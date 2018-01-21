@@ -5,7 +5,7 @@ This is the software which runs the MagAOX ExAO system.
 
 ## Dependencies
 
-1. This depends on mxlib (https://github.com/jaredmales/mxlib)
+1. mxlib (https://github.com/jaredmales/mxlib)
 2. libudev (for introspective device discovery)
 3. libhdf5 (though not for anything currently implemented, but we will)
 
@@ -22,3 +22,9 @@ Some notes:
   * This really should happen in the make file each time so it never gets out of date
   * This also means that a make install needs privileges.  See how this was handled for VisAO.
 
+## Documentation
+
+The code is more-or-less carefully documented with doxygen, though the doxyfile has not been created, etc.
+
+- [] Init doxygen doc system
+- [] Decide: do we use github pages, or host it on one of the snazzy magao-x domains?
