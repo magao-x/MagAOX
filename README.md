@@ -16,7 +16,7 @@ The build system has not been implemented.
 
 Some notes:
 
-* The mxlib build system, as re-engineered by Joseph Long, is a good start.
+* The mxlib build system, as re-engineered by Joseph Long, is a good starting point.
 * libMagAOX (part of this repository) is a c++ header-only library.  May not need to "install" it if everything uses rel paths.
 * We need setuid for RT priority handling, access to ttys and FIFOs, etc.
   * This means we need a way to parse LD_LIBRARY_PATH and create a list of -Wl,-rpath,<path> args to the linker
