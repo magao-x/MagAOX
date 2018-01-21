@@ -21,7 +21,6 @@ struct H5FileT
    static herr_t close( hid_t & h )
    {
       return H5Fclose(h);
-      h=0;
    }
 };
 
@@ -30,7 +29,6 @@ struct H5DatasetT
    static herr_t close( hid_t & h )
    {
       return H5Dclose(h);
-      h=0;
    }
 };
 

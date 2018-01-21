@@ -69,11 +69,11 @@ int main(int argc, char **argv)
    
       fin = fopen(fname.c_str(), "r");
       
-      int nrd;
-   
       size_t buffSz = 0;
       while(!feof(fin))
       {
+         int nrd;
+   
          nrd = fread( head.get(), sizeof(char), headerSize, fin);
          if(nrd == 0) break;
          msgLenT len = msgLen(head);

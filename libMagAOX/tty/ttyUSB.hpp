@@ -43,7 +43,7 @@ int ttyUSBDevName( std::string & devName,       ///< [out] the /dev/ttyUSBX devi
    if(devNames.size() == 0) return TTY_E_NODEVNAMES;
 
    struct udev *udev;
-   struct udev_device *dev;
+   
 
    /* Create the udev object */
    udev = udev_new();
@@ -52,6 +52,8 @@ int ttyUSBDevName( std::string & devName,       ///< [out] the /dev/ttyUSBX devi
    const char * cp;
    for(int i=0; i< devNames.size(); ++i)
    {
+      struct udev_device *dev;
+      
       dev = udev_device_new_from_syspath(udev, devNames[i].c_str());
    
       if(!dev) continue;

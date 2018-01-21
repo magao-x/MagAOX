@@ -203,7 +203,7 @@ int ttyRead( std::string & strRead,   ///< [out] The string in which to store th
    while( !isEndOfTrans(strRead, eot) )
    {  
       timeoutCurrent = timeoutRead - (mx::get_curr_time()-t0)*1000;
-      if(timeoutCurrent < 0) TTY_E_TIMEOUTONREAD;
+      if(timeoutCurrent < 0) return TTY_E_TIMEOUTONREAD;
    
       rv = poll( &pfd, 1, timeoutCurrent);
       if( rv == 0 ) return TTY_E_TIMEOUTONREADPOLL;
