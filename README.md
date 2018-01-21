@@ -22,6 +22,10 @@ Some notes:
   * This really should happen in the make file each time so it never gets out of date
   * This also means that a make install needs privileges.  See how this was handled for VisAO.
 
+## System Setup
+
+- [] Add docs here . . .
+
 ## Documentation
 
 The code is more-or-less carefully documented with doxygen, though the doxyfile has not been created, etc.
