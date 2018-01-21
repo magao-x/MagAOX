@@ -36,6 +36,8 @@ struct timespecX
    {
       time_s = ts.tv_sec;
       time_ns = ts.tv_nsec;
+      
+      return *this;
    }
    
    timespec getTimespec()
