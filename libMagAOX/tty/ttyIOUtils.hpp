@@ -122,9 +122,6 @@ int ttyWrite( const std::string & buffWrite, ///< [in] The characters to write t
               int timeoutWrite               ///< [in] The timeout in milliseconds.
             )
 {
-   int rv;
-   int timeoutCurrent;
-   
    double t0;
    struct pollfd pfd;
    
@@ -137,10 +134,10 @@ int ttyWrite( const std::string & buffWrite, ///< [in] The characters to write t
    int totWritten = 0;
    while( totWritten < buffWrite.size())
    {
-      timeoutCurrent = timeoutWrite - (mx::get_curr_time()-t0)*1000;
+      int timeoutCurrent = timeoutWrite - (mx::get_curr_time()-t0)*1000;
       if(timeoutCurrent < 0) return TTY_E_TIMEOUTONWRITE;
       
-      rv = poll( &pfd, 1, timeoutCurrent);
+      int rv = poll( &pfd, 1, timeoutCurrent);
       if( rv == 0 ) return TTY_E_TIMEOUTONWRITEPOLL;
       else if( rv < 0 ) return TTY_E_ERRORONWRITEPOLL;
    
@@ -256,7 +253,6 @@ int ttyWriteRead( std::string & strRead,        ///< [out] The string in which t
    //Now read response from console
    int timeoutCurrent;
    double t0;
-   char buffRead[TTY_BUFFSIZE];
    
    struct pollfd pfd;
    pfd.fd = fd;
@@ -269,6 +265,8 @@ int ttyWriteRead( std::string & strRead,        ///< [out] The string in which t
    if(swallowEcho)
    {
       int totrv = 0;
+      char buffRead[TTY_BUFFSIZE];
+
       //First swallow the echo.
       while( totrv <= strWrite.size() )
       {

@@ -69,7 +69,7 @@ struct logManager : public logFileT
    std::thread m_logThread; ///< A separate thread for actually writing to the file.
    std::mutex m_qMutex; ///< Mutex for accessing the m_logQueue.
    
-   bool m_shutdown {false}; ///< Flag to signal the log thread to shutdown.
+   bool m_logShutdown {false}; ///< Flag to signal the log thread to shutdown.
    
    unsigned long m_writePause {MAGAOX_default_writePause}; ///< Time, in nanoseconds, to pause between successive batch writes to the file. Default is 1e9. Configure with logger.writePause.
    
@@ -148,7 +148,7 @@ logManager<logFileT>::logManager()
 template<class logFileT>
 logManager<logFileT>::~logManager()
 {
-   m_shutdown = true;
+   m_logShutdown = true;
    
    if(m_logThread.joinable()) m_logThread.join();
    
@@ -198,7 +198,7 @@ void logManager<logFileT>::logThreadExec()
    
    std::unique_lock<std::mutex> lock(m_qMutex, std::defer_lock);
    
-   while(!m_shutdown || m_logQueue.size() > 0)
+   while(!m_logShutdown || m_logQueue.size() > 0)
    {
       std::list<bufferPtrT>::iterator beg, it, er, end;
 
@@ -233,7 +233,7 @@ void logManager<logFileT>::logThreadExec()
       this->flush();
       
       //We only pause if there's nothing to do.
-      if(m_logQueue.size() == 0 && !m_shutdown) std::this_thread::sleep_for( std::chrono::duration<unsigned long, std::nano>(m_writePause));
+      if(m_logQueue.size() == 0 && !m_logShutdown) std::this_thread::sleep_for( std::chrono::duration<unsigned long, std::nano>(m_writePause));
    }
    
 }

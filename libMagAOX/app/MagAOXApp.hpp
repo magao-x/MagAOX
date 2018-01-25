@@ -65,8 +65,6 @@ protected:
    
    unsigned long loopPause {MAGAOX_default_loopPause}; ///< The time in nanoseconds to pause the main loop.  The appLogic() function of the derived class is called every loopPause nanoseconds.  Default is 1,000,000,000 ns.  Config with loopPause=X.
    
-   //MagAOX::logger::logManager<logFileRaw> log;
-   
    int m_shutdown {0}; ///< Flag to signal it's time to shutdown.  When not 0, the main loop exits.
    
    
