@@ -74,7 +74,7 @@ int trippLitePDU::appStartup()
       state(stateCodes::NOTCONNECTED);
       std::stringstream logs;
       logs << "USB Device " << m_idVendor << ":" << m_idProduct << ":" << m_serial << " found in udev as " << m_deviceName;
-      log.log<text_log>(logs.str());
+      log<text_log>(logs.str());
    }
    return 0;
 }
@@ -84,12 +84,12 @@ int trippLitePDU::appLogic()
 
    if( state() == stateCodes::UNINITIALIZED )
    {
-      log.log<text_log>( "In appLogic but in state UNINITIALIZED.", logLevels::FATAL );
+      log<text_log>( "In appLogic but in state UNINITIALIZED.", logLevels::FATAL );
       return -1;
    }
    if( state() == stateCodes::INITIALIZED )
    {
-      log.log<text_log>( "In appLogic but in state INITIALIZED.", logLevels::FATAL );
+      log<text_log>( "In appLogic but in state INITIALIZED.", logLevels::FATAL );
       return -1;
    }
    
@@ -101,7 +101,7 @@ int trippLitePDU::appLogic()
          state(stateCodes::FAILURE);
          if(!stateLogged())
          {
-            log.log<software_fatal>({__FILE__, __LINE__, rv, tty::ttyErrorString(rv)});
+            log<software_fatal>({__FILE__, __LINE__, rv, tty::ttyErrorString(rv)});
          }
          return rv;
       }
@@ -114,7 +114,7 @@ int trippLitePDU::appLogic()
          {
             std::stringstream logs;
             logs << "USB Device " << m_idVendor << ":" << m_idProduct << ":" << m_serial << " not found in udev";
-            log.log<text_log>(logs.str());
+            log<text_log>(logs.str());
          }
          return 0;
       }
@@ -125,7 +125,7 @@ int trippLitePDU::appLogic()
          {
             std::stringstream logs;
             logs << "USB Device " << m_idVendor << ":" << m_idProduct << ":" << m_serial << " found in udev as " << m_deviceName;
-            log.log<text_log>(logs.str());
+            log<text_log>(logs.str());
          }
       }
          
@@ -145,14 +145,14 @@ int trippLitePDU::appLogic()
          {
             std::stringstream logs;
             logs << "Connected to " << m_deviceName;
-            log.log<text_log>(logs.str());
+            log<text_log>(logs.str());
          }
          
       }
       else
       {
          state(stateCodes::FAILURE);
-         log.log<text_log>("Error connecting to USB device.", logLevels::FATAL);
+         log<text_log>("Error connecting to USB device.", logLevels::FATAL);
          return -1;
       }
    }
@@ -182,7 +182,7 @@ int trippLitePDU::appLogic()
                else
                {
                   state(stateCodes::FAILURE);
-                  log.log<text_log>("Login failed.", logLevels::FATAL);
+                  log<text_log>("Login failed.", logLevels::FATAL);
                   return -1;
                }
             }
@@ -191,14 +191,14 @@ int trippLitePDU::appLogic()
          else
          {
             state(stateCodes::FAILURE);
-            log.log<text_log>("No response from device. Can not connect.", logLevels::FATAL);
+            log<text_log>("No response from device. Can not connect.", logLevels::FATAL);
             return -1;
          }
       }
       else if (rv < 0)
       {
          state(stateCodes::FAILURE);
-         log.log<text_log>(tty::ttyErrorString(rv), logLevels::FATAL);
+         log<text_log>(tty::ttyErrorString(rv), logLevels::FATAL);
          return -1;
       }
       
@@ -214,13 +214,13 @@ int trippLitePDU::appLogic()
       {
          if(rv == TTY_E_TIMEOUTONREAD || rv == TTY_E_TIMEOUTONREADPOLL)
          {
-            log.log<text_log>(tty::ttyErrorString(rv), logLevels::ERROR);
+            log<text_log>(tty::ttyErrorString(rv), logLevels::ERROR);
             return 0;
          }
          else
          {
             state(stateCodes::NOTCONNECTED);
-            log.log<text_log>(tty::ttyErrorString(rv), logLevels::ERROR);
+            log<text_log>(tty::ttyErrorString(rv), logLevels::ERROR);
             
             return 0;
          }
@@ -247,7 +247,7 @@ int trippLitePDU::appLogic()
    }
    
    state(stateCodes::FAILURE);
-   log.log<text_log>("appLogic fell through", logLevels::FATAL);
+   log<text_log>("appLogic fell through", logLevels::FATAL);
    return -1;
    
 }

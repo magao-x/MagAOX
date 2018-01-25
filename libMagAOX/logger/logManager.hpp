@@ -60,7 +60,7 @@ namespace logger
   * \tparam logFileT a logFile type with a writeLog method.
   */
 template<class logFileT>
-struct logManager
+struct logManager : public logFileT
 {
    ///\todo Make these protected members, with appropriate access methods
    //-->
@@ -71,11 +71,11 @@ struct logManager
    
    bool m_shutdown {false}; ///< Flag to signal the log thread to shutdown.
    
-   unsigned long m_writePause {1000000000}; ///< Time, in nanoseconds, to pause between successive batch writes to the file. Default is 1e9. Configure with logger.writePause.
+   unsigned long m_writePause {MAGAOX_default_writePause}; ///< Time, in nanoseconds, to pause between successive batch writes to the file. Default is 1e9. Configure with logger.writePause.
    
    logLevelT m_logLevel {logLevels::INFO}; ///< The minimum log level to actually record.  Logs with level below this are rejected. Default is INFO. Configure with logger.logLevel.
    
-   logFileT m_logFile;
+   int m_logThreadPrio {0};
    
    //<--end of todo
    
@@ -151,6 +151,10 @@ logManager<logFileT>::~logManager()
    m_shutdown = true;
    
    if(m_logThread.joinable()) m_logThread.join();
+   
+   //One last check to see if there are any unwritten logs.
+   if( m_logQueue.size() > 0 ) logThreadExec();
+   
 }
 
 template<class logFileT>
@@ -182,7 +186,7 @@ int logManager<logFileT>::logThreadStart()
    
    //Always set the m_logThread to lowest priority
    sched_param sp;
-   sp.sched_priority = 0;
+   sp.sched_priority = m_logThreadPrio;
    
    pthread_setschedparam( m_logThread.native_handle(), SCHED_OTHER, &sp);
    
@@ -212,7 +216,8 @@ void logManager<logFileT>::logThreadExec()
          while( it != end )
          {
                         
-            m_logFile.writeLog( *it );
+            //m_logFile.
+            this->writeLog( *it );
             
             er = it;
             ++it;
@@ -224,7 +229,8 @@ void logManager<logFileT>::logThreadExec()
          }
       }
       
-      m_logFile.flush();
+      //m_logFile.
+      this->flush();
       
       //We only pause if there's nothing to do.
       if(m_logQueue.size() == 0 && !m_shutdown) std::this_thread::sleep_for( std::chrono::duration<unsigned long, std::nano>(m_writePause));

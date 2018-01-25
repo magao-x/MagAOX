@@ -18,6 +18,7 @@
 #include <boost/filesystem.hpp>
 
 #include <mx/app/application.hpp>
+#include <mx/environment.hpp>
 
 #include "../common/environment.hpp"
 #include "../common/defaults.hpp"
@@ -36,7 +37,7 @@ namespace MagAOX
 namespace app 
 {
 
-///The base-class for MagAO-X applications.
+/// The base-class for MagAO-X applications.
 /**
   * You can define a base configuration file for this class by writing 
   * \code
@@ -46,25 +47,25 @@ namespace app
   * all filter wheels.
   *  
   * \todo add INDI!
-  * \todo need plan and default handling for magaox status file system. (see lockPID())
-  * \todo Need to dump log to log/something..something on failed startup, that is before we're sure PID isn't locked.  Maybe a check in d'tor.
   * \todo do we need libMagAOX error handling? (a stack?)
-  * \todo config logger thread priority
-  * \todo define-default and config for log extension
-  * \todo define-default and config for max log size
-  * \todo define-default for writePause
-  * \todo define-default for loopPause
   */ 
-class MagAOXApp : public mx::application
+class MagAOXApp : public mx::application, public logger::logManager<logFileRaw>
 {
    
 protected:
+   
+   std::string MagAOXPath; ///< The base path of the MagAO-X system.
+   
    std::string configDir; ///< The configuration directory.  
    std::string configName; ///< The name of the configuration file (minus .conf).
 
-   unsigned long loopPause {1000000000}; ///< The time in nanoseconds to pause the main loop.  The appLogic() function of the derived class is called every loopPause nanoseconds.  Default is 1,000,000,000 ns.  Config with loopPause=X.
+   std::string sysPath;  ///< The path to the system directory, for PID file, etc.
    
-   MagAOX::logger::logManager<logFileRaw> log;
+   std::string secretsPath; ///< Path to the secrets directory, where passwords, etc, are stored.
+   
+   unsigned long loopPause {MAGAOX_default_loopPause}; ///< The time in nanoseconds to pause the main loop.  The appLogic() function of the derived class is called every loopPause nanoseconds.  Default is 1,000,000,000 ns.  Config with loopPause=X.
+   
+   //MagAOX::logger::logManager<logFileRaw> log;
    
    int m_shutdown {0}; ///< Flag to signal it's time to shutdown.  When not 0, the main loop exits.
    
@@ -279,7 +280,7 @@ public:
        if( connection_failed ) //some condition set this to true
        {
           state( stateCodes::NOTCONNECTED );
-          if(!stateLogged()) log.log<text_log>("Not connected");
+          if(!stateLogged()) log<text_log>("Not connected");
        }
        \endcode
      * In this example, the log entry is made the first time the state changes.  If there are no changes to a 
@@ -318,36 +319,44 @@ void MagAOXApp::setDefaults( int argc,
                              char ** argv
                            )   //virtual
 {
-   char *tmpstr;
-   std::string tmp;
-   
+   std::string tmpstr;
 
-   tmpstr = getenv(MAGAOX_configDir);
-   if(tmpstr != 0) 
+   tmpstr = mx::getEnv(MAGAOX_env_path);
+   if(tmpstr != "")
    {
-      configDir = tmpstr;
+      MagAOXPath = tmpstr;
    }
    else
    {
-      configDir = MAGAOX_default_path;
-      configDir += "/config";
+      MagAOXPath = MAGAOX_default_path;
    }
    
-   tmpstr = getenv(MAGAOX_globalConfig);
-   if(tmpstr != 0) 
+   //Set ther config path relative to MagAOXPath
+   tmpstr = mx::getEnv(MAGAOX_env_config);
+   if(tmpstr == "") 
    {
-      tmp = tmpstr;
+      tmpstr = MAGAOX_default_configRelPath;
    }
-   else
-   {
-      tmp = MAGAOX_default_global_config;
-   }
+   configDir = MagAOXPath + "/" + tmpstr;
+   configPathGlobal = configDir + "/magaox.conf";
    
-   configPathGlobal = configDir + "/" + tmp;
+   //Setup default log path
+   tmpstr = MagAOXPath + "/" + MAGAOX_default_logRelPath;
+   //m_logFile.
+   logPath(tmpstr);
+
+   //Setup default sys path
+   tmpstr = MagAOXPath + "/" + MAGAOX_default_sysRelPath;
+   sysPath = tmpstr;
+   
+   //Setup default secrets path
+   tmpstr = MagAOXPath + "/" + MAGAOX_default_secretsRelPath;
+   secretsPath = tmpstr;
+   
    
    #ifdef MAGAOX_configBase
       //We use mx::application's configPathUser for this components base config file
-      configPathUser = configDir + "/" + MX_APP_DEFAULT_configPathUser;
+      configPathUser = configDir + "/" + MAGAOX_configBase;
    #endif
    
    //Parse CL just to get the "name".      
@@ -361,7 +370,7 @@ void MagAOXApp::setDefaults( int argc,
       boost::filesystem::path p(invokedName);
       configName = p.stem().string();
       
-      log.log<text_log>("Application name (-n --name) not set.  Using argv[0].");
+      log<text_log>("Application name (-n --name) not set.  Using argv[0].");
    }
    
    //We use mx::application's configPathLocal for this components config file 
@@ -380,9 +389,12 @@ void MagAOXApp::setupBasicConfig() //virtual
    
    //Logger Stuff
    config.add("logger.logDir","L", "logDir",mx::argType::Required, "logger", "logDir", false, "string", "The directory for log files");
+   config.add("logger.logExt","", "logExt",mx::argType::Required, "logger", "logExt", false, "string", "The extension for log files");
+   config.add("logger.maxLogSize","", "maxLogSize",mx::argType::Required, "logger", "maxLogSize", false, "string", "The maximum size of log files");
    config.add("logger.writePause","", "writePause",mx::argType::Required, "logger", "writePause", false, "unsigned long", "The log thread pause time in ns");
+   config.add("loger.logThreadPrio", "", "logThreadPrio", mx::argType::Required, "logger", "logThreadPrio", false, "int", "The log thread priority");
    config.add("logger.logLevel","l", "logLevel",mx::argType::Required, "logger", "logLevel", false, "string", "The log level");
-   
+
 
   
 }
@@ -395,9 +407,8 @@ void MagAOXApp::loadBasicConfig() //virtual
    //-- logDir
    std::string tmp;
    config(tmp, "logger.logDir");
-   
-   log.m_logFile.path(tmp);
-   log.m_logFile.name(configName);
+   if(tmp != "") logPath(tmp);
+   logName(configName);
       
    //-- logLevel
    tmp = "";
@@ -415,16 +426,21 @@ void MagAOXApp::loadBasicConfig() //virtual
          lev = logLevels::INFO;
       }
       
-      log.m_logLevel = lev;
+      m_logLevel = lev;
    }
 
-   //-- writePause
-   unsigned long wp = 0;
-   config(wp, "logger.writePause");
-   if(wp != 0)
-   {
-      log.writePause(wp);
-   }
+   
+   //logExt
+   config(m_logExt, "logger.logExt");
+   
+   //maxLogSize
+   config(m_maxLogSize, "logger.maxLogSize");
+   
+   //writePause
+   config(m_writePause, "logger.writePause");
+   
+   //logThreadPrio
+   config(m_logThreadPrio, "logger.logThreadPrio");
    
    //--------- Loop Pause Time --------//
    config(loopPause, "loopPause");
@@ -444,12 +460,12 @@ int MagAOXApp::execute() //virtual
 {
    if( lockPID() < 0 )
    {
-      log.log<text_log>("Failed to lock PID.", logLevels::FATAL);
-      m_shutdown = 1; //This lets logger run, etc, but appLogic never goes.
+      log<text_log>("Failed to lock PID.", logLevels::FATAL);
+      return -1;      
    }
    
    //Begin the logger   
-   log.logThreadStart();
+   logThreadStart();
    
    setSigTermHandler();
    
@@ -503,7 +519,7 @@ int MagAOXApp::setSigTermHandler()
       std::string logss = "Setting handler for SIGTERM failed. Errno says: ";
       logss += strerror(errno);
       
-      log.log<software_error>({__FILE__, __LINE__, errno, logss});
+      log<software_error>({__FILE__, __LINE__, errno, logss});
       
       return -1;
    }
@@ -514,7 +530,7 @@ int MagAOXApp::setSigTermHandler()
       std::string logss = "Setting handler for SIGQUIT failed. Errno says: ";
       logss += strerror(errno);
       
-      log.log<software_error>({__FILE__, __LINE__, errno, logss});
+      log<software_error>({__FILE__, __LINE__, errno, logss});
       
       return -1;
    }
@@ -525,12 +541,12 @@ int MagAOXApp::setSigTermHandler()
       std::string logss = "Setting handler for SIGINT failed. Errno says: ";
       logss += strerror(errno);
       
-      log.log<software_error>({__FILE__, __LINE__, errno, logss});
+      log<software_error>({__FILE__, __LINE__, errno, logss});
       
       return -1;
    }
    
-   log.log<text_log>("Installed SIGTERM/SIGQUIT/SIGINT signal handler.");
+   log<text_log>("Installed SIGTERM/SIGQUIT/SIGINT signal handler.");
    
    return 0;
 }
@@ -572,7 +588,7 @@ void MagAOXApp::handlerSigTerm( int signum,
    logss += signame;
    logss += ". Shutting down.";
    
-   log.log<text_log>(logss);
+   log<text_log>(logss);
 }
 
 inline 
@@ -586,7 +602,7 @@ int MagAOXApp::euidCalled()
       logss += ") failed.  Errno says: ";
       logss += strerror(errno);
       
-      log.log<software_error>({__FILE__, __LINE__, errno, logss});
+      log<software_error>({__FILE__, __LINE__, errno, logss});
       
       return -1;
    }
@@ -605,7 +621,7 @@ int MagAOXApp::euidReal()
       logss += ") failed.  Errno says: ";
       logss += strerror(errno);
       
-      log.log<software_error>({__FILE__, __LINE__, errno, logss});
+      log<software_error>({__FILE__, __LINE__, errno, logss});
       
       return -1;
    }
@@ -625,7 +641,7 @@ int MagAOXApp::RTPriority( unsigned prio)
    //Get the maximum privileges available
    if( euidCalled() < 0 )
    {
-      log.log<software_error>({__FILE__, __LINE__, 0, "Seeting euid to called failed."});
+      log<software_error>({__FILE__, __LINE__, 0, "Seeting euid to called failed."});
       return -1;
    }
    
@@ -641,7 +657,7 @@ int MagAOXApp::RTPriority( unsigned prio)
    {
       std::stringstream logss;
       logss << "Setting scheduler priority to " << prio <<" failed.  Errno says: " << strerror(errno) << ".  ";
-      log.log<software_error>({__FILE__, __LINE__, errno, logss.str()});
+      log<software_error>({__FILE__, __LINE__, errno, logss.str()});
    }
    else
    {
@@ -649,13 +665,13 @@ int MagAOXApp::RTPriority( unsigned prio)
 
       std::stringstream logss;
       logss << "Scheduler priority (RT_priority) set to " << m_RTPriority << ".";
-      log.log<text_log>(logss.str());
+      log<text_log>(logss.str());
    }
 
    //Go back to regular privileges
    if( euidReal() < 0 )
    {
-      log.log<software_error>({__FILE__, __LINE__, 0, "Seeting euid to real failed."});
+      log<software_error>({__FILE__, __LINE__, 0, "Seeting euid to real failed."});
       return -1;
    }
    
@@ -667,8 +683,14 @@ int MagAOXApp::lockPID()
 {
    m_pid = getpid();
    
+   std::string statusDir = sysPath;
    
-   std::string statusDir = "/tmp/magaox/";
+   //Get the maximum privileges available
+   if( euidCalled() < 0 )
+   {
+      log<software_error>({__FILE__, __LINE__, 0, "Seeting euid to called failed."});
+      return -1;
+   }
    
    // Create statusDir root with read/write/search permissions for owner and group, and with read/search permissions for others.
    errno = 0;
@@ -678,12 +700,17 @@ int MagAOXApp::lockPID()
       {
          std::stringstream logss;
          logss << "Failed to create root of statusDir (" << statusDir << ").  Errno says: " << strerror(errno);
-         log.log<software_critical>({__FILE__, __LINE__, errno, logss.str()});
+         log<software_critical>({__FILE__, __LINE__, errno, logss.str()});
+         
+         //Go back to regular privileges
+         euidReal();
+   
          return -1;
       }
       
    }
 
+   statusDir += "/";
    statusDir += configName;
    
    pidFileName = statusDir + "/pid";
@@ -696,7 +723,10 @@ int MagAOXApp::lockPID()
       {
          std::stringstream logss;
          logss << "Failed to create statusDir (" << statusDir << ").  Errno says: " << strerror(errno);
-         log.log<software_critical>({__FILE__, __LINE__, errno, logss.str()});
+         log<software_critical>({__FILE__, __LINE__, errno, logss.str()});
+         
+         //Go back to regular privileges
+         euidReal();
          
          return -1;
       }
@@ -732,7 +762,11 @@ int MagAOXApp::lockPID()
             //This means that this app already exists for this config, and we need to die.
             std::stringstream logss;
             logss << "PID already locked (" << testPid  << ").  Time to die.";
-            log.log<text_log>(logss.str(), logLevels::CRITICAL);            
+            log<text_log>(logss.str(), logLevels::CRITICAL);         
+            
+            //Go back to regular privileges
+            euidReal();
+         
             return -1;
          }
       }
@@ -755,7 +789,14 @@ int MagAOXApp::lockPID()
    
    std::stringstream logss;
    logss << "PID (" << m_pid << ") locked.";
-   log.log<text_log>(logss.str());
+   log<text_log>(logss.str());
+   
+   //Go back to regular privileges
+   if( euidReal() < 0 )
+   {
+      log<software_error>({__FILE__, __LINE__, 0, "Seeting euid to real failed."});
+      return -1;
+   }
 }
 
 inline
@@ -766,7 +807,7 @@ int MagAOXApp::unlockPID()
    
    std::stringstream logss;
    logss << "PID (" << m_pid << ") unlocked.";
-   log.log<text_log>(logss.str());
+   log<text_log>(logss.str());
    
    return 0;
 }
@@ -781,7 +822,7 @@ void MagAOXApp::state(const stateCodeT & s)
    if(m_state == s) return;
    
    
-   log.log<state_change>( {m_state, s} );
+   log<state_change>( {m_state, s} );
    
    m_state = s;
    m_stateLogged = 0;

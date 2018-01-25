@@ -13,9 +13,15 @@
   * @{
   */
 
-#define MAGAOX_configDir "MagAOX_CONFIG_DIR"
+#ifndef MAGAOX_env_path
+   /// Environment variable setting the MagAO-X path.
+   #define MAGAOX_env_path "MagAOX_PATH"
+#endif 
 
-#define MAGAOX_globalConfig "MagAOX_GLOBAL_CONFIG"
+#ifndef MAGAOX_env_config
+   /// Environment variable setting the relative config path.
+   #define MAGAOX_env_config "MagAOX_CONFIG"
+#endif
 
 ///@}
 
