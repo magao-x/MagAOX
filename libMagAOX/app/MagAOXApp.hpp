@@ -48,6 +48,7 @@ namespace app
   *  
   * \todo add INDI!
   * \todo do we need libMagAOX error handling? (a stack?)
+  * \todo add git repo status to initial log entries [requires implementation of build system]
   */ 
 class MagAOXApp : public mx::application, public logger::logManager<logFileRaw>
 {
