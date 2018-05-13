@@ -77,11 +77,7 @@ int usbDevice::loadConfig( mx::appConfigurator & config )
 
 int usbDevice::getDeviceName()
 {
-   int rv = ttyUSBDevName( m_deviceName, m_idVendor, m_idProduct, m_serial );
-   
-   if(rv < 0 && rv != TTY_E_DEVNOTFOUND) return rv;
-   
-   return rv;
+   return ttyUSBDevName( m_deviceName, m_idVendor, m_idProduct, m_serial );   
 }
 
 int usbDevice::connect()
