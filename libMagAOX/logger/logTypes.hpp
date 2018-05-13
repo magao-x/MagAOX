@@ -375,7 +375,7 @@ struct state_change
    
    /// Format the message for text output, including translation of state codes to text form.
    /**
-     * \returns the message fromatted as "State changed from UNINITIALIZED to INITIALIZED"
+     * \returns the message formatted as "State changed from UNINITIALIZED to INITIALIZED"
      */ 
    static std::string msgString( messageT & msg /**< [in] the message structure */ )
    {

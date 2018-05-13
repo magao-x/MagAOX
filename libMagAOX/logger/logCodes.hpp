@@ -23,8 +23,8 @@ namespace eventCodes
    
 ///The log event codes.  These are the unique identifiers for log entry types.
 enum : eventCodeT { GIT_STATE = 0,          ///< The git repository state at application build-time
-                    TEXT_LOG = 1,           ///< Denotes a simple text log.
-                    USER_LOG = 10,          ///< Denotes a log entered by the user.
+                    TEXT_LOG = 10,          ///< Denotes a simple text log.
+                    USER_LOG = 11,          ///< Denotes a log entered by the user.
                     STATE_CHANGE = 20,      ///< Denotes an application state change
                     SOFTWARE_DEBUG = 51,    ///< Denotes a software debug log entry
                     SOFTWARE_DEBUG2 = 52,   ///< Denotes a software debug-2 log entry
