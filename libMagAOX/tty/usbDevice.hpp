@@ -23,7 +23,7 @@ struct usbDevice
    std::string m_idProduct; ///< The product id 4-digit code
    std::string m_serial;    ///< The serial number
    
-   speed_t m_speed; ///< The baud rate specification
+   speed_t m_speed {0}; ///< The baud rate specification.
    
    std::string m_deviceName; ///< The device path name, e.g. /dev/ttyUSB0
    
@@ -33,6 +33,10 @@ struct usbDevice
    int setupConfig( mx::appConfigurator & config /**< [in] an application configuration to setup */);
    
    ///Load the USB section from an application configurator
+   /**
+     * If config does not contain a baud rate, m_speed is unchanged.  If m_speed is 0 at the end of this
+     * method, an error is returned.  Set m_speed prior to calling to avoid this error.
+     */ 
    int loadConfig( mx::appConfigurator & config /**< [in] an application configuration from which to load values */);
    
    ///Get the device name from udev using the vendor, product, and serial number.
@@ -59,18 +63,62 @@ int usbDevice::loadConfig( mx::appConfigurator & config )
    config(m_idProduct, "usb.idProduct");
    config(m_serial, "usb.serial");
    
-   ///\todo add all baud rates
-   int baud = 0;
+   //We read the config as a float to allow 134.5
+   //Then multiply by 10 for the switch statement.
+   float baud = 0;
    config(baud, "usb.baud");
-   switch(baud)
+   switch((int)(baud*10))
    {
-      case 9600:
+      case 0:
+         break; //Don't change default.
+      case 500:
+         m_speed = B50;
+         break;
+      case 750:
+         m_speed = B75;
+         break;
+      case 1100:
+         m_speed = B110;
+         break;
+      case 1345:
+         m_speed = B134;
+         break;
+      case 1500:
+         m_speed = B150;
+         break;
+      case 2000:
+         m_speed = B200;
+         break;
+      case 3000:
+         m_speed = B300;
+         break;
+      case 6000:
+         m_speed = B600;
+         break;
+      case 18000:
+         m_speed = B1800;
+         break;
+      case 24000:
+         m_speed = B2400;
+         break;
+      case 48000:
+         m_speed = B4800;
+         break;
+      case 96000:
          m_speed = B9600;
+         break;
+      case 192000:
+         m_speed = B19200;
+         break;
+      case 384000:
+         m_speed = B38400;
          break;
       default:
-         m_speed = B9600;
+         m_speed = 0;
          break;
    }
+
+   if(m_speed == 0) return TTY_E_BADBAUDRATE;
    
    return getDeviceName();
 }

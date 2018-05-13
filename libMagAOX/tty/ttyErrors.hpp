@@ -25,6 +25,7 @@
 #define TTY_E_NODEVNAMES         (-42021)
 #define TTY_E_UDEVNEWFAILED      (-42022)
 #define TTY_E_DEVNOTFOUND        (-42023)
+#define TTY_E_BADBAUDRATE        (-42030)
 
 namespace MagAOX 
 {
@@ -70,6 +71,8 @@ std::string ttyErrorString( int ec /**< [in] the error code */ )
          return "TTY: initializing libudev failed";
       case TTY_E_DEVNOTFOUND:
          return "TTY: no matching device found";
+      case TTY_E_BADBAUDRATE:
+         return "TTY: bad baud rate specified";
       default:
          return "TTY: unknown error code";
    };

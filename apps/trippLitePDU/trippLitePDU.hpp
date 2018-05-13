@@ -64,7 +64,16 @@ void trippLitePDU::setupConfig()
 
 void trippLitePDU::loadConfig()
 {
-   tty::usbDevice::loadConfig(config);
+   
+   this->m_speed = B9600; //default for trippLite PDUs.  Will be overridden by any config setting.
+   
+   
+   int rv = tty::usbDevice::loadConfig(config);
+   
+   if(rv != 0 && rv != TTY_E_NODEVNAMES) //Ignore error if nothing plugged in
+   {
+      log<software_error>( {__FILE__, __LINE__, rv, tty::ttyErrorString(rv)});
+   }
 }
 
 int trippLitePDU::appStartup()

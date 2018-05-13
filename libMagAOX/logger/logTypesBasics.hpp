@@ -177,11 +177,9 @@ struct software_log
       
       //Insert file length and string
       *reinterpret_cast<messageT::linenumT *>(cBuffer+offset) = msg.linenum;
-      std::cerr << *reinterpret_cast<messageT::linenumT *>(cBuffer+offset) << "\n";
       offset += sizeof(messageT::linenumT);
       
       *reinterpret_cast<messageT::codeT *>(cBuffer+offset) = msg.code;
-      std::cerr << *reinterpret_cast<messageT::codeT *>(cBuffer+offset) << "\n";
       offset += sizeof(messageT::codeT);
       
       cbuff = reinterpret_cast<char *>(cBuffer + offset);
@@ -239,7 +237,7 @@ struct software_log
    
    static std::string msgString( messageT & msg )
    {
-      std::string ret = "SW FILE:";
+      std::string ret = "SW FILE: ";
       ret += msg.file;
       ret += " LINE: ";
       ret += mx::convertToString(msg.linenum);
