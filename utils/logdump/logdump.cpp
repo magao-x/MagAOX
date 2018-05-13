@@ -2,16 +2,7 @@
   * \brief A simple utility to dump MagAO-X binary logs to stdout.
   */
 
-#include <iostream>
-#include <cstring>
-
-#include <mx/fileUtils.hpp>
-
-#include "../../libMagAOX/libMagAOX.hpp"
-// #include "../../libMagAOX/logger/logManager.hpp"
-// #include "../../libMagAOX/logger/logTypes.hpp"
-// #include "../../libMagAOX/logger/logFileRaw.hpp"
-// #include "../../libMagAOX/logger/logStdFormat.hpp"
+#include "logdump.hpp"
 
 // argv[1] (required) = prefix of logs
 // argv[2] (optional) = number of logs.  1 just shows latest, 2 last two, etc.
@@ -77,8 +68,11 @@ int main(int argc, char **argv)
    
          nrd = fread( head.get(), sizeof(char), headerSize, fin);
          if(nrd == 0) break;
+
+         logLevelT lvl = logLevel(head);
+         eventCodeT ec = eventCode(head);
          msgLenT len = msgLen(head);
-   
+         
          if( headerSize + len > buffSz )
          {
             logBuff = bufferPtrT(new char[headerSize + len]);
@@ -87,8 +81,36 @@ int main(int argc, char **argv)
          memcpy( logBuff.get(), head.get(), headerSize);
       
          nrd = fread( logBuff.get() + headerSize, sizeof(char), len, fin);
-   
+
+         if(ec == eventCodes::GIT_STATE)
+         {
+            typename git_state::messageT msg;
+            git_state::extract(msg, logBuff.get()+messageOffset, len);
+            
+            if(msg.m_repoName == "MagAOX")
+            {
+               for(int i=0;i<80;++i) std::cout << '-';
+               std::cout << "\n\t\t\t\t SOFTWARE RESTART\n";
+               for(int i=0;i<80;++i) std::cout << '-';
+               std::cout << '\n';
+            }
+         }
+         
+         if(lvl > logLevels::INFO)
+         {
+            std::cout << "\033[";
+            
+            if(lvl == logLevels::WARNING) std::cout << "33";
+            else std::cout << "31";
+            std::cout << "m";
+         }
+         
          logStdFormat(logBuff);
+         
+         if(lvl > logLevels::INFO)
+         {
+            std::cout << "\033[0m";
+         }
       }
    
       fclose(fin);
