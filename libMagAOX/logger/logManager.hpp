@@ -215,7 +215,6 @@ void logManager<logFileT>::logThreadExec()
          it = beg;
          while( it != end )
          {
-                        
             //m_logFile.
             this->writeLog( *it );
             

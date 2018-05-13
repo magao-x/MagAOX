@@ -7,10 +7,11 @@
 
 #include <mx/fileUtils.hpp>
 
-#include "../../libMagAOX/logger/logManager.hpp"
-#include "../../libMagAOX/logger/logTypes.hpp"
-#include "../../libMagAOX/logger/logFileRaw.hpp"
-#include "../../libMagAOX/logger/logStdFormat.hpp"
+#include "../../libMagAOX/libMagAOX.hpp"
+// #include "../../libMagAOX/logger/logManager.hpp"
+// #include "../../libMagAOX/logger/logTypes.hpp"
+// #include "../../libMagAOX/logger/logFileRaw.hpp"
+// #include "../../libMagAOX/logger/logStdFormat.hpp"
 
 // argv[1] (required) = prefix of logs
 // argv[2] (optional) = number of logs.  1 just shows latest, 2 last two, etc.
@@ -34,7 +35,7 @@ int main(int argc, char **argv)
    
    prefix = argv[1];
    
-   std::vector<std::string> logs = mx::getFileNames( dir, prefix, "", ".rawlog");
+   std::vector<std::string> logs = mx::getFileNames( dir, prefix, "", ".binlog");
    
    if(logs.size() == 0)
    {

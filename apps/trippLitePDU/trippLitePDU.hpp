@@ -1,9 +1,11 @@
 
-#include <mx/mxError.hpp>
 
 
-#include "../../libMagAOX/app/MagAOXApp.hpp"
-#include "../../libMagAOX/tty/usbDevice.hpp"
+#include "../../libMagAOX/libMagAOX.hpp"
+
+
+
+#include "magaox_git_version.h"
 
 namespace MagAOX
 {
@@ -51,7 +53,7 @@ public:
                      );
 };
 
-trippLitePDU::trippLitePDU()
+trippLitePDU::trippLitePDU() : MagAOXApp(MAGAOX_CURRENT_SHA1, MAGAOX_REPO_MODIFIED)
 {
    return;
 }

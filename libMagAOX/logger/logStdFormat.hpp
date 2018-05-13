@@ -45,6 +45,8 @@ void logStdFormat(bufferPtrT & buffer /**< [in] the binary log buffer */ )
 
    switch(ec)
    {
+      case git_state::eventCode:
+         return _stdFormat<git_state>(buffer);
       case text_log::eventCode:
          return _stdFormat<text_log>(buffer);
       case user_log::eventCode:

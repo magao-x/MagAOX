@@ -17,8 +17,10 @@
 
 #include <boost/filesystem.hpp>
 
+#include <mx/mxlib.hpp>
 #include <mx/app/application.hpp>
 #include <mx/environment.hpp>
+
 
 #include "../common/environment.hpp"
 #include "../common/defaults.hpp"
@@ -48,11 +50,10 @@ namespace app
   *  
   * \todo add INDI!
   * \todo do we need libMagAOX error handling? (a stack?)
-  * \todo add git repo status to initial log entries [requires implementation of build system]
   */ 
 class MagAOXApp : public mx::application, public logger::logManager<logFileRaw>
 {
-   
+      
 protected:
    
    std::string MagAOXPath; ///< The base path of the MagAO-X system.
@@ -72,7 +73,7 @@ protected:
    
 public:
    
-   /// Default c'tor.  Handles uid and initializes static members.
+   /// Public c'tor.  Handles uid, logs git repo status, and initializes static members.
    /** 
      * Only one MagAOXApp can be instantiated per program.  Hence this c'tor will issue exit(-1) 
      * if the static self-pointer m_self is already initialized.
@@ -82,8 +83,14 @@ public:
      * 
      * Reference: http://man7.org/linux/man-pages/man2/getresuid.2.html
      * 
+     * The git repository status is required to create a MagAOXApp.  Derived classes
+     * should include the results of running `gengithead.sh` and pass the defined 
+     * sha1 and modified flags.
+     * 
      */
-   MagAOXApp();
+   MagAOXApp( const std::string & git_sha1, ///< [in] The current SHA1 hash of the git repository
+              const bool git_modified       ///< [in] Whether or not the repo is modified.
+            );
   
    /// Set the paths for config files
    /** Replaces the mx::application defaults with the MagAO-X config system.
@@ -297,7 +304,9 @@ public:
 MagAOXApp * MagAOXApp::m_self = nullptr;
 
 inline
-MagAOXApp::MagAOXApp()
+MagAOXApp::MagAOXApp( const std::string & git_sha1,
+                      const bool git_modified
+                    )
 {
    if( m_self != nullptr )
    {
@@ -306,6 +315,10 @@ MagAOXApp::MagAOXApp()
    }
    
    m_self = this;
+ 
+   //We log the current GIT status.
+   log<git_state>(git_state::messageT("MagAOX", git_sha1, git_modified));
+   log<git_state>(git_state::messageT("mxlib", MXLIB_UNCOMP_CURRENT_SHA1, MXLIB_UNCOMP_REPO_MODIFIED));
    
    //Get the uids of this process.
    getresuid(&m_euidReal, &m_euidCalled, &m_suid);
