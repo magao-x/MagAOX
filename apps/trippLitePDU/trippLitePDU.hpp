@@ -1,10 +1,8 @@
 
+#ifndef trippLitePDU_hpp
+#define trippLitePDU_hpp
 
-
-#include "../../libMagAOX/libMagAOX.hpp"
-
-
-
+#include "../../libMagAOX/libMagAOX.hpp" //Note this is included on command line to trigger pch
 #include "magaox_git_version.h"
 
 namespace MagAOX
@@ -34,6 +32,7 @@ public:
    ///Load the configuration system results (called by MagAOXApp::setup())
    virtual void loadConfig();
    
+   ///Checks if the device was found during loadConfig.
    virtual int appStartup();
    
    virtual int appLogic();
@@ -312,3 +311,4 @@ int trippLitePDU::parsePDUStatus( std::string & statStr,
 } //namespace app
 } //namespace MagAOX
 
+#endif //trippLitePDU_hpp

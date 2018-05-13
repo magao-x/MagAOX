@@ -1,3 +1,10 @@
+/** \file libMagAOX.hpp 
+  * \brief The MagAO-X library-wide include
+  * \author Jared R. Males (jaredmales@gmail.com)
+  *
+  * History:
+  * - 2018-05-12 created by JRM
+  */ 
 
 #ifndef libMagAOX_hpp
 #define libMagAOX_hpp
