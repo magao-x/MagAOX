@@ -33,22 +33,22 @@ The following configurable options are accepted by trippLitePDU:
   
   Optional arguments:
 
-   |Short | Long         |  Config-File         |     T               | Description  |
+   |Short | Long         |  Config-File         |     Type               | Description  |
    | ---  | ---          | ---                  |   ---               | ---          |
-   | -c | --config       |      config          |    <string>         | A local config file    |
-   | -h | --help         |                      |     <none>          | Print this message and exit    |
-   | -p | --loopPause    | loopPause            |     <unsigned long> | The main loop pause time in ns |
-   | -P | --RTPriority   | RTPriority           |     <unsigned>      | The real-time priority (0-99)  |
-   | -L | --logDir       | logger.logDir        |     <string>        | The directory for log files    |
-   |    | --logExt       | logger.logExt        |     <string>        | The extension for log files    |
-   |    | --maxLogSize   | logger.maxLogSize    |     <string>        | The maximum size of log files  |
-   |    | --writePause   | logger.writePause    |     <unsigned long> | The log thread pause time in ns |
-   |    |--logThreadPrio | logger.logThreadPrio |     <int>           | The log thread priority        |
-   | -l | --logLevel     | logger.logLevel      |     <string>        | The log level                  |
-   |    | --idVendor     | usb.idVendor         |     <<string>>      | USB vendor id, 4 digits        |
-   |    | --idProduct    | usb.idProduct        |     <<string>>      | USB product id, 4 digits       |
-   |    | --serial       | usb.serial           |     <<string>>      | USB serial number        |
-   |    | --baud         | usb.baud             |     <real>          | USB tty baud rate (i.e. 9600) | 
-   | -n | --name         | name                 |     <string>        | The name of the application, specifies config. | 
+   | -c | --config       |      config          |    string        | A local config file    |
+   | -h | --help         |                      |    none          | Print this message and exit    |
+   | -p | --loopPause    | loopPause            |    unsigned long | The main loop pause time in ns |
+   | -P | --RTPriority   | RTPriority           |    unsigned      | The real-time priority (0-99)  |
+   | -L | --logDir       | logger.logDir        |    string        | The directory for log files    |
+   |    | --logExt       | logger.logExt        |    string        | The extension for log files    |
+   |    | --maxLogSize   | logger.maxLogSize    |    string        | The maximum size of log files  |
+   |    | --writePause   | logger.writePause    |    unsigned long | The log thread pause time in ns |
+   |    |--logThreadPrio | logger.logThreadPrio |    int           | The log thread priority        |
+   | -l | --logLevel     | logger.logLevel      |    string        | The log level                  |
+   |    | --idVendor     | usb.idVendor         |    string        | USB vendor id, 4 digits        |
+   |    | --idProduct    | usb.idProduct        |    string        | USB product id, 4 digits       |
+   |    | --serial       | usb.serial           |    string        | USB serial number        |
+   |    | --baud         | usb.baud             |    real          | USB tty baud rate (i.e. 9600) | 
+   | -n | --name         | name                 |    string        | The name of the application, specifies config. | 
    
    
