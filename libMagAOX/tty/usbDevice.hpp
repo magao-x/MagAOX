@@ -49,9 +49,9 @@ struct usbDevice
 int usbDevice::setupConfig( mx::appConfigurator & config )
 {
    std::cerr << "Setting up\n";
-   config.add("usb.idVendor", "", "idVendor", mx::argType::Required, "usb", "idVendor", false, "<string>", "USB vendor id, 4 digits");
-   config.add("usb.idProduct", "", "idProduct", mx::argType::Required, "usb", "idProduct", false, "<string>", "USB product id, 4 digits");
-   config.add("usb.serial", "", "serial", mx::argType::Required, "usb", "serial", false, "<string>", "USB serial number");
+   config.add("usb.idVendor", "", "idVendor", mx::argType::Required, "usb", "idVendor", false, "string", "USB vendor id, 4 digits");
+   config.add("usb.idProduct", "", "idProduct", mx::argType::Required, "usb", "idProduct", false, "string", "USB product id, 4 digits");
+   config.add("usb.serial", "", "serial", mx::argType::Required, "usb", "serial", false, "string", "USB serial number");
    config.add("usb.baud", "", "baud", mx::argType::Required, "usb", "baud", false, "real", "USB tty baud rate (i.e. 9600)");
    
    return 0;
