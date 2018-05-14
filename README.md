@@ -6,33 +6,39 @@ This is the software which runs the MagAOX ExAO system.
 
 ## Dependencies
 
+### Current:
 1. mxlib (https://github.com/jaredmales/mxlib)
 2. libudev (for introspective device discovery)
-3. libhdf5 (though not for anything currently implemented, but we will)
+
+### Future
+1. libhdf5 (though not for anything currently implemented, but we will)
 
 ## Building
 
-The build system has not been implemented. 
+A rudimentary build system has been implemented. 
+
+To build an app, cd the app's directory and type
+```
+make -f ../../Make/magAOXApp.mk t=<appname>
+```
+replacing `appname` with the name of the application.
 
 Some notes:
 
-* The mxlib build system, as re-engineered by Joseph Long, is a good starting point.
-* libMagAOX (part of this repository) is a c++ header-only library.  May not need to "install" it if everything uses rel paths.
-* We need setuid for RT priority handling, access to ttys and FIFOs, etc.
-  * This means we need a way to parse LD_LIBRARY_PATH and create a list of -Wl,-rpath,<path> args to the linker
-    * Done: a makefile $(shell ...) line which parses LD_LIBRARY_PATH
-      ```
-      #Hard-code the paths to system libraries so setuid works
-      LDLIBRPATH := $(shell echo $$LD_LIBRARY_PATH | sed 's/::/:/g' |  sed 's/:/ -Wl,-rpath,/g')
-      LDLIBS += -Wl,-rpath,$(LDLIBRPATH)
-      ``` 
-      This needs to be part of any compile in MagAO-X.
-  * This really should happen in the make file each time so it never gets out of date
-  * This also means that a make install needs privileges.  See how this was handled for VisAO (need to update Vizzy docs with makefiles!)
+* libMagAOX (part of this repository) is a c++ header-only library.  It is compiled into a pre-compiled-header (PCH), managed by the build system.  Any changes to libMagAOX should trigger a re-compile of the PCH, and of any apps depending on it.
+
+* Allowing setuid for RT priority handling, access to ttys and FIFOs, etc., requires hardcoding LD_LIBRARY_PATH at build time.  This is done in the makefiles, and so should be transparent.
+
+* Install requires root priveleges.
+
+ToDo:
+- [] Implement su and asking for password as part of install process
+- [] Use environment variables for path to various parts of build system, path to libMagAOX PCH, etc.
+- [] Possibly use name of directory for target app name.
 
 ## System Setup
 
-Typical MagAOX system directories:
+The following are the typical MagAOX system directories, which means they are #define-ed in libMagAOX/common/config.hpp:
 
 ```
 /opt/MagAOX               [MagAOX system directory]
@@ -43,7 +49,9 @@ Typical MagAOX system directories:
 /opt/MagAOX/secrets       [Directory containing device passwords, etc.]
 ```
 
-- [] Add more docs here . . .
+ToDo:
+- [] Script installation of these directories, with appropriate permission setting, etc.
+- [] Establish appropriate environment variables to allow overriding these.
 
 ## Documentation
 

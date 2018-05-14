@@ -23,20 +23,24 @@ namespace app
 class trippLitePDU : public MagAOXApp, public tty::usbDevice
 {
    
-public: 
+public:
+   
+   /// Default c'tor.
    trippLitePDU();
 
-   ///Setup the configuration system (called by MagAOXApp::setup())   
+   /// Setup the configuration system (called by MagAOXApp::setup())   
    virtual void setupConfig();
    
-   ///Load the configuration system results (called by MagAOXApp::setup())
+   /// Load the configuration system results (called by MagAOXApp::setup())
    virtual void loadConfig();
    
-   ///Checks if the device was found during loadConfig.
+   /// Checks if the device was found during loadConfig.
    virtual int appStartup();
    
+   /// Implementation of the FSM for the tripp lite PDU.
    virtual int appLogic();
    
+   /// Do any needed shutdown tasks.  Currently nothing in this app.
    virtual int appShutdown();
    
    /// Parse the PDU devstatus response.
@@ -66,7 +70,6 @@ void trippLitePDU::loadConfig()
 {
    
    this->m_speed = B9600; //default for trippLite PDUs.  Will be overridden by any config setting.
-   
    
    int rv = tty::usbDevice::loadConfig(config);
    
