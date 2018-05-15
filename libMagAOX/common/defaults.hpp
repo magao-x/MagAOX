@@ -10,6 +10,8 @@
 #define common_defaults_hpp
    
 /** \defgroup default_paths Default Paths
+  * \ingroup common 
+  * 
   * @{
   */
 
@@ -21,7 +23,7 @@
 #endif 
 
 #ifndef MAGAOX_default_configRelPath
-   /// The defautl relative path to the configuration files.
+   /// The default relative path to the configuration files.
    /**
      */
    #define MAGAOX_default_configRelPath "config"
@@ -70,7 +72,7 @@
 
 #ifndef MAGAOX_default_writePause
    /// The default logger writePause
-   /** Defines how long the logger write thread pauses after clearing the queue.  Default is 1 sec.
+   /** Defines the default value of how long the logger write thread pauses after clearing the queue.  Default is 1 sec.
      * 
      * Units: nanoseconds.
      */
@@ -79,7 +81,7 @@
 
 #ifndef MAGAOX_default_logSize
    /// The default maximum log file size 
-   /** Defines the maximum size in for a log file.  Default is 10 MB.
+   /** Defines the default maximum size in for a log file.  Default is 10 MB.
      * 
      * Units: bytes
      */
@@ -88,7 +90,7 @@
 
 #ifndef MAGAOX_default_loopPause
    /// The default application loopPause
-   /** Defines how long the event loop in execute() pauses. Default is 1 sec.
+   /** Defines default value of how long the event loop in execute() pauses. Default is 1 sec.
      * 
      * Units: nanoseconds.
      */

@@ -10,6 +10,8 @@
 #define common_environment_hpp
 
 /** \defgroup env_var Environment Variables
+  * \ingroup common 
+  * 
   * @{
   */
 

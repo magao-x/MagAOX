@@ -17,8 +17,11 @@ namespace MagAOX
 namespace logger 
 {
 
+
    
 ///The type of the message length
+/** \ingroup logbufftypes
+  */
 typedef uint16_t msgLenT;
 
 
@@ -29,6 +32,8 @@ typedef uint16_t msgLenT;
     |l| event |time_s            |time_ns                | len | message        |
     \endverbatim
   * where the header consists of everything up to and including the length of the message.
+  *
+  * \ingroup logbuff
   */
 struct logHeaderT
 {
@@ -36,14 +41,18 @@ struct logHeaderT
    eventCodeT eventCode;
    time::timespecX timespecX;
    msgLenT msgLen;
-}  __attribute__((packed)) ;
+}  __attribute__((packed));
 
 ///The log entry buffer smart pointer.
+/** \ingroup logbufftypes
+  */
 typedef std::shared_ptr<char> bufferPtrT; 
 
 ///Extract the level of a log entry
 /**
   * \returns the level
+  * 
+  * \ingroup logbuff
   */
 inline
 logLevelT logLevel( bufferPtrT & logBuffer /**< [in] a shared_ptr\<char\> containing a raw lag entry buffer.*/)
@@ -54,6 +63,8 @@ logLevelT logLevel( bufferPtrT & logBuffer /**< [in] a shared_ptr\<char\> contai
 ///Extract the event code of a log entry
 /**
   * \returns the event code
+  * 
+  * \ingroup logbuff
   */
 inline
 eventCodeT eventCode( bufferPtrT & logBuffer /**< [in] a shared_ptr\<char\> containing a raw lag entry buffer.*/)
@@ -65,6 +76,8 @@ eventCodeT eventCode( bufferPtrT & logBuffer /**< [in] a shared_ptr\<char\> cont
 ///Extract the timespec of a log entry
 /**
   * \returns the timespec
+  * 
+  * \ingroup logbuff
   */
 inline
 time::timespecX timespecX( bufferPtrT & logBuffer /**< [in] a shared_ptr\<char\> containing a raw lag entry buffer.*/)
@@ -75,6 +88,8 @@ time::timespecX timespecX( bufferPtrT & logBuffer /**< [in] a shared_ptr\<char\>
 ///Extract the message length of a log entry
 /**
   * \returns the message length
+  * 
+  * \ingroup logbuff
   */
 inline
 msgLenT msgLen(  bufferPtrT & logBuffer /**< [in] a shared_ptr\<char\> containing a raw lag entry buffer.*/)
@@ -86,6 +101,8 @@ msgLenT msgLen(  bufferPtrT & logBuffer /**< [in] a shared_ptr\<char\> containin
 /** Convenience wrapper for the other extraction functions.
   * 
   * \returns 0 on success, -1 on error.
+  * 
+  * \ingroup logbuff
   */
 inline
 int extractBasicLog( logLevelT & lvl,       ///< [out] The log level
@@ -108,25 +125,40 @@ int extractBasicLog( logLevelT & lvl,       ///< [out] The log level
 }
    
 
+   
 ///The offset to the log level entry
+/** \ingroup logbufftypes
+  */
 static const int levelOffset = 0;
 
 ///The offset to the log event code
+/** \ingroup logbufftypes
+  */
 static const int eventOffset = levelOffset + sizeof(logLevelT);
 
 ///The offset to the time seconds 
+/** \ingroup logbufftypes
+  */
 static const int time_sOffset = eventOffset + sizeof(eventCodeT);
 
 ///The offset to the time nanoseconds
+/** \ingroup logbufftypes
+  */
 static const int time_nsOffset = time_sOffset + sizeof(time::timespecX::secT);
 
 ///The offset to the message length field
+/** \ingroup logbufftypes
+  */
 static const int lenOffset = time_nsOffset + sizeof(time::timespecX::nanosecT);
 
 ///The offset to the message.
+/** \ingroup logbufftypes
+  */
 static const int messageOffset = lenOffset + sizeof(msgLenT);
  
 ///The base size of a message is the size of the header, not including the message.
+/** \ingroup logbufftypes
+  */
 static const int headerSize = sizeof(logHeaderT);
    
 static_assert( headerSize == messageOffset, "headerSize and messageOffset mismatch");

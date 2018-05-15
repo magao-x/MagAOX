@@ -17,7 +17,9 @@ namespace logger
 {
    
 /// Worker function that formats a log into the standard text representation.
-/** \todo change to using a std::ios as input instead of only using std::cout 
+/** \todo change to using a std::ios as input instead of only using std::cout
+  *
+  * \ingroup logformat
   */
 template<typename logT>
 void _stdFormat( bufferPtrT & logBuffer /**< [in] the binary log buffer */)
@@ -37,6 +39,9 @@ void _stdFormat( bufferPtrT & logBuffer /**< [in] the binary log buffer */)
 }
 
 /// Place the log in standard text format, with event code specific formatting.
+/** 
+  * \ingroup logformat
+  */ 
 inline
 void logStdFormat(bufferPtrT & buffer /**< [in] the binary log buffer */ )
 {

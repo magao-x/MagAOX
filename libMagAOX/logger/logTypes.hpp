@@ -18,6 +18,8 @@ namespace logger
 {
 
 /// Log entry recording the build-time git state.
+/** \ingroup logtypes
+  */
 struct git_state
 {
    //Define the log name for use in the database
@@ -126,7 +128,6 @@ struct git_state
    
    static std::string msgString( messageT & msg )
    {
-      //This just pre-allocates 40 chars for the hash.
       std::string str = msg.m_repoName + " GIT: ";
       for(int i=0;i<s_sha1Length;++i) str += msg.m_sha1[i];
       
@@ -137,6 +138,8 @@ struct git_state
 }; //git_state 
    
 ///A simple text log, a string-type log.
+/** \ingroup logtypes
+  */
 struct text_log : public string_log
 {
    //Define the log name for use in the database
@@ -151,6 +154,8 @@ struct text_log : public string_log
 };
 
 ///User entered log, a string-type log.
+/** \ingroup logtypes
+  */
 struct user_log : public string_log
 {
    //Define the log name for use in the database
@@ -171,6 +176,8 @@ struct user_log : public string_log
 
 
 ///Software DEBUG log entry
+/** \ingroup logtypes
+  */
 struct software_debug : public software_log
 {
    //Define the log name for use in the database
@@ -184,6 +191,8 @@ struct software_debug : public software_log
 };
 
 ///Software DEBUG2 log entry
+/** \ingroup logtypes
+  */
 struct software_debug2 : public software_log
 {
    //Define the log name for use in the database
@@ -197,6 +206,8 @@ struct software_debug2 : public software_log
 };
 
 ///Software INFO log entry
+/** \ingroup logtypes
+  */
 struct software_info : public software_log
 {
    //Define the log name for use in the database
@@ -210,6 +221,8 @@ struct software_info : public software_log
 };
 
 ///Software WARN log entry
+/** \ingroup logtypes
+  */
 struct software_warning : public software_log
 {
    //Define the log name for use in the database
@@ -223,6 +236,8 @@ struct software_warning : public software_log
 };
 
 ///Software ERR log entry
+/** \ingroup logtypes
+  */
 struct software_error : public software_log
 {
    //Define the log name for use in the database
@@ -236,6 +251,8 @@ struct software_error : public software_log
 };
 
 ///Software CRIT log entry
+/** \ingroup logtypes
+  */
 struct software_critical : public software_log
 {
    //Define the log name for use in the database
@@ -249,6 +266,8 @@ struct software_critical : public software_log
 };
 
 ///Software FATAL log entry
+/** \ingroup logtypes
+  */
 struct software_fatal : public software_log
 {
    //Define the log name for use in the database
@@ -263,6 +282,8 @@ struct software_fatal : public software_log
 
 
 ///Loop Closed event log
+/** \ingroup logtypes
+  */
 struct loop_closed : public empty_log
 {
    //Define the log name for use in the database
@@ -281,6 +302,8 @@ struct loop_closed : public empty_log
 };
 
 ///Loop Paused event log
+/** \ingroup logtypes
+  */
 struct loop_paused : public empty_log
 {
    //Define the log name for use in the database
@@ -299,6 +322,8 @@ struct loop_paused : public empty_log
 };
 
 ///Loop Open event log
+/** \ingroup logtypes
+  */
 struct loop_open : public empty_log
 {
    //Define the log name for use in the database
@@ -317,7 +342,9 @@ struct loop_open : public empty_log
    
 };
 
-///Application State Change 
+///Application State Change
+/** \ingroup logtypes
+  */
 struct state_change
 {
    //Define the log name for use in the database

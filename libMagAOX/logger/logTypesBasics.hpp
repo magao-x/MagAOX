@@ -130,8 +130,6 @@ struct empty_log
    }
 };
 
-
-
 ///Base class for software logs
 /** Such logs are used to log software status, warnings, and errors. Does not have eventCode or defaultLevel, so this can not be used as a log type in logger.
   * 
@@ -142,16 +140,16 @@ struct software_log
    ///The type of the message
    struct messageT
    {
-      typedef std::string stringT;
-      typedef int linenumT;
-      typedef int codeT;
+      typedef std::string stringT; ///< Type used for file and explanation.
+      typedef int linenumT;  ///< Type for line numbers
+      typedef int codeT; ///< Type for error codes.
    
-      typedef int lengthT;
+      typedef int lengthT; ///< Type for recording the length of strings within this message.
    
-      stringT file;
-      linenumT linenum;
-      codeT code;
-      stringT explanation;
+      stringT file; ///< File where message was generated.
+      linenumT linenum; ///< Line number of file where message was generated.
+      codeT code; ///< The error code (if applicable, e.g. errno)
+      stringT explanation; ///< Explanation of error (e.g. provided by strerrno)
    };
    
    ///Get the length of the message.
@@ -231,9 +229,7 @@ struct software_log
       
       offset += sizeof(messageT::codeT);
       
-      //strLen = *reinterpret_cast<messageT::lengthT *>(cBuffer + offset);
       strLen = len - offset;
-//      offset += sizeof(messageT::lengthT);
       
       cbuff = reinterpret_cast<char *>(cBuffer + offset);
       msg.explanation.resize(strLen);

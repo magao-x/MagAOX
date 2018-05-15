@@ -33,6 +33,7 @@ struct eventCodes
    
    ///The log event codes.  These are the unique identifiers for log entry types.
    /** These are in the eventCodes class scope, so must be referenced with, e.g., eventCodes::GIT_STATE. 
+     * \ingroup logcodes
      */
    enum : eventCodeT { GIT_STATE = 0,          ///< The git repository state at application build-time
                        TEXT_LOG = 10,          ///< Denotes a simple text log.

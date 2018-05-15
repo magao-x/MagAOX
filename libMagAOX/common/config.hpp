@@ -10,6 +10,8 @@
 #define common_config_hpp
 
 /** \defgroup config_defines Configuration Defines
+  * \ingroup common
+  * 
   * @{
   */
 

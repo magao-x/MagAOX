@@ -29,8 +29,9 @@ struct logLevels
 {
    ///The log level codes.  These control if logs are stored on disk and how they are presented to users.
    /** These are in the logLevels class scope, so must be referenced with, e.g., logLevles::INFO.
+     * \ingroup loglevels 
      */
-   enum : logLevelT { MAXLEVEL = 8, // used only for error checking.
+   enum : logLevelT { MAXLEVEL = 8, ///< used only for error checking.
                       FATAL = 7, ///< A fatal error, this should only be used if the process will be shutdown as a result.
                       CRITICAL = 6, ///< A critical error, this should only be used if some action is required by operators.
                       ERROR = 5, ///< An error.

@@ -58,6 +58,8 @@ namespace logger
   * \todo document all the requirements of logFileT
   *
   * \tparam logFileT a logFile type with a writeLog method.
+  *
+  * \ingroup logger
   */
 template<class logFileT>
 struct logManager : public logFileT

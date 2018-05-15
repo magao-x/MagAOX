@@ -1,0 +1,33 @@
+
+///\defgroup common Library Configuration
+
+///\defgroup logger The Logging System
+
+/** \defgroup logbuff Log Buffer Specification
+  * \ingroup logger
+  */
+
+/** \defgroup logbufftypes Types and Constants
+  * Typedefs and static constants related to the log buffer.
+  * \ingroup logbuff
+  */
+  
+/** \defgroup logcodes Log Event Codes
+  * \ingroup logger
+  */
+  
+/** \defgroup loglevels Log Levels
+  * \ingroup logger
+  */
+  
+/** \defgroup logtypes Log Entry Types
+  * \ingroup logger
+  */
+
+/** \defgroup logtypesbasic Basic Entry Types
+  * \ingroup logtypes
+  */
+
+/** \defgroup logformat Log Output Formatting
+  * \ingroup logger
+  */
