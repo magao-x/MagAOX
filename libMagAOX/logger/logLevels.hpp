@@ -16,24 +16,38 @@ namespace logger
 {
 
 ///The type of the log level code.
+/** \ingroup loglevels
+  */
 typedef int8_t logLevelT;
    
-///The log level codes.  These control if logs are stored on disk and how they are presented to users.
-enum logLevels : logLevelT { MAXLEVEL = 8, // used only for error checking.
-                             FATAL = 7, ///< A fatal error, this should only be used if the process will be shutdown as a result.
-                             CRITICAL = 6, ///< A critical error, this should only be used if some action is required by operators.
-                             ERROR = 5, ///< An error.
-                             WARNING = 4, ///< A warning.  
-                             INFO = 3, ///< The info log level is the lowest level recorded during normal operations.
-                             DEBUG2 = 2,  ///< 2nd lowest priority log, used for debugging.
-                             DEBUG  = 1,  ///< Lowest priority log, used for debugging.
-                             DEFAULT = 0, ///< Uses the logType default.
-                             TELEMETRY = -1, ///< Telemetry logs are handled differently.
-                             UNKNOWN = -2 ///<For indicating errors
-                           };
- 
+
+/// Scoping struct for logLevel codes.
+/** We do not use the enum class feature since it does not have automatic integer conversion.
+  * \ingroup loglevels
+  */
+struct logLevels
+{
+   ///The log level codes.  These control if logs are stored on disk and how they are presented to users.
+   /** These are in the logLevels class scope, so must be referenced with, e.g., logLevles::INFO.
+     */
+   enum : logLevelT { MAXLEVEL = 8, // used only for error checking.
+                      FATAL = 7, ///< A fatal error, this should only be used if the process will be shutdown as a result.
+                      CRITICAL = 6, ///< A critical error, this should only be used if some action is required by operators.
+                      ERROR = 5, ///< An error.
+                      WARNING = 4, ///< A warning.  
+                      INFO = 3, ///< The info log level is the lowest level recorded during normal operations.
+                      DEBUG2 = 2,  ///< 2nd lowest priority log, used for debugging.
+                      DEBUG  = 1,  ///< Lowest priority log, used for debugging.
+                      DEFAULT = 0, ///< Uses the logType default.
+                      TELEMETRY = -1, ///< Telemetry logs are handled differently.
+                      UNKNOWN = -2 ///<For indicating errors
+                    };
+};
+
 ///Get the string representation of a log level
-std::string levelString( logLevelT & lvl )
+/** \ingroup loglevels
+  */
+std::string levelString( logLevelT & lvl /**< [in] the log level */)
 {
    switch( lvl )
    {
@@ -78,6 +92,8 @@ std::string levelString( logLevelT & lvl )
   * 
   * \returns the logLevels value if parsing is successful.
   * \returns logLevels::UNKNOWN (-2) if parsing is not successful.
+  * 
+  * \ingroup loglevels
   */
 logLevelT logLevelFromString( const std::string & str )
 {
