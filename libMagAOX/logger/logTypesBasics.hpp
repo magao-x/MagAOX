@@ -18,6 +18,8 @@ namespace logger
    
 ///Base class for logs consisting of a string message.
 /** Does not have eventCode or defaultLevel, so this can not be used as a log type in logger.
+  * 
+  * \ingroup logtypesbasics 
   */
 struct string_log
 {
@@ -79,6 +81,9 @@ struct string_log
 
 
 ///Empty type for resolving logs with no message.
+/** 
+  * \ingroup logtypesbasics
+  */ 
 struct emptyMessage
 {
 };
@@ -86,6 +91,9 @@ struct emptyMessage
 
 ///Base class for logs consisting of an empty message.
 /** Such logs are used to log events. Does not have eventCode or defaultLevel, so this can not be used as a log type in logger.
+  *
+  * 
+  * \ingroup logtypesbasics
   */
 struct empty_log
 {
@@ -122,33 +130,35 @@ struct empty_log
    }
 };
 
-struct softwareMessage
-{
-   typedef std::string stringT;
-   typedef int linenumT;
-   typedef int codeT;
-   
-   typedef int lengthT;
-   
-   stringT file;
-   linenumT linenum;
-   codeT code;
-   stringT explanation;
-};
+
 
 ///Base class for software logs
 /** Such logs are used to log software status, warnings, and errors. Does not have eventCode or defaultLevel, so this can not be used as a log type in logger.
+  * 
+  * \ingroup logtypesbasics
   */
 struct software_log
 {
    ///The type of the message
-   typedef softwareMessage messageT;
+   struct messageT
+   {
+      typedef std::string stringT;
+      typedef int linenumT;
+      typedef int codeT;
+   
+      typedef int lengthT;
+   
+      stringT file;
+      linenumT linenum;
+      codeT code;
+      stringT explanation;
+   };
    
    ///Get the length of the message.
    static msgLenT length( const messageT & msg)
    {
-      return ( sizeof(softwareMessage::lengthT) + msg.file.size() 
-                   + sizeof(softwareMessage::linenumT) + sizeof(softwareMessage::codeT) 
+      return ( sizeof(messageT::lengthT) + msg.file.size() 
+                   + sizeof(messageT::linenumT) + sizeof(messageT::codeT) 
                        + msg.explanation.size() );
    }
    
