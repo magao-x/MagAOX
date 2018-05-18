@@ -407,7 +407,7 @@ struct state_change
    static std::string msgString( messageT & msg /**< [in] the message structure */ )
    {
       std::stringstream s;
-      s << "State changed from " << app::stateCodeText(msg.from) << " to " << app::stateCodeText(msg.to);
+      s << "State changed from " << app::stateCodes::codeText(msg.from) << " to " << app::stateCodes::codeText(msg.to);
       return s.str();
    }
 };

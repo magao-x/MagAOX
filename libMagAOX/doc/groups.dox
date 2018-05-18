@@ -31,3 +31,7 @@
 /** \defgroup logformat Log Output Formatting
   * \ingroup logger
   */
+
+
+/** \defgroup magaoxapp The Base MagAOX Application
+  */

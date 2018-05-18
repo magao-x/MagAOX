@@ -50,6 +50,8 @@ namespace app
   *  
   * \todo add INDI!
   * \todo do we need libMagAOX error handling? (a stack?)
+  * 
+  * \ingroup magaoxapp
   */ 
 class MagAOXApp : public mx::application, public logger::logManager<logFileRaw>
 {
@@ -262,21 +264,21 @@ protected:
      * @{
      */
 private:
-   stateCodeT m_state {stateCodes::UNINITIALIZED}; ///< The application's state.  Never ever set this directly, use state(const stateCodeT & s).
+   stateCodes::stateCodeT m_state {stateCodes::UNINITIALIZED}; ///< The application's state.  Never ever set this directly, use state(const stateCodeT & s).
    int m_stateLogged {0} ;///< Counter and flag for use to log errors just once.  Never ever access directly, use stateLogged().
    
 public:
    /// Get the current state code 
    /** \returns m_state
      */
-   stateCodeT state();
+   stateCodes::stateCodeT state();
    
    /// Set the current state code 
    /** If no change, returns immediately with no actions.
      * 
      * If it is a change, the state change is logged.  Also resets m_stateLogged to 0.
      */ 
-   void state(const stateCodeT & s /**< [in] The new application state */);
+   void state(const stateCodes::stateCodeT & s /**< [in] The new application state */);
    
    /// Updates and returns the value of m_stateLogged.  Will be 0 on first call after a state change, \>0 afterwords.
    /** This method exists to facilitate logging the reason for a state change once, but not 
@@ -824,12 +826,12 @@ int MagAOXApp::unlockPID()
    return 0;
 }
 
-stateCodeT MagAOXApp::state()
+stateCodes::stateCodeT MagAOXApp::state()
 {
    return m_state;
 }
 
-void MagAOXApp::state(const stateCodeT & s)
+void MagAOXApp::state(const stateCodes::stateCodeT & s)
 {
    if(m_state == s) return;
    

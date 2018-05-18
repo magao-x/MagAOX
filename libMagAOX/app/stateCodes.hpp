@@ -15,34 +15,49 @@ namespace MagAOX
 namespace app
 {
 
-typedef int stateCodeT;
-
-namespace stateCodes 
+/// Scoping struct for application state codes.
+/** We do not use the enum class feature since it does not have automatic integer conversion.
+  * \ingroup magaoxapp
+  */
+struct stateCodes 
 {
-   
-/// The numeric codes descrbing an application's state
-enum : stateCodeT { FAILURE=-20,       ///< The application has failed, should be used when m_shutdown is set for an error.
-                    ERROR=-10,         ///< The application has encountered and error, from which it is recovering (with or without intervention)
-                    UNINITIALIZED = 0, ///< The application is unitialized, the default
-                    INITIALIZED = 1,   ///< The application has been initialized, set just before calling appStartup().
-                    NODEVICE = 2,      ///<
-                    NOTCONNECTED = 3,  ///<
-                    CONNECTED = 4,     ///<
-                    LOGGEDIN = 5,      ///<
-                    CONFIGURING = 6,   ///<
-                    HOMING = 10,       ///<
-                    OPERATING = 20,    ///<
-                    READY = 30,        ///<
-                    SHUTDOWN = 10000   ///< The application has shutdown, set just after calling appShutdown().
+
+   /// The type of the state code.
+   /**
+     */
+   typedef int stateCodeT;
+
+
+   /// The numeric codes descrbing an application's state
+   /** \ingroup magaoxapp
+     */   
+   enum : stateCodeT { FAILURE=-20,       ///< The application has failed, should be used when m_shutdown is set for an error.
+                       ERROR=-10,         ///< The application has encountered an error, from which it is recovering (with or without intervention)
+                       UNINITIALIZED = 0, ///< The application is unitialized, the default
+                       INITIALIZED = 1,   ///< The application has been initialized, set just before calling appStartup().
+                       NODEVICE = 2,      ///< No device exists for the application to control.
+                       NOTCONNECTED = 3,  ///< The application is not connected to the device or service.
+                       CONNECTED = 4,     ///< The application has connected to the device or service.
+                       LOGGEDIN = 5,      ///< The application has logged into the device or service
+                       CONFIGURING = 6,   ///< The application is configuring the device.
+                       HOMING = 10,       ///< The device is homing.
+                       OPERATING = 20,    ///< The device is operating, other than homing.
+                       READY = 30,        ///< The device is ready for operation, but is not operating.
+                       SHUTDOWN = 10000   ///< The application has shutdown, set just after calling appShutdown().
                   };
                   
-} //namespace stateCodes           
 
-/// Get an ASCII string corresponding to an application stateCode.
-/**
-  * \returns a string with the text name of the stateCode
-  */ 
-std::string stateCodeText( stateCodeT stateCode /**<[in] the stateCode for which the name is desired*/)
+   /// Get an ASCII string corresponding to an application stateCode.
+   /**
+     * \returns a string with the text name of the stateCode
+     * 
+     */ 
+   static std::string codeText( stateCodeT stateCode /**<[in] the stateCode for which the name is desired*/);
+
+}; //struct stateCodes           
+
+
+std::string stateCodes::codeText( stateCodeT stateCode )
 {
    switch(stateCode)
    {
