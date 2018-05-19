@@ -31,17 +31,17 @@ struct logLevels
    /** These are in the logLevels class scope, so must be referenced with, e.g., logLevles::INFO.
      * \ingroup loglevels 
      */
-   enum : logLevelT { MAXLEVEL = 8, ///< used only for error checking.
-                      FATAL = 7, ///< A fatal error, this should only be used if the process will be shutdown as a result.
-                      CRITICAL = 6, ///< A critical error, this should only be used if some action is required by operators.
-                      ERROR = 5, ///< An error.
-                      WARNING = 4, ///< A warning.  
-                      INFO = 3, ///< The info log level is the lowest level recorded during normal operations.
-                      DEBUG2 = 2,  ///< 2nd lowest priority log, used for debugging.
-                      DEBUG  = 1,  ///< Lowest priority log, used for debugging.
-                      DEFAULT = 0, ///< Uses the logType default.
+   enum : logLevelT { MAXLEVEL =   8, ///< used only for bounds/error checking.
+                      FATAL =      7, ///< A fatal error, this should only be used if the process will be shutdown as a result.
+                      CRITICAL =   6, ///< A critical error, this should only be used if some action is required by operators.
+                      ERROR =      5, ///< An error.
+                      WARNING =    4, ///< A warning.  
+                      INFO =       3, ///< The info log level is the lowest level recorded during normal operations.
+                      DEBUG2 =     2,  ///< 2nd lowest priority log, used for debugging.
+                      DEBUG  =     1,  ///< Lowest priority log, used for debugging.
+                      DEFAULT =    0, ///< Uses the logType default.
                       TELEMETRY = -1, ///< Telemetry logs are handled differently.
-                      UNKNOWN = -2 ///<For indicating errors
+                      UNKNOWN =   -2 ///<For indicating errors
                     };
 };
 

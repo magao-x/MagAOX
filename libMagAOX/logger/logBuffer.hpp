@@ -109,7 +109,7 @@ int extractBasicLog( logLevelT & lvl,       ///< [out] The log level
                      eventCodeT & ec,       ///< [out] the event code
                      time::timespecX & ts,  ///< [out] the timestamp of the log entry
                      msgLenT & len,         ///< [out] the message length
-                     bufferPtrT & logBuffer ///< [in] a shared_ptr\<char\> containing a raw lag entry buffer.
+                     bufferPtrT & logBuffer ///< [in] a shared_ptr\<char\> containing a raw log entry buffer.
                    )
 {
    
