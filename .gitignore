@@ -3,4 +3,6 @@ apps/trippLitePDU/trippLitePDU
 utils/logdump/logdump
 *.gch
 *.o
+*.a
+*.so
 *html/
