@@ -15,13 +15,15 @@
 
 #include <fstream>
 
+#include <unordered_map>
+
 #include <boost/filesystem.hpp>
 
 #include <mx/mxlib.hpp>
 #include <mx/app/application.hpp>
 #include <mx/environment.hpp>
 
-#include <indi/IndiDriver.hpp>
+
 
 #include "../common/environment.hpp"
 #include "../common/defaults.hpp"
@@ -32,6 +34,8 @@
 #include "../logger/logFileRaw.hpp"
 
 #include "stateCodes.hpp"
+#include "indiDriver.hpp"
+#include "indiMacros.hpp"
 
 using namespace MagAOX::logger;
 
@@ -54,7 +58,7 @@ namespace app
   * 
   * \ingroup magaoxapp
   */ 
-class MagAOXApp : public mx::application, public logger::logManager<logFileRaw>, public pcf::IndiDriver
+class MagAOXApp : public mx::application, public logger::logManager<logFileRaw>
 {
       
 protected:
@@ -302,6 +306,72 @@ public:
    
    ///@} --Application State
 
+   /** \name INDI Interface
+     *
+     * @{
+     */
+protected:
+   ///The INDI driver wrapper.  Constructed and initialized by execute, which starts and stops communications.
+   indiDriver<MagAOXApp> * m_indiDriver {nullptr};
+   
+   ///Structure to hold the call-back details for handling INDI communications.
+   struct indiCallBack
+   {
+      pcf::IndiProperty * property {0}; ///< A pointer to an INDI property.
+      int (*newCallBack)( void *, const pcf::IndiProperty &) {0}; ///< The function to call for a new property request.
+   };
+   
+   ///Map to hold the indiCallBacks for this App, with fast lookup by property name.
+   std::unordered_map< std::string, indiCallBack> m_indiCallBacks;
+   
+   ///Value type of the indiCallBack map.
+   typedef std::pair<std::string, indiCallBack> callBackValueType;
+   
+   ///Iterator type of the indiCallBack map.
+   typedef std::unordered_map<std::string, indiCallBack>::iterator callBackIterator;
+   
+   ///Return type of insert on the indiCallBack map.
+   typedef std::pair<callBackIterator,bool> callBackInsertResult;
+
+   
+   
+   /// Register an INDI property.
+   /**
+     * 
+     * \returns 0 on success.
+     * \returns -1 on error.
+     *
+     * \todo needs error logging
+     * \todo needs exception handling
+     * \todo is a failure to register a FATAL error?
+     */ 
+   int registerIndiProperty( pcf::IndiProperty & prop,                               ///< [out] the property to register
+                             const std::string & propName,                           ///< [in] the name of the property
+                             const pcf::IndiProperty::Type & propType,               ///< [in] the type of the property
+                             const pcf::IndiProperty::PropertyPermType & propPerm,   ///< [in] the permissions of the property
+                             const pcf::IndiProperty::PropertyStateType & propState, ///< [in] the state of the property
+                             int (*)( void *, const pcf::IndiProperty &)             ///< [in] the callback for changing the property
+                           );
+
+public:
+   /// Handler for the get INDI properties request
+   /** Uses the properties registered in m_indiCallBacks to respond to the request.  This is called by
+     * m_indiDriver's indiDriver::handleGetProperties.
+     */
+   void handleGetProperties( const pcf::IndiProperty &ipRecv /**< [in] The property being requested. */ );
+   
+   /// Handler for the new INDI property request
+   /** Uses the properties registered in m_indiCallBacks to respond to the request, looking up the callback for this
+     * property and calling it.
+     * 
+     * This is called by m_indiDriver's indiDriver::handleGetProperties.
+     * 
+     * \todo handle errors, are they FATAL?
+     */
+   void handleNewProperty( const pcf::IndiProperty &ipRecv /**< [in] The property being changed. */);
+   
+   ///@} --INDI Interface
+   
 };
 
 MagAOXApp * MagAOXApp::m_self = nullptr;
@@ -357,7 +427,7 @@ void MagAOXApp::setDefaults( int argc,
    
    //Setup default log path
    tmpstr = MagAOXPath + "/" + MAGAOX_default_logRelPath;
-   //m_logFile.
+
    logPath(tmpstr);
 
    //Setup default sys path
@@ -384,7 +454,6 @@ void MagAOXApp::setDefaults( int argc,
    {
       boost::filesystem::path p(invokedName);
       configName = p.stem().string();
-      
       log<text_log>("Application name (-n --name) not set.  Using argv[0].");
    }
    
@@ -490,6 +559,14 @@ int MagAOXApp::execute() //virtual
       if(appStartup() < 0) m_shutdown = 1;
    }
    
+   //Begin INDI Communications
+   m_indiDriver = new indiDriver<MagAOXApp>(this, configName, "0", "0");
+   
+   if(m_indiDriver != nullptr)
+   {
+      m_indiDriver->activate();
+   }
+   
    while( m_shutdown == 0)
    {
       /** \todo Add a mutex to lock every time appLogic is called.  
@@ -507,10 +584,17 @@ int MagAOXApp::execute() //virtual
          std::this_thread::sleep_for( std::chrono::duration<unsigned long, std::nano>(loopPause));
       }
    }
-   
+      
    appShutdown();
    
    state(stateCodes::SHUTDOWN);
+   
+   //Stop INDI communications
+   if(m_indiDriver != nullptr)
+   {
+      m_indiDriver->quitProcess();
+      m_indiDriver->deactivate();
+   }
    
    unlockPID();
    
@@ -603,6 +687,7 @@ void MagAOXApp::handlerSigTerm( int signum,
    logss += signame;
    logss += ". Shutting down.";
    
+   std::cerr << "\n" << logss << std::endl;
    log<text_log>(logss);
 }
 
@@ -777,6 +862,8 @@ int MagAOXApp::lockPID()
             //This means that this app already exists for this config, and we need to die.
             std::stringstream logss;
             logss << "PID already locked (" << testPid  << ").  Time to die.";
+            std::cerr << logss.str() << std::endl;
+            
             log<text_log>(logss.str(), logLevels::CRITICAL);         
             
             //Go back to regular privileges
@@ -856,6 +943,79 @@ int MagAOXApp::stateLogged()
       return 0;
    }
 }
+
+/*-------------------------------------------------------------------------------------*/
+/*                                  INDI Support                                       */
+/*-------------------------------------------------------------------------------------*/
+
+int MagAOXApp::registerIndiProperty( pcf::IndiProperty & prop,
+                                     const std::string & propName,
+                                     const pcf::IndiProperty::Type & propType,
+                                     const pcf::IndiProperty::PropertyPermType & propPerm,
+                                     const pcf::IndiProperty::PropertyStateType & propState,
+                                     int (*newCallBack)( void *, const pcf::IndiProperty &ipRecv)
+                                   )
+{
+   prop = pcf::IndiProperty (propType);              
+   prop.setDevice(configName);
+   prop.setName(propName);
+   prop.setPerm(propPerm);
+   prop.setState( propState);
+   
+   
+   callBackInsertResult result =  m_indiCallBacks.insert(callBackValueType( propName, {&prop, newCallBack}));
+   
+   if(!result.second) 
+   {
+      return -1;
+   }
+   
+   return 0;
+}   
+
+
+void MagAOXApp::handleGetProperties( const pcf::IndiProperty &ipRecv )
+{
+   if(m_indiDriver == nullptr) return;
+   
+   //Ignore if not our device
+   if (ipRecv.hasValidDevice() && ipRecv.getDevice() != m_indiDriver->getName())
+   {
+      return;
+   }
+   
+   //Send all properties if requested.
+   if( !ipRecv.hasValidName() )
+   {
+      callBackIterator it = m_indiCallBacks.begin();
+      
+      while(it != m_indiCallBacks.end() )
+      {
+         m_indiDriver->sendDefProperty( *(it->second.property) );
+         ++it;
+      }
+      
+      return;
+   }
+   
+   //Otherwise send just the requested property.
+   m_indiDriver->sendDefProperty( *(m_indiCallBacks[ ipRecv.getName() ].property) );
+
+   return;
+}   
+
+   
+void MagAOXApp::handleNewProperty( const pcf::IndiProperty &ipRecv )
+{
+   if(m_indiDriver == nullptr) return;
+   
+   int (*newCallBack)(void *, const pcf::IndiProperty &) = m_indiCallBacks[ ipRecv.getName() ].newCallBack;
+   
+   if(newCallBack) newCallBack( this, ipRecv);
+   
+   return;
+}
+
    
 } //namespace app 
 } //namespace MagAOX 

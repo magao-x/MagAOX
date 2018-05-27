@@ -37,10 +37,10 @@ OPTIMIZE ?= -O3 -fopenmp -ffast-math
 #######################################
 
 #location of liblilxml, libindicommon, mxlib and sofa:
-EXTRA_LDFLAGS ?= -L$(LIB_PATH)/lib -L$(MXLIB_PATH)    
+EXTRA_LDFLAGS ?= -L$(LIB_PATH) -L$(MXLIB_LIB_PATH)    
 
 #the required librarires
-EXTRA_LDLIBS ?= -lmxlib -lsofa_c -lboost_system -lboost_filesystem -ludev -llilxml -lindicommon
+EXTRA_LDLIBS ?= -lmxlib -lsofa_c -lboost_system -lboost_filesystem -ludev -lindicommon -llilxml 
 
 #Add rt on Darwin:
 ifneq ($(UNAME),Darwin)

@@ -8,6 +8,8 @@ TARGET=libMagAOX.hpp
 
 #Dependencies to trigger recompile
 INCLUDEDEPS= app/MagAOXApp.hpp \
+	     app/indiDriver.hpp \
+	     app/indiMacros.hpp \
              app/stateCodes.hpp \
              common/config.hpp \
              common/defaults.hpp \

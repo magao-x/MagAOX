@@ -62,6 +62,6 @@ magaox_git_version.h:
 
 .PHONY: clean
 clean:
-	rm $(TARGET)
+	rm -f $(TARGET)
 	rm -f *.o 
 	rm -f *~

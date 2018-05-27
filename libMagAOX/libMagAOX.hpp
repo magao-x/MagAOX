@@ -10,6 +10,8 @@
 #define libMagAOX_hpp
 
 #include "app/MagAOXApp.hpp"
+#include "app/indiDriver.hpp"
+#include "app/indiMacros.hpp"
 #include "app/stateCodes.hpp"
 
 #include "common/config.hpp"

@@ -28,6 +28,11 @@
 #ifndef LILXML_H
 #define LILXML_H
 
+#ifdef __cplusplus
+extern "C"
+{
+#endif
+   
 /* opaque handle types */
 typedef struct _xml_att XMLAtt;
 typedef struct _xml_ele XMLEle;
@@ -124,4 +129,8 @@ extern void lilxmlMalloc (void *(*newmalloc)(size_t size),
  * @(#) $RCSfile: lilxml.h,v $ $Date: 2009/06/24 02:55:02 $ $Revision: 1.4 $ $Name:  $
  */
 
+#ifdef __cplusplus
+} //extern "C"
+#endif
+   
 #endif	/* LILXML_H */

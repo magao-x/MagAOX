@@ -35,3 +35,7 @@
 
 /** \defgroup magaoxapp The Base MagAOX Application
   */
+
+/** \defgroup indi INDI Support in MagAOX Apps
+  * \ingroup magaoxapp
+  */
