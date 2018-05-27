@@ -13,7 +13,7 @@ else
 	CFLAGS += -D_XOPEN_SOURCE=700
 	CXXFLAGS += -D_XOPEN_SOURCE=700
 endif
-PREFIX ?= $(HOME)
+PREFIX ?= /opt/MagAOX
 BIN_PATH ?= $(PREFIX)/bin
 LIB_PATH ?= $(PREFIX)/lib
 INCLUDE_PATH ?= $(PREFIX)/include

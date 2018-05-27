@@ -1,39 +1,37 @@
-# Makefile for the basic XML routines.
-# The idea is to compile and archive them into liblilxml.a
+# MagAO-X makefile for liblilxml
+# Modified from original LBT file:
+#  -- Include common.mk to inherit MagAO-X build settings.
+#  -- Changed to targets all and clean to conform to MagAO-X conventions
+#  -- Changed to ar -r, and ranlib is ar -s, and addid command to make shared library.
+#  -- Changed install to install .so to LIB_PATH, and update ldconfig
+#  -- Removed xmlcheck and liltest
 
-# compiler and flags
 
-# gcc
-CC = g++
-CFLAGS= -O2 -Wall -g
 
-def: pass1 pass5
 
-# use pass1 because this lib is required for pass3 common librares
-pass1: liblilxml.a
+#Get MagAO-X build settings
+SELF_DIR := $(dir $(lastword $(MAKEFILE_LIST)))
+include $(SELF_DIR)/../../Make/common.mk
 
-pass5: xmlcheck
 
-xmlcheck: xmlcheck.o liblilxml.a
-	$(CC) -Wall -o xmlcheck xmlcheck.o -L. -llilxml
+all: liblilxml.a 
 
-install: xmlcheck
-	cp -f xmlcheck $(LBTIINDIHOME)/bin
+
+install: all
+	su -c 'install -d $(LIB_PATH)'
+	su -c 'install liblilxml.so $(LIB_PATH)'
+	su -c 'echo $(LIB_PATH) > /etc/ld.so.conf.d/magaox.conf'
+	su -c 'ldconfig'
 
 HS = lilxml.h
 
 OBJS = lilxml.o base64.o
 
 liblilxml.a: $(HS) $(OBJS)
-	ar r $@ $(OBJS)
-	ranlib $@
+	ar -r $@ $(OBJS)
+	ar -s $@
+	$(CC) -shared -Wl,-soname,liblilxml.so -o liblilxml.so *.o -rdynamic
+	
 
-liltest: liltest.o liblilxml.a
-	$(CC) $(LDFLAGS) -o liltest liltest.o liblilxml.a
-
-liltest.o: $(HS) lilxml.c
-	$(CC) -DMAIN_TST $(CFLAGS) -c -o liltest.o lilxml.c
-
-clobber:
-	touch x.o x.a
-	rm -f *.o *.a core liltest xmlcheck
+clean:
+	rm -f *.o *.a *.so
