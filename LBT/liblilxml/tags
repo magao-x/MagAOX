@@ -1,0 +1,58 @@
+Copyright	lilxml.c	/^    Copyright (C) 2003 Elwood C. Downey$/
+DECODE64	base64.c	/^#define DECODE64(c)  (isascii(c) ? base64val[c] : /
+Mbase64	base64.c	/^main (int ac, char *av[])$/
+Mlilxml	lilxml.c	/^main (int ac, char *av[])$/
+State	lilxml.c	/^} State;				\/* parsing states *\/$/
+_LilXML	lilxml.c	/^struct _LilXML {$/
+_xml_att	lilxml.c	/^struct _xml_att {$/
+_xml_ele	lilxml.c	/^struct _xml_ele {$/
+addXMLAtt	lilxml.c	/^addXMLAtt (XMLEle *ep, char *name, char *valu)$/
+addXMLEle	lilxml.c	/^addXMLEle (XMLEle *parent, char *tag)$/
+appXMLEle	lilxml.c	/^appXMLEle (XMLEle *ep, XMLEle *newep)$/
+appendString	lilxml.c	/^appendString (String *sp, char *str)$/
+cloneXMLEle	lilxml.c	/^cloneXMLEle (XMLEle *ep)$/
+decodeEntity	lilxml.c	/^decodeEntity (char *ent, int *cp)$/
+delLilXML	lilxml.c	/^delLilXML (LilXML *lp)$/
+delXMLEle	lilxml.c	/^delXMLEle (XMLEle *ep)$/
+editXMLAtt	lilxml.c	/^editXMLAtt (XMLAtt *ap, char *str)$/
+editXMLEle	lilxml.c	/^editXMLEle (XMLEle *ep, char *pcdata)$/
+entityXML	lilxml.c	/^entityXML (char *s)$/
+findXMLAtt	lilxml.c	/^findXMLAtt (XMLEle *ep, char *name)$/
+findXMLAttValu	lilxml.c	/^findXMLAttValu (XMLEle *ep, char *name)$/
+findXMLEle	lilxml.c	/^findXMLEle (XMLEle *ep, char *tag)$/
+freeAtt	lilxml.c	/^freeAtt (XMLAtt *a)$/
+freeString	lilxml.c	/^freeString (String *sp)$/
+from64tobits	base64.c	/^from64tobits(char *out, const char *in)$/
+growAtt	lilxml.c	/^growAtt(XMLEle *ep)$/
+growEle	lilxml.c	/^growEle (XMLEle *pe)$/
+growString	lilxml.c	/^growString (String *sp, int c)$/
+initParser	lilxml.c	/^initParser(LilXML *lp)$/
+isTokenChar	lilxml.c	/^isTokenChar (int start, int c)$/
+lilxmlMalloc	lilxml.c	/^lilxmlMalloc (void *(*newmalloc)(size_t size),$/
+moremem	lilxml.c	/^moremem (void *old, int n)$/
+nXMLAtt	lilxml.c	/^nXMLAtt (XMLEle *ep)$/
+nXMLEle	lilxml.c	/^nXMLEle (XMLEle *ep)$/
+nameXMLAtt	lilxml.c	/^nameXMLAtt (XMLAtt *ap)$/
+newLilXML	lilxml.c	/^newLilXML ()$/
+newString	lilxml.c	/^newString(String *sp)$/
+nextXMLAtt	lilxml.c	/^nextXMLAtt (XMLEle *ep, int init)$/
+nextXMLEle	lilxml.c	/^nextXMLEle (XMLEle *ep, int init)$/
+oneXMLchar	lilxml.c	/^oneXMLchar (LilXML *lp, int c, char ynot[])$/
+parentXMLAtt	lilxml.c	/^parentXMLAtt (XMLAtt *ap)$/
+parentXMLEle	lilxml.c	/^parentXMLEle (XMLEle *ep)$/
+parseXML	lilxml.c	/^parseXML (char buf[], char ynot[])$/
+pcdataXMLEle	lilxml.c	/^pcdataXMLEle (XMLEle *ep)$/
+pcdatalenXMLEle	lilxml.c	/^pcdatalenXMLEle (XMLEle *ep)$/
+popXMLEle	lilxml.c	/^popXMLEle(LilXML *lp)$/
+prXMLEle	lilxml.c	/^prXMLEle (FILE *fp, XMLEle *ep, int level)$/
+pushXMLEle	lilxml.c	/^pushXMLEle(LilXML *lp)$/
+readXMLEle	lilxml.c	/^readXMLEle (LilXML *lp, int newc, char ynot[])$/
+readXMLFile	lilxml.c	/^readXMLFile (FILE *fp, LilXML *lp, char ynot[])$/
+resetEndTag	lilxml.c	/^resetEndTag(LilXML *lp)$/
+rmXMLAtt	lilxml.c	/^rmXMLAtt (XMLEle *ep, char *name)$/
+sprXMLEle	lilxml.c	/^sprXMLEle (char *s, XMLEle *ep, int level)$/
+sprlXMLEle	lilxml.c	/^sprlXMLEle (XMLEle *ep, int level)$/
+tagXMLEle	lilxml.c	/^tagXMLEle (XMLEle *ep)$/
+to64frombits	base64.c	/^to64frombits(unsigned char *out, const unsigned ch/
+usage	base64.c	/^usage (char *me)$/
+valuXMLAtt	lilxml.c	/^valuXMLAtt (XMLAtt *ap)$/

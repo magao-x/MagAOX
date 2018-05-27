@@ -22,9 +22,6 @@ namespace logger
   */
 struct git_state
 {
-   //Define the log name for use in the database
-   //Event: "Git State"
-   
    ///The event code
    static const eventCodeT eventCode = eventCodes::GIT_STATE;
 
@@ -102,9 +99,9 @@ struct git_state
      * \returns 0 on success.
      * \returns -1 on an error.
      */ 
-   static int extract( messageT & msg, ///< [out] the message which is populated with the contents of buffer.
-                       void * msgBuffer,  ///< [in] the buffer containing the GIT state.
-                       msgLenT len ///< [in] the length of the string contained in buffer.
+   static int extract( messageT & msg,   ///< [out] the message which is populated with the contents of buffer.
+                       void * msgBuffer, ///< [in] the buffer containing the GIT state.
+                       msgLenT len       ///< [in] the length of the string contained in buffer.
                      )
    {
       char * cbuff = reinterpret_cast<char *>(msgBuffer);
@@ -142,9 +139,6 @@ struct git_state
   */
 struct text_log : public string_log
 {
-   //Define the log name for use in the database
-   //Event: "Text Log"
-   
    ///The event code
    static const eventCodeT eventCode = eventCodes::TEXT_LOG;
 
@@ -158,9 +152,6 @@ struct text_log : public string_log
   */
 struct user_log : public string_log
 {
-   //Define the log name for use in the database
-   //Event: "User Log"
-   
    ///The event code
    static const eventCodeT eventCode = eventCodes::USER_LOG;
 
@@ -174,182 +165,11 @@ struct user_log : public string_log
    }
 };
 
-
-///Software DEBUG log entry
-/** \ingroup logtypes
-  */
-struct software_debug : public software_log
-{
-   //Define the log name for use in the database
-   //Event: "Software Debug"
-   
-   ///The event code
-   static const eventCodeT eventCode = eventCodes::SOFTWARE_DEBUG;
-
-   ///The default level 
-   static const logLevelT defaultLevel = logLevels::DEBUG;   
-};
-
-///Software DEBUG2 log entry
-/** \ingroup logtypes
-  */
-struct software_debug2 : public software_log
-{
-   //Define the log name for use in the database
-   //Event: "Software Debug2"
-   
-   ///The event code
-   static const eventCodeT eventCode = eventCodes::SOFTWARE_DEBUG2;
-
-   ///The default level 
-   static const logLevelT defaultLevel = logLevels::DEBUG2;   
-};
-
-///Software INFO log entry
-/** \ingroup logtypes
-  */
-struct software_info : public software_log
-{
-   //Define the log name for use in the database
-   //Event: "Software Info"
-   
-   ///The event code
-   static const eventCodeT eventCode = eventCodes::SOFTWARE_INFO;
-
-   ///The default level 
-   static const logLevelT defaultLevel = logLevels::INFO;   
-};
-
-///Software WARN log entry
-/** \ingroup logtypes
-  */
-struct software_warning : public software_log
-{
-   //Define the log name for use in the database
-   //Event: "Software Warning"
-   
-   ///The event code
-   static const eventCodeT eventCode = eventCodes::SOFTWARE_WARNING;
-
-   ///The default level 
-   static const logLevelT defaultLevel = logLevels::WARNING;   
-};
-
-///Software ERR log entry
-/** \ingroup logtypes
-  */
-struct software_error : public software_log
-{
-   //Define the log name for use in the database
-   //Event: "Software Error"
-   
-   ///The event code
-   static const eventCodeT eventCode = eventCodes::SOFTWARE_ERROR;
-
-   ///The default level 
-   static const logLevelT defaultLevel = logLevels::ERROR;   
-};
-
-///Software CRIT log entry
-/** \ingroup logtypes
-  */
-struct software_critical : public software_log
-{
-   //Define the log name for use in the database
-   //Event: "Software Critical"
-   
-   ///The event code
-   static const eventCodeT eventCode = eventCodes::SOFTWARE_CRITICAL;
-
-   ///The default level 
-   static const logLevelT defaultLevel = logLevels::CRITICAL;   
-};
-
-///Software FATAL log entry
-/** \ingroup logtypes
-  */
-struct software_fatal : public software_log
-{
-   //Define the log name for use in the database
-   //Event: "Software Fatal"
-   
-   ///The event code
-   static const eventCodeT eventCode = eventCodes::SOFTWARE_FATAL;
-
-   ///The default level 
-   static const logLevelT defaultLevel = logLevels::FATAL;   
-};
-
-
-///Loop Closed event log
-/** \ingroup logtypes
-  */
-struct loop_closed : public empty_log
-{
-   //Define the log name for use in the database
-   //Event: "Loop Closed"
-   
-   ///The event code
-   static const eventCodeT eventCode = eventCodes::LOOP_CLOSED;
-
-   ///The default level 
-   static const logLevelT defaultLevel = logLevels::INFO;   
-   
-   static std::string msgString( messageT & msg  /**< [in] [unused] the empty message */ )
-   {
-      return "LOOP CLOSED";
-   }
-};
-
-///Loop Paused event log
-/** \ingroup logtypes
-  */
-struct loop_paused : public empty_log
-{
-   //Define the log name for use in the database
-   //Event: "Loop Paused"
-   
-   ///The event code
-   static const eventCodeT eventCode = eventCodes::LOOP_PAUSED;
-   
-   ///The default level 
-   static const logLevelT defaultLevel = logLevels::INFO;   
-   
-   static std::string msgString( messageT & msg  /**< [in] [unused] the empty message */)
-   {
-      return "LOOP PAUSED";
-   }
-};
-
-///Loop Open event log
-/** \ingroup logtypes
-  */
-struct loop_open : public empty_log
-{
-   //Define the log name for use in the database
-   //Event: "Loop Open"
-   
-   ///The event code
-   static const eventCodeT eventCode = eventCodes::LOOP_OPEN;
-   
-   ///The default level 
-   static const logLevelT defaultLevel = logLevels::INFO;   
-   
-   static std::string msgString( messageT & msg  /**< [in] [unused] the empty message */)
-   {
-      return "LOOP OPEN";
-   }
-   
-};
-
 ///Application State Change
 /** \ingroup logtypes
   */
 struct state_change
 {
-   //Define the log name for use in the database
-   //Event: "App State Change"
-
    //The event code 
    static const eventCodeT eventCode = eventCodes::STATE_CHANGE;
    
@@ -411,6 +231,145 @@ struct state_change
       return s.str();
    }
 };
+
+///Software DEBUG log entry
+/** \ingroup logtypes
+  */
+struct software_debug : public software_log
+{
+   ///The event code
+   static const eventCodeT eventCode = eventCodes::SOFTWARE_DEBUG;
+
+   ///The default level 
+   static const logLevelT defaultLevel = logLevels::DEBUG;   
+};
+
+///Software DEBUG2 log entry
+/** \ingroup logtypes
+  */
+struct software_debug2 : public software_log
+{
+   ///The event code
+   static const eventCodeT eventCode = eventCodes::SOFTWARE_DEBUG2;
+
+   ///The default level 
+   static const logLevelT defaultLevel = logLevels::DEBUG2;   
+};
+
+///Software INFO log entry
+/** \ingroup logtypes
+  */
+struct software_info : public software_log
+{
+   ///The event code
+   static const eventCodeT eventCode = eventCodes::SOFTWARE_INFO;
+
+   ///The default level 
+   static const logLevelT defaultLevel = logLevels::INFO;   
+};
+
+///Software WARN log entry
+/** \ingroup logtypes
+  */
+struct software_warning : public software_log
+{
+   ///The event code
+   static const eventCodeT eventCode = eventCodes::SOFTWARE_WARNING;
+
+   ///The default level 
+   static const logLevelT defaultLevel = logLevels::WARNING;   
+};
+
+///Software ERR log entry
+/** \ingroup logtypes
+  */
+struct software_error : public software_log
+{
+   ///The event code
+   static const eventCodeT eventCode = eventCodes::SOFTWARE_ERROR;
+
+   ///The default level 
+   static const logLevelT defaultLevel = logLevels::ERROR;   
+};
+
+///Software CRIT log entry
+/** \ingroup logtypes
+  */
+struct software_critical : public software_log
+{
+   ///The event code
+   static const eventCodeT eventCode = eventCodes::SOFTWARE_CRITICAL;
+
+   ///The default level 
+   static const logLevelT defaultLevel = logLevels::CRITICAL;   
+};
+
+///Software FATAL log entry
+/** \ingroup logtypes
+  */
+struct software_fatal : public software_log
+{
+   ///The event code
+   static const eventCodeT eventCode = eventCodes::SOFTWARE_FATAL;
+
+   ///The default level 
+   static const logLevelT defaultLevel = logLevels::FATAL;   
+};
+
+
+///Loop Closed event log
+/** \ingroup logtypes
+  */
+struct loop_closed : public empty_log
+{
+   ///The event code
+   static const eventCodeT eventCode = eventCodes::LOOP_CLOSED;
+
+   ///The default level 
+   static const logLevelT defaultLevel = logLevels::INFO;   
+   
+   static std::string msgString( messageT & msg  /**< [in] [unused] the empty message */ )
+   {
+      return "LOOP CLOSED";
+   }
+};
+
+///Loop Paused event log
+/** \ingroup logtypes
+  */
+struct loop_paused : public empty_log
+{
+   ///The event code
+   static const eventCodeT eventCode = eventCodes::LOOP_PAUSED;
+   
+   ///The default level 
+   static const logLevelT defaultLevel = logLevels::INFO;   
+   
+   static std::string msgString( messageT & msg  /**< [in] [unused] the empty message */)
+   {
+      return "LOOP PAUSED";
+   }
+};
+
+///Loop Open event log
+/** \ingroup logtypes
+  */
+struct loop_open : public empty_log
+{
+   ///The event code
+   static const eventCodeT eventCode = eventCodes::LOOP_OPEN;
+   
+   ///The default level 
+   static const logLevelT defaultLevel = logLevels::INFO;   
+   
+   static std::string msgString( messageT & msg  /**< [in] [unused] the empty message */)
+   {
+      return "LOOP OPEN";
+   }
+   
+};
+
+
 
 } //namespace logger
 } //namespace MagAOX

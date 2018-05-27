@@ -25,7 +25,7 @@ struct stateCodes
    /// The type of the state code.
    /**
      */
-   typedef int stateCodeT;
+   typedef int16_t stateCodeT;
 
 
    /// The numeric codes descrbing an application's state

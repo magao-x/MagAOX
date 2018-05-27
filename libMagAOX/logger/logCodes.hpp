@@ -15,13 +15,13 @@ namespace logger
 {
 
 /** \addtogroup logcodes
-  * A log entry type is uniquely identified by a code, which is a 32-bit unsigned integer.
+  * A log entry type is uniquely identified by a code, which is a 16-bit unsigned integer.
   */
 
-/// The type of an event code (32-bit unsigned int).
+/// The type of an event code (16-bit unsigned int).
 /** \ingroup logcodes
   */
-typedef uint32_t eventCodeT;   
+typedef uint16_t eventCodeT;   
 
 
 /// Scoping struct for event codes
