@@ -2,11 +2,13 @@
 ///
 /// @author Paul Grenz
 ///
+/// Modified to support MagAO-X
 ////////////////////////////////////////////////////////////////////////////////
 
 #include "IndiDriver.hpp"
 #include "System.hpp"
-#include "Config.hpp"
+//#include "Config.hpp"
+#include "Logger.hpp"
 
 using std::runtime_error;
 using std::string;
@@ -16,7 +18,7 @@ using std::vector;
 using pcf::System;
 using pcf::TimeStamp;
 using pcf::Logger;
-using pcf::Config;
+//using pcf::Config;
 using pcf::IndiConnection;
 using pcf::IndiDriver;
 using pcf::IndiMessage;
@@ -90,6 +92,7 @@ void IndiDriver::setup()
   logMsg << Logger::enumInfo << getName() << "::setup: "
           << "(v " << getVersion() << ") Reading driver settings." << endl;
 
+#if 0 
   Config cfReader;
 
   // If this driver saves any files or data to disk, this is where to do it.
@@ -127,6 +130,7 @@ void IndiDriver::setup()
   // simulation mode or not. The default is one day (1440 minutes).
   // This is the maximun speed that alarms will go out.
   m_uiAlarmInterval = cfReader.get<unsigned int>( "alarm_interval", 1440 );
+#endif
 
   m_oIsAlarmActive = false;
   m_uiAlarmInterval = 1440; // Once a day (every 1440 minutes)

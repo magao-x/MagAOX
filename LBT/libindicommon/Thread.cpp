@@ -503,7 +503,7 @@ void Thread::runLoop()
 
   // Call function to allow user to clean things up before the
   // thread exits. There must be nothing done after this.
-  afterExecute();
+  execute();
 
   m_oIsRunning = false;
 }

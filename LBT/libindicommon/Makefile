@@ -6,6 +6,7 @@
 #  -- Changed to targets all and clean to conform to MagAO-X conventions
 #  -- Changed to ar -r, and ranlib is ar -s, and addid command to make shared library.
 #  -- Changed install to install .so to LIB_PATH, and update ldconfig
+#  -- Removed extraneous files.
 
 
 #Get MagAO-X build settings
@@ -24,30 +25,18 @@ install: all
 	su -c 'install -d $(INCLUDE_PATH)/indi'
 	su -c 'install *.hpp $(INCLUDE_PATH)/indi'	
 SRCS = \
-	 Cmd.cpp \
-	 Config.cpp \
-	 ConfigFile.cpp \
-	 Daemon.cpp \
-	 Event.cpp \
 	 IndiConnection.cpp \
-	 IndiClient.cpp \
 	 IndiDriver.cpp \
 	 IndiElement.cpp \
 	 IndiMessage.cpp \
 	 IndiProperty.cpp \
-	 IndiPropertyMap.cpp \
 	 IndiXmlParser.cpp \
 	 LogFile.cpp \
 	 Logger.cpp \
-	 RtdbMessage.cpp \
-	 RtdbVariable.cpp \
 	 System.cpp \
 	 SystemSocket.cpp \
-	 TCPConnection.cpp \
-	 TCPListener.cpp \
 	 Thread.cpp \
 	 TimeStamp.cpp
-
 
 OBJS = $(SRCS:.cpp=.o)
 
