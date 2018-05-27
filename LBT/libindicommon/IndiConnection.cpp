@@ -115,9 +115,9 @@ void IndiConnection::construct( const string &szName,
   m_fdOutput = STDOUT_FILENO;
 
   // setup the signal handler.
-  ::signal( SIGHUP, IndiConnection::handleSignal );
-  ::signal( SIGINT, IndiConnection::handleSignal );
-  ::signal( SIGTERM, IndiConnection::handleSignal );
+  //::signal( SIGHUP, IndiConnection::handleSignal );
+  //::signal( SIGINT, IndiConnection::handleSignal );
+  //::signal( SIGTERM, IndiConnection::handleSignal );
 
   // Set our information that sets us up as a unique INDI component.
   setName( szName );
