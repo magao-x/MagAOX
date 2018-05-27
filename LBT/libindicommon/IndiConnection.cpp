@@ -17,7 +17,6 @@
 #include "IndiConnection.hpp"
 #include "TimeStamp.hpp"
 #include "Logger.hpp"
-//#include "Config.hpp"
 
 using std::exception;
 using std::runtime_error;
@@ -27,7 +26,6 @@ using std::stringstream;
 using std::endl;
 using pcf::TimeStamp;
 using pcf::Logger;
-//using pcf::Config;
 using pcf::IndiConnection;
 using pcf::IndiXmlParser;
 using pcf::IndiMessage;
@@ -114,11 +112,6 @@ void IndiConnection::construct( const string &szName,
   m_fdInput = STDIN_FILENO;
   m_fdOutput = STDOUT_FILENO;
 
-  // setup the signal handler.
-  //::signal( SIGHUP, IndiConnection::handleSignal );
-  //::signal( SIGINT, IndiConnection::handleSignal );
-  //::signal( SIGTERM, IndiConnection::handleSignal );
-
   // Set our information that sets us up as a unique INDI component.
   setName( szName );
   setVersion( szVersion );
@@ -127,24 +120,17 @@ void IndiConnection::construct( const string &szName,
   logMsg << Logger::Info << getName() << "::construct: "
          << "Reading connection settings." << endl;
 
-  //Config cfReader;
 
-  // Should we log configuration settings? This will log the setting when
-  // it is used from the program. This setting will be read first, for obvious
-  // reasons.
-  //cfReader.enableLogMode( cfReader.get<bool>( "log_config_mode", true ) );
-
-  m_oIsVerboseModeEnabled = false; //cfReader.get<bool>( "verbose_mode", false );
+  m_oIsVerboseModeEnabled = false; 
 
   // What is the interval at which our 'execute' function is called?
   // This is the same if we are in simulation mode or not.
   // The default is one second.
-  //setInterval( cfReader.get<unsigned int>( "update_interval", 0 ) );
-   setInterval( 0 );
+  setInterval( 0 );
 
   // What is our CPU affinity? This is the CPU we will run on.
   // A -1 indicates we don't care where it runs.
-  m_iCpuAffinity = -1;//cfReader.get<int>( "cpu_affinity", -1 );
+  m_iCpuAffinity = -1;
 
   // allocate a big buffer to hold the input data.
   m_vecInputBuf = vector<unsigned char>( InputBufSize );

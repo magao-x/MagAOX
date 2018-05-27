@@ -7,7 +7,6 @@
 
 #include "IndiDriver.hpp"
 #include "System.hpp"
-//#include "Config.hpp"
 #include "Logger.hpp"
 
 using std::runtime_error;
@@ -18,7 +17,6 @@ using std::vector;
 using pcf::System;
 using pcf::TimeStamp;
 using pcf::Logger;
-//using pcf::Config;
 using pcf::IndiConnection;
 using pcf::IndiDriver;
 using pcf::IndiMessage;
@@ -92,45 +90,6 @@ void IndiDriver::setup()
   logMsg << Logger::enumInfo << getName() << "::setup: "
           << "(v " << getVersion() << ") Reading driver settings." << endl;
 
-#if 0 
-  Config cfReader;
-
-  // If this driver saves any files or data to disk, this is where to do it.
-  m_szDataDirectory = cfReader.get<string>( "data_directory", "" );
-
-  // Make sure this directory exists.
-  if ( m_szDataDirectory.length() > 0 )
-  {
-    try
-    {
-      System::makePath( m_szDataDirectory );
-    }
-    catch ( const runtime_error &excepRuntime )
-    {
-      Logger logMsg;
-      logMsg << Logger::enumError
-             << "Could not make data directory '" << m_szDataDirectory << "': "
-             << excepRuntime.what() << endl;
-    }
-  }
-
-  // This is a flag which can be used to fake data or pretend to be
-  // connected to hardware. By itself, it does nothing.
-  m_oIsSimulationModeEnabled = cfReader.get<bool>( "simulation_mode", false );
-
-  // This is also a flag which does nothing on its own, but can be used to
-  // decide whether or not to send an alarm email.
-  m_oIsAlarmModeEnabled = cfReader.get<bool>( "alarm_mode", true );
-
-  // This is a comma-separated list of email recipients which will receive
-  // an email when a alarm is logged.
-  m_szEmailList = cfReader.get<string>( "alarm_email_list", "" );
-
-  // What is our alarm interval? This is the same if we are in
-  // simulation mode or not. The default is one day (1440 minutes).
-  // This is the maximun speed that alarms will go out.
-  m_uiAlarmInterval = cfReader.get<unsigned int>( "alarm_interval", 1440 );
-#endif
 
   m_oIsAlarmActive = false;
   m_uiAlarmInterval = 1440; // Once a day (every 1440 minutes)
