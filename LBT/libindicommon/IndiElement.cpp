@@ -437,7 +437,7 @@ bool IndiElement::isNumeric() const
   // If we fail, this value is not numeric.
   ssValue >> iValue;
   return ssValue.good();
-//  return ( ssValue >> iValue );
+//  return ( ssValue >> iValue ); //This is the original LBT code for reference.  It won't work.
 }
 
 ////////////////////////////////////////////////////////////////////////////////
