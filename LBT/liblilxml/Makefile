@@ -7,8 +7,6 @@
 #  -- Removed xmlcheck and liltest
 
 
-
-
 #Get MagAO-X build settings
 SELF_DIR := $(dir $(lastword $(MAKEFILE_LIST)))
 include $(SELF_DIR)/../../Make/common.mk
