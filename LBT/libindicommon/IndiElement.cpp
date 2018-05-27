@@ -435,7 +435,9 @@ bool IndiElement::isNumeric() const
 
   // Try to stream the data into the int variable.
   // If we fail, this value is not numeric.
-  return ( ssValue >> iValue );
+  ssValue >> iValue;
+  return ssValue.good();
+//  return ( ssValue >> iValue );
 }
 
 ////////////////////////////////////////////////////////////////////////////////
