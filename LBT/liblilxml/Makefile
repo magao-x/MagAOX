@@ -20,7 +20,10 @@ install: all
 	su -c 'install liblilxml.so $(LIB_PATH)'
 	su -c 'echo $(LIB_PATH) > /etc/ld.so.conf.d/magaox.conf'
 	su -c 'ldconfig'
+	su -c 'install -d $(INCLUDE_PATH)/liblilxml'
+	su -c 'install *.h $(INCLUDE_PATH)/liblilxml'
 
+	
 HS = lilxml.h
 
 OBJS = lilxml.o base64.o

@@ -21,7 +21,8 @@ install: all
 	su -c 'install libindicommon.so $(LIB_PATH)'
 	su -c 'echo $(LIB_PATH) > /etc/ld.so.conf.d/magaox.conf'
 	su -c 'ldconfig'
-	
+	su -c 'install -d $(INCLUDE_PATH)/indi'
+	su -c 'install *.hpp $(INCLUDE_PATH)/indi'	
 SRCS = \
 	 Cmd.cpp \
 	 Config.cpp \

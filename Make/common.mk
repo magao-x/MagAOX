@@ -20,7 +20,11 @@ INCLUDE_PATH ?= $(PREFIX)/include
 LIB_SOFA ?= $(LIB_PATH)/libsofa_c.a
 ARFLAGS ?= rvs
 
-INCLUDES += -I$(INCLUDE_PATH)
+MXLIB_PREFIX ?= $(HOME)
+MXLIB_LIB_PATH ?= $(MXLIB_PREFIX)/lib 
+MXLIB_INCLUDE_PATH ?= $(MXLIB_PREFIX)/include 
+
+INCLUDES += -I$(INCLUDE_PATH) -I$(MXLIB_INCLUDE_PATH)
 
 
 ########################################
@@ -32,11 +36,11 @@ OPTIMIZE ?= -O3 -fopenmp -ffast-math
 ## Libraries
 #######################################
 
-#location of mxlib and sofa:
-EXTRA_LDFLAGS ?= -L$(PREFIX)/lib    
+#location of liblilxml, libindicommon, mxlib and sofa:
+EXTRA_LDFLAGS ?= -L$(LIB_PATH)/lib -L$(MXLIB_PATH)    
 
 #the required librarires
-EXTRA_LDLIBS ?= -lmxlib -lsofa_c -lboost_system -lboost_filesystem -ludev
+EXTRA_LDLIBS ?= -lmxlib -lsofa_c -lboost_system -lboost_filesystem -ludev -llilxml -lindicommon
 
 #Add rt on Darwin:
 ifneq ($(UNAME),Darwin)

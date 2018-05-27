@@ -21,6 +21,7 @@
 #include <mx/app/application.hpp>
 #include <mx/environment.hpp>
 
+#include <indi/IndiDriver.hpp>
 
 #include "../common/environment.hpp"
 #include "../common/defaults.hpp"
@@ -53,7 +54,7 @@ namespace app
   * 
   * \ingroup magaoxapp
   */ 
-class MagAOXApp : public mx::application, public logger::logManager<logFileRaw>
+class MagAOXApp : public mx::application, public logger::logManager<logFileRaw>, public pcf::IndiDriver
 {
       
 protected:
