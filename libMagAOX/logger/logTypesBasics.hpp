@@ -23,9 +23,6 @@ namespace logger
   */
 struct string_log
 {
-   //Define the log name for use in the database
-   //Event: "---"
-      
    ///The type of the message
    typedef std::string messageT;
    
