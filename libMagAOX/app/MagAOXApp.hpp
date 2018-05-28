@@ -370,6 +370,11 @@ public:
      */
    void handleNewProperty( const pcf::IndiProperty &ipRecv /**< [in] The property being changed. */);
    
+protected:
+
+   ///indi Property to report the application state.
+   pcf::IndiProperty indiP_state;
+   
    ///@} --INDI Interface
    
 };
@@ -396,6 +401,7 @@ MagAOXApp::MagAOXApp( const std::string & git_sha1,
    //Get the uids of this process.
    getresuid(&m_euidReal, &m_euidCalled, &m_suid);
    euidReal(); //immediately step down to unpriveleged uid.   
+   
    
 }
 
@@ -460,6 +466,11 @@ void MagAOXApp::setDefaults( int argc,
    //We use mx::application's configPathLocal for this components config file 
    configPathLocal = configDir + "/" + configName + ".conf";
 
+   //Now we can setup common INDI properties
+   REG_INDI_PROP_NOCB(indiP_state, "state", pcf::IndiProperty::Number, pcf::IndiProperty::ReadOnly, pcf::IndiProperty::Idle);
+   indiP_state.add (pcf::IndiElement("current"));
+   
+   
    return;
    
 }
@@ -928,6 +939,11 @@ void MagAOXApp::state(const stateCodes::stateCodeT & s)
    
    m_state = s;
    m_stateLogged = 0;
+   
+   //And we keep INDI up to date
+   indiP_state["current"] = s;
+   indiP_state.setState (pcf::IndiProperty::Ok);
+   if(m_indiDriver) m_indiDriver->sendSetProperty (indiP_state);
 }
 
 int MagAOXApp::stateLogged()
