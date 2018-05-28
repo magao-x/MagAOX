@@ -46,6 +46,8 @@ struct eventCodes
                        SOFTWARE_ERROR = 55,    ///< Denotes a software error log entry
                        SOFTWARE_CRITICAL = 56, ///< Denotes a software critical log entry
                        SOFTWARE_FATAL = 57,    ///< Denotes a software fatal log entry
+                       INDIDRIVER_START = 140, ///< The INDI driver has begun communications
+                       INDIDRIVER_STOP = 141,  ///< The INDI driver has stopped communications
                        LOOP_CLOSED = 1001,     ///< The loop is closed.
                        LOOP_PAUSED = 1002,     ///< The loop is paused.
                        LOOP_OPEN = 1003        ///< The loop is open.

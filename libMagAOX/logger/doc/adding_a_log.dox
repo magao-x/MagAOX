@@ -4,6 +4,10 @@ Steps to adding a new log type:
 
 1) Add an event code to the eventCodeT enum in logCodes.hpp
 2) add the type to logTypes.hpp (possibly adding a basic type to logTypesBasics.hpp).
-   -- This in includes coding the format(), extract(), and msgString() methods for that type.
+   -- Keep the type decl/defn in the same order as in the eventCodeT enum.
+   -- If the log is derived from another type, you may not need to code format() and extract()
+   -- You will need to code the msgString() method for the new type.
 3) Add the new log type to the switch-case statement in logStdFormat.hpp
+   -- Keep the cases in the same order as in the eventCodeT enum
+4) You will need to recompile logdump
 

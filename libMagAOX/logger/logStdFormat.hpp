@@ -72,6 +72,10 @@ void logStdFormat(bufferPtrT & buffer /**< [in] the binary log buffer */ )
          return _stdFormat<software_critical>(buffer);
       case software_fatal::eventCode:
          return _stdFormat<software_fatal>(buffer);
+      case indidriver_start::eventCode:
+         return _stdFormat<indidriver_start>(buffer);
+      case indidriver_stop::eventCode:
+         return _stdFormat<indidriver_stop>(buffer);   
       case loop_closed::eventCode:
          return _stdFormat<loop_closed>(buffer);
       case loop_paused::eventCode:

@@ -316,6 +316,39 @@ struct software_fatal : public software_log
    static const logLevelT defaultLevel = logLevels::FATAL;   
 };
 
+///INDI Driver Start log entry
+/** \ingroup logtypes
+  */
+struct indidriver_start : public empty_log
+{
+   ///The event code
+   static const eventCodeT eventCode = eventCodes::INDIDRIVER_START;
+
+   ///The default level 
+   static const logLevelT defaultLevel = logLevels::INFO;   
+   
+   static std::string msgString( messageT & msg  /**< [in] [unused] the empty message */ )
+   {
+      return "INDI driver communications started";
+   }
+};
+
+///INDI Driver Stop log entry
+/** \ingroup logtypes
+  */
+struct indidriver_stop : public empty_log
+{
+   ///The event code
+   static const eventCodeT eventCode = eventCodes::INDIDRIVER_STOP;
+
+   ///The default level 
+   static const logLevelT defaultLevel = logLevels::INFO;   
+   
+   static std::string msgString( messageT & msg  /**< [in] [unused] the empty message */ )
+   {
+      return "INDI driver communications stopped";
+   }
+};
 
 ///Loop Closed event log
 /** \ingroup logtypes

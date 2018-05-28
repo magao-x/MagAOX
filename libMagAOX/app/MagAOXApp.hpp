@@ -576,6 +576,7 @@ int MagAOXApp::execute() //virtual
    if(m_indiDriver != nullptr)
    {
       m_indiDriver->activate();
+      log<indidriver_start>();
    }
    
    while( m_shutdown == 0)
@@ -605,6 +606,7 @@ int MagAOXApp::execute() //virtual
    {
       m_indiDriver->quitProcess();
       m_indiDriver->deactivate();
+      log<indidriver_stop>();
    }
    
    unlockPID();
