@@ -9,8 +9,8 @@
 #ifndef app_indiDriver_hpp
 #define app_indiDriver_hpp
 
-#include <indi/IndiDriver.hpp>
-#include <indi/IndiElement.hpp>
+#include "../indi/indiDriver.hpp"
+#include "../../libLBTI/libcommon/IndiElement.hpp"
 
 #include "MagAOXApp.hpp"
 
@@ -22,7 +22,7 @@ namespace app
 //class MagAOXApp;
 
 template<class _parentT>
-class indiDriver : public pcf::IndiDriver
+class indiDriver : public indi::indiDriver
 {
 public:
    typedef _parentT parentT;
@@ -44,7 +44,7 @@ public:
 
    virtual void handleNewProperty( const pcf::IndiProperty &ipRecv );
 
-   virtual void execute(void);
+//    virtual void execute(void);
 
 };
 
@@ -53,7 +53,7 @@ indiDriver<parentT>::indiDriver ( parentT * parent,
                                   const std::string &szName, 
                                   const std::string &szDriverVersion, 
                                   const std::string &szProtocolVersion
-                                ) : pcf::IndiDriver(szName, szDriverVersion, szProtocolVersion)
+                                ) : indi::indiDriver(szName, szDriverVersion, szProtocolVersion)
 {
    m_parent = parent;
 }
@@ -70,11 +70,11 @@ void indiDriver<parentT>::handleNewProperty( const pcf::IndiProperty &ipRecv )
    if(m_parent) m_parent->handleNewProperty(ipRecv);
 }
 
-template<class parentT>
-void indiDriver<parentT>::execute()
-{
-   processIndiRequests(false);
-}
+// template<class parentT>
+// void indiDriver<parentT>::execute()
+// {
+//    processIndiRequests(false);
+// }
 
 } //namespace app 
 } //namespace MagAOX

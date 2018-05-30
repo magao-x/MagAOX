@@ -53,7 +53,7 @@ namespace app
   * before including MagAOXApp.hpp.  This would be used, for instance to have a config common to 
   * all filter wheels.
   *  
-  * \todo add INDI!
+  * 
   * \todo do we need libMagAOX error handling? (a stack?)
   * 
   * \ingroup magaoxapp
