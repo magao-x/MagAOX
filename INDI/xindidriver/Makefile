@@ -7,11 +7,11 @@ all: xindidriver
 xindidriver: xindidriver.cpp
 	$(CXX) $(CXXFLAGS) -o xindidriver xindidriver.cpp -lpthread -DXINDID_FIFODIR=\"$(FIFO_PATH)\"
 
+#Note this is not symlinke from /usr/local/bin in a normal MagAO-X install.
 install: all
-	su -c 'install -d $(BIN_PATH)'
-	su -c 'install xindidriver $(BIN_PATH)'
+	su -c 'install -d $(BIN_PATH) & \
+	       install xindidriver $(BIN_PATH)'
 
 clean:
 	rm -f xindidriver
 	rm -f *.o
-

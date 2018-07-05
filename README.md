@@ -24,6 +24,14 @@ make -f ../../Make/magAOXApp.mk t=<appname>
 ```
 replacing `appname` with the name of the application.
 
+To build a utility, cd to the utility's directory and type
+```
+make -f ../../Make/magAOXUtil.mk t=<utilname>
+```
+replacing `utilname` with the name of the utility.
+
+The difference between the two Makefiles is in install, in that MagAO-X Applications get setuid, whereas the utilities do not.
+
 Some notes:
 
 * libMagAOX (part of this repository) is a c++ header-only library.  It is compiled into a pre-compiled-header (PCH), managed by the build system.  Any changes to libMagAOX should trigger a re-compile of the PCH, and of any apps depending on it.
@@ -33,13 +41,12 @@ Some notes:
 * Install requires root privileges.
 
 ToDo:
-- [] Implement su and asking for password as part of install process
 - [] Use environment variables for path to various parts of build system, path to libMagAOX PCH, etc.
 - [] Possibly use name of directory for target app name.
 
 ## System Setup
 
-The following are the typical MagAOX system directories, which means they are #define-ed in libMagAOX/common/config.hpp:
+The following are the default MagAOX system directories.  
 
 ```
 /opt/MagAOX               [MagAOX system directory]
@@ -52,13 +59,17 @@ The following are the typical MagAOX system directories, which means they are #d
 /opt/MagAOX/secrets       [Directory containing device passwords, etc.]
 ```
 
+ This directory structure is #define-ed in libMagAOX/common/defaults.hpp.  It is created, with the proper permissions, by the script `setup/makeDirs.sh`.  It is also specified in `local/config.mk`.  Changing this isn't yet very simple, but we intend for it to be possible to have parallel installations.
+
 ToDo:
-- [] Script installation of these directories, with appropriate permission setting, etc.
-- [] Establish appropriate environment variables to allow overriding these.
+- [] Investigate using appropriate environment variables to allow overriding these.
+- [] Investigate having the defines be passed in via make.  E.g. `-DMAGAOX_default_path=/opt/MagAOX-DEV` will override, maybe we should just inherit from `local/config.mk`
+
+On install, symlinks are made for executables from `/usr/local/bin` to `/opt/MagAOX/bin`.
 
 ## Documentation
 
-The code is more-or-less carefully documented with doxygen, though the doxyfile has not been created, etc.
+The code is more-or-less carefully documented with doxygen, though the doxyfile has not been created.
 
 - [] Init doxygen doc system
 - [] Decide: do we use github pages, or host it on one of the snazzy magao-x domains?

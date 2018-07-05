@@ -20,10 +20,13 @@ evalINDI:
 	$(CC) $(CCFLAGS) -o evalINDI -I../liblilxml  evalINDI.c connect_to.c compiler.c ../liblilxml/liblilxml.a -lm
 
 install: all
-	su -c 'install -d $(BIN_PATH)'
-	su -c 'install indiserver getINDI setINDI evalINDI $(BIN_PATH)'
+	su -c 'install -d $(BIN_PATH) &  \
+          install indiserver getINDI setINDI evalINDI $(BIN_PATH) & \
+	       ln -sf $(BIN_PATH)/indiserver /usr/local/bin/indiserver & \
+			 ln -sf $(BIN_PATH)/getINDI /usr/local/bin/getINDI & \
+			 ln -sf $(BIN_PATH)/setINDI /usr/local/bin/setINDI & \
+			 ln -sf $(BIN_PATH)/evalINDI /usr/local/bin/evalINDI'
 
 clean:
 	rm -f indiserver getINDI setINDI evalINDI
 	rm -f *.o
-

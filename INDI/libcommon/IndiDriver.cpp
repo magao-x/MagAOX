@@ -69,7 +69,7 @@ const IndiDriver &IndiDriver::operator= ( const IndiDriver &idRhs )
 /// \brief IndiDriver::~IndiDriver
 /// Standard destructor.
 
-IndiDriver::~IndiDriver()
+IndiDriver::~IndiDriver() noexcept(true)
 {
 }
 
