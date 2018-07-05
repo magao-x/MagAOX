@@ -1,10 +1,10 @@
-/** \file magAOXApp.hpp 
+/** \file magAOXApp.hpp
   * \brief The basic MagAO-X Application
   * \author Jared R. Males (jaredmales@gmail.com)
   *
   * History:
   * - 2017-12-24 created by JRM
-  */ 
+  */
 
 #ifndef app_MagAOXApp_hpp
 #define app_MagAOXApp_hpp
@@ -13,7 +13,9 @@
 #include <signal.h>
 #include <sys/stat.h>
 
-#include <fstream>
+#include <cstdlib>
+#include <unistd.h>
+//#include <fstream>
 
 #include <unordered_map>
 
@@ -37,152 +39,166 @@
 #include "indiDriver.hpp"
 #include "indiMacros.hpp"
 
+#include "../../INDI/libcommon/Config.hpp"
+#include "../../INDI/libcommon/System.hpp"
+
 using namespace MagAOX::logger;
 
-namespace MagAOX 
+namespace MagAOX
 {
-namespace app 
+namespace app
 {
 
 /// The base-class for MagAO-X applications.
 /**
-  * You can define a base configuration file for this class by writing 
+  * You can define a base configuration file for this class by writing
   * \code
   *  #define MAGAOX_configBase "relative/path/from/configDir.conf"
   * \endcode
-  * before including MagAOXApp.hpp.  This would be used, for instance to have a config common to 
+  * before including MagAOXApp.hpp.  This would be used, for instance to have a config common to
   * all filter wheels.
-  *  
-  * 
+  *
+  *
   * \todo do we need libMagAOX error handling? (a stack?)
-  * 
+  *
   * \ingroup magaoxapp
-  */ 
+  */
 class MagAOXApp : public mx::application, public logger::logManager<logFileRaw>
 {
-      
+
 protected:
-   
+
    std::string MagAOXPath; ///< The base path of the MagAO-X system.
-   
-   std::string configDir; ///< The configuration directory.  
-   std::string configName; ///< The name of the configuration file (minus .conf).
+
+   std::string configDir; ///< The configuration directory.
+   std::string m_configName; ///< The name of the configuration file (minus .conf).
 
    std::string sysPath;  ///< The path to the system directory, for PID file, etc.
-   
+
    std::string secretsPath; ///< Path to the secrets directory, where passwords, etc, are stored.
-   
+
    unsigned long loopPause {MAGAOX_default_loopPause}; ///< The time in nanoseconds to pause the main loop.  The appLogic() function of the derived class is called every loopPause nanoseconds.  Default is 1,000,000,000 ns.  Config with loopPause=X.
-   
+
    int m_shutdown {0}; ///< Flag to signal it's time to shutdown.  When not 0, the main loop exits.
-   
-   
-   
+
+
+
+private:
+
+   ///Default c'tor is deleted.
+   MagAOXApp() = delete;
+
 public:
-   
+
+
    /// Public c'tor.  Handles uid, logs git repo status, and initializes static members.
-   /** 
-     * Only one MagAOXApp can be instantiated per program.  Hence this c'tor will issue exit(-1) 
+   /**
+     * Only one MagAOXApp can be instantiated per program.  Hence this c'tor will issue exit(-1)
      * if the static self-pointer m_self is already initialized.
-     * 
+     *
      * euid is set to 'real' to ensure that the application has normal privileges unless
      * explicitly needed.
-     * 
+     *
      * Reference: http://man7.org/linux/man-pages/man2/getresuid.2.html
-     * 
+     *
      * The git repository status is required to create a MagAOXApp.  Derived classes
-     * should include the results of running `gengithead.sh` and pass the defined 
+     * should include the results of running `gengithead.sh` and pass the defined
      * sha1 and modified flags.
-     * 
+     *
      */
    MagAOXApp( const std::string & git_sha1, ///< [in] The current SHA1 hash of the git repository
               const bool git_modified       ///< [in] Whether or not the repo is modified.
             );
-  
+
+   ~MagAOXApp() noexcept(true)
+   {
+
+   }
+
    /// Set the paths for config files
    /** Replaces the mx::application defaults with the MagAO-X config system.
      *
-     * This function parses the CL for "-n" or "--name".  
-     * 
-     * 
+     * This function parses the CL for "-n" or "--name".
+     *
+     *
      * Do not override this unless you intend to depart from the MagAO-X standard.
      */
-   virtual void setDefaults( int argc,    ///< [in] standard command line result specifying number of arguments in argv 
+   virtual void setDefaults( int argc,    ///< [in] standard command line result specifying number of arguments in argv
                              char ** argv ///< [in] standard command line result containing the arguments.
                            );
-   
+
    /// The basic MagAO-X configuration setup method.  Should not normally be overridden.
    /** This method sets up the config system with the standard MagAO-X key=value pairs.
      *
      * Though it is virtual, it should not normally be overridden unless you need
      * to depart from the MagAO-X standard.
-     * 
+     *
      * Setting up app specific config goes in setupConfig() implemented in the derived class.
      */
    virtual void setupBasicConfig();
-      
+
    /// The basic MagAO-X configuration processing method.  Should not normally be overridden.
    /** This method processes the standard MagAO-X key=value pairs.
-     * 
+     *
      * Though it is virtual, it should not normally be overridden unless you need
      * to depart from the MagAO-X standard.
-     * 
+     *
      * Processing of app specific config goes in loadConfig() implemented by the derived class.
      */
    virtual void loadBasicConfig();
-      
+
    /// The execute method implementing the standard main loop.  Should not normally be overridden.
    /**
      *
-     */ 
+     */
    virtual int execute();
-   
-  
+
+
    /** \name Pure Virtual Functions
      * Derived applications must implement these.
      * @{
      */
-   
+
    /// Any tasks to perform prior to the main event loop go here.
    /** This is called after signal handling is installed.
      *
      * Set m_shutdown = 1 on any fatal errors here.
-     */ 
+     */
    virtual int appStartup() = 0;
-   
+
    /// This is where derived applications implement their main FSM logic.
-   /** This will be called again after loopPause nanoseconds until the application terminates.
-     * 
-     * Should return -1 on an any uncrecoverable errors which will caues app to terminate.  Could also set m_shutdown=1.
+   /** This will be called every loopPause nanoseconds until the application terminates.
+     *
+     * Should return -1 on an any unrecoverable errors which will caues app to terminate.  Could also set m_shutdown=1.
      * Return 0 on success, or at least intent to continue.
      *
-     */   
+     */
    virtual int appLogic() = 0;
-   
+
    /// Any tasks to perform after main loop exit go here.
    /** Should be able to handle case where appStartup and/or appLogic have not run.
      */
    virtual int appShutdown() = 0;
-   
+
    ///@} -- Pure Virtual Functions
 
 
-   /** \name Signal Handling 
+   /** \name Signal Handling
      * @{
      */
 private:
-   
-   static MagAOXApp * m_self; ///< Static pointer to this (set in constructor).  Mainly for getting out of static signal handlers.
-   
+
+   static MagAOXApp * m_self; ///< Static pointer to this (set in constructor).  Used to test whether a a MagAOXApp is already instatiated (a fatal error) and used for getting out of static signal handlers.
+
    ///Sets the handler for SIGTERM, SIGQUIT, and SIGINT.
    int setSigTermHandler();
-   
+
    ///The handler called when SIGTERM, SIGQUIT, or SIGINT is received.  Just a wrapper for handlerSigTerm.
    static void _handlerSigTerm( int signum,        ///< [in] specifies the signal.
                                 siginfo_t *siginf, ///< [in] ignored by MagAOXApp
                                 void *ucont        ///< [in] ignored by MagAOXApp
-                              ); 
-   
+                              );
+
    ///Handles SIGTERM, SIGQUIT, and SIGINT.  Sets m_shutdown to 1 and logs the signal.
    void handlerSigTerm( int signum,         ///< [in] specifies the signal.
                         siginfo_t *siginf,  ///< [in] ignored by MagAOXApp
@@ -190,104 +206,112 @@ private:
                       );
 
    ///@} -- Signal Handling
-   
-   
-   /** \name RT Priority
+
+   /** \name Privilege Management
      * @{
      */
 private:
-   uid_t m_euidReal;     ///< The real user id of the proces (i.e. the lower priveleged id of the user)
-   uid_t m_euidCalled;   ///< The user id of the process as called (i.e. the higher priveleged id of the owner, root if setuid).
+   uid_t m_euidReal;     ///< The real user id of the proces (i.e. the lower privileged id of the user)
+   uid_t m_euidCalled;   ///< The user id of the process as called (i.e. the higher privileged id of the owner, root if setuid).
    uid_t m_suid;         ///< The save-set user id of the process
-   
-   int m_RTPriority {0}; ///< The real-time scheduling priority.  Default is 0.
-   
+
 protected:
-   
+
    /// Set the effective user ID to the called value, i.e. the highest possible.
    /** If setuid is set on the file, this will be super-user privileges.
      *
-     * Reference: http://pubs.opengroup.org/onlinepubs/009695399/functions/seteuid.html 
-     * 
+     * Reference: http://pubs.opengroup.org/onlinepubs/009695399/functions/seteuid.html
+     *
      * \returns 0 on success
      * \returns -1 on error from setuid().
      */
    int euidCalled();
-   
+
    /// Set the effective user ID to the real value, i.e. the file owner.
-   /** 
+   /**
      * Reference: http://pubs.opengroup.org/onlinepubs/009695399/functions/seteuid.html
-     * 
+     *
      * \returns 0 on success
      * \returns -1 on error from setuid().
-     */ 
+     */
    int euidReal();
-   
+
+
+   ///@} -- Privilege Management
+
+   /** \name RT Priority
+     * @{
+     */
+private:
+   int m_RTPriority {0}; ///< The real-time scheduling priority.  Default is 0.
+
+protected:
    /// Set the real-time priority of this process.
    /** This method attempts to set euid to 'called' with \ref euidCalled.  It then sets the priority
      * but will fail if it does not have sufficient privileges.  Regardless, it will then restore
      * privileges with \ref euidReal.
-     * 
+     *
      * If prio is > 99, then it is changed to 99.
-     * 
+     *
      * \returns 0 on success.
      * \returns -1 on an error.  In this case priority will not have been changed.
      */
    int RTPriority( unsigned prio /**< [in] the desired new RT priority */ );
-   
+
    ///@} -- RT Priority
-   
+
    /** \name PID Locking
      *
      * @{
      */
-   
+
    std::string pidFileName; ///<The name of the PID file
-   
+
    pid_t m_pid {0}; ///< This process's PID
-   
+
    /// Attempt to lock the PID by writing it to a file. Fails if a process is already running with the same config name.
    /** First checks the PID file for an existing PID.  If found, interrogates /proc to determine if that process is
      * running and if so if the command line matches.  If a matching process is currently running, then this returns an error.
-     * 
+     *
      * Will not fail if a PID file exists but the stored PID does not correspond to a running process with the same command line name.
      *
      * Reference: https://linux.die.net/man/3/getpid
-     * 
+     *
      * \returns 0 on success.
      * \returns -1 on any error, including creating the PID file or if this app is already running.
-     */ 
+     */
    int lockPID();
-   
+
    /// Remove the PID file.
    int unlockPID();
-   
+
    ///@} -- PID Locking
-   
+
    /** \name Application State
      *
      * @{
      */
 private:
    stateCodes::stateCodeT m_state {stateCodes::UNINITIALIZED}; ///< The application's state.  Never ever set this directly, use state(const stateCodeT & s).
+
    int m_stateLogged {0} ;///< Counter and flag for use to log errors just once.  Never ever access directly, use stateLogged().
-   
+
 public:
-   /// Get the current state code 
+   /// Get the current state code
    /** \returns m_state
      */
    stateCodes::stateCodeT state();
-   
-   /// Set the current state code 
+
+   /// Set the current state code
    /** If no change, returns immediately with no actions.
-     * 
+     *
      * If it is a change, the state change is logged.  Also resets m_stateLogged to 0.
-     */ 
+     */
    void state(const stateCodes::stateCodeT & s /**< [in] The new application state */);
-   
+
    /// Updates and returns the value of m_stateLogged.  Will be 0 on first call after a state change, \>0 afterwords.
-   /** This method exists to facilitate logging the reason for a state change once, but not 
-     * logging it on subsequent event loops.  Returns the current value upon entry, but updates 
+   /** This method exists to facilitate logging the reason for a state change once, but not
+     * logging it on subsequent event loops.  Returns the current value upon entry, but updates
      * before returning so that the next call returns the incremented value.  Example usage:
      * \code
        if( connection_failed ) //some condition set this to true
@@ -296,14 +320,14 @@ public:
           if(!stateLogged()) log<text_log>("Not connected");
        }
        \endcode
-     * In this example, the log entry is made the first time the state changes.  If there are no changes to a 
+     * In this example, the log entry is made the first time the state changes.  If there are no changes to a
      * different state in the mean time, then when the event loop gets here again and decides it is not connected,
-     * the log entry will not be made.  
+     * the log entry will not be made.
      *
      * \returns current value of m_stateLogged, that is the value before it is incremented.
-     */ 
+     */
    int stateLogged();
-   
+
    ///@} --Application State
 
    /** \name INDI Interface
@@ -313,38 +337,42 @@ public:
 protected:
    ///The INDI driver wrapper.  Constructed and initialized by execute, which starts and stops communications.
    indiDriver<MagAOXApp> * m_indiDriver {nullptr};
-   
+
    ///Structure to hold the call-back details for handling INDI communications.
    struct indiCallBack
    {
       pcf::IndiProperty * property {0}; ///< A pointer to an INDI property.
       int (*newCallBack)( void *, const pcf::IndiProperty &) {0}; ///< The function to call for a new property request.
    };
-   
+
    ///Map to hold the indiCallBacks for this App, with fast lookup by property name.
    std::unordered_map< std::string, indiCallBack> m_indiCallBacks;
-   
+
    ///Value type of the indiCallBack map.
    typedef std::pair<std::string, indiCallBack> callBackValueType;
-   
+
    ///Iterator type of the indiCallBack map.
    typedef std::unordered_map<std::string, indiCallBack>::iterator callBackIterator;
-   
+
    ///Return type of insert on the indiCallBack map.
    typedef std::pair<callBackIterator,bool> callBackInsertResult;
 
-   
-   
+   ///Full path name of the INDI driver input FIFO.
+   std::string m_driverInName;
+
+   ///Full path name of the INDI driver output FIFO.
+   std::string m_driverOutName;
+
    /// Register an INDI property.
    /**
-     * 
+     *
      * \returns 0 on success.
      * \returns -1 on error.
      *
      * \todo needs error logging
      * \todo needs exception handling
      * \todo is a failure to register a FATAL error?
-     */ 
+     */
    int registerIndiProperty( pcf::IndiProperty & prop,                               ///< [out] the property to register
                              const std::string & propName,                           ///< [in] the name of the property
                              const pcf::IndiProperty::Type & propType,               ///< [in] the type of the property
@@ -353,30 +381,63 @@ protected:
                              int (*)( void *, const pcf::IndiProperty &)             ///< [in] the callback for changing the property
                            );
 
+   /// Create the INDI FIFOs
+   /** Changes permissions to max available and creates the
+     * FIFOs at the configured path.
+     */
+   int createINDIFIFOS();
+
+   /// Start INDI Communications
+   /**
+     * \returns 0 on success
+     * \returns -1 on error.  This is fatal.
+     */
+   int startINDI();
+
 public:
    /// Handler for the get INDI properties request
    /** Uses the properties registered in m_indiCallBacks to respond to the request.  This is called by
      * m_indiDriver's indiDriver::handleGetProperties.
      */
    void handleGetProperties( const pcf::IndiProperty &ipRecv /**< [in] The property being requested. */ );
-   
+
    /// Handler for the new INDI property request
    /** Uses the properties registered in m_indiCallBacks to respond to the request, looking up the callback for this
      * property and calling it.
-     * 
+     *
      * This is called by m_indiDriver's indiDriver::handleGetProperties.
-     * 
+     *
      * \todo handle errors, are they FATAL?
      */
    void handleNewProperty( const pcf::IndiProperty &ipRecv /**< [in] The property being changed. */);
-   
+
 protected:
 
    ///indi Property to report the application state.
    pcf::IndiProperty indiP_state;
-   
+
    ///@} --INDI Interface
-   
+
+public:
+   /** \name Member Accessors
+     *
+     * @{
+     */
+   std::string configName()
+   {
+      return m_configName;
+   }
+
+   std::string driverInName()
+   {
+      return m_driverInName;
+   }
+
+   std::string driverOutName()
+   {
+      return m_driverOutName;
+   }
+   ///@} --Member Accessors
 };
 
 MagAOXApp * MagAOXApp::m_self = nullptr;
@@ -391,22 +452,22 @@ MagAOXApp::MagAOXApp( const std::string & git_sha1,
       std::cerr << "Attempt to instantiate 2nd MagAOXApp.  Exiting immediately.\n";
       exit(-1);
    }
-   
+
    m_self = this;
- 
+
    //We log the current GIT status.
    log<git_state>(git_state::messageT("MagAOX", git_sha1, git_modified));
    log<git_state>(git_state::messageT("mxlib", MXLIB_UNCOMP_CURRENT_SHA1, MXLIB_UNCOMP_REPO_MODIFIED));
-   
+
    //Get the uids of this process.
    getresuid(&m_euidReal, &m_euidCalled, &m_suid);
-   euidReal(); //immediately step down to unpriveleged uid.   
-   
-   
+   euidReal(); //immediately step down to unpriveleged uid.
+
+
 }
 
 inline
-void MagAOXApp::setDefaults( int argc, 
+void MagAOXApp::setDefaults( int argc,
                              char ** argv
                            )   //virtual
 {
@@ -421,16 +482,16 @@ void MagAOXApp::setDefaults( int argc,
    {
       MagAOXPath = MAGAOX_default_path;
    }
-   
+
    //Set ther config path relative to MagAOXPath
    tmpstr = mx::getEnv(MAGAOX_env_config);
-   if(tmpstr == "") 
+   if(tmpstr == "")
    {
       tmpstr = MAGAOX_default_configRelPath;
    }
    configDir = MagAOXPath + "/" + tmpstr;
    configPathGlobal = configDir + "/magaox.conf";
-   
+
    //Setup default log path
    tmpstr = MagAOXPath + "/" + MAGAOX_default_logRelPath;
 
@@ -439,49 +500,49 @@ void MagAOXApp::setDefaults( int argc,
    //Setup default sys path
    tmpstr = MagAOXPath + "/" + MAGAOX_default_sysRelPath;
    sysPath = tmpstr;
-   
+
    //Setup default secrets path
    tmpstr = MagAOXPath + "/" + MAGAOX_default_secretsRelPath;
    secretsPath = tmpstr;
-   
-   
+
+
    #ifdef MAGAOX_configBase
       //We use mx::application's configPathUser for this components base config file
       configPathUser = configDir + "/" + MAGAOX_configBase;
    #endif
-   
-   //Parse CL just to get the "name".      
+
+   //Parse CL just to get the "name".
    config.add("name","n", "name",mx::argType::Required, "", "name", false, "string", "The name of the application, specifies config.");
-   
+
    config.parseCommandLine(argc, argv, "name");
-   config(configName, "name");
-   
-   if(configName == "")
+   config(m_configName, "name");
+
+   if(m_configName == "")
    {
       boost::filesystem::path p(invokedName);
-      configName = p.stem().string();
+      m_configName = p.stem().string();
       log<text_log>("Application name (-n --name) not set.  Using argv[0].");
    }
-   
-   //We use mx::application's configPathLocal for this components config file 
-   configPathLocal = configDir + "/" + configName + ".conf";
+
+   //We use mx::application's configPathLocal for this components config file
+   configPathLocal = configDir + "/" + m_configName + ".conf";
 
    //Now we can setup common INDI properties
    REG_INDI_PROP_NOCB(indiP_state, "state", pcf::IndiProperty::Number, pcf::IndiProperty::ReadOnly, pcf::IndiProperty::Idle);
    indiP_state.add (pcf::IndiElement("current"));
-   
-   
+
+
    return;
-   
+
 }
 
 inline
 void MagAOXApp::setupBasicConfig() //virtual
 {
-   //App stuff   
+   //App stuff
    config.add("loopPause", "p", "loopPause", mx::argType::Required, "", "loopPause", false, "unsigned long", "The main loop pause time in ns");
-   config.add("RTPriority", "P", "RTPriority", mx::argType::Required, "", "RTPriority", false, "unsigned", "The real-time priority (0-99)");   
-   
+   config.add("RTPriority", "P", "RTPriority", mx::argType::Required, "", "RTPriority", false, "unsigned", "The real-time priority (0-99)");
+
    //Logger Stuff
    config.add("logger.logDir","L", "logDir",mx::argType::Required, "logger", "logDir", false, "string", "The directory for log files");
    config.add("logger.logExt","", "logExt",mx::argType::Required, "logger", "logExt", false, "string", "The extension for log files");
@@ -491,20 +552,20 @@ void MagAOXApp::setupBasicConfig() //virtual
    config.add("logger.logLevel","l", "logLevel",mx::argType::Required, "logger", "logLevel", false, "string", "The log level");
 
 
-  
+
 }
 
 inline
 void MagAOXApp::loadBasicConfig() //virtual
 {
    //---------- Setup the logger ----------//
-   
+
    //-- logDir
    std::string tmp;
    config(tmp, "logger.logDir");
    if(tmp != "") logPath(tmp);
-   logName(configName);
-      
+   logName(m_configName);
+
    //-- logLevel
    tmp = "";
    config(tmp, "logger.logLevel");
@@ -513,33 +574,33 @@ void MagAOXApp::loadBasicConfig() //virtual
       logLevelT lev;
 
       lev = logLevelFromString(tmp);
-   
+
       if(  lev == logLevels::DEFAULT ) lev = logLevels::INFO;
       if( lev == logLevels::UNKNOWN )
       {
          std::cerr << "Unkown log level specified.  Using default (INFO)\n";
          lev = logLevels::INFO;
       }
-      
+
       m_logLevel = lev;
    }
 
-   
+
    //logExt
    config(m_logExt, "logger.logExt");
-   
+
    //maxLogSize
    config(m_maxLogSize, "logger.maxLogSize");
-   
+
    //writePause
    config(m_writePause, "logger.writePause");
-   
+
    //logThreadPrio
    config(m_logThreadPrio, "logger.logThreadPrio");
-   
+
    //--------- Loop Pause Time --------//
    config(loopPause, "loopPause");
-   
+
    //--------- RT Priority ------------//
    int prio;
    config(prio, "RTPriority");
@@ -550,40 +611,41 @@ void MagAOXApp::loadBasicConfig() //virtual
 }
 
 
+
 inline
 int MagAOXApp::execute() //virtual
 {
    if( lockPID() < 0 )
    {
+      state(stateCodes::FAILURE);
       log<text_log>("Failed to lock PID.", logLevels::FATAL);
-      return -1;      
+      //Return immediately, not safe to go on.
+      return -1;
    }
-   
-   //Begin the logger   
+
+   //Begin the logger
    logThreadStart();
-   
+
    setSigTermHandler();
-   
+
    if( m_shutdown == 0 )
    {
       state(stateCodes::INITIALIZED);
       if(appStartup() < 0) m_shutdown = 1;
    }
-   
-   //Begin INDI Communications
-   m_indiDriver = new indiDriver<MagAOXApp>(this, configName, "0", "0");
-   
-   if(m_indiDriver != nullptr)
+
+   //====Begin INDI Communications
+   if(startINDI() < 0)
    {
-      m_indiDriver->activate();
-      log<indidriver_start>();
+      state(stateCodes::FAILURE);
+      m_shutdown = 1;
    }
-   
+
    while( m_shutdown == 0)
    {
-      /** \todo Add a mutex to lock every time appLogic is called.  
+      /** \todo Add a mutex to lock every time appLogic is called.
         * This would allow other threads to run appLogic, making it more responsive to status queries, etc.
-        *  
+        *
         */
       if( appLogic() < 0) m_shutdown = 1;
 
@@ -596,11 +658,11 @@ int MagAOXApp::execute() //virtual
          std::this_thread::sleep_for( std::chrono::duration<unsigned long, std::nano>(loopPause));
       }
    }
-      
+
    appShutdown();
-   
+
    state(stateCodes::SHUTDOWN);
-   
+
    //Stop INDI communications
    if(m_indiDriver != nullptr)
    {
@@ -608,13 +670,13 @@ int MagAOXApp::execute() //virtual
       m_indiDriver->deactivate();
       log<indidriver_stop>();
    }
-   
+
    unlockPID();
-   
+
    return 0;
 }
 
-inline 
+inline
 int MagAOXApp::setSigTermHandler()
 {
    struct sigaction act;
@@ -630,56 +692,56 @@ int MagAOXApp::setSigTermHandler()
    {
       std::string logss = "Setting handler for SIGTERM failed. Errno says: ";
       logss += strerror(errno);
-      
+
       log<software_error>({__FILE__, __LINE__, errno, logss});
-      
+
       return -1;
    }
-   
+
    errno = 0;
    if( sigaction(SIGQUIT, &act, 0) < 0 )
    {
       std::string logss = "Setting handler for SIGQUIT failed. Errno says: ";
       logss += strerror(errno);
-      
+
       log<software_error>({__FILE__, __LINE__, errno, logss});
-      
+
       return -1;
    }
-   
+
    errno = 0;
    if( sigaction(SIGINT, &act, 0) < 0 )
    {
       std::string logss = "Setting handler for SIGINT failed. Errno says: ";
       logss += strerror(errno);
-      
+
       log<software_error>({__FILE__, __LINE__, errno, logss});
-      
+
       return -1;
    }
-   
+
    log<text_log>("Installed SIGTERM/SIGQUIT/SIGINT signal handler.");
-   
+
    return 0;
 }
-   
-inline 
-void MagAOXApp::_handlerSigTerm( int signum, 
-                                 siginfo_t *siginf, 
+
+inline
+void MagAOXApp::_handlerSigTerm( int signum,
+                                 siginfo_t *siginf,
                                  void *ucont
                                )
 {
    m_self->handlerSigTerm(signum, siginf, ucont);
 }
 
-inline 
-void MagAOXApp::handlerSigTerm( int signum, 
-                                siginfo_t *siginf __attribute__((unused)), 
+inline
+void MagAOXApp::handlerSigTerm( int signum,
+                                siginfo_t *siginf __attribute__((unused)),
                                 void *ucont __attribute__((unused))
-                              ) 
+                              )
 {
    m_shutdown = 1;
-   
+
    std::string signame;
    switch(signum)
    {
@@ -699,12 +761,12 @@ void MagAOXApp::handlerSigTerm( int signum,
    std::string logss = "Caught signal ";
    logss += signame;
    logss += ". Shutting down.";
-   
+
    std::cerr << "\n" << logss << std::endl;
    log<text_log>(logss);
 }
 
-inline 
+inline
 int MagAOXApp::euidCalled()
 {
    errno = 0;
@@ -714,16 +776,16 @@ int MagAOXApp::euidCalled()
       logss += mx::convertToString<int>(m_euidCalled);
       logss += ") failed.  Errno says: ";
       logss += strerror(errno);
-      
+
       log<software_error>({__FILE__, __LINE__, errno, logss});
-      
+
       return -1;
    }
-   
+
    return 0;
 }
 
-inline 
+inline
 int MagAOXApp::euidReal()
 {
    errno = 0;
@@ -733,32 +795,32 @@ int MagAOXApp::euidReal()
       logss += mx::convertToString<int>(m_euidReal);
       logss += ") failed.  Errno says: ";
       logss += strerror(errno);
-      
+
       log<software_error>({__FILE__, __LINE__, errno, logss});
-      
+
       return -1;
    }
-   
+
    return 0;
-   
+
 }
 
 inline
 int MagAOXApp::RTPriority( unsigned prio)
 {
    struct sched_param schedpar;
-   
+
    if(prio > 99) prio = 99;
    schedpar.sched_priority = prio;
-      
+
    //Get the maximum privileges available
    if( euidCalled() < 0 )
    {
       log<software_error>({__FILE__, __LINE__, 0, "Seeting euid to called failed."});
       return -1;
    }
-   
-   
+
+
    //We set return value based on result from sched_setscheduler
    //But we make sure to restore privileges no matter what happens.
    errno = 0;
@@ -787,7 +849,7 @@ int MagAOXApp::RTPriority( unsigned prio)
       log<software_error>({__FILE__, __LINE__, 0, "Seeting euid to real failed."});
       return -1;
    }
-   
+
    return rv;
 }
 
@@ -795,16 +857,16 @@ inline
 int MagAOXApp::lockPID()
 {
    m_pid = getpid();
-   
+
    std::string statusDir = sysPath;
-   
+
    //Get the maximum privileges available
    if( euidCalled() < 0 )
    {
       log<software_error>({__FILE__, __LINE__, 0, "Seeting euid to called failed."});
       return -1;
    }
-   
+
    // Create statusDir root with read/write/search permissions for owner and group, and with read/search permissions for others.
    errno = 0;
    if( mkdir(statusDir.c_str(), S_IRWXU | S_IRWXG | S_IROTH | S_IXOTH) < 0 )
@@ -814,20 +876,20 @@ int MagAOXApp::lockPID()
          std::stringstream logss;
          logss << "Failed to create root of statusDir (" << statusDir << ").  Errno says: " << strerror(errno);
          log<software_critical>({__FILE__, __LINE__, errno, logss.str()});
-         
+
          //Go back to regular privileges
          euidReal();
-   
+
          return -1;
       }
-      
+
    }
 
    statusDir += "/";
-   statusDir += configName;
-   
+   statusDir += m_configName;
+
    pidFileName = statusDir + "/pid";
-   
+
    // Create statusDir with read/write/search permissions for owner and group, and with read/search permissions for others.
    errno = 0;
    if( mkdir(statusDir.c_str(), S_IRWXU | S_IRWXG | S_IROTH | S_IXOTH) < 0 )
@@ -837,38 +899,38 @@ int MagAOXApp::lockPID()
          std::stringstream logss;
          logss << "Failed to create statusDir (" << statusDir << ").  Errno says: " << strerror(errno);
          log<software_critical>({__FILE__, __LINE__, errno, logss.str()});
-         
+
          //Go back to regular privileges
          euidReal();
-         
+
          return -1;
       }
-      
+
       //If here, then we need to check the pid file.
-      
+
       std::ifstream pidIn;
       pidIn.open( pidFileName );
-      
+
       if(pidIn.good()) //PID file exists, now read its contents and compare to proc/<pid>/cmdline
       {
          //Read PID from file
-         pid_t testPid;   
+         pid_t testPid;
          pidIn >> testPid;
          pidIn.close();
 
          //Get command line used to start this process from /proc
          std::stringstream procN;
          procN << "/proc/" << testPid << "/cmdline";
-         
+
          std::ifstream procIn;
          std::string pidCmdLine;
 
          ///\todo what happens if /proc/pid/cmdline doesn't exist?  Need error handling here?
-         procIn.open(procN.str());         
+         procIn.open(procN.str());
          procIn >> pidCmdLine;
          procIn.close();
 
-         ///\todo This needs to also check for configName in case same invokedName but different configName is the one who is re-using the PID (pathological)
+         ///\todo This needs to also check for m_configName in case same invokedName but different m_configName is the one who is re-using the PID (pathological)
          //Search for invokedName in command line.
          if( pidCmdLine.find( invokedName ) != std::string::npos )
          {
@@ -876,12 +938,12 @@ int MagAOXApp::lockPID()
             std::stringstream logss;
             logss << "PID already locked (" << testPid  << ").  Time to die.";
             std::cerr << logss.str() << std::endl;
-            
-            log<text_log>(logss.str(), logLevels::CRITICAL);         
-            
+
+            log<text_log>(logss.str(), logLevels::CRITICAL);
+
             //Go back to regular privileges
             euidReal();
-         
+
             return -1;
          }
       }
@@ -891,21 +953,21 @@ int MagAOXApp::lockPID()
          pidIn.close();
       }
    }
-   
+
    //Now write current PID to file and go on with life.
    std::ofstream pidOut;
    pidOut.open(pidFileName);
 
    /// \todo need some error checking here.
-   
+
    pidOut << m_pid;
-   
+
    pidOut.close();
-   
+
    std::stringstream logss;
    logss << "PID (" << m_pid << ") locked.";
    log<text_log>(logss.str());
-   
+
    //Go back to regular privileges
    if( euidReal() < 0 )
    {
@@ -919,35 +981,38 @@ int MagAOXApp::unlockPID()
 {
    /// \todo need error handling here.
    remove(pidFileName.c_str());
-   
+
    std::stringstream logss;
    logss << "PID (" << m_pid << ") unlocked.";
    log<text_log>(logss.str());
-   
+
    return 0;
 }
 
+inline
 stateCodes::stateCodeT MagAOXApp::state()
 {
    return m_state;
 }
 
+inline
 void MagAOXApp::state(const stateCodes::stateCodeT & s)
 {
    if(m_state == s) return;
-   
-   
+
+
    log<state_change>( {m_state, s} );
-   
+
    m_state = s;
    m_stateLogged = 0;
-   
+
    //And we keep INDI up to date
    indiP_state["current"] = s;
    indiP_state.setState (pcf::IndiProperty::Ok);
    if(m_indiDriver) m_indiDriver->sendSetProperty (indiP_state);
 }
 
+inline
 int MagAOXApp::stateLogged()
 {
    if(m_stateLogged > 0)
@@ -966,6 +1031,7 @@ int MagAOXApp::stateLogged()
 /*                                  INDI Support                                       */
 /*-------------------------------------------------------------------------------------*/
 
+inline
 int MagAOXApp::registerIndiProperty( pcf::IndiProperty & prop,
                                      const std::string & propName,
                                      const pcf::IndiProperty::Type & propType,
@@ -974,69 +1040,186 @@ int MagAOXApp::registerIndiProperty( pcf::IndiProperty & prop,
                                      int (*newCallBack)( void *, const pcf::IndiProperty &ipRecv)
                                    )
 {
-   prop = pcf::IndiProperty (propType);              
-   prop.setDevice(configName);
+   prop = pcf::IndiProperty (propType);
+   prop.setDevice(m_configName);
    prop.setName(propName);
    prop.setPerm(propPerm);
    prop.setState( propState);
-   
-   
+
+
    callBackInsertResult result =  m_indiCallBacks.insert(callBackValueType( propName, {&prop, newCallBack}));
-   
-   if(!result.second) 
+
+   if(!result.second)
    {
       return -1;
    }
-   
+
    return 0;
-}   
+}
+
+inline
+int MagAOXApp::createINDIFIFOS()
+{
+   ///\todo make driver FIFO path full configurable.
+   std::string driverFIFOPath = MAGAOX_default_path;
+   driverFIFOPath += "/";
+   driverFIFOPath += MAGAOX_default_driverFIFORelPath;
+
+   m_driverInName = driverFIFOPath + "/" + configName() + ".in";
+   m_driverOutName = driverFIFOPath + "/" + configName() + ".out";
+
+   //Get max permissions
+   euidCalled();
+
+   //Clear the file mode creation mask so mkfifo does what we want. Don't forget to restore it.
+   mode_t prev = umask(0);
+
+   errno = 0;
+   if(mkfifo(m_driverInName.c_str(), S_IRUSR | S_IWUSR | S_IRGRP | S_IWGRP) !=0)
+   {
+      if(errno != EEXIST)
+      {
+         umask(prev);
+         euidReal();
+         log<software_fatal>({__FILE__, __LINE__, errno, "mkfifo failed"});
+         log<text_log>("Failed to create input FIFO.", logLevels::FATAL);
+         return -1;
+      }
+   }
+
+   errno = 0;
+   if(mkfifo(m_driverOutName.c_str(), S_IRUSR | S_IWUSR | S_IRGRP | S_IWGRP) !=0 )
+   {
+      if(errno != EEXIST)
+      {
+         umask(prev);
+         euidReal();
+         log<software_fatal>({__FILE__, __LINE__, errno, "mkfifo failed"});
+         log<text_log>("Failed to create ouput FIFO.", logLevels::FATAL);
+         return -1;
+      }
+   }
+
+   umask(prev);
+   euidReal();
+   return 0;
+}
+
+inline
+int MagAOXApp::startINDI()
+{
+   //===== Create the FIFOs for INDI communications ====
+   if(createINDIFIFOS() < 0)
+   {
+      return -1;
+   }
+
+   //===== Create dummy conf file for libcommon to ignore
+   //First create a unique filename with up to 12 chars of m_configName in it.
+   char dummyConf[] = {"/tmp/XXXXXXXXXXXXXXXXXX"};
+   for(int c=0; c< 12; ++c)
+   {
+      if(c > m_configName.size()-1) break;
+      dummyConf[5+c] = m_configName[c];
+   }
+   int touch = mkstemp(dummyConf); //mkstemp replaces extra Xs.
+
+   if( touch < 0) //Check if that failed.
+   {
+      log<software_fatal>({__FILE__, __LINE__, errno, "mkstemp failed"});
+      log<text_log>("Failed to create dummy config file for pcf::Config.", logLevels::FATAL);
+      return -1;
+   }
+
+   //Initialize the libcommon Config system with the empty dummy
+   pcf::Config::init( "/" , dummyConf ); //This just gets ignored since it is empty.
+
+   //======= Instantiate the indiDriver
+   try
+   {
+      m_indiDriver = new indiDriver<MagAOXApp>(this, m_configName, "0", "0");
+   }
+   catch(...)
+   {
+      //Try to clean up the dummy config
+      ::close(touch);
+      remove(dummyConf);
+
+      log<software_fatal>({__FILE__, __LINE__, 0, "INDI Driver construction exception."});
+      return -1;
+   }
 
 
+   //clean up and delete the dummy config file.
+   ::close(touch);
+   remove(dummyConf);
+
+   //Check for INDI failure
+   if(m_indiDriver == nullptr)
+   {
+      log<software_fatal>({__FILE__, __LINE__, 0, "INDI Driver construction failed."});
+      return -1;
+   }
+
+   //Check for INDI failure to open the FIFOs
+   if(m_indiDriver->good() == false)
+   {
+      log<software_fatal>({__FILE__, __LINE__, 0, "INDI Driver failed to open FIFOs."});
+      return -1;
+   }
+
+   //======= Now we start talkin'
+   m_indiDriver->activate();
+   log<indidriver_start>();
+
+   return 0;
+}
+
+inline
 void MagAOXApp::handleGetProperties( const pcf::IndiProperty &ipRecv )
 {
    if(m_indiDriver == nullptr) return;
-   
+
    //Ignore if not our device
    if (ipRecv.hasValidDevice() && ipRecv.getDevice() != m_indiDriver->getName())
    {
       return;
    }
-   
+
    //Send all properties if requested.
    if( !ipRecv.hasValidName() )
    {
       callBackIterator it = m_indiCallBacks.begin();
-      
+
       while(it != m_indiCallBacks.end() )
       {
          m_indiDriver->sendDefProperty( *(it->second.property) );
          ++it;
       }
-      
+
       return;
    }
-   
+
    //Otherwise send just the requested property.
    m_indiDriver->sendDefProperty( *(m_indiCallBacks[ ipRecv.getName() ].property) );
 
    return;
-}   
+}
 
-   
+inline
 void MagAOXApp::handleNewProperty( const pcf::IndiProperty &ipRecv )
 {
    if(m_indiDriver == nullptr) return;
-   
+
    int (*newCallBack)(void *, const pcf::IndiProperty &) = m_indiCallBacks[ ipRecv.getName() ].newCallBack;
-   
+
    if(newCallBack) newCallBack( this, ipRecv);
-   
+
    return;
 }
 
-   
-} //namespace app 
-} //namespace MagAOX 
+
+} //namespace app
+} //namespace MagAOX
 
 #endif //app_MagAOXApp_hpp
-

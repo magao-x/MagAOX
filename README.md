@@ -9,13 +9,14 @@ This is the software which runs the MagAOX ExAO system.
 ### Current:
 1. mxlib (https://github.com/jaredmales/mxlib)
 2. libudev (for introspective device discovery)
+3. zlib1g-dev [ubuntu]
 
 ### Future
 1. libhdf5 (though not for anything currently implemented, but we will)
 
 ## Building
 
-A rudimentary build system has been implemented. 
+A rudimentary build system has been implemented.
 
 To build an app, cd the app's directory and type
 ```
@@ -29,7 +30,7 @@ Some notes:
 
 * Allowing setuid for RT priority handling, access to ttys and FIFOs, etc., requires hardcoding LD_LIBRARY_PATH at build time.  This is done in the makefiles, and so should be transparent.
 
-* Install requires root priveleges.
+* Install requires root privileges.
 
 ToDo:
 - [] Implement su and asking for password as part of install process
@@ -43,8 +44,10 @@ The following are the typical MagAOX system directories, which means they are #d
 ```
 /opt/MagAOX               [MagAOX system directory]
 /opt/MagAOX/bin           [Contains all applications]
+/opt/MagAOX/drivers
+/opt/MagAOX/drivers/fifos
 /opt/MagAOX/config        [Contains the configuration files for the applications]
-/opt/MagAOX/logs          [Directory where logs are written by the applications]
+/opt/MagAOX/logs          [Directory where logs are written by the applications] (chown :xlog, chmod g+w, chmod g+s)
 /opt/MagAOX/sys           [Directory for application status files, e.g. PID lock-files]
 /opt/MagAOX/secrets       [Directory containing device passwords, etc.]
 ```

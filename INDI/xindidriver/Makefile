@@ -1,0 +1,17 @@
+
+SELF_DIR := $(dir $(lastword $(MAKEFILE_LIST)))
+include $(SELF_DIR)/../../Make/common.mk
+
+all: xindidriver
+
+xindidriver: xindidriver.cpp
+	$(CXX) $(CXXFLAGS) -o xindidriver xindidriver.cpp -lpthread -DXINDID_FIFODIR=\"$(FIFO_PATH)\"
+
+install: all
+	su -c 'install -d $(BIN_PATH)'
+	su -c 'install xindidriver $(BIN_PATH)'
+
+clean:
+	rm -f xindidriver
+	rm -f *.o
+

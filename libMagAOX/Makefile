@@ -14,8 +14,6 @@ INCLUDEDEPS= app/MagAOXApp.hpp \
              common/config.hpp \
              common/defaults.hpp \
              common/environment.hpp \
-             indi/indiConnection.hpp \
-             indi/indiDriver.hpp \
              logger/logBuffer.hpp \
              logger/logCodes.hpp \
              logger/logFileRaw.hpp \

@@ -1,4 +1,5 @@
 *magaox_git_version.h
+apps/*/tests
 apps/trippLitePDU/trippLitePDU
 utils/logdump/logdump
 *.gch
@@ -6,3 +7,4 @@ utils/logdump/logdump
 *.a
 *.so
 *html/
+local/

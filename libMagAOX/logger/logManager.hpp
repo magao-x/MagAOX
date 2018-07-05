@@ -242,9 +242,9 @@ void logManager<logFileT>::logThreadExec()
 template<class logFileT>
 template<typename logT>
 int logManager<logFileT>::createLog( bufferPtrT & logBuffer,
-                                 const typename logT::messageT & msg, 
-                                 logLevelT level 
-                               )
+                                     const typename logT::messageT & msg, 
+                                     logLevelT level 
+                                   )
 {
    //Very first step is to get the current time.
    time::timespecX ts;
@@ -272,8 +272,8 @@ int logManager<logFileT>::createLog( bufferPtrT & logBuffer,
 template<class logFileT>
 template<typename logT>   
 void logManager<logFileT>::log( const typename logT::messageT & msg,
-                            logLevelT level
-                          )  
+                                logLevelT level
+                              )   
 {
    //Step 0 check level.
    if(level == logLevels::DEFAULT) level = logT::defaultLevel;

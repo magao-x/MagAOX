@@ -1,63 +1,97 @@
-/** \file indiDriver.hpp 
+/** \file indiDriver.hpp
   * \brief MagAO-X INDI Driver Wrapper
   * \author Jared R. Males (jaredmales@gmail.com)
   *
   * History:
   * - 2018-05-26 created by JRM
-  */ 
+  */
 
 #ifndef app_indiDriver_hpp
 #define app_indiDriver_hpp
 
-#include "../indi/indiDriver.hpp"
-#include "../../libLBTI/libcommon/IndiElement.hpp"
+#include "../../INDI/libcommon/IndiDriver.hpp"
+#include "../../INDI/libcommon/IndiElement.hpp"
 
 #include "MagAOXApp.hpp"
 
-namespace MagAOX 
+namespace MagAOX
 {
-namespace app 
+namespace app
 {
-
-//class MagAOXApp;
 
 template<class _parentT>
-class indiDriver : public indi::indiDriver
+class indiDriver : public pcf::IndiDriver
 {
 public:
    typedef _parentT parentT;
-   
+
 protected:
 
    parentT * m_parent {nullptr};
 
+private:
+   bool m_good {true};
+
 public:
-   
-   indiDriver ( parentT * parent,
-                const std::string &szName, 
-                const std::string &szDriverVersion, 
-                const std::string &szProtocolVersion
-              );
-   
+
+   /// Public c'tor
+   /** Call pcf::IndiDriver c'tor, and then opens the FIFOs specified
+     * by parent.  If this fails, then m_good is set to false.
+     * test this with good().
+     */
+   indiDriver( parentT * parent,
+               const std::string &szName,
+               const std::string &szDriverVersion,
+               const std::string &szProtocolVersion
+             );
+
+   /// Get the value of the good flag.
+   /**
+     * \returns the value of m_good, true or false.
+     */
+   bool good(){ return m_good;}
+
    // override callbacks
    virtual void handleGetProperties( const pcf::IndiProperty &ipRecv );
 
    virtual void handleNewProperty( const pcf::IndiProperty &ipRecv );
 
-//    virtual void execute(void);
+   virtual void execute(void);
 
 };
 
 template<class parentT>
 indiDriver<parentT>::indiDriver ( parentT * parent,
-                                  const std::string &szName, 
-                                  const std::string &szDriverVersion, 
+                                  const std::string &szName,
+                                  const std::string &szDriverVersion,
                                   const std::string &szProtocolVersion
-                                ) : indi::indiDriver(szName, szDriverVersion, szProtocolVersion)
+                                ) : pcf::IndiDriver(szName, szDriverVersion, szProtocolVersion)
 {
    m_parent = parent;
+
+   int fd;
+
+   errno = 0;
+   fd = open( parent->driverInName().c_str(), O_RDWR);
+   if(fd < 0)
+   {
+      m_good = false;
+      return;
+   }
+   setInputFd(fd);
+
+   errno = 0;
+   fd = open( parent->driverOutName().c_str(), O_RDWR);
+   if(fd < 0)
+   {
+      m_good = false;
+      return;
+   }
+   setOutputFd(fd);
 }
-                    
+
+
+
 template<class parentT>
 void indiDriver<parentT>::handleGetProperties( const pcf::IndiProperty &ipRecv )
 {
@@ -70,14 +104,13 @@ void indiDriver<parentT>::handleNewProperty( const pcf::IndiProperty &ipRecv )
    if(m_parent) m_parent->handleNewProperty(ipRecv);
 }
 
-// template<class parentT>
-// void indiDriver<parentT>::execute()
-// {
-//    processIndiRequests(false);
-// }
+template<class parentT>
+void indiDriver<parentT>::execute()
+{
+   processIndiRequests(false);
+}
 
-} //namespace app 
+} //namespace app
 } //namespace MagAOX
 
 #endif //app_magAOXIndiDriver_hpp
-

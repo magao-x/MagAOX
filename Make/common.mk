@@ -3,6 +3,7 @@
 # NOTE: This file should only be edited in mxlib/local, not in the root mxlib directory.
 #
 SELF_DIR := $(dir $(lastword $(MAKEFILE_LIST)))
+include $(SELF_DIR)/../local/config.mk
 -include $(SELF_DIR)/../local/Common.mk
 
 UNAME ?= $(shell uname)
@@ -13,8 +14,9 @@ else
 	CFLAGS += -D_XOPEN_SOURCE=700
 	CXXFLAGS += -D_XOPEN_SOURCE=700
 endif
-PREFIX ?= /opt/MagAOX
-BIN_PATH ?= $(PREFIX)/bin
+#PREFIX ?= /opt/MagAOX   #-- now set in local/config.mk
+#BIN_PATH ?= $(PREFIX)/bin #-- now set in local/config.mk
+
 LIB_PATH ?= $(PREFIX)/lib
 INCLUDE_PATH ?= $(PREFIX)/include
 LIB_SOFA ?= $(LIB_PATH)/libsofa_c.a
@@ -37,10 +39,10 @@ OPTIMIZE ?= -O3 -fopenmp -ffast-math
 #######################################
 
 #location of liblilxml, libindicommon, mxlib and sofa:
-EXTRA_LDFLAGS ?= -L$(LIB_PATH) -L$(MXLIB_LIB_PATH)    
+EXTRA_LDFLAGS ?=  -L$(MXLIB_LIB_PATH)    
 
 #the required librarires
-EXTRA_LDLIBS ?= -lmxlib -lsofa_c -lboost_system -lboost_filesystem -ludev -llbti
+EXTRA_LDLIBS ?= -lmxlib -lsofa_c -lboost_system -lboost_filesystem -ludev  ../../INDI/libcommon/libcommon.a ../../INDI/liblilxml/liblilxml.a
 
 #Add rt on Darwin:
 ifneq ($(UNAME),Darwin)

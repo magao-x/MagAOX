@@ -1,0 +1,119 @@
+.TH setINDI 1
+.SH NAME
+setINDI \- set one or more writable INDI property values
+.SH SYNOPSIS
+\fBsetINDI [options] {[type] device.property.e1[;e2...]=v1[;v2...]} ... \fP
+.br
+\fBsetINDI [options] {[type] device.property.e1=v1[;e2=v2...]} ... \fP
+
+.SH DESCRIPTION
+.na
+.nh
+.PP
+setINDI connects to an indiserver and sends commands to set new values for
+specified properties. Each property is specified using three components 
+followed by the new value in the following form:
+.IP
+device.property.element=value
+.PP
+Since a property may be an array, the syntax allows for multiple elements
+to be specified simultaneously. Two different syntax forms are supported. One
+form lists each element name separated by semicolons, then an equal sign, 
+then each corresponding value also separated by semicolons. The other form
+lists each element=value together, each pair separated by a semicolon.
+In either form, all elements are updated atomically. If the property
+is of type BLOB then each element value is the name of a file to be sent.
+
+.SH OPTIONS
+.TP 8
+-d <f>
+use file descriptor f already open as a socket to the indiserver. This is
+useful for scripts to make a session connection one time then reuse it for
+each invocation. If the file descriptor seems to be being closed, check that
+the close-on-exec flag is off; for example in perl use something like:
+.nf
+
+#!/usr/bin/perl
+use Socket;
+use Fcntl;
+socket(SOCK, PF_INET, SOCK_STREAM, getprotobyname('tcp'));
+connect(SOCK, sockaddr_in(7624,inet_aton('localhost')));
+fcntl(SOCK,F_SETFD,0);
+$directfd = fileno(SOCK);
+&runindi ("./setINDI", "-d", "$directfd", "x.y.z=10");
+&runindi ("./setINDI", "-d", "$directfd", "a.b.c=hello");
+sub runindi { if (fork()) { wait(); } else { exec @_; } }
+.fi
+
+.TP
+-h <h>
+connect to alternate host h; the default is localhost.
+.TP
+-p <p>
+connect using alternate port p; the default is 7624.
+.TP
+-t <t>
+wait no longer than t seconds to accomplish setting the new values; the
+default is 2 seconds.
+.TP
+-v
+generate additional information on stderr. Additional v's report 
+successively more information.
+.TO
+-w
+after sending the given property specifications, wait for the State of each property
+to becomes either Ok or Alert. This is useful for properties that have
+been designed to offer synchronous operation. Note this flag can not be
+used at the same time as the explicit type codes (see next) because these
+codes effectively suppress getting any response from the indiserver.
+
+.SH TYPE
+Each property may optionally be preceded by a type code:
+
+.TP
+-x
+next property is of type Text
+.TP
+-n
+next property is of type Number
+.TP
+-s
+next property is of type Switch
+.TP
+-b
+next property is of type BLOB
+
+.PP
+If all properties are preceded by their type code, then a round trip to the
+server to discover their definitions is avoided and the session is much more
+efficient. However, this also precludes any error checking so each type
+indicated must in fact be correct or the commands will be silently ignored.
+.PP
+When developing a script of commands, one strategy is to use
+getINDI to get the exact property definitions one time, try the desired
+commands without the type codes to benefit from error checking, then add the
+type codes in the final optimized version.
+
+
+.SH EXIT STATUS
+The setINDI program exits with a status of 0 if it succeeded in sending the
+commands to set new values for each specified property. It exits with 1 if
+there was at least one property for which a value could not be set within the
+given timeout period. It exits with 2 if there was some other error such as
+not being able to connect to the indiserver.
+
+.SH EXAMPLES
+.PP
+Send new lat/long numeric location values atomically to the Mount driver:
+.IP
+setINDI 'Mount.Location.Latitude;Longitude=30;100'
+.PP
+Same, but with alternative syntax and indicate type for greater efficiency:
+.IP
+setINDI -n 'Mount.Location.Latitude=30;Longitude=100'
+
+.SH SEE ALSO
+.PP
+evalINDI, getINDI, indiserver
+.br
+http://www.clearskyinstitute.com/INDI/INDI.pdf
