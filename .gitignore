@@ -1,10 +1,20 @@
 *magaox_git_version.h
 apps/*/tests
-apps/trippLitePDU/trippLitePDU
-utils/logdump/logdump
 *.gch
 *.o
 *.a
 *.so
 *html/
 local/
+
+#Executables to ignore:
+INDI/INDI/evalINDI
+INDI/INDI/getINDI
+INDI/INDI/indiserver
+INDI/INDI/setINDI
+INDI/xindidriver/xindidriver
+apps/trippLitePDU/trippLitePDU
+apps/magAOXMaths/magAOXMaths
+
+utils/logdump/logdump
+

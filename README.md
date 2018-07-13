@@ -14,6 +14,19 @@ This is the software which runs the MagAOX ExAO system.
 ### Future
 1. libhdf5 (though not for anything currently implemented, but we will)
 
+## Configuration
+
+To configure the build, the following macros can be used.  Their default values are set in
+the headers in `libMagAOX/common/`.  To override at build time they can be redefined in `local/config.mk` [how?]
+
+#### Environment Variables
+
+These are defined in `libMagAOX/common/environment.hpp`
+
+- `MAGAOX_env_path`, the name of the environment variable holding the base path to the MagAOX system directories.  Default = "MagAOX_PATH"
+
+- `MAGAOX_env_config`, the name of the environment variable holding the relative path to the config files.  Default = "MagAOX_CONFIG".
+
 ## Building
 
 A rudimentary build system has been implemented.

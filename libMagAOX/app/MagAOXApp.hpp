@@ -70,7 +70,6 @@ protected:
 
    std::string MagAOXPath; ///< The base path of the MagAO-X system.
 
-   std::string configDir; ///< The configuration directory.
    std::string m_configName; ///< The name of the configuration file (minus .conf).
 
    std::string sysPath;  ///< The path to the system directory, for PID file, etc.
@@ -419,27 +418,34 @@ protected:
    ///@} --INDI Interface
 
 public:
+
    /** \name Member Accessors
      *
      * @{
      */
-   std::string configName()
-   {
-      return m_configName;
-   }
 
-   std::string driverInName()
-   {
-      return m_driverInName;
-   }
+   ///Get the config name
+   /**
+     * \returns the current value of m_configName
+     */
+   std::string configName();
 
-   std::string driverOutName()
-   {
-      return m_driverOutName;
-   }
+   ///Get the INDI input FIFO file name
+   /**
+     * \returns the current value of m_driverInName
+     */
+   std::string driverInName();
+
+   ///Get the INDI output FIFO file name
+   /**
+     * \returns the current value of m_driverOutName
+     */
+   std::string driverOutName();
+
    ///@} --Member Accessors
 };
 
+//Set self pointer to null so app starts up uninitialized.
 MagAOXApp * MagAOXApp::m_self = nullptr;
 
 inline
@@ -472,6 +478,7 @@ void MagAOXApp::setDefaults( int argc,
                            )   //virtual
 {
    std::string tmpstr;
+   std::string configDir;
 
    tmpstr = mx::getEnv(MAGAOX_env_path);
    if(tmpstr != "")
@@ -483,7 +490,7 @@ void MagAOXApp::setDefaults( int argc,
       MagAOXPath = MAGAOX_default_path;
    }
 
-   //Set ther config path relative to MagAOXPath
+   //Set the config path relative to MagAOXPath
    tmpstr = mx::getEnv(MAGAOX_env_config);
    if(tmpstr == "")
    {
@@ -1218,6 +1225,23 @@ void MagAOXApp::handleNewProperty( const pcf::IndiProperty &ipRecv )
    return;
 }
 
+inline
+std::string MagAOXApp::configName()
+{
+   return m_configName;
+}
+
+inline
+std::string MagAOXApp::driverInName()
+{
+   return m_driverInName;
+}
+
+inline
+std::string MagAOXApp::driverOutName()
+{
+   return m_driverOutName;
+}
 
 } //namespace app
 } //namespace MagAOX
