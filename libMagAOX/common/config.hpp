@@ -1,17 +1,17 @@
-/** \file config.hpp 
+/** \file config.hpp
   * \brief Configuration defines for the MagAO-X library
   * \author Jared R. Males (jaredmales@gmail.com)
   *
   * History:
   * - 2018-01-20 created by JRM
-  */ 
+  */
 
 #ifndef common_config_hpp
 #define common_config_hpp
 
 /** \defgroup config_defines Configuration Defines
   * \ingroup common
-  * 
+  *
   * @{
   */
 

@@ -28,6 +28,7 @@
 
 
 #include "../common/environment.hpp"
+#include "../common/paths.hpp"
 #include "../common/defaults.hpp"
 #include "../common/config.hpp"
 
@@ -487,29 +488,29 @@ void MagAOXApp::setDefaults( int argc,
    }
    else
    {
-      MagAOXPath = MAGAOX_default_path;
+      MagAOXPath = MAGAOX_path;
    }
 
    //Set the config path relative to MagAOXPath
    tmpstr = mx::getEnv(MAGAOX_env_config);
    if(tmpstr == "")
    {
-      tmpstr = MAGAOX_default_configRelPath;
+      tmpstr = MAGAOX_configRelPath;
    }
    configDir = MagAOXPath + "/" + tmpstr;
    configPathGlobal = configDir + "/magaox.conf";
 
    //Setup default log path
-   tmpstr = MagAOXPath + "/" + MAGAOX_default_logRelPath;
+   tmpstr = MagAOXPath + "/" + MAGAOX_logRelPath;
 
    logPath(tmpstr);
 
    //Setup default sys path
-   tmpstr = MagAOXPath + "/" + MAGAOX_default_sysRelPath;
+   tmpstr = MagAOXPath + "/" + MAGAOX_sysRelPath;
    sysPath = tmpstr;
 
    //Setup default secrets path
-   tmpstr = MagAOXPath + "/" + MAGAOX_default_secretsRelPath;
+   tmpstr = MagAOXPath + "/" + MAGAOX_secretsRelPath;
    secretsPath = tmpstr;
 
 
@@ -1068,9 +1069,9 @@ inline
 int MagAOXApp::createINDIFIFOS()
 {
    ///\todo make driver FIFO path full configurable.
-   std::string driverFIFOPath = MAGAOX_default_path;
+   std::string driverFIFOPath = MAGAOX_path;
    driverFIFOPath += "/";
-   driverFIFOPath += MAGAOX_default_driverFIFORelPath;
+   driverFIFOPath += MAGAOX_driverFIFORelPath;
 
    m_driverInName = driverFIFOPath + "/" + configName() + ".in";
    m_driverOutName = driverFIFOPath + "/" + configName() + ".out";
