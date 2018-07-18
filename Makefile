@@ -33,3 +33,20 @@ apps_clean:
 	for app in ${apps_to_build}; do \
 		(cd apps/$$app; ${MAKE} -f ../../Make/magAOXApp.mk t=$$app clean) || break; \
 	done
+
+.PHONY: setup
+setup:
+		@for file in ./local/*.example.mk; do \
+			dest=$$(echo $$file | sed 's/.example//'); \
+			if [ ! -e $$dest ]; then cp -v $$file $$dest; fi \
+		done
+		@echo "***\nBuild settings available in local/Common.mk\n***"
+		@grep "?=" mk/Common.mk || true
+		@echo "***"
+		@echo "Build settings available in local/MxLib.mk\n***"
+		@grep "?=" mk/MxLib.mk || true
+		@echo "***"
+		@echo "Build settings available in local/MxApp.mk\n***"
+		@grep  "?=" mk/MxApp.mk || true
+		@echo "***"
+		
