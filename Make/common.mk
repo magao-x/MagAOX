@@ -3,7 +3,6 @@
 # NOTE: This file should only be edited in mxlib/local, not in the root mxlib directory.
 #
 SELF_DIR := $(dir $(lastword $(MAKEFILE_LIST)))
-include $(SELF_DIR)/../local/config.mk
 -include $(SELF_DIR)/../local/Common.mk
 
 UNAME ?= $(shell uname)
@@ -23,8 +22,8 @@ LIB_SOFA ?= $(LIB_PATH)/libsofa_c.a
 ARFLAGS ?= rvs
 
 MXLIB_PREFIX ?= $(HOME)
-MXLIB_LIB_PATH ?= $(MXLIB_PREFIX)/lib 
-MXLIB_INCLUDE_PATH ?= $(MXLIB_PREFIX)/include 
+MXLIB_LIB_PATH ?= $(MXLIB_PREFIX)/lib
+MXLIB_INCLUDE_PATH ?= $(MXLIB_PREFIX)/include
 
 INCLUDES += -I$(INCLUDE_PATH) -I$(MXLIB_INCLUDE_PATH)
 
@@ -39,7 +38,7 @@ OPTIMIZE ?= -O3 -fopenmp -ffast-math
 #######################################
 
 #location of liblilxml, libindicommon, mxlib and sofa:
-EXTRA_LDFLAGS ?=  -L$(MXLIB_LIB_PATH)    
+EXTRA_LDFLAGS ?=  -L$(MXLIB_LIB_PATH)
 
 #the required librarires
 EXTRA_LDLIBS ?= -lmxlib -lsofa_c -lboost_system -lboost_filesystem -ludev  ../../INDI/libcommon/libcommon.a ../../INDI/liblilxml/liblilxml.a
@@ -49,7 +48,7 @@ ifneq ($(UNAME),Darwin)
     EXTRA_LDLIBS += -lrt
 endif
 
-LDLIBS += $(EXTRA_LDLIBS) 
+LDLIBS += $(EXTRA_LDLIBS)
 LDFLAGS += $(EXTRA_LDFLAGS)
 
 #Hard-code the paths to system libraries so setuid works
@@ -61,7 +60,7 @@ LDLIBS += -Wl,-rpath,$(LDLIBRPATH)
 #######################################
 
 CFLAGS += -std=c99 -fPIC $(INCLUDES) $(OPTIMIZE)
-CXXFLAGS += -std=c++14 -fPIC $(INCLUDES) $(OPTIMIZE) 
+CXXFLAGS += -std=c++14 -fPIC $(INCLUDES) $(OPTIMIZE)
 
 #This is needed to force use of g++ for linking
 LINK.o = $(LINK.cc)
@@ -69,5 +68,3 @@ LINK.o = $(LINK.cc)
 #Create an implicit rule for pre-compiled headers
 %.hpp.gch: %.hpp
 	$(CXX) $(CXXFLAGS) -c $<
-
-

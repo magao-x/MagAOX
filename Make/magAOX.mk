@@ -23,6 +23,7 @@
 SELF_DIR := $(dir $(lastword $(MAKEFILE_LIST)))
 -include $(SELF_DIR)/../local/magAOXApp.mk
 include $(SELF_DIR)/../Make/common.mk
+include $(SELF_DIR)/../Make/config.mk
 
 #To ensure pre-compiled header gets used
 CXXFLAGS += -include ../../libMagAOX/libMagAOX.hpp
