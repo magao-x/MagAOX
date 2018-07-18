@@ -13,23 +13,26 @@
 # is the LOGDIR definition -- probably from /data/logs to /opt/MagAOX/logs
 ###################################################
 
-mkdir  /opt/MagAOX
-mkdir  /opt/MagAOX/bin
-mkdir  /opt/MagAOX/drivers
-mkdir  /opt/MagAOX/drivers/fifos
-mkdir  /opt/MagAOX/config
+mkdir  -pv /opt/MagAOX
+mkdir  -pv /opt/MagAOX/bin
+mkdir  -pv /opt/MagAOX/drivers
+mkdir  -pv /opt/MagAOX/drivers/fifos
+mkdir  -pv /opt/MagAOX/config
 
 LOGDIR=/data/logs
 #LOGDIR=/opt/MagAOX/logs
 
-mkdir $LOGDIR
-chown :magaox $LOGDIR 
-chmod g+rw $LOGDIR
-chmod g+s $LOGDIR
+mkdir -pv $LOGDIR
+chown :magaox $LOGDIR
+chmod g+rw -v $LOGDIR
+chmod g+s -v $LOGDIR
 
-ln -s $LOGDIR /opt/MagAOX/logs
+if [ "$LOGDIR" != "/opt/MagAOX/logs" ] ; then
+  echo "Creating logs symlink . . ."
+  ln -s $LOGDIR /opt/MagAOX/logs
+fi
 
-mkdir  /opt/MagAOX/sys
-mkdir  /opt/MagAOX/secrets
-chmod o-rwx /opt/MagAOX/secrets
-chmod g-rwx /opt/MagAOX/secrets
+mkdir  -pv /opt/MagAOX/sys
+mkdir  -pv /opt/MagAOX/secrets
+chmod o-rwx -v /opt/MagAOX/secrets
+chmod g-rwx -v /opt/MagAOX/secrets
