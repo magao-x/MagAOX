@@ -338,7 +338,21 @@ addSearchDef (char *dev, char *prop, char *ele)
 {
 	if (!srchs)
 	    srchs = (SearchDef *) malloc (1);		/* realloc seed */
-	srchs = (SearchDef *) realloc (srchs, (nsrchs+1)*sizeof(SearchDef));
+
+   SearchDef * tmp_srchs;
+   tmp_srchs = (SearchDef *) realloc (srchs, (nsrchs+1)*sizeof(SearchDef));
+
+   if(tmp_srchs == NULL)
+   {
+      free(srchs);
+      srchs = NULL;
+
+      return;
+   }
+
+   srchs = tmp_srchs;
+   tmp_srchs=NULL;
+
 	srchs[nsrchs].d = strcpy ((char *)malloc(strlen(dev)+1), dev);
 	srchs[nsrchs].p = strcpy ((char *)malloc(strlen(prop)+1), prop);
 	srchs[nsrchs].e = strcpy ((char *)malloc(strlen(ele)+1), ele);
