@@ -12,7 +12,7 @@ namespace MagAOX
 namespace app
 {
 
-/** MagAO-X application to do math on a number
+/** MagAO-X application to do math on some numbers
   *
   */
 class magAOXMaths : public MagAOXApp

@@ -21,7 +21,7 @@ namespace app
   * \todo control outlets
   * \todo need to recognize signals in tty polls and not return errors, etc.
   * \todo need mutex to make sure we don't update INDI=props while setting
-  * \todo should check if values changed and do a sendSetProperty if so.
+  * \todo should check if values changed and do a sendSetProperty if so (pub/sub?)
   */
 class trippLitePDU : public MagAOXApp, public tty::usbDevice
 {
