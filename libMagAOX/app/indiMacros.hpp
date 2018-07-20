@@ -19,7 +19,7 @@
   */
 #define SET_INDI_NEWCALLBACK(class, prop) static int st_ ## newCallBack ## _ ## prop( void * app, const pcf::IndiProperty &ipRecv)\
                                           {\
-                                             return ((class *) app)->newCallBack ## _ ## prop(ipRecv);\
+                                             return static_cast<class *>(app)->newCallBack ## _ ## prop(ipRecv);\
                                           }
 
 /// Declare the callback for a new propery request, and declare and define the static wrapper.

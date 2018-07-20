@@ -12,16 +12,16 @@ namespace MagAOX
 namespace app
 {
 
-/** MagAO-X application to do math on a number
+/** MagAO-X application to do math on some numbers
   *
   */
 class magAOXMaths : public MagAOXApp
 {
 
 protected:
-   	// declare our properties
-	pcf::IndiProperty x, xmaths;
-	pcf::IndiProperty y, ymaths;
+   // declare our properties
+	 pcf::IndiProperty x, xmaths;
+	 pcf::IndiProperty y, ymaths;
 
 public:
 

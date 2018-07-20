@@ -610,7 +610,7 @@ void MagAOXApp::loadBasicConfig() //virtual
    config(loopPause, "loopPause");
 
    //--------- RT Priority ------------//
-   int prio;
+   unsigned prio = m_RTPriority;
    config(prio, "RTPriority");
    if(prio != m_RTPriority)
    {

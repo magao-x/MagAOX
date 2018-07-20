@@ -42,7 +42,7 @@ struct driverFIFO
 /// Work function for the FIFO read/write threads.
 void * xoverThread( void * vdf /**< [in] pointer to a driverFIFO struct */)
 {
-   driverFIFO * df = (driverFIFO *) vdf;
+   driverFIFO * df = static_cast<driverFIFO *>(vdf);
 
    //Make sure the driverFIFO was initialized properly.
    if(df->stdfd != STDIN_FILENO && df->stdfd != STDOUT_FILENO)
