@@ -18,18 +18,19 @@ namespace app
   * \todo handle timeouts gracefully -- maybe go to error, flush, disconnect, reconnect, etc.
   * \todo need username and secure password handling
   * \todo need to robustify login logic
-  * \todo parse outlets
   * \todo control outlets
   * \todo need to recognize signals in tty polls and not return errors, etc.
+  * \todo need mutex to make sure we don't update INDI=props while setting
+  * \todo should check if values changed and do a sendSetProperty if so.
   */
 class trippLitePDU : public MagAOXApp, public tty::usbDevice
 {
 
 protected:
    std::string m_status;
-   float m_frequency;
-   float m_voltage;
-   float m_current;
+   float m_frequency {0};
+   float m_voltage {0};
+   float m_current {0};
    std::vector<bool> m_outletStates;
 
 public:
