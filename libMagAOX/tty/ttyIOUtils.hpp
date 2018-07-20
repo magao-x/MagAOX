@@ -47,7 +47,7 @@ int ttyOpenRaw( int & fileDescrip,        ///< [out] the file descriptor.  Set t
 {
    errno = 0;
 
-   fileDescrip = open( deviceName.c_str(), O_RDWR | O_NOCTTY | O_NDELAY);
+   fileDescrip = ::open( deviceName.c_str(), O_RDWR | O_NOCTTY | O_NDELAY);
 
 
    struct termios termopt;
