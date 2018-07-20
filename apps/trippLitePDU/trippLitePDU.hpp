@@ -332,6 +332,8 @@ int trippLitePDU::appLogic()
 
       if(rv == 0)
       {
+         std::lock_guard<std::mutex> guard(m_indiMutex);  //Lock the mutex before conducting INDI communications.
+
          m_indiStatus["value"] = m_status;
          m_indiStatus.setState (pcf::IndiProperty::Ok);
 
@@ -440,8 +442,6 @@ int trippLitePDU::parsePDUStatus( std::string & strRead )
 
    current = mx::convertFromString<float>( pstr.substr(st, ed-st) );
 
-
-
    st = pstr.find("On:", ed) + 3;
    if( st != std::string::npos )
    {
@@ -485,6 +485,8 @@ int trippLitePDU::changeOutletState( const pcf::IndiProperty &ipRecv,
       std::cerr << "Request to turn outlet " << indiOutlet.getName() << " " << onum << " Off\n";
       m_outletStates[onum] = 0;
    }
+
+   std::lock_guard<std::mutex> guard(m_indiMutex);  //Lock the mutex before conducting INDI communications.
 
    if(m_outletStates[onum] == 0) indiOutlet["state"] = "Off";
    else indiOutlet["state"] = "On";

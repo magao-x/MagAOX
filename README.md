@@ -9,7 +9,9 @@ This is the software which runs the MagAOX ExAO system.
 #### 1.1 Current:
 1. mxlib (https://github.com/jaredmales/mxlib)
 2. libudev (for introspective device discovery)
-3. zlib1g-dev [ubuntu]
+3. zlib (compression for INDI)
+   - zlib-devel [centOS-7]
+   - zlib1g-dev [ubuntu]
 
 #### 1.1 Future
 1. libhdf5 (though not for anything currently implemented, but we will)
@@ -119,7 +121,17 @@ On install, symlinks are made for executables from `/usr/local/bin` to `/opt/Mag
 
 ## 5 Documentation
 
-The code is more-or-less carefully documented with doxygen, though the doxyfile has not been created.
+The code is more-or-less carefully documented with doxygen
 
-- [] Init doxygen doc system
+- [] Complete doxygen doc system
+- [] Script construction of complete docs from various places (doxygen, and the markdown app docs)
+- [] Create system to automatically make c.l. option table for each app
 - [] Decide: do we use github pages, or host it on one of the snazzy magao-x domains?
+
+## 6 To-Do
+
+To-do items are listed in the above sections.  Also see the Todo page in the doxygen html.  Other misc. items below:
+
+- [] split base INDI off into separate repo, which will be the minimum someone needs to have INDI utils for interacting with MagAO-X without installing the whole tree.
+- [] create indiserver startup script which takes a list of drivers from a config file, creates symlinks to xindidriver as needed, and then starts indiserver itself.
+- [] start issue tracking

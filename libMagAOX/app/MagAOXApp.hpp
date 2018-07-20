@@ -338,6 +338,9 @@ protected:
    ///The INDI driver wrapper.  Constructed and initialized by execute, which starts and stops communications.
    indiDriver<MagAOXApp> * m_indiDriver {nullptr};
 
+   ///Mutex for locking INDI communications.
+   std::mutex m_indiMutex;
+
    ///Structure to hold the call-back details for handling INDI communications.
    struct indiCallBack
    {
@@ -1015,6 +1018,7 @@ void MagAOXApp::state(const stateCodes::stateCodeT & s)
    m_stateLogged = 0;
 
    //And we keep INDI up to date
+   std::lock_guard<std::mutex> guard(m_indiMutex);  //Lock the mutex before conducting INDI communications.
    indiP_state["current"] = s;
    indiP_state.setState (pcf::IndiProperty::Ok);
    if(m_indiDriver) m_indiDriver->sendSetProperty (indiP_state);
