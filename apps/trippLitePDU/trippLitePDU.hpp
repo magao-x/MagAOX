@@ -33,6 +33,8 @@ protected:
    float m_current {0};
    std::vector<bool> m_outletStates;
 
+   ///Mutex for locking device communications.
+   std::mutex m_devMutex;
 public:
 
    /// Default c'tor.
@@ -255,6 +257,8 @@ int trippLitePDU::appLogic()
 
    if( state() == stateCodes::CONNECTED )
    {
+      std::lock_guard<std::mutex> guard(m_devMutex);
+
       std::string strRead;
       int rv = MagAOX::tty::ttyWriteRead( strRead, "\r", "$> ", false, m_fileDescrip, 1000, 5000);
 
@@ -306,6 +310,8 @@ int trippLitePDU::appLogic()
 
    if(state() == stateCodes::LOGGEDIN)
    {
+      std::lock_guard<std::mutex> guard(m_devMutex);
+
       std::string strRead;
       int rv = MagAOX::tty::ttyWriteRead( strRead, "devstatus\r", "$> ", true, m_fileDescrip, 1000, 5000);
 
@@ -477,13 +483,49 @@ int trippLitePDU::changeOutletState( const pcf::IndiProperty &ipRecv,
 
    if( oreq == "On" && m_outletStates[onum] == 0)
    {
+      std::lock_guard<std::mutex> guard(m_devMutex);
+
       std::cerr << "Request to turn outlet " << indiOutlet.getName() << " " << onum << " On\n";
+
+      std::string cmd = "loadctl on -o ";
+      cmd += mx::convertToString<int>(onum+1);
+      cmd += " --force\r";
+
+      std::cerr << "Sending " << cmd << "\n";
+      std::string strRead;
+      int rv = MagAOX::tty::ttyWriteRead( strRead, cmd, "$> ", true, m_fileDescrip, 1000, 5000);
+      std::cerr << "Received " << strRead << " (" << rv << ")\n";
+
+      std::cerr << "Waiting for confirmation...\n";
+      rv = MagAOX::tty::ttyRead(strRead, "\n", m_fileDescrip, 5000);
+      std::cerr << "Received " << strRead << " (" << rv << ")\n";
+
       m_outletStates[onum] = 1;
+
+      log<tripplitepdu_outlet_on>((char) (onum+1));
    }
    if( oreq == "Off" && m_outletStates[onum] == 1)
    {
+      std::lock_guard<std::mutex> guard(m_devMutex);
+
       std::cerr << "Request to turn outlet " << indiOutlet.getName() << " " << onum << " Off\n";
+
+      std::string cmd = "loadctl off -o ";
+      cmd += mx::convertToString<int>(onum+1);
+      cmd += " --force\r";
+
+      std::cerr << "Sending " << cmd << "\n";
+      std::string strRead;
+      int rv = MagAOX::tty::ttyWriteRead( strRead, cmd, "$> ", true, m_fileDescrip, 1000, 5000);
+      std::cerr << "Received " << strRead << " (" << rv << ")\n";
+
+      std::cerr << "Waiting for confirmation...\n";
+      rv = MagAOX::tty::ttyRead(strRead, "\n", m_fileDescrip, 5000);
+      std::cerr << "Received " << strRead << " (" << rv << ")\n";
+
       m_outletStates[onum] = 0;
+
+      log<tripplitepdu_outlet_off>((char) (onum+1));
    }
 
    std::lock_guard<std::mutex> guard(m_indiMutex);  //Lock the mutex before conducting INDI communications.

@@ -1,10 +1,10 @@
-/** \file logCodes.hpp 
+/** \file logCodes.hpp
   * \brief The MagAO-X logger log event codes.
   * \author Jared R. Males (jaredmales@gmail.com)
   *
   * History:
   * - 2017-06-27 created by JRM
-  */ 
+  */
 #ifndef logger_logCodes_hpp
 #define logger_logCodes_hpp
 
@@ -21,7 +21,7 @@ namespace logger
 /// The type of an event code (16-bit unsigned int).
 /** \ingroup logcodes
   */
-typedef uint16_t eventCodeT;   
+typedef uint16_t eventCodeT;
 
 
 /// Scoping struct for event codes
@@ -30,9 +30,9 @@ typedef uint16_t eventCodeT;
   */
 struct eventCodes
 {
-   
+
    ///The log event codes.  These are the unique identifiers for log entry types.
-   /** These are in the eventCodes class scope, so must be referenced with, e.g., eventCodes::GIT_STATE. 
+   /** These are in the eventCodes class scope, so must be referenced with, e.g., eventCodes::GIT_STATE.
      * \ingroup logcodes
      */
    enum : eventCodeT { GIT_STATE = 0,          ///< The git repository state at application build-time
@@ -50,7 +50,9 @@ struct eventCodes
                        INDIDRIVER_STOP = 141,  ///< The INDI driver has stopped communications
                        LOOP_CLOSED = 1001,     ///< The loop is closed.
                        LOOP_PAUSED = 1002,     ///< The loop is paused.
-                       LOOP_OPEN = 1003        ///< The loop is open.
+                       LOOP_OPEN = 1003,        ///< The loop is open.
+                       TRIPPLITEPDU_OUTLET_OFF = 12001, ///< An outlet was turned off on a TrippLite PDU
+                       TRIPPLITEPDU_OUTLET_ON = 12002 ///< An outlet was turned on on a TrippLite PDU
                      };
 };
 
@@ -58,4 +60,3 @@ struct eventCodes
 } //namespace MagAOX
 
 #endif //logger_logCodes_hpp
-

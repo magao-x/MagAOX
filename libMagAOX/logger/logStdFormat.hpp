@@ -1,10 +1,10 @@
-/** \file logStdFormat.hpp 
+/** \file logStdFormat.hpp
   * \brief Standard formating of log entries for readable output.
   * \author Jared R. Males (jaredmales@gmail.com)
   *
   * History:
   * - 2017-12-24 created by JRM
-  */ 
+  */
 
 #ifndef logger_logStdFormat_hpp
 #define logger_logStdFormat_hpp
@@ -13,9 +13,9 @@
 
 namespace MagAOX
 {
-namespace logger 
+namespace logger
 {
-   
+
 /// Worker function that formats a log into the standard text representation.
 /** \todo change to using a std::ios as input instead of only using std::cout
   *
@@ -29,7 +29,7 @@ void _stdFormat( bufferPtrT & logBuffer /**< [in] the binary log buffer */)
    time::timespecX ts;
    msgLenT len;
 
-   extractBasicLog( lvl, ec, ts, len, logBuffer); 
+   extractBasicLog( lvl, ec, ts, len, logBuffer);
 
    typename logT::messageT msg;
 
@@ -39,9 +39,9 @@ void _stdFormat( bufferPtrT & logBuffer /**< [in] the binary log buffer */)
 }
 
 /// Place the log in standard text format, with event code specific formatting.
-/** 
+/**
   * \ingroup logformat
-  */ 
+  */
 inline
 void logStdFormat(bufferPtrT & buffer /**< [in] the binary log buffer */ )
 {
@@ -75,20 +75,23 @@ void logStdFormat(bufferPtrT & buffer /**< [in] the binary log buffer */ )
       case indidriver_start::eventCode:
          return _stdFormat<indidriver_start>(buffer);
       case indidriver_stop::eventCode:
-         return _stdFormat<indidriver_stop>(buffer);   
+         return _stdFormat<indidriver_stop>(buffer);
       case loop_closed::eventCode:
          return _stdFormat<loop_closed>(buffer);
       case loop_paused::eventCode:
          return _stdFormat<loop_paused>(buffer);
       case loop_open::eventCode:
          return _stdFormat<loop_open>(buffer);
-      
+      case tripplitepdu_outlet_off::eventCode:
+            return _stdFormat<tripplitepdu_outlet_off>(buffer);
+      case tripplitepdu_outlet_on::eventCode:
+         return _stdFormat<tripplitepdu_outlet_on>(buffer);
       default:
          std::cout << "Unknown log type: " << ec << "\n";
    }
 }
 
-} //namespace logger 
-} //namespace MagAOX 
+} //namespace logger
+} //namespace MagAOX
 
 #endif //logger_logStdFormat_hpp
