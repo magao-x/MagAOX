@@ -19,9 +19,9 @@ class magAOXMaths : public MagAOXApp
 {
 
 protected:
-   	// declare our properties
-	pcf::IndiProperty x, xmaths;
-	pcf::IndiProperty y, ymaths;
+   // declare our properties
+	 pcf::IndiProperty x, xmaths;
+	 pcf::IndiProperty y, ymaths;
 
 public:
 

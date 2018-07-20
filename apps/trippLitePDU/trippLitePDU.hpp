@@ -1,13 +1,15 @@
 
+
 #ifndef trippLitePDU_hpp
 #define trippLitePDU_hpp
+
 
 #include "../../libMagAOX/libMagAOX.hpp" //Note this is included on command line to trigger pch
 #include "magaox_git_version.h"
 
 namespace MagAOX
 {
-namespace app 
+namespace app
 {
 
 /** MagAO-X application to control a Tripp Lite PDU
@@ -22,42 +24,84 @@ namespace app
   */
 class trippLitePDU : public MagAOXApp, public tty::usbDevice
 {
-   
+
+protected:
+   std::string m_status;
+   float m_frequency;
+   float m_voltage;
+   float m_current;
+   std::vector<bool> m_outletStates;
+
 public:
-   
+
    /// Default c'tor.
    trippLitePDU();
 
-   /// Setup the configuration system (called by MagAOXApp::setup())   
+   ~trippLitePDU() noexcept
+   {}
+
+   /// Setup the configuration system (called by MagAOXApp::setup())
    virtual void setupConfig();
-   
-   /// Load the configuration system results (called by MagAOXApp::setup())
+
+   /// load the configuration system results (called by MagAOXApp::setup())
    virtual void loadConfig();
-   
-   /// Checks if the device was found during loadConfig.
+
+   /// Startup functions
+   /** Setsup the INDI vars.
+     * Checks if the device was found during loadConfig.
+     */
    virtual int appStartup();
-   
+
    /// Implementation of the FSM for the tripp lite PDU.
    virtual int appLogic();
-   
+
    /// Do any needed shutdown tasks.  Currently nothing in this app.
    virtual int appShutdown();
-   
+
    /// Parse the PDU devstatus response.
-   /** 
+   /**
      * \returns 0 on success
      * \returns \<0 on error, with value indicating location of error.
-     */ 
-   int parsePDUStatus( std::string & statStr,
-                       float & voltage,
-                       float & frequency,
-                       float & current,
-                       std::string & strRead 
-                     );
+     */
+   int parsePDUStatus( std::string & strRead );
+
+protected:
+
+   //declare our properties
+   pcf::IndiProperty m_indiStatus;
+	pcf::IndiProperty m_indiFrequency;
+   pcf::IndiProperty m_indiVoltage;
+   pcf::IndiProperty m_indiCurrent;
+
+   pcf::IndiProperty m_indiOutlet1;
+   pcf::IndiProperty m_indiOutlet2;
+   pcf::IndiProperty m_indiOutlet3;
+   pcf::IndiProperty m_indiOutlet4;
+   pcf::IndiProperty m_indiOutlet5;
+   pcf::IndiProperty m_indiOutlet6;
+   pcf::IndiProperty m_indiOutlet7;
+   pcf::IndiProperty m_indiOutlet8;
+
+   int changeOutletState( const pcf::IndiProperty &ipRecv,
+                          pcf::IndiProperty & indiOutlet,
+                          int onum
+                        );
+
+public:
+   INDI_NEWCALLBACK_DECL(trippLitePDU, m_indiOutlet1);
+   INDI_NEWCALLBACK_DECL(trippLitePDU, m_indiOutlet2);
+   INDI_NEWCALLBACK_DECL(trippLitePDU, m_indiOutlet3);
+   INDI_NEWCALLBACK_DECL(trippLitePDU, m_indiOutlet4);
+   INDI_NEWCALLBACK_DECL(trippLitePDU, m_indiOutlet5);
+   INDI_NEWCALLBACK_DECL(trippLitePDU, m_indiOutlet6);
+   INDI_NEWCALLBACK_DECL(trippLitePDU, m_indiOutlet7);
+   INDI_NEWCALLBACK_DECL(trippLitePDU, m_indiOutlet8);
+
 };
 
 trippLitePDU::trippLitePDU() : MagAOXApp(MAGAOX_CURRENT_SHA1, MAGAOX_REPO_MODIFIED)
 {
+   m_outletStates.resize(8,0);
    return;
 }
 
@@ -68,11 +112,11 @@ void trippLitePDU::setupConfig()
 
 void trippLitePDU::loadConfig()
 {
-   
+
    this->m_speed = B9600; //default for trippLite PDUs.  Will be overridden by any config setting.
-   
+
    int rv = tty::usbDevice::loadConfig(config);
-   
+
    if(rv != 0 && rv != TTY_E_NODEVNAMES) //Ignore error if nothing plugged in
    {
       log<software_error>( {__FILE__, __LINE__, rv, tty::ttyErrorString(rv)});
@@ -81,8 +125,46 @@ void trippLitePDU::loadConfig()
 
 int trippLitePDU::appStartup()
 {
+   // set up the  INDI properties
+   REG_INDI_PROP_NOCB(m_indiStatus, "status", pcf::IndiProperty::Text, pcf::IndiProperty::ReadOnly, pcf::IndiProperty::Idle);
+   m_indiStatus.add (pcf::IndiElement("value"));
+
+   REG_INDI_PROP_NOCB(m_indiFrequency, "frequency", pcf::IndiProperty::Number, pcf::IndiProperty::ReadOnly, pcf::IndiProperty::Idle);
+   m_indiFrequency.add (pcf::IndiElement("value"));
+
+   REG_INDI_PROP_NOCB(m_indiVoltage, "voltage", pcf::IndiProperty::Number, pcf::IndiProperty::ReadOnly, pcf::IndiProperty::Idle);
+   m_indiVoltage.add (pcf::IndiElement("value"));
+
+   REG_INDI_PROP_NOCB(m_indiCurrent, "current", pcf::IndiProperty::Number, pcf::IndiProperty::ReadOnly, pcf::IndiProperty::Idle);
+   m_indiCurrent.add (pcf::IndiElement("value"));
+
+   REG_INDI_PROP(m_indiOutlet1, "outlet1", pcf::IndiProperty::Text, pcf::IndiProperty::ReadWrite, pcf::IndiProperty::Idle);
+   m_indiOutlet1.add (pcf::IndiElement("state"));
+
+   REG_INDI_PROP(m_indiOutlet2, "outlet2", pcf::IndiProperty::Text, pcf::IndiProperty::ReadWrite, pcf::IndiProperty::Idle);
+   m_indiOutlet2.add (pcf::IndiElement("state"));
+
+   REG_INDI_PROP(m_indiOutlet3, "outlet3", pcf::IndiProperty::Text, pcf::IndiProperty::ReadWrite, pcf::IndiProperty::Idle);
+   m_indiOutlet3.add (pcf::IndiElement("state"));
+
+   REG_INDI_PROP(m_indiOutlet4, "outlet4", pcf::IndiProperty::Text, pcf::IndiProperty::ReadWrite, pcf::IndiProperty::Idle);
+   m_indiOutlet4.add (pcf::IndiElement("state"));
+
+   REG_INDI_PROP(m_indiOutlet5, "outlet5", pcf::IndiProperty::Text, pcf::IndiProperty::ReadWrite, pcf::IndiProperty::Idle);
+   m_indiOutlet5.add (pcf::IndiElement("state"));
+
+   REG_INDI_PROP(m_indiOutlet6, "outlet6", pcf::IndiProperty::Text, pcf::IndiProperty::ReadWrite, pcf::IndiProperty::Idle);
+   m_indiOutlet6.add (pcf::IndiElement("state"));
+
+   REG_INDI_PROP(m_indiOutlet7, "outlet7", pcf::IndiProperty::Text, pcf::IndiProperty::ReadWrite, pcf::IndiProperty::Idle);
+   m_indiOutlet7.add (pcf::IndiElement("state"));
+
+   REG_INDI_PROP(m_indiOutlet8, "outlet8", pcf::IndiProperty::Text, pcf::IndiProperty::ReadWrite, pcf::IndiProperty::Idle);
+   m_indiOutlet8.add (pcf::IndiElement("state"));
+
+   //Get the USB device if it's in udev
    if(m_deviceName == "") state(stateCodes::NODEVICE);
-   else 
+   else
    {
       state(stateCodes::NOTCONNECTED);
       std::stringstream logs;
@@ -105,11 +187,11 @@ int trippLitePDU::appLogic()
       log<text_log>( "In appLogic but in state INITIALIZED.", logLevels::FATAL );
       return -1;
    }
-   
+
    if( state() == stateCodes::NODEVICE )
    {
       int rv = tty::usbDevice::getDeviceName();
-      if(rv < 0 && rv != TTY_E_DEVNOTFOUND && rv != TTY_E_NODEVNAMES) 
+      if(rv < 0 && rv != TTY_E_DEVNOTFOUND && rv != TTY_E_NODEVNAMES)
       {
          state(stateCodes::FAILURE);
          if(!stateLogged())
@@ -118,11 +200,11 @@ int trippLitePDU::appLogic()
          }
          return rv;
       }
-         
-      if(rv == TTY_E_DEVNOTFOUND || rv == TTY_E_NODEVNAMES) 
+
+      if(rv == TTY_E_DEVNOTFOUND || rv == TTY_E_NODEVNAMES)
       {
          state(stateCodes::NODEVICE);
-                  
+
          if(!stateLogged())
          {
             std::stringstream logs;
@@ -131,7 +213,7 @@ int trippLitePDU::appLogic()
          }
          return 0;
       }
-      else 
+      else
       {
          state(stateCodes::NOTCONNECTED);
          if(!stateLogged())
@@ -141,26 +223,26 @@ int trippLitePDU::appLogic()
             log<text_log>(logs.str());
          }
       }
-         
+
    }
-   
+
    if( state() == stateCodes::NOTCONNECTED )
    {
       euidCalled();
       int rv = tty::usbDevice::connect();
       euidReal();
-      
-      if(rv == 0 && m_fileDescrip > 0) 
+
+      if(rv == 0 && m_fileDescrip > 0)
       {
          state(stateCodes::CONNECTED);
-         
+
          if(!stateLogged())
          {
             std::stringstream logs;
             logs << "Connected to " << m_deviceName;
             log<text_log>(logs.str());
          }
-         
+
       }
       else
       {
@@ -169,25 +251,28 @@ int trippLitePDU::appLogic()
          return -1;
       }
    }
-   
+
    if( state() == stateCodes::CONNECTED )
    {
-      std::string strRead;  
-      int rv = MagAOX::tty::ttyWriteRead( strRead, "\r", "$> ", true, m_fileDescrip, 1000, 1000); 
-   
+      std::string strRead;
+      int rv = MagAOX::tty::ttyWriteRead( strRead, "\r", "$> ", false, m_fileDescrip, 1000, 5000);
+
       if( rv == TTY_E_TIMEOUTONREADPOLL || rv == TTY_E_TIMEOUTONREAD )
       {
          std::cerr << "Read timeout  . . . \n";
          if( strRead.size() > 0 )
          {
-            std::cerr << strRead << "\n";
-         
+            std::cerr << "-" << strRead << "\n";
+
             if(strRead.find("Username:") != std::string::npos)
             {
-               MagAOX::tty::ttyWriteRead( strRead, "localadmin\r", "$> ", true, m_fileDescrip, 1000, 2000);
-               MagAOX::tty::ttyWriteRead( strRead, "localadmin\r", "$> ", true, m_fileDescrip, 1000, 2000);
-               rv = MagAOX::tty::ttyWriteRead( strRead, "\r", "$> ", true, m_fileDescrip, 1000, 2000); 
-               
+               rv = MagAOX::tty::ttyWriteRead( strRead, "localadmin\r", ":", false, m_fileDescrip, 1000, 5000);
+               std::cerr << rv << "-" << strRead << "\n";
+               MagAOX::tty::ttyWriteRead( strRead, "localadmin\r", "$> ", false, m_fileDescrip, 1000, 5000);
+               std::cerr << rv << "-" << strRead << "\n";
+               //rv = MagAOX::tty::ttyWriteRead( strRead, "\r", "$> ", true, m_fileDescrip, 1000, 5000);
+               //std::cerr << rv << "-" << strRead << "\n";
+
                if( rv == TTY_E_NOERROR )
                {
                   state(stateCodes::LOGGEDIN);
@@ -214,15 +299,15 @@ int trippLitePDU::appLogic()
          log<text_log>(tty::ttyErrorString(rv), logLevels::FATAL);
          return -1;
       }
-      
+
       state(stateCodes::LOGGEDIN);
    }
-   
+
    if(state() == stateCodes::LOGGEDIN)
    {
       std::string strRead;
       int rv = MagAOX::tty::ttyWriteRead( strRead, "devstatus\r", "$> ", true, m_fileDescrip, 1000, 5000);
-      
+
       if(rv < 0)
       {
          if(rv == TTY_E_TIMEOUTONREAD || rv == TTY_E_TIMEOUTONREADPOLL)
@@ -234,23 +319,62 @@ int trippLitePDU::appLogic()
          {
             state(stateCodes::NOTCONNECTED);
             log<text_log>(tty::ttyErrorString(rv), logLevels::ERROR);
-            
+
             return 0;
          }
       }
 
-      std::string statStr;
-      float voltage, frequency, current;
-   
-      rv = parsePDUStatus( statStr, voltage, frequency, current, strRead);
-   
+      //std::string statStr;
+      //float voltage, frequency, current;
+
+      rv = parsePDUStatus( strRead);
+
       if(rv == 0)
       {
-         time::timespecX ts;
-         ts.gettime();
-         
-         std::cerr << ts.time_s << " " << ts.time_ns << " " << statStr << " " << voltage << " " << frequency << " " << current << "\n";
-         std::cout << ts.time_s << " " << ts.time_ns << " " << statStr << " " << voltage << " " << frequency << " " << current << std::endl;
+         m_indiStatus["value"] = m_status;
+         m_indiStatus.setState (pcf::IndiProperty::Ok);
+
+         m_indiFrequency["value"] = m_frequency;
+         m_indiFrequency.setState (pcf::IndiProperty::Ok);
+
+         m_indiVoltage["value"] = m_voltage;
+         m_indiVoltage.setState (pcf::IndiProperty::Ok);
+
+         m_indiCurrent["value"] = m_current;
+         m_indiCurrent.setState (pcf::IndiProperty::Ok);
+
+         if(m_outletStates[0] == 0) m_indiOutlet1["state"] = "Off";
+         else m_indiOutlet1["state"] = "On";
+         m_indiOutlet1.setState(pcf::IndiProperty::Ok);
+
+         if(m_outletStates[1] == 0) m_indiOutlet2["state"] = "Off";
+         else m_indiOutlet2["state"] = "On";
+         m_indiOutlet2.setState(pcf::IndiProperty::Ok);
+
+         if(m_outletStates[2] == 0) m_indiOutlet3["state"] = "Off";
+         else m_indiOutlet3["state"] = "On";
+         m_indiOutlet3.setState(pcf::IndiProperty::Ok);
+
+         if(m_outletStates[3] == 0) m_indiOutlet4["state"] = "Off";
+         else m_indiOutlet4["state"] = "On";
+         m_indiOutlet4.setState(pcf::IndiProperty::Ok);
+
+         if(m_outletStates[4] == 0) m_indiOutlet5["state"] = "Off";
+         else m_indiOutlet5["state"] = "On";
+         m_indiOutlet5.setState(pcf::IndiProperty::Ok);
+
+         if(m_outletStates[5] == 0) m_indiOutlet6["state"] = "Off";
+         else m_indiOutlet6["state"] = "On";
+         m_indiOutlet6.setState(pcf::IndiProperty::Ok);
+
+         if(m_outletStates[6] == 0) m_indiOutlet7["state"] = "Off";
+         else m_indiOutlet7["state"] = "On";
+         m_indiOutlet7.setState(pcf::IndiProperty::Ok);
+
+         if(m_outletStates[7] == 0) m_indiOutlet8["state"] = "Off";
+         else m_indiOutlet8["state"] = "On";
+         m_indiOutlet8.setState(pcf::IndiProperty::Ok);
+
       }
       else
       {
@@ -258,11 +382,11 @@ int trippLitePDU::appLogic()
       }
       return 0;
    }
-   
+
    state(stateCodes::FAILURE);
    log<text_log>("appLogic fell through", logLevels::FATAL);
    return -1;
-   
+
 }
 
 int trippLitePDU::appShutdown()
@@ -271,53 +395,176 @@ int trippLitePDU::appShutdown()
    return 0;
 }
 
-int trippLitePDU::parsePDUStatus( std::string & statStr,
-                                  float & voltage,
-                                  float & frequency,
-                                  float & current,
-                                  std::string & strRead 
-                                )
+int trippLitePDU::parsePDUStatus( std::string & strRead )
 {
+   std::string status;
+   float frequency, current, voltage;
+   std::vector<bool> outletStates(8,0);
+
    std::string pstr = mx::removeWhiteSpace(strRead);
 
    size_t st = pstr.find("Status:", 0);
    if( st == std::string::npos ) return -1;
-   
+
    st = pstr.find(':', st) + 1;
    if( st == std::string::npos ) return -2;
-   
+
    size_t ed = pstr.find('I', st);
    if( ed == std::string::npos ) return -3;
 
-   statStr = pstr.substr(st, ed-st);
-   
+   status = pstr.substr(st, ed-st);
+
    st = pstr.find(':', ed) + 1;
    if( st == std::string::npos ) return -4;
-   
+
    ed = pstr.find('V', st);
    if( ed == std::string::npos ) return -5;
-   
+
    voltage = mx::convertFromString<float>( pstr.substr(st, ed-st) );
-   
+
    st = pstr.find(':', ed) + 1;
    if( st == std::string::npos ) return -6;
-   
+
    ed = pstr.find('H', st);
    if( ed == std::string::npos ) return -7;
-   
+
    frequency = mx::convertFromString<float>( pstr.substr(st, ed-st) );
-   
+
    st = pstr.find(':', ed) + 1;
    if( st == std::string::npos ) return -8;
    st = pstr.find(':', st) + 1;
    if( st == std::string::npos ) return -9;
    ed = pstr.find('A', st);
    if( ed == std::string::npos ) return -10;
-   
+
    current = mx::convertFromString<float>( pstr.substr(st, ed-st) );
-   
+
+
+
+   st = pstr.find("On:", ed) + 3;
+   if( st != std::string::npos )
+   {
+      char ch = pstr[st];
+      while(isdigit(ch) && st < pstr.size())
+      {
+         int onum = ch - '0';
+         if(onum > 0 && onum < 9) outletStates[onum-1] = 1; //this outlet is on.
+
+         ++st;
+         if(st > pstr.size()-1) break;
+         ch = pstr[st];
+      }
+   }
+
+   //Ok, we're here with no errors.  Now update members.
+   m_status = status;
+   m_frequency = frequency;
+   m_voltage = voltage;
+   m_current = current;
+   for(int i=0;i<8;++i) m_outletStates[i]=outletStates[i];
+
    return 0;
-   
+
+}
+
+int trippLitePDU::changeOutletState( const pcf::IndiProperty &ipRecv,
+                                     pcf::IndiProperty & indiOutlet,
+                                     int onum
+                                   )
+{
+   std::string oreq = ipRecv["state"].get<std::string>();
+
+   if( oreq == "On" && m_outletStates[onum] == 0)
+   {
+      std::cerr << "Request to turn outlet " << indiOutlet.getName() << " " << onum << " On\n";
+      m_outletStates[onum] = 1;
+   }
+   if( oreq == "Off" && m_outletStates[onum] == 1)
+   {
+      std::cerr << "Request to turn outlet " << indiOutlet.getName() << " " << onum << " Off\n";
+      m_outletStates[onum] = 0;
+   }
+
+   if(m_outletStates[onum] == 0) indiOutlet["state"] = "Off";
+   else indiOutlet["state"] = "On";
+
+   indiOutlet.setState(pcf::IndiProperty::Ok);
+   m_indiDriver->sendSetProperty (indiOutlet);
+
+   return 0;
+
+}
+
+INDI_NEWCALLBACK_DEFN(trippLitePDU, m_indiOutlet1)(const pcf::IndiProperty &ipRecv)
+{
+   if (ipRecv.getName() == m_indiOutlet1.getName())
+   {
+      return changeOutletState(ipRecv, m_indiOutlet1, 0);
+   }
+   return -1;
+}
+
+INDI_NEWCALLBACK_DEFN(trippLitePDU, m_indiOutlet2)(const pcf::IndiProperty &ipRecv)
+{
+   if (ipRecv.getName() == m_indiOutlet2.getName())
+   {
+      return changeOutletState(ipRecv, m_indiOutlet2, 1);
+   }
+   return -1;
+}
+
+INDI_NEWCALLBACK_DEFN(trippLitePDU, m_indiOutlet3)(const pcf::IndiProperty &ipRecv)
+{
+   if (ipRecv.getName() == m_indiOutlet3.getName())
+   {
+      return changeOutletState(ipRecv, m_indiOutlet3, 2);
+   }
+   return -1;
+}
+
+INDI_NEWCALLBACK_DEFN(trippLitePDU, m_indiOutlet4)(const pcf::IndiProperty &ipRecv)
+{
+   if (ipRecv.getName() == m_indiOutlet4.getName())
+   {
+      return changeOutletState(ipRecv, m_indiOutlet4, 3);
+   }
+   return -1;
+}
+
+INDI_NEWCALLBACK_DEFN(trippLitePDU, m_indiOutlet5)(const pcf::IndiProperty &ipRecv)
+{
+   if (ipRecv.getName() == m_indiOutlet5.getName())
+   {
+      return changeOutletState(ipRecv, m_indiOutlet5, 4);
+   }
+   return -1;
+}
+
+INDI_NEWCALLBACK_DEFN(trippLitePDU, m_indiOutlet6)(const pcf::IndiProperty &ipRecv)
+{
+   if (ipRecv.getName() == m_indiOutlet6.getName())
+   {
+      return changeOutletState(ipRecv, m_indiOutlet6, 5);
+   }
+   return -1;
+}
+
+INDI_NEWCALLBACK_DEFN(trippLitePDU, m_indiOutlet7)(const pcf::IndiProperty &ipRecv)
+{
+   if (ipRecv.getName() == m_indiOutlet7.getName())
+   {
+      return changeOutletState(ipRecv, m_indiOutlet7, 6);
+   }
+   return -1;
+}
+
+INDI_NEWCALLBACK_DEFN(trippLitePDU, m_indiOutlet8)(const pcf::IndiProperty &ipRecv)
+{
+   if (ipRecv.getName() == m_indiOutlet8.getName())
+   {
+      return changeOutletState(ipRecv, m_indiOutlet8, 7);
+   }
+   return -1;
 }
 
 } //namespace app
