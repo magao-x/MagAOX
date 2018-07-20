@@ -1,13 +1,13 @@
-/** \file ttyIOUtils.hpp 
+/** \file ttyIOUtils.hpp
   * \brief Utilities for i/o on a file descriptor pointing to a tty device.
   * \author Jared R. Males (jaredmales@gmail.com)
   *
   * History:
   * - 2018-01-15 created by JRM, starting with code imported from VisAO
-  */ 
+  */
 
-#ifndef tty_ttyIOUtils_hpp 
-#define tty_ttyIOUtils_hpp 
+#ifndef tty_ttyIOUtils_hpp
+#define tty_ttyIOUtils_hpp
 
 //#include <string.h>
 
@@ -26,19 +26,19 @@
    #define TTY_BUFFSIZE (1024)
 #endif
 
-namespace MagAOX 
+namespace MagAOX
 {
-namespace tty 
+namespace tty
 {
- 
-/// Open a file as a raw-mode tty device 
+
+/// Open a file as a raw-mode tty device
 /**
   * \returns TTY_E_NOERROR on success.
   * \returns TTY_E_TCGETATTR on a error from tcgetattr.
   * \returns TTY_E_TCSETATTR on an error from tcsetattr.
   * \returns TTY_E_SETISPEED on a cfsetispeed error.
   * \returns TTY_E_SETOSPEED on a cfsetospeed error.
-  * 
+  *
   */
 int ttyOpenRaw( int & fileDescrip,        ///< [out] the file descriptor.  Set to 0 on an error.
                 std::string & deviceName, ///< [in] the device path name, e.g. /dev/ttyUSB0
@@ -46,10 +46,10 @@ int ttyOpenRaw( int & fileDescrip,        ///< [out] the file descriptor.  Set t
               )
 {
    errno = 0;
-   
+
    fileDescrip = open( deviceName.c_str(), O_RDWR | O_NOCTTY | O_NDELAY);
-      
-   
+
+
    struct termios termopt;
    if( tcgetattr(fileDescrip, &termopt) < 0 )
    {
@@ -57,7 +57,7 @@ int ttyOpenRaw( int & fileDescrip,        ///< [out] the file descriptor.  Set t
       fileDescrip = 0;
       return TTY_E_TCGETATTR;
    }
-   
+
    if( cfsetispeed(&termopt, speed) < 0 )
    {
       close(fileDescrip);
@@ -85,11 +85,11 @@ int ttyOpenRaw( int & fileDescrip,        ///< [out] the file descriptor.  Set t
 }
 
 /// Check if the end of the buffer contains the end-of-transmission string
-/** 
+/**
   * \returns true if the last N chars of buffRead are equal to eot, where N is the length of eot.
   * \returns false otherwise.
-  */ 
-inline 
+  */
+inline
 bool isEndOfTrans( const std::string & strRead, ///< [in] The read buffer to check
                    const std::string & eot      ///< [in] The end-of-transmission string
                  )
@@ -102,7 +102,7 @@ bool isEndOfTrans( const std::string & strRead, ///< [in] The read buffer to che
    {
       if( strRead[strRead.size()-1-i] != eot[eot.size()-1-i] ) return false;
    }
-   
+
    return true;
 }
 
@@ -115,7 +115,7 @@ bool isEndOfTrans( const std::string & strRead, ///< [in] The read buffer to che
   * \returns TTY_E_ERRORONWRITEPOLL if an error is returned by poll.
   * \returns TTY_E_TIMEOUTONWRITE if a timeout occurs during the write.
   * \returns TTY_E_ERRORONWRITE if an error occurs writing to the file.
-  */ 
+  */
 inline
 int ttyWrite( const std::string & buffWrite, ///< [in] The characters to write to the tty.
               int fd,                        ///< [in] The file descriptor of the open tty.
@@ -124,11 +124,11 @@ int ttyWrite( const std::string & buffWrite, ///< [in] The characters to write t
 {
    double t0;
    struct pollfd pfd;
-   
+
    errno = 0;
    pfd.fd = fd;
    pfd.events = POLLOUT;
-   
+
    t0 = mx::get_curr_time();
 
    int totWritten = 0;
@@ -136,19 +136,24 @@ int ttyWrite( const std::string & buffWrite, ///< [in] The characters to write t
    {
       int timeoutCurrent = timeoutWrite - (mx::get_curr_time()-t0)*1000;
       if(timeoutCurrent < 0) return TTY_E_TIMEOUTONWRITE;
-      
+
       int rv = poll( &pfd, 1, timeoutCurrent);
       if( rv == 0 ) return TTY_E_TIMEOUTONWRITEPOLL;
       else if( rv < 0 ) return TTY_E_ERRORONWRITEPOLL;
-   
-      rv = write(fd, buffWrite.c_str()+totWritten, buffWrite.size()-totWritten); 
+
+      rv = write(fd, buffWrite.c_str()+totWritten, buffWrite.size()-totWritten);
       if(rv < 0) return TTY_E_ERRORONWRITE;
-      
+
+      //sleep(1);
+      #ifdef TTY_DEBUG
+      std::cerr << "Wrote " << rv << " chars of " << buffWrite.size() << "\n";
+      #endif
+
       totWritten += rv;
-      
+
       if( ( mx::get_curr_time()-t0)*1000 > timeoutWrite ) return TTY_E_TIMEOUTONWRITE;
    }
-   
+
    return TTY_E_NOERROR;
 }
 
@@ -158,8 +163,8 @@ int ttyWrite( const std::string & buffWrite, ///< [in] The characters to write t
   * \returns TTY_E_TIMEOUTONREADPOLL if the poll times out.
   * \returns TTY_E_ERRORONREADPOLL if an error is returned by poll.
   * \returns TTY_E_TIMEOUTONREAD if a timeout occurs during the read.
-  * \returns TTY_E_ERRORONREAD if an error occurs reading from the file. 
-  */ 
+  * \returns TTY_E_ERRORONREAD if an error occurs reading from the file.
+  */
 inline
 int ttyRead( std::string & strRead,   ///< [out] The string in which to store the output.
              const std::string & eot, ///< [in] A sequence of characters which indicates the end of transmission.
@@ -170,58 +175,62 @@ int ttyRead( std::string & strRead,   ///< [out] The string in which to store th
    int rv;
    int timeoutCurrent;
    double t0;
-   
+
    struct pollfd pfd;
-   
+
    errno = 0;
-   
+
    pfd.fd = fd;
    pfd.events = POLLIN;
 
    strRead.clear();
    char buffRead[TTY_BUFFSIZE];
-   
+
    //Start timeout clock for reading.
    t0 = mx::get_curr_time();
    timeoutCurrent = timeoutRead;
 
    //Now read the response up to the eot.
    strRead.clear();
-   
-   rv = poll( &pfd, 1, timeoutCurrent);    
+
+   rv = poll( &pfd, 1, timeoutCurrent);
    if( rv == 0 ) return TTY_E_TIMEOUTONREADPOLL;
    if( rv < 0 ) return TTY_E_ERRORONREADPOLL;
-   
-   rv = read(fd, buffRead, TTY_BUFFSIZE);   
+
+   rv = read(fd, buffRead, TTY_BUFFSIZE);
    if( rv < 0 ) return TTY_E_ERRORONREAD;
-      
+
    strRead.append( buffRead, rv);
-   
+
    while( !isEndOfTrans(strRead, eot) )
-   {  
+   {
       timeoutCurrent = timeoutRead - (mx::get_curr_time()-t0)*1000;
       if(timeoutCurrent < 0) return TTY_E_TIMEOUTONREAD;
-   
+
       rv = poll( &pfd, 1, timeoutCurrent);
       if( rv == 0 ) return TTY_E_TIMEOUTONREADPOLL;
       if( rv < 0 ) return TTY_E_ERRORONREADPOLL;
-      
+
       rv = read(fd, buffRead, TTY_BUFFSIZE);
       if( rv < 0 ) return TTY_E_ERRORONREAD;
-         
+      buffRead[rv] ='\0';
+
       strRead.append( buffRead, rv);
+      #ifdef TTY_DEBUG
+      std::cerr << "ttyRead: read " << rv << " bytes. buffRead=" << buffRead << "\n";
+      #endif
    }
-   
+
 
    return TTY_E_NOERROR;
-   
-   
+
+
 }
 
 /// Write to a tty on an open file descriptor, then get the result.
-/** The read is conducted until an end-of-transmission string is received.  
+/** The read is conducted until an end-of-transmission string is received.
   * Echo characters are swallowed if desired.
-  * 
+  *
   * \returns TTY_E_NOERROR on success
   * \returns TTY_E_TIMEOUTONWRITEPOLL if the poll times out.
   * \returns TTY_E_ERRORONWRITEPOLL if an error is returned by poll.
@@ -230,8 +239,8 @@ int ttyRead( std::string & strRead,   ///< [out] The string in which to store th
   * \returns TTY_E_TIMEOUTONREADPOLL if the poll times out.
   * \returns TTY_E_ERRORONREADPOLL if an error is returned by poll.
   * \returns TTY_E_TIMEOUTONREAD if a timeout occurs during the read.
-  * \returns TTY_E_ERRORONREAD if an error occurs reading from the file. 
-  */ 
+  * \returns TTY_E_ERRORONREAD if an error occurs reading from the file.
+  */
 inline
 int ttyWriteRead( std::string & strRead,        ///< [out] The string in which to store the output.
                   const std::string & strWrite, ///< [in] The characters to write to the tty.
@@ -245,20 +254,22 @@ int ttyWriteRead( std::string & strRead,        ///< [out] The string in which t
    strRead.clear();
 
    int rv;
-         
+
    //Write First
    rv = ttyWrite( strWrite, fd, timeoutWrite);
    if(rv != TTY_E_NOERROR) return rv;
 
+
+
    //Now read response from console
    int timeoutCurrent;
    double t0;
-   
+
    struct pollfd pfd;
    pfd.fd = fd;
    pfd.events = POLLIN;
 
-   
+
    //Start timeout clock for reading.
    t0 = mx::get_curr_time();;
 
@@ -272,28 +283,28 @@ int ttyWriteRead( std::string & strRead,        ///< [out] The string in which t
       {
          timeoutCurrent = timeoutRead - (mx::get_curr_time()-t0)*1000;
          if(timeoutCurrent < 0) return TTY_E_TIMEOUTONREAD;
-      
-         rv = poll( &pfd, 1, timeoutCurrent);    
+
+         rv = poll( &pfd, 1, timeoutCurrent);
          if( rv == 0 ) return TTY_E_TIMEOUTONREADPOLL;
          if( rv < 0 ) return TTY_E_ERRORONREADPOLL;
-      
+
          rv = read(fd, buffRead, TTY_BUFFSIZE);
          if( rv < 0 ) return TTY_E_ERRORONREAD;
-      
+
          totrv += rv;
       }
    }
-   
+
    timeoutCurrent = timeoutRead - (mx::get_curr_time()-t0)*1000;
    if(timeoutCurrent < 0) return TTY_E_TIMEOUTONREAD;
-   
+
    //Now read the response up to the eot.
    return ttyRead(strRead, eot, fd, timeoutCurrent);
 }
 
 
 
-} //namespace tty 
-} //namespace MagAOX 
+} //namespace tty
+} //namespace MagAOX
 
 #endif //tty_ttyIOUtils_hpp
