@@ -343,7 +343,19 @@ crackSpec (int *acp, char **avp[])
 	/* add to list */
 	if (!sets)
 	    sets = (SetSpec *) malloc (1);		/* seed realloc */
-	sets = (SetSpec *) realloc (sets, (nsets+1)*sizeof(SetSpec));
+
+   SetSpec * tmp_sets;
+	tmp_sets = (SetSpec *) realloc (sets, (nsets+1)*sizeof(SetSpec));
+
+   if(tmp_sets == NULL)
+   {
+      free(sets);
+      sets= NULL;
+      return 0;
+   }
+   sets = tmp_sets;
+   tmp_sets = NULL;
+
 	memset (&sets[nsets], 0, sizeof(SetSpec));
 	sets[nsets].d = strcpy ((char *)malloc(strlen(d)+1), d);
 	sets[nsets].p = strcpy ((char *)malloc(strlen(p)+1), p);
@@ -390,7 +402,7 @@ openINDIServer ()
 
 	/* connect */
         for (i = 0; i < 2; i++)
-            if (connect_to (sockfd,(struct sockaddr *)&serv_addr,sizeof(serv_addr), 1000 ) == 0) 
+            if (connect_to (sockfd,(struct sockaddr *)&serv_addr,sizeof(serv_addr), 1000 ) == 0)
                 break;
         if (i == 2) {
 	    perror ("connect");
@@ -625,7 +637,7 @@ sendBLOB (FILE *fp, SetEV *ep)
 	int fd, bloblen, l64, i;
 	char *dot;
 	unsigned char *blob, *encblob;
-	
+
 	/* get file size */
 	if (stat (ep->v, &s) < 0) {
 	    fprintf (stderr, "Could not get size of %s: %s\n", ep->v,
@@ -839,7 +851,7 @@ static void
 sendSpecs()
 {
 	int i;
-	
+
 	for (i = 0; i < nsets; i++) {
 	    sendNew (svrwfp, sets[i].dp, &sets[i]);
 	    if (verbose)
