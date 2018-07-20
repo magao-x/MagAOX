@@ -405,50 +405,14 @@ struct loop_open : public empty_log
 ///TrippLite PDU Outlet off.
 /** \ingroup logtypes
   */
-struct tripplitepdu_outlet_off
+struct tripplitepdu_outlet_off : public tripplitepdu_outlet_state
 {
     ///The event code
    static const eventCodeT eventCode = eventCodes::TRIPPLITEPDU_OUTLET_OFF;
 
-   ///The default level
-   static const logLevelT defaultLevel = logLevels::INFO;
-
-   ///The type of the message
-   typedef char messageT;
-
-   ///Get the length of the message.
-   static msgLenT length( const messageT & msg )
+   static std::string msgString( messageT & msg  /**< [in]  a char int denoting outlet */)
    {
-      return sizeof(messageT);
-   }
-
-   ///Format the buffer given the input message.
-   static int format( void * msgBuffer,    ///< [out] the buffer, must be pre-allocated to size length(msg)
-                      const messageT & msg ///< [in] the message, which is placed in the buffer char by char.
-                    )
-   {
-      char * cbuff = reinterpret_cast<char *>(msgBuffer);
-      cbuff[0] = msg;
-
-      return 0;
-   }
-
-   static int extract( messageT & msg,   ///< [out] the message which is populated with the contents of buffer.
-                       void * msgBuffer, ///< [in] the buffer containing the GIT state.
-                       msgLenT len       ///< [in] the length of the string contained in buffer.
-                     )
-   {
-      char * cbuff = reinterpret_cast<char *>(msgBuffer);
-      msg = cbuff[0];
-
-      return 0;
-   }
-
-   static std::string msgString( messageT & msg  /**< [in] [unused] the empty message */)
-   {
-      std::stringstream str;
-      str << "Outlet " << (int) msg << " off";
-      return str.str();
+      return tripplitepdu_outlet_state::msgString(msg, false);
    }
 };
 
@@ -456,51 +420,16 @@ struct tripplitepdu_outlet_off
 ///TrippLite PDU Outlet on.
 /** \ingroup logtypes
   */
-struct tripplitepdu_outlet_on
+struct tripplitepdu_outlet_on : public tripplitepdu_outlet_state
 {
     ///The event code
    static const eventCodeT eventCode = eventCodes::TRIPPLITEPDU_OUTLET_ON;
 
-   ///The default level
-   static const logLevelT defaultLevel = logLevels::INFO;
-
-   ///The type of the message
-   typedef char messageT;
-
-   ///Get the length of the message.
-   static msgLenT length( const messageT & msg )
+   static std::string msgString( messageT & msg  /**< [in] a char int denoting outlet  */)
    {
-      return sizeof(messageT);
+      return tripplitepdu_outlet_state::msgString(msg, true);
    }
 
-   ///Format the buffer given the input message.
-   static int format( void * msgBuffer,    ///< [out] the buffer, must be pre-allocated to size length(msg)
-                      const messageT & msg ///< [in] the message, which is placed in the buffer char by char.
-                    )
-   {
-      char * cbuff = reinterpret_cast<char *>(msgBuffer);
-      cbuff[0] = msg;
-
-      return 0;
-   }
-
-   static int extract( messageT & msg,   ///< [out] the message which is populated with the contents of buffer.
-                       void * msgBuffer, ///< [in] the buffer containing the GIT state.
-                       msgLenT len       ///< [in] the length of the string contained in buffer.
-                     )
-   {
-      char * cbuff = reinterpret_cast<char *>(msgBuffer);
-      msg = cbuff[0];
-
-      return 0;
-   }
-
-   static std::string msgString( messageT & msg  /**< [in] [unused] the empty message */)
-   {
-      std::stringstream str;
-      str << "Outlet " << (int) msg << " on";
-      return str.str();
-   }
 };
 
 
