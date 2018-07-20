@@ -988,7 +988,7 @@ inline
 int MagAOXApp::unlockPID()
 {
    /// \todo need error handling here.
-   remove(pidFileName.c_str());
+   ::remove(pidFileName.c_str());
 
    std::stringstream logss;
    logss << "PID (" << m_pid << ") unlocked.";
