@@ -243,9 +243,9 @@ struct software_log
       std::string ret = "SW FILE: ";
       ret += msg.file;
       ret += " LINE: ";
-      ret += mx::convertToString(msg.linenum);
+      ret += mx::ioutils::convertToString(msg.linenum);
       ret += "  CODE: ";
-      ret += mx::convertToString(msg.code);
+      ret += mx::ioutils::convertToString(msg.code);
       ret += " >";
       ret += msg.explanation;
 

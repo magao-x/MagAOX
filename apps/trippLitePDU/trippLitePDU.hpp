@@ -14,7 +14,6 @@ namespace app
 
 /** MagAO-X application to control a Tripp Lite PDU
   *
-  * \todo need config for timeouts
   * \todo handle timeouts gracefully -- maybe go to error, flush, disconnect, reconnect, etc.
   * \todo need username and secure password handling
   * \todo need to robustify login logic
@@ -429,7 +428,7 @@ int trippLitePDU::parsePDUStatus( std::string & strRead )
    float frequency, current, voltage;
    std::vector<bool> outletStates(8,0);
 
-   std::string pstr = mx::removeWhiteSpace(strRead);
+   std::string pstr = mx::ioutils::removeWhiteSpace(strRead);
 
    size_t st = pstr.find("Status:", 0);
    if( st == std::string::npos ) return -1;
@@ -448,7 +447,7 @@ int trippLitePDU::parsePDUStatus( std::string & strRead )
    ed = pstr.find('V', st);
    if( ed == std::string::npos ) return -5;
 
-   voltage = mx::convertFromString<float>( pstr.substr(st, ed-st) );
+   voltage = mx::ioutils::convertFromString<float>( pstr.substr(st, ed-st) );
 
    st = pstr.find(':', ed) + 1;
    if( st == std::string::npos ) return -6;
@@ -456,7 +455,7 @@ int trippLitePDU::parsePDUStatus( std::string & strRead )
    ed = pstr.find('H', st);
    if( ed == std::string::npos ) return -7;
 
-   frequency = mx::convertFromString<float>( pstr.substr(st, ed-st) );
+   frequency = mx::ioutils::convertFromString<float>( pstr.substr(st, ed-st) );
 
    st = pstr.find(':', ed) + 1;
    if( st == std::string::npos ) return -8;
@@ -465,7 +464,7 @@ int trippLitePDU::parsePDUStatus( std::string & strRead )
    ed = pstr.find('A', st);
    if( ed == std::string::npos ) return -10;
 
-   current = mx::convertFromString<float>( pstr.substr(st, ed-st) );
+   current = mx::ioutils::convertFromString<float>( pstr.substr(st, ed-st) );
 
    st = pstr.find("On:", ed) + 3;
    if( st != std::string::npos )
@@ -505,7 +504,7 @@ int trippLitePDU::changeOutletState( const pcf::IndiProperty &ipRecv,
       std::lock_guard<std::mutex> guard(m_devMutex);
 
       std::string cmd = "loadctl on -o ";
-      cmd += mx::convertToString<int>(onum+1);
+      cmd += mx::ioutils::convertToString<int>(onum+1);
       cmd += " --force\r";
 
       std::cerr << "Sending " << cmd << "\n";
@@ -532,7 +531,7 @@ int trippLitePDU::changeOutletState( const pcf::IndiProperty &ipRecv,
       std::cerr << "Request to turn outlet " << indiOutlet.getName() << " " << onum << " Off\n";
 
       std::string cmd = "loadctl off -o ";
-      cmd += mx::convertToString<int>(onum+1);
+      cmd += mx::ioutils::convertToString<int>(onum+1);
       cmd += " --force\r";
 
       std::cerr << "Sending " << cmd << "\n";

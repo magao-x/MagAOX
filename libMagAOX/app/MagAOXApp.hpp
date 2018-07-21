@@ -784,7 +784,7 @@ int MagAOXApp::euidCalled()
    if(seteuid(m_euidCalled) < 0)
    {
       std::string logss = "Setting effective user id to euidCalled (";
-      logss += mx::convertToString<int>(m_euidCalled);
+      logss += mx::ioutils::convertToString<int>(m_euidCalled);
       logss += ") failed.  Errno says: ";
       logss += strerror(errno);
 
@@ -803,7 +803,7 @@ int MagAOXApp::euidReal()
    if(seteuid(m_euidReal) < 0)
    {
       std::string logss = "Setting effective user id to euidReal (";
-      logss += mx::convertToString<int>(m_euidReal);
+      logss += mx::ioutils::convertToString<int>(m_euidReal);
       logss += ") failed.  Errno says: ";
       logss += strerror(errno);
 
