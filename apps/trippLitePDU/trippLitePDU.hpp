@@ -18,20 +18,23 @@ namespace app
   * \todo handle timeouts gracefully -- maybe go to error, flush, disconnect, reconnect, etc.
   * \todo need username and secure password handling
   * \todo need to robustify login logic
-  * \todo control outlets
   * \todo need to recognize signals in tty polls and not return errors, etc.
-  * \todo need mutex to make sure we don't update INDI=props while setting
   * \todo should check if values changed and do a sendSetProperty if so (pub/sub?)
   */
 class trippLitePDU : public MagAOXApp, public tty::usbDevice
 {
 
 protected:
-   std::string m_status;
-   float m_frequency {0};
-   float m_voltage {0};
-   float m_current {0};
-   std::vector<bool> m_outletStates;
+
+   int m_writeTimeOut {1000};  ///< The timeout for writing to the device [msec].
+   int m_readTimeOut {2000}; ///< The timeout for reading from the device [msec].
+   int m_outletStateDelay {5000}; ///< The maximum time to wait for an outlet to change state [msec].
+
+   std::string m_status; ///< The device status
+   float m_frequency {0}; ///< The line frequency reported by the device.
+   float m_voltage {0}; ///< The line voltage reported by the device.
+   float m_current {0}; ///< The current being reported by the device.
+   std::vector<bool> m_outletStates; ///< The outlet states, false = off, true = on.
 
    ///Mutex for locking device communications.
    std::mutex m_devMutex;
@@ -40,6 +43,7 @@ public:
    /// Default c'tor.
    trippLitePDU();
 
+   /// D'tor, declared and defined for noexcept.
    ~trippLitePDU() noexcept
    {}
 
@@ -85,9 +89,14 @@ protected:
    pcf::IndiProperty m_indiOutlet7;
    pcf::IndiProperty m_indiOutlet8;
 
-   int changeOutletState( const pcf::IndiProperty &ipRecv,
-                          pcf::IndiProperty & indiOutlet,
-                          int onum
+   ///Common function called by the individual outlet callbacks.
+   /**
+     * \returns 0 on success
+     * \returns -1 on error
+     */
+   int changeOutletState( const pcf::IndiProperty &ipRecv, ///< [in] the received INDI property
+                          pcf::IndiProperty & indiOutlet,  ///< [in] the INDI property corresponding to the outlet.
+                          int onum ///< [in] the number of the outlet (0-7)
                         );
 
 public:
@@ -111,6 +120,11 @@ trippLitePDU::trippLitePDU() : MagAOXApp(MAGAOX_CURRENT_SHA1, MAGAOX_REPO_MODIFI
 void trippLitePDU::setupConfig()
 {
    tty::usbDevice::setupConfig(config);
+
+   config.add("timeouts.writeTimeOut", "", "writeTimeOut", mx::argType::Required, "timeouts", "writeTimeOut", false, "int", "The timeout for writing to the device [msec]. Default = 1000");
+   config.add("timeouts.readTimeOut", "", "readTimeOut", mx::argType::Required, "timeouts", "readTimeOut", false, "int", "The timeout for reading the device [msec]. Default = 2000");
+   config.add("timeouts.outletStateDelay", "", "outletStateDelay", mx::argType::Required, "timeouts", "outletStateDelay", false, "int", "The maximum time to wait for an outlet to change state [msec]. Default = 5000");
+
 }
 
 void trippLitePDU::loadConfig()
@@ -124,6 +138,11 @@ void trippLitePDU::loadConfig()
    {
       log<software_error>( {__FILE__, __LINE__, rv, tty::ttyErrorString(rv)});
    }
+
+   config(m_writeTimeOut, "timeouts.writeTimeOut");
+   config(m_readTimeOut, "timeouts.readTimeOut");
+   config(m_outletStateDelay, "timeouts.outletStateDelay");
+
 }
 
 int trippLitePDU::appStartup()
@@ -260,7 +279,7 @@ int trippLitePDU::appLogic()
       std::lock_guard<std::mutex> guard(m_devMutex);
 
       std::string strRead;
-      int rv = MagAOX::tty::ttyWriteRead( strRead, "\r", "$> ", false, m_fileDescrip, 1000, 5000);
+      int rv = MagAOX::tty::ttyWriteRead( strRead, "\r", "$> ", false, m_fileDescrip, m_writeTimeOut, m_readTimeOut);
 
       if( rv == TTY_E_TIMEOUTONREADPOLL || rv == TTY_E_TIMEOUTONREAD )
       {
@@ -271,9 +290,9 @@ int trippLitePDU::appLogic()
 
             if(strRead.find("Username:") != std::string::npos)
             {
-               rv = MagAOX::tty::ttyWriteRead( strRead, "localadmin\r", ":", false, m_fileDescrip, 1000, 5000);
+               rv = MagAOX::tty::ttyWriteRead( strRead, "localadmin\r", ":", false, m_fileDescrip, m_writeTimeOut, m_readTimeOut);
                std::cerr << rv << "-" << strRead << "\n";
-               MagAOX::tty::ttyWriteRead( strRead, "localadmin\r", "$> ", false, m_fileDescrip, 1000, 5000);
+               MagAOX::tty::ttyWriteRead( strRead, "localadmin\r", "$> ", false, m_fileDescrip, m_writeTimeOut, m_readTimeOut);
                std::cerr << rv << "-" << strRead << "\n";
                //rv = MagAOX::tty::ttyWriteRead( strRead, "\r", "$> ", true, m_fileDescrip, 1000, 5000);
                //std::cerr << rv << "-" << strRead << "\n";
@@ -313,7 +332,7 @@ int trippLitePDU::appLogic()
       std::lock_guard<std::mutex> guard(m_devMutex);
 
       std::string strRead;
-      int rv = MagAOX::tty::ttyWriteRead( strRead, "devstatus\r", "$> ", true, m_fileDescrip, 1000, 5000);
+      int rv = MagAOX::tty::ttyWriteRead( strRead, "devstatus\r", "$> ", true, m_fileDescrip, m_writeTimeOut, m_readTimeOut);
 
       if(rv < 0)
       {
@@ -485,19 +504,21 @@ int trippLitePDU::changeOutletState( const pcf::IndiProperty &ipRecv,
    {
       std::lock_guard<std::mutex> guard(m_devMutex);
 
-      std::cerr << "Request to turn outlet " << indiOutlet.getName() << " " << onum << " On\n";
-
       std::string cmd = "loadctl on -o ";
       cmd += mx::convertToString<int>(onum+1);
       cmd += " --force\r";
 
       std::cerr << "Sending " << cmd << "\n";
+
       std::string strRead;
-      int rv = MagAOX::tty::ttyWriteRead( strRead, cmd, "$> ", true, m_fileDescrip, 1000, 5000);
+      int rv = MagAOX::tty::ttyWriteRead( strRead, cmd, "$> ", true, m_fileDescrip, m_writeTimeOut, m_readTimeOut);
+
       std::cerr << "Received " << strRead << " (" << rv << ")\n";
 
       std::cerr << "Waiting for confirmation...\n";
-      rv = MagAOX::tty::ttyRead(strRead, "\n", m_fileDescrip, 5000);
+
+      rv = MagAOX::tty::ttyRead(strRead, "\n", m_fileDescrip, m_outletStateDelay);
+
       std::cerr << "Received " << strRead << " (" << rv << ")\n";
 
       m_outletStates[onum] = 1;
@@ -515,12 +536,15 @@ int trippLitePDU::changeOutletState( const pcf::IndiProperty &ipRecv,
       cmd += " --force\r";
 
       std::cerr << "Sending " << cmd << "\n";
+
       std::string strRead;
-      int rv = MagAOX::tty::ttyWriteRead( strRead, cmd, "$> ", true, m_fileDescrip, 1000, 5000);
+      int rv = MagAOX::tty::ttyWriteRead( strRead, cmd, "$> ", true, m_fileDescrip, m_writeTimeOut, m_readTimeOut);
       std::cerr << "Received " << strRead << " (" << rv << ")\n";
 
       std::cerr << "Waiting for confirmation...\n";
-      rv = MagAOX::tty::ttyRead(strRead, "\n", m_fileDescrip, 5000);
+
+      rv = MagAOX::tty::ttyRead(strRead, "\n", m_fileDescrip, m_outletStateDelay);
+
       std::cerr << "Received " << strRead << " (" << rv << ")\n";
 
       m_outletStates[onum] = 0;
