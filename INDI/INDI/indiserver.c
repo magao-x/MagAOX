@@ -567,7 +567,7 @@ startRemoteDvr (DvrInfo *dp)
 
 	/* extract host and port */
 	port = INDIPORT;
-	if (sscanf (dp->name, "%1024[^@]@%1024[^:]:%d", dev, host, &port) < 2)
+	if (sscanf (dp->name, "%1023[^@]@%1023[^:]:%d", dev, host, &port) < 2)
 	    Bye ("Bad remote device syntax: %s\n", dp->name);
 
 	/* try connect forever until success */

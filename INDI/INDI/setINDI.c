@@ -335,7 +335,7 @@ crackSpec (int *acp, char **avp[])
 	 * N.B. can't use %s for ev because it stops at whitespace; the %[ -~]
 	 *   includes all printable ASCII characters from space through squiggle.
 	 */
-	if (sscanf (spec, "%128[^.].%128[^.].%2048[ -~]", d, p, ev) != 3) {
+	if (sscanf (spec, "%127[^.].%127[^.].%2047[ -~]", d, p, ev) != 3) {
 	    fprintf (stderr, "Malformed property spec: %s\n", spec);
 	    usage();
 	}
