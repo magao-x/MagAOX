@@ -6,17 +6,17 @@ include $(SELF_DIR)config.mk
 
 all: indiserver getINDI setINDI evalINDI
 
-indiserver:
+indiserver: indiapi.h fq.h fq.c indiserver.c
 	$(CC) $(CCFLAGS) -o indiserver -I../liblilxml  indiserver.c fq.c ../liblilxml/liblilxml.a -lpthread
 
-getINDI:
+getINDI: connect_to.h connect_to.c indiapi.h getINDI.c
 	$(CC) $(CCFLAGS) -o getINDI -I../liblilxml  getINDI.c connect_to.c ../liblilxml/liblilxml.a -lz
 
 
-setINDI:
+setINDI: connect_to.h connect_to.c indiapi.h setINDI.c
 	$(CC) $(CCFLAGS) -o setINDI -I../liblilxml  setINDI.c connect_to.c ../liblilxml/liblilxml.a
 
-evalINDI:
+evalINDI: connect_to.h connect_to.c indiapi.h evalINDI.c
 	$(CC) $(CCFLAGS) -o evalINDI -I../liblilxml  evalINDI.c connect_to.c compiler.c ../liblilxml/liblilxml.a -lm
 
 install: all

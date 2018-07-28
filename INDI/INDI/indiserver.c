@@ -398,7 +398,7 @@ initDvr (DvrInfo *dp, char *name)
 	    Bye ("Driver %s attr init: %s\n", dp->name, strerror(errno));
 	if (pthread_attr_setdetachstate(&attr, PTHREAD_CREATE_DETACHED))
 	    Bye ("Driver %s setdetacthed: %s\n", dp->name, strerror(errno));
-	
+
 	/* start the thread that starts this driver */
 	if (pthread_create (&thr, &attr, startDvrThread, (void*)dp))
 	    Bye ("Driver %s startDvrThread thread: %s\n", dp->name, strerror(errno));
@@ -535,7 +535,7 @@ startLocalDvr (DvrInfo *dp)
 	if (pthread_attr_destroy (&attr))
 	    Bye ("Driver %s attr destroy: %s\n", dp->name, strerror(errno));
 
-	/* first message primes driver to report its properties -- dev already 
+	/* first message primes driver to report its properties -- dev already
 	 * known if just restarting
 	 */
 	mp = newMsg();
@@ -567,7 +567,7 @@ startRemoteDvr (DvrInfo *dp)
 
 	/* extract host and port */
 	port = INDIPORT;
-	if (sscanf (dp->name, "%[^@]@%[^:]:%d", dev, host, &port) < 2)
+	if (sscanf (dp->name, "%1024[^@]@%1024[^:]:%d", dev, host, &port) < 2)
 	    Bye ("Bad remote device syntax: %s\n", dp->name);
 
 	/* try connect forever until success */
@@ -598,7 +598,7 @@ startRemoteDvr (DvrInfo *dp)
 	if (!dp->sprops)
 	    Bye ("No memory to seed sprops starting remore driver %s\n", dev);
 	dp->nsprops = 0;
-	
+
 	/* N.B. storing name now is key to limiting outbound traffic to this
 	 * dev.
 	 */
@@ -727,7 +727,7 @@ indiListen ()
 	/* make socket endpoint */
 	if ((sfd = socket (AF_INET, SOCK_STREAM, 0)) < 0)
 	    Bye ("socket: %s\n", strerror(errno));
-	
+
 	/* bind to given port for any IP address */
 	memset (&serv_socket, 0, sizeof(serv_socket));
 	serv_socket.sin_family = AF_INET;
@@ -1785,7 +1785,7 @@ findClDevice (ClInfo *cp, int isblob, char *dev, char *name)
 
 	for (i = 0; i < nprops; i++) {
 	    Property *pp = &pa[i];
-	    if ((!dev[0] || !pp->dev[0] || !strcmp (dev, pp->dev)) 
+	    if ((!dev[0] || !pp->dev[0] || !strcmp (dev, pp->dev))
 		    && (!name[0] || !pp->name[0] || !strcmp (name, pp->name)))
 		break;
 	}
@@ -1877,7 +1877,7 @@ crackBLOB (char *enableBLOB, BLOBHandling *bp)
 	    *bp = B_ALSO;
 	else if (!strcmp (enableBLOB, "Only"))
 	    *bp = B_ONLY;
-	else 
+	else
 	    *bp = B_NEVER;
 }
 

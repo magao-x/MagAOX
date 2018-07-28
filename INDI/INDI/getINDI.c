@@ -319,7 +319,7 @@ crackDPE (char *spec)
 
 	if (verbose > 1)
 	    fprintf (stderr, "looking for %s\n", spec);
-	int ns = sscanf (spec, "%[^.].%[^.].%s", d, p, e);
+	int ns = sscanf (spec, "%1024[^.].%1024[^.].%2048s", d, p, e);
         if (ns < 3)
             strcpy (e, "*");
         if (ns < 2)
