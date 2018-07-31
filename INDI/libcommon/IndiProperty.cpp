@@ -172,7 +172,7 @@ bool IndiProperty::operator==( const IndiProperty &ipRhs ) const
   // We need some iterators for each of the maps.
   map<string, IndiElement>::const_iterator itrRhs = ipRhs.m_mapElements.end();
   map<string, IndiElement>::const_iterator itr = m_mapElements.begin();
-  for ( ; itr != m_mapElements.end(); itr++ )
+  for ( ; itr != m_mapElements.end(); ++itr )
   {
     // Can we find an element of the same name in the other map?
     itrRhs = ipRhs.m_mapElements.find( itr->first );
@@ -1317,5 +1317,3 @@ IndiProperty::Type IndiProperty::convertStringToType( const string &szTag )
 }
 
 ////////////////////////////////////////////////////////////////////////////////
-
-

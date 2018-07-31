@@ -484,7 +484,7 @@ void Logger::logAlarm( const Logger::Severity &tSeverity,
       pclose( fpMail );
     }
   }
-  catch ( std::exception excep )
+  catch ( std::exception & excep )
   {
     Logger msgLog;
     msgLog.clear();

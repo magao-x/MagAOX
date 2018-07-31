@@ -165,7 +165,7 @@ IndiProperty Config::get( const IndiProperty::Type &tType,
   string szName;
   string szSectionName;
   string szElementName;
-  for ( ; itr != itrEnd; itr++ )
+  for ( ; itr != itrEnd; ++itr )
   {
     szName = itr->first;
     // Do we have a section name?

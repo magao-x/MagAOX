@@ -93,7 +93,7 @@ IndiPropertyMap::ConstIterator IndiPropertyMap::find(const string& szPropertyNam
 IndiPropertyMap::Iterator IndiPropertyMap::findLabel( const string& szLabelText )
 {
   map<string, IndiProperty>::iterator itr = m_mapProperties.begin();
-  for ( ; itr != m_mapProperties.end(); itr++ )
+  for ( ; itr != m_mapProperties.end(); ++itr )
   {
     if ( itr->second.getLabel() == szLabelText )
     {

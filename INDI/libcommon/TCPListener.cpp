@@ -354,7 +354,7 @@ void TCPListener::execute()
       ///  are we an active connection?
       if ( itr->second->isConnected() == true )
       {
-        itr++;
+        ++itr;
       }
       else
       {

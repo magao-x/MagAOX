@@ -299,7 +299,7 @@ string ConfigFile::printAll() const
 
   ssList << "[ConfigFile::printAll] <-start-> " << endl;
   map<string, string>::const_iterator itr = m_mapVars.begin();
-  for ( ; itr != m_mapVars.end(); itr++ )
+  for ( ; itr != m_mapVars.end(); ++itr )
   {
     ssList << " name: '" << itr->first << "'"
          << " value: '" << itr->second << "'" << endl;
