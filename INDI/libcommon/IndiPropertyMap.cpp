@@ -132,7 +132,7 @@ IndiPropertyMap::Iterator IndiPropertyMap::find( const string& szElementName,
                                                  const string& szElementValue )
 {
   map<string, IndiProperty>::iterator itr = m_mapProperties.begin();
-  for ( ; itr != m_mapProperties.end(); itr++ )
+  for ( ; itr != m_mapProperties.end(); ++itr )
   {
     if ( itr->second.find( szElementName ) == true &&
          itr->second[szElementName].get() == szElementValue )
@@ -153,7 +153,7 @@ IndiPropertyMap::ConstIterator IndiPropertyMap::find( const string& szElementNam
                                                       const string& szElementValue ) const
 {
   map<string, IndiProperty>::const_iterator itr = m_mapProperties.begin();
-  for ( ; itr != m_mapProperties.end(); itr++ )
+  for ( ; itr != m_mapProperties.end(); ++itr )
   {
     if ( itr->second.find( szElementName ) == true &&
          itr->second[szElementName].get() == szElementValue )
@@ -252,7 +252,7 @@ void IndiPropertyMap::sendSet( const IndiDriver &idParent,
   if ( szPropertyName.length() == 0 )
   {
     map<string, IndiProperty>::const_iterator itr = m_mapProperties.begin();
-    for ( ; itr != m_mapProperties.end(); itr++ )
+    for ( ; itr != m_mapProperties.end(); ++itr )
     {
       if ( szNewName.length() == 0 )
       {
@@ -372,7 +372,7 @@ void IndiPropertyMap::sendDef( const IndiDriver &idParent,
   if ( szPropertyName.length() == 0 )
   {
     map<string, IndiProperty>::const_iterator itr = m_mapProperties.begin();
-    for ( ; itr != m_mapProperties.end(); itr++ )
+    for ( ; itr != m_mapProperties.end(); ++itr )
     {
       if ( szNewName.length() == 0 )
       {
@@ -428,7 +428,7 @@ void IndiPropertyMap::updateState( const IndiDriver &idParent,
   if ( szPropertyName.length() == 0 )
   {
     map<string, IndiProperty>::iterator itr = m_mapProperties.begin();
-    for ( ; itr != m_mapProperties.end(); itr++ )
+    for ( ; itr != m_mapProperties.end(); ++itr )
     {
       if ( pstNew != itr->second.getState() )
       {
@@ -483,7 +483,7 @@ void IndiPropertyMap::sendGet( IndiDriver &idParent,
   if ( szPropertyName.length() == 0 )
   {
     map<string, IndiProperty>::const_iterator itr = m_mapProperties.begin();
-    for ( ; itr != m_mapProperties.end(); itr++ )
+    for ( ; itr != m_mapProperties.end(); ++itr )
     {
       idParent.sendGetProperties( itr->second );
     }
