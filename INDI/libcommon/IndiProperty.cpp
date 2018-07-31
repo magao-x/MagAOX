@@ -258,7 +258,7 @@ bool IndiProperty::compareProperty( const IndiProperty &ipComp ) const
   // We need some iterators for each of the maps.
   map<string, IndiElement>::const_iterator itrComp = ipComp.m_mapElements.end();
   map<string, IndiElement>::const_iterator itr = m_mapElements.begin();
-  for ( ; itr != m_mapElements.end(); itr++ )
+  for ( ; itr != m_mapElements.end(); ++itr )
   {
     // Can we find an element of the same name in the other map?
     itrComp = ipComp.m_mapElements.find( itr->first );
