@@ -64,7 +64,7 @@ namespace app
   *
   * \ingroup magaoxapp
   */
-class MagAOXApp : public mx::application, public logger::logManager<logFileRaw>
+class MagAOXApp : public mx::application
 {
 
 protected:
@@ -81,15 +81,12 @@ protected:
 
    int m_shutdown {0}; ///< Flag to signal it's time to shutdown.  When not 0, the main loop exits.
 
-
-
 private:
 
    ///Default c'tor is deleted.
    MagAOXApp() = delete;
 
 public:
-
 
    /// Public c'tor.  Handles uid, logs git repo status, and initializes static members.
    /**
@@ -182,6 +179,22 @@ public:
 
    ///@} -- Pure Virtual Functions
 
+   /** \name Logging
+     * @{
+     */
+protected:
+   logger::logManager<logFileRaw> m_log;
+
+public:
+   template<typename logT>
+   void log( const typename logT::messageT & msg, ///< [in] the message to log
+             logLevelT level = logLevels::DEFAULT ///< [in] [optional] the log level.  The default is used if not specified.
+           );
+
+   template<typename logT>
+   void log( logLevelT level = logLevels::DEFAULT /**< [in] [optional] the log level.  The default is used if not specified.*/);
+
+   ///@} -- logging
 
    /** \name Signal Handling
      * @{
@@ -506,7 +519,7 @@ void MagAOXApp::setDefaults( int argc,
    //Setup default log path
    tmpstr = MagAOXPath + "/" + MAGAOX_logRelPath;
 
-   logPath(tmpstr);
+   m_log.logPath(tmpstr);
 
    //Setup default sys path
    tmpstr = MagAOXPath + "/" + MAGAOX_sysRelPath;
@@ -555,14 +568,7 @@ void MagAOXApp::setupBasicConfig() //virtual
    config.add("RTPriority", "P", "RTPriority", mx::argType::Required, "", "RTPriority", false, "unsigned", "The real-time priority (0-99)");
 
    //Logger Stuff
-   config.add("logger.logDir","L", "logDir",mx::argType::Required, "logger", "logDir", false, "string", "The directory for log files");
-   config.add("logger.logExt","", "logExt",mx::argType::Required, "logger", "logExt", false, "string", "The extension for log files");
-   config.add("logger.maxLogSize","", "maxLogSize",mx::argType::Required, "logger", "maxLogSize", false, "string", "The maximum size of log files");
-   config.add("logger.writePause","", "writePause",mx::argType::Required, "logger", "writePause", false, "unsigned long", "The log thread pause time in ns");
-   config.add("loger.logThreadPrio", "", "logThreadPrio", mx::argType::Required, "logger", "logThreadPrio", false, "int", "The log thread priority");
-   config.add("logger.logLevel","l", "logLevel",mx::argType::Required, "logger", "logLevel", false, "string", "The log level");
-
-
+   m_log.setupConfig(config);
 
 }
 
@@ -570,44 +576,8 @@ inline
 void MagAOXApp::loadBasicConfig() //virtual
 {
    //---------- Setup the logger ----------//
-
-   //-- logDir
-   std::string tmp;
-   config(tmp, "logger.logDir");
-   if(tmp != "") logPath(tmp);
-   logName(m_configName);
-
-   //-- logLevel
-   tmp = "";
-   config(tmp, "logger.logLevel");
-   if(tmp != "")
-   {
-      logLevelT lev;
-
-      lev = logLevelFromString(tmp);
-
-      if(  lev == logLevels::DEFAULT ) lev = logLevels::INFO;
-      if( lev == logLevels::UNKNOWN )
-      {
-         std::cerr << "Unkown log level specified.  Using default (INFO)\n";
-         lev = logLevels::INFO;
-      }
-
-      m_logLevel = lev;
-   }
-
-
-   //logExt
-   config(m_logExt, "logger.logExt");
-
-   //maxLogSize
-   config(m_maxLogSize, "logger.maxLogSize");
-
-   //writePause
-   config(m_writePause, "logger.writePause");
-
-   //logThreadPrio
-   config(m_logThreadPrio, "logger.logThreadPrio");
+   m_log.logName(m_configName);
+   m_log.loadConfig(config);
 
    //--------- Loop Pause Time --------//
    config(loopPause, "loopPause");
@@ -635,7 +605,7 @@ int MagAOXApp::execute() //virtual
    }
 
    //Begin the logger
-   logThreadStart();
+   m_log.logThreadStart();
 
    setSigTermHandler();
 
@@ -685,6 +655,20 @@ int MagAOXApp::execute() //virtual
    unlockPID();
 
    return 0;
+}
+
+template<typename logT>
+void MagAOXApp::log( const typename logT::messageT & msg,
+                     logLevelT level
+                   )
+{
+   m_log.log<logT>(msg, level);
+}
+
+template<typename logT>
+void MagAOXApp::log( logLevelT level)
+{
+   m_log.log<logT>(level);
 }
 
 inline

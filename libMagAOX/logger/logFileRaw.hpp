@@ -84,7 +84,7 @@ public:
 
    /// Get the path.
    /**
-     * \returns the current value of _path.
+     * \returns the current value of m_logPath.
      */
    std::string logPath();
 
@@ -94,13 +94,27 @@ public:
      * \returns 0 on success
      * \returns -1 on error
      */
-   int logName( const std::string & newName /**< [in] the new value of _name */ );
+   int logName( const std::string & newName /**< [in] the new value of m_logName */ );
 
    /// Get the name
    /**
      * \returns the current value of _name.
      */
    std::string logName();
+
+   /// Set the log extension
+   /**
+     *
+     * \returns 0 on success
+     * \returns -1 on error
+     */
+   int logExt( const std::string & newExt /**< [in] the new value of m_logExt */ );
+
+   /// Get the log extension
+   /**
+     * \returns the current value of m_logExt.
+     */
+   std::string logExt();
 
    /// Set the maximum file size
    /**
@@ -191,6 +205,19 @@ inline
 std::string logFileRaw::logName()
 {
    return m_logName;
+}
+
+inline
+int logFileRaw::logExt( const std::string & newExt)
+{
+   m_logExt = newExt;
+   return 0;
+}
+
+inline
+std::string logFileRaw::logExt()
+{
+   return m_logExt;
 }
 
 inline

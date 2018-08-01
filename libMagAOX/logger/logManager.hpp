@@ -100,6 +100,45 @@ struct logManager : public logFileT
      */
    unsigned long writePause();
 
+   /// Set a new value of logLevel
+   /** Updates m_logLevel with new value.
+     * Will return an error and take no actions if the argument
+     * is outside the range of the logLevels enum.
+     *
+     * \returns 0 on success
+     * \returns -1 on error.
+     */
+   int logLevel( logLevelT newLev /**< [in] the new value of logLevel */);
+
+   /// Get the current value of logLevel
+   /** \returns the value m_logLevel
+     */
+   logLevelT logLevel();
+
+   /// Set a new value of logThreadPrio
+   /** Updates m_logThreadPrio with new value.
+     * If the argument is < 0, this sets m_logThreadPrio to 0.
+     * Will not set > 98, and returns -1 with no changes in this case.
+     *
+     * \returns 0 on success
+     * \returns -1 on error (> 98).
+     */
+   int logThreadPrio( int newPrio /**< [in] the new value of logThreadPrio */);
+
+   /// Get the current value of logThreadPrio
+   /** \returns the value m_logThreadPrio
+     */
+   int logThreadPrio();
+
+   ///Setup an application configurator for the logger section
+   int setupConfig( mx::appConfigurator & config /**< [in] an application configuration to setup */);
+
+   ///Load the logger section from an application configurator
+   /**
+     */
+   int loadConfig( mx::appConfigurator & config /**< [in] an application configuration from which to load values */);
+
+
    ///Thread starter, called by m_logThreadStart on thread construction.  Calls m_logThreadExec.
    static void _logThreadStart( logManager * l /**< [in] a pointer to a logger instance (normally this) */);
 
@@ -173,6 +212,101 @@ template<class logFileT>
 unsigned long logManager<logFileT>::writePause()
 {
    return m_writePause;
+}
+
+template<class logFileT>
+int logManager<logFileT>::logLevel( logLevelT newLev )
+{
+   if(newLev >= logLevels::MAXLEVEL)
+   {
+      return -1;
+   }
+
+   if(newLev <= logLevels::UNKNOWN)
+   {
+      return -1;
+   }
+
+   m_logLevel = newLev;
+
+   return 0;
+}
+
+template<class logFileT>
+logLevelT logManager<logFileT>::logLevel()
+{
+   return m_logLevel;
+}
+
+template<class logFileT>
+int logManager<logFileT>::logThreadPrio( int newPrio )
+{
+   if(newPrio > 98) return -1; //clamped at 98 for safety.
+   if(newPrio < 0) newPrio = 0;
+
+   m_logThreadPrio = newPrio;
+   return 0;
+}
+
+template<class logFileT>
+int logManager<logFileT>::logThreadPrio()
+{
+   return m_logThreadPrio;
+}
+
+template<class logFileT>
+int logManager<logFileT>::setupConfig( mx::appConfigurator & config )
+{
+   config.add("logger.logDir","L", "logDir",mx::argType::Required, "logger", "logDir", false, "string", "The directory for log files");
+   config.add("logger.logExt","", "logExt",mx::argType::Required, "logger", "logExt", false, "string", "The extension for log files");
+   config.add("logger.maxLogSize","", "maxLogSize",mx::argType::Required, "logger", "maxLogSize", false, "string", "The maximum size of log files");
+   config.add("logger.writePause","", "writePause",mx::argType::Required, "logger", "writePause", false, "unsigned long", "The log thread pause time in ns");
+   config.add("loger.logThreadPrio", "", "logThreadPrio", mx::argType::Required, "logger", "logThreadPrio", false, "int", "The log thread priority");
+   config.add("logger.logLevel","l", "logLevel",mx::argType::Required, "logger", "logLevel", false, "string", "The log level");
+
+   return 0;
+}
+
+template<class logFileT>
+int logManager<logFileT>::loadConfig( mx::appConfigurator & config )
+{
+   //-- logDir
+   std::string tmp;
+   config(tmp, "logger.logDir");
+   if(tmp != "") this->logPath(tmp);
+
+   //-- logLevel
+   tmp = "";
+   config(tmp, "logger.logLevel");
+   if(tmp != "")
+   {
+      logLevelT lev;
+
+      lev = logLevelFromString(tmp);
+
+      if(  lev == logLevels::DEFAULT ) lev = logLevels::INFO;
+      if( lev == logLevels::UNKNOWN )
+      {
+         std::cerr << "Unkown log level specified.  Using default (INFO)\n";
+         lev = logLevels::INFO;
+      }
+      logLevel(lev);
+   }
+
+
+   //logExt
+   config(this->m_logExt, "logger.logExt");
+
+   //maxLogSize
+   config(this->m_maxLogSize, "logger.maxLogSize");
+
+   //writePause
+   config(m_writePause, "logger.writePause");
+
+   //logThreadPrio
+   config(m_logThreadPrio, "logger.logThreadPrio");
+
+   return 0;
 }
 
 template<class logFileT>
