@@ -186,11 +186,18 @@ protected:
    logger::logManager<logFileRaw> m_log;
 
 public:
+
+   /// Make a log entry
+   /** Wrapper for logManager::log
+     */
    template<typename logT>
    void log( const typename logT::messageT & msg, ///< [in] the message to log
              logLevelT level = logLevels::DEFAULT ///< [in] [optional] the log level.  The default is used if not specified.
            );
 
+   /// Make a log entry
+   /** Wrapper for logManager::log
+     */
    template<typename logT>
    void log( logLevelT level = logLevels::DEFAULT /**< [in] [optional] the log level.  The default is used if not specified.*/);
 
