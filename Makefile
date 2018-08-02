@@ -4,11 +4,11 @@ apps_to_build = magAOXMaths
 utils_to_build = logdump
 
 
-all: indi_all apps_all
+all: indi_all apps_all utils_all
 
-install: indi_install apps_install
+install: indi_install apps_install utils_install
 
-clean: indi_clean apps_clean
+clean: indi_clean apps_clean utils_clean
 
 indi_all:
 	cd INDI; ${MAKE} all
@@ -34,6 +34,21 @@ apps_clean:
 		(cd apps/$$app; ${MAKE} -f ../../Make/magAOXApp.mk t=$$app clean) || break; \
 	done
 
+utils_all:
+		for app in ${utils_to_build}; do \
+			(cd utils/$$app; ${MAKE} -f ../../Make/magAOXUtil.mk t=$$app) || break; \
+		done
+
+utils_install:
+		for app in ${utils_to_build}; do \
+			(cd utils/$$app; ${MAKE} -f ../../Make/magAOXUtil.mk t=$$app install) || break; \
+		done
+
+utils_clean:
+		for app in ${utils_to_build}; do \
+			(cd utils/$$app; ${MAKE} -f ../../Make/magAOXUtil.mk t=$$app clean) || break; \
+		done
+
 .PHONY: setup
 setup:
 		@for file in ./local/*.example.mk; do \
@@ -49,4 +64,3 @@ setup:
 		@echo "Build settings available in local/MxApp.mk\n***"
 		@grep  "?=" mk/MxApp.mk || true
 		@echo "***"
-		
