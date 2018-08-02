@@ -59,6 +59,7 @@ void logdump::loadConfig()
    ext = ".";
    ext += MAGAOX_default_logExt;
    config(ext, "ext");
+   ///\todo need to check for lack of "." and error or fix
 
    config(nfiles, "nfiles");
 
@@ -69,7 +70,7 @@ void logdump::loadConfig()
 
    if(config.nonOptions.size() > 1)
    {
-      std::cerr << "logdump: only one application at at time supported. Try logdump -h for help.\n";
+      std::cerr << "logdump: only one application at a time supported. Try logdump -h for help.\n";
    }
 
    prefixes.resize(config.nonOptions.size());
@@ -90,6 +91,7 @@ int logdump::execute()
 
    std::vector<std::string> logs = mx::ioutils::getFileNames( dir, prefixes[0], "", ext);
 
+   ///\todo if follow is set, then should nfiles default to 1 unless explicitly set?
    if(nfiles <= 0)
    {
       nfiles = logs.size();
@@ -127,6 +129,7 @@ int logdump::execute()
                   clearerr(fin);
                   nrd = fread( head.get(), sizeof(char), headerSize, fin);
 
+                  //Check if a new file exists now.
                   size_t oldsz = logs.size();
                   logs = mx::ioutils::getFileNames( dir, prefixes[0], "", ext);
                   if(logs.size() > oldsz) break;
