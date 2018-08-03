@@ -17,17 +17,20 @@ class logdump : public mx::application
 {
 protected:
 
-   std::string dir;
-   std::string ext;
+   std::string m_dir;
+   std::string m_ext;
 
    unsigned long m_pauseTime {250}; ///When following, pause time to check for new data. msec. Default is 250 msec.
    int m_fileCheckInterval {4}; ///When following, number of loops to wait before checking for a new file.  Default is 4.
 
-   std::vector<std::string> prefixes;
+   std::vector<std::string> m_prefixes;
 
    int m_nfiles {0}; ///Number of files to dump.  Default is 0, unless following then the default is 1.
 
    bool m_follow {false};
+
+   logLevelT m_level {logLevels::TELEMETRY};
+
 
    void printLogBuff( const logLevelT & lvl,
                       const eventCodeT & ec,
@@ -53,6 +56,8 @@ void logdump::setupConfig()
    config.add("ext","e", "ext" , mx::argType::Required, "", "ext", false,  "string", "The file extension of log files.  MagAO-X default is normally used.");
    config.add("nfiles","n", "nfiles" , mx::argType::Required, "", "nfiles", false,  "int", "Number of log files to dump.  If 0, then all matching files dumped.  Default: 0, 1 if following.");
    config.add("follow","f", "follow" , mx::argType::True, "", "follow", false,  "bool", "Follow the log, printing new entries as they appear.");
+   config.add("level","l", "level" , mx::argType::Required, "", "level", false,  "int/string", "Minimum log level to dump, either an integer or a string. -1/TELEMETRY [the default], 0/DEFAULT, 1/D1/DBG1/DEBUG2, 2/D2/DBG2/DEBUG1,3/INFO,4/WARNING,5/ERROR,6/CRITICAL,7/FATAL.  Note that only the mininum unique string is required.");
+
 }
 
 void logdump::loadConfig()
@@ -66,14 +71,14 @@ void logdump::loadConfig()
    {
       tmpstr = MAGAOX_path;
    }
-   dir = tmpstr +  "/" + MAGAOX_logRelPath;;
+   m_dir = tmpstr +  "/" + MAGAOX_logRelPath;;
 
    //Now check for config option for dir
-   config(dir, "dir");
+   config(m_dir, "dir");
 
-   ext = ".";
-   ext += MAGAOX_default_logExt;
-   config(ext, "ext");
+   m_ext = ".";
+   m_ext += MAGAOX_default_logExt;
+   config(m_ext, "ext");
    ///\todo need to check for lack of "." and error or fix
 
 
@@ -88,10 +93,10 @@ void logdump::loadConfig()
       std::cerr << "logdump: only one application at a time supported. Try logdump -h for help.\n";
    }
 
-   prefixes.resize(config.nonOptions.size());
+   m_prefixes.resize(config.nonOptions.size());
    for(int i=0;i<config.nonOptions.size(); ++i)
    {
-      prefixes[i] = config.nonOptions[i];
+      m_prefixes[i] = config.nonOptions[i];
    }
 
    config(m_follow, "follow");
@@ -99,15 +104,21 @@ void logdump::loadConfig()
    if(m_follow) m_nfiles = 1; //default to 1 if follow is set.
    config(m_nfiles, "nfiles");
 
+   tmpstr = "";
+   config(tmpstr, "level");
+   if(tmpstr != "")
+   {
+      m_level = logLevelFromString(tmpstr);
+   }
 }
 
 int logdump::execute()
 {
 
-   if(prefixes.size() !=1 ) return -1; //error message will have been printed in loadConfig.
+   if(m_prefixes.size() !=1 ) return -1; //error message will have been printed in loadConfig.
 
 
-   std::vector<std::string> logs = mx::ioutils::getFileNames( dir, prefixes[0], "", ext);
+   std::vector<std::string> logs = mx::ioutils::getFileNames( m_dir, m_prefixes[0], "", m_ext);
 
    ///\todo if follow is set, then should nfiles default to 1 unless explicitly set?
    if(m_nfiles <= 0)
@@ -126,7 +137,7 @@ int logdump::execute()
 
       bufferPtrT logBuff;
 
-      fin = fopen(fname.c_str(), "r");
+      fin = fopen(fname.c_str(), "rb");
 
       size_t buffSz = 0;
       while(!feof(fin)) //<--This should be an exit condition controlled by loop logic, not feof.
@@ -152,7 +163,7 @@ int logdump::execute()
                   {
                      //Check if a new file exists now.
                      size_t oldsz = logs.size();
-                     logs = mx::ioutils::getFileNames( dir, prefixes[0], "", ext);
+                     logs = mx::ioutils::getFileNames( m_dir, m_prefixes[0], "", m_ext);
                      if(logs.size() > oldsz) break;
 
                      check = 0;
@@ -171,6 +182,11 @@ int logdump::execute()
 
          //Here: check if lvl, eventCode, etc, match what we want.
          //If not, fseek and loop.
+         if(lvl < m_level)
+         {
+            fseek(fin, len, SEEK_CUR);
+            continue;
+         }
 
          if( headerSize + len > buffSz )
          {
@@ -183,6 +199,11 @@ int logdump::execute()
          nrd = fread( logBuff.get() + headerSize, sizeof(char), len, fin);
          // If not following, exit loop without printing the incomplete log entry (go on to next file).
          // If following, wait for it, but also be checking for new log file in case of crash
+
+         /*if(lvl < m_level)
+         {
+            continue;
+         }*/
 
          printLogBuff(lvl, ec, len, logBuff);
 
