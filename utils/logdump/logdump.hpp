@@ -31,6 +31,7 @@ protected:
 
    logLevelT m_level {logLevels::TELEMETRY};
 
+   std::vector<eventCodeT> m_codes;
 
    void printLogBuff( const logLevelT & lvl,
                       const eventCodeT & ec,
@@ -56,8 +57,8 @@ void logdump::setupConfig()
    config.add("ext","e", "ext" , mx::argType::Required, "", "ext", false,  "string", "The file extension of log files.  MagAO-X default is normally used.");
    config.add("nfiles","n", "nfiles" , mx::argType::Required, "", "nfiles", false,  "int", "Number of log files to dump.  If 0, then all matching files dumped.  Default: 0, 1 if following.");
    config.add("follow","f", "follow" , mx::argType::True, "", "follow", false,  "bool", "Follow the log, printing new entries as they appear.");
-   config.add("level","l", "level" , mx::argType::Required, "", "level", false,  "int/string", "Minimum log level to dump, either an integer or a string. -1/TELEMETRY [the default], 0/DEFAULT, 1/D1/DBG1/DEBUG2, 2/D2/DBG2/DEBUG1,3/INFO,4/WARNING,5/ERROR,6/CRITICAL,7/FATAL.  Note that only the mininum unique string is required.");
-
+   config.add("level","L", "level" , mx::argType::Required, "", "level", false,  "int/string", "Minimum log level to dump, either an integer or a string. -1/TELEMETRY [the default], 0/DEFAULT, 1/D1/DBG1/DEBUG2, 2/D2/DBG2/DEBUG1,3/INFO,4/WARNING,5/ERROR,6/CRITICAL,7/FATAL.  Note that only the mininum unique string is required.");
+   config.add("code","C", "code" , mx::argType::Required, "", "code", false,  "int", "The event code, or vector of codes, to dump.  If not specified, all codes are dumped.  See logCodes.hpp for a complete list of codes.");
 }
 
 void logdump::loadConfig()
@@ -110,6 +111,10 @@ void logdump::loadConfig()
    {
       m_level = logLevelFromString(tmpstr);
    }
+
+   config(m_codes, "code");
+
+   std::cerr << m_codes.size() << "\n";
 }
 
 int logdump::execute()
@@ -188,6 +193,25 @@ int logdump::execute()
             continue;
          }
 
+         if(m_codes.size() > 0)
+         {
+            bool found = false;
+            for(int c = 0; c< m_codes.size(); ++c)
+            {
+               if( m_codes[c] == ec )
+               {
+                  found = true;
+                  break;
+               }
+            }
+
+            if(!found)
+            {
+               fseek(fin, len, SEEK_CUR);
+               continue;
+            }
+         }
+
          if( headerSize + len > buffSz )
          {
             logBuff = bufferPtrT(new char[headerSize + len]);
@@ -200,10 +224,6 @@ int logdump::execute()
          // If not following, exit loop without printing the incomplete log entry (go on to next file).
          // If following, wait for it, but also be checking for new log file in case of crash
 
-         /*if(lvl < m_level)
-         {
-            continue;
-         }*/
 
          printLogBuff(lvl, ec, len, logBuff);
 
