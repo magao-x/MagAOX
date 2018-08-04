@@ -927,14 +927,31 @@ int MagAOXApp::lockPID()
          std::ifstream procIn;
          std::string pidCmdLine;
 
-         ///\todo what happens if /proc/pid/cmdline doesn't exist?  Need error handling here?
-         procIn.open(procN.str());
-         procIn >> pidCmdLine;
-         procIn.close();
+         try
+         {
+            procIn.open(procN.str());
+            if(procIn.good()) procIn >> pidCmdLine;
+            procIn.close();
+         }
+         catch( ... )
+         {
+            log<software_fatal>({__FILE__, __LINE__, 0, "exception caught testing /proc/pid"});
+            euidReal();
+            return -1;
+         }
 
-         ///\todo This needs to also check for m_configName in case same invokedName but different m_configName is the one who is re-using the PID (pathological)
+         //If pidCmdLine == "" at this point we just allow the rest of the
+         //logic to run...
+
          //Search for invokedName in command line.
-         if( pidCmdLine.find( invokedName ) != std::string::npos )
+         size_t invokedPos = pidCmdLine.find( invokedName );
+
+         //If invokedName found, then we check for configName.
+         size_t configPos = std::string::npos;
+         if(invokedPos != std::string::npos) configPos = pidCmdLine.find( m_configName );
+
+         //Check if PID is already locked by this program+config combo:
+         if(  invokedPos != std::string::npos && configPos != std::string::npos)
          {
             //This means that this app already exists for this config, and we need to die.
             std::stringstream logss;
@@ -960,7 +977,12 @@ int MagAOXApp::lockPID()
    std::ofstream pidOut;
    pidOut.open(pidFileName);
 
-   /// \todo need some error checking here.
+   if(!pidOut.good())
+   {
+      log<software_fatal>({__FILE__, __LINE__, errno, "could not open pid file for writing."});
+      euidReal();
+      return -1;
+   }
 
    pidOut << m_pid;
 
