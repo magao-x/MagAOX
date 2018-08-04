@@ -23,14 +23,14 @@ $ sudo chmod +s trippLitePDU`
 For this to work, you have to have setup the MagAO-X config and logging system (environment variables and a directory structure).  Then you type:
 
 `$ ./trippLitePDU`
- 
+
 ## Configuration
 
 The following configurable options are accepted by trippLitePDU:
 
   Required arguments:
    None.
-  
+
   Optional arguments:
 
    |Short | Long         |  Config-File         |     Type               | Description  |
@@ -48,7 +48,5 @@ The following configurable options are accepted by trippLitePDU:
    |    | --idVendor     | usb.idVendor         |    string        | USB vendor id, 4 digits        |
    |    | --idProduct    | usb.idProduct        |    string        | USB product id, 4 digits       |
    |    | --serial       | usb.serial           |    string        | USB serial number        |
-   |    | --baud         | usb.baud             |    real          | USB tty baud rate (i.e. 9600) | 
-   | -n | --name         | name                 |    string        | The name of the application, specifies config. | 
-   
-   
+   |    | --baud         | usb.baud             |    real          | USB tty baud rate (i.e. 9600) |
+   | -n | --name         | name                 |    string        | The name of the application, specifies config. |
