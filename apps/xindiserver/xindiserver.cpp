@@ -1,5 +1,5 @@
 /** \file xindiserver.cpp
-  * \brief The MagAO-X INDI Server wrapper main program.
+  * \brief The MagAO-X indiserver wrapper main program.
   *
   * \ingroup xindiserver_files
   */

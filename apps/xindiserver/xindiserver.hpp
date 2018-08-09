@@ -96,11 +96,11 @@ public:
    
    /// Startup functions
    /** Setsup the INDI vars.
-     * Checks if the device was found during loadConfig.
+     * Forks and execs the actual indiserver.
      */
    virtual int appStartup();
 
-   /// Implementation of the FSM for the tripp lite PDU.
+   /// Implementation of the FSM for xindiserver.
    virtual int appLogic();
 
    /// Do any needed shutdown tasks.  Currently nothing in this app.
@@ -120,7 +120,7 @@ void xindiserver::setupConfig()
    config.add("indiserver.m", "m", "", mx::argType::Required, "indiserver", "m", false,  "int", "indiserver kill client if gets more than this many MB behind, default 50");
    config.add("indiserver.n", "n", "", mx::argType::True, "indiserver", "n", false,  "bool", "indiserver: ignore /tmp/noindi");
    config.add("indiserver.p", "p", "", mx::argType::Required, "indiserver", "p", false,  "int", "indiserver: alternate IP port, default 7624");
-   config.add("indiserver.v", "v", "", mx::argType::Required, "indiserver", "v", false,  "int", "indiserver: loglevel 1/2/3 means -v, -vv or -vvv");
+   config.add("indiserver.v", "v", "", mx::argType::True, "indiserver", "v", false,  "int", "indiserver: log verbosity, -v, -vv or -vvv");
    config.add("indiserver.x", "x", "", mx::argType::True, "indiserver", "x", false,  "bool", "exit after last client disconnects -- FOR PROFILING ONLY");
    
    config.add("local.drivers","L", "local" , mx::argType::Required, "local", "drivers", false,  "vector string", "List of local drivers to start.");
@@ -136,7 +136,7 @@ void xindiserver::loadConfig()
    config(indiserver_n, "indiserver.n");
    config(indiserver_p, "indiserver.p");
    
-   config(indiserver_v, "indiserver.v");
+   indiserver_v = config.verbosity("indiserver.v");
    
    config(indiserver_x, "indiserver.x");
    
@@ -298,7 +298,7 @@ int xindiserver::addRemoteDrivers( std::vector<std::string> & driverArgs )
       hostMapT::iterator hit;
       try
       {
-          hit = hostMap.find( rdit->second.hostSpec() );
+         hit = hostMap.find( rdit->second.hostSpec() );
       }
       catch(...)
       {
@@ -357,13 +357,14 @@ int xindiserver::appStartup()
    }
    
    
-   for(int i=0;i<indiserverCommand.size();++i)
-   {
-      std::cerr << indiserverCommand[i] << "\n";
-   }
    
 
-   std::cerr << "about to fork!\n";
+   std::cerr << "Starting indiserver with command:\n";
+   for(int i=0;i<indiserverCommand.size();++i)
+   {
+      std::cerr << indiserverCommand[i] << " ";
+   }
+   std::cerr << "\n";
    
    pid_t isPID = fork();
    

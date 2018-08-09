@@ -77,7 +77,7 @@ SCENARIO( "xindiserver constructs inserver options", "[xindiserver]" )
          REQUIRE(clargs[2] == "2000");
       }
       
-      WHEN("Option v provided with argument (-v)")
+      WHEN("1 Option v provided with argument (-v)")
       {
          std::vector<std::string> clargs;
          xi_test.indiserver_v(xi, 1);
@@ -89,7 +89,7 @@ SCENARIO( "xindiserver constructs inserver options", "[xindiserver]" )
          REQUIRE(clargs[1] == "-v");
       }
       
-      WHEN("Option v provided with argument (-vv)")
+      WHEN("2 Option v provided with argument (-vv)")
       {
          std::vector<std::string> clargs;
          xi_test.indiserver_v(xi, 2);
@@ -101,7 +101,7 @@ SCENARIO( "xindiserver constructs inserver options", "[xindiserver]" )
          REQUIRE(clargs[1] == "-vv");
       }
       
-      WHEN("Option v provided with argument (3==>-vvv)")
+      WHEN("3 Option v provided with argument (3==>-vvv)")
       {
          std::vector<std::string> clargs;
          xi_test.indiserver_v(xi, 3);

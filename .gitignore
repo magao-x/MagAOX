@@ -6,6 +6,7 @@
 *html/
 local/
 **/a.out
+**/tests/*.binlog
 
 #Executables to ignore:
 INDI/INDI/evalINDI
