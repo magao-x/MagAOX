@@ -107,10 +107,7 @@ public:
               const bool git_modified       ///< [in] Whether or not the repo is modified.
             );
 
-   ~MagAOXApp() noexcept(true)
-   {
-
-   }
+   ~MagAOXApp() noexcept(true);
 
    /// Set the paths for config files
    /** Replaces the mx::application defaults with the MagAO-X config system.
@@ -496,6 +493,12 @@ MagAOXApp::MagAOXApp( const std::string & git_sha1,
 
 }
 
+inline
+MagAOXApp::~MagAOXApp() noexcept(true)
+{
+   MagAOXApp::m_self = nullptr;
+}
+   
 inline
 void MagAOXApp::setDefaults( int argc,
                              char ** argv
