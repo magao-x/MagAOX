@@ -15,6 +15,11 @@
 #define INDI_DEFAULT_PORT (7624)
 #endif
 
+namespace MagAOX
+{
+namespace xindi 
+{
+   
 ///Contains the details of a remote driver specification and provides parsing.
 /**
   * A remote driver is specified in terms of its name, host, and (optionally) a port
@@ -205,5 +210,8 @@ public:
    }
 
 };
+
+} //namespace xindi 
+} //namespace MagAOX
 
 #endif //remoteDriver_hpp

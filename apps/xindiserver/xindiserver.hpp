@@ -22,6 +22,7 @@
 
 #include "tunneledHost.hpp"
 #include "remoteDriver.hpp"
+using namespace MagAOX::xindi;
 
 namespace MagAOX
 {
