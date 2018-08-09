@@ -1,5 +1,5 @@
 
-apps_to_build = magAOXMaths
+apps_to_build = xindiserver trippLitePDU magAOXMaths 
 
 utils_to_build = logdump
 
