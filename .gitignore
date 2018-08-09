@@ -1,5 +1,4 @@
 *magaox_git_version.h
-apps/*/tests
 *.gch
 *.o
 *.a
@@ -16,6 +15,11 @@ INDI/INDI/setINDI
 INDI/xindidriver/xindidriver
 apps/trippLitePDU/trippLitePDU
 apps/magAOXMaths/magAOXMaths
+
+apps/xindiserver/tests/remoteDriver_test
+apps/xindiserver/tests/tunneledHost_test
+apps/xindiserver/tests/xindiserver_test
+apps/xindiserver/xindiserver
 
 utils/logdump/logdump
 

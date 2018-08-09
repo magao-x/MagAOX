@@ -6,6 +6,8 @@
 
 #include <cstdlib>
 #include <string>
+#include <sstream>
+
 #include <iostream>
 
 #ifndef tunneledHost_hpp
@@ -85,6 +87,30 @@ public:
       return 0;
    }
    
+   ///Get the remote specification string, "name:remotePort"
+   /**
+     * \returns the remote-spec as "name:remotePort"
+     */ 
+   std::string remoteSpec()
+   {
+      std::ostringstream k;
+      k << m_name << ':' << m_remotePort;
+      
+      return k.str();
+   }
+   
+   ///Get the full specification string, "name:remotePort:localPort"
+   /**
+     * \returns the full-spec as "name:remotePort:localPort"
+     */
+   std::string fullSpec()
+   {
+      std::ostringstream k;
+      k << m_name << ':' << m_remotePort << ':' << m_localPort ;
+      
+      return k.str();
+   }
+   
    ///Parse a host specification string into the component parts.
    /**
      * Expects a string in the form 'hostname[:remotePort]:localPort'.
@@ -96,7 +122,7 @@ public:
      * \returns 0 on success
      * \returns -1 on any error, in which case none of the values should be used.
      */
-   int parseName( const std::string & cnws)
+   int parse( const std::string & cnws)
    {
       //Remove whitespace
       std::string cn = cnws;

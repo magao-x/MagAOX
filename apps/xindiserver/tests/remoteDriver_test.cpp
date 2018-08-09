@@ -81,6 +81,9 @@ SCENARIO( "remoteDriver parses remote driver spec strings", "[remoteDriver]" )
          REQUIRE(rd.name() == "newDrive");
          REQUIRE(rd.host() == "remote");
          REQUIRE(rd.port() == INDI_DEFAULT_PORT);
+         REQUIRE(rd.hostSpec() == "remote:7624");
+         REQUIRE(rd.fullSpec() == "newDrive@remote:7624");
+ 
       }
       
       WHEN("A whitespace-full remote driver spec is parsed (no port)")

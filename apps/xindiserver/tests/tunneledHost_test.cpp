@@ -50,17 +50,19 @@ SCENARIO( "tunneled host parses host spec strings", "[tunneledHost]" )
  
       WHEN("Parsing a nominal spec, with default remote port")
       {
-         rv = th.parseName( "128.168.34.56:7623" );
+         rv = th.parse( "128.168.34.56:7623" );
          REQUIRE(rv == 0);
          
          REQUIRE( th.name() == "128.168.34.56");
          REQUIRE( th.remotePort() == INDI_DEFAULT_PORT);
          REQUIRE( th.localPort() == 7623);
+         REQUIRE( th.remoteSpec() == "128.168.34.56:7624");
+         REQUIRE( th.fullSpec() == "128.168.34.56:7624:7623");
       }
 
       WHEN("Parsing a nominal spec, with remote port")
       {
-         rv = th.parseName( "localhost:7625:7624" );
+         rv = th.parse( "localhost:7625:7624" );
          REQUIRE(rv == 0);
          
          REQUIRE( th.name() == "localhost");
@@ -70,7 +72,7 @@ SCENARIO( "tunneled host parses host spec strings", "[tunneledHost]" )
 
       WHEN("Parsing a conforming full spec, full of whitespace")
       {
-         rv = th.parseName( " new host : 82 37 : 1845 " );
+         rv = th.parse( " new host : 82 37 : 1845 " );
          REQUIRE(rv == 0);
          
          REQUIRE( th.name() == "newhost");
@@ -81,7 +83,7 @@ SCENARIO( "tunneled host parses host spec strings", "[tunneledHost]" )
 
       WHEN("Empty remote port with ::.")
       {
-         rv = th.parseName( "host::7627" );
+         rv = th.parse( "host::7627" );
          REQUIRE(rv == 0);
          
          REQUIRE( th.name() == "host");
@@ -91,7 +93,7 @@ SCENARIO( "tunneled host parses host spec strings", "[tunneledHost]" )
 
       WHEN("No local port supplied, no :.")
       {
-         rv = th.parseName( "host" );
+         rv = th.parse( "host" );
          REQUIRE(rv < 0);
          
          REQUIRE( th.name() == "");
@@ -101,7 +103,7 @@ SCENARIO( "tunneled host parses host spec strings", "[tunneledHost]" )
       
       WHEN("Empty local port supplied, trailing:.")
       {
-         rv = th.parseName( "host:" );
+         rv = th.parse( "host:" );
          REQUIRE(rv < 0);
          
          REQUIRE( th.name() == "");
@@ -111,7 +113,7 @@ SCENARIO( "tunneled host parses host spec strings", "[tunneledHost]" )
 
       WHEN("Empty local port supplied, trailing::.")
       {
-         rv = th.parseName( "host::" );
+         rv = th.parse( "host::" );
          REQUIRE(rv < 0);
          
          REQUIRE( th.name() == "");
@@ -121,7 +123,7 @@ SCENARIO( "tunneled host parses host spec strings", "[tunneledHost]" )
       
       WHEN("No host supplied, only ports.")
       {
-         rv = th.parseName( ":6000:6001" );
+         rv = th.parse( ":6000:6001" );
          REQUIRE(rv < 0);
          
          REQUIRE( th.name() == "");

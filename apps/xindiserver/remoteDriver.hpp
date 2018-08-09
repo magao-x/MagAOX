@@ -114,6 +114,30 @@ public:
       return 0;
    }
    
+   ///Get the host specification string, "host:port"
+   /**
+     * \returns the host-spec in the form "host:port"
+     */ 
+   std::string hostSpec()
+   {
+      std::ostringstream k;
+      k << m_host << ':' << m_port ;
+      
+      return k.str();
+   }
+   
+   ///Get the full specification of this driver as a string.
+   /** 
+     * \returns the full-spec in the form "name@host:port"
+     */ 
+   std::string fullSpec()
+   {
+      std::ostringstream k;
+      k << m_name << '@' << m_host << ':' << m_port ;
+      
+      return k.str();
+   }
+   
    ///Parse a remote driver specification string into the component parts.
    /**
      * Expects a string in the form 'name@host[:port]'.
