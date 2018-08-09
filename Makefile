@@ -21,32 +21,32 @@ indi_clean:
 
 apps_all:
 	for app in ${apps_to_build}; do \
-		(cd apps/$$app; ${MAKE} -f ../../Make/magAOXApp.mk t=$$app) || break; \
+		(cd apps/$$app; ${MAKE} )|| break; \
 	done
 
 apps_install:
 	for app in ${apps_to_build}; do \
-		(cd apps/$$app; ${MAKE} -f ../../Make/magAOXApp.mk t=$$app install) || break; \
+		(cd apps/$$app; ${MAKE}  install) || break; \
 	done
 
 apps_clean:
 	for app in ${apps_to_build}; do \
-		(cd apps/$$app; ${MAKE} -f ../../Make/magAOXApp.mk t=$$app clean) || break; \
+		(cd apps/$$app; ${MAKE}  clean) || break; \
 	done
 
 utils_all:
 		for app in ${utils_to_build}; do \
-			(cd utils/$$app; ${MAKE} -f ../../Make/magAOXUtil.mk t=$$app) || break; \
+			(cd utils/$$app; ${MAKE}) || break; \
 		done
 
 utils_install:
 		for app in ${utils_to_build}; do \
-			(cd utils/$$app; ${MAKE} -f ../../Make/magAOXUtil.mk t=$$app install) || break; \
+			(cd utils/$$app; ${MAKE} install) || break; \
 		done
 
 utils_clean:
 		for app in ${utils_to_build}; do \
-			(cd utils/$$app; ${MAKE} -f ../../Make/magAOXUtil.mk t=$$app clean) || break; \
+			(cd utils/$$app; ${MAKE} clean) || break; \
 		done
 
 .PHONY: setup
