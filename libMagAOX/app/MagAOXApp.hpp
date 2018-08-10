@@ -496,6 +496,8 @@ MagAOXApp::MagAOXApp( const std::string & git_sha1,
 inline
 MagAOXApp::~MagAOXApp() noexcept(true)
 {
+   if(m_indiDriver) delete m_indiDriver;
+   
    MagAOXApp::m_self = nullptr;
 }
    
@@ -1193,6 +1195,8 @@ int MagAOXApp::startINDI()
    if(m_indiDriver->good() == false)
    {
       log<software_fatal>({__FILE__, __LINE__, 0, "INDI Driver failed to open FIFOs."});
+      delete m_indiDriver;
+      m_indiDriver = nullptr;
       return -1;
    }
 
