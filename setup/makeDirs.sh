@@ -23,6 +23,7 @@ LOGDIR=/data/logs
 #LOGDIR=/opt/MagAOX/logs
 
 mkdir -pv $LOGDIR
+groupadd magaox
 chown :magaox $LOGDIR
 chmod g+rw -v $LOGDIR
 chmod g+s -v $LOGDIR
