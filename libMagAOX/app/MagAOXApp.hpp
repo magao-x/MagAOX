@@ -493,8 +493,13 @@ MagAOXApp::MagAOXApp( const std::string & git_sha1,
    m_self = this;
 
    //We log the current GIT status.
-   log<git_state>(git_state::messageT("MagAOX", git_sha1, git_modified));
-   log<git_state>(git_state::messageT("mxlib", MXLIB_UNCOMP_CURRENT_SHA1, MXLIB_UNCOMP_REPO_MODIFIED));
+   logLevelT gl = logLevels::INFO;
+   if(git_modified) gl = logLevels::WARNING;
+   log<git_state>(git_state::messageT("MagAOX", git_sha1, git_modified), gl);
+   
+   gl = logLevels::INFO;
+   if(MXLIB_UNCOMP_REPO_MODIFIED) gl = logLevels::WARNING;
+   log<git_state>(git_state::messageT("mxlib", MXLIB_UNCOMP_CURRENT_SHA1, MXLIB_UNCOMP_REPO_MODIFIED), gl);
 
    //Get the uids of this process.
    getresuid(&m_euidReal, &m_euidCalled, &m_suid);
