@@ -13,3 +13,9 @@ The following changes were made for use in MagAO-X:
 - MutexLock.hpp: added noexcept(true) to d'tor decl.
 - ReadWriteLock.hpp: added noexcept(true) to d'tor decl.
 - IndiDriver.hpp: added noexcept(true) to d'tor decl.
+- Removed logging of config elements, IndiConnection.ccp line 138
+
+TODO:
+- Should fully remove config system (comment it out), so we don't need to trick it with tmp files.
+- Analyze codacy issues with d'tors which throw (MutexLock and ReadWriteLock).
+
