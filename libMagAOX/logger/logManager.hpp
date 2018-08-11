@@ -388,7 +388,7 @@ int logManager<logFileT>::createLog( bufferPtrT & logBuffer,
 
    //We first allocate the buffer.
    msgLenT len = logT::length(msg);
-   logBuffer = bufferPtrT(new char[headerSize + len]);
+   logBuffer = bufferPtrT( (char *) ::operator new((headerSize + len)*sizeof(char)));
 
    //Now load the basics.
    reinterpret_cast<logHeaderT *>(logBuffer.get())->logLevel = level;
