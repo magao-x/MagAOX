@@ -104,7 +104,8 @@ public:
      *
      */
    MagAOXApp( const std::string & git_sha1, ///< [in] The current SHA1 hash of the git repository
-              const bool git_modified       ///< [in] Whether or not the repo is modified.
+              const bool git_modified,       ///< [in] Whether or not the repo is modified.
+              const bool useINDI = true ///< [in] [optional] Whether or not this app uses INDI
             );
 
    ~MagAOXApp() noexcept(true);
@@ -279,6 +280,10 @@ protected:
 
    /** \name PID Locking
      *
+     * Each MagAOXApp has a PID lock file in the system directory.  The app will not 
+     * startup if it detects that the PID is already locked, preventing duplicates.  This is
+     * based on the configured name, not the invoked name (argv[0]).
+     * 
      * @{
      */
 
@@ -352,6 +357,10 @@ public:
      * @{
      */
 protected:
+   
+   ///Flag controlling whether INDI is used.  If false, then no INDI code executes.
+   bool m_useINDI {true};
+   
    ///The INDI driver wrapper.  Constructed and initialized by execute, which starts and stops communications.
    indiDriver<MagAOXApp> * m_indiDriver {nullptr};
 
@@ -471,7 +480,8 @@ MagAOXApp * MagAOXApp::m_self = nullptr;
 
 inline
 MagAOXApp::MagAOXApp( const std::string & git_sha1,
-                      const bool git_modified
+                      const bool git_modified,
+                      const bool useINDI
                     )
 {
    if( m_self != nullptr )
@@ -491,6 +501,7 @@ MagAOXApp::MagAOXApp( const std::string & git_sha1,
    euidReal(); //immediately step down to unpriveleged uid.
 
 
+   m_useINDI = useINDI;
 }
 
 inline
@@ -1070,6 +1081,8 @@ int MagAOXApp::registerIndiProperty( pcf::IndiProperty & prop,
                                      int (*newCallBack)( void *, const pcf::IndiProperty &ipRecv)
                                    )
 {
+   if(!m_useINDI) return 0;
+   
    prop = pcf::IndiProperty (propType);
    prop.setDevice(m_configName);
    prop.setName(propName);
@@ -1090,6 +1103,8 @@ int MagAOXApp::registerIndiProperty( pcf::IndiProperty & prop,
 inline
 int MagAOXApp::createINDIFIFOS()
 {
+   if(!m_useINDI) return 0;
+   
    ///\todo make driver FIFO path full configurable.
    std::string driverFIFOPath = MAGAOX_path;
    driverFIFOPath += "/";
@@ -1138,6 +1153,9 @@ int MagAOXApp::createINDIFIFOS()
 inline
 int MagAOXApp::startINDI()
 {
+   if(!m_useINDI) return 0;
+   
+   
    //===== Create the FIFOs for INDI communications ====
    if(createINDIFIFOS() < 0)
    {
