@@ -35,4 +35,6 @@
 #include "tty/ttyUSB.hpp"
 #include "tty/usbDevice.hpp"
 
+#include "netcom/tunneledHost.hpp"
+
 #endif //libMagAOX_hpp
