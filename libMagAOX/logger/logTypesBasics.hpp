@@ -180,13 +180,15 @@ struct software_log
       }
       offset += msg.file.size();
 
-      //Insert file length and string
+      //Insert line number
       *reinterpret_cast<messageT::linenumT *>(cBuffer+offset) = msg.linenum;
       offset += sizeof(messageT::linenumT);
 
+      //Insert message code
       *reinterpret_cast<messageT::codeT *>(cBuffer+offset) = msg.code;
       offset += sizeof(messageT::codeT);
 
+      //Insert Explanation.
       cbuff = reinterpret_cast<char *>(cBuffer + offset);
 
       for(int i =0; i< msg.explanation.size(); ++i)
@@ -248,6 +250,101 @@ struct software_log
       ret += mx::ioutils::convertToString(msg.code);
       ret += " >";
       ret += msg.explanation;
+
+      return ret;
+   }
+};
+
+///Base class for software traces
+/** Such logs are used to log software source file and line number only. Does not have eventCode or defaultLevel, so this can not be used as a log type in logger.
+  *
+  * \ingroup logtypesbasics
+  */
+struct software_trace
+{
+   ///The type of the message
+   struct messageT
+   {
+      typedef std::string stringT; ///< Type used for file.
+      typedef int linenumT;  ///< Type for line numbers
+
+      typedef int lengthT; ///< Type for recording the length of strings within this message.
+
+      stringT file; ///< File where message was generated.
+      linenumT linenum; ///< Line number of file where message was generated.
+   };
+
+   ///Get the length of the message.
+   static msgLenT length( const messageT & msg)
+   {
+      return ( sizeof(messageT::lengthT) + msg.file.size()
+                   + sizeof(messageT::linenumT) );
+   }
+
+   ///Format the buffer given a software message
+   /**
+     * \returns 0
+     */
+   static int format( void * msgBuffer, ///< [out] the buffer, must be pre-allocated to size length(msg)
+                      const messageT & msg ///< [in] a softwareMessage.
+                    )
+   {
+
+      char * cBuffer = reinterpret_cast<char *>(msgBuffer);
+      char * cbuff;
+
+      //Insert file length and string
+      *reinterpret_cast<messageT::lengthT *>(cBuffer) = msg.file.length();
+      int offset = sizeof(messageT::lengthT);
+
+      cbuff = cBuffer + offset; //reinterpret_cast<char *>(msgBuffer + offset);
+      for(int i =0; i< msg.file.size(); ++i)
+      {
+         cbuff[i] = msg.file[i];
+      }
+      offset += msg.file.size();
+
+      //Insert linenumber
+      *reinterpret_cast<messageT::linenumT *>(cBuffer+offset) = msg.linenum;
+      offset += sizeof(messageT::linenumT);
+
+
+      return 0;
+   }
+
+   ///Extract the software message from a log buffer.
+   /**
+     * \returns 0
+     */
+   static int extract( messageT & msg, ///< [out] n softwareMessage
+                       void * msgBuffer, ///< [in] a log buffer
+                       msgLenT len ///< [in] length of the buffer.
+                     )
+   {
+      char * cBuffer = reinterpret_cast<char *>(msgBuffer);
+
+      messageT::lengthT strLen = *reinterpret_cast<messageT::lengthT *>(cBuffer);
+      int offset = sizeof(messageT::lengthT);
+
+      char * cbuff = reinterpret_cast<char *>(cBuffer + offset);
+      msg.file.resize(strLen);
+      for(int i=0;i<strLen; ++i)
+      {
+         msg.file[i] = cbuff[i];
+      }
+
+      offset += strLen;
+      msg.linenum = *reinterpret_cast<messageT::linenumT *>(cBuffer+offset);
+
+      return 0;
+   }
+
+   static std::string msgString( messageT & msg )
+   {
+      std::string ret = "SW TRACE: ";
+      ret += msg.file;
+      ret += " LINE: ";
+      ret += mx::ioutils::convertToString(msg.linenum);
 
       return ret;
    }

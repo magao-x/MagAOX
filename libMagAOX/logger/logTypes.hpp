@@ -316,6 +316,92 @@ struct software_fatal : public software_log
    static const logLevelT defaultLevel = logLevels::FATAL;
 };
 
+
+///Software trace DEBUG log entry
+/** \ingroup logtypes
+  */
+struct software_trace_debug : public software_trace
+{
+   ///The event code
+   static const eventCodeT eventCode = eventCodes::SOFTWARE_TRACE_DEBUG;
+
+   ///The default level
+   static const logLevelT defaultLevel = logLevels::DEBUG;
+};
+
+///Software trace DEBUG2 log entry
+/** \ingroup logtypes
+  */
+struct software_trace_debug2 : public software_trace
+{
+   ///The event code
+   static const eventCodeT eventCode = eventCodes::SOFTWARE_TRACE_DEBUG2;
+
+   ///The default level
+   static const logLevelT defaultLevel = logLevels::DEBUG2;
+};
+
+///Software trace INFO log entry
+/** \ingroup logtypes
+  */
+struct software_trace_info : public software_trace
+{
+   ///The event code
+   static const eventCodeT eventCode = eventCodes::SOFTWARE_TRACE_INFO;
+
+   ///The default level
+   static const logLevelT defaultLevel = logLevels::INFO;
+};
+
+///Software trace WARN log entry
+/** \ingroup logtypes
+  */
+struct software_trace_warning : public software_trace
+{
+   ///The event code
+   static const eventCodeT eventCode = eventCodes::SOFTWARE_TRACE_WARNING;
+
+   ///The default level
+   static const logLevelT defaultLevel = logLevels::WARNING;
+};
+
+///Software trace ERR log entry
+/** \ingroup logtypes
+  */
+struct software_trace_error : public software_trace
+{
+   ///The event code
+   static const eventCodeT eventCode = eventCodes::SOFTWARE_TRACE_ERROR;
+
+   ///The default level
+   static const logLevelT defaultLevel = logLevels::ERROR;
+};
+
+///Software trace CRIT log entry
+/** \ingroup logtypes
+  */
+struct software_trace_critical : public software_trace
+{
+   ///The event code
+   static const eventCodeT eventCode = eventCodes::SOFTWARE_TRACE_CRITICAL;
+
+   ///The default level
+   static const logLevelT defaultLevel = logLevels::CRITICAL;
+};
+
+///Software trace FATAL log entry
+/** \ingroup logtypes
+  */
+struct software_trace_fatal : public software_trace
+{
+   ///The event code
+   static const eventCodeT eventCode = eventCodes::SOFTWARE_TRACE_FATAL;
+
+   ///The default level
+   static const logLevelT defaultLevel = logLevels::FATAL;
+};
+
+
 ///INDI Driver Start log entry
 /** \ingroup logtypes
   */
