@@ -315,7 +315,6 @@ struct software_trace
 
       //Insert linenumber
       *reinterpret_cast<messageT::linenumT *>(cBuffer+offset) = msg.linenum;
-      offset += sizeof(messageT::linenumT);
 
 
       return 0;

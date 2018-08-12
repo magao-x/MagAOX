@@ -478,10 +478,9 @@ void xindiserver::isLogThreadExec()
          if(logs.back() == '\n')
          {
             size_t bol = 0;
-            size_t eol = 0;
             while(bol < logs.size())
             {
-               eol = logs.find('\n', bol);
+               size_t eol = logs.find('\n', bol);
                if(eol == std::string::npos) break;
                
                processISLog(logs.substr(bol, eol-bol));               
