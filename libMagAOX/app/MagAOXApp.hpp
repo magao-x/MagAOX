@@ -280,10 +280,10 @@ protected:
 
    /** \name PID Locking
      *
-     * Each MagAOXApp has a PID lock file in the system directory.  The app will not 
+     * Each MagAOXApp has a PID lock file in the system directory.  The app will not
      * startup if it detects that the PID is already locked, preventing duplicates.  This is
      * based on the configured name, not the invoked name (argv[0]).
-     * 
+     *
      * @{
      */
 
@@ -357,10 +357,10 @@ public:
      * @{
      */
 protected:
-   
+
    ///Flag controlling whether INDI is used.  If false, then no INDI code executes.
    constexpr static bool m_useINDI = _useINDI;
-   
+
    ///The INDI driver wrapper.  Constructed and initialized by execute, which starts and stops communications.
    indiDriver<MagAOXApp> * m_indiDriver {nullptr};
 
@@ -495,7 +495,7 @@ MagAOXApp<_useINDI>::MagAOXApp( const std::string & git_sha1,
    logLevelT gl = logLevels::INFO;
    if(git_modified) gl = logLevels::WARNING;
    log<git_state>(git_state::messageT("MagAOX", git_sha1, git_modified), gl);
-   
+
    gl = logLevels::INFO;
    if(MXLIB_UNCOMP_REPO_MODIFIED) gl = logLevels::WARNING;
    log<git_state>(git_state::messageT("mxlib", MXLIB_UNCOMP_CURRENT_SHA1, MXLIB_UNCOMP_REPO_MODIFIED), gl);
@@ -510,10 +510,10 @@ template<bool _useINDI>
 MagAOXApp<_useINDI>::~MagAOXApp() noexcept(true)
 {
    if(m_indiDriver) delete m_indiDriver;
-   
+
    MagAOXApp<_useINDI>::m_self = nullptr;
 }
-   
+
 template<bool _useINDI>
 void MagAOXApp<_useINDI>::setDefaults( int argc,
                                        char ** argv
@@ -660,7 +660,7 @@ int MagAOXApp<_useINDI>::execute() //virtual
 
       /** \todo Check of log thread is still running
         */
-      
+
       //Pause loop unless shutdown is set
       if( m_shutdown == 0)
       {
@@ -1022,7 +1022,7 @@ int MagAOXApp<_useINDI>::lockPID()
       log<software_error>({__FILE__, __LINE__, 0, "Seeting euid to real failed."});
       return -1;
    }
-   
+
    return 0;
 }
 
@@ -1053,8 +1053,11 @@ void MagAOXApp<_useINDI>::state(const stateCodes::stateCodeT & s)
 {
    if(m_state == s) return;
 
+   logLevelT lvl = logLevels::INFO;
+   if(s == stateCodes::ERROR) lvl = logLevels::ERROR;
+   if(s == stateCodes::FAILURE) lvl = logLevels::CRITICAL;
 
-   log<state_change>( {m_state, s} );
+   log<state_change>( {m_state, s}, lvl );
 
    m_state = s;
    m_stateLogged = 0;
@@ -1095,7 +1098,7 @@ int MagAOXApp<_useINDI>::registerIndiProperty( pcf::IndiProperty & prop,
                                              )
 {
    if(!m_useINDI) return 0;
-   
+
    prop = pcf::IndiProperty (propType);
    prop.setDevice(m_configName);
    prop.setName(propName);
@@ -1117,7 +1120,7 @@ template<bool _useINDI>
 int MagAOXApp<_useINDI>::createINDIFIFOS()
 {
    if(!m_useINDI) return 0;
-   
+
    ///\todo make driver FIFO path full configurable.
    std::string driverFIFOPath = MAGAOX_path;
    driverFIFOPath += "/";
@@ -1167,8 +1170,8 @@ template<bool _useINDI>
 int MagAOXApp<_useINDI>::startINDI()
 {
    if(!m_useINDI) return 0;
-   
-   
+
+
    //===== Create the FIFOs for INDI communications ====
    if(createINDIFIFOS() < 0)
    {
