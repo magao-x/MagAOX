@@ -23,5 +23,7 @@ apps/xindiserver/tests/tunneledHost_test
 apps/xindiserver/tests/xindiserver_test
 apps/xindiserver/xindiserver
 
+apps/sshDigger/sshDigger
+
 utils/logdump/logdump
 
