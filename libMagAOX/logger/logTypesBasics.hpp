@@ -39,7 +39,7 @@ struct string_log
    {
       char * cbuff = reinterpret_cast<char *>(msgBuffer);
 
-      for(int i =0; i< msg.size(); ++i)
+      for(size_t i =0; i< msg.size(); ++i)
       {
          cbuff[i] = msg[i];
       }
@@ -60,7 +60,7 @@ struct string_log
 
       msg.resize(len + 1);
 
-      for(int i=0; i< len; ++i)
+      for(msgLenT i=0; i< len; ++i)
       {
          msg[i] = cbuff[i];
       }
@@ -100,6 +100,8 @@ struct empty_log
    ///Get the length of the message.
    static msgLenT length( const messageT & msg)
    {
+      static_cast<void>(msg);
+      
       return 0;
    }
 
@@ -111,6 +113,9 @@ struct empty_log
                       const messageT & msg ///< [in] an emptyMessage.
                     )
    {
+      static_cast<void>(msgBuffer);
+      static_cast<void>(msg);
+      
       return 0;
    }
 
@@ -123,6 +128,10 @@ struct empty_log
                        msgLenT len ///< [in] ignored length of the empty buffer.
                      )
    {
+      static_cast<void>(msg);
+      static_cast<void>(msgBuffer);
+      static_cast<void>(len);
+      
       return 0;
    }
 };
@@ -174,7 +183,7 @@ struct software_log
       int offset = sizeof(messageT::lengthT);
 
       cbuff = cBuffer + offset; //reinterpret_cast<char *>(msgBuffer + offset);
-      for(int i =0; i< msg.file.size(); ++i)
+      for(size_t i =0; i< msg.file.size(); ++i)
       {
          cbuff[i] = msg.file[i];
       }
@@ -191,7 +200,7 @@ struct software_log
       //Insert Explanation.
       cbuff = reinterpret_cast<char *>(cBuffer + offset);
 
-      for(int i =0; i< msg.explanation.size(); ++i)
+      for(size_t i =0; i< msg.explanation.size(); ++i)
       {
          cbuff[i] = msg.explanation[i];
       }
@@ -215,7 +224,7 @@ struct software_log
 
       char * cbuff = reinterpret_cast<char *>(cBuffer + offset);
       msg.file.resize(strLen);
-      for(int i=0;i<strLen; ++i)
+      for(messageT::lengthT i=0;i<strLen; ++i)
       {
          msg.file[i] = cbuff[i];
       }
@@ -232,7 +241,7 @@ struct software_log
 
       cbuff = reinterpret_cast<char *>(cBuffer + offset);
       msg.explanation.resize(strLen);
-      for(int i=0;i<strLen; ++i)
+      for(messageT::lengthT i=0;i<strLen; ++i)
       {
          msg.explanation[i] = cbuff[i];
       }
@@ -298,7 +307,7 @@ struct software_trace
       int offset = sizeof(messageT::lengthT);
 
       cbuff = cBuffer + offset; //reinterpret_cast<char *>(msgBuffer + offset);
-      for(int i =0; i< msg.file.size(); ++i)
+      for(size_t i =0; i< msg.file.size(); ++i)
       {
          cbuff[i] = msg.file[i];
       }
@@ -321,6 +330,8 @@ struct software_trace
                        msgLenT len ///< [in] length of the buffer.
                      )
    {
+      static_cast<void>(len);
+      
       char * cBuffer = reinterpret_cast<char *>(msgBuffer);
 
       messageT::lengthT strLen = *reinterpret_cast<messageT::lengthT *>(cBuffer);
@@ -328,7 +339,7 @@ struct software_trace
 
       char * cbuff = reinterpret_cast<char *>(cBuffer + offset);
       msg.file.resize(strLen);
-      for(int i=0;i<strLen; ++i)
+      for(messageT::lengthT i=0;i<strLen; ++i)
       {
          msg.file[i] = cbuff[i];
       }
@@ -364,6 +375,8 @@ struct tripplitepdu_outlet_state
    ///Get the length of the message.
    static msgLenT length( const messageT & msg )
    {
+      static_cast<void>(msg);
+      
       return sizeof(messageT);
    }
 
@@ -383,6 +396,8 @@ struct tripplitepdu_outlet_state
                        msgLenT len       ///< [in] the length of the string contained in buffer.
                      )
    {
+      static_cast<void>(len);
+      
       char * cbuff = reinterpret_cast<char *>(msgBuffer);
       msg = cbuff[0];
 

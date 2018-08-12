@@ -176,6 +176,11 @@ void sigHandler( int signum,
                  void *ucont
                )
 {
+   //Suppress those warnings . . .
+   static_cast<void>(signum);
+   static_cast<void>(siginf);
+   static_cast<void>(ucont);
+   
    timeToDie = true;
 }
 

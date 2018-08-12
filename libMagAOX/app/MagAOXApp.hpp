@@ -270,12 +270,12 @@ protected:
      * but will fail if it does not have sufficient privileges.  Regardless, it will then restore
      * privileges with \ref euidReal.
      *
-     * If prio is > 99, then it is changed to 99.
+     * If prio < 0, it is changed to 0.  If prio is > 99, then it is changed to 99.
      *
      * \returns 0 on success.
      * \returns -1 on an error.  In this case priority will not have been changed.
      */
-   int RTPriority( unsigned prio /**< [in] the desired new RT priority */ );
+   int RTPriority( int prio /**< [in] the desired new RT priority */ );
 
    ///@} -- RT Priority
 
@@ -612,7 +612,7 @@ void MagAOXApp::loadBasicConfig() //virtual
    config(loopPause, "loopPause");
 
    //--------- RT Priority ------------//
-   unsigned prio = m_RTPriority;
+   int prio = m_RTPriority;
    config(prio, "RTPriority");
    if(prio != m_RTPriority)
    {
@@ -830,10 +830,11 @@ int MagAOXApp::euidReal()
 }
 
 inline
-int MagAOXApp::RTPriority( unsigned prio)
+int MagAOXApp::RTPriority( int prio)
 {
    struct sched_param schedpar;
 
+   if(prio < 0) prio = 0;
    if(prio > 99) prio = 99;
    schedpar.sched_priority = prio;
 
@@ -1020,6 +1021,8 @@ int MagAOXApp::lockPID()
       log<software_error>({__FILE__, __LINE__, 0, "Seeting euid to real failed."});
       return -1;
    }
+   
+   return 0;
 }
 
 inline
@@ -1171,7 +1174,7 @@ int MagAOXApp::startINDI()
    //===== Create dummy conf file for libcommon to ignore
    //First create a unique filename with up to 12 chars of m_configName in it.
    char dummyConf[] = {"/tmp/XXXXXXXXXXXXXXXXXX"};
-   for(int c=0; c< 12; ++c)
+   for(size_t c=0; c< 12; ++c)
    {
       if(c > m_configName.size()-1) break;
       dummyConf[5+c] = m_configName[c];

@@ -445,6 +445,7 @@ int logManager<logFileT>::createLog( bufferPtrT & logBuffer,
    //Each log-type is responsible for loading its message
    logT::format( logBuffer.get() + messageOffset, msg);
 
+   return 0;
 
 }
 
@@ -473,6 +474,7 @@ void logManager<logFileT>::log( const typename logT::messageT & msg,
    //Step 2 add log to queue
    std::lock_guard<std::mutex> guard(m_qMutex);  //Lock the mutex before pushing back.
    m_logQueue.push_back(logBuffer);
+   
 
 }
 

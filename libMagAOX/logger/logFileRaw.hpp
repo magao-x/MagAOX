@@ -246,7 +246,7 @@ int logFileRaw::writeLog( bufferPtrT & data )
       createFile(ts);
    }
 
-   int nwr = fwrite( data.get(), sizeof(char), N, m_fout);
+   size_t nwr = fwrite( data.get(), sizeof(char), N, m_fout);
 
    if(nwr != N*sizeof(char))
    {

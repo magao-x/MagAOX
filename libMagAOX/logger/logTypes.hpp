@@ -41,7 +41,7 @@ struct git_state
       ///Allow default construction
       messageT()
       {
-         for(int i=0;i<s_sha1Length;++i) m_sha1[i] = 0;
+         for(size_t i=0;i<s_sha1Length;++i) m_sha1[i] = 0;
       }
 
       ///Construct from components
@@ -52,7 +52,7 @@ struct git_state
       {
          m_repoName = repoName;
 
-         int N = sha1.size();
+         size_t N = sha1.size();
 
          if(sha1.size() != s_sha1Length)
          {
@@ -60,7 +60,7 @@ struct git_state
             if(N > s_sha1Length) N = s_sha1Length;
          }
 
-         for(int i=0; i<N;++i) m_sha1[i] = sha1[i];
+         for(size_t i=0; i<N;++i) m_sha1[i] = sha1[i];
 
          if(modified) m_modified = 1;
          else m_modified = 0;
@@ -81,10 +81,10 @@ struct git_state
    {
       char * cbuff = reinterpret_cast<char *>(msgBuffer);
 
-      int i;
+      size_t i;
       for(i=0; i< msg.m_repoName.size(); ++i) cbuff[i] = msg.m_repoName[i];
 
-      for(int j =0; j< s_sha1Length; ++j)
+      for(size_t j =0; j< s_sha1Length; ++j)
       {
          cbuff[i] = msg.m_sha1[j];
          ++i;
@@ -113,7 +113,7 @@ struct git_state
       int i;
       for(i =0; i< nlen; ++i) msg.m_repoName[i] = cbuff[i];
 
-      for(int j=0; j< s_sha1Length; ++j)
+      for(size_t j=0; j< s_sha1Length; ++j)
       {
          msg.m_sha1[j] = cbuff[i];
          ++i;
@@ -126,7 +126,7 @@ struct git_state
    static std::string msgString( messageT & msg )
    {
       std::string str = msg.m_repoName + " GIT: ";
-      for(int i=0;i<s_sha1Length;++i) str += msg.m_sha1[i];
+      for(size_t i=0;i<s_sha1Length;++i) str += msg.m_sha1[i];
 
       if(msg.m_modified) str += " MODIFIED";
 
@@ -186,6 +186,8 @@ struct state_change
    ///Get the length of the message.
    static msgLenT length( const messageT & msg /**< [in] [unused] the message itself */ )
    {
+      static_cast<void>(msg);
+      
       return sizeof(messageT);
    }
 
@@ -212,6 +214,8 @@ struct state_change
                        msgLenT len       ///< [in] the length of the string contained in buffer.
                      )
    {
+      static_cast<void>(len);
+      
       int * ibuff = reinterpret_cast<int *>(msgBuffer);
 
       msg.from = ibuff[0];
@@ -415,6 +419,8 @@ struct indidriver_start : public empty_log
 
    static std::string msgString( messageT & msg  /**< [in] [unused] the empty message */ )
    {
+      static_cast<void>(msg);
+      
       return "INDI driver communications started";
    }
 };
@@ -432,6 +438,8 @@ struct indidriver_stop : public empty_log
 
    static std::string msgString( messageT & msg  /**< [in] [unused] the empty message */ )
    {
+      static_cast<void>(msg);
+      
       return "INDI driver communications stopped";
    }
 };
@@ -449,6 +457,8 @@ struct loop_closed : public empty_log
 
    static std::string msgString( messageT & msg  /**< [in] [unused] the empty message */ )
    {
+      static_cast<void>(msg);
+      
       return "LOOP CLOSED";
    }
 };
@@ -466,6 +476,7 @@ struct loop_paused : public empty_log
 
    static std::string msgString( messageT & msg  /**< [in] [unused] the empty message */)
    {
+      static_cast<void>(msg);
       return "LOOP PAUSED";
    }
 };
@@ -483,6 +494,7 @@ struct loop_open : public empty_log
 
    static std::string msgString( messageT & msg  /**< [in] [unused] the empty message */)
    {
+      static_cast<void>(msg);
       return "LOOP OPEN";
    }
 

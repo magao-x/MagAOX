@@ -228,7 +228,7 @@ int xindiserver::addLocalDrivers( std::vector<std::string> & driverArgs )
    driverPath += MAGAOX_driverRelPath;
    driverPath += "/";
    
-   for(int i=0; i< m_local.size(); ++i)
+   for(size_t i=0; i< m_local.size(); ++i)
    {
       size_t bad = m_local[i].find_first_of("@:/", 0);
       
@@ -259,7 +259,7 @@ int xindiserver::addRemoteDrivers( std::vector<std::string> & driverArgs )
 {
    hostMapT hostMap;
    
-   for(int i=0; i < m_hosts.size(); ++i)
+   for(size_t i=0; i < m_hosts.size(); ++i)
    {
       netcom::tunneledHost th;
       
@@ -294,7 +294,7 @@ int xindiserver::addRemoteDrivers( std::vector<std::string> & driverArgs )
    rdriverMapT rdriverMap;
    
    
-   for(int i=0; i < m_remote.size(); ++i)
+   for(size_t i=0; i < m_remote.size(); ++i)
    {
       remoteDriver rd;
       
@@ -371,7 +371,7 @@ int xindiserver::forkIndiserver()
    if(m_log.logLevel() <= logLevels::INFO)
    {
       std::string coml = "Starting indiserver with command: ";
-      for(int i=0;i<m_indiserverCommand.size();++i)
+      for(size_t i=0;i<m_indiserverCommand.size();++i)
       {
          coml += m_indiserverCommand[i];
          coml += " ";
@@ -406,7 +406,7 @@ int xindiserver::forkIndiserver()
   
       const char ** drivers = new const char*[m_indiserverCommand.size()+1];
 
-      for(int i=0; i< m_indiserverCommand.size(); ++i)
+      for(size_t i=0; i< m_indiserverCommand.size(); ++i)
       {
          drivers[i] = (m_indiserverCommand[i].data());
       }
@@ -565,7 +565,7 @@ int xindiserver::appStartup()
    //Make symlinks
    //--------------------
    std::string path1 = "/opt/MagAOX/bin/xindidriver";
-   for(int i=0; i<m_local.size(); ++i)
+   for(size_t i=0; i<m_local.size(); ++i)
    {
       int rv = euidCalled();
       

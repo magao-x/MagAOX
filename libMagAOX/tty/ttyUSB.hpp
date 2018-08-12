@@ -49,8 +49,7 @@ int ttyUSBDevName( std::string & devName,       ///< [out] the /dev/ttyUSBX devi
    udev = udev_new();
    if (!udev) return TTY_E_UDEVNEWFAILED;
 
-   const char * cp;
-   for(int i=0; i< devNames.size(); ++i)
+   for(size_t i=0; i< devNames.size(); ++i)
    {
       struct udev_device *dev;
 
