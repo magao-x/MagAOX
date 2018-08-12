@@ -20,7 +20,7 @@ namespace MagAOX
 namespace app
 {
    
-class sshDigger : public MagAOXApp
+class sshDigger : public MagAOXApp<>
 {
 
    //Give the test harness access.

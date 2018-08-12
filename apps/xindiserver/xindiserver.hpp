@@ -26,7 +26,7 @@ namespace MagAOX
 namespace app
 {
    
-class xindiserver : public MagAOXApp
+class xindiserver : public MagAOXApp<false>
 {
 
    //Give the test harness access.
@@ -137,7 +137,7 @@ public:
 };
 
 inline
-xindiserver::xindiserver() : MagAOXApp(MAGAOX_CURRENT_SHA1, MAGAOX_REPO_MODIFIED, false)
+xindiserver::xindiserver() : MagAOXApp(MAGAOX_CURRENT_SHA1, MAGAOX_REPO_MODIFIED)
 {
    return;
 }

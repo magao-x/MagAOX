@@ -15,7 +15,7 @@ namespace app
 /** MagAO-X application to do math on some numbers
   *
   */
-class magAOXMaths : public MagAOXApp
+class magAOXMaths : public MagAOXApp<>
 {
 
 protected:

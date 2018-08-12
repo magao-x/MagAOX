@@ -61,10 +61,10 @@ namespace app
   *
   *
   * \todo do we need libMagAOX error handling? (a stack?)
-  * \todo make m_useINDI a template bool, so compiler can just elide.
   *
   * \ingroup magaoxapp
   */
+template< bool _useINDI = true >
 class MagAOXApp : public mx::application
 {
 
@@ -105,8 +105,7 @@ public:
      *
      */
    MagAOXApp( const std::string & git_sha1, ///< [in] The current SHA1 hash of the git repository
-              const bool git_modified,       ///< [in] Whether or not the repo is modified.
-              const bool useINDI = true ///< [in] [optional] Whether or not this app uses INDI
+              const bool git_modified       ///< [in] Whether or not the repo is modified.
             );
 
    ~MagAOXApp() noexcept(true);
@@ -360,7 +359,7 @@ public:
 protected:
    
    ///Flag controlling whether INDI is used.  If false, then no INDI code executes.
-   bool m_useINDI {true};
+   constexpr static bool m_useINDI = _useINDI;
    
    ///The INDI driver wrapper.  Constructed and initialized by execute, which starts and stops communications.
    indiDriver<MagAOXApp> * m_indiDriver {nullptr};
@@ -382,7 +381,7 @@ protected:
    typedef std::pair<std::string, indiCallBack> callBackValueType;
 
    ///Iterator type of the indiCallBack map.
-   typedef std::unordered_map<std::string, indiCallBack>::iterator callBackIterator;
+   typedef typename std::unordered_map<std::string, indiCallBack>::iterator callBackIterator;
 
    ///Return type of insert on the indiCallBack map.
    typedef std::pair<callBackIterator,bool> callBackInsertResult;
@@ -477,13 +476,12 @@ public:
 };
 
 //Set self pointer to null so app starts up uninitialized.
-MagAOXApp * MagAOXApp::m_self = nullptr;
+template<bool _useINDI> MagAOXApp<_useINDI> * MagAOXApp<_useINDI>::m_self = nullptr;
 
-inline
-MagAOXApp::MagAOXApp( const std::string & git_sha1,
-                      const bool git_modified,
-                      const bool useINDI
-                    )
+template<bool _useINDI>
+MagAOXApp<_useINDI>::MagAOXApp( const std::string & git_sha1,
+                                const bool git_modified
+                              )
 {
    if( m_self != nullptr )
    {
@@ -506,22 +504,20 @@ MagAOXApp::MagAOXApp( const std::string & git_sha1,
    getresuid(&m_euidReal, &m_euidCalled, &m_suid);
    euidReal(); //immediately step down to unpriveleged uid.
 
-
-   m_useINDI = useINDI;
 }
 
-inline
-MagAOXApp::~MagAOXApp() noexcept(true)
+template<bool _useINDI>
+MagAOXApp<_useINDI>::~MagAOXApp() noexcept(true)
 {
    if(m_indiDriver) delete m_indiDriver;
    
-   MagAOXApp::m_self = nullptr;
+   MagAOXApp<_useINDI>::m_self = nullptr;
 }
    
-inline
-void MagAOXApp::setDefaults( int argc,
-                             char ** argv
-                           )   //virtual
+template<bool _useINDI>
+void MagAOXApp<_useINDI>::setDefaults( int argc,
+                                       char ** argv
+                                     )   //virtual
 {
    std::string tmpstr;
    std::string configDir;
@@ -589,8 +585,8 @@ void MagAOXApp::setDefaults( int argc,
 
 }
 
-inline
-void MagAOXApp::setupBasicConfig() //virtual
+template<bool _useINDI>
+void MagAOXApp<_useINDI>::setupBasicConfig() //virtual
 {
    //App stuff
    config.add("loopPause", "p", "loopPause", mx::argType::Required, "", "loopPause", false, "unsigned long", "The main loop pause time in ns");
@@ -601,8 +597,8 @@ void MagAOXApp::setupBasicConfig() //virtual
 
 }
 
-inline
-void MagAOXApp::loadBasicConfig() //virtual
+template<bool _useINDI>
+void MagAOXApp<_useINDI>::loadBasicConfig() //virtual
 {
    //---------- Setup the logger ----------//
    m_log.logName(m_configName);
@@ -622,8 +618,8 @@ void MagAOXApp::loadBasicConfig() //virtual
 
 
 
-inline
-int MagAOXApp::execute() //virtual
+template<bool _useINDI>
+int MagAOXApp<_useINDI>::execute() //virtual
 {
    if( lockPID() < 0 )
    {
@@ -689,27 +685,29 @@ int MagAOXApp::execute() //virtual
    return 0;
 }
 
+template<bool _useINDI>
 template<typename logT>
-void MagAOXApp::log( const typename logT::messageT & msg,
-                     logLevelT level
-                   )
+void MagAOXApp<_useINDI>::log( const typename logT::messageT & msg,
+                               logLevelT level
+                             )
 {
    m_log.log<logT>(msg, level);
 }
 
+template<bool _useINDI>
 template<typename logT>
-void MagAOXApp::log( logLevelT level)
+void MagAOXApp<_useINDI>::log( logLevelT level)
 {
    m_log.log<logT>(level);
 }
 
-inline
-int MagAOXApp::setSigTermHandler()
+template<bool _useINDI>
+int MagAOXApp<_useINDI>::setSigTermHandler()
 {
    struct sigaction act;
    sigset_t set;
 
-   act.sa_sigaction = &MagAOXApp::_handlerSigTerm;
+   act.sa_sigaction = &MagAOXApp<_useINDI>::_handlerSigTerm;
    act.sa_flags = SA_SIGINFO;
    sigemptyset(&set);
    act.sa_mask = set;
@@ -752,20 +750,20 @@ int MagAOXApp::setSigTermHandler()
    return 0;
 }
 
-inline
-void MagAOXApp::_handlerSigTerm( int signum,
-                                 siginfo_t *siginf,
-                                 void *ucont
-                               )
+template<bool _useINDI>
+void MagAOXApp<_useINDI>::_handlerSigTerm( int signum,
+                                           siginfo_t *siginf,
+                                           void *ucont
+                                         )
 {
    m_self->handlerSigTerm(signum, siginf, ucont);
 }
 
-inline
-void MagAOXApp::handlerSigTerm( int signum,
-                                siginfo_t *siginf __attribute__((unused)),
-                                void *ucont __attribute__((unused))
-                              )
+template<bool _useINDI>
+void MagAOXApp<_useINDI>::handlerSigTerm( int signum,
+                                          siginfo_t *siginf __attribute__((unused)),
+                                          void *ucont __attribute__((unused))
+                                        )
 {
    m_shutdown = 1;
 
@@ -793,8 +791,8 @@ void MagAOXApp::handlerSigTerm( int signum,
    log<text_log>(logss);
 }
 
-inline
-int MagAOXApp::euidCalled()
+template<bool _useINDI>
+int MagAOXApp<_useINDI>::euidCalled()
 {
    errno = 0;
    if(seteuid(m_euidCalled) < 0)
@@ -812,8 +810,8 @@ int MagAOXApp::euidCalled()
    return 0;
 }
 
-inline
-int MagAOXApp::euidReal()
+template<bool _useINDI>
+int MagAOXApp<_useINDI>::euidReal()
 {
    errno = 0;
    if(seteuid(m_euidReal) < 0)
@@ -832,8 +830,8 @@ int MagAOXApp::euidReal()
 
 }
 
-inline
-int MagAOXApp::RTPriority( int prio)
+template<bool _useINDI>
+int MagAOXApp<_useINDI>::RTPriority( int prio)
 {
    struct sched_param schedpar;
 
@@ -881,8 +879,8 @@ int MagAOXApp::RTPriority( int prio)
    return rv;
 }
 
-inline
-int MagAOXApp::lockPID()
+template<bool _useINDI>
+int MagAOXApp<_useINDI>::lockPID()
 {
    m_pid = getpid();
 
@@ -1028,8 +1026,8 @@ int MagAOXApp::lockPID()
    return 0;
 }
 
-inline
-int MagAOXApp::unlockPID()
+template<bool _useINDI>
+int MagAOXApp<_useINDI>::unlockPID()
 {
    if( ::remove(pidFileName.c_str()) < 0)
    {
@@ -1044,14 +1042,14 @@ int MagAOXApp::unlockPID()
    return 0;
 }
 
-inline
-stateCodes::stateCodeT MagAOXApp::state()
+template<bool _useINDI>
+stateCodes::stateCodeT MagAOXApp<_useINDI>::state()
 {
    return m_state;
 }
 
-inline
-void MagAOXApp::state(const stateCodes::stateCodeT & s)
+template<bool _useINDI>
+void MagAOXApp<_useINDI>::state(const stateCodes::stateCodeT & s)
 {
    if(m_state == s) return;
 
@@ -1068,8 +1066,8 @@ void MagAOXApp::state(const stateCodes::stateCodeT & s)
    if(m_indiDriver) m_indiDriver->sendSetProperty (indiP_state);
 }
 
-inline
-int MagAOXApp::stateLogged()
+template<bool _useINDI>
+int MagAOXApp<_useINDI>::stateLogged()
 {
    if(m_stateLogged > 0)
    {
@@ -1087,14 +1085,14 @@ int MagAOXApp::stateLogged()
 /*                                  INDI Support                                       */
 /*-------------------------------------------------------------------------------------*/
 
-inline
-int MagAOXApp::registerIndiProperty( pcf::IndiProperty & prop,
-                                     const std::string & propName,
-                                     const pcf::IndiProperty::Type & propType,
-                                     const pcf::IndiProperty::PropertyPermType & propPerm,
-                                     const pcf::IndiProperty::PropertyStateType & propState,
-                                     int (*newCallBack)( void *, const pcf::IndiProperty &ipRecv)
-                                   )
+template<bool _useINDI>
+int MagAOXApp<_useINDI>::registerIndiProperty( pcf::IndiProperty & prop,
+                                               const std::string & propName,
+                                               const pcf::IndiProperty::Type & propType,
+                                               const pcf::IndiProperty::PropertyPermType & propPerm,
+                                               const pcf::IndiProperty::PropertyStateType & propState,
+                                               int (*newCallBack)( void *, const pcf::IndiProperty &ipRecv)
+                                             )
 {
    if(!m_useINDI) return 0;
    
@@ -1115,8 +1113,8 @@ int MagAOXApp::registerIndiProperty( pcf::IndiProperty & prop,
    return 0;
 }
 
-inline
-int MagAOXApp::createINDIFIFOS()
+template<bool _useINDI>
+int MagAOXApp<_useINDI>::createINDIFIFOS()
 {
    if(!m_useINDI) return 0;
    
@@ -1165,8 +1163,8 @@ int MagAOXApp::createINDIFIFOS()
    return 0;
 }
 
-inline
-int MagAOXApp::startINDI()
+template<bool _useINDI>
+int MagAOXApp<_useINDI>::startINDI()
 {
    if(!m_useINDI) return 0;
    
@@ -1240,8 +1238,8 @@ int MagAOXApp::startINDI()
    return 0;
 }
 
-inline
-void MagAOXApp::handleGetProperties( const pcf::IndiProperty &ipRecv )
+template<bool _useINDI>
+void MagAOXApp<_useINDI>::handleGetProperties( const pcf::IndiProperty &ipRecv )
 {
    if(m_indiDriver == nullptr) return;
 
@@ -1271,8 +1269,8 @@ void MagAOXApp::handleGetProperties( const pcf::IndiProperty &ipRecv )
    return;
 }
 
-inline
-void MagAOXApp::handleNewProperty( const pcf::IndiProperty &ipRecv )
+template<bool _useINDI>
+void MagAOXApp<_useINDI>::handleNewProperty( const pcf::IndiProperty &ipRecv )
 {
    if(m_indiDriver == nullptr) return;
 
@@ -1283,20 +1281,20 @@ void MagAOXApp::handleNewProperty( const pcf::IndiProperty &ipRecv )
    return;
 }
 
-inline
-std::string MagAOXApp::configName()
+template<bool _useINDI>
+std::string MagAOXApp<_useINDI>::configName()
 {
    return m_configName;
 }
 
-inline
-std::string MagAOXApp::driverInName()
+template<bool _useINDI>
+std::string MagAOXApp<_useINDI>::driverInName()
 {
    return m_driverInName;
 }
 
-inline
-std::string MagAOXApp::driverOutName()
+template<bool _useINDI>
+std::string MagAOXApp<_useINDI>::driverOutName()
 {
    return m_driverOutName;
 }
