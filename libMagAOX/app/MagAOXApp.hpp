@@ -662,6 +662,9 @@ int MagAOXApp::execute() //virtual
       /** \todo Need a heartbeat update here.
         */
 
+      /** \todo Check of log thread is still running
+        */
+      
       //Pause loop unless shutdown is set
       if( m_shutdown == 0)
       {
@@ -744,7 +747,7 @@ int MagAOXApp::setSigTermHandler()
       return -1;
    }
 
-   log<text_log>("Installed SIGTERM/SIGQUIT/SIGINT signal handler.");
+   log<text_log>("Installed SIGTERM/SIGQUIT/SIGINT signal handler.", logLevels::DEBUG);
 
    return 0;
 }
@@ -871,7 +874,7 @@ int MagAOXApp::RTPriority( int prio)
    //Go back to regular privileges
    if( euidReal() < 0 )
    {
-      log<software_error>({__FILE__, __LINE__, 0, "Seeting euid to real failed."});
+      log<software_error>({__FILE__, __LINE__, 0, "Setting euid to real failed."});
       return -1;
    }
 
@@ -1028,8 +1031,11 @@ int MagAOXApp::lockPID()
 inline
 int MagAOXApp::unlockPID()
 {
-   /// \todo need error handling here.
-   ::remove(pidFileName.c_str());
+   if( ::remove(pidFileName.c_str()) < 0)
+   {
+      log<software_error>({__FILE__, __LINE__, errno, std::string("Failed to remove PID file: ") + strerror(errno)});
+      return -1;
+   }
 
    std::stringstream logss;
    logss << "PID (" << m_pid << ") unlocked.";

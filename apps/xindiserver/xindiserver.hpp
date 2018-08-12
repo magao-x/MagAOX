@@ -383,7 +383,7 @@ int xindiserver::forkIndiserver()
    
    if(m_isPID < 0)
    {
-      log<software_error>({__FILE__, __LINE__, errno, strerror(errno)});
+      log<software_error>({__FILE__, __LINE__, errno, std::string("fork failed: ") + strerror(errno)});
       return -1;
    }
 
@@ -406,9 +406,11 @@ int xindiserver::forkIndiserver()
 
       execvp("indiserver", (char * const*) drivers);
 
-      std::cerr << "xindiserver: indiserver exited\n";
+      log<software_error>({__FILE__, __LINE__, errno, std::string("execvp returned: ") + strerror(errno)});
    
       delete[] drivers;
+      
+      return -1;
    }
    
    m_isSTDERR = filedes[0];
@@ -432,14 +434,38 @@ void xindiserver::_isLogThreadStart( xindiserver * l)
 inline
 int xindiserver::isLogThreadStart()
 {
-   m_isLogThread  = std::thread( _isLogThreadStart, this);
-
+   try
+   {
+      m_isLogThread  = std::thread( _isLogThreadStart, this);
+   }
+   catch( const std::exception & e )
+   {
+      log<software_error>({__FILE__,__LINE__, 0, std::string("Exception on I.S. log thread start: ") + e.what()});
+      return -1;
+   }
+   catch( ... )
+   {
+      log<software_error>({__FILE__,__LINE__, 0, "Unkown exception on I.S. log thread start"});
+      return -1;
+   }
+   
+   if(!m_isLogThread.joinable())
+   {
+      log<software_error>({__FILE__, __LINE__, 0, "I.S. log thread did not start"});
+      return -1;
+   }
+   
    sched_param sp;
    sp.sched_priority = m_isLogThreadPrio;
 
-   pthread_setschedparam( m_isLogThread.native_handle(), SCHED_OTHER, &sp);
+   int rv = pthread_setschedparam( m_isLogThread.native_handle(), SCHED_OTHER, &sp);
    
-   ///\todo need error checking in isLogThreadStart
+   if(rv != 0)
+   {
+      log<software_error>({__FILE__, __LINE__, rv, std::string("Error setting thread params: ") + strerror(rv)});
+      return -1;
+   }
+   
    return 0;
 
 }
@@ -521,6 +547,13 @@ int xindiserver::processISLog( std::string logs )
    ++ed;
    st = logs.find_first_not_of(" ", ed);
    
+   if(st == std::string::npos) st = ed;
+   if(st == logs.size())
+   {
+      log<software_error>({__FILE__, __LINE__, 0, "Did not find log entry."});
+      return -1;
+   }
+      
    m_log.log<text_log>(tsp, "IS: " + logs.substr(st, logs.size()-st));
 
    return 0;

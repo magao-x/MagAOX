@@ -351,15 +351,39 @@ void logManager<logFileT>::_logThreadStart( logManager * l)
 template<class logFileT>
 int logManager<logFileT>::logThreadStart()
 {
-   m_logThread = std::thread( _logThreadStart, this);
-
+   try
+   {
+      m_logThread = std::thread( _logThreadStart, this);
+   }
+   catch( const std::exception & e )
+   {
+      log<software_error>({__FILE__,__LINE__, 0, std::string("Exception on log thread start: ") + e.what()});
+      return -1;
+   }
+   catch( ... )
+   {
+      log<software_error>({__FILE__,__LINE__, 0, "Unkown exception on log thread start"});
+      return -1;
+   }
+   
+   if(!m_logThread.joinable())
+   {
+      log<software_error>({__FILE__, __LINE__, 0, "Log thread did not start"});
+      return -1;
+   }
+   
    //Always set the m_logThread to lowest priority
    sched_param sp;
    sp.sched_priority = m_logThreadPrio;
 
-   pthread_setschedparam( m_logThread.native_handle(), SCHED_OTHER, &sp);
+   int rv = pthread_setschedparam( m_logThread.native_handle(), SCHED_OTHER, &sp);
    
-   ///\todo need error checking in logThreadStart().
+   if(rv != 0)
+   {
+      log<software_error>({__FILE__, __LINE__, rv, std::string("Error setting thread params: ") + strerror(rv)});
+      return -1;
+   }
+   
    return 0;
 
 }
