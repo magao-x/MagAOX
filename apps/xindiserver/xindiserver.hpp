@@ -40,7 +40,6 @@ public:
       
 protected:
 
-   std::string indiserver_l; ///< The indiserver log directory (passed to indiserver)
    int indiserver_m {-1};  ///< The indiserver MB behind setting (passed to indiserver)
    bool indiserver_n {false}; ///< The indiserver ignore /tmp/noindi flag (passed to indiserver)
    int indiserver_p {-1}; ///< The indiserver port (passed to indiserver)
@@ -146,7 +145,6 @@ xindiserver::xindiserver() : MagAOXApp(MAGAOX_CURRENT_SHA1, MAGAOX_REPO_MODIFIED
 inline
 void xindiserver::setupConfig()
 {
-   config.add("indiserver.l", "l", "", mx::argType::Required, "indiserver", "l", false,  "string", "indiserver: log messages to <d>/YYYY-MM-DD.islog, else stderr");
    config.add("indiserver.m", "m", "", mx::argType::Required, "indiserver", "m", false,  "int", "indiserver kill client if gets more than this many MB behind, default 50");
    config.add("indiserver.n", "n", "", mx::argType::True, "indiserver", "n", false,  "bool", "indiserver: ignore /tmp/noindi");
    config.add("indiserver.p", "p", "", mx::argType::Required, "indiserver", "p", false,  "int", "indiserver: alternate IP port, default 7624");
@@ -162,7 +160,6 @@ inline
 void xindiserver::loadConfig()
 {
    //indiserver config:
-   //-->deal with logdir
    config(indiserver_m, "indiserver.m");
    config(indiserver_n, "indiserver.n");
    config(indiserver_p, "indiserver.p");
@@ -182,13 +179,7 @@ int xindiserver::constructIndiserverCommand( std::vector<std::string> & indiserv
    try
    {
       indiserverCommand.push_back("indiserver");
-   
-      if(indiserver_l != "") 
-      {
-         indiserverCommand.push_back("-l");
-         indiserverCommand.push_back(indiserver_l);
-      }
-      
+        
       if(indiserver_m > 0) 
       {
          indiserverCommand.push_back("-m");
