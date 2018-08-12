@@ -61,6 +61,7 @@ namespace app
   *
   *
   * \todo do we need libMagAOX error handling? (a stack?)
+  * \todo make m_useINDI a template bool, so compiler can just elide.
   *
   * \ingroup magaoxapp
   */

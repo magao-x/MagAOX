@@ -139,7 +139,7 @@ struct logManager : public logFileT
    int loadConfig( mx::appConfigurator & config /**< [in] an application configuration from which to load values */);
 
 
-   ///Thread starter, called by m_logThreadStart on thread construction.  Calls m_logThreadExec.
+   ///Thread starter, called by logThreadStart on thread construction.  Calls logThreadExec.
    static void _logThreadStart( logManager * l /**< [in] a pointer to a logger instance (normally this) */);
 
    /// Start the logger thread.
@@ -156,12 +156,25 @@ struct logManager : public logFileT
      * \returns 0 on success, -1 on error.
      */
    template<typename logT>
-   static int createLog( bufferPtrT & logBuffer, /**< [out] a shared_ptr\<logBuffer\>, which will be allocated and populated with the log entry */
-                         const typename logT::messageT & msg, /**< [in] the message to log (could be of type emptyMessage) */
-                         logLevelT level
+   static int createLog( bufferPtrT & logBuffer, ///< [out] a shared_ptr\<logBuffer\>, which will be allocated and populated with the log entry 
+                         const typename logT::messageT & msg, ///< [in] the message to log (could be of type emptyMessage) 
+                         logLevelT level  ///< [in] the level (verbosity) of this log
                        );
 
-
+   /// Create a log formatted log entry, filling in a buffer.
+   /** This version has the timestamp provided.
+     *
+     * \tparam logT is a log entry type
+     *
+     * \returns 0 on success, -1 on error.
+     */
+   template<typename logT>
+   static int createLog( bufferPtrT & logBuffer, ///< [out] a shared_ptr\<logBuffer\>, which will be allocated and populated with the log entry 
+                         time::timespecX & ts, ///< [in] the timestamp of this log entry.
+                         const typename logT::messageT & msg, ///< [in] the message to log (could be of type emptyMessage) 
+                         logLevelT level ///< [in] the level (verbosity) of this log
+                       );
+   
    /// Make a log entry, including a message.
    /**
      * \tparam logT is a log entry type
@@ -171,6 +184,16 @@ struct logManager : public logFileT
              logLevelT level = logLevels::DEFAULT ///< [in] [optional] the log level.  The default is used if not specified.
            );
 
+   /// Make a log entry, including a message.
+   /**
+     * \tparam logT is a log entry type
+     */
+   template<typename logT>
+   void log( time::timespecX & ts, ///< [in] the timestamp of the log entry
+             const typename logT::messageT & msg, ///< [in] the message to log
+             logLevelT level = logLevels::DEFAULT ///< [in] [optional] the log level.  The default is used if not specified.
+           );
+   
    /// Make a log entry with no message.
    /**
      * \tparam logT is a log entry type
@@ -178,6 +201,14 @@ struct logManager : public logFileT
    template<typename logT>
    void log( logLevelT level = logLevels::DEFAULT /**< [in] [optional] the log level.  The default is used if not specified.*/);
 
+   /// Make a log entry with no message.
+   /**
+     * \tparam logT is a log entry type
+     */
+   template<typename logT>
+   void log( time::timespecX & ts, ///< [in] the timestamp of the log entry
+             logLevelT level = logLevels::DEFAULT ///< [in] [optional] the log level.  The default is used if not specified.
+           );
 
 };
 
@@ -325,6 +356,9 @@ int logManager<logFileT>::logThreadStart()
    sp.sched_priority = m_logThreadPrio;
 
    pthread_setschedparam( m_logThread.native_handle(), SCHED_OTHER, &sp);
+   
+   ///\todo need error checking in logThreadStart().
+   return 0;
 
 }
 
@@ -384,6 +418,17 @@ int logManager<logFileT>::createLog( bufferPtrT & logBuffer,
    time::timespecX ts;
    ts.gettime();
 
+   return createLog<logT>(logBuffer, ts, msg, level);
+}
+
+template<class logFileT>
+template<typename logT>
+int logManager<logFileT>::createLog( bufferPtrT & logBuffer,
+                                     time::timespecX & ts,
+                                     const typename logT::messageT & msg,
+                                     logLevelT level
+                                   )
+{
    if(level == logLevels::DEFAULT) level = logT::defaultLevel;
 
    //We first allocate the buffer.
@@ -433,12 +478,48 @@ void logManager<logFileT>::log( const typename logT::messageT & msg,
 
 template<class logFileT>
 template<typename logT>
+void logManager<logFileT>::log( time::timespecX & ts,
+                                const typename logT::messageT & msg,
+                                logLevelT level
+                              )
+{
+   //Step 0 check level.
+   if(level == logLevels::DEFAULT) level = logT::defaultLevel;
+
+   if( level > 0) //Normal logs
+   {
+      if(level < m_logLevel) return; // We do nothing with this.
+   }
+   else //Telemetry logs
+   {
+      if(level > m_logLevel) return; // We do nothing with this.
+   }
+
+   //Step 1 create log
+   bufferPtrT logBuffer;
+   createLog<logT>(logBuffer, ts, msg, level);
+
+   //Step 2 add log to queue
+   std::lock_guard<std::mutex> guard(m_qMutex);  //Lock the mutex before pushing back.
+   m_logQueue.push_back(logBuffer);
+
+}
+
+template<class logFileT>
+template<typename logT>
 void logManager<logFileT>::log( logLevelT level )
 {
    log<logT>( emptyMessage(), level );
 }
 
-
+template<class logFileT>
+template<typename logT>
+void logManager<logFileT>::log( time::timespecX & ts,
+                                logLevelT level 
+                              )
+{
+   log<logT>( ts, emptyMessage(), level );
+}
 
 
 } //namespace logger
