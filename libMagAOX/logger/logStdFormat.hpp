@@ -2,6 +2,8 @@
   * \brief Standard formating of log entries for readable output.
   * \author Jared R. Males (jaredmales@gmail.com)
   *
+  * \ingroup logger_files
+  * 
   * History:
   * - 2017-12-24 created by JRM
   */

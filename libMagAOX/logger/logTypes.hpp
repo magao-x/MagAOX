@@ -2,6 +2,8 @@
   * \brief The MagAO-X logger log types.
   * \author Jared R. Males (jaredmales@gmail.com)
   *
+  * \ingroup logger_files
+  * 
   * History:
   * - 2017-06-27 created by JRM
   */

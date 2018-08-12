@@ -2,6 +2,8 @@
   * \brief Manage a raw log file.
   * \author Jared R. Males (jaredmales@gmail.com)
   *
+  * \ingroup logger_files
+  * 
   * History:
   * - 2017-08-28 created by JRM
   */
