@@ -563,7 +563,7 @@ static int decode_reply(struct za_reply *destination, char *reply)
 	if (offset > sizeof(destination->device_status))
 	{
 		PRINTF_ERROR("[ERROR] Reply could not be decoded: device status too "
-				"long. Expected length: %lu. Your length: %lu. Device status "
+				"long. Expected length: %zu. Your length: %zu. Device status "
 				"value: %s\n.", sizeof(destination->device_status), offset,
 				buffer);
 		return Z_ERROR_COULD_NOT_DECODE;
@@ -653,7 +653,7 @@ static int decode_alert(struct za_reply *destination, char *reply)
 	if (offset > sizeof(destination->device_status))
 	{
 		PRINTF_ERROR("[ERROR] Reply could not be decoded: device status too "
-				"long. Expected length: %lu. Your length: %lu. Device status "
+				"long. Expected length: %zu. Your length: %zu. Device status "
 				"value: %s\n.", sizeof(destination->device_status), offset,
 				buffer);
 		return Z_ERROR_COULD_NOT_DECODE;
@@ -670,7 +670,7 @@ static int decode_alert(struct za_reply *destination, char *reply)
 	if (offset > sizeof(destination->warning_flags))
 	{
 		PRINTF_ERROR("[ERROR] Reply could not be decoded: warning flags too "
-				"long. Expected length: %lu. Your length: %lu. Warning flags "
+				"long. Expected length: %zu. Your length: %zu. Warning flags "
 				"value: %s\n.", sizeof(destination->warning_flags), offset,
 				buffer);
 		return Z_ERROR_COULD_NOT_DECODE;
@@ -732,7 +732,7 @@ static int decode_info(struct za_reply *destination, char *reply)
 	if (length > sizeof(destination->response_data))
 	{
 		PRINTF_ERROR("[ERROR] Reply could not be decoded: response data too "
-				"long. Maximum length: %lu. Your length: %lu. Data: %s.\n",
+				"long. Maximum length: %zu. Your length: %zu. Data: %s.\n",
 				sizeof(destination->response_data), length, reply);
 		return Z_ERROR_COULD_NOT_DECODE;
 	}

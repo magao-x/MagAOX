@@ -125,12 +125,23 @@ int zaberCtrl::testConnection()
    if(m_port <= 0)
    {
       int rv = euidCalled();
-      ///\todo check for errors
+      
+      if(rv < 0)
+      {
+         log<software_trace_fatal>({__FILE__, __LINE__});
+         state(stateCodes::FAILURE);
+         return ZC_NOT_CONNECTED;
+      }
 
       int zrv = za_connect(&m_port, m_deviceName.c_str());
 
       rv = euidReal();
-      ///\todo check for errors
+      if(rv < 0)
+      {
+         log<software_trace_fatal>({__FILE__, __LINE__});
+         state(stateCodes::FAILURE);
+         return ZC_NOT_CONNECTED;
+      }
 
 
       if(zrv != Z_SUCCESS)
@@ -173,17 +184,23 @@ int zaberCtrl::testConnection()
 
    char buffer[256];
    int stageCnt = 0;
-   while(1) //We have to read all responses to timeout in case an !alert comes in
+   while(1) //We have to read all responses until timeout in case an !alert comes in
    {
       int nrd = za_receive(m_port, buffer, sizeof(buffer));
-      if(nrd > 0 && nrd != Z_ERROR_SYSTEM_ERROR && nrd != Z_ERROR_BUFFER_TOO_SMALL)
+      if(nrd >= 0)
       {
          buffer[nrd] = '\0';
          std::cerr << buffer << "\n";
+         //Here: process these messages
          ++stageCnt;
       }
-      else break; //We assume it's just a timeout
-      ///\todo modify za_zerial.c so it returns Z_TIMEOUT if that's all it was
+      else if (nrd != Z_ERROR_TIMEOUT)
+      {
+         log<text_log>("Error receiving from stages", logLevels::ERROR);
+         state(stateCodes::ERROR);
+         return ZC_NOT_CONNECTED;
+      }
+      else break; //timeout
    }
    if(stageCnt == 0)
    {
@@ -196,6 +213,12 @@ int zaberCtrl::testConnection()
 
 int zaberCtrl::appStartup()
 {
+   if( state() == stateCodes::UNINITIALIZED )
+   {
+      log<text_log>( "In appStartup but in state UNINITIALIZED.", logLevels::FATAL );
+      return -1;
+   }
+   
    //Get the USB device if it's in udev
    if(m_deviceName == "") state(stateCodes::NODEVICE);
    else
@@ -212,11 +235,7 @@ int zaberCtrl::appStartup()
 
 int zaberCtrl::appLogic()
 {
-   if( state() == stateCodes::UNINITIALIZED )
-   {
-      log<text_log>( "In appLogic but in state UNINITIALIZED.", logLevels::FATAL );
-      return -1;
-   }
+   
    if( state() == stateCodes::INITIALIZED )
    {
       log<text_log>( "In appLogic but in state INITIALIZED.", logLevels::FATAL );
@@ -302,7 +321,7 @@ int zaberCtrl::appLogic()
       state(stateCodes::LOGGEDIN);
    }
 
-   //If we get here already more than CONNECTED, see if we're still CONNECTED
+   //If we get here already more than CONNECTED, see if we're still actually connected
    if( state() > stateCodes::CONNECTED )
    {
       testConnection();
@@ -341,14 +360,16 @@ int zaberCtrl::appLogic()
       {
          log<text_log>("Error NOT due to loss of USB connection.  I can't fix it myself.", logLevels::FATAL);
       }
-      return -1;
    }
 
 
 
 
-
-
+   if( state() == stateCodes::FAILURE )
+   {
+      return -1;
+   }
+   
    return 0;
 }
 
