@@ -1,17 +1,20 @@
 #!/bin/bash
+set -exuo pipefail
+IFS=$'\n\t'
+USAGE=$(cat <<'HERE'
+Usage: makeDirs.sh [--dev]
+Set up the MagAO-X folder structure, users, groups, and permissions.
 
+  --dev   Set up for local development (i.e. don't assume real
+          MagAO-X mount locations are present)
+HERE
+)
 
-##################################################
-#  setup the MagAOX directory tree.
-#
-# This is normally configured to run on an actual MagAO-X machine.
-#
-# IMPORTANT: cp to the local directory and edit there if you change it
-#            on your own machine.
-#
-# The only thing you should need to edit for use on a different machine
-# is the LOGDIR definition -- probably from /data/logs to /opt/MagAOX/logs
-###################################################
+if [[ "$1" == "--dev" ]]; then
+  LOGDIR="${LOGDIR:-/opt/MagAOX/logs}"
+else
+  LOGDIR="${LOGDIR:-/data/logs}"
+fi
 
 mkdir  -pv /opt/MagAOX
 mkdir  -pv /opt/MagAOX/bin
@@ -19,17 +22,14 @@ mkdir  -pv /opt/MagAOX/drivers
 mkdir  -pv /opt/MagAOX/drivers/fifos
 mkdir  -pv /opt/MagAOX/config
 
-LOGDIR=/data/logs
-#LOGDIR=/opt/MagAOX/logs
-
-mkdir -pv $LOGDIR
-chown :magaox $LOGDIR
-chmod g+rw -v $LOGDIR
-chmod g+s -v $LOGDIR
+mkdir -pv "$LOGDIR"
+chown :magaox "$LOGDIR"
+chmod g+rw -v "$LOGDIR"
+chmod g+s -v "$LOGDIR"
 
 if [ "$LOGDIR" != "/opt/MagAOX/logs" ] ; then
   echo "Creating logs symlink . . ."
-  ln -s $LOGDIR /opt/MagAOX/logs
+  ln -s "$LOGDIR" /opt/MagAOX/logs
 fi
 
 mkdir  -pv /opt/MagAOX/sys
