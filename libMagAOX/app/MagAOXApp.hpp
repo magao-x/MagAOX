@@ -155,15 +155,18 @@ public:
      */
 
    /// Any tasks to perform prior to the main event loop go here.
-   /** This is called after signal handling is installed.
-     *
+   /** This is called after signal handling is installed.  FSM state is 
+     * stateCodes::INITIALIZED when this is called.
+     * 
      * Set m_shutdown = 1 on any fatal errors here.
      */
    virtual int appStartup() = 0;
 
    /// This is where derived applications implement their main FSM logic.
    /** This will be called every loopPause nanoseconds until the application terminates.
-     *
+     * 
+     * FSM state will be whatever it is on exti from appStartup.
+     * 
      * Should return -1 on an any unrecoverable errors which will caues app to terminate.  Could also set m_shutdown=1.
      * Return 0 on success, or at least intent to continue.
      *
