@@ -1,7 +1,9 @@
 /** \file logBuffer.hpp 
   * \brief The MagAO-X logger buffer format and utility functions.
   * \author Jared R. Males (jaredmales@gmail.com)
-  *
+  * 
+  * \ingroup logger_files
+  * 
   * History:
   * - 2017-08-29 created by JRM
   */ 

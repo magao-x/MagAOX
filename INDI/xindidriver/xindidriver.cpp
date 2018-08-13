@@ -47,13 +47,13 @@ void * xoverThread( void * vdf /**< [in] pointer to a driverFIFO struct */)
    //Make sure the driverFIFO was initialized properly.
    if(df->stdfd != STDIN_FILENO && df->stdfd != STDOUT_FILENO)
    {
-      std::cerr << myName << " (" << XINDID_COMPILEDNAME << "): stdfd must be either STDIN_FILENO or STDOUT_FILENO.\n";
+      std::cerr << " (" << XINDID_COMPILEDNAME << "): stdfd must be either STDIN_FILENO or STDOUT_FILENO.\n";
       return nullptr;
    }
 
    if(df->fd >= 0)
    {
-      std::cerr << myName << " (" << XINDID_COMPILEDNAME << "): file descriptor for " << df->fileName << " already initialized.\n";
+      std::cerr << " (" << XINDID_COMPILEDNAME << "): file descriptor for " << df->fileName << " already initialized.\n";
       return nullptr;
    }
 
@@ -71,7 +71,7 @@ void * xoverThread( void * vdf /**< [in] pointer to a driverFIFO struct */)
          }
          else
          {
-            std::cerr << myName << " (" << XINDID_COMPILEDNAME << "): failed to open " << df->fileName << ".\n";
+            std::cerr << " (" << XINDID_COMPILEDNAME << "): failed to open " << df->fileName << ".\n";
             return nullptr;
          }
       }
@@ -120,7 +120,7 @@ void * xoverThread( void * vdf /**< [in] pointer to a driverFIFO struct */)
          //Select returned some error.  Report it, and sleep for a bit.  Then try again.
          if ( timeToDie == false )
          {
-            std::cerr << myName << " (" << XINDID_COMPILEDNAME << "): " << std::strerror( errno);
+            std::cerr << " (" << XINDID_COMPILEDNAME << "): " << std::strerror( errno);
             std::cerr << " in " << __FILE__ << " at " << __LINE__ << "\n";
             sleep(1);
          }
@@ -140,7 +140,7 @@ void * xoverThread( void * vdf /**< [in] pointer to a driverFIFO struct */)
             if( rd < 0 && !timeToDie)
             {
                //An error on the read.  Report it, and go back around.
-               std::cerr << myName << " (" << XINDID_COMPILEDNAME << "): " << std::strerror( errno);
+               std::cerr << " (" << XINDID_COMPILEDNAME << "): " << std::strerror( errno);
                std::cerr << " in " << __FILE__ << " at " << __LINE__ << "\n";
                break;
             }
@@ -155,7 +155,7 @@ void * xoverThread( void * vdf /**< [in] pointer to a driverFIFO struct */)
                if( wr < 0 && !timeToDie)
                {
                   //An error on write.  Report it and go back around.
-                  std::cerr << myName << " (" << XINDID_COMPILEDNAME << "): " << std::strerror( errno);
+                  std::cerr << " (" << XINDID_COMPILEDNAME << "): " << std::strerror( errno);
                   std::cerr << " in " << __FILE__ << " at " << __LINE__ << "\n";
                   break;
                }
@@ -176,6 +176,11 @@ void sigHandler( int signum,
                  void *ucont
                )
 {
+   //Suppress those warnings . . .
+   static_cast<void>(signum);
+   static_cast<void>(siginf);
+   static_cast<void>(ucont);
+   
    timeToDie = true;
 }
 
@@ -192,21 +197,21 @@ int setSigTermHandler()
    errno = 0;
    if( sigaction(SIGTERM, &act, 0) < 0 )
    {
-      std::cerr << myName << " (" << XINDID_COMPILEDNAME << "): error setting SIGTERM handler: " << strerror(errno) << "\n";
+      std::cerr << " (" << XINDID_COMPILEDNAME << "): error setting SIGTERM handler: " << strerror(errno) << "\n";
       return -1;
    }
 
    errno = 0;
    if( sigaction(SIGQUIT, &act, 0) < 0 )
    {
-      std::cerr << myName << " (" << XINDID_COMPILEDNAME << "): error setting SIGQUIT handler: " << strerror(errno) << "\n";
+      std::cerr << " (" << XINDID_COMPILEDNAME << "): error setting SIGQUIT handler: " << strerror(errno) << "\n";
       return -1;
    }
 
    errno = 0;
    if( sigaction(SIGINT, &act, 0) < 0 )
    {
-      std::cerr << myName << " (" << XINDID_COMPILEDNAME << "): error setting SIGINT handler: " << strerror(errno) << "\n";
+      std::cerr << " (" << XINDID_COMPILEDNAME << "): error setting SIGINT handler: " << strerror(errno) << "\n";
       return -1;
    }
 
@@ -255,7 +260,7 @@ int main( int argc, char **argv)
    }
    else
    {
-      std::cerr << myName << " (" << XINDID_COMPILEDNAME << "): too many arguments.\n\n";
+      std::cerr << " (" << XINDID_COMPILEDNAME << "): too many arguments.\n\n";
       usage();
       return -1;
    }
@@ -266,7 +271,7 @@ int main( int argc, char **argv)
    std::string stdinFifo = std::string(XINDID_FIFODIR) + "/" + myName + ".in";
    std::string stdoutFifo = std::string(XINDID_FIFODIR) + "/" + myName + ".out";
 
-   std::cerr << myName << " (" << XINDID_COMPILEDNAME << "): starting with " << stdinFifo << " & " << stdoutFifo << std::endl;
+   std::cerr << " (" << XINDID_COMPILEDNAME << "): starting with " << stdinFifo << " & " << stdoutFifo << std::endl;
 
    driverFIFO dfIn (stdinFifo, STDIN_FILENO);
 
@@ -287,7 +292,7 @@ int main( int argc, char **argv)
 
       if(rv == 0)
       {
-         std::cerr << myName << " (" << XINDID_COMPILEDNAME << "): STDIN thread exited.\n";
+         std::cerr << " (" << XINDID_COMPILEDNAME << "): STDIN thread exited.\n";
          timeToDie = true;
       }
 
@@ -295,7 +300,7 @@ int main( int argc, char **argv)
 
       if(rv == 0)
       {
-         std::cerr << myName << " (" << XINDID_COMPILEDNAME << "): STDOUT thread exited.\n";
+         std::cerr << " (" << XINDID_COMPILEDNAME << "): STDOUT thread exited.\n";
          timeToDie = true;
       }
 

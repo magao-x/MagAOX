@@ -2,6 +2,8 @@
   * \brief The MagAO-X logger log levels.
   * \author Jared R. Males (jaredmales@gmail.com)
   *
+  * \ingroup logger_files
+  * 
   * History:
   * - 2017-07-22 created by JRM
   */

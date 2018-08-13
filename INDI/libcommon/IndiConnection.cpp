@@ -129,11 +129,14 @@ void IndiConnection::construct( const string &szName,
 
   Config cfReader;
 
+  
+  
   // Should we log configuration settings? This will log the setting when
   // it is used from the program. This setting will be read first, for obvious
   // reasons.
-  //-->Set to false by JRM for MagAO-X
-  cfReader.enableLogMode(cfReader.get<bool>( "log_config_mode", false ) );
+  //-->Insted just set to false by JRM for MagAO-X, we aren't using this logging feature.
+  cfReader.enableLogMode(false);
+  //cfReader.enableLogMode(cfReader.get<bool>( "log_config_mode", true ) );
 
   m_oIsVerboseModeEnabled = cfReader.get<bool>( "verbose_mode", false );
 

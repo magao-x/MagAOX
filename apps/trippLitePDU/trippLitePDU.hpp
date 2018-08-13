@@ -20,7 +20,7 @@ namespace app
   * \todo need to recognize signals in tty polls and not return errors, etc.
   * \todo should check if values changed and do a sendSetProperty if so (pub/sub?)
   */
-class trippLitePDU : public MagAOXApp, public tty::usbDevice
+class trippLitePDU : public MagAOXApp<>, public tty::usbDevice
 {
 
 protected:

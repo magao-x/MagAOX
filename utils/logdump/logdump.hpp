@@ -25,7 +25,7 @@ protected:
 
    std::vector<std::string> m_prefixes;
 
-   int m_nfiles {0}; ///Number of files to dump.  Default is 0, unless following then the default is 1.
+   size_t m_nfiles {0}; ///Number of files to dump.  Default is 0, unless following then the default is 1.
 
    bool m_follow {false};
 
@@ -95,7 +95,7 @@ void logdump::loadConfig()
    }
 
    m_prefixes.resize(config.nonOptions.size());
-   for(int i=0;i<config.nonOptions.size(); ++i)
+   for(size_t i=0;i<config.nonOptions.size(); ++i)
    {
       m_prefixes[i] = config.nonOptions[i];
    }
@@ -133,7 +133,7 @@ int logdump::execute()
 
    if(m_nfiles > logs.size()) m_nfiles = logs.size();
 
-   for(int i=logs.size() - m_nfiles; i < logs.size(); ++i)
+   for(size_t i=logs.size() - m_nfiles; i < logs.size(); ++i)
    {
       std::string fname = logs[i];
       FILE * fin;
@@ -196,7 +196,7 @@ int logdump::execute()
          if(m_codes.size() > 0)
          {
             bool found = false;
-            for(int c = 0; c< m_codes.size(); ++c)
+            for(size_t c = 0; c< m_codes.size(); ++c)
             {
                if( m_codes[c] == ec )
                {
@@ -212,7 +212,7 @@ int logdump::execute()
             }
          }
 
-         if( headerSize + len > buffSz )
+         if( (size_t) headerSize + (size_t) len > buffSz )
          {
             logBuff = bufferPtrT(new char[headerSize + len]);
          }

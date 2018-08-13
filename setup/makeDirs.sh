@@ -23,6 +23,9 @@ mkdir  -pv /opt/MagAOX/drivers/fifos
 mkdir  -pv /opt/MagAOX/config
 
 mkdir -pv "$LOGDIR"
+if [[ ! $(getent group magaox) ]]; then
+  groupadd magaox
+fi
 chown :magaox "$LOGDIR"
 chmod g+rw -v "$LOGDIR"
 chmod g+s -v "$LOGDIR"
