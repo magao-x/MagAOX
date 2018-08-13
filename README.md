@@ -2,7 +2,7 @@
 
 # The MagAOX Software System
 
-This is the software which runs the MagAOX ExAO system.  
+This is the software which runs the MagAOX ExAO system.
 
 ## 1 Dependencies
 
@@ -98,7 +98,7 @@ ToDo:
 
 ## 4 Software Install
 
-The following are the default MagAOX system directories.  
+The following are the default MagAOX system directories.
 
 ```
 /opt/MagAOX               [MagAOX system directory]
@@ -135,3 +135,19 @@ To-do items are listed in the above sections.  Also see the Todo page in the dox
 - [] split base INDI off into separate repo, which will be the minimum someone needs to have INDI utils for interacting with MagAO-X without installing the whole tree.
 - [] create indiserver startup script which takes a list of drivers from a config file, creates symlinks to xindidriver as needed, and then starts indiserver itself.
 - [] start issue tracking
+
+## 7 Develop in a VM with [Vagrant](https://vagrantup.com)
+
+The MagAOX code is intimately tied to Linux OS internals, and targets CentOS 7 for the realtime control computers. To develop in the most "flight-like" configuration, a Vagrantfile is provided to set up a development VM.
+
+### Prerequisites:
+
+  * VirtualBox
+  * Vagrant
+  * NFS
+
+### Usage:
+
+After cloning the MagAOX repository, `cd` into it and run `vagrant up`. Vagrant will download a virtual machine image for CentOS 7 and then set up all the dependencies required. NFS is used to sync the contents of your repository clone to the VM.
+
+To connect to the VM, use `vagrant ssh`.

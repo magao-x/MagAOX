@@ -21,6 +21,7 @@ echo "source /opt/rh/devtoolset-7/enable" | sudo tee /etc/profile.d/devtoolset-7
 set +u
 source /opt/rh/devtoolset-7/enable
 set -u
+echo "export LD_LIBRARY_PATH=\"/usr/local/lib:\$LD_LIBRARY_PATH\"" | sudo tee /etc/profile.d/ld-library-path.sh
 #
 # mxLib Dependencies
 #
@@ -28,9 +29,51 @@ SOFA_REV="2018_0130_C"
 SOFA_REV_DATE=$(echo $SOFA_REV | tr -d _C)
 EIGEN_VERSION="3.3.4"
 LEVMAR_VERSION="2.6"
+FFTW_VERSION="3.3.8"
 sudo yum -y install lapack-devel atlas-devel
-sudo yum -y install boost-devel fftw-devel
+sudo yum -y install boost-devel
 sudo yum -y install gsl gsl-devel
+#
+# FFTW (note: need 3.3.8 or newer, so can't use yum)
+#
+if [[ ! -d "./fftw-$FFTW_VERSION" ]]; then
+    curl -OL http://fftw.org/fftw-$FFTW_VERSION.tar.gz
+    tar xzf fftw-$FFTW_VERSION.tar.gz
+fi
+cd fftw-$FFTW_VERSION
+# Following Jared's comprehensive build script: https://gist.github.com/jaredmales/0aacc00b0ce493cd63d3c5c75ccc6cdd
+./configure --enable-float
+make
+sudo make install
+
+./configure --enable-float --enable-threads
+make
+sudo make install
+
+./configure
+make
+sudo make install
+
+./configure --enable-threads
+make
+sudo make install
+
+./configure --enable-long-double
+make
+sudo make install
+
+./configure --enable-long-double --enable-threads
+make
+sudo make install
+
+./configure --enable-quad-precision
+make
+sudo make install
+
+./configure --enable-quad-precision --enable-threads
+make
+sudo make install
+cd
 #
 # CFITSIO
 #
@@ -89,8 +132,26 @@ else
 fi
 MXMAKEFILE="$HOME/mxlib/mk/MxApp.mk"
 export MXMAKEFILE
+echo <<<HERE > "$HOME/mxlib/local/MxApp.mk"
+BLAS_INCLUDES = -I/usr/include/atlas-x86_64-base
+BLAS_LDFLAGS = -L/usr/lib64/atlas -L/usr/lib64
+BLAS_LDLIBS = -ltatlas -lgfortran
+HERE
 make PREFIX=/usr/local
 make install PREFIX=/usr/local
 cd ..
 
+#
+# aoSystem (demo, remove later)
+#
+MXMAKEFILE=$HOME/mxlib/mk/MxApp.mk
+if [[ -d ./aoSystem ]]; then
+    cd aoSystem
+    git pull
+    log "Updated aoSystem"
+else
+    git clone https://github.com/jaredmales/aoSystem.git
+    cd aoSystem
+fi
+make -B -f $MXMAKEFILE aoSystem USE_BLAS_FROM=ATLAS
 echo "Finished!"
