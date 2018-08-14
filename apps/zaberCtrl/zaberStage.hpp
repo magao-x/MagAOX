@@ -161,7 +161,7 @@ int zaberStage::getResponse( std::string & response,
    int rv = za_decode(&rep, repBuff.c_str());
    if(rv != Z_SUCCESS)
    {
-      std::cerr << "za_decode !=Z_SUCCESS" << "\n";
+      MagAOXAppT::log<software_error>({__FILE__, __LINE__, rv, "za_decode !=Z_SUCCESS"});      
       return rv;
    }
 
@@ -187,7 +187,11 @@ int zaberStage::getResponse( std::string & response,
 
       return 0;
    }
-   else return -1;
+   else 
+   {
+      MagAOXAppT::log<software_error>({__FILE__, __LINE__, 0, "wrong device"});
+      return -1;
+   }
 }
 
 inline
@@ -196,7 +200,8 @@ int zaberStage::sendCommand( std::string & response,
                              const std::string & command
                            )
 {
-   //log<text_log>(std::string("Sending: ") + command, logLevels::DEBUG2);
+   MagAOXAppT::log<text_log>(std::string("Sending: ") + command, logLevels::DEBUG2);
+   
    std::cerr << "Sending: " << command << "\n";
    za_send(port, command.c_str());
 
@@ -207,25 +212,23 @@ int zaberStage::sendCommand( std::string & response,
       int rv = za_receive(port, buff, sizeof(buff));
       if(rv == Z_ERROR_TIMEOUT)
       {
-         std::cerr << "Z_ERROR_TIMEOUT" << "\n";
-         //log timeout
-         break; //error but just get out.
+         MagAOXAppT::log<software_error>({__FILE__, __LINE__, 0, "Z_ERROR_TIMEOUT"});
+         break; //assume error and just get out.
       }
       else if(rv < 0)
       {
-         std::cerr << "za_receive!=Z_SUCCESS" << "\n";
-         //log error
+         MagAOXAppT::log<software_error>({__FILE__, __LINE__, 0, "za_receive !=Z_SUCCESS"});
          break;
       }
       za_reply rep;
 
-      //log<text_log>(std::string("Received: ") + buff, logLevels::DEBUG2);
+      
+      MagAOXAppT::log<text_log>(std::string("Received: ") + buff, logLevels::DEBUG2);
 
       rv = za_decode(&rep, buff);
       if(rv != Z_SUCCESS)
       {
-         std::cerr << "za_decode !=Z_SUCCESS" << "\n";
-         //log error
+         MagAOXAppT::log<software_error>({__FILE__, __LINE__, 0, "za_decode !=Z_SUCCESS"});
          break;
       }
 
@@ -257,16 +260,13 @@ int zaberStage::updatePos( z_port port )
       }
       else
       {
-         std::cerr << "Command Rejected\n";
-         //Log rejected command
-
+         MagAOXAppT::log<software_error>({__FILE__, __LINE__, rv, "Command Rejected"});         
          return -1;
       }
    }
    else
    {
-      std::cerr << "Some other error\n";
-      //trace
+      MagAOXAppT::log<software_trace_error>({__FILE__, __LINE__});
       return -1;
    }
 }

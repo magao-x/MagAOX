@@ -13,6 +13,8 @@
 #include "../../libMagAOX/libMagAOX.hpp" //Note this is included on command line to trigger pch
 #include "magaox_git_version.h"
 
+typedef MagAOX::app::MagAOXApp<true> MagAOXAppT; //This needs to be before zaberStage.hpp for logging to work.  
+
 #include "zaberStage.hpp"
 #include "za_serial.h"
 
@@ -24,7 +26,7 @@ namespace MagAOX
 namespace app
 {
 
-class zaberCtrl : public MagAOXApp<>, public tty::usbDevice
+class zaberCtrl : public MagAOXAppT, public tty::usbDevice
 {
 
    //Give the test harness access.

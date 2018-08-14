@@ -68,6 +68,11 @@ template< bool _useINDI = true >
 class MagAOXApp : public mx::application
 {
 
+public:
+   
+   ///The log manager type.
+   typedef logger::logManager<logFileRaw> logManagerT;
+   
 protected:
 
    std::string MagAOXPath; ///< The base path of the MagAO-X system.
@@ -183,16 +188,14 @@ public:
    /** \name Logging
      * @{
      */
-protected:
-   logger::logManager<logFileRaw> m_log;
-
 public:
+   static logManagerT m_log;
 
    /// Make a log entry
    /** Wrapper for logManager::log
      */
    template<typename logT>
-   void log( const typename logT::messageT & msg, ///< [in] the message to log
+   static void log( const typename logT::messageT & msg, ///< [in] the message to log
              logLevelT level = logLevels::DEFAULT ///< [in] [optional] the log level.  The default is used if not specified.
            );
 
@@ -200,7 +203,7 @@ public:
    /** Wrapper for logManager::log
      */
    template<typename logT>
-   void log( logLevelT level = logLevels::DEFAULT /**< [in] [optional] the log level.  The default is used if not specified.*/);
+   static void log( logLevelT level = logLevels::DEFAULT /**< [in] [optional] the log level.  The default is used if not specified.*/);
 
    ///@} -- logging
 
@@ -480,6 +483,9 @@ public:
 
 //Set self pointer to null so app starts up uninitialized.
 template<bool _useINDI> MagAOXApp<_useINDI> * MagAOXApp<_useINDI>::m_self = nullptr;
+
+//Define the logger
+template<bool _useINDI> typename MagAOXApp<_useINDI>::logManagerT MagAOXApp<_useINDI>::m_log;
 
 template<bool _useINDI>
 MagAOXApp<_useINDI>::MagAOXApp( const std::string & git_sha1,

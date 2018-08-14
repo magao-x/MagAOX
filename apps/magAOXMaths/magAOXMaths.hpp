@@ -51,7 +51,7 @@ public:
 
    INDI_NEWCALLBACK_DECL(magAOXMaths, x);
 
-	INDI_NEWCALLBACK_DECL(magAOXMaths, y);
+   INDI_NEWCALLBACK_DECL(magAOXMaths, y);
 
 };
 
@@ -148,7 +148,9 @@ INDI_NEWCALLBACK_DEFN(magAOXMaths, y)(const pcf::IndiProperty &ipRecv)
 
    if (ipRecv.getName() == y.getName())
    {
-      // received a new value for property x
+      std::cerr << ipRecv.getDevice() << "\n";
+      
+      // received a new value for property y
 
       // extract value
       double v = ipRecv["value"].get<double>();
