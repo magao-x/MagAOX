@@ -7,6 +7,7 @@
 local/
 **/a.out
 **/tests/*.binlog
+**/.*~
 
 #Executables to ignore:
 INDI/INDI/evalINDI
@@ -21,6 +22,8 @@ apps/xindiserver/tests/remoteDriver_test
 apps/xindiserver/tests/tunneledHost_test
 apps/xindiserver/tests/xindiserver_test
 apps/xindiserver/xindiserver
+
+apps/sshDigger/sshDigger
 
 utils/logdump/logdump
 

@@ -17,6 +17,11 @@
 #define INDI_DEFAULT_PORT (7624)
 #endif
 
+namespace MagAOX
+{
+namespace netcom
+{
+   
 ///Contains the details of a tunneled-host specification and provides parsing.
 class tunneledHost
 {
@@ -150,7 +155,6 @@ public:
       }
 
 
-
       //Look for a 2nd :
       size_t second = cn.find(':', first+1);
 
@@ -186,5 +190,8 @@ public:
    }
 
 };
+
+} //namespace netcom
+} //namespace MagAOX
 
 #endif //tunneledHost_hpp

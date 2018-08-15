@@ -98,7 +98,7 @@ bool isEndOfTrans( const std::string & strRead, ///< [in] The read buffer to che
    if(eot.size() > strRead.size()) return false;
 
    //Now check from back, if any don't match it's false.
-   for(int i=0; i < eot.size(); ++i)
+   for(size_t i=0; i < eot.size(); ++i)
    {
       if( strRead[strRead.size()-1-i] != eot[eot.size()-1-i] ) return false;
    }
@@ -131,7 +131,7 @@ int ttyWrite( const std::string & buffWrite, ///< [in] The characters to write t
 
    t0 = mx::get_curr_time();
 
-   int totWritten = 0;
+   size_t totWritten = 0;
    while( totWritten < buffWrite.size())
    {
       int timeoutCurrent = timeoutWrite - (mx::get_curr_time()-t0)*1000;
@@ -275,7 +275,7 @@ int ttyWriteRead( std::string & strRead,        ///< [out] The string in which t
 
    if(swallowEcho)
    {
-      int totrv = 0;
+      size_t totrv = 0;
       char buffRead[TTY_BUFFSIZE];
 
       //First swallow the echo.

@@ -2,6 +2,8 @@
   * \brief The MagAO-X logger basic log types.
   * \author Jared R. Males (jaredmales@gmail.com)
   *
+  * \ingroup logger_files
+  * 
   * History:
   * - 2018-01-01 created by JRM
   */
@@ -39,7 +41,7 @@ struct string_log
    {
       char * cbuff = reinterpret_cast<char *>(msgBuffer);
 
-      for(int i =0; i< msg.size(); ++i)
+      for(size_t i =0; i< msg.size(); ++i)
       {
          cbuff[i] = msg[i];
       }
@@ -60,7 +62,7 @@ struct string_log
 
       msg.resize(len + 1);
 
-      for(int i=0; i< len; ++i)
+      for(msgLenT i=0; i< len; ++i)
       {
          msg[i] = cbuff[i];
       }
@@ -100,6 +102,8 @@ struct empty_log
    ///Get the length of the message.
    static msgLenT length( const messageT & msg)
    {
+      static_cast<void>(msg);
+      
       return 0;
    }
 
@@ -111,6 +115,9 @@ struct empty_log
                       const messageT & msg ///< [in] an emptyMessage.
                     )
    {
+      static_cast<void>(msgBuffer);
+      static_cast<void>(msg);
+      
       return 0;
    }
 
@@ -123,6 +130,10 @@ struct empty_log
                        msgLenT len ///< [in] ignored length of the empty buffer.
                      )
    {
+      static_cast<void>(msg);
+      static_cast<void>(msgBuffer);
+      static_cast<void>(len);
+      
       return 0;
    }
 };
@@ -174,22 +185,24 @@ struct software_log
       int offset = sizeof(messageT::lengthT);
 
       cbuff = cBuffer + offset; //reinterpret_cast<char *>(msgBuffer + offset);
-      for(int i =0; i< msg.file.size(); ++i)
+      for(size_t i =0; i< msg.file.size(); ++i)
       {
          cbuff[i] = msg.file[i];
       }
       offset += msg.file.size();
 
-      //Insert file length and string
+      //Insert line number
       *reinterpret_cast<messageT::linenumT *>(cBuffer+offset) = msg.linenum;
       offset += sizeof(messageT::linenumT);
 
+      //Insert message code
       *reinterpret_cast<messageT::codeT *>(cBuffer+offset) = msg.code;
       offset += sizeof(messageT::codeT);
 
+      //Insert Explanation.
       cbuff = reinterpret_cast<char *>(cBuffer + offset);
 
-      for(int i =0; i< msg.explanation.size(); ++i)
+      for(size_t i =0; i< msg.explanation.size(); ++i)
       {
          cbuff[i] = msg.explanation[i];
       }
@@ -213,7 +226,7 @@ struct software_log
 
       char * cbuff = reinterpret_cast<char *>(cBuffer + offset);
       msg.file.resize(strLen);
-      for(int i=0;i<strLen; ++i)
+      for(messageT::lengthT i=0;i<strLen; ++i)
       {
          msg.file[i] = cbuff[i];
       }
@@ -230,7 +243,7 @@ struct software_log
 
       cbuff = reinterpret_cast<char *>(cBuffer + offset);
       msg.explanation.resize(strLen);
-      for(int i=0;i<strLen; ++i)
+      for(messageT::lengthT i=0;i<strLen; ++i)
       {
          msg.explanation[i] = cbuff[i];
       }
@@ -253,6 +266,102 @@ struct software_log
    }
 };
 
+///Base class for software traces
+/** Such logs are used to log software source file and line number only. Does not have eventCode or defaultLevel, so this can not be used as a log type in logger.
+  *
+  * \ingroup logtypesbasics
+  */
+struct software_trace
+{
+   ///The type of the message
+   struct messageT
+   {
+      typedef std::string stringT; ///< Type used for file.
+      typedef int linenumT;  ///< Type for line numbers
+
+      typedef int lengthT; ///< Type for recording the length of strings within this message.
+
+      stringT file; ///< File where message was generated.
+      linenumT linenum; ///< Line number of file where message was generated.
+   };
+
+   ///Get the length of the message.
+   static msgLenT length( const messageT & msg)
+   {
+      return ( sizeof(messageT::lengthT) + msg.file.size()
+                   + sizeof(messageT::linenumT) );
+   }
+
+   ///Format the buffer given a software message
+   /**
+     * \returns 0
+     */
+   static int format( void * msgBuffer, ///< [out] the buffer, must be pre-allocated to size length(msg)
+                      const messageT & msg ///< [in] a softwareMessage.
+                    )
+   {
+
+      char * cBuffer = reinterpret_cast<char *>(msgBuffer);
+      char * cbuff;
+
+      //Insert file length and string
+      *reinterpret_cast<messageT::lengthT *>(cBuffer) = msg.file.length();
+      int offset = sizeof(messageT::lengthT);
+
+      cbuff = cBuffer + offset; //reinterpret_cast<char *>(msgBuffer + offset);
+      for(size_t i =0; i< msg.file.size(); ++i)
+      {
+         cbuff[i] = msg.file[i];
+      }
+      offset += msg.file.size();
+
+      //Insert linenumber
+      *reinterpret_cast<messageT::linenumT *>(cBuffer+offset) = msg.linenum;
+
+
+      return 0;
+   }
+
+   ///Extract the software message from a log buffer.
+   /**
+     * \returns 0
+     */
+   static int extract( messageT & msg, ///< [out] n softwareMessage
+                       void * msgBuffer, ///< [in] a log buffer
+                       msgLenT len ///< [in] length of the buffer.
+                     )
+   {
+      static_cast<void>(len);
+      
+      char * cBuffer = reinterpret_cast<char *>(msgBuffer);
+
+      messageT::lengthT strLen = *reinterpret_cast<messageT::lengthT *>(cBuffer);
+      int offset = sizeof(messageT::lengthT);
+
+      char * cbuff = reinterpret_cast<char *>(cBuffer + offset);
+      msg.file.resize(strLen);
+      for(messageT::lengthT i=0;i<strLen; ++i)
+      {
+         msg.file[i] = cbuff[i];
+      }
+
+      offset += strLen;
+      msg.linenum = *reinterpret_cast<messageT::linenumT *>(cBuffer+offset);
+
+      return 0;
+   }
+
+   static std::string msgString( messageT & msg )
+   {
+      std::string ret = "SW TRACE: ";
+      ret += msg.file;
+      ret += " LINE: ";
+      ret += mx::ioutils::convertToString(msg.linenum);
+
+      return ret;
+   }
+};
+
 ///TrippLite PDU Outlet state
 /** \ingroup logtypesbasics
   */
@@ -267,6 +376,8 @@ struct tripplitepdu_outlet_state
    ///Get the length of the message.
    static msgLenT length( const messageT & msg )
    {
+      static_cast<void>(msg);
+      
       return sizeof(messageT);
    }
 
@@ -286,6 +397,8 @@ struct tripplitepdu_outlet_state
                        msgLenT len       ///< [in] the length of the string contained in buffer.
                      )
    {
+      static_cast<void>(len);
+      
       char * cbuff = reinterpret_cast<char *>(msgBuffer);
       msg = cbuff[0];
 

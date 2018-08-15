@@ -2,6 +2,8 @@
   * \brief Manage a raw log file.
   * \author Jared R. Males (jaredmales@gmail.com)
   *
+  * \ingroup logger_files
+  * 
   * History:
   * - 2017-08-28 created by JRM
   */
@@ -246,7 +248,7 @@ int logFileRaw::writeLog( bufferPtrT & data )
       createFile(ts);
    }
 
-   int nwr = fwrite( data.get(), sizeof(char), N, m_fout);
+   size_t nwr = fwrite( data.get(), sizeof(char), N, m_fout);
 
    if(nwr != N*sizeof(char))
    {
