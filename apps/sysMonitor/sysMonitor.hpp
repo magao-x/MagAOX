@@ -182,21 +182,35 @@ namespace MagAOX
          double disk_usage = std::stod (tokens2[4],&sz3);
          std::cout << disk_usage << std::endl;
 
-         /*
-         for(std::vector<std::string>::iterator it = tokens.begin(); it != tokens.end(); ++it) 
-         {
-            std::string temp_s = *it;
-            if (isdigit(temp_s.at(0)) && temp_s.substr(temp_s.length() - 1, 1) == "C") 
-            {
-               temp_s.pop_back();
-               temp_s.pop_back();
-               std::string::size_type sz2;
-               double hdd_temp = std::stod (temp_s,&sz2);
-               std::cout << hdd_temp << std::endl;
-            }
-         }
-         */
          
+         // For ram usage
+         strcpy( command, "free -m > /dev/shm/ramusage" );
+         rv = system(command);
+         if(rv == -1) //system call error
+         {
+            //handle error
+            std::cerr << "There's been an error with the system command" << std::endl;
+            return 1;
+         }
+
+         std::ifstream inFile4;
+         inFile4.open("/dev/shm/ramusage");
+         if (!inFile4) 
+         {
+            std::cerr << "Unable to open file" << std::endl;
+            return 1;
+         }
+         
+         // Want second line
+         getline (inFile4,line);
+         getline (inFile4,line);
+         std::istringstream iss3(line);
+         std::vector<std::string> tokens3{std::istream_iterator<std::string>{iss3},std::istream_iterator<std::string>{}};
+         std::string::size_type sz4;
+         double ram_usage = std::stod (tokens3[2],&sz4);
+         double ram_total = std::stod (tokens3[1],&sz4);
+         double ram_usage_percent = ram_usage/ram_total;
+         std::cout << ram_usage_percent << std::endl;
 
 
          return 0;
