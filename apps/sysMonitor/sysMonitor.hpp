@@ -82,6 +82,7 @@ namespace MagAOX
          
          char command[35];
 
+         // For core temps
          strcpy( command, "sensors > /dev/shm/sensors_out" );
          int rv = system(command);
          if(rv == -1) //system call error
@@ -114,7 +115,7 @@ namespace MagAOX
          }
          criticalTemperature(temps);
 
-
+         // For hard drive temp
          // wget http://dl.fedoraproject.org/pub/epel/7/x86_64/Packages/h/hddtemp-0.3-0.31.beta15.el7.x86_64.rpm (binary package)
          // su
          // rpm -Uvh hddtemp-0.3-0.31.beta15.el7.x86_64.rpm
@@ -152,6 +153,49 @@ namespace MagAOX
                std::cout << hdd_temp << std::endl;
             }
          }
+
+         // For disk usage
+         strcpy( command, "df > /dev/shm/diskusage" );
+         rv = system(command);
+         if(rv == -1) //system call error
+         {
+            //handle error
+            std::cerr << "There's been an error with the system command" << std::endl;
+            return 1;
+         }
+
+         std::ifstream inFile3;
+         inFile3.open("/dev/shm/diskusage");
+         if (!inFile3) 
+         {
+            std::cerr << "Unable to open file" << std::endl;
+            return 1;
+         }
+         
+         // Want second line
+         getline (inFile3,line);
+         getline (inFile3,line);
+         std::istringstream iss2(line);
+         std::vector<std::string> tokens2{std::istream_iterator<std::string>{iss2},std::istream_iterator<std::string>{}};
+         tokens2[4].pop_back();
+         std::string::size_type sz3;
+         double disk_usage = std::stod (tokens2[4],&sz3);
+         std::cout << disk_usage << std::endl;
+
+         /*
+         for(std::vector<std::string>::iterator it = tokens.begin(); it != tokens.end(); ++it) 
+         {
+            std::string temp_s = *it;
+            if (isdigit(temp_s.at(0)) && temp_s.substr(temp_s.length() - 1, 1) == "C") 
+            {
+               temp_s.pop_back();
+               temp_s.pop_back();
+               std::string::size_type sz2;
+               double hdd_temp = std::stod (temp_s,&sz2);
+               std::cout << hdd_temp << std::endl;
+            }
+         }
+         */
          
 
 
