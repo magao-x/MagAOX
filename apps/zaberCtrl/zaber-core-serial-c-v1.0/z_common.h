@@ -73,9 +73,7 @@ enum z_returns {
 	Z_ERROR_INVALID_BAUDRATE = -4,
 	/** Tried to decode a partial reply, 
 	 * or a string that wasn't a reply at all */
-	Z_ERROR_COULD_NOT_DECODE = -5,
-	/** A imeout occurred (added by JRM for MagAO-X) */
-    Z_ERROR_TIMEOUT = -10
+	Z_ERROR_COULD_NOT_DECODE = -5
 };
 
 #endif /* if !defined(Z_COMMON_H) */

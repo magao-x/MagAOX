@@ -68,6 +68,11 @@ template< bool _useINDI = true >
 class MagAOXApp : public mx::application
 {
 
+public:
+   
+   ///The log manager type.
+   typedef logger::logManager<logFileRaw> logManagerT;
+   
 protected:
 
    std::string MagAOXPath; ///< The base path of the MagAO-X system.
@@ -155,15 +160,18 @@ public:
      */
 
    /// Any tasks to perform prior to the main event loop go here.
-   /** This is called after signal handling is installed.
-     *
+   /** This is called after signal handling is installed.  FSM state is 
+     * stateCodes::INITIALIZED when this is called.
+     * 
      * Set m_shutdown = 1 on any fatal errors here.
      */
    virtual int appStartup() = 0;
 
    /// This is where derived applications implement their main FSM logic.
    /** This will be called every loopPause nanoseconds until the application terminates.
-     *
+     * 
+     * FSM state will be whatever it is on exti from appStartup.
+     * 
      * Should return -1 on an any unrecoverable errors which will caues app to terminate.  Could also set m_shutdown=1.
      * Return 0 on success, or at least intent to continue.
      *
@@ -180,16 +188,14 @@ public:
    /** \name Logging
      * @{
      */
-protected:
-   logger::logManager<logFileRaw> m_log;
-
 public:
+   static logManagerT m_log;
 
    /// Make a log entry
    /** Wrapper for logManager::log
      */
    template<typename logT>
-   void log( const typename logT::messageT & msg, ///< [in] the message to log
+   static void log( const typename logT::messageT & msg, ///< [in] the message to log
              logLevelT level = logLevels::DEFAULT ///< [in] [optional] the log level.  The default is used if not specified.
            );
 
@@ -197,7 +203,7 @@ public:
    /** Wrapper for logManager::log
      */
    template<typename logT>
-   void log( logLevelT level = logLevels::DEFAULT /**< [in] [optional] the log level.  The default is used if not specified.*/);
+   static void log( logLevelT level = logLevels::DEFAULT /**< [in] [optional] the log level.  The default is used if not specified.*/);
 
    ///@} -- logging
 
@@ -477,6 +483,9 @@ public:
 
 //Set self pointer to null so app starts up uninitialized.
 template<bool _useINDI> MagAOXApp<_useINDI> * MagAOXApp<_useINDI>::m_self = nullptr;
+
+//Define the logger
+template<bool _useINDI> typename MagAOXApp<_useINDI>::logManagerT MagAOXApp<_useINDI>::m_log;
 
 template<bool _useINDI>
 MagAOXApp<_useINDI>::MagAOXApp( const std::string & git_sha1,

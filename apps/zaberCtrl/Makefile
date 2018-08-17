@@ -1,7 +1,7 @@
 
 allall: all
 
-OTHER_HEADERS=zaberUtil.hpp
-OTHER_OBJS=za_serial
+OTHER_HEADERS=zaberStage.hpp 
+OTHER_OBJS=za_serial.o
 TARGET=zaberCtrl
 include ../../Make/magAOXApp.mk

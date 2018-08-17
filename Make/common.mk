@@ -67,8 +67,9 @@ LDLIBS += -Wl,-rpath,$(LDLIBRPATH)
 ## Compilation and linking
 #######################################
 
-CFLAGS += -std=c99 -fPIC $(INCLUDES) $(OPTIMIZE) -c
-CXXFLAGS += -std=c++14 -fPIC $(INCLUDES) $(OPTIMIZE)
+
+CFLAGS += -std=c99 -fPIC $(INCLUDES) $(OPTIMIZE) 
+CXXFLAGS += -std=c++14 -fPIC $(INCLUDES) $(OPTIMIZE) 
 
 #This is needed to force use of g++ for linking
 LINK.o = $(LINK.cc)

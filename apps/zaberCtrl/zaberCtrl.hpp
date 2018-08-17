@@ -13,6 +13,9 @@
 #include "../../libMagAOX/libMagAOX.hpp" //Note this is included on command line to trigger pch
 #include "magaox_git_version.h"
 
+typedef MagAOX::app::MagAOXApp<true> MagAOXAppT; //This needs to be before zaberStage.hpp for logging to work.  
+
+#include "zaberStage.hpp"
 #include "za_serial.h"
 
 #define ZC_CONNECTED (0)
@@ -23,7 +26,7 @@ namespace MagAOX
 namespace app
 {
 
-class zaberCtrl : public MagAOXApp<>, public tty::usbDevice
+class zaberCtrl : public MagAOXAppT, public tty::usbDevice
 {
 
    //Give the test harness access.
@@ -34,7 +37,12 @@ protected:
 
    int m_numStages {0};
 
-   z_port m_port;
+   z_port m_port {0};
+
+   std::vector<zaberStage> m_stages;
+
+   ///Mutex for locking device communications.
+   std::mutex m_devMutex;
 
 public:
    /// Default c'tor.
@@ -120,17 +128,28 @@ void zaberCtrl::loadConfig()
 
 int zaberCtrl::testConnection()
 {
-   //get mutex here.
+   std::lock_guard<std::mutex> guard(m_devMutex);
 
    if(m_port <= 0)
    {
       int rv = euidCalled();
-      ///\todo check for errors
+
+      if(rv < 0)
+      {
+         log<software_trace_fatal>({__FILE__, __LINE__});
+         state(stateCodes::FAILURE);
+         return ZC_NOT_CONNECTED;
+      }
 
       int zrv = za_connect(&m_port, m_deviceName.c_str());
 
       rv = euidReal();
-      ///\todo check for errors
+      if(rv < 0)
+      {
+         log<software_trace_fatal>({__FILE__, __LINE__});
+         state(stateCodes::FAILURE);
+         return ZC_NOT_CONNECTED;
+      }
 
 
       if(zrv != Z_SUCCESS)
@@ -160,7 +179,9 @@ int zaberCtrl::testConnection()
       return ZC_NOT_CONNECTED; //Not an error, just no device talking.
    }
 
+   log<text_log>("Sending: /", logLevels::DEBUG);
    int nwr = za_send(m_port, "/");
+
    if(nwr == Z_ERROR_SYSTEM_ERROR)
    {
       za_disconnect(m_port);
@@ -173,17 +194,26 @@ int zaberCtrl::testConnection()
 
    char buffer[256];
    int stageCnt = 0;
-   while(1) //We have to read all responses to timeout in case an !alert comes in
+   while(1) //We have to read all responses until timeout in case an !alert comes in
    {
       int nrd = za_receive(m_port, buffer, sizeof(buffer));
-      if(nrd > 0 && nrd != Z_ERROR_SYSTEM_ERROR && nrd != Z_ERROR_BUFFER_TOO_SMALL)
+      if(nrd >= 0)
       {
          buffer[nrd] = '\0';
-         std::cerr << buffer << "\n";
+         log<text_log>(std::string("Received: ") + buffer, logLevels::DEBUG);
          ++stageCnt;
       }
-      else break; //We assume it's just a timeout
-      ///\todo modify za_zerial.c so it returns Z_TIMEOUT if that's all it was
+      else if (nrd != Z_ERROR_TIMEOUT)
+      {
+         log<text_log>("Error receiving from stages", logLevels::ERROR);
+         state(stateCodes::ERROR);
+         return ZC_NOT_CONNECTED;
+      }
+      else
+      {
+         log<text_log>("TIMEOUT", logLevels::DEBUG);
+         break; //timeout
+      }
    }
    if(stageCnt == 0)
    {
@@ -196,6 +226,12 @@ int zaberCtrl::testConnection()
 
 int zaberCtrl::appStartup()
 {
+   if( state() == stateCodes::UNINITIALIZED )
+   {
+      log<text_log>( "In appStartup but in state UNINITIALIZED.", logLevels::FATAL );
+      return -1;
+   }
+
    //Get the USB device if it's in udev
    if(m_deviceName == "") state(stateCodes::NODEVICE);
    else
@@ -212,11 +248,7 @@ int zaberCtrl::appStartup()
 
 int zaberCtrl::appLogic()
 {
-   if( state() == stateCodes::UNINITIALIZED )
-   {
-      log<text_log>( "In appLogic but in state UNINITIALIZED.", logLevels::FATAL );
-      return -1;
-   }
+
    if( state() == stateCodes::INITIALIZED )
    {
       log<text_log>( "In appLogic but in state INITIALIZED.", logLevels::FATAL );
@@ -274,41 +306,96 @@ int zaberCtrl::appLogic()
 
    }
 
-   if( state() == stateCodes::CONNECTED )
+   //If we get here already more than CONNECTED, see if we're still actually connected
+   if( state() > stateCodes::CONNECTED )
+   {
+      testConnection();
+   }
+   else if( state() == stateCodes::CONNECTED )
    {
       state(stateCodes::CONFIGURING);
-      int nwr = za_send(m_port, "renumber");
-      if(nwr == Z_ERROR_SYSTEM_ERROR)
+
+      std::lock_guard<std::mutex> guard(m_devMutex);
+
+      log<text_log>("DRAINING", logLevels::DEBUG);
+      int rv = za_drain(m_port);
+      if(rv != Z_SUCCESS)
       {
-         log<text_log>("Error sending renumber to stages", logLevels::ERROR);
+         log<software_error>({__FILE__,__LINE__, rv, "error from za_drain"});
          state(stateCodes::ERROR);
          return 0;
       }
 
       char buffer[256];
       int stageCnt = 0;
+
+      std::vector<std::string> renumberRes;
+
+      log<text_log>("Sending: /renumber", logLevels::DEBUG);
+      int nwr = za_send(m_port, "/renumber");
+
+      if(nwr == Z_ERROR_SYSTEM_ERROR)
+      {
+         log<text_log>("Error sending renumber to stages", logLevels::ERROR);
+         state(stateCodes::ERROR);
+      }
+
       while(1)
       {
          int nrd = za_receive(m_port, buffer, sizeof(buffer));
-         if(nrd > 0 && nrd != Z_ERROR_SYSTEM_ERROR && nrd != Z_ERROR_BUFFER_TOO_SMALL)
+         if(nrd >= 0 )
          {
             buffer[nrd] = '\0';
-            std::cerr << buffer << "\n";
+            log<text_log>(std::string("Received: ")+buffer, logLevels::DEBUG);
+            renumberRes.push_back(buffer);
             ++stageCnt;
          }
-         else break;
+         else if( nrd != Z_ERROR_TIMEOUT)
+         {
+            log<text_log>("Error receiving from stages", logLevels::ERROR);
+            state(stateCodes::ERROR);
+         }
+         else
+         {
+            log<text_log>("TIMEOUT", logLevels::DEBUG);
+            break; //Timeout ok.
+         }
       }
-      std::cerr << "stageCnt: " << stageCnt << "\n";
-      state(stateCodes::LOGGEDIN);
-   }
 
-   //If we get here already more than CONNECTED, see if we're still CONNECTED
-   if( state() > stateCodes::CONNECTED )
+      if(state() == stateCodes::CONFIGURING) //Check that nothing changed.
+      {
+         std::cerr << "stageCnt: " << stageCnt << "\n";
+         for(size_t i=0; i< renumberRes.size(); ++i)
+         {
+            std::cerr << renumberRes[i] << "\n";
+            zaberStage newst;
+            newst.deviceAddress(i+1);
+
+            std::string rstr;
+
+            if( newst.getResponse(rstr, renumberRes[i]) != Z_SUCCESS)
+            {
+               std::cerr << "Stage did not match.\n";
+               state(stateCodes::ERROR);
+               return 0;
+            }
+
+            m_stages.push_back(newst);
+            std::cerr << newst.deviceStatus() << "\n";
+
+         }
+         state(stateCodes::LOGGEDIN);
+      }
+   } //mutex is given up at this point
+
+   if( state() == stateCodes::LOGGEDIN )
    {
-      testConnection();
+      std::lock_guard<std::mutex> guard(m_devMutex);
+      for(size_t i=0; i < m_stages.size();++i)
+      {
+         m_stages[i].updatePos(m_port);
+      }
    }
-
-
 
    if( state() == stateCodes::ERROR )
    {
@@ -341,13 +428,15 @@ int zaberCtrl::appLogic()
       {
          log<text_log>("Error NOT due to loss of USB connection.  I can't fix it myself.", logLevels::FATAL);
       }
-      return -1;
    }
 
 
 
 
-
+   if( state() == stateCodes::FAILURE )
+   {
+      return -1;
+   }
 
    return 0;
 }
