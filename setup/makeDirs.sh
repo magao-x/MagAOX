@@ -1,19 +1,22 @@
 #!/bin/bash
-set -exuo pipefail
+set -euo pipefail
 IFS=$'\n\t'
-USAGE=$(cat <<'HERE'
+
+envswitch=${1:---prod}
+
+if [[ "$envswitch" == "--dev" ]]; then
+  LOGDIR="${LOGDIR:-/opt/MagAOX/logs}"
+elif [[ "$envswitch" == "--prod" ]]; then
+  LOGDIR="${LOGDIR:-/data/logs}"
+else
+  cat <<'HERE'
 Usage: makeDirs.sh [--dev]
 Set up the MagAO-X folder structure, users, groups, and permissions.
 
   --dev   Set up for local development (i.e. don't assume real
           MagAO-X mount locations are present)
 HERE
-)
-
-if [[ "$1" == "--dev" ]]; then
-  LOGDIR="${LOGDIR:-/opt/MagAOX/logs}"
-else
-  LOGDIR="${LOGDIR:-/data/logs}"
+  exit 1
 fi
 
 mkdir  -pv /opt/MagAOX
