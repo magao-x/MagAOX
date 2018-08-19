@@ -1,30 +1,21 @@
 evalINDI
 ========
 
-[NAME](#NAME)
-[SYNOPSIS](#SYNOPSIS)
-[DESCRIPTION](#DESCRIPTION)
-[OPTIONS](#OPTIONS)
-[EXIT STATUS](#EXIT%20STATUS)
-[EXAMPLES](#EXAMPLES)
-[SEE ALSO](#SEE%20ALSO)
+[TOC]
 
 ------------------------------------------------------------------------
 
-NAME []()
----------
+# NAME 
 
 evalINDI − evaluate an expression of INDI property values
 
-SYNOPSIS []()
--------------
+# SYNOPSIS 
 
 ```
 evalINDI [options] [exp]
 ```
 
-DESCRIPTION []()
-----------------
+# DESCRIPTION 
 
 evalINDI connects to an indiserver and listens for the values of properties to evaluate an arithmetic expression. Each property is specified using three components enclosed in double quotes in the following form:
 ```
@@ -67,8 +58,7 @@ and the mathematical functions supported include:
 
 The value of PI can be specified using a constant named "pi".
 
-OPTIONS []()
-------------
+# OPTIONS 
 
 <table>
 <colgroup>
@@ -146,13 +136,11 @@ OPTIONS []()
 </tbody>
 </table>
 
-EXIT STATUS []()
-----------------
+# EXIT STATUS 
 
 The evalINDI program exits with a statis of 0 if the expression evaluates to non-0. It exits with 1 if the expression evaluated to 0. It exits with 2 if there was some other error such as not being able to connect to the indiserver.
 
-EXAMPLES []()
--------------
+# EXAMPLES 
 
 Print 0/1 whether the Front or Rear elements of the Security property are in a state of Alert:
 ```
@@ -170,8 +158,8 @@ Wait forever for the wind speed to become larger than 50:
 ```
 evalINDI -t 0 -w ’"Weather.Wind.Speed">50’
 ```
-SEE ALSO []()
--------------
+
+#SEE ALSO 
 
 getINDI
 
@@ -181,10 +169,11 @@ indiserver
 
 http://www.clearskyinstitute.com/INDI/INDI.pdf
 
+
 ------------------------------------------------------------------------
 This evalINDI.md generated from the man documentation with the commands:
 ```
 groff -mandoc -Thtml evalINDI.man > evalINDI.html
 pandoc -t markdown_github evalINDI.html > evalINDI.md
 ```
-and then tweaked for presentation.
+and then tweaked for presentation and doxygent compatibility.
