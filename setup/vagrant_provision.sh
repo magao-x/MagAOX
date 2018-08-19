@@ -132,11 +132,11 @@ else
 fi
 MXMAKEFILE="$HOME/mxlib/mk/MxApp.mk"
 export MXMAKEFILE
-echo <<<HERE > "$HOME/mxlib/local/MxApp.mk"
+cat << EOF > "$HOME/mxlib/local/MxApp.mk"
 BLAS_INCLUDES = -I/usr/include/atlas-x86_64-base
 BLAS_LDFLAGS = -L/usr/lib64/atlas -L/usr/lib64
 BLAS_LDLIBS = -ltatlas -lgfortran
-HERE
+EOF
 make PREFIX=/usr/local
 make install PREFIX=/usr/local
 cd ..
