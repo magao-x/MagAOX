@@ -19,9 +19,9 @@ namespace logger
 {
 
 ///Base class for software logs
-/** Such logs are used to log software status, warnings, and errors. Does not have eventCode or defaultLevel, so this can not be used as a log type in logger.
+/** Such logs are used to log software status, warnings, and errors. Does not have defaultLevel, so this can not be used as a log type in logger.
   *
-  * \ingroup logtypesbasics
+  * \ingroup logger_types__basic
   */
 struct software_log : public flatbuffer_log
 {
@@ -163,7 +163,8 @@ struct software_log : public flatbuffer_log
 
 
 ///Software EMERGENCY log entry
-/** \ingroup logtypes
+/** This should only be used for a system-wide emergency requiring operator or automatic shutdown.  Not for a process specific problem.
+  * \ingroup logger_types
   */
 struct software_emergency : public software_log
 {
@@ -172,7 +173,8 @@ struct software_emergency : public software_log
 };
 
 ///Software ALERT log entry
-/** \ingroup logtypes
+/** This should only be used for a system-wide emergency requiring operator or automatic action.  Not for a process specific problem.
+  * \ingroup logger_types
   */
 struct software_alert : public software_log
 {
@@ -180,8 +182,9 @@ struct software_alert : public software_log
    static const flatlogs::logPrioT defaultLevel = flatlogs::logPrio::LOG_ALERT;
 };
 
-///Software CRIT log entry
-/** \ingroup logtypes
+///Software CRITICAL log entry
+/** This should only be used if the process is going to shutdown.
+  * \ingroup logger_types
   */
 struct software_critical : public software_log
 {
@@ -190,7 +193,8 @@ struct software_critical : public software_log
 };
 
 ///Software ERR log entry
-/** \ingroup logtypes
+/** Used to record and error that the process will attempt to recover from. 
+  * \ingroup logger_types
   */
 struct software_error : public software_log
 {
@@ -199,7 +203,8 @@ struct software_error : public software_log
 };
 
 ///Software WARN log entry
-/** \ingroup logtypes
+/** Used to record an abnormal condition.
+  * \ingroup logger_types
   */
 struct software_warning : public software_log
 {
@@ -208,7 +213,8 @@ struct software_warning : public software_log
 };
 
 ///Software NOTICE log entry
-/** \ingroup logtypes
+/** Used to record a normal but signficant event or condition.
+  * \ingroup logger_types
   */
 struct software_notice : public software_log
 {
@@ -217,7 +223,8 @@ struct software_notice : public software_log
 };
 
 ///Software INFO log entry
-/** \ingroup logtypes
+/** Used to record a normal event or condition.  This is the lowest priority used in normal operations.
+  * \ingroup logger_types
   */
 struct software_info : public software_log
 {
@@ -226,7 +233,7 @@ struct software_info : public software_log
 };
 
 ///Software DEBUG log entry
-/** \ingroup logtypes
+/** \ingroup logger_types
   */
 struct software_debug : public software_log
 {
@@ -235,7 +242,7 @@ struct software_debug : public software_log
 };
 
 ///Software DEBUG2 log entry
-/** \ingroup logtypes
+/** \ingroup logger_types
   */
 struct software_debug2 : public software_log
 {

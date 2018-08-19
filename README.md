@@ -6,15 +6,19 @@ This is the software which runs the MagAOX ExAO system.
 
 ## 1 Dependencies
 
-#### 1.1 Current:
-1. mxlib (https://github.com/jaredmales/mxlib)
-2. libudev (for introspective device discovery)
-3. zlib (compression for INDI)
+1. mxlib (https://github.com/jaredmales/mxlib).
+   For a MagAO-X machine change the prefix to `/usr/local` in the mxlib install
+2. libudev (for introspective device discovery).  Get from package manager.
+3. zlib (compression for INDI). Get from package manager:
    - zlib-devel [centOS-7]
    - zlib1g-dev [ubuntu]
-
-#### 1.1 Future
-1. libhdf5 (though not for anything currently implemented, but we will)
+4. flatbuffers (https://google.github.io/flatbuffers/flatbuffers_guide_building.html)
+   To build and install the flatc compiler and install the include files in /usr/local:
+   ```
+   $ cmake -G "Unix Makefiles" -DCMAKE_BUILD_TYPE=Release
+   $ make
+   $ sudo make install
+   ```
 
 ## 2 Software Configuration
 

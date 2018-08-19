@@ -19,7 +19,7 @@ namespace logger
 
 ///Empty type for resolving logs with no message.
 /**
-  * \ingroup logger_types
+  * \ingroup logger_types_basic
   */
 struct emptyMessage
 {
@@ -31,7 +31,7 @@ struct emptyMessage
   * so this can not be used as a log type directly.
   *
   *
-  * \ingroup logger_types
+  * \ingroup logger_types_basic
   */
 template<class derivedT>
 struct empty_log 

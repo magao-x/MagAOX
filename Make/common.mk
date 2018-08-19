@@ -76,4 +76,4 @@ LINK.o = $(LINK.cc)
 
 #Create an implicit rule for pre-compiled headers
 %.hpp.gch: %.hpp
-	$(CXX) $(CXXFLAGS) -c $<
+	$(CXX) $(CXXFLAGS) -I$(SELF_DIR)../flatlogs/include -c $<

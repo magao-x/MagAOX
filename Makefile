@@ -1,5 +1,5 @@
 
-apps_to_build = xindiserver trippLitePDU magAOXMaths 
+apps_to_build = xindiserver trippLitePDU magAOXMaths zaberCtrl
 
 utils_to_build = logdump
 
@@ -8,7 +8,9 @@ all: indi_all apps_all utils_all
 
 install: indi_install apps_install utils_install
 
-clean: indi_clean apps_clean utils_clean
+clean: lib_clean apps_clean utils_clean
+
+all_clean: indi_clean lib_clean apps_clean utils_clean
 
 indi_all:
 	cd INDI; ${MAKE} all
@@ -18,6 +20,9 @@ indi_install:
 
 indi_clean:
 	cd INDI; ${MAKE} clean
+
+lib_clean:
+	cd libMagAOX; ${MAKE} clean
 
 apps_all:
 	for app in ${apps_to_build}; do \

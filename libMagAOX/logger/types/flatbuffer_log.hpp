@@ -18,7 +18,7 @@ namespace logger
 
 ///Message type for resolving log messages with a f.b. builder.
 /**
-  * \ingroup logger_types
+  * \ingroup logger_types_basic
   */
 struct fbMessage
 {
@@ -31,7 +31,7 @@ struct fbMessage
   * so this can not be used as a log type directly.
   *
   *
-  * \ingroup logger_types
+  * \ingroup logger_types_basic
   */
 struct flatbuffer_log 
 {

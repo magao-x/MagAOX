@@ -9,13 +9,22 @@ local/
 **/tests/*.binlog
 **/.*~
 
-#Executables to ignore:
+#Ignore any old folders 
+**/old/
+
+#Ignore any generated code directories:
+**/generated/
+
+#Executables and app specifics to ignore:
 INDI/INDI/evalINDI
 INDI/INDI/getINDI
 INDI/INDI/indiserver
 INDI/INDI/setINDI
 INDI/xindidriver/xindidriver
+
 apps/trippLitePDU/trippLitePDU
+apps/trippLitePDU/tests/
+
 apps/magAOXMaths/magAOXMaths
 
 apps/xindiserver/tests/remoteDriver_test
@@ -25,5 +34,11 @@ apps/xindiserver/xindiserver
 
 apps/sshDigger/sshDigger
 
+apps/zaberCtrl/zaberCtrl
+
 utils/logdump/logdump
+
+#Devel stuff in flatlogs
+flatlogs/src/flatlogcodes
+flatlogs/src/logCodes.dat
 

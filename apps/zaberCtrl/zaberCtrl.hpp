@@ -136,7 +136,7 @@ int zaberCtrl::testConnection()
 
       if(rv < 0)
       {
-         log<software_trace_fatal>({__FILE__, __LINE__});
+         log<software_critical>({__FILE__, __LINE__});
          state(stateCodes::FAILURE);
          return ZC_NOT_CONNECTED;
       }
@@ -146,7 +146,7 @@ int zaberCtrl::testConnection()
       rv = euidReal();
       if(rv < 0)
       {
-         log<software_trace_fatal>({__FILE__, __LINE__});
+         log<software_critical>({__FILE__, __LINE__});
          state(stateCodes::FAILURE);
          return ZC_NOT_CONNECTED;
       }
@@ -179,7 +179,7 @@ int zaberCtrl::testConnection()
       return ZC_NOT_CONNECTED; //Not an error, just no device talking.
    }
 
-   log<text_log>("Sending: /", logLevels::DEBUG);
+   log<text_log>("Sending: /", logPrio::LOG_DEBUG);
    int nwr = za_send(m_port, "/");
 
    if(nwr == Z_ERROR_SYSTEM_ERROR)
@@ -187,7 +187,7 @@ int zaberCtrl::testConnection()
       za_disconnect(m_port);
       m_port = 0;
 
-      log<text_log>("Error sending test com to stages", logLevels::ERROR);
+      log<text_log>("Error sending test com to stages", logPrio::LOG_ERROR);
       state(stateCodes::ERROR);
       return ZC_NOT_CONNECTED;
    }
@@ -200,18 +200,18 @@ int zaberCtrl::testConnection()
       if(nrd >= 0)
       {
          buffer[nrd] = '\0';
-         log<text_log>(std::string("Received: ") + buffer, logLevels::DEBUG);
+         log<text_log>(std::string("Received: ") + buffer, logPrio::LOG_DEBUG);
          ++stageCnt;
       }
       else if (nrd != Z_ERROR_TIMEOUT)
       {
-         log<text_log>("Error receiving from stages", logLevels::ERROR);
+         log<text_log>("Error receiving from stages", logPrio::LOG_ERROR);
          state(stateCodes::ERROR);
          return ZC_NOT_CONNECTED;
       }
       else
       {
-         log<text_log>("TIMEOUT", logLevels::DEBUG);
+         log<text_log>("TIMEOUT", logPrio::LOG_DEBUG);
          break; //timeout
       }
    }
@@ -228,7 +228,7 @@ int zaberCtrl::appStartup()
 {
    if( state() == stateCodes::UNINITIALIZED )
    {
-      log<text_log>( "In appStartup but in state UNINITIALIZED.", logLevels::FATAL );
+      log<text_log>( "In appStartup but in state UNINITIALIZED.", logPrio::LOG_CRITICAL );
       return -1;
    }
 
@@ -251,7 +251,7 @@ int zaberCtrl::appLogic()
 
    if( state() == stateCodes::INITIALIZED )
    {
-      log<text_log>( "In appLogic but in state INITIALIZED.", logLevels::FATAL );
+      log<text_log>( "In appLogic but in state INITIALIZED.", logPrio::LOG_CRITICAL );
       return -1;
    }
 
@@ -263,7 +263,7 @@ int zaberCtrl::appLogic()
          state(stateCodes::FAILURE);
          if(!stateLogged())
          {
-            log<software_fatal>({__FILE__, __LINE__, rv, tty::ttyErrorString(rv)});
+            log<software_critical>({__FILE__, __LINE__, rv, tty::ttyErrorString(rv)});
          }
          return -1;
       }
@@ -317,7 +317,7 @@ int zaberCtrl::appLogic()
 
       std::lock_guard<std::mutex> guard(m_devMutex);
 
-      log<text_log>("DRAINING", logLevels::DEBUG);
+      log<text_log>("DRAINING", logPrio::LOG_DEBUG);
       int rv = za_drain(m_port);
       if(rv != Z_SUCCESS)
       {
@@ -331,12 +331,12 @@ int zaberCtrl::appLogic()
 
       std::vector<std::string> renumberRes;
 
-      log<text_log>("Sending: /renumber", logLevels::DEBUG);
+      log<text_log>("Sending: /renumber", logPrio::LOG_DEBUG);
       int nwr = za_send(m_port, "/renumber");
 
       if(nwr == Z_ERROR_SYSTEM_ERROR)
       {
-         log<text_log>("Error sending renumber to stages", logLevels::ERROR);
+         log<text_log>("Error sending renumber to stages", logPrio::LOG_ERROR);
          state(stateCodes::ERROR);
       }
 
@@ -346,18 +346,18 @@ int zaberCtrl::appLogic()
          if(nrd >= 0 )
          {
             buffer[nrd] = '\0';
-            log<text_log>(std::string("Received: ")+buffer, logLevels::DEBUG);
+            log<text_log>(std::string("Received: ")+buffer, logPrio::LOG_DEBUG);
             renumberRes.push_back(buffer);
             ++stageCnt;
          }
          else if( nrd != Z_ERROR_TIMEOUT)
          {
-            log<text_log>("Error receiving from stages", logLevels::ERROR);
+            log<text_log>("Error receiving from stages", logPrio::LOG_ERROR);
             state(stateCodes::ERROR);
          }
          else
          {
-            log<text_log>("TIMEOUT", logLevels::DEBUG);
+            log<text_log>("TIMEOUT", logPrio::LOG_DEBUG);
             break; //Timeout ok.
          }
       }
@@ -405,7 +405,7 @@ int zaberCtrl::appLogic()
          state(stateCodes::FAILURE);
          if(!stateLogged())
          {
-            log<software_fatal>({__FILE__, __LINE__, rv, tty::ttyErrorString(rv)});
+            log<software_critical>({__FILE__, __LINE__, rv, tty::ttyErrorString(rv)});
          }
          return rv;
       }
@@ -426,7 +426,7 @@ int zaberCtrl::appLogic()
       state(stateCodes::FAILURE);
       if(!stateLogged())
       {
-         log<text_log>("Error NOT due to loss of USB connection.  I can't fix it myself.", logLevels::FATAL);
+         log<text_log>("Error NOT due to loss of USB connection.  I can't fix it myself.", logPrio::LOG_CRITICAL);
       }
    }
 

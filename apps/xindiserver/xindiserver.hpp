@@ -204,7 +204,7 @@ int xindiserver::constructIndiserverCommand( std::vector<std::string> & indiserv
    }
    catch(...)
    {
-      log<software_fatal>({__FILE__, __LINE__, 0, "Exception thrown by std::vector."});
+      log<software_critical>(software_log::messageT(__FILE__, __LINE__, "Exception thrown by std::vector."));
       return -1;
    }
    
@@ -225,7 +225,7 @@ int xindiserver::addLocalDrivers( std::vector<std::string> & driverArgs )
       
       if(bad != std::string::npos)
       {
-         log<software_fatal>({__FILE__, __LINE__, 0, "Local driver can't have host spec or path(@,:,/): " + m_local[i]});
+         log<software_critical>({__FILE__, __LINE__, "Local driver can't have host spec or path(@,:,/): " + m_local[i]});
          
          return -1;
       }
@@ -237,7 +237,7 @@ int xindiserver::addLocalDrivers( std::vector<std::string> & driverArgs )
       }
       catch(...)
       {
-         log<software_fatal>({__FILE__, __LINE__, 0, "Exception thrown by std::vector"});
+         log<software_critical>({__FILE__, __LINE__, "Exception thrown by std::vector"});
          return -1;
       }
    }
@@ -258,7 +258,7 @@ int xindiserver::addRemoteDrivers( std::vector<std::string> & driverArgs )
       
       if(rv < 0)
       {
-         log<software_fatal>({__FILE__, __LINE__, 0, "Error parsing host specification: " + m_hosts[i]});         
+         log<software_critical>({__FILE__, __LINE__, "Error parsing host specification: " + m_hosts[i]});         
          return -1;
       }
    
@@ -269,13 +269,13 @@ int xindiserver::addRemoteDrivers( std::vector<std::string> & driverArgs )
       }
       catch(...)
       {
-         log<software_fatal>({__FILE__, __LINE__, 0, "Exception thrown by map::insert."});
+         log<software_critical>({__FILE__, __LINE__, "Exception thrown by map::insert."});
          return -1;
       }
       
       if(res.second != true)
       {
-         log<software_fatal>({__FILE__, __LINE__, 0, "Duplicate host specification: " + th.fullSpec() + "( from " + m_hosts[i] + " )"});         
+         log<software_critical>({__FILE__, __LINE__, "Duplicate host specification: " + th.fullSpec() + "( from " + m_hosts[i] + " )"});         
          return -1;
       }
       
@@ -293,7 +293,7 @@ int xindiserver::addRemoteDrivers( std::vector<std::string> & driverArgs )
       
       if(rv < 0)
       {
-         log<software_fatal>({__FILE__, __LINE__, 0, "Error parsing remote driver specification: " + m_remote[i] + "\n"});         
+         log<software_critical>({__FILE__, __LINE__, "Error parsing remote driver specification: " + m_remote[i] + "\n"});         
          return -1;
       }
       
@@ -304,13 +304,13 @@ int xindiserver::addRemoteDrivers( std::vector<std::string> & driverArgs )
       }
       catch(...)
       {
-         log<software_fatal>({__FILE__, __LINE__, 0, "Exception thrown by map::insert."}); 
+         log<software_critical>({__FILE__, __LINE__, "Exception thrown by map::insert."}); 
          return -1;
       }
       
       if(res.second != true)
       {
-         log<software_fatal>({__FILE__, __LINE__, 0, "Duplicate remote driver specification: " + rd.fullSpec() + "( from " + m_remote[i] + " )"}); 
+         log<software_critical>({__FILE__, __LINE__, "Duplicate remote driver specification: " + rd.fullSpec() + "( from " + m_remote[i] + " )"}); 
          return -1;
       }
    }
@@ -326,13 +326,13 @@ int xindiserver::addRemoteDrivers( std::vector<std::string> & driverArgs )
       }
       catch(...)
       {
-         log<software_fatal>({__FILE__, __LINE__, 0, "Exception thrown by map::find."});
+         log<software_critical>({__FILE__, __LINE__, "Exception thrown by map::find."});
          return -1;
       }
       
       if(hit == hostMap.end())
       {
-         log<software_fatal>({__FILE__, __LINE__, 0, "No host " + rdit->second.hostSpec() + " specified for driver " + rdit->second.fullSpec()});         
+         log<software_critical>({__FILE__, __LINE__, "No host " + rdit->second.hostSpec() + " specified for driver " + rdit->second.fullSpec()});         
          return -1;
       }
       
@@ -346,7 +346,7 @@ int xindiserver::addRemoteDrivers( std::vector<std::string> & driverArgs )
       }
       catch(...)
       {
-         log<software_fatal>({__FILE__, __LINE__, 0, "Exception thrown by vector::push_back."});
+         log<software_critical>({__FILE__, __LINE__, "Exception thrown by vector::push_back."});
          return -1;
       }
    }
@@ -359,7 +359,7 @@ inline
 int xindiserver::forkIndiserver()
 {
    
-   if(m_log.logLevel() <= logLevels::INFO)
+   if(m_log.logLevel() >= logPrio::LOG_INFO)
    {
       std::string coml = "Starting indiserver with command: ";
       for(size_t i=0;i<m_indiserverCommand.size();++i)
@@ -374,7 +374,7 @@ int xindiserver::forkIndiserver()
    int filedes[2];
    if (pipe(filedes) == -1) 
    {
-      log<software_error>({__FILE__, __LINE__, errno, strerror(errno)});
+      log<software_error>({__FILE__, __LINE__, errno});
       return -1;
    }
 
@@ -383,7 +383,7 @@ int xindiserver::forkIndiserver()
    
    if(m_isPID < 0)
    {
-      log<software_error>({__FILE__, __LINE__, errno, std::string("fork failed: ") + strerror(errno)});
+      log<software_error>({__FILE__, __LINE__, errno, "fork failed"});
       return -1;
    }
 
@@ -406,7 +406,7 @@ int xindiserver::forkIndiserver()
 
       execvp("indiserver", (char * const*) drivers);
 
-      log<software_error>({__FILE__, __LINE__, errno, std::string("execvp returned: ") + strerror(errno)});
+      log<software_error>({__FILE__, __LINE__, errno, "execvp returned"});
    
       delete[] drivers;
       
@@ -416,7 +416,7 @@ int xindiserver::forkIndiserver()
    m_isSTDERR = filedes[0];
    m_isSTDERR_input = filedes[1];
    
-   if(m_log.logLevel() <= logLevels::INFO)
+   if(m_log.logLevel() <= logPrio::LOG_INFO)
    {
       std::string coml = "indiserver started with PID " + mx::ioutils::convertToString(m_isPID);   
       log<text_log>(coml);
@@ -440,18 +440,18 @@ int xindiserver::isLogThreadStart()
    }
    catch( const std::exception & e )
    {
-      log<software_error>({__FILE__,__LINE__, 0, std::string("Exception on I.S. log thread start: ") + e.what()});
+      log<software_error>({__FILE__,__LINE__, std::string("Exception on I.S. log thread start: ") + e.what()});
       return -1;
    }
    catch( ... )
    {
-      log<software_error>({__FILE__,__LINE__, 0, "Unkown exception on I.S. log thread start"});
+      log<software_error>({__FILE__,__LINE__, "Unkown exception on I.S. log thread start"});
       return -1;
    }
    
    if(!m_isLogThread.joinable())
    {
-      log<software_error>({__FILE__, __LINE__, 0, "I.S. log thread did not start"});
+      log<software_error>({__FILE__, __LINE__, "I.S. log thread did not start"});
       return -1;
    }
    
@@ -462,7 +462,7 @@ int xindiserver::isLogThreadStart()
    
    if(rv != 0)
    {
-      log<software_error>({__FILE__, __LINE__, rv, std::string("Error setting thread params: ") + strerror(rv)});
+      log<software_error>({__FILE__, __LINE__, rv, "Error setting thread params."});
       return -1;
    }
    
@@ -522,7 +522,7 @@ int xindiserver::processISLog( std::string logs )
    
    if(ed == std::string::npos)
    {
-      log<software_error>({__FILE__, __LINE__, 0, "Did not find timestamp : in log entry"});
+      log<software_error>({__FILE__, __LINE__, "Did not find timestamp : in log entry"});
       return -1;
    }
    
@@ -539,10 +539,10 @@ int xindiserver::processISLog( std::string logs )
    bdt.tm_isdst = 0;
    bdt.tm_gmtoff = 0;
    
-   time::timespecX tsp;
+   timespecX tsp;
    
    tsp.time_s = timegm(&bdt);
-   tsp.time_ns = (time::timespecX::nanosecT) ((dsec-bdt.tm_sec)*1e9 + 0.5);
+   tsp.time_ns = (nanosecT) ((dsec-bdt.tm_sec)*1e9 + 0.5);
     
    ++ed;
    st = logs.find_first_not_of(" ", ed);
@@ -550,7 +550,7 @@ int xindiserver::processISLog( std::string logs )
    if(st == std::string::npos) st = ed;
    if(st == logs.size())
    {
-      log<software_error>({__FILE__, __LINE__, 0, "Did not find log entry."});
+      log<software_error>({__FILE__, __LINE__, "Did not find log entry."});
       return -1;
    }
       
@@ -565,20 +565,20 @@ int xindiserver::appStartup()
    
    if( constructIndiserverCommand(m_indiserverCommand) < 0)
    {
-      log<software_trace_fatal>({__FILE__, __LINE__});
+      log<software_critical>({__FILE__, __LINE__});
       return -1;
    }
    
    
    if( addLocalDrivers(m_indiserverCommand) < 0)
    {
-      log<software_trace_fatal>({__FILE__, __LINE__});
+      log<software_critical>({__FILE__, __LINE__});
       return -1;
    }
    
    if( addRemoteDrivers(m_indiserverCommand) < 0)
    {
-      log<software_trace_fatal>({__FILE__, __LINE__});
+      log<software_critical>({__FILE__, __LINE__});
       return -1;
    }
    
@@ -594,21 +594,21 @@ int xindiserver::appStartup()
       
       if(rv < 0)
       {
-         log<software_error>({__FILE__, __LINE__, 0, "Failed to create symlink for driver: " + m_local[i] + ". Continuing."});
+         log<software_error>({__FILE__, __LINE__, "Failed to create symlink for driver: " + m_local[i] + ". Continuing."});
       }
       
       rv = symlink(path1.c_str(), m_local[i].c_str());
       
       if(rv < 0 && errno != EEXIST)
       {
-         log<software_error>({__FILE__, __LINE__, errno, strerror(errno)});
-         log<software_error>({__FILE__, __LINE__, 0, "Failed to create symlink for driver: " + m_local[i] + ". Continuing."});
+         log<software_error>({__FILE__, __LINE__, errno});
+         log<software_error>({__FILE__, __LINE__, "Failed to create symlink for driver: " + m_local[i] + ". Continuing."});
       }
       
       rv = euidReal();
       if(rv < 0)
       {
-         log<software_fatal>({__FILE__, __LINE__, 0, "Failed to reset privileges."});
+         log<software_critical>({__FILE__, __LINE__, "Failed to reset privileges."});
          return -1;
       }
    }
@@ -622,13 +622,13 @@ int xindiserver::appStartup()
    //--------------------
    if(forkIndiserver() < 0)
    {
-      log<software_trace_fatal>({__FILE__, __LINE__});
+      log<software_critical>({__FILE__, __LINE__});
       return -1;
    }
       
    if(isLogThreadStart() < 0)
    {
-      log<software_trace_fatal>({__FILE__, __LINE__});
+      log<software_critical>({__FILE__, __LINE__});
       return -1;
    }  
    
@@ -652,8 +652,8 @@ int xindiserver::appShutdown()
    ssize_t nwr = write(m_isSTDERR_input, &w, 1);
    if(nwr != 1)
    {
-      log<software_error>({__FILE__, __LINE__, errno, strerror(errno)});
-      log<software_error>({__FILE__, __LINE__, 0, "Error on write to i.s. log thread. Sending SIGTERM."});
+      log<software_error>({__FILE__, __LINE__, errno });
+      log<software_error>({__FILE__, __LINE__, "Error on write to i.s. log thread. Sending SIGTERM."});
       pthread_kill(m_isLogThread.native_handle(), SIGTERM);
       
    }

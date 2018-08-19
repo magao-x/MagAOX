@@ -24,7 +24,7 @@ namespace logger
 /// Base class for logs consisting of a string message.
 /** Does not have eventCode or defaultLevel, so this can not be used as a log type in logger.
   *
-  * \ingroup logtypesbasics
+  * \ingroup logger_types_basic
   */
 struct string_log : public flatbuffer_log
 {

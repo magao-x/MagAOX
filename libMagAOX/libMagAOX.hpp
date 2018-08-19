@@ -18,16 +18,12 @@
 #include "common/defaults.hpp"
 #include "common/environment.hpp"
 
-#include "logger/logBuffer.hpp"
-#include "logger/logCodes.hpp"
 #include "logger/logFileRaw.hpp"
-#include "logger/logLevels.hpp"
 #include "logger/logManager.hpp"
-#include "logger/logStdFormat.hpp"
-#include "logger/logTypes.hpp"
-#include "logger/logTypesBasics.hpp"
+#include "logger/generated/logCodes.hpp"
+#include "logger/generated/logStdFormat.hpp"
+#include "logger/generated/logTypes.hpp"
 
-#include "time/timespecX.hpp"
 
 //#define TTY_DEBUG
 #include "tty/ttyErrors.hpp"
