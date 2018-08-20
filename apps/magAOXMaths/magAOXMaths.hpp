@@ -23,7 +23,7 @@ protected:
    pcf::IndiProperty x, xmaths;
    pcf::IndiProperty y, ymaths;
 
-   char data[10];
+   char data[10] = {0};
    
 public:
 
@@ -59,6 +59,12 @@ public:
 
 magAOXMaths::magAOXMaths() : MagAOXApp(MAGAOX_CURRENT_SHA1, MAGAOX_REPO_MODIFIED)
 {
+   data[0] = 'a';
+   data[1] = 'b';
+   for(size_t i=2;i<sizeof(data)-2; ++i) data[i] = ' ';
+   data[sizeof(data)-2] = 'z';
+   data[sizeof(data)-1] = '\0';
+   
    return;
 }
 
@@ -101,11 +107,7 @@ int magAOXMaths::appStartup()
    ymaths.add (pcf::IndiElement("abs"));
 
    
-   data[0] = 'a';
-   data[1] = 'b';
-   for(size_t i=2;i<sizeof(data)-2; ++i) data[i] = ' ';
-   data[sizeof(data)-2] = 'z';
-   data[sizeof(data)-1] = '\0';
+   
    
    
    log<software_notice>({__FILE__, __LINE__, 1000, 2000, "t"});

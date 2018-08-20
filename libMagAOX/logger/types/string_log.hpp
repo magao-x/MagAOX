@@ -31,7 +31,7 @@ struct string_log : public flatbuffer_log
    ///The type of the message
    struct messageT : public fbMessage
    {
-      messageT( const char * msg )
+      explicit messageT( const char * msg )
       {
          auto _msg = builder.CreateString(msg);
          
@@ -39,7 +39,7 @@ struct string_log : public flatbuffer_log
          builder.Finish(gs);
       }
       
-      messageT( const std::string & msg )
+      explicit messageT( const std::string & msg )
       {
          auto _msg = builder.CreateString(msg);
          
