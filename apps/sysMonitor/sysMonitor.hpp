@@ -53,7 +53,7 @@ namespace MagAOX
    /// Do any needed shutdown tasks.  Currently nothing in this app.
          virtual int appShutdown();
 
-         int criticalTemperature(std::vector<int>);
+         int criticalCoreTemperature(std::vector<int>);
 
       };
 
@@ -81,6 +81,7 @@ namespace MagAOX
       {
          
          char command[35];
+         std::string line;
 
          // For core temps
          strcpy( command, "sensors > /dev/shm/sensors_out" );
@@ -99,7 +100,6 @@ namespace MagAOX
             std::cerr << "Unable to open file" << std::endl;
             return 1;
          }
-         std::string line;
          std::vector<int> temps;
          while (getline (inFile,line)) 
          {
@@ -108,12 +108,14 @@ namespace MagAOX
             {
                std::string temp_str = line.substr(17, 4);
                std::string::size_type sz;
-               double temp = std::stod (temp_str,&sz);
+               //double temp = std::stod (temp_str,&sz);
+               double temp = std::stod (temp_str);
+
                temps.push_back(temp);
                std::cout << temp << std::endl;
             }
          }
-         criticalTemperature(temps);
+         criticalCoreTemperature(temps);
 
          // For hard drive temp
          // wget http://dl.fedoraproject.org/pub/epel/7/x86_64/Packages/h/hddtemp-0.3-0.31.beta15.el7.x86_64.rpm (binary package)
@@ -212,6 +214,45 @@ namespace MagAOX
          double ram_usage_percent = ram_usage/ram_total;
          std::cout << ram_usage_percent << std::endl;
 
+         // For cpu load
+         strcpy( command, "mpstat -P ALL > /dev/shm/cpuload" );
+         rv = system(command);
+         if(rv == -1) //system call error
+         {
+            //handle error
+            std::cerr << "There's been an error with the system command" << std::endl;
+            return 1;
+         }
+
+         std::ifstream inFile5;
+         inFile5.open("/dev/shm/cpuload");
+         if (!inFile5) 
+         {
+            std::cerr << "Unable to open file" << std::endl;
+            return 1;
+         }
+         std::vector<double> cpu_core_loads;
+         int cores = 0;
+         // Want to start at third line
+         getline (inFile5,line);
+         getline (inFile5,line);
+         getline (inFile5,line);
+         getline (inFile5,line);
+         while (getline (inFile5,line)) 
+         {
+            //std::cout << line << std::endl;
+            cores++;
+            std::istringstream iss4(line);
+            std::vector<std::string> tokens4{std::istream_iterator<std::string>{iss4},std::istream_iterator<std::string>{}};
+            std::string::size_type sz5;
+            //std::cout << tokens4[12] << std::endl;
+            double cpu_load = 100.0 - std::stod (tokens4[12],&sz5);
+            cpu_load /= 100;
+            cpu_core_loads.push_back(cpu_load);
+            std::cout << "core load " << cpu_load << std::endl;
+         }
+         
+
 
          return 0;
       }
@@ -222,7 +263,7 @@ namespace MagAOX
          return 0;
       }
 
-      int sysMonitor::criticalTemperature(std::vector<int> temps)
+      int sysMonitor::criticalCoreTemperature(std::vector<int> temps)
       {
          int warningTempValue = 80, criticalTempValue = 90, iterator = 1;
          for (std::vector<int>::const_iterator i = temps.begin(); i != temps.end(); ++i)
