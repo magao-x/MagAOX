@@ -27,3 +27,4 @@ apps/sshDigger/sshDigger
 
 utils/logdump/logdump
 
+.vagrant/
