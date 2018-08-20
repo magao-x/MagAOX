@@ -42,3 +42,4 @@ utils/logdump/logdump
 flatlogs/src/flatlogcodes
 flatlogs/src/logCodes.dat
 
+.vagrant/
