@@ -48,7 +48,7 @@ struct string_log : public flatbuffer_log
       }
    };
 
-   ///Get the message formatte for human consumption.
+   ///Get the message formatted for human consumption.
    static std::string msgString( void * msgBuffer,  /**< [in] Buffer containing the flatbuffer serialized message.*/
                                  flatlogs::msgLenT len  /**< [in] [unused] length of msgBuffer.*/
                                )
@@ -57,7 +57,8 @@ struct string_log : public flatbuffer_log
       
       auto rgs = GetString_log_fb(msgBuffer);
       
-      return rgs->message()->c_str();
+      if(rgs->message() == nullptr) return "";
+      else return rgs->message()->c_str();
    }
 
 };
