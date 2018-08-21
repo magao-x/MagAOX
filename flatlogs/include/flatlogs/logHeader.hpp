@@ -20,7 +20,7 @@ namespace flatlogs
 {
 
 ///The log entry buffer smart pointer.
-/** \ingroup logbufftypes
+/** \ingroup logbuff
   */
 typedef std::shared_ptr<char> bufferPtrT; 
 
@@ -441,10 +441,10 @@ void * logHeader::messageBuffer(  bufferPtrT & logBuffer )
 
 template<typename logT>
 int logHeader::createLog( bufferPtrT & logBuffer,
-                           const timespecX & ts,
-                           const typename logT::messageT & msg,
-                           const logPrioT & level
-                         )
+                          const timespecX & ts,
+                          const typename logT::messageT & msg,
+                          const logPrioT & level
+                        )
 {
    logPrioT lvl;
    if(level == logPrio::LOG_DEFAULT) 
@@ -474,11 +474,11 @@ int logHeader::createLog( bufferPtrT & logBuffer,
 
 inline
 int logHeader::extractBasicLog( logPrioT & lvl,       
-                                 eventCodeT & ec,       
-                                 timespecX & ts,  
-                                 msgLenT & len,
-                                 bufferPtrT & logBuffer 
-                               )
+                                eventCodeT & ec,       
+                                timespecX & ts,  
+                                msgLenT & len,
+                                bufferPtrT & logBuffer 
+                              )
 {
    
    lvl = logLevel(logBuffer); 

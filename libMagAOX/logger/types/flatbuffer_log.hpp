@@ -36,14 +36,16 @@ struct fbMessage
 struct flatbuffer_log 
 {
    ///Get the length of the message.
-   static flatlogs::msgLenT length( const fbMessage & msg )
+   static flatlogs::msgLenT length( const fbMessage & msg /**< [in] the fbMessage type holding a FlatBufferBuilder */)
    {
       return msg.builder.GetSize();      
    }
 
    ///Format the buffer given the input message.
+   /** \todo this is an unneccesary memcpy from the FlatBufferBuilder, we need to figure out how to not do this.
+     */
    static int format( void * msgBuffer,    ///< [out] the buffer, must be pre-allocated to size length(msg)
-                      const fbMessage & msg ///< [in] the message, which is placed in the buffer char by char.
+                      const fbMessage & msg ///< [in] the message which contains a flatbuffer builder, from which the data are memcpy-ed.
                     )
    {
       uint8_t * cbuff = reinterpret_cast<uint8_t *>(msgBuffer);

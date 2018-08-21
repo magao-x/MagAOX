@@ -48,7 +48,9 @@ struct state_change : public flatbuffer_log
    /**
      * \returns the message formatted as "State changed from UNINITIALIZED to INITIALIZED"
      */
-   static std::string msgString(void * msgBuffer, flatlogs::msgLenT len)
+   static std::string msgString( void * msgBuffer,  /**< [in] Buffer containing the flatbuffer serialized message.*/
+                                 flatlogs::msgLenT len  /**< [in] [unused] length of msgBuffer.*/
+                               )   
    {
       static_cast<void>(len);
       

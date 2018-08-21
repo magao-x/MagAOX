@@ -28,7 +28,10 @@ struct user_log : public string_log
    ///The default level
    static const flatlogs::logPrioT defaultLevel = flatlogs::logPrio::LOG_INFO;
 
-   static std::string msgString( void * msgBuffer, flatlogs::msgLenT len)
+   ///Get the message formatte for human consumption.
+   static std::string msgString( void * msgBuffer,  /**< [in] Buffer containing the flatbuffer serialized message.*/
+                                 flatlogs::msgLenT len  /**< [in] [unused] length of msgBuffer.*/
+                               )
    {
       std::string msg;
       msg = string_log::msgString(msgBuffer, len);

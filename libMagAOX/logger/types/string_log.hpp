@@ -31,7 +31,7 @@ struct string_log : public flatbuffer_log
    ///The type of the message
    struct messageT : public fbMessage
    {
-      explicit messageT( const char * msg )
+      messageT( const char * msg )
       {
          auto _msg = builder.CreateString(msg);
          
@@ -39,7 +39,7 @@ struct string_log : public flatbuffer_log
          builder.Finish(gs);
       }
       
-      explicit messageT( const std::string & msg )
+      messageT( const std::string & msg )
       {
          auto _msg = builder.CreateString(msg);
          
@@ -48,8 +48,10 @@ struct string_log : public flatbuffer_log
       }
    };
 
-  
-   static std::string msgString(void * msgBuffer, flatlogs::msgLenT len)
+   ///Get the message formatte for human consumption.
+   static std::string msgString( void * msgBuffer,  /**< [in] Buffer containing the flatbuffer serialized message.*/
+                                 flatlogs::msgLenT len  /**< [in] [unused] length of msgBuffer.*/
+                               )
    {
       static_cast<void>(len);
       

@@ -129,8 +129,10 @@ struct software_log : public flatbuffer_log
    };
 
 
-
-   static std::string msgString( void * msgBuffer, flatlogs::msgLenT len) 
+   ///Get the message formatte for human consumption.
+   static std::string msgString( void * msgBuffer,  /**< [in] Buffer containing the flatbuffer serialized message.*/
+                                 flatlogs::msgLenT len  /**< [in] [unused] length of msgBuffer.*/
+                               )
    {
       
       static_cast<void>(len);

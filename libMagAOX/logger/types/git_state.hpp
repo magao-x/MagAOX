@@ -51,9 +51,11 @@ struct git_state : public flatbuffer_log
       }
 
    };
-
-
-   static std::string msgString( void * msgBuffer, flatlogs::msgLenT len )
+   
+   ///Get the message formatte for human consumption.
+   static std::string msgString( void * msgBuffer,  /**< [in] Buffer containing the flatbuffer serialized message.*/
+                                 flatlogs::msgLenT len  /**< [in] [unused] length of msgBuffer.*/
+                               )
    {
       static_cast<void>(len);
       
@@ -72,7 +74,7 @@ struct git_state : public flatbuffer_log
    }
    
    /// Access the repo name field
-   static std::string repoName( void * msgBuffer )
+   static std::string repoName( void * msgBuffer /**< [in] Buffer containing the flatbuffer serialized message.*/ )
    {
       auto rgs = GetGit_state_fb(msgBuffer);
    
@@ -81,7 +83,7 @@ struct git_state : public flatbuffer_log
    }
    
    /// Access the modified field
-   static bool modified( void * msgBuffer )
+   static bool modified( void * msgBuffer /**< [in] Buffer containing the flatbuffer serialized message.*/ )
    {
       auto rgs = GetGit_state_fb(msgBuffer);
    
@@ -96,3 +98,4 @@ struct git_state : public flatbuffer_log
 } //namespace MagAOX
 
 #endif //logger_types_git_state_hpp
+

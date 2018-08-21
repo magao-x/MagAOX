@@ -2,6 +2,8 @@
   * \brief A fixed-width timespec structure and utilities.
   * \author Jared R. Males (jaredmales@gmail.com)
   *
+  * \ingroup flatlogs_files
+  * 
   * History:
   * - 2017-06-27 created by JRM
   * - 2018-08-17 moved to flatlogs
@@ -22,6 +24,9 @@ namespace flatlogs
   * composed of fixed-width types.
   * 
   * \note This is NOT binary compatible with plain timespec.  Use the provided conversions.
+  * 
+  * \ingroup flatlogs_time
+  * 
   */
 struct timespecX 
 {
@@ -146,6 +151,9 @@ struct timespecX
 } __attribute__((packed));
 
 ///Convert a timespecX to a native timespec
+/**
+  * \ingroup flatlogs_time
+  */ 
 inline
 void timespecFromX ( timespec & ts, ///< [out] the native timespec to set
                      const timespecX & tsX ///< [in] the fixed-width timespec from which to get values
@@ -162,6 +170,9 @@ void timespecFromX ( timespec & ts, ///< [out] the native timespec to set
   * it will be passed in the same order as in clock_gettime.
   * 
   * \tparam clk_id specifies the type.
+  * 
+  * \ingroup flatlogs_time
+  * 
   */ 
 template<clockid_t clk_id=CLOCK_REALTIME>
 void clock_gettimeX( timespecX & tsX /**< [out] the fixed-width timespec to populate */)

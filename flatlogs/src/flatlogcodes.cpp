@@ -1,14 +1,36 @@
-
+/** \file flatlogcodes.cpp
+  * \brief Program to parse a log type to code file.
+  * \author Jared R. Males (jaredmales@gmail.com)
+  *
+  * \ingroup flatlogcodes
+  * 
+  * History:
+  * - 2018-08-18 created by JRM
+  */
 
 #include <iostream>
 #include <fstream>
 #include <sstream>
 #include <map>
 
-typedef uint16_t eventCodeT;
+#include "../include/flatlogs/logDefs.hpp"
+using namespace flatlogs;
 
-int readCodeFile( std::map<eventCodeT, std::string> & codeMap, 
-                  const std::string & fileName
+///Read in an event code file line by line, parsing for log type and code.
+/** Looks for entries of the form:
+  * \verbatim log_type 12349876 \endverbatim
+  * Each log type must be on its own line.  The log type name and its code
+  * are deliminated by whitespace.  On any line, all input after a \# char are ignored (allowing comments).
+  *
+  * In addition to parsing errors, duplicate log codes result in an error.  Errors are reported with
+  * the line number of the input file.
+  *
+  * \returns 0 on success
+  * \returns -1 on error
+  * 
+  */ 
+int readCodeFile( std::map<eventCodeT, std::string> & codeMap, ///< [out] The map of codes to log types
+                  const std::string & fileName ///< [in] the file to parse
                 )
 {
    typedef std::map<eventCodeT, std::string> codeMapT;
@@ -98,12 +120,15 @@ int readCodeFile( std::map<eventCodeT, std::string> & codeMap,
    return 0;
 }
 
-int emitLogCodes( std::map<uint16_t, std::string> & logCodes )
+/// Write the logCodes.hpp header
+int emitLogCodes( const std::string & fileName,
+                  std::map<uint16_t, std::string> & logCodes 
+                )
 {
    typedef std::map<uint16_t, std::string> mapT;
    
    std::ofstream fout;
-   fout.open("generated/logCodes.hpp");
+   fout.open(fileName);
    
    fout << "#ifndef logger_logCodes_hpp\n";
    fout << "#define logger_logCodes_hpp\n";
@@ -130,14 +155,17 @@ int emitLogCodes( std::map<uint16_t, std::string> & logCodes )
    return 0;
 }
 
-int emitStdFormatHeader( std::map<uint16_t, std::string> & logCodes )
+///Write the logStdFormat.hpp header.
+int emitStdFormatHeader( const std::string & fileName,
+                         std::map<uint16_t, std::string> & logCodes 
+                       )
 {
    typedef std::map<uint16_t, std::string> mapT;
    
    mapT::iterator it = logCodes.begin();
    
    std::ofstream fout;
-   fout.open("generated/logStdFormat.hpp");
+   fout.open(fileName);
 
    
    fout << "#ifndef logger_logStdFormat_hpp\n";
@@ -147,6 +175,7 @@ int emitStdFormatHeader( std::map<uint16_t, std::string> & logCodes )
 
    fout << "#include \"logTypes.hpp\"\n";
 
+   ///\todo Need to allow specification of the namespaces
    fout << "namespace MagAOX\n";
    fout << "{\n";
    fout << "namespace logger\n";
@@ -180,14 +209,17 @@ int emitStdFormatHeader( std::map<uint16_t, std::string> & logCodes )
    return 0;
 }
 
-int emitLogTypes( std::map<uint16_t, std::string> & logCodes )
+/// Write the logTypes.hpp header
+int emitLogTypes( const std::string & fileName,
+                  std::map<uint16_t, std::string> & logCodes 
+                )
 {
    typedef std::map<uint16_t, std::string> mapT;
    
    mapT::iterator it = logCodes.begin();
    
    std::ofstream fout;
-   fout.open("generated/logTypes.hpp");
+   fout.open(fileName);
 
    fout << "#ifndef logger_logTypes_hpp\n";
    fout << "#define logger_logTypes_hpp\n";
@@ -203,17 +235,25 @@ int emitLogTypes( std::map<uint16_t, std::string> & logCodes )
 int main()
 {
    typedef std::map<uint16_t, std::string> mapT;
+   
+   
+   
+   std::string inputFile = "logCodes.dat";
+   std::string stdFormatHeader = "generated/logStdFormat.hpp";
+   std::string logCodesHeader = "generated/logCodes.hpp";
+   std::string logTypesHeader = "generated/logTypes.hpp";
+   
    mapT logCodes;
    
-   if( readCodeFile(logCodes, "logCodes.dat") < 0 )
+   if( readCodeFile(logCodes, inputFile) < 0 )
    {
       std::cerr << "Error reading code file.\n";
       return -1;
    }
    
-   emitStdFormatHeader( logCodes );
-   emitLogCodes( logCodes );
-   emitLogTypes( logCodes );
+   emitStdFormatHeader(stdFormatHeader, logCodes );
+   emitLogCodes( logCodesHeader, logCodes );
+   emitLogTypes( logTypesHeader, logCodes );
    return 0;
 }
 

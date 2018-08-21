@@ -101,7 +101,7 @@ named "log_type" in what follows.
       
          auto rgs = GetString_log_fb(msgBuffer); // EXAMPLE: how to work with a flatbuffer
       
-         if(rgs->message() return rgs->message()->c_str(); // EXAMPLE: how to access the message contents.
+         if(rgs->message()) return rgs->message()->c_str(); // EXAMPLE: how to access the message contents.
          else return "";
       }
 
@@ -111,14 +111,14 @@ named "log_type" in what follows.
    } //namespace MagAOX
    #endif
    \endcode
-   For more information about how to write flatbuffer schemas and pack and access data, see the <a href="">flatbuffer documentation</a>.
+   For more information about how to write flatbuffer schemas and pack and access data, see the <a href="https://google.github.io/flatbuffers/">flatbuffer documentation</a>.
    
 -# Now add the log to logger/logCodes.dat"
   - Place it in an appropriate section of the file, and in numerical order by the code so future additions can be easily managed.
   - Choose a code <= 65535, that is not already used.
   - Run the "flatlogcodes" code generator from inside the logger directory:
   \verbatim
-  $ ../../flatlogs/src/flatlogcodes
+  $ ../../flatlogs/bin/flatlogcodes
   \endverbatim
   This will update the files in logger/generated
   
