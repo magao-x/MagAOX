@@ -1,29 +1,23 @@
-logdump
+logdump {#logdump}
 ==========
 
-[NAME](#NAME)
-[SYNOPSIS](#SYNOPSIS)
-[DESCRIPTION](#DESCRIPTION)
-[OPTIONS](#OPTIONS)
-[EXIT STATUS](#EXIT%20STATUS)
-[EXAMPLES](#EXAMPLES)
-[SEE ALSO](#SEE%20ALSO)
+[TOC]
 
 ------------------------------------------------------------------------
 
-NAME []()
----------
+# NAME 
+
 
 logdump − prints MagAO-X binary log files in a readable format.
 
-SYNOPSIS []()
--------------
+# SYNOPSIS 
+
 ```
 logdump [options] appname
 ```
 
-DESCRIPTION []()
-----------------
+# DESCRIPTION
+
 
 logdump reads the log file(s) for the app specified with `appname`.  Possible modes of operation are:
 - Print entries from all log files present (default if no other options are given)
@@ -35,8 +29,8 @@ logdump reads the log file(s) for the app specified with `appname`.  Possible mo
 `logdump` by default looks in the MagAO-X system log directory, normally `/opt/MagAOX/logs`.  This can be changed with thte `--dir` option.
 
 
-OPTIONS []()
-------------
+# OPTIONS 
+
 
 |Short | Long         |  Config-File         |     Type               | Description  |
 | ---  | ---          | ---                  |   ---               | ---          |
@@ -53,15 +47,15 @@ OPTIONS []()
 
 
 
-EXIT STATUS []()
-----------------
+# EXIT STATUS
+
 
 How `logdump` exits depends on the mode operation.  If it is printing all or a set number of log files, it will exit normally after printing the last entry.  If it is following a log, it will not exit until signaled (e.g. with `ctrl-c`).
 
-EXAMPLES []()
--------------
+# EXAMPLES
 
-To dump all the log entries for the application `$trippLitePDU0`:
+
+To dump all the log entries for the application `trippLitePDU0`:
 
 ```
 $ logdump trippLitePDU0
@@ -92,5 +86,5 @@ $ logdump -L W -f trippLitePDU0
 ```
 
 
-SEE ALSO []()
--------------
+# SEE ALSO 
+

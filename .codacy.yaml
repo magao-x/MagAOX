@@ -1,4 +1,4 @@
 exclude_paths:
   -  '**/tests/**'
   - 'apps/zaberCtrl/zaber-core-serial-c-v1.0/**'
-
+  - 'tests/catch2/catch.hpp'

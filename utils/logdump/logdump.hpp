@@ -13,6 +13,9 @@
 #include "../../libMagAOX/libMagAOX.hpp"
 using namespace MagAOX::logger;
 
+using namespace flatlogs;
+
+
 class logdump : public mx::application
 {
 protected:
@@ -29,11 +32,11 @@ protected:
 
    bool m_follow {false};
 
-   logLevelT m_level {logLevels::TELEMETRY};
+   logPrioT m_level {logPrio::LOG_DEFAULT};
 
    std::vector<eventCodeT> m_codes;
 
-   void printLogBuff( const logLevelT & lvl,
+   void printLogBuff( const logPrioT & lvl,
                       const eventCodeT & ec,
                       const msgLenT & len,
                       bufferPtrT & logBuff
@@ -138,18 +141,21 @@ int logdump::execute()
       std::string fname = logs[i];
       FILE * fin;
 
-      bufferPtrT head(new char[headerSize]);
+      bufferPtrT head(new char[logHeader::maxHeadSize]);
 
       bufferPtrT logBuff;
 
       fin = fopen(fname.c_str(), "rb");
 
+      std::cerr << fname << "\n";
+      
       size_t buffSz = 0;
       while(!feof(fin)) //<--This should be an exit condition controlled by loop logic, not feof.
       {
          int nrd;
 
-         nrd = fread( head.get(), sizeof(char), headerSize, fin);
+         ///\todo check for errors on all reads . . .
+         nrd = fread( head.get(), sizeof(char), logHeader::minHeadSize, fin);
          if(nrd == 0)
          {
             //If we're following and on the last log file, wait for more to show up.
@@ -160,7 +166,7 @@ int logdump::execute()
                {
                   std::this_thread::sleep_for( std::chrono::duration<unsigned long, std::milli>(m_pauseTime));
                   clearerr(fin);
-                  nrd = fread( head.get(), sizeof(char), headerSize, fin);
+                  nrd = fread( head.get(), sizeof(char), logHeader::minHeadSize, fin);
                   if(nrd > 0) break;
 
                   ++check;
@@ -181,13 +187,25 @@ int logdump::execute()
             }
          }
 
-         logLevelT lvl = logLevel(head);
-         eventCodeT ec = eventCode(head);
-         msgLenT len = msgLen(head);
+         if( logHeader::msgLen0(head) == logHeader::MAX_LEN0-1)
+         { 
+            //Intermediate size message, read two more bytes
+            nrd = fread( head.get() + logHeader::minHeadSize + sizeof(msgLen0T), sizeof(char), sizeof(msgLen1T), fin);
+         }         
+         else if( logHeader::msgLen0(head) == logHeader::MAX_LEN0)
+         {
+            //Large size message: read 8 more bytes 
+            nrd = fread( head.get() + logHeader::minHeadSize + sizeof(msgLen0T), sizeof(char), sizeof(msgLen2T), fin);
+         }
+         
+         
+         logPrioT lvl = logHeader::logLevel(head);
+         eventCodeT ec = logHeader::eventCode(head);
+         msgLenT len = logHeader::msgLen(head);
 
          //Here: check if lvl, eventCode, etc, match what we want.
          //If not, fseek and loop.
-         if(lvl < m_level)
+         if(lvl > m_level)
          {
             fseek(fin, len, SEEK_CUR);
             continue;
@@ -212,15 +230,17 @@ int logdump::execute()
             }
          }
 
-         if( (size_t) headerSize + (size_t) len > buffSz )
+         size_t hSz = logHeader::headerSize(head);
+         
+         if( (size_t) hSz + (size_t) len > buffSz )
          {
-            logBuff = bufferPtrT(new char[headerSize + len]);
+            logBuff = bufferPtrT(new char[hSz + len]);
          }
 
-         memcpy( logBuff.get(), head.get(), headerSize);
+         memcpy( logBuff.get(), head.get(), hSz);
 
          ///\todo what do we do if nrd not equal to expected size?
-         nrd = fread( logBuff.get() + headerSize, sizeof(char), len, fin);
+         nrd = fread( logBuff.get() + hSz, sizeof(char), len, fin);
          // If not following, exit loop without printing the incomplete log entry (go on to next file).
          // If following, wait for it, but also be checking for new log file in case of crash
 
@@ -237,18 +257,17 @@ int logdump::execute()
 }
 
 inline
-void logdump::printLogBuff( const logLevelT & lvl,
+void logdump::printLogBuff( const logPrioT & lvl,
                             const eventCodeT & ec,
                             const msgLenT & len,
                             bufferPtrT & logBuff
                           )
 {
+   static_cast<void>(len); //be unused
+   
    if(ec == eventCodes::GIT_STATE)
    {
-      typename git_state::messageT msg;
-      git_state::extract(msg, logBuff.get()+messageOffset, len);
-
-      if(msg.m_repoName == "MagAOX")
+      if(git_state::repoName(logHeader::messageBuffer(logBuff)) == "MagAOX")
       {
          for(int i=0;i<80;++i) std::cout << '-';
          std::cout << "\n\t\t\t\t SOFTWARE RESTART\n";
@@ -257,21 +276,44 @@ void logdump::printLogBuff( const logLevelT & lvl,
       }
    }
 
-   if(lvl > logLevels::INFO)
+   if(lvl < logPrio::LOG_INFO)
    {
-      std::cout << "\033[";
-
-      if(lvl == logLevels::WARNING) std::cout << "33";
-      else std::cout << "31";
-      std::cout << "m";
+      if(lvl == logPrio::LOG_EMERGENCY)
+      {
+         std::cout << "\033[104m\033[91m\033[5m\033[1m";
+      }
+      
+      if(lvl == logPrio::LOG_ALERT)
+      {
+         std::cout << "\033[101m\033[5m";
+      }
+      
+      if(lvl == logPrio::LOG_CRITICAL)
+      {
+         std::cout << "\033[41m\033[1m";
+      }
+      
+      if(lvl == logPrio::LOG_ERROR)
+      {
+         std::cout << "\033[91m\033[1m";
+      }
+      
+      if(lvl == logPrio::LOG_WARNING)
+      {
+         std::cout << "\033[93m\033[1m";
+      }
+      
+      if(lvl == logPrio::LOG_NOTICE)
+      {
+         std::cout << "\033[1m";
+      }
+      
    }
 
    logStdFormat(logBuff);
 
-   if(lvl > logLevels::INFO)
-   {
-      std::cout << "\033[0m";
-   }
+   std::cout << "\033[0m";
+   std::cout << "\n";
 }
 
 #endif //logdump_hpp

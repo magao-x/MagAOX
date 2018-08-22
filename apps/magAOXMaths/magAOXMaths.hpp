@@ -20,9 +20,11 @@ class magAOXMaths : public MagAOXApp<>
 
 protected:
    // declare our properties
-	 pcf::IndiProperty x, xmaths;
-	 pcf::IndiProperty y, ymaths;
+   pcf::IndiProperty x, xmaths;
+   pcf::IndiProperty y, ymaths;
 
+   char data[10] = {0};
+   
 public:
 
    /// Default c'tor.
@@ -57,6 +59,12 @@ public:
 
 magAOXMaths::magAOXMaths() : MagAOXApp(MAGAOX_CURRENT_SHA1, MAGAOX_REPO_MODIFIED)
 {
+   data[0] = 'a';
+   data[1] = 'b';
+   for(size_t i=2;i<sizeof(data)-2; ++i) data[i] = ' ';
+   data[sizeof(data)-2] = 'z';
+   data[sizeof(data)-1] = '\0';
+   
    return;
 }
 
@@ -98,12 +106,26 @@ int magAOXMaths::appStartup()
    ymaths.add (pcf::IndiElement("sqrt"));
    ymaths.add (pcf::IndiElement("abs"));
 
+   
+   
+   
+   
+   log<software_notice>({__FILE__, __LINE__, 1000, 2000, "t"});
+   log<software_notice>({__FILE__, __LINE__});
+   log<software_warning>({__FILE__, __LINE__});
+   log<software_error>({__FILE__, __LINE__});
+   log<software_critical>({__FILE__, __LINE__});
+   log<software_alert>({__FILE__, __LINE__});
+   log<software_emergency>({__FILE__, __LINE__});
+   
    return 0;
 }
 
 int magAOXMaths::appLogic()
 {
 
+   //log<text_log>(data);
+   //log<loop_closed>();
    return 0;
 
 }

@@ -1,5 +1,5 @@
 
-apps_to_build = xindiserver trippLitePDU magAOXMaths 
+apps_to_build = xindiserver trippLitePDU magAOXMaths zaberCtrl
 
 utils_to_build = logdump
 
@@ -8,7 +8,9 @@ all: indi_all apps_all utils_all
 
 install: indi_install apps_install utils_install
 
-clean: indi_clean apps_clean utils_clean
+clean: lib_clean apps_clean utils_clean
+
+all_clean: indi_clean lib_clean apps_clean utils_clean doc_clean
 
 indi_all:
 	cd INDI; ${MAKE} all
@@ -18,6 +20,9 @@ indi_install:
 
 indi_clean:
 	cd INDI; ${MAKE} clean
+
+lib_clean:
+	cd libMagAOX; ${MAKE} clean
 
 apps_all:
 	for app in ${apps_to_build}; do \
@@ -49,6 +54,20 @@ utils_clean:
 			(cd utils/$$app; ${MAKE} clean) || break; \
 		done
 
+		
+.PHONY: doc
+doc:
+	cd libMagAOX/doc; doxygen libMagAOX_doxygen.in; cp -r sw_html ../../doc/www/;
+	cd utils/doc; doxygen magaox_utils_doxygen.in; cp -r  util_html ../../doc/www/; 
+	cd apps/doc; doxygen magaox_apps_doxygen.in; cp -r apps_html ../../doc/www/; 
+	
+.PHONY: doc_clean
+doc_clean:
+	rm -rf libMagAOX/doc/sw_html;
+	rm -rf utils/doc/util_html
+	rm -rf apps/doc/apps_html
+	rm -rf www/*_html
+	
 .PHONY: setup
 setup:
 		@for file in ./local/*.example.mk; do \

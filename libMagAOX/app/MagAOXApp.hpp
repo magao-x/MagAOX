@@ -32,9 +32,10 @@
 #include "../common/defaults.hpp"
 #include "../common/config.hpp"
 
-#include "../logger/logManager.hpp"
-#include "../logger/logTypes.hpp"
 #include "../logger/logFileRaw.hpp"
+#include "../logger/logManager.hpp"
+
+
 
 #include "stateCodes.hpp"
 #include "indiDriver.hpp"
@@ -196,14 +197,14 @@ public:
      */
    template<typename logT>
    static void log( const typename logT::messageT & msg, ///< [in] the message to log
-             logLevelT level = logLevels::DEFAULT ///< [in] [optional] the log level.  The default is used if not specified.
+             logPrioT level = logPrio::LOG_DEFAULT ///< [in] [optional] the log level.  The default is used if not specified.
            );
 
    /// Make a log entry
    /** Wrapper for logManager::log
      */
    template<typename logT>
-   static void log( logLevelT level = logLevels::DEFAULT /**< [in] [optional] the log level.  The default is used if not specified.*/);
+   static void log( logPrioT level = logPrio::LOG_DEFAULT /**< [in] [optional] the log level.  The default is used if not specified.*/);
 
    ///@} -- logging
 
@@ -501,12 +502,12 @@ MagAOXApp<_useINDI>::MagAOXApp( const std::string & git_sha1,
    m_self = this;
 
    //We log the current GIT status.
-   logLevelT gl = logLevels::INFO;
-   if(git_modified) gl = logLevels::WARNING;
+   logPrioT gl = logPrio::LOG_INFO;
+   if(git_modified) gl = logPrio::LOG_WARNING;
    log<git_state>(git_state::messageT("MagAOX", git_sha1, git_modified), gl);
 
-   gl = logLevels::INFO;
-   if(MXLIB_UNCOMP_REPO_MODIFIED) gl = logLevels::WARNING;
+   gl = logPrio::LOG_INFO;
+   if(MXLIB_UNCOMP_REPO_MODIFIED) gl = logPrio::LOG_WARNING;
    log<git_state>(git_state::messageT("mxlib", MXLIB_UNCOMP_CURRENT_SHA1, MXLIB_UNCOMP_REPO_MODIFIED), gl);
 
    //Get the uids of this process.
@@ -633,7 +634,7 @@ int MagAOXApp<_useINDI>::execute() //virtual
    if( lockPID() < 0 )
    {
       state(stateCodes::FAILURE);
-      log<text_log>("Failed to lock PID.", logLevels::FATAL);
+      log<text_log>({"Failed to lock PID."}, logPrio::LOG_CRITICAL);
       //Return immediately, not safe to go on.
       return -1;
    }
@@ -697,7 +698,7 @@ int MagAOXApp<_useINDI>::execute() //virtual
 template<bool _useINDI>
 template<typename logT>
 void MagAOXApp<_useINDI>::log( const typename logT::messageT & msg,
-                               logLevelT level
+                               logPrioT level
                              )
 {
    m_log.log<logT>(msg, level);
@@ -705,7 +706,7 @@ void MagAOXApp<_useINDI>::log( const typename logT::messageT & msg,
 
 template<bool _useINDI>
 template<typename logT>
-void MagAOXApp<_useINDI>::log( logLevelT level)
+void MagAOXApp<_useINDI>::log( logPrioT level)
 {
    m_log.log<logT>(level);
 }
@@ -727,7 +728,7 @@ int MagAOXApp<_useINDI>::setSigTermHandler()
       std::string logss = "Setting handler for SIGTERM failed. Errno says: ";
       logss += strerror(errno);
 
-      log<software_error>({__FILE__, __LINE__, errno, logss});
+      log<software_error>({__FILE__, __LINE__, errno, 0, logss});
 
       return -1;
    }
@@ -738,7 +739,7 @@ int MagAOXApp<_useINDI>::setSigTermHandler()
       std::string logss = "Setting handler for SIGQUIT failed. Errno says: ";
       logss += strerror(errno);
 
-      log<software_error>({__FILE__, __LINE__, errno, logss});
+      log<software_error>({__FILE__, __LINE__, errno, 0,logss});
 
       return -1;
    }
@@ -749,12 +750,12 @@ int MagAOXApp<_useINDI>::setSigTermHandler()
       std::string logss = "Setting handler for SIGINT failed. Errno says: ";
       logss += strerror(errno);
 
-      log<software_error>({__FILE__, __LINE__, errno, logss});
+      log<software_error>({__FILE__, __LINE__, errno, 0, logss});
 
       return -1;
    }
 
-   log<text_log>("Installed SIGTERM/SIGQUIT/SIGINT signal handler.", logLevels::DEBUG);
+   log<text_log>("Installed SIGTERM/SIGQUIT/SIGINT signal handler.", logPrio::LOG_DEBUG);
 
    return 0;
 }
@@ -811,7 +812,7 @@ int MagAOXApp<_useINDI>::euidCalled()
       logss += ") failed.  Errno says: ";
       logss += strerror(errno);
 
-      log<software_error>({__FILE__, __LINE__, errno, logss});
+      log<software_error>({__FILE__, __LINE__, errno, 0, logss});
 
       return -1;
    }
@@ -830,7 +831,7 @@ int MagAOXApp<_useINDI>::euidReal()
       logss += ") failed.  Errno says: ";
       logss += strerror(errno);
 
-      log<software_error>({__FILE__, __LINE__, errno, logss});
+      log<software_error>({__FILE__, __LINE__, errno, 0, logss});
 
       return -1;
    }
@@ -851,7 +852,7 @@ int MagAOXApp<_useINDI>::RTPriority( int prio)
    //Get the maximum privileges available
    if( euidCalled() < 0 )
    {
-      log<software_error>({__FILE__, __LINE__, 0, "Seeting euid to called failed."});
+      log<software_error>({__FILE__, __LINE__, 0, 0,"Seeting euid to called failed."});
       return -1;
    }
 
@@ -867,7 +868,7 @@ int MagAOXApp<_useINDI>::RTPriority( int prio)
    {
       std::stringstream logss;
       logss << "Setting scheduler priority to " << prio <<" failed.  Errno says: " << strerror(errno) << ".  ";
-      log<software_error>({__FILE__, __LINE__, errno, logss.str()});
+      log<software_error>({__FILE__, __LINE__, errno, 0, logss.str()});
    }
    else
    {
@@ -881,7 +882,7 @@ int MagAOXApp<_useINDI>::RTPriority( int prio)
    //Go back to regular privileges
    if( euidReal() < 0 )
    {
-      log<software_error>({__FILE__, __LINE__, 0, "Setting euid to real failed."});
+      log<software_error>({__FILE__, __LINE__, 0, 0, "Setting euid to real failed."});
       return -1;
    }
 
@@ -898,7 +899,7 @@ int MagAOXApp<_useINDI>::lockPID()
    //Get the maximum privileges available
    if( euidCalled() < 0 )
    {
-      log<software_error>({__FILE__, __LINE__, 0, "Seeting euid to called failed."});
+      log<software_error>({__FILE__, __LINE__, 0, 0, "Seeting euid to called failed."});
       return -1;
    }
 
@@ -910,7 +911,7 @@ int MagAOXApp<_useINDI>::lockPID()
       {
          std::stringstream logss;
          logss << "Failed to create root of statusDir (" << statusDir << ").  Errno says: " << strerror(errno);
-         log<software_critical>({__FILE__, __LINE__, errno, logss.str()});
+         log<software_critical>({__FILE__, __LINE__, errno, 0, logss.str()});
 
          //Go back to regular privileges
          euidReal();
@@ -933,7 +934,7 @@ int MagAOXApp<_useINDI>::lockPID()
       {
          std::stringstream logss;
          logss << "Failed to create statusDir (" << statusDir << ").  Errno says: " << strerror(errno);
-         log<software_critical>({__FILE__, __LINE__, errno, logss.str()});
+         log<software_critical>({__FILE__, __LINE__, errno, 0, logss.str()});
 
          //Go back to regular privileges
          euidReal();
@@ -968,7 +969,7 @@ int MagAOXApp<_useINDI>::lockPID()
          }
          catch( ... )
          {
-            log<software_fatal>({__FILE__, __LINE__, 0, "exception caught testing /proc/pid"});
+            log<software_critical>({__FILE__, __LINE__, 0, 0, "exception caught testing /proc/pid"});
             euidReal();
             return -1;
          }
@@ -991,7 +992,7 @@ int MagAOXApp<_useINDI>::lockPID()
             logss << "PID already locked (" << testPid  << ").  Time to die.";
             std::cerr << logss.str() << std::endl;
 
-            log<text_log>(logss.str(), logLevels::CRITICAL);
+            log<text_log>(logss.str(), logPrio::LOG_CRITICAL);
 
             //Go back to regular privileges
             euidReal();
@@ -1012,7 +1013,7 @@ int MagAOXApp<_useINDI>::lockPID()
 
    if(!pidOut.good())
    {
-      log<software_fatal>({__FILE__, __LINE__, errno, "could not open pid file for writing."});
+      log<software_critical>({__FILE__, __LINE__, errno, 0, "could not open pid file for writing."});
       euidReal();
       return -1;
    }
@@ -1028,7 +1029,7 @@ int MagAOXApp<_useINDI>::lockPID()
    //Go back to regular privileges
    if( euidReal() < 0 )
    {
-      log<software_error>({__FILE__, __LINE__, 0, "Seeting euid to real failed."});
+      log<software_error>({__FILE__, __LINE__, 0, 0, "Seeting euid to real failed."});
       return -1;
    }
 
@@ -1040,7 +1041,7 @@ int MagAOXApp<_useINDI>::unlockPID()
 {
    if( ::remove(pidFileName.c_str()) < 0)
    {
-      log<software_error>({__FILE__, __LINE__, errno, std::string("Failed to remove PID file: ") + strerror(errno)});
+      log<software_error>({__FILE__, __LINE__, errno, 0, std::string("Failed to remove PID file: ") + strerror(errno)});
       return -1;
    }
 
@@ -1062,9 +1063,9 @@ void MagAOXApp<_useINDI>::state(const stateCodes::stateCodeT & s)
 {
    if(m_state == s) return;
 
-   logLevelT lvl = logLevels::INFO;
-   if(s == stateCodes::ERROR) lvl = logLevels::ERROR;
-   if(s == stateCodes::FAILURE) lvl = logLevels::CRITICAL;
+   logPrioT lvl = logPrio::LOG_INFO;
+   if(s == stateCodes::ERROR) lvl = logPrio::LOG_ERROR;
+   if(s == stateCodes::FAILURE) lvl = logPrio::LOG_CRITICAL;
 
    log<state_change>( {m_state, s}, lvl );
 
@@ -1151,8 +1152,8 @@ int MagAOXApp<_useINDI>::createINDIFIFOS()
       {
          umask(prev);
          euidReal();
-         log<software_fatal>({__FILE__, __LINE__, errno, "mkfifo failed"});
-         log<text_log>("Failed to create input FIFO.", logLevels::FATAL);
+         log<software_critical>({__FILE__, __LINE__, errno, 0, "mkfifo failed"});
+         log<text_log>("Failed to create input FIFO.", logPrio::LOG_CRITICAL);
          return -1;
       }
    }
@@ -1164,8 +1165,8 @@ int MagAOXApp<_useINDI>::createINDIFIFOS()
       {
          umask(prev);
          euidReal();
-         log<software_fatal>({__FILE__, __LINE__, errno, "mkfifo failed"});
-         log<text_log>("Failed to create ouput FIFO.", logLevels::FATAL);
+         log<software_critical>({__FILE__, __LINE__, errno, 0, "mkfifo failed"});
+         log<text_log>("Failed to create ouput FIFO.", logPrio::LOG_CRITICAL);
          return -1;
       }
    }
@@ -1199,8 +1200,8 @@ int MagAOXApp<_useINDI>::startINDI()
 
    if( touch < 0) //Check if that failed.
    {
-      log<software_fatal>({__FILE__, __LINE__, errno, "mkstemp failed"});
-      log<text_log>("Failed to create dummy config file for pcf::Config.", logLevels::FATAL);
+      log<software_critical>({__FILE__, __LINE__, errno, 0, "mkstemp failed"});
+      log<text_log>("Failed to create dummy config file for pcf::Config.", logPrio::LOG_CRITICAL);
       return -1;
    }
 
@@ -1218,7 +1219,7 @@ int MagAOXApp<_useINDI>::startINDI()
       ::close(touch);
       remove(dummyConf);
 
-      log<software_fatal>({__FILE__, __LINE__, 0, "INDI Driver construction exception."});
+      log<software_critical>({__FILE__, __LINE__, 0, 0, "INDI Driver construction exception."});
       return -1;
    }
 
@@ -1230,14 +1231,14 @@ int MagAOXApp<_useINDI>::startINDI()
    //Check for INDI failure
    if(m_indiDriver == nullptr)
    {
-      log<software_fatal>({__FILE__, __LINE__, 0, "INDI Driver construction failed."});
+      log<software_critical>({__FILE__, __LINE__, 0, 0, "INDI Driver construction failed."});
       return -1;
    }
 
    //Check for INDI failure to open the FIFOs
    if(m_indiDriver->good() == false)
    {
-      log<software_fatal>({__FILE__, __LINE__, 0, "INDI Driver failed to open FIFOs."});
+      log<software_critical>({__FILE__, __LINE__, 0, 0, "INDI Driver failed to open FIFOs."});
       delete m_indiDriver;
       m_indiDriver = nullptr;
       return -1;

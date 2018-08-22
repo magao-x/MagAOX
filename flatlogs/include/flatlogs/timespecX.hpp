@@ -1,45 +1,60 @@
 /** \file timespecX.hpp 
-  * \brief The fixed-width timespec structure and utilities.
+  * \brief A fixed-width timespec structure and utilities.
   * \author Jared R. Males (jaredmales@gmail.com)
   *
+  * \ingroup flatlogs_files
+  * 
   * History:
   * - 2017-06-27 created by JRM
+  * - 2018-08-17 moved to flatlogs
   */ 
 
-#ifndef time_timespecX_hpp
-#define time_timespecX_hpp
+#ifndef flatlogs_timespecX_hpp
+#define flatlogs_timespecX_hpp
 
 #include <cstdint>
 
-namespace MagAOX
-{
-namespace time 
+#include "logDefs.hpp"
+
+namespace flatlogs
 {
 
 ///A fixed-width timespec structure.
 /** To ensure that binary encoding of time is stable regardless of environment, we use a custom timespec
   * composed of fixed-width types.
   * 
-  * \note Do NOT assume that this is binary compatible with plain timespec.
+  * \note This is NOT binary compatible with plain timespec.  Use the provided conversions.
+  * 
+  * \ingroup flatlogs_time
+  * 
   */
 struct timespecX 
 {
-   typedef int64_t secT;  ///< Type used for seconds.  Signed 64 bits is enough to last until heat death.
-   typedef int64_t nanosecT; ///< Type used for nanoseconds.  Signed 32 bits is all that is needed for 10^9 nanoseconds, but 64 bits matches long on most modern systems.
-   
    secT time_s; ///< Time since the Unix epoch
    nanosecT time_ns; ///< Nanoseconds.  
 
 
    ///Convert a native timespec to a timespecX.
+   /**
+     * \returns this reference, if values are 0 and 0 then the input was too big or negative. 
+     */
    timespecX & operator=( const timespec & ts /**< [in] the native timespec from which to get values */)
    {
-      time_s = ts.tv_sec;
-      time_ns = ts.tv_nsec;
+      if(ts.tv_sec < 0 || ts.tv_sec > 4294967295) ///\todo make this use minval and maxval
+      {
+         time_s = 0;
+         time_ns = 0;
+      }
+      else 
+      {
+         time_s = ts.tv_sec;
+         time_ns = ts.tv_nsec;
+      }
       
       return *this;
    }
    
+   ///Get a native timespec from this custom one.
    timespec getTimespec()
    {
       struct timespec ts;
@@ -53,7 +68,7 @@ struct timespecX
    ///Fill the the timespecX with the current time.
    /** This is based on the usual clock_gettime.  clockid_t is a template parameter 
      * since we probaby always want CLOCK_REALTIME, but if we don't for some reason
-     * it will be passed in the same order as in clock_gettimeX.
+     * it will be passed in the same order as in clock_gettime.
      * 
      * \tparam clk_id specifies the type.
      */ 
@@ -62,7 +77,7 @@ struct timespecX
    {
       struct timespec ts;
       clock_gettime(clk_id, &ts);
-      (*this) = ts;
+      (*this) = ts; //see operator=
    }
    
    ///Get the filename timestamp for this timespecX.
@@ -86,7 +101,7 @@ struct timespecX
    
       char buffer[24];
 
-      snprintf(buffer, 24, "%04i%02i%02i%02i%02i%02i%09li", uttime.tm_year+1900, uttime.tm_mon+1, uttime.tm_mday, uttime.tm_hour, uttime.tm_min, uttime.tm_sec, time_ns);
+      snprintf(buffer, 24, "%04i%02i%02i%02i%02i%02i%09i", uttime.tm_year+1900, uttime.tm_mon+1, uttime.tm_mday, uttime.tm_hour, uttime.tm_min, uttime.tm_sec, static_cast<int>(time_ns)); //casting in case we switch type of time_ns.
    
       tstamp = buffer;
 
@@ -129,13 +144,16 @@ struct timespecX
       
       char tstr2[11];
       
-      snprintf(tstr2, 11, ".%09li", time_ns);
+      snprintf(tstr2, 11, ".%09i", static_cast<int>(time_ns)); //casting in case we switch to int64_t
       
       return std::string(tstr1) + std::string(tstr2);
    }
-};
+} __attribute__((packed));
 
 ///Convert a timespecX to a native timespec
+/**
+  * \ingroup flatlogs_time
+  */ 
 inline
 void timespecFromX ( timespec & ts, ///< [out] the native timespec to set
                      const timespecX & tsX ///< [in] the fixed-width timespec from which to get values
@@ -152,6 +170,9 @@ void timespecFromX ( timespec & ts, ///< [out] the native timespec to set
   * it will be passed in the same order as in clock_gettime.
   * 
   * \tparam clk_id specifies the type.
+  * 
+  * \ingroup flatlogs_time
+  * 
   */ 
 template<clockid_t clk_id=CLOCK_REALTIME>
 void clock_gettimeX( timespecX & tsX /**< [out] the fixed-width timespec to populate */)
@@ -159,13 +180,8 @@ void clock_gettimeX( timespecX & tsX /**< [out] the fixed-width timespec to popu
    tsX.gettime<clk_id>();
 }
 
+}//namespace flatlogs
 
 
-
-
-}//namespace time
-}//namespace MagAOX
-
-
-#endif //time_timespecX_hpp
+#endif //flatlogs_timespecX_hpp
 

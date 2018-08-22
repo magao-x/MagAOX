@@ -95,7 +95,7 @@ protected:
      */
    int changeOutletState( const pcf::IndiProperty &ipRecv, ///< [in] the received INDI property
                           pcf::IndiProperty & indiOutlet,  ///< [in] the INDI property corresponding to the outlet.
-                          int onum ///< [in] the number of the outlet (0-7)
+                          uint8_t onum ///< [in] the number of the outlet (0-7)
                         );
 
 public:
@@ -200,12 +200,12 @@ int trippLitePDU::appLogic()
 
    if( state() == stateCodes::UNINITIALIZED )
    {
-      log<text_log>( "In appLogic but in state UNINITIALIZED.", logLevels::FATAL );
+      log<text_log>( "In appLogic but in state UNINITIALIZED.", logPrio::LOG_CRITICAL );
       return -1;
    }
    if( state() == stateCodes::INITIALIZED )
    {
-      log<text_log>( "In appLogic but in state INITIALIZED.", logLevels::FATAL );
+      log<text_log>( "In appLogic but in state INITIALIZED.", logPrio::LOG_CRITICAL );
       return -1;
    }
 
@@ -217,7 +217,7 @@ int trippLitePDU::appLogic()
          state(stateCodes::FAILURE);
          if(!stateLogged())
          {
-            log<software_fatal>({__FILE__, __LINE__, rv, tty::ttyErrorString(rv)});
+            log<software_critical>({__FILE__, __LINE__, rv, tty::ttyErrorString(rv)});
          }
          return rv;
       }
@@ -268,7 +268,7 @@ int trippLitePDU::appLogic()
       else
       {
          state(stateCodes::FAILURE);
-         log<text_log>("Error connecting to USB device.", logLevels::FATAL);
+         log<text_log>("Error connecting to USB device.", logPrio::LOG_CRITICAL);
          return -1;
       }
    }
@@ -303,7 +303,7 @@ int trippLitePDU::appLogic()
                else
                {
                   state(stateCodes::FAILURE);
-                  log<text_log>("Login failed.", logLevels::FATAL);
+                  log<text_log>("Login failed.", logPrio::LOG_CRITICAL);
                   return -1;
                }
             }
@@ -312,14 +312,14 @@ int trippLitePDU::appLogic()
          else
          {
             state(stateCodes::FAILURE);
-            log<text_log>("No response from device. Can not connect.", logLevels::FATAL);
+            log<text_log>("No response from device. Can not connect.", logPrio::LOG_CRITICAL);
             return -1;
          }
       }
       else if (rv < 0)
       {
          state(stateCodes::FAILURE);
-         log<text_log>(tty::ttyErrorString(rv), logLevels::FATAL);
+         log<text_log>(tty::ttyErrorString(rv), logPrio::LOG_CRITICAL);
          return -1;
       }
 
@@ -337,13 +337,13 @@ int trippLitePDU::appLogic()
       {
          if(rv == TTY_E_TIMEOUTONREAD || rv == TTY_E_TIMEOUTONREADPOLL)
          {
-            log<text_log>(tty::ttyErrorString(rv), logLevels::ERROR);
+            log<text_log>(tty::ttyErrorString(rv), logPrio::LOG_ERROR);
             return 0;
          }
          else
          {
             state(stateCodes::NOTCONNECTED);
-            log<text_log>(tty::ttyErrorString(rv), logLevels::ERROR);
+            log<text_log>(tty::ttyErrorString(rv), logPrio::LOG_ERROR);
 
             return 0;
          }
@@ -411,7 +411,7 @@ int trippLitePDU::appLogic()
    }
 
    state(stateCodes::FAILURE);
-   log<text_log>("appLogic fell through", logLevels::FATAL);
+   log<text_log>("appLogic fell through", logPrio::LOG_CRITICAL);
    return -1;
 
 }
@@ -494,7 +494,7 @@ int trippLitePDU::parsePDUStatus( std::string & strRead )
 
 int trippLitePDU::changeOutletState( const pcf::IndiProperty &ipRecv,
                                      pcf::IndiProperty & indiOutlet,
-                                     int onum
+                                     uint8_t onum
                                    )
 {
    std::string oreq = ipRecv["state"].get<std::string>();
@@ -522,7 +522,8 @@ int trippLitePDU::changeOutletState( const pcf::IndiProperty &ipRecv,
 
       m_outletStates[onum] = 1;
 
-      log<tripplitepdu_outlet_on>((char) (onum+1));
+      uint8_t lonum = onum + 1;   //Do this without narrowing
+      log<pdu_outlet_state>({ lonum, 1});
    }
    if( oreq == "Off" && m_outletStates[onum] == 1)
    {
@@ -548,7 +549,8 @@ int trippLitePDU::changeOutletState( const pcf::IndiProperty &ipRecv,
 
       m_outletStates[onum] = 0;
 
-      log<tripplitepdu_outlet_off>((char) (onum+1));
+      uint8_t lonum = onum + 1; //Do this without narrowing
+      log<pdu_outlet_state>({ lonum, 0});
    }
 
    std::lock_guard<std::mutex> guard(m_indiMutex);  //Lock the mutex before conducting INDI communications.
