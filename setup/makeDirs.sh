@@ -19,14 +19,16 @@ mkdir  -pv /opt/MagAOX/drivers
 mkdir  -pv /opt/MagAOX/drivers/fifos
 mkdir  -pv /opt/MagAOX/config
 
-LOGDIR=/data/logs
-#LOGDIR=/opt/MagAOX/logs
-
-mkdir -pv $LOGDIR
-groupadd magaox
-chown :magaox $LOGDIR
-chmod g+rw -v $LOGDIR
-chmod g+s -v $LOGDIR
+mkdir -pv "$LOGDIR"
+if [[ ! $(getent group magaox) ]]; then
+  groupadd magaox
+  echo "Added group magaox"
+else
+  echo "Group magaox exists"
+fi
+chown :magaox "$LOGDIR"
+chmod g+rw -v "$LOGDIR"
+chmod g+s -v "$LOGDIR"
 
 if [ "$LOGDIR" != "/opt/MagAOX/logs" ] ; then
   echo "Creating logs symlink . . ."
