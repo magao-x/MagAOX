@@ -20,7 +20,7 @@ namespace logger
 
 
 ///Application State Change
-/** \ingroup logtypes
+/** \ingroup logger_types
   */
 struct pdu_outlet_state : public flatbuffer_log
 {

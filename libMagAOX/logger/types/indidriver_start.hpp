@@ -18,7 +18,7 @@ namespace logger
 {
 
 ///INDI Driver Start log entry
-/** \ingroup logtypes
+/** \ingroup logger_types
   */
 struct indidriver_start : public empty_log<indidriver_start>
 {

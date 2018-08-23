@@ -75,7 +75,7 @@ protected:
 
    //declare our properties
    pcf::IndiProperty m_indiStatus;
-	pcf::IndiProperty m_indiFrequency;
+   pcf::IndiProperty m_indiFrequency;
    pcf::IndiProperty m_indiVoltage;
    pcf::IndiProperty m_indiCurrent;
 

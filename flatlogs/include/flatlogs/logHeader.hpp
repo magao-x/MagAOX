@@ -19,16 +19,10 @@
 namespace flatlogs
 {
 
-///The log entry buffer smart pointer.
-/** \ingroup logbuff
-  */
-typedef std::shared_ptr<char> bufferPtrT; 
-
-
-/// The log entry header 
 /** The log entry is a binary buffer with the following format:
+  * \addtogroup flatlogs
   * \verbatim 
-  *                      1 1 1 1 1 1 1 1 1 1 2 2 2 2 2 2 2 2 2 
+                         1 1 1 1 1 1 1 1 1 1 2 2 2 2 2 2 2 2 2 
      0 1 2 3 4 5 6 7 8 9 0 1 2 3 4 5 6 7 8 9 0 1 2 3 4 5 6 7 8
     |p|evt|time_s |time_ns|l| [message (0-254)]
     |p|evt|time_s |time_ns|E|len| [message (255-65534)]
@@ -45,19 +39,30 @@ typedef std::shared_ptr<char> bufferPtrT;
   *   - Message length 255-65534: uint8_t = 0xFF-1 in the first byte, uint16_t in the next two bytes.
   *   - Message length 65535 and up: uint8_t=0xFF in the first byte, uint64_t in the next 8 bytes.
   * 
-  * Rationale for variable lenth: this keeps the space used for 0 length and short messages
+  * Rationale for variable length: this keeps the space used for 0 length and short messages
   * to a minimum, while allowing for progressively larger messages to be saved.  
   * The savings will be large for small messages, while the the cost is proportionally small 
   * for larger messages.  For larger messages, this requires a progressive read to 
   * sniff out the entire length.  Likewise, the cost is small relative to the cost of reading 
   * the larger message.
   *
-  * This class is designed to work with the log header only as a pointer to it, 
+  * If a non-zero message exists, it is usually a flatlogs serialized buffer. 
+  *
+  * 
+  */
+   
+///The log entry buffer smart pointer.
+/** \ingroup logbuff
+  */
+typedef std::shared_ptr<char> bufferPtrT; 
+
+
+/// The log entry header 
+/** 
+  * This class is designed to work with the log header only as a shared pointer to it, 
   * not directly on the members.  The actual header struct is private so we ensure that it is 
   * accessed properly.As such all of the member methods are static and take a shared_ptr as 
   * first argument.
-  *
-  * 
   *
   * \ingroup logbuff
   */

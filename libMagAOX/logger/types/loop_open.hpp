@@ -18,7 +18,7 @@ namespace logger
 {
 
 ///Loop Open event log
-/** \ingroup logtypes
+/** \ingroup logger_types
   */
 struct loop_open : public empty_log<loop_open>
 {

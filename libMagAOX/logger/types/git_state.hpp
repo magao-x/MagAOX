@@ -20,7 +20,7 @@ namespace logger
 
 
 /// Log entry recording the build-time git state.
-/** \ingroup logtypes
+/** \ingroup logger_types
   */
 struct git_state : public flatbuffer_log
 {

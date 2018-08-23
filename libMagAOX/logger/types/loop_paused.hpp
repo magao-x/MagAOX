@@ -18,7 +18,7 @@ namespace logger
 {
 
 ///Loop Paused event log
-/** \ingroup logtypes
+/** \ingroup logger_types
   */
 struct loop_paused : public empty_log<loop_paused>
 {

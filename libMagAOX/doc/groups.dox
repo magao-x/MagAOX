@@ -3,6 +3,35 @@
 
 ///\defgroup logger The Logging System
   
+/** \defgroup flatlogs The flatlogs log protocol
+  * flatlogs consist of a simple header, followed by a flatbuffers encoded message payload.
+  * \ingroup logger
+  */
+
+/** \defgroup logDefs Type definitions for flatlogs.
+  * \ingroup \flatlogs
+  */
+  
+/** \defgroup logbuff The flatlogs binary header definition
+  * \ingroup flatlogs
+  */
+  
+/** \defgroup logPrio The log priorities
+  * \ingroup logbuff
+  */
+  
+/** \defgroup flatlogs_time The flatlogs timestamp
+  * \ingroup logbuff
+  */
+
+/** \defgroup logformat Standard text formatting of logs for biological purposes
+  * \ingroup flatlogs
+  */
+  
+/** \defgroup flatlogs_files
+  * \ingroup flatlogs
+  */
+  
 /** \defgroup logger_types Log Entry Types
   * \ingroup logger
   */

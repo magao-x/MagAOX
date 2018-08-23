@@ -21,6 +21,9 @@ namespace logger
 ///Base class for software logs
 /** Such logs are used to log software status, warnings, and errors. Does not have defaultLevel, so this can not be used as a log type in logger.
   *
+  * \includedoc sw_logs.dox.inc
+  * 
+  * 
   * \ingroup logger_types__basic
   */
 struct software_log : public flatbuffer_log
@@ -32,11 +35,11 @@ struct software_log : public flatbuffer_log
    struct messageT : public fbMessage
    {
       /// C'tor with full specification.
-      messageT( const char * file,
-                const uint32_t line,
-                const int32_t  code_errno,
-                const int32_t  code_other,
-                const char * expl 
+      messageT( const char * file, ///< [in] The file of the error, should always be \c \_\_FILE\_\_
+                const uint32_t line, ///< [in] The line number of the error, should always be \c \_\_LINE\_\_ 
+                const int32_t  code_errno, ///< [in] The errno code at the time of the log entry. Only errno should be passed here, so strerror can be used later.
+                const int32_t  code_other, ///< [in] Some other error code, such as a return value or library code.
+                const char * expl  ///< [in] explanatory text about the software event
               )
       {
          auto _file = builder.CreateString(file);
@@ -47,11 +50,13 @@ struct software_log : public flatbuffer_log
       }
       
       /// C'tor with full specification, overloaded for a std::string in explanation.
-      messageT( const char * file,
-                const uint32_t line,
-                const int32_t  code_errno,
-                const int32_t  code_other,
-                const std::string & expl 
+      /** \overload
+        */
+      messageT( const char * file, ///< [in] The file of the error, should always be \c \_\_FILE\_\_
+                const uint32_t line, ///< [in] The line number of the error, should always be \c \_\_LINE\_\_
+                const int32_t  code_errno, ///< [in] The errno code at the time of the log entry. Only errno should be passed here, so strerror can be used later.
+                const int32_t  code_other, ///< [in] Some other error code, such as a return value or library code.
+                const std::string & expl ///< [in] explanatory text about the software event
               )
       {
          auto _file = builder.CreateString(file);
@@ -62,9 +67,9 @@ struct software_log : public flatbuffer_log
       }
       
       /// C'tor for errno only -- code explanation can be looked up later.
-      messageT( const char * file,
-                const uint32_t line,
-                const int32_t  code_errno
+      messageT( const char * file, ///< [in] The file of the error, should always be \c \_\_FILE\_\_
+                const uint32_t line, ///< [in] The line number of the error, should always be \c \_\_LINE\_\_
+                const int32_t  code_errno ///< [in] The errno code at the time of the log entry. Only errno should be passed here, so strerror can be used later.
               )
       {
          auto _file = builder.CreateString(file);
@@ -74,10 +79,10 @@ struct software_log : public flatbuffer_log
       }
       
       /// C'tor for errno with additional explanation.
-      messageT( const char * file,
-                const uint32_t line,
-                const int32_t  code_errno,
-                const char * expl
+      messageT( const char * file, ///< [in] The file of the error, should always be \c \_\_FILE\_\_
+                const uint32_t line, ///< [in] The line number of the error, should always be \c \_\_LINE\_\_
+                const int32_t  code_errno, ///< [in] The errno code at the time of the log entry. Only errno should be passed here, so strerror can be used later.
+                const char * expl ///< [in] explanatory text about the software event
               )
       {
          auto _file = builder.CreateString(file);
@@ -88,10 +93,10 @@ struct software_log : public flatbuffer_log
       }
       
       /// C'tor for errno with additional explanation, std::string overload.
-      messageT( const char * file,
-                const uint32_t line,
-                const int32_t  code_errno,
-                const std::string & expl
+      messageT( const char * file, ///< [in] The file of the error, should always be \c \_\_FILE\_\_
+                const uint32_t line, ///< [in] The line number of the error, should always be \c \_\_LINE\_\_
+                const int32_t  code_errno, ///< [in] The errno code at the time of the log entry. Only errno should be passed here, so strerror can be used later.
+                const std::string & expl ///< [in] explanatory text about the software event
               )
       {
          auto _file = builder.CreateString(file);
@@ -102,9 +107,9 @@ struct software_log : public flatbuffer_log
       }
       
       /// C'tor with no codes, just the explanation.
-      messageT( const char * file,
-                const uint32_t line,
-                const std::string & expl
+      messageT( const char * file, ///< [in] The file of the error, should always be \c \_\_FILE\_\_
+                const uint32_t line, ///< [in] The line number of the error, should always be \c \_\_LINE\_\_
+                const std::string & expl ///< [in] explanatory text about the software event
               )
       {
          auto _file = builder.CreateString(file);
@@ -115,8 +120,8 @@ struct software_log : public flatbuffer_log
       }
 
       /// C'tor for a trace log, only the file and line.
-      messageT( const char * file,
-                const uint32_t line
+      messageT( const char * file, ///< [in] The file of the error, should always be \c \_\_FILE\_\_
+                const uint32_t line ///< [in] The line number of the error, should always be \c \_\_LINE\_\_
               )
       {
          auto _file = builder.CreateString(file);
@@ -129,7 +134,7 @@ struct software_log : public flatbuffer_log
    };
 
 
-   ///Get the message formatte for human consumption.
+   ///Get the message formatted for human consumption.
    static std::string msgString( void * msgBuffer,  /**< [in] Buffer containing the flatbuffer serialized message.*/
                                  flatlogs::msgLenT len  /**< [in] [unused] length of msgBuffer.*/
                                )
@@ -166,6 +171,7 @@ struct software_log : public flatbuffer_log
 
 ///Software EMERGENCY log entry
 /** This should only be used for a system-wide emergency requiring operator or automatic shutdown.  Not for a process specific problem.
+  * \includedoc sw_logs.dox.inc
   * \ingroup logger_types
   */
 struct software_emergency : public software_log
@@ -176,6 +182,7 @@ struct software_emergency : public software_log
 
 ///Software ALERT log entry
 /** This should only be used for a system-wide emergency requiring operator or automatic action.  Not for a process specific problem.
+  * \includedoc sw_logs.dox.inc
   * \ingroup logger_types
   */
 struct software_alert : public software_log
@@ -186,6 +193,7 @@ struct software_alert : public software_log
 
 ///Software CRITICAL log entry
 /** This should only be used if the process is going to shutdown.
+  * \includedoc sw_logs.dox.inc
   * \ingroup logger_types
   */
 struct software_critical : public software_log
@@ -196,6 +204,7 @@ struct software_critical : public software_log
 
 ///Software ERR log entry
 /** Used to record and error that the process will attempt to recover from. 
+  * \includedoc sw_logs.dox.inc
   * \ingroup logger_types
   */
 struct software_error : public software_log
@@ -206,6 +215,7 @@ struct software_error : public software_log
 
 ///Software WARN log entry
 /** Used to record an abnormal condition.
+  * \includedoc sw_logs.dox.inc
   * \ingroup logger_types
   */
 struct software_warning : public software_log
@@ -216,6 +226,7 @@ struct software_warning : public software_log
 
 ///Software NOTICE log entry
 /** Used to record a normal but signficant event or condition.
+  * \includedoc sw_logs.dox.inc
   * \ingroup logger_types
   */
 struct software_notice : public software_log
@@ -225,7 +236,8 @@ struct software_notice : public software_log
 };
 
 ///Software INFO log entry
-/** Used to record a normal event or condition.  This is the lowest priority used in normal operations.
+/** \includedoc sw_logs.dox.inc
+ * Used to record a normal event or condition.  This is the lowest priority used in normal operations.
   * \ingroup logger_types
   */
 struct software_info : public software_log
@@ -235,7 +247,8 @@ struct software_info : public software_log
 };
 
 ///Software DEBUG log entry
-/** \ingroup logger_types
+/** \includedoc sw_logs.dox.inc
+ * \ingroup logger_types
   */
 struct software_debug : public software_log
 {
@@ -244,7 +257,8 @@ struct software_debug : public software_log
 };
 
 ///Software DEBUG2 log entry
-/** \ingroup logger_types
+/** \includedoc sw_logs.dox.inc
+  * \ingroup logger_types
   */
 struct software_debug2 : public software_log
 {

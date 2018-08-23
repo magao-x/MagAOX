@@ -22,7 +22,7 @@ namespace logger
 
 
 ///Application State Change
-/** \ingroup logtypes
+/** \ingroup logger_types
   */
 struct state_change : public flatbuffer_log
 {

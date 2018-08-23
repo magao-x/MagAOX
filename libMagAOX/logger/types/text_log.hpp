@@ -18,7 +18,7 @@ namespace logger
 {
 
 ///A simple text log, a string-type log.
-/** \ingroup logtypes
+/** \ingroup logger_types
   */
 struct text_log : public string_log
 {
