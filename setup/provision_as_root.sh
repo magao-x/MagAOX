@@ -8,14 +8,14 @@ function realpath() {
 }
 
 echo "Starting shell-based provisioning script from $DIR..."
-sudo yum -y install centos-release-scl
+yum -y install centos-release-scl
 # n.b. the preceding line changes the set of available packages, so these two can't be combined.
-sudo yum -y install devtoolset-7
-echo "source /opt/rh/devtoolset-7/enable" | sudo tee /etc/profile.d/devtoolset-7.sh
+yum -y install devtoolset-7
+echo "source /opt/rh/devtoolset-7/enable" | tee /etc/profile.d/devtoolset-7.sh
 set +u
 source /opt/rh/devtoolset-7/enable
 set -u
-echo "export LD_LIBRARY_PATH=\"/usr/local/lib:\$LD_LIBRARY_PATH\"" | sudo tee /etc/profile.d/ld-library-path.sh
+echo "export LD_LIBRARY_PATH=\"/usr/local/lib:\$LD_LIBRARY_PATH\"" | tee /etc/profile.d/ld-library-path.sh
 #
 # mxLib Dependencies
 #
@@ -24,9 +24,9 @@ SOFA_REV_DATE=$(echo $SOFA_REV | tr -d _C)
 EIGEN_VERSION="3.3.4"
 LEVMAR_VERSION="2.6"
 FFTW_VERSION="3.3.8"
-sudo yum -y install lapack-devel atlas-devel
-sudo yum -y install boost-devel
-sudo yum -y install gsl gsl-devel
+yum -y install lapack-devel atlas-devel
+yum -y install boost-devel
+yum -y install gsl gsl-devel
 #
 # FFTW (note: need 3.3.8 or newer, so can't use yum)
 #
@@ -38,35 +38,35 @@ cd fftw-$FFTW_VERSION
 # Following Jared's comprehensive build script: https://gist.github.com/jaredmales/0aacc00b0ce493cd63d3c5c75ccc6cdd
 ./configure --enable-float
 make
-sudo make install
+make install
 
 ./configure --enable-float --enable-threads
 make
-sudo make install
+make install
 
 ./configure
 make
-sudo make install
+make install
 
 ./configure --enable-threads
 make
-sudo make install
+make install
 
 ./configure --enable-long-double
 make
-sudo make install
+make install
 
 ./configure --enable-long-double --enable-threads
 make
-sudo make install
+make install
 
 ./configure --enable-quad-precision
 make
-sudo make install
+make install
 
 ./configure --enable-quad-precision --enable-threads
 make
-sudo make install
+make install
 cd
 #
 # CFITSIO
@@ -78,7 +78,7 @@ fi
 cd cfitsio
 ./configure --prefix=/usr/local
 make
-sudo make install
+make install
 cd
 #
 # SOFA
@@ -89,7 +89,7 @@ if [[ ! -d ./sofa ]]; then
 fi
 cd sofa/$SOFA_REV_DATE/c/src
 make "CFLAGX=-pedantic -Wall -W -O -fPIC" "CFLAGF=-c -pedantic -Wall -W -O -fPIC"
-sudo make install INSTALL_DIR=/usr/local
+make install INSTALL_DIR=/usr/local
 cd
 #
 # Eigen
@@ -110,5 +110,5 @@ if [[ ! -d $LEVMAR_DIR ]]; then
 fi
 cd $LEVMAR_DIR
 make liblevmar.a
-sudo install liblevmar.a /usr/local/lib/
+install liblevmar.a /usr/local/lib/
 cd
