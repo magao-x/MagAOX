@@ -50,3 +50,10 @@
 /** \defgroup indi INDI Support in MagAOX Apps
   * \ingroup magaoxapp
   */
+
+/** \defgroup tty TTY device interfaces 
+  */
+  
+/** \defgroup tty_files TTY files 
+  * \ingroup tty 
+  */

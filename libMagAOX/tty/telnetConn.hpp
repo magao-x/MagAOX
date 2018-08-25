@@ -2,6 +2,7 @@
   * \brief Managing a connection to a telnet device.
   * \author Jared R. Males (jaredmales@gmail.com)
   *
+  * \ingroup tty_files
   * History:
   * - 2018-08-24 created by JRM
   */
@@ -43,6 +44,8 @@ namespace tty
 #endif
 
 /// libtelnet option table.
+/** \ingroup tty 
+  */
 static const telnet_telopt_t telopts[] = {
             { TELNET_TELOPT_ECHO,       TELNET_WONT, TELNET_DO   },
             { TELNET_TELOPT_TTYPE,      TELNET_WILL, TELNET_DONT },
@@ -71,6 +74,8 @@ static const telnet_telopt_t telopts[] = {
   * 
   * Because of the way event handling is managed, and the class-global error and response accumulation
   * this is not thread-safe.  Any calls to this class methods should be mutex-ed.
+  * 
+  * \ingroup tty 
   */ 
 struct telnetConn
 {

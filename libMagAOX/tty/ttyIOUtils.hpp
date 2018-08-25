@@ -1,7 +1,8 @@
 /** \file ttyIOUtils.hpp
   * \brief Utilities for i/o on a file descriptor pointing to a tty device.
   * \author Jared R. Males (jaredmales@gmail.com)
-  *
+  * 
+  * \ingroup tty_files
   * History:
   * - 2018-01-15 created by JRM, starting with code imported from VisAO
   */
@@ -39,6 +40,7 @@ namespace tty
   * \returns TTY_E_SETISPEED on a cfsetispeed error.
   * \returns TTY_E_SETOSPEED on a cfsetospeed error.
   *
+  * \ingroup tty 
   */
 int ttyOpenRaw( int & fileDescrip,        ///< [out] the file descriptor.  Set to 0 on an error.
                 std::string & deviceName, ///< [in] the device path name, e.g. /dev/ttyUSB0
@@ -88,6 +90,8 @@ int ttyOpenRaw( int & fileDescrip,        ///< [out] the file descriptor.  Set t
 /**
   * \returns true if the last N chars of buffRead are equal to eot, where N is the length of eot.
   * \returns false otherwise.
+  * 
+  * \ingroup tty 
   */
 inline
 bool isEndOfTrans( const std::string & strRead, ///< [in] The read buffer to check
@@ -115,6 +119,8 @@ bool isEndOfTrans( const std::string & strRead, ///< [in] The read buffer to che
   * \returns TTY_E_ERRORONWRITEPOLL if an error is returned by poll.
   * \returns TTY_E_TIMEOUTONWRITE if a timeout occurs during the write.
   * \returns TTY_E_ERRORONWRITE if an error occurs writing to the file.
+  * 
+  * \ingroup tty 
   */
 inline
 int ttyWrite( const std::string & buffWrite, ///< [in] The characters to write to the tty.
@@ -164,6 +170,8 @@ int ttyWrite( const std::string & buffWrite, ///< [in] The characters to write t
   * \returns TTY_E_ERRORONREADPOLL if an error is returned by poll.
   * \returns TTY_E_TIMEOUTONREAD if a timeout occurs during the read.
   * \returns TTY_E_ERRORONREAD if an error occurs reading from the file.
+  * 
+  * \ingroup tty 
   */
 inline
 int ttyRead( std::string & strRead,   ///< [out] The string in which to store the output.
@@ -240,6 +248,8 @@ int ttyRead( std::string & strRead,   ///< [out] The string in which to store th
   * \returns TTY_E_ERRORONREADPOLL if an error is returned by poll.
   * \returns TTY_E_TIMEOUTONREAD if a timeout occurs during the read.
   * \returns TTY_E_ERRORONREAD if an error occurs reading from the file.
+  * 
+  * \ingroup tty 
   */
 inline
 int ttyWriteRead( std::string & strRead,        ///< [out] The string in which to store the output.

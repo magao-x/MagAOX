@@ -1,6 +1,8 @@
 /** \file usbDevice.hpp
  * \author Jared R. Males
  * \brief Manage a USB TTY device in the MagAOXApp context
+ * 
+ * \ingroup tty_files
  *
  */
 
@@ -17,6 +19,9 @@ namespace tty
 {
 
 /// A USB device as a TTY device.
+/**   
+  * \ingroup tty
+  */ 
 struct usbDevice
 {
    std::string m_idVendor;  ///< The vendor id 4-digit code

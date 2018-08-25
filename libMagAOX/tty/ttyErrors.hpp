@@ -2,6 +2,7 @@
   * \brief Error numbers for the tty utilities.
   * \author Jared R. Males (jaredmales@gmail.com)
   *
+  * \ingroup tty_files
   * History:
   * - 2018-01-17 created by JRM
   */
@@ -39,8 +40,12 @@ namespace MagAOX
 namespace tty 
 {
 
+
   
 /// Get a text explanation of a TTY_E_ error code.
+/** 
+  * \ingroup tty 
+  */ 
 inline
 std::string ttyErrorString( int ec /**< [in] the error code */ )
 {
