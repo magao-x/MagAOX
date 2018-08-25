@@ -1172,7 +1172,7 @@ void telnet_recv(telnet_t *telnet, const char *buffer,
 	/* if we have an inflate (decompression) zlib stream, use it */
 	if (telnet->z != 0 && !(telnet->flags & TELNET_PFLAG_DEFLATE)) {
 		char inflate_buffer[1024];
-		int rs;
+		
 
 		/* initialize zlib state */
 		telnet->z->next_in = (unsigned char*)buffer;
@@ -1182,7 +1182,8 @@ void telnet_recv(telnet_t *telnet, const char *buffer,
 
 		/* inflate until buffer exhausted and all output is produced */
 		while (telnet->z->avail_in > 0 || telnet->z->avail_out == 0) {
-			/* reset output buffer */
+		    int rs;
+           /* reset output buffer */
 
 			/* decompress */
 			rs = inflate(telnet->z, Z_SYNC_FLUSH);
@@ -1470,6 +1471,7 @@ int telnet_vprintf(telnet_t *telnet, const char *fmt, va_list va) {
 			_error(telnet, __LINE__, __func__, TELNET_ENOMEM, 0,
 					"malloc() failed: %s", strerror(errno));
             va_end(va2);
+            va_end(va);
 			return -1;
 		}
 		rs = vsnprintf(output, rs + 1, fmt, va2);
@@ -1539,6 +1541,8 @@ int telnet_raw_vprintf(telnet_t *telnet, const char *fmt, va_list va) {
 		if (output == 0) {
 			_error(telnet, __LINE__, __func__, TELNET_ENOMEM, 0,
 					"malloc() failed: %s", strerror(errno));
+            va_end(va);
+            va_end(va2);
 			return -1;
 		}
 		rs = vsnprintf(output, rs + 1, fmt, va2);

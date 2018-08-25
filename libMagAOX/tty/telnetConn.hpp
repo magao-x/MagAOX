@@ -501,7 +501,7 @@ int telnetConn::send(int sock, const char *buffer, size_t size)
       else if (rs == 0) 
       {
          fprintf(stderr, "send() unexpectedly returned 0\n");
-         TTY_E_ERRORONWRITE;
+         return TTY_E_ERRORONWRITE;
       }
       /* update pointer and size to see if we've got more to send */
       buffer += rs;
