@@ -205,7 +205,7 @@ static void _send(telnet_t *telnet, const char *buffer,
 	/* if we have a deflate (compression) zlib box, use it */
 	if (telnet->z != 0 && telnet->flags & TELNET_PFLAG_DEFLATE) {
 		char deflate_buffer[1024];
-		int rs;
+		
 
 		/* initialize z state */
 		telnet->z->next_in = (unsigned char *)buffer;
@@ -215,6 +215,7 @@ static void _send(telnet_t *telnet, const char *buffer,
 
 		/* deflate until buffer exhausted and all output is produced */
 		while (telnet->z->avail_in > 0 || telnet->z->avail_out == 0) {
+           int rs;
 			/* compress */
 			if ((rs = deflate(telnet->z, Z_SYNC_FLUSH)) != Z_OK) {
 				_error(telnet, __LINE__, __func__, TELNET_ECOMPRESS, 1,
@@ -921,10 +922,11 @@ void telnet_free(telnet_t *telnet) {
 static telnet_error_t _buffer_byte(telnet_t *telnet,
 		unsigned char byte) {
 	char *new_buffer;
-	size_t i;
+	
 
 	/* check if we're out of room */
 	if (telnet->buffer_pos == telnet->buffer_size) {
+       size_t i;
 		/* find the next buffer size */
 		for (i = 0; i != _buffer_sizes_count; ++i) {
 			if (_buffer_sizes[i] == telnet->buffer_size) {
@@ -1467,6 +1469,7 @@ int telnet_vprintf(telnet_t *telnet, const char *fmt, va_list va) {
 		if (output == 0) {
 			_error(telnet, __LINE__, __func__, TELNET_ENOMEM, 0,
 					"malloc() failed: %s", strerror(errno));
+            va_end(va2);
 			return -1;
 		}
 		rs = vsnprintf(output, rs + 1, fmt, va2);
