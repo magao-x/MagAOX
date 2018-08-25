@@ -27,6 +27,13 @@
 #define TTY_E_DEVNOTFOUND        (-42023)
 #define TTY_E_BADBAUDRATE        (-42030)
 
+#define TELNET_E_GETADDR            (-42040)
+#define TELNET_E_SOCKET             (-42041)
+#define TELNET_E_BIND               (-42042)
+#define TELNET_E_CONNECT            (-42043)
+#define TELNET_E_TELNETINIT         (-42044)
+#define TELNET_E_EHERROR            (-42045)
+
 namespace MagAOX 
 {
 namespace tty 
@@ -73,6 +80,19 @@ std::string ttyErrorString( int ec /**< [in] the error code */ )
          return "TTY: no matching device found";
       case TTY_E_BADBAUDRATE:
          return "TTY: bad baud rate specified";
+         
+      case TELNET_E_GETADDR:
+         return "TTY: getaddr failed";
+      case TELNET_E_SOCKET:
+         return "TTY: socket creation failed";
+      case TELNET_E_BIND:
+         return "TTY: socket bind failed";
+      case TELNET_E_CONNECT:
+         return "TTY; socket connect failed";
+      case TELNET_E_TELNETINIT:
+         return "TTY: failed to init telnet_t structure";
+      case TELNET_E_EHERROR:
+         return "TTY: error set in telnet event handler";
       default:
          return "TTY: unknown error code";
    };
