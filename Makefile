@@ -1,16 +1,18 @@
 
+libs_to_build = libtelnet
+
 apps_to_build = xindiserver trippLitePDU magAOXMaths zaberCtrl
 
 utils_to_build = logdump
 
 
-all: indi_all apps_all utils_all
+all: indi_all libs_all apps_all utils_all
 
-install: indi_install apps_install utils_install
+install: indi_install libs_install apps_install utils_install
 
-clean: lib_clean apps_clean utils_clean
+clean: lib_clean libs_clean apps_clean utils_clean
 
-all_clean: indi_clean lib_clean apps_clean utils_clean doc_clean
+all_clean: indi_clean libs_clean lib_clean apps_clean utils_clean doc_clean
 
 indi_all:
 	cd INDI; ${MAKE} all
@@ -20,6 +22,21 @@ indi_install:
 
 indi_clean:
 	cd INDI; ${MAKE} clean
+
+libs_all:
+	for lib in ${libs_to_build}; do \
+		(cd libs/$$lib; ${MAKE} )|| break; \
+	done
+
+libs_install:
+	for lib in ${libs_to_build}; do \
+		(cd libs/$$lib; ${MAKE}  install) || break; \
+	done
+
+libs_clean:
+	for lib in ${libs_to_build}; do \
+		(cd libs/$$lib; ${MAKE}  clean) || break; \
+	done
 
 lib_clean:
 	cd libMagAOX; ${MAKE} clean

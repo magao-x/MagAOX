@@ -232,6 +232,7 @@ int emitLogTypes( const std::string & fileName,
    fout.close();
 }
 
+///\todo needs to make generated directory
 int main()
 {
    typedef std::map<uint16_t, std::string> mapT;
