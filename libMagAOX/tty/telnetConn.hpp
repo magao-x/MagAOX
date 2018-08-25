@@ -208,7 +208,7 @@ int telnetConn::connect( const std::string & host,
    hints.ai_socktype = SOCK_STREAM;
    if ((rs = getaddrinfo(host.c_str(), port.c_str(), &hints, &ai)) != 0) 
    {
-      fprintf(stderr, "getaddrinfo() failed for %s: %s\n", host,
+      fprintf(stderr, "getaddrinfo() failed for %s: %s\n", host.c_str(),
       gai_strerror(rs));
       return TELNET_E_GETADDR;
    }
@@ -334,8 +334,6 @@ int telnetConn::write( const std::string & buffWrite,
       int rv = poll( &pfd, 1, timeoutCurrent);
       if( rv == 0 ) return TTY_E_TIMEOUTONWRITEPOLL;
       else if( rv < 0 ) return TTY_E_ERRORONWRITEPOLL;
-
-      static char crlf[] = { '\r', '\n' };
    
       /* if we got a CR or LF, replace with CRLF
        * NOTE that usually you'd get a CR in UNIX, but in raw
@@ -343,6 +341,8 @@ int telnetConn::write( const std::string & buffWrite,
        */
       if (buffWrite[totWritten] == '\r' || buffWrite[totWritten] == '\n') 
       {
+         static char crlf[] = { '\r', '\n' };
+
          telnet_send(m_telnet, crlf, 2);
          if(m_EHError != TTY_E_NOERROR) return m_EHError;
          totWritten+=1; //though we wrote 2
@@ -456,7 +456,6 @@ int telnetConn::writeRead( const std::string & strWrite,
 
    if(swallowEcho)
    {
-      size_t totrv = 0;
       char buffRead[TELNET_BUFFSIZE];
 
       //First swallow the echo.
@@ -489,15 +488,15 @@ int telnetConn::writeRead( const std::string & strWrite,
 inline
 int telnetConn::send(int sock, const char *buffer, size_t size) 
 {
-   int rs;
-
    /* send data */
    while (size > 0) 
    {
+      int rs;
+
       if ((rs = ::send(sock, buffer, size, 0)) == -1) 
       {
          fprintf(stderr, "send() failed: %s\n", strerror(errno));
-            TTY_E_ERRORONWRITE;
+         return TTY_E_ERRORONWRITE;
       } 
       else if (rs == 0) 
       {
@@ -518,7 +517,7 @@ void telnetConn::event_handler( telnet_t *telnet,
                                 void *user_data
                               ) 
 {
-   telnetConn * cs = (telnetConn*)user_data; 
+   telnetConn * cs = static_cast<telnetConn*>(user_data); 
    int sock = cs->m_sock;
 
    //Always reset the error at beginning.
