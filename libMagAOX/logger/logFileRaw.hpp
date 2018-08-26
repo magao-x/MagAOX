@@ -251,6 +251,7 @@ int logFileRaw::writeLog( flatlogs::bufferPtrT & data )
    if(nwr != N*sizeof(char))
    {
       std::cerr << "logFileRaw::writeLog: Error by fwrite.  At: " << __FILE__ << " " << __LINE__ << "\n";
+      std::cerr << "logFileRaw::writeLog: errno says: " << strerror(errno) << "\n";
       return -1;
    }
 
