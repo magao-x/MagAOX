@@ -49,7 +49,7 @@ OPTIMIZE ?= -O3 -fopenmp -ffast-math
 EXTRA_LDFLAGS ?=  -L$(MXLIB_LIB_PATH)
 
 #the required librarires
-EXTRA_LDLIBS ?= -lmxlib -lsofa_c -lboost_system -lboost_filesystem -ludev  $(SELF_DIR)../INDI/libcommon/libcommon.a $(SELF_DIR)../INDI/liblilxml/liblilxml.a
+EXTRA_LDLIBS ?= -lmxlib -lsofa_c -lboost_system -lboost_filesystem -ludev -ltelnet $(SELF_DIR)../INDI/libcommon/libcommon.a $(SELF_DIR)../INDI/liblilxml/liblilxml.a
 
 #Add rt on Darwin:
 ifneq ($(UNAME),Darwin)

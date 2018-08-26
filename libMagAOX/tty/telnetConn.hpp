@@ -89,7 +89,7 @@ struct telnetConn
    ///The device's password entry prompt, used for managing login.
    std::string m_passwordPrompt {"Password:"};
    
-   std::string m_prompt {"$>"}; ///< The device's prompt, used for detecting end of transmission.
+   std::string m_prompt {"$> "}; ///< The device's prompt, used for detecting end of transmission.
    
    ///Flag denoting the login state.
    /** Used to manage different behaviors in the libtelnet event handler.
@@ -138,7 +138,20 @@ struct telnetConn
               int timeoutWrite               ///< [in] The timeout in milliseconds.
             );
 
-   /// Read from a telnet connection, until the m_prompt is read.
+   /// Read from a telnet connection, until end-of-transmission string is read.
+   /**
+     * \returns TTY_E_NOERROR on success
+     * \returns TTY_E_TIMEOUTONREADPOLL if the poll times out.
+     * \returns TTY_E_ERRORONREADPOLL if an error is returned by poll.
+     * \returns TTY_E_TIMEOUTONREAD if a timeout occurs during the read.
+     * \returns TTY_E_ERRORONREAD if an error occurs reading from the file.
+     */
+   int read( const std::string & eot, ///< [in] the end-of-transmission indicator
+             int timeoutRead, ///< [in] The timeout in milliseconds.
+             bool clear=true  ///< [in] [optional] whether or not to clear the strRead buffer
+           );
+   
+   /// Read from a telnet connection, until m_prompt is read.
    /**
      * \returns TTY_E_NOERROR on success
      * \returns TTY_E_TIMEOUTONREADPOLL if the poll times out.
@@ -314,6 +327,8 @@ int telnetConn::login( const std::string & username,
          break;
       }
    }   
+   
+   return TTY_E_NOERROR;
 }
 
 inline
@@ -371,7 +386,8 @@ int telnetConn::write( const std::string & buffWrite,
 }
 
 inline
-int telnetConn::read( int timeoutRead,
+int telnetConn::read( const std::string & eot,
+                      int timeoutRead,
                       bool clear
                     )
 {
@@ -405,7 +421,7 @@ int telnetConn::read( int timeoutRead,
    telnet_recv(m_telnet, buffRead, rv);
    if(m_EHError != TTY_E_NOERROR) return m_EHError;
 
-   while( !isEndOfTrans(m_strRead, m_prompt) )
+   while( !isEndOfTrans(m_strRead, eot) )
    {
       timeoutCurrent = timeoutRead - (mx::get_curr_time()-t0)*1000;
       if(timeoutCurrent < 0) return TTY_E_TIMEOUTONREAD;
@@ -430,6 +446,14 @@ int telnetConn::read( int timeoutRead,
    return TTY_E_NOERROR;
 
 
+}
+
+inline
+int telnetConn::read( int timeoutRead,
+                      bool clear
+                    )
+{
+   return read(m_prompt, timeoutRead, clear);
 }
 
 inline
@@ -483,6 +507,8 @@ int telnetConn::writeRead( const std::string & strWrite,
       m_strRead.erase(0, strWrite.size());
    }
 
+   if(isEndOfTrans(m_strRead, m_prompt)) return TTY_E_NOERROR;
+      
    timeoutCurrent = timeoutRead - (mx::get_curr_time()-t0)*1000;
    if(timeoutCurrent < 0) return TTY_E_TIMEOUTONREAD;
 

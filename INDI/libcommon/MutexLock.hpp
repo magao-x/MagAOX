@@ -60,7 +60,8 @@ class MutexLock
     {
       int nErr = 0;
       if ( ( nErr = pthread_mutex_destroy( &m_idLock ) ) != 0 )
-        throw std::runtime_error( std::string( "MutexLock::~MutexLock: " ) + strerror( nErr ) );
+       return;
+      //throw std::runtime_error( std::string( "MutexLock::~MutexLock: " ) + strerror( nErr ) );
       //m_logMsg.clear();
       //m_logMsg << pcf::Logger::enumDebug << "pthread_mutex_destroy" << std::endl;
     }

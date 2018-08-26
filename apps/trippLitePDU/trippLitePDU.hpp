@@ -20,11 +20,18 @@ namespace app
   * \todo need to recognize signals in tty polls and not return errors, etc.
   * \todo should check if values changed and do a sendSetProperty if so (pub/sub?)
   */
-class trippLitePDU : public MagAOXApp<>, public tty::usbDevice
+class trippLitePDU : public MagAOXApp<>
 {
 
 protected:
 
+   std::string m_deviceAddr; ///< The device address
+   std::string m_devicePort; ///< The device port
+   std::string m_deviceUsername;
+   std::string m_devicePassFile;
+   
+   tty::telnetConn m_telnetConn; ///< The telnet connection manager
+        
    int m_writeTimeOut {1000};  ///< The timeout for writing to the device [msec].
    int m_readTimeOut {2000}; ///< The timeout for reading from the device [msec].
    int m_outletStateDelay {5000}; ///< The maximum time to wait for an outlet to change state [msec].
@@ -118,30 +125,31 @@ trippLitePDU::trippLitePDU() : MagAOXApp(MAGAOX_CURRENT_SHA1, MAGAOX_REPO_MODIFI
 
 void trippLitePDU::setupConfig()
 {
-   tty::usbDevice::setupConfig(config);
+   config.add("device.address", "a", "device.address", mx::argType::Required, "device", "address", false, "string", "The device address.");
+   config.add("device.port", "p", "device.port", mx::argType::Required, "device", "port", false, "string", "The device port.");
+   config.add("device.username", "u", "device.username", mx::argType::Required, "device", "username", false, "string", "The device login username.");
+   config.add("device.passfile", "", "device.passfile", mx::argType::Required, "device", "passfile", false, "string", "The device login password file (relative to secrets dir).");
 
-   config.add("timeouts.writeTimeOut", "", "writeTimeOut", mx::argType::Required, "timeouts", "writeTimeOut", false, "int", "The timeout for writing to the device [msec]. Default = 1000");
-   config.add("timeouts.readTimeOut", "", "readTimeOut", mx::argType::Required, "timeouts", "readTimeOut", false, "int", "The timeout for reading the device [msec]. Default = 2000");
-   config.add("timeouts.outletStateDelay", "", "outletStateDelay", mx::argType::Required, "timeouts", "outletStateDelay", false, "int", "The maximum time to wait for an outlet to change state [msec]. Default = 5000");
+   config.add("timeouts.write", "", "timeouts.write", mx::argType::Required, "timeouts", "write", false, "int", "The timeout for writing to the device [msec]. Default = 1000");
+   config.add("timeouts.read", "", "timeouts.read", mx::argType::Required, "timeouts", "read", false, "int", "The timeout for reading the device [msec]. Default = 2000");
+   config.add("timeouts.outletStateDelay", "", "timeouts.outletStateDelay", mx::argType::Required, "timeouts", "outletStateDelay", false, "int", "The maximum time to wait for an outlet to change state [msec]. Default = 5000");
 
 }
 
 void trippLitePDU::loadConfig()
 {
-
-   this->m_speed = B9600; //default for trippLite PDUs.  Will be overridden by any config setting.
-
-   int rv = tty::usbDevice::loadConfig(config);
-
-   if(rv != 0 && rv != TTY_E_NODEVNAMES) //Ignore error if nothing plugged in
-   {
-      log<software_error>( {__FILE__, __LINE__, rv, tty::ttyErrorString(rv)});
-   }
-
-   config(m_writeTimeOut, "timeouts.writeTimeOut");
-   config(m_readTimeOut, "timeouts.readTimeOut");
+   config(m_deviceAddr, "device.address");
+   config(m_devicePort, "device.port");
+   config(m_deviceUsername, "device.username");
+   config(m_devicePassFile, "device.passfile");
+   
+   config(m_writeTimeOut, "timeouts.write");
+   config(m_readTimeOut, "timeouts.read");
    config(m_outletStateDelay, "timeouts.outletStateDelay");
 
+   
+   
+   
 }
 
 int trippLitePDU::appStartup()
@@ -183,15 +191,8 @@ int trippLitePDU::appStartup()
    REG_INDI_PROP(m_indiOutlet8, "outlet8", pcf::IndiProperty::Text, pcf::IndiProperty::ReadWrite, pcf::IndiProperty::Idle);
    m_indiOutlet8.add (pcf::IndiElement("state"));
 
-   //Get the USB device if it's in udev
-   if(m_deviceName == "") state(stateCodes::NODEVICE);
-   else
-   {
-      state(stateCodes::NOTCONNECTED);
-      std::stringstream logs;
-      logs << "USB Device " << m_idVendor << ":" << m_idProduct << ":" << m_serial << " found in udev as " << m_deviceName;
-      log<text_log>(logs.str());
-   }
+   state(stateCodes::NOTCONNECTED);
+   
    return 0;
 }
 
@@ -209,130 +210,64 @@ int trippLitePDU::appLogic()
       return -1;
    }
 
-   if( state() == stateCodes::NODEVICE )
-   {
-      int rv = tty::usbDevice::getDeviceName();
-      if(rv < 0 && rv != TTY_E_DEVNOTFOUND && rv != TTY_E_NODEVNAMES)
-      {
-         state(stateCodes::FAILURE);
-         if(!stateLogged())
-         {
-            log<software_critical>({__FILE__, __LINE__, rv, tty::ttyErrorString(rv)});
-         }
-         return rv;
-      }
-
-      if(rv == TTY_E_DEVNOTFOUND || rv == TTY_E_NODEVNAMES)
-      {
-         state(stateCodes::NODEVICE);
-
-         if(!stateLogged())
-         {
-            std::stringstream logs;
-            logs << "USB Device " << m_idVendor << ":" << m_idProduct << ":" << m_serial << " not found in udev";
-            log<text_log>(logs.str());
-         }
-         return 0;
-      }
-      else
-      {
-         state(stateCodes::NOTCONNECTED);
-         if(!stateLogged())
-         {
-            std::stringstream logs;
-            logs << "USB Device " << m_idVendor << ":" << m_idProduct << ":" << m_serial << " found in udev as " << m_deviceName;
-            log<text_log>(logs.str());
-         }
-      }
-
-   }
 
    if( state() == stateCodes::NOTCONNECTED )
    {
-      euidCalled();
-      int rv = tty::usbDevice::connect();
-      euidReal();
-
-      if(rv == 0 && m_fileDescrip > 0)
+      std::cerr << m_deviceAddr << " " << m_devicePort << "\n";
+      int rv = m_telnetConn.connect(m_deviceAddr, m_devicePort);
+      
+      if(rv == 0)
       {
          state(stateCodes::CONNECTED);
 
          if(!stateLogged())
          {
             std::stringstream logs;
-            logs << "Connected to " << m_deviceName;
+            logs << "Connected to " << m_deviceAddr << ":" << m_devicePort;
             log<text_log>(logs.str());
          }
-
       }
       else
       {
-         state(stateCodes::FAILURE);
-         log<text_log>("Error connecting to USB device.", logPrio::LOG_CRITICAL);
-         return -1;
+         if(!stateLogged())
+         {
+            std::stringstream logs;
+            logs << "Failed to connect to " << m_deviceAddr << ":" << m_devicePort;
+            log<text_log>(logs.str());
+         }
       }
    }
 
    if( state() == stateCodes::CONNECTED )
    {
-      std::lock_guard<std::mutex> guard(m_devMutex);
-
-      std::string strRead;
-      int rv = MagAOX::tty::ttyWriteRead( strRead, "\r", "$> ", false, m_fileDescrip, m_writeTimeOut, m_readTimeOut);
-
-      if( rv == TTY_E_TIMEOUTONREADPOLL || rv == TTY_E_TIMEOUTONREAD )
+      int rv = m_telnetConn.login("localadmin", "localadmin");
+         
+      if(rv == 0)
       {
-         std::cerr << "Read timeout  . . . \n";
-         if( strRead.size() > 0 )
-         {
-            std::cerr << "-" << strRead << "\n";
-
-            if(strRead.find("Username:") != std::string::npos)
-            {
-               rv = MagAOX::tty::ttyWriteRead( strRead, "localadmin\r", ":", false, m_fileDescrip, m_writeTimeOut, m_readTimeOut);
-               std::cerr << rv << "-" << strRead << "\n";
-               MagAOX::tty::ttyWriteRead( strRead, "localadmin\r", "$> ", false, m_fileDescrip, m_writeTimeOut, m_readTimeOut);
-               std::cerr << rv << "-" << strRead << "\n";
-               //rv = MagAOX::tty::ttyWriteRead( strRead, "\r", "$> ", true, m_fileDescrip, 1000, 5000);
-               //std::cerr << rv << "-" << strRead << "\n";
-
-               if( rv == TTY_E_NOERROR )
-               {
-                  state(stateCodes::LOGGEDIN);
-               }
-               else
-               {
-                  state(stateCodes::FAILURE);
-                  log<text_log>("Login failed.", logPrio::LOG_CRITICAL);
-                  return -1;
-               }
-            }
-            else return 0; //We keep trying until we get Username:
-         }
-         else
-         {
-            state(stateCodes::FAILURE);
-            log<text_log>("No response from device. Can not connect.", logPrio::LOG_CRITICAL);
-            return -1;
-         }
+         state(stateCodes::LOGGEDIN);
       }
-      else if (rv < 0)
+      else
       {
+         std::cerr << rv << "\n";
          state(stateCodes::FAILURE);
-         log<text_log>(tty::ttyErrorString(rv), logPrio::LOG_CRITICAL);
+         log<text_log>("login failure", logPrio::LOG_CRITICAL);
          return -1;
       }
-
-      state(stateCodes::LOGGEDIN);
    }
 
    if(state() == stateCodes::LOGGEDIN)
    {
-      std::lock_guard<std::mutex> guard(m_devMutex);
-
+      int rv;
       std::string strRead;
-      int rv = MagAOX::tty::ttyWriteRead( strRead, "devstatus\r", "$> ", true, m_fileDescrip, m_writeTimeOut, m_readTimeOut);
+      //Scoping the mutex
+      {
+         std::lock_guard<std::mutex> guard(m_devMutex);
 
+         rv = m_telnetConn.writeRead("devstatus\n", true, 1000,1000);
+      
+         strRead = m_telnetConn.m_strRead;
+      }
+      
       if(rv < 0)
       {
          if(rv == TTY_E_TIMEOUTONREAD || rv == TTY_E_TIMEOUTONREADPOLL)
@@ -344,13 +279,9 @@ int trippLitePDU::appLogic()
          {
             state(stateCodes::NOTCONNECTED);
             log<text_log>(tty::ttyErrorString(rv), logPrio::LOG_ERROR);
-
             return 0;
          }
       }
-
-      //std::string statStr;
-      //float voltage, frequency, current;
 
       rv = parsePDUStatus( strRead);
 
@@ -401,12 +332,14 @@ int trippLitePDU::appLogic()
          if(m_outletStates[7] == 0) m_indiOutlet8["state"] = "Off";
          else m_indiOutlet8["state"] = "On";
          m_indiOutlet8.setState(pcf::IndiProperty::Ok);
+         m_indiDriver->sendSetProperty (m_indiOutlet8);
 
       }
       else
       {
          std::cerr << "Parse Error: " << rv << "\n";
       }
+      
       return 0;
    }
 
@@ -510,14 +443,10 @@ int trippLitePDU::changeOutletState( const pcf::IndiProperty &ipRecv,
       std::cerr << "Sending " << cmd << "\n";
 
       std::string strRead;
-      int rv = MagAOX::tty::ttyWriteRead( strRead, cmd, "$> ", true, m_fileDescrip, m_writeTimeOut, m_readTimeOut);
+      int rv = m_telnetConn.writeRead( cmd, true, m_writeTimeOut, m_readTimeOut);
 
-      std::cerr << "Received " << strRead << " (" << rv << ")\n";
-
-      std::cerr << "Waiting for confirmation...\n";
-
-      rv = MagAOX::tty::ttyRead(strRead, "\n", m_fileDescrip, m_outletStateDelay);
-
+      strRead = m_telnetConn.m_strRead;
+      
       std::cerr << "Received " << strRead << " (" << rv << ")\n";
 
       m_outletStates[onum] = 1;
@@ -538,13 +467,9 @@ int trippLitePDU::changeOutletState( const pcf::IndiProperty &ipRecv,
       std::cerr << "Sending " << cmd << "\n";
 
       std::string strRead;
-      int rv = MagAOX::tty::ttyWriteRead( strRead, cmd, "$> ", true, m_fileDescrip, m_writeTimeOut, m_readTimeOut);
-      std::cerr << "Received " << strRead << " (" << rv << ")\n";
-
-      std::cerr << "Waiting for confirmation...\n";
-
-      rv = MagAOX::tty::ttyRead(strRead, "\n", m_fileDescrip, m_outletStateDelay);
-
+      int rv = m_telnetConn.writeRead( cmd, true, m_writeTimeOut, m_readTimeOut);
+      strRead = m_telnetConn.m_strRead;
+      
       std::cerr << "Received " << strRead << " (" << rv << ")\n";
 
       m_outletStates[onum] = 0;
