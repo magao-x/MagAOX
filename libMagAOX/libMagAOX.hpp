@@ -30,6 +30,7 @@
 #include "tty/ttyIOUtils.hpp"
 #include "tty/ttyUSB.hpp"
 #include "tty/usbDevice.hpp"
+#include "tty/telnetConn.hpp"
 
 #include "netcom/tunneledHost.hpp"
 
