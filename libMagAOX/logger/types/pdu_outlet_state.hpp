@@ -54,7 +54,7 @@ struct pdu_outlet_state : public flatbuffer_log
       auto rgs = GetPdu_outlet_state_fb(msgBuffer);
       
       std::stringstream s;
-      s << "Outlet: " << app::stateCodes::codeText(rgs->outlet()) << " ";
+      s << "Outlet: " << rgs->outlet() << " ";
       if(rgs->state())
       {
          s << "ON";

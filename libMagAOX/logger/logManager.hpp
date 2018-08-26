@@ -82,6 +82,7 @@ struct logManager : public logFileT
 
    int m_logThreadPrio {0};
 
+   bool m_logThreadRunning {false};
    //<--end of todo
 
    /// Default c'tor.
@@ -133,6 +134,11 @@ struct logManager : public logFileT
      */
    int logThreadPrio();
 
+   /// Get status of the log thread running flag 
+   /** \returns the current value of m_logThreadRunning 
+     */
+   bool logThreadRunning();
+   
    ///Setup an application configurator for the logger section
    int setupConfig( mx::appConfigurator & config /**< [in] an application configuration to setup */);
 
@@ -281,6 +287,12 @@ int logManager<logFileT>::logThreadPrio()
 }
 
 template<class logFileT>
+bool logManager<logFileT>::logThreadRunning()
+{
+   return m_logThreadRunning;
+}
+
+template<class logFileT>
 int logManager<logFileT>::setupConfig( mx::appConfigurator & config )
 {
    config.add("logger.logDir","L", "logDir",mx::argType::Required, "logger", "logDir", false, "string", "The directory for log files");
@@ -385,6 +397,8 @@ template<class logFileT>
 void logManager<logFileT>::logThreadExec()
 {
 
+   m_logThreadRunning = true;
+   
    std::unique_lock<std::mutex> lock(m_qMutex, std::defer_lock);
 
    while(!m_logShutdown || !m_logQueue.empty())
@@ -405,8 +419,12 @@ void logManager<logFileT>::logThreadExec()
          while( it != end )
          {
             //m_logFile.
-            this->writeLog( *it );
-
+            if( this->writeLog( *it ) < 0) 
+            {
+               m_logThreadRunning = false;
+               return;
+            }
+            
             er = it;
             ++it;
 
@@ -424,6 +442,7 @@ void logManager<logFileT>::logThreadExec()
       if(m_logQueue.empty() && !m_logShutdown) std::this_thread::sleep_for( std::chrono::duration<unsigned long, std::nano>(m_writePause));
    }
 
+   m_logThreadRunning = false;
 }
 
 template<class logFileT>

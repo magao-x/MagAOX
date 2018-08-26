@@ -10,8 +10,10 @@ all: indi_all libs_all apps_all utils_all
 
 install: indi_install libs_install apps_install utils_install
 
-clean: lib_clean libs_clean apps_clean utils_clean
+#We clean just libMagAOX, and the apps and utils for normal devel work.
+clean: lib_clean apps_clean utils_clean
 
+#Clean everything.
 all_clean: indi_clean libs_clean lib_clean apps_clean utils_clean doc_clean
 
 indi_all:

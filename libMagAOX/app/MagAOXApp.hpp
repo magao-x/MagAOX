@@ -338,7 +338,7 @@ public:
      */
    void state(const stateCodes::stateCodeT & s /**< [in] The new application state */);
 
-   /// Updates and returns the value of m_stateLogged.  Will be 0 on first call after a state change, \>0 afterwords.
+   /// Updates and returns the value of m_stateLogged.  Will be 0 on first call after a state change, \>0 afterwards.
    /** This method exists to facilitate logging the reason for a state change once, but not
      * logging it on subsequent event loops.  Returns the current value upon entry, but updates
      * before returning so that the next call returns the incremented value.  Example usage:
@@ -583,7 +583,7 @@ void MagAOXApp<_useINDI>::setDefaults( int argc,
       log<text_log>("Application name (-n --name) not set.  Using argv[0].");
    }
 
-   //We use mx::application's configPathLocal for this components config file
+   //We use mx::application's configPathLocal for this component's config file
    configPathLocal = configDir + "/" + m_configName + ".conf";
 
    //Now we can setup common INDI properties
@@ -639,9 +639,23 @@ int MagAOXApp<_useINDI>::execute() //virtual
       return -1;
    }
 
-   //Begin the logger
+   //----------------------------------------//
+   //        Begin the logger
+   //----------------------------------------//
    m_log.logThreadStart();
 
+   //Sleep for 500 msec to make sure log thread has time to get started and try to open a file.
+   std::this_thread::sleep_for( std::chrono::duration<unsigned long, std::nano>(500000));
+   
+   //Verify that log thread is still running.
+   if(m_log.logThreadRunning() == false)
+   {
+      //We don't log this, because it won't be logged anyway.
+      std::cerr << "\nCRITICAL: log thread not running.  Exiting.\n\n";
+      m_shutdown = 1;
+   }
+   //----------------------------------------//
+      
    setSigTermHandler();
 
    if( m_shutdown == 0 )
@@ -668,9 +682,7 @@ int MagAOXApp<_useINDI>::execute() //virtual
       /** \todo Need a heartbeat update here.
         */
 
-      /** \todo Check of log thread is still running
-        */
-
+      
       //Pause loop unless shutdown is set
       if( m_shutdown == 0)
       {
@@ -1254,6 +1266,7 @@ int MagAOXApp<_useINDI>::startINDI()
 template<bool _useINDI>
 void MagAOXApp<_useINDI>::handleGetProperties( const pcf::IndiProperty &ipRecv )
 {
+   if(!m_useINDI) return;
    if(m_indiDriver == nullptr) return;
 
    //Ignore if not our device
@@ -1285,6 +1298,7 @@ void MagAOXApp<_useINDI>::handleGetProperties( const pcf::IndiProperty &ipRecv )
 template<bool _useINDI>
 void MagAOXApp<_useINDI>::handleNewProperty( const pcf::IndiProperty &ipRecv )
 {
+   if(!m_useINDI) return;
    if(m_indiDriver == nullptr) return;
 
    int (*newCallBack)(void *, const pcf::IndiProperty &) = m_indiCallBacks[ ipRecv.getName() ].newCallBack;

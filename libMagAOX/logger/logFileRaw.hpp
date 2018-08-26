@@ -243,7 +243,7 @@ int logFileRaw::writeLog( flatlogs::bufferPtrT & data )
    if(m_currFileSize + N > m_maxLogSize || m_fout == 0)
    {
       flatlogs::timespecX ts = flatlogs::logHeader::timespec(data);
-      createFile(ts);
+      if( createFile(ts) < 0 ) return -1;
    }
 
    size_t nwr = fwrite( data.get(), sizeof(char), N, m_fout);
@@ -286,12 +286,14 @@ int logFileRaw::createFile(flatlogs::timespecX & ts)
 
    if(m_fout) fclose(m_fout);
 
+   errno = 0;
    ///\todo handle case where file exists (only if another instance tries at same ns -- pathological)
    m_fout = fopen(fname.c_str(), "wb");
 
    if(m_fout == 0)
    {
-      std::cerr << "logFileRaw::createFile: Error by fopen.  At: " << __FILE__ << " " << __LINE__ << "\n";
+      std::cerr << "logFileRaw::createFile: Error by fopen. At: " << __FILE__ << " " << __LINE__ << "\n";
+      std::cerr << "logFileRaw::createFile: errno says: " << strerror(errno) << "\n";
       std::cerr << "logFileRaw::createFile: fname = " << fname << "\n";
       return -1;
    }

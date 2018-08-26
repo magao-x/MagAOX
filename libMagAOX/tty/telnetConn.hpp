@@ -564,7 +564,7 @@ void telnetConn::event_handler( telnet_t *telnet,
          
          char * buf = const_cast<char *>(ev->data.buffer);
          buf[ev->data.size] = 0;
-         for(int i=0; i<ev->data.size; ++i)
+         for(size_t i=0; i<ev->data.size; ++i)
          {
             if(ev->data.buffer[i] < 20)
             {
