@@ -52,6 +52,8 @@ public:
    bool good(){ return m_good;}
 
    // override callbacks
+   virtual void handleDefProperty( const pcf::IndiProperty &ipRecv );
+   
    virtual void handleGetProperties( const pcf::IndiProperty &ipRecv );
 
    virtual void handleNewProperty( const pcf::IndiProperty &ipRecv );
@@ -93,6 +95,11 @@ indiDriver<parentT>::indiDriver ( parentT * parent,
 }
 
 
+template<class parentT>
+void indiDriver<parentT>::handleDefProperty( const pcf::IndiProperty &ipRecv )
+{
+   if(m_parent) m_parent->handleDefProperty(ipRecv);
+}
 
 template<class parentT>
 void indiDriver<parentT>::handleGetProperties( const pcf::IndiProperty &ipRecv )

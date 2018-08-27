@@ -382,15 +382,22 @@ protected:
    struct indiCallBack
    {
       pcf::IndiProperty * property {0}; ///< A pointer to an INDI property.
-      int (*callBack)( void *, const pcf::IndiProperty &) {0}; ///< The function to call for a new property request.
+      int (*callBack)( void *, const pcf::IndiProperty &) {0}; ///< The function to call for a new or set property.
+      bool m_defReceived {false}; ///< Flag indicating that a DefProperty has been received after a GetProperty.
    };
 
    ///Map to hold the NewProperty indiCallBacks for this App, with fast lookup by property name.
+   /** The key for these is the property name.
+     */
    std::unordered_map< std::string, indiCallBack> m_indiNewCallBacks;
 
    ///Map to hold the SetProperty indiCallBacks for this App, with fast lookup by property name.
+   /** The key for these is device.name
+     */
    std::unordered_map< std::string, indiCallBack> m_indiSetCallBacks;
    
+   ///Flat indicating that all registered Set properties have been updated since last Get.
+   bool m_allDefsReceived {false};
    
    ///Value type of the indiCallBack map.
    typedef std::pair<std::string, indiCallBack> callBackValueType;
@@ -455,6 +462,15 @@ protected:
    int startINDI();
 
 public:
+   
+   void sendGetPropertySetList(bool all=false);
+   
+   /// Handler for the DEF INDI properties notification
+   /** Uses the properties registered in m_indiSetCallBacks to process the notification.  This is called by
+     * m_indiDriver's indiDriver::handleDefProperties.
+     */
+   void handleDefProperty( const pcf::IndiProperty &ipRecv /**< [in] The property being sent. */ );
+   
    /// Handler for the get INDI properties request
    /** Uses the properties registered in m_indiCallBacks to respond to the request.  This is called by
      * m_indiDriver's indiDriver::handleGetProperties.
@@ -483,7 +499,7 @@ public:
 protected:
 
    ///indi Property to report the application state.
-   pcf::IndiProperty indiP_state;
+   pcf::IndiProperty m_indiP_state;
 
    ///@} --INDI Interface
 
@@ -620,8 +636,8 @@ void MagAOXApp<_useINDI>::setDefaults( int argc,
    configPathLocal = configDir + "/" + m_configName + ".conf";
 
    //Now we can setup common INDI properties
-   REG_INDI_NEWPROP_NOCB(indiP_state, "state", pcf::IndiProperty::Number, pcf::IndiProperty::ReadOnly, pcf::IndiProperty::Idle);
-   indiP_state.add (pcf::IndiElement("current"));
+   REG_INDI_NEWPROP_NOCB(m_indiP_state, "state", pcf::IndiProperty::Number, pcf::IndiProperty::ReadOnly, pcf::IndiProperty::Idle);
+   m_indiP_state.add (pcf::IndiElement("current"));
 
 
    return;
@@ -726,7 +742,15 @@ int MagAOXApp<_useINDI>::execute() //virtual
       /** \todo Need a heartbeat update here.
         */
 
-
+      if(m_useINDI)
+      {
+         //Checkup on the INDI properties we're monitoring.
+         //This will make sure we are up-to-date if indiserver restarts without us.
+         //And handles cases where we miss a Def becuase the other driver wasn't started up
+         //when we sent our Get.
+         sendGetPropertySetList(false); //Only does anything if it needs to be done.
+      }
+      
       //Pause loop unless shutdown is set
       if( m_shutdown == 0)
       {
@@ -1130,9 +1154,9 @@ void MagAOXApp<_useINDI>::state(const stateCodes::stateCodeT & s)
 
    //And we keep INDI up to date
    std::lock_guard<std::mutex> guard(m_indiMutex);  //Lock the mutex before conducting INDI communications.
-   indiP_state["current"] = s;
-   indiP_state.setState (pcf::IndiProperty::Ok);
-   if(m_indiDriver) m_indiDriver->sendSetProperty (indiP_state);
+   m_indiP_state["current"] = s;
+   m_indiP_state.setState (pcf::IndiProperty::Ok);
+   if(m_indiDriver) m_indiDriver->sendSetProperty (m_indiP_state);
 }
 
 template<bool _useINDI>
@@ -1326,8 +1350,44 @@ int MagAOXApp<_useINDI>::startINDI()
    //======= Now we start talkin'
    m_indiDriver->activate();
    log<indidriver_start>();
+   
+   sendGetPropertySetList();
 
    return 0;
+}
+
+template<bool _useINDI>
+void MagAOXApp<_useINDI>::sendGetPropertySetList(bool all)
+{
+   //Unless forced by all, we only do anything if allDefs are not received yet
+   if(!all && m_allDefsReceived) return;
+   
+   callBackIterator it = m_indiSetCallBacks.begin();
+
+   int nowFalse = 0;
+   while(it != m_indiSetCallBacks.end() )
+   {
+      if(all || it->second.m_defReceived == false)
+      {
+         if( it->second.property )
+         {
+            m_indiDriver->sendGetProperties( *(it->second.property) );
+         }
+         
+         it->second.m_defReceived = false;
+         ++nowFalse;
+         
+      }
+      ++it;
+   }
+   if(nowFalse != 0) m_allDefsReceived = false;
+   if(nowFalse == 0) m_allDefsReceived = true;
+}
+      
+template<bool _useINDI>
+void MagAOXApp<_useINDI>::handleDefProperty( const pcf::IndiProperty &ipRecv )
+{
+   handleSetProperty(ipRecv); //We have the same response to both Def and Set.
 }
 
 template<bool _useINDI>
@@ -1342,13 +1402,9 @@ void MagAOXApp<_useINDI>::handleGetProperties( const pcf::IndiProperty &ipRecv )
       return;
    }
 
-   std::cerr << "GetProperties\n";
    //Send all properties if requested.
-   //This is a possible INDI server restart, so we re-register for all notifications.
    if( !ipRecv.hasValidName() )
    {
-      std::cerr << "GetProperties -- ALL\n";
-
       callBackIterator it = m_indiNewCallBacks.begin();
 
       while(it != m_indiNewCallBacks.end() )
@@ -1359,21 +1415,14 @@ void MagAOXApp<_useINDI>::handleGetProperties( const pcf::IndiProperty &ipRecv )
          }
          ++it;
       }
+
+      //This is a possible INDI server restart, so we re-register for all notifications.
+      sendGetPropertySetList(true);
       
-      it = m_indiSetCallBacks.begin();
-
-      while(it != m_indiSetCallBacks.end() )
-      {
-         if( it->second.property )
-         {
-            m_indiDriver->sendGetProperties( *(it->second.property) );
-         }
-         ++it;
-      }
-
       return;
    }
 
+   //Check if we actually have this.
    if( m_indiNewCallBacks.count(ipRecv.getName()) == 0) 
    {
       std::stringstream s;
@@ -1382,9 +1431,11 @@ void MagAOXApp<_useINDI>::handleGetProperties( const pcf::IndiProperty &ipRecv )
       return;
    }
    
-   //Otherwise send just the requested property.
-   m_indiDriver->sendDefProperty( *(m_indiNewCallBacks[ ipRecv.getName() ].property) );
-
+   //Otherwise send just the requested property, if property is not null
+   if(m_indiNewCallBacks[ ipRecv.getName() ].property)
+   {
+      m_indiDriver->sendDefProperty( *(m_indiNewCallBacks[ ipRecv.getName() ].property) );
+   }
    return;
 }
 
@@ -1416,14 +1467,14 @@ void MagAOXApp<_useINDI>::handleSetProperty( const pcf::IndiProperty &ipRecv )
    if(!m_useINDI) return;
    if(m_indiDriver == nullptr) return;
 
-   std::cerr << "Got SetProperty\n";
-   std::cerr << ipRecv.getDevice() << "\n";
-
    std::string key = ipRecv.getDevice() + "." + ipRecv.getName();
    
    //Check if this is valid
    if( m_indiSetCallBacks.count(key) > 0 )
    {
+      m_indiSetCallBacks[ key ].m_defReceived = true; //record that we got this Def/Set 
+      
+      //And call the callback
       int (*callBack)(void *, const pcf::IndiProperty &) = m_indiSetCallBacks[ key ].callBack;
       if(callBack) callBack( this, ipRecv);
       
