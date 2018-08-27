@@ -53,7 +53,19 @@ namespace MagAOX
    /// Do any needed shutdown tasks.  Currently nothing in this app.
          virtual int appShutdown();
 
+         int findCPUTemperatures(std::vector<int>);
+         int parseCPUTemperatures(std::string, std::vector<int>); //done
          int criticalCoreTemperature(std::vector<int>);
+         int findCPULoads();
+         double parseCPULoads(std::string);
+         int findDiskTemperature();
+         int parseDiskTemperature(std::string);
+         int criticalDiskTemperature(int);
+         int findDiskUsage();
+         int parseDiskUsage(std::string);
+         int findRamUsage();
+         double parseRamUsage(std::string);
+
 
       };
 
@@ -79,85 +91,18 @@ namespace MagAOX
 
       int sysMonitor::appLogic()
       {
-         std::vector<int> coreTemps = findCoreTemps();
+         std::vector<int> coreTemps;
+         int CPUTempMeasurement = findCPUTemperatures(coreTemps);
          criticalCoreTemperature(coreTemps);
+         int CPULoad = findCPULoads();
 
          int diskTemp = findDiskTemperature();
+         std::cout << diskTemp << std::endl;
          criticalDiskTemperature(diskTemp);
-
          int diskUsage = findDiskUsage();
 
-
+         int ramUsage = findRamUsage();
          
-
-         
-         // For ram usage
-         strcpy( command, "free -m > /dev/shm/ramusage" );
-         rv = system(command);
-         if(rv == -1) //system call error
-         {
-            //handle error
-            std::cerr << "There's been an error with the system command" << std::endl;
-            return 1;
-         }
-
-         std::ifstream inFile4;
-         inFile4.open("/dev/shm/ramusage");
-         if (!inFile4) 
-         {
-            std::cerr << "Unable to open file" << std::endl;
-            return 1;
-         }
-         
-         // Want second line
-         getline (inFile4,line);
-         getline (inFile4,line);
-         std::istringstream iss3(line);
-         std::vector<std::string> tokens3{std::istream_iterator<std::string>{iss3},std::istream_iterator<std::string>{}};
-         double ram_usage = std::stod (tokens3[2]);
-         double ram_total = std::stod (tokens3[1]);
-         double ram_usage_percent = ram_usage/ram_total;
-         std::cout << ram_usage_percent << std::endl;
-
-         // For cpu load
-         strcpy( command, "mpstat -P ALL > /dev/shm/cpuload" );
-         rv = system(command);
-         if(rv == -1) //system call error
-         {
-            //handle error
-            std::cerr << "There's been an error with the system command" << std::endl;
-            return 1;
-         }
-
-         std::ifstream inFile5;
-         inFile5.open("/dev/shm/cpuload");
-         if (!inFile5) 
-         {
-            std::cerr << "Unable to open file" << std::endl;
-            return 1;
-         }
-         std::vector<double> cpu_core_loads;
-         int cores = 0;
-         // Want to start at third line
-         getline (inFile5,line);
-         getline (inFile5,line);
-         getline (inFile5,line);
-         getline (inFile5,line);
-         while (getline (inFile5,line)) 
-         {
-            //std::cout << line << std::endl;
-            cores++;
-            std::istringstream iss4(line);
-            std::vector<std::string> tokens4{std::istream_iterator<std::string>{iss4},std::istream_iterator<std::string>{}};
-            //std::cout << tokens4[12] << std::endl;
-            double cpu_load = 100.0 - std::stod (tokens4[12]);
-            cpu_load /= 100;
-            cpu_core_loads.push_back(cpu_load);
-            std::cout << "core load " << cpu_load << std::endl;
-         }
-         
-
-
          return 0;
       }
 
@@ -167,36 +112,7 @@ namespace MagAOX
          return 0;
       }
 
-      int sysMonitor::findDiskUsage() {
-         // For disk usage
-         strcpy( command, "df > /dev/shm/diskusage" );
-         rv = system(command);
-         if(rv == -1) //system call error
-         {
-            //handle error
-            std::cerr << "There's been an error with the system command" << std::endl;
-            return 1;
-         }
-
-         std::ifstream inFile3;
-         inFile3.open("/dev/shm/diskusage");
-         if (!inFile3) 
-         {
-            std::cerr << "Unable to open file" << std::endl;
-            return 1;
-         }
-         
-         // Want second line
-         getline (inFile3,line);
-         getline (inFile3,line);
-         std::istringstream iss2(line);
-         std::vector<std::string> tokens2{std::istream_iterator<std::string>{iss2},std::istream_iterator<std::string>{}};
-         tokens2[4].pop_back();
-         double disk_usage = std::stod (tokens2[4]);
-         std::cout << disk_usage << std::endl;
-      }
-
-      std::vector<int> sysMonitor::findCoreTemperature() {
+      int sysMonitor::findCPUTemperatures(std::vector<int> temps) {
          char command[35];
          std::string line;
 
@@ -218,20 +134,26 @@ namespace MagAOX
             std::cerr << "Unable to open file" << std::endl;
             return 1;
          }
-         std::vector<int> temps;
          while (getline (inFile,line)) 
          {
-            std::string str = line.substr(0, 5);
-            if (str.compare("Core ") == 0) 
-            {
-               std::string temp_str = line.substr(17, 4);
-               double temp = std::stod (temp_str);
-
-               temps.push_back(temp);
-               std::cout << temp << std::endl;
-            }
+            int rv = parseCPUTemperatures(line, temps);
          }
-         return temps;
+         return 0;
+      }
+
+      int sysMonitor::parseCPUTemperatures(std::string line, std::vector<int> temps) {
+      	std::string str = line.substr(0, 5);
+        if (str.compare("Core ") == 0) 
+        {
+        	std::string temp_str = line.substr(17, 4);
+            double temp = std::stod (temp_str);
+			temps.push_back(temp);
+            //std::cout << temp << std::endl;
+        }
+        else 
+        {
+        	return 0;
+        }
       }
 
       int sysMonitor::criticalCoreTemperature(std::vector<int> temps)
@@ -251,6 +173,52 @@ namespace MagAOX
          }
       }
 
+      int sysMonitor::findCPULoads() {
+         char command[35];
+         std::string line;
+         // For cpu load
+         strcpy( command, "mpstat -P ALL > /dev/shm/cpuload" );
+         int rv = system(command);
+         if(rv == -1) //system call error
+         {
+            //handle error
+            std::cerr << "There's been an error with the system command" << std::endl;
+            return 1;
+         }
+
+         std::ifstream inFile5;
+         inFile5.open("/dev/shm/cpuload");
+         if (!inFile5) 
+         {
+            std::cerr << "Unable to open file" << std::endl;
+            return 1;
+         }
+         std::vector<double> cpu_core_loads; double cpu_load;
+         int cores = 0;
+         // Want to start at third line
+         getline (inFile5,line);
+         getline (inFile5,line);
+         getline (inFile5,line);
+         getline (inFile5,line);
+         while (getline (inFile5,line)) 
+         {
+            cores++;
+            cpu_load = parseCPULoads(line);
+            cpu_core_loads.push_back(cpu_load);
+         }
+         return (int)cpu_load;
+      }
+
+      double sysMonitor::parseCPULoads(std::string line)
+      {
+      	std::istringstream iss4(line);
+        std::vector<std::string> tokens4{std::istream_iterator<std::string>{iss4},std::istream_iterator<std::string>{}};
+        double cpu_load = 100.0 - std::stod (tokens4[12]);
+        cpu_load /= 100;
+        //std::cout << "core load " << cpu_load << std::endl;
+        return cpu_load;
+      }
+
       int sysMonitor::findDiskTemperature() {
          char command[35];
          std::string line;
@@ -262,7 +230,7 @@ namespace MagAOX
          // Check install with rpm -q -a | grep -i hddtemp
          //
          strcpy( command, "hddtemp > /dev/shm/hddtemp" );
-         rv = system(command);
+         int rv = system(command);
          if(rv == -1) //system call error
          {
             //handle error
@@ -278,20 +246,28 @@ namespace MagAOX
             return 1;
          }
          
+         double hdd_temp = 0;
          getline (inFile2,line);
-         std::istringstream iss(line);
-         std::vector<std::string> tokens{std::istream_iterator<std::string>{iss},std::istream_iterator<std::string>{}};
-         for(std::vector<std::string>::iterator it = tokens.begin(); it != tokens.end(); ++it) 
-         {
-            std::string temp_s = *it;
-            if (isdigit(temp_s.at(0)) && temp_s.substr(temp_s.length() - 1, 1) == "C") 
+         hdd_temp = parseDiskTemperature(line);
+         //std::cout << hdd_temp << std::endl;
+         return (int) hdd_temp;
+      }
+
+      int sysMonitor::parseDiskTemperature(std::string line) {
+      	double hdd_temp;
+      	std::istringstream iss(line);
+        std::vector<std::string> tokens{std::istream_iterator<std::string>{iss},std::istream_iterator<std::string>{}};
+        for(std::vector<std::string>::iterator it = tokens.begin(); it != tokens.end(); ++it) 
+        {
+        	std::string temp_s = *it;
+          	if (isdigit(temp_s.at(0)) && temp_s.substr(temp_s.length() - 1, 1) == "C") 
             {
                temp_s.pop_back();
                temp_s.pop_back();
-               double hdd_temp = std::stod (temp_s);
-               std::cout << hdd_temp << std::endl;
+               hdd_temp = std::stod (temp_s);
             }
          }
+         return hdd_temp;
       }
 
       int sysMonitor::criticalDiskTemperature(int temp)
@@ -302,8 +278,86 @@ namespace MagAOX
          }
          else if (temp >= criticalTempValue) 
          {   
-            std::cout << "Critical temperature for Dore " << std::endl;
+            std::cout << "Critical temperature for Disk " << std::endl;
          }
+      }
+
+      int sysMonitor::findDiskUsage() {
+         char command[35];
+         std::string line;
+         // For disk usage
+         strcpy( command, "df > /dev/shm/diskusage" );
+         int rv = system(command);
+         if(rv == -1) //system call error
+         {
+            //handle error
+            std::cerr << "There's been an error with the system command" << std::endl;
+            return 1;
+         }
+
+         std::ifstream inFile3;
+         inFile3.open("/dev/shm/diskusage");
+         if (!inFile3) 
+         {
+            std::cerr << "Unable to open file" << std::endl;
+            return 1;
+         }
+         
+         // Want second line
+         getline (inFile3,line);
+         getline (inFile3,line);
+         double disk_usage = parseDiskUsage(line);
+         
+         return disk_usage;
+      }
+
+      int sysMonitor::parseDiskUsage(std::string line) 
+      {
+      	std::istringstream iss2(line);
+        std::vector<std::string> tokens2{std::istream_iterator<std::string>{iss2},std::istream_iterator<std::string>{}};
+        tokens2[4].pop_back();
+        double disk_usage = std::stod (tokens2[4]);
+        //std::cout << disk_usage << std::endl;
+        return disk_usage;
+      }
+
+      int sysMonitor::findRamUsage() {
+         char command[35];
+         std::string line;
+          // For ram usage
+         strcpy( command, "free -m > /dev/shm/ramusage" );
+         int rv = system(command);
+         if(rv == -1) //system call error
+         {
+            //handle error
+            std::cerr << "There's been an error with the system command" << std::endl;
+            return 1;
+         }
+
+         std::ifstream inFile4;
+         inFile4.open("/dev/shm/ramusage");
+         if (!inFile4) 
+         {
+            std::cerr << "Unable to open file" << std::endl;
+            return 1;
+         }
+         
+         // Want second line
+         getline (inFile4,line);
+         getline (inFile4,line);
+         double ram_usage_percent = parseRamUsage(line);
+         //std::cout << ram_usage_percent << std::endl;
+         return ram_usage_percent;
+      }
+
+      double sysMonitor::parseRamUsage(std::string line) 
+      {
+      	std::istringstream iss3(line);
+        std::vector<std::string> tokens3{std::istream_iterator<std::string>{iss3},std::istream_iterator<std::string>{}};
+        double ram_usage = std::stod (tokens3[2]);
+        double ram_total = std::stod (tokens3[1]);
+        double ram_usage_percent = ram_usage/ram_total;
+        return ram_usage_percent;
       }
 
    } //namespace app
