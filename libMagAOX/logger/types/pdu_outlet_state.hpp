@@ -3,7 +3,7 @@
   * \author Jared R. Males (jaredmales@gmail.com)
   *
   * \ingroup logger_types_files
-  * 
+  *
   * History:
   * - 2018-08-18 created by JRM
   */
@@ -34,7 +34,7 @@ struct pdu_outlet_state : public flatbuffer_log
    struct messageT : public fbMessage
    {
       messageT( uint8_t outlet,
-                uint8_t state 
+                uint8_t state
               )
       {
          auto gs = CreatePdu_outlet_state_fb(builder, outlet, state);
@@ -50,11 +50,11 @@ struct pdu_outlet_state : public flatbuffer_log
    static std::string msgString(void * msgBuffer, flatlogs::msgLenT len)
    {
       static_cast<void>(len);
-      
+
       auto rgs = GetPdu_outlet_state_fb(msgBuffer);
-      
+
       std::stringstream s;
-      s << "Outlet: " << rgs->outlet() << " ";
+      s << "Outlet: " << (int) rgs->outlet() << " ";
       if(rgs->state())
       {
          s << "ON";
@@ -63,7 +63,7 @@ struct pdu_outlet_state : public flatbuffer_log
       {
          s << "OFF";
       }
-      
+
       return s.str();
    }
 };

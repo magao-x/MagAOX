@@ -56,6 +56,8 @@ public:
 
    virtual void handleNewProperty( const pcf::IndiProperty &ipRecv );
 
+   virtual void handleSetProperty( const pcf::IndiProperty &ipRecv );
+
    virtual void execute(void);
 
 };
@@ -102,6 +104,12 @@ template<class parentT>
 void indiDriver<parentT>::handleNewProperty( const pcf::IndiProperty &ipRecv )
 {
    if(m_parent) m_parent->handleNewProperty(ipRecv);
+}
+
+template<class parentT>
+void indiDriver<parentT>::handleSetProperty( const pcf::IndiProperty &ipRecv )
+{
+   if(m_parent) m_parent->handleSetProperty(ipRecv);
 }
 
 template<class parentT>

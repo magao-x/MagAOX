@@ -70,10 +70,10 @@ class MagAOXApp : public mx::application
 {
 
 public:
-   
+
    ///The log manager type.
    typedef logger::logManager<logFileRaw> logManagerT;
-   
+
 protected:
 
    std::string MagAOXPath; ///< The base path of the MagAO-X system.
@@ -161,18 +161,18 @@ public:
      */
 
    /// Any tasks to perform prior to the main event loop go here.
-   /** This is called after signal handling is installed.  FSM state is 
+   /** This is called after signal handling is installed.  FSM state is
      * stateCodes::INITIALIZED when this is called.
-     * 
+     *
      * Set m_shutdown = 1 on any fatal errors here.
      */
    virtual int appStartup() = 0;
 
    /// This is where derived applications implement their main FSM logic.
    /** This will be called every loopPause nanoseconds until the application terminates.
-     * 
+     *
      * FSM state will be whatever it is on exti from appStartup.
-     * 
+     *
      * Should return -1 on an any unrecoverable errors which will caues app to terminate.  Could also set m_shutdown=1.
      * Return 0 on success, or at least intent to continue.
      *
@@ -361,11 +361,15 @@ public:
 
    /** \name INDI Interface
      *
+     * For reference: "Get" and "New" refer to properties we own. "Set" refers to properties owned by others.
+     * So we respond to GetProperties by listing our own properties, and NewProperty is a request to change
+     * a property we own.  Whereas SetProperty is a notification that someone else has changed a property.
+     * 
      * @{
      */
 protected:
 
-   ///Flag controlling whether INDI is used.  If false, then no INDI code executes.
+   ///Flag controlling whether INDI is used.  If false, then no INDI code ipRecv.getName()executes.
    constexpr static bool m_useINDI = _useINDI;
 
    ///The INDI driver wrapper.  Constructed and initialized by execute, which starts and stops communications.
@@ -378,12 +382,16 @@ protected:
    struct indiCallBack
    {
       pcf::IndiProperty * property {0}; ///< A pointer to an INDI property.
-      int (*newCallBack)( void *, const pcf::IndiProperty &) {0}; ///< The function to call for a new property request.
+      int (*callBack)( void *, const pcf::IndiProperty &) {0}; ///< The function to call for a new property request.
    };
 
-   ///Map to hold the indiCallBacks for this App, with fast lookup by property name.
-   std::unordered_map< std::string, indiCallBack> m_indiCallBacks;
+   ///Map to hold the NewProperty indiCallBacks for this App, with fast lookup by property name.
+   std::unordered_map< std::string, indiCallBack> m_indiNewCallBacks;
 
+   ///Map to hold the SetProperty indiCallBacks for this App, with fast lookup by property name.
+   std::unordered_map< std::string, indiCallBack> m_indiSetCallBacks;
+   
+   
    ///Value type of the indiCallBack map.
    typedef std::pair<std::string, indiCallBack> callBackValueType;
 
@@ -399,7 +407,7 @@ protected:
    ///Full path name of the INDI driver output FIFO.
    std::string m_driverOutName;
 
-   /// Register an INDI property.
+   /// Register an INDI property which is exposed for others to request a New Property for.
    /**
      *
      * \returns 0 on success.
@@ -409,14 +417,30 @@ protected:
      * \todo needs exception handling
      * \todo is a failure to register a FATAL error?
      */
-   int registerIndiProperty( pcf::IndiProperty & prop,                               ///< [out] the property to register
-                             const std::string & propName,                           ///< [in] the name of the property
-                             const pcf::IndiProperty::Type & propType,               ///< [in] the type of the property
-                             const pcf::IndiProperty::PropertyPermType & propPerm,   ///< [in] the permissions of the property
-                             const pcf::IndiProperty::PropertyStateType & propState, ///< [in] the state of the property
-                             int (*)( void *, const pcf::IndiProperty &)             ///< [in] the callback for changing the property
-                           );
+   int registerIndiPropertyNew( pcf::IndiProperty & prop,                               ///< [out] the property to register
+                                const std::string & propName,                           ///< [in] the name of the property
+                                const pcf::IndiProperty::Type & propType,               ///< [in] the type of the property
+                                const pcf::IndiProperty::PropertyPermType & propPerm,   ///< [in] the permissions of the property
+                                const pcf::IndiProperty::PropertyStateType & propState, ///< [in] the state of the property
+                                int (*)( void *, const pcf::IndiProperty &)             ///< [in] the callback for changing the property
+                              );
 
+   /// Register an INDI property which is monitored for updates from others.
+   /**
+     *
+     * \returns 0 on success.
+     * \returns -1 on error.
+     *
+     * \todo needs error logging
+     * \todo needs exception handling
+     * \todo is a failure to register a FATAL error?
+     */
+   int registerIndiPropertySet( pcf::IndiProperty & prop,                   ///< [out] the property to register
+                                const std::string & devName,                ///< [in] the device which owns this property
+                                const std::string & propName,               ///< [in] the name of the property
+                                int (*)( void *, const pcf::IndiProperty &) ///< [in] the callback for processing the property change
+                              );
+   
    /// Create the INDI FIFOs
    /** Changes permissions to max available and creates the
      * FIFOs at the configured path.
@@ -446,6 +470,15 @@ public:
      * \todo handle errors, are they FATAL?
      */
    void handleNewProperty( const pcf::IndiProperty &ipRecv /**< [in] The property being changed. */);
+
+   /// Handler for the set INDI property request
+   /**
+     *
+     * This is called by m_indiDriver's indiDriver::handleSetProperties.
+     *
+     * \todo handle errors, are they FATAL?
+     */
+   void handleSetProperty( const pcf::IndiProperty &ipRecv /**< [in] The property being changed. */);
 
 protected:
 
@@ -587,7 +620,7 @@ void MagAOXApp<_useINDI>::setDefaults( int argc,
    configPathLocal = configDir + "/" + m_configName + ".conf";
 
    //Now we can setup common INDI properties
-   REG_INDI_PROP_NOCB(indiP_state, "state", pcf::IndiProperty::Number, pcf::IndiProperty::ReadOnly, pcf::IndiProperty::Idle);
+   REG_INDI_NEWPROP_NOCB(indiP_state, "state", pcf::IndiProperty::Number, pcf::IndiProperty::ReadOnly, pcf::IndiProperty::Idle);
    indiP_state.add (pcf::IndiElement("current"));
 
 
@@ -644,18 +677,25 @@ int MagAOXApp<_useINDI>::execute() //virtual
    //----------------------------------------//
    m_log.logThreadStart();
 
-   //Sleep for 500 msec to make sure log thread has time to get started and try to open a file.
-   std::this_thread::sleep_for( std::chrono::duration<unsigned long, std::nano>(500000));
+   //Give up to 2 secs to make sure log thread has time to get started and try to open a file.
+   for(int w=0;w<4;++w)
+   {
+      //Sleep for 500 msec 
+      std::this_thread::sleep_for( std::chrono::duration<unsigned long, std::nano>(500000));
+
+      //Verify that log thread is still running.
+      if(m_log.logThreadRunning() == true) break;
+   }
    
-   //Verify that log thread is still running.
    if(m_log.logThreadRunning() == false)
    {
       //We don't log this, because it won't be logged anyway.
       std::cerr << "\nCRITICAL: log thread not running.  Exiting.\n\n";
-      m_shutdown = 1;
+        m_shutdown = 1;
    }
+   
    //----------------------------------------//
-      
+
    setSigTermHandler();
 
    if( m_shutdown == 0 )
@@ -665,12 +705,16 @@ int MagAOXApp<_useINDI>::execute() //virtual
    }
 
    //====Begin INDI Communications
-   if(startINDI() < 0)
+   if(m_useINDI && m_shutdown == 0) //if we're using INDI and not already dead, that is
    {
-      state(stateCodes::FAILURE);
-      m_shutdown = 1;
+      if(startINDI() < 0)
+      {
+         state(stateCodes::FAILURE);
+         m_shutdown = 1;
+      }
    }
 
+   //This is the main event loop.
    while( m_shutdown == 0)
    {
       /** \todo Add a mutex to lock every time appLogic is called.
@@ -682,7 +726,7 @@ int MagAOXApp<_useINDI>::execute() //virtual
       /** \todo Need a heartbeat update here.
         */
 
-      
+
       //Pause loop unless shutdown is set
       if( m_shutdown == 0)
       {
@@ -1111,13 +1155,13 @@ int MagAOXApp<_useINDI>::stateLogged()
 /*-------------------------------------------------------------------------------------*/
 
 template<bool _useINDI>
-int MagAOXApp<_useINDI>::registerIndiProperty( pcf::IndiProperty & prop,
-                                               const std::string & propName,
-                                               const pcf::IndiProperty::Type & propType,
-                                               const pcf::IndiProperty::PropertyPermType & propPerm,
-                                               const pcf::IndiProperty::PropertyStateType & propState,
-                                               int (*newCallBack)( void *, const pcf::IndiProperty &ipRecv)
-                                             )
+int MagAOXApp<_useINDI>::registerIndiPropertyNew( pcf::IndiProperty & prop,
+                                                  const std::string & propName,
+                                                  const pcf::IndiProperty::Type & propType,
+                                                  const pcf::IndiProperty::PropertyPermType & propPerm,
+                                                  const pcf::IndiProperty::PropertyStateType & propState,
+                                                  int (*callBack)( void *, const pcf::IndiProperty &ipRecv)
+                                                )
 {
    if(!m_useINDI) return 0;
 
@@ -1128,7 +1172,30 @@ int MagAOXApp<_useINDI>::registerIndiProperty( pcf::IndiProperty & prop,
    prop.setState( propState);
 
 
-   callBackInsertResult result =  m_indiCallBacks.insert(callBackValueType( propName, {&prop, newCallBack}));
+   callBackInsertResult result =  m_indiNewCallBacks.insert(callBackValueType( propName, {&prop, callBack}));
+
+   if(!result.second)
+   {
+      return -1;
+   }
+
+   return 0;
+}
+
+template<bool _useINDI>
+int MagAOXApp<_useINDI>::registerIndiPropertySet( pcf::IndiProperty & prop,
+                                                  const std::string & devName,
+                                                  const std::string & propName,
+                                                  int (*callBack)( void *, const pcf::IndiProperty &ipRecv)
+                                                )
+{
+   if(!m_useINDI) return 0;
+
+   prop = pcf::IndiProperty();
+   prop.setDevice(devName);
+   prop.setName(propName);
+
+   callBackInsertResult result =  m_indiSetCallBacks.insert(callBackValueType( devName + "." + propName, {&prop, callBack}));
 
    if(!result.second)
    {
@@ -1275,22 +1342,48 @@ void MagAOXApp<_useINDI>::handleGetProperties( const pcf::IndiProperty &ipRecv )
       return;
    }
 
+   std::cerr << "GetProperties\n";
    //Send all properties if requested.
+   //This is a possible INDI server restart, so we re-register for all notifications.
    if( !ipRecv.hasValidName() )
    {
-      callBackIterator it = m_indiCallBacks.begin();
+      std::cerr << "GetProperties -- ALL\n";
 
-      while(it != m_indiCallBacks.end() )
+      callBackIterator it = m_indiNewCallBacks.begin();
+
+      while(it != m_indiNewCallBacks.end() )
       {
-         m_indiDriver->sendDefProperty( *(it->second.property) );
+         if( it->second.property )
+         {
+            m_indiDriver->sendDefProperty( *(it->second.property) );
+         }
+         ++it;
+      }
+      
+      it = m_indiSetCallBacks.begin();
+
+      while(it != m_indiSetCallBacks.end() )
+      {
+         if( it->second.property )
+         {
+            m_indiDriver->sendGetProperties( *(it->second.property) );
+         }
          ++it;
       }
 
       return;
    }
 
+   if( m_indiNewCallBacks.count(ipRecv.getName()) == 0) 
+   {
+      std::stringstream s;
+      s << "Received GetProperty for " << ipRecv.getName();
+      log<text_log>(s.str(), logPrio::LOG_ERROR);
+      return;
+   }
+   
    //Otherwise send just the requested property.
-   m_indiDriver->sendDefProperty( *(m_indiCallBacks[ ipRecv.getName() ].property) );
+   m_indiDriver->sendDefProperty( *(m_indiNewCallBacks[ ipRecv.getName() ].property) );
 
    return;
 }
@@ -1301,10 +1394,46 @@ void MagAOXApp<_useINDI>::handleNewProperty( const pcf::IndiProperty &ipRecv )
    if(!m_useINDI) return;
    if(m_indiDriver == nullptr) return;
 
-   int (*newCallBack)(void *, const pcf::IndiProperty &) = m_indiCallBacks[ ipRecv.getName() ].newCallBack;
+   //Check if this is a valid name for us.
+   if( m_indiNewCallBacks.count(ipRecv.getName()) == 0 ) 
+   {
+      ///\todo log invalid NewProperty request, though it probably can't get this far.
+      return;
+   }
+   
+   int (*callBack)(void *, const pcf::IndiProperty &) = m_indiNewCallBacks[ ipRecv.getName() ].callBack;
 
-   if(newCallBack) newCallBack( this, ipRecv);
+   if(callBack) callBack( this, ipRecv);
 
+   ///\todo log an error here because callBack should not be null
+   
+   return;
+}
+
+template<bool _useINDI>
+void MagAOXApp<_useINDI>::handleSetProperty( const pcf::IndiProperty &ipRecv )
+{
+   if(!m_useINDI) return;
+   if(m_indiDriver == nullptr) return;
+
+   std::cerr << "Got SetProperty\n";
+   std::cerr << ipRecv.getDevice() << "\n";
+
+   std::string key = ipRecv.getDevice() + "." + ipRecv.getName();
+   
+   //Check if this is valid
+   if( m_indiSetCallBacks.count(key) > 0 )
+   {
+      int (*callBack)(void *, const pcf::IndiProperty &) = m_indiSetCallBacks[ key ].callBack;
+      if(callBack) callBack( this, ipRecv);
+      
+      ///\todo log an error here because callBack should not be null
+   }
+   else
+   {
+      ///\todo log invalid SetProperty request.
+   }
+   
    return;
 }
 

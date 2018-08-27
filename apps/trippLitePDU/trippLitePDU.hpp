@@ -29,9 +29,9 @@ protected:
    std::string m_devicePort; ///< The device port
    std::string m_deviceUsername;
    std::string m_devicePassFile;
-   
+
    tty::telnetConn m_telnetConn; ///< The telnet connection manager
-        
+
    int m_writeTimeOut {1000};  ///< The timeout for writing to the device [msec].
    int m_readTimeOut {2000}; ///< The timeout for reading from the device [msec].
    int m_outletStateDelay {5000}; ///< The maximum time to wait for an outlet to change state [msec].
@@ -142,14 +142,14 @@ void trippLitePDU::loadConfig()
    config(m_devicePort, "device.port");
    config(m_deviceUsername, "device.username");
    config(m_devicePassFile, "device.passfile");
-   
+
    config(m_writeTimeOut, "timeouts.write");
    config(m_readTimeOut, "timeouts.read");
    config(m_outletStateDelay, "timeouts.outletStateDelay");
 
-   
-   
-   
+
+
+
 }
 
 int trippLitePDU::appStartup()
@@ -192,7 +192,7 @@ int trippLitePDU::appStartup()
    m_indiOutlet8.add (pcf::IndiElement("state"));
 
    state(stateCodes::NOTCONNECTED);
-   
+
    return 0;
 }
 
@@ -215,7 +215,7 @@ int trippLitePDU::appLogic()
    {
       std::cerr << m_deviceAddr << " " << m_devicePort << "\n";
       int rv = m_telnetConn.connect(m_deviceAddr, m_devicePort);
-      
+
       if(rv == 0)
       {
          state(stateCodes::CONNECTED);
@@ -241,7 +241,7 @@ int trippLitePDU::appLogic()
    if( state() == stateCodes::CONNECTED )
    {
       int rv = m_telnetConn.login("localadmin", "localadmin");
-         
+
       if(rv == 0)
       {
          state(stateCodes::LOGGEDIN);
@@ -264,10 +264,10 @@ int trippLitePDU::appLogic()
          std::lock_guard<std::mutex> guard(m_devMutex);
 
          rv = m_telnetConn.writeRead("devstatus\n", true, 1000,1000);
-      
+
          strRead = m_telnetConn.m_strRead;
       }
-      
+
       if(rv < 0)
       {
          if(rv == TTY_E_TIMEOUTONREAD || rv == TTY_E_TIMEOUTONREADPOLL)
@@ -325,21 +325,24 @@ int trippLitePDU::appLogic()
          else m_indiOutlet6["state"] = "On";
          m_indiOutlet6.setState(pcf::IndiProperty::Ok);
 
+
          if(m_outletStates[6] == 0) m_indiOutlet7["state"] = "Off";
          else m_indiOutlet7["state"] = "On";
          m_indiOutlet7.setState(pcf::IndiProperty::Ok);
 
+         std::string currSt = m_indiOutlet7["state"].get();
          if(m_outletStates[7] == 0) m_indiOutlet8["state"] = "Off";
          else m_indiOutlet8["state"] = "On";
          m_indiOutlet8.setState(pcf::IndiProperty::Ok);
-         m_indiDriver->sendSetProperty (m_indiOutlet8);
+
+         if(currSt != m_indiOutlet7["state"].get()) m_indiDriver->sendSetProperty (m_indiOutlet8);
 
       }
       else
       {
          std::cerr << "Parse Error: " << rv << "\n";
       }
-      
+
       return 0;
    }
 
@@ -446,7 +449,7 @@ int trippLitePDU::changeOutletState( const pcf::IndiProperty &ipRecv,
       int rv = m_telnetConn.writeRead( cmd, true, m_writeTimeOut, m_readTimeOut);
 
       strRead = m_telnetConn.m_strRead;
-      
+
       std::cerr << "Received " << strRead << " (" << rv << ")\n";
 
       m_outletStates[onum] = 1;
@@ -469,7 +472,7 @@ int trippLitePDU::changeOutletState( const pcf::IndiProperty &ipRecv,
       std::string strRead;
       int rv = m_telnetConn.writeRead( cmd, true, m_writeTimeOut, m_readTimeOut);
       strRead = m_telnetConn.m_strRead;
-      
+
       std::cerr << "Received " << strRead << " (" << rv << ")\n";
 
       m_outletStates[onum] = 0;

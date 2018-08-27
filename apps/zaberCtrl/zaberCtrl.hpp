@@ -13,7 +13,7 @@
 #include "../../libMagAOX/libMagAOX.hpp" //Note this is included on command line to trigger pch
 #include "magaox_git_version.h"
 
-typedef MagAOX::app::MagAOXApp<true> MagAOXAppT; //This needs to be before zaberStage.hpp for logging to work.  
+typedef MagAOX::app::MagAOXApp<true> MagAOXAppT; //This needs to be before zaberStage.hpp for logging to work.
 
 #include "zaberStage.hpp"
 #include "za_serial.h"
@@ -248,6 +248,15 @@ int zaberCtrl::appStartup()
 
 int zaberCtrl::appLogic()
 {
+
+   static int sent = 0;
+   if(m_indiDriver && !sent)
+   {
+      sent = 1;
+      pcf::IndiProperty ipSend(pcf::IndiProperty::Text, "trippLitePDU1", "outlet8");
+      m_indiDriver->sendGetProperties( ipSend );
+   }
+
 
    if( state() == stateCodes::INITIALIZED )
    {
