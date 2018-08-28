@@ -82,9 +82,10 @@ public:
      */
    int parseOUTP( int & channel,
                   int & output,
-                  std::string & strRead );
+                  const std::string & strRead
+                );
 
-   /// Parse the SDG response to the OUTP query
+   /// Parse the SDG response to the BSWV query
    /**
      * Example: C1:BSWV WVTP,SINE,FRQ,10HZ,PERI,0.1S,AMP,2V,AMPVRMS,0.707Vrms,OFST,0V,HLEV,1V,LLEV,-1V,PHSE,0
      *
@@ -101,7 +102,8 @@ public:
                   double & hlev,
                   double & llev,
                   double & phse,
-                  std::string & strRead );
+                  const std::string & strRead
+                );
 
 
 
@@ -212,6 +214,12 @@ int siglentSDG::appLogic()
       {
          state(stateCodes::CONNECTED);
          m_telnetConn.noLogin();
+         sleep(1);//Wait for the connection to take.
+
+         std::cerr << m_readTimeOut << "\n";
+         m_telnetConn.read(">>", m_readTimeOut);
+         std::cerr << "Login: " << m_telnetConn.m_strRead << "\n";
+
          m_telnetConn.write("\n", m_writeTimeOut);
          m_telnetConn.read(">>", m_readTimeOut);
 
@@ -221,6 +229,7 @@ int siglentSDG::appLogic()
             logs << "Connected to " << m_deviceAddr << ":" << m_devicePort;
             log<text_log>(logs.str());
          }
+         return 0;//We cycle out to give connection time to settle.
       }
       else
       {
@@ -242,19 +251,22 @@ int siglentSDG::appLogic()
       {
          std::lock_guard<std::mutex> guard(m_devMutex);
 
+
          std::cerr << "Connected, sending OUTP\n";
          rv = m_telnetConn.writeRead("C1:OUTP?\r\n", false, 1000,1000);
          strRead = m_telnetConn.m_strRead;
-         m_telnetConn.write("\n", m_writeTimeOut);
-         m_telnetConn.read(">>", m_readTimeOut);
       }
 
       if(rv < 0)
       {
-         state(stateCodes::NOTCONNECTED);
          log<text_log>(tty::ttyErrorString(rv), logPrio::LOG_ERROR);
+         state(stateCodes::NOTCONNECTED);
          return 0;
       }
+
+      m_telnetConn.write("\n", m_writeTimeOut);
+      m_telnetConn.read(">>", m_readTimeOut);
+
 
       std::cerr << "C1:OUTP: " << strRead << "\n";
       rv = 0;
@@ -288,6 +300,40 @@ int siglentSDG::appLogic()
 int siglentSDG::appShutdown()
 {
    //don't bother
+   return 0;
+}
+
+int siglentSDG::parseOUTP( int & channel,
+                           int & output,
+                           const std::string & strRead
+                         )
+{
+   std::vector<std::string> v;
+
+   mx::ioutils::parseStringVector(v, strRead, ":, ";
+
+   for(size_t i=0; i<v.size();++i) std::cerr << v[i] << "\n";
+   
+   if(v[0][0] != 'C') return -1;
+   size_t tok = v[0].find(':',1);
+
+   if(tok < 2 || tok == std::string::npos) return -1;
+
+   channel = mx::ioutils::convertFromString<int>(v[0].substr(1, tok-1));
+
+   size_t tok2 = v[0].find(' ', tok);
+
+   if(tok2 == std::string::npos) return -1;
+
+   std::string o = v[0].substr(tok2+1, v[0].size()-tok2-1);
+
+   std::cerr << o << "\n";
+   if(o == "OFF") output = 0;
+   else if(o == "ON") output = 1;
+   else
+   {
+      return -1;
+   }
    return 0;
 }
 
