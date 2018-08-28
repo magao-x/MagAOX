@@ -32,6 +32,62 @@ namespace MagAOX
 namespace tty
 {
 
+/// Replace lone \\r and \\n with \\r\\n for telnet-ness.
+/** Do it all at once instead of during char-by-char transmission
+  * cuz some devices (I'm looking at you SDG) get impatient and 
+  * stop paying attention.
+  * 
+  * \returns 0 on success
+  * \returns -1 on error (nothing yet)
+  * 
+  */
+int telnetCRLF( std::string & telnetStr,     ///< [out] the string with \\r an \\n converted to \\r\\n
+                const std::string & inputStr ///< [in] the string to be converted
+              )
+{
+   telnetStr.resize(inputStr.size()); 
+      
+   size_t N = inputStr.size();
+   size_t j = 0;
+   for(size_t i=0;i<N; ++i)
+   {
+      if(inputStr[i] != '\r' && inputStr[i] != '\n')
+      {
+         telnetStr[j] = inputStr[i];
+      }
+      else if(inputStr[i] == '\r')
+      {
+         telnetStr[j] = '\r';
+
+         if(i < N-1)
+         {
+            if(inputStr[i+1] == '\n')
+            {
+               ++j;
+               telnetStr[j] = '\n';
+               ++i;
+               ++j; //i is incremented on continue, but j is not
+               continue;
+            }
+         }
+         telnetStr.push_back(' ');
+         ++j;
+         telnetStr[j] = '\n';
+      }
+      else if(inputStr[i] == '\n')
+      {
+         telnetStr[j] = '\r';
+         telnetStr.push_back(' ');
+         ++j;
+         telnetStr[j] = '\n';
+      }
+      ++j;
+   }
+   
+   return 0;
+}
+
+  
 /// Open a file as a raw-mode tty device
 /**
   * \returns TTY_E_NOERROR on success.
