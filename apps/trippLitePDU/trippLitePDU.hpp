@@ -268,19 +268,27 @@ int trippLitePDU::appLogic()
          strRead = m_telnetConn.m_strRead;
       }
 
-      if(rv < 0)
+      if(rv == TTY_E_TIMEOUTONREAD || rv == TTY_E_TIMEOUTONREADPOLL)
       {
-         if(rv == TTY_E_TIMEOUTONREAD || rv == TTY_E_TIMEOUTONREADPOLL)
+         std::cerr << "Error read.  Draining...\n";
+         rv = m_telnetConn.read(5*m_readTimeOut, false);
+         
+         if( rv < 0 )
          {
+            std::cerr << "Timed out.\n";
             log<text_log>(tty::ttyErrorString(rv), logPrio::LOG_ERROR);
-            return 0;
-         }
-         else
-         {
             state(stateCodes::NOTCONNECTED);
-            log<text_log>(tty::ttyErrorString(rv), logPrio::LOG_ERROR);
             return 0;
          }
+         
+         std::cerr << "Drain successful.\n";
+         return 0;
+      }
+      else if(rv < 0 )
+      {
+         log<text_log>(tty::ttyErrorString(rv), logPrio::LOG_ERROR);
+         state(stateCodes::NOTCONNECTED);
+         return 0;
       }
 
       rv = parsePDUStatus( strRead);
@@ -341,6 +349,9 @@ int trippLitePDU::appLogic()
       else
       {
          std::cerr << "Parse Error: " << rv << "\n";
+         
+         std::cerr << "Read: \n-----------------\n";
+         std::cerr << strRead << "\n-----------------\n";
       }
 
       return 0;

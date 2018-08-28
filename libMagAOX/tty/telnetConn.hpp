@@ -217,6 +217,12 @@ int telnetConn::connect( const std::string & host,
                          const std::string & port
                        )
 {
+   //First cleanup any previous connections.
+   if(m_telnet) telnet_free(m_telnet);
+   m_telnet = 0;
+   if(m_sock) close(m_sock);
+   m_sock = 0;
+   
    int rs;
 
    struct sockaddr_in addr;

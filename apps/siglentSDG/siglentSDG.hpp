@@ -82,11 +82,8 @@ public:
      */
    int parseOUTP( int & channel,
                   int & output,
-<<<<<<< HEAD
+
                   const std::string & strRead
-=======
-                  const std::string & strRead
->>>>>>> c052801ce6916195178c111354f62777596bf881
                 );
 
    /// Parse the SDG response to the BSWV query
@@ -106,11 +103,7 @@ public:
                   double & hlev,
                   double & llev,
                   double & phse,
-<<<<<<< HEAD
                   const std::string & strRead
-=======
-                  const std::string & strRead
->>>>>>> c052801ce6916195178c111354f62777596bf881
                 );
 
 
@@ -318,26 +311,16 @@ int siglentSDG::parseOUTP( int & channel,
 {
    std::vector<std::string> v;
 
-   mx::ioutils::parseStringVector(v, strRead, ":, ";
+   mx::ioutils::parseStringVector(v, strRead, ":, ");
 
-   for(size_t i=0; i<v.size();++i) std::cerr << v[i] << "\n";
+   if(v[1] != "OUTP") return -1;
 
    if(v[0][0] != 'C') return -1;
-   size_t tok = v[0].find(':',1);
+   if(v[0].size() < 2) return -1;
+   channel = mx::ioutils::convertFromString<int>(v[0].substr(1, v[0].size()-1));
 
-   if(tok < 2 || tok == std::string::npos) return -1;
-
-   channel = mx::ioutils::convertFromString<int>(v[0].substr(1, tok-1));
-
-   size_t tok2 = v[0].find(' ', tok);
-
-   if(tok2 == std::string::npos) return -1;
-
-   std::string o = v[0].substr(tok2+1, v[0].size()-tok2-1);
-
-   std::cerr << o << "\n";
-   if(o == "OFF") output = 0;
-   else if(o == "ON") output = 1;
+   if(v[2] == "OFF") output = 0;
+   else if(v[2] == "ON") output = 1;
    else
    {
       return -1;
@@ -346,6 +329,62 @@ int siglentSDG::parseOUTP( int & channel,
 }
 
 
+int siglentSDG::parseBSWV( int & channel,
+                           std::string & wvtp,
+                           double & freq,
+                           double & peri,
+                           double & amp,
+                           double & ampvrms,
+                           double & ofst,
+                           double & hlev,
+                           double & llev,
+                           double & phse,
+                           const std::string & strRead
+                         )
+{
+   std::vector<std::string> v;
+
+   mx::ioutils::parseStringVector(v, strRead, ":, ");
+
+   for(size_t i=0; i<v.size();++i) std::cerr << v[i] << "\n";
+
+   if(v.size()!= 20) return -1;
+
+   if(v[1] != "BSWV") return -1;
+
+   if(v[0][0] != 'C') return -1;
+   if(v[0].size() < 2) return -1;
+   channel = mx::ioutils::convertFromString<int>(v[0].substr(1, v[0].size()-1));
+
+   if(v[2] != "WVTP") return -1;
+   wvtp = v[3];
+
+   if(v[4] != "FRQ") return -1;
+   freq = mx::ioutils::convertFromString<double>(v[5]);
+
+   if(v[6] != "PERI") return -1;
+   peri = mx::ioutils::convertFromString<double>(v[7]);
+
+   if(v[8] != "AMP") return -1;
+   amp = mx::ioutils::convertFromString<double>(v[9]);
+
+   if(v[10] != "AMPVRMS") return -1;
+   ampvrms = mx::ioutils::convertFromString<double>(v[11]);
+
+   if(v[12] != "OFST") return -1;
+   ofst = mx::ioutils::convertFromString<double>(v[13]);
+
+   if(v[14] != "HLEV") return -1;
+   hlev = mx::ioutils::convertFromString<double>(v[15]);
+
+   if(v[16] != "LLEV") return -1;
+   llev = mx::ioutils::convertFromString<double>(v[17]);
+
+   if(v[18] != "PHSE") return -1;
+   phse = mx::ioutils::convertFromString<double>(v[19]);
+
+   return 0;
+}
 
 INDI_NEWCALLBACK_DEFN(siglentSDG, m_indiP_C1outp)(const pcf::IndiProperty &ipRecv)
 {
