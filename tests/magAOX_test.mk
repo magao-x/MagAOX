@@ -54,7 +54,7 @@ $(TARGET):  $(TARGET).o
 #This always gets regenerated.
 .PHONY: magaox_git_version.h
 magaox_git_version.h:
-	gengithead.sh ../../ ../magaox_git_version.h MAGAOX
+	gengithead.sh ../../../ ../magaox_git_version.h MAGAOX
 
 	
 .PHONY: clean

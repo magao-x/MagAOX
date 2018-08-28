@@ -18,18 +18,14 @@
 namespace flatlogs
 {
 
-/// Scoping namespace for log priority codes.
-/** We do not use the enum class feature since it does not have automatic integer conversion.
+/// The log priority codes.  These control if logs are stored on disk and how they are presented to users.
+/** This is a scoping namespace for log priority codes.
+  * We do not use the enum class feature since it does not have automatic integer conversion.
   * \ingroup logPrio
   */
 namespace logPrio
 {
-   ///The log priority codes.  These control if logs are stored on disk and how they are presented to users.
-   /** 
-     * \ingroup logPrio
-     * @{
-     */
-   
+    
   
   /// Normal operations of the entire system should be shut down immediately. 
   constexpr static logPrioT LOG_EMERGENCY = 0;  
@@ -64,7 +60,6 @@ namespace logPrio
   /// Used to denote an unkown log type for internal error handling.
   constexpr static logPrioT LOG_UNKNOWN = std::numeric_limits<logPrioT>::max();
   
-  ///@}
 };
 
 ///Get the string representation of a log priority
