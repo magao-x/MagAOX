@@ -82,7 +82,11 @@ public:
      */
    int parseOUTP( int & channel,
                   int & output,
+<<<<<<< HEAD
                   const std::string & strRead
+=======
+                  const std::string & strRead
+>>>>>>> c052801ce6916195178c111354f62777596bf881
                 );
 
    /// Parse the SDG response to the BSWV query
@@ -102,7 +106,11 @@ public:
                   double & hlev,
                   double & llev,
                   double & phse,
+<<<<<<< HEAD
                   const std::string & strRead
+=======
+                  const std::string & strRead
+>>>>>>> c052801ce6916195178c111354f62777596bf881
                 );
 
 
@@ -313,7 +321,7 @@ int siglentSDG::parseOUTP( int & channel,
    mx::ioutils::parseStringVector(v, strRead, ":, ";
 
    for(size_t i=0; i<v.size();++i) std::cerr << v[i] << "\n";
-   
+
    if(v[0][0] != 'C') return -1;
    size_t tok = v[0].find(':',1);
 
