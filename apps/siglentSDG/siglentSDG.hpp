@@ -82,9 +82,10 @@ public:
      */
    int parseOUTP( int & channel,
                   int & output,
-                  std::string & strRead );
+                  const std::string & strRead 
+                );
 
-   /// Parse the SDG response to the OUTP query
+   /// Parse the SDG response to the BSWV query
    /**
      * Example: C1:BSWV WVTP,SINE,FRQ,10HZ,PERI,0.1S,AMP,2V,AMPVRMS,0.707Vrms,OFST,0V,HLEV,1V,LLEV,-1V,PHSE,0
      *
@@ -101,7 +102,8 @@ public:
                   double & hlev,
                   double & llev,
                   double & phse,
-                  std::string & strRead );
+                  const std::string & strRead 
+                );
 
 
 
@@ -291,6 +293,38 @@ int siglentSDG::appShutdown()
    return 0;
 }
 
+int siglentSDG::parseOUTP( int & channel,
+                           int & output,
+                           const std::string & strRead 
+                         )
+{
+   std::vector<std::string> v;
+   
+   mx::ioutils::parseStringVector(v, strRead);
+      
+   if(v[0][0] != 'C') return -1;
+   size_t tok = v[0].find(':',1);
+   
+   if(tok < 2 || tok == std::string::npos) return -1;
+   
+   channel = mx::ioutils::convertFromString<int>(v[0].substr(1, tok-1));
+   
+   size_t tok2 = v[0].find(' ', tok);
+   
+   if(tok2 == std::string::npos) return -1;
+   
+   std::string o = v[0].substr(tok2+1, v[0].size()-tok2-1);
+   
+   std::cerr << o << "\n";
+   if(o == "OFF") output = 0;
+   else if(o == "ON") output = 1;
+   else 
+   {
+      return -1;
+   }
+   return 0;
+}
+   
 
 
 INDI_NEWCALLBACK_DEFN(siglentSDG, m_indiP_C1outp)(const pcf::IndiProperty &ipRecv)
