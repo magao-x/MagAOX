@@ -14,11 +14,7 @@ namespace app
 
 /** MagAO-X application to control a Siglent SDG series function generator
   *
-  * \todo handle timeouts gracefully -- maybe go to error, flush, disconnect, reconnect, etc.
-  * \todo need username and secure password handling
-  * \todo need to robustify login logic
   * \todo need to recognize signals in tty polls and not return errors, etc.
-  * \todo should check if values changed and do a sendSetProperty if so (pub/sub?)
   */
 class siglentSDG : public MagAOXApp<>
 {
@@ -40,7 +36,7 @@ protected:
 
    int m_C1outp {0}; ///< The output status channel 1
    double m_C1frequency {0}; ///< The output frequency of channel 1
-   double m_C1amp {0}; ///< The peak-2-peak voltage of channel 1
+   double m_C1vpp {0}; ///< The peak-2-peak voltage of channel 1
 
 
    int m_C2outp {0}; ///<  The output status channel 2
@@ -139,6 +135,17 @@ public:
      */ 
    int writeCommand( const std::string & commmand /**< [in] the complete command string to send to the device */);
    
+   /// Send a change frequency command to the device.  This locks the mutex.
+   /** 
+     * The mutex is locked in the call to writeCommand.
+     * 
+     * \returns 0 on success
+     * \returns -1 on error
+     */
+   int changeFreq( int channel,   ///< [in] the channel to send the command to.
+                   double newFreq ///< [in] The requested new frequency [Hz]
+                 );
+   
    /// Send a change frequency command to the device in response to an INDI property.  This locks the mutex.
    /** 
      * The mutex is locked in the call to writeCommand.
@@ -146,9 +153,20 @@ public:
      * \returns 0 on success
      * \returns -1 on error
      */
-   int changeFreq( int channel, ///< [in] the channel to send the command to.
-                   const pcf::IndiProperty &ipRecv ///< INDI property containing the requested new frequency [Hz]
+   int changeFreq( int channel,                    ///< [in] the channel to send the command to.
+                   const pcf::IndiProperty &ipRecv ///< [in] INDI property containing the requested new frequency [Hz]
                  );
+   
+   /// Send a change amplitude command to the device.  This locks the mutex.
+   /** 
+     * The mutex is locked in the call to writeCommand.
+     * 
+     * \returns 0 on success
+     * \returns -1 on error
+     */
+   int changeAmp( int channel,  ///< [in] the channel to send the command to.
+                  double newAmp ///< [in] The requested new amplitude [V p2p]
+                );
    
    /// Send a change amplitude command to the device in response to an INDI property.  This locks the mutex.
    /** 
@@ -157,8 +175,8 @@ public:
      * \returns 0 on success
      * \returns -1 on error
      */
-   int changeAmp( int channel, ///< [in] the channel to send the command to.
-                  const pcf::IndiProperty &ipRecv ///< INDI property containing the requested new amplitude [V p2p]
+   int changeAmp( int channel,                    ///< [in] the channel to send the command to.
+                  const pcf::IndiProperty &ipRecv ///< [in] INDI property containing the requested new amplitude [V p2p]
                 );
    
 protected:
@@ -214,8 +232,6 @@ void siglentSDG::setupConfig()
 
    config.add("timeouts.write", "", "timeouts.write", mx::argType::Required, "timeouts", "write", false, "int", "The timeout for writing to the device [msec]. Default = 1000");
    config.add("timeouts.read", "", "timeouts.read", mx::argType::Required, "timeouts", "read", false, "int", "The timeout for reading the device [msec]. Default = 2000");
-
-
 }
 
 void siglentSDG::loadConfig()
@@ -225,8 +241,6 @@ void siglentSDG::loadConfig()
 
    config(m_writeTimeOut, "timeouts.write");
    config(m_readTimeOut, "timeouts.read");
-
-
 }
 
 int siglentSDG::appStartup()
@@ -306,9 +320,6 @@ int siglentSDG::appStartup()
 int siglentSDG::appLogic()
 {
 
- 
-
-
    if( state() == stateCodes::NOTCONNECTED )
    {
       int rv = m_telnetConn.connect(m_deviceAddr, m_devicePort);
@@ -346,18 +357,92 @@ int siglentSDG::appLogic()
 
    if(state() == stateCodes::CONNECTED)
    {
-      if( queryOUTP(1) < 0 ) return 0; //Might be disconnected, might just need to start over.
-      if( queryOUTP(2) < 0 ) return 0;
-      if( queryBSWV(1) < 0 ) return 0;
-      if( queryBSWV(2) < 0 ) return 0;
+      //Do Initial Checks Here.
+      std::unique_lock<std::mutex> lock(m_indiMutex, std::try_to_lock);
+      if(lock.owns_lock())
+      {
+         if( queryOUTP(1) < 0 ) 
+         {
+            log<text_log>("Failure checking C1 OUTP.", logPrio::LOG_CRITICAL);
+            return -1;
+         }
+         if( queryOUTP(2) < 0 )
+         {
+            log<text_log>("Failure checking C2 OUTP.", logPrio::LOG_CRITICAL);
+            return -1;
+         }
+         if( queryBSWV(1) < 0 )
+         {
+            log<text_log>("Failure checking C1 BSWV.", logPrio::LOG_CRITICAL);
+            return -1;
+         }
+         if( queryBSWV(2) < 0 )
+         {
+            log<text_log>("Failure checking C2 BSWV.", logPrio::LOG_CRITICAL);
+            return -1;
+         }   
+         
+         ///\todo check wvtp here.
+         
+         if( m_C1outp == 1 || m_C2outp == 1)
+         {
+            state(stateCodes::OPERATING);
+         }
+         else
+         {
+            state(stateCodes::READY);
+         }
+         
+      }
+      else
+      {
+         log<text_log>("Could not get mutex after connecting.", logPrio::LOG_CRITICAL);
+         return -1;
+      }
+   }
+   
+   if(state() == stateCodes::READY || state() == stateCodes::OPERATING)
+   {
+      // Do this right away to avoid a different thread updating something after we get it.
+      //std::unique_lock<std::mutex> lock(m_indiMutex, std::chrono::duration<unsigned long, std::nano>(100000));
+      std::unique_lock<std::mutex> lock(m_indiMutex, std::try_to_lock);
+      if(lock.owns_lock())
+      {
+         if( queryOUTP(1) < 0 ) return 0; //Might be disconnected, might just need to start over.
+         if( queryOUTP(2) < 0 ) return 0;
+         if( queryBSWV(1) < 0 ) return 0;
+         if( queryBSWV(2) < 0 ) return 0;
+         
+         if( m_C1outp == 1 || m_C2outp == 1)
+         {
+            state(stateCodes::OPERATING);
+         }
+         else
+         {
+            state(stateCodes::READY);
+         }
+      }
+      
       
       return 0;
       
    }
 
-   state(stateCodes::FAILURE);
-   log<text_log>("appLogic fell through", logPrio::LOG_CRITICAL);
-   return -1;
+   if( state() == stateCodes::CONFIGURING )
+   {
+      return 0;
+   }
+   
+   //It's possible to get here because other threads are changing states.   
+   //These are the only valid states for this APP at this point.  Anything else and we'll log it.
+   if( state() == stateCodes::READY || state() == stateCodes::OPERATING || state() == stateCodes::CONFIGURING )
+   {
+      return 0;
+   }
+   
+   
+   log<software_error>({__FILE__, __LINE__, "appLogic fell through in state " + stateCodes::codeText(state())});
+   return 0;
 
 }
 
@@ -425,10 +510,6 @@ int siglentSDG::queryOUTP( int channel )
 
    std::string com = makeCommand(channel, "OUTP?");
    
-   // Do this right away to avoid a different thread updating something after we get it.
-   // Note that it's dangerous to have this before writeRead because there's another mutex in there.
-   std::lock_guard<std::mutex> guard(m_indiMutex);  //Lock the mutex before conducting INDI communications.
-
    rv = writeRead( strRead, com);
    
    if(rv < 0)
@@ -454,8 +535,17 @@ int siglentSDG::queryOUTP( int channel )
       else if(resp_output == 0 ) ro = "Off";
       else ro = "UNK";
       
-      if(channel == 1) updateIfChanged(m_indiP_C1outp, "value", ro);
-      else if(channel == 2) updateIfChanged(m_indiP_C2outp, "value", ro);
+      if(channel == 1) 
+      {
+         m_C1outp = resp_output;
+         updateIfChanged(m_indiP_C1outp, "value", ro);
+      }
+      
+      else if(channel == 2) 
+      {
+         m_C2outp = resp_output;
+         updateIfChanged(m_indiP_C2outp, "value", ro);
+      }
    }
    else
    {
@@ -475,14 +565,9 @@ int siglentSDG::queryBSWV( int channel )
    std::string strRead;
 
    std::string com = makeCommand(channel, "BSWV?");
-
-   // Do this right away to avoid a different thread updating something after we get it.
-   // Note that it's dangerous to have this before writeRead because there's another mutex in there.
-   std::lock_guard<std::mutex> guard(m_indiMutex);  //Lock the mutex before conducting INDI communications.
    
    rv = writeRead( strRead, com);
-   
-   
+      
    if(rv < 0)
    {
       log<text_log>("Error on BSWV? for channel " + mx::ioutils::convertToString<int>(channel), logPrio::LOG_ERROR);
@@ -504,6 +589,9 @@ int siglentSDG::queryBSWV( int channel )
 
       if(channel == 1) 
       {
+         m_C1frequency = resp_freq;
+         m_C1vpp = resp_amp;
+         
          updateIfChanged(m_indiP_C1wvtp, "value", resp_wvtp);
          updateIfChanged(m_indiP_C1freq, "value", resp_freq);
          updateIfChanged(m_indiP_C1peri, "value", resp_peri);
@@ -516,6 +604,9 @@ int siglentSDG::queryBSWV( int channel )
       }
       else if(channel == 2)
       {
+         m_C2frequency = resp_freq;
+         m_C2vpp = resp_amp;
+         
          updateIfChanged(m_indiP_C2wvtp, "value", resp_wvtp);
          updateIfChanged(m_indiP_C2freq, "value", resp_freq);
          updateIfChanged(m_indiP_C2peri, "value", resp_peri);
@@ -623,9 +714,7 @@ int siglentSDG::parseBSWV( int & channel,
 
 int siglentSDG::writeCommand( const std::string & command )
 {
-   //Make sure we don't change things while other things are being updated.
-   std::lock_guard<std::mutex> guard(m_indiMutex);  //Lock the mutex before conducting any communications.
-    
+   
    int rv = m_telnetConn.write(command, m_writeTimeOut);
    if(rv < 0)
    {
@@ -650,24 +739,13 @@ int siglentSDG::writeCommand( const std::string & command )
    
    return 0;
 }
-   
+  
 int siglentSDG::changeFreq( int channel,
-                            const pcf::IndiProperty &ipRecv
+                            double newFreq
                           )
 {
    if(channel < 1 || channel > 2) return -1;
-   
-   double newFreq;
-   try
-   {
-      newFreq = ipRecv["value"].get<double>();
-   }
-   catch(...)
-   {
-      log<software_error>({__FILE__, __LINE__, "Exception caught."});
-      return -1;
-   }
-      
+         
    ///\todo logs here
    if(newFreq > cs_MaxFreq)
    {
@@ -688,16 +766,16 @@ int siglentSDG::changeFreq( int channel,
    return 0;
 }
 
-int siglentSDG::changeAmp( int channel,
-                           const pcf::IndiProperty &ipRecv
-                         )
+int siglentSDG::changeFreq( int channel,
+                            const pcf::IndiProperty &ipRecv
+                          )
 {
    if(channel < 1 || channel > 2) return -1;
    
-   double newAmp;
+   double newFreq;
    try
    {
-      newAmp = ipRecv["value"].get<double>();
+      newFreq = ipRecv["value"].get<double>();
    }
    catch(...)
    {
@@ -705,7 +783,25 @@ int siglentSDG::changeAmp( int channel,
       return -1;
    }
       
-      
+   //Make sure we don't change things while other things are being updated.
+   std::lock_guard<std::mutex> guard(m_indiMutex);  //Lock the mutex before conducting any communications.
+   stateCodes::stateCodeT enterState = state();
+   state(stateCodes::CONFIGURING);
+   
+   int rv = changeFreq(channel,newFreq);
+   if(rv < 0) log<software_error>({__FILE__, __LINE__});
+   
+   state(enterState);
+   
+   return rv;
+}
+
+int siglentSDG::changeAmp( int channel,
+                           double newAmp
+                         )
+{
+   if(channel < 1 || channel > 2) return -1;
+   
    ///\todo logs here
    
    if(newAmp > cs_MaxAmp)
@@ -726,6 +822,39 @@ int siglentSDG::changeAmp( int channel,
    
    return 0;
 }
+
+int siglentSDG::changeAmp( int channel,
+                           const pcf::IndiProperty &ipRecv
+                         )
+{
+   if(channel < 1 || channel > 2) return -1;
+ 
+   double newAmp;
+   try
+   {
+      newAmp = ipRecv["value"].get<double>();
+   }
+   catch(...)
+   {
+      log<software_error>({__FILE__, __LINE__, "Exception caught."});
+      return -1;
+   }
+ 
+   //Make sure we don't change things while other things are being updated.
+   std::lock_guard<std::mutex> guard(m_indiMutex);  //Lock the mutex before conducting any communications.
+
+   stateCodes::stateCodeT enterState = state();
+   state(stateCodes::CONFIGURING);
+
+   int rv = changeAmp(channel, newAmp);
+   if(rv < 0) log<software_error>({__FILE__, __LINE__});
+   
+   state(enterState);
+   
+   return rv;
+}
+
+
 
 INDI_NEWCALLBACK_DEFN(siglentSDG, m_indiP_C1outp)(const pcf::IndiProperty &ipRecv)
 {

@@ -763,6 +763,10 @@ int MagAOXApp<_useINDI>::execute() //virtual
          sendGetPropertySetList(false); //Only does anything if it needs to be done.
       }
 
+      // This is purely to make sure INDI is up to date in case
+      // mutex was locked on last attempt.
+      state( state() );
+      
       //Pause loop unless shutdown is set
       if( m_shutdown == 0)
       {
@@ -1153,22 +1157,26 @@ stateCodes::stateCodeT MagAOXApp<_useINDI>::state()
 template<bool _useINDI>
 void MagAOXApp<_useINDI>::state(const stateCodes::stateCodeT & s)
 {
-   if(m_state == s) return;
+   //Only do anything if it's a change
+   if(m_state != s)
+   {
+      logPrioT lvl = logPrio::LOG_INFO;
+      if(s == stateCodes::ERROR) lvl = logPrio::LOG_ERROR;
+      if(s == stateCodes::FAILURE) lvl = logPrio::LOG_CRITICAL;
 
-   logPrioT lvl = logPrio::LOG_INFO;
-   if(s == stateCodes::ERROR) lvl = logPrio::LOG_ERROR;
-   if(s == stateCodes::FAILURE) lvl = logPrio::LOG_CRITICAL;
+      log<state_change>( {m_state, s}, lvl );
 
-   log<state_change>( {m_state, s}, lvl );
-
-   m_state = s;
-   m_stateLogged = 0;
-
-   //And we keep INDI up to date
-   std::lock_guard<std::mutex> guard(m_indiMutex);  //Lock the mutex before conducting INDI communications.
-   m_indiP_state["current"] = s;
-   m_indiP_state.setState (pcf::IndiProperty::Ok);
-   if(m_indiDriver) m_indiDriver->sendSetProperty (m_indiP_state);
+      m_state = s;
+      m_stateLogged = 0;
+   }
+   
+   //Check to make sure INDI is up to date
+   std::unique_lock<std::mutex> lock(m_indiMutex, std::try_to_lock);  //Lock the mutex before conducting INDI communications.
+   
+   if(lock.owns_lock())
+   {
+      updateIfChanged(m_indiP_state, "current", m_state);
+   }
 }
 
 template<bool _useINDI>
@@ -1507,6 +1515,10 @@ void MagAOXApp<_useINDI>::updateIfChanged( pcf::IndiProperty & p,
                                            const T & newVal
                                          )
 {
+   if(!_useINDI) return;
+   
+   if(!m_indiDriver) return;
+   
    T oldVal = p[el].get<T>();
 
    if(oldVal != newVal)
