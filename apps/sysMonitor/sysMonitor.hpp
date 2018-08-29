@@ -53,18 +53,18 @@ namespace MagAOX
    /// Do any needed shutdown tasks.  Currently nothing in this app.
          virtual int appShutdown();
 
-         int findCPUTemperatures(std::vector<int>);
-         int parseCPUTemperatures(std::string, std::vector<int>); //done
-         int criticalCoreTemperature(std::vector<int>);
-         int findCPULoads();
-         double parseCPULoads(std::string);
-         int findDiskTemperature();
-         int parseDiskTemperature(std::string);
-         int criticalDiskTemperature(int);
-         int findDiskUsage();
-         int parseDiskUsage(std::string);
-         int findRamUsage();
-         double parseRamUsage(std::string);
+         int findCPUTemperatures(std::vector<float>&);
+         int parseCPUTemperatures(std::string, std::vector<float>&); //done
+         int criticalCoreTemperature(std::vector<float>&);
+         int findCPULoads(std::vector<float>&);
+         int parseCPULoads(std::string, float&);
+         int findDiskTemperature(float&);
+         int parseDiskTemperature(std::string, float&);
+         int criticalDiskTemperature(float&);
+         int findDiskUsage(float&);
+         int parseDiskUsage(std::string, float&);
+         int findRamUsage(float&);
+         int parseRamUsage(std::string, float&);
 
 
       };
@@ -91,17 +91,31 @@ namespace MagAOX
 
       int sysMonitor::appLogic()
       {
-         std::vector<int> coreTemps;
-         int CPUTempMeasurement = findCPUTemperatures(coreTemps);
+         std::vector<float> coreTemps;
+         int rvCPUTemp = findCPUTemperatures(coreTemps);
+         for (auto i: coreTemps)
+            std::cout << "Core temp " << i << ' ';
+         std::cout << std::endl;
          criticalCoreTemperature(coreTemps);
-         int CPULoad = findCPULoads();
 
-         int diskTemp = findDiskTemperature();
-         std::cout << diskTemp << std::endl;
+         std::vector<float> cpu_core_loads;
+         int rvCPULoad = findCPULoads(cpu_core_loads);
+         for (auto i: cpu_core_loads)
+            std::cout << "CPU Load " << i << ' ';
+         std::cout << std::endl;
+
+         float diskTemp;
+         int rvDiskTemp = findDiskTemperature(diskTemp);
+         std::cout << "Disk temp " << diskTemp << std::endl;
          criticalDiskTemperature(diskTemp);
-         int diskUsage = findDiskUsage();
 
-         int ramUsage = findRamUsage();
+         float diskUsage;
+         int rvDiskUsage = findDiskUsage(diskUsage);
+         std::cout << "Disk usage " << diskUsage << std::endl;
+
+         float ramUsage;
+         int rvRamUsage = findRamUsage(ramUsage);
+         std::cout << "Ram usage " << ramUsage << std::endl;
          
          return 0;
       }
@@ -112,7 +126,8 @@ namespace MagAOX
          return 0;
       }
 
-      int sysMonitor::findCPUTemperatures(std::vector<int> temps) {
+      int sysMonitor::findCPUTemperatures(std::vector<float>& temps) 
+      {
          char command[35];
          std::string line;
 
@@ -141,25 +156,26 @@ namespace MagAOX
          return 0;
       }
 
-      int sysMonitor::parseCPUTemperatures(std::string line, std::vector<int> temps) {
+      int sysMonitor::parseCPUTemperatures(std::string line, std::vector<float>& temps) 
+      {
       	std::string str = line.substr(0, 5);
         if (str.compare("Core ") == 0) 
         {
         	std::string temp_str = line.substr(17, 4);
-            double temp = std::stod (temp_str);
-			temps.push_back(temp);
-            //std::cout << temp << std::endl;
+            float temp = std::stof (temp_str);
+			      temps.push_back(temp);
+            return 0;
         }
         else 
         {
-        	return 0;
+        	return 1;
         }
       }
 
-      int sysMonitor::criticalCoreTemperature(std::vector<int> temps)
+      int sysMonitor::criticalCoreTemperature(std::vector<float>& temps)
       {
-         int warningTempValue = 80, criticalTempValue = 90, iterator = 1;
-         for (std::vector<int>::const_iterator i = temps.begin(); i != temps.end(); ++i)
+         float warningTempValue = 80, criticalTempValue = 90, iterator = 1;
+         for (std::vector<float>::const_iterator i = temps.begin(); i != temps.end(); ++i)
          {
             int temp = *i;
             if (temp >=warningTempValue && temp < criticalTempValue ) {
@@ -173,7 +189,8 @@ namespace MagAOX
          }
       }
 
-      int sysMonitor::findCPULoads() {
+      int sysMonitor::findCPULoads(std::vector<float>& cpu_core_loads) 
+      {
          char command[35];
          std::string line;
          // For cpu load
@@ -193,7 +210,7 @@ namespace MagAOX
             std::cerr << "Unable to open file" << std::endl;
             return 1;
          }
-         std::vector<double> cpu_core_loads; double cpu_load;
+         float cpu_load;
          int cores = 0;
          // Want to start at third line
          getline (inFile5,line);
@@ -203,23 +220,26 @@ namespace MagAOX
          while (getline (inFile5,line)) 
          {
             cores++;
-            cpu_load = parseCPULoads(line);
-            cpu_core_loads.push_back(cpu_load);
+            float loadVal;
+            int rv = parseCPULoads(line, loadVal);
+            cpu_core_loads.push_back(loadVal);
          }
-         return (int)cpu_load;
+
+         return 0;
       }
 
-      double sysMonitor::parseCPULoads(std::string line)
+      int sysMonitor::parseCPULoads(std::string line, float& loadVal)
       {
       	std::istringstream iss4(line);
         std::vector<std::string> tokens4{std::istream_iterator<std::string>{iss4},std::istream_iterator<std::string>{}};
-        double cpu_load = 100.0 - std::stod (tokens4[12]);
+        float cpu_load = 100.0 - std::stof (tokens4[12]);
         cpu_load /= 100;
-        //std::cout << "core load " << cpu_load << std::endl;
-        return cpu_load;
+        loadVal = cpu_load;
+        return 0;
       }
 
-      int sysMonitor::findDiskTemperature() {
+      int sysMonitor::findDiskTemperature(float &hdd_temp) 
+      {
          char command[35];
          std::string line;
 
@@ -246,15 +266,13 @@ namespace MagAOX
             return 1;
          }
          
-         double hdd_temp = 0;
          getline (inFile2,line);
-         hdd_temp = parseDiskTemperature(line);
-         //std::cout << hdd_temp << std::endl;
-         return (int) hdd_temp;
+         int rvHddTemp = parseDiskTemperature(line, hdd_temp);
+         return 0;
       }
 
-      int sysMonitor::parseDiskTemperature(std::string line) {
-      	double hdd_temp;
+      int sysMonitor::parseDiskTemperature(std::string line, float& hdd_temp) 
+      {
       	std::istringstream iss(line);
         std::vector<std::string> tokens{std::istream_iterator<std::string>{iss},std::istream_iterator<std::string>{}};
         for(std::vector<std::string>::iterator it = tokens.begin(); it != tokens.end(); ++it) 
@@ -264,13 +282,13 @@ namespace MagAOX
             {
                temp_s.pop_back();
                temp_s.pop_back();
-               hdd_temp = std::stod (temp_s);
+               hdd_temp = std::stof (temp_s);
             }
          }
-         return hdd_temp;
+         return 0;
       }
 
-      int sysMonitor::criticalDiskTemperature(int temp)
+      int sysMonitor::criticalDiskTemperature(float& temp)
       {
          int warningTempValue = 80, criticalTempValue = 90;
          if (temp >=warningTempValue && temp < criticalTempValue ) {
@@ -280,9 +298,11 @@ namespace MagAOX
          {   
             std::cout << "Critical temperature for Disk " << std::endl;
          }
+         return 0;
       }
 
-      int sysMonitor::findDiskUsage() {
+      int sysMonitor::findDiskUsage(float &diskUsage) 
+      {
          char command[35];
          std::string line;
          // For disk usage
@@ -306,22 +326,22 @@ namespace MagAOX
          // Want second line
          getline (inFile3,line);
          getline (inFile3,line);
-         double disk_usage = parseDiskUsage(line);
+         int rvDiskUsage = parseDiskUsage(line, diskUsage);
          
-         return disk_usage;
+         return 0;
       }
 
-      int sysMonitor::parseDiskUsage(std::string line) 
+      int sysMonitor::parseDiskUsage(std::string line, float& diskUsage) 
       {
       	std::istringstream iss2(line);
         std::vector<std::string> tokens2{std::istream_iterator<std::string>{iss2},std::istream_iterator<std::string>{}};
         tokens2[4].pop_back();
-        double disk_usage = std::stod (tokens2[4]);
-        //std::cout << disk_usage << std::endl;
-        return disk_usage;
+        diskUsage = std::stof (tokens2[4]);
+        return 0;
       }
 
-      int sysMonitor::findRamUsage() {
+      int sysMonitor::findRamUsage(float& ramUsage) 
+      {
          char command[35];
          std::string line;
           // For ram usage
@@ -345,19 +365,17 @@ namespace MagAOX
          // Want second line
          getline (inFile4,line);
          getline (inFile4,line);
-         double ram_usage_percent = parseRamUsage(line);
-         //std::cout << ram_usage_percent << std::endl;
-         return ram_usage_percent;
+         int rvRamUsage = parseRamUsage(line, ramUsage);
+         return 0;
       }
 
-      double sysMonitor::parseRamUsage(std::string line) 
+      int sysMonitor::parseRamUsage(std::string line, float& ramUsage) 
       {
       	std::istringstream iss3(line);
         std::vector<std::string> tokens3{std::istream_iterator<std::string>{iss3},std::istream_iterator<std::string>{}};
-        double ram_usage = std::stod (tokens3[2]);
-        double ram_total = std::stod (tokens3[1]);
-        double ram_usage_percent = ram_usage/ram_total;
-        return ram_usage_percent;
+        ramUsage = std::stof(tokens3[2])/std::stof(tokens3[1]);
+        std::cout << "Checking1: " << ramUsage << std::endl;
+        return 0;
       }
 
    } //namespace app
