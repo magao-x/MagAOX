@@ -196,6 +196,14 @@ int trippLitePDU::appStartup()
    return 0;
 }
 
+std::string stateIntToString(int st)
+{
+   if(st==0) return "Off";
+   else return "On";
+}
+
+
+
 int trippLitePDU::appLogic()
 {
 
@@ -272,7 +280,7 @@ int trippLitePDU::appLogic()
       {
          std::cerr << "Error read.  Draining...\n";
          rv = m_telnetConn.read(5*m_readTimeOut, false);
-         
+
          if( rv < 0 )
          {
             std::cerr << "Timed out.\n";
@@ -280,7 +288,7 @@ int trippLitePDU::appLogic()
             state(stateCodes::NOTCONNECTED);
             return 0;
          }
-         
+
          std::cerr << "Drain successful.\n";
          return 0;
       }
@@ -297,61 +305,34 @@ int trippLitePDU::appLogic()
       {
          std::lock_guard<std::mutex> guard(m_indiMutex);  //Lock the mutex before conducting INDI communications.
 
-         m_indiStatus["value"] = m_status;
-         m_indiStatus.setState (pcf::IndiProperty::Ok);
+         updateIfChanged(m_indiStatus, "value", m_status);
 
-         m_indiFrequency["value"] = m_frequency;
-         m_indiFrequency.setState (pcf::IndiProperty::Ok);
+         updateIfChanged(m_indiFrequency, "value", m_frequency);
 
-         m_indiVoltage["value"] = m_voltage;
-         m_indiVoltage.setState (pcf::IndiProperty::Ok);
+         updateIfChanged(m_indiVoltage, "value", m_voltage);
 
-         m_indiCurrent["value"] = m_current;
-         m_indiCurrent.setState (pcf::IndiProperty::Ok);
+         updateIfChanged(m_indiCurrent, "value", m_current);
 
-         if(m_outletStates[0] == 0) m_indiOutlet1["state"] = "Off";
-         else m_indiOutlet1["state"] = "On";
-         m_indiOutlet1.setState(pcf::IndiProperty::Ok);
+         updateIfChanged(m_indiOutlet1, "state", stateIntToString(m_outletStates[0]));
 
-         if(m_outletStates[1] == 0) m_indiOutlet2["state"] = "Off";
-         else m_indiOutlet2["state"] = "On";
-         m_indiOutlet2.setState(pcf::IndiProperty::Ok);
+         updateIfChanged(m_indiOutlet2, "state", stateIntToString(m_outletStates[1]));
 
-         if(m_outletStates[2] == 0) m_indiOutlet3["state"] = "Off";
-         else m_indiOutlet3["state"] = "On";
-         m_indiOutlet3.setState(pcf::IndiProperty::Ok);
+         updateIfChanged(m_indiOutlet3, "state", stateIntToString(m_outletStates[2]));
 
-         if(m_outletStates[3] == 0) m_indiOutlet4["state"] = "Off";
-         else m_indiOutlet4["state"] = "On";
-         m_indiOutlet4.setState(pcf::IndiProperty::Ok);
+         updateIfChanged(m_indiOutlet4, "state", stateIntToString(m_outletStates[3]));
 
-         if(m_outletStates[4] == 0) m_indiOutlet5["state"] = "Off";
-         else m_indiOutlet5["state"] = "On";
-         m_indiOutlet5.setState(pcf::IndiProperty::Ok);
+         updateIfChanged(m_indiOutlet5, "state", stateIntToString(m_outletStates[4]));
 
-         if(m_outletStates[5] == 0) m_indiOutlet6["state"] = "Off";
-         else m_indiOutlet6["state"] = "On";
-         m_indiOutlet6.setState(pcf::IndiProperty::Ok);
+         updateIfChanged(m_indiOutlet6, "state", stateIntToString(m_outletStates[5]));
 
+         updateIfChanged(m_indiOutlet7, "state", stateIntToString(m_outletStates[6]));
 
-         if(m_outletStates[6] == 0) m_indiOutlet7["state"] = "Off";
-         else m_indiOutlet7["state"] = "On";
-         m_indiOutlet7.setState(pcf::IndiProperty::Ok);
-
-         std::string currSt = m_indiOutlet7["state"].get();
-         if(m_outletStates[7] == 0) m_indiOutlet8["state"] = "Off";
-         else m_indiOutlet8["state"] = "On";
-         m_indiOutlet8.setState(pcf::IndiProperty::Ok);
-
-         if(currSt != m_indiOutlet7["state"].get()) m_indiDriver->sendSetProperty (m_indiOutlet8);
+         updateIfChanged(m_indiOutlet8, "state", stateIntToString(m_outletStates[7]));
 
       }
       else
       {
-         std::cerr << "Parse Error: " << rv << "\n";
-         
-         std::cerr << "Read: \n-----------------\n";
-         std::cerr << strRead << "\n-----------------\n";
+         log<software_error>({__FILE__, __LINE__, 0, rv, "parse error"});
       }
 
       return 0;
