@@ -16,9 +16,7 @@ namespace app
   *
   * \todo handle timeouts gracefully -- maybe go to error, flush, disconnect, reconnect, etc.
   * \todo need username and secure password handling
-  * \todo need to robustify login logic
   * \todo need to recognize signals in tty polls and not return errors, etc.
-  * \todo should check if values changed and do a sendSetProperty if so (pub/sub?)
   */
 class trippLitePDU : public MagAOXApp<>
 {
@@ -42,8 +40,6 @@ protected:
    float m_current {0}; ///< The current being reported by the device.
    std::vector<bool> m_outletStates; ///< The outlet states, false = off, true = on.
 
-   ///Mutex for locking device communications.
-   std::mutex m_devMutex;
 public:
 
    /// Default c'tor.
@@ -265,16 +261,20 @@ int trippLitePDU::appLogic()
 
    if(state() == stateCodes::LOGGEDIN)
    {
+      
+      std::unique_lock<std::mutex> lock(m_indiMutex, std::try_to_lock);
+      
+      if( !lock.owns_lock())
+      {
+         return 0;
+      }
+
       int rv;
       std::string strRead;
-      //Scoping the mutex
-      {
-         std::lock_guard<std::mutex> guard(m_devMutex);
 
-         rv = m_telnetConn.writeRead("devstatus\n", true, 1000,1000);
+      rv = m_telnetConn.writeRead("devstatus\n", true, 1000,1000);
 
-         strRead = m_telnetConn.m_strRead;
-      }
+      strRead = m_telnetConn.m_strRead;
 
       if(rv == TTY_E_TIMEOUTONREAD || rv == TTY_E_TIMEOUTONREADPOLL)
       {
@@ -303,8 +303,6 @@ int trippLitePDU::appLogic()
 
       if(rv == 0)
       {
-         std::lock_guard<std::mutex> guard(m_indiMutex);  //Lock the mutex before conducting INDI communications.
-
          updateIfChanged(m_indiStatus, "value", m_status);
 
          updateIfChanged(m_indiFrequency, "value", m_frequency);
@@ -425,61 +423,41 @@ int trippLitePDU::changeOutletState( const pcf::IndiProperty &ipRecv,
                                      uint8_t onum
                                    )
 {
+   std::lock_guard<std::mutex> guard(m_indiMutex);  //Lock the mutex before doing anything
+
+      
    std::string oreq = ipRecv["state"].get<std::string>();
 
    if( oreq == "On" && m_outletStates[onum] == 0)
    {
-      std::lock_guard<std::mutex> guard(m_devMutex);
-
       std::string cmd = "loadctl on -o ";
       cmd += mx::ioutils::convertToString<int>(onum+1);
       cmd += " --force\r";
-
-      std::cerr << "Sending " << cmd << "\n";
 
       std::string strRead;
       int rv = m_telnetConn.writeRead( cmd, true, m_writeTimeOut, m_readTimeOut);
 
       strRead = m_telnetConn.m_strRead;
-
-      std::cerr << "Received " << strRead << " (" << rv << ")\n";
-
-      m_outletStates[onum] = 1;
 
       uint8_t lonum = onum + 1;   //Do this without narrowing
       log<pdu_outlet_state>({ lonum, 1});
    }
    if( oreq == "Off" && m_outletStates[onum] == 1)
    {
-      std::lock_guard<std::mutex> guard(m_devMutex);
-
-      std::cerr << "Request to turn outlet " << indiOutlet.getName() << " " << onum << " Off\n";
-
       std::string cmd = "loadctl off -o ";
       cmd += mx::ioutils::convertToString<int>(onum+1);
       cmd += " --force\r";
-
-      std::cerr << "Sending " << cmd << "\n";
 
       std::string strRead;
       int rv = m_telnetConn.writeRead( cmd, true, m_writeTimeOut, m_readTimeOut);
       strRead = m_telnetConn.m_strRead;
 
-      std::cerr << "Received " << strRead << " (" << rv << ")\n";
-
-      m_outletStates[onum] = 0;
-
       uint8_t lonum = onum + 1; //Do this without narrowing
       log<pdu_outlet_state>({ lonum, 0});
    }
 
-   std::lock_guard<std::mutex> guard(m_indiMutex);  //Lock the mutex before conducting INDI communications.
 
-   if(m_outletStates[onum] == 0) indiOutlet["state"] = "Off";
-   else indiOutlet["state"] = "On";
-
-   indiOutlet.setState(pcf::IndiProperty::Ok);
-   m_indiDriver->sendSetProperty (indiOutlet);
+   //We don't update INDI, because the state won't change immediately.  Let device report it when it's ready.
 
    return 0;
 

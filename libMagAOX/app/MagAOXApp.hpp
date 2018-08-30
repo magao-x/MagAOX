@@ -515,6 +515,48 @@ protected:
 
    ///@} --INDI Interface
 
+   /** \name Power Management 
+     * For devices which have remote power management (e.g. from one of the PDUs) we implement
+     * a standard power state monitoring and management component for the FSM.  This is only 
+     * enabled if the power management configuration options are set.
+     * 
+     * If power management is enabled, then while power is off, appLogic will not be called.
+     * Instead a parrallel set of virtual functions is called, onPowerOff (to allow apps to 
+     * perform cleanup) and whilePowerOff (to allow apps to keep variables updated, etc).
+     * Note that these could merely call appLogic if desired.
+     * 
+     */
+protected:
+   bool m_powerMgtEnabled {false};
+   
+   std::string m_powerDevice;
+   std::string m_powerOutlet;
+   std::string m_powerElement {"state"};
+ 
+   int m_powerState {-1}; ///< Current power state, 1=On, 0=Off, -1=Unk.
+   
+   pcf::IndiProperty m_indiP_powerOutlet;
+   
+   /// This method is called when the change to poweroff is detected.
+   /**
+     * \returns 0 on success.
+     * \returns -1 on any error which means the app should exit.
+     */ 
+   virtual int onPowerOff() {return 0;}
+   
+   /// This method is called while the power is off, once per FSM loop.
+   /**
+     * \returns 0 on success.
+     * \returns -1 on any error which means the app should exit.
+     */ 
+   virtual int whilePowerOff() {return 0;}
+   
+public:
+   
+   INDI_SETCALLBACK_DECL(MagAOXApp, m_indiP_powerOutlet);
+   
+   ///@} Power Management
+   
 public:
 
    /** \name Member Accessors
@@ -666,6 +708,10 @@ void MagAOXApp<_useINDI>::setupBasicConfig() //virtual
    //Logger Stuff
    m_log.setupConfig(config);
 
+   //Power Management
+   config.add("power.device", "", "power.device", mx::argType::Required, "power", "device", false, "string", "Device controlling power for this app's device (INDI name).");
+   config.add("power.outlet", "", "power.outlet", mx::argType::Required, "power", "outlet", false, "string", "Outlet (or channel) on device for this app's device (INDI name).");
+   config.add("power.element", "", "power.element", mx::argType::Required, "power", "element", false, "string", "INDI element name.  Default is \"state\", only need to specify if different.");
 }
 
 template<bool _useINDI>
@@ -684,6 +730,19 @@ void MagAOXApp<_useINDI>::loadBasicConfig() //virtual
    if(prio != m_RTPriority)
    {
       RTPriority(prio);
+   }
+   
+   //--------Power Management --------//
+   config(m_powerDevice, "power.device");
+   config(m_powerOutlet, "power.outlet");
+   config(m_powerElement, "power.element");
+   
+   if(m_powerDevice != "" && m_powerOutlet != "")
+   {
+      log<text_log>("enabling power management: " + m_powerDevice + "." + m_powerOutlet + "." + m_powerElement);
+      
+      m_powerMgtEnabled = true;
+      REG_INDI_SETPROP(m_indiP_powerOutlet, m_powerDevice, m_powerOutlet);
    }
 }
 
@@ -745,12 +804,45 @@ int MagAOXApp<_useINDI>::execute() //virtual
    //This is the main event loop.
    while( m_shutdown == 0)
    {
-      /** \todo Add a mutex to lock every time appLogic is called.
-        * This would allow other threads to run appLogic, making it more responsive to status queries, etc.
-        *
-        */
-      if( appLogic() < 0) m_shutdown = 1;
-
+      
+      if(m_powerMgtEnabled)
+      {
+         if(state() == stateCodes::POWEROFF)
+         {
+            if(m_powerState == 1)
+            {
+               state(stateCodes::POWERON);
+            }
+         }
+         else
+         {
+            if(m_powerState < 1)
+            {
+               state(stateCodes::POWEROFF);
+               if(onPowerOff() < 0)
+               {
+                  m_shutdown = 1;
+                  continue;
+               }
+               
+            }
+         }
+      }
+      else if(state() == stateCodes::POWEROFF)
+      {
+         //If power management is not enabled there's no way to get out of power off, so we just go
+         state(stateCodes::POWERON);
+      }
+      
+      if(state() != stateCodes::POWEROFF) 
+      {
+         if( appLogic() < 0) 
+         {
+            m_shutdown = 1;
+            continue;
+         }
+      }
+      
       /** \todo Need a heartbeat update here.
         */
 
@@ -1527,6 +1619,39 @@ void MagAOXApp<_useINDI>::updateIfChanged( pcf::IndiProperty & p,
       p.setState (pcf::IndiProperty::Ok);
       m_indiDriver->sendSetProperty (p);
    }
+}
+
+template<bool _useINDI>
+INDI_SETCALLBACK_DEFN( MagAOXApp<_useINDI>, m_indiP_powerOutlet)(const pcf::IndiProperty &ipRecv)
+{
+   //m_indiP_powerOutlet = ipRecv;
+
+   std::string ps;
+   
+   try
+   {
+      ps = ipRecv[m_powerElement].get<std::string>();
+   }
+   catch(...)
+   {
+      log<software_error>({__FILE__, __LINE__, "Exception caught."});
+      return -1;
+   }
+   
+   if(ps == "On")
+   {
+      m_powerState = 1;
+   }
+   else if (ps == "Off")
+   {
+      m_powerState = 0;
+   }
+   else
+   {
+      m_powerState = -1;
+   }
+   
+   return 0;
 }
 
 template<bool _useINDI>

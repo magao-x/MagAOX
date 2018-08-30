@@ -36,13 +36,15 @@ struct stateCodes
                        UNINITIALIZED = 0, ///< The application is unitialized, the default
                        INITIALIZED = 1,   ///< The application has been initialized, set just before calling appStartup().
                        NODEVICE = 2,      ///< No device exists for the application to control.
-                       NOTCONNECTED = 3,  ///< The application is not connected to the device or service.
-                       CONNECTED = 4,     ///< The application has connected to the device or service.
-                       LOGGEDIN = 5,      ///< The application has logged into the device or service
-                       CONFIGURING = 6,   ///< The application is configuring the device.
-                       HOMING = 10,       ///< The device is homing.
-                       OPERATING = 20,    ///< The device is operating, other than homing.
-                       READY = 30,        ///< The device is ready for operation, but is not operating.
+                       POWEROFF = 4,      ///< The device power is off.
+                       POWERON = 6,       ///< The device power is on.
+                       NOTCONNECTED = 8,  ///< The application is not connected to the device or service.
+                       CONNECTED = 10,     ///< The application has connected to the device or service.
+                       LOGGEDIN = 15,      ///< The application has logged into the device or service
+                       CONFIGURING = 20,   ///< The application is configuring the device.
+                       HOMING = 25,       ///< The device is homing.
+                       OPERATING = 30,    ///< The device is operating, other than homing.
+                       READY = 35,        ///< The device is ready for operation, but is not operating.
                        SHUTDOWN = 10000   ///< The application has shutdown, set just after calling appShutdown().
                   };
                   
@@ -71,6 +73,10 @@ std::string stateCodes::codeText( stateCodeT stateCode )
          return "INITIALIZED";
       case stateCodes::NODEVICE:
          return "NODEVICE";
+      case stateCodes::POWEROFF:
+         return "POWEROFF";
+      case stateCodes::POWERON:
+         return "POWERON";
       case stateCodes::NOTCONNECTED:
          return "NOTCONNECTED";
       case stateCodes::CONNECTED:

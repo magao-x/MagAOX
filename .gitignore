@@ -36,6 +36,10 @@ apps/sshDigger/sshDigger
 
 apps/zaberCtrl/zaberCtrl
 
+apps/siglentSDG/siglentSDG
+apps/siglentSDG/tests/siglentSDG_test
+
+
 utils/logdump/logdump
 
 #Devel stuff in flatlogs

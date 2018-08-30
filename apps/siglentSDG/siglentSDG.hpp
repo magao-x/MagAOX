@@ -312,7 +312,7 @@ int siglentSDG::appStartup()
    m_indiP_C2phse.add (pcf::IndiElement("value"));
    
 
-   state(stateCodes::NOTCONNECTED);
+   //state(stateCodes::N);
 
    return 0;
 }
@@ -320,21 +320,47 @@ int siglentSDG::appStartup()
 int siglentSDG::appLogic()
 {
 
+   if( state() == stateCodes::POWERON )
+   {
+      sleep(1); //Give it time to wake up.
+      state(stateCodes::NOTCONNECTED);
+   }
+   
    if( state() == stateCodes::NOTCONNECTED )
    {
       int rv = m_telnetConn.connect(m_deviceAddr, m_devicePort);
 
       if(rv == 0)
       {
+         ///\todo the connection process in siglentSDG is a total hack.  Figure out why this is need to clear the channel, especially on a post-poweroff/on reconnect.
+         
+         //The sleeps here seem to be necessary to make sure there is a good
+         //comm with device.  Probably a more graceful way.
          state(stateCodes::CONNECTED);
          m_telnetConn.noLogin();
          sleep(1);//Wait for the connection to take.
 
          m_telnetConn.read(">>", m_readTimeOut);
-
+         
+         m_telnetConn.m_strRead.clear();
          m_telnetConn.write("\n", m_writeTimeOut);
+         
          m_telnetConn.read(">>", m_readTimeOut);
-
+         
+         int n = 0;
+         while( m_telnetConn.m_strRead != ">>")
+         {
+            if(n>9)
+            {
+               log<software_critical>({__FILE__, __LINE__});
+               return -1;
+            }
+            m_telnetConn.write("\n", m_writeTimeOut);
+            sleep(1);
+            m_telnetConn.read(">>", m_readTimeOut);
+            ++n;
+         }
+         
          if(!stateLogged())
          {
             std::stringstream logs;
@@ -464,7 +490,7 @@ int siglentSDG::writeRead( std::string & strRead,
 
    if(rv < 0)
    {
-      log<software_error>({__FILE__, __LINE__, 0, rv, tty::ttyErrorString(rv)});
+      if(m_powerState) log<software_error>({__FILE__, __LINE__, 0, rv, tty::ttyErrorString(rv)});
       state(stateCodes::NOTCONNECTED);
       return -1;
    }
@@ -473,14 +499,14 @@ int siglentSDG::writeRead( std::string & strRead,
    rv = m_telnetConn.write("\n", m_writeTimeOut);
    if(rv < 0)
    {
-      log<software_error>({__FILE__, __LINE__, 0, rv, tty::ttyErrorString(rv)});
+      if(m_powerState) log<software_error>({__FILE__, __LINE__, 0, rv, tty::ttyErrorString(rv)});
       return -1;
    }
    
    rv = m_telnetConn.read(">>", m_readTimeOut);
    if(rv < 0)
    {
-      log<software_error>({__FILE__, __LINE__, 0, rv, tty::ttyErrorString(rv)});
+      if(m_powerState) log<software_error>({__FILE__, __LINE__, 0, rv, tty::ttyErrorString(rv)});
       return -1;
    }
    return 0;
@@ -514,7 +540,7 @@ int siglentSDG::queryOUTP( int channel )
    
    if(rv < 0)
    {
-      log<text_log>("Error on OUTP? for channel " + mx::ioutils::convertToString<int>(channel), logPrio::LOG_ERROR);
+      if(m_powerState) log<text_log>("Error on OUTP? for channel " + mx::ioutils::convertToString<int>(channel), logPrio::LOG_ERROR);
       return -1;
    }
    
@@ -527,7 +553,8 @@ int siglentSDG::queryOUTP( int channel )
    {
       if(resp_channel != channel)
       {
-         log<software_error>({__FILE__,__LINE__, "wrong channel returned"});
+         if(m_powerState) log<software_error>({__FILE__,__LINE__, "wrong channel returned"});
+         return -1;
       }
 
       std::string ro;
@@ -549,7 +576,8 @@ int siglentSDG::queryOUTP( int channel )
    }
    else
    {
-      log<software_error>({__FILE__,__LINE__, 0, rv, "parse error"});
+      std::cerr << strRead << "\n";
+      if(m_powerState) log<software_error>({__FILE__,__LINE__, 0, rv, "parse error"});
       return -1;
    }
 
@@ -570,7 +598,7 @@ int siglentSDG::queryBSWV( int channel )
       
    if(rv < 0)
    {
-      log<text_log>("Error on BSWV? for channel " + mx::ioutils::convertToString<int>(channel), logPrio::LOG_ERROR);
+      if(m_powerState) log<text_log>("Error on BSWV? for channel " + mx::ioutils::convertToString<int>(channel), logPrio::LOG_ERROR);
       return -1;
    }
    
@@ -584,7 +612,8 @@ int siglentSDG::queryBSWV( int channel )
    {
       if(resp_channel != channel)
       {
-         log<software_error>({__FILE__,__LINE__, "wrong channel returned"});
+         if(m_powerState) log<software_error>({__FILE__,__LINE__, "wrong channel returned"});
+         return -1;
       }
 
       if(channel == 1) 
@@ -718,7 +747,7 @@ int siglentSDG::writeCommand( const std::string & command )
    int rv = m_telnetConn.write(command, m_writeTimeOut);
    if(rv < 0)
    {
-      log<software_error>({__FILE__, __LINE__, 0, rv, tty::ttyErrorString(rv)});
+      if(m_powerState) log<software_error>({__FILE__, __LINE__, 0, rv, tty::ttyErrorString(rv)});
       return -1;
    }
       
@@ -726,14 +755,14 @@ int siglentSDG::writeCommand( const std::string & command )
    rv = m_telnetConn.write("\n", m_writeTimeOut);
    if(rv < 0)
    {
-      log<software_error>({__FILE__, __LINE__, 0, rv, tty::ttyErrorString(rv)});
+      if(m_powerState) log<software_error>({__FILE__, __LINE__, 0, rv, tty::ttyErrorString(rv)});
       return -1;
    }
    
    rv = m_telnetConn.read(">>", m_readTimeOut);
    if(rv < 0)
    {
-      log<software_error>({__FILE__, __LINE__, 0, rv, tty::ttyErrorString(rv)});
+      if(m_powerState) log<software_error>({__FILE__, __LINE__, 0, rv, tty::ttyErrorString(rv)});
       return -1;
    }
    
@@ -759,7 +788,7 @@ int siglentSDG::changeFreq( int channel,
    
    if(rv < 0)
    {
-      log<software_error>({__FILE__, __LINE__});
+      if(m_powerState) log<software_error>({__FILE__, __LINE__});
       return -1;
    }
    
@@ -816,7 +845,7 @@ int siglentSDG::changeAmp( int channel,
    
    if(rv < 0)
    {
-      log<software_error>({__FILE__, __LINE__});
+      if(m_powerState) log<software_error>({__FILE__, __LINE__});
       return -1;
    }
    
