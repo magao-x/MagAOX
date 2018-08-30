@@ -128,17 +128,33 @@ public:
                 );
 
 
-   /// Write a command to the device.  This locks the mutex.
+   /// Write a command to the device.
    /**
      * \returns 0 on success
      * \returns -1 on error
      */ 
    int writeCommand( const std::string & commmand /**< [in] the complete command string to send to the device */);
    
-   /// Send a change frequency command to the device.  This locks the mutex.
+   /// Change the output status (on/off) of one channel. 
+   /**
+     * \returns 0 on success
+     * \returns -1 on error.
+     */ 
+   int changeOutp( int channel,                ///< [in] the channel to send the command to.
+                   const std::string & newOutp ///< [in] The requested output state [On/Off]
+                 );
+   
+   /// Change the output status (on/off) of one channel in response to an INDI property. This locks the mutex.
+   /**
+     * \returns 0 on success
+     * \returns -1 on error.
+     */ 
+   int changeOutp( int channel,                    ///< [in] the channel to send the command to.
+                   const pcf::IndiProperty &ipRecv ///< [in] INDI property containing the requested output state [On/Off]
+                 );
+   
+   /// Send a change frequency command to the device. 
    /** 
-     * The mutex is locked in the call to writeCommand.
-     * 
      * \returns 0 on success
      * \returns -1 on error
      */
@@ -148,8 +164,6 @@ public:
    
    /// Send a change frequency command to the device in response to an INDI property.  This locks the mutex.
    /** 
-     * The mutex is locked in the call to writeCommand.
-     * 
      * \returns 0 on success
      * \returns -1 on error
      */
@@ -157,10 +171,8 @@ public:
                    const pcf::IndiProperty &ipRecv ///< [in] INDI property containing the requested new frequency [Hz]
                  );
    
-   /// Send a change amplitude command to the device.  This locks the mutex.
+   /// Send a change amplitude command to the device. 
    /** 
-     * The mutex is locked in the call to writeCommand.
-     * 
      * \returns 0 on success
      * \returns -1 on error
      */
@@ -168,10 +180,8 @@ public:
                   double newAmp ///< [in] The requested new amplitude [V p2p]
                 );
    
-   /// Send a change amplitude command to the device in response to an INDI property.  This locks the mutex.
-   /** 
-     * The mutex is locked in the call to writeCommand.
-     * 
+   /// Send a change amplitude command to the device in response to an INDI property.
+   /**
      * \returns 0 on success
      * \returns -1 on error
      */
@@ -311,8 +321,6 @@ int siglentSDG::appStartup()
    REG_INDI_NEWPROP_NOCB(m_indiP_C2phse, "C2phse", pcf::IndiProperty::Number, pcf::IndiProperty::ReadOnly, pcf::IndiProperty::Idle);
    m_indiP_C2phse.add (pcf::IndiElement("value"));
    
-
-   //state(stateCodes::N);
 
    return 0;
 }
@@ -768,7 +776,71 @@ int siglentSDG::writeCommand( const std::string & command )
    
    return 0;
 }
-  
+ 
+int siglentSDG::changeOutp( int channel,
+                            const std::string & newOutp
+                          )
+{
+   if(channel < 1 || channel > 2) return -1;
+         
+   ///\todo logs here
+   
+   std::string no;
+   
+   if(newOutp == "Off" || newOutp == "OFF" || newOutp == "off") no = "OFF";
+   else if(newOutp == "On" || newOutp == "ON" || newOutp == "on") no = "ON";
+   else
+   {
+      log<software_error>({__FILE__, __LINE__, "Invalid OUTP spec: " + newOutp});
+      return -1;
+   }
+   
+   std::string afterColon = "OUTP " + no;
+   std::string command = makeCommand(channel, afterColon);
+      
+   int rv = writeCommand(command);
+   
+   if(rv < 0)
+   {
+      if(m_powerState) log<software_error>({__FILE__, __LINE__});
+      return -1;
+   }
+   
+   return 0;
+}
+
+int siglentSDG::changeOutp( int channel,
+                            const pcf::IndiProperty &ipRecv
+                          )
+{
+   if(channel < 1 || channel > 2) return -1;
+ 
+   std::string newOutp;
+   try
+   {
+      newOutp = ipRecv["value"].get<std::string>();
+   }
+   catch(...)
+   {
+      log<software_error>({__FILE__, __LINE__, "Exception caught."});
+      return -1;
+   }
+ 
+   //Make sure we don't change things while other things are being updated.
+   std::lock_guard<std::mutex> guard(m_indiMutex);  //Lock the mutex before conducting any communications.
+
+   stateCodes::stateCodeT enterState = state();
+   state(stateCodes::CONFIGURING);
+
+   int rv = changeOutp(channel, newOutp);
+   if(rv < 0) log<software_error>({__FILE__, __LINE__});
+   
+   state(enterState);
+   
+   return rv;
+}
+
+
 int siglentSDG::changeFreq( int channel,
                             double newFreq
                           )
@@ -889,7 +961,7 @@ INDI_NEWCALLBACK_DEFN(siglentSDG, m_indiP_C1outp)(const pcf::IndiProperty &ipRec
 {
    if (ipRecv.getName() == m_indiP_C1outp.getName())
    {
-      return 0;
+      return changeOutp(1, ipRecv);
    }
    return -1;
 }
@@ -916,7 +988,7 @@ INDI_NEWCALLBACK_DEFN(siglentSDG, m_indiP_C2outp)(const pcf::IndiProperty &ipRec
 {
    if (ipRecv.getName() == m_indiP_C2outp.getName())
    {
-      return 0;
+      return changeOutp(2, ipRecv);
    }
    return -1;
 }
