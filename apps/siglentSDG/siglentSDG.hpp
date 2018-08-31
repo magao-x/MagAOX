@@ -7,6 +7,8 @@
 #include "../../libMagAOX/libMagAOX.hpp" //Note this is included on command line to trigger pch
 #include "magaox_git_version.h"
 
+#include "siglentSDG_parsers.hpp"
+
 namespace MagAOX
 {
 namespace app
@@ -70,19 +72,6 @@ public:
    /// Do any needed shutdown tasks.  Currently nothing in this app.
    virtual int appShutdown();
 
-   /// Parse the SDG response to the OUTP query
-   /**
-     * Example: C1:OUTP OFF,LOAD,HZ,PLRT,NOR
-     *
-     * \returns 0 on success
-     * \returns \<0 on error, with value indicating location of error.
-     */
-   int parseOUTP( int & channel,
-                  int & output,
-
-                  const std::string & strRead
-                );
-
    /// Write a command to the device and get the response.  Not mutex-ed.
    /** We assume this is called after the m_indiMutex is locked.
      *
@@ -107,27 +96,6 @@ public:
      */ 
    int queryBSWV( int channel /**< [in] the channel to query */);
    
-   /// Parse the SDG response to the BSWV query
-   /**
-     * Example: C1:BSWV WVTP,SINE,FRQ,10HZ,PERI,0.1S,AMP,2V,AMPVRMS,0.707Vrms,OFST,0V,HLEV,1V,LLEV,-1V,PHSE,0
-     *
-     * \returns 0 on success
-     * \returns \<0 on error, with value indicating location of error.
-     */
-   int parseBSWV( int & channel,
-                  std::string & wvtp,
-                  double & freq,
-                  double & peri,
-                  double & amp,
-                  double & amprs,
-                  double & ofst,
-                  double & hlev,
-                  double & llev,
-                  double & phse,
-                  const std::string & strRead
-                );
-
-
    /// Write a command to the device.
    /**
      * \returns 0 on success
@@ -664,90 +632,11 @@ int siglentSDG::queryBSWV( int channel )
    return 0;
 }
 
-int siglentSDG::parseOUTP( int & channel,
-                           int & output,
-                           const std::string & strRead
-                         )
-{
-   std::vector<std::string> v;
-
-   mx::ioutils::parseStringVector(v, strRead, ":, ");
-
-   if(v[1] != "OUTP") return -1;
-
-   if(v[0][0] != 'C') return -2;
-   if(v[0].size() < 2) return -3;
-   channel = mx::ioutils::convertFromString<int>(v[0].substr(1, v[0].size()-1));
-
-   if(v[2] == "OFF") output = 0;
-   else if(v[2] == "ON") output = 1;
-   else
-   {
-      return -4;
-   }
-   return 0;
-}
 
 
 
-int siglentSDG::parseBSWV( int & channel,
-                           std::string & wvtp,
-                           double & freq,
-                           double & peri,
-                           double & amp,
-                           double & ampvrms,
-                           double & ofst,
-                           double & hlev,
-                           double & llev,
-                           double & phse,
-                           const std::string & strRead
-                         )
-{
-   std::vector<std::string> v;
 
-   mx::ioutils::parseStringVector(v, strRead, ":, ");
 
-   //for(size_t i=0; i<v.size();++i) std::cerr << v[i] << "\n";
-
-   if(v.size()!= 20) return -1;
-
-   if(v[1] != "BSWV") return -2;
-
-   if(v[0][0] != 'C') return -3;
-   if(v[0].size() < 2) return -4;
-   channel = mx::ioutils::convertFromString<int>(v[0].substr(1, v[0].size()-1));
-
-   if(v[2] != "WVTP") return -5;
-   wvtp = v[3];
-
-   if(wvtp != "SINE") return -6;
-   
-   if(v[4] != "FRQ") return -7;
-   freq = mx::ioutils::convertFromString<double>(v[5]);
-
-   if(v[6] != "PERI") return -8;
-   peri = mx::ioutils::convertFromString<double>(v[7]);
-
-   if(v[8] != "AMP") return -9;
-   amp = mx::ioutils::convertFromString<double>(v[9]);
-
-   if(v[10] != "AMPVRMS") return -10;
-   ampvrms = mx::ioutils::convertFromString<double>(v[11]);
-
-   if(v[12] != "OFST") return -11;
-   ofst = mx::ioutils::convertFromString<double>(v[13]);
-
-   if(v[14] != "HLEV") return -12;
-   hlev = mx::ioutils::convertFromString<double>(v[15]);
-
-   if(v[16] != "LLEV") return -13;
-   llev = mx::ioutils::convertFromString<double>(v[17]);
-
-   if(v[18] != "PHSE") return -14;
-   phse = mx::ioutils::convertFromString<double>(v[19]);
-
-   return 0;
-}
 
 int siglentSDG::writeCommand( const std::string & command )
 {

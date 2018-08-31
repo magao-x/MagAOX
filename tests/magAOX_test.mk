@@ -1,5 +1,5 @@
 ####################################################
-# Makefile for building MagAOX applications
+# Makefile for building MagAOX test programs
 #
 # Manages dependance on the libMagAOX pre-compiled header
 # as well as local files (such as .hpp)
@@ -26,10 +26,10 @@ include $(SELF_DIR)/../Make/common.mk
 include $(SELF_DIR)/../Make/config.mk
 
 #To ensure pre-compiled header gets used
-CXXFLAGS += -include $(SELF_DIR)../libMagAOX/libMagAOX.hpp
+CXXFLAGS += -include $(SELF_DIR)../tests/testMagAOX.hpp
 
 #Uncomment to test whether pre-compiled header is used
-#CXXFLAGS += -H
+CXXFLAGS += -H
 
 
 ########################################
@@ -43,10 +43,10 @@ TARGET ?= $(t)
 all:  pch magaox_git_version.h $(TARGET)
 
 pch:
-	cd $(SELF_DIR)../libMagAOX; ${MAKE}
+	cd $(SELF_DIR)../tests; ${MAKE}
 
 
-$(TARGET):  $(TARGET).o  
+$(TARGET):  $(TARGET).o  $(SELF_DIR)../tests/testMagAOX.hpp.gch $(TARGET).cpp $(OTHER_HEADERS)
 	$(LINK.o) -o $(TARGET) $(TARGET).o  $(LDFLAGS) $(LDLIBS)
 
 
