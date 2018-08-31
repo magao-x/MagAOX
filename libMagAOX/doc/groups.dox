@@ -2,40 +2,58 @@
 ///\defgroup common Library Configuration
 
 ///\defgroup logger The Logging System
-
-/** \defgroup logbuff Log Buffer Specification
+  
+/** \defgroup flatlogs The flatlogs log protocol
+  * flatlogs consist of a simple header, followed by a flatbuffers encoded message payload.
   * \ingroup logger
   */
 
-/** \defgroup logbufftypes Types and Constants
-  * Typedefs and static constants related to the log buffer.
+/** \defgroup logDefs Type definitions for flatlogs.
+  * \ingroup \flatlogs
+  */
+  
+/** \defgroup logbuff The flatlogs binary header definition
+  * \ingroup flatlogs
+  */
+  
+/** \defgroup logPrio The log priorities
   * \ingroup logbuff
   */
   
-/** \defgroup logcodes Log Event Codes
-  * \ingroup logger
+/** \defgroup flatlogs_time The flatlogs timestamp
+  * \ingroup logbuff
+  */
+
+/** \defgroup logformat Standard text formatting of logs for biological purposes
+  * \ingroup flatlogs
   */
   
-/** \defgroup loglevels Log Levels
-  * \ingroup logger
+/** \defgroup flatlogs_files
+  * \ingroup flatlogs
   */
   
-/** \defgroup logtypes Log Entry Types
+/** \defgroup logger_types Log Entry Types
   * \ingroup logger
   */
 
-/** \defgroup logtypesbasic Basic Entry Types
-  * \ingroup logtypes
+/** \defgroup logger_types_basic Basic Entry Types
+  * \ingroup logger_types
   */
 
-/** \defgroup logformat Log Output Formatting
-  * \ingroup logger
+/** \defgroup logger_types_files Files specifying log types
+  * \ingroup logger_types
   */
-
 
 /** \defgroup magaoxapp The Base MagAOX Application
   */
 
 /** \defgroup indi INDI Support in MagAOX Apps
   * \ingroup magaoxapp
+  */
+
+/** \defgroup tty TTY device interfaces 
+  */
+  
+/** \defgroup tty_files TTY files 
+  * \ingroup tty 
   */

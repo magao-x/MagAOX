@@ -200,7 +200,7 @@ int zaberStage::sendCommand( std::string & response,
                              const std::string & command
                            )
 {
-   MagAOXAppT::log<text_log>(std::string("Sending: ") + command, logLevels::DEBUG2);
+   MagAOXAppT::log<text_log>(std::string("Sending: ") + command, logPrio::LOG_DEBUG2);
    
    std::cerr << "Sending: " << command << "\n";
    za_send(port, command.c_str());
@@ -223,7 +223,7 @@ int zaberStage::sendCommand( std::string & response,
       za_reply rep;
 
       
-      MagAOXAppT::log<text_log>(std::string("Received: ") + buff, logLevels::DEBUG2);
+      MagAOXAppT::log<text_log>(std::string("Received: ") + buff, logPrio::LOG_DEBUG2);
 
       rv = za_decode(&rep, buff);
       if(rv != Z_SUCCESS)
@@ -266,7 +266,7 @@ int zaberStage::updatePos( z_port port )
    }
    else
    {
-      MagAOXAppT::log<software_trace_error>({__FILE__, __LINE__});
+      MagAOXAppT::log<software_error>({__FILE__, __LINE__});
       return -1;
    }
 }

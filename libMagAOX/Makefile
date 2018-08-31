@@ -14,15 +14,8 @@ INCLUDEDEPS= app/MagAOXApp.hpp \
              common/config.hpp \
              common/defaults.hpp \
              common/environment.hpp \
-             logger/logBuffer.hpp \
-             logger/logCodes.hpp \
              logger/logFileRaw.hpp \
-             logger/logLevels.hpp \
              logger/logManager.hpp \
-             logger/logStdFormat.hpp \
-             logger/logTypes.hpp \
-             logger/logTypesBasics.hpp \
-             time/timespecX.hpp \
              tty/ttyErrors.hpp \
              tty/ttyIOUtils.hpp \
              tty/ttyUSB.hpp \

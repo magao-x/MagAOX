@@ -1,0 +1,12 @@
+#these are the log codes
+git_state                0
+text_log                 10
+user_log                 11
+state_change             20
+software_log             50
+indidriver_start         140
+indidriver_stop          141
+loop_closed              1001
+loop_paused              1002
+loop_open                1003
+pdu_outlet_state         12001

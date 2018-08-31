@@ -2,19 +2,23 @@
 
 # The MagAOX Software System
 
-This is the software which runs the MagAOX ExAO system.  
+This is the software which runs the MagAOX ExAO system.
 
 ## 1 Dependencies
 
-#### 1.1 Current:
-1. mxlib (https://github.com/jaredmales/mxlib)
-2. libudev (for introspective device discovery)
-3. zlib (compression for INDI)
+1. mxlib (https://github.com/jaredmales/mxlib).
+   For a MagAO-X machine change the prefix to `/usr/local` in the mxlib install
+2. libudev (for introspective device discovery).  Get from package manager.
+3. zlib (compression for INDI). Get from package manager:
    - zlib-devel [centOS-7]
    - zlib1g-dev [ubuntu]
-
-#### 1.1 Future
-1. libhdf5 (though not for anything currently implemented, but we will)
+4. flatbuffers (https://google.github.io/flatbuffers/flatbuffers_guide_building.html)
+   To build and install the flatc compiler and install the include files in /usr/local:
+   ```
+   $ cmake -G "Unix Makefiles" -DCMAKE_BUILD_TYPE=Release
+   $ make
+   $ sudo make install
+   ```
 
 ## 2 Software Configuration
 
@@ -98,7 +102,7 @@ ToDo:
 
 ## 4 Software Install
 
-The following are the default MagAOX system directories.  
+The following are the default MagAOX system directories.
 
 ```
 /opt/MagAOX               [MagAOX system directory]
@@ -135,3 +139,19 @@ To-do items are listed in the above sections.  Also see the Todo page in the dox
 - [] split base INDI off into separate repo, which will be the minimum someone needs to have INDI utils for interacting with MagAO-X without installing the whole tree.
 - [] create indiserver startup script which takes a list of drivers from a config file, creates symlinks to xindidriver as needed, and then starts indiserver itself.
 - [] start issue tracking
+
+## 7 Develop in a VM with [Vagrant](https://vagrantup.com)
+
+The MagAOX code is intimately tied to Linux OS internals, and targets CentOS 7 for the realtime control computers. To develop in the most "flight-like" configuration, a Vagrantfile is provided to set up a development VM.
+
+### Prerequisites:
+
+  * VirtualBox
+  * Vagrant
+  * NFS
+
+### Usage:
+
+After cloning the MagAOX repository, `cd` into it and run `vagrant up`. Vagrant will download a virtual machine image for CentOS 7 and then set up all the dependencies required. NFS is used to sync the contents of your repository clone to the VM.
+
+To connect to the VM, use `vagrant ssh`.

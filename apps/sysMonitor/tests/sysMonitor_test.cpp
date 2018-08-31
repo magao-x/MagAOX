@@ -4,70 +4,69 @@
 #include "../../../tests/catch2/catch.hpp"
 
 
-#include "../remoteDriver.hpp"
+#include "../sysMonitor.hpp"
 
-SCENARIO( "remoteDriver is constructed and modified", "[remoteDriver]" ) 
+SCENARIO( "System monitor is constructed and CPU temperature results are passed in", "[sysMonitor]" ) 
 {
-   GIVEN("A default constructed remoteDriver")
+   GIVEN("A default constructed system monitor object and an empty vector for temperatures")
    {
-      remoteDriver rd;
+      sysMonitor sm;
       int rv;
+      std::vector<float> temps;
+
+      /****
+       * Test following parsing functions
+       * int parseCPUTemperatures(std::string, std::vector<float>&);
+       * int parseCPULoads(std::string, float&);
+       * int parseDiskTemperature(std::string, float&);
+       * int parseDiskUsage(std::string, float&);
+       * int parseRamUsage(std::string, float&);
+      ****/
       
-      REQUIRE(rd.name() == "");
-      REQUIRE(rd.host() == "");
-      REQUIRE(rd.port() == INDI_DEFAULT_PORT);
-      
-      WHEN("The name is changed")
+      WHEN("Correct line is given")
       {
-         rv = rd.name("remDrive");
+         rv = sm.parseCPUTemperatures("Core 0:         +42.0°C  (high = +100.0°C, crit = +100.0°C)", temps);
          REQUIRE(rv == 0);
-         REQUIRE(rd.name() == "remDrive");
+         REQUIRE(temps.size() == 1);
       }
       
-      WHEN("An invalid name is specified, includes @")
+      WHEN("Another correct line is given")
       {
-         rv = rd.name("@ghj");
-         REQUIRE(rv < 0);
-         REQUIRE(rd.name() == "");
-      }
-      
-      WHEN("An invalid name is specified, includes :")
-      {
-         rv = rd.name("ghj:345");
-         REQUIRE(rv < 0);
-         REQUIRE(rd.name() == "");
-      }
-      
-      WHEN("The host is changed")
-      {
-         rv = rd.host("1.2.3.4");
+         rv = sm.parseCPUTemperatures("     Core   1:    +45.0°C    (high = +100.0°C, crit = +100.0°C)", temps);
          REQUIRE(rv == 0);
-         REQUIRE(rd.host() == "1.2.3.4");
+         REQUIRE(temps.size() == 2);
       }
       
-      WHEN("An invalid host is specified, includes @")
+      WHEN("Another correct line is given")
       {
-         rv = rd.host("1.2.@3.4");
-         REQUIRE(rv < 0);
-         REQUIRE(rd.host() == "");
+         rv = sm.parseCPUTemperatures("Core 2:      +91.0°C  (high = +100.0°C, crit = +100.0°C)", temps);
+         REQUIRE(rv == 0);
+         REQUIRE(temps.size() == 3);
       }
       
-      WHEN("An invalid host is specified, includes :")
+      WHEN("Incorrect line is given")
       {
-         rv = rd.host("1.2.3:4");
-         REQUIRE(rv < 0);
-         REQUIRE(rd.host() == "");
+         rv = sm.parseCPUTemperatures("coretemp-isa-0000", temps);
+         REQUIRE(rv == 1);
+         REQUIRE(temps.size() == 3);
       }
       
-      WHEN("The port is changed")
+      WHEN("Incorrect line is given")
       {
-         rv = rd.port(256);
-         REQUIRE(rd.port() == 256);
+         rv = sm.parseCPUTemperatures("Core 3:+91.0°C  (high = +100.0°C, crit = +100.0°C)", temps);
+         REQUIRE(rv == 1);
+         REQUIRE(temps.size() == 3);
+      }
+
+      WHEN("Incorrect line is given")
+      {
+         rv = sm.parseCPUTemperatures("Core2:      +91.0°C(high =+100.0°C, crit= +100.0°C)", temps);
+         REQUIRE(rv == 1);
+         REQUIRE(temps.size() == 3);
       }
    }
-   
 }
-
+/*
 SCENARIO( "remoteDriver parses remote driver spec strings", "[remoteDriver]" ) 
 {
    GIVEN("A default constructed remoteDriver")
@@ -157,3 +156,4 @@ SCENARIO( "remoteDriver parses remote driver spec strings", "[remoteDriver]" )
       
    }
 }
+*/

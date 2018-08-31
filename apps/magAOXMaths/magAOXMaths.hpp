@@ -20,9 +20,16 @@ class magAOXMaths : public MagAOXApp<>
 
 protected:
    // declare our properties
-	 pcf::IndiProperty x, xmaths;
-	 pcf::IndiProperty y, ymaths;
+   pcf::IndiProperty my_val, my_val_maths;
+ 
+   pcf::IndiProperty other_val;
 
+   std::string m_myVal {"x"};
+   std::string m_other_devName;
+   std::string m_other_valName;
+   
+   int updateVals();
+   
 public:
 
    /// Default c'tor.
@@ -49,25 +56,31 @@ public:
    virtual int appShutdown();
 
 
-   INDI_NEWCALLBACK_DECL(magAOXMaths, x);
+   INDI_NEWCALLBACK_DECL(magAOXMaths, my_val);
 
-   INDI_NEWCALLBACK_DECL(magAOXMaths, y);
+   INDI_SETCALLBACK_DECL(magAOXMaths, other_val);
 
 };
 
 magAOXMaths::magAOXMaths() : MagAOXApp(MAGAOX_CURRENT_SHA1, MAGAOX_REPO_MODIFIED)
 {
+  
+   
    return;
 }
 
 void magAOXMaths::setupConfig()
 {
-
+   config.add("my_val", "", "my_val", mx::argType::Required, "", "my_val", false, "string", "The name of this app's value.");
+   config.add("other_devName", "", "other_devName", mx::argType::Required, "", "other_devName", false, "string", "The name of the other app name.");
+   config.add("other_valName", "", "other_valName", mx::argType::Required, "", "other_valName", false, "string", "The name of the other val name.");
 }
 
 void magAOXMaths::loadConfig()
 {
-
+   config(m_myVal, "my_val");
+   config(m_other_devName, "other_devName");
+   config(m_other_valName, "other_valName");
 
 }
 
@@ -75,35 +88,33 @@ int magAOXMaths::appStartup()
 {
 
    // set up the x input property
-   REG_INDI_PROP(x, "x", pcf::IndiProperty::Number, pcf::IndiProperty::ReadWrite, pcf::IndiProperty::Idle);
+   REG_INDI_NEWPROP(my_val, m_myVal, pcf::IndiProperty::Number, pcf::IndiProperty::ReadWrite, pcf::IndiProperty::Idle);
 
-   x.add (pcf::IndiElement("value"));
-
+   my_val.add (pcf::IndiElement("value"));
+   my_val["value"].set<double>(0.0);
+   
+   
    // set up the result maths property
-   REG_INDI_PROP_NOCB(xmaths, "xmaths", pcf::IndiProperty::Number, pcf::IndiProperty::ReadOnly, pcf::IndiProperty::Idle);
-   xmaths.add (pcf::IndiElement("value"));
-   xmaths.add (pcf::IndiElement("sqr"));
-   xmaths.add (pcf::IndiElement("sqrt"));
-   xmaths.add (pcf::IndiElement("abs"));
+   REG_INDI_NEWPROP_NOCB(my_val_maths, "maths", pcf::IndiProperty::Number, pcf::IndiProperty::ReadOnly, pcf::IndiProperty::Idle);
+   my_val_maths.add (pcf::IndiElement("value"));
+   my_val_maths.add (pcf::IndiElement("sqr"));
+   my_val_maths.add (pcf::IndiElement("sqrt"));
+   my_val_maths.add (pcf::IndiElement("abs"));
+   my_val_maths.add (pcf::IndiElement("prod"));
 
-	// set up the x input property
-   REG_INDI_PROP(y, "y", pcf::IndiProperty::Number, pcf::IndiProperty::ReadWrite, pcf::IndiProperty::Idle);
-
-   y.add (pcf::IndiElement("value"));
-
-   // set up the result maths property
-   REG_INDI_PROP_NOCB(ymaths, "ymaths", pcf::IndiProperty::Number, pcf::IndiProperty::ReadOnly, pcf::IndiProperty::Idle);
-   ymaths.add (pcf::IndiElement("value"));
-   ymaths.add (pcf::IndiElement("sqr"));
-   ymaths.add (pcf::IndiElement("sqrt"));
-   ymaths.add (pcf::IndiElement("abs"));
-
+   
+   REG_INDI_SETPROP(other_val, m_other_devName, m_other_valName);
+   other_val.add (pcf::IndiElement("value"));
+   other_val["value"].set<double>(0.0);
+   
+   updateVals();
+                    
+   
    return 0;
 }
 
 int magAOXMaths::appLogic()
 {
-
    return 0;
 
 }
@@ -114,64 +125,49 @@ int magAOXMaths::appShutdown()
    return 0;
 }
 
-INDI_NEWCALLBACK_DEFN(magAOXMaths, x)(const pcf::IndiProperty &ipRecv)
+int magAOXMaths::updateVals()
+{
+   // extract value
+   double v = my_val["value"].get<double>();
+
+   // fill maths
+   my_val_maths["value"] = v;
+   my_val_maths["sqr"] = v*v;
+   my_val_maths["sqrt"] = sqrt(v);
+   my_val_maths["abs"] = fabs(v);
+
+   my_val_maths["prod"] = v*other_val["value"].get<double>();
+
+   // publish maths
+   my_val_maths.setState (pcf::IndiProperty::Ok);
+   if(m_indiDriver) m_indiDriver->sendSetProperty (my_val_maths);
+   
+   return 0;
+}
+
+INDI_NEWCALLBACK_DEFN(magAOXMaths, my_val)(const pcf::IndiProperty &ipRecv)
 {
 
-   if (ipRecv.getName() == x.getName())
+   if (ipRecv.getName() == my_val.getName())
    {
-      // received a new value for property x
+      // received a new value for property val
+      my_val["value"] = ipRecv["value"].get<double>();
+      my_val.setState (pcf::IndiProperty::Ok);
+      m_indiDriver->sendSetProperty (my_val);
 
-      // extract value
-      double v = ipRecv["value"].get<double>();
-
-      // fill maths
-      xmaths["value"] = v;
-      xmaths["sqr"] = v*v;
-      xmaths["sqrt"] = sqrt(v);
-      xmaths["abs"] = fabs(v);
-
-      // ack x
-      x["value"] = v;
-      x.setState (pcf::IndiProperty::Ok);
-      m_indiDriver->sendSetProperty (x);
-
-      // publish xmaths to be nice
-      xmaths.setState (pcf::IndiProperty::Ok);
-      m_indiDriver->sendSetProperty (xmaths);
+      updateVals();
+      
       return 0;
    }
    return -1;
 }
 
-INDI_NEWCALLBACK_DEFN(magAOXMaths, y)(const pcf::IndiProperty &ipRecv)
+INDI_SETCALLBACK_DEFN(magAOXMaths, other_val)(const pcf::IndiProperty &ipRecv)
 {
-
-   if (ipRecv.getName() == y.getName())
-   {
-      std::cerr << ipRecv.getDevice() << "\n";
-      
-      // received a new value for property y
-
-      // extract value
-      double v = ipRecv["value"].get<double>();
-
-      // fill maths
-      ymaths["value"] = v;
-      ymaths["sqr"] = v*v;
-      ymaths["sqrt"] = sqrt(v);
-      ymaths["abs"] = fabs(v);
-
-      // ack x
-      y["value"] = v;
-      y.setState (pcf::IndiProperty::Ok);
-      m_indiDriver->sendSetProperty (y);
-
-      // publish ymaths to be nice
-      ymaths.setState (pcf::IndiProperty::Ok);
-      m_indiDriver->sendSetProperty (ymaths);
-      return 0;
-   }
-   return -1;
+   other_val = ipRecv;
+   
+   updateVals();
+   return 0;
 }
 
 } //namespace app

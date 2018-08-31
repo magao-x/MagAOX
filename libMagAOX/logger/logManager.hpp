@@ -20,9 +20,10 @@
 #include <ratio>
 
 
-#include "../time/timespecX.hpp"
+#include <flatlogs/flatlogs.hpp>
+using namespace flatlogs;
 
-#include "logTypes.hpp"
+#include "generated/logTypes.hpp"
 
 namespace MagAOX
 {
@@ -77,10 +78,11 @@ struct logManager : public logFileT
 
    unsigned long m_writePause {MAGAOX_default_writePause}; ///< Time, in nanoseconds, to pause between successive batch writes to the file. Default is 1e9. Configure with logger.writePause.
 
-   logLevelT m_logLevel {logLevels::INFO}; ///< The minimum log level to actually record.  Logs with level below this are rejected. Default is INFO. Configure with logger.logLevel.
+   logPrioT m_logLevel {logPrio::LOG_INFO}; ///< The minimum log level to actually record.  Logs with level below this are rejected. Default is INFO. Configure with logger.logLevel.
 
    int m_logThreadPrio {0};
 
+   bool m_logThreadRunning {false};
    //<--end of todo
 
    /// Default c'tor.
@@ -110,12 +112,12 @@ struct logManager : public logFileT
      * \returns 0 on success
      * \returns -1 on error.
      */
-   int logLevel( logLevelT newLev /**< [in] the new value of logLevel */);
+   int logLevel( logPrioT newLev /**< [in] the new value of logLevel */);
 
    /// Get the current value of logLevel
    /** \returns the value m_logLevel
      */
-   logLevelT logLevel();
+   logPrioT logLevel();
 
    /// Set a new value of logThreadPrio
    /** Updates m_logThreadPrio with new value.
@@ -132,6 +134,11 @@ struct logManager : public logFileT
      */
    int logThreadPrio();
 
+   /// Get status of the log thread running flag 
+   /** \returns the current value of m_logThreadRunning 
+     */
+   bool logThreadRunning();
+   
    ///Setup an application configurator for the logger section
    int setupConfig( mx::appConfigurator & config /**< [in] an application configuration to setup */);
 
@@ -160,7 +167,7 @@ struct logManager : public logFileT
    template<typename logT>
    static int createLog( bufferPtrT & logBuffer, ///< [out] a shared_ptr\<logBuffer\>, which will be allocated and populated with the log entry 
                          const typename logT::messageT & msg, ///< [in] the message to log (could be of type emptyMessage) 
-                         logLevelT level  ///< [in] the level (verbosity) of this log
+                         const logPrioT & level  ///< [in] the level (verbosity) of this log
                        );
 
    /// Create a log formatted log entry, filling in a buffer.
@@ -172,9 +179,9 @@ struct logManager : public logFileT
      */
    template<typename logT>
    static int createLog( bufferPtrT & logBuffer, ///< [out] a shared_ptr\<logBuffer\>, which will be allocated and populated with the log entry 
-                         time::timespecX & ts, ///< [in] the timestamp of this log entry.
+                         const timespecX & ts, ///< [in] the timestamp of this log entry.
                          const typename logT::messageT & msg, ///< [in] the message to log (could be of type emptyMessage) 
-                         logLevelT level ///< [in] the level (verbosity) of this log
+                         const logPrioT & level ///< [in] the level (verbosity) of this log
                        );
    
    /// Make a log entry, including a message.
@@ -183,7 +190,7 @@ struct logManager : public logFileT
      */
    template<typename logT>
    void log( const typename logT::messageT & msg, ///< [in] the message to log
-             logLevelT level = logLevels::DEFAULT ///< [in] [optional] the log level.  The default is used if not specified.
+             logPrioT level = logPrio::LOG_DEFAULT ///< [in] [optional] the log level.  The default is used if not specified.
            );
 
    /// Make a log entry, including a message.
@@ -191,9 +198,9 @@ struct logManager : public logFileT
      * \tparam logT is a log entry type
      */
    template<typename logT>
-   void log( time::timespecX & ts, ///< [in] the timestamp of the log entry
+   void log( timespecX & ts, ///< [in] the timestamp of the log entry
              const typename logT::messageT & msg, ///< [in] the message to log
-             logLevelT level = logLevels::DEFAULT ///< [in] [optional] the log level.  The default is used if not specified.
+             logPrioT level = logPrio::LOG_DEFAULT ///< [in] [optional] the log level.  The default is used if not specified.
            );
    
    /// Make a log entry with no message.
@@ -201,15 +208,15 @@ struct logManager : public logFileT
      * \tparam logT is a log entry type
      */
    template<typename logT>
-   void log( logLevelT level = logLevels::DEFAULT /**< [in] [optional] the log level.  The default is used if not specified.*/);
+   void log( logPrioT level = logPrio::LOG_DEFAULT /**< [in] [optional] the log level.  The default is used if not specified.*/);
 
    /// Make a log entry with no message.
    /**
      * \tparam logT is a log entry type
      */
    template<typename logT>
-   void log( time::timespecX & ts, ///< [in] the timestamp of the log entry
-             logLevelT level = logLevels::DEFAULT ///< [in] [optional] the log level.  The default is used if not specified.
+   void log( timespecX & ts, ///< [in] the timestamp of the log entry
+             logPrioT level = logPrio::LOG_DEFAULT ///< [in] [optional] the log level.  The default is used if not specified.
            );
 
 };
@@ -248,17 +255,9 @@ unsigned long logManager<logFileT>::writePause()
 }
 
 template<class logFileT>
-int logManager<logFileT>::logLevel( logLevelT newLev )
+int logManager<logFileT>::logLevel( logPrioT newLev )
 {
-   if(newLev >= logLevels::MAXLEVEL)
-   {
-      return -1;
-   }
-
-   if(newLev <= logLevels::UNKNOWN)
-   {
-      return -1;
-   }
+   
 
    m_logLevel = newLev;
 
@@ -266,7 +265,7 @@ int logManager<logFileT>::logLevel( logLevelT newLev )
 }
 
 template<class logFileT>
-logLevelT logManager<logFileT>::logLevel()
+logPrioT logManager<logFileT>::logLevel()
 {
    return m_logLevel;
 }
@@ -285,6 +284,12 @@ template<class logFileT>
 int logManager<logFileT>::logThreadPrio()
 {
    return m_logThreadPrio;
+}
+
+template<class logFileT>
+bool logManager<logFileT>::logThreadRunning()
+{
+   return m_logThreadRunning;
 }
 
 template<class logFileT>
@@ -313,15 +318,15 @@ int logManager<logFileT>::loadConfig( mx::appConfigurator & config )
    config(tmp, "logger.logLevel");
    if(tmp != "")
    {
-      logLevelT lev;
+      logPrioT lev;
 
       lev = logLevelFromString(tmp);
 
-      if(  lev == logLevels::DEFAULT ) lev = logLevels::INFO;
-      if( lev == logLevels::UNKNOWN )
+      if(  lev == logPrio::LOG_DEFAULT ) lev = logPrio::LOG_INFO;
+      if( lev == logPrio::LOG_UNKNOWN )
       {
          std::cerr << "Unkown log level specified.  Using default (INFO)\n";
-         lev = logLevels::INFO;
+         lev = logPrio::LOG_INFO;
       }
       logLevel(lev);
    }
@@ -357,18 +362,18 @@ int logManager<logFileT>::logThreadStart()
    }
    catch( const std::exception & e )
    {
-      log<software_error>({__FILE__,__LINE__, 0, std::string("Exception on log thread start: ") + e.what()});
+      log<software_error>({__FILE__,__LINE__, 0, 0, std::string("Exception on log thread start: ") + e.what()});
       return -1;
    }
    catch( ... )
    {
-      log<software_error>({__FILE__,__LINE__, 0, "Unkown exception on log thread start"});
+      log<software_error>({__FILE__,__LINE__, 0, 0, "Unkown exception on log thread start"});
       return -1;
    }
    
    if(!m_logThread.joinable())
    {
-      log<software_error>({__FILE__, __LINE__, 0, "Log thread did not start"});
+      log<software_error>({__FILE__, __LINE__, 0, 0,  "Log thread did not start"});
       return -1;
    }
    
@@ -380,7 +385,7 @@ int logManager<logFileT>::logThreadStart()
    
    if(rv != 0)
    {
-      log<software_error>({__FILE__, __LINE__, rv, std::string("Error setting thread params: ") + strerror(rv)});
+      log<software_error>({__FILE__, __LINE__, 0, rv, std::string("Error setting thread params: ") + strerror(rv)});
       return -1;
    }
    
@@ -392,6 +397,8 @@ template<class logFileT>
 void logManager<logFileT>::logThreadExec()
 {
 
+   m_logThreadRunning = true;
+   
    std::unique_lock<std::mutex> lock(m_qMutex, std::defer_lock);
 
    while(!m_logShutdown || !m_logQueue.empty())
@@ -412,8 +419,12 @@ void logManager<logFileT>::logThreadExec()
          while( it != end )
          {
             //m_logFile.
-            this->writeLog( *it );
-
+            if( this->writeLog( *it ) < 0) 
+            {
+               m_logThreadRunning = false;
+               return;
+            }
+            
             er = it;
             ++it;
 
@@ -431,68 +442,45 @@ void logManager<logFileT>::logThreadExec()
       if(m_logQueue.empty() && !m_logShutdown) std::this_thread::sleep_for( std::chrono::duration<unsigned long, std::nano>(m_writePause));
    }
 
+   m_logThreadRunning = false;
 }
 
 template<class logFileT>
 template<typename logT>
 int logManager<logFileT>::createLog( bufferPtrT & logBuffer,
                                      const typename logT::messageT & msg,
-                                     logLevelT level
+                                     const logPrioT & level
                                    )
 {
    //Very first step is to get the current time.
-   time::timespecX ts;
+   timespecX ts;
    ts.gettime();
 
-   return createLog<logT>(logBuffer, ts, msg, level);
+   return logHeader::createLog<logT>(logBuffer, ts, msg, level);
 }
 
 template<class logFileT>
 template<typename logT>
 int logManager<logFileT>::createLog( bufferPtrT & logBuffer,
-                                     time::timespecX & ts,
+                                     const timespecX & ts,
                                      const typename logT::messageT & msg,
-                                     logLevelT level
+                                     const logPrioT & level
                                    )
 {
-   if(level == logLevels::DEFAULT) level = logT::defaultLevel;
-
-   //We first allocate the buffer.
-   msgLenT len = logT::length(msg);
-   logBuffer = bufferPtrT( (char *) ::operator new((headerSize + len)*sizeof(char)) );
-
-   //Now load the basics.
-   reinterpret_cast<logHeaderT *>(logBuffer.get())->logLevel = level;
-   reinterpret_cast<logHeaderT *>(logBuffer.get())->eventCode = logT::eventCode;
-   reinterpret_cast<logHeaderT *>(logBuffer.get())->timespecX = ts;
-   reinterpret_cast<logHeaderT *>(logBuffer.get())->msgLen = len;
-
-
-   //Each log-type is responsible for loading its message
-   logT::format( logBuffer.get() + messageOffset, msg);
-
-   return 0;
-
+   return logHeader::createLog<logT>(logBuffer, ts, msg, level);
 }
 
 template<class logFileT>
 template<typename logT>
 void logManager<logFileT>::log( const typename logT::messageT & msg,
-                                logLevelT level
+                                logPrioT level
                               )
 {
    //Step 0 check level.
-   if(level == logLevels::DEFAULT) level = logT::defaultLevel;
+   if(level == logPrio::LOG_DEFAULT) level = logT::defaultLevel;
 
-   if( level > 0) //Normal logs
-   {
-      if(level < m_logLevel) return; // We do nothing with this.
-   }
-   else //Telemetry logs
-   {
-      if(level > m_logLevel) return; // We do nothing with this.
-   }
-
+   if(level > m_logLevel) return; // We do nothing with this.
+   
    //Step 1 create log
    bufferPtrT logBuffer;
    createLog<logT>(logBuffer, msg, level);
@@ -506,22 +494,15 @@ void logManager<logFileT>::log( const typename logT::messageT & msg,
 
 template<class logFileT>
 template<typename logT>
-void logManager<logFileT>::log( time::timespecX & ts,
+void logManager<logFileT>::log( timespecX & ts,
                                 const typename logT::messageT & msg,
-                                logLevelT level
+                                logPrioT level
                               )
 {
    //Step 0 check level.
-   if(level == logLevels::DEFAULT) level = logT::defaultLevel;
+   if(level == logPrio::LOG_DEFAULT) level = logT::defaultLevel;
 
-   if( level > 0) //Normal logs
-   {
-      if(level < m_logLevel) return; // We do nothing with this.
-   }
-   else //Telemetry logs
-   {
-      if(level > m_logLevel) return; // We do nothing with this.
-   }
+   if(level > m_logLevel) return; // We do nothing with this.
 
    //Step 1 create log
    bufferPtrT logBuffer;
@@ -535,15 +516,15 @@ void logManager<logFileT>::log( time::timespecX & ts,
 
 template<class logFileT>
 template<typename logT>
-void logManager<logFileT>::log( logLevelT level )
+void logManager<logFileT>::log( logPrioT level )
 {
    log<logT>( emptyMessage(), level );
 }
 
 template<class logFileT>
 template<typename logT>
-void logManager<logFileT>::log( time::timespecX & ts,
-                                logLevelT level 
+void logManager<logFileT>::log( timespecX & ts,
+                                logPrioT level 
                               )
 {
    log<logT>( ts, emptyMessage(), level );

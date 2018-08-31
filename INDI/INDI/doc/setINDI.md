@@ -1,30 +1,20 @@
 setINDI
 =======
 
-[NAME](#NAME)
-[SYNOPSIS](#SYNOPSIS)
-[DESCRIPTION](#DESCRIPTION)
-[OPTIONS](#OPTIONS)
-[TYPE](#TYPE)
-[EXIT STATUS](#EXIT%20STATUS)
-[EXAMPLES](#EXAMPLES)
-[SEE ALSO](#SEE%20ALSO)
+[TOC]
 
 ------------------------------------------------------------------------
 
-NAME []()
----------
+# NAME 
 
 setINDI − set one or more writable INDI property values
 
-SYNOPSIS []()
--------------
+# SYNOPSIS 
 
 **setINDI \[options\] {\[type\] device.property.e1\[;e2...\]=v1\[;v2...\]} ...
 setINDI \[options\] {\[type\] device.property.e1=v1\[;e2=v2...\]} ...**
 
-DESCRIPTION []()
-----------------
+# DESCRIPTION 
 
 setINDI connects to an indiserver and sends commands to set new values for specified properties. Each property is specified using three components followed by the new value in the following form:
 ```
@@ -32,8 +22,7 @@ device.property.element=value
 ```
 Since a property may be an array, the syntax allows for multiple elements to be specified simultaneously. Two different syntax forms are supported. One form lists each element name separated by semicolons, then an equal sign, then each corresponding value also separated by semicolons. The other form lists each element=value together, each pair separated by a semicolon. In either form, all elements are updated atomically. If the property is of type BLOB then each element value is the name of a file to be sent.
 
-OPTIONS []()
-------------
+# OPTIONS 
 
 <table>
 <colgroup>
@@ -81,8 +70,7 @@ OPTIONS []()
 </tbody>
 </table>
 
-TYPE []()
----------
+# TYPE 
 
 Each property may optionally be preceded by a type code:
 
@@ -120,13 +108,11 @@ If all properties are preceded by their type code, then a round trip to the serv
 
 When developing a script of commands, one strategy is to use getINDI to get the exact property definitions one time, try the desired commands without the type codes to benefit from error checking, then add the type codes in the final optimized version.
 
-EXIT STATUS []()
-----------------
+# EXIT STATUS 
 
 The setINDI program exits with a status of 0 if it succeeded in sending the commands to set new values for each specified property. It exits with 1 if there was at least one property for which a value could not be set within the given timeout period. It exits with 2 if there was some other error such as not being able to connect to the indiserver.
 
-EXAMPLES []()
--------------
+# EXAMPLES 
 
 Send new lat/long numeric location values atomically to the Mount driver:
 
@@ -136,16 +122,17 @@ Same, but with alternative syntax and indicate type for greater efficiency:
 
 setINDI -n ’Mount.Location.Latitude=30;Longitude=100’
 
-SEE ALSO []()
--------------
+# SEE ALSO 
 
 evalINDI, getINDI, indiserver
 http://www.clearskyinstitute.com/INDI/INDI.pdf
 
+
 ------------------------------------------------------------------------
+
 This setINDI.md generated from the man documentation with the commands:
 ```
 groff -mandoc -Thtml setINDI.man > setINDI.html
 pandoc -t markdown_github setINDI.html > setINDI.md
 ```
-and then tweaked for presentation.
+and then tweaked for presentation and doxygen compatibility.

@@ -54,7 +54,7 @@ namespace MagAOX
          virtual int appShutdown();
 
          int findCPUTemperatures(std::vector<float>&);
-         int parseCPUTemperatures(std::string, std::vector<float>&); //done
+         int parseCPUTemperatures(std::string, std::vector<float>&);
          int criticalCoreTemperature(std::vector<float>&);
          int findCPULoads(std::vector<float>&);
          int parseCPULoads(std::string, float&);
@@ -162,7 +162,16 @@ namespace MagAOX
         if (str.compare("Core ") == 0) 
         {
         	std::string temp_str = line.substr(17, 4);
-            float temp = std::stof (temp_str);
+          float temp;
+            try
+            {
+                temp = std::stof (temp_str);
+            }
+            catch (const std::invalid_argument& e) {
+              std::cerr << "Invalid read occuered when parsing CPU temperatures" << std::endl;
+              return 1;
+            }
+            
 			      temps.push_back(temp);
             return 0;
         }
@@ -232,7 +241,15 @@ namespace MagAOX
       {
       	std::istringstream iss4(line);
         std::vector<std::string> tokens4{std::istream_iterator<std::string>{iss4},std::istream_iterator<std::string>{}};
-        float cpu_load = 100.0 - std::stof (tokens4[12]);
+        float cpu_load;
+        try
+            {
+                cpu_load = 100.0 - std::stof (tokens4[12]);
+            }
+            catch (const std::invalid_argument& e) {
+              std::cerr << "Invalid read occuered when parsing CPU loads" << std::endl;
+              return 1;
+            }
         cpu_load /= 100;
         loadVal = cpu_load;
         return 0;
@@ -282,7 +299,14 @@ namespace MagAOX
             {
                temp_s.pop_back();
                temp_s.pop_back();
-               hdd_temp = std::stof (temp_s);
+               try
+              {
+                hdd_temp = std::stof (temp_s);
+              }
+              catch (const std::invalid_argument& e) {
+                std::cerr << "Invalid read occuered when parsing disk temperature" << std::endl;
+                return 1;
+              }
             }
          }
          return 0;
@@ -336,7 +360,15 @@ namespace MagAOX
       	std::istringstream iss2(line);
         std::vector<std::string> tokens2{std::istream_iterator<std::string>{iss2},std::istream_iterator<std::string>{}};
         tokens2[4].pop_back();
-        diskUsage = std::stof (tokens2[4]);
+        try
+              {
+                diskUsage = std::stof (tokens2[4]);
+              }
+              catch (const std::invalid_argument& e) {
+                std::cerr << "Invalid read occuered when parsing disk usage" << std::endl;
+                return 1;
+              }
+        
         return 0;
       }
 
@@ -373,8 +405,14 @@ namespace MagAOX
       {
       	std::istringstream iss3(line);
         std::vector<std::string> tokens3{std::istream_iterator<std::string>{iss3},std::istream_iterator<std::string>{}};
-        ramUsage = std::stof(tokens3[2])/std::stof(tokens3[1]);
-        std::cout << "Checking1: " << ramUsage << std::endl;
+        try
+              {
+                ramUsage = std::stof(tokens3[2])/std::stof(tokens3[1]);
+              }
+              catch (const std::invalid_argument& e) {
+                std::cerr << "Invalid read occuered when parsing ram usage" << std::endl;
+                return 1;
+              }
         return 0;
       }
 

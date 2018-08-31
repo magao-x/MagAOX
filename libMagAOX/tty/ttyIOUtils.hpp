@@ -1,7 +1,8 @@
 /** \file ttyIOUtils.hpp
   * \brief Utilities for i/o on a file descriptor pointing to a tty device.
   * \author Jared R. Males (jaredmales@gmail.com)
-  *
+  * 
+  * \ingroup tty_files
   * History:
   * - 2018-01-15 created by JRM, starting with code imported from VisAO
   */
@@ -31,6 +32,62 @@ namespace MagAOX
 namespace tty
 {
 
+/// Replace lone \\r and \\n with \\r\\n for telnet-ness.
+/** Do it all at once instead of during char-by-char transmission
+  * cuz some devices (I'm looking at you SDG) get impatient and 
+  * stop paying attention.
+  * 
+  * \returns 0 on success
+  * \returns -1 on error (nothing yet)
+  * 
+  */
+int telnetCRLF( std::string & telnetStr,     ///< [out] the string with \\r an \\n converted to \\r\\n
+                const std::string & inputStr ///< [in] the string to be converted
+              )
+{
+   telnetStr.resize(inputStr.size()); 
+      
+   size_t N = inputStr.size();
+   size_t j = 0;
+   for(size_t i=0;i<N; ++i)
+   {
+      if(inputStr[i] != '\r' && inputStr[i] != '\n')
+      {
+         telnetStr[j] = inputStr[i];
+      }
+      else if(inputStr[i] == '\r')
+      {
+         telnetStr[j] = '\r';
+
+         if(i < N-1)
+         {
+            if(inputStr[i+1] == '\n')
+            {
+               ++j;
+               telnetStr[j] = '\n';
+               ++i;
+               ++j; //i is incremented on continue, but j is not
+               continue;
+            }
+         }
+         telnetStr.push_back(' ');
+         ++j;
+         telnetStr[j] = '\n';
+      }
+      else if(inputStr[i] == '\n')
+      {
+         telnetStr[j] = '\r';
+         telnetStr.push_back(' ');
+         ++j;
+         telnetStr[j] = '\n';
+      }
+      ++j;
+   }
+   
+   return 0;
+}
+
+  
 /// Open a file as a raw-mode tty device
 /**
   * \returns TTY_E_NOERROR on success.
@@ -39,6 +96,7 @@ namespace tty
   * \returns TTY_E_SETISPEED on a cfsetispeed error.
   * \returns TTY_E_SETOSPEED on a cfsetospeed error.
   *
+  * \ingroup tty 
   */
 int ttyOpenRaw( int & fileDescrip,        ///< [out] the file descriptor.  Set to 0 on an error.
                 std::string & deviceName, ///< [in] the device path name, e.g. /dev/ttyUSB0
@@ -88,6 +146,8 @@ int ttyOpenRaw( int & fileDescrip,        ///< [out] the file descriptor.  Set t
 /**
   * \returns true if the last N chars of buffRead are equal to eot, where N is the length of eot.
   * \returns false otherwise.
+  * 
+  * \ingroup tty 
   */
 inline
 bool isEndOfTrans( const std::string & strRead, ///< [in] The read buffer to check
@@ -115,6 +175,8 @@ bool isEndOfTrans( const std::string & strRead, ///< [in] The read buffer to che
   * \returns TTY_E_ERRORONWRITEPOLL if an error is returned by poll.
   * \returns TTY_E_TIMEOUTONWRITE if a timeout occurs during the write.
   * \returns TTY_E_ERRORONWRITE if an error occurs writing to the file.
+  * 
+  * \ingroup tty 
   */
 inline
 int ttyWrite( const std::string & buffWrite, ///< [in] The characters to write to the tty.
@@ -164,6 +226,8 @@ int ttyWrite( const std::string & buffWrite, ///< [in] The characters to write t
   * \returns TTY_E_ERRORONREADPOLL if an error is returned by poll.
   * \returns TTY_E_TIMEOUTONREAD if a timeout occurs during the read.
   * \returns TTY_E_ERRORONREAD if an error occurs reading from the file.
+  * 
+  * \ingroup tty 
   */
 inline
 int ttyRead( std::string & strRead,   ///< [out] The string in which to store the output.
@@ -240,6 +304,8 @@ int ttyRead( std::string & strRead,   ///< [out] The string in which to store th
   * \returns TTY_E_ERRORONREADPOLL if an error is returned by poll.
   * \returns TTY_E_TIMEOUTONREAD if a timeout occurs during the read.
   * \returns TTY_E_ERRORONREAD if an error occurs reading from the file.
+  * 
+  * \ingroup tty 
   */
 inline
 int ttyWriteRead( std::string & strRead,        ///< [out] The string in which to store the output.

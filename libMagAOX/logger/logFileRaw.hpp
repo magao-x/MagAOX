@@ -20,8 +20,7 @@
 #include <mx/ioutils/stringUtils.hpp>
 
 #include "../common/defaults.hpp"
-#include "../time/timespecX.hpp"
-#include "logBuffer.hpp"
+#include <flatlogs/flatlogs.hpp>
 
 namespace MagAOX
 {
@@ -139,7 +138,7 @@ public:
      * \returns 0 on success
      * \returns -1 on error
      */
-   int writeLog( bufferPtrT & data ///< [in] the log entry to write to disk
+   int writeLog( flatlogs::bufferPtrT & data ///< [in] the log entry to write to disk
                );
 
    /// Flush the stream
@@ -166,7 +165,7 @@ protected:
      * \returns 0 on success
      * \returns -1 on error
      */
-   int createFile(time::timespecX & ts /**< [in] A MagAOX timespec, used to set the timestamp */);
+   int createFile(flatlogs::timespecX & ts /**< [in] A MagAOX timespec, used to set the timestamp */);
 
 
 };
@@ -236,16 +235,15 @@ size_t logFileRaw::maxLogSize()
 }
 
 inline
-int logFileRaw::writeLog( bufferPtrT & data )
+int logFileRaw::writeLog( flatlogs::bufferPtrT & data )
 {
-   msgLenT len = msgLen(data);
-   size_t N = headerSize + len;
+   size_t N = flatlogs::logHeader::totalSize(data);
 
    //Check if we need a new file
    if(m_currFileSize + N > m_maxLogSize || m_fout == 0)
    {
-      time::timespecX ts = timespecX(data);
-      createFile(ts);
+      flatlogs::timespecX ts = flatlogs::logHeader::timespec(data);
+      if( createFile(ts) < 0 ) return -1;
    }
 
    size_t nwr = fwrite( data.get(), sizeof(char), N, m_fout);
@@ -253,6 +251,7 @@ int logFileRaw::writeLog( bufferPtrT & data )
    if(nwr != N*sizeof(char))
    {
       std::cerr << "logFileRaw::writeLog: Error by fwrite.  At: " << __FILE__ << " " << __LINE__ << "\n";
+      std::cerr << "logFileRaw::writeLog: errno says: " << strerror(errno) << "\n";
       return -1;
    }
 
@@ -279,7 +278,7 @@ int logFileRaw::close()
 
 
 inline
-int logFileRaw::createFile(time::timespecX & ts)
+int logFileRaw::createFile(flatlogs::timespecX & ts)
 {
    std::string tstamp = ts.timeStamp();
 
@@ -288,12 +287,14 @@ int logFileRaw::createFile(time::timespecX & ts)
 
    if(m_fout) fclose(m_fout);
 
+   errno = 0;
    ///\todo handle case where file exists (only if another instance tries at same ns -- pathological)
    m_fout = fopen(fname.c_str(), "wb");
 
    if(m_fout == 0)
    {
-      std::cerr << "logFileRaw::createFile: Error by fopen.  At: " << __FILE__ << " " << __LINE__ << "\n";
+      std::cerr << "logFileRaw::createFile: Error by fopen. At: " << __FILE__ << " " << __LINE__ << "\n";
+      std::cerr << "logFileRaw::createFile: errno says: " << strerror(errno) << "\n";
       std::cerr << "logFileRaw::createFile: fname = " << fname << "\n";
       return -1;
    }

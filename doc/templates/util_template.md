@@ -1,53 +1,39 @@
 util-name
 ==========
 
-[NAME](#NAME)
-[SYNOPSIS](#SYNOPSIS)
-[DESCRIPTION](#DESCRIPTION)
-[OPTIONS](#OPTIONS)
-[other-sec](#DRIVER)
-[EXIT STATUS](#EXIT%20STATUS)
-[EXAMPLES](#EXAMPLES)
-[SEE ALSO](#SEE%20ALSO)
+[TOC]
 
 ------------------------------------------------------------------------
 
-NAME []()
----------
+# NAME 
 
 util-name − does something
 
-SYNOPSIS []()
--------------
+# SYNOPSIS 
+
 ```
 commands [options] arg1 [more-args ...]
 ```
 
-DESCRIPTION []()
-----------------
+# DESCRIPTION 
 
 add . . .
 
-OPTIONS []()
-------------
+# OPTIONS
 
 |Short | Long         |  Config-File         |     Type               | Description  |
 | ---  | ---          | ---                  |   ---               | ---          |
 
 
-other-sec []()
------------
+# other-sec
 
 
-EXIT STATUS []()
-----------------
+# EXIT STATUS
 
 `util-name` will . . .
 
-EXAMPLES []()
--------------
+
+# EXAMPLES
 
 
-
-SEE ALSO []()
--------------
+# SEE ALSO 
