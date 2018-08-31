@@ -7,6 +7,8 @@
 #include "../../libMagAOX/libMagAOX.hpp" //Note this is included on command line to trigger pch
 #include "magaox_git_version.h"
 
+#include "siglentSDG_parsers.hpp"
+
 namespace MagAOX
 {
 namespace app
@@ -70,19 +72,6 @@ public:
    /// Do any needed shutdown tasks.  Currently nothing in this app.
    virtual int appShutdown();
 
-   /// Parse the SDG response to the OUTP query
-   /**
-     * Example: C1:OUTP OFF,LOAD,HZ,PLRT,NOR
-     *
-     * \returns 0 on success
-     * \returns \<0 on error, with value indicating location of error.
-     */
-   int parseOUTP( int & channel,
-                  int & output,
-
-                  const std::string & strRead
-                );
-
    /// Write a command to the device and get the response.  Not mutex-ed.
    /** We assume this is called after the m_indiMutex is locked.
      *
@@ -93,41 +82,66 @@ public:
                   const std::string & command ///< [in] The command to send.
                  );
    
+   /// Send the MDWV? query and get the response state.
+   /** This does not update internal state.
+     * 
+     * \returns 0 on success
+     * \returns -1 on an error.
+     */ 
+   int queryMDWV( std::string & state, ///< [out] the MDWV state, ON or OFF
+                  int channel ///< [in] the channel to query
+                );
+ 
+   /// Send the SWWV? query and get the response state.
+   /** This does not update internal state.
+     * 
+     * \returns 0 on success
+     * \returns -1 on an error.
+     */ 
+   int querySWWV( std::string & state, ///< [out] the SWWV state, ON or OFF 
+                  int channel ///< [in] the channel to query
+                );
+
+   /// Send the BTWV? query and get the response state.
+   /** This does not update internal state.
+     * 
+     * \returns 0 on success
+     * \returns -1 on an error.
+     */ 
+   int queryBTWV( std::string & state,  ///< [out] the BTWV state, ON or OFF
+                  int channel ///< [in] the channel to query
+                );
+
+   /// Send the ARWV? query and get the response index.
+   /** This does not update internal state.
+     * 
+     * \returns 0 on success
+     * \returns -1 on an error.
+     */ 
+   int queryARWV( int & index,  ///< [out] the ARWV index
+                  int channel ///< [in] the channel to query 
+                );
+   
+   /// Send the BSWV? query for a channel.
+   /** This updates member variables and INDI.
+     * 
+     * \returns 0 on success
+     * \returns -1 on an error.
+     */ 
+   int queryBSWV( int channel /**< [in] the channel to query */);
+
+   
+   /// Check the setup is correct and safe for PI TTM control.
+   int checkSetup();
+   
    /// Send the OUTP? query for a channel.
-   /** This can set state to DISCONNECTED.
+   /** 
      * \returns 0 on success
      * \returns -1 on an error.
      */ 
    int queryOUTP( int channel /**< [in] the channel to query */);
    
-   /// Send the BSWV? query for a channel.
-   /** This can set state to DISCONNECTED.
-     * \returns 0 on success
-     * \returns -1 on an error.
-     */ 
-   int queryBSWV( int channel /**< [in] the channel to query */);
    
-   /// Parse the SDG response to the BSWV query
-   /**
-     * Example: C1:BSWV WVTP,SINE,FRQ,10HZ,PERI,0.1S,AMP,2V,AMPVRMS,0.707Vrms,OFST,0V,HLEV,1V,LLEV,-1V,PHSE,0
-     *
-     * \returns 0 on success
-     * \returns \<0 on error, with value indicating location of error.
-     */
-   int parseBSWV( int & channel,
-                  std::string & wvtp,
-                  double & freq,
-                  double & peri,
-                  double & amp,
-                  double & amprs,
-                  double & ofst,
-                  double & hlev,
-                  double & llev,
-                  double & phse,
-                  const std::string & strRead
-                );
-
-
    /// Write a command to the device.
    /**
      * \returns 0 on success
@@ -395,26 +409,21 @@ int siglentSDG::appLogic()
       std::unique_lock<std::mutex> lock(m_indiMutex, std::try_to_lock);
       if(lock.owns_lock())
       {
-         if( queryOUTP(1) < 0 ) 
+         int cs = checkSetup();
+         
+         if(cs < 0) return 0; //This means we aren't really connected yet.
+         
+         if(cs > 0)
          {
-            log<text_log>("Failure checking C1 OUTP.", logPrio::LOG_CRITICAL);
-            return -1;
+            std::cerr << "failed setup check, need to normalizeSetup\n";
          }
-         if( queryOUTP(2) < 0 )
-         {
-            log<text_log>("Failure checking C2 OUTP.", logPrio::LOG_CRITICAL);
-            return -1;
-         }
-         if( queryBSWV(1) < 0 )
-         {
-            log<text_log>("Failure checking C1 BSWV.", logPrio::LOG_CRITICAL);
-            return -1;
-         }
-         if( queryBSWV(2) < 0 )
-         {
-            log<text_log>("Failure checking C2 BSWV.", logPrio::LOG_CRITICAL);
-            return -1;
-         }   
+
+         if( queryBSWV(1) < 0 ) return 0; //This means we aren't really connected yet.
+         if( queryBSWV(2) < 0 ) return 0; //This means we aren't really connected yet.
+
+         
+         if( queryOUTP(1) < 0 ) return 0; //This means we aren't really connected yet.
+         if( queryOUTP(2) < 0 ) return 0; //This means we aren't really connected yet.
          
          ///\todo check wvtp here.
          
@@ -534,7 +543,12 @@ std::string makeCommand( int channel,
    return command;
 }
 
-int siglentSDG::queryOUTP( int channel )
+
+
+inline
+int siglentSDG::queryMDWV( std::string & state, 
+                           int channel
+                         )
 {
    int rv;
 
@@ -542,21 +556,21 @@ int siglentSDG::queryOUTP( int channel )
    
    std::string strRead;
 
-   std::string com = makeCommand(channel, "OUTP?");
+   std::string com = makeCommand(channel, "MDWV?");
    
    rv = writeRead( strRead, com);
    
    if(rv < 0)
    {
-      if(m_powerState) log<text_log>("Error on OUTP? for channel " + mx::ioutils::convertToString<int>(channel), logPrio::LOG_ERROR);
+      if(m_powerState) log<text_log>("Error on MDWV? for channel " + mx::ioutils::convertToString<int>(channel), logPrio::LOG_ERROR);
       return -1;
    }
    
    int resp_channel;
-   int resp_output;
+   std::string resp_state;
       
-   rv = parseOUTP(resp_channel, resp_output, strRead );
-
+   rv = parseMDWV(resp_channel, resp_state, strRead );
+   
    if(rv == 0)
    {
       if(resp_channel != channel)
@@ -565,26 +579,145 @@ int siglentSDG::queryOUTP( int channel )
          return -1;
       }
 
-      std::string ro;
-      if(resp_output > 0) ro = "On";
-      else if(resp_output == 0 ) ro = "Off";
-      else ro = "UNK";
-      
-      if(channel == 1) 
-      {
-         m_C1outp = resp_output;
-         updateIfChanged(m_indiP_C1outp, "value", ro);
-      }
-      
-      else if(channel == 2) 
-      {
-         m_C2outp = resp_output;
-         updateIfChanged(m_indiP_C2outp, "value", ro);
-      }
+      state = resp_state;
    }
    else
    {
-      std::cerr << strRead << "\n";
+      if(m_powerState) log<software_error>({__FILE__,__LINE__, 0, rv, "parse error"});
+      return -1;
+   }
+
+   return 0;
+}
+
+inline
+int siglentSDG::querySWWV( std::string & state, 
+                           int channel
+                         )
+{
+   int rv;
+
+   if(channel < 1 || channel > 2) return -1;
+   
+   std::string strRead;
+
+   std::string com = makeCommand(channel, "SWWV?");
+   
+   rv = writeRead( strRead, com);
+   
+   if(rv < 0)
+   {
+      if(m_powerState) log<text_log>("Error on SWWV? for channel " + mx::ioutils::convertToString<int>(channel), logPrio::LOG_ERROR);
+      return -1;
+   }
+   
+   int resp_channel;
+   std::string resp_state;
+      
+   rv = parseSWWV(resp_channel, resp_state, strRead );
+   
+   if(rv == 0)
+   {
+      if(resp_channel != channel)
+      {
+         if(m_powerState) log<software_error>({__FILE__,__LINE__, "wrong channel returned"});
+         return -1;
+      }
+
+      state = resp_state;
+   }
+   else
+   {
+      if(m_powerState) log<software_error>({__FILE__,__LINE__, 0, rv, "parse error"});
+      return -1;
+   }
+
+   return 0;
+}
+   
+inline
+int siglentSDG::queryBTWV( std::string & state, 
+                           int channel
+                         )
+{
+   int rv;
+
+   if(channel < 1 || channel > 2) return -1;
+   
+   std::string strRead;
+
+   std::string com = makeCommand(channel, "BTWV?");
+   
+   rv = writeRead( strRead, com);
+   
+   if(rv < 0)
+   {
+      if(m_powerState) log<text_log>("Error on BTWV? for channel " + mx::ioutils::convertToString<int>(channel), logPrio::LOG_ERROR);
+      return -1;
+   }
+   
+   int resp_channel;
+   std::string resp_state;
+      
+   rv = parseBTWV(resp_channel, resp_state, strRead );
+   
+   if(rv == 0)
+   {
+      if(resp_channel != channel)
+      {
+         if(m_powerState) log<software_error>({__FILE__,__LINE__, "wrong channel returned"});
+         return -1;
+      }
+
+      state = resp_state;
+   }
+   else
+   {
+      if(m_powerState) log<software_error>({__FILE__,__LINE__, 0, rv, "parse error"});
+      return -1;
+   }
+
+   return 0;
+}
+
+inline
+int siglentSDG::queryARWV( int & index, 
+                           int channel
+                         )
+{
+   int rv;
+
+   if(channel < 1 || channel > 2) return -1;
+   
+   std::string strRead;
+
+   std::string com = makeCommand(channel, "ARWV?");
+   
+   rv = writeRead( strRead, com);
+   
+   if(rv < 0)
+   {
+      if(m_powerState) log<text_log>("Error on ARWV? for channel " + mx::ioutils::convertToString<int>(channel), logPrio::LOG_ERROR);
+      return -1;
+   }
+   
+   int resp_channel;
+   int resp_index;
+      
+   rv = parseBSTWV(resp_channel, resp_index, strRead );
+   
+   if(rv == 0)
+   {
+      if(resp_channel != channel)
+      {
+         if(m_powerState) log<software_error>({__FILE__,__LINE__, "wrong channel returned"});
+         return -1;
+      }
+
+      index = resp_index;
+   }
+   else
+   {
       if(m_powerState) log<software_error>({__FILE__,__LINE__, 0, rv, "parse error"});
       return -1;
    }
@@ -664,91 +797,188 @@ int siglentSDG::queryBSWV( int channel )
    return 0;
 }
 
-int siglentSDG::parseOUTP( int & channel,
-                           int & output,
-                           const std::string & strRead
-                         )
+int siglentSDG::queryOUTP( int channel )
 {
-   std::vector<std::string> v;
+   int rv;
 
-   mx::ioutils::parseStringVector(v, strRead, ":, ");
+   if(channel < 1 || channel > 2) return -1;
+   
+   std::string strRead;
 
-   if(v[1] != "OUTP") return -1;
+   std::string com = makeCommand(channel, "OUTP?");
+   
+   rv = writeRead( strRead, com);
+   
+   if(rv < 0)
+   {
+      if(m_powerState) log<text_log>("Error on OUTP? for channel " + mx::ioutils::convertToString<int>(channel), logPrio::LOG_ERROR);
+      return -1;
+   }
+   
+   int resp_channel;
+   int resp_output;
+      
+   rv = parseOUTP(resp_channel, resp_output, strRead );
 
-   if(v[0][0] != 'C') return -2;
-   if(v[0].size() < 2) return -3;
-   channel = mx::ioutils::convertFromString<int>(v[0].substr(1, v[0].size()-1));
+   if(rv == 0)
+   {
+      if(resp_channel != channel)
+      {
+         if(m_powerState) log<software_error>({__FILE__,__LINE__, "wrong channel returned"});
+         return -1;
+      }
 
-   if(v[2] == "OFF") output = 0;
-   else if(v[2] == "ON") output = 1;
+      std::string ro;
+      if(resp_output > 0) ro = "On";
+      else if(resp_output == 0 ) ro = "Off";
+      else ro = "UNK";
+      
+      if(channel == 1) 
+      {
+         m_C1outp = resp_output;
+         updateIfChanged(m_indiP_C1outp, "value", ro);
+      }
+      
+      else if(channel == 2) 
+      {
+         m_C2outp = resp_output;
+         updateIfChanged(m_indiP_C2outp, "value", ro);
+      }
+   }
    else
    {
-      return -4;
+      std::cerr << strRead << "\n";
+      if(m_powerState) log<software_error>({__FILE__,__LINE__, 0, rv, "parse error"});
+      return -1;
    }
+
    return 0;
 }
 
 
-
-int siglentSDG::parseBSWV( int & channel,
-                           std::string & wvtp,
-                           double & freq,
-                           double & peri,
-                           double & amp,
-                           double & ampvrms,
-                           double & ofst,
-                           double & hlev,
-                           double & llev,
-                           double & phse,
-                           const std::string & strRead
-                         )
+inline 
+int siglentSDG::checkSetup()
 {
-   std::vector<std::string> v;
-
-   mx::ioutils::parseStringVector(v, strRead, ":, ");
-
-   //for(size_t i=0; i<v.size();++i) std::cerr << v[i] << "\n";
-
-   if(v.size()!= 20) return -1;
-
-   if(v[1] != "BSWV") return -2;
-
-   if(v[0][0] != 'C') return -3;
-   if(v[0].size() < 2) return -4;
-   channel = mx::ioutils::convertFromString<int>(v[0].substr(1, v[0].size()-1));
-
-   if(v[2] != "WVTP") return -5;
-   wvtp = v[3];
-
-   if(wvtp != "SINE") return -6;
+   std::string state, int index;
+   int rv;
    
-   if(v[4] != "FRQ") return -7;
-   freq = mx::ioutils::convertFromString<double>(v[5]);
+   rv = queryMDWV(state, 1);
+   
+   if(rv < 0)
+   {
+      log<software_log>({__FILE__,__LINE__});
+      return rv;
+   }
+   
+   if(state != "OFF")
+   {
+      log<text_log>("Channel 1 MDWV no OFF");
+      return 1;
+   }
+   
+   rv = queryMDWV(state, 2);
+   
+   if(rv < 0)
+   {
+      log<software_log>({__FILE__,__LINE__});
+      return rv;
+   }
+   
+   if(state != "OFF")
+   {
+      log<text_log>("Channel 2 MDWV no OFF");
+      return 1;
+   }
+   
+   rv = querySWWV(state, 1);
+   
+   if(rv < 0)
+   {
+      log<software_log>({__FILE__,__LINE__});
+      return rv;
+   }
+   
+   if(state != "OFF")
+   {
+      log<text_log>("Channel 1 SWWV no OFF");
+      return 1;
+   }
 
-   if(v[6] != "PERI") return -8;
-   peri = mx::ioutils::convertFromString<double>(v[7]);
+   rv = querySWWV(state, 2);
+   
+   if(rv < 0)
+   {
+      log<software_log>({__FILE__,__LINE__});
+      return rv;
+   }
+   
+   if(state != "OFF")
+   {
+      log<text_log>("Channel 2 SWWV no OFF");
+      return 1;
+   }
 
-   if(v[8] != "AMP") return -9;
-   amp = mx::ioutils::convertFromString<double>(v[9]);
+   rv = queryBTWV(state, 1);
+   
+   if(rv < 0)
+   {
+      log<software_log>({__FILE__,__LINE__});
+      return rv;
+   }
+   
+   if(state != "OFF")
+   {
+      log<text_log>("Channel 1 BTWV no OFF");
+      return 1;
+   }
 
-   if(v[10] != "AMPVRMS") return -10;
-   ampvrms = mx::ioutils::convertFromString<double>(v[11]);
+   rv = queryBTWV(state, 2);
+   
+   if(rv < 0)
+   {
+      log<software_log>({__FILE__,__LINE__});
+      return rv;
+   }
+   
+   if(state != "OFF")
+   {
+      log<text_log>("Channel 2 BTWV no OFF");
+      return 1;
+   }
 
-   if(v[12] != "OFST") return -11;
-   ofst = mx::ioutils::convertFromString<double>(v[13]);
+   rv = queryARWV(index, 1);
+   
+   if(rv < 0)
+   {
+      log<software_log>({__FILE__,__LINE__});
+      return rv;
+   }
+   
+   if(index != 0)
+   {
+      log<text_log>("Channel 1 ARWV not 1");
+      return 1;
+   }
 
-   if(v[14] != "HLEV") return -12;
-   hlev = mx::ioutils::convertFromString<double>(v[15]);
-
-   if(v[16] != "LLEV") return -13;
-   llev = mx::ioutils::convertFromString<double>(v[17]);
-
-   if(v[18] != "PHSE") return -14;
-   phse = mx::ioutils::convertFromString<double>(v[19]);
-
+   rv = queryARWV(index, 2);
+   
+   if(rv < 0)
+   {
+      log<software_log>({__FILE__,__LINE__});
+      return rv;
+   }
+   
+   if(index != 0)
+   {
+      log<text_log>("Channel 2 ARWV not 1");
+      return 1;
+   }
+   
+   
+ 
    return 0;
 }
-
+   
 int siglentSDG::writeCommand( const std::string & command )
 {
    
