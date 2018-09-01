@@ -18,9 +18,9 @@ namespace app
      * \returns 0 on success
      * \returns \<0 on error, with value indicating location of error.
      */
-int parseOUTP( int & channel,
-               int & output,
-               const std::string & strRead
+int parseOUTP( int & channel, ///< [out] the channel indicated by this response.
+               int & output, ///< [out] the output status of the channel, ON or OFF
+               const std::string & strRead ///< [in] string containing the device response
              )
 {
    std::vector<std::string> v;
@@ -45,6 +45,8 @@ int parseOUTP( int & channel,
    return 0;
 }
 
+#define SDG_PARSEERR_WVTP (-6)
+
 /// Parse the SDG response to the BSWV query
 /**
   * Example: C1:BSWV WVTP,SINE,FRQ,10HZ,PERI,0.1S,AMP,2V,AMPVRMS,0.707Vrms,OFST,0V,HLEV,1V,LLEV,-1V,PHSE,0
@@ -52,7 +54,7 @@ int parseOUTP( int & channel,
   * \returns 0 on success
   * \returns \<0 on error, with value indicating location of error.
   */
-int parseBSWV( int & channel,
+int parseBSWV( int & channel, ///< [out] the channel indicated by this response.
                std::string & wvtp,
                double & freq,
                double & peri,
@@ -62,7 +64,7 @@ int parseBSWV( int & channel,
                double & hlev,
                double & llev,
                double & phse,
-               const std::string & strRead
+               const std::string & strRead ///< [in] string containing the device response
              )
 {
    std::vector<std::string> v;
@@ -80,7 +82,7 @@ int parseBSWV( int & channel,
    if(v[2] != "WVTP") return -5;
    wvtp = v[3];
 
-   if(wvtp != "SINE") return -6; //We don't actually know how to handle anything else.
+   if(wvtp != "SINE") return SDG_PARSEERR_WVTP; //We don't actually know how to handle anything else.
    
    if(v[4] != "FRQ") return -7;
    freq = mx::ioutils::convertFromString<double>(v[5]);
@@ -118,9 +120,9 @@ int parseBSWV( int & channel,
   * \returns 0 on success
   * \returns \<0 on error, with value indicating location of error.
   */
-int parseMDWV( int & channel,
-               std::string & state,
-               const std::string & strRead
+int parseMDWV( int & channel, ///< [out] the channel indicated by this response.
+               std::string & state, ///< [out] the MDWV state of the channel, ON or OFF
+               const std::string & strRead ///< [in] string containing the device response
              )
 {
    std::vector<std::string> v;
@@ -150,9 +152,9 @@ int parseMDWV( int & channel,
   * \returns 0 on success
   * \returns \<0 on error, with value indicating location of error.
   */
-int parseSWWV( int & channel,
-               std::string & state,
-               const std::string & strRead
+int parseSWWV( int & channel, ///< [out] the channel indicated by this response.
+               std::string & state, ///< [out] the SWWV state of the channel, ON or OFF
+               const std::string & strRead ///< [in] string containing the device response
              )
 {
    std::vector<std::string> v;
@@ -182,9 +184,9 @@ int parseSWWV( int & channel,
   * \returns 0 on success
   * \returns \<0 on error, with value indicating location of error.
   */
-int parseBTWV( int & channel,
-               std::string & state,
-               const std::string & strRead
+int parseBTWV( int & channel, ///< [out] the channel indicated by this response.
+               std::string & state, ///< [out] the BTWV state of the channel, ON or OFF
+               const std::string & strRead ///< [in] string containing the device response
              )
 {
    std::vector<std::string> v;
@@ -213,9 +215,9 @@ int parseBTWV( int & channel,
   * \returns 0 on success
   * \returns \<0 on error, with value indicating location of error.
   */
-int parseARWV( int & channel,
-               int & index,
-               const std::string & strRead
+int parseARWV( int & channel, ///< [out] the channel indicated by this response.
+               int & index, ///< [out] the ARWV index of the channel.  Should be 0.
+               const std::string & strRead ///< [in] string containing the device response
              )
 {
    std::vector<std::string> v;

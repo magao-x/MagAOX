@@ -31,6 +31,9 @@ protected:
 
    tty::telnetConn m_telnetConn; ///< The telnet connection manager
 
+   double m_bootDelay {10}; ///< Time in seconds it take the device to boot.
+
+      
    int m_writeTimeOut {1000};  ///< The timeout for writing to the device [msec].
    int m_readTimeOut {1000}; ///< The timeout for reading from the device [msec].
 
@@ -45,6 +48,11 @@ protected:
    double m_C2frequency {0}; ///< The output frequency of channel 2
    double m_C2vpp {0}; ///< The peak-2-peak voltage of channel 2
 
+   
+private:
+   
+   double m_powerOnCounter {0}; ///< Counts the number of loops since power-on, used to control loggin of connect failures.
+   
 public:
 
    /// Default c'tor.
@@ -135,7 +143,7 @@ public:
      * \returns 0 on success
      * \returns -1 on an error.
      */
-   int queryBSWV( int channel /**< [in] the channel to query */);
+   int queryBSWV( int channel  /** < [in] the channel to query */ );
 
 
    /// Check the setup is correct and safe for PI TTM control.
@@ -251,12 +259,14 @@ public:
 
 };
 
+inline
 siglentSDG::siglentSDG() : MagAOXApp(MAGAOX_CURRENT_SHA1, MAGAOX_REPO_MODIFIED)
 {
    m_telnetConn.m_prompt = "\n";
    return;
 }
 
+inline
 void siglentSDG::setupConfig()
 {
    config.add("device.address", "a", "device.address", mx::argType::Required, "device", "address", false, "string", "The device address.");
@@ -267,6 +277,7 @@ void siglentSDG::setupConfig()
    config.add("timeouts.read", "", "timeouts.read", mx::argType::Required, "timeouts", "read", false, "int", "The timeout for reading the device [msec]. Default = 2000");
 }
 
+inline
 void siglentSDG::loadConfig()
 {
    config(m_deviceAddr, "device.address");
@@ -276,6 +287,7 @@ void siglentSDG::loadConfig()
    config(m_readTimeOut, "timeouts.read");
 }
 
+inline
 int siglentSDG::appStartup()
 {
    // set up the  INDI properties
@@ -345,9 +357,17 @@ int siglentSDG::appStartup()
    m_indiP_C2phse.add (pcf::IndiElement("value"));
 
 
+   //If we startup powered-on, we try to connect immediately with no delays.
+   if( state() == stateCodes::POWERON )
+   {
+      state(stateCodes::NOTCONNECTED);
+      m_powerOnCounter = 0;
+   }
+   
    return 0;
 }
 
+inline
 int siglentSDG::appLogic()
 {
 
@@ -355,6 +375,7 @@ int siglentSDG::appLogic()
    {
       sleep(1); //Give it time to wake up.
       state(stateCodes::NOTCONNECTED);
+      m_powerOnCounter = 0;
    }
 
    if( state() == stateCodes::NOTCONNECTED )
@@ -363,13 +384,13 @@ int siglentSDG::appLogic()
 
       if(rv == 0)
       {
-         ///\todo the connection process in siglentSDG is a total hack.  Figure out why this is need to clear the channel, especially on a post-poweroff/on reconnect.
+         ///\todo the connection process in siglentSDG is a total hack.  Figure out why this is needed to clear the channel, especially on a post-poweroff/on reconnect.
 
          //The sleeps here seem to be necessary to make sure there is a good
          //comm with device.  Probably a more graceful way.
          state(stateCodes::CONNECTED);
          m_telnetConn.noLogin();
-         sleep(1);//Wait for the connection to take.
+         //sleep(1);//Wait for the connection to take.
 
          m_telnetConn.read(">>", m_readTimeOut);
 
@@ -402,12 +423,16 @@ int siglentSDG::appLogic()
       }
       else
       {
-         if(!stateLogged())
+
+         if(m_powerOnCounter > m_bootDelay && !stateLogged())
          {
             std::stringstream logs;
             logs << "Failed to connect to " << m_deviceAddr << ":" << m_devicePort;
             log<text_log>(logs.str());
          }
+         
+         m_powerOnCounter += 1 + loopPause/1e9;
+
          return 0;
       }
    }
@@ -422,16 +447,34 @@ int siglentSDG::appLogic()
 
          if(cs < 0) return 0; //This means we aren't really connected yet.
 
+         int rv;
+         
+         rv = queryBSWV(1);
+         
+         if( rv < 0 )
+         {
+            if(rv != SDG_PARSEERR_WVTP ) return 0; //This means we aren't really connected yet.
+            
+            cs = 1; //Trigger normalizeSetup
+         }
+         
+         rv = queryBSWV(2); 
+         
+         if( rv < 0 )
+         {
+            if(rv != SDG_PARSEERR_WVTP ) return 0; //This means we aren't really connected yet.
+            
+            cs = 1; //Trigger normalizeSetup
+         }
+         
+         
          if(cs > 0)
          {
-            std::cerr << "failed setup check, need to normalizeSetup\n";
+            log<text_log>("Failed setup check, normalizing setup.", logPrio::LOG_NOTICE);
             normalizeSetup();
 
             return 0;
          }
-
-         if( queryBSWV(1) < 0 ) return 0; //This means we aren't really connected yet.
-         if( queryBSWV(2) < 0 ) return 0; //This means we aren't really connected yet.
 
 
          if( queryOUTP(1) < 0 ) return 0; //This means we aren't really connected yet.
@@ -501,12 +544,14 @@ int siglentSDG::appLogic()
 
 }
 
+inline
 int siglentSDG::appShutdown()
 {
    //don't bother
    return 0;
 }
 
+inline
 int siglentSDG::writeRead( std::string & strRead,
                            const std::string & command
                          )
@@ -542,6 +587,7 @@ int siglentSDG::writeRead( std::string & strRead,
 
 }
 
+inline
 int siglentSDG::writeCommand( const std::string & command )
 {
 
@@ -570,6 +616,7 @@ int siglentSDG::writeCommand( const std::string & command )
    return 0;
 }
 
+inline
 std::string makeCommand( int channel,
                          const std::string afterColon
                        )
@@ -582,8 +629,6 @@ std::string makeCommand( int channel,
 
    return command;
 }
-
-
 
 inline
 int siglentSDG::queryMDWV( std::string & state,
@@ -765,7 +810,8 @@ int siglentSDG::queryARWV( int & index,
    return 0;
 }
 
-int siglentSDG::queryBSWV( int channel )
+inline
+int siglentSDG::queryBSWV( int channel)
 {
    int rv;
 
@@ -837,6 +883,7 @@ int siglentSDG::queryBSWV( int channel )
    return 0;
 }
 
+inline
 int siglentSDG::queryOUTP( int channel )
 {
    int rv;
@@ -1019,6 +1066,7 @@ int siglentSDG::checkSetup()
    return 0;
 }
 
+inline
 int siglentSDG::normalizeSetup()
 {
 
@@ -1075,11 +1123,7 @@ int siglentSDG::normalizeSetup()
    return 0;
 }
 
-
-
-
-
-
+inline
 int siglentSDG::changeOutp( int channel,
                             const std::string & newOutp
                           )
@@ -1112,6 +1156,7 @@ int siglentSDG::changeOutp( int channel,
    return 0;
 }
 
+inline
 int siglentSDG::changeOutp( int channel,
                             const pcf::IndiProperty &ipRecv
                           )
@@ -1143,7 +1188,7 @@ int siglentSDG::changeOutp( int channel,
    return rv;
 }
 
-
+inline
 int siglentSDG::changeFreq( int channel,
                             double newFreq
                           )
@@ -1170,6 +1215,7 @@ int siglentSDG::changeFreq( int channel,
    return 0;
 }
 
+inline
 int siglentSDG::changeFreq( int channel,
                             const pcf::IndiProperty &ipRecv
                           )
@@ -1200,6 +1246,7 @@ int siglentSDG::changeFreq( int channel,
    return rv;
 }
 
+inline
 int siglentSDG::changeAmp( int channel,
                            double newAmp
                          )
@@ -1227,6 +1274,7 @@ int siglentSDG::changeAmp( int channel,
    return 0;
 }
 
+inline
 int siglentSDG::changeAmp( int channel,
                            const pcf::IndiProperty &ipRecv
                          )

@@ -801,10 +801,32 @@ int MagAOXApp<_useINDI>::execute() //virtual
       }
    }
 
+   //We have to wait for power status to become available
+   if(m_powerMgtEnabled)
+   {
+      while(m_powerState < 0) 
+      {
+         sleep(1);
+         if(m_powerState < 0)
+         {
+            if(!stateLogged()) log<text_log>("waiting for power state");
+         }
+      }
+      if(m_powerState > 0) state(stateCodes::POWERON);
+      else state(stateCodes::POWEROFF);
+   }
+   
    //This is the main event loop.
+   /* Conditions on entry:
+    * -- PID locked
+    * -- Log thread running
+    * -- Signal handling installed
+    * -- appStartup() successful
+    * -- INDI communications started successfully (if being used)
+    * -- power state known (if being managed)
+    */
    while( m_shutdown == 0)
    {
-      
       if(m_powerMgtEnabled)
       {
          if(state() == stateCodes::POWEROFF)
@@ -814,9 +836,9 @@ int MagAOXApp<_useINDI>::execute() //virtual
                state(stateCodes::POWERON);
             }
          }
-         else
+         else //Any other state
          {
-            if(m_powerState < 1)
+            if(m_powerState == 0)
             {
                state(stateCodes::POWEROFF);
                if(onPowerOff() < 0)
@@ -824,19 +846,23 @@ int MagAOXApp<_useINDI>::execute() //virtual
                   m_shutdown = 1;
                   continue;
                }
-               
             }
+            //We don't do anything if m_powerState is -1, which is a startup condition.
          }
       }
-      else if(state() == stateCodes::POWEROFF)
-      {
-         //If power management is not enabled there's no way to get out of power off, so we just go
-         state(stateCodes::POWERON);
-      }
       
-      if(state() != stateCodes::POWEROFF) 
+      //Only run appLogic if power is on, or we are not managing power.
+      if( !m_powerMgtEnabled || m_powerState > 0 ) 
       {
          if( appLogic() < 0) 
+         {
+            m_shutdown = 1;
+            continue;
+         }
+      }
+      else if(m_powerState == 0)
+      {
+         if( whilePowerOff() < 0)
          {
             m_shutdown = 1;
             continue;
