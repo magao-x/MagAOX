@@ -17,6 +17,12 @@ namespace app
 /** MagAO-X application to control a Siglent SDG series function generator
   *
   * \todo need to recognize signals in tty polls and not return errors, etc.
+  * \todo need to implement onPoweroff() to update values to off.
+  * \todo need to implement an onDisconnect() to update values to unknown indicators.
+  * \todo need to to the setupCheck every loop.
+  * \todo maybe need to run the loop more often than 1 second for device safety.
+  * \todo need a frequency-dependent max amp facility.
+  * 
   */
 class siglentSDG : public MagAOXApp<>
 {
@@ -618,7 +624,7 @@ int siglentSDG::writeCommand( const std::string & command )
 
 inline
 std::string makeCommand( int channel,
-                         const std::string afterColon
+                         const std::string & afterColon
                        )
 {
    std::string command = "C";
