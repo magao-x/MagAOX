@@ -16,8 +16,6 @@
 #include <sys/resource.h>  // provides 'setrlimit'
 #include "IndiConnection.hpp"
 #include "TimeStamp.hpp"
-#include "Logger.hpp"
-#include "Config.hpp"
 
 using std::exception;
 using std::runtime_error;
@@ -26,8 +24,6 @@ using std::vector;
 using std::stringstream;
 using std::endl;
 using pcf::TimeStamp;
-using pcf::Logger;
-using pcf::Config;
 using pcf::IndiConnection;
 using pcf::IndiXmlParser;
 using pcf::IndiMessage;
@@ -101,9 +97,6 @@ void IndiConnection::construct( const string &szName,
                                 const string &szVersion,
                                 const string &szProtocolVersion )
 {
-  Logger logMsg;
-  logMsg.enableClearAfterLog( true );
-
   // Make sure we are in a known state.
   sm_oQuitProcess = false;
 
@@ -124,36 +117,20 @@ void IndiConnection::construct( const string &szName,
   setVersion( szVersion );
   setProtocolVersion( szProtocolVersion );
 
-  logMsg << Logger::Info << getName() << "::construct: "
-         << "Reading connection settings." << endl;
-
-  Config cfReader;
-
-  
-  
-  // Should we log configuration settings? This will log the setting when
-  // it is used from the program. This setting will be read first, for obvious
-  // reasons.
-  //-->Insted just set to false by JRM for MagAO-X, we aren't using this logging feature.
-  cfReader.enableLogMode(false);
-  //cfReader.enableLogMode(cfReader.get<bool>( "log_config_mode", true ) );
-
-  m_oIsVerboseModeEnabled = cfReader.get<bool>( "verbose_mode", false );
+  m_oIsVerboseModeEnabled = false;
 
   // What is the interval at which our 'execute' function is called?
   // This is the same if we are in simulation mode or not.
   // The default is one second.
-  setInterval( cfReader.get<unsigned int>( "update_interval", 0 ) );
-
+  setInterval(1000);
+  
   // What is our CPU affinity? This is the CPU we will run on.
   // A -1 indicates we don't care where it runs.
-  m_iCpuAffinity = cfReader.get<int>( "cpu_affinity", -1 );
+  m_iCpuAffinity = -1;
 
   // allocate a big buffer to hold the input data.
   m_vecInputBuf = vector<unsigned char>( InputBufSize );
 
-  logMsg << Logger::Info << getName() << "::construct: "
-         << "Finished reading connection settings." << endl;
 }
 
 ////////////////////////////////////////////////////////////////////////////////
@@ -191,12 +168,6 @@ void IndiConnection::execute()
 
 void IndiConnection::activate()
 {
-  Logger logMsg;
-  logMsg.enableClearAfterLog( true );
-
-  logMsg << Logger::Info << m_szName << "::activate: "
-         << "Starting the update 'execute' thread." << endl;
-
   // is the thread already running?
   if ( isRunning() == true )
     throw runtime_error( string( "Tried to activate when already active." ) );
@@ -213,27 +184,16 @@ void IndiConnection::activate()
 
 void IndiConnection::deactivate()
 {
-  Logger logMsg;
-  logMsg.enableClearAfterLog( true );
-
-  logMsg << Logger::Info << m_szName << "::deactivate: "
-         << "Stopping the 'execute' and 'process' loops." << endl;
-
   if ( isRunning() == true )
   {
     stop();
     join();
-    logMsg << Logger::Info << "  Stopped the 'execute' loop" << endl;
     if ( m_idProcessThread != 0 )
     {
       ::pthread_join( m_idProcessThread, NULL );
       m_idProcessThread = 0;
-      logMsg << Logger::Info << "  Stopped the 'process' loop" << endl;
     }
   }
-
-  logMsg << Logger::Info << m_szName << "::deactivate: "
-         << "Stopped the 'execute' and 'process' loops." << endl;
 }
 
 ////////////////////////////////////////////////////////////////////////////////
@@ -254,10 +214,6 @@ bool IndiConnection::isActive() const
 
 void IndiConnection::handleSignal( int nSignal )
 {
-  Logger logMsg;
-  logMsg << Logger::Info << "Caught signal #" << nSignal
-         << ". Exiting." << std::endl;
-
   sm_oQuitProcess = true;
 }
 
@@ -319,12 +275,6 @@ void *IndiConnection::pthreadProcess( void *pUnknown )
 
 void IndiConnection::process()
 {
-  Logger logMsg;
-  logMsg.enableClearAfterLog( true );
-
-  logMsg << Logger::Info << m_szName << "::process: "
-         << "Starting processing incoming INDI messages." << endl;
-
   // Loop here until we are told to quit or we hit an error.
   while ( sm_oQuitProcess == false )
   {
@@ -361,7 +311,6 @@ void IndiConnection::process()
       {
         if ( sm_oQuitProcess == false )
         {
-          logMsg << Logger::Error << "select ERROR: " << strerror( errno ) << endl;
           Thread::sleep( 1 );
         }
       }
@@ -376,8 +325,6 @@ void IndiConnection::process()
         nInputBufLen = ::read( m_fdInput, &m_vecInputBuf[0], InputBufSize );
         if ( nInputBufLen < 0 )
         {
-          logMsg << Logger::Error
-                 << "Failed to get data from input." << endl;
           sm_oQuitProcess = true;
         }
         else if ( nInputBufLen == 0 )
@@ -409,22 +356,12 @@ void IndiConnection::process()
     }
     catch ( const runtime_error &excep )
     {
-      Logger logMsg;
-      logMsg << Logger::enumError << excep.what() << endl;
-      logMsg << Logger::enumError << "Received XML: "
-             << m_ixpIndi.createXmlString() << endl;
     }
     catch ( const exception &excep )
     {
-      Logger logMsg;
-      logMsg << Logger::enumError << excep.what() << endl;
-      logMsg << Logger::enumError << "Received XML: "
-             << m_ixpIndi.createXmlString() << endl;
     }
   }
 
-  logMsg << Logger::Info << m_szName << "::process: "
-         << "Stopped processing incoming INDI messages." << endl;
 }
 
 ////////////////////////////////////////////////////////////////////////////////
@@ -440,8 +377,6 @@ void IndiConnection::sendXml( const string &szXml ) const
   //if ( fflush( m_fdOutput ) != 0 || nNumPrinted < (int)( szXml.length() ) )
   if ( nNumPrinted < ( int )( szXml.length() ) )
   {
-    Logger logMsg;
-    logMsg << Logger::Error << "Failed to write XML to output." << endl;
   }
 }
 

@@ -15,7 +15,7 @@
 #include "Thread.hpp"
 #include "MutexLock.hpp"
 #include "TimeStamp.hpp"
-#include "ConfigFile.hpp"
+//#include "ConfigFile.hpp"
 #include "IndiXmlParser.hpp"
 #include "IndiMessage.hpp"
 #include "IndiProperty.hpp"

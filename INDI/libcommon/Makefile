@@ -19,8 +19,6 @@ all: libcommon.a
 	
 SRCS = \
 	 Cmd.cpp \
-	 Config.cpp \
-	 ConfigFile.cpp \
 	 Fits.cpp \
 	 IndiConnection.cpp \
 	 IndiClient.cpp \
@@ -38,6 +36,9 @@ SRCS = \
 	 TCPListener.cpp \
 	 Thread.cpp \
 	 TimeStamp.cpp
+
+#	 Config.cpp \
+#	 ConfigFile.cpp \
 
 OBJS = $(SRCS:.cpp=.o)
 

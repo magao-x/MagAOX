@@ -41,7 +41,7 @@
 #include "indiDriver.hpp"
 #include "indiMacros.hpp"
 
-#include "../../INDI/libcommon/Config.hpp"
+//#include "../../INDI/libcommon/Config.hpp"
 #include "../../INDI/libcommon/System.hpp"
 
 using namespace MagAOX::logger;
@@ -1429,26 +1429,6 @@ int MagAOXApp<_useINDI>::startINDI()
       return -1;
    }
 
-   //===== Create dummy conf file for libcommon to ignore
-   //First create a unique filename with up to 12 chars of m_configName in it.
-   char dummyConf[] = {"/tmp/XXXXXXXXXXXXXXXXXX"};
-   for(size_t c=0; c< 12; ++c)
-   {
-      if(c > m_configName.size()-1) break;
-      dummyConf[5+c] = m_configName[c];
-   }
-   int touch = mkstemp(dummyConf); //mkstemp replaces extra Xs.
-
-   if( touch < 0) //Check if that failed.
-   {
-      log<software_critical>({__FILE__, __LINE__, errno, 0, "mkstemp failed"});
-      log<text_log>("Failed to create dummy config file for pcf::Config.", logPrio::LOG_CRITICAL);
-      return -1;
-   }
-
-   //Initialize the libcommon Config system with the empty dummy
-   pcf::Config::init( "/" , dummyConf ); //This just gets ignored since it is empty.
-
    //======= Instantiate the indiDriver
    try
    {
@@ -1456,18 +1436,9 @@ int MagAOXApp<_useINDI>::startINDI()
    }
    catch(...)
    {
-      //Try to clean up the dummy config
-      ::close(touch);
-      remove(dummyConf);
-
       log<software_critical>({__FILE__, __LINE__, 0, 0, "INDI Driver construction exception."});
       return -1;
    }
-
-
-   //clean up and delete the dummy config file.
-   ::close(touch);
-   remove(dummyConf);
 
    //Check for INDI failure
    if(m_indiDriver == nullptr)

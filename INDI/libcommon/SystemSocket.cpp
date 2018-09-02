@@ -862,7 +862,7 @@ void SystemSocket::connect()
   {
     if ( isValid() == false )
       create();
-
+    
     //  we need the sockaddr struct to pass the port and host.
     sockaddr_in saAddr = createSockAddr( m_nPort, m_szHost );
 
@@ -915,18 +915,15 @@ void SystemSocket::connect()
       // Did select have an error?
       if ( nNum < 0 )
         throw ( Error( string( ": " ) + strerror( m_nLastError ) ) );
-
       // Did we timeout (no descriptors are ready)?
       if ( nNum == 0 )
         throw ( Error( string( ": " ) + strerror( ETIMEDOUT ) ) );
-
       // n > 0 - Are we possibly connected?
       if ( FD_ISSET( m_nSocket, &setWrite ) || FD_ISSET( m_nSocket, &setRead ) )
       {
         m_nLastError = 0;
         socklen_t nSizeErr = sizeof( m_nLastError );
-        getOption( SOL_SOCKET, SO_ERROR, &m_nLastError, nSizeErr );
-
+        //getOption( SOL_SOCKET, SO_ERROR, &m_nLastError, nSizeErr );
         if ( m_nLastError != 0 )
           throw ( Error( string( ": " ) + strerror( m_nLastError ) ) );
       }
@@ -1008,12 +1005,14 @@ void SystemSocket::getOption( const int &nLevel,
 {
   try
   {
+    std::cerr << "0.3.8.1\n";
     if ( isValid() == false )
     {
       m_nLastError = EBADF;
       throw ( Error( string( ": " ) + strerror( m_nLastError ) ) );
     }
 
+    std::cerr << "0.3.8.2\n";
     if ( ::setsockopt( m_nSocket, nLevel, nOption,
                        (char *)( pvOptionValue ), nOptionLength ) == -1 )
     {
