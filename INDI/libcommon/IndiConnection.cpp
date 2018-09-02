@@ -339,7 +339,7 @@ void IndiConnection::process()
           // Now, is this a command which fits our requirements?
           m_ixpIndi.parseXml( ( char * )( &m_vecInputBuf[0] ), nInputBufLen, szErrorMsg );
 
-          if ( m_ixpIndi.getState() == IndiXmlParser::CompleteState )
+          while( m_ixpIndi.getState() == IndiXmlParser::CompleteState )
           {
             // Create the message from the XML.
             IndiMessage imRecv = m_ixpIndi.createIndiMessage();
@@ -349,7 +349,10 @@ void IndiConnection::process()
             dispatch( imRecv.getType(), ipRecv );
 
             // Get ready for some new XML.
-            m_ixpIndi.clear();
+            //m_ixpIndi.clear();
+
+            //Test whether there is more unparsed data.
+            m_ixpIndi.parseXml( "", szErrorMsg);
           }
         }
       }
