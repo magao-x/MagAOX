@@ -3,7 +3,7 @@ libs_to_build = libtelnet
 
 apps_to_build = xindiserver trippLitePDU siglentSDG zaberCtrl magAOXMaths
 
-utils_to_build = logdump
+utils_to_build = logdump cursesINDI
 
 
 all: indi_all libs_all apps_all utils_all
@@ -73,20 +73,20 @@ utils_clean:
 			(cd utils/$$app; ${MAKE} clean) || break; \
 		done
 
-		
+
 .PHONY: doc
 doc:
 	cd libMagAOX/doc; doxygen libMagAOX_doxygen.in; cp -r sw_html ../../doc/www/;
-	cd utils/doc; doxygen magaox_utils_doxygen.in; cp -r  util_html ../../doc/www/; 
-	cd apps/doc; doxygen magaox_apps_doxygen.in; cp -r apps_html ../../doc/www/; 
-	
+	cd utils/doc; doxygen magaox_utils_doxygen.in; cp -r  util_html ../../doc/www/;
+	cd apps/doc; doxygen magaox_apps_doxygen.in; cp -r apps_html ../../doc/www/;
+
 .PHONY: doc_clean
 doc_clean:
 	rm -rf libMagAOX/doc/sw_html;
 	rm -rf utils/doc/util_html
 	rm -rf apps/doc/apps_html
 	rm -rf www/*_html
-	
+
 .PHONY: setup
 setup:
 		@for file in ./local/*.example.mk; do \
