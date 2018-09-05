@@ -13,6 +13,8 @@ else
 Usage: make_directories.sh [--dev]
 Set up the MagAO-X folder structure, users, groups, and permissions.
 
+  --prod  (default) Set up for production (i.e. logs are on
+          /data/logs and symlinked to /opt/MagAOX/logs)
   --dev   Set up for local development (i.e. don't assume real
           MagAO-X mount locations are present)
 HERE
@@ -27,7 +29,7 @@ mkdir  -pv /opt/MagAOX/config
 mkdir  -pv /opt/MagAOX/source
 mkdir  -pv /opt/MagAOX/sys
 mkdir  -pv /opt/MagAOX/secrets
-mkdir -pv "$LOGDIR"
+mkdir  -pv "$LOGDIR"
 
 log_target=/opt/MagAOX/logs
 if [ "$LOGDIR" != "$log_target" ] ; then
