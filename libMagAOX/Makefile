@@ -21,11 +21,16 @@ INCLUDEDEPS= app/MagAOXApp.hpp \
              tty/ttyUSB.hpp \
              tty/usbDevice.hpp
 
-	
-$(TARGET).gch: $(TARGET) $(INCLUDEDEPS)
 
+
+$(TARGET).gch: $(TARGET) $(INCLUDEDEPS) logger/generated/logTypes.hpp
+
+logger/generated/logTypes.hpp: logger/logCodes.dat
+	cd logger; ../../flatlogs/bin/flatlogcodes
 
 .PHONY: clean
 clean:
 	rm -f $(TARGET).gch
 	rm -f *~
+	rm -rf logger/generated
+	rm -rf logger/types/generated

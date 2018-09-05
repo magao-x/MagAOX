@@ -86,7 +86,6 @@ void magAOXMaths::loadConfig()
 
 int magAOXMaths::appStartup()
 {
-
    // set up the x input property
    REG_INDI_NEWPROP(my_val, m_myVal, pcf::IndiProperty::Number, pcf::IndiProperty::ReadWrite, pcf::IndiProperty::Idle);
 

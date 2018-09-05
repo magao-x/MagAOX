@@ -12,6 +12,9 @@
 #include <fstream>
 #include <sstream>
 #include <map>
+#include <set>
+
+#include <sys/stat.h>
 
 #include "../include/flatlogs/logDefs.hpp"
 using namespace flatlogs;
@@ -30,10 +33,12 @@ using namespace flatlogs;
   * 
   */ 
 int readCodeFile( std::map<eventCodeT, std::string> & codeMap, ///< [out] The map of codes to log types
+                  std::set<std::string> & schemaSet, ///< [out] The set of schemas to process
                   const std::string & fileName ///< [in] the file to parse
                 )
 {
    typedef std::map<eventCodeT, std::string> codeMapT;
+   typedef std::set<std::string> schemaSetT;
    
    std::fstream fin;
 
@@ -71,11 +76,12 @@ int readCodeFile( std::map<eventCodeT, std::string> & codeMap, ///< [out] The ma
       
       std::stringstream sstr(line, std::ios_base::in);
 
-      std::string logType, logCodeStr;
+      std::string logType, logCodeStr, schema;
       eventCodeT logCode;
 
       sstr >> logType;
       sstr >> logCodeStr;
+      sstr >> schema;
       
       if(logCodeStr.size() == 0)
       {
@@ -89,6 +95,12 @@ int readCodeFile( std::map<eventCodeT, std::string> & codeMap, ///< [out] The ma
          return -1;
       }
 
+      if(schema.size() == 0)
+      {
+         std::cerr << fileName << " line " << lineNo << ": no schema found.\n";
+         return -1;
+      }
+      
       std::stringstream sstr2(logCodeStr, std::ios_base::in);
       sstr2 >> logCode;
       
@@ -115,6 +127,23 @@ int readCodeFile( std::map<eventCodeT, std::string> & codeMap, ///< [out] The ma
          std::cerr << "New attempt: " << logType << " " << logCode << "\n\n";
          return -1;
       }
+      
+      std::pair<schemaSetT::iterator, bool> res2;
+      try
+      {
+         res2 = schemaSet.insert(schema);
+      }
+      catch(std::exception & e)
+      {
+         std::cerr << fileName << " line " << lineNo << ": Exception on set insertion: " << e.what() << "\n";
+         return -1;
+      }
+      catch(...)
+      {
+         std::cerr << fileName << " line " << lineNo << ": unknown exception on set insertion.\n";
+         return -1;
+      }
+            
    }
    
    return 0;
@@ -236,17 +265,25 @@ int emitLogTypes( const std::string & fileName,
 int main()
 {
    typedef std::map<uint16_t, std::string> mapT;
+   typedef std::set<std::string> setT;
    
+   std::string generatedDir = "generated";
+   std::string schemaDir = "types/schemas";
    
+   std::string schemaGeneratedDir = "types/generated";
+   
+   mkdir(generatedDir.c_str(), S_IRWXU | S_IRWXG | S_IROTH | S_IXOTH);
+   mkdir(schemaGeneratedDir.c_str(), S_IRWXU | S_IRWXG | S_IROTH | S_IXOTH);
    
    std::string inputFile = "logCodes.dat";
-   std::string stdFormatHeader = "generated/logStdFormat.hpp";
-   std::string logCodesHeader = "generated/logCodes.hpp";
-   std::string logTypesHeader = "generated/logTypes.hpp";
+   std::string stdFormatHeader = generatedDir + "/logStdFormat.hpp";
+   std::string logCodesHeader = generatedDir + "/logCodes.hpp";
+   std::string logTypesHeader = generatedDir + "/logTypes.hpp";
    
    mapT logCodes;
+   setT schemas;
    
-   if( readCodeFile(logCodes, inputFile) < 0 )
+   if( readCodeFile(logCodes, schemas, inputFile) < 0 )
    {
       std::cerr << "Error reading code file.\n";
       return -1;
@@ -255,6 +292,28 @@ int main()
    emitStdFormatHeader(stdFormatHeader, logCodes );
    emitLogCodes( logCodesHeader, logCodes );
    emitLogTypes( logTypesHeader, logCodes );
+   
+   std::string flatc = "flatc -o " + schemaGeneratedDir + " --cpp";
+   
+   setT::iterator it = schemas.begin();
+   while(it != schemas.end())
+   {
+      if(*it == "empty_log")
+      {
+         ++it;
+         continue;
+      }
+      flatc += " " + schemaDir + "/";
+      flatc += *it;
+      flatc += ".fbs";
+      
+      ++it;
+   }
+
+   int rv = system(flatc.c_str());
+   
+   if(rv < 0) std::cerr << "Error running flatc.\n";
+   
    return 0;
 }
 
