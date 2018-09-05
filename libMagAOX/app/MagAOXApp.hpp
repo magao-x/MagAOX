@@ -15,7 +15,7 @@
 
 #include <cstdlib>
 #include <unistd.h>
-//#include <fstream>
+#include <fstream>
 
 #include <unordered_map>
 
@@ -515,48 +515,48 @@ protected:
 
    ///@} --INDI Interface
 
-   /** \name Power Management 
+   /** \name Power Management
      * For devices which have remote power management (e.g. from one of the PDUs) we implement
-     * a standard power state monitoring and management component for the FSM.  This is only 
+     * a standard power state monitoring and management component for the FSM.  This is only
      * enabled if the power management configuration options are set.
-     * 
+     *
      * If power management is enabled, then while power is off, appLogic will not be called.
-     * Instead a parrallel set of virtual functions is called, onPowerOff (to allow apps to 
+     * Instead a parrallel set of virtual functions is called, onPowerOff (to allow apps to
      * perform cleanup) and whilePowerOff (to allow apps to keep variables updated, etc).
      * Note that these could merely call appLogic if desired.
-     * 
+     *
      */
 protected:
    bool m_powerMgtEnabled {false};
-   
+
    std::string m_powerDevice;
    std::string m_powerOutlet;
    std::string m_powerElement {"state"};
- 
+
    int m_powerState {-1}; ///< Current power state, 1=On, 0=Off, -1=Unk.
-   
+
    pcf::IndiProperty m_indiP_powerOutlet;
-   
+
    /// This method is called when the change to poweroff is detected.
    /**
      * \returns 0 on success.
      * \returns -1 on any error which means the app should exit.
-     */ 
+     */
    virtual int onPowerOff() {return 0;}
-   
+
    /// This method is called while the power is off, once per FSM loop.
    /**
      * \returns 0 on success.
      * \returns -1 on any error which means the app should exit.
-     */ 
+     */
    virtual int whilePowerOff() {return 0;}
-   
+
 public:
-   
+
    INDI_SETCALLBACK_DECL(MagAOXApp, m_indiP_powerOutlet);
-   
+
    ///@} Power Management
-   
+
 public:
 
    /** \name Member Accessors
@@ -731,16 +731,16 @@ void MagAOXApp<_useINDI>::loadBasicConfig() //virtual
    {
       RTPriority(prio);
    }
-   
+
    //--------Power Management --------//
    config(m_powerDevice, "power.device");
    config(m_powerOutlet, "power.outlet");
    config(m_powerElement, "power.element");
-   
+
    if(m_powerDevice != "" && m_powerOutlet != "")
    {
       log<text_log>("enabling power management: " + m_powerDevice + "." + m_powerOutlet + "." + m_powerElement);
-      
+
       m_powerMgtEnabled = true;
       REG_INDI_SETPROP(m_indiP_powerOutlet, m_powerDevice, m_powerOutlet);
    }
@@ -804,7 +804,7 @@ int MagAOXApp<_useINDI>::execute() //virtual
    //We have to wait for power status to become available
    if(m_powerMgtEnabled)
    {
-      while(m_powerState < 0) 
+      while(m_powerState < 0)
       {
          sleep(1);
          if(m_powerState < 0)
@@ -815,7 +815,7 @@ int MagAOXApp<_useINDI>::execute() //virtual
       if(m_powerState > 0) state(stateCodes::POWERON);
       else state(stateCodes::POWEROFF);
    }
-   
+
    //This is the main event loop.
    /* Conditions on entry:
     * -- PID locked
@@ -850,11 +850,11 @@ int MagAOXApp<_useINDI>::execute() //virtual
             //We don't do anything if m_powerState is -1, which is a startup condition.
          }
       }
-      
+
       //Only run appLogic if power is on, or we are not managing power.
-      if( !m_powerMgtEnabled || m_powerState > 0 ) 
+      if( !m_powerMgtEnabled || m_powerState > 0 )
       {
-         if( appLogic() < 0) 
+         if( appLogic() < 0)
          {
             m_shutdown = 1;
             continue;
@@ -868,7 +868,7 @@ int MagAOXApp<_useINDI>::execute() //virtual
             continue;
          }
       }
-      
+
       /** \todo Need a heartbeat update here.
         */
 
@@ -884,7 +884,7 @@ int MagAOXApp<_useINDI>::execute() //virtual
       // This is purely to make sure INDI is up to date in case
       // mutex was locked on last attempt.
       state( state() );
-      
+
       //Pause loop unless shutdown is set
       if( m_shutdown == 0)
       {
@@ -1287,10 +1287,10 @@ void MagAOXApp<_useINDI>::state(const stateCodes::stateCodeT & s)
       m_state = s;
       m_stateLogged = 0;
    }
-   
+
    //Check to make sure INDI is up to date
    std::unique_lock<std::mutex> lock(m_indiMutex, std::try_to_lock);  //Lock the mutex before conducting INDI communications.
-   
+
    if(lock.owns_lock())
    {
       updateIfChanged(m_indiP_state, "current", m_state);
@@ -1605,9 +1605,9 @@ void MagAOXApp<_useINDI>::updateIfChanged( pcf::IndiProperty & p,
                                          )
 {
    if(!_useINDI) return;
-   
+
    if(!m_indiDriver) return;
-   
+
    T oldVal = p[el].get<T>();
 
    if(oldVal != newVal)
@@ -1624,7 +1624,7 @@ INDI_SETCALLBACK_DEFN( MagAOXApp<_useINDI>, m_indiP_powerOutlet)(const pcf::Indi
    //m_indiP_powerOutlet = ipRecv;
 
    std::string ps;
-   
+
    try
    {
       ps = ipRecv[m_powerElement].get<std::string>();
@@ -1634,7 +1634,7 @@ INDI_SETCALLBACK_DEFN( MagAOXApp<_useINDI>, m_indiP_powerOutlet)(const pcf::Indi
       log<software_error>({__FILE__, __LINE__, "Exception caught."});
       return -1;
    }
-   
+
    if(ps == "On")
    {
       m_powerState = 1;
@@ -1647,7 +1647,7 @@ INDI_SETCALLBACK_DEFN( MagAOXApp<_useINDI>, m_indiP_powerOutlet)(const pcf::Indi
    {
       m_powerState = -1;
    }
-   
+
    return 0;
 }
 

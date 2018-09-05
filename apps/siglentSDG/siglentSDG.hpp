@@ -22,12 +22,13 @@ namespace app
   * \todo need to to the setupCheck every loop.
   * \todo maybe need to run the loop more often than 1 second for device safety.
   * \todo need a frequency-dependent max amp facility.
-  * 
+  *
   */
 class siglentSDG : public MagAOXApp<>
 {
 
    constexpr static double cs_MaxAmp = 10.0;
+   constexpr static double cs_MaxOfst = 10.0;
    constexpr static double cs_MaxFreq = 3700.0;
 
 protected:
@@ -39,7 +40,7 @@ protected:
 
    double m_bootDelay {10}; ///< Time in seconds it take the device to boot.
 
-      
+
    int m_writeTimeOut {1000};  ///< The timeout for writing to the device [msec].
    int m_readTimeOut {1000}; ///< The timeout for reading from the device [msec].
 
@@ -54,11 +55,11 @@ protected:
    double m_C2frequency {0}; ///< The output frequency of channel 2
    double m_C2vpp {0}; ///< The peak-2-peak voltage of channel 2
 
-   
+
 private:
-   
+
    double m_powerOnCounter {0}; ///< Counts the number of loops since power-on, used to control loggin of connect failures.
-   
+
 public:
 
    /// Default c'tor.
@@ -226,6 +227,24 @@ public:
                   const pcf::IndiProperty &ipRecv ///< [in] INDI property containing the requested new amplitude [V p2p]
                 );
 
+   /// Send a change offset command to the device.
+   /**
+     * \returns 0 on success
+     * \returns -1 on error
+     */
+   int changeOfst( int channel,  ///< [in] the channel to send the command to.
+                  double newOfst ///< [in] The requested new offset [V p2p]
+                );
+
+   /// Send a change offset command to the device in response to an INDI property.
+   /**
+     * \returns 0 on success
+     * \returns -1 on error
+     */
+   int changeOfst( int channel,                    ///< [in] the channel to send the command to.
+                  const pcf::IndiProperty &ipRecv ///< [in] INDI property containing the requested new offset [V p2p]
+                );
+
 protected:
 
    //declare our properties
@@ -259,10 +278,11 @@ public:
    INDI_NEWCALLBACK_DECL(siglentSDG, m_indiP_C1outp);
    INDI_NEWCALLBACK_DECL(siglentSDG, m_indiP_C1freq);
    INDI_NEWCALLBACK_DECL(siglentSDG, m_indiP_C1amp);
+   INDI_NEWCALLBACK_DECL(siglentSDG, m_indiP_C1ofst);
    INDI_NEWCALLBACK_DECL(siglentSDG, m_indiP_C2outp);
    INDI_NEWCALLBACK_DECL(siglentSDG, m_indiP_C2freq);
    INDI_NEWCALLBACK_DECL(siglentSDG, m_indiP_C2amp);
-
+   INDI_NEWCALLBACK_DECL(siglentSDG, m_indiP_C2ofst);
 };
 
 inline
@@ -309,18 +329,17 @@ int siglentSDG::appStartup()
    REG_INDI_NEWPROP(m_indiP_C1amp, "C1amp", pcf::IndiProperty::Number, pcf::IndiProperty::ReadWrite, pcf::IndiProperty::Idle);
    m_indiP_C1amp.add (pcf::IndiElement("value"));
 
+   REG_INDI_NEWPROP(m_indiP_C1ofst, "C1ofst", pcf::IndiProperty::Number, pcf::IndiProperty::ReadWrite, pcf::IndiProperty::Idle);
+   m_indiP_C1ofst.add (pcf::IndiElement("value"));
+
    REG_INDI_NEWPROP_NOCB(m_indiP_C1wvtp, "C1wvtp", pcf::IndiProperty::Text, pcf::IndiProperty::ReadOnly, pcf::IndiProperty::Idle);
    m_indiP_C1wvtp.add (pcf::IndiElement("value"));
-
 
    REG_INDI_NEWPROP_NOCB(m_indiP_C1peri, "C1peri", pcf::IndiProperty::Number, pcf::IndiProperty::ReadOnly, pcf::IndiProperty::Idle);
    m_indiP_C1peri.add (pcf::IndiElement("value"));
 
    REG_INDI_NEWPROP_NOCB(m_indiP_C1ampvrms, "C1ampvrms", pcf::IndiProperty::Number, pcf::IndiProperty::ReadOnly, pcf::IndiProperty::Idle);
    m_indiP_C1ampvrms.add (pcf::IndiElement("value"));
-
-   REG_INDI_NEWPROP_NOCB(m_indiP_C1ofst, "C1ofst", pcf::IndiProperty::Number, pcf::IndiProperty::ReadOnly, pcf::IndiProperty::Idle);
-   m_indiP_C1ofst.add (pcf::IndiElement("value"));
 
    REG_INDI_NEWPROP_NOCB(m_indiP_C1hlev, "C1hlev", pcf::IndiProperty::Number, pcf::IndiProperty::ReadOnly, pcf::IndiProperty::Idle);
    m_indiP_C1hlev.add (pcf::IndiElement("value"));
@@ -341,6 +360,9 @@ int siglentSDG::appStartup()
    REG_INDI_NEWPROP(m_indiP_C2amp, "C2amp", pcf::IndiProperty::Number, pcf::IndiProperty::ReadWrite, pcf::IndiProperty::Idle);
    m_indiP_C2amp.add (pcf::IndiElement("value"));
 
+   REG_INDI_NEWPROP(m_indiP_C2ofst, "C2ofst", pcf::IndiProperty::Number, pcf::IndiProperty::ReadWrite, pcf::IndiProperty::Idle);
+   m_indiP_C2ofst.add (pcf::IndiElement("value"));
+
    REG_INDI_NEWPROP_NOCB(m_indiP_C2wvtp, "C2wvtp", pcf::IndiProperty::Text, pcf::IndiProperty::ReadOnly, pcf::IndiProperty::Idle);
    m_indiP_C2wvtp.add (pcf::IndiElement("value"));
 
@@ -349,9 +371,6 @@ int siglentSDG::appStartup()
 
    REG_INDI_NEWPROP_NOCB(m_indiP_C2ampvrms, "C2ampvrms", pcf::IndiProperty::Number, pcf::IndiProperty::ReadOnly, pcf::IndiProperty::Idle);
    m_indiP_C2ampvrms.add (pcf::IndiElement("value"));
-
-   REG_INDI_NEWPROP_NOCB(m_indiP_C2ofst, "C2ofst", pcf::IndiProperty::Number, pcf::IndiProperty::ReadOnly, pcf::IndiProperty::Idle);
-   m_indiP_C2ofst.add (pcf::IndiElement("value"));
 
    REG_INDI_NEWPROP_NOCB(m_indiP_C2hlev, "C2hlev", pcf::IndiProperty::Number, pcf::IndiProperty::ReadOnly, pcf::IndiProperty::Idle);
    m_indiP_C2hlev.add (pcf::IndiElement("value"));
@@ -369,7 +388,7 @@ int siglentSDG::appStartup()
       state(stateCodes::NOTCONNECTED);
       m_powerOnCounter = 0;
    }
-   
+
    return 0;
 }
 
@@ -436,7 +455,7 @@ int siglentSDG::appLogic()
             logs << "Failed to connect to " << m_deviceAddr << ":" << m_devicePort;
             log<text_log>(logs.str());
          }
-         
+
          m_powerOnCounter += 1 + loopPause/1e9;
 
          return 0;
@@ -454,26 +473,26 @@ int siglentSDG::appLogic()
          if(cs < 0) return 0; //This means we aren't really connected yet.
 
          int rv;
-         
+
          rv = queryBSWV(1);
-         
+
          if( rv < 0 )
          {
             if(rv != SDG_PARSEERR_WVTP ) return 0; //This means we aren't really connected yet.
-            
+
             cs = 1; //Trigger normalizeSetup
          }
-         
-         rv = queryBSWV(2); 
-         
+
+         rv = queryBSWV(2);
+
          if( rv < 0 )
          {
             if(rv != SDG_PARSEERR_WVTP ) return 0; //This means we aren't really connected yet.
-            
+
             cs = 1; //Trigger normalizeSetup
          }
-         
-         
+
+
          if(cs > 0)
          {
             log<text_log>("Failed setup check, normalizing setup.", logPrio::LOG_NOTICE);
@@ -1312,7 +1331,65 @@ int siglentSDG::changeAmp( int channel,
    return rv;
 }
 
+inline
+int siglentSDG::changeOfst( int channel,
+                            double newOfst
+                          )
+{
+   if(channel < 1 || channel > 2) return -1;
 
+   ///\todo logs here
+
+   if(newOfst > cs_MaxOfst)
+   {
+      newOfst = cs_MaxOfst;
+   }
+
+   std::string afterColon = "BSWV OFST," + mx::ioutils::convertToString<double>(newOfst);
+   std::string command = makeCommand(channel, afterColon);
+
+   int rv = writeCommand(command);
+
+   if(rv < 0)
+   {
+      if(m_powerState) log<software_error>({__FILE__, __LINE__});
+      return -1;
+   }
+
+   return 0;
+}
+
+inline
+int siglentSDG::changeOfst( int channel,
+                            const pcf::IndiProperty &ipRecv
+                          )
+{
+   if(channel < 1 || channel > 2) return -1;
+
+   double newOfst;
+   try
+   {
+      newOfst = ipRecv["value"].get<double>();
+   }
+   catch(...)
+   {
+      log<software_error>({__FILE__, __LINE__, "Exception caught."});
+      return -1;
+   }
+
+   //Make sure we don't change things while other things are being updated.
+   std::lock_guard<std::mutex> guard(m_indiMutex);  //Lock the mutex before conducting any communications.
+
+   stateCodes::stateCodeT enterState = state();
+   state(stateCodes::CONFIGURING);
+
+   int rv = changeOfst(channel, newOfst);
+   if(rv < 0) log<software_error>({__FILE__, __LINE__});
+
+   state(enterState);
+
+   return rv;
+}
 
 INDI_NEWCALLBACK_DEFN(siglentSDG, m_indiP_C1outp)(const pcf::IndiProperty &ipRecv)
 {
@@ -1341,6 +1418,15 @@ INDI_NEWCALLBACK_DEFN(siglentSDG, m_indiP_C1amp)(const pcf::IndiProperty &ipRecv
    return -1;
 }
 
+INDI_NEWCALLBACK_DEFN(siglentSDG, m_indiP_C1ofst)(const pcf::IndiProperty &ipRecv)
+{
+   if (ipRecv.getName() == m_indiP_C1ofst.getName())
+   {
+      return changeOfst(1, ipRecv);
+   }
+   return -1;
+}
+
 INDI_NEWCALLBACK_DEFN(siglentSDG, m_indiP_C2outp)(const pcf::IndiProperty &ipRecv)
 {
    if (ipRecv.getName() == m_indiP_C2outp.getName())
@@ -1364,6 +1450,15 @@ INDI_NEWCALLBACK_DEFN(siglentSDG, m_indiP_C2amp)(const pcf::IndiProperty &ipRecv
    if (ipRecv.getName() == m_indiP_C2amp.getName())
    {
       return changeAmp(2, ipRecv);
+   }
+   return -1;
+}
+
+INDI_NEWCALLBACK_DEFN(siglentSDG, m_indiP_C2ofst)(const pcf::IndiProperty &ipRecv)
+{
+   if (ipRecv.getName() == m_indiP_C2ofst.getName())
+   {
+      return changeOfst(2, ipRecv);
    }
    return -1;
 }
