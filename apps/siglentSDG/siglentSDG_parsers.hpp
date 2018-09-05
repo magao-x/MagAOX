@@ -67,6 +67,16 @@ int parseBSWV( int & channel, ///< [out] the channel indicated by this response.
                const std::string & strRead ///< [in] string containing the device response
              )
 {
+   channel = 0;
+   freq = 0;
+   peri = 0;
+   amp = 0;
+   ampvrms = 0;
+   ofst = 0;
+   hlev = 0;
+   llev = 0;
+   phse = 0;
+   
    std::vector<std::string> v;
 
    mx::ioutils::parseStringVector(v, strRead, ":, \n");
@@ -82,30 +92,43 @@ int parseBSWV( int & channel, ///< [out] the channel indicated by this response.
    if(v[2] != "WVTP") return -5;
    wvtp = v[3];
 
-   if(wvtp != "SINE") return SDG_PARSEERR_WVTP; //We don't actually know how to handle anything else.
+   if(wvtp != "SINE" && wvtp != "DC") return SDG_PARSEERR_WVTP; //We don't actually know how to handle anything else.
    
-   if(v[4] != "FRQ") return -7;
+   if(wvtp == "DC")
+   {
+      if(v.size() < 6) return -7;
+      
+      if(v[4] != "OFST") return -8;
+      
+      ofst = mx::ioutils::convertFromString<double>(v[5]);
+      
+      return 0;
+   }
+   
+   if(v.size() < 20) return -9;
+   
+   if(v[4] != "FRQ") return -10;
    freq = mx::ioutils::convertFromString<double>(v[5]);
 
-   if(v[6] != "PERI") return -8;
+   if(v[6] != "PERI") return -11;
    peri = mx::ioutils::convertFromString<double>(v[7]);
 
-   if(v[8] != "AMP") return -9;
+   if(v[8] != "AMP") return -12;
    amp = mx::ioutils::convertFromString<double>(v[9]);
 
-   if(v[10] != "AMPVRMS") return -10;
+   if(v[10] != "AMPVRMS") return -13;
    ampvrms = mx::ioutils::convertFromString<double>(v[11]);
 
-   if(v[12] != "OFST") return -11;
+   if(v[12] != "OFST") return -14;
    ofst = mx::ioutils::convertFromString<double>(v[13]);
 
-   if(v[14] != "HLEV") return -12;
+   if(v[14] != "HLEV") return -15;
    hlev = mx::ioutils::convertFromString<double>(v[15]);
 
-   if(v[16] != "LLEV") return -13;
+   if(v[16] != "LLEV") return -16;
    llev = mx::ioutils::convertFromString<double>(v[17]);
 
-   if(v[18] != "PHSE") return -14;
+   if(v[18] != "PHSE") return -17;
    phse = mx::ioutils::convertFromString<double>(v[19]);
 
    return 0;
@@ -125,6 +148,8 @@ int parseMDWV( int & channel, ///< [out] the channel indicated by this response.
                const std::string & strRead ///< [in] string containing the device response
              )
 {
+   channel = 0;
+
    std::vector<std::string> v;
 
    mx::ioutils::parseStringVector(v, strRead, ":, \n");
@@ -157,6 +182,8 @@ int parseSWWV( int & channel, ///< [out] the channel indicated by this response.
                const std::string & strRead ///< [in] string containing the device response
              )
 {
+   channel = 0;
+   
    std::vector<std::string> v;
 
    mx::ioutils::parseStringVector(v, strRead, ":, \n");
@@ -189,6 +216,8 @@ int parseBTWV( int & channel, ///< [out] the channel indicated by this response.
                const std::string & strRead ///< [in] string containing the device response
              )
 {
+   channel = 0;
+   
    std::vector<std::string> v;
 
    mx::ioutils::parseStringVector(v, strRead, ":, \n");
@@ -220,6 +249,9 @@ int parseARWV( int & channel, ///< [out] the channel indicated by this response.
                const std::string & strRead ///< [in] string containing the device response
              )
 {
+   channel = 0;
+   index = -1;
+   
    std::vector<std::string> v;
 
    mx::ioutils::parseStringVector(v, strRead, ":, \n");
