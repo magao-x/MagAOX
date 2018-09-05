@@ -11,7 +11,7 @@
 ###################################################
 
 SELF_DIR := $(dir $(lastword $(MAKEFILE_LIST)))
--include $(SELF_DIR)../local/Common.mk
+-include $(SELF_DIR)../local/common.mk
 
 UNAME ?= $(shell uname)
 ifeq ($(UNAME),Darwin)
@@ -27,13 +27,8 @@ endif
 LIB_PATH ?= $(PREFIX)/lib
 INCLUDE_PATH ?= $(PREFIX)/include
 LIB_SOFA ?= $(LIB_PATH)/libsofa_c.a
-ARFLAGS ?= rvs
 
-MXLIB_PREFIX ?= $(HOME)
-MXLIB_LIB_PATH ?= $(MXLIB_PREFIX)/lib
-MXLIB_INCLUDE_PATH ?= $(MXLIB_PREFIX)/include
-
-INCLUDES += -I$(INCLUDE_PATH) -I$(MXLIB_INCLUDE_PATH)
+INCLUDES += -I$(INCLUDE_PATH)
 
 
 ########################################
@@ -46,10 +41,12 @@ OPTIMIZE ?= -O3 -fopenmp -ffast-math
 #######################################
 
 #location of liblilxml, libindicommon, mxlib and sofa:
-EXTRA_LDFLAGS ?=  -L$(MXLIB_LIB_PATH)
+EXTRA_LDFLAGS ?= -L$(MXLIB_LIB_PATH)
 
 #the required librarires
-EXTRA_LDLIBS ?= -lmxlib -lsofa_c -lboost_system -lboost_filesystem -ludev -ltelnet $(SELF_DIR)../INDI/libcommon/libcommon.a $(SELF_DIR)../INDI/liblilxml/liblilxml.a
+EXTRA_LDLIBS ?= -lmxlib -lsofa_c -lboost_system -lboost_filesystem -ludev \
+	-ltelnet $(SELF_DIR)../INDI/libcommon/libcommon.a \
+	$(SELF_DIR)../INDI/liblilxml/liblilxml.a
 
 #Add rt on Darwin:
 ifneq ($(UNAME),Darwin)
@@ -67,9 +64,8 @@ LDLIBS += -Wl,-rpath,$(LDLIBRPATH)
 ## Compilation and linking
 #######################################
 
-
-CFLAGS += -std=c99 -fPIC $(INCLUDES) $(OPTIMIZE) 
-CXXFLAGS += -std=c++14 -fPIC $(INCLUDES) $(OPTIMIZE) 
+CFLAGS += -std=c99 -fPIC $(INCLUDES) $(OPTIMIZE)
+CXXFLAGS += -std=c++14 -fPIC $(INCLUDES) $(OPTIMIZE)
 
 #This is needed to force use of g++ for linking
 LINK.o = $(LINK.cc)

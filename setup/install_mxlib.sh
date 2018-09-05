@@ -4,7 +4,7 @@ IFS=$'\n\t'
 DIR="$( cd "$( dirname "${BASH_SOURCE[0]}" )" && pwd )"
 envswitch=${1:---prod}
 
-MXLIBROOT=/opt/MagAOX/source/mxlib
+MXLIBROOT=/opt/MagAOX/source/dependencies/mxlib
 
 if [[ "$envswitch" == "--dev" ]]; then
   ENV=dev
@@ -29,10 +29,10 @@ fi
 if [[ -d "$MXLIBROOT" ]]; then
     cd "$MXLIBROOT"
     git pull
-    log "Updated mxlib"
+    echo "Updated mxlib"
 else
-    git clone --depth=1 https://github.com/jaredmales/mxlib.git
-    log "Cloned a new copy of mxlib"
+    git clone --depth=1 https://github.com/jaredmales/mxlib.git "$MXLIBROOT"
+    echo "Cloned a new copy of mxlib"
     cd "$MXLIBROOT"
 fi
 

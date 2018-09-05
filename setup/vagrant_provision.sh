@@ -1,10 +1,13 @@
 #!/bin/bash
 set -exuo pipefail
-DIR="$( cd "$( dirname "${BASH_SOURCE[0]}" )" && pwd )"
-/bin/sudo bash "$DIR/install_dependencies.sh"
+DIR="/vagrant/setup"
 /bin/sudo bash "$DIR/make_directories.sh" --dev
+/bin/sudo bash "$DIR/install_dependencies.sh"
 /bin/sudo bash "$DIR/install_mxlib.sh" --dev
 /bin/sudo bash "$DIR/set_permissions.sh"
+# Create or replace symlink to sources so we develop on the host machine's copy
+# (unlike prod, where we install a new clone of the repo to this location)
+ln -nfs /vagrant /opt/MagAOX/source/MagAOX
+usermod -G magaox,magaox-dev vagrant
 /bin/sudo bash "$DIR/install_MagAOX.sh"
-usermod -G magaox,magao-dev vagrant
 echo "Finished!"

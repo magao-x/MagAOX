@@ -7,15 +7,29 @@ function realpath() {
     echo "$(cd "$(dirname "$1")"; pwd)/$(basename "$1")"
 }
 
+DEPSROOT=/opt/MagAOX/source/dependencies
+
 echo "Starting shell-based provisioning script from $DIR..."
+# needed for (at least) git:
+yum groupinstall -y 'Development Tools'
+# changes the set of available packages, making devtoolset-7 available
 yum -y install centos-release-scl
-# n.b. the preceding line changes the set of available packages, so these two can't be combined.
+# install and enable devtoolset-7 for all users
+# Note: this only works on interactive shells! There is a bug in SCL
+# that breaks sudo argument parsing when SCL is enabled
+# (https://bugzilla.redhat.com/show_bug.cgi?id=1319936)
+# so we don't want it enabled when, e.g., Vagrant
+# sshes in to change things. (Complete sudo functionality
+# is available to interactive shells by specifying /bin/bash.)
 yum -y install devtoolset-7
-echo "source /opt/rh/devtoolset-7/enable" | tee /etc/profile.d/devtoolset-7.sh
+echo "if tty -s; then source /opt/rh/devtoolset-7/enable; fi" | tee /etc/profile.d/devtoolset-7.sh
 set +u
 source /opt/rh/devtoolset-7/enable
 set -u
-echo "export LD_LIBRARY_PATH=\"/usr/local/lib:\$LD_LIBRARY_PATH\"" | tee /etc/profile.d/ld-library-path.sh
+# Search /usr/local/lib by default for dynamic library loading
+echo "/usr/local/lib" | tee /etc/ld.so.conf.d/local.conf
+ldconfig -v
+
 #
 # mxLib Dependencies
 #
@@ -28,6 +42,10 @@ yum -y install lapack-devel atlas-devel
 yum -y install boost-devel
 yum -y install gsl gsl-devel
 #
+# Move to $DEPSROOT to download and build dependencies from source
+#
+cd $DEPSROOT
+#
 # FFTW (note: need 3.3.8 or newer, so can't use yum)
 #
 if [[ ! -d "./fftw-$FFTW_VERSION" ]]; then
@@ -36,38 +54,47 @@ if [[ ! -d "./fftw-$FFTW_VERSION" ]]; then
 fi
 cd fftw-$FFTW_VERSION
 # Following Jared's comprehensive build script: https://gist.github.com/jaredmales/0aacc00b0ce493cd63d3c5c75ccc6cdd
-./configure --enable-float
-make
-make install
-
-./configure --enable-float --enable-threads
-make
-make install
-
-./configure
-make
-make install
-
-./configure --enable-threads
-make
-make install
-
-./configure --enable-long-double
-make
-make install
-
-./configure --enable-long-double --enable-threads
-make
-make install
-
-./configure --enable-quad-precision
-make
-make install
-
-./configure --enable-quad-precision --enable-threads
-make
-make install
-cd
+if [ ! -e /usr/local/lib/libfftw3f.a ]; then
+    ./configure --enable-float
+    make
+    make install
+fi
+if [ ! -e /usr/local/lib/libfftw3f_threads.a ]; then
+    ./configure --enable-float --enable-threads
+    make
+    make install
+fi
+if [ ! -e /usr/local/lib/libfftw3.a ]; then
+    ./configure
+    make
+    make install
+fi
+if [ ! -e /usr/local/lib/libfftw3_threads.a ]; then
+    ./configure --enable-threads
+    make
+    make install
+fi
+if [ ! -e /usr/local/lib/libfftw3l.a ]; then
+    ./configure --enable-long-double
+    make
+    make install
+fi
+if [ ! -e /usr/local/lib/libfftw3l_threads.a ]; then
+    ./configure --enable-long-double --enable-threads
+    make
+    make install
+fi
+if [ ! -e /usr/local/lib/libfftw3q.a ]; then
+    ./configure --enable-quad-precision
+    make
+    make install
+fi
+if [ ! -e /usr/local/lib/libfftw3q_threads.a ]; then
+    ./configure --enable-quad-precision --enable-threads
+    make
+    make install
+fi
+cd $DEPSROOT
 #
 # CFITSIO
 #
@@ -76,10 +103,13 @@ if [[ ! -d ./cfitsio ]]; then
     tar xzf cfitsio_latest.tar.gz
 fi
 cd cfitsio
-./configure --prefix=/usr/local
-make
-make install
-cd
+if [[ ! (( -e /usr/local/lib/libcfitsio.a ) && ( -e /usr/local/lib/libcfitsio.so )) ]]; then
+    ./configure --prefix=/usr/local
+    make
+    make shared
+    make install
+fi
+cd $DEPSROOT
 #
 # SOFA
 #
@@ -88,9 +118,11 @@ if [[ ! -d ./sofa ]]; then
     echo "Downloaded and unpacked 'sofa' from sofa_c_-$SOFA_REV_DATE.tar.gz"
 fi
 cd sofa/$SOFA_REV_DATE/c/src
-make "CFLAGX=-pedantic -Wall -W -O -fPIC" "CFLAGF=-c -pedantic -Wall -W -O -fPIC"
-make install INSTALL_DIR=/usr/local
-cd
+if [[ ! -e /usr/local/lib/libsofa_c.a ]]; then
+    make "CFLAGX=-pedantic -Wall -W -O -fPIC" "CFLAGF=-c -pedantic -Wall -W -O -fPIC"
+    make install INSTALL_DIR=/usr/local
+fi
+cd $DEPSROOT
 #
 # Eigen
 #
@@ -100,7 +132,7 @@ if [[ ! -e $(readlink "/usr/local/include/Eigen") ]]; then
     ln -sv "$EIGEN_DIR/Eigen" "/usr/local/include/Eigen"
     echo "/usr/local/include/Eigen is now a symlink to $EIGEN_DIR"
 fi
-cd
+cd $DEPSROOT
 #
 # LevMar
 #
@@ -109,6 +141,26 @@ if [[ ! -d $LEVMAR_DIR ]]; then
     curl -LA "Mozilla/5.0" http://users.ics.forth.gr/~lourakis/levmar/levmar-$LEVMAR_VERSION.tgz | tar xvz
 fi
 cd $LEVMAR_DIR
-make liblevmar.a
-install liblevmar.a /usr/local/lib/
-cd
+if [[ ! -e /usr/local/lib/liblevmar.a ]]; then
+    make liblevmar.a
+    install liblevmar.a /usr/local/lib/
+fi
+cd $DEPSROOT
+#
+# MagAOX dependencies
+#
+FLATBUFFERS_VERSION="1.9.0"
+yum install -y cmake zlib-devel
+#
+# Flatbuffers
+#
+FLATBUFFERS_DIR="./flatbuffers-$FLATBUFFERS_VERSION"
+if [[ ! -d $FLATBUFFERS_DIR ]]; then
+    curl -L https://github.com/google/flatbuffers/archive/v$FLATBUFFERS_VERSION.tar.gz | tar xvz
+fi
+cd $FLATBUFFERS_DIR
+if ! command -v flatc; then
+    cmake -G "Unix Makefiles" -DCMAKE_BUILD_TYPE=Release
+    make
+    make install
+fi

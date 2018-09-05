@@ -32,7 +32,7 @@ chown -Rv root:root /opt/MagAOX
 # Operators should be able to access config and source
 # but modifications should be setGID (+s)
 chown -Rv :magaox-dev /opt/MagAOX/{config,source}
-chown -Rv g+rwXs /opt/MagAOX/{config,source}
+chmod -Rv g+rwXs /opt/MagAOX/{config,source}
 
 # Set logs to writable for non-admin users like xsup
 chown -RPv xsup:magaox /opt/MagAOX/logs
