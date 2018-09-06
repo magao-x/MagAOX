@@ -21,14 +21,12 @@ else
 	CFLAGS += -D_XOPEN_SOURCE=700
 	CXXFLAGS += -D_XOPEN_SOURCE=700
 endif
-#PREFIX ?= /opt/MagAOX   #-- now set in local/config.mk
-#BIN_PATH ?= $(PREFIX)/bin #-- now set in local/config.mk
 
 LIB_PATH ?= $(PREFIX)/lib
 INCLUDE_PATH ?= $(PREFIX)/include
 LIB_SOFA ?= $(LIB_PATH)/libsofa_c.a
 
-INCLUDES += -I$(INCLUDE_PATH)
+INCLUDES += -I$(INCLUDE_PATH) -I$(MAGAOX_PREFIX)/source/MagAOX/flatlogs/include
 
 
 ########################################
