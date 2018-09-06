@@ -5,7 +5,7 @@
   * \ingroup logger_types_files
   * 
   * History:
-  * - 2018-08-18 created by JRM
+  * - 2018-09-06 created by JRM
   */
 #ifndef logger_types_fxngen_params_hpp
 #define logger_types_fxngen_params_hpp
@@ -35,16 +35,16 @@ struct fxngen_params : public flatbuffer_log
    struct messageT : public fbMessage
    {
       ///Construct from components
-      messageT( const uint8_t & C1outp,     ///< [in]
-                const double & C1freq,      ///< [in]
-                const double & C1vpp,       ///< [in]
-                const double & C1ofst,      ///< [in]
-                const std::string & C1wvtp, ///< [in]
-                const uint8_t & C2outp,     ///< [in]
-                const double & C2freq,      ///< [in]
-                const double & C2vpp,       ///< [in]
-                const double & C2ofst,      ///< [in]
-                const std::string & C2wvtp  ///< [in]
+      messageT( const uint8_t & C1outp,     ///< [in] Channel 1 output status
+                const double & C1freq,      ///< [in] Channel 1 frequency [Hz]
+                const double & C1vpp,       ///< [in] Channel 1 P2P voltage
+                const double & C1ofst,      ///< [in] Channel 1 offset
+                const std::string & C1wvtp, ///< [in] Channel 1 wavetype (SINE or DC)
+                const uint8_t & C2outp,     ///< [in] Channel 2 output status
+                const double & C2freq,      ///< [in] Channel 2 frequency [Hz]
+                const double & C2vpp,       ///< [in] Channel 2 P2P voltage
+                const double & C2ofst,      ///< [in] Channel 2 offset
+                const std::string & C2wvtp  ///< [in] Channel 2 wavetype  (SINE or DC) 
               )
       {
          uint8_t  _C1wvtp = 3,  _C2wvtp = 3;
@@ -70,20 +70,38 @@ struct fxngen_params : public flatbuffer_log
                                )
    {
       static_cast<void>(len);
-//       
-//       auto rgs = GetGit_state_fb(msgBuffer);
-//       
-//       std::string str;
-//       if( rgs->repo()) str = rgs->repo()->c_str();
-//       
-//       str += " GIT: ";
-//       
-//       if( rgs->sha1()) str += rgs->sha1()->c_str();
-//       
-//       if(rgs->modified() > 0) str+= " MODIFIED";
 
-      static_cast<void>(msgBuffer);
-      return "fxngen_params logged";
+      auto fbs = GetFxngen_params_fb(msgBuffer);
+
+      std::string msg = "Ch 1: ";
+      
+      if(fbs->C1wvtp() == 0) msg += "DC ";
+      else if(fbs->C1wvtp() == 1) msg += "SINE ";
+      else msg += "UNK ";
+      
+      if(fbs->C1outp() == 0) msg += "OFF ";
+      else if(fbs->C1outp() == 1) msg += "ON ";
+      else msg += "UNK ";
+      
+      msg += std::to_string(fbs->C1freq()) + " Hz ";
+      msg += std::to_string(fbs->C1vpp()) + " Vp2p ";
+      msg += std::to_string(fbs->C1ofst()) + " V ";
+      
+      msg += " | Ch 2: ";
+
+      if(fbs->C2wvtp() == 0) msg += "DC ";
+      else if(fbs->C2wvtp() == 1) msg += "SINE ";
+      else msg += "UNK ";
+      
+      if(fbs->C2outp() == 0) msg += "OFF ";
+      else if(fbs->C2outp() == 1) msg += "ON ";
+      else msg += "UNK ";
+      
+      msg += std::to_string(fbs->C2freq()) + " Hz ";
+      msg += std::to_string(fbs->C2vpp()) + " Vp2p ";
+      msg += std::to_string(fbs->C2ofst()) + " V ";
+
+      return msg;
    
    }
    
