@@ -13,7 +13,14 @@ public:
    
    int m_redraw {0};
    
+   int m_cursStat {1};
+   
+   std::vector<std::string> m_numkeyKeys;
+   std::vector<std::string> m_numkeyNames;
+   std::vector<std::string> m_numkeyVals;
+   
    WINDOW * w_interactWin {nullptr};
+   WINDOW * w_countWin {nullptr};
    
    cursesINDI( const std::string &szName,
                const std::string &szVersion,
@@ -50,6 +57,14 @@ public:
    virtual void handleSetProperty( const pcf::IndiProperty &ipRecv );
 
    virtual void execute();
+   
+   void setFKeySet( size_t n,
+                    const std::string & com
+                  );
+   
+   void cursStat(int cs);
+   
+   int cursStat();
    
    void startUp();
    
@@ -150,6 +165,43 @@ void cursesINDI::execute()
   }
 }     
 
+void cursesINDI::setFKeySet( size_t n,
+                             const std::string & com
+                           )
+{
+   std::vector<std::string> spec;
+   mx::ioutils::parseStringVector(spec, com, "=\n");
+
+   std::vector<std::string> spec2;
+   mx::ioutils::parseStringVector(spec2, spec[0], ".");
+   
+   if(spec2.size() != 3) return;
+   
+   if(n+1 > m_numkeyKeys.size()) 
+   {
+      m_numkeyKeys.resize(n+1);
+      m_numkeyNames.resize(n+1);
+      m_numkeyVals.resize(n+1);
+   }
+   
+   m_numkeyKeys[n] = spec2[0] + "." + spec2[1];
+   m_numkeyNames[n] = spec2[2];
+   m_numkeyVals[n] = spec[1];
+
+}
+
+void cursesINDI::cursStat(int cs)
+{
+   m_cursStat = cs;
+   curs_set(m_cursStat);
+   
+}
+
+int cursesINDI::cursStat()
+{
+   return m_cursStat;
+}
+   
 void cursesINDI::startUp()
 {
    if(w_interactWin == nullptr)
@@ -158,6 +210,14 @@ void cursesINDI::startUp()
    }
 
    keypad(w_interactWin, TRUE);
+   
+   if(w_countWin == nullptr)
+   {
+      w_countWin = newwin( 1, m_tabWidth, m_tabY+m_tabHeight+1, m_tabX);
+   }
+
+   wprintw(w_countWin, "elements shown.");
+   wrefresh(w_countWin);
 }
 
 void cursesINDI::shutDown()
@@ -169,6 +229,10 @@ void cursesINDI::shutDown()
    
    if(w_interactWin) delwin(w_interactWin);
    w_interactWin = nullptr;
+   
+   if(w_countWin) delwin(w_countWin);
+   w_countWin = nullptr;
+   
 }
 
 void cursesINDI::redrawTable()
@@ -184,7 +248,7 @@ void cursesINDI::redrawTable()
     
       std::vector<std::string> s;
       s.resize( m_cx.size() );
-      s[0] = std::to_string(es->second.tableRow);
+      s[0] = std::to_string(es->second.tableRow+1);
       s[1] = knownProps[es->second.propKey].getDevice();
       s[2] = knownProps[es->second.propKey].getName();
       s[3] = es->second.name;
@@ -196,7 +260,16 @@ void cursesINDI::redrawTable()
    m_redraw -= start_redraw;
    if(m_redraw <0) m_redraw = 0;
    
+   wclear(w_countWin);
+   
+   int shown = m_tabHeight;
+   if(rows.size() < (size_t) m_tabHeight ) shown = rows.size();
+   wprintw(w_countWin, "%i/%i elements shown.", shown, knownElements.size());
+   wrefresh(w_countWin);
+   
    moveCurrent(m_currY, m_currX);
+   
+   
 }
 
 void cursesINDI::tableUpdateElement( elementSpec & es )
@@ -206,10 +279,11 @@ void cursesINDI::tableUpdateElement( elementSpec & es )
    int cx, cy;
    
    getyx(w_interactWin, cy, cx);
-   curs_set(0);
+   int cs = cursStat();
+   cursStat(0);
    updateContents( es.tableRow, 4, knownProps[es.propKey][es.name].getValue());
    wmove(w_interactWin,cy,cx);
-   curs_set(1);
+   cursStat(cs);
    wrefresh(w_interactWin);
    
 }
@@ -250,7 +324,7 @@ void cursesINDI::keyPressed( int ch )
          }
          //Error checks?
          
-         curs_set(1);
+         cursStat(1);
          wclear(w_interactWin);
          wprintw(w_interactWin, "set: %s.%s=", it->second.propKey.c_str(), it->second.name.c_str());
          wrefresh(w_interactWin);
@@ -260,6 +334,8 @@ void cursesINDI::keyPressed( int ch )
          int nch;
          while( (nch = wgetch(w_interactWin)) != '\n')
          {
+            cursStat(1);
+            
             if(nch == 27)
             {
                wclear(w_interactWin);
@@ -276,7 +352,7 @@ void cursesINDI::keyPressed( int ch )
                   wrefresh(w_interactWin);
                }
             }
-            else
+            else if (std::isprint(nch))
             {  
                wprintw(w_interactWin, "%c", nch);
                wrefresh(w_interactWin);
@@ -313,7 +389,7 @@ void cursesINDI::keyPressed( int ch )
          break;
    }
    
-   curs_set(0);
+   cursStat(0);
    wrefresh(w_interactWin);
 }
 

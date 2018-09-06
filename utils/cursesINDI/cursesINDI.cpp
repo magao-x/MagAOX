@@ -7,11 +7,11 @@
 
 int main()
 {
-//    FILE *f = fopen("/dev/tty", "r+");
-//    SCREEN *screen = newterm(NULL, f, f);
-//    set_term(screen);
+   FILE *f = fopen("/dev/tty", "r+");
+   SCREEN *screen = newterm(NULL, f, f);
+   set_term(screen);
   
-   initscr();
+   //initscr();
    cbreak();
    raw();    /* Line buffering disabled*/
    keypad(stdscr, TRUE); /* We get F1, 2 etc...*/
@@ -21,10 +21,13 @@ int main()
    
    cursesINDI ci("me", "1.7", "1.7");
 
-   ci.m_tabHeight = 20;
+   ci.m_tabHeight = LINES-5-2;
    ci.m_tabX = 1;
    ci.m_tabWidth = 78;
    
+   ci.setFKeySet(0, "maths_x.val.value=0.0");
+   
+   ci.startUp();
    ci.processIndiRequests(true);
    ci.activate();
  
@@ -33,8 +36,8 @@ int main()
    pcf::IndiProperty ipSend;
    ci.sendGetProperties( ipSend );
       
-   WINDOW * topWin = newwin(2, COLS, 0, 0);
-   wprintw(topWin, "Press q to quit");
+   WINDOW * topWin = newwin(1, COLS, 0, 0);
+   wprintw(topWin, "(e)dit a property, (q)uit");
    keypad(topWin, TRUE);
    wrefresh(topWin);
    
@@ -42,9 +45,8 @@ int main()
    box(boxWin, 0, 0);
    wrefresh(boxWin);
    int ch;
-   
 
-   curs_set(0);
+   ci.cursStat(0);
    
    //Now main event loop
    while((ch = wgetch(topWin)) != 'q')
@@ -52,9 +54,24 @@ int main()
       int nextX = ci.m_currX;
       int nextY = ci.m_currY;
       
-      
+      if(ch >= '0' && ch <= '9')
+      {
+         size_t kn = ch - '0';
+         
+         std::cout << kn << std::endl;
+         if(ci.m_numkeyKeys.size() >= kn +1 )
+         {
+            std::cout << ci.m_numkeyKeys[kn] << " " << ci.m_numkeyNames[kn] << " " << ci.m_numkeyVals[kn] << std::endl;
+            pcf::IndiProperty newProp = ci.knownProps[ci.m_numkeyKeys[kn]];
+            newProp[ci.m_numkeyNames[kn]].setValue(ci.m_numkeyVals[kn]);
+            ci.sendNewProperty(newProp);
+         }
+         
+         continue;
+      }
+            
       switch(ch)
-      { 
+      {         
          case KEY_LEFT:
             --nextX;
             break;
@@ -94,7 +111,7 @@ int main()
       
       wrefresh(topWin);
       
-      curs_set(0);
+      ci.cursStat(0);
    }
 
    

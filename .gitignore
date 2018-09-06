@@ -41,6 +41,7 @@ apps/siglentSDG/tests/siglentSDG_test
 
 
 utils/logdump/logdump
+utils/cursesINDI/cursesINDI
 
 #Devel stuff in flatlogs
 flatlogs/src/flatlogcodes
