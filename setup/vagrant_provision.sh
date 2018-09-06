@@ -9,5 +9,5 @@ DIR="/vagrant/setup"
 # (unlike prod, where we install a new clone of the repo to this location)
 ln -nfs /vagrant /opt/MagAOX/source/MagAOX
 usermod -G magaox,magaox-dev vagrant
-/bin/sudo -u xdev bash "$DIR/install_MagAOX.sh"
+/bin/sudo bash "$DIR/install_MagAOX.sh"
 echo "Finished!"

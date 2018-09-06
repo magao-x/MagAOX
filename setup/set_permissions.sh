@@ -26,9 +26,6 @@ function createuser() {
 creategroup magaox
 creategroup magaox-dev
 createuser xsup
-createuser xdev
-chsh -s /sbin/nologin xdev
-gpasswd -a xdev magaox-dev
 
 chown -R root:root /opt/MagAOX
 

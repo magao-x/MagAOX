@@ -10,8 +10,8 @@ xindidriver: xindidriver.cpp
 
 #Note this is not symlinke from /usr/local/bin in a normal MagAO-X install.
 install: all
-	su -c 'install -d $(BIN_PATH) & \
-	       install xindidriver $(BIN_PATH)'
+	sudo install -d $(BIN_PATH) && \
+		install xindidriver $(BIN_PATH)
 
 clean:
 	rm -f xindidriver

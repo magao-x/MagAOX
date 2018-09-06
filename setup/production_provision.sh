@@ -1,6 +1,11 @@
 #!/bin/bash
 set -exuo pipefail
 DIR="$( cd "$( dirname "${BASH_SOURCE[0]}" )" && pwd )"
+if [[ "$EUID" == 0 ]]; then
+  echo "This script should be run as a normal user"
+  echo "in the magaox-dev group with sudo access, not root."
+  exit 1
+fi
 /bin/sudo bash "$DIR/make_directories.sh"
 /bin/sudo bash "$DIR/install_dependencies.sh"
 /bin/sudo bash "$DIR/install_mxlib.sh"

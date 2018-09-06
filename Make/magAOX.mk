@@ -23,7 +23,6 @@
 #    -- Then finally include this file (or magAOXApp.mk or magAOXUtil.mk)
 ####################################################
 SELF_DIR := $(abspath $(dir $(lastword $(MAKEFILE_LIST))))
-#-include $(SELF_DIR)/../local/magAOXApp.mk
 include $(SELF_DIR)/../Make/common.mk
 include $(SELF_DIR)/../Make/config.mk
 

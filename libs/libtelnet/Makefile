@@ -9,10 +9,10 @@ all: libtelnet.a
 	$(CC) -shared -Wl,-soname,libtelnet.so -o libtelnet.so libtelnet*.o -rdynamic
 
 install: all
-	su -c 'install -d $(LIB_PATH)'
-	su -c 'install libtelnet.so $(LIB_PATH)'
-	su -c 'echo $(LIB_PATH) > /etc/ld.so.conf.d/magaox.conf'
-	su -c 'ldconfig'
+	sudo install -d $(LIB_PATH)
+	sudo install libtelnet.so $(LIB_PATH)
+	sudo echo $(LIB_PATH) > /etc/ld.so.conf.d/magaox.conf
+	sudo ldconfig
 
 
 HS = libtelnet.h

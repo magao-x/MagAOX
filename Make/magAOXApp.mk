@@ -31,4 +31,4 @@ SELF_DIR := $(abspath $(dir $(lastword $(MAKEFILE_LIST))))
 include $(SELF_DIR)/../Make/magAOX.mk
 
 install: all
-	su -c 'install -d $(BIN_PATH) & install $(TARGET) $(BIN_PATH) --mode=4755 --owner=root'
+	sudo install -d $(BIN_PATH) & install $(TARGET) $(BIN_PATH) --mode=4755 --owner=root
