@@ -23,5 +23,9 @@ else
     echo "Running from clone located at $DIR, nothing to do for cloning step"
 fi
 /bin/sudo bash "$DIR/set_permissions.sh"
-/bin/sudo -u xdev bash "$DIR/install_MagAOX.sh"
+# The last step should work as whatever user is installing, provided
+# they are a member of magaox-dev and they have sudo access to install to
+# /usr/local. Building as root  would leave intermediate build products
+# owned by root, which we probably don't want.
+bash "$DIR/install_MagAOX.sh"
 echo "Finished!"
