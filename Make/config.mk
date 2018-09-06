@@ -10,7 +10,7 @@
 #
 ###################################################
 
-SELF_DIR := $(dir $(lastword $(MAKEFILE_LIST)))
+SELF_DIR := $(abspath $(dir $(lastword $(MAKEFILE_LIST))))
 -include $(SELF_DIR)/../local/config.mk
 
 MAGAOX_PREFIX?=/opt/MagAOX

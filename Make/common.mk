@@ -10,8 +10,8 @@
 #
 ###################################################
 
-SELF_DIR := $(dir $(lastword $(MAKEFILE_LIST)))
--include $(SELF_DIR)../local/common.mk
+SELF_DIR := $(abspath $(dir $(lastword $(MAKEFILE_LIST))))
+-include $(SELF_DIR)/../local/common.mk
 
 UNAME ?= $(shell uname)
 ifeq ($(UNAME),Darwin)
@@ -40,13 +40,12 @@ OPTIMIZE ?= -O3 -fopenmp -ffast-math
 ## Libraries
 #######################################
 
-#location of liblilxml, libindicommon, mxlib and sofa:
-EXTRA_LDFLAGS ?= -L$(MXLIB_LIB_PATH)
+EXTRA_LDFLAGS ?=
 
 #the required librarires
 EXTRA_LDLIBS ?= -lmxlib -lsofa_c -lboost_system -lboost_filesystem -ludev \
-	-ltelnet $(SELF_DIR)../INDI/libcommon/libcommon.a \
-	$(SELF_DIR)../INDI/liblilxml/liblilxml.a
+	-ltelnet $(abspath $(SELF_DIR)/../INDI/libcommon/libcommon.a) \
+	$(abspath $(SELF_DIR)/../INDI/liblilxml/liblilxml.a)
 
 #Add rt on Darwin:
 ifneq ($(UNAME),Darwin)
@@ -72,4 +71,4 @@ LINK.o = $(LINK.cc)
 
 #Create an implicit rule for pre-compiled headers
 %.hpp.gch: %.hpp
-	$(CXX) $(CXXFLAGS) -I$(SELF_DIR)../flatlogs/include -c $<
+	$(CXX) $(CXXFLAGS) -I$(abspath $(SELF_DIR)/../flatlogs/include) -c $<
