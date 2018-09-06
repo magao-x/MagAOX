@@ -18,5 +18,5 @@ else
     echo "Running from clone located at $DIR, nothing to do for cloning step"
 fi
 /bin/sudo bash "$DIR/set_permissions.sh"
-/bin/sudo bash "$DIR/install_MagAOX.sh"
+/bin/sudo -u xdev bash "$DIR/install_MagAOX.sh"
 echo "Finished!"

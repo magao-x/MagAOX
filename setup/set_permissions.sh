@@ -26,19 +26,27 @@ function createuser() {
 creategroup magaox
 creategroup magaox-dev
 createuser xsup
+createuser xdev
+chsh -s /sbin/nologin xdev
+gpasswd -a xdev magaox-dev
 
-chown -Rv root:root /opt/MagAOX
+chown -R root:root /opt/MagAOX
 
 # Operators should be able to access config and source
 # but modifications should be setGID (+s)
-chown -Rv :magaox-dev /opt/MagAOX/{config,source}
-chmod -Rv g+rwXs /opt/MagAOX/{config,source}
+for shared_dir in /opt/MagAOX/config /opt/MagAOX/source; do
+  chown -R :magaox-dev $shared_dir
+  chmod -R g=rwX $shared_dir
+  # n.b. can't be recursive because g+s on files means something else
+  # so we find all directories and individually chmod them:
+  find /opt/MagAOX/config -type d -exec chmod -v g+s {} \;
+done
 
 # Set logs to writable for non-admin users like xsup
-chown -RPv xsup:magaox /opt/MagAOX/logs
+chown -RP xsup:magaox /opt/MagAOX/logs
 # Let operators (not in group magaox) read logs but not write:
-chmod -Rv u=rwX,g=rwX,o=rX /opt/MagAOX/logs
+chmod -R u=rwX,g=rwX,o=rX /opt/MagAOX/logs
 
 # Hide secrets
-chmod o-rwx -v /opt/MagAOX/secrets
-chmod g-rwx -v /opt/MagAOX/secrets
+chmod o-rwx /opt/MagAOX/secrets
+chmod g-rwx /opt/MagAOX/secrets

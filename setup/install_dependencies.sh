@@ -10,6 +10,8 @@ function realpath() {
 DEPSROOT=/opt/MagAOX/source/dependencies
 
 echo "Starting shell-based provisioning script from $DIR..."
+# Nice-to-haves
+yum install -y vim nano
 # needed for (at least) git:
 yum groupinstall -y 'Development Tools'
 # changes the set of available packages, making devtoolset-7 available
@@ -150,7 +152,7 @@ cd $DEPSROOT
 # MagAOX dependencies
 #
 FLATBUFFERS_VERSION="1.9.0"
-yum install -y cmake zlib-devel
+yum install -y cmake zlib-devel libudev-devel
 #
 # Flatbuffers
 #
