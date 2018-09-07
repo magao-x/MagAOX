@@ -34,7 +34,7 @@ mkdir  -pv "$LOGDIR"
 log_target=/opt/MagAOX/logs
 if [ "$LOGDIR" != "$log_target" ] ; then
   if [ -L $log_target ]; then
-    if [ "$(readlink -- "$log_target")" != $LOGDIR ]; then
+    if [[ "$(readlink -- "$log_target")" != $LOGDIR ]]; then
       echo "$log_target is an existing link, but doesn't point to $LOGDIR. Aborting."
       exit 1
     fi
