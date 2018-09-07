@@ -1,7 +1,7 @@
 #ifndef cursesTableRow_hpp
 #define cursesTableRow_hpp
 
-   
+
 class cursesTableRow
 {
 public:
@@ -10,23 +10,23 @@ public:
    int m_rowX;
    int m_rowHeight {1};
    int m_rowWidth {-1};
-   
+
    std::vector<int> m_cellX;
-   
-   
+
+
    std::vector<std::string> m_cellContents;
 
 private:
    bool own {false}; //Need this for move semantics
-   
+
 public:
    std::vector<WINDOW *> m_cellWin;
-  
+
 
    cursesTableRow()
    {
    }
-   
+
    /// Move constructor
    /** Allows safe copy-construction for vector-resize
      */
@@ -38,41 +38,41 @@ public:
       m_rowWidth = ctr.m_rowWidth;
       m_cellX = ctr.m_cellX;
       m_cellContents = ctr.m_cellContents;
-   
+
       m_cellWin = ctr.m_cellWin;
       ctr.own=false;
    }
-   
+
    ~cursesTableRow();
 
    void deleteRowWins();
-   
+
    void deleteRow();
-   
-   void createRow( int rowH, 
-                   int rowW, 
-                   int rowY, 
-                   int rowX, 
-                   std::vector<int> cellX 
+
+   void createRow( int rowH,
+                   int rowW,
+                   int rowY,
+                   int rowX,
+                   std::vector<int> cellX
                  );
-   
+
    void updateContents( const std::vector<std::string> & cellContents,
                         bool force = false,
                         bool display = true
                       );
-   
+
    void updateContents( int cellNo,
                         const std::string & cellContents,
                         bool force = false,
                         bool display = true
                       );
-   
+
    void recreate( bool display );
-   
+
    int cellY( int cellNo );
-   
+
    int cellX( int cellNo );
-   
+
    void keyPressed( int cellNo,
                     int ch
                   );
@@ -80,7 +80,7 @@ public:
 
 cursesTableRow::~cursesTableRow()
 {
-   deleteRowWins();
+   //deleteRowWins();
 }
 
 void cursesTableRow::deleteRowWins()
@@ -98,18 +98,18 @@ void cursesTableRow::deleteRow()
    m_cellX.clear();
 }
 
-void cursesTableRow::createRow( int rowH, 
-                                int rowW, 
-                                int rowY, 
-                                int rowX, 
-                                std::vector<int> cellX 
+void cursesTableRow::createRow( int rowH,
+                                int rowW,
+                                int rowY,
+                                int rowX,
+                                std::vector<int> cellX
                               )
 {
    if(cellX.size() != m_cellX.size())
    {
       //A reset is called for.
       deleteRow();
-      
+
       m_cellX = cellX;
       m_cellContents.resize(m_cellX.size());
       m_cellWin.resize(m_cellX.size(), 0);
@@ -118,7 +118,7 @@ void cursesTableRow::createRow( int rowH,
    {
       //Check if we actually do anyting
       bool cellsSame = true;
-      for(size_t i=0; i<m_cellX.size(); ++i) 
+      for(size_t i=0; i<m_cellX.size(); ++i)
       {
          if(cellX[i] != m_cellX[i])
          {
@@ -126,25 +126,25 @@ void cursesTableRow::createRow( int rowH,
             break;
          }
       }
-      
+
       //If no changes then we're out.
       if( cellsSame && rowH == m_rowHeight && rowW == m_rowWidth && rowY == m_rowY && rowX == m_rowX ) return;
-      
+
       deleteRowWins();
    }
-   
+
    m_rowHeight = rowH;
    m_rowWidth = rowW;
    m_rowY = rowY;
    m_rowX = rowX;
-   
+
    own = true;
    for(size_t i=0; i< m_cellWin.size()-1; ++i)
    {
       m_cellWin[i] = newwin(m_rowHeight, m_cellX[i+1]-m_cellX[i], m_rowY, m_rowX + m_cellX[i]);
       keypad(m_cellWin[i], TRUE);
    }
-   
+
    //Do last one outside loop to handle max-width case
    int l = m_cellWin.size()-1;
    int w = m_rowWidth;
@@ -153,7 +153,7 @@ void cursesTableRow::createRow( int rowH,
    keypad(m_cellWin[l], TRUE);
 
    //updateContents(m_cellContents, true);
-      
+
 }
 
 void cursesTableRow::updateContents( const std::vector<std::string> & cellContents,
@@ -166,7 +166,7 @@ void cursesTableRow::updateContents( const std::vector<std::string> & cellConten
       std::cout << "Wrong cell contents size" << std::endl;
       return;
    }
-   
+
    for(size_t i=0; i< m_cellContents.size(); ++i)
    {
       if(cellContents[i] != m_cellContents[i] || force)
@@ -184,10 +184,12 @@ void cursesTableRow::updateContents( const std::vector<std::string> & cellConten
 
 void cursesTableRow::updateContents( int cellNo,
                                      const std::string & cellContents,
-                                     bool force, 
+                                     bool force,
                                      bool display
                                    )
 {
+   if(cellNo > m_cellContents.size()-1) return;
+
    if(cellContents != m_cellContents[cellNo] || force)
    {
       m_cellContents[cellNo] = cellContents;
@@ -214,7 +216,7 @@ void cursesTableRow::recreate( bool display )
    int l = m_cellWin.size()-1;
    int w = m_rowWidth;
    if(w < 0) w = COLS;
-   
+
    delwin(m_cellWin[l]);
    m_cellWin[l] = newwin(m_rowHeight, w-m_cellX[l], m_rowY, m_rowX + m_cellX[l]);
    keypad(m_cellWin[l], TRUE);
@@ -222,11 +224,11 @@ void cursesTableRow::recreate( bool display )
    updateContents(m_cellContents, true, display);
 
 }
-   
+
 int cursesTableRow::cellY( int cellNo )
 {
    static_cast<void>(cellNo);
-   
+
    return m_rowY;
 }
 
@@ -254,7 +256,7 @@ void cursesTableRow::keyPressed( int cellNo,
             }
             wprintw(m_cellWin[cellNo], "%c", nch);
             wrefresh(m_cellWin[cellNo]);
-            
+
             newStr += (char) nch;
          }
          updateContents(cellNo, newStr, true);
