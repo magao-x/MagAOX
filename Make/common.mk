@@ -49,7 +49,7 @@ OPTIMIZE ?= -O3 -fopenmp -ffast-math
 EXTRA_LDFLAGS ?=  -L$(MXLIB_LIB_PATH)
 
 #the required librarires
-EXTRA_LDLIBS ?= -lmxlib -lsofa_c -lboost_system -lboost_filesystem -ludev -ltelnet $(SELF_DIR)../INDI/libcommon/libcommon.a $(SELF_DIR)../INDI/liblilxml/liblilxml.a
+EXTRA_LDLIBS ?= -lmxlib -lsofa_c -lboost_system -lboost_filesystem -ludev -ltelnet $(SELF_DIR)../INDI/libcommon/libcommon.a $(SELF_DIR)../INDI/liblilxml/liblilxml.a -lpthread
 
 #Add rt on Darwin:
 ifneq ($(UNAME),Darwin)
@@ -68,8 +68,8 @@ LDLIBS += -Wl,-rpath,$(LDLIBRPATH)
 #######################################
 
 
-CFLAGS += -std=c99 -fPIC $(INCLUDES) $(OPTIMIZE) 
-CXXFLAGS += -std=c++14 -fPIC $(INCLUDES) $(OPTIMIZE) 
+CFLAGS += -std=c99 -fPIC $(INCLUDES) $(OPTIMIZE)
+CXXFLAGS += -std=c++14 -fPIC $(INCLUDES) $(OPTIMIZE)
 
 #This is needed to force use of g++ for linking
 LINK.o = $(LINK.cc)

@@ -344,7 +344,7 @@ void cursesINDI::moveCurrent( int nextY,
    wattroff(rows[m_currY].m_cellWin[m_currX], A_REVERSE);
    rows[m_currY].updateContents( m_currX, rows[m_currY].m_cellContents[m_currX], true);
 
-   if(nextY >= 0 & nextY < m_tabHeight && nextX >= 1 && nextX <= 4)
+   if(nextY >= 0 && nextY < m_tabHeight && nextX >= 1 && nextX <= 4)
    {
       m_currY = nextY;
       m_currX = nextX;
