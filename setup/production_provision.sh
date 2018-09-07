@@ -7,9 +7,9 @@ if [[ "$EUID" == 0 ]]; then
   exit 1
 fi
 # Prompt for sudo authentication
-sudo -v
+/bin/sudo -v
 # Keep the sudo timestamp updated until this script exits
-while true; do sudo -n true; sleep 60; kill -0 "$$" || exit; done 2>/dev/null &
+while true; do /bin/sudo -n true; sleep 60; kill -0 "$$" || exit; done 2>/dev/null &
 
 /bin/sudo bash "$DIR/make_directories.sh"
 /bin/sudo bash "$DIR/install_dependencies.sh"
