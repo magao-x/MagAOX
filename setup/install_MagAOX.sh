@@ -10,7 +10,11 @@ if [[ ! -e /opt/MagAOX/config ]]; then
     cd /opt/MagAOX/config
     echo "Config branches available:"
     git branch
-    chmod -R g+s /opt/MagAOX/config
+    chown -R :magaox-dev /opt/MagAOX/config
+    chmod -R g=rwX /opt/MagAOX/config
+    # n.b. can't be recursive because g+s on files means something else
+    # so we find all directories and individually chmod them:
+    find /opt/MagAOX/config -type d -exec chmod -v g+s {} \;
 fi
 echo "Building flatlogs"
 cd /opt/MagAOX/source/MagAOX/flatlogs/src
