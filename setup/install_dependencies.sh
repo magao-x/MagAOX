@@ -7,6 +7,24 @@ function realpath() {
     echo "$(cd "$(dirname "$1")"; pwd)/$(basename "$1")"
 }
 
+envswitch=${1:---prod}
+if [[ "$envswitch" == "--dev" ]]; then
+  ENV=dev
+elif [[ "$envswitch" == "--prod" ]]; then
+  ENV=prod
+else
+  cat <<'HERE'
+Usage: install_dependencies.sh [--dev] [--prod]
+Automate installation of from-package-manager and from-source
+software dependencies for MagAO-X
+
+  --prod  (default) Set up for production (don't install linear algebra
+          libs, use MKL)
+  --dev   Set up for local development (install ATLAS and LAPACK)
+HERE
+  exit 1
+fi
+
 DEPSROOT=/opt/MagAOX/source/dependencies
 
 echo "Starting shell-based provisioning script from $DIR..."
@@ -40,7 +58,9 @@ SOFA_REV_DATE=$(echo $SOFA_REV | tr -d _C)
 EIGEN_VERSION="3.3.4"
 LEVMAR_VERSION="2.6"
 FFTW_VERSION="3.3.8"
-yum -y install lapack-devel atlas-devel
+if [[ $ENV == dev ]]; then
+    yum -y install lapack-devel atlas-devel
+fi
 yum -y install boost-devel
 yum -y install gsl gsl-devel
 #
