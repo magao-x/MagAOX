@@ -25,7 +25,7 @@ fi
 /bin/sudo bash "$DIR/set_permissions.sh"
 # The last step should work as whatever user is installing, provided
 # they are a member of magaox-dev and they have sudo access to install to
-# /usr/local. Building as root  would leave intermediate build products
+# /usr/local. Building as root would leave intermediate build products
 # owned by root, which we probably don't want.
 bash "$DIR/install_MagAOX.sh"
 echo "Finished!"

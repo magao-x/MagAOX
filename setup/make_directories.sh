@@ -25,7 +25,6 @@ mkdir  -pv /opt/MagAOX
 mkdir  -pv /opt/MagAOX/bin
 mkdir  -pv /opt/MagAOX/drivers
 mkdir  -pv /opt/MagAOX/drivers/fifos
-mkdir  -pv /opt/MagAOX/config
 mkdir  -pv /opt/MagAOX/source
 mkdir  -pv /opt/MagAOX/source/dependencies
 mkdir  -pv /opt/MagAOX/sys
