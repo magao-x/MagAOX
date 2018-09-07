@@ -19,6 +19,7 @@ This is the software which runs the MagAOX ExAO system.
    $ make
    $ sudo make install
    ```
+4. ncurses-devel
 
 ## 2 Software Configuration
 

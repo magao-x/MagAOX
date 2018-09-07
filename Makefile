@@ -3,7 +3,7 @@ libs_to_build = libtelnet
 
 apps_to_build = xindiserver trippLitePDU siglentSDG zaberCtrl magAOXMaths
 
-utils_to_build = logdump
+utils_to_build = logdump cursesINDI
 
 
 all: indi_all libs_all apps_all utils_all

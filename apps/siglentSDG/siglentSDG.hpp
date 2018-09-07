@@ -42,13 +42,13 @@ protected:
    int m_writeTimeOut {1000};  ///< The timeout for writing to the device [msec].
    int m_readTimeOut {1000}; ///< The timeout for reading from the device [msec].
 
-   int m_C1outp {0}; ///< The output status channel 1
+   uint8_t m_C1outp {0}; ///< The output status channel 1
    double m_C1frequency {0}; ///< The output frequency of channel 1
    double m_C1vpp {0}; ///< The peak-2-peak voltage of channel 1
    double m_C1ofst {0}; ///< The offset voltage of channel 1
    std::string m_C1wvtp; ///< The wave type of channel 1
    
-   int m_C2outp {0}; ///<  The output status channel 2
+   uint8_t m_C2outp {0}; ///<  The output status channel 2
    double m_C2frequency {0}; ///< The output frequency of channel 2
    double m_C2vpp {0}; ///< The peak-2-peak voltage of channel 2
    double m_C2ofst {0}; ///< The offset voltage of channel 2
@@ -643,7 +643,9 @@ int siglentSDG::appLogic()
 
       if( m_changeToLog )
       {
-         log<text_log>("change to log . . .");
+         //log<text_log>("change to log . . .");
+         log<fxngen_params>({m_C1outp, m_C1frequency, m_C1vpp,m_C1ofst, m_C1wvtp, m_C2outp, m_C2frequency, m_C2vpp, m_C2ofst, m_C2wvtp});
+         
          --m_changeToLog;
          
          if(m_changeToLog < 0) m_changeToLog = 0;

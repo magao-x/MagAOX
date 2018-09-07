@@ -59,12 +59,7 @@ named "log_type" in what follows.
   
 -# If it is not an empty log:
   - Create a flatbuffer schema in logger/types/schemas 
-  
-  - Add this schema to genflatc.sh, following other examples.  Now run it:
-  \verbatim
-  $ bash ./genflatc.sh
-  \endverbatim
-  
+    
   - Create a new file "log_type.hpp" in the logger/types directory.  This new file has the following form 
   \code
    #ifndef logger_types_log_type_hpp
@@ -112,16 +107,16 @@ named "log_type" in what follows.
    #endif
    \endcode
    For more information about how to write flatbuffer schemas and pack and access data, see the <a href="https://google.github.io/flatbuffers/">flatbuffer documentation</a>.
-   
--# Now add the log to logger/logCodes.dat"
+ 
+-# For completeness you should add the new types/log_type.hpp file to the libMagAOX Makefile INCLUDEDEPS list.
+
+-# Now add the log to \p "logger/logCodes.dat"
   - Place it in an appropriate section of the file, and in numerical order by the code so future additions can be easily managed.
   - Choose a code <= 65535, that is not already used.
-  - Run the "flatlogcodes" code generator from inside the logger directory:
-  \verbatim
-  $ ../../flatlogs/bin/flatlogcodes
-  \endverbatim
-  This will update the files in logger/generated
+  - Be sure to make the third column the name of the schema (without .fbs attached), which is not necessarily the log type name.
   
--# Now recompile the whole system.
+-# Re-compile the logging system by, in the libMagAOX directory (above logger), typing make.    This will generate a number of files based on the logCodes.dat entry you have made.  Correct any errors from the \p flatc compiler or the flatlogs code gerator.
+
+-# Now recompile (at least) the app using the log type and the logdump utility.
 
 */
