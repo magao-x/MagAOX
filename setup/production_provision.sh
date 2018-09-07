@@ -14,6 +14,7 @@ while true; do sudo -n true; sleep 60; kill -0 "$$" || exit; done 2>/dev/null &
 /bin/sudo bash "$DIR/make_directories.sh"
 /bin/sudo bash "$DIR/install_dependencies.sh"
 /bin/sudo bash "$DIR/install_mxlib.sh"
+/bin/sudo bash "$DIR/set_permissions.sh"
 if [[ $DIR != /opt/MagAOX/source/MagAOX ]]; then
     if [[ ! -e /opt/MagAOX/source/MagAOX ]]; then
         echo "Cloning new copy of MagAOX codebase"
@@ -27,7 +28,6 @@ if [[ $DIR != /opt/MagAOX/source/MagAOX ]]; then
 else
     echo "Running from clone located at $DIR, nothing to do for cloning step"
 fi
-/bin/sudo bash "$DIR/set_permissions.sh"
 # The last step should work as whatever user is installing, provided
 # they are a member of magaox-dev and they have sudo access to install to
 # /usr/local. Building as root would leave intermediate build products
