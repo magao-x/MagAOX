@@ -17,7 +17,7 @@ while true; do sudo -n true; sleep 60; kill -0 "$$" || exit; done 2>/dev/null &
 if [[ $DIR != /opt/MagAOX/source/MagAOX ]]; then
     if [[ ! -e /opt/MagAOX/source/MagAOX ]]; then
         echo "Cloning new copy of MagAOX codebase"
-        git clone $DIR /opt/MagAOX/source/MagAOX
+        git clone $(dirname $DIR) /opt/MagAOX/source/MagAOX
     fi
     cd /opt/MagAOX/source/MagAOX
     git remote remove origin
