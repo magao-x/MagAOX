@@ -6,7 +6,7 @@ class cursesINDI : public pcf::IndiClient, public cursesTable
 {
 
 public:
-   std::vector<int> m_cx;
+   std::vector<int> m_cx {0, 5, 20, 35, 50};
 
    int m_currY {0};
    int m_currX {1};
@@ -109,7 +109,7 @@ cursesINDI::cursesINDI( const std::string &szName,
    m_tabHeight = LINES-5;
    m_tabWidth = COLS;
 
-   m_cx = {0, 5, 20, 35, 50};
+   //m_cx = {0, 5, 20, 35, 50};
 
 }
 

@@ -12,7 +12,7 @@ int main()
 
    WINDOW * topWin;
 
-   WINDOW * boxWin;
+   
 
    int ch;
 
@@ -45,11 +45,11 @@ int main()
       keypad(topWin, TRUE);
       wrefresh(topWin);
 
+      WINDOW * boxWin;
       boxWin = newwin(ci.m_tabHeight+2, ci.m_tabWidth+2, 4,0);
       box(boxWin, 0, 0);
       wrefresh(boxWin);
-      int ch;
-
+      
       ci.cursStat(0);
    }
    catch(...)

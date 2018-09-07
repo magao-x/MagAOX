@@ -6,8 +6,8 @@ class cursesTableRow
 {
 public:
 
-   int m_rowY;
-   int m_rowX;
+   int m_rowY {0};
+   int m_rowX {0};
    int m_rowHeight {1};
    int m_rowWidth {-1};
 
@@ -30,16 +30,22 @@ public:
    /// Move constructor
    /** Allows safe copy-construction for vector-resize
      */
-   cursesTableRow( cursesTableRow && ctr )
+   cursesTableRow( cursesTableRow && ctr ) : m_rowY{ctr.m_rowY}, 
+                                             m_rowX{ctr.m_rowX}, 
+                                             m_rowHeight{ctr.m_rowHeight}, 
+                                             m_rowWidth{ctr.m_rowWidth},
+                                             m_cellX{ctr.m_cellX},
+                                             m_cellContents{ctr.m_cellContents},
+                                             m_cellWin{ctr.m_cellWin}
    {
-      m_rowX = ctr.m_rowX;
-      m_rowY = ctr.m_rowY;
-      m_rowHeight = ctr.m_rowHeight;
-      m_rowWidth = ctr.m_rowWidth;
-      m_cellX = ctr.m_cellX;
-      m_cellContents = ctr.m_cellContents;
-
-      m_cellWin = ctr.m_cellWin;
+//       m_rowX = ctr.m_rowX;
+//       m_rowY = ctr.m_rowY;
+//      m_rowHeight = ctr.m_rowHeight;
+//      m_rowWidth = ctr.m_rowWidth;
+//       m_cellX = ctr.m_cellX;
+//       m_cellContents = ctr.m_cellContents;
+// 
+//       m_cellWin = ctr.m_cellWin;
       ctr.own=false;
    }
 
@@ -61,7 +67,7 @@ public:
                         bool display = true
                       );
 
-   void updateContents( int cellNo,
+   void updateContents( size_t cellNo,
                         const std::string & cellContents,
                         bool force = false,
                         bool display = true
@@ -182,13 +188,13 @@ void cursesTableRow::updateContents( const std::vector<std::string> & cellConten
    }
 }
 
-void cursesTableRow::updateContents( int cellNo,
+void cursesTableRow::updateContents( size_t cellNo,
                                      const std::string & cellContents,
                                      bool force,
                                      bool display
                                    )
 {
-   if(cellNo > m_cellContents.size()-1) return;
+   if(cellNo >= m_cellContents.size()) return;
 
    if(cellContents != m_cellContents[cellNo] || force)
    {
