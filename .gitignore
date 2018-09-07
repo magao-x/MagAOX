@@ -5,6 +5,8 @@
 *.so
 *html/
 local/
+!local/common.example.mk
+!local/config.example.mk
 **/a.out
 **/tests/*.binlog
 **/.*~

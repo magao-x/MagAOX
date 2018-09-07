@@ -116,7 +116,7 @@ The following are the default MagAOX system directories.
 /opt/MagAOX/secrets       [Directory containing device passwords, etc.]
 ```
 
- This directory structure is #define-ed in libMagAOX/common/defaults.hpp.  It is created, with the proper permissions, by the script `setup/makeDirs.sh`.  It is also specified in `local/config.mk`.  Changing this isn't yet very simple, but we intend for it to be possible to have parallel installations.
+ This directory structure is #define-ed in libMagAOX/common/defaults.hpp.  It is created, with the proper permissions, by the script `setup/make_directories.sh` (except for `config`, which is made by cloning [magao-x/config](https://github.com/magao-x/config) into `/opt/MagAOX/config`).  It is also specified in `local/config.mk`.  Changing this isn't yet very simple, but we intend for it to be possible to have parallel installations.
 
 ToDo:
 - [] Investigate using appropriate environment variables to allow overriding these.
@@ -153,6 +153,8 @@ The MagAOX code is intimately tied to Linux OS internals, and targets CentOS 7 f
 
 ### Usage:
 
-After cloning the MagAOX repository, `cd` into it and run `vagrant up`. Vagrant will download a virtual machine image for CentOS 7 and then set up all the dependencies required. NFS is used to sync the contents of your repository clone to the VM.
+After cloning the MagAOX repository, `cd` into it and run `vagrant up`. Provisioning uses the `setup/vagrant_provision.sh` script, which in turn calls other scripts in `setup/` and sets permissions. Provisioning is slow, but only costly the first time you start the VM. Vagrant will download a virtual machine image for CentOS 7 and then set up all the dependencies required. NFS is used to sync the contents of your repository clone to the VM.
 
-To connect to the VM, use `vagrant ssh`.
+To connect to the VM, use `vagrant ssh`. The VM has a view of your copy of this repository under `/vagrant`. For example, no matter where you cloned this repository on your own (host) machine, the virtual machine will see this file at `/vagrant/README.md`. (For consistency with production, we symlink `/opt/MagAOX/source/MagAOX` to `/vagrant`.) Edits to the MagAO-X software source on your computer will be instantly reflected on the VM side, ready for you to `make` or `make install`.
+
+The `vagrant` user you log in as will be a member of the `magaox` and `magaox-dev` groups, and should have all the necessary permissions to run the system (or, at least, the parts you can run in a VM).

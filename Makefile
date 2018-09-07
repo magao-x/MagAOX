@@ -89,16 +89,12 @@ doc_clean:
 
 .PHONY: setup
 setup:
-		@for file in ./local/*.example.mk; do \
-			dest=$$(echo $$file | sed 's/.example//'); \
-			if [ ! -e $$dest ]; then cp -v $$file $$dest; fi \
-		done
-		@echo "***\nBuild settings available in local/Common.mk\n***"
-		@grep "?=" mk/Common.mk || true
-		@echo "***"
-		@echo "Build settings available in local/MxLib.mk\n***"
-		@grep "?=" mk/MxLib.mk || true
-		@echo "***"
-		@echo "Build settings available in local/MxApp.mk\n***"
-		@grep  "?=" mk/MxApp.mk || true
-		@echo "***"
+	@for file in ./local/*.example.mk; do \
+		dest=$$(echo $$file | sed 's/.example//'); \
+		if [ ! -e $$dest ]; then cp -v $$file $$dest; fi \
+	done
+	@echo "*** Build settings available in local/common.mk ***"
+	@grep "?=" Make/common.mk || true
+	@echo "*** Build settings available in local/config.mk ***"
+	@grep "?=" Make/config.mk || true
+	@echo "***"
