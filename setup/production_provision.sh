@@ -3,7 +3,7 @@ set -exuo pipefail
 DIR="$( cd "$( dirname "${BASH_SOURCE[0]}" )" && pwd )"
 set +e; groups | grep magaox-dev; set -e
 not_in_group=$?
-if [[ "$EUID" == 0 || $not_in_group ]]; then
+if [[ "$EUID" == 0 || $not_in_group != 0 ]]; then
   echo "This script should be run as a normal user"
   echo "in the magaox-dev group with sudo access, not root."
   echo "Run $DIR/setup_users_and_groups.sh first."
@@ -21,7 +21,6 @@ while true; do /bin/sudo -n true; sleep 60; kill -0 "$$" || exit; done 2>/dev/nu
 
 /bin/sudo gpasswd -a $USER magaox-dev
 echo "Added current user $USER to group magaox-dev"
-newgrp magaox-dev
 
 if [[ $DIR != /opt/MagAOX/source/MagAOX ]]; then
     if [[ ! -e /opt/MagAOX/source/MagAOX ]]; then
