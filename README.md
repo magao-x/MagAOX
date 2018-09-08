@@ -145,6 +145,8 @@ Beginning from a CentOS 7 fresh install with network access, once you've logged 
    $ ./setup_users_and_groups.sh
    ```
 
+  **Note:** This creates the `xsup` user account with a default password (`extremeAO!`). Change this to the real password (`sudo passwd xsup`), or be a disappointment to @jaredmales.
+
    This changes the group memberships of the installing user (i.e. `$USER`, so most likely you). Before that takes effect, you will have to log out and back in. (Alternatively, you can run `newgrp magaox-dev` to start a new subshell where the new group is active, but this can get confusing.)
 
 6. Run the provisioning script
