@@ -4,6 +4,7 @@ DIR="/vagrant/setup"
 /bin/sudo bash "$DIR/make_directories.sh" --dev
 /bin/sudo bash "$DIR/install_dependencies.sh" --dev
 /bin/sudo bash "$DIR/install_mxlib.sh" --dev
+/bin/sudo bash "$DIR/setup_users_and_groups.sh" --dev
 /bin/sudo bash "$DIR/set_permissions.sh"
 # Create or replace symlink to sources so we develop on the host machine's copy
 # (unlike prod, where we install a new clone of the repo to this location)

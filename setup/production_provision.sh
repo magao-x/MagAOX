@@ -1,9 +1,12 @@
 #!/bin/bash
 set -exuo pipefail
 DIR="$( cd "$( dirname "${BASH_SOURCE[0]}" )" && pwd )"
-if [[ "$EUID" == 0 ]]; then
+groups | grep magaox-dev
+not_in_group=$?
+if [[ "$EUID" == 0 || $not_in_group ]]; then
   echo "This script should be run as a normal user"
   echo "in the magaox-dev group with sudo access, not root."
+  echo "Run $DIR/setup_users_and_groups.sh first."
   exit 1
 fi
 # Prompt for sudo authentication
@@ -28,7 +31,7 @@ if [[ $DIR != /opt/MagAOX/source/MagAOX ]]; then
     cd /opt/MagAOX/source/MagAOX
     git remote remove origin
     git remote add origin git@github.com:magao-x/MagAOX.git
-    git branch -u origin
+    git branch -u origin master
     echo "In the future, you can run this script from /opt/MagAOX/source/MagAOX/setup"
 else
     echo "Running from clone located at $DIR, nothing to do for cloning step"
