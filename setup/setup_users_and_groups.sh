@@ -44,7 +44,7 @@ creategroup magaox
 creategroup magaox-dev
 createuser xsup
 if [[ $ENV == "prod" ]]; then
-    gpasswd -a $USER magaox-dev
+    /bin/sudo gpasswd -a $USER magaox-dev
     echo "Added $USER to group magaox-dev"
     echo "Note: You will need to log out and back in before this group takes effect"
 fi
