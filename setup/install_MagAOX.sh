@@ -6,7 +6,7 @@ IFS=$'\n\t'
 
 if [[ ! -e /opt/MagAOX/config ]]; then
     echo "Cloning new copy of MagAOX config files"
-    git clone https://github.com/magao-x/config.git /opt/MagAOX/config
+    /bin/sudo git clone https://github.com/magao-x/config.git /opt/MagAOX/config
     cd /opt/MagAOX/config
     echo "Config branches available:"
     git branch

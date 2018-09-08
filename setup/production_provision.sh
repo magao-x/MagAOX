@@ -29,7 +29,9 @@ if [[ $DIR != /opt/MagAOX/source/MagAOX ]]; then
     fi
     cd /opt/MagAOX/source/MagAOX
     git remote remove origin
-    git remote add origin git@github.com:magao-x/MagAOX.git
+    git remote add origin https://github.com/magao-x/MagAOX.git
+    git fetch
+    git branch -u origin master
     echo "In the future, you can run this script from /opt/MagAOX/source/MagAOX/setup"
 else
     echo "Running from clone located at $DIR, nothing to do for cloning step"
