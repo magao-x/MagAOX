@@ -1,7 +1,7 @@
 #!/bin/bash
 set -exuo pipefail
 DIR="$( cd "$( dirname "${BASH_SOURCE[0]}" )" && pwd )"
-groups | grep magaox-dev
+set +e; groups | grep magaox-dev; set -e
 not_in_group=$?
 if [[ "$EUID" == 0 || $not_in_group ]]; then
   echo "This script should be run as a normal user"
