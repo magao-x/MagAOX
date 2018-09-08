@@ -172,7 +172,7 @@ cd $DEPSROOT
 # MagAOX dependencies
 #
 FLATBUFFERS_VERSION="1.9.0"
-yum install -y cmake zlib-devel libudev-devel
+yum install -y cmake zlib-devel libudev-devel ncurses-devel
 #
 # Flatbuffers
 #
