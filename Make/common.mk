@@ -33,7 +33,7 @@ MXLIB_PREFIX ?= $(HOME)
 MXLIB_LIB_PATH ?= $(MXLIB_PREFIX)/lib
 MXLIB_INCLUDE_PATH ?= $(MXLIB_PREFIX)/include
 
-INCLUDES += -I$(INCLUDE_PATH) -I$(MXLIB_INCLUDE_PATH)
+INCLUDES += -I$(INCLUDE_PATH) -I$(MXLIB_INCLUDE_PATH) -I$(SELF_DIR)../flatlogs/include
 
 
 ########################################

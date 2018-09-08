@@ -1534,9 +1534,6 @@ void MagAOXApp<_useINDI>::handleGetProperties( const pcf::IndiProperty &ipRecv )
    //Check if we actually have this.
    if( m_indiNewCallBacks.count(ipRecv.getName()) == 0)
    {
-      std::stringstream s;
-      s << "Received GetProperty for " << ipRecv.getName();
-      log<text_log>(s.str(), logPrio::LOG_ERROR);
       return;
    }
 
