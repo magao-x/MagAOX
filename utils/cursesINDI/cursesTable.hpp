@@ -61,6 +61,8 @@ void cursesTable::updateContents( int rowNo,
                                   const std::string & contents 
                                 )
 {
+   if(rowNo < 0  || (size_t) rowNo >= rows.size()) return;
+   
    bool display = false;
    if(rows[rowNo].m_rowY >= m_tabY && rows[rowNo].m_rowY < m_tabY + m_tabHeight) display = true;
          

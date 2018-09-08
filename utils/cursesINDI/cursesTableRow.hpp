@@ -38,14 +38,6 @@ public:
                                              m_cellContents{ctr.m_cellContents},
                                              m_cellWin{ctr.m_cellWin}
    {
-//       m_rowX = ctr.m_rowX;
-//       m_rowY = ctr.m_rowY;
-//      m_rowHeight = ctr.m_rowHeight;
-//      m_rowWidth = ctr.m_rowWidth;
-//       m_cellX = ctr.m_cellX;
-//       m_cellContents = ctr.m_cellContents;
-// 
-//       m_cellWin = ctr.m_cellWin;
       ctr.own=false;
    }
 
@@ -86,7 +78,7 @@ public:
 
 cursesTableRow::~cursesTableRow()
 {
-   //deleteRowWins();
+   deleteRowWins();
 }
 
 void cursesTableRow::deleteRowWins()
