@@ -27,8 +27,8 @@
 #
 ####################################################
 
-SELF_DIR := $(dir $(lastword $(MAKEFILE_LIST)))
+SELF_DIR := $(abspath $(dir $(lastword $(MAKEFILE_LIST))))
 include $(SELF_DIR)/../Make/magAOX.mk
 
 install: all
-	su -c 'install -d $(BIN_PATH) & install $(TARGET) $(BIN_PATH) & ln -sf $(BIN_PATH)/$(TARGET) /usr/local/bin/$(TARGET)'
+	sudo install -d $(BIN_PATH) & install $(TARGET) $(BIN_PATH) & ln -sf $(BIN_PATH)/$(TARGET) /usr/local/bin/$(TARGET)

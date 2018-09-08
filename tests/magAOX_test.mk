@@ -20,13 +20,13 @@
 #    -- Define TARGET=
 #    -- Then include this file.
 ####################################################
-SELF_DIR := $(dir $(lastword $(MAKEFILE_LIST)))
+SELF_DIR := $(abspath $(dir $(lastword $(MAKEFILE_LIST))))
 -include $(SELF_DIR)/../local/magAOXApp.mk
 include $(SELF_DIR)/../Make/common.mk
 include $(SELF_DIR)/../Make/config.mk
 
 #To ensure pre-compiled header gets used
-CXXFLAGS += -include $(SELF_DIR)../tests/testMagAOX.hpp
+CXXFLAGS += -include $(abspath $(SELF_DIR)/../tests/testMagAOX.hpp)
 
 #Uncomment to test whether pre-compiled header is used
 CXXFLAGS += -H
@@ -43,10 +43,10 @@ TARGET ?= $(t)
 all:  pch magaox_git_version.h $(TARGET)
 
 pch:
-	cd $(SELF_DIR)../tests; ${MAKE}
+	cd $(SELF_DIR)/../tests; ${MAKE}
 
 
-$(TARGET):  $(TARGET).o  $(SELF_DIR)../tests/testMagAOX.hpp.gch $(TARGET).cpp $(OTHER_HEADERS)
+$(TARGET):  $(TARGET).o  $(SELF_DIR)/../tests/testMagAOX.hpp.gch $(TARGET).cpp $(OTHER_HEADERS)
 	$(LINK.o) -o $(TARGET) $(TARGET).o  $(LDFLAGS) $(LDLIBS)
 
 
@@ -54,9 +54,9 @@ $(TARGET):  $(TARGET).o  $(SELF_DIR)../tests/testMagAOX.hpp.gch $(TARGET).cpp $(
 #This always gets regenerated.
 .PHONY: magaox_git_version.h
 magaox_git_version.h:
-	gengithead.sh ../../../ ../magaox_git_version.h MAGAOX
+	gengithead.sh $(abspath ../../../) ../magaox_git_version.h MAGAOX
 
-	
+
 .PHONY: clean
 clean:
 	rm -f $(TARGET)

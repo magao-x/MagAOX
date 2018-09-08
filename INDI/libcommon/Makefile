@@ -9,14 +9,14 @@
 
 
 #Get MagAO-X build settings
-SELF_DIR := $(dir $(lastword $(MAKEFILE_LIST)))
+SELF_DIR := $(abspath $(dir $(lastword $(MAKEFILE_LIST))))
 include $(SELF_DIR)/../../Make/common.mk
 
 
 
 all: libcommon.a
 
-	
+
 SRCS = \
 	 Cmd.cpp \
 	 Fits.cpp \

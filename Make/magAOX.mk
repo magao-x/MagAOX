@@ -22,16 +22,15 @@
 #    -- Define TARGET=
 #    -- Then finally include this file (or magAOXApp.mk or magAOXUtil.mk)
 ####################################################
-SELF_DIR := $(dir $(lastword $(MAKEFILE_LIST)))
-#-include $(SELF_DIR)../local/magAOXApp.mk
-include $(SELF_DIR)../Make/common.mk
-include $(SELF_DIR)../Make/config.mk
+SELF_DIR := $(abspath $(dir $(lastword $(MAKEFILE_LIST))))
+include $(SELF_DIR)/../Make/common.mk
+include $(SELF_DIR)/../Make/config.mk
 
 #To ensure pre-compiled header gets used
-CXXFLAGS += -include $(SELF_DIR)../libMagAOX/libMagAOX.hpp
+CXXFLAGS += -include $(abspath $(SELF_DIR)/../libMagAOX/libMagAOX.hpp)
 
 #Uncomment to test whether pre-compiled header is used
-#CXXFLAGS += -H
+# CXXFLAGS += -H
 
 
 ########################################
@@ -48,7 +47,7 @@ all:  pch magaox_git_version.h $(TARGET)
 pch:
 	cd ../../libMagAOX; ${MAKE}
 
-$(TARGET).o: $(SELF_DIR)../libMagAOX/libMagAOX.hpp.gch $(TARGET).hpp $(OTHER_HEADERS)
+$(TARGET).o: $(abspath $(SELF_DIR)/../libMagAOX/libMagAOX.hpp.gch) $(TARGET).hpp $(OTHER_HEADERS)
 
 $(TARGET):  $(TARGET).o  $(OTHER_OBJS)
 	$(LINK.o)  -o $(TARGET) $(TARGET).o $(OTHER_OBJS) $(LDFLAGS) $(LDLIBS)
@@ -58,7 +57,7 @@ $(TARGET):  $(TARGET).o  $(OTHER_OBJS)
 #This always gets regenerated.
 .PHONY: magaox_git_version.h
 magaox_git_version.h:
-	gengithead.sh $(SELF_DIR)../ ./magaox_git_version.h MAGAOX
+	gengithead.sh $(abspath $(SELF_DIR)/../) ./magaox_git_version.h MAGAOX
 
 .PHONY: clean
 clean:
