@@ -19,9 +19,6 @@ while true; do /bin/sudo -n true; sleep 60; kill -0 "$$" || exit; done 2>/dev/nu
 /bin/sudo bash "$DIR/install_mxlib.sh"
 /bin/sudo bash "$DIR/set_permissions.sh"
 
-/bin/sudo gpasswd -a $USER magaox-dev
-echo "Added current user $USER to group magaox-dev"
-
 if [[ $DIR != /opt/MagAOX/source/MagAOX ]]; then
     if [[ ! -e /opt/MagAOX/source/MagAOX ]]; then
         echo "Cloning new copy of MagAOX codebase"

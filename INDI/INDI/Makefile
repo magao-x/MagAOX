@@ -20,12 +20,12 @@ evalINDI: connect_to.h connect_to.c indiapi.h evalINDI.c
 	$(CC) $(CCFLAGS) -o evalINDI -I../liblilxml  evalINDI.c connect_to.c compiler.c ../liblilxml/liblilxml.a -lm
 
 install: all
-	sudo install -d $(BIN_PATH) && \
-		install indiserver getINDI setINDI evalINDI $(BIN_PATH) && \
-		ln -sf $(BIN_PATH)/indiserver /usr/local/bin/indiserver && \
-		ln -sf $(BIN_PATH)/getINDI /usr/local/bin/getINDI && \
-		ln -sf $(BIN_PATH)/setINDI /usr/local/bin/setINDI && \
-		ln -sf $(BIN_PATH)/evalINDI /usr/local/bin/evalINDI
+	/bin/sudo install -d $(BIN_PATH)
+	/bin/sudo install indiserver getINDI setINDI evalINDI $(BIN_PATH)
+	/bin/sudo ln -sf $(BIN_PATH)/indiserver /usr/local/bin/indiserver
+	/bin/sudo ln -sf $(BIN_PATH)/getINDI /usr/local/bin/getINDI
+	/bin/sudo ln -sf $(BIN_PATH)/setINDI /usr/local/bin/setINDI
+	/bin/sudo ln -sf $(BIN_PATH)/evalINDI /usr/local/bin/evalINDI
 
 clean:
 	rm -f indiserver getINDI setINDI evalINDI

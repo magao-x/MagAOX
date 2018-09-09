@@ -15,10 +15,10 @@ all: liblilxml.a
 	$(CC) -shared -Wl,-soname,liblilxml.so -o liblilxml.so lilxml*.o -rdynamic
 
 install: all
-	sudo install -d $(LIB_PATH)
-	sudo install liblilxml.so $(LIB_PATH)
-	sudo echo $(LIB_PATH) > /etc/ld.so.conf.d/magaox.conf
-	sudo ldconfig
+	/bin/sudo install -d $(LIB_PATH)
+	/bin/sudo install liblilxml.so $(LIB_PATH)
+	/bin/sudo echo $(LIB_PATH) > /etc/ld.so.conf.d/magaox.conf
+	/bin/sudo ldconfig
 
 
 HS = lilxml.h
