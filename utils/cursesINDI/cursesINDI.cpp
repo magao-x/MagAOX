@@ -3,11 +3,10 @@
 
 
 
-
+#include <fstream>
 
 int main()
 {
-
    cursesINDI ci("me", "1.7", "1.7");
 
    WINDOW * topWin;
@@ -26,7 +25,6 @@ int main()
    ci.m_tabWidth = 78;
 
    ci.startUp();
-   ci.processIndiRequests(true);
    ci.activate();
 
    pcf::IndiProperty ipSend;
@@ -44,6 +42,7 @@ int main()
    
    ci.cursStat(0);
 
+   
    //Now main event loop
    while((ch = wgetch(ci.w_interactWin)) != 'q')
    {
@@ -88,8 +87,6 @@ int main()
       }
 
       ci.moveCurrent(nextY, nextX);
-
-      //wrefresh(topWin);
 
       ci.cursStat(0);
    }

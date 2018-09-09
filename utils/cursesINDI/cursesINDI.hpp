@@ -2,6 +2,7 @@
 #include "../../INDI/libcommon/IndiClient.hpp"
 #include "cursesTable.hpp"
 
+   
 class cursesINDI : public pcf::IndiClient, public cursesTable
 {
 
@@ -13,11 +14,16 @@ public:
 
    int m_redraw {0};
 
+   int m_update {0};
+   
    int m_cursStat {1};
 
    WINDOW * w_interactWin {nullptr};
-   WINDOW * w_countWin {nullptr};
+   WINDOW * w_countWin
+   {nullptr};
 
+   bool m_shutdown {false};
+   std::thread m_drawThread;
    std::mutex m_drawMutex;
    
    cursesINDI( const std::string &szName,
@@ -64,14 +70,27 @@ public:
 
    void shutDown();
 
+   static void _drawThreadStart( cursesINDI * c /**< [in]  */);
+
+   /// Start the draw thread.
+   int drawThreadStart();
+
+   /// Execute the draw thread.
+   void drawThreadExec();
+   
+   
    void redrawTable();
 
-   void tableUpdateElement( const std::string & esKey );
+   void updateTable();
 
    void moveCurrent( int nextY,
                      int nextX
                    );
 
+   void _moveCurrent( int nextY,
+                     int nextX
+                   );
+   
    void keyPressed( int ch );
 
 };
@@ -86,8 +105,6 @@ cursesINDI::cursesINDI( const std::string &szName,
    m_tabHeight = LINES-5;
    m_tabWidth = COLS;
    
-   setInterval(250);
-
 }
 
 cursesINDI::~cursesINDI()
@@ -97,11 +114,14 @@ cursesINDI::~cursesINDI()
 
 void cursesINDI::handleDefProperty( const pcf::IndiProperty &ipRecv )
 {
-   if(!ipRecv.hasValidDevice() && !ipRecv.hasValidName()) return;
-
+   if(!ipRecv.hasValidDevice() && !ipRecv.hasValidName()) 
+   {
+      return;
+   }
+   
    std::pair<propMapIteratorT, bool> result;
    
-   //std::lock_guard<std::mutex> lock(m_drawMutex); 
+   std::lock_guard<std::mutex> lock(m_drawMutex); 
    
    result = knownProps.insert(propMapValueT( ipRecv.createUniqueKey(), ipRecv ));
    
@@ -133,8 +153,9 @@ void cursesINDI::handleDefProperty( const pcf::IndiProperty &ipRecv )
       }
       else
       {
-         //Otherwise we just update the element.
-         tableUpdateElement(elResult.first->first);
+         ++m_update;
+//          //Otherwise we just update the element.
+//          tableUpdateElement(elResult.first->first);
       }
       ++elIt;
    }
@@ -158,10 +179,7 @@ void cursesINDI::handleSetProperty( const pcf::IndiProperty &ipRecv )
 
 void cursesINDI::execute()
 {
-   if(m_redraw > 0)
-   {
-      redrawTable();
-   }
+   processIndiRequests(false);
 }
 
 void cursesINDI::cursStat(int cs)
@@ -192,13 +210,20 @@ void cursesINDI::startUp()
 
    wprintw(w_countWin, "elements shown.");
    wrefresh(w_countWin);
+   
+   m_shutdown = false;
+   drawThreadStart();
 }
 
 void cursesINDI::shutDown()
 {
+   m_shutdown = true;
+      
    quitProcess();
    deactivate();
 
+   m_drawThread.join();
+   
    rows.clear();
 
    if(w_interactWin) delwin(w_interactWin);
@@ -209,8 +234,60 @@ void cursesINDI::shutDown()
 
 }
 
+inline
+void cursesINDI::_drawThreadStart( cursesINDI * c)
+{
+   c->drawThreadExec();
+}
+
+inline
+int cursesINDI::drawThreadStart()
+{
+   try
+   {
+      m_drawThread = std::thread( _drawThreadStart, this);
+   }
+   catch( const std::exception & e )
+   {
+      return -1;
+   }
+   catch( ... )
+   {
+      return -1;
+   }
+   
+   if(!m_drawThread.joinable())
+   {
+      return -1;
+   }
+      
+   return 0;
+}
+
+inline
+void cursesINDI::drawThreadExec()
+{
+   while(!m_shutdown)
+   {
+      if(m_redraw > 0)
+      {
+         redrawTable();
+      }
+      
+      if(m_update > 0)
+      {
+         updateTable();
+      }
+      
+      std::this_thread::sleep_for( std::chrono::duration<unsigned long, std::nano>(250000000));
+   }
+      
+}
+
 void cursesINDI::redrawTable()
 {
+   std::lock_guard<std::mutex> lock(m_drawMutex); 
+   
    int start_redraw = m_redraw;
 
    rows.clear();
@@ -242,43 +319,54 @@ void cursesINDI::redrawTable()
    wprintw(w_countWin, "%i/%i elements shown.", shown, knownElements.size());
    wrefresh(w_countWin);
 
-   moveCurrent(m_currY, m_currX);
-
-
+   _moveCurrent(m_currY, m_currX);
 }
 
-void cursesINDI::tableUpdateElement( const std::string & esKey )
+void cursesINDI::updateTable()
 {
    if(m_redraw) return; //Pending redraw, so we skip it and let that take care of it.
-   
-   elementSpec es = knownElements[esKey];
-   
-   if(es.tableRow == -1) return;
+ 
+   std::lock_guard<std::mutex> lock(m_drawMutex); 
+ 
+   int start_update = m_update;
 
    int cx, cy;
-
-   //std::lock_guard<std::mutex> lock(m_drawMutex); 
    
    getyx(w_interactWin, cy, cx);
    int cs = cursStat();
    cursStat(0);
-   updateContents( es.tableRow, 4, knownProps[es.propKey][es.name].getValue());
+   
+   for(auto it = knownElements.begin(); it != knownElements.end(); ++it)
+   {      
+      if(it->second.tableRow == -1) continue;
+
+      updateContents( it->second.tableRow, 4,  knownProps[it->second.propKey][it->second.name].getValue());
+   }
+   
    wmove(w_interactWin,cy,cx);
    cursStat(cs);
    wrefresh(w_interactWin);
-
+      
+   m_update -= start_update;
+   if(m_update <0) m_update = 0;
 }
 
 void cursesINDI::moveCurrent( int nextY,
                               int nextX
                             )
 {
-   //std::lock_guard<std::mutex> lock(m_drawMutex); 
+   std::lock_guard<std::mutex> lock(m_drawMutex); 
+   _moveCurrent(nextY, nextX);
+}
 
+void cursesINDI::_moveCurrent( int nextY,
+                              int nextX
+                            )
+{
    wattroff(rows[m_currY].m_cellWin[m_currX], A_REVERSE);
    rows[m_currY].updateContents( m_currX, rows[m_currY].m_cellContents[m_currX], true);
 
-   if(nextY >= 0 && nextY < m_tabHeight && nextX >= 1 && nextX <= 4)
+   if(nextY >= 0 && nextY < rows.size() && nextX >= 1 && nextX <= 4)
    {
       m_currY = nextY;
       m_currX = nextX;
@@ -306,11 +394,13 @@ void cursesINDI::keyPressed( int ch )
          //Error checks?
    
          cursStat(1);
+         
+         //mutex scope
          {
-            //std::lock_guard<std::mutex> lock(m_drawMutex); 
-         wclear(w_interactWin);
-         wprintw(w_interactWin, "set: %s.%s=", it->second.propKey.c_str(), it->second.name.c_str());
-         wrefresh(w_interactWin);
+            std::lock_guard<std::mutex> lock(m_drawMutex); 
+            wclear(w_interactWin);
+            wprintw(w_interactWin, "set: %s.%s=", it->second.propKey.c_str(), it->second.name.c_str());
+            wrefresh(w_interactWin);
          }
          
          bool escape = false;
@@ -322,7 +412,7 @@ void cursesINDI::keyPressed( int ch )
    
             if(nch == 27)
             {
-               //std::lock_guard<std::mutex> lock(m_drawMutex); 
+               std::lock_guard<std::mutex> lock(m_drawMutex); 
                wclear(w_interactWin);
                wrefresh(w_interactWin);
                escape = true;
@@ -332,7 +422,7 @@ void cursesINDI::keyPressed( int ch )
             {
                if(newStr.size() > 0)
                {
-                  //std::lock_guard<std::mutex> lock(m_drawMutex); 
+                  std::lock_guard<std::mutex> lock(m_drawMutex); 
                   newStr.erase(newStr.size()-1,1);
                   wprintw(w_interactWin, "\b \b");
                   wrefresh(w_interactWin);
@@ -340,7 +430,7 @@ void cursesINDI::keyPressed( int ch )
             }
             else if (std::isprint(nch))
             {
-               //std::lock_guard<std::mutex> lock(m_drawMutex); 
+               std::lock_guard<std::mutex> lock(m_drawMutex); 
                wprintw(w_interactWin, "%c", nch);
                wrefresh(w_interactWin);
    
@@ -349,11 +439,12 @@ void cursesINDI::keyPressed( int ch )
          }
          if(escape) break;
          
+         //mutex scope
          {
-            //std::lock_guard<std::mutex> lock(m_drawMutex); 
-         wclear(w_interactWin);
-         wprintw(w_interactWin, "send: %s.%s=%s? y/n [n]", it->second.propKey.c_str(), it->second.name.c_str(), newStr.c_str());
-         wrefresh(w_interactWin);
+            std::lock_guard<std::mutex> lock(m_drawMutex); 
+            wclear(w_interactWin);
+            wprintw(w_interactWin, "send: %s.%s=%s? y/n [n]", it->second.propKey.c_str(), it->second.name.c_str(), newStr.c_str());
+            wrefresh(w_interactWin);
          }
          
          nch = 0;
@@ -371,24 +462,21 @@ void cursesINDI::keyPressed( int ch )
             sendNewProperty(ipSend);
          }
       
+         //mutex scope
          {
-         //std::lock_guard<std::mutex> lock(m_drawMutex); 
-         wclear(w_interactWin);
-         wrefresh(w_interactWin);
+            std::lock_guard<std::mutex> lock(m_drawMutex); 
+            wclear(w_interactWin);
+            wrefresh(w_interactWin);
          }
+         
          break;
       }
       default:
          return;//break;
    }
    
-   {
-      //std::lock_guard<std::mutex> lock(m_drawMutex); 
+   std::lock_guard<std::mutex> lock(m_drawMutex); 
    cursStat(0);
    wrefresh(w_interactWin);
-
-   }
-
-
 
 }
