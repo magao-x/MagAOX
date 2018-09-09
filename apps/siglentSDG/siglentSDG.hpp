@@ -17,47 +17,58 @@ namespace app
 /** MagAO-X application to control a Siglent SDG series function generator
   *
   * \todo need to recognize signals in tty polls and not return errors, etc.
-  * \todo need to implement onPoweroff() to update values to off.
   * \todo need to implement an onDisconnect() to update values to unknown indicators.
-  * \todo maybe need to run the loop more often than 1 second for device safety.
   * \todo need a frequency-dependent max amp facility.
   *
   */
 class siglentSDG : public MagAOXApp<>
 {
 
-   constexpr static double cs_MaxAmp = 10.0;
+   constexpr static double cs_MaxAmp = 2.0;
    constexpr static double cs_MaxOfst = 10.0;
    constexpr static double cs_MaxFreq = 3700.0;
 
 protected:
 
+   /** \name Configurable Parameters
+     * @{
+     */
+   
    std::string m_deviceAddr; ///< The device address
    std::string m_devicePort; ///< The device port
 
-   tty::telnetConn m_telnetConn; ///< The telnet connection manager
-
-   double m_bootDelay {10}; ///< Time in seconds it take the device to boot.
+   double m_bootDelay {10}; ///< Time in seconds it takes the device to boot.
 
    int m_writeTimeOut {1000};  ///< The timeout for writing to the device [msec].
    int m_readTimeOut {1000}; ///< The timeout for reading from the device [msec].
+
+   double m_C1setVoltage {5.0}; ///< the set position voltage of Ch. 1.
+   double m_C2setVoltage {5.0}; ///< the set position voltage of Ch. 2.
+   
+   ///@}
+   
+   tty::telnetConn m_telnetConn; ///< The telnet connection manager
 
    uint8_t m_C1outp {0}; ///< The output status channel 1
    double m_C1frequency {0}; ///< The output frequency of channel 1
    double m_C1vpp {0}; ///< The peak-2-peak voltage of channel 1
    double m_C1ofst {0}; ///< The offset voltage of channel 1
+   double m_C1phse {0}; ///< The phase of channel 1
    std::string m_C1wvtp; ///< The wave type of channel 1
    
    uint8_t m_C2outp {0}; ///<  The output status channel 2
    double m_C2frequency {0}; ///< The output frequency of channel 2
    double m_C2vpp {0}; ///< The peak-2-peak voltage of channel 2
    double m_C2ofst {0}; ///< The offset voltage of channel 2
+   double m_C2phse {0}; ///< The phase of channel 2
    std::string m_C2wvtp; ///< The wave type of channel 2
 
-   int m_changeToLog {1};
+   int m_changeToLog {1}; ///< Flag telling the main loop that a log entry should be made
    
 private:
 
+   bool m_poweredOn {false};
+   
    double m_powerOnCounter {0}; ///< Counts the number of loops since power-on, used to control logging of connect failures.
 
 public:
@@ -167,17 +178,15 @@ public:
      */
    int checkSetup();
 
-   /// Normalize the setup, called during connection if checkSetup shows a problem.
+   /// Normalize the setup, called during connection if checkSetup shows a problem, or on power-up.
    int normalizeSetup();
-
+   
    /// Send the OUTP? query for a channel.
    /**
      * \returns 0 on success
      * \returns -1 on an error.
      */
    int queryOUTP( int channel /**< [in] the channel to query */);
-
-
 
    /// Change the output status (on/off) of one channel.
    /**
@@ -251,6 +260,24 @@ public:
                    const pcf::IndiProperty &ipRecv ///< [in] INDI property containing the requested new offset [V p2p]
                  );
 
+   /// Send a change phase command to the device.
+   /**
+     * \returns 0 on success
+     * \returns -1 on error
+     */
+   int changePhse( int channel,  ///< [in] the channel to send the command to.
+                   double newPhse ///< [in] The requested new phase [deg]
+                 );
+
+   /// Send a change phase command to the device in response to an INDI property.
+   /**
+     * \returns 0 on success
+     * \returns -1 on error
+     */
+   int changePhse( int channel,                    ///< [in] the channel to send the command to.
+                   const pcf::IndiProperty &ipRecv ///< [in] INDI property containing the requested new phase [deg]
+                 );
+   
    /// Send a change wavetype command to the device.
    /**
      * \returns 0 on success
@@ -303,12 +330,14 @@ public:
    INDI_NEWCALLBACK_DECL(siglentSDG, m_indiP_C1freq);
    INDI_NEWCALLBACK_DECL(siglentSDG, m_indiP_C1amp);
    INDI_NEWCALLBACK_DECL(siglentSDG, m_indiP_C1ofst);
+   INDI_NEWCALLBACK_DECL(siglentSDG, m_indiP_C1phse);
    INDI_NEWCALLBACK_DECL(siglentSDG, m_indiP_C1wvtp);
    
    INDI_NEWCALLBACK_DECL(siglentSDG, m_indiP_C2outp);
    INDI_NEWCALLBACK_DECL(siglentSDG, m_indiP_C2freq);
    INDI_NEWCALLBACK_DECL(siglentSDG, m_indiP_C2amp);
    INDI_NEWCALLBACK_DECL(siglentSDG, m_indiP_C2ofst);
+   INDI_NEWCALLBACK_DECL(siglentSDG, m_indiP_C2phse);
    INDI_NEWCALLBACK_DECL(siglentSDG, m_indiP_C2wvtp);
    
 };
@@ -365,6 +394,10 @@ int siglentSDG::appStartup()
    m_indiP_C1ofst.add (pcf::IndiElement("value"));
    m_indiP_C1ofst["value"].set(0);
 
+   REG_INDI_NEWPROP(m_indiP_C1phse, "C1phse", pcf::IndiProperty::Number);
+   m_indiP_C1phse.add (pcf::IndiElement("value"));
+   m_indiP_C1phse["value"].set(0);
+   
    REG_INDI_NEWPROP(m_indiP_C1wvtp, "C1wvtp", pcf::IndiProperty::Text);
    m_indiP_C1wvtp.add (pcf::IndiElement("value"));
    m_indiP_C1wvtp["value"].set("");
@@ -405,6 +438,10 @@ int siglentSDG::appStartup()
    m_indiP_C2ofst.add (pcf::IndiElement("value"));
    m_indiP_C2ofst["value"].set(0);
 
+   REG_INDI_NEWPROP(m_indiP_C2phse, "C2phse", pcf::IndiProperty::Number);
+   m_indiP_C2phse.add (pcf::IndiElement("value"));
+   m_indiP_C2phse["value"].set(0);
+   
    REG_INDI_NEWPROP(m_indiP_C2wvtp, "C2wvtp", pcf::IndiProperty::Text);
    m_indiP_C2wvtp.add (pcf::IndiElement("value"));
    m_indiP_C2wvtp["value"].set("");
@@ -445,6 +482,9 @@ int siglentSDG::appLogic()
 
    if( state() == stateCodes::POWERON )
    {
+      //This is a state change from powered-off to powered-on
+      m_poweredOn = true; //So we reset the device.
+      
       sleep(1); //Give it time to wake up.
       state(stateCodes::NOTCONNECTED);
       m_powerOnCounter = 0;
@@ -556,16 +596,29 @@ int siglentSDG::appLogic()
          if(cs > 0)
          {
             log<text_log>("Failed setup check, normalizing setup.", logPrio::LOG_NOTICE);
-            normalizeSetup();
+            if(normalizeSetup() < 0)
+            {
+               log<software_critical>({__FILE__, __LINE__});
+               return -1;
+            }
 
             return 0;
          }
 
-
          if( queryOUTP(1) < 0 ) return 0; //This means we aren't really connected yet.
          if( queryOUTP(2) < 0 ) return 0; //This means we aren't really connected yet.
 
-         ///\todo check wvtp here.
+         if(m_poweredOn)
+         {
+            //This means we need to do the power-on setup.
+            if(normalizeSetup() < 0 )
+            {
+               log<software_critical>({__FILE__, __LINE__});
+               return -1;
+            }
+            
+            m_poweredOn = false;
+         }   
 
          if( m_C1outp == 1 || m_C2outp == 1)
          {
@@ -576,7 +629,8 @@ int siglentSDG::appLogic()
             state(stateCodes::READY);
          }
 
-         log<fxngen_params>({m_C1outp, m_C1frequency, m_C1vpp,m_C1ofst, m_C1wvtp, m_C2outp, m_C2frequency, m_C2vpp, m_C2ofst, m_C2wvtp});
+         log<fxngen_params>({m_C1outp, m_C1frequency, m_C1vpp, m_C1ofst, m_C1phse, m_C1wvtp, 
+                             m_C2outp, m_C2frequency, m_C2vpp, m_C2ofst, m_C2phse, m_C2wvtp});
          
          --m_changeToLog;
          
@@ -593,7 +647,6 @@ int siglentSDG::appLogic()
    if(state() == stateCodes::READY || state() == stateCodes::OPERATING)
    {
       // Do this right away to avoid a different thread updating something after we get it.
-      //std::unique_lock<std::mutex> lock(m_indiMutex, std::chrono::duration<unsigned long, std::nano>(100000));
       std::unique_lock<std::mutex> lock(m_indiMutex, std::try_to_lock);
       if(lock.owns_lock())
       {
@@ -601,7 +654,7 @@ int siglentSDG::appLogic()
 
          if(cs < 0)
          {
-            if(m_powerState && !m_shutdown)
+            if(m_powerState > 0 && !m_shutdown)
             {
                log<software_error>({__FILE__, __LINE__});
                state(stateCodes::ERROR);
@@ -657,7 +710,7 @@ int siglentSDG::appLogic()
 
          if( queryOUTP(1) < 0 ) 
          {
-            if(m_powerState && !m_shutdown)
+            if(m_powerState > 0 && !m_shutdown)
             {
                log<software_error>({__FILE__, __LINE__});
                state(stateCodes::ERROR);
@@ -667,7 +720,7 @@ int siglentSDG::appLogic()
          
          if( queryOUTP(2) < 0 ) 
          {
-            if(m_powerState && !m_shutdown)
+            if(m_powerState > 0 && !m_shutdown)
             {
                log<software_error>({__FILE__, __LINE__});
                state(stateCodes::ERROR);
@@ -687,8 +740,8 @@ int siglentSDG::appLogic()
 
       if( m_changeToLog )
       {
-         //log<text_log>("change to log . . .");
-         log<fxngen_params>({m_C1outp, m_C1frequency, m_C1vpp,m_C1ofst, m_C1wvtp, m_C2outp, m_C2frequency, m_C2vpp, m_C2ofst, m_C2wvtp});
+         log<fxngen_params>({m_C1outp, m_C1frequency, m_C1vpp, m_C1ofst, m_C1phse, m_C1wvtp, 
+                             m_C2outp, m_C2frequency, m_C2vpp, m_C2ofst, m_C2phse, m_C2wvtp});
          
          --m_changeToLog;
          
@@ -1298,11 +1351,7 @@ int siglentSDG::normalizeSetup()
    changeOutp(1, "OFF");
    changeOutp(2, "OFF");
 
-   changeFreq(1, 0);
-   changeFreq(2, 0);
-
-   changeAmp(1, 0);
-   changeAmp(2, 0);
+   
 
    std::string afterColon;
    std::string command;
@@ -1335,14 +1384,30 @@ int siglentSDG::normalizeSetup()
    command = makeCommand(2, afterColon);
    writeCommand(command);
 
-   afterColon = "BSWV WVTP,SINE";
-   command = makeCommand(1, afterColon);
-   writeCommand(command);
+   changeWvtp(1, "SINE");
+   changeWvtp(2, "SINE");
+   
+   changeFreq(1, 0);
+   changeFreq(2, 0);
 
-   command = makeCommand(2, afterColon);
-   writeCommand(command);
-
-
+   changeAmp(1, 0);
+   changeAmp(2, 0);
+   
+   changePhse(1, 0);
+   changePhse(2, 0);
+   
+   changeOfst(1, m_C1setVoltage);
+   changeOfst(2, m_C2setVoltage);
+   
+   changeWvtp(1, "DC");
+   changeWvtp(2, "DC");
+   
+   changeOfst(1, m_C1setVoltage);
+   changeOfst(2, m_C2setVoltage);
+   
+   changeOutp(1, "OFF");
+   changeOutp(2, "OFF");
+   
    std::cerr << "Done\n";
    return 0;
 }
@@ -1389,6 +1454,8 @@ int siglentSDG::changeOutp( int channel,
 {
    if(channel < 1 || channel > 2) return -1;
 
+   if(state() != stateCodes::READY && state() != stateCodes::OPERATING) return 0;
+   
    std::string newOutp;
    try
    {
@@ -1451,6 +1518,8 @@ int siglentSDG::changeFreq( int channel,
 {
    if(channel < 1 || channel > 2) return -1;
 
+   if(state() != stateCodes::READY && state() != stateCodes::OPERATING) return 0;
+   
    double newFreq;
    try
    {
@@ -1512,6 +1581,8 @@ int siglentSDG::changeAmp( int channel,
 {
    if(channel < 1 || channel > 2) return -1;
 
+   if(state() != stateCodes::READY && state() != stateCodes::OPERATING) return 0;
+   
    double newAmp;
    try
    {
@@ -1574,6 +1645,8 @@ int siglentSDG::changeOfst( int channel,
 {
    if(channel < 1 || channel > 2) return -1;
 
+   if(state() != stateCodes::READY && state() != stateCodes::OPERATING) return 0;
+   
    double newOfst;
    try
    {
@@ -1592,6 +1665,65 @@ int siglentSDG::changeOfst( int channel,
    state(stateCodes::CONFIGURING);
 
    int rv = changeOfst(channel, newOfst);
+   if(rv < 0) log<software_error>({__FILE__, __LINE__});
+
+   state(enterState);
+
+   return rv;
+}
+
+inline
+int siglentSDG::changePhse( int channel,
+                            double newPhse
+                          )
+{
+   if(channel < 1 || channel > 2) return -1;
+
+   std::string afterColon = "BSWV PHSE," + mx::ioutils::convertToString<double>(newPhse);
+   std::string command = makeCommand(channel, afterColon);
+
+   log<text_log>("Ch. " + std::to_string(channel) + " PHSE to " + std::to_string(newPhse), logPrio::LOG_NOTICE);
+   
+   int rv = writeCommand(command);
+   
+   ++m_changeToLog;
+
+   if(rv < 0)
+   {
+      if(m_powerState) log<software_error>({__FILE__, __LINE__});
+      return -1;
+   }
+
+   return 0;
+}
+
+inline
+int siglentSDG::changePhse( int channel,
+                            const pcf::IndiProperty &ipRecv
+                          )
+{
+   if(channel < 1 || channel > 2) return -1;
+
+   if(state() != stateCodes::READY && state() != stateCodes::OPERATING) return 0;
+   
+   double newPhse;
+   try
+   {
+      newPhse = ipRecv["value"].get<double>();
+   }
+   catch(...)
+   {
+      log<software_error>({__FILE__, __LINE__, "Exception caught."});
+      return -1;
+   }
+
+   //Make sure we don't change things while other things are being updated.
+   std::lock_guard<std::mutex> guard(m_indiMutex);  //Lock the mutex before conducting any communications.
+
+   stateCodes::stateCodeT enterState = state();
+   state(stateCodes::CONFIGURING);
+
+   int rv = changePhse(channel, newPhse);
    if(rv < 0) log<software_error>({__FILE__, __LINE__});
 
    state(enterState);
@@ -1631,6 +1763,8 @@ int siglentSDG::changeWvtp( int channel,
 {
    if(channel < 1 || channel > 2) return -1;
 
+   if(state() != stateCodes::READY && state() != stateCodes::OPERATING) return 0;
+   
    std::string newWvtp;
    try
    {
@@ -1692,6 +1826,15 @@ INDI_NEWCALLBACK_DEFN(siglentSDG, m_indiP_C1ofst)(const pcf::IndiProperty &ipRec
    return -1;
 }
 
+INDI_NEWCALLBACK_DEFN(siglentSDG, m_indiP_C1phse)(const pcf::IndiProperty &ipRecv)
+{
+   if (ipRecv.getName() == m_indiP_C1phse.getName())
+   {
+      return changePhse(1, ipRecv);
+   }
+   return -1;
+}
+
 INDI_NEWCALLBACK_DEFN(siglentSDG, m_indiP_C1wvtp)(const pcf::IndiProperty &ipRecv)
 {
    if (ipRecv.getName() == m_indiP_C1wvtp.getName())
@@ -1733,6 +1876,15 @@ INDI_NEWCALLBACK_DEFN(siglentSDG, m_indiP_C2ofst)(const pcf::IndiProperty &ipRec
    if (ipRecv.getName() == m_indiP_C2ofst.getName())
    {
       return changeOfst(2, ipRecv);
+   }
+   return -1;
+}
+
+INDI_NEWCALLBACK_DEFN(siglentSDG, m_indiP_C2phse)(const pcf::IndiProperty &ipRecv)
+{
+   if (ipRecv.getName() == m_indiP_C2phse.getName())
+   {
+      return changePhse(2, ipRecv);
    }
    return -1;
 }

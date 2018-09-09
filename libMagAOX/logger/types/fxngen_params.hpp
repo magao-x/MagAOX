@@ -37,13 +37,15 @@ struct fxngen_params : public flatbuffer_log
       ///Construct from components
       messageT( const uint8_t & C1outp,     ///< [in] Channel 1 output status
                 const double & C1freq,      ///< [in] Channel 1 frequency [Hz]
-                const double & C1vpp,       ///< [in] Channel 1 P2P voltage
-                const double & C1ofst,      ///< [in] Channel 1 offset
+                const double & C1vpp,       ///< [in] Channel 1 P2P voltage [V]
+                const double & C1ofst,      ///< [in] Channel 1 offset [V]
+                const double & C1phse,      ///< [in] Channel 1 phase [deg]
                 const std::string & C1wvtp, ///< [in] Channel 1 wavetype (SINE or DC)
                 const uint8_t & C2outp,     ///< [in] Channel 2 output status
                 const double & C2freq,      ///< [in] Channel 2 frequency [Hz]
-                const double & C2vpp,       ///< [in] Channel 2 P2P voltage
-                const double & C2ofst,      ///< [in] Channel 2 offset
+                const double & C2vpp,       ///< [in] Channel 2 P2P voltage [V]
+                const double & C2ofst,      ///< [in] Channel 2 offset [V]
+                const double & C2phse,      ///< [in] Channel 2 phase [deg]
                 const std::string & C2wvtp  ///< [in] Channel 2 wavetype  (SINE or DC) 
               )
       {
@@ -57,7 +59,7 @@ struct fxngen_params : public flatbuffer_log
          else if(C2wvtp == "SINE") _C2wvtp = 1;
          
          
-         auto fp = CreateFxngen_params_fb(builder, C1outp, C1freq, C1vpp, C1ofst, _C1wvtp, C2outp, C2freq, C2vpp, C2ofst, _C2wvtp);
+         auto fp = CreateFxngen_params_fb(builder, C1outp, C1freq, C1vpp, C1ofst, C1phse, _C1wvtp, C2outp, C2freq, C2vpp, C2ofst, C2phse, _C2wvtp);
          builder.Finish(fp);
 
       }
@@ -86,6 +88,7 @@ struct fxngen_params : public flatbuffer_log
       msg += std::to_string(fbs->C1freq()) + " Hz ";
       msg += std::to_string(fbs->C1vpp()) + " Vp2p ";
       msg += std::to_string(fbs->C1ofst()) + " V ";
+      msg += std::to_string(fbs->C1phse()) + " deg ";
       
       msg += " | Ch 2: ";
 
@@ -100,6 +103,7 @@ struct fxngen_params : public flatbuffer_log
       msg += std::to_string(fbs->C2freq()) + " Hz ";
       msg += std::to_string(fbs->C2vpp()) + " Vp2p ";
       msg += std::to_string(fbs->C2ofst()) + " V ";
+      msg += std::to_string(fbs->C2phse()) + " deg ";
 
       return msg;
    

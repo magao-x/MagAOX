@@ -8,12 +8,14 @@ table Fxngen_params_fb
    C1freq:double;
    C1vpp:double;
    C1ofst:double;
+   C1phse:double;
    C1wvtp:uint8;
    
    C2outp:uint8;
    C2freq:double;
    C2vpp:double;
    C2ofst:double;
+   C2phse:double;
    C2wvtp:uint8;
 }
 
