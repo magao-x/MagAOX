@@ -115,7 +115,7 @@ void zaberCtrl::loadConfig()
    {
       std::string newtarg = "stage" + mx::ioutils::convertToString(i);
       std::string name;
-      int dnum;
+      int dnum = 0;
 
       config(name, newtarg+".name");
       config(dnum, newtarg+".deviceNum");

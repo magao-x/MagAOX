@@ -150,40 +150,40 @@ void trippLitePDU::loadConfig()
 int trippLitePDU::appStartup()
 {
    // set up the  INDI properties
-   REG_INDI_NEWPROP_NOCB(m_indiStatus, "status", pcf::IndiProperty::Text, pcf::IndiProperty::ReadOnly, pcf::IndiProperty::Idle);
+   REG_INDI_NEWPROP_NOCB(m_indiStatus, "status", pcf::IndiProperty::Text);
    m_indiStatus.add (pcf::IndiElement("value"));
 
-   REG_INDI_NEWPROP_NOCB(m_indiFrequency, "frequency", pcf::IndiProperty::Number, pcf::IndiProperty::ReadOnly, pcf::IndiProperty::Idle);
+   REG_INDI_NEWPROP_NOCB(m_indiFrequency, "frequency", pcf::IndiProperty::Number);
    m_indiFrequency.add (pcf::IndiElement("value"));
 
-   REG_INDI_NEWPROP_NOCB(m_indiVoltage, "voltage", pcf::IndiProperty::Number, pcf::IndiProperty::ReadOnly, pcf::IndiProperty::Idle);
+   REG_INDI_NEWPROP_NOCB(m_indiVoltage, "voltage", pcf::IndiProperty::Number);
    m_indiVoltage.add (pcf::IndiElement("value"));
 
-   REG_INDI_NEWPROP_NOCB(m_indiCurrent, "current", pcf::IndiProperty::Number, pcf::IndiProperty::ReadOnly, pcf::IndiProperty::Idle);
+   REG_INDI_NEWPROP_NOCB(m_indiCurrent, "current", pcf::IndiProperty::Number);
    m_indiCurrent.add (pcf::IndiElement("value"));
 
-   REG_INDI_NEWPROP(m_indiOutlet1, "outlet1", pcf::IndiProperty::Text, pcf::IndiProperty::ReadWrite, pcf::IndiProperty::Idle);
+   REG_INDI_NEWPROP(m_indiOutlet1, "outlet1", pcf::IndiProperty::Text);
    m_indiOutlet1.add (pcf::IndiElement("state"));
 
-   REG_INDI_NEWPROP(m_indiOutlet2, "outlet2", pcf::IndiProperty::Text, pcf::IndiProperty::ReadWrite, pcf::IndiProperty::Idle);
+   REG_INDI_NEWPROP(m_indiOutlet2, "outlet2", pcf::IndiProperty::Text);
    m_indiOutlet2.add (pcf::IndiElement("state"));
 
-   REG_INDI_NEWPROP(m_indiOutlet3, "outlet3", pcf::IndiProperty::Text, pcf::IndiProperty::ReadWrite, pcf::IndiProperty::Idle);
+   REG_INDI_NEWPROP(m_indiOutlet3, "outlet3", pcf::IndiProperty::Text);
    m_indiOutlet3.add (pcf::IndiElement("state"));
 
-   REG_INDI_NEWPROP(m_indiOutlet4, "outlet4", pcf::IndiProperty::Text, pcf::IndiProperty::ReadWrite, pcf::IndiProperty::Idle);
+   REG_INDI_NEWPROP(m_indiOutlet4, "outlet4", pcf::IndiProperty::Text);
    m_indiOutlet4.add (pcf::IndiElement("state"));
 
-   REG_INDI_NEWPROP(m_indiOutlet5, "outlet5", pcf::IndiProperty::Text, pcf::IndiProperty::ReadWrite, pcf::IndiProperty::Idle);
+   REG_INDI_NEWPROP(m_indiOutlet5, "outlet5", pcf::IndiProperty::Text);
    m_indiOutlet5.add (pcf::IndiElement("state"));
 
-   REG_INDI_NEWPROP(m_indiOutlet6, "outlet6", pcf::IndiProperty::Text, pcf::IndiProperty::ReadWrite, pcf::IndiProperty::Idle);
+   REG_INDI_NEWPROP(m_indiOutlet6, "outlet6", pcf::IndiProperty::Text);
    m_indiOutlet6.add (pcf::IndiElement("state"));
 
-   REG_INDI_NEWPROP(m_indiOutlet7, "outlet7", pcf::IndiProperty::Text, pcf::IndiProperty::ReadWrite, pcf::IndiProperty::Idle);
+   REG_INDI_NEWPROP(m_indiOutlet7, "outlet7", pcf::IndiProperty::Text);
    m_indiOutlet7.add (pcf::IndiElement("state"));
 
-   REG_INDI_NEWPROP(m_indiOutlet8, "outlet8", pcf::IndiProperty::Text, pcf::IndiProperty::ReadWrite, pcf::IndiProperty::Idle);
+   REG_INDI_NEWPROP(m_indiOutlet8, "outlet8", pcf::IndiProperty::Text);
    m_indiOutlet8.add (pcf::IndiElement("state"));
 
    state(stateCodes::NOTCONNECTED);

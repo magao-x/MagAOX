@@ -690,7 +690,7 @@ void MagAOXApp<_useINDI>::setDefaults( int argc,
    configPathLocal = configDir + "/" + m_configName + ".conf";
 
    //Now we can setup common INDI properties
-   REG_INDI_NEWPROP_NOCB(m_indiP_state, "state", pcf::IndiProperty::Number, pcf::IndiProperty::ReadOnly, pcf::IndiProperty::Idle);
+   REG_INDI_NEWPROP_NOCB(m_indiP_state, "state", pcf::IndiProperty::Number);
    m_indiP_state.add (pcf::IndiElement("current"));
 
 

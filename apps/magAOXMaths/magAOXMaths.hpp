@@ -87,14 +87,14 @@ void magAOXMaths::loadConfig()
 int magAOXMaths::appStartup()
 {
    // set up the x input property
-   REG_INDI_NEWPROP(my_val, m_myVal, pcf::IndiProperty::Number, pcf::IndiProperty::ReadWrite, pcf::IndiProperty::Idle);
+   REG_INDI_NEWPROP(my_val, m_myVal, pcf::IndiProperty::Number);
 
    my_val.add (pcf::IndiElement("value"));
    my_val["value"].set<double>(0.0);
    
    
    // set up the result maths property
-   REG_INDI_NEWPROP_NOCB(my_val_maths, "maths", pcf::IndiProperty::Number, pcf::IndiProperty::ReadOnly, pcf::IndiProperty::Idle);
+   REG_INDI_NEWPROP_NOCB(my_val_maths, "maths", pcf::IndiProperty::Number);
    my_val_maths.add (pcf::IndiElement("value"));
    my_val_maths.add (pcf::IndiElement("sqr"));
    my_val_maths.add (pcf::IndiElement("sqrt"));
