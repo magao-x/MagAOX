@@ -84,6 +84,12 @@ public:
    /// Implementation of the FSM for the Siglent SDG
    virtual int appLogic();
 
+   /// Implementation of the on-power-off FSM logic
+   virtual int onPowerOff();
+   
+   /// Implementation of the while-powered-off FSM
+   virtual int whilePowerOff();
+   
    /// Do any needed shutdown tasks.  Currently nothing in this app.
    virtual int appShutdown();
 
@@ -341,68 +347,87 @@ int siglentSDG::appStartup()
    // set up the  INDI properties
    REG_INDI_NEWPROP_NOCB(m_indiP_status, "status", pcf::IndiProperty::Text, pcf::IndiProperty::ReadOnly, pcf::IndiProperty::Idle);
    m_indiP_status.add (pcf::IndiElement("value"));
+   m_indiP_status["value"].set(0);
 
    REG_INDI_NEWPROP(m_indiP_C1outp, "C1outp", pcf::IndiProperty::Text, pcf::IndiProperty::ReadWrite, pcf::IndiProperty::Idle);
    m_indiP_C1outp.add (pcf::IndiElement("value"));
+   m_indiP_C1outp["value"].set("");
 
    REG_INDI_NEWPROP(m_indiP_C1freq, "C1freq", pcf::IndiProperty::Number, pcf::IndiProperty::ReadWrite, pcf::IndiProperty::Idle);
    m_indiP_C1freq.add (pcf::IndiElement("value"));
+   m_indiP_C1freq["value"].set(0);
 
    REG_INDI_NEWPROP(m_indiP_C1amp, "C1amp", pcf::IndiProperty::Number, pcf::IndiProperty::ReadWrite, pcf::IndiProperty::Idle);
    m_indiP_C1amp.add (pcf::IndiElement("value"));
+   m_indiP_C1amp["value"].set(0);
 
    REG_INDI_NEWPROP(m_indiP_C1ofst, "C1ofst", pcf::IndiProperty::Number, pcf::IndiProperty::ReadWrite, pcf::IndiProperty::Idle);
    m_indiP_C1ofst.add (pcf::IndiElement("value"));
+   m_indiP_C1ofst["value"].set(0);
 
    REG_INDI_NEWPROP(m_indiP_C1wvtp, "C1wvtp", pcf::IndiProperty::Text, pcf::IndiProperty::ReadWrite, pcf::IndiProperty::Idle);
    m_indiP_C1wvtp.add (pcf::IndiElement("value"));
+   m_indiP_C1wvtp["value"].set("");
 
    REG_INDI_NEWPROP_NOCB(m_indiP_C1peri, "C1peri", pcf::IndiProperty::Number, pcf::IndiProperty::ReadOnly, pcf::IndiProperty::Idle);
    m_indiP_C1peri.add (pcf::IndiElement("value"));
+   m_indiP_C1peri["value"].set(0);
 
    REG_INDI_NEWPROP_NOCB(m_indiP_C1ampvrms, "C1ampvrms", pcf::IndiProperty::Number, pcf::IndiProperty::ReadOnly, pcf::IndiProperty::Idle);
    m_indiP_C1ampvrms.add (pcf::IndiElement("value"));
+   m_indiP_C1ampvrms["value"].set(0);
 
    REG_INDI_NEWPROP_NOCB(m_indiP_C1hlev, "C1hlev", pcf::IndiProperty::Number, pcf::IndiProperty::ReadOnly, pcf::IndiProperty::Idle);
    m_indiP_C1hlev.add (pcf::IndiElement("value"));
+   m_indiP_C1hlev["value"].set(0);
 
    REG_INDI_NEWPROP_NOCB(m_indiP_C1llev, "C1llev", pcf::IndiProperty::Number, pcf::IndiProperty::ReadOnly, pcf::IndiProperty::Idle);
    m_indiP_C1llev.add (pcf::IndiElement("value"));
+   m_indiP_C1llev["value"].set(0);
 
    REG_INDI_NEWPROP_NOCB(m_indiP_C1phse, "C1phse", pcf::IndiProperty::Number, pcf::IndiProperty::ReadOnly, pcf::IndiProperty::Idle);
    m_indiP_C1phse.add (pcf::IndiElement("value"));
-
+   m_indiP_C1phse["value"].set(0);
 
    REG_INDI_NEWPROP(m_indiP_C2outp, "C2outp", pcf::IndiProperty::Text, pcf::IndiProperty::ReadWrite, pcf::IndiProperty::Idle);
    m_indiP_C2outp.add (pcf::IndiElement("value"));
+   m_indiP_C2outp["value"].set("");
 
    REG_INDI_NEWPROP(m_indiP_C2freq, "C2freq", pcf::IndiProperty::Number, pcf::IndiProperty::ReadWrite, pcf::IndiProperty::Idle);
    m_indiP_C2freq.add (pcf::IndiElement("value"));
+   m_indiP_C2freq["value"].set(0);
 
    REG_INDI_NEWPROP(m_indiP_C2amp, "C2amp", pcf::IndiProperty::Number, pcf::IndiProperty::ReadWrite, pcf::IndiProperty::Idle);
    m_indiP_C2amp.add (pcf::IndiElement("value"));
+   m_indiP_C2amp["value"].set(0);
 
    REG_INDI_NEWPROP(m_indiP_C2ofst, "C2ofst", pcf::IndiProperty::Number, pcf::IndiProperty::ReadWrite, pcf::IndiProperty::Idle);
    m_indiP_C2ofst.add (pcf::IndiElement("value"));
+   m_indiP_C2ofst["value"].set(0);
 
    REG_INDI_NEWPROP(m_indiP_C2wvtp, "C2wvtp", pcf::IndiProperty::Text, pcf::IndiProperty::ReadWrite, pcf::IndiProperty::Idle);
    m_indiP_C2wvtp.add (pcf::IndiElement("value"));
+   m_indiP_C2wvtp["value"].set("");
 
    REG_INDI_NEWPROP_NOCB(m_indiP_C2peri, "C2peri", pcf::IndiProperty::Number, pcf::IndiProperty::ReadOnly, pcf::IndiProperty::Idle);
    m_indiP_C2peri.add (pcf::IndiElement("value"));
+   m_indiP_C2peri["value"].set(0);
 
    REG_INDI_NEWPROP_NOCB(m_indiP_C2ampvrms, "C2ampvrms", pcf::IndiProperty::Number, pcf::IndiProperty::ReadOnly, pcf::IndiProperty::Idle);
    m_indiP_C2ampvrms.add (pcf::IndiElement("value"));
+   m_indiP_C2ampvrms["value"].set(0);
 
    REG_INDI_NEWPROP_NOCB(m_indiP_C2hlev, "C2hlev", pcf::IndiProperty::Number, pcf::IndiProperty::ReadOnly, pcf::IndiProperty::Idle);
    m_indiP_C2hlev.add (pcf::IndiElement("value"));
+   m_indiP_C2hlev["value"].set(0);
 
    REG_INDI_NEWPROP_NOCB(m_indiP_C2llev, "C2llev", pcf::IndiProperty::Number, pcf::IndiProperty::ReadOnly, pcf::IndiProperty::Idle);
    m_indiP_C2llev.add (pcf::IndiElement("value"));
+   m_indiP_C2llev["value"].set(0);
 
    REG_INDI_NEWPROP_NOCB(m_indiP_C2phse, "C2phse", pcf::IndiProperty::Number, pcf::IndiProperty::ReadOnly, pcf::IndiProperty::Idle);
    m_indiP_C2phse.add (pcf::IndiElement("value"));
-
+   m_indiP_C2phse["value"].set(0);
 
    //If we startup powered-on, we try to connect immediately with no delays.
    if( state() == stateCodes::POWERON )
@@ -425,6 +450,19 @@ int siglentSDG::appLogic()
       m_powerOnCounter = 0;
    }
 
+   //If we enter this loop in state ERROR, we wait 1 sec and then check power state.
+   if( state() == stateCodes::ERROR ) 
+   {
+      sleep(1);
+      
+      //This allows for the case where the device powers off causing a comm error
+      //But we haven't gotten the update from the power controller before going through
+      //the main loop after the error.
+      if(m_powerState < 1) 
+      {
+         return 0;
+      }
+   }
    if( state() == stateCodes::NOTCONNECTED || state() == stateCodes::ERROR )
    {
       int rv = m_telnetConn.connect(m_deviceAddr, m_devicePort);
@@ -538,6 +576,12 @@ int siglentSDG::appLogic()
             state(stateCodes::READY);
          }
 
+         log<fxngen_params>({m_C1outp, m_C1frequency, m_C1vpp,m_C1ofst, m_C1wvtp, m_C2outp, m_C2frequency, m_C2vpp, m_C2ofst, m_C2wvtp});
+         
+         --m_changeToLog;
+         
+         if(m_changeToLog < 0) m_changeToLog = 0;
+         
       }
       else
       {
@@ -573,7 +617,7 @@ int siglentSDG::appLogic()
          {
             if(rv != SDG_PARSEERR_WVTP ) 
             {
-               if(m_powerState && !m_shutdown)
+               if(m_powerState > 0 && !m_shutdown)
                {
                   log<software_error>({__FILE__, __LINE__});
                   state(stateCodes::ERROR);
@@ -590,7 +634,7 @@ int siglentSDG::appLogic()
          {
             if(rv != SDG_PARSEERR_WVTP ) 
             {
-               if(m_powerState && !m_shutdown)
+               if(m_powerState > 0 && !m_shutdown)
                {
                   log<software_error>({__FILE__, __LINE__});
                   state(stateCodes::ERROR);
@@ -671,6 +715,54 @@ int siglentSDG::appLogic()
    log<software_error>({__FILE__, __LINE__, "appLogic fell through in state " + stateCodes::codeText(state())});
    return 0;
 
+}
+
+inline
+int siglentSDG::onPowerOff()
+{
+   std::lock_guard<std::mutex> lock(m_indiMutex);
+   
+   m_C1wvtp = "NONE";
+   m_C1frequency = 0.0;
+   m_C1vpp = 0.0;
+   m_C1ofst = 0.0;
+   m_C1outp = 0;
+   
+   updateIfChanged(m_indiP_C1wvtp, "value", m_C1wvtp);
+   updateIfChanged(m_indiP_C1freq, "value", 0.0);
+   updateIfChanged(m_indiP_C1peri, "value", 0.0);
+   updateIfChanged(m_indiP_C1amp, "value", 0.0);
+   updateIfChanged(m_indiP_C1ampvrms, "value", 0.0);
+   updateIfChanged(m_indiP_C1ofst, "value", 0.0);
+   updateIfChanged(m_indiP_C1hlev, "value", 0.0);
+   updateIfChanged(m_indiP_C1llev, "value", 0.0);
+   updateIfChanged(m_indiP_C1phse, "value", 0.0);
+   updateIfChanged(m_indiP_C1outp, "value", std::string("Off"));
+   
+   m_C2wvtp = "NONE";
+   m_C2frequency = 0.0;
+   m_C2vpp = 0.0;
+   m_C2ofst = 0.0;
+   m_C2outp = 0;
+   
+   updateIfChanged(m_indiP_C2wvtp, "value", m_C2wvtp);
+   updateIfChanged(m_indiP_C2freq, "value", 0.0);
+   updateIfChanged(m_indiP_C2peri, "value", 0.0);
+   updateIfChanged(m_indiP_C2amp, "value", 0.0);
+   updateIfChanged(m_indiP_C2ampvrms, "value", 0.0);
+   updateIfChanged(m_indiP_C2ofst, "value", 0.0);
+   updateIfChanged(m_indiP_C2hlev, "value", 0.0);
+   updateIfChanged(m_indiP_C2llev, "value", 0.0);
+   updateIfChanged(m_indiP_C2phse, "value", 0.0);
+   updateIfChanged(m_indiP_C1outp, "value", std::string("Off"));
+   
+   return 0;
+}
+
+inline
+int siglentSDG::whilePowerOff()
+{
+   return onPowerOff();
 }
 
 inline
@@ -1085,13 +1177,13 @@ int siglentSDG::checkSetup()
 
    if(rv < 0)
    {
-      if(m_powerState && !m_shutdown) log<software_error>({__FILE__,__LINE__});
+      if(m_powerState > 0 && !m_shutdown) log<software_error>({__FILE__,__LINE__});
       return rv;
    }
 
    if(state != "OFF")
    {
-      if(m_powerState && !m_shutdown) log<text_log>("Channel 1 MDWV not OFF");
+      if(m_powerState > 0 && !m_shutdown) log<text_log>("Channel 1 MDWV not OFF");
       return 1;
    }
 
@@ -1099,13 +1191,13 @@ int siglentSDG::checkSetup()
 
    if(rv < 0)
    {
-      if(m_powerState && !m_shutdown) log<software_error>({__FILE__,__LINE__});
+      if(m_powerState > 0 && !m_shutdown) log<software_error>({__FILE__,__LINE__});
       return rv;
    }
 
    if(state != "OFF")
    {
-      if(m_powerState && !m_shutdown) log<text_log>("Channel 2 MDWV not OFF");
+      if(m_powerState > 0 && !m_shutdown) log<text_log>("Channel 2 MDWV not OFF");
       return 1;
    }
 
@@ -1113,13 +1205,13 @@ int siglentSDG::checkSetup()
 
    if(rv < 0)
    {
-      if(m_powerState && !m_shutdown) log<software_error>({__FILE__,__LINE__});
+      if(m_powerState > 0 && !m_shutdown) log<software_error>({__FILE__,__LINE__});
       return rv;
    }
 
    if(state != "OFF")
    {
-      if(m_powerState && !m_shutdown) log<text_log>("Channel 1 SWWV not OFF");
+      if(m_powerState > 0 && !m_shutdown) log<text_log>("Channel 1 SWWV not OFF");
       return 1;
    }
 
@@ -1127,13 +1219,13 @@ int siglentSDG::checkSetup()
 
    if(rv < 0)
    {
-      if(m_powerState && !m_shutdown) log<software_error>({__FILE__,__LINE__});
+      if(m_powerState > 0 && !m_shutdown) log<software_error>({__FILE__,__LINE__});
       return rv;
    }
 
    if(state != "OFF")
    {
-      if(m_powerState && !m_shutdown) log<text_log>("Channel 2 SWWV no OFF");
+      if(m_powerState > 0 && !m_shutdown) log<text_log>("Channel 2 SWWV no OFF");
       return 1;
    }
 
@@ -1141,13 +1233,13 @@ int siglentSDG::checkSetup()
 
    if(rv < 0)
    {
-      if(m_powerState && !m_shutdown) log<software_error>({__FILE__,__LINE__});
+      if(m_powerState > 0 && !m_shutdown) log<software_error>({__FILE__,__LINE__});
       return rv;
    }
 
    if(state != "OFF")
    {
-      if(m_powerState && !m_shutdown) log<text_log>("Channel 1 BTWV not OFF");
+      if(m_powerState > 0 && !m_shutdown) log<text_log>("Channel 1 BTWV not OFF");
       return 1;
    }
 
@@ -1155,13 +1247,13 @@ int siglentSDG::checkSetup()
 
    if(rv < 0)
    {
-      if(m_powerState && !m_shutdown) log<software_error>({__FILE__,__LINE__});
+      if(m_powerState > 0 && !m_shutdown) log<software_error>({__FILE__,__LINE__});
       return rv;
    }
 
    if(state != "OFF")
    {
-      if(m_powerState && !m_shutdown) log<text_log>("Channel 2 BTWV not OFF");
+      if(m_powerState > 0 && !m_shutdown) log<text_log>("Channel 2 BTWV not OFF");
       return 1;
    }
 
@@ -1169,13 +1261,13 @@ int siglentSDG::checkSetup()
 
    if(rv < 0)
    {
-      if(m_powerState && !m_shutdown) log<software_error>({__FILE__,__LINE__});
+      if(m_powerState > 0 && !m_shutdown) log<software_error>({__FILE__,__LINE__});
       return rv;
    }
 
    if(index != 0)
    {
-      if(m_powerState && !m_shutdown) log<text_log>("Channel 1 ARWV not 1");
+      if(m_powerState > 0 && !m_shutdown) log<text_log>("Channel 1 ARWV not 1");
       return 1;
    }
 
@@ -1183,13 +1275,13 @@ int siglentSDG::checkSetup()
 
    if(rv < 0)
    {
-      if(m_powerState && !m_shutdown) log<software_error>({__FILE__,__LINE__});
+      if(m_powerState > 0 && !m_shutdown) log<software_error>({__FILE__,__LINE__});
       return rv;
    }
 
    if(index != 0)
    {
-      if(m_powerState && !m_shutdown) log<text_log>("Channel 2 ARWV not 1");
+      if(m_powerState > 0 && !m_shutdown) log<text_log>("Channel 2 ARWV not 1");
       return 1;
    }
 
