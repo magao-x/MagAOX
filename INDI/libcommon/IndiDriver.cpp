@@ -92,7 +92,7 @@ void IndiDriver::setup()
 
   // This is also a flag which does nothing on its own, but can be used to
   // decide whether or not to send an alarm email.
-  m_oIsAlarmModeEnabled = true; 
+  m_oIsAlarmModeEnabled = true;
 
   // This is a comma-separated list of email recipients which will receive
   // an email when a alarm is logged.
@@ -102,7 +102,7 @@ void IndiDriver::setup()
   // simulation mode or not. The default is one day (1440 minutes).
   // This is the maximun speed that alarms will go out.
   m_uiAlarmInterval = 1440;
-  
+
   m_oIsAlarmActive = false;
   m_uiAlarmInterval = 1440; // Once a day (every 1440 minutes)
 

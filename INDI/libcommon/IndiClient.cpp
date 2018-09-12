@@ -20,20 +20,25 @@ using pcf::IndiProperty;
 ////////////////////////////////////////////////////////////////////////////////
 /// Standard constructor.
 
-IndiClient::IndiClient()
+IndiClient::IndiClient( const string & szIPAddr,
+                        const int & port
+                      )
   : IndiConnection()
 {
-  setup();
+  setup(szIPAddr, port);
 }
 
 ////////////////////////////////////////////////////////////////////////////////
 
 IndiClient::IndiClient( const string &szName,
                         const string &szVersion,
-                        const string &szProtocolVersion )
+                        const string &szProtocolVersion,
+                        const string & szIPAddr,
+                        const int & port
+                      )
     : IndiConnection( szName, szVersion, szProtocolVersion )
 {
-  setup();
+  setup(szIPAddr, port);
 }
 
 ////////////////////////////////////////////////////////////////////////////////
@@ -77,7 +82,9 @@ IndiClient::~IndiClient()
 /// \brief IndiClient::setup Sets up file descriptors and other things that
 /// need to be initialized at construction time.
 
-void IndiClient::setup()
+void IndiClient::setup( const string & szIPAddr,
+                        const int & port
+                      )
 {
   try
   {
@@ -93,7 +100,7 @@ void IndiClient::setup()
     }
 
     //Config cfReader;
-    m_socClient = SystemSocket( SystemSocket::Stream, 7624, "127.0.0.1");
+    m_socClient = SystemSocket( SystemSocket::Stream, port, szIPAddr.c_str());
 
     m_socClient.connect();
 
@@ -110,7 +117,7 @@ void IndiClient::setup()
     // Assign the file descriptor to the member variables.
     setInputFd( m_socClient.getFd() );
     setOutputFd( m_socClient.getFd() );
-    
+
   }
   catch ( const SystemSocket::Error &err )
   {

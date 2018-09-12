@@ -20,11 +20,17 @@ class IndiClient : public pcf::IndiConnection
   // construction/destruction/assign/copy
   public:
     /// Standard constructor.
-    IndiClient();
+    IndiClient( const std::string & szIPAddr,
+                const int & port
+              );
     /// Constructor which sets the name, version, and INDI protocol version.
     IndiClient( const std::string &szName,
                 const std::string &szVersion,
-                const std::string &szProtocolVersion );
+                const std::string &szProtocolVersion,
+                const std::string & szIPAddr,
+                const int & port
+              );
+
     /// Standard destructor.
     virtual ~IndiClient();
 
@@ -32,11 +38,15 @@ class IndiClient : public pcf::IndiConnection
   private:
     /// Copy constructor.
     IndiClient( const IndiClient &icRhs );
+
     /// Assignment operator.
     const IndiClient &operator= ( const IndiClient &icRhs );
+
     /// Sets up file descriptors and other things that need to be
     /// initialized at construction time.
-    void setup();
+    void setup( const std::string & szIPAddr,
+                const int & port
+              );
 
   // Standard client interface methods.
   public:
