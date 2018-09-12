@@ -41,8 +41,7 @@
 #include "indiDriver.hpp"
 #include "indiMacros.hpp"
 
-//#include "../../INDI/libcommon/Config.hpp"
-#include "../../INDI/libcommon/System.hpp"
+//#include "../../INDI/libcommon/System.hpp"
 
 using namespace MagAOX::logger;
 
@@ -509,6 +508,17 @@ protected:
                          const T & newVal ///< [in] the new value
                       );
 
+   /// Send a newProperty command to another device (using the INDI Client interface)
+   /** Copies the input IndiProperty, then updates the element with the new value.
+     *
+     * \returns 0 on success.
+     * \returns -1 on an errory.
+     */
+   template<typename T>
+   int sendNewProperty( const pcf::IndiProperty & ipSend, ///< [in] The property to send a "new" INDI command for
+                        const std::string & el, ///< [in] The element of the property to change
+                        const T & newVal ///< [in] The value to request for the element.
+                      );
 
    ///indi Property to report the application state.
    pcf::IndiProperty m_indiP_state;
@@ -1613,6 +1623,79 @@ void MagAOXApp<_useINDI>::updateIfChanged( pcf::IndiProperty & p,
       p.setState (pcf::IndiProperty::Ok);
       m_indiDriver->sendSetProperty (p);
    }
+}
+
+/// \todo move propType to an INDI utils file, and document.
+
+template<typename T>
+pcf::IndiProperty::Type propType()
+{
+   return pcf::IndiProperty::Unknown;
+}
+
+
+template<>
+inline
+pcf::IndiProperty::Type propType<char *>()
+{
+   return pcf::IndiProperty::Text;
+}
+
+template<>
+inline
+pcf::IndiProperty::Type propType<std::string>()
+{
+   return pcf::IndiProperty::Text;
+}
+
+template<>
+inline
+pcf::IndiProperty::Type propType<int>()
+{
+   return pcf::IndiProperty::Number;
+}
+
+template<>
+inline
+pcf::IndiProperty::Type propType<double>()
+{
+   return pcf::IndiProperty::Number;
+}
+
+template<bool _useINDI>
+template<typename T>
+int MagAOXApp<_useINDI>::sendNewProperty( const pcf::IndiProperty & ipSend,
+                                          const std::string & el,
+                                          const T & newVal
+                                        )
+{
+   if(!_useINDI) return 0;
+
+   if(!m_indiDriver)
+   {
+      log<software_error>({__FILE__, __LINE__, "INDI communications not initialized."});
+      return -1;
+   }
+   pcf::IndiProperty ipToSend = ipSend;
+
+   try
+   {
+      ipToSend[el].setValue(newVal);
+   }
+   catch(...)
+   {
+      log<software_error>({__FILE__, __LINE__, "Exception caught setting " + ipSend.getDevice() + "." + ipSend.getName() + "." + el});
+      return -1;
+   }
+
+   int rv = m_indiDriver->sendNewProperty(ipToSend);
+   if(rv < 0)
+   {
+      log<software_error>({__FILE__, __LINE__});
+      return -1;
+   }
+
+   return 0;
 }
 
 template<bool _useINDI>
