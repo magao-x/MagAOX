@@ -1,5 +1,6 @@
 #!/bin/bash
 set -euo pipefail
+DIR="$( cd "$( dirname "${BASH_SOURCE[0]}" )" && pwd )"
 IFS=$'\n\t'
 
 envswitch=${1:---prod}
