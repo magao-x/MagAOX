@@ -45,7 +45,7 @@ creategroup magaox
 creategroup magaox-dev
 createuser xsup
 if grep -vq magaox-dev /etc/pam.d/su; then
-  /bin/sudo cp -v "$DIR/setup/enable_su_xsup_for_magaox-dev" /etc/pam.d/su
+  /bin/sudo cp -v "$DIR/enable_su_xsup_for_magaox-dev" /etc/pam.d/su
   echo "Installed new /etc/pam.d/su"
 else
   echo "/etc/pam.d/su already includes reference to magaox-dev, not overwriting"
