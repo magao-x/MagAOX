@@ -191,19 +191,29 @@ Log in via `ssh` as a user with `sudo` access.
 
     **If you've registered before:** It's well hidden, but https://registrationcenter.intel.com/en/products/ should take you right to the page with the download links. We want Intel Performance Libraries for Linux, specifically Intel Math Kernel Library.
 
-    Copy the download link (e.g. right-click and "Copy Link Location") and switch to a terminal on a production machine to run `curl -OL <pasted-url>`. (I'd put the download link in these docs, but it's _export controlled_.)
+    Copy the download link (e.g. right-click and "Copy Link Location") and switch to a terminal on a production machine.
+
+    ```
+    $ cd
+    $ curl -OL <pasted-url>
+    ```
+    (I'd put the download link in these docs, but it's _export controlled_. Anyway, it changes when there's a new release.)
 
 3. Extract and install Intel MKL
 
    ```
-   $ tar xvzf l_mkl_2018.3.222.tgz
-   $ cd l_mkl_2018.3.222
+   $ tar xvzf l_mkl_<tab>  # name subject to change ;)
+   $ cd l_mkl_<tab>
    ```
 
    Install as root:
+
    ```
    $ sudo ./install.sh -s ~/MagAOX/setup/intel_mkl_silent_install.cfg
    ```
+
+   Wait a few minutes for it to complete. You shouldn't see any output, but `/opt/intel` should now exist.
+
 ## Run provisioning scripts
 
 1. Switch to the `setup` subdirectory in the MagAOX directory you cloned (in this example: `~/MagAOX/setup`) to set up users and groups.
@@ -213,9 +223,18 @@ Log in via `ssh` as a user with `sudo` access.
     $ ./setup_users_and_groups.sh
     ```
 
-    This changes the group memberships of the installing user (i.e. `$USER`, so most likely you). Before that takes effect, you will have to log out and back in. (Alternatively, you can run `newgrp magaox-dev` to start a new subshell where the new group is active, but this can get confusing.)
+2. Log out and back in, verify groups
 
-6. Run the provisioning script
+    ```
+    $ logout
+    [open new terminal]
+    $ groups
+    yourname wheel magaox-dev
+    ```
+
+    Because the last step changed the group memberships of the installing user (i.e. `$USER`, so most likely you), you will have to log out and back in. (Alternatively, you can run `newgrp magaox-dev` to start a new subshell where the new group is active, but this can get confusing.)
+
+3. Run the provisioning script
 
     ```
     $ cd ~/MagAOX/setup
