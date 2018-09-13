@@ -43,8 +43,16 @@ function createuser() {
 creategroup magaox
 creategroup magaox-dev
 createuser xsup
+if grep -vq magaox-dev /etc/pam.d/su; then
+  /bin/sudo cp -v "$DIR/setup/enable_su_xsup_for_magaox-dev" /etc/pam.d/su
+  echo "Installed new /etc/pam.d/su"
+else
+  echo "/etc/pam.d/su already includes reference to magaox-dev, not overwriting"
+fi
 if [[ $ENV == "prod" ]]; then
+  if [[ -z $(groups | grep magaox-dev) ]]; then
     /bin/sudo gpasswd -a $USER magaox-dev
     echo "Added $USER to group magaox-dev"
     echo "Note: You will need to log out and back in before this group takes effect"
+  fi
 fi
