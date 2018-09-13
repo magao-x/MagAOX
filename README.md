@@ -102,60 +102,7 @@ ToDo:
 
 ## 4 Software Install
 
-Beginning from a CentOS 7 fresh install with network access, once you've logged in as a user in the `wheel` group:
-
-1. Install development tools (including `git`)
-
-   ```
-   $ sudo yum groupinstall -y 'Development Tools'
-   $ sudo yum install -y screen
-   ```
-
-2. Clone this repository into your home directory (not into `/opt/MagAOX`, yet)
-
-   ```
-   $ cd
-   $ git clone https://github.com/magao-x/MagAOX.git
-   ```
-
-3. Download Intel MKL -- This has to be done interactively, since Intel enforces a registration requirement to download the MKL package.
-
-    **If you're not yet registered with Intel:** Starting at https://software.intel.com/en-us/mkl, click "Free Download" and follow the prompts to create and verify an account.
-
-    **If you've registered before:** It's well hidden, but https://registrationcenter.intel.com/en/products/ should take you right to the page with the download links. We want Intel Performance Libraries for Linux, specifically Intel Math Kernel Library.
-
-    Copy the download link (e.g. right-click and "Copy Link Location") and switch to a terminal on a production machine to run `curl -OL <pasted-url>`. (I'd put the download link in these docs, but it's _export controlled_.)
-
-4. Extract and install Intel MKL
-
-   ```
-   $ tar xvzf l_mkl_2018.3.222.tgz
-   $ cd l_mkl_2018.3.222
-   ```
-
-   Install as root:
-   ```
-   $ sudo ./install.sh -s ~/MagAOX/setup/intel_mkl_silent_install.cfg
-   ```
-
-5. Switch to the MagAOX directory you cloned (in this example: `~/MagAOX/setup`) and set up users and groups.
-
-   ```
-   $ cd ~/MagAOX/setup
-   $ ./setup_users_and_groups.sh
-   ```
-
-  **Note:** This creates the `xsup` user account with a default password (`extremeAO!`). Change this to the real password (`sudo passwd xsup`), or be a disappointment to @jaredmales.
-
-   This changes the group memberships of the installing user (i.e. `$USER`, so most likely you). Before that takes effect, you will have to log out and back in. (Alternatively, you can run `newgrp magaox-dev` to start a new subshell where the new group is active, but this can get confusing.)
-
-6. Run the provisioning script
-
-   ```
-   $ cd ~/MagAOX/setup
-   $ screen  # optional: lets you detach from the build and come back later
-   $ ./production_provision.sh
-   ```
+The software install process (from BIOS setup to building the MagAO-X software) is described in detail in [setup/README.md](setup/README.md). To the extent practicable, this is automated by the scripts in `setup/` that take over after CentOS is installed.
 
 ### Directory structure
 
