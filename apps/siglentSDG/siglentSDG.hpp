@@ -24,9 +24,9 @@ namespace app
 class siglentSDG : public MagAOXApp<>
 {
 
-   constexpr static double cs_MaxAmp = 2.0;
+   constexpr static double cs_MaxAmp = 0.87;
    constexpr static double cs_MaxOfst = 10.0;
-   constexpr static double cs_MaxFreq = 3700.0;
+   constexpr static double cs_MaxFreq = 1000.0;
 
 protected:
 
@@ -1118,6 +1118,7 @@ int siglentSDG::queryBSWV( int channel)
          m_C1frequency = resp_freq;
          m_C1vpp = resp_amp;
          m_C1ofst = resp_ofst;
+         m_C1phse = resp_phse;
 
          updateIfChanged(m_indiP_C1wvtp, "value", resp_wvtp);
          updateIfChanged(m_indiP_C1freq, "value", resp_freq);
@@ -1135,6 +1136,7 @@ int siglentSDG::queryBSWV( int channel)
          m_C2frequency = resp_freq;
          m_C2vpp = resp_amp;
          m_C2ofst = resp_ofst;
+         m_C2phse = resp_phse;
 
          updateIfChanged(m_indiP_C2wvtp, "value", resp_wvtp);
          updateIfChanged(m_indiP_C2freq, "value", resp_freq);
@@ -1403,6 +1405,9 @@ int siglentSDG::normalizeSetup()
    changeOutp(1, "OFF");
    changeOutp(2, "OFF");
 
+   changeWvtp(1, "SINE");
+   changeWvtp(2, "SINE");
+
    std::cerr << "Done\n";
    return 0;
 }
@@ -1613,6 +1618,11 @@ int siglentSDG::changeOfst( int channel,
    if(newOfst > cs_MaxOfst)
    {
       newOfst = cs_MaxOfst;
+   }
+
+   if(newOfst < 0.0)
+   {
+      newOfst = 0.0;
    }
 
    std::string afterColon = "BSWV OFST," + mx::ioutils::convertToString<double>(newOfst);
