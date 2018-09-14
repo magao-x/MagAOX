@@ -38,13 +38,18 @@ else
 fi
 
 export MXMAKEFILE="$MXLIBROOT/mk/MxApp.mk"
+# Populate $MXLIBROOT/local/ with example makefiles:
+make setup
 if [[ $ENV == dev ]]; then
-  cat << EOF > "$MXLIBROOT/local/MxApp.mk"
+  cat << EOF >> "$MXLIBROOT/local/MxApp.mk"
 BLAS_INCLUDES = -I/usr/include/atlas-x86_64-base
 BLAS_LDFLAGS = -L/usr/lib64/atlas -L/usr/lib64
 BLAS_LDLIBS = -ltatlas -lgfortran
 EOF
 fi
-make PREFIX=/usr/local
-make install PREFIX=/usr/local
+# Ensure mxlib installs to /usr/local (not $HOME)
+echo "PREFIX = /usr/local" >> "$MXLIBROOT/local/Common.mk"
+make
+make install
+# Ensure all users get $MXMAKEFILE pointing to this install by default
 echo "export MXMAKEFILE=\"$MXLIBROOT/mk/MxApp.mk\"" | tee /etc/profile.d/mxmakefile.sh

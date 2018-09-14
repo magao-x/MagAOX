@@ -28,10 +28,14 @@ fi
 DEPSROOT=/opt/MagAOX/source/dependencies
 
 echo "Starting shell-based provisioning script from $DIR..."
-# Nice-to-haves
-yum install -y vim nano
 # needed for (at least) git:
 yum groupinstall -y 'Development Tools'
+# EPEL is additional packages that aren't in the main repo
+wget http://dl.fedoraproject.org/pub/epel/epel-release-latest-7.noarch.rpm
+# use || true so it's not an error if already installed:
+yum install -y epel-release-latest-7.noarch.rpm || true
+# Install nice-to-haves
+yum install -y vim nano wget htop
 # changes the set of available packages, making devtoolset-7 available
 yum -y install centos-release-scl
 # install and enable devtoolset-7 for all users
@@ -172,7 +176,8 @@ cd $DEPSROOT
 # MagAOX dependencies
 #
 FLATBUFFERS_VERSION="1.9.0"
-yum install -y cmake zlib-devel libudev-devel ncurses-devel nmap-ncat
+yum install -y cmake zlib-devel libudev-devel ncurses-devel nmap-ncat \
+    lm_sensors hddtemp
 #
 # Flatbuffers
 #
