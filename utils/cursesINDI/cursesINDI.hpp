@@ -454,8 +454,11 @@ void cursesINDI::keyPressed( int ch )
 
          if(nch == 'y')
          {
-            pcf::IndiProperty ipSend;
-            ipSend = knownProps[it->second.propKey];
+            pcf::IndiProperty ipSend(knownProps[it->second.propKey].getType());
+
+            ipSend.setDevice(knownProps[it->second.propKey].getDevice());
+            ipSend.setName(knownProps[it->second.propKey].getName());
+            ipSend.add(pcf::IndiElement(it->second.name));
             ipSend[it->second.name].setValue(newStr);
             sendNewProperty(ipSend);
          }
