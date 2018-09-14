@@ -41,6 +41,7 @@ apps/zaberCtrl/zaberCtrl
 apps/siglentSDG/siglentSDG
 apps/siglentSDG/tests/siglentSDG_test
 
+apps/ttmModulator/ttmModulator
 
 utils/logdump/logdump
 utils/cursesINDI/cursesINDI
