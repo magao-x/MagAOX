@@ -193,17 +193,25 @@ public:
 
    /// Make a log entry
    /** Wrapper for logManager::log
+     *
+     * \tparam logT the log entry type
+     * \tparam retval the value returned by this method.
+     * 
      */
-   template<typename logT>
-   static void log( const typename logT::messageT & msg, ///< [in] the message to log
-             logPrioT level = logPrio::LOG_DEFAULT ///< [in] [optional] the log level.  The default is used if not specified.
-           );
+   template<typename logT, int retval=0>
+   static int log( const typename logT::messageT & msg, ///< [in] the message to log
+                   logPrioT level = logPrio::LOG_DEFAULT ///< [in] [optional] the log level.  The default is used if not specified.
+                 );
 
    /// Make a log entry
    /** Wrapper for logManager::log
+     * 
+     * \tparam logT the log entry type
+     * \tparam retval the value returned by this method.
+     * 
      */
-   template<typename logT>
-   static void log( logPrioT level = logPrio::LOG_DEFAULT /**< [in] [optional] the log level.  The default is used if not specified.*/);
+   template<typename logT, int retval=0>
+   static int log( logPrioT level = logPrio::LOG_DEFAULT /**< [in] [optional] the log level.  The default is used if not specified.*/);
 
    ///@} -- logging
 
@@ -920,19 +928,21 @@ int MagAOXApp<_useINDI>::execute() //virtual
 }
 
 template<bool _useINDI>
-template<typename logT>
-void MagAOXApp<_useINDI>::log( const typename logT::messageT & msg,
-                               logPrioT level
-                             )
+template<typename logT, int retval>
+int MagAOXApp<_useINDI>::log( const typename logT::messageT & msg,
+                              logPrioT level
+                            )
 {
    m_log.log<logT>(msg, level);
+   return retval;
 }
 
 template<bool _useINDI>
-template<typename logT>
-void MagAOXApp<_useINDI>::log( logPrioT level)
+template<typename logT, int retval>
+int MagAOXApp<_useINDI>::log( logPrioT level)
 {
    m_log.log<logT>(level);
+   return retval;
 }
 
 template<bool _useINDI>

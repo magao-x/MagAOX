@@ -13,7 +13,7 @@ namespace MagAOX
 namespace app
 {
 
-/** MagAO-X application to control a TTM modulation
+/** MagAO-X application to control TTM modulation
   *
   *
   */
@@ -26,40 +26,43 @@ protected:
      * @{
      */
 
-   double m_maxFreq {1000}; ///< The maximum modulation frequency setable by this program
-   double m_maxAmp {6.0}; ///< The maximum modulation amplitude setable by this program
+   double m_maxFreq {1000}; ///< The maximum modulation frequency settable by this program
+   double m_maxAmp {6.0}; ///< The maximum modulation amplitude settable by this program
 
-   double m_voltsPerLD_1 {0.87/6.0};
-   double m_voltsPerLD_2 {0.87/6.0};
-   double m_phase_2 {75.0};
+   double m_voltsPerLD_1 {0.87/6.0}; ///< The voltage for 1 lambda/D of motion for channel 1
+   double m_voltsPerLD_2 {0.87/6.0}; ///< The voltage for 1 lambda/D of motion for channel 2
+   double m_phase_2 {75.0}; ///< The phase offset for channel 2 to produce circular motion
 
    double m_setVoltage_1 {5.0}; ///< the set position voltage of Ch. 1.
    double m_setVoltage_2 {5.0}; ///< the set position voltage of Ch. 2.
 
-   double m_setDVolts {1.0};
+   double m_setDVolts {1.0}; ///< The setting ramp step size [volts].
+   
+   double m_modDFreq {500}; ///< The modulation ramp frequency step size [Hz].
+   double m_modDVolts {0.1}; ///< The modulation ramp voltage step size [Volts].
 
    ///@}
 
    int m_ttmState {-1}; ///< -1 = unknown, 0 = off, 1 = rest, 2 = midset, 3 = set, 4 = modulating
-   int m_ttmStateRequested {-1};
+   int m_ttmStateRequested {-1};  ///< The requested TTM state
 
-   double m_modRad {0};
-   double m_modRadRequested {-1};
-   double m_modFreq {0};
-   double m_modFreqRequested {-1};
+   double m_modRad {0}; ///< The current modulation radius, in lam/D.
+   double m_modRadRequested {-1}; ///< The requested modulation radius, in lam/D.
+   double m_modFreq {0}; ///< The current modulation frequency, in Hz.
+   double m_modFreqRequested {-1}; ///< The requested modulation frequency, in Hz.
 
 
-   int m_C1outp {-1};
-   double m_C1freq {-1};
-   double m_C1volts {-1};
-   double m_C1ofst {-1};
-   double m_C1phse {-1};
+   int m_C1outp {-1};     ///< Output state of fxn gen channel 1.
+   double m_C1freq {-1};  ///< Frequency of fxn gen channel 1.
+   double m_C1volts {-1}; ///< Voltage p2p of fxn gen channel 1.
+   double m_C1ofst {-1};  ///< DC offset of fxn gen channel 1.
+   double m_C1phse {-1};  ///< Phase of fxn gen channel 1.
 
-   int m_C2outp {-1};
-   double m_C2freq {-1};
-   double m_C2volts {-1};
-   double m_C2ofst {-1};
-   double m_C2phse {-1};
+   int m_C2outp {-1};     ///< Output state of fxn gen channel 2
+   double m_C2freq {-1};  ///< Frequency of fxn gen channel 2.
+   double m_C2volts {-1}; ///< Voltage p2p of fxn gen channel 2.
+   double m_C2ofst {-1};  ///< DC offset of fxn gen channel 2.
+   double m_C2phse {-1};  ///< Phase of fxn gen channel 2.
 
 public:
 
@@ -78,25 +81,55 @@ public:
 
    /// Startup functions
    /** Setsup the INDI vars.
-     *
+     * 
+     * \returns 0 on success
+     * \returns -1 on error.
      */
    virtual int appStartup();
 
-   /// Implementation of the FSM for the Siglent SDG
+   /// Implementation of the FSM for the TTM Modulator
+   /**
+     * \returns 0 on success
+     * \returns -1 on error.
+     */
    virtual int appLogic();
 
    /// Do any needed shutdown tasks.  Currently nothing in this app.
+   /**
+     * \returns 0 on success
+     * \returns -1 on error.
+     */
    virtual int appShutdown();
 
 
+   /// Calculate the state of the modulator from the fxn gen params.
+   /**
+     * \returns 0 on success
+     * \returns -1 on error.
+     */
    int calcState();
 
+   /// Rest the TTM
+   /**
+     * \returns 0 on success
+     * \returns -1 on error.
+     */
    int restTTM();
 
+   /// Set the TTM
+   /**
+     * \returns 0 on success
+     * \returns -1 on error.
+     */
    int setTTM();
 
-   int modTTM( double newRad,
-               double newFreq
+   /// Begin modulating or modify current modulation parameters.
+   /**
+     * \returns 0 on success
+     * \returns -1 on error.
+     */ 
+   int modTTM( double newRad, ///< The new radius for modulation [lam/D]
+               double newFreq ///< The new frequency for modulation [Hz]
              );
 
 protected:
@@ -119,8 +152,6 @@ protected:
    pcf::IndiProperty m_indiP_C2volts;
    pcf::IndiProperty m_indiP_C2ofst;
    pcf::IndiProperty m_indiP_C2phse;
-
-
 
 public:
    INDI_NEWCALLBACK_DECL(ttmModulator, m_indiP_ttmState);
@@ -159,7 +190,11 @@ void ttmModulator::setupConfig()
    config.add("cal.setv1", "", "cal.setv1", mx::argType::Required, "cal", "setv1", false, "real", "The set position voltage of chaannel 1.");
    config.add("cal.setv2", "", "cal.setv2", mx::argType::Required, "cal", "setv2", false, "real", "The set position voltage of chaannel 2.");
 
+   config.add("cal.setDvolts", "", "cal.setDvolts", mx::argType::Required, "cal", "setDvolts", false, "real", "The setting ramp step size [Volts]");
 
+   config.add("cal.modDfreq", "", "cal.modDfreq", mx::argType::Required, "cal", "modDfreq", false, "real", "The modulation ramp frequency step size [Hz]");
+   config.add("cal.modDvolts", "", "cal.modDvolts", mx::argType::Required, "cal", "modDvolts", false, "real", "The modulation ramp voltage step size [Volts]");
+   
 }
 
 inline
@@ -172,15 +207,18 @@ void ttmModulator::loadConfig()
    config(m_phase_2, "cal.phase");
 
    config(m_setVoltage_1, "cal.setv1");
-   config(m_setVoltage_2, "call.setv2");
+   config(m_setVoltage_2, "cal.setv2");
 
+   config(m_setDVolts, "cal.setDvolts");
+   config(m_modDFreq, "cal.modDfreq");
+   config(m_modDVolts, "cal.modDvolts");
 }
 
 inline
 int ttmModulator::appStartup()
 {
    // set up the  INDI properties
-   REG_INDI_NEWPROP(m_indiP_ttmState, "attmState", pcf::IndiProperty::Number);
+   REG_INDI_NEWPROP(m_indiP_ttmState, "ttmState", pcf::IndiProperty::Number);
    m_indiP_ttmState.add (pcf::IndiElement("value"));
    m_indiP_ttmState["value"].set(m_ttmState);
 
@@ -219,9 +257,9 @@ int ttmModulator::appLogic()
 
    { //mutex scope
       std::lock_guard<std::mutex> lock(m_indiMutex);
-      std::cerr << "\n" << m_indiP_ttmState["value"].get<int>() << " " << m_ttmState << "\n";
       updateIfChanged(m_indiP_ttmState, "value", m_ttmState);
-      std::cerr << m_indiP_ttmState["value"].get<int>() << " " << m_ttmState << "\n\n";
+      updateIfChanged(m_indiP_modulation, "radius", m_modRad);
+      updateIfChanged(m_indiP_modulation, "frequency", m_modFreq);
    }
    //This is set by an INDI newProperty
    if(m_ttmStateRequested > 0)
@@ -237,8 +275,8 @@ int ttmModulator::appLogic()
 
       if(newState == 1) restTTM();
       if(newState == 3) setTTM();
-      if(newState == 4) modTTM(m_modRadRequested, m_modFreqRequested);
-
+      if(newState == 4) modTTM(m_modRadRequested, m_modFreqRequested);         
+      
 
    }
    return 0;
@@ -288,6 +326,11 @@ int ttmModulator::calcState()
    return 0;
 }
 
+void nanoSleep( unsigned long nsec ) 
+{
+   std::this_thread::sleep_for( std::chrono::duration<unsigned long, std::nano>(nsec));
+}
+
 template<typename T>
 int waitValue( const T & var,
                const T & tgtVal,
@@ -306,7 +349,8 @@ int waitValue( const T & var,
    {
       if(var == tgtVal) return 0;
 
-      std::this_thread::sleep_for( std::chrono::duration<unsigned long, std::nano>(pauseWait));
+      nanoSleep(pauseWait);
+      
       clock_gettime(CLOCK_REALTIME, &ts1);
    }
 
@@ -336,7 +380,8 @@ int waitValue( const T & var,
    {
       if(fabs(tgtVal - var) <= tol) return 0;
 
-      std::this_thread::sleep_for( std::chrono::duration<unsigned long, std::nano>(pauseWait));
+      nanoSleep(pauseWait);
+      
       clock_gettime(CLOCK_REALTIME, &ts1);
    }
 
@@ -350,84 +395,38 @@ int waitValue( const T & var,
 inline
 int ttmModulator::restTTM()
 {
-   log<text_log>("Resting the PyWFS TTM.", logPrio::LOG_INFO);
-
    //Steps:
    //1) Set freqs to 0
-   if( sendNewProperty(m_indiP_C1freq, "value", 0.0) < 0 )
-   {
-      log<software_error>({__FILE__,__LINE__});
-      return -1;
-   };
-
-   if( sendNewProperty(m_indiP_C2freq, "value", 0.0) < 0 )
-   {
-      log<software_error>({__FILE__,__LINE__});
-      return -1;
-   };
-
+   if( sendNewProperty(m_indiP_C1freq, "value", 0.0) < 0 ) return log<software_error,-1>({__FILE__,__LINE__});
+   if( sendNewProperty(m_indiP_C2freq, "value", 0.0) < 0 ) return log<software_error,-1>({__FILE__,__LINE__});
+   
    //2) Set amps to 0 (really 0.002)
-   if( sendNewProperty(m_indiP_C1volts, "value", 0.0) < 0 )
-   {
-      log<software_error>({__FILE__,__LINE__});
-      return -1;
-   };
-
-   if( sendNewProperty(m_indiP_C2volts, "value", 0.0) < 0 )
-   {
-      log<software_error>({__FILE__,__LINE__});
-      return -1;
-   };
+   if( sendNewProperty(m_indiP_C1volts, "value", 0.0) < 0 ) return log<software_error,-1>({__FILE__,__LINE__});
+   if( sendNewProperty(m_indiP_C2volts, "value", 0.0) < 0 ) return log<software_error,-1>({__FILE__,__LINE__});
 
    //3) Set phase to 0
-   if( sendNewProperty(m_indiP_C1phse, "value", 0.0) < 0 )
-   {
-      log<software_error>({__FILE__,__LINE__});
-      return -1;
-   };
-
-   if( sendNewProperty(m_indiP_C2phse, "value", 0.0) < 0 )
-   {
-      log<software_error>({__FILE__,__LINE__});
-      return -1;
-   };
+   if( sendNewProperty(m_indiP_C1phse, "value", 0.0) < 0 ) return log<software_error,-1>({__FILE__,__LINE__});
+   if( sendNewProperty(m_indiP_C2phse, "value", 0.0) < 0 ) return log<software_error,-1>({__FILE__,__LINE__});
 
    //4) Set offset to 0
-   if( sendNewProperty(m_indiP_C1ofst, "value", 0.0) < 0 )
-   {
-      log<software_error>({__FILE__,__LINE__});
-      return -1;
-   };
-
-   if( sendNewProperty(m_indiP_C2ofst, "value", 0.0) < 0 )
-   {
-      log<software_error>({__FILE__,__LINE__});
-      return -1;
-   };
+   if( sendNewProperty(m_indiP_C1ofst, "value", 0.0) < 0 ) return log<software_error,-1>({__FILE__,__LINE__});
+   if( sendNewProperty(m_indiP_C2ofst, "value", 0.0) < 0 ) return log<software_error,-1>({__FILE__,__LINE__});
 
    //5) Set outputs to off
-   if( sendNewProperty(m_indiP_C1outp, "value", "Off") < 0 )
-   {
-      log<software_error>({__FILE__,__LINE__});
-      return -1;
-   };
-
-   if( sendNewProperty(m_indiP_C2outp, "value", "Off") < 0 )
-   {
-      log<software_error>({__FILE__,__LINE__});
-      return -1;
-   };
+   if( sendNewProperty(m_indiP_C1outp, "value", "Off") < 0 ) return log<software_error,-1>({__FILE__,__LINE__});
+   if( sendNewProperty(m_indiP_C2outp, "value", "Off") < 0 ) return log<software_error,-1>({__FILE__,__LINE__});
 
    //Now check if values have changed.
-   if( (waitValue(m_C1freq, 0.0) < 0) || (waitValue(m_C2freq, 0.0) < 0) ||
-        (waitValue(m_C1volts, 0.002, 1e-10) < 0) || (waitValue(m_C2volts, 0.002,1e-10) < 0) ||
-         (waitValue(m_C1phse, 0.0) < 0) || (waitValue(m_C2phse, 0.0) < 0) ||
-          (waitValue(m_C1ofst, 0.0) < 0) || (waitValue(m_C2ofst, 0.0) < 0) ||
-           (waitValue(m_C1outp, 0) < 0) || (waitValue(m_C2outp, 0) < 0) )
-   {
-      log<software_error>({__FILE__,__LINE__, "fxngen timeout"});
-      return -1;
-   }
+   if( waitValue(m_C1freq, 0.0) < 0) return log<software_error,-1>({__FILE__,__LINE__, "fxngen timeout"});
+   if( waitValue(m_C2freq, 0.0) < 0) return log<software_error,-1>({__FILE__,__LINE__, "fxngen timeout"});
+   if( waitValue(m_C1volts, 0.002, 1e-10) < 0) return log<software_error,-1>({__FILE__,__LINE__, "fxngen timeout"}); 
+   if( waitValue(m_C2volts, 0.002,1e-10) < 0) return log<software_error,-1>({__FILE__,__LINE__, "fxngen timeout"});
+   if( waitValue(m_C1phse, 0.0) < 0) return log<software_error,-1>({__FILE__,__LINE__, "fxngen timeout"});
+   if( waitValue(m_C2phse, 0.0) < 0) return log<software_error,-1>({__FILE__,__LINE__, "fxngen timeout"});
+   if( waitValue(m_C1ofst, 0.0) < 0) return log<software_error,-1>({__FILE__,__LINE__, "fxngen timeout"}); 
+   if( waitValue(m_C2ofst, 0.0) < 0) return log<software_error,-1>({__FILE__,__LINE__, "fxngen timeout"});
+   if( waitValue(m_C1outp, 0) < 0) return log<software_error,-1>({__FILE__,__LINE__, "fxngen timeout"});
+   if( waitValue(m_C2outp, 0) < 0) return log<software_error,-1>({__FILE__,__LINE__, "fxngen timeout"}); 
 
    log<text_log>("The PyWFS TTM is rested.", logPrio::LOG_NOTICE);
 
@@ -445,56 +444,32 @@ int ttmModulator::setTTM()
    if(m_ttmState == 4) //Modulating
    {
       log<text_log>("Stopping modulation.", logPrio::LOG_INFO);
+      
       //Steps:
       //1) Set freqs to 0
-      if( sendNewProperty(m_indiP_C1freq, "value", 0.0) < 0 )
-      {
-         log<software_error>({__FILE__,__LINE__});
-         return -1;
-      };
+      if( sendNewProperty(m_indiP_C1freq, "value", 0.0) < 0 ) return log<software_error,-1>({__FILE__,__LINE__});
 
-      if( sendNewProperty(m_indiP_C2freq, "value", 0.0) < 0 )
-      {
-         log<software_error>({__FILE__,__LINE__});
-         return -1;
-      };
-
+      if( sendNewProperty(m_indiP_C2freq, "value", 0.0) < 0 ) return log<software_error,-1>({__FILE__,__LINE__});
+      
       //2) Set amps to 0 (really 0.002)
-      if( sendNewProperty(m_indiP_C1volts, "value", 0.0) < 0 )
-      {
-         log<software_error>({__FILE__,__LINE__});
-         return -1;
-      };
+      if( sendNewProperty(m_indiP_C1volts, "value", 0.0) < 0 ) return log<software_error,-1>({__FILE__,__LINE__});
 
-      if( sendNewProperty(m_indiP_C2volts, "value", 0.0) < 0 )
-      {
-         log<software_error>({__FILE__,__LINE__});
-         return -1;
-      };
+      if( sendNewProperty(m_indiP_C2volts, "value", 0.0) < 0 ) return log<software_error,-1>({__FILE__,__LINE__});
 
       //3) Set phase to 0
-      if( sendNewProperty(m_indiP_C1phse, "value", 0.0) < 0 )
-      {
-         log<software_error>({__FILE__,__LINE__});
-         return -1;
-      };
+      if( sendNewProperty(m_indiP_C1phse, "value", 0.0) < 0 ) return log<software_error,-1>({__FILE__,__LINE__});
 
-      if( sendNewProperty(m_indiP_C2phse, "value", 0.0) < 0 )
-      {
-         log<software_error>({__FILE__,__LINE__});
-         return -1;
-      };
+      if( sendNewProperty(m_indiP_C2phse, "value", 0.0) < 0 ) return log<software_error,-1>({__FILE__,__LINE__});
 
       /// \todo should we set the offset here just to be sure?
 
       //Now check if values have changed.
-      if( (waitValue(m_C1freq, 0.0) < 0) || (waitValue(m_C2freq, 0.0) < 0) ||
-           (waitValue(m_C1volts, 0.002, 1e-10) < 0) || (waitValue(m_C2volts, 0.002,1e-10) < 0) ||
-            (waitValue(m_C1phse, 0.0) < 0) || (waitValue(m_C2phse, 0.0) < 0)  )
-      {
-         log<software_error>({__FILE__,__LINE__, "fxngen timeout"});
-         return -1;
-      }
+      if( waitValue(m_C1freq, 0.0) < 0) return log<software_error,-1>({__FILE__,__LINE__, "fxngen timeout"}); 
+      if( waitValue(m_C2freq, 0.0) < 0) return log<software_error,-1>({__FILE__,__LINE__, "fxngen timeout"}); 
+      if( waitValue(m_C1volts, 0.002, 1e-10) < 0) return log<software_error,-1>({__FILE__,__LINE__, "fxngen timeout"});
+      if( waitValue(m_C2volts, 0.002,1e-10) < 0) return log<software_error,-1>({__FILE__,__LINE__, "fxngen timeout"});
+      if( waitValue(m_C1phse, 0.0) < 0) return log<software_error,-1>({__FILE__,__LINE__, "fxngen timeout"});
+      if( waitValue(m_C2phse, 0.0) < 0) return log<software_error,-1>({__FILE__,__LINE__, "fxngen timeout"});  
 
       log<text_log>("PyWFS TTM is set.", logPrio::LOG_NOTICE);
       return 0;
@@ -506,30 +481,19 @@ int ttmModulator::setTTM()
    //1) Make sure we're fully rested:
    if( m_ttmState != 1)
    {
-      if( restTTM() < 0)
-      {
-         log<software_error>({__FILE__, __LINE__});
-         return -1;
-      }
+      if( restTTM() < 0 ) return log<software_error, -1>({__FILE__, __LINE__});
+      
       sleep(1);
    }
-
 
    log<text_log>("Setting the PyWFS TTM.", logPrio::LOG_INFO);
 
    //2) Set outputs to on
-   if( (sendNewProperty(m_indiP_C1outp, "value", "On") < 0 ) ||
-        ( sendNewProperty(m_indiP_C2outp, "value", "On") < 0 ) )
-   {
-      log<software_error>({__FILE__,__LINE__});
-      return -1;
-   };
+   if( sendNewProperty(m_indiP_C1outp, "value", "On") < 0 ) return log<software_error,-1>({__FILE__,__LINE__});
+   if( sendNewProperty(m_indiP_C2outp, "value", "On") < 0 ) return log<software_error,-1>({__FILE__,__LINE__}); 
 
-   if( (waitValue(m_C1outp, 1) < 0) || (waitValue(m_C2outp, 1) < 0) )
-   {
-      log<software_error>({__FILE__,__LINE__, "fxngen timeout"});
-      return -1;
-   }
+   if( waitValue(m_C1outp, 1) < 0) return log<software_error,-1>({__FILE__,__LINE__, "fxngen timeout"});
+   if( waitValue(m_C2outp, 1) < 0) return log<software_error,-1>({__FILE__,__LINE__, "fxngen timeout"}); 
 
    //3) Now we begin ramp . . .
    size_t N1 = m_setVoltage_1/m_setDVolts;
@@ -544,38 +508,18 @@ int ttmModulator::setTTM()
    {
       double nv = i*m_setDVolts;
 
-      if(nv < 0 || nv > 10)
-      {
-         log<software_error>({__FILE__, __LINE__, "Bad voltage calculated.  Refusing."});
-         return -1;
-      }
+      if(nv < 0 || nv > 10) return log<software_error,-1>({__FILE__, __LINE__, "Bad voltage calculated.  Refusing."});
 
-      if( sendNewProperty(m_indiP_C1ofst, "value", nv) < 0 )
-      {
-         log<software_error>({__FILE__,__LINE__});
-         return -1;
-      };
+      if( sendNewProperty(m_indiP_C1ofst, "value", nv) < 0 ) return log<software_error,-1>({__FILE__,__LINE__});
 
-      if( waitValue(m_C1ofst, nv, 1e-10) < 0 )
-      {
-         log<software_error>({__FILE__,__LINE__, "fxngen timeout"});
-         return -1;
-      }
+      if( waitValue(m_C1ofst, nv, 1e-10) < 0 ) return log<software_error,-1>({__FILE__,__LINE__, "fxngen timeout"});
 
       sleep(1);
 
-      if( sendNewProperty(m_indiP_C2ofst, "value", nv) < 0 )
-      {
-         log<software_error>({__FILE__,__LINE__});
-         return -1;
-      };
-
-      if( waitValue(m_C2ofst, nv, 1e-10) < 0 )
-      {
-         log<software_error>({__FILE__,__LINE__, "fxngen timeout"});
-         return -1;
-      }
-
+      if( sendNewProperty(m_indiP_C2ofst, "value", nv) < 0 ) return log<software_error,-1>({__FILE__,__LINE__});
+ 
+      if( waitValue(m_C2ofst, nv, 1e-10) < 0 ) return log<software_error,-1>({__FILE__,__LINE__, "fxngen timeout"});
+      
       sleep(1);
    }
 
@@ -583,24 +527,12 @@ int ttmModulator::setTTM()
    {
       double nv = j*m_setDVolts;
 
-      if(nv < 0 || nv > 10)
-      {
-         log<software_error>({__FILE__, __LINE__, "Bad voltage calculated.  Refusing."});
-         return -1;
-      }
-
-      if( (sendNewProperty(m_indiP_C1ofst, "value", nv) < 0 ) )
-      {
-         log<software_error>({__FILE__,__LINE__});
-         return -1;
-      };
-
-      if( (waitValue(m_C1ofst, nv, 1e-10) < 0) )
-      {
-         log<software_error>({__FILE__,__LINE__, "fxngen timeout"});
-         return -1;
-      }
-
+      if(nv < 0 || nv > 10) return log<software_error,-1>({__FILE__, __LINE__, "Bad voltage calculated.  Refusing."});
+      
+      if( sendNewProperty(m_indiP_C1ofst, "value", nv) < 0 ) return log<software_error,-1>({__FILE__,__LINE__});
+      
+      if( waitValue(m_C1ofst, nv, 1e-10) < 0 ) return log<software_error, -1>({__FILE__,__LINE__, "fxngen timeout"});
+      
       sleep(1);
    }
 
@@ -608,67 +540,33 @@ int ttmModulator::setTTM()
    {
       double nv = j*m_setDVolts;
 
-      if(nv < 0 || nv > 10)
-      {
-         log<software_error>({__FILE__, __LINE__, "Bad voltage calculated.  Refusing."});
-         return -1;
-      }
+      if(nv < 0 || nv > 10) return log<software_error,-1>({__FILE__, __LINE__, "Bad voltage calculated.  Refusing."});
 
-      if( (sendNewProperty(m_indiP_C2ofst, "value", nv) < 0 ) )
-      {
-         log<software_error>({__FILE__,__LINE__});
-         return -1;
-      };
+      if( sendNewProperty(m_indiP_C2ofst, "value", nv) < 0 ) return log<software_error,-1>({__FILE__,__LINE__});
 
-      if( (waitValue(m_C2ofst, nv, 1e-10) < 0) )
-      {
-         log<software_error>({__FILE__,__LINE__, "fxngen timeout"});
-         return -1;
-      }
-
+      if( waitValue(m_C2ofst, nv, 1e-10) < 0 ) return log<software_error,-1>({__FILE__,__LINE__, "fxngen timeout"});
+      
       sleep(1);
    }
 
    if(m_C1ofst < m_setVoltage_1)
    {
-      if( m_setVoltage_1 < 0 ||  m_setVoltage_1 > 10)
-      {
-         log<software_error>({__FILE__, __LINE__, "Bad voltage calculated.  Refusing."});
-         return -1;
-      }
+      if( m_setVoltage_1 < 0 ||  m_setVoltage_1 > 10) return log<software_error,-1>({__FILE__, __LINE__, "Bad voltage calculated.  Refusing."});
+      
+      if( (sendNewProperty(m_indiP_C1ofst, "value", m_setVoltage_1) < 0 ) ) return log<software_error,-1>({__FILE__,__LINE__});
 
-      if( (sendNewProperty(m_indiP_C1ofst, "value", m_setVoltage_1) < 0 ) )
-      {
-         log<software_error>({__FILE__,__LINE__});
-         return -1;
-      };
-
-      if(waitValue(m_C1ofst, m_setVoltage_1, 1e-10) < 0)
-      {
-         log<software_error>({__FILE__,__LINE__, "fxngen timeout"});
-         return -1;
-      }
+      if(waitValue(m_C1ofst, m_setVoltage_1, 1e-10) < 0) return log<software_error,-1>({__FILE__,__LINE__, "fxngen timeout"});
+      
    }
 
    if(m_C2ofst < m_setVoltage_2)
    {
-      if( m_setVoltage_2 < 0 ||  m_setVoltage_2 > 10)
-      {
-         log<software_error>({__FILE__, __LINE__, "Bad voltage calculated.  Refusing."});
-         return -1;
-      }
+      if( m_setVoltage_2 < 0 ||  m_setVoltage_2 > 10) return log<software_error,-1>({__FILE__, __LINE__, "Bad voltage calculated.  Refusing."});
 
-      if( (sendNewProperty(m_indiP_C2ofst, "value", m_setVoltage_2) < 0 ) )
-      {
-         log<software_error>({__FILE__,__LINE__});
-         return -1;
-      };
-
-      if(waitValue(m_C2ofst, m_setVoltage_2, 1e-10) < 0)
-      {
-         log<software_error>({__FILE__,__LINE__, "fxngen timeout"});
-         return -1;
-      }
+      if( (sendNewProperty(m_indiP_C2ofst, "value", m_setVoltage_2) < 0 ) ) return log<software_error,-1>({__FILE__,__LINE__});
+      
+      if( waitValue(m_C2ofst, m_setVoltage_2, 1e-10) < 0) return log<software_error,-1>({__FILE__,__LINE__, "fxngen timeout"});
+      
    }
 
    log<text_log>("PyWFS TTM is set.", logPrio::LOG_NOTICE);
@@ -685,46 +583,27 @@ int ttmModulator::modTTM( double newRad,
    if(newRad < 0 || newFreq < 0) return 0;
 
    /// \todo logging in these steps
-   
+
    //For now: if we enter modulating, we stop modulating.
    /// \todo Implement changing modulation without setting first.
    if( m_ttmState == 4)
    {
       if(newRad == m_modRad && newFreq == m_modFreq) return 0;
 
-      if(setTTM() < 0)
-      {
-         log<software_error>({__FILE__, __LINE__});
-         return -1;
-      }
-
-      if( calcState() < 0)
-      {
-         log<software_error>({__FILE__,__LINE__});
-         return -1;
-      }
+      if( setTTM() < 0 ) return log<software_error, -1>({__FILE__, __LINE__});
+         
+      if( calcState() < 0) return log<software_error, -1>({__FILE__,__LINE__});
+         
    }
 
    //If not set, we first check if we are fully rested.
    if( m_ttmState < 3 )
    {
-      if(setTTM() < 0)
-      {
-         log<software_error>({__FILE__, __LINE__});
-         return -1;
-      }
-
-      if( calcState() < 0)
-      {
-         log<software_error>({__FILE__,__LINE__});
-         return -1;
-      }
-
-      if( m_ttmState < 3)
-      {
-         log<software_error>({__FILE__,__LINE__, "TTM not set/setable."});
-         return -1;
-      }
+      if( setTTM() < 0 ) return log<software_error, -1>({__FILE__, __LINE__});
+      
+      if( calcState() < 0 ) return log<software_error, -1>({__FILE__,__LINE__});
+      
+      if( m_ttmState < 3) return log<software_error, -1>({__FILE__,__LINE__, "TTM not set/setable."});
    }
 
    //Check frequency for safety.
@@ -755,40 +634,24 @@ int ttmModulator::modTTM( double newRad,
    if( m_ttmState == 3)
    {
       // 0) set phase
-      if( sendNewProperty(m_indiP_C2phse, "value", m_phase_2) < 0 )
-      {
-         log<software_error>({__FILE__,__LINE__});
-         return -1;
-      };
-
+      if( sendNewProperty(m_indiP_C2phse, "value", m_phase_2) < 0 ) return log<software_error,-1>({__FILE__,__LINE__});
+    
       /// \todo should we set the offset here just to be sure?
 
       //Now check if values have changed.
-      if( waitValue(m_C2phse, m_phase_2, 1e-10) < 0  )
-      {
-         log<software_error>({__FILE__,__LINE__, "fxngen timeout"});
-         return -1;
-      }
-
+      if( waitValue(m_C2phse, m_phase_2, 1e-10) < 0  ) return log<software_error, -1>({__FILE__,__LINE__, "fxngen timeout"});
+      
       // 1) set freq to 100 Hz (or requested if < 100 Hz)
       double nextFreq = 100.0;
       if(nextFreq > newFreq) nextFreq = newFreq;
-      if( sendNewProperty(m_indiP_C1freq, "value", nextFreq) < 0 ||
-            sendNewProperty(m_indiP_C2freq, "value", nextFreq) < 0 )
-      {
-         log<software_error>({__FILE__,__LINE__});
-         return -1;
-      };
+      
+      //send to device
+      if( sendNewProperty(m_indiP_C1freq, "value", nextFreq) < 0 ) log<software_error,-1>({__FILE__,__LINE__});
+      if( sendNewProperty(m_indiP_C2freq, "value", nextFreq) < 0 ) log<software_error,-1>({__FILE__,__LINE__});
 
       //Now check if values have changed.
-      if( waitValue(m_C1freq, nextFreq, 1e-10) < 0 ||
-           waitValue(m_C2freq, nextFreq, 1e-10) < 0  )
-      {
-         std::cerr.precision(20);
-         std::cerr << m_C1freq << " " << m_C2freq << " " << newFreq << "\n";
-         log<software_error>({__FILE__,__LINE__, "fxngen timeout"});
-         return -1;
-      }
+      if( waitValue(m_C1freq, nextFreq, 1e-10) < 0 ) return log<software_error,-1>({__FILE__,__LINE__, "fxngen timeout"});
+      if( waitValue(m_C2freq, nextFreq, 1e-10) < 0 ) return log<software_error,-1>({__FILE__,__LINE__, "fxngen timeout"});
 
       // 2) set amp to 0.1 V (or requested if < 0.1 V)
       double nextVolts1 = 0.1;
@@ -797,20 +660,14 @@ int ttmModulator::modTTM( double newRad,
       double nextVolts2 = 0.1;
       if(nextVolts2 > voltageC2) nextVolts2 = voltageC2;
 
-      if( sendNewProperty(m_indiP_C1volts, "value", nextVolts1) < 0 ||
-            sendNewProperty(m_indiP_C2volts, "value", nextVolts2) < 0 )
-      {
-         log<software_error>({__FILE__,__LINE__});
-         return -1;
-      };
+      //send to device
+      if( sendNewProperty(m_indiP_C1volts, "value", nextVolts1) < 0 ) return log<software_error, -1>({__FILE__,__LINE__});
+      if( sendNewProperty(m_indiP_C2volts, "value", nextVolts2) < 0 ) return log<software_error, -1>({__FILE__,__LINE__});
+      
 
       //Now check if values have changed.
-      if( waitValue(m_C1volts, nextVolts1, 1e-10) < 0 ||
-           waitValue(m_C2volts, nextVolts2, 1e-10) < 0  )
-      {
-         log<software_error>({__FILE__,__LINE__, "fxngen timeout"});
-         return -1;
-      }
+      if( waitValue(m_C1volts, nextVolts1, 1e-10) < 0 ) log<software_error,-1>({__FILE__,__LINE__, "fxngen timeout"});
+      if( waitValue(m_C2volts, nextVolts2, 1e-10) < 0 ) log<software_error,-1>({__FILE__,__LINE__, "fxngen timeout"});
 
       // 3) Increase freq to 500 Hz, then in 500 Hz increments
       double currFreq = m_C1freq;
@@ -821,25 +678,20 @@ int ttmModulator::modTTM( double newRad,
       ///\todo make frequency tolerance a configurable
       while( fabs(currFreq - newFreq) > 1e-4)
       {
-         if( sendNewProperty(m_indiP_C1freq, "value", nextFreq) < 0 ||
-               sendNewProperty(m_indiP_C2freq, "value", nextFreq) < 0 )
-         {
-            log<software_error>({__FILE__,__LINE__});
-            return -1;
-         };
+         if( sendNewProperty(m_indiP_C1freq, "value", nextFreq) < 0 ) return log<software_error,-1>({__FILE__,__LINE__});
+         if( sendNewProperty(m_indiP_C2freq, "value", nextFreq) < 0 ) return log<software_error,-1>({__FILE__,__LINE__});
 
          //Now check if values have changed.
-         if( waitValue(m_C1freq, nextFreq, 1e-10) < 0 ||
-              waitValue(m_C2freq, nextFreq, 1e-10) < 0  )
-         {
-            log<software_error>({__FILE__,__LINE__, "fxngen timeout"});
-            return -1;
-         }
+         if( waitValue(m_C1freq, nextFreq, 1e-10) < 0 ) return log<software_error,-1>({__FILE__,__LINE__, "fxngen timeout"});
+         if( waitValue(m_C2freq, nextFreq, 1e-10) < 0 ) return log<software_error,-1>({__FILE__,__LINE__, "fxngen timeout"});
+         
+         ///\todo make sleep-time configurable
          sleep(1);
          currFreq = m_C1freq;
          nextFreq = currFreq + 500.0;
          if(nextFreq > newFreq) nextFreq = newFreq;
       }
+ 
       // 4) Now increase amplitude in 0.1 V increments.
       double currVolts1 = m_C1volts;
       double currVolts2 = m_C2volts;
@@ -852,20 +704,13 @@ int ttmModulator::modTTM( double newRad,
       ///\todo make voltage tolerance a configurable.
       while( fabs(currVolts1 - voltageC1) > 1e-4 || fabs(currVolts2 - voltageC2) > 1e-4)
       {
-         if( sendNewProperty(m_indiP_C1volts, "value", nextVolts1) < 0 ||
-               sendNewProperty(m_indiP_C2volts, "value", nextVolts2) < 0 )
-         {
-            log<software_error>({__FILE__,__LINE__});
-            return -1;
-         };
+         if( sendNewProperty(m_indiP_C1volts, "value", nextVolts1) < 0 ) return log<software_error,-1>({__FILE__,__LINE__});
+         if( sendNewProperty(m_indiP_C2volts, "value", nextVolts2) < 0 ) return log<software_error,-1>({__FILE__,__LINE__});
 
          //Now check if values have changed.
-         if( waitValue(m_C1volts, nextVolts1, 1e-10) < 0 ||
-              waitValue(m_C2volts, nextVolts2, 1e-10) < 0  )
-         {
-            log<software_error>({__FILE__,__LINE__, "fxngen timeout"});
-            return -1;
-         }
+         if( waitValue(m_C1volts, nextVolts1, 1e-10) < 0 ) return log<software_error,-1>({__FILE__,__LINE__, "fxngen timeout"});
+         if( waitValue(m_C2volts, nextVolts2, 1e-10) < 0 ) return log<software_error,-1>({__FILE__,__LINE__, "fxngen timeout"});
+
          sleep(1);
          currVolts1 = m_C1volts;
          nextVolts1 = currVolts1 + 0.1;
@@ -876,12 +721,13 @@ int ttmModulator::modTTM( double newRad,
          if(nextVolts2 > voltageC2) nextVolts2 = voltageC2;
 
       }
+      
+      m_modRad = newRad;
+      m_modFreq = newFreq;
    }
-   else
-   {
-      log<software_error>({__FILE__,__LINE__, "TTM not set but should be by now."});
-      return -1;
-   }
+   else return log<software_error,-1>({__FILE__,__LINE__, "TTM not set but should be by now."});
+      
+   
    return 0;
 }
 
@@ -891,8 +737,6 @@ INDI_NEWCALLBACK_DEFN(ttmModulator, m_indiP_ttmState)(const pcf::IndiProperty &i
    std::cerr << "State change request" << std::endl;
    if (ipRecv.getName() == m_indiP_ttmState.getName())
    {
-
-      //std::lock_guard<std::mutex> lock(m_indiMutex);
 
       int state = 0;
       try
@@ -920,7 +764,6 @@ INDI_NEWCALLBACK_DEFN(ttmModulator, m_indiP_modulation)(const pcf::IndiProperty 
       try
       {
          nr = ipRecv["radius"].get<double>();
-         std::cerr << "nr: " << nr << "\n";
       }
       catch(...)
       {
@@ -932,7 +775,6 @@ INDI_NEWCALLBACK_DEFN(ttmModulator, m_indiP_modulation)(const pcf::IndiProperty 
       try
       {
          nf = ipRecv["frequency"].get<double>();
-         std::cerr << "nf: " << nf << "\n";
       }
       catch(...)
       {
@@ -1018,8 +860,6 @@ INDI_SETCALLBACK_DEFN(ttmModulator, m_indiP_C1volts)(const pcf::IndiProperty &ip
          nv = ipRecv["value"].get<double>();
 
          m_C1volts = nv;
-         std::cerr << "m_C1volts: " << nv << "\n";
-
          return 0;
       }
       catch(...)
@@ -1150,7 +990,6 @@ INDI_SETCALLBACK_DEFN(ttmModulator, m_indiP_C2volts)(const pcf::IndiProperty &ip
          nv = ipRecv["value"].get<double>();
 
          m_C2volts = nv;
-         std::cerr << "m_C2volts: " << nv << "\n";
          return 0;
       }
       catch(...)
