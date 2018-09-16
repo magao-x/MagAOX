@@ -123,6 +123,20 @@ indiDriver<parentT>::indiDriver ( parentT * parent,
       return;
    }
    setOutputFd(fd);
+   
+   // Open the ctrl fifo and write a single byte to it to trigger a restart
+   // of the xindidriver process.
+   // This allows indiserver to refresh everything.
+   errno = 0;
+   fd = open( parent->driverCtrlName().c_str(), O_RDWR);
+   if(fd < 0)
+   {
+      m_good = false;
+      return;
+   }
+   char c = 0;
+   write(fd, &c, 1);
+   close(fd);
 }
 
 template<class parentT>

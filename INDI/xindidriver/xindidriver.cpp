@@ -171,6 +171,45 @@ void * xoverThread( void * vdf /**< [in] pointer to a driverFIFO struct */)
    return 0;
 }
 
+
+/// Work function for the restart FIFO thread 
+void * ctrlThread( void * vdf /**< [in] pointer to a driverFIFO struct */)
+{
+   driverFIFO * df = static_cast<driverFIFO *>(vdf);
+
+   //Open the controller's restart FIFO
+
+   while(df->fd < 0 && !timeToDie)
+   {
+      errno = 0;
+      df->fd = open( df->fileName.c_str(), O_RDWR);
+
+      if(df->fd < 0)
+      {
+         if( errno == ENOENT ) //If it's just cuz the file doesn't exist, we'll be patient.
+         {
+            sleep(1);
+         }
+         else
+         {
+            std::cerr << " (" << XINDID_COMPILEDNAME << "): failed to open " << df->fileName << ".\n";
+            return nullptr;
+         }
+      }
+   }
+   
+   char rdbuff[XINDID_BUFFSIZE];
+   
+   //Now we try to read from it.  Anything at all will cause us to set timeToDie and thus this program will exit.
+   int rd = read(df->fd, rdbuff, XINDID_BUFFSIZE);
+   
+   static_cast<void>(rd); //suppress warning
+   
+   timeToDie = true;
+   
+   return 0;
+}
+
 void sigHandler( int signum,
                  siginfo_t *siginf,
                  void *ucont
@@ -234,7 +273,6 @@ void usage()
 
 int main( int argc, char **argv)
 {
-
    timeToDie = false;
 
    if (argc == 1 )
@@ -268,8 +306,11 @@ int main( int argc, char **argv)
    //Now that myName is known, install signal handler
    if( setSigTermHandler() < 0) return -1;
 
+   //setSigIOHandler();
+   
    std::string stdinFifo = std::string(XINDID_FIFODIR) + "/" + myName + ".in";
    std::string stdoutFifo = std::string(XINDID_FIFODIR) + "/" + myName + ".out";
+   std::string ctrlFifo = std::string(XINDID_FIFODIR) + "/" + myName + ".ctrl";
 
    std::cerr << " (" << XINDID_COMPILEDNAME << "): starting with " << stdinFifo << " & " << stdoutFifo << std::endl;
 
@@ -277,13 +318,18 @@ int main( int argc, char **argv)
 
    driverFIFO dfOut (stdoutFifo, STDOUT_FILENO);
 
-   //Launch the read/write threads, one each for STDIN and STDOUT
+   driverFIFO dfCtrl (ctrlFifo, 0);
+   
+   //Launch the read/write threads, one each for STDIN and STDOUT and for control.
    pthread_t stdIn_th = 0;
    pthread_create( &stdIn_th, NULL, xoverThread, &dfIn );
 
    pthread_t stdOut_th = 0;
    pthread_create( &stdOut_th, NULL, xoverThread, &dfOut );
 
+   pthread_t ctrl_th = 0;
+   pthread_create( &ctrl_th, NULL, ctrlThread, &dfCtrl );
+   
    //Now loop until killed.
    int rv;
    while( !timeToDie )
@@ -304,16 +350,26 @@ int main( int argc, char **argv)
          timeToDie = true;
       }
 
+      rv = pthread_tryjoin_np(ctrl_th, 0);
+
+      if(rv == 0)
+      {
+         std::cerr << " (" << XINDID_COMPILEDNAME << "): control thread exited.\n";
+         timeToDie = true;
+      }
+      
       if(!timeToDie) sleep(1);
    }
 
    //Wake up each thread:
    pthread_kill(stdIn_th, SIGTERM);
    pthread_kill(stdOut_th, SIGTERM);
+   pthread_kill(ctrl_th, SIGTERM);
 
    //Give each thread a chance to cleanup.
    pthread_join(stdIn_th, 0);
    pthread_join(stdOut_th, 0);
+   pthread_join(ctrl_th, 0);
 
    return 0;
 

@@ -421,6 +421,11 @@ protected:
    ///Full path name of the INDI driver output FIFO.
    std::string m_driverOutName;
 
+   ///Full path name of the INDI driver control FIFO.
+   /** This is currently only used to signal restarts.
+     */
+   std::string m_driverCtrlName;
+   
    /// Register an INDI property which is exposed for others to request a New Property for.
    /**
      *
@@ -600,6 +605,12 @@ public:
      */
    std::string driverOutName();
 
+   ///Get the INDI control FIFO file name
+   /**
+     * \returns the current value of m_driverCtrlName
+     */
+   std::string driverCtrlName();
+   
    ///@} --Member Accessors
 };
 
@@ -1399,7 +1410,8 @@ int MagAOXApp<_useINDI>::createINDIFIFOS()
 
    m_driverInName = driverFIFOPath + "/" + configName() + ".in";
    m_driverOutName = driverFIFOPath + "/" + configName() + ".out";
-
+   m_driverCtrlName = driverFIFOPath + "/" + configName() + ".ctrl";
+   
    //Get max permissions
    euidCalled();
 
@@ -1432,6 +1444,19 @@ int MagAOXApp<_useINDI>::createINDIFIFOS()
       }
    }
 
+   errno = 0;
+   if(mkfifo(m_driverCtrlName.c_str(), S_IRUSR | S_IWUSR | S_IRGRP | S_IWGRP) !=0 )
+   {
+      if(errno != EEXIST)
+      {
+         umask(prev);
+         euidReal();
+         log<software_critical>({__FILE__, __LINE__, errno, 0, "mkfifo failed"});
+         log<text_log>("Failed to create ouput FIFO.", logPrio::LOG_CRITICAL);
+         return -1;
+      }
+   }
+   
    umask(prev);
    euidReal();
    return 0;
@@ -1757,6 +1782,12 @@ template<bool _useINDI>
 std::string MagAOXApp<_useINDI>::driverOutName()
 {
    return m_driverOutName;
+}
+
+template<bool _useINDI>
+std::string MagAOXApp<_useINDI>::driverCtrlName()
+{
+   return m_driverCtrlName;
 }
 
 } //namespace app
