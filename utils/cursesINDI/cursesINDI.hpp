@@ -9,8 +9,8 @@ class cursesINDI : public pcf::IndiClient, public cursesTable
 public:
    std::vector<int> m_cx {0, 5, 20, 35, 50};
 
-   int m_currY {0};
-   int m_currX {1};
+   size_t m_currY {0};
+   size_t m_currX {1};
 
    int m_redraw {0};
 
@@ -23,6 +23,8 @@ public:
    {nullptr};
 
    bool m_shutdown {false};
+   bool m_connectionLost{false};
+   
    std::thread m_drawThread;
    std::mutex m_drawMutex;
 
@@ -265,7 +267,7 @@ int cursesINDI::drawThreadStart()
 inline
 void cursesINDI::drawThreadExec()
 {
-   while(!m_shutdown)
+   while(!m_shutdown && !getQuitProcess())
    {
       if(m_redraw > 0)
       {
@@ -278,6 +280,15 @@ void cursesINDI::drawThreadExec()
       }
 
       std::this_thread::sleep_for( std::chrono::duration<unsigned long, std::nano>(250000000));
+   }
+                           
+   if(getQuitProcess() && !m_shutdown) 
+   {
+      m_connectionLost = true;
+      
+      rows.clear();
+      redrawTable();
+      m_shutdown = true;
    }
 
 }
@@ -358,18 +369,25 @@ void cursesINDI::moveCurrent( int nextY,
 }
 
 void cursesINDI::_moveCurrent( int nextY,
-                              int nextX
-                            )
+                               int nextX
+                             )
 {
+   //Do some bounds checks
+   if(rows.size() == 0 || m_currY >= rows.size()) return;
+   if(m_currX >= rows[m_currY].m_cellWin.size()) return;
+   
+   //Now turn off the reverse
    wattroff(rows[m_currY].m_cellWin[m_currX], A_REVERSE);
    rows[m_currY].updateContents( m_currX, rows[m_currY].m_cellContents[m_currX], true);
 
-   if(nextY >= 0 && nextY < rows.size() && nextX >= 1 && nextX <= 4)
+   //Move the cursor position
+   if(nextY >= 0 && (size_t) nextY < rows.size() && nextX >= 1 && nextX <= 4)
    {
       m_currY = nextY;
       m_currX = nextX;
    }
 
+   //Turn it back on
    wattron(rows[m_currY].m_cellWin[m_currX], A_REVERSE);
    rows[m_currY].updateContents( m_currX, rows[m_currY].m_cellContents[m_currX], true);
 
@@ -386,7 +404,7 @@ void cursesINDI::keyPressed( int ch )
          auto it = knownElements.begin();
          while(it != knownElements.end())
          {
-            if(it->second.tableRow == m_currY) break;
+            if( (size_t) it->second.tableRow == m_currY) break;
             ++it;
          }
          //Error checks?
@@ -406,6 +424,18 @@ void cursesINDI::keyPressed( int ch )
          int nch;
          while( (nch = wgetch(w_interactWin)) != '\n')
          {
+            if(nch == ERR)
+            {
+               if( getQuitProcess()) 
+               {
+                  //If the IndiConnection has set 'quitProces' but no other shutdown
+                  //has been issued then we record this as a lost connection.
+                  if(!m_shutdown) m_connectionLost = true;
+                  break;
+               }
+               else continue;
+            }
+            
             cursStat(1);
 
             if(nch == 27)

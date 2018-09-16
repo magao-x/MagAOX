@@ -14,8 +14,9 @@ int main()
    int ch;
 
    initscr();
-   cbreak();
+   
    raw();    /* Line buffering disabled*/
+   halfdelay(10); //We use a 1 second timeout to check for connection loss.
    keypad(stdscr, TRUE); /* We get F1, 2 etc...*/
 
    noecho(); /* Don't echo() while we do getch */
@@ -46,6 +47,12 @@ int main()
    //Now main event loop
    while((ch = wgetch(ci.w_interactWin)) != 'q')
    {
+      if(ch == ERR)
+      {
+         if( ci.getQuitProcess() || ci.m_shutdown) break;
+         else continue;
+      }
+      
       int nextX = ci.m_currX;
       int nextY = ci.m_currY;
 
@@ -89,12 +96,19 @@ int main()
       ci.moveCurrent(nextY, nextX);
 
       ci.cursStat(0);
+      
+      if(ci.m_shutdown) break;
    }
 
    ci.shutDown();
 
    endwin();   /* End curses mode */
 
+   if(ci.m_connectionLost)
+   {
+      std::cerr << "\ncursesINDI: lost connection to indiserver.\n\n";
+   }
+   
    return 0;
 
 
