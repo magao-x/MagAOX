@@ -26,6 +26,10 @@ namespace MagAOX
       class sysMonitor : public MagAOXApp<> {
 
       protected:
+      	int m_warningCoreTemp;
+      	int m_criticalCoreTemp;
+      	int m_warningDiskTemp;
+      	int m_criticalDiskTemp;
 
 
       public:
@@ -76,12 +80,18 @@ namespace MagAOX
 
       void sysMonitor::setupConfig()
       {
-
+      	config.add("warningCoreTemp", "", "warningCoreTemp", mx::argType::Required, "", "warningCoreTemp", false, "int", "The warning temperature for CPU cores.");
+   		config.add("criticalCoreTemp", "", "criticalCoreTemp", mx::argType::Required, "", "criticalCoreTemp", false, "int", "The critical temperature for CPU cores.");
+		config.add("warningDiskTemp", "", "warningDiskTemp", mx::argType::Required, "", "warningDiskTemp", false, "int", "The warning temperature for the disk.");
+      	config.add("criticalDiskTemp", "", "criticalDiskTemp", mx::argType::Required, "", "criticalDiskTemp", false, "int", "The critical temperature for disk.");
       }
 
       void sysMonitor::loadConfig()
       {
-
+      	config(m_warningCoreTemp, "warningCoreTemp");
+   		config(m_criticalCoreTemp, "criticalCoreTemp");
+		config(m_warningDiskTemp, "warningDiskTemp");
+		config(m_criticalDiskTemp, "criticalDiskTemp");
       }
 
       int sysMonitor::appStartup()
@@ -91,39 +101,37 @@ namespace MagAOX
 
       int sysMonitor::appLogic()
       {
+         std::cout << m_warningCoreTemp << " " << m_criticalCoreTemp << " " << m_warningDiskTemp << " " << m_criticalDiskTemp << std::endl;
          std::vector<float> coreTemps;
          int rvCPUTemp = findCPUTemperatures(coreTemps);
          for (auto i: coreTemps)
-            std::cout << "Core temp " << i << ' ';
+            std::cout << "Core temps: " << i << ' ';
          std::cout << std::endl;
          criticalCoreTemperature(coreTemps);
 
          std::vector<float> cpu_core_loads;
          int rvCPULoad = findCPULoads(cpu_core_loads);
          for (auto i: cpu_core_loads)
-            std::cout << "CPU Load " << i << ' ';
+            std::cout << "CPU loads: " << i << ' ';
          std::cout << std::endl;
 
          std::vector<float> diskTemp;
          int rvDiskTemp = findDiskTemperature(diskTemp);
          for (auto i: diskTemp)
-            std::cout << "Disk temp " << i << ' ';
+            std::cout << "Disk temps: " << i << ' ';
          std::cout << std::endl;
          criticalDiskTemperature(diskTemp);
 
          float rootUsage = 0, dataUsage = 0, bootUsage = 0;
          int rvDiskUsage = findDiskUsage(rootUsage, dataUsage, bootUsage);
-         if (rootUsage == 0)
-         {
-          
-         }
-         std::cout << "/ usage " << rootUsage << std::endl;
-         std::cout << "/data usage " << dataUsage << std::endl;
-         std::cout << "/boot usage " << bootUsage << std::endl;
+
+         std::cout << "/ usage: " << rootUsage << std::endl;
+         std::cout << "/data usage: " << dataUsage << std::endl;
+         std::cout << "/boot usage: " << bootUsage << std::endl;
 
          float ramUsage = 0;
          int rvRamUsage = findRamUsage(ramUsage);
-         std::cout << "Ram usage " << ramUsage << std::endl;
+         std::cout << "Ram usage: " << ramUsage << std::endl;
          
          return 0;
       }
