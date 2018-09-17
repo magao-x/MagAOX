@@ -10,8 +10,8 @@
 #
 ###################################################
 
-SELF_DIR := $(dir $(lastword $(MAKEFILE_LIST)))
--include $(SELF_DIR)../local/Common.mk
+SELF_DIR := $(abspath $(dir $(lastword $(MAKEFILE_LIST))))
+-include $(SELF_DIR)/../local/common.mk
 
 UNAME ?= $(shell uname)
 ifeq ($(UNAME),Darwin)
@@ -21,19 +21,12 @@ else
 	CFLAGS += -D_XOPEN_SOURCE=700
 	CXXFLAGS += -D_XOPEN_SOURCE=700
 endif
-#PREFIX ?= /opt/MagAOX   #-- now set in local/config.mk
-#BIN_PATH ?= $(PREFIX)/bin #-- now set in local/config.mk
 
 LIB_PATH ?= $(PREFIX)/lib
 INCLUDE_PATH ?= $(PREFIX)/include
 LIB_SOFA ?= $(LIB_PATH)/libsofa_c.a
-ARFLAGS ?= rvs
 
-MXLIB_PREFIX ?= $(HOME)
-MXLIB_LIB_PATH ?= $(MXLIB_PREFIX)/lib
-MXLIB_INCLUDE_PATH ?= $(MXLIB_PREFIX)/include
-
-INCLUDES += -I$(INCLUDE_PATH) -I$(MXLIB_INCLUDE_PATH)
+INCLUDES += -I$(INCLUDE_PATH) -I$(MAGAOX_PREFIX)/source/MagAOX/flatlogs/include
 
 
 ########################################
@@ -45,11 +38,18 @@ OPTIMIZE ?= -O3 -fopenmp -ffast-math
 ## Libraries
 #######################################
 
-#location of liblilxml, libindicommon, mxlib and sofa:
-EXTRA_LDFLAGS ?=  -L$(MXLIB_LIB_PATH)
+EXTRA_LDFLAGS ?=
 
 #the required librarires
-EXTRA_LDLIBS ?= -lmxlib -lsofa_c -lboost_system -lboost_filesystem -ludev -ltelnet $(SELF_DIR)../INDI/libcommon/libcommon.a $(SELF_DIR)../INDI/liblilxml/liblilxml.a
+EXTRA_LDLIBS ?= -lmxlib \
+  -lsofa_c \
+  -lboost_system \
+  -lboost_filesystem \
+  -ludev \
+  -lpthread \
+	-ltelnet $(abspath $(SELF_DIR)/../INDI/libcommon/libcommon.a) \
+	$(abspath $(SELF_DIR)/../INDI/liblilxml/liblilxml.a)
+
 
 #Add rt on Darwin:
 ifneq ($(UNAME),Darwin)
@@ -67,13 +67,12 @@ LDLIBS += -Wl,-rpath,$(LDLIBRPATH)
 ## Compilation and linking
 #######################################
 
-
-CFLAGS += -std=c99 -fPIC $(INCLUDES) $(OPTIMIZE) 
-CXXFLAGS += -std=c++14 -fPIC $(INCLUDES) $(OPTIMIZE) 
+CFLAGS += -std=c99 -fPIC $(INCLUDES) $(OPTIMIZE)
+CXXFLAGS += -std=c++14 -fPIC $(INCLUDES) $(OPTIMIZE)
 
 #This is needed to force use of g++ for linking
 LINK.o = $(LINK.cc)
 
 #Create an implicit rule for pre-compiled headers
 %.hpp.gch: %.hpp
-	$(CXX) $(CXXFLAGS) -I$(SELF_DIR)../flatlogs/include -c $<
+	$(CXX) $(CXXFLAGS) -I$(abspath $(SELF_DIR)/../flatlogs/include) -c $<

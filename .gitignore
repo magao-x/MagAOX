@@ -5,6 +5,8 @@
 *.so
 *html/
 local/
+!local/common.example.mk
+!local/config.example.mk
 **/a.out
 **/tests/*.binlog
 **/.*~
@@ -39,8 +41,10 @@ apps/zaberCtrl/zaberCtrl
 apps/siglentSDG/siglentSDG
 apps/siglentSDG/tests/siglentSDG_test
 
+apps/ttmModulator/ttmModulator
 
 utils/logdump/logdump
+utils/cursesINDI/cursesINDI
 
 #Devel stuff in flatlogs
 flatlogs/src/flatlogcodes

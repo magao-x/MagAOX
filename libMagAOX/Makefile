@@ -16,16 +16,36 @@ INCLUDEDEPS= app/MagAOXApp.hpp \
              common/environment.hpp \
              logger/logFileRaw.hpp \
              logger/logManager.hpp \
+             logger/types/empty_log.hpp \
+             logger/types/flatbuffer_log.hpp \
+             logger/types/fxngen_params.hpp \
+             logger/types/git_state.hpp \
+             logger/types/indidriver_start.hpp \
+             logger/types/indidriver_stop.hpp \
+             logger/types/loop_closed.hpp \
+             logger/types/loop_open.hpp \
+             logger/types/loop_paused.hpp \
+             logger/types/pdu_outlet_state.hpp \
+             logger/types/software_log.hpp \
+             logger/types/state_change.hpp \
+             logger/types/string_log.hpp \
+             logger/types/text_log.hpp \
+             logger/types/user_log.hpp \
              tty/ttyErrors.hpp \
              tty/ttyIOUtils.hpp \
              tty/ttyUSB.hpp \
              tty/usbDevice.hpp
 
-	
-$(TARGET).gch: $(TARGET) $(INCLUDEDEPS)
 
+
+$(TARGET).gch: $(TARGET) $(INCLUDEDEPS) logger/generated/logTypes.hpp
+
+logger/generated/logTypes.hpp: logger/logCodes.dat
+	cd logger; ../../flatlogs/bin/flatlogcodes
 
 .PHONY: clean
 clean:
 	rm -f $(TARGET).gch
 	rm -f *~
+	rm -rf logger/generated
+	rm -rf logger/types/generated

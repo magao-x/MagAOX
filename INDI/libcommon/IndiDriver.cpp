@@ -6,7 +6,6 @@
 
 #include "IndiDriver.hpp"
 #include "System.hpp"
-#include "Config.hpp"
 
 using std::runtime_error;
 using std::string;
@@ -15,8 +14,6 @@ using std::endl;
 using std::vector;
 using pcf::System;
 using pcf::TimeStamp;
-using pcf::Logger;
-using pcf::Config;
 using pcf::IndiConnection;
 using pcf::IndiDriver;
 using pcf::IndiMessage;
@@ -84,60 +81,35 @@ void IndiDriver::setup()
   // Initialize the the last time sent with the current time.
   TimeStamp m_tsLastSent = TimeStamp::now();
 
-  Logger logMsg;
-  logMsg.enableClearAfterLog( true );
-
-  logMsg << Logger::enumInfo << getName() << "::setup: "
-          << "(v " << getVersion() << ") Reading driver settings." << endl;
-
-  Config cfReader;
 
   // If this driver saves any files or data to disk, this is where to do it.
-  m_szDataDirectory = cfReader.get<string>( "data_directory", "" );
+  m_szDataDirectory = "";
 
-  // Make sure this directory exists.
-  if ( m_szDataDirectory.length() > 0 )
-  {
-    try
-    {
-      System::makePath( m_szDataDirectory );
-    }
-    catch ( const runtime_error &excepRuntime )
-    {
-      Logger logMsg;
-      logMsg << Logger::enumError
-             << "Could not make data directory '" << m_szDataDirectory << "': "
-             << excepRuntime.what() << endl;
-    }
-  }
 
   // This is a flag which can be used to fake data or pretend to be
   // connected to hardware. By itself, it does nothing.
-  m_oIsSimulationModeEnabled = cfReader.get<bool>( "simulation_mode", false );
+  m_oIsSimulationModeEnabled = false;
 
   // This is also a flag which does nothing on its own, but can be used to
   // decide whether or not to send an alarm email.
-  m_oIsAlarmModeEnabled = cfReader.get<bool>( "alarm_mode", true );
+  m_oIsAlarmModeEnabled = true;
 
   // This is a comma-separated list of email recipients which will receive
   // an email when a alarm is logged.
-  m_szEmailList = cfReader.get<string>( "alarm_email_list", "" );
+  m_szEmailList = "";
 
   // What is our alarm interval? This is the same if we are in
   // simulation mode or not. The default is one day (1440 minutes).
   // This is the maximun speed that alarms will go out.
-  m_uiAlarmInterval = cfReader.get<unsigned int>( "alarm_interval", 1440 );
+  m_uiAlarmInterval = 1440;
 
   m_oIsAlarmActive = false;
   m_uiAlarmInterval = 1440; // Once a day (every 1440 minutes)
 
-  logMsg << Logger::enumInfo << getName() << "::setup: "
-          << "Finished reading driver settings." << endl;
 
   // This will not be set to true until at least one 'getProperties' has
   // been received, or the user of this class sets it manually.
   m_oIsResponseModeEnabled = false;
-  logMsg << Logger::enumInfo << "Response mode is (initially): OFF" << endl;
 
   // Create and initialize the uptime message.
   m_ipUpTime = IndiProperty( IndiProperty::Number, getName(), "Version" );
@@ -183,8 +155,6 @@ void IndiDriver::update()
 void IndiDriver::dispatch( const IndiMessage::Type &tType,
                            const IndiProperty &ipDispatch )
 {
-  Logger logMsg;
-  logMsg.enableClearAfterLog( true );
 
   // Make sure the client knows about the basic properties the driver supports.
   if ( tType == IndiMessage::GetProperties )
@@ -211,7 +181,6 @@ void IndiDriver::dispatch( const IndiMessage::Type &tType,
     case IndiMessage::SetProperty:
       handleSetProperty( ipDispatch ); break;
     default:
-      logMsg << Logger::Error << "Driver unable to dispatch INDI message." << endl;
       break;
   }
 }
@@ -254,8 +223,6 @@ bool IndiDriver::handleDriverGetProperties( const IndiProperty &ipRecv )
   if ( isResponseModeEnabled() == false )
   {
     enableResponseMode( true );
-    Logger logMsg;
-    logMsg << Logger::Info << "Response mode is now ON." << endl;
   }
 
   IndiElement::SwitchStateType swActive = isActive() ?
@@ -293,8 +260,7 @@ bool IndiDriver::handleDriverNewProperty( const IndiProperty &ipRecv )
   {
     if ( ipRecv.find( "value" ) == false )
     {
-      Logger logMsg;
-      logMsg << "NEW: Cannot find 'value' in 'enable_active' property." << endl;
+
     }
     else if ( ipRecv["value"].getSwitchState() == IndiElement::On )
     {

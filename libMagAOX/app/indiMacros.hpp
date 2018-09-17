@@ -144,7 +144,7 @@
   *
   * \ingroup indi
   */
-#define REG_INDI_NEWPROP(prop, propName, type, perm, state) registerIndiPropertyNew( prop, propName, type, perm, state, INDI_NEWCALLBACK(prop));
+#define REG_INDI_NEWPROP(prop, propName, type) registerIndiPropertyNew( prop, propName, type, pcf::IndiProperty::ReadWrite, pcf::IndiProperty::Idle, INDI_NEWCALLBACK(prop));
 
 /// Register a NEW INDI property with the class, with no callback.
 /** Is a wrapper for MagAOXApp::registerIndiPropertyNew with  NULL callback.
@@ -157,7 +157,7 @@
   *
   * \ingroup indi
   */
-#define REG_INDI_NEWPROP_NOCB(prop, propName, type, perm, state) registerIndiPropertyNew( prop, propName, type, perm, state, 0);
+#define REG_INDI_NEWPROP_NOCB(prop, propName, type) registerIndiPropertyNew( prop, propName, type, pcf::IndiProperty::ReadOnly, pcf::IndiProperty::Idle, 0);
 
 /// Register a SET INDI property with the class, using the standard callback name.
 /** Is a wrapper for MagAOXApp::registerIndiPropertySet.

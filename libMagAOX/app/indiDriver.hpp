@@ -12,6 +12,8 @@
 #include "../../INDI/libcommon/IndiDriver.hpp"
 #include "../../INDI/libcommon/IndiElement.hpp"
 
+#include "../../INDI/libcommon/IndiClient.hpp"
+
 #include "MagAOXApp.hpp"
 
 namespace MagAOX
@@ -23,13 +25,27 @@ template<class _parentT>
 class indiDriver : public pcf::IndiDriver
 {
 public:
+
+   ///The parent MagAOX app.
    typedef _parentT parentT;
 
 protected:
 
+   ///This objects parent class
    parentT * m_parent {nullptr};
 
+   ///An INDI Client is used to send commands to other drivers.
+   pcf::IndiClient * m_outGoing {nullptr};
+
+   ///The IP address of the server for the INDI Client connection
+   std::string m_serverIPAddress {"127.0.01"};
+
+   ///The port of the server for the INDI Client connection
+   int m_serverPort {7624};
+
 private:
+
+   /// Flag to hold the status of this connection.
    bool m_good {true};
 
 public:
@@ -45,6 +61,9 @@ public:
                const std::string &szProtocolVersion
              );
 
+   /// D'tor, deletes the IndiClient pointer.
+   ~indiDriver();
+
    /// Get the value of the good flag.
    /**
      * \returns the value of m_good, true or false.
@@ -53,14 +72,26 @@ public:
 
    // override callbacks
    virtual void handleDefProperty( const pcf::IndiProperty &ipRecv );
-   
+
    virtual void handleGetProperties( const pcf::IndiProperty &ipRecv );
 
    virtual void handleNewProperty( const pcf::IndiProperty &ipRecv );
 
    virtual void handleSetProperty( const pcf::IndiProperty &ipRecv );
 
+   /// Define the execute virtual function.  This runs the processIndiRequests function in this thread, and does not return.
    virtual void execute(void);
+
+   /// Define the update virt. func. here so the uptime message isn't sent
+   virtual void update();
+
+   /// Send a newProperty command to another INDI driver
+   /** Uses the IndiClient member of this class, which is initialized the first time if necessary.
+     *
+     * \returns 0 on success
+     * \returns -1 on any errors (which are logged).
+     */
+   virtual int sendNewProperty( const pcf::IndiProperty &ipRecv );
 
 };
 
@@ -92,9 +123,28 @@ indiDriver<parentT>::indiDriver ( parentT * parent,
       return;
    }
    setOutputFd(fd);
+   
+   // Open the ctrl fifo and write a single byte to it to trigger a restart
+   // of the xindidriver process.
+   // This allows indiserver to refresh everything.
+   errno = 0;
+   fd = open( parent->driverCtrlName().c_str(), O_RDWR);
+   if(fd < 0)
+   {
+      m_good = false;
+      return;
+   }
+   char c = 0;
+   write(fd, &c, 1);
+   close(fd);
 }
 
+template<class parentT>
+indiDriver<parentT>::~indiDriver()
+{
+   if(m_outGoing) delete m_outGoing;
 
+}
 template<class parentT>
 void indiDriver<parentT>::handleDefProperty( const pcf::IndiProperty &ipRecv )
 {
@@ -123,6 +173,47 @@ template<class parentT>
 void indiDriver<parentT>::execute()
 {
    processIndiRequests(false);
+}
+
+template<class parentT>
+void  indiDriver<parentT>::update()
+{
+   return;
+}
+
+template<class parentT>
+int  indiDriver<parentT>::sendNewProperty( const pcf::IndiProperty &ipRecv )
+{
+   if( m_outGoing == nullptr)
+   {
+      try
+      {
+         m_outGoing = new pcf::IndiClient(m_serverIPAddress, m_serverPort);
+      }
+      catch(...)
+      {
+         parentT::template log<logger::software_error>({__FILE__, __LINE__, "Exception thrown while creating IndiClient connection"});
+         return -1;
+      }
+
+      if(m_outGoing == nullptr)
+      {
+         parentT::template log<logger::software_error>({__FILE__, __LINE__, "Failed to allocate IndiClient connection"});
+         return -1;
+      }
+   }
+
+   try
+   {
+      m_outGoing->sendNewProperty(ipRecv);
+   }
+   catch(...)
+   {
+      parentT::template log<logger::software_error>({__FILE__, __LINE__, "Exception from IndiClient::sendNewProperty"});
+      return -1;
+   }
+
+   return 0;
 }
 
 } //namespace app

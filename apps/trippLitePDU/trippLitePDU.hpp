@@ -97,7 +97,6 @@ protected:
      * \returns -1 on error
      */
    int changeOutletState( const pcf::IndiProperty &ipRecv, ///< [in] the received INDI property
-                          pcf::IndiProperty & indiOutlet,  ///< [in] the INDI property corresponding to the outlet.
                           uint8_t onum ///< [in] the number of the outlet (0-7)
                         );
 
@@ -151,40 +150,40 @@ void trippLitePDU::loadConfig()
 int trippLitePDU::appStartup()
 {
    // set up the  INDI properties
-   REG_INDI_NEWPROP_NOCB(m_indiStatus, "status", pcf::IndiProperty::Text, pcf::IndiProperty::ReadOnly, pcf::IndiProperty::Idle);
+   REG_INDI_NEWPROP_NOCB(m_indiStatus, "status", pcf::IndiProperty::Text);
    m_indiStatus.add (pcf::IndiElement("value"));
 
-   REG_INDI_NEWPROP_NOCB(m_indiFrequency, "frequency", pcf::IndiProperty::Number, pcf::IndiProperty::ReadOnly, pcf::IndiProperty::Idle);
+   REG_INDI_NEWPROP_NOCB(m_indiFrequency, "frequency", pcf::IndiProperty::Number);
    m_indiFrequency.add (pcf::IndiElement("value"));
 
-   REG_INDI_NEWPROP_NOCB(m_indiVoltage, "voltage", pcf::IndiProperty::Number, pcf::IndiProperty::ReadOnly, pcf::IndiProperty::Idle);
+   REG_INDI_NEWPROP_NOCB(m_indiVoltage, "voltage", pcf::IndiProperty::Number);
    m_indiVoltage.add (pcf::IndiElement("value"));
 
-   REG_INDI_NEWPROP_NOCB(m_indiCurrent, "current", pcf::IndiProperty::Number, pcf::IndiProperty::ReadOnly, pcf::IndiProperty::Idle);
+   REG_INDI_NEWPROP_NOCB(m_indiCurrent, "current", pcf::IndiProperty::Number);
    m_indiCurrent.add (pcf::IndiElement("value"));
 
-   REG_INDI_NEWPROP(m_indiOutlet1, "outlet1", pcf::IndiProperty::Text, pcf::IndiProperty::ReadWrite, pcf::IndiProperty::Idle);
+   REG_INDI_NEWPROP(m_indiOutlet1, "outlet1", pcf::IndiProperty::Text);
    m_indiOutlet1.add (pcf::IndiElement("state"));
 
-   REG_INDI_NEWPROP(m_indiOutlet2, "outlet2", pcf::IndiProperty::Text, pcf::IndiProperty::ReadWrite, pcf::IndiProperty::Idle);
+   REG_INDI_NEWPROP(m_indiOutlet2, "outlet2", pcf::IndiProperty::Text);
    m_indiOutlet2.add (pcf::IndiElement("state"));
 
-   REG_INDI_NEWPROP(m_indiOutlet3, "outlet3", pcf::IndiProperty::Text, pcf::IndiProperty::ReadWrite, pcf::IndiProperty::Idle);
+   REG_INDI_NEWPROP(m_indiOutlet3, "outlet3", pcf::IndiProperty::Text);
    m_indiOutlet3.add (pcf::IndiElement("state"));
 
-   REG_INDI_NEWPROP(m_indiOutlet4, "outlet4", pcf::IndiProperty::Text, pcf::IndiProperty::ReadWrite, pcf::IndiProperty::Idle);
+   REG_INDI_NEWPROP(m_indiOutlet4, "outlet4", pcf::IndiProperty::Text);
    m_indiOutlet4.add (pcf::IndiElement("state"));
 
-   REG_INDI_NEWPROP(m_indiOutlet5, "outlet5", pcf::IndiProperty::Text, pcf::IndiProperty::ReadWrite, pcf::IndiProperty::Idle);
+   REG_INDI_NEWPROP(m_indiOutlet5, "outlet5", pcf::IndiProperty::Text);
    m_indiOutlet5.add (pcf::IndiElement("state"));
 
-   REG_INDI_NEWPROP(m_indiOutlet6, "outlet6", pcf::IndiProperty::Text, pcf::IndiProperty::ReadWrite, pcf::IndiProperty::Idle);
+   REG_INDI_NEWPROP(m_indiOutlet6, "outlet6", pcf::IndiProperty::Text);
    m_indiOutlet6.add (pcf::IndiElement("state"));
 
-   REG_INDI_NEWPROP(m_indiOutlet7, "outlet7", pcf::IndiProperty::Text, pcf::IndiProperty::ReadWrite, pcf::IndiProperty::Idle);
+   REG_INDI_NEWPROP(m_indiOutlet7, "outlet7", pcf::IndiProperty::Text);
    m_indiOutlet7.add (pcf::IndiElement("state"));
 
-   REG_INDI_NEWPROP(m_indiOutlet8, "outlet8", pcf::IndiProperty::Text, pcf::IndiProperty::ReadWrite, pcf::IndiProperty::Idle);
+   REG_INDI_NEWPROP(m_indiOutlet8, "outlet8", pcf::IndiProperty::Text);
    m_indiOutlet8.add (pcf::IndiElement("state"));
 
    state(stateCodes::NOTCONNECTED);
@@ -419,10 +418,10 @@ int trippLitePDU::parsePDUStatus( std::string & strRead )
 }
 
 int trippLitePDU::changeOutletState( const pcf::IndiProperty &ipRecv,
-                                     pcf::IndiProperty & indiOutlet,
                                      uint8_t onum
                                    )
 {
+
    std::lock_guard<std::mutex> guard(m_indiMutex);  //Lock the mutex before doing anything
 
       
@@ -437,8 +436,11 @@ int trippLitePDU::changeOutletState( const pcf::IndiProperty &ipRecv,
       std::string strRead;
       int rv = m_telnetConn.writeRead( cmd, true, m_writeTimeOut, m_readTimeOut);
 
-      strRead = m_telnetConn.m_strRead;
-
+      if(rv < 0)
+      {
+         log<software_error>({__FILE__, __LINE__, 0, rv, ""});
+      }
+      
       uint8_t lonum = onum + 1;   //Do this without narrowing
       log<pdu_outlet_state>({ lonum, 1});
    }
@@ -450,8 +452,12 @@ int trippLitePDU::changeOutletState( const pcf::IndiProperty &ipRecv,
 
       std::string strRead;
       int rv = m_telnetConn.writeRead( cmd, true, m_writeTimeOut, m_readTimeOut);
-      strRead = m_telnetConn.m_strRead;
-
+      
+      if(rv < 0)
+      {
+         log<software_error>({__FILE__, __LINE__, 0, rv, ""});
+      }
+      
       uint8_t lonum = onum + 1; //Do this without narrowing
       log<pdu_outlet_state>({ lonum, 0});
    }
@@ -467,7 +473,7 @@ INDI_NEWCALLBACK_DEFN(trippLitePDU, m_indiOutlet1)(const pcf::IndiProperty &ipRe
 {
    if (ipRecv.getName() == m_indiOutlet1.getName())
    {
-      return changeOutletState(ipRecv, m_indiOutlet1, 0);
+      return changeOutletState(ipRecv, 0);
    }
    return -1;
 }
@@ -476,7 +482,7 @@ INDI_NEWCALLBACK_DEFN(trippLitePDU, m_indiOutlet2)(const pcf::IndiProperty &ipRe
 {
    if (ipRecv.getName() == m_indiOutlet2.getName())
    {
-      return changeOutletState(ipRecv, m_indiOutlet2, 1);
+      return changeOutletState(ipRecv, 1);
    }
    return -1;
 }
@@ -485,7 +491,7 @@ INDI_NEWCALLBACK_DEFN(trippLitePDU, m_indiOutlet3)(const pcf::IndiProperty &ipRe
 {
    if (ipRecv.getName() == m_indiOutlet3.getName())
    {
-      return changeOutletState(ipRecv, m_indiOutlet3, 2);
+      return changeOutletState(ipRecv, 2);
    }
    return -1;
 }
@@ -494,7 +500,7 @@ INDI_NEWCALLBACK_DEFN(trippLitePDU, m_indiOutlet4)(const pcf::IndiProperty &ipRe
 {
    if (ipRecv.getName() == m_indiOutlet4.getName())
    {
-      return changeOutletState(ipRecv, m_indiOutlet4, 3);
+      return changeOutletState(ipRecv, 3);
    }
    return -1;
 }
@@ -503,7 +509,7 @@ INDI_NEWCALLBACK_DEFN(trippLitePDU, m_indiOutlet5)(const pcf::IndiProperty &ipRe
 {
    if (ipRecv.getName() == m_indiOutlet5.getName())
    {
-      return changeOutletState(ipRecv, m_indiOutlet5, 4);
+      return changeOutletState(ipRecv, 4);
    }
    return -1;
 }
@@ -512,7 +518,7 @@ INDI_NEWCALLBACK_DEFN(trippLitePDU, m_indiOutlet6)(const pcf::IndiProperty &ipRe
 {
    if (ipRecv.getName() == m_indiOutlet6.getName())
    {
-      return changeOutletState(ipRecv, m_indiOutlet6, 5);
+      return changeOutletState(ipRecv, 5);
    }
    return -1;
 }
@@ -521,7 +527,7 @@ INDI_NEWCALLBACK_DEFN(trippLitePDU, m_indiOutlet7)(const pcf::IndiProperty &ipRe
 {
    if (ipRecv.getName() == m_indiOutlet7.getName())
    {
-      return changeOutletState(ipRecv, m_indiOutlet7, 6);
+      return changeOutletState(ipRecv, 6);
    }
    return -1;
 }
@@ -530,7 +536,7 @@ INDI_NEWCALLBACK_DEFN(trippLitePDU, m_indiOutlet8)(const pcf::IndiProperty &ipRe
 {
    if (ipRecv.getName() == m_indiOutlet8.getName())
    {
-      return changeOutletState(ipRecv, m_indiOutlet8, 7);
+      return changeOutletState(ipRecv, 7);
    }
    return -1;
 }

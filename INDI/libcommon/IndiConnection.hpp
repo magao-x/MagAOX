@@ -15,7 +15,7 @@
 #include "Thread.hpp"
 #include "MutexLock.hpp"
 #include "TimeStamp.hpp"
-#include "ConfigFile.hpp"
+//#include "ConfigFile.hpp"
 #include "IndiXmlParser.hpp"
 #include "IndiMessage.hpp"
 #include "IndiProperty.hpp"
@@ -124,6 +124,11 @@ class IndiConnection : public pcf::Thread
     /// This will cause the process to quit, the same as if a ctrl-c was sent.
     void quitProcess();
 
+    static bool getQuitProcess() 
+    {
+       return sm_oQuitProcess;
+    }
+    
   // Helper functions.
   protected:
     /// 'pthread_create' needs a static function to get the thread going.

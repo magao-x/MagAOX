@@ -6,15 +6,13 @@
 
 #include "IndiClient.hpp"
 #include "SystemSocket.hpp"
-#include "Config.hpp"
+//#include "Config.hpp"
 
 using std::runtime_error;
 using std::string;
 using std::endl;
 using std::vector;
 using pcf::Thread;
-using pcf::Logger;
-using pcf::Config;
 using pcf::IndiClient;
 using pcf::IndiMessage;
 using pcf::IndiProperty;
@@ -22,20 +20,25 @@ using pcf::IndiProperty;
 ////////////////////////////////////////////////////////////////////////////////
 /// Standard constructor.
 
-IndiClient::IndiClient()
+IndiClient::IndiClient( const string & szIPAddr,
+                        const int & port
+                      )
   : IndiConnection()
 {
-  setup();
+  setup(szIPAddr, port);
 }
 
 ////////////////////////////////////////////////////////////////////////////////
 
 IndiClient::IndiClient( const string &szName,
                         const string &szVersion,
-                        const string &szProtocolVersion )
+                        const string &szProtocolVersion,
+                        const string & szIPAddr,
+                        const int & port
+                      )
     : IndiConnection( szName, szVersion, szProtocolVersion )
 {
-  setup();
+  setup(szIPAddr, port);
 }
 
 ////////////////////////////////////////////////////////////////////////////////
@@ -79,7 +82,9 @@ IndiClient::~IndiClient()
 /// \brief IndiClient::setup Sets up file descriptors and other things that
 /// need to be initialized at construction time.
 
-void IndiClient::setup()
+void IndiClient::setup( const string & szIPAddr,
+                        const int & port
+                      )
 {
   try
   {
@@ -88,30 +93,16 @@ void IndiClient::setup()
     setInputFd( -1 ); // STDIN_FILENO;
     setOutputFd( -1 ); // STDOUT_FILENO;
 
-    Logger logMsg;
-    logMsg.enableClearAfterLog( true );
-
-    logMsg << Logger::enumInfo << getName() << "::setup: "
-           << " (v " << getVersion() << ")." << endl;
-
     if ( m_socClient.isValid() == true )
     {
       m_socClient.close();
       Thread::msleep( 10 );
     }
 
-    Config cfReader;
-    m_socClient = SystemSocket( SystemSocket::Stream,
-                                cfReader.get<int>( "indi_server_port", 9752 ),
-                                cfReader.get<string>( "indi_server_ip", "127.0.0.1" ) );
-
-    logMsg << Logger::Info << "    Read & set the client configuration." << endl;
+    //Config cfReader;
+    m_socClient = SystemSocket( SystemSocket::Stream, port, szIPAddr.c_str());
 
     m_socClient.connect();
-
-    logMsg << Logger::enumInfo
-           << "    Connected to server at " << m_socClient.getHost() << ":"
-           << m_socClient.getPort() << endl;
 
     // Make sure we have a limit on how long we wait for a response.
     //m_socClient.setRecvTimeout( 1000 );
@@ -126,20 +117,15 @@ void IndiClient::setup()
     // Assign the file descriptor to the member variables.
     setInputFd( m_socClient.getFd() );
     setOutputFd( m_socClient.getFd() );
+
   }
   catch ( const SystemSocket::Error &err )
   {
-    Logger logMsg;
-    logMsg << Logger::enumError
-           << "Cannot connect to " << m_socClient.getHost() << ":"
-           << m_socClient.getPort() << " '" << err.what() << "'." << endl;
     m_socClient.close();
     Thread::msleep( 10 );
   }
   catch ( const runtime_error &excepRuntime )
   {
-    Logger logMsg;
-    logMsg << Logger::enumError << excepRuntime.what() << endl;
     m_socClient.close();
     Thread::msleep( 10 );
   }
@@ -162,9 +148,6 @@ void IndiClient::update()
 void IndiClient::dispatch( const IndiMessage::Type &tType,
                            const IndiProperty &ipDispatch )
 {
-  Logger logMsg;
-  logMsg.enableClearAfterLog( true );
-
   // Decide what we should do based on the type of the message.
   switch ( tType )
   {
@@ -179,7 +162,6 @@ void IndiClient::dispatch( const IndiMessage::Type &tType,
     case IndiMessage::SetProperty:
       handleSetProperty( ipDispatch ); break;
     default:
-      logMsg << Logger::Error << "Client unable to dispatch INDI message." << endl;
       break;
   }
 }

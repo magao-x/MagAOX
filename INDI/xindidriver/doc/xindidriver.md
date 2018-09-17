@@ -55,6 +55,8 @@ If at startup the FIFOs do not exist, the program will patiently wait for them t
 
 The presence of a process listening-on or writing-to the FIFOs has no effect.
 
+A third fifo, `drivername.ctrl` is used for signaling `xindidriver` that the controller has restarted.  Anything written to this FIFO will cause `xindidriver` to exit, and it will then be restarted by `indiserver`.  This is done to keep all snoops, etc, up to date and fresh.
+
 
 OPTIONS []()
 ------------

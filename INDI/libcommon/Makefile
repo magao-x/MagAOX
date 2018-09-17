@@ -9,18 +9,16 @@
 
 
 #Get MagAO-X build settings
-SELF_DIR := $(dir $(lastword $(MAKEFILE_LIST)))
+SELF_DIR := $(abspath $(dir $(lastword $(MAKEFILE_LIST))))
 include $(SELF_DIR)/../../Make/common.mk
 
 
 
 all: libcommon.a
 
-	
+
 SRCS = \
 	 Cmd.cpp \
-	 Config.cpp \
-	 ConfigFile.cpp \
 	 Fits.cpp \
 	 IndiConnection.cpp \
 	 IndiClient.cpp \
@@ -38,6 +36,9 @@ SRCS = \
 	 TCPListener.cpp \
 	 Thread.cpp \
 	 TimeStamp.cpp
+
+#	 Config.cpp \
+#	 ConfigFile.cpp \
 
 OBJS = $(SRCS:.cpp=.o)
 

@@ -1,12 +1,14 @@
 #these are the log codes
-git_state                0
-text_log                 10
-user_log                 11
-state_change             20
-software_log             50
-indidriver_start         140
-indidriver_stop          141
-loop_closed              1001
-loop_paused              1002
-loop_open                1003
-pdu_outlet_state         12001
+git_state                0        git_state
+text_log                 10       string_log
+user_log                 11       string_log
+state_change             20       state_change
+software_log             50       software_log
+indidriver_start         140      empty_log
+indidriver_stop          141      empty_log
+loop_closed              1001     empty_log
+loop_paused              1002     empty_log
+loop_open                1003     empty_log
+pdu_outlet_state         12001    pdu_outlet_state
+fxngen_params            12100    fxngen_params
+

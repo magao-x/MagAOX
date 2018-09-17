@@ -18,14 +18,14 @@ namespace app
      * \returns 0 on success
      * \returns \<0 on error, with value indicating location of error.
      */
-int parseOUTP( int & channel,
-               int & output,
-               const std::string & strRead
+int parseOUTP( int & channel, ///< [out] the channel indicated by this response.
+               int & output, ///< [out] the output status of the channel, ON or OFF
+               const std::string & strRead ///< [in] string containing the device response
              )
 {
    std::vector<std::string> v;
 
-   mx::ioutils::parseStringVector(v, strRead, ":, ");
+   mx::ioutils::parseStringVector(v, strRead, ":, \n");
 
    channel = -1;
    output = -1;
@@ -45,6 +45,8 @@ int parseOUTP( int & channel,
    return 0;
 }
 
+#define SDG_PARSEERR_WVTP (-6)
+
 /// Parse the SDG response to the BSWV query
 /**
   * Example: C1:BSWV WVTP,SINE,FRQ,10HZ,PERI,0.1S,AMP,2V,AMPVRMS,0.707Vrms,OFST,0V,HLEV,1V,LLEV,-1V,PHSE,0
@@ -52,7 +54,7 @@ int parseOUTP( int & channel,
   * \returns 0 on success
   * \returns \<0 on error, with value indicating location of error.
   */
-int parseBSWV( int & channel,
+int parseBSWV( int & channel, ///< [out] the channel indicated by this response.
                std::string & wvtp,
                double & freq,
                double & peri,
@@ -62,12 +64,22 @@ int parseBSWV( int & channel,
                double & hlev,
                double & llev,
                double & phse,
-               const std::string & strRead
+               const std::string & strRead ///< [in] string containing the device response
              )
 {
+   channel = 0;
+   freq = 0;
+   peri = 0;
+   amp = 0;
+   ampvrms = 0;
+   ofst = 0;
+   hlev = 0;
+   llev = 0;
+   phse = 0;
+   
    std::vector<std::string> v;
 
-   mx::ioutils::parseStringVector(v, strRead, ":, ");
+   mx::ioutils::parseStringVector(v, strRead, ":, \n");
 
    if(v.size() < 4) return -1; //We need to get to at least the WVTP parameter.
 
@@ -80,30 +92,43 @@ int parseBSWV( int & channel,
    if(v[2] != "WVTP") return -5;
    wvtp = v[3];
 
-   if(wvtp != "SINE") return -6; //We don't actually know how to handle anything else.
+   if(wvtp != "SINE" && wvtp != "DC") return SDG_PARSEERR_WVTP; //We don't actually know how to handle anything else.
    
-   if(v[4] != "FRQ") return -7;
+   if(wvtp == "DC")
+   {
+      if(v.size() < 6) return -7;
+      
+      if(v[4] != "OFST") return -8;
+      
+      ofst = mx::ioutils::convertFromString<double>(v[5]);
+      
+      return 0;
+   }
+   
+   if(v.size() < 20) return -9;
+   
+   if(v[4] != "FRQ") return -10;
    freq = mx::ioutils::convertFromString<double>(v[5]);
 
-   if(v[6] != "PERI") return -8;
+   if(v[6] != "PERI") return -11;
    peri = mx::ioutils::convertFromString<double>(v[7]);
 
-   if(v[8] != "AMP") return -9;
+   if(v[8] != "AMP") return -12;
    amp = mx::ioutils::convertFromString<double>(v[9]);
 
-   if(v[10] != "AMPVRMS") return -10;
+   if(v[10] != "AMPVRMS") return -13;
    ampvrms = mx::ioutils::convertFromString<double>(v[11]);
 
-   if(v[12] != "OFST") return -11;
+   if(v[12] != "OFST") return -14;
    ofst = mx::ioutils::convertFromString<double>(v[13]);
 
-   if(v[14] != "HLEV") return -12;
+   if(v[14] != "HLEV") return -15;
    hlev = mx::ioutils::convertFromString<double>(v[15]);
 
-   if(v[16] != "LLEV") return -13;
+   if(v[16] != "LLEV") return -16;
    llev = mx::ioutils::convertFromString<double>(v[17]);
 
-   if(v[18] != "PHSE") return -14;
+   if(v[18] != "PHSE") return -17;
    phse = mx::ioutils::convertFromString<double>(v[19]);
 
    return 0;
@@ -118,14 +143,16 @@ int parseBSWV( int & channel,
   * \returns 0 on success
   * \returns \<0 on error, with value indicating location of error.
   */
-int parseMDWV( int & channel,
-               std::string & state,
-               const std::string & strRead
+int parseMDWV( int & channel, ///< [out] the channel indicated by this response.
+               std::string & state, ///< [out] the MDWV state of the channel, ON or OFF
+               const std::string & strRead ///< [in] string containing the device response
              )
 {
+   channel = 0;
+
    std::vector<std::string> v;
 
-   mx::ioutils::parseStringVector(v, strRead, ":, ");
+   mx::ioutils::parseStringVector(v, strRead, ":, \n");
 
 
    if(v.size() < 4) return -1;
@@ -150,14 +177,16 @@ int parseMDWV( int & channel,
   * \returns 0 on success
   * \returns \<0 on error, with value indicating location of error.
   */
-int parseSWWV( int & channel,
-               std::string & state,
-               const std::string & strRead
+int parseSWWV( int & channel, ///< [out] the channel indicated by this response.
+               std::string & state, ///< [out] the SWWV state of the channel, ON or OFF
+               const std::string & strRead ///< [in] string containing the device response
              )
 {
+   channel = 0;
+   
    std::vector<std::string> v;
 
-   mx::ioutils::parseStringVector(v, strRead, ":, ");
+   mx::ioutils::parseStringVector(v, strRead, ":, \n");
 
 
    if(v.size() < 4) return -1;
@@ -182,14 +211,16 @@ int parseSWWV( int & channel,
   * \returns 0 on success
   * \returns \<0 on error, with value indicating location of error.
   */
-int parseBTWV( int & channel,
-               std::string & state,
-               const std::string & strRead
+int parseBTWV( int & channel, ///< [out] the channel indicated by this response.
+               std::string & state, ///< [out] the BTWV state of the channel, ON or OFF
+               const std::string & strRead ///< [in] string containing the device response
              )
 {
+   channel = 0;
+   
    std::vector<std::string> v;
 
-   mx::ioutils::parseStringVector(v, strRead, ":, ");
+   mx::ioutils::parseStringVector(v, strRead, ":, \n");
 
 
    if(v.size() < 4) return -1;
@@ -213,14 +244,17 @@ int parseBTWV( int & channel,
   * \returns 0 on success
   * \returns \<0 on error, with value indicating location of error.
   */
-int parseARWV( int & channel,
-               int & index,
-               const std::string & strRead
+int parseARWV( int & channel, ///< [out] the channel indicated by this response.
+               int & index, ///< [out] the ARWV index of the channel.  Should be 0.
+               const std::string & strRead ///< [in] string containing the device response
              )
 {
+   channel = 0;
+   index = -1;
+   
    std::vector<std::string> v;
 
-   mx::ioutils::parseStringVector(v, strRead, ":, ");
+   mx::ioutils::parseStringVector(v, strRead, ":, \n");
 
 
    if(v.size() < 4) return -1;
