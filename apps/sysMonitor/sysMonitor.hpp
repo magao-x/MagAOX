@@ -26,10 +26,10 @@ namespace MagAOX
       class sysMonitor : public MagAOXApp<> {
 
       protected:
-      	int m_warningCoreTemp;
-      	int m_criticalCoreTemp;
-      	int m_warningDiskTemp;
-      	int m_criticalDiskTemp;
+      	int m_warningCoreTemp = 0;
+      	int m_criticalCoreTemp = 0;
+      	int m_warningDiskTemp = 0;
+      	int m_criticalDiskTemp = 0;
 
 
       public:
@@ -101,12 +101,13 @@ namespace MagAOX
 
       int sysMonitor::appLogic()
       {
-         std::cout << m_warningCoreTemp << " " << m_criticalCoreTemp << " " << m_warningDiskTemp << " " << m_criticalDiskTemp << std::endl;
+		 //std::cout << m_warningCoreTemp << " " << m_criticalCoreTemp << " " << m_warningDiskTemp << " " << m_criticalDiskTemp << std::endl;
          std::vector<float> coreTemps;
          int rvCPUTemp = findCPUTemperatures(coreTemps);
          for (auto i: coreTemps)
             std::cout << "Core temps: " << i << ' ';
          std::cout << std::endl;
+
          criticalCoreTemperature(coreTemps);
 
          std::vector<float> cpu_core_loads;
@@ -132,7 +133,7 @@ namespace MagAOX
          float ramUsage = 0;
          int rvRamUsage = findRamUsage(ramUsage);
          std::cout << "Ram usage: " << ramUsage << std::endl;
-         
+         //std::cout << m_warningCoreTemp << " " << m_criticalCoreTemp << " " << m_warningDiskTemp << " " << m_criticalDiskTemp << std::endl;
          return 0;
       }
 
@@ -193,7 +194,44 @@ namespace MagAOX
               return 1;
             }
             
-			      temps = temp;
+			 temps = temp;
+
+			
+			if (m_warningCoreTemp == 0)
+        	{
+        		std::istringstream iss4(line);
+        		std::vector<std::string> tokens4{std::istream_iterator<std::string>{iss4},std::istream_iterator<std::string>{}};
+        		try
+            	{
+            	   	tokens4[5].pop_back();
+            	   	tokens4[5].pop_back();
+            	  	tokens4[5].pop_back();
+            	  	tokens4[5].pop_back();
+            	  	tokens4[5].erase(0,1);
+            		m_warningCoreTemp = std::stof (tokens4[5]);
+           		} catch (const std::invalid_argument& e) {
+              		std::cerr << "Invalid read occuered when parsing CPU temperatures" << std::endl;
+              		return 1;
+            	}
+         	}
+         	if (m_criticalCoreTemp == 0) 
+         	{
+         		std::istringstream iss4(line);
+        		std::vector<std::string> tokens4{std::istream_iterator<std::string>{iss4},std::istream_iterator<std::string>{}};
+        		try
+            	{
+            	    tokens4[8].pop_back();
+            	   	tokens4[8].pop_back();
+            	  	tokens4[8].pop_back();
+            	  	tokens4[8].pop_back();
+            	  	tokens4[8].erase(0,1);
+            	    m_criticalCoreTemp = std::stof (tokens4[8]);
+           		} catch (const std::invalid_argument& e) {
+              		std::cerr << "Invalid read occuered when parsing CPU temperatures" << std::endl;
+              		return 1;
+            	}
+         	}
+
             return 0;
         }
         else 
@@ -336,6 +374,14 @@ namespace MagAOX
                 return 1;
               }
               hdd_temp = tempValue;
+              if (m_warningDiskTemp == 0)
+        	  {
+        		m_warningDiskTemp = tempValue + (.1*tempValue);
+         	  }
+         	  if (m_criticalDiskTemp == 0) 
+         	  {
+         		m_criticalDiskTemp = tempValue + (.2*tempValue);
+         	  }
               return 0;
             }
          }
