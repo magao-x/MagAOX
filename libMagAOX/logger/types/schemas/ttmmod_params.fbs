@@ -1,0 +1,14 @@
+namespace MagAOX.logger;
+
+
+
+table Ttmmod_params_fb
+{
+   modState:uint8;
+   modFreq:double;
+   modRad:double;
+   offset1:double;
+   offset2:double;
+}
+
+root_type Ttmmod_params_fb;

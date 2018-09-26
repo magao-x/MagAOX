@@ -24,7 +24,7 @@ public:
 
    bool m_shutdown {false};
    bool m_connectionLost{false};
-   
+
    std::thread m_drawThread;
    std::mutex m_drawMutex;
 
@@ -281,11 +281,11 @@ void cursesINDI::drawThreadExec()
 
       std::this_thread::sleep_for( std::chrono::duration<unsigned long, std::nano>(250000000));
    }
-                           
-   if(getQuitProcess() && !m_shutdown) 
+
+   if(getQuitProcess() && !m_shutdown)
    {
       m_connectionLost = true;
-      
+
       rows.clear();
       redrawTable();
       m_shutdown = true;
@@ -375,7 +375,7 @@ void cursesINDI::_moveCurrent( int nextY,
    //Do some bounds checks
    if(rows.size() == 0 || m_currY >= rows.size()) return;
    if(m_currX >= rows[m_currY].m_cellWin.size()) return;
-   
+
    //Now turn off the reverse
    wattroff(rows[m_currY].m_cellWin[m_currX], A_REVERSE);
    rows[m_currY].updateContents( m_currX, rows[m_currY].m_cellContents[m_currX], true);
@@ -426,7 +426,7 @@ void cursesINDI::keyPressed( int ch )
          {
             if(nch == ERR)
             {
-               if( getQuitProcess()) 
+               if( getQuitProcess())
                {
                   //If the IndiConnection has set 'quitProces' but no other shutdown
                   //has been issued then we record this as a lost connection.
@@ -435,7 +435,7 @@ void cursesINDI::keyPressed( int ch )
                }
                else continue;
             }
-            
+
             cursStat(1);
 
             if(nch == 27)
@@ -476,10 +476,8 @@ void cursesINDI::keyPressed( int ch )
          }
 
          nch = 0;
-         while( nch == 0 )
+         while( (nch = wgetch(w_interactWin)) == ERR)
          {
-            nch = wgetch(w_interactWin);
-            if(nch == 'y' || nch == 'n' || nch == '\n') break;
          }
 
          if(nch == 'y')
