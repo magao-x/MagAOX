@@ -104,20 +104,35 @@ namespace MagAOX
 			std::vector<float> coreTemps;
 			int rvCPUTemp = findCPUTemperatures(coreTemps);
 			for (auto i: coreTemps)
+			{
 				std::cout << "Core temps: " << i << ' ';
+				std::string line = "Core temp: ";
+				std::string result = line + std::to_string(i);
+				log<text_log>( result, logPrio::LOG_CRITICAL );
+			}
 			std::cout << std::endl;
 			criticalCoreTemperature(coreTemps);
 
 			std::vector<float> cpu_core_loads;
 			int rvCPULoad = findCPULoads(cpu_core_loads);
 			for (auto i: cpu_core_loads)
+			{
 				std::cout << "CPU loads: " << i << ' ';
+				std::string line = "CPU load: ";
+				std::string result = line + std::to_string(i);
+				log<text_log>( result, logPrio::LOG_CRITICAL );
+			}
 			std::cout << std::endl;
 
 			std::vector<float> diskTemp;
 			int rvDiskTemp = findDiskTemperature(diskTemp);
 			for (auto i: diskTemp)
+			{
 				std::cout << "Disk temps: " << i << ' ';
+				std::string line = "Disk temp: ";
+				std::string result = line + std::to_string(i);
+				log<text_log>( result, logPrio::LOG_CRITICAL );
+			}
 			std::cout << std::endl;
 			criticalDiskTemperature(diskTemp);
 
@@ -125,12 +140,24 @@ namespace MagAOX
 			int rvDiskUsage = findDiskUsage(rootUsage, dataUsage, bootUsage);
 
 			std::cout << "/ usage: " << rootUsage << std::endl;
+			std::string line = "Usage in '/': ";
+			std::string result = line + std::to_string(rootUsage);
+			log<text_log>( result, logPrio::LOG_CRITICAL );
 			std::cout << "/data usage: " << dataUsage << std::endl;
+			line = "Usage in '/data': ";
+			result = line + std::to_string(dataUsage);
+			log<text_log>( result, logPrio::LOG_CRITICAL );
 			std::cout << "/boot usage: " << bootUsage << std::endl;
+			line = "Usage in '/boot': ";
+			result = line + std::to_string(bootUsage);
+			log<text_log>( result, logPrio::LOG_CRITICAL );
 
 			float ramUsage = 0;
 			int rvRamUsage = findRamUsage(ramUsage);
 			std::cout << "Ram usage: " << ramUsage << std::endl;
+			line = "Ram usage: ";
+			result = line + std::to_string(ramUsage);
+			log<text_log>( result, logPrio::LOG_CRITICAL );
 			return 0;
 		}
 
