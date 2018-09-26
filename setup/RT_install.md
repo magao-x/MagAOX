@@ -13,7 +13,7 @@ sudo cp RPM-GPG-KEY-cern /etc/pki/rpm-gpg/
 sudo yum groupinstall RT
 sudo yum kernel-rt-devel
 ```
-Now reboot.  I should fail to start X if you have a graphics environment going.  That's fine, you'd need to kill it anyway to install the driver.
+Now reboot.  It should fail to start X if you have a graphics environment going.  That's fine, you'd need to kill it anyway to install the driver.
 
 Once at a prompt, type `uname -a` and verify that the PREEMPT kernel-rt is running.
 
@@ -25,12 +25,12 @@ These steps inspired by: https://gitlab.manjaro.org/packages/community/realtime-
 
 ### 2.1 Shutdown X
 You will need to switch to `multi-user.target` to do the install.  
-- Temporary Change:
+- Temporary change:
 From command line:
 ```
 sudo systemctl isolate multi-user.target
 ```
-Or from grub boot menu, add `systemd.unit=multi-user.target` and end of the linux16 line.
+Or from grub boot menu, add `systemd.unit=multi-user.target` at end of the linux16 line.
 - Permanent change:
 I find it easier to do this with the default changed. In case anything goes wrong it is easier to reboot:
 ```
@@ -85,7 +85,7 @@ To test booting into graphical mode, if you changed the default target you can d
 ```
 sudo systemctl isolate graphical.target
 ```
-or from grub boot menu, add `systemd.unit=graphical.target` and end of the linux16 line.
+or from grub boot menu, add `systemd.unit=graphical.target` at end of the linux16 line.
 - To change the default:
 ```
 /etc/systemd/system/default.target to /usr/lib/systemd/system/graphical.target
