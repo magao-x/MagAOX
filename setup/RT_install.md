@@ -13,7 +13,9 @@ sudo cp RPM-GPG-KEY-cern /etc/pki/rpm-gpg/
 sudo yum groupinstall RT
 sudo yum kernel-rt-devel
 ```
+Now reboot.  I should fail to start X if you have a graphics environment going.  That's fine, you'd need to kill it anyway to install the driver.
 
+Once at a prompt, type `uname -a` and verify that the PREEMPT kernel-rt is running.
 
 ## 2 Installing the NVIDIA driver & CUDA
 
@@ -22,7 +24,7 @@ With hacks to make it build against the rt kernel.
 These steps inspired by: https://gitlab.manjaro.org/packages/community/realtime-kernels/linux416-rt-extramodules/blob/master/nvidia/PKGBUILD but with additions.
 
 ### 2.1 Shutdown X
-Eventually uou will need to switch to `multi-user.target` to do the install.  
+You will need to switch to `multi-user.target` to do the install.  
 - Temporary Change:
 From command line:
 ```
@@ -30,13 +32,13 @@ sudo systemctl isolate multi-user.target
 ```
 Or from grub boot menu, add `systemd.unit=multi-user.target` and end of the linux16 line.
 - Permanent change:
-I find it easier to do this with the default changed in case anything goes wrong it is easier to reboot:
+I find it easier to do this with the default changed. In case anything goes wrong it is easier to reboot:
 ```
 sudo systemctl set-default multi-user.target
 ```
 
 ### 2.2 Preparing The Driver
-Get the CUDA .run file from the NVIDIA website, and make it executable (`chmod +x cuda_10.0.130_410.48_linux.run`).  Next, unpack it:
+Get the CUDA `.run` file from the NVIDIA website, and make it executable (`chmod +x cuda_10.0.130_410.48_linux.run`).  Next, unpack it:
 ```
 ./cuda_10.0.130_410.48_linux.run --extract=$(pwd)/cuda_10.0.130_410.48_linux
 ```
