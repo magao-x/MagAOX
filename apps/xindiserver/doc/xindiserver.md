@@ -41,7 +41,7 @@ xindiserver [options]
 |  -v  |                 | indiserver.v          |     int           | indiserver: log verbosity, -v, -vv or -vvv                        
 |  -x  |                 | indiserver.x          |     bool          | exit after last client disconnects -- FOR PROFILING ONLY          
 |  -L  | --local         | local.drivers         |    vector string  | List of local drivers to start.                                                                                                
-|  -R  | --remote        | remote.drivers        |    vector string  | List of remote drivers to start, in the form of name@hostname without the port.  Hostname needs an entry in remote.hosts                            
+|  -R  | --remote        | remote.drivers        |    vector string  | List of remote drivers to start, in the form of name\@hostname without the port.  Hostname needs an entry in remote.hosts                            
 |  -H  | --hosts         | remote.hosts          |    vector string  | List of remote hosts, in the form of hostname[:remote_port]:local_port.  remote_port is optional if it is the INDI default.
 |  -n  | --name          | name                  |    string         | The name of the application, specifies config.
     
