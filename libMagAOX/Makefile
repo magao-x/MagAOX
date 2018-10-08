@@ -31,6 +31,7 @@ INCLUDEDEPS= app/MagAOXApp.hpp \
              logger/types/string_log.hpp \
              logger/types/text_log.hpp \
              logger/types/user_log.hpp \
+	     logger/types/sys_mon.hpp \
              tty/ttyErrors.hpp \
              tty/ttyIOUtils.hpp \
              tty/ttyUSB.hpp \
