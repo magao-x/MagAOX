@@ -25,6 +25,9 @@ namespace logger
 struct sys_mon : public flatbuffer_log
 {
 
+     static const flatlogs::eventCodeT eventCode = eventCodes::TTMMOD_PARAMS;
+  static const flatlogs::logPrioT defaultLevel = flatlogs::logPrio::LOG_INFO;
+
    ///The type of the input message
    struct messageT : public fbMessage
    {

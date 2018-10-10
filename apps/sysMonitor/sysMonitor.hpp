@@ -165,7 +165,7 @@ namespace MagAOX
 			result = line + std::to_string(ramUsage);
 			//log<text_log>( result, logPrio::LOG_CRITICAL );
 
-			log<sys_mon>({coreTemps, cpu_core_loads, diskTemp, rootUsage, dataUsage, bootUsage});
+			log<sys_mon>({coreTemps, cpu_core_loads, diskTemp, rootUsage, dataUsage, bootUsage, ramUsage});
 			return 0;
 		}
 
