@@ -29,9 +29,9 @@ struct sys_mon : public flatbuffer_log
    struct messageT : public fbMessage
    {
       ///Construct from components
-      messageT( std::vector<float> coreTemps,
-                std::vector<float> cpu_core_loads,
-                std::vector<float> diskTemp,
+      messageT( std::vector<float> & coreTemps,
+                std::vector<float> & cpu_core_loads,
+                std::vector<float> & diskTemp,
                 const float & rootUsage,
                 const float & dataUsage,
                 const float & bootUsage,

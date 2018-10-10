@@ -142,7 +142,7 @@ namespace MagAOX
 			*/
 			criticalDiskTemperature(diskTemp);
 
-			float rootUsage = 0, dataUsage = 0, bootUsage = 0;
+			float rootUsage = {0}, dataUsage = {0}, bootUsage = {0};
 			int rvDiskUsage = findDiskUsage(rootUsage, dataUsage, bootUsage);
 
 			std::cout << "/ usage: " << rootUsage << std::endl;
