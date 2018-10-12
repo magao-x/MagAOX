@@ -1,4 +1,3 @@
-// Change critical temps to critical monitor when there exists such a condition
 // More logs for each seperate value (i.e. one for each)
 // inter process communications system: INDI in magaoxmaths
 #ifndef sysMonitor_hpp
@@ -104,8 +103,9 @@ namespace MagAOX
 		int sysMonitor::appLogic()
 		{
 			std::cout << m_warningCoreTemp << " " << m_criticalCoreTemp << " " << m_warningDiskTemp << " " << m_criticalDiskTemp << std::endl;
-			
-			bool criticalLog = false;
+
+			bool warningLog = false;
+			bool alertLog = false;
 
 			std::vector<float> coreTemps;
 			int rvCPUTemp = findCPUTemperatures(coreTemps);
@@ -120,8 +120,12 @@ namespace MagAOX
 			
 			std::cout << std::endl;
 			
-			if (criticalCoreTemperature(coreTemps) == 1) {
-				criticalLog = true;
+			int rv = criticalCoreTemperature(coreTemps);
+
+			if (rv == 1) {
+				warningLog = true;
+			} else if (rv == 2) {
+				alertLog = true;
 			}
 
 			std::vector<float> cpu_core_loads;
@@ -148,9 +152,13 @@ namespace MagAOX
 				//log<text_log>( result, logPrio::LOG_CRITICAL );
 			}
 			std::cout << std::endl;
-			
-			if (criticalDiskTemperature(diskTemp) == 1) {
-				criticalLog = true;
+
+			rv = criticalDiskTemperature(diskTemp);
+
+			if (rv == 1) {
+				warningLog = true;
+			} else if (rv == 2) {
+				alertLog = true;
 			}
 
 			float rootUsage = {0}, dataUsage = {0}, bootUsage = {0};
@@ -176,8 +184,10 @@ namespace MagAOX
 			result = line + std::to_string(ramUsage);
 			//log<text_log>( result, logPrio::LOG_CRITICAL );
 
-			if (criticalLog) {
-				log<sys_mon>({coreTemps, cpu_core_loads, diskTemp, rootUsage, dataUsage, bootUsage, ramUsage}, logPrio::LOG_CRITICAL);
+			if (alertLog) {
+				log<sys_mon>({coreTemps, cpu_core_loads, diskTemp, rootUsage, dataUsage, bootUsage, ramUsage}, logPrio::LOG_ALERT);
+			} else if (warningLog) {
+				log<sys_mon>({coreTemps, cpu_core_loads, diskTemp, rootUsage, dataUsage, bootUsage, ramUsage}, logPrio::LOG_WARNING);
 			} else {
 				log<sys_mon>({coreTemps, cpu_core_loads, diskTemp, rootUsage, dataUsage, bootUsage, ramUsage});
 			}
@@ -294,12 +304,13 @@ namespace MagAOX
 	     		if (temp >= m_warningCoreTemp && temp < m_criticalCoreTemp ) 
 	     		{
 	     			std::cout << "Warning temperature for Core " << coreNum << std::endl;
-	     			rv = 1;
+	     			if (rv < 2) rv = 1;
+	     			
 	     		}
 	     		else if (temp >= m_criticalCoreTemp) 
 	     		{   
 	     			std::cout << "Critical temperature for Core " << coreNum << std::endl;
-	     			rv = 1;
+	     			rv = 2;
 	     		}
 	     		++coreNum;
 	     	}
@@ -448,12 +459,12 @@ namespace MagAOX
 	     		if (temp >= m_warningDiskTemp && temp < m_criticalDiskTemp )
 	     		{
 	     			std::cout << "Warning temperature for Disk" << std::endl;
-	     			rv = 1;
+	     			if (rv < 2) rv = 1;
 	     		}  
 	     		else if (temp >= m_criticalDiskTemp) 
 	     		{   
 	     			std::cout << "Critical temperature for Disk " << std::endl;
-	     			rv = 1;
+	     			rv = 2;
 	     		}
 	     	}
 	     	return rv;
