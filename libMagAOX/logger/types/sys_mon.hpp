@@ -25,7 +25,7 @@ namespace logger
 struct sys_mon : public flatbuffer_log
 {
 
-     static const flatlogs::eventCodeT eventCode = eventCodes::TTMMOD_PARAMS;
+  static const flatlogs::eventCodeT eventCode = eventCodes::SYS_MON;
   static const flatlogs::logPrioT defaultLevel = flatlogs::logPrio::LOG_INFO;
 
    ///The type of the input message
@@ -42,9 +42,9 @@ struct sys_mon : public flatbuffer_log
               )
       {
          
-         auto _coreTempsVec = builder.CreateVector(coreTemps.data(),sizeof(coreTemps));
-         auto _coreLoadsVec = builder.CreateVector(cpu_core_loads.data(),sizeof(cpu_core_loads));
-         auto _driveTempsVec = builder.CreateVector(diskTemp.data(),sizeof(diskTemp));
+         auto _coreTempsVec = builder.CreateVector(coreTemps.data(),coreTemps.size());
+         auto _coreLoadsVec = builder.CreateVector(cpu_core_loads.data(),cpu_core_loads.size());
+         auto _driveTempsVec = builder.CreateVector(diskTemp.data(),diskTemp.size());
 
          auto fp = Createsys_mon_fb(builder, _coreTempsVec, _coreLoadsVec, _driveTempsVec, rootUsage, dataUsage, bootUsage, ramUsage);
          
@@ -61,13 +61,16 @@ struct sys_mon : public flatbuffer_log
    {
 
       static_cast<void>(len); // unused by most log types
+      //return "test";
    
       //auto rgs = sys_mon(msgBuffer); // EXAMPLE: how to work with a flatbuffer
       auto rgs = Getsys_mon_fb(msgBuffer);  
 
+      
       std::string msg = "SYSTEM MONITOR: ";
+
       if (rgs->cpu_core_loads() != nullptr) {
-        msg+= "CPU LOADS: ";
+        msg+= "CPULOADS: ";
         for(flatbuffers::Vector<float>::iterator it = rgs->cpu_core_loads()->begin(); it != rgs->cpu_core_loads()->end(); ++it) {
           msg+= std::to_string(*it);
           msg+= " ";
@@ -75,7 +78,7 @@ struct sys_mon : public flatbuffer_log
       }
       
       if (rgs->coreTemps() != nullptr) {
-        msg+= "CPU TEMPS: ";
+        msg+= "CPUTEMPS: ";
         for(flatbuffers::Vector<float>::iterator it = rgs->coreTemps()->begin(); it != rgs->coreTemps()->end(); ++it) {
           msg+= std::to_string(*it);
           msg+= " ";
@@ -83,31 +86,32 @@ struct sys_mon : public flatbuffer_log
       }
 
       if (rgs->diskTemp() != nullptr) {
-        msg+= "DRIVE TEMPS:  ";
+        msg+= "DRIVETEMPS:  ";
         for(flatbuffers::Vector<float>::iterator it = rgs->diskTemp()->begin(); it != rgs->diskTemp()->end(); ++it) {
           msg+= std::to_string(*it);
           msg+= " ";
         }
       }
+      
 
       if (rgs->rootUsage() != 0) {
-        msg+= std::to_string(rgs->rootUsage());
-        msg+= "/ROOT USAGE ";
+        msg+= "/ROOTUSAGE ";
+        msg+= std::to_string(rgs->rootUsage());      
         msg+= " ";
       }
       if (rgs->dataUsage() != 0) {
-        msg+= std::to_string(rgs->dataUsage());
-        msg+= "/DATA USAGE ";
+        msg+= "/DATAUSAGE ";
+        msg+= std::to_string(rgs->dataUsage());       
         msg+= " ";
       }
       if (rgs->bootUsage() != 0){
-        msg+= std::to_string(rgs->bootUsage());
-        msg+= "/BOOT USAGE ";
+        msg+= "/BOOTUSAGE ";
+        msg+= std::to_string(rgs->bootUsage());      
         msg+= " ";
       }
       if (rgs->ramUsage() != 0) {
+        msg+= "RAMUSAGE ";
         msg+= std::to_string(rgs->ramUsage());
-        msg+= "RAM USAGE ";
         msg+= " ";
       }
 

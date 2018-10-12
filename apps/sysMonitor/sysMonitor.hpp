@@ -1,4 +1,6 @@
-
+// Change critical temps to critical monitor when there exists such a condition
+// More logs for each seperate value (i.e. one for each)
+// inter process communications system: INDI in magaoxmaths
 #ifndef sysMonitor_hpp
 #define sysMonitor_hpp
 
@@ -101,46 +103,55 @@ namespace MagAOX
 
 		int sysMonitor::appLogic()
 		{
+			std::cout << m_warningCoreTemp << " " << m_criticalCoreTemp << " " << m_warningDiskTemp << " " << m_criticalDiskTemp << std::endl;
+			
+			bool criticalLog = false;
+
 			std::vector<float> coreTemps;
 			int rvCPUTemp = findCPUTemperatures(coreTemps);
-			/*
+			
 			for (auto i: coreTemps)
 			{
 				std::cout << "Core temps: " << i << ' ';
 				std::string line = "Core temp: ";
 				std::string result = line + std::to_string(i);
-				log<text_log>( result, logPrio::LOG_CRITICAL );
+				//log<text_log>( result, logPrio::LOG_CRITICAL );
 			}
-			*/
-			//std::cout << std::endl;
-			criticalCoreTemperature(coreTemps);
+			
+			std::cout << std::endl;
+			
+			if (criticalCoreTemperature(coreTemps) == 1) {
+				criticalLog = true;
+			}
 
 			std::vector<float> cpu_core_loads;
 			int rvCPULoad = findCPULoads(cpu_core_loads);
-			/*
+			
 			for (auto i: cpu_core_loads)
 			{
 				std::cout << "CPU loads: " << i << ' ';
 				std::string line = "CPU load: ";
 				std::string result = line + std::to_string(i);
-				log<text_log>( result, logPrio::LOG_CRITICAL );
+				//log<text_log>( result, logPrio::LOG_CRITICAL );
 			}
 			std::cout << std::endl;
-			*/
+			
 
 			std::vector<float> diskTemp;
 			int rvDiskTemp = findDiskTemperature(diskTemp);
-			/*
+			
 			for (auto i: diskTemp)
 			{
 				std::cout << "Disk temps: " << i << ' ';
 				std::string line = "Disk temp: ";
 				std::string result = line + std::to_string(i);
-				log<text_log>( result, logPrio::LOG_CRITICAL );
+				//log<text_log>( result, logPrio::LOG_CRITICAL );
 			}
 			std::cout << std::endl;
-			*/
-			criticalDiskTemperature(diskTemp);
+			
+			if (criticalDiskTemperature(diskTemp) == 1) {
+				criticalLog = true;
+			}
 
 			float rootUsage = {0}, dataUsage = {0}, bootUsage = {0};
 			int rvDiskUsage = findDiskUsage(rootUsage, dataUsage, bootUsage);
@@ -165,7 +176,12 @@ namespace MagAOX
 			result = line + std::to_string(ramUsage);
 			//log<text_log>( result, logPrio::LOG_CRITICAL );
 
-			log<sys_mon>({coreTemps, cpu_core_loads, diskTemp, rootUsage, dataUsage, bootUsage, ramUsage});
+			if (criticalLog) {
+				log<sys_mon>({coreTemps, cpu_core_loads, diskTemp, rootUsage, dataUsage, bootUsage, ramUsage}, logPrio::LOG_CRITICAL);
+			} else {
+				log<sys_mon>({coreTemps, cpu_core_loads, diskTemp, rootUsage, dataUsage, bootUsage, ramUsage});
+			}
+			
 			return 0;
 		}
 
@@ -269,22 +285,25 @@ namespace MagAOX
 	     	}
 	    }
 
-	    int sysMonitor::criticalCoreTemperature(std::vector<float>& temps)
+	    int sysMonitor::criticalCoreTemperature(std::vector<float>& v)
 	    {
-	    	float warningTempValue = 80, criticalTempValue = 90, iterator = 1;
-	     	for (std::vector<float>::const_iterator i = temps.begin(); i != temps.end(); ++i)
+	    	int coreNum = 0, rv = 0;
+	    	for(auto it: v)
 	     	{
-	     		int temp = *i;
-	     		if (temp >=warningTempValue && temp < criticalTempValue ) 
+	     		float temp = it;
+	     		if (temp >= m_warningCoreTemp && temp < m_criticalCoreTemp ) 
 	     		{
-	     			std::cout << "Warning temperature for Core " << iterator << std::endl;
+	     			std::cout << "Warning temperature for Core " << coreNum << std::endl;
+	     			rv = 1;
 	     		}
-	     		else if (temp >= criticalTempValue) 
+	     		else if (temp >= m_criticalCoreTemp) 
 	     		{   
-	     			std::cout << "Critical temperature for Core " << iterator << std::endl;
+	     			std::cout << "Critical temperature for Core " << coreNum << std::endl;
+	     			rv = 1;
 	     		}
-	     		++iterator;
+	     		++coreNum;
 	     	}
+	     	return rv;
 	    }
 
 	    int sysMonitor::findCPULoads(std::vector<float>& cpu_core_loads) 
@@ -423,16 +442,15 @@ namespace MagAOX
 	    int sysMonitor::criticalDiskTemperature(std::vector<float>& v)
 	    {
 	     	int rv = 0;
-	     	int warningTempValue = 80, criticalTempValue = 90;
 	     	for(auto it: v)
 	     	{
 	     		float temp = it;
-	     		if (temp >=warningTempValue && temp < criticalTempValue )
+	     		if (temp >= m_warningDiskTemp && temp < m_criticalDiskTemp )
 	     		{
 	     			std::cout << "Warning temperature for Disk" << std::endl;
 	     			rv = 1;
 	     		}  
-	     		else if (temp >= criticalTempValue) 
+	     		else if (temp >= m_criticalDiskTemp) 
 	     		{   
 	     			std::cout << "Critical temperature for Disk " << std::endl;
 	     			rv = 1;
@@ -471,7 +489,7 @@ namespace MagAOX
 	        }
 	         
 	        return 0;
-	     }
+	    }
 
 	    int sysMonitor::parseDiskUsage(std::string line, float& rootUsage, float& dataUsage, float& bootUsage) 
 	    {
