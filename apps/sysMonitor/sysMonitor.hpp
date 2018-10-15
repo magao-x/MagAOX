@@ -109,80 +109,63 @@ namespace MagAOX
 
 			std::vector<float> coreTemps;
 			int rvCPUTemp = findCPUTemperatures(coreTemps);
-			
 			for (auto i: coreTemps)
 			{
 				std::cout << "Core temps: " << i << ' ';
-				std::string line = "Core temp: ";
-				std::string result = line + std::to_string(i);
-				//log<text_log>( result, logPrio::LOG_CRITICAL );
-			}
-			
+			}	
 			std::cout << std::endl;
-			
 			int rv = criticalCoreTemperature(coreTemps);
-
 			if (rv == 1) {
 				warningLog = true;
+				log<core_temp>({coreTemps},logPrio::LOG_WARNING);
 			} else if (rv == 2) {
-				alertLog = true;
+				log<core_temp>({coreTemps},logPrio::LOG_ALERT);
+			} else {
+				log<core_temp>({coreTemps});
 			}
+
 
 			std::vector<float> cpu_core_loads;
 			int rvCPULoad = findCPULoads(cpu_core_loads);
-			
 			for (auto i: cpu_core_loads)
 			{
 				std::cout << "CPU loads: " << i << ' ';
-				std::string line = "CPU load: ";
-				std::string result = line + std::to_string(i);
-				//log<text_log>( result, logPrio::LOG_CRITICAL );
 			}
 			std::cout << std::endl;
+			log<core_load>({cpu_core_loads});
 			
 
 			std::vector<float> diskTemp;
 			int rvDiskTemp = findDiskTemperature(diskTemp);
-			
 			for (auto i: diskTemp)
 			{
 				std::cout << "Disk temps: " << i << ' ';
-				std::string line = "Disk temp: ";
-				std::string result = line + std::to_string(i);
-				//log<text_log>( result, logPrio::LOG_CRITICAL );
 			}
 			std::cout << std::endl;
-
 			rv = criticalDiskTemperature(diskTemp);
-
 			if (rv == 1) {
 				warningLog = true;
+				log<drive_temp>({diskTemp},logPrio::LOG_WARNING);
 			} else if (rv == 2) {
-				alertLog = true;
+				log<drive_temp>({diskTemp},logPrio::LOG_ALERT);
+			} else {
+				log<drive_temp>({diskTemp});
 			}
 
-			float rootUsage = {0}, dataUsage = {0}, bootUsage = {0};
+			float rootUsage = 0, dataUsage = 0, bootUsage = 0;
 			int rvDiskUsage = findDiskUsage(rootUsage, dataUsage, bootUsage);
 
 			std::cout << "/ usage: " << rootUsage << std::endl;
-			std::string line = "Usage in '/': ";
-			std::string result = line + std::to_string(rootUsage);
-			//log<text_log>( result, logPrio::LOG_CRITICAL );
-			std::cout << "/data usage: " << dataUsage << std::endl;
-			line = "Usage in '/data': ";
-			result = line + std::to_string(dataUsage);
-			//log<text_log>( result, logPrio::LOG_CRITICAL );
+			std::cout << "/data usage: " << dataUsage << std::endl;	
 			std::cout << "/boot usage: " << bootUsage << std::endl;
-			line = "Usage in '/boot': ";
-			result = line + std::to_string(bootUsage);
-			//log<text_log>( result, logPrio::LOG_CRITICAL );
+			//log<root_usage>(rootUsage);
+			//log<data_usage>(dataUsage);
+			//log<boot_usage>(bootUsage);
 
 			float ramUsage = 0;
 			int rvRamUsage = findRamUsage(ramUsage);
 			std::cout << "Ram usage: " << ramUsage << std::endl;
-			line = "Ram usage: ";
-			result = line + std::to_string(ramUsage);
-			//log<text_log>( result, logPrio::LOG_CRITICAL );
+			log<ram_usage>(ramUsage);
 
 			if (alertLog) {
 				log<sys_mon>({coreTemps, cpu_core_loads, diskTemp, rootUsage, dataUsage, bootUsage, ramUsage}, logPrio::LOG_ALERT);
@@ -205,33 +188,32 @@ namespace MagAOX
 			char command[35];
 			std::string line;
 
-         // For core temps
-         //TODO: User defined warning level (use config)
+         	// For core temps
 			strcpy( command, "sensors > /dev/shm/sensors_out" );
 			int rv = system(command);
-         if(rv == -1) //system call error
-         {
-            //handle error
-         	std::cerr << "There's been an error with the system command" << std::endl;
-         	return 1;
-         }
-         std::ifstream inFile;
+         	if(rv == -1) //system call error
+         	{
+         	   //handle error
+         		std::cerr << "There's been an error with the system command" << std::endl;
+         		return 1;
+         	}
+         	std::ifstream inFile;
 
-         inFile.open("/dev/shm/sensors_out");
-         if (!inFile) 
-         {
-         	std::cerr << "Unable to open file" << std::endl;
-         	return 1;
-         }
+         	inFile.open("/dev/shm/sensors_out");
+         	if (!inFile) 
+         	{
+         		std::cerr << "Unable to open file" << std::endl;
+         		return 1;
+         	}
          
-         while (getline (inFile,line)) 
-         {
-         	float tempVal;
-         	int rv = parseCPUTemperatures(line, tempVal);
-         	if (rv == 0)
-         		temps.push_back(tempVal);
-         }
-         return 0;
+         	while (getline (inFile,line)) 
+         	{
+         		float tempVal;
+         		int rv = parseCPUTemperatures(line, tempVal);
+         		if (rv == 0)
+         			temps.push_back(tempVal);
+         	}
+         	return 0;
      	}
 
 	    int sysMonitor::parseCPUTemperatures(std::string line, float& temps) 

@@ -61,11 +61,8 @@ struct sys_mon : public flatbuffer_log
    {
 
       static_cast<void>(len); // unused by most log types
-      //return "test";
    
-      //auto rgs = sys_mon(msgBuffer); // EXAMPLE: how to work with a flatbuffer
       auto rgs = Getsys_mon_fb(msgBuffer);  
-
       
       std::string msg = "SYSTEM MONITOR: ";
 
@@ -92,7 +89,6 @@ struct sys_mon : public flatbuffer_log
           msg+= " ";
         }
       }
-      
 
       if (rgs->rootUsage() != 0) {
         msg+= "/ROOTUSAGE ";
@@ -119,7 +115,7 @@ struct sys_mon : public flatbuffer_log
 
    }
 
-}; //ttmmod_params
+}; //sys_mon
 
 
 } //namespace logger

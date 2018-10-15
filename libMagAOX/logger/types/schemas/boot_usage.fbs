@@ -1,0 +1,9 @@
+namespace MagAOX.logger;
+
+table boot_usage_fb
+{
+   bootUsage:float;
+}
+
+root_type boot_usage_fb;
+

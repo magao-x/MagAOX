@@ -1,0 +1,9 @@
+namespace MagAOX.logger;
+
+table core_temp_fb
+{
+   coreTemps:[float];
+}
+
+root_type core_temp_fb;
+
