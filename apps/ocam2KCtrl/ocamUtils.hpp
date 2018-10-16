@@ -51,6 +51,19 @@ int parseTemps( ocamTemps & temps,
    return 0;
 }
 
+int parseFPS( float & fps,
+              const std::string & fstr
+            )
+{
+   std::vector<std::string> v;
+   mx::ioutils::parseStringVector(v, fstr, "[]");
+
+   if( v.size() < 3) return -1;
+
+   fps = mx::ioutils::convertFromString<float>( v[1] );
+
+   return 0;
+}
 
 } //namespace app
 } //namespace MagAOX
