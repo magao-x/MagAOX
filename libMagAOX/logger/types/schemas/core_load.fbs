@@ -1,9 +1,0 @@
-namespace MagAOX.logger;
-
-table core_load_fb
-{
-   coreLoads:[float];
-}
-
-root_type core_load_fb;
-

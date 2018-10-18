@@ -1,4 +1,3 @@
-// More logs for each seperate value (i.e. one for each)
 // inter process communications system: INDI in magaoxmaths
 #ifndef sysMonitor_hpp
 #define sysMonitor_hpp
@@ -115,15 +114,6 @@ namespace MagAOX
 			}	
 			std::cout << std::endl;
 			int rv = criticalCoreTemperature(coreTemps);
-			if (rv == 1) {
-				warningLog = true;
-				log<core_temp>({coreTemps},logPrio::LOG_WARNING);
-			} else if (rv == 2) {
-				log<core_temp>({coreTemps},logPrio::LOG_ALERT);
-			} else {
-				log<core_temp>({coreTemps});
-			}
-
 
 			std::vector<float> cpu_core_loads;
 			int rvCPULoad = findCPULoads(cpu_core_loads);
@@ -132,7 +122,14 @@ namespace MagAOX
 				std::cout << "CPU loads: " << i << ' ';
 			}
 			std::cout << std::endl;
-			log<core_load>({cpu_core_loads});
+			
+			if (rv == 1) {
+				log<core_mon>({coreTemps, cpu_core_loads}, logPrio::LOG_WARNING);
+			} else if (rv == 2) {
+				log<core_mon>({coreTemps, cpu_core_loads}, logPrio::LOG_ALERT);
+			} else {
+				log<core_mon>({coreTemps, cpu_core_loads}, logPrio::LOG_INFO);
+			}
 			
 
 			std::vector<float> diskTemp;
@@ -143,14 +140,6 @@ namespace MagAOX
 			}
 			std::cout << std::endl;
 			rv = criticalDiskTemperature(diskTemp);
-			if (rv == 1) {
-				warningLog = true;
-				log<drive_temp>({diskTemp},logPrio::LOG_WARNING);
-			} else if (rv == 2) {
-				log<drive_temp>({diskTemp},logPrio::LOG_ALERT);
-			} else {
-				log<drive_temp>({diskTemp});
-			}
 
 			float rootUsage = 0, dataUsage = 0, bootUsage = 0;
 			int rvDiskUsage = findDiskUsage(rootUsage, dataUsage, bootUsage);
@@ -158,22 +147,21 @@ namespace MagAOX
 			std::cout << "/ usage: " << rootUsage << std::endl;
 			std::cout << "/data usage: " << dataUsage << std::endl;	
 			std::cout << "/boot usage: " << bootUsage << std::endl;
-			//log<root_usage>(rootUsage);
-			//log<data_usage>(dataUsage);
-			//log<boot_usage>(bootUsage);
+
+			if (rv == 1) {
+				log<drive_mon>({diskTemp, rootUsage, dataUsage, bootUsage}, logPrio::LOG_WARNING);
+			} else if (rv == 2) {
+				log<drive_mon>({diskTemp, rootUsage, dataUsage, bootUsage}, logPrio::LOG_ALERT);
+			} else {
+				log<drive_mon>({diskTemp, rootUsage, dataUsage, bootUsage}, logPrio::LOG_INFO);
+			}
+
 
 			float ramUsage = 0;
 			int rvRamUsage = findRamUsage(ramUsage);
 			std::cout << "Ram usage: " << ramUsage << std::endl;
-			log<ram_usage>(ramUsage);
 
-			if (alertLog) {
-				log<sys_mon>({coreTemps, cpu_core_loads, diskTemp, rootUsage, dataUsage, bootUsage, ramUsage}, logPrio::LOG_ALERT);
-			} else if (warningLog) {
-				log<sys_mon>({coreTemps, cpu_core_loads, diskTemp, rootUsage, dataUsage, bootUsage, ramUsage}, logPrio::LOG_WARNING);
-			} else {
-				log<sys_mon>({coreTemps, cpu_core_loads, diskTemp, rootUsage, dataUsage, bootUsage, ramUsage});
-			}
+			log<ram_usage>({ramUsage}, logPrio::LOG_INFO);
 			
 			return 0;
 		}

@@ -1,9 +1,0 @@
-namespace MagAOX.logger;
-
-table drive_temp_fb
-{
-   driveTemps:[float];
-}
-
-root_type drive_temp_fb;
-

@@ -7,10 +7,10 @@
   * History:
   * - 2018-09-06 created by JRM
   */
-#ifndef logger_types_drive_temp_hpp
-#define logger_types_drive_temp_hpp
+#ifndef logger_types_core_mon_hpp
+#define logger_types_core_mon_hpp
 
-#include "generated/drive_temp_generated.h"
+#include "generated/core_mon_generated.h"
 #include "flatbuffer_log.hpp"
 
 namespace MagAOX
@@ -22,23 +22,25 @@ namespace logger
 /// Log entry recording the build-time git state.
 /** \ingroup logger_types
   */
-struct drive_temp : public flatbuffer_log
+struct core_mon : public flatbuffer_log
 {
 
-  static const flatlogs::eventCodeT eventCode = eventCodes::DRIVE_TEMP;
+  static const flatlogs::eventCodeT eventCode = eventCodes::CORE_MON;
   static const flatlogs::logPrioT defaultLevel = flatlogs::logPrio::LOG_INFO;
 
    ///The type of the input message
    struct messageT : public fbMessage
    {
       ///Construct from components
-      messageT( std::vector<float> & driveTemps
+      messageT( std::vector<float> & coreTemps,
+                std::vector<float> & cpu_core_loads
               )
       {
          
-         auto _driveTempsVec = builder.CreateVector(driveTemps.data(),driveTemps.size());
+         auto _coreTempsVec = builder.CreateVector(coreTemps.data(),coreTemps.size());
+         auto _coreLoadsVec = builder.CreateVector(cpu_core_loads.data(),cpu_core_loads.size());
 
-         auto fp = Createdrive_temp_fb(builder, _driveTempsVec);
+         auto fp = Createcore_mon_fb(builder, _coreTempsVec, _coreLoadsVec);
          
          builder.Finish(fp);
 
@@ -54,13 +56,21 @@ struct drive_temp : public flatbuffer_log
 
       static_cast<void>(len); // unused by most log types
    
-      auto rgs = Getdrive_temp_fb(msgBuffer);  
+      auto rgs = Getcore_mon_fb(msgBuffer);  
       
       std::string msg = "";
 
-      if (rgs->driveTemps() != nullptr) {
-        msg+= "DRIVETEMPS: ";
-        for(flatbuffers::Vector<float>::iterator it = rgs->driveTemps()->begin(); it != rgs->driveTemps()->end(); ++it) {
+      if (rgs->cpu_core_loads() != nullptr) {
+        msg+= "CPULOADS: ";
+        for(flatbuffers::Vector<float>::iterator it = rgs->cpu_core_loads()->begin(); it != rgs->cpu_core_loads()->end(); ++it) {
+          msg+= std::to_string(*it);
+          msg+= " ";
+        }
+      }
+      
+      if (rgs->coreTemps() != nullptr) {
+        msg+= "CPUTEMPS: ";
+        for(flatbuffers::Vector<float>::iterator it = rgs->coreTemps()->begin(); it != rgs->coreTemps()->end(); ++it) {
           msg+= std::to_string(*it);
           msg+= " ";
         }

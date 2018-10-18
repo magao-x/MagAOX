@@ -1,15 +1,12 @@
 namespace MagAOX.logger;
 
-table sys_mon_fb
+table drive_mon_fb
 {
-   coreTemps:[float];
-   cpu_core_loads:[float];
    diskTemp:[float];
    rootUsage:float;
    dataUsage:float;
    bootUsage:float;
-   ramUsage:float;
 }
 
-root_type sys_mon_fb;
+root_type drive_mon_fb;
 

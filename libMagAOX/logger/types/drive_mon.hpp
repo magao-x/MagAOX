@@ -7,10 +7,10 @@
   * History:
   * - 2018-09-06 created by JRM
   */
-#ifndef logger_types_sys_mon_hpp
-#define logger_types_sys_mon_hpp
+#ifndef logger_types_drive_mon_hpp
+#define logger_types_drive_mon_hpp
 
-#include "generated/sys_mon_generated.h"
+#include "generated/drive_mon_generated.h"
 #include "flatbuffer_log.hpp"
 
 namespace MagAOX
@@ -22,31 +22,27 @@ namespace logger
 /// Log entry recording the build-time git state.
 /** \ingroup logger_types
   */
-struct sys_mon : public flatbuffer_log
+struct drive_mon : public flatbuffer_log
 {
 
-  static const flatlogs::eventCodeT eventCode = eventCodes::SYS_MON;
+  static const flatlogs::eventCodeT eventCode = eventCodes::DRIVE_MON;
   static const flatlogs::logPrioT defaultLevel = flatlogs::logPrio::LOG_INFO;
 
    ///The type of the input message
    struct messageT : public fbMessage
    {
       ///Construct from components
-      messageT( std::vector<float> & coreTemps,
-                std::vector<float> & cpu_core_loads,
+      messageT( 
                 std::vector<float> & diskTemp,
                 const float & rootUsage,
                 const float & dataUsage,
-                const float & bootUsage,
-                const float & ramUsage
+                const float & bootUsage
               )
       {
-         
-         auto _coreTempsVec = builder.CreateVector(coreTemps.data(),coreTemps.size());
-         auto _coreLoadsVec = builder.CreateVector(cpu_core_loads.data(),cpu_core_loads.size());
+
          auto _driveTempsVec = builder.CreateVector(diskTemp.data(),diskTemp.size());
 
-         auto fp = Createsys_mon_fb(builder, _coreTempsVec, _coreLoadsVec, _driveTempsVec, rootUsage, dataUsage, bootUsage, ramUsage);
+         auto fp = Createdrive_mon_fb(builder, _driveTempsVec, rootUsage, dataUsage, bootUsage);
          
          builder.Finish(fp);
 
@@ -62,25 +58,9 @@ struct sys_mon : public flatbuffer_log
 
       static_cast<void>(len); // unused by most log types
    
-      auto rgs = Getsys_mon_fb(msgBuffer);  
+      auto rgs = Getdrive_mon_fb(msgBuffer);  
       
-      std::string msg = "SYSTEM MONITOR: ";
-
-      if (rgs->cpu_core_loads() != nullptr) {
-        msg+= "CPULOADS: ";
-        for(flatbuffers::Vector<float>::iterator it = rgs->cpu_core_loads()->begin(); it != rgs->cpu_core_loads()->end(); ++it) {
-          msg+= std::to_string(*it);
-          msg+= " ";
-        }
-      }
-      
-      if (rgs->coreTemps() != nullptr) {
-        msg+= "CPUTEMPS: ";
-        for(flatbuffers::Vector<float>::iterator it = rgs->coreTemps()->begin(); it != rgs->coreTemps()->end(); ++it) {
-          msg+= std::to_string(*it);
-          msg+= " ";
-        }
-      }
+      std::string msg = "";
 
       if (rgs->diskTemp() != nullptr) {
         msg+= "DRIVETEMPS:  ";
@@ -103,11 +83,6 @@ struct sys_mon : public flatbuffer_log
       if (rgs->bootUsage() != 0){
         msg+= "/BOOTUSAGE ";
         msg+= std::to_string(rgs->bootUsage());      
-        msg+= " ";
-      }
-      if (rgs->ramUsage() != 0) {
-        msg+= "RAMUSAGE ";
-        msg+= std::to_string(rgs->ramUsage());
         msg+= " ";
       }
 

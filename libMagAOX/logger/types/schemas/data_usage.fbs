@@ -1,9 +1,0 @@
-namespace MagAOX.logger;
-
-table data_usage_fb
-{
-   dataUsage:float;
-}
-
-root_type data_usage_fb;
-

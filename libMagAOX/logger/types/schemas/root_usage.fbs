@@ -1,9 +1,0 @@
-namespace MagAOX.logger;
-
-table root_usage_fb
-{
-   rootUsage:float;
-}
-
-root_type root_usage_fb;
-
