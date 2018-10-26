@@ -31,6 +31,26 @@ namespace MagAOX
 			int m_warningDiskTemp = 0;
 			int m_criticalDiskTemp = 0;
 
+			pcf::IndiProperty core_loads;
+			pcf::IndiProperty core_temps;
+			pcf::IndiProperty drive_temps;
+			pcf::IndiProperty root_usage;
+			pcf::IndiProperty boot_usage;
+			pcf::IndiProperty data_usage;
+			pcf::IndiProperty ram_usage_indi;
+
+			int updateVals();
+
+			std::vector<float> coreTemps;
+			std::vector<float> cpu_core_loads;
+			std::vector<float> diskTemp;
+			float rootUsage = 0, dataUsage = 0, bootUsage = 0;
+			float ramUsage = 0;
+
+
+
+
+
 
 		public:
 
@@ -60,7 +80,7 @@ namespace MagAOX
 			int findCPUTemperatures(std::vector<float>&);
 			int parseCPUTemperatures(std::string, float&);
 			int criticalCoreTemperature(std::vector<float>&);
-			int findCPULoads(std::vector<float>&);
+			int findCPULoads();
 			int parseCPULoads(std::string, float&);
 			int findDiskTemperature(std::vector<float>&);
 			int parseDiskTemperature(std::string, float&);
@@ -96,30 +116,80 @@ namespace MagAOX
 
 		int sysMonitor::appStartup()
 		{
+			REG_INDI_NEWPROP_NOCB(core_loads, "core_loads", pcf::IndiProperty::Number);
+			REG_INDI_NEWPROP_NOCB(core_temps, "core_temps", pcf::IndiProperty::Number);
+			REG_INDI_NEWPROP_NOCB(drive_temps, "drive_temps", pcf::IndiProperty::Number);
+			REG_INDI_NEWPROP_NOCB(root_usage, "root_usage", pcf::IndiProperty::Number);
+			REG_INDI_NEWPROP_NOCB(boot_usage, "boot_usage", pcf::IndiProperty::Number);
+			REG_INDI_NEWPROP_NOCB(data_usage, "data_usage", pcf::IndiProperty::Number);
+			REG_INDI_NEWPROP_NOCB(ram_usage_indi, "ram_usage_indi", pcf::IndiProperty::Number);
+
+
+			int i;
+			std::string coreStr = "core";
+
+			findCPULoads();
+			for (i = 0; i < cpu_core_loads.size(); i++) {
+				coreStr.append(std::to_string(i));
+				core_loads.add (pcf::IndiElement(coreStr));
+   				core_loads[coreStr].set<double>(0.0);
+				coreStr.pop_back();
+			}
+
+			findCPUTemperatures(coreTemps);
+			for (i = 0; i < coreTemps.size(); i++) {
+				coreStr.append(std::to_string(i));
+				core_temps.add (pcf::IndiElement(coreStr));
+   				core_temps[coreStr].set<double>(0.0);
+				coreStr.pop_back();
+			}
+
+			std::string driveStr = "drive";
+			findDiskTemperature(diskTemp);
+			for (i = 0; i < diskTemp.size(); i++) {
+				driveStr.append(std::to_string(i));
+				drive_temps.add (pcf::IndiElement(driveStr));
+   				drive_temps[driveStr].set<double>(0.0);
+				driveStr.pop_back();
+			}
+
+			root_usage.add(pcf::IndiElement("root_usage"));
+			root_usage["root_usage"].set<double>(0.0);
+
+			boot_usage.add(pcf::IndiElement("boot_usage"));
+			boot_usage["boot_usage"].set<double>(0.0);
+
+			data_usage.add(pcf::IndiElement("data_usage"));
+			data_usage["data_usage"].set<double>(0.0);
+
+			ram_usage_indi.add(pcf::IndiElement("ram_usage"));
+			ram_usage_indi["ram_usage"].set<double>(0.0);
+
+
 			return 0;
 		}
 
 		int sysMonitor::appLogic()
 		{
-			std::cout << m_warningCoreTemp << " " << m_criticalCoreTemp << " " << m_warningDiskTemp << " " << m_criticalDiskTemp << std::endl;
+			//std::cout << m_warningCoreTemp << " " << m_criticalCoreTemp << " " << m_warningDiskTemp << " " << m_criticalDiskTemp << std::endl;
 
 			bool warningLog = false;
 			bool alertLog = false;
 
-			std::vector<float> coreTemps;
+			coreTemps.clear();
 			int rvCPUTemp = findCPUTemperatures(coreTemps);
 			for (auto i: coreTemps)
 			{
-				std::cout << "Core temps: " << i << ' ';
+				std::cout << "Core temp: " << i << ' ';
 			}	
 			std::cout << std::endl;
 			int rv = criticalCoreTemperature(coreTemps);
 
-			std::vector<float> cpu_core_loads;
-			int rvCPULoad = findCPULoads(cpu_core_loads);
+			cpu_core_loads.clear();
+			int rvCPULoad = findCPULoads();
 			for (auto i: cpu_core_loads)
 			{
-				std::cout << "CPU loads: " << i << ' ';
+				std::cout << "CPU load: " << i << ' ';
 			}
 			std::cout << std::endl;
 			
@@ -131,19 +201,16 @@ namespace MagAOX
 				log<core_mon>({coreTemps, cpu_core_loads}, logPrio::LOG_INFO);
 			}
 			
-
-			std::vector<float> diskTemp;
+			diskTemp.clear();
 			int rvDiskTemp = findDiskTemperature(diskTemp);
 			for (auto i: diskTemp)
 			{
-				std::cout << "Disk temps: " << i << ' ';
+				std::cout << "Disk temp: " << i << ' ';
 			}
 			std::cout << std::endl;
 			rv = criticalDiskTemperature(diskTemp);
 
-			float rootUsage = 0, dataUsage = 0, bootUsage = 0;
 			int rvDiskUsage = findDiskUsage(rootUsage, dataUsage, bootUsage);
-
 			std::cout << "/ usage: " << rootUsage << std::endl;
 			std::cout << "/data usage: " << dataUsage << std::endl;	
 			std::cout << "/boot usage: " << bootUsage << std::endl;
@@ -156,12 +223,12 @@ namespace MagAOX
 				log<drive_mon>({diskTemp, rootUsage, dataUsage, bootUsage}, logPrio::LOG_INFO);
 			}
 
-
-			float ramUsage = 0;
 			int rvRamUsage = findRamUsage(ramUsage);
 			std::cout << "Ram usage: " << ramUsage << std::endl;
 
 			log<ram_usage>({ramUsage}, logPrio::LOG_INFO);
+
+			updateVals();
 			
 			return 0;
 		}
@@ -287,7 +354,7 @@ namespace MagAOX
 	     	return rv;
 	    }
 
-	    int sysMonitor::findCPULoads(std::vector<float>& cpu_core_loads) 
+	    int sysMonitor::findCPULoads() 
 	    {
 	     	char command[35];
 	     	std::string line;
@@ -571,6 +638,55 @@ namespace MagAOX
 	     		return 1;
 	     	}
 	    }
+	    int sysMonitor::updateVals()
+		{
+			int i;
+			std::string coreStr = "core";
+			std::string driveStr = "drive";
+
+			for (i = 0; i < cpu_core_loads.size(); i++) {
+				coreStr.append(std::to_string(i));
+				core_loads[coreStr] = cpu_core_loads[i];
+				coreStr.pop_back();
+			}
+			core_loads.setState (pcf::IndiProperty::Ok);
+		   	if(m_indiDriver) m_indiDriver->sendSetProperty (core_loads);
+
+			for (i = 0; i < coreTemps.size(); i++) {
+				coreStr.append(std::to_string(i));
+				core_temps[coreStr] = coreTemps[i];
+				coreStr.pop_back();
+			}
+			core_temps.setState (pcf::IndiProperty::Ok);
+		   	if(m_indiDriver) m_indiDriver->sendSetProperty (core_temps);
+
+		   	for (i = 0; i < diskTemp.size(); i++) {
+				driveStr.append(std::to_string(i));
+				drive_temps[driveStr] = diskTemp[i];
+				driveStr.pop_back();
+			}
+			drive_temps.setState (pcf::IndiProperty::Ok);
+		   	if(m_indiDriver) m_indiDriver->sendSetProperty (drive_temps);
+
+		   	root_usage["root_usage"] = rootUsage;
+		   	root_usage.setState (pcf::IndiProperty::Ok);
+		   	if(m_indiDriver) m_indiDriver->sendSetProperty (root_usage);
+
+		   	boot_usage["boot_usage"] = bootUsage;
+		   	boot_usage.setState (pcf::IndiProperty::Ok);
+		   	if(m_indiDriver) m_indiDriver->sendSetProperty (boot_usage);
+
+		   	data_usage["data_usage"] = dataUsage;
+		   	data_usage.setState (pcf::IndiProperty::Ok);
+		   	if(m_indiDriver) m_indiDriver->sendSetProperty (data_usage);
+
+		   	ram_usage_indi["ram_usage"] = ramUsage;
+		   	ram_usage_indi.setState (pcf::IndiProperty::Ok);
+		   	if(m_indiDriver) m_indiDriver->sendSetProperty (ram_usage_indi);
+
+			
+		   	return 0;
+		}
 
    } //namespace app
 } //namespace MagAOX
