@@ -80,7 +80,7 @@ namespace MagAOX
 			int findCPUTemperatures(std::vector<float>&);
 			int parseCPUTemperatures(std::string, float&);
 			int criticalCoreTemperature(std::vector<float>&);
-			int findCPULoads();
+			int findCPULoads(std::vector<float>&);
 			int parseCPULoads(std::string, float&);
 			int findDiskTemperature(std::vector<float>&);
 			int parseDiskTemperature(std::string, float&);
@@ -128,7 +128,7 @@ namespace MagAOX
 			int i;
 			std::string coreStr = "core";
 
-			findCPULoads();
+			findCPULoads(cpu_core_loads);
 			for (i = 0; i < cpu_core_loads.size(); i++) {
 				coreStr.append(std::to_string(i));
 				core_loads.add (pcf::IndiElement(coreStr));
@@ -186,7 +186,7 @@ namespace MagAOX
 			int rv = criticalCoreTemperature(coreTemps);
 
 			cpu_core_loads.clear();
-			int rvCPULoad = findCPULoads();
+			int rvCPULoad = findCPULoads(cpu_core_loads);
 			for (auto i: cpu_core_loads)
 			{
 				std::cout << "CPU load: " << i << ' ';
@@ -354,7 +354,7 @@ namespace MagAOX
 	     	return rv;
 	    }
 
-	    int sysMonitor::findCPULoads() 
+	    int sysMonitor::findCPULoads(std::vector<float>& loads) 
 	    {
 	     	char command[35];
 	     	std::string line;
@@ -388,7 +388,7 @@ namespace MagAOX
 	         	float loadVal;
 	         	int rv = parseCPULoads(line, loadVal);
 	         	if (rv == 0)
-	         		cpu_core_loads.push_back(loadVal);
+	         		loads.push_back(loadVal);
 	        }
 
 	        return 0;
