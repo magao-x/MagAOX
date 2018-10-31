@@ -527,15 +527,18 @@ namespace MagAOX
 	         	std::cerr << "Unable to open file" << std::endl;
 	         	return 1;
 	        }
-	         
+	        rv = 1; 
 	        // Want second line
 	        getline (inFile,line);
+
 	        while(getline(inFile,line)) 
 	        {
 	        	int rvDiskUsage = parseDiskUsage(line, rootUsage, dataUsage, bootUsage);
+	        	if (rvDiskUsage == 0)
+	        		rv = 0;
 	        }
 	         
-	        return rvDiskUsage;
+	        return rv;
 	    }
 
 	    int sysMonitor::parseDiskUsage(std::string line, float& rootUsage, float& dataUsage, float& bootUsage) 
