@@ -376,7 +376,6 @@ namespace MagAOX
 	         	return 1;
 	        }
 	        float cpu_load;
-	        int cores = 0;
 	        // Want to start at third line
 	        getline (inFile,line);
 	        getline (inFile,line);
@@ -384,7 +383,6 @@ namespace MagAOX
 	        getline (inFile,line);
 	        while (getline (inFile,line)) 
 	        {
-	        	cores++;
 	         	float loadVal;
 	         	int rv = parseCPULoads(line, loadVal);
 	         	if (rv == 0)
@@ -446,7 +444,8 @@ namespace MagAOX
 	    	{
 	         	float tempVal;
 	         	int rvHddTemp = parseDiskTemperature(line, tempVal);
-	         	hdd_temp.push_back(tempVal);
+	         	if (rvHddTemp == 0) 
+	         		hdd_temp.push_back(tempVal);
 	        }
 	        return 0;
 	    }
@@ -536,7 +535,7 @@ namespace MagAOX
 	        	int rvDiskUsage = parseDiskUsage(line, rootUsage, dataUsage, bootUsage);
 	        }
 	         
-	        return 0;
+	        return rvDiskUsage;
 	    }
 
 	    int sysMonitor::parseDiskUsage(std::string line, float& rootUsage, float& dataUsage, float& bootUsage) 
@@ -614,7 +613,7 @@ namespace MagAOX
 	        getline (inFile,line);
 	        getline (inFile,line);
 	        int rvRamUsage = parseRamUsage(line, ramUsage);
-	        return 0;
+	        return rvRamUsage;
 	    }
 
 	    int sysMonitor::parseRamUsage(std::string line, float& ramUsage) 
