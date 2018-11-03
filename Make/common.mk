@@ -41,8 +41,7 @@ OPTIMIZE ?= -O3 -fopenmp -ffast-math
 EXTRA_LDFLAGS ?=
 
 #the required librarires
-EXTRA_LDLIBS ?= -lmxlib \
-  -lsofa_c \
+EXTRA_LDLIBS ?=  -lsofa_c \
   -lboost_system \
   -lboost_filesystem \
   -ludev \
