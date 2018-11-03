@@ -34,6 +34,8 @@ apps/xindiserver/tests/tunneledHost_test
 apps/xindiserver/tests/xindiserver_test
 apps/xindiserver/xindiserver
 
+apps/sysMonitor/sysMonitor
+
 apps/sshDigger/sshDigger
 
 apps/zaberCtrl/zaberCtrl
