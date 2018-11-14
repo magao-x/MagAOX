@@ -6,12 +6,15 @@ state_change             20       state_change
 software_log             50       software_log
 indidriver_start         140      empty_log
 indidriver_stop          141      empty_log
+
+core_mon		             826      core_mon
+drive_mon		             827      drive_mon
+ram_usage		             865      ram_usage
+
 loop_closed              1001     empty_log
 loop_paused              1002     empty_log
 loop_open                1003     empty_log
 pdu_outlet_state         12001    pdu_outlet_state
 fxngen_params            12100    fxngen_params
 ttmmod_params            12110    ttmmod_params
-core_mon		 826      core_mon
-drive_mon		 827      drive_mon
-ram_usage		 865      ram_usage
+ocam_temps               12120    ocam_temps
