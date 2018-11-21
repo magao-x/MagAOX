@@ -67,6 +67,8 @@ namespace MagAOX
 
 		void ttmTalker::loadConfig()
 		{
+			this->m_speed = B115200; //default for Zaber stages.  Will be overridden by any config setting.
+
 			int rv = tty::usbDevice::loadConfig(config);
 
    			if(rv != 0 && rv != TTY_E_NODEVNAMES && rv != TTY_E_DEVNOTFOUND) //Ignore error if not plugged in
@@ -77,11 +79,27 @@ namespace MagAOX
 
 		int ttmTalker::appStartup()
 		{
+			if( state() == stateCodes::UNINITIALIZED )
+			{
+      			log<text_log>( "In appStartup but in state UNINITIALIZED.", logPrio::LOG_CRITICAL );
+    			return -1;
+   			}
+
+   			//Get the USB device if it's in udev
+   			if(m_deviceName == "") state(stateCodes::NODEVICE);
+   			else
+   			{
+    			state(stateCodes::NOTCONNECTED);
+    			std::stringstream logs;
+    			logs << "USB Device " << m_idVendor << ":" << m_idProduct << ":" << m_serial << " found in udev as " << m_deviceName;
+    			log<text_log>(logs.str());
+   			}
 			return 0;
 		}
 
 		int ttmTalker::appLogic()
 		{	
+			std::cerr << tty::usbDevice::m_idVendor << std::endl;
 			if( state() == stateCodes::INITIALIZED )
    			{
       			log<text_log>( "In appLogic but in state INITIALIZED.", logPrio::LOG_CRITICAL );
@@ -137,6 +155,7 @@ namespace MagAOX
 		      	   log<text_log>(logs.str());
 		      	}
 		    }
+
 			if( state() == stateCodes::ERROR )
 	   		{
 	     		int rv = tty::usbDevice::getDeviceName();
@@ -169,6 +188,7 @@ namespace MagAOX
 	        		log<text_log>("Error NOT due to loss of USB connection.  I can't fix it myself.", logPrio::LOG_CRITICAL);
 	      		}
 	   		}
+	   		
 			return 0;
 		}
 
