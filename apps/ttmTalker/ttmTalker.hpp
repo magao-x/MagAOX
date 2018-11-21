@@ -99,7 +99,6 @@ namespace MagAOX
 
 		int ttmTalker::appLogic()
 		{	
-			std::cerr << tty::usbDevice::m_idVendor << std::endl;
 			if( state() == stateCodes::INITIALIZED )
    			{
       			log<text_log>( "In appLogic but in state INITIALIZED.", logPrio::LOG_CRITICAL );
