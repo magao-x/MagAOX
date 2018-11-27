@@ -227,7 +227,7 @@ private:
    ///@} -- logging
 
    /** \name Signal Handling
-     * @{
+     * @{libMagAOX/logger/types/software_log.hpp
      */
 private:
 
