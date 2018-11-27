@@ -213,6 +213,17 @@ public:
    template<typename logT, int retval=0>
    static int log( logPrioT level = logPrio::LOG_DEFAULT /**< [in] [optional] the log level.  The default is used if not specified.*/);
 
+private:
+   /// Callback for config system logging.
+   /** Called by appConfigurator each time a value is set using the config() operator.
+     * You never need to call this directly.
+     */
+   static void configLog( const std::string & name,  ///< [in] The name of the config value
+                          const int & code,          ///< [in] numeric code specifying the type 
+                          const std::string & value, ///< [in] the value read by the config system
+                          const std::string & source ///< [in] the source of the value.
+                        );
+   
    ///@} -- logging
 
    /** \name Signal Handling
@@ -633,6 +644,10 @@ MagAOXApp<_useINDI>::MagAOXApp( const std::string & git_sha1,
 
    m_self = this;
 
+   //Set up config logging
+   config.m_sources = true;
+   config.configLog = configLog;
+   
    //We log the current GIT status.
    logPrioT gl = logPrio::LOG_INFO;
    if(git_modified) gl = logPrio::LOG_WARNING;
@@ -954,6 +969,16 @@ int MagAOXApp<_useINDI>::log( logPrioT level)
 {
    m_log.log<logT>(level);
    return retval;
+}
+
+template<bool _useINDI>
+void MagAOXApp<_useINDI>::configLog( const std::string & name,
+                                     const int & code,
+                                     const std::string & value,
+                                     const std::string & source
+                                   )
+{
+   m_log.log<config_log>({name, code, value, source});
 }
 
 template<bool _useINDI>

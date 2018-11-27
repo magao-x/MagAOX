@@ -19,7 +19,7 @@ namespace logger
 {
 
 
-/// Log entry recording the build-time git state.
+/// Log entry recording the function generator parameters
 /** \ingroup logger_types
   */
 struct fxngen_params : public flatbuffer_log

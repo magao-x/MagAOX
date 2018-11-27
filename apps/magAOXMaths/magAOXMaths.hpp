@@ -12,6 +12,16 @@ namespace MagAOX
 namespace app
 {
 
+void externalLog ( const std::string & name,
+                         const int & code,
+                         const std::string & valueStr,
+                         const std::string & source
+                       )
+{
+   std::cerr << name << " " << code << " " << valueStr << " " << source << "\n";
+}
+
+                       
 /** MagAO-X application to do math on some numbers
   *
   */
@@ -64,8 +74,6 @@ public:
 
 magAOXMaths::magAOXMaths() : MagAOXApp(MAGAOX_CURRENT_SHA1, MAGAOX_REPO_MODIFIED)
 {
-  
-   
    return;
 }
 
