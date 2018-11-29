@@ -11,7 +11,7 @@ sudo cp CentOS-RT.repo /etc/yum.repos.d/
 wget linuxsoft.cern.ch/cern/slc5X/i386/RPM-GPG-KEYs/RPM-GPG-KEY-cern
 sudo cp RPM-GPG-KEY-cern /etc/pki/rpm-gpg/
 sudo yum groupinstall RT
-sudo yum kernel-rt-devel
+sudo yum install kernel-rt-devel
 ```
 Now reboot.  It should fail to start X if you have a graphics environment going.  That's fine, you'd need to kill it anyway to install the driver.
 
@@ -68,7 +68,11 @@ which will cause the build configuration to accept that you have the PREEMPT ker
 ./nvidia-installer
 ```
 
-Now reboot.  After it completes, in a terminal type
+The first time you run `nvidia-installer`, it may fail due to the Noveau driver.  Allow the installer to install the blacklist files automatically, and then reboot. This will remove the conflict, so the 2nd time you run `nvidia-installer` it should work.
+
+If you are using the `devtools`, which provides a more advanced `gcc`, the installer will complain.  It seems to be ok to ignore the CC version check.
+
+After the installer completes, reboot.  After it completes, in a terminal type
 ```
 dmesg | grep NV
 ```
@@ -80,6 +84,8 @@ which should produce two lines something like
 in addition to several others.  This indicates that the driver is being loaded and works.  You can also run `nvidia-smi` to verify that it is working with the installed GPU.
 
 ### 2.4 Restoring X
+Ignore this step if you do not intend to run X.
+
 To test booting into graphical mode, if you changed the default target you can do:
 - Temporarily, from command line:
 ```
@@ -102,13 +108,15 @@ Install NVIDIA Accelerated Graphics Driver for Linux-x86_64 410.48?
 (y)es/(n)o/(q)uit: n
 ```
 
-After it's installed, created a file `/etc/ld.so.conf.d/cuda.conf` with contents:
+Do install the samples, and do make a symbolic link for `/usr/local/cuda`.
+
+After it's installed, create a file `/etc/ld.so.conf.d/cuda.conf` with contents:
 ```
-/etc/ld.so.conf.d/cuda.conf
+/usr/local/cuda/lib64
 ```
 and run `ldconfig`.  Then add `/usr/local/cuda-10.0/bin` to your path.  This can be done for a single user in `~/.bashrc` with the line:
 ```
-PATH=$PATH:/usr/local/cuda-10.0/bin
+PATH=$PATH:/usr/local/cuda/bin
 ```
 or for all users by creating a file `/etc/profile.d/cuda.sh` with the same contents.
 
@@ -129,4 +137,9 @@ Computing result using host CPU...done.
 Comparing CUBLAS Matrix Multiply with CPU results: PASS
 
 NOTE: The CUDA Samples are not meant for performance measurements. Results may vary when GPU Boost is enabled.
+```
+
+To get the maximum speed, you will need to enable persistance mode, like so:
+```
+sudo nvidia-smi -pm ENABLED -i 0
 ```
