@@ -53,6 +53,8 @@ namespace MagAOX
    /// Do any needed shutdown tasks.  Currently nothing in this app.
 			virtual int appShutdown();
 
+			virtual int callCommand();
+
 		};
 
 		ttmTalker::ttmTalker() : MagAOXApp(MAGAOX_CURRENT_SHA1, MAGAOX_REPO_MODIFIED)
@@ -133,12 +135,13 @@ namespace MagAOX
       			else
       			{
 					state(stateCodes::NOTCONNECTED);
-					if(!stateLogged())
-					{
+					//if(!stateLogged())
+					//{
 						std::stringstream logs;
             			logs << "USB Device " << m_idVendor << ":" << m_idProduct << ":" << m_serial << " found in udev as " << m_deviceName;
             			log<text_log>(logs.str());
-         			}
+            			callCommand();
+         			//}
       			}
 
    			}
@@ -146,6 +149,42 @@ namespace MagAOX
 			if( state() == stateCodes::NOTCONNECTED )
 		   	{
 		      	//if( testConnection() == ZC_CONNECTED) state(stateCodes::CONNECTED);
+		      	int rv = euidCalled();
+		      	if(rv < 0)
+    			{
+    				log<software_critical>({__FILE__, __LINE__});
+    				state(stateCodes::FAILURE);
+    				return -1;
+				}
+				rv = euidReal();
+      			if(rv < 0)
+      			{
+         			log<software_critical>({__FILE__, __LINE__});
+         			state(stateCodes::FAILURE);
+         			return -1;
+				}
+		   		int fileDescrip;
+            	MagAOX::tty::ttyOpenRaw(
+            		fileDescrip,      	///< [out] the file descriptor.  Set to 0 on an error.
+               		m_deviceName, 		///< [in] the device path name, e.g. /dev/ttyUSB0
+                	B115200             ///< [in] indicates the baud rate (see http://pubs.opengroup.org/onlinepubs/7908799/xsh/termios.h.html)
+              	);
+            	std::cout << m_deviceName << "    " << fileDescrip << std::endl;
+            	std::string buffer;
+            	buffer.resize(6);
+            	buffer[0] = 0x23;
+            	buffer[1] = 0x02;
+            	buffer[2] = 0x00;
+            	buffer[3] = 0x00;
+            	buffer[4] = 0x50;
+            	buffer[5] = 0x01;
+            	MagAOX::tty::ttyWrite(
+            		buffer, 			///< [in] The characters to write to the tty.
+              		fileDescrip,        ///< [in] The file descriptor of the open tty.
+					2000				///< [in] The timeout in milliseconds.
+            	);
+
+				return -1;
 
 		      	if(state() == stateCodes::CONNECTED && !stateLogged())
 		      	{
@@ -153,6 +192,7 @@ namespace MagAOX
 		      	   logs << "Connected to stage(s) on " << m_deviceName;
 		      	   log<text_log>(logs.str());
 		      	}
+
 		    }
 
 			if( state() == stateCodes::ERROR )
@@ -193,6 +233,33 @@ namespace MagAOX
 
 	int ttmTalker::appShutdown()
 		{
+			return 0;
+		}
+
+		int ttmTalker::callCommand()
+		{
+			/*
+			// Set baud rate to 115200.
+			ftStatus = FT_SetBaudRate(m_hFTDevice, (ULONG)uBaudRate);
+			// 8 data bits, 1 stop bit, no parity
+			ftStatus = FT_SetDataCharacteristics(m_hFTDevice, FT_BITS_8, FT_STOP_BITS_1,
+			FT_PARITY_NONE);
+			// Pre purge dwell 50ms.
+			Sleep(uPrePurgeDwell);
+			// Purge the device.
+			ftStatus = FT_Purge(m_hFTDevice, FT_PURGE_RX | FT_PURGE_TX);
+			// Post purge dwell 50ms.
+			Sleep(uPostPurgeDwell);
+			Page 27 of 367Thorlabs APT Controllers
+			Host-Controller Communications Protocol
+			Issue 23
+			// Reset device.
+			ftStatus = FT_ResetDevice(m_hFTDevice);
+			// Set flow control to RTS/CTS.
+			ftStatus = FT_SetFlowControl(m_hFTDevice, FT_FLOW_RTS_CTS, 0, 0);
+			// Set RTS.
+			ftStatus = FT_SetRts(m_hFTDevice);
+			*/
 			return 0;
 		}
 

@@ -1,11 +1,11 @@
-/** \file ttmmod_params.hpp
-  * \brief The MagAO-X logger ttmmod_params log type.
-  * \author Jared R. Males (jaredmales@gmail.com)
+/** \file ram_usage.hpp
+  * \brief The MagAO-X logger ram usage log type.
+  * \author Chris Bohlman (cbohlmanaz@gmail.com)
   *
   * \ingroup logger_types_files
   *
   * History:
-  * - 2018-09-06 created by JRM
+  * - 2018-10-15 created by JRM
   */
 #ifndef logger_types_ram_usage_hpp
 #define logger_types_ram_usage_hpp

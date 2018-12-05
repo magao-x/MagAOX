@@ -1,4 +1,12 @@
-// inter process communications system: INDI in magaoxmaths
+/** \file sysMonitor.hpp
+  * \brief The MagAO-X sysMonitor app header file.
+  * \author Chris Bohlman (cbohlmanaz@gmail.com)
+  *
+  * \ingroup sysMonitor_files
+  *
+  * History:
+  * - 2018-08-10 created by CJB
+  */
 #ifndef sysMonitor_hpp
 #define sysMonitor_hpp
 
@@ -46,11 +54,6 @@ namespace MagAOX
 			std::vector<float> diskTemp;
 			float rootUsage = 0, dataUsage = 0, bootUsage = 0;
 			float ramUsage = 0;
-
-
-
-
-
 
 		public:
 
