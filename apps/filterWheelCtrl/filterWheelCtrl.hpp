@@ -13,6 +13,19 @@
 #include "magaox_git_version.h"
 
 
+/** \defgroup filterWheelCtrl Filter Wheel Control
+  * \brief Control of MagAO-X MCBL-based f/w.
+  * 
+  * \link page_module_filterWheelCtrl Application Documentation
+  * 
+  * \ingroup apps
+  * 
+  */
+
+/** \defgroup filterWheelCtrl_files Filter Wheel Control Files
+  * \ingroup filterWheelCtrl
+  */
+
 namespace MagAOX
 {
 namespace app
@@ -22,7 +35,10 @@ namespace app
   *
   * \todo add temperature monitoring
   * \todo add power monitoring
+  * \todo add INDI props to md doc
+  * \todo should move in least time direction, rather than always in the same direction.
   * 
+  * \ingroup filterWheelCtrl
   */
 class filterWheelCtrl : public MagAOXApp<>, public tty::usbDevice
 {

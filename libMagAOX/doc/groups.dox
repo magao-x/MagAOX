@@ -57,3 +57,11 @@
 /** \defgroup tty_files TTY files 
   * \ingroup tty 
   */
+  
+/** \defgroup apps Applications
+  * \brief MagAO-X Applications
+  */
+  
+
+  
+

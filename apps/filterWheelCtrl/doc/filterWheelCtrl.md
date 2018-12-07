@@ -1,4 +1,4 @@
-filterWheelCtrl
+filterWheelCtrl {#page_module_filterWheelCtrl}
 ==========
 
 [TOC]
@@ -23,7 +23,7 @@ filterWheelCtrl [options]
 
 # C.L. OPTIONS
 
-|Short | Long                 |    Config-File       |     Type          | Description  |
+|Short | Long                 |    Config-File*      |     Type          | Description  |
 | ---  | ---                  | ---                  |   ---             | ---          |
 |   -c | --config             | config               |   string          | A local config file |
 |   -h | --help               |                      |   none            | Print this message and exit | 
@@ -52,6 +52,13 @@ filterWheelCtrl [options]
 |      | --motor.powerOnHome  | motor.powerOnHome    | bool              |     If true, home at startup/power-on. Default=false.
 |      | --filters.names      | filters.names        | vector<string>    | The names of the filters. 
 |      | --filters.positions  | filters.positions    | vector<double>    | The positions of the filters.  If omitted or 0 then order is used.
+
+`*` format in the config file column is section.option which implies the format 
+```
+[section]
+option=value
+```
+in the config file.
 
 # INDI PROPERTIES
 
