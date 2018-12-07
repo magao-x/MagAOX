@@ -494,6 +494,7 @@ int siglentSDG::appLogic()
          return 0;
       }
    }
+   
    if( state() == stateCodes::NOTCONNECTED || state() == stateCodes::ERROR )
    {
       int rv = m_telnetConn.connect(m_deviceAddr, m_devicePort);
@@ -826,7 +827,6 @@ int siglentSDG::writeRead( std::string & strRead,
                          )
 {
    int rv;
-   //Scoping the mutex
 
    rv = m_telnetConn.writeRead(command, false, m_writeTimeOut, m_readTimeOut);
    strRead = m_telnetConn.m_strRead;

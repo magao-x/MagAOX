@@ -45,6 +45,8 @@ apps/siglentSDG/tests/siglentSDG_test
 
 apps/ttmModulator/ttmModulator
 
+apps/filterWheelCtrl/filterWheelCtrl
+
 utils/logdump/logdump
 utils/cursesINDI/cursesINDI
 

@@ -71,6 +71,7 @@ int usbDevice::loadConfig( mx::appConfigurator & config )
    //Then multiply by 10 for the switch statement.
    float baud = 0;
    config(baud, "usb.baud");
+   
    switch((int)(baud*10))
    {
       case 0:
@@ -118,7 +119,6 @@ int usbDevice::loadConfig( mx::appConfigurator & config )
          m_speed = B38400;
          break;
       default:
-         m_speed = 0;
          break;
    }
 

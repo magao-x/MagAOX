@@ -32,11 +32,14 @@ protected:
    unsigned long m_powerOnWait {6000000000}; ///< Time in nsec to wait for camera boot after power on.
    
    
-   
    float m_fpsSet {0};
    
    
    int m_powerOnCounter {0}; ///< Counts numer of loops after power on, implements delay for camera bootup.
+   
+
+
+   
 public:
 
    ocam2KCtrl();
@@ -72,6 +75,19 @@ public:
    
    int getTemps();
    int getFPS();
+   
+   //INDI:
+protected:
+   //declare our properties
+   pcf::IndiProperty m_indiP_temps;
+   pcf::IndiProperty m_indiP_binning;
+   pcf::IndiProperty m_indiP_fps;
+   
+public:
+   INDI_NEWCALLBACK_DECL(ocam2KCtrl, m_indiP_temps);
+   INDI_NEWCALLBACK_DECL(ocam2KCtrl, m_indiP_binning);
+   INDI_NEWCALLBACK_DECL(ocam2KCtrl, m_indiP_fps);
+   
 };
 
 inline
@@ -181,7 +197,34 @@ int pdvSerialWriteRead( std::string & response,
 inline
 int ocam2KCtrl::appStartup()
 {
-
+   // set up the  INDI properties
+   REG_INDI_NEWPROP(m_indiP_temps, "temps", pcf::IndiProperty::Number);
+   m_indiP_temps.add (pcf::IndiElement("ccd"));
+   m_indiP_temps["ccd"].set(0);
+   m_indiP_temps.add (pcf::IndiElement("cpu"));
+   m_indiP_temps["cpu"].set(0);
+   m_indiP_temps.add (pcf::IndiElement("power"));
+   m_indiP_temps["power"].set(0);
+   m_indiP_temps.add (pcf::IndiElement("bias"));
+   m_indiP_temps["bias"].set(0);
+   m_indiP_temps.add (pcf::IndiElement("water"));
+   m_indiP_temps["water"].set(0);
+   m_indiP_temps.add (pcf::IndiElement("left"));
+   m_indiP_temps["left"].set(0);
+   m_indiP_temps.add (pcf::IndiElement("right"));
+   m_indiP_temps["right"].set(0);
+   m_indiP_temps.add (pcf::IndiElement("set"));
+   m_indiP_temps["set"].set(0);
+   m_indiP_temps.add (pcf::IndiElement("cooling"));
+   m_indiP_temps["cooling"].set(0);
+   
+   REG_INDI_NEWPROP(m_indiP_binning, "binning", pcf::IndiProperty::Number);
+   m_indiP_binning.add (pcf::IndiElement("binning"));
+   m_indiP_binning["binning"].set(0);
+   
+   REG_INDI_NEWPROP(m_indiP_fps, "fps", pcf::IndiProperty::Number);
+   m_indiP_fps.add (pcf::IndiElement("fps"));
+   m_indiP_fps["fps"].set(0);
    
    if(pdvInit() < 0) return -1;
 
