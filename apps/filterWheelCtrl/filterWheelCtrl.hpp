@@ -20,7 +20,9 @@ namespace app
 
 /** MagAO-X application to control a filter wheel.
   *
-  *
+  * \todo add temperature monitoring
+  * \todo add power monitoring
+  * 
   */
 class filterWheelCtrl : public MagAOXApp<>, public tty::usbDevice
 {
@@ -250,6 +252,9 @@ void filterWheelCtrl::setupConfig()
    
    tty::usbDevice::setupConfig(config);
    
+   config.add("timeouts.write", "", "timeouts.write", mx::argType::Required, "timeouts", "write", false, "int", "The timeout for writing to the device [msec]. Default = 1000");
+   config.add("timeouts.read", "", "timeouts.read", mx::argType::Required, "timeouts", "read", false, "int", "The timeout for reading the device [msec]. Default = 1000");
+   
    config.add("motor.acceleration", "", "motor.acceleration", mx::argType::Required, "motor", "acceleration", false, "real", "The motor acceleration parameter. Default=1000.");
    config.add("motor.speed", "", "motor.speed", mx::argType::Required, "motor", "speeed", false, "real", "The motor speed parameter.  Default=1000.");
    config.add("motor.circleSteps", "", "motor.circleSteps", mx::argType::Required, "motor", "circleSteps", false, "long", "The number of steps in 1 revolution.");
@@ -257,7 +262,7 @@ void filterWheelCtrl::setupConfig()
    config.add("motor.powerOnHome", "", "motor.powerOnHome", mx::argType::Required, "motor", "powerOnHome", false, "bool", "If true, home at startup/power-on.  Default=false.");
    
    config.add("filters.names", "", "filters.names",  mx::argType::Required, "filters", "names", false, "vector<string>", "The names of the filters.");
-   config.add("filters.positions", "", "filters.positions",  mx::argType::Required, "filters", "positions", false, "vector<double>", "The positions of the filters.  If 0 then order is used.");
+   config.add("filters.positions", "", "filters.positions",  mx::argType::Required, "filters", "positions", false, "vector<double>", "The positions of the filters.  If omitted or 0 then order is used.");
 }
 
 inline
@@ -271,6 +276,9 @@ void filterWheelCtrl::loadConfig()
    {
       log<software_error>( {__FILE__, __LINE__, rv, tty::ttyErrorString(rv)});
    }
+   
+   config(m_writeTimeOut, "timeouts.write");
+   config(m_readTimeOut, "timeouts.read");
    
    config(m_acceleration, "motor.acceleration");
    config(m_motorSpeed, "motor.speed");
