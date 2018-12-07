@@ -21,7 +21,7 @@ filterWheelCtrl [options]
 
 `filterWheelCtrl` controls an MCBL 3006S based filter wheel for MagAO-X.  As of Dec, 2018, there are 6 such wheels in MagAO-X.  This program communicates with the MCBL 3006S controller via USB.  It monitors the position and motion status of the wheel, and via INDI accepts commands to home and change wheel position.
 
-# OPTIONS
+# C.L. OPTIONS
 
 |Short | Long                 |    Config-File       |     Type          | Description  |
 | ---  | ---                  | ---                  |   ---             | ---          |
@@ -52,6 +52,16 @@ filterWheelCtrl [options]
 |      | --motor.powerOnHome  | motor.powerOnHome    | bool              |     If true, home at startup/power-on. Default=false.
 |      | --filters.names      | filters.names        | vector<string>    | The names of the filters. 
 |      | --filters.positions  | filters.positions    | vector<double>    | The positions of the filters.  If omitted or 0 then order is used.
+
+# INDI PROPERTIES
+
+## Read-Only INDI Properties
+
+list them here
+
+## Read-Write INDI Properties
+
+list them here
 
 # EXIT STATUS
 

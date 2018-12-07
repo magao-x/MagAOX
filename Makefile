@@ -1,7 +1,7 @@
 
 libs_to_build = libtelnet
 
-apps_to_build = xindiserver sysMonitor trippLitePDU siglentSDG zaberCtrl magAOXMaths
+apps_to_build = xindiserver sysMonitor trippLitePDU siglentSDG filterWheelCtrl zaberCtrl magAOXMaths
 
 utils_to_build = logdump cursesINDI
 
