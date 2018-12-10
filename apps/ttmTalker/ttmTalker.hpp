@@ -172,17 +172,66 @@ namespace MagAOX
             	std::cout << m_deviceName << "    " << fileDescrip << std::endl;
             	std::string buffer;
             	buffer.resize(6);
-            	buffer[0] = 0x23;
-            	buffer[1] = 0x02;
+            	buffer[0] = 0x05;
+            	buffer[1] = 0x00;
             	buffer[2] = 0x00;
             	buffer[3] = 0x00;
             	buffer[4] = 0x50;
             	buffer[5] = 0x01;
-            	MagAOX::tty::ttyWrite(
-            		buffer, 			///< [in] The characters to write to the tty.
-              		fileDescrip,        ///< [in] The file descriptor of the open tty.
-					2000				///< [in] The timeout in milliseconds.
-            	);
+
+     //        	MagAOX::tty::ttyWrite(
+     //        		buffer, 			///< [in] The characters to write to the tty.
+     //          	fileDescrip,        ///< [in] The file descriptor of the open tty.
+	 // 			2000				///< [in] The timeout in milliseconds.
+     //        	);
+
+				std::string output;
+            	output.resize(90);
+            	rv = MagAOX::tty::ttyWriteRead( 
+            	  output,        		///< [out] The string in which to store the output.
+                  buffer, 				///< [in] The characters to write to the tty.
+                  "",      				///< [in] A sequence of characters which indicates the end of transmission.
+                  false,             	///< [in] If true, strWrite.size() characters are read after the write
+                  fileDescrip,          ///< [in] The file descriptor of the open tty.
+                  2000,             	///< [in] The write timeout in milliseconds.
+                  2000               	///< [in] The read timeout in milliseconds.
+                );
+
+            	switch(rv) {
+            		case TTY_E_NOERROR: 
+            			std::cout << "No error with read or write." << std::endl;
+            			for (int i = 0; i < output.size(); i++) {
+            				std::cout << std::hex << output[i] << std::endl;
+            			}
+            			break;
+            		case TTY_E_TIMEOUTONWRITEPOLL: 
+            			std::cout << "Error with write poll timeout." << std::endl;
+            			break;
+ 					case TTY_E_ERRORONWRITEPOLL:
+            			std::cout << "Error with write poll." << std::endl;
+            			break;
+					case TTY_E_TIMEOUTONWRITE:
+            			std::cout << "Error with write timeout." << std::endl;
+            			break;
+					case TTY_E_ERRORONWRITE:
+            			std::cout << "Error with writing to file." << std::endl;
+            			break;
+  					case TTY_E_TIMEOUTONREADPOLL:
+            			std::cout << "Error with read poll timeout." << std::endl;
+            			break;
+  					case TTY_E_ERRORONREADPOLL:
+            			std::cout << "Error with read poll." << std::endl;
+            			break;
+  					case TTY_E_TIMEOUTONREAD:
+            			std::cout << "Error with read timeout." << std::endl;
+            			break;
+					case TTY_E_ERRORONREAD:
+            			std::cout << "Error with reading from file." << std::endl;
+            			break;
+     				default:
+     					std::cout << "Something happened, but I don't know what." << std::endl;
+     					break;
+            	}
 
 				return -1;
 
