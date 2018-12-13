@@ -13,6 +13,7 @@
 #include <sstream>
 #include <algorithm>
 #include <iterator>
+#include <bitset>
 
 
 namespace MagAOX
@@ -196,13 +197,14 @@ namespace MagAOX
                   2000,             	///< [in] The write timeout in milliseconds.
                   2000               	///< [in] The read timeout in milliseconds.
                 );
-
+            	long serial;
+            	char temp[4];
+            	int iterator = 0;
             	switch(rv) {
-            		case TTY_E_NOERROR: 
+            		case TTY_E_NOERROR:
             			std::cout << "No error with read or write." << std::endl;
-            			for (int i = 0; i < output.size(); i++) {
-            				std::cout << std::hex << output[i] << std::endl;
-            			}
+            			std::cout << *((uint32_t *) (  output.data() + 6)) << '\t' << output.substr(10, 8) << std::endl;
+
             			break;
             		case TTY_E_TIMEOUTONWRITEPOLL: 
             			std::cout << "Error with write poll timeout." << std::endl;
