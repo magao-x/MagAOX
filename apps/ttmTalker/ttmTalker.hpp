@@ -1,4 +1,8 @@
-// inter process communications system: INDI in magaoxmaths
+/** \file ttmTalker.hpp
+  * \brief The ttm Talker for generic usb devices
+  *
+  * \ingroup ttmTalker_files
+  */
 #ifndef ttmTalker_hpp
 #define ttmTalker_hpp
 
@@ -51,7 +55,9 @@ namespace MagAOX
    			/// Implementation of the FSM for the maths.
 			virtual int appLogic();
 
-   /// Do any needed shutdown tasks.  Currently nothing in this app.
+			int testConnection();
+
+			/// Do any needed shutdown tasks.  Currently nothing in this app.
 			virtual int appShutdown();
 
 			virtual int callCommand();
@@ -149,21 +155,62 @@ namespace MagAOX
 
 			if( state() == stateCodes::NOTCONNECTED )
 		   	{
-		      	//if( testConnection() == ZC_CONNECTED) state(stateCodes::CONNECTED);
-		      	int rv = euidCalled();
+		      	if( testConnection() == 0) state(stateCodes::CONNECTED);
+
+		      	if(state() == stateCodes::CONNECTED && !stateLogged())
+		      	{
+		      	   std::stringstream logs;
+		      	   logs << "Connected to stage(s) on " << m_deviceName;
+		      	   log<text_log>(logs.str());
+		      	}
+
+		    }
+
+			if( state() == stateCodes::ERROR )
+	   		{
+	     		int rv = tty::usbDevice::getDeviceName();
+	      		if(rv < 0 && rv != TTY_E_DEVNOTFOUND && rv != TTY_E_NODEVNAMES)
+	      		{
+	        		state(stateCodes::FAILURE);
+	         		if(!stateLogged())
+	         		{
+	            		log<software_critical>({__FILE__, __LINE__, rv, tty::ttyErrorString(rv)});
+	         		}
+	         		return rv;
+	      		}
+
+	    		if(rv == TTY_E_DEVNOTFOUND || rv == TTY_E_NODEVNAMES)
+	      		{
+	         		state(stateCodes::NODEVICE);
+
+					if(!stateLogged())
+	        		{
+	            		std::stringstream logs;
+	            		logs << "USB Device " << m_idVendor << ":" << m_idProduct << ":" << m_serial << " not found in udev";
+	            		log<text_log>(logs.str());
+	         		}
+	        		return 0;
+	      		}
+
+	    		state(stateCodes::FAILURE);
+	    		if(!stateLogged())
+	    		{
+	        		log<text_log>("Error NOT due to loss of USB connection.  I can't fix it myself.", logPrio::LOG_CRITICAL);
+	      		}
+	   		}
+	   		
+			return 0;
+		}
+
+		int ttmTalker::testConnection() {
+			int rv = euidCalled();
 		      	if(rv < 0)
     			{
     				log<software_critical>({__FILE__, __LINE__});
     				state(stateCodes::FAILURE);
     				return -1;
 				}
-				rv = euidReal();
-      			if(rv < 0)
-      			{
-         			log<software_critical>({__FILE__, __LINE__});
-         			state(stateCodes::FAILURE);
-         			return -1;
-				}
+				
 		   		int fileDescrip;
             	MagAOX::tty::ttyOpenRaw(
             		fileDescrip,      	///< [out] the file descriptor.  Set to 0 on an error.
@@ -179,12 +226,6 @@ namespace MagAOX
             	buffer[3] = 0x00;
             	buffer[4] = 0x50;
             	buffer[5] = 0x01;
-
-     //        	MagAOX::tty::ttyWrite(
-     //        		buffer, 			///< [in] The characters to write to the tty.
-     //          	fileDescrip,        ///< [in] The file descriptor of the open tty.
-	 // 			2000				///< [in] The timeout in milliseconds.
-     //        	);
 
 				std::string output;
             	output.resize(90);
@@ -235,54 +276,26 @@ namespace MagAOX
      					break;
             	}
 
-				return -1;
+            	rv = euidReal();
+      			if(rv < 0)
+      			{
+         			log<software_critical>({__FILE__, __LINE__});
+         			state(stateCodes::FAILURE);
+         			return -1;
+				}
 
-		      	if(state() == stateCodes::CONNECTED && !stateLogged())
-		      	{
-		      	   std::stringstream logs;
-		      	   logs << "Connected to stage(s) on " << m_deviceName;
-		      	   log<text_log>(logs.str());
-		      	}
+            	if (*((uint32_t *) (  output.data() + 6)) == stoi(m_serial)) {
+            		std::cout << "Connection sucsessful" << std::endl;
+            		return 0;
+            	} else {
+            		std::cout << "Connection unsucsessful" << std::endl;
+            		return -1;
+            	}
 
-		    }
-
-			if( state() == stateCodes::ERROR )
-	   		{
-	     		int rv = tty::usbDevice::getDeviceName();
-	      		if(rv < 0 && rv != TTY_E_DEVNOTFOUND && rv != TTY_E_NODEVNAMES)
-	      		{
-	        		state(stateCodes::FAILURE);
-	         		if(!stateLogged())
-	         		{
-	            		log<software_critical>({__FILE__, __LINE__, rv, tty::ttyErrorString(rv)});
-	         		}
-	         		return rv;
-	      		}
-
-	    		if(rv == TTY_E_DEVNOTFOUND || rv == TTY_E_NODEVNAMES)
-	      		{
-	         		state(stateCodes::NODEVICE);
-
-					if(!stateLogged())
-	        		{
-	            		std::stringstream logs;
-	            		logs << "USB Device " << m_idVendor << ":" << m_idProduct << ":" << m_serial << " not found in udev";
-	            		log<text_log>(logs.str());
-	         		}
-	        		return 0;
-	      		}
-
-	    		state(stateCodes::FAILURE);
-	    		if(!stateLogged())
-	    		{
-	        		log<text_log>("Error NOT due to loss of USB connection.  I can't fix it myself.", logPrio::LOG_CRITICAL);
-	      		}
-	   		}
-	   		
-			return 0;
+				
 		}
 
-	int ttmTalker::appShutdown()
+		int ttmTalker::appShutdown()
 		{
 			return 0;
 		}
