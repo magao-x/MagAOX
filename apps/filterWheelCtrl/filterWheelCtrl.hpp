@@ -826,6 +826,7 @@ int filterWheelCtrl::home()
 
 int filterWheelCtrl::halt()
 {
+   m_homingState = 0;
    int rv = tty::ttyWrite( "DI\r", m_fileDescrip, m_writeTimeOut);
    if(rv < 0) return log<software_error,-1>({__FILE__,__LINE__,rv, tty::ttyErrorString(rv)});
    
