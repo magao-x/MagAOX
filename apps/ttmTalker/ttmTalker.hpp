@@ -153,9 +153,17 @@ namespace MagAOX
 
    			}
 
+   			if( state() == stateCodes::CONNECTED )
+		   	{
+		      	if( testConnection() != 0) state(stateCodes::NOTCONNECTED);
+		    }
+
 			if( state() == stateCodes::NOTCONNECTED )
 		   	{
-		      	if( testConnection() == 0) state(stateCodes::CONNECTED);
+		      	if( testConnection() == 0) {
+		      		state(stateCodes::CONNECTED);
+		      		std::cout << "Connection successful." << std::endl;
+		      	}
 
 		      	if(state() == stateCodes::CONNECTED && !stateLogged())
 		      	{
@@ -203,94 +211,67 @@ namespace MagAOX
 		}
 
 		int ttmTalker::testConnection() {
-			int rv = euidCalled();
-		      	if(rv < 0)
-    			{
-    				log<software_critical>({__FILE__, __LINE__});
-    				state(stateCodes::FAILURE);
-    				return -1;
-				}
-				
-		   		int fileDescrip;
-            	MagAOX::tty::ttyOpenRaw(
-            		fileDescrip,      	///< [out] the file descriptor.  Set to 0 on an error.
-               		m_deviceName, 		///< [in] the device path name, e.g. /dev/ttyUSB0
-                	B115200             ///< [in] indicates the baud rate (see http://pubs.opengroup.org/onlinepubs/7908799/xsh/termios.h.html)
-              	);
-            	std::cout << m_deviceName << "    " << fileDescrip << std::endl;
-            	std::string buffer;
-            	buffer.resize(6);
-            	buffer[0] = 0x05;
-            	buffer[1] = 0x00;
-            	buffer[2] = 0x00;
-            	buffer[3] = 0x00;
-            	buffer[4] = 0x50;
-            	buffer[5] = 0x01;
+			int uid_rv = euidCalled();
+	      	if(uid_rv < 0)
+			{
+				log<software_critical>({__FILE__, __LINE__});
+				state(stateCodes::FAILURE);
+				return -1;
+			}
+			
+	   		int fileDescrip = 0;
+        	int rv = MagAOX::tty::ttyOpenRaw(
+        		fileDescrip,      	///< [out] the file descriptor.  Set to 0 on an error.
+           		m_deviceName, 		///< [in] the device path name, e.g. /dev/ttyUSB0
+            	B115200             ///< [in] indicates the baud rate (see http://pubs.opengroup.org/onlinepubs/7908799/xsh/termios.h.html)
+          	);
+          	std::cout << MagAOX::tty::ttyErrorString(rv) << std::endl;
+        	std::cout << m_deviceName << "   " << fileDescrip << std::endl;
+        	std::string buffer;
+        	buffer.resize(6);
+        	buffer[0] = 0x05;
+        	buffer[1] = 0x00;
+        	buffer[2] = 0x00;
+        	buffer[3] = 0x00;
+        	buffer[4] = 0x50;
+        	buffer[5] = 0x01;
 
-				std::string output;
-            	output.resize(90);
-            	rv = MagAOX::tty::ttyWriteRead( 
-            	  output,        		///< [out] The string in which to store the output.
-                  buffer, 				///< [in] The characters to write to the tty.
-                  "",      				///< [in] A sequence of characters which indicates the end of transmission.
-                  false,             	///< [in] If true, strWrite.size() characters are read after the write
-                  fileDescrip,          ///< [in] The file descriptor of the open tty.
-                  2000,             	///< [in] The write timeout in milliseconds.
-                  2000               	///< [in] The read timeout in milliseconds.
-                );
-            	long serial;
-            	char temp[4];
-            	int iterator = 0;
-            	switch(rv) {
-            		case TTY_E_NOERROR:
-            			std::cout << "No error with read or write." << std::endl;
-            			std::cout << *((uint32_t *) (  output.data() + 6)) << '\t' << output.substr(10, 8) << std::endl;
+			std::string output;
+        	output.resize(90);
+        	rv = MagAOX::tty::ttyWriteRead( 
+        	  output,        		///< [out] The string in which to store the output.
+              buffer, 				///< [in] The characters to write to the tty.
+              "",      				///< [in] A sequence of characters which indicates the end of transmission.
+              false,             	///< [in] If true, strWrite.size() characters are read after the write
+              fileDescrip,          ///< [in] The file descriptor of the open tty.
+              2000,             	///< [in] The write timeout in milliseconds.
+              2000               	///< [in] The read timeout in milliseconds.
+            );
+            uid_rv = euidReal();
+  			if(uid_rv < 0)
+  			{
+     			log<software_critical>({__FILE__, __LINE__});
+     			state(stateCodes::FAILURE);
+     			return -1;
+			}
 
-            			break;
-            		case TTY_E_TIMEOUTONWRITEPOLL: 
-            			std::cout << "Error with write poll timeout." << std::endl;
-            			break;
- 					case TTY_E_ERRORONWRITEPOLL:
-            			std::cout << "Error with write poll." << std::endl;
-            			break;
-					case TTY_E_TIMEOUTONWRITE:
-            			std::cout << "Error with write timeout." << std::endl;
-            			break;
-					case TTY_E_ERRORONWRITE:
-            			std::cout << "Error with writing to file." << std::endl;
-            			break;
-  					case TTY_E_TIMEOUTONREADPOLL:
-            			std::cout << "Error with read poll timeout." << std::endl;
-            			break;
-  					case TTY_E_ERRORONREADPOLL:
-            			std::cout << "Error with read poll." << std::endl;
-            			break;
-  					case TTY_E_TIMEOUTONREAD:
-            			std::cout << "Error with read timeout." << std::endl;
-            			break;
-					case TTY_E_ERRORONREAD:
-            			std::cout << "Error with reading from file." << std::endl;
-            			break;
-     				default:
-     					std::cout << "Something happened, but I don't know what." << std::endl;
-     					break;
-            	}
+        	std::cout << MagAOX::tty::ttyErrorString(rv) << std::endl;
+        	if (rv == TTY_E_NOERROR)
+        	{
+        		std::cout << *((uint32_t *) (  output.data() + 6)) << "   " << output.substr(10, 8) << std::endl;
+        	} 
+        	else
+        	{
+        		return -1;
+        	}
 
-            	rv = euidReal();
-      			if(rv < 0)
-      			{
-         			log<software_critical>({__FILE__, __LINE__});
-         			state(stateCodes::FAILURE);
-         			return -1;
-				}
-
-            	if (*((uint32_t *) (  output.data() + 6)) == stoi(m_serial)) {
-            		std::cout << "Connection sucsessful" << std::endl;
-            		return 0;
-            	} else {
-            		std::cout << "Connection unsucsessful" << std::endl;
-            		return -1;
-            	}
+        	if (*((uint32_t *) (  output.data() + 6)) == stoi(m_serial)) {
+        		std::cout << "Serial number test successful" << std::endl;
+        		return 0;
+        	} else {
+        		std::cout << "Serial number test unsuccessful" << std::endl;
+        		return -1;
+        	}
 
 				
 		}
