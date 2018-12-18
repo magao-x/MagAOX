@@ -218,15 +218,25 @@ namespace MagAOX
 				state(stateCodes::FAILURE);
 				return -1;
 			}
-			
+
 	   		int fileDescrip = 0;
         	int rv = MagAOX::tty::ttyOpenRaw(
         		fileDescrip,      	///< [out] the file descriptor.  Set to 0 on an error.
            		m_deviceName, 		///< [in] the device path name, e.g. /dev/ttyUSB0
             	B115200             ///< [in] indicates the baud rate (see http://pubs.opengroup.org/onlinepubs/7908799/xsh/termios.h.html)
           	);
+
+          	uid_rv = euidReal();
+  			if(uid_rv < 0)
+  			{
+     			log<software_critical>({__FILE__, __LINE__});
+     			state(stateCodes::FAILURE);
+     			return -1;
+			}
+
           	std::cout << MagAOX::tty::ttyErrorString(rv) << std::endl;
         	std::cout << m_deviceName << "   " << fileDescrip << std::endl;
+        	
         	std::string buffer;
         	buffer.resize(6);
         	buffer[0] = 0x05;
@@ -235,7 +245,6 @@ namespace MagAOX
         	buffer[3] = 0x00;
         	buffer[4] = 0x50;
         	buffer[5] = 0x01;
-
 			std::string output;
         	output.resize(90);
         	rv = MagAOX::tty::ttyWriteRead( 
@@ -247,13 +256,7 @@ namespace MagAOX
               2000,             	///< [in] The write timeout in milliseconds.
               2000               	///< [in] The read timeout in milliseconds.
             );
-            uid_rv = euidReal();
-  			if(uid_rv < 0)
-  			{
-     			log<software_critical>({__FILE__, __LINE__});
-     			state(stateCodes::FAILURE);
-     			return -1;
-			}
+            
 
         	std::cout << MagAOX::tty::ttyErrorString(rv) << std::endl;
         	if (rv == TTY_E_NOERROR)
