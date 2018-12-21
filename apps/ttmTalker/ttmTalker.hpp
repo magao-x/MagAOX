@@ -164,7 +164,7 @@ namespace MagAOX
 				if( rv == 0) {
 		      		state(stateCodes::CONNECTED);
 		      		std::cout << "Connection successful." << std::endl;
-		      	} else if (rv == -2) {
+		      	} else if (rv == TTY_E_TCGETATTR) {
 		      		state(stateCodes::NODEVICE);
 		      	}
 
@@ -238,11 +238,10 @@ namespace MagAOX
 			}
 
 			if (rv != 0) {
-				std::cout << "open raw did not work" << std::endl;
-				return -2;
+				std::cout << MagAOX::tty::ttyErrorString(rv) << std::endl;
+				return rv;
 			}
 
-          	std::cout << MagAOX::tty::ttyErrorString(rv) << std::endl;
         	std::cout << m_deviceName << "   " << fileDescrip << std::endl;
         	
         	std::string buffer;
