@@ -160,9 +160,12 @@ namespace MagAOX
 
 			if( state() == stateCodes::NOTCONNECTED )
 		   	{
-		      	if( testConnection() == 0) {
+		      	int rv = testConnection();
+				if( rv == 0) {
 		      		state(stateCodes::CONNECTED);
 		      		std::cout << "Connection successful." << std::endl;
+		      	} else if (rv == -2) {
+		      		state(stateCodes::NODEVICE);
 		      	}
 
 		      	if(state() == stateCodes::CONNECTED && !stateLogged())
@@ -232,6 +235,11 @@ namespace MagAOX
      			log<software_critical>({__FILE__, __LINE__});
      			state(stateCodes::FAILURE);
      			return -1;
+			}
+
+			if (rv != 0) {
+				std::cout << "open raw did not work" << std::endl;
+				return -2;
 			}
 
           	std::cout << MagAOX::tty::ttyErrorString(rv) << std::endl;
