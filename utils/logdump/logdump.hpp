@@ -175,8 +175,11 @@ int logdump::execute()
                      //Check if a new file exists now.
                      size_t oldsz = logs.size();
                      logs = mx::ioutils::getFileNames( m_dir, m_prefixes[0], "", m_ext);
-                     if(logs.size() > oldsz) break;
-
+                     if(logs.size() > oldsz) 
+                     {
+                        //new file(s) detected;
+                        break;
+                     }
                      check = 0;
                   }
                }
@@ -187,6 +190,10 @@ int logdump::execute()
             }
          }
 
+         //We got here without any data, probably means time to get a new file.
+         if(nrd == 0) break;
+         
+         
          if( logHeader::msgLen0(head) == logHeader::MAX_LEN0-1)
          { 
             //Intermediate size message, read two more bytes
