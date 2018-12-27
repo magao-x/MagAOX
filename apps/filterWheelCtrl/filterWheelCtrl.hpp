@@ -10,7 +10,7 @@
 
 
 #include "../../libMagAOX/libMagAOX.hpp" //Note this is included on command line to trigger pch
-#include "magaox_git_version.h"
+#include "../../magaox_git_version.h"
 
 
 /** \defgroup filterWheelCtrl Filter Wheel Control
@@ -268,17 +268,17 @@ void filterWheelCtrl::setupConfig()
    
    tty::usbDevice::setupConfig(config);
    
-   config.add("timeouts.write", "", "timeouts.write", mx::argType::Required, "timeouts", "write", false, "int", "The timeout for writing to the device [msec]. Default = 1000");
-   config.add("timeouts.read", "", "timeouts.read", mx::argType::Required, "timeouts", "read", false, "int", "The timeout for reading the device [msec]. Default = 1000");
+   config.add("timeouts.write", "", "timeouts.write", argType::Required, "timeouts", "write", false, "int", "The timeout for writing to the device [msec]. Default = 1000");
+   config.add("timeouts.read", "", "timeouts.read", argType::Required, "timeouts", "read", false, "int", "The timeout for reading the device [msec]. Default = 1000");
    
-   config.add("motor.acceleration", "", "motor.acceleration", mx::argType::Required, "motor", "acceleration", false, "real", "The motor acceleration parameter. Default=1000.");
-   config.add("motor.speed", "", "motor.speed", mx::argType::Required, "motor", "speeed", false, "real", "The motor speed parameter.  Default=1000.");
-   config.add("motor.circleSteps", "", "motor.circleSteps", mx::argType::Required, "motor", "circleSteps", false, "long", "The number of steps in 1 revolution.");
-   config.add("motor.homeOffset", "", "motor.homeOffset", mx::argType::Required, "motor", "homeOffset", false, "long", "The homing offset in motor counts.");
-   config.add("motor.powerOnHome", "", "motor.powerOnHome", mx::argType::Required, "motor", "powerOnHome", false, "bool", "If true, home at startup/power-on.  Default=false.");
+   config.add("motor.acceleration", "", "motor.acceleration", argType::Required, "motor", "acceleration", false, "real", "The motor acceleration parameter. Default=1000.");
+   config.add("motor.speed", "", "motor.speed", argType::Required, "motor", "speeed", false, "real", "The motor speed parameter.  Default=1000.");
+   config.add("motor.circleSteps", "", "motor.circleSteps", argType::Required, "motor", "circleSteps", false, "long", "The number of steps in 1 revolution.");
+   config.add("motor.homeOffset", "", "motor.homeOffset", argType::Required, "motor", "homeOffset", false, "long", "The homing offset in motor counts.");
+   config.add("motor.powerOnHome", "", "motor.powerOnHome", argType::Required, "motor", "powerOnHome", false, "bool", "If true, home at startup/power-on.  Default=false.");
    
-   config.add("filters.names", "", "filters.names",  mx::argType::Required, "filters", "names", false, "vector<string>", "The names of the filters.");
-   config.add("filters.positions", "", "filters.positions",  mx::argType::Required, "filters", "positions", false, "vector<double>", "The positions of the filters.  If omitted or 0 then order is used.");
+   config.add("filters.names", "", "filters.names",  argType::Required, "filters", "names", false, "vector<string>", "The names of the filters.");
+   config.add("filters.positions", "", "filters.positions",  argType::Required, "filters", "positions", false, "vector<double>", "The positions of the filters.  If omitted or 0 then order is used.");
 }
 
 inline

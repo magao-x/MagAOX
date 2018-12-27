@@ -1,10 +1,11 @@
-
-
 #define CATCH_CONFIG_MAIN
 #include "../../../tests/catch2/catch.hpp"
 
 
 #include "../ttyIOUtils.hpp"
+
+namespace ttyIOUtils_test
+{
 
 SCENARIO( "A string needs to be telnet-ified", "[libMagAOX::tty]" ) 
 {
@@ -147,3 +148,5 @@ SCENARIO( "A string needs to be telnet-ified", "[libMagAOX::tty]" )
       
    }
 }
+
+} //namespace ttyIOUtils_test

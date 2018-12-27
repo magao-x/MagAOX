@@ -5,7 +5,7 @@
 
 
 #include "../../libMagAOX/libMagAOX.hpp" //Note this is included on command line to trigger pch
-#include "magaox_git_version.h"
+#include "../../magaox_git_version.h"
 
 #include "siglentSDG_parsers.hpp"
 
@@ -352,12 +352,12 @@ siglentSDG::siglentSDG() : MagAOXApp(MAGAOX_CURRENT_SHA1, MAGAOX_REPO_MODIFIED)
 inline
 void siglentSDG::setupConfig()
 {
-   config.add("device.address", "a", "device.address", mx::argType::Required, "device", "address", false, "string", "The device address.");
-   config.add("device.port", "p", "device.port", mx::argType::Required, "device", "port", false, "string", "The device port.");
+   config.add("device.address", "a", "device.address", argType::Required, "device", "address", false, "string", "The device address.");
+   config.add("device.port", "p", "device.port", argType::Required, "device", "port", false, "string", "The device port.");
 
 
-   config.add("timeouts.write", "", "timeouts.write", mx::argType::Required, "timeouts", "write", false, "int", "The timeout for writing to the device [msec]. Default = 1000");
-   config.add("timeouts.read", "", "timeouts.read", mx::argType::Required, "timeouts", "read", false, "int", "The timeout for reading the device [msec]. Default = 2000");
+   config.add("timeouts.write", "", "timeouts.write", argType::Required, "timeouts", "write", false, "int", "The timeout for writing to the device [msec]. Default = 1000");
+   config.add("timeouts.read", "", "timeouts.read", argType::Required, "timeouts", "read", false, "int", "The timeout for reading the device [msec]. Default = 2000");
 }
 
 inline

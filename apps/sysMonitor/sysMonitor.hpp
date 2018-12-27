@@ -3,7 +3,7 @@
 #define sysMonitor_hpp
 
 #include "../../libMagAOX/libMagAOX.hpp" //Note this is included on command line to trigger pch
-#include "magaox_git_version.h"
+#include "../../magaox_git_version.h"
 
 #include <iostream>
 #include <string>
@@ -100,10 +100,10 @@ namespace MagAOX
 
 		void sysMonitor::setupConfig()
 		{
-			config.add("warningCoreTemp", "", "warningCoreTemp", mx::argType::Required, "", "warningCoreTemp", false, "int", "The warning temperature for CPU cores.");
-			config.add("criticalCoreTemp", "", "criticalCoreTemp", mx::argType::Required, "", "criticalCoreTemp", false, "int", "The critical temperature for CPU cores.");
-			config.add("warningDiskTemp", "", "warningDiskTemp", mx::argType::Required, "", "warningDiskTemp", false, "int", "The warning temperature for the disk.");
-			config.add("criticalDiskTemp", "", "criticalDiskTemp", mx::argType::Required, "", "criticalDiskTemp", false, "int", "The critical temperature for disk.");
+			config.add("warningCoreTemp", "", "warningCoreTemp", argType::Required, "", "warningCoreTemp", false, "int", "The warning temperature for CPU cores.");
+			config.add("criticalCoreTemp", "", "criticalCoreTemp", argType::Required, "", "criticalCoreTemp", false, "int", "The critical temperature for CPU cores.");
+			config.add("warningDiskTemp", "", "warningDiskTemp", argType::Required, "", "warningDiskTemp", false, "int", "The warning temperature for the disk.");
+			config.add("criticalDiskTemp", "", "criticalDiskTemp", argType::Required, "", "criticalDiskTemp", false, "int", "The critical temperature for disk.");
 		}
 
 		void sysMonitor::loadConfig()

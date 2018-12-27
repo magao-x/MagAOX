@@ -16,7 +16,7 @@ using namespace MagAOX::logger;
 using namespace flatlogs;
 
 
-class logdump : public mx::application
+class logdump : public mx::app::application
 {
 protected:
 
@@ -53,15 +53,15 @@ public:
 
 void logdump::setupConfig()
 {
-   config.add("pauseTime","p", "pauseTime" , mx::argType::Required, "", "pauseTime", false,  "int", "When following, time in milliseconds to pause before checking for new entries.");
-   config.add("fileCheckInterval","F", "fileCheckInterval" , mx::argType::Required, "", "fileCheckInterval", false,  "int", "When following, number of pause intervals between checks for new files.");
+   config.add("pauseTime","p", "pauseTime" , argType::Required, "", "pauseTime", false,  "int", "When following, time in milliseconds to pause before checking for new entries.");
+   config.add("fileCheckInterval","F", "fileCheckInterval" , argType::Required, "", "fileCheckInterval", false,  "int", "When following, number of pause intervals between checks for new files.");
 
-   config.add("dir","d", "dir" , mx::argType::Required, "", "dir", false,  "string", "Directory to search for logs. MagAO-X default is normally used.");
-   config.add("ext","e", "ext" , mx::argType::Required, "", "ext", false,  "string", "The file extension of log files.  MagAO-X default is normally used.");
-   config.add("nfiles","n", "nfiles" , mx::argType::Required, "", "nfiles", false,  "int", "Number of log files to dump.  If 0, then all matching files dumped.  Default: 0, 1 if following.");
-   config.add("follow","f", "follow" , mx::argType::True, "", "follow", false,  "bool", "Follow the log, printing new entries as they appear.");
-   config.add("level","L", "level" , mx::argType::Required, "", "level", false,  "int/string", "Minimum log level to dump, either an integer or a string. -1/TELEMETRY [the default], 0/DEFAULT, 1/D1/DBG1/DEBUG2, 2/D2/DBG2/DEBUG1,3/INFO,4/WARNING,5/ERROR,6/CRITICAL,7/FATAL.  Note that only the mininum unique string is required.");
-   config.add("code","C", "code" , mx::argType::Required, "", "code", false,  "int", "The event code, or vector of codes, to dump.  If not specified, all codes are dumped.  See logCodes.hpp for a complete list of codes.");
+   config.add("dir","d", "dir" , argType::Required, "", "dir", false,  "string", "Directory to search for logs. MagAO-X default is normally used.");
+   config.add("ext","e", "ext" , argType::Required, "", "ext", false,  "string", "The file extension of log files.  MagAO-X default is normally used.");
+   config.add("nfiles","n", "nfiles" , argType::Required, "", "nfiles", false,  "int", "Number of log files to dump.  If 0, then all matching files dumped.  Default: 0, 1 if following.");
+   config.add("follow","f", "follow" , argType::True, "", "follow", false,  "bool", "Follow the log, printing new entries as they appear.");
+   config.add("level","L", "level" , argType::Required, "", "level", false,  "int/string", "Minimum log level to dump, either an integer or a string. -1/TELEMETRY [the default], 0/DEFAULT, 1/D1/DBG1/DEBUG2, 2/D2/DBG2/DEBUG1,3/INFO,4/WARNING,5/ERROR,6/CRITICAL,7/FATAL.  Note that only the mininum unique string is required.");
+   config.add("code","C", "code" , argType::Required, "", "code", false,  "int", "The event code, or vector of codes, to dump.  If not specified, all codes are dumped.  See logCodes.hpp for a complete list of codes.");
 }
 
 void logdump::loadConfig()

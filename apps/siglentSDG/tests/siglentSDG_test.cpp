@@ -1,14 +1,18 @@
+/** \file siglentSDG_test.cpp
+  * \brief Catch2 tests for the siglentSDG app.
+  * \author Jared R. Males (jaredmales@gmail.com)
+  *
+  * History:
+  */
 
-// #define CATCH_CONFIG_MAIN
-// #include "../../../tests/catch2/catch.hpp"
-
-#include "../../../tests/testMagAOX.hpp"
+#include "../../../tests/catch2/catch.hpp"
 
 #include "../siglentSDG.hpp"
 
 using namespace MagAOX::app;
 
-
+namespace siglentSDG_test 
+{
 
 SCENARIO( "Parsing the OUTP? response", "[siglentSDG]" )
 {
@@ -748,3 +752,5 @@ SCENARIO( "Parsing the ARWV? response", "[siglentSDG]" )
       }
    }
 }
+
+} //namespace siglentSDG_test 

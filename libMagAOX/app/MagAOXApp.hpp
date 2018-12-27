@@ -42,6 +42,7 @@
 #include "indiMacros.hpp"
 
 //#include "../../INDI/libcommon/System.hpp"
+using namespace mx::app;
 
 using namespace MagAOX::logger;
 
@@ -65,7 +66,7 @@ namespace app
   * \ingroup magaoxapp
   */
 template< bool _useINDI = true >
-class MagAOXApp : public mx::application
+class MagAOXApp : public application
 {
 
 public:
@@ -718,7 +719,7 @@ void MagAOXApp<_useINDI>::setDefaults( int argc,
    #endif
 
    //Parse CL just to get the "name".
-   config.add("name","n", "name",mx::argType::Required, "", "name", false, "string", "The name of the application, specifies config.");
+   config.add("name","n", "name",argType::Required, "", "name", false, "string", "The name of the application, specifies config.");
 
    config.parseCommandLine(argc, argv, "name");
    config(m_configName, "name");
@@ -746,16 +747,16 @@ template<bool _useINDI>
 void MagAOXApp<_useINDI>::setupBasicConfig() //virtual
 {
    //App stuff
-   config.add("loopPause", "p", "loopPause", mx::argType::Required, "", "loopPause", false, "unsigned long", "The main loop pause time in ns");
-   config.add("RTPriority", "P", "RTPriority", mx::argType::Required, "", "RTPriority", false, "unsigned", "The real-time priority (0-99)");
+   config.add("loopPause", "p", "loopPause", argType::Required, "", "loopPause", false, "unsigned long", "The main loop pause time in ns");
+   config.add("RTPriority", "P", "RTPriority", argType::Required, "", "RTPriority", false, "unsigned", "The real-time priority (0-99)");
 
    //Logger Stuff
    m_log.setupConfig(config);
 
    //Power Management
-   config.add("power.device", "", "power.device", mx::argType::Required, "power", "device", false, "string", "Device controlling power for this app's device (INDI name).");
-   config.add("power.outlet", "", "power.outlet", mx::argType::Required, "power", "outlet", false, "string", "Outlet (or channel) on device for this app's device (INDI name).");
-   config.add("power.element", "", "power.element", mx::argType::Required, "power", "element", false, "string", "INDI element name.  Default is \"state\", only need to specify if different.");
+   config.add("power.device", "", "power.device", argType::Required, "power", "device", false, "string", "Device controlling power for this app's device (INDI name).");
+   config.add("power.outlet", "", "power.outlet", argType::Required, "power", "outlet", false, "string", "Outlet (or channel) on device for this app's device (INDI name).");
+   config.add("power.element", "", "power.element", argType::Required, "power", "element", false, "string", "INDI element name.  Default is \"state\", only need to specify if different.");
 }
 
 template<bool _useINDI>

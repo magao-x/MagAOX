@@ -42,7 +42,7 @@ CXXFLAGS += -include $(abspath $(SELF_DIR)/../libMagAOX/libMagAOX.hpp)
 TARGET ?= $(t)
 
 all:  pch magaox_git_version.h $(TARGET)
-	rm magaox_git_version.h
+	rm $(SELF_DIR)/../magaox_git_version.h
 
 pch:
 	cd ../../libMagAOX; ${MAKE}
@@ -57,11 +57,11 @@ $(TARGET):  $(TARGET).o  $(OTHER_OBJS)
 #This always gets regenerated.
 .PHONY: magaox_git_version.h
 magaox_git_version.h:
-	gengithead.sh $(abspath $(SELF_DIR)/../) ./magaox_git_version.h MAGAOX
+	gengithead.sh $(abspath $(SELF_DIR)/../) $(SELF_DIR)/../magaox_git_version.h MAGAOX
 
 .PHONY: clean
 clean:
 	rm -f $(TARGET)
-	rm -f magaox_git_version.h
+	rm -f $(SELF_DIR)/../magaox_git_version.h
 	rm -f *.o
 	rm -f *~
