@@ -1,4 +1,10 @@
-
+/** \file trippLitePDU.hpp
+  * \brief The MagAO-X Tripp Lite Power Distribution Unit controller.
+  *
+  * \author Jared R. Males (jaredmales@gmail.com)
+  * 
+  * \ingroup trippLitePDU_files
+  */
 
 #ifndef trippLitePDU_hpp
 #define trippLitePDU_hpp
@@ -12,7 +18,7 @@ namespace MagAOX
 namespace app
 {
 
-/** MagAO-X application to control a Tripp Lite PDU
+/** MagAO-X application to control a Tripp Lite power distribution unit (PDU)
   *
   * \todo handle timeouts gracefully -- maybe go to error, flush, disconnect, reconnect, etc.
   * \todo need username and secure password handling
@@ -25,8 +31,8 @@ protected:
 
    std::string m_deviceAddr; ///< The device address
    std::string m_devicePort; ///< The device port
-   std::string m_deviceUsername;
-   std::string m_devicePassFile;
+   std::string m_deviceUsername; ///< The login username for this device
+   std::string m_devicePassFile; ///< The login password for this device
 
    tty::telnetConn m_telnetConn; ///< The telnet connection manager
 
