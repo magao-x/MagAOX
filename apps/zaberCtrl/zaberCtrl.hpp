@@ -11,7 +11,7 @@
 
 
 #include "../../libMagAOX/libMagAOX.hpp" //Note this is included on command line to trigger pch
-#include "magaox_git_version.h"
+#include "../../magaox_git_version.h"
 
 typedef MagAOX::app::MagAOXApp<true> MagAOXAppT; //This needs to be before zaberStage.hpp for logging to work.
 
@@ -83,7 +83,7 @@ void zaberCtrl::setupConfig()
 {
    tty::usbDevice::setupConfig(config);
 
-   config.add("stages.numStages", "N", "numStages", mx::argType::Required, "stages", "numStages", false,  "int", "number of stages being controlled by this connection");
+   config.add("stages.numStages", "N", "numStages", argType::Required, "stages", "numStages", false,  "int", "number of stages being controlled by this connection");
 
 }
 
@@ -105,8 +105,8 @@ void zaberCtrl::loadConfig()
    for(int i=0; i< m_numStages; ++i)
    {
       std::string newtarg = "stage" + mx::ioutils::convertToString(i);
-      config.add(newtarg+".name", "", "", mx::argType::Required, newtarg, "name", false,  "", "");
-      config.add(newtarg+".deviceNum", "", "", mx::argType::Required, newtarg, "deviceNum", false,  "", "");
+      config.add(newtarg+".name", "", "", argType::Required, newtarg, "name", false,  "", "");
+      config.add(newtarg+".deviceNum", "", "", argType::Required, newtarg, "deviceNum", false,  "", "");
    }
 
    reReadConfig();

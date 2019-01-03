@@ -4,8 +4,14 @@ text_log                 10       string_log
 user_log                 11       string_log
 state_change             20       state_change
 software_log             50       software_log
+config_log               60       config_log
 indidriver_start         140      empty_log
 indidriver_stop          141      empty_log
+
+core_mon                 826      core_mon
+drive_mon                827      drive_mon
+ram_usage                865      ram_usage
+
 loop_closed              1001     empty_log
 loop_paused              1002     empty_log
 loop_open                1003     empty_log

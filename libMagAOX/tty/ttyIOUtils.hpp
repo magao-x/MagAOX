@@ -331,16 +331,16 @@ int ttyWriteRead( std::string & strRead,        ///< [out] The string in which t
    int timeoutCurrent;
    double t0;
 
-   struct pollfd pfd;
-   pfd.fd = fd;
-   pfd.events = POLLIN;
-
 
    //Start timeout clock for reading.
    t0 = mx::get_curr_time();;
 
    if(swallowEcho)
    {
+      struct pollfd pfd;
+      pfd.fd = fd;
+      pfd.events = POLLIN;
+   
       size_t totrv = 0;
       char buffRead[TTY_BUFFSIZE];
 

@@ -5,7 +5,7 @@
 #include <edtinc.h>
 
 #include "../../libMagAOX/libMagAOX.hpp" //Note this is included on command line to trigger pch
-#include "magaox_git_version.h"
+#include "../../magaox_git_version.h"
 
 typedef MagAOX::app::MagAOXApp<true> MagAOXAppT; //This needs to be before pdvUtils.hpp for logging to work.
 
@@ -224,8 +224,8 @@ int ocam2KCtrl::appStartup()
    m_indiP_binning["binning"].set(0);
 
    REG_INDI_NEWPROP(m_indiP_fps, "fps", pcf::IndiProperty::Number);
-   m_indiP_fps.add (pcf::IndiElement("value"));
-   m_indiP_fps["value"].set(0);
+   m_indiP_fps.add (pcf::IndiElement("fps"));
+   m_indiP_fps["fps"].set(0);
 
    if(pdvInit() < 0) return -1;
 

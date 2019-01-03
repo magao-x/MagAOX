@@ -1,18 +1,24 @@
-
+/** \file trippLitePDU.hpp
+  * \brief The MagAO-X Tripp Lite Power Distribution Unit controller.
+  *
+  * \author Jared R. Males (jaredmales@gmail.com)
+  * 
+  * \ingroup trippLitePDU_files
+  */
 
 #ifndef trippLitePDU_hpp
 #define trippLitePDU_hpp
 
 
 #include "../../libMagAOX/libMagAOX.hpp" //Note this is included on command line to trigger pch
-#include "magaox_git_version.h"
+#include "../../magaox_git_version.h"
 
 namespace MagAOX
 {
 namespace app
 {
 
-/** MagAO-X application to control a Tripp Lite PDU
+/** MagAO-X application to control a Tripp Lite power distribution unit (PDU)
   *
   * \todo handle timeouts gracefully -- maybe go to error, flush, disconnect, reconnect, etc.
   * \todo need username and secure password handling
@@ -25,8 +31,8 @@ protected:
 
    std::string m_deviceAddr; ///< The device address
    std::string m_devicePort; ///< The device port
-   std::string m_deviceUsername;
-   std::string m_devicePassFile;
+   std::string m_deviceUsername; ///< The login username for this device
+   std::string m_devicePassFile; ///< The login password for this device
 
    tty::telnetConn m_telnetConn; ///< The telnet connection manager
 
@@ -120,14 +126,14 @@ trippLitePDU::trippLitePDU() : MagAOXApp(MAGAOX_CURRENT_SHA1, MAGAOX_REPO_MODIFI
 
 void trippLitePDU::setupConfig()
 {
-   config.add("device.address", "a", "device.address", mx::argType::Required, "device", "address", false, "string", "The device address.");
-   config.add("device.port", "p", "device.port", mx::argType::Required, "device", "port", false, "string", "The device port.");
-   config.add("device.username", "u", "device.username", mx::argType::Required, "device", "username", false, "string", "The device login username.");
-   config.add("device.passfile", "", "device.passfile", mx::argType::Required, "device", "passfile", false, "string", "The device login password file (relative to secrets dir).");
+   config.add("device.address", "a", "device.address", argType::Required, "device", "address", false, "string", "The device address.");
+   config.add("device.port", "p", "device.port", argType::Required, "device", "port", false, "string", "The device port.");
+   config.add("device.username", "u", "device.username", argType::Required, "device", "username", false, "string", "The device login username.");
+   config.add("device.passfile", "", "device.passfile", argType::Required, "device", "passfile", false, "string", "The device login password file (relative to secrets dir).");
 
-   config.add("timeouts.write", "", "timeouts.write", mx::argType::Required, "timeouts", "write", false, "int", "The timeout for writing to the device [msec]. Default = 1000");
-   config.add("timeouts.read", "", "timeouts.read", mx::argType::Required, "timeouts", "read", false, "int", "The timeout for reading the device [msec]. Default = 2000");
-   config.add("timeouts.outletStateDelay", "", "timeouts.outletStateDelay", mx::argType::Required, "timeouts", "outletStateDelay", false, "int", "The maximum time to wait for an outlet to change state [msec]. Default = 5000");
+   config.add("timeouts.write", "", "timeouts.write", argType::Required, "timeouts", "write", false, "int", "The timeout for writing to the device [msec]. Default = 1000");
+   config.add("timeouts.read", "", "timeouts.read", argType::Required, "timeouts", "read", false, "int", "The timeout for reading the device [msec]. Default = 2000");
+   config.add("timeouts.outletStateDelay", "", "timeouts.outletStateDelay", argType::Required, "timeouts", "outletStateDelay", false, "int", "The maximum time to wait for an outlet to change state [msec]. Default = 5000");
 
 }
 

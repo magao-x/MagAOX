@@ -1,0 +1,12 @@
+namespace MagAOX.logger;
+
+table drive_mon_fb
+{
+   diskTemp:[float];
+   rootUsage:float;
+   dataUsage:float;
+   bootUsage:float;
+}
+
+root_type drive_mon_fb;
+

@@ -145,6 +145,7 @@ struct software_log : public flatbuffer_log
       auto rgs = GetSoftware_log_fb(msgBuffer);
       
       std::string ret = "SW FILE: ";
+      ///\todo must check string existence
       ret += rgs->file()->c_str();
       ret += " LINE: ";
       ret += mx::ioutils::convertToString(rgs->line());
