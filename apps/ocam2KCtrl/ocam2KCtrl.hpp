@@ -28,23 +28,23 @@ protected:
 
    int m_unit {0};
    int m_channel {0};
-   
+
    unsigned long m_powerOnWait {6000000000}; ///< Time in nsec to wait for camera boot after power on.
-   
-   
+
+
    float m_fpsSet {0};
-   
-   
+
+
    int m_powerOnCounter {0}; ///< Counts numer of loops after power on, implements delay for camera bootup.
-   
 
 
-   
+
+
 public:
 
    ocam2KCtrl();
 
-   ~ocam2KCtrl();
+   ~ocam2KCtrl() noexcept;
 
    /// Setup the configuration system (called by MagAOXApp::setup())
    virtual void setupConfig();
@@ -70,24 +70,24 @@ public:
    /// Do any needed shutdown tasks.  Currently nothing in this app.
    virtual int appShutdown();
 
-   
+
    int pdvInit();
-   
+
    int getTemps();
    int getFPS();
-   
+
    //INDI:
 protected:
    //declare our properties
    pcf::IndiProperty m_indiP_temps;
    pcf::IndiProperty m_indiP_binning;
    pcf::IndiProperty m_indiP_fps;
-   
+
 public:
    INDI_NEWCALLBACK_DECL(ocam2KCtrl, m_indiP_temps);
    INDI_NEWCALLBACK_DECL(ocam2KCtrl, m_indiP_binning);
    INDI_NEWCALLBACK_DECL(ocam2KCtrl, m_indiP_fps);
-   
+
 };
 
 inline
@@ -97,10 +97,10 @@ ocam2KCtrl::ocam2KCtrl() : MagAOXApp(MAGAOX_CURRENT_SHA1, MAGAOX_REPO_MODIFIED)
 }
 
 inline
-ocam2KCtrl::~ocam2KCtrl()
+ocam2KCtrl::~ocam2KCtrl() noexcept
 {
    if(m_pdv) pdv_close(m_pdv);
-   
+
    return;
 }
 
@@ -179,6 +179,7 @@ int pdvSerialWriteRead( std::string & response,
 -- separate fps and temp functions.
 -- Need startup wait capability.
 -- INDI props for fps, temp, both curr and req.  Measured for fps.
+   --- Maybe make set-temp separate since it is r/w
 -- INDI prop for timestamp of last frame skip.  Maybe total frameskips?
 -- INDI props for binning mode
 -- Configs to add:
@@ -217,19 +218,19 @@ int ocam2KCtrl::appStartup()
    m_indiP_temps["set"].set(0);
    m_indiP_temps.add (pcf::IndiElement("cooling"));
    m_indiP_temps["cooling"].set(0);
-   
+
    REG_INDI_NEWPROP(m_indiP_binning, "binning", pcf::IndiProperty::Number);
    m_indiP_binning.add (pcf::IndiElement("binning"));
    m_indiP_binning["binning"].set(0);
-   
+
    REG_INDI_NEWPROP(m_indiP_fps, "fps", pcf::IndiProperty::Number);
    m_indiP_fps.add (pcf::IndiElement("fps"));
    m_indiP_fps["fps"].set(0);
-   
+
    if(pdvInit() < 0) return -1;
 
    return 0;
-   
+
 }
 
 
@@ -286,12 +287,13 @@ int ocam2KCtrl::appLogic()
 
    if( state() == stateCodes::READY || state() == stateCodes::OPERATING )
    {
+      //INDI mutex here?
       if(getTemps() < 0)
       {
          state(stateCodes::ERROR);
          return 0;
       }
-      
+
       if(getFPS() < 0)
       {
          state(stateCodes::ERROR);
@@ -333,70 +335,106 @@ int ocam2KCtrl::pdvInit()
       pdv_close(m_pdv);
       m_pdv = nullptr;
    }
-   
+
    char edt_devname[128];
    strncpy(edt_devname, EDT_INTERFACE, sizeof(edt_devname));
 
    if ((m_pdv = pdv_open_channel(edt_devname, m_unit, m_channel)) == NULL)
    {
       std::string errstr = std::string("pdv_open_channel(") + edt_devname + std::to_string(m_unit) + "_" + std::to_string(m_channel) + ")";
-      
+
       log<software_error>({__FILE__, __LINE__, errstr});
       log<software_error>({__FILE__, __LINE__, errno});
-      
+
       return -1;
    }
-   
+
    pdv_flush_fifo(m_pdv);
 
    pdv_serial_read_enable(m_pdv); //This is undocumented, don't know if it's really needed.
 
    return 0;
-   
+
 }
 
 inline
 int ocam2KCtrl::getTemps()
 {
    std::string response;
-   
+
    if( pdvSerialWriteRead( response, m_pdv, "temp", 1000) == 0)
    {
       ocamTemps temps;
-       
+
       if(parseTemps( temps, response ) < 0) return log<software_error, -1>({__FILE__, __LINE__, "Temp. parse error"});
-      
+
       log<ocam_temps>({temps.CCD, temps.CPU, temps.POWER, temps.BIAS, temps.WATER, temps.LEFT, temps.RIGHT, temps.COOLING_POWER});
-      
+
+      updateIfChanged(m_indiP_temps, "ccd", temps.CCD);
+      updateIfChanged(m_indiP_temps, "cpu", temps.CPU);
+      updateIfChanged(m_indiP_temps, "power", temps.POWER);
+      updateIfChanged(m_indiP_temps, "bias", temps.BIAS);
+      updateIfChanged(m_indiP_temps, "water", temps.WATER);
+      updateIfChanged(m_indiP_temps, "left", temps.LEFT);
+      updateIfChanged(m_indiP_temps, "right", temps.RIGHT);
+      updateIfChanged(m_indiP_temps, "cooling", temps.COOLING_POWER);
       return 0;
-       
+
    }
    else return log<software_error,-1>({__FILE__, __LINE__});
-    
+
 }
 
 inline
 int ocam2KCtrl::getFPS()
 {
    std::string response;
-   
+
    if( pdvSerialWriteRead( response, m_pdv, "fps", 1000) == 0)
    {
       float fps;
       if(parseFPS( fps, response ) < 0) return log<software_error, -1>({__FILE__, __LINE__, "fps parse error"});
-      
+
       m_fpsSet = fps;
-      
-      std::cerr << "FPS: " << fps << "\n";
-      
-      
+
+      updateIfChanged(m_indiP_fps, "value", m_fpsSet);
+
       return 0;
-       
+
    }
    else return log<software_error,-1>({__FILE__, __LINE__});
-    
+
 }
 
+INDI_NEWCALLBACK_DEFN(ocam2KCtrl, m_indiP_temps)(const pcf::IndiProperty &ipRecv)
+{
+   if (ipRecv.getName() == m_indiP_temps.getName())
+   {
+      std::cerr << "New temp\n";
+      return 0;
+   }
+   return -1;
+}
+
+INDI_NEWCALLBACK_DEFN(ocam2KCtrl, m_indiP_binning)(const pcf::IndiProperty &ipRecv)
+{
+   if (ipRecv.getName() == m_indiP_binning.getName())
+   {
+      std::cerr << "New binning\n";
+      return 0;
+   }
+   return -1;
+}
+
+INDI_NEWCALLBACK_DEFN(ocam2KCtrl, m_indiP_fps)(const pcf::IndiProperty &ipRecv)
+{
+   if (ipRecv.getName() == m_indiP_fps.getName())
+   {
+      std::cerr << "New fps\n";
+      return 0;
+   }
+   return -1;
+}
 }//namespace app
 } //namespace MagAOX
 #endif
