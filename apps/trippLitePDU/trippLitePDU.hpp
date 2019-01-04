@@ -359,7 +359,7 @@ int trippLitePDU::parsePDUStatus( std::string & strRead )
 {
    std::string status;
    float frequency, current, voltage;
-   std::vector<bool> outletStates(8,0);
+   std::vector<bool> outletStates(8,OUTLET_STATE_OFF);
 
    std::string pstr = mx::ioutils::removeWhiteSpace(strRead);
 
@@ -406,7 +406,7 @@ int trippLitePDU::parsePDUStatus( std::string & strRead )
       while(isdigit(ch) && st < pstr.size())
       {
          int onum = ch - '0';
-         if(onum > 0 && onum < 9) outletStates[onum-1] = 1; //this outlet is on.
+         if(onum > 0 && onum < 9) outletStates[onum-1] = OUTLET_STATE_ON; //this outlet is on.
 
          ++st;
          if(st > pstr.size()-1) break;
