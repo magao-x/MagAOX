@@ -153,14 +153,22 @@ struct software_log : public flatbuffer_log
       {
          ret += "  ERRNO: ";
          ret += mx::ioutils::convertToString(rgs->errnoCode());
+         ret += " [";
+         ret += strerror(rgs->errnoCode());
+         ret += "]";
       }
       if(rgs->otherCode())
       {
-         ret += "  OTHER CODE: ";
+         ret += "  CODE: ";
          ret += mx::ioutils::convertToString(rgs->otherCode());
+         if(rgs->explanation())
+         {
+            ret += " [";
+            ret += rgs->explanation()->c_str();
+            ret += "]";
+         }
       }
-      
-      if(rgs->explanation())
+      else if(rgs->explanation())
       {
          ret += " >";
          ret += rgs->explanation()->c_str();

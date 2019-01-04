@@ -40,6 +40,7 @@
 #include "stateCodes.hpp"
 #include "indiDriver.hpp"
 #include "indiMacros.hpp"
+#include "indiUtils.hpp"
 
 //#include "../../INDI/libcommon/System.hpp"
 using namespace mx::app;
@@ -1676,14 +1677,16 @@ void MagAOXApp<_useINDI>::updateIfChanged( pcf::IndiProperty & p,
 
    if(!m_indiDriver) return;
 
-   T oldVal = p[el].get<T>();
-
-   if(oldVal != newVal)
-   {
-      p[el].set(newVal);
-      p.setState (pcf::IndiProperty::Ok);
-      m_indiDriver->sendSetProperty (p);
-   }
+   indi::updateIfChanged( p, el, newVal, m_indiDriver); 
+                    
+//    T oldVal = p[el].get<T>();
+// 
+//    if(oldVal != newVal)
+//    {
+//       p[el].set(newVal);
+//       p.setState (pcf::IndiProperty::Ok);
+//       m_indiDriver->sendSetProperty (p);
+//    }
 }
 
 /// \todo move propType to an INDI utils file, and document.

@@ -51,6 +51,10 @@
   * \ingroup magaoxapp
   */
 
+/** \defgroup appdev Device Helpers for MagAOX Applications
+  * \ingroup magaoxapp 
+  */
+  
 /** \defgroup tty TTY device interfaces 
   */
   

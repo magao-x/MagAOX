@@ -93,7 +93,7 @@ std::string ttyErrorString( int ec /**< [in] the error code */ )
       case TELNET_E_BIND:
          return "TTY: socket bind failed";
       case TELNET_E_CONNECT:
-         return "TTY; socket connect failed";
+         return "TTY: socket connect failed";
       case TELNET_E_TELNETINIT:
          return "TTY: failed to init telnet_t structure";
       case TELNET_E_EHERROR:

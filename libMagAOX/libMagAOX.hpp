@@ -13,6 +13,7 @@
 #include "app/indiDriver.hpp"
 #include "app/indiMacros.hpp"
 #include "app/stateCodes.hpp"
+#include "app/dev/outletController.hpp"
 
 #include "common/config.hpp"
 #include "common/defaults.hpp"
