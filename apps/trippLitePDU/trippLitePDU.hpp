@@ -2,7 +2,7 @@
   * \brief The MagAO-X Tripp Lite Power Distribution Unit controller.
   *
   * \author Jared R. Males (jaredmales@gmail.com)
-  * 
+  *
   * \ingroup trippLitePDU_files
   */
 
@@ -24,7 +24,7 @@ namespace app
   * \todo need username and secure password handling
   * \todo need to recognize signals in tty polls and not return errors, etc.
   */
-class trippLitePDU : public MagAOXApp<>, public dev::outletController
+class trippLitePDU : public MagAOXApp<>, public dev::outletController<trippLitePDU>
 {
 
 protected:
@@ -60,6 +60,12 @@ public:
    /// load the configuration system results (called by MagAOXApp::setup())
    virtual void loadConfig();
 
+/*   static int st_newCallBack_channels( void * app,
+                                       const pcf::IndiProperty &ipRecv
+                                     )
+   {
+      return static_cast<trippLitePDU *>(app)->newCallBack_channels(ipRecv);
+   }*/
    /// Startup functions
    /** Setsup the INDI vars.
      * Checks if the device was found during loadConfig.
@@ -74,11 +80,11 @@ public:
 
    virtual int updateOutletState( int outletNum /**< [in] the outlet number to update */);
    virtual int updateOutletStates();
-   
+
    virtual int turnOutletOn( int outletNum /**< [in] the outlet number to turn on */);
-   
+
    virtual int turnOutletOff( int outletNum /**< [in] the outlet number to turn off */);
-   
+
    /// Parse the PDU devstatus response.
    /**
      * \returns 0 on success
@@ -110,7 +116,7 @@ trippLitePDU::trippLitePDU() : MagAOXApp(MAGAOX_CURRENT_SHA1, MAGAOX_REPO_MODIFI
 {
    //m_outletStates.resize(8,0);
    setNumberOfOutlets(8);
-   
+
    return;
 }
 
@@ -125,7 +131,7 @@ void trippLitePDU::setupConfig()
    config.add("timeouts.read", "", "timeouts.read", argType::Required, "timeouts", "read", false, "int", "The timeout for reading the device [msec]. Default = 2000");
    config.add("timeouts.outletStateDelay", "", "timeouts.outletStateDelay", argType::Required, "timeouts", "outletStateDelay", false, "int", "The maximum time to wait for an outlet to change state [msec]. Default = 5000");
 
-   dev::outletController::setupConfig(config);
+   dev::outletController<trippLitePDU>::setupConfig(config);
 }
 
 
@@ -141,7 +147,7 @@ void trippLitePDU::loadConfig()
    config(m_outletStateDelay, "timeouts.outletStateDelay");
 
 
-   dev::outletController::loadConfig(config);
+   dev::outletController<trippLitePDU>::loadConfig(config);
 
 }
 
@@ -161,8 +167,9 @@ int trippLitePDU::appStartup()
    m_indiP_current.add (pcf::IndiElement("value"));
 
    //Error check?
-   dev::outletController::setupINDI( m_configName, m_indiNewCallBacks);
-   
+   //dev::outletController::setupINDI( m_configName, m_indiNewCallBacks, st_newCallBack_channels);
+   dev::outletController<trippLitePDU>::setupINDI();
+
    state(stateCodes::NOTCONNECTED);
 
    return 0;
@@ -227,16 +234,16 @@ int trippLitePDU::appLogic()
    }
 
    if(state() == stateCodes::LOGGEDIN)
-   {      
+   {
       std::unique_lock<std::mutex> lock(m_indiMutex, std::try_to_lock);
-      
+
       if( !lock.owns_lock())
       {
          return 0;
       }
-   
+
       int rv = updateOutletStates();
-      
+
       if(rv < 0) return log<software_error,-1>({__FILE__, __LINE__});
 
       return 0;
@@ -257,11 +264,11 @@ int trippLitePDU::appShutdown()
 int trippLitePDU::updateOutletState( int outletNum )
 {
    static_cast<void>(outletNum);
-   
+
    return updateOutletStates(); //We can't do just one.
 }
 
-   
+
 int trippLitePDU::updateOutletStates()
 {
    int rv;
@@ -305,8 +312,8 @@ int trippLitePDU::updateOutletStates()
       updateIfChanged(m_indiP_voltage, "value", m_voltage);
 
       updateIfChanged(m_indiP_current, "value", m_current);
-      
-      dev::outletController::updateINDI( m_indiDriver );
+
+      dev::outletController<trippLitePDU>::updateINDI();
    }
    else
    {
@@ -315,11 +322,11 @@ int trippLitePDU::updateOutletStates()
 
    return 0;
 }
-   
+
 int trippLitePDU::turnOutletOn( int outletNum )
 {
    std::lock_guard<std::mutex> guard(m_indiMutex);  //Lock the mutex before doing anything
-   
+
 
    std::string cmd = "loadctl on -o ";
    cmd += mx::ioutils::convertToString<int>(outletNum+1); //Internally 0 counted, device starts at 1.
@@ -329,37 +336,37 @@ int trippLitePDU::turnOutletOn( int outletNum )
    int rv = m_telnetConn.writeRead( cmd, true, m_writeTimeOut, m_readTimeOut);
 
    if(rv < 0) return log<software_error, -1>({__FILE__, __LINE__, 0, rv, "telnet error"});
-      
+
    uint8_t lonum = outletNum + 1;   //Do this without narrowing
    log<pdu_outlet_state>({ lonum, 1});
-   
+
    return 0;
 }
-   
+
 int trippLitePDU::turnOutletOff( int outletNum )
 {
    std::lock_guard<std::mutex> guard(m_indiMutex);  //Lock the mutex before doing anything
-   
+
    std::string cmd = "loadctl off -o ";
    cmd += mx::ioutils::convertToString<int>(outletNum+1); //Internally 0 counted, device starts at 1.
    cmd += " --force\r";
 
    std::string strRead;
    int rv = m_telnetConn.writeRead( cmd, true, m_writeTimeOut, m_readTimeOut);
-      
+
    if(rv < 0) return log<software_error, -1>({__FILE__, __LINE__, 0, rv, "telnet error"});
-      
+
    uint8_t lonum = outletNum + 1; //Do this without narrowing
    log<pdu_outlet_state>({ lonum, 0});
-      
+
    return 0;
 }
-   
+
 int trippLitePDU::parsePDUStatus( std::string & strRead )
 {
    std::string status;
    float frequency, current, voltage;
-   std::vector<bool> outletStates(8,OUTLET_STATE_OFF);
+   std::vector<int> outletStates(m_outletStates.size(),OUTLET_STATE_OFF);
 
    std::string pstr = mx::ioutils::removeWhiteSpace(strRead);
 
@@ -406,8 +413,10 @@ int trippLitePDU::parsePDUStatus( std::string & strRead )
       while(isdigit(ch) && st < pstr.size())
       {
          int onum = ch - '0';
-         if(onum > 0 && onum < 9) outletStates[onum-1] = OUTLET_STATE_ON; //this outlet is on.
-
+         if(onum > 0 && onum < 9)
+         {
+            outletStates[onum-1] = OUTLET_STATE_ON; //this outlet is on.
+         }
          ++st;
          if(st > pstr.size()-1) break;
          ch = pstr[st];
@@ -419,7 +428,7 @@ int trippLitePDU::parsePDUStatus( std::string & strRead )
    m_frequency = frequency;
    m_voltage = voltage;
    m_current = current;
-   for(int i=0;i<8;++i) m_outletStates[i]=outletStates[i];
+   for(size_t i=0;i<m_outletStates.size();++i) m_outletStates[i]=outletStates[i];
 
    return 0;
 
@@ -433,7 +442,7 @@ int trippLitePDU::changeOutletState( const pcf::IndiProperty &ipRecv,
 
    std::lock_guard<std::mutex> guard(m_indiMutex);  //Lock the mutex before doing anything
 
-      
+
    std::string oreq = ipRecv["state"].get<std::string>();
 
    if( oreq == "On" && m_outletStates[onum] == 0)
@@ -449,7 +458,7 @@ int trippLitePDU::changeOutletState( const pcf::IndiProperty &ipRecv,
       {
          log<software_error>({__FILE__, __LINE__, 0, rv, ""});
       }
-      
+
       uint8_t lonum = onum + 1;   //Do this without narrowing
       log<pdu_outlet_state>({ lonum, 1});
    }
@@ -461,12 +470,12 @@ int trippLitePDU::changeOutletState( const pcf::IndiProperty &ipRecv,
 
       std::string strRead;
       int rv = m_telnetConn.writeRead( cmd, true, m_writeTimeOut, m_readTimeOut);
-      
+
       if(rv < 0)
       {
          log<software_error>({__FILE__, __LINE__, 0, rv, ""});
       }
-      
+
       uint8_t lonum = onum + 1; //Do this without narrowing
       log<pdu_outlet_state>({ lonum, 0});
    }

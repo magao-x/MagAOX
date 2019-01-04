@@ -198,7 +198,7 @@ public:
      *
      * \tparam logT the log entry type
      * \tparam retval the value returned by this method.
-     * 
+     *
      */
    template<typename logT, int retval=0>
    static int log( const typename logT::messageT & msg, ///< [in] the message to log
@@ -207,10 +207,10 @@ public:
 
    /// Make a log entry
    /** Wrapper for logManager::log
-     * 
+     *
      * \tparam logT the log entry type
      * \tparam retval the value returned by this method.
-     * 
+     *
      */
    template<typename logT, int retval=0>
    static int log( logPrioT level = logPrio::LOG_DEFAULT /**< [in] [optional] the log level.  The default is used if not specified.*/);
@@ -221,11 +221,11 @@ private:
      * You never need to call this directly.
      */
    static void configLog( const std::string & name,  ///< [in] The name of the config value
-                          const int & code,          ///< [in] numeric code specifying the type 
+                          const int & code,          ///< [in] numeric code specifying the type
                           const std::string & value, ///< [in] the value read by the config system
                           const std::string & source ///< [in] the source of the value.
                         );
-   
+
    ///@} -- logging
 
    /** \name Signal Handling
@@ -392,8 +392,11 @@ protected:
    ///Flag controlling whether INDI is used.  If false, then no INDI code ipRecv.getName()executes.
    constexpr static bool m_useINDI = _useINDI;
 
+///\todo instead of making this public, provide an accessor.
+public:
    ///The INDI driver wrapper.  Constructed and initialized by execute, which starts and stops communications.
    indiDriver<MagAOXApp> * m_indiDriver {nullptr};
+protected:
 
    ///Mutex for locking INDI communications.
    std::mutex m_indiMutex;
@@ -406,6 +409,8 @@ protected:
       bool m_defReceived {false}; ///< Flag indicating that a DefProperty has been received after a GetProperty.
    };
 
+///\todo instead of making these public, we should provide the addCallBack function for public use.
+public:
    ///Map to hold the NewProperty indiCallBacks for this App, with fast lookup by property name.
    /** The key for these is the property name.
      */
@@ -416,6 +421,7 @@ protected:
      */
    std::unordered_map< std::string, indiCallBack> m_indiSetCallBacks;
 
+protected:
    ///Flat indicating that all registered Set properties have been updated since last Get.
    bool m_allDefsReceived {false};
 
@@ -438,7 +444,7 @@ protected:
    /** This is currently only used to signal restarts.
      */
    std::string m_driverCtrlName;
-   
+
    /// Register an INDI property which is exposed for others to request a New Property for.
    /**
      *
@@ -623,7 +629,7 @@ public:
      * \returns the current value of m_driverCtrlName
      */
    std::string driverCtrlName();
-   
+
    ///@} --Member Accessors
 };
 
@@ -649,7 +655,7 @@ MagAOXApp<_useINDI>::MagAOXApp( const std::string & git_sha1,
    //Set up config logging
    config.m_sources = true;
    config.configLog = configLog;
-   
+
    //We log the current GIT status.
    logPrioT gl = logPrio::LOG_INFO;
    if(git_modified) gl = logPrio::LOG_WARNING;
@@ -1438,7 +1444,7 @@ int MagAOXApp<_useINDI>::createINDIFIFOS()
    m_driverInName = driverFIFOPath + "/" + configName() + ".in";
    m_driverOutName = driverFIFOPath + "/" + configName() + ".out";
    m_driverCtrlName = driverFIFOPath + "/" + configName() + ".ctrl";
-   
+
    //Get max permissions
    euidCalled();
 
@@ -1483,7 +1489,7 @@ int MagAOXApp<_useINDI>::createINDIFIFOS()
          return -1;
       }
    }
-   
+
    umask(prev);
    euidReal();
    return 0;
@@ -1677,10 +1683,10 @@ void MagAOXApp<_useINDI>::updateIfChanged( pcf::IndiProperty & p,
 
    if(!m_indiDriver) return;
 
-   indi::updateIfChanged( p, el, newVal, m_indiDriver); 
-                    
+   indi::updateIfChanged( p, el, newVal, m_indiDriver);
+
 //    T oldVal = p[el].get<T>();
-// 
+//
 //    if(oldVal != newVal)
 //    {
 //       p[el].set(newVal);
