@@ -20,6 +20,12 @@ namespace app
 namespace indi 
 {
    
+/// Update the value of the INDI element, but only if it has changed.
+/** Only sends the set property message if the new value is different.
+  *
+  * \todo investigate how this handles floating point values and string conversions.
+  * 
+  */  
 template<typename T, class indiDriverT>
 void updateIfChanged( pcf::IndiProperty & p,   ///< [in/out] The property containing the element to possibly update
                       const std::string & el,  ///< [in] The element name

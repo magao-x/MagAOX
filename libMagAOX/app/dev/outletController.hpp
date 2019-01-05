@@ -35,11 +35,15 @@ namespace app
 namespace dev
 {
 
-/// A generic power controller
-/**
+/// A generic outlet controller
+/** Controls a set of outlets on a device, such as A/C power outlets or digital outputs.  
+  * The outlets are organized into channels, which could be made up of multiple outlets.
+  *
+  * \tparam derivedT specifies a MagAOXApp parent base class which is accessed with a `static_cast` (downcast)to perform various methods. 
+  * 
   * \ingroup appdev
   */
-template<class parentT>
+template<class derivedT>
 struct outletController
 {
 
@@ -219,12 +223,20 @@ struct outletController
      */
 
    /// The static callback function to be registered for the channel properties.
-   static int st_newCallBack_channels( void * app,
-                                       const pcf::IndiProperty &ipRecv
-                                    );
+   /** 
+     * \returns 0 on success.
+     * \returns -1 on error.
+     */ 
+   static int st_newCallBack_channels( void * app, ///< [in] a pointer to this, will be static_cast-ed to derivedT.
+                                       const pcf::IndiProperty &ipRecv ///< [in] the INDI property sent with the the new property request.
+                                     );
 
    /// The callback called by the static version, to actually process the new request.
-   int newCallBack_channels( const pcf::IndiProperty &ipRecv );
+   /** 
+     * \returns 0 on success.
+     * \returns -1 on error.
+     */
+   int newCallBack_channels( const pcf::IndiProperty &ipRecv /**< [in] the INDI property sent with the the new property request.*/);
 
    /// Setup the INDI properties for this device controller
    /** This should be called in the `appStartup` function of the derived MagAOXApp.
@@ -246,16 +258,16 @@ struct outletController
    ///@}
 };
 
-template<class parentT>
-int outletController<parentT>::setupConfig( appConfigurator & config )
+template<class derivedT>
+int outletController<derivedT>::setupConfig( appConfigurator & config )
 {
    static_cast<void>(config);
 
    return 0;
 }
 
-template<class parentT>
-int outletController<parentT>::loadConfig( appConfigurator & config )
+template<class derivedT>
+int outletController<derivedT>::loadConfig( appConfigurator & config )
 {
    if( m_outletStates.size() == 0) return OUTLET_E_NOOUTLETS;
 
@@ -336,21 +348,21 @@ int outletController<parentT>::loadConfig( appConfigurator & config )
    return 0;
 }
 
-template<class parentT>
-int outletController<parentT>::setNumberOfOutlets( int numOuts )
+template<class derivedT>
+int outletController<derivedT>::setNumberOfOutlets( int numOuts )
 {
    m_outletStates.resize(numOuts, -1);
    return 0;
 }
 
-template<class parentT>
-int outletController<parentT>::outletState( int outletNum )
+template<class derivedT>
+int outletController<derivedT>::outletState( int outletNum )
 {
    return m_outletStates[outletNum];
 }
 
-template<class parentT>
-int outletController<parentT>::updateOutletStates()
+template<class derivedT>
+int outletController<derivedT>::updateOutletStates()
 {
    for(size_t n=0; n<m_outletStates.size(); ++n)
    {
@@ -361,44 +373,44 @@ int outletController<parentT>::updateOutletStates()
    return 0;
 }
 
-template<class parentT>
-size_t outletController<parentT>::numChannels()
+template<class derivedT>
+size_t outletController<derivedT>::numChannels()
 {
    return m_channels.size();
 }
 
-template<class parentT>
-std::vector<size_t> outletController<parentT>::channelOutlets( const std::string & channel )
+template<class derivedT>
+std::vector<size_t> outletController<derivedT>::channelOutlets( const std::string & channel )
 {
    return m_channels[channel].m_outlets;
 }
 
-template<class parentT>
-std::vector<size_t> outletController<parentT>::channelOnOrder( const std::string & channel )
+template<class derivedT>
+std::vector<size_t> outletController<derivedT>::channelOnOrder( const std::string & channel )
 {
    return m_channels[channel].m_onOrder;
 }
 
-template<class parentT>
-std::vector<size_t> outletController<parentT>::channelOffOrder( const std::string & channel )
+template<class derivedT>
+std::vector<size_t> outletController<derivedT>::channelOffOrder( const std::string & channel )
 {
    return m_channels[channel].m_offOrder;
 }
 
-template<class parentT>
-std::vector<unsigned> outletController<parentT>::channelOnDelays( const std::string & channel )
+template<class derivedT>
+std::vector<unsigned> outletController<derivedT>::channelOnDelays( const std::string & channel )
 {
    return m_channels[channel].m_onDelays;
 }
 
-template<class parentT>
-std::vector<unsigned> outletController<parentT>::channelOffDelays( const std::string & channel )
+template<class derivedT>
+std::vector<unsigned> outletController<derivedT>::channelOffDelays( const std::string & channel )
 {
    return m_channels[channel].m_offDelays;
 }
 
-template<class parentT>
-int outletController<parentT>::channelState( const std::string & channel )
+template<class derivedT>
+int outletController<derivedT>::channelState( const std::string & channel )
 {
    int st = outletState(m_channels[channel].m_outlets[0]);
 
@@ -410,9 +422,11 @@ int outletController<parentT>::channelState( const std::string & channel )
    return st;
 }
 
-template<class parentT>
-int outletController<parentT>::turnChannelOn( const std::string & channel )
+template<class derivedT>
+int outletController<derivedT>::turnChannelOn( const std::string & channel )
 {
+   m_channels[channel].m_indiP_prop["target"].setValue("On");
+   
    //If order is specified, get first outlet number
    size_t n = 0;
    if( m_channels[channel].m_onOrder.size() == m_channels[channel].m_outlets.size() ) n = m_channels[channel].m_onOrder[0];
@@ -440,9 +454,11 @@ int outletController<parentT>::turnChannelOn( const std::string & channel )
    return 0;
 }
 
-template<class parentT>
-int outletController<parentT>::turnChannelOff( const std::string & channel )
+template<class derivedT>
+int outletController<derivedT>::turnChannelOff( const std::string & channel )
 {
+   m_channels[channel].m_indiP_prop["target"].setValue("Off");
+   
    //If order is specified, get first outlet number
    size_t n = 0;
    if( m_channels[channel].m_offOrder.size() == m_channels[channel].m_outlets.size() ) n = m_channels[channel].m_offOrder[0];
@@ -470,16 +486,16 @@ int outletController<parentT>::turnChannelOff( const std::string & channel )
    return 0;
 }
 
-template<class parentT>
-int outletController<parentT>::st_newCallBack_channels( void * app,
+template<class derivedT>
+int outletController<derivedT>::st_newCallBack_channels( void * app,
                                                          const pcf::IndiProperty &ipRecv
                                                        )
 {
-   return static_cast<parentT *>(app)->newCallBack_channels(ipRecv);
+   return static_cast<derivedT *>(app)->newCallBack_channels(ipRecv);
 }
 
-template<class parentT>
-int outletController<parentT>::newCallBack_channels( const pcf::IndiProperty &ipRecv )
+template<class derivedT>
+int outletController<derivedT>::newCallBack_channels( const pcf::IndiProperty &ipRecv )
 {
    //Interogate ipRecv to figure out which channel it is.
    //And then call turn on or turn off based on requested state.
@@ -515,14 +531,14 @@ int outletController<parentT>::newCallBack_channels( const pcf::IndiProperty &ip
    return 0;
 }
 
-template<class parentT>
-int outletController<parentT>::setupINDI()
+template<class derivedT>
+int outletController<derivedT>::setupINDI()
 {
    //Create channel properties and register callback.
    for(auto it = m_channels.begin(); it != m_channels.end(); ++it)
    {
       it->second.m_indiP_prop = pcf::IndiProperty (pcf::IndiProperty::Text);
-      it->second.m_indiP_prop.setDevice(static_cast<parentT *>(this)->configName());
+      it->second.m_indiP_prop.setDevice(static_cast<derivedT *>(this)->configName());
       it->second.m_indiP_prop.setName(it->first);
       it->second.m_indiP_prop.setPerm(pcf::IndiProperty::ReadWrite);
       it->second.m_indiP_prop.setState( pcf::IndiProperty::Idle );
@@ -532,7 +548,7 @@ int outletController<parentT>::setupINDI()
       it->second.m_indiP_prop.add (pcf::IndiElement("target"));
 
       //auto result = indiNewCallBacks.insert( {it->first, {&it->second.m_indiP_prop, newCallBack_channels}});
-      auto result = static_cast<parentT *>(this)->m_indiNewCallBacks.insert( {it->first, {&it->second.m_indiP_prop, st_newCallBack_channels}});
+      auto result = static_cast<derivedT *>(this)->m_indiNewCallBacks.insert( {it->first, {&it->second.m_indiP_prop, st_newCallBack_channels}});
 
       if(!result.second)
       {
@@ -542,13 +558,13 @@ int outletController<parentT>::setupINDI()
 
    //Register the outletStates INDI property, and add an element for each outlet.
    m_indiP_outletStates = pcf::IndiProperty (pcf::IndiProperty::Text);
-   m_indiP_outletStates.setDevice(static_cast<parentT *>(this)->configName());
+   m_indiP_outletStates.setDevice(static_cast<derivedT *>(this)->configName());
    m_indiP_outletStates.setName("outlet");
    m_indiP_outletStates.setPerm(pcf::IndiProperty::ReadWrite);
    m_indiP_outletStates.setState( pcf::IndiProperty::Idle );
 
 
-   auto result =  static_cast<parentT *>(this)->m_indiNewCallBacks.insert( { "outlet", {&m_indiP_outletStates, nullptr}});
+   auto result =  static_cast<derivedT *>(this)->m_indiNewCallBacks.insert( { "outlet", {&m_indiP_outletStates, nullptr}});
 
    if(!result.second)
    {
@@ -571,15 +587,15 @@ std::string stateIntToString(int st)
    else return "Unk";
 }
 
-template<class parentT>
-int outletController<parentT>::updateINDI()
+template<class derivedT>
+int outletController<derivedT>::updateINDI()
 {
-   if( !static_cast<parentT*>(this)->m_indiDriver ) return 0;
+   if( !static_cast<derivedT*>(this)->m_indiDriver ) return 0;
 
    //Publish outlet states (only bother if they've changed)
    for(size_t i=0; i< m_outletStates.size(); ++i)
    {
-      indi::updateIfChanged(m_indiP_outletStates, std::to_string(i+1), stateIntToString(m_outletStates[i]), static_cast<parentT*>(this)->m_indiDriver);
+      indi::updateIfChanged(m_indiP_outletStates, std::to_string(i+1), stateIntToString(m_outletStates[i]), static_cast<derivedT*>(this)->m_indiDriver);
    }
 
    //Publish channel states (only bother if they've changed)
@@ -588,12 +604,12 @@ int outletController<parentT>::updateINDI()
       std::string state = stateIntToString( channelState( it->first ));
 
       std::string target;
-      //target = (it->second.m_indiP_prop)["target"].get<std::string>();
+      target = it->second.m_indiP_prop["target"].get();
 
       if(target == state) target = "";
 
-      indi::updateIfChanged( it->second.m_indiP_prop, "state", state, static_cast<parentT*>(this)->m_indiDriver );
-      indi::updateIfChanged( it->second.m_indiP_prop, "target", target, static_cast<parentT*>(this)->m_indiDriver );
+      indi::updateIfChanged( it->second.m_indiP_prop, "state", state, static_cast<derivedT*>(this)->m_indiDriver );
+      indi::updateIfChanged( it->second.m_indiP_prop, "target", target, static_cast<derivedT*>(this)->m_indiDriver );
    }
 
    return 0;

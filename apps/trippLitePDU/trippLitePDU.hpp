@@ -60,12 +60,6 @@ public:
    /// load the configuration system results (called by MagAOXApp::setup())
    virtual void loadConfig();
 
-/*   static int st_newCallBack_channels( void * app,
-                                       const pcf::IndiProperty &ipRecv
-                                     )
-   {
-      return static_cast<trippLitePDU *>(app)->newCallBack_channels(ipRecv);
-   }*/
    /// Startup functions
    /** Setsup the INDI vars.
      * Checks if the device was found during loadConfig.
@@ -78,11 +72,34 @@ public:
    /// Do any needed shutdown tasks.  Currently nothing in this app.
    virtual int appShutdown();
 
+   /// Update a single outlet state
+   /** For the trippLitePDU this isn't possible for a single outlet, so this calls updateOutletStates.
+     *
+     * \returns 0 on success 
+     * \returns -1 on error
+     */
    virtual int updateOutletState( int outletNum /**< [in] the outlet number to update */);
+   
+   /// Queries the device to find the state of each outlet, as well as other parameters.
+   /** Sends `devstatus` to the device, and parses the result.
+     * 
+     * \returns 0 on success 
+     * \returns -1 on error
+     */
    virtual int updateOutletStates();
 
+   /// Turn on an outlet.
+   /** 
+     * \returns 0 on success 
+     * \returns -1 on error
+     */
    virtual int turnOutletOn( int outletNum /**< [in] the outlet number to turn on */);
 
+   /// Turn off an outlet.
+   /** 
+     * \returns 0 on success 
+     * \returns -1 on error
+     */
    virtual int turnOutletOff( int outletNum /**< [in] the outlet number to turn off */);
 
    /// Parse the PDU devstatus response.
@@ -95,21 +112,9 @@ public:
 protected:
 
    //declare our properties
-   pcf::IndiProperty m_indiP_status;
-   pcf::IndiProperty m_indiP_frequency;
-   pcf::IndiProperty m_indiP_voltage;
-   pcf::IndiProperty m_indiP_current;
-
-
-   ///Common function called by the individual outlet callbacks.
-   /**
-     * \returns 0 on success
-     * \returns -1 on error
-     */
-   //int changeOutletState( const pcf::IndiProperty &ipRecv, ///< [in] the received INDI property
-   //                       uint8_t onum ///< [in] the number of the outlet (0-7)
-   //                     );
-
+   pcf::IndiProperty m_indiP_status; ///< The device's status string
+   pcf::IndiProperty m_indiP_load; ///< The line and load characteristics
+   
 };
 
 trippLitePDU::trippLitePDU() : MagAOXApp(MAGAOX_CURRENT_SHA1, MAGAOX_REPO_MODIFIED)
@@ -157,17 +162,12 @@ int trippLitePDU::appStartup()
    REG_INDI_NEWPROP_NOCB(m_indiP_status, "status", pcf::IndiProperty::Text);
    m_indiP_status.add (pcf::IndiElement("value"));
 
-   REG_INDI_NEWPROP_NOCB(m_indiP_frequency, "frequency", pcf::IndiProperty::Number);
-   m_indiP_frequency.add (pcf::IndiElement("value"));
-
-   REG_INDI_NEWPROP_NOCB(m_indiP_voltage, "voltage", pcf::IndiProperty::Number);
-   m_indiP_voltage.add (pcf::IndiElement("value"));
-
-   REG_INDI_NEWPROP_NOCB(m_indiP_current, "current", pcf::IndiProperty::Number);
-   m_indiP_current.add (pcf::IndiElement("value"));
-
-   //Error check?
-   //dev::outletController::setupINDI( m_configName, m_indiNewCallBacks, st_newCallBack_channels);
+   REG_INDI_NEWPROP_NOCB(m_indiP_load, "load", pcf::IndiProperty::Number);
+   m_indiP_load.add (pcf::IndiElement("frequency"));
+   m_indiP_load.add (pcf::IndiElement("voltage"));
+   m_indiP_load.add (pcf::IndiElement("current"));
+   
+   ///\todo Error check?
    dev::outletController<trippLitePDU>::setupINDI();
 
    state(stateCodes::NOTCONNECTED);
@@ -307,11 +307,11 @@ int trippLitePDU::updateOutletStates()
    {
       updateIfChanged(m_indiP_status, "value", m_status);
 
-      updateIfChanged(m_indiP_frequency, "value", m_frequency);
+      updateIfChanged(m_indiP_load, "frequency", m_frequency);
 
-      updateIfChanged(m_indiP_voltage, "value", m_voltage);
+      updateIfChanged(m_indiP_load, "voltage", m_voltage);
 
-      updateIfChanged(m_indiP_current, "value", m_current);
+      updateIfChanged(m_indiP_load, "current", m_current);
 
       dev::outletController<trippLitePDU>::updateINDI();
    }
@@ -434,134 +434,6 @@ int trippLitePDU::parsePDUStatus( std::string & strRead )
 
 }
 
-/*
-int trippLitePDU::changeOutletState( const pcf::IndiProperty &ipRecv,
-                                     uint8_t onum
-                                   )
-{
-
-   std::lock_guard<std::mutex> guard(m_indiMutex);  //Lock the mutex before doing anything
-
-
-   std::string oreq = ipRecv["state"].get<std::string>();
-
-   if( oreq == "On" && m_outletStates[onum] == 0)
-   {
-      std::string cmd = "loadctl on -o ";
-      cmd += mx::ioutils::convertToString<int>(onum+1);
-      cmd += " --force\r";
-
-      std::string strRead;
-      int rv = m_telnetConn.writeRead( cmd, true, m_writeTimeOut, m_readTimeOut);
-
-      if(rv < 0)
-      {
-         log<software_error>({__FILE__, __LINE__, 0, rv, ""});
-      }
-
-      uint8_t lonum = onum + 1;   //Do this without narrowing
-      log<pdu_outlet_state>({ lonum, 1});
-   }
-   if( oreq == "Off" && m_outletStates[onum] == 1)
-   {
-      std::string cmd = "loadctl off -o ";
-      cmd += mx::ioutils::convertToString<int>(onum+1);
-      cmd += " --force\r";
-
-      std::string strRead;
-      int rv = m_telnetConn.writeRead( cmd, true, m_writeTimeOut, m_readTimeOut);
-
-      if(rv < 0)
-      {
-         log<software_error>({__FILE__, __LINE__, 0, rv, ""});
-      }
-
-      uint8_t lonum = onum + 1; //Do this without narrowing
-      log<pdu_outlet_state>({ lonum, 0});
-   }
-
-
-   //We don't update INDI, because the state won't change immediately.  Let device report it when it's ready.
-
-   return 0;
-
-}
-*/
-
-/*
-
-INDI_NEWCALLBACK_DEFN(trippLitePDU, m_indiOutlet1)(const pcf::IndiProperty &ipRecv)
-{
-   if (ipRecv.getName() == m_indiOutlet1.getName())
-   {
-      return changeOutletState(ipRecv, 0);
-   }
-   return -1;
-}
-
-INDI_NEWCALLBACK_DEFN(trippLitePDU, m_indiOutlet2)(const pcf::IndiProperty &ipRecv)
-{
-   if (ipRecv.getName() == m_indiOutlet2.getName())
-   {
-      return changeOutletState(ipRecv, 1);
-   }
-   return -1;
-}
-
-INDI_NEWCALLBACK_DEFN(trippLitePDU, m_indiOutlet3)(const pcf::IndiProperty &ipRecv)
-{
-   if (ipRecv.getName() == m_indiOutlet3.getName())
-   {
-      return changeOutletState(ipRecv, 2);
-   }
-   return -1;
-}
-
-INDI_NEWCALLBACK_DEFN(trippLitePDU, m_indiOutlet4)(const pcf::IndiProperty &ipRecv)
-{
-   if (ipRecv.getName() == m_indiOutlet4.getName())
-   {
-      return changeOutletState(ipRecv, 3);
-   }
-   return -1;
-}
-
-INDI_NEWCALLBACK_DEFN(trippLitePDU, m_indiOutlet5)(const pcf::IndiProperty &ipRecv)
-{
-   if (ipRecv.getName() == m_indiOutlet5.getName())
-   {
-      return changeOutletState(ipRecv, 4);
-   }
-   return -1;
-}
-
-INDI_NEWCALLBACK_DEFN(trippLitePDU, m_indiOutlet6)(const pcf::IndiProperty &ipRecv)
-{
-   if (ipRecv.getName() == m_indiOutlet6.getName())
-   {
-      return changeOutletState(ipRecv, 5);
-   }
-   return -1;
-}
-
-INDI_NEWCALLBACK_DEFN(trippLitePDU, m_indiOutlet7)(const pcf::IndiProperty &ipRecv)
-{
-   if (ipRecv.getName() == m_indiOutlet7.getName())
-   {
-      return changeOutletState(ipRecv, 6);
-   }
-   return -1;
-}
-
-INDI_NEWCALLBACK_DEFN(trippLitePDU, m_indiOutlet8)(const pcf::IndiProperty &ipRecv)
-{
-   if (ipRecv.getName() == m_indiOutlet8.getName())
-   {
-      return changeOutletState(ipRecv, 7);
-   }
-   return -1;
-}
-*/
 
 } //namespace app
 } //namespace MagAOX
