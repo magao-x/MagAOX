@@ -13,16 +13,35 @@
 #include "../../libMagAOX/libMagAOX.hpp" //Note this is included on command line to trigger pch
 #include "../../magaox_git_version.h"
 
+/** \defgroup trippLitePDU Tripp Lite PDU
+  * \brief Control of MagAO-X Tripp Lite PDUs.
+  * 
+  * \link page_module_trippLitePDU Application Documentation
+  * 
+  * \ingroup apps
+  * 
+  */
+
+/** \defgroup trippLitePDU_files Tripp Lite PDU Files
+  * \ingroup trippLitePDU
+  */
+
 namespace MagAOX
 {
 namespace app
 {
 
-/** MagAO-X application to control a Tripp Lite power distribution unit (PDU)
-  *
+/// MagAO-X application to control a Tripp Lite power distribution unit (PDU).
+/** The device outlets are organized into channels.  See \ref dev::outletController for details of configuring the channels.
+  * 
+  * The line frequency and voltage, and the total load on the PDU, are monitored.
+  * 
   * \todo handle timeouts gracefully -- maybe go to error, flush, disconnect, reconnect, etc.
   * \todo need username and secure password handling
   * \todo need to recognize signals in tty polls and not return errors, etc.
+  * \todo being logging freq/volt/amps telemetry
+  * 
+  * \ingroup trippLitePDU
   */
 class trippLitePDU : public MagAOXApp<>, public dev::outletController<trippLitePDU>
 {

@@ -42,6 +42,9 @@ namespace dev
   * \tparam derivedT specifies a MagAOXApp parent base class which is accessed with a `static_cast` (downcast)to perform various methods. 
   * 
   * \ingroup appdev
+  *
+  * \todo add logging specific to this class 
+  * \todo finalize 0-counting vs 1-counting rules, possibly allowing config-time modification
   */
 template<class derivedT>
 struct outletController
@@ -78,7 +81,7 @@ struct outletController
      * \returns 0 on success
      * \returns -1 on failure
      */
-   int setupConfig( appConfigurator & config /**< [in] an application configuration to setup */);
+   int setupConfig( mx::app::appConfigurator & config /**< [in] an application configuration to setup */);
 
    /// Load the [channel] sections from an application configurator
    /** Any "unused" section from the config parser is analyzed to determine if it is a channel specification.
@@ -106,7 +109,7 @@ struct outletController
      * \returns 0 on success
      * \returns -1 on failure
      */
-   int loadConfig( appConfigurator & config /**< [in] an application configuration from which to load values */);
+   int loadConfig( mx::app::appConfigurator & config /**< [in] an application configuration from which to load values */);
 
    /// Sets the number of outlets.  This should be called by the derived class constructor.
    /**
@@ -128,7 +131,7 @@ struct outletController
 
    /// Get the states of all outlets from the device.
    /** The default implementation for-loops through each outlet, calling \ref updateOutletState.
-     * Can be re-implemented in derived classes to update the outlet state.
+     * Can be re-implemented in derived classes to update the outlet states.
      *
      * \returns 0 on success.
      * \returns -1 on error.
@@ -259,7 +262,7 @@ struct outletController
 };
 
 template<class derivedT>
-int outletController<derivedT>::setupConfig( appConfigurator & config )
+int outletController<derivedT>::setupConfig( mx::app::appConfigurator & config )
 {
    static_cast<void>(config);
 
@@ -267,7 +270,7 @@ int outletController<derivedT>::setupConfig( appConfigurator & config )
 }
 
 template<class derivedT>
-int outletController<derivedT>::loadConfig( appConfigurator & config )
+int outletController<derivedT>::loadConfig( mx::app::appConfigurator & config )
 {
    if( m_outletStates.size() == 0) return OUTLET_E_NOOUTLETS;
 
@@ -283,8 +286,8 @@ int outletController<derivedT>::loadConfig( appConfigurator & config )
 
    for(size_t i=0;i<sections.size(); ++i)
    {
-      if( config.isSetUnused( iniFile::makeKey(sections[i], "outlet" ))
-              || config.isSetUnused( iniFile::makeKey(sections[i], "outlets" )) )
+      if( config.isSetUnused( mx::app::iniFile::makeKey(sections[i], "outlet" ))
+              || config.isSetUnused( mx::app::iniFile::makeKey(sections[i], "outlets" )) )
       {
          chSections.push_back(sections[i]);
       }
@@ -299,47 +302,47 @@ int outletController<derivedT>::loadConfig( appConfigurator & config )
 
       //---- Set outlets ----
       std::vector<size_t> outlets;
-      if( config.isSetUnused( iniFile::makeKey(chSections[n], "outlet" )))
+      if( config.isSetUnused( mx::app::iniFile::makeKey(chSections[n], "outlet" )))
       {
-         config.configUnused( outlets, iniFile::makeKey(chSections[n], "outlet" ) );
+         config.configUnused( outlets, mx::app::iniFile::makeKey(chSections[n], "outlet" ) );
       }
       else
       {
-         config.configUnused( outlets, iniFile::makeKey(chSections[n], "outlets" ) );
+         config.configUnused( outlets, mx::app::iniFile::makeKey(chSections[n], "outlets" ) );
       }
 
       m_channels[chSections[n]].m_outlets = outlets;
       ///\todo error checking on outlets
 
       //---- Set optional configs ----
-      if( config.isSetUnused( iniFile::makeKey(chSections[n], "onOrder" )))
+      if( config.isSetUnused( mx::app::iniFile::makeKey(chSections[n], "onOrder" )))
       {
          std::vector<size_t> onOrder;
-         config.configUnused( onOrder, iniFile::makeKey(chSections[n], "onOrder" ) );
+         config.configUnused( onOrder, mx::app::iniFile::makeKey(chSections[n], "onOrder" ) );
          m_channels[chSections[n]].m_onOrder = onOrder;
          ///\todo error checking on onOrder
       }
 
-      if( config.isSetUnused( iniFile::makeKey(chSections[n], "offOrder" )))
+      if( config.isSetUnused( mx::app::iniFile::makeKey(chSections[n], "offOrder" )))
       {
          std::vector<size_t> offOrder;
-         config.configUnused( offOrder, iniFile::makeKey(chSections[n], "offOrder" ) );
+         config.configUnused( offOrder, mx::app::iniFile::makeKey(chSections[n], "offOrder" ) );
          m_channels[chSections[n]].m_offOrder = offOrder;
          ///\todo error checking on offOrder
       }
 
-      if( config.isSetUnused( iniFile::makeKey(chSections[n], "onDelays" )))
+      if( config.isSetUnused( mx::app::iniFile::makeKey(chSections[n], "onDelays" )))
       {
          std::vector<unsigned> onDelays;
-         config.configUnused( onDelays, iniFile::makeKey(chSections[n], "onDelays" ) );
+         config.configUnused( onDelays, mx::app::iniFile::makeKey(chSections[n], "onDelays" ) );
          m_channels[chSections[n]].m_onDelays = onDelays;
          ///\todo error checking on onDelays
       }
 
-      if( config.isSetUnused( iniFile::makeKey(chSections[n], "offDelays" )))
+      if( config.isSetUnused( mx::app::iniFile::makeKey(chSections[n], "offDelays" )))
       {
          std::vector<unsigned> offDelays;
-         config.configUnused( offDelays, iniFile::makeKey(chSections[n], "offDelays" ) );
+         config.configUnused( offDelays, mx::app::iniFile::makeKey(chSections[n], "offDelays" ) );
          m_channels[chSections[n]].m_offDelays = offDelays;
          ///\todo error checking on offDelays
       }
@@ -425,7 +428,11 @@ int outletController<derivedT>::channelState( const std::string & channel )
 template<class derivedT>
 int outletController<derivedT>::turnChannelOn( const std::string & channel )
 {
-   m_channels[channel].m_indiP_prop["target"].setValue("On");
+   try //Ignore the exception if not set, for testing.
+   {
+      m_channels[channel].m_indiP_prop["target"].setValue("On");
+   }
+   catch(...){}
    
    //If order is specified, get first outlet number
    size_t n = 0;
@@ -457,7 +464,11 @@ int outletController<derivedT>::turnChannelOn( const std::string & channel )
 template<class derivedT>
 int outletController<derivedT>::turnChannelOff( const std::string & channel )
 {
-   m_channels[channel].m_indiP_prop["target"].setValue("Off");
+   try //Ignore the exception if not set, for testing.
+   {
+      m_channels[channel].m_indiP_prop["target"].setValue("Off");
+   }
+   catch(...){}
    
    //If order is specified, get first outlet number
    size_t n = 0;
@@ -604,6 +615,7 @@ int outletController<derivedT>::updateINDI()
       std::string state = stateIntToString( channelState( it->first ));
 
       std::string target;
+
       target = it->second.m_indiP_prop["target"].get();
 
       if(target == state) target = "";

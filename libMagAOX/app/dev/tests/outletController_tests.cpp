@@ -8,7 +8,7 @@
 namespace outletController_tests 
 {
    
-struct outletControllerTest : public MagAOX::app::dev::outletController 
+struct outletControllerTest : public MagAOX::app::dev::outletController<outletControllerTest>
 {
    std::vector<double> m_timestamps;
    
@@ -53,7 +53,7 @@ SCENARIO( "outletController Configuration", "[outletController]" )
    {
       WHEN("using outlet keyword, only outlet specified")
       {
-         writeConfigFile( "/tmp/outletController_test.conf", {"channel1", "channel2",     "channel3",      "channel4"},
+         mx::app::writeConfigFile( "/tmp/outletController_test.conf", {"channel1", "channel2",     "channel3",      "channel4"},
                                                         {"outlet",   "outlet",       "outlet",          "outlet"},
                                                         {"0",         "1",             "2",                "3"} );
       
@@ -127,7 +127,7 @@ SCENARIO( "outletController Configuration", "[outletController]" )
       
       WHEN("using outlet keyword, all specified")
       {
-         writeConfigFile( "/tmp/outletController_test.conf", {"channel1", "channel1", "channel1", "channel1", "channel1",  "channel2",  "channel2", "channel2", "channel2", "channel2",  "channel3", "channel3", "channel3", "channel3", "channel3",   "channel4",  "channel4", "channel4", "channel4", "channel4"  },
+         mx::app::writeConfigFile( "/tmp/outletController_test.conf", {"channel1", "channel1", "channel1", "channel1", "channel1",  "channel2",  "channel2", "channel2", "channel2", "channel2",  "channel3", "channel3", "channel3", "channel3", "channel3",   "channel4",  "channel4", "channel4", "channel4", "channel4"  },
                                                         {"outlet",   "onOrder",  "offOrder", "onDelays", "offDelays", "outlet",    "onOrder",  "offOrder", "onDelays", "offDelays", "outlet",   "onOrder",  "offOrder", "onDelays", "offDelays",  "outlet",   "onOrder",  "offOrder", "onDelays", "offDelays"  },
                                                         {"0",        "0",        "0",        "100",      "120",       "1",         "0",        "0",        "105",      "130",       "2",        "0",        "0",        "107",      "132",        "3",      "0",        "0",        "108",      "133"});      
       
@@ -217,7 +217,7 @@ SCENARIO( "outletController Configuration", "[outletController]" )
       
       WHEN("using outlets keyword, only outlet specified")
       {
-         writeConfigFile( "/tmp/outletController_test.conf", {"channel1",     "channel2",     "channel3",      "channel4"},
+         mx::app::writeConfigFile( "/tmp/outletController_test.conf", {"channel1",     "channel2",     "channel3",      "channel4"},
                                                         {"outlets",       "outlets",       "outlets",          "outlets"},
                                                         {"0",             "1",             "2",                "3"} );
       
@@ -290,7 +290,7 @@ SCENARIO( "outletController Configuration", "[outletController]" )
       
       WHEN("using outlets keyword, all specified")
       {
-         writeConfigFile( "/tmp/outletController_test.conf", {"channel1", "channel1", "channel1", "channel1", "channel1",  "channel2", "channel2", "channel2", "channel2", "channel2",  "channel3", "channel3", "channel3", "channel3", "channel3",   "channel4",  "channel4", "channel4", "channel4", "channel4"  },
+         mx::app::writeConfigFile( "/tmp/outletController_test.conf", {"channel1", "channel1", "channel1", "channel1", "channel1",  "channel2", "channel2", "channel2", "channel2", "channel2",  "channel3", "channel3", "channel3", "channel3", "channel3",   "channel4",  "channel4", "channel4", "channel4", "channel4"  },
                                                         {"outlets",  "onOrder",  "offOrder", "onDelays", "offDelays", "outlets",  "onOrder",  "offOrder", "onDelays", "offDelays", "outlets",  "onOrder",  "offOrder", "onDelays", "offDelays",  "outlets",   "onOrder",  "offOrder", "onDelays", "offDelays"  },
                                                         {"0",        "0",        "0",        "100",      "120",       "1",        "0",        "0",        "105",      "130",       "2",        "0",        "0",        "107",      "132",        "3",          "0",        "0",        "108",      "133"});      
       
@@ -383,7 +383,7 @@ SCENARIO( "outletController Configuration", "[outletController]" )
    {
       WHEN("using outlet keyword, only outlet specified")
       {
-         writeConfigFile( "/tmp/outletController_test.conf", {"channel1",     "channel2" },
+         mx::app::writeConfigFile( "/tmp/outletController_test.conf", {"channel1",     "channel2" },
                                                         {"outlet",       "outlet"   },
                                                         {"0,1",             "2,3"   } );
       
@@ -434,7 +434,7 @@ SCENARIO( "outletController Configuration", "[outletController]" )
       
       WHEN("using outlet keyword, all specified")
       {
-         writeConfigFile( "/tmp/outletController_test.conf", {"channel1","channel1", "channel1", "channel1", "channel1",  "channel2", "channel2", "channel2", "channel2", "channel2"   },
+         mx::app::writeConfigFile( "/tmp/outletController_test.conf", {"channel1","channel1", "channel1", "channel1", "channel1",  "channel2", "channel2", "channel2", "channel2", "channel2"   },
                                                         {"outlet",  "onOrder",  "offOrder", "onDelays", "offDelays", "outlet",   "onOrder",  "offOrder", "onDelays", "offDelays"  },
                                                         {"0,1",     "0,1",      "1,0",      "0,105",    "0,107",     "2,3",      "1,0",      "0,1",      "0,106",    "0,108"      } );
       
@@ -499,7 +499,7 @@ SCENARIO( "outletController Configuration", "[outletController]" )
       
       WHEN("using outlets keyword, only outlet specified")
       {
-         writeConfigFile( "/tmp/outletController_test.conf", {"channel1",     "channel2" },
+         mx::app::writeConfigFile( "/tmp/outletController_test.conf", {"channel1",     "channel2" },
                                                         {"outlets",       "outlets"   },
                                                         {"0,1",             "2,3"   } );
       
@@ -549,7 +549,7 @@ SCENARIO( "outletController Configuration", "[outletController]" )
       
       WHEN("using outlets keyword, all specified")
       {
-         writeConfigFile( "/tmp/outletController_test.conf", {"channel1","channel1", "channel1", "channel1", "channel1",  "channel2", "channel2", "channel2", "channel2", "channel2"   },
+         mx::app::writeConfigFile( "/tmp/outletController_test.conf", {"channel1","channel1", "channel1", "channel1", "channel1",  "channel2", "channel2", "channel2", "channel2", "channel2"   },
                                                         {"outlets",  "onOrder",  "offOrder", "onDelays", "offDelays", "outlets",   "onOrder",  "offOrder", "onDelays", "offDelays"  },
                                                         {"0,2",     "0,1",      "1,0",      "0,105",    "0,107",     "1,3",      "1,0",      "0,1",      "0,106",    "0,108"      } );
       
@@ -618,7 +618,7 @@ SCENARIO( "outletController Operation", "[outletController]" )
 {
    GIVEN("a config file with 4 channels for 4 outlets, only outlet specified")
    {
-      writeConfigFile( "/tmp/outletController_test.conf", {"channel1", "channel2",     "channel3",      "channel4"},
+      mx::app::writeConfigFile( "/tmp/outletController_test.conf", {"channel1", "channel2",     "channel3",      "channel4"},
                                                         {"outlet",   "outlet",       "outlet",          "outlet"},
                                                         {"0",         "1",             "2",                "3"} );
       
@@ -966,7 +966,7 @@ SCENARIO( "outletController Operation", "[outletController]" )
    
    GIVEN("a config file with 2 channels for 4 outlets, only outlet specified")
    {
-      writeConfigFile( "/tmp/outletController_test.conf", {"channel1",     "channel2" },
+      mx::app::writeConfigFile( "/tmp/outletController_test.conf", {"channel1",     "channel2" },
                                                         {"outlet",       "outlet"   },
                                                         {"0,1",             "2,3"   } );
       
@@ -1163,7 +1163,7 @@ SCENARIO( "outletController Operation", "[outletController]" )
    {
       //Here we are just testing order, so we don't need to verify outlet state anymore
       
-      writeConfigFile( "/tmp/outletController_test.conf", {"channel1",  "channel1",   "channel2", "channel2" },
+      mx::app::writeConfigFile( "/tmp/outletController_test.conf", {"channel1",  "channel1",   "channel2", "channel2" },
                                                         {"outlet",  "onOrder",     "outlet", "onOrder"   },
                                                         {"0,1",     "0,1",        "2,3",     "0,1"   } );
       
@@ -1221,7 +1221,7 @@ SCENARIO( "outletController Operation", "[outletController]" )
    {
       //Here we are just testing order, so we don't need to verify outlet state anymore
       
-      writeConfigFile( "/tmp/outletController_test.conf", {"channel1",  "channel1",   "channel2", "channel2" },
+      mx::app::writeConfigFile( "/tmp/outletController_test.conf", {"channel1",  "channel1",   "channel2", "channel2" },
                                                         {"outlet",  "onOrder",     "outlet", "onOrder"   },
                                                         {"0,1",     "1,0",        "2,3",     "1,0"   } );
       
@@ -1279,7 +1279,7 @@ SCENARIO( "outletController Operation", "[outletController]" )
    {
       //Here we are just testing order, so we don't need to verify outlet state anymore
       
-      writeConfigFile( "/tmp/outletController_test.conf", {"channel1",  "channel1",  "channel1",  "channel2", "channel2", "channel2" },
+      mx::app::writeConfigFile( "/tmp/outletController_test.conf", {"channel1",  "channel1",  "channel1",  "channel2", "channel2", "channel2" },
                                                         {"outlet",  "onOrder",  "offOrder",   "outlet", "onOrder", "offOrder"   },
                                                         {"0,1",     "0,1",       "0,1",  "2,3",     "0,1" , "0,1"  } );
       
@@ -1340,7 +1340,7 @@ SCENARIO( "outletController Operation", "[outletController]" )
    {
       //Here we are just testing order, so we don't need to verify outlet state anymore
       
-      writeConfigFile( "/tmp/outletController_test.conf", {"channel1",  "channel1",  "channel1",  "channel2", "channel2", "channel2" },
+      mx::app::writeConfigFile( "/tmp/outletController_test.conf", {"channel1",  "channel1",  "channel1",  "channel2", "channel2", "channel2" },
                                                         {"outlet",  "onOrder",  "offOrder",   "outlet", "onOrder", "offOrder"   },
                                                         {"0,1",     "0,1",       "1,0",  "2,3",     "0,1" , "1,0"  } );
       
@@ -1403,7 +1403,7 @@ SCENARIO( "outletController Operation", "[outletController]" )
    {
       //Here we are just testing order, so we don't need to verify outlet state anymore
       
-      writeConfigFile( "/tmp/outletController_test.conf", {"channel1",  "channel1",  "channel1",  "channel2", "channel2", "channel2" },
+      mx::app::writeConfigFile( "/tmp/outletController_test.conf", {"channel1",  "channel1",  "channel1",  "channel2", "channel2", "channel2" },
                                                         {"outlet",  "onOrder",  "offOrder",   "outlet", "onOrder", "offOrder"   },
                                                         {"0,1",     "1,0",       "0,1",  "2,3",     "1,0" , "0,1"  } );
       
@@ -1472,7 +1472,7 @@ SCENARIO( "outletController Operation with delays", "[outletController]" )
    {
       //Here we are just testing delays, so we don't need to verify outlet state anymore
       
-      writeConfigFile( "/tmp/outletController_test.conf", {"channel1",  "channel1",   "channel2", "channel2" },
+      mx::app::writeConfigFile( "/tmp/outletController_test.conf", {"channel1",  "channel1",   "channel2", "channel2" },
                                                         {"outlet",  "onDelays",   "outlet", "onDelays"   },
                                                         {"0,1",     "0,350",        "2,3",     "0,150"   } );
       
@@ -1529,7 +1529,7 @@ SCENARIO( "outletController Operation with delays", "[outletController]" )
    {
       //Here we are just testing delays, so we don't need to verify outlet state anymore
       
-      writeConfigFile( "/tmp/outletController_test.conf", {"channel1",  "channel1",   "channel2", "channel2" },
+      mx::app::writeConfigFile( "/tmp/outletController_test.conf", {"channel1",  "channel1",   "channel2", "channel2" },
                                                         {"outlet",  "offDelays",   "outlet", "offDelays"   },
                                                         {"0,1",     "0,550",        "2,3",     "0,750"   } );
       
@@ -1587,7 +1587,7 @@ SCENARIO( "outletController Operation with delays", "[outletController]" )
    {
       //Here we are just testing delays, so we don't need to verify outlet state anymore
       
-      writeConfigFile( "/tmp/outletController_test.conf", {"channel1", "channel1", "channel1", "channel1", "channel1",  "channel2", "channel2", "channel2",  "channel2", "channel2" },
+      mx::app::writeConfigFile( "/tmp/outletController_test.conf", {"channel1", "channel1", "channel1", "channel1", "channel1",  "channel2", "channel2", "channel2",  "channel2", "channel2" },
                                                      {"outlet",   "onOrder",  "onDelays", "offOrder", "offDelays", "outlet",   "onOrder",  "onDelays", "offOrder", "offDelays"   },
                                                      {"0,1",      "0,1",      "0,350",    "1,0",      "0,450",     "2,3",      "0,1",      "0,150",      "1,0",      "0,75"   } );
       
