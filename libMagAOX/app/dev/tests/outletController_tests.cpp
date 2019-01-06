@@ -4,6 +4,7 @@
 #include <mx/timeUtils.hpp>
 
 #define OUTLET_CTRL_TEST_NOINDI
+#define OUTLET_CTRL_TEST_NOLOG
 #include "../outletController.hpp"
 
 namespace outletController_tests 
