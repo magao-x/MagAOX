@@ -1,0 +1,10 @@
+namespace MagAOX.logger;
+
+table Outlet_channel_state_fb
+{
+   channel:string;
+   state:uint8;
+}
+
+root_type Outlet_channel_state_fb;
+

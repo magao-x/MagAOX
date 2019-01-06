@@ -138,7 +138,7 @@ protected:
 
 trippLitePDU::trippLitePDU() : MagAOXApp(MAGAOX_CURRENT_SHA1, MAGAOX_REPO_MODIFIED)
 {
-   //m_outletStates.resize(8,0);
+   m_firstOne = true;
    setNumberOfOutlets(8);
 
    return;
@@ -356,9 +356,6 @@ int trippLitePDU::turnOutletOn( int outletNum )
 
    if(rv < 0) return log<software_error, -1>({__FILE__, __LINE__, 0, rv, "telnet error"});
 
-   uint8_t lonum = outletNum + 1;   //Do this without narrowing
-   log<pdu_outlet_state>({ lonum, 1});
-
    return 0;
 }
 
@@ -374,9 +371,6 @@ int trippLitePDU::turnOutletOff( int outletNum )
    int rv = m_telnetConn.writeRead( cmd, true, m_writeTimeOut, m_readTimeOut);
 
    if(rv < 0) return log<software_error, -1>({__FILE__, __LINE__, 0, rv, "telnet error"});
-
-   uint8_t lonum = outletNum + 1; //Do this without narrowing
-   log<pdu_outlet_state>({ lonum, 0});
 
    return 0;
 }

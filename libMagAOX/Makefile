@@ -25,7 +25,8 @@ INCLUDEDEPS= app/MagAOXApp.hpp \
              logger/types/loop_closed.hpp \
              logger/types/loop_open.hpp \
              logger/types/loop_paused.hpp \
-             logger/types/pdu_outlet_state.hpp \
+             logger/types/outlet_state.hpp \
+             logger/types/outlet_channel_state.hpp \
              logger/types/software_log.hpp \
              logger/types/state_change.hpp \
              logger/types/string_log.hpp \
