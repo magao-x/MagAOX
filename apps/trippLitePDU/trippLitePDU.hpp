@@ -40,6 +40,7 @@ namespace app
   * \todo need username and secure password handling
   * \todo need to recognize signals in tty polls and not return errors, etc.
   * \todo being logging freq/volt/amps telemetry
+  * \todo need warnings, etc., for freq, volt, amps.
   * 
   * \ingroup trippLitePDU
   */
