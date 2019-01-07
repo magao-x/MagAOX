@@ -36,11 +36,13 @@ namespace app
   * 
   * The line frequency and voltage, and the total load on the PDU, are monitored.
   * 
-  * \todo handle timeouts gracefully -- maybe go to error, flush, disconnect, reconnect, etc.
+  * \todo figure out why reads sometimes fail, requring the "drain"
   * \todo need username and secure password handling
   * \todo need to recognize signals in tty polls and not return errors, etc.
-  * \todo being logging freq/volt/amps telemetry
-  * \todo need warnings, etc., for freq, volt, amps.
+  * \todo begin logging freq/volt/amps telemetry
+  * \todo research load warnings
+  * \todo tests for parser
+  * \todo test for load warnings
   * 
   * \ingroup trippLitePDU
   */
@@ -54,6 +56,28 @@ protected:
    std::string m_deviceUsername; ///< The login username for this device
    std::string m_devicePassFile; ///< The login password for this device
 
+   float m_freqLowWarn {59};    ///< The low-frequency warning threshold
+   float m_freqHighWarn {61};   ///< The high-frequency warning threshold
+   
+   float m_freqLowAlert {58};   ///< The low-frequency alert threshold
+   float m_freqHighAlert {62};  ///< The high-frequency alert threshold
+   
+   float m_freqLowEmerg {57};   ///< The low-frequency emergency threshold
+   float m_freqHighEmerg {63};  ///< The high-frequency emergency threshold
+   
+   float m_voltLowWarn {105};   ///< The low-voltage warning threshold
+   float m_voltHighWarn {125};  ///< The high-voltage warning threshold
+   
+   float m_voltLowAlert {101};  ///< The low-voltage alert threshold
+   float m_voltHighAlert {126}; ///< The high-voltage alert threshold
+   
+   float m_voltLowEmerg {99};   ///< The low-voltage emergency threshold
+   float m_voltHighEmerg {128}; ///< The high-voltage emergency threshold
+   
+   float m_currWarn {15};  ///< The high-current warning threshold
+   float m_currAlert {16}; ///< The high-current alert threshold
+   float m_currEmerg {20}; ///< The high-current emergency threshold
+   
    tty::telnetConn m_telnetConn; ///< The telnet connection manager
 
    int m_writeTimeOut {1000};  ///< The timeout for writing to the device [msec].
@@ -156,6 +180,24 @@ void trippLitePDU::setupConfig()
    config.add("timeouts.read", "", "timeouts.read", argType::Required, "timeouts", "read", false, "int", "The timeout for reading the device [msec]. Default = 2000");
    config.add("timeouts.outletStateDelay", "", "timeouts.outletStateDelay", argType::Required, "timeouts", "outletStateDelay", false, "int", "The maximum time to wait for an outlet to change state [msec]. Default = 5000");
 
+   config.add("limits.freqLowWarn", "", "limits.freqLowWarn", argType::Required, "limits", "freqLowWarn", false, "int", "The low-frequency warning threshold");
+   config.add("limits.freqHighWarn", "", "limits.freqHighWarn", argType::Required, "limits", "freqHighWarn", false, "int", "The high-frequency warning threshold");
+   config.add("limits.freqLowAlert", "", "limits.freqLowAlert", argType::Required, "limits", "freqLowAlert", false, "int", "The low-frequency alert threshold");
+   config.add("limits.freqHighAlert", "", "limits.freqHighAlert", argType::Required, "limits", "freqHighAlert", false, "int", "The high-frequency alert threshold");
+   config.add("limits.freqLowEmerg", "", "limits.freqLowEmerg", argType::Required, "limits", "freqLowEmerg", false, "int", "The low-frequency emergency threshold");
+   config.add("limits.freqHighEmerg", "", "limits.freqHighEmerg", argType::Required, "limits", "freqHighEmerg", false, "int", "The high-frequency emergency threshold");
+   
+   config.add("limits.voltLowWarn", "", "limits.voltLowWarn", argType::Required, "limits", "voltLowWarn", false, "int", "The low-voltage warning threshold");
+   config.add("limits.voltHighWarn", "", "limits.voltHighWarn", argType::Required, "limits", "voltHighWarn", false, "int", "The high-voltage warning threshold");
+   config.add("limits.voltLowAlert", "", "limits.voltLowAlert", argType::Required, "limits", "voltLowAlert", false, "int", "The low-voltage alert threshold");
+   config.add("limits.voltHighAlert", "", "limits.voltHighAlert", argType::Required, "limits", "voltHighAlert", false, "int", "The high-voltage alert threshold");
+   config.add("limits.voltLowEmerg", "", "limits.voltLowEmerg", argType::Required, "limits", "voltLowEmerg", false, "int", "The low-voltage emergency threshold");
+   config.add("limits.voltHighEmerg", "", "limits.voltHighEmerg", argType::Required, "limits", "voltHighEmerg", false, "int", "The high-voltage emergency threshold");
+   
+   config.add("limits.currWarn", "", "limits.currWarn", argType::Required, "limits", "currWarn", false, "int", "The high-current warning threshold");
+   config.add("limits.currAlert", "", "limits.currAlert", argType::Required, "limits", "currAlert", false, "int", "The high-current alert threshold");
+   config.add("limits.currEmerg", "", "limits.currEmerg", argType::Required, "limits", "currEmerg", false, "int", "The high-current emergency threshold");
+   
    dev::outletController<trippLitePDU>::setupConfig(config);
 }
 
@@ -171,7 +213,24 @@ void trippLitePDU::loadConfig()
    config(m_readTimeOut, "timeouts.read");
    config(m_outletStateDelay, "timeouts.outletStateDelay");
 
-
+   config(m_freqLowWarn, "limits.freqLowWarn");
+   config(m_freqHighWarn, "limits.freqHighWarn");
+   config(m_freqLowAlert, "limits.freqLowAlert");
+   config(m_freqHighAlert, "limits.freqHighAlert");
+   config(m_freqLowEmerg, "limits.freqLowEmerg");
+   config(m_freqHighEmerg, "limits.freqHighEmerg");
+   
+   config(m_voltLowWarn, "limits.voltLowWarn");
+   config(m_voltHighWarn, "limits.voltHighWarn");
+   config(m_voltLowAlert, "limits.voltLowAlert");
+   config(m_voltHighAlert, "limits.voltHighAlert");
+   config(m_voltLowEmerg, "limits.voltLowEmerg");
+   config(m_voltHighEmerg, "limits.voltHighEmerg");
+   
+   config(m_currWarn, "limits.currWarn");
+   config(m_currAlert, "limits.currAlert");
+   config(m_currEmerg, "limits.currEmerg");
+   
    dev::outletController<trippLitePDU>::loadConfig(config);
 
 }
@@ -253,7 +312,13 @@ int trippLitePDU::appLogic()
       }
    }
 
+   
    if(state() == stateCodes::LOGGEDIN)
+   {
+      state(stateCodes::READY);
+   }
+   
+   if(state() == stateCodes::READY)
    {
       std::unique_lock<std::mutex> lock(m_indiMutex, std::try_to_lock);
 
@@ -266,6 +331,69 @@ int trippLitePDU::appLogic()
 
       if(rv < 0) return log<software_error,-1>({__FILE__, __LINE__});
 
+      if (m_frequency <= m_freqLowEmerg)
+      {
+         log<text_log>("Frequency is " + std::to_string(m_frequency) + " Hz, below " + std::to_string(m_freqLowEmerg) + " Hz.",  logPrio::LOG_EMERGENCY);
+      }
+      else if (m_frequency >= m_freqHighEmerg)
+      {
+         log<text_log>("Frequency is " + std::to_string(m_frequency) + " Hz, above " + std::to_string(m_freqHighEmerg) + " Hz.",  logPrio::LOG_EMERGENCY);
+      }
+      else if (m_frequency <= m_freqLowAlert)
+      {
+         log<text_log>("Frequency is " + std::to_string(m_frequency) + " Hz, below " + std::to_string(m_freqLowAlert) + " Hz.",  logPrio::LOG_ALERT);
+      }
+      else if (m_frequency >= m_freqHighAlert)
+      {
+         log<text_log>("Frequency is " + std::to_string(m_frequency) + " Hz, above " + std::to_string(m_freqHighAlert) + " Hz.",  logPrio::LOG_ALERT);
+      }
+      else if(m_frequency <= m_freqLowWarn)
+      {
+         log<text_log>("Frequency is " + std::to_string(m_frequency) + " Hz, below " + std::to_string(m_freqLowWarn) + " Hz.",  logPrio::LOG_WARNING);
+      }
+      else if (m_frequency >= m_freqHighWarn)
+      {
+         log<text_log>("Frequency is " + std::to_string(m_frequency) + " Hz, above " + std::to_string(m_freqHighWarn) + " Hz.",  logPrio::LOG_WARNING);
+      }
+      
+      if (m_voltage <= m_voltLowEmerg)
+      {
+         log<text_log>("Voltage is " + std::to_string(m_voltage) + " V, below " + std::to_string(m_voltLowEmerg) + " V.",  logPrio::LOG_EMERGENCY);
+      }
+      else if (m_voltage >= m_voltHighEmerg)
+      {
+         log<text_log>("Voltage is " + std::to_string(m_voltage) + " V, above " + std::to_string(m_voltHighEmerg) + " V.",  logPrio::LOG_EMERGENCY);
+      }
+      else if (m_voltage <= m_voltLowAlert)
+      {
+         log<text_log>("Voltage is " + std::to_string(m_voltage) + " V, below " + std::to_string(m_voltLowAlert) + " V.",  logPrio::LOG_ALERT);
+      }
+      else if (m_voltage >= m_voltHighAlert)
+      {
+         log<text_log>("Voltage is " + std::to_string(m_voltage) + " V, above " + std::to_string(m_voltHighAlert) + " V.",  logPrio::LOG_ALERT);
+      }
+      else if(m_voltage <= m_voltLowWarn)
+      {
+         log<text_log>("Voltage is " + std::to_string(m_voltage) + " V, below " + std::to_string(m_voltLowWarn) + " V.",  logPrio::LOG_WARNING);
+      }
+      else if (m_voltage >= m_voltHighWarn)
+      {
+         log<text_log>("Voltage is " + std::to_string(m_voltage) + " V, above " + std::to_string(m_voltHighWarn) + " V.",  logPrio::LOG_WARNING);
+      }
+      
+      if (m_current >= m_currEmerg)
+      {
+         log<text_log>("Current is " + std::to_string(m_current) + " A, above " + std::to_string(m_currEmerg) + " A.",  logPrio::LOG_EMERGENCY);
+      }
+      else if (m_current >= m_currAlert)
+      {
+         log<text_log>("Current is " + std::to_string(m_current) + " A, above " + std::to_string(m_currAlert) + " A.",  logPrio::LOG_ALERT);
+      }
+      else if (m_current >= m_currWarn)
+      {
+         log<text_log>("Current is " + std::to_string(m_current) + " A, above " + std::to_string(m_currWarn) + " A.",  logPrio::LOG_WARNING);
+      }
+      
       return 0;
    }
 
