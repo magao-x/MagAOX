@@ -85,7 +85,7 @@ protected:
 
    std::string secretsPath; ///< Path to the secrets directory, where passwords, etc, are stored.
 
-   unsigned long loopPause {MAGAOX_default_loopPause}; ///< The time in nanoseconds to pause the main loop.  The appLogic() function of the derived class is called every loopPause nanoseconds.  Default is 1,000,000,000 ns.  Config with loopPause=X.
+   unsigned long m_loopPause {MAGAOX_default_loopPause}; ///< The time in nanoseconds to pause the main loop.  The appLogic() function of the derived class is called every m_loopPause nanoseconds.  Default is 1,000,000,000 ns.  Config with loopPause=X.
 
    int m_shutdown {0}; ///< Flag to signal it's time to shutdown.  When not 0, the main loop exits.
 
@@ -150,8 +150,31 @@ public:
    virtual void loadBasicConfig();
 
    /// The execute method implementing the standard main loop.  Should not normally be overridden.
-   /**
-     *
+   /** Performs final startup steps.  That is:
+     * - PID locking lockPID()
+     * - log thread startup by logThreadStart()
+     * - signal handling installation by setSigTermHandler()
+     * - appStartup() is called 
+     * - INDI communications started by startINDI()
+     * - power state is checked, pausing if unknown (if being managed)
+     * 
+     * Errors in the above steps will cause a process exit.
+     * 
+     * Then commences the main event loop. 
+     * Conditions on entry to the main loop:
+     * - PID locked
+     * - Log thread running
+     * - Signal handling installed 
+     * - appStartup successful
+     * - INDI communications started successfully (if being used)
+     * - power state known (if being managed)
+     * 
+     * In the event loop, the power state is checked (if being managed).  If power is off, then onPowerOff is called.  
+     * If power is on, or power is not managed, appLogic is called.  These methods are implemented in derived classes, and
+     * are called every m_loopPause interval.
+     * 
+     * If an error is returned by either onPowerOff or appLogic, or a signal is handled, then the shutdown is managed.
+     * This includes shutting down INDI, calling appShutdown, and unlocking the PID.  The log thread will shutdown.
      */
    virtual int execute();
 
@@ -170,7 +193,7 @@ public:
    virtual int appStartup() = 0;
 
    /// This is where derived applications implement their main FSM logic.
-   /** This will be called every loopPause nanoseconds until the application terminates.
+   /** This will be called every m_loopPause nanoseconds until the application terminates.
      *
      * FSM state will be whatever it is on exti from appStartup.
      *
@@ -559,8 +582,9 @@ protected:
 
    /** \name Power Management
      * For devices which have remote power management (e.g. from one of the PDUs) we implement
-     * a standard power state monitoring and management component for the FSM.  This is only
-     * enabled if the power management configuration options are set.
+     * a standard power state monitoring and management component for the FSM.  This needs to be enabled
+     * in the derived app constructor.  To stay enabled, m_powerDevice and m_powerChannel must be
+     * not empty strings after the configuration.  These could be set in the derived app defaults.
      *
      * If power management is enabled, then while power is off, appLogic will not be called.
      * Instead a parrallel set of virtual functions is called, onPowerOff (to allow apps to
@@ -569,15 +593,15 @@ protected:
      *
      */
 protected:
-   bool m_powerMgtEnabled {false};
+   bool m_powerMgtEnabled {false}; ///< Flag controls whether power mgt is used.  Set this in the constructor of a derived app.  If true, then if after loadConfig the powerDevice and powerChannel are empty, then this will revert to false.
 
-   std::string m_powerDevice;
-   std::string m_powerOutlet;
-   std::string m_powerElement {"state"};
+   std::string m_powerDevice; ///< The INDI device name of the power controller
+   std::string m_powerChannel; ///< The INDI property name of the channel controlling this device's power.
+   std::string m_powerElement {"state"}; ///< The INDI element name to monitor for this device's power state.
 
    int m_powerState {-1}; ///< Current power state, 1=On, 0=Off, -1=Unk.
 
-   pcf::IndiProperty m_indiP_powerOutlet;
+   pcf::IndiProperty m_indiP_powerChannel;
 
    /// This method is called when the change to poweroff is detected.
    /**
@@ -594,9 +618,9 @@ protected:
    virtual int whilePowerOff() {return 0;}
 
 public:
-
-   INDI_SETCALLBACK_DECL(MagAOXApp, m_indiP_powerOutlet);
-
+   
+   INDI_SETCALLBACK_DECL(MagAOXApp, m_indiP_powerChannel);
+   
    ///@} Power Management
 
 public:
@@ -760,10 +784,13 @@ void MagAOXApp<_useINDI>::setupBasicConfig() //virtual
    //Logger Stuff
    m_log.setupConfig(config);
 
-   //Power Management
-   config.add("power.device", "", "power.device", argType::Required, "power", "device", false, "string", "Device controlling power for this app's device (INDI name).");
-   config.add("power.outlet", "", "power.outlet", argType::Required, "power", "outlet", false, "string", "Outlet (or channel) on device for this app's device (INDI name).");
-   config.add("power.element", "", "power.element", argType::Required, "power", "element", false, "string", "INDI element name.  Default is \"state\", only need to specify if different.");
+   if( m_powerMgtEnabled)
+   {
+      //Power Management
+      config.add("power.device", "", "power.device", argType::Required, "power", "device", false, "string", "Device controlling power for this app's device (INDI name).");
+      config.add("power.outlet", "", "power.outlet", argType::Required, "power", "outlet", false, "string", "Channel on device for this app's device (INDI name).");
+      config.add("power.element", "", "power.element", argType::Required, "power", "element", false, "string", "INDI element name.  Default is \"state\", only need to specify if different.");
+   }
 }
 
 template<bool _useINDI>
@@ -774,7 +801,7 @@ void MagAOXApp<_useINDI>::loadBasicConfig() //virtual
    m_log.loadConfig(config);
 
    //--------- Loop Pause Time --------//
-   config(loopPause, "loopPause");
+   config(m_loopPause, "loopPause");
 
    //--------- RT Priority ------------//
    int prio = m_RTPriority;
@@ -784,17 +811,23 @@ void MagAOXApp<_useINDI>::loadBasicConfig() //virtual
       RTPriority(prio);
    }
 
+
    //--------Power Management --------//
-   config(m_powerDevice, "power.device");
-   config(m_powerOutlet, "power.outlet");
-   config(m_powerElement, "power.element");
-
-   if(m_powerDevice != "" && m_powerOutlet != "")
+   if( m_powerMgtEnabled)
    {
-      log<text_log>("enabling power management: " + m_powerDevice + "." + m_powerOutlet + "." + m_powerElement);
+      config(m_powerDevice, "power.device");
+      config(m_powerChannel, "power.channel");
+      config(m_powerElement, "power.element");
 
-      m_powerMgtEnabled = true;
-      REG_INDI_SETPROP(m_indiP_powerOutlet, m_powerDevice, m_powerOutlet);
+      if(m_powerDevice != "" && m_powerChannel != "")
+      {
+         log<text_log>("enabling power management: " + m_powerDevice + "." + m_powerChannel + "." + m_powerElement);
+         REG_INDI_SETPROP(m_indiP_powerChannel, m_powerDevice, m_powerChannel);
+      }
+      else
+      {
+         m_powerMgtEnabled = false;
+      }
    }
 }
 
@@ -940,7 +973,7 @@ int MagAOXApp<_useINDI>::execute() //virtual
       //Pause loop unless shutdown is set
       if( m_shutdown == 0)
       {
-         std::this_thread::sleep_for( std::chrono::duration<unsigned long, std::nano>(loopPause));
+         std::this_thread::sleep_for( std::chrono::duration<unsigned long, std::nano>(m_loopPause));
       }
    }
 
@@ -1769,10 +1802,8 @@ int MagAOXApp<_useINDI>::sendNewProperty( const pcf::IndiProperty & ipSend,
 }
 
 template<bool _useINDI>
-INDI_SETCALLBACK_DEFN( MagAOXApp<_useINDI>, m_indiP_powerOutlet)(const pcf::IndiProperty &ipRecv)
+INDI_SETCALLBACK_DEFN( MagAOXApp<_useINDI>, m_indiP_powerChannel)(const pcf::IndiProperty &ipRecv)
 {
-   //m_indiP_powerOutlet = ipRecv;
-
    std::string ps;
 
    try
