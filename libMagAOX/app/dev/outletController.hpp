@@ -13,8 +13,9 @@
 #include <mx/app/application.hpp>
 #include <mx/timeUtils.hpp>
 
-#include "../../INDI/libcommon/IndiProperty.hpp"
 
+#include "../../INDI/libcommon/IndiProperty.hpp"
+#include "../../libMagAOX/libMagAOX.hpp"
 #include "../indiUtils.hpp"
 
 
@@ -36,11 +37,11 @@ namespace dev
 {
 
 /// A generic outlet controller
-/** Controls a set of outlets on a device, such as A/C power outlets or digital outputs.  
+/** Controls a set of outlets on a device, such as A/C power outlets or digital outputs.
   * The outlets are organized into channels, which could be made up of multiple outlets.
   *
-  * \tparam derivedT specifies a MagAOXApp parent base class which is accessed with a `static_cast` (downcast)to perform various methods. 
-  * 
+  * \tparam derivedT specifies a MagAOXApp parent base class which is accessed with a `static_cast` (downcast)to perform various methods.
+  *
   * \ingroup appdev
   *
   * \todo finalize 0-counting vs 1-counting rules --> do we subtract one from config-ed outlet indices if m_firstOne is true?
@@ -226,16 +227,16 @@ struct outletController
      */
 
    /// The static callback function to be registered for the channel properties.
-   /** 
+   /**
      * \returns 0 on success.
      * \returns -1 on error.
-     */ 
+     */
    static int st_newCallBack_channels( void * app, ///< [in] a pointer to this, will be static_cast-ed to derivedT.
                                        const pcf::IndiProperty &ipRecv ///< [in] the INDI property sent with the the new property request.
                                      );
 
    /// The callback called by the static version, to actually process the new request.
-   /** 
+   /**
      * \returns 0 on success.
      * \returns -1 on error.
      */
@@ -309,6 +310,18 @@ int outletController<derivedT>::loadConfig( mx::app::appConfigurator & config )
       else
       {
          config.configUnused( outlets, mx::app::iniFile::makeKey(chSections[n], "outlets" ) );
+      }
+
+      //Subtract one if the device numbers from 1.
+      for(size_t k=0;k<outlets.size(); ++k)
+      {
+         ///\todo test this error
+         if( (int) outlets[k] - m_firstOne < 0 || (int) outlets[k] - m_firstOne > (int) m_outletStates.size())
+         {
+            return derivedT::template log<text_log,-1>("Outlet " + std::to_string(outlets[k]) + " in Channel " + chSections[n] + " is invalid", logPrio::LOG_ERROR);
+         }
+
+         outlets[k] -= m_firstOne;
       }
 
       m_channels[chSections[n]].m_outlets = outlets;
@@ -428,15 +441,15 @@ int outletController<derivedT>::channelState( const std::string & channel )
 template<class derivedT>
 int outletController<derivedT>::turnChannelOn( const std::string & channel )
 {
-      
+
    #ifndef OUTLET_CTRL_TEST_NOLOG
-   derivedT::template log<software_debug>({__FILE__, __LINE__, "turning on channel " + channel}); 
+   derivedT::template log<software_debug>({__FILE__, __LINE__, "turning on channel " + channel});
    #endif
-   
-   #ifndef OUTLET_CTRL_TEST_NOINDI   
+
+   #ifndef OUTLET_CTRL_TEST_NOINDI
    m_channels[channel].m_indiP_prop["target"].setValue("On");
    #endif
-      
+
    //If order is specified, get first outlet number
    size_t n = 0;
    if( m_channels[channel].m_onOrder.size() == m_channels[channel].m_outlets.size() ) n = m_channels[channel].m_onOrder[0];
@@ -446,18 +459,18 @@ int outletController<derivedT>::turnChannelOn( const std::string & channel )
    {
 
       #ifndef OUTLET_CTRL_TEST_NOLOG
-         derivedT::template log<software_error>({__FILE__, __LINE__, "error turning on outlet " + std::to_string(n)}); 
+         derivedT::template log<software_error>({__FILE__, __LINE__, "error turning on outlet " + std::to_string(n)});
       #else
          std::cerr << "Failed to turn on outlet " << n << "\n";
       #endif
-      
+
       return -1;
    }
-   
+
    #ifndef OUTLET_CTRL_TEST_NOLOG
    derivedT::template log<outlet_state>({ (uint8_t) (n  + m_firstOne), 2});
    #endif
-   
+
    //Now do the rest
    for(size_t i = 1; i< m_channels[channel].m_outlets.size(); ++i)
    {
@@ -472,19 +485,19 @@ int outletController<derivedT>::turnChannelOn( const std::string & channel )
       }
 
       //turn on next outlet
-      
+
       if( turnOutletOn(m_channels[channel].m_outlets[n]) < 0 )
       {
-   
+
          #ifndef OUTLET_CTRL_TEST_NOLOG
-         derivedT::template log<software_error>({__FILE__, __LINE__, "error turning on outlet " + std::to_string(n)}); 
+         derivedT::template log<software_error>({__FILE__, __LINE__, "error turning on outlet " + std::to_string(n)});
          #else
          std::cerr << "Failed to turn on outlet " << n << "\n";
          #endif
-      
+
          return -1;
       }
-   
+
       #ifndef OUTLET_CTRL_TEST_NOLOG
       derivedT::template log<outlet_state>({ (uint8_t) (n  + m_firstOne ), 2});
       #endif
@@ -493,22 +506,22 @@ int outletController<derivedT>::turnChannelOn( const std::string & channel )
    #ifndef OUTLET_CTRL_TEST_NOLOG
    derivedT::template log<outlet_channel_state>({ channel, 2});
    #endif
-   
+
    return 0;
 }
 
 template<class derivedT>
 int outletController<derivedT>::turnChannelOff( const std::string & channel )
 {
-   
+
    #ifndef OUTLET_CTRL_TEST_NOLOG
-   derivedT::template log<software_debug>({__FILE__, __LINE__, "turning off channel " + channel}); 
+   derivedT::template log<software_debug>({__FILE__, __LINE__, "turning off channel " + channel});
    #endif
-   
-   #ifndef OUTLET_CTRL_TEST_NOINDI   
+
+   #ifndef OUTLET_CTRL_TEST_NOINDI
    m_channels[channel].m_indiP_prop["target"].setValue("Off");
    #endif
-   
+
    //If order is specified, get first outlet number
    size_t n = 0;
    if( m_channels[channel].m_offOrder.size() == m_channels[channel].m_outlets.size() ) n = m_channels[channel].m_offOrder[0];
@@ -517,18 +530,18 @@ int outletController<derivedT>::turnChannelOff( const std::string & channel )
    if( turnOutletOff(m_channels[channel].m_outlets[n]) < 0 )
    {
       #ifndef OUTLET_CTRL_TEST_NOLOG
-         derivedT::template log<software_error>({__FILE__, __LINE__, "error turning off outlet " + std::to_string(n)}); 
+         derivedT::template log<software_error>({__FILE__, __LINE__, "error turning off outlet " + std::to_string(n)});
       #else
          std::cerr << "Failed to turn off outlet " << n << "\n";
       #endif
-      
+
       return -1;
    }
 
    #ifndef OUTLET_CTRL_TEST_NOLOG
    derivedT::template log<outlet_state>({ (uint8_t) (n  + m_firstOne), 0});
    #endif
-      
+
    //Now do the rest
    for(size_t i = 1; i< m_channels[channel].m_outlets.size(); ++i)
    {
@@ -550,10 +563,10 @@ int outletController<derivedT>::turnChannelOff( const std::string & channel )
          #else
             std::cerr << "Failed to turn off outlet " << n << "\n";
          #endif
-      
+
          return -1;
       }
-      
+
       #ifndef OUTLET_CTRL_TEST_NOLOG
       derivedT::template log<outlet_state>({ (uint8_t) (n + m_firstOne), 0});
       #endif
@@ -562,7 +575,7 @@ int outletController<derivedT>::turnChannelOff( const std::string & channel )
    #ifndef OUTLET_CTRL_TEST_NOLOG
    derivedT::template log<outlet_channel_state>({ channel, 0});
    #endif
-   
+
    return 0;
 }
 
