@@ -548,7 +548,7 @@ int siglentSDG::appLogic()
             log<text_log>(logs.str());
          }
 
-         m_powerOnCounter += 1 + loopPause/1e9;
+         m_powerOnCounter += 1 + m_loopPause/1e9;
 
          return 0;
       }
