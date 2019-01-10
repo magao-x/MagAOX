@@ -13,6 +13,8 @@
 #include "../../libMagAOX/tty/ttyIOUtils.hpp"
 #include "../../libMagAOX/tty/ttyUSB.hpp"
 
+using namespace mx::app;
+
 namespace MagAOX
 {
 namespace tty
@@ -28,21 +30,28 @@ struct usbDevice
    std::string m_idProduct; ///< The product id 4-digit code
    std::string m_serial;    ///< The serial number
 
-   speed_t m_speed {0}; ///< The baud rate specification.
+   speed_t m_speed {0}; ///< The baud rate specification. \todo change this m_baudRate
 
    std::string m_deviceName; ///< The device path name, e.g. /dev/ttyUSB0
 
    int m_fileDescrip {0}; ///< The file descriptor
 
    ///Setup an application configurator for the USB section
-   int setupConfig( mx::appConfigurator & config /**< [in] an application configuration to setup */);
+   /**
+     * \returns 0 on success.
+     * \returns -1 on error (nothing implemented yet)
+     */ 
+   int setupConfig( appConfigurator & config /**< [in] an application configuration to setup */);
 
    ///Load the USB section from an application configurator
    /**
      * If config does not contain a baud rate, m_speed is unchanged.  If m_speed is 0 at the end of this
      * method, an error is returned.  Set m_speed prior to calling to avoid this error.
+     *
+     * \returns 0 on success
+     * \returns -1 on error (nothing implemented yet)
      */
-   int loadConfig( mx::appConfigurator & config /**< [in] an application configuration from which to load values */);
+   int loadConfig( appConfigurator & config /**< [in] an application configuration from which to load values */);
 
    ///Get the device name from udev using the vendor, product, and serial number.
    int getDeviceName();
@@ -51,17 +60,17 @@ struct usbDevice
    int connect();
 };
 
-int usbDevice::setupConfig( mx::appConfigurator & config )
+int usbDevice::setupConfig( mx::app::appConfigurator & config )
 {
-   config.add("usb.idVendor", "", "idVendor", mx::argType::Required, "usb", "idVendor", false, "string", "USB vendor id, 4 digits");
-   config.add("usb.idProduct", "", "idProduct", mx::argType::Required, "usb", "idProduct", false, "string", "USB product id, 4 digits");
-   config.add("usb.serial", "", "serial", mx::argType::Required, "usb", "serial", false, "string", "USB serial number");
-   config.add("usb.baud", "", "baud", mx::argType::Required, "usb", "baud", false, "real", "USB tty baud rate (i.e. 9600)");
+   config.add("usb.idVendor", "", "usb.idVendor", argType::Required, "usb", "idVendor", false, "string", "USB vendor id, 4 digits");
+   config.add("usb.idProduct", "", "usb.idProduct", argType::Required, "usb", "idProduct", false, "string", "USB product id, 4 digits");
+   config.add("usb.serial", "", "usb.serial", argType::Required, "usb", "serial", false, "string", "USB serial number");
+   config.add("usb.baud", "", "usb.baud", argType::Required, "usb", "baud", false, "real", "USB tty baud rate (i.e. 9600)");
 
    return 0;
 }
 
-int usbDevice::loadConfig( mx::appConfigurator & config )
+int usbDevice::loadConfig( mx::app::appConfigurator & config )
 {
    config(m_idVendor, "usb.idVendor");
    config(m_idProduct, "usb.idProduct");
@@ -71,6 +80,7 @@ int usbDevice::loadConfig( mx::appConfigurator & config )
    //Then multiply by 10 for the switch statement.
    float baud = 0;
    config(baud, "usb.baud");
+   
    switch((int)(baud*10))
    {
       case 0:
@@ -118,7 +128,6 @@ int usbDevice::loadConfig( mx::appConfigurator & config )
          m_speed = B38400;
          break;
       default:
-         m_speed = 0;
          break;
    }
 

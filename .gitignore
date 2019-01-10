@@ -34,6 +34,8 @@ apps/xindiserver/tests/tunneledHost_test
 apps/xindiserver/tests/xindiserver_test
 apps/xindiserver/xindiserver
 
+apps/sysMonitor/sysMonitor
+
 apps/sshDigger/sshDigger
 
 apps/zaberCtrl/zaberCtrl
@@ -42,6 +44,8 @@ apps/siglentSDG/siglentSDG
 apps/siglentSDG/tests/siglentSDG_test
 
 apps/ttmModulator/ttmModulator
+
+apps/filterWheelCtrl/filterWheelCtrl
 
 utils/logdump/logdump
 utils/cursesINDI/cursesINDI

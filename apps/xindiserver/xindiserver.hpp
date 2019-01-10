@@ -15,7 +15,7 @@
 #include <mx/ioutils/fileUtils.hpp>
 
 #include "../../libMagAOX/libMagAOX.hpp" //Note this is included on command line to trigger pch
-#include "magaox_git_version.h"
+#include "../../magaox_git_version.h"
 
 
 #include "remoteDriver.hpp"
@@ -145,15 +145,15 @@ xindiserver::xindiserver() : MagAOXApp(MAGAOX_CURRENT_SHA1, MAGAOX_REPO_MODIFIED
 inline
 void xindiserver::setupConfig()
 {
-   config.add("indiserver.m", "m", "", mx::argType::Required, "indiserver", "m", false,  "int", "indiserver kills client if it gets more than this many MB behind, default 50");
-   config.add("indiserver.n", "n", "", mx::argType::True, "indiserver", "n", false,  "bool", "indiserver: ignore /tmp/noindi");
-   config.add("indiserver.p", "p", "", mx::argType::Required, "indiserver", "p", false,  "int", "indiserver: alternate IP port, default 7624");
-   config.add("indiserver.v", "v", "", mx::argType::True, "indiserver", "v", false,  "int", "indiserver: log verbosity, -v, -vv or -vvv");
-   config.add("indiserver.x", "x", "", mx::argType::True, "indiserver", "x", false,  "bool", "exit after last client disconnects -- FOR PROFILING ONLY");
+   config.add("indiserver.m", "m", "", argType::Required, "indiserver", "m", false,  "int", "indiserver kills client if it gets more than this many MB behind, default 50");
+   config.add("indiserver.n", "n", "", argType::True, "indiserver", "n", false,  "bool", "indiserver: ignore /tmp/noindi");
+   config.add("indiserver.p", "p", "", argType::Required, "indiserver", "p", false,  "int", "indiserver: alternate IP port, default 7624");
+   config.add("indiserver.v", "v", "", argType::True, "indiserver", "v", false,  "int", "indiserver: log verbosity, -v, -vv or -vvv");
+   config.add("indiserver.x", "x", "", argType::True, "indiserver", "x", false,  "bool", "exit after last client disconnects -- FOR PROFILING ONLY");
    
-   config.add("local.drivers","L", "local" , mx::argType::Required, "local", "drivers", false,  "vector string", "List of local drivers to start.");
-   config.add("remote.drivers","R", "remote" , mx::argType::Required, "remote", "drivers", false,  "vector string", "List of remote drivers to start, in the form of name@hostname without the port.  Hostname needs an entry in remote.hosts.");
-   config.add("remote.hosts", "H", "hosts", mx::argType::Required, "remote", "hosts", false,  "vector string", "List of remote hosts, in the form of hostname[:remote_port]:local_port. remote_port is optional if it is the INDI default.");
+   config.add("local.drivers","L", "local" , argType::Required, "local", "drivers", false,  "vector string", "List of local drivers to start.");
+   config.add("remote.drivers","R", "remote" , argType::Required, "remote", "drivers", false,  "vector string", "List of remote drivers to start, in the form of name@hostname without the port.  Hostname needs an entry in remote.hosts.");
+   config.add("remote.hosts", "H", "hosts", argType::Required, "remote", "hosts", false,  "vector string", "List of remote hosts, in the form of hostname[:remote_port]:local_port. remote_port is optional if it is the INDI default.");
 }
 
 inline

@@ -110,6 +110,7 @@ indiDriver<parentT>::indiDriver ( parentT * parent,
    fd = open( parent->driverInName().c_str(), O_RDWR);
    if(fd < 0)
    {
+      parentT::template log<logger::software_error>({__FILE__, __LINE__, errno, "Error opening input INDI FIFO."});
       m_good = false;
       return;
    }
@@ -119,6 +120,7 @@ indiDriver<parentT>::indiDriver ( parentT * parent,
    fd = open( parent->driverOutName().c_str(), O_RDWR);
    if(fd < 0)
    {
+      parentT::template log<logger::software_error>({__FILE__, __LINE__, errno, "Error opening output INDI FIFO."});
       m_good = false;
       return;
    }
@@ -131,11 +133,19 @@ indiDriver<parentT>::indiDriver ( parentT * parent,
    fd = open( parent->driverCtrlName().c_str(), O_RDWR);
    if(fd < 0)
    {
+      parentT::template log<logger::software_error>({__FILE__, __LINE__, errno, "Error opening control INDI FIFO."});
       m_good = false;
       return;
    }
    char c = 0;
-   write(fd, &c, 1);
+   int wrno = write(fd, &c, 1);
+   if(wrno < 0)
+   {
+      parentT::template log<logger::software_error>({__FILE__, __LINE__, errno, "Error writing to control INDI FIFO."});
+      m_good = false;
+   }
+   
+   
    close(fd);
 }
 

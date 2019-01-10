@@ -1,14 +1,17 @@
-
-// #define CATCH_CONFIG_MAIN
-// #include "../../../tests/catch2/catch.hpp"
-
-#include "../../../tests/testMagAOX.hpp"
+/** \file ocamUtils_test.cpp
+  * \brief Catch2 tests for the ocamUtils in the ocam2KCtrl app.
+  * \author Jared R. Males (jaredmales@gmail.com)
+  *
+  * History:
+  */
+#include "../../../tests/catch2/catch.hpp"
 
 #include "../ocamUtils.hpp"
 
 using namespace MagAOX::app;
 
-
+namespace ocamUtils_test 
+{
 
 SCENARIO( "Parsing the temp response", "[ocamUtils]" )
 {
@@ -56,4 +59,4 @@ SCENARIO( "Parsing the temp response", "[ocamUtils]" )
    }
 }
 
-
+} //namespace ocamUtils_test 

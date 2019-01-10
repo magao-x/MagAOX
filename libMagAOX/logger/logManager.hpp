@@ -140,12 +140,12 @@ struct logManager : public logFileT
    bool logThreadRunning();
    
    ///Setup an application configurator for the logger section
-   int setupConfig( mx::appConfigurator & config /**< [in] an application configuration to setup */);
+   int setupConfig( mx::app::appConfigurator & config /**< [in] an application configuration to setup */);
 
    ///Load the logger section from an application configurator
    /**
      */
-   int loadConfig( mx::appConfigurator & config /**< [in] an application configuration from which to load values */);
+   int loadConfig( mx::app::appConfigurator & config /**< [in] an application configuration from which to load values */);
 
 
    ///Thread starter, called by logThreadStart on thread construction.  Calls logThreadExec.
@@ -293,20 +293,20 @@ bool logManager<logFileT>::logThreadRunning()
 }
 
 template<class logFileT>
-int logManager<logFileT>::setupConfig( mx::appConfigurator & config )
+int logManager<logFileT>::setupConfig( mx::app::appConfigurator & config )
 {
-   config.add("logger.logDir","L", "logDir",mx::argType::Required, "logger", "logDir", false, "string", "The directory for log files");
-   config.add("logger.logExt","", "logExt",mx::argType::Required, "logger", "logExt", false, "string", "The extension for log files");
-   config.add("logger.maxLogSize","", "maxLogSize",mx::argType::Required, "logger", "maxLogSize", false, "string", "The maximum size of log files");
-   config.add("logger.writePause","", "writePause",mx::argType::Required, "logger", "writePause", false, "unsigned long", "The log thread pause time in ns");
-   config.add("loger.logThreadPrio", "", "logThreadPrio", mx::argType::Required, "logger", "logThreadPrio", false, "int", "The log thread priority");
-   config.add("logger.logLevel","l", "logLevel",mx::argType::Required, "logger", "logLevel", false, "string", "The log level");
+   config.add("logger.logDir","L", "logDir",mx::app::argType::Required, "logger", "logDir", false, "string", "The directory for log files");
+   config.add("logger.logExt","", "logExt",mx::app::argType::Required, "logger", "logExt", false, "string", "The extension for log files");
+   config.add("logger.maxLogSize","", "maxLogSize",mx::app::argType::Required, "logger", "maxLogSize", false, "string", "The maximum size of log files");
+   config.add("logger.writePause","", "writePause",mx::app::argType::Required, "logger", "writePause", false, "unsigned long", "The log thread pause time in ns");
+   config.add("loger.logThreadPrio", "", "logThreadPrio", mx::app::argType::Required, "logger", "logThreadPrio", false, "int", "The log thread priority");
+   config.add("logger.logLevel","l", "logLevel",mx::app::argType::Required, "logger", "logLevel", false, "string", "The log level");
 
    return 0;
 }
 
 template<class logFileT>
-int logManager<logFileT>::loadConfig( mx::appConfigurator & config )
+int logManager<logFileT>::loadConfig( mx::app::appConfigurator & config )
 {
    //-- logDir
    std::string tmp;

@@ -145,21 +145,37 @@ struct software_log : public flatbuffer_log
       auto rgs = GetSoftware_log_fb(msgBuffer);
       
       std::string ret = "SW FILE: ";
-      ret += rgs->file()->c_str();
+      if(rgs->file() != nullptr)
+      {
+         ret += rgs->file()->c_str();
+      }
+      else
+      {
+         ret += "????";
+      }
+      
       ret += " LINE: ";
       ret += mx::ioutils::convertToString(rgs->line());
       if(rgs->errnoCode())
       {
          ret += "  ERRNO: ";
          ret += mx::ioutils::convertToString(rgs->errnoCode());
+         ret += " [";
+         ret += strerror(rgs->errnoCode());
+         ret += "]";
       }
       if(rgs->otherCode())
       {
-         ret += "  OTHER CODE: ";
+         ret += "  CODE: ";
          ret += mx::ioutils::convertToString(rgs->otherCode());
+         if(rgs->explanation())
+         {
+            ret += " [";
+            ret += rgs->explanation()->c_str();
+            ret += "]";
+         }
       }
-      
-      if(rgs->explanation())
+      else if(rgs->explanation())
       {
          ret += " >";
          ret += rgs->explanation()->c_str();

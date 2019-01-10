@@ -3,7 +3,7 @@
 #define magAOXMaths_hpp
 
 #include "../../libMagAOX/libMagAOX.hpp" //Note this is included on command line to trigger pch
-#include "magaox_git_version.h"
+#include "../../magaox_git_version.h"
 
 
 
@@ -12,6 +12,16 @@ namespace MagAOX
 namespace app
 {
 
+void externalLog ( const std::string & name,
+                         const int & code,
+                         const std::string & valueStr,
+                         const std::string & source
+                       )
+{
+   std::cerr << name << " " << code << " " << valueStr << " " << source << "\n";
+}
+
+                       
 /** MagAO-X application to do math on some numbers
   *
   */
@@ -64,16 +74,14 @@ public:
 
 magAOXMaths::magAOXMaths() : MagAOXApp(MAGAOX_CURRENT_SHA1, MAGAOX_REPO_MODIFIED)
 {
-  
-   
    return;
 }
 
 void magAOXMaths::setupConfig()
 {
-   config.add("my_val", "", "my_val", mx::argType::Required, "", "my_val", false, "string", "The name of this app's value.");
-   config.add("other_devName", "", "other_devName", mx::argType::Required, "", "other_devName", false, "string", "The name of the other app name.");
-   config.add("other_valName", "", "other_valName", mx::argType::Required, "", "other_valName", false, "string", "The name of the other val name.");
+   config.add("my_val", "", "my_val", argType::Required, "", "my_val", false, "string", "The name of this app's value.");
+   config.add("other_devName", "", "other_devName", argType::Required, "", "other_devName", false, "string", "The name of the other app name.");
+   config.add("other_valName", "", "other_valName", argType::Required, "", "other_valName", false, "string", "The name of the other val name.");
 }
 
 void magAOXMaths::loadConfig()

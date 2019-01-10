@@ -26,7 +26,7 @@ LIB_PATH ?= $(PREFIX)/lib
 INCLUDE_PATH ?= $(PREFIX)/include
 LIB_SOFA ?= $(LIB_PATH)/libsofa_c.a
 
-INCLUDES += -I$(INCLUDE_PATH) -I$(MAGAOX_PREFIX)/source/MagAOX/flatlogs/include
+INCLUDES += -I$(INCLUDE_PATH) -I$(abspath $(SELF_DIR)/../flatlogs/include)
 
 
 ########################################
@@ -67,11 +67,11 @@ LDLIBS += -Wl,-rpath,$(LDLIBRPATH)
 #######################################
 
 CFLAGS += -std=c99 -fPIC $(INCLUDES) $(OPTIMIZE)
-CXXFLAGS += -std=c++14 -fPIC $(INCLUDES) $(OPTIMIZE)
+CXXFLAGS += -std=c++14 -Wall -Wextra -fPIC $(INCLUDES) $(OPTIMIZE)
 
 #This is needed to force use of g++ for linking
 LINK.o = $(LINK.cc)
 
 #Create an implicit rule for pre-compiled headers
 %.hpp.gch: %.hpp
-	$(CXX) $(CXXFLAGS) -I$(abspath $(SELF_DIR)/../flatlogs/include) -c $<
+	$(CXX) $(CXXFLAGS) -c $<

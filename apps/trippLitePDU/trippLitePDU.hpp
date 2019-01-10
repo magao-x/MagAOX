@@ -1,33 +1,83 @@
-
+/** \file trippLitePDU.hpp
+  * \brief The MagAO-X Tripp Lite Power Distribution Unit controller.
+  *
+  * \author Jared R. Males (jaredmales@gmail.com)
+  *
+  * \ingroup trippLitePDU_files
+  */
 
 #ifndef trippLitePDU_hpp
 #define trippLitePDU_hpp
 
 
 #include "../../libMagAOX/libMagAOX.hpp" //Note this is included on command line to trigger pch
-#include "magaox_git_version.h"
+#include "../../magaox_git_version.h"
+
+/** \defgroup trippLitePDU Tripp Lite PDU
+  * \brief Control of MagAO-X Tripp Lite PDUs.
+  * 
+  * \link page_module_trippLitePDU Application Documentation
+  * 
+  * \ingroup apps
+  * 
+  */
+
+/** \defgroup trippLitePDU_files Tripp Lite PDU Files
+  * \ingroup trippLitePDU
+  */
 
 namespace MagAOX
 {
 namespace app
 {
 
-/** MagAO-X application to control a Tripp Lite PDU
-  *
-  * \todo handle timeouts gracefully -- maybe go to error, flush, disconnect, reconnect, etc.
+/// MagAO-X application to control a Tripp Lite power distribution unit (PDU).
+/** The device outlets are organized into channels.  See \ref dev::outletController for details of configuring the channels.
+  * 
+  * The line frequency and voltage, and the total load on the PDU, are monitored.
+  * 
+  * \todo figure out why reads sometimes fail, requring the "drain"
   * \todo need username and secure password handling
   * \todo need to recognize signals in tty polls and not return errors, etc.
+  * \todo begin logging freq/volt/amps telemetry
+  * \todo research load warnings
+  * \todo tests for parser
+  * \todo test for load warnings
+  * 
+  * \ingroup trippLitePDU
   */
-class trippLitePDU : public MagAOXApp<>
+class trippLitePDU : public MagAOXApp<>, public dev::outletController<trippLitePDU>
 {
 
 protected:
 
    std::string m_deviceAddr; ///< The device address
    std::string m_devicePort; ///< The device port
-   std::string m_deviceUsername;
-   std::string m_devicePassFile;
+   std::string m_deviceUsername; ///< The login username for this device
+   std::string m_devicePassFile; ///< The login password for this device
 
+   float m_freqLowWarn {59};    ///< The low-frequency warning threshold
+   float m_freqHighWarn {61};   ///< The high-frequency warning threshold
+   
+   float m_freqLowAlert {58};   ///< The low-frequency alert threshold
+   float m_freqHighAlert {62};  ///< The high-frequency alert threshold
+   
+   float m_freqLowEmerg {57};   ///< The low-frequency emergency threshold
+   float m_freqHighEmerg {63};  ///< The high-frequency emergency threshold
+   
+   float m_voltLowWarn {105};   ///< The low-voltage warning threshold
+   float m_voltHighWarn {125};  ///< The high-voltage warning threshold
+   
+   float m_voltLowAlert {101};  ///< The low-voltage alert threshold
+   float m_voltHighAlert {126}; ///< The high-voltage alert threshold
+   
+   float m_voltLowEmerg {99};   ///< The low-voltage emergency threshold
+   float m_voltHighEmerg {128}; ///< The high-voltage emergency threshold
+   
+   float m_currWarn {15};  ///< The high-current warning threshold
+   float m_currAlert {16}; ///< The high-current alert threshold
+   float m_currEmerg {20}; ///< The high-current emergency threshold
+   
    tty::telnetConn m_telnetConn; ///< The telnet connection manager
 
    int m_writeTimeOut {1000};  ///< The timeout for writing to the device [msec].
@@ -38,7 +88,6 @@ protected:
    float m_frequency {0}; ///< The line frequency reported by the device.
    float m_voltage {0}; ///< The line voltage reported by the device.
    float m_current {0}; ///< The current being reported by the device.
-   std::vector<bool> m_outletStates; ///< The outlet states, false = off, true = on.
 
 public:
 
@@ -67,6 +116,36 @@ public:
    /// Do any needed shutdown tasks.  Currently nothing in this app.
    virtual int appShutdown();
 
+   /// Update a single outlet state
+   /** For the trippLitePDU this isn't possible for a single outlet, so this calls updateOutletStates.
+     *
+     * \returns 0 on success 
+     * \returns -1 on error
+     */
+   virtual int updateOutletState( int outletNum /**< [in] the outlet number to update */);
+   
+   /// Queries the device to find the state of each outlet, as well as other parameters.
+   /** Sends `devstatus` to the device, and parses the result.
+     * 
+     * \returns 0 on success 
+     * \returns -1 on error
+     */
+   virtual int updateOutletStates();
+
+   /// Turn on an outlet.
+   /** 
+     * \returns 0 on success 
+     * \returns -1 on error
+     */
+   virtual int turnOutletOn( int outletNum /**< [in] the outlet number to turn on */);
+
+   /// Turn off an outlet.
+   /** 
+     * \returns 0 on success 
+     * \returns -1 on error
+     */
+   virtual int turnOutletOff( int outletNum /**< [in] the outlet number to turn off */);
+
    /// Parse the PDU devstatus response.
    /**
      * \returns 0 on success
@@ -77,59 +156,51 @@ public:
 protected:
 
    //declare our properties
-   pcf::IndiProperty m_indiStatus;
-   pcf::IndiProperty m_indiFrequency;
-   pcf::IndiProperty m_indiVoltage;
-   pcf::IndiProperty m_indiCurrent;
-
-   pcf::IndiProperty m_indiOutlet1;
-   pcf::IndiProperty m_indiOutlet2;
-   pcf::IndiProperty m_indiOutlet3;
-   pcf::IndiProperty m_indiOutlet4;
-   pcf::IndiProperty m_indiOutlet5;
-   pcf::IndiProperty m_indiOutlet6;
-   pcf::IndiProperty m_indiOutlet7;
-   pcf::IndiProperty m_indiOutlet8;
-
-   ///Common function called by the individual outlet callbacks.
-   /**
-     * \returns 0 on success
-     * \returns -1 on error
-     */
-   int changeOutletState( const pcf::IndiProperty &ipRecv, ///< [in] the received INDI property
-                          uint8_t onum ///< [in] the number of the outlet (0-7)
-                        );
-
-public:
-   INDI_NEWCALLBACK_DECL(trippLitePDU, m_indiOutlet1);
-   INDI_NEWCALLBACK_DECL(trippLitePDU, m_indiOutlet2);
-   INDI_NEWCALLBACK_DECL(trippLitePDU, m_indiOutlet3);
-   INDI_NEWCALLBACK_DECL(trippLitePDU, m_indiOutlet4);
-   INDI_NEWCALLBACK_DECL(trippLitePDU, m_indiOutlet5);
-   INDI_NEWCALLBACK_DECL(trippLitePDU, m_indiOutlet6);
-   INDI_NEWCALLBACK_DECL(trippLitePDU, m_indiOutlet7);
-   INDI_NEWCALLBACK_DECL(trippLitePDU, m_indiOutlet8);
-
+   pcf::IndiProperty m_indiP_status; ///< The device's status string
+   pcf::IndiProperty m_indiP_load; ///< The line and load characteristics
+   
 };
 
 trippLitePDU::trippLitePDU() : MagAOXApp(MAGAOX_CURRENT_SHA1, MAGAOX_REPO_MODIFIED)
 {
-   m_outletStates.resize(8,0);
+   m_firstOne = true;
+   setNumberOfOutlets(8);
+
    return;
 }
 
 void trippLitePDU::setupConfig()
 {
-   config.add("device.address", "a", "device.address", mx::argType::Required, "device", "address", false, "string", "The device address.");
-   config.add("device.port", "p", "device.port", mx::argType::Required, "device", "port", false, "string", "The device port.");
-   config.add("device.username", "u", "device.username", mx::argType::Required, "device", "username", false, "string", "The device login username.");
-   config.add("device.passfile", "", "device.passfile", mx::argType::Required, "device", "passfile", false, "string", "The device login password file (relative to secrets dir).");
+   config.add("device.address", "a", "device.address", argType::Required, "device", "address", false, "string", "The device address.");
+   config.add("device.port", "p", "device.port", argType::Required, "device", "port", false, "string", "The device port.");
+   config.add("device.username", "u", "device.username", argType::Required, "device", "username", false, "string", "The device login username.");
+   config.add("device.passfile", "", "device.passfile", argType::Required, "device", "passfile", false, "string", "The device login password file (relative to secrets dir).");
 
-   config.add("timeouts.write", "", "timeouts.write", mx::argType::Required, "timeouts", "write", false, "int", "The timeout for writing to the device [msec]. Default = 1000");
-   config.add("timeouts.read", "", "timeouts.read", mx::argType::Required, "timeouts", "read", false, "int", "The timeout for reading the device [msec]. Default = 2000");
-   config.add("timeouts.outletStateDelay", "", "timeouts.outletStateDelay", mx::argType::Required, "timeouts", "outletStateDelay", false, "int", "The maximum time to wait for an outlet to change state [msec]. Default = 5000");
+   config.add("timeouts.write", "", "timeouts.write", argType::Required, "timeouts", "write", false, "int", "The timeout for writing to the device [msec]. Default = 1000");
+   config.add("timeouts.read", "", "timeouts.read", argType::Required, "timeouts", "read", false, "int", "The timeout for reading the device [msec]. Default = 2000");
+   config.add("timeouts.outletStateDelay", "", "timeouts.outletStateDelay", argType::Required, "timeouts", "outletStateDelay", false, "int", "The maximum time to wait for an outlet to change state [msec]. Default = 5000");
 
+   config.add("limits.freqLowWarn", "", "limits.freqLowWarn", argType::Required, "limits", "freqLowWarn", false, "int", "The low-frequency warning threshold");
+   config.add("limits.freqHighWarn", "", "limits.freqHighWarn", argType::Required, "limits", "freqHighWarn", false, "int", "The high-frequency warning threshold");
+   config.add("limits.freqLowAlert", "", "limits.freqLowAlert", argType::Required, "limits", "freqLowAlert", false, "int", "The low-frequency alert threshold");
+   config.add("limits.freqHighAlert", "", "limits.freqHighAlert", argType::Required, "limits", "freqHighAlert", false, "int", "The high-frequency alert threshold");
+   config.add("limits.freqLowEmerg", "", "limits.freqLowEmerg", argType::Required, "limits", "freqLowEmerg", false, "int", "The low-frequency emergency threshold");
+   config.add("limits.freqHighEmerg", "", "limits.freqHighEmerg", argType::Required, "limits", "freqHighEmerg", false, "int", "The high-frequency emergency threshold");
+   
+   config.add("limits.voltLowWarn", "", "limits.voltLowWarn", argType::Required, "limits", "voltLowWarn", false, "int", "The low-voltage warning threshold");
+   config.add("limits.voltHighWarn", "", "limits.voltHighWarn", argType::Required, "limits", "voltHighWarn", false, "int", "The high-voltage warning threshold");
+   config.add("limits.voltLowAlert", "", "limits.voltLowAlert", argType::Required, "limits", "voltLowAlert", false, "int", "The low-voltage alert threshold");
+   config.add("limits.voltHighAlert", "", "limits.voltHighAlert", argType::Required, "limits", "voltHighAlert", false, "int", "The high-voltage alert threshold");
+   config.add("limits.voltLowEmerg", "", "limits.voltLowEmerg", argType::Required, "limits", "voltLowEmerg", false, "int", "The low-voltage emergency threshold");
+   config.add("limits.voltHighEmerg", "", "limits.voltHighEmerg", argType::Required, "limits", "voltHighEmerg", false, "int", "The high-voltage emergency threshold");
+   
+   config.add("limits.currWarn", "", "limits.currWarn", argType::Required, "limits", "currWarn", false, "int", "The high-current warning threshold");
+   config.add("limits.currAlert", "", "limits.currAlert", argType::Required, "limits", "currAlert", false, "int", "The high-current alert threshold");
+   config.add("limits.currEmerg", "", "limits.currEmerg", argType::Required, "limits", "currEmerg", false, "int", "The high-current emergency threshold");
+   
+   dev::outletController<trippLitePDU>::setupConfig(config);
 }
+
 
 void trippLitePDU::loadConfig()
 {
@@ -142,81 +213,53 @@ void trippLitePDU::loadConfig()
    config(m_readTimeOut, "timeouts.read");
    config(m_outletStateDelay, "timeouts.outletStateDelay");
 
-
-
+   config(m_freqLowWarn, "limits.freqLowWarn");
+   config(m_freqHighWarn, "limits.freqHighWarn");
+   config(m_freqLowAlert, "limits.freqLowAlert");
+   config(m_freqHighAlert, "limits.freqHighAlert");
+   config(m_freqLowEmerg, "limits.freqLowEmerg");
+   config(m_freqHighEmerg, "limits.freqHighEmerg");
+   
+   config(m_voltLowWarn, "limits.voltLowWarn");
+   config(m_voltHighWarn, "limits.voltHighWarn");
+   config(m_voltLowAlert, "limits.voltLowAlert");
+   config(m_voltHighAlert, "limits.voltHighAlert");
+   config(m_voltLowEmerg, "limits.voltLowEmerg");
+   config(m_voltHighEmerg, "limits.voltHighEmerg");
+   
+   config(m_currWarn, "limits.currWarn");
+   config(m_currAlert, "limits.currAlert");
+   config(m_currEmerg, "limits.currEmerg");
+   
+   dev::outletController<trippLitePDU>::loadConfig(config);
 
 }
 
 int trippLitePDU::appStartup()
 {
    // set up the  INDI properties
-   REG_INDI_NEWPROP_NOCB(m_indiStatus, "status", pcf::IndiProperty::Text);
-   m_indiStatus.add (pcf::IndiElement("value"));
+   REG_INDI_NEWPROP_NOCB(m_indiP_status, "status", pcf::IndiProperty::Text);
+   m_indiP_status.add (pcf::IndiElement("value"));
 
-   REG_INDI_NEWPROP_NOCB(m_indiFrequency, "frequency", pcf::IndiProperty::Number);
-   m_indiFrequency.add (pcf::IndiElement("value"));
-
-   REG_INDI_NEWPROP_NOCB(m_indiVoltage, "voltage", pcf::IndiProperty::Number);
-   m_indiVoltage.add (pcf::IndiElement("value"));
-
-   REG_INDI_NEWPROP_NOCB(m_indiCurrent, "current", pcf::IndiProperty::Number);
-   m_indiCurrent.add (pcf::IndiElement("value"));
-
-   REG_INDI_NEWPROP(m_indiOutlet1, "outlet1", pcf::IndiProperty::Text);
-   m_indiOutlet1.add (pcf::IndiElement("state"));
-
-   REG_INDI_NEWPROP(m_indiOutlet2, "outlet2", pcf::IndiProperty::Text);
-   m_indiOutlet2.add (pcf::IndiElement("state"));
-
-   REG_INDI_NEWPROP(m_indiOutlet3, "outlet3", pcf::IndiProperty::Text);
-   m_indiOutlet3.add (pcf::IndiElement("state"));
-
-   REG_INDI_NEWPROP(m_indiOutlet4, "outlet4", pcf::IndiProperty::Text);
-   m_indiOutlet4.add (pcf::IndiElement("state"));
-
-   REG_INDI_NEWPROP(m_indiOutlet5, "outlet5", pcf::IndiProperty::Text);
-   m_indiOutlet5.add (pcf::IndiElement("state"));
-
-   REG_INDI_NEWPROP(m_indiOutlet6, "outlet6", pcf::IndiProperty::Text);
-   m_indiOutlet6.add (pcf::IndiElement("state"));
-
-   REG_INDI_NEWPROP(m_indiOutlet7, "outlet7", pcf::IndiProperty::Text);
-   m_indiOutlet7.add (pcf::IndiElement("state"));
-
-   REG_INDI_NEWPROP(m_indiOutlet8, "outlet8", pcf::IndiProperty::Text);
-   m_indiOutlet8.add (pcf::IndiElement("state"));
+   REG_INDI_NEWPROP_NOCB(m_indiP_load, "load", pcf::IndiProperty::Number);
+   m_indiP_load.add (pcf::IndiElement("frequency"));
+   m_indiP_load.add (pcf::IndiElement("voltage"));
+   m_indiP_load.add (pcf::IndiElement("current"));
+   
+   ///\todo Error check?
+   dev::outletController<trippLitePDU>::setupINDI();
 
    state(stateCodes::NOTCONNECTED);
 
    return 0;
 }
 
-std::string stateIntToString(int st)
-{
-   if(st==0) return "Off";
-   else return "On";
-}
-
-
-
 int trippLitePDU::appLogic()
 {
-
-   if( state() == stateCodes::UNINITIALIZED )
-   {
-      log<text_log>( "In appLogic but in state UNINITIALIZED.", logPrio::LOG_CRITICAL );
-      return -1;
-   }
-   if( state() == stateCodes::INITIALIZED )
-   {
-      log<text_log>( "In appLogic but in state INITIALIZED.", logPrio::LOG_CRITICAL );
-      return -1;
-   }
-
-
+   static int lastrv = 0; //Used to handle a change in error within the same state.  Make general?
+   static int lasterrno = 0;
    if( state() == stateCodes::NOTCONNECTED )
    {
-      std::cerr << m_deviceAddr << " " << m_devicePort << "\n";
       int rv = m_telnetConn.connect(m_deviceAddr, m_devicePort);
 
       if(rv == 0)
@@ -229,15 +272,26 @@ int trippLitePDU::appLogic()
             logs << "Connected to " << m_deviceAddr << ":" << m_devicePort;
             log<text_log>(logs.str());
          }
+         lastrv = rv;
+         lasterrno = errno;
       }
       else
       {
          if(!stateLogged())
          {
-            std::stringstream logs;
-            logs << "Failed to connect to " << m_deviceAddr << ":" << m_devicePort;
-            log<text_log>(logs.str());
+            log<text_log>({"Failed to connect to " + m_deviceAddr + ":" + m_devicePort}, logPrio::LOG_ERROR);
          }
+         if( rv != lastrv )
+         {
+            log<software_error>( {__FILE__,__LINE__, 0, rv,  tty::ttyErrorString(rv)} );
+            lastrv = rv;
+         }
+         if( errno != lasterrno )
+         {
+            log<software_error>( {__FILE__,__LINE__, errno});
+            lasterrno = errno;
+         }
+         return 0;
       }
    }
 
@@ -258,80 +312,88 @@ int trippLitePDU::appLogic()
       }
    }
 
+   
    if(state() == stateCodes::LOGGEDIN)
    {
-      
+      state(stateCodes::READY);
+   }
+   
+   if(state() == stateCodes::READY)
+   {
       std::unique_lock<std::mutex> lock(m_indiMutex, std::try_to_lock);
-      
+
       if( !lock.owns_lock())
       {
          return 0;
       }
 
-      int rv;
-      std::string strRead;
+      int rv = updateOutletStates();
 
-      rv = m_telnetConn.writeRead("devstatus\n", true, 1000,1000);
+      if(rv < 0) return log<software_error,-1>({__FILE__, __LINE__});
 
-      strRead = m_telnetConn.m_strRead;
-
-      if(rv == TTY_E_TIMEOUTONREAD || rv == TTY_E_TIMEOUTONREADPOLL)
+      if (m_frequency <= m_freqLowEmerg)
       {
-         std::cerr << "Error read.  Draining...\n";
-         rv = m_telnetConn.read(5*m_readTimeOut, false);
-
-         if( rv < 0 )
-         {
-            std::cerr << "Timed out.\n";
-            log<text_log>(tty::ttyErrorString(rv), logPrio::LOG_ERROR);
-            state(stateCodes::NOTCONNECTED);
-            return 0;
-         }
-
-         std::cerr << "Drain successful.\n";
-         return 0;
+         log<text_log>("Frequency is " + std::to_string(m_frequency) + " Hz, below " + std::to_string(m_freqLowEmerg) + " Hz.",  logPrio::LOG_EMERGENCY);
       }
-      else if(rv < 0 )
+      else if (m_frequency >= m_freqHighEmerg)
       {
-         log<text_log>(tty::ttyErrorString(rv), logPrio::LOG_ERROR);
-         state(stateCodes::NOTCONNECTED);
-         return 0;
+         log<text_log>("Frequency is " + std::to_string(m_frequency) + " Hz, above " + std::to_string(m_freqHighEmerg) + " Hz.",  logPrio::LOG_EMERGENCY);
       }
-
-      rv = parsePDUStatus( strRead);
-
-      if(rv == 0)
+      else if (m_frequency <= m_freqLowAlert)
       {
-         updateIfChanged(m_indiStatus, "value", m_status);
-
-         updateIfChanged(m_indiFrequency, "value", m_frequency);
-
-         updateIfChanged(m_indiVoltage, "value", m_voltage);
-
-         updateIfChanged(m_indiCurrent, "value", m_current);
-
-         updateIfChanged(m_indiOutlet1, "state", stateIntToString(m_outletStates[0]));
-
-         updateIfChanged(m_indiOutlet2, "state", stateIntToString(m_outletStates[1]));
-
-         updateIfChanged(m_indiOutlet3, "state", stateIntToString(m_outletStates[2]));
-
-         updateIfChanged(m_indiOutlet4, "state", stateIntToString(m_outletStates[3]));
-
-         updateIfChanged(m_indiOutlet5, "state", stateIntToString(m_outletStates[4]));
-
-         updateIfChanged(m_indiOutlet6, "state", stateIntToString(m_outletStates[5]));
-
-         updateIfChanged(m_indiOutlet7, "state", stateIntToString(m_outletStates[6]));
-
-         updateIfChanged(m_indiOutlet8, "state", stateIntToString(m_outletStates[7]));
-
+         log<text_log>("Frequency is " + std::to_string(m_frequency) + " Hz, below " + std::to_string(m_freqLowAlert) + " Hz.",  logPrio::LOG_ALERT);
       }
-      else
+      else if (m_frequency >= m_freqHighAlert)
       {
-         log<software_error>({__FILE__, __LINE__, 0, rv, "parse error"});
+         log<text_log>("Frequency is " + std::to_string(m_frequency) + " Hz, above " + std::to_string(m_freqHighAlert) + " Hz.",  logPrio::LOG_ALERT);
       }
-
+      else if(m_frequency <= m_freqLowWarn)
+      {
+         log<text_log>("Frequency is " + std::to_string(m_frequency) + " Hz, below " + std::to_string(m_freqLowWarn) + " Hz.",  logPrio::LOG_WARNING);
+      }
+      else if (m_frequency >= m_freqHighWarn)
+      {
+         log<text_log>("Frequency is " + std::to_string(m_frequency) + " Hz, above " + std::to_string(m_freqHighWarn) + " Hz.",  logPrio::LOG_WARNING);
+      }
+      
+      if (m_voltage <= m_voltLowEmerg)
+      {
+         log<text_log>("Voltage is " + std::to_string(m_voltage) + " V, below " + std::to_string(m_voltLowEmerg) + " V.",  logPrio::LOG_EMERGENCY);
+      }
+      else if (m_voltage >= m_voltHighEmerg)
+      {
+         log<text_log>("Voltage is " + std::to_string(m_voltage) + " V, above " + std::to_string(m_voltHighEmerg) + " V.",  logPrio::LOG_EMERGENCY);
+      }
+      else if (m_voltage <= m_voltLowAlert)
+      {
+         log<text_log>("Voltage is " + std::to_string(m_voltage) + " V, below " + std::to_string(m_voltLowAlert) + " V.",  logPrio::LOG_ALERT);
+      }
+      else if (m_voltage >= m_voltHighAlert)
+      {
+         log<text_log>("Voltage is " + std::to_string(m_voltage) + " V, above " + std::to_string(m_voltHighAlert) + " V.",  logPrio::LOG_ALERT);
+      }
+      else if(m_voltage <= m_voltLowWarn)
+      {
+         log<text_log>("Voltage is " + std::to_string(m_voltage) + " V, below " + std::to_string(m_voltLowWarn) + " V.",  logPrio::LOG_WARNING);
+      }
+      else if (m_voltage >= m_voltHighWarn)
+      {
+         log<text_log>("Voltage is " + std::to_string(m_voltage) + " V, above " + std::to_string(m_voltHighWarn) + " V.",  logPrio::LOG_WARNING);
+      }
+      
+      if (m_current >= m_currEmerg)
+      {
+         log<text_log>("Current is " + std::to_string(m_current) + " A, above " + std::to_string(m_currEmerg) + " A.",  logPrio::LOG_EMERGENCY);
+      }
+      else if (m_current >= m_currAlert)
+      {
+         log<text_log>("Current is " + std::to_string(m_current) + " A, above " + std::to_string(m_currAlert) + " A.",  logPrio::LOG_ALERT);
+      }
+      else if (m_current >= m_currWarn)
+      {
+         log<text_log>("Current is " + std::to_string(m_current) + " A, above " + std::to_string(m_currWarn) + " A.",  logPrio::LOG_WARNING);
+      }
+      
       return 0;
    }
 
@@ -347,11 +409,106 @@ int trippLitePDU::appShutdown()
    return 0;
 }
 
+int trippLitePDU::updateOutletState( int outletNum )
+{
+   static_cast<void>(outletNum);
+
+   return updateOutletStates(); //We can't do just one.
+}
+
+
+int trippLitePDU::updateOutletStates()
+{
+   int rv;
+   std::string strRead;
+
+   rv = m_telnetConn.writeRead("devstatus\n", true, 1000,1000);
+
+   strRead = m_telnetConn.m_strRead;
+
+   if(rv == TTY_E_TIMEOUTONREAD || rv == TTY_E_TIMEOUTONREADPOLL)
+   {
+      std::cerr << "Error read.  Draining...\n";
+      rv = m_telnetConn.read(5*m_readTimeOut, false);
+
+      if( rv < 0 )
+      {
+         std::cerr << "Timed out.\n";
+         log<text_log>(tty::ttyErrorString(rv), logPrio::LOG_ERROR);
+         state(stateCodes::NOTCONNECTED);
+         return 0;
+      }
+
+      std::cerr << "Drain successful.\n";
+      return 0;
+   }
+   else if(rv < 0 )
+   {
+      log<text_log>(tty::ttyErrorString(rv), logPrio::LOG_ERROR);
+      state(stateCodes::NOTCONNECTED);
+      return 0;
+   }
+
+   rv = parsePDUStatus( strRead);
+
+   if(rv == 0)
+   {
+      updateIfChanged(m_indiP_status, "value", m_status);
+
+      updateIfChanged(m_indiP_load, "frequency", m_frequency);
+
+      updateIfChanged(m_indiP_load, "voltage", m_voltage);
+
+      updateIfChanged(m_indiP_load, "current", m_current);
+
+      dev::outletController<trippLitePDU>::updateINDI();
+   }
+   else
+   {
+      log<software_error>({__FILE__, __LINE__, 0, rv, "parse error"});
+   }
+
+   return 0;
+}
+
+int trippLitePDU::turnOutletOn( int outletNum )
+{
+   std::lock_guard<std::mutex> guard(m_indiMutex);  //Lock the mutex before doing anything
+
+
+   std::string cmd = "loadctl on -o ";
+   cmd += mx::ioutils::convertToString<int>(outletNum+1); //Internally 0 counted, device starts at 1.
+   cmd += " --force\r";
+
+   std::string strRead;
+   int rv = m_telnetConn.writeRead( cmd, true, m_writeTimeOut, m_readTimeOut);
+
+   if(rv < 0) return log<software_error, -1>({__FILE__, __LINE__, 0, rv, "telnet error"});
+
+   return 0;
+}
+
+int trippLitePDU::turnOutletOff( int outletNum )
+{
+   std::lock_guard<std::mutex> guard(m_indiMutex);  //Lock the mutex before doing anything
+
+   std::string cmd = "loadctl off -o ";
+   cmd += mx::ioutils::convertToString<int>(outletNum+1); //Internally 0 counted, device starts at 1.
+   cmd += " --force\r";
+
+   std::string strRead;
+   int rv = m_telnetConn.writeRead( cmd, true, m_writeTimeOut, m_readTimeOut);
+
+   if(rv < 0) return log<software_error, -1>({__FILE__, __LINE__, 0, rv, "telnet error"});
+
+   return 0;
+}
+
 int trippLitePDU::parsePDUStatus( std::string & strRead )
 {
    std::string status;
    float frequency, current, voltage;
-   std::vector<bool> outletStates(8,0);
+   std::vector<int> outletStates(m_outletStates.size(),OUTLET_STATE_OFF);
 
    std::string pstr = mx::ioutils::removeWhiteSpace(strRead);
 
@@ -398,8 +555,10 @@ int trippLitePDU::parsePDUStatus( std::string & strRead )
       while(isdigit(ch) && st < pstr.size())
       {
          int onum = ch - '0';
-         if(onum > 0 && onum < 9) outletStates[onum-1] = 1; //this outlet is on.
-
+         if(onum > 0 && onum < 9)
+         {
+            outletStates[onum-1] = OUTLET_STATE_ON; //this outlet is on.
+         }
          ++st;
          if(st > pstr.size()-1) break;
          ch = pstr[st];
@@ -411,135 +570,12 @@ int trippLitePDU::parsePDUStatus( std::string & strRead )
    m_frequency = frequency;
    m_voltage = voltage;
    m_current = current;
-   for(int i=0;i<8;++i) m_outletStates[i]=outletStates[i];
+   for(size_t i=0;i<m_outletStates.size();++i) m_outletStates[i]=outletStates[i];
 
    return 0;
 
 }
 
-int trippLitePDU::changeOutletState( const pcf::IndiProperty &ipRecv,
-                                     uint8_t onum
-                                   )
-{
-
-   std::lock_guard<std::mutex> guard(m_indiMutex);  //Lock the mutex before doing anything
-
-      
-   std::string oreq = ipRecv["state"].get<std::string>();
-
-   if( oreq == "On" && m_outletStates[onum] == 0)
-   {
-      std::string cmd = "loadctl on -o ";
-      cmd += mx::ioutils::convertToString<int>(onum+1);
-      cmd += " --force\r";
-
-      std::string strRead;
-      int rv = m_telnetConn.writeRead( cmd, true, m_writeTimeOut, m_readTimeOut);
-
-      if(rv < 0)
-      {
-         log<software_error>({__FILE__, __LINE__, 0, rv, ""});
-      }
-      
-      uint8_t lonum = onum + 1;   //Do this without narrowing
-      log<pdu_outlet_state>({ lonum, 1});
-   }
-   if( oreq == "Off" && m_outletStates[onum] == 1)
-   {
-      std::string cmd = "loadctl off -o ";
-      cmd += mx::ioutils::convertToString<int>(onum+1);
-      cmd += " --force\r";
-
-      std::string strRead;
-      int rv = m_telnetConn.writeRead( cmd, true, m_writeTimeOut, m_readTimeOut);
-      
-      if(rv < 0)
-      {
-         log<software_error>({__FILE__, __LINE__, 0, rv, ""});
-      }
-      
-      uint8_t lonum = onum + 1; //Do this without narrowing
-      log<pdu_outlet_state>({ lonum, 0});
-   }
-
-
-   //We don't update INDI, because the state won't change immediately.  Let device report it when it's ready.
-
-   return 0;
-
-}
-
-INDI_NEWCALLBACK_DEFN(trippLitePDU, m_indiOutlet1)(const pcf::IndiProperty &ipRecv)
-{
-   if (ipRecv.getName() == m_indiOutlet1.getName())
-   {
-      return changeOutletState(ipRecv, 0);
-   }
-   return -1;
-}
-
-INDI_NEWCALLBACK_DEFN(trippLitePDU, m_indiOutlet2)(const pcf::IndiProperty &ipRecv)
-{
-   if (ipRecv.getName() == m_indiOutlet2.getName())
-   {
-      return changeOutletState(ipRecv, 1);
-   }
-   return -1;
-}
-
-INDI_NEWCALLBACK_DEFN(trippLitePDU, m_indiOutlet3)(const pcf::IndiProperty &ipRecv)
-{
-   if (ipRecv.getName() == m_indiOutlet3.getName())
-   {
-      return changeOutletState(ipRecv, 2);
-   }
-   return -1;
-}
-
-INDI_NEWCALLBACK_DEFN(trippLitePDU, m_indiOutlet4)(const pcf::IndiProperty &ipRecv)
-{
-   if (ipRecv.getName() == m_indiOutlet4.getName())
-   {
-      return changeOutletState(ipRecv, 3);
-   }
-   return -1;
-}
-
-INDI_NEWCALLBACK_DEFN(trippLitePDU, m_indiOutlet5)(const pcf::IndiProperty &ipRecv)
-{
-   if (ipRecv.getName() == m_indiOutlet5.getName())
-   {
-      return changeOutletState(ipRecv, 4);
-   }
-   return -1;
-}
-
-INDI_NEWCALLBACK_DEFN(trippLitePDU, m_indiOutlet6)(const pcf::IndiProperty &ipRecv)
-{
-   if (ipRecv.getName() == m_indiOutlet6.getName())
-   {
-      return changeOutletState(ipRecv, 5);
-   }
-   return -1;
-}
-
-INDI_NEWCALLBACK_DEFN(trippLitePDU, m_indiOutlet7)(const pcf::IndiProperty &ipRecv)
-{
-   if (ipRecv.getName() == m_indiOutlet7.getName())
-   {
-      return changeOutletState(ipRecv, 6);
-   }
-   return -1;
-}
-
-INDI_NEWCALLBACK_DEFN(trippLitePDU, m_indiOutlet8)(const pcf::IndiProperty &ipRecv)
-{
-   if (ipRecv.getName() == m_indiOutlet8.getName())
-   {
-      return changeOutletState(ipRecv, 7);
-   }
-   return -1;
-}
 
 } //namespace app
 } //namespace MagAOX

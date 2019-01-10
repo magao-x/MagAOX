@@ -5,7 +5,7 @@
 
 
 #include "../../libMagAOX/libMagAOX.hpp" //Note this is included on command line to trigger pch
-#include "magaox_git_version.h"
+#include "../../magaox_git_version.h"
 
 
 namespace MagAOX
@@ -181,20 +181,20 @@ ttmModulator::ttmModulator() : MagAOXApp(MAGAOX_CURRENT_SHA1, MAGAOX_REPO_MODIFI
 inline
 void ttmModulator::setupConfig()
 {
-   config.add("limits.maxfreq", "", "limits.maxfreq", mx::argType::Required, "limits", "maxfreq", false, "real", "The maximum frequency [Hz] which can be set through this program.");
-   config.add("limits.maxamp", "", "limits.maxamp", mx::argType::Required, "limits", "maxamp", false, "real", "The maximum amplitude [lam/D] which can be set throught this program.");
+   config.add("limits.maxfreq", "", "limits.maxfreq", argType::Required, "limits", "maxfreq", false, "real", "The maximum frequency [Hz] which can be set through this program.");
+   config.add("limits.maxamp", "", "limits.maxamp", argType::Required, "limits", "maxamp", false, "real", "The maximum amplitude [lam/D] which can be set throught this program.");
 
-   config.add("cal.voltsperld1", "", "cal.voltsperld1", mx::argType::Required, "cal", "voltsperld1", false, "real", "The voltage per lam/D for channel 1.");
-   config.add("cal.voltsperld2", "", "cal.voltsperld2", mx::argType::Required, "cal", "voltsperld2", false, "real", "The voltage per lam/D for channel 2.");
-   config.add("cal.phase", "", "cal.phase", mx::argType::Required, "cal", "phase", false, "real", "The axis phase offset, which is applied to channel 2.");
+   config.add("cal.voltsperld1", "", "cal.voltsperld1", argType::Required, "cal", "voltsperld1", false, "real", "The voltage per lam/D for channel 1.");
+   config.add("cal.voltsperld2", "", "cal.voltsperld2", argType::Required, "cal", "voltsperld2", false, "real", "The voltage per lam/D for channel 2.");
+   config.add("cal.phase", "", "cal.phase", argType::Required, "cal", "phase", false, "real", "The axis phase offset, which is applied to channel 2.");
 
-   config.add("cal.setv1", "", "cal.setv1", mx::argType::Required, "cal", "setv1", false, "real", "The set position voltage of chaannel 1.");
-   config.add("cal.setv2", "", "cal.setv2", mx::argType::Required, "cal", "setv2", false, "real", "The set position voltage of chaannel 2.");
+   config.add("cal.setv1", "", "cal.setv1", argType::Required, "cal", "setv1", false, "real", "The set position voltage of chaannel 1.");
+   config.add("cal.setv2", "", "cal.setv2", argType::Required, "cal", "setv2", false, "real", "The set position voltage of chaannel 2.");
 
-   config.add("cal.setDvolts", "", "cal.setDvolts", mx::argType::Required, "cal", "setDvolts", false, "real", "The setting ramp step size [Volts]");
+   config.add("cal.setDvolts", "", "cal.setDvolts", argType::Required, "cal", "setDvolts", false, "real", "The setting ramp step size [Volts]");
 
-   config.add("cal.modDfreq", "", "cal.modDfreq", mx::argType::Required, "cal", "modDfreq", false, "real", "The modulation ramp frequency step size [Hz]");
-   config.add("cal.modDvolts", "", "cal.modDvolts", mx::argType::Required, "cal", "modDvolts", false, "real", "The modulation ramp voltage step size [Volts]");
+   config.add("cal.modDfreq", "", "cal.modDfreq", argType::Required, "cal", "modDfreq", false, "real", "The modulation ramp frequency step size [Hz]");
+   config.add("cal.modDvolts", "", "cal.modDvolts", argType::Required, "cal", "modDvolts", false, "real", "The modulation ramp voltage step size [Volts]");
 
 }
 

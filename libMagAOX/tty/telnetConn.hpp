@@ -235,15 +235,12 @@ int telnetConn::connect( const std::string & host,
    hints.ai_socktype = SOCK_STREAM;
    if ((rs = getaddrinfo(host.c_str(), port.c_str(), &hints, &ai)) != 0)
    {
-      fprintf(stderr, "getaddrinfo() failed for %s: %s\n", host.c_str(),
-      gai_strerror(rs));
       return TELNET_E_GETADDR;
    }
 
    /* create server m_socket */
    if ((m_sock = socket(AF_INET, SOCK_STREAM, 0)) == -1)
    {
-      fprintf(stderr, "socket() failed: %s\n", strerror(errno));
       return TELNET_E_SOCKET;
    }
 
@@ -252,14 +249,12 @@ int telnetConn::connect( const std::string & host,
    addr.sin_family = AF_INET;
    if (bind(m_sock, (struct sockaddr *)&addr, sizeof(addr)) == -1)
    {
-      fprintf(stderr, "bind() failed: %s\n", strerror(errno));
       return TELNET_E_BIND;
    }
 
    /* connect */
    if (::connect(m_sock, ai->ai_addr, ai->ai_addrlen) == -1)
    {
-      fprintf(stderr, "connect() failed: %s\n", strerror(errno));
       return TELNET_E_CONNECT;
    }
 
@@ -271,7 +266,6 @@ int telnetConn::connect( const std::string & host,
 
    if(m_telnet == nullptr)
    {
-      fprintf(stderr, "error initializing telnet");
       return TELNET_E_TELNETINIT;
    }
 

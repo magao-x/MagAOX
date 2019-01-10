@@ -40,8 +40,10 @@
 #include "stateCodes.hpp"
 #include "indiDriver.hpp"
 #include "indiMacros.hpp"
+#include "indiUtils.hpp"
 
 //#include "../../INDI/libcommon/System.hpp"
+using namespace mx::app;
 
 using namespace MagAOX::logger;
 
@@ -65,7 +67,7 @@ namespace app
   * \ingroup magaoxapp
   */
 template< bool _useINDI = true >
-class MagAOXApp : public mx::application
+class MagAOXApp : public application
 {
 
 public:
@@ -83,7 +85,7 @@ protected:
 
    std::string secretsPath; ///< Path to the secrets directory, where passwords, etc, are stored.
 
-   unsigned long loopPause {MAGAOX_default_loopPause}; ///< The time in nanoseconds to pause the main loop.  The appLogic() function of the derived class is called every loopPause nanoseconds.  Default is 1,000,000,000 ns.  Config with loopPause=X.
+   unsigned long m_loopPause {MAGAOX_default_loopPause}; ///< The time in nanoseconds to pause the main loop.  The appLogic() function of the derived class is called every m_loopPause nanoseconds.  Default is 1,000,000,000 ns.  Config with loopPause=X.
 
    int m_shutdown {0}; ///< Flag to signal it's time to shutdown.  When not 0, the main loop exits.
 
@@ -148,8 +150,31 @@ public:
    virtual void loadBasicConfig();
 
    /// The execute method implementing the standard main loop.  Should not normally be overridden.
-   /**
-     *
+   /** Performs final startup steps.  That is:
+     * - PID locking lockPID()
+     * - log thread startup by logThreadStart()
+     * - signal handling installation by setSigTermHandler()
+     * - appStartup() is called 
+     * - INDI communications started by startINDI()
+     * - power state is checked, pausing if unknown (if being managed)
+     * 
+     * Errors in the above steps will cause a process exit.
+     * 
+     * Then commences the main event loop. 
+     * Conditions on entry to the main loop:
+     * - PID locked
+     * - Log thread running
+     * - Signal handling installed 
+     * - appStartup successful
+     * - INDI communications started successfully (if being used)
+     * - power state known (if being managed)
+     * 
+     * In the event loop, the power state is checked (if being managed).  If power is off, then onPowerOff is called.  
+     * If power is on, or power is not managed, appLogic is called.  These methods are implemented in derived classes, and
+     * are called every m_loopPause interval.
+     * 
+     * If an error is returned by either onPowerOff or appLogic, or a signal is handled, then the shutdown is managed.
+     * This includes shutting down INDI, calling appShutdown, and unlocking the PID.  The log thread will shutdown.
      */
    virtual int execute();
 
@@ -168,7 +193,7 @@ public:
    virtual int appStartup() = 0;
 
    /// This is where derived applications implement their main FSM logic.
-   /** This will be called every loopPause nanoseconds until the application terminates.
+   /** This will be called every m_loopPause nanoseconds until the application terminates.
      *
      * FSM state will be whatever it is on exti from appStartup.
      *
@@ -196,7 +221,7 @@ public:
      *
      * \tparam logT the log entry type
      * \tparam retval the value returned by this method.
-     * 
+     *
      */
    template<typename logT, int retval=0>
    static int log( const typename logT::messageT & msg, ///< [in] the message to log
@@ -205,18 +230,29 @@ public:
 
    /// Make a log entry
    /** Wrapper for logManager::log
-     * 
+     *
      * \tparam logT the log entry type
      * \tparam retval the value returned by this method.
-     * 
+     *
      */
    template<typename logT, int retval=0>
    static int log( logPrioT level = logPrio::LOG_DEFAULT /**< [in] [optional] the log level.  The default is used if not specified.*/);
 
+private:
+   /// Callback for config system logging.
+   /** Called by appConfigurator each time a value is set using the config() operator.
+     * You never need to call this directly.
+     */
+   static void configLog( const std::string & name,  ///< [in] The name of the config value
+                          const int & code,          ///< [in] numeric code specifying the type
+                          const std::string & value, ///< [in] the value read by the config system
+                          const std::string & source ///< [in] the source of the value.
+                        );
+
    ///@} -- logging
 
    /** \name Signal Handling
-     * @{
+     * @{libMagAOX/logger/types/software_log.hpp
      */
 private:
 
@@ -379,8 +415,11 @@ protected:
    ///Flag controlling whether INDI is used.  If false, then no INDI code ipRecv.getName()executes.
    constexpr static bool m_useINDI = _useINDI;
 
+///\todo instead of making this public, provide an accessor.
+public:
    ///The INDI driver wrapper.  Constructed and initialized by execute, which starts and stops communications.
    indiDriver<MagAOXApp> * m_indiDriver {nullptr};
+protected:
 
    ///Mutex for locking INDI communications.
    std::mutex m_indiMutex;
@@ -393,6 +432,8 @@ protected:
       bool m_defReceived {false}; ///< Flag indicating that a DefProperty has been received after a GetProperty.
    };
 
+///\todo instead of making these public, we should provide the addCallBack function for public use.
+public:
    ///Map to hold the NewProperty indiCallBacks for this App, with fast lookup by property name.
    /** The key for these is the property name.
      */
@@ -403,6 +444,7 @@ protected:
      */
    std::unordered_map< std::string, indiCallBack> m_indiSetCallBacks;
 
+protected:
    ///Flat indicating that all registered Set properties have been updated since last Get.
    bool m_allDefsReceived {false};
 
@@ -425,7 +467,7 @@ protected:
    /** This is currently only used to signal restarts.
      */
    std::string m_driverCtrlName;
-   
+
    /// Register an INDI property which is exposed for others to request a New Property for.
    /**
      *
@@ -540,8 +582,9 @@ protected:
 
    /** \name Power Management
      * For devices which have remote power management (e.g. from one of the PDUs) we implement
-     * a standard power state monitoring and management component for the FSM.  This is only
-     * enabled if the power management configuration options are set.
+     * a standard power state monitoring and management component for the FSM.  This needs to be enabled
+     * in the derived app constructor.  To stay enabled, m_powerDevice and m_powerChannel must be
+     * not empty strings after the configuration.  These could be set in the derived app defaults.
      *
      * If power management is enabled, then while power is off, appLogic will not be called.
      * Instead a parrallel set of virtual functions is called, onPowerOff (to allow apps to
@@ -550,15 +593,15 @@ protected:
      *
      */
 protected:
-   bool m_powerMgtEnabled {false};
+   bool m_powerMgtEnabled {false}; ///< Flag controls whether power mgt is used.  Set this in the constructor of a derived app.  If true, then if after loadConfig the powerDevice and powerChannel are empty, then this will revert to false.
 
-   std::string m_powerDevice;
-   std::string m_powerOutlet;
-   std::string m_powerElement {"state"};
+   std::string m_powerDevice; ///< The INDI device name of the power controller
+   std::string m_powerChannel; ///< The INDI property name of the channel controlling this device's power.
+   std::string m_powerElement {"state"}; ///< The INDI element name to monitor for this device's power state.
 
    int m_powerState {-1}; ///< Current power state, 1=On, 0=Off, -1=Unk.
 
-   pcf::IndiProperty m_indiP_powerOutlet;
+   pcf::IndiProperty m_indiP_powerChannel;
 
    /// This method is called when the change to poweroff is detected.
    /**
@@ -575,9 +618,9 @@ protected:
    virtual int whilePowerOff() {return 0;}
 
 public:
-
-   INDI_SETCALLBACK_DECL(MagAOXApp, m_indiP_powerOutlet);
-
+   
+   INDI_SETCALLBACK_DECL(MagAOXApp, m_indiP_powerChannel);
+   
    ///@} Power Management
 
 public:
@@ -610,7 +653,7 @@ public:
      * \returns the current value of m_driverCtrlName
      */
    std::string driverCtrlName();
-   
+
    ///@} --Member Accessors
 };
 
@@ -632,6 +675,10 @@ MagAOXApp<_useINDI>::MagAOXApp( const std::string & git_sha1,
    }
 
    m_self = this;
+
+   //Set up config logging
+   config.m_sources = true;
+   config.configLog = configLog;
 
    //We log the current GIT status.
    logPrioT gl = logPrio::LOG_INFO;
@@ -703,7 +750,7 @@ void MagAOXApp<_useINDI>::setDefaults( int argc,
    #endif
 
    //Parse CL just to get the "name".
-   config.add("name","n", "name",mx::argType::Required, "", "name", false, "string", "The name of the application, specifies config.");
+   config.add("name","n", "name",argType::Required, "", "name", false, "string", "The name of the application, specifies config.");
 
    config.parseCommandLine(argc, argv, "name");
    config(m_configName, "name");
@@ -731,16 +778,19 @@ template<bool _useINDI>
 void MagAOXApp<_useINDI>::setupBasicConfig() //virtual
 {
    //App stuff
-   config.add("loopPause", "p", "loopPause", mx::argType::Required, "", "loopPause", false, "unsigned long", "The main loop pause time in ns");
-   config.add("RTPriority", "P", "RTPriority", mx::argType::Required, "", "RTPriority", false, "unsigned", "The real-time priority (0-99)");
+   config.add("loopPause", "p", "loopPause", argType::Required, "", "loopPause", false, "unsigned long", "The main loop pause time in ns");
+   config.add("RTPriority", "P", "RTPriority", argType::Required, "", "RTPriority", false, "unsigned", "The real-time priority (0-99)");
 
    //Logger Stuff
    m_log.setupConfig(config);
 
-   //Power Management
-   config.add("power.device", "", "power.device", mx::argType::Required, "power", "device", false, "string", "Device controlling power for this app's device (INDI name).");
-   config.add("power.outlet", "", "power.outlet", mx::argType::Required, "power", "outlet", false, "string", "Outlet (or channel) on device for this app's device (INDI name).");
-   config.add("power.element", "", "power.element", mx::argType::Required, "power", "element", false, "string", "INDI element name.  Default is \"state\", only need to specify if different.");
+   if( m_powerMgtEnabled)
+   {
+      //Power Management
+      config.add("power.device", "", "power.device", argType::Required, "power", "device", false, "string", "Device controlling power for this app's device (INDI name).");
+      config.add("power.outlet", "", "power.outlet", argType::Required, "power", "outlet", false, "string", "Channel on device for this app's device (INDI name).");
+      config.add("power.element", "", "power.element", argType::Required, "power", "element", false, "string", "INDI element name.  Default is \"state\", only need to specify if different.");
+   }
 }
 
 template<bool _useINDI>
@@ -751,7 +801,7 @@ void MagAOXApp<_useINDI>::loadBasicConfig() //virtual
    m_log.loadConfig(config);
 
    //--------- Loop Pause Time --------//
-   config(loopPause, "loopPause");
+   config(m_loopPause, "loopPause");
 
    //--------- RT Priority ------------//
    int prio = m_RTPriority;
@@ -761,17 +811,23 @@ void MagAOXApp<_useINDI>::loadBasicConfig() //virtual
       RTPriority(prio);
    }
 
+
    //--------Power Management --------//
-   config(m_powerDevice, "power.device");
-   config(m_powerOutlet, "power.outlet");
-   config(m_powerElement, "power.element");
-
-   if(m_powerDevice != "" && m_powerOutlet != "")
+   if( m_powerMgtEnabled)
    {
-      log<text_log>("enabling power management: " + m_powerDevice + "." + m_powerOutlet + "." + m_powerElement);
+      config(m_powerDevice, "power.device");
+      config(m_powerChannel, "power.channel");
+      config(m_powerElement, "power.element");
 
-      m_powerMgtEnabled = true;
-      REG_INDI_SETPROP(m_indiP_powerOutlet, m_powerDevice, m_powerOutlet);
+      if(m_powerDevice != "" && m_powerChannel != "")
+      {
+         log<text_log>("enabling power management: " + m_powerDevice + "." + m_powerChannel + "." + m_powerElement);
+         REG_INDI_SETPROP(m_indiP_powerChannel, m_powerDevice, m_powerChannel);
+      }
+      else
+      {
+         m_powerMgtEnabled = false;
+      }
    }
 }
 
@@ -917,7 +973,7 @@ int MagAOXApp<_useINDI>::execute() //virtual
       //Pause loop unless shutdown is set
       if( m_shutdown == 0)
       {
-         std::this_thread::sleep_for( std::chrono::duration<unsigned long, std::nano>(loopPause));
+         std::this_thread::sleep_for( std::chrono::duration<unsigned long, std::nano>(m_loopPause));
       }
    }
 
@@ -954,6 +1010,16 @@ int MagAOXApp<_useINDI>::log( logPrioT level)
 {
    m_log.log<logT>(level);
    return retval;
+}
+
+template<bool _useINDI>
+void MagAOXApp<_useINDI>::configLog( const std::string & name,
+                                     const int & code,
+                                     const std::string & value,
+                                     const std::string & source
+                                   )
+{
+   m_log.log<config_log>({name, code, value, source});
 }
 
 template<bool _useINDI>
@@ -1411,7 +1477,7 @@ int MagAOXApp<_useINDI>::createINDIFIFOS()
    m_driverInName = driverFIFOPath + "/" + configName() + ".in";
    m_driverOutName = driverFIFOPath + "/" + configName() + ".out";
    m_driverCtrlName = driverFIFOPath + "/" + configName() + ".ctrl";
-   
+
    //Get max permissions
    euidCalled();
 
@@ -1456,7 +1522,7 @@ int MagAOXApp<_useINDI>::createINDIFIFOS()
          return -1;
       }
    }
-   
+
    umask(prev);
    euidReal();
    return 0;
@@ -1650,14 +1716,16 @@ void MagAOXApp<_useINDI>::updateIfChanged( pcf::IndiProperty & p,
 
    if(!m_indiDriver) return;
 
-   T oldVal = p[el].get<T>();
+   indi::updateIfChanged( p, el, newVal, m_indiDriver);
 
-   if(oldVal != newVal)
-   {
-      p[el].set(newVal);
-      p.setState (pcf::IndiProperty::Ok);
-      m_indiDriver->sendSetProperty (p);
-   }
+//    T oldVal = p[el].get<T>();
+//
+//    if(oldVal != newVal)
+//    {
+//       p[el].set(newVal);
+//       p.setState (pcf::IndiProperty::Ok);
+//       m_indiDriver->sendSetProperty (p);
+//    }
 }
 
 /// \todo move propType to an INDI utils file, and document.
@@ -1734,10 +1802,8 @@ int MagAOXApp<_useINDI>::sendNewProperty( const pcf::IndiProperty & ipSend,
 }
 
 template<bool _useINDI>
-INDI_SETCALLBACK_DEFN( MagAOXApp<_useINDI>, m_indiP_powerOutlet)(const pcf::IndiProperty &ipRecv)
+INDI_SETCALLBACK_DEFN( MagAOXApp<_useINDI>, m_indiP_powerChannel)(const pcf::IndiProperty &ipRecv)
 {
-   //m_indiP_powerOutlet = ipRecv;
-
    std::string ps;
 
    try
