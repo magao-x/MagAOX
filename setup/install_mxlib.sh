@@ -50,7 +50,7 @@ fi
 # Ensure mxlib installs to /usr/local (not $HOME)
 if diff "$MXLIBROOT/local/Common.mk" "$MXLIBROOT/local/Common.example.mk"; then
   echo "PREFIX = /usr/local" > "$MXLIBROOT/local/Common.mk"
-elif cat "PREFIX = /usr/local" | diff "$MXLIBROOT/local/Common.mk" -; then
+elif echo "PREFIX = /usr/local" | diff "$MXLIBROOT/local/Common.mk" -; then
   echo "PREFIX already set to /usr/local"
 else
   echo "Unexpected modifications in $MXLIBROOT/local/Common.mk! Aborting." >&2
