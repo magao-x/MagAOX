@@ -41,15 +41,23 @@ export MXMAKEFILE="$MXLIBROOT/mk/MxApp.mk"
 # Populate $MXLIBROOT/local/ with example makefiles:
 make setup
 if [[ $ENV == dev ]]; then
-  cat << EOF >> "$MXLIBROOT/local/MxApp.mk"
+  cat << EOF > "$MXLIBROOT/local/MxApp.mk"
 BLAS_INCLUDES = -I/usr/include/atlas-x86_64-base
 BLAS_LDFLAGS = -L/usr/lib64/atlas -L/usr/lib64
 BLAS_LDLIBS = -ltatlas -lgfortran
 EOF
 fi
 # Ensure mxlib installs to /usr/local (not $HOME)
-echo "PREFIX = /usr/local" >> "$MXLIBROOT/local/Common.mk"
+if diff "$MXLIBROOT/local/Common.mk" "$MXLIBROOT/local/Common.example.mk"; then
+  echo "PREFIX = /usr/local" > "$MXLIBROOT/local/Common.mk"
+elif cat "PREFIX = /usr/local" | diff "$MXLIBROOT/local/Common.mk" -; then
+  echo "PREFIX already set to /usr/local"
+else
+  echo "Unexpected modifications in $MXLIBROOT/local/Common.mk! Aborting." >&2
+fi
 make
 make install
+# Sanity check: make sure gengithead.sh is available systemwide in /usr/local
+gengithead.sh ./ ./include/mxlib_uncomp_version.h MXLIB_UNCOMP
 # Ensure all users get $MXMAKEFILE pointing to this install by default
 echo "export MXMAKEFILE=\"$MXLIBROOT/mk/MxApp.mk\"" | tee /etc/profile.d/mxmakefile.sh
