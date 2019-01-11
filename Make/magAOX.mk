@@ -24,7 +24,6 @@
 ####################################################
 SELF_DIR := $(abspath $(dir $(lastword $(MAKEFILE_LIST))))
 include $(SELF_DIR)/../Make/common.mk
-include $(SELF_DIR)/../Make/config.mk
 
 #To ensure pre-compiled header gets used
 CXXFLAGS += -include $(abspath $(SELF_DIR)/../libMagAOX/libMagAOX.hpp)

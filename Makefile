@@ -34,6 +34,8 @@ libs_install:
 	for lib in ${libs_to_build}; do \
 		(cd libs/$$lib; ${MAKE}  install) || break; \
 	done
+	/bin/sudo bash -c "echo $(LIB_PATH) > /etc/ld.so.conf.d/magaox.conf"
+	/bin/sudo ldconfig
 
 libs_clean:
 	for lib in ${libs_to_build}; do \
@@ -43,7 +45,8 @@ libs_clean:
 lib_clean:
 	cd libMagAOX; ${MAKE} clean
 
-apps_all:
+apps_all: libs_install
+
 	for app in ${apps_to_build}; do \
 		(cd apps/$$app; ${MAKE} )|| break; \
 	done

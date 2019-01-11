@@ -28,7 +28,6 @@ TEST_INCLUDES ?= ../libMagAOX/tty/tests/ttyIOUtils_test.cpp \
 SELF_DIR := $(abspath $(dir $(lastword $(MAKEFILE_LIST))))
 -include $(SELF_DIR)/../local/magAOXApp.mk
 include $(SELF_DIR)/../Make/common.mk
-include $(SELF_DIR)/../Make/config.mk
 
 
 
