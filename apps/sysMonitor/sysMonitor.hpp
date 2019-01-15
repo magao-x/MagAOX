@@ -58,7 +58,7 @@ protected:
    /** This includes updating values for core loads, core temps, drive temps, / usage, /boot usage, /data usage, and RAM usage
      * Unsure if this method can fail in any way, as of now always returns 0
      *
-     * \todo Check to see if any method called in here can fail
+     * \TODO: Check to see if any method called in here can fail
      * \returns 0 on completion
      */
    int updateVals();
@@ -103,7 +103,7 @@ public:
    /// Parses string from system call to find CPU temperatures
    /** When a valid string is read in, the value from that string is stored
      * 
-     * \returns 1 on invalid string being read in
+     * \returns -1 on invalid string being read in
      * \returns 0 on completion and storing of value
      */
    int parseCPUTemperatures(
@@ -127,7 +127,7 @@ public:
    /// Finds all CPU core usage loads
    /** Makes system call and then parses result to add usage loads to vector of values
      *
-     * \returns 1 on error with system command or output reading
+     * \returns -1 on error with system command or output file reading
      * \returns 0 on completion
      */
    int findCPULoads(
@@ -149,8 +149,13 @@ public:
 
    /// Finds all drive temperatures
    /** Makes system call and then parses result to add temperatures to vector of values
+     * For hard drive temp utility:
+     * `wget http://dl.fedoraproject.org/pub/epel/7/x86_64/Packages/h/hddtemp-0.3-0.31.beta15.el7.x86_64.rpm`
+     * `su`
+     * `rpm -Uvh hddtemp-0.3-0.31.beta15.el7.x86_64.rpm`
+     * Check install with rpm -q -a | grep -i hddtemp
      *
-     * \returns 1 on error with system command or output reading
+     * \returns -1 on error with system command or output reading
      * \returns 0 on successful completion otherwise
      */
    int findDiskTemperature(
@@ -185,8 +190,9 @@ public:
    /// Finds usages of space for following directory paths: /; /data; /boot
    /** These usage values are stored as integer values between 0 and 100 (e.g. value of 39 means directory is 39% full)
      * If directory is not found, space usage value will remain 0
+     * TODO: What about multiple drives? What does this do?
      *
-     * \returns 1 on error with system command or output reading
+     * \returns -1 on error with system command or output reading
      * \returns 0 on completion
      */
    int findDiskUsage(
@@ -213,7 +219,7 @@ public:
    /// Finds current RAM usage
    /** This usage value is stored as a decimal value between 0 and 1 (e.g. value of 0.39 means RAM usage is 39%)
      *
-     * \returns 1 on error with system command or output reading
+     * \returns -1 on error with system command or output reading
      * \returns 0 on completion
      */
    int findRamUsage(
@@ -235,8 +241,7 @@ public:
 
 };
 
-/// \todo Maybe make this function inline?
-sysMonitor::sysMonitor() : MagAOXApp(MAGAOX_CURRENT_SHA1, MAGAOX_REPO_MODIFIED)
+inline sysMonitor::sysMonitor() : MagAOXApp(MAGAOX_CURRENT_SHA1, MAGAOX_REPO_MODIFIED)
 {
    return;
 }
@@ -267,7 +272,7 @@ int sysMonitor::appStartup()
    REG_INDI_NEWPROP_NOCB(data_usage, "data_usage", pcf::IndiProperty::Number);
    REG_INDI_NEWPROP_NOCB(ram_usage_indi, "ram_usage_indi", pcf::IndiProperty::Number);
 
-   int i;
+   unsigned int i;
    std::string coreStr = "core";
 
    findCPULoads(cpu_core_loads);
@@ -317,65 +322,96 @@ int sysMonitor::appLogic()
 {
    coreTemps.clear();
    int rvCPUTemp = findCPUTemperatures(coreTemps);
-   for (auto i: coreTemps)
+   if (rvCPUTemp >= 0) 
    {
-      std::cout << "Core temp: " << i << ' ';
-   }   
-   std::cout << std::endl;
-   int rv = criticalCoreTemperature(coreTemps);
-
+      for (auto i: coreTemps)
+      {
+         std::cout << "Core temp: " << i << ' ';
+      }   
+      std::cout << std::endl;
+      rvCPUTemp = criticalCoreTemperature(coreTemps);
+   }
+   
    cpu_core_loads.clear();
    int rvCPULoad = findCPULoads(cpu_core_loads);
-   for (auto i: cpu_core_loads)
-   {
-      std::cout << "CPU load: " << i << ' ';
+   if (rvCPULoad >= 0) {
+      for (auto i: cpu_core_loads)
+      {
+         std::cout << "CPU load: " << i << ' ';
+      }
+      std::cout << std::endl;
    }
-   std::cout << std::endl;
-
-   if (rv == 1)
+   
+   if (rvCPUTemp >= 0 && rvCPULoad >= 0)
    {
-      log<core_mon>({coreTemps, cpu_core_loads}, logPrio::LOG_WARNING);
-   } 
-   else if (rv == 2) 
-   {
-      log<core_mon>({coreTemps, cpu_core_loads}, logPrio::LOG_ALERT);
-   } 
+      if (rvCPUTemp == 1)
+      {
+         log<core_mon>({coreTemps, cpu_core_loads}, logPrio::LOG_WARNING);
+      } 
+      else if (rvCPUTemp == 2) 
+      {
+         log<core_mon>({coreTemps, cpu_core_loads}, logPrio::LOG_ALERT);
+      } 
+      else 
+      {
+         log<core_mon>({coreTemps, cpu_core_loads}, logPrio::LOG_INFO);
+      }
+   }
    else 
    {
-      log<core_mon>({coreTemps, cpu_core_loads}, logPrio::LOG_INFO);
+      log<software_error>({__FILE__, __LINE__,"Could not log values for CPU core temperatures and usages."});
    }
 
    diskTemp.clear();
    int rvDiskTemp = findDiskTemperature(diskTemp);
-   for (auto i: diskTemp)
+   if (rvDiskTemp >= 0)
    {
-      std::cout << "Disk temp: " << i << ' ';
-   }
-   std::cout << std::endl;
-   rv = criticalDiskTemperature(diskTemp);
+      for (auto i: diskTemp)
+      {
+         std::cout << "Disk temp: " << i << ' ';
+      }
+      std::cout << std::endl;
+      rvDiskTemp = criticalDiskTemperature(diskTemp);
+   }  
 
    int rvDiskUsage = findDiskUsage(rootUsage, dataUsage, bootUsage);
-   std::cout << "/ usage: " << rootUsage << std::endl;
-   std::cout << "/data usage: " << dataUsage << std::endl; 
-   std::cout << "/boot usage: " << bootUsage << std::endl;
-
-   if (rv == 1) 
+   if (rvDiskUsage >= 0)
    {
-      log<drive_mon>({diskTemp, rootUsage, dataUsage, bootUsage}, logPrio::LOG_WARNING);
-   } 
-   else if (rv == 2) 
+      std::cout << "/ usage: " << rootUsage << std::endl;
+      std::cout << "/data usage: " << dataUsage << std::endl; 
+      std::cout << "/boot usage: " << bootUsage << std::endl;
+   }
+   
+   if (rvDiskTemp >= 0 && rvDiskUsage >= 0)
    {
-      log<drive_mon>({diskTemp, rootUsage, dataUsage, bootUsage}, logPrio::LOG_ALERT);
-   } 
+      if (rvDiskTemp == 1) 
+      {
+         log<drive_mon>({diskTemp, rootUsage, dataUsage, bootUsage}, logPrio::LOG_WARNING);
+      } 
+      else if (rvDiskTemp == 2) 
+      {
+         log<drive_mon>({diskTemp, rootUsage, dataUsage, bootUsage}, logPrio::LOG_ALERT);
+      } 
+      else 
+      {
+         log<drive_mon>({diskTemp, rootUsage, dataUsage, bootUsage}, logPrio::LOG_INFO);
+      }
+   }
    else 
    {
-      log<drive_mon>({diskTemp, rootUsage, dataUsage, bootUsage}, logPrio::LOG_INFO);
+      log<software_error>({__FILE__, __LINE__,"Could not log values for drive temperatures and usages."});
    }
+   
 
    int rvRamUsage = findRamUsage(ramUsage);
-   std::cout << "Ram usage: " << ramUsage << std::endl;
-
-   log<ram_usage>({ramUsage}, logPrio::LOG_INFO);
+   if (rvRamUsage >= 0)
+   {
+      std::cout << "Ram usage: " << ramUsage << std::endl;
+      log<ram_usage>({ramUsage}, logPrio::LOG_INFO);
+   }
+   else {
+      log<software_error>({__FILE__, __LINE__,"Could not log values for RAM usage."});
+   }
 
    updateVals();
 
@@ -397,17 +433,16 @@ int sysMonitor::findCPUTemperatures(std::vector<float>& temps)
    int rv = system(command);
    if(rv == -1) //system call error
    {
-      //handle error
-      std::cerr << "There's been an error with the system command" << std::endl;
-      return 1;
+      log<software_error>({__FILE__, __LINE__,"Could not complete CPU temperature `system` command."});
+      return -1;
    }
    std::ifstream inFile;
 
    inFile.open("/dev/shm/sensors_out");
    if (!inFile) 
    {
-      std::cerr << "Unable to open file" << std::endl;
-      return 1;
+      log<software_error>({__FILE__, __LINE__,"Could not open CPU temperature value file."});
+      return -1;
    }
 
    while (getline (inFile,line)) 
@@ -427,7 +462,7 @@ int sysMonitor::parseCPUTemperatures(std::string line, float& temps)
 {
    if (line.length() <= 1)
    {
-      return 1;
+      return -1;
    }
 
    std::string str = line.substr(0, 5);
@@ -441,8 +476,8 @@ int sysMonitor::parseCPUTemperatures(std::string line, float& temps)
       }
       catch (const std::invalid_argument& e) 
       {
-         std::cerr << "Invalid read occuered when parsing CPU temperatures" << std::endl;
-         return 1;
+         log<software_error>({__FILE__, __LINE__,"Invalid read occured when parsing CPU temperatures."});
+         return -1;
       }
 
       temps = temp;
@@ -462,8 +497,8 @@ int sysMonitor::parseCPUTemperatures(std::string line, float& temps)
          }
          catch (const std::invalid_argument& e) 
          {
-            std::cerr << "Invalid read occuered when parsing warning CPU temperature" << std::endl;
-            return 1;
+            log<software_error>({__FILE__, __LINE__,"Invalid read occured when parsing warning CPU temperatures."});
+            return -1;
          }
       }
       if (m_criticalCoreTemp == 0) 
@@ -481,15 +516,15 @@ int sysMonitor::parseCPUTemperatures(std::string line, float& temps)
          }
          catch (const std::invalid_argument& e) 
          {
-            std::cerr << "Invalid read occuered when parsing critical CPU temperature" << std::endl;
-            return 1;
+            log<software_error>({__FILE__, __LINE__,"Invalid read occured when parsing critical CPU temperatures."});
+            return -1;
          }
       }
       return 0;
    }
    else 
    {
-      return 1;
+      return -1;
    }
 
 }
@@ -527,24 +562,26 @@ int sysMonitor::findCPULoads(std::vector<float>& loads)
    int rv = system(command);
    if(rv == -1) //system call error
    {
-      //handle error
-      std::cerr << "There's been an error with the system command" << std::endl;
-      return 1;
+      log<software_error>({__FILE__, __LINE__,"Could not complete CPU core usage `system` command."});
+      return -1;
    }
 
    std::ifstream inFile;
    inFile.open("/dev/shm/cpuload");
    if (!inFile) 
    {
-      std::cerr << "Unable to open file" << std::endl;
-      return 1;
+      log<software_error>({__FILE__, __LINE__,"Could not open CPU core usage value file."});
+      return -1;
    }
-   float cpu_load;
-   // Want to start at third line
-   getline (inFile,line);
-   getline (inFile,line);
-   getline (inFile,line);
-   getline (inFile,line);
+
+   // Want to start parsing at fifth line
+   int iterator = 0;
+   while (getline (inFile,line)) {
+      iterator++;
+      if (iterator == 4) {
+         break;
+      }
+   }
    while (getline (inFile,line)) 
    {
       float loadVal;
@@ -562,7 +599,7 @@ int sysMonitor::parseCPULoads(std::string line, float& loadVal)
 {
    if (line.length() <= 1)
    {
-      return 1;
+      return -1;
    }
    std::istringstream iss(line);
    std::vector<std::string> tokens{std::istream_iterator<std::string>{iss},std::istream_iterator<std::string>{}};
@@ -573,8 +610,8 @@ int sysMonitor::parseCPULoads(std::string line, float& loadVal)
    }
    catch (const std::invalid_argument& e)
    {
-      std::cerr << "Invalid read occuered when parsing CPU loads" << std::endl;
-      return 1;
+      log<software_error>({__FILE__, __LINE__,"Invalid read occured when parsing CPU core usage."});
+      return -1;
    }
    cpu_load /= 100;
    loadVal = cpu_load;
@@ -586,27 +623,20 @@ int sysMonitor::findDiskTemperature(std::vector<float>& hdd_temp)
    char command[35];
    std::string line;
 
-   // For hard drive temp utility:
-   // wget http://dl.fedoraproject.org/pub/epel/7/x86_64/Packages/h/hddtemp-0.3-0.31.beta15.el7.x86_64.rpm (binary package)
-   // su
-   // rpm -Uvh hddtemp-0.3-0.31.beta15.el7.x86_64.rpm
-   // Check install with rpm -q -a | grep -i hddtemp
-
    strcpy( command, "hddtemp > /dev/shm/hddtemp" );
    int rv = system(command);
    if(rv == -1) //system call error
    {
-      //handle error
-      std::cerr << "There's been an error with the system command" << std::endl;
-      return 1;
+      log<software_error>({__FILE__, __LINE__,"Invalid read occured when parsing drive temperatures."});
+      return -1;
    }
 
    std::ifstream inFile;
    inFile.open("/dev/shm/hddtemp");
    if (!inFile) 
    {
-      std::cerr << "Unable to open file" << std::endl;
-      return 1;
+      log<software_error>({__FILE__, __LINE__,"Could not open drive temperature value file."});
+      return -1;
    }
 
    while (getline (inFile,line)) 
@@ -627,7 +657,7 @@ int sysMonitor::parseDiskTemperature(std::string line, float& hdd_temp)
    float tempValue;
    if (line.length() <= 1) 
    {
-      return 1;
+      return -1;
    }
    std::istringstream iss(line);
    std::vector<std::string> tokens{std::istream_iterator<std::string>{iss},std::istream_iterator<std::string>{}};
@@ -644,8 +674,8 @@ int sysMonitor::parseDiskTemperature(std::string line, float& hdd_temp)
          }
          catch (const std::invalid_argument& e) 
          {
-            std::cerr << "Invalid read occuered when parsing disk temperature" << std::endl;
-            return 1;
+            log<software_error>({__FILE__, __LINE__,"Invalid read occured when parsing drive temperatures."});
+            return -1;
          }
          hdd_temp = tempValue;
          if (m_warningDiskTemp == 0)
@@ -695,28 +725,27 @@ int sysMonitor::findDiskUsage(float &rootUsage, float &dataUsage, float &bootUsa
    int rv = system(command);
    if(rv == -1) //system call error
    {
-      //handle error
-      std::cerr << "There's been an error with the system command" << std::endl;
-      return 1;
+      log<software_error>({__FILE__, __LINE__,"Could not complete drive usage `system` command."});
+      return -1;
    }
 
    std::ifstream inFile;
    inFile.open("/dev/shm/diskusage");
    if (!inFile) 
    {
-      std::cerr << "Unable to open file" << std::endl;
-      return 1;
+      log<software_error>({__FILE__, __LINE__,"Could not open drive usage value file."});
+      return -1;
    }
-   rv = 1; 
-   // Want second line
-   getline (inFile,line);
 
    while(getline(inFile,line)) 
    {
+      // TODO: Figure out what to do about this.
+      // There are multiple lines that the function needs to iterate through, and any functions not needed are discarded
+      // Therefore, does this return value really need to do anything?
       int rvDiskUsage = parseDiskUsage(line, rootUsage, dataUsage, bootUsage);
-      if (rvDiskUsage == 0) {
-         rv = 0;
-      }
+      // if (rvDiskUsage == 0) {
+      //    rv = 0;
+      // }
    }
 
    return rv;
@@ -726,13 +755,13 @@ int sysMonitor::parseDiskUsage(std::string line, float& rootUsage, float& dataUs
 {
    if (line.length() <= 1)
    {
-      return 1;
+      return -1;
    }
 
    std::istringstream iss(line);
    std::vector<std::string> tokens{std::istream_iterator<std::string>{iss},std::istream_iterator<std::string>{}};
    if (tokens[5].compare("/") == 0)
-      {
+   {
       tokens[4].pop_back();
       try
       {
@@ -741,8 +770,8 @@ int sysMonitor::parseDiskUsage(std::string line, float& rootUsage, float& dataUs
       }
       catch (const std::invalid_argument& e) 
       {
-         std::cerr << "Invalid read occuered when parsing disk usage" << std::endl;
-         return 1;
+         log<software_error>({__FILE__, __LINE__,"Invalid read occured when parsing drive usage."});
+         return -1;
       }
    } 
    else if (tokens[5].compare("/data") == 0)
@@ -755,8 +784,8 @@ int sysMonitor::parseDiskUsage(std::string line, float& rootUsage, float& dataUs
       }
       catch (const std::invalid_argument& e) 
       {
-         std::cerr << "Invalid read occuered when parsing disk usage" << std::endl;
-         return 1;
+         log<software_error>({__FILE__, __LINE__,"Invalid read occured when parsing drive usage."});
+         return -1;
       }
    } 
    else if (tokens[5].compare("/boot") == 0)
@@ -769,11 +798,11 @@ int sysMonitor::parseDiskUsage(std::string line, float& rootUsage, float& dataUs
       }
       catch (const std::invalid_argument& e) 
       {
-         std::cerr << "Invalid read occuered when parsing disk usage" << std::endl;
-         return 1;
+         log<software_error>({__FILE__, __LINE__,"Invalid read occured when parsing drive usage."});
+         return -1;
       }
    }
-   return 1;
+   return -1;
 }
 
 int sysMonitor::findRamUsage(float& ramUsage) 
@@ -785,29 +814,40 @@ int sysMonitor::findRamUsage(float& ramUsage)
    int rv = system(command);
    if(rv == -1) //system call error
    {
-      //handle error
-      std::cerr << "There's been an error with the system command" << std::endl;
-      return 1;
+      log<software_error>({__FILE__, __LINE__,"Could not complete RAM usage `system` command."});
+      return -1;
    }
 
    std::ifstream inFile;
    inFile.open("/dev/shm/ramusage");
    if (!inFile) 
    {
-      std::cerr << "Unable to open file" << std::endl;
-      return 1;
+      log<software_error>({__FILE__, __LINE__,"Could not open RAM usage value file."});
+      return -1;
    }
 
    // Want second line
-   getline (inFile,line);
-   getline (inFile,line);
+   // TODO: Determine that we only want the second line from this command
+   // Should we iterate through all possible lines and pick out just the one?
+   // If so, what do the return values for the parse function mean?
+   // Want to start parse only second line
+   int iterator = 0;
+   while (getline (inFile,line)) {
+      iterator++;
+      if (iterator == 2) {
+         break;
+      }
+   }
    int rvRamUsage = parseRamUsage(line, ramUsage);
    return rvRamUsage;
 }
 
 int sysMonitor::parseRamUsage(std::string line, float& ramUsage) 
 {
-   if (line.length() <= 1) return 1;
+   if (line.length() <= 1)
+   {
+      return -1;
+   }
    std::istringstream iss(line);
    std::vector<std::string> tokens{std::istream_iterator<std::string>{iss},std::istream_iterator<std::string>{}};
    try
@@ -816,20 +856,20 @@ int sysMonitor::parseRamUsage(std::string line, float& ramUsage)
       if (ramUsage > 1 || ramUsage == 0)
       {
          ramUsage = -1;  
-         return 1;
+         return -1;
       }
       return 0;
    }
    catch (const std::invalid_argument& e) 
    {
-      std::cerr << "Invalid read occuered when parsing ram usage" << std::endl;
-      return 1;
+      log<software_error>({__FILE__, __LINE__,"Invalid read occured when parsing RAM usage."});
+      return -1;
    }
 }
 
 int sysMonitor::updateVals()
 {
-   int i;
+   unsigned int i;
    std::string coreStr = "core";
    std::string driveStr = "drive";
 
@@ -842,7 +882,8 @@ int sysMonitor::updateVals()
    core_loads.setState (pcf::IndiProperty::Ok);
    if(m_indiDriver) m_indiDriver->sendSetProperty(core_loads);
 
-   for (i = 0; i < coreTemps.size(); i++) {
+   for (i = 0; i < coreTemps.size(); i++) 
+   {
       coreStr.append(std::to_string(i));
       core_temps[coreStr] = coreTemps[i];
       coreStr.pop_back();
@@ -850,7 +891,8 @@ int sysMonitor::updateVals()
    core_temps.setState (pcf::IndiProperty::Ok);
    if(m_indiDriver) m_indiDriver->sendSetProperty (core_temps);
 
-   for (i = 0; i < diskTemp.size(); i++) {
+   for (i = 0; i < diskTemp.size(); i++) 
+   {
       driveStr.append(std::to_string(i));
       drive_temps[driveStr] = diskTemp[i];
       driveStr.pop_back();
