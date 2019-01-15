@@ -193,7 +193,7 @@ public:
      * TODO: What about multiple drives? What does this do?
      *
      * \returns -1 on error with system command or output reading
-     * \returns 0 on completion
+     * \returns 0 if at least one of the return values is found
      */
    int findDiskUsage(
       float&,   /**< [out] the return value for usage in root path*/
@@ -737,15 +737,16 @@ int sysMonitor::findDiskUsage(float &rootUsage, float &dataUsage, float &bootUsa
       return -1;
    }
 
+   rv = 1;
    while(getline(inFile,line)) 
    {
       // TODO: Figure out what to do about this.
       // There are multiple lines that the function needs to iterate through, and any functions not needed are discarded
       // Therefore, does this return value really need to do anything?
       int rvDiskUsage = parseDiskUsage(line, rootUsage, dataUsage, bootUsage);
-      // if (rvDiskUsage == 0) {
-      //    rv = 0;
-      // }
+      if (rvDiskUsage == 0) {
+         rv = 0;
+      }
    }
 
    return rv;
