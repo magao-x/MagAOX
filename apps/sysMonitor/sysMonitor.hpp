@@ -445,17 +445,18 @@ int sysMonitor::findCPUTemperatures(std::vector<float>& temps)
       return -1;
    }
 
+   rv = 1;
    while (getline (inFile,line)) 
    {
       float tempVal;
-      int rv = parseCPUTemperatures(line, tempVal);
-      if (rv == 0)
+      if (parseCPUTemperatures(line, tempVal) == 0)
       {
          temps.push_back(tempVal);
+         rv = 0;
       }
    }
 
-   return 0;
+   return rv;
 }
 
 int sysMonitor::parseCPUTemperatures(std::string line, float& temps) 
@@ -582,17 +583,18 @@ int sysMonitor::findCPULoads(std::vector<float>& loads)
          break;
       }
    }
+   rv = 1;
    while (getline (inFile,line)) 
    {
       float loadVal;
-      int rv = parseCPULoads(line, loadVal);
-      if (rv == 0) 
+      if (parseCPULoads(line, loadVal) == 0) 
       {
          loads.push_back(loadVal);
+         rv = 0;
       }
    }
 
-   return 0;
+   return rv;
 }
 
 int sysMonitor::parseCPULoads(std::string line, float& loadVal)
@@ -639,17 +641,18 @@ int sysMonitor::findDiskTemperature(std::vector<float>& hdd_temp)
       return -1;
    }
 
+   rv = 1;
    while (getline (inFile,line)) 
    {
       float tempVal;
-      int rvHddTemp = parseDiskTemperature(line, tempVal);
-      if (rvHddTemp == 0)
+      if (parseDiskTemperature(line, tempVal) == 0)
       {
          hdd_temp.push_back(tempVal);
+         rv = 0;
       }
    }
 
-   return 0;
+   return rv;
 }
 
 int sysMonitor::parseDiskTemperature(std::string line, float& hdd_temp) 
@@ -690,7 +693,7 @@ int sysMonitor::parseDiskTemperature(std::string line, float& hdd_temp)
       }
    }
 
-   return 1;
+   return -1;
 }
 
 int sysMonitor::criticalDiskTemperature(std::vector<float>& v)
@@ -740,9 +743,6 @@ int sysMonitor::findDiskUsage(float &rootUsage, float &dataUsage, float &bootUsa
    rv = 1;
    while(getline(inFile,line)) 
    {
-      // TODO: Figure out what to do about this.
-      // There are multiple lines that the function needs to iterate through, and any functions not needed are discarded
-      // Therefore, does this return value really need to do anything?
       int rvDiskUsage = parseDiskUsage(line, rootUsage, dataUsage, bootUsage);
       if (rvDiskUsage == 0) {
          rv = 0;
@@ -766,7 +766,7 @@ int sysMonitor::parseDiskUsage(std::string line, float& rootUsage, float& dataUs
       tokens[4].pop_back();
       try
       {
-         rootUsage = std::stof (tokens[4]);
+         rootUsage = std::stof (tokens[4])/100;
          return 0;
       }
       catch (const std::invalid_argument& e) 
@@ -780,7 +780,7 @@ int sysMonitor::parseDiskUsage(std::string line, float& rootUsage, float& dataUs
       tokens[4].pop_back();
       try
       {
-         dataUsage = std::stof (tokens[4]);
+         dataUsage = std::stof (tokens[4])/100;
          return 0;
       }
       catch (const std::invalid_argument& e) 
@@ -794,7 +794,7 @@ int sysMonitor::parseDiskUsage(std::string line, float& rootUsage, float& dataUs
       tokens[4].pop_back();
       try
       {
-         bootUsage = std::stof (tokens[4]);
+         bootUsage = std::stof (tokens[4])/100;
          return 0;
       }
       catch (const std::invalid_argument& e) 
@@ -827,20 +827,13 @@ int sysMonitor::findRamUsage(float& ramUsage)
       return -1;
    }
 
-   // Want second line
-   // TODO: Determine that we only want the second line from this command
-   // Should we iterate through all possible lines and pick out just the one?
-   // If so, what do the return values for the parse function mean?
-   // Want to start parse only second line
-   int iterator = 0;
    while (getline (inFile,line)) {
-      iterator++;
-      if (iterator == 2) {
-         break;
+      if (parseRamUsage(line, ramUsage) == 0)
+      {
+        return 0;
       }
    }
-   int rvRamUsage = parseRamUsage(line, ramUsage);
-   return rvRamUsage;
+   return -1;
 }
 
 int sysMonitor::parseRamUsage(std::string line, float& ramUsage) 
@@ -853,6 +846,10 @@ int sysMonitor::parseRamUsage(std::string line, float& ramUsage)
    std::vector<std::string> tokens{std::istream_iterator<std::string>{iss},std::istream_iterator<std::string>{}};
    try
    {
+      if (tokens[0].compare("Mem:") != 0)
+      {
+        return -1;
+      }
       ramUsage = std::stof(tokens[2])/std::stof(tokens[1]);
       if (ramUsage > 1 || ramUsage == 0)
       {
