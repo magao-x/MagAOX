@@ -92,7 +92,7 @@ public:
    /// Finds all CPU core temperatures
    /** Makes system call and then parses result to add temperatures to vector of values
      *
-     * \returns 1 on error with system command or output reading
+     * \returns -1 on error with system command or output reading
      * \returns 0 on successful completion otherwise
      */
    int findCPUTemperatures(
@@ -138,7 +138,7 @@ public:
    /// Parses string from system call to find CPU usage loads
    /** When a valid string is read in, the value from that string is stored
      * 
-     * \returns 1 on invalid string being read in
+     * \returns -1 on invalid string being read in
      * \returns 0 on completion and storing of value
      */
    int parseCPULoads(
@@ -166,7 +166,7 @@ public:
    /// Parses string from system call to find drive temperatures
    /** When a valid string is read in, the value from that string is stored
      * 
-     * \returns 1 on invalid string being read in
+     * \returns -1 on invalid string being read in
      * \returns 0 on completion and storing of value
      */
    int parseDiskTemperature(
@@ -205,7 +205,7 @@ public:
    /// Parses string from system call to find drive usage space
    /** When a valid string is read in, the value from that string is stored
      * 
-     * \returns 1 on invalid string being read in
+     * \returns -1 on invalid string being read in
      * \returns 0 on completion and storing of value
      */
    int parseDiskUsage(
@@ -229,15 +229,14 @@ public:
 
    /// Parses string from system call to find RAM usage
    /** When a valid string is read in, the value from that string is stored
-     * 
-     * \returns 1 on invalid string being read in
-     * \returns 0 on completion and storing of value
-     */
+    * 
+    * \returns -1 on invalid string being read in
+    * \returns 0 on completion and storing of value
+    */
    int parseRamUsage(
       std::string,   /**< [in] the string to be parsed*/
       float&    /**< [out] the return value for current RAM usage*/
    );
-
 
 };
 
@@ -913,6 +912,11 @@ int sysMonitor::updateVals()
    ram_usage_indi["ram_usage"] = ramUsage;
    ram_usage_indi.setState (pcf::IndiProperty::Ok);
    if(m_indiDriver) m_indiDriver->sendSetProperty (ram_usage_indi);
+   MagAOXApp::updateIfChanged(
+      ram_usage_indi,
+      "ram_usage",
+      ram_usage,
+   );
 
    return 0;
 }
