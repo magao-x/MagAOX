@@ -5,6 +5,11 @@
    * int parseDiskTemperature(std::string, float&);
    * int parseDiskUsage(std::string, float&);
    * int parseRamUsage(std::string, float&);
+   * To use:
+   * In ~MagAOX/tests, compile this file with:
+   * `make -f singleTest.mk testfile=../apps/sysMonitor/tests/sysMonitor_test.cpp`
+   * and run program with:
+   * `./singleTest`
    ****/
 
 #define CATCH_CONFIG_MAIN
@@ -198,21 +203,21 @@ SCENARIO( "System monitor is constructed and disk usage result is passed in", "[
       {
          rv = sm.parseDiskUsage("/dev/mapper/cl-root  52403200 12321848  40081352  24% /", rootUsage, dataUsage, bootUsage);
          REQUIRE(rv == 0);
-         REQUIRE(rootUsage == 24);
+         REQUIRE((rootUsage - 0.24f) < 0.0005);
       }
       
       WHEN("Correct line for /data is given")
       {
          rv = sm.parseDiskUsage("/dev/md124     1952297568    81552 1952216016   1% /data", rootUsage, dataUsage, bootUsage);
          REQUIRE(rv == 0);
-         REQUIRE(dataUsage == 1);
+         REQUIRE((dataUsage - 0.01f) < 0.0005);
       }
       
       WHEN("Correct line for /boot is given")
       {
          rv = sm.parseDiskUsage("/dev/md126         484004   289264     194740  60% /boot", rootUsage, dataUsage, bootUsage);
          REQUIRE(rv == 0);
-         REQUIRE(bootUsage == 60);
+         REQUIRE((bootUsage - 0.6f) < 0.0005);
       }
       
       WHEN("Blank line is given")
