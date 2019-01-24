@@ -30,12 +30,12 @@ DEPSROOT=/opt/MagAOX/source/dependencies
 echo "Starting shell-based provisioning script from $DIR..."
 # needed for (at least) git:
 yum groupinstall -y 'Development Tools'
+# Install nice-to-haves
+yum install -y vim nano wget htop
 # EPEL is additional packages that aren't in the main repo
 wget http://dl.fedoraproject.org/pub/epel/epel-release-latest-7.noarch.rpm
 # use || true so it's not an error if already installed:
 yum install -y epel-release-latest-7.noarch.rpm || true
-# Install nice-to-haves
-yum install -y vim nano wget htop
 # changes the set of available packages, making devtoolset-7 available
 yum -y install centos-release-scl
 # install and enable devtoolset-7 for all users
@@ -81,42 +81,22 @@ fi
 cd fftw-$FFTW_VERSION
 # Following Jared's comprehensive build script: https://gist.github.com/jaredmales/0aacc00b0ce493cd63d3c5c75ccc6cdd
 if [ ! -e /usr/local/lib/libfftw3f.a ]; then
-    ./configure --enable-float
-    make
-    make install
-fi
-if [ ! -e /usr/local/lib/libfftw3f_threads.a ]; then
-    ./configure --enable-float --enable-threads
+    ./configure --enable-float --with-combined-threads --enable-threads --enable-shared
     make
     make install
 fi
 if [ ! -e /usr/local/lib/libfftw3.a ]; then
-    ./configure
-    make
-    make install
-fi
-if [ ! -e /usr/local/lib/libfftw3_threads.a ]; then
-    ./configure --enable-threads
+    ./configure --with-combined-threads --enable-threads --enable-shared
     make
     make install
 fi
 if [ ! -e /usr/local/lib/libfftw3l.a ]; then
-    ./configure --enable-long-double
-    make
-    make install
-fi
-if [ ! -e /usr/local/lib/libfftw3l_threads.a ]; then
-    ./configure --enable-long-double --enable-threads
+    ./configure --enable-long-double --with-combined-threads --enable-threads --enable-shared
     make
     make install
 fi
 if [ ! -e /usr/local/lib/libfftw3q.a ]; then
-    ./configure --enable-quad-precision
-    make
-    make install
-fi
-if [ ! -e /usr/local/lib/libfftw3q_threads.a ]; then
-    ./configure --enable-quad-precision --enable-threads
+    ./configure --enable-quad-precision --with-combined-threads --enable-threads --enable-shared
     make
     make install
 fi

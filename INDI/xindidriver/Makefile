@@ -1,7 +1,6 @@
 
 SELF_DIR := $(abspath $(dir $(lastword $(MAKEFILE_LIST))))
 include $(SELF_DIR)/../../Make/common.mk
-include $(SELF_DIR)/config.mk
 
 all: xindidriver
 

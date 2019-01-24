@@ -11,7 +11,7 @@
 #define ttmTalker_hpp
 
 #include "../../libMagAOX/libMagAOX.hpp" //Note this is included on command line to trigger pch
-#include "magaox_git_version.h"
+#include "../../magaox_git_version.h"
 #include "../../libMagAOX/tty/ttyUSB.hpp"
 
 #include <iostream>
@@ -39,12 +39,12 @@ protected:
 
 public:
 
-	/// Default c'tor.
-  ttmTalker();
+   /// Default c'tor.
+   ttmTalker();
 
-  ~ttmTalker() noexcept
-  {
-  }
+   ~ttmTalker() noexcept
+   {
+   }
 
    /// Setup the configuration system (called by MagAOXApp::setup())
    virtual void setupConfig();
@@ -76,12 +76,12 @@ public:
 
 inline ttmTalker::ttmTalker() : MagAOXApp(MAGAOX_CURRENT_SHA1, MAGAOX_REPO_MODIFIED)
 {
-  return;
+   return;
 }
 
 void ttmTalker::setupConfig()
 {
-  tty::usbDevice::setupConfig(config);
+   tty::usbDevice::setupConfig(config);
 }
 
 void ttmTalker::loadConfig()
@@ -154,13 +154,13 @@ int ttmTalker::appLogic()
       else
       {
          state(stateCodes::NOTCONNECTED);
-			//if(!stateLogged())
-			//{
-         std::stringstream logs;
-         logs << "USB Device " << m_idVendor << ":" << m_idProduct << ":" << m_serial << " found in udev as " << m_deviceName;
-         log<text_log>(logs.str());
-         callCommand();
-     	   //}
+			if(!stateLogged())
+			{
+            std::stringstream logs;
+            logs << "USB Device " << m_idVendor << ":" << m_idProduct << ":" << m_serial << " found in udev as " << m_deviceName;
+            log<text_log>(logs.str());
+            callCommand();
+     	   }
       }
    }
 
@@ -294,7 +294,12 @@ int ttmTalker::testConnection()
       return -1;
    }
 
-   if (*((uint32_t *) (  output.data() + 6)) == stoi(m_serial)) 
+   if (output.size() != 90)
+   {
+      return -1;
+   }
+
+   if (*((uint32_t *) (  output.data() + 6)) == (uint32_t) stoi(m_serial)) 
    {
       std::cout << "Serial number test successful" << std::endl;
       return 0;
