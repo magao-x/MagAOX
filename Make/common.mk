@@ -12,6 +12,7 @@
 
 SELF_DIR := $(abspath $(dir $(lastword $(MAKEFILE_LIST))))
 -include $(SELF_DIR)/../local/common.mk
+include $(SELF_DIR)/config.mk
 
 UNAME ?= $(shell uname)
 ifeq ($(UNAME),Darwin)
