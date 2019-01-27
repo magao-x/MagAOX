@@ -16,6 +16,18 @@
 #include "../../libMagAOX/libMagAOX.hpp" //Note this is included on command line to trigger pch
 #include "../../magaox_git_version.h"
 
+/** \defgroup sshDigger SSH Tunnel Manager
+  * \brief Manage the SSH tunnels for MagAO-X communications..
+  * 
+  * \link page_module_sshDigger Application Documentation
+  * 
+  * \ingroup apps
+  * 
+  */
+
+/** \defgroup sshDigger_files SSH Tunnel Files
+  * \ingroup sshDigger
+  */
 
 //Return codes, these are primarily for testing purposes
 #define SSHDIGGER_E_NOTUNNELS (-10)
@@ -31,9 +43,13 @@ namespace app
    
 /// The MagAO-X SSH tunnel manager
 /** Each instance of this app manages one SSH tunnel to another computer.
-  *
+  * These tunnels are opened via the `autossh` app, which itself calls `ssh`.
+  * 
+  * 
   * \todo add options for verboseness of ssh and autossh (loglevel)
   * \todo add options for ssh and autossh log thread priorities
+  * 
+  * \ingroup sshDigger
   */ 
 class sshDigger : public MagAOXApp<false>
 {

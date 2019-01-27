@@ -777,6 +777,7 @@ INPUT                  = ../ \
                          ../logger/doc/logger.dox \
                          ../tty/doc/screen.dox \
                          ../../flatlogs/include/flatlogs/ \
+                         ../../apps/sshDigger/ \
                          ../../apps/filterWheelCtrl/ \
                          ../../apps/trippLitePDU/
 
