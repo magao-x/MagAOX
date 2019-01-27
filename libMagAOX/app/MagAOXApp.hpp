@@ -54,11 +54,11 @@ namespace app
 
 /// The base-class for MagAO-X applications.
 /**
-  * You can define a base configuration file for this class by writing
+  * You can define a base configuration file for this class by defining
   * \code
-  *  #define MAGAOX_configBase "relative/path/from/configDir.conf"
-  * \endcode
-  * before including MagAOXApp.hpp.  This would be used, for instance to have a config common to
+    m_configBase = "base_name";
+    \endcode
+  * in the derived class constructor. This would be used, for instance to have a config common to
   * all filter wheels.
   *
   *
@@ -81,6 +81,8 @@ protected:
 
    std::string m_configName; ///< The name of the configuration file (minus .conf).
 
+   std::string m_configBase; ///< The name of a base config class for this app (minus .conf).
+   
    std::string sysPath;  ///< The path to the system directory, for PID file, etc.
 
    std::string secretsPath; ///< Path to the secrets directory, where passwords, etc, are stored.
@@ -744,10 +746,11 @@ void MagAOXApp<_useINDI>::setDefaults( int argc,
    secretsPath = tmpstr;
 
 
-   #ifdef MAGAOX_configBase
+   if(m_configBase != "")
+   {
       //We use mx::application's configPathUser for this components base config file
-      configPathUser = configDir + "/" + MAGAOX_configBase;
-   #endif
+      configPathUser = configDir + "/" + m_configBase + ".conf";
+   }
 
    //Parse CL just to get the "name".
    config.add("name","n", "name",argType::Required, "", "name", false, "string", "The name of the application, specifies config.");
