@@ -67,9 +67,12 @@ protected:
    int m_remotePort {0}; ///< The remote port to forward to
    
    ///@}
-   
+
    int m_tunnelPID; ///< The PID of the autossh process
-   
+
+   /** \name ssh log capture
+     * @{
+     */ 
    int m_sshSTDERR {-1}; ///< The output of stderr of the ssh process
    int m_sshSTDERR_input {-1}; ///< The input end of stderr, used to wake up the log thread on shutdown.
    
@@ -77,15 +80,21 @@ protected:
    
    std::thread m_sshLogThread; ///< A separate thread for capturing ssh logs
    
+   bool m_sshError {false}; ///< Flag to signal when ssh logs an error, and should be restarted via SIGUSR1 to autossh.
+
+   ///@}
+   
+   /** \name autossh log capture
+     * @{
+     */ 
    std::string m_autosshLogFile; ///< Name of the autossh logfile.
    int m_autosshLogFD; ///< File descriptor of the autossh logfile.
    
    int m_autosshLogThreadPrio {0}; ///< Priority of the autossh log capture thread, should normally be 0.
    
    std::thread m_autosshLogThread; ///< A separate thread for capturing autossh logs
+   ///@}
    
-   
-   bool m_sshError {false}; ///< Flag to signal when ssh logs an error, and should be restarted via SIGUSR1 to autossh.
    
 public:
    /// Default c'tor.
@@ -143,16 +152,28 @@ public:
    /// Process a log entry from indiserver, putting it into MagAO-X standard form 
    int processAutoSSHLog( std::string logs );
    
-   /// Startup functions
+   /// Startup function
    /** 
      * 
      */
    virtual int appStartup();
 
    /// Implementation of the FSM for sshDigger.
+   /** Monitors status of m_sshError flag, and sends a signal to autossh if an error is indicated.
+     * 
+     * Checks that autossh is still alive, and if it has died restarts it.
+     *
+     * \returns 0 on no critical error
+     * \returns -1 on an error requiring shutdown
+     */ 
    virtual int appLogic();
 
-   /// SIGTERM the tunnel process.
+   /// Shutdown the app.
+   /** Sends SIGTERM to autossh.
+     * 
+     * Tells the two logging threads to exit, and waits for them to complete.
+     * 
+     */ 
    virtual int appShutdown();
    
 
@@ -416,8 +437,6 @@ void sshDigger::sshLogThreadExec()
 inline
 int sshDigger::processSSHLog( std::string logs )
 {
-   ///\todo interpret logs, giving errors vs info vs debug
-   
    logPrioT lp = logPrio::LOG_INFO;
    
    if(logs.find("bind: Address already in use") != std::string::npos)
@@ -489,9 +508,22 @@ void sshDigger::autosshLogThreadExec()
 {
    char buffer[4096];
 
+   //Open the FIFO
    m_autosshLogFD = 0;
    
-   m_autosshLogFD = open(m_autosshLogFile.c_str(), O_RDONLY );
+   //We currently aren't monitoring this thread status, so we might as well retry if there is an error
+   while(m_autosshLogFD <= 0)
+   {
+      m_autosshLogFD = open(m_autosshLogFile.c_str(), O_RDONLY);
+   
+      if( m_autosshLogFD < 0 )
+      {
+         log<software_error>({__FILE__, __LINE__, errno});
+         log<software_error>({__FILE__, __LINE__, "unable to open auto ssh log fifo"});
+         mx::sleep(1);
+      }
+   }
+      
    
    std::string logs;
    while(m_shutdown == 0)
@@ -499,7 +531,6 @@ void sshDigger::autosshLogThreadExec()
       ssize_t count = read(m_autosshLogFD, buffer, sizeof(buffer));
       if (count <= 0) 
       {
-         mx::milliSleep(100); //read doesn't block, probably because autossh holds it open 
          continue;
       }
       else 
@@ -542,9 +573,14 @@ int sshDigger::appStartup()
    m_tunnelPID = 0;
 
    m_autosshLogFile = "/dev/shm/sshDigger_autossh_" + m_configName + "_" + std::to_string(m_pid);
-   m_autosshLogFD = open(m_autosshLogFile.c_str(), O_CREAT , S_IRUSR | S_IWUSR );
-   close(m_autosshLogFD);
    
+   if( mkfifo( m_autosshLogFile.c_str(), S_IRUSR | S_IWUSR) < 0)
+   {
+      log<software_critical>({__FILE__, __LINE__, errno});
+      log<software_critical>({__FILE__, __LINE__, "unable to create autossh log fifo"});
+      return -1;
+   }
+      
    
    if(execTunnel() < 0)
    {
@@ -579,40 +615,13 @@ int sshDigger::appLogic()
       m_sshError = false;
    }
    
-   //Check if the tunnelPID is still in proc and not a zombie
-   bool needrestart = false; //will be true if autossh is no longer alive
-   std::string procDir = "/proc/" + std::to_string(m_tunnelPID) + "/status";
-   if(access( procDir.c_str(), F_OK) != 0)
-   {
-      log<text_log>("autossh died");
-      needrestart = true;
-   }
-   else
-   {
-      std::ifstream statin;
-      statin.open(procDir.c_str());
+   //Check if autossh has died for any reason
+   int status;
+   pid_t exited = waitpid(m_tunnelPID, &status, WNOHANG);
       
-      //Find the state entry and check for zombie-ness
-      std::string line;
-      bool statefound = false;
-      while(statin.good() && !statefound)
-      {
-         getline( statin, line);
-         if(line.find("State:") != std::string::npos) statefound = true;
-      }
-      
-      if(line.find("Z") != std::string::npos)
-      {
-         log<text_log>("autossh has gone zombie");
-         needrestart = true;
-      }
-   }
-   
-   if(needrestart)
+   if(exited == m_tunnelPID)
    {
-      int status;
-      waitpid(m_tunnelPID, &status, 0);
-
+      log<text_log>("autossh exited, restarting.");
       m_sshSTDERR = -1; //This tells the sshLogThread to exit
       char w = '\0';
       ssize_t nwr = write(m_sshSTDERR_input, &w, 1); //And this wakes it up from the blocking read
@@ -632,15 +641,15 @@ int sshDigger::appLogic()
          return -1;
       }
    
-      //And the log thread.
+      //And the ssh log thread.
       if(sshLogThreadStart() < 0)
       {
          log<software_critical>({__FILE__, __LINE__, "restart of ssh log thread failed."});
          return -1;
       }
    
+      //Don't need to restart the autossh log thread, becuase we'll give it the same file as log file.
    }
-   
    
    return 0;
 }
@@ -648,6 +657,7 @@ int sshDigger::appLogic()
 int sshDigger::appShutdown()
 {
    kill(m_tunnelPID, SIGTERM);
+   waitpid(m_tunnelPID, 0, 0);
    
    //Write the the ssh stderr to wake up the ssh log thread, which will then see shutdown is set.
    char w = '\0';
