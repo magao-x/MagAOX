@@ -51,5 +51,23 @@ trippLitePDU [options]
 
 # EXAMPLES
 
+# Troubleshooting
+
+## Device not responding
+If the device stops responding on the CLI port.  A fix is to login via ssh, e.g.
+```
+$ ssh localadmin@x.x.x.x
+```
+You will need the current password for this device.  Once logged in, navigate to the menu choice to `Restart PowerAlert`.
+```
+2- System Configuration
+
+   7- Restart PowerAlert
+   
+      1- Restart PowerAlert Now
+```
+This can take a loooooong time to reboot.
+
+If the software reboot doesn't fix it, reset the device using the recessed reset button under the ethernet adapter.
 
 # SEE ALSO 
