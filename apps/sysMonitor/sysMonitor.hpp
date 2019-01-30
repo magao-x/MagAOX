@@ -2,6 +2,8 @@
   * \brief The MagAO-X sysMonitor app main program which provides functions to read and report system statistics
   * \author Chris Bohlman (cbohlmanaz@gmail.com)
   *
+  * To view logdump files: logdump -f sysMonitor
+  *
   * \ingroup sysMonitor_files
   *
   * History:
@@ -866,70 +868,30 @@ int sysMonitor::parseRamUsage(std::string line, float& ramUsage)
 
 int sysMonitor::updateVals()
 {
-   unsigned int i;
-   std::string coreStr = "core";
-   std::string driveStr = "drive";
+   MagAOXApp::updateIfChanged(core_loads, "core", cpu_core_loads);
 
-   for (i = 0; i < cpu_core_loads.size(); i++) 
-   {
-      coreStr.append(std::to_string(i));
-      // core_loads[coreStr] = cpu_core_loads[i];
-      MagAOXApp::updateIfChanged(core_loads, coreStr, cpu_core_loads[i]);
-      coreStr.pop_back();
-   }
-   // core_loads.setState (pcf::IndiProperty::Ok);
-   // if(m_indiDriver) m_indiDriver->sendSetProperty(core_loads);
+   MagAOXApp::updateIfChanged(core_temps, "core", coreTemps);
 
-   for (i = 0; i < coreTemps.size(); i++) 
-   {
-      coreStr.append(std::to_string(i));
-      // core_temps[coreStr] = coreTemps[i];
-      MagAOXApp::updateIfChanged(core_temps, coreStr, coreTemps[i]);
-      coreStr.pop_back();
-   }
-   // core_temps.setState (pcf::IndiProperty::Ok);
-   // if(m_indiDriver) m_indiDriver->sendSetProperty (core_temps);
+   MagAOXApp::updateIfChanged(drive_temps, "drive", diskTemp);
 
-   for (i = 0; i < diskTemp.size(); i++) 
-   {
-      driveStr.append(std::to_string(i));
-      // drive_temps[driveStr] = diskTemp[i];
-      MagAOXApp::updateIfChanged(drive_temps, driveStr, diskTemp[i]);
-      driveStr.pop_back();
-   }
-   // drive_temps.setState (pcf::IndiProperty::Ok);
-   // if(m_indiDriver) m_indiDriver->sendSetProperty (drive_temps);
-
-   // root_usage["root_usage"] = rootUsage;
-   // root_usage.setState (pcf::IndiProperty::Ok);
-   // if(m_indiDriver) m_indiDriver->sendSetProperty (root_usage);
    MagAOXApp::updateIfChanged(
       root_usage,
       "root_usage",
       rootUsage
    );
 
-   // boot_usage["boot_usage"] = bootUsage;
-   // boot_usage.setState (pcf::IndiProperty::Ok);
-   // if(m_indiDriver) m_indiDriver->sendSetProperty (boot_usage);
    MagAOXApp::updateIfChanged(
       boot_usage,
       "boot_usage",
       bootUsage
    );
 
-   //data_usage["data_usage"] = dataUsage;
-   // data_usage.setState (pcf::IndiProperty::Ok);
-   // if(m_indiDriver) m_indiDriver->sendSetProperty (data_usage);
    MagAOXApp::updateIfChanged(
       data_usage,
       "data_usage",
       dataUsage
    );
 
-   // ram_usage_indi["ram_usage"] = ramUsage;
-   // ram_usage_indi.setState (pcf::IndiProperty::Ok);
-   // if(m_indiDriver) m_indiDriver->sendSetProperty (ram_usage_indi);
    MagAOXApp::updateIfChanged(
       ram_usage_indi,
       "ram_usage",

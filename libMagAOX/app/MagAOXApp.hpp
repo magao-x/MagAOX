@@ -563,6 +563,26 @@ protected:
                          const T & newVal ///< [in] the new value
                       );
 
+   /** 
+     * \overload void updateIfChanged(pcf::IndiProperty & p, const std::string & el, const std::vector<T> & newVal)
+     * Takes in a vector of values, such that each element in the vector will have an element name of el+(index of value)
+     */
+   template<typename T>
+   void updateIfChanged( pcf::IndiProperty & p, ///< [in/out] The property containing the element to possibly update
+                         const std::string & el, ///< [in] Beginning of each element name
+                         const std::vector<T> & newVal ///< [in] the new values
+                      );
+
+  /** 
+     * \overload void updateIfChanged(pcf::IndiProperty & p, const std::string & el, const std::vector<T> & newVal)
+     * Takes in a vector of values, such that each element in the vector will have an element name of el+(index of value)
+     */
+   template<typename T>
+   void updateIfChanged( pcf::IndiProperty & p, ///< [in/out] The property containing the element to possibly update
+                         const std::vector<std::string> & el, ///< [in] String vector of element names
+                         const std::vector<T> & newVal ///< [in] the new values
+                      );
+
    /// Send a newProperty command to another device (using the INDI Client interface)
    /** Copies the input IndiProperty, then updates the element with the new value.
      *
@@ -1717,6 +1737,62 @@ void MagAOXApp<_useINDI>::updateIfChanged( pcf::IndiProperty & p,
    if(!m_indiDriver) return;
 
    indi::updateIfChanged( p, el, newVal, m_indiDriver);
+
+//    T oldVal = p[el].get<T>();
+//
+//    if(oldVal != newVal)
+//    {
+//       p[el].set(newVal);
+//       p.setState (pcf::IndiProperty::Ok);
+//       m_indiDriver->sendSetProperty (p);
+//    }
+}
+
+template<bool _useINDI>
+template<typename T>
+void MagAOXApp<_useINDI>::updateIfChanged( pcf::IndiProperty & p,
+                                           const std::string & el,
+                                           const std::vector<T> & newVals
+                                         )
+{
+   if(!_useINDI) return;
+
+   if(!m_indiDriver) return;
+
+   for (size_t index = 0; index < newVals.size(); ++index) {
+      std::string descriptor = el+std::to_string(index);
+      indi::updateIfChanged( p, descriptor, newVals.at(index), m_indiDriver);
+   }
+
+   
+
+//    T oldVal = p[el].get<T>();
+//
+//    if(oldVal != newVal)
+//    {
+//       p[el].set(newVal);
+//       p.setState (pcf::IndiProperty::Ok);
+//       m_indiDriver->sendSetProperty (p);
+//    }
+}
+
+template<bool _useINDI>
+template<typename T>
+void MagAOXApp<_useINDI>::updateIfChanged( pcf::IndiProperty & p,
+                                           const std::vector<std::string> & el,
+                                           const std::vector<T> & newVals
+                                         )
+{
+   if(!_useINDI) return;
+
+   if(!m_indiDriver) return;
+
+   for (size_t index = 0; index < newVals.size(); ++index) {
+      std::string descriptor = el.at(index);
+      indi::updateIfChanged( p, descriptor, newVals.at(index), m_indiDriver);
+   }
+
+   
 
 //    T oldVal = p[el].get<T>();
 //
