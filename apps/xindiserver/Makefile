@@ -1,7 +1,7 @@
 
 allall: all 
 
-OTHER_HEADERS=remoteDriver.hpp
+OTHER_HEADERS=
 TARGET=xindiserver
 include ../../Make/magAOXApp.mk
 

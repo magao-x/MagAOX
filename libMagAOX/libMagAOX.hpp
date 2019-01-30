@@ -33,6 +33,5 @@
 #include "tty/usbDevice.hpp"
 #include "tty/telnetConn.hpp"
 
-#include "netcom/tunneledHost.hpp"
 
 #endif //libMagAOX_hpp
