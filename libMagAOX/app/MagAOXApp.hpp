@@ -82,7 +82,7 @@ protected:
    std::string m_configName; ///< The name of the configuration file (minus .conf).
 
    std::string m_configBase; ///< The name of a base config class for this app (minus .conf).
-   
+
    std::string sysPath;  ///< The path to the system directory, for PID file, etc.
 
    std::string secretsPath; ///< Path to the secrets directory, where passwords, etc, are stored.
@@ -156,25 +156,25 @@ public:
      * - PID locking lockPID()
      * - log thread startup by logThreadStart()
      * - signal handling installation by setSigTermHandler()
-     * - appStartup() is called 
+     * - appStartup() is called
      * - INDI communications started by startINDI()
      * - power state is checked, pausing if unknown (if being managed)
-     * 
+     *
      * Errors in the above steps will cause a process exit.
-     * 
-     * Then commences the main event loop. 
+     *
+     * Then commences the main event loop.
      * Conditions on entry to the main loop:
      * - PID locked
      * - Log thread running
-     * - Signal handling installed 
+     * - Signal handling installed
      * - appStartup successful
      * - INDI communications started successfully (if being used)
      * - power state known (if being managed)
-     * 
-     * In the event loop, the power state is checked (if being managed).  If power is off, then onPowerOff is called.  
+     *
+     * In the event loop, the power state is checked (if being managed).  If power is off, then onPowerOff is called.
      * If power is on, or power is not managed, appLogic is called.  These methods are implemented in derived classes, and
      * are called every m_loopPause interval.
-     * 
+     *
      * If an error is returned by either onPowerOff or appLogic, or a signal is handled, then the shutdown is managed.
      * This includes shutting down INDI, calling appShutdown, and unlocking the PID.  The log thread will shutdown.
      */
@@ -620,9 +620,9 @@ protected:
    virtual int whilePowerOff() {return 0;}
 
 public:
-   
+
    INDI_SETCALLBACK_DECL(MagAOXApp, m_indiP_powerChannel);
-   
+
    ///@} Power Management
 
 public:
@@ -791,7 +791,7 @@ void MagAOXApp<_useINDI>::setupBasicConfig() //virtual
    {
       //Power Management
       config.add("power.device", "", "power.device", argType::Required, "power", "device", false, "string", "Device controlling power for this app's device (INDI name).");
-      config.add("power.outlet", "", "power.outlet", argType::Required, "power", "outlet", false, "string", "Channel on device for this app's device (INDI name).");
+      config.add("power.channel", "", "power.channel", argType::Required, "power", "channel", false, "string", "Channel on device for this app's device (INDI name).");
       config.add("power.element", "", "power.element", argType::Required, "power", "element", false, "string", "INDI element name.  Default is \"state\", only need to specify if different.");
    }
 }

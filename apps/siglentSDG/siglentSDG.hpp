@@ -345,6 +345,7 @@ public:
 inline
 siglentSDG::siglentSDG() : MagAOXApp(MAGAOX_CURRENT_SHA1, MAGAOX_REPO_MODIFIED)
 {
+   m_powerMgtEnabled = true;
    m_telnetConn.m_prompt = "\n";
    return;
 }

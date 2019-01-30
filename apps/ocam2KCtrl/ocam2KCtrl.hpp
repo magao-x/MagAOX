@@ -16,6 +16,17 @@ namespace MagAOX
 namespace app
 {
 
+   
+   
+struct ccdConfig 
+{
+   int binning {1};
+   std::string configFile;
+   unsigned sizeX {0};
+   unsigned sizeY {0};
+   float maxFPS {0};
+};
+
 /** MagAO-X application to control the OCAM 2K EMCCD
   *
   */
@@ -38,7 +49,7 @@ protected:
    int m_powerOnCounter {0}; ///< Counts numer of loops after power on, implements delay for camera bootup.
 
 
-
+   std::vector<ccdConfig> m_ccdConfigs;
 
 public:
 
@@ -72,19 +83,26 @@ public:
 
 
    int pdvInit();
-
+   
+   
+   
    int getTemps();
+   int setTemp(float temp);
+   
    int getFPS();
+   int setFPS(float fps);
+   
 
    //INDI:
 protected:
    //declare our properties
+   pcf::IndiProperty m_indiP_ccdtemp;
    pcf::IndiProperty m_indiP_temps;
    pcf::IndiProperty m_indiP_binning;
    pcf::IndiProperty m_indiP_fps;
 
 public:
-   INDI_NEWCALLBACK_DECL(ocam2KCtrl, m_indiP_temps);
+   INDI_NEWCALLBACK_DECL(ocam2KCtrl, m_indiP_ccdtemp);
    INDI_NEWCALLBACK_DECL(ocam2KCtrl, m_indiP_binning);
    INDI_NEWCALLBACK_DECL(ocam2KCtrl, m_indiP_fps);
 
@@ -109,9 +127,29 @@ void ocam2KCtrl::setupConfig()
 {
 }
 
+/*
+inline
+void ocam2KCtrl::loadConfigImpl( mx::app::appConfigurator & _config )
+{
+   std::vector<std::string> sections;
+
+   _config.unusedSections(sections);
+
+   if( sections.size() == 0 )
+   {
+      log<text_log>("No camera modes found.", logPrio::LOG_CRITICAL);
+
+      return CAMCTRL_E_NOTUNNELS;
+   }
+}*/
+
 inline
 void ocam2KCtrl::loadConfig()
 {
+
+   
+   
+   
 }
 
 #define MAGAOX_PDV_SERBUFSIZE 512
@@ -199,9 +237,12 @@ inline
 int ocam2KCtrl::appStartup()
 {
    // set up the  INDI properties
-   REG_INDI_NEWPROP(m_indiP_temps, "temps", pcf::IndiProperty::Number);
-   m_indiP_temps.add (pcf::IndiElement("ccd"));
-   m_indiP_temps["ccd"].set(0);
+   REG_INDI_NEWPROP(m_indiP_ccdtemp, "ccdtemp", pcf::IndiProperty::Number);
+   m_indiP_temps.add (pcf::IndiElement("current"));
+   m_indiP_temps["current"].set(0);
+   m_indiP_temps.add (pcf::IndiElement("target"));
+   
+   REG_INDI_NEWPROP_NOCB(m_indiP_temps, "temps", pcf::IndiProperty::Number);
    m_indiP_temps.add (pcf::IndiElement("cpu"));
    m_indiP_temps["cpu"].set(0);
    m_indiP_temps.add (pcf::IndiElement("power"));
@@ -224,8 +265,9 @@ int ocam2KCtrl::appStartup()
    m_indiP_binning["binning"].set(0);
 
    REG_INDI_NEWPROP(m_indiP_fps, "fps", pcf::IndiProperty::Number);
-   m_indiP_fps.add (pcf::IndiElement("fps"));
-   m_indiP_fps["fps"].set(0);
+   m_indiP_fps.add (pcf::IndiElement("current"));
+   m_indiP_fps["current"].set(0);
+   m_indiP_fps.add (pcf::IndiElement("target"));
 
    if(pdvInit() < 0) return -1;
 
@@ -241,7 +283,7 @@ int ocam2KCtrl::appLogic()
 
    if( state() == stateCodes::POWERON )
    {
-      if(m_powerOnCounter*loopPause > m_powerOnWait)
+      if(m_powerOnCounter*m_loopPause > m_powerOnWait)
       {
          state(stateCodes::NOTCONNECTED);
          m_powerOnCounter = 0;
@@ -287,7 +329,8 @@ int ocam2KCtrl::appLogic()
 
    if( state() == stateCodes::READY || state() == stateCodes::OPERATING )
    {
-      //INDI mutex here?
+      std::unique_lock<std::mutex> lock(m_indiMutex, std::try_to_lock);
+
       if(getTemps() < 0)
       {
          state(stateCodes::ERROR);
@@ -370,7 +413,9 @@ int ocam2KCtrl::getTemps()
 
       log<ocam_temps>({temps.CCD, temps.CPU, temps.POWER, temps.BIAS, temps.WATER, temps.LEFT, temps.RIGHT, temps.COOLING_POWER});
 
-      updateIfChanged(m_indiP_temps, "ccd", temps.CCD);
+      updateIfChanged(m_indiP_ccdtemp, "current", temps.CCD);
+      
+      
       updateIfChanged(m_indiP_temps, "cpu", temps.CPU);
       updateIfChanged(m_indiP_temps, "power", temps.POWER);
       updateIfChanged(m_indiP_temps, "bias", temps.BIAS);
@@ -380,6 +425,28 @@ int ocam2KCtrl::getTemps()
       updateIfChanged(m_indiP_temps, "cooling", temps.COOLING_POWER);
       return 0;
 
+   }
+   else return log<software_error,-1>({__FILE__, __LINE__});
+
+}
+
+inline
+int ocam2KCtrl::setTemp(float temp)
+{
+   std::string response;
+
+   std::string tempStr = std::to_string(temp);
+   
+   ///\todo make more configurable
+   if(temp >= 30 || temp < -40) 
+   {
+      return log<text_log,-1>({"attempt to set temperature outside valid range: " + tempStr}, logPrio::LOG_ERROR);
+   }
+   
+   if( pdvSerialWriteRead( response, m_pdv, "temp " + tempStr, 1000) == 0)
+   {
+      ///\todo check response
+      return log<text_log,0>({"set temperature: " + tempStr});
    }
    else return log<software_error,-1>({__FILE__, __LINE__});
 
@@ -397,7 +464,7 @@ int ocam2KCtrl::getFPS()
 
       m_fpsSet = fps;
 
-      updateIfChanged(m_indiP_fps, "value", m_fpsSet);
+      updateIfChanged(m_indiP_fps, "current", m_fpsSet);
 
       return 0;
 
@@ -406,12 +473,55 @@ int ocam2KCtrl::getFPS()
 
 }
 
-INDI_NEWCALLBACK_DEFN(ocam2KCtrl, m_indiP_temps)(const pcf::IndiProperty &ipRecv)
+inline
+int ocam2KCtrl::setFPS(float fps)
 {
-   if (ipRecv.getName() == m_indiP_temps.getName())
+   std::string response;
+
+   ///\todo should we have fps range checks or let camera deal with it?
+   
+   std::string fpsStr= std::to_string(fps);
+   if( pdvSerialWriteRead( response, m_pdv, "fps " + fpsStr, 1000) == 0)
    {
-      std::cerr << "New temp\n";
-      return 0;
+      ///\todo check response
+      return log<text_log,0>({"set fps: " + fpsStr});
+   }
+   else return log<software_error,-1>({__FILE__, __LINE__});
+
+}
+
+INDI_NEWCALLBACK_DEFN(ocam2KCtrl, m_indiP_ccdtemp)(const pcf::IndiProperty &ipRecv)
+{
+   if (ipRecv.getName() == m_indiP_ccdtemp.getName())
+   {
+      float current = 99, target = 99;
+
+      try
+      {
+         current = ipRecv["current"].get<float>();
+      }
+      catch(...){}
+
+      try
+      {
+         target = ipRecv["target"].get<float>();
+      }
+      catch(...){}
+
+      
+      //Check if target is empty
+      if( target == 99 ) target = current;
+      
+      //Now check if it's valid?
+      ///\todo implement more configurable max-set-able temperature
+      if( target > 30 ) return 0;
+   
+      std::unique_lock<std::mutex> lock(m_indiMutex, std::try_to_lock);
+      
+      updateIfChanged(m_indiP_ccdtemp, "target", target);
+      
+      
+      return setTemp(target);
    }
    return -1;
 }
@@ -430,8 +540,28 @@ INDI_NEWCALLBACK_DEFN(ocam2KCtrl, m_indiP_fps)(const pcf::IndiProperty &ipRecv)
 {
    if (ipRecv.getName() == m_indiP_fps.getName())
    {
-      std::cerr << "New fps\n";
-      return 0;
+      float current = -99, target = -99;
+
+      try
+      {
+         current = ipRecv["current"].get<float>();
+      }
+      catch(...){}
+      
+      try
+      {
+         target = ipRecv["target"].get<float>();
+      }
+      catch(...){}
+      
+      if(target == -99) target = current;
+      
+      if(target <= 0) return 0;
+
+      updateIfChanged(m_indiP_fps, "target", target);
+      
+      return setFPS(target);
+      
    }
    return -1;
 }
