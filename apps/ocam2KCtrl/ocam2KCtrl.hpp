@@ -111,6 +111,9 @@ public:
 inline
 ocam2KCtrl::ocam2KCtrl() : MagAOXApp(MAGAOX_CURRENT_SHA1, MAGAOX_REPO_MODIFIED)
 {
+   ///\todo if power management is not fully corectly specified (e.g. outlet instead of channel is used as keyword), things just silently hang.
+   m_powerMgtEnabled = true;
+   
    return;
 }
 
@@ -238,9 +241,9 @@ int ocam2KCtrl::appStartup()
 {
    // set up the  INDI properties
    REG_INDI_NEWPROP(m_indiP_ccdtemp, "ccdtemp", pcf::IndiProperty::Number);
-   m_indiP_temps.add (pcf::IndiElement("current"));
-   m_indiP_temps["current"].set(0);
-   m_indiP_temps.add (pcf::IndiElement("target"));
+   m_indiP_ccdtemp.add (pcf::IndiElement("current"));
+   m_indiP_ccdtemp["current"].set(0);
+   m_indiP_ccdtemp.add (pcf::IndiElement("target"));
    
    REG_INDI_NEWPROP_NOCB(m_indiP_temps, "temps", pcf::IndiProperty::Number);
    m_indiP_temps.add (pcf::IndiElement("cpu"));
