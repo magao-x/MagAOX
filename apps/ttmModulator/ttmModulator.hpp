@@ -237,17 +237,17 @@ int ttmModulator::appStartup()
    m_indiP_modRadius["current"].set(m_modRad);
    m_indiP_modRadius["requested"].set(m_modRadRequested);
 
-   REG_INDI_SETPROP(m_indiP_C1outp, "ttmfxngen", "C1outp");
-   REG_INDI_SETPROP(m_indiP_C1freq, "ttmfxngen", "C1freq");
-   REG_INDI_SETPROP(m_indiP_C1volts, "ttmfxngen", "C1amp");
-   REG_INDI_SETPROP(m_indiP_C1ofst, "ttmfxngen", "C1ofst");
-   REG_INDI_SETPROP(m_indiP_C1phse, "ttmfxngen", "C1phse");
+   REG_INDI_SETPROP(m_indiP_C1outp, "fxngenmodwfs", "C1outp");
+   REG_INDI_SETPROP(m_indiP_C1freq, "fxngenmodwfs", "C1freq");
+   REG_INDI_SETPROP(m_indiP_C1volts, "fxngenmodwfs", "C1amp");
+   REG_INDI_SETPROP(m_indiP_C1ofst, "fxngenmodwfs", "C1ofst");
+   REG_INDI_SETPROP(m_indiP_C1phse, "fxngenmodwfs", "C1phse");
 
-   REG_INDI_SETPROP(m_indiP_C2outp, "ttmfxngen", "C2outp");
-   REG_INDI_SETPROP(m_indiP_C2freq, "ttmfxngen", "C2freq");
-   REG_INDI_SETPROP(m_indiP_C2volts, "ttmfxngen", "C2amp");
-   REG_INDI_SETPROP(m_indiP_C2ofst, "ttmfxngen", "C2ofst");
-   REG_INDI_SETPROP(m_indiP_C2phse, "ttmfxngen", "C2phse");
+   REG_INDI_SETPROP(m_indiP_C2outp, "fxngenmodwfs", "C2outp");
+   REG_INDI_SETPROP(m_indiP_C2freq, "fxngenmodwfs", "C2freq");
+   REG_INDI_SETPROP(m_indiP_C2volts, "fxngenmodwfs", "C2amp");
+   REG_INDI_SETPROP(m_indiP_C2ofst, "fxngenmodwfs", "C2ofst");
+   REG_INDI_SETPROP(m_indiP_C2phse, "fxngenmodwfs", "C2phse");
 
    return 0;
 }
