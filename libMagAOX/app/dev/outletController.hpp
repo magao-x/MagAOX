@@ -333,7 +333,7 @@ int outletController<derivedT>::loadConfig( mx::app::appConfigurator & config )
          std::vector<size_t> onOrder;
          config.configUnused( onOrder, mx::app::iniFile::makeKey(chSections[n], "onOrder" ) );
          m_channels[chSections[n]].m_onOrder = onOrder;
-         ///\todo error checking on onOrder
+         ///\todo error checking on onOrder, should complain if not same length
       }
 
       if( config.isSetUnused( mx::app::iniFile::makeKey(chSections[n], "offOrder" )))
@@ -341,7 +341,7 @@ int outletController<derivedT>::loadConfig( mx::app::appConfigurator & config )
          std::vector<size_t> offOrder;
          config.configUnused( offOrder, mx::app::iniFile::makeKey(chSections[n], "offOrder" ) );
          m_channels[chSections[n]].m_offOrder = offOrder;
-         ///\todo error checking on offOrder
+         ///\todo error checking on offOrder, should complain if not same length
       }
 
       if( config.isSetUnused( mx::app::iniFile::makeKey(chSections[n], "onDelays" )))
@@ -349,7 +349,7 @@ int outletController<derivedT>::loadConfig( mx::app::appConfigurator & config )
          std::vector<unsigned> onDelays;
          config.configUnused( onDelays, mx::app::iniFile::makeKey(chSections[n], "onDelays" ) );
          m_channels[chSections[n]].m_onDelays = onDelays;
-         ///\todo error checking on onDelays
+         ///\todo error checking on onDelays, should complain if not same length
       }
 
       if( config.isSetUnused( mx::app::iniFile::makeKey(chSections[n], "offDelays" )))
@@ -357,7 +357,7 @@ int outletController<derivedT>::loadConfig( mx::app::appConfigurator & config )
          std::vector<unsigned> offDelays;
          config.configUnused( offDelays, mx::app::iniFile::makeKey(chSections[n], "offDelays" ) );
          m_channels[chSections[n]].m_offDelays = offDelays;
-         ///\todo error checking on offDelays
+         ///\todo error checking on offDelays, should complain if not same length
       }
    }
 

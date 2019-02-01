@@ -16,21 +16,74 @@ namespace MagAOX
 namespace app
 {
 
+#define CAMCTRL_E_NOCONFIGS (-10)
    
-   
-struct ccdConfig 
+struct cameraConfig 
 {
-   int binning {1};
    std::string configFile;
+   std::string serialCommand;
+   unsigned binning {0};
    unsigned sizeX {0};
    unsigned sizeY {0};
    float maxFPS {0};
 };
 
+typedef std::unordered_map<std::string, cameraConfig> cameraConfigMap;
+
+inline
+int loadCameraConfig( cameraConfigMap & ccmap,
+                      mx::app::appConfigurator & config 
+                    )
+{
+   std::vector<std::string> sections;
+
+   config.unusedSections(sections);
+
+   if( sections.size() == 0 )
+   {
+      return CAMCTRL_E_NOCONFIGS;
+   }
+   
+   for(size_t i=0; i< sections.size(); ++i)
+   {
+      bool fileset = config.isSetUnused(mx::app::iniFile::makeKey(sections[i], "configFile" ));
+      /*bool binset = config.isSetUnused(mx::app::iniFile::makeKey(sections[i], "binning" ));
+      bool sizeXset = config.isSetUnused(mx::app::iniFile::makeKey(sections[i], "sizeX" ));
+      bool sizeYset = config.isSetUnused(mx::app::iniFile::makeKey(sections[i], "sizeY" ));
+      bool maxfpsset = config.isSetUnused(mx::app::iniFile::makeKey(sections[i], "maxFPS" ));
+      */
+      
+      //The configuration file tells us most things for EDT, so it's our current requirement. 
+      if( !fileset ) continue;
+      
+      std::string configFile;
+      config.configUnused(configFile, mx::app::iniFile::makeKey(sections[i], "configFile" ));
+      
+      std::string serialCommand;
+      config.configUnused(serialCommand, mx::app::iniFile::makeKey(sections[i], "serialCommand" ));
+      
+      unsigned binning = 0;
+      config.configUnused(binning, mx::app::iniFile::makeKey(sections[i], "binning" ));
+      
+      unsigned sizeX = 0;
+      config.configUnused(sizeX, mx::app::iniFile::makeKey(sections[i], "sizeX" ));
+      
+      unsigned sizeY = 0;
+      config.configUnused(sizeY, mx::app::iniFile::makeKey(sections[i], "sizeY" ));
+      
+      float maxFPS = 0;
+      config.configUnused(maxFPS, mx::app::iniFile::makeKey(sections[i], "maxFPS" ));
+      
+      ccmap[sections[i]] = cameraConfig({configFile, serialCommand, binning, sizeX, sizeY, maxFPS});
+   }
+   
+   return 0;
+}
+
 /** MagAO-X application to control the OCAM 2K EMCCD
   *
   */
-class ocam2KCtrl : public MagAOXApp<>
+class ocam2KCtrl : public MagAOXApp<>, public dev::ioDevice
 {
 
 protected:
@@ -49,7 +102,9 @@ protected:
    int m_powerOnCounter {0}; ///< Counts numer of loops after power on, implements delay for camera bootup.
 
 
-   std::vector<ccdConfig> m_ccdConfigs;
+   cameraConfigMap m_cameraConfigs;
+   
+   std::string m_startupConfig;
 
 public:
 
@@ -98,12 +153,12 @@ protected:
    //declare our properties
    pcf::IndiProperty m_indiP_ccdtemp;
    pcf::IndiProperty m_indiP_temps;
-   pcf::IndiProperty m_indiP_binning;
+   pcf::IndiProperty m_indiP_mode;
    pcf::IndiProperty m_indiP_fps;
 
 public:
    INDI_NEWCALLBACK_DECL(ocam2KCtrl, m_indiP_ccdtemp);
-   INDI_NEWCALLBACK_DECL(ocam2KCtrl, m_indiP_binning);
+   INDI_NEWCALLBACK_DECL(ocam2KCtrl, m_indiP_mode);
    INDI_NEWCALLBACK_DECL(ocam2KCtrl, m_indiP_fps);
 
 };
@@ -111,7 +166,7 @@ public:
 inline
 ocam2KCtrl::ocam2KCtrl() : MagAOXApp(MAGAOX_CURRENT_SHA1, MAGAOX_REPO_MODIFIED)
 {
-   ///\todo if power management is not fully corectly specified (e.g. outlet instead of channel is used as keyword), things just silently hang.
+   ///\todo if power management is not fully corectly specified (e.g. outlet instead of channel is used as keyword), things just silently hang. Fix implemented, test needed.
    m_powerMgtEnabled = true;
    
    return;
@@ -128,31 +183,33 @@ ocam2KCtrl::~ocam2KCtrl() noexcept
 inline
 void ocam2KCtrl::setupConfig()
 {
+   config.add("camera.startupConfig", "", "camera.startupConfig", argType::Required, "camera", "startupConfig", false, "string", "The name of the configuration to set at startup.");
+   
+   dev::ioDevice::setupConfig(config);
 }
 
-/*
-inline
-void ocam2KCtrl::loadConfigImpl( mx::app::appConfigurator & _config )
-{
-   std::vector<std::string> sections;
 
-   _config.unusedSections(sections);
-
-   if( sections.size() == 0 )
-   {
-      log<text_log>("No camera modes found.", logPrio::LOG_CRITICAL);
-
-      return CAMCTRL_E_NOTUNNELS;
-   }
-}*/
 
 inline
 void ocam2KCtrl::loadConfig()
 {
-
+   config(m_startupConfig, "camera.startupConfig");
    
+   int rv = loadCameraConfig( m_cameraConfigs, config);
    
+   if(rv < 0)
+   {
+      if(rv == CAMCTRL_E_NOCONFIGS)
+      {
+         log<text_log>("No camera configurations found.", logPrio::LOG_CRITICAL);
+      }
+      
+      m_shutdown = true;
+   }
    
+   m_readTimeout = 1000;
+   m_writeTimeout = 1000;
+   dev::ioDevice::loadConfig(config);
 }
 
 #define MAGAOX_PDV_SERBUFSIZE 512
@@ -160,7 +217,7 @@ void ocam2KCtrl::loadConfig()
 int pdvSerialWriteRead( std::string & response,
                         PdvDev * pdv,
                         const std::string & command,
-                        int timeout
+                        int timeout ///< [in] timeout in milliseconds
                       )
 {
    char    buf[MAGAOX_PDV_SERBUFSIZE+1];
@@ -217,7 +274,6 @@ int pdvSerialWriteRead( std::string & response,
 -- mutex m_pdv, along with serial communications, but not framegrabbing.
 -- need non-mutex way to check for consistency in f.g.-ing, or a way to wait until that loop exits.
 -- need way for f.g. loop to communicate errors.
--- separate fps and temp functions.
 -- Need startup wait capability.
 -- INDI props for fps, temp, both curr and req.  Measured for fps.
    --- Maybe make set-temp separate since it is r/w
@@ -263,9 +319,9 @@ int ocam2KCtrl::appStartup()
    m_indiP_temps.add (pcf::IndiElement("cooling"));
    m_indiP_temps["cooling"].set(0);
 
-   REG_INDI_NEWPROP(m_indiP_binning, "binning", pcf::IndiProperty::Number);
-   m_indiP_binning.add (pcf::IndiElement("binning"));
-   m_indiP_binning["binning"].set(0);
+   REG_INDI_NEWPROP(m_indiP_mode, "mode", pcf::IndiProperty::Number);
+   m_indiP_mode.add (pcf::IndiElement("current"));
+   m_indiP_mode.add (pcf::IndiElement("target"));
 
    REG_INDI_NEWPROP(m_indiP_fps, "fps", pcf::IndiProperty::Number);
    m_indiP_fps.add (pcf::IndiElement("current"));
@@ -302,7 +358,7 @@ int ocam2KCtrl::appLogic()
    {
       std::string response;
 
-      int ret = pdvSerialWriteRead( response, m_pdv, "fps", 1000);
+      int ret = pdvSerialWriteRead( response, m_pdv, "fps", m_readTimeout);
       if( ret == 0)
       {
          state(stateCodes::CONNECTED);
@@ -332,8 +388,12 @@ int ocam2KCtrl::appLogic()
 
    if( state() == stateCodes::READY || state() == stateCodes::OPERATING )
    {
+      //Get a lock if we can
       std::unique_lock<std::mutex> lock(m_indiMutex, std::try_to_lock);
 
+      //but don't wait for it, just go back around.
+      if(!lock.owns_lock()) return 0;
+      
       if(getTemps() < 0)
       {
          state(stateCodes::ERROR);
@@ -408,7 +468,7 @@ int ocam2KCtrl::getTemps()
 {
    std::string response;
 
-   if( pdvSerialWriteRead( response, m_pdv, "temp", 1000) == 0)
+   if( pdvSerialWriteRead( response, m_pdv, "temp", m_readTimeout) == 0)
    {
       ocamTemps temps;
 
@@ -446,7 +506,7 @@ int ocam2KCtrl::setTemp(float temp)
       return log<text_log,-1>({"attempt to set temperature outside valid range: " + tempStr}, logPrio::LOG_ERROR);
    }
    
-   if( pdvSerialWriteRead( response, m_pdv, "temp " + tempStr, 1000) == 0)
+   if( pdvSerialWriteRead( response, m_pdv, "temp " + tempStr, m_readTimeout) == 0)
    {
       ///\todo check response
       return log<text_log,0>({"set temperature: " + tempStr});
@@ -460,7 +520,7 @@ int ocam2KCtrl::getFPS()
 {
    std::string response;
 
-   if( pdvSerialWriteRead( response, m_pdv, "fps", 1000) == 0)
+   if( pdvSerialWriteRead( response, m_pdv, "fps", m_readTimeout) == 0)
    {
       float fps;
       if(parseFPS( fps, response ) < 0) return log<software_error, -1>({__FILE__, __LINE__, "fps parse error"});
@@ -484,7 +544,7 @@ int ocam2KCtrl::setFPS(float fps)
    ///\todo should we have fps range checks or let camera deal with it?
    
    std::string fpsStr= std::to_string(fps);
-   if( pdvSerialWriteRead( response, m_pdv, "fps " + fpsStr, 1000) == 0)
+   if( pdvSerialWriteRead( response, m_pdv, "fps " + fpsStr, m_readTimeout) == 0)
    {
       ///\todo check response
       return log<text_log,0>({"set fps: " + fpsStr});
@@ -518,22 +578,23 @@ INDI_NEWCALLBACK_DEFN(ocam2KCtrl, m_indiP_ccdtemp)(const pcf::IndiProperty &ipRe
       //Now check if it's valid?
       ///\todo implement more configurable max-set-able temperature
       if( target > 30 ) return 0;
-   
-      std::unique_lock<std::mutex> lock(m_indiMutex, std::try_to_lock);
+      
+      
+      //Lock the mutex, waiting if necessary
+      std::unique_lock<std::mutex> lock(m_indiMutex);
       
       updateIfChanged(m_indiP_ccdtemp, "target", target);
-      
       
       return setTemp(target);
    }
    return -1;
 }
 
-INDI_NEWCALLBACK_DEFN(ocam2KCtrl, m_indiP_binning)(const pcf::IndiProperty &ipRecv)
+INDI_NEWCALLBACK_DEFN(ocam2KCtrl, m_indiP_mode)(const pcf::IndiProperty &ipRecv)
 {
-   if (ipRecv.getName() == m_indiP_binning.getName())
+   if (ipRecv.getName() == m_indiP_mode.getName())
    {
-      std::cerr << "New binning\n";
+      std::cerr << "New mode\n";
       return 0;
    }
    return -1;
@@ -560,6 +621,9 @@ INDI_NEWCALLBACK_DEFN(ocam2KCtrl, m_indiP_fps)(const pcf::IndiProperty &ipRecv)
       if(target == -99) target = current;
       
       if(target <= 0) return 0;
+      
+      //Lock the mutex, waiting if necessary
+      std::unique_lock<std::mutex> lock(m_indiMutex);
 
       updateIfChanged(m_indiP_fps, "target", target);
       

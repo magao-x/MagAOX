@@ -829,7 +829,8 @@ void MagAOXApp<_useINDI>::loadBasicConfig() //virtual
       }
       else
       {
-         m_powerMgtEnabled = false;
+         log<text_log>("power management not configured: " + m_powerDevice + "." + m_powerChannel + "." + m_powerElement, logPrio::LOG_CRITICAL);
+         m_shutdown = true;
       }
    }
 }
@@ -892,7 +893,7 @@ int MagAOXApp<_useINDI>::execute() //virtual
    //We have to wait for power status to become available
    if(m_powerMgtEnabled)
    {
-      while(m_powerState < 0)
+      while(m_powerState < 0 && !m_shutdown)
       {
          sleep(1);
          if(m_powerState < 0)
