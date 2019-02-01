@@ -93,7 +93,7 @@ protected:
    int m_unit {0};
    int m_channel {0};
 
-   unsigned long m_powerOnWait {6000000000}; ///< Time in nsec to wait for camera boot after power on.
+   unsigned long m_powerOnWait {10000000000}; ///< Time in nsec to wait for camera boot after power on.
 
 
    float m_fpsSet {0};
@@ -271,20 +271,29 @@ int pdvSerialWriteRead( std::string & response,
 }
 
 /* Todo:
+
+-- Image loop:
+  -- flags for stop, reconfig, shutdown 
+  -- measure fps 
+  --
+  
+-- Need to load pdv config on mode change.
+   -- but from in imaging loop 
+   
 -- mutex m_pdv, along with serial communications, but not framegrabbing.
+
 -- need non-mutex way to check for consistency in f.g.-ing, or a way to wait until that loop exits.
+
 -- need way for f.g. loop to communicate errors.
--- Need startup wait capability.
--- INDI props for fps, temp, both curr and req.  Measured for fps.
-   --- Maybe make set-temp separate since it is r/w
+
+-- INDI props for measured fps.
 -- INDI prop for timestamp of last frame skip.  Maybe total frameskips?
--- INDI props for binning mode
 -- Configs to add:
   -- pdv unit number
-  -- serial comm timeout.
   -- startup temp command
-  -- shutdown temp command
-
+  -- startup delay
+  -- circ buff size for pdv 
+  
 -- add ImageStreamIO
   -- config: filename
   -- buffer length (ser. buffer size)
@@ -358,6 +367,9 @@ int ocam2KCtrl::appLogic()
    {
       std::string response;
 
+      //Might have gotten here because of a power off.
+      if(m_powerState == 0) return 0;
+      
       int ret = pdvSerialWriteRead( response, m_pdv, "fps", m_readTimeout);
       if( ret == 0)
       {
@@ -382,7 +394,7 @@ int ocam2KCtrl::appLogic()
       else
       {
          state(stateCodes::ERROR);
-         return log<software_error,-1>({__FILE__,__LINE__});
+         return log<software_error,0>({__FILE__,__LINE__});
       }
    }
 
@@ -396,12 +408,16 @@ int ocam2KCtrl::appLogic()
       
       if(getTemps() < 0)
       {
+         if(m_powerState == 0) return 0;
+         
          state(stateCodes::ERROR);
          return 0;
       }
 
       if(getFPS() < 0)
       {
+         if(m_powerState == 0) return 0;
+         
          state(stateCodes::ERROR);
          return 0;
       }
@@ -472,8 +488,12 @@ int ocam2KCtrl::getTemps()
    {
       ocamTemps temps;
 
-      if(parseTemps( temps, response ) < 0) return log<software_error, -1>({__FILE__, __LINE__, "Temp. parse error"});
-
+      if(parseTemps( temps, response ) < 0) 
+      {
+         if(m_powerState == 0) return -1;
+         return log<software_error, -1>({__FILE__, __LINE__, "Temp. parse error"});
+      }
+      
       log<ocam_temps>({temps.CCD, temps.CPU, temps.POWER, temps.BIAS, temps.WATER, temps.LEFT, temps.RIGHT, temps.COOLING_POWER});
 
       updateIfChanged(m_indiP_ccdtemp, "current", temps.CCD);
@@ -523,8 +543,11 @@ int ocam2KCtrl::getFPS()
    if( pdvSerialWriteRead( response, m_pdv, "fps", m_readTimeout) == 0)
    {
       float fps;
-      if(parseFPS( fps, response ) < 0) return log<software_error, -1>({__FILE__, __LINE__, "fps parse error"});
-
+      if(parseFPS( fps, response ) < 0) 
+      {
+         if(m_powerState == 0) return -1;
+         return log<software_error, -1>({__FILE__, __LINE__, "fps parse error"});
+      }
       m_fpsSet = fps;
 
       updateIfChanged(m_indiP_fps, "current", m_fpsSet);

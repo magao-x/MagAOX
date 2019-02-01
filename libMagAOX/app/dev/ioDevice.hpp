@@ -18,14 +18,14 @@ namespace app
 namespace dev 
 {
    
-/// A USB device as a TTY device.
+/// An input/output capable device.
 /**   
   * \ingroup tty
   */ 
 struct ioDevice
 {
-   std::string m_readTimeout {1000};  ///< The read timeout [msec]
-   std::string m_writeTimeout {1000}; ///< The write timeout [msec]
+   unsigned m_readTimeout {1000};  ///< The read timeout [msec]
+   unsigned m_writeTimeout {1000}; ///< The write timeout [msec]
 
    ///Setup an application configurator for the device section
    /**
@@ -56,6 +56,8 @@ int ioDevice::loadConfig( mx::app::appConfigurator & config )
 {
    config(m_readTimeout, "device.readTimeOut");
    config(m_writeTimeout, "device.writeTimeout");
+   
+   return 0;
 }
 
 
