@@ -51,18 +51,15 @@ int loadSSHTunnelConfigs( tunnelMap & tmap,
 
    //Now see if any sections match a tunnel specification
 
-   std::string remoteHost;
-   int localPort;
-   int remotePort;
-   int monitorPort;
+   
    
    for(size_t i=0; i< sections.size(); ++i)
    {
-      remoteHost = "";
-      localPort = 0;
-      remotePort = 0;
-      monitorPort = 0;
-      
+      std::string remoteHost;
+      int localPort = 0;
+      int remotePort = 0;
+      int monitorPort = 0;
+         
       if( config.isSetUnused(mx::app::iniFile::makeKey(sections[i], "remoteHost" )) &&
              config.isSetUnused(mx::app::iniFile::makeKey(sections[i], "localPort" )) &&
                 config.isSetUnused(mx::app::iniFile::makeKey(sections[i], "remotePort" )) )
