@@ -175,7 +175,6 @@ static int ocam2_fillDescrblTab(const char *descrbFile)
 
                         if (NULL != g_descrblTab)
                         {
-                            char *arg;
                             char delim[] = ",\n\r";
                             char *saveptr;
 
@@ -184,6 +183,7 @@ static int ocam2_fillDescrblTab(const char *descrbFile)
 
                             while (i<nbElem)
                             {
+                                char *arg;
                                 arg = strtok_r(pfc, delim, &saveptr);
                                 if (NULL != arg)
                                     g_descrblTab[i] = atoi(arg);

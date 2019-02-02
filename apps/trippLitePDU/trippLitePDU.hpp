@@ -256,10 +256,11 @@ int trippLitePDU::appStartup()
 
 int trippLitePDU::appLogic()
 {
-   static int lastrv = 0; //Used to handle a change in error within the same state.  Make general?
-   static int lasterrno = 0;
    if( state() == stateCodes::NOTCONNECTED )
    {
+      static int lastrv = 0; //Used to handle a change in error within the same state.  Make general?
+      static int lasterrno = 0;
+       
       int rv = m_telnetConn.connect(m_deviceAddr, m_devicePort);
 
       if(rv == 0)
@@ -267,6 +268,7 @@ int trippLitePDU::appLogic()
          state(stateCodes::CONNECTED);
 
          if(!stateLogged())
+            
          {
             std::stringstream logs;
             logs << "Connected to " << m_deviceAddr << ":" << m_devicePort;

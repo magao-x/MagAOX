@@ -109,10 +109,19 @@ protected:
 
    cameraConfigMap m_cameraConfigs;
    
+   float m_startupTemp {20.0};
+   
    std::string m_startupMode;
    
    std::string m_ocamDescrambleFile;
 
+   
+   int m_width {0};
+   int m_height {0};
+   int m_depth {0};
+   std::string m_cameraType;
+    
+      
 public:
 
    ocam2KCtrl();
@@ -145,9 +154,6 @@ public:
 
 
    int pdvConfig(std::string & cfgname);
-   
-   int pdvInit();
-   
    
    
    int getTemps();
@@ -208,6 +214,11 @@ inline
 void ocam2KCtrl::setupConfig()
 {
    config.add("framegrabber.threadPrio", "", "framegrabber.threadPrio", argType::Required, "framegrabber", "threadPrio", false, "int", "The real-time priority of the fraemgrabber thread.");
+   
+   
+   config.add("camera.startupTemp", "", "camera.startupTemp", argType::Required, "camera", "startupTemp", false, "float", "The temperature setpoint to set after a power-on [C].  Default is 20 C.");
+   
+   config.add("camera.startupMode", "", "camera.startupMode", argType::Required, "camera", "startupMode", false, "string", "The name of the configuration to set at startup.");
    
    config.add("camera.startupMode", "", "camera.startupMode", argType::Required, "camera", "startupMode", false, "string", "The name of the configuration to set at startup.");
    
@@ -367,16 +378,17 @@ int ocam2KCtrl::appStartup()
    m_indiP_fps["current"].set(0);
    m_indiP_fps.add (pcf::IndiElement("target"));
 
-   //1) Check for startupMode in mode config map [rename startupMode to startupMode] 
-   //2) call pdvConfig for startupMode config file.
-   //   --- add logging in pdvConfig
-   //3) set current mode 
-   if(pdvConfig(m_startupMode) < 0) return -1;
+   if(pdvConfig(m_startupMode) < 0) 
+   {
+      log<software_error>({__FILE__, __LINE__});
+      return -1;
+   }
    
-   //Then if successful, do this:
-   if(pdvInit() < 0) return -1;
-
-   fgThreadStart();
+   if(fgThreadStart() < 0)
+   {
+      log<software_error>({__FILE__, __LINE__});
+      return -1;
+   }
    
    return 0;
 
@@ -387,6 +399,14 @@ int ocam2KCtrl::appStartup()
 inline
 int ocam2KCtrl::appLogic()
 {
+   //first do a join check to see if other threads have exited.
+   if(pthread_tryjoin_np(m_fgThread.native_handle(),0) == 0)
+   {
+      log<software_error>({__FILE__, __LINE__, "framegrabber thread has exited"});
+      
+      return -1;
+   }
+   
    //Handle the case where we enter this loop already powered on.
    static bool firstCall = 1;
    
@@ -427,15 +447,18 @@ int ocam2KCtrl::appLogic()
 
    if( state() == stateCodes::CONNECTED )
    {
-      std::string response;
-
+      //Get a lock
+      std::unique_lock<std::mutex> lock(m_indiMutex);
+      
       if( getFPS() == 0 )
       {
-         
-         
-         
          if(m_fpsSet == 0) state(stateCodes::READY);
          else state(stateCodes::OPERATING);
+         
+         if(setTemp(m_startupTemp) < 0)
+         {
+            return log<software_error,0>({__FILE__,__LINE__});
+         }
       }
       else
       {
@@ -522,6 +545,14 @@ int ocam2KCtrl::pdvConfig(std::string & modeName)
    EdtDev *edt_p = NULL;
    Edtinfo edtinfo;
    
+   //Preliminaries
+   if(m_pdv)
+   {
+      pdv_close(m_pdv);
+      m_pdv = nullptr;
+   }
+
+      
    //----- NEED TO resolve to absolute cfgname path.
    if(m_cameraConfigs.count(modeName) != 1)
    {
@@ -530,74 +561,49 @@ int ocam2KCtrl::pdvConfig(std::string & modeName)
    
    std::string configFile = m_configDir + "/" + m_cameraConfigs[modeName].configFile;
    
-   std::cerr << "configFile: " << configFile << "\n";
-   
-   
-   
-   /*
-    * if porting this code to an application, be sure to free this 
-    * and reallocate if you call pdv_initcam multiple times.
-    */
+   log<text_log>("Loading EDT PDV config file: " + configFile);
+      
    if ((dd_p = pdv_alloc_dependent()) == NULL)
    {
-      edt_msg(PDVLIB_MSG_FATAL, "alloc_dependent FAILED -- exiting\n");
-      exit(1);
+      return log<software_error, -1>({__FILE__, __LINE__, "EDT PDV alloc_dependent FAILED"});      
    }
    
    if (pdv_readcfg(configFile.c_str(), dd_p, &edtinfo) != 0)
    {
-      edt_msg(PDVLIB_MSG_FATAL, "readcfg FAILED -- exiting\n");
       free(dd_p);
-      exit(1);
+      return log<software_error, -1>({__FILE__, __LINE__, "EDT PDV readcfg FAILED"});
+      
    }
    
    char edt_devname[128];
    strncpy(edt_devname, EDT_INTERFACE, sizeof(edt_devname));
    
-   /*
-    * IMPORTANT: pdv_initcam is a special case in that it requies a device pointer returned by use
-    * edt_open_channel (or edt_open), NOT pdv_open_channel (or etc.). If you port this code to an
-    * application that subsequently performs other operations (e.g. image capture) on the device,
-    * edt_close should be called after pdv_initcam, then reopen with pdv_open_channel or pdv_open.
-    */
    if ((edt_p = edt_open_channel(edt_devname, m_unit, m_channel)) == NULL)
    {
-      //sprintf(errstr, "edt_open(%s%d)", edt_devname, m_unit);
-      //edt_perror(errstr);
+      char errstr[256];
+      edt_perror(errstr);
       free(dd_p);
-      return (1);
+      return log<software_error, -1>({__FILE__, __LINE__, std::string("EDT PDV edt_open_channel FAILED: ") + errstr});
    }
    
    char bitdir[1];
    bitdir[0] = '\0';
-        
-   if (pdv_initcam(edt_p, dd_p, m_unit, &edtinfo, configFile.c_str(), bitdir, /*pdv_debug=*/0) != 0)
+    
+   int pdv_debug = 0;
+   if(m_log.logLevel() > logPrio::LOG_INFO) pdv_debug = 2;
+   
+   if (pdv_initcam(edt_p, dd_p, m_unit, &edtinfo, configFile.c_str(), bitdir, pdv_debug) != 0)
    {
-      edt_msg(EDTAPP_MSG_FATAL,"initcam failed. Run with '-V' to see complete debugging output\n");
       edt_close(edt_p);
       free(dd_p);
-      exit(1);
+      return log<software_error, -1>({__FILE__, __LINE__, "initcam failed. Run with '--logLevel=DBG' to see complete debugging output."});
    }
 
    edt_close(edt_p);
    free(dd_p);
    
-   return 0;
-}
-
-    
-inline
-int ocam2KCtrl::pdvInit()
-{
-   if(m_pdv)
-   {
-      pdv_close(m_pdv);
-      m_pdv = nullptr;
-   }
-
-   char edt_devname[128];
-   strncpy(edt_devname, EDT_INTERFACE, sizeof(edt_devname));
-
+   
+   //Now open the PDV device handle for talking to the camera via the EDT board.
    if ((m_pdv = pdv_open_channel(edt_devname, m_unit, m_channel)) == NULL)
    {
       std::string errstr = std::string("pdv_open_channel(") + edt_devname + std::to_string(m_unit) + "_" + std::to_string(m_channel) + ")";
@@ -611,6 +617,14 @@ int ocam2KCtrl::pdvInit()
    pdv_flush_fifo(m_pdv);
 
    pdv_serial_read_enable(m_pdv); //This is undocumented, don't know if it's really needed.
+   
+   m_width = pdv_get_width(m_pdv);
+   m_height = pdv_get_height(m_pdv);
+   m_depth = pdv_get_depth(m_pdv);
+   m_cameraType = pdv_get_cameratype(m_pdv);
+
+   log<text_log>("Initialized camera: " + m_cameraType);
+   log<text_log>("WxHxD: " + std::to_string(m_width) + " X " + std::to_string(m_height) + " X " + std::to_string(m_depth));
 
    return 0;
 
@@ -776,19 +790,7 @@ void ocam2KCtrl::fgThreadExec()
       // if m_reconfig then stop grabbing, then call pdfConfig and pdvInit
       // -- then loop back to the top
       
-      /*
-       * get image size and name for display, save, printfs, etc.
-       */
-      int     width, height, depth;
-      char * cameratype;
       
-      width = pdv_get_width(m_pdv);
-      height = pdv_get_height(m_pdv);
-      depth = pdv_get_depth(m_pdv);
-      cameratype = pdv_get_cameratype(m_pdv);
-
-      printf("reading from '%s'\nwidth %d height %d depth %d\n", cameratype, width, height, depth);
-    
       /* Initialize the OCAM2 SDK
        */
 
@@ -798,39 +800,41 @@ void ocam2KCtrl::fgThreadExec()
       unsigned number;
 
       int OCAM_SZ;
-      if(height == 121)
+      if(m_height == 121)
       {
          mode = OCAM2_NORMAL;
          OCAM_SZ = 240;
       }
-      else if (height == 62)
+      else if (m_height == 62)
       {
          mode = OCAM2_BINNING;
          OCAM_SZ = 120;
       }
       else
       {
-         fprintf(stderr, "Unrecognized OCAM2 mode.\n");
-         return ; ///\todo handle errors like this within this thread, don't return.
+         log<text_log>("Unrecognized OCAM2 mode.", logPrio::LOG_ERROR);
+         return;
       }
 
       std::string ocamDescrambleFile = m_configDir + "/" + m_ocamDescrambleFile;
+      
       std::cerr << "ocamDescrambleFile: " << ocamDescrambleFile << "\n";
       rc=ocam2_init(mode, ocamDescrambleFile.c_str(), &id);
       if (rc != OCAM2_OK)
       {
-         printf("ocam2_init error. Failed to initialize OCAM SDK\n");
-         return ; ///\todo handle errors like this within this thread, don't return.
+         log<text_log>("ocam2_init error. Failed to initialize OCAM SDK with descramble file: " + ocamDescrambleFile, logPrio::LOG_ERROR);
+         return;
       }
+      
 
-      printf("ocam2_init: success, get id:%d\n", id);
-      printf("Mode is: %s \n", ocam2_modeStr(ocam2_getMode(id)));
+      log<text_log>("OCAM2K initialized. id: " + std::to_string(id));
+      log<text_log>(std::string("OCAM2K mode is:") + ocam2_modeStr(ocam2_getMode(id)));
       
       /* Initialize ImageStreamIO
        */
-      #define SNAME "ocam2ksem"
+      //#define SNAME "ocam2ksem"
       IMAGE * imarray;
-      sem_t * sem;
+      //sem_t * sem;
       imarray = (IMAGE *) malloc(sizeof(IMAGE)*100);
       uint32_t imsize[3];
       imsize[0] = OCAM_SZ;
@@ -852,15 +856,17 @@ void ocam2KCtrl::fgThreadExec()
 
       //pthread_t fpsThread;
       //pthread_create(&fpsThread,NULL, fps_thread, &imno);
-      u_char *image_p;
+      
 
-      int overrun;
+      
       int overruns = 0;
-      int     timeouts, last_timeouts = 0;
-      int     recovering_timeout = FALSE;
+      int last_timeouts = 0;
+      int recovering_timeout = FALSE;
 
       while(!m_shutdown)
       {
+         u_char *image_p;
+      
          /*
           * get the image and immediately start the next one (if not the last
           * time through the loop). Processing (saving to a file in this case)
@@ -876,11 +882,10 @@ void ocam2KCtrl::fgThreadExec()
          ImageStreamIO_sempost(&imarray[0],-1);
          ++imno;
 
-         if ((overrun = (edt_reg_read(m_pdv, PDV_STAT) & PDV_OVERRUN)))
-                 ++overruns;
+         if ( edt_reg_read(m_pdv, PDV_STAT) & PDV_OVERRUN) ++overruns;
 
          pdv_start_image(m_pdv);
-         timeouts = pdv_timeouts(m_pdv);
+         int timeouts = pdv_timeouts(m_pdv);
 
          /*
           * check for timeouts or data overruns -- timeouts occur when data
@@ -898,11 +903,14 @@ void ocam2KCtrl::fgThreadExec()
             pdv_timeout_restart(m_pdv, TRUE);
             last_timeouts = timeouts;
             recovering_timeout = TRUE;
+            log<text_log>("timeout", logPrio::LOG_ERROR);
             printf("\ntimeout....\n");
-         } else if (recovering_timeout)
+         } 
+         else if (recovering_timeout)
          {
             pdv_timeout_restart(m_pdv, TRUE);
             recovering_timeout = FALSE;
+            log<text_log>("restarted", logPrio::LOG_INFO);
             printf("\nrestarted....\n");
          }
       }

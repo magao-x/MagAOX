@@ -1098,11 +1098,10 @@ INDI_SETCALLBACK_DEFN(ttmModulator, m_indiP_C2phse)(const pcf::IndiProperty &ipR
 {
    if (ipRecv.getDevice() == m_indiP_C2phse.getDevice() && ipRecv.getName() == m_indiP_C2phse.getName())
    {
-      double nv;
       try
       {
          m_indiP_C2phse = ipRecv;
-         nv = ipRecv["value"].get<double>();
+         double nv = ipRecv["value"].get<double>();
 
          m_C2phse = nv;
 

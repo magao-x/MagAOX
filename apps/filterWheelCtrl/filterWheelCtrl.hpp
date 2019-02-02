@@ -490,13 +490,11 @@ int filterWheelCtrl::appLogic()
    
    if( state() == stateCodes::READY || state() == stateCodes::OPERATING || state() == stateCodes::HOMING)
    {
-      int rv;
-      
       { //mutex scope
          //Make sure we have exclusive attention of the device
          std::lock_guard<std::mutex> guard(m_indiMutex);  //Lock the mutex before conducting any communications.
 
-         rv = getSwitch(); 
+         int rv = getSwitch(); 
       
          if(rv  != 0 )
          {
