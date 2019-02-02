@@ -81,6 +81,8 @@ protected:
 
    std::string m_configName; ///< The name of the configuration file (minus .conf).
 
+   std::string m_configDir; ///< The path to configuration files for MagAOX.
+      
    std::string m_configBase; ///< The name of a base config class for this app (minus .conf).
 
    std::string sysPath;  ///< The path to the system directory, for PID file, etc.
@@ -711,7 +713,6 @@ void MagAOXApp<_useINDI>::setDefaults( int argc,
                                      )   //virtual
 {
    std::string tmpstr;
-   std::string configDir;
 
    tmpstr = mx::getEnv(MAGAOX_env_path);
    if(tmpstr != "")
@@ -729,8 +730,8 @@ void MagAOXApp<_useINDI>::setDefaults( int argc,
    {
       tmpstr = MAGAOX_configRelPath;
    }
-   configDir = MagAOXPath + "/" + tmpstr;
-   configPathGlobal = configDir + "/magaox.conf";
+   m_configDir = MagAOXPath + "/" + tmpstr;
+   configPathGlobal = m_configDir + "/magaox.conf";
 
    //Setup default log path
    tmpstr = MagAOXPath + "/" + MAGAOX_logRelPath;
@@ -749,7 +750,7 @@ void MagAOXApp<_useINDI>::setDefaults( int argc,
    if(m_configBase != "")
    {
       //We use mx::application's configPathUser for this components base config file
-      configPathUser = configDir + "/" + m_configBase + ".conf";
+      configPathUser = m_configDir + "/" + m_configBase + ".conf";
    }
 
    //Parse CL just to get the "name".
@@ -766,7 +767,7 @@ void MagAOXApp<_useINDI>::setDefaults( int argc,
    }
 
    //We use mx::application's configPathLocal for this component's config file
-   configPathLocal = configDir + "/" + m_configName + ".conf";
+   configPathLocal = m_configDir + "/" + m_configName + ".conf";
 
    //Now we can setup common INDI properties
    REG_INDI_NEWPROP_NOCB(m_indiP_state, "state", pcf::IndiProperty::Number);
@@ -902,7 +903,14 @@ int MagAOXApp<_useINDI>::execute() //virtual
          }
       }
       if(m_powerState > 0) state(stateCodes::POWERON);
-      else state(stateCodes::POWEROFF);
+      else 
+      {
+         state(stateCodes::POWEROFF);
+         if(onPowerOff() < 0)
+         {
+            m_shutdown = 1;
+         }
+      }
    }
 
    //This is the main event loop.

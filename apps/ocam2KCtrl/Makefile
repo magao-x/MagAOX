@@ -2,7 +2,7 @@
 allall: all
 
 OTHER_HEADERS=ocamUtils.hpp
-OTHER_OBJS=
+OTHER_OBJS=fli/ocam2_sdk.o
 TARGET=ocam2KCtrl
 
 EDT_PATH=/opt/EDTpdv
