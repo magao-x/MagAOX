@@ -1,3 +1,11 @@
+/** \file ocam2KCtrl.hpp
+  * \brief The MagAO-X OCAM2K EMCCD camera controller.
+  *
+  * \author Jared R. Males (jaredmales@gmail.com)
+  *
+  * \ingroup ocam2KCtrl_files
+  */
+
 #ifndef ocam2KCtrl_hpp
 #define ocam2KCtrl_hpp
 
@@ -85,47 +93,67 @@ int loadCameraConfig( cameraConfigMap & ccmap,
    return 0;
 }
 
+/** \defgroup ocam2KCtrl OCAM2K EMCCD Camera
+  * \brief Control of the OCAM2K EMCCD Camera.
+  *
+  * \link page_module_ocam2KCtrl Application Documentation
+  *
+  * \ingroup apps
+  *
+  */
+
+/** \defgroup ocam2KCtrl_files OCAM2K EMCCD Camera Files
+  * \ingroup ocam2KCtrl
+  */
+
 /** MagAO-X application to control the OCAM 2K EMCCD
   *
+  * \ingroup ocam2KCtrl
   */
 class ocam2KCtrl : public MagAOXApp<>, public dev::ioDevice
 {
 
 protected:
 
-   PdvDev * m_pdv {nullptr};
+   
 
+   /** \name configurable parameters 
+     *@{
+     */ 
    int m_unit {0};
    int m_channel {0};
 
    unsigned long m_powerOnWait {10000000000}; ///< Time in nsec to wait for camera boot after power on.
 
+   
+   cameraConfigMap m_cameraConfigs; ///< Map holding the possible camera mode configurations
+   
+   float m_startupTemp {20.0}; ///< The temperature to set after a power-on.
+   
+   std::string m_startupMode; ///< The camera mode to load during first init after a power-on.
+   
+   std::string m_ocamDescrambleFile; ///< Path the OCAM 2K pixel descrambling file, relative to MagAO-X config directory.
 
-   float m_fpsSet {0};
+   ///@}
+   
+   PdvDev * m_pdv {nullptr}; ///< The EDT PDV device handle
 
+   float m_fpsSet {0}; ///< The commanded fps, as returned by the camera
 
    int m_powerOnCounter {0}; ///< Counts numer of loops after power on, implements delay for camera bootup.
-
-
-   cameraConfigMap m_cameraConfigs;
    
-   float m_startupTemp {20.0};
-   
-   std::string m_startupMode;
-   
-   std::string m_ocamDescrambleFile;
-
-   
-   int m_width {0};
-   int m_height {0};
-   int m_depth {0};
-   std::string m_cameraType;
+   int m_width {0}; ///< The width of the image according to the framegrabber
+   int m_height {0}; ///< The height of the image frame according the framegrabber
+   int m_depth {0}; ///< The pixel bit depth according to the framegrabber
+   std::string m_cameraType; ///< The camera type according to the framegrabber
     
       
 public:
 
+   ///Default c'tor
    ocam2KCtrl();
 
+   ///Destructor
    ~ocam2KCtrl() noexcept;
 
    /// Setup the configuration system (called by MagAOXApp::setup())

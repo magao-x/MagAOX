@@ -861,11 +861,10 @@ INDI_SETCALLBACK_DEFN(ttmModulator, m_indiP_C1outp)(const pcf::IndiProperty &ipR
 {
    if (ipRecv.getDevice() == m_indiP_C1outp.getDevice() && ipRecv.getName() == m_indiP_C1outp.getName())
    {
-      std::string outp;
       try
       {
          m_indiP_C1outp = ipRecv;
-         outp = ipRecv["value"].getValue();
+         std::string outp = ipRecv["value"].getValue();
 
          if( outp == "Off" )
          {
@@ -896,11 +895,10 @@ INDI_SETCALLBACK_DEFN(ttmModulator, m_indiP_C1freq)(const pcf::IndiProperty &ipR
 {
    if (ipRecv.getDevice() == m_indiP_C1freq.getDevice() && ipRecv.getName() == m_indiP_C1freq.getName())
    {
-      double nv;
       try
       {
          m_indiP_C1freq = ipRecv;
-         nv = ipRecv["value"].get<double>();
+         double nv = ipRecv["value"].get<double>();
 
          m_C1freq = nv;
 
@@ -920,11 +918,10 @@ INDI_SETCALLBACK_DEFN(ttmModulator, m_indiP_C1volts)(const pcf::IndiProperty &ip
 {
    if (ipRecv.getDevice() == m_indiP_C1volts.getDevice() && ipRecv.getName() == m_indiP_C1volts.getName())
    {
-      double nv;
       try
       {
          m_indiP_C1volts = ipRecv;
-         nv = ipRecv["value"].get<double>();
+         double nv = ipRecv["value"].get<double>();
 
          m_C1volts = nv;
          return 0;
@@ -943,11 +940,10 @@ INDI_SETCALLBACK_DEFN(ttmModulator, m_indiP_C1ofst)(const pcf::IndiProperty &ipR
 {
    if (ipRecv.getDevice() == m_indiP_C1ofst.getDevice() && ipRecv.getName() == m_indiP_C1ofst.getName())
    {
-      double nv;
       try
       {
          m_indiP_C1ofst = ipRecv;
-         nv = ipRecv["value"].get<double>();
+         double nv = ipRecv["value"].get<double>();
 
          m_C1ofst = nv;
 
@@ -967,11 +963,10 @@ INDI_SETCALLBACK_DEFN(ttmModulator, m_indiP_C1phse)(const pcf::IndiProperty &ipR
 {
    if (ipRecv.getDevice() == m_indiP_C1phse.getDevice() && ipRecv.getName() == m_indiP_C1phse.getName())
    {
-      double nv;
       try
       {
          m_indiP_C1phse = ipRecv;
-         nv = ipRecv["value"].get<double>();
+         double nv = ipRecv["value"].get<double>();
 
          m_C1phse = nv;
 
@@ -991,11 +986,10 @@ INDI_SETCALLBACK_DEFN(ttmModulator, m_indiP_C2outp)(const pcf::IndiProperty &ipR
 {
    if (ipRecv.getDevice() == m_indiP_C2outp.getDevice() && ipRecv.getName() == m_indiP_C2outp.getName())
    {
-      std::string outp;
       try
       {
          m_indiP_C2outp = ipRecv;
-         outp = ipRecv["value"].getValue();
+         std::string outp = ipRecv["value"].getValue();
 
          if( outp == "Off" )
          {
@@ -1026,11 +1020,10 @@ INDI_SETCALLBACK_DEFN(ttmModulator, m_indiP_C2freq)(const pcf::IndiProperty &ipR
 {
    if (ipRecv.getDevice() == m_indiP_C2freq.getDevice() && ipRecv.getName() == m_indiP_C2freq.getName())
    {
-      double nv;
       try
       {
          m_indiP_C2freq = ipRecv;
-         nv = ipRecv["value"].get<double>();
+         double nv = ipRecv["value"].get<double>();
 
          m_C2freq = nv;
 
@@ -1050,11 +1043,10 @@ INDI_SETCALLBACK_DEFN(ttmModulator, m_indiP_C2volts)(const pcf::IndiProperty &ip
 {
    if (ipRecv.getDevice() == m_indiP_C2volts.getDevice() && ipRecv.getName() == m_indiP_C2volts.getName())
    {
-      double nv;
       try
       {
          m_indiP_C2volts = ipRecv;
-         nv = ipRecv["value"].get<double>();
+         double nv = ipRecv["value"].get<double>();
 
          m_C2volts = nv;
          return 0;
@@ -1073,12 +1065,11 @@ INDI_SETCALLBACK_DEFN(ttmModulator, m_indiP_C2ofst)(const pcf::IndiProperty &ipR
 {
    if (ipRecv.getDevice() == m_indiP_C2ofst.getDevice() && ipRecv.getName() == m_indiP_C2ofst.getName())
    {
-      double nv;
       try
       {
          m_indiP_C2ofst = ipRecv;
 
-         nv = ipRecv["value"].get<double>();
+         double nv = ipRecv["value"].get<double>();
 
          m_C2ofst = nv;
 
