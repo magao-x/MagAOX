@@ -89,7 +89,7 @@ protected:
      * @{
      */
    std::string m_autosshLogFile; ///< Name of the autossh logfile.
-   int m_autosshLogFD; ///< File descriptor of the autossh logfile.
+   int m_autosshLogFD {0}; ///< File descriptor of the autossh logfile.
 
    int m_autosshLogThreadPrio {0}; ///< Priority of the autossh log capture thread, should normally be 0.
 
@@ -151,7 +151,7 @@ public:
    void autosshLogThreadExec();
 
    /// Process a log entry from indiserver, putting it into MagAO-X standard form
-   int processAutoSSHLog( std::string logs );
+   int processAutoSSHLog( const std::string & logs );
 
    /// Startup function
    /**
@@ -570,7 +570,7 @@ void sshDigger::autosshLogThreadExec()
 }
 
 inline
-int sshDigger::processAutoSSHLog( std::string logs )
+int sshDigger::processAutoSSHLog( const std::string & logs )
 {
    ///\todo interpret logs, giving errors vs info vs debug, strip timestamps, etc.
 
