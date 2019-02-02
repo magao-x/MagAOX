@@ -182,8 +182,6 @@ public:
 
 sshDigger::sshDigger() : MagAOXApp(MAGAOX_CURRENT_SHA1, MAGAOX_REPO_MODIFIED)
 {
-   m_autosshLogFD = 0;
-   
    //Use the sshTunnels.conf config file
    m_configBase = "sshTunnels";
 
