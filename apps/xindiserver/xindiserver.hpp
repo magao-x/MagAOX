@@ -55,15 +55,18 @@ int loadSSHTunnelConfigs( tunnelMap & tmap,
    
    for(size_t i=0; i< sections.size(); ++i)
    {
-      std::string remoteHost;
-      int localPort = 0;
-      int remotePort = 0;
-      int monitorPort = 0;
+      
          
       if( config.isSetUnused(mx::app::iniFile::makeKey(sections[i], "remoteHost" )) &&
              config.isSetUnused(mx::app::iniFile::makeKey(sections[i], "localPort" )) &&
                 config.isSetUnused(mx::app::iniFile::makeKey(sections[i], "remotePort" )) )
       {
+         
+         std::string remoteHost;
+         int localPort = 0;
+         int remotePort = 0;
+         int monitorPort = 0;
+      
          config.configUnused( remoteHost, mx::app::iniFile::makeKey(sections[i], "remoteHost" ) );
          config.configUnused( localPort, mx::app::iniFile::makeKey(sections[i], "localPort" ) );
          config.configUnused( remotePort, mx::app::iniFile::makeKey(sections[i], "remotePort" ) );
