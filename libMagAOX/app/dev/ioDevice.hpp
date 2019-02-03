@@ -54,7 +54,7 @@ int ioDevice::setupConfig( mx::app::appConfigurator & config )
 
 int ioDevice::loadConfig( mx::app::appConfigurator & config )
 {
-   config(m_readTimeout, "device.readTimeOut");
+   config(m_readTimeout, "device.readTimeout");
    config(m_writeTimeout, "device.writeTimeout");
    
    return 0;
