@@ -16,10 +16,10 @@
 /** \defgroup trippLitePDU Tripp Lite PDU
   * \brief Control of MagAO-X Tripp Lite PDUs.
   *
-  * \link page_module_trippLitePDU Application Documentation
+  * <a href="../apps_html/page_module_trippLitePDU.html">Application Documentation</a>
   *
   * \ingroup apps
-  *
+  * 
   */
 
 /** \defgroup trippLitePDU_files Tripp Lite PDU Files
@@ -36,17 +36,16 @@ namespace app
   *
   * The line frequency and voltage, and the total load on the PDU, are monitored.
   *
-  * \todo figure out why reads sometimes fail, requring the "drain"
   * \todo need username and secure password handling
   * \todo need to recognize signals in tty polls and not return errors, etc.
   * \todo begin logging freq/volt/amps telemetry
   * \todo research load warnings
   * \todo tests for parser
   * \todo test for load warnings
-  *
+  * 
   * \ingroup trippLitePDU
   */
-class trippLitePDU : public MagAOXApp<>, public dev::outletController<trippLitePDU>
+class trippLitePDU : public MagAOXApp<>, public dev::outletController<trippLitePDU>, public dev::ioDevice
 {
 
 protected:
@@ -80,8 +79,6 @@ protected:
 
    tty::telnetConn m_telnetConn; ///< The telnet connection manager
 
-   int m_writeTimeOut {1000};  ///< The timeout for writing to the device [msec].
-   int m_readTimeOut {2000}; ///< The timeout for reading from the device [msec].
    int m_outletStateDelay {5000}; ///< The maximum time to wait for an outlet to change state [msec].
 
    std::string m_status; ///< The device status
@@ -176,9 +173,8 @@ void trippLitePDU::setupConfig()
    config.add("device.username", "u", "device.username", argType::Required, "device", "username", false, "string", "The device login username.");
    config.add("device.passfile", "", "device.passfile", argType::Required, "device", "passfile", false, "string", "The device login password file (relative to secrets dir).");
 
-   config.add("timeouts.write", "", "timeouts.write", argType::Required, "timeouts", "write", false, "int", "The timeout for writing to the device [msec]. Default = 1000");
-   config.add("timeouts.read", "", "timeouts.read", argType::Required, "timeouts", "read", false, "int", "The timeout for reading the device [msec]. Default = 2000");
-   config.add("timeouts.outletStateDelay", "", "timeouts.outletStateDelay", argType::Required, "timeouts", "outletStateDelay", false, "int", "The maximum time to wait for an outlet to change state [msec]. Default = 5000");
+   dev::ioDevice::setupConfig(config);
+   config.add("device.outletStateDelay", "", "device.outletStateDelay", argType::Required, "device", "outletStateDelay", false, "int", "The maximum time to wait for an outlet to change state [msec]. Default = 5000");
 
    config.add("limits.freqLowWarn", "", "limits.freqLowWarn", argType::Required, "limits", "freqLowWarn", false, "int", "The low-frequency warning threshold");
    config.add("limits.freqHighWarn", "", "limits.freqHighWarn", argType::Required, "limits", "freqHighWarn", false, "int", "The high-frequency warning threshold");
@@ -199,6 +195,7 @@ void trippLitePDU::setupConfig()
    config.add("limits.currEmerg", "", "limits.currEmerg", argType::Required, "limits", "currEmerg", false, "int", "The high-current emergency threshold");
 
    dev::outletController<trippLitePDU>::setupConfig(config);
+   
 }
 
 
@@ -209,8 +206,8 @@ void trippLitePDU::loadConfig()
    config(m_deviceUsername, "device.username");
    config(m_devicePassFile, "device.passfile");
 
-   config(m_writeTimeOut, "timeouts.write");
-   config(m_readTimeOut, "timeouts.read");
+   dev::ioDevice::loadConfig(config);
+
    config(m_outletStateDelay, "timeouts.outletStateDelay");
 
    config(m_freqLowWarn, "limits.freqLowWarn");
@@ -232,6 +229,7 @@ void trippLitePDU::loadConfig()
    config(m_currEmerg, "limits.currEmerg");
 
    dev::outletController<trippLitePDU>::loadConfig(config);
+   
 
 }
 
@@ -246,8 +244,10 @@ int trippLitePDU::appStartup()
    m_indiP_load.add (pcf::IndiElement("voltage"));
    m_indiP_load.add (pcf::IndiElement("current"));
 
-   ///\todo Error check?
-   dev::outletController<trippLitePDU>::setupINDI();
+   if(dev::outletController<trippLitePDU>::setupINDI() < 0)
+   {
+      return log<text_log,-1>("Error setting up INDI for outlet control.", logPrio::LOG_CRITICAL);
+   }
 
    state(stateCodes::NOTCONNECTED);
 
@@ -268,7 +268,6 @@ int trippLitePDU::appLogic()
          state(stateCodes::CONNECTED);
 
          if(!stateLogged())
-            
          {
             std::stringstream logs;
             logs << "Connected to " << m_deviceAddr << ":" << m_devicePort;
@@ -307,13 +306,11 @@ int trippLitePDU::appLogic()
       }
       else
       {
-         std::cerr << rv << "\n";
          state(stateCodes::FAILURE);
          log<text_log>("login failure", logPrio::LOG_CRITICAL);
          return -1;
       }
    }
-
 
    if(state() == stateCodes::LOGGEDIN)
    {
@@ -424,7 +421,7 @@ int trippLitePDU::updateOutletStates()
    int rv;
    std::string strRead;
 
-   rv = m_telnetConn.writeRead("devstatus\n", true, 1000,1000);
+   rv = m_telnetConn.writeRead("devstatus\n", true, m_writeTimeout, m_readTimeout);
 
    strRead = m_telnetConn.m_strRead;
 
@@ -432,14 +429,15 @@ int trippLitePDU::updateOutletStates()
    {
       std::cerr << "Error read.  Draining...\n";
 
-      std::cerr << "Received: \n-----------------------------------------\n";
+      std::cerr << "Received: \n**************************\n";
       std::cerr << strRead << "\n";
-      std::cerr << "\n-----------------------------------------\n";
+      std::cerr << "\n**************************\n";
 
-      rv = m_telnetConn.read(5*m_readTimeOut, false);
-      std::cerr << "and then got: \n-----------------------------------------\n";
+      m_telnetConn.m_strRead.clear();
+      rv = m_telnetConn.read(5*m_readTimeout, false);
+      std::cerr << "and then got: \n**************************\n";
       std::cerr << m_telnetConn.m_strRead << "\n";
-      std::cerr << "\n-----------------------------------------\n";
+      std::cerr << "\n**************************\n";
 
       if( rv < 0 )
       {
@@ -491,7 +489,7 @@ int trippLitePDU::turnOutletOn( int outletNum )
    cmd += " --force\r";
 
    std::string strRead;
-   int rv = m_telnetConn.writeRead( cmd, true, m_writeTimeOut, m_readTimeOut);
+   int rv = m_telnetConn.writeRead( cmd, true, m_writeTimeout, m_readTimeout);
 
    if(rv < 0) return log<software_error, -1>({__FILE__, __LINE__, 0, rv, "telnet error"});
 
@@ -507,7 +505,7 @@ int trippLitePDU::turnOutletOff( int outletNum )
    cmd += " --force\r";
 
    std::string strRead;
-   int rv = m_telnetConn.writeRead( cmd, true, m_writeTimeOut, m_readTimeOut);
+   int rv = m_telnetConn.writeRead( cmd, true, m_writeTimeout, m_readTimeout);
 
    if(rv < 0) return log<software_error, -1>({__FILE__, __LINE__, 0, rv, "telnet error"});
 
