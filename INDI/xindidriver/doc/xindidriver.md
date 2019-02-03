@@ -1,23 +1,15 @@
 xindidriver
 ==========
 
-[NAME](#NAME)
-[SYNOPSIS](#SYNOPSIS)
-[DESCRIPTION](#DESCRIPTION)
-[OPTIONS](#OPTIONS)
-[EXAMPLES](#EXAMPLES)
-[TESTING](#TESTING)
-[SEE ALSO](#SEE%20ALSO)
+[TOC]
 
 ------------------------------------------------------------------------
 
-NAME []()
----------
+# NAME
 
 indidriver − create a passthrough from STDIN/STDOUT to a pair of FIFOs belonging to a device controller implementing the INDI protocol.
 
-SYNOPSIS []()
--------------
+# SYNOPSIS 
 ```
 symlinked-name
 ```
@@ -29,8 +21,7 @@ xindidriver name
 ```
 where name is the driver name.
 
-DESCRIPTION []()
-----------------
+# DESCRIPTION
 
 A program to act as the INDI driver for indiserver, but pass the STDIN and STDOUT to/from FIFOs exposed by a device controller with INDI driver functionality. This allows the device controller to integrate INDI processing, without using STDIN and STDOUT and without being subject to process control by `indiserver`.
 
@@ -58,18 +49,15 @@ The presence of a process listening-on or writing-to the FIFOs has no effect.
 A third fifo, `drivername.ctrl` is used for signaling `xindidriver` that the controller has restarted.  Anything written to this FIFO will cause `xindidriver` to exit, and it will then be restarted by `indiserver`.  This is done to keep all snoops, etc, up to date and fresh.
 
 
-OPTIONS []()
-------------
+# OPTIONS 
 
 There are no options.
 
-EXAMPLES []()
-------------
+# EXAMPLES
 
 
 
-TESTING []()
-------------
+# TESTING
 
 To test xindidriver, one can perform the following steps:
 
@@ -111,8 +99,7 @@ $ echo "test output" > test.out
 You should see "test output" printed from xindidriver in the original terminal.
 
 
-SEE ALSO []()
--------------
+# SEE ALSO
 
 indiserver
 

@@ -790,9 +790,17 @@ WARN_LOGFILE           =
 # spaces. See also FILE_PATTERNS and EXTENSION_MAPPING
 # Note: If this tag is empty the current directory is searched.
 
-INPUT                  = ../xindiserver/doc/xindiserver.md \
-                         ../trippLitePDU/doc/trippLitePDU.md \
-                         ../filterWheelCtrl/doc/filterWheelCtrl.md
+INPUT                  = ../filterWheelCtrl/doc/ \
+                         ../ocam2KCtrl/doc/ \
+                         ../siglentSDG/doc/ \
+                         ../sshDigger/doc/ \
+                         ../sysMonitor/doc/ \
+                         ../trippLitePDU/doc/ \
+                         ../ttmModulator/doc/ \
+                         ../xindiserver/doc/ \
+                         ../../INDI/xindidriver/doc/xindidriver.md \
+                         ../../INDI/INDI/doc/indiserver.md \
+                         ../zaberCtrl/doc/ \
 
 # This tag can be used to specify the character encoding of the source files
 # that doxygen parses. Internally doxygen uses the UTF-8 encoding. Doxygen uses

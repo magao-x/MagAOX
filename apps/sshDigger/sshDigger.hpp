@@ -19,7 +19,7 @@
 /** \defgroup sshDigger SSH Tunnel Manager
   * \brief Manage the SSH tunnels for MagAO-X communications..
   *
-  * \link page_module_sshDigger Application Documentation
+  * <a href="..//apps_html/page_module_sshDigger.html">Application Documentation</a>
   *
   * \ingroup apps
   *

@@ -19,7 +19,9 @@ namespace app
   * \todo need to recognize signals in tty polls and not return errors, etc.
   * \todo need to implement an onDisconnect() to update values to unknown indicators.
   * \todo need a frequency-dependent max amp facility.
-  *
+  * \todo convert to ioDevice
+  * \todo need telnet device, with optional username/password.
+  * 
   */
 class siglentSDG : public MagAOXApp<>
 {

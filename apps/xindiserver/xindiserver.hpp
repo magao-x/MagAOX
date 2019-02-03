@@ -1,5 +1,5 @@
 /** \file xindiserver.hpp
-  * \brief The MagAO-X INDI Server wrapper main program.
+  * \brief The MagAO-X INDI Server wrapper header.
   *
   * \ingroup xindiserver_files
   */
@@ -17,6 +17,18 @@
 #include "../../libMagAOX/libMagAOX.hpp" //Note this is included on command line to trigger pch
 #include "../../magaox_git_version.h"
 
+/** \defgroup xindiserver INDI Server wrapper.
+  * \brief Manges INDI server in the MagAO-X context.
+  *
+  * <a href="..//apps_html/page_module_xindiserver.html">Application Documentation</a>
+  *
+  * \ingroup apps
+  *
+  */
+
+/** \defgroup xindiserver_files xindiserver Files
+  * \ingroup xindiserver
+  */
 
 namespace MagAOX
 {
@@ -79,6 +91,10 @@ int loadSSHTunnelConfigs( tunnelMap & tmap,
    return 0;
 }
 
+/** The INDI Server wrapper applciation class.
+  *
+  * \ingroup xindiserver
+  */  
 class xindiserver : public MagAOXApp<false>
 {
 

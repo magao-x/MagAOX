@@ -1,35 +1,24 @@
 indiserver
 ==========
 
-[NAME](#NAME)
-[SYNOPSIS](#SYNOPSIS)
-[DESCRIPTION](#DESCRIPTION)
-[OPTIONS](#OPTIONS)
-[DRIVER](#DRIVER)
-[EXIT STATUS](#EXIT%20STATUS)
-[EXAMPLES](#EXAMPLES)
-[SEE ALSO](#SEE%20ALSO)
+[TOC]
 
 ------------------------------------------------------------------------
 
-NAME []()
----------
+# NAME 
 
 indiserver − provide socket access to one or more local or remote INDI drivers
 
-SYNOPSIS []()
--------------
+# SYNOPSIS 
 ```
 indiserver [options] driver [driver ...]
 ```
 
-DESCRIPTION []()
-----------------
+# DESCRIPTION 
 
 indiserver is a TCP server that provides network access to any number of local INDI Driver programs or INDI Devices running on other indiservers in a chained fashion.
 
-OPTIONS []()
-------------
+# OPTIONS 
 
 <table>
 <colgroup>
@@ -66,8 +55,7 @@ OPTIONS []()
 </tbody>
 </table>
 
-DRIVER []()
------------
+# DRIVER 
 
 Each additional argument can be either the name of a local program to run or a specification of an INDI Device on a remote indiserver.
 
@@ -79,13 +67,11 @@ Indiserver will attempt to restart a driver that dies unless the file /tmp/noind
 
 Indiserver queues messages separately for each client and driver in an attempt to avoid slow consumers from effecting faster consumers. However, if a client ever gets more than 50MB behind in its queue (or as set using -m), it is considered hopelessly slow and is shut down.
 
-EXIT STATUS []()
-----------------
+# EXIT STATUS 
 
 `indiserver` is intended to run forever and so never exits normally. If it does exit, it prints a message to stderr and exits with status 1.
 
-EXAMPLES []()
--------------
+# EXAMPLES 
 
 In the following discussion, suppose there are driver programs named `cam`, `ota` and `tmount` which implement INDI devices Camera, OTA and Mount, respectively.
 
@@ -101,8 +87,7 @@ In this way an INDI client connecting to host2 seemlessly sees all the devices C
 
 This technique can also be used to manage which Devices are available to INDI clients depending on where they connect. Continuing with the example before, if a client connects to host1 it will only see device Camera, but clients connecting to host2 will see Camera, OTA and Mount. In this way, certain devices can be hidden from, say, external access to a facility.
 
-SEE ALSO []()
--------------
+# SEE ALSO 
 
 evalINDI
 

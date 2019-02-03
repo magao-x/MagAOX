@@ -485,7 +485,6 @@ int logHeader::extractBasicLog( logPrioT & lvl,
                                 bufferPtrT & logBuffer 
                               )
 {
-   
    lvl = logLevel(logBuffer); 
    
    ec = eventCode(logBuffer); 
