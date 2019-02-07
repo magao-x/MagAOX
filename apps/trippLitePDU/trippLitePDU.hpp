@@ -427,32 +427,22 @@ int trippLitePDU::updateOutletStates()
 
    if(rv == TTY_E_TIMEOUTONREAD || rv == TTY_E_TIMEOUTONREADPOLL)
    {
-      std::cerr << "Error read.  Draining...\n";
-
-      std::cerr << "Received: \n**************************\n";
-      std::cerr << strRead << "\n";
-      std::cerr << "\n**************************\n";
-
-      m_telnetConn.m_strRead.clear();
-      rv = m_telnetConn.read(5*m_readTimeout, false);
-      std::cerr << "and then got: \n**************************\n";
-      std::cerr << m_telnetConn.m_strRead << "\n";
-      std::cerr << "\n**************************\n";
+      rv = m_telnetConn.read(m_readTimeout, false);
 
       if( rv < 0 )
       {
-         std::cerr << "Timed out.\n";
-         log<text_log>(tty::ttyErrorString(rv), logPrio::LOG_ERROR);
+         log<software_error>({__FILE__, __LINE__, 0, rv, "devstatus timeout, timed out on re-read: " + tty::ttyErrorString(rv)});
          state(stateCodes::NOTCONNECTED);
          return 0;
       }
 
-      std::cerr << "Drain successful.\n";
+      log<text_log>("devstatus timeout, re-read successful");
+      
       return 0;
    }
    else if(rv < 0 )
    {
-      log<text_log>(tty::ttyErrorString(rv), logPrio::LOG_ERROR);
+      log<software_error>({__FILE__, __LINE__, 0, rv, tty::ttyErrorString(rv)});
       state(stateCodes::NOTCONNECTED);
       return 0;
    }
