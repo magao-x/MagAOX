@@ -65,7 +65,8 @@ protected:
    std::string m_remoteHost; ///< The name of the remote host
    int m_localPort {0}; ///< The local port to forward from
    int m_remotePort {0}; ///< The remote port to forward to
-
+   int m_monitorPort {0}; ///< The monitor port
+   
    ///@}
 
    int m_tunnelPID; ///< The PID of the autossh process
@@ -251,6 +252,8 @@ int sshDigger::loadConfigImpl( mx::app::appConfigurator & _config )
       return SSHDIGGER_E_NOREMOTEPORT;
    }
 
+   _config.configUnused( m_monitorPort, mx::app::iniFile::makeKey(m_configName, "monitorPort" ) );
+   
    return 0;
 }
 
@@ -268,8 +271,7 @@ std::string sshDigger::tunnelSpec()
 
 void sshDigger::genArgsV( std::vector<std::string> & argsV )
 {
-   ///\todo make monitor port a config variable.
-   argsV = {"autossh", "-M0", "-nNTL", tunnelSpec(), m_remoteHost};
+   argsV = {"autossh", "-M" + std::to_string(m_monitorPort), "-nNTL", tunnelSpec(), m_remoteHost};
 }
 
 void sshDigger::genEnvp( std::vector<std::string> & envp )
@@ -325,7 +327,6 @@ int sshDigger::execTunnel()
       args[argsV.size()] = NULL;
 
 
-      ///\todo need to set environment vars and capture autossh logs...
       const char ** envp = new const char*[envps.size() + 1];
       for(size_t i=0; i< envps.size();++i) envp[i] = envps[i].data();
       envp[envps.size()] = NULL;

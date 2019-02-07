@@ -20,6 +20,7 @@ public:
    std::string remoteHost() {return m_remoteHost;}
    int localPort() {return m_localPort;}
    int remotePort() {return m_remotePort;}
+   int monitorPort() { return m_monitorPort;}
 };
 
 
@@ -46,6 +47,29 @@ SCENARIO( "sshDigger Configuration", "[sshDigger]" )
          REQUIRE( dig.remoteHost() == "exao2");
          REQUIRE( dig.localPort() == 80 );
          REQUIRE( dig.remotePort() == 81 );
+         REQUIRE( dig.monitorPort() == 0 );
+      }
+      
+      WHEN("the tunnel is fully specified and matches configName, includes monitorPort")
+      {
+         mx::app::writeConfigFile( "/tmp/sshDigger_test.conf", {"tunnel1",      "tunnel1",     "tunnel1" , "tunnel1"},
+                                                               {"remoteHost",   "localPort",       "remotePort", "monitorPort" },
+                                                               {"exao2",         "80",             "81" , "6000"} );
+      
+      
+         mx::app::appConfigurator config;
+         config.readConfig("/tmp/sshDigger_test.conf");
+         
+         sshDigger_test dig;
+         dig.configName("tunnel1");
+         int rv;
+         rv = dig.loadConfigImpl(config);
+         REQUIRE( rv == 0);
+         
+         REQUIRE( dig.remoteHost() == "exao2");
+         REQUIRE( dig.localPort() == 80 );
+         REQUIRE( dig.remotePort() == 81 );
+         REQUIRE( dig.monitorPort() == 6000);
          
       }
       
