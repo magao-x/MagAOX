@@ -4,6 +4,8 @@
   *
   * To view logdump files: logdump -f sysMonitor
   *
+  * \todo Change `system` calls to fork()/exec()
+  *
   * \ingroup sysMonitor_files
   *
   * History:
@@ -49,7 +51,7 @@ protected:
    pcf::IndiProperty ram_usage_indi;   ///< Indi variable for repoting ram usage
 
    std::vector<float> coreTemps;   ///< List of current core temperature(s)
-   std::vector<float> cpu_core_loads;   ///< List of current core load(s)
+   std::vector<float> coreLoads;   ///< List of current core load(s)
    std::vector<float> diskTemp;   ///< List of current disk temperature(s)
    float rootUsage = 0;   ///< Disk usage in root path as a value out of 100
    float dataUsage = 0;   ///< Disk usage in /data path as a value out of 100
@@ -274,10 +276,10 @@ int sysMonitor::appStartup()
    REG_INDI_NEWPROP_NOCB(ram_usage_indi, "ram_usage_indi", pcf::IndiProperty::Number);
 
    unsigned int i;
-   std::string coreStr = "core";
+   std::string coreStr = {"core"};
 
-   findCPULoads(cpu_core_loads);
-   for (i = 0; i < cpu_core_loads.size(); i++) 
+   findCPULoads(coreLoads);
+   for (i = 0; i < coreLoads.size(); i++) 
    {
       coreStr.append(std::to_string(i));
       core_loads.add (pcf::IndiElement(coreStr));
@@ -294,7 +296,7 @@ int sysMonitor::appStartup()
       coreStr.pop_back();
    }
 
-   std::string driveStr = "drive";
+   std::string driveStr = {"drive"};
    findDiskTemperature(diskTemp);
    for (i = 0; i < diskTemp.size(); i++) 
    {
@@ -333,10 +335,10 @@ int sysMonitor::appLogic()
       rvCPUTemp = criticalCoreTemperature(coreTemps);
    }
    
-   cpu_core_loads.clear();
-   int rvCPULoad = findCPULoads(cpu_core_loads);
+   coreLoads.clear();
+   int rvCPULoad = findCPULoads(coreLoads);
    if (rvCPULoad >= 0) {
-      for (auto i: cpu_core_loads)
+      for (auto i: coreLoads)
       {
          std::cout << "CPU load: " << i << ' ';
       }
@@ -347,15 +349,15 @@ int sysMonitor::appLogic()
    {
       if (rvCPUTemp == 1)
       {
-         log<core_mon>({coreTemps, cpu_core_loads}, logPrio::LOG_WARNING);
+         log<core_mon>({coreTemps, coreLoads}, logPrio::LOG_WARNING);
       } 
       else if (rvCPUTemp == 2) 
       {
-         log<core_mon>({coreTemps, cpu_core_loads}, logPrio::LOG_ALERT);
+         log<core_mon>({coreTemps, coreLoads}, logPrio::LOG_ALERT);
       } 
       else 
       {
-         log<core_mon>({coreTemps, cpu_core_loads}, logPrio::LOG_INFO);
+         log<core_mon>({coreTemps, coreLoads}, logPrio::LOG_INFO);
       }
    }
    else 
@@ -426,12 +428,11 @@ int sysMonitor::appShutdown()
 
 int sysMonitor::findCPUTemperatures(std::vector<float>& temps) 
 {
-   char command[35];
+   std::string command = {"sensors > /dev/shm/sensors_out"};
    std::string line;
 
    // For core temps
-   strcpy( command, "sensors > /dev/shm/sensors_out" );
-   int rv = system(command);
+   int rv = system(command.c_str());
    if(rv == -1) //system call error
    {
       log<software_error>({__FILE__, __LINE__,"Could not complete CPU temperature `system` command."});
@@ -446,7 +447,7 @@ int sysMonitor::findCPUTemperatures(std::vector<float>& temps)
       return -1;
    }
 
-   rv = 1;
+   rv = -1;
    while (getline (inFile,line)) 
    {
       float tempVal;
@@ -557,11 +558,10 @@ int sysMonitor::criticalCoreTemperature(std::vector<float>& v)
 
 int sysMonitor::findCPULoads(std::vector<float>& loads) 
 {
-   char command[35];
+   std::string command = {"mpstat -P ALL > /dev/shm/cpuload"};
    std::string line;
    // For cpu load
-   strcpy( command, "mpstat -P ALL > /dev/shm/cpuload" );
-   int rv = system(command);
+   int rv = system(command.c_str());
    if(rv == -1) //system call error
    {
       log<software_error>({__FILE__, __LINE__,"Could not complete CPU core usage `system` command."});
@@ -577,14 +577,11 @@ int sysMonitor::findCPULoads(std::vector<float>& loads)
    }
 
    // Want to start parsing at fifth line
-   int iterator = 0;
-   while (getline (inFile,line)) {
-      iterator++;
-      if (iterator == 4) {
-         break;
-      }
+   for (auto i{0}; i < 4; i++) {
+      getline (inFile,line);
    }
-   rv = 1;
+   
+   rv = -1;
    while (getline (inFile,line)) 
    {
       float loadVal;
@@ -594,7 +591,6 @@ int sysMonitor::findCPULoads(std::vector<float>& loads)
          rv = 0;
       }
    }
-
    return rv;
 }
 
@@ -623,11 +619,10 @@ int sysMonitor::parseCPULoads(std::string line, float& loadVal)
 
 int sysMonitor::findDiskTemperature(std::vector<float>& hdd_temp) 
 {
-   char command[35];
+   std::string command  = {"hddtemp > /dev/shm/hddtemp"};
    std::string line;
 
-   strcpy( command, "hddtemp > /dev/shm/hddtemp" );
-   int rv = system(command);
+   int rv = system(command.c_str());
    if(rv == -1) //system call error
    {
       log<software_error>({__FILE__, __LINE__,"Invalid read occured when parsing drive temperatures."});
@@ -642,7 +637,7 @@ int sysMonitor::findDiskTemperature(std::vector<float>& hdd_temp)
       return -1;
    }
 
-   rv = 1;
+   rv = -1;
    while (getline (inFile,line)) 
    {
       float tempVal;
@@ -665,9 +660,8 @@ int sysMonitor::parseDiskTemperature(std::string line, float& hdd_temp)
    }
    std::istringstream iss(line);
    std::vector<std::string> tokens{std::istream_iterator<std::string>{iss},std::istream_iterator<std::string>{}};
-   for(std::vector<std::string>::iterator it = tokens.begin(); it != tokens.end(); ++it) 
+   for(auto temp_s: tokens) 
    {
-      std::string temp_s = *it;
       if (isdigit(temp_s.at(0)) && temp_s.substr(temp_s.length() - 1, 1) == "C") 
       {
          temp_s.pop_back();
@@ -722,11 +716,10 @@ int sysMonitor::criticalDiskTemperature(std::vector<float>& v)
 
 int sysMonitor::findDiskUsage(float &rootUsage, float &dataUsage, float &bootUsage) 
 {
-   char command[35];
+   std::string command = {"df > /dev/shm/diskusage"};
    std::string line;
    // For disk usage
-   strcpy( command, "df > /dev/shm/diskusage" );
-   int rv = system(command);
+   int rv = system(command.c_str());
    if(rv == -1) //system call error
    {
       log<software_error>({__FILE__, __LINE__,"Could not complete drive usage `system` command."});
@@ -741,7 +734,7 @@ int sysMonitor::findDiskUsage(float &rootUsage, float &dataUsage, float &bootUsa
       return -1;
    }
 
-   rv = 1;
+   rv = -1;
    while(getline(inFile,line)) 
    {
       int rvDiskUsage = parseDiskUsage(line, rootUsage, dataUsage, bootUsage);
@@ -809,11 +802,10 @@ int sysMonitor::parseDiskUsage(std::string line, float& rootUsage, float& dataUs
 
 int sysMonitor::findRamUsage(float& ramUsage) 
 {
-   char command[35];
+   std::string command = {"free -m > /dev/shm/ramusage"};
    std::string line;
    // For ram usage
-   strcpy( command, "free -m > /dev/shm/ramusage" );
-   int rv = system(command);
+   int rv = system(command.c_str());
    if(rv == -1) //system call error
    {
       log<software_error>({__FILE__, __LINE__,"Could not complete RAM usage `system` command."});
@@ -868,7 +860,7 @@ int sysMonitor::parseRamUsage(std::string line, float& ramUsage)
 
 int sysMonitor::updateVals()
 {
-   MagAOXApp::updateIfChanged(core_loads, "core", cpu_core_loads);
+   MagAOXApp::updateIfChanged(core_loads, "core", coreLoads);
 
    MagAOXApp::updateIfChanged(core_temps, "core", coreTemps);
 

@@ -72,6 +72,14 @@ public:
     */
    int testConnection();
 
+   /// Tests and returns output voltage of device.
+   /** Sends short parameter to retrieve voltage.
+    *
+    * \returns -1 on unsuccessful voltage get and read request.
+    * \returns 0 on successful voltage get and read request. Parameter will hold voltage.
+    */
+   int testVoltage(short&);
+
 };
 
 inline ttmTalker::ttmTalker() : MagAOXApp(MAGAOX_CURRENT_SHA1, MAGAOX_REPO_MODIFIED)
@@ -169,6 +177,16 @@ int ttmTalker::appLogic()
       if( testConnection() != 0)
       {
          state(stateCodes::NOTCONNECTED);
+      }
+      else {
+         short voltage = -1;
+         int rv = testVoltage(voltage);
+         if (rv == 0) {
+            std::cout << "Voltage: " << voltage << std::endl;
+         }
+         else {
+            std::cerr << "Could not get voltage." << std::endl;
+         }
       }
    }
 
@@ -309,6 +327,93 @@ int ttmTalker::testConnection()
       std::cout << "Serial number test unsuccessful" << std::endl;
       return -1;
    }
+}
+
+int ttmTalker::testVoltage(short& voltage) 
+{
+   std::cout << "Testing voltage" << std::endl;
+   int uid_rv = euidCalled();
+   if(uid_rv < 0)
+   {
+      log<software_critical>({__FILE__, __LINE__});
+      state(stateCodes::FAILURE);
+      return -1;
+   }
+
+   int fileDescrip = 0;
+   int rv = MagAOX::tty::ttyOpenRaw(
+      fileDescrip,         ///< [out] the file descriptor.  Set to 0 on an error.
+      m_deviceName,        ///< [in] the device path name, e.g. /dev/ttyUSB0
+      B115200              ///< [in] indicates the baud rate (see http://pubs.opengroup.org/onlinepubs/7908799/xsh/termios.h.html)
+   );
+
+   uid_rv = euidReal();
+
+   if(uid_rv < 0)
+   {
+      log<software_critical>({__FILE__, __LINE__});
+      state(stateCodes::FAILURE);
+      return -1;
+   }
+
+   if (rv != 0) 
+   {
+      std::cout << MagAOX::tty::ttyErrorString(rv) << std::endl;
+      return rv;
+   }
+
+   std::cout << m_deviceName << "   " << fileDescrip << std::endl;
+
+   std::string buffer;
+   buffer.resize(6);
+   buffer[0] = 0x44;
+   buffer[1] = 0x06;
+   buffer[2] = 0x01; // chan indent
+   buffer[3] = 0x00;
+   buffer[4] = 0x50;
+   buffer[5] = 0x01;
+   std::string output;
+   output.resize(10);
+   rv = MagAOX::tty::ttyWriteRead( 
+      output,              ///< [out] The string in which to store the output.
+      buffer,              ///< [in] The characters to write to the tty.
+      "",                  ///< [in] A sequence of characters which indicates the end of transmission.
+      false,               ///< [in] If true, strWrite.size() characters are read after the write
+      fileDescrip,         ///< [in] The file descriptor of the open tty.
+      2000,                ///< [in] The write timeout in milliseconds.
+      2000                 ///< [in] The read timeout in milliseconds.
+   );
+
+
+   std::cout << MagAOX::tty::ttyErrorString(rv) << std::endl;
+   if (rv == TTY_E_NOERROR)
+   {
+      //std::cout << *((uint32_t *) (  output.data() + 6)) << "   " << output.substr(10, 8) << std::endl;
+   } 
+   else
+   {
+      return -1;
+   }
+
+   if (output.size() != 10)
+   {
+      return -1;
+   }
+
+   /*
+   if (*((uint32_t] *) (  output.data() + 6)) == (uint32_t) stoi(m_serial)) 
+   {
+      std::cout << "Serial number test successful" << std::endl;
+      return 0;
+   }
+   else 
+   {
+      std::cout << "Serial number test unsuccessful" << std::endl;
+      return -1;
+   }
+   */
+   voltage = *((short *) (  output.data() + 8));
+   return 0;
 }
 
 int ttmTalker::appShutdown()
