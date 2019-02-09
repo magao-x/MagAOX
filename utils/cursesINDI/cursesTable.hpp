@@ -7,6 +7,7 @@
 #include <unistd.h>
 #include <ncurses.h>
 
+
 #include "cursesTableRow.hpp"
 
 class cursesTable
@@ -35,6 +36,10 @@ public:
    /// Update the Y position of all rows, for scrolling
    void updateRowY( int firstRow );
 
+   #ifdef DEBUG_TMPOUT
+public:
+   ofstream * fout {0};
+   #endif
 };
 
 int cursesTable::addRow( const std::vector<int> & cellX )
@@ -42,6 +47,8 @@ int cursesTable::addRow( const std::vector<int> & cellX )
    rows.emplace_back();
    rows.back().createRow(1, m_tabWidth, m_tabY + rows.size()-1, m_tabX, cellX);
 
+   rows.back().fout = fout;
+   
    return rows.size()-1;
 }
 
@@ -61,8 +68,7 @@ void cursesTable::updateContents( int rowNo,
 void cursesTable::updateContents( int rowNo,
                                   int cellNo,
                                   const std::string & contents
-                                )
-{
+                                ) {
    if(rowNo < 0  || (size_t) rowNo >= rows.size()) return;
 
    bool display = false;
@@ -78,10 +84,17 @@ void cursesTable::updateRowY( int firstRow )
 
    m_currFirstRow = firstRow;
 
+   #ifdef DEBUG_TMPOUT
+   if(fout)  *fout << __FILE__ << " " << __LINE__<< " " << firstRow << std::endl;
+   #endif
    for(size_t i=0; i< rows.size(); ++i)
    {
       rows[i].m_rowY = m_tabY + (i - m_currFirstRow);
 
+      #ifdef DEBUG_TMPOUT
+      if(fout) *fout << __FILE__ << " " << __LINE__<< " " << i << " " << rows[i].m_rowY << " " << m_tabY << std::endl;
+      #endif
+   
       bool display = false;
 
       if(rows[i].m_rowY >= m_tabY && rows[i].m_rowY < m_tabY + m_tabHeight)
@@ -89,6 +102,10 @@ void cursesTable::updateRowY( int firstRow )
          display = true;
       }
 
+      #ifdef DEBUG_TMPOUT
+      if(fout)  *fout << __FILE__ << " " << __LINE__<< " " << display << std::endl;
+      #endif
+      
       rows[i].recreate(display); //updateContents(rows[i].m_cellContents, true);
    }
 }

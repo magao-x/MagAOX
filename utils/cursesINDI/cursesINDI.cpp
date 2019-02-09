@@ -1,14 +1,30 @@
 
+#define DEBUG_TMPOUT
+
+#ifdef DEBUG_TMPOUT
+#include <fstream>
+#endif
+
+
 #include "cursesINDI.hpp"
 
 
 
-#include <fstream>
+
 
 int main()
 {
    cursesINDI ci("me", "1.7", "1.7");
 
+   #ifdef DEBUG_TMPOUT
+   ofstream fout;
+   std::string fname = "/tmp/cursesINDI_" + std::to_string(getpid()) + ".txt";
+   fout.open(fname);
+   
+   ci.fout = &fout;
+   #endif
+   
+   
    WINDOW * topWin;
 
    int ch;
@@ -86,10 +102,16 @@ int main()
 
       if(nextY-ci.m_currFirstRow > ci.m_tabHeight-1)
       {
+         #ifdef DEBUG_TMPOUT
+         fout << __FILE__ << " " << __LINE__<< " " << nextY - ci.m_tabHeight + 1 << std::endl;
+         #endif
          ci.updateRowY(nextY - ci.m_tabHeight + 1);
       }
       else if( nextY < ci.m_currFirstRow)
       {
+         #ifdef DEBUG_TMPOUT
+         fout << __FILE__ << " " << __LINE__<< " " << nextY << std::endl;
+         #endif
          ci.updateRowY(nextY);
       }
 

@@ -95,6 +95,10 @@ public:
 
    void keyPressed( int ch );
 
+   
+
+   
+
 };
 
 cursesINDI::cursesINDI( const std::string &szName,

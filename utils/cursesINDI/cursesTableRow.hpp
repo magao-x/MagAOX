@@ -1,6 +1,10 @@
 #ifndef cursesTableRow_hpp
 #define cursesTableRow_hpp
 
+#ifdef DEBUG_TMPOUT
+#include <fstream>
+#endif
+
 
 class cursesTableRow
 {
@@ -74,6 +78,11 @@ public:
    void keyPressed( int cellNo,
                     int ch
                   );
+   
+   #ifdef DEBUG_TMPOUT
+public:
+   ofstream * fout {0};
+   #endif
 };
 
 cursesTableRow::~cursesTableRow()
@@ -205,16 +214,24 @@ void cursesTableRow::recreate( bool display )
    own = true;
    for(size_t i=0; i< m_cellWin.size()-1; ++i)
    {
+      #ifdef DEBUG_TMPOUT
+      if(fout) *fout << __FILE__ << " " << __LINE__<< " " << i << " " << m_cellWin.size() << std::endl;
+      #endif
       delwin(m_cellWin[i]);
       m_cellWin[i] = newwin(m_rowHeight, m_cellX[i+1]-m_cellX[i], m_rowY, m_rowX + m_cellX[i]);
       keypad(m_cellWin[i], TRUE);
    }
 
+   
+      
    //Do last one outside loop to handle max-width case
    int l = m_cellWin.size()-1;
    int w = m_rowWidth;
    if(w < 0) w = COLS;
 
+   #ifdef DEBUG_TMPOUT
+   if(fout)  *fout << __FILE__ << " " << __LINE__<< " " << l << " " << m_cellWin.size() << std::endl;
+   #endif
    delwin(m_cellWin[l]);
    m_cellWin[l] = newwin(m_rowHeight, w-m_cellX[l], m_rowY, m_rowX + m_cellX[l]);
    keypad(m_cellWin[l], TRUE);
