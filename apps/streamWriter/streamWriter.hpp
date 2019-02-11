@@ -26,90 +26,6 @@ namespace MagAOX
 namespace app
 {
 
-   
-typedef uint64_t timeSecT;
-typedef uint64_t timeNSecT;
-
-size_t rawImageFrameSz( size_t width,
-                        size_t height,
-                        size_t dataSz
-                      )
-{
-   return sizeof(timeSecT) + sizeof(timeNSecT) + width*height*dataSz;
-}
-
-uint8_t * rawImageFrameStart( size_t imNo,
-                              void * bufferStart,
-                              size_t width,
-                              size_t height,
-                              size_t dataSz
-                            )
-{
-   return (uint8_t *) bufferStart + imNo*rawImageFrameSz(width, height, dataSz);
-}
-
-int getTimeSpec( timespec & ts,
-                 size_t imNo,
-                 void * bufferStart,
-                 size_t width,
-                 size_t height,
-                 size_t dataSz
-               )
-{
-   //Casts to uint8_t for pointer arithmetic
-   uint8_t * frameStart = rawImageFrameStart(imNo, bufferStart, width, height, dataSz);
-   
-   ts.tv_sec = *((timeSecT *) frameStart);
-   ts.tv_nsec = *((timeNSecT *) (frameStart + sizeof(timeSecT)));
-   
-   return 0;
-}
-
-int copyRawImageFrame( size_t imNo,
-                       void * bufferStart,
-                       const void * imageFrame,
-                       timeSecT timeSec,
-                       timeNSecT timeNSec,
-                       size_t width,
-                       size_t height,
-                       size_t dataSz
-                     )
-{
-   //Casts to uint8_t for pointer arithmetic
-   uint8_t * frameStart = rawImageFrameStart(imNo, bufferStart, width, height, dataSz);
-   
-   *((timeSecT *) frameStart) = timeSec;
-   *((timeNSecT *) (frameStart + sizeof(timeSecT))) = timeNSec;
-   
-   memcpy( frameStart + sizeof(timeSecT) + sizeof(timeNSecT), imageFrame, width*height*dataSz);
-   
-   return 0;
-}
-   
-/// Get the filename timestamp for a timespec.
-/** Fills in a string with the timestamp encoded as
-  * \verbatim
-    YYYYMMDDHHMMSSNNNNNNNNN
-    \endverbatim
-  *
-  */ 
-int getTimeStamp( char * tstamp, ///< [out] the string to hold the formatted time.  Must be at least 24 bytes in length.
-               const timespec & ts
-             )
-{
-   tm uttime;//The broken down time.
-   
-   if(gmtime_r(&ts.tv_sec, &uttime) == 0)
-   {
-      std::cerr << "Error getting UT time (gmtime_r returned 0). At: " <<  __FILE__ << " " << __LINE__ << "\n";
-      return -1;
-   }
-   
-   snprintf(tstamp, 24, "%04i%02i%02i%02i%02i%02i%09i", uttime.tm_year+1900, uttime.tm_mon+1, uttime.tm_mday, uttime.tm_hour, uttime.tm_min, uttime.tm_sec, static_cast<int>(ts.tv_nsec)); 
-   
-   return 0;   
-}
-   
 /** \defgroup streamWriter ImageStreamIO Stream Writing
   * \brief Writes the contents of an ImageStreamIO image stream to disk.
   *
@@ -137,6 +53,8 @@ protected:
      *@{
      */ 
 
+   std::string m_rawimageDir; ///< The path where files will be saved.
+   
    size_t m_circBuffLength {1000};
    
    size_t m_writeChunkLength {100};
@@ -155,7 +73,7 @@ protected:
    int m_byteDepth {0}; ///< The pixel byte depth
    
     
-   uint8_t * m_rawImageCircBuff {0};
+   char * m_rawImageCircBuff {0};
    
    size_t m_currImage {0};
    size_t m_currChunkStart {0};
@@ -243,9 +161,9 @@ protected:
      *
      * @{
      */ 
-   int m_swThreadPrio {1}; ///< Priority of the stream writer thread, should normally be > 00, but less than m_fgThreadPrio.
+   int m_swThreadPrio {1}; ///< Priority of the stream writer thread, should normally be > 0, and <= m_fgThreadPrio.
 
-   sem_t m_swSemaphore;
+   sem_t m_swSemaphore; ///< Semaphore used to synchronize the fg thread and the sw thread.
    
    std::thread m_swThread; ///< A separate thread for the actual writing
 
@@ -293,6 +211,8 @@ streamWriter::~streamWriter() noexcept
 inline
 void streamWriter::setupConfig()
 {
+   config.add("writer.savePath", "", "writer.savePath", argType::Required, "writer", "savePath", false, "string", "The absolute path where images are saved. Will use MagAO-X default if not set.");
+   
    config.add("writer.circBuffLength", "", "writer.circBuffLength", argType::Required, "writer", "circBuffLength", false, "size_t", "The length in frames of the circular buffer. Should be an integer multiple of and larger than writeChunkLength.");
    
    config.add("writer.writeChunkLength", "", "writer.writeChunkLength", argType::Required, "writer", "writeChunkLength", false, "size_t", "The length in frames of the chunks to write to disk. Should be smaller than circBuffLength.");
@@ -311,6 +231,11 @@ void streamWriter::setupConfig()
 inline
 void streamWriter::loadConfig()
 {
+   //Set some defaults
+   //Setup default log path
+   m_rawimageDir = MagAOXPath + "/" + MAGAOX_rawimageRelPath;
+   config(m_rawimageDir, "writer.savePath");
+   
    config(m_circBuffLength, "writer.circBuffLength");
    config(m_writeChunkLength, "writer.writeChunkLength");
    config(m_swThreadPrio, "writer.threadPrio");
@@ -594,7 +519,7 @@ void streamWriter::fgThreadExec()
       
       //Now allocate teh circBuff 
       
-      m_rawImageCircBuff = (uint8_t *) malloc( rawImageFrameSz(m_width, m_height, m_byteDepth)*m_circBuffLength );
+      m_rawImageCircBuff = (char *) malloc( xrif::rawImageFrameSz(m_width, m_height, m_byteDepth)*m_circBuffLength );
       
       
       
@@ -613,7 +538,11 @@ void streamWriter::fgThreadExec()
       {
          timespec ts;
          
-         clock_gettime(CLOCK_REALTIME, &ts); ///\todo handle clock_gettime error here
+         if(clock_gettime(CLOCK_REALTIME, &ts) < 0)
+         {
+            log<software_critical>({__FILE__,__LINE__,errno,0,"clock_gettime"}); 
+            return;
+         }
          
          mx::timespecAddNsec(ts, m_semWait);
          
@@ -639,7 +568,7 @@ void streamWriter::fgThreadExec()
             if(m_shutdown || m_restart) break; //Check for exit signals
          
             
-            copyRawImageFrame( m_currImage, m_rawImageCircBuff, image.array.SI8, imno, 0, m_width, m_height, m_byteDepth);
+            xrif::copyRawImageFrame( m_currImage, m_rawImageCircBuff, (char *) image.array.SI8, image.md[0].atime.ts.tv_sec, image.md[0].atime.ts.tv_nsec, m_width, m_height, m_byteDepth);
             ++imno;
          
             ++m_currImage;
@@ -649,7 +578,8 @@ void streamWriter::fgThreadExec()
                std::cerr << "Write: " << m_nextChunkStart << " to " << m_currImage << "\n";
             
                m_currChunkStart = m_nextChunkStart;
-               //Signal to writer thread here.  Setting m_chunkStart = m_nextChunkStart.
+               
+               //Now tell the writer to get going
                if(sem_post(&m_swSemaphore) < 0)
                {
                   log<software_critical>({__FILE__, __LINE__, errno, 0, "Error posting to semaphore"});
@@ -664,7 +594,6 @@ void streamWriter::fgThreadExec()
             
             if(m_currImage >= m_circBuffLength) m_currImage = 0;
             
-
          }
          else
          {
@@ -705,7 +634,6 @@ void streamWriter::fgThreadExec()
    }
       
    if(opened) ImageStreamIO_closeIm(&image);
-   
    
 }
 
@@ -784,45 +712,43 @@ int streamWriter::swThreadStart()
 inline
 void streamWriter::swThreadExec()
 {
+   char * fname = 0;
    while(m_shutdown == 0)
    {
-      char fname[1024];
-      snprintf(fname, sizeof(fname), "/tmp/%s_YYYYMMDDHHMMSSNNNNNNNNN.xrif", m_streamName.c_str());
-      char * tstamp = fname + m_streamName.size() + 5 + 1;
+      std::string fnameBase = m_rawimageDir + "/" + m_streamName;
+      
+      size_t fnameSz = fnameBase.size() + sizeof("_YYYYMMDDHHMMSSNNNNNNNNN.xrif");
+      if(!fname) fname = (char*) malloc(fnameSz);
+      
+      snprintf(fname, fnameSz, "%s_YYYYMMDDHHMMSSNNNNNNNNN.xrif", fnameBase.c_str());
       
       while(!m_shutdown && !m_restart)
       {
          timespec ts;
          
-         clock_gettime(CLOCK_REALTIME, &ts); ///\todo handle clock_gettime error here
+         if(clock_gettime(CLOCK_REALTIME, &ts) < 0)
+         {
+            log<software_critical>({__FILE__,__LINE__,errno,0,"clock_gettime"}); 
+            return;
+         }
          
          mx::timespecAddNsec(ts, m_semWait);
          
          if(sem_timedwait(&m_swSemaphore, &ts) == 0)
          {
             double t0 = mx::get_curr_time();
-            timespec ts;
             
-            getTimeSpec( ts, m_currChunkStart, m_rawImageCircBuff, m_width, m_height, m_byteDepth);
-            
-            getTimeStamp(tstamp, ts);
-            tstamp[23] = '.';
-            
-            int fd = open(fname, O_WRONLY | O_CREAT, S_IRWXU | S_IRWXG | S_IROTH | S_IXOTH);
-            if(fd < 0) perror("open");
-            size_t bw = write(fd, rawImageFrameStart( m_currChunkStart, m_rawImageCircBuff, m_width, m_height, m_byteDepth), m_writeChunkLength*rawImageFrameSz(m_width, m_height, m_byteDepth));
-            if(close(fd) < 0) perror("close");
-            
+            ssize_t totw = xrif::writeBuffer( fname, fnameBase.size()+1, m_currChunkStart, m_writeChunkLength, m_rawImageCircBuff, m_width, m_height, m_atype);
+
             double t1 = mx::get_curr_time();
             
-            std::cerr << "Wrote: " << m_currChunkStart << " to " << m_currChunkStart+m_writeChunkLength << ": " << fname << " ";
-            std::cerr << bw << " bytes in " << t1-t0 << "sec \n";
+            std::cerr << "Wrote: " << m_currChunkStart << " to " << m_currChunkStart+m_writeChunkLength << ": " << fname << " " << totw << " bytes in " << t1-t0 << "sec \n";
          }
          else
          {
             
             //Check for why we timed out
-            if(errno == EINTR) break; //This will indicate time to shutdown, loop will exit normally flags set.
+            if(errno == EINTR) break; //This will probably indicate time to shutdown, loop will exit normally if flags set.
             
             //ETIMEDOUT just means we should wait more.
             //Otherwise, report an error.
@@ -834,6 +760,8 @@ void streamWriter::swThreadExec()
          }
       }
   } //outer loop, will exit if m_shutdown==true
+  
+  if(fname) free(fname);
 }
 
 INDI_NEWCALLBACK_DEFN(streamWriter, m_indiP_writing)(const pcf::IndiProperty &ipRecv)

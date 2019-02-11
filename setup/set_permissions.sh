@@ -17,6 +17,11 @@ chown -RP xsup:magaox /opt/MagAOX/logs
 # Let operators (not in group magaox) read logs but not write:
 chmod -R u=rwX,g=rwX,o=rX /opt/MagAOX/logs
 
+# Set rawimages to writable for non-admin users like xsup
+chown -RP xsup:magaox /opt/MagAOX/rawimages
+# Let operators (not in group magaox) read rawimages but not write:
+chmod -R u=rwX,g=rwX,o=rX /opt/MagAOX/rawimages
+
 # Hide secrets
 chmod o-rwx /opt/MagAOX/secrets
 chmod g-rwx /opt/MagAOX/secrets
