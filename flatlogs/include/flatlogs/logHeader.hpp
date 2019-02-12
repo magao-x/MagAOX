@@ -464,7 +464,7 @@ int logHeader::createLog( bufferPtrT & logBuffer,
 
    //Now load the basics.
    logLevel(logBuffer, lvl);
-   eventCode(logBuffer, logT::eventCode);
+   eventCode(logBuffer, +logT::eventCode); //The + fixes an issue with undefined references
    timespec(logBuffer, ts);
    
    msgLen( logBuffer, len);

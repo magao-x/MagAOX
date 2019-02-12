@@ -524,7 +524,7 @@ int siglentSDG::appLogic()
          {
             if(n>9)
             {
-               log<software_critical>({__FILE__, __LINE__});
+               log<software_critical>({__FILE__, __LINE__, "No response from device.  Time to power cycle."});
                return -1;
             }
             m_telnetConn.write("\n", m_writeTimeOut);
