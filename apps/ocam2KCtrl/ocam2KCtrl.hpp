@@ -273,7 +273,6 @@ void ocam2KCtrl::setupConfig()
    config.add("camera.powerOnWait", "", "camera.powerOnWait", argType::Required, "camera", "powerOnWait", false, "int", "Time after power-on to begin attempting connections [sec].  Default is 10 sec.");
    config.add("camera.startupTemp", "", "camera.startupTemp", argType::Required, "camera", "startupTemp", false, "float", "The temperature setpoint to set after a power-on [C].  Default is 20 C.");
    config.add("camera.startupMode", "", "camera.startupMode", argType::Required, "camera", "startupMode", false, "string", "The name of the configuration to set at startup.");
-   config.add("camera.startupMode", "", "camera.startupMode", argType::Required, "camera", "startupMode", false, "string", "The name of the configuration to set at startup.");
    config.add("camera.ocamDescrambleFile", "", "camera.ocamDescrambleFile", argType::Required, "camera", "ocamDescrambleFile", false, "string", "The path of the OCAM descramble file, relative to MagAOX/config.");
    
    dev::ioDevice::setupConfig(config);
@@ -290,6 +289,7 @@ void ocam2KCtrl::loadConfig()
    config(m_fgThreadPrio, "framegrabber.threadPrio");
    
    config(m_powerOnWait, "camera.powerOnWait");
+   config(m_startupTemp, "camera.startupTemp");
    config(m_startupMode, "camera.startupMode");
    config(m_ocamDescrambleFile, "camera.ocamDescrambleFile");
    
@@ -542,7 +542,8 @@ int ocam2KCtrl::onPowerOff()
 
    updateIfChanged(m_indiP_fps, "current", 0);
    updateIfChanged(m_indiP_fps, "target", 0);
-      
+   updateIfChanged(m_indiP_fps, "measured", 0);
+   
    return 0;
 }
 
@@ -921,10 +922,7 @@ void ocam2KCtrl::fgThreadExec()
       
       /* Initialize ImageStreamIO
        */
-      //#define SNAME "ocam2ksem"
       IMAGE imageStream;
-      //sem_t * sem;
-      //imarray = (IMAGE *) malloc(sizeof(IMAGE)*100);
       uint32_t imsize[3];
       imsize[0] = OCAM_SZ;
       imsize[1] = OCAM_SZ;
@@ -935,7 +933,7 @@ void ocam2KCtrl::fgThreadExec()
        * allocate four buffers for optimal pdv ring buffer pipeline (reduce if
        * memory is at a premium)
        */
-      pdv_multibuf(m_pdv, m_numBuffs);
+      pdv_multibuf(m_pdv, m_numBuffs); ///\todo this can be done in the main config fxn.
       pdv_start_images(m_pdv, m_numBuffs);
       
       //This completes the reconfiguration.
@@ -971,10 +969,11 @@ void ocam2KCtrl::fgThreadExec()
           * can then occur in parallel with the next acquisition
           */
          uint dmaTimeStamp[2];
+         timespec timeStamp;
          image_p = pdv_wait_image_timed(m_pdv, dmaTimeStamp);
 
-         m_currImageTimestamp = mx::get_curr_time(); //Get as close to download as possible.
-         m_currImageDMATimestamp = dmaTimeStamp[0] + ((double) dmaTimeStamp[1] / 1e6);
+         clock_gettime(CLOCK_REALTIME, &timeStamp); //Get as close to download as possible.
+         
          
          //Check for overrun 
          if ( edt_reg_read(m_pdv, PDV_STAT) & PDV_OVERRUN) overrun = true;
@@ -982,6 +981,10 @@ void ocam2KCtrl::fgThreadExec()
          ///\todo verify this works here, immediately after wait_image and timestamping
          pdv_start_image(m_pdv);
 
+         m_currImageTimestamp = timeStamp.tv_sec + ((double) timeStamp.tv_nsec / 1e9);
+         m_currImageDMATimestamp = dmaTimeStamp[0] + ((double) dmaTimeStamp[1] / 1e6);
+
+                  
          int timeouts = pdv_timeouts(m_pdv);
 
 
@@ -1074,6 +1077,7 @@ void ocam2KCtrl::fgThreadExec()
          //Ok, no timeout, so we process the image and publish it.
          imageStream.md[0].write=1;
          ocam2_descramble(id, &currImageNumber, imageStream.array.SI16, (short int *) image_p);
+         imageStream.md[0].atime.ts = timeStamp;
          imageStream.md[0].cnt0++;
          imageStream.md[0].cnt1++;
          imageStream.md[0].write=0;
