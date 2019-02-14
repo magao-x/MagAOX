@@ -428,7 +428,7 @@ int sysMonitor::appShutdown()
 
 int sysMonitor::findCPUTemperatures(std::vector<float>& temps) 
 {
-   std::string command = {"sensors > /dev/shm/sensors_out"};
+   std::string command{"sensors > /dev/shm/sensors_out"};
    std::string line;
 
    // For core temps
@@ -438,8 +438,8 @@ int sysMonitor::findCPUTemperatures(std::vector<float>& temps)
       log<software_error>({__FILE__, __LINE__,"Could not complete CPU temperature `system` command."});
       return -1;
    }
-   std::ifstream inFile;
 
+   std::ifstream inFile;
    inFile.open("/dev/shm/sensors_out");
    if (!inFile) 
    {
@@ -558,7 +558,7 @@ int sysMonitor::criticalCoreTemperature(std::vector<float>& v)
 
 int sysMonitor::findCPULoads(std::vector<float>& loads) 
 {
-   std::string command = {"mpstat -P ALL > /dev/shm/cpuload"};
+   std::string command{"mpstat -P ALL > /dev/shm/cpuload"};
    std::string line;
    // For cpu load
    int rv = system(command.c_str());
@@ -619,7 +619,7 @@ int sysMonitor::parseCPULoads(std::string line, float& loadVal)
 
 int sysMonitor::findDiskTemperature(std::vector<float>& hdd_temp) 
 {
-   std::string command  = {"hddtemp > /dev/shm/hddtemp"};
+   std::string command{"hddtemp > /dev/shm/hddtemp"};
    std::string line;
 
    int rv = system(command.c_str());
@@ -716,7 +716,7 @@ int sysMonitor::criticalDiskTemperature(std::vector<float>& v)
 
 int sysMonitor::findDiskUsage(float &rootUsage, float &dataUsage, float &bootUsage) 
 {
-   std::string command = {"df > /dev/shm/diskusage"};
+   std::string command{"df > /dev/shm/diskusage"};
    std::string line;
    // For disk usage
    int rv = system(command.c_str());
@@ -802,7 +802,7 @@ int sysMonitor::parseDiskUsage(std::string line, float& rootUsage, float& dataUs
 
 int sysMonitor::findRamUsage(float& ramUsage) 
 {
-   std::string command = {"free -m > /dev/shm/ramusage"};
+   std::string command{"free -m > /dev/shm/ramusage"};
    std::string line;
    // For ram usage
    int rv = system(command.c_str());
