@@ -1,0 +1,8 @@
+#Usage: ./setpix val actnum serial
+cacao << EOF
+readshmim $3
+creaim im1 97 1
+setpix im1 $1 $2 1 
+cp im1 $3
+exit
+EOF
