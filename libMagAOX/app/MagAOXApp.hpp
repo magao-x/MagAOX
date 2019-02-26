@@ -434,10 +434,32 @@ protected:
       pcf::IndiProperty * property {0}; ///< A pointer to an INDI property.
       int (*callBack)( void *, const pcf::IndiProperty &) {0}; ///< The function to call for a new or set property.
       bool m_defReceived {false}; ///< Flag indicating that a DefProperty has been received after a GetProperty.
+      
+//       indiCallBack()
+//       {
+//       }
+//       
+//       indiCallBack( pcf::IndiProperty * _ip,
+//                     int (*_callBack)( void *, const pcf::IndiProperty &) )
+//       {
+//          property = _ip;
+//          callBack = _callBack;
+//       }
    };
 
-///\todo instead of making these public, we should provide the addCallBack function for public use.
+
 public:
+
+   ///Value type of the indiCallBack map.
+   typedef std::pair<std::string, indiCallBack> callBackValueType;
+
+   ///Iterator type of the indiCallBack map.
+   typedef typename std::unordered_map<std::string, indiCallBack>::iterator callBackIterator;
+
+   ///Return type of insert on the indiCallBack map.
+   typedef std::pair<callBackIterator,bool> callBackInsertResult;
+
+protected:
    ///Map to hold the NewProperty indiCallBacks for this App, with fast lookup by property name.
    /** The key for these is the property name.
      */
@@ -449,17 +471,8 @@ public:
    std::unordered_map< std::string, indiCallBack> m_indiSetCallBacks;
 
 protected:
-   ///Flat indicating that all registered Set properties have been updated since last Get.
+   ///Flag indicating that all registered Set properties have been updated since last Get.
    bool m_allDefsReceived {false};
-
-   ///Value type of the indiCallBack map.
-   typedef std::pair<std::string, indiCallBack> callBackValueType;
-
-   ///Iterator type of the indiCallBack map.
-   typedef typename std::unordered_map<std::string, indiCallBack>::iterator callBackIterator;
-
-   ///Return type of insert on the indiCallBack map.
-   typedef std::pair<callBackIterator,bool> callBackInsertResult;
 
    ///Full path name of the INDI driver input FIFO.
    std::string m_driverInName;
@@ -472,15 +485,48 @@ protected:
      */
    std::string m_driverCtrlName;
 
-   /// Register an INDI property which is exposed for others to request a New Property for.
-   /**
+public:
+   
+   /// Register an INDI property which is read only.
+   /** This version requires the property be fully set up.
      *
      * \returns 0 on success.
      * \returns -1 on error.
      *
-     * \todo needs error logging
-     * \todo needs exception handling
-     * \todo is a failure to register a FATAL error?
+     */
+   int registerIndiPropertyReadOnly( pcf::IndiProperty & prop /**< [in] the property to register, must be completely setup */ );
+
+   /// Register an INDI property which is read only.
+   /** This verison sets up the INDI property according to the arguments.
+     *
+     * \returns 0 on success.
+     * \returns -1 on error.
+     *
+     */
+   int registerIndiPropertyReadOnly( pcf::IndiProperty & prop,                               ///< [out] the property to register, will be configured
+                                     const std::string & propName,                           ///< [in] the name of the property
+                                     const pcf::IndiProperty::Type & propType,               ///< [in] the type of the property
+                                     const pcf::IndiProperty::PropertyPermType & propPerm,   ///< [in] the permissions of the property
+                                     const pcf::IndiProperty::PropertyStateType & propState ///< [in] the state of the property
+                                   );
+   
+   /// Register an INDI property which is exposed for others to request a New Property for.
+   /** In this version the supplied IndiProperty must be fully set up before passing in.
+     *
+     * \returns 0 on success.
+     * \returns -1 on error.
+     *
+     */
+   int registerIndiPropertyNew( pcf::IndiProperty & prop,                               ///< [in] the property to register, must be fully set up
+                                int (*)( void *, const pcf::IndiProperty &)             ///< [in] the callback for changing the property
+                              );
+   
+   /// Register an INDI property which is exposed for others to request a New Property for.
+   /** This verison sets up the INDI property according to the arguments.
+     *
+     * \returns 0 on success.
+     * \returns -1 on error.
+     *
      */
    int registerIndiPropertyNew( pcf::IndiProperty & prop,                               ///< [out] the property to register
                                 const std::string & propName,                           ///< [in] the name of the property
@@ -489,16 +535,13 @@ protected:
                                 const pcf::IndiProperty::PropertyStateType & propState, ///< [in] the state of the property
                                 int (*)( void *, const pcf::IndiProperty &)             ///< [in] the callback for changing the property
                               );
-
+   
    /// Register an INDI property which is monitored for updates from others.
    /**
      *
      * \returns 0 on success.
      * \returns -1 on error.
      *
-     * \todo needs error logging
-     * \todo needs exception handling
-     * \todo is a failure to register a FATAL error?
      */
    int registerIndiPropertySet( pcf::IndiProperty & prop,                   ///< [out] the property to register
                                 const std::string & devName,                ///< [in] the device which owns this property
@@ -506,6 +549,7 @@ protected:
                                 int (*)( void *, const pcf::IndiProperty &) ///< [in] the callback for processing the property change
                               );
 
+protected:
    /// Create the INDI FIFOs
    /** Changes permissions to max available and creates the
      * FIFOs at the configured path.
@@ -518,7 +562,7 @@ protected:
      * \returns -1 on error.  This is fatal.
      */
    int startINDI();
-
+   
 public:
 
    void sendGetPropertySetList(bool all=false);
@@ -889,6 +933,7 @@ int MagAOXApp<_useINDI>::execute() //virtual
          state(stateCodes::FAILURE);
          m_shutdown = 1;
       }
+      
    }
 
    //We have to wait for power status to become available
@@ -1396,7 +1441,7 @@ void MagAOXApp<_useINDI>::state(const stateCodes::stateCodeT & s)
       m_state = s;
       m_stateLogged = 0;
    }
-
+   
    //Check to make sure INDI is up to date
    std::unique_lock<std::mutex> lock(m_indiMutex, std::try_to_lock);  //Lock the mutex before conducting INDI communications.
 
@@ -1426,6 +1471,97 @@ int MagAOXApp<_useINDI>::stateLogged()
 /*-------------------------------------------------------------------------------------*/
 
 template<bool _useINDI>
+int MagAOXApp<_useINDI>::registerIndiPropertyReadOnly( pcf::IndiProperty & prop )
+{
+   if(!m_useINDI) return 0;
+
+   callBackInsertResult result =  m_indiNewCallBacks.insert(callBackValueType( prop.getName(), {&prop, nullptr}));
+
+   try 
+   {
+      if(!result.second)
+      {
+         return log<software_error,-1>({__FILE__, __LINE__, "failed to insert INDI property: " + prop.getName()});
+      }
+   }
+   catch( std::exception & e)
+   {
+      return log<software_error, -1>({__FILE__, __LINE__, std::string("Exception caught: ") + e.what()});
+   }
+   catch(...)
+   {
+      return log<software_error, -1>({__FILE__, __LINE__, "Unknown exception caught."});
+   }
+   
+   return 0;
+}
+
+template<bool _useINDI>
+int MagAOXApp<_useINDI>::registerIndiPropertyReadOnly( pcf::IndiProperty & prop,
+                                                       const std::string & propName,
+                                                       const pcf::IndiProperty::Type & propType,
+                                                       const pcf::IndiProperty::PropertyPermType & propPerm,
+                                                       const pcf::IndiProperty::PropertyStateType & propState
+                                                     )
+{
+   if(!m_useINDI) return 0;
+
+   prop = pcf::IndiProperty (propType);
+   prop.setDevice(m_configName);
+   prop.setName(propName);
+   prop.setPerm(propPerm);
+   prop.setState( propState);
+
+
+   callBackInsertResult result =  m_indiNewCallBacks.insert(callBackValueType( propName, {&prop, nullptr}));
+
+   try 
+   {
+      if(!result.second)
+      {
+         return log<software_error,-1>({__FILE__, __LINE__, "failed to insert INDI property: " + prop.getName()});
+      }
+   }
+   catch( std::exception & e)
+   {
+      return log<software_error, -1>({__FILE__, __LINE__, std::string("Exception caught: ") + e.what()});
+   }
+   catch(...)
+   {
+      return log<software_error, -1>({__FILE__, __LINE__, "Unknown exception caught."});
+   }
+   return 0;
+}
+
+template<bool _useINDI>
+int MagAOXApp<_useINDI>::registerIndiPropertyNew( pcf::IndiProperty & prop,
+                                                  int (*callBack)( void *, const pcf::IndiProperty &ipRecv)
+                                                )
+{
+   if(!m_useINDI) return 0;
+
+   try
+   {
+      callBackInsertResult result =  m_indiNewCallBacks.insert(callBackValueType( prop.getName(), {&prop, callBack}));
+
+      if(!result.second)
+      {
+         return log<software_error,-1>({__FILE__, __LINE__, "failed to insert INDI property: " + prop.getName()});
+      }
+   }
+   catch( std::exception & e)
+   {
+      return log<software_error, -1>({__FILE__, __LINE__, std::string("Exception caught: ") + e.what()});
+   }
+   catch(...)
+   {
+      return log<software_error, -1>({__FILE__, __LINE__, "Unknown exception caught."});
+   }
+   
+   return 0;
+}
+
+template<bool _useINDI>
 int MagAOXApp<_useINDI>::registerIndiPropertyNew( pcf::IndiProperty & prop,
                                                   const std::string & propName,
                                                   const pcf::IndiProperty::Type & propType,
@@ -1445,11 +1581,21 @@ int MagAOXApp<_useINDI>::registerIndiPropertyNew( pcf::IndiProperty & prop,
 
    callBackInsertResult result =  m_indiNewCallBacks.insert(callBackValueType( propName, {&prop, callBack}));
 
-   if(!result.second)
+   try 
    {
-      return -1;
+      if(!result.second)
+      {
+         return log<software_error,-1>({__FILE__, __LINE__, "failed to insert INDI property: " + prop.getName()});
+      }
    }
-
+   catch( std::exception & e)
+   {
+      return log<software_error, -1>({__FILE__, __LINE__, std::string("Exception caught: ") + e.what()});
+   }
+   catch(...)
+   {
+      return log<software_error, -1>({__FILE__, __LINE__, "Unknown exception caught."});
+   }
    return 0;
 }
 
@@ -1468,11 +1614,22 @@ int MagAOXApp<_useINDI>::registerIndiPropertySet( pcf::IndiProperty & prop,
 
    callBackInsertResult result =  m_indiSetCallBacks.insert(callBackValueType( devName + "." + propName, {&prop, callBack}));
 
-   if(!result.second)
+   try 
    {
-      return -1;
+      if(!result.second)
+      {
+         return log<software_error,-1>({__FILE__, __LINE__, "failed to insert INDI property: " + prop.createUniqueKey()});
+      }
    }
-
+   catch( std::exception & e)
+   {
+      return log<software_error, -1>({__FILE__, __LINE__, std::string("Exception caught: ") + e.what()});
+   }
+   catch(...)
+   {
+      return log<software_error, -1>({__FILE__, __LINE__, "Unknown exception caught."});
+   }
+   
    return 0;
 }
 
