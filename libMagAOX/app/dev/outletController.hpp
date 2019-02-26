@@ -638,7 +638,7 @@ template<class derivedT>
 int outletController<derivedT>::setupINDI()
 {
    //Register the static INDI properties
-   m_indiP_chOutlets = pcf::IndiProperty ();
+   m_indiP_chOutlets = pcf::IndiProperty(pcf::IndiProperty::Text);
    m_indiP_chOutlets.setDevice(static_cast<derivedT *>(this)->configName());
    m_indiP_chOutlets.setName("channelOutlets");
    m_indiP_chOutlets.setPerm(pcf::IndiProperty::ReadOnly);
