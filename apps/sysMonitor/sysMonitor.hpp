@@ -24,6 +24,8 @@
 #include <sstream>
 #include <algorithm>
 #include <iterator>
+#include <sys/wait.h>
+
 
 namespace MagAOX
 {
@@ -242,6 +244,10 @@ public:
       float&    /**< [out] the return value for current RAM usage*/
    );
 
+   std::vector<std::string> runCommand(
+    std::vector<std::string>
+   );
+
 };
 
 inline sysMonitor::sysMonitor() : MagAOXApp(MAGAOX_CURRENT_SHA1, MAGAOX_REPO_MODIFIED)
@@ -428,28 +434,10 @@ int sysMonitor::appShutdown()
 
 int sysMonitor::findCPUTemperatures(std::vector<float>& temps) 
 {
-   std::string command{"sensors > /dev/shm/sensors_out"};
-   std::string line;
-
-   // For core temps
-   int rv = system(command.c_str());
-   if(rv == -1) //system call error
-   {
-      log<software_error>({__FILE__, __LINE__,"Could not complete CPU temperature `system` command."});
-      return -1;
-   }
-
-   std::ifstream inFile;
-   inFile.open("/dev/shm/sensors_out");
-   if (!inFile) 
-   {
-      log<software_error>({__FILE__, __LINE__,"Could not open CPU temperature value file."});
-      return -1;
-   }
-
-   rv = -1;
-   while (getline (inFile,line)) 
-   {
+   std::vector<std::string> commandList{"sensors"};
+   std::vector<std::string> commandOutput = runCommand(commandList);
+   int rv = -1;
+   for (auto line: commandOutput) {  
       float tempVal;
       if (parseCPUTemperatures(line, tempVal) == 0)
       {
@@ -457,7 +445,6 @@ int sysMonitor::findCPUTemperatures(std::vector<float>& temps)
          rv = 0;
       }
    }
-
    return rv;
 }
 
@@ -558,34 +545,17 @@ int sysMonitor::criticalCoreTemperature(std::vector<float>& v)
 
 int sysMonitor::findCPULoads(std::vector<float>& loads) 
 {
-   std::string command{"mpstat -P ALL > /dev/shm/cpuload"};
-   std::string line;
-   // For cpu load
-   int rv = system(command.c_str());
-   if(rv == -1) //system call error
-   {
-      log<software_error>({__FILE__, __LINE__,"Could not complete CPU core usage `system` command."});
-      return -1;
+   std::vector<std::string> commandList{"mpstat", "-P", "ALL"};
+   std::vector<std::string> commandOutput = runCommand(commandList);
+   int rv = -1;
+   // If output lines are less than 5 (with one CPU, guarenteed output is 5)
+   if (commandOutput.size() < 5) {
+      return rv;
    }
-
-   std::ifstream inFile;
-   inFile.open("/dev/shm/cpuload");
-   if (!inFile) 
-   {
-      log<software_error>({__FILE__, __LINE__,"Could not open CPU core usage value file."});
-      return -1;
-   }
-
-   // Want to start parsing at fifth line
-   for (auto i{0}; i < 4; i++) {
-      getline (inFile,line);
-   }
-   
-   rv = -1;
-   while (getline (inFile,line)) 
-   {
+   //start iterating at fourth line
+   for (auto line = commandOutput.begin()+4; line != commandOutput.end(); line++) {
       float loadVal;
-      if (parseCPULoads(line, loadVal) == 0) 
+      if (parseCPULoads(*line, loadVal) == 0) 
       {
          loads.push_back(loadVal);
          rv = 0;
@@ -619,27 +589,10 @@ int sysMonitor::parseCPULoads(std::string line, float& loadVal)
 
 int sysMonitor::findDiskTemperature(std::vector<float>& hdd_temp) 
 {
-   std::string command{"hddtemp > /dev/shm/hddtemp"};
-   std::string line;
-
-   int rv = system(command.c_str());
-   if(rv == -1) //system call error
-   {
-      log<software_error>({__FILE__, __LINE__,"Invalid read occured when parsing drive temperatures."});
-      return -1;
-   }
-
-   std::ifstream inFile;
-   inFile.open("/dev/shm/hddtemp");
-   if (!inFile) 
-   {
-      log<software_error>({__FILE__, __LINE__,"Could not open drive temperature value file."});
-      return -1;
-   }
-
-   rv = -1;
-   while (getline (inFile,line)) 
-   {
+   std::vector<std::string> commandList{"hddtemp"};
+   std::vector<std::string> commandOutput = runCommand(commandList);
+   int rv = -1;
+   for (auto line: commandOutput) {  
       float tempVal;
       if (parseDiskTemperature(line, tempVal) == 0)
       {
@@ -647,7 +600,6 @@ int sysMonitor::findDiskTemperature(std::vector<float>& hdd_temp)
          rv = 0;
       }
    }
-
    return rv;
 }
 
@@ -716,33 +668,15 @@ int sysMonitor::criticalDiskTemperature(std::vector<float>& v)
 
 int sysMonitor::findDiskUsage(float &rootUsage, float &dataUsage, float &bootUsage) 
 {
-   std::string command{"df > /dev/shm/diskusage"};
-   std::string line;
-   // For disk usage
-   int rv = system(command.c_str());
-   if(rv == -1) //system call error
-   {
-      log<software_error>({__FILE__, __LINE__,"Could not complete drive usage `system` command."});
-      return -1;
-   }
-
-   std::ifstream inFile;
-   inFile.open("/dev/shm/diskusage");
-   if (!inFile) 
-   {
-      log<software_error>({__FILE__, __LINE__,"Could not open drive usage value file."});
-      return -1;
-   }
-
-   rv = -1;
-   while(getline(inFile,line)) 
-   {
+   std::vector<std::string> commandList{"df"};
+   std::vector<std::string> commandOutput = runCommand(commandList);
+   int rv = -1;
+   for (auto line: commandOutput) {  
       int rvDiskUsage = parseDiskUsage(line, rootUsage, dataUsage, bootUsage);
       if (rvDiskUsage == 0) {
          rv = 0;
       }
    }
-
    return rv;
 }
 
@@ -802,25 +736,9 @@ int sysMonitor::parseDiskUsage(std::string line, float& rootUsage, float& dataUs
 
 int sysMonitor::findRamUsage(float& ramUsage) 
 {
-   std::string command{"free -m > /dev/shm/ramusage"};
-   std::string line;
-   // For ram usage
-   int rv = system(command.c_str());
-   if(rv == -1) //system call error
-   {
-      log<software_error>({__FILE__, __LINE__,"Could not complete RAM usage `system` command."});
-      return -1;
-   }
-
-   std::ifstream inFile;
-   inFile.open("/dev/shm/ramusage");
-   if (!inFile) 
-   {
-      log<software_error>({__FILE__, __LINE__,"Could not open RAM usage value file."});
-      return -1;
-   }
-
-   while (getline (inFile,line)) {
+   std::vector<std::string> commandList{"free", "-m"};
+   std::vector<std::string> commandOutput = runCommand(commandList);
+   for (auto line: commandOutput) {  
       if (parseRamUsage(line, ramUsage) == 0)
       {
         return 0;
@@ -891,6 +809,52 @@ int sysMonitor::updateVals()
    );
 
    return 0;
+}
+
+std::vector<std::string> sysMonitor::runCommand( std::vector<std::string> commandList) {
+   int link[2];
+   pid_t pid;
+   char foo[4096];
+   std::vector<std::string> commandOutput;
+
+   if (pipe(link)==-1) {
+      perror("Pipe error");
+      return commandOutput;
+   }
+
+   if ((pid = fork()) == -1) {
+      perror("Fork error");
+      return commandOutput;
+   }
+
+   if(pid == 0) {
+      dup2 (link[1], STDOUT_FILENO);
+      close(link[0]);
+      close(link[1]);
+      std::vector<const char *>charCommandList( commandList.size()+1, NULL);
+      for(int index = 0; index < (int) commandList.size(); ++index)
+      {
+         charCommandList[index]=commandList[index].c_str();
+      }
+      execvp( charCommandList[0], const_cast<char**>(charCommandList.data()));
+      perror("exec");
+      return commandOutput;
+   } else {
+      wait(NULL);
+      close(link[1]);
+      if (read(link[0], foo, sizeof(foo)) < 0) {
+         perror("Read");
+         return commandOutput;
+      }
+      std::string line{};
+      std::string foo2(foo);
+      std::istringstream iss(foo2);
+      while (getline(iss, line)) {
+         commandOutput.push_back(line);
+      }
+      wait(NULL);
+   }
+   return commandOutput;
 }
 
 
