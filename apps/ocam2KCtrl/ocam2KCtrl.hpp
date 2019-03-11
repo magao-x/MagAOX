@@ -1077,7 +1077,7 @@ void ocam2KCtrl::fgThreadExec()
          //Ok, no timeout, so we process the image and publish it.
          imageStream.md[0].write=1;
          ocam2_descramble(id, &currImageNumber, imageStream.array.SI16, (short int *) image_p);
-         imageStream.md[0].atime.ts = timeStamp;
+         imageStream.md[0].atime = timeStamp;
          imageStream.md[0].cnt0++;
          imageStream.md[0].cnt1++;
          imageStream.md[0].write=0;
