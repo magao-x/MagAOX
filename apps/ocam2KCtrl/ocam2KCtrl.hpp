@@ -1138,7 +1138,7 @@ void ocam2KCtrl::fgThreadExec()
          //Ok, no timeout, so we process the image and publish it.
          imageStream.md[0].write=1; ///\todo make sure rtimv skips image if write=1
          ocam2_descramble(id, &currImageNumber, imageStream.array.SI16, (short int *) image_p);
-         imageStream.md[0].atime.ts = timeStamp;
+         imageStream.md[0].atime = timeStamp;
          imageStream.md[0].cnt0++;
          imageStream.md[0].cnt1++; ///\todo this is wrong, needs to be 0 if needed, and needs to be done *before* image write for cube handling.
          imageStream.md[0].write=0;
