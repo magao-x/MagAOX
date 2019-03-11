@@ -247,8 +247,8 @@ public:
    /// Runs a command (with parameters) passed in using fork/exec
    /** New process is made with fork(), and child runs execvp with command provided
     * 
-    * \returns output of command, contained in a vector if strings
-    * If an error occurs during the process, an empty vector is returned.
+    * \returns output of command, contained in a vector of strings
+    * If an error occurs during the process, an empty vector of strings is returned.
     */
    std::vector<std::string> runCommand(
     std::vector<std::string>    /**< [in] command to be run, with any subsequent parameters stored after*/
@@ -349,7 +349,8 @@ int sysMonitor::appLogic()
    
    coreLoads.clear();
    int rvCPULoad = findCPULoads(coreLoads);
-   if (rvCPULoad >= 0) {
+   if (rvCPULoad >= 0) 
+   {
       for (auto i: coreLoads)
       {
          std::cout << "CPU load: " << i << ' ';
@@ -424,7 +425,8 @@ int sysMonitor::appLogic()
       std::cout << "Ram usage: " << ramUsage << std::endl;
       log<ram_usage>({ramUsage}, logPrio::LOG_INFO);
    }
-   else {
+   else 
+   {
       log<software_error>({__FILE__, __LINE__,"Could not log values for RAM usage."});
    }
 
@@ -443,7 +445,8 @@ int sysMonitor::findCPUTemperatures(std::vector<float>& temps)
    std::vector<std::string> commandList{"sensors"};
    std::vector<std::string> commandOutput = runCommand(commandList);
    int rv = -1;
-   for (auto line: commandOutput) {  
+   for (auto line: commandOutput) 
+   {  
       float tempVal;
       if (parseCPUTemperatures(line, tempVal) == 0)
       {
@@ -555,11 +558,13 @@ int sysMonitor::findCPULoads(std::vector<float>& loads)
    std::vector<std::string> commandOutput = runCommand(commandList);
    int rv = -1;
    // If output lines are less than 5 (with one CPU, guarenteed output is 5)
-   if (commandOutput.size() < 5) {
+   if (commandOutput.size() < 5) 
+   {
       return rv;
    }
    //start iterating at fourth line
-   for (auto line = commandOutput.begin()+4; line != commandOutput.end(); line++) {
+   for (auto line = commandOutput.begin()+4; line != commandOutput.end(); line++) 
+   {
       float loadVal;
       if (parseCPULoads(*line, loadVal) == 0) 
       {
@@ -598,7 +603,8 @@ int sysMonitor::findDiskTemperature(std::vector<float>& hdd_temp)
    std::vector<std::string> commandList{"hddtemp"};
    std::vector<std::string> commandOutput = runCommand(commandList);
    int rv = -1;
-   for (auto line: commandOutput) {  
+   for (auto line: commandOutput) 
+   {  
       float tempVal;
       if (parseDiskTemperature(line, tempVal) == 0)
       {
@@ -676,9 +682,11 @@ int sysMonitor::findDiskUsage(float &rootUsage, float &dataUsage, float &bootUsa
    std::vector<std::string> commandList{"df"};
    std::vector<std::string> commandOutput = runCommand(commandList);
    int rv = -1;
-   for (auto line: commandOutput) {  
+   for (auto line: commandOutput) 
+   {  
       int rvDiskUsage = parseDiskUsage(line, rootUsage, dataUsage, bootUsage);
-      if (rvDiskUsage == 0) {
+      if (rvDiskUsage == 0) 
+      {
          rv = 0;
       }
    }
@@ -743,7 +751,8 @@ int sysMonitor::findRamUsage(float& ramUsage)
 {
    std::vector<std::string> commandList{"free", "-m"};
    std::vector<std::string> commandOutput = runCommand(commandList);
-   for (auto line: commandOutput) {  
+   for (auto line: commandOutput) 
+   {  
       if (parseRamUsage(line, ramUsage) == 0)
       {
         return 0;
@@ -820,7 +829,7 @@ std::vector<std::string> sysMonitor::runCommand( std::vector<std::string> comman
 {
    int link[2];
    pid_t pid;
-   char foo[4096];
+   char commandOutput_c[4096];
    std::vector<std::string> commandOutput;
 
    if (pipe(link)==-1) 
@@ -835,7 +844,8 @@ std::vector<std::string> sysMonitor::runCommand( std::vector<std::string> comman
       return commandOutput;
    }
 
-   if(pid == 0) {
+   if(pid == 0) 
+   {
       dup2 (link[1], STDOUT_FILENO);
       close(link[0]);
       close(link[1]);
@@ -848,24 +858,25 @@ std::vector<std::string> sysMonitor::runCommand( std::vector<std::string> comman
       perror("exec");
       return commandOutput;
    }
-   else {
+   else 
+   {
       wait(NULL);
       close(link[1]);
-      if (read(link[0], foo, sizeof(foo)) < 0) 
+      if (read(link[0], commandOutput_c, sizeof(commandOutput_c)) < 0) 
       {
-         perror("Read");
+         perror("Read error");
          return commandOutput;
       }
       std::string line{};
-      std::string foo2(foo);
-      std::istringstream iss(foo2);
+      std::string commandOutputString(commandOutput_c);
+      std::istringstream iss(commandOutputString);
       while (getline(iss, line)) 
       {
          commandOutput.push_back(line);
       }
       wait(NULL);
+      return commandOutput;
    }
-   return commandOutput;
 }
 
 
