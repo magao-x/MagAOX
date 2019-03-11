@@ -124,13 +124,20 @@ protected:
    /** \name configurable parameters 
      *@{
      */ 
+   //Framegrabber:
    int m_unit {0}; ///< EDT PDV board unit number
    int m_channel {0}; ///< EDT PDV board channel number
    int m_numBuffs {4}; ///< EDT PDV DMA buffer size, indicating number of images.
    
+   int m_fgThreadPrio {1}; ///< Priority of the framegrabber thread, should normally be > 00.
+
+   std::string m_shmemName {"ocam2k"}; ///< The name of the shared memory image, is used in `/tmp/<shmemName>.im.shm`.  Default is `ocam2k`.
+   
+   int m_shmemCubeSz {1}; ///< The size of the shared memory image cube.  Default is 1.
+
+   //Camera:
    unsigned long m_powerOnWait {10}; ///< Time in sec to wait for camera boot after power on.
 
-   
    cameraConfigMap m_cameraModes; ///< Map holding the possible camera mode configurations
    
    float m_startupTemp {20.0}; ///< The temperature to set after a power-on.
@@ -171,6 +178,8 @@ protected:
    bool m_resetFPS {false};
    bool m_reconfig {false};
    
+   unsigned m_emGain {1};
+   
 public:
 
    ///Default c'tor
@@ -208,14 +217,19 @@ public:
    
    
    int getTemps();
+   
    int setTemp(float temp);
    
    int getFPS();
+   
    int setFPS(float fps);
+   
+   int getEMGain();
+   
+   int setEMGain( unsigned emg );
    
 protected:
    
-   int m_fgThreadPrio {1}; ///< Priority of the framegrabber thread, should normally be > 00.
 
    std::thread m_fgThread; ///< A separate thread for the actual framegrabbings
 
@@ -236,11 +250,13 @@ protected:
    pcf::IndiProperty m_indiP_temps;
    pcf::IndiProperty m_indiP_mode;
    pcf::IndiProperty m_indiP_fps;
+   pcf::IndiProperty m_indiP_emGain;
 
 public:
    INDI_NEWCALLBACK_DECL(ocam2KCtrl, m_indiP_ccdtemp);
    INDI_NEWCALLBACK_DECL(ocam2KCtrl, m_indiP_mode);
    INDI_NEWCALLBACK_DECL(ocam2KCtrl, m_indiP_fps);
+   INDI_NEWCALLBACK_DECL(ocam2KCtrl, m_indiP_emGain);
 
 };
 
@@ -269,10 +285,16 @@ void ocam2KCtrl::setupConfig()
    config.add("framegrabber.numBuffs", "", "framegrabber.numBuffs", argType::Required, "framegrabber", "numBuffs", false, "int", "The EDT PDV framegrabber DMA buffer size [images].  Default is 4.");
    config.add("framegrabber.threadPrio", "", "framegrabber.threadPrio", argType::Required, "framegrabber", "threadPrio", false, "int", "The real-time priority of the fraemgrabber thread.");
    
+   config.add("framegrabber.shmemName", "", "framegrabber.shmemName", argType::Required, "framegrabber", "shmemName", false, "string", "The name of the ImageStreamIO shared memory image. Will be used as /tmp/<shmemName>.im.shm.");
+   
+   config.add("framegrabber.shmemCubeSz", "", "framegrabber.shmemCubeSz", argType::Required, "framegrabber", "shmemCubeSz", false, "int", "The cube size (number of images) in the shared memory buffer.");
    
    config.add("camera.powerOnWait", "", "camera.powerOnWait", argType::Required, "camera", "powerOnWait", false, "int", "Time after power-on to begin attempting connections [sec].  Default is 10 sec.");
+   
    config.add("camera.startupTemp", "", "camera.startupTemp", argType::Required, "camera", "startupTemp", false, "float", "The temperature setpoint to set after a power-on [C].  Default is 20 C.");
+   
    config.add("camera.startupMode", "", "camera.startupMode", argType::Required, "camera", "startupMode", false, "string", "The name of the configuration to set at startup.");
+   
    config.add("camera.ocamDescrambleFile", "", "camera.ocamDescrambleFile", argType::Required, "camera", "ocamDescrambleFile", false, "string", "The path of the OCAM descramble file, relative to MagAOX/config.");
    
    dev::ioDevice::setupConfig(config);
@@ -287,6 +309,8 @@ void ocam2KCtrl::loadConfig()
    config(m_channel, "framegrabber.pdv_channel");
    config(m_numBuffs, "framegrabber.numBuffs");
    config(m_fgThreadPrio, "framegrabber.threadPrio");
+   config(m_shmemName, "framegrabber.shmemName");
+   config(m_shmemCubeSz, "framegrabber.shmemCubeSz");
    
    config(m_powerOnWait, "camera.powerOnWait");
    config(m_startupTemp, "camera.startupTemp");
@@ -403,6 +427,11 @@ int ocam2KCtrl::appStartup()
    m_indiP_fps.add (pcf::IndiElement("target"));
    m_indiP_fps.add (pcf::IndiElement("measured"));
 
+   REG_INDI_NEWPROP(m_indiP_emGain, "emgain", pcf::IndiProperty::Number);
+   m_indiP_emGain.add (pcf::IndiElement("current"));
+   m_indiP_emGain["current"].set(m_emGain);
+   m_indiP_emGain.add (pcf::IndiElement("target"));
+   
    if(pdvConfig(m_startupMode) < 0) 
    {
       log<software_error>({__FILE__, __LINE__});
@@ -543,6 +572,9 @@ int ocam2KCtrl::onPowerOff()
    updateIfChanged(m_indiP_fps, "current", 0);
    updateIfChanged(m_indiP_fps, "target", 0);
    updateIfChanged(m_indiP_fps, "measured", 0);
+   
+   updateIfChanged(m_indiP_emGain, "current", 0);
+   updateIfChanged(m_indiP_emGain, "target", 0);
    
    return 0;
 }
@@ -777,6 +809,35 @@ int ocam2KCtrl::setFPS(float fps)
 }
 
 inline
+int ocam2KCtrl::getEMGain()
+{
+   std::string response;
+
+   if( pdvSerialWriteRead( response, m_pdv, "gain", m_readTimeout) == 0)
+   {
+      unsigned emGain;
+      if(parseEMGain( emGain, response ) < 0) 
+      {
+         if(m_powerState == 0) return -1;
+         return log<software_error, -1>({__FILE__, __LINE__, "EM Gain parse error"});
+      }
+      m_emGain = emGain;
+
+      updateIfChanged(m_indiP_emGain, "current", m_emGain);
+      
+      return 0;
+
+   }
+   else return log<software_error,-1>({__FILE__, __LINE__});
+}
+   
+inline
+int ocam2KCtrl::setEMGain( unsigned emg )
+{
+   return 0;
+}
+   
+inline
 void ocam2KCtrl::_fgThreadStart( ocam2KCtrl * o)
 {
    o->fgThreadExec();
@@ -927,7 +988,7 @@ void ocam2KCtrl::fgThreadExec()
       imsize[0] = OCAM_SZ;
       imsize[1] = OCAM_SZ;
       imsize[2] = 1;
-      ImageStreamIO_createIm(&imageStream, "ocam2k", 2, imsize, _DATATYPE_INT16, 1, 0);
+      ImageStreamIO_createIm(&imageStream, m_shmemName.c_str(), 2, imsize, _DATATYPE_INT16, 1, 0);
 
       /*
        * allocate four buffers for optimal pdv ring buffer pipeline (reduce if
@@ -1075,11 +1136,11 @@ void ocam2KCtrl::fgThreadExec()
          
          
          //Ok, no timeout, so we process the image and publish it.
-         imageStream.md[0].write=1;
+         imageStream.md[0].write=1; ///\todo make sure rtimv skips image if write=1
          ocam2_descramble(id, &currImageNumber, imageStream.array.SI16, (short int *) image_p);
          imageStream.md[0].atime.ts = timeStamp;
          imageStream.md[0].cnt0++;
-         imageStream.md[0].cnt1++;
+         imageStream.md[0].cnt1++; ///\todo this is wrong, needs to be 0 if needed, and needs to be done *before* image write for cube handling.
          imageStream.md[0].write=0;
          ImageStreamIO_sempost(&imageStream,-1);
  
@@ -1230,6 +1291,38 @@ INDI_NEWCALLBACK_DEFN(ocam2KCtrl, m_indiP_fps)(const pcf::IndiProperty &ipRecv)
    }
    return -1;
 }
+
+INDI_NEWCALLBACK_DEFN(ocam2KCtrl, m_indiP_emGain)(const pcf::IndiProperty &ipRecv)
+{
+   if (ipRecv.getName() == m_indiP_emGain.getName())
+   {
+      unsigned current = 0, target = 0;
+
+      if(ipRecv.find("current")
+      {
+         current = ipRecv["current"].get<unsigned>();
+      }
+
+      if(ipRecv.find("target")
+      {
+         target = ipRecv["target"].get<unsigned>();
+      }
+      
+      if(target == 0) target = current;
+      
+      if(target == 0) return 0;
+      
+      //Lock the mutex, waiting if necessary
+      std::unique_lock<std::mutex> lock(m_indiMutex);
+
+      updateIfChanged(m_indiP_emGain, "target", target);
+      
+      return setEMGain(target);
+      
+   }
+   return -1;
+}
+
 }//namespace app
 } //namespace MagAOX
 #endif
