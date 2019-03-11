@@ -28,12 +28,14 @@
 #define TTY_E_DEVNOTFOUND        (-42023)
 #define TTY_E_BADBAUDRATE        (-42030)
 
+#define TELNET_E_NOERROR            (0)
 #define TELNET_E_GETADDR            (-42040)
 #define TELNET_E_SOCKET             (-42041)
 #define TELNET_E_BIND               (-42042)
 #define TELNET_E_CONNECT            (-42043)
 #define TELNET_E_TELNETINIT         (-42044)
 #define TELNET_E_EHERROR            (-42045)
+#define TELNET_E_LOGINTIMEOUT       (-42046)
 
 namespace MagAOX 
 {
@@ -98,6 +100,8 @@ std::string ttyErrorString( int ec /**< [in] the error code */ )
          return "TTY: failed to init telnet_t structure";
       case TELNET_E_EHERROR:
          return "TTY: error set in telnet event handler";
+      case TELNET_E_LOGINTIMEOUT:
+         return "TTY: login timed out";
       default:
          return "TTY: unknown error code";
    };

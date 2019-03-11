@@ -28,7 +28,7 @@ class siglentSDG : public MagAOXApp<>
 
    constexpr static double cs_MaxAmp = 0.87;
    constexpr static double cs_MaxOfst = 10.0;
-   constexpr static double cs_MaxFreq = 1000.0;
+   constexpr static double cs_MaxFreq = 3623.0;
 
 protected:
 

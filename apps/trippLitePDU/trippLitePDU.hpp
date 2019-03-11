@@ -54,6 +54,7 @@ protected:
    std::string m_devicePort; ///< The device port
    std::string m_deviceUsername; ///< The login username for this device
    std::string m_devicePassFile; ///< The login password for this device
+   int m_deviceVersion {0}; ///< Version 0 = the old PDUs, version 1 = new PDUMH15NET2LX, which is a new login procedure to get to the CLI.
 
    float m_freqLowWarn {59};    ///< The low-frequency warning threshold
    float m_freqHighWarn {61};   ///< The high-frequency warning threshold
@@ -162,7 +163,8 @@ trippLitePDU::trippLitePDU() : MagAOXApp(MAGAOX_CURRENT_SHA1, MAGAOX_REPO_MODIFI
 {
    m_firstOne = true;
    setNumberOfOutlets(8);
-
+   m_loopPause=2000000000;//Default to 2 sec loop pause to lessen the load on the PDUs.
+   
    return;
 }
 
@@ -172,6 +174,7 @@ void trippLitePDU::setupConfig()
    config.add("device.port", "p", "device.port", argType::Required, "device", "port", false, "string", "The device port.");
    config.add("device.username", "u", "device.username", argType::Required, "device", "username", false, "string", "The device login username.");
    config.add("device.passfile", "", "device.passfile", argType::Required, "device", "passfile", false, "string", "The device login password file (relative to secrets dir).");
+   config.add("device.powerAlertVersion", "", "device.powerAlertVersion", argType::Required, "device", "powerAlertVersion", false, "int", "The device network interface version.  0 is PDU..., 1 is newer LX platform.");
 
    dev::ioDevice::setupConfig(config);
    config.add("device.outletStateDelay", "", "device.outletStateDelay", argType::Required, "device", "outletStateDelay", false, "int", "The maximum time to wait for an outlet to change state [msec]. Default = 5000");
@@ -205,7 +208,8 @@ void trippLitePDU::loadConfig()
    config(m_devicePort, "device.port");
    config(m_deviceUsername, "device.username");
    config(m_devicePassFile, "device.passfile");
-
+   config(m_deviceVersion, "device.powerAlertVersion");
+   
    dev::ioDevice::loadConfig(config);
 
    config(m_outletStateDelay, "timeouts.outletStateDelay");
@@ -261,6 +265,7 @@ int trippLitePDU::appLogic()
       static int lastrv = 0; //Used to handle a change in error within the same state.  Make general?
       static int lasterrno = 0;
        
+      
       int rv = m_telnetConn.connect(m_deviceAddr, m_devicePort);
 
       if(rv == 0)
@@ -298,6 +303,13 @@ int trippLitePDU::appLogic()
 
    if( state() == stateCodes::CONNECTED )
    {
+      //Newer version of power alert changed login (at least the first one)
+      if(m_deviceVersion > 0)
+      {
+         m_telnetConn.m_usernamePrompt = "login:";
+         m_telnetConn.m_prompt = ">>";
+      }
+      
       int rv = m_telnetConn.login("localadmin", "localadmin");
 
       if(rv == 0)
@@ -306,6 +318,13 @@ int trippLitePDU::appLogic()
       }
       else
       {
+         if(rv == TELNET_E_LOGINTIMEOUT)
+         {
+            state(stateCodes::NOTCONNECTED);
+            log<text_log>("login timedout", logPrio::LOG_ERROR);
+            return 0;
+         }
+         
          state(stateCodes::FAILURE);
          log<text_log>("login failure", logPrio::LOG_CRITICAL);
          return -1;
@@ -313,7 +332,14 @@ int trippLitePDU::appLogic()
    }
 
    if(state() == stateCodes::LOGGEDIN)
-   {
+   {  
+      //For newer version of power alert we need to select C.L.I.
+      if(m_deviceVersion > 0)
+      {
+         m_telnetConn.writeRead("E\n", false, m_writeTimeout, m_readTimeout);
+      
+         m_telnetConn.m_prompt = "$> ";
+      }
       state(stateCodes::READY);
    }
 
@@ -503,77 +529,117 @@ int trippLitePDU::turnOutletOff( int outletNum )
 }
 
 int trippLitePDU::parsePDUStatus( std::string & strRead )
-{
-   std::string status;
-   float frequency, current, voltage;
-   std::vector<int> outletStates(m_outletStates.size(),OUTLET_STATE_OFF);
+{  
+   size_t eol = 0;
+   size_t curpos = 0;
 
-   std::string pstr = mx::ioutils::removeWhiteSpace(strRead);
+   curpos = strRead.find_first_of("\r\n", curpos);
 
-   size_t st = pstr.find("Status:", 0);
-   if( st == std::string::npos ) return -1;
+   std::string sstr;
 
-   st = pstr.find(':', st) + 1;
-   if( st == std::string::npos ) return -2;
-
-   size_t ed = pstr.find('I', st);
-   if( ed == std::string::npos ) return -3;
-
-   status = pstr.substr(st, ed-st);
-
-   st = pstr.find(':', ed) + 1;
-   if( st == std::string::npos ) return -4;
-
-   ed = pstr.find('V', st);
-   if( ed == std::string::npos ) return -5;
-
-   voltage = mx::ioutils::convertFromString<float>( pstr.substr(st, ed-st) );
-
-   st = pstr.find(':', ed) + 1;
-   if( st == std::string::npos ) return -6;
-
-   ed = pstr.find('H', st);
-   if( ed == std::string::npos ) return -7;
-
-   frequency = mx::ioutils::convertFromString<float>( pstr.substr(st, ed-st) );
-
-   st = pstr.find(':', ed) + 1;
-   if( st == std::string::npos ) return -8;
-   st = pstr.find(':', st) + 1;
-   if( st == std::string::npos ) return -9;
-   ed = pstr.find('A', st);
-   if( ed == std::string::npos ) return -10;
-
-   current = mx::ioutils::convertFromString<float>( pstr.substr(st, ed-st) );
-
-   st = pstr.find("On:", ed) + 3;
-   if( st != std::string::npos )
+   while(curpos < strRead.size())
    {
-      char ch = pstr[st];
-      while(isdigit(ch) && st < pstr.size())
+
+      eol = strRead.find_first_of("\r\n", curpos);
+
+      if(eol == std::string::npos) eol = strRead.size();
+
+      if(eol == curpos)
       {
-         int onum = ch - '0';
-         if(onum > 0 && onum < 9)
-         {
-            outletStates[onum-1] = OUTLET_STATE_ON; //this outlet is on.
-         }
-         ++st;
-         if(st > pstr.size()-1) break;
-         ch = pstr[st];
+         curpos = eol + 1;
+         continue;
       }
+
+      sstr = strRead.substr(curpos, eol-curpos);
+      curpos = eol + 1;
+
+      if(sstr[0] == '-' || sstr[0] == '0' || sstr[0] == 'L' || sstr[0] == ' ' || sstr[0] == 'D' || sstr[0] == '$') continue;
+
+      if(sstr[0] == 'I')
+      {
+         if(sstr[6] == 'V') 
+         {
+            size_t begin = sstr.find(' ',6);
+            if(begin == std::string::npos) return -1;
+            
+            begin = sstr.find_first_not_of(' ', begin);
+            if(begin == std::string::npos) return -1;
+            
+            size_t end = sstr.find('V', begin);
+            if(end == std::string::npos) return -1;
+            
+            float V = mx::ioutils::convertFromString<float>( sstr.substr(begin, end-begin) );
+            
+            m_voltage = V;
+         }
+         
+         else if(sstr[6] == 'F') 
+         {
+            size_t begin = sstr.find(' ',6);
+            if(begin == std::string::npos) return -1;
+            
+            begin = sstr.find_first_not_of(' ', begin);
+            if(begin == std::string::npos) return -1;
+            
+            size_t end = sstr.find('H', begin);
+            if(end == std::string::npos) return -1;
+            
+            float F = mx::ioutils::convertFromString<float>( sstr.substr(begin, end-begin) );
+            
+            m_frequency = F;
+         }
+         else return -1;
+      }
+      else if(sstr[0] == 'O')
+      {
+         if(sstr[7] == 'C') 
+         {
+            size_t begin = sstr.find(' ',6);
+            if(begin == std::string::npos) return -1;
+            
+            begin = sstr.find_first_not_of(' ', begin);
+            if(begin == std::string::npos) return -1;
+            
+            size_t end = sstr.find('A', begin);
+            if(end == std::string::npos) return -1;
+            
+            float C = mx::ioutils::convertFromString<float>( sstr.substr(begin, end-begin) );
+            
+            m_current = C;
+         }
+         else if(sstr[8] == 'O') 
+         {
+            std::vector<int> outletStates(m_outletStates.size(),OUTLET_STATE_OFF);
+            
+            size_t begin = sstr.find(' ',8);
+            if(begin == std::string::npos) return -1; 
+            
+            begin = sstr.find_first_not_of(' ', begin);
+            if(begin == std::string::npos) return -1;
+               
+            while(begin < sstr.size())
+            {
+               size_t end = sstr.find(' ', begin);
+               if(end == std::string::npos) end = sstr.size();
+               
+               int onum = atoi(sstr.substr(begin, end-begin).c_str());
+               
+               if(onum > 0 && onum < 9)
+               {
+                  outletStates[onum-1] = OUTLET_STATE_ON; //this outlet is on.
+               }
+               begin = sstr.find_first_not_of(' ', end+1);
+            }
+               
+            for(size_t i=0;i<m_outletStates.size();++i) m_outletStates[i]=outletStates[i];
+         }
+         else return -1;
+      }
+      else return -1;
    }
 
-   //Ok, we're here with no errors.  Now update members.
-   m_status = status;
-   m_frequency = frequency;
-   m_voltage = voltage;
-   m_current = current;
-   for(size_t i=0;i<m_outletStates.size();++i) m_outletStates[i]=outletStates[i];
-
    return 0;
-
 }
-
 
 } //namespace app
 } //namespace MagAOX

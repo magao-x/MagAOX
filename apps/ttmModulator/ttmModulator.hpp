@@ -358,7 +358,7 @@ int ttmModulator::calcState()
       // -- sine wave freq is 0 or amp is 0.002
       // -- offset V is at setVoltage
       // -- phase is 0
-      if(m_C1ofst == m_setVoltage_1 && m_C2ofst == m_setVoltage_2 && m_C1phse == 0 && m_C2phse == 0 )
+      if(/*m_C1ofst == m_setVoltage_1 && m_C2ofst == m_setVoltage_2 &&*/ m_C1phse == 0 && m_C2phse == 0 )
       {
          m_modState = 3;
       }
