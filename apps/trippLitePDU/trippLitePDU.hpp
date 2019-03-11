@@ -163,7 +163,8 @@ trippLitePDU::trippLitePDU() : MagAOXApp(MAGAOX_CURRENT_SHA1, MAGAOX_REPO_MODIFI
 {
    m_firstOne = true;
    setNumberOfOutlets(8);
-
+   m_loopPause=2000000000;//Default to 2 sec loop pause to lessen the load on the PDUs.
+   
    return;
 }
 
@@ -173,7 +174,7 @@ void trippLitePDU::setupConfig()
    config.add("device.port", "p", "device.port", argType::Required, "device", "port", false, "string", "The device port.");
    config.add("device.username", "u", "device.username", argType::Required, "device", "username", false, "string", "The device login username.");
    config.add("device.passfile", "", "device.passfile", argType::Required, "device", "passfile", false, "string", "The device login password file (relative to secrets dir).");
-   config.add("device.version", "", "device.version", argType::Required, "device", "version", false, "int", "The device network interface version.  0 is PDU..., 1 is newer LX platform.");
+   config.add("device.powerAlertVersion", "", "device.powerAlertVersion", argType::Required, "device", "powerAlertVersion", false, "int", "The device network interface version.  0 is PDU..., 1 is newer LX platform.");
 
    dev::ioDevice::setupConfig(config);
    config.add("device.outletStateDelay", "", "device.outletStateDelay", argType::Required, "device", "outletStateDelay", false, "int", "The maximum time to wait for an outlet to change state [msec]. Default = 5000");
@@ -207,7 +208,7 @@ void trippLitePDU::loadConfig()
    config(m_devicePort, "device.port");
    config(m_deviceUsername, "device.username");
    config(m_devicePassFile, "device.passfile");
-   config(m_deviceVersion, "device.version");
+   config(m_deviceVersion, "device.powerAlertVersion");
    
    dev::ioDevice::loadConfig(config);
 
@@ -313,13 +314,6 @@ int trippLitePDU::appLogic()
 
       if(rv == 0)
       {
-         //For newer version of power alert we need to select C.L.I.
-         if(m_deviceVersion > 0)
-         {
-            m_telnetConn.writeRead("E\n", false, m_writeTimeout, m_readTimeout);
-      
-            m_telnetConn.m_prompt = "$> ";
-         }
          state(stateCodes::LOGGEDIN);
       }
       else
@@ -339,6 +333,13 @@ int trippLitePDU::appLogic()
 
    if(state() == stateCodes::LOGGEDIN)
    {  
+      //For newer version of power alert we need to select C.L.I.
+      if(m_deviceVersion > 0)
+      {
+         m_telnetConn.writeRead("E\n", false, m_writeTimeout, m_readTimeout);
+      
+         m_telnetConn.m_prompt = "$> ";
+      }
       state(stateCodes::READY);
    }
 

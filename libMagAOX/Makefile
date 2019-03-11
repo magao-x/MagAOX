@@ -11,6 +11,8 @@ INCLUDEDEPS= app/MagAOXApp.hpp \
 	     app/indiDriver.hpp \
 	     app/indiMacros.hpp \
              app/stateCodes.hpp \
+             app/dev/outletController.hpp \
+             app/dev/ioDevice.hpp \
              common/config.hpp \
              common/defaults.hpp \
              common/environment.hpp \
