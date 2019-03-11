@@ -47,6 +47,10 @@ apps/ttmModulator/ttmModulator
 
 apps/filterWheelCtrl/filterWheelCtrl
 
+apps/ocam2KCtrl/ocam2KCtrl
+
+apps/streamWriter/streamWriter
+
 utils/logdump/logdump
 utils/cursesINDI/cursesINDI
 

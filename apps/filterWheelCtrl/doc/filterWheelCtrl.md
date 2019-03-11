@@ -83,3 +83,5 @@ To start the filter wheel controller for science camera 1:
 ```
 
 # SEE ALSO 
+
+[Source code.](../sw_html/group__filterWheelCtrl.html)

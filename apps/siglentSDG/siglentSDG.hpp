@@ -19,14 +19,16 @@ namespace app
   * \todo need to recognize signals in tty polls and not return errors, etc.
   * \todo need to implement an onDisconnect() to update values to unknown indicators.
   * \todo need a frequency-dependent max amp facility.
-  *
+  * \todo convert to ioDevice
+  * \todo need telnet device, with optional username/password.
+  * 
   */
 class siglentSDG : public MagAOXApp<>
 {
 
    constexpr static double cs_MaxAmp = 0.87;
    constexpr static double cs_MaxOfst = 10.0;
-   constexpr static double cs_MaxFreq = 1000.0;
+   constexpr static double cs_MaxFreq = 3623.0;
 
 protected:
 
@@ -345,6 +347,7 @@ public:
 inline
 siglentSDG::siglentSDG() : MagAOXApp(MAGAOX_CURRENT_SHA1, MAGAOX_REPO_MODIFIED)
 {
+   m_powerMgtEnabled = true;
    m_telnetConn.m_prompt = "\n";
    return;
 }
@@ -521,7 +524,7 @@ int siglentSDG::appLogic()
          {
             if(n>9)
             {
-               log<software_critical>({__FILE__, __LINE__});
+               log<software_critical>({__FILE__, __LINE__, "No response from device.  Time to power cycle."});
                return -1;
             }
             m_telnetConn.write("\n", m_writeTimeOut);

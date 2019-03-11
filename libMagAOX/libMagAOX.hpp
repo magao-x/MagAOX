@@ -14,6 +14,7 @@
 #include "app/indiMacros.hpp"
 #include "app/stateCodes.hpp"
 #include "app/dev/outletController.hpp"
+#include "app/dev/ioDevice.hpp"
 
 #include "common/config.hpp"
 #include "common/defaults.hpp"
@@ -25,6 +26,7 @@
 #include "logger/generated/logStdFormat.hpp"
 #include "logger/generated/logTypes.hpp"
 
+#include "xrif/xrif.hpp"
 
 #define TTY_DEBUG
 #include "tty/ttyErrors.hpp"
@@ -33,6 +35,5 @@
 #include "tty/usbDevice.hpp"
 #include "tty/telnetConn.hpp"
 
-#include "netcom/tunneledHost.hpp"
 
 #endif //libMagAOX_hpp

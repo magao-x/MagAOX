@@ -71,6 +71,13 @@
    #define MAGAOX_driverFIFORelPath "drivers/fifos"
 #endif
 
+#ifndef MAGAOX_rawimageRelPath
+   /// The relative path to the raw images directory.
+   /** This is the subdirectory for raw images.
+     */
+   #define MAGAOX_rawimageRelPath "rawimages"
+#endif
+
 ///@}
 
 #endif //common_paths_hpp

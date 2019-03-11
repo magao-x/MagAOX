@@ -48,7 +48,8 @@ EXTRA_LDLIBS ?=  -lsofa_c \
   -ludev \
   -lpthread \
 	-ltelnet $(abspath $(SELF_DIR)/../INDI/libcommon/libcommon.a) \
-	$(abspath $(SELF_DIR)/../INDI/liblilxml/liblilxml.a)
+	$(abspath $(SELF_DIR)/../INDI/liblilxml/liblilxml.a)\
+  -lImageStreamIO
 
 
 #Add rt on Darwin:

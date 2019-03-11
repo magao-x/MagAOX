@@ -1,4 +1,4 @@
-xindiserver
+xindiserver  {#page_module_xindiserver}
 ==========
 
 [TOC]
@@ -58,3 +58,5 @@ To-do: describe drivers specs.
 
 
 # SEE ALSO 
+
+[Source code.](../sw_html/group__xindiserver.html)

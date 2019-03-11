@@ -6,8 +6,10 @@ envswitch=${1:---prod}
 
 if [[ "$envswitch" == "--dev" ]]; then
   LOGDIR="${LOGDIR:-/opt/MagAOX/logs}"
+  XRIFDIR="${XRIFDIR:-/opt/MagAOX/rawimages}"
 elif [[ "$envswitch" == "--prod" ]]; then
   LOGDIR="${LOGDIR:-/data/logs}"
+  XRIFDIR="${XRIFDIR:-/data/rawimages}"
 else
   cat <<'HERE'
 Usage: make_directories.sh [--dev]
@@ -30,6 +32,7 @@ mkdir  -pv /opt/MagAOX/source/dependencies
 mkdir  -pv /opt/MagAOX/sys
 mkdir  -pv /opt/MagAOX/secrets
 mkdir  -pv "$LOGDIR"
+mkdir  -pv "$XRIFDIR"
 
 log_target=/opt/MagAOX/logs
 if [ "$LOGDIR" != "$log_target" ] ; then
@@ -43,5 +46,20 @@ if [ "$LOGDIR" != "$log_target" ] ; then
     exit 1
 else
     ln -sv "$LOGDIR" "$log_target"
+  fi
+fi
+
+xrif_target=/opt/MagAOX/rawimages
+if [ "$XRIFDIR" != "$xrif_target" ] ; then
+  if [ -L $xrif_target ]; then
+    if [[ "$(readlink -- "$xrif_target")" != $XRIFDIR ]]; then
+      echo "$xrif_target is an existing link, but doesn't point to $XRIFDIR. Aborting."
+      exit 1
+    fi
+  elif [ -e $xrif_target ]; then
+    echo "$xrif_target exists, but is not a symlink and we want logs in $XRIFDIR. Aborting."
+    exit 1
+else
+    ln -sv "$XRIFDIR" "$xrif_target"
   fi
 fi

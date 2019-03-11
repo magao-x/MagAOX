@@ -1,5 +1,5 @@
 /** \file xindiserver.hpp
-  * \brief The MagAO-X INDI Server wrapper main program.
+  * \brief The MagAO-X INDI Server wrapper header.
   *
   * \ingroup xindiserver_files
   */
@@ -17,27 +17,90 @@
 #include "../../libMagAOX/libMagAOX.hpp" //Note this is included on command line to trigger pch
 #include "../../magaox_git_version.h"
 
+/** \defgroup xindiserver INDI Server wrapper.
+  * \brief Manges INDI server in the MagAO-X context.
+  *
+  * <a href="..//apps_html/page_module_xindiserver.html">Application Documentation</a>
+  *
+  * \ingroup apps
+  *
+  */
 
-#include "remoteDriver.hpp"
-using namespace MagAOX::xindi;
+/** \defgroup xindiserver_files xindiserver Files
+  * \ingroup xindiserver
+  */
 
 namespace MagAOX
 {
 namespace app
 {
    
+#define SSHTUNNEL_E_NOTUNNELS (-10)
+
+struct sshTunnel 
+{
+   std::string m_remoteHost;
+   int m_localPort {0};
+   int m_remotePort {0};
+   int m_monitorPort {0};
+};
+
+typedef std::unordered_map<std::string, sshTunnel> tunnelMap;
+
+inline 
+int loadSSHTunnelConfigs( tunnelMap & tmap,
+                          mx::app::appConfigurator & config
+                        )
+{
+   std::vector<std::string> sections;
+
+   config.unusedSections(sections);
+
+   if( sections.size() == 0 )
+   {
+      return SSHTUNNEL_E_NOTUNNELS;
+   }
+
+   //Now see if any sections match a tunnel specification
+
+   
+   
+   for(size_t i=0; i< sections.size(); ++i)
+   {
+      
+         
+      if( config.isSetUnused(mx::app::iniFile::makeKey(sections[i], "remoteHost" )) &&
+             config.isSetUnused(mx::app::iniFile::makeKey(sections[i], "localPort" )) &&
+                config.isSetUnused(mx::app::iniFile::makeKey(sections[i], "remotePort" )) )
+      {
+         
+         std::string remoteHost;
+         int localPort = 0;
+         int remotePort = 0;
+         int monitorPort = 0;
+      
+         config.configUnused( remoteHost, mx::app::iniFile::makeKey(sections[i], "remoteHost" ) );
+         config.configUnused( localPort, mx::app::iniFile::makeKey(sections[i], "localPort" ) );
+         config.configUnused( remotePort, mx::app::iniFile::makeKey(sections[i], "remotePort" ) );
+         config.configUnused( monitorPort, mx::app::iniFile::makeKey(sections[i], "monitorPort" ) );
+         
+         tmap[sections[i]] = sshTunnel({remoteHost, localPort, remotePort, monitorPort});
+      }
+   }
+   
+   return 0;
+}
+
+/** The INDI Server wrapper applciation class.
+  *
+  * \ingroup xindiserver
+  */  
 class xindiserver : public MagAOXApp<false>
 {
 
    //Give the test harness access.
    friend class xindiserver_test;
 
-public:   
-   
-   typedef std::map< std::string, netcom::tunneledHost> hostMapT;
-   
-   typedef std::map< std::string, remoteDriver> rdriverMapT;
-      
 protected:
 
    int indiserver_m {-1};  ///< The indiserver MB behind setting (passed to indiserver)
@@ -48,8 +111,8 @@ protected:
    
    std::vector<std::string> m_local; ///< List of local drivers passed in by config
    std::vector<std::string> m_remote; ///< List of remote drivers passed in by config
-   std::vector<std::string> m_hosts; ///< List of hosts passed in by config
-
+   tunnelMap m_tunnels; ///< Map of the ssh tunnels, used for processing the remote drivers in m_remote.
+   
    std::vector<std::string> m_indiserverCommand; ///< The command line arguments to indiserver
       
    pid_t m_isPID {0}; ///< The PID of the indiserver process
@@ -91,8 +154,8 @@ public:
    int addLocalDrivers( std::vector<std::string> & driverArgs /**< [out] the vector of command line arguments for exec*/);
    
    
-   ///Validate the remote driver and remote hosts strings, and append them to the indi server command line arguments.
-   /** Uses remoteDriver and tunneledHost to parse the remote driver and host specs, then
+   ///Validate the remote driver entries, and append them to the indi server command line arguments.
+   /** Parses the remote driver specs, then
      * constructs the command line arguments and appends them to the driverArgs vector passed in.
      *
      * \returns 0 on success.
@@ -139,6 +202,9 @@ public:
 inline
 xindiserver::xindiserver() : MagAOXApp(MAGAOX_CURRENT_SHA1, MAGAOX_REPO_MODIFIED)
 {
+   //Use the sshTunnels.conf config file
+   m_configBase = "sshTunnels";
+   
    return;
 }
 
@@ -152,9 +218,11 @@ void xindiserver::setupConfig()
    config.add("indiserver.x", "x", "", argType::True, "indiserver", "x", false,  "bool", "exit after last client disconnects -- FOR PROFILING ONLY");
    
    config.add("local.drivers","L", "local" , argType::Required, "local", "drivers", false,  "vector string", "List of local drivers to start.");
-   config.add("remote.drivers","R", "remote" , argType::Required, "remote", "drivers", false,  "vector string", "List of remote drivers to start, in the form of name@hostname without the port.  Hostname needs an entry in remote.hosts.");
-   config.add("remote.hosts", "H", "hosts", argType::Required, "remote", "hosts", false,  "vector string", "List of remote hosts, in the form of hostname[:remote_port]:local_port. remote_port is optional if it is the INDI default.");
+   config.add("remote.drivers","R", "remote" , argType::Required, "remote", "drivers", false,  "vector string", "List of remote drivers to start, in the form of name@tunnel, where tunnel is the name of a tunnel specified in sshTunnels.conf.");
+
 }
+
+
 
 inline
 void xindiserver::loadConfig()
@@ -170,7 +238,8 @@ void xindiserver::loadConfig()
    
    config(m_local, "local.drivers");
    config(m_remote, "remote.drivers");
-   config(m_hosts, "remote.hosts");
+   
+   loadSSHTunnelConfigs(m_tunnels, config);
 }
 
 inline
@@ -248,97 +317,33 @@ int xindiserver::addLocalDrivers( std::vector<std::string> & driverArgs )
 inline
 int xindiserver::addRemoteDrivers( std::vector<std::string> & driverArgs )
 {
-   hostMapT hostMap;
-   
-   for(size_t i=0; i < m_hosts.size(); ++i)
-   {
-      netcom::tunneledHost th;
-      
-      int rv = th.parse( m_hosts[i] );
-      
-      if(rv < 0)
-      {
-         log<software_critical>({__FILE__, __LINE__, "Error parsing host specification: " + m_hosts[i]});         
-         return -1;
-      }
-   
-      std::pair<hostMapT::iterator, bool> res;
-      try
-      {
-          res = hostMap.insert( hostMapT::value_type(th.remoteSpec(), th) );
-      }
-      catch(...)
-      {
-         log<software_critical>({__FILE__, __LINE__, "Exception thrown by map::insert."});
-         return -1;
-      }
-      
-      if(res.second != true)
-      {
-         log<software_critical>({__FILE__, __LINE__, "Duplicate host specification: " + th.fullSpec() + "( from " + m_hosts[i] + " )"});         
-         return -1;
-      }
-      
-   }
-      
-
-   rdriverMapT rdriverMap;
-   
-   
    for(size_t i=0; i < m_remote.size(); ++i)
    {
-      remoteDriver rd;
+      std::string driver;
+      std::string tunnel;
       
-      int rv = rd.parse(m_remote[i]);
+      size_t p = m_remote[i].find('@');
       
-      if(rv < 0)
+      if(p == 0 || p == std::string::npos)
       {
          log<software_critical>({__FILE__, __LINE__, "Error parsing remote driver specification: " + m_remote[i] + "\n"});         
          return -1;
       }
       
-      std::pair<rdriverMapT::iterator, bool> res;
-      try
-      {
-          res = rdriverMap.insert( rdriverMapT::value_type(rd.name(), rd) );
-      }
-      catch(...)
-      {
-         log<software_critical>({__FILE__, __LINE__, "Exception thrown by map::insert."}); 
-         return -1;
-      }
-      
-      if(res.second != true)
-      {
-         log<software_critical>({__FILE__, __LINE__, "Duplicate remote driver specification: " + rd.fullSpec() + "( from " + m_remote[i] + " )"}); 
-         return -1;
-      }
-   }
-         
-   
-   rdriverMapT::iterator rdit = rdriverMap.begin();
-   for(;rdit!=rdriverMap.end(); ++rdit)
-   {
-      hostMapT::iterator hit;
-      try
-      {
-         hit = hostMap.find( rdit->second.hostSpec() );
-      }
-      catch(...)
-      {
-         log<software_critical>({__FILE__, __LINE__, "Exception thrown by map::find."});
-         return -1;
-      }
-      
-      if(hit == hostMap.end())
-      {
-         log<software_critical>({__FILE__, __LINE__, "No host " + rdit->second.hostSpec() + " specified for driver " + rdit->second.fullSpec()});         
-         return -1;
-      }
+      driver = m_remote[i].substr(0, p);
+      tunnel = m_remote[i].substr(p+1);
       
       std::ostringstream oss;
       
-      oss << rdit->second.name() << "@localhost:" << hit->second.localPort();
+      ///\todo check for tunnel existence here.
+      
+      if(m_tunnels.count(tunnel) != 1)
+      {
+         log<software_critical>({__FILE__, __LINE__, "Tunnel not found for: " + m_remote[i] + "\n"});         
+         return -1;
+      }
+      
+      oss << driver << "@localhost:" << m_tunnels[tunnel].m_localPort;
       
       try
       {
@@ -615,7 +620,7 @@ int xindiserver::appStartup()
    
    m_local.clear();
    m_remote.clear();
-   m_hosts.clear();
+   m_tunnels.clear();
    
    //--------------------
    //Now start indiserver

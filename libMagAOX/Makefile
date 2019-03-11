@@ -11,6 +11,8 @@ INCLUDEDEPS= app/MagAOXApp.hpp \
 	     app/indiDriver.hpp \
 	     app/indiMacros.hpp \
              app/stateCodes.hpp \
+             app/dev/outletController.hpp \
+             app/dev/ioDevice.hpp \
              common/config.hpp \
              common/defaults.hpp \
              common/environment.hpp \
@@ -36,6 +38,7 @@ INCLUDEDEPS= app/MagAOXApp.hpp \
 	     logger/types/core_mon.hpp \
 	     logger/types/drive_mon.hpp \
 	     logger/types/config_log.hpp \
+	     xrif/xrif.hpp \
              tty/ttyErrors.hpp \
              tty/ttyIOUtils.hpp \
              tty/ttyUSB.hpp \

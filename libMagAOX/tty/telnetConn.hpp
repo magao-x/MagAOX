@@ -222,7 +222,9 @@ int telnetConn::connect( const std::string & host,
    m_telnet = 0;
    if(m_sock) close(m_sock);
    m_sock = 0;
-   
+  
+   m_loggedin = 0;
+ 
    int rs;
 
    struct sockaddr_in addr;
@@ -277,7 +279,7 @@ int telnetConn::login( const std::string & username,
                        const std::string & password
                      )
 {
-   char buffer[512];
+   char buffer[1024];
    int rs;
 
    struct pollfd pfd[1];
@@ -288,13 +290,26 @@ int telnetConn::login( const std::string & username,
    pfd[0].events = POLLIN;
 
    //Loop while waiting on the login process to complete.
-   while (poll(pfd, 1, -1) != -1)
+   #ifdef TELNET_DEBUG
+   std::cerr << "Starting poll\n";
+   #endif
+   int pollrv;
+   while ( (pollrv = poll(pfd, 1, 30000)) > 0)
    {
+      #ifdef TELNET_DEBUG    
+      std::cerr << "Polled\n";
+      #endif
       /* read from client */
       if (pfd[0].revents & POLLIN)
       {
+         #ifdef TELNET_DEBUG
+         std::cerr << "Starting read\n";
+         #endif
          if ((rs = recv(m_sock, buffer, sizeof(buffer), 0)) > 0)
          {
+            #ifdef TELNET_DEBUG
+            std::cerr << "read: " << rs << "bytes\n";
+            #endif
             telnet_recv(m_telnet, buffer, rs);
             if(m_EHError != TTY_E_NOERROR) return m_EHError;
          }
@@ -330,8 +345,19 @@ int telnetConn::login( const std::string & username,
       {
          break;
       }
+      #ifdef TELNET_DEBUG
+      std::cerr << "polling\n";
+      #endif
    }
 
+   if(pollrv == 0)
+   {
+      #ifdef TELNET_DEBUG
+      std::cerr << "login timed out\n";
+      #endif
+      return TELNET_E_LOGINTIMEOUT;
+   }
+   
    return TTY_E_NOERROR;
 }
 
@@ -560,26 +586,57 @@ void telnetConn::event_handler( telnet_t *telnet,
       /* data received */
       case TELNET_EV_DATA:
       {
+         #ifdef TELNET_DEBUG
+         std::cerr << "Got ev->data.size: " << ev->data.size << "\n";
+         #endif
+         
          //First we remove the various control chars from the front.
          if(ev->data.size == 0) break;
 
          char * buf = const_cast<char *>(ev->data.buffer);
          buf[ev->data.size] = 0;
+
+         int nn = 0;         
          for(size_t i=0; i<ev->data.size; ++i)
          {
-            if(ev->data.buffer[i] < 20)
+            if(ev->data.buffer[i] < 32)
             {
                ++buf;
+               ++nn;
                continue;
             }
             break;
          }
+ 
+         #ifdef TELNET_DEBUG
+         std::cerr << "removed: " << nn << "\n";
+         #endif
+         
+         //Now we check for '\0' characters inside the data
+         //this is maybe a bug workaround for tripp lite pdu LX card . . .
+         int mm = 0;
+         for(size_t i=nn; i < ev->data.size;++i)
+         {
+            if( ev->data.buffer[i] == 0)
+            {
+               ++mm;
+               buf[i-nn] = '\n';
+            }
+	 }
 
+	 #ifdef TELNET_DEBUG
+         std::cerr << "dezeroed: " << mm << "\n";
+         #endif
+         
          //Now make it a string so we can make use of it.
          std::string sbuf(buf);
 
          if(sbuf.size() == 0) break;
 
+         #ifdef TELNET_DEBUG
+         std::cerr  << "ev->data: " << sbuf << "\n";
+         #endif
+         
          if(cs->m_loggedin < TELNET_LOGGED_IN) //we aren't logged in yet
          {
             if(cs->m_loggedin == TELNET_WAITING_USER)
