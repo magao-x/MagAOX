@@ -244,8 +244,14 @@ public:
       float&    /**< [out] the return value for current RAM usage*/
    );
 
+   /// Runs a command (with parameters) passed in using fork/exec
+   /** New process is made with fork(), and child runs execvp with command provided
+    * 
+    * \returns output of command, contained in a vector if strings
+    * If an error occurs during the process, an empty vector is returned.
+    */
    std::vector<std::string> runCommand(
-    std::vector<std::string>
+    std::vector<std::string>    /**< [in] command to be run, with any subsequent parameters stored after*/
    );
 
 };
@@ -639,7 +645,6 @@ int sysMonitor::parseDiskTemperature(std::string line, float& hdd_temp)
          return 0;
       }
    }
-
    return -1;
 }
 
@@ -811,18 +816,21 @@ int sysMonitor::updateVals()
    return 0;
 }
 
-std::vector<std::string> sysMonitor::runCommand( std::vector<std::string> commandList) {
+std::vector<std::string> sysMonitor::runCommand( std::vector<std::string> commandList) 
+{
    int link[2];
    pid_t pid;
    char foo[4096];
    std::vector<std::string> commandOutput;
 
-   if (pipe(link)==-1) {
+   if (pipe(link)==-1) 
+   {
       perror("Pipe error");
       return commandOutput;
    }
 
-   if ((pid = fork()) == -1) {
+   if ((pid = fork()) == -1) 
+   {
       perror("Fork error");
       return commandOutput;
    }
@@ -839,17 +847,20 @@ std::vector<std::string> sysMonitor::runCommand( std::vector<std::string> comman
       execvp( charCommandList[0], const_cast<char**>(charCommandList.data()));
       perror("exec");
       return commandOutput;
-   } else {
+   }
+   else {
       wait(NULL);
       close(link[1]);
-      if (read(link[0], foo, sizeof(foo)) < 0) {
+      if (read(link[0], foo, sizeof(foo)) < 0) 
+      {
          perror("Read");
          return commandOutput;
       }
       std::string line{};
       std::string foo2(foo);
       std::istringstream iss(foo2);
-      while (getline(iss, line)) {
+      while (getline(iss, line)) 
+      {
          commandOutput.push_back(line);
       }
       wait(NULL);
