@@ -12,6 +12,7 @@ QMAKE?=qmake
 
 all: $(TARGET)
 
+.PHONY: $(TARGET)
 $(TARGET):
 	$(QMAKE) -makefile $(TARGET).pro
 	$(MAKE) -f makefile.$(TARGET)

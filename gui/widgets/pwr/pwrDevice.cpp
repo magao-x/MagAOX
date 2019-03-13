@@ -20,6 +20,7 @@ pwrDevice::pwrDevice( QWidget * parent,
 
 pwrDevice::~pwrDevice()
 {
+   
    if(m_numChannels > 0)
    {
       for(size_t i=0; i<m_numChannels; ++i)
@@ -30,7 +31,8 @@ pwrDevice::~pwrDevice()
    
    if(m_channels) delete[] m_channels;
    
-   delete m_deviceNameLabel;
+   //This is taken care of by parent destruct
+   //delete m_deviceNameLabel;
 }
    
 std::string pwrDevice::deviceName()
@@ -105,10 +107,16 @@ void pwrDevice::handleSetProperty( const pcf::IndiProperty & ipRecv )
       {
          if( ipRecv.find(m_channels[n]->channelName()))
          {
-            std::string outlets =  ipRecv[m_channels[n]->channelName()].get();
-            size_t noutlets = std::count(outlets.begin(), outlets.end(), ',');
-            std::cerr << "   " << m_channels[n]->channelName() << " " << noutlets+1 << "\n";
-            m_channels[n]->numOutlets(noutlets+1);
+             
+            std::string outletStr =  ipRecv[m_channels[n]->channelName()].get();
+            
+            std::vector<int> outlets;
+            mx::ioutils::parseStringVector(outlets, outletStr);
+                                     
+            //size_t noutlets = std::count(outletStr.begin(), outletStr.end(), ',');
+            //std::cerr << "   " << m_channels[n]->channelName() << " " << noutlets+1 << " " << outlets.size() << "\n";
+            //m_channels[n]->numOutlets(noutlets+1);
+            m_channels[n]->outlets(outlets);
          }
       }
       
@@ -172,6 +180,7 @@ void pwrDevice::handleSetProperty( const pcf::IndiProperty & ipRecv )
       if(ipRecv.find("voltage"))
       {
          m_voltage.add( ipRecv["voltage"].get<double>(), ts);
+         //std::cerr << m_deviceName << " " << ipRecv["voltage"].get<double>() << "\n";
       }
       
       if(ipRecv.find("frequency"))

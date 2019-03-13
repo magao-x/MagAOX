@@ -41,7 +41,7 @@ XqwtMultiDial::~XqwtMultiDial()
     for ( int i = 0; i < d_numNeedles; i++ )
         delete d_needles[i];
     
-    delete d_needles;
+    delete[] d_needles;
     
     //delete m_unitsTextLabel;
 }

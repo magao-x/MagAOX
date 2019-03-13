@@ -3,6 +3,7 @@
 #define multiIndiPublisher_hpp
 
 #include <unordered_map>
+#include <set>
 
 #include "../../INDI/libcommon/IndiClient.hpp"
 
@@ -43,6 +44,8 @@ public:
    virtual ~multiIndiSubscriber();
    
    
+   virtual int handleDefProperty( const pcf::IndiProperty &ipRecv );
+   
    /// Callback for a SET PROPERTY message notifying us that the propery has changed.
    /** This is called by the publisher which is subscribed to.
      * 
@@ -74,12 +77,19 @@ public:
 
    /// The forward iterator for the unordered_multimap of subscribers
    typedef propMapT::iterator propMapIteratorT;
+   
+   /// Subscriber pointers are also stored in a set, to allow iteration over them
+   typedef std::set<multiIndiSubscriber*> subSetT;
+   
+   /// The iterator for the set of subscriber pointers
+   typedef subSetT::iterator subSetIteratorT;
 
 protected:
    
    /// Contains the subscriber pointers
    propMapT subscribedProperties;
 
+   subSetT subscribers;
 public:
 
    /// Constructor, which establishes the INDI client connection.
@@ -87,6 +97,13 @@ public:
                        const std::string & hostAddress,
                        const int hostPort
                      );
+   
+   /// Subscribes the given instance of multiIndiSubscriber for notifications on the given property.
+   /**
+     * \returns 0 on success.
+     * \returns -1 on error.
+     */ 
+   int subscribe( multiIndiSubscriber * sub /**< [in] pointer to the subscriber */ );
    
    /// Subscribes the given instance of multiIndiSubscriber for notifications on the given property.
    /**
@@ -148,6 +165,14 @@ void multiIndiSubscriber::setPublisher(multiIndiPublisher * p)
 }
 
 inline
+int multiIndiSubscriber::handleDefProperty( const pcf::IndiProperty & ipRecv)
+{
+   std::cerr << "Received Def: " << ipRecv.createUniqueKey() << "\n";
+
+   return 0;
+}
+
+inline
 int multiIndiSubscriber::handleSetProperty( const pcf::IndiProperty & ipRecv)
 {
    std::cerr << "Received: " << ipRecv.createUniqueKey() << "\n";
@@ -173,6 +198,18 @@ multiIndiPublisher::multiIndiPublisher( const std::string & clientName,
                                         const int hostPort
                                       ) : pcf::IndiClient( clientName, MULTI_INDI_CLIENT_VERSION, MULTI_INDI_PROTO_VERSION, hostAddress, hostPort)
 {
+   pcf::IndiProperty ipSend;
+   sendGetProperties( ipSend );
+}
+
+inline
+int multiIndiPublisher::subscribe( multiIndiSubscriber * sub )
+{
+   subscribers.insert(sub);
+   
+   sub->setPublisher(this);
+   
+   return 0;
 }
 
 inline
@@ -183,6 +220,8 @@ int multiIndiPublisher::subscribeProperty( multiIndiSubscriber * sub,
    size_t already = subscribedProperties.count(ipSub.createUniqueKey());
 
    subscribedProperties.insert(std::pair<std::string,multiIndiSubscriber*>(ipSub.createUniqueKey(), sub));
+   subscribers.insert(sub);
+   
    sub->setPublisher(this);
    
    if(already == 0)
@@ -220,12 +259,17 @@ void multiIndiPublisher::unsubscribe( multiIndiSubscriber * sub )
       }
       else  ++it;
    }
+   
+   subscribers.erase(sub);
 }
 
 inline
 void multiIndiPublisher::handleDefProperty( const pcf::IndiProperty &ipRecv )
-{
-   handleSetProperty(ipRecv);
+{   
+   for(subSetIteratorT it = subscribers.begin(); it != subscribers.end(); ++it)
+   {
+      (*it)->handleDefProperty(ipRecv);
+   }      
 
 }
 
