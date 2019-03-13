@@ -66,7 +66,7 @@ scripts_install:
 	for script in ${scripts_to_install}; do \
 		/bin/sudo install -d /opt/MagAOX/bin && \
 		/bin/sudo install scripts/$$script /opt/MagAOX/bin  && \
-		/bin/sudo ln -s /opt/MagAOX/bin/$$script /usr/local/bin/$$script; \
+		/bin/sudo ln -fs /opt/MagAOX/bin/$$script /usr/local/bin/$$script; \
 	done
 
 utils_all:
