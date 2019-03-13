@@ -15,15 +15,13 @@ magaox_path=/opt/MagAOX
 procname=$1
 
 #TODO: verify that line returned by grep is valid, i.e. first word matches $1, verify that execname exists,.
-execname=$(grep $procname $magaox_path/config/proclist_$2.txt | awk '{print $2}')
-
-
+execname=$(grep "\b$procname\b" $magaox_path/config/proclist_$2.txt | awk '{print $2}')
 
 echo "process name = $procname"
 echo "executable name = $execname"
 
 #1) check if session exists
-if tmux ls | grep -q "$1"; then
+if tmux ls | grep -q "\b$1\b"; then
    echo "Session $procname exists.  Doing nothing."
    exit 0
 fi

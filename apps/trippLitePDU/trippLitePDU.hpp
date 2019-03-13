@@ -553,6 +553,8 @@ int trippLitePDU::parsePDUStatus( std::string & strRead )
       sstr = strRead.substr(curpos, eol-curpos);
       curpos = eol + 1;
 
+      //std::cerr << "Current line: " << sstr << "\n";
+      
       if(sstr[0] == '-' || sstr[0] == '0' || sstr[0] == 'L' || sstr[0] == ' ' || sstr[0] == 'D' || sstr[0] == '$') continue;
 
       if(sstr[0] == 'I')
@@ -594,7 +596,7 @@ int trippLitePDU::parsePDUStatus( std::string & strRead )
       {
          if(sstr[7] == 'C') 
          {
-            size_t begin = sstr.find(' ',6);
+            size_t begin = sstr.find(' ',7);
             if(begin == std::string::npos) return -1;
             
             begin = sstr.find_first_not_of(' ', begin);
@@ -606,6 +608,7 @@ int trippLitePDU::parsePDUStatus( std::string & strRead )
             float C = mx::ioutils::convertFromString<float>( sstr.substr(begin, end-begin) );
             
             m_current = C;
+            //std::cerr << "Current: " << m_current << "\n";
          }
          else if(sstr[8] == 'O') 
          {
