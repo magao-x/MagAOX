@@ -13,11 +13,10 @@
 #include <ImageStruct.h>
 #include <ImageStreamIO.h>
 
-#include <picam.h>
+#include <picam_advanced.h>
 
 #include "../../libMagAOX/libMagAOX.hpp" //Note this is included on command line to trigger pch
 #include "../../magaox_git_version.h"
-
 
 inline
 std::string PicamEnum2String( PicamEnumeratedType type, piint value )
@@ -120,7 +119,7 @@ int loadCameraConfig( cameraConfigMap & ccmap,
   * \todo Config item for ImageStreamIO name filename
   * \todo implement ImageStreamIO circular buffer, with config setting
   */
-class picamCtrl : public MagAOXApp<>, public dev::ioDevice
+class picamCtrl : public MagAOXApp<>
 {
 
 protected:
@@ -134,12 +133,15 @@ protected:
    
    cameraConfigMap m_cameraModes; ///< Map holding the possible camera mode configurations
    
-   float m_startupTemp {99}; ///< The temperature to set after a power-on.
+   float m_startupTemp {-55}; ///< The temperature to set after a power-on.
    
    ///@}
 
-   float m_expTime {0}; ///< The exposure time, in seconds, as returned by the camera.
-   float m_fpsSet {0}; ///< The commanded fps, as returned by the camera
+   float m_ccdTemp;
+   float m_ccdTempSetpt;
+   
+   float m_expTimeSet {0}; ///< The exposure time, in seconds, as set by user.
+   float m_fpsSet {0}; ///< The commanded fps, as set by user.
 
    int m_powerOnCounter {0}; ///< Counts numer of loops after power on, implements delay for camera bootup.
    
@@ -149,6 +151,8 @@ protected:
    int m_width {0}; ///< The width of the image according to the framegrabber, not necessarily the true image width.
    int m_height {0}; ///< The height of the image frame according the framegrabber, not necessarily the true image height.
    int m_depth {0}; ///< The pixel bit depth according to the framegrabber
+   int m_xbinning {0}; ///< The x-binning according to the framegrabber
+   int m_ybinning {0}; ///< The y-binning according to the framegrabber
    std::string m_cameraType; ///< The camera type according to the framegrabber
           
    long m_currImageNumber {-1};
@@ -167,7 +171,9 @@ protected:
    bool m_reconfig {false};
    
 
-   PicamHandle m_cameraHandle;
+   PicamHandle m_cameraHandle {0};
+   PicamHandle m_modelHandle {0};
+   
    bool m_cameraConnected;
    std::string m_cameraName;
    std::string m_cameraModel;
@@ -204,20 +210,55 @@ public:
    /// Do any needed shutdown tasks.  Currently nothing in this app.
    virtual int appShutdown();
 
+protected:
+   int getPicamParameter( piint & value,
+                          PicamParameter parameter
+                        );
+   
+   int getPicamParameter( piflt & value,
+                          PicamParameter parameter
+                        );
+   
+   int setPicamParameter( PicamParameter parameter,
+                          pi64s value
+                        );
+ 
+   int setPicamParameter( PicamHandle handle,
+                          PicamParameter parameter,
+                          piflt value
+                        );
+   
+   int setPicamParameter( PicamParameter parameter,
+                          piflt value
+                        );
+   
+   int setPicamParameterOnline( PicamHandle handle,
+                                PicamParameter parameter,
+                                piflt value
+                              );
+   
+   int setPicamParameterOnline( PicamParameter parameter,
+                                piflt value
+                              );
+   
    int connect();
    
    int getAcquisitionState();
    
    int getTemps();
-   int setTemp(float temp);
-
-   int getExpTime();
-   int setExpTime(float exptime);
    
-   int getFPS();
-   int setFPS(float fps);
+   int setTemp(piflt temp);
+   
+   int setExpTime(piflt exptime);
+   
+   int setFPS(piflt fps);
    
 protected:
+   
+   
+   
+   
+   
    
    int m_fgThreadPrio {1}; ///< Priority of the framegrabber thread, should normally be > 00.
 
@@ -278,10 +319,7 @@ void picamCtrl::setupConfig()
    config.add("camera.powerOnWait", "", "camera.powerOnWait", argType::Required, "camera", "powerOnWait", false, "int", "Time after power-on to begin attempting connections [sec].  Default is 10 sec.");
    config.add("camera.startupTemp", "", "camera.startupTemp", argType::Required, "camera", "startupTemp", false, "float", "The temperature setpoint to set after a power-on [C].  Default is -55 C.");
    
-   dev::ioDevice::setupConfig(config);
 }
-
-
 
 inline
 void picamCtrl::loadConfig()
@@ -292,7 +330,7 @@ void picamCtrl::loadConfig()
    config(m_powerOnWait, "camera.powerOnWait");
    config(m_startupTemp, "camera.startupTemp");
    
-   int rv = loadCameraConfig(m_cameraModes, config);
+ /*  int rv = loadCameraConfig(m_cameraModes, config);
    
    if(rv < 0)
    {
@@ -302,14 +340,9 @@ void picamCtrl::loadConfig()
       }
       
       m_shutdown = true;
-   }
+   }*/
    
-   m_readTimeout = 1000;
-   m_writeTimeout = 1000;
-   dev::ioDevice::loadConfig(config);
 }
-
-
 
 inline
 int picamCtrl::appStartup()
@@ -342,8 +375,7 @@ int picamCtrl::appStartup()
    
    //=================================
    // Do camera configuration here
-   //=================================
-   Picam_InitializeLibrary();
+  
    
    if(fgThreadStart() < 0)
    {
@@ -353,64 +385,6 @@ int picamCtrl::appStartup()
    
    return 0;
 
-}
-
-
-
-inline
-int picamCtrl::connect()
-{
-   PicamError error;
-   PicamCameraID * id_array;
-   piint id_count;
-
-   Picam_GetAvailableCameraIDs((const PicamCameraID **) &id_array, &id_count);
-   
-   if(id_count == 0)
-   {
-      state(stateCodes::NODEVICE);
-      if(!stateLogged())
-      {
-         log<text_log>("no P.I. Cameras available.");
-      }
-      return 0;
-   }
-   
-   for(int i=0; i< id_count; ++i)
-   {
-      if( std::string(id_array[i].serial_number) == m_serialNumber )
-      {  
-         error = Picam_OpenCamera(&id_array[i], &m_cameraHandle);
-         if(error == PicamError_None) 
-         {
-            m_cameraConnected = true;
-            m_cameraName = id_array[i].sensor_name;
-            m_cameraModel = PicamEnum2String(PicamEnumeratedType_Model, id_array[i].model);
-            
-            state(stateCodes::CONNECTED);
-            log<text_log>("Connected to " + m_cameraName + " [S/N " + m_serialNumber + "]");
-            
-            return 0;
-         }
-         else
-         {
-            state(stateCodes::ERROR);
-            if(!stateLogged())
-            {
-               log<software_error>({__FILE__,__LINE__, 0, error, "Error connecting to camera."});
-            }
-            
-            return -1;
-         }
-      }
-   }
-   
-   state(stateCodes::NODEVICE);
-   if(!stateLogged())
-   {
-      log<text_log>("Camera not found in available ids.");
-   }
-   return 0;
 }
 
 inline
@@ -428,6 +402,9 @@ int picamCtrl::appLogic()
    {
       if(m_powerOnCounter*m_loopPause > ((double) m_powerOnWait)*1e9)
       {
+         //=================================
+        
+   
          state(stateCodes::NOTCONNECTED);
          m_reconfig = true; //Trigger a f.g. thread reconfig.
          m_powerOnCounter = 0;
@@ -439,7 +416,7 @@ int picamCtrl::appLogic()
       }
    }
 
-   if( state() == stateCodes::NOTCONNECTED || state() == stateCodes::ERROR)
+   if( state() == stateCodes::NOTCONNECTED || state() == stateCodes::NODEVICE || state() == stateCodes::ERROR)
    {
       //Might have gotten here because of a power off.
       if(m_powerState == 0) return 0;
@@ -462,6 +439,11 @@ int picamCtrl::appLogic()
       {
          return log<software_error,0>({__FILE__,__LINE__});
       }
+      
+      if( setTemp(m_startupTemp) < 0 )
+      {
+         return log<software_error,0>({__FILE__,__LINE__});
+      }
    }
 
    if( state() == stateCodes::READY || state() == stateCodes::OPERATING )
@@ -472,6 +454,14 @@ int picamCtrl::appLogic()
       //but don't wait for it, just go back around.
       if(!lock.owns_lock()) return 0;
       
+      if(getAcquisitionState() < 0)
+      {
+         if(m_powerState == 0) return 0;
+         
+         state(stateCodes::ERROR);
+         return 0;
+      }
+      
       if(getTemps() < 0)
       {
          if(m_powerState == 0) return 0;
@@ -480,13 +470,6 @@ int picamCtrl::appLogic()
          return 0;
       }
 
-      if(getFPS() < 0)
-      {
-         if(m_powerState == 0) return 0;
-         
-         state(stateCodes::ERROR);
-         return 0;
-      }
    }
 
    //Fall through check?
@@ -513,6 +496,14 @@ int picamCtrl::onPowerOff()
    updateIfChanged(m_indiP_fps, "target", 0);
    updateIfChanged(m_indiP_fps, "measured", 0);
    
+   if(m_cameraHandle)
+   {
+      Picam_CloseCamera(m_cameraHandle);
+      m_cameraHandle = 0;
+   }
+   
+   Picam_UninitializeLibrary();
+   
    return 0;
 }
 
@@ -529,6 +520,244 @@ int picamCtrl::appShutdown()
    {
       m_fgThread.join();
    }
+   
+   if(m_cameraHandle)
+   {
+      Picam_CloseCamera(m_cameraHandle);
+      m_cameraHandle = 0;
+   }
+   
+   Picam_UninitializeLibrary();
+    
+   return 0;
+}
+
+inline
+int picamCtrl::getPicamParameter( piint & value,
+                                  PicamParameter parameter
+                                )
+{
+   PicamError error = Picam_GetParameterIntegerValue( m_cameraHandle, parameter, &value );
+
+   if(m_powerState == 0) return -1; //Flag error but don't log
+   
+   if(error != PicamError_None)
+   {
+      log<software_error>({__FILE__, __LINE__, 0, error, PicamEnum2String(PicamEnumeratedType_Error, error)});
+      return -1;
+   }
+   
+   return 0;
+}
+
+inline
+int picamCtrl::getPicamParameter( piflt & value,
+                                  PicamParameter parameter
+                                )
+{
+   PicamError error = Picam_GetParameterFloatingPointValue( m_cameraHandle, parameter, &value );
+
+   if(m_powerState == 0) return -1; //Flag error but don't log
+   
+   if(error != PicamError_None)
+   {
+      log<software_error>({__FILE__, __LINE__, 0, error, PicamEnum2String(PicamEnumeratedType_Error, error)});
+      return -1;
+   }
+   
+   return 0;
+}
+
+inline
+int picamCtrl::setPicamParameter( PicamParameter parameter,
+                                  pi64s value
+                                )
+{
+   PicamError error = Picam_SetParameterLargeIntegerValue( m_cameraHandle, parameter, value );
+   if(error != PicamError_None)
+   {
+      log<software_error>({__FILE__, __LINE__, 0, error, PicamEnum2String(PicamEnumeratedType_Error, error)});
+      return -1;
+   }
+   
+   const PicamParameter* failed_parameters;
+   piint failed_parameters_count;
+    
+   error = Picam_CommitParameters( m_cameraHandle, &failed_parameters, &failed_parameters_count );
+   if(error != PicamError_None)
+   {
+      log<software_error>({__FILE__, __LINE__, 0, error, PicamEnum2String(PicamEnumeratedType_Error, error)});
+      return -1;
+   }
+   
+   for( int i=0; i< failed_parameters_count; ++i)
+   {
+      if( failed_parameters[i] ==  parameter)
+      {
+         Picam_DestroyParameters( failed_parameters );
+         return log<text_log,-1>( "Parameter not committed");
+      }
+   }
+   
+   Picam_DestroyParameters( failed_parameters );
+
+   return 0;
+}
+
+inline
+int picamCtrl::setPicamParameter( PicamHandle handle,
+                                  PicamParameter parameter,
+                                  piflt value
+                                )
+{
+   PicamError error = Picam_SetParameterFloatingPointValue( handle, parameter, value );
+   if(error != PicamError_None)
+   {
+      log<software_error>({__FILE__, __LINE__, 0, error, PicamEnum2String(PicamEnumeratedType_Error, error)});
+      return -1;
+   }
+   
+   const PicamParameter* failed_parameters;
+   piint failed_parameters_count;
+    
+   error = Picam_CommitParameters( handle, &failed_parameters, &failed_parameters_count );
+   if(error != PicamError_None)
+   {
+      log<software_error>({__FILE__, __LINE__, 0, error, PicamEnum2String(PicamEnumeratedType_Error, error)});
+      return -1;
+   }
+   
+   for( int i=0; i< failed_parameters_count; ++i)
+   {
+      if( failed_parameters[i] ==  parameter)
+      {
+         Picam_DestroyParameters( failed_parameters );
+         return log<text_log,-1>( "Parameter not committed");
+      }
+   }
+   
+   Picam_DestroyParameters( failed_parameters );
+
+   return 0;
+}
+
+inline
+int picamCtrl::setPicamParameter( PicamParameter parameter,
+                                  piflt value
+                                )
+{
+   return setPicamParameter( m_cameraHandle, parameter, value);
+}
+
+inline
+int picamCtrl::setPicamParameterOnline( PicamHandle handle,
+                                        PicamParameter parameter,
+                                        piflt value
+                                       )
+{
+   PicamError error = Picam_SetParameterFloatingPointValueOnline( handle, parameter, value );
+   if(error != PicamError_None)
+   {
+      log<software_error>({__FILE__, __LINE__, 0, error, PicamEnum2String(PicamEnumeratedType_Error, error)});
+      return -1;
+   }
+
+   return 0;
+}
+
+inline
+int picamCtrl::setPicamParameterOnline( PicamParameter parameter,
+                                        piflt value
+                                       )
+{
+   return setPicamParameterOnline(m_cameraHandle, parameter, value);
+}
+inline
+int picamCtrl::connect()
+{
+   PicamError error;
+   PicamCameraID * id_array;
+   piint id_count;
+   
+   //Have to initialize the library every time.  Otherwise we won't catch a newly booted camera.
+   Picam_InitializeLibrary();
+   
+   if(m_cameraHandle)
+   {
+      Picam_CloseCamera(m_cameraHandle);
+      m_cameraHandle = 0;
+   }
+
+   Picam_GetAvailableCameraIDs((const PicamCameraID **) &id_array, &id_count);
+   
+   if(id_count == 0)
+   {
+      Picam_DestroyCameraIDs(id_array);
+      
+      Picam_UninitializeLibrary();
+      
+      state(stateCodes::NODEVICE);
+      if(!stateLogged())
+      {
+         log<text_log>("no P.I. Cameras available.");
+      }
+      return 0;
+   }
+    
+   for(int i=0; i< id_count; ++i)
+   {
+      if( std::string(id_array[i].serial_number) == m_serialNumber )
+      {  
+
+         error = PicamAdvanced_OpenCameraDevice(&id_array[i], &m_cameraHandle);
+         if(error == PicamError_None) 
+         {
+            m_cameraConnected = true;
+            m_cameraName = id_array[i].sensor_name;
+            m_cameraModel = PicamEnum2String(PicamEnumeratedType_Model, id_array[i].model);
+            
+            error = PicamAdvanced_GetCameraModel( m_cameraHandle, &m_modelHandle );
+            if( error != PicamError_None )
+            {
+               std::cerr << "failed to get camera model\n";
+            }
+            
+            state(stateCodes::CONNECTED);
+            log<text_log>("Connected to " + m_cameraName + " [S/N " + m_serialNumber + "]");
+            
+            Picam_DestroyCameraIDs(id_array);
+            
+            
+            return 0;
+         }
+         else
+         {
+            state(stateCodes::ERROR);
+            if(!stateLogged())
+            {
+               log<software_error>({__FILE__,__LINE__, 0, error, "Error connecting to camera."});
+            }
+            
+            Picam_DestroyCameraIDs(id_array);
+            
+            Picam_UninitializeLibrary();
+            
+            return -1;
+         }
+      }
+   }
+   
+   state(stateCodes::NODEVICE);
+   if(!stateLogged())
+   {
+      log<text_log>("Camera not found in available ids.");
+   }
+   
+   Picam_DestroyCameraIDs(id_array);
+   
+   Picam_UninitializeLibrary();
+   
+   
    return 0;
 }
 
@@ -539,6 +768,8 @@ int picamCtrl::getAcquisitionState()
    pibln running = false;
    
    PicamError error = Picam_IsAcquisitionRunning(m_cameraHandle, &running);
+
+   if(m_powerState == 0) return 0;
 
    if(error != PicamError_None)
    {
@@ -559,31 +790,23 @@ int picamCtrl::getTemps()
 {
    piflt currTemperature;
    
-   PicamError error = Picam_ReadParameterFloatingPointValue( m_cameraHandle, PicamParameter_SensorTemperatureReading, &currTemperature );
-
-   if(error != PicamError_None)
+   if(getPicamParameter(currTemperature, PicamParameter_SensorTemperatureReading) < 0)
    {
-      log<software_error>({__FILE__, __LINE__, 0, error, PicamEnum2String(PicamEnumeratedType_Error, error)});
+      if(m_powerState == 0) return 0;
+   
+      log<software_error>({__FILE__, __LINE__});
       state(stateCodes::ERROR);
       return -1;
    }
+  
+   //PicamSensorTemperatureStatus 
+   piint status;
    
-   piflt setTemperature;
+   if(getPicamParameter( status, PicamParameter_SensorTemperatureStatus ) < 0)
+   {   
+      if(m_powerState == 0) return 0;
    
-   error = Picam_ReadParameterFloatingPointValue( m_cameraHandle, PicamParameter_SensorTemperatureSetPoint, &setTemperature );
-
-   if(error != PicamError_None)
-   {
-      log<software_error>({__FILE__, __LINE__, 0, error, PicamEnum2String(PicamEnumeratedType_Error, error)});
-      state(stateCodes::ERROR);
-      return -1;
-   }
-   
-   PicamSensorTemperatureStatus status;
-   error = Picam_ReadParameterIntegerValue( m_cameraHandle, PicamParameter_SensorTemperatureStatus, reinterpret_cast<piint*>( &status ) );
-   if(error != PicamError_None)
-   {
-      log<software_error>({__FILE__, __LINE__, 0, error, PicamEnum2String(PicamEnumeratedType_Error, error)});
+      log<software_error>({__FILE__, __LINE__});
       state(stateCodes::ERROR);
       return -1;
    }
@@ -594,7 +817,6 @@ int picamCtrl::getTemps()
    else if(status == 3) lockstr = "faulted";
       
    updateIfChanged(m_indiP_ccdTemp, "current", currTemperature);
-   updateIfChanged(m_indiP_ccdTemp, "target", setTemperature);
    
    updateIfChanged(m_indiP_ccdTempLock, "state", lockstr);
    
@@ -603,123 +825,56 @@ int picamCtrl::getTemps()
 }
 
 inline
-int picamCtrl::setTemp(float temp)
+int picamCtrl::setTemp(piflt temp)
 {
-   PicamError error = Picam_SetParameterFloatingPointValue( m_cameraHandle, PicamParameter_SensorTemperatureSetPoint, temp );
-   if(error != PicamError_None)
+   if(setPicamParameter( PicamParameter_SensorTemperatureSetPoint, temp) < 0)
    {
-      log<software_error>({__FILE__, __LINE__, 0, error, PicamEnum2String(PicamEnumeratedType_Error, error)});
+      log<software_error>({__FILE__, __LINE__, "Error setting temperature setpoint"});
       state(stateCodes::ERROR);
       return -1;
    }
    
-   const PicamParameter* failed_parameters;
-   piint failed_parameters_count;
-    
-   error = Picam_CommitParameters( m_cameraHandle, &failed_parameters, &failed_parameters_count );
-   if(error != PicamError_None)
-   {
-      log<software_error>({__FILE__, __LINE__, 0, error, PicamEnum2String(PicamEnumeratedType_Error, error)});
-      state(stateCodes::ERROR);
-      return -1;
-   }
-   
-   for( int i=0; i< failed_parameters_count; ++i)
-   {
-      if( failed_parameters[i] ==  PicamParameter_SensorTemperatureSetPoint)
-      {
-         Picam_DestroyParameters( failed_parameters );
-         return log<text_log,-1>( "Camera refused new set point: " + std::to_string(temp) + " C");
-      }
-   }
-   
-   Picam_DestroyParameters( failed_parameters );
+   updateIfChanged(m_indiP_ccdTemp, "target", temp);
    
    log<text_log>( "Set temperature set point: " + std::to_string(temp) + " C");
-   
+      
    return 0;
-
 }
 
-inline
-int picamCtrl::getExpTime()
-{
-   piflt exptime;
-   
-   PicamError error = Picam_ReadParameterFloatingPointValue( m_cameraHandle, PicamParameter_ExposureTime, &exptime );
-
-   if(error != PicamError_None)
-   {
-      log<software_error>({__FILE__, __LINE__, 0, error, PicamEnum2String(PicamEnumeratedType_Error, error)});
-      state(stateCodes::ERROR);
-      return -1;
-   }
-   
-
-   m_expTime = exptime/1000.0;
-   
-   m_fpsSet = 1.0/m_expTime;
-   
-   updateIfChanged(m_indiP_exptime, "current", m_expTime);
-   updateIfChanged(m_indiP_fps, "current", m_fpsSet);
-   
-
-   float target_exptime = m_indiP_exptime["target"].get<float>();
-   if( fabs(m_expTime - target_exptime) < 1e-5) updateIfChanged(m_indiP_exptime, "target", 0);
-   
-   float target_fps = m_indiP_fps["target"].get<float>();
-   if( fabs(m_fpsSet - target_fps) < 1e-5) updateIfChanged(m_indiP_fps, "target", 0);
-   
-   return 0;
-
-}
 
 inline
-int picamCtrl::setExpTime(float exptime)
+int picamCtrl::setExpTime(piflt exptime)
 {
-   PicamError error = Picam_SetParameterFloatingPointValue( m_cameraHandle, PicamParameter_ExposureTime, exptime*1000.0 );
-   if(error != PicamError_None)
+   
+   long intexptime = exptime * 1000 * 10000 + 0.5;
+   exptime = ((double)intexptime)/10000;
+   
+   int rv;
+   if(state() == stateCodes::OPERATING)
    {
-      log<software_error>({__FILE__, __LINE__, 0, error, PicamEnum2String(PicamEnumeratedType_Error, error)});
-      state(stateCodes::ERROR);
+      std::cerr << "setting online...\n";
+      rv = setPicamParameterOnline(m_modelHandle, PicamParameter_ExposureTime, exptime);
+   }
+   else
+   {
+      std::cerr << "setting offline...\n";
+      rv = setPicamParameter(m_modelHandle, PicamParameter_ExposureTime, exptime);
+   }
+   
+   if(rv < 0)
+   {
+      log<software_error>({__FILE__, __LINE__, "Error setting exposure time"});
       return -1;
    }
    
-   const PicamParameter* failed_parameters;
-   piint failed_parameters_count;
-    
-   error = Picam_CommitParameters( m_cameraHandle, &failed_parameters, &failed_parameters_count );
-   if(error != PicamError_None)
-   {
-      log<software_error>({__FILE__, __LINE__, 0, error, PicamEnum2String(PicamEnumeratedType_Error, error)});
-      state(stateCodes::ERROR);
-      return -1;
-   }
-   
-   for( int i=0; i< failed_parameters_count; ++i)
-   {
-      if( failed_parameters[i] ==  PicamParameter_ExposureTime)
-      {
-         Picam_DestroyParameters( failed_parameters );
-         return log<text_log,-1>( "Camera refused new exposure time: " + std::to_string(exptime) + " sec");
-      }
-   }
-   
-   Picam_DestroyParameters( failed_parameters );
-   
-   log<text_log>( "Set exposure time: " + std::to_string(exptime) + " sec");
+   log<text_log>( "Set exposure time: " + std::to_string(exptime/1000.0) + " sec");
    
    return 0;
 }
 
-inline
-int picamCtrl::getFPS()
-{
-   return getExpTime();
-}
 
 inline
-int picamCtrl::setFPS(float fps)
+int picamCtrl::setFPS(piflt fps)
 {
    return setExpTime(1.0/fps);
 }
@@ -806,46 +961,194 @@ void picamCtrl::fgThreadExec()
          sleep(1);
       }
       
-      //*****&&&&&&&@@@@@@@@@@@   TEMPORARY
-      while(! m_shutdown) sleep(1);
-      //!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!1
+      piint readoutStride;
+      piint framesPerReadout;
+      piint frameStride;
+      piint frameSize;
+      piint pixelBitDepth;
       
-#if 0
-      
+      PicamAcquisitionBuffer acqBuff;
+      acqBuff.memory = 0;
+      acqBuff.memory_size = 0;
       
       if(m_shutdown) continue;
       else //This gives a nice scope for the mutex
       {
          // call static_cast<derived>::preAcqModeConfig() or whatever
          
-//          std::unique_lock<std::mutex> lock(m_indiMutex);
+         std::unique_lock<std::mutex> lock(m_indiMutex);
       
-         //Send command to camera to place it in the correct mode, if needed.
+         if(getPicamParameter(readoutStride, PicamParameter_ReadoutStride) < 0)
+         {
+            log<software_error>({__FILE__, __LINE__, "Error getting readout stride"});
+            state(stateCodes::ERROR);
+            continue;
+         }
+
+         if(getPicamParameter(frameStride, PicamParameter_FrameStride) < 0)
+         {
+            log<software_error>({__FILE__, __LINE__, "Error getting frame stride"});
+            state(stateCodes::ERROR);
+            
+            continue;
+         }
+
+         if(getPicamParameter(framesPerReadout, PicamParameter_FramesPerReadout) < 0)
+         {
+            log<software_error>({__FILE__, __LINE__, "Error getting frames per readout"});
+            state(stateCodes::ERROR);
+            continue;
+         }
+         
+         if(getPicamParameter( frameSize, PicamParameter_FrameSize) < 0)
+         {       
+            log<software_error>({__FILE__, __LINE__, "Error getting frame size"});
+            state(stateCodes::ERROR);
+            continue;
+         }
+         
+         if(getPicamParameter( pixelBitDepth, PicamParameter_PixelBitDepth) < 0)
+         {
+            log<software_error>({__FILE__, __LINE__,"Error getting pixel bit depth"});
+            state(stateCodes::ERROR);
+            continue;
+         }
+         m_depth = pixelBitDepth;
+         
+         const PicamRois* rois;
+         PicamError error = Picam_GetParameterRoisValue( m_cameraHandle, PicamParameter_Rois, &rois );
+         if( error != PicamError_None )
+         {
+            log<software_error>({__FILE__, __LINE__, 0, error, PicamEnum2String(PicamEnumeratedType_Error, error)});
+            state(stateCodes::ERROR);            
+            continue;
+         }
+         m_xbinning = rois->roi_array[0].x_binning;
+         m_ybinning = rois->roi_array[0].y_binning;
+         m_width  = rois->roi_array[0].width  / rois->roi_array[0].x_binning;
+         m_height = rois->roi_array[0].height / rois->roi_array[0].y_binning;
+         Picam_DestroyRois( rois );
+         
+         piint cmode;
+         if(getPicamParameter(cmode, PicamParameter_ReadoutControlMode) < 0)
+         {
+            std::cerr << "could not get control mode\n";
+         }
+
+         std::cerr << "ReadoutControlMode is: " << cmode << "\n";
+
+         piflt FrameRateCalculation;
+         if(getPicamParameter(FrameRateCalculation, PicamParameter_FrameRateCalculation) < 0)
+         {
+            std::cerr << "could not get FrameRateCalculation\n";
+         }
+
+         std::cerr << "FrameRateCalculation is: " << FrameRateCalculation << "\n";
+         
+         piint AdcQuality;
+         if(getPicamParameter(AdcQuality, PicamParameter_AdcQuality) < 0)
+         {
+            std::cerr << "could not get AdcQuality\n";
+         }
+
+         std::cerr << "AdcQuality is: " << AdcQuality << "\n";
+         
+         piflt AdcSpeed;
+         if(getPicamParameter(AdcSpeed, PicamParameter_AdcSpeed) < 0)
+         {
+            std::cerr << "could not get AdcSpeed\n";
+         }
+
+         std::cerr << "AdcSpeed is: " << AdcSpeed << "\n";
+       
+         
+         std::cerr << "Onlineable:\n";
+         pibln onlineable;
+         Picam_CanSetParameterOnline(m_modelHandle, PicamParameter_ReadoutControlMode,&onlineable);
+         std::cerr << "ReadoutControlMode: " << onlineable << "\n"; //0
+         
+         Picam_CanSetParameterOnline(m_modelHandle, PicamParameter_AdcQuality,&onlineable);
+         std::cerr << "AdcQuality: " << onlineable << "\n"; //0
+         
+         Picam_CanSetParameterOnline(m_modelHandle, PicamParameter_AdcAnalogGain,&onlineable);
+         std::cerr << "AdcAnalogGain: " << onlineable << "\n"; //1
+         
+         Picam_CanSetParameterOnline(m_modelHandle, PicamParameter_DisableCoolingFan,&onlineable);
+         std::cerr << "DisableCoolingFan: " << onlineable << "\n";//0
+         
+         Picam_CanSetParameterOnline(m_modelHandle, PicamParameter_SensorTemperatureSetPoint,&onlineable);
+         std::cerr << "SensorTemperatureSetPoint: " << onlineable << "\n"; //0
+         
+         Picam_CanSetParameterOnline(m_modelHandle, PicamParameter_AdcEMGain,&onlineable);
+         std::cerr << "AdcEMGain: " << onlineable << "\n"; //1
+         
+         Picam_CanSetParameterOnline(m_modelHandle, PicamParameter_FrameRateCalculation,&onlineable);
+         std::cerr << "FrameRateCalculation: " << onlineable << "\n";
+         
+//          Picam_CanSetParameterOnline(m_modelHandle, PicamParameter_,&onlineable);
+//          std::cerr << ": " << onlineable << "\n";
          
          
-//          log<text_log>("Send command to set mode: " + m_cameraModes[m_modeName].m_serialCommand);
-//          log<text_log>("Response was: " + response);
-//          
-//          updateIfChanged(m_indiP_mode, "current", m_modeName);
-//          updateIfChanged(m_indiP_mode, "target", std::string(""));
+   
+         
+         
+         
+         const PicamRangeConstraint * constraint_array;
+         piint constraint_count;
+         PicamAdvanced_GetParameterRangeConstraints( m_modelHandle, PicamParameter_ExposureTime, &constraint_array, &constraint_count);
+         std::cerr << "Exp. Time Constraints: " << constraint_count << "\n";
+         
+         for(int i=0;i<constraint_count;++i)
+         {
+            std::cerr << constraint_array[i].empty_set << "\n";
+            std::cerr << constraint_array[i].minimum << "\n";
+            std::cerr << constraint_array[i].maximum << "\n";
+            std::cerr << constraint_array[i].increment << "\n";
+            std::cerr << constraint_array[i].excluded_values_count << "\n";
+         }
+         
+         acqBuff.memory_size = framesPerReadout*readoutStride;                                                                                                                  
+         acqBuff.memory = malloc(acqBuff.memory_size);
+         
+         error = PicamAdvanced_SetAcquisitionBuffer(m_cameraHandle, &acqBuff);
+         if(error != PicamError_None)
+            {
+              std::cerr << "-->" << PicamEnum2String(PicamEnumeratedType_Error, error) << "\n";
+            }
+            
+
+         if(setPicamParameter(PicamParameter_ReadoutCount,(pi64s) 0) < 0)
+         {
+            log<software_error>({__FILE__, __LINE__, "Error setting readouts=0"});
+            state(stateCodes::ERROR);
+            continue;
+         }
+   
+         //setExpTime(1./2.);
+         
+         error = Picam_StartAcquisition(m_cameraHandle);
+         if(error != PicamError_None) 
+         {
+            log<software_error>({__FILE__, __LINE__, 0, error, PicamEnum2String(PicamEnumeratedType_Error, error)});
+            state(stateCodes::ERROR);
+            
+            continue;
+         }
+         std::cerr << "Acquisition Started\n"; 
       }
    
-      ///\todo check response
-   
-   
-      /* Initialize the Camera?
-       */
-
-      
+     
+     
+            
       /* Initialize ImageStreamIO
        */
       IMAGE imageStream;
       uint32_t imsize[3];
-      imsize[0] = 1024; //MODE DETERMINED SIZE?
-      imsize[1] = OCAM_SZ;
+      imsize[0] = m_width; //MODE DETERMINED SIZE?
+      imsize[1] = m_height;
       imsize[2] = 1;
-      ImageStreamIO_createIm(&imageStream, "ocam2k", 2, imsize, _DATATYPE_INT16, 1, 0);
-
+      ImageStreamIO_createIm(&imageStream, m_configName.c_str(), 2, imsize, _DATATYPE_INT16, 1, 0);
+   
       
       //This completes the reconfiguration.
       m_reconfig = false;
@@ -857,20 +1160,45 @@ void picamCtrl::fgThreadExec()
       
       while(!m_shutdown && !m_reconfig && m_powerState > 0)
       {
-         if( state() != stateCodes::OPERATING || m_powerState <= 0)
-         {
-            sleep(1);
-            continue;
-         }
-         
-         
          //==================
          //Get next image, process validity.
          //====================
          
+         piint camTimeOut = 1000;
+         PicamAvailableData available;
+         PicamAcquisitionStatus status;
+         timespec timestamp;
+         
+         PicamError error;
+         error = Picam_WaitForAcquisitionUpdate(m_cameraHandle, camTimeOut, &available, &status);
+         clock_gettime(CLOCK_REALTIME, &timestamp);
+         
+         if(error == PicamError_TimeOutOccurred) continue;
+         else if(error != PicamError_None)
+         {
+            log<software_error>({__FILE__, __LINE__, 0, error, PicamEnum2String(PicamEnumeratedType_Error, error)});
+            state(stateCodes::ERROR);
+            
+            break;
+         }
+         if(available.initial_readout == 0) continue;
+         
+         piflt FrameRateCalculation;
+         if(getPicamParameter(FrameRateCalculation, PicamParameter_FrameRateCalculation) < 0)
+         {
+            std::cerr << "could not get FrameRateCalculation\n";
+         }
+
+         //std::cerr << "FrameRateCalculation is: " << FrameRateCalculation << "\n";
+         
+         //std::cerr << "Available readouts: " << available.readout_count << "\n";
+         std::cerr << "Frame rate: " << status.readout_rate <<" " << FrameRateCalculation << "\r";
+         if(available.readout_count <= 0) continue;
+         
          //Ok, no timeout, so we process the image and publish it.
          imageStream.md[0].write=1;
-         ocam2_descramble(id, &currImageNumber, imageStream.array.SI16, (short int *) image_p);
+         memcpy(imageStream.array.SI16, available.initial_readout, m_width*m_height*pixelBitDepth/8);
+         imageStream.md[0].atime = timestamp;
          imageStream.md[0].cnt0++;
          imageStream.md[0].cnt1++;
          imageStream.md[0].write=0;
@@ -896,7 +1224,7 @@ void picamCtrl::fgThreadExec()
             m_nextMode = "";
          }
       }
-#endif
+
    } //outer loop, will exit if m_shutdown==true
 
 }
@@ -932,8 +1260,6 @@ INDI_NEWCALLBACK_DEFN(picamCtrl, m_indiP_ccdTemp)(const pcf::IndiProperty &ipRec
       
       //Lock the mutex, waiting if necessary
       std::unique_lock<std::mutex> lock(m_indiMutex);
-      
-      updateIfChanged(m_indiP_ccdTemp, "target", target);
       
       return setTemp(target);
    }
@@ -1010,6 +1336,7 @@ INDI_NEWCALLBACK_DEFN(picamCtrl, m_indiP_fps)(const pcf::IndiProperty &ipRecv)
       //Lock the mutex, waiting if necessary
       std::unique_lock<std::mutex> lock(m_indiMutex);
 
+      m_ccdTempSetpt = target;
       updateIfChanged(m_indiP_fps, "target", target);
       
       return setFPS(target);
