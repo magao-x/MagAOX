@@ -6,11 +6,12 @@ TEMPLATE = app
 TARGET = pwrGUI
 DESTDIR = bin/ 
 DEPENDPATH += ./ ../../lib 
-INCLUDEPATH += /usr/include/x86_64-linux-gnu/qt5/
+#INCLUDEPATH += /usr/include/x86_64-linux-gnu/qt5/
 #INCLUDEPATH += /usr/include/qt5/
 
-INCLUDEPATH += /usr/include/qwt/ \
-               ../../widgets/multiDial
+INCLUDEPATH += /usr/include/qwt/
+
+INCLUDEPATH +=../../widgets/multiDial
 
 MOC_DIR = moc/
 OBJECTS_DIR = obj/
