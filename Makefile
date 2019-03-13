@@ -5,7 +5,7 @@ apps_to_build = sshDigger xindiserver sysMonitor trippLitePDU siglentSDG filterW
 
 utils_to_build = logdump cursesINDI
 
-scripts_to_install = magaox_procstart.sh magaox_startup.sh
+scripts_to_install = magaox_procstart.sh magaox_startup.sh magaox_shutdown.sh
 
 all: indi_all libs_all apps_all utils_all
 
@@ -66,7 +66,7 @@ scripts_install:
 	for script in ${scripts_to_install}; do \
 		/bin/sudo install -d /opt/MagAOX/bin && \
 		/bin/sudo install scripts/$$script /opt/MagAOX/bin  && \
-		/bin/sudo ln -s /opt/MagAOX/bin/$$script /usr/local/bin/$$script; \
+		/bin/sudo ln -fs /opt/MagAOX/bin/$$script /usr/local/bin/$$script; \
 	done
 
 utils_all:
