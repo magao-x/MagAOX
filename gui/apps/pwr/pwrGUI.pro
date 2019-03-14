@@ -10,6 +10,7 @@ DEPENDPATH += ./ ../../lib
 #INCLUDEPATH += /usr/include/qt5/
 
 INCLUDEPATH += /usr/include/qwt/
+INCLUDEPATH += /home/jrmales/include 
 
 INCLUDEPATH +=../../widgets/multiDial
 

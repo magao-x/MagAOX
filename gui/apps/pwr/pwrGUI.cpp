@@ -140,9 +140,8 @@ pwrGUI::pwrGUI( QWidget * Parent, Qt::WindowFlags f) : QWidget(Parent, f)
    setXDialPalette(&p);
    ui.currentDial->setPalette(p);
    
-   ui.currentDial->setNumNeedles(2);
-   ui.currentDial->setValue(0, 0.0);
-   ui.currentDial->setValue(1, 0.0);
+   
+   
    ui.currentDial->setFocusPolicy(Qt::NoFocus);
    
    ui.voltageDial->setOrigin(150.0);
@@ -156,9 +155,7 @@ pwrGUI::pwrGUI( QWidget * Parent, Qt::WindowFlags f) : QWidget(Parent, f)
    setXDialPalette(&p);
    ui.voltageDial->setPalette(p);
    
-   ui.voltageDial->setNumNeedles(2);
-   ui.voltageDial->setValue(0, 0.0);
-   ui.voltageDial->setValue(1, 0.0);
+   
    ui.voltageDial->setFocusPolicy(Qt::NoFocus);
    
    ui.frequencyDial->setOrigin(150.0);
@@ -172,11 +169,11 @@ pwrGUI::pwrGUI( QWidget * Parent, Qt::WindowFlags f) : QWidget(Parent, f)
    setXDialPalette(&p);
    ui.frequencyDial->setPalette(p);
    
-   ui.frequencyDial->setNumNeedles(2);
-   ui.frequencyDial->setValue(0, 0.0);
-   ui.frequencyDial->setValue(1, 0.0);
+   
    ui.frequencyDial->setFocusPolicy(Qt::NoFocus);
    
+   connect(this, SIGNAL(gotNewDevice(std::string *, std::vector<std::string> *)), this, SLOT(addNewDevice(std::string *, std::vector<std::string> *)));
+   /*
    m_devices.resize(2);
    m_devices[0] = new pwrDevice(this);
    m_devices[1] = new pwrDevice(this);
@@ -209,8 +206,9 @@ pwrGUI::pwrGUI( QWidget * Parent, Qt::WindowFlags f) : QWidget(Parent, f)
       ui.switchGrid->addWidget(m_devices[1]->channel(n)->channelNameLabel(), 2, n+1);
       ui.switchGrid->addWidget(m_devices[1]->channel(n)->channelSwitch(), 3, n+1);
    }
+   */
    
-   n_ACpdus=2;
+   n_ACpdus=3;
    currents.resize(n_ACpdus, -1);
    voltages.resize(n_ACpdus, -1);
    frequencies.resize(n_ACpdus, -1);
@@ -218,25 +216,136 @@ pwrGUI::pwrGUI( QWidget * Parent, Qt::WindowFlags f) : QWidget(Parent, f)
    
 pwrGUI::~pwrGUI()
 {
+   for(size_t i=0; i< m_devices.size(); ++i) delete m_devices[i];
 }
 
 int pwrGUI::subscribe( multiIndiPublisher * publisher )
 {
-   for(size_t n=0; n<m_devices.size(); ++n)
-   {
-      publisher->subscribeProperty(this, m_devices[n]->deviceName(), "load");
-      publisher->subscribeProperty(this, m_devices[n]->deviceName(), "channelOutlets");
-      publisher->subscribeProperty(this, m_devices[n]->deviceName(), "channelOnDelays");
-      publisher->subscribeProperty(this, m_devices[n]->deviceName(), "channelOffDelays");
-      for(size_t i=0;i<m_devices[n]->numChannels();++i)
-      {
-         publisher->subscribeProperty(this, m_devices[n]->deviceName(), m_devices[n]->channel(i)->channelName());
-      }
-   }
+   publisher->subscribe(this);
       
    return 0;
 }
-                                
+ 
+int pwrGUI::handleDefProperty( const pcf::IndiProperty & ipRecv /**< [in] the property which has changed*/)
+{
+
+   bool have = false;
+   for(size_t i=0;i<m_devices.size(); ++i)
+   {
+      if(m_devices[i]->deviceName() == ipRecv.getDevice()) 
+      {
+         have = true;
+         break;
+      }
+   }
+         
+   if(!have)
+   {
+      if(ipRecv.getName() == "channelOutlets")
+      {
+         std::cerr << ipRecv.getDevice() << " is an outlet controller\n";
+         
+         size_t nel = ipRecv.getNumElements();
+         
+         if(nel == 0)
+         {
+            std::cerr << "  but has no channels . . .\n";
+         }
+         else
+         {
+            std::vector<std::string> * elements = new std::vector<std::string>;
+            elements->resize(nel);
+            for(size_t i = 0; i < nel; ++i)
+            {
+               (*elements)[i] = ipRecv[i].getName();
+            }
+         
+            std::cerr << "   Channels:\n";
+            for(size_t i = 0; i < nel; ++i)
+            {
+               std::cerr << "      " << (*elements)[i] << "\n";
+            }
+         
+            std::string * devName = new std::string;
+            *devName = ipRecv.getDevice();
+         
+            emit gotNewDevice( devName, elements);
+         }
+         
+         return 0;
+      }
+   }
+   
+   std::unique_lock<std::mutex> lock(m_addMutex);
+   return handleSetProperty(ipRecv);
+   
+}
+
+ 
+/*bool channelSortComp(const pwrChannel* &a, const pwrChannel* &b)
+{
+   
+}*/
+
+void pwrGUI::addNewDevice( std::string * devName,
+                   std::vector<std::string>  * channels
+                 )
+{
+   static int currRow = 0;
+   
+   for(size_t i=0;i<m_devices.size(); ++i)
+   {
+      if(m_devices[i]->deviceName() == *devName) 
+      {
+         delete devName;
+         delete channels;
+         return;
+      }
+   }
+   
+   //Get mutex so we don't get clobbered by the next INDI def
+   std::unique_lock<std::mutex> lock(m_addMutex);
+   
+   m_devices.push_back( new pwrDevice(this));
+   m_devices.back()->deviceName(*devName);
+   
+   
+   m_devices.back()->setChannels(*channels);
+   
+   QObject::connect(m_devices.back(), SIGNAL(chChange(pcf::IndiProperty &)), this, SLOT(chChange(pcf::IndiProperty &)));
+   QObject::connect(m_devices.back(), SIGNAL(loadChanged()), this, SLOT(updateGauges()));
+      
+   publisher->subscribeProperty(this, m_devices.back()->deviceName(), "load");
+   publisher->subscribeProperty(this, m_devices.back()->deviceName(), "channelOutlets");
+   publisher->subscribeProperty(this, m_devices.back()->deviceName(), "channelOnDelays");
+   publisher->subscribeProperty(this, m_devices.back()->deviceName(), "channelOffDelays");
+   
+   ui.switchGrid->addWidget(m_devices.back()->deviceNameLabel(), currRow, 0, 2, 1);
+   
+   for(size_t i=0;i<m_devices.back()->numChannels();++i)
+   {
+      publisher->subscribeProperty(this, m_devices.back()->deviceName(), m_devices.back()->channel(i)->channelName());
+      
+      ui.switchGrid->addWidget(m_devices.back()->channel(i)->channelNameLabel(), currRow, i+1);
+      ui.switchGrid->addWidget(m_devices.back()->channel(i)->channelSwitch(), currRow+1, i+1);
+   }
+      
+   currRow +=2;
+   
+   delete devName;
+   delete channels;
+   
+   ui.currentDial->setNumNeedles(m_devices.size());
+//    ui.currentDial->setValue(0, 0.0);
+//    ui.currentDial->setValue(1, 0.0);
+   ui.voltageDial->setNumNeedles(m_devices.size());
+//    ui.voltageDial->setValue(0, 0.0);
+//    ui.voltageDial->setValue(1, 0.0);
+   ui.frequencyDial->setNumNeedles(m_devices.size());
+//    ui.frequencyDial->setValue(0, 0.0);
+//    ui.frequencyDial->setValue(1, 0.0);
+   
+}
 int pwrGUI::handleSetProperty( const pcf::IndiProperty & ipRecv /**< [in] the property which has changed*/)
 {
    std::string key = ipRecv.createUniqueKey();
@@ -252,7 +361,6 @@ int pwrGUI::handleSetProperty( const pcf::IndiProperty & ipRecv /**< [in] the pr
       }
    }
 
-   //If we get here then we need to add this device
    return 0;
    
 }
@@ -289,6 +397,7 @@ void pwrGUI::updateGauges()
       {
          ui.voltageDial->setValue(i,v);
          sumVolt += v;
+        // std::cerr << v << "\n";
          ++nVolt;
       }
       

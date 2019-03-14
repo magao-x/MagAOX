@@ -4,6 +4,8 @@
 #include <QWidget>
 #include <qwt_text_label.h>
 
+#include <mx/ioutils/stringUtils.hpp>
+
 #include "../../lib/multiIndi.hpp"
 
 #include "pwrChannel.hpp"

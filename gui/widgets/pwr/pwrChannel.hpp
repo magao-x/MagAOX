@@ -32,7 +32,7 @@ protected:
    
    int m_setSwitchState {0}; ///< The last state set by the user.
    
-   int m_numOutlets {1}; ///< The number of outlets controlled by this channel, used for timeout calculation.
+   std::vector<int> m_outlets; ///< The outlets controlled by this channel.
    
    double m_onDelay {0}; ///< The total turn-on delay for this channel (between outlets)
    
@@ -76,7 +76,7 @@ public:
    
    QSlider * channelSwitch();
    
-   void numOutlets( int nO);
+   void outlets( const std::vector<int> & outs );
    
    void onDelay( double onD );
    
