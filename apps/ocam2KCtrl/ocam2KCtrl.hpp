@@ -131,7 +131,7 @@ protected:
    
    int m_fgThreadPrio {1}; ///< Priority of the framegrabber thread, should normally be > 00.
 
-   std::string m_shmemName {"ocam2k"}; ///< The name of the shared memory image, is used in `/tmp/<shmemName>.im.shm`.  Default is `ocam2k`.
+   std::string m_shmimName {"ocam2k"}; ///< The name of the shared memory image, is used in `/tmp/<shmimName>.im.shm`.  Default is `ocam2k`.
    
    int m_shmemCubeSz {1}; ///< The size of the shared memory image cube.  Default is 1.
 
@@ -285,7 +285,7 @@ void ocam2KCtrl::setupConfig()
    config.add("framegrabber.numBuffs", "", "framegrabber.numBuffs", argType::Required, "framegrabber", "numBuffs", false, "int", "The EDT PDV framegrabber DMA buffer size [images].  Default is 4.");
    config.add("framegrabber.threadPrio", "", "framegrabber.threadPrio", argType::Required, "framegrabber", "threadPrio", false, "int", "The real-time priority of the fraemgrabber thread.");
    
-   config.add("framegrabber.shmemName", "", "framegrabber.shmemName", argType::Required, "framegrabber", "shmemName", false, "string", "The name of the ImageStreamIO shared memory image. Will be used as /tmp/<shmemName>.im.shm.");
+   config.add("framegrabber.shmimName", "", "framegrabber.shmimName", argType::Required, "framegrabber", "shmimName", false, "string", "The name of the ImageStreamIO shared memory image. Will be used as /tmp/<shmimName>.im.shm.");
    
    config.add("framegrabber.shmemCubeSz", "", "framegrabber.shmemCubeSz", argType::Required, "framegrabber", "shmemCubeSz", false, "int", "The cube size (number of images) in the shared memory buffer.");
    
@@ -309,7 +309,7 @@ void ocam2KCtrl::loadConfig()
    config(m_channel, "framegrabber.pdv_channel");
    config(m_numBuffs, "framegrabber.numBuffs");
    config(m_fgThreadPrio, "framegrabber.threadPrio");
-   config(m_shmemName, "framegrabber.shmemName");
+   config(m_shmimName, "framegrabber.shmimName");
    config(m_shmemCubeSz, "framegrabber.shmemCubeSz");
    
    config(m_powerOnWait, "camera.powerOnWait");
@@ -988,7 +988,7 @@ void ocam2KCtrl::fgThreadExec()
       imsize[0] = OCAM_SZ;
       imsize[1] = OCAM_SZ;
       imsize[2] = 1;
-      ImageStreamIO_createIm(&imageStream, m_shmemName.c_str(), 2, imsize, _DATATYPE_INT16, 1, 0);
+      ImageStreamIO_createIm(&imageStream, m_shmimName.c_str(), 2, imsize, _DATATYPE_INT16, 1, 0);
 
       /*
        * allocate four buffers for optimal pdv ring buffer pipeline (reduce if
@@ -1298,12 +1298,12 @@ INDI_NEWCALLBACK_DEFN(ocam2KCtrl, m_indiP_emGain)(const pcf::IndiProperty &ipRec
    {
       unsigned current = 0, target = 0;
 
-      if(ipRecv.find("current")
+      if(ipRecv.find("current"))
       {
          current = ipRecv["current"].get<unsigned>();
       }
 
-      if(ipRecv.find("target")
+      if(ipRecv.find("target"))
       {
          target = ipRecv["target"].get<unsigned>();
       }
