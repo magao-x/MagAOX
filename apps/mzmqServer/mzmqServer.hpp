@@ -164,6 +164,7 @@ void mzmqServer::loadConfig()
 }
 
 
+#include <sys/syscall.h>
 
 inline
 int mzmqServer::appStartup()
@@ -186,7 +187,7 @@ int mzmqServer::appStartup()
       return -1;
    }
 
-   
+   std::cerr << "Main Thread: " << syscall(SYS_gettid) << "\n";   
    return 0;
 
 }
