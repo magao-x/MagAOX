@@ -223,6 +223,7 @@ Log in via `ssh` as a user with `sudo` access.
     $ ./setup_users_and_groups.sh
     ```
 
+    Note: on ubuntu you will need to add a symlink: 'ln -s /usr/bin/sudo /bin/sudo
 2. Log out and back in, verify groups
 
     ```
@@ -234,6 +235,8 @@ Log in via `ssh` as a user with `sudo` access.
 
     Because the last step changed the group memberships of the installing user (i.e. `$USER`, so most likely you), you will have to log out and back in. (Alternatively, you can run `newgrp magaox-dev` to start a new subshell where the new group is active, but this can get confusing.)
 
+    Note: on ubuntu instead of `wheel` it will be `sudo`
+    
 3. Run the provisioning script
 
     ```
