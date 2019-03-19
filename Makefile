@@ -1,7 +1,17 @@
 
 libs_to_build = libtelnet
 
-apps_to_build = sshDigger xindiserver sysMonitor trippLitePDU siglentSDG filterWheelCtrl zaberCtrl magAOXMaths
+apps_to_build =  filterWheelCtrl \
+                 magAOXMaths \
+                 mzmqServer \
+                 ocam2KCtrl \
+                 picamCtrl \
+                 siglentSDG \
+                 sshDigger \
+                 sysMonitor \
+                 trippLitePDU \
+                 xindiserver \
+                 zaberCtrl 
 
 utils_to_build = logdump cursesINDI
 

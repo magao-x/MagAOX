@@ -274,6 +274,7 @@ void logdump::printLogBuff( const logPrioT & lvl,
    
    if(ec == eventCodes::GIT_STATE)
    {
+      std::cerr << "git state" << std::endl;
       if(git_state::repoName(logHeader::messageBuffer(logBuff)) == "MagAOX")
       {
          for(int i=0;i<80;++i) std::cout << '-';
@@ -281,6 +282,8 @@ void logdump::printLogBuff( const logPrioT & lvl,
          for(int i=0;i<80;++i) std::cout << '-';
          std::cout << '\n';
       }
+      std::cerr << "git state" << std::endl;
+
    }
 
    if(lvl < logPrio::LOG_INFO)
