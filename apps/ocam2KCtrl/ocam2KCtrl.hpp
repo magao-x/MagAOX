@@ -690,6 +690,8 @@ int ocam2KCtrl::pdvConfig(std::string & modeName)
   
    
    log<text_log>("camera configured with: " +m_cameraModes[modeName].m_serialCommand);
+   
+   
    return 0;
 
 }
@@ -912,6 +914,15 @@ inline
 void ocam2KCtrl::fgThreadExec()
 {
 
+   //Create and initialize the ImageStreamIO buffer.
+   //It will only be recreated if needed.
+   IMAGE imageStream;
+   uint32_t imsize[3];
+   imsize[0] = 120;
+   imsize[1] = 120;
+   imsize[2] = 1;
+   ImageStreamIO_createIm(&imageStream, m_shmimName.c_str(), 2, imsize, _DATATYPE_INT16, 1, 0);
+      
    while(m_shutdown == 0)
    {
       while(!m_shutdown && (!( state() == stateCodes::READY || state() == stateCodes::OPERATING) || m_powerState <= 0 || m_pdv == nullptr ) )
@@ -932,6 +943,8 @@ void ocam2KCtrl::fgThreadExec()
             sleep(1);
             continue;
          }
+         
+         if(m_fpsSet > 0) setFPS(m_fpsSet);
          
          log<text_log>("Send command to set mode: " + m_cameraModes[m_modeName].m_serialCommand);
          log<text_log>("Response was: " + response);
@@ -983,13 +996,19 @@ void ocam2KCtrl::fgThreadExec()
       
       /* Initialize ImageStreamIO
        */
-      IMAGE imageStream;
-      uint32_t imsize[3];
-      imsize[0] = OCAM_SZ;
-      imsize[1] = OCAM_SZ;
-      imsize[2] = 1;
-      ImageStreamIO_createIm(&imageStream, m_shmimName.c_str(), 2, imsize, _DATATYPE_INT16, 1, 0);
-
+      if(OCAM_SZ != imageStream.md[0].size[0] || OCAM_SZ != imageStream.md[0].size[1])
+      {
+         std::cerr << "recreating ImageStream\n";
+         imsize[0] = OCAM_SZ;
+         imsize[1] = OCAM_SZ;
+         imsize[2] = 1;
+         ImageStreamIO_createIm(&imageStream, m_shmimName.c_str(), 2, imsize, _DATATYPE_INT16, 1, 0);
+      }
+      else
+      {
+         std::cerr << "not recreating\n";
+      }
+      
       /*
        * allocate four buffers for optimal pdv ring buffer pipeline (reduce if
        * memory is at a premium)
@@ -1031,7 +1050,7 @@ void ocam2KCtrl::fgThreadExec()
           */
          uint dmaTimeStamp[2];
          timespec timeStamp;
-         image_p = pdv_wait_image_timed(m_pdv, dmaTimeStamp);
+         image_p = pdv_wait_last_image_timed(m_pdv, dmaTimeStamp);
 
          clock_gettime(CLOCK_REALTIME, &timeStamp); //Get as close to download as possible.
          
@@ -1064,14 +1083,19 @@ void ocam2KCtrl::fgThreadExec()
              * pdv_timeout_cleanup helps recover gracefully after a timeout,
              * particularly if multiple buffers were prestarted
              */
-            pdv_timeout_restart(m_pdv, TRUE);
-            last_timeouts = timeouts;
-            m_lastImageNumber = -1;
-            
+//             pdv_timeout_restart(m_pdv, FALSE);
+//             pdv_multibuf(m_pdv, m_numBuffs);
+//             pdv_start_images(m_pdv, m_numBuffs);
+//             
+//             last_timeouts = timeouts;
+//             m_lastImageNumber = -1;
+//             
             
             ///\todo need timeout and overrun log types
             log<text_log>("timeout", logPrio::LOG_ERROR);
             
+            m_nextMode = m_modeName;
+            m_reconfig = 1;
             continue;
          } 
 
@@ -1114,16 +1138,35 @@ void ocam2KCtrl::fgThreadExec()
                   //This we handle as a non-timeout -- report how many frames were skipped
                   framesSkipped = m_currImageNumber - m_lastImageNumber;
                   //and don't `continue` to top of loop
+                  
+                  log<text_log>("frames skipped: " + std::to_string(framesSkipped) + ", total since restart: " + std::to_string(m_framesSkipped), logPrio::LOG_ERROR);
+                  
+                  m_nextMode = m_modeName;
+                  m_reconfig = 1;
+            
+                  /*pdv_timeout_restart(m_pdv, FALSE);
+                  pdv_multibuf(m_pdv, m_numBuffs);
+                  pdv_start_images(m_pdv, m_numBuffs);
+                  m_lastImageNumber = -1;
+                  */
+                  
+                  continue;
+                  
                }
                else //but if it's any bigger or < 0, it's probably garbage
                {
                   //This we handle as corruption, therefore a timeout
-                  pdv_timeout_restart(m_pdv, TRUE);
-                  last_timeouts = timeouts;
+//                   pdv_timeout_restart(m_pdv, FALSE);
+//                   pdv_multibuf(m_pdv, m_numBuffs);
+//                   pdv_start_images(m_pdv, m_numBuffs);
+//                   last_timeouts = timeouts;
                
                   ///\todo need frame corrupt log type
                   log<text_log>("frame number possibly corrupt: " + std::to_string(m_currImageNumber) + " - " + std::to_string(m_lastImageNumber), logPrio::LOG_ERROR);
                   
+                  m_nextMode = m_modeName;
+                  m_reconfig = 1;
+            
                   //Reset the counters.
                   m_lastImageNumber = -1;
                   
@@ -1155,8 +1198,6 @@ void ocam2KCtrl::fgThreadExec()
          m_lastImageNumber = m_currImageNumber;
       }
     
-      ImageStreamIO_destroyIm( &imageStream );
-    
       if(m_reconfig && !m_shutdown)
       {
          //lock mutex
@@ -1170,11 +1211,13 @@ void ocam2KCtrl::fgThreadExec()
          else
          {
             m_nextMode = "";
+            
          }
       }
 
    } //outer loop, will exit if m_shutdown==true
 
+   ImageStreamIO_destroyIm( &imageStream );
 }
 
 
