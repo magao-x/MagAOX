@@ -1051,54 +1051,15 @@ void ocam2KCtrl::fgThreadExec()
          uint dmaTimeStamp[2];
          timespec timeStamp;
          image_p = pdv_wait_last_image_timed(m_pdv, dmaTimeStamp);
-
-         clock_gettime(CLOCK_REALTIME, &timeStamp); //Get as close to download as possible.
-         
-         
-         //Check for overrun 
-         if ( edt_reg_read(m_pdv, PDV_STAT) & PDV_OVERRUN) overrun = true;
-         
-         ///\todo verify this works here, immediately after wait_image and timestamping
          pdv_start_image(m_pdv);
 
-         m_currImageTimestamp = timeStamp.tv_sec + ((double) timeStamp.tv_nsec / 1e9);
-         m_currImageDMATimestamp = dmaTimeStamp[0] + ((double) dmaTimeStamp[1] / 1e6);
 
-                  
-         int timeouts = pdv_timeouts(m_pdv);
-
-
-         /*
-          * check for timeouts or data overruns -- timeouts occur when data
-          * is lost, camera isn't hooked up, etc, and application programs
-          * should always check for them. data overruns usually occur as a
-          * result of a timeout but should be checked for separately since
-          * ROI can sometimes mask timeouts
-          */
-         if (timeouts > last_timeouts || overrun)
-         {
-            if(m_powerState <= 0) continue; //timeout due to power off so we can ignore it.
-            
-            /*
-             * pdv_timeout_cleanup helps recover gracefully after a timeout,
-             * particularly if multiple buffers were prestarted
-             */
-//             pdv_timeout_restart(m_pdv, FALSE);
-//             pdv_multibuf(m_pdv, m_numBuffs);
-//             pdv_start_images(m_pdv, m_numBuffs);
-//             
-//             last_timeouts = timeouts;
-//             m_lastImageNumber = -1;
-//             
-            
-            ///\todo need timeout and overrun log types
-            log<text_log>("timeout", logPrio::LOG_ERROR);
-            
-            m_nextMode = m_modeName;
-            m_reconfig = 1;
-            continue;
-         } 
-
+         /* Removed all pdv timeout and overrun checking, since we can rely on frame number from the camera
+            to detect missed and corrupted frames.
+         
+            See ef0dd24 for last version with full checks in it.
+         */
+        
          //Get the image number to see if this is valid.
          //This is how it is in the ocam2_sdk:
          currImageNumber = ((int *)image_p)[OCAM2_IMAGE_NB_OFFSET/4]; /* int offset */
@@ -1106,7 +1067,6 @@ void ocam2KCtrl::fgThreadExec()
          //We want to do arithmetic in signed long, big enough to hold the unsigned counter from OCAM2
          m_currImageNumber = currImageNumber;
          
-
          //For the first loop after a restart
          if(m_lastImageNumber == -1 || m_resetFPS) 
          {
@@ -1181,12 +1141,23 @@ void ocam2KCtrl::fgThreadExec()
          //Ok, no timeout, so we process the image and publish it.
          imageStream.md[0].write=1; ///\todo make sure rtimv skips image if write=1
          ocam2_descramble(id, &currImageNumber, imageStream.array.SI16, (short int *) image_p);
-         imageStream.md[0].atime = timeStamp;
+         
+         imageStream.md[0].atime.tv_sec = dmaTimeStamp[0];
+         imageStream.md[0].atime.tv_nsec = dmaTimeStamp[1];
+         clock_gettime(CLOCK_REALTIME, &timeStamp); 
+         ///\todo need to update the write time in imagestruct with this timeStamp
          imageStream.md[0].cnt0++;
          imageStream.md[0].cnt1++; ///\todo this is wrong, needs to be 0 if needed, and needs to be done *before* image write for cube handling.
          imageStream.md[0].write=0;
          ImageStreamIO_sempost(&imageStream,-1);
  
+         
+         
+         if(imageStream.md[0].cnt0 % 2000 == 0)
+         {
+            std::cerr << ( (double) timeStamp.tv_sec + ((double) timeStamp.tv_nsec)/1e9) - ( (double) dmaTimeStamp[0] + ((double) dmaTimeStamp[1])/1e9) << "\n";
+         }
+         
          if(framesSkipped)
          {
             m_framesSkipped += framesSkipped;
