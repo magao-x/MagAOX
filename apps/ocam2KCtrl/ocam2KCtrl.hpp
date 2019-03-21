@@ -540,6 +540,15 @@ int ocam2KCtrl::appLogic()
          state(stateCodes::ERROR);
          return 0;
       }
+      
+      std::cerr << "Getting gain\n";
+      if(getEMGain () < 0)
+      {
+         if(m_powerState == 0) return 0;
+         
+         state(stateCodes::ERROR);
+         return 0;
+      }
    }
 
    //Fall through check?
@@ -836,7 +845,20 @@ int ocam2KCtrl::getEMGain()
 inline
 int ocam2KCtrl::setEMGain( unsigned emg )
 {
-   return 0;
+   std::string response;
+
+   ///\todo should we have fps range checks or let camera deal with it?
+   
+   std::string emgStr= std::to_string(emg);
+   if( pdvSerialWriteRead( response, m_pdv, "gain " + emgStr, m_readTimeout) == 0)
+   {
+      ///\todo check response
+      log<text_log>({"set EM Gain: " + emgStr});
+      
+      return 0;
+   }
+   else return log<software_error,-1>({__FILE__, __LINE__});
+   
 }
    
 inline
