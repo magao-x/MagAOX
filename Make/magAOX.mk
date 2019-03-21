@@ -44,7 +44,7 @@ all:  pch magaox_git_version.h $(TARGET)
 	rm $(SELF_DIR)/../magaox_git_version.h
 
 pch:
-	cd ../../libMagAOX; ${MAKE}
+	cd $(SELF_DIR)/../libMagAOX; ${MAKE}
 
 $(TARGET).o: $(abspath $(SELF_DIR)/../libMagAOX/libMagAOX.hpp.gch) $(TARGET).hpp $(OTHER_HEADERS)
 
