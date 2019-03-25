@@ -1,7 +1,7 @@
 
 allall: all
 
-#OPTIMIZE=-ggdb
+OPTIMIZE=-ggdb
 
 OTHER_HEADERS=cursesTableRow.hpp cursesTable.hpp
 TARGET=cursesINDI

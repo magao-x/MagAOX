@@ -17,7 +17,7 @@ int main()
    cursesINDI ci("me", "1.7", "1.7");
 
    #ifdef DEBUG_TMPOUT
-   ofstream fout;
+   std::ofstream fout;
    std::string fname = "/tmp/cursesINDI_" + std::to_string(getpid()) + ".txt";
    fout.open(fname);
    

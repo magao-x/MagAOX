@@ -15,6 +15,7 @@ namespace MagAOX
 namespace app
 {
 
+///\todo document this
 struct ocamTemps
 {
    float CCD {0};
@@ -28,7 +29,7 @@ struct ocamTemps
    float COOLING_POWER {0};
 };
 
-
+///\todo document this
 int parseTemps( ocamTemps & temps,
                 const std::string & tstr
               )
@@ -51,6 +52,7 @@ int parseTemps( ocamTemps & temps,
    return 0;
 }
 
+///\todo document this
 int parseFPS( float & fps,
               const std::string & fstr
             )
@@ -61,6 +63,22 @@ int parseFPS( float & fps,
    if( v.size() < 3) return -1;
 
    fps = mx::ioutils::convertFromString<float>( v[1] );
+
+   return 0;
+}
+
+///\todo add test for parseEMGain
+//Example response: Gain set to 2
+int parseEMGain( unsigned & emGain,
+                 const std::string & fstr
+               )
+{
+   std::vector<std::string> v;
+   mx::ioutils::parseStringVector(v, fstr, " ");
+  
+   if( v.size() != 5) return -1;
+
+   emGain = mx::ioutils::convertFromString<unsigned>( v[3] );
 
    return 0;
 }

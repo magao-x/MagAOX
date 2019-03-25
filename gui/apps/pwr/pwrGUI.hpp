@@ -1,4 +1,6 @@
 
+#include <mutex>
+
 #include <QWidget>
 #include <QPainter>
 #include <qwt_dial_needle.h>
@@ -29,6 +31,9 @@ protected:
    std::vector<double> voltages;
    std::vector<double> frequencies;
    
+   ///Mutex for locking INDI communications.
+   std::mutex m_addMutex;
+   
 public:
    pwrGUI( QWidget * Parent = 0, Qt::WindowFlags f = 0);
    
@@ -36,19 +41,30 @@ public:
    
    int subscribe( multiIndiPublisher * publisher );
                                    
+   int handleDefProperty( const pcf::IndiProperty & ipRecv /**< [in] the property which has been defined*/);
+   
    int handleSetProperty( const pcf::IndiProperty & ipRecv /**< [in] the property which has changed*/);
    
    
    
 public slots:
+   void addNewDevice( std::string * devName,
+                      std::vector<std::string> * channels
+                    );
+   
    void chChange( pcf::IndiProperty & ip );
    void updateGauges();
+
+signals:
+   void gotNewDevice( std::string * devName,
+                      std::vector<std::string> * channels
+                    );
    
-   private:
+private:
       
-      QwtDialSimpleNeedle * pdu1Needle {nullptr};
+   QwtDialSimpleNeedle * pdu1Needle {nullptr};
       
-      Ui::pwr ui;
+   Ui::pwr ui;
 };
 
 } //namespace xqt

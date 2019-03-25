@@ -38,7 +38,7 @@ public:
 
    #ifdef DEBUG_TMPOUT
 public:
-   ofstream * fout {0};
+   std::ofstream * fout {0};
    #endif
 };
 
