@@ -47,10 +47,14 @@ EXTRA_LDLIBS ?=  -lsofa_c \
   -lboost_filesystem \
   -ludev \
   -lpthread \
-	-ltelnet $(abspath $(SELF_DIR)/../INDI/libcommon/libcommon.a) \
-	$(abspath $(SELF_DIR)/../INDI/liblilxml/liblilxml.a)\
-  -lImageStreamIO
-
+  -ltelnet $(abspath \
+  $(SELF_DIR)/../INDI/libcommon/libcommon.a) \
+  $(abspath $(SELF_DIR)/../INDI/liblilxml/liblilxml.a)
+  
+  
+ifneq ($(CACAO),false)
+  EXTRA_LDLIBS +=  -lImageStreamIO
+endif
 
 #Add rt on Darwin:
 ifneq ($(UNAME),Darwin)
