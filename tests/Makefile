@@ -11,9 +11,13 @@
 ## NOTE: follow same order as in testMagAOX.cpp!!
 
 TEST_INCLUDES ?= ../libMagAOX/tty/tests/ttyIOUtils_test.cpp \
-                 ../libMagAOX/app/dev/tests/powerDevice_tests.cpp \
+                 ../libMagAOX/app/dev/tests/outletController_tests.cpp \
                  ../apps/ocam2KCtrl/tests/ocamUtils_test.cpp \
-                 ../apps/siglentSDG/tests/siglentSDG_test.cpp
+                 ../apps/siglentSDG/tests/siglentSDG_test.cpp \
+                 ../apps/sshDigger/tests/sshDigger_tests.cpp \
+                 ../apps/sysMonitor/tests/sysMonitor_test.cpp 
+                 
+                 
 
 
 

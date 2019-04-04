@@ -328,7 +328,11 @@ int outletController<derivedT>::loadConfig( mx::app::appConfigurator & config )
          ///\todo test this error
          if( (int) outlets[k] - m_firstOne < 0 || (int) outlets[k] - m_firstOne > (int) m_outletStates.size())
          {
+            #ifndef OUTLET_CTRL_TEST_NOLOG
             return derivedT::template log<text_log,-1>("Outlet " + std::to_string(outlets[k]) + " in Channel " + chSections[n] + " is invalid", logPrio::LOG_ERROR);
+            #else
+            return -1;
+            #endif
          }
 
          outlets[k] -= m_firstOne;

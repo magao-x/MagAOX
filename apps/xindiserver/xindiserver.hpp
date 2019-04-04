@@ -47,6 +47,7 @@ struct sshTunnel
 
 typedef std::unordered_map<std::string, sshTunnel> tunnelMap;
 
+///\todo add tests for this
 inline 
 int loadSSHTunnelConfigs( tunnelMap & tmap,
                           mx::app::appConfigurator & config
@@ -94,6 +95,8 @@ int loadSSHTunnelConfigs( tunnelMap & tmap,
 /** The INDI Server wrapper applciation class.
   *
   * \ingroup xindiserver
+  * 
+  * \todo update tests
   */  
 class xindiserver : public MagAOXApp<false>
 {
