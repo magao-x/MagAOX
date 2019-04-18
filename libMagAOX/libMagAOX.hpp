@@ -15,6 +15,7 @@
 #include "app/stateCodes.hpp"
 #include "app/dev/outletController.hpp"
 #include "app/dev/ioDevice.hpp"
+#include "app/dev/frameGrabber.hpp"
 
 #include "common/config.hpp"
 #include "common/defaults.hpp"

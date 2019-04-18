@@ -24,6 +24,8 @@ INDI/INDI/indiserver
 INDI/INDI/setINDI
 INDI/xindidriver/xindidriver
 
+apps/baslerCtrl/baslerCtrl
+
 apps/trippLitePDU/trippLitePDU
 apps/trippLitePDU/tests/
 
