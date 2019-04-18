@@ -54,7 +54,6 @@ namespace dev
   * \endcode
   * replacing derivedT by the name of the class.
   *
-  * \todo circular buffer
   * 
   */
 template<class derivedT>
@@ -67,10 +66,12 @@ protected:
 
    
    
-   int m_width {0}; ///< The width of the image according to the framegrabber, not necessarily the true image width.
-   int m_height {0}; ///< The height of the image frame according the framegrabber, not necessarily the true image height.
-   int m_depth {0}; ///< The pixel bit depth according to the framegrabber
+   uint32_t m_width {0}; ///< The width of the image, once deinterlaced etc.
+   uint32_t m_height {0}; ///< The height of the image, once deinterlaced etc.
+   uint32_t m_planes {1}; ///< The number of planes in the image circular buffer.
+   
    uint8_t m_dataType{0}; ///< The ImageStreamIO type code.
+   size_t m_typeSize {0}; ///< The size of the type, in bytes.  Result of sizeof.
    
    int m_xbinning {0}; ///< The x-binning according to the framegrabber
    int m_ybinning {0}; ///< The y-binning according to the framegrabber
@@ -185,6 +186,8 @@ void frameGrabber<derivedT>::setupConfig(mx::app::appConfigurator & config)
 {
    config.add("framegrabber.threadPrio", "", "framegrabber.threadPrio", argType::Required, "framegrabber", "threadPrio", false, "int", "The real-time priority of the fraemgrabber thread.");
    config.add("framegrabber.shmimName", "", "framegrabber.shmimName", argType::Required, "framegrabber", "shmimName", false, "string", "The name of the ImageStreamIO shared memory image. Will be used as /tmp/<shmimName>.im.shm.");
+   
+   config.add("framegrabber.circBuffLength", "", "framegrabber.circBuffLength", argType::Required, "framegrabber", "circBuffLength", false, "size_t", "The length of the circular buffer. Sets m_planes, default is 1.");
 }
 
 template<class derivedT>
@@ -192,6 +195,7 @@ void frameGrabber<derivedT>::loadConfig(mx::app::appConfigurator & config)
 {
    config(m_fgThreadPrio, "framegrabber.threadPrio");
    config(m_shmimName, "framegrabber.shmimName");
+   config(m_planes, "framegrabber.circBuffLength");
 }
    
 
@@ -326,6 +330,8 @@ void frameGrabber<derivedT>::fgThreadExec()
       {
          //At the end of this, must have m_width, m_height, m_dataType set.
          if(m_parent->startAcquisition() < 0) continue;        
+         
+         m_typeSize = ImageStreamIO_typesize(m_dataType);
       }
 
       /* Initialize ImageStreamIO
@@ -333,9 +339,10 @@ void frameGrabber<derivedT>::fgThreadExec()
       uint32_t imsize[3];
       imsize[0] = m_width; 
       imsize[1] = m_height;
-      imsize[2] = 1;
-      ImageStreamIO_createIm(&imageStream, m_shmimName.c_str(), 2, imsize, m_dataType, 1, 0);
-   
+      imsize[2] = m_planes;
+      ImageStreamIO_createIm(&imageStream, m_shmimName.c_str(), 3, imsize, m_dataType, 1, 0);
+      imageStream.md[0].cnt1 = m_planes;
+      
       //This completes the reconfiguration.
       m_reconfig = false;
                   
@@ -353,11 +360,20 @@ void frameGrabber<derivedT>::fgThreadExec()
          //Ok, no timeout, so we process the image and publish it.
          imageStream.md[0].write=1;
          
-         if(m_parent->loadImageIntoStream() < 0) break;
+         //Increment cnt1, wrapping for circular buffer.
+         uint64_t cnt1 = imageStream.md[0].cnt1 + 1;
+         if(cnt1 > m_planes-1) cnt1 = 0;
+         imageStream.md[0].cnt1 = cnt1;
+
+         if(m_parent->loadImageIntoStream((char *) imageStream.array.raw + imageStream.md[0].cnt1*m_width*m_height*m_typeSize) < 0) 
+         {
+            break;
+         }
          
          imageStream.md[0].atime = m_currImageTimestamp;;
          imageStream.md[0].cnt0++;
-         imageStream.md[0].cnt1++;
+         
+         
          imageStream.md[0].write=0;
          ImageStreamIO_sempost(&imageStream,-1);
  

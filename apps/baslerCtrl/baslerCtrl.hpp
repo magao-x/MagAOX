@@ -109,7 +109,7 @@ public:
    
    int startAcquisition();
    int acquireAndCheckValid();
-   int loadImageIntoStream();
+   int loadImageIntoStream(void * dest);
    int reconfig();
    
 protected:
@@ -333,6 +333,7 @@ int baslerCtrl::startAcquisition()
    m_width = 640;
    m_height = 480;
    m_dataType = _DATATYPE_INT16;
+
     
    try
    {
@@ -371,11 +372,11 @@ int baslerCtrl::acquireAndCheckValid()
    }
 }
 
-int baslerCtrl::loadImageIntoStream()
+int baslerCtrl::loadImageIntoStream(void * dest)
 {
    try 
    {
-      memcpy( imageStream.array.SI16, (pixelT *) ptrGrabResult->GetBuffer(), 640*480*sizeof(pixelT));
+      memcpy( dest, (pixelT *) ptrGrabResult->GetBuffer(), m_width*m_height*sizeof(pixelT));
    }
    catch(...)
    {
