@@ -53,8 +53,15 @@ apps/ocam2KCtrl/ocam2KCtrl
 
 apps/streamWriter/streamWriter
 
+apps/mzmqServer/mzmqServer
+apps/picamCtrl/picamCtrl
+
 utils/logdump/logdump
 utils/cursesINDI/cursesINDI
+
+tests/singleTest
+tests/testMagAOX
+
 
 #Devel stuff in flatlogs
 flatlogs/src/flatlogcodes

@@ -111,6 +111,12 @@ int xtChannels<numChannels>::setChannel( size_t chNo )
 {
    if(chNo > numChannels - 1) return -1;
    
+   if(m_inputOnly[chNo])
+   {
+      m_channels[chNo] = false;
+      return 0;
+   }
+   
    m_channels[chNo] = true;
    
    return 0;

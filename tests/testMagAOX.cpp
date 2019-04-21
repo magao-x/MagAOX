@@ -34,3 +34,6 @@
 
 #include "../apps/sysMonitor/tests/sysMonitor_test.cpp"
 
+#include "../apps/xt1121Ctrl/tests/xtChannels_test.cpp"
+
+

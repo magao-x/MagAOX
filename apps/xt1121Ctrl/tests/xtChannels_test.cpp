@@ -1,5 +1,5 @@
 /** \file xtChannels_test.cpp
-  * \brief Catch2 tests for the xtChannels struct in the Ctrl app.
+  * \brief Catch2 tests for the xtChannels struct.
   * \author Jared R. Males (jaredmales@gmail.com)
   *
   * \ingroup xt1211Ctrl_files
