@@ -68,16 +68,17 @@ int parseFPS( float & fps,
 }
 
 ///\todo add test for parseEMGain
+//Example response: Gain set to 2
 int parseEMGain( unsigned & emGain,
                  const std::string & fstr
                )
 {
    std::vector<std::string> v;
-   mx::ioutils::parseStringVector(v, fstr, "[]");
+   mx::ioutils::parseStringVector(v, fstr, " ");
+  
+   if( v.size() != 5) return -1;
 
-   if( v.size() < 3) return -1;
-
-   emGain = mx::ioutils::convertFromString<unsigned>( v[1] );
+   emGain = mx::ioutils::convertFromString<unsigned>( v[3] );
 
    return 0;
 }

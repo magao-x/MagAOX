@@ -541,7 +541,6 @@ int ocam2KCtrl::appLogic()
          return 0;
       }
       
-      std::cerr << "Getting gain\n";
       if(getEMGain () < 0)
       {
          if(m_powerState == 0) return 0;
@@ -747,7 +746,7 @@ int ocam2KCtrl::setTemp(float temp)
    std::string tempStr = std::to_string(temp);
    
    ///\todo make more configurable
-   if(temp >= 30 || temp < -40) 
+   if(temp >= 30 || temp < -50) 
    {
       return log<text_log,-1>({"attempt to set temperature outside valid range: " + tempStr}, logPrio::LOG_ERROR);
    }

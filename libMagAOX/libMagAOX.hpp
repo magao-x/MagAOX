@@ -28,12 +28,14 @@
 
 #include "xrif/xrif.hpp"
 
-#define TTY_DEBUG
+//#define TTY_DEBUG
 #include "tty/ttyErrors.hpp"
 #include "tty/ttyIOUtils.hpp"
 #include "tty/ttyUSB.hpp"
 #include "tty/usbDevice.hpp"
 #include "tty/telnetConn.hpp"
 
+#include "modbus/modbus.hpp"
+#include "modbus/modbus_exception.hpp"
 
 #endif //libMagAOX_hpp

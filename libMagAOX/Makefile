@@ -42,7 +42,9 @@ INCLUDEDEPS= app/MagAOXApp.hpp \
              tty/ttyErrors.hpp \
              tty/ttyIOUtils.hpp \
              tty/ttyUSB.hpp \
-             tty/usbDevice.hpp
+             tty/usbDevice.hpp \
+             modbus/modbus.hpp \
+             modbus/modbus_exception.hpp
 
 
 
