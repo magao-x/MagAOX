@@ -215,52 +215,52 @@ inline
 int xt1121Ctrl::appStartup()
 {
    // set up the  INDI properties
-   REG_INDI_NEWPROP(m_indiP_ch00, "ch0", pcf::IndiProperty::Number);
+   REG_INDI_NEWPROP(m_indiP_ch00, "ch00", pcf::IndiProperty::Number);
    m_indiP_ch00.add (pcf::IndiElement("current"));
    m_indiP_ch00["current"].set(-1);
    m_indiP_ch00.add (pcf::IndiElement("target"));
    
-   REG_INDI_NEWPROP(m_indiP_ch01, "ch1", pcf::IndiProperty::Number);
+   REG_INDI_NEWPROP(m_indiP_ch01, "ch01", pcf::IndiProperty::Number);
    m_indiP_ch01.add (pcf::IndiElement("current"));
    m_indiP_ch01["current"].set(-1);
    m_indiP_ch01.add (pcf::IndiElement("target"));
    
-   REG_INDI_NEWPROP(m_indiP_ch02, "ch2", pcf::IndiProperty::Number);
+   REG_INDI_NEWPROP(m_indiP_ch02, "ch02", pcf::IndiProperty::Number);
    m_indiP_ch02.add (pcf::IndiElement("current"));
    m_indiP_ch02["current"].set(-1);
    m_indiP_ch02.add (pcf::IndiElement("target"));
    
-   REG_INDI_NEWPROP(m_indiP_ch03, "ch3", pcf::IndiProperty::Number);
+   REG_INDI_NEWPROP(m_indiP_ch03, "ch03", pcf::IndiProperty::Number);
    m_indiP_ch03.add (pcf::IndiElement("current"));
    m_indiP_ch03["current"].set(-1);
    m_indiP_ch03.add (pcf::IndiElement("target"));
    
-   REG_INDI_NEWPROP(m_indiP_ch04, "ch4", pcf::IndiProperty::Number);
+   REG_INDI_NEWPROP(m_indiP_ch04, "ch04", pcf::IndiProperty::Number);
    m_indiP_ch04.add (pcf::IndiElement("current"));
    m_indiP_ch04["current"].set(-1);
    m_indiP_ch04.add (pcf::IndiElement("target"));
    
-   REG_INDI_NEWPROP(m_indiP_ch05, "ch5", pcf::IndiProperty::Number);
+   REG_INDI_NEWPROP(m_indiP_ch05, "ch05", pcf::IndiProperty::Number);
    m_indiP_ch05.add (pcf::IndiElement("current"));
    m_indiP_ch05["current"].set(-1);
    m_indiP_ch05.add (pcf::IndiElement("target"));
    
-   REG_INDI_NEWPROP(m_indiP_ch06, "ch6", pcf::IndiProperty::Number);
+   REG_INDI_NEWPROP(m_indiP_ch06, "ch06", pcf::IndiProperty::Number);
    m_indiP_ch06.add (pcf::IndiElement("current"));
    m_indiP_ch06["current"].set(-1);
    m_indiP_ch06.add (pcf::IndiElement("target"));
    
-   REG_INDI_NEWPROP(m_indiP_ch07, "ch7", pcf::IndiProperty::Number);
+   REG_INDI_NEWPROP(m_indiP_ch07, "ch07", pcf::IndiProperty::Number);
    m_indiP_ch07.add (pcf::IndiElement("current"));
    m_indiP_ch07["current"].set(-1);
    m_indiP_ch07.add (pcf::IndiElement("target"));
    
-   REG_INDI_NEWPROP(m_indiP_ch08, "ch8", pcf::IndiProperty::Number);
+   REG_INDI_NEWPROP(m_indiP_ch08, "ch08", pcf::IndiProperty::Number);
    m_indiP_ch08.add (pcf::IndiElement("current"));
    m_indiP_ch08["current"].set(-1);
    m_indiP_ch08.add (pcf::IndiElement("target"));
    
-   REG_INDI_NEWPROP(m_indiP_ch09, "ch9", pcf::IndiProperty::Number);
+   REG_INDI_NEWPROP(m_indiP_ch09, "ch09", pcf::IndiProperty::Number);
    m_indiP_ch09.add (pcf::IndiElement("current"));
    m_indiP_ch09["current"].set(-1);
    m_indiP_ch09.add (pcf::IndiElement("target"));
@@ -560,10 +560,8 @@ int xt1121Ctrl::channelSetCallback( size_t chNo,
       return log<software_error,-1>({__FILE__, __LINE__, std::string("Exception caught: ") + e.what()});   
    }
    
-   std::string ststr = "off";
-   if(target) ststr = "on";
    
-   log<text_log>("Set channel " + std::to_string(chNo) + " to " + ststr);
+   log<text_log>("Set channel " + std::to_string(chNo) + " to " + std::to_string(target));
    
    return 0;
   
