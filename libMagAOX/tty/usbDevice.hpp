@@ -143,6 +143,12 @@ int usbDevice::getDeviceName()
 
 int usbDevice::connect()
 {
+   if(m_fileDescrip)
+   {
+      ::close(m_fileDescrip);
+      m_fileDescrip = 0;
+   }
+   
    return ttyOpenRaw( m_fileDescrip, m_deviceName, m_speed );
 }
 
