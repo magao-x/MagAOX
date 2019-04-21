@@ -121,6 +121,12 @@ public:
 
    ~MagAOXApp() noexcept(true);
 
+   /// Get the value of the shutdown flag.
+   /**
+     * \returns the current value of m_shutdown 
+     */ 
+   int shutdown();
+   
    /// Set the paths for config files
    /** Replaces the mx::application defaults with the MagAO-X config system.
      *
@@ -687,6 +693,20 @@ protected:
 
 public:
 
+   /// Returns the current power state.
+   /** If power management is not enabled, this always returns 1=On.
+     *
+     * \returns -1 if power state is unknown
+     * \returns 0 if power is off 
+     * \returns 1 if power is on or m_powerMgtEnabled==false
+     */ 
+   int powerState()
+   {
+      if(!m_powerMgtEnabled) return 1;
+      
+      return m_powerState;
+   }
+   
    INDI_SETCALLBACK_DECL(MagAOXApp, m_indiP_powerChannel);
 
    ///@} Power Management
@@ -769,6 +789,12 @@ MagAOXApp<_useINDI>::~MagAOXApp() noexcept(true)
    if(m_indiDriver) delete m_indiDriver;
 
    MagAOXApp<_useINDI>::m_self = nullptr;
+}
+
+template<bool _useINDI>
+int MagAOXApp<_useINDI>::shutdown()
+{
+   return m_shutdown;
 }
 
 template<bool _useINDI>

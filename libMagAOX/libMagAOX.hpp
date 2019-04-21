@@ -15,6 +15,7 @@
 #include "app/stateCodes.hpp"
 #include "app/dev/outletController.hpp"
 #include "app/dev/ioDevice.hpp"
+#include "app/dev/frameGrabber.hpp"
 
 #include "common/config.hpp"
 #include "common/defaults.hpp"
@@ -26,9 +27,8 @@
 #include "logger/generated/logStdFormat.hpp"
 #include "logger/generated/logTypes.hpp"
 
-#include "xrif/xrif.hpp"
-
 //#define TTY_DEBUG
+
 #include "tty/ttyErrors.hpp"
 #include "tty/ttyIOUtils.hpp"
 #include "tty/ttyUSB.hpp"

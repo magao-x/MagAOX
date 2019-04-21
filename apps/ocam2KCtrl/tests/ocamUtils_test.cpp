@@ -59,4 +59,123 @@ SCENARIO( "Parsing the temp response", "[ocamUtils]" )
    }
 }
 
+SCENARIO( "Parsing the gain response", "[ocamUtils]" )
+{
+   GIVEN("A valid response to gain from the OCAM")
+   {
+      int rv;
+
+      WHEN("Valid gain response, gain=2")
+      {
+         std::string tstr = "Gain set to 2 \n\n";
+
+         unsigned emgain = 1;
+         
+         rv = parseEMGain(emgain, tstr);
+
+         REQUIRE(rv == 0);
+         REQUIRE(emgain == 2);
+      }
+
+
+   }
+   
+   GIVEN("A valid response to gain from the OCAM")
+   {
+      int rv;
+
+      WHEN("Valid gain response, gain=512")
+      {
+         std::string tstr = "Gain set to 512 \n\n";
+
+         unsigned emgain = 1;
+         
+         rv = parseEMGain(emgain, tstr);
+
+         REQUIRE(rv == 0);
+         REQUIRE(emgain == 512);
+      }
+
+      
+
+   }
+   
+   GIVEN("An invalid response to gain from the OCAM")
+   {
+      int rv;
+
+      WHEN("Invalid gain response, too short, no trailing space")
+      {
+         std::string tstr = "Gain set to 512\n\n";
+
+         unsigned emgain = 1;
+         
+         rv = parseEMGain(emgain, tstr);
+
+         REQUIRE(rv == -1);
+         REQUIRE(emgain == 0);
+      }
+
+      WHEN("Invalid gain response, too short, no gain")
+      {
+         std::string tstr = "Gain set to \n\n";
+
+         unsigned emgain = 1;
+         
+         rv = parseEMGain(emgain, tstr);
+
+         REQUIRE(rv == -1);
+         REQUIRE(emgain == 0);
+      }
+
+      WHEN("Invalid gain response, too long")
+      {
+         std::string tstr = "Gain set to 512 rubbish added\n\n";
+
+         unsigned emgain = 1;
+         
+         rv = parseEMGain(emgain, tstr);
+
+         REQUIRE(rv == -1);
+         REQUIRE(emgain == 0);
+      }
+      
+      WHEN("Invalid gain response, low gain")
+      {
+         std::string tstr = "Gain set to 0 \n\n";
+
+         unsigned emgain = 1;
+         
+         rv = parseEMGain(emgain, tstr);
+
+         REQUIRE(rv == -1);
+         REQUIRE(emgain == 0);
+      }
+      
+      WHEN("Invalid gain response, high gain")
+      {
+         std::string tstr = "Gain set to 601 \n\n";
+
+         unsigned emgain = 1;
+         
+         rv = parseEMGain(emgain, tstr);
+
+         REQUIRE(rv == -1);
+         REQUIRE(emgain == 0);
+      }
+      
+      WHEN("Invalid gain response, bad gain")
+      {
+         std::string tstr = "Gain set to x \n\n";
+
+         unsigned emgain = 1;
+         
+         rv = parseEMGain(emgain, tstr);
+
+         REQUIRE(rv == -1);
+         REQUIRE(emgain == 0);
+      }
+   }
+}
+   
 } //namespace ocamUtils_test 

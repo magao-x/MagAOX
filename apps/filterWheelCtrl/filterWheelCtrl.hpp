@@ -38,6 +38,7 @@ namespace app
   * \todo add INDI props to md doc
   * \todo should move in least time direction, rather than always in the same direction.
   * \todo switch to target/current elements in properties
+  * \todo add tests
   * 
   * \ingroup filterWheelCtrl
   */

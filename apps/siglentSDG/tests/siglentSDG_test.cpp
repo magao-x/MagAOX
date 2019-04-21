@@ -264,7 +264,7 @@ SCENARIO( "Parsing the BSWV? response", "[siglentSDG]" )
          std::string resp="C1:BSWV WVTP,SINE,FRZ,10.123HZ,PERI,0.8345S,AMP,2.567V,AMPVRMS,0.707Vrms,OFST,0.34V,HLEV,1.3V,LLEV,-2.567V,PHSE,4.3567";
          rv = parseBSWV(channel, wvtp, freq, peri, amp, ampvrms, ofst, hlev, llev, phse, resp);
 
-         REQUIRE(rv == -7);
+         REQUIRE(rv == -10);
       }
       
       WHEN("An invalid BSWV passed - bad PERI indicator")
@@ -282,7 +282,7 @@ SCENARIO( "Parsing the BSWV? response", "[siglentSDG]" )
          std::string resp="C1:BSWV WVTP,SINE,FRQ,10.123HZ,PERZ,0.8345S,AMP,2.567V,AMPVRMS,0.707Vrms,OFST,0.34V,HLEV,1.3V,LLEV,-2.567V,PHSE,4.3567";
          rv = parseBSWV(channel, wvtp, freq, peri, amp, ampvrms, ofst, hlev, llev, phse, resp);
 
-         REQUIRE(rv == -8);
+         REQUIRE(rv == -11);
       }
       
       WHEN("An invalid BSWV passed - bad AMP indicator")
@@ -300,7 +300,7 @@ SCENARIO( "Parsing the BSWV? response", "[siglentSDG]" )
          std::string resp="C1:BSWV WVTP,SINE,FRQ,10.123HZ,PERI,0.8345S,A/P,2.567V,AMPVRMS,0.707Vrms,OFST,0.34V,HLEV,1.3V,LLEV,-2.567V,PHSE,4.3567";
          rv = parseBSWV(channel, wvtp, freq, peri, amp, ampvrms, ofst, hlev, llev, phse, resp);
 
-         REQUIRE(rv == -9);
+         REQUIRE(rv == -12);
       }
       
       WHEN("An invalid BSWV passed - bad AMPVRMS indicator")
@@ -318,7 +318,7 @@ SCENARIO( "Parsing the BSWV? response", "[siglentSDG]" )
          std::string resp="C1:BSWV WVTP,SINE,FRQ,10.123HZ,PERI,0.8345S,AMP,2.567V,APVRMS,0.707Vrms,OFST,0.34V,HLEV,1.3V,LLEV,-2.567V,PHSE,4.3567";
          rv = parseBSWV(channel, wvtp, freq, peri, amp, ampvrms, ofst, hlev, llev, phse, resp);
 
-         REQUIRE(rv == -10);
+         REQUIRE(rv == -13);
       }
       
       WHEN("An invalid BSWV passed - bad OFST indicator")
@@ -336,7 +336,7 @@ SCENARIO( "Parsing the BSWV? response", "[siglentSDG]" )
          std::string resp="C1:BSWV WVTP,SINE,FRQ,10.123HZ,PERI,0.8345S,AMP,2.567V,AMPVRMS,0.707Vrms,O,0.34V,HLEV,1.3V,LLEV,-2.567V,PHSE,4.3567";
          rv = parseBSWV(channel, wvtp, freq, peri, amp, ampvrms, ofst, hlev, llev, phse, resp);
 
-         REQUIRE(rv == -11);
+         REQUIRE(rv == -14);
       }
       
       WHEN("An invalid BSWV passed - bad HLEV indicator")
@@ -354,7 +354,7 @@ SCENARIO( "Parsing the BSWV? response", "[siglentSDG]" )
          std::string resp="C1:BSWV WVTP,SINE,FRQ,10.123HZ,PERI,0.8345S,AMP,2.567V,AMPVRMS,0.707Vrms,OFST,0.34V,HLV,1.3V,LLEV,-2.567V,PHSE,4.3567";
          rv = parseBSWV(channel, wvtp, freq, peri, amp, ampvrms, ofst, hlev, llev, phse, resp);
 
-         REQUIRE(rv == -12);
+         REQUIRE(rv == -15);
       }
       
       WHEN("An invalid BSWV passed - bad LLEV indicator")
@@ -372,7 +372,7 @@ SCENARIO( "Parsing the BSWV? response", "[siglentSDG]" )
          std::string resp="C1:BSWV WVTP,SINE,FRQ,10.123HZ,PERI,0.8345S,AMP,2.567V,AMPVRMS,0.707Vrms,OFST,0.34V,HLEV,1.3V,QLEV,-2.567V,PHSE,4.3567";
          rv = parseBSWV(channel, wvtp, freq, peri, amp, ampvrms, ofst, hlev, llev, phse, resp);
 
-         REQUIRE(rv == -13);
+         REQUIRE(rv == -16);
       }
       
       WHEN("An invalid BSWV passed - bad PHSE indicator")
@@ -390,7 +390,7 @@ SCENARIO( "Parsing the BSWV? response", "[siglentSDG]" )
          std::string resp="C1:BSWV WVTP,SINE,FRQ,10.123HZ,PERI,0.8345S,AMP,2.567V,AMPVRMS,0.707Vrms,OFST,0.34V,HLEV,1.3V,LLEV,-2.567V,XXXXX,4.3567";
          rv = parseBSWV(channel, wvtp, freq, peri, amp, ampvrms, ofst, hlev, llev, phse, resp);
 
-         REQUIRE(rv == -14);
+         REQUIRE(rv == -17);
       }
    }
 }

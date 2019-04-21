@@ -53,6 +53,7 @@ int parseTemps( ocamTemps & temps,
 }
 
 ///\todo document this
+///\todo add test for FPS
 int parseFPS( float & fps,
               const std::string & fstr
             )
@@ -67,19 +68,34 @@ int parseFPS( float & fps,
    return 0;
 }
 
-///\todo add test for parseEMGain
-//Example response: Gain set to 2
-int parseEMGain( unsigned & emGain,
-                 const std::string & fstr
+/// Parse the EM gain response 
+/** Example response: "Gain set to 2 \n\n", with the trailing space.
+  * Expects gain >=1 and <= 600, otherwise returns an error.
+  * 
+  * \returns 0 on success, and emGain set to a value >= 1
+  * \returns -1 on error, and emGain will be set to 0.
+  */ 
+int parseEMGain( unsigned & emGain,       ///< [out] the value of gain returned by the camera
+                 const std::string & fstr ///< [in] the query response from the camera.
                )
 {
    std::vector<std::string> v;
    mx::ioutils::parseStringVector(v, fstr, " ");
   
-   if( v.size() != 5) return -1;
-
+   if( v.size() != 5) 
+   {
+      emGain = 0;
+      return -1;
+   }
+   
    emGain = mx::ioutils::convertFromString<unsigned>( v[3] );
 
+   if(emGain < 1 || emGain > 600)
+   {
+      emGain = 0;
+      return -1;
+   }
+   
    return 0;
 }
 

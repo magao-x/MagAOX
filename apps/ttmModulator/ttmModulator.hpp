@@ -15,7 +15,7 @@ namespace app
 
 /** MagAO-X application to control TTM modulation
   *
-  *
+  * \todo need tests fo ttmModulator
   */
 class ttmModulator : public MagAOXApp<>
 {

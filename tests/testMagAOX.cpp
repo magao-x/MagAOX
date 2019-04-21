@@ -22,10 +22,15 @@
 //0 libMagAOX Tests
 #include "../libMagAOX/tty/tests/ttyIOUtils_test.cpp"
 
-#include "../libMagAOX/app/dev/tests/powerDevice_tests.cpp"
+#include "../libMagAOX/app/dev/tests/outletController_tests.cpp"
 
 //1 App specific Tests
 
 #include "../apps/ocam2KCtrl/tests/ocamUtils_test.cpp"
 
 #include "../apps/siglentSDG/tests/siglentSDG_test.cpp"
+
+#include "../apps/sshDigger/tests/sshDigger_tests.cpp"
+
+#include "../apps/sysMonitor/tests/sysMonitor_test.cpp"
+
