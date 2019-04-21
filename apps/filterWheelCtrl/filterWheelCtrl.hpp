@@ -37,7 +37,6 @@ namespace app
   * \todo add power monitoring
   * \todo add INDI props to md doc
   * \todo should move in least time direction, rather than always in the same direction.
-  * \todo switch to target/current elements in properties
   * \todo add tests
   * 
   * \ingroup filterWheelCtrl
@@ -130,17 +129,14 @@ protected:
 
    //declare our properties   
    
-   ///The current position of the wheel
-   pcf::IndiProperty m_indiP_position;
+   ///The position of the wheel in counts
+   pcf::IndiProperty m_indiP_counts;
 
-   ///The requested position of the wheel
-   pcf::IndiProperty m_indiP_req_position;
+   ///The position of the wheel in filters
+   pcf::IndiProperty m_indiP_filters;
 
    ///The name of the nearest filter for this position   
-   pcf::IndiProperty m_indiP_posName;
-
-   ///The request filter by name
-   pcf::IndiProperty m_indiP_req_posName;
+   pcf::IndiProperty m_indiP_filterName;
 
    ///Command the wheel to home.  Any change in this property causes a home.
    pcf::IndiProperty m_indiP_req_home;
@@ -149,8 +145,10 @@ protected:
    pcf::IndiProperty m_indiP_req_halt;
    
 public:
-   INDI_NEWCALLBACK_DECL(filterWheelCtrl, m_indiP_req_position);
-   INDI_NEWCALLBACK_DECL(filterWheelCtrl, m_indiP_req_posName);
+   INDI_NEWCALLBACK_DECL(filterWheelCtrl, m_indiP_counts);
+   INDI_NEWCALLBACK_DECL(filterWheelCtrl, m_indiP_filters);
+   INDI_NEWCALLBACK_DECL(filterWheelCtrl, m_indiP_filterName);
+   
    INDI_NEWCALLBACK_DECL(filterWheelCtrl, m_indiP_req_home);
    INDI_NEWCALLBACK_DECL(filterWheelCtrl, m_indiP_req_halt);
 
@@ -322,21 +320,26 @@ int filterWheelCtrl::appStartup()
    }
 
    // set up the  INDI properties
-   REG_INDI_NEWPROP_NOCB(m_indiP_position, "position", pcf::IndiProperty::Number);
-   m_indiP_position.add (pcf::IndiElement("filters"));
-   m_indiP_position.add (pcf::IndiElement("counts"));
+   REG_INDI_NEWPROP(m_indiP_counts, "counts", pcf::IndiProperty::Number);
+   m_indiP_counts.add (pcf::IndiElement("current"));
+   m_indiP_counts.add (pcf::IndiElement("target"));
+   m_indiP_counts.add (pcf::IndiElement("target_rel"));
+   m_indiP_counts["current"].set(-1);
+   m_indiP_counts["target"].set(-1);
+   m_indiP_counts["target_rel"].set(0);
    
-   REG_INDI_NEWPROP(m_indiP_req_position, "req_position", pcf::IndiProperty::Number);
-   m_indiP_req_position.add (pcf::IndiElement("filters"));
-   m_indiP_req_position.add (pcf::IndiElement("filters_relative"));
-   m_indiP_req_position.add (pcf::IndiElement("counts"));
-   m_indiP_req_position.add (pcf::IndiElement("counts_relative"));
+   REG_INDI_NEWPROP(m_indiP_filters, "filters", pcf::IndiProperty::Number);
+   m_indiP_filters.add (pcf::IndiElement("current"));
+   m_indiP_filters.add (pcf::IndiElement("target"));
+   m_indiP_filters.add (pcf::IndiElement("target_rel"));
+   m_indiP_filters["current"].set(-1);
+   m_indiP_filters["target"].set(-1);
+   m_indiP_filters["target_rel"].set(0);
    
-   REG_INDI_NEWPROP_NOCB(m_indiP_posName, "posName", pcf::IndiProperty::Text);
-   m_indiP_posName.add (pcf::IndiElement("filter"));
+   REG_INDI_NEWPROP(m_indiP_filterName, "filterName", pcf::IndiProperty::Number);
+   m_indiP_filterName.add (pcf::IndiElement("current"));
+   m_indiP_filterName.add (pcf::IndiElement("target"));
    
-   REG_INDI_NEWPROP(m_indiP_req_posName, "req_posName", pcf::IndiProperty::Text);
-   m_indiP_req_posName.add (pcf::IndiElement("filter"));
    
    REG_INDI_NEWPROP(m_indiP_req_home, "req_home", pcf::IndiProperty::Number);
    m_indiP_req_home.add (pcf::IndiElement("home"));
@@ -570,16 +573,16 @@ int filterWheelCtrl::appLogic()
       }
       
       
-      updateIfChanged(m_indiP_position, "counts", m_rawPos);
+      updateIfChanged(m_indiP_counts, "current", m_rawPos);
       
       double filPos = ((double) m_rawPos-m_homeOffset)/m_circleSteps*m_filterNames.size() + 1.0;
-      updateIfChanged(m_indiP_position, "filters", filPos);
+      updateIfChanged(m_indiP_filters, "current", filPos);
       
       int nfilPos = fmod(filPos-1+0.5, m_filterNames.size()) ;
       if(nfilPos > (long) m_filterNames.size()) nfilPos -= m_filterNames.size();
       if(nfilPos < 0) nfilPos += m_filterNames.size();
       
-      updateIfChanged(m_indiP_posName, "filter", m_filterNames[nfilPos]);
+      updateIfChanged(m_indiP_filterName, "current", m_filterNames[nfilPos]);
    
       return 0;
    }
@@ -602,72 +605,110 @@ int filterWheelCtrl::appShutdown()
    return 0;
 }
 
-
-INDI_NEWCALLBACK_DEFN(filterWheelCtrl, m_indiP_req_position)(const pcf::IndiProperty &ipRecv)
+INDI_NEWCALLBACK_DEFN(filterWheelCtrl, m_indiP_counts)(const pcf::IndiProperty &ipRecv)
 {
-   if (ipRecv.getName() == m_indiP_req_position.getName())
+   if (ipRecv.getName() == m_indiP_counts.getName())
    {
-      double filters = -1;
-      try
-      {
-         filters = ipRecv["filters"].get<double>();
-      }
-      catch(...)
-      {
-         //do nothing, just means no requested in command.
-      }
-      
-      double filters_relative = 0;
-      try
-      {
-         filters_relative = ipRecv["filters_relative"].get<double>();
-      }
-      catch(...)
-      {
-         //do nothing, just means no requested in command.
-      }
-      
+      std::cerr << "counts\n";
       double counts = -1;
-      try
+      double target_abs = -1;
+      double target_rel = 0;
+      
+      if(ipRecv.find("current"))
       {
-         counts = ipRecv["counts"].get<double>();
-      }
-      catch(...)
-      {
-         //do nothing, just means no requested in command.
+         counts = ipRecv["current"].get<double>();
       }
       
-      double counts_relative = 0;
-      try
+      if(ipRecv.find("target"))
       {
-         counts_relative = ipRecv["counts_relative"].get<double>();
-      }
-      catch(...)
-      {
-         //do nothing, just means no requested in command.
+         target_abs = ipRecv["target"].get<double>();
       }
 
+      if(target_abs == -1) target_abs = counts;
+      
+      if(ipRecv.find("target_rel"))
+      {
+         target_rel = ipRecv["target_rel"].get<double>();
+      }
+      
       std::lock_guard<std::mutex> guard(m_indiMutex);
       
-      return moveTo( filters, filters_relative, counts, counts_relative );
+      updateIfChanged(m_indiP_counts, "target", target_abs);
+      updateIfChanged(m_indiP_counts, "target_rel", target_rel);
+      
+      return moveTo( -1, 0, target_abs, target_rel );
    }
    return -1;
 }
 
-INDI_NEWCALLBACK_DEFN(filterWheelCtrl, m_indiP_req_posName)(const pcf::IndiProperty &ipRecv)
+INDI_NEWCALLBACK_DEFN(filterWheelCtrl, m_indiP_filters)(const pcf::IndiProperty &ipRecv)
 {
-   if (ipRecv.getName() == m_indiP_req_posName.getName())
+   if (ipRecv.getName() == m_indiP_filters.getName())
    {
-      std::string name = ipRecv["filter"].get();
+      double filters = -1;
+      double target_abs = -1;
+      double target_rel = 0;
+      
+      if(ipRecv.find("current"))
+      {
+         filters = ipRecv["current"].get<double>();
+      }
+      
+      if(ipRecv.find("target"))
+      {
+         target_abs = ipRecv["target"].get<double>();
+      }
+
+      if(target_abs == -1) target_abs = filters;
+      
+      if(ipRecv.find("target_rel"))
+      {
+         target_rel = ipRecv["target_rel"].get<double>();
+      }
+      
+      std::lock_guard<std::mutex> guard(m_indiMutex);
+      
+      updateIfChanged(m_indiP_filters, "target", target_abs);
+      updateIfChanged(m_indiP_filters, "target_rel", target_rel);
+      
+      return moveTo( target_abs, target_rel, -1, 0 );
+   }
+   return -1;
+}
+
+INDI_NEWCALLBACK_DEFN(filterWheelCtrl, m_indiP_filterName)(const pcf::IndiProperty &ipRecv)
+{
+   if (ipRecv.getName() == m_indiP_filterName.getName())
+   {
+      std::string name;
+      std::string target;
+      
+      if(ipRecv.find("current"))
+      {
+         name = ipRecv["current"].get();
+      }
+      
+      if(ipRecv.find("target"))
+      {
+         target = ipRecv["target"].get();
+      }
+
+      if(target == "") target = name;
+      
+      
+      if(target == "") return 0;
       
       size_t n;
-      for(n=0; n< m_filterNames.size(); ++n) if( m_filterNames[n] == name ) break;
+      for(n=0; n< m_filterNames.size(); ++n) if( m_filterNames[n] == target ) break;
       
       if(n >= m_filterNames.size()) return -1;
       
       std::lock_guard<std::mutex> guard(m_indiMutex);
       
+      updateIfChanged(m_indiP_filterName, "target", target);
+      
       return moveTo(n+1);
+      
    }
    return -1;
 }
@@ -762,7 +803,7 @@ int filterWheelCtrl::getMoving()
       try{ speed = std::stol(resp.c_str());}
       catch(...){speed=0;}
       
-      if(speed > 0.1*m_motorSpeed) m_moving = true;
+      if(fabs(speed) > 0.1*m_motorSpeed) m_moving = true;
       else m_moving = false;
       
       return 0;
