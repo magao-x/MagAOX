@@ -131,11 +131,11 @@ void mzmqServer::setupConfig()
 {
    config.add("server.imagePort", "", "imagePort", argType::Required, "server", "imagePort", false, "int", "");
    
-   config.add("server.shmimName", "", "writer.shmimName", argType::Required, "server", "shmimName", false, "string", "");
+   config.add("server.shmimName", "", "server.shmimName", argType::Required, "server", "shmimName", false, "string", "");
    
-   config.add("server.semaphoreNumber", "", "writer.semaphoreNumber", argType::Required, "server", "semaphoreNumber", false, "string", "");
+   config.add("server.semaphoreNumber", "", "server.semaphoreNumber", argType::Required, "server", "semaphoreNumber", false, "string", "");
    
-   config.add("server.usecSleep", "", "writer.usecSleep", argType::Required, "server", "usecSleep", false, "int", "");
+   config.add("server.usecSleep", "", "server.usecSleep", argType::Required, "server", "usecSleep", false, "int", "");
    
    config.add("server.fpsTgt", "", "writer.fpsTgt", argType::Required, "server", "fpsTgt", false, "float", "");
    
