@@ -1,7 +1,8 @@
 
 libs_to_build = libtelnet
 
-apps_to_build =  filterWheelCtrl \
+apps_to_build =  baslerCtrl \
+                 filterWheelCtrl \
                  magAOXMaths \
                  mzmqServer \
                  ocam2KCtrl \

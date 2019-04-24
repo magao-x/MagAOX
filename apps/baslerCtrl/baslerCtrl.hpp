@@ -10,6 +10,7 @@
 #define baslerCtrl_hpp
 
 
+
 #include <pylon/PylonIncludes.h>
 #include <pylon/PixelData.h>
 #include <pylon/GrabResultData.h>
@@ -26,8 +27,6 @@ using namespace Pylon;
 
 #include <ImageStruct.h>
 #include <ImageStreamIO.h>
-
-//#include "frameGrabber.hpp"
 
 #include "../../libMagAOX/libMagAOX.hpp" //Note this is included on command line to trigger pch
 #include "../../magaox_git_version.h"
@@ -199,7 +198,10 @@ int baslerCtrl::appStartup()
   
    PylonInitialize(); // Initializes pylon runtime before using any pylon methods
 
-   dev::frameGrabber<baslerCtrl>::appStartup();
+   if(dev::frameGrabber<baslerCtrl>::appStartup() < 0)
+   {
+      return log<software_critical,-1>({__FILE__,__LINE__});
+   }
    
    state(stateCodes::NOTCONNECTED);
    
@@ -256,6 +258,12 @@ int baslerCtrl::appLogic()
          return 0;
       }
 
+      if(frameGrabber<baslerCtrl>::updateINDI() < 0)
+      {
+         log<software_error>({__FILE__, __LINE__});
+         state(stateCodes::ERROR);
+         return 0;
+      }
    }
 
    ///\todo Fall through check?

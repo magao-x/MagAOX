@@ -429,11 +429,11 @@ protected:
 public:
    ///The INDI driver wrapper.  Constructed and initialized by execute, which starts and stops communications.
    indiDriver<MagAOXApp> * m_indiDriver {nullptr};
-protected:
 
    ///Mutex for locking INDI communications.
    std::mutex m_indiMutex;
-
+   
+protected:
    ///Structure to hold the call-back details for handling INDI communications.
    struct indiCallBack
    {
