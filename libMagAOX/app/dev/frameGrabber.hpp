@@ -761,7 +761,7 @@ int frameGrabber<derivedT>::newCallBack_writing( const pcf::IndiProperty &ipRecv
       
       if(ipRecv.find("target"))
       {
-         current = ipRecv["target"].get<int>();
+         target = ipRecv["target"].get<int>();
       }
       
       if(target == -1 ) target = current;
