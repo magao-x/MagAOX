@@ -83,7 +83,11 @@ protected:
    
    std::string m_rawimageDir; ///< The path where files will be saved.
    
-   unsigned m_semWait {500000000}; //The time in nsec to wait on the semaphore.  Max is 999999999. Default is 5e8 nsec.
+   int m_swThreadPrio {1}; ///< Priority of the stream writer thread, should normally be > 0, and <= m_fgThreadPrio.
+    
+   unsigned m_semWait {500000000}; //The time in nsec to wait on the writer semaphore.  Max is 999999999. Default is 5e8 nsec.
+   
+   
    
    ///@}
    
@@ -114,6 +118,7 @@ protected:
    size_t m_currSaveStart {0};
    size_t m_currSaveStop {0};
    
+   ///The xrif compression handle
    xrif_t xrif {nullptr};
    
 public:
@@ -208,8 +213,6 @@ protected:
       *
       * @{
       */ 
-   int m_swThreadPrio {1}; ///< Priority of the stream writer thread, should normally be > 0, and <= m_fgThreadPrio.
-
    sem_t m_swSemaphore; ///< Semaphore used to synchronize the fg thread and the sw thread.
    
    std::thread m_swThread; ///< A separate thread for the actual writing
@@ -232,8 +235,9 @@ protected:
 protected:
    //declare our properties
    pcf::IndiProperty m_indiP_writing;
-   pcf::IndiProperty m_indiP_written;
 
+   pdf::IndiProperty m_indiP_xrifStats;
+   
 public:
   
    /// The static callback function to be registered for the writing property
@@ -292,6 +296,8 @@ void frameGrabber<derivedT>::setupConfig(mx::app::appConfigurator & config)
    config.add("framegrabber.writeChunkLength", "", "framegrabber.writeChunkLength", argType::Required, "framegrabber", "writeChunkLength", false, "size_t", "The length in frames of the chunks to write to disk. Should be smaller than circBuffLength, and must be a whole divisor.");
    config.add("framegrabber.writerThreadPrio", "", "framegrabber.writerThreadPrio", argType::Required, "framegrabber", "writerThreadPrio", false, "int", "The real-time priority of the stream writer thread.");
 
+   config.add("framegrabber.semWait", "", "framegrabber.semWait", argType::Required, "framegrabber", "semWait", false, "int", "The time in nsec to wait on the writer semaphore.  Max is 999999999. Default is 5e8 nsec.");
+   
 }
 
 template<class derivedT>
@@ -303,7 +309,7 @@ void frameGrabber<derivedT>::loadConfig(mx::app::appConfigurator & config)
    config(m_rawimageDir,"framegrabber.savePath");
    config(m_writeChunkLength,"framegrabber.writeChunkLength");
    config(m_swThreadPrio,"framegrabber.writerThreadPrio");
-   
+   config(m_semWait, "framegrabber.semWait");
 }
    
 

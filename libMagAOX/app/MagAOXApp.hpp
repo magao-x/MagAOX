@@ -440,17 +440,6 @@ protected:
       pcf::IndiProperty * property {0}; ///< A pointer to an INDI property.
       int (*callBack)( void *, const pcf::IndiProperty &) {0}; ///< The function to call for a new or set property.
       bool m_defReceived {false}; ///< Flag indicating that a DefProperty has been received after a GetProperty.
-      
-//       indiCallBack()
-//       {
-//       }
-//       
-//       indiCallBack( pcf::IndiProperty * _ip,
-//                     int (*_callBack)( void *, const pcf::IndiProperty &) )
-//       {
-//          property = _ip;
-//          callBack = _callBack;
-//       }
    };
 
 
