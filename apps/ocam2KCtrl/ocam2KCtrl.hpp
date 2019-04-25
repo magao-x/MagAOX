@@ -154,6 +154,8 @@ protected:
 
    int m_powerOnCounter {0}; ///< Counts numer of loops after power on, implements delay for camera bootup.
    
+   bool m_fgThreadInit {true}; ///< Synchronizer for thread startup, to allow priority setting to finish.
+
    std::string m_modeName;
    std::string m_nextMode;
    
@@ -869,6 +871,7 @@ void ocam2KCtrl::_fgThreadStart( ocam2KCtrl * o)
 inline
 int ocam2KCtrl::fgThreadStart()
 {
+   m_fgThreadInit = true;
    try
    {
       m_fgThread  = std::thread( _fgThreadStart, this);
@@ -925,6 +928,7 @@ int ocam2KCtrl::fgThreadStart()
    }
    else
    {
+      m_fgThreadInit = false;
       return log<text_log,0>("F.G. thread scheduler priority (framegrabber.threadPrio) set to " + std::to_string(prio));
    }
    
@@ -934,6 +938,11 @@ int ocam2KCtrl::fgThreadStart()
 inline
 void ocam2KCtrl::fgThreadExec()
 {
+   //Waot fpr the thread starter to finish initializing this thread.
+   while(m_fgThreadInit == true)
+   {
+       sleep(1);
+   }
 
    //Create and initialize the ImageStreamIO buffer.
    //It will only be recreated if needed.
