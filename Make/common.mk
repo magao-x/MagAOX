@@ -47,7 +47,9 @@ EXTRA_LDLIBS ?=  -lsofa_c \
   -lboost_filesystem \
   -ludev \
   -lpthread \
-  -ltelnet $(abspath \
+  -ltelnet \
+  -lxrif \
+  $(abspath \
   $(SELF_DIR)/../INDI/libcommon/libcommon.a) \
   $(abspath $(SELF_DIR)/../INDI/liblilxml/liblilxml.a)
   

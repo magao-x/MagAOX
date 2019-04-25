@@ -610,6 +610,7 @@ int outletController<derivedT>::newCallBack_channels( const pcf::IndiProperty &i
 
    std::string state, target;
 
+   ///\todo change these to the "find" members
    try
    {
       state = ipRecv["state"].get<std::string>();

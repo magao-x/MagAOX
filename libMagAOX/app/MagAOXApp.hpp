@@ -429,28 +429,17 @@ protected:
 public:
    ///The INDI driver wrapper.  Constructed and initialized by execute, which starts and stops communications.
    indiDriver<MagAOXApp> * m_indiDriver {nullptr};
-protected:
 
    ///Mutex for locking INDI communications.
    std::mutex m_indiMutex;
-
+   
+protected:
    ///Structure to hold the call-back details for handling INDI communications.
    struct indiCallBack
    {
       pcf::IndiProperty * property {0}; ///< A pointer to an INDI property.
       int (*callBack)( void *, const pcf::IndiProperty &) {0}; ///< The function to call for a new or set property.
       bool m_defReceived {false}; ///< Flag indicating that a DefProperty has been received after a GetProperty.
-      
-//       indiCallBack()
-//       {
-//       }
-//       
-//       indiCallBack( pcf::IndiProperty * _ip,
-//                     int (*_callBack)( void *, const pcf::IndiProperty &) )
-//       {
-//          property = _ip;
-//          callBack = _callBack;
-//       }
    };
 
 
