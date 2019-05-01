@@ -194,6 +194,8 @@ protected:
      * @{
      */
    
+   bool m_fgThreadInit {true}; ///< Synchronizer for thread startup, to allow priority setting to finish.
+   
    std::thread m_fgThread; ///< A separate thread for the actual framegrabbings
 
    ///Thread starter, called by fgThreadStart on thread construction.  Calls fgThreadExec.
@@ -205,6 +207,7 @@ protected:
    /// Execute the log capture.
    void fgThreadExec();
 
+   
    ///@}
   
    
@@ -212,7 +215,10 @@ protected:
       * This thread writes chunks of the circular buffer to disk.
       *
       * @{
-      */ 
+      */
+    
+   bool m_swThreadInit {true}; ///< Synchronizer for thread startup, to allow priority setting to finish.
+   
    sem_t m_swSemaphore; ///< Semaphore used to synchronize the fg thread and the sw thread.
    
    std::thread m_swThread; ///< A separate thread for the actual writing
@@ -236,7 +242,7 @@ protected:
    //declare our properties
    pcf::IndiProperty m_indiP_writing;
 
-   pdf::IndiProperty m_indiP_xrifStats;
+   pcf::IndiProperty m_indiP_xrifStats;
    
 public:
   
@@ -426,6 +432,8 @@ void frameGrabber<derivedT>::_fgThreadStart( frameGrabber * o)
 template<class derivedT>
 int frameGrabber<derivedT>::fgThreadStart()
 {
+   m_fgThreadInit = true;
+   
    try
    {
       m_fgThread  = std::thread( _fgThreadStart, this);
@@ -482,6 +490,8 @@ int frameGrabber<derivedT>::fgThreadStart()
    }
    else
    {
+      m_fgThreadInit = false;
+      
       return derivedT::template log<text_log,0>("F.G. thread scheduler priority (framegrabber.threadPrio) set to " + std::to_string(prio));
    }
    
@@ -491,6 +501,12 @@ int frameGrabber<derivedT>::fgThreadStart()
 template<class derivedT>
 void frameGrabber<derivedT>::fgThreadExec()
 {
+   //Wait fpr the thread starter to finish initializing this thread.
+   while(m_fgThreadInit == true && m_parent->m_shutdown == 0)
+   {
+       sleep(1);
+   }
+   
    while(m_parent->shutdown() == 0)
    {
       while(!m_parent->shutdown() && (!( m_parent->state() == stateCodes::READY || m_parent->state() == stateCodes::OPERATING) || m_parent->powerState() <= 0 ) )
@@ -631,6 +647,8 @@ void frameGrabber<derivedT>::_swThreadStart( frameGrabber * o)
 template<class derivedT>
 int frameGrabber<derivedT>::swThreadStart()
 {
+   m_swThreadInit = true;
+   
    try
    {
       m_swThread  = std::thread( _swThreadStart, this);
@@ -687,6 +705,8 @@ int frameGrabber<derivedT>::swThreadStart()
    }
    else
    {
+      m_swThreadInit = false;
+      
       return derivedT::template log<text_log,0>("writer thread scheduler priority (framegrabber.writerThreadPrio) set to " + std::to_string(prio));
    }
    
@@ -696,7 +716,12 @@ int frameGrabber<derivedT>::swThreadStart()
 template<class derivedT>
 void frameGrabber<derivedT>::swThreadExec()
 {
-
+   //Wait fpr the thread starter to finish initializing this thread.
+   while(m_swThreadInit == true && m_parent->m_shutdown == 0)
+   {
+       sleep(1);
+   }
+   
    while(!m_parent->m_shutdown)
    {
       timespec ts;
