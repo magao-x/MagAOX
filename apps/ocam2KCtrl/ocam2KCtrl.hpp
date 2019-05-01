@@ -939,7 +939,7 @@ inline
 void ocam2KCtrl::fgThreadExec()
 {
    //Waot fpr the thread starter to finish initializing this thread.
-   while(m_fgThreadInit == true)
+   while(m_fgThreadInit == true && m_shutdown == 0)
    {
        sleep(1);
    }
