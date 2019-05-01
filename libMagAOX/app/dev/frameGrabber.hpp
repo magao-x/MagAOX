@@ -354,6 +354,40 @@ int frameGrabber<derivedT>::appStartup()
       return -1;
    }
    
+   //Register the stats INDI property
+   m_indiP_xrifStats = pcf::IndiProperty(pcf::IndiProperty::Text);
+   m_indiP_xrifStats.setDevice(static_cast<derivedT *>(this)->configName());
+   m_indiP_xrifStats.setName("xrif");
+   m_indiP_xrifStats.setPerm(pcf::IndiProperty::ReadOnly);
+   m_indiP_xrifStats.setState(pcf::IndiProperty::Idle);
+    
+   m_indiP_xrifStats.add(pcf::IndiElement("ratio"));
+   m_indiP_xrifStats["ratio"].set(0);
+   m_indiP_xrifStats.add(pcf::IndiElement("differenceMBsec"));
+   m_indiP_xrifStats["differenceMBsec"].set(0);
+   m_indiP_xrifStats.add(pcf::IndiElement("reorderMBsec"));
+   m_indiP_xrifStats["reorderMBsec"].set(0);
+   m_indiP_xrifStats.add(pcf::IndiElement("compressMBsec"));
+   m_indiP_xrifStats["compressMBsec"].set(0);
+   m_indiP_xrifStats.add(pcf::IndiElement("encodeMBsec"));
+   m_indiP_xrifStats["encodeMBsec"].set(0);
+   
+   m_indiP_xrifStats.add(pcf::IndiElement("differenceFPS"));
+   m_indiP_xrifStats["differenceFPS"].set(0);
+   m_indiP_xrifStats.add(pcf::IndiElement("reorderFPS"));
+   m_indiP_xrifStats["reorderFPS"].set(0);
+   m_indiP_xrifStats.add(pcf::IndiElement("compressFPS"));
+   m_indiP_xrifStats["compressFPS"].set(0);
+   m_indiP_xrifStats.add(pcf::IndiElement("encodeFPS"));
+   m_indiP_xrifStats["encodeFPS"].set(0);
+   
+   if( static_cast<derivedT *>(this)->registerIndiPropertyNew( m_indiP_xrifStats, nullptr) < 0)
+   {
+      #ifndef OUTLET_CTRL_TEST_NOLOG
+      derivedT::template log<software_error>({__FILE__,__LINE__});
+      #endif
+      return -1;
+   }
    
    
    if(sem_init(&m_swSemaphore, 0,0) < 0)
@@ -521,8 +555,6 @@ void frameGrabber<derivedT>::fgThreadExec()
          if(m_parent->startAcquisition() < 0) continue;        
          
          m_typeSize = ImageStreamIO_typesize(m_dataType);
-         
-         
       }
 
       /* Initialize ImageStreamIO
@@ -538,6 +570,8 @@ void frameGrabber<derivedT>::fgThreadExec()
       xrif->compress_on_raw = 0;
       xrif_allocate_reordered(xrif);
       xrif_allocate_compressed(xrif);
+      std::cerr << (int) xrif->own_compressed << "\n";
+      std::cerr << xrif->compressed_buffer_size << "\n";
       
       //This completes the reconfiguration.
       m_reconfig = false;
@@ -594,6 +628,7 @@ void frameGrabber<derivedT>::fgThreadExec()
                   m_currSaveStart = m_currChunkStart;
                   m_currSaveStop = m_nextChunkStart + m_writeChunkLength;
                
+                  std::cerr << "FG: " << m_currSaveStart << " " << m_currSaveStop << " " << imageStream.md[0].cnt1 << " " << imageStream.md[0].cnt0 << "\n";
                   //Now tell the writer to get going
                   if(sem_post(&m_swSemaphore) < 0)
                   {
@@ -722,6 +757,15 @@ void frameGrabber<derivedT>::swThreadExec()
        sleep(1);
    }
    
+   timespec ts0, ts1;
+   
+   while( m_typeSize == 0 && m_parent->m_shutdown == 0)
+   {
+      sleep(1);
+   }
+   char * raw = new char[m_width*m_height*m_typeSize*m_writeChunkLength];
+   xrif_set_raw(xrif, raw, m_width*m_height*m_typeSize*m_writeChunkLength);
+   
    while(!m_parent->m_shutdown)
    {
       timespec ts;
@@ -734,22 +778,23 @@ void frameGrabber<derivedT>::swThreadExec()
        
       mx::timespecAddNsec(ts, m_semWait);
       
+      
       if(sem_timedwait(&m_swSemaphore, &ts) == 0)
       {
          if(m_writing == NOT_WRITING) continue;
                
+         std::cerr << "SW: " << m_currSaveStart << " " << m_currSaveStop << " " << imageStream.md[0].cnt1 << " " << imageStream.md[0].cnt0 << "\n";
+         clock_gettime(CLOCK_REALTIME, &ts0);
+         
          xrif_set_size(xrif, m_width, m_height, 1, (m_currSaveStop-m_currSaveStart), m_dataType);
-         xrif_set_raw(xrif, (char *) imageStream.array.raw + m_currSaveStart*m_width*m_height*m_typeSize, (m_currSaveStop-m_currSaveStart)*m_width*m_height*m_typeSize);
+         memcpy(raw, (char *) imageStream.array.raw + m_currSaveStart*m_width*m_height*m_typeSize, (m_currSaveStop-m_currSaveStart)*m_width*m_height*m_typeSize);
+         //xrif_set_raw(xrif, (char *) imageStream.array.raw + m_currSaveStart*m_width*m_height*m_typeSize, (m_currSaveStop-m_currSaveStart)*m_width*m_height*m_typeSize);
          xrif->lz4_acceleration=50;
          xrif_encode(xrif);
          
-         
-         double ratio = ((double)xrif->compressed_size)/( (m_currSaveStop-m_currSaveStart)*m_width*m_height*m_typeSize);
-         
-        
-         double td = ((double) xrif->ts_compress_done.tv_sec + ((double) xrif->ts_compress_done.tv_nsec)/1e9) -  ((double) xrif->ts_difference_start.tv_sec + ((double) xrif->ts_difference_start.tv_nsec)/1e9);  
-         std::cerr << "Compressed: " << m_currSaveStart << " to " << m_currSaveStop << " [" << ratio*100 << "% @ " << (double)(m_currSaveStop-m_currSaveStart) / td <<" fps]\n";
-         
+         clock_gettime(CLOCK_REALTIME, &ts1);
+         std::cerr << "SW: " << m_currSaveStart << " " << m_currSaveStop << " " << imageStream.md[0].cnt1 << " " << imageStream.md[0].cnt0 << "\n";
+         std::cerr << ((double) ts1.tv_sec + ((double) ts1.tv_nsec)/1e9) - ((double) ts0.tv_sec + ((double) ts0.tv_nsec)/1e9) << "\n"; 
          if(m_writing == STOP_WRITING) m_writing = NOT_WRITING;
       }
       else
@@ -828,6 +873,11 @@ int frameGrabber<derivedT>::updateINDI()
    if(m_writing == NOT_WRITING || m_writing == WRITING)
    {
       indi::updateIfChanged(m_indiP_writing, "current", (int) (m_writing == WRITING), m_parent->m_indiDriver);
+      
+      if(xrif)
+      {
+         indi::updateIfChanged(m_indiP_xrifStats, "ratio", xrif_compression_ratio(xrif), m_parent->m_indiDriver);
+      }
    }
    
    return 0;
