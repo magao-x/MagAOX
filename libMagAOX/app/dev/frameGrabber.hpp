@@ -996,6 +996,7 @@ void frameGrabber<derivedT>::swThreadExec()
          if(bw != XRIF_HEADER_SIZE)
          {
             derivedT::template log<software_critical>({__FILE__,__LINE__,errno,0,"failure writing header to file"}); 
+            fclose(fp_xrif);
             return; //will trigger a shutdown
          }
          
@@ -1004,6 +1005,7 @@ void frameGrabber<derivedT>::swThreadExec()
          if(bw != xrif->compressed_size)
          {
             derivedT::template log<software_critical>({__FILE__,__LINE__,errno,0,"failure writing data to file"}); 
+            fclose(fp_xrif);
             return; //will trigger a shutdown
          }
          

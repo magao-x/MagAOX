@@ -61,11 +61,11 @@ enum {
  */
 class modbus {
 private:
-    bool _connected;
-    uint16_t PORT;
-    int _socket;
-    int _msg_id;
-    int _slaveid ;
+    bool _connected {false};
+    uint16_t PORT {502};
+    int _socket {0};
+    int _msg_id {1};
+    int _slaveid {1};
     std::string HOST;
     struct sockaddr_in _server;
 
@@ -81,8 +81,8 @@ private:
 
 
 public:
-    modbus(std::string host, uint16_t port);
-    modbus(std::string host);
+    modbus(const std::string & host, uint16_t port);
+    explicit modbus(const std::string & host);
     ~modbus();
 
     bool modbus_connect();
@@ -111,13 +111,9 @@ public:
  * @return     A Modbus Connector Object
  */
 inline
-modbus::modbus(std::string host, uint16_t port) {
+modbus::modbus(const std::string & host, uint16_t port) {
     HOST = host;
     PORT = port;
-    _slaveid = 1;
-    _msg_id = 1;
-    _connected = false;
-
 }
 
 
@@ -127,8 +123,8 @@ modbus::modbus(std::string host, uint16_t port) {
  * @return      A Modbus Connector Object
  */
 inline
-modbus::modbus(std::string host) {
-    modbus(host, 502);
+modbus::modbus(const std::string & host) {
+    HOST = host;
 }
 
 

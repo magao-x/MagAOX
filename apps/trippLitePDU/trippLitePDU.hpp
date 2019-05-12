@@ -530,7 +530,6 @@ int trippLitePDU::turnOutletOff( int outletNum )
 
 int trippLitePDU::parsePDUStatus( std::string & strRead )
 {  
-   size_t eol = 0;
    size_t curpos = 0;
 
    curpos = strRead.find_first_of("\r\n", curpos);
@@ -540,7 +539,7 @@ int trippLitePDU::parsePDUStatus( std::string & strRead )
    while(curpos < strRead.size())
    {
 
-      eol = strRead.find_first_of("\r\n", curpos);
+      size_t eol = strRead.find_first_of("\r\n", curpos);
 
       if(eol == std::string::npos) eol = strRead.size();
 
