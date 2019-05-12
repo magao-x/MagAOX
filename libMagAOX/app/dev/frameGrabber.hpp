@@ -17,6 +17,8 @@
 #include <ImageStruct.h>
 #include <ImageStreamIO.h>
 
+#include "../../common/paths.hpp"
+
 #define NOT_WRITING (0)
 #define START_WRITING (1)
 #define WRITING (2)
@@ -66,7 +68,7 @@ template<class derivedT>
 class frameGrabber 
 {
 
-   derivedT * m_parent;
+   derivedT * m_parent; ///< The parent class, used for casting `this`
    
 protected:
 
@@ -75,19 +77,17 @@ protected:
     */
    std::string m_shmimName {""}; ///< The name of the shared memory image, is used in `/tmp/<shmimName>.im.shm`. Derived classes should set a default.
       
-   int m_fgThreadPrio {1}; ///< Priority of the framegrabber thread, should normally be > 00.
+   int m_fgThreadPrio {2}; ///< Priority of the framegrabber thread, should normally be > 00.
     
-   uint32_t m_circBuffLength {1000}; ///< Length of the circular buffer, in frames
+   uint32_t m_circBuffLength {1024}; ///< Length of the circular buffer, in frames
    
-   uint32_t m_writeChunkLength {500}; ///< The number of images to write at a time.  Should normally be < m_circBuffLength.
+   uint32_t m_writeChunkLength {512}; ///< The number of images to write at a time.  Should normally be < m_circBuffLength.
    
-   std::string m_rawimageDir; ///< The path where files will be saved.
+   std::string m_rawimageDir; ///< The path where files will be saved.  Normally derived from the library config.
    
    int m_swThreadPrio {1}; ///< Priority of the stream writer thread, should normally be > 0, and <= m_fgThreadPrio.
     
    unsigned m_semWait {500000000}; //The time in nsec to wait on the writer semaphore.  Max is 999999999. Default is 5e8 nsec.
-   
-   
    
    ///@}
    
@@ -107,19 +107,29 @@ protected:
    
    IMAGE imageStream; ///< The ImageStreamIO shared memory buffer.
    
-   int m_writing {NOT_WRITING};
+   
    
    //Writer book-keeping:
-   size_t m_currImage {0};
+   int m_writing {NOT_WRITING}; ///< Controls whether or not images are being written, and sequences start and stop of writing.
    
-   size_t m_currChunkStart {0};
-   size_t m_nextChunkStart {0};
+   uint64_t m_currChunkStart {0}; ///< The circular buffer starting position of the current to-be-written chunk.
+   uint64_t m_nextChunkStart {0}; ///< The circular buffer starting position of the next to-be-written chunk.
    
-   size_t m_currSaveStart {0};
-   size_t m_currSaveStop {0};
+   uint64_t m_currSaveStart {0}; ///< The circular buffer position at which to start saving.
+   uint64_t m_currSaveStop {0}; ///< The circular buffer position at which to stop saving.
+   
+   bool m_logSaveStart {0}; ///< Flag indicating that the start saving log should entry should be made.
+   uint64_t m_currSaveStartFrameNo {0}; ///< The frame number of the image at which saving started (for logging)
+   uint64_t m_currSaveStopFrameNo {0}; ///< The frame number of the image at which saving stopped (for logging)
    
    ///The xrif compression handle
    xrif_t xrif {nullptr};
+   
+   ///Storage for the xrif file header
+   char * xrif_header {nullptr};
+   
+   ///Storage for the iamge timing data for writing
+   char * m_timingData {nullptr};
    
 public:
 
@@ -240,9 +250,17 @@ protected:
       */ 
 protected:
    //declare our properties
-   pcf::IndiProperty m_indiP_writing;
+   
+   pcf::IndiProperty m_indiP_shmimName; ///< Property used to report the shmim buffer name
+   
+   pcf::IndiProperty m_indiP_frameSize; ///< Property used to report the current frame size
 
-   pcf::IndiProperty m_indiP_xrifStats;
+   pcf::IndiProperty m_indiP_bufferSize; ///< Property used to report the current buffer size.
+   
+   
+   pcf::IndiProperty m_indiP_writing; ///< Property used to control whether frames are being written to disk
+
+   pcf::IndiProperty m_indiP_xrifStats; ///< Property to report xrif compression performance.
    
 public:
   
@@ -286,6 +304,12 @@ frameGrabber<derivedT>::frameGrabber()
 template<class derivedT>
 frameGrabber<derivedT>::~frameGrabber() noexcept
 {
+   if(xrif) xrif_delete(xrif);
+   
+   if(xrif_header) free(xrif_header);
+   
+   if(m_timingData) free(m_timingData);
+   
    return;
 }
 
@@ -312,7 +336,12 @@ void frameGrabber<derivedT>::loadConfig(mx::app::appConfigurator & config)
    config(m_fgThreadPrio, "framegrabber.threadPrio");
    config(m_shmimName, "framegrabber.shmimName");
    config(m_circBuffLength, "framegrabber.circBuffLength");
+   
+   
+   //Setup default save path before overriding with config
+   m_rawimageDir = std::string(MAGAOX_path) + "/" + MAGAOX_rawimageRelPath + "/" + m_parent->configName();
    config(m_rawimageDir,"framegrabber.savePath");
+   
    config(m_writeChunkLength,"framegrabber.writeChunkLength");
    config(m_swThreadPrio,"framegrabber.writerThreadPrio");
    config(m_semWait, "framegrabber.semWait");
@@ -322,6 +351,21 @@ void frameGrabber<derivedT>::loadConfig(mx::app::appConfigurator & config)
 template<class derivedT>
 int frameGrabber<derivedT>::appStartup()
 {
+   //Create save directory.
+   errno = 0;
+   if( mkdir(m_rawimageDir.c_str(), S_IRWXU | S_IRWXG | S_IROTH | S_IXOTH) < 0 )
+   {
+      if( errno != EEXIST)
+      {
+         std::stringstream logss;
+         logss << "Failed to image directory (" << m_rawimageDir << ").  Errno says: " << strerror(errno);
+         derivedT::template log<software_critical>({__FILE__, __LINE__, errno, 0, logss.str()});
+
+         return -1;
+      }
+
+   }
+   
    //Check if we have a safe writeChunkLengthh
    if( m_circBuffLength % m_writeChunkLength != 0)
    {
@@ -334,9 +378,47 @@ int frameGrabber<derivedT>::appStartup()
       return derivedT::template log<software_critical, -1>({__FILE__,__LINE__, "xrif handle allocation or initialization error. Code = " + std::to_string(rv)});
    }
    
+   xrif_header = (char *) malloc( XRIF_HEADER_SIZE * sizeof(char));
+      
+   //Register the shmimName INDI property
+   m_indiP_shmimName = pcf::IndiProperty(pcf::IndiProperty::Text);
+   m_indiP_shmimName.setDevice(m_parent->configName());
+   m_indiP_shmimName.setName("shmimName");
+   m_indiP_shmimName.setPerm(pcf::IndiProperty::ReadWrite);
+   m_indiP_shmimName.setState(pcf::IndiProperty::Idle);
+   m_indiP_shmimName.add(pcf::IndiElement("name"));
+   m_indiP_shmimName["name"] = m_shmimName;
+   
+   if( m_parent->registerIndiPropertyNew( m_indiP_shmimName, nullptr) < 0)
+   {
+      #ifndef FRAMEGRABBER_TEST_NOLOG
+      derivedT::template log<software_error>({__FILE__,__LINE__});
+      #endif
+      return -1;
+   }
+   
+   //Register the frameSize INDI property
+   m_indiP_frameSize = pcf::IndiProperty(pcf::IndiProperty::Number);
+   m_indiP_frameSize.setDevice(m_parent->configName());
+   m_indiP_frameSize.setName("frameSize");
+   m_indiP_frameSize.setPerm(pcf::IndiProperty::ReadWrite);
+   m_indiP_frameSize.setState(pcf::IndiProperty::Idle);
+   m_indiP_frameSize.add(pcf::IndiElement("width"));
+   m_indiP_frameSize["width"] = 0;
+   m_indiP_frameSize.add(pcf::IndiElement("height"));
+   m_indiP_frameSize["height"] = 0;
+   
+   if( m_parent->registerIndiPropertyNew( m_indiP_frameSize, nullptr) < 0)
+   {
+      #ifndef FRAMEGRABBER_TEST_NOLOG
+      derivedT::template log<software_error>({__FILE__,__LINE__});
+      #endif
+      return -1;
+   }
+   
    //Register the writing INDI property
    m_indiP_writing = pcf::IndiProperty(pcf::IndiProperty::Text);
-   m_indiP_writing.setDevice(static_cast<derivedT *>(this)->configName());
+   m_indiP_writing.setDevice(m_parent->configName());
    m_indiP_writing.setName("writing");
    m_indiP_writing.setPerm(pcf::IndiProperty::ReadWrite);
    m_indiP_writing.setState(pcf::IndiProperty::Idle);
@@ -346,27 +428,29 @@ int frameGrabber<derivedT>::appStartup()
    m_indiP_writing.add(pcf::IndiElement("target"));
    m_indiP_writing["target"].set(0);
    
-   if( static_cast<derivedT *>(this)->registerIndiPropertyNew( m_indiP_writing, st_newCallBack_writing) < 0)
+   if( m_parent->registerIndiPropertyNew( m_indiP_writing, st_newCallBack_writing) < 0)
    {
-      #ifndef OUTLET_CTRL_TEST_NOLOG
+      #ifndef FRAMEGRABBER_TEST_NOLOG
       derivedT::template log<software_error>({__FILE__,__LINE__});
       #endif
       return -1;
    }
    
    //Register the stats INDI property
-   m_indiP_xrifStats = pcf::IndiProperty(pcf::IndiProperty::Text);
-   m_indiP_xrifStats.setDevice(static_cast<derivedT *>(this)->configName());
+   m_indiP_xrifStats = pcf::IndiProperty(pcf::IndiProperty::Number);
+   m_indiP_xrifStats.setDevice(m_parent->configName());
    m_indiP_xrifStats.setName("xrif");
    m_indiP_xrifStats.setPerm(pcf::IndiProperty::ReadOnly);
    m_indiP_xrifStats.setState(pcf::IndiProperty::Idle);
     
    m_indiP_xrifStats.add(pcf::IndiElement("ratio"));
    m_indiP_xrifStats["ratio"].set(0);
+   
    m_indiP_xrifStats.add(pcf::IndiElement("differenceMBsec"));
    m_indiP_xrifStats["differenceMBsec"].set(0);
    m_indiP_xrifStats.add(pcf::IndiElement("reorderMBsec"));
    m_indiP_xrifStats["reorderMBsec"].set(0);
+   
    m_indiP_xrifStats.add(pcf::IndiElement("compressMBsec"));
    m_indiP_xrifStats["compressMBsec"].set(0);
    m_indiP_xrifStats.add(pcf::IndiElement("encodeMBsec"));
@@ -376,14 +460,15 @@ int frameGrabber<derivedT>::appStartup()
    m_indiP_xrifStats["differenceFPS"].set(0);
    m_indiP_xrifStats.add(pcf::IndiElement("reorderFPS"));
    m_indiP_xrifStats["reorderFPS"].set(0);
+   
    m_indiP_xrifStats.add(pcf::IndiElement("compressFPS"));
    m_indiP_xrifStats["compressFPS"].set(0);
    m_indiP_xrifStats.add(pcf::IndiElement("encodeFPS"));
    m_indiP_xrifStats["encodeFPS"].set(0);
    
-   if( static_cast<derivedT *>(this)->registerIndiPropertyNew( m_indiP_xrifStats, nullptr) < 0)
+   if( m_parent->registerIndiPropertyNew( m_indiP_xrifStats, nullptr) < 0)
    {
-      #ifndef OUTLET_CTRL_TEST_NOLOG
+      #ifndef FRAMEGRABBER_TEST_NOLOG
       derivedT::template log<software_error>({__FILE__,__LINE__});
       #endif
       return -1;
@@ -535,6 +620,8 @@ int frameGrabber<derivedT>::fgThreadStart()
 template<class derivedT>
 void frameGrabber<derivedT>::fgThreadExec()
 {
+   
+   
    //Wait fpr the thread starter to finish initializing this thread.
    while(m_fgThreadInit == true && m_parent->m_shutdown == 0)
    {
@@ -563,20 +650,30 @@ void frameGrabber<derivedT>::fgThreadExec()
       imsize[0] = m_width; 
       imsize[1] = m_height;
       imsize[2] = m_circBuffLength;
-      ImageStreamIO_createIm(&imageStream, m_shmimName.c_str(), 3, imsize, m_dataType, 1, 0);
-      imageStream.md[0].cnt1 = m_circBuffLength;
+      ImageStreamIO_createIm_gpu(&imageStream, m_shmimName.c_str(), 3, imsize, m_dataType, -1, 1, IMAGE_NB_SEMAPHORE, 0, CIRCULAR_BUFFER | ZAXIS_TEMPORAL);
       
-      xrif_set_size(xrif, m_width, m_height, 1, m_circBuffLength, m_dataType);
-      xrif->compress_on_raw = 0;
+     /* ImageStreamIO_createIm_gpu(&imageStreahm, const char *name, long naxis,
+                               uint32_t *size, uint8_t datatype,
+                               int8_t location, int shared, int NBsem, int NBkw,
+                               uint64_t imagetype) {*/
+      
+      
+      
+      imageStream.md->cnt1 = m_circBuffLength;
+      
+      xrif_set_size(xrif, m_width, m_height, 1, m_writeChunkLength, m_dataType);
+      xrif->compress_on_raw = 1;
       xrif_allocate_reordered(xrif);
-      xrif_allocate_compressed(xrif);
-      std::cerr << (int) xrif->own_compressed << "\n";
-      std::cerr << xrif->compressed_buffer_size << "\n";
+      xrif_allocate_raw(xrif);
+
+      //Alocate the timing data buffer used for writing.
+      if(m_timingData) free(m_timingData);
+      m_timingData = (char *) malloc( (sizeof(uint64_t) + 2*sizeof(timespec))*m_writeChunkLength);
+      
       
       //This completes the reconfiguration.
       m_reconfig = false;
                   
-      m_currImage = 0;
       m_currChunkStart = 0;
       m_nextChunkStart = 0;
       
@@ -592,43 +689,56 @@ void frameGrabber<derivedT>::fgThreadExec()
          }
          
          //Ok, no timeout, so we process the image and publish it.
-         imageStream.md[0].write=1;
+         imageStream.md->write=1;
          
          //Increment cnt1, wrapping for circular buffer.
-         uint64_t cnt1 = imageStream.md[0].cnt1 + 1;
+         uint64_t cnt1 = imageStream.md->cnt1 + 1;
          if(cnt1 > m_circBuffLength-1) cnt1 = 0;
-         imageStream.md[0].cnt1 = cnt1;
+         imageStream.md->cnt1 = cnt1;
 
-         if(m_parent->loadImageIntoStream((char *) imageStream.array.raw + imageStream.md[0].cnt1*m_width*m_height*m_typeSize) < 0) 
+         if(m_parent->loadImageIntoStream((char *) imageStream.array.raw + imageStream.md->cnt1*m_width*m_height*m_typeSize) < 0) 
          {
             break;
          }
          
-         imageStream.md[0].atime = m_currImageTimestamp;;
-         imageStream.md[0].cnt0++;
+         //Set the time of last write
+         clock_gettime(CLOCK_REALTIME, &imageStream.md->writetime);
+
+         //Set the image acquisition timestamp
+         imageStream.md->atime = m_currImageTimestamp;
          
+         //Update cnt0
+         imageStream.md->cnt0++;
          
-         imageStream.md[0].write=0;
+         //Update the circular buffers
+         imageStream.writetimearray[cnt1] = imageStream.md->writetime;
+         imageStream.atimearray[cnt1] = m_currImageTimestamp;
+         imageStream.cntarray[cnt1] = imageStream.md->cnt0;
+         
+         //And post
+         imageStream.md->write=0;
          ImageStreamIO_sempost(&imageStream,-1);
  
          //----------------------------
          //Writer book keeping
-         m_currImage = imageStream.md[0].cnt1;
+         uint64_t currImage = imageStream.md->cnt1;
          
          switch(m_writing)
          {
             case START_WRITING:
-               m_currChunkStart = m_currImage;
-               m_nextChunkStart = (m_currImage / m_writeChunkLength)*m_writeChunkLength;
+               m_currChunkStart = currImage;
+               m_nextChunkStart = (currImage / m_writeChunkLength)*m_writeChunkLength;
                m_writing = WRITING;
+               m_currSaveStartFrameNo = imageStream.md->cnt0;
+               m_logSaveStart = true;
                // fall through
             case WRITING:
-               if( m_currImage - m_nextChunkStart == m_writeChunkLength-1 )
+               if( currImage - m_nextChunkStart == m_writeChunkLength-1 )
                {  
                   m_currSaveStart = m_currChunkStart;
                   m_currSaveStop = m_nextChunkStart + m_writeChunkLength;
-               
-                  std::cerr << "FG: " << m_currSaveStart << " " << m_currSaveStop << " " << imageStream.md[0].cnt1 << " " << imageStream.md[0].cnt0 << "\n";
+                  m_currSaveStopFrameNo = imageStream.md->cnt0;
+                  
                   //Now tell the writer to get going
                   if(sem_post(&m_swSemaphore) < 0)
                   {
@@ -636,7 +746,7 @@ void frameGrabber<derivedT>::fgThreadExec()
                      return;
                   }
               
-                  m_nextChunkStart = ( (m_currImage  + 1) / m_writeChunkLength)*m_writeChunkLength;
+                  m_nextChunkStart = ( (currImage  + 1) / m_writeChunkLength)*m_writeChunkLength;
                   if(m_nextChunkStart >= m_circBuffLength) m_nextChunkStart = 0;
                
                   m_currChunkStart = m_nextChunkStart;
@@ -646,7 +756,9 @@ void frameGrabber<derivedT>::fgThreadExec()
                
             case STOP_WRITING:
                m_currSaveStart = m_currChunkStart;
-               m_currSaveStop = m_currImage + 1;
+               m_currSaveStop = currImage + 1;
+               m_currSaveStopFrameNo = imageStream.md->cnt0;
+               
                //Now tell the writer to get going
                if(sem_post(&m_swSemaphore) < 0)
                {
@@ -756,18 +868,55 @@ void frameGrabber<derivedT>::swThreadExec()
    {
        sleep(1);
    }
+
    
-   timespec ts0, ts1;
-   
-   while( m_typeSize == 0 && m_parent->m_shutdown == 0)
-   {
-      sleep(1);
-   }
-   char * raw = new char[m_width*m_height*m_typeSize*m_writeChunkLength];
-   xrif_set_raw(xrif, raw, m_width*m_height*m_typeSize*m_writeChunkLength);
-   
+   char * fname = nullptr;
+   char * fnameTiming = nullptr;
+      
+   std::string fnameBase;
+   std::string fnameTimingBase;
+      
    while(!m_parent->m_shutdown)
    {
+      while(!m_parent->shutdown() && (!( m_parent->state() == stateCodes::READY || m_parent->state() == stateCodes::OPERATING) || m_parent->powerState() <= 0 ) )
+      {
+         if(fname) 
+         {
+            free(fname);
+            fname = nullptr;
+         }
+         
+         if(fnameTiming) 
+         {
+            free(fnameTiming);
+            fnameTiming = nullptr;
+         }
+         sleep(1);
+      }
+      
+      //This will happen after a reconnection, and could update m_shmimName, etc.
+      if(fname == nullptr)
+      {
+         fnameBase = m_rawimageDir + "/" + m_shmimName + "_";
+      
+         size_t fnameSz = fnameBase.size() + sizeof("YYYYMMDDHHMMSSNNNNNNNNN.xrif");
+         fname = (char*) malloc(fnameSz);
+      
+         snprintf(fname, fnameSz, "%sYYYYMMDDHHMMSSNNNNNNNNN.xrif", fnameBase.c_str());
+
+      }
+      
+      if(fnameTiming == nullptr)
+      {
+         fnameTimingBase = m_rawimageDir + "/" + m_shmimName + "_timing_";
+      
+         size_t fnameSz = fnameTimingBase.size() + sizeof("YYYYMMDDHHMMSSNNNNNNNNN.dat");
+         fnameTiming = (char*) malloc(fnameSz);
+      
+         snprintf(fnameTiming, fnameSz, "%sYYYYMMDDHHMMSSNNNNNNNNN.dat", fnameTimingBase.c_str());
+
+      }
+      
       timespec ts;
        
       if(clock_gettime(CLOCK_REALTIME, &ts) < 0)
@@ -778,24 +927,105 @@ void frameGrabber<derivedT>::swThreadExec()
        
       mx::timespecAddNsec(ts, m_semWait);
       
-      
       if(sem_timedwait(&m_swSemaphore, &ts) == 0)
       {
          if(m_writing == NOT_WRITING) continue;
-               
-         std::cerr << "SW: " << m_currSaveStart << " " << m_currSaveStop << " " << imageStream.md[0].cnt1 << " " << imageStream.md[0].cnt0 << "\n";
-         clock_gettime(CLOCK_REALTIME, &ts0);
+         
+         if(m_logSaveStart) 
+         {
+            derivedT::template log<saving_start>({1,m_currSaveStartFrameNo});
+            m_logSaveStart = false;
+         }
+         
+         timespec tw0, tw1, tw2;
+         
+         clock_gettime(CLOCK_REALTIME, &tw0);
          
          xrif_set_size(xrif, m_width, m_height, 1, (m_currSaveStop-m_currSaveStart), m_dataType);
-         memcpy(raw, (char *) imageStream.array.raw + m_currSaveStart*m_width*m_height*m_typeSize, (m_currSaveStop-m_currSaveStart)*m_width*m_height*m_typeSize);
-         //xrif_set_raw(xrif, (char *) imageStream.array.raw + m_currSaveStart*m_width*m_height*m_typeSize, (m_currSaveStop-m_currSaveStart)*m_width*m_height*m_typeSize);
+
+         memcpy(xrif->raw_buffer, (char *) imageStream.array.raw + m_currSaveStart*m_width*m_height*m_typeSize, (m_currSaveStop-m_currSaveStart)*m_width*m_height*m_typeSize);
+         
+         for(size_t i =0; i< m_writeChunkLength; ++i)
+         {
+            *((uint64_t *) &m_timingData[ (sizeof(uint64_t) + 2*sizeof(timespec))*i + 0]) = imageStream.cntarray[m_currSaveStart + i];
+            *((timespec *) &m_timingData[ (sizeof(uint64_t) + 2*sizeof(timespec))*i + sizeof(uint64_t)]) = imageStream.atimearray[m_currSaveStart + i];
+            *((timespec *) &m_timingData[ (sizeof(uint64_t) + 2*sizeof(timespec))*i + sizeof(uint64_t)+sizeof(timespec)]) = imageStream.writetimearray[m_currSaveStart + i];
+         }
+         
+         
          xrif->lz4_acceleration=50;
          xrif_encode(xrif);
+      
+         xrif_write_header( xrif_header, xrif);
+
+         tm uttime;//The broken down time.
+   
+         //This needs to be first iamge time stamp.
+         if(gmtime_r(&ts.tv_sec, &uttime) == 0)
+         {
+            derivedT::template log<software_critical>({__FILE__,__LINE__,errno,0,"gmtime_r"}); 
+            return; //will trigger a shutdown
+         }
+            
+         snprintf(fname + fnameBase.size(), 24, "%04i%02i%02i%02i%02i%02i%09i", uttime.tm_year+1900, uttime.tm_mon+1, uttime.tm_mday, 
+                                                                uttime.tm_hour, uttime.tm_min, uttime.tm_sec, static_cast<int>(ts.tv_nsec));
+         snprintf(fnameTiming + fnameTimingBase.size(), 24, "%04i%02i%02i%02i%02i%02i%09i", uttime.tm_year+1900, uttime.tm_mon+1, uttime.tm_mday, 
+                                                                            uttime.tm_hour, uttime.tm_min, uttime.tm_sec, static_cast<int>(ts.tv_nsec));
          
-         clock_gettime(CLOCK_REALTIME, &ts1);
-         std::cerr << "SW: " << m_currSaveStart << " " << m_currSaveStop << " " << imageStream.md[0].cnt1 << " " << imageStream.md[0].cnt0 << "\n";
-         std::cerr << ((double) ts1.tv_sec + ((double) ts1.tv_nsec)/1e9) - ((double) ts0.tv_sec + ((double) ts0.tv_nsec)/1e9) << "\n"; 
-         if(m_writing == STOP_WRITING) m_writing = NOT_WRITING;
+         //Need efficient way to make time file name too
+         
+         (fname + fnameBase.size())[23] = '.';
+         (fnameTiming + fnameTimingBase.size())[23] = '.';
+         
+         std::cerr << "Would write to: " << fname << "\n";
+         std::cerr << "           and: " << fnameTiming << "\n";
+         
+         clock_gettime(CLOCK_REALTIME, &tw1);
+         
+         FILE * fp_xrif = fopen(fname, "wb");
+         if(fp_xrif == NULL)
+         {
+            derivedT::template log<software_critical>({__FILE__,__LINE__,errno,0,"failed to open file for writing"}); 
+            return; //will trigger a shutdown
+         }
+         
+         
+         
+         size_t bw = fwrite(xrif_header, sizeof(uint8_t), XRIF_HEADER_SIZE, fp_xrif);
+         
+         if(bw != XRIF_HEADER_SIZE)
+         {
+            derivedT::template log<software_critical>({__FILE__,__LINE__,errno,0,"failure writing header to file"}); 
+            return; //will trigger a shutdown
+         }
+         
+         bw = fwrite(xrif->raw_buffer, sizeof(uint8_t), xrif->compressed_size, fp_xrif);
+
+         if(bw != xrif->compressed_size)
+         {
+            derivedT::template log<software_critical>({__FILE__,__LINE__,errno,0,"failure writing data to file"}); 
+            return; //will trigger a shutdown
+         }
+         
+         fclose(fp_xrif);
+         
+         clock_gettime(CLOCK_REALTIME, &tw2);
+         
+         double wt = ( (double) tw2.tv_sec + ((double) tw2.tv_nsec)/1e9) - ( (double) tw1.tv_sec + ((double) tw1.tv_nsec)/1e9);
+         
+         std::cerr << wt << "\n";
+         
+         //ssize_t bw = write(fd, xrif->raw_buffer, xrif->compressed_size);
+         //close fd_xrif
+         //open fd_timing
+         //close fd_timing
+         
+         
+         if(m_writing == STOP_WRITING) 
+         {
+            m_writing = NOT_WRITING;
+            derivedT::template log<saving_stop>({0,m_currSaveStopFrameNo});
+         }
       }
       else
       {
@@ -811,6 +1041,8 @@ void frameGrabber<derivedT>::swThreadExec()
          }
       }
    } //outer loop, will exit if m_shutdown==true
+   
+   if(fname) free(fname);
 }
 
 template<class derivedT>
@@ -869,14 +1101,42 @@ int frameGrabber<derivedT>::updateINDI()
 {
    if( !m_parent->m_indiDriver ) return 0;
    
+   indi::updateIfChanged(m_indiP_shmimName, "name", m_shmimName, m_parent->m_indiDriver);                     
+   indi::updateIfChanged(m_indiP_frameSize, "width", m_width, m_parent->m_indiDriver);
+   indi::updateIfChanged(m_indiP_frameSize, "height", m_height, m_parent->m_indiDriver);
+   
    //Only update this if not changing
    if(m_writing == NOT_WRITING || m_writing == WRITING)
    {
       indi::updateIfChanged(m_indiP_writing, "current", (int) (m_writing == WRITING), m_parent->m_indiDriver);
       
-      if(xrif)
+      if(xrif && m_writing == WRITING)
       {
-         indi::updateIfChanged(m_indiP_xrifStats, "ratio", xrif_compression_ratio(xrif), m_parent->m_indiDriver);
+         indi::updateIfChanged(m_indiP_xrifStats, "ratio", xrif->compression_ratio, m_parent->m_indiDriver);
+         
+         indi::updateIfChanged(m_indiP_xrifStats, "encodeMBsec", xrif->encode_rate/1048576.0, m_parent->m_indiDriver);
+         indi::updateIfChanged(m_indiP_xrifStats, "encodeFPS", xrif->encode_rate/(m_width*m_height*m_typeSize), m_parent->m_indiDriver);
+         
+         indi::updateIfChanged(m_indiP_xrifStats, "differenceMBsec", xrif->difference_rate/1048576.0, m_parent->m_indiDriver);
+         indi::updateIfChanged(m_indiP_xrifStats, "differenceFPS", xrif->difference_rate/(m_width*m_height*m_typeSize), m_parent->m_indiDriver);
+         
+         indi::updateIfChanged(m_indiP_xrifStats, "reorderMBsec", xrif->reorder_rate/1048576.0, m_parent->m_indiDriver);
+         indi::updateIfChanged(m_indiP_xrifStats, "reorderFPS", xrif->reorder_rate/(m_width*m_height*m_typeSize), m_parent->m_indiDriver);
+
+         indi::updateIfChanged(m_indiP_xrifStats, "compressMBsec", xrif->compress_rate/1048576.0, m_parent->m_indiDriver);
+         indi::updateIfChanged(m_indiP_xrifStats, "compressFPS", xrif->compress_rate/(m_width*m_height*m_typeSize), m_parent->m_indiDriver);
+      }
+      else
+      {
+         indi::updateIfChanged(m_indiP_xrifStats, "ratio", 0.0, m_parent->m_indiDriver);
+         indi::updateIfChanged(m_indiP_xrifStats, "encodeMBsec", 0.0, m_parent->m_indiDriver);
+         indi::updateIfChanged(m_indiP_xrifStats, "encodeFPS", 0.0, m_parent->m_indiDriver);
+         indi::updateIfChanged(m_indiP_xrifStats, "differenceMBsec", 0.0, m_parent->m_indiDriver);
+         indi::updateIfChanged(m_indiP_xrifStats, "differenceFPS", 0.0, m_parent->m_indiDriver);
+         indi::updateIfChanged(m_indiP_xrifStats, "reorderMBsec", 0.0, m_parent->m_indiDriver);
+         indi::updateIfChanged(m_indiP_xrifStats, "reorderFPS", 0.0, m_parent->m_indiDriver);
+         indi::updateIfChanged(m_indiP_xrifStats, "compressMBsec", 0.0, m_parent->m_indiDriver);
+         indi::updateIfChanged(m_indiP_xrifStats, "compressFPS", 0.0, m_parent->m_indiDriver);
       }
    }
    

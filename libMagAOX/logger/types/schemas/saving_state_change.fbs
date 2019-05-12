@@ -1,0 +1,10 @@
+namespace MagAOX.logger;
+
+table Saving_state_change_fb
+{
+   state:int16; 
+   frameNo:uint64;
+}
+
+root_type Saving_state_change_fb;
+

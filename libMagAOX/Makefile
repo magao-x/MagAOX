@@ -39,6 +39,10 @@ INCLUDEDEPS= app/MagAOXApp.hpp \
 	     logger/types/core_mon.hpp \
 	     logger/types/drive_mon.hpp \
 	     logger/types/config_log.hpp \
+	     logger/types/saving_state_change.hpp \
+	     logger/types/saving_start.hpp \
+	     logger/types/saving_stop.hpp \
+	     logger/types/saving_stats.hpp \
              tty/ttyErrors.hpp \
              tty/ttyIOUtils.hpp \
              tty/ttyUSB.hpp \
