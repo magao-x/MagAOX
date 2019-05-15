@@ -69,7 +69,7 @@ protected:
    
    ///@}
 
-   float m_ccdTemp;
+   float m_ccdTemp;  ///< The temperature of the camera.
    
    float m_expTimeSet {0}; ///< The exposure time, in seconds, as set by user.
    float m_fpsSet {0}; ///< The commanded fps, as set by user.
