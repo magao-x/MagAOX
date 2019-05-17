@@ -10,7 +10,7 @@ while read -r line; do
    nocomment=${line%%#*}
    procname=$(echo $nocomment | awk '{print $1}')
    
-   #if not empty, do the startup
+   #if not empty, do the shutdown
    if [[ !  -z  ${procname// }  ]]; then
       tmux send-keys -t $procname C-c
       tmux send-keys -t $procname "exit" Enter

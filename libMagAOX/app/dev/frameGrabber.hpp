@@ -358,7 +358,7 @@ int frameGrabber<derivedT>::appStartup()
       if( errno != EEXIST)
       {
          std::stringstream logss;
-         logss << "Failed to image directory (" << m_rawimageDir << ").  Errno says: " << strerror(errno);
+         logss << "Failed to create image directory (" << m_rawimageDir << ").  Errno says: " << strerror(errno);
          derivedT::template log<software_critical>({__FILE__, __LINE__, errno, 0, logss.str()});
 
          return -1;
@@ -650,15 +650,11 @@ void frameGrabber<derivedT>::fgThreadExec()
       imsize[0] = m_width; 
       imsize[1] = m_height;
       imsize[2] = m_circBuffLength;
+      
+      if(m_shmimName == "") m_shmimName = m_parent->configName();
+      
       ImageStreamIO_createIm_gpu(&imageStream, m_shmimName.c_str(), 3, imsize, m_dataType, -1, 1, IMAGE_NB_SEMAPHORE, 0, CIRCULAR_BUFFER | ZAXIS_TEMPORAL);
-      
-     /* ImageStreamIO_createIm_gpu(&imageStreahm, const char *name, long naxis,
-                               uint32_t *size, uint8_t datatype,
-                               int8_t location, int shared, int NBsem, int NBkw,
-                               uint64_t imagetype) {*/
-      
-      
-      
+       
       imageStream.md->cnt1 = m_circBuffLength;
       
       xrif_set_size(xrif, m_width, m_height, 1, m_writeChunkLength, m_dataType);
@@ -683,9 +679,14 @@ void frameGrabber<derivedT>::fgThreadExec()
          //==================
          //Get next image, process validity.
          //====================         
-         if(m_parent->acquireAndCheckValid() < 0)
+         int isValid = m_parent->acquireAndCheckValid();
+         if( isValid < 0)
          {
             break;
+         }
+         else if( isValid > 0)
+         {
+            continue;
          }
          
          //Ok, no timeout, so we process the image and publish it.
