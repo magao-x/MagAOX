@@ -536,6 +536,7 @@ int frameGrabber<derivedT>::appShutdown()
    if(xrif)
    {
       xrif_delete(xrif);
+      xrif=nullptr;
    }
    return 0;
 }
@@ -923,6 +924,17 @@ void frameGrabber<derivedT>::swThreadExec()
       if(clock_gettime(CLOCK_REALTIME, &ts) < 0)
       {
          derivedT::template log<software_critical>({__FILE__,__LINE__,errno,0,"clock_gettime"}); 
+         
+         if(fname) 
+         {
+            free(fname);
+            fname = nullptr;
+         }
+         if(fnameTiming) 
+         {
+            free(fnameTiming);
+            fnameTiming = nullptr;
+         }
          return; //will trigger a shutdown
       }
        
@@ -965,6 +977,16 @@ void frameGrabber<derivedT>::swThreadExec()
          if(gmtime_r(&ts.tv_sec, &uttime) == 0)
          {
             derivedT::template log<software_critical>({__FILE__,__LINE__,errno,0,"gmtime_r"}); 
+            if(fname) 
+            {
+               free(fname);
+               fname = nullptr;
+            }
+            if(fnameTiming) 
+            {
+               free(fnameTiming);
+               fnameTiming = nullptr;
+            }
             return; //will trigger a shutdown
          }
             
@@ -987,6 +1009,16 @@ void frameGrabber<derivedT>::swThreadExec()
          if(fp_xrif == NULL)
          {
             derivedT::template log<software_critical>({__FILE__,__LINE__,errno,0,"failed to open file for writing"}); 
+            if(fname) 
+            {
+               free(fname);
+               fname = nullptr;
+            }
+            if(fnameTiming) 
+            {
+               free(fnameTiming);
+               fnameTiming = nullptr;
+            }
             return; //will trigger a shutdown
          }
          
@@ -998,6 +1030,17 @@ void frameGrabber<derivedT>::swThreadExec()
          {
             derivedT::template log<software_critical>({__FILE__,__LINE__,errno,0,"failure writing header to file"}); 
             fclose(fp_xrif);
+            
+            if(fname) 
+            {
+               free(fname);
+               fname = nullptr;
+            }
+            if(fnameTiming) 
+            {
+               free(fnameTiming);
+               fnameTiming = nullptr;
+            }
             return; //will trigger a shutdown
          }
          
@@ -1007,15 +1050,63 @@ void frameGrabber<derivedT>::swThreadExec()
          {
             derivedT::template log<software_critical>({__FILE__,__LINE__,errno,0,"failure writing data to file"}); 
             fclose(fp_xrif);
+            
+            if(fname) 
+            {
+               free(fname);
+               fname = nullptr;
+            }
+            if(fnameTiming) 
+            {
+               free(fnameTiming);
+               fnameTiming = nullptr;
+            }
             return; //will trigger a shutdown
          }
          
          fclose(fp_xrif);
          
+         
+         FILE * fp_time = fopen(fnameTiming, "wb");
+         if(fp_time == NULL)
+         {
+            derivedT::template log<software_critical>({__FILE__,__LINE__,errno,0,"failed to open timing file for writing"}); 
+            if(fname) 
+            {
+               free(fname);
+               fname = nullptr;
+            }
+            if(fnameTiming) 
+            {
+               free(fnameTiming);
+               fnameTiming = nullptr;
+            }
+            return; //will trigger a shutdown
+         }
+         
+         bw = fwrite(m_timingData, (sizeof(uint64_t) + 2*sizeof(timespec)), (m_currSaveStop-m_currSaveStart), fp_time);
+         
+         if(bw != (sizeof(uint64_t) + 2*sizeof(timespec)) * (m_currSaveStop-m_currSaveStart))
+         {
+            derivedT::template log<software_critical>({__FILE__,__LINE__,errno,0,"failure writing data to file"}); 
+            fclose(fp_time);
+            if(fname) 
+            {
+               free(fname);
+               fname = nullptr;
+            }
+            if(fnameTiming) 
+            {
+               free(fnameTiming);
+               fnameTiming = nullptr;
+            }
+            return; //will trigger a shutdown
+         }
+
          clock_gettime(CLOCK_REALTIME, &tw2);
          
          double wt = ( (double) tw2.tv_sec + ((double) tw2.tv_nsec)/1e9) - ( (double) tw1.tv_sec + ((double) tw1.tv_nsec)/1e9);
-         
+
          std::cerr << wt << "\n";
          
          //ssize_t bw = write(fd, xrif->raw_buffer, xrif->compressed_size);
@@ -1045,7 +1136,17 @@ void frameGrabber<derivedT>::swThreadExec()
       }
    } //outer loop, will exit if m_shutdown==true
    
-   if(fname) free(fname);
+   
+   if(fname) 
+   {
+      free(fname);
+      fname = nullptr;
+   }
+   if(fnameTiming) 
+   {
+      free(fnameTiming);
+      fnameTiming = nullptr;
+   }
 }
 
 template<class derivedT>

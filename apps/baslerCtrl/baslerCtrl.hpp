@@ -278,7 +278,9 @@ int baslerCtrl::appShutdown()
 {
    dev::frameGrabber<baslerCtrl>::appShutdown();
    
-
+   if(camera) camera->Close();
+   
+   PylonTerminate();
       
     
    return 0;
@@ -294,7 +296,11 @@ int baslerCtrl::connect()
    
    try 
    {
-      if(camera) delete camera;
+      if(camera) 
+      {
+         camera->Close();
+         delete camera;
+      }
       camera = nullptr;
       
       camera = new CBaslerUsbInstantCamera( CTlFactory::GetInstance().CreateFirstDevice(info) );
@@ -321,8 +327,11 @@ int baslerCtrl::connect()
    }
    catch(...)
    {
-      if(camera) delete camera;
-      
+      if(camera) 
+      {
+         camera->Close();
+         delete camera;
+      }
       camera = nullptr;
       
       state(stateCodes::NODEVICE);
