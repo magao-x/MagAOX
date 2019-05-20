@@ -789,8 +789,6 @@ int sysMonitor::parseRamUsage(std::string line, float& ramUsage)
    }
    std::istringstream iss(line);
    std::vector<std::string> tokens{std::istream_iterator<std::string>{iss},std::istream_iterator<std::string>{}};
-   if (tokens.size() < 2) return -1;
-
    try
    {
       if (tokens.at(0).compare("Mem:") != 0)
