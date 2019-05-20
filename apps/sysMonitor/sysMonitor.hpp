@@ -390,7 +390,9 @@ int sysMonitor::appLogic()
       rvDiskTemp = criticalDiskTemperature(diskTemp);
    }  
 
+
    int rvDiskUsage = findDiskUsage(rootUsage, dataUsage, bootUsage);
+
    if (rvDiskUsage >= 0)
    {
       std::cout << "/ usage: " << rootUsage << std::endl;
@@ -487,12 +489,12 @@ int sysMonitor::parseCPUTemperatures(std::string line, float& temps)
          std::vector<std::string> tokens{std::istream_iterator<std::string>{iss},std::istream_iterator<std::string>{}};
          try
          {
-            tokens[5].pop_back();
-            tokens[5].pop_back();
-            tokens[5].pop_back();
-            tokens[5].pop_back();
-            tokens[5].erase(0,1);
-            m_warningCoreTemp = std::stof(tokens[5]);
+            tokens.at(5).pop_back();
+            tokens.at(5).pop_back();
+            tokens.at(5).pop_back();
+            tokens.at(5).pop_back();
+            tokens.at(5).erase(0,1);
+            m_warningCoreTemp = std::stof(tokens.at(5));
          }
          catch (const std::invalid_argument& e) 
          {
@@ -506,12 +508,12 @@ int sysMonitor::parseCPUTemperatures(std::string line, float& temps)
          std::vector<std::string> tokens{std::istream_iterator<std::string>{iss},std::istream_iterator<std::string>{}};
          try
          {
-            tokens[8].pop_back();
-            tokens[8].pop_back();
-            tokens[8].pop_back();
-            tokens[8].pop_back();
-            tokens[8].erase(0,1);
-            m_criticalCoreTemp = std::stof(tokens[8]);
+            tokens.at(8).pop_back();
+            tokens.at(8).pop_back();
+            tokens.at(8).pop_back();
+            tokens.at(8).pop_back();
+            tokens.at(8).erase(0,1);
+            m_criticalCoreTemp = std::stof(tokens.at(8));
          }
          catch (const std::invalid_argument& e) 
          {
@@ -586,7 +588,7 @@ int sysMonitor::parseCPULoads(std::string line, float& loadVal)
    float cpu_load;
    try
    {
-      cpu_load = 100.0 - std::stof(tokens[12]);
+      cpu_load = 100.0 - std::stof(tokens.at(12));
    }
    catch (const std::invalid_argument& e)
    {
@@ -702,12 +704,14 @@ int sysMonitor::parseDiskUsage(std::string line, float& rootUsage, float& dataUs
 
    std::istringstream iss(line);
    std::vector<std::string> tokens{std::istream_iterator<std::string>{iss},std::istream_iterator<std::string>{}};
-   if (tokens[5].compare("/") == 0)
+   if (tokens.size() < 6) return -1;
+
+   if (tokens.at(5).compare("/") == 0)
    {
-      tokens[4].pop_back();
+      tokens.at(4).pop_back();
       try
       {
-         rootUsage = std::stof (tokens[4])/100;
+         rootUsage = std::stof (tokens.at(4))/100;
          return 0;
       }
       catch (const std::invalid_argument& e) 
@@ -716,12 +720,12 @@ int sysMonitor::parseDiskUsage(std::string line, float& rootUsage, float& dataUs
          return -1;
       }
    } 
-   else if (tokens[5].compare("/data") == 0)
+   else if (tokens.at(5).compare("/data") == 0)
    {
-      tokens[4].pop_back();
+      tokens.at(4).pop_back();
       try
       {
-         dataUsage = std::stof (tokens[4])/100;
+         dataUsage = std::stof (tokens.at(4))/100;
          return 0;
       }
       catch (const std::invalid_argument& e) 
@@ -730,12 +734,12 @@ int sysMonitor::parseDiskUsage(std::string line, float& rootUsage, float& dataUs
          return -1;
       }
    } 
-   else if (tokens[5].compare("/boot") == 0)
+   else if (tokens.at(5).compare("/boot") == 0)
    {
-      tokens[4].pop_back();
+      tokens.at(4).pop_back();
       try
       {
-         bootUsage = std::stof (tokens[4])/100;
+         bootUsage = std::stof (tokens.at(4))/100;
          return 0;
       }
       catch (const std::invalid_argument& e) 
@@ -771,11 +775,11 @@ int sysMonitor::parseRamUsage(std::string line, float& ramUsage)
    std::vector<std::string> tokens{std::istream_iterator<std::string>{iss},std::istream_iterator<std::string>{}};
    try
    {
-      if (tokens[0].compare("Mem:") != 0)
+      if (tokens.at(0).compare("Mem:") != 0)
       {
         return -1;
       }
-      ramUsage = std::stof(tokens[2])/std::stof(tokens[1]);
+      ramUsage = std::stof(tokens.at(2))/std::stof(tokens.at(1));
       if (ramUsage > 1 || ramUsage == 0)
       {
          ramUsage = -1;  

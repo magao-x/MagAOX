@@ -29,15 +29,26 @@ namespace MagAOX
 namespace app
 {
 
-/** MagAO-X application to do math on some numbers
-  *
+/** TS command: Checks if there were any errors during initialization
+  * Solid orange LED: everything is okay, TS should return 1TS00000A
+  * PW command: change all stage and motor configuration parameters
+  * OR command: gets controller to ready state (must go through homing first)
+  * In ready state, can move relative and move absolute
+  * RS command: TO get from ready to not referenced
+
   */
 class ttmTalker : public MagAOXApp<>, public tty::usbDevice
 {
 
-protected:		
+protected:	
+   pcf::IndiProperty m_indiP_position;
+   std::vector<std::string> validStateCodes{};
+
 
 public:
+
+   INDI_NEWCALLBACK_DECL(ttmTalker, m_indiP_position);
+
 
    /// Default c'tor.
    ttmTalker();
@@ -72,6 +83,12 @@ public:
     */
    int testConnection();
 
+   int setUpMoving();
+
+   int moveToPosition(float pos);
+
+   int checkPosition();
+
 };
 
 inline ttmTalker::ttmTalker() : MagAOXApp(MAGAOX_CURRENT_SHA1, MAGAOX_REPO_MODIFIED)
@@ -98,7 +115,14 @@ void ttmTalker::loadConfig()
 
 int ttmTalker::appStartup()
 {
-	if( state() == stateCodes::UNINITIALIZED )
+	
+    REG_INDI_NEWPROP(m_indiP_position, "position", pcf::IndiProperty::Number);
+    m_indiP_position.add (pcf::IndiElement("current"));
+    m_indiP_position["current"].set(0);
+    m_indiP_position.add (pcf::IndiElement("target"));
+   
+
+   if( state() == stateCodes::UNINITIALIZED )
 	{
       log<text_log>( "In appStartup but in state UNINITIALIZED.", logPrio::LOG_CRITICAL );
       return -1;
@@ -129,7 +153,7 @@ int ttmTalker::appLogic()
 
 	if( state() == stateCodes::NODEVICE )
 	{
-		int rv = tty::usbDevice::getDeviceName();
+      int rv = tty::usbDevice::getDeviceName();
 		if(rv < 0 && rv != TTY_E_DEVNOTFOUND && rv != TTY_E_NODEVNAMES)
 		{
          state(stateCodes::FAILURE);
@@ -166,20 +190,14 @@ int ttmTalker::appLogic()
 
    if( state() == stateCodes::CONNECTED )
    {
+      // Only test connection before a command goes through
+      
       if( testConnection() != 0)
       {
-         state(stateCodes::NOTCONNECTED);
+          state(stateCodes::NOTCONNECTED);
       }
       else {
-         short voltage = -1;
-         int rv = testVoltage(voltage);
-         if (rv == 0) {
-            std::cout << "Voltage: " << voltage << std::endl;
-            setVoltage(voltage);
-         }
-         else {
-            std::cerr << "Could not get voltage." << std::endl;
-         }
+         std::cout << "Connected!" << std::endl;
       }
    }
 
@@ -190,6 +208,9 @@ int ttmTalker::appLogic()
       {
          state(stateCodes::CONNECTED);
          std::cout << "Connection successful." << std::endl;
+         if (checkPosition() != 0) {
+            std::cout << "There's been an error with movement." << std::endl;
+         }
       }
       else if (rv == TTY_E_TCGETATTR) 
       {
@@ -275,45 +296,43 @@ int ttmTalker::testConnection()
 
    std::cout << m_deviceName << "   " << fileDescrip << std::endl;
 
-   std::string buffer{"1TS"};
+   std::string buffer{"1TS\r\n"};
    std::string output;
-   output.resize(9);
+   output.resize(11);
    rv = MagAOX::tty::ttyWriteRead( 
       output,        		///< [out] The string in which to store the output.
       buffer, 				   ///< [in] The characters to write to the tty.
-      "",      				///< [in] A sequence of characters which indicates the end of transmission.
+      "\r\n",      			///< [in] A sequence of characters which indicates the end of transmission.
       false,             	///< [in] If true, strWrite.size() characters are read after the write
       fileDescrip,         ///< [in] The file descriptor of the open tty.
       2000,             	///< [in] The write timeout in milliseconds.
       2000               	///< [in] The read timeout in milliseconds.
    );
 
-   std::cout << output << std::endl;
-   std::cout << MagAOX::tty::ttyErrorString(rv) << std::endl;
-   // if (rv == TTY_E_NOERROR)
-   // {
-   //    std::cout << *((uint32_t *) (  output.data() + 6)) << "   " << output.substr(10, 8) << std::endl;
-   // } 
-   // else
-   // {
-   //    return -1;
-   // }
-   return -1;
-
-   if (output.size() != 9)
+   //std::cout << output << std::endl;
+   if (rv != TTY_E_NOERROR)
    {
+      std::cerr << MagAOX::tty::ttyErrorString(rv) << std::endl;
+   } 
+   
+   if (output.size() != 11)
+   {
+      std::cerr << "Wrongly sized output: " << output << " = size " << output.size() << std::endl;
       return -1;
    }
+   //Compare output minus controller state (all are fine)
+   if (output.substr(0, 7) == "1TS0000") {
+   	//Test successful
+      std::cout << "Test successful." << std::endl;
+      // Set up moving if controller is not homed
 
-   if (*((uint32_t *) (  output.data() + 6)) == (uint32_t) stoi(m_serial)) 
-   {
-      std::cout << "Serial number test successful" << std::endl;
-      return 0;
+      setUpMoving();
+   	return 0;
    }
-   else 
-   {
-      std::cout << "Serial number test unsuccessful" << std::endl;
-      return -1;
+   else {
+      //Diagnose error
+      std::cerr << "Error occured: " << output << std::endl;
+   	return -1;
    }
 }
 
@@ -347,6 +366,212 @@ int ttmTalker::callCommand()
 	ftStatus = FT_SetRts(m_hFTDevice);
 	*/
 	return 0;
+}
+
+int ttmTalker::setUpMoving() 
+{
+   // Execute OR command
+   int uid_rv = euidCalled();
+   if(uid_rv < 0)
+   {
+      log<software_critical>({__FILE__, __LINE__});
+      state(stateCodes::FAILURE);
+      return -1;
+   }
+
+   int fileDescrip = 0;
+   int rv = MagAOX::tty::ttyOpenRaw(
+      fileDescrip,         ///< [out] the file descriptor.  Set to 0 on an error.
+      m_deviceName,        ///< [in] the device path name, e.g. /dev/ttyUSB0
+      B57600              ///< [in] indicates the baud rate (see http://pubs.opengroup.org/onlinepubs/7908799/xsh/termios.h.html)
+   );
+
+   uid_rv = euidReal();
+
+   if(uid_rv < 0)
+   {
+      log<software_critical>({__FILE__, __LINE__});
+      state(stateCodes::FAILURE);
+      return -1;
+   }
+
+   if (rv != 0) 
+   {
+      std::cout << MagAOX::tty::ttyErrorString(rv) << std::endl;
+      return rv;
+   }
+
+   //std::cout << m_deviceName << "   " << fileDescrip << std::endl;
+
+   std::string buffer{"1OR\r\n"};
+   rv = MagAOX::tty::ttyWrite( 
+      buffer,              ///< [in] The characters to write to the tty.
+      fileDescrip,         ///< [in] The file descriptor of the open tty.
+      2000                ///< [in] The write timeout in milliseconds.
+   );
+
+   //std::cout << output << std::endl;
+   if (rv != TTY_E_NOERROR)
+   {
+      std::cerr << MagAOX::tty::ttyErrorString(rv) << std::endl;
+   } 
+
+   return 0;
+}
+
+int ttmTalker::moveToPosition(float pos) 
+{
+   int uid_rv = euidCalled();
+   if(uid_rv < 0)
+   {
+      log<software_critical>({__FILE__, __LINE__});
+      state(stateCodes::FAILURE);
+      return -1;
+   }
+
+   int fileDescrip = 0;
+   int rv = MagAOX::tty::ttyOpenRaw(
+      fileDescrip,         ///< [out] the file descriptor.  Set to 0 on an error.
+      m_deviceName,        ///< [in] the device path name, e.g. /dev/ttyUSB0
+      B57600              ///< [in] indicates the baud rate (see http://pubs.opengroup.org/onlinepubs/7908799/xsh/termios.h.html)
+   );
+
+   uid_rv = euidReal();
+
+   if(uid_rv < 0)
+   {
+      log<software_critical>({__FILE__, __LINE__});
+      state(stateCodes::FAILURE);
+      return -1;
+   }
+
+   if (rv != 0) 
+   {
+      std::cout << MagAOX::tty::ttyErrorString(rv) << std::endl;
+      return rv;
+   }
+
+   
+   std::string moveAmt = std::to_string(pos);
+
+   std::string buffer{"1PA"};
+   buffer  = buffer + moveAmt + "\r\n";
+   std::string output = "";
+   output.resize(11);
+   rv = MagAOX::tty::ttyWrite( 
+      buffer,              ///< [in] The characters to write to the tty.
+      fileDescrip,         ///< [in] The file descriptor of the open tty.
+      2000                ///< [in] The write timeout in milliseconds.
+   );
+
+   //std::cout << output << std::endl;
+   if (rv != TTY_E_NOERROR)
+   {
+      std::cerr << MagAOX::tty::ttyErrorString(rv) << std::endl;
+   }
+
+   return 0;
+}
+
+int ttmTalker::checkPosition() {
+   int uid_rv = euidCalled();
+   if(uid_rv < 0)
+   {
+      log<software_critical>({__FILE__, __LINE__});
+      state(stateCodes::FAILURE);
+      return -1;
+   }
+
+   int fileDescrip = 0;
+   int rv = MagAOX::tty::ttyOpenRaw(
+      fileDescrip,         ///< [out] the file descriptor.  Set to 0 on an error.
+      m_deviceName,        ///< [in] the device path name, e.g. /dev/ttyUSB0
+      B57600              ///< [in] indicates the baud rate (see http://pubs.opengroup.org/onlinepubs/7908799/xsh/termios.h.html)
+   );
+
+   uid_rv = euidReal();
+
+   if(uid_rv < 0)
+   {
+      log<software_critical>({__FILE__, __LINE__});
+      state(stateCodes::FAILURE);
+      return -1;
+   }
+
+   if (rv != 0) 
+   {
+      std::cout << MagAOX::tty::ttyErrorString(rv) << std::endl;
+      return rv;
+   }
+
+   std::cout << m_deviceName << "   " << fileDescrip << std::endl;
+
+   std::string buffer{"1TS\r\n"};
+   std::string output;
+   output.resize(11);
+   rv = MagAOX::tty::ttyWriteRead( 
+      output,              ///< [out] The string in which to store the output.
+      buffer,              ///< [in] The characters to write to the tty.
+      "\r\n",              ///< [in] A sequence of characters which indicates the end of transmission.
+      false,               ///< [in] If true, strWrite.size() characters are read after the write
+      fileDescrip,         ///< [in] The file descriptor of the open tty.
+      2000,                ///< [in] The write timeout in milliseconds.
+      2000                 ///< [in] The read timeout in milliseconds.
+   );
+
+   if (rv != TTY_E_NOERROR)
+   {
+      std::cerr << MagAOX::tty::ttyErrorString(rv) << std::endl;
+   } 
+   
+   if (output.size() != 11)
+   {
+      std::cerr << "Wrongly sized output: " << output << " = size " << output.size() << std::endl;
+      return -1;
+   }
+
+   if (output == "1TS000028\r\n") {
+      // Controller is moving.
+      // Do I check something here?
+      return 0;
+   }
+   else {
+      // TODO: Check if target position is equal to current position
+      return 0;
+   }
+}
+
+INDI_NEWCALLBACK_DEFN(ttmTalker, m_indiP_position)(const pcf::IndiProperty &ipRecv)
+{
+   if (ipRecv.getName() == m_indiP_position.getName())
+   {
+      float current = -99, target = -99;
+
+      try
+      {
+         current = ipRecv["current"].get<float>();
+      }
+      catch(...){}
+      
+      try
+      {
+         target = ipRecv["target"].get<float>();
+      }
+      catch(...){}
+      
+      if(target == -99) target = current;
+      
+      if(target <= 0) return 0;
+      
+      //Lock the mutex, waiting if necessary
+      std::unique_lock<std::mutex> lock(m_indiMutex);
+
+      updateIfChanged(m_indiP_position, "target", target);
+      
+      return moveToPosition(target);
+      
+   }
+   return -1;
 }
 
 } //namespace app
