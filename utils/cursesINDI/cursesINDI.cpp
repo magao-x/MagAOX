@@ -1,5 +1,5 @@
 
-//#define DEBUG_TMPOUT
+#define DEBUG_TMPOUT
 
 
 
@@ -67,11 +67,11 @@ int main()
       int npress = 1;
       
       nocbreak();
-      wtimeout(topWin, 50);
-      ch = wgetch(topWin);
+      wtimeout(ci.w_interactWin, 50);
+      ch = wgetch(ci.w_interactWin);
       while(ch == ch0) 
       {
-         ch = wgetch(topWin);
+         ch = wgetch(ci.w_interactWin);
          ++npress; 
       }
       if(ch != ERR) ungetch(ch);

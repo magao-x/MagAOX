@@ -223,8 +223,6 @@ int cursesTableGrid::print()
       {
          wclear(m_gridWin[y][x]);
          if(hasContent(m_startRow+y,x)) wprintw(m_gridWin[y][x], m_cellContents[m_startRow + y][x].c_str());
-         //else wprintw(m_gridWin[y][x], ".");
-         
          wrefresh(m_gridWin[y][x]);
       }
    }

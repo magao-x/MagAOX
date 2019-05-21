@@ -319,9 +319,10 @@ void cursesINDI::redrawTable()
 
    int start_redraw = m_redraw;
 
+   if(fpout) *fpout << "redrawTable: " << m_redraw << std::endl; 
+   
    m_cellContents.clear();
 
-   if(fpout) *fpout << "redraw" << std::endl;
    for( elementMapIteratorT es = knownElements.begin(); es != knownElements.end(); ++es)
    {
       
@@ -362,25 +363,40 @@ void cursesINDI::updateTable()
 
    int start_update = m_update;
 
+   if(fpout) *fpout << "updateTable: " << m_update << std::endl; 
    int cx, cy;
 
    getyx(w_interactWin, cy, cx);
    int cs = cursStat();
-   cursStat(0);
+   
 
    for(auto it = knownElements.begin(); it != knownElements.end(); ++it)
    {
       if(it->second.tableRow == -1) continue;
-      if(fpout) *fpout << "would update" << std::endl;
-      m_cellContents[it->second.tableRow][4] = knownProps[it->second.propKey][it->second.name].getValue();
+      if(m_cellContents[it->second.tableRow][4] != knownProps[it->second.propKey][it->second.name].getValue())
+      {
+         m_cellContents[it->second.tableRow][4] = knownProps[it->second.propKey][it->second.name].getValue();
+         
+         if(it->second.tableRow - m_startRow < (size_t) tabHeight()) //It's currently displayed
+         {
+            cursStat(0);
+            wclear(m_gridWin[it->second.tableRow - m_startRow][4]);
+            if(hasContent(it->second.tableRow,4)) wprintw(m_gridWin[it->second.tableRow - m_startRow][4], m_cellContents[it->second.tableRow][4].c_str());
+            wrefresh(m_gridWin[it->second.tableRow - m_startRow][4]);
+            wmove(w_interactWin,cy,cx);
+            cursStat(cs);
+            wrefresh(w_interactWin);
+         }
+         
+      };
       //updateContents( it->second.tableRow, 4,  knownProps[it->second.propKey][it->second.name].getValue());
    }
 
-   print();
+   //print();
    
-   wmove(w_interactWin,cy,cx);
-   cursStat(cs);
-   wrefresh(w_interactWin);
+//    wmove(w_interactWin,cy,cx);
+//    cursStat(cs);
+//    wrefresh(w_interactWin);
 
    m_update -= start_update;
    if(m_update <0) m_update = 0;
