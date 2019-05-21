@@ -1,9 +1,6 @@
 
-#define DEBUG_TMPOUT
+//#define DEBUG_TMPOUT
 
-#ifdef DEBUG_TMPOUT
-#include <fstream>
-#endif
 
 
 #include "cursesINDI.hpp"
@@ -16,12 +13,14 @@ int main()
 {
    cursesINDI ci("me", "1.7", "1.7");
 
-   #ifdef DEBUG_TMPOUT
-   std::ofstream fout;
-   std::string fname = "/tmp/cursesINDI_" + std::to_string(getpid()) + ".txt";
-   fout.open(fname);
+   std::ofstream *fpout {nullptr};
    
-   ci.fout = &fout;
+   #ifdef DEBUG_TMPOUT
+   std::string fname = "/tmp/cursesINDI.txt";
+   fpout = new std::ofstream;
+   fpout->open(fname);
+   
+   ci.fpout = fpout;
    #endif
    
    
@@ -37,9 +36,6 @@ int main()
 
    noecho(); /* Don't echo() while we do getch */
 
-   ci.m_tabHeight = LINES-5-2;
-   ci.m_tabX = 1;
-   ci.m_tabWidth = 78;
 
    ci.startUp();
    ci.activate();
@@ -52,68 +48,78 @@ int main()
    keypad(topWin, TRUE);
    wrefresh(topWin);
 
-   WINDOW * boxWin;
-   boxWin = newwin(ci.m_tabHeight+2, ci.m_tabWidth+2, 4,0);
-   box(boxWin, 0, 0);
-   wrefresh(boxWin);
    
    ci.cursStat(0);
-
+   
    
    //Now main event loop
    while((ch = wgetch(ci.w_interactWin)) != 'q')
    {
       if(ch == ERR)
       {
+         //if(fpout) *fpout << "loop" << std::endl;
          if( ci.getQuitProcess() || ci.m_shutdown) break;
          else continue;
       }
       
+      //Get hold downs
+      int ch0 = ch;
+      int npress = 1;
+      
+      nocbreak();
+      wtimeout(topWin, 50);
+      ch = wgetch(topWin);
+      while(ch == ch0) 
+      {
+         ch = wgetch(topWin);
+         ++npress; 
+      }
+      if(ch != ERR) ungetch(ch);
+      halfdelay(10);   
+      
       int nextX = ci.m_currX;
       int nextY = ci.m_currY;
 
-      switch(ch)
+      switch(ch0)
       {
          case KEY_LEFT:
-            --nextX;
+            nextX -= npress;
+            if(fpout) *fpout << "left: " << npress << std::endl;
             break;
          case KEY_RIGHT:
-            ++nextX;
+            nextX += npress;
+            if(fpout) *fpout << "right: " << npress << std::endl;
             break;
          case KEY_UP:
-            --nextY;
+            nextY -= npress;
+            if(fpout) *fpout << "up: " << npress << std::endl;
             break;
          case KEY_DOWN:
-            ++nextY;
+            nextY += npress;
+            if(fpout) *fpout << "down: " << npress << std::endl;
             break;
+         case KEY_PPAGE:
+            nextY -= ci.m_gridWin.size()-1;
+            if(fpout) *fpout << "ppage: " << npress << std::endl;
+            break;   
+         case KEY_NPAGE:
+            nextY += ci.m_gridWin.size()-1;
+            if(fpout) *fpout << "npage: " << npress << std::endl;
+            break;
+         case KEY_RESIZE:
+            ci.draw();
+            if(fpout) *fpout << "resizes: " << npress << std::endl;
+            continue;
          default:
-            ci.keyPressed(ch);
+            if(fpout) *fpout << "other: " << npress << std::endl;
+            ci.keyPressed(ch0);
             continue;
             break;
       }
 
-      int maxX = ci.m_cx.size()-1;
+      int maxX = ci.m_gridWin[0].size()-1;
       if(nextX < 1) nextX = 1;
       if(nextX >= maxX) nextX = maxX;
-
-      int maxY = ci.rows.size();
-      if(nextY < 0) nextY = 0;
-      if(nextY >= maxY) nextY = maxY - 1;
-
-      if(nextY-ci.m_currFirstRow > ci.m_tabHeight-1)
-      {
-         #ifdef DEBUG_TMPOUT
-         fout << __FILE__ << " " << __LINE__<< " " << nextY - ci.m_tabHeight + 1 << std::endl;
-         #endif
-         ci.updateRowY(nextY - ci.m_tabHeight + 1);
-      }
-      else if( nextY < ci.m_currFirstRow)
-      {
-         #ifdef DEBUG_TMPOUT
-         fout << __FILE__ << " " << __LINE__<< " " << nextY << std::endl;
-         #endif
-         ci.updateRowY(nextY);
-      }
 
       ci.moveCurrent(nextY, nextX);
 

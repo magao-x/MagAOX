@@ -1,16 +1,14 @@
 
+#include <fstream>
+
 #include "../../INDI/libcommon/IndiClient.hpp"
-#include "cursesTable.hpp"
+#include "cursesTableGrid.hpp"
 
 
-class cursesINDI : public pcf::IndiClient, public cursesTable
+class cursesINDI : public pcf::IndiClient, public cursesTableGrid
 {
 
 public:
-   std::vector<int> m_cx {0, 5, 20, 35, 50};
-
-   size_t m_currY {0};
-   size_t m_currX {1};
 
    int m_redraw {0};
 
@@ -19,8 +17,7 @@ public:
    int m_cursStat {1};
 
    WINDOW * w_interactWin {nullptr};
-   WINDOW * w_countWin
-   {nullptr};
+   WINDOW * w_countWin {nullptr};
 
    bool m_shutdown {false};
    bool m_connectionLost{false};
@@ -95,8 +92,33 @@ public:
 
    void keyPressed( int ch );
 
-   
+   virtual int postDraw()
+   {
+      if(fpout) *fpout << "post draw" << std::endl;
+      
+      if(w_countWin) 
+      {
+         wclear(w_countWin);
+         delwin(w_countWin);
+      }
+      w_countWin = newwin( 1, m_minWidth, m_yTop+tabHeight()+1, m_xLeft);
+      
+      return postPrint();
+   }
 
+   virtual int postPrint()
+   {
+      if(! w_countWin) return 0;
+      
+      int shown = tabHeight();
+      if( m_cellContents.size() - m_startRow <  (size_t) shown ) shown = m_cellContents.size() - m_startRow;
+      
+      wclear(w_countWin);
+      wprintw(w_countWin, "%i/%i elements shown.", shown, knownElements.size());
+      wrefresh(w_countWin);
+      
+      return 0;
+   }
    
 
 };
@@ -106,10 +128,10 @@ cursesINDI::cursesINDI( const std::string &szName,
                         const std::string &szProtocolVersion
                      ) : pcf::IndiClient(szName, szVersion, szProtocolVersion, "127.0.0.1", 7624)
 {
-   m_tabY = 5;
-   m_tabX = 0;
-   m_tabHeight = LINES-5;
-   m_tabWidth = COLS;
+   m_yTop = 6;
+   colWidth({4, 19, 39, 18, 18});
+   
+   m_yBot = 1;
 
 }
 
@@ -202,18 +224,11 @@ void cursesINDI::startUp()
 {
    if(w_interactWin == nullptr)
    {
-      w_interactWin = newwin( 1, m_tabWidth, m_tabY-2, m_tabX);
+      w_interactWin = newwin( 1, m_minWidth, m_yTop-2, m_xLeft);
    }
 
    keypad(w_interactWin, TRUE);
 
-   if(w_countWin == nullptr)
-   {
-      w_countWin = newwin( 1, m_tabWidth, m_tabY+m_tabHeight+1, m_tabX);
-   }
-
-   wprintw(w_countWin, "elements shown.");
-   wrefresh(w_countWin);
 
    m_shutdown = false;
    drawThreadStart();
@@ -228,7 +243,7 @@ void cursesINDI::shutDown()
 
    m_drawThread.join();
 
-   rows.clear();
+   m_cellContents.clear();
 
    if(w_interactWin) delwin(w_interactWin);
    w_interactWin = nullptr;
@@ -273,6 +288,7 @@ void cursesINDI::drawThreadExec()
 {
    while(!m_shutdown && !getQuitProcess())
    {
+      //if(fpout) *fpout << "draw thread . . ." << std::endl;
       if(m_redraw > 0)
       {
          redrawTable();
@@ -290,7 +306,7 @@ void cursesINDI::drawThreadExec()
    {
       m_connectionLost = true;
 
-      rows.clear();
+      m_cellContents.clear();
       redrawTable();
       m_shutdown = true;
    }
@@ -303,34 +319,37 @@ void cursesINDI::redrawTable()
 
    int start_redraw = m_redraw;
 
-   rows.clear();
+   m_cellContents.clear();
 
+   if(fpout) *fpout << "redraw" << std::endl;
    for( elementMapIteratorT es = knownElements.begin(); es != knownElements.end(); ++es)
    {
-      es->second.tableRow = addRow(m_cx);
+      
 
       std::vector<std::string> s;
 
-      s.resize( m_cx.size() );
-      s[0] = std::to_string(es->second.tableRow+1);
+      s.resize( m_colFraction.size() );
+      
+      s[0] = std::to_string(m_cellContents.size()+1);
       s[1] = knownProps[es->second.propKey].getDevice();
       s[2] = knownProps[es->second.propKey].getName();
       s[3] = es->second.name;
       s[4] = knownProps[es->second.propKey][es->second.name].getValue();
 
-      updateContents(es->second.tableRow, s);
+      m_cellContents.push_back(s);
+      es->second.tableRow = m_cellContents.size()-1;
+      
+      
+      //updateContents(es->second.tableRow, s);
    }
 
+   draw();
+   
    m_redraw -= start_redraw;
    if(m_redraw <0) m_redraw = 0;
 
-
-   wclear(w_countWin);
-
-   int shown = m_tabHeight;
-   if(rows.size() < (size_t) m_tabHeight ) shown = rows.size();
-   wprintw(w_countWin, "%i/%i elements shown.", shown, knownElements.size());
-   wrefresh(w_countWin);
+   
+   
 
    _moveCurrent(m_currY, m_currX);
 }
@@ -352,10 +371,13 @@ void cursesINDI::updateTable()
    for(auto it = knownElements.begin(); it != knownElements.end(); ++it)
    {
       if(it->second.tableRow == -1) continue;
-
-      updateContents( it->second.tableRow, 4,  knownProps[it->second.propKey][it->second.name].getValue());
+      if(fpout) *fpout << "would update" << std::endl;
+      m_cellContents[it->second.tableRow][4] = knownProps[it->second.propKey][it->second.name].getValue();
+      //updateContents( it->second.tableRow, 4,  knownProps[it->second.propKey][it->second.name].getValue());
    }
 
+   print();
+   
    wmove(w_interactWin,cy,cx);
    cursStat(cs);
    wrefresh(w_interactWin);
@@ -376,26 +398,7 @@ void cursesINDI::_moveCurrent( int nextY,
                                int nextX
                              )
 {
-   //Do some bounds checks
-   if(rows.size() == 0 || m_currY >= rows.size()) return;
-   if(m_currX >= rows[m_currY].m_cellWin.size()) return;
-
-   //Now turn off the reverse
-   wattroff(rows[m_currY].m_cellWin[m_currX], A_REVERSE);
-   rows[m_currY].updateContents( m_currX, rows[m_currY].m_cellContents[m_currX], true);
-
-   //Move the cursor position
-   if(nextY >= 0 && (size_t) nextY < rows.size() && nextX >= 1 && nextX <= 4)
-   {
-      m_currY = nextY;
-      m_currX = nextX;
-   }
-
-   //Turn it back on
-   wattron(rows[m_currY].m_cellWin[m_currX], A_REVERSE);
-   rows[m_currY].updateContents( m_currX, rows[m_currY].m_cellContents[m_currX], true);
-
-   wattroff(rows[m_currY].m_cellWin[m_currX], A_REVERSE);
+   moveSelected(nextY, nextX);
 }
 
 void cursesINDI::keyPressed( int ch )
@@ -405,13 +408,15 @@ void cursesINDI::keyPressed( int ch )
    {
       case 'e':
       {
+         if(m_currY + m_startRow >= knownElements.size()) break;
          auto it = knownElements.begin();
          while(it != knownElements.end())
          {
-            if( (size_t) it->second.tableRow == m_currY) break;
+            if( (size_t) it->second.tableRow == m_currY+m_startRow) break;
             ++it;
          }
-         //Error checks?
+         
+         if(it == knownElements.end()) break;
 
          cursStat(1);
 
