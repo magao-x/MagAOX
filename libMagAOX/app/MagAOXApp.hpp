@@ -1083,6 +1083,7 @@ int MagAOXApp<_useINDI>::execute() //virtual
 
    unlockPID();
 
+   sleep(1);
    return 0;
 }
 

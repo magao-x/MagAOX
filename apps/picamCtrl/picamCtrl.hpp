@@ -384,6 +384,10 @@ int picamCtrl::appLogic()
          return 0;
       }
 
+      if(frameGrabber<picamCtrl>::updateINDI() < 0)
+      {
+         return log<software_error,0>({__FILE__,__LINE__});
+      }
    }
 
    //Fall through check?

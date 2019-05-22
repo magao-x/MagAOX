@@ -334,7 +334,9 @@ template<class derivedT>
 void frameGrabber<derivedT>::loadConfig(mx::app::appConfigurator & config)
 {
    config(m_fgThreadPrio, "framegrabber.threadPrio");
+   m_shmimName = m_parent->configName();
    config(m_shmimName, "framegrabber.shmimName");
+  
    config(m_circBuffLength, "framegrabber.circBuffLength");
    
    
@@ -524,13 +526,27 @@ template<class derivedT>
 int frameGrabber<derivedT>::appShutdown()
 {
    if(m_fgThread.joinable())
-   {
-      m_fgThread.join();
+   {/*
+      try
+      {*/
+         pthread_join(m_fgThread.native_handle(),0);
+        // m_fgThread.join(); //this will throw if it was already joined
+//       }
+//       catch(...)
+//       {
+//       }
    }
    
    if(m_swThread.joinable())
    {
-      m_swThread.join();
+//       try
+//       {
+         pthread_join(m_swThread.native_handle(),0);
+//         m_swThread.join(); //this will throw if it was already joined
+//       }
+//       catch(...)
+//       {
+//       }
    }
    
    if(xrif)
@@ -538,6 +554,7 @@ int frameGrabber<derivedT>::appShutdown()
       xrif_delete(xrif);
       xrif=nullptr;
    }
+   
    return 0;
 }
 
@@ -956,7 +973,7 @@ void frameGrabber<derivedT>::swThreadExec()
 
          memcpy(xrif->raw_buffer, (char *) imageStream.array.raw + m_currSaveStart*m_width*m_height*m_typeSize, (m_currSaveStop-m_currSaveStart)*m_width*m_height*m_typeSize);
          
-         for(size_t i =0; i< m_writeChunkLength; ++i)
+         for(size_t i =0; i< (m_currSaveStop-m_currSaveStart); ++i)
          {
             *((uint64_t *) &m_timingData[ (sizeof(uint64_t) + 2*sizeof(timespec))*i + 0]) = imageStream.cntarray[m_currSaveStart + i];
             *((timespec *) &m_timingData[ (sizeof(uint64_t) + 2*sizeof(timespec))*i + sizeof(uint64_t)]) = imageStream.atimearray[m_currSaveStart + i];
@@ -1063,7 +1080,7 @@ void frameGrabber<derivedT>::swThreadExec()
          
          bw = fwrite(m_timingData, (sizeof(uint64_t) + 2*sizeof(timespec)), (m_currSaveStop-m_currSaveStart), fp_time);
          
-         if(bw != (sizeof(uint64_t) + 2*sizeof(timespec)) * (m_currSaveStop-m_currSaveStart))
+         if(bw != (m_currSaveStop-m_currSaveStart))
          {
             derivedT::template log<software_critical>({__FILE__,__LINE__,errno,0,"failure writing data to file"}); 
             fclose(fp_time);
