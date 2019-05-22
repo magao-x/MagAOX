@@ -122,14 +122,18 @@ protected:
    uint64_t m_currSaveStartFrameNo {0}; ///< The frame number of the image at which saving started (for logging)
    uint64_t m_currSaveStopFrameNo {0}; ///< The frame number of the image at which saving stopped (for logging)
    
-   ///The xrif compression handle
-   xrif_t xrif {nullptr};
+   ///The xrif compression handle for image data
+   xrif_t m_xrif {nullptr};
    
-   ///Storage for the xrif file header
-   char * xrif_header {nullptr};
+   ///Storage for the xrif image data file header
+   char * m_xrif_header {nullptr};
    
-   ///Storage for the iamge timing data for writing
-   char * m_timingData {nullptr};
+   ///The xrif compression handle for image data
+   xrif_t m_xrif_timing {nullptr};
+   
+   ///Storage for the xrif image data file header
+   char * m_xrif_timing_header {nullptr};
+   
    
 public:
 
@@ -304,11 +308,14 @@ frameGrabber<derivedT>::frameGrabber()
 template<class derivedT>
 frameGrabber<derivedT>::~frameGrabber() noexcept
 {
-   if(xrif) xrif_delete(xrif);
+   if(m_xrif) xrif_delete(m_xrif);
    
-   if(xrif_header) free(xrif_header);
+   if(m_xrif_header) free(m_xrif_header);
    
-   if(m_timingData) free(m_timingData);
+   if(m_xrif_timing) xrif_delete(m_xrif_timing);
+   
+   if(m_xrif_timing_header) free(m_xrif_timing_header);
+   
    
    return;
 }
@@ -374,14 +381,22 @@ int frameGrabber<derivedT>::appStartup()
       return derivedT::template log<software_critical, -1>({__FILE__,__LINE__, "Write chunk length is not a divisor of circular buffer length."});
    }
    
-   int rv = xrif_new(&xrif);
+   int rv = xrif_new(&m_xrif);
    if( rv != XRIF_NOERROR )
    {
       return derivedT::template log<software_critical, -1>({__FILE__,__LINE__, "xrif handle allocation or initialization error. Code = " + std::to_string(rv)});
    }
    
-   xrif_header = (char *) malloc( XRIF_HEADER_SIZE * sizeof(char));
+   m_xrif_header = (char *) malloc( XRIF_HEADER_SIZE * sizeof(char));
       
+   rv = xrif_new(&m_xrif_timing);
+   if( rv != XRIF_NOERROR )
+   {
+      return derivedT::template log<software_critical, -1>({__FILE__,__LINE__, "xrif handle allocation or initialization error. Code = " + std::to_string(rv)});
+   }
+   
+   m_xrif_timing_header = (char *) malloc( XRIF_HEADER_SIZE * sizeof(char));
+   
    //Register the shmimName INDI property
    m_indiP_shmimName = pcf::IndiProperty(pcf::IndiProperty::Text);
    m_indiP_shmimName.setDevice(m_parent->configName());
@@ -549,10 +564,16 @@ int frameGrabber<derivedT>::appShutdown()
 //       }
    }
    
-   if(xrif)
+   if(m_xrif)
    {
-      xrif_delete(xrif);
-      xrif=nullptr;
+      xrif_delete(m_xrif);
+      m_xrif=nullptr;
+   }
+   
+   if(m_xrif_timing)
+   {
+      xrif_delete(m_xrif_timing);
+      m_xrif_timing=nullptr;
    }
    
    return 0;
@@ -675,14 +696,21 @@ void frameGrabber<derivedT>::fgThreadExec()
        
       imageStream.md->cnt1 = m_circBuffLength;
       
-      xrif_set_size(xrif, m_width, m_height, 1, m_writeChunkLength, m_dataType);
-      xrif->compress_on_raw = 1;
-      xrif_allocate_reordered(xrif);
-      xrif_allocate_raw(xrif);
+      //Set up the image data xrif handle
+      xrif_set_size(m_xrif, m_width, m_height, 1, m_writeChunkLength, m_dataType);
+      m_xrif->compress_on_raw = 1;
+      xrif_allocate_reordered(m_xrif);
+      xrif_allocate_raw(m_xrif);
 
-      //Alocate the timing data buffer used for writing.
-      if(m_timingData) free(m_timingData);
-      m_timingData = (char *) malloc( (sizeof(uint64_t) + 2*sizeof(timespec))*m_writeChunkLength);
+      //Set up the timing data xrif handle
+      xrif_set_size(m_xrif_timing, 5,1,1, m_writeChunkLength, XRIF_TYPECODE_UINT64);
+      m_xrif_timing->compress_on_raw = 1;
+      m_xrif_timing->difference_method = XRIF_DIFFERENCE_NONE;
+      m_xrif_timing->reorder_method = XRIF_REORDER_NONE;
+      m_xrif_timing->compress_method = XRIF_COMPRESS_NONE;
+      xrif_allocate_reordered(m_xrif_timing);
+      xrif_allocate_raw(m_xrif_timing);
+      
       
       
       //This completes the reconfiguration.
@@ -969,27 +997,38 @@ void frameGrabber<derivedT>::swThreadExec()
          
          clock_gettime(CLOCK_REALTIME, &tw0);
          
-         xrif_set_size(xrif, m_width, m_height, 1, (m_currSaveStop-m_currSaveStart), m_dataType);
+         //Configure xrif and copy image data
+         xrif_set_size(m_xrif, m_width, m_height, 1, (m_currSaveStop-m_currSaveStart), m_dataType);
 
-         memcpy(xrif->raw_buffer, (char *) imageStream.array.raw + m_currSaveStart*m_width*m_height*m_typeSize, (m_currSaveStop-m_currSaveStart)*m_width*m_height*m_typeSize);
+         memcpy(m_xrif->raw_buffer, (char *) imageStream.array.raw + m_currSaveStart*m_width*m_height*m_typeSize, (m_currSaveStop-m_currSaveStart)*m_width*m_height*m_typeSize);
+
+         //Configure xrif and copy timing data
+         xrif_set_size(m_xrif_timing, 5, 1, 1, (m_currSaveStop-m_currSaveStart), XRIF_TYPECODE_UINT64);
          
          for(size_t i =0; i< (m_currSaveStop-m_currSaveStart); ++i)
          {
-            *((uint64_t *) &m_timingData[ (sizeof(uint64_t) + 2*sizeof(timespec))*i + 0]) = imageStream.cntarray[m_currSaveStart + i];
-            *((timespec *) &m_timingData[ (sizeof(uint64_t) + 2*sizeof(timespec))*i + sizeof(uint64_t)]) = imageStream.atimearray[m_currSaveStart + i];
-            *((timespec *) &m_timingData[ (sizeof(uint64_t) + 2*sizeof(timespec))*i + sizeof(uint64_t)+sizeof(timespec)]) = imageStream.writetimearray[m_currSaveStart + i];
+            m_xrif_timing->raw_buffer[i*(5*sizeof(uint64_t)) + 0] = imageStream.cntarray[m_currSaveStart + i];
+            m_xrif_timing->raw_buffer[i*(5*sizeof(uint64_t)) + 1] = imageStream.atimearray[m_currSaveStart + i].tv_sec; 
+            m_xrif_timing->raw_buffer[i*(5*sizeof(uint64_t)) + 2] = imageStream.atimearray[m_currSaveStart + i].tv_nsec;
+            m_xrif_timing->raw_buffer[i*(5*sizeof(uint64_t)) + 3] = imageStream.writetimearray[m_currSaveStart + i].tv_sec;
+            m_xrif_timing->raw_buffer[i*(5*sizeof(uint64_t)) + 4] = imageStream.writetimearray[m_currSaveStart + i].tv_nsec;
          }
          
          
-         xrif->lz4_acceleration=50;
-         xrif_encode(xrif);
+         m_xrif->lz4_acceleration=50; ///\todo make lz4 acceleration a configurable parameter
+         xrif_encode(m_xrif);
       
-         xrif_write_header( xrif_header, xrif);
+         xrif_write_header( m_xrif_header, m_xrif);
 
-         tm uttime;//The broken down time.
-   
-         //This needs to be first iamge time stamp.
-         if(gmtime_r(&ts.tv_sec, &uttime) == 0)
+         xrif_encode(m_xrif_timing);
+      
+         xrif_write_header( m_xrif_timing_header, m_xrif_timing);
+         
+         
+         //Now break down the acq time of the first image in the buffer for use in file name
+         tm uttime;//The broken down time.   
+         timespec * fts = &imageStream.atimearray[m_currSaveStart];
+         if(gmtime_r(&fts->tv_sec, &uttime) == 0)
          {
             derivedT::template log<software_critical>({__FILE__,__LINE__,errno,0,"gmtime_r"}); 
             free(fname);
@@ -1002,12 +1041,11 @@ void frameGrabber<derivedT>::swThreadExec()
          }
             
          snprintf(fname + fnameBase.size(), 24, "%04i%02i%02i%02i%02i%02i%09i", uttime.tm_year+1900, uttime.tm_mon+1, uttime.tm_mday, 
-                                                                uttime.tm_hour, uttime.tm_min, uttime.tm_sec, static_cast<int>(ts.tv_nsec));
+                                                                uttime.tm_hour, uttime.tm_min, uttime.tm_sec, static_cast<int>(fts->tv_nsec));
          snprintf(fnameTiming + fnameTimingBase.size(), 24, "%04i%02i%02i%02i%02i%02i%09i", uttime.tm_year+1900, uttime.tm_mon+1, uttime.tm_mday, 
-                                                                            uttime.tm_hour, uttime.tm_min, uttime.tm_sec, static_cast<int>(ts.tv_nsec));
+                                                                            uttime.tm_hour, uttime.tm_min, uttime.tm_sec, static_cast<int>(fts->tv_nsec));
          
-         //Need efficient way to make time file name too
-         
+         //Cover up the \0 inserted by snprintf
          (fname + fnameBase.size())[23] = '.';
          (fnameTiming + fnameTimingBase.size())[23] = '.';
          
@@ -1029,7 +1067,7 @@ void frameGrabber<derivedT>::swThreadExec()
          
          
          
-         size_t bw = fwrite(xrif_header, sizeof(uint8_t), XRIF_HEADER_SIZE, fp_xrif);
+         size_t bw = fwrite(m_xrif_header, sizeof(uint8_t), XRIF_HEADER_SIZE, fp_xrif);
          
          if(bw != XRIF_HEADER_SIZE)
          {
@@ -1045,9 +1083,9 @@ void frameGrabber<derivedT>::swThreadExec()
             return; //will trigger a shutdown
          }
          
-         bw = fwrite(xrif->raw_buffer, sizeof(uint8_t), xrif->compressed_size, fp_xrif);
+         bw = fwrite(m_xrif->raw_buffer, sizeof(uint8_t), m_xrif->compressed_size, fp_xrif);
 
-         if(bw != xrif->compressed_size)
+         if(bw != m_xrif->compressed_size)
          {
             derivedT::template log<software_critical>({__FILE__,__LINE__,errno,0,"failure writing data to file"}); 
             fclose(fp_xrif);
@@ -1061,49 +1099,45 @@ void frameGrabber<derivedT>::swThreadExec()
             return; //will trigger a shutdown
          }
          
+         bw = fwrite(m_xrif_timing_header, sizeof(uint8_t), XRIF_HEADER_SIZE, fp_xrif);
+         
+         if(bw != XRIF_HEADER_SIZE)
+         {
+            derivedT::template log<software_critical>({__FILE__,__LINE__,errno,0,"failure writing timing header to file"}); 
+            fclose(fp_xrif);
+            
+            free(fname);
+            fname = nullptr;
+
+            free(fnameTiming);
+            fnameTiming = nullptr;
+            
+            return; //will trigger a shutdown
+         }
+         
+         bw = fwrite(m_xrif_timing->raw_buffer, sizeof(uint8_t), m_xrif_timing->compressed_size, fp_xrif);
+
+         if(bw != m_xrif_timing->compressed_size)
+         {
+            derivedT::template log<software_critical>({__FILE__,__LINE__,errno,0,"failure writing timing data to file"}); 
+            fclose(fp_xrif);
+            
+            free(fname);
+            fname = nullptr;
+
+            free(fnameTiming);
+            fnameTiming = nullptr;
+            
+            return; //will trigger a shutdown
+         }
+         
          fclose(fp_xrif);
          
-         
-         FILE * fp_time = fopen(fnameTiming, "wb");
-         if(fp_time == NULL)
-         {
-            derivedT::template log<software_critical>({__FILE__,__LINE__,errno,0,"failed to open timing file for writing"}); 
-            
-            free(fname);
-            fname = nullptr;
-            
-            free(fnameTiming);
-            fnameTiming = nullptr;
-            
-            return; //will trigger a shutdown
-         }
-         
-         bw = fwrite(m_timingData, (sizeof(uint64_t) + 2*sizeof(timespec)), (m_currSaveStop-m_currSaveStart), fp_time);
-         
-         if(bw != (m_currSaveStop-m_currSaveStart))
-         {
-            derivedT::template log<software_critical>({__FILE__,__LINE__,errno,0,"failure writing data to file"}); 
-            fclose(fp_time);
-            
-            free(fname);
-            fname = nullptr;
-            
-            free(fnameTiming);
-            fnameTiming = nullptr;
-            
-            return; //will trigger a shutdown
-         }
-
          clock_gettime(CLOCK_REALTIME, &tw2);
          
          double wt = ( (double) tw2.tv_sec + ((double) tw2.tv_nsec)/1e9) - ( (double) tw1.tv_sec + ((double) tw1.tv_nsec)/1e9);
 
          std::cerr << wt << "\n";
-         
-         //ssize_t bw = write(fd, xrif->raw_buffer, xrif->compressed_size);
-         //close fd_xrif
-         //open fd_timing
-         //close fd_timing
          
          
          if(m_writing == STOP_WRITING) 
@@ -1205,21 +1239,21 @@ int frameGrabber<derivedT>::updateINDI()
    {
       indi::updateIfChanged(m_indiP_writing, "current", (int) (m_writing == WRITING), m_parent->m_indiDriver);
       
-      if(xrif && m_writing == WRITING)
+      if(m_xrif && m_writing == WRITING)
       {
-         indi::updateIfChanged(m_indiP_xrifStats, "ratio", xrif->compression_ratio, m_parent->m_indiDriver);
+         indi::updateIfChanged(m_indiP_xrifStats, "ratio", m_xrif->compression_ratio, m_parent->m_indiDriver);
          
-         indi::updateIfChanged(m_indiP_xrifStats, "encodeMBsec", xrif->encode_rate/1048576.0, m_parent->m_indiDriver);
-         indi::updateIfChanged(m_indiP_xrifStats, "encodeFPS", xrif->encode_rate/(m_width*m_height*m_typeSize), m_parent->m_indiDriver);
+         indi::updateIfChanged(m_indiP_xrifStats, "encodeMBsec", m_xrif->encode_rate/1048576.0, m_parent->m_indiDriver);
+         indi::updateIfChanged(m_indiP_xrifStats, "encodeFPS", m_xrif->encode_rate/(m_width*m_height*m_typeSize), m_parent->m_indiDriver);
          
-         indi::updateIfChanged(m_indiP_xrifStats, "differenceMBsec", xrif->difference_rate/1048576.0, m_parent->m_indiDriver);
-         indi::updateIfChanged(m_indiP_xrifStats, "differenceFPS", xrif->difference_rate/(m_width*m_height*m_typeSize), m_parent->m_indiDriver);
+         indi::updateIfChanged(m_indiP_xrifStats, "differenceMBsec", m_xrif->difference_rate/1048576.0, m_parent->m_indiDriver);
+         indi::updateIfChanged(m_indiP_xrifStats, "differenceFPS", m_xrif->difference_rate/(m_width*m_height*m_typeSize), m_parent->m_indiDriver);
          
-         indi::updateIfChanged(m_indiP_xrifStats, "reorderMBsec", xrif->reorder_rate/1048576.0, m_parent->m_indiDriver);
-         indi::updateIfChanged(m_indiP_xrifStats, "reorderFPS", xrif->reorder_rate/(m_width*m_height*m_typeSize), m_parent->m_indiDriver);
+         indi::updateIfChanged(m_indiP_xrifStats, "reorderMBsec", m_xrif->reorder_rate/1048576.0, m_parent->m_indiDriver);
+         indi::updateIfChanged(m_indiP_xrifStats, "reorderFPS", m_xrif->reorder_rate/(m_width*m_height*m_typeSize), m_parent->m_indiDriver);
 
-         indi::updateIfChanged(m_indiP_xrifStats, "compressMBsec", xrif->compress_rate/1048576.0, m_parent->m_indiDriver);
-         indi::updateIfChanged(m_indiP_xrifStats, "compressFPS", xrif->compress_rate/(m_width*m_height*m_typeSize), m_parent->m_indiDriver);
+         indi::updateIfChanged(m_indiP_xrifStats, "compressMBsec", m_xrif->compress_rate/1048576.0, m_parent->m_indiDriver);
+         indi::updateIfChanged(m_indiP_xrifStats, "compressFPS", m_xrif->compress_rate/(m_width*m_height*m_typeSize), m_parent->m_indiDriver);
       }
       else
       {
