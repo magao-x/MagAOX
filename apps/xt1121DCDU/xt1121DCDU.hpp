@@ -137,6 +137,7 @@ protected:
 
 xt1121DCDU::xt1121DCDU() : MagAOXApp(MAGAOX_CURRENT_SHA1, MAGAOX_REPO_MODIFIED)
 {
+   m_firstOne = true;
    m_powerMgtEnabled = true;
   
    setNumberOfOutlets(8);
