@@ -12,6 +12,8 @@ apps_to_build =  baslerCtrl \
                  sysMonitor \
                  trippLitePDU \
                  xindiserver \
+                 xt1121Ctrl \
+                 xt1121DCDU \
                  zaberCtrl 
 
 utils_to_build = logdump cursesINDI

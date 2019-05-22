@@ -770,7 +770,7 @@ int outletController<derivedT>::updateINDI()
    //Publish outlet states (only bother if they've changed)
    for(size_t i=0; i< m_outletStates.size(); ++i)
    {
-      indi::updateIfChanged(m_indiP_outletStates, std::to_string(i+1), stateIntToString(m_outletStates[i]), static_cast<derivedT*>(this)->m_indiDriver);
+      indi::updateIfChanged(m_indiP_outletStates, std::to_string(i+m_firstOne), stateIntToString(m_outletStates[i]), static_cast<derivedT*>(this)->m_indiDriver);
    }
 
    //Publish channel states (only bother if they've changed)
