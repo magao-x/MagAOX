@@ -6,6 +6,12 @@
   *
   * History:
   * - 2018-08-10 created by CJB
+  *
+  * To compile:
+  * - make clean (recommended)
+  * - make CACAO=false
+  * - sudo make install
+  * - /opt/MagAOX/bin/ttmTalker 
   */
 #ifndef ttmTalker_hpp
 #define ttmTalker_hpp
@@ -36,12 +42,14 @@ namespace app
   * In ready state, can move relative and move absolute
   * RS command: TO get from ready to not referenced
 
+  Change to stateCodes::OPERATING and stateCodes::READY
+
   */
 class ttmTalker : public MagAOXApp<>, public tty::usbDevice
 {
 
 protected:	
-   pcf::IndiProperty m_indiP_position;
+   pcf::IndiProperty m_indiP_position;   ///< Indi variable for reporting CPU core loads
    std::vector<std::string> validStateCodes{};
 
 
@@ -75,6 +83,7 @@ public:
    // Purges and resets device. Currently nothing in this app.
    virtual int callCommand();
 
+
    /// Tests if device is cabale of recieving/executing IO commands
    /** Sends command for device to return serial number, and compares to device serial number indi property
     * 
@@ -83,11 +92,45 @@ public:
     */
    int testConnection();
 
+
+   /// Changes device status to READY
+   /** Sets device to start to home in order to move controller
+    * 
+    * \returns -1 on error with sending command
+    * \returns 0 on cpmmand sending success
+    */
    int setUpMoving();
 
-   int moveToPosition(float pos);
 
+   /// Moves stage to the specified position
+   /** Sends command for device to move to a position.
+    * 
+    * \returns -1 on error with sending command
+    * \returns 0 on command sending success
+    */
+   int moveToPosition(
+      float pos   /**< [in] the desired position*/
+   );
+
+
+   /// Verifies current status of controller
+   /** Checks if controller is moving or has moved to correct position
+    * 
+    * \returns 0 if controller is currently moving or has moved correctly.
+    * \returns -1 on error with sending commands or if current position does not match target position.
+    */
    int checkPosition();
+
+
+   /// Verifies current status of controller
+   /** Checks if controller is moving or has moved to correct position
+    * 
+    * \returns 0 if controller is currently moving or has moved correctly.
+    * \returns -1 on error with sending commands or if current position does not match target position.
+    */
+   int getPosition(
+      float&
+   );
 
 };
 
@@ -198,6 +241,20 @@ int ttmTalker::appLogic()
       }
       else {
          std::cout << "Connected!" << std::endl;
+         // Update current
+         float current = -99;
+         int rv = getPosition(current);
+         if (rv == 0) {
+            updateIfChanged(m_indiP_position, "curent", current);
+         }
+         else {
+            std::cout << "There's been an error with getting current controller position"
+         }
+         // Check target and position
+         if (checkPosition() != 0) {
+            std::cout << "There's been an error with movement." << std::endl;
+         }
+         // Log errors
       }
    }
 
@@ -208,9 +265,20 @@ int ttmTalker::appLogic()
       {
          state(stateCodes::CONNECTED);
          std::cout << "Connection successful." << std::endl;
+         // Update current
+         float current = -99;
+         int rv = getPosition(current);
+         if (rv == 0) {
+            updateIfChanged(m_indiP_position, "curent", current);
+         }
+         else {
+            std::cout << "There's been an error with getting current controller position"
+         }
+         // Check target and position
          if (checkPosition() != 0) {
             std::cout << "There's been an error with movement." << std::endl;
          }
+         // Log errors
       }
       else if (rv == TTY_E_TCGETATTR) 
       {
@@ -451,20 +519,16 @@ int ttmTalker::moveToPosition(float pos)
       return rv;
    }
 
-   
-   std::string moveAmt = std::to_string(pos);
 
+   // TODO: Check if controller is in correct state
    std::string buffer{"1PA"};
-   buffer  = buffer + moveAmt + "\r\n";
-   std::string output = "";
-   output.resize(11);
+   buffer = buffer + std::to_string(pos) + "\r\n";
    rv = MagAOX::tty::ttyWrite( 
       buffer,              ///< [in] The characters to write to the tty.
       fileDescrip,         ///< [in] The file descriptor of the open tty.
       2000                ///< [in] The write timeout in milliseconds.
    );
 
-   //std::cout << output << std::endl;
    if (rv != TTY_E_NOERROR)
    {
       std::cerr << MagAOX::tty::ttyErrorString(rv) << std::endl;
@@ -530,15 +594,91 @@ int ttmTalker::checkPosition() {
       return -1;
    }
 
+   // Where is current updated in the program?
    if (output == "1TS000028\r\n") {
       // Controller is moving.
-      // Do I check something here?
       return 0;
    }
    else {
-      // TODO: Check if target position is equal to current position
+      float current = -99, target = -99;
+
+      try
+      {
+         current = ipRecv["current"].get<float>();
+      }
+      catch(...){}
+      
+      try
+      {
+         target = ipRecv["target"].get<float>();
+      }
+      catch(...){}
+
+      // TODO: Check if target position is equal to current position with error band
+
       return 0;
    }
+}
+
+int ttmTalker::getPosition(float& current) {
+   int uid_rv = euidCalled();
+   if(uid_rv < 0)
+   {
+      log<software_critical>({__FILE__, __LINE__});
+      state(stateCodes::FAILURE);
+      return -1;
+   }
+
+   int fileDescrip = 0;
+   int rv = MagAOX::tty::ttyOpenRaw(
+      fileDescrip,         ///< [out] the file descriptor.  Set to 0 on an error.
+      m_deviceName,        ///< [in] the device path name, e.g. /dev/ttyUSB0
+      B57600              ///< [in] indicates the baud rate (see http://pubs.opengroup.org/onlinepubs/7908799/xsh/termios.h.html)
+   );
+
+   uid_rv = euidReal();
+
+   if(uid_rv < 0)
+   {
+      log<software_critical>({__FILE__, __LINE__});
+      state(stateCodes::FAILURE);
+      return -1;
+   }
+
+   if (rv != 0) 
+   {
+      std::cout << MagAOX::tty::ttyErrorString(rv) << std::endl;
+      return rv;
+   }
+
+   std::cout << m_deviceName << "   " << fileDescrip << std::endl;
+
+   std::string buffer{"1TP\r\n"};
+   std::string output;
+   output.resize(11);
+   rv = MagAOX::tty::ttyWriteRead( 
+      output,              ///< [out] The string in which to store the output.
+      buffer,              ///< [in] The characters to write to the tty.
+      "\r\n",              ///< [in] A sequence of characters which indicates the end of transmission.
+      false,               ///< [in] If true, strWrite.size() characters are read after the write
+      fileDescrip,         ///< [in] The file descriptor of the open tty.
+      2000,                ///< [in] The write timeout in milliseconds.
+      2000                 ///< [in] The read timeout in milliseconds.
+   );
+
+   if (rv != TTY_E_NOERROR)
+   {
+      std::cerr << MagAOX::tty::ttyErrorString(rv) << std::endl;
+   } 
+   
+   if (output.size() != 11)
+   {
+      std::cerr << "Wrongly sized output: " << output << " = size " << output.size() << std::endl;
+      return -1;
+   }
+
+   // parse current and place into argument
+   return 0;
 }
 
 INDI_NEWCALLBACK_DEFN(ttmTalker, m_indiP_position)(const pcf::IndiProperty &ipRecv)
