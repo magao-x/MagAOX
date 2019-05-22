@@ -39,7 +39,7 @@ INDI properties provide the status of each outlet.
    | -n | --name                      | name                      | string        | The name of the application, specifies config. |
    |    | --power.device              | power.device              | string        | Device controlling power for this app's device (INDI name). |
    |    | --power.channe              | power.channel             | string        | Channel on device for this app's device (INDI name). |
-   |    | --power.elemen              | power.element             | string        | INDI element name.  Default is "state", only need to specify if different.
+   |    | --power.element              | power.element             | string        | INDI element name.  Default is "state", only need to specify if different.
    |    | --device.name               | device.name               | string        | The device INDI name.                   | 
    |    | --device.channelNumbers     | device.channelNumbers     | vector<int>   | The channel numbers to use for the outlets,in order.    |
 
@@ -76,7 +76,6 @@ Channel states are reported by the property with the channel name, and state cha
 
 ## Read-only Properties
 
-```
 
 Each outlet has a property which indicates its current state.
 ```

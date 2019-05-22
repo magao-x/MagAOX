@@ -38,10 +38,6 @@ namespace app
   *
   * \ingroup xt1121Ctrl
   * 
-  * \todo INDI prop for timestamp of last frame skip.  Maybe total frameskips?
-  * \todo Config item for ImageStreamIO name filename
-  * \todo implement ImageStreamIO circular buffer, with config setting
-  * \todo calculate frames skipped due to timeouts.
   */
 class xt1121Ctrl : public MagAOXApp<>, public xt1121Channels
 {
@@ -634,7 +630,6 @@ INDI_NEWCALLBACK_DEFN(xt1121Ctrl, m_indiP_ch07)(const pcf::IndiProperty &ipRecv)
 {
    if (ipRecv.getName() == m_indiP_ch07.getName())
    {    
-      std::cerr << "calling\n";
       return channelSetCallback(7, m_indiP_ch07, ipRecv);
    }
    return -1;

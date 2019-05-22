@@ -781,7 +781,8 @@ INPUT                  = ../ \
                          ../../apps/filterWheelCtrl/ \
                          ../../apps/trippLitePDU/ \
                          ../../apps/ocam2KCtrl/ \
-                         ../../apps/xindiserver/
+                         ../../apps/xindiserver/ \
+                         ../../apps/xt1121DCDU/
 
 # This tag can be used to specify the character encoding of the source files
 # that doxygen parses. Internally doxygen uses the UTF-8 encoding. Doxygen uses
@@ -829,8 +830,8 @@ EXCLUDE                = ../logger/old \
                          ../../apps/filterWheelCtrl/doc \
                          ../../apps/trippLitePDU/doc \
                          ../../apps/ocam2KCtrl/doc \
-                         ../../apps/xindiserver/doc
-                         
+                         ../../apps/xindiserver/doc \
+                         ../../apps/xt1121DCDU/doc
                      
 # The EXCLUDE_SYMLINKS tag can be used to select whether or not files or
 # directories that are symbolic links (a Unix file system feature) are excluded
