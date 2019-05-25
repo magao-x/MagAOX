@@ -57,7 +57,7 @@ namespace app
 class baslerCtrl : public MagAOXApp<>, public dev::frameGrabber<baslerCtrl>
 {
 
-   friend class dev::frameGrabber<baslerCtrl>;
+   //friend class dev::frameGrabber<baslerCtrl>;
    
 protected:
 
@@ -106,6 +106,7 @@ public:
 
    int connect();
    
+   int configureAcquisition();
    int startAcquisition();
    int acquireAndCheckValid();
    int loadImageIntoStream(void * dest);
@@ -345,13 +346,17 @@ int baslerCtrl::connect()
 }
 
 
-int baslerCtrl::startAcquisition()
+int baslerCtrl::configureAcquisition()
 {
    m_width = 640;
    m_height = 480;
    m_dataType = _DATATYPE_INT16;
 
-    
+   return 0;
+}
+
+int baslerCtrl::startAcquisition()
+{    
    try
    {
       camera->StartGrabbing(GrabStrategy_LatestImageOnly ); // Start grabbing, and always grab just the last image.

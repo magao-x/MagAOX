@@ -369,6 +369,47 @@ protected:
 
    ///@} -- PID Locking
 
+   /** \name Threads 
+     *
+     * @{
+     */
+public:
+   ///\todo need to ensure that we understand what threads could be running when elevated privileges are in place -- how many threads are running during appStartup? 
+   /// At least logThread is running - probably can start this after appStartup.
+   
+   /// Start a thread, using this class's privileges to set priority, etc.
+   /** Because this function takes elevated privileges, it should only be called during
+     * appStartup or earlier to ensure that no actions are taken with higher privileges.
+     * 
+     * The thread initialization synchronizer `bool` is set to true at the beginning
+     * of this function, then is set to false once all initialization is complete.  This
+     * should be used in the thread exec function to ensure that privileges have been restored
+     * to a normal level before doing anything.
+     *
+     * The interface of the thread start function is:
+     \code
+     static void impl::myThreadStart( impl * o )
+     {
+        o->myThreadExec(); //A member function which actually exectues the thread
+     }
+     \endcode
+     * where `impl` is the derived class, and `mThreadStart` and `myThreadExec` are members
+     * of `impl`.
+     *
+     * \returns 0 on success
+     * \returns -1 on error
+     */ 
+   template<class thisPtr, class Function>
+   int threadStart( std::thread & thrd,           ///< [out] The thread object to start executing
+                    bool & thrdInit,              ///< [in/out] The thread initilization synchronizer.  
+                    int thrdPrio,                 ///< [in] The r/t priority to set for this thread
+                    const std::string & thrdName, ///< [in] The name of the thread (just for logging)
+                    thisPtr * thrdThis,           ///< [in] The `this` pointer to pass to the thread starter function
+                    Function&& thrdStart          ///< [in] The thread starting function, a static function taking a `this` pointer as argument.
+                  );
+   
+   ///@} -- Threads
+   
    /** \name Application State
      *
      * @{
@@ -1454,6 +1495,81 @@ int MagAOXApp<_useINDI>::unlockPID()
    log<text_log>(logss.str());
 
    return 0;
+}
+
+template<bool _useINDI>
+template<class thisPtr, class Function>
+int MagAOXApp<_useINDI>::threadStart( std::thread & thrd,
+                                      bool & thrdInit,
+                                      int thrdPrio,
+                                      const std::string & thrdName,
+                                      thisPtr * thrdThis,
+                                      Function&& thrdStart
+                                    )
+{
+   thrdInit = true;
+   
+   try
+   {
+      thrd  = std::thread( thrdStart, thrdThis);
+   }
+   catch( const std::exception & e )
+   {
+      log<software_error>({__FILE__,__LINE__, std::string("Exception on " + thrdName + " thread start: ") + e.what()});
+      return -1;
+   }
+   catch( ... )
+   {
+      log<software_error>({__FILE__,__LINE__, "Unkown exception on " + thrdName + " thread start"});
+      return -1;
+   }
+
+   if(!thrd.joinable())
+   {
+      log<software_error>({__FILE__, __LINE__, thrdName + " thread did not start"});
+      return -1;
+   }
+
+   //Now set the RT priority.
+   
+   if(thrdPrio < 0) thrdPrio = 0;
+   if(thrdPrio > 99) thrdPrio = 99;
+
+   sched_param sp;
+   sp.sched_priority = thrdPrio;
+
+   //Get the maximum privileges available
+   if( euidCalled() < 0 )
+   {
+      log<software_error>({__FILE__, __LINE__, "Setting euid to called failed for " + thrdName});
+      return -1;
+   }
+   
+   //We set return value based on result from sched_setscheduler
+   //But we make sure to restore privileges no matter what happens.
+   errno = 0;
+   int rv = 0;
+   if(thrdPrio > 0) rv = pthread_setschedparam(thrd.native_handle(), MAGAOX_RT_SCHED_POLICY, &sp);
+   else rv = pthread_setschedparam(thrd.native_handle(), SCHED_OTHER, &sp);
+   
+   //Go back to regular privileges
+   if( euidReal() < 0 )
+   {
+      log<software_error>({__FILE__, __LINE__, "Setting euid to real failed for " + thrdName});
+   }
+   
+   if(rv < 0)
+   {
+      return log<software_error,-1>({__FILE__, __LINE__, errno, "Setting " + thrdName + " thread scheduler priority to " + std::to_string(thrdPrio) + " failed."});
+   }
+   else
+   {
+      thrdInit = false;
+      
+      return log<text_log,0>(thrdName + " thread scheduler priority set to " + std::to_string(thrdPrio));
+   }
+   
+
 }
 
 template<bool _useINDI>
