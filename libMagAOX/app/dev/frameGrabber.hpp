@@ -94,26 +94,20 @@ protected:
    int m_ybinning {0}; ///< The y-binning according to the framegrabber
    std::string m_cameraType; ///< The camera type according to the framegrabber
           
-   timespec m_currImageTimestamp; ///< The timestamp of the current image.
+   timespec m_currImageTimestamp {0,0}; ///< The timestamp of the current image.
    
    bool m_reconfig {false}; ///< Flag to set if a camera reconfiguration requires a framegrabber reset.
    
    IMAGE imageStream; ///< The ImageStreamIO shared memory buffer.
    
-   timespec m_dummy_ts;
-   uint64_t m_dummy_cnt;
-   char m_dummy_c;
+   timespec m_dummy_ts {0,0};
+   uint64_t m_dummy_cnt {0};
+   char m_dummy_c {0};
    
    
    
    
 public:
-
-   ///Default c'tor
-   frameGrabber();
-
-   ///Destructor
-   ~frameGrabber() noexcept;
 
    /// Setup the configuration system
    /**
@@ -226,18 +220,6 @@ private:
       return *static_cast<derivedT *>(this);
    }
 };
-
-template<class derivedT>
-frameGrabber<derivedT>::frameGrabber() 
-{
-   return;
-}
-
-template<class derivedT>
-frameGrabber<derivedT>::~frameGrabber() noexcept
-{
-   return;
-}
 
 template<class derivedT>
 void frameGrabber<derivedT>::setupConfig(mx::app::appConfigurator & config)
