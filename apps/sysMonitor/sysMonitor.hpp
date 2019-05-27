@@ -4,7 +4,10 @@
   *
   * To view logdump files: logdump -f sysMonitor
   *
-  * \todo Change `system` calls to fork()/exec()
+  * To view sysMonitor with cursesIndi: 
+  * 1. /opt/MagAOX/bin/xindiserver -n xindiserverMaths
+  * 2. /opt/MagAOX/bin/sysMonitor -n sysMonitor
+  * 3. /opt/MagAOX/bin/cursesINDI 
   *
   * \ingroup sysMonitor_files
   *
@@ -44,13 +47,13 @@ protected:
    int m_warningDiskTemp = 0;   ///< User defined warning temperature for drives
    int m_criticalDiskTemp = 0;   ///< User defined critical temperature for drives
 
-   pcf::IndiProperty core_loads;   ///< Indi variable for repoting CPU core loads
-   pcf::IndiProperty core_temps;   ///< Indi variable for repoting CPU core temperature(s)
-   pcf::IndiProperty drive_temps;   ///< Indi variable for repoting drive temperature(s)
-   pcf::IndiProperty root_usage;   ///< Indi variable for repoting drive usage of root path
-   pcf::IndiProperty boot_usage;   ///< Indi variable for repoting drive usage of /boot path
-   pcf::IndiProperty data_usage;   ///< Indi variable for repoting drive usage of /data path
-   pcf::IndiProperty ram_usage_indi;   ///< Indi variable for repoting ram usage
+   pcf::IndiProperty core_loads;   ///< Indi variable for reporting CPU core loads
+   pcf::IndiProperty core_temps;   ///< Indi variable for reporting CPU core temperature(s)
+   pcf::IndiProperty drive_temps;   ///< Indi variable for reporting drive temperature(s)
+   pcf::IndiProperty root_usage;   ///< Indi variable for reporting drive usage of root path
+   pcf::IndiProperty boot_usage;   ///< Indi variable for reporting drive usage of /boot path
+   pcf::IndiProperty data_usage;   ///< Indi variable for reporting drive usage of /data path
+   pcf::IndiProperty ram_usage_indi;   ///< Indi variable for reporting ram usage
 
    std::vector<float> coreTemps;   ///< List of current core temperature(s)
    std::vector<float> coreLoads;   ///< List of current core load(s)
@@ -390,7 +393,9 @@ int sysMonitor::appLogic()
       rvDiskTemp = criticalDiskTemperature(diskTemp);
    }  
 
+
    int rvDiskUsage = findDiskUsage(rootUsage, dataUsage, bootUsage);
+
    if (rvDiskUsage >= 0)
    {
       std::cout << "/ usage: " << rootUsage << std::endl;
@@ -487,12 +492,12 @@ int sysMonitor::parseCPUTemperatures(std::string line, float& temps)
          std::vector<std::string> tokens{std::istream_iterator<std::string>{iss},std::istream_iterator<std::string>{}};
          try
          {
-            tokens[5].pop_back();
-            tokens[5].pop_back();
-            tokens[5].pop_back();
-            tokens[5].pop_back();
-            tokens[5].erase(0,1);
-            m_warningCoreTemp = std::stof(tokens[5]);
+            tokens.at(5).pop_back();
+            tokens.at(5).pop_back();
+            tokens.at(5).pop_back();
+            tokens.at(5).pop_back();
+            tokens.at(5).erase(0,1);
+            m_warningCoreTemp = std::stof(tokens.at(5));
          }
          catch (const std::invalid_argument& e) 
          {
@@ -506,12 +511,12 @@ int sysMonitor::parseCPUTemperatures(std::string line, float& temps)
          std::vector<std::string> tokens{std::istream_iterator<std::string>{iss},std::istream_iterator<std::string>{}};
          try
          {
-            tokens[8].pop_back();
-            tokens[8].pop_back();
-            tokens[8].pop_back();
-            tokens[8].pop_back();
-            tokens[8].erase(0,1);
-            m_criticalCoreTemp = std::stof(tokens[8]);
+            tokens.at(8).pop_back();
+            tokens.at(8).pop_back();
+            tokens.at(8).pop_back();
+            tokens.at(8).pop_back();
+            tokens.at(8).erase(0,1);
+            m_criticalCoreTemp = std::stof(tokens.at(8));
          }
          catch (const std::invalid_argument& e) 
          {
@@ -586,11 +591,14 @@ int sysMonitor::parseCPULoads(std::string line, float& loadVal)
    float cpu_load;
    try
    {
-      cpu_load = 100.0 - std::stof(tokens[12]);
+      cpu_load = 100.0 - std::stof(tokens.at(12));
    }
    catch (const std::invalid_argument& e)
    {
       log<software_error>({__FILE__, __LINE__,"Invalid read occured when parsing CPU core usage."});
+      return -1;
+   }
+   catch (const std::out_of_range& e) {
       return -1;
    }
    cpu_load /= 100;
@@ -624,31 +632,37 @@ int sysMonitor::parseDiskTemperature(std::string line, float& hdd_temp)
    }
    std::istringstream iss(line);
    std::vector<std::string> tokens{std::istream_iterator<std::string>{iss},std::istream_iterator<std::string>{}};
+
    for(auto temp_s: tokens) 
    {
-      if (isdigit(temp_s.at(0)) && temp_s.substr(temp_s.length() - 1, 1) == "C") 
-      {
-         temp_s.pop_back();
-         temp_s.pop_back();
-         try
+      try {
+         if (isdigit(temp_s.at(0)) && temp_s.substr(temp_s.length() - 1, 1) == "C") 
          {
-            tempValue = std::stof (temp_s);
+            temp_s.pop_back();
+            temp_s.pop_back();
+            try
+            {
+               tempValue = std::stof (temp_s);
+            }
+            catch (const std::invalid_argument& e) 
+            {
+               log<software_error>({__FILE__, __LINE__,"Invalid read occured when parsing drive temperatures."});
+               return -1;
+            }
+            hdd_temp = tempValue;
+            if (m_warningDiskTemp == 0)
+            {
+               m_warningDiskTemp = tempValue + (.1*tempValue);
+            }
+            if (m_criticalDiskTemp == 0) 
+            {
+               m_criticalDiskTemp = tempValue + (.2*tempValue);
+            }
+            return 0;
          }
-         catch (const std::invalid_argument& e) 
-         {
-            log<software_error>({__FILE__, __LINE__,"Invalid read occured when parsing drive temperatures."});
-            return -1;
-         }
-         hdd_temp = tempValue;
-         if (m_warningDiskTemp == 0)
-         {
-            m_warningDiskTemp = tempValue + (.1*tempValue);
-         }
-         if (m_criticalDiskTemp == 0) 
-         {
-            m_criticalDiskTemp = tempValue + (.2*tempValue);
-         }
-         return 0;
+      }
+      catch (const std::out_of_range& e) {
+         return -1;
       }
    }
    return -1;
@@ -702,47 +716,53 @@ int sysMonitor::parseDiskUsage(std::string line, float& rootUsage, float& dataUs
 
    std::istringstream iss(line);
    std::vector<std::string> tokens{std::istream_iterator<std::string>{iss},std::istream_iterator<std::string>{}};
-   if (tokens[5].compare("/") == 0)
-   {
-      tokens[4].pop_back();
-      try
+
+   try {
+      if (tokens.at(5).compare("/") == 0)
       {
-         rootUsage = std::stof (tokens[4])/100;
-         return 0;
-      }
-      catch (const std::invalid_argument& e) 
+         tokens.at(4).pop_back();
+         try
+         {
+            rootUsage = std::stof (tokens.at(4))/100;
+            return 0;
+         }
+         catch (const std::invalid_argument& e) 
+         {
+            log<software_error>({__FILE__, __LINE__,"Invalid read occured when parsing drive usage."});
+            return -1;
+         }
+      } 
+      else if (tokens.at(5).compare("/data") == 0)
       {
-         log<software_error>({__FILE__, __LINE__,"Invalid read occured when parsing drive usage."});
-         return -1;
-      }
-   } 
-   else if (tokens[5].compare("/data") == 0)
-   {
-      tokens[4].pop_back();
-      try
+         tokens.at(4).pop_back();
+         try
+         {
+            dataUsage = std::stof (tokens.at(4))/100;
+            return 0;
+         }
+         catch (const std::invalid_argument& e) 
+         {
+            log<software_error>({__FILE__, __LINE__,"Invalid read occured when parsing drive usage."});
+            return -1;
+         }
+      } 
+      else if (tokens.at(5).compare("/boot") == 0)
       {
-         dataUsage = std::stof (tokens[4])/100;
-         return 0;
+         tokens.at(4).pop_back();
+         try
+         {
+            bootUsage = std::stof (tokens.at(4))/100;
+            return 0;
+         }
+         catch (const std::invalid_argument& e) 
+         {
+            log<software_error>({__FILE__, __LINE__,"Invalid read occured when parsing drive usage."});
+            return -1;
+         }
       }
-      catch (const std::invalid_argument& e) 
-      {
-         log<software_error>({__FILE__, __LINE__,"Invalid read occured when parsing drive usage."});
-         return -1;
-      }
-   } 
-   else if (tokens[5].compare("/boot") == 0)
-   {
-      tokens[4].pop_back();
-      try
-      {
-         bootUsage = std::stof (tokens[4])/100;
-         return 0;
-      }
-      catch (const std::invalid_argument& e) 
-      {
-         log<software_error>({__FILE__, __LINE__,"Invalid read occured when parsing drive usage."});
-         return -1;
-      }
+   }
+   catch (const std::out_of_range& e) {
+      return -1;
    }
    return -1;
 }
@@ -771,11 +791,11 @@ int sysMonitor::parseRamUsage(std::string line, float& ramUsage)
    std::vector<std::string> tokens{std::istream_iterator<std::string>{iss},std::istream_iterator<std::string>{}};
    try
    {
-      if (tokens[0].compare("Mem:") != 0)
+      if (tokens.at(0).compare("Mem:") != 0)
       {
         return -1;
       }
-      ramUsage = std::stof(tokens[2])/std::stof(tokens[1]);
+      ramUsage = std::stof(tokens.at(2))/std::stof(tokens.at(1));
       if (ramUsage > 1 || ramUsage == 0)
       {
          ramUsage = -1;  
@@ -786,6 +806,9 @@ int sysMonitor::parseRamUsage(std::string line, float& ramUsage)
    catch (const std::invalid_argument& e) 
    {
       log<software_error>({__FILE__, __LINE__,"Invalid read occured when parsing RAM usage."});
+      return -1;
+   }
+   catch (const std::out_of_range& e) {
       return -1;
    }
 }
