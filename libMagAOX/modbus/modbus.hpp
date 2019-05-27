@@ -111,10 +111,9 @@ public:
  * @return     A Modbus Connector Object
  */
 inline
-modbus::modbus(const std::string & host, uint16_t port) {
-    HOST = host;
-    PORT = port;
-}
+modbus::modbus( const std::string & host, 
+                uint16_t port
+              ) : PORT {port}, HOST{host} {}
 
 
 /**
@@ -123,9 +122,7 @@ modbus::modbus(const std::string & host, uint16_t port) {
  * @return      A Modbus Connector Object
  */
 inline
-modbus::modbus(const std::string & host) {
-    HOST = host;
-}
+modbus::modbus(const std::string & host) : HOST{host} {}
 
 
 /**
@@ -288,7 +285,7 @@ void modbus::modbus_read_holding_registers(int address, int amount, uint16_t *bu
         }
         modbus_read(address, amount, READ_REGS);
         uint8_t to_rec[MAX_MSG_LENGTH];
-        ssize_t k = modbus_receive(to_rec);
+        modbus_receive(to_rec);
         try {
             modbus_error_handle(to_rec, READ_REGS);
             for(int i = 0; i < amount; i++) {
@@ -296,10 +293,7 @@ void modbus::modbus_read_holding_registers(int address, int amount, uint16_t *bu
                 buffer[i] += (uint16_t) to_rec[10 + 2 * i];
             }
         } catch (std::exception &e) {
-            //cout<<e.what()<<endl;
-            delete(&to_rec);
-            delete(&k);
-            throw e;
+            throw; //e;
         }
     } else {
         throw modbus_connect_exception();
@@ -322,7 +316,7 @@ void modbus::modbus_read_input_registers(int address, int amount, uint16_t *buff
         }
         modbus_read(address, amount, READ_INPUT_REGS);
         uint8_t to_rec[MAX_MSG_LENGTH];
-        ssize_t k = modbus_receive(to_rec);
+        modbus_receive(to_rec);
         try {
             modbus_error_handle(to_rec, READ_INPUT_REGS);
             for(int i = 0; i < amount; i++) {
@@ -330,10 +324,7 @@ void modbus::modbus_read_input_registers(int address, int amount, uint16_t *buff
                 buffer[i] += (uint16_t) to_rec[10 + 2 * i];
             }
         } catch (std::exception &e) {
-            //cout<<e.what()<<endl;
-            delete(&to_rec);
-            delete(&k);
-            throw e;
+            throw; //e;
         }
     } else {
         throw modbus_connect_exception();
@@ -356,17 +347,14 @@ void modbus::modbus_read_coils(int address, int amount, bool *buffer) {
         }
         modbus_read(address, amount, READ_COILS);
         uint8_t to_rec[MAX_MSG_LENGTH];
-        ssize_t k = modbus_receive(to_rec);
+        modbus_receive(to_rec);
         try {
             modbus_error_handle(to_rec, READ_COILS);
             for(int i = 0; i < amount; i++) {
                 buffer[i] = (bool) ((to_rec[9 + i / 8] >> (i % 8)) & 1);
             }
         } catch (std::exception &e) {
-            //cout<<e.what()<<endl;
-            delete(&to_rec);
-            delete(&k);
-            throw e;
+            throw; //e;
         }
     } else {
         throw modbus_connect_exception();
@@ -389,17 +377,14 @@ void modbus::modbus_read_input_bits(int address, int amount, bool* buffer) {
         }
         modbus_read(address, amount, READ_INPUT_BITS);
         uint8_t to_rec[MAX_MSG_LENGTH];
-        ssize_t k = modbus_receive(to_rec);
+        modbus_receive(to_rec);
         try {
             modbus_error_handle(to_rec, READ_INPUT_BITS);
             for(int i = 0; i < amount; i++) {
                 buffer[i] = (bool) ((to_rec[9 + i / 8] >> (i % 8)) & 1);
             }
         } catch (std::exception &e) {
-            //cout<<e.what()<<endl;
-            delete(&to_rec);
-            delete(&k);
-            throw e;
+            throw; //e;
         }
     } else {
         throw modbus_connect_exception();
@@ -422,14 +407,11 @@ void modbus::modbus_write_coil(int address, bool to_write) {
         int value = to_write * 0xFF00;
         modbus_write(address, 1, WRITE_COIL, (uint16_t *)&value);
         uint8_t to_rec[MAX_MSG_LENGTH];
-        ssize_t k = modbus_receive(to_rec);
+        modbus_receive(to_rec);
         try{
             modbus_error_handle(to_rec, WRITE_COIL);
         } catch (std::exception &e) {
-            //cout<<e.what()<<endl;
-            delete(&to_rec);
-            delete(&k);
-            throw e;
+            throw; //e;
         }
     } else {
         throw modbus_connect_exception();
@@ -451,14 +433,11 @@ void modbus::modbus_write_register(int address, uint16_t value) {
         }
         modbus_write(address, 1, WRITE_REG, &value);
         uint8_t to_rec[MAX_MSG_LENGTH];
-        ssize_t k = modbus_receive(to_rec);
+        modbus_receive(to_rec);
         try{
             modbus_error_handle(to_rec, WRITE_COIL);
         } catch (std::exception &e) {
-            //cout << e.what() << endl;
-            delete (&to_rec);
-            delete (&k);
-            throw e;
+            throw; //e;
         }
     } else {
         throw modbus_connect_exception();
@@ -485,14 +464,11 @@ void modbus::modbus_write_coils(int address, int amount, bool *value) {
         }
         modbus_write(address, amount, WRITE_COILS,  temp);
         uint8_t to_rec[MAX_MSG_LENGTH];
-        ssize_t k = modbus_receive(to_rec);
+        modbus_receive(to_rec);
         try{
             modbus_error_handle(to_rec, WRITE_COILS);
         } catch (std::exception &e) {
-            //cout << e.what() << endl;
-            delete (&to_rec);
-            delete (&k);
-            throw e;
+            throw; //e;
         }
     } else {
         throw modbus_connect_exception();
@@ -515,14 +491,11 @@ void modbus::modbus_write_registers(int address, int amount, uint16_t *value) {
         }
         modbus_write(address, amount, WRITE_REGS, value);
         uint8_t to_rec[MAX_MSG_LENGTH];
-        ssize_t k = modbus_receive(to_rec);
+        modbus_receive(to_rec);
         try{
             modbus_error_handle(to_rec, WRITE_REGS);
         } catch (std::exception &e) {
-            //cout << e.what() << endl;
-            delete (&to_rec);
-            delete (&k);
-            throw e;
+            throw; //e;
         }
     } else {
         throw modbus_connect_exception();
@@ -550,7 +523,7 @@ ssize_t modbus::modbus_send(uint8_t *to_send, int length) {
  */
 inline
 ssize_t modbus::modbus_receive(uint8_t *buffer) {
-    return recv(_socket, (char *) buffer, 1024, 0);
+    return recv(_socket, (char *) buffer, MAX_MSG_LENGTH, 0);
 }
 
 

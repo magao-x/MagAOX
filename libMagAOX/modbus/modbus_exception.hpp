@@ -76,7 +76,12 @@ public:
  */
 class modbus_illegal_address_exception: public modbus_exception {
 public:
-    std::string msg = "test";
+   
+   modbus_illegal_address_exception()
+   {
+      msg = "test";
+   }
+   
     const char* what() const throw()
     {
         return "Illegal Address";
