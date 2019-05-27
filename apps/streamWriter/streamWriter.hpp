@@ -60,24 +60,25 @@ protected:
 
    std::string m_rawimageDir; ///< The path where files will be saved.
    
-   size_t m_circBuffLength {1024};
+   size_t m_circBuffLength {1024}; ///< The length of the circular buffer, in frames
    
-   size_t m_writeChunkLength {512};
+   size_t m_writeChunkLength {512}; ///< The number of frames to write at a time
    
-   std::string m_streamName;
+   std::string m_shmimName; ///< The name of the shared memory buffer.
    
    unsigned m_semWait {500000000}; //The time in nsec to wait on the semaphore.  Max is 999999999. Default is 5e8 nsec.
    
    ///@}
    
+   int m_semaphoreNumber {0}; ///< The image structure semaphore index.
    
    size_t m_width {0}; ///< The width of the image
    size_t m_height {0}; ///< The height of the image
-   uint8_t m_atype {0}; ///< The ImageStreamIO type code.
+   uint8_t m_dataType {0}; ///< The ImageStreamIO type code.
    int m_typeSize {0}; ///< The pixel byte depth
        
-   char * m_rawImageCircBuff {0};
-   uint64_t * m_timingCircBuff {0}
+   char * m_rawImageCircBuff {nullptr};
+   uint64_t * m_timingCircBuff {nullptr};
    
    size_t m_currImage {0};
          
@@ -172,11 +173,10 @@ protected:
 
    std::thread m_fgThread; ///< A separate thread for the actual framegrabbings
 
+   bool m_fgThreadInit {true}; ///< Synchronizer to ensure f.g. thread initializes before doing dangerous things.
+   
    ///Thread starter, called by fgThreadStart on thread construction.  Calls fgThreadExec.
-   static void _fgThreadStart( streamWriter * s /**< [in] a pointer to an streamWriter instance (normally this) */);
-
-   /// Start the frame grabber thread.
-   int fgThreadStart();
+   static void fgThreadStart( streamWriter * s /**< [in] a pointer to an streamWriter instance (normally this) */);
 
    /// Execute the frame grabber main loop.
    void fgThreadExec();
@@ -194,11 +194,10 @@ protected:
    
    std::thread m_swThread; ///< A separate thread for the actual writing
 
+   bool m_swThreadInit {true}; ///< Synchronizer to ensure s.w. thread initializes before doing dangerous things.
+   
    ///Thread starter, called by swThreadStart on thread construction.  Calls swThreadExec.
-   static void _swThreadStart( streamWriter * s /**< [in] a pointer to an streamWriter instance (normally this) */);
-
-   /// Start the stream writer
-   int swThreadStart();
+   static void swThreadStart( streamWriter * s /**< [in] a pointer to an streamWriter instance (normally this) */);
 
    /// Execute the stream writer main loop.
    void swThreadExec();
@@ -211,9 +210,13 @@ protected:
    pcf::IndiProperty m_indiP_writing;
    pcf::IndiProperty m_indiP_written;
 
+   pcf::IndiProperty m_indiP_xrifStats;
+   
 public:
    INDI_NEWCALLBACK_DECL(streamWriter, m_indiP_writing);
 
+   void updateINDI();
+   
 };
 
 //Set self pointer to null so app starts up uninitialized.
@@ -255,7 +258,8 @@ void streamWriter::setupConfig()
    
    config.add("writer.threadPrio", "", "writer.threadPrio", argType::Required, "writer", "threadPrio", false, "int", "The real-time priority of the stream writer thread.");
    
-   config.add("framegrabber.streamName", "", "framegrabber.streamName", argType::Required, "framegrabber", "streamName", false, "int", "The name of the stream to monitor. From /tmp/streamName.im.shm.");
+   config.add("framegrabber.shmimName", "", "framegrabber.shmimName", argType::Required, "framegrabber", "shmimName", false, "int", "The name of the stream to monitor. From /tmp/shmimName.im.shm.");
+   
    config.add("framegrabber.semWait", "", "framegrabber.semWait", argType::Required, "framegrabber", "semWait", false, "int", "The time in nsec to wait on the semaphore.  Max is 999999999. Default is 5e8 nsec.");
    
    config.add("framegrabber.threadPrio", "", "framegrabber.threadPrio", argType::Required, "framegrabber", "threadPrio", false, "int", "The real-time priority of the framegrabber thread.");
@@ -268,14 +272,14 @@ void streamWriter::loadConfig()
 {
    //Set some defaults
    //Setup default log path
-   m_rawimageDir = MagAOXPath + "/" + MAGAOX_rawimageRelPath;
+   m_rawimageDir = MagAOXPath + "/" + MAGAOX_rawimageRelPath + "/" + configName();
    config(m_rawimageDir, "writer.savePath");
    
    config(m_circBuffLength, "writer.circBuffLength");
    config(m_writeChunkLength, "writer.writeChunkLength");
    config(m_swThreadPrio, "writer.threadPrio");
    
-   config(m_streamName, "framegrabber.streamName");
+   config(m_shmimName, "framegrabber.shmimName");
    config(m_semWait, "framegrabber.semWait");
    
    
@@ -296,7 +300,7 @@ int streamWriter::appStartup()
       {
          std::stringstream logss;
          logss << "Failed to create image directory (" << m_rawimageDir << ").  Errno says: " << strerror(errno);
-         derivedT::template log<software_critical>({__FILE__, __LINE__, errno, 0, logss.str()});
+         log<software_critical>({__FILE__, __LINE__, errno, 0, logss.str()});
 
          return -1;
       }
@@ -304,9 +308,10 @@ int streamWriter::appStartup()
    }
    
    // set up the  INDI properties
-   REG_INDI_NEWPROP(m_indiP_writing, "writing", pcf::IndiProperty::Switch);
+   REG_INDI_NEWPROP(m_indiP_writing, "writing", pcf::IndiProperty::Number);
    m_indiP_writing.add (pcf::IndiElement("current"));
    m_indiP_writing.add (pcf::IndiElement("target"));
+   m_indiP_writing["target"].set(0);
    
    REG_INDI_NEWPROP_NOCB(m_indiP_written, "written", pcf::IndiProperty::Number);
    m_indiP_written.add (pcf::IndiElement("number"));
@@ -314,50 +319,35 @@ int streamWriter::appStartup()
    m_indiP_written.add (pcf::IndiElement("fps"));
    m_indiP_written["fps"].set(0);
 
-   ///\todo need to re-do these:
    //Register the stats INDI property
-   m_indiP_xrifStats = pcf::IndiProperty(pcf::IndiProperty::Number);
-   m_indiP_xrifStats.setDevice(m_parent->configName());
-   m_indiP_xrifStats.setName("xrif");
-   m_indiP_xrifStats.setPerm(pcf::IndiProperty::ReadOnly);
-   m_indiP_xrifStats.setState(pcf::IndiProperty::Idle);
-    
+   REG_INDI_NEWPROP_NOCB(m_indiP_xrifStats, "xrif", pcf::IndiProperty::Number);
+ 
    m_indiP_xrifStats.add(pcf::IndiElement("ratio"));
    m_indiP_xrifStats["ratio"].set(0);
    
    m_indiP_xrifStats.add(pcf::IndiElement("differenceMBsec"));
    m_indiP_xrifStats["differenceMBsec"].set(0);
+
    m_indiP_xrifStats.add(pcf::IndiElement("reorderMBsec"));
    m_indiP_xrifStats["reorderMBsec"].set(0);
    
    m_indiP_xrifStats.add(pcf::IndiElement("compressMBsec"));
    m_indiP_xrifStats["compressMBsec"].set(0);
+
    m_indiP_xrifStats.add(pcf::IndiElement("encodeMBsec"));
    m_indiP_xrifStats["encodeMBsec"].set(0);
    
    m_indiP_xrifStats.add(pcf::IndiElement("differenceFPS"));
    m_indiP_xrifStats["differenceFPS"].set(0);
+
    m_indiP_xrifStats.add(pcf::IndiElement("reorderFPS"));
    m_indiP_xrifStats["reorderFPS"].set(0);
    
    m_indiP_xrifStats.add(pcf::IndiElement("compressFPS"));
    m_indiP_xrifStats["compressFPS"].set(0);
+
    m_indiP_xrifStats.add(pcf::IndiElement("encodeFPS"));
    m_indiP_xrifStats["encodeFPS"].set(0);
-   
-   if( m_parent->registerIndiPropertyNew( m_indiP_xrifStats, nullptr) < 0)
-   {
-      #ifndef FRAMEGRABBER_TEST_NOLOG
-      derivedT::template log<software_error>({__FILE__,__LINE__});
-      #endif
-      return -1;
-   }
-   
-   
-   
-   
-   
-   
    
    //Now set up the framegrabber and writer threads.
    // - need SIGSEGV and SIGBUS handling for ImageStreamIO restarts
@@ -379,13 +369,13 @@ int streamWriter::appStartup()
    //Check if we have a safe writeChunkLengthh
    if( m_circBuffLength % m_writeChunkLength != 0)
    {
-      return derivedT::template log<software_critical, -1>({__FILE__,__LINE__, "Write chunk length is not a divisor of circular buffer length."});
+      return log<software_critical, -1>({__FILE__,__LINE__, "Write chunk length is not a divisor of circular buffer length."});
    }
    
    int rv = xrif_new(&m_xrif);
    if( rv != XRIF_NOERROR )
    {
-      return derivedT::template log<software_critical, -1>({__FILE__,__LINE__, "xrif handle allocation or initialization error. Code = " + std::to_string(rv)});
+      return log<software_critical, -1>({__FILE__,__LINE__, "xrif handle allocation or initialization error. Code = " + std::to_string(rv)});
    }
    
    m_xrif_header = (char *) malloc( XRIF_HEADER_SIZE * sizeof(char));
@@ -393,19 +383,18 @@ int streamWriter::appStartup()
    rv = xrif_new(&m_xrif_timing);
    if( rv != XRIF_NOERROR )
    {
-      return derivedT::template log<software_critical, -1>({__FILE__,__LINE__, "xrif handle allocation or initialization error. Code = " + std::to_string(rv)});
+      return log<software_critical, -1>({__FILE__,__LINE__, "xrif handle allocation or initialization error. Code = " + std::to_string(rv)});
    }
    
    m_xrif_timing_header = (char *) malloc( XRIF_HEADER_SIZE * sizeof(char));
    
-   ///\todo need thread start synchro for euid
-   if(fgThreadStart() < 0)
+   if(threadStart( m_fgThread, m_fgThreadInit, m_fgThreadPrio, "framegrabber", this, fgThreadStart)  < 0)
    {
       log<software_critical>({__FILE__, __LINE__});
       return -1;
    }
 
-   if(swThreadStart() < 0)
+   if(threadStart( m_swThread, m_swThreadInit, m_swThreadPrio, "streamwriter", this, swThreadStart) < 0)
    {
       log<software_critical>({__FILE__, __LINE__});
       return -1;
@@ -415,25 +404,49 @@ int streamWriter::appStartup()
 
 }
 
-
-
 inline
 int streamWriter::appLogic()
 {
    //first do a join check to see if other threads have exited.
-   if(pthread_tryjoin_np(m_fgThread.native_handle(),0) == 0)
+   //these will throw if the threads are really gone
+   try
    {
-      log<software_error>({__FILE__, __LINE__, "framegrabber thread has exited"});
-      
+      if(pthread_tryjoin_np(m_fgThread.native_handle(),0) == 0)
+      {
+         log<software_error>({__FILE__, __LINE__, "framegrabber thread has exited"});
+         return -1;
+      }
+   }
+   catch(...)
+   {
+      log<software_error>({__FILE__, __LINE__, "streamwriter thread has exited"});
+      return -1;
+   }
+
+   try 
+   {
+      if(pthread_tryjoin_np(m_swThread.native_handle(),0) == 0)
+      {
+         log<software_error>({__FILE__, __LINE__, "stream thread has exited"});
+         return -1;
+      }
+   }
+   catch(...)
+   {
+      log<software_error>({__FILE__, __LINE__, "streamwriter thread has exited"});
       return -1;
    }
    
-   if(pthread_tryjoin_np(m_swThread.native_handle(),0) == 0)
+   switch(m_writing)
    {
-      log<software_error>({__FILE__, __LINE__, "stream thread has exited"});
-      
-      return -1;
+      case NOT_WRITING:
+         state(stateCodes::READY);
+         break;
+      default:
+         state(stateCodes::OPERATING);
    }
+   
+   updateINDI();
    
    return 0;
 
@@ -442,15 +455,23 @@ int streamWriter::appLogic()
 inline
 int streamWriter::appShutdown()
 {
-   if(m_fgThread.joinable())
+   try
    {
-      m_fgThread.join();
+      if(m_fgThread.joinable())
+      {
+         m_fgThread.join();
+      }
    }
+   catch(...){}
    
-   if(m_swThread.joinable())
+   try 
    {
-      m_swThread.join();
+      if(m_swThread.joinable())
+      {
+         m_swThread.join();
+      }
    }
+   catch(...){}
    
    if(m_xrif)
    {
@@ -531,80 +552,20 @@ void streamWriter::handlerSigSegv( int signum,
 }
 
 inline
-void streamWriter::_fgThreadStart( streamWriter * o)
+void streamWriter::fgThreadStart( streamWriter * o)
 {
    o->fgThreadExec();
 }
 
 inline
-int streamWriter::fgThreadStart()
-{
-   try
-   {
-      m_fgThread  = std::thread( _fgThreadStart, this);
-   }
-   catch( const std::exception & e )
-   {
-      log<software_error>({__FILE__,__LINE__, std::string("Exception on framegrabber thread start: ") + e.what()});
-      return -1;
-   }
-   catch( ... )
-   {
-      log<software_error>({__FILE__,__LINE__, "Unkown exception on framegrabber thread start"});
-      return -1;
-   }
-
-   if(!m_fgThread.joinable())
-   {
-      log<software_error>({__FILE__, __LINE__, "framegrabber thread did not start"});
-      return -1;
-   }
-
-   //Now set the RT priority.
-   
-   int prio=m_fgThreadPrio;
-   if(prio < 0) prio = 0;
-   if(prio > 99) prio = 99;
-
-   sched_param sp;
-   sp.sched_priority = prio;
-
-   //Get the maximum privileges available
-   if( euidCalled() < 0 )
-   {
-      log<software_error>({__FILE__, __LINE__, "Setting euid to called failed."});
-      return -1;
-   }
-   
-   //We set return value based on result from sched_setscheduler
-   //But we make sure to restore privileges no matter what happens.
-   errno = 0;
-   int rv = 0;
-   if(prio > 0) rv = pthread_setschedparam(m_fgThread.native_handle(), MAGAOX_RT_SCHED_POLICY, &sp);
-   else rv = pthread_setschedparam(m_fgThread.native_handle(), SCHED_OTHER, &sp);
-   
-   //Go back to regular privileges
-   if( euidReal() < 0 )
-   {
-      log<software_error>({__FILE__, __LINE__, "Setting euid to real failed."});
-   }
-   
-   if(rv < 0)
-   {
-      return log<software_error,-1>({__FILE__, __LINE__, errno, "Setting F.G. thread scheduler priority to " + std::to_string(prio) + " failed."});
-   }
-   else
-   {
-      return log<text_log,0>("F.G. thread scheduler priority (framegrabber.threadPrio) set to " + std::to_string(prio));
-   }
-   
-
-}
-
-inline
 void streamWriter::fgThreadExec()
 {
-
+   //Wait fpr the thread starter to finish initializing this thread.
+   while(m_fgThreadInit == true && m_shutdown == 0)
+   {
+       sleep(1);
+   }
+   
    IMAGE image;
    bool opened = false;
    
@@ -619,7 +580,7 @@ void streamWriter::fgThreadExec()
       
       while(!opened && !m_shutdown && !m_restart)
       {
-         if( ImageStreamIO_openIm(&image, m_streamName.c_str()) == 0)
+         if( ImageStreamIO_openIm(&image, m_shmimName.c_str()) == 0)
          {
             if(image.md[0].sem <= m_semaphoreNumber) 
             {
@@ -639,15 +600,17 @@ void streamWriter::fgThreadExec()
       
       if(m_shutdown || !opened) return;
     
-      sem = ImageStreamIO_getsemwaitindex(&image, sem); //ask for semaphore we had before
-      if(sem == -1)
+      m_semaphoreNumber = ImageStreamIO_getsemwaitindex(&image, m_semaphoreNumber); //ask for semaphore we had before
+      if(m_semaphoreNumber == -1)
       {
          log<software_critical>({__FILE__,__LINE__, "could not get semaphore index"});
          return;
       }
       
-      m_atype = image.md[0].atype;
-      m_typeSize = ImageStreamIO_typesize(image.md[0].atype);
+      sem = image.semptr[m_semaphoreNumber];
+      
+      m_dataType = image.md[0].datatype;
+      m_typeSize = ImageStreamIO_typesize(m_dataType);
       m_width = image.md[0].size[0];
       m_height = image.md[0].size[1];
       size_t length = image.md[0].size[2];
@@ -657,7 +620,7 @@ void streamWriter::fgThreadExec()
       
       m_rawImageCircBuff = (char *) malloc( m_width*m_height*m_typeSize*m_circBuffLength );
       
-      m_timingCircBuff = (uint64_t *) malloc( 5*m_circBuffLength*sizeof(uint64_t));
+      m_timingCircBuff = (uint64_t *) malloc( 5*sizeof(uint64_t)*m_circBuffLength);
       
       // And allocate teh xrif
       
@@ -711,12 +674,12 @@ void streamWriter::fgThreadExec()
             }
             else curr_image = 0;
 
-            atype = image.md[0].atype;
+            atype = image.md[0].datatype;
             snx = image.md[0].size[0];
             sny = image.md[0].size[1];
             snz = image.md[0].size[2];
          
-            if( atype!= m_atype || snx != m_width || sny != m_height || snz != length )
+            if( atype!= m_dataType || snx != m_width || sny != m_height || snz != length )
             {
                break; //exit the nearest while loop and get the new image setup.
             }
@@ -725,8 +688,9 @@ void streamWriter::fgThreadExec()
          
            
             
-            char * curr_dest = m_rawImageCircBuff + curr_image*m_width*m_height*m_typeSize;
-            char * curr_src = (char *) image.array.raw+ m_currImage*m_width*m_height*m_typeSize; 
+            char * curr_dest = m_rawImageCircBuff + m_currImage*m_width*m_height*m_typeSize;
+            char * curr_src = (char *) image.array.raw + curr_image*m_width*m_height*m_typeSize;
+            
             memcpy( curr_dest, curr_src , m_width*m_height*m_typeSize);
             
             uint64_t * curr_timing = m_timingCircBuff + 5*m_currImage;
@@ -736,11 +700,7 @@ void streamWriter::fgThreadExec()
             curr_timing[3] = image.writetimearray[curr_image].tv_sec;
             curr_timing[4] = image.writetimearray[curr_image].tv_nsec;
             
-            
-           
-         
-            
-            
+            if(m_shutdown && m_writing == WRITING) m_writing = STOP_WRITING;
             switch(m_writing)
             {
                case START_WRITING:
@@ -756,11 +716,11 @@ void streamWriter::fgThreadExec()
                      m_currSaveStart = m_currChunkStart;
                      m_currSaveStop = m_nextChunkStart + m_writeChunkLength;
                      m_currSaveStopFrameNo = image.cntarray[curr_image];
-                     
+                  
                      //Now tell the writer to get going
                      if(sem_post(&m_swSemaphore) < 0)
                      {
-                        derivedT::template log<software_critical>({__FILE__, __LINE__, errno, 0, "Error posting to semaphore"});
+                        log<software_critical>({__FILE__, __LINE__, errno, 0, "Error posting to semaphore"});
                         return;
                      }
                  
@@ -780,7 +740,7 @@ void streamWriter::fgThreadExec()
                   //Now tell the writer to get going
                   if(sem_post(&m_swSemaphore) < 0)
                   {
-                     derivedT::template log<software_critical>({__FILE__, __LINE__, errno, 0, "Error posting to semaphore"});
+                     log<software_critical>({__FILE__, __LINE__, errno, 0, "Error posting to semaphore"});
                      return;
                   }
                   break;
@@ -839,94 +799,29 @@ void streamWriter::fgThreadExec()
 
 
 inline
-void streamWriter::_swThreadStart( streamWriter * o)
+void streamWriter::swThreadStart( streamWriter * s)
 {
-   o->swThreadExec();
-}
-
-inline
-int streamWriter::swThreadStart()
-{
-   try
-   {
-      m_swThread  = std::thread( _swThreadStart, this);
-   }
-   catch( const std::exception & e )
-   {
-      log<software_error>({__FILE__,__LINE__, std::string("Exception on stream writer thread start: ") + e.what()});
-      return -1;
-   }
-   catch( ... )
-   {
-      log<software_error>({__FILE__,__LINE__, "Unkown exception on stream writer thread start"});
-      return -1;
-   }
-
-   if(!m_swThread.joinable())
-   {
-      log<software_error>({__FILE__, __LINE__, "stream writer thread did not start"});
-      return -1;
-   }
-
-   //Now set the RT priority.
-   
-   int prio=m_swThreadPrio;
-   if(prio < 0) prio = 0;
-   if(prio > 99) prio = 99;
-
-   sched_param sp;
-   sp.sched_priority = prio;
-
-   //Get the maximum privileges available
-   if( euidCalled() < 0 )
-   {
-      log<software_error>({__FILE__, __LINE__, "Setting euid to called failed."});
-      return -1;
-   }
-   
-   //We set return value based on result from sched_setscheduler
-   //But we make sure to restore privileges no matter what happens.
-   errno = 0;
-   int rv = 0;
-   if(prio > 0) rv = pthread_setschedparam(m_swThread.native_handle(), MAGAOX_RT_SCHED_POLICY, &sp);
-   else rv = pthread_setschedparam(m_swThread.native_handle(), SCHED_OTHER, &sp);
-   
-   //Go back to regular privileges
-   if( euidReal() < 0 )
-   {
-      log<software_error>({__FILE__, __LINE__, "Setting euid to real failed."});
-   }
-   
-   if(rv < 0)
-   {
-      return log<software_error,-1>({__FILE__, __LINE__, errno, "Setting S.W.. thread scheduler priority to " + std::to_string(prio) + " failed."});
-   }
-   else
-   {
-      return log<text_log,0>("S.W. thread scheduler priority (writer.threadPrio) set to " + std::to_string(prio));
-   }
-   
-
+   s->swThreadExec();
 }
 
 inline
 void streamWriter::swThreadExec()
+{
    //Wait fpr the thread starter to finish initializing this thread.
-   while(m_swThreadInit == true && m_parent->m_shutdown == 0)
+   while(m_swThreadInit == true && m_shutdown == 0)
    {
        sleep(1);
    }
 
-   
    char * fname = nullptr;
    char * fnameTiming = nullptr;
       
    std::string fnameBase;
    std::string fnameTimingBase;
       
-   while(!m_parent->m_shutdown)
+   while(!m_shutdown)
    {
-      while(!m_parent->shutdown() && (!( m_parent->state() == stateCodes::READY || m_parent->state() == stateCodes::OPERATING) || m_parent->powerState() <= 0 ) )
+      while(!shutdown() && (!( state() == stateCodes::READY || state() == stateCodes::OPERATING) ) )
       {
          if(fname) 
          {
@@ -941,6 +836,8 @@ void streamWriter::swThreadExec()
          }
          sleep(1);
       }
+      
+      if(shutdown()) break;
       
       //This will happen after a reconnection, and could update m_shmimName, etc.
       if(fname == nullptr)
@@ -971,7 +868,7 @@ void streamWriter::swThreadExec()
        
       if(clock_gettime(CLOCK_REALTIME, &ts) < 0)
       {
-         derivedT::template log<software_critical>({__FILE__,__LINE__,errno,0,"clock_gettime"}); 
+         log<software_critical>({__FILE__,__LINE__,errno,0,"clock_gettime"}); 
          
          free(fname);
          fname = nullptr;
@@ -990,7 +887,7 @@ void streamWriter::swThreadExec()
          
          if(m_logSaveStart) 
          {
-            derivedT::template log<saving_start>({1,m_currSaveStartFrameNo});
+            log<saving_start>({1,m_currSaveStartFrameNo});
             m_logSaveStart = false;
          }
          
@@ -1001,37 +898,30 @@ void streamWriter::swThreadExec()
          //Configure xrif and copy image data
          xrif_set_size(m_xrif, m_width, m_height, 1, (m_currSaveStop-m_currSaveStart), m_dataType);
 
-         memcpy(m_xrif->raw_buffer, (char *) imageStream.array.raw + m_currSaveStart*m_width*m_height*m_typeSize, (m_currSaveStop-m_currSaveStart)*m_width*m_height*m_typeSize);
-
+         memcpy(m_xrif->raw_buffer,  m_rawImageCircBuff + m_currSaveStart*m_width*m_height*m_typeSize, (m_currSaveStop-m_currSaveStart)*m_width*m_height*m_typeSize);
+         
          //Configure xrif and copy timing data
          xrif_set_size(m_xrif_timing, 5, 1, 1, (m_currSaveStop-m_currSaveStart), XRIF_TYPECODE_UINT64);
-         
-         for(size_t i =0; i< (m_currSaveStop-m_currSaveStart); ++i)
-         {
-            m_xrif_timing->raw_buffer[i*(5*sizeof(uint64_t)) + 0] = imageStream.cntarray[m_currSaveStart + i];
-            m_xrif_timing->raw_buffer[i*(5*sizeof(uint64_t)) + 1] = imageStream.atimearray[m_currSaveStart + i].tv_sec; 
-            m_xrif_timing->raw_buffer[i*(5*sizeof(uint64_t)) + 2] = imageStream.atimearray[m_currSaveStart + i].tv_nsec;
-            m_xrif_timing->raw_buffer[i*(5*sizeof(uint64_t)) + 3] = imageStream.writetimearray[m_currSaveStart + i].tv_sec;
-            m_xrif_timing->raw_buffer[i*(5*sizeof(uint64_t)) + 4] = imageStream.writetimearray[m_currSaveStart + i].tv_nsec;
-         }
-         
-         
+
+         memcpy(m_xrif_timing->raw_buffer, m_timingCircBuff + m_currSaveStart*5, (m_currSaveStop-m_currSaveStart)*5*sizeof(uint64_t));
+
          m_xrif->lz4_acceleration=50; ///\todo make lz4 acceleration a configurable parameter
+         
          xrif_encode(m_xrif);
-      
+
          xrif_write_header( m_xrif_header, m_xrif);
 
          xrif_encode(m_xrif_timing);
       
          xrif_write_header( m_xrif_timing_header, m_xrif_timing);
-         
-         
+
          //Now break down the acq time of the first image in the buffer for use in file name
          tm uttime;//The broken down time.   
-         timespec * fts = &imageStream.atimearray[m_currSaveStart];
+         timespec * fts = (timespec *) (m_timingCircBuff + m_currSaveStart*5 +1);
+                  
          if(gmtime_r(&fts->tv_sec, &uttime) == 0)
          {
-            derivedT::template log<software_critical>({__FILE__,__LINE__,errno,0,"gmtime_r"}); 
+            log<software_critical>({__FILE__,__LINE__,errno,0,"gmtime_r"}); 
             free(fname);
             fname = nullptr;
             
@@ -1040,7 +930,7 @@ void streamWriter::swThreadExec()
             
             return; //will trigger a shutdown
          }
-            
+         
          snprintf(fname + fnameBase.size(), 24, "%04i%02i%02i%02i%02i%02i%09i", uttime.tm_year+1900, uttime.tm_mon+1, uttime.tm_mday, 
                                                                 uttime.tm_hour, uttime.tm_min, uttime.tm_sec, static_cast<int>(fts->tv_nsec));
          snprintf(fnameTiming + fnameTimingBase.size(), 24, "%04i%02i%02i%02i%02i%02i%09i", uttime.tm_year+1900, uttime.tm_mon+1, uttime.tm_mday, 
@@ -1055,7 +945,7 @@ void streamWriter::swThreadExec()
          FILE * fp_xrif = fopen(fname, "wb");
          if(fp_xrif == NULL)
          {
-            derivedT::template log<software_critical>({__FILE__,__LINE__,errno,0,"failed to open file for writing"}); 
+            log<software_critical>({__FILE__,__LINE__,errno,0,"failed to open file for writing"}); 
             
             free(fname);
             fname = nullptr;
@@ -1066,13 +956,11 @@ void streamWriter::swThreadExec()
             return; //will trigger a shutdown
          }
          
-         
-         
          size_t bw = fwrite(m_xrif_header, sizeof(uint8_t), XRIF_HEADER_SIZE, fp_xrif);
          
          if(bw != XRIF_HEADER_SIZE)
          {
-            derivedT::template log<software_critical>({__FILE__,__LINE__,errno,0,"failure writing header to file"}); 
+            log<software_critical>({__FILE__,__LINE__,errno,0,"failure writing header to file"}); 
             fclose(fp_xrif);
             
             free(fname);
@@ -1088,7 +976,7 @@ void streamWriter::swThreadExec()
 
          if(bw != m_xrif->compressed_size)
          {
-            derivedT::template log<software_critical>({__FILE__,__LINE__,errno,0,"failure writing data to file"}); 
+            log<software_critical>({__FILE__,__LINE__,errno,0,"failure writing data to file"}); 
             fclose(fp_xrif);
             
             free(fname);
@@ -1104,7 +992,7 @@ void streamWriter::swThreadExec()
          
          if(bw != XRIF_HEADER_SIZE)
          {
-            derivedT::template log<software_critical>({__FILE__,__LINE__,errno,0,"failure writing timing header to file"}); 
+            log<software_critical>({__FILE__,__LINE__,errno,0,"failure writing timing header to file"}); 
             fclose(fp_xrif);
             
             free(fname);
@@ -1120,7 +1008,7 @@ void streamWriter::swThreadExec()
 
          if(bw != m_xrif_timing->compressed_size)
          {
-            derivedT::template log<software_critical>({__FILE__,__LINE__,errno,0,"failure writing timing data to file"}); 
+            log<software_critical>({__FILE__,__LINE__,errno,0,"failure writing timing data to file"}); 
             fclose(fp_xrif);
             
             free(fname);
@@ -1140,12 +1028,12 @@ void streamWriter::swThreadExec()
 
          std::cerr << wt << "\n";
          
-         
          if(m_writing == STOP_WRITING) 
          {
             m_writing = NOT_WRITING;
-            derivedT::template log<saving_stop>({0,m_currSaveStopFrameNo});
+            log<saving_stop>({0,m_currSaveStopFrameNo});
          }
+         
       }
       else
       {
@@ -1156,7 +1044,7 @@ void streamWriter::swThreadExec()
          //Otherwise, report an error.
          if(errno != ETIMEDOUT)
          {
-            derivedT::template log<software_error>({__FILE__, __LINE__,errno, "sem_timedwait"});
+            log<software_error>({__FILE__, __LINE__,errno, "sem_timedwait"});
             break;
          }
       }
@@ -1180,48 +1068,80 @@ INDI_NEWCALLBACK_DEFN(streamWriter, m_indiP_writing)(const pcf::IndiProperty &ip
 {
    if (ipRecv.getName() == m_indiP_writing.getName())
    {
+      int current = -1;
+      int target = -1;
       
-      return 0;
+      if(ipRecv.find("current"))
+      {
+         current = ipRecv["current"].get<int>();
+      }
+      
+      if(ipRecv.find("target"))
+      {
+         target = ipRecv["target"].get<int>();
+      }
+      
+      if(target == -1 ) target = current;
+      
+      if(target == 0 && (m_writing == WRITING || m_writing == START_WRITING))
+      {
+         m_writing = STOP_WRITING;
+      }
+      
+      if(target == 1 && m_writing == NOT_WRITING)
+      {
+         m_writing = START_WRITING;
+      }
+      
+      //Lock the m parent's mutex, waiting if necessary
+      std::unique_lock<std::mutex> lock( m_indiMutex );
+      
+      //And update target
+       updateIfChanged(m_indiP_writing, "target", target);
+      
    }
+   
    return -1;
 }
 
-
-updateINDI:
+inline
+void streamWriter::updateINDI()
+{
    //Only update this if not changing
    if(m_writing == NOT_WRITING || m_writing == WRITING)
    {
-      indi::updateIfChanged(m_indiP_writing, "current", (int) (m_writing == WRITING), m_parent->m_indiDriver);
+      indi::updateIfChanged(m_indiP_writing, "current", (int) (m_writing == WRITING), m_indiDriver);
       
       if(m_xrif && m_writing == WRITING)
       {
-         indi::updateIfChanged(m_indiP_xrifStats, "ratio", m_xrif->compression_ratio, m_parent->m_indiDriver);
+         indi::updateIfChanged(m_indiP_xrifStats, "ratio", m_xrif->compression_ratio, m_indiDriver);
          
-         indi::updateIfChanged(m_indiP_xrifStats, "encodeMBsec", m_xrif->encode_rate/1048576.0, m_parent->m_indiDriver);
-         indi::updateIfChanged(m_indiP_xrifStats, "encodeFPS", m_xrif->encode_rate/(m_width*m_height*m_typeSize), m_parent->m_indiDriver);
+         indi::updateIfChanged(m_indiP_xrifStats, "encodeMBsec", m_xrif->encode_rate/1048576.0, m_indiDriver);
+         indi::updateIfChanged(m_indiP_xrifStats, "encodeFPS", m_xrif->encode_rate/(m_width*m_height*m_typeSize), m_indiDriver);
          
-         indi::updateIfChanged(m_indiP_xrifStats, "differenceMBsec", m_xrif->difference_rate/1048576.0, m_parent->m_indiDriver);
-         indi::updateIfChanged(m_indiP_xrifStats, "differenceFPS", m_xrif->difference_rate/(m_width*m_height*m_typeSize), m_parent->m_indiDriver);
+         indi::updateIfChanged(m_indiP_xrifStats, "differenceMBsec", m_xrif->difference_rate/1048576.0, m_indiDriver);
+         indi::updateIfChanged(m_indiP_xrifStats, "differenceFPS", m_xrif->difference_rate/(m_width*m_height*m_typeSize), m_indiDriver);
          
-         indi::updateIfChanged(m_indiP_xrifStats, "reorderMBsec", m_xrif->reorder_rate/1048576.0, m_parent->m_indiDriver);
-         indi::updateIfChanged(m_indiP_xrifStats, "reorderFPS", m_xrif->reorder_rate/(m_width*m_height*m_typeSize), m_parent->m_indiDriver);
+         indi::updateIfChanged(m_indiP_xrifStats, "reorderMBsec", m_xrif->reorder_rate/1048576.0, m_indiDriver);
+         indi::updateIfChanged(m_indiP_xrifStats, "reorderFPS", m_xrif->reorder_rate/(m_width*m_height*m_typeSize), m_indiDriver);
 
-         indi::updateIfChanged(m_indiP_xrifStats, "compressMBsec", m_xrif->compress_rate/1048576.0, m_parent->m_indiDriver);
-         indi::updateIfChanged(m_indiP_xrifStats, "compressFPS", m_xrif->compress_rate/(m_width*m_height*m_typeSize), m_parent->m_indiDriver);
+         indi::updateIfChanged(m_indiP_xrifStats, "compressMBsec", m_xrif->compress_rate/1048576.0, m_indiDriver);
+         indi::updateIfChanged(m_indiP_xrifStats, "compressFPS", m_xrif->compress_rate/(m_width*m_height*m_typeSize), m_indiDriver);
       }
       else
       {
-         indi::updateIfChanged(m_indiP_xrifStats, "ratio", 0.0, m_parent->m_indiDriver);
-         indi::updateIfChanged(m_indiP_xrifStats, "encodeMBsec", 0.0, m_parent->m_indiDriver);
-         indi::updateIfChanged(m_indiP_xrifStats, "encodeFPS", 0.0, m_parent->m_indiDriver);
-         indi::updateIfChanged(m_indiP_xrifStats, "differenceMBsec", 0.0, m_parent->m_indiDriver);
-         indi::updateIfChanged(m_indiP_xrifStats, "differenceFPS", 0.0, m_parent->m_indiDriver);
-         indi::updateIfChanged(m_indiP_xrifStats, "reorderMBsec", 0.0, m_parent->m_indiDriver);
-         indi::updateIfChanged(m_indiP_xrifStats, "reorderFPS", 0.0, m_parent->m_indiDriver);
-         indi::updateIfChanged(m_indiP_xrifStats, "compressMBsec", 0.0, m_parent->m_indiDriver);
-         indi::updateIfChanged(m_indiP_xrifStats, "compressFPS", 0.0, m_parent->m_indiDriver);
+         indi::updateIfChanged(m_indiP_xrifStats, "ratio", 0.0, m_indiDriver);
+         indi::updateIfChanged(m_indiP_xrifStats, "encodeMBsec", 0.0, m_indiDriver);
+         indi::updateIfChanged(m_indiP_xrifStats, "encodeFPS", 0.0, m_indiDriver);
+         indi::updateIfChanged(m_indiP_xrifStats, "differenceMBsec", 0.0, m_indiDriver);
+         indi::updateIfChanged(m_indiP_xrifStats, "differenceFPS", 0.0, m_indiDriver);
+         indi::updateIfChanged(m_indiP_xrifStats, "reorderMBsec", 0.0, m_indiDriver);
+         indi::updateIfChanged(m_indiP_xrifStats, "reorderFPS", 0.0, m_indiDriver);
+         indi::updateIfChanged(m_indiP_xrifStats, "compressMBsec", 0.0, m_indiDriver);
+         indi::updateIfChanged(m_indiP_xrifStats, "compressFPS", 0.0, m_indiDriver);
       }
    }
+}
 
 }//namespace app
 } //namespace MagAOX
