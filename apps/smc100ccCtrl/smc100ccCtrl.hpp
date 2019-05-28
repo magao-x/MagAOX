@@ -1,8 +1,8 @@
-/** \file ttmTalker.hpp
+/** \file smc100ccCtrl.hpp
   * \brief The ttm Talker for generic usb devices
   * \author Chris Bohlman (cbohlmanaz@gmail.com)
   *
-  * \ingroup ttmTalker_files
+  * \ingroup smc100ccCtrl_files
   *
   * History:
   * - 2018-08-10 created by CJB
@@ -11,10 +11,10 @@
   * - make clean (recommended)
   * - make CACAO=false
   * - sudo make install
-  * - /opt/MagAOX/bin/ttmTalker 
+  * - /opt/MagAOX/bin/smc100ccCtrl 
   */
-#ifndef ttmTalker_hpp
-#define ttmTalker_hpp
+#ifndef smc100ccCtrl_hpp
+#define smc100ccCtrl_hpp
 
 #include "../../libMagAOX/libMagAOX.hpp" //Note this is included on command line to trigger pch
 #include "../../magaox_git_version.h"
@@ -45,7 +45,7 @@ namespace app
   Change to stateCodes::OPERATING and stateCodes::READY
 
   */
-class ttmTalker : public MagAOXApp<>, public tty::usbDevice
+class smc100ccCtrl : public MagAOXApp<>, public tty::usbDevice
 {
 
 protected:	
@@ -55,13 +55,13 @@ protected:
 
 public:
 
-   INDI_NEWCALLBACK_DECL(ttmTalker, m_indiP_position);
+   INDI_NEWCALLBACK_DECL(smc100ccCtrl, m_indiP_position);
 
 
    /// Default c'tor.
-   ttmTalker();
+   smc100ccCtrl();
 
-   ~ttmTalker() noexcept
+   ~smc100ccCtrl() noexcept
    {
    }
 
@@ -134,17 +134,17 @@ public:
 
 };
 
-inline ttmTalker::ttmTalker() : MagAOXApp(MAGAOX_CURRENT_SHA1, MAGAOX_REPO_MODIFIED)
+inline smc100ccCtrl::smc100ccCtrl() : MagAOXApp(MAGAOX_CURRENT_SHA1, MAGAOX_REPO_MODIFIED)
 {
    return;
 }
 
-void ttmTalker::setupConfig()
+void smc100ccCtrl::setupConfig()
 {
    tty::usbDevice::setupConfig(config);
 }
 
-void ttmTalker::loadConfig()
+void smc100ccCtrl::loadConfig()
 {
    this->m_speed = B115200; //default for Zaber stages.  Will be overridden by any config setting.
 
@@ -156,7 +156,7 @@ void ttmTalker::loadConfig()
    }
 }
 
-int ttmTalker::appStartup()
+int smc100ccCtrl::appStartup()
 {
 	
     REG_INDI_NEWPROP(m_indiP_position, "position", pcf::IndiProperty::Number);
@@ -186,7 +186,7 @@ int ttmTalker::appStartup()
    return 0;
 }
 
-int ttmTalker::appLogic()
+int smc100ccCtrl::appLogic()
 {	
 	if( state() == stateCodes::INITIALIZED )
 	{
@@ -234,7 +234,7 @@ int ttmTalker::appLogic()
    if( state() == stateCodes::CONNECTED )
    {
       // Only test connection before a command goes through
-      
+      // position, moving status, errors
       if( testConnection() != 0)
       {
           state(stateCodes::NOTCONNECTED);
@@ -248,13 +248,13 @@ int ttmTalker::appLogic()
             updateIfChanged(m_indiP_position, "curent", current);
          }
          else {
-            std::cout << "There's been an error with getting current controller position"
+            std::cout << "There's been an error with getting current controller position" << std::endl;
          }
          // Check target and position
          if (checkPosition() != 0) {
             std::cout << "There's been an error with movement." << std::endl;
          }
-         // Log errors
+         // TODO: Log errors: use TE after every command?
       }
    }
 
@@ -272,13 +272,13 @@ int ttmTalker::appLogic()
             updateIfChanged(m_indiP_position, "curent", current);
          }
          else {
-            std::cout << "There's been an error with getting current controller position"
+            std::cout << "There's been an error with getting current controller position" << std::endl;
          }
          // Check target and position
          if (checkPosition() != 0) {
             std::cout << "There's been an error with movement." << std::endl;
          }
-         // Log errors
+         // TODO: Log errors: use TE after every command?
       }
       else if (rv == TTY_E_TCGETATTR) 
       {
@@ -329,7 +329,7 @@ int ttmTalker::appLogic()
    return 0;
 }
 
-int ttmTalker::testConnection() 
+int smc100ccCtrl::testConnection() 
 {
    std::cout << "Testing connection..." << std::endl;
    int uid_rv = euidCalled();
@@ -393,8 +393,9 @@ int ttmTalker::testConnection()
    	//Test successful
       std::cout << "Test successful." << std::endl;
       // Set up moving if controller is not homed
-
-      setUpMoving();
+      if (state() == stateCodes::CONNECTED) {
+         setUpMoving();
+      }  
    	return 0;
    }
    else {
@@ -404,12 +405,12 @@ int ttmTalker::testConnection()
    }
 }
 
-int ttmTalker::appShutdown()
+int smc100ccCtrl::appShutdown()
 {
 	return 0;
 }
 
-int ttmTalker::callCommand()
+int smc100ccCtrl::callCommand()
 {
 	/*
 	// Set baud rate to 115200.
@@ -436,7 +437,7 @@ int ttmTalker::callCommand()
 	return 0;
 }
 
-int ttmTalker::setUpMoving() 
+int smc100ccCtrl::setUpMoving() 
 {
    // Execute OR command
    int uid_rv = euidCalled();
@@ -483,11 +484,11 @@ int ttmTalker::setUpMoving()
    {
       std::cerr << MagAOX::tty::ttyErrorString(rv) << std::endl;
    } 
-
+   state(stateCodes::READY);
    return 0;
 }
 
-int ttmTalker::moveToPosition(float pos) 
+int smc100ccCtrl::moveToPosition(float pos) 
 {
    int uid_rv = euidCalled();
    if(uid_rv < 0)
@@ -534,10 +535,12 @@ int ttmTalker::moveToPosition(float pos)
       std::cerr << MagAOX::tty::ttyErrorString(rv) << std::endl;
    }
 
+   state(stateCodes::OPERATING);
+
    return 0;
 }
 
-int ttmTalker::checkPosition() {
+int smc100ccCtrl::checkPosition() {
    int uid_rv = euidCalled();
    if(uid_rv < 0)
    {
@@ -594,33 +597,42 @@ int ttmTalker::checkPosition() {
       return -1;
    }
 
-   // Where is current updated in the program?
-   if (output == "1TS000028\r\n") {
+   if (output.substr(0, 9) == "1TS000028") {
       // Controller is moving.
       return 0;
    }
    else {
+      state(stateCodes::READY);
+
+      // TODO: Get target position and current position from INDI (This code doesn't compile)
+
       float current = -99, target = -99;
 
-      try
-      {
-         current = ipRecv["current"].get<float>();
-      }
-      catch(...){}
+      // try
+      // {
+      //    current = ipRecv["current"].get<float>();
+      // }
+      // catch(...){}
       
-      try
-      {
-         target = ipRecv["target"].get<float>();
-      }
-      catch(...){}
+      // try
+      // {
+      //    target = ipRecv["target"].get<float>();
+      // }
+      // catch(...){}
 
       // TODO: Check if target position is equal to current position with error band
+
+      if (target != current) {
+         std::cerr << "Current and target don't match when controller is not moving" << std::endl;
+         return -1;
+      }
 
       return 0;
    }
 }
 
-int ttmTalker::getPosition(float& current) {
+int smc100ccCtrl::getPosition(float& current) 
+{
    int uid_rv = euidCalled();
    if(uid_rv < 0)
    {
@@ -655,7 +667,7 @@ int ttmTalker::getPosition(float& current) {
 
    std::string buffer{"1TP\r\n"};
    std::string output;
-   output.resize(11);
+   output.resize(13);
    rv = MagAOX::tty::ttyWriteRead( 
       output,              ///< [out] The string in which to store the output.
       buffer,              ///< [in] The characters to write to the tty.
@@ -671,17 +683,24 @@ int ttmTalker::getPosition(float& current) {
       std::cerr << MagAOX::tty::ttyErrorString(rv) << std::endl;
    } 
    
-   if (output.size() != 11)
-   {
-      std::cerr << "Wrongly sized output: " << output << " = size " << output.size() << std::endl;
-      return -1;
-   }
+   // TODO: What sizes should positive and negative returns be?
+   // if (output.size() != 13)
+   // {
+   //    std::cerr << "Wrongly sized output: " << output << " = size " << output.size() << std::endl;
+   //    return -1;
+   // }
 
    // parse current and place into argument
+   try {
+      current = std::stof(output.substr(3));
+   }
+   catch (...) {
+   	return -1;
+   }
    return 0;
 }
 
-INDI_NEWCALLBACK_DEFN(ttmTalker, m_indiP_position)(const pcf::IndiProperty &ipRecv)
+INDI_NEWCALLBACK_DEFN(smc100ccCtrl, m_indiP_position)(const pcf::IndiProperty &ipRecv)
 {
    if (ipRecv.getName() == m_indiP_position.getName())
    {
@@ -707,6 +726,10 @@ INDI_NEWCALLBACK_DEFN(ttmTalker, m_indiP_position)(const pcf::IndiProperty &ipRe
       std::unique_lock<std::mutex> lock(m_indiMutex);
 
       updateIfChanged(m_indiP_position, "target", target);
+
+      // Check for state in here?
+      // Busy wait until we have a non moving state
+      while (state() == stateCodes::OPERATING);
       
       return moveToPosition(target);
       
@@ -717,4 +740,4 @@ INDI_NEWCALLBACK_DEFN(ttmTalker, m_indiP_position)(const pcf::IndiProperty &ipRe
 } //namespace app
 } //namespace MagAOX
 
-#endif //ttmTalker_hpp
+#endif //smc100ccCtrl_hpp
