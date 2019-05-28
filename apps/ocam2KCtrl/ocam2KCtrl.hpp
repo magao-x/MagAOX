@@ -11,8 +11,6 @@
 
 
 #include <edtinc.h>
-#include <ImageStruct.h>
-#include <ImageStreamIO.h>
 
 
 
@@ -116,9 +114,12 @@ int loadCameraConfig( cameraConfigMap & ccmap,
   * \todo implement ImageStreamIO circular buffer, with config setting
   * \todo calculate frames skipped due to timeouts.
   */
-class ocam2KCtrl : public MagAOXApp<>, public dev::ioDevice
+class ocam2KCtrl : public MagAOXApp<>, public dev::ioDevice, public dev::frameGrabber<ocam2KCtrl>
 {
 
+   friend class dev::frameGrabber<ocam2KCtrl>;
+   
+   
 protected:
 
    /** \name configurable parameters 
@@ -129,11 +130,11 @@ protected:
    int m_channel {0}; ///< EDT PDV board channel number
    int m_numBuffs {4}; ///< EDT PDV DMA buffer size, indicating number of images.
    
-   int m_fgThreadPrio {1}; ///< Priority of the framegrabber thread, should normally be > 00.
+   //int m_fgThreadPrio {1}; ///< Priority of the framegrabber thread, should normally be > 00.
 
-   std::string m_shmimName {"ocam2k"}; ///< The name of the shared memory image, is used in `/tmp/<shmimName>.im.shm`.  Default is `ocam2k`.
+   //std::string m_shmimName {"ocam2k"}; ///< The name of the shared memory image, is used in `/tmp/<shmimName>.im.shm`.  Default is `ocam2k`.
    
-   int m_shmemCubeSz {1}; ///< The size of the shared memory image cube.  Default is 1.
+   //int m_shmemCubeSz {1}; ///< The size of the shared memory image cube.  Default is 1.
 
    //Camera:
    unsigned long m_powerOnWait {10}; ///< Time in sec to wait for camera boot after power on.
@@ -150,35 +151,24 @@ protected:
    
    PdvDev * m_pdv {nullptr}; ///< The EDT PDV device handle
 
+   int m_raw_height {0};
+   
+   ocam2_id m_ocam2_id {0};
+   
+   u_char * m_image_p {nullptr};
+   
    float m_fpsSet {0}; ///< The commanded fps, as returned by the camera
 
    int m_powerOnCounter {0}; ///< Counts numer of loops after power on, implements delay for camera bootup.
-   
-   bool m_fgThreadInit {true}; ///< Synchronizer for thread startup, to allow priority setting to finish.
 
    std::string m_modeName;
    std::string m_nextMode;
    
-   int m_width {0}; ///< The width of the image according to the framegrabber, not necessarily the true image width.
-   int m_height {0}; ///< The height of the image frame according the framegrabber, not necessarily the true image height.
-   int m_depth {0}; ///< The pixel bit depth according to the framegrabber
-   std::string m_cameraType; ///< The camera type according to the framegrabber
+  
     
-      
    long m_currImageNumber {-1};
-   double m_currImageTimestamp {0};
-   double m_currImageDMATimestamp {0};
-      
-   long m_lastImageNumber {-1};
-      
-   long m_firstGoodImageNumber {-1};
-   double m_firstGoodImageTimestamp {0};
-   double m_firstGoodImageDMATimestamp {0};
-   
-   long m_framesSkipped = 0;
-      
-   bool m_resetFPS {false};
-   bool m_reconfig {false};
+       
+   long m_lastImageNumber {-1};  
    
    unsigned m_emGain {1};
    
@@ -230,20 +220,12 @@ public:
    
    int setEMGain( unsigned emg );
    
-protected:
+   int configureAcquisition();
+   int startAcquisition();
+   int acquireAndCheckValid();
+   int loadImageIntoStream(void * dest);
+   int reconfig();
    
-
-   std::thread m_fgThread; ///< A separate thread for the actual framegrabbings
-
-   ///Thread starter, called by fgThreadStart on thread construction.  Calls fgThreadExec.
-   static void _fgThreadStart( ocam2KCtrl * o /**< [in] a pointer to an ocam2KCtrl instance (normally this) */);
-
-   /// Start the log capture.
-   int fgThreadStart();
-
-   /// Execute the log capture.
-   void fgThreadExec();
-
    
    //INDI:
 protected:
@@ -285,12 +267,9 @@ void ocam2KCtrl::setupConfig()
    config.add("framegrabber.pdv_unit", "", "framegrabber.pdv_unit", argType::Required, "framegrabber", "pdv_unit", false, "int", "The EDT PDV framegrabber unit number.  Default is 0.");
    config.add("framegrabber.pdv_channel", "", "framegrabber.pdv_channel", argType::Required, "framegrabber", "pdv_channel", false, "int", "The EDT PDV framegrabber channel number.  Default is 0.");
    config.add("framegrabber.numBuffs", "", "framegrabber.numBuffs", argType::Required, "framegrabber", "numBuffs", false, "int", "The EDT PDV framegrabber DMA buffer size [images].  Default is 4.");
-   config.add("framegrabber.threadPrio", "", "framegrabber.threadPrio", argType::Required, "framegrabber", "threadPrio", false, "int", "The real-time priority of the fraemgrabber thread.");
    
-   config.add("framegrabber.shmimName", "", "framegrabber.shmimName", argType::Required, "framegrabber", "shmimName", false, "string", "The name of the ImageStreamIO shared memory image. Will be used as /tmp/<shmimName>.im.shm.");
-   
-   config.add("framegrabber.shmemCubeSz", "", "framegrabber.shmemCubeSz", argType::Required, "framegrabber", "shmemCubeSz", false, "int", "The cube size (number of images) in the shared memory buffer.");
-   
+   dev::frameGrabber<ocam2KCtrl>::setupConfig(config);
+ 
    config.add("camera.powerOnWait", "", "camera.powerOnWait", argType::Required, "camera", "powerOnWait", false, "int", "Time after power-on to begin attempting connections [sec].  Default is 10 sec.");
    
    config.add("camera.startupTemp", "", "camera.startupTemp", argType::Required, "camera", "startupTemp", false, "float", "The temperature setpoint to set after a power-on [C].  Default is 20 C.");
@@ -310,14 +289,15 @@ void ocam2KCtrl::loadConfig()
    config(m_unit, "framegrabber.pdv_unit");
    config(m_channel, "framegrabber.pdv_channel");
    config(m_numBuffs, "framegrabber.numBuffs");
-   config(m_fgThreadPrio, "framegrabber.threadPrio");
-   config(m_shmimName, "framegrabber.shmimName");
-   config(m_shmemCubeSz, "framegrabber.shmemCubeSz");
+  
+
    
    config(m_powerOnWait, "camera.powerOnWait");
    config(m_startupTemp, "camera.startupTemp");
    config(m_startupMode, "camera.startupMode");
    config(m_ocamDescrambleFile, "camera.ocamDescrambleFile");
+
+   dev::frameGrabber<ocam2KCtrl>::loadConfig(config);
    
    int rv = loadCameraConfig(m_cameraModes, config);
    
@@ -440,11 +420,11 @@ int ocam2KCtrl::appStartup()
       return -1;
    }
    
-   if(fgThreadStart() < 0)
+   if(dev::frameGrabber<ocam2KCtrl>::appStartup() < 0)
    {
-      log<software_error>({__FILE__, __LINE__});
-      return -1;
+      return log<software_critical,-1>({__FILE__,__LINE__});
    }
+   
    
    return 0;
 
@@ -455,12 +435,10 @@ int ocam2KCtrl::appStartup()
 inline
 int ocam2KCtrl::appLogic()
 {
-   //first do a join check to see if other threads have exited.
-   if(pthread_tryjoin_np(m_fgThread.native_handle(),0) == 0)
+   //first run frameGrabber's appLogic to see if the f.g. thread has exited.
+   if(dev::frameGrabber<ocam2KCtrl>::appLogic() < 0)
    {
-      log<software_error>({__FILE__, __LINE__, "framegrabber thread has exited"});
-      
-      return -1;
+      return log<software_error, -1>({__FILE__, __LINE__});
    }
    
    if( state() == stateCodes::POWERON )
@@ -550,6 +528,13 @@ int ocam2KCtrl::appLogic()
          state(stateCodes::ERROR);
          return 0;
       }
+      
+      if(frameGrabber<ocam2KCtrl>::updateINDI() < 0)
+      {
+         log<software_error>({__FILE__, __LINE__});
+         state(stateCodes::ERROR);
+         return 0;
+      }
    }
 
    //Fall through check?
@@ -598,10 +583,8 @@ int ocam2KCtrl::whilePowerOff()
 inline
 int ocam2KCtrl::appShutdown()
 {
-   if(m_fgThread.joinable())
-   {
-      m_fgThread.join();
-   }
+   dev::frameGrabber<ocam2KCtrl>::appShutdown();
+   
    return 0;
 }
 
@@ -688,15 +671,20 @@ int ocam2KCtrl::pdvConfig(std::string & modeName)
 
    pdv_serial_read_enable(m_pdv); //This is undocumented, don't know if it's really needed.
    
-   m_width = pdv_get_width(m_pdv);
-   m_height = pdv_get_height(m_pdv);
-   m_depth = pdv_get_depth(m_pdv);
+   int width = pdv_get_width(m_pdv);
+   m_raw_height = pdv_get_height(m_pdv);
+   int depth = pdv_get_depth(m_pdv);
    m_cameraType = pdv_get_cameratype(m_pdv);
 
    log<text_log>("Initialized framegrabber: " + m_cameraType);
-   log<text_log>("WxHxD: " + std::to_string(m_width) + " X " + std::to_string(m_height) + " X " + std::to_string(m_depth));
+   log<text_log>("WxHxD: " + std::to_string(width) + " X " + std::to_string(m_raw_height) + " X " + std::to_string(depth));
 
-   
+   /*
+    * allocate four buffers for optimal pdv ring buffer pipeline (reduce if
+    * memory is at a premium)
+    */
+   pdv_multibuf(m_pdv, m_numBuffs);
+   log<text_log>("allocated " + std::to_string(m_numBuffs) + " buffers");
   
    
    log<text_log>("camera configured with: " +m_cameraModes[modeName].m_serialCommand);
@@ -779,16 +767,7 @@ int ocam2KCtrl::getFPS()
 
       updateIfChanged(m_indiP_fps, "current", m_fpsSet);
 
-      double fpsMeas;
-      
-      if(m_currImageNumber > m_firstGoodImageNumber)
-      {
-         fpsMeas = (m_currImageNumber - m_firstGoodImageNumber)/(m_currImageTimestamp-m_firstGoodImageTimestamp);
-      }
-      else
-      {
-         fpsMeas = ( std::numeric_limits<unsigned int>::max() - m_firstGoodImageNumber + m_currImageNumber)/(m_currImageTimestamp-m_firstGoodImageTimestamp);
-      }
+      double fpsMeas = 0;
       
       updateIfChanged(m_indiP_fps, "measured", fpsMeas);
       
@@ -811,8 +790,6 @@ int ocam2KCtrl::setFPS(float fps)
    {
       ///\todo check response
       log<text_log>({"set fps: " + fpsStr});
-      
-      m_resetFPS = true;
       
       return 0;
    }
@@ -861,367 +838,214 @@ int ocam2KCtrl::setEMGain( unsigned emg )
    else return log<software_error,-1>({__FILE__, __LINE__});
    
 }
-   
-inline
-void ocam2KCtrl::_fgThreadStart( ocam2KCtrl * o)
-{
-   o->fgThreadExec();
-}
 
 inline
-int ocam2KCtrl::fgThreadStart()
+int ocam2KCtrl::configureAcquisition()
 {
-   m_fgThreadInit = true;
-   try
+   //lock mutex
+   std::unique_lock<std::mutex> lock(m_indiMutex);
+   
+   //Send command to camera to place it in the correct mode
+   std::string response;
+   if( pdvSerialWriteRead( response, m_pdv, m_cameraModes[m_modeName].m_serialCommand, m_readTimeout) != 0)
    {
-      m_fgThread  = std::thread( _fgThreadStart, this);
-   }
-   catch( const std::exception & e )
-   {
-      log<software_error>({__FILE__,__LINE__, std::string("Exception on framegrabber thread start: ") + e.what()});
+      log<software_error>({__FILE__, __LINE__, "Error sending command to set mode"});
+      sleep(1);
       return -1;
    }
-   catch( ... )
-   {
-      log<software_error>({__FILE__,__LINE__, "Unkown exception on framegrabber thread start"});
-      return -1;
-   }
-
-   if(!m_fgThread.joinable())
-   {
-      log<software_error>({__FILE__, __LINE__, "framegrabber thread did not start"});
-      return -1;
-   }
-
-   //Now set the RT priority.
+    ///\todo check response of pdvSerialWriteRead
    
-   int prio=m_fgThreadPrio;
-   if(prio < 0) prio = 0;
-   if(prio > 99) prio = 99;
+   if(m_fpsSet > 0) setFPS(m_fpsSet);
+   
+   log<text_log>("Send command to set mode: " + m_cameraModes[m_modeName].m_serialCommand);
+   log<text_log>("Response was: " + response);
+  
+   updateIfChanged(m_indiP_mode, "current", m_modeName);
+   updateIfChanged(m_indiP_mode, "target", std::string(""));
+   
+ 
+   /* Initialize the OCAM2 SDK
+       */
 
-   sched_param sp;
-   sp.sched_priority = prio;
+   if(m_ocam2_id > 0)
+   {
+      ocam2_exit(m_ocam2_id);
+   }
+   ocam2_rc rc;
+   ocam2_mode mode;
 
-   //Get the maximum privileges available
-   if( euidCalled() < 0 )
+   int OCAM_SZ;
+   if(m_raw_height == 121)
    {
-      log<software_error>({__FILE__, __LINE__, "Setting euid to called failed."});
-      return -1;
+      mode = OCAM2_NORMAL;
+      OCAM_SZ = 240;
    }
-   
-   //We set return value based on result from sched_setscheduler
-   //But we make sure to restore privileges no matter what happens.
-   errno = 0;
-   int rv = 0;
-   if(prio > 0) rv = pthread_setschedparam(m_fgThread.native_handle(), MAGAOX_RT_SCHED_POLICY, &sp);
-   else rv = pthread_setschedparam(m_fgThread.native_handle(), SCHED_OTHER, &sp);
-   
-   //Go back to regular privileges
-   if( euidReal() < 0 )
+   else if (m_raw_height == 62)
    {
-      log<software_error>({__FILE__, __LINE__, "Setting euid to real failed."});
-   }
-   
-   if(rv < 0)
-   {
-      return log<software_error,-1>({__FILE__, __LINE__, errno, "Setting F.G. thread scheduler priority to " + std::to_string(prio) + " failed."});
+      mode = OCAM2_BINNING;
+      OCAM_SZ = 120;
    }
    else
    {
-      m_fgThreadInit = false;
-      return log<text_log,0>("F.G. thread scheduler priority (framegrabber.threadPrio) set to " + std::to_string(prio));
+      log<text_log>("Unrecognized OCAM2 mode.", logPrio::LOG_ERROR);
+      return -1;
+   }
+
+   std::string ocamDescrambleFile = m_configDir + "/" + m_ocamDescrambleFile;
+
+   std::cerr << "ocamDescrambleFile: " << ocamDescrambleFile << std::endl;
+   rc=ocam2_init(mode, ocamDescrambleFile.c_str(), &m_ocam2_id);
+   if (rc != OCAM2_OK)
+   {
+      log<text_log>("ocam2_init error. Failed to initialize OCAM SDK with descramble file: " + ocamDescrambleFile, logPrio::LOG_ERROR);
+      return -1;
    }
    
 
+   log<text_log>("OCAM2K initialized. id: " + std::to_string(m_ocam2_id));
+   log<text_log>(std::string("OCAM2K mode is:") + ocam2_modeStr(ocam2_getMode(m_ocam2_id)));
+   
+   m_width = OCAM_SZ;
+   m_height = OCAM_SZ;
+   m_dataType = _DATATYPE_INT16;
+   
+   return 0;
+}
+   
+inline
+int ocam2KCtrl::startAcquisition()
+{
+   pdv_start_images(m_pdv, m_numBuffs);
+   
+ 
+   m_lastImageNumber = -1;
+   return 0;
 }
 
 inline
-void ocam2KCtrl::fgThreadExec()
+int ocam2KCtrl::acquireAndCheckValid()
 {
-   //Waot fpr the thread starter to finish initializing this thread.
-   while(m_fgThreadInit == true && m_shutdown == 0)
+   
+   /*
+    * get the image and immediately start the next one (if not the last
+    * time through the loop). Processing (saving to a file in this case)
+    * can then occur in parallel with the next acquisition
+    */
+   uint dmaTimeStamp[2];
+   m_image_p = pdv_wait_last_image_timed(m_pdv, dmaTimeStamp);
+   //m_image_p = pdv_wait_image_timed(m_pdv, dmaTimeStamp);
+   pdv_start_image(m_pdv);
+
+   m_currImageTimestamp.tv_sec = dmaTimeStamp[0];
+   m_currImageTimestamp.tv_nsec = dmaTimeStamp[1];
+   
+   /* Removed all pdv timeout and overrun checking, since we can rely on frame number from the camera
+      to detect missed and corrupted frames.
+   
+      See ef0dd24 for last version with full checks in it.
+   */
+  
+   //Get the image number to see if this is valid.
+   //This is how it is in the ocam2_sdk:
+   unsigned currImageNumber = ((int *)m_image_p)[OCAM2_IMAGE_NB_OFFSET/4]; /* int offset */
+   m_currImageNumber = currImageNumber;
+   
+   //For the first loop after a restart
+   if( m_lastImageNumber == -1 ) 
    {
-       sleep(1);
+      m_lastImageNumber = m_currImageNumber - 1;
    }
-
-   //Create and initialize the ImageStreamIO buffer.
-   //It will only be recreated if needed.
-   IMAGE imageStream;
-   uint32_t imsize[3];
-   imsize[0] = 120;
-   imsize[1] = 120;
-   imsize[2] = 1;
-   ImageStreamIO_createIm(&imageStream, m_shmimName.c_str(), 2, imsize, _DATATYPE_INT16, 1, 0);
       
-   while(m_shutdown == 0)
+   if(m_currImageNumber - m_lastImageNumber != 1)
    {
-      while(!m_shutdown && (!( state() == stateCodes::READY || state() == stateCodes::OPERATING) || m_powerState <= 0 || m_pdv == nullptr ) )
+      //Detect exact condition of a wraparound on the unsigned int.
+      // Yes, this can only happen once every 13.72 days at 3622 fps 
+      // But just in case . . .
+      if(m_lastImageNumber != std::numeric_limits<unsigned int>::max() && m_currImageNumber != 0)
       {
-         sleep(1);
-      }
-      
-      if(m_shutdown) continue;
-      else //This gives a nice scope for the mutex
-      {
-         std::unique_lock<std::mutex> lock(m_indiMutex);
-      
-         //Send command to camera to place it in the correct mode
-         std::string response;
-         if( pdvSerialWriteRead( response, m_pdv, m_cameraModes[m_modeName].m_serialCommand, m_readTimeout) != 0)
-         {
-            log<software_error>({__FILE__, __LINE__, "Error sending command to set mode"});
-            sleep(1);
-            continue;
-         }
-         
-         if(m_fpsSet > 0) setFPS(m_fpsSet);
-         
-         log<text_log>("Send command to set mode: " + m_cameraModes[m_modeName].m_serialCommand);
-         log<text_log>("Response was: " + response);
-         
-         updateIfChanged(m_indiP_mode, "current", m_modeName);
-         updateIfChanged(m_indiP_mode, "target", std::string(""));
-      }
+         //The far more likely case is a problem...
    
-      ///\todo check response
-   
-   
-      /* Initialize the OCAM2 SDK
-       */
-
-      ocam2_rc rc;
-      ocam2_id id;
-      ocam2_mode mode;
-   
-      int OCAM_SZ;
-      if(m_height == 121)
-      {
-         mode = OCAM2_NORMAL;
-         OCAM_SZ = 240;
-      }
-      else if (m_height == 62)
-      {
-         mode = OCAM2_BINNING;
-         OCAM_SZ = 120;
-      }
-      else
-      {
-         log<text_log>("Unrecognized OCAM2 mode.", logPrio::LOG_ERROR);
-         return;
-      }
-
-      std::string ocamDescrambleFile = m_configDir + "/" + m_ocamDescrambleFile;
-      
-      std::cerr << "ocamDescrambleFile: " << ocamDescrambleFile << "\n";
-      rc=ocam2_init(mode, ocamDescrambleFile.c_str(), &id);
-      if (rc != OCAM2_OK)
-      {
-         log<text_log>("ocam2_init error. Failed to initialize OCAM SDK with descramble file: " + ocamDescrambleFile, logPrio::LOG_ERROR);
-         return;
-      }
-      
-
-      log<text_log>("OCAM2K initialized. id: " + std::to_string(id));
-      log<text_log>(std::string("OCAM2K mode is:") + ocam2_modeStr(ocam2_getMode(id)));
-      
-      /* Initialize ImageStreamIO
-       */
-      if(OCAM_SZ != imageStream.md[0].size[0] || OCAM_SZ != imageStream.md[0].size[1])
-      {
-         std::cerr << "recreating ImageStream\n";
-         imsize[0] = OCAM_SZ;
-         imsize[1] = OCAM_SZ;
-         imsize[2] = 1;
-         ImageStreamIO_createIm(&imageStream, m_shmimName.c_str(), 2, imsize, _DATATYPE_INT16, 1, 0);
-      }
-      else
-      {
-         std::cerr << "not recreating\n";
-      }
-      
-      /*
-       * allocate four buffers for optimal pdv ring buffer pipeline (reduce if
-       * memory is at a premium)
-       */
-      pdv_multibuf(m_pdv, m_numBuffs); ///\todo this can be done in the main config fxn.
-      pdv_start_images(m_pdv, m_numBuffs);
-      
-      //This completes the reconfiguration.
-      m_reconfig = false;
-                  
-      //Trigger an FPS reset.
-      m_lastImageNumber = -1;
-      
-      //This is the main image grabbing loop.
-      // - It waits for a new image DMA to complete
-      // - Then checks for timeouts or overrun
-      // - Then checks image number for consistency 
-      // - Then loads the image into the stream 
-      while(!m_shutdown && !m_reconfig && m_powerState > 0)
-      {
-         if( state() != stateCodes::OPERATING || m_powerState <= 0)
-         {
-            sleep(1);
-            continue;
-         }
-         
-         u_char *image_p;
-         bool overrun = false;
-         long framesSkipped = 0;
-         
-         int last_timeouts = 0;
-
-         unsigned currImageNumber = 0;
-      
-         /*
-          * get the image and immediately start the next one (if not the last
-          * time through the loop). Processing (saving to a file in this case)
-          * can then occur in parallel with the next acquisition
-          */
-         uint dmaTimeStamp[2];
-         timespec timeStamp;
-         image_p = pdv_wait_last_image_timed(m_pdv, dmaTimeStamp);
-         pdv_start_image(m_pdv);
-
-
-         /* Removed all pdv timeout and overrun checking, since we can rely on frame number from the camera
-            to detect missed and corrupted frames.
-         
-            See ef0dd24 for last version with full checks in it.
-         */
-        
-         //Get the image number to see if this is valid.
-         //This is how it is in the ocam2_sdk:
-         currImageNumber = ((int *)image_p)[OCAM2_IMAGE_NB_OFFSET/4]; /* int offset */
-         
-         //We want to do arithmetic in signed long, big enough to hold the unsigned counter from OCAM2
-         m_currImageNumber = currImageNumber;
-         
-         //For the first loop after a restart
-         if(m_lastImageNumber == -1 || m_resetFPS) 
-         {
-            m_lastImageNumber = m_currImageNumber - 1;
+         //If a reasonably small number of frames skipped, then we trust the image number
+         if(m_currImageNumber - m_lastImageNumber > 1 && m_currImageNumber - m_lastImageNumber < 100)
+         { 
+            //This we handle as a non-timeout -- report how many frames were skipped
+            long framesSkipped = m_currImageNumber - m_lastImageNumber;
+            //and don't `continue` to top of loop
             
-            //Update this for fps meter
-            m_firstGoodImageNumber = m_currImageNumber;
-            m_firstGoodImageTimestamp = m_currImageTimestamp;
-            m_firstGoodImageDMATimestamp = m_currImageDMATimestamp;
+            log<text_log>("frames skipped: " + std::to_string(framesSkipped), logPrio::LOG_ERROR);
             
-            m_framesSkipped = 0;
-            
-            m_resetFPS = false;
-         }
-            
-      
-         if(m_currImageNumber - m_lastImageNumber != 1)
-         {
-            //Detect exact condition of a wraparound on the unsigned int.
-            // Yes, this can only happen once every 13.72 days at 3622 fps 
-            // But just in case . . .
-            if(m_lastImageNumber != std::numeric_limits<unsigned int>::max() && m_currImageNumber != 0)
-            {
-               //The far more likely case is a problem...
-         
-               //If a reasonably small number of frames skipped, then we trust the image number
-               if(m_currImageNumber - m_lastImageNumber > 1 && m_currImageNumber - m_lastImageNumber < 100)
-               { 
-                  //This we handle as a non-timeout -- report how many frames were skipped
-                  framesSkipped = m_currImageNumber - m_lastImageNumber;
-                  //and don't `continue` to top of loop
-                  
-                  log<text_log>("frames skipped: " + std::to_string(framesSkipped) + ", total since restart: " + std::to_string(m_framesSkipped), logPrio::LOG_ERROR);
-                  
-                  m_nextMode = m_modeName;
-                  m_reconfig = 1;
-            
-                  /*pdv_timeout_restart(m_pdv, FALSE);
-                  pdv_multibuf(m_pdv, m_numBuffs);
-                  pdv_start_images(m_pdv, m_numBuffs);
-                  m_lastImageNumber = -1;
-                  */
-                  
-                  continue;
-                  
-               }
-               else //but if it's any bigger or < 0, it's probably garbage
-               {
-                  //This we handle as corruption, therefore a timeout
-//                   pdv_timeout_restart(m_pdv, FALSE);
-//                   pdv_multibuf(m_pdv, m_numBuffs);
-//                   pdv_start_images(m_pdv, m_numBuffs);
-//                   last_timeouts = timeouts;
-               
-                  ///\todo need frame corrupt log type
-                  log<text_log>("frame number possibly corrupt: " + std::to_string(m_currImageNumber) + " - " + std::to_string(m_lastImageNumber), logPrio::LOG_ERROR);
-                  
-                  m_nextMode = m_modeName;
-                  m_reconfig = 1;
-            
-                  //Reset the counters.
-                  m_lastImageNumber = -1;
-                  
-                  continue;
-               
-               }
-            }
-         }
-
-         
-         
-         //Ok, no timeout, so we process the image and publish it.
-         imageStream.md[0].write=1; ///\todo make sure rtimv skips image if write=1
-         ocam2_descramble(id, &currImageNumber, imageStream.array.SI16, (short int *) image_p);
-         
-         imageStream.md[0].atime.tv_sec = dmaTimeStamp[0];
-         imageStream.md[0].atime.tv_nsec = dmaTimeStamp[1];
-         clock_gettime(CLOCK_REALTIME, &timeStamp); 
-         ///\todo need to update the write time in imagestruct with this timeStamp
-         imageStream.md[0].cnt0++;
-         imageStream.md[0].cnt1++; ///\todo this is wrong, needs to be 0 if needed, and needs to be done *before* image write for cube handling.
-         imageStream.md[0].write=0;
-         ImageStreamIO_sempost(&imageStream,-1);
- 
-         
-         
-         if(imageStream.md[0].cnt0 % 2000 == 0)
-         {
-            std::cerr << ( (double) timeStamp.tv_sec + ((double) timeStamp.tv_nsec)/1e9) - ( (double) dmaTimeStamp[0] + ((double) dmaTimeStamp[1])/1e9) << "\n";
-         }
-         
-         if(framesSkipped)
-         {
-            m_framesSkipped += framesSkipped;
-            
-            ///\todo need frame skip log type
-            log<text_log>("frames skipped: " + std::to_string(framesSkipped) + ", total since restart: " + std::to_string(m_framesSkipped), logPrio::LOG_ERROR);
-         }
-         
-         m_lastImageNumber = m_currImageNumber;
-      }
-    
-      if(m_reconfig && !m_shutdown)
-      {
-         //lock mutex
-         std::unique_lock<std::mutex> lock(m_indiMutex);
-         
-         if(pdvConfig(m_nextMode) < 0)
-         {
-            log<text_log>("error trying to re-configure with " + m_nextMode, logPrio::LOG_ERROR);
-            sleep(1);
-         }
-         else
-         {
-            m_nextMode = "";
+            m_nextMode = m_modeName;
+            m_reconfig = 1;
+           
+            return 1;
             
          }
+         else //but if it's any bigger or < 0, it's probably garbage
+         {
+            ///\todo need frame corrupt log type
+            log<text_log>("frame number possibly corrupt: " + std::to_string(m_currImageNumber) + " - " + std::to_string(m_lastImageNumber), logPrio::LOG_ERROR);
+            
+            m_nextMode = m_modeName;
+            m_reconfig = 1;
+      
+            //Reset the counters.
+            m_lastImageNumber = -1;
+            
+            return 1;
+         
+         }
       }
-
-   } //outer loop, will exit if m_shutdown==true
-
-   ImageStreamIO_destroyIm( &imageStream );
+   }
+   m_lastImageNumber = m_currImageNumber;
+   return 0;
 }
 
+inline
+int ocam2KCtrl::loadImageIntoStream(void * dest)
+{
+   unsigned currImageNumber = 0;
+   ocam2_descramble(m_ocam2_id, &currImageNumber, (short int *) dest, (short int *) m_image_p);
+   
+   //memcpy(dest, m_image_p, 120*120*2); //This is about 10 usec faster -- but we have to descramble.
+   return 0;
+}
+   
+inline
+int ocam2KCtrl::reconfig()
+{
+   //lock mutex
+   std::unique_lock<std::mutex> lock(m_indiMutex);
+   
+   if(pdvConfig(m_nextMode) < 0)
+   {
+      log<text_log>("error trying to re-configure with " + m_nextMode, logPrio::LOG_ERROR);
+      sleep(1);
+   }
+   else
+   {
+      m_nextMode = "";
+      
+   }
+   
+   return 0;
+}
+   
 
+      
+         
+   
+     
+   
+   
+
+         
+
+         
+         
+     
+           
+    
+     
 
 INDI_NEWCALLBACK_DEFN(ocam2KCtrl, m_indiP_ccdtemp)(const pcf::IndiProperty &ipRecv)
 {
