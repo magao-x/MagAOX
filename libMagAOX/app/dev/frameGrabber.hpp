@@ -350,6 +350,8 @@ void frameGrabber<derivedT>::fgThreadExec()
        sleep(1);
    }
    
+   uint32_t imsize[3] = {0,0,0};
+   std::string shmimName;
    
    while(impl().shutdown() == 0)
    {
@@ -369,19 +371,25 @@ void frameGrabber<derivedT>::fgThreadExec()
 
       /* Initialize ImageStreamIO
        */
-      uint32_t imsize[3];
-      imsize[0] = m_width; 
-      imsize[1] = m_height;
-      imsize[2] = m_circBuffLength;
-      
       if(m_shmimName == "") m_shmimName = impl().configName();
+
+      if(m_width != imsize[0] || m_height != imsize[1] || m_circBuffLength != imsize[2] || m_shmimName != shmimName)
+      {
+         imsize[0] = m_width; 
+         imsize[1] = m_height;
+         imsize[2] = m_circBuffLength;
+         shmimName = m_shmimName;
       
-      std::cerr << "Creating: " << m_shmimName << " " << m_width << " " << m_height << "\n";
+         std::cerr << "Creating: " << m_shmimName << " " << m_width << " " << m_height << " " << m_circBuffLength << "\n";
       
-      ImageStreamIO_createIm_gpu(&imageStream, m_shmimName.c_str(), 3, imsize, m_dataType, -1, 1, IMAGE_NB_SEMAPHORE, 0, CIRCULAR_BUFFER | ZAXIS_TEMPORAL);
+         ImageStreamIO_createIm_gpu(&imageStream, m_shmimName.c_str(), 3, imsize, m_dataType, -1, 1, IMAGE_NB_SEMAPHORE, 0, CIRCULAR_BUFFER | ZAXIS_TEMPORAL);
        
-      imageStream.md->cnt1 = m_circBuffLength;
-      
+         imageStream.md->cnt1 = m_circBuffLength;
+      }
+      else
+      {
+         std::cerr << "Not creating . . .\n";
+      }
      
        
       //This completes the reconfiguration.
@@ -471,8 +479,6 @@ void frameGrabber<derivedT>::fgThreadExec()
          
       }
     
-      ImageStreamIO_destroyIm( &imageStream );
-    
       if(m_reconfig && !impl().shutdown())
       {
          impl().reconfig();
@@ -480,6 +486,8 @@ void frameGrabber<derivedT>::fgThreadExec()
 
    } //outer loop, will exit if m_shutdown==true
 
+   ImageStreamIO_destroyIm( &imageStream );
+   
 }
 
 
