@@ -1,11 +1,11 @@
 /** \file smc100ccCtrl.hpp
-  * \brief The ttm Talker for generic usb devices
-  * \author Chris Bohlman (cbohlmanaz@gmail.com)
+  * \brief The smc controller communicator
+  * \author Chris Bohlman (cbohlman@pm.me)
   *
   * \ingroup smc100ccCtrl_files
   *
   * History:
-  * - 2018-08-10 created by CJB
+  * - 2019-01-10 created by CJB
   *
   * To compile:
   * - make clean (recommended)
@@ -132,6 +132,16 @@ public:
       float&
    );
 
+   /// Returns any error controller has
+   /** Called after every command is sent
+    * 
+    * \returns 0 if no error is reported
+    * \returns -1 if an error is reported and error string is set in reference
+    */
+   int getLastError(
+   	std::string&
+   );
+
 };
 
 inline smc100ccCtrl::smc100ccCtrl() : MagAOXApp(MAGAOX_CURRENT_SHA1, MAGAOX_REPO_MODIFIED)
@@ -240,7 +250,7 @@ int smc100ccCtrl::appLogic()
           state(stateCodes::NOTCONNECTED);
       }
       else {
-         std::cout << "Connected!" << std::endl;
+         // Still connected
          // Update current
          float current = -99;
          int rv = getPosition(current);
@@ -248,13 +258,17 @@ int smc100ccCtrl::appLogic()
             updateIfChanged(m_indiP_position, "curent", current);
          }
          else {
-            std::cout << "There's been an error with getting current controller position" << std::endl;
+         	log<software_error>({__FILE__, __LINE__,"There's been an error with getting current controller position."});
          }
          // Check target and position
          if (checkPosition() != 0) {
-            std::cout << "There's been an error with movement." << std::endl;
+           log<software_error>({__FILE__, __LINE__,"There's been an error with movement."});
          }
          // TODO: Log errors: use TE after every command?
+         std::string errorString;
+         if (getLastError(errorString) != 0) {
+         	log<software_error>({__FILE__, __LINE__,errorString});
+         }
       }
    }
 
@@ -263,8 +277,8 @@ int smc100ccCtrl::appLogic()
       int rv = testConnection();
       if( rv == 0) 
       {
+         // Connection successful
          state(stateCodes::CONNECTED);
-         std::cout << "Connection successful." << std::endl;
          // Update current
          float current = -99;
          int rv = getPosition(current);
@@ -272,13 +286,17 @@ int smc100ccCtrl::appLogic()
             updateIfChanged(m_indiP_position, "curent", current);
          }
          else {
-            std::cout << "There's been an error with getting current controller position" << std::endl;
+         	log<software_error>({__FILE__, __LINE__,"There's been an error with getting current controller position."});
          }
          // Check target and position
          if (checkPosition() != 0) {
-            std::cout << "There's been an error with movement." << std::endl;
+           log<software_error>({__FILE__, __LINE__,"There's been an error with movement."});
          }
          // TODO: Log errors: use TE after every command?
+         std::string errorString;
+         if (getLastError(errorString) != 0) {
+         	log<software_error>({__FILE__, __LINE__,errorString});
+         }
       }
       else if (rv == TTY_E_TCGETATTR) 
       {
@@ -331,7 +349,7 @@ int smc100ccCtrl::appLogic()
 
 int smc100ccCtrl::testConnection() 
 {
-   std::cout << "Testing connection..." << std::endl;
+   // Testing connection
    int uid_rv = euidCalled();
    if(uid_rv < 0)
    {
@@ -358,11 +376,11 @@ int smc100ccCtrl::testConnection()
 
    if (rv != 0) 
    {
-      std::cout << MagAOX::tty::ttyErrorString(rv) << std::endl;
+      log<software_error>({__FILE__, __LINE__,MagAOX::tty::ttyErrorString(rv)});
       return rv;
    }
 
-   std::cout << m_deviceName << "   " << fileDescrip << std::endl;
+   //std::cout << m_deviceName << "   " << fileDescrip << std::endl;
 
    std::string buffer{"1TS\r\n"};
    std::string output;
@@ -377,21 +395,20 @@ int smc100ccCtrl::testConnection()
       2000               	///< [in] The read timeout in milliseconds.
    );
 
-   //std::cout << output << std::endl;
    if (rv != TTY_E_NOERROR)
    {
-      std::cerr << MagAOX::tty::ttyErrorString(rv) << std::endl;
+      log<software_error>({__FILE__, __LINE__,MagAOX::tty::ttyErrorString(rv)});
    } 
    
    if (output.size() != 11)
    {
-      std::cerr << "Wrongly sized output: " << output << " = size " << output.size() << std::endl;
+      std::string errorString = "Wrongly sized output in testConnection(): "+output+" = size "+std::to_string(output.size())+".";
+      log<software_error>({__FILE__, __LINE__,errorString});
       return -1;
    }
    //Compare output minus controller state (all are fine)
    if (output.substr(0, 7) == "1TS0000") {
    	//Test successful
-      std::cout << "Test successful." << std::endl;
       // Set up moving if controller is not homed
       if (state() == stateCodes::CONNECTED) {
          setUpMoving();
@@ -399,8 +416,8 @@ int smc100ccCtrl::testConnection()
    	return 0;
    }
    else {
-      //Diagnose error
-      std::cerr << "Error occured: " << output << std::endl;
+      //Error, offending output is printed and diagnosis occurs in parent function
+      log<software_error>({__FILE__, __LINE__,"Error occured: "+output});
    	return -1;
    }
 }
@@ -466,7 +483,7 @@ int smc100ccCtrl::setUpMoving()
 
    if (rv != 0) 
    {
-      std::cout << MagAOX::tty::ttyErrorString(rv) << std::endl;
+      log<software_error>({__FILE__, __LINE__,MagAOX::tty::ttyErrorString(rv)});
       return rv;
    }
 
@@ -479,10 +496,9 @@ int smc100ccCtrl::setUpMoving()
       2000                ///< [in] The write timeout in milliseconds.
    );
 
-   //std::cout << output << std::endl;
    if (rv != TTY_E_NOERROR)
    {
-      std::cerr << MagAOX::tty::ttyErrorString(rv) << std::endl;
+      log<software_error>({__FILE__, __LINE__,MagAOX::tty::ttyErrorString(rv)});
    } 
    state(stateCodes::READY);
    return 0;
@@ -516,7 +532,7 @@ int smc100ccCtrl::moveToPosition(float pos)
 
    if (rv != 0) 
    {
-      std::cout << MagAOX::tty::ttyErrorString(rv) << std::endl;
+      log<software_error>({__FILE__, __LINE__,MagAOX::tty::ttyErrorString(rv)});
       return rv;
    }
 
@@ -532,12 +548,19 @@ int smc100ccCtrl::moveToPosition(float pos)
 
    if (rv != TTY_E_NOERROR)
    {
-      std::cerr << MagAOX::tty::ttyErrorString(rv) << std::endl;
+      log<software_error>({__FILE__, __LINE__,MagAOX::tty::ttyErrorString(rv)});
    }
 
    state(stateCodes::OPERATING);
 
-   return 0;
+   std::string errorString;
+   if (getLastError(errorString) == 0) {
+   	return 0;
+   }
+   else {
+   	log<software_error>({__FILE__, __LINE__,errorString});
+   	return -1;
+   }
 }
 
 int smc100ccCtrl::checkPosition() {
@@ -567,11 +590,11 @@ int smc100ccCtrl::checkPosition() {
 
    if (rv != 0) 
    {
-      std::cout << MagAOX::tty::ttyErrorString(rv) << std::endl;
+      log<software_error>({__FILE__, __LINE__,MagAOX::tty::ttyErrorString(rv)});
       return rv;
    }
 
-   std::cout << m_deviceName << "   " << fileDescrip << std::endl;
+   //std::cout << m_deviceName << "   " << fileDescrip << std::endl;
 
    std::string buffer{"1TS\r\n"};
    std::string output;
@@ -588,12 +611,13 @@ int smc100ccCtrl::checkPosition() {
 
    if (rv != TTY_E_NOERROR)
    {
-      std::cerr << MagAOX::tty::ttyErrorString(rv) << std::endl;
+      log<software_error>({__FILE__, __LINE__,MagAOX::tty::ttyErrorString(rv)});
    } 
    
    if (output.size() != 11)
    {
-      std::cerr << "Wrongly sized output: " << output << " = size " << output.size() << std::endl;
+      std::string errorString = "Wrongly sized output in checkPosition(): "+output+" = size "+std::to_string(output.size())+".";
+      log<software_error>({__FILE__, __LINE__,errorString});
       return -1;
    }
 
@@ -623,7 +647,7 @@ int smc100ccCtrl::checkPosition() {
       // TODO: Check if target position is equal to current position with error band
 
       if (target != current) {
-         std::cerr << "Current and target don't match when controller is not moving" << std::endl;
+         log<software_error>({__FILE__, __LINE__,"Current and target don't match when controller is not moving."});
          return -1;
       }
 
@@ -659,11 +683,11 @@ int smc100ccCtrl::getPosition(float& current)
 
    if (rv != 0) 
    {
-      std::cout << MagAOX::tty::ttyErrorString(rv) << std::endl;
+      log<software_error>({__FILE__, __LINE__,MagAOX::tty::ttyErrorString(rv)});
       return rv;
    }
 
-   std::cout << m_deviceName << "   " << fileDescrip << std::endl;
+   //std::cout << m_deviceName << "   " << fileDescrip << std::endl;
 
    std::string buffer{"1TP\r\n"};
    std::string output;
@@ -680,7 +704,7 @@ int smc100ccCtrl::getPosition(float& current)
 
    if (rv != TTY_E_NOERROR)
    {
-      std::cerr << MagAOX::tty::ttyErrorString(rv) << std::endl;
+      log<software_error>({__FILE__, __LINE__,MagAOX::tty::ttyErrorString(rv)});
    } 
    
    // TODO: What sizes should positive and negative returns be?
@@ -698,6 +722,124 @@ int smc100ccCtrl::getPosition(float& current)
    	return -1;
    }
    return 0;
+}
+
+int smc100ccCtrl::getLastError( std::string& errorString) {
+	int uid_rv = euidCalled();
+   if(uid_rv < 0)
+   {
+      log<software_critical>({__FILE__, __LINE__});
+      state(stateCodes::FAILURE);
+      return -1;
+   }
+
+   int fileDescrip = 0;
+   int rv = MagAOX::tty::ttyOpenRaw(
+      fileDescrip,         ///< [out] the file descriptor.  Set to 0 on an error.
+      m_deviceName,        ///< [in] the device path name, e.g. /dev/ttyUSB0
+      B57600              ///< [in] indicates the baud rate (see http://pubs.opengroup.org/onlinepubs/7908799/xsh/termios.h.html)
+   );
+
+   uid_rv = euidReal();
+
+   if(uid_rv < 0)
+   {
+      log<software_critical>({__FILE__, __LINE__});
+      state(stateCodes::FAILURE);
+      return -1;
+   }
+
+   if (rv != 0) 
+   {
+      log<software_error>({__FILE__, __LINE__,MagAOX::tty::ttyErrorString(rv)});
+      return rv;
+   }
+
+   //std::cout << m_deviceName << "   " << fileDescrip << std::endl;
+
+   std::string buffer{"1TE\r\n"};
+   std::string output;
+   output.resize(6);
+   rv = MagAOX::tty::ttyWriteRead( 
+      output,              ///< [out] The string in which to store the output.
+      buffer,              ///< [in] The characters to write to the tty.
+      "\r\n",              ///< [in] A sequence of characters which indicates the end of transmission.
+      false,               ///< [in] If true, strWrite.size() characters are read after the write
+      fileDescrip,         ///< [in] The file descriptor of the open tty.
+      2000,                ///< [in] The write timeout in milliseconds.
+      2000                 ///< [in] The read timeout in milliseconds.
+   );
+
+   if (rv != TTY_E_NOERROR)
+   {
+      log<software_error>({__FILE__, __LINE__,MagAOX::tty::ttyErrorString(rv)});
+   } 
+
+   if (output.at(3) == '@') {
+   	return 0;
+   }
+   else {
+   	switch(output.at(3)) {
+   		case 'A': 
+   			errorString = "Unknown message code or floating point controller address.";
+   			break;
+   		case 'B': 
+   			errorString = "Controller address not correct.";
+   			break;
+   		case 'C': 
+   			errorString = "Parameter missing or out of range.";
+   			break;
+   		case 'D': 
+   			errorString = "Command not allowed.";
+   			break;
+   		case 'E': 
+   			errorString = "Home sequence already started.";
+   			break;
+   		case 'F': 
+   			errorString = "ESP stage name unknown.";
+   			break;
+   		case 'G': 
+   			errorString = "Displacement out of limits.";
+   			break;
+   		case 'H': 
+   			errorString = "Command not allowed in NOT REFERENCED state.";
+   			break;
+   		case 'I': 
+   			errorString = "Command not allowed in CONFIGURATION state.";
+   			break;
+   		case 'J': 
+   			errorString = "Command not allowed in DISABLE state.";
+   			break;
+   		case 'K': 
+   			errorString = "Command not allowed in READY state.";
+   			break;
+   		case 'L': 
+   			errorString = "Command not allowed in HOMING state.";
+   			break;
+   		case 'M': 
+   			errorString = "UCommand not allowed in MOVING state.";
+   			break;
+   		case 'N': 
+   			errorString = "Current position out of software limit.";
+   			break;
+   		case 'S': 
+   			errorString = "Communication Time Out.";
+   			break;
+   		case 'U': 
+   			errorString = "Error during EEPROM access.";
+   			break;
+   		case 'V': 
+   			errorString = "Error during command execution.";
+   			break;
+   		case 'W': 
+   			errorString = "Command not allowed for PP version.";
+   			break;
+   		case 'X': 
+   			errorString = "Command not allowed for CC version.";
+   			break;
+   	}
+   	return -1;
+   }
 }
 
 INDI_NEWCALLBACK_DEFN(smc100ccCtrl, m_indiP_position)(const pcf::IndiProperty &ipRecv)
@@ -732,7 +874,6 @@ INDI_NEWCALLBACK_DEFN(smc100ccCtrl, m_indiP_position)(const pcf::IndiProperty &i
       while (state() == stateCodes::OPERATING);
       
       return moveToPosition(target);
-      
    }
    return -1;
 }
