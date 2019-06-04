@@ -241,7 +241,8 @@ int smc100ccCtrl::appLogic()
       }
    }
 
-   if( state() == stateCodes::CONNECTED )
+   // TODO: Is this right lol
+   if( state() == stateCodes::CONNECTED || state() == stateCodes::READY || state() == stateCodes::OPERATING)
    {
       // Only test connection before a command goes through
       // position, moving status, errors
@@ -255,7 +256,7 @@ int smc100ccCtrl::appLogic()
          float current = -99;
          int rv = getPosition(current);
          if (rv == 0) {
-            updateIfChanged(m_indiP_position, "curent", current);
+            updateIfChanged(m_indiP_position, "current", current);
          }
          else {
          	log<software_error>({__FILE__, __LINE__,"There's been an error with getting current controller position."});
@@ -283,7 +284,7 @@ int smc100ccCtrl::appLogic()
          float current = -99;
          int rv = getPosition(current);
          if (rv == 0) {
-            updateIfChanged(m_indiP_position, "curent", current);
+            updateIfChanged(m_indiP_position, "current", current);
          }
          else {
          	log<software_error>({__FILE__, __LINE__,"There's been an error with getting current controller position."});
@@ -719,6 +720,7 @@ int smc100ccCtrl::getPosition(float& current)
       current = std::stof(output.substr(3));
    }
    catch (...) {
+   	log<software_error>({__FILE__, __LINE__,"Error with parsing current position."});
    	return -1;
    }
    return 0;
@@ -775,11 +777,20 @@ int smc100ccCtrl::getLastError( std::string& errorString) {
       log<software_error>({__FILE__, __LINE__,MagAOX::tty::ttyErrorString(rv)});
    } 
 
-   if (output.at(3) == '@') {
+   char status;
+   try {
+   	status = output.at(3);
+   }
+   catch (const std::out_of_range& oor) {
+   	errorString = "Command output not recognized.";
+   	return -1;
+  	}
+
+   if (status == '@') {
    	return 0;
    }
    else {
-   	switch(output.at(3)) {
+   	switch(status) {
    		case 'A': 
    			errorString = "Unknown message code or floating point controller address.";
    			break;
