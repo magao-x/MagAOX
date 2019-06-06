@@ -12,6 +12,12 @@
   * - make CACAO=false
   * - sudo make install
   * - /opt/MagAOX/bin/smc100ccCtrl 
+  *
+  *
+  * To run with cursesIndi
+  * 1. /opt/MagAOX/bin/xindiserver -n xindiserverMaths
+  * 2. /opt/MagAOX/bin/smc100ccCtrl -n ssmc100ccCtrl
+  * 3. /opt/MagAOX/bin/cursesINDI 
   */
 #ifndef smc100ccCtrl_hpp
 #define smc100ccCtrl_hpp
@@ -241,68 +247,50 @@ int smc100ccCtrl::appLogic()
       }
    }
 
-   // TODO: Is this right lol
-   if( state() == stateCodes::CONNECTED || state() == stateCodes::READY || state() == stateCodes::OPERATING)
-   {
-      // Only test connection before a command goes through
-      // position, moving status, errors
-      if( testConnection() != 0)
-      {
-          state(stateCodes::NOTCONNECTED);
-      }
-      else {
-         // Still connected
-         // Update current
-         float current = -99;
-         int rv = getPosition(current);
-         if (rv == 0) {
-            updateIfChanged(m_indiP_position, "current", current);
-         }
-         else {
-         	log<software_error>({__FILE__, __LINE__,"There's been an error with getting current controller position."});
-         }
-         // Check target and position
-         if (checkPosition() != 0) {
-           log<software_error>({__FILE__, __LINE__,"There's been an error with movement."});
-         }
-         // TODO: Log errors: use TE after every command?
-         std::string errorString;
-         if (getLastError(errorString) != 0) {
-         	log<software_error>({__FILE__, __LINE__,errorString});
-         }
-      }
-   }
-
    if( state() == stateCodes::NOTCONNECTED )
    {
-      int rv = testConnection();
-      if( rv == 0) 
+      euidCalled();
+      int rv = connect();
+      euidReal();
+
+      if(rv < 0) 
       {
-         // Connection successful
-         state(stateCodes::CONNECTED);
-         // Update current
-         float current = -99;
-         int rv = getPosition(current);
-         if (rv == 0) {
-            updateIfChanged(m_indiP_position, "current", current);
+         int nrv = tty::usbDevice::getDeviceName();
+         if(nrv < 0 && nrv != TTY_E_DEVNOTFOUND && nrv != TTY_E_NODEVNAMES)
+         {
+            state(stateCodes::FAILURE);
+            if(!stateLogged()) log<software_critical>({__FILE__, __LINE__, nrv, tty::ttyErrorString(nrv)});
+            return -1;
          }
-         else {
-         	log<software_error>({__FILE__, __LINE__,"There's been an error with getting current controller position."});
+
+         if(nrv == TTY_E_DEVNOTFOUND || nrv == TTY_E_NODEVNAMES)
+         {
+            state(stateCodes::NODEVICE);
+
+            if(!stateLogged())
+            {
+               std::stringstream logs;
+               logs << "USB Device " << m_idVendor << ":" << m_idProduct << ":" << m_serial << " no longer found in udev";
+               log<text_log>(logs.str());
+            }
+            return 0;
          }
-         // Check target and position
-         if (checkPosition() != 0) {
-           log<software_error>({__FILE__, __LINE__,"There's been an error with movement."});
-         }
-         // TODO: Log errors: use TE after every command?
-         std::string errorString;
-         if (getLastError(errorString) != 0) {
-         	log<software_error>({__FILE__, __LINE__,errorString});
-         }
+         
+         //if connect failed, and there is a device, then we have some other problem.
+         state(stateCodes::FAILURE);
+         if(!stateLogged()) log<software_error>({__FILE__,__LINE__,rv, tty::ttyErrorString(rv)});
+         return -1;
+                           
       }
-      else if (rv == TTY_E_TCGETATTR) 
-      {
-         state(stateCodes::NODEVICE);
+
+      if( testConnection() == 0 ) state(stateCodes::CONNECTED);
+      else {
+      	std::string errorString;
+      	if (getLastError(errorString) != 0) {
+        		log<software_error>({__FILE__, __LINE__,errorString});
+      	}
       }
+      
 
       if(state() == stateCodes::CONNECTED && !stateLogged())
       {
@@ -311,6 +299,46 @@ int smc100ccCtrl::appLogic()
          log<text_log>(logs.str());
       }
    }
+
+   if( state() == stateCodes::CONNECTED || state() == stateCodes::READY || state() == stateCodes::OPERATING)
+   {
+      // Only test connection before a command goes through
+      // position, moving status, errors
+      if( testConnection() != 0)
+      {
+      	state(stateCodes::NOTCONNECTED);
+         std::string errorString;
+         if (getLastError(errorString) != 0) {
+         	log<software_error>({__FILE__, __LINE__,errorString});
+         }
+      }
+      else {
+         // Still connected
+         // Update current
+         float current = -99;
+         int rv = getPosition(current);
+         std::string errorString;
+         if (getLastError(errorString) != 0 && errorString.size() != 0) {
+         	log<software_error>({__FILE__, __LINE__,errorString});
+         }
+         if (rv == 0) {
+            updateIfChanged(m_indiP_position, "current", current);
+         }
+         else {
+         	log<software_error>({__FILE__, __LINE__,"There's been an error with getting current controller position."});
+         }
+         // Check target and position
+         if (checkPosition() != 0) {
+           log<software_error>({__FILE__, __LINE__,"There's been an error with movement."});
+         }
+         errorString.clear();
+         if (getLastError(errorString) != 0 && errorString.size() != 0) {
+         	log<software_error>({__FILE__, __LINE__,errorString});
+         }
+      }
+   }
+
+ 
 
    if( state() == stateCodes::ERROR )
    {
@@ -348,50 +376,19 @@ int smc100ccCtrl::appLogic()
    return 0;
 }
 
+// have a connect function seperate from testConnection(), and call test connection afterwards()
+
 int smc100ccCtrl::testConnection() 
 {
-   // Testing connection
-   int uid_rv = euidCalled();
-   if(uid_rv < 0)
-   {
-      log<software_critical>({__FILE__, __LINE__});
-      state(stateCodes::FAILURE);
-      return -1;
-   }
-
-   int fileDescrip = 0;
-   int rv = MagAOX::tty::ttyOpenRaw(
-      fileDescrip,         ///< [out] the file descriptor.  Set to 0 on an error.
-      m_deviceName,        ///< [in] the device path name, e.g. /dev/ttyUSB0
-      B57600              ///< [in] indicates the baud rate (see http://pubs.opengroup.org/onlinepubs/7908799/xsh/termios.h.html)
-   );
-
-   uid_rv = euidReal();
-
-   if(uid_rv < 0)
-   {
-      log<software_critical>({__FILE__, __LINE__});
-      state(stateCodes::FAILURE);
-      return -1;
-   }
-
-   if (rv != 0) 
-   {
-      log<software_error>({__FILE__, __LINE__,MagAOX::tty::ttyErrorString(rv)});
-      return rv;
-   }
-
-   //std::cout << m_deviceName << "   " << fileDescrip << std::endl;
-
    std::string buffer{"1TS\r\n"};
    std::string output;
    output.resize(11);
-   rv = MagAOX::tty::ttyWriteRead( 
+   int rv = MagAOX::tty::ttyWriteRead( 
       output,        		///< [out] The string in which to store the output.
       buffer, 				   ///< [in] The characters to write to the tty.
       "\r\n",      			///< [in] A sequence of characters which indicates the end of transmission.
       false,             	///< [in] If true, strWrite.size() characters are read after the write
-      fileDescrip,         ///< [in] The file descriptor of the open tty.
+      m_fileDescrip,         ///< [in] The file descriptor of the open tty.
       2000,             	///< [in] The write timeout in milliseconds.
       2000               	///< [in] The read timeout in milliseconds.
    );
@@ -399,6 +396,7 @@ int smc100ccCtrl::testConnection()
    if (rv != TTY_E_NOERROR)
    {
       log<software_error>({__FILE__, __LINE__,MagAOX::tty::ttyErrorString(rv)});
+      return -1;
    } 
    
    if (output.size() != 11)
@@ -457,49 +455,17 @@ int smc100ccCtrl::callCommand()
 
 int smc100ccCtrl::setUpMoving() 
 {
-   // Execute OR command
-   int uid_rv = euidCalled();
-   if(uid_rv < 0)
-   {
-      log<software_critical>({__FILE__, __LINE__});
-      state(stateCodes::FAILURE);
-      return -1;
-   }
-
-   int fileDescrip = 0;
-   int rv = MagAOX::tty::ttyOpenRaw(
-      fileDescrip,         ///< [out] the file descriptor.  Set to 0 on an error.
-      m_deviceName,        ///< [in] the device path name, e.g. /dev/ttyUSB0
-      B57600              ///< [in] indicates the baud rate (see http://pubs.opengroup.org/onlinepubs/7908799/xsh/termios.h.html)
-   );
-
-   uid_rv = euidReal();
-
-   if(uid_rv < 0)
-   {
-      log<software_critical>({__FILE__, __LINE__});
-      state(stateCodes::FAILURE);
-      return -1;
-   }
-
-   if (rv != 0) 
-   {
-      log<software_error>({__FILE__, __LINE__,MagAOX::tty::ttyErrorString(rv)});
-      return rv;
-   }
-
-   //std::cout << m_deviceName << "   " << fileDescrip << std::endl;
-
    std::string buffer{"1OR\r\n"};
-   rv = MagAOX::tty::ttyWrite( 
+   int rv = MagAOX::tty::ttyWrite( 
       buffer,              ///< [in] The characters to write to the tty.
-      fileDescrip,         ///< [in] The file descriptor of the open tty.
+      m_fileDescrip,         ///< [in] The file descriptor of the open tty.
       2000                ///< [in] The write timeout in milliseconds.
    );
 
    if (rv != TTY_E_NOERROR)
    {
       log<software_error>({__FILE__, __LINE__,MagAOX::tty::ttyErrorString(rv)});
+      return -1;
    } 
    state(stateCodes::READY);
    return 0;
@@ -507,49 +473,19 @@ int smc100ccCtrl::setUpMoving()
 
 int smc100ccCtrl::moveToPosition(float pos) 
 {
-   int uid_rv = euidCalled();
-   if(uid_rv < 0)
-   {
-      log<software_critical>({__FILE__, __LINE__});
-      state(stateCodes::FAILURE);
-      return -1;
-   }
-
-   int fileDescrip = 0;
-   int rv = MagAOX::tty::ttyOpenRaw(
-      fileDescrip,         ///< [out] the file descriptor.  Set to 0 on an error.
-      m_deviceName,        ///< [in] the device path name, e.g. /dev/ttyUSB0
-      B57600              ///< [in] indicates the baud rate (see http://pubs.opengroup.org/onlinepubs/7908799/xsh/termios.h.html)
-   );
-
-   uid_rv = euidReal();
-
-   if(uid_rv < 0)
-   {
-      log<software_critical>({__FILE__, __LINE__});
-      state(stateCodes::FAILURE);
-      return -1;
-   }
-
-   if (rv != 0) 
-   {
-      log<software_error>({__FILE__, __LINE__,MagAOX::tty::ttyErrorString(rv)});
-      return rv;
-   }
-
-
    // TODO: Check if controller is in correct state
    std::string buffer{"1PA"};
    buffer = buffer + std::to_string(pos) + "\r\n";
-   rv = MagAOX::tty::ttyWrite( 
+   int rv = MagAOX::tty::ttyWrite( 
       buffer,              ///< [in] The characters to write to the tty.
-      fileDescrip,         ///< [in] The file descriptor of the open tty.
+      m_fileDescrip,         ///< [in] The file descriptor of the open tty.
       2000                ///< [in] The write timeout in milliseconds.
    );
 
    if (rv != TTY_E_NOERROR)
    {
       log<software_error>({__FILE__, __LINE__,MagAOX::tty::ttyErrorString(rv)});
+      return -1;
    }
 
    state(stateCodes::OPERATING);
@@ -565,47 +501,15 @@ int smc100ccCtrl::moveToPosition(float pos)
 }
 
 int smc100ccCtrl::checkPosition() {
-   int uid_rv = euidCalled();
-   if(uid_rv < 0)
-   {
-      log<software_critical>({__FILE__, __LINE__});
-      state(stateCodes::FAILURE);
-      return -1;
-   }
-
-   int fileDescrip = 0;
-   int rv = MagAOX::tty::ttyOpenRaw(
-      fileDescrip,         ///< [out] the file descriptor.  Set to 0 on an error.
-      m_deviceName,        ///< [in] the device path name, e.g. /dev/ttyUSB0
-      B57600              ///< [in] indicates the baud rate (see http://pubs.opengroup.org/onlinepubs/7908799/xsh/termios.h.html)
-   );
-
-   uid_rv = euidReal();
-
-   if(uid_rv < 0)
-   {
-      log<software_critical>({__FILE__, __LINE__});
-      state(stateCodes::FAILURE);
-      return -1;
-   }
-
-   if (rv != 0) 
-   {
-      log<software_error>({__FILE__, __LINE__,MagAOX::tty::ttyErrorString(rv)});
-      return rv;
-   }
-
-   //std::cout << m_deviceName << "   " << fileDescrip << std::endl;
-
-   std::string buffer{"1TS\r\n"};
+  	std::string buffer{"1TS\r\n"};
    std::string output;
    output.resize(11);
-   rv = MagAOX::tty::ttyWriteRead( 
+   int rv = MagAOX::tty::ttyWriteRead( 
       output,              ///< [out] The string in which to store the output.
       buffer,              ///< [in] The characters to write to the tty.
       "\r\n",              ///< [in] A sequence of characters which indicates the end of transmission.
       false,               ///< [in] If true, strWrite.size() characters are read after the write
-      fileDescrip,         ///< [in] The file descriptor of the open tty.
+      m_fileDescrip,         ///< [in] The file descriptor of the open tty.
       2000,                ///< [in] The write timeout in milliseconds.
       2000                 ///< [in] The read timeout in milliseconds.
    );
@@ -613,6 +517,7 @@ int smc100ccCtrl::checkPosition() {
    if (rv != TTY_E_NOERROR)
    {
       log<software_error>({__FILE__, __LINE__,MagAOX::tty::ttyErrorString(rv)});
+      return -1;
    } 
    
    if (output.size() != 11)
@@ -658,47 +563,15 @@ int smc100ccCtrl::checkPosition() {
 
 int smc100ccCtrl::getPosition(float& current) 
 {
-   int uid_rv = euidCalled();
-   if(uid_rv < 0)
-   {
-      log<software_critical>({__FILE__, __LINE__});
-      state(stateCodes::FAILURE);
-      return -1;
-   }
-
-   int fileDescrip = 0;
-   int rv = MagAOX::tty::ttyOpenRaw(
-      fileDescrip,         ///< [out] the file descriptor.  Set to 0 on an error.
-      m_deviceName,        ///< [in] the device path name, e.g. /dev/ttyUSB0
-      B57600              ///< [in] indicates the baud rate (see http://pubs.opengroup.org/onlinepubs/7908799/xsh/termios.h.html)
-   );
-
-   uid_rv = euidReal();
-
-   if(uid_rv < 0)
-   {
-      log<software_critical>({__FILE__, __LINE__});
-      state(stateCodes::FAILURE);
-      return -1;
-   }
-
-   if (rv != 0) 
-   {
-      log<software_error>({__FILE__, __LINE__,MagAOX::tty::ttyErrorString(rv)});
-      return rv;
-   }
-
-   //std::cout << m_deviceName << "   " << fileDescrip << std::endl;
-
    std::string buffer{"1TP\r\n"};
    std::string output;
    output.resize(13);
-   rv = MagAOX::tty::ttyWriteRead( 
+   int rv = MagAOX::tty::ttyWriteRead( 
       output,              ///< [out] The string in which to store the output.
       buffer,              ///< [in] The characters to write to the tty.
       "\r\n",              ///< [in] A sequence of characters which indicates the end of transmission.
       false,               ///< [in] If true, strWrite.size() characters are read after the write
-      fileDescrip,         ///< [in] The file descriptor of the open tty.
+      m_fileDescrip,         ///< [in] The file descriptor of the open tty.
       2000,                ///< [in] The write timeout in milliseconds.
       2000                 ///< [in] The read timeout in milliseconds.
    );
@@ -706,6 +579,7 @@ int smc100ccCtrl::getPosition(float& current)
    if (rv != TTY_E_NOERROR)
    {
       log<software_error>({__FILE__, __LINE__,MagAOX::tty::ttyErrorString(rv)});
+      return -1;
    } 
    
    // TODO: What sizes should positive and negative returns be?
@@ -727,54 +601,25 @@ int smc100ccCtrl::getPosition(float& current)
 }
 
 int smc100ccCtrl::getLastError( std::string& errorString) {
-	int uid_rv = euidCalled();
-   if(uid_rv < 0)
-   {
-      log<software_critical>({__FILE__, __LINE__});
-      state(stateCodes::FAILURE);
-      return -1;
-   }
 
-   int fileDescrip = 0;
-   int rv = MagAOX::tty::ttyOpenRaw(
-      fileDescrip,         ///< [out] the file descriptor.  Set to 0 on an error.
-      m_deviceName,        ///< [in] the device path name, e.g. /dev/ttyUSB0
-      B57600              ///< [in] indicates the baud rate (see http://pubs.opengroup.org/onlinepubs/7908799/xsh/termios.h.html)
-   );
 
-   uid_rv = euidReal();
-
-   if(uid_rv < 0)
-   {
-      log<software_critical>({__FILE__, __LINE__});
-      state(stateCodes::FAILURE);
-      return -1;
-   }
-
-   if (rv != 0) 
-   {
-      log<software_error>({__FILE__, __LINE__,MagAOX::tty::ttyErrorString(rv)});
-      return rv;
-   }
-
-   //std::cout << m_deviceName << "   " << fileDescrip << std::endl;
-
-   std::string buffer{"1TE\r\n"};
+	std::string buffer{"1TE\r\n"};
    std::string output;
    output.resize(6);
-   rv = MagAOX::tty::ttyWriteRead( 
+   int rv = MagAOX::tty::ttyWriteRead( 
       output,              ///< [out] The string in which to store the output.
       buffer,              ///< [in] The characters to write to the tty.
       "\r\n",              ///< [in] A sequence of characters which indicates the end of transmission.
       false,               ///< [in] If true, strWrite.size() characters are read after the write
-      fileDescrip,         ///< [in] The file descriptor of the open tty.
+      m_fileDescrip,         ///< [in] The file descriptor of the open tty.
       2000,                ///< [in] The write timeout in milliseconds.
       2000                 ///< [in] The read timeout in milliseconds.
    );
 
    if (rv != TTY_E_NOERROR)
    {
-      log<software_error>({__FILE__, __LINE__,MagAOX::tty::ttyErrorString(rv)});
+      errorString = MagAOX::tty::ttyErrorString(rv);
+      return -1;
    } 
 
    char status;
@@ -782,7 +627,7 @@ int smc100ccCtrl::getLastError( std::string& errorString) {
    	status = output.at(3);
    }
    catch (const std::out_of_range& oor) {
-   	errorString = "Command output not recognized.";
+    errorString = "Unknown output; controller not responding correctly.";
    	return -1;
   	}
 
