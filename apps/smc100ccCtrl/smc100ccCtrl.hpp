@@ -57,7 +57,7 @@ class smc100ccCtrl : public MagAOXApp<>, public tty::usbDevice
 protected:	
    pcf::IndiProperty m_indiP_position;   ///< Indi variable for reporting CPU core loads
    std::vector<std::string> validStateCodes{};
-
+   double m_target;
 
 public:
 
@@ -125,7 +125,9 @@ public:
     * \returns 0 if controller is currently moving or has moved correctly.
     * \returns -1 on error with sending commands or if current position does not match target position.
     */
-   int checkPosition();
+   int checkPosition(
+      const float&
+   );
 
 
    /// Verifies current status of controller
@@ -135,7 +137,7 @@ public:
     * \returns -1 on error with sending commands or if current position does not match target position.
     */
    int getPosition(
-      float&
+      float&   /**< [in] returned error string*/
    );
 
    /// Returns any error controller has
@@ -162,7 +164,7 @@ void smc100ccCtrl::setupConfig()
 
 void smc100ccCtrl::loadConfig()
 {
-   this->m_speed = B115200; //default for Zaber stages.  Will be overridden by any config setting.
+   this->m_speed = B57600; //default for Zaber stages.  Will be overridden by any config setting.
 
    int rv = tty::usbDevice::loadConfig(config);
 
@@ -308,7 +310,8 @@ int smc100ccCtrl::appLogic()
       {
       	state(stateCodes::NOTCONNECTED);
          std::string errorString;
-         if (getLastError(errorString) != 0) {
+         if (getLastError(errorString) != 0) 
+         {
          	log<software_error>({__FILE__, __LINE__,errorString});
          }
       }
@@ -328,7 +331,7 @@ int smc100ccCtrl::appLogic()
          	log<software_error>({__FILE__, __LINE__,"There's been an error with getting current controller position."});
          }
          // Check target and position
-         if (checkPosition() != 0) {
+         if (checkPosition(current) != 0) {
            log<software_error>({__FILE__, __LINE__,"There's been an error with movement."});
          }
          errorString.clear();
@@ -337,8 +340,6 @@ int smc100ccCtrl::appLogic()
          }
       }
    }
-
- 
 
    if( state() == stateCodes::ERROR )
    {
@@ -380,9 +381,8 @@ int smc100ccCtrl::appLogic()
 
 int smc100ccCtrl::testConnection() 
 {
-   std::string buffer{"1TS\r\n"};
+   std::string buffer{"1TS\r\n\r\n"};
    std::string output;
-   output.resize(11);
    int rv = MagAOX::tty::ttyWriteRead( 
       output,        		///< [out] The string in which to store the output.
       buffer, 				   ///< [in] The characters to write to the tty.
@@ -399,25 +399,29 @@ int smc100ccCtrl::testConnection()
       return -1;
    } 
    
-   if (output.size() != 11)
+   try {
+      //Compare output minus controller state (all are fine)
+      if (output.substr(0, 7) == "1TS0000") 
+      {
+      	//Test successful
+         // Set up moving if controller is not homed
+         if (state() == stateCodes::CONNECTED) 
+         {
+            setUpMoving();
+         }  
+      	return 0;
+      }
+      else 
+      {
+         //Error, offending output is printed and diagnosis occurs in parent function
+         log<software_error>({__FILE__, __LINE__,"Error occured: "+output});
+      	return -1;
+      }
+   }
+   catch (const std::out_of_range& oor) 
    {
-      std::string errorString = "Wrongly sized output in testConnection(): "+output+" = size "+std::to_string(output.size())+".";
-      log<software_error>({__FILE__, __LINE__,errorString});
+      log<software_error>({__FILE__, __LINE__,"Error occured: unexpected output in testConnection()."});
       return -1;
-   }
-   //Compare output minus controller state (all are fine)
-   if (output.substr(0, 7) == "1TS0000") {
-   	//Test successful
-      // Set up moving if controller is not homed
-      if (state() == stateCodes::CONNECTED) {
-         setUpMoving();
-      }  
-   	return 0;
-   }
-   else {
-      //Error, offending output is printed and diagnosis occurs in parent function
-      log<software_error>({__FILE__, __LINE__,"Error occured: "+output});
-   	return -1;
    }
 }
 
@@ -455,7 +459,7 @@ int smc100ccCtrl::callCommand()
 
 int smc100ccCtrl::setUpMoving() 
 {
-   std::string buffer{"1OR\r\n"};
+   std::string buffer{"1OR\r\n\r\n"};
    int rv = MagAOX::tty::ttyWrite( 
       buffer,              ///< [in] The characters to write to the tty.
       m_fileDescrip,         ///< [in] The file descriptor of the open tty.
@@ -473,9 +477,8 @@ int smc100ccCtrl::setUpMoving()
 
 int smc100ccCtrl::moveToPosition(float pos) 
 {
-   // TODO: Check if controller is in correct state
    std::string buffer{"1PA"};
-   buffer = buffer + std::to_string(pos) + "\r\n";
+   buffer = buffer + std::to_string(pos) + "\r\n\r\n";
    int rv = MagAOX::tty::ttyWrite( 
       buffer,              ///< [in] The characters to write to the tty.
       m_fileDescrip,         ///< [in] The file descriptor of the open tty.
@@ -491,19 +494,20 @@ int smc100ccCtrl::moveToPosition(float pos)
    state(stateCodes::OPERATING);
 
    std::string errorString;
-   if (getLastError(errorString) == 0) {
+   if (getLastError(errorString) == 0) 
+   {
    	return 0;
    }
-   else {
+   else 
+   {
    	log<software_error>({__FILE__, __LINE__,errorString});
    	return -1;
    }
 }
 
-int smc100ccCtrl::checkPosition() {
-  	std::string buffer{"1TS\r\n"};
+int smc100ccCtrl::checkPosition(const float& current) {
+  	std::string buffer{"1TS\r\n\r\n"};
    std::string output;
-   output.resize(11);
    int rv = MagAOX::tty::ttyWriteRead( 
       output,              ///< [out] The string in which to store the output.
       buffer,              ///< [in] The characters to write to the tty.
@@ -520,52 +524,40 @@ int smc100ccCtrl::checkPosition() {
       return -1;
    } 
    
-   if (output.size() != 11)
+
+   try 
    {
-      std::string errorString = "Wrongly sized output in checkPosition(): "+output+" = size "+std::to_string(output.size())+".";
-      log<software_error>({__FILE__, __LINE__,errorString});
-      return -1;
-   }
-
-   if (output.substr(0, 9) == "1TS000028") {
-      // Controller is moving.
-      return 0;
-   }
-   else {
-      state(stateCodes::READY);
-
-      // TODO: Get target position and current position from INDI (This code doesn't compile)
-
-      float current = -99, target = -99;
-
-      // try
-      // {
-      //    current = ipRecv["current"].get<float>();
-      // }
-      // catch(...){}
-      
-      // try
-      // {
-      //    target = ipRecv["target"].get<float>();
-      // }
-      // catch(...){}
-
-      // TODO: Check if target position is equal to current position with error band
-
-      if (target != current) {
-         log<software_error>({__FILE__, __LINE__,"Current and target don't match when controller is not moving."});
-         return -1;
+      if (output.substr(0, 9) == "1TS000028") 
+      {
+         // Controller is moving.
+         return 0;
       }
+      else 
+      {
 
-      return 0;
+         float error_band = 0.05;
+
+         if (std::abs(m_target - current) > error_band) 
+         {
+            log<software_error>({__FILE__, __LINE__,"Current and target don't match when controller is not moving: Current: "+std::to_string(current)+" & Target: "+std::to_string(m_target)});
+            return -1;
+         }
+
+         state(stateCodes::READY);
+         return 0;
+      }
+   }
+   catch (const std::out_of_range& oor) 
+   {
+      log<software_error>({__FILE__, __LINE__,"Error occured: unexpected output in checkPosition()."});
+      return -1;
    }
 }
 
 int smc100ccCtrl::getPosition(float& current) 
 {
-   std::string buffer{"1TP\r\n"};
+   std::string buffer{"1TP\r\n\r\n"};
    std::string output;
-   output.resize(13);
    int rv = MagAOX::tty::ttyWriteRead( 
       output,              ///< [out] The string in which to store the output.
       buffer,              ///< [in] The characters to write to the tty.
@@ -581,31 +573,24 @@ int smc100ccCtrl::getPosition(float& current)
       log<software_error>({__FILE__, __LINE__,MagAOX::tty::ttyErrorString(rv)});
       return -1;
    } 
-   
-   // TODO: What sizes should positive and negative returns be?
-   // if (output.size() != 13)
-   // {
-   //    std::cerr << "Wrongly sized output: " << output << " = size " << output.size() << std::endl;
-   //    return -1;
-   // }
 
-   // parse current and place into argument
-   try {
+   // Parse current and place into argument
+   try 
+   {
       current = std::stof(output.substr(3));
    }
-   catch (...) {
-   	log<software_error>({__FILE__, __LINE__,"Error with parsing current position."});
+   catch (...) 
+   {
+   	log<software_error>({__FILE__, __LINE__,"Error occured: Unexpected output in getPosition()"});
    	return -1;
    }
    return 0;
 }
 
-int smc100ccCtrl::getLastError( std::string& errorString) {
-
-
-	std::string buffer{"1TE\r\n"};
+int smc100ccCtrl::getLastError( std::string& errorString) 
+{
+	std::string buffer{"1TE\r\n\r\n"};
    std::string output;
-   output.resize(6);
    int rv = MagAOX::tty::ttyWriteRead( 
       output,              ///< [out] The string in which to store the output.
       buffer,              ///< [in] The characters to write to the tty.
@@ -623,19 +608,24 @@ int smc100ccCtrl::getLastError( std::string& errorString) {
    } 
 
    char status;
-   try {
+   try 
+   {
    	status = output.at(3);
    }
-   catch (const std::out_of_range& oor) {
-    errorString = "Unknown output; controller not responding correctly.";
+   catch (const std::out_of_range& oor) 
+   {
+      errorString = "Unknown output; controller not responding correctly.";
    	return -1;
-  	}
+   }
 
-   if (status == '@') {
+   if (status == '@') 
+   {
    	return 0;
    }
-   else {
-   	switch(status) {
+   else 
+   {
+   	switch(status) 
+      {
    		case 'A': 
    			errorString = "Unknown message code or floating point controller address.";
    			break;
@@ -724,6 +714,7 @@ INDI_NEWCALLBACK_DEFN(smc100ccCtrl, m_indiP_position)(const pcf::IndiProperty &i
       std::unique_lock<std::mutex> lock(m_indiMutex);
 
       updateIfChanged(m_indiP_position, "target", target);
+      m_target = target;
 
       // Check for state in here?
       // Busy wait until we have a non moving state
