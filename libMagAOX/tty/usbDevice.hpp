@@ -124,6 +124,9 @@ int usbDevice::loadConfig( mx::app::appConfigurator & config )
       case 192000:
          m_speed = B19200;
          break;
+      case 576000:
+         m_speed = B57600;
+         break;
       case 384000:
          m_speed = B38400;
          break;
