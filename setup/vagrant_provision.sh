@@ -2,6 +2,7 @@
 set -exuo pipefail
 DIR="/vagrant/setup"
 /bin/sudo bash "$DIR/make_directories.sh" --dev
+/bin/sudo bash "$DIR/install_mkl.sh"
 /bin/sudo bash "$DIR/install_dependencies.sh" --dev
 /bin/sudo bash "$DIR/install_mxlib.sh" --dev
 /bin/sudo bash "$DIR/setup_users_and_groups.sh" --dev
