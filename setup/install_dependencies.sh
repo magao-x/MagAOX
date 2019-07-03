@@ -62,6 +62,7 @@ SOFA_REV_DATE=$(echo $SOFA_REV | tr -d _C)
 EIGEN_VERSION="3.3.4"
 LEVMAR_VERSION="2.6"
 FFTW_VERSION="3.3.8"
+CFITSIO_VERSION="3.47"
 if [[ $ENV == dev ]]; then
     yum -y install lapack-devel atlas-devel
 fi
@@ -104,11 +105,11 @@ cd $DEPSROOT
 #
 # CFITSIO
 #
-if [[ ! -d ./cfitsio ]]; then
-    curl -OL http://heasarc.gsfc.nasa.gov/FTP/software/fitsio/c/cfitsio_latest.tar.gz
-    tar xzf cfitsio_latest.tar.gz
+if [[ ! -d ./cfitsio-$CFITSIO_VERSION ]]; then
+    curl -OL http://heasarc.gsfc.nasa.gov/FTP/software/fitsio/c/cfitsio-$CFITSIO_VERSION.tar.gz
+    tar xzf cfitsio-$CFITSIO_VERSION.tar.gz
 fi
-cd cfitsio
+cd cfitsio-$CFITSIO_VERSION
 if [[ ! (( -e /usr/local/lib/libcfitsio.a ) && ( -e /usr/local/lib/libcfitsio.so )) ]]; then
     ./configure --prefix=/usr/local
     make
