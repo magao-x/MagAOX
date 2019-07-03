@@ -157,6 +157,7 @@ cd $DEPSROOT
 # MagAOX dependencies
 #
 FLATBUFFERS_VERSION="1.9.0"
+PYLON_VERSION="5.2.0.13457"
 yum install -y cmake zlib-devel libudev-devel ncurses-devel nmap-ncat \
     lm_sensors hddtemp
 #
@@ -172,3 +173,17 @@ if ! command -v flatc; then
     make
     make install
 fi
+cd $DEPSROOT
+#
+# Basler camera Pylon framework
+#
+PYLON_DIR="./pylon-$PYLON_VERSION-x86_64"
+if [[ ! -d $PYLON_DIR ]]; then
+    curl -L https://www.baslerweb.com/fp-1551786516/media/downloads/software/pylon_software/pylon-5.2.0.13457-x86_64.tar.gz | tar xvz
+fi
+cd $PYLON_DIR
+tar -C /opt -xzf pylonSDK*.tar.gz
+# Adapt setup-usb for noninteractive operation
+sed -i "s/^askNoYes() {$/askNoYes() { return 1; }; askNoYesOld() {/" setup-usb.sh
+./setup-usb.sh
+cd $DEPSROOT
