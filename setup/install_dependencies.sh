@@ -55,19 +55,9 @@ echo "/usr/local/lib" | tee /etc/ld.so.conf.d/local.conf
 ldconfig -v
 
 #
-# Install cmake and default to cmake3
+# Install cmake and cmake3
 #
 yum install -y cmake cmake3
-alternatives --install /usr/local/bin/cmake cmake /usr/bin/cmake 10 \
-    --slave /usr/local/bin/ctest ctest /usr/bin/ctest \
-    --slave /usr/local/bin/cpack cpack /usr/bin/cpack \
-    --slave /usr/local/bin/ccmake ccmake /usr/bin/ccmake \
-    --family cmake
-alternatives --install /usr/local/bin/cmake cmake /usr/bin/cmake3 20 \
-    --slave /usr/local/bin/ctest ctest /usr/bin/ctest3 \
-    --slave /usr/local/bin/cpack cpack /usr/bin/cpack3 \
-    --slave /usr/local/bin/ccmake ccmake /usr/bin/ccmake3 \
-    --family cmake
 
 #
 # mxLib Dependencies
@@ -218,7 +208,7 @@ cd $XRIF_DIR
 git checkout $XRIF_COMMIT
 mkdir -p build
 cd build
-cmake ..
+cmake3 ..
 make
 make test
 make install
