@@ -216,7 +216,7 @@ if [[ ! -d $XRIF_DIR ]]; then
 fi
 cd $XRIF_DIR
 git checkout $XRIF_COMMIT
-mkdir build
+mkdir -p build
 cd build
 cmake ..
 make
