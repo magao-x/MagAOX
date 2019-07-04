@@ -158,6 +158,7 @@ cd $DEPSROOT
 #
 FLATBUFFERS_VERSION="1.9.0"
 PYLON_VERSION="5.2.0.13457"
+XRIF_COMMIT="fdfce2bff20f22fa5d965ed290a8e0c4f9ff64d5"
 yum install -y cmake zlib-devel libudev-devel ncurses-devel nmap-ncat \
     lm_sensors hddtemp
 #
@@ -183,7 +184,28 @@ if [[ ! -d $PYLON_DIR ]]; then
 fi
 cd $PYLON_DIR
 tar -C /opt -xzf pylonSDK*.tar.gz
-# Adapt setup-usb for noninteractive operation
-sed -i "s/^askNoYes() {$/askNoYes() { return 1; }; askNoYesOld() {/" setup-usb.sh
-./setup-usb.sh
+# Replacement for the important parts of setup-usb.sh
+BASLER_RULES_FILE=69-basler-cameras.rules
+UDEV_RULES_DIR=/etc/udev/rules.d
+if [[ ! -e $UDEV_RULES_DIR/$BASLER_RULES_FILE ]]; then
+    cp $BASLER_RULES_FILE $UDEV_RULES_DIR
+fi
+cd $DEPSROOT
+#
+# xrif streaming compression library
+#
+yum install -y check-devel subunit-devel
+XRIF_DIR="./xrif"
+if [[ ! -d $XRIF_DIR ]]; then
+    git clone https://github.com/jaredmales/xrif.git $XRIF_DIR
+fi
+cd $XRIF_DIR
+git checkout $XRIF_COMMIT
+mkdir build
+cd build
+cmake ..
+make
+make test
+make install
+ldconfig
 cd $DEPSROOT
