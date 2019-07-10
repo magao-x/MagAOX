@@ -29,6 +29,8 @@ DEPSROOT=/opt/MagAOX/source/dependencies
 cd $DEPSROOT
 
 echo "Starting shell-based provisioning script from $DIR..."
+# needed for CUDA:
+yum install -y kernel-devel-$(uname -r) kernel-headers-$(uname -r)
 # needed for (at least) git:
 yum groupinstall -y 'Development Tools'
 # Install nice-to-haves
