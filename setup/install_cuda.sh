@@ -18,4 +18,5 @@ yum install -y cuda-toolkit-$CUDA_VERSION_SPEC \
     cuda-libraries-$CUDA_VERSION_SPEC \
     cuda-libraries-dev-$CUDA_VERSION_SPEC \
     cuda-drivers
-echo "export CUDADIR=/usr/local/cuda" > /etc/profile.d/cudadir.sh
+echo "export CUDADIR=/usr/local/cuda" > /etc/profile.d/cuda.sh
+echo "export PATH=\"\$PATH:/usr/local/cuda/bin\"" >> /etc/profile.d/cuda.sh
