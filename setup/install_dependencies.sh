@@ -227,3 +227,4 @@ cd $DEPSROOT
 
 export DEPSROOT
 $DIR/install_cuda.sh
+$DIR/install_magma.sh
