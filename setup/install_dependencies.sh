@@ -214,3 +214,6 @@ make test
 make install
 ldconfig
 cd $DEPSROOT
+
+export DEPSROOT
+$DIR/install_cuda.sh
