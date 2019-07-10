@@ -26,16 +26,24 @@ HERE
 fi
 
 DEPSROOT=/opt/MagAOX/source/dependencies
+cd $DEPSROOT
 
 echo "Starting shell-based provisioning script from $DIR..."
 # needed for (at least) git:
 yum groupinstall -y 'Development Tools'
 # Install nice-to-haves
 yum install -y vim nano wget htop
-# EPEL is additional packages that aren't in the main repo
-wget http://dl.fedoraproject.org/pub/epel/epel-release-latest-7.noarch.rpm
+# Install EPEL
+mkdir -p epel-rpm
+cd epel-rpm/
+EPEL_RPM_FILE=epel-release-latest-7.noarch.rpm
+if [[ ! -e $EPEL_RPM_FILE ]]; then
+    # EPEL is additional packages that aren't in the main repo
+    curl -OL http://dl.fedoraproject.org/pub/epel/$EPEL_RPM_FILE
+fi
 # use || true so it's not an error if already installed:
-yum install -y epel-release-latest-7.noarch.rpm || true
+yum install -y $EPEL_RPM_FILE || true
+cd $DEPSROOT
 # changes the set of available packages, making devtoolset-7 available
 yum -y install centos-release-scl
 # install and enable devtoolset-7 for all users
@@ -44,7 +52,7 @@ yum -y install centos-release-scl
 # (https://bugzilla.redhat.com/show_bug.cgi?id=1319936)
 # so we don't want it enabled when, e.g., Vagrant
 # sshes in to change things. (Complete sudo functionality
-# is available to interactive shells by specifying /bin/bash.)
+# is available to interactive shells by specifying /bin/sudo.)
 yum -y install devtoolset-7
 echo "if tty -s; then source /opt/rh/devtoolset-7/enable; fi" | tee /etc/profile.d/devtoolset-7.sh
 set +u
