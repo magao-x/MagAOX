@@ -26,16 +26,26 @@ HERE
 fi
 
 DEPSROOT=/opt/MagAOX/source/dependencies
+cd $DEPSROOT
 
 echo "Starting shell-based provisioning script from $DIR..."
+# needed for CUDA:
+yum install -y kernel-devel-$(uname -r) kernel-headers-$(uname -r)
 # needed for (at least) git:
 yum groupinstall -y 'Development Tools'
 # Install nice-to-haves
 yum install -y vim nano wget htop
-# EPEL is additional packages that aren't in the main repo
-wget http://dl.fedoraproject.org/pub/epel/epel-release-latest-7.noarch.rpm
+# Install EPEL
+mkdir -p epel-rpm
+cd epel-rpm/
+EPEL_RPM_FILE=epel-release-latest-7.noarch.rpm
+if [[ ! -e $EPEL_RPM_FILE ]]; then
+    # EPEL is additional packages that aren't in the main repo
+    curl -OL http://dl.fedoraproject.org/pub/epel/$EPEL_RPM_FILE
+fi
 # use || true so it's not an error if already installed:
-yum install -y epel-release-latest-7.noarch.rpm || true
+yum install -y $EPEL_RPM_FILE || true
+cd $DEPSROOT
 # changes the set of available packages, making devtoolset-7 available
 yum -y install centos-release-scl
 # install and enable devtoolset-7 for all users
@@ -44,7 +54,7 @@ yum -y install centos-release-scl
 # (https://bugzilla.redhat.com/show_bug.cgi?id=1319936)
 # so we don't want it enabled when, e.g., Vagrant
 # sshes in to change things. (Complete sudo functionality
-# is available to interactive shells by specifying /bin/bash.)
+# is available to interactive shells by specifying /bin/sudo.)
 yum -y install devtoolset-7
 echo "if tty -s; then source /opt/rh/devtoolset-7/enable; fi" | tee /etc/profile.d/devtoolset-7.sh
 set +u
@@ -55,6 +65,11 @@ echo "/usr/local/lib" | tee /etc/ld.so.conf.d/local.conf
 ldconfig -v
 
 #
+# Install cmake and cmake3
+#
+yum install -y cmake cmake3
+
+#
 # mxLib Dependencies
 #
 SOFA_REV="2018_0130_C"
@@ -62,6 +77,7 @@ SOFA_REV_DATE=$(echo $SOFA_REV | tr -d _C)
 EIGEN_VERSION="3.3.4"
 LEVMAR_VERSION="2.6"
 FFTW_VERSION="3.3.8"
+CFITSIO_VERSION="3.47"
 if [[ $ENV == dev ]]; then
     yum -y install lapack-devel atlas-devel
 fi
@@ -104,11 +120,11 @@ cd $DEPSROOT
 #
 # CFITSIO
 #
-if [[ ! -d ./cfitsio ]]; then
-    curl -OL http://heasarc.gsfc.nasa.gov/FTP/software/fitsio/c/cfitsio_latest.tar.gz
-    tar xzf cfitsio_latest.tar.gz
+if [[ ! -d ./cfitsio-$CFITSIO_VERSION ]]; then
+    curl -OL http://heasarc.gsfc.nasa.gov/FTP/software/fitsio/c/cfitsio-$CFITSIO_VERSION.tar.gz
+    tar xzf cfitsio-$CFITSIO_VERSION.tar.gz
 fi
-cd cfitsio
+cd cfitsio-$CFITSIO_VERSION
 if [[ ! (( -e /usr/local/lib/libcfitsio.a ) && ( -e /usr/local/lib/libcfitsio.so )) ]]; then
     ./configure --prefix=/usr/local
     make
@@ -156,7 +172,9 @@ cd $DEPSROOT
 # MagAOX dependencies
 #
 FLATBUFFERS_VERSION="1.9.0"
-yum install -y cmake zlib-devel libudev-devel ncurses-devel nmap-ncat \
+PYLON_VERSION="5.2.0.13457"
+XRIF_COMMIT="fdfce2bff20f22fa5d965ed290a8e0c4f9ff64d5"
+yum install -y zlib-devel libudev-devel ncurses-devel nmap-ncat \
     lm_sensors hddtemp
 #
 # Flatbuffers
@@ -171,3 +189,42 @@ if ! command -v flatc; then
     make
     make install
 fi
+cd $DEPSROOT
+#
+# Basler camera Pylon framework
+#
+PYLON_DIR="./pylon-$PYLON_VERSION-x86_64"
+if [[ ! -d $PYLON_DIR ]]; then
+    curl -L https://www.baslerweb.com/fp-1551786516/media/downloads/software/pylon_software/pylon-5.2.0.13457-x86_64.tar.gz | tar xvz
+fi
+cd $PYLON_DIR
+tar -C /opt -xzf pylonSDK*.tar.gz
+# Replacement for the important parts of setup-usb.sh
+BASLER_RULES_FILE=69-basler-cameras.rules
+UDEV_RULES_DIR=/etc/udev/rules.d
+if [[ ! -e $UDEV_RULES_DIR/$BASLER_RULES_FILE ]]; then
+    cp $BASLER_RULES_FILE $UDEV_RULES_DIR
+fi
+cd $DEPSROOT
+#
+# xrif streaming compression library
+#
+yum install -y check-devel subunit-devel
+XRIF_DIR="./xrif"
+if [[ ! -d $XRIF_DIR ]]; then
+    git clone https://github.com/jaredmales/xrif.git $XRIF_DIR
+fi
+cd $XRIF_DIR
+git checkout $XRIF_COMMIT
+mkdir -p build
+cd build
+cmake3 ..
+make
+make test
+make install
+ldconfig
+cd $DEPSROOT
+
+export DEPSROOT
+$DIR/install_cuda.sh
+$DIR/install_magma.sh

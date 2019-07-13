@@ -15,6 +15,7 @@ fi
 while true; do /bin/sudo -n true; sleep 60; kill -0 "$$" || exit; done 2>/dev/null &
 
 /bin/sudo bash "$DIR/make_directories.sh"
+/bin/sudo bash "$DIR/install_mkl.sh"
 /bin/sudo bash "$DIR/install_dependencies.sh"
 /bin/sudo bash "$DIR/install_mxlib.sh"
 /bin/sudo bash "$DIR/set_permissions.sh"
