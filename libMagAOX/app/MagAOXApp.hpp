@@ -14,7 +14,6 @@
 #include <sys/stat.h>
 
 #include <cstdlib>
-#include <unistd.h>
 #include <fstream>
 
 #include <unordered_map>
@@ -35,7 +34,7 @@
 #include "../logger/logFileRaw.hpp"
 #include "../logger/logManager.hpp"
 
-
+#include "../sys/thSetuid.hpp"
 
 #include "stateCodes.hpp"
 #include "indiDriver.hpp"
@@ -1250,7 +1249,7 @@ template<bool _useINDI>
 int MagAOXApp<_useINDI>::euidCalled()
 {
    errno = 0;
-   if(seteuid(m_euidCalled) < 0)
+   if(sys::th_seteuid(m_euidCalled) < 0)
    {
       std::string logss = "Setting effective user id to euidCalled (";
       logss += mx::ioutils::convertToString<int>(m_euidCalled);
@@ -1269,7 +1268,7 @@ template<bool _useINDI>
 int MagAOXApp<_useINDI>::euidReal()
 {
    errno = 0;
-   if(seteuid(m_euidReal) < 0)
+   if(sys::th_seteuid(m_euidReal) < 0)
    {
       std::string logss = "Setting effective user id to euidReal (";
       logss += mx::ioutils::convertToString<int>(m_euidReal);

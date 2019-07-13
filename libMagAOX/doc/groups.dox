@@ -9,7 +9,7 @@
   */
 
 /** \defgroup logDefs Type definitions for flatlogs.
-  * \ingroup \flatlogs
+  * \ingroup flatlogs
   */
   
 /** \defgroup logbuff The flatlogs binary header definition
@@ -60,6 +60,13 @@
   
 /** \defgroup tty_files TTY files 
   * \ingroup tty 
+  */
+  
+/** \defgroup sys System utilities
+  */
+  
+/** \defgroup sys_files System utility files 
+  * \ingroup sys
   */
   
 /** \defgroup apps Applications
