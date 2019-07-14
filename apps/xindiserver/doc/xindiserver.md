@@ -36,7 +36,7 @@ xindiserver [options]
 |      | --logThreadPrio | logger.logThreadPrio  |     int           | The log thread priority   |
 |   -l | --logLevel      | logger.logLevel       |     string        | The log level   | 
 |   -m |                 | indiserver.m          |     int           | indiserver kills client if it gets more  than this many MB behind, default 50 |
-|  -N  |                 | indiserver.N          |     bool          | indiserver: ignore /tmp/noindi. Capitilzed to avoid conflict with --name    
+|  -N  |                 | indiserver.N          |     bool          | indiserver: ignore /tmp/noindi. Capitalized to avoid conflict with --name    
 |  -p  |                 | indiserver.p          |     int           | indiserver: alternate IP port, default 7624                   
 |  -v  |                 | indiserver.v          |     int           | indiserver: log verbosity, -v, -vv or -vvv                        
 |  -x  |                 | indiserver.x          |     bool          | exit after last client disconnects -- FOR PROFILING ONLY          
