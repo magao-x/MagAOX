@@ -1,6 +1,6 @@
 /** \file sysMonitor.hpp
   * \brief The MagAO-X sysMonitor app main program which provides functions to read and report system statistics
-  * \author Chris Bohlman (cbohlmanaz@gmail.com)
+  * \author Chris Bohlman (cbohlman@pm.me)
   *
   * To view logdump files: logdump -f sysMonitor
   *

@@ -1,6 +1,6 @@
 /** \file sysMonitor.cpp
   * \brief The MagAO-X sysMonitor app source file.
-  * \author Chris Bohlman (cbohlmanaz@gmail.com)
+  * \author Chris Bohlman (cbohlman@pm.me)
   *
   * \ingroup sysMonitor_files
   *

@@ -3,6 +3,6 @@ allall: all
 
 OTHER_HEADERS=
 OTHER_OBJS=
-TARGET=ttmTalker
+TARGET=smc100ccCtrl
 include ../../Make/magAOXApp.mk
 
