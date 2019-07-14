@@ -15,7 +15,9 @@ TEST_INCLUDES ?= ../libMagAOX/tty/tests/ttyIOUtils_test.cpp \
                  ../apps/ocam2KCtrl/tests/ocamUtils_test.cpp \
                  ../apps/siglentSDG/tests/siglentSDG_test.cpp \
                  ../apps/sshDigger/tests/sshDigger_tests.cpp \
-                 ../apps/sysMonitor/tests/sysMonitor_test.cpp 
+                 ../apps/sysMonitor/tests/sysMonitor_test.cpp  \
+                 ../apps/xindiserver/tests/xindiserver_test.cpp
+
                  
                  
 
@@ -43,11 +45,19 @@ include $(SELF_DIR)/../Make/common.mk
 # or `t=` for short
 TARGET ?= testMagAOX
 
-all:  magaox_git_version.h $(TARGET)
+all:  magaox_git_version.h $(TARGET) testMagAOXsetuid
+	rm ../magaox_git_version.h
+
+single: magaox_git_version.h $(TARGET)
 	rm ../magaox_git_version.h
 
 $(TARGET): $(TARGET).o $(TARGET).cpp $(TEST_INCLUDES)
 	$(LINK.o) -o $(TARGET) $(TARGET).o  $(LDFLAGS) $(LDLIBS)
+
+
+testMagAOXsetuid: testMagAOXsetuid.o ../libMagAOX/sys/tests/thSetuid_tests.cpp
+	$(LINK.o) -o testMagAOXsetuid testMagAOXsetuid.o $(LDFLAGS) $(LDLIBS)
+	sudo chown root:root testMagAOXsetuid && sudo chmod u+s testMagAOXsetuid
 
 
 #The GIT status header

@@ -11,6 +11,7 @@
 #include <vector>
 #include <string>
 #include <map>
+#include <unordered_set>
 
 #include <mx/ioutils/fileUtils.hpp>
 
@@ -18,7 +19,7 @@
 #include "../../magaox_git_version.h"
 
 /** \defgroup xindiserver INDI Server wrapper.
-  * \brief Manges INDI server in the MagAO-X context.
+  * \brief Manages INDI server in the MagAO-X context.
   *
   * <a href="..//apps_html/page_module_xindiserver.html">Application Documentation</a>
   *
@@ -37,6 +38,7 @@ namespace app
    
 #define SSHTUNNEL_E_NOTUNNELS (-10)
 
+/// Structure to hold an sshTunnel specification, used for created command line args for indiserver
 struct sshTunnel 
 {
    std::string m_remoteHost;
@@ -45,12 +47,17 @@ struct sshTunnel
    int m_monitorPort {0};
 };
 
-typedef std::unordered_map<std::string, sshTunnel> tunnelMap;
+///The map used to hold tunnel specifications.
+typedef std::unordered_map<std::string, sshTunnel> tunnelMapT;
 
-///\todo add tests for this
+/// Create the tunnel map from a configurator
+/**
+  * \returns 0 on success 
+  * \returns SSHTUNNEL_E_NOTUNNELS if no tunnels are found (< 0).
+  */ 
 inline 
-int loadSSHTunnelConfigs( tunnelMap & tmap,
-                          mx::app::appConfigurator & config
+int loadSSHTunnelConfigs( tunnelMapT & tmap, ///< [out] the tunnel map which will be populated
+                          mx::app::appConfigurator & config ///< [in] the configurator which contains tunnel specifications.
                         )
 {
    std::vector<std::string> sections;
@@ -62,14 +69,12 @@ int loadSSHTunnelConfigs( tunnelMap & tmap,
       return SSHTUNNEL_E_NOTUNNELS;
    }
 
+   size_t matched = 0;
+   
    //Now see if any sections match a tunnel specification
-
-   
-   
    for(size_t i=0; i< sections.size(); ++i)
    {
-      
-         
+      //A tunnel as remoteHost, localPort, and remotePort.
       if( config.isSetUnused(mx::app::iniFile::makeKey(sections[i], "remoteHost" )) &&
              config.isSetUnused(mx::app::iniFile::makeKey(sections[i], "localPort" )) &&
                 config.isSetUnused(mx::app::iniFile::makeKey(sections[i], "remotePort" )) )
@@ -86,17 +91,29 @@ int loadSSHTunnelConfigs( tunnelMap & tmap,
          config.configUnused( monitorPort, mx::app::iniFile::makeKey(sections[i], "monitorPort" ) );
          
          tmap[sections[i]] = sshTunnel({remoteHost, localPort, remotePort, monitorPort});
+      
+         ++matched;
       }
    }
+
+   if(matched == 0) return SSHTUNNEL_E_NOTUNNELS;
    
    return 0;
 }
 
-/** The INDI Server wrapper applciation class.
+
+#define XINDISERVER_E_BADDRIVERSPEC (-100)
+#define XINDISERVER_E_DUPLICATEDRIVER (-101)
+#define XINDISERVER_E_VECTOREXCEPT (-102)
+#define XINDISERVER_E_NOTUNNELS (-103) 
+#define XINDISERVER_E_TUNNELNOTFOUND (-104)
+ 
+
+ 
+/** The INDI Server wrapper application class.
   *
   * \ingroup xindiserver
   * 
-  * \todo update tests
   */  
 class xindiserver : public MagAOXApp<false>
 {
@@ -114,7 +131,9 @@ protected:
    
    std::vector<std::string> m_local; ///< List of local drivers passed in by config
    std::vector<std::string> m_remote; ///< List of remote drivers passed in by config
-   tunnelMap m_tunnels; ///< Map of the ssh tunnels, used for processing the remote drivers in m_remote.
+   std::unordered_set<std::string> m_driverNames; ///< List of driver names processed for command line, used to prevent duplication.
+   
+   tunnelMapT m_tunnels; ///< Map of the ssh tunnels, used for processing the remote drivers in m_remote.
    
    std::vector<std::string> m_indiserverCommand; ///< The command line arguments to indiserver
       
@@ -215,7 +234,7 @@ inline
 void xindiserver::setupConfig()
 {
    config.add("indiserver.m", "m", "", argType::Required, "indiserver", "m", false,  "int", "indiserver kills client if it gets more than this many MB behind, default 50");
-   config.add("indiserver.n", "n", "", argType::True, "indiserver", "n", false,  "bool", "indiserver: ignore /tmp/noindi");
+   config.add("indiserver.N", "N", "", argType::True, "indiserver", "N", false,  "bool", "indiserver: ignore /tmp/noindi.  Capitilzed to avoid conflict with --name");
    config.add("indiserver.p", "p", "", argType::Required, "indiserver", "p", false,  "int", "indiserver: alternate IP port, default 7624");
    config.add("indiserver.v", "v", "", argType::True, "indiserver", "v", false,  "int", "indiserver: log verbosity, -v, -vv or -vvv");
    config.add("indiserver.x", "x", "", argType::True, "indiserver", "x", false,  "bool", "exit after last client disconnects -- FOR PROFILING ONLY");
@@ -232,7 +251,7 @@ void xindiserver::loadConfig()
 {
    //indiserver config:
    config(indiserver_m, "indiserver.m");
-   config(indiserver_n, "indiserver.n");
+   config(indiserver_n, "indiserver.N");
    config(indiserver_p, "indiserver.p");
    
    indiserver_v = config.verbosity("indiserver.v");
@@ -282,7 +301,7 @@ int xindiserver::constructIndiserverCommand( std::vector<std::string> & indiserv
    
    return 0;
 }
-
+ 
 inline
 int xindiserver::addLocalDrivers( std::vector<std::string> & driverArgs )
 {
@@ -299,18 +318,27 @@ int xindiserver::addLocalDrivers( std::vector<std::string> & driverArgs )
       {
          log<software_critical>({__FILE__, __LINE__, "Local driver can't have host spec or path(@,:,/): " + m_local[i]});
          
-         return -1;
+         return XINDISERVER_E_BADDRIVERSPEC;
       }
+      
+      if( m_driverNames.count(m_local[i]) > 0)
+      {
+         log<software_critical>({__FILE__, __LINE__, "Duplicate driver name: " + m_local[i]});
+         return XINDISERVER_E_DUPLICATEDRIVER;
+      }
+      
+      m_driverNames.insert(m_local[i]);
+      
+      std::string dname = driverPath + m_local[i];
       
       try
       {
-         m_local[i].insert(0, driverPath);
-         driverArgs.push_back(m_local[i]);
+         driverArgs.push_back(dname);
       }
       catch(...)
       {
          log<software_critical>({__FILE__, __LINE__, "Exception thrown by std::vector"});
-         return -1;
+         return XINDISERVER_E_VECTOREXCEPT;
       }
    }
    
@@ -330,21 +358,33 @@ int xindiserver::addRemoteDrivers( std::vector<std::string> & driverArgs )
       if(p == 0 || p == std::string::npos)
       {
          log<software_critical>({__FILE__, __LINE__, "Error parsing remote driver specification: " + m_remote[i] + "\n"});         
-         return -1;
+         return XINDISERVER_E_BADDRIVERSPEC;
       }
       
       driver = m_remote[i].substr(0, p);
       tunnel = m_remote[i].substr(p+1);
       
+      if( m_driverNames.count(driver) > 0)
+      {
+         log<software_critical>({__FILE__, __LINE__, "Duplicate driver name: " + driver});
+         return XINDISERVER_E_DUPLICATEDRIVER;
+      }
+      
       std::ostringstream oss;
       
-      ///\todo check for tunnel existence here.
+      if(m_tunnels.size() == 0)
+      {
+         log<software_critical>({__FILE__, __LINE__, "No tunnels specified.\n"});         
+         return XINDISERVER_E_NOTUNNELS;
+      }
       
       if(m_tunnels.count(tunnel) != 1)
       {
          log<software_critical>({__FILE__, __LINE__, "Tunnel not found for: " + m_remote[i] + "\n"});         
-         return -1;
+         return XINDISERVER_E_TUNNELNOTFOUND;
       }
+      
+      m_driverNames.insert(driver);
       
       oss << driver << "@localhost:" << m_tunnels[tunnel].m_localPort;
       
@@ -355,7 +395,7 @@ int xindiserver::addRemoteDrivers( std::vector<std::string> & driverArgs )
       catch(...)
       {
          log<software_critical>({__FILE__, __LINE__, "Exception thrown by vector::push_back."});
-         return -1;
+         return XINDISERVER_E_VECTOREXCEPT;
       }
    }
    
