@@ -284,7 +284,7 @@ void filterWheelCtrl::setupConfig()
 inline
 void filterWheelCtrl::loadConfig()
 {
-   this->m_speed = B9600; //default for MCBL controller.  Will be overridden by any config setting.
+   this->m_baudRate = B9600; //default for MCBL controller.  Will be overridden by any config setting.
 
    int rv = tty::usbDevice::loadConfig(config);
    
