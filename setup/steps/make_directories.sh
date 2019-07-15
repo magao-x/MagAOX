@@ -2,7 +2,7 @@
 DIR="$( cd "$( dirname "${BASH_SOURCE[0]}" )" && pwd )"
 source $DIR/../_common.sh
 set -euo pipefail
-IFS=$'\n\t'
+
 TARGET_ENV=$1
 
 function link_if_necessary() {

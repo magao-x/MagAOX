@@ -2,7 +2,6 @@
 DIR="$( cd "$( dirname "${BASH_SOURCE[0]}" )" && pwd )"
 source $DIR/../_common.sh
 set -euo pipefail
-IFS=$'\n\t'
 
 if [[ ! -e /opt/MagAOX/config ]]; then
     echo "Cloning new copy of MagAOX config files"
