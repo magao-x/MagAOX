@@ -1,6 +1,8 @@
 #!/bin/bash
+DIR="$( cd "$( dirname "${BASH_SOURCE[0]}" )" && pwd )"
+source $DIR/../_common.sh
 set -exuo pipefail
-CUDA_RPM_DIR=$DEPSROOT/cuda
+CUDA_RPM_DIR=./cuda
 mkdir -p $CUDA_RPM_DIR
 cd $CUDA_RPM_DIR
 # Use the local CUDA installer RPM (2.5 GB download) to ensure
@@ -12,7 +14,6 @@ if [[ ! -e $CUDA_RPM_FILE ]]; then
     curl -OL "https://developer.nvidia.com/compute/cuda/10.1/Prod/local_installers/$CUDA_RPM_FILE"
 fi
 rpm -i $CUDA_RPM_FILE || true
-yum clean all
 # pin cuda versions to prevent auto-upgrades
 yum install -y cuda-toolkit-$CUDA_VERSION_SPEC \
     cuda-tools-$CUDA_VERSION_SPEC \

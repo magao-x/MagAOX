@@ -2,24 +2,6 @@
 set -euo pipefail
 DIR="$( cd "$( dirname "${BASH_SOURCE[0]}" )" && pwd )"
 IFS=$'\n\t'
-
-envswitch=${1:---prod}
-if [[ "$envswitch" == "--dev" ]]; then
-  ENV=dev
-elif [[ "$envswitch" == "--prod" ]]; then
-  ENV=prod
-else
-  cat <<'HERE'
-Usage: setup_users_and_groups.sh [--dev] [--prod]
-Automate installation of from-package-manager and from-source
-software dependencies for MagAO-X
-
-  --prod  (default) Set up for production (add current user to magaox-dev)
-  --dev   Set up for local development (don't bother)
-HERE
-  exit 1
-fi
-
 DEFAULT_PASSWORD="extremeAO!"
 
 function creategroup() {
@@ -45,12 +27,29 @@ creategroup magaox
 creategroup magaox-dev
 createuser xsup
 if grep -vq magaox-dev /etc/pam.d/su; then
-  /bin/sudo cp -v "$DIR/enable_su_xsup_for_magaox-dev" /etc/pam.d/su
+  sudo tee /etc/pam.d/su >/dev/null <<EOF
+#%PAM-1.0
+auth            sufficient      pam_rootok.so
+auth            [success=ignore default=1] pam_succeed_if.so user = xsup
+auth            sufficient      pam_succeed_if.so use_uid user ingroup magaox-dev
+# Uncomment the following line to implicitly trust users in the "wheel" group.
+#auth           sufficient      pam_wheel.so trust use_uid
+# Uncomment the following line to require a user to be in the "wheel" group.
+#auth           required        pam_wheel.so use_uid
+auth            substack        system-auth
+auth            include         postlogin
+account         sufficient      pam_succeed_if.so uid = 0 use_uid quiet
+account         include         system-auth
+password        include         system-auth
+session         include         system-auth
+session         include         postlogin
+session         optional        pam_xauth.so
+EOF
   echo "Installed new /etc/pam.d/su"
 else
   echo "/etc/pam.d/su already includes reference to magaox-dev, not overwriting"
 fi
-if [[ $ENV == "prod" ]]; then
+if [[ $EUID != 0 ]]; then
   if [[ -z $(groups | grep magaox-dev) ]]; then
     /bin/sudo gpasswd -a $USER magaox-dev
     echo "Added $USER to group magaox-dev"

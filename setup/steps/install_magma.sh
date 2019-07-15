@@ -1,10 +1,14 @@
 #!/bin/bash
-set -exuo pipefail
-cd $DEPSROOT
+DIR="$( cd "$( dirname "${BASH_SOURCE[0]}" )" && pwd )"
+source $DIR/../_common.sh
+set -ue
 MAGMA_VERSION=2.5.1-alpha1
-MAGMA_FOLDER=magma-$MAGMA_VERSION
+MAGMA_FOLDER=./magma-$MAGMA_VERSION
 if [[ ! -d $MAGMA_FOLDER ]]; then
-    curl -L http://icl.utk.edu/projectsfiles/magma/downloads/$MAGMA_VERSION.tar.gz | tar xvz
+  if [[ ! -e magma-$MAGMA_VERSION.tar.gz ]]; then
+    curl -OL http://icl.utk.edu/projectsfiles/magma/downloads/magma-$MAGMA_VERSION.tar.gz
+  fi
+  tar xzf magma-$MAGMA_VERSION.tar.gz
 fi
 cd $MAGMA_FOLDER
 cp -n make.inc-examples/make.inc.mkl-gcc ./make.inc

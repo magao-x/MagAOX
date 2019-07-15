@@ -1,6 +1,6 @@
 #!/bin/bash
-source /opt/rh/devtoolset-7/enable
-export PATH="/usr/local/bin:$PATH"
+DIR="$( cd "$( dirname "${BASH_SOURCE[0]}" )" && pwd )"
+source $DIR/../_common.sh
 set -exuo pipefail
 IFS=$'\n\t'
 

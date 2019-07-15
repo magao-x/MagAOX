@@ -1,4 +1,6 @@
 #!/bin/bash
+DIR="$( cd "$( dirname "${BASH_SOURCE[0]}" )" && pwd )"
+source $DIR/../_common.sh
 # adapted from
 # https://software.intel.com/en-us/articles/installing-intel-free-libs-and-python-yum-repo
 set -exuo pipefail
