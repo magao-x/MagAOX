@@ -93,7 +93,7 @@ if [[ "$TARGET_ENV" == "vagrant" ]]; then
     /bin/sudo -u vagrant bash "$DIR/steps/install_MagAOX.sh"
     echo "Finished!"
 else
-    if [[ $DIR != /opt/MagAOX/source/MagAOX ]]; then
+    if [[ $DIR != /opt/MagAOX/source/MagAOX/setup ]]; then
         if [[ ! -e /opt/MagAOX/source/MagAOX ]]; then
             echo "Cloning new copy of MagAOX codebase"
             git clone $(dirname $DIR) /opt/MagAOX/source/MagAOX
