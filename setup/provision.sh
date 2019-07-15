@@ -5,6 +5,7 @@ if [[ -d /vagrant ]]; then
     DIR="/vagrant/setup"
     echo "Setting up for VM use"
     /bin/sudo bash -l "$DIR/setup_users_and_groups.sh"
+    /bin/sudo yum install kernel-devel
 else
     TARGET_ENV=instrument
     DIR="$( cd "$( dirname "${BASH_SOURCE[0]}" )" && pwd )"
@@ -54,6 +55,7 @@ cd /opt/MagAOX/vendor
 /bin/sudo bash -l "$DIR/steps/install_magma.sh"
 /bin/sudo bash -l "$DIR/steps/install_basler_pylon.sh"
 /bin/sudo bash -l "$DIR/steps/install_edt.sh"
+/bin/sudo bash -l "$DIR/steps/install_picam.sh"
 
 ## Install proprietary / non-public software
 if [[ -e $VENDOR_SOFTWARE_BUNDLE ]]; then

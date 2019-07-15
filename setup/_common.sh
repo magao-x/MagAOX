@@ -42,7 +42,7 @@ function createuser() {
 # that means we have to explicitly enable it ourselves.
 # (This crap again: https://bugzilla.redhat.com/show_bug.cgi?id=1319936)
 if [[ -e /opt/rh/devtoolset-7/enable ]]; then
-    source /opt/rh/devtoolset-7/enable
+    set +u; source /opt/rh/devtoolset-7/enable; set -u
 fi
 # root doesn't get /usr/local/bin on their path, so add it
 # (why? https://serverfault.com/a/838552)
