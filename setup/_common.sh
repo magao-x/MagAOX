@@ -33,7 +33,7 @@ function createuser() {
     /bin/sudo touch /home/$1/.ssh/authorized_keys
     /bin/sudo chown -R $1:magaox /home/$1/.ssh
     /bin/sudo chmod -R u=rwx,g=,o= /home/$1/.ssh
-    /bin/sudo chmod u=rw,g=r,o=r /home/$1/.ssh/authorized_keys
+    /bin/sudo chmod u=rw,g=,o= /home/$1/.ssh/authorized_keys
     log_success "Created user account $1 with default password $DEFAULT_PASSWORD"
     log_info "Append an ecdsa or ed25519 key to /home/$1/.ssh/authorized_keys to enable SSH login"
   fi
