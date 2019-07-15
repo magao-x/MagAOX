@@ -25,13 +25,13 @@ fi
 source $DIR/_common.sh
 
 VENDOR_SOFTWARE_BUNDLE=$DIR/vendor_software.tar.gz
-if [[ ! -e $VENDOR_SOFTWARE_BUNDLE ]]; then
-    echo "Couldn't find vendor software bundle at location $VENDOR_SOFTWARE_BUNDLE"
-    echo "(Generate with ~/Box/MagAO-X/Vendor\ Software/generate_bundle.sh)"
-    if [[ $TARGET_ENV == "instrument" ]]; then
-        exit 1
-    fi
-fi
+# if [[ ! -e $VENDOR_SOFTWARE_BUNDLE ]]; then
+#     echo "Couldn't find vendor software bundle at location $VENDOR_SOFTWARE_BUNDLE"
+#     echo "(Generate with ~/Box/MagAO-X/Vendor\ Software/generate_bundle.sh)"
+#     if [[ $TARGET_ENV == "instrument" ]]; then
+#         exit 1
+#     fi
+# fi
 # die on uninitialized variables (typo guard)
 set -u
 
