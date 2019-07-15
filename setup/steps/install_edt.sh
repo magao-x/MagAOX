@@ -1,6 +1,7 @@
 #!/bin/bash
 DIR="$( cd "$( dirname "${BASH_SOURCE[0]}" )" && pwd )"
 source $DIR/../_common.sh
+set -euo pipefail
 # lspci needed to install EDT framegrabber driver
 yum install -y pciutils
 EDT_RPM_FILENAME=EDTpdv-5.5.7-2.noarch.rpm

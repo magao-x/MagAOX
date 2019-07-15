@@ -1,7 +1,7 @@
 #!/bin/bash
 DIR="$( cd "$( dirname "${BASH_SOURCE[0]}" )" && pwd )"
 source $DIR/../_common.sh
-set -ue
+set -euo pipefail
 LEVMAR_VERSION="2.6"
 #
 # LevMar

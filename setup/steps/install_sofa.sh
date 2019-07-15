@@ -1,7 +1,7 @@
 #!/bin/bash
 DIR="$( cd "$( dirname "${BASH_SOURCE[0]}" )" && pwd )"
 source $DIR/../_common.sh
-set -ue
+set -euo pipefail
 SOFA_REV="2018_0130_C"
 SOFA_REV_DATE=$(echo $SOFA_REV | tr -d _C)
 #

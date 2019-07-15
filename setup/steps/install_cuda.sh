@@ -1,7 +1,7 @@
 #!/bin/bash
 DIR="$( cd "$( dirname "${BASH_SOURCE[0]}" )" && pwd )"
 source $DIR/../_common.sh
-set -exuo pipefail
+set -euo pipefail
 CUDA_RPM_DIR=./cuda
 mkdir -p $CUDA_RPM_DIR
 cd $CUDA_RPM_DIR

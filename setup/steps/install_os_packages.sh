@@ -1,7 +1,7 @@
 #!/bin/bash
 DIR="$( cd "$( dirname "${BASH_SOURCE[0]}" )" && pwd )"
 source $DIR/../_common.sh
-set -eu
+set -euo pipefail
 # needed for (at least) git:
 yum groupinstall -y 'Development Tools'
 

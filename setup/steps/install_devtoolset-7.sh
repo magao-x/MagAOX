@@ -1,7 +1,7 @@
 #!/bin/bash
 DIR="$( cd "$( dirname "${BASH_SOURCE[0]}" )" && pwd )"
 source $DIR/../_common.sh
-set -exuo pipefail
+set -euo pipefail
 # install and enable devtoolset-7 for all users
 # Note: this only works on interactive shells! There is a bug in SCL
 # that breaks sudo argument parsing when SCL is enabled

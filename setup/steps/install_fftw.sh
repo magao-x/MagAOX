@@ -1,7 +1,7 @@
 #!/bin/bash
 DIR="$( cd "$( dirname "${BASH_SOURCE[0]}" )" && pwd )"
 source $DIR/../_common.sh
-set -ue
+set -euo pipefail
 FFTW_VERSION="3.3.8"
 #
 # FFTW (note: need 3.3.8 or newer, so can't use yum)

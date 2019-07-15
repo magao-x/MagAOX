@@ -1,7 +1,7 @@
 #!/bin/bash
 DIR="$( cd "$( dirname "${BASH_SOURCE[0]}" )" && pwd )"
 source $DIR/../_common.sh
-set -ue
+set -euo pipefail
 XRIF_COMMIT="fdfce2bff20f22fa5d965ed290a8e0c4f9ff64d5"
 XRIF_DIR="./xrif"
 

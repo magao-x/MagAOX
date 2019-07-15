@@ -1,7 +1,7 @@
 #!/bin/bash
 DIR="$( cd "$( dirname "${BASH_SOURCE[0]}" )" && pwd )"
 source $DIR/../_common.sh
-set -exuo pipefail
+set -euo pipefail
 DIR="$( cd "$( dirname "${BASH_SOURCE[0]}" )" && pwd )"
 VENDOR_SOFTWARE_BUNDLE=$DIR/vendor_software.tar.gz
 if [[ ! -e $VENDOR_SOFTWARE_BUNDLE ]]; then
