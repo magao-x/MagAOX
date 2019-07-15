@@ -29,7 +29,13 @@ function createuser() {
   else
     /bin/sudo useradd $1 -g magaox
     echo -e "$DEFAULT_PASSWORD\n$DEFAULT_PASSWORD" | passwd $1
-    echo "Created user account $1 with default password $DEFAULT_PASSWORD"
+    /bin/sudo mkdir -p /home/$1/.ssh
+    /bin/sudo touch /home/$1/.ssh/authorized_keys
+    /bin/sudo chown -R $1:magaox /home/$1/.ssh
+    /bin/sudo chmod -R u=rwx,g=,o= /home/$1/.ssh
+    /bin/sudo chmod u=rw,g=r,o=r /home/$1/.ssh/authorized_keys
+    log_success "Created user account $1 with default password $DEFAULT_PASSWORD"
+    log_info "Append an ecdsa or ed25519 key to /home/$1/.ssh/authorized_keys to enable SSH login"
   fi
 }
 # We work around the buggy devtoolset /bin/sudo wrapper in provision.sh, but
