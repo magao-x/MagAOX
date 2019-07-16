@@ -9,4 +9,13 @@ yum install -y \
     ncurses-devel \
     nmap-ncat \
     lm_sensors \
-    hddtemp
+    hddtemp \
+    readline-devel \
+    pkg-config \
+    bison \
+    flex \
+    dialog \
+;
+
+# For some reason, pkg-config doesn't automatically look here?
+echo "export PKG_CONFIG_PATH=/usr/local/lib/pkgconfig" > /etc/profile.d/pkg-config-path.sh

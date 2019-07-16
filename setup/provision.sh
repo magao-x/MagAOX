@@ -88,13 +88,14 @@ source /etc/profile.d/mxmakefile.sh
 /bin/sudo bash -l "$DIR/steps/install_MagAOX_osdeps.sh"
 
 if [[ "$TARGET_ENV" == "vagrant" ]]; then
+    MAYBE_SUDO="/bin/sudo -u vagrant"
     # Create or replace symlink to sources so we develop on the host machine's copy
     # (unlike prod, where we install a new clone of the repo to this location)
     ln -nfs /vagrant /opt/MagAOX/source/MagAOX
     usermod -G magaox,magaox-dev vagrant
-    /bin/sudo -u vagrant bash "$DIR/steps/install_MagAOX.sh"
     echo "Finished!"
 else
+    MAYBE_SUDO=""
     if [[ $DIR != /opt/MagAOX/source/MagAOX/setup ]]; then
         if [[ ! -e /opt/MagAOX/source/MagAOX ]]; then
             echo "Cloning new copy of MagAOX codebase"
@@ -110,10 +111,14 @@ else
     else
         echo "Running from clone located at $DIR, nothing to do for cloning step"
     fi
-    # The last step should work as whatever user is installing, provided
-    # they are a member of magaox-dev and they have sudo access to install to
-    # /usr/local. Building as root would leave intermediate build products
-    # owned by root, which we probably don't want.
-    bash "$DIR/steps/install_MagAOX.sh"
     echo "Finished!"
 fi
+# These last steps should work as whatever user is installing, provided
+# they are a member of magaox-dev and they have sudo access to install to
+# /usr/local. Building as root would leave intermediate build products
+# owned by root, which we probably don't want.
+#
+# On a Vagrant VM, we need to "sudo" to become vagrant since the provisioning
+# runs as root.
+$MAYBE_SUDO bash "$DIR/steps/install_cacao.sh" $TARGET_ENV
+$MAYBE_SUDO bash "$DIR/steps/install_MagAOX.sh"
