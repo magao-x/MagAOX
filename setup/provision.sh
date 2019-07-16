@@ -5,7 +5,7 @@ if [[ -d /vagrant ]]; then
     DIR="/vagrant/setup"
     echo "Setting up for VM use"
     /bin/sudo bash -l "$DIR/setup_users_and_groups.sh"
-    /bin/sudo yum install kernel-devel
+    /bin/sudo yum install -y kernel-devel
 else
     TARGET_ENV=instrument
     DIR="$( cd "$( dirname "${BASH_SOURCE[0]}" )" && pwd )"
