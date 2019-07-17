@@ -116,7 +116,6 @@ int magAOXMaths::appStartup()
    
    updateVals();
                     
-   
    return 0;
 }
 

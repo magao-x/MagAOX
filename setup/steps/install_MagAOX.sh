@@ -1,8 +1,7 @@
 #!/bin/bash
-source /opt/rh/devtoolset-7/enable
-export PATH="/usr/local/bin:$PATH"
-set -exuo pipefail
-IFS=$'\n\t'
+DIR="$( cd "$( dirname "${BASH_SOURCE[0]}" )" && pwd )"
+source $DIR/../_common.sh
+set -euo pipefail
 
 if [[ ! -e /opt/MagAOX/config ]]; then
     echo "Cloning new copy of MagAOX config files"
