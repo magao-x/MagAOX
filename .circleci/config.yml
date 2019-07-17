@@ -1,0 +1,11 @@
+version: 2
+jobs:
+  build:
+    docker:
+      - image: centos:7.6.1810
+    steps:
+      - checkout
+      - run:
+          name: Auto-provision
+          command: 'bash -l ~/project/setup/provision.sh'
+

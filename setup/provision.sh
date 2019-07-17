@@ -1,14 +1,17 @@
 #!/bin/bash
 set -eo pipefail
-if [[ -d /vagrant ]]; then
-    TARGET_ENV=vagrant
-    DIR="/vagrant/setup"
+DIR="$( cd "$( dirname "${BASH_SOURCE[0]}" )" && pwd )"
+if [[ -d /vagrant || $CI == true ]]; then
+    TARGET_ENV=vm
+    if [[ -d /vagrant ]]; then
+        DIR="/vagrant/setup"
+        VAGRANT=true
+    fi
     echo "Setting up for VM use"
     /bin/sudo bash -l "$DIR/setup_users_and_groups.sh"
     /bin/sudo yum install -y kernel-devel
 else
     TARGET_ENV=instrument
-    DIR="$( cd "$( dirname "${BASH_SOURCE[0]}" )" && pwd )"
     echo "Setting up for instrument use"
     set +e; groups | grep magaox-dev; set -e
     not_in_group=$?
@@ -26,13 +29,13 @@ fi
 source $DIR/_common.sh
 
 VENDOR_SOFTWARE_BUNDLE=$DIR/vendor_software.tar.gz
-# if [[ ! -e $VENDOR_SOFTWARE_BUNDLE ]]; then
-#     echo "Couldn't find vendor software bundle at location $VENDOR_SOFTWARE_BUNDLE"
-#     echo "(Generate with ~/Box/MagAO-X/Vendor\ Software/generate_bundle.sh)"
-#     if [[ $TARGET_ENV == "instrument" ]]; then
-#         exit 1
-#     fi
-# fi
+if [[ ! -e $VENDOR_SOFTWARE_BUNDLE ]]; then
+    echo "Couldn't find vendor software bundle at location $VENDOR_SOFTWARE_BUNDLE"
+    echo "(Generate with ~/Box/MagAO-X/Vendor\ Software/generate_bundle.sh)"
+    if [[ $TARGET_ENV == "instrument" ]]; then
+        exit 1
+    fi
+fi
 # die on uninitialized variables (typo guard)
 set -u
 
@@ -86,16 +89,16 @@ source /etc/profile.d/mxmakefile.sh
 
 
 ## Build MagAO-X and install sources to /opt/MagAOX/source/MagAOX
-
-if [[ "$TARGET_ENV" == "vagrant" ]]; then
+MAYBE_SUDO=
+if $VAGRANT; then
     MAYBE_SUDO="/bin/sudo -u vagrant"
     # Create or replace symlink to sources so we develop on the host machine's copy
     # (unlike prod, where we install a new clone of the repo to this location)
     ln -nfs /vagrant /opt/MagAOX/source/MagAOX
+    log_success "Symlinked /opt/MagAOX/source/MagAOX to /vagrant (host folder)"
     usermod -G magaox,magaox-dev vagrant
-    echo "Finished!"
+    log_success "Added vagrant user to magaox,magaox-dev"
 else
-    MAYBE_SUDO=""
     if [[ $DIR != /opt/MagAOX/source/MagAOX/setup ]]; then
         if [[ ! -e /opt/MagAOX/source/MagAOX ]]; then
             echo "Cloning new copy of MagAOX codebase"
@@ -106,12 +109,11 @@ else
         git remote add origin https://github.com/magao-x/MagAOX.git
         git fetch
         git branch -u origin/master master
-        echo "In the future, you can re-run this script from /opt/MagAOX/source/MagAOX/setup"
-        echo "(In fact, maybe delete $(dirname $DIR)?)"
+        log_success "In the future, you can re-run this script from /opt/MagAOX/source/MagAOX/setup"
+        log_info "(In fact, maybe delete $(dirname $DIR)?)"
     else
-        echo "Running from clone located at $DIR, nothing to do for cloning step"
+        log_info "Running from clone located at $DIR, nothing to do for cloning step"
     fi
-    echo "Finished!"
 fi
 # These last steps should work as whatever user is installing, provided
 # they are a member of magaox-dev and they have sudo access to install to

@@ -31,7 +31,7 @@ mkdir -pv /opt/MagAOX/vendor
 mkdir -pv /opt/MagAOX/sys
 mkdir -pv /opt/MagAOX/secrets
 
-if [[ "$TARGET_ENV" == "vagrant" ]]; then
+if [[ "$TARGET_ENV" == "vm" ]]; then
   mkdir -pv /opt/MagAOX/logs
   mkdir -pv /opt/MagAOX/rawimages
 elif [[ "$TARGET_ENV" == "instrument" ]]; then
