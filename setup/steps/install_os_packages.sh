@@ -19,4 +19,6 @@ yum install -y \
     vim \
     nano \
     wget \
-    htop
+    htop \
+    ntp \
+;

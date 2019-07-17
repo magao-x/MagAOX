@@ -48,6 +48,7 @@ cd /opt/MagAOX/vendor
 /bin/sudo bash -l "$DIR/steps/install_fftw.sh"
 /bin/sudo bash -l "$DIR/steps/install_cfitsio.sh"
 /bin/sudo bash -l "$DIR/steps/install_sofa.sh"
+/bin/sudo bash -l "$DIR/steps/install_xpa.sh"
 /bin/sudo bash -l "$DIR/steps/install_eigen.sh"
 /bin/sudo bash -l "$DIR/steps/install_levmar.sh"
 /bin/sudo bash -l "$DIR/steps/install_flatbuffers.sh"

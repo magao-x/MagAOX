@@ -17,5 +17,9 @@ yum install -y \
     dialog \
 ;
 
+yum-config-manager --add-repo https://download.opensuse.org/repositories/network:/messaging:/zeromq:/release-stable/CentOS_7/network:messaging:zeromq:release-stable.repo
+yum install -y zeromq-devel
+
+
 # For some reason, pkg-config doesn't automatically look here?
 echo "export PKG_CONFIG_PATH=/usr/local/lib/pkgconfig" > /etc/profile.d/pkg-config-path.sh
