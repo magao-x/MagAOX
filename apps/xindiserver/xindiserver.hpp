@@ -129,6 +129,7 @@ protected:
    int indiserver_v {-1}; ///< The indiserver verbosity (passed to indiserver)
    bool indiserver_x {false}; ///< The indiserver terminate after last exit flag (passed to indiserver)
    
+   std::string m_driverPath; ///< The path to the local drivers
    std::vector<std::string> m_local; ///< List of local drivers passed in by config
    std::vector<std::string> m_remote; ///< List of remote drivers passed in by config
    std::unordered_set<std::string> m_driverNames; ///< List of driver names processed for command line, used to prevent duplication.
@@ -305,10 +306,10 @@ int xindiserver::constructIndiserverCommand( std::vector<std::string> & indiserv
 inline
 int xindiserver::addLocalDrivers( std::vector<std::string> & driverArgs )
 {
-   std::string driverPath = MAGAOX_path;
-   driverPath += "/";
-   driverPath += MAGAOX_driverRelPath;
-   driverPath += "/";
+   m_driverPath = MAGAOX_path;
+   m_driverPath += "/";
+   m_driverPath += MAGAOX_driverRelPath;
+   m_driverPath += "/";
    
    for(size_t i=0; i< m_local.size(); ++i)
    {
@@ -329,7 +330,7 @@ int xindiserver::addLocalDrivers( std::vector<std::string> & driverArgs )
       
       m_driverNames.insert(m_local[i]);
       
-      std::string dname = driverPath + m_local[i];
+      std::string dname = m_driverPath + m_local[i];
       
       try
       {
@@ -645,7 +646,8 @@ int xindiserver::appStartup()
          log<software_error>({__FILE__, __LINE__, "Failed to create symlink for driver: " + m_local[i] + ". Continuing."});
       }
       
-      rv = symlink(path1.c_str(), m_local[i].c_str());
+      std::cerr << "creating symlink " << path1 << " " << m_driverPath + m_local[i] << "\n";
+      rv = symlink(path1.c_str(), (m_driverPath + m_local[i]).c_str());
       
       if(rv < 0 && errno != EEXIST)
       {
