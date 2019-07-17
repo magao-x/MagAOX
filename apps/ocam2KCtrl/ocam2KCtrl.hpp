@@ -109,10 +109,6 @@ int loadCameraConfig( cameraConfigMap & ccmap,
   *
   * \ingroup ocam2KCtrl
   * 
-  * \todo INDI prop for timestamp of last frame skip.  Maybe total frameskips?
-  * \todo Config item for ImageStreamIO name filename
-  * \todo implement ImageStreamIO circular buffer, with config setting
-  * \todo calculate frames skipped due to timeouts.
   */
 class ocam2KCtrl : public MagAOXApp<>, public dev::ioDevice, public dev::frameGrabber<ocam2KCtrl>
 {
@@ -147,6 +143,8 @@ protected:
    
    std::string m_ocamDescrambleFile; ///< Path the OCAM 2K pixel descrambling file, relative to MagAO-X config directory.
 
+   unsigned m_maxEMGain {600};
+   
    ///@}
    
    PdvDev * m_pdv {nullptr}; ///< The EDT PDV device handle
@@ -247,7 +245,6 @@ public:
 inline
 ocam2KCtrl::ocam2KCtrl() : MagAOXApp(MAGAOX_CURRENT_SHA1, MAGAOX_REPO_MODIFIED)
 {
-   ///\todo if power management is not fully corectly specified (e.g. outlet instead of channel is used as keyword), things just silently hang. Fix implemented, test needed.
    m_powerMgtEnabled = true;
    
    return;
@@ -278,6 +275,8 @@ void ocam2KCtrl::setupConfig()
    
    config.add("camera.ocamDescrambleFile", "", "camera.ocamDescrambleFile", argType::Required, "camera", "ocamDescrambleFile", false, "string", "The path of the OCAM descramble file, relative to MagAOX/config.");
    
+   config.add("camera.maxEMGain", "", "camera.maxEMGain", argType::Required, "camera", "maxEMGain", false, "unsigned", "The maximum EM gain which can be set by  user. Default is 600.  Min is 1, max is 600.");
+   
    dev::ioDevice::setupConfig(config);
 }
 
@@ -296,7 +295,19 @@ void ocam2KCtrl::loadConfig()
    config(m_startupTemp, "camera.startupTemp");
    config(m_startupMode, "camera.startupMode");
    config(m_ocamDescrambleFile, "camera.ocamDescrambleFile");
-
+   config(m_maxEMGain, "camera.maxEMGain");
+   if(m_maxEMGain < 1)
+   {
+      m_maxEMGain = 1;
+      log<text_log>("maxEMGain set to 1");
+   }
+   
+   if(m_maxEMGain > 600)
+   {
+      m_maxEMGain = 600;
+      log<text_log>("maxEMGain set to 600");
+   }
+   
    dev::frameGrabber<ocam2KCtrl>::loadConfig(config);
    
    int rv = loadCameraConfig(m_cameraModes, config);
@@ -825,7 +836,11 @@ int ocam2KCtrl::setEMGain( unsigned emg )
 {
    std::string response;
 
-   ///\todo should we have fps range checks or let camera deal with it?
+   if(emg < 1 || emg > m_maxEMGain)
+   {
+      log<text_log>("Attempt to set EM gain to " + std::to_string(emg) + " outside limits refused", logPrio::LOG_WARNING);
+      return 0;
+   }
    
    std::string emgStr= std::to_string(emg);
    if( pdvSerialWriteRead( response, m_pdv, "gain " + emgStr, m_readTimeout) == 0)

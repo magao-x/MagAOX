@@ -26,6 +26,8 @@
 
 //1 App specific Tests
 
+#include "../apps/xindiserver/tests/xindiserver_test.cpp"
+
 #include "../apps/ocam2KCtrl/tests/ocamUtils_test.cpp"
 
 #include "../apps/siglentSDG/tests/siglentSDG_test.cpp"

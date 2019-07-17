@@ -30,7 +30,7 @@ struct usbDevice
    std::string m_idProduct; ///< The product id 4-digit code
    std::string m_serial;    ///< The serial number
 
-   speed_t m_speed {0}; ///< The baud rate specification. \todo change this m_baudRate
+   speed_t m_baudRate {0}; ///< The baud rate specification. 
 
    std::string m_deviceName; ///< The device path name, e.g. /dev/ttyUSB0
 
@@ -45,8 +45,8 @@ struct usbDevice
 
    ///Load the USB section from an application configurator
    /**
-     * If config does not contain a baud rate, m_speed is unchanged.  If m_speed is 0 at the end of this
-     * method, an error is returned.  Set m_speed prior to calling to avoid this error.
+     * If config does not contain a baud rate, m_baudRate is unchanged.  If m_baudRate is 0 at the end of this
+     * method, an error is returned.  Set m_baudRate prior to calling to avoid this error.
      *
      * \returns 0 on success
      * \returns -1 on error (nothing implemented yet)
@@ -86,55 +86,55 @@ int usbDevice::loadConfig( mx::app::appConfigurator & config )
       case 0:
          break; //Don't change default.
       case 500:
-         m_speed = B50;
+         m_baudRate = B50;
          break;
       case 750:
-         m_speed = B75;
+         m_baudRate = B75;
          break;
       case 1100:
-         m_speed = B110;
+         m_baudRate = B110;
          break;
       case 1345:
-         m_speed = B134;
+         m_baudRate = B134;
          break;
       case 1500:
-         m_speed = B150;
+         m_baudRate = B150;
          break;
       case 2000:
-         m_speed = B200;
+         m_baudRate = B200;
          break;
       case 3000:
-         m_speed = B300;
+         m_baudRate = B300;
          break;
       case 6000:
-         m_speed = B600;
+         m_baudRate = B600;
          break;
       case 18000:
-         m_speed = B1800;
+         m_baudRate = B1800;
          break;
       case 24000:
-         m_speed = B2400;
+         m_baudRate = B2400;
          break;
       case 48000:
-         m_speed = B4800;
+         m_baudRate = B4800;
          break;
       case 96000:
-         m_speed = B9600;
+         m_baudRate = B9600;
          break;
       case 192000:
-         m_speed = B19200;
+         m_baudRate = B19200;
          break;
       case 576000:
-         m_speed = B57600;
+         m_baudRate = B57600;
          break;
       case 384000:
-         m_speed = B38400;
+         m_baudRate = B38400;
          break;
       default:
          break;
    }
 
-   if(m_speed == 0) return TTY_E_BADBAUDRATE;
+   if(m_baudRate == 0) return TTY_E_BADBAUDRATE;
 
    return getDeviceName();
 }
@@ -152,7 +152,7 @@ int usbDevice::connect()
       m_fileDescrip = 0;
    }
    
-   return ttyOpenRaw( m_fileDescrip, m_deviceName, m_speed );
+   return ttyOpenRaw( m_fileDescrip, m_deviceName, m_baudRate );
 }
 
 } //namespace tty

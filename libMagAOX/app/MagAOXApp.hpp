@@ -14,7 +14,6 @@
 #include <sys/stat.h>
 
 #include <cstdlib>
-#include <unistd.h>
 #include <fstream>
 
 #include <unordered_map>
@@ -35,7 +34,7 @@
 #include "../logger/logFileRaw.hpp"
 #include "../logger/logManager.hpp"
 
-
+#include "../sys/thSetuid.hpp"
 
 #include "stateCodes.hpp"
 #include "indiDriver.hpp"
@@ -1250,7 +1249,7 @@ template<bool _useINDI>
 int MagAOXApp<_useINDI>::euidCalled()
 {
    errno = 0;
-   if(seteuid(m_euidCalled) < 0)
+   if(sys::th_seteuid(m_euidCalled) < 0)
    {
       std::string logss = "Setting effective user id to euidCalled (";
       logss += mx::ioutils::convertToString<int>(m_euidCalled);
@@ -1269,7 +1268,7 @@ template<bool _useINDI>
 int MagAOXApp<_useINDI>::euidReal()
 {
    errno = 0;
-   if(seteuid(m_euidReal) < 0)
+   if(sys::th_seteuid(m_euidReal) < 0)
    {
       std::string logss = "Setting effective user id to euidReal (";
       logss += mx::ioutils::convertToString<int>(m_euidReal);
@@ -1730,25 +1729,7 @@ int MagAOXApp<_useINDI>::registerIndiPropertyNew( pcf::IndiProperty & prop,
    prop.setPerm(propPerm);
    prop.setState( propState);
 
-
-   callBackInsertResult result =  m_indiNewCallBacks.insert(callBackValueType( propName, {&prop, callBack}));
-
-   try 
-   {
-      if(!result.second)
-      {
-         return log<software_error,-1>({__FILE__, __LINE__, "failed to insert INDI property: " + prop.getName()});
-      }
-   }
-   catch( std::exception & e)
-   {
-      return log<software_error, -1>({__FILE__, __LINE__, std::string("Exception caught: ") + e.what()});
-   }
-   catch(...)
-   {
-      return log<software_error, -1>({__FILE__, __LINE__, "Unknown exception caught."});
-   }
-   return 0;
+   return registerIndiPropertyNew(prop, callBack);
 }
 
 template<bool _useINDI>
@@ -1764,7 +1745,7 @@ int MagAOXApp<_useINDI>::registerIndiPropertySet( pcf::IndiProperty & prop,
    prop.setDevice(devName);
    prop.setName(propName);
 
-   callBackInsertResult result =  m_indiSetCallBacks.insert(callBackValueType( devName + "." + propName, {&prop, callBack}));
+   callBackInsertResult result =  m_indiSetCallBacks.insert(callBackValueType( prop.createUniqueKey(), {&prop, callBack}));
 
    try 
    {

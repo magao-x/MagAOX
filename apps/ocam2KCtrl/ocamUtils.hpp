@@ -15,23 +15,27 @@ namespace MagAOX
 namespace app
 {
 
-///\todo document this
+/// Structure to hold the OCAM camera temperature readings returned by the device.
 struct ocamTemps
 {
-   float CCD {0};
-   float CPU {0};
-   float POWER {0};
-   float BIAS {0};
-   float WATER {0};
-   float LEFT {0};
-   float RIGHT {0};
-   float SET {0};
-   float COOLING_POWER {0};
+   float CCD {0};           ///< The detector temperature.
+   float CPU {0};           ///< The CPU temperature
+   float POWER {0};         ///< Power supply temperature
+   float BIAS {0};          ///< Bias temperature
+   float WATER {0};         ///< Cooling water temperature
+   float LEFT {0};          ///< The left amplifier temperature
+   float RIGHT {0};         ///< The right amplifier temperature
+   float SET {0};           ///< The CCD set temeperature
+   float COOLING_POWER {0}; ///< the cooling power in 100 mw.
 };
 
-///\todo document this
-int parseTemps( ocamTemps & temps,
-                const std::string & tstr
+///Parse the OCAM temp query and fill the ocamTemps structure.
+/**
+  * \returns 0 on success
+  * \returns -1 on error
+  */ 
+int parseTemps( ocamTemps & temps,        ///< [out] the struture of temperature readings
+                const std::string & tstr  ///< [in] the device response to parse.
               )
 {
    std::vector<std::string> v;
@@ -52,10 +56,16 @@ int parseTemps( ocamTemps & temps,
    return 0;
 }
 
-///\todo document this
-///\todo add test for FPS
-int parseFPS( float & fps,
-              const std::string & fstr
+/// Parse the FPS response
+/** Parses the OCAM 2K response to the "fps" query.
+  *
+  * \returns 0 on success
+  * \returns -1 on error
+  *  
+  * \todo add test for FPS
+  */
+int parseFPS( float & fps,             ///< [out] the fps returned by the camera
+              const std::string & fstr ///< [in] the response to parse
             )
 {
    std::vector<std::string> v;

@@ -35,6 +35,10 @@ protected:
    bool m_warningState {false}; ///< True if a warning exists, false if no warning.
 
    long m_rawPos; ///< The raw position reported by the device, in microsteps.
+   
+   long m_maxPos; ///< The max position allowed for the device, set by config.  Will be set to no larger m_maxPosHW.
+   
+   long m_maxPosHW; ///< The max position allowed for the device, as reported by the device.
 
 public:
 

@@ -13,7 +13,6 @@ namespace app
 {
 struct xindiserver_test
 {
-   void indiserver_l( xindiserver & xi, const std::string &l) {xi.indiserver_l = l;}
    void indiserver_m( xindiserver & xi, const int &m) {xi.indiserver_m = m; }
    void indiserver_n( xindiserver & xi, const bool &n) {xi.indiserver_n = n;}
    void indiserver_p( xindiserver & xi, const int &p) {xi.indiserver_p = p;}
@@ -21,8 +20,8 @@ struct xindiserver_test
    void indiserver_x( xindiserver & xi, const bool &x) {xi.indiserver_x = x;}
    void m_local(xindiserver & xi, const std::vector<std::string> & ml) {xi.m_local = ml;}
    void m_remote(xindiserver & xi, const std::vector<std::string> & mr) {xi.m_remote = mr;}
-   void m_hosts(xindiserver & xi, const std::vector<std::string> & mh) {xi.m_hosts = mh;}
    
+   tunnelMapT & tunnelMap(xindiserver & xi) {return xi.m_tunnels;}
 };
 }
 }
@@ -227,7 +226,7 @@ SCENARIO( "xindiserver constructs local driver arguments", "[xindiserver]" )
          
          std::vector<std::string> clargs;
          rv = xi.addLocalDrivers(clargs);
-         REQUIRE(rv < 0);
+         REQUIRE(rv == XINDISERVER_E_BADDRIVERSPEC);
       }
       
       WHEN("Three local drivers, with an error (/)")
@@ -237,7 +236,7 @@ SCENARIO( "xindiserver constructs local driver arguments", "[xindiserver]" )
          
          std::vector<std::string> clargs;
          rv = xi.addLocalDrivers(clargs);
-         REQUIRE(rv < 0);
+         REQUIRE(rv == XINDISERVER_E_BADDRIVERSPEC);
       }
       
       WHEN("Three local drivers, with an error (:)")
@@ -247,7 +246,17 @@ SCENARIO( "xindiserver constructs local driver arguments", "[xindiserver]" )
          
          std::vector<std::string> clargs;
          rv = xi.addLocalDrivers(clargs);
-         REQUIRE(rv < 0);
+         REQUIRE(rv == XINDISERVER_E_BADDRIVERSPEC);
+      }
+      
+      WHEN("Three local drivers, duplicate")
+      {
+         std::vector<std::string> ml({"driverX","driverY", "driverX"});
+         xi_test.m_local(xi, ml);
+         
+         std::vector<std::string> clargs;
+         rv = xi.addLocalDrivers(clargs);
+         REQUIRE(rv == XINDISERVER_E_DUPLICATEDRIVER);
       }
    }
 }
@@ -266,8 +275,13 @@ SCENARIO( "xindiserver constructs remote driver arguments", "[xindiserver]" )
          std::vector<std::string> mr({"driverX@host1"});
          xi_test.m_remote(xi, mr);
          
-         std::vector<std::string> mh({"host1:1000"});
-         xi_test.m_hosts(xi, mh);
+         mx::app::writeConfigFile( "/tmp/xindiserver_test.conf", {"host1",      "host1",     "host1" },
+                                                                 {"remoteHost",   "localPort",       "remotePort" },
+                                                                 {"host1",         "1000",             "81" } );
+         mx::app::appConfigurator config;
+         config.readConfig("/tmp/xindiserver_test.conf");
+         
+         loadSSHTunnelConfigs( xi_test.tunnelMap(xi), config);
          
          std::vector<std::string> clargs;
          rv = xi.addRemoteDrivers(clargs);
@@ -281,8 +295,14 @@ SCENARIO( "xindiserver constructs remote driver arguments", "[xindiserver]" )
          std::vector<std::string> mr({"driverX@host1","driverY@host1"});
          xi_test.m_remote(xi, mr);
          
-         std::vector<std::string> mh({"host1:1000"});
-         xi_test.m_hosts(xi, mh);
+         mx::app::writeConfigFile( "/tmp/xindiserver_test.conf", {"host1",      "host1",     "host1" },
+                                                                 {"remoteHost",   "localPort",       "remotePort" },
+                                                                 {"host1",         "1000",             "81" } );
+         mx::app::appConfigurator config;
+         config.readConfig("/tmp/xindiserver_test.conf");
+         
+         xi_test.tunnelMap(xi).clear(); //make sure we don't hold over
+         loadSSHTunnelConfigs( xi_test.tunnelMap(xi), config);
          
          std::vector<std::string> clargs;
          rv = xi.addRemoteDrivers(clargs);
@@ -291,14 +311,21 @@ SCENARIO( "xindiserver constructs remote driver arguments", "[xindiserver]" )
          REQUIRE(clargs[0] == "driverX@localhost:1000");
          REQUIRE(clargs[1] == "driverY@localhost:1000");
       }
+      
       
       WHEN("Two remote drivers, two remote hosts")
       {
          std::vector<std::string> mr({"driverX@host1","driverY@host2"});
          xi_test.m_remote(xi, mr);
          
-         std::vector<std::string> mh({"host1:1000","host2:1002"});
-         xi_test.m_hosts(xi, mh);
+         mx::app::writeConfigFile( "/tmp/xindiserver_test.conf", {"host1",      "host1",     "host1", "host2",      "host2",     "host2" },
+                                                                 {"remoteHost",   "localPort", "remotePort","remoteHost",   "localPort", "remotePort" },
+                                                                 {"host1",         "1000",             "81" ,"host2",         "1002",             "86"} );
+         mx::app::appConfigurator config;
+         config.readConfig("/tmp/xindiserver_test.conf");
+         
+         xi_test.tunnelMap(xi).clear(); //make sure we don't hold over
+         loadSSHTunnelConfigs( xi_test.tunnelMap(xi), config);
          
          std::vector<std::string> clargs;
          rv = xi.addRemoteDrivers(clargs);
@@ -308,66 +335,76 @@ SCENARIO( "xindiserver constructs remote driver arguments", "[xindiserver]" )
          REQUIRE(clargs[1] == "driverY@localhost:1002");
       }
       
+      
       WHEN("Three remote drivers, two remote hosts, in order")
       {
          std::vector<std::string> mr({"driverX@host1","driverZ@host1", "driverY@host2"});
          xi_test.m_remote(xi, mr);
          
-         std::vector<std::string> mh({"host1:1000","host2:1002"});
-         xi_test.m_hosts(xi, mh);
+         mx::app::writeConfigFile( "/tmp/xindiserver_test.conf", {"host1",      "host1",     "host1", "host2",      "host2",     "host2" },
+                                                                 {"remoteHost",   "localPort", "remotePort","remoteHost",   "localPort", "remotePort" },
+                                                                 {"host1",         "1000",             "81" ,"host2",         "1002",             "86"} );
+         
+         mx::app::appConfigurator config;
+         config.readConfig("/tmp/xindiserver_test.conf");
+         
+         xi_test.tunnelMap(xi).clear(); //make sure we don't hold over
+         loadSSHTunnelConfigs( xi_test.tunnelMap(xi), config);
          
          std::vector<std::string> clargs;
          rv = xi.addRemoteDrivers(clargs);
          REQUIRE(rv == 0);
          REQUIRE(clargs.size() == 3);
-         //Map sorts!
+         
          REQUIRE(clargs[0] == "driverX@localhost:1000");
-         REQUIRE(clargs[1] == "driverY@localhost:1002");
-         REQUIRE(clargs[2] == "driverZ@localhost:1000");
+         REQUIRE(clargs[1] == "driverZ@localhost:1000");
+         REQUIRE(clargs[2] == "driverY@localhost:1002");
       }
 
+      
       WHEN("Three remote drivers, two remote hosts, arb order")
       {
          std::vector<std::string> mr({"driverX@host1","driverZ@host2", "driverY@host1"});
          xi_test.m_remote(xi, mr);
+      
+         mx::app::writeConfigFile( "/tmp/xindiserver_test.conf", {"host1",      "host1",     "host1", "host2",      "host2",     "host2" },
+                                                                 {"remoteHost",   "localPort", "remotePort","remoteHost",   "localPort", "remotePort" },
+                                                                 {"host1",         "1000",             "81" ,"host2",         "1002",             "86"} );
          
-         std::vector<std::string> mh({"host1:1000","host2:1002"});
-         xi_test.m_hosts(xi, mh);
+         mx::app::appConfigurator config;
+         config.readConfig("/tmp/xindiserver_test.conf");
+         
+         xi_test.tunnelMap(xi).clear(); //make sure we don't hold over
+         loadSSHTunnelConfigs( xi_test.tunnelMap(xi), config);
          
          std::vector<std::string> clargs;
          rv = xi.addRemoteDrivers(clargs);
          REQUIRE(rv == 0);
          REQUIRE(clargs.size() == 3);
-         //Map sorts!
+         
          REQUIRE(clargs[0] == "driverX@localhost:1000");
-         REQUIRE(clargs[1] == "driverY@localhost:1000");
-         REQUIRE(clargs[2] == "driverZ@localhost:1002");
+         REQUIRE(clargs[1] == "driverZ@localhost:1002");
+         REQUIRE(clargs[2] == "driverY@localhost:1000");
       }
       
       WHEN("Three remote drivers, two remote hosts, error in host")
       {
          std::vector<std::string> mr({"driverX@host1","driverZ@host2", "driverY@host1"});
          xi_test.m_remote(xi, mr);
+
+         mx::app::writeConfigFile( "/tmp/xindiserver_test.conf", {"host1",      "host1",     "host1", "host2",      "host2" },
+                                                                 {"remoteHost",   "localPort", "remotePort","remoteHost",   "localPort" },
+                                                                 {"exao2",         "1000",             "81" ,"exao2",         "1002"} );         
          
-         std::vector<std::string> mh({"host1:1000","host2"});
-         xi_test.m_hosts(xi, mh);
+         mx::app::appConfigurator config;
+         config.readConfig("/tmp/xindiserver_test.conf");
          
-         std::vector<std::string> clargs;
-         rv = xi.addRemoteDrivers(clargs);
-         REQUIRE(rv < 0);
-      }
-      
-      WHEN("Three remote drivers, two remote hosts, duplicate host")
-      {
-         std::vector<std::string> mr({"driverX@host1","driverZ@host2", "driverY@host1"});
-         xi_test.m_remote(xi, mr);
-         
-         std::vector<std::string> mh({"host1:1000","host1:1000"});
-         xi_test.m_hosts(xi, mh);
+         xi_test.tunnelMap(xi).clear(); //make sure we don't hold over
+         loadSSHTunnelConfigs( xi_test.tunnelMap(xi), config);
          
          std::vector<std::string> clargs;
          rv = xi.addRemoteDrivers(clargs);
-         REQUIRE(rv < 0);
+         REQUIRE(rv == XINDISERVER_E_TUNNELNOTFOUND);
       }
       
       WHEN("Three remote drivers, two remote hosts, error in driver")
@@ -375,12 +412,19 @@ SCENARIO( "xindiserver constructs remote driver arguments", "[xindiserver]" )
          std::vector<std::string> mr({"driverX","driverZ@host2", "driverY@host1"});
          xi_test.m_remote(xi, mr);
          
-         std::vector<std::string> mh({"host1:1000","host2:1002"});
-         xi_test.m_hosts(xi, mh);
+         mx::app::writeConfigFile( "/tmp/xindiserver_test.conf", {"host1",      "host1",     "host1", "host2",      "host2",     "host2" },
+                                                                 {"remoteHost",   "localPort", "remotePort","remoteHost",   "localPort", "remotePort" },
+                                                                 {"host1",         "1000",             "81" ,"host2",         "1002",             "86"} );
+         
+         mx::app::appConfigurator config;
+         config.readConfig("/tmp/xindiserver_test.conf");
+         
+         xi_test.tunnelMap(xi).clear(); //make sure we don't hold over
+         loadSSHTunnelConfigs( xi_test.tunnelMap(xi), config);
          
          std::vector<std::string> clargs;
          rv = xi.addRemoteDrivers(clargs);
-         REQUIRE(rv < 0);
+         REQUIRE(rv == XINDISERVER_E_BADDRIVERSPEC);
       }
       
       WHEN("Three remote drivers, two remote hosts, duplicate driver")
@@ -388,12 +432,85 @@ SCENARIO( "xindiserver constructs remote driver arguments", "[xindiserver]" )
          std::vector<std::string> mr({"driverX@host2","driverX@host1", "driverY@host1"});
          xi_test.m_remote(xi, mr);
          
-         std::vector<std::string> mh({"host1:1000","host2:1002"});
-         xi_test.m_hosts(xi, mh);
+         mx::app::writeConfigFile( "/tmp/xindiserver_test.conf", {"host1",      "host1",     "host1", "host2",      "host2",     "host2" },
+                                                                 {"remoteHost",   "localPort", "remotePort","remoteHost",   "localPort", "remotePort" },
+                                                                 {"host1",         "1000",             "81" ,"host2",         "1002",             "86"} );
+         
+         mx::app::appConfigurator config;
+         config.readConfig("/tmp/xindiserver_test.conf");
+         loadSSHTunnelConfigs( xi_test.tunnelMap(xi), config);
          
          std::vector<std::string> clargs;
          rv = xi.addRemoteDrivers(clargs);
-         REQUIRE(rv < 0);
+         REQUIRE(rv == XINDISERVER_E_DUPLICATEDRIVER);
+      }
+   }
+}
+
+SCENARIO( "xindiserver constructs both local and remote driver arguments", "[xindiserver]" ) 
+{
+   GIVEN("A default constructed xindiserver")
+   {
+      xindiserver xi;
+      xindiserver_test xi_test;
+      
+      int rv;
+      
+      WHEN("single local driver, single remote driver, single remote host")
+      {
+         
+         std::vector<std::string> ml({"driverX"});
+         xi_test.m_local(xi, ml);
+         
+         std::vector<std::string> mr({"driverY@host1"});
+         xi_test.m_remote(xi, mr);
+         
+         mx::app::writeConfigFile( "/tmp/xindiserver_test.conf", {"host1",      "host1",     "host1" },
+                                                                 {"remoteHost",   "localPort",       "remotePort" },
+                                                                 {"host1",         "1000",             "81" } );
+         mx::app::appConfigurator config;
+         config.readConfig("/tmp/xindiserver_test.conf");
+         
+         loadSSHTunnelConfigs( xi_test.tunnelMap(xi), config);
+         
+         std::vector<std::string> clargs;
+         rv = xi.addRemoteDrivers(clargs);
+         REQUIRE(rv == 0);
+         
+         rv = xi.addLocalDrivers(clargs);
+         REQUIRE(rv == 0);
+         
+         REQUIRE(clargs.size() == 2);
+         
+         
+         REQUIRE(clargs[0] == "driverY@localhost:1000");
+         REQUIRE(clargs[1] == "/opt/MagAOX/drivers/driverX");
+      }
+      
+      WHEN("single local driver, single remote driver, single remote host -- duplicate driver")
+      {
+         
+         std::vector<std::string> ml({"driverX"});
+         xi_test.m_local(xi, ml);
+         
+         std::vector<std::string> mr({"driverX@host1"});
+         xi_test.m_remote(xi, mr);
+         
+         mx::app::writeConfigFile( "/tmp/xindiserver_test.conf", {"host1",      "host1",     "host1" },
+                                                                 {"remoteHost",   "localPort",       "remotePort" },
+                                                                 {"host1",         "1000",             "81" } );
+         mx::app::appConfigurator config;
+         config.readConfig("/tmp/xindiserver_test.conf");
+         
+         loadSSHTunnelConfigs( xi_test.tunnelMap(xi), config);
+         
+         std::vector<std::string> clargs;
+         rv = xi.addRemoteDrivers(clargs);
+         REQUIRE(rv == 0);
+         
+         rv = xi.addLocalDrivers(clargs);
+         REQUIRE(rv == XINDISERVER_E_DUPLICATEDRIVER);
+         
       }
    }
 }

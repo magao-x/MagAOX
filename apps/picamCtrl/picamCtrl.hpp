@@ -179,6 +179,7 @@ protected:
    
    
    //Framegrabber interface:
+   int configureAcquisition();
    int startAcquisition();
    int acquireAndCheckValid();
    int loadImageIntoStream(void * dest);
@@ -799,7 +800,7 @@ int picamCtrl::setFPS(piflt fps)
 
 
 inline
-int picamCtrl::startAcquisition()
+int picamCtrl::configureAcquisition()
 {
   
    piint readoutStride;
@@ -980,6 +981,12 @@ int picamCtrl::startAcquisition()
     sleep(1);
     return 0;
    
+}
+
+inline
+int picamCtrl::startAcquisition()
+{
+   return 0;
 }
 
 inline

@@ -1,6 +1,7 @@
 #!/bin/bash
+DIR="$( cd "$( dirname "${BASH_SOURCE[0]}" )" && pwd )"
+source $DIR/../_common.sh
 set -euo pipefail
-IFS=$'\n\t'
 
 chown -R root:root /opt/MagAOX
 
@@ -13,12 +14,12 @@ chmod -R g=rwX /opt/MagAOX/source
 find /opt/MagAOX/source -type d -exec chmod -v g+s {} \;
 
 # Set logs to writable for non-admin users like xsup
-chown -RP jrmales:magaox /opt/MagAOX/logs
+chown -RP xsup:magaox /opt/MagAOX/logs
 # Let operators (not in group magaox) read logs but not write:
 chmod -R u=rwX,g=rwX,o=rX /opt/MagAOX/logs
 
 # Set rawimages to writable for non-admin users like xsup
-chown -RP jrmales:magaox /opt/MagAOX/rawimages
+chown -RP xsup:magaox /opt/MagAOX/rawimages
 # Let operators (not in group magaox) read rawimages but not write:
 chmod -R u=rwX,g=rwX,o=rX /opt/MagAOX/rawimages
 

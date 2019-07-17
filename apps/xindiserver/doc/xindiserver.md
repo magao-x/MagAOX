@@ -36,7 +36,7 @@ xindiserver [options]
 |      | --logThreadPrio | logger.logThreadPrio  |     int           | The log thread priority   |
 |   -l | --logLevel      | logger.logLevel       |     string        | The log level   | 
 |   -m |                 | indiserver.m          |     int           | indiserver kills client if it gets more  than this many MB behind, default 50 |
-|  -n  |                 | indiserver.n          |     bool          | indiserver: ignore /tmp/noindi 
+|  -N  |                 | indiserver.N          |     bool          | indiserver: ignore /tmp/noindi. Capitalized to avoid conflict with --name    
 |  -p  |                 | indiserver.p          |     int           | indiserver: alternate IP port, default 7624                   
 |  -v  |                 | indiserver.v          |     int           | indiserver: log verbosity, -v, -vv or -vvv                        
 |  -x  |                 | indiserver.x          |     bool          | exit after last client disconnects -- FOR PROFILING ONLY          
@@ -47,7 +47,39 @@ xindiserver [options]
     
 # DRIVER SPECIFICATIONS
 
-To-do: describe drivers specs.
+Lists of driver names are passed to `xindiserver` via the configuration system.  Drivers can be either local or remote.
+
+Driver names can not be repeated, whether local or remote.
+
+## Local Drivers
+
+Drivers running on the same machine are specified by their names only.  On the command line this would be
+```
+--local=driverX,driverY,driverZ
+```
+and in the configuration file this would be
+```
+[local]
+drivers=driverX,driverY,driverZ
+```
+
+## Remote Drivers
+
+Drivers running a remote machine are specified by their names and the name of the SSH tunnel to that machine.  `xindiserver` parses the `sshTunnels.conf` config file as part of configuration.  
+
+NOTE: the tunnel specification is by the tunnel name (the section in the config file), not the host name.
+
+On the command line this would be
+```
+--remote=driverR@tunnel_name_1,driverS@tunnel_name_2,driverT@tunnel_name_1
+```
+and in the configuration file this would be
+```
+[remote]
+drivers=driverR@tunnel_name_1,driverS@tunnel_name_2,driverT@tunnel_name_1
+```
+
+In both cases it must be true that `sshTunnels.conf` contains a valid tunnel specification for `tunnel_name_1` and `tunnel_name_2`.
 
 # EXIT STATUS
 

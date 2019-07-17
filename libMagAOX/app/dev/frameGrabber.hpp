@@ -240,10 +240,14 @@ void frameGrabber<derivedT>::loadConfig(mx::app::appConfigurator & config)
    m_shmimName = impl().configName();
    config(m_shmimName, "framegrabber.shmimName");
   
-   ///\todo handle 0
    config(m_circBuffLength, "framegrabber.circBuffLength");
-   
+
+   if(m_circBuffLength < 1)
+   {
+      m_circBuffLength = 1;
+      derivedT::template log<text_log>("circBuffLength set to 1");
    }
+}
    
 
 template<class derivedT>
