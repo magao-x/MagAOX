@@ -11,7 +11,7 @@ chown -R :magaox-dev /opt/MagAOX/source
 chmod -R g=rwX /opt/MagAOX/source
 # n.b. can't be recursive because g+s on files means something else
 # so we find all directories and individually chmod them:
-find /opt/MagAOX/source -type d -exec chmod -v g+s {} \;
+find /opt/MagAOX/source -type d -exec chmod g+s {} \;
 
 # Set logs to writable for non-admin users like xsup
 chown -RP xsup:magaox /opt/MagAOX/logs

@@ -86,7 +86,6 @@ source /etc/profile.d/mxmakefile.sh
 
 
 ## Build MagAO-X and install sources to /opt/MagAOX/source/MagAOX
-/bin/sudo bash -l "$DIR/steps/install_MagAOX_osdeps.sh"
 
 if [[ "$TARGET_ENV" == "vagrant" ]]; then
     MAYBE_SUDO="/bin/sudo -u vagrant"
@@ -122,4 +121,5 @@ fi
 # On a Vagrant VM, we need to "sudo" to become vagrant since the provisioning
 # runs as root.
 $MAYBE_SUDO bash "$DIR/steps/install_cacao.sh" $TARGET_ENV
+$MAYBE_SUDO bash "$DIR/steps/install_milkzmq.sh"
 $MAYBE_SUDO bash "$DIR/steps/install_MagAOX.sh"

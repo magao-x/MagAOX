@@ -3,9 +3,7 @@ allall: all
 
 TARGET=mzmqServer
 
-
-#OPTIMIZE = -ggdb
-INCLUDES += -I/home/jrmales/Source/milkzmq
+INCLUDES += -I/opt/MagAOX/source/milkzmq
 LDLIBS += -lzmq
 
 include ../../Make/magAOXApp.mk

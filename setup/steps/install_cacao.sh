@@ -15,24 +15,22 @@ else
 fi
 
 if [[ ! -d ./cacao ]]; then
-    git clone --recursive https://github.com/cacao-org/cacao cacao
+    git clone --recursive https://github.com/cacao-org/cacao.git cacao
     cd ./cacao
+    git checkout dev
+    git submodule foreach git checkout dev
 else
     cd ./cacao
-    git fetch
 fi
 CACAO_ABSPATH=$PWD
-git submodule update --recursive --remote
-git checkout dev
-git submodule foreach git checkout dev
-git submodule foreach git pull
-git fetch --all --tags --prune
-git submodule foreach "git fetch --all --tags --prune"
-git submodule update
 
-mkdir -p _build
-cd _build
-cmake3 ../ $CMAKE_FLAGS
+if [[ ! -d _build ]]; then
+    mkdir -p _build
+    cd _build
+    cmake3 ../ $CMAKE_FLAGS
+else
+    cd _build
+fi
 make
 /bin/sudo make install
 if [[ ! -e /usr/local/bin/milk ]]; then

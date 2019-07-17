@@ -40,8 +40,6 @@ fi
 make
 make install
 # Sanity check: make sure gengithead.sh is available systemwide in /usr/local/bin
-ls -la /usr/local/bin
-echo $PATH
 gengithead.sh ./ ./include/mxlib_uncomp_version.h MXLIB_UNCOMP
 # Ensure all users get $MXMAKEFILE pointing to this install by default
 echo "export MXMAKEFILE=\"$MXLIBROOT/mk/MxApp.mk\"" | tee /etc/profile.d/mxmakefile.sh

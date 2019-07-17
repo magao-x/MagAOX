@@ -68,3 +68,4 @@ flatlogs/src/flatlogcodes
 flatlogs/src/logCodes.dat
 
 .vagrant/
+.DS_Store
