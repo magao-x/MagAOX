@@ -5,7 +5,7 @@ set -euo pipefail
 
 TARGET_ENV=$1
 
-if [[ "$TARGET_ENV" == "vagrant" ]]; then
+if [[ "$TARGET_ENV" == "vm" ]]; then
   CMAKE_FLAGS=""
 elif [[ "$TARGET_ENV" == "instrument" ]]; then
   CMAKE_FLAGS="-DUSE_CUDA=YES -DUSE_MAGMA=YES"

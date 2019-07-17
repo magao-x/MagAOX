@@ -1,0 +1,19 @@
+version: 2
+jobs:
+  build:
+    docker:
+      - image: centos:7.6.1810
+    steps:
+      - checkout
+      - run:
+          name: Add sudo
+          command: 'yum install -y sudo'
+      - run:
+          name: Add an unprivileged user
+          command: 'useradd xdev'
+      - run:
+          name: Setup users and groups
+          command: 'bash -l ~/project/setup/setup_users_and_groups.sh'
+      - run:
+          name: Auto-provision
+          command: 'bash -l ~/project/setup/provision.sh'
