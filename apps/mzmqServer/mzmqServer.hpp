@@ -78,6 +78,8 @@ public:
    
 protected:
    
+   std::vector<std::string> m_shMemImNames;
+   
    /** \name SIGSEGV & SIGBUS signal handling
      * These signals occur as a result of a ImageStreamIO source server resetting (e.g. changing frame sizes).
      * When they occur a restart of the framegrabber and framewriter thread main loops is triggered.
@@ -131,9 +133,7 @@ void mzmqServer::setupConfig()
 {
    config.add("server.imagePort", "", "imagePort", argType::Required, "server", "imagePort", false, "int", "");
    
-   config.add("server.shmimName", "", "server.shmimName", argType::Required, "server", "shmimName", false, "string", "");
-   
-   config.add("server.semaphoreNumber", "", "server.semaphoreNumber", argType::Required, "server", "semaphoreNumber", false, "string", "");
+   config.add("server.shmimNames", "", "server.shmimNames", argType::Required, "server", "shmimNames", false, "string", "");
    
    config.add("server.usecSleep", "", "server.usecSleep", argType::Required, "server", "usecSleep", false, "int", "");
    
@@ -152,8 +152,7 @@ void mzmqServer::loadConfig()
    
    config(m_imagePort, "server.imagePort");
    
-   config(m_shMemImName, "server.shmimName");
-   config(m_semaphoreNumber, "server.semaphoreNumber");
+   config(m_shMemImNames, "server.shmimNames");
    config(m_usecSleep, "server.usecSleep");
    config(m_fpsTgt, "server.fpsTgt");
    
@@ -181,11 +180,27 @@ int mzmqServer::appStartup()
       return -1;
    }
 
-   if(imageThreadStart() < 0)
+   
+   for(size_t n=0; n < m_shMemImNames.size(); ++n)
+   {
+      shMemImName(m_shMemImNames[n]);
+   }
+   
+   if(serverThreadStart() < 0)
    {
       log<software_critical>({__FILE__, __LINE__});
       return -1;
    }
+
+   for(size_t n=0; n < m_imageThreads.size(); ++n)
+   {
+      if( imageThreadStart(n) > 0)
+      {
+         log<software_critical>({__FILE__, __LINE__, "Starting image thread " + m_imageThreads[n].m_imageName});
+         return -1;
+      }
+   }
+   
 
    std::cerr << "Main Thread: " << syscall(SYS_gettid) << "\n";   
    return 0;
@@ -198,11 +213,22 @@ inline
 int mzmqServer::appLogic()
 {
    //first do a join check to see if other threads have exited.
-   if(pthread_tryjoin_np(m_imageThread.native_handle(),0) == 0)
+   
+   if(pthread_tryjoin_np(m_serverThread.native_handle(),0) == 0)
    {
-      log<software_error>({__FILE__, __LINE__, "image thread has exited"});
+      log<software_error>({__FILE__, __LINE__, "server thread has exited"});
       
       return -1;
+   }
+   
+   for(size_t n=0; n < m_imageThreads.size(); ++n)
+   {
+      if(pthread_tryjoin_np(m_imageThreads[n].m_thread->native_handle(),0) == 0)
+      {
+         log<software_error>({__FILE__, __LINE__, "image thread " + m_imageThreads[n].m_imageName + " has exited"});
+      
+         return -1;
+      }
    }
    
    
@@ -215,11 +241,18 @@ int mzmqServer::appShutdown()
 {
    m_timeToDie = true;
    
-   if(m_imageThread.joinable())
+   if(m_serverThread.joinable())
    {
-      m_imageThread.join();
+      m_serverThread.join();
    }
    
+   for(size_t n=0; n < m_imageThreads.size(); ++n)
+   {
+      if( m_imageThreads[n].m_thread->joinable())
+      {
+         m_imageThreads[n].m_thread->join();
+      }
+   }
    
    return 0;
 }
