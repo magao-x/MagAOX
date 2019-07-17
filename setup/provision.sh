@@ -127,6 +127,6 @@ fi
 #
 # On a Vagrant VM, we need to "sudo" to become vagrant since the provisioning
 # runs as root.
-$MAYBE_SUDO bash "$DIR/steps/install_cacao.sh" $TARGET_ENV
-$MAYBE_SUDO bash "$DIR/steps/install_milkzmq.sh"
-$MAYBE_SUDO bash "$DIR/steps/install_MagAOX.sh"
+$MAYBE_SUDO bash -l "$DIR/steps/install_cacao.sh" $TARGET_ENV
+$MAYBE_SUDO bash -l "$DIR/steps/install_milkzmq.sh"
+$MAYBE_SUDO bash -l "$DIR/steps/install_MagAOX.sh"
