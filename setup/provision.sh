@@ -6,12 +6,17 @@ if [[ -d /vagrant || $CI == true ]]; then
     if [[ -d /vagrant ]]; then
         DIR="/vagrant/setup"
         VAGRANT=true
+        CI=false
+    else
+        VAGRANT=false
     fi
     echo "Setting up for VM use"
     /bin/sudo bash -l "$DIR/setup_users_and_groups.sh"
     /bin/sudo yum install -y kernel-devel
 else
     TARGET_ENV=instrument
+    VAGRANT=false
+    CI=false
     echo "Setting up for instrument use"
     set +e; groups | grep magaox-dev; set -e
     not_in_group=$?
