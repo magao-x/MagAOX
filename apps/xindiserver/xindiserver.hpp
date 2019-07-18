@@ -418,6 +418,7 @@ int xindiserver::forkIndiserver()
       }
    
       log<text_log>(coml);
+      std::cerr << coml << std::endl;
    }
    
    int filedes[2];
@@ -440,7 +441,7 @@ int xindiserver::forkIndiserver()
    if(m_isPID == 0)
    {
       //Route STDERR of child to pipe input.
-      while ((dup2(filedes[1], STDERR_FILENO) == -1) && (errno == EINTR)) {}
+      //while ((dup2(filedes[1], STDERR_FILENO) == -1) && (errno == EINTR)) {}
       close(filedes[1]);
       close(filedes[0]);
   
@@ -647,6 +648,7 @@ int xindiserver::appStartup()
       }
       
       std::cerr << "creating symlink " << path1 << " " << m_driverPath + m_local[i] << "\n";
+      
       rv = symlink(path1.c_str(), (m_driverPath + m_local[i]).c_str());
       
       if(rv < 0 && errno != EEXIST)
@@ -662,11 +664,12 @@ int xindiserver::appStartup()
          return -1;
       }
    }
-   
+   std::cerr << "--1" << std::endl;
    m_local.clear();
    m_remote.clear();
    m_tunnels.clear();
    
+   std::cerr << "--2" << std::endl;
    //--------------------
    //Now start indiserver
    //--------------------
@@ -676,12 +679,14 @@ int xindiserver::appStartup()
       return -1;
    }
       
+   std::cerr << "--3" << std::endl;
    if(isLogThreadStart() < 0)
    {
       log<software_critical>({__FILE__, __LINE__});
       return -1;
    }  
    
+   std::cerr << "--4" << std::endl;
    return 0;
 }
 
