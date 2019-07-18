@@ -1,22 +1,34 @@
-
 SELF_DIR := $(abspath $(dir $(lastword $(MAKEFILE_LIST))))
 -include $(SELF_DIR)/../local/common.mk
 
-libs_to_build = libtelnet
+apps_common = \
+	sshDigger \
+	sysMonitor \
+	xindiserver
+apps_rtcicc = \
+	mzmqServer \
+	streamWriter \
+	alpaoCtrl
+apps_rtc = \
+	ocam2KCtrl \
+	siglentSDG \
+	ttmModulator \
+	bmcCtrl
+apps_icc = \
+	filterWheelCtrl \
+	baslerCtrl \
+	zaberCtrl \
+	picamCtrl \
+	smc100ccCtrl \
+	zaberLowLevel
+apps_aoc = \
+	magAOXMaths \
+	trippLitePDU \
+	xt1121Ctrl \
+    xt1121DCDU
+	mzmqClient
 
-apps_to_build =  filterWheelCtrl \
-                 magAOXMaths \
-                 mzmqServer \
-                 mzmqClient \
-                 siglentSDG \
-                 sshDigger \
-                 sysMonitor \
-                 trippLitePDU \
-                 xindiserver \
-                 xt1121Ctrl \
-                 xt1121DCDU \
-                 zaberCtrl \
-                 zaberLowLevel
+libs_to_build = libtelnet
 
 ifneq ($(PYLON),false)
 apps_to_build += baslerCtrl

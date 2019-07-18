@@ -59,6 +59,19 @@ set -u
 
 # Get logging functions
 source $DIR/_common.sh
+if [[ -e /usr/bin/sudo ]]; then
+  _REAL_SUDO=/usr/bin/sudo
+elif [[ -e /bin/sudo ]]; then
+  _REAL_SUDO=/binsudo
+else
+  _REAL_SUDO=sudo
+  echo "Couldn't find sudo in the usual places..."
+fi
+# Prompt for sudo authentication, using absolute path to avoid
+# devtools-7 bug
+$_REAL_SUDO -v
+# Keep the sudo timestamp updated until this script exits
+while true; do $_REAL_SUDO -n true; sleep 60; kill -0 "$$" || exit; done 2>/dev/null &
 
 # Install OS packages first
 if [[ $ID == ubuntu ]]; then
