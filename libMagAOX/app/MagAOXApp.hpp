@@ -373,17 +373,11 @@ protected:
      * @{
      */
 public:
-   ///\todo need to ensure that we understand what threads could be running when elevated privileges are in place -- how many threads are running during appStartup? 
-   /// At least logThread is running - probably can start this after appStartup.
    
    /// Start a thread, using this class's privileges to set priority, etc.
-   /** Because this function takes elevated privileges, it should only be called during
-     * appStartup or earlier to ensure that no actions are taken with higher privileges.
-     * 
+   /** 
      * The thread initialization synchronizer `bool` is set to true at the beginning
-     * of this function, then is set to false once all initialization is complete.  This
-     * should be used in the thread exec function to ensure that privileges have been restored
-     * to a normal level before doing anything.
+     * of this function, then is set to false once all initialization is complete.  
      *
      * The interface of the thread start function is:
      \code
