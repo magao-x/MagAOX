@@ -436,6 +436,7 @@ void logManager<logFileT>::logThreadExec()
       }
 
       //m_logFile.
+      ///\todo must check this for errors, and investigate how `fsyncgate` impacts us
       this->flush();
 
       //We only pause if there's nothing to do.

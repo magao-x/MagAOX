@@ -263,6 +263,7 @@ int logFileRaw::writeLog( flatlogs::bufferPtrT & data )
 inline
 int logFileRaw::flush()
 {
+   ///\todo this probably should be fsync, with appropriate error handling (see fsyncgate)
    if(m_fout) fflush(m_fout);
 
    return 0;
