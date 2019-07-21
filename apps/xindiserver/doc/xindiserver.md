@@ -83,11 +83,20 @@ In both cases it must be true that `sshTunnels.conf` contains a valid tunnel spe
 
 # EXIT STATUS
 
-`xindiserver` runs until killed.
+If there are no errors `xindiserver` runs until killed.
+
+If the specified port is already in use, i.e. due to a previously running `indiserver`, then `xindiserver` will produce a log entry, change to state FAILURE, and exit.
+
+If the `indiserver` process exits for any reason, then `xindiserver` will produce a log entry, change to state FAILURE, and exit.
+
+If the `xindidriver` program for a driver reports that it can not get a lock, which indicates that another instance of `xindidriver` already has the FIFO open, then `xindiserver` will produce a log entry, change to state FAILURE, and exit.
 
 
 # EXAMPLES
 
+# TROUBLESHOOTING
+
+If `indiserver` exits abnormally (this is extremly rare, and is not expected except due to operator error!), it can leave the `xindidriver` processes running.  A subsequent attempt to restart will fail when new instances of `xindidriver` can not lock the FIFOs.  The solution is manually kill each of the `xindidriver` processes, which will have the symlinked names of the `MagAOXApp` they are communicating with.
 
 # SEE ALSO 
 

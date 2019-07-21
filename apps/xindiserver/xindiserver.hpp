@@ -7,6 +7,8 @@
 #ifndef xindiserver_hpp
 #define xindiserver_hpp
 
+#include <sys/wait.h>
+
 #include <iostream>
 #include <vector>
 #include <string>
@@ -441,7 +443,7 @@ int xindiserver::forkIndiserver()
    if(m_isPID == 0)
    {
       //Route STDERR of child to pipe input.
-      //while ((dup2(filedes[1], STDERR_FILENO) == -1) && (errno == EINTR)) {}
+      while ((dup2(filedes[1], STDERR_FILENO) == -1) && (errno == EINTR)) {}
       close(filedes[1]);
       close(filedes[0]);
   
@@ -604,21 +606,42 @@ int xindiserver::processISLog( std::string logs )
       return -1;
    }
       
-   m_log.log<text_log>(tsp, "IS: " + logs.substr(st, logs.size()-st));
+   std::string logstr = logs.substr(st, logs.size()-st);
+   
+   logPrioT prio = logPrio::LOG_INFO;
+   
+   //Look for fatal errors
+   if(logstr.find("xindidriver") != std::string::npos) //Errors from xindidriver
+   {
+      if(logstr.find("failed to lock") != std::string::npos)
+      {
+         prio = logPrio::LOG_CRITICAL;
+      }
+   }
+   else if(logstr.find("bind: Address already in use") != std::string::npos) //Errors from indiserver
+   {
+      prio = logPrio::LOG_CRITICAL;
+   }
+   
+   m_log.log<text_log>(tsp, "IS: " + logstr, prio);
 
+   if(prio == logPrio::LOG_CRITICAL)
+   {
+      state(stateCodes::FAILURE);
+      m_shutdown = true;
+   }
+   
    return 0;
 }
 
 inline
 int xindiserver::appStartup()
 {
-   
    if( constructIndiserverCommand(m_indiserverCommand) < 0)
    {
       log<software_critical>({__FILE__, __LINE__});
       return -1;
    }
-   
    
    if( addLocalDrivers(m_indiserverCommand) < 0)
    {
@@ -631,8 +654,6 @@ int xindiserver::appStartup()
       log<software_critical>({__FILE__, __LINE__});
       return -1;
    }
-   
-
    
    //--------------------
    //Make symlinks
@@ -664,12 +685,11 @@ int xindiserver::appStartup()
          return -1;
       }
    }
-   std::cerr << "--1" << std::endl;
+
    m_local.clear();
    m_remote.clear();
    m_tunnels.clear();
    
-   std::cerr << "--2" << std::endl;
    //--------------------
    //Now start indiserver
    //--------------------
@@ -679,21 +699,33 @@ int xindiserver::appStartup()
       return -1;
    }
       
-   std::cerr << "--3" << std::endl;
    if(isLogThreadStart() < 0)
    {
       log<software_critical>({__FILE__, __LINE__});
       return -1;
    }  
    
-   std::cerr << "--4" << std::endl;
    return 0;
 }
 
 inline
 int xindiserver::appLogic()
 {
-   state(stateCodes::CONNECTED);
+   int status;
+   pid_t result = waitpid(m_isPID, &status, WNOHANG);
+   if (result == 0) 
+   {
+      state(stateCodes::CONNECTED);
+   }  
+   else 
+   {
+      //We don't care why.  If indiserver is not alive while in this function then it's a fatal error.
+      log<text_log>("indiserver has exited", logPrio::LOG_CRITICAL);
+      state(stateCodes::FAILURE);
+      return -1;
+   }
+
+   
    
    return 0;
 }

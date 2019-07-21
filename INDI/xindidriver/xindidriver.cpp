@@ -86,6 +86,21 @@ void * xoverThread( void * vdf /**< [in] pointer to a driverFIFO struct */)
    {
       fdRead = df->stdfd;
       fdWrite = df->fd;
+   
+      struct flock fl;
+      fl.l_type = F_WRLCK; //get an exclusive lock
+      fl.l_whence = SEEK_SET;
+      fl.l_start = 0;
+      fl.l_len = 0;
+      fl.l_pid = getpid();
+   
+      if(fcntl(df->fd, F_SETLK, &fl) < 0)
+      {
+         std::cerr << " (" << XINDID_COMPILEDNAME << "): failed to lock " << df->fileName << ".  Another process is already running.  Kill the zombies.\n";
+         return nullptr;
+      }
+
+   
    }
    else // (df->stdfd == STDOUT_FILENO)
    {
@@ -95,6 +110,7 @@ void * xoverThread( void * vdf /**< [in] pointer to a driverFIFO struct */)
 
 
 
+   
    //Now loop until told to stop.
    while(!timeToDie)
    {

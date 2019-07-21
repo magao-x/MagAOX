@@ -44,6 +44,8 @@ The FIFOs must be located at the path pointed to by the `XINDID_FIFODIR` macro a
 
 If at startup the FIFOs do not exist, the program will patiently wait for them to come into existence.  If some other error occurs, say due to permissions, the program will exit.  In this case `indiserver` should restart it automatically.
 
+An exclusive lock is placed on the `.in` FIFO.  If this fails, it means that another instance of `xindidriver` is already running.  The instance which could not get a lock will exit.  This is necessary to prevent lost data on the FIFOs, etc.
+
 The presence of a process listening-on or writing-to the FIFOs has no effect.
 
 A third fifo, `drivername.ctrl` is used for signaling `xindidriver` that the controller has restarted.  Anything written to this FIFO will cause `xindidriver` to exit, and it will then be restarted by `indiserver`.  This is done to keep all snoops, etc, up to date and fresh.
