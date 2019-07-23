@@ -197,12 +197,12 @@ int logdump::execute()
          if( logHeader::msgLen0(head) == logHeader::MAX_LEN0-1)
          { 
             //Intermediate size message, read two more bytes
-            nrd = fread( head.get() + logHeader::minHeadSize + sizeof(msgLen0T), sizeof(char), sizeof(msgLen1T), fin);
+            nrd = fread( head.get() + logHeader::minHeadSize, sizeof(char), sizeof(msgLen1T), fin);
          }         
          else if( logHeader::msgLen0(head) == logHeader::MAX_LEN0)
          {
             //Large size message: read 8 more bytes 
-            nrd = fread( head.get() + logHeader::minHeadSize + sizeof(msgLen0T), sizeof(char), sizeof(msgLen2T), fin);
+            nrd = fread( head.get() + logHeader::minHeadSize, sizeof(char), sizeof(msgLen2T), fin);
          }
          
          
@@ -251,7 +251,6 @@ int logdump::execute()
          // If not following, exit loop without printing the incomplete log entry (go on to next file).
          // If following, wait for it, but also be checking for new log file in case of crash
 
-
          printLogBuff(lvl, ec, len, logBuff);
 
 
@@ -274,7 +273,6 @@ void logdump::printLogBuff( const logPrioT & lvl,
    
    if(ec == eventCodes::GIT_STATE)
    {
-      std::cerr << "git state" << std::endl;
       if(git_state::repoName(logHeader::messageBuffer(logBuff)) == "MagAOX")
       {
          for(int i=0;i<80;++i) std::cout << '-';
@@ -282,7 +280,6 @@ void logdump::printLogBuff( const logPrioT & lvl,
          for(int i=0;i<80;++i) std::cout << '-';
          std::cout << '\n';
       }
-      std::cerr << "git state" << std::endl;
 
    }
 

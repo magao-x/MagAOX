@@ -346,8 +346,18 @@ int outletController<derivedT>::loadConfig( mx::app::appConfigurator & config )
       {
          std::vector<size_t> onOrder;
          config.configUnused( onOrder, mx::app::iniFile::makeKey(chSections[n], "onOrder" ) );
+         
+         ///\todo test this error
+         if(onOrder.size() != m_channels[chSections[n]].m_outlets.size())
+         {
+            #ifndef OUTLET_CTRL_TEST_NOLOG
+            return derivedT::template log<text_log,-1>("onOrder be same size as outlets.  In Channel " + chSections[n], logPrio::LOG_ERROR);
+            #else
+            return -1;
+            #endif
+         }
+            
          m_channels[chSections[n]].m_onOrder = onOrder;
-         ///\todo error checking on onOrder, should complain if not same length
       }
 
       if( config.isSetUnused( mx::app::iniFile::makeKey(chSections[n], "offOrder" )))
