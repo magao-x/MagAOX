@@ -4,10 +4,9 @@ source $DIR/../_common.sh
 set -euo pipefail
 
 function clone_or_update_and_cd() {
-
     if [[ ! -e /opt/MagAOX/$1 ]]; then
         echo "Cloning new copy of MagAOX config files"
-        /bin/sudo git clone https://github.com/magao-x/$1.git /opt/MagAOX/$1
+        git clone https://github.com/magao-x/$1.git /opt/MagAOX/$1
         cd /opt/MagAOX/$1
         log_success "Cloned new /opt/MagAOX/$1"
     else
