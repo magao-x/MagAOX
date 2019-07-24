@@ -12,7 +12,7 @@ if [[ -d /vagrant || $CI == true ]]; then
     fi
     echo "Setting up for VM use"
     /bin/sudo bash -l "$DIR/setup_users_and_groups.sh"
-    /bin/sudo yum install -y kernel-devel
+    /bin/sudo yum install -y kernel-devel-$(uname -r)
 else
     TARGET_ENV=instrument
     VAGRANT=false
@@ -33,7 +33,7 @@ else
 fi
 source $DIR/_common.sh
 
-VENDOR_SOFTWARE_BUNDLE=$DIR/vendor_software.tar.gz
+VENDOR_SOFTWARE_BUNDLE=$DIR/vendor_software_bundle.tar.gz
 if [[ ! -e $VENDOR_SOFTWARE_BUNDLE ]]; then
     echo "Couldn't find vendor software bundle at location $VENDOR_SOFTWARE_BUNDLE"
     echo "(Generate with ~/Box/MagAO-X/Vendor\ Software/generate_bundle.sh)"
