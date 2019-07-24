@@ -8,5 +8,5 @@ if [[ "$EUID" == 0 ]]; then
     log_error "Can't add you to the magaox-dev group when you're running as root! Aborting."
     exit 1
 fi
-/bin/sudo $DIR/steps/setup_users_and_groups.sh
+/bin/sudo $DIR/setup_users_and_groups.sh
 log_success "Installed PREEMPT_RT Linux kernel and configured groups. Reboot before proceeding."
