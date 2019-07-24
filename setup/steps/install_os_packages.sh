@@ -42,4 +42,4 @@ yum-config-manager --add-repo https://download.opensuse.org/repositories/network
 yum install -y zeromq-devel
 
 # For some reason, pkg-config doesn't automatically look here?
-echo "export PKG_CONFIG_PATH=/usr/local/lib/pkgconfig" > /etc/profile.d/pkg-config-path.sh
+echo "export PKG_CONFIG_PATH=\$PKG_CONFIG_PATH:/usr/local/lib/pkgconfig" > /etc/profile.d/pkg-config-path.sh
