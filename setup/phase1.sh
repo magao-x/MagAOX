@@ -1,5 +1,6 @@
 #!/bin/bash
 DIR="$( cd "$( dirname "${BASH_SOURCE[0]}" )" && pwd )"
+set -euo pipefail
 source $DIR/_common.sh
 mkdir -p /opt/MagAOX/vendor
 cd /opt/MagAOX/vendor
