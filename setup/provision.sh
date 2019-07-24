@@ -61,7 +61,9 @@ cd /opt/MagAOX/vendor
 /bin/sudo bash -l "$DIR/steps/install_levmar.sh"
 /bin/sudo bash -l "$DIR/steps/install_flatbuffers.sh"
 /bin/sudo bash -l "$DIR/steps/install_xrif.sh"
-/bin/sudo bash -l "$DIR/steps/install_magma.sh"
+if ! $VAGRANT; then
+    /bin/sudo bash -l "$DIR/steps/install_magma.sh"
+fi
 /bin/sudo bash -l "$DIR/steps/install_basler_pylon.sh"
 /bin/sudo bash -l "$DIR/steps/install_edt.sh"
 /bin/sudo bash -l "$DIR/steps/install_picam.sh"
