@@ -12,7 +12,7 @@ if [[ -d /vagrant || $CI == true ]]; then
     fi
     echo "Setting up for VM use"
     /bin/sudo bash -l "$DIR/setup_users_and_groups.sh"
-    /bin/sudo yum install -y kernel-devel-$(uname -r)
+    /bin/sudo yum install -y kernel-devel-$(uname -r) || /bin/sudo yum install -y kernel-devel
 else
     TARGET_ENV=instrument
     VAGRANT=false
