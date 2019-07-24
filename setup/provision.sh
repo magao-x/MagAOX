@@ -76,7 +76,7 @@ if [[ -e $VENDOR_SOFTWARE_BUNDLE ]]; then
     tar xzf $VENDOR_SOFTWARE_BUNDLE -C $BUNDLE_TMPDIR
     for vendorname in alpao bmc; do
         if [[ ! -d /opt/MagAOX/vendor/$vendorname ]]; then
-            cp -R $BUNDLE_TMPDIR/$vendorname /opt/MagAOX/vendor
+            sudo cp -R $BUNDLE_TMPDIR/$vendorname /opt/MagAOX/vendor
         else
             echo "/opt/MagAOX/vendor/$vendorname exists, not overwriting files"
             echo "(but they're in $BUNDLE_TMPDIR/$vendorname if you want them)"
