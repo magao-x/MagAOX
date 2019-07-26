@@ -63,6 +63,20 @@ ifneq ($(UNAME),Darwin)
     EXTRA_LDLIBS += -lrt
 endif
 
+########################################
+## EDT
+#######################################
+
+EDT_PATH=/opt/EDTpdv
+
+EDT_INCLUDES=-I$(EDT_PATH)
+EDT_LIBS = -L/opt/EDTpdv -lpdv -lpthread -lm -ldl
+#TODO: make EDT a selectable include
+
+INCLUDES += $(EDT_INCLUDES)
+EXTRA_LDLIBS += $(EDT_LIBS)
+#####################################
+
 LDLIBS += $(EXTRA_LDLIBS)
 LDFLAGS += $(EXTRA_LDFLAGS)
 

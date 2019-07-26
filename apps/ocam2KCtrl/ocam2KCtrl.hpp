@@ -162,7 +162,7 @@ protected:
    std::string m_modeName;
    std::string m_nextMode;
    
-  
+   std::string m_cameraType; ///< The camera type according to the framegrabber
     
    long m_currImageNumber {-1};
        
@@ -868,7 +868,9 @@ int ocam2KCtrl::configureAcquisition()
       sleep(1);
       return -1;
    }
+   
     ///\todo check response of pdvSerialWriteRead
+   log<text_log>("camera configured with: " +m_cameraModes[m_modeName].m_serialCommand);
    
    if(m_fpsSet > 0) setFPS(m_fpsSet);
    

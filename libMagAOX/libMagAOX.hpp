@@ -16,6 +16,7 @@
 #include "app/dev/outletController.hpp"
 #include "app/dev/ioDevice.hpp"
 #include "app/dev/frameGrabber.hpp"
+#include "app/dev/edtCamera.hpp"
 
 #include "common/config.hpp"
 #include "common/defaults.hpp"

@@ -92,7 +92,7 @@ protected:
    
    int m_xbinning {0}; ///< The x-binning according to the framegrabber
    int m_ybinning {0}; ///< The y-binning according to the framegrabber
-   std::string m_cameraType; ///< The camera type according to the framegrabber
+   
           
    timespec m_currImageTimestamp {0,0}; ///< The timestamp of the current image.
    
@@ -257,7 +257,7 @@ int frameGrabber<derivedT>::appStartup()
    m_indiP_shmimName = pcf::IndiProperty(pcf::IndiProperty::Text);
    m_indiP_shmimName.setDevice(impl().configName());
    m_indiP_shmimName.setName("shmimName");
-   m_indiP_shmimName.setPerm(pcf::IndiProperty::ReadWrite);
+   m_indiP_shmimName.setPerm(pcf::IndiProperty::ReadWrite); ///\todo why is this ReadWrite?
    m_indiP_shmimName.setState(pcf::IndiProperty::Idle);
    m_indiP_shmimName.add(pcf::IndiElement("name"));
    m_indiP_shmimName["name"] = m_shmimName;
@@ -274,7 +274,7 @@ int frameGrabber<derivedT>::appStartup()
    m_indiP_frameSize = pcf::IndiProperty(pcf::IndiProperty::Number);
    m_indiP_frameSize.setDevice(impl().configName());
    m_indiP_frameSize.setName("frameSize");
-   m_indiP_frameSize.setPerm(pcf::IndiProperty::ReadWrite);
+   m_indiP_frameSize.setPerm(pcf::IndiProperty::ReadWrite); ///\todo why is this ReadWrite?
    m_indiP_frameSize.setState(pcf::IndiProperty::Idle);
    m_indiP_frameSize.add(pcf::IndiElement("width"));
    m_indiP_frameSize["width"] = 0;

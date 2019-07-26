@@ -747,6 +747,12 @@ public:
      */
    std::string configName();
 
+   ///Get the config directory
+   /**
+     * \returns the current value of m_configDir
+     */
+   std::string configDir();
+   
    ///Get the INDI input FIFO file name
    /**
      * \returns the current value of m_driverInName
@@ -2188,6 +2194,12 @@ template<bool _useINDI>
 std::string MagAOXApp<_useINDI>::configName()
 {
    return m_configName;
+}
+
+template<bool _useINDI>
+std::string MagAOXApp<_useINDI>::configDir()
+{
+   return m_configDir;
 }
 
 template<bool _useINDI>
