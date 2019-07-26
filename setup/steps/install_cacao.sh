@@ -24,15 +24,13 @@ else
 fi
 CACAO_ABSPATH=$PWD
 
-if [[ ! -d _build ]]; then
-    mkdir -p _build
-    cd _build
-    cmake3 ../ $CMAKE_FLAGS
-else
-    cd _build
+mkdir -p _build
+cd _build
+if [[ ! -e Makefile ]]; then
+  cmake3 ../ $CMAKE_FLAGS
 fi
 make
-/bin/sudo make install
+sudo make install
 if [[ ! -e /usr/local/bin/milk ]]; then
     sudo ln -s /usr/local/bin/cacao /usr/local/bin/milk
 fi

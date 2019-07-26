@@ -23,8 +23,10 @@ CENTOS_BASE=http://mirror.centos.org/centos/7/os/x86_64/Packages
 CENTOS_UPDATES=http://mirror.centos.org/centos/7/updates/x86_64/Packages
 CENTOS_RT=http://mirror.centos.org/centos/7/rt/x86_64/Packages
 
-# Installed by default, but too new for the tuned-profiles-realtime package:
-yum remove -y tuned
+if ! rpm -q tuned-2.9.0-1.el7fdp.noarch; then
+    # Newer version installed by default, too new for the tuned-profiles-realtime package:
+    yum remove -y tuned
+fi
 
 getandinstall $CENTOS_BASE    libnl                   1.1.4-3.el7.x86_64
 getandinstall $CENTOS_BASE    python-ethtool          0.8-7.el7.x86_64

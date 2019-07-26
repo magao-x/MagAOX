@@ -12,7 +12,7 @@ if [[ -d /vagrant || $CI == true ]]; then
     fi
     echo "Setting up for VM use"
     /bin/sudo bash -l "$DIR/setup_users_and_groups.sh"
-    /bin/sudo yum install -y kernel-devel
+    /bin/sudo yum install -y kernel-devel-$(uname -r) || /bin/sudo yum install -y kernel-devel
 else
     TARGET_ENV=instrument
     VAGRANT=false
@@ -33,7 +33,7 @@ else
 fi
 source $DIR/_common.sh
 
-VENDOR_SOFTWARE_BUNDLE=$DIR/vendor_software.tar.gz
+VENDOR_SOFTWARE_BUNDLE=$DIR/vendor_software_bundle.tar.gz
 if [[ ! -e $VENDOR_SOFTWARE_BUNDLE ]]; then
     echo "Couldn't find vendor software bundle at location $VENDOR_SOFTWARE_BUNDLE"
     echo "(Generate with ~/Box/MagAO-X/Vendor\ Software/generate_bundle.sh)"
@@ -58,10 +58,13 @@ cd /opt/MagAOX/vendor
 /bin/sudo bash -l "$DIR/steps/install_sofa.sh"
 /bin/sudo bash -l "$DIR/steps/install_xpa.sh"
 /bin/sudo bash -l "$DIR/steps/install_eigen.sh"
+/bin/sudo bash -l "$DIR/steps/install_cppzmq.sh"
 /bin/sudo bash -l "$DIR/steps/install_levmar.sh"
 /bin/sudo bash -l "$DIR/steps/install_flatbuffers.sh"
 /bin/sudo bash -l "$DIR/steps/install_xrif.sh"
-/bin/sudo bash -l "$DIR/steps/install_magma.sh"
+if ! $VAGRANT; then
+    /bin/sudo bash -l "$DIR/steps/install_magma.sh"
+fi
 /bin/sudo bash -l "$DIR/steps/install_basler_pylon.sh"
 /bin/sudo bash -l "$DIR/steps/install_edt.sh"
 /bin/sudo bash -l "$DIR/steps/install_picam.sh"
@@ -74,7 +77,7 @@ if [[ -e $VENDOR_SOFTWARE_BUNDLE ]]; then
     tar xzf $VENDOR_SOFTWARE_BUNDLE -C $BUNDLE_TMPDIR
     for vendorname in alpao bmc; do
         if [[ ! -d /opt/MagAOX/vendor/$vendorname ]]; then
-            cp -R $BUNDLE_TMPDIR/$vendorname /opt/MagAOX/vendor
+            sudo cp -R $BUNDLE_TMPDIR/$vendorname /opt/MagAOX/vendor
         else
             echo "/opt/MagAOX/vendor/$vendorname exists, not overwriting files"
             echo "(but they're in $BUNDLE_TMPDIR/$vendorname if you want them)"
