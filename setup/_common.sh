@@ -38,7 +38,6 @@ function createuser() {
   sudo chmod u=rw,g=,o= /home/$1/.ssh/authorized_keys
   log_success "Created user account $1 with default password $DEFAULT_PASSWORD"
   log_info "Append an ecdsa or ed25519 key to /home/$1/.ssh/authorized_keys to enable SSH login"
-  fi
 }
 # We work around the buggy devtoolset /bin/sudo wrapper in provision.sh, but
 # that means we have to explicitly enable it ourselves.
