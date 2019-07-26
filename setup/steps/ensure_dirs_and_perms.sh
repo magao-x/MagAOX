@@ -77,6 +77,7 @@ chown -RP xsup:magaox $REAL_RAWIMAGES_DIR
 chmod -R u=rwX,g=rwX,o=rX $REAL_RAWIMAGES_DIR
 setgid_all $REAL_RAWIMAGES_DIR
 
+mkdir -pv /opt/MagAOX/secrets
 chown -R root:root /opt/MagAOX/secrets
 chmod -R u=rwX,g=,o= /opt/MagAOX/secrets
 
