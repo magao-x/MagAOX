@@ -122,7 +122,7 @@ The software install process (from BIOS setup to building the MagAO-X software) 
 | `/opt/MagAOX/vendor`        | Vendor software packages (anything we aren't frequent committers to ourselves) |
 
 This directory structure is #define-ed in [libMagAOX/common/defaults.hpp](https://github.com/magao-x/MagAOX/blob/master/libMagAOX/common/paths.hpp).
-System directories are created by [setup/steps/make_directories.sh](https://github.com/magao-x/MagAOX/blob/master/setup/steps/make_directories.sh). Permissions are set by [setup/steps/set_permissions.sh](https://github.com/magao-x/MagAOX/blob/master/setup/steps/set_permissions.sh#L12-L57).
+System directories are created and permissions are set by [setup/steps/ensure_dirs_and_perms.sh](https://github.com/magao-x/MagAOX/blob/master/setup/steps/ensure_dirs_and_perms.sh). If permissions get out of whack, it is safe to re-run that script.
 
 
 ## 5 Documentation
