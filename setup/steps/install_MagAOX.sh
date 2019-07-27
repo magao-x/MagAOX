@@ -7,7 +7,7 @@ function clone_or_update_and_cd() {
     if [[ ! -e /opt/MagAOX/$1 ]]; then
         echo "Cloning new copy of MagAOX config files"
         git clone https://github.com/magao-x/$1.git /tmp/$1
-        sudo mv /tmp/$1 /opt/MagAOX/
+        sudo rsync -av /tmp/$1/ /opt/MagAOX/$1/
         cd /opt/MagAOX/$1
         log_success "Cloned new /opt/MagAOX/$1"
     else

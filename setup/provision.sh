@@ -1,6 +1,13 @@
 #!/bin/bash
 set -eo pipefail
 DIR="$( cd "$( dirname "${BASH_SOURCE[0]}" )" && pwd )"
+if [[ -e /usr/bin/sudo ]]; then
+  _REAL_SUDO=/usr/bin/sudo
+elif [[ -e /bin/sudo ]]; then
+  _REAL_SUDO=/bin/sudo
+else
+  _REAL_SUDO=$(which sudo)
+fi
 if [[ -d /vagrant || $CI == true ]]; then
     TARGET_ENV=vm
     if [[ -d /vagrant ]]; then
@@ -11,8 +18,8 @@ if [[ -d /vagrant || $CI == true ]]; then
         VAGRANT=false
     fi
     echo "Setting up for VM use"
-    /bin/sudo bash -l "$DIR/setup_users_and_groups.sh"
-    /bin/sudo yum install -y kernel-devel-$(uname -r) || /bin/sudo yum install -y kernel-devel
+    sudo bash -l "$DIR/setup_users_and_groups.sh"
+    sudo yum install -y kernel-devel-$(uname -r) || sudo yum install -y kernel-devel
 else
     TARGET_ENV=instrument
     VAGRANT=false
@@ -27,9 +34,9 @@ else
         exit 1
     fi
     # Prompt for sudo authentication
-    /bin/sudo -v
+    $_REAL_SUDO -v
     # Keep the sudo timestamp updated until this script exits
-    while true; do /bin/sudo -n true; sleep 60; kill -0 "$$" || exit; done 2>/dev/null &
+    while true; do $_REAL_SUDO -n true; sleep 60; kill -0 "$$" || exit; done 2>/dev/null &
 fi
 source $DIR/_common.sh
 
@@ -45,29 +52,29 @@ fi
 set -u
 
 ## Set up file structure and permissions
-/bin/sudo bash -l "$DIR/steps/make_directories.sh" $TARGET_ENV
+sudo bash -l "$DIR/steps/ensure_dirs_and_perms.sh" $TARGET_ENV
 
 ## Build third-party dependencies under /opt/MagAOX/vendor
 cd /opt/MagAOX/vendor
-/bin/sudo bash -l "$DIR/steps/install_os_packages.sh"
-/bin/sudo bash -l "$DIR/steps/install_devtoolset-7.sh"
-/bin/sudo bash -l "$DIR/steps/install_mkl_tarball.sh"
-/bin/sudo bash -l "$DIR/steps/install_cuda.sh"
-/bin/sudo bash -l "$DIR/steps/install_fftw.sh"
-/bin/sudo bash -l "$DIR/steps/install_cfitsio.sh"
-/bin/sudo bash -l "$DIR/steps/install_sofa.sh"
-/bin/sudo bash -l "$DIR/steps/install_xpa.sh"
-/bin/sudo bash -l "$DIR/steps/install_eigen.sh"
-/bin/sudo bash -l "$DIR/steps/install_cppzmq.sh"
-/bin/sudo bash -l "$DIR/steps/install_levmar.sh"
-/bin/sudo bash -l "$DIR/steps/install_flatbuffers.sh"
-/bin/sudo bash -l "$DIR/steps/install_xrif.sh"
+sudo bash -l "$DIR/steps/install_os_packages.sh"
+sudo bash -l "$DIR/steps/install_devtoolset-7.sh"
+sudo bash -l "$DIR/steps/install_mkl_tarball.sh"
+sudo bash -l "$DIR/steps/install_cuda.sh"
+sudo bash -l "$DIR/steps/install_fftw.sh"
+sudo bash -l "$DIR/steps/install_cfitsio.sh"
+sudo bash -l "$DIR/steps/install_sofa.sh"
+sudo bash -l "$DIR/steps/install_xpa.sh"
+sudo bash -l "$DIR/steps/install_eigen.sh"
+sudo bash -l "$DIR/steps/install_cppzmq.sh"
+sudo bash -l "$DIR/steps/install_levmar.sh"
+sudo bash -l "$DIR/steps/install_flatbuffers.sh"
+sudo bash -l "$DIR/steps/install_xrif.sh"
 if ! $VAGRANT; then
-    /bin/sudo bash -l "$DIR/steps/install_magma.sh"
+    sudo bash -l "$DIR/steps/install_magma.sh"
 fi
-/bin/sudo bash -l "$DIR/steps/install_basler_pylon.sh"
-/bin/sudo bash -l "$DIR/steps/install_edt.sh"
-/bin/sudo bash -l "$DIR/steps/install_picam.sh"
+sudo bash -l "$DIR/steps/install_basler_pylon.sh"
+sudo bash -l "$DIR/steps/install_edt.sh"
+sudo bash -l "$DIR/steps/install_picam.sh"
 
 ## Install proprietary / non-public software
 if [[ -e $VENDOR_SOFTWARE_BUNDLE ]]; then
@@ -83,23 +90,19 @@ if [[ -e $VENDOR_SOFTWARE_BUNDLE ]]; then
             echo "(but they're in $BUNDLE_TMPDIR/$vendorname if you want them)"
         fi
     done
-    /bin/sudo bash -l "$DIR/steps/install_alpao.sh"
-    /bin/sudo bash -l "$DIR/steps/install_bmc.sh"
+    sudo bash -l "$DIR/steps/install_alpao.sh"
+    sudo bash -l "$DIR/steps/install_bmc.sh"
 fi
 
 ## Build first-party dependencies
 cd /opt/MagAOX/source
-/bin/sudo bash -l "$DIR/steps/install_mxlib.sh"
+sudo bash -l "$DIR/steps/install_mxlib.sh"
 source /etc/profile.d/mxmakefile.sh
-
-## Verify all permissions are set correctly
-/bin/sudo bash -l "$DIR/steps/set_permissions.sh"
-
 
 ## Build MagAO-X and install sources to /opt/MagAOX/source/MagAOX
 MAYBE_SUDO=
 if $VAGRANT; then
-    MAYBE_SUDO="/bin/sudo -u vagrant"
+    MAYBE_SUDO="$_REAL_SUDO -u vagrant"
     # Create or replace symlink to sources so we develop on the host machine's copy
     # (unlike prod, where we install a new clone of the repo to this location)
     ln -nfs /vagrant /opt/MagAOX/source/MagAOX

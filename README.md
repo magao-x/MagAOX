@@ -112,24 +112,24 @@ The software install process (from BIOS setup to building the MagAO-X software) 
 
 ### Directory structure
 
-The following are the default MagAOX system directories.
+| Directory                   | Description |
+|-----------------------------|-------------|
+| `/opt/MagAOX`               | MagAOX system directory |
+| `/opt/MagAOX/bin`           | Contains all applications |
+| `/opt/MagAOX/calib`         | [magao-x/calib](https://github.com/magao-x/calib) repo for instrument calibration files |
+| `/opt/MagAOX/config`        | [magao-x/config](https://github.com/magao-x/config) repo for instrument config files |
+| `/opt/MagAOX/drivers`       | Symlinks for INDI |
+| `/opt/MagAOX/drivers/fifos` | FIFOs for INDI |
+| `/opt/MagAOX/logs`          | Directory where logs are written by the applications |
+| `/opt/MagAOX/rawimages`     | Directory where raw images are written by the applications |
+| `/opt/MagAOX/secrets`       | Directory containing device passwords, etc. |
+| `/opt/MagAOX/source`        | Directory containing clones of this repo, [cacao-org/cacao](https://github.com/cacao-org/cacao), [jaredmales/mxlib](https://github.com/jaredmales/mxlib)                    , [jaredmales/milkzmq](https://github.com/jaredmales/milkzmq) |
+| `/opt/MagAOX/sys`           | Directory for application status files, e.g. PID lock-files |
+| `/opt/MagAOX/vendor`        | Vendor software packages (anything we aren't frequent committers to ourselves) |
 
-| Directory                   | Description                                                                               |
-|-----------------------------|-------------------------------------------------------------------------------------------|
-| `/opt/MagAOX`               | MagAOX system directory                                                                   |
-| `/opt/MagAOX/bin`           | Contains all applications                                                                 |
-| `/opt/MagAOX/drivers`       | Contains symlinks to `xindidriver` for app drivers                                        |
-| `/opt/MagAOX/drivers/fifos` | Contains the FIFOs for INDI communications                                                |
-| `/opt/MagAOX/config`        | Contains the configuration files for the applications                                     |
-| `/opt/MagAOX/logs`          | Directory where logs are written by the applications (chown :magaox, mode g+rws)          |
-| `/opt/MagAOX/sys`           | Directory for application status files, e.g. PID lock-files                               |
-| `/opt/MagAOX/secrets`       | Directory containing device passwords, etc.                                               |
+This directory structure is #define-ed in [libMagAOX/common/defaults.hpp](https://github.com/magao-x/MagAOX/blob/master/libMagAOX/common/paths.hpp).
+System directories are created and permissions are set by [setup/steps/ensure_dirs_and_perms.sh](https://github.com/magao-x/MagAOX/blob/master/setup/steps/ensure_dirs_and_perms.sh). If permissions get out of whack, it is safe to re-run that script.
 
-
- This directory structure is #define-ed in libMagAOX/common/defaults.hpp.  It is created by the script `setup/make_directories.sh` (except for `config`, which is made by cloning [magao-x/config](https://github.com/magao-x/config) into `/opt/MagAOX/config`).  Permissions are set in `setup/set_permissions.sh`. This structure is also specified in `local/config.mk`.  Changing this isn't yet very simple, but we intend for it to be possible to have parallel installations.
-
-ToDo:
-- [ ] Investigate using appropriate environment variables to allow overriding these.
 
 On install, symlinks are made for utility executables from `/usr/local/bin` to `/opt/MagAOX/bin`.
 
