@@ -14,3 +14,4 @@ INCLUDES += $(EDT_INCLUDES)
 LDLIBS += $(EDT_LIBS)
 
 include ../../Make/magAOXApp.mk
+

@@ -63,9 +63,18 @@ ifneq ($(UNAME),Darwin)
     EXTRA_LDLIBS += -lrt
 endif
 
-########################################
-## EDT
-#######################################
+### MKL BLAS 
+
+BLAS_INCLUDES ?= -DMXLIB_MKL -m64 -I${MKLROOT}/include
+BLAS_LDFLAGS ?= -L${MKLROOT}/lib/intel64 -Wl,--no-as-needed
+BLAS_LDLIBS ?= -lmkl_intel_lp64 -lmkl_gnu_thread -lmkl_core -lgomp -lpthread -lm -ldl
+
+#2nd step in case we need to modify above for other architectures/systems
+INCLUDES += $(BLAS_INCLUDES)
+EXTRA_LDFLAGS += $(BLAS_INCLUDES)
+EXTRA_LDLIBS += $(BLAS_LDLIBS)
+
+### EDT
 
 EDT_PATH=/opt/EDTpdv
 
@@ -73,8 +82,14 @@ EDT_INCLUDES=-I$(EDT_PATH)
 EDT_LIBS = -L/opt/EDTpdv -lpdv -lpthread -lm -ldl
 #TODO: make EDT a selectable include
 
-INCLUDES += $(EDT_INCLUDES)
-EXTRA_LDLIBS += $(EDT_LIBS)
+
+ifneq ($(EDT),false)
+   INCLUDES += $(EDT_INCLUDES) 
+   EXTRA_LDLIBS += $(EDT_LIBS)
+else
+   CXXFLAGS+= -DMAGAOX_NOEDT
+endif
+
 #####################################
 
 LDLIBS += $(EXTRA_LDLIBS)

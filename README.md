@@ -22,7 +22,11 @@ This is the software which runs the MagAOX ExAO system.
 
 ## 2 Software Configuration
 
-For a standard build, nothing needs to be done here.  However, various defaults can be changed with macros.  To override at build time, the following macros can be redefined in `local/config.mk` [how?]
+For a standard build, nothing needs to be done here.  However, various defaults can be changed with macros.  To override at build time, the following macros can be redefined in `local/config.mk`.  For example to change the `MAGAOX_env_path` environment variable, one could add 
+```
+CXXFLAGS += -DMAGAOX_env_path="/my/magaox/path"
+```
+to  `local/config.mk`.
 
 #### 2.1 Environment Variables
 
@@ -72,33 +76,35 @@ These are defined in `libMagAOX/common/paths.hpp`.  They do not normally need to
 
 ## 3 Building
 
-A rudimentary build system has been implemented.
+Typing make in the MagAOX top-level directory will build the entire system.
 
-To build an app, cd to the app's directory and type
-```
-make -f ../../Make/magAOXApp.mk t=<appname>
-```
-replacing `appname` with the name of the application.
+Each app (subfolders of the `apps` directory) and each utilitiy (subfolders of the `utils` directory) have a Makefile.  Typing make in any of those folders should build just that component, along with any dependencies (usually including `libMagAOX`).
 
-To build a utility, cd to the utility's directory and type
-```
-make -f ../../Make/magAOXUtil.mk t=<utilname>
-```
-replacing `utilname` with the name of the utility.
-
-The difference between the two Makefiles is in install, in that MagAO-X Applications get setuid, whereas the utilities do not.
+Note the difference between the `apps` and `utils` components, is that upon install MagAO-X Applications get setuid, whereas the utilities do not.
 
 Some notes:
 
-* libMagAOX (part of this repository) is a c++ header-only library.  It is compiled into a pre-compiled-header (PCH), managed by the build system.  Any changes to libMagAOX should trigger a re-compile of the PCH, and of any apps depending on it.
+* libMagAOX (part of this repository) is a c++ header-only library.  It is compiled into a pre-compiled-header (PCH), managed by the build system.  Any changes to libMagAOX should trigger a re-compile of the PCH, and of any apps or utils depending on it.
 
 * Allowing setuid for RT priority handling, access to ttys and FIFOs, etc., requires hardcoding LD_LIBRARY_PATH at build time.  This is done in the makefiles, and so should be transparent.
 
 * Install requires root privileges.
 
-ToDo:
-- [] Use environment variables for path to various parts of build system, path to libMagAOX PCH, etc.
-- [] Possibly use name of directory for target app name.
+### 3.1 Selective Build 
+
+It is sometimes necessary or desired to not build some parts of the system.  For instance on a machine on which not all dependencies are installed.  The make files allow the following to be turned off
+
+#### CACAO
+To prevent linking against the CACAO library, define `CACAO=false` in `local/common.mk`.  Note that this has not been tested in a long time and will probably faile completely.
+
+#### EDT
+To prevent linking against the EDT framegrabber library, define `EDT=false` in `local/common.mk`.  This will prevent building the `ocam2KCtrl` and `andorCtrl` apps.
+
+#### PICam 
+To prevent linking against the Princeton Instruments PICam library, define `PICAM=false` in `local/common.mk`.  This will prevent building the `picamCtrl` app.
+
+#### Pylon
+To prevent linking against the Basler Pylon library, define `Pylong=false` in `local/common.mk`.  This will prevent building the `baslerCtrl` app.
 
 ## 4 Software Install
 
@@ -112,8 +118,8 @@ The following are the default MagAOX system directories.
 |-----------------------------|-------------------------------------------------------------------------------------------|
 | `/opt/MagAOX`               | MagAOX system directory                                                                   |
 | `/opt/MagAOX/bin`           | Contains all applications                                                                 |
-| `/opt/MagAOX/drivers`       |                                                                                           |
-| `/opt/MagAOX/drivers/fifos` |                                                                                           |
+| `/opt/MagAOX/drivers`       | Contains symlinks to `xindidriver` for app drivers                                        |
+| `/opt/MagAOX/drivers/fifos` | Contains the FIFOs for INDI communications                                                |
 | `/opt/MagAOX/config`        | Contains the configuration files for the applications                                     |
 | `/opt/MagAOX/logs`          | Directory where logs are written by the applications (chown :magaox, mode g+rws)          |
 | `/opt/MagAOX/sys`           | Directory for application status files, e.g. PID lock-files                               |
@@ -124,9 +130,8 @@ The following are the default MagAOX system directories.
 
 ToDo:
 - [ ] Investigate using appropriate environment variables to allow overriding these.
-- [ ] Investigate having the defines be passed in via make.  E.g. `-DMAGAOX_path=/opt/MagAOX-DEV` will override, maybe we should just inherit from `local/config.mk`
 
-On install, symlinks are made for executables from `/usr/local/bin` to `/opt/MagAOX/bin`.
+On install, symlinks are made for utility executables from `/usr/local/bin` to `/opt/MagAOX/bin`.
 
 ## 5 Documentation
 

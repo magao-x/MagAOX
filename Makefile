@@ -1,12 +1,12 @@
 
+SELF_DIR := $(abspath $(dir $(lastword $(MAKEFILE_LIST))))
+-include $(SELF_DIR)/../local/common.mk
+
 libs_to_build = libtelnet
 
-apps_to_build =  baslerCtrl \
-                 filterWheelCtrl \
+apps_to_build =  filterWheelCtrl \
                  magAOXMaths \
                  mzmqServer \
-                 ocam2KCtrl \
-                 picamCtrl \
                  siglentSDG \
                  sshDigger \
                  sysMonitor \
@@ -16,9 +16,25 @@ apps_to_build =  baslerCtrl \
                  xt1121DCDU \
                  zaberCtrl 
 
-utils_to_build = logdump cursesINDI
+ifneq ($(PYLON),false)
+apps_to_build += baslerCtrl
+endif 
 
-scripts_to_install = magaox_procstart.sh magaox_startup.sh magaox_shutdown.sh
+ifneq ($(PICAM), false)
+apps_to_build += picamCtrl 
+endif 
+
+ifneq ($(EDT),false)
+apps_to_build += ocam2KCtrl 
+apps_to_build += andorCtrl
+endif 
+
+utils_to_build = logdump \
+                 cursesINDI
+
+scripts_to_install = magaox_procstart.sh \
+                     magaox_startup.sh \
+                     magaox_shutdown.sh
 
 all: indi_all libs_all apps_all utils_all
 

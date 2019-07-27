@@ -9,6 +9,7 @@
 #ifndef edtCamera_hpp
 #define edtCamera_hpp
 
+#ifndef MAGAOX_NOEDT 
 
 #include <edtinc.h>
 
@@ -517,4 +518,6 @@ int edtCamera<derivedT>::updateINDI()
 } //namespace dev
 } //namespace app
 } //namespace MagAOX
-#endif
+
+#endif //MAGAOX_NOEDT
+#endif //edtCamera_hpp
