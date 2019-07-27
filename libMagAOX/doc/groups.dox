@@ -51,7 +51,15 @@
   * \ingroup magaoxapp
   */
 
-/** \defgroup appdev Device Helpers for MagAOX Applications
+/** \defgroup appdev Device Modules for MagAOX Applications
+  *
+  * These provide base classes implementing device-specific functionality, including configuration.  Many
+  * employ the CRTP -- so have fun.
+  *.
+  * \ingroup magaoxapp 
+  */
+  
+/** \defgroup app_files MagAOX Application Files 
   * \ingroup magaoxapp 
   */
   

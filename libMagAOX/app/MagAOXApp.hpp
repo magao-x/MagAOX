@@ -4,6 +4,8 @@
   *
   * History:
   * - 2017-12-24 created by JRM
+  * 
+  * \ingroup app_files
   */
 
 #ifndef app_MagAOXApp_hpp
@@ -633,6 +635,8 @@ protected:
    /** Will only peform a SetProperty if the new element value has changed
      * compared to the stored value.  This comparison is done in the true
      * type of the value.
+     * 
+     * \todo this needs a const char specialization
      */
    template<typename T>
    void updateIfChanged( pcf::IndiProperty & p, ///< [in/out] The property containing the element to possibly update

@@ -3,15 +3,11 @@
   *
   * \author Jared R. Males (jaredmales@gmail.com)
   *
-  * \ingroup frameGrabber_files
+  * \ingroup app_files
   */
 
 #ifndef frameGrabber_hpp
 #define frameGrabber_hpp
-
-
-
-#include <xrif/xrif.h>
 
 
 #include <ImageStruct.h>
@@ -32,7 +28,6 @@ namespace dev
 
 /** MagAO-X generic frame grabber
   *
-  * \ingroup frameGrabber
   * 
   * The derived class `derivedT` must expose the following interface
   * \code 
@@ -62,6 +57,8 @@ namespace dev
   *
   * Calls to this class's `setupConfig`, `loadConfig`, `appStartup`, `appLogic` and `appShutdown`
   * functions must be placed in the derived class's functions of the same name.
+  *
+  * \ingroup appdev
   */
 template<class derivedT>
 class frameGrabber 

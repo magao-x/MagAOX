@@ -4,6 +4,8 @@
   *
   * History:
   * - 2019-01-03 created by JRM
+  * 
+  * \ingroup app_files
   */
 
 #ifndef app_indiUtils_hpp
@@ -24,6 +26,7 @@ namespace indi
 /** Only sends the set property message if the new value is different.
   *
   * \todo investigate how this handles floating point values and string conversions.
+  * \todo this needs a const char specialization to std::string
   * 
   */  
 template<typename T, class indiDriverT>

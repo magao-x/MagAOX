@@ -1,8 +1,8 @@
 /** \file ioDevice.hpp
  * \author Jared R. Males
- * \brief Configuration and control of input and output to a device
+ * \brief Configuration and control of an input and output device
  * 
- * \ingroup tty_files
+ * \ingroup app_files
  *
  */
 
@@ -20,7 +20,7 @@ namespace dev
    
 /// An input/output capable device.
 /**   
-  * \ingroup tty
+  * \ingroup appdev
   */ 
 struct ioDevice
 {

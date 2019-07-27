@@ -42,6 +42,8 @@ namespace app
   * \todo research load warnings
   * \todo tests for parser
   * \todo test for load warnings
+  * \todo load warnings/crit values can be logged on parse errors -- make this an issue
+  * \todo segfaults if device can not be reached on network -- make this an issue
   * 
   * \ingroup trippLitePDU
   */

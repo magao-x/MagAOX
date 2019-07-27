@@ -4,6 +4,8 @@
   *
   * History:
   * - 2018-01-20 created by JRM
+  * 
+  * \ingroup app_files
   */ 
 
 #ifndef app_stateCodes_hpp

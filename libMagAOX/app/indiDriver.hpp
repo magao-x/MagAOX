@@ -4,6 +4,8 @@
   *
   * History:
   * - 2018-05-26 created by JRM
+  * 
+  * \ingroup app_files
   */
 
 #ifndef app_indiDriver_hpp

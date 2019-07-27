@@ -3,7 +3,7 @@
   *
   * \author Jared R. Males (jaredmales@gmail.com)
   *
-  * \ingroup edtCamera_files
+  * \ingroup app_files
   */
 
 #ifndef edtCamera_hpp
@@ -91,37 +91,20 @@ int loadCameraConfig( cameraConfigMap & ccmap,
 
 /** MagAO-X EDT framegrabber interface
   *
-  * \ingroup edtCamera
   * 
   * The derived class `derivedT` must expose the following interface
   * \todo update this
   * \code 
-    //Configures the camera for acquistion, must also set m_width, m_height, and m_dataType
-    //so that the share memory can be allocated
-    int derivedT::configureAcquisition();
-
-    //Start acquisition.
-    int derivedT::startAcquisition();
-    
-    //Acquires the data, and checks if it is valid.
-    //This should set m_currImageTimestamp to the image timestamp.
-    // returns 0 if valid, < 0 on error, > 0 on no data.
-    int derivedT::acquireAndCheckValid()
-    
-    //Loads the acquired image into the stream, copying it to the appropriate member of imageStream.array.
-    //This could simply be a memcpy.
-    int derivedT::loadImageIntoStream(void * dest);
-    
-    //Take any actions needed to reconfigure the system.  Called if m_reconfig is set to true.
-    int derivedT::reconfig()
   * \endcode  
+  * 
   * Each of the above functions should return 0 on success, and -1 on an error. 
-  * For `acquireAndCheckValid` >0 will indicate no data but not an error.  In most cases, 
-  * an appropriate state code, such as NOTCONNECTED, should be set as well.
+  * 
   *
   *
   * Calls to this class's `setupConfig`, `loadConfig`, `appStartup`, `appLogic` and `appShutdown`
   * functions must be placed in the derived class's functions of the same name.
+  *
+  * \ingroup appdev
   */
 template<class derivedT>
 class edtCamera : public ioDevice
