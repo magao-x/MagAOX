@@ -23,6 +23,23 @@ void microsleep( unsigned usec /**< [in] the number of microseconds to sleep. */
 }
 
 
+bool g_timeToDie = false;
+
+void sigTermHandler( int signum,
+                     siginfo_t *siginf,
+                     void *ucont
+                    )
+{
+   //Suppress those warnings . . .
+   static_cast<void>(signum);
+   static_cast<void>(siginf);
+   static_cast<void>(ucont);
+  
+   std::cerr << "\n"; //clear out the ^C char
+   
+   g_timeToDie = true;
+}
+
 /// A utility to stream MagaO-X images from xrif compressed archives to an ImageStreamIO stream.
 class xrif2shmim : public mx::app::application
 {
@@ -117,6 +134,45 @@ void xrif2shmim::loadConfig()
 inline 
 int xrif2shmim::execute()
 {
+   //Install signal handling
+   struct sigaction act;
+   sigset_t set;
+
+   act.sa_sigaction = sigTermHandler;
+   act.sa_flags = SA_SIGINFO;
+   sigemptyset(&set);
+   act.sa_mask = set;
+
+   errno = 0;
+   if( sigaction(SIGTERM, &act, 0) < 0 )
+   {
+      std::cerr << " (" << invokedName << "): error setting SIGTERM handler: " << strerror(errno) << "\n";
+      return -1;
+   }
+
+   errno = 0;
+   if( sigaction(SIGQUIT, &act, 0) < 0 )
+   {
+      std::cerr << " (" << invokedName << "): error setting SIGQUIT handler: " << strerror(errno) << "\n";
+      return -1;
+   }
+
+   errno = 0;
+   if( sigaction(SIGINT, &act, 0) < 0 )
+   {
+      std::cerr << " (" << invokedName << "): error setting SIGINT handler: " << strerror(errno) << "\n";
+      return -1;
+   }
+   
+   
+   
+   
+   
+   
+   
+   
+   
+   //Figure out which files to use
    if(m_files.size() == 0)
    {
       if(m_dir == "")
@@ -141,7 +197,7 @@ int xrif2shmim::execute()
    
    if(m_files.size() == 0)
    {
-      std::cerr << "No files found.\n";
+      std::cerr << " (" << invokedName << "): No files found.\n";
       return -1;
    }
 
@@ -151,7 +207,7 @@ int xrif2shmim::execute()
    
    if(rv < 0)
    {
-      std::cerr << "Error allocating xrif.\n";
+      std::cerr << " (" << invokedName << "): Error allocating xrif.\n";
       return -1;
    }
       
@@ -178,7 +234,7 @@ int xrif2shmim::execute()
       fclose(fp_xrif);
       if(nr != XRIF_HEADER_SIZE)
       {
-         std::cerr << "Error reading header of " << m_files[n] << "\n";
+         std::cerr << " (" << invokedName << "): Error reading header of " << m_files[n] << "\n";
          return -1;
       }
       
@@ -195,29 +251,29 @@ int xrif2shmim::execute()
       {
          if(m_xrif->width != m_width)
          {
-            std::cerr << "width mis-match in " << m_files[n] << "\n";
+            std::cerr << " (" << invokedName << "): width mis-match in " << m_files[n] << "\n";
             return -1;
          }
          if(m_xrif->height != m_height)
          {
-            std::cerr << "height mis-match in " << m_files[n] << "\n";
+            std::cerr << " (" << invokedName << "): height mis-match in " << m_files[n] << "\n";
             return -1;
          }
          if(m_xrif->type_code != m_dataType)
          {
-            std::cerr << "data type mismatch in " << m_files[n] << "\n";
+            std::cerr << " (" << invokedName << "): data type mismatch in " << m_files[n] << "\n";
          }
       }
       
       if(m_xrif->depth != 1)
       {
-         std::cerr << "Cubes detected in " << m_files[n] << "\n";
+         std::cerr << " (" << invokedName << "): Cubes detected in " << m_files[n] << "\n";
          return -1;
       }
       
       if(m_dataType !=  XRIF_TYPECODE_INT16)
       {
-         std::cerr << "Only 16-bit signed integerss (short) supported" << "\n";
+         std::cerr << " (" << invokedName << "): Only 16-bit signed integerss (short) supported" << "\n";
          return -1;
       }
       
@@ -230,12 +286,18 @@ int xrif2shmim::execute()
       }
    }
    
+   if(g_timeToDie != false)
+   {
+      std::cerr << " (" << invokedName << "): exiting.\n";
+      return -1;
+   }
+   
    //Now record the actual number of frames
    if(m_numFrames == 0 || nframes < m_numFrames) m_numFrames = nframes;
    
-   std::cout << "Reading " << m_numFrames << " frames in " << (ed-st)*stp << " file";
-   if( (ed-st)*stp > 1) std::cout << "s";
-   std::cout << "\n";
+   std::cerr << " (" << invokedName << "): Reading " << m_numFrames << " frames in " << (ed-st)*stp << " file";
+   if( (ed-st)*stp > 1) std::cerr << "s";
+   std::cerr << "\n";
    
    //Allocate the storage
    m_typeSize = xrif_typesize(m_dataType);
@@ -255,11 +317,13 @@ int xrif2shmim::execute()
    //Only decompressing the number of files needed, and only copying the number of frames needed
    for(long n=st; n != ed; n += stp)
    {
+      if(g_timeToDie == true) break; //check before going on
+      
       FILE * fp_xrif = fopen(m_files[n].c_str(), "rb");
       size_t nr = fread(header, 1, XRIF_HEADER_SIZE, fp_xrif);
       if(nr != XRIF_HEADER_SIZE)
       {
-         std::cerr << "Error reading header of " << m_files[n] << "\n";
+         std::cerr << " (" << invokedName << "): Error reading header of " << m_files[n] << "\n";
          fclose(fp_xrif);
          return -1;
       }
@@ -273,14 +337,18 @@ int xrif2shmim::execute()
       nr = fread(m_xrif->raw_buffer, 1, m_xrif->compressed_size, fp_xrif);
       fclose(fp_xrif);
     
+      if(g_timeToDie == true) break; //check after the long read.
+      
       if(nr != m_xrif->compressed_size)
       {
-         std::cerr << "Error reading data from " << m_files[n] << "\n";
+         std::cerr << " (" << invokedName << "): Error reading data from " << m_files[n] << "\n";
          return -1;
       }
    
       xrif_decode(m_xrif);
    
+      if(g_timeToDie == true) break; //check after the decompress.
+      
       mx::improc::eigenCube<short> tmpc( (short*) m_xrif->raw_buffer, m_xrif->width, m_xrif->height, m_xrif->frames);
       
       //Determine the order in which frames in tmpc are read
@@ -303,11 +371,16 @@ int xrif2shmim::execute()
       }
    }
 
+   if(g_timeToDie != false)
+   {
+      std::cerr << " (" << invokedName << "): exiting.\n";
+      return -1;
+   }
+   
    //De-allocate xrif
    xrif_delete(m_xrif);
    m_xrif = nullptr; //This is so destructor doesn't choke
    
-
    //Now create share memory stream.
    
    uint32_t imsize[3];
@@ -315,19 +388,13 @@ int xrif2shmim::execute()
    imsize[1] = m_height;
    imsize[2] = m_circBuffLength;
    
-   std::cerr << "Creating stream: " << m_shmimName << "  (" << m_width << " x " << m_height << " x " << m_circBuffLength << ")\n";
+   std::cerr << " (" << invokedName << "): Creating stream: " << m_shmimName << "  (" << m_width << " x " << m_height << " x " << m_circBuffLength << ")\n";
       
    ImageStreamIO_createIm_gpu(&m_imageStream, m_shmimName.c_str(), 3, imsize, m_dataType, -1, 1, IMAGE_NB_SEMAPHORE, 0, CIRCULAR_BUFFER | ZAXIS_TEMPORAL);
        
    m_imageStream.md->cnt1 = m_circBuffLength;
          
-   
-   
-         
    //Begin streaming
-   std::cout << m_fps << "\n";
-   
-   
    uint64_t next_cnt1 = 0; 
    char * next_dest = (char *) m_imageStream.array.raw;
    timespec * next_wtimearr = &m_imageStream.writetimearray[0];
@@ -337,7 +404,7 @@ int xrif2shmim::execute()
    findex = 0;
    double lastSend = mx::get_curr_time();
    double delta = 0;
-   while(1)
+   while(g_timeToDie == false)
    {
       m_imageStream.md->write=1;
       
@@ -379,11 +446,13 @@ int xrif2shmim::execute()
       lastSend = ct;
             
             
-      if(1./m_fps - delta > 0) microsleep( (1./m_fps - delta)*1e6 );
+      if(1./m_fps - delta > 0) microsleep( (1./m_fps - delta)*1e6 ); //Argument is unsigned, since we can't unsleep, so don't pass a big number by axe.
    } 
    
    
    ImageStreamIO_destroyIm( &m_imageStream );
+   
+   std::cerr << " (" << invokedName << "): exited normally.\n";
    
    return 0;
 }
