@@ -260,6 +260,7 @@ int xrif2shmim::execute()
       if(nr != XRIF_HEADER_SIZE)
       {
          std::cerr << "Error reading header of " << m_files[n] << "\n";
+         fclose(fp_xrif);
          return -1;
       }
       
@@ -378,7 +379,7 @@ int xrif2shmim::execute()
       lastSend = ct;
             
             
-      microsleep( (1./m_fps - delta)*1e6 );
+      if(1./m_fps - delta > 0) microsleep( (1./m_fps - delta)*1e6 );
    } 
    
    
