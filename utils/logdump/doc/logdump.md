@@ -1,4 +1,4 @@
-logdump {#logdump}
+logdump {#page_module_logdump}
 ==========
 
 [TOC]
@@ -88,3 +88,4 @@ $ logdump -L W -f trippLitePDU0
 
 # SEE ALSO 
 
+[Source code.](../sw_html/group__logdump.html)

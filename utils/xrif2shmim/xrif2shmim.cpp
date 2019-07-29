@@ -1,5 +1,7 @@
 /** \file xrif2shmim.cpp
   * \brief The xrif2shmim main program.
+  * 
+  * \ingroup xrif2hmim_files
   */
 
 #include "xrif2shmim.hpp"

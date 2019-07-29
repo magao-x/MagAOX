@@ -1,7 +1,14 @@
 
-///\defgroup common Library Configuration
+/// \defgroup lib libMagAOX: the MagAO-X software library 
 
-///\defgroup logger The Logging System
+/** \defgroup common Library Configuration
+  * \ingroup lib 
+  */
+  
+/** \defgroup logger The Logging System
+  *
+  * \ingroup lib 
+  */
   
 /** \defgroup flatlogs The flatlogs log protocol
   * flatlogs consist of a simple header, followed by a flatbuffers encoded message payload.
@@ -45,6 +52,7 @@
   */
 
 /** \defgroup magaoxapp The Base MagAOX Application
+  * \ingroup lib 
   */
 
 /** \defgroup indi INDI Support in MagAOX Apps
@@ -64,6 +72,7 @@
   */
   
 /** \defgroup tty TTY device interfaces 
+  * \ingroup lib 
   */
   
 /** \defgroup tty_files TTY files 
@@ -71,16 +80,24 @@
   */
   
 /** \defgroup sys System utilities
+  * \ingroup lib
   */
   
 /** \defgroup sys_files System utility files 
   * \ingroup sys
   */
   
-/** \defgroup apps Applications
-  * \brief MagAO-X Applications
+/** \defgroup apps Application Programs
+  * \brief MagAO-X application programs
+  *
+  * These are the programs which control the MagAO-X system.
+  *
   */
   
-
+/** \defgroup utils Utility Programs
+  * \brief MagAO-X utility programs
+  *
+  * These programs assist with operating MagAO-X and analyzing its various outputs.
+  */
   
 

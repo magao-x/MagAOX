@@ -800,7 +800,7 @@ INPUT                  = ../filterWheelCtrl/doc/ \
                          ../xindiserver/doc/ \
                          ../../INDI/xindidriver/doc/xindidriver.md \
                          ../../INDI/INDI/doc/indiserver.md \
-                         ../xt1121DCDU/doc/xt1121DCDU.md \
+                         ../xt1121DCDU/doc/ \
                          ../zaberCtrl/doc/ \
 
 # This tag can be used to specify the character encoding of the source files

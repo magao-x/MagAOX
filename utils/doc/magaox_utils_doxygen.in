@@ -791,6 +791,7 @@ WARN_LOGFILE           =
 # Note: If this tag is empty the current directory is searched.
 
 INPUT                  = ../logdump/doc/logdump.md \
+                         ../xrif2shmim/doc/xrif2shmim.md \
                          ../../INDI/INDI/doc/evalINDI.md \
                          ../../INDI/INDI/doc/setINDI.md
 

@@ -1,6 +1,11 @@
 /** \file xrif2shmim.hpp
   * \brief The xrif2shmim class declaration and definition.
+  * 
+  * \ingroup xrif2hmim_files
   */
+
+#ifndef xrif2shmim_hpp
+#define xrif2shmim_hpp
 
 #include <ImageStruct.h>
 #include <ImageStreamIO.h>
@@ -16,12 +21,27 @@
 #include "../../libMagAOX/libMagAOX.hpp"
 
 /// Sleep for a specified period in microseconds.
+/** \todo add timeutils to libMagAOX
+  */
 inline
 void microsleep( unsigned usec /**< [in] the number of microseconds to sleep. */)
 {
    std::this_thread::sleep_for(std::chrono::microseconds(usec));
 }
 
+
+/** \defgroup xrif2shmim xrif2shmim: xrif-archive Streamer
+  * \brief Stream images from an xrif archive to shared memory.
+  *
+  * <a href="../util_html/page_module_xrif2shmim.html">Application Documentation</a>
+  *
+  * \ingroup utils
+  * 
+  */
+
+/** \defgroup xrif2hmim_files xrif2shmim Files
+  * \ingroup xrif2shmim
+  */
 
 bool g_timeToDie = false;
 
@@ -41,6 +61,11 @@ void sigTermHandler( int signum,
 }
 
 /// A utility to stream MagaO-X images from xrif compressed archives to an ImageStreamIO stream.
+/**
+  * \todo finish md doc for xrif2shmim
+  *  
+  * \ingroup xrif2shmim
+  */ 
 class xrif2shmim : public mx::app::application
 {
 protected:
@@ -163,14 +188,6 @@ int xrif2shmim::execute()
       std::cerr << " (" << invokedName << "): error setting SIGINT handler: " << strerror(errno) << "\n";
       return -1;
    }
-   
-   
-   
-   
-   
-   
-   
-   
    
    //Figure out which files to use
    if(m_files.size() == 0)
@@ -449,7 +466,6 @@ int xrif2shmim::execute()
       if(1./m_fps - delta > 0) microsleep( (1./m_fps - delta)*1e6 ); //Argument is unsigned, since we can't unsleep, so don't pass a big number by axe.
    } 
    
-   
    ImageStreamIO_destroyIm( &m_imageStream );
    
    std::cerr << " (" << invokedName << "): exited normally.\n";
@@ -457,3 +473,4 @@ int xrif2shmim::execute()
    return 0;
 }
 
+#endif //xrif2shmim_hpp

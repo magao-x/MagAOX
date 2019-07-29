@@ -1,5 +1,7 @@
 /** \file logdump.hpp
   * \brief A simple utility to dump MagAO-X binary logs to stdout.
+  * 
+  * \ingroup logdump_files
   */
 
 #ifndef logdump_hpp
@@ -15,7 +17,25 @@ using namespace MagAOX::logger;
 
 using namespace flatlogs;
 
+/** \defgroup logdump logdump: MagAO-X Log Reader
+  * \brief Read a MagAO-X binary log file.
+  *
+  * <a href="../util_html/page_module_logdump.html">Application Documentation</a>
+  *
+  * \ingroup utils
+  * 
+  */
 
+/** \defgroup logdump_files logdump Files
+  * \ingroup logdump
+  */
+
+/// An application to dump MagAo-X binary logs to the terminal.
+/** \todo document this
+  * \todo add config for colors, both on/off and options to change.
+  *
+  * \ingroup logdump
+  */
 class logdump : public mx::app::application
 {
 protected:

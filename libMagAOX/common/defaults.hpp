@@ -11,6 +11,7 @@
 
 
 /** \defgroup default_app Default App Setup
+  * \ingroup common 
   * @{
   */
 

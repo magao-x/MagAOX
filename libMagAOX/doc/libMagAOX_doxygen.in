@@ -782,7 +782,9 @@ INPUT                  = ../ \
                          ../../apps/trippLitePDU/ \
                          ../../apps/ocam2KCtrl/ \
                          ../../apps/xindiserver/ \
-                         ../../apps/xt1121DCDU/
+                         ../../apps/xt1121DCDU/ \
+                         ../../utils/logdump/ \
+                         ../../utils/xrif2shmim/
 
 # This tag can be used to specify the character encoding of the source files
 # that doxygen parses. Internally doxygen uses the UTF-8 encoding. Doxygen uses
@@ -823,15 +825,18 @@ RECURSIVE              = YES
 # run.
 
 #---------------------
-# MagAO-X: exclude the apps/*/doc director!!!
+# MagAO-X: exclude the apps/*/doc and utils/*/doc directories!!!
 
 EXCLUDE                = ../logger/old \
+                         ../../apps/template \
                          ../../apps/sshDigger/doc \ 
                          ../../apps/filterWheelCtrl/doc \
                          ../../apps/trippLitePDU/doc \
                          ../../apps/ocam2KCtrl/doc \
                          ../../apps/xindiserver/doc \
-                         ../../apps/xt1121DCDU/doc
+                         ../../apps/xt1121DCDU/doc \
+                         ../../utils/logdump/doc \
+                         ../../utils/xrif2shmim/doc
                      
 # The EXCLUDE_SYMLINKS tag can be used to select whether or not files or
 # directories that are symbolic links (a Unix file system feature) are excluded
