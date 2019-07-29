@@ -95,7 +95,7 @@ protected:
    
    bool m_reconfig {false}; ///< Flag to set if a camera reconfiguration requires a framegrabber reset.
    
-   IMAGE imageStream; ///< The ImageStreamIO shared memory buffer.
+   IMAGE imageStream; ///< The ImageStreamIO shared memory buffer. \todo why isn't this m_imageStream?
    
    timespec m_dummy_ts {0,0};
    uint64_t m_dummy_cnt {0};
