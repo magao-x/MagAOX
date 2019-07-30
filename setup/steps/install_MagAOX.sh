@@ -4,7 +4,7 @@ source $DIR/../_common.sh
 set -euo pipefail
 
 function clone_or_update_and_cd() {
-    if [[ ! -e /opt/MagAOX/$1 ]]; then
+    if [[ ! -d /opt/MagAOX/$1/.git ]]; then
         echo "Cloning new copy of MagAOX config files"
         git clone https://github.com/magao-x/$1.git /tmp/$1
         sudo rsync -av /tmp/$1/ /opt/MagAOX/$1/
