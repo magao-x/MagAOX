@@ -25,18 +25,19 @@ function creategroup() {
 
 function createuser() {
   if getent passwd $1 > /dev/null 2>&1; then
-      echo "User account $1 exists"
-      echo -e "$DEFAULT_PASSWORD\n$DEFAULT_PASSWORD" | sudo passwd $1
+    log_info "User account $1 exists"
   else
     sudo useradd $1
+    echo -e "$DEFAULT_PASSWORD\n$DEFAULT_PASSWORD" | sudo passwd $1
+    log_success "Created user account $1 with default password $DEFAULT_PASSWORD"
   fi
   sudo usermod -g magaox $1
+  log_info "Added user $1 to group magaox"
   sudo mkdir -p /home/$1/.ssh
   sudo touch /home/$1/.ssh/authorized_keys
   sudo chown -R $1:magaox /home/$1/.ssh
   sudo chmod -R u=rwx,g=,o= /home/$1/.ssh
   sudo chmod u=rw,g=,o= /home/$1/.ssh/authorized_keys
-  log_success "Created user account $1 with default password $DEFAULT_PASSWORD"
   log_info "Append an ecdsa or ed25519 key to /home/$1/.ssh/authorized_keys to enable SSH login"
 }
 # We work around the buggy devtoolset /bin/sudo wrapper in provision.sh, but
