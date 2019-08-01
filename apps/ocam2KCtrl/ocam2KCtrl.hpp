@@ -27,71 +27,6 @@ namespace MagAOX
 namespace app
 {
 
-#define CAMCTRL_E_NOCONFIGS (-10)
-   
-///\todo craete cameraConfig in libMagAOX
-struct cameraConfig 
-{
-   std::string m_configFile;
-   std::string m_serialCommand;
-   unsigned m_binning {0};
-   unsigned m_sizeX {0};
-   unsigned m_sizeY {0};
-   float m_maxFPS {0};
-};
-
-typedef std::unordered_map<std::string, cameraConfig> cameraConfigMap;
-
-inline
-int loadCameraConfig( cameraConfigMap & ccmap,
-                      mx::app::appConfigurator & config 
-                    )
-{
-   std::vector<std::string> sections;
-
-   config.unusedSections(sections);
-
-   if( sections.size() == 0 )
-   {
-      return CAMCTRL_E_NOCONFIGS;
-   }
-   
-   for(size_t i=0; i< sections.size(); ++i)
-   {
-      bool fileset = config.isSetUnused(mx::app::iniFile::makeKey(sections[i], "configFile" ));
-      /*bool binset = config.isSetUnused(mx::app::iniFile::makeKey(sections[i], "binning" ));
-      bool sizeXset = config.isSetUnused(mx::app::iniFile::makeKey(sections[i], "sizeX" ));
-      bool sizeYset = config.isSetUnused(mx::app::iniFile::makeKey(sections[i], "sizeY" ));
-      bool maxfpsset = config.isSetUnused(mx::app::iniFile::makeKey(sections[i], "maxFPS" ));
-      */
-      
-      //The configuration file tells us most things for EDT, so it's our current requirement. 
-      if( !fileset ) continue;
-      
-      std::string configFile;
-      config.configUnused(configFile, mx::app::iniFile::makeKey(sections[i], "configFile" ));
-      
-      std::string serialCommand;
-      config.configUnused(serialCommand, mx::app::iniFile::makeKey(sections[i], "serialCommand" ));
-      
-      unsigned binning = 0;
-      config.configUnused(binning, mx::app::iniFile::makeKey(sections[i], "binning" ));
-      
-      unsigned sizeX = 0;
-      config.configUnused(sizeX, mx::app::iniFile::makeKey(sections[i], "sizeX" ));
-      
-      unsigned sizeY = 0;
-      config.configUnused(sizeY, mx::app::iniFile::makeKey(sections[i], "sizeY" ));
-      
-      float maxFPS = 0;
-      config.configUnused(maxFPS, mx::app::iniFile::makeKey(sections[i], "maxFPS" ));
-      
-      ccmap[sections[i]] = cameraConfig({configFile, serialCommand, binning, sizeX, sizeY, maxFPS});
-   }
-   
-   return 0;
-}
-
 /** \defgroup ocam2KCtrl OCAM2K EMCCD Camera
   * \brief Control of the OCAM2K EMCCD Camera.
   *
@@ -110,65 +45,40 @@ int loadCameraConfig( cameraConfigMap & ccmap,
   * \ingroup ocam2KCtrl
   * 
   */
-class ocam2KCtrl : public MagAOXApp<>, public dev::ioDevice, public dev::frameGrabber<ocam2KCtrl>
+class ocam2KCtrl : public MagAOXApp<>, /*public dev::ioDevice,*/ public dev::frameGrabber<ocam2KCtrl>, public dev::edtCamera<ocam2KCtrl>
 {
 
    friend class dev::frameGrabber<ocam2KCtrl>;
-   
+   friend class dev::edtCamera<ocam2KCtrl>;
    
 protected:
 
    /** \name configurable parameters 
      *@{
      */ 
-   //Framegrabber:
-   int m_unit {0}; ///< EDT PDV board unit number
-   int m_channel {0}; ///< EDT PDV board channel number
-   int m_numBuffs {4}; ///< EDT PDV DMA buffer size, indicating number of images.
-   
-   //int m_fgThreadPrio {1}; ///< Priority of the framegrabber thread, should normally be > 00.
-
-   //std::string m_shmimName {"ocam2k"}; ///< The name of the shared memory image, is used in `/tmp/<shmimName>.im.shm`.  Default is `ocam2k`.
-   
-   //int m_shmemCubeSz {1}; ///< The size of the shared memory image cube.  Default is 1.
 
    //Camera:
    unsigned long m_powerOnWait {10}; ///< Time in sec to wait for camera boot after power on.
 
-   cameraConfigMap m_cameraModes; ///< Map holding the possible camera mode configurations
-   
    float m_startupTemp {20.0}; ///< The temperature to set after a power-on.
-   
-   std::string m_startupMode; ///< The camera mode to load during first init after a power-on.
    
    std::string m_ocamDescrambleFile; ///< Path the OCAM 2K pixel descrambling file, relative to MagAO-X config directory.
 
-   unsigned m_maxEMGain {600};
+   unsigned m_maxEMGain {600}; ///< The maximum allowable EM gain settable by the user.
    
    ///@}
    
-   PdvDev * m_pdv {nullptr}; ///< The EDT PDV device handle
-
-   int m_raw_height {0};
-   
-   ocam2_id m_ocam2_id {0};
-   
-   u_char * m_image_p {nullptr};
+   ocam2_id m_ocam2_id {0}; ///< OCAM SDK id.
    
    float m_fpsSet {0}; ///< The commanded fps, as returned by the camera
 
    int m_powerOnCounter {0}; ///< Counts numer of loops after power on, implements delay for camera bootup.
 
-   std::string m_modeName;
-   std::string m_nextMode;
-   
-   std::string m_cameraType; ///< The camera type according to the framegrabber
-    
-   long m_currImageNumber {-1};
+   long m_currImageNumber {-1}; ///< The current image number, retrieved from the image itself.
        
-   long m_lastImageNumber {-1};  
+   long m_lastImageNumber {-1};  ///< The last image number, saved from the last loop through.
    
-   unsigned m_emGain {1};
+   unsigned m_emGain {1}; ///< The current EM gain.
    
 public:
 
@@ -185,12 +95,12 @@ public:
    virtual void loadConfig();
 
    /// Startup functions
-   /** Sets up the INDI vars.
+   /** Sets up the INDI vars, and the f.g. thread.
      *
      */
    virtual int appStartup();
 
-   /// Implementation of the FSM for the Siglent SDG
+   /// Implementation of the FSM for the OCAM 2K.
    virtual int appLogic();
 
    /// Implementation of the on-power-off FSM logic
@@ -199,29 +109,88 @@ public:
    /// Implementation of the while-powered-off FSM
    virtual int whilePowerOff();
 
-   /// Do any needed shutdown tasks.  Currently nothing in this app.
+   /// Do any needed shutdown tasks. 
    virtual int appShutdown();
 
-
-   int pdvConfig(std::string & cfgname);
-   
-   
+   /// Get the current device temperatures
+   /**
+     * \returns 0 on success
+     * \returns -1 on error
+     */ 
    int getTemps();
    
-   int setTemp(float temp);
+   /// Set the CCD temperature setpoint.
+   /**
+     * \returns 0 on success
+     * \returns -1 on error
+     */
+   int setTemp( float temp /**< [in] The new CCD temp setpoing [C] */ );
    
+   /// Get the current frame rate.
+   /**
+     * \returns 0 on success
+     * \returns -1 on error
+     */
    int getFPS();
    
-   int setFPS(float fps);
+   /// Set the frame rate.
+   /**
+     * \returns 0 on success
+     * \returns -1 on error
+     */
+   int setFPS( float fps  /**< [in] the new value of framerate [fps] */ );
    
+   /// Get the current EM Gain.
+   /**
+     * \returns 0 on success
+     * \returns -1 on error
+     */
    int getEMGain();
    
-   int setEMGain( unsigned emg );
+   /// Set the EM gain.
+   /**
+     * \returns 0 on success
+     * \returns -1 on error
+     */
+   int setEMGain( unsigned emg  /**< [in] the new value of EM gain */ );
    
+   /// Implementation of the framegrabber configureAcquisition interface
+   /** Sends the mode command over serial, sets the FPS, and initializes the OCAM SDK.
+     * 
+     * \returns 0 on success
+     * \returns -1 on error
+     */
    int configureAcquisition();
+   
+   /// Implementation of the framegrabber startAcquisition interface
+   /** Initializes m_lastImageNumber, and calls edtCamera::pdvStartAcquisition
+     * 
+     * \returns 0 on success
+     * \returns -1 on error
+     */
    int startAcquisition();
+   
+   /// Implementation of the framegrabber acquireAndCheckValid interface
+   /** Calls edtCamera::pdvAcquire, then analyzes the OCAM generated framenumber for skips and corruption.
+     * 
+     * \returns 0 on success
+     * \returns -1 on error
+     */
    int acquireAndCheckValid();
-   int loadImageIntoStream(void * dest);
+   
+   /// Implementation of the framegrabber loadImageIntoStream interface
+   /** Conducts the OCAM descramble.
+     * 
+     * \returns 0 on success
+     * \returns -1 on error
+     */
+   int loadImageIntoStream( void * dest  /**< [in] */);
+   
+   /// Implementation of the framegrabber reconfig interface
+   /** Locks the INDI mutex and calls edtCamera::pdvReconfig.
+     * \returns 0 on success
+     * \returns -1 on error
+     */
    int reconfig();
    
    
@@ -230,13 +199,11 @@ protected:
    //declare our properties
    pcf::IndiProperty m_indiP_ccdtemp;
    pcf::IndiProperty m_indiP_temps;
-   pcf::IndiProperty m_indiP_mode;
    pcf::IndiProperty m_indiP_fps;
    pcf::IndiProperty m_indiP_emGain;
 
 public:
    INDI_NEWCALLBACK_DECL(ocam2KCtrl, m_indiP_ccdtemp);
-   INDI_NEWCALLBACK_DECL(ocam2KCtrl, m_indiP_mode);
    INDI_NEWCALLBACK_DECL(ocam2KCtrl, m_indiP_fps);
    INDI_NEWCALLBACK_DECL(ocam2KCtrl, m_indiP_emGain);
 
@@ -253,47 +220,33 @@ ocam2KCtrl::ocam2KCtrl() : MagAOXApp(MAGAOX_CURRENT_SHA1, MAGAOX_REPO_MODIFIED)
 inline
 ocam2KCtrl::~ocam2KCtrl() noexcept
 {
-   if(m_pdv) pdv_close(m_pdv);
-
    return;
 }
 
 inline
 void ocam2KCtrl::setupConfig()
 {
-   config.add("framegrabber.pdv_unit", "", "framegrabber.pdv_unit", argType::Required, "framegrabber", "pdv_unit", false, "int", "The EDT PDV framegrabber unit number.  Default is 0.");
-   config.add("framegrabber.pdv_channel", "", "framegrabber.pdv_channel", argType::Required, "framegrabber", "pdv_channel", false, "int", "The EDT PDV framegrabber channel number.  Default is 0.");
-   config.add("framegrabber.numBuffs", "", "framegrabber.numBuffs", argType::Required, "framegrabber", "numBuffs", false, "int", "The EDT PDV framegrabber DMA buffer size [images].  Default is 4.");
-   
+   dev::edtCamera<ocam2KCtrl>::setupConfig(config);
    dev::frameGrabber<ocam2KCtrl>::setupConfig(config);
  
    config.add("camera.powerOnWait", "", "camera.powerOnWait", argType::Required, "camera", "powerOnWait", false, "int", "Time after power-on to begin attempting connections [sec].  Default is 10 sec.");
    
    config.add("camera.startupTemp", "", "camera.startupTemp", argType::Required, "camera", "startupTemp", false, "float", "The temperature setpoint to set after a power-on [C].  Default is 20 C.");
    
-   config.add("camera.startupMode", "", "camera.startupMode", argType::Required, "camera", "startupMode", false, "string", "The name of the configuration to set at startup.");
-   
    config.add("camera.ocamDescrambleFile", "", "camera.ocamDescrambleFile", argType::Required, "camera", "ocamDescrambleFile", false, "string", "The path of the OCAM descramble file, relative to MagAOX/config.");
    
    config.add("camera.maxEMGain", "", "camera.maxEMGain", argType::Required, "camera", "maxEMGain", false, "unsigned", "The maximum EM gain which can be set by  user. Default is 600.  Min is 1, max is 600.");
-   
-   dev::ioDevice::setupConfig(config);
+ 
 }
-
 
 
 inline
 void ocam2KCtrl::loadConfig()
 {
-   config(m_unit, "framegrabber.pdv_unit");
-   config(m_channel, "framegrabber.pdv_channel");
-   config(m_numBuffs, "framegrabber.numBuffs");
-  
-
+   dev::edtCamera<ocam2KCtrl>::loadConfig(config);
    
    config(m_powerOnWait, "camera.powerOnWait");
    config(m_startupTemp, "camera.startupTemp");
-   config(m_startupMode, "camera.startupMode");
    config(m_ocamDescrambleFile, "camera.ocamDescrambleFile");
    config(m_maxEMGain, "camera.maxEMGain");
    if(m_maxEMGain < 1)
@@ -310,79 +263,6 @@ void ocam2KCtrl::loadConfig()
    
    dev::frameGrabber<ocam2KCtrl>::loadConfig(config);
    
-   int rv = loadCameraConfig(m_cameraModes, config);
-   
-   if(rv < 0)
-   {
-      if(rv == CAMCTRL_E_NOCONFIGS)
-      {
-         log<text_log>("No camera configurations found.", logPrio::LOG_CRITICAL);
-      }
-      
-      m_shutdown = true;
-   }
-   
-   m_readTimeout = 1000;
-   m_writeTimeout = 1000;
-   dev::ioDevice::loadConfig(config);
-}
-
-#define MAGAOX_PDV_SERBUFSIZE 512
-
-int pdvSerialWriteRead( std::string & response,
-                        PdvDev * pdv,
-                        const std::string & command,
-                        int timeout ///< [in] timeout in milliseconds
-                      )
-{
-   char    buf[MAGAOX_PDV_SERBUFSIZE+1];
-
-   // Flush the channel first.
-   // This does not indicate errors, so no checks possible.
-   pdv_serial_read(pdv, buf, MAGAOX_PDV_SERBUFSIZE);
-
-   if( pdv_serial_command(pdv, command.c_str()) < 0)
-   {
-      MagAOXAppT::log<software_error>({__FILE__, __LINE__, "PDV: error sending serial command"});
-      return -1;
-   }
-
-   int ret;
-
-   ret = pdv_serial_wait(pdv, timeout, 1);
-
-   if(ret == 0)
-   {
-      MagAOXAppT::log<software_error>({__FILE__, __LINE__, "PDV: timeout, no serial response"});
-      return -1;
-   }
-
-   u_char  lastbyte, waitc;
-
-   response.clear();
-
-   do
-   {
-      ret = pdv_serial_read(pdv, buf, MAGAOX_PDV_SERBUFSIZE);
-
-      if(ret > 0) response += buf;
-
-      //Check for last char, wait for more otherwise.
-      if (*buf) lastbyte = (u_char)buf[strlen(buf)-1];
-
-      if (pdv_get_waitchar(pdv, &waitc) && (lastbyte == waitc))
-          break;
-      else ret = pdv_serial_wait(pdv, timeout/2, 1);
-   }
-   while(ret > 0);
-
-   if(ret == 0 && pdv_get_waitchar(pdv, &waitc))
-   {
-      MagAOXAppT::log<software_error>({__FILE__, __LINE__, "PDV: timeout in serial response"});
-      return -1;
-   }
-
-   return 0;
 }
 
 inline
@@ -410,10 +290,6 @@ int ocam2KCtrl::appStartup()
    m_indiP_temps.add (pcf::IndiElement("cooling"));
    m_indiP_temps["cooling"].set(0);
 
-   REG_INDI_NEWPROP(m_indiP_mode, "mode", pcf::IndiProperty::Text);
-   m_indiP_mode.add (pcf::IndiElement("current"));
-   m_indiP_mode.add (pcf::IndiElement("target"));
-
    REG_INDI_NEWPROP(m_indiP_fps, "fps", pcf::IndiProperty::Number);
    m_indiP_fps.add (pcf::IndiElement("current"));
    m_indiP_fps["current"].set(0);
@@ -425,10 +301,9 @@ int ocam2KCtrl::appStartup()
    m_indiP_emGain["current"].set(m_emGain);
    m_indiP_emGain.add (pcf::IndiElement("target"));
    
-   if(pdvConfig(m_startupMode) < 0) 
+   if(dev::edtCamera<ocam2KCtrl>::appStartup() < 0)
    {
-      log<software_error>({__FILE__, __LINE__});
-      return -1;
+      return log<software_critical,-1>({__FILE__,__LINE__});
    }
    
    if(dev::frameGrabber<ocam2KCtrl>::appStartup() < 0)
@@ -448,6 +323,12 @@ int ocam2KCtrl::appLogic()
 {
    //first run frameGrabber's appLogic to see if the f.g. thread has exited.
    if(dev::frameGrabber<ocam2KCtrl>::appLogic() < 0)
+   {
+      return log<software_error, -1>({__FILE__, __LINE__});
+   }
+   
+   //and run edtCamera's appLogic
+   if(dev::edtCamera<ocam2KCtrl>::appLogic() < 0)
    {
       return log<software_error, -1>({__FILE__, __LINE__});
    }
@@ -474,7 +355,7 @@ int ocam2KCtrl::appLogic()
       //Might have gotten here because of a power off.
       if(m_powerState == 0) return 0;
       
-      int ret = pdvSerialWriteRead( response, m_pdv, "fps", m_readTimeout);
+      int ret = pdvSerialWriteRead( response, "fps"); //m_pdv, "fps", m_readTimeout);
       if( ret == 0)
       {
          state(stateCodes::CONNECTED);
@@ -572,9 +453,6 @@ int ocam2KCtrl::onPowerOff()
    updateIfChanged(m_indiP_temps, "right", -999);
    updateIfChanged(m_indiP_temps, "cooling", -999);
    
-   updateIfChanged(m_indiP_mode, "current", std::string(""));
-   updateIfChanged(m_indiP_mode, "target", std::string(""));
-
    updateIfChanged(m_indiP_fps, "current", 0);
    updateIfChanged(m_indiP_fps, "target", 0);
    updateIfChanged(m_indiP_fps, "measured", 0);
@@ -582,135 +460,32 @@ int ocam2KCtrl::onPowerOff()
    updateIfChanged(m_indiP_emGain, "current", 0);
    updateIfChanged(m_indiP_emGain, "target", 0);
    
-   return 0;
+   
+   return edtCamera<ocam2KCtrl>::onPowerOff();
 }
 
 inline
 int ocam2KCtrl::whilePowerOff()
 {
-   return 0;
+   return edtCamera<ocam2KCtrl>::whilePowerOff();;
 }
 
 inline
 int ocam2KCtrl::appShutdown()
 {
+   dev::edtCamera<ocam2KCtrl>::appShutdown();
    dev::frameGrabber<ocam2KCtrl>::appShutdown();
    
    return 0;
 }
 
-inline
-int ocam2KCtrl::pdvConfig(std::string & modeName)
-{
-   Dependent *dd_p;
-   EdtDev *edt_p = NULL;
-   Edtinfo edtinfo;
-   
-   //Preliminaries
-   if(m_pdv)
-   {
-      pdv_close(m_pdv);
-      m_pdv = nullptr;
-   }
-      
-   m_modeName = modeName;
-   if(m_indiDriver)
-   {
-      updateIfChanged(m_indiP_mode, "target", m_modeName);
-   }
-   
-   if(m_cameraModes.count(modeName) != 1)
-   {
-      return log<text_log, -1>("No mode named " + modeName + " found.", logPrio::LOG_ERROR);
-   }
-   
-   std::string configFile = m_configDir + "/" +m_cameraModes[modeName].m_configFile;
-   
-   log<text_log>("Loading EDT PDV config file: " + configFile);
-      
-   if ((dd_p = pdv_alloc_dependent()) == NULL)
-   {
-      return log<software_error, -1>({__FILE__, __LINE__, "EDT PDV alloc_dependent FAILED"});      
-   }
-   
-   if (pdv_readcfg(configFile.c_str(), dd_p, &edtinfo) != 0)
-   {
-      free(dd_p);
-      return log<software_error, -1>({__FILE__, __LINE__, "EDT PDV readcfg FAILED"});
-      
-   }
-   
-   char edt_devname[128];
-   strncpy(edt_devname, EDT_INTERFACE, sizeof(edt_devname));
-   
-   if ((edt_p = edt_open_channel(edt_devname, m_unit, m_channel)) == NULL)
-   {
-      char errstr[256];
-      edt_perror(errstr);
-      free(dd_p);
-      return log<software_error, -1>({__FILE__, __LINE__, std::string("EDT PDV edt_open_channel FAILED: ") + errstr});
-   }
-   
-   char bitdir[1];
-   bitdir[0] = '\0';
-    
-   int pdv_debug = 0;
-   if(m_log.logLevel() > logPrio::LOG_INFO) pdv_debug = 2;
-   
-   if (pdv_initcam(edt_p, dd_p, m_unit, &edtinfo, configFile.c_str(), bitdir, pdv_debug) != 0)
-   {
-      edt_close(edt_p);
-      free(dd_p);
-      return log<software_error, -1>({__FILE__, __LINE__, "initcam failed. Run with '--logLevel=DBG' to see complete debugging output."});
-   }
-
-   edt_close(edt_p);
-   free(dd_p);
-   
-   //Now open the PDV device handle for talking to the camera via the EDT board.
-   if ((m_pdv = pdv_open_channel(edt_devname, m_unit, m_channel)) == NULL)
-   {
-      std::string errstr = std::string("pdv_open_channel(") + edt_devname + std::to_string(m_unit) + "_" + std::to_string(m_channel) + ")";
-
-      log<software_error>({__FILE__, __LINE__, errstr});
-      log<software_error>({__FILE__, __LINE__, errno});
-
-      return -1;
-   }
-
-   pdv_flush_fifo(m_pdv);
-
-   pdv_serial_read_enable(m_pdv); //This is undocumented, don't know if it's really needed.
-   
-   int width = pdv_get_width(m_pdv);
-   m_raw_height = pdv_get_height(m_pdv);
-   int depth = pdv_get_depth(m_pdv);
-   m_cameraType = pdv_get_cameratype(m_pdv);
-
-   log<text_log>("Initialized framegrabber: " + m_cameraType);
-   log<text_log>("WxHxD: " + std::to_string(width) + " X " + std::to_string(m_raw_height) + " X " + std::to_string(depth));
-
-   /*
-    * allocate four buffers for optimal pdv ring buffer pipeline (reduce if
-    * memory is at a premium)
-    */
-   pdv_multibuf(m_pdv, m_numBuffs);
-   log<text_log>("allocated " + std::to_string(m_numBuffs) + " buffers");
-  
-   
-   log<text_log>("camera configured with: " +m_cameraModes[modeName].m_serialCommand);
-   
-   
-   return 0;
-
-}
 
 inline
 int ocam2KCtrl::getTemps()
 {
    std::string response;
 
-   if( pdvSerialWriteRead( response, m_pdv, "temp", m_readTimeout) == 0)
+   if( pdvSerialWriteRead( response, "temp") == 0)// m_pdv, "temp", m_readTimeout) == 0)
    {
       ocamTemps temps;
 
@@ -752,7 +527,7 @@ int ocam2KCtrl::setTemp(float temp)
       return log<text_log,-1>({"attempt to set temperature outside valid range: " + tempStr}, logPrio::LOG_ERROR);
    }
    
-   if( pdvSerialWriteRead( response, m_pdv, "temp " + tempStr, m_readTimeout) == 0)
+   if( pdvSerialWriteRead( response, "temp " + tempStr) == 0) //m_pdv, "temp " + tempStr, m_readTimeout) == 0)
    {
       ///\todo check response
       return log<text_log,0>({"set temperature: " + tempStr});
@@ -766,7 +541,7 @@ int ocam2KCtrl::getFPS()
 {
    std::string response;
 
-   if( pdvSerialWriteRead( response, m_pdv, "fps", m_readTimeout) == 0)
+   if( pdvSerialWriteRead( response, "fps") == 0) // m_pdv, "fps", m_readTimeout) == 0)
    {
       float fps;
       if(parseFPS( fps, response ) < 0) 
@@ -797,7 +572,7 @@ int ocam2KCtrl::setFPS(float fps)
    ///\todo should we have fps range checks or let camera deal with it?
    
    std::string fpsStr= std::to_string(fps);
-   if( pdvSerialWriteRead( response, m_pdv, "fps " + fpsStr, m_readTimeout) == 0)
+   if( pdvSerialWriteRead( response, "fps " + fpsStr ) == 0) //m_pdv, "fps " + fpsStr, m_readTimeout) == 0)
    {
       ///\todo check response
       log<text_log>({"set fps: " + fpsStr});
@@ -813,7 +588,7 @@ int ocam2KCtrl::getEMGain()
 {
    std::string response;
 
-   if( pdvSerialWriteRead( response, m_pdv, "gain", m_readTimeout) == 0)
+   if( pdvSerialWriteRead( response, "gain") == 0) //m_pdv, "gain", m_readTimeout) == 0)
    {
       unsigned emGain;
       if(parseEMGain( emGain, response ) < 0) 
@@ -843,7 +618,7 @@ int ocam2KCtrl::setEMGain( unsigned emg )
    }
    
    std::string emgStr= std::to_string(emg);
-   if( pdvSerialWriteRead( response, m_pdv, "gain " + emgStr, m_readTimeout) == 0)
+   if( pdvSerialWriteRead( response, "gain " + emgStr ) == 0) //m_pdv, "gain " + emgStr, m_readTimeout) == 0)
    {
       ///\todo check response
       log<text_log>({"set EM Gain: " + emgStr});
@@ -862,7 +637,7 @@ int ocam2KCtrl::configureAcquisition()
    
    //Send command to camera to place it in the correct mode
    std::string response;
-   if( pdvSerialWriteRead( response, m_pdv, m_cameraModes[m_modeName].m_serialCommand, m_readTimeout) != 0)
+   if( pdvSerialWriteRead( response, m_cameraModes[m_modeName].m_serialCommand) != 0) //m_pdv, m_cameraModes[m_modeName].m_serialCommand, m_readTimeout) != 0)
    {
       log<software_error>({__FILE__, __LINE__, "Error sending command to set mode"});
       sleep(1);
@@ -932,29 +707,15 @@ int ocam2KCtrl::configureAcquisition()
 inline
 int ocam2KCtrl::startAcquisition()
 {
-   pdv_start_images(m_pdv, m_numBuffs);
-   
- 
    m_lastImageNumber = -1;
-   return 0;
+   return edtCamera<ocam2KCtrl>::pdvStartAcquisition();
+   
 }
 
 inline
 int ocam2KCtrl::acquireAndCheckValid()
 {
-   
-   /*
-    * get the image and immediately start the next one (if not the last
-    * time through the loop). Processing (saving to a file in this case)
-    * can then occur in parallel with the next acquisition
-    */
-   uint dmaTimeStamp[2];
-   m_image_p = pdv_wait_last_image_timed(m_pdv, dmaTimeStamp);
-   //m_image_p = pdv_wait_image_timed(m_pdv, dmaTimeStamp);
-   pdv_start_image(m_pdv);
-
-   m_currImageTimestamp.tv_sec = dmaTimeStamp[0];
-   m_currImageTimestamp.tv_nsec = dmaTimeStamp[1];
+   edtCamera<ocam2KCtrl>::pdvAcquire( m_currImageTimestamp );
    
    /* Removed all pdv timeout and overrun checking, since we can rely on frame number from the camera
       to detect missed and corrupted frames.
@@ -1033,18 +794,7 @@ int ocam2KCtrl::reconfig()
    //lock mutex
    std::unique_lock<std::mutex> lock(m_indiMutex);
    
-   if(pdvConfig(m_nextMode) < 0)
-   {
-      log<text_log>("error trying to re-configure with " + m_nextMode, logPrio::LOG_ERROR);
-      sleep(1);
-   }
-   else
-   {
-      m_nextMode = "";
-      
-   }
-   
-   return 0;
+   return edtCamera<ocam2KCtrl>::pdvReconfig();
 }
    
 
@@ -1101,48 +851,7 @@ INDI_NEWCALLBACK_DEFN(ocam2KCtrl, m_indiP_ccdtemp)(const pcf::IndiProperty &ipRe
    return -1;
 }
 
-INDI_NEWCALLBACK_DEFN(ocam2KCtrl, m_indiP_mode)(const pcf::IndiProperty &ipRecv)
-{
-   if (ipRecv.getName() == m_indiP_mode.getName())
-   {
-      std::cerr << "New mode\n";
-      std::string current;
-      std::string target;
-      try 
-      {
-         current = ipRecv["current"].get();
-      }
-      catch(...)
-      {
-         current = "";
-      }
-      
-      try 
-      {
-         target = ipRecv["target"].get();
-      }
-      catch(...)
-      {
-         target = "";
-      }
-      
-      if(target == "") target = current;
-      
-      if(m_cameraModes.count(target) == 0 )
-      {
-         return log<text_log, -1>("Unrecognized mode requested: " + target, logPrio::LOG_ERROR);
-      }
-      
-      updateIfChanged(m_indiP_mode, "target", target);
-      
-      //Now signal the f.g. thread to reconfigure
-      m_nextMode = target;
-      m_reconfig = true;
-      
-      return 0;
-   }
-   return -1;
-}
+
 
 INDI_NEWCALLBACK_DEFN(ocam2KCtrl, m_indiP_fps)(const pcf::IndiProperty &ipRecv)
 {

@@ -27,68 +27,6 @@ namespace app
 
 #define CAMCTRL_E_NOCONFIGS (-10)
    
-///\todo craete cameraConfig in libMagAOX
-struct cameraConfig 
-{
-   std::string m_configFile;
-   std::string m_serialCommand;
-   unsigned m_binning {0};
-   unsigned m_sizeX {0};
-   unsigned m_sizeY {0};
-   float m_maxFPS {0};
-};
-
-typedef std::unordered_map<std::string, cameraConfig> cameraConfigMap;
-
-inline
-int loadCameraConfig( cameraConfigMap & ccmap,
-                      mx::app::appConfigurator & config 
-                    )
-{
-   std::vector<std::string> sections;
-
-   config.unusedSections(sections);
-
-   if( sections.size() == 0 )
-   {
-      return CAMCTRL_E_NOCONFIGS;
-   }
-   
-   for(size_t i=0; i< sections.size(); ++i)
-   {
-      bool fileset = config.isSetUnused(mx::app::iniFile::makeKey(sections[i], "configFile" ));
-      /*bool binset = config.isSetUnused(mx::app::iniFile::makeKey(sections[i], "binning" ));
-      bool sizeXset = config.isSetUnused(mx::app::iniFile::makeKey(sections[i], "sizeX" ));
-      bool sizeYset = config.isSetUnused(mx::app::iniFile::makeKey(sections[i], "sizeY" ));
-      bool maxfpsset = config.isSetUnused(mx::app::iniFile::makeKey(sections[i], "maxFPS" ));
-      */
-      
-      //The configuration file tells us most things for EDT, so it's our current requirement. 
-      if( !fileset ) continue;
-      
-      std::string configFile;
-      config.configUnused(configFile, mx::app::iniFile::makeKey(sections[i], "configFile" ));
-      
-      std::string serialCommand;
-      config.configUnused(serialCommand, mx::app::iniFile::makeKey(sections[i], "serialCommand" ));
-      
-      unsigned binning = 0;
-      config.configUnused(binning, mx::app::iniFile::makeKey(sections[i], "binning" ));
-      
-      unsigned sizeX = 0;
-      config.configUnused(sizeX, mx::app::iniFile::makeKey(sections[i], "sizeX" ));
-      
-      unsigned sizeY = 0;
-      config.configUnused(sizeY, mx::app::iniFile::makeKey(sections[i], "sizeY" ));
-      
-      float maxFPS = 0;
-      config.configUnused(maxFPS, mx::app::iniFile::makeKey(sections[i], "maxFPS" ));
-      
-      ccmap[sections[i]] = cameraConfig({configFile, serialCommand, binning, sizeX, sizeY, maxFPS});
-   }
-   
-   return 0;
-}
 
 /** \defgroup andorCtrl Andor EMCCD Camera
   * \brief Control of the Andor EMCCD Camera.
@@ -123,16 +61,14 @@ protected:
    //Camera:
    unsigned long m_powerOnWait {10}; ///< Time in sec to wait for camera boot after power on.
 
-   cameraConfigMap m_cameraModes; ///< Map holding the possible camera mode configurations
+   //dev::cameraConfigMap m_cameraModes; ///< Map holding the possible camera mode configurations
    
    float m_startupTemp {20.0}; ///< The temperature to set after a power-on.
       
    unsigned m_maxEMGain {600};
    
    ///@}
-   
-   u_char * m_image_p {nullptr};
-   
+      
    int m_powerOnCounter {0}; ///< Counts numer of loops after power on, implements delay for camera bootup.
 
    std::string m_modeName;
@@ -252,6 +188,7 @@ void andorCtrl::loadConfig()
    config(m_powerOnWait, "camera.powerOnWait");
    config(m_startupTemp, "camera.startupTemp");
    config(m_maxEMGain, "camera.maxEMGain");
+   
    if(m_maxEMGain < 1)
    {
       m_maxEMGain = 1;
@@ -298,10 +235,14 @@ int andorCtrl::appStartup()
    m_indiP_emGain["current"].set(m_emGain);
    m_indiP_emGain.add (pcf::IndiElement("target"));
    
-   if(pdvConfig(m_startupMode) < 0) 
+//    if(pdvConfig(m_startupMode) < 0) 
+//    {
+//       log<software_error>({__FILE__, __LINE__});
+//       return -1;
+//    }
+   if(dev::edtCamera<andorCtrl>::appStartup() < 0)
    {
-      log<software_error>({__FILE__, __LINE__});
-      return -1;
+      return log<software_critical,-1>({__FILE__,__LINE__});
    }
    
    if(dev::frameGrabber<andorCtrl>::appStartup() < 0)
@@ -309,6 +250,7 @@ int andorCtrl::appStartup()
       return log<software_critical,-1>({__FILE__,__LINE__});
    }
    
+   state(stateCodes::NOTCONNECTED);
    
    return 0;
 
@@ -347,23 +289,39 @@ int andorCtrl::appLogic()
       //Might have gotten here because of a power off.
       if(m_powerState == 0) return 0;
       
-      int ret = 0;//pdvSerialWriteRead( response, m_pdv, "fps", m_readTimeout);
-      if( ret == 0)
-      {
-         state(stateCodes::CONNECTED);
-      }
-      else
+      int ret = cameraSelect(0); ///\todo make camera number configurable
+      
+      if( ret != 0) //Probably not powered on yet.
       {
          sleep(1);
          return 0;
       }
+      
+      int error = Initialize((char *)"/usr/local/etc/andor");
+    
+      std::cout << "The Error code is " << error << std::endl;
+	
+      if(error!=DRV_SUCCESS)
+      {
+		std::cerr << "Initialisation error...exiting" << std::endl;
+		return -1;
+	}
+	
+      state(stateCodes::CONNECTED);
+      
+      
    }
 
+   std::cerr << 3 << "\n";
+   
    if( state() == stateCodes::CONNECTED )
    {
       //Get a lock
       std::unique_lock<std::mutex> lock(m_indiMutex);
       
+      
+      
+      state(stateCodes::READY);
 //       if( getFPS() == 0 )
 //       {
 //          if(m_fpsSet == 0) state(stateCodes::READY);
@@ -381,6 +339,8 @@ int andorCtrl::appLogic()
 //       }
    }
 
+   std::cerr << 4 << "\n";
+   
    if( state() == stateCodes::READY || state() == stateCodes::OPERATING )
    {
       //Get a lock if we can
@@ -397,7 +357,7 @@ int andorCtrl::appLogic()
          return 0;
       }
 
-      if(getFPS() < 0)
+     if(getFPS() < 0)
       {
          if(m_powerState == 0) return 0;
          
@@ -413,12 +373,12 @@ int andorCtrl::appLogic()
          return 0;
       }
       
-      if(frameGrabber<andorCtrl>::updateINDI() < 0)
+      /*if(frameGrabber<andorCtrl>::updateINDI() < 0)
       {
          log<software_error>({__FILE__, __LINE__});
          state(stateCodes::ERROR);
          return 0;
-      }
+      }*/
    }
 
    //Fall through check?
@@ -467,22 +427,27 @@ int andorCtrl::appShutdown()
 inline
 int andorCtrl::cameraSelect(int camNo)
 {
-    at_32 lNumCameras;
-    GetAvailableCameras(&lNumCameras);
+   std::cerr << "In cameraSelect(0) \n";
+   at_32 lNumCameras;
+   GetAvailableCameras(&lNumCameras);
 
-    int iSelectedCamera = camNo;
- 
-    if (iSelectedCamera < lNumCameras && iSelectedCamera >= 0) 
-    {
+   std::cerr << "Number of cameras: " << lNumCameras << "\n";
+    
+   int iSelectedCamera = camNo;
+
+   if (iSelectedCamera < lNumCameras && iSelectedCamera >= 0) 
+   {
       at_32 lCameraHandle;
       GetCameraHandle(iSelectedCamera, &lCameraHandle);
       
       SetCurrentCamera(lCameraHandle);
       
       return 0;
-    }
-    else
-      return -1;
+   }
+   else
+   {
+      return log<text_log,-1>("No Andor cameras found.");
+   }
   
 }
 
@@ -491,8 +456,10 @@ int andorCtrl::getTemp()
 {
    std::string response;
 
-   int temp, temp_low, temp_high;
+   int temp {999}, temp_low {999}, temp_high {999};
    unsigned long error=GetTemperatureRange(&temp_low, &temp_high); ///\todo need error check
+   
+   std::cerr << error << "\n";
    unsigned long status=GetTemperature(&temp);
    
    std::cout << "Current Temperature: " << temp << " C" << std::endl;
@@ -572,25 +539,91 @@ int andorCtrl::configureAcquisition()
    std::unique_lock<std::mutex> lock(m_indiMutex);
    
    
+   
+
+   
+    
+    //Get Detector dimensions
+    int width, height;
+    GetDetector(&width, &height);
+    
+    ///\todo This should check whether we have a match between EDT and the camera right?
+    m_width = width;
+    m_height = height;
+    m_dataType = _DATATYPE_INT16;
+    
+    //Set Read Mode to --Image--
+    SetReadMode(4);
+    /* 0 - Full Vertical Binning
+     * 1 - Multi-Track; Need to call SetMultiTrack(int NumTracks, int height, int offset, int* bottom, int *gap)
+     * 2 - Random-Track; Need to call SetRandomTracks
+     * 3 - Single-Track; Need to call SetSingleTrack(int center, int height)
+     * 4 - Image; See SetImage, need shutter during readout
+     */
+    
+    //Set Acquisition mode to --Run Till Abort--
+    SetAcquisitionMode(5);
+    /* 1 - Single Scan
+     * 2 - Accumulate
+     * 3 - Kinetic Series
+     * 5 - Run Till Abort
+     * 
+     * See Page 53 of SDK User's Guide for Frame Transfer Info
+     */
+   
+    //Set initial exposure time
+    SetExposureTime(0.1);
+   
+    //Initialize Shutter to SHUT
+    SetShutter(1,2,50,50);
+    
+    // Set CameraLink
+    SetCameraLinkMode(1);
+    
+    // Set Output Amplifier
+    SetOutputAmplifier(1);
+    
+    //Setup Image dimensions
+    SetImage(1,1,1,width,1,height);
+    /* SetImage(int hbin, int vbin, int hstart, int hend, int vstart, int vend)
+     * hbin: number of pixels to bin horizontally
+     * vbin: number of pixels to bin vertically
+     * hstart: Starting Column (inclusive)
+     * hend: End column (inclusive)
+     * vstart: Start row (inclusive)
+     * vend: End row (inclusive)
+     */
+    
+    // Print Detector Frame Size
+    std::cout << "Detector Frame is: " << width << "x" << height << "\n";
+
+    
    return 0;
 }
    
 inline
 int andorCtrl::startAcquisition()
 {
-   return 0;
+   SetKineticCycleTime(0);
+   StartAcquisition();
+      
+   std::cout << "\n" << "Starting Continuous Acquisition" << "\n";
+            
+   return edtCamera<andorCtrl>::pdvStartAcquisition();
 }
 
 inline
 int andorCtrl::acquireAndCheckValid()
 {
+   return edtCamera<andorCtrl>::pdvAcquire( m_currImageTimestamp );
    
-   return 0;
 }
 
 inline
 int andorCtrl::loadImageIntoStream(void * dest)
 {
+   memcpy(dest, m_image_p, m_width*m_height*m_typeSize); 
+   
    return 0;
 }
    
@@ -600,36 +633,8 @@ int andorCtrl::reconfig()
    //lock mutex
    std::unique_lock<std::mutex> lock(m_indiMutex);
    
-   if(pdvConfig(m_nextMode) < 0)
-   {
-      log<text_log>("error trying to re-configure with " + m_nextMode, logPrio::LOG_ERROR);
-      sleep(1);
-   }
-   else
-   {
-      m_nextMode = "";
-      
-   }
-   
-   return 0;
-}
-   
-
-      
-         
-   
-     
-   
-   
-
-         
-
-         
-         
-     
-           
-    
-     
+   return edtCamera<ocam2KCtrl>::pdvReconfig();
+}     
 
 INDI_NEWCALLBACK_DEFN(andorCtrl, m_indiP_ccdtemp)(const pcf::IndiProperty &ipRecv)
 {

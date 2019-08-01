@@ -1,5 +1,5 @@
 /** \file frameGrabber.hpp
-  * \brief The MagAO-X Princeton Instruments EMCCD camera controller.
+  * \brief The MagAO-X generic frame grabber.
   *
   * \author Jared R. Males (jaredmales@gmail.com)
   *
@@ -73,12 +73,7 @@ protected:
    int m_fgThreadPrio {2}; ///< Priority of the framegrabber thread, should normally be > 00.
     
    uint32_t m_circBuffLength {1024}; ///< Length of the circular buffer, in frames
-   
-   uint32_t m_writeChunkLength {512}; ///< The number of images to write at a time.  Should normally be < m_circBuffLength.
-   
-   std::string m_rawimageDir; ///< The path where files will be saved.  Normally derived from the library config.
-   
-    
+       
    ///@}
    
    uint32_t m_width {0}; ///< The width of the image, once deinterlaced etc.
@@ -221,7 +216,8 @@ private:
 template<class derivedT>
 void frameGrabber<derivedT>::setupConfig(mx::app::appConfigurator & config)
 {
-   config.add("framegrabber.threadPrio", "", "framegrabber.threadPrio", argType::Required, "framegrabber", "threadPrio", false, "int", "The real-time priority of the fraemgrabber thread.");
+   config.add("framegrabber.threadPrio", "", "framegrabber.threadPrio", argType::Required, "framegrabber", "threadPrio", false, "int", "The real-time priority of the framegrabber thread.");
+   
    config.add("framegrabber.shmimName", "", "framegrabber.shmimName", argType::Required, "framegrabber", "shmimName", false, "string", "The name of the ImageStreamIO shared memory image. Will be used as /tmp/<shmimName>.im.shm.");
    
    config.add("framegrabber.circBuffLength", "", "framegrabber.circBuffLength", argType::Required, "framegrabber", "circBuffLength", false, "size_t", "The length of the circular buffer. Sets m_circBuffLength, default is 1.");
