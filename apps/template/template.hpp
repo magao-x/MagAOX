@@ -1,5 +1,5 @@
 /** \file template.hpp
-  * \brief The MagAO-X template
+  * \brief The MagAO-X XXXXXX header file
   *
   * \ingroup template_files
   */
@@ -12,7 +12,7 @@
 #include "../../magaox_git_version.h"
 
 /** \defgroup template 
-  * \brief 
+  * \brief The XXXXXXX application to do YYYYYYY
   *
   * <a href="..//apps_html/page_module_template.html">Application Documentation</a>
   *
@@ -44,6 +44,9 @@ protected:
    /** \name Configurable Parameters
      *@{
      */
+   
+   //here add parameters which will be config-able at runtime
+   
    ///@}
 
 

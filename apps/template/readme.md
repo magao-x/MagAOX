@@ -17,6 +17,8 @@ The three basic files for any application are the header, the main program file,
 
 Now in `Makefile`, `hardwareCtrl.hpp` and `hardwareCtrl.cpp`, change `template` to `hardwareCtrl` (you should be able to use find-all and replace).  
 
+If all replacement is done correctly, the application will build with only warnings if you type `make` on the command line.
+
 Next edit the code in the `.hpp` file to implement the application.  You can also edit the Makefile adding additional libraries, or perhaps another header.  You will typically not need to edit any code in the `.cpp` file other than replacing `template` as above.
 
 # 2. Build System Integration
@@ -40,8 +42,16 @@ Rename and edit the file `doc/template.md`, in the above example it should becom
 # 6. Documentation System Integration
 
 Next, follow all of these steps to integrate the documentation:
-- in the file `libMagAOX/doc/libMagAOX_doxygen.in` add the application folder the INPUT directive 
-- in the same file, add the application/doc folder the EXCLUDE directive
+- in the file `libMagAOX/doc/libMagAOX_doxygen.in` add the application folder to the INPUT directive 
+- in the same file, add the application/doc folder to the EXCLUDE directive
 - in the file 'apps/doc/magaox_apps_doxygen.in`  add the application `xxxx/doc/` folder to the `INPUT` directive
 
 Now running `make doc` in the top level should build all documentation with your new application integrated into it like all the others.
+
+# 7. Final Steps
+
+Delete this `readme.md` from the new application folder.
+
+Commit all of the new files.
+
+Use your new application to find planets.

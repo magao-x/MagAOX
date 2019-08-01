@@ -1,5 +1,5 @@
 /** \file template.cpp
-  * \brief The MagAO-X xxxxx
+  * \brief The MagAO-X xxxxx main program source file.
   *
   * \ingroup template_files
   */
