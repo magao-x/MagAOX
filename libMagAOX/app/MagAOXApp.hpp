@@ -1487,12 +1487,26 @@ int MagAOXApp<_useINDI>::lockPID()
 template<bool _useINDI>
 int MagAOXApp<_useINDI>::unlockPID()
 {
+   //Get the maximum privileges available
+   if( euidCalled() < 0 )
+   {
+      log<software_error>({__FILE__, __LINE__, 0, 0, "Seeting euid to called failed."});
+      return -1;
+   }
+   
    if( ::remove(pidFileName.c_str()) < 0)
    {
       log<software_error>({__FILE__, __LINE__, errno, 0, std::string("Failed to remove PID file: ") + strerror(errno)});
       return -1;
    }
 
+   //Go back to regular privileges
+   if( euidReal() < 0 )
+   {
+      log<software_error>({__FILE__, __LINE__, 0, 0, "Seeting euid to real failed."});
+      return -1;
+   }
+   
    std::stringstream logss;
    logss << "PID (" << m_pid << ") unlocked.";
    log<text_log>(logss.str());
