@@ -10,6 +10,10 @@ local/
 **/a.out
 **/tests/*.binlog
 **/.*~
+**/*.stash
+
+**/bin/
+**/moc/
 
 #Ignore any old folders
 **/old/
@@ -56,12 +60,17 @@ apps/streamWriter/streamWriter
 apps/mzmqServer/mzmqServer
 apps/picamCtrl/picamCtrl
 
+apps/xt1121Ctrl/xt1121Ctrl                                                                                                                                                                    
+apps/xt1121DCDU/xt1121DCDU 
+
+
 utils/logdump/logdump
 utils/cursesINDI/cursesINDI
+utils/xrif2shmim/xrif2shmim
 
 tests/singleTest
 tests/testMagAOX
-
+tests/testMagAOXsetuid
 
 #Devel stuff in flatlogs
 flatlogs/src/flatlogcodes
