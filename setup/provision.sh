@@ -119,11 +119,12 @@ else
             # things and not having them go where we expect
             git remote remove origin
             git remote add origin https://github.com/magao-x/MagAOX.git
+            git fetch origin
             git branch -u origin/master master
             log_success "In the future, you can re-run this script from /opt/MagAOX/source/MagAOX/setup"
             log_info "(In fact, maybe delete $(dirname $DIR)?)"
         else
-            git pull
+            git fetch
         fi
     else
         log_info "Running from clone located at $(dirname $DIR), nothing to do for cloning step"
