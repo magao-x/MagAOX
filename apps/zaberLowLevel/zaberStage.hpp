@@ -134,6 +134,12 @@ public:
      */
    char deviceStatus();
 
+   /// Get the current raw position, in counts
+   /**
+     * \returns the current value of m_rawPos
+     */
+   long rawPos();
+   
    /// Get the warning state
    /**
      * \returns the true if any warning flags are set.
@@ -288,6 +294,12 @@ bool zaberStage::commandStatus()
 char zaberStage::deviceStatus()
 {
    return m_deviceStatus;
+}
+
+inline
+long zaberStage::rawPos()
+{
+   return m_rawPos;
 }
 
 bool zaberStage::warningState()

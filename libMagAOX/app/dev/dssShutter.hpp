@@ -17,6 +17,19 @@ namespace app
 namespace dev 
 {
    
+//Empty signal handler.  SIGUSR1 is used to interrupt sleep in the open/shut threads.   
+void sigUsr1Handler( int signum,
+                     siginfo_t * siginf,
+                     void *ucont 
+                   )
+{
+   static_cast<void>(signum);
+   static_cast<void>(siginf);
+   static_cast<void>(ucont);
+   
+   return;
+}
+
 /// MagAO-X Uniblitz DSS Shutter interface
 /**
   * 
@@ -48,6 +61,9 @@ protected:
    std::string m_sensorChannel;  ///< The channel reading this shutter's sensor
    std::string m_triggerChannel; ///< The channel sending this shutter's trigger
       
+   unsigned m_shutterWait {100};  ///< The time to pause between checks of the sensor state during open/shut [msec]. Default is 100.
+   
+   unsigned m_shutterTimeout {2000}; ///< Total time to wait for sensor to change state before timing out [msec]. Default is 2000.
    ///@}
    
    int m_powerState {-1};  ///< The current power state, -1 is unknown, 0 is off, 1 is on.
@@ -156,6 +172,47 @@ public:
      */
    int shut();
    
+protected:
+   
+   /** \name Open/Shut Threads 
+     *
+     * Separate threads are used since we need INDI updates while trying to open/shut.
+     * These threads sleep(1), unless interrupted by a signal.  When signaled, they check 
+     * for the m_doOpen or m_doShut flag, and if true the appropriate open() or shut()
+     * function is called.  If not, they go back to sleep unless m_shutdown is true.
+     * 
+     * @{
+     */
+   
+   bool m_doOpen {false}; ///< Flag telling the open thread that it should actually open the shutter, not just go back to sleep.
+   
+   bool m_openThreadInit {true}; ///< Initialization flag for the open thread.
+   
+   std::thread m_openThread; ///< The opening thread.
+
+   /// Open thread starter function
+   static void openThreadStart( dssShutter * d /**< [in] pointer to this */);
+   
+   /// Open thread function
+   /** Runs until m_shutdown is true.
+     */
+   void openThreadExec();
+   
+   bool m_doShut {false}; ///< Flag telling the shut thread that it should actually shut the shutter, not just go back to sleep.
+   
+   bool m_shutThreadInit {true}; ///< Initialization flag for the shut thread.
+   
+   std::thread m_shutThread; ///< The shutting thread
+   
+   /// Shut thread starter function.
+   static void shutThreadStart( dssShutter * d /**< [in] pointer to this */);
+   
+   /// Shut thread function
+   /** Runs until m_shutdown is true.
+     */
+   void shutThreadExec();
+   
+   ///@}
 protected:
     /** \name INDI 
       *
@@ -274,6 +331,11 @@ void dssShutter<derivedT>::setupConfig(mx::app::appConfigurator & config)
    config.add("shutter.sensorChannel", "", "shutter.sensorChannel", argType::Required, "shutter", "sensorChannel", false, "string", "The channel reading this shutter's sensor.");
    
    config.add("shutter.triggerChannel", "", "shutter.triggerChannel", argType::Required, "shutter", "triggerChannel", false, "string", "The channel sending this shutter's trigger.");
+   
+   config.add("shutter.wait", "", "shutter.wait", argType::Required, "shutter", "wait", false, "int", "The time to pause between checks of the sensor state during open/shut [msec]. Default is 100.");
+   
+   config.add("shutter.timeout", "", "shutter.timeout", argType::Required, "shutter", "timeout", false, "int", "Total time to wait for sensor to change state before timing out [msec]. Default is 2000.");
+   
 }
 
 template<class derivedT>
@@ -284,7 +346,8 @@ void dssShutter<derivedT>::loadConfig(mx::app::appConfigurator & config)
    config(m_dioDevice, "shutter.dioDevice");
    config(m_sensorChannel, "shutter.sensorChannel");
    config(m_triggerChannel, "shutter.triggerChannel");
-
+   config(m_shutterWait, "shutter.wait");
+   config(m_shutterTimeout, "shutter.timeout");
 }
    
 
@@ -337,7 +400,37 @@ int dssShutter<derivedT>::appStartup()
       return -1;
    }
    
+   if(derived().threadStart( m_openThread, m_openThreadInit, 0, "open", this, openThreadStart) < 0)
+   {
+      derivedT::template log<software_error>({__FILE__, __LINE__});
+      return -1;
+   }
+      
+   if(derived().threadStart( m_shutThread, m_shutThreadInit, 0, "shut", this, shutThreadStart) < 0)
+   {
+      derivedT::template log<software_error>({__FILE__, __LINE__});
+      return -1;
+   }
    
+   //Install empty signal handler for USR1, which is used to interrupt sleeps in the open/shut threads.
+   struct sigaction act;
+   sigset_t set;
+
+   act.sa_sigaction = &sigUsr1Handler;
+   act.sa_flags = SA_SIGINFO;
+   sigemptyset(&set);
+   act.sa_mask = set;
+
+   errno = 0;
+   if( sigaction(SIGUSR1, &act, 0) < 0 )
+   {
+      std::string logss = "Setting handler for SIGUSR1 failed. Errno says: ";
+      logss += strerror(errno);
+
+      derivedT::template log<software_error>({__FILE__, __LINE__, errno, 0, logss});
+
+      return -1;
+   }
    
    return 0;
 
@@ -352,6 +445,30 @@ int dssShutter<derivedT>::appLogic()
 template<class derivedT>
 int dssShutter<derivedT>::appShutdown()
 {
+   pthread_kill(m_openThread.native_handle(), SIGUSR1);
+   pthread_kill(m_shutThread.native_handle(), SIGUSR1);
+   
+   if(m_openThread.joinable())
+   {
+      try
+      {
+         m_openThread.join(); //this will throw if it was already joined
+      }
+      catch(...)
+      {
+      }
+   }
+   
+   if(m_shutThread.joinable())
+   {
+      try
+      {
+         m_shutThread.join(); //this will throw if it was already joined
+      }
+      catch(...)
+      {
+      }
+   }
    return 0;
 }
 
@@ -380,22 +497,51 @@ int dssShutter<derivedT>::open()
    int startts = m_triggerState;
    
    derived().sendNewProperty (m_indiP_triggerChannel, "target", (int) !m_triggerState);
+
+   double t0 = mx::get_curr_time();
+   while( m_sensorState != 1 )
+   {
+      mx::milliSleep( m_shutterWait );
+      if( (mx::get_curr_time() - t0)*1000 > m_shutterTimeout) break;
+   }
+
+   ///\todo need shutter log types
+   if(m_sensorState == 1)
+   {
+      derivedT::template log<text_log>("shutter open");
+      return 0;
+   }
+
+   if( m_triggerState == startts )
+   {
+      return derivedT::template log<software_error,-1>({__FILE__, __LINE__, "shutter trigger did not change state"});
+   }
    
-   //--invert
+   //If here, shutter is not open, and trigger did flip, so it's a starting state issue.
+   //So we try again.
+
+   derived().sendNewProperty (m_indiP_triggerChannel, "target", (int) !m_triggerState);
    
-   //--wait for state change checking frequently
+   t0 = mx::get_curr_time();
+   while( m_sensorState != 1 )
+   {
+      mx::milliSleep( m_shutterWait );
+      if( (mx::get_curr_time() - t0)*1000 > m_shutterTimeout) break;
+   }
    
-   //if(startss) return; //and log 
+   ///\todo need shutter log types
+   if(m_sensorState == 1)
+   {
+      derivedT::template log<text_log>("shutter open");
+      return 0;
+   }
+
+   if( m_triggerState == !startts )
+   {
+      return derivedT::template log<software_error,-1>({__FILE__, __LINE__, "shutter trigger did not change state"});
+   }
    
-   //timeout: send original state
-   
-   //--wait for state change checking frequently
-   
-   //if(startss) return; //and log 
-   
-   //timeout: failed
-   
-   return 0;
+   return derivedT::template log<software_error,-1>({__FILE__, __LINE__, "shutter failed to open"});
 }
 
 template<class derivedT>
@@ -405,28 +551,123 @@ int dssShutter<derivedT>::shut()
    
    int startss = m_sensorState;
    
-   if(!startss) return 0; //Already shut
+   if(!startss) return 0; //already shut
    
    //First try:
    int startts = m_triggerState;
    
    derived().sendNewProperty (m_indiP_triggerChannel, "target", (int) !m_triggerState);
    
-   //--invert
+   double t0 = mx::get_curr_time();
+   while( m_sensorState != 0 )
+   {
+      mx::milliSleep( m_shutterWait );
+      if( (mx::get_curr_time() - t0)*1000 > m_shutterTimeout) break;
+   }
    
-   //--wait for state change checking frequently
+   ///\todo need shutter log types
+   if(m_sensorState == 0)
+   {
+      derivedT::template log<text_log>("shutter shut");
+      return 0;
+   }
+
+   if( m_triggerState == startts )
+   {
+      return derivedT::template log<software_error,-1>({__FILE__, __LINE__, "shutter trigger did not change state"});
+   }
    
-   //if(startss) return; //and log 
+
+   //If here, shutter is not open, and trigger did flip, so it's a starting state issue.
+   //So we try again.
    
-   //timeout: send original state
+   derived().sendNewProperty (m_indiP_triggerChannel, "target", (int) !m_triggerState);
    
-   //--wait for state change checking frequently
+   t0 = mx::get_curr_time();
+   while( m_sensorState != 0 )
+   {
+      mx::milliSleep( m_shutterWait );
+      if( (mx::get_curr_time() - t0)*1000 > m_shutterTimeout) break;
+   }
    
-   //if(startss) return; //and log 
+   ///\todo need shutter log types
+   if(m_sensorState == 0)
+   {
+      derivedT::template log<text_log>("shutter shut");
+      return 0;
+   }
+
+   if( m_triggerState == !startts )
+   {
+      return derivedT::template log<software_error,-1>({__FILE__, __LINE__, "shutter trigger did not change state"});
+   }
    
-   //timeout: failed
+   return derivedT::template log<software_error,-1>({__FILE__, __LINE__, "shutter failed to shut"});
    
-   return 0;
+
+}
+
+template<class derivedT>
+void dssShutter<derivedT>::openThreadStart( dssShutter * d )
+{
+   d->openThreadExec();
+}
+
+template<class derivedT>
+void dssShutter<derivedT>::openThreadExec( )
+{
+   while( m_openThreadInit == true && derived().shutdown() == 0)
+   {
+      sleep(1);
+   }
+   
+   while(derived().shutdown() == 0)
+   {
+      if( m_doOpen )
+      {
+         if(open() < 0)
+         {
+            derivedT::template log<software_error>({__FILE__,__LINE__});
+         }
+         m_doOpen = false;
+      }
+      
+      sleep(1);
+
+   }
+   
+   return;
+}
+
+template<class derivedT>
+void dssShutter<derivedT>::shutThreadStart( dssShutter * d )
+{
+   d->shutThreadExec();
+}
+
+template<class derivedT>
+void dssShutter<derivedT>::shutThreadExec( )
+{
+   while( m_shutThreadInit == true && derived().shutdown() == 0)
+   {
+      sleep(1);
+   }
+   
+   while(derived().shutdown() == 0)
+   {
+      if( m_doShut )
+      {
+         if(shut() < 0)
+         {
+            derivedT::template log<software_error>({__FILE__,__LINE__});
+         }
+         m_doShut = false;
+      }
+      
+      sleep(1);
+   }
+   
+   return;
 }
 
 template<class derivedT>
@@ -451,7 +692,7 @@ int dssShutter<derivedT>::updateINDI()
    if(m_sensorState == 0)
    {
       indi::updateIfChanged(m_indiP_state, "current", std::string("SHUT"), derived().m_indiDriver);
-      //indi::updateIfChanged(m_indiP_state, "target", std::string(""), derived().m_indiDriver);
+      if(m_indiP_state["target"].get<std::string>() == "SHUT") indi::updateIfChanged(m_indiP_state, "target", std::string(""), derived().m_indiDriver);
    
       return 0;
    }
@@ -459,7 +700,7 @@ int dssShutter<derivedT>::updateINDI()
    if(m_sensorState == 1)
    {
       indi::updateIfChanged(m_indiP_state, "current", std::string("OPEN"), derived().m_indiDriver);
-      //indi::updateIfChanged(m_indiP_state, "target", std::string(""), derived().m_indiDriver);
+      if(m_indiP_state["target"].get<std::string>() == "OPEN") indi::updateIfChanged(m_indiP_state, "target", std::string(""), derived().m_indiDriver);
    
       return 0;
    }
@@ -479,8 +720,6 @@ template<class derivedT>
 int dssShutter<derivedT>::setCallBack_powerChannel( const pcf::IndiProperty &ipRecv )
 {
    std::string ps;
-
-   std::cerr << "In shutter power callback\n";
    
    if(ipRecv.getName() != m_indiP_powerChannel.getName()) return 0;
    
@@ -562,8 +801,6 @@ int dssShutter<derivedT>::setCallBack_triggerChannel( const pcf::IndiProperty &i
    
    int ts = ipRecv["current"].get<int>(); 
 
-   std::cerr << "\n*************\ntrigger: " << ts << "\n*****************\n";
-   
    if(ts == 1)
    {
       m_triggerState = 1;
@@ -615,8 +852,23 @@ int dssShutter<derivedT>::newCallBack_state( const pcf::IndiProperty &ipRecv )
          indi::updateIfChanged(m_indiP_state, "target", target, derived().m_indiDriver);
       }
       
-      if(target == "OPEN") return open();
-      if(target == "SHUT") return shut();
+      if(target == "OPEN") 
+      {
+         m_doOpen = true;
+         
+         pthread_kill(m_openThread.native_handle(), SIGUSR1);
+         
+         return 0;
+      }
+      
+      if(target == "SHUT")
+      {
+         m_doShut = true;
+         
+         pthread_kill(m_shutThread.native_handle(), SIGUSR1);
+         
+         return 0;
+      }
       
       return -1; //never get here
    }

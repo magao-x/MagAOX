@@ -11,6 +11,7 @@ local/
 **/tests/*.binlog
 **/.*~
 **/*.stash
+**/*-swp
 
 **/bin/
 **/moc/
@@ -62,7 +63,6 @@ apps/picamCtrl/picamCtrl
 
 apps/xt1121Ctrl/xt1121Ctrl                                                                                                                                                                    
 apps/xt1121DCDU/xt1121DCDU 
-
 
 utils/logdump/logdump
 utils/cursesINDI/cursesINDI

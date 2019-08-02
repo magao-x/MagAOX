@@ -87,15 +87,27 @@ public:
    /// Implementation of the FSM for zaberLowLevel.
    virtual int appLogic();
 
+   /// Implementation of the on-power-off FSM logic
+   virtual int onPowerOff();
+
+   /// Implementation of the while-powered-off FSM
+   virtual int whilePowerOff();
+   
    /// Do any needed shutdown tasks.  Currently nothing in this app.
    virtual int appShutdown();
 
 protected:
+   ///Current state of the stage.  
+   pcf::IndiProperty m_indiP_curr_state;
+   
    ///Current raw position of the stage.  
    pcf::IndiProperty m_indiP_curr_pos;
    
    ///Target raw position of the stage.  
    pcf::IndiProperty m_indiP_tgt_pos;
+      
+   ///Target relative position of the stage.  
+   pcf::IndiProperty m_indiP_tgt_relpos;
    
    ///Command a stage to home.  
    pcf::IndiProperty m_indiP_req_home;
@@ -108,6 +120,7 @@ protected:
    
 public:
    INDI_NEWCALLBACK_DECL(zaberLowLevel, m_indiP_tgt_pos);
+   INDI_NEWCALLBACK_DECL(zaberLowLevel, m_indiP_tgt_relpos);
    INDI_NEWCALLBACK_DECL(zaberLowLevel, m_indiP_req_home);
    INDI_NEWCALLBACK_DECL(zaberLowLevel, m_indiP_req_halt);
    INDI_NEWCALLBACK_DECL(zaberLowLevel, m_indiP_req_ehalt);
@@ -116,6 +129,8 @@ public:
 
 zaberLowLevel::zaberLowLevel() : MagAOXApp(MAGAOX_CURRENT_SHA1, MAGAOX_REPO_MODIFIED)
 {
+   m_powerMgtEnabled = true;
+   
    return;
 }
 
@@ -408,6 +423,11 @@ int zaberLowLevel::appStartup()
       return -1;
    }
    
+   REG_INDI_NEWPROP_NOCB(m_indiP_curr_state, "curr_state", pcf::IndiProperty::Text);
+   for(size_t n=0; n< m_stages.size(); ++n)
+   {
+      m_indiP_curr_state.add (pcf::IndiElement(m_stages[n].name()));
+   }
    
    REG_INDI_NEWPROP_NOCB(m_indiP_curr_pos, "curr_pos", pcf::IndiProperty::Number);
    for(size_t n=0; n< m_stages.size(); ++n)
@@ -419,6 +439,12 @@ int zaberLowLevel::appStartup()
    for(size_t n=0; n< m_stages.size(); ++n)
    {
       m_indiP_tgt_pos.add (pcf::IndiElement(m_stages[n].name()));
+   }
+   
+   REG_INDI_NEWPROP(m_indiP_tgt_relpos, "tgt_relpos", pcf::IndiProperty::Number);
+   for(size_t n=0; n< m_stages.size(); ++n)
+   {
+      m_indiP_tgt_relpos.add (pcf::IndiElement(m_stages[n].name()));
    }
    
    REG_INDI_NEWPROP(m_indiP_req_home, "req_home", pcf::IndiProperty::Number);
@@ -499,6 +525,11 @@ int zaberLowLevel::appLogic()
 
    }
 
+   if( state() == stateCodes::POWERON)
+   {
+      state(stateCodes::NOTCONNECTED);
+   }
+   
    if( state() == stateCodes::NOTCONNECTED )
    {
       std::lock_guard<std::mutex> guard(m_indiMutex);
@@ -521,16 +552,23 @@ int zaberLowLevel::appLogic()
       //Need to check for homing states, etc.
       state(stateCodes::READY);
       
-   } //mutex is given up at this point
+   }
 
    if( state() == stateCodes::READY )
    {
-      std::lock_guard<std::mutex> guard(m_indiMutex);
       
       //Here we check complete stage state.
       for(size_t i=0; i < m_stages.size();++i)
       {
+         std::lock_guard<std::mutex> guard(m_indiMutex); //Inside loop so INDI requests can steal it
+
          m_stages[i].updatePos(m_port);
+         updateIfChanged(m_indiP_curr_pos, m_stages[i].name(), m_stages[i].rawPos());
+         
+         
+         if(m_stages[i].deviceStatus() == 'B') updateIfChanged(m_indiP_curr_state, m_stages[i].name(), std::string("OPERATING"));
+         else if(m_stages[i].deviceStatus() == 'I') updateIfChanged(m_indiP_curr_state, m_stages[i].name(), std::string("READY"));
+         else  updateIfChanged(m_indiP_curr_state, m_stages[i].name(), std::string("NODEVICE"));
          
          if(m_stages[i].warningState() == true)
          {
@@ -584,6 +622,33 @@ int zaberLowLevel::appLogic()
    return 0;
 }
 
+inline
+int zaberLowLevel::onPowerOff()
+{
+   std::lock_guard<std::mutex> lock(m_indiMutex);
+   
+   for(size_t i=0; i < m_stages.size();++i)
+   {
+
+      updateIfChanged(m_indiP_curr_pos, m_stages[i].name(), -1);
+      updateIfChanged(m_indiP_tgt_pos, m_stages[i].name(), std::string(""));
+      updateIfChanged(m_indiP_tgt_relpos, m_stages[i].name(), std::string(""));
+      
+      updateIfChanged(m_indiP_curr_state, m_stages[i].name(), std::string("POWEROFF"));
+      
+         
+   }
+   return 0;
+}
+
+inline
+int zaberLowLevel::whilePowerOff()
+{
+
+   return 0;
+}
+
+inline
 int zaberLowLevel::appShutdown()
 {
    return 0;
@@ -598,7 +663,29 @@ INDI_NEWCALLBACK_DEFN(zaberLowLevel, m_indiP_tgt_pos)(const pcf::IndiProperty &i
          if( ipRecv.find(m_stages[n].name()) )
          {
             long tgt = ipRecv[m_stages[n].name()].get<long>();
-            if(tgt > 0)
+            if(tgt >= 0)
+            {
+               std::lock_guard<std::mutex> guard(m_indiMutex);
+               std::cerr << "moving " << m_stages[n].name() << " to " << std::to_string(tgt) << "\n";
+               return m_stages[n].moveAbs(m_port, tgt);
+            }
+         }
+      }
+   }
+   return 0;
+}
+
+INDI_NEWCALLBACK_DEFN(zaberLowLevel, m_indiP_tgt_relpos)(const pcf::IndiProperty &ipRecv)
+{
+   if (ipRecv.getName() == m_indiP_tgt_relpos.getName())
+   {  
+      for(size_t n=0; n < m_stages.size(); ++n)
+      {
+         if( ipRecv.find(m_stages[n].name()) )
+         {
+            long tgt = ipRecv[m_stages[n].name()].get<long>();
+            tgt += m_stages[n].rawPos();
+            if(tgt >= 0)
             {
                std::lock_guard<std::mutex> guard(m_indiMutex);
                std::cerr << "moving " << m_stages[n].name() << " to " << std::to_string(tgt) << "\n";
