@@ -219,6 +219,11 @@ int  indiDriver<parentT>::sendNewProperty( const pcf::IndiProperty &ipRecv )
    {
       m_outGoing->sendNewProperty(ipRecv);
    }
+   catch(std::exception & e)
+   {
+      ///\todo need to log and return -1 here too.  Should look for other places to do this in codebase.
+      std::cerr << e.what() << "\n";
+   }
    catch(...)
    {
       parentT::template log<logger::software_error>({__FILE__, __LINE__, "Exception from IndiClient::sendNewProperty"});

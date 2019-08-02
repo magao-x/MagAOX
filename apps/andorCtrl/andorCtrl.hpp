@@ -577,6 +577,9 @@ int andorCtrl::configureAcquisition()
     //Initialize Shutter to SHUT
     SetShutter(1,2,50,50);
     
+    SetNumberAccumulations(1);
+    SetFrameTransferMode(1);
+    
     // Set CameraLink
     SetCameraLinkMode(1);
     

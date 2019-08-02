@@ -45,11 +45,14 @@ namespace app
   * \ingroup ocam2KCtrl
   * 
   */
-class ocam2KCtrl : public MagAOXApp<>, /*public dev::ioDevice,*/ public dev::frameGrabber<ocam2KCtrl>, public dev::edtCamera<ocam2KCtrl>
+class ocam2KCtrl : public MagAOXApp<>, /*public dev::ioDevice,*/ public dev::frameGrabber<ocam2KCtrl>, public dev::edtCamera<ocam2KCtrl>, public dev::dssShutter<ocam2KCtrl>
 {
 
    friend class dev::frameGrabber<ocam2KCtrl>;
    friend class dev::edtCamera<ocam2KCtrl>;
+   friend class dev::dssShutter<ocam2KCtrl>;
+   
+   typedef MagAOXApp<> MagAOXAppT;
    
 protected:
 
@@ -226,9 +229,8 @@ ocam2KCtrl::~ocam2KCtrl() noexcept
 inline
 void ocam2KCtrl::setupConfig()
 {
-   dev::edtCamera<ocam2KCtrl>::setupConfig(config);
-   dev::frameGrabber<ocam2KCtrl>::setupConfig(config);
- 
+   
+   
    config.add("camera.powerOnWait", "", "camera.powerOnWait", argType::Required, "camera", "powerOnWait", false, "int", "Time after power-on to begin attempting connections [sec].  Default is 10 sec.");
    
    config.add("camera.startupTemp", "", "camera.startupTemp", argType::Required, "camera", "startupTemp", false, "float", "The temperature setpoint to set after a power-on [C].  Default is 20 C.");
@@ -237,6 +239,9 @@ void ocam2KCtrl::setupConfig()
    
    config.add("camera.maxEMGain", "", "camera.maxEMGain", argType::Required, "camera", "maxEMGain", false, "unsigned", "The maximum EM gain which can be set by  user. Default is 600.  Min is 1, max is 600.");
  
+   dev::edtCamera<ocam2KCtrl>::setupConfig(config);
+   dev::frameGrabber<ocam2KCtrl>::setupConfig(config);
+   dev::dssShutter<ocam2KCtrl>::setupConfig(config);
 }
 
 
@@ -262,7 +267,7 @@ void ocam2KCtrl::loadConfig()
    }
    
    dev::frameGrabber<ocam2KCtrl>::loadConfig(config);
-   
+   dev::dssShutter<ocam2KCtrl>::loadConfig(config);
 }
 
 inline
@@ -311,6 +316,10 @@ int ocam2KCtrl::appStartup()
       return log<software_critical,-1>({__FILE__,__LINE__});
    }
    
+   if(dev::dssShutter<ocam2KCtrl>::appStartup() < 0)
+   {
+      return log<software_critical,-1>({__FILE__,__LINE__});
+   }
    
    return 0;
 
@@ -329,6 +338,12 @@ int ocam2KCtrl::appLogic()
    
    //and run edtCamera's appLogic
    if(dev::edtCamera<ocam2KCtrl>::appLogic() < 0)
+   {
+      return log<software_error, -1>({__FILE__, __LINE__});
+   }
+   
+   //and run dssShutter's appLogic
+   if(dev::dssShutter<ocam2KCtrl>::appLogic() < 0)
    {
       return log<software_error, -1>({__FILE__, __LINE__});
    }
@@ -353,7 +368,7 @@ int ocam2KCtrl::appLogic()
       std::string response;
 
       //Might have gotten here because of a power off.
-      if(m_powerState == 0) return 0;
+      if(MagAOXAppT::m_powerState == 0) return 0;
       
       int ret = pdvSerialWriteRead( response, "fps"); //m_pdv, "fps", m_readTimeout);
       if( ret == 0)
@@ -399,7 +414,7 @@ int ocam2KCtrl::appLogic()
       
       if(getTemps() < 0)
       {
-         if(m_powerState == 0) return 0;
+         if(MagAOXAppT::m_powerState == 0) return 0;
          
          state(stateCodes::ERROR);
          return 0;
@@ -407,7 +422,7 @@ int ocam2KCtrl::appLogic()
 
       if(getFPS() < 0)
       {
-         if(m_powerState == 0) return 0;
+         if(MagAOXAppT::m_powerState == 0) return 0;
          
          state(stateCodes::ERROR);
          return 0;
@@ -415,13 +430,27 @@ int ocam2KCtrl::appLogic()
       
       if(getEMGain () < 0)
       {
-         if(m_powerState == 0) return 0;
+         if(MagAOXAppT::m_powerState == 0) return 0;
          
          state(stateCodes::ERROR);
          return 0;
       }
       
       if(frameGrabber<ocam2KCtrl>::updateINDI() < 0)
+      {
+         log<software_error>({__FILE__, __LINE__});
+         state(stateCodes::ERROR);
+         return 0;
+      }
+      
+      if(edtCamera<ocam2KCtrl>::updateINDI() < 0)
+      {
+         log<software_error>({__FILE__, __LINE__});
+         state(stateCodes::ERROR);
+         return 0;
+      }
+      
+      if(dssShutter<ocam2KCtrl>::updateINDI() < 0)
       {
          log<software_error>({__FILE__, __LINE__});
          state(stateCodes::ERROR);
@@ -460,21 +489,34 @@ int ocam2KCtrl::onPowerOff()
    updateIfChanged(m_indiP_emGain, "current", 0);
    updateIfChanged(m_indiP_emGain, "target", 0);
    
+   ///\todo error check these base class fxns.
+   edtCamera<ocam2KCtrl>::onPowerOff();
    
-   return edtCamera<ocam2KCtrl>::onPowerOff();
+   dssShutter<ocam2KCtrl>::onPowerOff();
+   
+   return 0;
 }
 
 inline
 int ocam2KCtrl::whilePowerOff()
 {
-   return edtCamera<ocam2KCtrl>::whilePowerOff();;
+   std::lock_guard<std::mutex> lock(m_indiMutex);
+   
+   ///\todo error check these base class fxns.
+   edtCamera<ocam2KCtrl>::whilePowerOff();
+   
+   dssShutter<ocam2KCtrl>::whilePowerOff();
+   
+   return 0;
 }
 
 inline
 int ocam2KCtrl::appShutdown()
 {
+   ///\todo error check these base class fxns.
    dev::edtCamera<ocam2KCtrl>::appShutdown();
    dev::frameGrabber<ocam2KCtrl>::appShutdown();
+   dev::dssShutter<ocam2KCtrl>::appShutdown();
    
    return 0;
 }
@@ -491,7 +533,7 @@ int ocam2KCtrl::getTemps()
 
       if(parseTemps( temps, response ) < 0) 
       {
-         if(m_powerState == 0) return -1;
+         if(MagAOXAppT::m_powerState == 0) return -1;
          return log<software_error, -1>({__FILE__, __LINE__, "Temp. parse error"});
       }
       
@@ -546,7 +588,7 @@ int ocam2KCtrl::getFPS()
       float fps;
       if(parseFPS( fps, response ) < 0) 
       {
-         if(m_powerState == 0) return -1;
+         if(MagAOXAppT::m_powerState == 0) return -1;
          return log<software_error, -1>({__FILE__, __LINE__, "fps parse error"});
       }
       m_fpsSet = fps;
@@ -593,7 +635,7 @@ int ocam2KCtrl::getEMGain()
       unsigned emGain;
       if(parseEMGain( emGain, response ) < 0) 
       {
-         if(m_powerState == 0) return -1;
+         if(MagAOXAppT::m_powerState == 0) return -1;
          return log<software_error, -1>({__FILE__, __LINE__, "EM Gain parse error"});
       }
       m_emGain = emGain;
