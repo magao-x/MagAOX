@@ -50,7 +50,7 @@ class andorCtrl : public MagAOXApp<>, public dev::edtCamera<andorCtrl>, public d
 {
 
    friend class dev::frameGrabber<andorCtrl>;
-   
+   friend class dev::edtCamera<andorCtrl>;
    
 protected:
 
@@ -126,6 +126,10 @@ public:
    
    int setEMGain( unsigned emg );
    
+   int getShutter();
+   
+   int setShutter( unsigned os);
+   
    int configureAcquisition();
    int startAcquisition();
    int acquireAndCheckValid();
@@ -141,12 +145,15 @@ protected:
    pcf::IndiProperty m_indiP_fps;
    pcf::IndiProperty m_indiP_emGain;
 
+   pcf::IndiProperty m_indiP_shutter;
+   
 public:
    INDI_NEWCALLBACK_DECL(andorCtrl, m_indiP_ccdtemp);
    INDI_NEWCALLBACK_DECL(andorCtrl, m_indiP_mode);
    INDI_NEWCALLBACK_DECL(andorCtrl, m_indiP_fps);
    INDI_NEWCALLBACK_DECL(andorCtrl, m_indiP_emGain);
 
+   INDI_NEWCALLBACK_DECL(andorCtrl, m_indiP_shutter);
 };
 
 inline
@@ -220,9 +227,7 @@ int andorCtrl::appStartup()
    m_indiP_ccdtemp.add (pcf::IndiElement("target"));
    
 
-   REG_INDI_NEWPROP(m_indiP_mode, "mode", pcf::IndiProperty::Text);
-   m_indiP_mode.add (pcf::IndiElement("current"));
-   m_indiP_mode.add (pcf::IndiElement("target"));
+   
 
    REG_INDI_NEWPROP(m_indiP_fps, "fps", pcf::IndiProperty::Number);
    m_indiP_fps.add (pcf::IndiElement("current"));
@@ -234,6 +239,11 @@ int andorCtrl::appStartup()
    m_indiP_emGain.add (pcf::IndiElement("current"));
    m_indiP_emGain["current"].set(m_emGain);
    m_indiP_emGain.add (pcf::IndiElement("target"));
+   
+   REG_INDI_NEWPROP(m_indiP_shutter, "shutter", pcf::IndiProperty::Number);
+   m_indiP_shutter.add (pcf::IndiElement("current"));
+   m_indiP_shutter["current"].set("UNKNOWN");
+   m_indiP_shutter.add (pcf::IndiElement("target"));
    
 //    if(pdvConfig(m_startupMode) < 0) 
 //    {
@@ -533,6 +543,21 @@ int andorCtrl::setEMGain( unsigned emg )
 }
 
 inline
+int andorCtrl::setShutter( unsigned os )
+{
+   std::cerr << "\n*****************\n in setShutter " << os << "\n*********************\n";
+   
+   AbortAcquisition();
+   
+   if(os == 0) SetShutter(1,2,50,50);
+   else SetShutter(1,1,50,50);
+   
+   StartAcquisition();
+   
+   return 0;
+}
+
+inline
 int andorCtrl::configureAcquisition()
 {
    //lock mutex
@@ -576,6 +601,9 @@ int andorCtrl::configureAcquisition()
    
     //Initialize Shutter to SHUT
     SetShutter(1,2,50,50);
+    
+    SetNumberAccumulations(1);
+    SetFrameTransferMode(1);
     
     // Set CameraLink
     SetCameraLinkMode(1);
@@ -633,7 +661,7 @@ int andorCtrl::reconfig()
    //lock mutex
    std::unique_lock<std::mutex> lock(m_indiMutex);
    
-   return edtCamera<ocam2KCtrl>::pdvReconfig();
+   return edtCamera<andorCtrl>::pdvReconfig();
 }     
 
 INDI_NEWCALLBACK_DEFN(andorCtrl, m_indiP_ccdtemp)(const pcf::IndiProperty &ipRecv)
@@ -775,6 +803,47 @@ INDI_NEWCALLBACK_DEFN(andorCtrl, m_indiP_emGain)(const pcf::IndiProperty &ipRecv
       updateIfChanged(m_indiP_emGain, "target", target);
       
       return setEMGain(target);
+      
+   }
+   return -1;
+}
+
+INDI_NEWCALLBACK_DEFN(andorCtrl, m_indiP_shutter)(const pcf::IndiProperty &ipRecv)
+{
+   if (ipRecv.getName() == m_indiP_shutter.getName())
+   {
+      std::string current, target;
+
+      if(ipRecv.find("current"))
+      {
+         current = ipRecv["current"].get<std::string>();
+      }
+
+      if(ipRecv.find("target"))
+      {
+         target = ipRecv["target"].get<std::string>();
+      }
+      
+      if(target == "") target = current;
+      
+      target = mx::ioutils::toUpper(target);
+      
+      if(target != "OPEN" && target != "SHUT")
+      {
+         return log<software_error,-1>({__FILE__, __LINE__, "invalid shutter request"});
+      }
+      else
+      {
+
+         //Lock the mutex, waiting if necessary
+         std::unique_lock<std::mutex> lock(m_indiMutex);
+
+         updateIfChanged(m_indiP_shutter, "target", target);
+      }
+      
+      int os = 0;
+      if(target == "OPEN") os = 1;
+      return setShutter(os);
       
    }
    return -1;
