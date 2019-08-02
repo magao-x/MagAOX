@@ -90,20 +90,21 @@ int loadCameraConfig( cameraConfigMap & ccmap,
 }
 
 
-/** MagAO-X EDT framegrabber interface
-  *
+/// MagAO-X EDT framegrabber interface
+/** Implements an interface to the EDT PDV SDK
   * 
-  * The derived class `derivedT` must expose the following interface
-  * \todo update this
-  * \code 
-  * \endcode  
-  * 
-  * Each of the above functions should return 0 on success, and -1 on an error. 
-  * 
+  * The derived class `derivedT` must be a MagAOXApp\<true\>, and should declare this class a friend like so: 
+   \code
+    friend class dev::dssShutter<derivedT>;
+   \endcode
+  *
+  * In addition, `derivedT` should be `dev::frameGrabber` or equivalent, with an `m_reconfig` member, and calls
+  * to this class's `pdvStartAcquisition`, `pdvAcquire`, and `pdvReconfig` in the relevant `dev::frameGrabber`
+  * implementation functions.
   *
   *
-  * Calls to this class's `setupConfig`, `loadConfig`, `appStartup`, `appLogic` and `appShutdown`
-  * functions must be placed in the derived class's functions of the same name.
+  * Calls to this class's `setupConfig`, `loadConfig`, `appStartup`, `appLogic`, `appShutdown`
+  * `onPowerOff`, and `whilePowerOff`,  must be placed in the derived class's functions of the same name.
   *
   * \ingroup appdev
   */
@@ -130,13 +131,13 @@ protected:
    
    u_char * m_image_p {nullptr}; ///< The image data grabbed
 
-   std::string m_modeName;
+   std::string m_modeName; ///< The current mode name
    
-   std::string m_nextMode;
+   std::string m_nextMode; ///< The mode to be set by the next reconfiguration
    
-   int m_raw_height {0};
-   int m_raw_width {0};
-   int m_raw_depth {0};
+   int m_raw_height {0}; ///< The height of the frame, according to the framegrabber
+   int m_raw_width {0}; ///< The width of the frame, according to the framegrabber
+   int m_raw_depth {0}; ///< The bit-depth of the frame, according to the framegrabber
    std::string m_cameraType; ///< The camera type according to the framegrabber
    
 public:
@@ -144,12 +145,13 @@ public:
    ///Destructor, destroys the PdvDev structure
    ~edtCamera() noexcept;
    
-   int pdvSerialWriteRead( std::string & response,
-                           const std::string & command
+   /// Send a serial command over cameralink and retrieve the response
+   int pdvSerialWriteRead( std::string & response,     ///< [out] the response to the command from the device
+                           const std::string & command ///< [in] the command to send to the device
                          );
 
-   int pdvConfig(std::string & cfgname);
-
+   /// Configure the EDT framegrabber
+   int pdvConfig( std::string & cfgname /**< [in] The configuration name for the mode to set */);
 
    /// Setup the configuration system
    /**
@@ -184,8 +186,10 @@ public:
      */
    int appStartup();
 
-   /// Checks the edtCamera thread
-   /** 
+   /// Application logic 
+   /** Checks the edtCamera thread
+     * 
+     * This should be called from the derived's appLogic() as in
      * \code
        edtCamera<derivedT>::appLogic();
        \endcode
@@ -196,12 +200,35 @@ public:
      */
    int appLogic();
 
+   /// Actions on power off
+   /**
+     * This should be called from the derived's onPowerOff() as in
+     * \code
+       edtCamera<derivedT>::onPowerOff();
+       \endcode
+     * with appropriate error checking.
+     * 
+     * \returns 0 on success
+     * \returns -1 on error, which is logged.
+     */
    int onPowerOff();
 
+   /// Actions while powered off
+   /**
+     * This should be called from the derived's whilePowerOff() as in
+     * \code
+       edtCamera<derivedT>::whilePowerOff();
+       \endcode
+     * with appropriate error checking.
+     * 
+     * \returns 0 on success
+     * \returns -1 on error, which is logged.
+     */
    int whilePowerOff();
    
-   /// Shuts down the edtCamera thread
-   /** 
+   /// Application the shutdown 
+   /** Shuts down the edtCamera thread
+     * 
      * \code
        edtCamera<derivedT>::appShutdown();
        \endcode
@@ -211,6 +238,7 @@ public:
      * \returns -1 on error, which is logged.
      */
    int appShutdown();
+   
    
    int pdvStartAcquisition();
    
@@ -355,7 +383,6 @@ int edtCamera<derivedT>::pdvConfig(std::string & modeName)
    
    if(m_cameraModes.count(modeName) != 1)
    {
-      ///\todo investigate if this static function is needed, or if we can use derived().log
       return derivedT::template log<text_log, -1>("No mode named " + modeName + " found.", logPrio::LOG_ERROR);
    }
    
@@ -623,6 +650,7 @@ int edtCamera<derivedT>::newCallBack_mode( const pcf::IndiProperty &ipRecv )
          return derivedT::template log<text_log, -1>("Unrecognized mode requested: " + target, logPrio::LOG_ERROR);
       }
       
+      ///\todo should lock mutex here
       indi::updateIfChanged(m_indiP_mode, "current", target, derived().m_indiDriver);
       
       //Now signal the f.g. thread to reconfigure

@@ -17,23 +17,19 @@ namespace app
 namespace dev 
 {
    
-
-
-/** MagAO-X Uniblitz DSS Shutter interface
+/// MagAO-X Uniblitz DSS Shutter interface
+/**
+  * 
+  * The derived class `derivedT` must be a MagAOXApp\<true\>, and should declare this class a friend like so: 
+   \code
+    friend class dev::dssShutter<derivedT>;
+   \endcode
+  *
+  *
+  * Calls to this class's `setupConfig`, `loadConfig`, `appStartup`, `appLogic`, `appShutdown`
+  * `onPowerOff`, `whilePowerOff`, functions must be placed in the derived class's functions of the same name.
   *
   * 
-  * The derived class `derivedT` must expose the following interface
-  * \todo update this
-  * \code 
-  * \endcode  
-  * 
-  * Each of the above functions should return 0 on success, and -1 on an error. 
-  * 
-  *
-  *
-  * Calls to this class's `setupConfig`, `loadConfig`, `appStartup`, `appLogic` and `appShutdown`
-  * functions must be placed in the derived class's functions of the same name.
-  *
   * \ingroup appdev
   */
 template<class derivedT>
@@ -45,24 +41,23 @@ protected:
     * @{
     */
 
-   std::string m_powerDevice;
-   std::string m_powerChannel;
+   std::string m_powerDevice;    ///< The device controlling this shutter's power
+   std::string m_powerChannel;   ///< The channel controlling this shutter's power
    
-   std::string m_dioDevice;
-   std::string m_sensorChannel;
-   std::string m_triggerChannel;
+   std::string m_dioDevice;      ///< The device controlling this shutter's digital I/O.
+   std::string m_sensorChannel;  ///< The channel reading this shutter's sensor
+   std::string m_triggerChannel; ///< The channel sending this shutter's trigger
       
    ///@}
    
-   int m_powerState {-1};
+   int m_powerState {-1};  ///< The current power state, -1 is unknown, 0 is off, 1 is on.
    
-   int m_sensorState {-1};
-   
-   int m_triggerState {-1};
+   int m_sensorState {-1}; ///< The current sensor state, -1 is unknown, 0 is shut, 1 is open.
+    
+   int m_triggerState {-1}; ///< The current trigger state.  -1 is unknown, 0 is low, 1 is high.
    
 public:
 
-   
    
    /// Setup the configuration system
    /**
@@ -97,7 +92,7 @@ public:
      */
    int appStartup();
 
-   /// Applogic
+   /// application logic
    /** This should be called in `derivedT::appLogic` as
      * \code
        dssShutter<derivedT>::appLogic();
@@ -109,14 +104,56 @@ public:
      */
    int appLogic();
 
+   /// applogic shutdown
+   /** This should be called in `derivedT::appShutdown` as
+     * \code
+       dssShutter<derivedT>::appShutdown();
+       \endcode
+     * with appropriate error checking.
+     * 
+     * \returns 0 on success
+     * \returns -1 on error, which is logged.
+     */
    int appShutdown();
    
+   /// Actions on power off
+   /** This should be called in `derivedT::appPowerOff` as
+     * \code
+       dssShutter<derivedT>::appPowerOff();
+       \endcode
+     * with appropriate error checking.
+     * 
+     * \returns 0 on success
+     * \returns -1 on error, which is logged.
+     */
    int onPowerOff();
 
+   /// Actions while powered off
+   /** This should be called in `derivedT::whilePowerOff` as
+     * \code
+       dssShutter<derivedT>::whilePowerOff();
+       \endcode
+     * with appropriate error checking.
+     * 
+     * \returns 0 on success
+     * \returns -1 on error, which is logged.
+     */
    int whilePowerOff();
    
+   /// Open the shutter
+   /** Do not lock the mutex before calling this.
+     * 
+     * \returns 0 on success
+     * \returns -1 on error
+     */ 
    int open();
    
+   /// Shut the shutter
+   /** Do not lock the mutex before calling this.
+     * 
+     * \returns 0 on success
+     * \returns -1 on error
+     */
    int shut();
    
 protected:
@@ -127,11 +164,11 @@ protected:
 protected:
    //declare our properties
    
-   pcf::IndiProperty m_indiP_powerChannel;
-   pcf::IndiProperty m_indiP_sensorChannel;
-   pcf::IndiProperty m_indiP_triggerChannel;
+   pcf::IndiProperty m_indiP_powerChannel; ///< Property used to monitor the shutter's power state
+   pcf::IndiProperty m_indiP_sensorChannel; ///< Property used to monitor the shutter's hall sensor
+   pcf::IndiProperty m_indiP_triggerChannel; ///< Property used to monitor and set the shutter's trigger
    
-   pcf::IndiProperty m_indiP_state; ///< Property used to report the current shutter state
+   pcf::IndiProperty m_indiP_state; ///< Property used to report the current shutter state (unkown, off, shut, open)
    
    
    
@@ -217,6 +254,8 @@ public:
    ///@}
    
 private:
+   
+   /// Access the derived class.
    derivedT & derived()
    {
       return *static_cast<derivedT *>(this);
@@ -227,8 +266,8 @@ private:
 template<class derivedT>
 void dssShutter<derivedT>::setupConfig(mx::app::appConfigurator & config)
 {
-   config.add("shutter.powerDevice", "", "shutter.powerDevice", argType::Required, "shutter", "powerDevice", false, "string", "The device controlling this shutter's power.");
-   config.add("shutter.powerChannel", "", "shutter.powerChannel", argType::Required, "shutter", "powerChannel", false, "string", "The channel controlling this shutter's power.");
+   config.add("shutter.powerDevice", "", "shutter.powerDevice", argType::Required, "shutter", "powerDevice", false, "string", "The device controlling this shutter's power");
+   config.add("shutter.powerChannel", "", "shutter.powerChannel", argType::Required, "shutter", "powerChannel", false, "string", "The channel controlling this shutter's power");
    
    config.add("shutter.dioDevice", "", "shutter.dioDevice", argType::Required, "shutter", "dioDevice", false, "string", "The device controlling this shutter's digital I/O.");
    
