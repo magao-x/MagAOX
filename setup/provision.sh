@@ -14,6 +14,7 @@ if [[ -d /vagrant || $CI == true ]]; then
         DIR="/vagrant/setup"
         VAGRANT=true
         CI=false
+        yum install -y xorg-x11-xauth
     else
         VAGRANT=false
     fi

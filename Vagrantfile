@@ -9,4 +9,6 @@ Vagrant.configure("2") do |config|
   end
   config.vm.synced_folder ".", "/vagrant", type: "nfs"
   config.vm.provision "shell", path: "setup/provision.sh"
+  config.ssh.forward_agent = true
+  config.ssh.forward_x11 = true
 end
