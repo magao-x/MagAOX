@@ -114,16 +114,19 @@ else
         if [[ ! -e /opt/MagAOX/source/MagAOX ]]; then
             echo "Cloning new copy of MagAOX codebase"
             git clone $(dirname $DIR) /opt/MagAOX/source/MagAOX
+            cd /opt/MagAOX/source/MagAOX
+            # ensure upstream is set somewhere that isn't on the fs to avoid possibly pushing
+            # things and not having them go where we expect
+            git remote remove origin
+            git remote add origin https://github.com/magao-x/MagAOX.git
+            git branch -u origin/master master
+            log_success "In the future, you can re-run this script from /opt/MagAOX/source/MagAOX/setup"
+            log_info "(In fact, maybe delete $(dirname $DIR)?)"
+        else
+            git pull
         fi
-        cd /opt/MagAOX/source/MagAOX
-        git remote remove origin
-        git remote add origin https://github.com/magao-x/MagAOX.git
-        git fetch
-        git branch -u origin/master master
-        log_success "In the future, you can re-run this script from /opt/MagAOX/source/MagAOX/setup"
-        log_info "(In fact, maybe delete $(dirname $DIR)?)"
     else
-        log_info "Running from clone located at $DIR, nothing to do for cloning step"
+        log_info "Running from clone located at $(dirname $DIR), nothing to do for cloning step"
     fi
 fi
 # These last steps should work as whatever user is installing, provided
