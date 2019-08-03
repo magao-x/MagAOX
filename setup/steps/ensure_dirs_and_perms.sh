@@ -35,10 +35,9 @@ mkdir -pv /opt/MagAOX
 chown root:root /opt/MagAOX
 
 mkdir -pv /opt/MagAOX/bin
-chown -R root:magaox-dev /opt/MagAOX/bin
+chown -R root:root /opt/MagAOX/bin
 # n.b. using + instead of = so we don't clobber setuid binaries
-chmod -R u+rwX,g+rwX,o+rX /opt/MagAOX/bin
-setgid_all /opt/MagAOX/bin
+chmod u+rwX,g+rX,o+rX /opt/MagAOX/bin
 
 mkdir -pv /opt/MagAOX/calib
 chown -R root:magaox-dev /opt/MagAOX/calib
