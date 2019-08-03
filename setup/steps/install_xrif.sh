@@ -14,6 +14,7 @@ if [[ ! -d $XRIF_DIR ]]; then
     git clone https://github.com/jaredmales/xrif.git $XRIF_DIR
 fi
 cd $XRIF_DIR
+git config core.sharedRepository group
 git checkout $XRIF_COMMIT
 mkdir -p build
 cd build

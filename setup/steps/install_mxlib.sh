@@ -23,7 +23,7 @@ else
     echo "Cloned a new copy of mxlib"
     cd "$MXLIBROOT"
 fi
-
+git config core.sharedRepository group
 export MXMAKEFILE="$MXLIBROOT/mk/MxApp.mk"
 # Populate $MXLIBROOT/local/ with example makefiles:
 make setup

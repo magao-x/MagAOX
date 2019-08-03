@@ -15,6 +15,7 @@ function clone_or_update_and_cd() {
         git pull
         log_success "Updated /opt/MagAOX/$1"
     fi
+    git config core.sharedRepository group
     sudo chown -R :magaox-dev /opt/MagAOX/$1
     sudo chmod -R g=rwX /opt/MagAOX/$1
     # n.b. can't be recursive because g+s on files means something else

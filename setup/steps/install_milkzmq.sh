@@ -12,6 +12,7 @@ else
     cd ./milkzmq
     git fetch
 fi
+git config core.sharedRepository group
 git checkout $MILKZMQ_COMMIT
 make
 sudo make install

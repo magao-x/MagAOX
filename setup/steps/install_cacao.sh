@@ -17,6 +17,7 @@ fi
 if [[ ! -d ./cacao ]]; then
     git clone --recursive --branch dev https://github.com/magao-x/cacao.git cacao
     cd ./cacao
+    git config core.sharedRepository true
     git remote add upstream https://github.com/cacao-org/cacao.git
 else
     cd ./cacao

@@ -32,7 +32,7 @@ yum install -y \
     lm_sensors \
     hddtemp \
     readline-devel \
-    pkg-config \
+    pkgconfig \
     bison \
     flex \
     dialog \
