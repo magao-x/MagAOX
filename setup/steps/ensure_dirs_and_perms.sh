@@ -53,6 +53,8 @@ setgid_all /opt/MagAOX/config
 mkdir -pv /opt/MagAOX/drivers/fifos
 chown -R root:root /opt/MagAOX/drivers
 chmod -R u=rwX,g=rwX,o=rX /opt/MagAOX/drivers
+chown -R root:magaox /opt/MagAOX/drivers/fifos
+
 
 if [[ "$TARGET_ENV" == "vm" ]]; then
   REAL_LOGS_DIR=/opt/MagAOX/logs
@@ -84,7 +86,8 @@ chmod -R u=rwX,g=,o= /opt/MagAOX/secrets
 
 mkdir -pv /opt/MagAOX/source
 chown -R root:magaox-dev /opt/MagAOX/source
-chmod -R u=rwX,g=rwX,o=rX /opt/MagAOX/source
+# n.b. using + instead of = so we don't clobber setuid binaries
+chmod -R u+rwX,g+rwX,o+rX /opt/MagAOX/source
 setgid_all /opt/MagAOX/source
 
 mkdir -pv /opt/MagAOX/sys

@@ -15,12 +15,12 @@ else
 fi
 
 if [[ ! -d ./cacao ]]; then
-    git clone --recursive https://github.com/cacao-org/cacao.git cacao
+    git clone --recursive --branch dev https://github.com/magao-x/cacao.git cacao
     cd ./cacao
-    git checkout dev
-    git submodule foreach git checkout dev
+    git remote add upstream https://github.com/cacao-org/cacao.git
 else
     cd ./cacao
+    git pull
 fi
 CACAO_ABSPATH=$PWD
 
