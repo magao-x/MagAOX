@@ -40,8 +40,9 @@ namespace app
   * \ingroup mzmqServer
   */
 
-/** MagAO-X application to control writing ImageStreamIO streams to a zeroMQ channel
-  *
+/// MagAO-X application to control writing ImageStreamIO streams to a zeroMQ channel
+/** \todo document this better
+  * \todo implement thread-kills for shutdown. Maybe switch to USR1, with library wide empty handler, so it isn't logged.
   * \ingroup mzmqServer
   * 
   */

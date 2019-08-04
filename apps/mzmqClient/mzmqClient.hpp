@@ -40,8 +40,12 @@ namespace app
   * \ingroup mzmqClient
   */
 
-/** MagAO-X application to control reading ImageStreamIO streams from a zeroMQ channel
-  *
+/// MagAO-X application to control reading ImageStreamIO streams from a zeroMQ channel
+/** Contents are published to a local ImageStreamIO shmem buffer.
+  * 
+  * \todo handle the alternate local name option as in the base milkzmqClient
+  * \todo md docs for this.
+  * 
   * \ingroup mzmqClient
   * 
   */
@@ -131,9 +135,10 @@ mzmqClient::~mzmqClient() noexcept
 inline
 void mzmqClient::setupConfig()
 {
-   config.add("server.imagePort", "", "imagePort", argType::Required, "server", "imagePort", false, "int", "");
+   config.add("server.address", "", "server.address", argType::Required, "server", "address", false, "string", "The server's remote address. Usually localhost if using a tunnel.");
+   config.add("server.imagePort", "", "server.imagePort", argType::Required, "server", "imagePort", false, "int", "The server's port.  Usually the port on localhost forwarded to the host.");
    
-   config.add("server.shmimNames", "", "server.shmimNames", argType::Required, "server", "shmimNames", false, "string", "");
+   config.add("server.shmimNames", "", "server.shmimNames", argType::Required, "server", "shmimNames", false, "string", "List of names of the remote shmim streams to get.");
    
    
  
@@ -146,10 +151,12 @@ void mzmqClient::loadConfig()
 {
    m_argv0 = m_configName;
    
+   config(m_address, "server.address");
    config(m_imagePort, "server.imagePort");
    
    config(m_shMemImNames, "server.shmimNames");
    
+   std::cerr << "m_imagePort = " << m_imagePort << "\n";
    
 }
 
@@ -159,30 +166,17 @@ void mzmqClient::loadConfig()
 inline
 int mzmqClient::appStartup()
 {
-
-   //Now set up the framegrabber and writer threads.
-   // - need SIGSEGV and SIGBUS handling for ImageStreamIO restarts
-   // - initialize the semaphore 
-   // - start the threads
-   
    if(setSigSegvHandler() < 0)
    {
       log<software_error>({__FILE__, __LINE__});
       return -1;
    }
-
    
    for(size_t n=0; n < m_shMemImNames.size(); ++n)
    {
       shMemImName(m_shMemImNames[n]);
    }
    
-//    if(serverThreadStart() < 0)
-//    {
-//       log<software_critical>({__FILE__, __LINE__});
-//       return -1;
-//    }
-
    for(size_t n=0; n < m_imageThreads.size(); ++n)
    {
       if( imageThreadStart(n) > 0)
@@ -192,8 +186,6 @@ int mzmqClient::appStartup()
       }
    }
    
-
-   std::cerr << "Main Thread: " << syscall(SYS_gettid) << "\n";   
    return 0;
 
 }
@@ -224,6 +216,11 @@ inline
 int mzmqClient::appShutdown()
 {
    m_timeToDie = true;
+   
+   for(size_t n=0; n < m_imageThreads.size(); ++n)
+   {
+      imageThreadKill(n);
+   }
    
    for(size_t n=0; n < m_imageThreads.size(); ++n)
    {
