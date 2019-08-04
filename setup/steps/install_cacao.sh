@@ -7,7 +7,7 @@ TARGET_ENV=$1
 
 if [[ "$TARGET_ENV" == "vm" ]]; then
   CMAKE_FLAGS=""
-elif [[ "$TARGET_ENV" == "instrument" ]]; then
+elif [[ "$TARGET_ENV" == "instrument" || "$TARGET_ENV" == "ci" ]]; then
   CMAKE_FLAGS="-DUSE_CUDA=YES -DUSE_MAGMA=YES"
 else
   echo "Unknown TARGET_ENV passed as argument 1"
