@@ -570,10 +570,10 @@ int zaberLowLevel::appLogic()
          else if(m_stages[i].deviceStatus() == 'I') updateIfChanged(m_indiP_curr_state, m_stages[i].name(), std::string("READY"));
          else  updateIfChanged(m_indiP_curr_state, m_stages[i].name(), std::string("NODEVICE"));
          
-         if(m_stages[i].warningState() == true)
-         {
+         //if(m_stages[i].warningState() == true)
+         //{
             m_stages[i].getWarnings(m_port);
-         }
+         //}
             
       }
    }

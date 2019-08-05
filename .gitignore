@@ -64,6 +64,8 @@ apps/picamCtrl/picamCtrl
 apps/xt1121Ctrl/xt1121Ctrl                                                                                                                                                                    
 apps/xt1121DCDU/xt1121DCDU 
 
+apps/zaberLowLevel/zaberLowLevel
+
 utils/logdump/logdump
 utils/cursesINDI/cursesINDI
 utils/xrif2shmim/xrif2shmim

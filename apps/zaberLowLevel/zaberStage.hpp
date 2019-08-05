@@ -48,24 +48,43 @@ protected:
    bool m_warn {false};
    
    bool m_warnFD {false};
+   bool m_warnFDreported {false};
    bool m_warnFQ {false};
+   bool m_warnFQreported {false};
    bool m_warnFS {false};
+   bool m_warnFSreported {false};
    bool m_warnFT {false};
+   bool m_warnFTreported {false};
    bool m_warnFB {false};
+   bool m_warnFBreported {false};
    bool m_warnFP {false};
+   bool m_warnFPreported {false};
    bool m_warnFE {false};
+   bool m_warnFEreported {false};
    bool m_warnWH {false};
+   bool m_warnWHreported {false};
    bool m_warnWL {false};
+   bool m_warnWLreported {false};
    bool m_warnWP {false};
+   bool m_warnWPreported {false};
    bool m_warnWV {false};
+   bool m_warnWVreported {false};
    bool m_warnWT {false};
+   bool m_warnWTreported {false};
    bool m_warnWM {false};
+   bool m_warnWMreported {false};
    bool m_warnWR {false};
+   bool m_warnWRreported {false};
    bool m_warnNC {false};
+   bool m_warnNCreported {false};
    bool m_warnNI {false};
+   bool m_warnNIreported {false};
    bool m_warnND {false};
+   bool m_warnNDreported {false};
    bool m_warnNU {false};
+   bool m_warnNUreported {false};
    bool m_warnNJ {false};
+   bool m_warnNJreported {false};
    bool m_warnUNK {false};
    
 public:
@@ -696,7 +715,7 @@ int zaberStage::processWarning( std::string & warn )
 {
    if(warn == "FD")
    {
-      MagAOXAppT::log<text_log>(m_name + " Driver Disabled (FD): The driver has disabled itself due to overheating." , logPrio::LOG_WARNING);
+      MagAOXAppT::log<text_log>(m_name + " Driver Disabled (FD): The driver has disabled itself due to overheating." , logPrio::LOG_EMERGENCY);
       m_warnFD = true;
       return 0;
    }
@@ -738,7 +757,11 @@ int zaberStage::processWarning( std::string & warn )
    }
    else if(warn == "WH")
    {
-      MagAOXAppT::log<text_log>(m_name + " Device not homed (WH): The device has a position reference, but has not been homed." , logPrio::LOG_WARNING);
+      if(m_warnWHreported == false)
+      {
+         MagAOXAppT::log<text_log>(m_name + " Device not homed (WH): The device has a position reference, but has not been homed." , logPrio::LOG_WARNING);
+         m_warnWHreported = true;
+      }
       m_warnWH = true;
       return 0;
    }
@@ -774,7 +797,11 @@ int zaberStage::processWarning( std::string & warn )
    }
    else if(warn == "WR")
    {
-      MagAOXAppT::log<text_log>(m_name + " No Reference Position (WR): Axis has not had a reference position established. [homing required]" , logPrio::LOG_WARNING);
+      if(m_warnWRreported == false)
+      {
+         MagAOXAppT::log<text_log>(m_name + " No Reference Position (WR): Axis has not had a reference position established. [homing required]" , logPrio::LOG_WARNING);
+         m_warnWRreported = true;
+      }
       m_warnWR = true;
       return 0;
    }
@@ -840,6 +867,21 @@ int zaberStage::parseWarnings( std::string & response )
       {
          MagAOXAppT::log<software_error>({__FILE__, __LINE__});         
          return -1;
+      }
+   }
+   
+   
+   if(m_warnWHreported)
+   {
+      if(!m_warnWH) m_warnWHreported = false;
+   }
+   
+   if(m_warnWRreported)
+   {
+      if(!m_warnWR) 
+      {
+         MagAOXAppT::log<text_log>(m_name + " homed.  WR clear." , logPrio::LOG_NOTICE);
+         m_warnWRreported = false;
       }
    }
    
