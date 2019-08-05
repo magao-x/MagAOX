@@ -132,7 +132,7 @@ mzmqServer::~mzmqServer() noexcept
 inline
 void mzmqServer::setupConfig()
 {
-   config.add("server.imagePort", "", "imagePort", argType::Required, "server", "imagePort", false, "int", "");
+   config.add("server.imagePort", "", "server.imagePort", argType::Required, "server", "imagePort", false, "int", "");
    
    config.add("server.shmimNames", "", "server.shmimNames", argType::Required, "server", "shmimNames", false, "string", "");
    
@@ -242,19 +242,23 @@ int mzmqServer::appShutdown()
 {
    m_timeToDie = true;
    
+   serverThreadKill();
+   
    if(m_serverThread.joinable())
    {
       m_serverThread.join();
    }
-   
+      
    for(size_t n=0; n < m_imageThreads.size(); ++n)
    {
+      imageThreadKill(n);
+      
       if( m_imageThreads[n].m_thread->joinable())
       {
          m_imageThreads[n].m_thread->join();
       }
    }
-   
+      
    return 0;
 }
 
