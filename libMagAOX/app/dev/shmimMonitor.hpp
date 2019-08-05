@@ -401,7 +401,7 @@ void shmimMonitor<derivedT>::smThreadExec()
    
    bool opened = false;
    
-   sem_t * sem {nullptr}; ///< The semaphore to monitor for new image data
+   
       
    while(derived().shutdown() == 0)
    {
@@ -441,7 +441,7 @@ void shmimMonitor<derivedT>::smThreadExec()
       
       derivedT::template log<software_info>({__FILE__,__LINE__, "got semaphore index " + std::to_string(m_semaphoreNumber) });
       
-      sem = m_imageStream.semptr[m_semaphoreNumber];
+      sem_t * sem = m_imageStream.semptr[m_semaphoreNumber]; ///< The semaphore to monitor for new image data
       
       m_dataType = m_imageStream.md[0].datatype;
       m_typeSize = ImageStreamIO_typesize(m_dataType);

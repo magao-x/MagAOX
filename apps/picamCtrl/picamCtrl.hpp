@@ -98,7 +98,7 @@ protected:
    PicamAcquisitionBuffer m_acqBuff;
    PicamAvailableData m_available;
    
-   bool m_cameraConnected;
+   bool m_cameraConnected {false};
    std::string m_cameraName;
    std::string m_cameraModel;
    
@@ -598,7 +598,7 @@ int picamCtrl::connect()
     
    Picam_UninitializeLibrary();
    
-  //Have to initialize the library every time.  Otherwise we won't catch a newly booted camera.
+   //Have to initialize the library every time.  Otherwise we won't catch a newly booted camera.
    Picam_InitializeLibrary();
    
    if(m_cameraHandle)
@@ -673,6 +673,7 @@ int picamCtrl::connect()
    }
    
    Picam_DestroyCameraIDs(id_array);
+   
    
    Picam_UninitializeLibrary();
    
