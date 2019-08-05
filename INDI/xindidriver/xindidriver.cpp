@@ -86,7 +86,7 @@ void * xoverThread( void * vdf /**< [in] pointer to a driverFIFO struct */)
    {
       fdRead = df->stdfd;
       fdWrite = df->fd;
-   
+      
       struct flock fl;
       fl.l_type = F_WRLCK; //get an exclusive lock
       fl.l_whence = SEEK_SET;
@@ -99,8 +99,6 @@ void * xoverThread( void * vdf /**< [in] pointer to a driverFIFO struct */)
          std::cerr << " (" << XINDID_COMPILEDNAME << "): failed to lock " << df->fileName << ".  Another process is already running.  Kill the zombies.\n";
          return nullptr;
       }
-
-   
    }
    else // (df->stdfd == STDOUT_FILENO)
    {
@@ -108,9 +106,6 @@ void * xoverThread( void * vdf /**< [in] pointer to a driverFIFO struct */)
       fdWrite = df->stdfd;
    }
 
-
-
-   
    //Now loop until told to stop.
    while(!timeToDie)
    {
@@ -336,6 +331,8 @@ int main( int argc, char **argv)
 
    driverFIFO dfCtrl (ctrlFifo, 0);
    
+   sleep(2);
+
    //Launch the read/write threads, one each for STDIN and STDOUT and for control.
    pthread_t stdIn_th = 0;
    pthread_create( &stdIn_th, NULL, xoverThread, &dfIn );

@@ -16,10 +16,10 @@ include $(SELF_DIR)/config.mk
 
 UNAME ?= $(shell uname)
 ifeq ($(UNAME),Darwin)
-	CFLAGS += -D_BSD_SOURCE
+	CCFLAGS += -D_BSD_SOURCE
 	CXXFLAGS += -D_BSD_SOURCE
 else
-	CFLAGS += -D_XOPEN_SOURCE=700
+	CCFLAGS += -D_XOPEN_SOURCE=700
 	CXXFLAGS += -D_XOPEN_SOURCE=700
 endif
 
@@ -103,7 +103,7 @@ LDLIBS += -Wl,-rpath,$(LDLIBRPATH)
 ## Compilation and linking
 #######################################
 
-CFLAGS += -std=c99 -fPIC $(INCLUDES) $(OPTIMIZE)
+CCFLAGS += -std=c99 -fPIC $(INCLUDES) $(OPTIMIZE)
 CXXFLAGS += -std=c++14 -Wall -Wextra -fPIC $(INCLUDES) $(OPTIMIZE)
 
 #This is needed to force use of g++ for linking

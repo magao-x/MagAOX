@@ -328,9 +328,9 @@ logDrivers (int ac, char *av[])
 	char buf[2048];
 	int i, l;
 
-	l = sprintf (buf, "startup: ");
+	l = snprintf (buf,sizeof(buf), "startup: ");
 	for (i = 0; i < ac; i++)
-	    l += sprintf (buf+l, "%s ", av[i]);
+	    l += snprintf (buf+l, sizeof(buf), "%s ", av[i]);
 	logMessage ("%s\n", buf);
 }
 
@@ -540,9 +540,9 @@ startLocalDvr (DvrInfo *dp)
 	 */
 	mp = newMsg();
 	if (dp->dev[0])
-	    l = sprintf (buf, "<getProperties device='%s' version='%g'/>\n", dp->dev, INDIV);
+	    l = snprintf (buf, sizeof(buf), "<getProperties device='%s' version='%g'/>\n", dp->dev, INDIV);
 	else
-	    l = sprintf (buf, "<getProperties version='%g'/>\n", INDIV);
+	    l = snprintf (buf, sizeof(buf), "<getProperties version='%g'/>\n", INDIV);
 	addMsg (mp, buf, l);
 	(void) pushMsg (dp, NULL, mp);
 	decMsg (mp);
@@ -623,7 +623,7 @@ startRemoteDvr (DvrInfo *dp)
 	 * outbound (and our inbound) traffic on this socket to this device.
 	 */
 	mp = newMsg();
-	l = sprintf (buf, "<getProperties device='%s' version='%g'/>\n", dp->dev, INDIV);
+	l = snprintf (buf,sizeof(buf), "<getProperties device='%s' version='%g'/>\n", dp->dev, INDIV);
 	addMsg (mp, buf, l);
 	(void) pushMsg (dp, NULL, mp);
 	decMsg(mp);
@@ -632,7 +632,7 @@ startRemoteDvr (DvrInfo *dp)
 	 * Then here we honor enableBLOB from each of our clients.
 	 */
 	mp = newMsg();
-	l = sprintf (buf, "<enableBLOB device='%s'>Also</enableBLOB>\n", dp->dev);
+	l = snprintf (buf, sizeof(buf), "<enableBLOB device='%s'>Also</enableBLOB>\n", dp->dev);
 	addMsg (mp, buf, l);
 	(void) pushMsg (dp, NULL, mp);
 	decMsg(mp);
@@ -657,7 +657,7 @@ openRemoteConnection (char host[], int port)
 	memset (&hints, 0, sizeof(hints));
 	hints.ai_family = AF_INET;
 	hints.ai_socktype = SOCK_STREAM;
-	sprintf (port_str, "%d", port);
+	snprintf (port_str, sizeof(port_str), "%d", port);
 	int error = getaddrinfo (host, port_str, &hints, &aip);
 	if (error) {
 	    logMessage ("getaddrinfo(%s:%d): %s\n", host, port, gai_strerror(error));
@@ -1406,7 +1406,7 @@ q2Drivers (char *dev, Msg *mp, char *roottag)
 			    logMessage ("Driver %s: Loop caught, adding %s to generic getProperties\n",
 					    dp->name, dp->dev);
 			remote_mp = newMsg();
-			gpl = sprintf (gp, "<getProperties version='%g' device='%s' />\n", INDIV, dp->dev);
+			gpl = snprintf (gp, sizeof(gp), "<getProperties version='%g' device='%s' />\n", INDIV, dp->dev);
 			addMsg (remote_mp, gp, gpl);
 			sendmp = remote_mp;
 		    } else
@@ -1955,7 +1955,7 @@ logDvrMsg (XMLEle *root, char *dev)
 	if (ldir) {
 	    char logfn[1024];
 	    FILE *fp;
-	    sprintf (logfn, "%s/%.10s.islog", ldir, ts);
+	    snprintf (logfn, sizeof(logfn), "%s/%.10s.islog", ldir, ts);
 	    fp = fopen (logfn, "a");
 	    if (fp) {
 		fprintf (fp, "%s: %s: %s\n", ts, dev, ms);
@@ -1990,7 +1990,7 @@ logMessage (const char *fmt, ...)
 	if (ldir) {
 	    char logfn[1024];
 	    FILE *fp;
-	    sprintf (logfn, "%s/%.10s.islog", ldir, ts);
+	    snprintf (logfn,sizeof(logfn), "%s/%.10s.islog", ldir, ts);
 	    fp = fopen (logfn, "a");
 	    if (fp) {
 		fprintf (fp, "%s: ", ts);

@@ -385,7 +385,7 @@ openINDIServer ()
 	/* lookup host address */
 	hp = gethostbyname (host);
 	if (!hp) {
-	    herror(host);
+	    perror(host);
 	    exit (2);
 	}
 
