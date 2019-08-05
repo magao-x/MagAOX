@@ -9,14 +9,13 @@ else
   _REAL_SUDO=$(which sudo)
 fi
 if [[ -d /vagrant || $CI == true ]]; then
-    TARGET_ENV=vm
     if [[ -d /vagrant ]]; then
         DIR="/vagrant/setup"
-        VAGRANT=true
+        TARGET_ENV=vm
         CI=false
         yum install -y xorg-x11-xauth
     else
-        VAGRANT=false
+        TARGET_ENV=ci
     fi
     echo "Setting up for VM use"
     sudo bash -l "$DIR/setup_users_and_groups.sh"
@@ -70,7 +69,7 @@ sudo bash -l "$DIR/steps/install_cppzmq.sh"
 sudo bash -l "$DIR/steps/install_levmar.sh"
 sudo bash -l "$DIR/steps/install_flatbuffers.sh"
 sudo bash -l "$DIR/steps/install_xrif.sh"
-if ! $VAGRANT; then
+if [[ "$TARGET_ENV" == "instrument" || "$TARGET_ENV" == "ci" ]]; then
     sudo bash -l "$DIR/steps/install_magma.sh"
 fi
 sudo bash -l "$DIR/steps/install_basler_pylon.sh"
@@ -102,7 +101,7 @@ source /etc/profile.d/mxmakefile.sh
 
 ## Build MagAO-X and install sources to /opt/MagAOX/source/MagAOX
 MAYBE_SUDO=
-if $VAGRANT; then
+if [[ $TARGET_ENV == vm ]]; then
     MAYBE_SUDO="$_REAL_SUDO -u vagrant"
     # Create or replace symlink to sources so we develop on the host machine's copy
     # (unlike prod, where we install a new clone of the repo to this location)

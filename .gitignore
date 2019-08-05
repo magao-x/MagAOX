@@ -59,10 +59,14 @@ apps/ocam2KCtrl/ocam2KCtrl
 apps/streamWriter/streamWriter
 
 apps/mzmqServer/mzmqServer
+apps/mzmqClient/mzmqClient
+
 apps/picamCtrl/picamCtrl
 
-apps/xt1121Ctrl/xt1121Ctrl                                                                                                                                                                    
-apps/xt1121DCDU/xt1121DCDU 
+apps/xt1121Ctrl/xt1121Ctrl
+
+apps/xt1121DCDU/xt1121DCDU
+
 
 apps/zaberLowLevel/zaberLowLevel
 

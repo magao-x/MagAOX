@@ -284,7 +284,7 @@ int frameGrabber<derivedT>::appStartup()
    
    if(impl().threadStart( m_fgThread, m_fgThreadInit, m_fgThreadPrio, "framegrabber", this, fgThreadStart) < 0)
    {
-      derivedT::template log<software_error>({__FILE__, __LINE__});
+      derivedT::template log<software_error, -1>({__FILE__, __LINE__});
       return -1;
    }
    
