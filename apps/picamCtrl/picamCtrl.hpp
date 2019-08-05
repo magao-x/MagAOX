@@ -98,7 +98,6 @@ protected:
    PicamAcquisitionBuffer m_acqBuff;
    PicamAvailableData m_available;
    
-   bool m_cameraConnected {false};
    std::string m_cameraName;
    std::string m_cameraModel;
    
@@ -631,7 +630,6 @@ int picamCtrl::connect()
          error = PicamAdvanced_OpenCameraDevice(&id_array[i], &m_cameraHandle);
          if(error == PicamError_None) 
          {
-            m_cameraConnected = true;
             m_cameraName = id_array[i].sensor_name;
             m_cameraModel = PicamEnum2String(PicamEnumeratedType_Model, id_array[i].model);
             
