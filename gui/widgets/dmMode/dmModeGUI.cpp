@@ -17,9 +17,8 @@ namespace xqt
 
 dmModeGUI::dmModeGUI( std::string deviceName,
                       QWidget * Parent, 
-                      Qt::WindowFlags f) : QDialog(Parent, f)
+                      Qt::WindowFlags f) : QDialog(Parent, f), m_deviceName{deviceName} 
 {
-   m_deviceName = deviceName;
    ui.setupUi(this);
    
    setWindowTitle(QString(deviceName.c_str()));
@@ -54,8 +53,6 @@ int dmModeGUI::handleDefProperty( const pcf::IndiProperty & ipRecv /**< [in] the
 
 int dmModeGUI::handleSetProperty( const pcf::IndiProperty & ipRecv /**< [in] the property which has changed*/)
 {
-   std::string key = ipRecv.createUniqueKey();
-   
    if(ipRecv.getDevice() != m_deviceName) return 0;
    
    if(ipRecv.getName() == "current_amps")
@@ -87,11 +84,8 @@ int dmModeGUI::updateGUI( QLabel * currLabel,
    currLabel->setText(QString::number(amp));
    tgtLabel->setText(QString(""));
    
-   //slider->setTracking(false);
    slider->setValue(amp);
-   //slider->setTracking(true);
    
-   //std::cerr << slider->lowerBound() << " " << slider->upperBound() << "\n";
    return 0;
 }
 
