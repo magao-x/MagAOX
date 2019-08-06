@@ -82,7 +82,7 @@ if [[ -e $VENDOR_SOFTWARE_BUNDLE ]]; then
     BUNDLE_TMPDIR=/tmp/vendor_software_bundle
     mkdir -p /tmp/vendor_software_bundle
     tar xzf $VENDOR_SOFTWARE_BUNDLE -C $BUNDLE_TMPDIR
-    for vendorname in alpao bmc; do
+    for vendorname in alpao bmc andor; do
         if [[ ! -d /opt/MagAOX/vendor/$vendorname ]]; then
             sudo cp -R $BUNDLE_TMPDIR/$vendorname /opt/MagAOX/vendor
         else
@@ -92,6 +92,7 @@ if [[ -e $VENDOR_SOFTWARE_BUNDLE ]]; then
     done
     sudo bash -l "$DIR/steps/install_alpao.sh"
     sudo bash -l "$DIR/steps/install_bmc.sh"
+    sudo bash -l "$DIR/steps/install_andor.sh"
 fi
 
 ## Build first-party dependencies

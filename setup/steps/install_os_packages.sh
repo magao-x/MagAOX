@@ -21,10 +21,6 @@ yum install -y \
     wget \
     htop \
     ntp \
-;
-
-
-yum install -y \
     zlib-devel \
     libudev-devel \
     ncurses-devel \
@@ -36,6 +32,12 @@ yum install -y \
     bison \
     flex \
     dialog \
+    autossh \
+    check-devel \
+    subunit-devel \
+    pciutils \
+    libusb-devel \
+    usbutils \
 ;
 
 yum-config-manager --add-repo https://download.opensuse.org/repositories/network:/messaging:/zeromq:/release-stable/CentOS_7/network:messaging:zeromq:release-stable.repo
