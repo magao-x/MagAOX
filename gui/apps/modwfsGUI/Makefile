@@ -1,4 +1,4 @@
-TARGET ?= dmModeGUI
+TARGET ?= modwfsGUI
 
 #############################
 # The qt5 qmake 

@@ -1,3 +1,4 @@
+TARGET ?= pwrGUI
 
 #############################
 # The qt5 qmake 
@@ -6,6 +7,15 @@
 # argument is needed.  If not, then invoke with, e.g., `make QMAKE=qmake-qt5`
 
 QMAKE?=qmake
+
+QMAKE_PATH := $(shell which qmake 2>/dev/null)
+
+$(info $(QMAKE_PATH))
+
+ifeq "$(QMAKE_PATH)" ""
+  QMAKE=qmake-qt5
+endif
+
 
 ##############################
 
