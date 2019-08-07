@@ -2,10 +2,10 @@
 DIR="$( cd "$( dirname "${BASH_SOURCE[0]}" )" && pwd )"
 source $DIR/../_common.sh
 set -euo pipefail
-# lspci needed to install EDT framegrabber driver
-yum install -y pciutils
-EDT_RPM_FILENAME=EDTpdv-5.5.7-2.noarch.rpm
-if [[ ! -e $EDT_RPM_FILENAME ]]; then
-    curl -OL https://edt.com/wp-content/uploads/2019/05/$EDT_RPM_FILENAME
+
+EDT_FILENAME=EDTpdv_lnx_5.5.8.2.run
+if [[ ! -e $EDT_FILENAME ]]; then
+    curl -L https://edt.com/downloads/pdv_5-5-8-2_run/ > $EDT_FILENAME
 fi
-yum install -y $EDT_RPM_FILENAME || true
+chmod +x $EDT_FILENAME
+./$EDT_FILENAME -- --default

@@ -1,4 +1,4 @@
-TARGET ?= pwrGUI
+TARGET ?= dmModeGUI
 
 #############################
 # The qt5 qmake 

@@ -1,4 +1,4 @@
-TARGET ?= pwrGUI
+TARGET ?= modwfsGUI
 
 #############################
 # The qt5 qmake 
