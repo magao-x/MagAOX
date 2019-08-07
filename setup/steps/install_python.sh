@@ -24,7 +24,11 @@ else
     fi
 fi
 unset __conda_setup" > /etc/profile.d/miniconda.sh
-#
+source /etc/profile.d/miniconda.sh
+# set group and permissions such that only magaox-dev has write access
+sudo chgrp -R magaox-dev /opt/miniconda3
+sudo chmod -R g=rwx /opt/miniconda3
 # TO DO: Build the python environment from an environment.yml file
-# TO DO: Manually install pyImageStreamIO in cacao/src
+# TO DO: Manually install pyImageStreamIO in cacao/src (need to force cmake3 to run as cmake)
 # TO DO: Clone git repos for any MagAO-X python utils and install
+echo "You may need to run \"source /etc/profile.d/miniconda.sh\" before conda is ready to use."
