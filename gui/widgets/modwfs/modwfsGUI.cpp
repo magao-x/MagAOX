@@ -78,12 +78,22 @@ int modwfsGUI::subscribe( multiIndiPublisher * publisher )
    publisher->subscribeProperty(this, "modwfs", "modRadius");
    publisher->subscribeProperty(this, "fxngenmodwfs", "C1ofst");
    publisher->subscribeProperty(this, "fxngenmodwfs", "C2ofst");
-   publisher->subscribeProperty(this, "pdu0", "modttm");   
+   publisher->subscribeProperty(this, "pdu1", "modttm");   
    
    return 0;
 }
-                                
-int modwfsGUI::handleSetProperty( const pcf::IndiProperty & ipRecv /**< [in] the property which has changed*/)
+   
+int modwfsGUI::handleDefProperty( const pcf::IndiProperty & ipRecv)
+{  
+   if(ipRecv.getDevice() == "modwfs" || ipRecv.getDevice() == "fxngenmodwfs" || ipRecv.getDevice() == "pdu1")
+   {
+      return handleSetProperty(ipRecv);
+   }
+   
+   return 0;
+}
+
+int modwfsGUI::handleSetProperty( const pcf::IndiProperty & ipRecv)
 {  
    std::cerr << "Got " << ipRecv.createUniqueKey() << "\n";
    
@@ -138,7 +148,7 @@ int modwfsGUI::handleSetProperty( const pcf::IndiProperty & ipRecv /**< [in] the
          }
       }
    }
-   else if(ipRecv.getDevice() == "pdu0")
+   else if(ipRecv.getDevice() == "pdu1")
    {
       if(ipRecv.getName() == "modttm")
       {

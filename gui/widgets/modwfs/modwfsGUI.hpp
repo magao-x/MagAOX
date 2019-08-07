@@ -33,6 +33,7 @@ public:
    
    int subscribe( multiIndiPublisher * publisher );
                                    
+   int handleDefProperty( const pcf::IndiProperty & ipRecv /**< [in] the property which has changed*/);
    int handleSetProperty( const pcf::IndiProperty & ipRecv /**< [in] the property which has changed*/);
    
 protected:
