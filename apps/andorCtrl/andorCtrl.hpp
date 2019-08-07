@@ -150,7 +150,7 @@ protected:
    pcf::IndiProperty m_indiP_ccdtemp;
    pcf::IndiProperty m_indiP_cooling;
    
-   pcf::IndiProperty m_indiP_mode;
+
    pcf::IndiProperty m_indiP_fps;
    pcf::IndiProperty m_indiP_emGain;
 
@@ -425,17 +425,15 @@ int andorCtrl::onPowerOff()
    
    updateIfChanged(m_indiP_ccdtemp, "current", -999);
    updateIfChanged(m_indiP_ccdtemp, "target", -999);
-      
-   updateIfChanged(m_indiP_mode, "current", std::string(""));
-   updateIfChanged(m_indiP_mode, "target", std::string(""));
-
+   
    updateIfChanged(m_indiP_fps, "current", 0);
    updateIfChanged(m_indiP_fps, "target", 0);
    updateIfChanged(m_indiP_fps, "measured", 0);
-   
+
    updateIfChanged(m_indiP_emGain, "current", 0);
    updateIfChanged(m_indiP_emGain, "target", 0);
-   
+
+   edtCamera<andorCtrl>::onPowerOff();
    return 0;
 }
 
