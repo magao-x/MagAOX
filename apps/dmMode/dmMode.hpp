@@ -19,6 +19,8 @@
 /** \defgroup dmMode 
   * \brief The DM mode command app, places modes on a DM channel
   * \todo update md doc
+  * \todo the current_amps/target_amps thing is dumb.  Should consider mode00.target, mode00.current maybe.
+  * 
   * <a href="..//apps_html/page_module_dmMode.html">Application Documentation</a>
   *
   * \ingroup apps
