@@ -54,6 +54,8 @@ protected:
 
    std::string m_modeCube;
    
+   std::string m_dmName;
+   
    std::string m_dmChannelName;
    
    ///@}
@@ -116,6 +118,7 @@ public:
    //INDI:
 protected:
    //declare our properties
+   pcf::IndiProperty m_indiP_dm;
    pcf::IndiProperty m_indiP_currAmps;
    pcf::IndiProperty m_indiP_tgtAmps;
 
@@ -135,6 +138,7 @@ dmMode::dmMode() : MagAOXApp(MAGAOX_CURRENT_SHA1, MAGAOX_REPO_MODIFIED)
 void dmMode::setupConfig()
 {
    config.add("dm.modeCube", "", "dm.modeCube", argType::Required, "dm", "modeCube", false, "string", "Full path to the FITS file containing the modes for this DM.");
+   config.add("dm.name", "", "dm.name", argType::Required, "dm", "name", false, "string", "The descriptive name of this dm. Default is the channel name.");
    config.add("dm.channelName", "", "dm.channelName", argType::Required, "dm", "channelName", false, "string", "The name of the DM channel to write to.");
 }
 
@@ -143,6 +147,10 @@ int dmMode::loadConfigImpl( mx::app::appConfigurator & _config )
 
    _config(m_modeCube, "dm.modeCube");
    _config(m_dmChannelName, "dm.channelName");
+   
+   m_dmName = m_dmChannelName;
+   _config(m_dmName, "dm.name");
+   
    
    return 0;
 }
@@ -163,6 +171,12 @@ int dmMode::appStartup()
    
    m_amps.resize(m_modes.planes(), 0);
    m_shape.resize(m_modes.rows(), m_modes.cols());
+   
+   REG_INDI_NEWPROP_NOCB(m_indiP_dm, "dm", pcf::IndiProperty::Text);
+   m_indiP_dm.add(pcf::IndiElement("name"));
+   m_indiP_dm["name"] = m_dmName;
+   m_indiP_dm.add(pcf::IndiElement("channel"));
+   m_indiP_dm["channel"] = m_dmChannelName;
    
    REG_INDI_NEWPROP(m_indiP_currAmps, "current_amps", pcf::IndiProperty::Number);
    REG_INDI_NEWPROP(m_indiP_tgtAmps, "target_amps", pcf::IndiProperty::Number);

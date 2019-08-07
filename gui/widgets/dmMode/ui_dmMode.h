@@ -17,6 +17,7 @@
 #include <QtWidgets/QHeaderView>
 #include <QtWidgets/QLabel>
 #include <QtWidgets/QLineEdit>
+#include <QtWidgets/QPushButton>
 #include "qwt_slider.h"
 
 QT_BEGIN_NAMESPACE
@@ -70,6 +71,18 @@ public:
     QLineEdit *modeTarget_8;
     QLineEdit *modeTarget_9;
     QLineEdit *modeTarget_10;
+    QPushButton *modeZero_0;
+    QPushButton *modeZero_1;
+    QPushButton *modeZero_2;
+    QPushButton *modeZero_3;
+    QPushButton *modeZero_4;
+    QPushButton *modeZero_5;
+    QPushButton *modeZero_6;
+    QPushButton *modeZero_7;
+    QPushButton *modeZero_8;
+    QPushButton *modeZero_9;
+    QPushButton *modeZero_10;
+    QPushButton *modeZero_all;
 
     void setupUi(QDialog *dmMode)
     {
@@ -293,6 +306,42 @@ public:
         modeTarget_10 = new QLineEdit(dmMode);
         modeTarget_10->setObjectName(QStringLiteral("modeTarget_10"));
         modeTarget_10->setGeometry(QRect(466, 605, 67, 41));
+        modeZero_0 = new QPushButton(dmMode);
+        modeZero_0->setObjectName(QStringLiteral("modeZero_0"));
+        modeZero_0->setGeometry(QRect(275, 125, 30, 26));
+        modeZero_1 = new QPushButton(dmMode);
+        modeZero_1->setObjectName(QStringLiteral("modeZero_1"));
+        modeZero_1->setGeometry(QRect(274, 180, 30, 26));
+        modeZero_2 = new QPushButton(dmMode);
+        modeZero_2->setObjectName(QStringLiteral("modeZero_2"));
+        modeZero_2->setGeometry(QRect(273, 235, 30, 26));
+        modeZero_3 = new QPushButton(dmMode);
+        modeZero_3->setObjectName(QStringLiteral("modeZero_3"));
+        modeZero_3->setGeometry(QRect(273, 285, 30, 26));
+        modeZero_4 = new QPushButton(dmMode);
+        modeZero_4->setObjectName(QStringLiteral("modeZero_4"));
+        modeZero_4->setGeometry(QRect(274, 335, 30, 26));
+        modeZero_5 = new QPushButton(dmMode);
+        modeZero_5->setObjectName(QStringLiteral("modeZero_5"));
+        modeZero_5->setGeometry(QRect(274, 385, 30, 26));
+        modeZero_6 = new QPushButton(dmMode);
+        modeZero_6->setObjectName(QStringLiteral("modeZero_6"));
+        modeZero_6->setGeometry(QRect(274, 435, 30, 26));
+        modeZero_7 = new QPushButton(dmMode);
+        modeZero_7->setObjectName(QStringLiteral("modeZero_7"));
+        modeZero_7->setGeometry(QRect(274, 485, 30, 26));
+        modeZero_8 = new QPushButton(dmMode);
+        modeZero_8->setObjectName(QStringLiteral("modeZero_8"));
+        modeZero_8->setGeometry(QRect(274, 535, 30, 26));
+        modeZero_9 = new QPushButton(dmMode);
+        modeZero_9->setObjectName(QStringLiteral("modeZero_9"));
+        modeZero_9->setGeometry(QRect(274, 585, 30, 26));
+        modeZero_10 = new QPushButton(dmMode);
+        modeZero_10->setObjectName(QStringLiteral("modeZero_10"));
+        modeZero_10->setGeometry(QRect(274, 635, 30, 26));
+        modeZero_all = new QPushButton(dmMode);
+        modeZero_all->setObjectName(QStringLiteral("modeZero_all"));
+        modeZero_all->setGeometry(QRect(240, 680, 95, 36));
 
         retranslateUi(dmMode);
 
@@ -326,6 +375,18 @@ public:
         modeName_10->setText(QApplication::translate("dmMode", "Mode 10", Q_NULLPTR));
         modeCurrent_1->setText(QApplication::translate("dmMode", "0.0", Q_NULLPTR));
         modeName_1->setText(QApplication::translate("dmMode", "Mode 01", Q_NULLPTR));
+        modeZero_0->setText(QApplication::translate("dmMode", "0", Q_NULLPTR));
+        modeZero_1->setText(QApplication::translate("dmMode", "0", Q_NULLPTR));
+        modeZero_2->setText(QApplication::translate("dmMode", "0", Q_NULLPTR));
+        modeZero_3->setText(QApplication::translate("dmMode", "0", Q_NULLPTR));
+        modeZero_4->setText(QApplication::translate("dmMode", "0", Q_NULLPTR));
+        modeZero_5->setText(QApplication::translate("dmMode", "0", Q_NULLPTR));
+        modeZero_6->setText(QApplication::translate("dmMode", "0", Q_NULLPTR));
+        modeZero_7->setText(QApplication::translate("dmMode", "0", Q_NULLPTR));
+        modeZero_8->setText(QApplication::translate("dmMode", "0", Q_NULLPTR));
+        modeZero_9->setText(QApplication::translate("dmMode", "0", Q_NULLPTR));
+        modeZero_10->setText(QApplication::translate("dmMode", "0", Q_NULLPTR));
+        modeZero_all->setText(QApplication::translate("dmMode", "zero all", Q_NULLPTR));
     } // retranslateUi
 
 };

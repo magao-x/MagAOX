@@ -44,9 +44,14 @@ public:
                   float amp
                 );
    
+   void setChannel( size_t ch, float amp );
+   
+   void on_modeTarget_returnPressed( size_t ch,
+                                     QLineEdit * modeTarget 
+                                   );
 public slots:
 
-   void setChannel( size_t ch, float amp );
+   
    
       
    void on_modeSlider_0_sliderMoved( double amp );
@@ -73,9 +78,7 @@ public slots:
    void on_modeSlider_9_sliderReleased();
    void on_modeSlider_10_sliderReleased();
    
-   void on_modeTarget_returnPressed( size_t ch,
-                                     QLineEdit * modeTarget 
-                                   );
+   
    
    void on_modeTarget_0_returnPressed();
    void on_modeTarget_1_returnPressed();
@@ -88,6 +91,20 @@ public slots:
    void on_modeTarget_8_returnPressed();
    void on_modeTarget_9_returnPressed();
    void on_modeTarget_10_returnPressed();
+   
+   void on_modeZero_0_pressed();
+   void on_modeZero_1_pressed();
+   void on_modeZero_2_pressed();
+   void on_modeZero_3_pressed();
+   void on_modeZero_4_pressed();
+   void on_modeZero_5_pressed();
+   void on_modeZero_6_pressed();
+   void on_modeZero_7_pressed();
+   void on_modeZero_8_pressed();
+   void on_modeZero_9_pressed();
+   void on_modeZero_10_pressed();
+   
+   void on_modeZero_all_pressed();
    
 signals:
    

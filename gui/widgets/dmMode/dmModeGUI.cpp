@@ -70,6 +70,21 @@ int dmModeGUI::handleSetProperty( const pcf::IndiProperty & ipRecv /**< [in] the
       }
    }
 
+   if(ipRecv.getName() == "dm")
+   {
+      if(ipRecv.find("name"))
+      {
+         QString name = ipRecv["name"].get<std::string>().c_str();
+         name += " DM modes";
+         ui.title->setText(name);
+         setWindowTitle(name);
+      }
+      if(ipRecv.find("channel"))
+      {
+         QString channel = ipRecv["channel"].get<std::string>().c_str();
+         ui.channel->setText(channel);
+      }
+   }
    
    return 0;
    
@@ -337,6 +352,78 @@ void dmModeGUI::on_modeTarget_9_returnPressed()
 void dmModeGUI::on_modeTarget_10_returnPressed()
 {
    on_modeTarget_returnPressed(10, ui.modeTarget_10);
+}
+
+void dmModeGUI::on_modeZero_0_pressed()
+{
+   setChannel(0, 0.0);
+}
+
+void dmModeGUI::on_modeZero_1_pressed()
+{
+   setChannel(1, 0.0);
+}
+
+void dmModeGUI::on_modeZero_2_pressed()
+{
+   setChannel(2, 0.0);
+}
+
+void dmModeGUI::on_modeZero_3_pressed()
+{
+   setChannel(3, 0.0);
+}
+
+void dmModeGUI::on_modeZero_4_pressed()
+{
+   setChannel(4, 0.0);
+}
+
+void dmModeGUI::on_modeZero_5_pressed()
+{
+   setChannel(5, 0.0);
+}
+
+void dmModeGUI::on_modeZero_6_pressed()
+{
+   setChannel(6, 0.0);
+}
+
+void dmModeGUI::on_modeZero_7_pressed()
+{
+   setChannel(7, 0.0);
+}
+
+void dmModeGUI::on_modeZero_8_pressed()
+{
+   setChannel(8, 0.0);
+}
+
+void dmModeGUI::on_modeZero_9_pressed()
+{
+   setChannel(9, 0.0);
+}
+
+void dmModeGUI::on_modeZero_10_pressed()
+{
+   setChannel(10, 0.0);
+}
+
+void dmModeGUI::on_modeZero_all_pressed()
+{
+   pcf::IndiProperty ip(pcf::IndiProperty::Number);
+   
+   ip.setDevice(m_deviceName);
+   ip.setName("target_amps");
+   
+   for(size_t n =0; n <= 10; ++n)
+   {
+      std::string elName = mx::ioutils::convertToString<size_t, 2, '0'>(n);
+      ip.add(pcf::IndiElement(elName));
+      ip[elName] = 0.0;
+   }
+   
+   sendNewProperty(ip);
 }
 
 } //namespace xqt
