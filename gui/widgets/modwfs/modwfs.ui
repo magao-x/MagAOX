@@ -7,7 +7,7 @@
     <x>0</x>
     <y>0</y>
     <width>512</width>
-    <height>509</height>
+    <height>400</height>
    </rect>
   </property>
   <property name="palette">
@@ -141,7 +141,7 @@
   <widget class="QPushButton" name="buttonUp">
    <property name="geometry">
     <rect>
-     <x>140</x>
+     <x>414</x>
      <y>260</y>
      <width>41</width>
      <height>40</height>
@@ -157,7 +157,7 @@
   <widget class="QPushButton" name="buttonLeft">
    <property name="geometry">
     <rect>
-     <x>100</x>
+     <x>374</x>
      <y>300</y>
      <width>41</width>
      <height>40</height>
@@ -173,7 +173,7 @@
   <widget class="QPushButton" name="buttonRight">
    <property name="geometry">
     <rect>
-     <x>180</x>
+     <x>454</x>
      <y>300</y>
      <width>41</width>
      <height>40</height>
@@ -189,7 +189,7 @@
   <widget class="QPushButton" name="buttonDown">
    <property name="geometry">
     <rect>
-     <x>140</x>
+     <x>414</x>
      <y>340</y>
      <width>41</width>
      <height>40</height>
@@ -205,8 +205,8 @@
   <widget class="QLCDNumber" name="voltsAxis1">
    <property name="geometry">
     <rect>
-     <x>150</x>
-     <y>400</y>
+     <x>185</x>
+     <y>275</y>
      <width>101</width>
      <height>41</height>
     </rect>
@@ -279,8 +279,8 @@
   <widget class="QLCDNumber" name="voltsAxis2">
    <property name="geometry">
     <rect>
-     <x>150</x>
-     <y>450</y>
+     <x>185</x>
+     <y>325</y>
      <width>101</width>
      <height>41</height>
     </rect>
@@ -326,8 +326,8 @@
   <widget class="QLabel" name="labelChannel1">
    <property name="geometry">
     <rect>
-     <x>5</x>
-     <y>410</y>
+     <x>40</x>
+     <y>285</y>
      <width>131</width>
      <height>24</height>
     </rect>
@@ -382,8 +382,8 @@
   <widget class="QLabel" name="labelChannel2">
    <property name="geometry">
     <rect>
-     <x>5</x>
-     <y>460</y>
+     <x>40</x>
+     <y>335</y>
      <width>131</width>
      <height>24</height>
     </rect>

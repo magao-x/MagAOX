@@ -45,7 +45,7 @@ public:
     {
         if (modwfs->objectName().isEmpty())
             modwfs->setObjectName(QStringLiteral("modwfs"));
-        modwfs->resize(512, 509);
+        modwfs->resize(512, 400);
         QPalette palette;
         QBrush brush(QColor(32, 31, 31, 255));
         brush.setStyle(Qt::SolidPattern);
@@ -89,23 +89,23 @@ public:
 
         buttonUp = new QPushButton(modwfs);
         buttonUp->setObjectName(QStringLiteral("buttonUp"));
-        buttonUp->setGeometry(QRect(140, 260, 41, 40));
+        buttonUp->setGeometry(QRect(414, 260, 41, 40));
         buttonUp->setFocusPolicy(Qt::StrongFocus);
         buttonLeft = new QPushButton(modwfs);
         buttonLeft->setObjectName(QStringLiteral("buttonLeft"));
-        buttonLeft->setGeometry(QRect(100, 300, 41, 40));
+        buttonLeft->setGeometry(QRect(374, 300, 41, 40));
         buttonLeft->setFocusPolicy(Qt::StrongFocus);
         buttonRight = new QPushButton(modwfs);
         buttonRight->setObjectName(QStringLiteral("buttonRight"));
-        buttonRight->setGeometry(QRect(180, 300, 41, 40));
+        buttonRight->setGeometry(QRect(454, 300, 41, 40));
         buttonRight->setFocusPolicy(Qt::StrongFocus);
         buttonDown = new QPushButton(modwfs);
         buttonDown->setObjectName(QStringLiteral("buttonDown"));
-        buttonDown->setGeometry(QRect(140, 340, 41, 40));
+        buttonDown->setGeometry(QRect(414, 340, 41, 40));
         buttonDown->setFocusPolicy(Qt::StrongFocus);
         voltsAxis1 = new QLCDNumber(modwfs);
         voltsAxis1->setObjectName(QStringLiteral("voltsAxis1"));
-        voltsAxis1->setGeometry(QRect(150, 400, 101, 41));
+        voltsAxis1->setGeometry(QRect(185, 275, 101, 41));
         QPalette palette1;
         QBrush brush2(QColor(170, 255, 255, 255));
         brush2.setStyle(Qt::SolidPattern);
@@ -122,7 +122,7 @@ public:
         voltsAxis1->setPalette(palette1);
         voltsAxis2 = new QLCDNumber(modwfs);
         voltsAxis2->setObjectName(QStringLiteral("voltsAxis2"));
-        voltsAxis2->setGeometry(QRect(150, 450, 101, 41));
+        voltsAxis2->setGeometry(QRect(185, 325, 101, 41));
         QPalette palette2;
         palette2.setBrush(QPalette::Active, QPalette::WindowText, brush2);
         palette2.setBrush(QPalette::Inactive, QPalette::WindowText, brush2);
@@ -130,7 +130,7 @@ public:
         voltsAxis2->setPalette(palette2);
         labelChannel1 = new QLabel(modwfs);
         labelChannel1->setObjectName(QStringLiteral("labelChannel1"));
-        labelChannel1->setGeometry(QRect(5, 410, 131, 24));
+        labelChannel1->setGeometry(QRect(40, 285, 131, 24));
         QPalette palette3;
         QBrush brush5(QColor(0, 0, 102, 255));
         brush5.setStyle(Qt::SolidPattern);
@@ -144,7 +144,7 @@ public:
         labelChannel1->setFont(font);
         labelChannel2 = new QLabel(modwfs);
         labelChannel2->setObjectName(QStringLiteral("labelChannel2"));
-        labelChannel2->setGeometry(QRect(5, 460, 131, 24));
+        labelChannel2->setGeometry(QRect(40, 335, 131, 24));
         labelChannel2->setFont(font);
         ttmStatus = new QLabel(modwfs);
         ttmStatus->setObjectName(QStringLiteral("ttmStatus"));

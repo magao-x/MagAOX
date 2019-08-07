@@ -77,6 +77,13 @@ protected:
       
    unsigned m_emGain {1};
    
+   float m_expTime {0};
+   float m_fpsSet {0};
+   float m_fpsTgt {0};
+   float m_fpsMeasured {0};
+   
+   bool m_shutter {false};
+   
 public:
 
    ///Default c'tor
@@ -141,6 +148,8 @@ public:
 protected:
    //declare our properties
    pcf::IndiProperty m_indiP_ccdtemp;
+   pcf::IndiProperty m_indiP_cooling;
+   
    pcf::IndiProperty m_indiP_mode;
    pcf::IndiProperty m_indiP_fps;
    pcf::IndiProperty m_indiP_emGain;
@@ -149,6 +158,8 @@ protected:
    
 public:
    INDI_NEWCALLBACK_DECL(andorCtrl, m_indiP_ccdtemp);
+   INDI_NEWCALLBACK_DECL(andorCtrl, m_indiP_cooling);
+   
    INDI_NEWCALLBACK_DECL(andorCtrl, m_indiP_mode);
    INDI_NEWCALLBACK_DECL(andorCtrl, m_indiP_fps);
    INDI_NEWCALLBACK_DECL(andorCtrl, m_indiP_emGain);
@@ -159,7 +170,7 @@ public:
 inline
 andorCtrl::andorCtrl() : MagAOXApp(MAGAOX_CURRENT_SHA1, MAGAOX_REPO_MODIFIED)
 {
-   //m_powerMgtEnabled = true;
+   m_powerMgtEnabled = true;
    
    return;
 }
@@ -226,7 +237,9 @@ int andorCtrl::appStartup()
    m_indiP_ccdtemp["current"].set(0);
    m_indiP_ccdtemp.add (pcf::IndiElement("target"));
    
-
+   REG_INDI_NEWPROP(m_indiP_cooling, "cooling", pcf::IndiProperty::Number);
+   m_indiP_cooling.add (pcf::IndiElement("current"));
+   m_indiP_cooling.add (pcf::IndiElement("target"));
    
 
    REG_INDI_NEWPROP(m_indiP_fps, "fps", pcf::IndiProperty::Number);
@@ -321,8 +334,6 @@ int andorCtrl::appLogic()
       
       
    }
-
-   std::cerr << 3 << "\n";
    
    if( state() == stateCodes::CONNECTED )
    {
@@ -349,8 +360,6 @@ int andorCtrl::appLogic()
 //       }
    }
 
-   std::cerr << 4 << "\n";
-   
    if( state() == stateCodes::READY || state() == stateCodes::OPERATING )
    {
       //Get a lock if we can
@@ -383,6 +392,16 @@ int andorCtrl::appLogic()
          return 0;
       }
       
+      if(m_shutter == false)
+      {
+         updateIfChanged(m_indiP_shutter, "current", std::string("SHUT"));
+         updateIfChanged(m_indiP_shutter, "target", std::string(""));
+      }
+      else
+      {
+         updateIfChanged(m_indiP_shutter, "current", std::string("OPEN"));
+         updateIfChanged(m_indiP_shutter, "target", std::string(""));
+      }
       /*if(frameGrabber<andorCtrl>::updateINDI() < 0)
       {
          log<software_error>({__FILE__, __LINE__});
@@ -469,26 +488,29 @@ int andorCtrl::getTemp()
    int temp {999}, temp_low {999}, temp_high {999};
    unsigned long error=GetTemperatureRange(&temp_low, &temp_high); ///\todo need error check
    
-   std::cerr << error << "\n";
+//   std::cerr << error << "\n";
    unsigned long status=GetTemperature(&temp);
    
-   std::cout << "Current Temperature: " << temp << " C" << std::endl;
-   std::cout << "Temp Range: {" << temp_low << "," << temp_high << "}" << std::endl;
-   std::cout << "Status             : ";
+   updateIfChanged(m_indiP_ccdtemp, "current", temp);
+    
+//    std::cout << "Current Temperature: " << temp << " C" << std::endl;
+//    std::cout << "Temp Range: {" << temp_low << "," << temp_high << "}" << std::endl;
+//    std::cout << "Status             : ";
+   std::string cooling;
    switch(status)
    {
-      case DRV_TEMPERATURE_OFF: std::cout << "Cooler OFF" << std::endl; break;
-        case DRV_TEMPERATURE_STABILIZED: std::cout << "Stabilised" << std::endl; break;
-        case DRV_TEMPERATURE_NOT_REACHED: std::cout << "Cooling" << std::endl; break;
-        case DRV_TEMPERATURE_NOT_STABILIZED: std::cout << "Temp reached but not stablized" << std::endl; break;
-        case DRV_TEMPERATURE_DRIFT: std::cout << "Temp had stabilized but has since drifted" << std::endl; break;
-        default:std::cout << "Unknown" << std::endl;
+      case DRV_TEMPERATURE_OFF: cooling =  "OFF"; break;
+      case DRV_TEMPERATURE_STABILIZED: cooling = "STABILIZED"; break;
+      case DRV_TEMPERATURE_NOT_REACHED: cooling = "COOLING"; break; 
+      case DRV_TEMPERATURE_NOT_STABILIZED: cooling = "NOT STABILIZED"; break;
+      case DRV_TEMPERATURE_DRIFT: cooling = "DRIFTING"; break;
+      default: cooling =  "UNKOWN";
    }     
-      
+   updateIfChanged(m_indiP_cooling, "current", cooling);
       
    //log<ocam_temps>({temps.CCD, temps.CPU, temps.POWER, temps.BIAS, temps.WATER, temps.LEFT, temps.RIGHT, temps.COOLING_POWER});
 
-   updateIfChanged(m_indiP_ccdtemp, "current", temp);
+  
    return 0;
 
 
@@ -503,6 +525,26 @@ int andorCtrl::setTemp(float temp)
 inline
 int andorCtrl::getFPS()
 {
+   float exptime;
+   float accumCycletime;
+   float kinCycletime;
+   
+   unsigned long error = GetAcquisitionTimings(&exptime, &accumCycletime, &kinCycletime);
+   if(error != DRV_SUCCESS)
+   {
+      return log<software_error,-1>({__FILE__, __LINE__, "Error from GetAcquisitionTimings"});
+   }
+   
+   m_fpsSet = 1./exptime;
+   
+   updateIfChanged(m_indiP_fps, "current", m_fpsSet);
+   
+   if(m_fpsSet == m_fpsTgt) updateIfChanged(m_indiP_fps, "target", std::string(""));
+   
+   m_fpsMeasured = 0;
+   
+   updateIfChanged(m_indiP_fps, "measured", std::string(""));
+   
    return 0;
 
 }
@@ -510,6 +552,17 @@ int andorCtrl::getFPS()
 inline
 int andorCtrl::setFPS(float fps)
 {
+   AbortAcquisition();
+   
+   unsigned long err = SetExposureTime(1.0/fps);
+    
+   StartAcquisition();
+   
+   
+   if(err != DRV_SUCCESS)
+   {
+      return log<software_error, -1>({__FILE__, __LINE__, "error from SetExposureTime"});
+   }
    return 0;
 
 }
@@ -522,18 +575,20 @@ int andorCtrl::getEMGain()
    int low, high;
    unsigned long out = GetEMAdvanced(&state);
    
-   if(out==DRV_SUCCESS){
-        std::cout << "The Current Advanced EM gain setting is: " << state << std::endl;
-   }
+//    if(out==DRV_SUCCESS){
+//         std::cout << "The Current Advanced EM gain setting is: " << state << std::endl;
+//    }
    out = GetEMCCDGain(&gain);
-   if(out==DRV_SUCCESS){
-       std::cout << "Current EMCCD Gain: " << gain << std::endl;
-   }
+//    if(out==DRV_SUCCESS){
+//        std::cout << "Current EMCCD Gain: " << gain << std::endl;
+//    }
    
    out = GetEMGainRange(&low, &high);
-   if(out==DRV_SUCCESS){
-        std::cout << " The range of EMGain is: {" << low << "," << high << "}" << std::endl;
-   }
+//    if(out==DRV_SUCCESS){
+//         std::cout << " The range of EMGain is: {" << low << "," << high << "}" << std::endl;
+//    }
+   
+   return 0;
 }
    
 inline
@@ -545,12 +600,18 @@ int andorCtrl::setEMGain( unsigned emg )
 inline
 int andorCtrl::setShutter( unsigned os )
 {
-   std::cerr << "\n*****************\n in setShutter " << os << "\n*********************\n";
-   
    AbortAcquisition();
    
-   if(os == 0) SetShutter(1,2,50,50);
-   else SetShutter(1,1,50,50);
+   if(os == 0) 
+   {
+      SetShutter(1,2,50,50);
+      m_shutter = 0;
+   }
+   else 
+   {
+      SetShutter(1,1,50,50);
+      m_shutter = 1;
+   }
    
    StartAcquisition();
    
@@ -600,7 +661,9 @@ int andorCtrl::configureAcquisition()
     SetExposureTime(0.1);
    
     //Initialize Shutter to SHUT
-    SetShutter(1,2,50,50);
+    int ss = 2;
+    if(m_shutter) ss = 1;
+    SetShutter(1,ss,50,50);
     
     SetNumberAccumulations(1);
     SetFrameTransferMode(1);
@@ -701,6 +764,40 @@ INDI_NEWCALLBACK_DEFN(andorCtrl, m_indiP_ccdtemp)(const pcf::IndiProperty &ipRec
    return -1;
 }
 
+INDI_NEWCALLBACK_DEFN(andorCtrl, m_indiP_cooling)(const pcf::IndiProperty &ipRecv)
+{
+   if (ipRecv.getName() == m_indiP_cooling.getName())
+   {
+      std::string current, target;
+
+      if(ipRecv.find("current"))
+      {
+         current = ipRecv["current"].get<std::string>();
+      }
+
+      if(ipRecv.find("target"))
+      {
+         target = ipRecv["target"].get<std::string>();
+      }
+      
+      //Check if target is empty
+      if( target == "" ) target = current;
+      
+      target = mx::ioutils::toUpper(target);
+      
+      if( target != "ON" && target != "OFF") return 0;
+      
+      //Lock the mutex, waiting if necessary
+      std::unique_lock<std::mutex> lock(m_indiMutex);
+      
+      updateIfChanged(m_indiP_cooling, "target", target);
+      
+      return 0;
+      //return setCooling(target);
+   }
+   return -1;
+}
+
 INDI_NEWCALLBACK_DEFN(andorCtrl, m_indiP_mode)(const pcf::IndiProperty &ipRecv)
 {
    if (ipRecv.getName() == m_indiP_mode.getName())
@@ -750,17 +847,15 @@ INDI_NEWCALLBACK_DEFN(andorCtrl, m_indiP_fps)(const pcf::IndiProperty &ipRecv)
    {
       float current = -99, target = -99;
 
-      try
+      if(ipRecv.find("current"))
       {
          current = ipRecv["current"].get<float>();
       }
-      catch(...){}
-      
-      try
+
+      if(ipRecv.find("target"))
       {
          target = ipRecv["target"].get<float>();
       }
-      catch(...){}
       
       if(target == -99) target = current;
       
@@ -769,9 +864,10 @@ INDI_NEWCALLBACK_DEFN(andorCtrl, m_indiP_fps)(const pcf::IndiProperty &ipRecv)
       //Lock the mutex, waiting if necessary
       std::unique_lock<std::mutex> lock(m_indiMutex);
 
-      updateIfChanged(m_indiP_fps, "target", target);
+      m_fpsTgt = target;
+      updateIfChanged(m_indiP_fps, "target", m_fpsTgt);
       
-      return setFPS(target);
+      return setFPS(m_fpsTgt);
       
    }
    return -1;
