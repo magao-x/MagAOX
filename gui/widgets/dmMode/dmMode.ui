@@ -782,6 +782,162 @@
     </rect>
    </property>
   </widget>
+  <widget class="QPushButton" name="modeZero_0">
+   <property name="geometry">
+    <rect>
+     <x>275</x>
+     <y>125</y>
+     <width>30</width>
+     <height>26</height>
+    </rect>
+   </property>
+   <property name="text">
+    <string>0</string>
+   </property>
+  </widget>
+  <widget class="QPushButton" name="modeZero_1">
+   <property name="geometry">
+    <rect>
+     <x>274</x>
+     <y>180</y>
+     <width>30</width>
+     <height>26</height>
+    </rect>
+   </property>
+   <property name="text">
+    <string>0</string>
+   </property>
+  </widget>
+  <widget class="QPushButton" name="modeZero_2">
+   <property name="geometry">
+    <rect>
+     <x>273</x>
+     <y>235</y>
+     <width>30</width>
+     <height>26</height>
+    </rect>
+   </property>
+   <property name="text">
+    <string>0</string>
+   </property>
+  </widget>
+  <widget class="QPushButton" name="modeZero_3">
+   <property name="geometry">
+    <rect>
+     <x>273</x>
+     <y>285</y>
+     <width>30</width>
+     <height>26</height>
+    </rect>
+   </property>
+   <property name="text">
+    <string>0</string>
+   </property>
+  </widget>
+  <widget class="QPushButton" name="modeZero_4">
+   <property name="geometry">
+    <rect>
+     <x>274</x>
+     <y>335</y>
+     <width>30</width>
+     <height>26</height>
+    </rect>
+   </property>
+   <property name="text">
+    <string>0</string>
+   </property>
+  </widget>
+  <widget class="QPushButton" name="modeZero_5">
+   <property name="geometry">
+    <rect>
+     <x>274</x>
+     <y>385</y>
+     <width>30</width>
+     <height>26</height>
+    </rect>
+   </property>
+   <property name="text">
+    <string>0</string>
+   </property>
+  </widget>
+  <widget class="QPushButton" name="modeZero_6">
+   <property name="geometry">
+    <rect>
+     <x>274</x>
+     <y>435</y>
+     <width>30</width>
+     <height>26</height>
+    </rect>
+   </property>
+   <property name="text">
+    <string>0</string>
+   </property>
+  </widget>
+  <widget class="QPushButton" name="modeZero_7">
+   <property name="geometry">
+    <rect>
+     <x>274</x>
+     <y>485</y>
+     <width>30</width>
+     <height>26</height>
+    </rect>
+   </property>
+   <property name="text">
+    <string>0</string>
+   </property>
+  </widget>
+  <widget class="QPushButton" name="modeZero_8">
+   <property name="geometry">
+    <rect>
+     <x>274</x>
+     <y>535</y>
+     <width>30</width>
+     <height>26</height>
+    </rect>
+   </property>
+   <property name="text">
+    <string>0</string>
+   </property>
+  </widget>
+  <widget class="QPushButton" name="modeZero_9">
+   <property name="geometry">
+    <rect>
+     <x>274</x>
+     <y>585</y>
+     <width>30</width>
+     <height>26</height>
+    </rect>
+   </property>
+   <property name="text">
+    <string>0</string>
+   </property>
+  </widget>
+  <widget class="QPushButton" name="modeZero_10">
+   <property name="geometry">
+    <rect>
+     <x>274</x>
+     <y>635</y>
+     <width>30</width>
+     <height>26</height>
+    </rect>
+   </property>
+   <property name="text">
+    <string>0</string>
+   </property>
+  </widget>
+  <widget class="QPushButton" name="modeZero_all">
+   <property name="geometry">
+    <rect>
+     <x>240</x>
+     <y>680</y>
+     <width>95</width>
+     <height>36</height>
+    </rect>
+   </property>
+   <property name="text">
+    <string>zero all</string>
+   </property>
+  </widget>
  </widget>
  <customwidgets>
   <customwidget>

@@ -89,6 +89,20 @@ public slots:
    void on_modeTarget_9_returnPressed();
    void on_modeTarget_10_returnPressed();
    
+   void on_modeZero_0_pressed();
+   void on_modeZero_1_pressed();
+   void on_modeZero_2_pressed();
+   void on_modeZero_3_pressed();
+   void on_modeZero_4_pressed();
+   void on_modeZero_5_pressed();
+   void on_modeZero_6_pressed();
+   void on_modeZero_7_pressed();
+   void on_modeZero_8_pressed();
+   void on_modeZero_9_pressed();
+   void on_modeZero_10_pressed();
+   
+   void on_modeZero_all_pressed();
+   
 signals:
    
 private:
