@@ -1,7 +1,7 @@
 /********************************************************************************
 ** Form generated from reading UI file 'modwfs.ui'
 **
-** Created by: Qt User Interface Compiler version 5.9.2
+** Created by: Qt User Interface Compiler version 5.9.5
 **
 ** WARNING! All changes made in this file will be lost when recompiling UI file!
 ********************************************************************************/
@@ -25,27 +25,34 @@ QT_BEGIN_NAMESPACE
 class Ui_modwfs
 {
 public:
+    QGridLayout *gridLayout;
     QLabel *titleLabel;
-    QWidget *gridLayoutWidget;
+    QLabel *ttmStatus;
     QGridLayout *gridLayout_2;
     QPushButton *buttonRest;
     QPushButton *buttonSet;
     QPushButton *buttonModulate;
+    QLabel *labelChannel1;
+    QLCDNumber *voltsAxis1;
     QPushButton *buttonUp;
     QPushButton *buttonLeft;
     QPushButton *buttonRight;
-    QPushButton *buttonDown;
-    QLCDNumber *voltsAxis1;
-    QLCDNumber *voltsAxis2;
-    QLabel *labelChannel1;
     QLabel *labelChannel2;
-    QLabel *ttmStatus;
+    QLCDNumber *voltsAxis2;
+    QPushButton *buttonDown;
+    QPushButton *pushButton;
 
     void setupUi(QWidget *modwfs)
     {
         if (modwfs->objectName().isEmpty())
             modwfs->setObjectName(QStringLiteral("modwfs"));
-        modwfs->resize(512, 400);
+        modwfs->resize(551, 272);
+        QSizePolicy sizePolicy(QSizePolicy::MinimumExpanding, QSizePolicy::MinimumExpanding);
+        sizePolicy.setHorizontalStretch(1);
+        sizePolicy.setVerticalStretch(1);
+        sizePolicy.setHeightForWidth(modwfs->sizePolicy().hasHeightForWidth());
+        modwfs->setSizePolicy(sizePolicy);
+        modwfs->setSizeIncrement(QSize(1, 1));
         QPalette palette;
         QBrush brush(QColor(32, 31, 31, 255));
         brush.setStyle(Qt::SolidPattern);
@@ -59,108 +66,183 @@ public:
         palette.setBrush(QPalette::Disabled, QPalette::Window, brush1);
         modwfs->setPalette(palette);
         modwfs->setFocusPolicy(Qt::StrongFocus);
+        gridLayout = new QGridLayout(modwfs);
+        gridLayout->setObjectName(QStringLiteral("gridLayout"));
         titleLabel = new QLabel(modwfs);
         titleLabel->setObjectName(QStringLiteral("titleLabel"));
-        titleLabel->setGeometry(QRect(10, 20, 491, 24));
+        QSizePolicy sizePolicy1(QSizePolicy::MinimumExpanding, QSizePolicy::MinimumExpanding);
+        sizePolicy1.setHorizontalStretch(0);
+        sizePolicy1.setVerticalStretch(0);
+        sizePolicy1.setHeightForWidth(titleLabel->sizePolicy().hasHeightForWidth());
+        titleLabel->setSizePolicy(sizePolicy1);
         titleLabel->setAlignment(Qt::AlignCenter);
-        gridLayoutWidget = new QWidget(modwfs);
-        gridLayoutWidget->setObjectName(QStringLiteral("gridLayoutWidget"));
-        gridLayoutWidget->setGeometry(QRect(10, 150, 491, 88));
-        gridLayout_2 = new QGridLayout(gridLayoutWidget);
-        gridLayout_2->setObjectName(QStringLiteral("gridLayout_2"));
-        gridLayout_2->setContentsMargins(0, 0, 0, 0);
-        buttonRest = new QPushButton(gridLayoutWidget);
-        buttonRest->setObjectName(QStringLiteral("buttonRest"));
-        buttonRest->setFocusPolicy(Qt::StrongFocus);
 
-        gridLayout_2->addWidget(buttonRest, 0, 0, 1, 1);
+        gridLayout->addWidget(titleLabel, 0, 0, 1, 5);
 
-        buttonSet = new QPushButton(gridLayoutWidget);
-        buttonSet->setObjectName(QStringLiteral("buttonSet"));
-        buttonSet->setFocusPolicy(Qt::StrongFocus);
-
-        gridLayout_2->addWidget(buttonSet, 0, 1, 1, 1);
-
-        buttonModulate = new QPushButton(gridLayoutWidget);
-        buttonModulate->setObjectName(QStringLiteral("buttonModulate"));
-        buttonModulate->setFocusPolicy(Qt::StrongFocus);
-
-        gridLayout_2->addWidget(buttonModulate, 0, 2, 1, 1);
-
-        buttonUp = new QPushButton(modwfs);
-        buttonUp->setObjectName(QStringLiteral("buttonUp"));
-        buttonUp->setGeometry(QRect(414, 260, 41, 40));
-        buttonUp->setFocusPolicy(Qt::StrongFocus);
-        buttonLeft = new QPushButton(modwfs);
-        buttonLeft->setObjectName(QStringLiteral("buttonLeft"));
-        buttonLeft->setGeometry(QRect(374, 300, 41, 40));
-        buttonLeft->setFocusPolicy(Qt::StrongFocus);
-        buttonRight = new QPushButton(modwfs);
-        buttonRight->setObjectName(QStringLiteral("buttonRight"));
-        buttonRight->setGeometry(QRect(454, 300, 41, 40));
-        buttonRight->setFocusPolicy(Qt::StrongFocus);
-        buttonDown = new QPushButton(modwfs);
-        buttonDown->setObjectName(QStringLiteral("buttonDown"));
-        buttonDown->setGeometry(QRect(414, 340, 41, 40));
-        buttonDown->setFocusPolicy(Qt::StrongFocus);
-        voltsAxis1 = new QLCDNumber(modwfs);
-        voltsAxis1->setObjectName(QStringLiteral("voltsAxis1"));
-        voltsAxis1->setGeometry(QRect(185, 275, 101, 41));
+        ttmStatus = new QLabel(modwfs);
+        ttmStatus->setObjectName(QStringLiteral("ttmStatus"));
+        sizePolicy1.setHeightForWidth(ttmStatus->sizePolicy().hasHeightForWidth());
+        ttmStatus->setSizePolicy(sizePolicy1);
         QPalette palette1;
         QBrush brush2(QColor(170, 255, 255, 255));
         brush2.setStyle(Qt::SolidPattern);
         palette1.setBrush(QPalette::Active, QPalette::WindowText, brush2);
-        palette1.setBrush(QPalette::Active, QPalette::Text, brush2);
         palette1.setBrush(QPalette::Inactive, QPalette::WindowText, brush2);
-        palette1.setBrush(QPalette::Inactive, QPalette::Text, brush2);
         QBrush brush3(QColor(96, 95, 94, 255));
         brush3.setStyle(Qt::SolidPattern);
         palette1.setBrush(QPalette::Disabled, QPalette::WindowText, brush3);
-        QBrush brush4(QColor(83, 82, 81, 255));
-        brush4.setStyle(Qt::SolidPattern);
-        palette1.setBrush(QPalette::Disabled, QPalette::Text, brush4);
-        voltsAxis1->setPalette(palette1);
-        voltsAxis2 = new QLCDNumber(modwfs);
-        voltsAxis2->setObjectName(QStringLiteral("voltsAxis2"));
-        voltsAxis2->setGeometry(QRect(185, 325, 101, 41));
-        QPalette palette2;
-        palette2.setBrush(QPalette::Active, QPalette::WindowText, brush2);
-        palette2.setBrush(QPalette::Inactive, QPalette::WindowText, brush2);
-        palette2.setBrush(QPalette::Disabled, QPalette::WindowText, brush3);
-        voltsAxis2->setPalette(palette2);
+        ttmStatus->setPalette(palette1);
+        QFont font;
+        font.setFamily(QStringLiteral("Tlwg Typist"));
+        font.setPointSize(22);
+        ttmStatus->setFont(font);
+        ttmStatus->setFrameShape(QFrame::Box);
+        ttmStatus->setFrameShadow(QFrame::Sunken);
+        ttmStatus->setAlignment(Qt::AlignCenter);
+
+        gridLayout->addWidget(ttmStatus, 1, 0, 1, 5);
+
+        gridLayout_2 = new QGridLayout();
+        gridLayout_2->setObjectName(QStringLiteral("gridLayout_2"));
+        gridLayout_2->setSizeConstraint(QLayout::SetMinimumSize);
+        buttonRest = new QPushButton(modwfs);
+        buttonRest->setObjectName(QStringLiteral("buttonRest"));
+        sizePolicy.setHeightForWidth(buttonRest->sizePolicy().hasHeightForWidth());
+        buttonRest->setSizePolicy(sizePolicy);
+        buttonRest->setFocusPolicy(Qt::StrongFocus);
+
+        gridLayout_2->addWidget(buttonRest, 0, 0, 1, 1);
+
+        buttonSet = new QPushButton(modwfs);
+        buttonSet->setObjectName(QStringLiteral("buttonSet"));
+        sizePolicy.setHeightForWidth(buttonSet->sizePolicy().hasHeightForWidth());
+        buttonSet->setSizePolicy(sizePolicy);
+        buttonSet->setFocusPolicy(Qt::StrongFocus);
+
+        gridLayout_2->addWidget(buttonSet, 0, 1, 1, 1);
+
+        buttonModulate = new QPushButton(modwfs);
+        buttonModulate->setObjectName(QStringLiteral("buttonModulate"));
+        sizePolicy.setHeightForWidth(buttonModulate->sizePolicy().hasHeightForWidth());
+        buttonModulate->setSizePolicy(sizePolicy);
+        buttonModulate->setFocusPolicy(Qt::StrongFocus);
+
+        gridLayout_2->addWidget(buttonModulate, 0, 2, 1, 1);
+
+        gridLayout_2->setColumnStretch(0, 1);
+        gridLayout_2->setColumnStretch(1, 1);
+        gridLayout_2->setColumnStretch(2, 1);
+
+        gridLayout->addLayout(gridLayout_2, 2, 0, 1, 5);
+
         labelChannel1 = new QLabel(modwfs);
         labelChannel1->setObjectName(QStringLiteral("labelChannel1"));
-        labelChannel1->setGeometry(QRect(40, 285, 131, 24));
-        QPalette palette3;
-        QBrush brush5(QColor(0, 0, 102, 255));
+        QSizePolicy sizePolicy2(QSizePolicy::Preferred, QSizePolicy::Preferred);
+        sizePolicy2.setHorizontalStretch(2);
+        sizePolicy2.setVerticalStretch(0);
+        sizePolicy2.setHeightForWidth(labelChannel1->sizePolicy().hasHeightForWidth());
+        labelChannel1->setSizePolicy(sizePolicy2);
+        QPalette palette2;
+        QBrush brush4(QColor(0, 0, 102, 255));
+        brush4.setStyle(Qt::SolidPattern);
+        palette2.setBrush(QPalette::Active, QPalette::Text, brush4);
+        palette2.setBrush(QPalette::Inactive, QPalette::Text, brush4);
+        QBrush brush5(QColor(83, 82, 81, 255));
         brush5.setStyle(Qt::SolidPattern);
-        palette3.setBrush(QPalette::Active, QPalette::Text, brush5);
-        palette3.setBrush(QPalette::Inactive, QPalette::Text, brush5);
-        palette3.setBrush(QPalette::Disabled, QPalette::Text, brush4);
-        labelChannel1->setPalette(palette3);
-        QFont font;
-        font.setFamily(QStringLiteral("Tlwg Typewriter"));
-        font.setPointSize(14);
-        labelChannel1->setFont(font);
+        palette2.setBrush(QPalette::Disabled, QPalette::Text, brush5);
+        labelChannel1->setPalette(palette2);
+        QFont font1;
+        font1.setFamily(QStringLiteral("Tlwg Typewriter"));
+        font1.setPointSize(14);
+        labelChannel1->setFont(font1);
+
+        gridLayout->addWidget(labelChannel1, 3, 0, 2, 1);
+
+        voltsAxis1 = new QLCDNumber(modwfs);
+        voltsAxis1->setObjectName(QStringLiteral("voltsAxis1"));
+        QSizePolicy sizePolicy3(QSizePolicy::MinimumExpanding, QSizePolicy::Minimum);
+        sizePolicy3.setHorizontalStretch(2);
+        sizePolicy3.setVerticalStretch(0);
+        sizePolicy3.setHeightForWidth(voltsAxis1->sizePolicy().hasHeightForWidth());
+        voltsAxis1->setSizePolicy(sizePolicy3);
+        QPalette palette3;
+        palette3.setBrush(QPalette::Active, QPalette::WindowText, brush2);
+        palette3.setBrush(QPalette::Active, QPalette::Text, brush2);
+        palette3.setBrush(QPalette::Inactive, QPalette::WindowText, brush2);
+        palette3.setBrush(QPalette::Inactive, QPalette::Text, brush2);
+        palette3.setBrush(QPalette::Disabled, QPalette::WindowText, brush3);
+        palette3.setBrush(QPalette::Disabled, QPalette::Text, brush5);
+        voltsAxis1->setPalette(palette3);
+
+        gridLayout->addWidget(voltsAxis1, 3, 1, 2, 1);
+
+        buttonUp = new QPushButton(modwfs);
+        buttonUp->setObjectName(QStringLiteral("buttonUp"));
+        QSizePolicy sizePolicy4(QSizePolicy::MinimumExpanding, QSizePolicy::Fixed);
+        sizePolicy4.setHorizontalStretch(1);
+        sizePolicy4.setVerticalStretch(0);
+        sizePolicy4.setHeightForWidth(buttonUp->sizePolicy().hasHeightForWidth());
+        buttonUp->setSizePolicy(sizePolicy4);
+        buttonUp->setMaximumSize(QSize(50, 16777215));
+        buttonUp->setFocusPolicy(Qt::StrongFocus);
+
+        gridLayout->addWidget(buttonUp, 3, 3, 1, 1);
+
+        buttonLeft = new QPushButton(modwfs);
+        buttonLeft->setObjectName(QStringLiteral("buttonLeft"));
+        sizePolicy4.setHeightForWidth(buttonLeft->sizePolicy().hasHeightForWidth());
+        buttonLeft->setSizePolicy(sizePolicy4);
+        buttonLeft->setMaximumSize(QSize(50, 16777215));
+        buttonLeft->setFocusPolicy(Qt::StrongFocus);
+
+        gridLayout->addWidget(buttonLeft, 4, 2, 2, 1);
+
+        buttonRight = new QPushButton(modwfs);
+        buttonRight->setObjectName(QStringLiteral("buttonRight"));
+        sizePolicy4.setHeightForWidth(buttonRight->sizePolicy().hasHeightForWidth());
+        buttonRight->setSizePolicy(sizePolicy4);
+        buttonRight->setMaximumSize(QSize(50, 16777215));
+        buttonRight->setFocusPolicy(Qt::StrongFocus);
+
+        gridLayout->addWidget(buttonRight, 4, 4, 2, 1);
+
         labelChannel2 = new QLabel(modwfs);
         labelChannel2->setObjectName(QStringLiteral("labelChannel2"));
-        labelChannel2->setGeometry(QRect(40, 335, 131, 24));
-        labelChannel2->setFont(font);
-        ttmStatus = new QLabel(modwfs);
-        ttmStatus->setObjectName(QStringLiteral("ttmStatus"));
-        ttmStatus->setGeometry(QRect(20, 80, 471, 51));
+        sizePolicy2.setHeightForWidth(labelChannel2->sizePolicy().hasHeightForWidth());
+        labelChannel2->setSizePolicy(sizePolicy2);
+        labelChannel2->setFont(font1);
+
+        gridLayout->addWidget(labelChannel2, 5, 0, 2, 1);
+
+        voltsAxis2 = new QLCDNumber(modwfs);
+        voltsAxis2->setObjectName(QStringLiteral("voltsAxis2"));
+        sizePolicy3.setHeightForWidth(voltsAxis2->sizePolicy().hasHeightForWidth());
+        voltsAxis2->setSizePolicy(sizePolicy3);
         QPalette palette4;
         palette4.setBrush(QPalette::Active, QPalette::WindowText, brush2);
         palette4.setBrush(QPalette::Inactive, QPalette::WindowText, brush2);
         palette4.setBrush(QPalette::Disabled, QPalette::WindowText, brush3);
-        ttmStatus->setPalette(palette4);
-        QFont font1;
-        font1.setFamily(QStringLiteral("Tlwg Typist"));
-        font1.setPointSize(22);
-        ttmStatus->setFont(font1);
-        ttmStatus->setFrameShape(QFrame::Box);
-        ttmStatus->setFrameShadow(QFrame::Sunken);
-        ttmStatus->setAlignment(Qt::AlignCenter);
+        voltsAxis2->setPalette(palette4);
+
+        gridLayout->addWidget(voltsAxis2, 5, 1, 2, 1);
+
+        buttonDown = new QPushButton(modwfs);
+        buttonDown->setObjectName(QStringLiteral("buttonDown"));
+        sizePolicy4.setHeightForWidth(buttonDown->sizePolicy().hasHeightForWidth());
+        buttonDown->setSizePolicy(sizePolicy4);
+        buttonDown->setMaximumSize(QSize(50, 16777215));
+        buttonDown->setFocusPolicy(Qt::StrongFocus);
+
+        gridLayout->addWidget(buttonDown, 6, 3, 1, 1);
+
+        pushButton = new QPushButton(modwfs);
+        pushButton->setObjectName(QStringLiteral("pushButton"));
+        sizePolicy4.setHeightForWidth(pushButton->sizePolicy().hasHeightForWidth());
+        pushButton->setSizePolicy(sizePolicy4);
+        pushButton->setMaximumSize(QSize(50, 16777215));
+
+        gridLayout->addWidget(pushButton, 5, 3, 1, 1);
+
 
         retranslateUi(modwfs);
 
@@ -171,16 +253,17 @@ public:
     {
         modwfs->setWindowTitle(QApplication::translate("modwfs", "modwfs", Q_NULLPTR));
         titleLabel->setText(QApplication::translate("modwfs", "PyWFS Modulator", Q_NULLPTR));
+        ttmStatus->setText(QApplication::translate("modwfs", "OFF", Q_NULLPTR));
         buttonRest->setText(QApplication::translate("modwfs", "Rest", Q_NULLPTR));
         buttonSet->setText(QApplication::translate("modwfs", "Set", Q_NULLPTR));
         buttonModulate->setText(QApplication::translate("modwfs", "Modulate", Q_NULLPTR));
+        labelChannel1->setText(QApplication::translate("modwfs", "Channel 1:", Q_NULLPTR));
         buttonUp->setText(QApplication::translate("modwfs", "U", Q_NULLPTR));
         buttonLeft->setText(QApplication::translate("modwfs", "L", Q_NULLPTR));
         buttonRight->setText(QApplication::translate("modwfs", "R", Q_NULLPTR));
-        buttonDown->setText(QApplication::translate("modwfs", "D", Q_NULLPTR));
-        labelChannel1->setText(QApplication::translate("modwfs", "Channel 1:", Q_NULLPTR));
         labelChannel2->setText(QApplication::translate("modwfs", "Channel 2:", Q_NULLPTR));
-        ttmStatus->setText(QApplication::translate("modwfs", "OFF", Q_NULLPTR));
+        buttonDown->setText(QApplication::translate("modwfs", "D", Q_NULLPTR));
+        pushButton->setText(QApplication::translate("modwfs", "0.01", Q_NULLPTR));
     } // retranslateUi
 
 };
