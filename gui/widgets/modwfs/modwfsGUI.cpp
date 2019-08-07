@@ -63,6 +63,9 @@ modwfsGUI::modwfsGUI( QWidget * Parent, Qt::WindowFlags f) : QWidget(Parent, f)
    synchActiveInactive(&p);
    ui.buttonRest->setPalette(p);
    
+   char ss[5];
+   snprintf(ss, 5, "%0.2f", m_stepSize);
+   ui.buttonScale->setText(ss);
    
 }
    
@@ -78,7 +81,7 @@ int modwfsGUI::subscribe( multiIndiPublisher * publisher )
    publisher->subscribeProperty(this, "modwfs", "modRadius");
    publisher->subscribeProperty(this, "fxngenmodwfs", "C1ofst");
    publisher->subscribeProperty(this, "fxngenmodwfs", "C2ofst");
-   publisher->subscribeProperty(this, "pdu1", "modttm");   
+   publisher->subscribeProperty(this, "pdu1", "modttm");  ///\todo this ought to get from the modwfs state code.
    
    return 0;
 }
@@ -95,8 +98,6 @@ int modwfsGUI::handleDefProperty( const pcf::IndiProperty & ipRecv)
 
 int modwfsGUI::handleSetProperty( const pcf::IndiProperty & ipRecv)
 {  
-   std::cerr << "Got " << ipRecv.createUniqueKey() << "\n";
-   
    if(ipRecv.getDevice() == "modwfs")
    {
       if(ipRecv.getName() == "state")
@@ -155,12 +156,10 @@ int modwfsGUI::handleSetProperty( const pcf::IndiProperty & ipRecv)
          if(ipRecv.find("state"))
          {
             std::string tmp = ipRecv["state"].get();
-            std::cerr << "|" <<tmp << "|\n";
             if(tmp == "On") m_pwrState = 2;
             else if(tmp == "Int") m_pwrState = 1;
             else if(tmp == "Off") m_pwrState = 0;
             else m_pwrState = -1;
-            std::cerr << m_pwrState << "\n";
          }
       }
    }
@@ -174,7 +173,8 @@ int modwfsGUI::handleSetProperty( const pcf::IndiProperty & ipRecv)
 
 void modwfsGUI::updateGUI()
 {
-   std::cerr << "Updating " << m_pwrState << "\n";
+   
+   
    if( m_pwrState != 2 )
    {
       if(m_pwrState == 1)
@@ -200,6 +200,7 @@ void modwfsGUI::updateGUI()
       ui.buttonDown->setEnabled(false);
       ui.buttonLeft->setEnabled(false);
       ui.buttonRight->setEnabled(false);
+      ui.buttonScale->setEnabled(false);
       
       ui.voltsAxis1->display(0);
       ui.voltsAxis1->setEnabled(false);
@@ -225,7 +226,8 @@ void modwfsGUI::updateGUI()
       ui.buttonUp->setEnabled(false);
       ui.buttonDown->setEnabled(false);
       ui.buttonLeft->setEnabled(false);
-      ui.buttonRight->setEnabled(false);      
+      ui.buttonRight->setEnabled(false);    
+      ui.buttonScale->setEnabled(false);
    }
    if( m_modState == 2)
    {
@@ -239,6 +241,7 @@ void modwfsGUI::updateGUI()
       ui.buttonDown->setEnabled(false);
       ui.buttonLeft->setEnabled(false);
       ui.buttonRight->setEnabled(false);
+      ui.buttonScale->setEnabled(false);
    }
    if( m_modState == 3)
    {
@@ -252,6 +255,7 @@ void modwfsGUI::updateGUI()
       ui.buttonDown->setEnabled(true);
       ui.buttonLeft->setEnabled(true);
       ui.buttonRight->setEnabled(true);
+      ui.buttonScale->setEnabled(true);
    }
    if( m_modState == 4)
    {
@@ -265,6 +269,7 @@ void modwfsGUI::updateGUI()
       ui.buttonDown->setEnabled(true);
       ui.buttonLeft->setEnabled(true);
       ui.buttonRight->setEnabled(true);
+      ui.buttonScale->setEnabled(true);
    }
    
 } //updateGUI()
@@ -280,7 +285,6 @@ void modwfsGUI::on_buttonRest_pressed()
    
    sendNewProperty(ip);
    
-   std::cerr << "button rest\n";
 }
 
 void modwfsGUI::on_buttonSet_pressed()
@@ -294,7 +298,6 @@ void modwfsGUI::on_buttonSet_pressed()
    
    sendNewProperty(ip);
    
-   std::cerr << "button set\n";
 }
 
 void modwfsGUI::on_buttonModulate_pressed()
@@ -326,7 +329,6 @@ void modwfsGUI::on_buttonModulate_pressed()
    
    sendNewProperty(ip);
    
-   std::cerr << "button modulate\n";
 }
 
 void modwfsGUI::on_buttonUp_pressed()
@@ -336,11 +338,10 @@ void modwfsGUI::on_buttonUp_pressed()
    ip.setDevice("fxngenmodwfs");
    ip.setName("C1ofst");
    ip.add(pcf::IndiElement("value"));
-   ip["value"] = m_C1ofst + 0.01;
+   ip["value"] = m_C1ofst + m_stepSize;
     
    sendNewProperty(ip);
    
-   std::cerr << "button up\n";
 }
 
 void modwfsGUI::on_buttonDown_pressed()
@@ -350,11 +351,10 @@ void modwfsGUI::on_buttonDown_pressed()
    ip.setDevice("fxngenmodwfs");
    ip.setName("C1ofst");
    ip.add(pcf::IndiElement("value"));
-   ip["value"] = m_C1ofst - 0.01;
+   ip["value"] = m_C1ofst - m_stepSize;
     
    sendNewProperty(ip);
    
-   std::cerr << "button down\n";
 }
 
 void modwfsGUI::on_buttonLeft_pressed()
@@ -364,11 +364,10 @@ void modwfsGUI::on_buttonLeft_pressed()
    ip.setDevice("fxngenmodwfs");
    ip.setName("C2ofst");
    ip.add(pcf::IndiElement("value"));
-   ip["value"] = m_C2ofst - 0.01;
+   ip["value"] = m_C2ofst - m_stepSize;
     
    sendNewProperty(ip);
    
-   std::cerr << "button left\n";
 }
 
 void modwfsGUI::on_buttonRight_pressed()
@@ -378,12 +377,33 @@ void modwfsGUI::on_buttonRight_pressed()
    ip.setDevice("fxngenmodwfs");
    ip.setName("C2ofst");
    ip.add(pcf::IndiElement("value"));
-   ip["value"] = m_C2ofst + 0.01;
+   ip["value"] = m_C2ofst + m_stepSize;
     
    sendNewProperty(ip);
    
-   std::cerr << "button right\n";
+
 }
 
+void modwfsGUI::on_buttonScale_pressed()
+{
+   if(((int) (100*m_stepSize)) == 1)
+   {
+      m_stepSize = 0.05;
+   }
+   else if(((int) (100*m_stepSize)) == 5)
+   {
+      m_stepSize = 0.1;
+   }
+   else if(((int) (100*m_stepSize)) == 10)
+   {
+      m_stepSize = 0.01;
+   }
+   
+   char ss[5];
+   snprintf(ss, 5, "%0.2f", m_stepSize);
+   ui.buttonScale->setText(ss);
+
+
+}
 
 } //namespace xqt

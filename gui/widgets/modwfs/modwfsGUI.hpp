@@ -38,6 +38,7 @@ public:
    
 protected:
    
+   float m_stepSize {0.1};
    
 public slots:
    void updateGUI();
@@ -51,6 +52,7 @@ public slots:
    void on_buttonLeft_pressed();
    void on_buttonRight_pressed();
    
+   void on_buttonScale_pressed();
    
    private:
       
