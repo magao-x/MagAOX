@@ -150,7 +150,7 @@ protected:
    pcf::IndiProperty m_indiP_ccdtemp;
    pcf::IndiProperty m_indiP_cooling;
    
-   pcf::IndiProperty m_indiP_mode;
+
    pcf::IndiProperty m_indiP_fps;
    pcf::IndiProperty m_indiP_emGain;
 
@@ -423,19 +423,24 @@ int andorCtrl::onPowerOff()
    
    std::lock_guard<std::mutex> lock(m_indiMutex);
    
+   std::cerr << "1" << std::endl;
    updateIfChanged(m_indiP_ccdtemp, "current", -999);
+   std::cerr << "2" << std::endl;
    updateIfChanged(m_indiP_ccdtemp, "target", -999);
-      
-   updateIfChanged(m_indiP_mode, "current", std::string(""));
-   updateIfChanged(m_indiP_mode, "target", std::string(""));
-
+   std::cerr << "3" << std::endl;
+   
    updateIfChanged(m_indiP_fps, "current", 0);
+   std::cerr << "6" << std::endl;
    updateIfChanged(m_indiP_fps, "target", 0);
+   std::cerr << "7" << std::endl;
    updateIfChanged(m_indiP_fps, "measured", 0);
-   
+   std::cerr << "8" << std::endl;
    updateIfChanged(m_indiP_emGain, "current", 0);
+   std::cerr << "9" << std::endl;
    updateIfChanged(m_indiP_emGain, "target", 0);
-   
+   std::cerr << "10" << std::endl;
+
+   edtCamera<andorCtrl>::onPowerOff();
    return 0;
 }
 
