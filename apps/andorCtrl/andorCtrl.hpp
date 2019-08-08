@@ -427,14 +427,13 @@ int andorCtrl::onPowerOff()
    updateIfChanged(m_indiP_ccdtemp, "current", -999);
    std::cerr << "2" << std::endl;
    updateIfChanged(m_indiP_ccdtemp, "target", -999);
-   std::cerr << "3" << std::endl;
    
    updateIfChanged(m_indiP_fps, "current", 0);
    std::cerr << "6" << std::endl;
    updateIfChanged(m_indiP_fps, "target", 0);
    std::cerr << "7" << std::endl;
    updateIfChanged(m_indiP_fps, "measured", 0);
-   std::cerr << "8" << std::endl;
+
    updateIfChanged(m_indiP_emGain, "current", 0);
    std::cerr << "9" << std::endl;
    updateIfChanged(m_indiP_emGain, "target", 0);

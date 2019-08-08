@@ -33,10 +33,12 @@ public:
    
    int subscribe( multiIndiPublisher * publisher );
                                    
+   int handleDefProperty( const pcf::IndiProperty & ipRecv /**< [in] the property which has changed*/);
    int handleSetProperty( const pcf::IndiProperty & ipRecv /**< [in] the property which has changed*/);
    
 protected:
    
+   float m_stepSize {0.1};
    
 public slots:
    void updateGUI();
@@ -50,6 +52,7 @@ public slots:
    void on_buttonLeft_pressed();
    void on_buttonRight_pressed();
    
+   void on_buttonScale_pressed();
    
    private:
       
