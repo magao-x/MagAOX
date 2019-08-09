@@ -25,7 +25,7 @@ protected:
    
    QString m_unitsText;
    
-   QLabel * m_unitsTextLabel;
+   //QLabel * m_unitsTextLabel {nullptr};
    
 public:
    explicit XqwtMultiDial( QWidget* parent = NULL );

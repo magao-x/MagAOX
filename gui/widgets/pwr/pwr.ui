@@ -6,8 +6,8 @@
    <rect>
     <x>0</x>
     <y>0</y>
-    <width>814</width>
-    <height>637</height>
+    <width>1156</width>
+    <height>527</height>
    </rect>
   </property>
   <property name="palette">
@@ -79,7 +79,7 @@
   </property>
   <layout class="QGridLayout" name="gridLayout_2">
    <item row="0" column="0">
-    <layout class="QVBoxLayout" name="verticalLayout" stretch="5,1,1,8">
+    <layout class="QVBoxLayout" name="verticalLayout" stretch="3,1,1,6">
      <item>
       <layout class="QHBoxLayout" name="horizontalLayout" stretch="1,1,1">
        <property name="sizeConstraint">
@@ -95,14 +95,14 @@
          </property>
          <property name="minimumSize">
           <size>
-           <width>250</width>
-           <height>250</height>
+           <width>150</width>
+           <height>150</height>
           </size>
          </property>
          <property name="maximumSize">
           <size>
-           <width>250</width>
-           <height>250</height>
+           <width>150</width>
+           <height>150</height>
           </size>
          </property>
          <property name="palette">
@@ -424,14 +424,14 @@
          </property>
          <property name="minimumSize">
           <size>
-           <width>250</width>
-           <height>250</height>
+           <width>150</width>
+           <height>150</height>
           </size>
          </property>
          <property name="maximumSize">
           <size>
-           <width>250</width>
-           <height>250</height>
+           <width>150</width>
+           <height>150</height>
           </size>
          </property>
          <property name="palette">
@@ -753,14 +753,14 @@
          </property>
          <property name="minimumSize">
           <size>
-           <width>250</width>
-           <height>250</height>
+           <width>150</width>
+           <height>150</height>
           </size>
          </property>
          <property name="maximumSize">
           <size>
-           <width>250</width>
-           <height>250</height>
+           <width>150</width>
+           <height>150</height>
           </size>
          </property>
          <property name="palette">
