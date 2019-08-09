@@ -20,7 +20,7 @@ else
 fi
 EOF
 fi
-source /etc/profile.d/miniconda.sh
+set +u; source /etc/profile.d/miniconda.sh; set -u
 # set group and permissions such that only magaox-dev has write access
 sudo chgrp -R magaox-dev /opt/miniconda3
 sudo chmod -R g=rwx /opt/miniconda3
