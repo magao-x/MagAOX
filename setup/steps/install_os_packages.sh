@@ -39,6 +39,9 @@ yum install -y \
     libusb-devel \
     usbutils \
     tmux \
+    boost-devel \
+    gsl \
+    gsl-devel \
 ;
 
 yum-config-manager --add-repo https://download.opensuse.org/repositories/network:/messaging:/zeromq:/release-stable/CentOS_7/network:messaging:zeromq:release-stable.repo
