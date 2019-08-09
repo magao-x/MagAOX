@@ -36,7 +36,7 @@ chown root:root /opt/MagAOX
 
 mkdir -pv /opt/MagAOX/bin
 chown -R root:root /opt/MagAOX/bin
-# n.b. using + instead of = so we don't clobber setuid binaries
+# n.b. not using -R so we don't clobber setuid binaries
 chmod u+rwX,g+rX,o+rX /opt/MagAOX/bin
 
 mkdir -pv /opt/MagAOX/calib
@@ -97,3 +97,7 @@ mkdir -pv /opt/MagAOX/vendor
 chown -R root:magaox-dev /opt/MagAOX/vendor
 chmod -R u=rwX,g=rwX,o=rX /opt/MagAOX/vendor
 setgid_all /opt/MagAOX/vendor
+
+mkdir -pv /opt/MagAOX/.cache
+chown -R root:root /opt/MagAOX/.cache
+chmod -R u=rwX,g=rwX,o=rX /opt/MagAOX/.cache

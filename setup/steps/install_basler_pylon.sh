@@ -8,9 +8,7 @@ PYLON_VERSION="5.2.0.13457"
 #
 PYLON_DIR="pylon-$PYLON_VERSION-x86_64"
 if [[ ! -d $PYLON_DIR ]]; then
-    if [[ ! -e $PYLON_DIR.tar.gz ]]; then
-        curl -OL https://www.baslerweb.com/fp-1551786516/media/downloads/software/pylon_software/$PYLON_DIR.tar.gz
-    fi
+    _cached_fetch https://www.baslerweb.com/fp-1551786516/media/downloads/software/pylon_software/$PYLON_DIR.tar.gz $PYLON_DIR.tar.gz
     tar xzf $PYLON_DIR.tar.gz
 fi
 cd $PYLON_DIR

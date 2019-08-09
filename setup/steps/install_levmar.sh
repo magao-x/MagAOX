@@ -8,9 +8,7 @@ LEVMAR_VERSION="2.6"
 #
 LEVMAR_DIR="./levmar-$LEVMAR_VERSION"
 if [[ ! -d $LEVMAR_DIR ]]; then
-    if [[ ! -e levmar-$LEVMAR_VERSION.tgz ]]; then
-        curl -OLA "Mozilla/5.0" http://users.ics.forth.gr/~lourakis/levmar/levmar-$LEVMAR_VERSION.tgz
-    fi
+    _cached_fetch http://users.ics.forth.gr/~lourakis/levmar/levmar-$LEVMAR_VERSION.tgz levmar-$LEVMAR_VERSION.tgz
     tar xzf levmar-$LEVMAR_VERSION.tgz
 fi
 cd $LEVMAR_DIR

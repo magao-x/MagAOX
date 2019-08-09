@@ -6,10 +6,7 @@ set -euo pipefail
 PICAM_RUNFILE_CHECKSUM=df337d5ff5bea402669b2283eb534d08
 PICAM_RUNFILE=Picam_SDK.run
 PICAM_URL=ftp://ftp.piacton.com/Public/Software/Official/PICam/$PICAM_RUNFILE
-if [[ ! -e $PICAM_RUNFILE ]]; then
-    curl -O $PICAM_URL
-    log_success "Downloaded $PICAM_URL"
-fi
+_cached_fetch $PICAM_URL $PICAM_RUNFILE
 if [[ $(md5sum ./$PICAM_RUNFILE) != *$PICAM_RUNFILE_CHECKSUM* ]]; then
     log_error "$PICAM_RUNFILE has md5 checksum $(md5sum ./$PICAM_RUNFILE)"
     log_error "Expected $PICAM_RUNFILE_CHECKSUM"

@@ -6,9 +6,7 @@ INTEL_MKL_VERSION=l_mkl_2019.4.243
 INTEL_MKL_TARBALL=$INTEL_MKL_VERSION.tgz
 INTEL_MKL_TARBALL_URL=http://registrationcenter-download.intel.com/akdlm/irc_nas/tec/15540/$INTEL_MKL_TARBALL
 if [[ ! -e l_mkl_2019.4.243 ]]; then
-    if [[ ! -e $INTEL_MKL_TARBALL ]]; then
-        curl -OL $INTEL_MKL_TARBALL_URL
-    fi
+    _cached_fetch $INTEL_MKL_TARBALL_URL $INTEL_MKL_TARBALL
     log_info "Extracting $INTEL_MKL_TARBALL..."
     tar xzf $INTEL_MKL_TARBALL
 fi

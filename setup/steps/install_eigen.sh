@@ -7,9 +7,7 @@ EIGEN_VERSION="3.3.4"
 # Eigen
 #
 if [[ ! -e $(readlink "/usr/local/include/Eigen") ]]; then
-    if [[ ! -e eigen-$EIGEN_VERSION.tar.gz ]]; then
-        curl -L http://bitbucket.org/eigen/eigen/get/$EIGEN_VERSION.tar.gz > eigen-$EIGEN_VERSION.tar.gz
-    fi
+    _cached_fetch http://bitbucket.org/eigen/eigen/get/$EIGEN_VERSION.tar.gz eigen-$EIGEN_VERSION.tar.gz
     tar xzf eigen-$EIGEN_VERSION.tar.gz
     EIGEN_DIR=$(realpath $(find . -type d -name "eigen-eigen-*" | head -n 1))
     ln -sv "$EIGEN_DIR/Eigen" "/usr/local/include/Eigen"

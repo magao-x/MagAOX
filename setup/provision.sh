@@ -54,12 +54,16 @@ set -u
 ## Set up file structure and permissions
 sudo bash -l "$DIR/steps/ensure_dirs_and_perms.sh" $TARGET_ENV
 
+# Install CentOS 7 packages
+if [[ -e /etc/redhat-release && $(cat /etc/redhat-release) == *7.6.1810* ]]; then
+    sudo bash -l "$DIR/steps/install_os_packages.sh"
+    sudo bash -l "$DIR/steps/install_devtoolset-7.sh"
+fi
+
 ## Build third-party dependencies under /opt/MagAOX/vendor
 cd /opt/MagAOX/vendor
-sudo bash -l "$DIR/steps/install_os_packages.sh"
-sudo bash -l "$DIR/steps/install_devtoolset-7.sh"
 sudo bash -l "$DIR/steps/install_mkl_tarball.sh"
-sudo bash -l "$DIR/steps/install_cuda.sh"
+sudo bash -l "$DIR/steps/install_cuda.sh" $TARGET_ENV
 sudo bash -l "$DIR/steps/install_fftw.sh"
 sudo bash -l "$DIR/steps/install_cfitsio.sh"
 sudo bash -l "$DIR/steps/install_sofa.sh"
@@ -140,4 +144,10 @@ fi
 # runs as root.
 $MAYBE_SUDO bash -l "$DIR/steps/install_cacao.sh" $TARGET_ENV
 $MAYBE_SUDO bash -l "$DIR/steps/install_milkzmq.sh"
-$MAYBE_SUDO bash -l "$DIR/steps/install_MagAOX.sh"
+
+# CircleCI invokes install_MagAOX.sh as the next step (see .circleci/config.yml)
+# By separating the real build into another step, we can cache the slow provisioning steps
+# and reuse them on subsequent runs.
+if [[ $TARGET_ENV != ci ]]; then
+    $MAYBE_SUDO bash -l "$DIR/steps/install_MagAOX.sh"
+fi
