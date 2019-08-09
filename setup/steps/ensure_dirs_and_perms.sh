@@ -98,6 +98,11 @@ chown -R root:magaox-dev /opt/MagAOX/vendor
 chmod -R u=rwX,g=rwX,o=rX /opt/MagAOX/vendor
 setgid_all /opt/MagAOX/vendor
 
-mkdir -pv /opt/MagAOX/.cache
-chown -R root:root /opt/MagAOX/.cache
-chmod -R u=rwX,g=rwX,o=rX /opt/MagAOX/.cache
+if [[ "$TARGET_ENV" == "vm" ]]; then
+  mkdir -pv /vagrant/setup/cache
+  link_if_necessary /vagrant/setup/cache /opt/MagAOX/.cache
+elif [[ "$TARGET_ENV" == "instrument" || "$TARGET_ENV" == "ci" ]]; then
+  mkdir -pv /opt/MagAOX/.cache
+  chown -R root:root /opt/MagAOX/.cache
+  chmod -R u=rwX,g=rwX,o=rX /opt/MagAOX/.cache
+fi

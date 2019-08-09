@@ -3,11 +3,6 @@ DIR="$( cd "$( dirname "${BASH_SOURCE[0]}" )" && pwd )"
 source $DIR/../_common.sh
 set -euo pipefail
 
-# mxlib dependencies available as repo packages
-yum -y install \
-  boost-devel \
-  gsl \
-  gsl-devel
 
 MXLIBROOT=/opt/MagAOX/source/mxlib
 
