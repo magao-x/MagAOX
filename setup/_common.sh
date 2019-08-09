@@ -17,7 +17,7 @@ function _cached_fetch() {
   filename=$2
   dest=$PWD
   mkdir -p /opt/MagAOX/.cache
-  if [[ -e /opt/MagAOX/.cache/$filename ]]; then
+  if [[ ! -e /opt/MagAOX/.cache/$filename ]]; then
     curl -A "Mozilla/5.0" -L $url > /opt/MagAOX/.cache/$filename
   fi
   if [[ ! -e $dest/$filename ]]; then
