@@ -38,6 +38,7 @@ yum install -y \
     pciutils \
     libusb-devel \
     usbutils \
+    tmux \
 ;
 
 yum-config-manager --add-repo https://download.opensuse.org/repositories/network:/messaging:/zeromq:/release-stable/CentOS_7/network:messaging:zeromq:release-stable.repo

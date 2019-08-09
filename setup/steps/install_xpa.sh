@@ -8,9 +8,7 @@ XPA_DIR="xpa-$XPA_VERSION"
 XPA_TARBALL="$XPA_DIR.tar.gz"
 
 if [[ ! -e $XPA_DIR ]]; then
-    if [[ ! -e $XPA_TARBALL ]]; then
-        curl -L $XPA_URL > $XPA_TARBALL
-    fi
+    _cached_fetch $XPA_URL $XPA_TARBALL
     log_info "Extracting $XPA_TARBALL..."
     tar xzf $XPA_TARBALL
 fi

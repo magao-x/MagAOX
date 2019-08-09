@@ -8,7 +8,7 @@ FFTW_VERSION="3.3.8"
 #
 if [[ ! -d "./fftw-$FFTW_VERSION" ]]; then
     if [[ ! -e fftw-$FFTW_VERSION.tar.gz ]]; then
-        curl -OL http://fftw.org/fftw-$FFTW_VERSION.tar.gz
+        _cached_fetch http://fftw.org/fftw-$FFTW_VERSION.tar.gz fftw-$FFTW_VERSION.tar.gz
     fi
     tar xzf fftw-$FFTW_VERSION.tar.gz
 fi

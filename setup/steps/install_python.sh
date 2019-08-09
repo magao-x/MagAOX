@@ -7,9 +7,7 @@ MINICONDA_VERSION="3-4.7.10"
 # MINICONDA
 #
 MINICONDA_INSTALLER="Miniconda$MINICONDA_VERSION-Linux-x86_64.sh"
-if [[ ! -e $MINICONDA_INSTALLER ]]; then
-    curl -OL "https://repo.continuum.io/miniconda/$MINICONDA_INSTALLER"
-fi
+_cached_fetch "https://repo.continuum.io/miniconda/$MINICONDA_INSTALLER" $MINICONDA_INSTALLER
 sudo bash $MINICONDA_INSTALLER -b -p /opt/miniconda3
 # Set environment variables for miniconda
 echo "__conda_setup=\"\$(CONDA_REPORT_ERRORS=false '/opt/miniconda3/bin/conda' shell.bash hook 2> /dev/null)\"

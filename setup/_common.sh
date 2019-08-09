@@ -12,6 +12,19 @@ function log_info() {
     echo -e "$(tput setaf 4)$1$(tput sgr0)"
 }
 
+function _cached_fetch() {
+  url=$1
+  filename=$2
+  dest=$PWD
+  mkdir -p /opt/MagAOX/.cache
+  if [[ -e /opt/MagAOX/.cache/$filename ]]; then
+    curl -A "Mozilla/5.0" -L $url > /opt/MagAOX/.cache/$filename
+  fi
+  if [[ ! -e $dest/$filename ]]; then
+    cp /opt/MagAOX/.cache/$filename $dest/$filename
+  fi
+}
+
 DEFAULT_PASSWORD="extremeAO!"
 
 function creategroup() {

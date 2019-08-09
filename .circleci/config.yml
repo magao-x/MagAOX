@@ -12,8 +12,28 @@ jobs:
           name: Add an unprivileged user
           command: 'useradd xdev'
       - run:
+          name: Give sudo to xdev
+          command: 'gpasswd -a xdev wheel'
+      - run:
           name: Setup users and groups
-          command: 'bash -l ~/project/setup/setup_users_and_groups.sh'
+          command: '/bin/sudo -u xdev bash -l ~/project/setup/setup_users_and_groups.sh'
+        - run:
+          name: Add an unprivileged user
+          command: 'useradd xdev'
+      - run:
+          name: Checksum provisioning scripts
+          command: 'find ~/project/setup/ -type f -exec md5sum {} \; | sort -k 2 > ~/provisioning_scripts_checksums.txt'
+      - restore_cache:
+          keys:
+            - v1-{{ checksum "provisioning_scripts_checksums.txt" }}
       - run:
           name: Auto-provision
-          command: 'bash -l ~/project/setup/provision.sh'
+          command: '/bin/sudo -u xdev bash -l ~/project/setup/provision.sh'
+      - save_cache:
+          key: my-cache
+          paths:
+            - /opt/MagAOX/vendor
+            - /opt/MagAOX/.cache
+      - run:
+          name: Install MagAO-X
+          command: '/bin/sudo -u xdev bash -l ~/project/setup/steps/install_MagAOX.sh'
