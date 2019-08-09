@@ -577,11 +577,14 @@ int andorCtrl::getEMGain()
    int state;
    int gain;
    int low, high;
-   unsigned long out = GetEMAdvanced(&state);
    
-//    if(out==DRV_SUCCESS){
-//         std::cout << "The Current Advanced EM gain setting is: " << state << std::endl;
-//    }
+   ///\todo what is EM advanced?
+   if(GetEMAdvanced(&state) != DRV_SUCCESS)
+   {
+      log<software_error>({__FILE__,__LINE__, "error getting em advanced"});
+      return -1;
+   }
+
    if(GetEMCCDGain(&gain) !=DRV_SUCCESS)
    {
       log<software_error>({__FILE__,__LINE__, "error getting em gain"});
