@@ -83,21 +83,35 @@ mkdir -pv /opt/MagAOX/secrets
 chown -R root:root /opt/MagAOX/secrets
 chmod -R u=rwX,g=,o= /opt/MagAOX/secrets
 
-mkdir -pv /opt/MagAOX/source
-chown -R root:magaox-dev /opt/MagAOX/source
-# n.b. using + instead of = so we don't clobber setuid binaries
-chmod -R u+rwX,g+rwX,o+rX /opt/MagAOX/source
-setgid_all /opt/MagAOX/source
+if [[ "$TARGET_ENV" == "vm" ]]; then
+  mkdir -pv /vagrant/setup/source
+  link_if_necessary /vagrant/setup/source /opt/MagAOX/source
+elif [[ "$TARGET_ENV" == "instrument" || "$TARGET_ENV" == "ci" ]]; then
+  mkdir -pv /opt/MagAOX/source
+  chown -R root:magaox-dev /opt/MagAOX/source
+  chmod -R u+rwX,g+rwX,o+rX /opt/MagAOX/source
+  setgid_all /opt/MagAOX/source
+fi
 
 mkdir -pv /opt/MagAOX/sys
 chown -R root:root /opt/MagAOX/sys
 chmod -R u=rwX,g=rX,o=rX /opt/MagAOX/sys
 
-mkdir -pv /opt/MagAOX/vendor
-chown -R root:magaox-dev /opt/MagAOX/vendor
-chmod -R u=rwX,g=rwX,o=rX /opt/MagAOX/vendor
-setgid_all /opt/MagAOX/vendor
+if [[ "$TARGET_ENV" == "vm" ]]; then
+  mkdir -pv /vagrant/setup/vendor
+  link_if_necessary /vagrant/setup/vendor /opt/MagAOX/vendor
+elif [[ "$TARGET_ENV" == "instrument" || "$TARGET_ENV" == "ci" ]]; then
+  mkdir -pv /opt/MagAOX/vendor
+  chown -R root:magaox-dev /opt/MagAOX/vendor
+  chmod -R u=rwX,g=rwX,o=rX /opt/MagAOX/vendor
+  setgid_all /opt/MagAOX/vendor
+fi
 
-mkdir -pv /opt/MagAOX/.cache
-chown -R root:root /opt/MagAOX/.cache
-chmod -R u=rwX,g=rwX,o=rX /opt/MagAOX/.cache
+if [[ "$TARGET_ENV" == "vm" ]]; then
+  mkdir -pv /vagrant/setup/cache
+  link_if_necessary /vagrant/setup/cache /opt/MagAOX/.cache
+elif [[ "$TARGET_ENV" == "instrument" || "$TARGET_ENV" == "ci" ]]; then
+  mkdir -pv /opt/MagAOX/.cache
+  chown -R root:root /opt/MagAOX/.cache
+  chmod -R u=rwX,g=rwX,o=rX /opt/MagAOX/.cache
+fi
