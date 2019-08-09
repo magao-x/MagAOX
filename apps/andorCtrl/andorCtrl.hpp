@@ -582,16 +582,21 @@ int andorCtrl::getEMGain()
 //    if(out==DRV_SUCCESS){
 //         std::cout << "The Current Advanced EM gain setting is: " << state << std::endl;
 //    }
-   out = GetEMCCDGain(&gain);
-//    if(out==DRV_SUCCESS){
-//        std::cout << "Current EMCCD Gain: " << gain << std::endl;
-//    }
+   if(GetEMCCDGain(&gain) !=DRV_SUCCESS)
+   {
+      log<software_error>({__FILE__,__LINE__, "error getting em gain"});
+      return -1;
+   }
+      
+   m_emGain = gain;
    
-   out = GetEMGainRange(&low, &high);
-//    if(out==DRV_SUCCESS){
-//         std::cout << " The range of EMGain is: {" << low << "," << high << "}" << std::endl;
-//    }
-   
+   ///\todo this needs to be done on connection, and the max/min field updated.
+   if(GetEMGainRange(&low, &high) !=DRV_SUCCESS)
+   {
+      log<software_error>({__FILE__,__LINE__, "error getting em gain range"});
+      return -1;
+   }
+      
    return 0;
 }
    
