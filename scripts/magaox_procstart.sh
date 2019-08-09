@@ -49,6 +49,6 @@ fi
 command="$execpath -n $1"
 
 tmux new -s $procname -d
-log_info "Created tmux session \'$procname\'"
+log_info "Created tmux session '$procname'"
 tmux send-keys -t $procname "$command" Enter
 log_success "Executed in $procname session: $command"

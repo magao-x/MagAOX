@@ -12,12 +12,17 @@ grep -v '^#' < $filename | { while read -r line; do
    #if not empty, do the shutdown
    if [[ !  -z  ${procname// }  ]]; then
       if tmux ls 2>/dev/null | grep $procname > /dev/null; then
-         tmux send-keys -t $procname C-c
-         tmux send-keys -t $procname "exit" Enter
+         while tmux ls 2>/dev/null | grep $procname > /dev/null; do
+            tmux send-keys -t $procname C-c
+            tmux send-keys -t $procname "exit" Enter
+            log_info "waiting for tmux session $procname to exit..."
+            sleep 0.5
+         done
+         log_success "Ended tmux session for $procname"
       else
-         echo "no running tmux session for $procname"
+         log_info "No running tmux session for $procname"
       fi
    else
-      echo "Empty procname in line: $line"
+      log_warn "Empty procname in line: $line"
    fi
 done }
