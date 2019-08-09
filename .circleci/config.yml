@@ -11,17 +11,17 @@ jobs:
       - run:
           name: Checksum provisioning scripts
           command: 'find ~/project/setup/ -type f -exec md5sum {} \; | sort -k 2 > ~/project/provisioning_scripts_checksums.txt'
-      - restore_cache:
-          keys:
-            - v1-{{ checksum "provisioning_scripts_checksums.txt" }}
+      # - restore_cache:
+      #     keys:
+      #       - v1-{{ checksum "provisioning_scripts_checksums.txt" }}
       - run:
           name: Auto-provision
           command: 'bash -l ~/project/setup/provision.sh'
-      - save_cache:
-          key: v1-{{ checksum "provisioning_scripts_checksums.txt" }}
-          paths:
-            - /opt/MagAOX/vendor
-            - /opt/MagAOX/.cache
+      # - save_cache:
+      #     key: v1-{{ checksum "provisioning_scripts_checksums.txt" }}
+      #     paths:
+      #       - /opt/MagAOX/vendor
+      #       - /opt/MagAOX/.cache
       - run:
           name: Install MagAO-X
           command: 'bash -l ~/project/setup/steps/install_MagAOX.sh'
