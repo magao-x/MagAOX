@@ -15,8 +15,11 @@ jobs:
           name: Give sudo to xdev
           command: 'gpasswd -a xdev wheel'
       - run:
+          name: Examine env
+          command: 'env'
+      - run:
           name: Setup users and groups
-          command: '/bin/sudo -u xdev bash -l ~/project/setup/setup_users_and_groups.sh'
+          command: '/bin/sudo -u xdev bash -l /home/circleci/project/setup/setup_users_and_groups.sh'
       - run:
           name: Add an unprivileged user
           command: 'useradd xdev'
