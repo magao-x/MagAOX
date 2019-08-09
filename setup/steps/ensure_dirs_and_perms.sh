@@ -35,8 +35,8 @@ mkdir -pv /opt/MagAOX
 chown root:root /opt/MagAOX
 
 mkdir -pv /opt/MagAOX/bin
-chown -R root:root /opt/MagAOX/bin
-# n.b. not using -R so we don't clobber setuid binaries
+# n.b. not using -R on *either* chown *or* chmod so we don't clobber setuid binaries
+chown root:root /opt/MagAOX/bin
 chmod u+rwX,g+rX,o+rX /opt/MagAOX/bin
 
 mkdir -pv /opt/MagAOX/calib
