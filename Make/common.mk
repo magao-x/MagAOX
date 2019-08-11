@@ -48,6 +48,7 @@ EXTRA_LDLIBS ?=  -lsofa_c \
   -ludev \
   -lpthread \
   -ltelnet \
+  -lcfitsio \
   -lxrif \
   $(abspath \
   $(SELF_DIR)/../INDI/libcommon/libcommon.a) \
