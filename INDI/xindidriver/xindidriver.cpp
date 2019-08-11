@@ -367,7 +367,7 @@ int main( int argc, char **argv)
    std::string ctrlFifo = std::string(XINDID_FIFODIR) + "/" + myName + ".ctrl";
 
    flushFIFO(stdinFifo);
-   flushFIFO(stdoutFifo);
+   //flushFIFO(stdoutFifo);
    
    std::cerr << " (" << XINDID_COMPILEDNAME << "): starting with " << stdinFifo << " & " << stdoutFifo << std::endl;
 
