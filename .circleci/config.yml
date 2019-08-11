@@ -9,19 +9,22 @@ jobs:
           name: Add sudo
           command: 'yum install -y sudo'
       - run:
+          name: Install all OS packaged dependencies
+          command: 'bash -l ~/project/setup/steps/install_os_packages.sh'
+      - run:
           name: Checksum provisioning scripts
           command: 'find ~/project/setup/ -type f -exec md5sum {} \; | sort -k 2 > ~/project/provisioning_scripts_checksums.txt'
-      # - restore_cache:
-      #     keys:
-      #       - dependencies-cache-v1-{{ checksum "provisioning_scripts_checksums.txt" }}
+      - restore_cache:
+          keys:
+            - dependencies-cache-v1-{{ checksum "provisioning_scripts_checksums.txt" }}
       - run:
           name: Auto-provision
           command: 'bash -l ~/project/setup/provision.sh'
-      # - save_cache:
-      #     key: dependencies-cache-v1-{{ checksum "provisioning_scripts_checksums.txt" }}
-      #     paths:
-      #       - /opt/MagAOX/vendor
-      #       - /opt/MagAOX/.cache
+      - save_cache:
+          key: dependencies-cache-v1-{{ checksum "provisioning_scripts_checksums.txt" }}
+          paths:
+            - /opt/MagAOX/vendor
+            - /opt/MagAOX/.cache
       - run:
           name: Install MagAO-X
           command: 'bash -l ~/project/setup/steps/install_MagAOX.sh'

@@ -6,23 +6,21 @@ MINICONDA_VERSION="3-4.7.10"
 #
 # MINICONDA
 #
-MINICONDA_INSTALLER="Miniconda$MINICONDA_VERSION-Linux-x86_64.sh"
-_cached_fetch "https://repo.continuum.io/miniconda/$MINICONDA_INSTALLER" $MINICONDA_INSTALLER
-sudo bash $MINICONDA_INSTALLER -b -p /opt/miniconda3
-# Set environment variables for miniconda
-echo "__conda_setup=\"\$(CONDA_REPORT_ERRORS=false '/opt/miniconda3/bin/conda' shell.bash hook 2> /dev/null)\"
-if [ \$? -eq 0 ]; then
-    \eval \"\$__conda_setup\"
+if [[ ! -d /opt/miniconda3 ]]; then
+    MINICONDA_INSTALLER="Miniconda$MINICONDA_VERSION-Linux-x86_64.sh"
+    _cached_fetch "https://repo.continuum.io/miniconda/$MINICONDA_INSTALLER" $MINICONDA_INSTALLER
+    sudo bash $MINICONDA_INSTALLER -b -p /opt/miniconda3
+    # Set environment variables for miniconda
+    cat << 'EOF' | sudo tee /etc/profile.d/miniconda.sh
+if [ -f "/opt/miniconda3/etc/profile.d/conda.sh" ]; then
+    . "/opt/miniconda3/etc/profile.d/conda.sh"
+    CONDA_CHANGEPS1=false conda activate base
 else
-    if [ -f \"/opt/miniconda3/etc/profile.d/conda.sh\" ]; then
-        . \"/opt/miniconda3/etc/profile.d/conda.sh\"
-        CONDA_CHANGEPS1=false conda activate base
-    else
-        \export PATH=\"/opt/miniconda3/bin:\$PATH\"
-    fi
+    \export PATH="/opt/miniconda3/bin:$PATH"
 fi
-unset __conda_setup" > /etc/profile.d/miniconda.sh
-source /etc/profile.d/miniconda.sh
+EOF
+fi
+set +u; source /etc/profile.d/miniconda.sh; set -u
 # set group and permissions such that only magaox-dev has write access
 sudo chgrp -R magaox-dev /opt/miniconda3
 sudo chmod -R g=rwx /opt/miniconda3

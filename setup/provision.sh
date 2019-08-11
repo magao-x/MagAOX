@@ -79,6 +79,7 @@ fi
 sudo bash -l "$DIR/steps/install_basler_pylon.sh"
 sudo bash -l "$DIR/steps/install_edt.sh"
 sudo bash -l "$DIR/steps/install_picam.sh"
+sudo bash -l "$DIR/steps/install_python.sh"
 
 ## Install proprietary / non-public software
 if [[ -e $VENDOR_SOFTWARE_BUNDLE ]]; then
