@@ -81,8 +81,12 @@ protected:
        
    long m_lastImageNumber {-1};  ///< The last image number, saved from the last loop through.
    
+   unsigned m_protectionResetConfirmed {0}; ///< Counter indicating the number of times that the protection reset has been requested within 10 seconds, for confirmation.
+
+   double m_protectionResetReqTime {0}; ///< The time at which protection reset was requested.  You have 10 seconds to confirm.
+
    unsigned m_emGain {1}; ///< The current EM gain.
-   
+
 public:
 
    ///Default c'tor
@@ -142,6 +146,13 @@ public:
      * \returns -1 on error
      */
    int setFPS( float fps  /**< [in] the new value of framerate [fps] */ );
+   
+   /// Reset the EM Protection 
+   /** 
+     * \returns 0 on success
+     * \returns -1 on error
+     */
+   int resetEMProtection();
    
    /// Get the current EM Gain.
    /**
@@ -203,11 +214,13 @@ protected:
    pcf::IndiProperty m_indiP_ccdtemp;
    pcf::IndiProperty m_indiP_temps;
    pcf::IndiProperty m_indiP_fps;
+   pcf::IndiProperty m_indiP_emProtReset;
    pcf::IndiProperty m_indiP_emGain;
 
 public:
    INDI_NEWCALLBACK_DECL(ocam2KCtrl, m_indiP_ccdtemp);
    INDI_NEWCALLBACK_DECL(ocam2KCtrl, m_indiP_fps);
+   INDI_NEWCALLBACK_DECL(ocam2KCtrl, m_indiP_emProtReset);
    INDI_NEWCALLBACK_DECL(ocam2KCtrl, m_indiP_emGain);
 
 };
@@ -276,7 +289,6 @@ int ocam2KCtrl::appStartup()
    // set up the  INDI properties
    REG_INDI_NEWPROP(m_indiP_ccdtemp, "ccdtemp", pcf::IndiProperty::Number);
    m_indiP_ccdtemp.add (pcf::IndiElement("current"));
-   m_indiP_ccdtemp["current"].set(0);
    m_indiP_ccdtemp.add (pcf::IndiElement("target"));
    
    REG_INDI_NEWPROP_NOCB(m_indiP_temps, "temps", pcf::IndiProperty::Number);
@@ -301,6 +313,10 @@ int ocam2KCtrl::appStartup()
    m_indiP_fps.add (pcf::IndiElement("target"));
    m_indiP_fps.add (pcf::IndiElement("measured"));
 
+   REG_INDI_NEWPROP(m_indiP_emProtReset, "emProtectionReset", pcf::IndiProperty::Text);
+   m_indiP_emProtReset.add (pcf::IndiElement("current"));
+   m_indiP_emProtReset.add (pcf::IndiElement("target"));
+   
    REG_INDI_NEWPROP(m_indiP_emGain, "emgain", pcf::IndiProperty::Number);
    m_indiP_emGain.add (pcf::IndiElement("current"));
    m_indiP_emGain["current"].set(m_emGain);
@@ -428,6 +444,17 @@ int ocam2KCtrl::appLogic()
          return 0;
       }
       
+      if(m_protectionResetConfirmed > 0 )
+      {
+         if( mx::get_curr_time() - m_protectionResetReqTime > 10.0)
+         {
+            m_protectionResetConfirmed = 0;
+            updateIfChanged(m_indiP_emProtReset, "current", std::string(""));
+            updateIfChanged(m_indiP_emProtReset, "target", std::string(""));
+            log<text_log>("protection reset request not confirmed", logPrio::LOG_NOTICE);
+         }
+      }
+      
       if(getEMGain () < 0)
       {
          if(MagAOXAppT::m_powerState == 0) return 0;
@@ -471,23 +498,26 @@ int ocam2KCtrl::onPowerOff()
    
    std::lock_guard<std::mutex> lock(m_indiMutex);
    
-   updateIfChanged(m_indiP_ccdtemp, "current", -999);
-   updateIfChanged(m_indiP_ccdtemp, "target", -999);
+   updateIfChanged(m_indiP_ccdtemp, "current", std::string(""));
+   updateIfChanged(m_indiP_ccdtemp, "target", std::string(""));
    
-   updateIfChanged(m_indiP_temps, "cpu", -999);
-   updateIfChanged(m_indiP_temps, "power", -999);
-   updateIfChanged(m_indiP_temps, "bias", -999);
-   updateIfChanged(m_indiP_temps, "water", -999);
-   updateIfChanged(m_indiP_temps, "left", -999);
-   updateIfChanged(m_indiP_temps, "right", -999);
-   updateIfChanged(m_indiP_temps, "cooling", -999);
+   updateIfChanged(m_indiP_temps, "cpu",std::string(""));
+   updateIfChanged(m_indiP_temps, "power", std::string(""));
+   updateIfChanged(m_indiP_temps, "bias", std::string(""));
+   updateIfChanged(m_indiP_temps, "water", std::string(""));
+   updateIfChanged(m_indiP_temps, "left", std::string(""));
+   updateIfChanged(m_indiP_temps, "right", std::string(""));
+   updateIfChanged(m_indiP_temps, "cooling", std::string(""));
    
-   updateIfChanged(m_indiP_fps, "current", 0);
-   updateIfChanged(m_indiP_fps, "target", 0);
-   updateIfChanged(m_indiP_fps, "measured", 0);
+   updateIfChanged(m_indiP_fps, "current", std::string(""));
+   updateIfChanged(m_indiP_fps, "target", std::string(""));
+   updateIfChanged(m_indiP_fps, "measured", std::string(""));
    
-   updateIfChanged(m_indiP_emGain, "current", 0);
-   updateIfChanged(m_indiP_emGain, "target", 0);
+   updateIfChanged(m_indiP_emProtReset, "current", std::string(""));
+   updateIfChanged(m_indiP_emProtReset, "target", std::string(""));
+   
+   updateIfChanged(m_indiP_emGain, "current", std::string(""));
+   updateIfChanged(m_indiP_emGain, "target", std::string(""));
    
    ///\todo error check these base class fxns.
    edtCamera<ocam2KCtrl>::onPowerOff();
@@ -625,12 +655,38 @@ int ocam2KCtrl::setFPS(float fps)
 
 }
 
+inline 
+int ocam2KCtrl::resetEMProtection()
+{
+   std::string response;
+   
+   if( pdvSerialWriteRead( response, "protection reset") == 0)
+   {
+      std::cerr << "\n******************************************\n";
+      std::cerr << "protection reset:\n";
+      std::cerr << response << "\n";
+      std::cerr << "\n******************************************\n";
+      ///\todo check response.
+      
+      updateIfChanged(m_indiP_emProtReset, "current", std::string("RESET"));
+      updateIfChanged(m_indiP_emProtReset, "target", std::string(""));
+      
+      log<text_log>("overillumination protection has been reset", logPrio::LOG_NOTICE);
+      
+      m_protectionResetConfirmed = 0;
+      return 0;
+
+   }
+   else return log<software_error,-1>({__FILE__, __LINE__});
+   
+}
+
 inline
 int ocam2KCtrl::getEMGain()
 {
    std::string response;
 
-   if( pdvSerialWriteRead( response, "gain") == 0) //m_pdv, "gain", m_readTimeout) == 0)
+   if( pdvSerialWriteRead( response, "gain") == 0)
    {
       unsigned emGain;
       if(parseEMGain( emGain, response ) < 0) 
@@ -858,6 +914,8 @@ int ocam2KCtrl::reconfig()
 
 INDI_NEWCALLBACK_DEFN(ocam2KCtrl, m_indiP_ccdtemp)(const pcf::IndiProperty &ipRecv)
 {
+   if(MagAOXAppT::m_powerState == 0) return 0;
+   
    if (ipRecv.getName() == m_indiP_ccdtemp.getName())
    {
       float current = 99, target = 99;
@@ -897,6 +955,8 @@ INDI_NEWCALLBACK_DEFN(ocam2KCtrl, m_indiP_ccdtemp)(const pcf::IndiProperty &ipRe
 
 INDI_NEWCALLBACK_DEFN(ocam2KCtrl, m_indiP_fps)(const pcf::IndiProperty &ipRecv)
 {
+   if(MagAOXAppT::m_powerState == 0) return 0;
+   
    if (ipRecv.getName() == m_indiP_fps.getName())
    {
       float current = -99, target = -99;
@@ -928,8 +988,62 @@ INDI_NEWCALLBACK_DEFN(ocam2KCtrl, m_indiP_fps)(const pcf::IndiProperty &ipRecv)
    return -1;
 }
 
+INDI_NEWCALLBACK_DEFN(ocam2KCtrl, m_indiP_emProtReset)(const pcf::IndiProperty &ipRecv)
+{
+   if(MagAOXAppT::m_powerState == 0) return 0;
+   
+   if (ipRecv.getName() == m_indiP_emProtReset.getName())
+   {
+      std::string current, target;
+
+      if(ipRecv.find("current"))
+      {
+         current = ipRecv["current"].get<std::string>();
+      }
+
+      if(ipRecv.find("target"))
+      {
+         target = ipRecv["target"].get<std::string>();
+      }
+      
+      if(target == "") target = current;
+      
+      target = mx::ioutils::toUpper(target);
+      
+      if(target != "RESET") return 0;
+      
+      //Lock the mutex, waiting if necessary
+      std::unique_lock<std::mutex> lock(m_indiMutex);
+
+      updateIfChanged(m_indiP_emProtReset, "target", target);
+      
+      
+      if(m_protectionResetConfirmed == 0)
+      {
+         updateIfChanged(m_indiP_emProtReset, "current", std::string("CONFIRM"));
+       
+         m_protectionResetConfirmed = 1;
+         
+         m_protectionResetReqTime = mx::get_curr_time();
+         
+         log<text_log>("protection reset requested", logPrio::LOG_NOTICE);
+         
+         return 0;
+      }
+      
+      //If here, this is a confirmation.
+      return resetEMProtection();
+
+      
+   }
+   return -1;
+}
+
+
 INDI_NEWCALLBACK_DEFN(ocam2KCtrl, m_indiP_emGain)(const pcf::IndiProperty &ipRecv)
 {
+   if(MagAOXAppT::m_powerState == 0) return 0;
+   
    if (ipRecv.getName() == m_indiP_emGain.getName())
    {
       unsigned current = 0, target = 0;

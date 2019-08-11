@@ -16,19 +16,6 @@ namespace app
 {
 namespace dev 
 {
-   
-//Empty signal handler.  SIGUSR1 is used to interrupt sleep in the open/shut threads.   
-void sigUsr1Handler( int signum,
-                     siginfo_t * siginf,
-                     void *ucont 
-                   )
-{
-   static_cast<void>(signum);
-   static_cast<void>(siginf);
-   static_cast<void>(ucont);
-   
-   return;
-}
 
 /// MagAO-X Uniblitz DSS Shutter interface
 /**
