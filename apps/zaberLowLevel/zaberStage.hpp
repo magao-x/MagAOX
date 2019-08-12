@@ -39,12 +39,16 @@ protected:
 
    char m_deviceStatus {'U'}; ///< Current status.  Either 'I' for IDLE or 'B' for BUSY.  Intializes to 'U' for UNKOWN.
 
+   bool m_homing {false};
+   
    long m_rawPos; ///< The raw position reported by the device, in microsteps.
+   
+   long m_tgtPos {0}; ///< The tgt position last sent to the device, in microsteps.
    
    long m_maxPos; ///< The max position allowed for the device, set by config.  Will be set to no larger m_maxPosHW.
    
-   long m_maxPosHW; ///< The max position allowed for the device, as reported by the device.
-
+   float m_temp; ///< The driver temperature, in C.
+   
    bool m_warn {false};
    
    bool m_warnFD {false};
@@ -153,11 +157,35 @@ public:
      */
    char deviceStatus();
 
+   /// Get the homing status
+   /**
+     * \returns the current value of m_homing
+     */
+   bool homing();
+   
    /// Get the current raw position, in counts
    /**
      * \returns the current value of m_rawPos
      */
    long rawPos();
+   
+   /// Get the current tgt position, in counts
+   /**
+     * \returns the current value of m_tgtPos
+     */
+   long tgtPos();
+
+   /// Get the max position, in counts
+   /**
+     * \returns the current value of m_maxPos
+     */
+   long maxPos();
+   
+   /// Get the temperature, in C
+   /**
+     * \returns the current value of m_temp
+     */
+   float temp();
    
    /// Get the warning state
    /**
@@ -215,7 +243,11 @@ public:
                     const std::string & command  ///< [in] the command to send
                    );
 
+   int getMaxPos( z_port port /**< [in] the port with which to communicate */ );
+   
    int updatePos( z_port port /**< [in] the port with which to communicate */ );
+   
+   int updateTemp( z_port port /**< [in] the port with which to communicate */ );
    
    int stop (z_port port );
    
@@ -316,9 +348,33 @@ char zaberStage::deviceStatus()
 }
 
 inline
+bool zaberStage::homing()
+{
+   return m_homing;
+}
+
+inline
 long zaberStage::rawPos()
 {
    return m_rawPos;
+}
+
+inline
+long zaberStage::tgtPos()
+{
+   return m_tgtPos;
+}
+
+inline
+long zaberStage::maxPos()
+{
+   return m_maxPos;
+}
+
+inline
+float zaberStage::temp()
+{
+   return m_temp;
 }
 
 bool zaberStage::warningState()
@@ -472,8 +528,11 @@ int zaberStage::getResponse( std::string & response,
       if(rep.reply_flags[0] == 'O') m_commandStatus = true;
       else m_commandStatus = false;
 
+      
       m_deviceStatus = rep.device_status[0];
 
+      if(m_deviceStatus == 'I' && m_homing) m_homing = false;
+      
       if(rep.warning_flags[0] == '-') unsetWarnings();
       else m_warn = true;;
 
@@ -534,6 +593,36 @@ int zaberStage::sendCommand( std::string & response,
 }
 
 inline
+int zaberStage::getMaxPos( z_port port )
+{
+   std::string com = "/" + mx::ioutils::convertToString(m_deviceAddress) + " ";
+   com += "get limit.max";
+
+   std::string response;
+
+   int rv = sendCommand(response, port, com);
+
+   if(rv == 0)
+   {
+      if( m_commandStatus )
+      {
+         m_maxPos = mx::ioutils::convertFromString<long>(response);
+         return 0;
+      }
+      else
+      {
+         MagAOXAppT::log<software_error>({__FILE__, __LINE__, rv, "get limit.max Command Rejected"});         
+         return -1;
+      }
+   }
+   else
+   {
+      MagAOXAppT::log<software_error>({__FILE__, __LINE__});
+      return -1;
+   }
+}
+
+inline
 int zaberStage::updatePos( z_port port )
 {
    std::string com = "/" + mx::ioutils::convertToString(m_deviceAddress) + " ";
@@ -553,6 +642,36 @@ int zaberStage::updatePos( z_port port )
       else
       {
          MagAOXAppT::log<software_error>({__FILE__, __LINE__, rv, "get pos Command Rejected"});         
+         return -1;
+      }
+   }
+   else
+   {
+      MagAOXAppT::log<software_error>({__FILE__, __LINE__});
+      return -1;
+   }
+}
+
+inline
+int zaberStage::updateTemp( z_port port )
+{
+   std::string com = "/" + mx::ioutils::convertToString(m_deviceAddress) + " ";
+   com += "get driver.temperature";
+
+   std::string response;
+
+   int rv = sendCommand(response, port, com);
+
+   if(rv == 0)
+   {
+      if( m_commandStatus )
+      {
+         m_temp = mx::ioutils::convertFromString<float>(response);
+         return 0;
+      }
+      else
+      {
+         MagAOXAppT::log<software_error>({__FILE__, __LINE__, rv, "get driver.temperature Command Rejected"});         
          return -1;
       }
    }
@@ -635,6 +754,7 @@ int zaberStage::home( z_port port )
    {
       if( m_commandStatus )
       {
+         m_homing = true;
          return 0;
       }
       else
@@ -658,6 +778,8 @@ int zaberStage::moveAbs( z_port port,
    std::string com = "/" + mx::ioutils::convertToString(m_deviceAddress) + " ";
    com += "move abs " + std::to_string(rawPos);
 
+   m_tgtPos = rawPos;
+   
    std::string response;
 
    int rv = sendCommand(response, port, com);

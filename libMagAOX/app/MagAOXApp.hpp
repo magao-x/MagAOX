@@ -1607,11 +1607,8 @@ int MagAOXApp<_useINDI>::threadStart( std::thread & thrd,
    else
    {
       thrdInit = false;
-      
       return log<text_log,0>(thrdName + " thread scheduler priority set to " + std::to_string(thrdPrio));
    }
-   
-
 }
 
 template<bool _useINDI>
@@ -1640,7 +1637,7 @@ void MagAOXApp<_useINDI>::state(const stateCodes::stateCodeT & s)
    std::unique_lock<std::mutex> lock(m_indiMutex, std::try_to_lock);  //Lock the mutex before conducting INDI communications.
 
    if(lock.owns_lock())
-   {
+   {  ///\todo well what do we do if we don't get the lock?  this should be updated elsewhere...
       updateIfChanged(m_indiP_state, "current", stateCodes::codeText(m_state));
    }
 }

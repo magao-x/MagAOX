@@ -54,9 +54,12 @@ protected:
    
    ///@}
 
+   double m_maxRawPos {0};
    double m_rawPos {0};
    double m_tgtRawPos {0};
+   double m_stageTemp{0};
    
+   double m_maxPos {0};
    double m_pos {0};
    double m_tgtPos {0};
 
@@ -101,6 +104,7 @@ protected:
    //INDI properties for user interaction:   
    pcf::IndiProperty m_indiP_pos;
    pcf::IndiProperty m_indiP_rawpos;
+   pcf::IndiProperty m_indiP_temp;
    
    pcf::IndiProperty m_indiP_home;
    
@@ -110,13 +114,17 @@ protected:
    
    //INDI properties for interacting with Low-Level
    pcf::IndiProperty m_indiP_stageState;
-   
+   pcf::IndiProperty m_indiP_stageMaxRawPos;
    pcf::IndiProperty m_indiP_stageRawPos;
    pcf::IndiProperty m_indiP_stageTgtPos;
+   pcf::IndiProperty m_indiP_stageTemp;
+   
    
    INDI_SETCALLBACK_DECL(zaberCtrl, m_indiP_stageState);
+   INDI_SETCALLBACK_DECL(zaberCtrl, m_indiP_stageMaxRawPos);
    INDI_SETCALLBACK_DECL(zaberCtrl, m_indiP_stageRawPos);
    INDI_SETCALLBACK_DECL(zaberCtrl, m_indiP_stageTgtPos);
+   INDI_SETCALLBACK_DECL(zaberCtrl, m_indiP_stageTemp);
 };
 
 zaberCtrl::zaberCtrl() : MagAOXApp(MAGAOX_CURRENT_SHA1, MAGAOX_REPO_MODIFIED)
@@ -144,9 +152,7 @@ int zaberCtrl::loadConfigImpl( mx::app::appConfigurator & _config )
    
    _config(m_countsPerMillimeter, "stage.countsPerMillimeter");
    
-   REG_INDI_SETPROP(m_indiP_stageState, m_lowLevelName, "curr_state");
-   REG_INDI_SETPROP(m_indiP_stageRawPos, m_lowLevelName, std::string("curr_pos"));
-   REG_INDI_SETPROP(m_indiP_stageRawPos, m_lowLevelName, std::string("tgt_pos"));
+   
    
    return 0;
 }
@@ -160,14 +166,27 @@ int zaberCtrl::appStartup()
 {
    REG_INDI_NEWPROP(m_indiP_pos, "position", pcf::IndiProperty::Number);
    m_indiP_pos.add (pcf::IndiElement("current"));
+   m_indiP_pos["current"] = -1;
    m_indiP_pos.add (pcf::IndiElement("target"));
+   m_indiP_pos.add (pcf::IndiElement("max"));
    
    REG_INDI_NEWPROP(m_indiP_rawpos, "rawpos", pcf::IndiProperty::Number);
    m_indiP_rawpos.add (pcf::IndiElement("current"));
+   m_indiP_rawpos["current"] = -1;
    m_indiP_rawpos.add (pcf::IndiElement("target"));
+   m_indiP_rawpos.add (pcf::IndiElement("max"));
    
    REG_INDI_NEWPROP(m_indiP_home, "home", pcf::IndiProperty::Text);
    m_indiP_home.add (pcf::IndiElement("request"));
+   
+   REG_INDI_NEWPROP_NOCB(m_indiP_temp, "temp", pcf::IndiProperty::Number);
+   m_indiP_temp.add (pcf::IndiElement("current"));
+   
+   REG_INDI_SETPROP(m_indiP_stageState, m_lowLevelName, "curr_state");
+   REG_INDI_SETPROP(m_indiP_stageMaxRawPos, m_lowLevelName, std::string("max_pos"));
+   REG_INDI_SETPROP(m_indiP_stageRawPos, m_lowLevelName, std::string("curr_pos"));
+   REG_INDI_SETPROP(m_indiP_stageTgtPos, m_lowLevelName, std::string("tgt_pos"));
+   REG_INDI_SETPROP(m_indiP_stageTemp, m_lowLevelName, std::string("temp"));
    
    return 0;
 }
@@ -225,7 +244,14 @@ INDI_NEWCALLBACK_DEFN( zaberCtrl, m_indiP_pos)(const pcf::IndiProperty &ipRecv)
       
    long tgt = (target*m_countsPerMillimeter + 0.5);
    
-   if( sendNewProperty(m_indiP_stageTgtPos, m_lowLevelName, tgt) < 0 ) return log<software_error,-1>({__FILE__,__LINE__});
+   pcf::IndiProperty indiP_stageTgtPos = pcf::IndiProperty(pcf::IndiProperty::Text);
+   indiP_stageTgtPos.setDevice(m_lowLevelName);
+   indiP_stageTgtPos.setName("tgt_pos");
+   indiP_stageTgtPos.setPerm(pcf::IndiProperty::ReadWrite); 
+   indiP_stageTgtPos.setState(pcf::IndiProperty::Idle);
+   indiP_stageTgtPos.add(pcf::IndiElement(m_stageName));
+   
+   if( sendNewProperty(indiP_stageTgtPos, m_stageName, tgt) < 0 ) return log<software_error,-1>({__FILE__,__LINE__});
    
 
    return 0;
@@ -258,9 +284,14 @@ INDI_NEWCALLBACK_DEFN( zaberCtrl, m_indiP_rawpos)(const pcf::IndiProperty &ipRec
       }
    }
       
+   pcf::IndiProperty indiP_stageTgtPos = pcf::IndiProperty(pcf::IndiProperty::Text);
+   indiP_stageTgtPos.setDevice(m_lowLevelName);
+   indiP_stageTgtPos.setName("tgt_pos");
+   indiP_stageTgtPos.setPerm(pcf::IndiProperty::ReadWrite); 
+   indiP_stageTgtPos.setState(pcf::IndiProperty::Idle);
+   indiP_stageTgtPos.add(pcf::IndiElement(m_stageName));
    
-   
-   if( sendNewProperty(m_indiP_stageTgtPos, m_lowLevelName, target) < 0 ) return log<software_error,-1>({__FILE__,__LINE__});
+   if( sendNewProperty(indiP_stageTgtPos, m_stageName, target) < 0 ) return log<software_error,-1>({__FILE__,__LINE__});
    
 
    return 0;
@@ -279,10 +310,15 @@ INDI_NEWCALLBACK_DEFN( zaberCtrl, m_indiP_home)(const pcf::IndiProperty &ipRecv)
       return 0;
    }
    
-   //Figure out how to home here -- need to create the var right?
-   //if( sendNewProperty(m_indiP_stageTgtPos, m_lowLevelName, target) < 0 ) return log<software_error,-1>({__FILE__,__LINE__});
+   pcf::IndiProperty indiP_stageHome = pcf::IndiProperty(pcf::IndiProperty::Text);
+   indiP_stageHome.setDevice(m_lowLevelName);
+   indiP_stageHome.setName("req_home");
+   indiP_stageHome.setPerm(pcf::IndiProperty::ReadWrite); 
+   indiP_stageHome.setState(pcf::IndiProperty::Idle);
+   indiP_stageHome.add(pcf::IndiElement(m_stageName));
    
-
+   if( sendNewProperty(indiP_stageHome, m_stageName, "1") < 0 ) return log<software_error,-1>({__FILE__,__LINE__});
+   
    return 0;
 }
 
@@ -299,6 +335,8 @@ INDI_SETCALLBACK_DEFN( zaberCtrl, m_indiP_stageState)(const pcf::IndiProperty &i
       return 0;
    }
 
+   m_indiP_stageState = ipRecv;
+   
    std::string sstr = ipRecv[m_stageName].get<std::string>();
    
    if(sstr == "POWEROFF") state(stateCodes::POWEROFF);
@@ -308,6 +346,31 @@ INDI_SETCALLBACK_DEFN( zaberCtrl, m_indiP_stageState)(const pcf::IndiProperty &i
    if(sstr == "READY") state(stateCodes::READY);
    if(sstr == "OPERATING") state(stateCodes::OPERATING);
    if(sstr == "SHUTDOWN") state(stateCodes::NOTCONNECTED);
+   
+
+   return 0;
+}
+
+INDI_SETCALLBACK_DEFN( zaberCtrl, m_indiP_stageMaxRawPos )(const pcf::IndiProperty &ipRecv)
+{
+   if( ipRecv.getName() != m_indiP_stageMaxRawPos.getName())
+   {
+      log<software_error>({__FILE__, __LINE__, "Invalid INDI property."});
+      return -1;
+   }
+   
+   if( ipRecv.find(m_stageName) != true ) //Just not our stage.
+   {
+      return 0;
+   }
+   
+   m_maxRawPos = ipRecv[m_stageName].get<double>();
+   
+   m_maxPos = m_maxRawPos / m_countsPerMillimeter;
+
+   updateIfChanged(m_indiP_rawpos, "max", m_maxRawPos);   
+   updateIfChanged(m_indiP_pos, "max", m_maxPos);
+   
    
 
    return 0;
@@ -325,7 +388,7 @@ INDI_SETCALLBACK_DEFN( zaberCtrl, m_indiP_stageRawPos )(const pcf::IndiProperty 
    {
       return 0;
    }
-
+   
    m_rawPos = ipRecv[m_stageName].get<double>();
    
    m_pos = m_rawPos / m_countsPerMillimeter;
@@ -364,8 +427,30 @@ INDI_SETCALLBACK_DEFN( zaberCtrl, m_indiP_stageTgtPos )(const pcf::IndiProperty 
    m_tgtRawPos = ipRecv[m_stageName].get<double>();
    m_tgtPos = m_tgtRawPos / m_countsPerMillimeter;
    
-   updateIfChanged(m_indiP_rawpos, "target", m_rawPos);   
-   updateIfChanged(m_indiP_pos, "target", m_pos);
+   updateIfChanged(m_indiP_rawpos, "target", m_tgtRawPos);   
+   updateIfChanged(m_indiP_pos, "target", m_tgtPos);
+
+   return 0;
+}
+
+INDI_SETCALLBACK_DEFN( zaberCtrl, m_indiP_stageTemp )(const pcf::IndiProperty &ipRecv)
+{
+   if( ipRecv.getName() != m_indiP_stageTemp.getName())
+   {
+      log<software_error>({__FILE__, __LINE__, "Invalid INDI property."});
+      return -1;
+   }
+   
+   if( ipRecv.find(m_stageName) != true ) //Just not our stage.
+   {
+      return 0;
+   }
+   
+   m_stageTemp = ipRecv[m_stageName].get<double>();
+   
+   updateIfChanged(m_indiP_temp, "current", m_stageTemp);   
+   
+   
 
    return 0;
 }

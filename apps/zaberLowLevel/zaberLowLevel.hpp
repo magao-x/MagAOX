@@ -76,8 +76,6 @@ public:
    
    int loadStages( std:: string & serialRes );
 
-   int testConnection();
-
    /// Startup functions
    /** Sets up the INDI vars.
      *
@@ -100,8 +98,14 @@ protected:
    ///Current state of the stage.  
    pcf::IndiProperty m_indiP_curr_state;
    
+   ///Maximum raw position of the stage.  
+   pcf::IndiProperty m_indiP_max_pos;
+   
    ///Current raw position of the stage.  
    pcf::IndiProperty m_indiP_curr_pos;
+   
+   ///Current temperature of the stage.  
+   pcf::IndiProperty m_indiP_temp;
    
    ///Target raw position of the stage.  
    pcf::IndiProperty m_indiP_tgt_pos;
@@ -311,103 +315,6 @@ int zaberLowLevel::loadStages( std::string & serialRes )
    return ZC_CONNECTED;
 }
 
-int zaberLowLevel::testConnection()
-{
-   std::lock_guard<std::mutex> guard(m_indiMutex);
-
-   if(m_port <= 0)
-   {
-      int rv = euidCalled();
-
-      if(rv < 0)
-      {
-         log<software_critical>({__FILE__, __LINE__});
-         state(stateCodes::FAILURE);
-         return ZC_NOT_CONNECTED;
-      }
-
-      int zrv = za_connect(&m_port, m_deviceName.c_str());
-
-      rv = euidReal();
-      if(rv < 0)
-      {
-         log<software_critical>({__FILE__, __LINE__});
-         state(stateCodes::FAILURE);
-         return ZC_NOT_CONNECTED;
-      }
-
-
-      if(zrv != Z_SUCCESS)
-      {
-         if(m_port > 0)
-         {
-            za_disconnect(m_port);
-            m_port = 0;
-         }
-         state(stateCodes::ERROR); //Should not get this here.  Probably means no device.
-         return ZC_NOT_CONNECTED; //We aren't connected.
-      }
-   }
-
-   if(m_port <= 0)
-   {
-      state(stateCodes::ERROR); //Should not get this here.  Probably means no device.
-      return ZC_NOT_CONNECTED; //We aren't connected.
-   }
-
-   int rv = za_drain(m_port);
-   if(rv != Z_SUCCESS)
-   {
-      za_disconnect(m_port);
-      m_port = 0;
-      state(stateCodes::NOTCONNECTED);
-      return ZC_NOT_CONNECTED; //Not an error, just no device talking.
-   }
-
-   log<text_log>("Sending: /", logPrio::LOG_DEBUG);
-   int nwr = za_send(m_port, "/");
-
-   if(nwr == Z_ERROR_SYSTEM_ERROR)
-   {
-      za_disconnect(m_port);
-      m_port = 0;
-
-      log<text_log>("Error sending test com to stages", logPrio::LOG_ERROR);
-      state(stateCodes::ERROR);
-      return ZC_NOT_CONNECTED;
-   }
-
-   char buffer[256];
-   int stageCnt = 0;
-   while(1) //We have to read all responses until timeout in case an !alert comes in
-   {
-      int nrd = za_receive(m_port, buffer, sizeof(buffer));
-      if(nrd >= 0)
-      {
-         buffer[nrd] = '\0';
-         log<text_log>(std::string("Received: ") + buffer, logPrio::LOG_DEBUG);
-         ++stageCnt;
-      }
-      else if (nrd != Z_ERROR_TIMEOUT)
-      {
-         log<text_log>("Error receiving from stages", logPrio::LOG_ERROR);
-         state(stateCodes::ERROR);
-         return ZC_NOT_CONNECTED;
-      }
-      else
-      {
-         log<text_log>("TIMEOUT", logPrio::LOG_DEBUG);
-         break; //timeout
-      }
-   }
-   if(stageCnt == 0)
-   {
-      state(stateCodes::NOTCONNECTED);
-      return ZC_NOT_CONNECTED; //We aren't connected.
-   }
-
-   return ZC_CONNECTED;
-}
 
 int zaberLowLevel::appStartup()
 {
@@ -429,10 +336,22 @@ int zaberLowLevel::appStartup()
       m_indiP_curr_state.add (pcf::IndiElement(m_stages[n].name()));
    }
    
+   REG_INDI_NEWPROP_NOCB(m_indiP_max_pos, "max_pos", pcf::IndiProperty::Text);
+   for(size_t n=0; n< m_stages.size(); ++n)
+   {
+      m_indiP_max_pos.add (pcf::IndiElement(m_stages[n].name()));
+   }
+   
    REG_INDI_NEWPROP_NOCB(m_indiP_curr_pos, "curr_pos", pcf::IndiProperty::Number);
    for(size_t n=0; n< m_stages.size(); ++n)
    {
       m_indiP_curr_pos.add (pcf::IndiElement(m_stages[n].name()));
+   }
+   
+   REG_INDI_NEWPROP_NOCB(m_indiP_temp, "temp", pcf::IndiProperty::Number);
+   for(size_t n=0; n< m_stages.size(); ++n)
+   {
+      m_indiP_temp.add (pcf::IndiElement(m_stages[n].name()));
    }
    
    REG_INDI_NEWPROP(m_indiP_tgt_pos, "tgt_pos", pcf::IndiProperty::Number);
@@ -549,7 +468,14 @@ int zaberLowLevel::appLogic()
 
    if( state() == stateCodes::CONNECTED )
    {
-      //Need to check for homing states, etc.
+      for(size_t i=0; i < m_stages.size();++i)
+      {
+         std::lock_guard<std::mutex> guard(m_indiMutex); //Inside loop so INDI requests can steal it
+
+         m_stages[i].getMaxPos(m_port);
+         updateIfChanged(m_indiP_max_pos, m_stages[i].name(), m_stages[i].maxPos());
+      }
+      
       state(stateCodes::READY);
       
    }
@@ -563,17 +489,47 @@ int zaberLowLevel::appLogic()
          std::lock_guard<std::mutex> guard(m_indiMutex); //Inside loop so INDI requests can steal it
 
          m_stages[i].updatePos(m_port);
+         
          updateIfChanged(m_indiP_curr_pos, m_stages[i].name(), m_stages[i].rawPos());
          
+         if(m_stages[i].rawPos() == m_stages[i].tgtPos())
+         {
+            updateIfChanged(m_indiP_tgt_pos, m_stages[i].name(), std::string(""));
+         }
+         else
+         {
+            updateIfChanged(m_indiP_tgt_pos, m_stages[i].name(), m_stages[i].tgtPos());
+         }
          
-         if(m_stages[i].deviceStatus() == 'B') updateIfChanged(m_indiP_curr_state, m_stages[i].name(), std::string("OPERATING"));
-         else if(m_stages[i].deviceStatus() == 'I') updateIfChanged(m_indiP_curr_state, m_stages[i].name(), std::string("READY"));
-         else  updateIfChanged(m_indiP_curr_state, m_stages[i].name(), std::string("NODEVICE"));
          
-         //if(m_stages[i].warningState() == true)
-         //{
-            m_stages[i].getWarnings(m_port);
-         //}
+         if(m_stages[i].deviceStatus() == 'B') 
+         {
+            if(m_stages[i].homing())
+            {
+               updateIfChanged(m_indiP_curr_state, m_stages[i].name(), std::string("HOMING"));
+            }
+            else
+            {
+               updateIfChanged(m_indiP_curr_state, m_stages[i].name(), std::string("OPERATING"));
+            }
+         }
+         else if(m_stages[i].deviceStatus() == 'I') 
+         {
+            if(m_stages[i].warnWR())
+            {
+               updateIfChanged(m_indiP_curr_state, m_stages[i].name(), std::string("NOTHOMED"));
+            }
+            else
+            {
+               updateIfChanged(m_indiP_curr_state, m_stages[i].name(), std::string("READY"));
+            }
+         }
+         else updateIfChanged(m_indiP_curr_state, m_stages[i].name(), std::string("NODEVICE"));
+         
+         m_stages[i].updateTemp(m_port);
+         updateIfChanged(m_indiP_temp, m_stages[i].name(), m_stages[i].temp());
+         
+         m_stages[i].getWarnings(m_port);
             
       }
    }
@@ -667,6 +623,7 @@ INDI_NEWCALLBACK_DEFN(zaberLowLevel, m_indiP_tgt_pos)(const pcf::IndiProperty &i
             {
                std::lock_guard<std::mutex> guard(m_indiMutex);
                std::cerr << "moving " << m_stages[n].name() << " to " << std::to_string(tgt) << "\n";
+               
                return m_stages[n].moveAbs(m_port, tgt);
             }
          }
