@@ -12,6 +12,7 @@ local/
 **/.*~
 **/*.stash
 **/*-swp
+ui*.h
 
 **/bin/
 **/moc/

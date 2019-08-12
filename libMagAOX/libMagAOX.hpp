@@ -18,7 +18,8 @@
 #include "app/dev/frameGrabber.hpp"
 #include "app/dev/edtCamera.hpp"
 #include "app/dev/dssShutter.hpp"
-//#include "app/dev/shmimMonitor.hpp"
+#include "app/dev/shmimMonitor.hpp"
+#include "app/dev/dm.hpp"
 
 #include "common/config.hpp"
 #include "common/defaults.hpp"
