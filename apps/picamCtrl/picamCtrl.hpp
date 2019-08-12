@@ -18,6 +18,14 @@
 #include "../../libMagAOX/libMagAOX.hpp" //Note this is included on command line to trigger pch
 #include "../../magaox_git_version.h"
 
+#define DEBUG
+
+#ifdef DEBUG
+#define BREADCRUMB  std::cerr << __FILE__ << " " << __LINE__ << "\n";
+#else
+#define BREADCRUMB
+#endif
+
 inline
 std::string PicamEnum2String( PicamEnumeratedType type, piint value )
 {
@@ -56,10 +64,13 @@ namespace app
   * \todo Config item for ImageStreamIO name filename
   * \todo implement ImageStreamIO circular buffer, with config setting
   */
-class picamCtrl : public MagAOXApp<>, public dev::frameGrabber<picamCtrl>
+class picamCtrl : public MagAOXApp<>, public dev::frameGrabber<picamCtrl>, public dev::dssShutter<picamCtrl>
 {
 
    friend class dev::frameGrabber<picamCtrl>;
+   friend class dev::dssShutter<picamCtrl>;
+   
+   typedef MagAOXApp<> MagAOXAppT;
    
 protected:
 
@@ -245,6 +256,7 @@ void picamCtrl::setupConfig()
    config.add("camera.startupTemp", "", "camera.startupTemp", argType::Required, "camera", "startupTemp", false, "float", "The temperature setpoint to set after a power-on [C].  Default is -55 C.");
    
    dev::frameGrabber<picamCtrl>::setupConfig(config);
+   dev::dssShutter<picamCtrl>::setupConfig(config);
 }
 
 inline
@@ -256,7 +268,7 @@ void picamCtrl::loadConfig()
    config(m_startupTemp, "camera.startupTemp");
    
    dev::frameGrabber<picamCtrl>::loadConfig(config);
-   
+   dev::dssShutter<picamCtrl>::loadConfig(config);
    
 }
 
@@ -293,6 +305,11 @@ int picamCtrl::appStartup()
       return log<software_critical,-1>({__FILE__,__LINE__});
    }
    
+   if(dev::dssShutter<picamCtrl>::appStartup() < 0)
+   {
+      return log<software_critical,-1>({__FILE__,__LINE__});
+   }
+   
    return 0;
 
 }
@@ -306,6 +323,11 @@ int picamCtrl::appLogic()
       return log<software_error, -1>({__FILE__, __LINE__});
    }
    
+   //and run dssShutter's appLogic
+   if(dev::dssShutter<picamCtrl>::appLogic() < 0)
+   {
+      return log<software_error, -1>({__FILE__, __LINE__});
+   }
    
    if( state() == stateCodes::POWERON )
    {
@@ -328,7 +350,7 @@ int picamCtrl::appLogic()
    if( state() == stateCodes::NOTCONNECTED || state() == stateCodes::NODEVICE || state() == stateCodes::ERROR)
    {
       //Might have gotten here because of a power off.
-      if(m_powerState == 0) return 0;
+      if(MagAOXAppT::m_powerState == 0) return 0;
       
       std::unique_lock<std::mutex> lock(m_indiMutex);
       if(connect() < 0)
@@ -370,7 +392,7 @@ int picamCtrl::appLogic()
       
       if(getAcquisitionState() < 0)
       {
-         if(m_powerState == 0) return 0;
+         if(MagAOXAppT::m_powerState == 0) return 0;
          
          state(stateCodes::ERROR);
          return 0;
@@ -378,7 +400,7 @@ int picamCtrl::appLogic()
       
       if(getTemps() < 0)
       {
-         if(m_powerState == 0) return 0;
+         if(MagAOXAppT::m_powerState == 0) return 0;
          
          state(stateCodes::ERROR);
          return 0;
@@ -387,6 +409,13 @@ int picamCtrl::appLogic()
       if(frameGrabber<picamCtrl>::updateINDI() < 0)
       {
          return log<software_error,0>({__FILE__,__LINE__});
+      }
+      
+      if(dssShutter<picamCtrl>::updateINDI() < 0)
+      {
+         log<software_error>({__FILE__, __LINE__});
+         state(stateCodes::ERROR);
+         return 0;
       }
    }
 
@@ -422,12 +451,20 @@ int picamCtrl::onPowerOff()
    
    Picam_UninitializeLibrary();
    
+   ///\todo error check these base class fxns.
+   dssShutter<picamCtrl>::onPowerOff();
+   
    return 0;
 }
 
 inline
 int picamCtrl::whilePowerOff()
 {
+   ///\todo error check these base class fxns.
+   
+   dssShutter<picamCtrl>::whilePowerOff();
+   
+   
    return 0;
 }
 
@@ -444,6 +481,10 @@ int picamCtrl::appShutdown()
    
    Picam_UninitializeLibrary();
     
+   ///\todo error check these base class fxns.
+   dev::frameGrabber<picamCtrl>::appShutdown();
+   dev::dssShutter<picamCtrl>::appShutdown();
+   
    return 0;
 }
 
@@ -454,7 +495,7 @@ int picamCtrl::getPicamParameter( piint & value,
 {
    PicamError error = Picam_GetParameterIntegerValue( m_cameraHandle, parameter, &value );
 
-   if(m_powerState == 0) return -1; //Flag error but don't log
+   if(MagAOXAppT::m_powerState == 0) return -1; //Flag error but don't log
    
    if(error != PicamError_None)
    {
@@ -472,7 +513,7 @@ int picamCtrl::getPicamParameter( piflt & value,
 {
    PicamError error = Picam_GetParameterFloatingPointValue( m_cameraHandle, parameter, &value );
 
-   if(m_powerState == 0) return -1; //Flag error but don't log
+   if(MagAOXAppT::m_powerState == 0) return -1; //Flag error but don't log
    
    if(error != PicamError_None)
    {
@@ -595,24 +636,41 @@ int picamCtrl::connect()
    PicamCameraID * id_array;
    piint id_count;
     
+   BREADCRUMB
+   
    Picam_UninitializeLibrary();
+   
+   BREADCRUMB
    
    //Have to initialize the library every time.  Otherwise we won't catch a newly booted camera.
    Picam_InitializeLibrary();
    
+   BREADCRUMB
+   
    if(m_cameraHandle)
    {
+      BREADCRUMB
       Picam_CloseCamera(m_cameraHandle);
       m_cameraHandle = 0;
    }
 
+   BREADCRUMB
+   
    Picam_GetAvailableCameraIDs((const PicamCameraID **) &id_array, &id_count);
-     
+   
+   BREADCRUMB
+   
    if(id_count == 0)
    {
+      BREADCRUMB
+      
       Picam_DestroyCameraIDs(id_array);
       
+      BREADCRUMB
+      
       Picam_UninitializeLibrary();
+      
+      BREADCRUMB
       
       state(stateCodes::NODEVICE);
       if(!stateLogged())
@@ -622,16 +680,23 @@ int picamCtrl::connect()
       return 0;
    }
     
+   BREADCRUMB
+    
    for(int i=0; i< id_count; ++i)
    {
+      BREADCRUMB
+      
       if( std::string(id_array[i].serial_number) == m_serialNumber )
       {  
-
+         BREADCRUMB
+         
          error = PicamAdvanced_OpenCameraDevice(&id_array[i], &m_cameraHandle);
          if(error == PicamError_None) 
          {
             m_cameraName = id_array[i].sensor_name;
             m_cameraModel = PicamEnum2String(PicamEnumeratedType_Model, id_array[i].model);
+          
+            BREADCRUMB
             
             error = PicamAdvanced_GetCameraModel( m_cameraHandle, &m_modelHandle );
             if( error != PicamError_None )
@@ -642,23 +707,33 @@ int picamCtrl::connect()
             state(stateCodes::CONNECTED);
             log<text_log>("Connected to " + m_cameraName + " [S/N " + m_serialNumber + "]");
             
+            BREADCRUMB
+            
             Picam_DestroyCameraIDs(id_array);
             
+            BREADCRUMB
             
             return 0;
          }
          else
          {
+            BREADCRUMB
+            
             state(stateCodes::ERROR);
             if(!stateLogged())
             {
                log<software_error>({__FILE__,__LINE__, 0, error, "Error connecting to camera."});
             }
             
+            BREADCRUMB
+            
             Picam_DestroyCameraIDs(id_array);
+            
+            BREADCRUMB
             
             Picam_UninitializeLibrary();
             
+            BREADCRUMB
             return -1;
          }
       }
@@ -687,7 +762,7 @@ int picamCtrl::getAcquisitionState()
    
    PicamError error = Picam_IsAcquisitionRunning(m_cameraHandle, &running);
 
-   if(m_powerState == 0) return 0;
+   if(MagAOXAppT::m_powerState == 0) return 0;
 
    if(error != PicamError_None)
    {
@@ -710,7 +785,7 @@ int picamCtrl::getTemps()
    
    if(getPicamParameter(currTemperature, PicamParameter_SensorTemperatureReading) < 0)
    {
-      if(m_powerState == 0) return 0;
+      if(MagAOXAppT::m_powerState == 0) return 0;
    
       log<software_error>({__FILE__, __LINE__});
       state(stateCodes::ERROR);
@@ -722,7 +797,7 @@ int picamCtrl::getTemps()
    
    if(getPicamParameter( status, PicamParameter_SensorTemperatureStatus ) < 0)
    {   
-      if(m_powerState == 0) return 0;
+      if(MagAOXAppT::m_powerState == 0) return 0;
    
       log<software_error>({__FILE__, __LINE__});
       state(stateCodes::ERROR);

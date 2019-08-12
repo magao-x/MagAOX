@@ -86,6 +86,8 @@ protected:
       
    std::string m_configBase; ///< The name of a base config class for this app (minus .conf).
 
+   std::string m_calibDir; ///< The path to calibration files for MagAOX.
+   
    std::string sysPath;  ///< The path to the system directory, for PID file, etc.
 
    std::string secretsPath; ///< Path to the secrets directory, where passwords, etc, are stored.
@@ -856,6 +858,16 @@ void MagAOXApp<_useINDI>::setDefaults( int argc,
    m_configDir = MagAOXPath + "/" + tmpstr;
    configPathGlobal = m_configDir + "/magaox.conf";
 
+   //Set the calib path relative to MagAOXPath
+   tmpstr = mx::getEnv(MAGAOX_env_calib);
+   if(tmpstr == "")
+   {
+      tmpstr = MAGAOX_calibRelPath;
+   }
+   m_calibDir = MagAOXPath + "/" + tmpstr;
+   
+   
+   
    //Setup default log path
    tmpstr = MagAOXPath + "/" + MAGAOX_logRelPath;
 
@@ -1247,6 +1259,19 @@ void MagAOXApp<_useINDI>::handlerSigTerm( int signum,
 
    std::cerr << "\n" << logss << std::endl;
    log<text_log>(logss);
+}
+
+///Empty signal handler.  SIGUSR1 is used to interrupt sleep in various threads.   
+void sigUsr1Handler( int signum,
+                     siginfo_t * siginf,
+                     void *ucont 
+                   )
+{
+   static_cast<void>(signum);
+   static_cast<void>(siginf);
+   static_cast<void>(ucont);
+   
+   return;
 }
 
 template<bool _useINDI>

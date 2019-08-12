@@ -70,6 +70,21 @@ int dmModeGUI::handleSetProperty( const pcf::IndiProperty & ipRecv /**< [in] the
       }
    }
 
+   if(ipRecv.getName() == "dm")
+   {
+      if(ipRecv.find("name"))
+      {
+         QString name = ipRecv["name"].get<std::string>().c_str();
+         name += " DM modes";
+         ui.title->setText(name);
+         setWindowTitle(name);
+      }
+      if(ipRecv.find("channel"))
+      {
+         QString channel = ipRecv["channel"].get<std::string>().c_str();
+         ui.channel->setText(channel);
+      }
+   }
    
    return 0;
    

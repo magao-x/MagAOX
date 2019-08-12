@@ -38,6 +38,49 @@ struct driverFIFO
    }
 };
 
+int flushFIFO(const std::string & fileName)
+{
+   int fd {-1};
+   
+   fd = open( fileName.c_str(), O_RDONLY);
+   
+   char flushBuff[1024];
+   
+   int rd = 1;
+   int totrd = 0;
+   
+   // Create and clear out the FD set, set to watch the reader.
+   fd_set fdsRead;
+   FD_ZERO( &fdsRead );
+   FD_SET( fd, &fdsRead );
+
+   // Set the timeout on the select call.
+   timeval tv;
+   tv.tv_sec = 1;
+   tv.tv_usec = 0;
+
+   std::cerr << "Starting flush of " << fileName << "\n";
+
+   while(rd > 0)
+   {
+      int nRetval = ::select( fd + 1, &fdsRead, NULL, NULL, &tv );
+      
+   
+      if(nRetval != 0)
+      {
+         rd = read(fd, flushBuff, sizeof(flushBuff));
+      
+         totrd += rd;
+      }
+      else rd = 0;
+         
+   }
+      
+   
+   std::cerr << "flushed " << totrd << " bytes from " << fileName << "\n";
+   
+   return 0;
+}
 
 /// Work function for the FIFO read/write threads.
 void * xoverThread( void * vdf /**< [in] pointer to a driverFIFO struct */)
@@ -323,6 +366,9 @@ int main( int argc, char **argv)
    std::string stdoutFifo = std::string(XINDID_FIFODIR) + "/" + myName + ".out";
    std::string ctrlFifo = std::string(XINDID_FIFODIR) + "/" + myName + ".ctrl";
 
+   flushFIFO(stdinFifo);
+   flushFIFO(stdoutFifo);
+   
    std::cerr << " (" << XINDID_COMPILEDNAME << "): starting with " << stdinFifo << " & " << stdoutFifo << std::endl;
 
    driverFIFO dfIn (stdinFifo, STDIN_FILENO);
@@ -331,7 +377,7 @@ int main( int argc, char **argv)
 
    driverFIFO dfCtrl (ctrlFifo, 0);
    
-   sleep(2);
+   sleep(2); //This gives indiserver time to startup so it can handle any thing that comes from the fifos.
 
    //Launch the read/write threads, one each for STDIN and STDOUT and for control.
    pthread_t stdIn_th = 0;

@@ -150,7 +150,7 @@ protected:
    pcf::IndiProperty m_indiP_ccdtemp;
    pcf::IndiProperty m_indiP_cooling;
    
-   pcf::IndiProperty m_indiP_mode;
+
    pcf::IndiProperty m_indiP_fps;
    pcf::IndiProperty m_indiP_emGain;
 
@@ -423,19 +423,23 @@ int andorCtrl::onPowerOff()
    
    std::lock_guard<std::mutex> lock(m_indiMutex);
    
+   std::cerr << "1" << std::endl;
    updateIfChanged(m_indiP_ccdtemp, "current", -999);
+   std::cerr << "2" << std::endl;
    updateIfChanged(m_indiP_ccdtemp, "target", -999);
-      
-   updateIfChanged(m_indiP_mode, "current", std::string(""));
-   updateIfChanged(m_indiP_mode, "target", std::string(""));
-
+   
    updateIfChanged(m_indiP_fps, "current", 0);
+   std::cerr << "6" << std::endl;
    updateIfChanged(m_indiP_fps, "target", 0);
+   std::cerr << "7" << std::endl;
    updateIfChanged(m_indiP_fps, "measured", 0);
-   
+
    updateIfChanged(m_indiP_emGain, "current", 0);
+   std::cerr << "9" << std::endl;
    updateIfChanged(m_indiP_emGain, "target", 0);
-   
+   std::cerr << "10" << std::endl;
+
+   edtCamera<andorCtrl>::onPowerOff();
    return 0;
 }
 
@@ -573,21 +577,29 @@ int andorCtrl::getEMGain()
    int state;
    int gain;
    int low, high;
-   unsigned long out = GetEMAdvanced(&state);
    
-//    if(out==DRV_SUCCESS){
-//         std::cout << "The Current Advanced EM gain setting is: " << state << std::endl;
-//    }
-   out = GetEMCCDGain(&gain);
-//    if(out==DRV_SUCCESS){
-//        std::cout << "Current EMCCD Gain: " << gain << std::endl;
-//    }
+   ///\todo what is EM advanced?
+   if(GetEMAdvanced(&state) != DRV_SUCCESS)
+   {
+      log<software_error>({__FILE__,__LINE__, "error getting em advanced"});
+      return -1;
+   }
+
+   if(GetEMCCDGain(&gain) !=DRV_SUCCESS)
+   {
+      log<software_error>({__FILE__,__LINE__, "error getting em gain"});
+      return -1;
+   }
+      
+   m_emGain = gain;
    
-   out = GetEMGainRange(&low, &high);
-//    if(out==DRV_SUCCESS){
-//         std::cout << " The range of EMGain is: {" << low << "," << high << "}" << std::endl;
-//    }
-   
+   ///\todo this needs to be done on connection, and the max/min field updated.
+   if(GetEMGainRange(&low, &high) !=DRV_SUCCESS)
+   {
+      log<software_error>({__FILE__,__LINE__, "error getting em gain range"});
+      return -1;
+   }
+      
    return 0;
 }
    

@@ -7,14 +7,14 @@ XPA_VERSION="2.1.19"
 XPA_DIR="xpa-$XPA_VERSION"
 XPA_TARBALL="$XPA_DIR.tar.gz"
 
-if [[ ! -e $XPA_DIR ]]; then
-    if [[ ! -e $XPA_TARBALL ]]; then
-        curl -L $XPA_URL > $XPA_TARBALL
+if [[ ! -e /usr/local/lib/pkgconfig/xpa.pc ]]; then
+    if [[ ! -e $XPA_DIR ]]; then
+        _cached_fetch $XPA_URL $XPA_TARBALL
+        log_info "Extracting $XPA_TARBALL..."
+        tar xzf $XPA_TARBALL
     fi
-    log_info "Extracting $XPA_TARBALL..."
-    tar xzf $XPA_TARBALL
+    cd $XPA_DIR
+    ./configure
+    make
+    make install
 fi
-cd $XPA_DIR
-./configure
-make
-make install

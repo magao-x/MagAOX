@@ -1,5 +1,5 @@
 /** \file zaberCtrl.cpp
-  * \brief The MagAO-X Zaber Controller
+  * \brief The MagAO-X Zaber Stage Controller main program source file.
   *
   * \ingroup zaberCtrl_files
   */
@@ -9,8 +9,8 @@
 
 int main(int argc, char **argv)
 {
-   MagAOX::app::zaberCtrl zc;
+   MagAOX::app::zaberCtrl xapp;
 
-   return zc.main(argc, argv);
+   return xapp.main(argc, argv);
 
 }

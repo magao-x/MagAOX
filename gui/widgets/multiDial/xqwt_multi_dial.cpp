@@ -25,7 +25,7 @@ XqwtMultiDial::XqwtMultiDial( QWidget *parent ): QwtDial( parent )
    d_numNeedles = 0;
    d_needles = 0;
    
-//    m_unitsTextLabel = new QLabel(this);
+//m_unitsTextLabel = new QLabel(this);
 //    auto c = QWidget::rect().center();
 //    std::cerr << "c: " << c.x() << " " << c.y() << "\n";
 //    m_unitsTextLabel->setGeometry(c.x(),c.y()+10,80,30);
@@ -137,9 +137,16 @@ void XqwtMultiDial::drawNeedle( QPainter *painter, const QPointF &center,
     {
         for ( int i = 0; i < d_numNeedles; ++i )
         {
+           if(d_values[i] == -999)
+           {
+              continue;
+           }
+           else
+           {
            //std::cerr << d_values[i] << " " << maxScaleArc() << " " << minScaleArc() << " " << upperBound() << " " << lowerBound() << "\n";
             drawNeedle( painter, i,
                 center, radius, 360.0 - ((d_values[i]-lowerBound())*(maxScaleArc()-minScaleArc())/(upperBound()-lowerBound())) - origin(), colorGroup );
+           }
         }
     }
 }
