@@ -11,8 +11,6 @@
 #include "../../libMagAOX/libMagAOX.hpp" //Note this is included on command line to trigger pch
 #include "../../magaox_git_version.h"
 
-#include "dm.hpp"
-#include "shmimMonitor.hpp"
 
 /* Alpao SDK C Header */
 #include <asdkWrapper.h>
