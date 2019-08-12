@@ -88,6 +88,8 @@ std::string stateCodes::codeText( stateCodeT stateCode )
          return "LOGGEDIN";
       case stateCodes::CONFIGURING:
          return "CONFIGURING";
+      case stateCodes::NOTHOMED:
+         return "NOTHOMED";
       case stateCodes::HOMING:
          return "HOMING";
       case stateCodes::OPERATING:
