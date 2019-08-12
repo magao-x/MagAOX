@@ -33,7 +33,7 @@ namespace app
 /** 
   * \ingroup template
   */
-class template : public MagAOXApp<false>
+class template : public MagAOXApp<true>
 {
 
    //Give the test harness access.

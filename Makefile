@@ -14,31 +14,32 @@ apps_to_build =  filterWheelCtrl \
                  xindiserver \
                  xt1121Ctrl \
                  xt1121DCDU \
-                 zaberCtrl 
+                 zaberCtrl
 
 ifneq ($(PYLON),false)
 apps_to_build += baslerCtrl
-endif 
+endif
 
 ifneq ($(PICAM), false)
-apps_to_build += picamCtrl 
-endif 
+apps_to_build += picamCtrl
+endif
 
 ifneq ($(EDT),false)
-apps_to_build += ocam2KCtrl 
+apps_to_build += ocam2KCtrl
 apps_to_build += andorCtrl
-endif 
+endif
 
 utils_to_build = logdump \
                  cursesINDI
 
 scripts_to_install = magaox_procstart.sh \
                      magaox_startup.sh \
+                     magaox_status.sh \
                      magaox_shutdown.sh
 
 all: indi_all libs_all apps_all utils_all
 
-install: indi_install libs_install apps_install utils_install
+install: indi_install libs_install apps_install utils_install scripts_install
 
 #We clean just libMagAOX, and the apps and utils for normal devel work.
 clean: lib_clean apps_clean utils_clean

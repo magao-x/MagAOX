@@ -12,6 +12,7 @@ local/
 **/.*~
 **/*.stash
 **/*-swp
+ui*.h
 
 **/bin/
 **/moc/
@@ -67,6 +68,7 @@ apps/xt1121Ctrl/xt1121Ctrl
 
 apps/xt1121DCDU/xt1121DCDU
 
+apps/dmMode/dmMode
 
 apps/zaberLowLevel/zaberLowLevel
 
@@ -85,3 +87,4 @@ flatlogs/src/logCodes.dat
 .vagrant/
 .DS_Store
 setup/vendor_software_bundle.tar.gz
+setup/cache

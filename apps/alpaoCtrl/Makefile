@@ -2,6 +2,7 @@
 allall: all 
 
 OTHER_HEADERS=
-TARGET=dmMode
+TARGET=alpaoCtrl
+LDLIBS+= -lasdk
 include ../../Make/magAOXApp.mk
 

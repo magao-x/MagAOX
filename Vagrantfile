@@ -4,6 +4,7 @@
 Vagrant.configure("2") do |config|
   config.vm.box = "centos/7"
   config.vm.network "private_network", ip: "172.16.200.2"  # needed for NFS
+  config.vm.network "forwarded_port", guest: 7624, host: 7624
   config.vm.provider :virtualbox do |vb|
     vb.memory = 2048
   end

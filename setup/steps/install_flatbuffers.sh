@@ -8,9 +8,7 @@ FLATBUFFERS_VERSION="1.9.0"
 #
 FLATBUFFERS_DIR="./flatbuffers-$FLATBUFFERS_VERSION"
 if [[ ! -d $FLATBUFFERS_DIR ]]; then
-    if [[ ! -e $FLATBUFFERS_DIR.tar.gz ]]; then
-        curl -L https://github.com/google/flatbuffers/archive/v$FLATBUFFERS_VERSION.tar.gz > $FLATBUFFERS_DIR.tar.gz
-    fi
+    _cached_fetch https://github.com/google/flatbuffers/archive/v$FLATBUFFERS_VERSION.tar.gz $FLATBUFFERS_DIR.tar.gz
     tar xzf $FLATBUFFERS_DIR.tar.gz
 fi
 cd $FLATBUFFERS_DIR

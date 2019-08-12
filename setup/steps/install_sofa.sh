@@ -8,9 +8,7 @@ SOFA_REV_DATE=$(echo $SOFA_REV | tr -d _C)
 # SOFA
 #
 if [[ ! -d ./sofa ]]; then
-    if [[ ! -e sofa_c-$SOFA_REV_DATE.tar.gz ]]; then
-        curl -OL http://www.iausofa.org/$SOFA_REV/sofa_c-$SOFA_REV_DATE.tar.gz
-    fi
+    _cached_fetch http://www.iausofa.org/$SOFA_REV/sofa_c-$SOFA_REV_DATE.tar.gz sofa_c-$SOFA_REV_DATE.tar.gz
     tar xzf sofa_c-$SOFA_REV_DATE.tar.gz
     echo "Downloaded and unpacked 'sofa' from sofa_c_-$SOFA_REV_DATE.tar.gz"
 fi

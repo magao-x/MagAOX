@@ -5,9 +5,7 @@ set -euo pipefail
 MAGMA_VERSION=2.5.1-alpha1
 MAGMA_FOLDER=./magma-$MAGMA_VERSION
 if [[ ! -d $MAGMA_FOLDER ]]; then
-  if [[ ! -e magma-$MAGMA_VERSION.tar.gz ]]; then
-    curl -OL http://icl.utk.edu/projectsfiles/magma/downloads/magma-$MAGMA_VERSION.tar.gz
-  fi
+  _cached_fetch http://icl.utk.edu/projectsfiles/magma/downloads/magma-$MAGMA_VERSION.tar.gz magma-$MAGMA_VERSION.tar.gz
   tar xzf magma-$MAGMA_VERSION.tar.gz
 fi
 cd $MAGMA_FOLDER

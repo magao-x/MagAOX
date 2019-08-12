@@ -10,7 +10,7 @@ function getandinstall() {
     filename=$name-$version.rpm
     log_info "Downloading $baseurl/$filename"
     if [[ ! -e $filename ]]; then
-        curl -OL $baseurl/$filename
+        _cached_fetch $baseurl/$filename $filename
         log_success "Downloaded $filename from $baseurl"
     else
         log_info "$filename RPM present"

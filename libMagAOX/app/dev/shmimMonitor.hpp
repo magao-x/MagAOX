@@ -13,7 +13,7 @@
 #include <ImageStruct.h>
 #include <ImageStreamIO.h>
 
-#include "../../common/paths.hpp"
+#include "../../libMagAOX/common/paths.hpp"
 
 
 namespace MagAOX
@@ -23,11 +23,16 @@ namespace app
 namespace dev 
 {
 
-/** MagAO-X generic frame grabber
+/** MagAO-X generic deformable mirror controller
   *
   * 
   * The derived class `derivedT` must expose the following interface
    \code 
+    
+    //The allocate function is called after connecting to the shared memory buffer
+    //It should check that the buffer has the expected size, and perform any internal allocations
+    //to prepare for processing.
+    int derivedT::allocate();
     
    \endcode  
   * Each of the above functions should return 0 on success, and -1 on an error. 
@@ -230,7 +235,6 @@ void shmimMonitor<derivedT>::loadConfig(mx::app::appConfigurator & config)
   
 }
    
-
 template<class derivedT>
 int shmimMonitor<derivedT>::appStartup()
 {
@@ -278,6 +282,26 @@ int shmimMonitor<derivedT>::appStartup()
       return -1;
    }
    
+    //Install empty signal handler for USR1, which is used to interrupt sleeps in the monitor threads.
+   struct sigaction act;
+   sigset_t set;
+
+   act.sa_sigaction = &sigUsr1Handler;
+   act.sa_flags = SA_SIGINFO;
+   sigemptyset(&set);
+   act.sa_mask = set;
+
+   errno = 0;
+   if( sigaction(SIGUSR1, &act, 0) < 0 )
+   {
+      std::string logss = "Setting handler for SIGUSR1 failed. Errno says: ";
+      logss += strerror(errno);
+
+      derivedT::template log<software_error>({__FILE__, __LINE__, errno, 0, logss});
+
+      return -1;
+   }
+   
    if(derived().threadStart( m_smThread, m_smThreadInit, m_smThreadPrio, "shmimMonitor", this, smThreadStart) < 0)
    {
       derivedT::template log<software_error>({__FILE__, __LINE__});
@@ -307,6 +331,8 @@ int shmimMonitor<derivedT>::appLogic()
 template<class derivedT>
 int shmimMonitor<derivedT>::appShutdown()
 {
+   pthread_kill(m_smThread.native_handle(), SIGUSR1);
+   
    if(m_smThread.joinable())
    {
       try
@@ -401,16 +427,26 @@ void shmimMonitor<derivedT>::smThreadExec()
    
    bool opened = false;
    
-   
-      
    while(derived().shutdown() == 0)
    {
+      if(derived().state() != stateCodes::OPERATING)
+      {
+         std::cerr << "Pausing \n";
+      }
+      
+      while(derived().state() != stateCodes::OPERATING && !derived().shutdown() && !m_restart )
+      {
+         sleep(1);
+      }
+      
+      if(derived().shutdown()) return;
+      
       /* Initialize ImageStreamIO
        */
       opened = false;
       m_restart = false; //Set this up front, since we're about to restart.
       
-      while(!opened && !derived().m_shutdown && !m_restart)
+      while(!opened && !derived().m_shutdown && !m_restart && derived().state() == stateCodes::OPERATING)
       {
          if( ImageStreamIO_openIm(&m_imageStream, m_shmimName.c_str()) == 0)
          {
@@ -441,6 +477,8 @@ void shmimMonitor<derivedT>::smThreadExec()
       
       derivedT::template log<software_info>({__FILE__,__LINE__, "got semaphore index " + std::to_string(m_semaphoreNumber) });
       
+      ImageStreamIO_semflush(&m_imageStream, m_semaphoreNumber);
+      
       sem_t * sem = m_imageStream.semptr[m_semaphoreNumber]; ///< The semaphore to monitor for new image data
       
       m_dataType = m_imageStream.md[0].datatype;
@@ -461,7 +499,7 @@ void shmimMonitor<derivedT>::smThreadExec()
       uint64_t curr_image; //The current cnt1 index
       
       //This is the main image grabbing loop.
-      while( derived().shutdown() == 0 && !m_restart)
+      while( derived().shutdown() == 0 && !m_restart && derived().state() == stateCodes::OPERATING)
       {
          
          timespec ts;
@@ -492,7 +530,7 @@ void shmimMonitor<derivedT>::smThreadExec()
                break; //exit the nearest while loop and get the new image setup.
             }
          
-            if(derived().shutdown() != 0 || m_restart) break; //Check for exit signals
+            if(derived().shutdown() != 0 || m_restart || derived().state() != stateCodes::OPERATING) break; //Check for exit signals
          
             char * curr_src = (char *)  m_imageStream.array.raw + curr_image*m_width*m_height*m_typeSize;
             

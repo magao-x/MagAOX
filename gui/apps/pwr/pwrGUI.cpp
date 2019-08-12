@@ -124,9 +124,6 @@ pwrGUI::pwrGUI( QWidget * Parent, Qt::WindowFlags f) : QWidget(Parent, f)
 {
    ui.setupUi(this);
    
-//    pdu1Needle = new QwtDialSimpleNeedle(QwtDialSimpleNeedle::Style::Arrow,false, Qt::red);
-//    ui.currentDial->setNeedle(pdu1Needle);
-   
    ui.currentDial->setOrigin(150.0);
    ui.currentDial->setScaleArc(0.0,240.0);
    ui.currentDial->setScale(0.0,15.0);
@@ -134,19 +131,15 @@ pwrGUI::pwrGUI( QWidget * Parent, Qt::WindowFlags f) : QWidget(Parent, f)
    ui.currentDial->setScaleMaxMajor(5);
    ui.currentDial->setScaleMaxMinor(1);
    
-   //paletteExporter(ui.voltageDial);
-   
    QPalette p = ui.currentDial->palette();
    setXDialPalette(&p);
    ui.currentDial->setPalette(p);
-   
-   
    
    ui.currentDial->setFocusPolicy(Qt::NoFocus);
    
    ui.voltageDial->setOrigin(150.0);
    ui.voltageDial->setScaleArc(0.0,240.0);
-   ui.voltageDial->setScale(118.0,122.0);
+   ui.voltageDial->setScale(116.0,121.0);
    ui.voltageDial->setScaleStepSize(1.0);
    ui.voltageDial->setScaleMaxMajor(10);
    ui.voltageDial->setScaleMaxMinor(10);
@@ -173,40 +166,6 @@ pwrGUI::pwrGUI( QWidget * Parent, Qt::WindowFlags f) : QWidget(Parent, f)
    ui.frequencyDial->setFocusPolicy(Qt::NoFocus);
    
    connect(this, SIGNAL(gotNewDevice(std::string *, std::vector<std::string> *)), this, SLOT(addNewDevice(std::string *, std::vector<std::string> *)));
-   /*
-   m_devices.resize(2);
-   m_devices[0] = new pwrDevice(this);
-   m_devices[1] = new pwrDevice(this);
-   
-   m_devices[0]->deviceName("pdu0");
-   m_devices[0]->setChannels({"psdcmain", "swint", "safety", "compicc", "comprtc", "comppcie1", "modttm"});
-   
-   QObject::connect(m_devices[0], SIGNAL(chChange(pcf::IndiProperty &)), this, SLOT(chChange(pcf::IndiProperty &)));
-   QObject::connect(m_devices[0], SIGNAL(loadChanged()), this, SLOT(updateGauges()));
-   
-
-   ui.switchGrid->addWidget(m_devices[0]->deviceNameLabel(), 0, 0, 2, 1);
-   
-   for(size_t n=0; n<m_devices[0]->numChannels();++n)
-   {
-      ui.switchGrid->addWidget(m_devices[0]->channel(n)->channelNameLabel(), 0, n+1);
-      ui.switchGrid->addWidget(m_devices[0]->channel(n)->channelSwitch(), 1, n+1);
-   }
-   
-   
-   QObject::connect(m_devices[1], SIGNAL(chChange(pcf::IndiProperty &)), this, SLOT(chChange(pcf::IndiProperty &)));
-   QObject::connect(m_devices[1], SIGNAL(loadChanged()), this, SLOT(updateGauges()));
-   
-   m_devices[1]->deviceName("pdu1");
-   m_devices[1]->setChannels({"camwfs", "dmwoofer", "camlowfs", "dmcoron", "camsci1", "camsci2", "zaberstages"});
-   
-   ui.switchGrid->addWidget(m_devices[1]->deviceNameLabel(), 2, 0,2,1);
-   for(size_t n=0; n<m_devices[1]->numChannels();++n)
-   {
-      ui.switchGrid->addWidget(m_devices[1]->channel(n)->channelNameLabel(), 2, n+1);
-      ui.switchGrid->addWidget(m_devices[1]->channel(n)->channelSwitch(), 3, n+1);
-   }
-   */
    
    n_ACpdus=3;
    currents.resize(n_ACpdus, -1);
@@ -243,27 +202,15 @@ int pwrGUI::handleDefProperty( const pcf::IndiProperty & ipRecv /**< [in] the pr
    {
       if(ipRecv.getName() == "channelOutlets")
       {
-         std::cerr << ipRecv.getDevice() << " is an outlet controller\n";
-         
          size_t nel = ipRecv.getNumElements();
          
-         if(nel == 0)
-         {
-            std::cerr << "  but has no channels . . .\n";
-         }
-         else
+         if(nel != 0)
          {
             std::vector<std::string> * elements = new std::vector<std::string>;
             elements->resize(nel);
             for(size_t i = 0; i < nel; ++i)
             {
                (*elements)[i] = ipRecv[i].getName();
-            }
-         
-            std::cerr << "   Channels:\n";
-            for(size_t i = 0; i < nel; ++i)
-            {
-               std::cerr << "      " << (*elements)[i] << "\n";
             }
          
             std::string * devName = new std::string;
@@ -320,6 +267,7 @@ void pwrGUI::addNewDevice( std::string * devName,
    publisher->subscribeProperty(this, m_devices.back()->deviceName(), "channelOnDelays");
    publisher->subscribeProperty(this, m_devices.back()->deviceName(), "channelOffDelays");
    
+   
    ui.switchGrid->addWidget(m_devices.back()->deviceNameLabel(), currRow, 0, 2, 1);
    
    for(size_t i=0;i<m_devices.back()->numChannels();++i)
@@ -335,28 +283,19 @@ void pwrGUI::addNewDevice( std::string * devName,
    delete devName;
    delete channels;
    
-   ui.currentDial->setNumNeedles(m_devices.size());
-//    ui.currentDial->setValue(0, 0.0);
-//    ui.currentDial->setValue(1, 0.0);
+   ui.currentDial->setNumNeedles( m_devices.size());
    ui.voltageDial->setNumNeedles(m_devices.size());
-//    ui.voltageDial->setValue(0, 0.0);
-//    ui.voltageDial->setValue(1, 0.0);
    ui.frequencyDial->setNumNeedles(m_devices.size());
-//    ui.frequencyDial->setValue(0, 0.0);
-//    ui.frequencyDial->setValue(1, 0.0);
    
 }
 int pwrGUI::handleSetProperty( const pcf::IndiProperty & ipRecv /**< [in] the property which has changed*/)
 {
-   std::string key = ipRecv.createUniqueKey();
-   
    for(size_t n=0; n<m_devices.size(); ++n)
    {
       if(ipRecv.getDevice() == m_devices[n]->deviceName())
       {
          m_devices[n]->handleSetProperty(ipRecv);
          
-         //updateAverages();
          return 0;
       }
    }
@@ -385,11 +324,16 @@ void pwrGUI::updateGauges()
    for(size_t i =0; i< m_devices.size(); ++i)
    {
       double a = m_devices[i]->current();
+      
       if( a >= 0)
       {
          ui.currentDial->setValue(i,a);
          sumCurr += a;
          ++nCurr;
+      }
+      else
+      {
+         ui.currentDial->setValue(i,-999);
       }
       
       double v = m_devices[i]->voltage(); 
@@ -397,8 +341,11 @@ void pwrGUI::updateGauges()
       {
          ui.voltageDial->setValue(i,v);
          sumVolt += v;
-        // std::cerr << v << "\n";
          ++nVolt;
+      }
+      else
+      {
+         ui.voltageDial->setValue(i,-999);
       }
       
       double f= m_devices[i]->frequency();
@@ -407,6 +354,10 @@ void pwrGUI::updateGauges()
          ui.frequencyDial->setValue(i,f);
          sumFreq += f;
          ++nFreq;
+      }
+      else
+      {
+         ui.frequencyDial->setValue(i,-999);
       }
       
    }

@@ -8,7 +8,6 @@ XRIF_DIR="./xrif"
 #
 # xrif streaming compression library
 #
-yum install -y check-devel subunit-devel
 
 if [[ ! -d $XRIF_DIR ]]; then
     git clone https://github.com/jaredmales/xrif.git $XRIF_DIR

@@ -25,6 +25,11 @@
    #define MAGAOX_env_config "MagAOX_CONFIG"
 #endif
 
+#ifndef MAGAOX_env_calib
+   /// Environment variable setting the relative calib path.
+   #define MAGAOX_env_calib "MagAOX_CALIB"
+#endif
+
 ///@}
 
 

@@ -1,15 +1,29 @@
 #!/bin/bash
 function log_error() {
-    echo -e "$(tput setaf 1)$1$(tput sgr0)"
+    echo -e "$(tput setaf 1 2>/dev/null)$1$(tput sgr0 2>/dev/null)"
 }
 function log_success() {
-    echo -e "$(tput setaf 2)$1$(tput sgr0)"
+    echo -e "$(tput setaf 2 2>/dev/null)$1$(tput sgr0 2>/dev/null)"
 }
 function log_warn() {
-    echo -e "$(tput setaf 3)$1$(tput sgr0)"
+    echo -e "$(tput setaf 3 2>/dev/null)$1$(tput sgr0 2>/dev/null)"
 }
 function log_info() {
-    echo -e "$(tput setaf 4)$1$(tput sgr0)"
+    echo -e "$(tput setaf 4 2>/dev/null)$1$(tput sgr0 2>/dev/null)"
+}
+
+function _cached_fetch() {
+  url=$1
+  filename=$2
+  dest=$PWD
+  if [[ ! -e $dest/$filename ]]; then
+    if [[ ! -e /opt/MagAOX/.cache/$filename ]]; then
+      curl -A "Mozilla/5.0" -L $url > /opt/MagAOX/.cache/$filename
+      log_info "Downloaded to /opt/MagAOX/.cache/$filename"
+    fi
+    cp /opt/MagAOX/.cache/$filename $dest/$filename
+    log_info "Copied to $dest/$filename"
+  fi
 }
 
 DEFAULT_PASSWORD="extremeAO!"

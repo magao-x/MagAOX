@@ -44,6 +44,7 @@ struct stateCodes
                        CONNECTED = 10,     ///< The application has connected to the device or service.
                        LOGGEDIN = 15,      ///< The application has logged into the device or service
                        CONFIGURING = 20,   ///< The application is configuring the device.
+                       NOTHOMED = 24,     ///< The device has not been homed.
                        HOMING = 25,       ///< The device is homing.
                        OPERATING = 30,    ///< The device is operating, other than homing.
                        READY = 35,        ///< The device is ready for operation, but is not operating.

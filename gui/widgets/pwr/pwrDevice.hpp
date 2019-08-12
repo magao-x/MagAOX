@@ -41,7 +41,7 @@ public:
    {
    }
    
-   circularTimeSeries(size_t size)
+   explicit circularTimeSeries(size_t size)
    {
       resize(size);
    }

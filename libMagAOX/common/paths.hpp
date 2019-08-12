@@ -29,6 +29,13 @@
    #define MAGAOX_configRelPath "config"
 #endif
 
+#ifndef MAGAOX_calibRelPath
+   /// The relative path to the calibration files.
+   /** This is the subdirectory for calibration files.
+     */
+   #define MAGAOX_calibRelPath "calib"
+#endif
+
 #ifndef MAGAOX_globalConfig
    /// The filename for the global configuration file.
    /** Will be looked for in the config/ subdirectory.
