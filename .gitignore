@@ -16,6 +16,7 @@ ui*.h
 
 **/bin/
 **/moc/
+makefile.*GUI
 
 #Ignore any old folders
 **/old/
