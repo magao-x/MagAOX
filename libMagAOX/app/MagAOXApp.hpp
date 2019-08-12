@@ -1641,7 +1641,7 @@ void MagAOXApp<_useINDI>::state(const stateCodes::stateCodeT & s)
 
    if(lock.owns_lock())
    {
-      updateIfChanged(m_indiP_state, "current", m_state);
+      updateIfChanged(m_indiP_state, "current", stateCodes::codeText(m_state));
    }
 }
 
