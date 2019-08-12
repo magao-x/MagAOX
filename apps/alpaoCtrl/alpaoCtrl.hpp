@@ -1,5 +1,5 @@
 /** \file alpaoCtrl.hpp
-  * \brief The MagAO-X XXXXXX header file
+  * \brief The MagAO-X ALPAO DM controller header file
   *
   * \ingroup alpaoCtrl_files
   */
@@ -17,7 +17,7 @@
 
 
 /** \defgroup alpaoCtrl 
-  * \brief The XXXXXXX application to do YYYYYYY
+  * \brief The MagAO-X application to control an ALPAO DM
   *
   * <a href="..//apps_html/page_module_alpaoCtrl.html">Application Documentation</a>
   *
@@ -34,7 +34,7 @@ namespace MagAOX
 namespace app
 {
 
-/// The MagAO-X xxxxxxxx
+/// The MagAO-X ALPAO DM Controller
 /** 
   * \ingroup alpaoCtrl
   */
@@ -48,7 +48,7 @@ class alpaoCtrl : public MagAOXApp<true>, public dev::dm<alpaoCtrl,float>, publi
    
    friend class dev::shmimMonitor<alpaoCtrl>;
    
-   typedef float realT;
+   typedef float realT;  ///< This defines the datatype used to signal the DM using the ImageStreamIO library.
    
 protected:
 
@@ -67,9 +67,10 @@ public:
    /// Default c'tor.
    alpaoCtrl();
 
-   /// D'tor, declared and defined for noexcept.
+   /// D'tor.
    ~alpaoCtrl() noexcept;
 
+   /// Setup the configuration system.
    virtual void setupConfig();
 
    /// Implementation of loadConfig logic, separated for testing.
@@ -77,10 +78,11 @@ public:
      */
    int loadConfigImpl( mx::app::appConfigurator & _config /**< [in] an application configuration from which to load values*/);
 
+   /// Load the configuration
    virtual void loadConfig();
 
    /// Startup function
-   /**
+   /** Sets up INDI, and starts the shmim thread.
      *
      */
    virtual int appStartup();
@@ -98,13 +100,44 @@ public:
      */
    virtual int appShutdown();
 
+   /** \name DM Base Class Interface
+     *
+     *@{
+     */
+   
+   /// Initialize the DM and prepare for operation.
+   /** Application is in state OPERATING upon successful conclusion.
+     * 
+     * \returns 0 on success 
+     * \returns -1 on error
+     */ 
    int initDM();
    
+   /// Zero all commands on the DM
+   /** This does not update the shared memory buffer.
+     * 
+     * \returns 0 on success 
+     * \returns -1 on error
+     */
    int zeroDM();
    
-   int commandDM(char * curr_src);
+   /// Send a command to the DM
+   /** This is called by the shmim monitoring thread in response to a semaphore trigger.
+     * 
+     * \returns 0 on success 
+     * \returns -1 on error
+     */
+   int commandDM(void * curr_src);
    
+   /// Release the DM, making it safe to turn off power.
+   /** The application will be state READY at the conclusion of this.
+     *  
+     * \returns 0 on success 
+     * \returns -1 on error
+     */
    int releaseDM();
+   
+   ///@}
    
    /** \name ALPAO Interface
      * \todo document these members
@@ -112,18 +145,31 @@ public:
      */
    
 protected:
-   Scalar m_max_stroke {0};
-   Scalar m_volume_factor {0};
-   UInt m_nbAct {0};
+   Scalar m_max_stroke {0}; ///< The maximum allowable stroke
+   Scalar m_volume_factor {0}; ///< the volume factor to convert from displacement to commands
+   UInt m_nbAct {0}; ///< The number of actuators
    
-   int * m_actuator_mapping {nullptr};
+   int * m_actuator_mapping {nullptr}; ///< Array containing the mapping from 2D grid position to linear index in the command vector
    
-   Scalar * m_dminputs {nullptr};
+   Scalar * m_dminputs {nullptr}; ///< Pre-allocated command vector, used only in commandDM
    
-   asdkDM * m_dm {nullptr};
+   asdkDM * m_dm {nullptr}; ///< ALPAO SDK handle for the DM.
    
 public:
-   int parse_calibration_file();
+   
+   /// Parse the ALPAO calibration file
+   /** \returns 0 on success
+     * \returns -1 on error
+     */  
+   int parse_calibration_file(); 
+   
+   /// Read the actuator mapping from a FITS file
+   /**
+     * \todo convert this to use mxlib::fitsFile
+     *
+     * \returns 0 on success
+     * \returns -1 on error
+     */ 
    int get_actuator_mapping();
    
    ///@}
@@ -323,7 +369,7 @@ int alpaoCtrl::zeroDM()
    return 0;
 }
 
-int alpaoCtrl::commandDM(char * curr_src)
+int alpaoCtrl::commandDM(void * curr_src)
 {
    COMPL_STAT ret;
 
@@ -467,6 +513,8 @@ int alpaoCtrl::parse_calibration_file() //const char * serial, Scalar *max_strok
     m_max_stroke = calibvals[0];
     m_volume_factor = calibvals[1];
 
+    free(calibvals);
+    
     log<text_log>("ALPAO " + m_serialNumber + ": Using stroke and volume calibration from " + calibpath);
     std::cerr << m_max_stroke << " " << m_volume_factor << "\n";
     return 0;
@@ -479,11 +527,8 @@ int alpaoCtrl::get_actuator_mapping() //const char * serial, int nbAct, int * ac
 
     fitsfile *fptr;  /* FITS file pointer */
     int status = 0;  /* CFITSIO status value MUST be initialized to zero! */
-    int hdutype, naxis, ii;
-    long naxes[2], /*totpix,*/ fpixel[2];
-    int *pix;
-    int ij = 0; /* actuator mapping index */
-
+    
+    
 
     // get file path to actuator map
     std::string ser = mx::ioutils::toLower(m_serialNumber);
@@ -492,6 +537,9 @@ int alpaoCtrl::get_actuator_mapping() //const char * serial, int nbAct, int * ac
     
     if ( !fits_open_image(&fptr, calibpath.c_str(), READONLY, &status) )
     {
+      int hdutype, naxis;
+      long naxes[2];   
+       
       if (fits_get_hdu_type(fptr, &hdutype, &status) || hdutype != IMAGE_HDU) { 
         printf("Error: this program only works on images, not tables\n");
         return(1);
@@ -505,18 +553,19 @@ int alpaoCtrl::get_actuator_mapping() //const char * serial, int nbAct, int * ac
         return(1);
       }
 
-      pix = (int *) malloc(naxes[0] * sizeof(int)); /* memory for 1 row */
+      int * pix = (int *) malloc(naxes[0] * sizeof(int)); /* memory for 1 row */
 
       if (pix == NULL) {
         printf("Memory allocation error\n");
         return(1);
       }
 
+      long fpixel[2];
       //totpix = naxes[0] * naxes[1];
       fpixel[0] = 1;  /* read starting with first pixel in each row */
 
       /* process image one row at a time; increment row # in each loop */
-      //for (fpixel[1] = 1; fpixel[1] <= naxes[1]; fpixel[1]++)
+      int ij = 0;/* actuator mapping index */
       for (fpixel[1] = naxes[1]; fpixel[1] >= 1; fpixel[1]--)
       {  
          /* give starting pixel coordinate and number of pixels to read */
@@ -524,7 +573,7 @@ int alpaoCtrl::get_actuator_mapping() //const char * serial, int nbAct, int * ac
             break;   /* jump out of loop on error */
 
          // get indices of active actuators in order
-         for (ii = 0; ii < naxes[0]; ii++) {
+         for (int ii = 0; ii < naxes[0]; ii++) {
            if (pix[ii] > 0) {
                 m_actuator_mapping[ij] = (fpixel[1]-1) * naxes[0] + ii;
                 ij++;
