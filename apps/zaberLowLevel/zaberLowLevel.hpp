@@ -191,6 +191,17 @@ void zaberLowLevel::loadConfig()
 
 int zaberLowLevel::connect()
 {
+   if(m_port > 0)
+   {
+      int rv = za_disconnect(m_port);
+      if(rv < 0)
+      {
+         log<text_log>("Error disconnecting from zaber system.", logPrio::LOG_ERROR);
+      }
+      m_port = 0;
+   }
+   
+   
    if(m_port <= 0)
    {
       int rv = euidCalled();
@@ -243,9 +254,33 @@ int zaberLowLevel::connect()
    }
    
    char buffer[256];
+   
+   //===== First renumber so they are unique.   
+   log<text_log>("Sending: / renumber", logPrio::LOG_DEBUG);
+   int nwr = za_send(m_port, "/ renumber");
+   
+   if(nwr == Z_ERROR_SYSTEM_ERROR)
+   {
+      log<text_log>("Error sending renumber query to stages", logPrio::LOG_ERROR);
+      state(stateCodes::ERROR);
+      return ZC_ERROR;
+   }
+   
+   //===== Drain the result
+   log<text_log>("DRAINING", logPrio::LOG_DEBUG);
       
+   rv = za_drain(m_port);
+   
+   if(rv != Z_SUCCESS)
+   {
+      log<software_error>({__FILE__,__LINE__, rv, "error from za_drain"});
+      state(stateCodes::ERROR);
+      return ZC_ERROR;
+   }
+   
+   //======= Now find the stages
    log<text_log>("Sending: / get system.serial", logPrio::LOG_DEBUG);
-   int nwr = za_send(m_port, "/ get system.serial");
+   nwr = za_send(m_port, "/ get system.serial");
 
    if(nwr == Z_ERROR_SYSTEM_ERROR)
    {
@@ -581,14 +616,28 @@ int zaberLowLevel::appLogic()
 inline
 int zaberLowLevel::onPowerOff()
 {
+   int rv = za_disconnect(m_port);
+   if(rv < 0)
+   {
+      log<text_log>("Error disconnecting from zaber system.", logPrio::LOG_ERROR);
+   }
+   
+   
+   m_port = 0;
+   
    std::lock_guard<std::mutex> lock(m_indiMutex);
    
    for(size_t i=0; i < m_stages.size();++i)
    {
-
-      updateIfChanged(m_indiP_curr_pos, m_stages[i].name(), -1);
+      //Don't erase positions.
+      //updateIfChanged(m_indiP_curr_pos, m_stages[i].name(), -1); <------- do not zero curr_pos
+      
+      
       updateIfChanged(m_indiP_tgt_pos, m_stages[i].name(), std::string(""));
       updateIfChanged(m_indiP_tgt_relpos, m_stages[i].name(), std::string(""));
+      updateIfChanged(m_indiP_temp, m_stages[i].name(), std::string(""));
+      
+      m_stages[i].onPowerOff();
       
       updateIfChanged(m_indiP_curr_state, m_stages[i].name(), std::string("POWEROFF"));
       

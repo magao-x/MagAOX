@@ -47,7 +47,7 @@ protected:
    
    long m_maxPos; ///< The max position allowed for the device, set by config.  Will be set to no larger m_maxPosHW.
    
-   float m_temp; ///< The driver temperature, in C.
+   float m_temp {-999}; ///< The driver temperature, in C.
    
    bool m_warn {false};
    
@@ -291,6 +291,8 @@ public:
      */ 
    int getWarnings( z_port port /**< [in] the port with which to communicate */ );
 
+   /// Clear all state so that when the system is powered back on we get the correct new state.
+   int onPowerOff();
 };
 
 std::string zaberStage::name()
@@ -1042,6 +1044,26 @@ int zaberStage::getWarnings( z_port port )
    }
 }
 
+inline
+int zaberStage::onPowerOff( )
+{
+   m_commandStatus = true; ///< The status of the last command sent. true = OK, false = RJ (rejected)
+
+   m_deviceStatus  = 'U'; ///< Current status.  Either 'I' for IDLE or 'B' for BUSY.  Intializes to 'U' for UNKOWN.
+
+   m_homing = false;
+   
+   //We don't 0 rawPos so it is retained
+   
+   m_tgtPos = 0; ///< The tgt position last sent to the device, in microsteps.
+      
+   m_temp = -999; ///< The driver temperature, in C.
+   
+   unsetWarnings();
+   m_warnWRreported = false;
+   
+   return 0;
+}
 
 } //namespace app
 } //namespace MagAOX
