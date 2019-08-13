@@ -53,8 +53,8 @@ EXTRA_LDLIBS ?=  -lsofa_c \
   $(abspath \
   $(SELF_DIR)/../INDI/libcommon/libcommon.a) \
   $(abspath $(SELF_DIR)/../INDI/liblilxml/liblilxml.a)
-  
-  
+
+
 ifneq ($(CACAO),false)
   EXTRA_LDLIBS +=  -lImageStreamIO
 endif
@@ -64,7 +64,7 @@ ifneq ($(UNAME),Darwin)
     EXTRA_LDLIBS += -lrt
 endif
 
-### MKL BLAS 
+### MKL BLAS
 
 BLAS_INCLUDES ?= -DMXLIB_MKL -m64 -I${MKLROOT}/include
 BLAS_LDFLAGS ?= -L${MKLROOT}/lib/intel64 -Wl,--no-as-needed
@@ -85,7 +85,7 @@ EDT_LIBS = -L/opt/EDTpdv -lpdv -lpthread -lm -ldl
 
 
 ifneq ($(EDT),false)
-   INCLUDES += $(EDT_INCLUDES) 
+   INCLUDES += $(EDT_INCLUDES)
    EXTRA_LDLIBS += $(EDT_LIBS)
 else
    CXXFLAGS+= -DMAGAOX_NOEDT
@@ -104,7 +104,7 @@ LDLIBS += -Wl,-rpath,$(LDLIBRPATH)
 ## Compilation and linking
 #######################################
 
-CCFLAGS += -std=c99 -fPIC $(INCLUDES) $(OPTIMIZE)
+CFLAGS += -std=c99 -fPIC $(INCLUDES) $(OPTIMIZE)
 CXXFLAGS += -std=c++14 -Wall -Wextra -fPIC $(INCLUDES) $(OPTIMIZE)
 
 #This is needed to force use of g++ for linking
