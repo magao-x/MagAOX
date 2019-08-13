@@ -47,3 +47,11 @@ jobs:
       - run:
           name: Install MagAO-X
           command: 'bash -l ~/project/setup/steps/install_MagAOX.sh'
+workflows:
+  version: 2
+  ubuntu:
+    jobs:
+      - build_ubuntu
+  centos:
+    jobs:
+      - build_centos
