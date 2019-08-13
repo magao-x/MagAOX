@@ -17,7 +17,7 @@ else
 fi
 if [[ $EUID != 0 ]]; then
   if [[ -z $(groups | grep magaox-dev) ]]; then
-    /bin/sudo gpasswd -a $USER magaox-dev
+    sudo gpasswd -a $USER magaox-dev
     log_success "Added $USER to group magaox-dev"
     log_warn "Note: You will need to log out and back in before this group takes effect"
   fi
