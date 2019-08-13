@@ -16,10 +16,10 @@ include $(SELF_DIR)/config.mk
 
 UNAME ?= $(shell uname)
 ifeq ($(UNAME),Darwin)
-	CCFLAGS += -D_BSD_SOURCE
+	CFLAGS += -D_BSD_SOURCE
 	CXXFLAGS += -D_BSD_SOURCE
 else
-	CCFLAGS += -D_XOPEN_SOURCE=700
+	CFLAGS += -D_XOPEN_SOURCE=700
 	CXXFLAGS += -D_XOPEN_SOURCE=700
 endif
 
