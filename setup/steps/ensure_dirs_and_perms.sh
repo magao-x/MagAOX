@@ -94,8 +94,8 @@ chown -R root:root /opt/MagAOX/sys
 chmod -R u=rwX,g=rX,o=rX /opt/MagAOX/sys
 
 mkdir -pv /opt/MagAOX/vendor
-chown -R root:magaox-dev /opt/MagAOX/vendor
-chmod -R u=rwX,g=rwX,o=rX /opt/MagAOX/vendor
+chown root:magaox-dev /opt/MagAOX/vendor
+chmod u=rwX,g=rwX,o=rX /opt/MagAOX/vendor
 setgid_all /opt/MagAOX/vendor
 
 if [[ "$TARGET_ENV" == "vm" ]]; then
