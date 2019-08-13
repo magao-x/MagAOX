@@ -31,5 +31,5 @@ apt install -y \
     libboost-all-dev \
     libgsl-dev \
     bc \
-    libczmq4-dev \
+    libczmq-dev \
 ;

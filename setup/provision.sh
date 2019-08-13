@@ -9,6 +9,13 @@ else
   _REAL_SUDO=$(which sudo)
 fi
 source /etc/os-release
+if [[ $ID == ubuntu ]]; then
+    # Need to populate package lists before attempting any installations
+    apt-get update
+    # Stop annoying messages about messages
+    # https://superuser.com/questions/1160025/how-to-solve-ttyname-failed-inappropriate-ioctl-for-device-in-vagrant
+    sed -i -e 's/mesg n .*true/tty -s \&\& mesg n/g' ~/.profile
+fi
 if [[ -d /vagrant || $CI == true ]]; then
     if [[ -d /vagrant ]]; then
         DIR="/vagrant/setup"
@@ -48,6 +55,7 @@ else
     while true; do $_REAL_SUDO -n true; sleep 60; kill -0 "$$" || exit; done 2>/dev/null &
 fi
 source $DIR/_common.sh
+log_success "Starting '$TARGET_ENV' provisioning"
 
 VENDOR_SOFTWARE_BUNDLE=$DIR/vendor_software_bundle.tar.gz
 if [[ ! -e $VENDOR_SOFTWARE_BUNDLE ]]; then
