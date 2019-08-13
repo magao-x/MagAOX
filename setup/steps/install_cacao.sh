@@ -28,7 +28,7 @@ CACAO_ABSPATH=$PWD
 mkdir -p _build
 cd _build
 if [[ ! -e Makefile ]]; then
-  cmake3 ../ $CMAKE_FLAGS
+  cmake ../ $CMAKE_FLAGS
 fi
 make
 sudo make install

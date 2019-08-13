@@ -14,7 +14,6 @@ yum -y install centos-release-scl
 
 # Install build tools and utilities
 yum install -y \
-    cmake \
     cmake3 \
     vim \
     nano \
@@ -45,6 +44,12 @@ yum install -y \
     gsl-devel \
     bc \
 ;
+
+sudo alternatives --install /usr/local/bin/cmake cmake /usr/bin/cmake3 20 \
+    --slave /usr/local/bin/ctest ctest /usr/bin/ctest3 \
+    --slave /usr/local/bin/cpack cpack /usr/bin/cpack3 \
+    --slave /usr/local/bin/ccmake ccmake /usr/bin/ccmake3 \
+    --family cmake
 
 yum-config-manager --add-repo https://download.opensuse.org/repositories/network:/messaging:/zeromq:/release-stable/CentOS_7/network:messaging:zeromq:release-stable.repo
 yum install -y zeromq-devel
