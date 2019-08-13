@@ -6,7 +6,7 @@ source $DIR/_common.sh
 creategroup magaox
 creategroup magaox-dev
 createuser xsup
-if grep -vq magaox-dev /etc/pam.d/su; then
+if ! grep -q magaox-dev /etc/pam.d/su; then
   cat <<'HERE' | sudo sed -i '/pam_rootok.so$/r /dev/stdin' /etc/pam.d/su
 auth            [success=ignore default=1] pam_succeed_if.so user = xsup
 auth            sufficient      pam_succeed_if.so use_uid user ingroup magaox-dev
