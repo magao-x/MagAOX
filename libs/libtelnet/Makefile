@@ -9,8 +9,8 @@ all: libtelnet.a
 	$(CC) $(CFLAGS) -shared -Wl,-soname,libtelnet.so -o libtelnet.so libtelnet*.o -rdynamic
 
 install: all
-	/bin/sudo install -d $(LIB_PATH)
-	/bin/sudo install libtelnet.so $(LIB_PATH)
+	sudo install -d $(LIB_PATH)
+	sudo install libtelnet.so $(LIB_PATH)
 
 HS = libtelnet.h
 

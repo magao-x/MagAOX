@@ -14,8 +14,8 @@ all: liblilxml.a
 	$(CC) -shared -Wl,-soname,liblilxml.so -o liblilxml.so lilxml*.o -rdynamic
 
 install: all
-	/bin/sudo install -d $(LIB_PATH)
-	/bin/sudo install liblilxml.so $(LIB_PATH)
+	sudo install -d $(LIB_PATH)
+	sudo install liblilxml.so $(LIB_PATH)
 
 HS = lilxml.h
 
