@@ -19,6 +19,12 @@ else
     \export PATH="/opt/miniconda3/bin:$PATH"
 fi
 EOF
+    cat << 'EOF' | sudo tee /opt/miniconda3/.condarc
+channels:
+  - conda-forge
+  - defaults
+changeps1: false
+EOF
 fi
 set +u; source /etc/profile.d/miniconda.sh; set -u
 # set group and permissions such that only magaox-dev has write access

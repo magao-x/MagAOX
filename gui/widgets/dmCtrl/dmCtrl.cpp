@@ -11,13 +11,11 @@ namespace xqt
 
 dmCtrl::dmCtrl( std::string & dmName,
                 QWidget * Parent, 
-                Qt::WindowFlags f) : QDialog(Parent, f)
+                Qt::WindowFlags f) : QDialog(Parent, f), m_dmName{dmName}
 {
-   m_dmName = dmName;
-   
-   std::cerr << m_dmName << "\n";
-   
    ui.setupUi(this);
+   ui.labelDMName->setText(m_dmName.c_str());
+   setWindowTitle(QString(m_dmName.c_str()));
 }
    
 dmCtrl::~dmCtrl()
@@ -87,7 +85,7 @@ int dmCtrl::handleSetProperty( const pcf::IndiProperty & ipRecv)
 
 void dmCtrl::updateGUI()
 {
-   ui.labelDMName->setText(m_dmName.c_str());
+   
    ui.labelShmimName_value->setText(m_shmimName.c_str());
    ui.labelFlatName_value->setText(m_flatName.c_str());
    ui.labelFlatShmim_value->setText(m_flatShmim.c_str());
