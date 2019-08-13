@@ -26,7 +26,7 @@ if [[ -d /vagrant || $CI == true ]]; then
         TARGET_ENV=vm
         CI=false
         if [[ $ID == ubuntu ]]; then
-            apt install xauth
+            apt install -y xauth
         elif [[ $ID == centos ]]; then
             yum install -y xorg-x11-xauth
         fi
@@ -36,7 +36,7 @@ if [[ -d /vagrant || $CI == true ]]; then
     echo "Setting up for VM use"
     sudo bash -l "$DIR/setup_users_and_groups.sh"
     if [[ $ID == ubuntu ]]; then
-        apt install linux-headers-generic
+        apt install -y linux-headers-generic
     elif [[ $ID == centos ]]; then
         yum install -y kernel-devel-$(uname -r) || yum install -y kernel-devel
     fi
