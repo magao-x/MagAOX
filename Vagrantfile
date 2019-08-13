@@ -20,6 +20,6 @@ Vagrant.configure("2") do |config|
     aoc.vm.box = "generic/ubuntu1804"
     aoc.vm.synced_folder ".", "/vagrant"
     aoc.vm.network "private_network", ip: "172.16.200.3"  # needed for NFS
-    aoc.vm.network "forwarded_port", guest: 7624, host: 7625
+    aoc.vm.network "forwarded_port", guest: 7624, host: 7624
   end
 end
