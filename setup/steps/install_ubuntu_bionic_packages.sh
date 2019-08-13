@@ -6,6 +6,7 @@ set -euo pipefail
 apt install -y \
     build-essential \
     cmake \
+    curl \
     vim \
     nano \
     htop \
