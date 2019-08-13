@@ -6,7 +6,11 @@ if [[ -e /usr/bin/sudo ]]; then
 elif [[ -e /bin/sudo ]]; then
   _REAL_SUDO=/bin/sudo
 else
-  _REAL_SUDO=$(which sudo)
+  if [[ -z $(command -v sudo) ]]; then
+    echo "Install sudo before provisioning"
+  else
+    _REAL_SUDO=$(which sudo)
+  fi
 fi
 source /etc/os-release
 if [[ $ID == ubuntu ]]; then

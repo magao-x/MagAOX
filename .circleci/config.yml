@@ -31,6 +31,9 @@ jobs:
     steps:
       - checkout
       - run:
+          name: Add sudo
+          command: 'apt install -y sudo'
+      - run:
           name: Checksum provisioning scripts
           command: 'find ~/project/setup/ -type f -exec md5sum {} \; | sort -k 2 > ~/project/provisioning_scripts_checksums.txt'
       - restore_cache:
