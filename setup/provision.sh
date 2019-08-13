@@ -15,10 +15,10 @@ fi
 source /etc/os-release
 if [[ $ID == ubuntu ]]; then
     # Need to populate package lists before attempting any installations
-    apt-get update
+    sudo apt-get update
     # Stop annoying messages about messages
     # https://superuser.com/questions/1160025/how-to-solve-ttyname-failed-inappropriate-ioctl-for-device-in-vagrant
-    sed -i -e 's/mesg n .*true/tty -s \&\& mesg n/g' ~/.profile
+    sudo sed -i -e 's/mesg n .*true/tty -s \&\& mesg n/g' ~/.profile
 fi
 if [[ -d /vagrant || $CI == true ]]; then
     if [[ -d /vagrant ]]; then
