@@ -8,18 +8,27 @@ elif [[ -e /bin/sudo ]]; then
 else
   _REAL_SUDO=$(which sudo)
 fi
+source /etc/os-release
 if [[ -d /vagrant || $CI == true ]]; then
     if [[ -d /vagrant ]]; then
         DIR="/vagrant/setup"
         TARGET_ENV=vm
         CI=false
-        yum install -y xorg-x11-xauth
+        if [[ $ID == ubuntu ]]; then
+            apt install xauth
+        elif [[ $ID == centos ]]; then
+            yum install -y xorg-x11-xauth
+        fi
     else
         TARGET_ENV=ci
     fi
     echo "Setting up for VM use"
     sudo bash -l "$DIR/setup_users_and_groups.sh"
-    sudo yum install -y kernel-devel-$(uname -r) || sudo yum install -y kernel-devel
+    if [[ $ID == ubuntu ]]; then
+        apt install linux-headers-generic
+    elif [[ $ID == centos ]]; then
+        yum install -y kernel-devel-$(uname -r) || yum install -y kernel-devel
+    fi
 else
     TARGET_ENV=instrument
     VAGRANT=false
@@ -55,9 +64,14 @@ set -u
 sudo bash -l "$DIR/steps/ensure_dirs_and_perms.sh" $TARGET_ENV
 
 # Install CentOS 7 packages
-if [[ -e /etc/redhat-release && $(cat /etc/redhat-release) == *7.6.1810* ]]; then
-    sudo bash -l "$DIR/steps/install_os_packages.sh"
+if [[ $ID == ubuntu && $VERSION_ID == 18.04 ]]; then
+    sudo bash -l "$DIR/steps/install_ubuntu_bionic_packages.sh"
+elif [[ $ID == centos && $VERSION_ID == 7 ]]; then
+    sudo bash -l "$DIR/steps/install_centos7_packages.sh"
     sudo bash -l "$DIR/steps/install_devtoolset-7.sh"
+else
+    log_error "No special casing for $ID $VERSION_ID yet, abort"
+    exit 1
 fi
 
 ## Build third-party dependencies under /opt/MagAOX/vendor
