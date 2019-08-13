@@ -7,6 +7,7 @@ apt install -y \
     build-essential \
     cmake \
     curl \
+    cpio \
     vim \
     nano \
     htop \
