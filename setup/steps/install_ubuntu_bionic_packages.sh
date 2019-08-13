@@ -7,6 +7,7 @@ apt install -y \
     build-essential \
     gfortran \
     udev \
+    rsync \
     git \
     cmake \
     curl \
