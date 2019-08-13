@@ -6,11 +6,7 @@ TARGET_ENV=$1
 log_info "Setting up CUDA for $TARGET_ENV"
 
 if [[ "$TARGET_ENV" == "vm" || "$TARGET_ENV" == "ci" ]]; then
-  if [[ $TARGET_ENV == vm ]]; then
-    TMP_CUDA_DIR=/vagrant/tmp-cuda-install
-  else
-    TMP_CUDA_DIR=$HOME/tmp
-  fi
+  TMP_CUDA_DIR=$HOME/tmp
   mkdir -p $TMP_CUDA_DIR
   CUDA_FLAGS="--silent --toolkit --tmpdir=$TMP_CUDA_DIR"
 elif [[ "$TARGET_ENV" == "instrument" ]]; then
