@@ -5,6 +5,7 @@ set -euo pipefail
 
 apt install -y \
     build-essential \
+    gfortran \
     git \
     cmake \
     curl \
