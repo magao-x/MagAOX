@@ -1,6 +1,8 @@
 #!/bin/bash
 set -eo pipefail
 DIR="$( cd "$( dirname "${BASH_SOURCE[0]}" )" && pwd )"
+# CentOS + devtoolset-7 aliases sudo, but breaks command line arguments for it,
+# so if we need those, we must use $_REAL_SUDO.
 if [[ -e /usr/bin/sudo ]]; then
   _REAL_SUDO=/usr/bin/sudo
 elif [[ -e /bin/sudo ]]; then
@@ -12,20 +14,32 @@ else
     _REAL_SUDO=$(which sudo)
   fi
 fi
+# Get logging functions
 source $DIR/_common.sh
+# Defines $ID and $VERSION_ID so we can detect which distribution we're on
 source /etc/os-release
 if [[ $ID == ubuntu ]]; then
-    # Need to populate package lists before attempting any installations
-    sudo apt-get update
     # Stop annoying messages about messages
     # https://superuser.com/questions/1160025/how-to-solve-ttyname-failed-inappropriate-ioctl-for-device-in-vagrant
     sudo sed -i -e 's/mesg n .*true/tty -s \&\& mesg n/g' ~/.profile
 fi
+# Install OS packages first
+if [[ $ID == ubuntu && $VERSION_ID == 18.04 ]]; then
+    sudo bash -l "$DIR/steps/install_ubuntu_bionic_packages.sh"
+elif [[ $ID == centos && $VERSION_ID == 7 ]]; then
+    sudo bash -l "$DIR/steps/install_centos7_packages.sh"
+    sudo bash -l "$DIR/steps/install_devtoolset-7.sh"
+else
+    log_error "No special casing for $ID $VERSION_ID yet, abort"
+    exit 1
+fi
+# Detect whether we're running in some kind of VM or container
 if [[ -d /vagrant || $CI == true ]]; then
     if [[ -d /vagrant ]]; then
         DIR="/vagrant/setup"
         TARGET_ENV=vm
         CI=false
+        # Necessary for forwarding GUIs from the VM to the host
         if [[ $ID == ubuntu ]]; then
             apt install -y xauth
         elif [[ $ID == centos ]]; then
@@ -34,7 +48,6 @@ if [[ -d /vagrant || $CI == true ]]; then
     else
         TARGET_ENV=ci
     fi
-    echo "Setting up for VM use"
     sudo bash -l "$DIR/setup_users_and_groups.sh"
     if [[ $ID == ubuntu ]]; then
         apt install -y linux-headers-generic
@@ -45,7 +58,6 @@ else
     TARGET_ENV=instrument
     VAGRANT=false
     CI=false
-    echo "Setting up for instrument use"
     set +e; groups | grep magaox-dev; set -e
     not_in_group=$?
     if [[ "$EUID" == 0 || $not_in_group != 0 ]]; then
@@ -75,17 +87,6 @@ set -u
 
 ## Set up file structure and permissions
 sudo bash -l "$DIR/steps/ensure_dirs_and_perms.sh" $TARGET_ENV
-
-# Install CentOS 7 packages
-if [[ $ID == ubuntu && $VERSION_ID == 18.04 ]]; then
-    sudo bash -l "$DIR/steps/install_ubuntu_bionic_packages.sh"
-elif [[ $ID == centos && $VERSION_ID == 7 ]]; then
-    sudo bash -l "$DIR/steps/install_centos7_packages.sh"
-    sudo bash -l "$DIR/steps/install_devtoolset-7.sh"
-else
-    log_error "No special casing for $ID $VERSION_ID yet, abort"
-    exit 1
-fi
 
 ## Build third-party dependencies under /opt/MagAOX/vendor
 cd /opt/MagAOX/vendor
