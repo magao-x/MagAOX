@@ -17,7 +17,7 @@ git config core.sharedRepository group
 git checkout $XRIF_COMMIT
 mkdir -p build
 cd build
-cmake3 ..
+cmake ..
 make
 make test
 make install

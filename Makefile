@@ -65,8 +65,8 @@ libs_install:
 	for lib in ${libs_to_build}; do \
 		(cd libs/$$lib; ${MAKE}  install) || break; \
 	done
-	/bin/sudo bash -c "echo $(LIB_PATH) > /etc/ld.so.conf.d/magaox.conf"
-	/bin/sudo ldconfig
+	sudo bash -c "echo $(LIB_PATH) > /etc/ld.so.conf.d/magaox.conf"
+	sudo ldconfig
 
 libs_clean:
 	for lib in ${libs_to_build}; do \
@@ -94,9 +94,9 @@ apps_clean:
 
 scripts_install:
 	for script in ${scripts_to_install}; do \
-		/bin/sudo install -d /opt/MagAOX/bin && \
-		/bin/sudo install scripts/$$script /opt/MagAOX/bin  && \
-		/bin/sudo ln -fs /opt/MagAOX/bin/$$script /usr/local/bin/$$script; \
+		sudo install -d /opt/MagAOX/bin && \
+		sudo install scripts/$$script /opt/MagAOX/bin  && \
+		sudo ln -fs /opt/MagAOX/bin/$$script /usr/local/bin/$$script; \
 	done
 
 utils_all:

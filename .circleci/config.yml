@@ -1,6 +1,6 @@
 version: 2
 jobs:
-  build:
+  build_centos:
     docker:
       - image: centos:7.6.1810
     steps:
@@ -25,3 +25,36 @@ jobs:
       - run:
           name: Install MagAO-X
           command: 'bash -l ~/project/setup/steps/install_MagAOX.sh'
+  build_ubuntu:
+    docker:
+      - image: ubuntu:18.04
+    steps:
+      - checkout
+      - run:
+          name: Add sudo
+          command: 'apt-get update && apt-get install -y sudo'
+      - run:
+          name: Checksum provisioning scripts
+          command: 'find ~/project/setup/ -type f -exec md5sum {} \; | sort -k 2 > ~/project/provisioning_scripts_checksums.txt'
+      - restore_cache:
+          keys:
+            - dependencies-cache-ubuntu-{{ checksum "provisioning_scripts_checksums.txt" }}
+      - run:
+          name: Auto-provision
+          command: 'bash -l ~/project/setup/provision.sh'
+      - save_cache:
+          key: dependencies-cache-ubuntu-{{ checksum "provisioning_scripts_checksums.txt" }}
+          paths:
+            - /opt/MagAOX/vendor
+            - /opt/MagAOX/.cache
+      - run:
+          name: Install MagAO-X
+          command: 'bash -l ~/project/setup/steps/install_MagAOX.sh'
+workflows:
+  version: 2
+  ubuntu:
+    jobs:
+      - build_ubuntu
+  centos:
+    jobs:
+      - build_centos

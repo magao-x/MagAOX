@@ -2,10 +2,18 @@
 DIR="$( cd "$( dirname "${BASH_SOURCE[0]}" )" && pwd )"
 source $DIR/../_common.sh
 set -euo pipefail
+apt-get update
 
 apt install -y \
+    ssh \
     build-essential \
+    gfortran \
+    udev \
+    rsync \
+    git \
     cmake \
+    curl \
+    cpio \
     vim \
     nano \
     htop \
@@ -31,5 +39,5 @@ apt install -y \
     libboost-all-dev \
     libgsl-dev \
     bc \
-    libczmq4-dev \
+    libczmq-dev \
 ;

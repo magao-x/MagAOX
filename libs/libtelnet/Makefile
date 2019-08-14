@@ -6,11 +6,11 @@ include $(SELF_DIR)/../../Make/common.mk
 
 
 all: libtelnet.a
-	$(CC) -shared -Wl,-soname,libtelnet.so -o libtelnet.so libtelnet*.o -rdynamic
+	$(CC) $(CFLAGS) -shared -Wl,-soname,libtelnet.so -o libtelnet.so libtelnet*.o -rdynamic
 
 install: all
-	/bin/sudo install -d $(LIB_PATH)
-	/bin/sudo install libtelnet.so $(LIB_PATH)
+	sudo install -d $(LIB_PATH)
+	sudo install libtelnet.so $(LIB_PATH)
 
 HS = libtelnet.h
 
