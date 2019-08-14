@@ -212,7 +212,7 @@ protected:
    pcf::IndiProperty m_indiP_sensorChannel; ///< Property used to monitor the shutter's hall sensor
    pcf::IndiProperty m_indiP_triggerChannel; ///< Property used to monitor and set the shutter's trigger
    
-   pcf::IndiProperty m_indiP_state; ///< Property used to report the current shutter state (unkown, off, shut, open)
+   pcf::IndiProperty m_indiP_shutterState; ///< Property used to report the current shutter state (unkown, off, shut, open)
    
    
    
@@ -369,17 +369,17 @@ int dssShutter<derivedT>::appStartup()
    }
    
    //Register the shmimName INDI property
-   m_indiP_state = pcf::IndiProperty(pcf::IndiProperty::Text);
-   m_indiP_state.setDevice(derived().configName());
-   m_indiP_state.setName("shutter");
-   m_indiP_state.setPerm(pcf::IndiProperty::ReadWrite); 
-   m_indiP_state.setState(pcf::IndiProperty::Idle);
-   m_indiP_state.add(pcf::IndiElement("current"));
-   m_indiP_state["current"] = "";
-   m_indiP_state.add(pcf::IndiElement("target"));
-   m_indiP_state["target"] = "";
+   m_indiP_shutterState = pcf::IndiProperty(pcf::IndiProperty::Text);
+   m_indiP_shutterState.setDevice(derived().configName());
+   m_indiP_shutterState.setName("shutter");
+   m_indiP_shutterState.setPerm(pcf::IndiProperty::ReadWrite); 
+   m_indiP_shutterState.setState(pcf::IndiProperty::Idle);
+   m_indiP_shutterState.add(pcf::IndiElement("current"));
+   m_indiP_shutterState["current"] = "";
+   m_indiP_shutterState.add(pcf::IndiElement("target"));
+   m_indiP_shutterState["target"] = "";
    
-   if( derived().registerIndiPropertyNew( m_indiP_state, st_newCallBack_state) < 0)
+   if( derived().registerIndiPropertyNew( m_indiP_shutterState, st_newCallBack_state) < 0)
    {
       #ifndef DSSSHUTTER_TEST_NOLOG
       derivedT::template log<software_error>({__FILE__,__LINE__});
@@ -662,32 +662,32 @@ int dssShutter<derivedT>::updateINDI()
 {
    if(m_powerState !=0 && m_powerState != 1)
    {
-      indi::updateIfChanged(m_indiP_state, "current", std::string("UNKNOWN"), derived().m_indiDriver);
-      indi::updateIfChanged(m_indiP_state, "target", std::string(""), derived().m_indiDriver);
+      indi::updateIfChanged(m_indiP_shutterState, "current", std::string("UNKNOWN"), derived().m_indiDriver);
+      indi::updateIfChanged(m_indiP_shutterState, "target", std::string(""), derived().m_indiDriver);
    
       return 0;
    }
    
    if(m_powerState == 0)
    {
-      indi::updateIfChanged(m_indiP_state, "current", std::string("OFF"), derived().m_indiDriver);
-      indi::updateIfChanged(m_indiP_state, "target", std::string(""), derived().m_indiDriver);
+      indi::updateIfChanged(m_indiP_shutterState, "current", std::string("OFF"), derived().m_indiDriver);
+      indi::updateIfChanged(m_indiP_shutterState, "target", std::string(""), derived().m_indiDriver);
    
       return 0;
    }
    
    if(m_sensorState == 0)
    {
-      indi::updateIfChanged(m_indiP_state, "current", std::string("SHUT"), derived().m_indiDriver);
-      if(m_indiP_state["target"].get<std::string>() == "SHUT") indi::updateIfChanged(m_indiP_state, "target", std::string(""), derived().m_indiDriver);
+      indi::updateIfChanged(m_indiP_shutterState, "current", std::string("SHUT"), derived().m_indiDriver);
+      if(m_indiP_shutterState["target"].get<std::string>() == "SHUT") indi::updateIfChanged(m_indiP_shutterState, "target", std::string(""), derived().m_indiDriver);
    
       return 0;
    }
    
    if(m_sensorState == 1)
    {
-      indi::updateIfChanged(m_indiP_state, "current", std::string("OPEN"), derived().m_indiDriver);
-      if(m_indiP_state["target"].get<std::string>() == "OPEN") indi::updateIfChanged(m_indiP_state, "target", std::string(""), derived().m_indiDriver);
+      indi::updateIfChanged(m_indiP_shutterState, "current", std::string("OPEN"), derived().m_indiDriver);
+      if(m_indiP_shutterState["target"].get<std::string>() == "OPEN") indi::updateIfChanged(m_indiP_shutterState, "target", std::string(""), derived().m_indiDriver);
    
       return 0;
    }
@@ -815,7 +815,7 @@ int dssShutter<derivedT>::st_newCallBack_state( void * app,
 template<class derivedT>
 int dssShutter<derivedT>::newCallBack_state( const pcf::IndiProperty &ipRecv )
 {
-   if (ipRecv.getName() == m_indiP_state.getName())
+   if (ipRecv.getName() == m_indiP_shutterState.getName())
    {
       std::string current;
       std::string target;
@@ -836,7 +836,7 @@ int dssShutter<derivedT>::newCallBack_state( const pcf::IndiProperty &ipRecv )
       {
          //Get a lock
          std::unique_lock<std::mutex> lock(derived().m_indiMutex);
-         indi::updateIfChanged(m_indiP_state, "target", target, derived().m_indiDriver);
+         indi::updateIfChanged(m_indiP_shutterState, "target", target, derived().m_indiDriver);
       }
       
       if(target == "OPEN") 

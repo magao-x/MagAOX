@@ -905,8 +905,8 @@ void MagAOXApp<_useINDI>::setDefaults( int argc,
    configPathLocal = m_configDir + "/" + m_configName + ".conf";
 
    //Now we can setup common INDI properties
-   REG_INDI_NEWPROP_NOCB(m_indiP_state, "state", pcf::IndiProperty::Number);
-   m_indiP_state.add (pcf::IndiElement("current"));
+   REG_INDI_NEWPROP_NOCB(m_indiP_state, "fsm", pcf::IndiProperty::Text);
+   m_indiP_state.add (pcf::IndiElement("state"));
 
 
    return;
@@ -1638,7 +1638,7 @@ void MagAOXApp<_useINDI>::state(const stateCodes::stateCodeT & s)
 
    if(lock.owns_lock())
    {  ///\todo well what do we do if we don't get the lock?  this should be updated elsewhere...
-      updateIfChanged(m_indiP_state, "current", stateCodes::codeText(m_state));
+      updateIfChanged(m_indiP_state, "state", stateCodes::codeText(m_state));
    }
 }
 
