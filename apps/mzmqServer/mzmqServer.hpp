@@ -136,7 +136,7 @@ void mzmqServer::setupConfig()
    
    config.add("server.usecSleep", "", "server.usecSleep", argType::Required, "server", "usecSleep", false, "int", "");
    
-   config.add("server.fpsTgt", "", "writer.fpsTgt", argType::Required, "server", "fpsTgt", false, "float", "");
+   config.add("server.fpsTgt", "", "server.fpsTgt", argType::Required, "server", "fpsTgt", false, "float", "");
    
    config.add("server.fpsGain", "", "server.fpsGain", argType::Required, "server", "fpsGain", false, "float", "");
  
