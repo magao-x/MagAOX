@@ -87,8 +87,6 @@ protected:
      * 
      * @{
      */ 
-   bool m_restart {false};
-   
    static mzmqServer * m_selfWriter; ///< Static pointer to this (set in constructor).  Used for getting out of the static SIGSEGV handler.
 
    ///Sets the handler for SIGSEGV and SIGBUS
@@ -319,7 +317,7 @@ void mzmqServer::handlerSigSegv( int signum,
    static_cast<void>(siginf);
    static_cast<void>(ucont);
    
-   m_restart = true;
+   milkzmqServer::m_restart = true;
 
    return;
 }
