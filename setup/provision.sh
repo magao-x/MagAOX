@@ -12,6 +12,7 @@ else
     _REAL_SUDO=$(which sudo)
   fi
 fi
+source $DIR/_common.sh
 source /etc/os-release
 if [[ $ID == ubuntu ]]; then
     # Need to populate package lists before attempting any installations
@@ -58,7 +59,7 @@ else
     # Keep the sudo timestamp updated until this script exits
     while true; do $_REAL_SUDO -n true; sleep 60; kill -0 "$$" || exit; done 2>/dev/null &
 fi
-source $DIR/_common.sh
+
 log_success "Starting '$TARGET_ENV' provisioning"
 
 VENDOR_SOFTWARE_BUNDLE=$DIR/vendor_software_bundle.tar.gz
@@ -88,8 +89,8 @@ fi
 
 ## Build third-party dependencies under /opt/MagAOX/vendor
 cd /opt/MagAOX/vendor
-sudo bash -l "$DIR/steps/install_mkl_tarball.sh"
 sudo bash -l "$DIR/steps/install_cuda.sh" $TARGET_ENV
+sudo bash -l "$DIR/steps/install_mkl_tarball.sh"
 sudo bash -l "$DIR/steps/install_fftw.sh"
 sudo bash -l "$DIR/steps/install_cfitsio.sh"
 sudo bash -l "$DIR/steps/install_sofa.sh"

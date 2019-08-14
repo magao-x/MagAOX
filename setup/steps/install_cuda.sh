@@ -10,7 +10,8 @@ if [[ "$TARGET_ENV" == "vm" || "$TARGET_ENV" == "ci" ]]; then
   mkdir -p $TMP_CUDA_DIR
   CUDA_FLAGS="--silent --toolkit --tmpdir=$TMP_CUDA_DIR"
 elif [[ "$TARGET_ENV" == "instrument" ]]; then
-  CUDA_FLAGS="--silent --driver --toolkit"
+  CUDA_FLAGS="--silent --driver --toolkit --samples"
+  export IGNORE_PREEMPT_RT_PRESENCE=1
 else
   echo "Unknown TARGET_ENV passed as argument 1"
   exit 1
