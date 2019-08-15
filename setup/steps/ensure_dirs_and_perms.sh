@@ -3,7 +3,7 @@ DIR="$( cd "$( dirname "${BASH_SOURCE[0]}" )" && pwd )"
 source $DIR/../_common.sh
 set -euo pipefail
 TARGET_ENV=$1
-if ! [[ $TARGET_ENV == vm || $TARGET_ENV == instrument || $TARGET_ENV == ci ]]; then
+if ! [[ $TARGET_ENV == vm || $TARGET_ENV == instrument || $TARGET_ENV == ci || $TARGET_ENV == workstation]]; then
   echo "Unknown TARGET_ENV passed as argument 1"
   exit 1
 fi
@@ -55,7 +55,7 @@ chmod -R u=rwX,g=rwX,o=rX /opt/MagAOX/drivers
 chown -R root:magaox /opt/MagAOX/drivers/fifos
 
 
-if [[ "$TARGET_ENV" == "vm" || "$TARGET_ENV" == "ci" ]]; then
+if [[ "$TARGET_ENV" == "vm" || "$TARGET_ENV" == "ci" || "$TARGET_ENV" == "workstation" ]]; then
   REAL_LOGS_DIR=/opt/MagAOX/logs
   mkdir -pv $REAL_LOGS_DIR
 elif [[ "$TARGET_ENV" == "instrument" ]]; then
@@ -67,7 +67,7 @@ chown -RP xsup:magaox $REAL_LOGS_DIR
 chmod -R u=rwX,g=rwX,o=rX $REAL_LOGS_DIR
 setgid_all $REAL_LOGS_DIR
 
-if [[ "$TARGET_ENV" == "vm" || "$TARGET_ENV" == "ci" ]]; then
+if [[ "$TARGET_ENV" == "vm" || "$TARGET_ENV" == "ci" || "$TARGET_ENV" == "workstation" ]]; then
   REAL_RAWIMAGES_DIR=/opt/MagAOX/rawimages
   mkdir -pv $REAL_RAWIMAGES_DIR
 elif [[ "$TARGET_ENV" == "instrument" ]]; then
@@ -101,7 +101,7 @@ setgid_all /opt/MagAOX/vendor
 if [[ "$TARGET_ENV" == "vm" ]]; then
   mkdir -pv /vagrant/setup/cache
   link_if_necessary /vagrant/setup/cache /opt/MagAOX/.cache
-elif [[ "$TARGET_ENV" == "instrument" || "$TARGET_ENV" == "ci" ]]; then
+elif [[ "$TARGET_ENV" == "instrument" || "$TARGET_ENV" == "ci" || "$TARGET_ENV" == "workstation" ]]; then
   mkdir -pv /opt/MagAOX/.cache
   chown -R root:root /opt/MagAOX/.cache
   chmod -R u=rwX,g=rwX,o=rX /opt/MagAOX/.cache

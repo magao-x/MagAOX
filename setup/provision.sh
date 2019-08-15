@@ -24,7 +24,7 @@ if [[ $ID == ubuntu ]]; then
     sudo sed -i -e 's/mesg n .*true/tty -s \&\& mesg n/g' ~/.profile
 fi
 # Install OS packages first
-if [[ $ID == ubuntu && $VERSION_ID == 18.04 ]]; then
+if [[ $ID == ubuntu ]]; then
     sudo bash -l "$DIR/steps/install_ubuntu_bionic_packages.sh"
 elif [[ $ID == centos && $VERSION_ID == 7 ]]; then
     sudo bash -l "$DIR/steps/install_centos7_packages.sh"
