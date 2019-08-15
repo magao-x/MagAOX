@@ -10,6 +10,7 @@ fi
 source /etc/os-release
 if [[ $ID == ubuntu ]]; then
     log_info "Skipping RT kernel install on Ubuntu"
+    install_rt=false
 else
     if ! grep "hardened_usercopy=off" /etc/default/grub; then
         # without this option, the ALPAO DM driver (really the Interface Corp card driver) will
@@ -26,7 +27,12 @@ else
         sudo $DIR/steps/install_rt_kernel_pinned.sh
         log_success "Installed PREEMPT_RT Linux kernel packages"
     fi
+    install_rt=true
 fi
 sudo $DIR/setup_users_and_groups.sh
 log_success "Created users and configured groups"
-log_success "Reboot before proceeding"
+if [[ $install_rt ]]; then
+    log_success "Reboot before proceeding"
+else
+    log_success "Log out and back in before proceeding"
+fi
