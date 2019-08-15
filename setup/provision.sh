@@ -24,7 +24,7 @@ if [[ $ID == ubuntu ]]; then
     sudo sed -i -e 's/mesg n .*true/tty -s \&\& mesg n/g' ~/.profile
 fi
 # Install OS packages first
-if [[ $ID == ubuntu && $VERSION_ID == 18.04 ]]; then
+if [[ $ID == ubuntu ]]; then
     sudo bash -l "$DIR/steps/install_ubuntu_bionic_packages.sh"
 elif [[ $ID == centos && $VERSION_ID == 7 ]]; then
     sudo bash -l "$DIR/steps/install_centos7_packages.sh"
@@ -71,7 +71,9 @@ else
     # Keep the sudo timestamp updated until this script exits
     while true; do $_REAL_SUDO -n true; sleep 60; kill -0 "$$" || exit; done 2>/dev/null &
 fi
-
+if [[ ! -z "$1" ]]; then
+    TARGET_ENV="$1"
+fi
 log_success "Starting '$TARGET_ENV' provisioning"
 
 VENDOR_SOFTWARE_BUNDLE=$DIR/vendor_software_bundle.tar.gz
@@ -90,8 +92,11 @@ sudo bash -l "$DIR/steps/ensure_dirs_and_perms.sh" $TARGET_ENV
 
 ## Build third-party dependencies under /opt/MagAOX/vendor
 cd /opt/MagAOX/vendor
-sudo bash -l "$DIR/steps/install_cuda.sh" $TARGET_ENV
 sudo bash -l "$DIR/steps/install_mkl_tarball.sh"
+if [[ "$TARGET_ENV" == "instrument" || "$TARGET_ENV" == "ci" ]]; then
+    sudo bash -l "$DIR/steps/install_cuda.sh" $TARGET_ENV
+    sudo bash -l "$DIR/steps/install_magma.sh"
+fi
 sudo bash -l "$DIR/steps/install_fftw.sh"
 sudo bash -l "$DIR/steps/install_cfitsio.sh"
 sudo bash -l "$DIR/steps/install_sofa.sh"
@@ -100,14 +105,13 @@ sudo bash -l "$DIR/steps/install_eigen.sh"
 sudo bash -l "$DIR/steps/install_cppzmq.sh"
 sudo bash -l "$DIR/steps/install_levmar.sh"
 sudo bash -l "$DIR/steps/install_flatbuffers.sh"
+sudo bash -l "$DIR/steps/install_python.sh"
 sudo bash -l "$DIR/steps/install_xrif.sh"
 if [[ "$TARGET_ENV" == "instrument" || "$TARGET_ENV" == "ci" ]]; then
-    sudo bash -l "$DIR/steps/install_magma.sh"
+    sudo bash -l "$DIR/steps/install_basler_pylon.sh"
+    sudo bash -l "$DIR/steps/install_edt.sh"
+    sudo bash -l "$DIR/steps/install_picam.sh"
 fi
-sudo bash -l "$DIR/steps/install_basler_pylon.sh"
-sudo bash -l "$DIR/steps/install_edt.sh"
-sudo bash -l "$DIR/steps/install_picam.sh"
-sudo bash -l "$DIR/steps/install_python.sh"
 
 ## Install proprietary / non-public software
 if [[ -e $VENDOR_SOFTWARE_BUNDLE ]]; then
