@@ -287,17 +287,17 @@ void ttmpupilGUI::on_buttonRight_pressed()
 
 void ttmpupilGUI::on_buttonScale_pressed()
 {
-   if(((int) (100*m_stepSize)) == 1)
+   if(((int) (100*m_stepSize)) == 10)
    {
-      m_stepSize = 0.05;
+      m_stepSize = 0.5;
    }
-   else if(((int) (100*m_stepSize)) == 5)
+   else if(((int) (100*m_stepSize)) == 50)
+   {
+      m_stepSize = 1.0;
+   }
+   else if(((int) (100*m_stepSize)) == 100)
    {
       m_stepSize = 0.1;
-   }
-   else if(((int) (100*m_stepSize)) == 10)
-   {
-      m_stepSize = 0.01;
    }
    
    char ss[5];
