@@ -3,7 +3,7 @@ DIR="$( cd "$( dirname "${BASH_SOURCE[0]}" )" && pwd )"
 source $DIR/../_common.sh
 set -euo pipefail
 TARGET_ENV=$1
-if ! [[ $TARGET_ENV == vm || $TARGET_ENV == instrument || $TARGET_ENV == ci || $TARGET_ENV == workstation]]; then
+if ! [[ $TARGET_ENV == vm || $TARGET_ENV == instrument || $TARGET_ENV == ci || $TARGET_ENV == workstation ]]; then
   echo "Unknown TARGET_ENV passed as argument 1"
   exit 1
 fi
