@@ -643,7 +643,8 @@ protected:
    template<typename T>
    void updateIfChanged( pcf::IndiProperty & p, ///< [in/out] The property containing the element to possibly update
                          const std::string & el, ///< [in] The element name
-                         const T & newVal ///< [in] the new value
+                         const T & newVal, ///< [in] the new value
+                         pcf::IndiProperty::PropertyStateType ipState = pcf::IndiProperty::Ok
                       );
 
    /** 
@@ -653,7 +654,8 @@ protected:
    template<typename T>
    void updateIfChanged( pcf::IndiProperty & p, ///< [in/out] The property containing the element to possibly update
                          const std::string & el, ///< [in] Beginning of each element name
-                         const std::vector<T> & newVal ///< [in] the new values
+                         const std::vector<T> & newVal, ///< [in] the new values
+                         pcf::IndiProperty::PropertyStateType ipState = pcf::IndiProperty::Ok
                       );
 
   /** 
@@ -905,8 +907,8 @@ void MagAOXApp<_useINDI>::setDefaults( int argc,
    configPathLocal = m_configDir + "/" + m_configName + ".conf";
 
    //Now we can setup common INDI properties
-   REG_INDI_NEWPROP_NOCB(m_indiP_state, "state", pcf::IndiProperty::Number);
-   m_indiP_state.add (pcf::IndiElement("current"));
+   REG_INDI_NEWPROP_NOCB(m_indiP_state, "fsm", pcf::IndiProperty::Text);
+   m_indiP_state.add (pcf::IndiElement("state"));
 
 
    return;
@@ -1638,7 +1640,7 @@ void MagAOXApp<_useINDI>::state(const stateCodes::stateCodeT & s)
 
    if(lock.owns_lock())
    {  ///\todo well what do we do if we don't get the lock?  this should be updated elsewhere...
-      updateIfChanged(m_indiP_state, "current", stateCodes::codeText(m_state));
+      updateIfChanged(m_indiP_state, "state", stateCodes::codeText(m_state));
    }
 }
 
@@ -2051,14 +2053,15 @@ template<bool _useINDI>
 template<typename T>
 void MagAOXApp<_useINDI>::updateIfChanged( pcf::IndiProperty & p,
                                            const std::string & el,
-                                           const T & newVal
+                                           const T & newVal, 
+                                           pcf::IndiProperty::PropertyStateType ipState
                                          )
 {
    if(!_useINDI) return;
 
    if(!m_indiDriver) return;
 
-   indi::updateIfChanged( p, el, newVal, m_indiDriver);
+   indi::updateIfChanged( p, el, newVal, m_indiDriver, ipState);
 
 //    T oldVal = p[el].get<T>();
 //
@@ -2074,7 +2077,8 @@ template<bool _useINDI>
 template<typename T>
 void MagAOXApp<_useINDI>::updateIfChanged( pcf::IndiProperty & p,
                                            const std::string & el,
-                                           const std::vector<T> & newVals
+                                           const std::vector<T> & newVals,
+                                           pcf::IndiProperty::PropertyStateType ipState
                                          )
 {
    if(!_useINDI) return;
@@ -2083,7 +2087,7 @@ void MagAOXApp<_useINDI>::updateIfChanged( pcf::IndiProperty & p,
 
    for (size_t index = 0; index < newVals.size(); ++index) {
       std::string descriptor = el+std::to_string(index);
-      indi::updateIfChanged( p, descriptor, newVals.at(index), m_indiDriver);
+      indi::updateIfChanged( p, descriptor, newVals.at(index), m_indiDriver, ipState);
    }
 
    

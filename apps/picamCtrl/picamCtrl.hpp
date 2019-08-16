@@ -100,6 +100,7 @@ protected:
    
    float m_fpsSet {0}; ///< The commanded fps, as set by user.
 
+   float m_fpsCurr {0}; ///< The current FPS as reported by the camera.
    
    int m_powerOnCounter {0}; ///< Counts numer of loops after power on, implements delay for camera bootup.
    
@@ -191,6 +192,10 @@ protected:
    
    int setTemp(piflt temp);
    
+   int adcSpeed();
+   
+   int setAdcSpeed(int newspd);
+   
    int setExpTime(piflt exptime);
    
    int setFPS(piflt fps);
@@ -217,6 +222,8 @@ protected:
    pcf::IndiProperty m_indiP_ccdTemp;
    pcf::IndiProperty m_indiP_ccdTempLock;
    
+   pcf::IndiProperty m_indiP_adcspeed;
+   
 //   pcf::IndiProperty m_indiP_mode;
    
    pcf::IndiProperty m_indiP_exptime;
@@ -224,6 +231,8 @@ protected:
 
 public:
    INDI_NEWCALLBACK_DECL(picamCtrl, m_indiP_ccdTemp);
+   INDI_NEWCALLBACK_DECL(picamCtrl, m_indiP_adcspeed);
+   
 //   INDI_NEWCALLBACK_DECL(picamCtrl, m_indiP_mode);
    INDI_NEWCALLBACK_DECL(picamCtrl, m_indiP_exptime);
    INDI_NEWCALLBACK_DECL(picamCtrl, m_indiP_fps);
@@ -289,6 +298,10 @@ int picamCtrl::appStartup()
    m_indiP_ccdTemp["current"].set(0);
    m_indiP_ccdTemp.add (pcf::IndiElement("target"));
    
+   REG_INDI_NEWPROP(m_indiP_adcspeed, "adcspeed", pcf::IndiProperty::Number);
+   m_indiP_adcspeed.add (pcf::IndiElement("current"));
+   m_indiP_adcspeed.add (pcf::IndiElement("target"));
+   
    REG_INDI_NEWPROP_NOCB(m_indiP_ccdTempLock, "ccdtempctrl", pcf::IndiProperty::Text);
    m_indiP_ccdTempLock.add (pcf::IndiElement("state"));
    
@@ -299,6 +312,7 @@ int picamCtrl::appStartup()
    REG_INDI_NEWPROP(m_indiP_fps, "fps", pcf::IndiProperty::Number);
    m_indiP_fps.add (pcf::IndiElement("current"));
    m_indiP_fps["current"].set(0);
+   m_indiP_fps.add (pcf::IndiElement("set"));
    m_indiP_fps.add (pcf::IndiElement("target"));
    m_indiP_fps.add (pcf::IndiElement("measured"));
    
@@ -432,6 +446,8 @@ int picamCtrl::appLogic()
          state(stateCodes::ERROR);
          return 0;
       }
+      
+      updateIfChanged(m_indiP_fps, "current", m_fpsCurr);
    }
 
    //Fall through check?
@@ -853,6 +869,24 @@ int picamCtrl::setTemp(piflt temp)
 
 
 inline
+int picamCtrl::setAdcSpeed(int newspd)
+{
+   if(newspd != 5 && newspd != 10 && newspd != 20 && newspd != 30)
+   {
+      log<text_log>("Invalid ADC speed requested.", logPrio::LOG_ERROR);
+      return -1;
+   }
+   
+   m_adcSpeed = newspd;
+   
+   updateIfChanged(m_indiP_adcspeed, "target", m_adcSpeed);
+   
+   m_reconfig = true;
+   
+   return 0;
+}
+
+inline
 int picamCtrl::setExpTime(piflt exptime)
 {
    
@@ -953,6 +987,11 @@ int picamCtrl::configureAcquisition()
       state(stateCodes::ERROR);
       return -1;
    }
+   
+   updateIfChanged(m_indiP_adcspeed, "current", m_adcSpeed);
+   updateIfChanged(m_indiP_adcspeed, "target", std::string(""));
+   
+   log<text_log>( "ADC Speed: " + std::to_string(m_adcSpeed) + " MHz");
    
    //=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*
    //=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*
@@ -1055,7 +1094,18 @@ int picamCtrl::configureAcquisition()
    }
    
    
+   piflt FrameRateCalculation;
+   if(getPicamParameter(FrameRateCalculation, PicamParameter_FrameRateCalculation) < 0)
+   {
+      std::cerr << "could not get FrameRateCalculation\n";
+   }
+
+   //std::cerr << "FrameRateCalculation is: " << FrameRateCalculation << "\n";
    
+   //std::cerr << "Available readouts: " << available.readout_count << "\n";
+   std::cerr << "Frame rate: " << FrameRateCalculation << "\n";
+   m_fpsSet = FrameRateCalculation;
+   updateIfChanged(m_indiP_fps, "set", m_fpsSet);
    
   
    
@@ -1090,6 +1140,7 @@ int picamCtrl::configureAcquisition()
    std::cerr << "AdcSpeed is: " << AdcSpeed << "\n";
    
    
+   std::cerr << "************************************************************\n";
    
    
    
@@ -1119,10 +1170,13 @@ int picamCtrl::configureAcquisition()
    Picam_CanSetParameterOnline(m_modelHandle, PicamParameter_FrameRateCalculation,&onlineable);
    std::cerr << "FrameRateCalculation: " << onlineable << "\n"; //0
          
+   std::cerr << "************************************************************\n";
+      
 //          Picam_CanSetParameterOnline(m_modelHandle, PicamParameter_ ,&onlineable);
 //          std::cerr << ": " << onlineable << "\n";
      
    
+   //If not previously allocated, allocate a nice big buffer to play with
    pi64s newbuffsz = framesPerReadout*readoutStride*10; //Save room for 10 frames
    if( newbuffsz >  m_acqBuff.memory_size)
    {
@@ -1148,6 +1202,7 @@ int picamCtrl::configureAcquisition()
       }
    }
 
+   //Start continuous acquisition
    if(setPicamParameter(PicamParameter_ReadoutCount,(pi64s) 0) < 0)
    {
       log<software_error>({__FILE__, __LINE__, "Error setting readouts=0"});
@@ -1238,6 +1293,8 @@ int picamCtrl::acquireAndCheckValid()
       return 1;
    }
 
+   m_fpsCurr = status.readout_rate;
+   
    return 0;
    
    piflt FrameRateCalculation;
@@ -1251,6 +1308,7 @@ int picamCtrl::acquireAndCheckValid()
    //std::cerr << "Available readouts: " << available.readout_count << "\n";
    std::cerr << "Frame rate: " << status.readout_rate <<" " << FrameRateCalculation << "\r";
    if(available.readout_count <= 0) return 1;
+
 }
 
 inline
@@ -1264,6 +1322,7 @@ int picamCtrl::loadImageIntoStream(void * dest)
 inline
 int picamCtrl::reconfig()
 {
+   ///\todo clean this up.  Just need to wait on acquisition update the first time probably.
    std::cerr << "In reconfig " << std::endl;
    
    PicamError error = Picam_StopAcquisition(m_cameraHandle);
@@ -1374,6 +1433,34 @@ INDI_NEWCALLBACK_DEFN(picamCtrl, m_indiP_ccdTemp)(const pcf::IndiProperty &ipRec
       std::unique_lock<std::mutex> lock(m_indiMutex);
       
       return setTemp(target);
+   }
+   return -1;
+}
+
+INDI_NEWCALLBACK_DEFN(picamCtrl, m_indiP_adcspeed)(const pcf::IndiProperty &ipRecv)
+{
+   if (ipRecv.getName() == m_indiP_adcspeed.getName())
+   {
+      int current = 0, target = 0;
+
+      if(ipRecv.find("current"))
+      {
+         current = ipRecv["current"].get<int>();
+      }
+
+      if(ipRecv.find("target"))
+      {
+         target = ipRecv["target"].get<int>();
+      }
+
+      
+      //Check if target is empty
+      if( target == 0 ) target = current;
+      
+      if( target == 0 ) return 0;
+                  
+      std::unique_lock<std::mutex> lock(m_indiMutex);
+      return setAdcSpeed(target);
    }
    return -1;
 }

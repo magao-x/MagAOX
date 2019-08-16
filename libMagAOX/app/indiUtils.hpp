@@ -21,7 +21,11 @@ namespace app
 {
 namespace indi 
 {
-   
+
+#define INDI_IDLE (pcf::IndiProperty::Ok)   
+#define INDI_OK (pcf::IndiProperty::Ok)
+#define INDI_BUSY (pcf::IndiProperty::Busy)
+
 /// Update the value of the INDI element, but only if it has changed.
 /** Only sends the set property message if the new value is different.
   *
@@ -33,17 +37,20 @@ template<typename T, class indiDriverT>
 void updateIfChanged( pcf::IndiProperty & p,   ///< [in/out] The property containing the element to possibly update
                       const std::string & el,  ///< [in] The element name
                       const T & newVal,        ///< [in] the new value
-                      indiDriverT * indiDriver ///< [in] the MagAOX INDI driver to use
+                      indiDriverT * indiDriver, ///< [in] the MagAOX INDI driver to use
+                      pcf::IndiProperty::PropertyStateType newState = pcf::IndiProperty::Ok
                     )
 {
    if( !indiDriver ) return;
    
    T oldVal = p[el].get<T>();
 
-   if(oldVal != newVal)
+   pcf::IndiProperty::PropertyStateType oldState = p.getState();
+   
+   if(oldVal != newVal || oldState != newState)
    {
       p[el].set(newVal);
-      p.setState (pcf::IndiProperty::Ok);
+      p.setState (newState);
       indiDriver->sendSetProperty (p);
    }
 }

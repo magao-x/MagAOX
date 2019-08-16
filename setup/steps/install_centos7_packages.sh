@@ -2,6 +2,7 @@
 DIR="$( cd "$( dirname "${BASH_SOURCE[0]}" )" && pwd )"
 source $DIR/../_common.sh
 set -euo pipefail
+
 # needed for (at least) git:
 yum groupinstall -y 'Development Tools'
 
@@ -14,6 +15,7 @@ yum -y install centos-release-scl
 
 # Install build tools and utilities
 yum install -y \
+    ssh \
     cmake3 \
     vim \
     nano \

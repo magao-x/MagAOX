@@ -11,5 +11,11 @@ if [[ ! $(getent group $1) ]]; then
 else
     echo "Group $1 exists"
 fi
-gpasswd -a $1 wheel
-log_success "Added $1 to groups magaox-dev and wheel"
+source /etc/os-release
+if [[ $ID == ubuntu ]]; then
+    admins_group=sudo
+else
+    admins_group=wheel
+fi
+gpasswd -a $1 $admins_group
+log_success "Added $1 to groups magaox-dev and $admins_group"

@@ -87,8 +87,6 @@ protected:
      * 
      * @{
      */ 
-   bool m_restart {false};
-   
    static mzmqServer * m_selfWriter; ///< Static pointer to this (set in constructor).  Used for getting out of the static SIGSEGV handler.
 
    ///Sets the handler for SIGSEGV and SIGBUS
@@ -138,7 +136,7 @@ void mzmqServer::setupConfig()
    
    config.add("server.usecSleep", "", "server.usecSleep", argType::Required, "server", "usecSleep", false, "int", "");
    
-   config.add("server.fpsTgt", "", "writer.fpsTgt", argType::Required, "server", "fpsTgt", false, "float", "");
+   config.add("server.fpsTgt", "", "server.fpsTgt", argType::Required, "server", "fpsTgt", false, "float", "");
    
    config.add("server.fpsGain", "", "server.fpsGain", argType::Required, "server", "fpsGain", false, "float", "");
  
@@ -319,7 +317,7 @@ void mzmqServer::handlerSigSegv( int signum,
    static_cast<void>(siginf);
    static_cast<void>(ucont);
    
-   m_restart = true;
+   milkzmqServer::m_restart = true;
 
    return;
 }
