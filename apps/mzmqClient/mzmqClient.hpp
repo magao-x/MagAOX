@@ -30,7 +30,7 @@ namespace app
 /** \defgroup mzmqClient ImageStreamIO 0mq Stream Client
   * \brief Reads the contents of an ImageStreamIO image stream over a zeroMQ channel
   *
-  *  <a href="../apps_html/page_module_mzmqClient.html">Application Documentation</a>
+  * <a href="../handbook/apps/mzmqClient.html">Application Documentation</a>
   *
   * \ingroup apps
   *

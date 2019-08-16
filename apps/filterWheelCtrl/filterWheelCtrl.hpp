@@ -16,7 +16,7 @@
 /** \defgroup filterWheelCtrl Filter Wheel Control
   * \brief Control of MagAO-X MCBL-based f/w.
   *
-  * <a href="../../handbook/apps/filterWheelCtrl.html">Application Documentation</a>
+  * <a href="../handbook/apps/filterWheelCtrl.html">Application Documentation</a>
   *
   * \ingroup apps
   *

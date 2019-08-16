@@ -26,12 +26,12 @@ namespace app
 {
 
 #define CAMCTRL_E_NOCONFIGS (-10)
-   
+
 
 /** \defgroup andorCtrl Andor EMCCD Camera
   * \brief Control of the Andor EMCCD Camera.
   *
-  *  <a href="../apps_html/page_module_andorCtrl.html">Application Documentation</a>
+  * <a href="../handbook/apps/andorCtrl.html">Application Documentation</a>
   *
   * \ingroup apps
   *

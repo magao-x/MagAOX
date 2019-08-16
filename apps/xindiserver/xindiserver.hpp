@@ -23,7 +23,7 @@
 /** \defgroup xindiserver INDI Server wrapper.
   * \brief Manages INDI server in the MagAO-X context.
   *
-  * <a href="..//apps_html/page_module_xindiserver.html">Application Documentation</a>
+  * <a href="../handbook/apps/xindiserver.html">Application Documentation</a>
   *
   * \ingroup apps
   *

@@ -12,8 +12,8 @@ jobs:
           name: "Build docs"
           command: make doc
       - persist_to_workspace:
-          root: doc/output/
-          paths: api
+          root: doc
+          paths: output
   docs-deploy:
     docker:
       - image: node:8.10.0
@@ -26,7 +26,7 @@ jobs:
           at: doc
       - run:
           name: Disable jekyll builds
-          command: touch doc/output/.nojekyll
+          command: touch doc/output/api/.nojekyll
       - run:
           name: Install and configure dependencies
           command: |

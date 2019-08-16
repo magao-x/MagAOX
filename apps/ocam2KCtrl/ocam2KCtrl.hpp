@@ -30,7 +30,7 @@ namespace app
 /** \defgroup ocam2KCtrl OCAM2K EMCCD Camera
   * \brief Control of the OCAM2K EMCCD Camera.
   *
-  *  <a href="../apps_html/page_module_ocam2KCtrl.html">Application Documentation</a>
+  * <a href="../handbook/apps/ocam2KCtrl.html">Application Documentation</a>
   *
   * \ingroup apps
   *
