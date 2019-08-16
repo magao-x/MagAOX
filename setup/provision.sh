@@ -82,7 +82,8 @@ if [[ ! -e $VENDOR_SOFTWARE_BUNDLE ]]; then
     echo "Couldn't find vendor software bundle at location $VENDOR_SOFTWARE_BUNDLE"
     echo "(Generate with ~/Box/MagAO-X/Vendor\ Software/generate_bundle.sh)"
     if [[ $TARGET_ENV == "instrument" ]]; then
-        exit 1
+        log_warn "If this instrument computer will be interfacing with the DMs or framegrabbers, you should Ctrl-C now and get the software bundle."
+        read -p "If not, press enter to continue"
     fi
 fi
 
