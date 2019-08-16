@@ -236,6 +236,8 @@ void cursesINDI::startUp()
 
 void cursesINDI::shutDown()
 {
+   if(getQuitProcess() && !m_shutdown) m_connectionLost = true;
+   
    m_shutdown = true;
 
    quitProcess();
