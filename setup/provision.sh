@@ -201,7 +201,7 @@ $MAYBE_SUDO bash -l "$DIR/steps/install_milkzmq.sh"
 # By separating the real build into another step, we can cache the slow provisioning steps
 # and reuse them on subsequent runs.
 if [[ $TARGET_ENV != ci ]]; then
-    $MAYBE_SUDO bash -l "$DIR/steps/install_MagAOX.sh"
+    $MAYBE_SUDO bash -l "$DIR/steps/install_MagAOX.sh" $TARGET_ENV
 fi
 
 log_success "Provisioning complete"
