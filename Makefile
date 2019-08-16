@@ -117,16 +117,14 @@ utils_clean:
 
 .PHONY: doc
 doc:
-	cd libMagAOX/doc; doxygen libMagAOX_doxygen.in; cp -r sw_html ../../doc/www/;
-	cd utils/doc; doxygen magaox_utils_doxygen.in; cp -r  util_html ../../doc/www/;
-	cd apps/doc; doxygen magaox_apps_doxygen.in; cp -r apps_html ../../doc/www/;
+	doxygen doc/config/Doxyfile.libMagAOX
+	doxygen doc/config/Doxyfile.apps
+	doxygen doc/config/Doxyfile.utils
+	cp doc/config/customtheme/index.html doc/config/customtheme/magao-x-logo-white.svg doc/output/
 
 .PHONY: doc_clean
 doc_clean:
-	rm -rf libMagAOX/doc/sw_html;
-	rm -rf utils/doc/util_html
-	rm -rf apps/doc/apps_html
-	rm -rf www/*_html
+	rm -rf doc/output
 
 .PHONY: setup
 setup:

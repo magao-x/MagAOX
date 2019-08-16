@@ -1,0 +1,12 @@
+html #titlearea {
+    background-color: #245F95;
+    color: white;
+}
+
+html #projectlogo {
+    width: 11.5rem;
+}
+
+html #projectname {
+    font-size: 2rem;
+}
