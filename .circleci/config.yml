@@ -1,5 +1,46 @@
 version: 2
 jobs:
+  html-docs:
+    docker:
+      - image: centos:7.6.1810
+    steps:
+      - checkout
+      - run:
+          name: "Install Doxygen and dependencies"
+          command: yum install -y make doxygen graphviz
+      - run:
+          name: "Build docs"
+          command: make doc
+      - persist_to_workspace:
+          root: doc
+          paths: www
+      - store_artifacts:
+          path: doc/www
+      - run:
+          name: "Built documentation is available at:"
+          command: DOCS_URL="${CIRCLE_BUILD_URL}/artifacts/${CIRCLE_NODE_INDEX}/${CIRCLE_WORKING_DIRECTORY/#\~/$HOME}/doc/www/index.html"; echo $DOCS_URL
+  docs-deploy:
+    docker:
+      - image: node:8.10.0
+    steps:
+      - add_ssh_keys:
+          fingerprints:
+            - "2d:68:ae:2b:f4:63:ce:2e:8e:53:0d:71:03:8e:a4:fd"
+      - checkout
+      - attach_workspace:
+          at: doc
+      - run:
+          name: Disable jekyll builds
+          command: touch doc/www/.nojekyll
+      - run:
+          name: Install and configure dependencies
+          command: |
+            npm install -g --silent gh-pages@2.0.1
+            git config user.email "lynx@magao-x.org"
+            git config user.name "Lynx the Cat"
+      - run:
+          name: Deploy docs to gh-pages branch
+          command: gh-pages --dotfiles --message "[skip ci] Update built docs" --dist doc/www/
   build_centos:
     docker:
       - image: centos:7.6.1810
@@ -58,3 +99,12 @@ workflows:
   centos:
     jobs:
       - build_centos
+  build_and_upload:
+    jobs:
+      - html-docs
+      - docs-deploy:
+          requires:
+            - html-docs
+          filters:
+            branches:
+              only: master
