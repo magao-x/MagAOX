@@ -12,13 +12,8 @@ jobs:
           name: "Build docs"
           command: make doc
       - persist_to_workspace:
-          root: doc
-          paths: output
-      - store_artifacts:
-          path: doc/output
-      - run:
-          name: "Built documentation is available at:"
-          command: DOCS_URL="${CIRCLE_BUILD_URL}/artifacts/${CIRCLE_NODE_INDEX}/${CIRCLE_WORKING_DIRECTORY/#\~/$HOME}/doc/output/index.html"; echo $DOCS_URL
+          root: doc/output/
+          paths: api
   docs-deploy:
     docker:
       - image: node:8.10.0
@@ -40,7 +35,7 @@ jobs:
             git config user.name "Lynx the Cat"
       - run:
           name: Deploy docs to gh-pages branch
-          command: gh-pages --dotfiles --message "[skip ci] Update built docs" --dist doc/output/
+          command: gh-pages --dotfiles --message "[skip ci] Update built docs" --dist doc/output/api/
   build_centos:
     docker:
       - image: centos:7.6.1810

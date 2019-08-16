@@ -118,9 +118,7 @@ utils_clean:
 .PHONY: doc
 doc:
 	doxygen doc/config/Doxyfile.libMagAOX
-	doxygen doc/config/Doxyfile.apps
-	doxygen doc/config/Doxyfile.utils
-	cp doc/config/customtheme/index.html doc/config/customtheme/magao-x-logo-white.svg doc/output/
+	# cp doc/config/customtheme/index.html doc/config/customtheme/magao-x-logo-white.svg doc/output/
 
 .PHONY: doc_clean
 doc_clean:

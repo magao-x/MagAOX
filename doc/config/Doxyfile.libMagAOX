@@ -824,18 +824,7 @@ RECURSIVE              = YES
 # Note that relative paths are relative to the directory from which doxygen is
 # run.
 
-#---------------------
-# MagAO-X: exclude the apps/*/doc and utils/*/doc directories!!!
-
-EXCLUDE                = apps/template \
-                         apps/sshDigger/doc \
-                         apps/filterWheelCtrl/doc \
-                         apps/trippLitePDU/doc \
-                         apps/ocam2KCtrl/doc \
-                         apps/xindiserver/doc \
-                         apps/xt1121DCDU/doc \
-                         utils/logdump/doc \
-                         utils/xrif2shmim/doc
+EXCLUDE                =
 
 # The EXCLUDE_SYMLINKS tag can be used to select whether or not files or
 # directories that are symbolic links (a Unix file system feature) are excluded
