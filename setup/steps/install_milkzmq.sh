@@ -4,15 +4,15 @@ source $DIR/../_common.sh
 set -euo pipefail
 
 # install milkzmq
-MILKZMQ_COMMIT=f427ed35986b3956a937adef349820d1d3a626f0
+MILKZMQ_COMMIT_ISH=master
 if [[ ! -d ./milkzmq ]]; then
     git clone https://github.com/jaredmales/milkzmq.git milkzmq
     cd ./milkzmq
 else
     cd ./milkzmq
-    git fetch
+    git pull origin master
 fi
 git config core.sharedRepository group
-git checkout $MILKZMQ_COMMIT
+git checkout $MILKZMQ_COMMIT_ISH
 make
 sudo make install
