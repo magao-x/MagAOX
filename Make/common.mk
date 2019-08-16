@@ -54,14 +54,9 @@ EXTRA_LDLIBS ?=  -lsofa_c \
   $(SELF_DIR)/../INDI/libcommon/libcommon.a) \
   $(abspath $(SELF_DIR)/../INDI/liblilxml/liblilxml.a)
 
-
+CACAO ?= true
 ifneq ($(CACAO),false)
   EXTRA_LDLIBS +=  -lImageStreamIO
-endif
-
-#Add rt on Darwin:
-ifneq ($(UNAME),Darwin)
-    EXTRA_LDLIBS += -lrt
 endif
 
 ### MKL BLAS
@@ -84,6 +79,7 @@ EDT_LIBS = -L/opt/EDTpdv -lpdv -lpthread -lm -ldl
 #TODO: make EDT a selectable include
 
 
+EDT ?= true
 ifneq ($(EDT),false)
    INCLUDES += $(EDT_INCLUDES)
    EXTRA_LDLIBS += $(EDT_LIBS)

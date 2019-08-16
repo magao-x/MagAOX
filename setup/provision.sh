@@ -14,8 +14,6 @@ else
     _REAL_SUDO=$(which sudo)
   fi
 fi
-# Get logging functions
-source $DIR/_common.sh
 # Defines $ID and $VERSION_ID so we can detect which distribution we're on
 source /etc/os-release
 if [[ $ID == ubuntu ]]; then
@@ -23,36 +21,14 @@ if [[ $ID == ubuntu ]]; then
     # https://superuser.com/questions/1160025/how-to-solve-ttyname-failed-inappropriate-ioctl-for-device-in-vagrant
     sudo sed -i -e 's/mesg n .*true/tty -s \&\& mesg n/g' ~/.profile
 fi
-# Install OS packages first
-if [[ $ID == ubuntu ]]; then
-    sudo bash -l "$DIR/steps/install_ubuntu_bionic_packages.sh"
-elif [[ $ID == centos && $VERSION_ID == 7 ]]; then
-    sudo bash -l "$DIR/steps/install_centos7_packages.sh"
-    sudo bash -l "$DIR/steps/install_devtoolset-7.sh"
-else
-    log_error "No special casing for $ID $VERSION_ID yet, abort"
-    exit 1
-fi
 # Detect whether we're running in some kind of VM or container
 if [[ -d /vagrant || $CI == true ]]; then
     if [[ -d /vagrant ]]; then
         DIR="/vagrant/setup"
         TARGET_ENV=vm
         CI=false
-        # Necessary for forwarding GUIs from the VM to the host
-        if [[ $ID == ubuntu ]]; then
-            apt install -y xauth
-        elif [[ $ID == centos ]]; then
-            yum install -y xorg-x11-xauth
-        fi
     else
         TARGET_ENV=ci
-    fi
-    sudo bash -l "$DIR/setup_users_and_groups.sh"
-    if [[ $ID == ubuntu ]]; then
-        apt install -y linux-headers-generic
-    elif [[ $ID == centos ]]; then
-        yum install -y kernel-devel-$(uname -r) || yum install -y kernel-devel
     fi
 else
     TARGET_ENV=instrument
@@ -71,25 +47,65 @@ else
     # Keep the sudo timestamp updated until this script exits
     while true; do $_REAL_SUDO -n true; sleep 60; kill -0 "$$" || exit; done 2>/dev/null &
 fi
+
 if [[ ! -z "$1" ]]; then
     TARGET_ENV="$1"
 fi
-log_success "Starting '$TARGET_ENV' provisioning"
+echo "Starting '$TARGET_ENV' provisioning"
+
+# Shouldn't be any more undefined variables after (maybe) $1,
+# so tell bash to die if it encounters any
+set -u
+
+# Get logging functions
+source $DIR/_common.sh
+
+# Install OS packages first
+if [[ $ID == ubuntu ]]; then
+    sudo bash -l "$DIR/steps/install_ubuntu_bionic_packages.sh"
+elif [[ $ID == centos && $VERSION_ID == 7 ]]; then
+    sudo bash -l "$DIR/steps/install_centos7_packages.sh"
+    sudo bash -l "$DIR/steps/install_devtoolset-7.sh"
+else
+    log_error "No special casing for $ID $VERSION_ID yet, abort"
+    exit 1
+fi
+
+# The VM and CI provisioning doesn't run setup_users_and_groups.sh
+# separately as in the instrument instructions; we have to run it
+if [[ $TARGET_ENV == vm || $TARGET_ENV == ci ]]; then
+    sudo bash -l "$DIR/setup_users_and_groups.sh"
+fi
 
 VENDOR_SOFTWARE_BUNDLE=$DIR/vendor_software_bundle.tar.gz
 if [[ ! -e $VENDOR_SOFTWARE_BUNDLE ]]; then
     echo "Couldn't find vendor software bundle at location $VENDOR_SOFTWARE_BUNDLE"
     echo "(Generate with ~/Box/MagAO-X/Vendor\ Software/generate_bundle.sh)"
     if [[ $TARGET_ENV == "instrument" ]]; then
-        exit 1
+        log_warn "If this instrument computer will be interfacing with the DMs or framegrabbers, you should Ctrl-C now and get the software bundle."
+        read -p "If not, press enter to continue"
     fi
 fi
-# die on uninitialized variables (typo guard)
-set -u
 
 ## Set up file structure and permissions
 sudo bash -l "$DIR/steps/ensure_dirs_and_perms.sh" $TARGET_ENV
 
+# Necessary for forwarding GUIs from the VM to the host
+if [[ $TARGET_ENV == vm ]]; then
+    if [[ $ID == ubuntu ]]; then
+        apt install -y xauth
+    elif [[ $ID == centos ]]; then
+        yum install -y xorg-x11-xauth
+    fi
+fi
+# Install Linux headers (instrument computers use the RT kernel / headers)
+if [[ $TARGET_ENV == ci || $TARGET_ENV == vm ||  $TARGET_ENV == workstation ]]; then
+    if [[ $ID == ubuntu ]]; then
+        sudo apt install -y linux-headers-generic
+    elif [[ $ID == centos ]]; then
+        sudo yum install -y kernel-devel-$(uname -r) || yum install -y kernel-devel
+    fi
+fi
 ## Build third-party dependencies under /opt/MagAOX/vendor
 cd /opt/MagAOX/vendor
 sudo bash -l "$DIR/steps/install_mkl_tarball.sh"
@@ -144,6 +160,7 @@ if [[ $TARGET_ENV == vm ]]; then
     # Create or replace symlink to sources so we develop on the host machine's copy
     # (unlike prod, where we install a new clone of the repo to this location)
     ln -nfs /vagrant /opt/MagAOX/source/MagAOX
+    cd /opt/MagAOX/source/MagAOX
     log_success "Symlinked /opt/MagAOX/source/MagAOX to /vagrant (host folder)"
     usermod -G magaox,magaox-dev vagrant
     log_success "Added vagrant user to magaox,magaox-dev"
@@ -162,6 +179,7 @@ else
             log_success "In the future, you can re-run this script from /opt/MagAOX/source/MagAOX/setup"
             log_info "(In fact, maybe delete $(dirname $DIR)?)"
         else
+            cd /opt/MagAOX/source/MagAOX
             git fetch
         fi
     else
@@ -175,6 +193,7 @@ fi
 #
 # On a Vagrant VM, we need to "sudo" to become vagrant since the provisioning
 # runs as root.
+cd /opt/MagAOX/source
 $MAYBE_SUDO bash -l "$DIR/steps/install_cacao.sh" $TARGET_ENV
 $MAYBE_SUDO bash -l "$DIR/steps/install_milkzmq.sh"
 
@@ -182,5 +201,10 @@ $MAYBE_SUDO bash -l "$DIR/steps/install_milkzmq.sh"
 # By separating the real build into another step, we can cache the slow provisioning steps
 # and reuse them on subsequent runs.
 if [[ $TARGET_ENV != ci ]]; then
-    $MAYBE_SUDO bash -l "$DIR/steps/install_MagAOX.sh"
+    $MAYBE_SUDO bash -l "$DIR/steps/install_MagAOX.sh" $TARGET_ENV
 fi
+
+log_success "Provisioning complete"
+log_info "You'll probably want to run"
+log_info "    source /etc/profile.d/*.sh"
+log_info "to get all the new environment variables set."

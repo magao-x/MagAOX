@@ -196,6 +196,17 @@ void  indiDriver<parentT>::update()
 template<class parentT>
 int  indiDriver<parentT>::sendNewProperty( const pcf::IndiProperty &ipRecv )
 {
+   //Check for a reconnection
+   if( m_outGoing != nullptr)
+   {
+      if(m_outGoing->getQuitProcess())
+      {
+         parentT::template log<logger::text_log>("INDI client disconnect");
+         delete m_outGoing;
+         m_outGoing = nullptr;
+      }
+   }
+   
    if( m_outGoing == nullptr)
    {
       try
@@ -213,6 +224,8 @@ int  indiDriver<parentT>::sendNewProperty( const pcf::IndiProperty &ipRecv )
          parentT::template log<logger::software_error>({__FILE__, __LINE__, "Failed to allocate IndiClient connection"});
          return -1;
       }
+      
+      parentT::template log<logger::text_log>("INDI client connected");
    }
 
    try
@@ -222,7 +235,8 @@ int  indiDriver<parentT>::sendNewProperty( const pcf::IndiProperty &ipRecv )
    catch(std::exception & e)
    {
       ///\todo need to log and return -1 here too.  Should look for other places to do this in codebase.
-      std::cerr << e.what() << "\n";
+      parentT::template log<logger::software_error>({__FILE__, __LINE__, std::string("Exception from IndiClient::sendNewProperty: ") + e.what()});
+      return -1;
    }
    catch(...)
    {

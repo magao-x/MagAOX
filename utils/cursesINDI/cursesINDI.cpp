@@ -11,8 +11,9 @@
 
 int main()
 {
-   cursesINDI ci("me", "1.7", "1.7");
-
+   
+   cursesINDI * ci;
+   
    std::ofstream *fpout {nullptr};
    
    #ifdef DEBUG_TMPOUT
@@ -20,9 +21,56 @@ int main()
    fpout = new std::ofstream;
    fpout->open(fname);
    
-   ci.fpout = fpout;
    #endif
    
+   
+
+   std::cerr << " cursesINDI: Connecting to INDI server . . .                                            \r";
+
+retry:
+   bool notConnected = true;
+
+   while(notConnected)
+   {   
+       
+      ci = new cursesINDI("me", "1.7", "1.7");
+
+
+      #ifdef DEBUG_TMPOUT
+      ci->fpout = fpout;
+      #endif
+   
+      ci->activate();
+   
+      pcf::IndiProperty ipSend;
+      ci->sendGetProperties( ipSend );
+
+      sleep(2);
+      if(ci->getQuitProcess())
+      {
+         ci->quitProcess();
+         ci->deactivate();
+         delete ci;
+         std::cerr << "\r cursesINDI: Connection to INDI server failed.  Will retry in 5...";
+         sleep(1);
+         for(int i=4; i > 0; --i)
+         {
+            std::cerr << i << "...";
+            sleep(1);
+         }
+         std::cerr << "\r cursesINDI: Retrying connection to INDI server . . .                                            \r";
+      }
+      else
+      {
+         notConnected = false;
+      }
+   }
+   
+   if(notConnected) return 0;
+   //sleep(1);
+   
+   
+   //return 0;
    
    WINDOW * topWin;
 
@@ -36,12 +84,10 @@ int main()
 
    noecho(); /* Don't echo() while we do getch */
 
+   ci->startUp();
+   
+   
 
-   ci.startUp();
-   ci.activate();
-
-   pcf::IndiProperty ipSend;
-   ci.sendGetProperties( ipSend );
 
    topWin = newwin(1, COLS, 0, 0);
    wprintw(topWin, "(e)dit a property, (q)uit");
@@ -49,16 +95,16 @@ int main()
    wrefresh(topWin);
 
    
-   ci.cursStat(0);
+   ci->cursStat(0);
    
    
    //Now main event loop
-   while((ch = wgetch(ci.w_interactWin)) != 'q')
+   while((ch = wgetch(ci->w_interactWin)) != 'q')
    {
       if(ch == ERR)
       {
          //if(fpout) *fpout << "loop" << std::endl;
-         if( ci.getQuitProcess() || ci.m_shutdown) break;
+         if( ci->getQuitProcess() || ci->m_shutdown) break;
          else continue;
       }
       
@@ -67,18 +113,18 @@ int main()
       int npress = 1;
       
       nocbreak();
-      wtimeout(ci.w_interactWin, 50);
-      ch = wgetch(ci.w_interactWin);
+      wtimeout(ci->w_interactWin, 50);
+      ch = wgetch(ci->w_interactWin);
       while(ch == ch0) 
       {
-         ch = wgetch(ci.w_interactWin);
+         ch = wgetch(ci->w_interactWin);
          ++npress; 
       }
       if(ch != ERR) ungetch(ch);
       halfdelay(10);   
       
-      int nextX = ci.m_currX;
-      int nextY = ci.m_currY;
+      int nextX = ci->m_currX;
+      int nextY = ci->m_currY;
 
       switch(ch0)
       {
@@ -99,44 +145,57 @@ int main()
             if(fpout) *fpout << "down: " << npress << std::endl;
             break;
          case KEY_PPAGE:
-            nextY -= ci.m_gridWin.size()-1;
+            nextY -= ci->m_gridWin.size()-1;
             if(fpout) *fpout << "ppage: " << npress << std::endl;
             break;   
          case KEY_NPAGE:
-            nextY += ci.m_gridWin.size()-1;
+            nextY += ci->m_gridWin.size()-1;
             if(fpout) *fpout << "npage: " << npress << std::endl;
             break;
          case KEY_RESIZE:
-            ci.draw();
+            ci->draw();
             if(fpout) *fpout << "resizes: " << npress << std::endl;
             continue;
          default:
             if(fpout) *fpout << "other: " << npress << std::endl;
-            ci.keyPressed(ch0);
+            ci->keyPressed(ch0);
             continue;
             break;
       }
 
-      int maxX = ci.m_gridWin[0].size()-1;
+      int maxX = ci->m_gridWin[0].size()-1;
       if(nextX < 1) nextX = 1;
       if(nextX >= maxX) nextX = maxX;
 
-      ci.moveCurrent(nextY, nextX);
+      ci->moveCurrent(nextY, nextX);
 
-      ci.cursStat(0);
+      ci->cursStat(0);
       
-      if(ci.m_shutdown) break;
+      if(ci->m_shutdown) break;
    }
 
-   ci.shutDown();
+   ci->shutDown();
 
    endwin();   /* End curses mode */
 
-   if(ci.m_connectionLost)
+   sleep(1);
+   if(ci->m_connectionLost)
    {
-      std::cerr << "\ncursesINDI: lost connection to indiserver.\n\n";
+      delete ci;
+
+      std::cerr << "\r cursesINDI: lost connection to indiserver.  Will retry in 5...";
+      
+      sleep(1);
+      for(int i=4; i > 0; --i)
+      {
+         std::cerr << i << "...";
+         sleep(1);
+      }
+      std::cerr << "\r cursesINDI: Retrying connection to INDI server . . .                                            \r";
+      goto retry;
    }
    
+   std::cerr << "\r cursesINDI: Disconnected from INDI server.                                                              \n";
    return 0;
 
 
