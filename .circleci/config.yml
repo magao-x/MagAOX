@@ -65,7 +65,7 @@ jobs:
             - /opt/MagAOX/.cache
       - run:
           name: Install MagAO-X
-          command: 'bash -l ~/project/setup/steps/install_MagAOX.sh'
+          command: 'bash -l ~/project/setup/steps/install_MagAOX.sh ci'
   build_ubuntu:
     docker:
       - image: ubuntu:18.04
@@ -90,7 +90,7 @@ jobs:
             - /opt/MagAOX/.cache
       - run:
           name: Install MagAO-X
-          command: 'bash -l ~/project/setup/steps/install_MagAOX.sh'
+          command: 'bash -l ~/project/setup/steps/install_MagAOX.sh ci'
 workflows:
   version: 2
   ubuntu:
