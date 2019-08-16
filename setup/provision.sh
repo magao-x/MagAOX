@@ -58,13 +58,14 @@ else
     # Keep the sudo timestamp updated until this script exits
     while true; do $_REAL_SUDO -n true; sleep 60; kill -0 "$$" || exit; done 2>/dev/null &
 fi
-# Get logging functions
-source $DIR/_common.sh
 
 if [[ ! -z "$1" ]]; then
     TARGET_ENV="$1"
 fi
 log_success "Starting '$TARGET_ENV' provisioning"
+
+# Get logging functions
+source $DIR/_common.sh
 
 VENDOR_SOFTWARE_BUNDLE=$DIR/vendor_software_bundle.tar.gz
 if [[ ! -e $VENDOR_SOFTWARE_BUNDLE ]]; then
