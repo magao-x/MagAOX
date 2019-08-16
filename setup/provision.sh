@@ -160,6 +160,7 @@ if [[ $TARGET_ENV == vm ]]; then
     # Create or replace symlink to sources so we develop on the host machine's copy
     # (unlike prod, where we install a new clone of the repo to this location)
     ln -nfs /vagrant /opt/MagAOX/source/MagAOX
+    cd /opt/MagAOX/source/MagAOX
     log_success "Symlinked /opt/MagAOX/source/MagAOX to /vagrant (host folder)"
     usermod -G magaox,magaox-dev vagrant
     log_success "Added vagrant user to magaox,magaox-dev"
@@ -178,6 +179,7 @@ else
             log_success "In the future, you can re-run this script from /opt/MagAOX/source/MagAOX/setup"
             log_info "(In fact, maybe delete $(dirname $DIR)?)"
         else
+            cd /opt/MagAOX/source/MagAOX
             git fetch
         fi
     else
@@ -191,6 +193,7 @@ fi
 #
 # On a Vagrant VM, we need to "sudo" to become vagrant since the provisioning
 # runs as root.
+cd /opt/MagAOX/source
 $MAYBE_SUDO bash -l "$DIR/steps/install_cacao.sh" $TARGET_ENV
 $MAYBE_SUDO bash -l "$DIR/steps/install_milkzmq.sh"
 
