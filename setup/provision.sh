@@ -21,16 +21,6 @@ if [[ $ID == ubuntu ]]; then
     # https://superuser.com/questions/1160025/how-to-solve-ttyname-failed-inappropriate-ioctl-for-device-in-vagrant
     sudo sed -i -e 's/mesg n .*true/tty -s \&\& mesg n/g' ~/.profile
 fi
-# Install OS packages first
-if [[ $ID == ubuntu ]]; then
-    sudo bash -l "$DIR/steps/install_ubuntu_bionic_packages.sh"
-elif [[ $ID == centos && $VERSION_ID == 7 ]]; then
-    sudo bash -l "$DIR/steps/install_centos7_packages.sh"
-    sudo bash -l "$DIR/steps/install_devtoolset-7.sh"
-else
-    log_error "No special casing for $ID $VERSION_ID yet, abort"
-    exit 1
-fi
 # Detect whether we're running in some kind of VM or container
 if [[ -d /vagrant || $CI == true ]]; then
     if [[ -d /vagrant ]]; then
@@ -40,7 +30,6 @@ if [[ -d /vagrant || $CI == true ]]; then
     else
         TARGET_ENV=ci
     fi
-    sudo bash -l "$DIR/setup_users_and_groups.sh"
 else
     TARGET_ENV=instrument
     VAGRANT=false
@@ -64,8 +53,29 @@ if [[ ! -z "$1" ]]; then
 fi
 echo "Starting '$TARGET_ENV' provisioning"
 
+# Shouldn't be any more undefined variables after (maybe) $1,
+# so tell bash to die if it encounters any
+set -u
+
 # Get logging functions
 source $DIR/_common.sh
+
+# Install OS packages first
+if [[ $ID == ubuntu ]]; then
+    sudo bash -l "$DIR/steps/install_ubuntu_bionic_packages.sh"
+elif [[ $ID == centos && $VERSION_ID == 7 ]]; then
+    sudo bash -l "$DIR/steps/install_centos7_packages.sh"
+    sudo bash -l "$DIR/steps/install_devtoolset-7.sh"
+else
+    log_error "No special casing for $ID $VERSION_ID yet, abort"
+    exit 1
+fi
+
+# The VM and CI provisioning doesn't run setup_users_and_groups.sh
+# separately as in the instrument instructions; we have to run it
+if [[ $TARGET_ENV == vm || $TARGET_ENV == ci ]]; then
+    sudo bash -l "$DIR/setup_users_and_groups.sh"
+fi
 
 VENDOR_SOFTWARE_BUNDLE=$DIR/vendor_software_bundle.tar.gz
 if [[ ! -e $VENDOR_SOFTWARE_BUNDLE ]]; then
@@ -75,8 +85,6 @@ if [[ ! -e $VENDOR_SOFTWARE_BUNDLE ]]; then
         exit 1
     fi
 fi
-# die on uninitialized variables (typo guard)
-set -u
 
 ## Set up file structure and permissions
 sudo bash -l "$DIR/steps/ensure_dirs_and_perms.sh" $TARGET_ENV
@@ -191,3 +199,8 @@ $MAYBE_SUDO bash -l "$DIR/steps/install_milkzmq.sh"
 if [[ $TARGET_ENV != ci ]]; then
     $MAYBE_SUDO bash -l "$DIR/steps/install_MagAOX.sh"
 fi
+
+log_success "Provisioning complete"
+log_info "You'll probably want to run"
+log_info "    source /etc/profile.d/*.sh"
+log_info "to get all the new environment variables set."
