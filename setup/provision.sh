@@ -14,8 +14,6 @@ else
     _REAL_SUDO=$(which sudo)
   fi
 fi
-# Get logging functions
-source $DIR/_common.sh
 # Defines $ID and $VERSION_ID so we can detect which distribution we're on
 source /etc/os-release
 if [[ $ID == ubuntu ]]; then
@@ -39,21 +37,10 @@ if [[ -d /vagrant || $CI == true ]]; then
         DIR="/vagrant/setup"
         TARGET_ENV=vm
         CI=false
-        # Necessary for forwarding GUIs from the VM to the host
-        if [[ $ID == ubuntu ]]; then
-            apt install -y xauth
-        elif [[ $ID == centos ]]; then
-            yum install -y xorg-x11-xauth
-        fi
     else
         TARGET_ENV=ci
     fi
     sudo bash -l "$DIR/setup_users_and_groups.sh"
-    if [[ $ID == ubuntu ]]; then
-        apt install -y linux-headers-generic
-    elif [[ $ID == centos ]]; then
-        yum install -y kernel-devel-$(uname -r) || yum install -y kernel-devel
-    fi
 else
     TARGET_ENV=instrument
     VAGRANT=false
@@ -71,6 +58,9 @@ else
     # Keep the sudo timestamp updated until this script exits
     while true; do $_REAL_SUDO -n true; sleep 60; kill -0 "$$" || exit; done 2>/dev/null &
 fi
+# Get logging functions
+source $DIR/_common.sh
+
 if [[ ! -z "$1" ]]; then
     TARGET_ENV="$1"
 fi
@@ -90,6 +80,22 @@ set -u
 ## Set up file structure and permissions
 sudo bash -l "$DIR/steps/ensure_dirs_and_perms.sh" $TARGET_ENV
 
+# Necessary for forwarding GUIs from the VM to the host
+if [[ $TARGET_ENV == vm ]]; then
+    if [[ $ID == ubuntu ]]; then
+        apt install -y xauth
+    elif [[ $ID == centos ]]; then
+        yum install -y xorg-x11-xauth
+    fi
+fi
+# Install Linux headers (instrument computers use the RT kernel / headers)
+if [[ $TARGET_ENV == ci || $TARGET_ENV == vm ||  $TARGET_ENV == workstation ]]; then
+    if [[ $ID == ubuntu ]]; then
+        sudo apt install -y linux-headers-generic
+    elif [[ $ID == centos ]]; then
+        sudo yum install -y kernel-devel-$(uname -r) || yum install -y kernel-devel
+    fi
+fi
 ## Build third-party dependencies under /opt/MagAOX/vendor
 cd /opt/MagAOX/vendor
 sudo bash -l "$DIR/steps/install_mkl_tarball.sh"
