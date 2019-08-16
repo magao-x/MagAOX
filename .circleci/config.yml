@@ -13,12 +13,12 @@ jobs:
           command: make doc
       - persist_to_workspace:
           root: doc
-          paths: www
+          paths: output
       - store_artifacts:
-          path: doc/www
+          path: doc/output
       - run:
           name: "Built documentation is available at:"
-          command: DOCS_URL="${CIRCLE_BUILD_URL}/artifacts/${CIRCLE_NODE_INDEX}/${CIRCLE_WORKING_DIRECTORY/#\~/$HOME}/doc/www/index.html"; echo $DOCS_URL
+          command: DOCS_URL="${CIRCLE_BUILD_URL}/artifacts/${CIRCLE_NODE_INDEX}/${CIRCLE_WORKING_DIRECTORY/#\~/$HOME}/doc/output/index.html"; echo $DOCS_URL
   docs-deploy:
     docker:
       - image: node:8.10.0
@@ -31,7 +31,7 @@ jobs:
           at: doc
       - run:
           name: Disable jekyll builds
-          command: touch doc/www/.nojekyll
+          command: touch doc/output/.nojekyll
       - run:
           name: Install and configure dependencies
           command: |
@@ -40,7 +40,7 @@ jobs:
             git config user.name "Lynx the Cat"
       - run:
           name: Deploy docs to gh-pages branch
-          command: gh-pages --dotfiles --message "[skip ci] Update built docs" --dist doc/www/
+          command: gh-pages --dotfiles --message "[skip ci] Update built docs" --dist doc/output/
   build_centos:
     docker:
       - image: centos:7.6.1810
