@@ -62,7 +62,7 @@ fi
 if [[ ! -z "$1" ]]; then
     TARGET_ENV="$1"
 fi
-log_success "Starting '$TARGET_ENV' provisioning"
+echo "Starting '$TARGET_ENV' provisioning"
 
 # Get logging functions
 source $DIR/_common.sh
