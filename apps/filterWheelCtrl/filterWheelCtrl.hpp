@@ -244,14 +244,14 @@ protected:
    int moveTo( const double & filters,          ///< [in] The new position in absolute filters.  Only valid if not -1.
                const double & counts           ///< [in] The new position in absolute counts.  Only valid if not -1.
              );
-   
+
    /// Move to a new filter by name.
    /**
      * \returns 0 on success.
      * \returns -1 on error.
      */
    int moveTo( const std::string & name /**< [in] The name of the filter to move to*/);
-   
+
 };
 
 inline
@@ -632,7 +632,7 @@ INDI_NEWCALLBACK_DEFN(filterWheelCtrl, m_indiP_filters)(const pcf::IndiProperty 
    {
       double filters = -1;
       double target_abs = -1;
-     
+      
       if(ipRecv.find("current"))
       {
          filters = ipRecv["current"].get<double>();
