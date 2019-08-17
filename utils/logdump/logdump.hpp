@@ -1,6 +1,6 @@
 /** \file logdump.hpp
   * \brief A simple utility to dump MagAO-X binary logs to stdout.
-  * 
+  *
   * \ingroup logdump_files
   */
 
@@ -20,10 +20,10 @@ using namespace flatlogs;
 /** \defgroup logdump logdump: MagAO-X Log Reader
   * \brief Read a MagAO-X binary log file.
   *
-  * <a href="../util_html/page_module_logdump.html">Application Documentation</a>
+  * <a href="../handbook/utils/logdump.html">Utility Documentation</a>
   *
   * \ingroup utils
-  * 
+  *
   */
 
 /** \defgroup logdump_files logdump Files
@@ -168,7 +168,7 @@ int logdump::execute()
       fin = fopen(fname.c_str(), "rb");
 
       std::cerr << fname << "\n";
-      
+
       size_t buffSz = 0;
       while(!feof(fin)) //<--This should be an exit condition controlled by loop logic, not feof.
       {
@@ -195,7 +195,7 @@ int logdump::execute()
                      //Check if a new file exists now.
                      size_t oldsz = logs.size();
                      logs = mx::ioutils::getFileNames( m_dir, m_prefixes[0], "", m_ext);
-                     if(logs.size() > oldsz) 
+                     if(logs.size() > oldsz)
                      {
                         //new file(s) detected;
                         break;
@@ -212,20 +212,20 @@ int logdump::execute()
 
          //We got here without any data, probably means time to get a new file.
          if(nrd == 0) break;
-         
-         
+
+
          if( logHeader::msgLen0(head) == logHeader::MAX_LEN0-1)
-         { 
+         {
             //Intermediate size message, read two more bytes
             nrd = fread( head.get() + logHeader::minHeadSize, sizeof(char), sizeof(msgLen1T), fin);
-         }         
+         }
          else if( logHeader::msgLen0(head) == logHeader::MAX_LEN0)
          {
-            //Large size message: read 8 more bytes 
+            //Large size message: read 8 more bytes
             nrd = fread( head.get() + logHeader::minHeadSize, sizeof(char), sizeof(msgLen2T), fin);
          }
-         
-         
+
+
          logPrioT lvl = logHeader::logLevel(head);
          eventCodeT ec = logHeader::eventCode(head);
          msgLenT len = logHeader::msgLen(head);
@@ -258,7 +258,7 @@ int logdump::execute()
          }
 
          size_t hSz = logHeader::headerSize(head);
-         
+
          if( (size_t) hSz + (size_t) len > buffSz )
          {
             logBuff = bufferPtrT(new char[hSz + len]);
@@ -290,7 +290,7 @@ void logdump::printLogBuff( const logPrioT & lvl,
                           )
 {
    static_cast<void>(len); //be unused
-   
+
    if(ec == eventCodes::GIT_STATE)
    {
       if(git_state::repoName(logHeader::messageBuffer(logBuff)) == "MagAOX")
@@ -309,32 +309,32 @@ void logdump::printLogBuff( const logPrioT & lvl,
       {
          std::cout << "\033[104m\033[91m\033[5m\033[1m";
       }
-      
+
       if(lvl == logPrio::LOG_ALERT)
       {
          std::cout << "\033[101m\033[5m";
       }
-      
+
       if(lvl == logPrio::LOG_CRITICAL)
       {
          std::cout << "\033[41m\033[1m";
       }
-      
+
       if(lvl == logPrio::LOG_ERROR)
       {
          std::cout << "\033[91m\033[1m";
       }
-      
+
       if(lvl == logPrio::LOG_WARNING)
       {
          std::cout << "\033[93m\033[1m";
       }
-      
+
       if(lvl == logPrio::LOG_NOTICE)
       {
          std::cout << "\033[1m";
       }
-      
+
    }
 
    logStdFormat(logBuff);
