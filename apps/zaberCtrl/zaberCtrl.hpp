@@ -11,10 +11,10 @@
 #include "../../libMagAOX/libMagAOX.hpp" //Note this is included on command line to trigger pch
 #include "../../magaox_git_version.h"
 
-/** \defgroup zaberCtrl 
+/** \defgroup zaberCtrl
   * \brief The MagAO-X application to control a single Zaber stage
   *
-  * <a href="..//apps_html/page_module_zaberCtrl.html">Application Documentation</a>
+  * <a href="../handbook/apps/zaberCtrl.html">Application Documentation</a>
   *
   * \ingroup apps
   *

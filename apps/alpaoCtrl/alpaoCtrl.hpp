@@ -16,10 +16,10 @@
 #include <asdkWrapper.h>
 
 
-/** \defgroup alpaoCtrl 
+/** \defgroup alpaoCtrl
   * \brief The MagAO-X application to control an ALPAO DM
   *
-  * <a href="..//apps_html/page_module_alpaoCtrl.html">Application Documentation</a>
+  * <a href="../handbook/apps/alpaoCtrl.html">Application Documentation</a>
   *
   * \ingroup apps
   *

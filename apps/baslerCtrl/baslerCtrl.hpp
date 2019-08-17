@@ -39,7 +39,7 @@ namespace app
 /** \defgroup baslerCtrl Basler USB3 Camera
   * \brief Control of a Basler USB3 Camera
   *
-  *  <a href="../apps_html/page_module_baslerCtrl.html">Application Documentation</a>
+  * <a href="../handbook/apps/baslerCtrl.html">Application Documentation</a>
   *
   * \ingroup apps
   *

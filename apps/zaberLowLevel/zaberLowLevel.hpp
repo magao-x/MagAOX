@@ -26,7 +26,7 @@ typedef MagAOX::app::MagAOXApp<true> MagAOXAppT; //This needs to be before zaber
 /** \defgroup zaberLowLevel low-level zaber controller
   * \brief The low-level interface to a set of chained Zaber stages
   *
-  * <a href="..//apps_html/page_module_zaberLowLevel.html">Application Documentation</a>
+  * <a href="../handbook/apps/zaberLowLevel.html">Application Documentation</a>
   *
   * \ingroup apps
   *

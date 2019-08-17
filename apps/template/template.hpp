@@ -11,10 +11,10 @@
 #include "../../libMagAOX/libMagAOX.hpp" //Note this is included on command line to trigger pch
 #include "../../magaox_git_version.h"
 
-/** \defgroup template 
-  * \brief The XXXXXXX application to do YYYYYYY
+/** \defgroup template
+  * \brief The XXXXXX application to do YYYYYYY
   *
-  * <a href="..//apps_html/page_module_template.html">Application Documentation</a>
+  * <a href="../handbook/apps/XXXXXX.html">Application Documentation</a>
   *
   * \ingroup apps
   *

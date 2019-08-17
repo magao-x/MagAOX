@@ -1,5 +1,41 @@
 version: 2
 jobs:
+  html-docs:
+    docker:
+      - image: centos:7.6.1810
+    steps:
+      - checkout
+      - run:
+          name: "Install Doxygen and dependencies"
+          command: yum install -y make doxygen graphviz
+      - run:
+          name: "Build docs"
+          command: make doc
+      - persist_to_workspace:
+          root: doc
+          paths: output
+  docs-deploy:
+    docker:
+      - image: node:8.10.0
+    steps:
+      - add_ssh_keys:
+          fingerprints:
+            - "87:bc:05:35:3a:b8:4c:99:5f:89:ea:fa:6f:78:22:eb"
+      - checkout
+      - attach_workspace:
+          at: doc
+      - run:
+          name: Disable jekyll builds
+          command: touch doc/output/api/.nojekyll
+      - run:
+          name: Install and configure dependencies
+          command: |
+            npm install -g --silent gh-pages@2.0.1
+            git config user.email "lynx@magao-x.org"
+            git config user.name "Lynx the Cat"
+      - run:
+          name: Deploy docs to gh-pages branch
+          command: gh-pages --dotfiles --message "[skip ci] Update built docs" --dist doc/output/api/
   build_centos:
     docker:
       - image: centos:7.6.1810
@@ -24,7 +60,7 @@ jobs:
             - /opt/MagAOX/.cache
       - run:
           name: Install MagAO-X
-          command: 'bash -l ~/project/setup/steps/install_MagAOX.sh'
+          command: 'bash -l ~/project/setup/steps/install_MagAOX.sh ci'
   build_ubuntu:
     docker:
       - image: ubuntu:18.04
@@ -49,7 +85,7 @@ jobs:
             - /opt/MagAOX/.cache
       - run:
           name: Install MagAO-X
-          command: 'bash -l ~/project/setup/steps/install_MagAOX.sh'
+          command: 'bash -l ~/project/setup/steps/install_MagAOX.sh ci'
 workflows:
   version: 2
   ubuntu:
@@ -58,3 +94,12 @@ workflows:
   centos:
     jobs:
       - build_centos
+  build_and_upload:
+    jobs:
+      - html-docs
+      - docs-deploy:
+          requires:
+            - html-docs
+          filters:
+            branches:
+              only: master

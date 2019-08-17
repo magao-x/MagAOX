@@ -3,7 +3,7 @@
 *.o
 *.a
 *.so
-*html/
+doc/output
 local/
 !local/common.example.mk
 !local/config.example.mk
