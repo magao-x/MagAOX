@@ -1,5 +1,5 @@
 
-//#define DEBUG_TMPOUT
+#define DEBUG_TMPOUT
 
 
 
@@ -14,6 +14,7 @@ int main()
    
    cursesINDI * ci;
    
+   //This is for debugging
    std::ofstream *fpout {nullptr};
    
    #ifdef DEBUG_TMPOUT
@@ -25,7 +26,7 @@ int main()
    
    
 
-   std::cerr << " cursesINDI: Connecting to INDI server . . .                                            \r";
+   std::cout << " cursesINDI: Connecting to INDI server . . .                                            \r";
 
 retry:
    bool notConnected = true;
@@ -33,7 +34,7 @@ retry:
    while(notConnected)
    {   
        
-      ci = new cursesINDI("me", "1.7", "1.7");
+      ci = new cursesINDI("cursesINDI", "1.7", "1.7");
 
 
       #ifdef DEBUG_TMPOUT
@@ -51,14 +52,14 @@ retry:
          ci->quitProcess();
          ci->deactivate();
          delete ci;
-         std::cerr << "\r cursesINDI: Connection to INDI server failed.  Will retry in 5...";
+         std::cout << "\r cursesINDI: Connection to INDI server failed.  Will retry in 5...";
          sleep(1);
          for(int i=4; i > 0; --i)
          {
-            std::cerr << i << "...";
+            std::cout << i << "...";
             sleep(1);
          }
-         std::cerr << "\r cursesINDI: Retrying connection to INDI server . . .                                            \r";
+         std::cout << "\r cursesINDI: Retrying connection to INDI server . . .                                            \r";
       }
       else
       {
@@ -90,7 +91,7 @@ retry:
 
 
    topWin = newwin(1, COLS, 0, 0);
-   wprintw(topWin, "(e)dit a property, (q)uit");
+   wprintw(topWin, "(e)dit a property, (t)oggle a switch, (q)uit");
    keypad(topWin, TRUE);
    wrefresh(topWin);
 
@@ -183,19 +184,19 @@ retry:
    {
       delete ci;
 
-      std::cerr << "\r cursesINDI: lost connection to indiserver.  Will retry in 5...";
+      std::cout << "\r cursesINDI: lost connection to indiserver.  Will retry in 5...";
       
       sleep(1);
       for(int i=4; i > 0; --i)
       {
-         std::cerr << i << "...";
+         std::cout << i << "...";
          sleep(1);
       }
-      std::cerr << "\r cursesINDI: Retrying connection to INDI server . . .                                            \r";
+      std::cout << "\r cursesINDI: Retrying connection to INDI server . . .                                            \r";
       goto retry;
    }
    
-   std::cerr << "\r cursesINDI: Disconnected from INDI server.                                                              \n";
+   std::cout << "\r cursesINDI: Disconnected from INDI server.                                                              \n";
    return 0;
 
 

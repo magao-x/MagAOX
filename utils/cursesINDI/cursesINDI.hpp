@@ -5,6 +5,27 @@
 #include "cursesTableGrid.hpp"
 
 
+///Simple utility to get the display value of an element
+/**
+  * \returns the properly formatted element value
+  * \returns empty string if element is not in property
+  */ 
+std::string displayValue( pcf::IndiProperty & ip, ///< [in] the INDI property
+                          std::string & el ///< [in] the name of the element
+                        )
+{
+   if(!ip.find(el)) return "";
+   
+   if(ip.getType() == pcf::IndiProperty::Switch)
+   {
+      return pcf::IndiElement::getSwitchStateString(ip[el].getSwitchState());
+   }
+   else
+   {
+      return ip[el].getValue();
+   }
+}
+
 class cursesINDI : public pcf::IndiClient, public cursesTableGrid
 {
 
@@ -41,6 +62,8 @@ public:
    struct elementSpec
    {
       std::string propKey;
+      std::string device;
+      std::string propertyName;
       std::string name;
       int tableRow {-1};
    };
@@ -156,11 +179,11 @@ void cursesINDI::handleDefProperty( const pcf::IndiProperty &ipRecv )
 
    if(result.second == false)
    {
-      result.first->second = ipRecv;
+      result.first->second = ipRecv; //We already have it, so we're already registered
    }
    else
    {
-      sendGetProperties(ipRecv);
+      sendGetProperties(ipRecv); //Otherwise register for it
    }
 
    auto elIt = ipRecv.getElements().begin();
@@ -169,6 +192,8 @@ void cursesINDI::handleDefProperty( const pcf::IndiProperty &ipRecv )
    {
       elementSpec es;
       es.propKey = ipRecv.createUniqueKey();
+      es.device = ipRecv.getDevice();
+      es.propertyName = ipRecv.getName();
       es.name = elIt->second.getName();
 
       std::string key = es.propKey + "." + es.name;
@@ -181,6 +206,8 @@ void cursesINDI::handleDefProperty( const pcf::IndiProperty &ipRecv )
       }
       else
       {
+         //Or just update the table.
+         //Should check if this element actually changed....
          ++m_update;
       }
       ++elIt;
@@ -190,7 +217,33 @@ void cursesINDI::handleDefProperty( const pcf::IndiProperty &ipRecv )
 
 void cursesINDI::handleDelProperty( const pcf::IndiProperty &ipRecv )
 {
-   static_cast<void>(ipRecv);
+   if(fpout) *fpout << "got delete property" << std::endl;
+   
+   if(ipRecv.hasValidDevice())
+   {
+      if(!ipRecv.hasValidName())
+      {
+         if(fpout) *fpout << "will delete: " << ipRecv.getDevice() << "\n";
+         
+         for(elementMapIteratorT elIt = knownElements.begin(); elIt != knownElements.end();)
+         {
+            if( elIt->second.device == ipRecv.getDevice()) elIt = knownElements.erase(elIt);
+            else ++elIt;
+         }
+         
+         
+         knownProps.erase(ipRecv.getDevice());
+         
+      }
+      else
+      {
+         if(fpout) *fpout << "will delete: " << ipRecv.createUniqueKey() << "\n";
+         knownElements.erase(ipRecv.createUniqueKey());
+      }
+   }
+   
+   ++m_redraw;
+   
 }
 
 void cursesINDI::handleMessage( const pcf::IndiProperty &ipRecv )
@@ -337,13 +390,11 @@ void cursesINDI::redrawTable()
       s[1] = knownProps[es->second.propKey].getDevice();
       s[2] = knownProps[es->second.propKey].getName();
       s[3] = es->second.name;
-      s[4] = knownProps[es->second.propKey][es->second.name].getValue();
-
+      
+      s[4] = displayValue( knownProps[es->second.propKey], es->second.name);
+      
       m_cellContents.push_back(s);
       es->second.tableRow = m_cellContents.size()-1;
-      
-      
-      //updateContents(es->second.tableRow, s);
    }
 
    draw();
@@ -357,6 +408,8 @@ void cursesINDI::redrawTable()
    _moveCurrent(m_currY, m_currX);
 }
 
+
+   
 void cursesINDI::updateTable()
 {
    if(m_redraw) return; //Pending redraw, so we skip it and let that take care of it.
@@ -375,9 +428,9 @@ void cursesINDI::updateTable()
    for(auto it = knownElements.begin(); it != knownElements.end(); ++it)
    {
       if(it->second.tableRow == -1) continue;
-      if(m_cellContents[it->second.tableRow][4] != knownProps[it->second.propKey][it->second.name].getValue())
+      if(m_cellContents[it->second.tableRow][4] != displayValue(knownProps[it->second.propKey], it->second.name)) //.getValue())
       {
-         m_cellContents[it->second.tableRow][4] = knownProps[it->second.propKey][it->second.name].getValue();
+         m_cellContents[it->second.tableRow][4] = displayValue(knownProps[it->second.propKey], it->second.name); //knownProps[it->second.propKey][it->second.name].getValue();
          
          if(it->second.tableRow - m_startRow < (size_t) tabHeight()) //It's currently displayed
          {
@@ -526,7 +579,70 @@ void cursesINDI::keyPressed( int ch )
          }
 
          break;
-      }
+      } //case 'e'
+      case 't':
+      {
+         if(m_currY + m_startRow >= knownElements.size()) break;
+         auto it = knownElements.begin();
+         while(it != knownElements.end())
+         {
+            if( (size_t) it->second.tableRow == m_currY+m_startRow) break;
+            ++it;
+         }
+         
+         if(it == knownElements.end()) break;
+
+         if( !knownProps[it->second.propKey].find(it->second.name)) break; //Just a check.
+         
+         std::string toggleString;
+         pcf::IndiElement::SwitchStateType toggleState;
+         if( knownProps[it->second.propKey][it->second.name].getSwitchState() == pcf::IndiElement::Off  )
+         {
+            toggleString = "On";
+            toggleState = pcf::IndiElement::On;
+         }
+         else if(knownProps[it->second.propKey][it->second.name].getSwitchState() == pcf::IndiElement::On)
+         {
+            toggleString = "Off";
+            toggleState = pcf::IndiElement::Off;
+         }
+         else break; //would happen fo state unknown
+         
+         cursStat(1);
+
+         //mutex scope
+         {
+            std::lock_guard<std::mutex> lock(m_drawMutex);
+            wclear(w_interactWin);
+            wprintw(w_interactWin, "toggle %s.%s to %s?", it->second.propKey.c_str(), it->second.name.c_str(), toggleString.c_str());
+            wrefresh(w_interactWin);
+         }
+
+         int nch = 0;
+         while( (nch = wgetch(w_interactWin)) == ERR)
+         {
+         }
+
+         if(nch == 'y')
+         {
+            pcf::IndiProperty ipSend(knownProps[it->second.propKey].getType());
+
+            ipSend.setDevice(knownProps[it->second.propKey].getDevice());
+            ipSend.setName(knownProps[it->second.propKey].getName());
+            ipSend.add(pcf::IndiElement(it->second.name));
+            ipSend[it->second.name].setSwitchState(toggleState);
+            sendNewProperty(ipSend);
+         }
+
+         //mutex scope
+         {
+            std::lock_guard<std::mutex> lock(m_drawMutex);
+            wclear(w_interactWin);
+            wrefresh(w_interactWin);
+         }
+
+         break;
+      } //case 'e'
       default:
          return;//break;
    }

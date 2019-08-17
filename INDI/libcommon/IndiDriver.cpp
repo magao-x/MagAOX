@@ -213,7 +213,7 @@ void IndiDriver::execute()
 /// at a basic level. These properties are common to all drivers.
 /// Some of these are:
 ///
-///   enable_active.value=On/Off -  start or stop the internal worker thread.
+///   enable_active -> rmeoved for MagAO-X
 ///
 /// Returns true (for now).
 
@@ -225,16 +225,6 @@ bool IndiDriver::handleDriverGetProperties( const IndiProperty &ipRecv )
     enableResponseMode( true );
   }
 
-  IndiElement::SwitchStateType swActive = isActive() ?
-      IndiElement::On : IndiElement::Off;
-
-  IndiProperty ipActivate( IndiProperty::Switch, getName(), "enable_active",
-                           IndiProperty::Ok, IndiProperty::ReadWrite,
-                           IndiProperty::AtMostOne );
-  ipActivate.setLabel( "Start/stop the internal worker thread." );
-  ipActivate.add( IndiElement( "value", swActive ) );
-  ipActivate["value"].setLabel( "Start/stop the thread." );
-  sendDefProperty( ipActivate );
 
   // For now, this always succeeds.
   return true;
@@ -254,25 +244,7 @@ bool IndiDriver::handleDriverNewProperty( const IndiProperty &ipRecv )
   // Assume we didn't handle the NEW and it will be handled by
   // the derived class.
   bool oHandledProperty = false;
-
-  // Handle whether we want to start or stop the thread running.
-  if ( ipRecv.getDevice() == getName() && ipRecv.getName() == "enable_active" )
-  {
-    if ( ipRecv.find( "value" ) == false )
-    {
-
-    }
-    else if ( ipRecv["value"].getSwitchState() == IndiElement::On )
-    {
-      activate();
-      oHandledProperty = true;
-    }
-    else
-    {
-      deactivate();
-      oHandledProperty = true;
-    }
-  }
+  
   return oHandledProperty;
 }
 

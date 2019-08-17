@@ -520,6 +520,26 @@ protected:
 
 public:
    
+   /// Create a standard INDI property with target and current elements.
+   /**
+     * \returns 0 on success 
+     * \returns -1 on error
+     */ 
+   int createStandardIndiProp( pcf::IndiProperty & prop,
+                               pcf::IndiProperty::Type type,
+                               const std::string & name
+                             );
+
+
+   /// Create a standard INDI property with target and current elements.
+   /**
+     * \returns 0 on success 
+     * \returns -1 on error
+     */ 
+   int createStandardIndiToggle( pcf::IndiProperty & prop,
+                                 const std::string & name
+                               );
+   
    /// Register an INDI property which is read only.
    /** This version requires the property be fully set up.
      *
@@ -566,6 +586,22 @@ public:
                                 const pcf::IndiProperty::Type & propType,               ///< [in] the type of the property
                                 const pcf::IndiProperty::PropertyPermType & propPerm,   ///< [in] the permissions of the property
                                 const pcf::IndiProperty::PropertyStateType & propState, ///< [in] the state of the property
+                                int (*)( void *, const pcf::IndiProperty &)             ///< [in] the callback for changing the property
+                              );
+   
+   /// Register an INDI property which is exposed for others to request a New Property for, with a switch rule
+   /** This verison sets up the INDI property according to the arguments.
+     *
+     * \returns 0 on success.
+     * \returns -1 on error.
+     *
+     */
+   int registerIndiPropertyNew( pcf::IndiProperty & prop,                               ///< [out] the property to register
+                                const std::string & propName,                           ///< [in] the name of the property
+                                const pcf::IndiProperty::Type & propType,               ///< [in] the type of the property
+                                const pcf::IndiProperty::PropertyPermType & propPerm,   ///< [in] the permissions of the property
+                                const pcf::IndiProperty::PropertyStateType & propState, ///< [in] the state of the property
+                                const pcf::IndiProperty::SwitchRuleType & propRule,     ///< [in] the switch rule type
                                 int (*)( void *, const pcf::IndiProperty &)             ///< [in] the callback for changing the property
                               );
    
@@ -667,6 +703,18 @@ protected:
                          const std::vector<std::string> & el, ///< [in] String vector of element names
                          const std::vector<T> & newVal ///< [in] the new values
                       );
+
+   /// Get the target element value from an new property 
+   /**
+     * \returns 0 on success
+     * \returns -1 on error
+     */
+   template<typename T>
+   int indiTargetUpdate( pcf::IndiProperty & localProperty, ///< [out] The local property to update 
+                         T & localTarget, ///< [out] The local value to update
+                         const pcf::IndiProperty & remoteProperty, ///< [in] the new property received 
+                         bool setBusy = true ///< [in] [optional] set property to busy if true
+                       );
 
    /// Send a newProperty command to another device (using the INDI Client interface)
    /** Copies the input IndiProperty, then updates the element with the new value.
@@ -1134,6 +1182,10 @@ int MagAOXApp<_useINDI>::execute() //virtual
    //Stop INDI communications
    if(m_indiDriver != nullptr)
    {
+      pcf::IndiProperty ipSend;
+      ipSend.setDevice(m_configName);
+      m_indiDriver->sendDelProperty(ipSend);
+      
       m_indiDriver->quitProcess();
       m_indiDriver->deactivate();
       log<indidriver_stop>();
@@ -1664,6 +1716,41 @@ int MagAOXApp<_useINDI>::stateLogged()
 /*-------------------------------------------------------------------------------------*/
 
 template<bool _useINDI>
+int MagAOXApp<_useINDI>::createStandardIndiProp( pcf::IndiProperty & prop,
+                                                 pcf::IndiProperty::Type type,
+                                                 const std::string & name
+                                                )
+{
+   prop = pcf::IndiProperty(type);
+   prop.setDevice(configName());
+   prop.setName(name);
+   prop.setPerm(pcf::IndiProperty::ReadWrite); 
+   prop.setState(pcf::IndiProperty::Idle);
+   prop.add(pcf::IndiElement("current"));
+   prop.add(pcf::IndiElement("target"));
+   
+   return 0;
+}
+
+template<bool _useINDI>
+int MagAOXApp<_useINDI>::createStandardIndiToggle( pcf::IndiProperty & prop,
+                                                   const std::string & name
+                                                 )
+{
+   prop = pcf::IndiProperty(pcf::IndiProperty::Switch);
+   prop.setDevice(configName());
+   prop.setName(name);
+   prop.setPerm(pcf::IndiProperty::ReadWrite); 
+   prop.setState(pcf::IndiProperty::Idle);
+   prop.setRule(pcf::IndiProperty::AtMostOne);
+   
+   //Add the toggle element initialized to Off
+   prop.add(pcf::IndiElement("toggle", pcf::IndiElement::Off));
+   
+   return 0;
+}
+
+template<bool _useINDI>
 int MagAOXApp<_useINDI>::registerIndiPropertyReadOnly( pcf::IndiProperty & prop )
 {
    if(!m_useINDI) return 0;
@@ -1771,6 +1858,27 @@ int MagAOXApp<_useINDI>::registerIndiPropertyNew( pcf::IndiProperty & prop,
    prop.setPerm(propPerm);
    prop.setState( propState);
 
+   return registerIndiPropertyNew(prop, callBack);
+}
+
+template<bool _useINDI>
+int MagAOXApp<_useINDI>::registerIndiPropertyNew( pcf::IndiProperty & prop,
+                                                  const std::string & propName,
+                                                  const pcf::IndiProperty::Type & propType,
+                                                  const pcf::IndiProperty::PropertyPermType & propPerm,
+                                                  const pcf::IndiProperty::PropertyStateType & propState,
+                                                  const pcf::IndiProperty::SwitchRuleType & propRule,
+                                                  int (*callBack)( void *, const pcf::IndiProperty &ipRecv)
+                                                )
+{
+   if(!m_useINDI) return 0;
+
+   prop = pcf::IndiProperty (propType);
+   prop.setDevice(m_configName);
+   prop.setName(propName);
+   prop.setPerm(propPerm);
+   prop.setState( propState);
+   prop.setRule( propRule);
    return registerIndiPropertyNew(prop, callBack);
 }
 
@@ -2062,15 +2170,6 @@ void MagAOXApp<_useINDI>::updateIfChanged( pcf::IndiProperty & p,
    if(!m_indiDriver) return;
 
    indi::updateIfChanged( p, el, newVal, m_indiDriver, ipState);
-
-//    T oldVal = p[el].get<T>();
-//
-//    if(oldVal != newVal)
-//    {
-//       p[el].set(newVal);
-//       p.setState (pcf::IndiProperty::Ok);
-//       m_indiDriver->sendSetProperty (p);
-//    }
 }
 
 template<bool _useINDI>
@@ -2085,21 +2184,11 @@ void MagAOXApp<_useINDI>::updateIfChanged( pcf::IndiProperty & p,
 
    if(!m_indiDriver) return;
 
-   for (size_t index = 0; index < newVals.size(); ++index) {
+   for (size_t index = 0; index < newVals.size(); ++index) 
+   {
       std::string descriptor = el+std::to_string(index);
       indi::updateIfChanged( p, descriptor, newVals.at(index), m_indiDriver, ipState);
    }
-
-   
-
-//    T oldVal = p[el].get<T>();
-//
-//    if(oldVal != newVal)
-//    {
-//       p[el].set(newVal);
-//       p.setState (pcf::IndiProperty::Ok);
-//       m_indiDriver->sendSetProperty (p);
-//    }
 }
 
 template<bool _useINDI>
@@ -2113,22 +2202,60 @@ void MagAOXApp<_useINDI>::updateIfChanged( pcf::IndiProperty & p,
 
    if(!m_indiDriver) return;
 
-   for (size_t index = 0; index < newVals.size(); ++index) {
+   for (size_t index = 0; index < newVals.size(); ++index) 
+   {
       std::string descriptor = el.at(index);
       indi::updateIfChanged( p, descriptor, newVals.at(index), m_indiDriver);
    }
-
-   
-
-//    T oldVal = p[el].get<T>();
-//
-//    if(oldVal != newVal)
-//    {
-//       p[el].set(newVal);
-//       p.setState (pcf::IndiProperty::Ok);
-//       m_indiDriver->sendSetProperty (p);
-//    }
 }
+
+
+template<bool _useINDI>
+template<typename T>
+int MagAOXApp<_useINDI>::indiTargetUpdate( pcf::IndiProperty & localProperty,
+                                           T & localTarget,
+                                           const pcf::IndiProperty & remoteProperty,
+                                           bool setBusy
+                                         )
+{
+   if( remoteProperty.getName() != localProperty.getName())
+   {
+      return log<text_log,-1>("INDI property names do not match", logPrio::LOG_ERROR);
+   }
+   
+   if( ! (localProperty.find("target") || localProperty.find("current") ) )
+   {
+      return log<text_log,-1>("not target or current element in INDI property", logPrio::LOG_ERROR);
+   }
+   
+   if( !localProperty.find("target")  )
+   {
+      localTarget = remoteProperty["current"].get<T>();
+   }
+   else
+   {
+      localTarget = remoteProperty["target"].get<T>();
+   }
+
+   if(setBusy)
+   {
+      updateIfChanged(localProperty, "target", localTarget, INDI_BUSY);
+   }
+   else
+   {
+      updateIfChanged(localProperty, "target", localTarget);
+   }
+   
+   return 0;
+}
+
+
+
+
+
+
+
+
 
 /// \todo move propType to an INDI utils file, and document.
 
