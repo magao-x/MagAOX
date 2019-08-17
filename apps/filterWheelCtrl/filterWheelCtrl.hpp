@@ -242,17 +242,15 @@ protected:
      * 
      */
    int moveTo( const double & filters,          ///< [in] The new position in absolute filters.  Only valid if not -1.
-               const double & filters_relative, ///< [in] The new position in relative filters.  Only valid if not 0.
-               const double & counts,           ///< [in] The new position in absolute counts.  Only valid if not -1.
-               const double & counts_relative   ///< [in] The new position in relative counts.  Only valid if not 0.
+               const double & counts           ///< [in] The new position in absolute counts.  Only valid if not -1.
              );
    
-   /// Move to a new filter by name.
-   /**
-     * \returns 0 on success.
-     * \returns -1 on error.
-     */
-   int moveTo( const std::string & name /**< [in] The name of the filter to move to*/);
+//    /// Move to a new filter by name.
+//    /**
+//      * \returns 0 on success.
+//      * \returns -1 on error.
+//      */
+//    int moveTo( const std::string & name /**< [in] The name of the filter to move to*/);
    
 };
 
@@ -323,29 +321,21 @@ int filterWheelCtrl::appStartup()
    REG_INDI_NEWPROP(m_indiP_counts, "counts", pcf::IndiProperty::Number);
    m_indiP_counts.add (pcf::IndiElement("current"));
    m_indiP_counts.add (pcf::IndiElement("target"));
-   m_indiP_counts.add (pcf::IndiElement("target_rel"));
-   m_indiP_counts["current"].set(-1);
-   m_indiP_counts["target"].set(-1);
-   m_indiP_counts["target_rel"].set(0);
    
    REG_INDI_NEWPROP(m_indiP_filters, "filters", pcf::IndiProperty::Number);
    m_indiP_filters.add (pcf::IndiElement("current"));
    m_indiP_filters.add (pcf::IndiElement("target"));
-   m_indiP_filters.add (pcf::IndiElement("target_rel"));
-   m_indiP_filters["current"].set(-1);
-   m_indiP_filters["target"].set(-1);
-   m_indiP_filters["target_rel"].set(0);
    
    REG_INDI_NEWPROP(m_indiP_filterName, "filterName", pcf::IndiProperty::Number);
    m_indiP_filterName.add (pcf::IndiElement("current"));
    m_indiP_filterName.add (pcf::IndiElement("target"));
    
    
-   REG_INDI_NEWPROP(m_indiP_req_home, "req_home", pcf::IndiProperty::Number);
-   m_indiP_req_home.add (pcf::IndiElement("home"));
+   REG_INDI_NEWPROP(m_indiP_req_home, "home", pcf::IndiProperty::Number);
+   m_indiP_req_home.add (pcf::IndiElement("request"));
    
-   REG_INDI_NEWPROP(m_indiP_req_halt, "req_halt", pcf::IndiProperty::Number);
-   m_indiP_req_halt.add (pcf::IndiElement("halt"));
+   REG_INDI_NEWPROP(m_indiP_req_halt, "stop", pcf::IndiProperty::Number);
+   m_indiP_req_halt.add (pcf::IndiElement("request"));
    
    //Get the USB device if it's in udev
    if(m_deviceName == "") state(stateCodes::NODEVICE);
@@ -530,7 +520,10 @@ int filterWheelCtrl::appLogic()
       }
       else
       {
-         if(state() == stateCodes::OPERATING) state(stateCodes::READY); //stopped moving but was just changing pos
+         if(state() == stateCodes::OPERATING) 
+         {
+            state(stateCodes::READY); //stopped moving but was just changing pos
+         }
          else if (state() == stateCodes::HOMING) //stopped moving but was in the homing sequence
          {
             if(m_homingState == 1)
@@ -612,7 +605,6 @@ INDI_NEWCALLBACK_DEFN(filterWheelCtrl, m_indiP_counts)(const pcf::IndiProperty &
       std::cerr << "counts\n";
       double counts = -1;
       double target_abs = -1;
-      double target_rel = 0;
       
       if(ipRecv.find("current"))
       {
@@ -626,17 +618,11 @@ INDI_NEWCALLBACK_DEFN(filterWheelCtrl, m_indiP_counts)(const pcf::IndiProperty &
 
       if(target_abs == -1) target_abs = counts;
       
-      if(ipRecv.find("target_rel"))
-      {
-         target_rel = ipRecv["target_rel"].get<double>();
-      }
-      
       std::lock_guard<std::mutex> guard(m_indiMutex);
       
-      updateIfChanged(m_indiP_counts, "target", target_abs);
-      updateIfChanged(m_indiP_counts, "target_rel", target_rel);
+     
       
-      return moveTo( -1, 0, target_abs, target_rel );
+      return moveTo( -1, target_abs);
    }
    return -1;
 }
@@ -647,7 +633,6 @@ INDI_NEWCALLBACK_DEFN(filterWheelCtrl, m_indiP_filters)(const pcf::IndiProperty 
    {
       double filters = -1;
       double target_abs = -1;
-      double target_rel = 0;
       
       if(ipRecv.find("current"))
       {
@@ -661,17 +646,12 @@ INDI_NEWCALLBACK_DEFN(filterWheelCtrl, m_indiP_filters)(const pcf::IndiProperty 
 
       if(target_abs == -1) target_abs = filters;
       
-      if(ipRecv.find("target_rel"))
-      {
-         target_rel = ipRecv["target_rel"].get<double>();
-      }
       
       std::lock_guard<std::mutex> guard(m_indiMutex);
       
-      updateIfChanged(m_indiP_filters, "target", target_abs);
-      updateIfChanged(m_indiP_filters, "target_rel", target_rel);
+      updateIfChanged(m_indiP_filters, "target", target_abs, pcf::IndiProperty::Busy);
       
-      return moveTo( target_abs, target_rel, -1, 0 );
+      return moveTo( target_abs, -1 );
    }
    return -1;
 }
@@ -705,7 +685,7 @@ INDI_NEWCALLBACK_DEFN(filterWheelCtrl, m_indiP_filterName)(const pcf::IndiProper
       
       std::lock_guard<std::mutex> guard(m_indiMutex);
       
-      updateIfChanged(m_indiP_filterName, "target", target);
+      updateIfChanged(m_indiP_filterName, "target", target, pcf::IndiProperty::Busy);
       
       return moveTo(n+1);
       
@@ -890,7 +870,8 @@ int filterWheelCtrl::moveToRaw( const long & counts )
    rv = tty::ttyWrite( "M\r", m_fileDescrip, m_writeTimeOut);
    if(rv < 0) return log<software_error,-1>({__FILE__,__LINE__,rv, tty::ttyErrorString(rv)});
    
-   
+   updateIfChanged(m_indiP_counts, "target", counts, pcf::IndiProperty::Busy);
+    
    return 0;
 }
 
@@ -926,21 +907,8 @@ int filterWheelCtrl::moveTo( const double & filters )
 
 }
 
-int filterWheelCtrl::moveToRelative( const double & filters_relative )
-{
-   long counts_relative;
-   
-   if(m_circleSteps ==0 || m_filterNames.size() == 0) counts_relative = filters_relative;
-   else counts_relative = m_circleSteps/m_filterNames.size() * filters_relative;
-   
-   return moveToRawRelative(counts_relative);
- 
-}
-
 int filterWheelCtrl::moveTo( const double & filters,
-                             const double & filters_relative,
-                             const double & counts,
-                             const double & counts_relative
+                             const double & counts
                            )
 {
    if( filters != -1 )
@@ -951,16 +919,6 @@ int filterWheelCtrl::moveTo( const double & filters,
    if( counts != -1 )
    {
       return moveToRaw( counts );
-   }
-   
-   if( filters_relative != 0)
-   {
-      return moveToRelative( filters_relative );
-   }
-   
-   if( counts_relative != 0)
-   {
-      return moveToRawRelative( counts_relative );
    }
    
    return 0;
