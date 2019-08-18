@@ -22,7 +22,7 @@ namespace app
 namespace indi 
 {
 
-#define INDI_IDLE (pcf::IndiProperty::Ok)   
+#define INDI_IDLE (pcf::IndiProperty::Idle)   
 #define INDI_OK (pcf::IndiProperty::Ok)
 #define INDI_BUSY (pcf::IndiProperty::Busy)
 #define INDI_ALERT (pcf::IndiProperty::Alert)

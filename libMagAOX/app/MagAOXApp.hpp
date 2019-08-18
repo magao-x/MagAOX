@@ -520,38 +520,57 @@ protected:
 
 public:
    
-   /// Create a standard INDI property with target and current elements.
+   /// Create a standard R/W INDI Text property with target and current elements.
    /**
      * \returns 0 on success 
      * \returns -1 on error
      */ 
-   int createStandardIndiProp( pcf::IndiProperty & prop,
-                               pcf::IndiProperty::Type type,
-                               const std::string & name
+   int createStandardIndiText( pcf::IndiProperty & prop, ///< [out] the property to create and setup
+                               const std::string & name, ///< [in] the name of the property
+                               const std::string & label = "", ///< [in] [optional] the GUI label suggestion for this property
+                               const std::string & group = "" ///< [in] [optional] the group for this property
                              );
 
-   /// Create a standard INDI Number property with target and current elements.
+   /// Create a standard R/W INDI Number property with target and current elements.
    /**
      * \returns 0 on success 
      * \returns -1 on error
      */ 
    template<typename T>
-   int createStandardIndiNumber( pcf::IndiProperty & prop,
-                                 const std::string & name,
-                                 const T & min,
-                                 const T & max,
-                                 const T & step,
-                                 const std::string & format
-                                );
+   int createStandardIndiNumber( pcf::IndiProperty & prop, ///< [out] the property to create and setup
+                                 const std::string & name,  ///< [in] the name of the property
+                                 const T & min, ///< [in] the minimum value for the elements, applied to both target and current
+                                 const T & max, ///< [in] the minimum value for the elements, applied to both target and current
+                                 const T & step, ///< [in] the minimum value for the elements, applied to both target and current
+                                 const std::string & format,  ///< [in] the _ value for the elements, applied to both target and current.  Set to "" to use the MagAO-X standard for type.
+                                 const std::string & label = "", ///< [in] [optional] the GUI label suggestion for this property
+                                 const std::string & group = "" ///< [in] [optional] the group for this property
+                               );
 
-   /// Create a standard INDI property with target and current elements.
-   /**
+   /// Create a standard R/W INDI switch with a single request element.
+   /** This switch is intended to function like a momentary switch.
+     * 
      * \returns 0 on success 
      * \returns -1 on error
      */ 
-   int createStandardIndiToggle( pcf::IndiProperty & prop,
-                                 const std::string & name
-                               );
+   int createStandardIndiRequestSw( pcf::IndiProperty & prop, ///< [out] the property to create and setup
+                                    const std::string & name, ///< [in] the name of the property
+                                    const std::string & label = "", ///< [in] [optional] the GUI label suggestion for this property
+                                    const std::string & group = "" ///< [in] [optional] the group for this property
+                                  );
+   
+   /// Create a standard R/W INDI selection (one of many) switch with vector of elements
+   /** This switch is intended to function like drop down menu.
+     * 
+     * \returns 0 on success 
+     * \returns -1 on error
+     */ 
+   int createStandardIndiSelectionSw( pcf::IndiProperty & prop, ///< [out] the property to create and setup
+                                      const std::string & name, ///< [in] the name of the property,
+                                      const std::vector<std::string> & elements, ///< [in] the element names to give to the switches
+                                      const std::string & label = "", ///< [in] [optional] the GUI label suggestion for this property
+                                      const std::string & group = "" ///< [in] [optional] the group for this property
+                                    );
    
    /// Register an INDI property which is read only.
    /** This version requires the property be fully set up.
@@ -1732,9 +1751,18 @@ void MagAOXApp<_useINDI>::state(const stateCodes::stateCodeT & s)
    //Check to make sure INDI is up to date
    std::unique_lock<std::mutex> lock(m_indiMutex, std::try_to_lock);  //Lock the mutex before conducting INDI communications.
 
+   //Note this is called very execute loop to make sure we update eventually
    if(lock.owns_lock())
-   {  ///\todo well what do we do if we don't get the lock?  this should be updated elsewhere...
-      updateIfChanged(m_indiP_state, "state", stateCodes::codeText(m_state));
+   {  
+      ///\todo move this to a function in stateCodes
+      pcf::IndiProperty::PropertyStateType stst = INDI_IDLE;
+      if(m_state == stateCodes::READY) stst = INDI_OK;
+      if(m_state == stateCodes::OPERATING || m_state == stateCodes::HOMING || m_state == stateCodes::CONFIGURING) stst = INDI_BUSY;
+      if( m_state < stateCodes::NODEVICE ) stst = INDI_ALERT;
+      else if (m_state <= stateCodes::LOGGEDIN ) stst = INDI_IDLE;
+      else if (m_state == stateCodes::NOTHOMED || m_state == stateCodes::SHUTDOWN) stst = INDI_IDLE;
+      
+      updateIfChanged(m_indiP_state, "state", stateCodes::codeText(m_state), stst);
    }
 }
 
@@ -1758,18 +1786,30 @@ int MagAOXApp<_useINDI>::stateLogged()
 /*-------------------------------------------------------------------------------------*/
 
 template<bool _useINDI>
-int MagAOXApp<_useINDI>::createStandardIndiProp( pcf::IndiProperty & prop,
-                                                 pcf::IndiProperty::Type type,
-                                                 const std::string & name
+int MagAOXApp<_useINDI>::createStandardIndiText( pcf::IndiProperty & prop,
+                                                 const std::string & name,
+                                                 const std::string & label,
+                                                 const std::string & group
                                                 )
 {
-   prop = pcf::IndiProperty(type);
+   prop = pcf::IndiProperty(pcf::IndiProperty::Text);
    prop.setDevice(configName());
    prop.setName(name);
    prop.setPerm(pcf::IndiProperty::ReadWrite); 
    prop.setState(pcf::IndiProperty::Idle);
    prop.add(pcf::IndiElement("current"));
    prop.add(pcf::IndiElement("target"));
+   
+   //Don't set "" just in case libcommon does something with defaults
+   if(label != "")
+   {
+      prop.setLabel(label);
+   }
+   
+   if(group != "")
+   {
+      prop.setGroup(group);
+   }
    
    return 0;
 }
@@ -1781,7 +1821,9 @@ int MagAOXApp<_useINDI>::createStandardIndiNumber( pcf::IndiProperty & prop,
                                                    const T & min,
                                                    const T & max,
                                                    const T & step,
-                                                   const std::string & format
+                                                   const std::string & format,
+                                                   const std::string & label,
+                                                   const std::string & group
                                                  )
 {
    prop = pcf::IndiProperty(pcf::IndiProperty::Number);
@@ -1803,13 +1845,26 @@ int MagAOXApp<_useINDI>::createStandardIndiNumber( pcf::IndiProperty & prop,
    prop["target"].setStep(step);
    prop["target"].setFormat(format);
    
+   //Don't set "" just in case libcommon does something with defaults
+   if(label != "")
+   {
+      prop.setLabel(label);
+   }
+   
+   if(group != "")
+   {
+      prop.setGroup(group);
+   }
+   
    return 0;
 }
 
 template<bool _useINDI>
-int MagAOXApp<_useINDI>::createStandardIndiToggle( pcf::IndiProperty & prop,
-                                                   const std::string & name
-                                                 )
+int MagAOXApp<_useINDI>::createStandardIndiRequestSw( pcf::IndiProperty & prop,
+                                                      const std::string & name,
+                                                      const std::string & label,
+                                                      const std::string & group
+                                                    )
 {
    prop = pcf::IndiProperty(pcf::IndiProperty::Switch);
    prop.setDevice(configName());
@@ -1819,7 +1874,58 @@ int MagAOXApp<_useINDI>::createStandardIndiToggle( pcf::IndiProperty & prop,
    prop.setRule(pcf::IndiProperty::AtMostOne);
    
    //Add the toggle element initialized to Off
-   prop.add(pcf::IndiElement("toggle", pcf::IndiElement::Off));
+   prop.add(pcf::IndiElement("request", pcf::IndiElement::Off));
+   
+   //Don't set "" just in case libcommon does something with defaults
+   if(label != "")
+   {
+      prop.setLabel(label);
+   }
+   
+   if(group != "")
+   {
+      prop.setGroup(group);
+   }
+   
+   return 0;
+}
+
+template<bool _useINDI>
+int MagAOXApp<_useINDI>::createStandardIndiSelectionSw( pcf::IndiProperty & prop,
+                                                        const std::string & name,
+                                                        const std::vector<std::string> & elements,
+                                                        const std::string & label,
+                                                        const std::string & group
+                                                      )
+{
+   if(elements.size() == 0)
+   {
+      return log<software_error,-1>({__FILE__,__LINE__, "elements vector has zero size"});
+   }
+   
+   prop = pcf::IndiProperty(pcf::IndiProperty::Switch);
+   prop.setDevice(configName());
+   prop.setName(name);
+   prop.setPerm(pcf::IndiProperty::ReadWrite); 
+   prop.setState(pcf::IndiProperty::Idle);
+   prop.setRule(pcf::IndiProperty::OneOfMany);
+   
+   //Add the toggle element initialized to Off
+   for(size_t n=0; n < elements.size(); ++n)
+   {
+      prop.add(pcf::IndiElement(elements[n], pcf::IndiElement::Off));
+   }
+   
+   //Don't set "" just in case libcommon does something with defaults
+   if(label != "")
+   {
+      prop.setLabel(label);
+   }
+   
+   if(group != "")
+   {
+      prop.setGroup(group);
+   }
    
    return 0;
 }
@@ -2321,20 +2427,33 @@ int MagAOXApp<_useINDI>::indiTargetUpdate( pcf::IndiProperty & localProperty,
       return log<text_log,-1>("INDI property names do not match", logPrio::LOG_ERROR);
    }
    
-   if( ! (localProperty.find("target") || localProperty.find("current") ) )
+   if( ! (remoteProperty.find("target") || remoteProperty.find("current") ) )
    {
       return log<text_log,-1>("not target or current element in INDI property", logPrio::LOG_ERROR);
    }
+
+   bool set = false;
    
-   if( !localProperty.find("target")  )
-   {
-      localTarget = remoteProperty["current"].get<T>();
-   }
-   else
+   if( remoteProperty.find("target") )
    {
       localTarget = remoteProperty["target"].get<T>();
+      set = true;
    }
-
+   
+   if( !set )
+   {
+      if( remoteProperty.find("current") )
+      {
+         localTarget = remoteProperty["current"].get<T>();
+         set = true;
+      }
+   }
+   
+   if( !set )
+   {
+      return log<text_log,-1>("no non-empty value found in INDI property", logPrio::LOG_ERROR);
+   }
+   
    if(setBusy)
    {
       updateIfChanged(localProperty, "target", localTarget, INDI_BUSY);

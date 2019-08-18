@@ -12,8 +12,6 @@
 #include "../../libMagAOX/libMagAOX.hpp" //Note this is included on command line to trigger pch
 #include "../../magaox_git_version.h"
 
-#include "../../libMagAOX/app/dev/stdFilterWheel.hpp"
-
 /** \defgroup filterWheelCtrl Filter Wheel Control
   * \brief Control of MagAO-X MCBL-based f/w.
   *
@@ -249,6 +247,8 @@ protected:
 inline
 filterWheelCtrl::filterWheelCtrl() : MagAOXApp(MAGAOX_CURRENT_SHA1, MAGAOX_REPO_MODIFIED)
 {
+   m_powerMgtEnabled = true;
+   
    return;
 }
 
@@ -305,20 +305,13 @@ int filterWheelCtrl::appStartup()
    }
 
    // set up the  INDI properties
-   derived().createStandardIndiNumber( m_indiP_counts, "counts", std::numeric_limits<long>::lowest(), std::numeric_limits<long>::max(), 0.0, "%ld");
-   registerIndiPropertyNew( m_indiP_filter, INDI_NEWCALLBACK(m_indiP_counts)) ;
+   createStandardIndiNumber<long>( m_indiP_counts, "counts", std::numeric_limits<long>::lowest(), std::numeric_limits<long>::max(), 0.0, "%ld");
+   registerIndiPropertyNew( m_indiP_counts, INDI_NEWCALLBACK(m_indiP_counts)) ;
 
    
    dev::stdFilterWheel<filterWheelCtrl>::appStartup();
    
-   if(m_deviceName == "") state(stateCodes::NODEVICE);
-   else
-   {
-      state(stateCodes::NOTCONNECTED);
-      std::stringstream logs;
-      logs << "USB Device " << m_idVendor << ":" << m_idProduct << ":" << m_serial << " found in udev as " << m_deviceName;
-      log<text_log>(logs.str());
-   }
+   
 
    
    return 0;
@@ -333,6 +326,18 @@ int filterWheelCtrl::appLogic()
       return -1;
    }
 
+   if( state() == stateCodes::POWERON )
+   {
+      if(m_deviceName == "") state(stateCodes::NODEVICE);
+      else
+      {
+         state(stateCodes::NOTCONNECTED);
+         std::stringstream logs;
+         logs << "USB Device " << m_idVendor << ":" << m_idProduct << ":" << m_serial << " found in udev as " << m_deviceName;
+         log<text_log>(logs.str());
+      }
+   }
+   
    if( state() == stateCodes::NODEVICE )
    {
       int rv = tty::usbDevice::getDeviceName();
@@ -400,6 +405,10 @@ int filterWheelCtrl::appLogic()
          }
 
          //if connect failed, and there is a device, then we have some other problem.
+         sleep(1); //wait to see if power state updates 
+         if(m_powerState == 0) return 0;
+         
+         //Ok we can't figure this out, die.
          state(stateCodes::FAILURE);
          if(!stateLogged()) log<software_error>({__FILE__,__LINE__,rv, tty::ttyErrorString(rv)});
          return -1;
@@ -503,6 +512,9 @@ int filterWheelCtrl::appLogic()
                std::lock_guard<std::mutex> guard(m_indiMutex);
                if(moveToRawRelative(-50000) < 0)
                {
+                  sleep(1);
+                  if(m_powerState == 0) return 0;
+                  
                   state(stateCodes::ERROR);
                   return log<software_error,0>({__FILE__,__LINE__});
                }
@@ -514,6 +526,9 @@ int filterWheelCtrl::appLogic()
                std::lock_guard<std::mutex> guard(m_indiMutex);
                if(home()<0)
                {
+                  sleep(1);
+                  if(m_powerState == 0) return 0;
+                  
                   state(stateCodes::ERROR);
                   return log<software_error,0>({__FILE__,__LINE__});
                }
@@ -524,6 +539,9 @@ int filterWheelCtrl::appLogic()
                std::lock_guard<std::mutex> guard(m_indiMutex);
                if(moveToRaw(m_homeOffset)<0)
                {
+                  sleep(1);
+                  if(m_powerState == 0) return 0;
+                  
                   state(stateCodes::ERROR);
                   return log<software_error,0>({__FILE__,__LINE__});
                }
@@ -560,6 +578,9 @@ int filterWheelCtrl::appLogic()
 
    if(state() == stateCodes::ERROR)
    {
+      sleep(1);
+      if(m_powerState == 0) return 0;
+                  
       return log<software_error,-1>({__FILE__,__LINE__, "In state ERROR but no recovery implemented.  Terminating."});
    }
 
@@ -580,7 +601,8 @@ INDI_NEWCALLBACK_DEFN(filterWheelCtrl, m_indiP_counts)(const pcf::IndiProperty &
 {
    if (ipRecv.getName() == m_indiP_counts.getName())
    {
-      std::cerr << "counts\n";
+      
+      
       double counts = -1;
       double target_abs = -1;
 
@@ -596,109 +618,15 @@ INDI_NEWCALLBACK_DEFN(filterWheelCtrl, m_indiP_counts)(const pcf::IndiProperty &
 
       if(target_abs == -1) target_abs = counts;
       
+      
       std::lock_guard<std::mutex> guard(m_indiMutex);
-      
-     
-      
-      return moveTo( -1, target_abs);
+      return moveToRaw(target_abs);
    }
    return -1;
 }
 
-// INDI_NEWCALLBACK_DEFN(filterWheelCtrl, m_indiP_filters)(const pcf::IndiProperty &ipRecv)
-// {
-//    if (ipRecv.getName() == m_indiP_filters.getName())
-//    {
-//       double filters = -1;
-//       double target_abs = -1;
-//       
-//       if(ipRecv.find("current"))
-//       {
-//          filters = ipRecv["current"].get<double>();
-//       }
-// 
-//       if(ipRecv.find("target"))
-//       {
-//          target_abs = ipRecv["target"].get<double>();
-//       }
-// 
-//       if(target_abs == -1) target_abs = filters;
-//       
-//       std::lock_guard<std::mutex> guard(m_indiMutex);
-//       
-//       updateIfChanged(m_indiP_filters, "target", target_abs, pcf::IndiProperty::Busy);
-//       
-//       return moveTo( target_abs, -1 );
-// 
-//    }
-//    return -1;
-// }
 
-// INDI_NEWCALLBACK_DEFN(filterWheelCtrl, m_indiP_filterName)(const pcf::IndiProperty &ipRecv)
-// {
-//    if (ipRecv.getName() == m_indiP_filterName.getName())
-//    {
-//       std::string name;
-//       std::string target;
-// 
-//       if(ipRecv.find("current"))
-//       {
-//          name = ipRecv["current"].get();
-//       }
-// 
-//       if(ipRecv.find("target"))
-//       {
-//          target = ipRecv["target"].get();
-//       }
-// 
-//       if(target == "") target = name;
-// 
-// 
-//       if(target == "") return 0;
-// 
-//       size_t n;
-//       for(n=0; n< m_filterNames.size(); ++n) if( m_filterNames[n] == target ) break;
-// 
-//       if(n >= m_filterNames.size()) return -1;
-// 
-//       std::lock_guard<std::mutex> guard(m_indiMutex);
-//       
-//       updateIfChanged(m_indiP_filterName, "target", target, pcf::IndiProperty::Busy);
-//       
-//       return moveTo(n+1);
-// 
-//    }
-//    return -1;
-// }
 
-// INDI_NEWCALLBACK_DEFN(filterWheelCtrl, m_indiP_req_home)(const pcf::IndiProperty &ipRecv)
-// {
-//    if (ipRecv.getName() == m_indiP_req_home.getName())
-//    {
-// 
-//       if(state() == stateCodes::HOMING) return 0; //Don't restart while homing already.
-// 
-//       std::lock_guard<std::mutex> guard(m_indiMutex);
-// 
-//       m_homingState = 1;
-//       return home();
-//    }
-//    return -1;
-// }
-
-// INDI_NEWCALLBACK_DEFN(filterWheelCtrl, m_indiP_req_halt)(const pcf::IndiProperty &ipRecv)
-// {
-//    if (ipRecv.getName() == m_indiP_req_halt.getName())
-//    {
-//       halt(); //Try immediately without locking
-// 
-//       //Now lock to make sure we get uninterrupted attention
-//       std::lock_guard<std::mutex> guard(m_indiMutex);
-// 
-//       return halt();
-//    }
-//    return -1;
-// }
 
 int filterWheelCtrl::onPowerOnConnect()
 {
@@ -794,7 +722,7 @@ int filterWheelCtrl::getPos()
 int filterWheelCtrl::startHoming()
 {
    m_homingState = 1;
-   updateSwitchIfChanged(m_indiP_home, "toggle", pcf::IndiElement::Off, INDI_IDLE);
+   updateSwitchIfChanged(m_indiP_home, "request", pcf::IndiElement::Off, INDI_IDLE);
    return home();
 }
 
@@ -835,8 +763,14 @@ int filterWheelCtrl::home()
 int filterWheelCtrl::stop()
 {
    m_homingState = 0;
+   //First try without locking
+   tty::ttyWrite( "DI\r", m_fileDescrip, m_writeTimeOut);
+
+   //Now make sure it goes through
+   std::lock_guard<std::mutex> guard(m_indiMutex);
    int rv = tty::ttyWrite( "DI\r", m_fileDescrip, m_writeTimeOut);
-   updateSwitchIfChanged(m_indiP_stop, "toggle", pcf::IndiElement::Off, INDI_IDLE);
+
+   updateSwitchIfChanged(m_indiP_stop, "request", pcf::IndiElement::Off, INDI_IDLE);
    
    if(rv < 0) return log<software_error,-1>({__FILE__,__LINE__,rv, tty::ttyErrorString(rv)});
 
