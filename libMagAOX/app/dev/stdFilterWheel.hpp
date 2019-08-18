@@ -23,10 +23,16 @@ namespace dev
   * 
   * The required interface to be implemented in derivedT is
   * \code
+   
+    int stop(); //Note that the INDI mutex will not be locked on this call 
+    
+    int startHoming(); //INDI mutex will be locked on this call.
+    
+    int moveTo(double); //INDI mutex will be locked on this call.
     \endcode 
   *
-  * 
-  * 
+  * In addition the derived class is responsible for setting m_moving and m_filter. m_filter_target should also be set if the wheel
+  * is moved via a low-level position command.
   * 
   * The derived class `derivedT` must be a MagAOXApp\<true\>, and should declare this class a friend like so: 
    \code
@@ -391,9 +397,7 @@ int stdFilterWheel<derivedT>::newCallBack_filterName( const pcf::IndiProperty &i
    {
       while( n > (long) m_filterNames.size()-1 ) n -= m_filterNames.size();
    }
-   
-   std::string currName = m_filterNames[n];
-   
+      
    std::string newName = "";
    int newn = -1;
    

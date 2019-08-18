@@ -30,10 +30,9 @@ namespace MagAOX
 namespace app
 {
 
-/** MagAO-X application to control a filter wheel.
+/** MagAO-X application to control a Faulhaber MCBL controlled filter wheel.
   *
   * \todo add temperature monitoring
-  * \todo add power monitoring
   * \todo add INDI props to md doc
   * \todo should move in least time direction, rather than always in the same direction.
   * \todo add tests
@@ -552,7 +551,6 @@ int filterWheelCtrl::appLogic()
                m_homingState = 0;
                state(stateCodes::READY);
                
-               ///\todo document that this is a required step at conclusion of homing for stdFilterWheel interface
                m_filter_target = ((double) m_rawPos-m_homeOffset)/m_circleSteps*m_filterNames.size() + 1.0;
             }
          }
@@ -619,6 +617,8 @@ INDI_NEWCALLBACK_DEFN(filterWheelCtrl, m_indiP_counts)(const pcf::IndiProperty &
       if(target_abs == -1) target_abs = counts;
       
       
+      m_filter_target = ((double) target_abs - m_homeOffset)/m_circleSteps*m_filterNames.size() + 1.0;
+
       std::lock_guard<std::mutex> guard(m_indiMutex);
       return moveToRaw(target_abs);
    }
