@@ -5,6 +5,34 @@
 #include "cursesTableGrid.hpp"
 
 
+///Simple utility to get the display string of a property
+/**
+  * \returns the properly formatted element value
+  * \returns empty string on error
+  */ 
+std::string displayProperty( pcf::IndiProperty & ip /**< [in] the INDI property */ )
+{
+   std::string str = ip.getName();
+   str += " [";
+   
+   std::string tstr = "n";
+   if(ip.getType() == pcf::IndiProperty::Text) tstr = "t";
+   if(ip.getType() == pcf::IndiProperty::Switch) tstr = "s";
+   if(ip.getType() == pcf::IndiProperty::Light) tstr = "l";
+   
+   str += tstr;
+   
+   str += "]";
+   
+   
+   if(ip.getState() == pcf::IndiProperty::Idle) str += "~";
+   if(ip.getState() == pcf::IndiProperty::Ok) str += "-";
+   if(ip.getState() == pcf::IndiProperty::Busy) str += "*";
+   if(ip.getState() == pcf::IndiProperty::Alert) str += "!";
+   
+   return str;
+}
+
 ///Simple utility to get the display value of an element
 /**
   * \returns the properly formatted element value
@@ -18,6 +46,8 @@ std::string displayValue( pcf::IndiProperty & ip, ///< [in] the INDI property
    
    if(ip.getType() == pcf::IndiProperty::Switch)
    {
+      if( ip[el].getSwitchState() == pcf::IndiElement::Off ) return "|O|";
+      if( ip[el].getSwitchState() == pcf::IndiElement::On ) return "|X|";
       return pcf::IndiElement::getSwitchStateString(ip[el].getSwitchState());
    }
    else
@@ -388,7 +418,8 @@ void cursesINDI::redrawTable()
       
       s[0] = std::to_string(m_cellContents.size()+1);
       s[1] = knownProps[es->second.propKey].getDevice();
-      s[2] = knownProps[es->second.propKey].getName();
+      s[2] = displayProperty( knownProps[es->second.propKey] );
+      
       s[3] = es->second.name;
       
       s[4] = displayValue( knownProps[es->second.propKey], es->second.name);
@@ -428,6 +459,23 @@ void cursesINDI::updateTable()
    for(auto it = knownElements.begin(); it != knownElements.end(); ++it)
    {
       if(it->second.tableRow == -1) continue;
+      
+      if(m_cellContents[it->second.tableRow][2] != displayProperty(knownProps[it->second.propKey]) )
+      {
+         m_cellContents[it->second.tableRow][2] = displayProperty(knownProps[it->second.propKey]) ;
+         
+         if(it->second.tableRow - m_startRow < (size_t) tabHeight()) //It's currently displayed
+         {
+            cursStat(0);
+            wclear(m_gridWin[it->second.tableRow - m_startRow][2]);
+            if(hasContent(it->second.tableRow,2)) wprintw(m_gridWin[it->second.tableRow - m_startRow][2], m_cellContents[it->second.tableRow][2].c_str());
+            wrefresh(m_gridWin[it->second.tableRow - m_startRow][2]);
+            wmove(w_interactWin,cy,cx);
+            cursStat(cs);
+            wrefresh(w_interactWin);
+         }
+      }
+      
       if(m_cellContents[it->second.tableRow][4] != displayValue(knownProps[it->second.propKey], it->second.name)) //.getValue())
       {
          m_cellContents[it->second.tableRow][4] = displayValue(knownProps[it->second.propKey], it->second.name); //knownProps[it->second.propKey][it->second.name].getValue();
@@ -489,13 +537,16 @@ void cursesINDI::keyPressed( int ch )
          
          if(it == knownElements.end()) break;
 
+         //Can't edit a switch
+         if( knownProps[it->second.propKey].getType() != pcf::IndiProperty::Text && knownProps[it->second.propKey].getType() != pcf::IndiProperty::Number) break;
+         
          cursStat(1);
 
          //mutex scope
          {
             std::lock_guard<std::mutex> lock(m_drawMutex);
             wclear(w_interactWin);
-            wprintw(w_interactWin, "set: %s.%s=", it->second.propKey.c_str(), it->second.name.c_str());
+            wprintw(w_interactWin, "set %s.%s=", it->second.propKey.c_str(), it->second.name.c_str());
             wrefresh(w_interactWin);
          }
 
@@ -551,7 +602,7 @@ void cursesINDI::keyPressed( int ch )
          {
             std::lock_guard<std::mutex> lock(m_drawMutex);
             wclear(w_interactWin);
-            wprintw(w_interactWin, "send: %s.%s=%s? y/n [n]", it->second.propKey.c_str(), it->second.name.c_str(), newStr.c_str());
+            wprintw(w_interactWin, "send %s.%s=%s? y/n [n]", it->second.propKey.c_str(), it->second.name.c_str(), newStr.c_str());
             wrefresh(w_interactWin);
          }
 
@@ -593,6 +644,8 @@ void cursesINDI::keyPressed( int ch )
          if(it == knownElements.end()) break;
 
          if( !knownProps[it->second.propKey].find(it->second.name)) break; //Just a check.
+         
+         if( knownProps[it->second.propKey].getType() != pcf::IndiProperty::Switch) break;
          
          std::string toggleString;
          pcf::IndiElement::SwitchStateType toggleState;
@@ -642,7 +695,67 @@ void cursesINDI::keyPressed( int ch )
          }
 
          break;
-      } //case 'e'
+      } //case 't'
+      case 'p':
+      {
+         if(m_currY + m_startRow >= knownElements.size()) break;
+         auto it = knownElements.begin();
+         while(it != knownElements.end())
+         {
+            if( (size_t) it->second.tableRow == m_currY+m_startRow) break;
+            ++it;
+         }
+         
+         if(it == knownElements.end()) break;
+
+         if( !knownProps[it->second.propKey].find(it->second.name)) break; //Just a check.
+                  
+         if( knownProps[it->second.propKey].getType() != pcf::IndiProperty::Switch) break;
+         cursStat(1);
+
+         //mutex scope
+         {
+            std::lock_guard<std::mutex> lock(m_drawMutex);
+            wclear(w_interactWin);
+            wprintw(w_interactWin, "press switch %s.%s?", it->second.propKey.c_str(), it->second.name.c_str());
+            wrefresh(w_interactWin);
+         }
+
+         int nch = 0;
+         while( (nch = wgetch(w_interactWin)) == ERR)
+         {
+         }
+
+         if(nch == 'y')
+         {
+            pcf::IndiProperty ipSend(knownProps[it->second.propKey].getType());
+
+            ipSend.setDevice(knownProps[it->second.propKey].getDevice());
+            ipSend.setName(knownProps[it->second.propKey].getName());
+            
+            //Must add all elements
+            for(auto elit = knownProps[it->second.propKey].getElements().begin(); elit != knownProps[it->second.propKey].getElements().end(); ++elit)
+            {
+               ipSend.add(elit->second);
+               if( knownProps[it->second.propKey].getRule() != pcf::IndiProperty::AnyOfMany)
+               {
+                  ipSend[elit->first].setSwitchState(pcf::IndiElement::Off);
+               }
+            }
+            
+            ipSend[it->second.name].setSwitchState(pcf::IndiElement::On);
+            sendNewProperty(ipSend);
+         }
+
+         //mutex scope
+         {
+            std::lock_guard<std::mutex> lock(m_drawMutex);
+            wclear(w_interactWin);
+            wrefresh(w_interactWin);
+         }
+
+         break;
+      } //case 'p'
       default:
          return;//break;
    }

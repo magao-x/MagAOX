@@ -91,7 +91,7 @@ retry:
 
 
    topWin = newwin(1, COLS, 0, 0);
-   wprintw(topWin, "(e)dit a property, (t)oggle a switch, (q)uit");
+   wprintw(topWin, "(e)dit a property, (p)ress a switch, (t)oggle a switch, (q)uit");
    keypad(topWin, TRUE);
    wrefresh(topWin);
 
