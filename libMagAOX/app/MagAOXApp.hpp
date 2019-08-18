@@ -671,10 +671,11 @@ protected:
 
    /// Update an INDI property element value if it has changed.
    /** Will only peform a SetProperty if the new element value has changed
-     * compared to the stored value.  This comparison is done in the true
+     * compared to the stored value, or if the property state has changed.  
+     * 
+     * This comparison is done in the true
      * type of the value.
      * 
-     * \todo this needs a const char specialization
      */
    template<typename T>
    void updateIfChanged( pcf::IndiProperty & p, ///< [in/out] The property containing the element to possibly update
@@ -683,6 +684,34 @@ protected:
                          pcf::IndiProperty::PropertyStateType ipState = pcf::IndiProperty::Ok
                       );
 
+   /// Update an INDI property element value if it has changed.
+   /** Will only peform a SetProperty if the new element value has changed
+     * compared to the stored value, or if the property state has changed.  
+     * 
+     * This comparison is done in the true
+     * type of the value.
+     * 
+     * This is a specialization for `const char *` to `std::string`.
+     * 
+     * \overload
+     */
+   void updateIfChanged( pcf::IndiProperty & p, ///< [in/out] The property containing the element to possibly update
+                         const std::string & el, ///< [in] The element name
+                         const char * newVal, ///< [in] the new value
+                         pcf::IndiProperty::PropertyStateType ipState = pcf::IndiProperty::Ok
+                      );
+   
+   /// Update an INDI switch element value if it has changed.
+   /** Will only peform a SetProperty if the new element switch state has changed, or the propery state
+     * has changed.
+     * 
+     */
+   void updateSwitchIfChanged( pcf::IndiProperty & p, ///< [in/out] The property containing the element to possibly update
+                               const std::string & el, ///< [in] The element name
+                               const pcf::IndiElement::SwitchStateType & newVal, ///< [in] the new value
+                               pcf::IndiProperty::PropertyStateType ipState = pcf::IndiProperty::Ok
+                             );
+   
    /** 
      * \overload void updateIfChanged(pcf::IndiProperty & p, const std::string & el, const std::vector<T> & newVal)
      * Takes in a vector of values, such that each element in the vector will have an element name of el+(index of value)
@@ -2170,6 +2199,30 @@ void MagAOXApp<_useINDI>::updateIfChanged( pcf::IndiProperty & p,
    if(!m_indiDriver) return;
 
    indi::updateIfChanged( p, el, newVal, m_indiDriver, ipState);
+}
+
+template<bool _useINDI>
+void MagAOXApp<_useINDI>::updateIfChanged( pcf::IndiProperty & p,
+                                           const std::string & el,
+                                           const char * newVal, 
+                                           pcf::IndiProperty::PropertyStateType ipState
+                                         )
+{
+   updateIfChanged<std::string>(p,el, std::string(newVal), ipState);
+}
+
+template<bool _useINDI>
+void MagAOXApp<_useINDI>::updateSwitchIfChanged( pcf::IndiProperty & p,
+                                                 const std::string & el,
+                                                 const pcf::IndiElement::SwitchStateType & newVal, 
+                                                 pcf::IndiProperty::PropertyStateType ipState
+                                               )
+{
+   if(!_useINDI) return;
+
+   if(!m_indiDriver) return;
+
+   indi::updateSwitchIfChanged( p, el, newVal, m_indiDriver, ipState);
 }
 
 template<bool _useINDI>

@@ -17,6 +17,8 @@
 
 #include "ioDevice.hpp"
 
+#include "stdCamera.hpp"
+
 namespace MagAOX
 {
 namespace app
@@ -24,70 +26,7 @@ namespace app
 namespace dev 
 {
    
-#define CAMCTRL_E_NOCONFIGS (-10)
    
-///\todo craete cameraConfig in libMagAOX -- plan is to have a higher level genericCamera to derive from, which will have this in it.
-struct cameraConfig 
-{
-   std::string m_configFile;
-   std::string m_serialCommand;
-   unsigned m_binning {0};
-   unsigned m_sizeX {0};
-   unsigned m_sizeY {0};
-   float m_maxFPS {0};
-};
-
-typedef std::unordered_map<std::string, cameraConfig> cameraConfigMap;
-
-inline
-int loadCameraConfig( cameraConfigMap & ccmap,
-                      mx::app::appConfigurator & config 
-                    )
-{
-   std::vector<std::string> sections;
-
-   config.unusedSections(sections);
-
-   if( sections.size() == 0 )
-   {
-      return CAMCTRL_E_NOCONFIGS;
-   }
-   
-   for(size_t i=0; i< sections.size(); ++i)
-   {
-      bool fileset = config.isSetUnused(mx::app::iniFile::makeKey(sections[i], "configFile" ));
-      /*bool binset = config.isSetUnused(mx::app::iniFile::makeKey(sections[i], "binning" ));
-      bool sizeXset = config.isSetUnused(mx::app::iniFile::makeKey(sections[i], "sizeX" ));
-      bool sizeYset = config.isSetUnused(mx::app::iniFile::makeKey(sections[i], "sizeY" ));
-      bool maxfpsset = config.isSetUnused(mx::app::iniFile::makeKey(sections[i], "maxFPS" ));
-      */
-      
-      //The configuration file tells us most things for EDT, so it's our current requirement. 
-      if( !fileset ) continue;
-      
-      std::string configFile;
-      config.configUnused(configFile, mx::app::iniFile::makeKey(sections[i], "configFile" ));
-      
-      std::string serialCommand;
-      config.configUnused(serialCommand, mx::app::iniFile::makeKey(sections[i], "serialCommand" ));
-      
-      unsigned binning = 0;
-      config.configUnused(binning, mx::app::iniFile::makeKey(sections[i], "binning" ));
-      
-      unsigned sizeX = 0;
-      config.configUnused(sizeX, mx::app::iniFile::makeKey(sections[i], "sizeX" ));
-      
-      unsigned sizeY = 0;
-      config.configUnused(sizeY, mx::app::iniFile::makeKey(sections[i], "sizeY" ));
-      
-      float maxFPS = 0;
-      config.configUnused(maxFPS, mx::app::iniFile::makeKey(sections[i], "maxFPS" ));
-      
-      ccmap[sections[i]] = cameraConfig({configFile, serialCommand, binning, sizeX, sizeY, maxFPS});
-   }
-   
-   return 0;
-}
 
 
 /// MagAO-X EDT framegrabber interface

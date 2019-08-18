@@ -15,6 +15,7 @@ INCLUDEDEPS= app/MagAOXApp.hpp \
              app/dev/outletController.hpp \
              app/dev/ioDevice.hpp \
              app/dev/frameGrabber.hpp \
+             app/dev/stdCamera.hpp \
              app/dev/edtCamera.hpp \
              app/dev/dssShutter.hpp \
              app/dev/shmimMonitor.hpp \

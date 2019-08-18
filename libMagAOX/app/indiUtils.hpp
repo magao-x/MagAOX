@@ -55,6 +55,35 @@ void updateIfChanged( pcf::IndiProperty & p,   ///< [in/out] The property contai
    }
 }
 
+/// Update the value of the INDI element, but only if it has changed.
+/** Only sends the set property message if the new value is different.
+  *
+  * \todo investigate how this handles floating point values and string conversions.
+  * \todo this needs a const char specialization to std::string
+  * 
+  */  
+template<class indiDriverT>
+void updateSwitchIfChanged( pcf::IndiProperty & p,   ///< [in/out] The property containing the element to possibly update
+                            const std::string & el,  ///< [in] The element name
+                            const pcf::IndiElement::SwitchStateType & newVal,        ///< [in] the new value
+                            indiDriverT * indiDriver, ///< [in] the MagAOX INDI driver to use
+                            pcf::IndiProperty::PropertyStateType newState = pcf::IndiProperty::Ok
+                          )
+{
+   if( !indiDriver ) return;
+   
+   pcf::IndiElement::SwitchStateType oldVal = p[el].getSwitchState();
+
+   pcf::IndiProperty::PropertyStateType oldState = p.getState();
+   
+   if(oldVal != newVal || oldState != newState)
+   {
+      p[el].setSwitchState(newVal);
+      p.setState (newState);
+      indiDriver->sendSetProperty (p);
+   }
+}
+
 } //namespace indi
 } //namespace app
 } //namespace MagAOX

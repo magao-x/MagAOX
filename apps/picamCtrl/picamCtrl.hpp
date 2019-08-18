@@ -45,7 +45,7 @@ namespace app
 
 
 /** \defgroup picamCtrl Princeton Instruments EMCCD Camera
-  * \brief Control of a Princeton Instruments OCAM2K EMCCD Camera.
+  * \brief Control of a Princeton Instruments EMCCD Camera.
   *
   * <a href="../handbook/apps/picamCtrl.html">Application Documentation</a>
   *
@@ -64,9 +64,10 @@ namespace app
   * \todo Config item for ImageStreamIO name filename
   * \todo implement ImageStreamIO circular buffer, with config setting
   */
-class picamCtrl : public MagAOXApp<>, public dev::frameGrabber<picamCtrl>, public dev::dssShutter<picamCtrl>
+class picamCtrl : public MagAOXApp<>, public dev::stdCamera<picamCtrl>, public dev::frameGrabber<picamCtrl>, public dev::dssShutter<picamCtrl>
 {
 
+   friend class dev::stdCamera<picamCtrl>;
    friend class dev::frameGrabber<picamCtrl>;
    friend class dev::dssShutter<picamCtrl>;
 
@@ -106,11 +107,6 @@ protected:
 
    std::string m_modeName;
    std::string m_nextMode;
-
-
-
-
-
 
    PicamHandle m_cameraHandle {0};
    PicamHandle m_modelHandle {0};
@@ -201,6 +197,9 @@ protected:
    int setFPS(piflt fps);
 
 
+   // stdCamera interface:
+   int setNextROI();
+   
    //Framegrabber interface:
    int configureAcquisition();
    int startAcquisition();
@@ -248,6 +247,8 @@ picamCtrl::picamCtrl() : MagAOXApp(MAGAOX_CURRENT_SHA1, MAGAOX_REPO_MODIFIED)
    m_acqBuff.memory_size = 0;
    m_acqBuff.memory = 0;
 
+   m_usesModes = false;
+   
    return;
 }
 
@@ -272,6 +273,7 @@ void picamCtrl::setupConfig()
    config.add("camera.powerOnWait", "", "camera.powerOnWait", argType::Required, "camera", "powerOnWait", false, "int", "Time after power-on to begin attempting connections [sec].  Default is 10 sec.");
    config.add("camera.startupTemp", "", "camera.startupTemp", argType::Required, "camera", "startupTemp", false, "float", "The temperature setpoint to set after a power-on [C].  Default is -55 C.");
 
+   dev::stdCamera<picamCtrl>::setupConfig(config);
    dev::frameGrabber<picamCtrl>::setupConfig(config);
    dev::dssShutter<picamCtrl>::setupConfig(config);
 }
@@ -284,6 +286,7 @@ void picamCtrl::loadConfig()
    config(m_powerOnWait, "camera.powerOnWait");
    config(m_startupTemp, "camera.startupTemp");
 
+   dev::stdCamera<picamCtrl>::loadConfig(config);
    dev::frameGrabber<picamCtrl>::loadConfig(config);
    dev::dssShutter<picamCtrl>::loadConfig(config);
 
@@ -329,6 +332,44 @@ int picamCtrl::appStartup()
    m_indiP_exptime.add (pcf::IndiElement("delta"));
    m_indiP_exptime["delta"].set(m_expTimeDelta);
 
+   if(dev::stdCamera<picamCtrl>::appStartup() < 0)
+   {
+      return log<software_critical,-1>({__FILE__,__LINE__});
+   }
+   ///\todo document this as stdCamera requirement.
+   
+   m_currentROI.x = 511.5;
+   m_currentROI.y = 511.5;
+   m_currentROI.w = 1024;
+   m_currentROI.h = 1024;
+   m_currentROI.bin_x = 1;
+   m_currentROI.bin_y = 1;
+   
+   m_nextROI.x = 511.5;
+   m_nextROI.y = 511.5;
+   m_nextROI.w = 1024;
+   m_nextROI.h = 1024;
+   m_nextROI.bin_x = 1;
+   m_nextROI.bin_y = 1;
+   
+   updateIfChanged(m_indiP_roi_x, "current", m_currentROI.x, INDI_IDLE);
+   updateIfChanged(m_indiP_roi_x, "target", m_nextROI.x, INDI_IDLE);
+   
+   updateIfChanged(m_indiP_roi_y, "current", m_currentROI.y, INDI_IDLE);
+   updateIfChanged(m_indiP_roi_y, "target", m_nextROI.y, INDI_IDLE);
+   
+   updateIfChanged(m_indiP_roi_w, "current", m_currentROI.w, INDI_IDLE);
+   updateIfChanged(m_indiP_roi_w, "target", m_nextROI.w, INDI_IDLE);
+   
+   updateIfChanged(m_indiP_roi_h, "current", m_currentROI.h, INDI_IDLE);
+   updateIfChanged(m_indiP_roi_h, "target", m_nextROI.h, INDI_IDLE);
+   
+   updateIfChanged(m_indiP_roi_bin_x, "current", m_currentROI.bin_x, INDI_IDLE);
+   updateIfChanged(m_indiP_roi_bin_x, "target", m_nextROI.bin_x, INDI_IDLE);
+   
+   updateIfChanged(m_indiP_roi_bin_y, "current", m_currentROI.bin_y, INDI_IDLE);
+   updateIfChanged(m_indiP_roi_bin_y, "target", m_nextROI.bin_y, INDI_IDLE);
+   
    if(dev::frameGrabber<picamCtrl>::appStartup() < 0)
    {
       return log<software_critical,-1>({__FILE__,__LINE__});
@@ -923,6 +964,27 @@ int picamCtrl::setFPS(piflt fps)
    return setExpTime(1.0/fps);
 }
 
+//Set ROI property to busy if accepted, set toggle to Off and Idlw either way.
+//Set ROI actual 
+//Update current values (including struct and indiP) and set to OK when done
+inline 
+int picamCtrl::setNextROI()
+{
+   std::cerr << "setNextROI:\n";
+   std::cerr << "  m_nextROI.x = " << m_nextROI.x << "\n";
+   std::cerr << "  m_nextROI.y = " << m_nextROI.y << "\n";
+   std::cerr << "  m_nextROI.w = " << m_nextROI.w << "\n";
+   std::cerr << "  m_nextROI.h = " << m_nextROI.h << "\n";
+   std::cerr << "  m_nextROI.bin_x = " << m_nextROI.bin_x << "\n";
+   std::cerr << "  m_nextROI.bin_y = " << m_nextROI.bin_y << "\n";
+   
+   m_reconfig = true;
+
+   updateSwitchIfChanged(m_indiP_roi_set, "toggle", pcf::IndiElement::Off, INDI_IDLE);
+   
+   return 0;
+   
+}
 
 inline
 int picamCtrl::configureAcquisition()
@@ -977,7 +1039,7 @@ int picamCtrl::configureAcquisition()
 
    //=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*
    //=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*
-   // Speed
+   // ADC Speed
    //=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*
    //=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*
 
@@ -999,6 +1061,35 @@ int picamCtrl::configureAcquisition()
    //=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*
    //=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*
 
+   std::cerr << "ROI: would set x=" << (m_nextROI.x - 0.5*( (float) m_nextROI.w - 1.0)) << "\n";
+   std::cerr << "               y=" << (m_nextROI.y - 0.5*( (float) m_nextROI.h - 1.0)) << "\n";
+   std::cerr << "               w=" << m_nextROI.w << "\n";
+   std::cerr << "               h=" << m_nextROI.h << "\n";
+   std::cerr << "           bin_x=" << m_nextROI.bin_x << "\n";
+   std::cerr << "           bin_y=" << m_nextROI.bin_y << "\n";
+   
+   PicamRois  nextrois;
+   PicamRoi nextroi;
+   
+   nextrois.roi_array = &nextroi;
+   nextrois.roi_count = 1;
+   
+   nextroi.x = (m_nextROI.x - 0.5*( (float) m_nextROI.w - 1.0));
+   nextroi.y = (m_nextROI.y - 0.5*( (float) m_nextROI.h - 1.0));
+   nextroi.width = m_nextROI.w;
+   nextroi.height = m_nextROI.h;
+   nextroi.x_binning = m_nextROI.bin_x;
+   nextroi.y_binning = m_nextROI.bin_y;
+   
+   PicamError error = Picam_SetParameterRoisValue( m_cameraHandle, PicamParameter_Rois, &nextrois);   
+   if( error != PicamError_None )
+   {
+      std::cerr << PicamEnum2String(PicamEnumeratedType_Error, error) << "\n";
+      log<software_error>({__FILE__, __LINE__, 0, error, PicamEnum2String(PicamEnumeratedType_Error, error)});
+      state(stateCodes::ERROR);
+      return -1;
+   }
+   
    if(getPicamParameter(readoutStride, PicamParameter_ReadoutStride) < 0)
    {
       log<software_error>({__FILE__, __LINE__, "Error getting readout stride"});
@@ -1037,7 +1128,7 @@ int picamCtrl::configureAcquisition()
    m_depth = pixelBitDepth;
 
    const PicamRois* rois;
-   PicamError error = Picam_GetParameterRoisValue( m_cameraHandle, PicamParameter_Rois, &rois );
+   error = Picam_GetParameterRoisValue( m_cameraHandle, PicamParameter_Rois, &rois );
    if( error != PicamError_None )
    {
       log<software_error>({__FILE__, __LINE__, 0, error, PicamEnum2String(PicamEnumeratedType_Error, error)});
@@ -1045,12 +1136,33 @@ int picamCtrl::configureAcquisition()
       return -1;
    }
    m_xbinning = rois->roi_array[0].x_binning;
+   m_currentROI.bin_x = m_xbinning;
    m_ybinning = rois->roi_array[0].y_binning;
+   m_currentROI.bin_y = m_ybinning;
+   
+   std::cerr << rois->roi_array[0].x << "\n";
+   std::cerr << (rois->roi_array[0].x-1) << "\n";
+   std::cerr << rois->roi_array[0].width << "\n";
+   std::cerr << 0.5*( (float) (rois->roi_array[0].width - 1.0)) << "\n";
+   
+   m_currentROI.x = (rois->roi_array[0].x) + 0.5*( (float) (rois->roi_array[0].width - 1.0)) ;
+   m_currentROI.y = (rois->roi_array[0].y) + 0.5*( (float) (rois->roi_array[0].height - 1.0)) ;
+   
+   m_currentROI.w = rois->roi_array[0].width;
+   m_currentROI.h = rois->roi_array[0].height;
+   
    m_width  = rois->roi_array[0].width  / rois->roi_array[0].x_binning;
    m_height = rois->roi_array[0].height / rois->roi_array[0].y_binning;
    Picam_DestroyRois( rois );
 
 
+   updateIfChanged( m_indiP_roi_x, "current", m_currentROI.x, INDI_OK);
+   updateIfChanged( m_indiP_roi_y, "current", m_currentROI.y, INDI_OK);
+   updateIfChanged( m_indiP_roi_w, "current", m_currentROI.w, INDI_OK);
+   updateIfChanged( m_indiP_roi_h, "current", m_currentROI.h, INDI_OK);
+   updateIfChanged( m_indiP_roi_bin_x, "current", m_currentROI.bin_x, INDI_OK);
+   updateIfChanged( m_indiP_roi_bin_y, "current", m_currentROI.bin_y, INDI_OK);
+   
    //=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*
    //=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*
    // Exposure Time and Frame Rate
