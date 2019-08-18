@@ -530,6 +530,19 @@ public:
                                const std::string & name
                              );
 
+   /// Create a standard INDI Number property with target and current elements.
+   /**
+     * \returns 0 on success 
+     * \returns -1 on error
+     */ 
+   template<typename T>
+   int createStandardIndiNumber( pcf::IndiProperty & prop,
+                                 const std::string & name,
+                                 const T & min,
+                                 const T & max,
+                                 const T & step,
+                                 const std::string & format
+                                );
 
    /// Create a standard INDI property with target and current elements.
    /**
@@ -1757,6 +1770,38 @@ int MagAOXApp<_useINDI>::createStandardIndiProp( pcf::IndiProperty & prop,
    prop.setState(pcf::IndiProperty::Idle);
    prop.add(pcf::IndiElement("current"));
    prop.add(pcf::IndiElement("target"));
+   
+   return 0;
+}
+
+template<bool _useINDI>
+template<typename T>
+int MagAOXApp<_useINDI>::createStandardIndiNumber( pcf::IndiProperty & prop,
+                                                   const std::string & name,
+                                                   const T & min,
+                                                   const T & max,
+                                                   const T & step,
+                                                   const std::string & format
+                                                 )
+{
+   prop = pcf::IndiProperty(pcf::IndiProperty::Number);
+   prop.setDevice(configName());
+   prop.setName(name);
+   prop.setPerm(pcf::IndiProperty::ReadWrite); 
+   prop.setState(pcf::IndiProperty::Idle);
+   prop.add(pcf::IndiElement("current"));
+   prop["current"].setMin(min);
+   prop["current"].setMax(max);
+   prop["current"].setMin(min);
+   prop["current"].setStep(step);
+   prop["current"].setFormat(format);
+   
+   prop.add(pcf::IndiElement("target"));
+   prop["target"].setMin(min);
+   prop["target"].setMax(max);
+   prop["target"].setMin(min);
+   prop["target"].setStep(step);
+   prop["target"].setFormat(format);
    
    return 0;
 }

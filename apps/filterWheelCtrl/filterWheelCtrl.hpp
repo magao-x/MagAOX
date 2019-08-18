@@ -12,6 +12,7 @@
 #include "../../libMagAOX/libMagAOX.hpp" //Note this is included on command line to trigger pch
 #include "../../magaox_git_version.h"
 
+#include "../../libMagAOX/app/dev/stdFilterWheel.hpp"
 
 /** \defgroup filterWheelCtrl Filter Wheel Control
   * \brief Control of MagAO-X MCBL-based f/w.
@@ -41,9 +42,11 @@ namespace app
   *
   * \ingroup filterWheelCtrl
   */
-class filterWheelCtrl : public MagAOXApp<>, public tty::usbDevice
+class filterWheelCtrl : public MagAOXApp<>, public tty::usbDevice, public dev::stdFilterWheel<filterWheelCtrl>
 {
 
+   friend class dev::stdFilterWheel<filterWheelCtrl>;
+   
 protected:
 
    /** \name Non-configurable parameters
@@ -67,10 +70,7 @@ protected:
    long m_circleSteps {0}; ///< The number of position counts in 1 360-degree revolution.
    long m_homeOffset {0}; ///< The number of position counts to offset from the home position
 
-   bool m_powerOnHome {false}; ///< If true, then the motor is homed at startup (software or actual power on)
-
-   std::vector<std::string> m_filterNames; ///< The names of each position in the wheel.
-   std::vector<double> m_filterPositions; ///< The positions, in filter units, of each filter.  If 0, then the integer position number is used to calculate.
+   
 
    ///@}
 
@@ -79,7 +79,7 @@ protected:
      */
 
    bool m_switch{false}; ///< The home switch status
-   int m_moving {0}; ///< Whether or not the wheel is moving.
+   
    long m_rawPos {0}; ///< The position of the wheel in motor coutns.
 
    int m_homingState{0}; ///< The homing state, tracks the stages of homing.
@@ -132,25 +132,8 @@ protected:
    ///The position of the wheel in counts
    pcf::IndiProperty m_indiP_counts;
 
-   ///The position of the wheel in filters
-   pcf::IndiProperty m_indiP_filters;
-
-   ///The name of the nearest filter for this position
-   pcf::IndiProperty m_indiP_filterName;
-
-   ///Command the wheel to home.  Any change in this property causes a home.
-   pcf::IndiProperty m_indiP_req_home;
-
-   ///Command the wheel to halt.  Any change in this property causes an immediate halt.
-   pcf::IndiProperty m_indiP_req_halt;
-
 public:
    INDI_NEWCALLBACK_DECL(filterWheelCtrl, m_indiP_counts);
-   INDI_NEWCALLBACK_DECL(filterWheelCtrl, m_indiP_filters);
-   INDI_NEWCALLBACK_DECL(filterWheelCtrl, m_indiP_filterName);
-
-   INDI_NEWCALLBACK_DECL(filterWheelCtrl, m_indiP_req_home);
-   INDI_NEWCALLBACK_DECL(filterWheelCtrl, m_indiP_req_halt);
 
 protected:
    //Each of these should have m_indiMutex locked before being called.
@@ -183,19 +166,28 @@ protected:
      */
    int getPos();
 
-   /// Start a homing sequence.
-   /**
+   /// Start a high-level homing sequence.
+   /** For this device this includes the homing dither.
+     * 
+     * \returns 0 on success.
+     * \returns -1 on error.
+     */
+   int startHoming();
+   
+   /// Start a low-level homing sequence.
+   /** This initiates the device homing sequence.
+     * 
      * \returns 0 on success.
      * \returns -1 on error.
      */
    int home();
 
-   /// Halt the wheel motion immediately.
+   /// Stop the wheel motion immediately.
    /**
      * \returns 0 on success.
      * \returns -1 on error.
      */
-   int halt();
+   int stop();
 
    /// Move to an absolute position in raw counts.
    /**
@@ -273,10 +265,9 @@ void filterWheelCtrl::setupConfig()
    config.add("motor.speed", "", "motor.speed", argType::Required, "motor", "speeed", false, "real", "The motor speed parameter.  Default=1000.");
    config.add("motor.circleSteps", "", "motor.circleSteps", argType::Required, "motor", "circleSteps", false, "long", "The number of steps in 1 revolution.");
    config.add("motor.homeOffset", "", "motor.homeOffset", argType::Required, "motor", "homeOffset", false, "long", "The homing offset in motor counts.");
-   config.add("motor.powerOnHome", "", "motor.powerOnHome", argType::Required, "motor", "powerOnHome", false, "bool", "If true, home at startup/power-on.  Default=false.");
-
-   config.add("filters.names", "", "filters.names",  argType::Required, "filters", "names", false, "vector<string>", "The names of the filters.");
-   config.add("filters.positions", "", "filters.positions",  argType::Required, "filters", "positions", false, "vector<double>", "The positions of the filters.  If omitted or 0 then order is used.");
+   
+   dev::stdFilterWheel<filterWheelCtrl>::setupConfig(config);
+   
 }
 
 inline
@@ -298,13 +289,9 @@ void filterWheelCtrl::loadConfig()
    config(m_motorSpeed, "motor.speed");
    config(m_circleSteps, "motor.circleSteps");
    config(m_homeOffset, "motor.homeOffset");
-   config(m_powerOnHome, "motor.powerOnHome");
+   
 
-   config(m_filterNames, "filters.names");
-   m_filterPositions.resize(m_filterNames.size(), 0);
-   for(size_t n=0;n<m_filterPositions.size();++n) m_filterPositions[n] = n+1;
-   config(m_filterPositions, "filters.positions");
-   for(size_t n=0;n<m_filterPositions.size();++n) if(m_filterPositions[n] == 0) m_filterPositions[n] = n+1;
+   dev::stdFilterWheel<filterWheelCtrl>::loadConfig(config);
 
 }
 
@@ -318,25 +305,12 @@ int filterWheelCtrl::appStartup()
    }
 
    // set up the  INDI properties
-   REG_INDI_NEWPROP(m_indiP_counts, "counts", pcf::IndiProperty::Number);
-   m_indiP_counts.add (pcf::IndiElement("current"));
-   m_indiP_counts.add (pcf::IndiElement("target"));
-   REG_INDI_NEWPROP(m_indiP_filters, "filters", pcf::IndiProperty::Number);
-   m_indiP_filters.add (pcf::IndiElement("current"));
-   m_indiP_filters.add (pcf::IndiElement("target"));
+   derived().createStandardIndiNumber( m_indiP_counts, "counts", std::numeric_limits<long>::lowest(), std::numeric_limits<long>::max(), 0.0, "%ld");
+   registerIndiPropertyNew( m_indiP_filter, INDI_NEWCALLBACK(m_indiP_counts)) ;
+
    
-   REG_INDI_NEWPROP(m_indiP_filterName, "filterName", pcf::IndiProperty::Number);
-   m_indiP_filterName.add (pcf::IndiElement("current"));
-   m_indiP_filterName.add (pcf::IndiElement("target"));
+   dev::stdFilterWheel<filterWheelCtrl>::appStartup();
    
-   
-   REG_INDI_NEWPROP(m_indiP_req_home, "home", pcf::IndiProperty::Number);
-   m_indiP_req_home.add (pcf::IndiElement("request"));
-   
-   REG_INDI_NEWPROP(m_indiP_req_halt, "stop", pcf::IndiProperty::Number);
-   m_indiP_req_halt.add (pcf::IndiElement("request"));
-   
-   //Get the USB device if it's in udev
    if(m_deviceName == "") state(stateCodes::NODEVICE);
    else
    {
@@ -346,6 +320,7 @@ int filterWheelCtrl::appStartup()
       log<text_log>(logs.str());
    }
 
+   
    return 0;
 }
 
@@ -467,21 +442,19 @@ int filterWheelCtrl::appLogic()
       {
          std::lock_guard<std::mutex> guard(m_indiMutex);
 
-         m_homingState = 1;
-
-         if(home()<0)
+         if(startHoming()<0)
          {
             state(stateCodes::ERROR);
             log<software_error>({__FILE__,__LINE__});
             return 0;
          }
       }
-      else state(stateCodes::READY);
+      else state(stateCodes::NOTHOMED);
 
 
    }
 
-   if( state() == stateCodes::READY || state() == stateCodes::OPERATING || state() == stateCodes::HOMING)
+   if( state() == stateCodes::NOTHOMED || state() == stateCodes::READY || state() == stateCodes::OPERATING || state() == stateCodes::HOMING)
    {
       { //mutex scope
          //Make sure we have exclusive attention of the device
@@ -560,22 +533,28 @@ int filterWheelCtrl::appLogic()
             {
                m_homingState = 0;
                state(stateCodes::READY);
+               
+               ///\todo document that this is a required step at conclusion of homing for stdFilterWheel interface
+               m_filter_target = ((double) m_rawPos-m_homeOffset)/m_circleSteps*m_filterNames.size() + 1.0;
             }
          }
       }
 
-
-      updateIfChanged(m_indiP_counts, "current", m_rawPos);
-
-      double filPos = ((double) m_rawPos-m_homeOffset)/m_circleSteps*m_filterNames.size() + 1.0;
-      updateIfChanged(m_indiP_filters, "current", filPos);
-
-      int nfilPos = fmod(filPos-1+0.5, m_filterNames.size()) ;
-      if(nfilPos > (long) m_filterNames.size()) nfilPos -= m_filterNames.size();
-      if(nfilPos < 0) nfilPos += m_filterNames.size();
-
-      updateIfChanged(m_indiP_filterName, "current", m_filterNames[nfilPos]);
-
+      std::lock_guard<std::mutex> guard(m_indiMutex);
+      
+      if(m_moving)
+      {
+         updateIfChanged(m_indiP_counts, "current", m_rawPos, INDI_BUSY);
+      }
+      else
+      {
+         updateIfChanged(m_indiP_counts, "current", m_rawPos, INDI_IDLE);
+      }
+      
+      m_filter = ((double) m_rawPos-m_homeOffset)/m_circleSteps*m_filterNames.size() + 1.0;
+      
+      stdFilterWheel<filterWheelCtrl>::updateINDI();
+      
       return 0;
    }
 
@@ -626,99 +605,100 @@ INDI_NEWCALLBACK_DEFN(filterWheelCtrl, m_indiP_counts)(const pcf::IndiProperty &
    return -1;
 }
 
-INDI_NEWCALLBACK_DEFN(filterWheelCtrl, m_indiP_filters)(const pcf::IndiProperty &ipRecv)
-{
-   if (ipRecv.getName() == m_indiP_filters.getName())
-   {
-      double filters = -1;
-      double target_abs = -1;
-      
-      if(ipRecv.find("current"))
-      {
-         filters = ipRecv["current"].get<double>();
-      }
+// INDI_NEWCALLBACK_DEFN(filterWheelCtrl, m_indiP_filters)(const pcf::IndiProperty &ipRecv)
+// {
+//    if (ipRecv.getName() == m_indiP_filters.getName())
+//    {
+//       double filters = -1;
+//       double target_abs = -1;
+//       
+//       if(ipRecv.find("current"))
+//       {
+//          filters = ipRecv["current"].get<double>();
+//       }
+// 
+//       if(ipRecv.find("target"))
+//       {
+//          target_abs = ipRecv["target"].get<double>();
+//       }
+// 
+//       if(target_abs == -1) target_abs = filters;
+//       
+//       std::lock_guard<std::mutex> guard(m_indiMutex);
+//       
+//       updateIfChanged(m_indiP_filters, "target", target_abs, pcf::IndiProperty::Busy);
+//       
+//       return moveTo( target_abs, -1 );
+// 
+//    }
+//    return -1;
+// }
 
-      if(ipRecv.find("target"))
-      {
-         target_abs = ipRecv["target"].get<double>();
-      }
+// INDI_NEWCALLBACK_DEFN(filterWheelCtrl, m_indiP_filterName)(const pcf::IndiProperty &ipRecv)
+// {
+//    if (ipRecv.getName() == m_indiP_filterName.getName())
+//    {
+//       std::string name;
+//       std::string target;
+// 
+//       if(ipRecv.find("current"))
+//       {
+//          name = ipRecv["current"].get();
+//       }
+// 
+//       if(ipRecv.find("target"))
+//       {
+//          target = ipRecv["target"].get();
+//       }
+// 
+//       if(target == "") target = name;
+// 
+// 
+//       if(target == "") return 0;
+// 
+//       size_t n;
+//       for(n=0; n< m_filterNames.size(); ++n) if( m_filterNames[n] == target ) break;
+// 
+//       if(n >= m_filterNames.size()) return -1;
+// 
+//       std::lock_guard<std::mutex> guard(m_indiMutex);
+//       
+//       updateIfChanged(m_indiP_filterName, "target", target, pcf::IndiProperty::Busy);
+//       
+//       return moveTo(n+1);
+// 
+//    }
+//    return -1;
+// }
 
-      if(target_abs == -1) target_abs = filters;
-      
-      std::lock_guard<std::mutex> guard(m_indiMutex);
-      
-      updateIfChanged(m_indiP_filters, "target", target_abs, pcf::IndiProperty::Busy);
-      
-      return moveTo( target_abs, -1 );
+// INDI_NEWCALLBACK_DEFN(filterWheelCtrl, m_indiP_req_home)(const pcf::IndiProperty &ipRecv)
+// {
+//    if (ipRecv.getName() == m_indiP_req_home.getName())
+//    {
+// 
+//       if(state() == stateCodes::HOMING) return 0; //Don't restart while homing already.
+// 
+//       std::lock_guard<std::mutex> guard(m_indiMutex);
+// 
+//       m_homingState = 1;
+//       return home();
+//    }
+//    return -1;
+// }
 
-   }
-   return -1;
-}
-
-INDI_NEWCALLBACK_DEFN(filterWheelCtrl, m_indiP_filterName)(const pcf::IndiProperty &ipRecv)
-{
-   if (ipRecv.getName() == m_indiP_filterName.getName())
-   {
-      std::string name;
-      std::string target;
-
-      if(ipRecv.find("current"))
-      {
-         name = ipRecv["current"].get();
-      }
-
-      if(ipRecv.find("target"))
-      {
-         target = ipRecv["target"].get();
-      }
-
-      if(target == "") target = name;
-
-
-      if(target == "") return 0;
-
-      size_t n;
-      for(n=0; n< m_filterNames.size(); ++n) if( m_filterNames[n] == target ) break;
-
-      if(n >= m_filterNames.size()) return -1;
-
-      std::lock_guard<std::mutex> guard(m_indiMutex);
-      
-      updateIfChanged(m_indiP_filterName, "target", target, pcf::IndiProperty::Busy);
-      
-      return moveTo(n+1);
-
-   }
-   return -1;
-}
-
-INDI_NEWCALLBACK_DEFN(filterWheelCtrl, m_indiP_req_home)(const pcf::IndiProperty &ipRecv)
-{
-   if (ipRecv.getName() == m_indiP_req_home.getName())
-   {
-
-      if(state() == stateCodes::HOMING) return 0; //Don't restart while homing already.
-      std::lock_guard<std::mutex> guard(m_indiMutex);
-
-      m_homingState = 1;
-      return home();
-   }
-   return -1;
-}
-
-INDI_NEWCALLBACK_DEFN(filterWheelCtrl, m_indiP_req_halt)(const pcf::IndiProperty &ipRecv)
-{
-   if (ipRecv.getName() == m_indiP_req_halt.getName())
-   {
-      halt(); //Try immediately without locking
-
-      //Now lock to make sure we get uninterrupted attention
-      std::lock_guard<std::mutex> guard(m_indiMutex);
-
-      return halt();
-   }
-   return -1;
-}
+// INDI_NEWCALLBACK_DEFN(filterWheelCtrl, m_indiP_req_halt)(const pcf::IndiProperty &ipRecv)
+// {
+//    if (ipRecv.getName() == m_indiP_req_halt.getName())
+//    {
+//       halt(); //Try immediately without locking
+// 
+//       //Now lock to make sure we get uninterrupted attention
+//       std::lock_guard<std::mutex> guard(m_indiMutex);
+// 
+//       return halt();
+//    }
+//    return -1;
+// }
 
 int filterWheelCtrl::onPowerOnConnect()
 {
@@ -811,8 +791,16 @@ int filterWheelCtrl::getPos()
 
 }
 
+int filterWheelCtrl::startHoming()
+{
+   m_homingState = 1;
+   updateSwitchIfChanged(m_indiP_home, "toggle", pcf::IndiElement::Off, INDI_IDLE);
+   return home();
+}
+
 int filterWheelCtrl::home()
 {
+   
    state(stateCodes::HOMING);
 
    int rv;
@@ -844,10 +832,12 @@ int filterWheelCtrl::home()
    return 0;
 }
 
-int filterWheelCtrl::halt()
+int filterWheelCtrl::stop()
 {
    m_homingState = 0;
    int rv = tty::ttyWrite( "DI\r", m_fileDescrip, m_writeTimeOut);
+   updateSwitchIfChanged(m_indiP_stop, "toggle", pcf::IndiElement::Off, INDI_IDLE);
+   
    if(rv < 0) return log<software_error,-1>({__FILE__,__LINE__,rv, tty::ttyErrorString(rv)});
 
    return 0;

@@ -25,7 +25,8 @@ namespace indi
 #define INDI_IDLE (pcf::IndiProperty::Ok)   
 #define INDI_OK (pcf::IndiProperty::Ok)
 #define INDI_BUSY (pcf::IndiProperty::Busy)
-
+#define INDI_ALERT (pcf::IndiProperty::Alert)
+   
 /// Update the value of the INDI element, but only if it has changed.
 /** Only sends the set property message if the new value is different.
   *
