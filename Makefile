@@ -7,6 +7,7 @@ libs_to_build = libtelnet
 apps_to_build =  filterWheelCtrl \
                  magAOXMaths \
                  mzmqServer \
+                 mzmqClient \
                  siglentSDG \
                  sshDigger \
                  sysMonitor \
@@ -14,7 +15,8 @@ apps_to_build =  filterWheelCtrl \
                  xindiserver \
                  xt1121Ctrl \
                  xt1121DCDU \
-                 zaberCtrl
+                 zaberCtrl \
+                 zaberLowLevel
 
 ifneq ($(PYLON),false)
 apps_to_build += baslerCtrl
