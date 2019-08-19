@@ -13,8 +13,7 @@
 #include <ImageStruct.h>
 #include <ImageStreamIO.h>
 
-
-#include <mx/timeUtils.hpp>
+#include <xrif/xrif.h>
 
 #include "../../libMagAOX/libMagAOX.hpp" //Note this is included on command line to trigger pch
 #include "../../magaox_git_version.h"
@@ -67,6 +66,8 @@ protected:
    std::string m_shmimName; ///< The name of the shared memory buffer.
    
    unsigned m_semWait {500000000}; //The time in nsec to wait on the semaphore.  Max is 999999999. Default is 5e8 nsec.
+   
+   int m_lz4accel {1};
    
    ///@}
    
@@ -208,7 +209,6 @@ protected:
 protected:
    //declare our properties
    pcf::IndiProperty m_indiP_writing;
-   pcf::IndiProperty m_indiP_written;
 
    pcf::IndiProperty m_indiP_xrifStats;
    
@@ -258,6 +258,8 @@ void streamWriter::setupConfig()
    
    config.add("writer.threadPrio", "", "writer.threadPrio", argType::Required, "writer", "threadPrio", false, "int", "The real-time priority of the stream writer thread.");
    
+   config.add("writer.lz4accel", "", "writer.lz4accel", argType::Required, "writer", "lz4accel", false, "int", "The LZ4 acceleration parameter.  Larger is faster, but lower compression.");
+   
    config.add("framegrabber.shmimName", "", "framegrabber.shmimName", argType::Required, "framegrabber", "shmimName", false, "int", "The name of the stream to monitor. From /tmp/shmimName.im.shm.");
    
    config.add("framegrabber.semWait", "", "framegrabber.semWait", argType::Required, "framegrabber", "semWait", false, "int", "The time in nsec to wait on the semaphore.  Max is 999999999. Default is 5e8 nsec.");
@@ -270,14 +272,13 @@ void streamWriter::setupConfig()
 inline
 void streamWriter::loadConfig()
 {
-   //Set some defaults
-   //Setup default log path
-   m_rawimageDir = MagAOXPath + "/" + MAGAOX_rawimageRelPath + "/" + configName();
-   config(m_rawimageDir, "writer.savePath");
+   
    
    config(m_circBuffLength, "writer.circBuffLength");
    config(m_writeChunkLength, "writer.writeChunkLength");
    config(m_swThreadPrio, "writer.threadPrio");
+   config(m_lz4accel, "writer.lz4accel");
+   if(m_lz4accel < 1) m_lz4accel = 1;
    
    config(m_shmimName, "framegrabber.shmimName");
    config(m_semWait, "framegrabber.semWait");
@@ -285,6 +286,10 @@ void streamWriter::loadConfig()
    
    config(m_fgThreadPrio, "framegrabber.threadPrio");
    
+   //Set some defaults
+   //Setup default log path
+   m_rawimageDir = MagAOXPath + "/" + MAGAOX_rawimageRelPath + "/" + m_shmimName;
+   config(m_rawimageDir, "writer.savePath");
 }
 
 
@@ -308,46 +313,32 @@ int streamWriter::appStartup()
    }
    
    // set up the  INDI properties
-   REG_INDI_NEWPROP(m_indiP_writing, "writing", pcf::IndiProperty::Number);
-   m_indiP_writing.add (pcf::IndiElement("current"));
-   m_indiP_writing.add (pcf::IndiElement("target"));
-   m_indiP_writing["target"].set(0);
-   
-   REG_INDI_NEWPROP_NOCB(m_indiP_written, "written", pcf::IndiProperty::Number);
-   m_indiP_written.add (pcf::IndiElement("number"));
-   m_indiP_written["number"].set(0);
-   m_indiP_written.add (pcf::IndiElement("fps"));
-   m_indiP_written["fps"].set(0);
-
+   createStandardIndiToggleSw(m_indiP_writing, "writing");
+   registerIndiPropertyNew(m_indiP_writing, INDI_NEWCALLBACK(m_indiP_writing));
+      
+  
    //Register the stats INDI property
    REG_INDI_NEWPROP_NOCB(m_indiP_xrifStats, "xrif", pcf::IndiProperty::Number);
- 
-   m_indiP_xrifStats.add(pcf::IndiElement("ratio"));
-   m_indiP_xrifStats["ratio"].set(0);
+   m_indiP_xrifStats.setLabel("xrif compression performance");
    
-   m_indiP_xrifStats.add(pcf::IndiElement("differenceMBsec"));
-   m_indiP_xrifStats["differenceMBsec"].set(0);
-
-   m_indiP_xrifStats.add(pcf::IndiElement("reorderMBsec"));
-   m_indiP_xrifStats["reorderMBsec"].set(0);
+   indi::addNumberElement<float>(m_indiP_xrifStats, "ratio", 0, 1.0, 0.0, "%0.2f", "Compression Ratio");
    
-   m_indiP_xrifStats.add(pcf::IndiElement("compressMBsec"));
-   m_indiP_xrifStats["compressMBsec"].set(0);
-
-   m_indiP_xrifStats.add(pcf::IndiElement("encodeMBsec"));
-   m_indiP_xrifStats["encodeMBsec"].set(0);
+   indi::addNumberElement<float>(m_indiP_xrifStats, "differenceMBsec", 0, std::numeric_limits<float>::max(), 0.0, "%0.2f", "Differencing Rate [MB/sec]");
    
-   m_indiP_xrifStats.add(pcf::IndiElement("differenceFPS"));
-   m_indiP_xrifStats["differenceFPS"].set(0);
-
-   m_indiP_xrifStats.add(pcf::IndiElement("reorderFPS"));
-   m_indiP_xrifStats["reorderFPS"].set(0);
+   indi::addNumberElement<float>(m_indiP_xrifStats, "reorderMBsec", 0, std::numeric_limits<float>::max(), 0.0, "%0.2f", "Reordering Rate [MB/sec]");
    
-   m_indiP_xrifStats.add(pcf::IndiElement("compressFPS"));
-   m_indiP_xrifStats["compressFPS"].set(0);
-
-   m_indiP_xrifStats.add(pcf::IndiElement("encodeFPS"));
-   m_indiP_xrifStats["encodeFPS"].set(0);
+   indi::addNumberElement<float>(m_indiP_xrifStats, "compressMBsec", 0, std::numeric_limits<float>::max(), 0.0, "%0.2f", "Compression Rate [MB/sec]");
+   
+   indi::addNumberElement<float>(m_indiP_xrifStats, "encodeMBsec", 0, std::numeric_limits<float>::max(), 0.0, "%0.2f", "Total Encoding Rate [MB/sec]");
+   
+   indi::addNumberElement<float>(m_indiP_xrifStats, "differenceFPS", 0, std::numeric_limits<float>::max(), 0.0, "%0.2f", "Differencing Rate [f.p.s.]");
+   
+   indi::addNumberElement<float>(m_indiP_xrifStats, "reorderFPS", 0, std::numeric_limits<float>::max(), 0.0, "%0.2f", "Reordering Rate [f.p.s.]");
+   
+   indi::addNumberElement<float>(m_indiP_xrifStats, "compressFPS", 0, std::numeric_limits<float>::max(), 0.0, "%0.2f", "Compression Rate [f.p.s.]");
+   
+   indi::addNumberElement<float>(m_indiP_xrifStats, "encodeFPS", 0, std::numeric_limits<float>::max(), 0.0, "%0.2f", "Total Encoding Rate [f.p.s.]");
+   
    
    //Now set up the framegrabber and writer threads.
    // - need SIGSEGV and SIGBUS handling for ImageStreamIO restarts
@@ -905,7 +896,7 @@ void streamWriter::swThreadExec()
 
          memcpy(m_xrif_timing->raw_buffer, m_timingCircBuff + m_currSaveStart*5, (m_currSaveStop-m_currSaveStart)*5*sizeof(uint64_t));
 
-         m_xrif->lz4_acceleration=50; ///\todo make lz4 acceleration a configurable parameter
+         m_xrif->lz4_acceleration=m_lz4accel;
          
          xrif_encode(m_xrif);
 
@@ -1066,42 +1057,24 @@ void streamWriter::swThreadExec()
 
 INDI_NEWCALLBACK_DEFN(streamWriter, m_indiP_writing)(const pcf::IndiProperty &ipRecv)
 {
-   if (ipRecv.getName() == m_indiP_writing.getName())
+   if(ipRecv.getName() != m_indiP_writing.getName())
    {
-      int current = -1;
-      int target = -1;
-      
-      if(ipRecv.find("current"))
-      {
-         current = ipRecv["current"].get<int>();
-      }
-      
-      if(ipRecv.find("target"))
-      {
-         target = ipRecv["target"].get<int>();
-      }
-      
-      if(target == -1 ) target = current;
-      
-      if(target == 0 && (m_writing == WRITING || m_writing == START_WRITING))
-      {
-         m_writing = STOP_WRITING;
-      }
-      
-      if(target == 1 && m_writing == NOT_WRITING)
-      {
-         m_writing = START_WRITING;
-      }
-      
-      //Lock the m parent's mutex, waiting if necessary
-      std::unique_lock<std::mutex> lock( m_indiMutex );
-      
-      //And update target
-       updateIfChanged(m_indiP_writing, "target", target);
-      
+      log<software_error>({__FILE__,__LINE__, "wrong INDI property received."});
+      return -1;
    }
    
-   return -1;
+   if(!ipRecv.find("toggle")) return 0;
+   
+   if( ipRecv["toggle"].getSwitchState() == pcf::IndiElement::Off && (m_writing == WRITING || m_writing == START_WRITING))
+   {
+      m_writing = STOP_WRITING;
+   }
+   
+   if( ipRecv["toggle"].getSwitchState() == pcf::IndiElement::On && m_writing == NOT_WRITING)
+   {
+      m_writing = START_WRITING;
+   }
+   return 0;
 }
 
 inline
@@ -1110,35 +1083,37 @@ void streamWriter::updateINDI()
    //Only update this if not changing
    if(m_writing == NOT_WRITING || m_writing == WRITING)
    {
-      indi::updateIfChanged(m_indiP_writing, "current", (int) (m_writing == WRITING), m_indiDriver);
-      
       if(m_xrif && m_writing == WRITING)
       {
-         indi::updateIfChanged(m_indiP_xrifStats, "ratio", m_xrif->compression_ratio, m_indiDriver);
+         indi::updateSwitchIfChanged(m_indiP_writing, "toggle", pcf::IndiElement::On, m_indiDriver, INDI_OK);
          
-         indi::updateIfChanged(m_indiP_xrifStats, "encodeMBsec", m_xrif->encode_rate/1048576.0, m_indiDriver);
-         indi::updateIfChanged(m_indiP_xrifStats, "encodeFPS", m_xrif->encode_rate/(m_width*m_height*m_typeSize), m_indiDriver);
+         indi::updateIfChanged(m_indiP_xrifStats, "ratio", m_xrif->compression_ratio, m_indiDriver, INDI_BUSY);
          
-         indi::updateIfChanged(m_indiP_xrifStats, "differenceMBsec", m_xrif->difference_rate/1048576.0, m_indiDriver);
-         indi::updateIfChanged(m_indiP_xrifStats, "differenceFPS", m_xrif->difference_rate/(m_width*m_height*m_typeSize), m_indiDriver);
+         indi::updateIfChanged(m_indiP_xrifStats, "encodeMBsec", m_xrif->encode_rate/1048576.0, m_indiDriver, INDI_BUSY);
+         indi::updateIfChanged(m_indiP_xrifStats, "encodeFPS", m_xrif->encode_rate/(m_width*m_height*m_typeSize), m_indiDriver, INDI_BUSY);
          
-         indi::updateIfChanged(m_indiP_xrifStats, "reorderMBsec", m_xrif->reorder_rate/1048576.0, m_indiDriver);
-         indi::updateIfChanged(m_indiP_xrifStats, "reorderFPS", m_xrif->reorder_rate/(m_width*m_height*m_typeSize), m_indiDriver);
+         indi::updateIfChanged(m_indiP_xrifStats, "differenceMBsec", m_xrif->difference_rate/1048576.0, m_indiDriver, INDI_BUSY);
+         indi::updateIfChanged(m_indiP_xrifStats, "differenceFPS", m_xrif->difference_rate/(m_width*m_height*m_typeSize), m_indiDriver, INDI_BUSY);
+         
+         indi::updateIfChanged(m_indiP_xrifStats, "reorderMBsec", m_xrif->reorder_rate/1048576.0, m_indiDriver, INDI_BUSY);
+         indi::updateIfChanged(m_indiP_xrifStats, "reorderFPS", m_xrif->reorder_rate/(m_width*m_height*m_typeSize), m_indiDriver, INDI_BUSY);
 
-         indi::updateIfChanged(m_indiP_xrifStats, "compressMBsec", m_xrif->compress_rate/1048576.0, m_indiDriver);
-         indi::updateIfChanged(m_indiP_xrifStats, "compressFPS", m_xrif->compress_rate/(m_width*m_height*m_typeSize), m_indiDriver);
+         indi::updateIfChanged(m_indiP_xrifStats, "compressMBsec", m_xrif->compress_rate/1048576.0, m_indiDriver, INDI_BUSY);
+         indi::updateIfChanged(m_indiP_xrifStats, "compressFPS", m_xrif->compress_rate/(m_width*m_height*m_typeSize), m_indiDriver, INDI_BUSY);
       }
       else
       {
-         indi::updateIfChanged(m_indiP_xrifStats, "ratio", 0.0, m_indiDriver);
-         indi::updateIfChanged(m_indiP_xrifStats, "encodeMBsec", 0.0, m_indiDriver);
-         indi::updateIfChanged(m_indiP_xrifStats, "encodeFPS", 0.0, m_indiDriver);
-         indi::updateIfChanged(m_indiP_xrifStats, "differenceMBsec", 0.0, m_indiDriver);
-         indi::updateIfChanged(m_indiP_xrifStats, "differenceFPS", 0.0, m_indiDriver);
-         indi::updateIfChanged(m_indiP_xrifStats, "reorderMBsec", 0.0, m_indiDriver);
-         indi::updateIfChanged(m_indiP_xrifStats, "reorderFPS", 0.0, m_indiDriver);
-         indi::updateIfChanged(m_indiP_xrifStats, "compressMBsec", 0.0, m_indiDriver);
-         indi::updateIfChanged(m_indiP_xrifStats, "compressFPS", 0.0, m_indiDriver);
+         indi::updateSwitchIfChanged(m_indiP_writing, "toggle", pcf::IndiElement::Off, m_indiDriver, INDI_OK);
+         
+         indi::updateIfChanged(m_indiP_xrifStats, "ratio", 0.0, m_indiDriver, INDI_IDLE);
+         indi::updateIfChanged(m_indiP_xrifStats, "encodeMBsec", 0.0, m_indiDriver, INDI_IDLE);
+         indi::updateIfChanged(m_indiP_xrifStats, "encodeFPS", 0.0, m_indiDriver, INDI_IDLE);
+         indi::updateIfChanged(m_indiP_xrifStats, "differenceMBsec", 0.0, m_indiDriver, INDI_IDLE);
+         indi::updateIfChanged(m_indiP_xrifStats, "differenceFPS", 0.0, m_indiDriver, INDI_IDLE);
+         indi::updateIfChanged(m_indiP_xrifStats, "reorderMBsec", 0.0, m_indiDriver, INDI_IDLE);
+         indi::updateIfChanged(m_indiP_xrifStats, "reorderFPS", 0.0, m_indiDriver, INDI_IDLE);
+         indi::updateIfChanged(m_indiP_xrifStats, "compressMBsec", 0.0, m_indiDriver, INDI_IDLE);
+         indi::updateIfChanged(m_indiP_xrifStats, "compressFPS", 0.0, m_indiDriver, INDI_IDLE);
       }
    }
 }

@@ -541,7 +541,7 @@ public:
                                  const std::string & name,  ///< [in] the name of the property
                                  const T & min, ///< [in] the minimum value for the elements, applied to both target and current
                                  const T & max, ///< [in] the minimum value for the elements, applied to both target and current
-                                 const T & step, ///< [in] the minimum value for the elements, applied to both target and current
+                                 const T & step, ///< [in] the step size for the elements, applied to both target and current
                                  const std::string & format,  ///< [in] the _ value for the elements, applied to both target and current.  Set to "" to use the MagAO-X standard for type.
                                  const std::string & label = "", ///< [in] [optional] the GUI label suggestion for this property
                                  const std::string & group = "" ///< [in] [optional] the group for this property
@@ -558,6 +558,18 @@ public:
                                     const std::string & label = "", ///< [in] [optional] the GUI label suggestion for this property
                                     const std::string & group = "" ///< [in] [optional] the group for this property
                                   );
+   
+   /// Create a standard R/W INDI switch with a single toggle element.
+   /** This switch is intended to function like an on/off toggle switch.
+     * 
+     * \returns 0 on success 
+     * \returns -1 on error
+     */ 
+   int createStandardIndiToggleSw( pcf::IndiProperty & prop, ///< [out] the property to create and setup
+                                   const std::string & name, ///< [in] the name of the property
+                                   const std::string & label = "", ///< [in] [optional] the GUI label suggestion for this property
+                                   const std::string & group = "" ///< [in] [optional] the group for this property
+                                 );
    
    /// Create a standard R/W INDI selection (one of many) switch with vector of elements
    /** This switch is intended to function like drop down menu.
@@ -1834,14 +1846,12 @@ int MagAOXApp<_useINDI>::createStandardIndiNumber( pcf::IndiProperty & prop,
    prop.add(pcf::IndiElement("current"));
    prop["current"].setMin(min);
    prop["current"].setMax(max);
-   prop["current"].setMin(min);
    prop["current"].setStep(step);
    prop["current"].setFormat(format);
    
    prop.add(pcf::IndiElement("target"));
    prop["target"].setMin(min);
    prop["target"].setMax(max);
-   prop["target"].setMin(min);
    prop["target"].setStep(step);
    prop["target"].setFormat(format);
    
@@ -1859,6 +1869,8 @@ int MagAOXApp<_useINDI>::createStandardIndiNumber( pcf::IndiProperty & prop,
    return 0;
 }
 
+
+
 template<bool _useINDI>
 int MagAOXApp<_useINDI>::createStandardIndiRequestSw( pcf::IndiProperty & prop,
                                                       const std::string & name,
@@ -1875,6 +1887,37 @@ int MagAOXApp<_useINDI>::createStandardIndiRequestSw( pcf::IndiProperty & prop,
    
    //Add the toggle element initialized to Off
    prop.add(pcf::IndiElement("request", pcf::IndiElement::Off));
+   
+   //Don't set "" just in case libcommon does something with defaults
+   if(label != "")
+   {
+      prop.setLabel(label);
+   }
+   
+   if(group != "")
+   {
+      prop.setGroup(group);
+   }
+   
+   return 0;
+}
+
+template<bool _useINDI>
+int MagAOXApp<_useINDI>::createStandardIndiToggleSw( pcf::IndiProperty & prop,
+                                                     const std::string & name,
+                                                     const std::string & label,
+                                                     const std::string & group
+                                                   )
+{
+   prop = pcf::IndiProperty(pcf::IndiProperty::Switch);
+   prop.setDevice(configName());
+   prop.setName(name);
+   prop.setPerm(pcf::IndiProperty::ReadWrite); 
+   prop.setState(pcf::IndiProperty::Idle);
+   prop.setRule(pcf::IndiProperty::AtMostOne);
+   
+   //Add the toggle element initialized to Off
+   prop.add(pcf::IndiElement("toggle", pcf::IndiElement::Off));
    
    //Don't set "" just in case libcommon does something with defaults
    if(label != "")

@@ -27,6 +27,36 @@ namespace indi
 #define INDI_BUSY (pcf::IndiProperty::Busy)
 #define INDI_ALERT (pcf::IndiProperty::Alert)
    
+/// Add a standard INDI Number element
+/**
+  * \returns 0 on success 
+  * \returns -1 on error
+  */ 
+template<typename T>
+int addNumberElement( pcf::IndiProperty & prop, ///< [out] the property to which to add the elemtn
+                      const std::string & name,  ///< [in] the name of the element
+                      const T & min, ///< [in] the minimum value for the element
+                      const T & max, ///< [in] the minimum value for the element
+                      const T & step, ///< [in] the step size of the lement
+                      const std::string & format,  ///< [in] the _ value for the elements, applied to both target and current.  Set to "" to use the MagAO-X standard for type.
+                      const std::string & label = "" ///< [in] [optional] the GUI label suggestion for this property
+                    )                                                
+{
+   prop.add(pcf::IndiElement(name, 0));
+   prop[name].setMin(min);
+   prop[name].setMax(max);
+   prop[name].setStep(step);
+   prop[name].setFormat(format);
+      
+   //Don't set "" just in case libcommon does something with defaults
+   if(label != "")
+   {
+      prop[name].setLabel(label);
+   }
+   
+   return 0;
+}
+
 /// Update the value of the INDI element, but only if it has changed.
 /** Only sends the set property message if the new value is different.
   *
@@ -84,6 +114,54 @@ void updateSwitchIfChanged( pcf::IndiProperty & p,   ///< [in/out] The property 
       indiDriver->sendSetProperty (p);
    }
 }
+
+
+/// Update the values of a one-of-many INDI switch vector, but only if it has changed.
+/** Only sends the set property message if the new settings are different.
+  *
+  * 
+  */  
+template<class indiDriverT>
+void updateSelectionSwitchIfChanged( pcf::IndiProperty & p,   ///< [in/out] The property containing the element to possibly update
+                                     const std::string & el,  ///< [in] The element name which is now on
+                                     indiDriverT * indiDriver, ///< [in] the MagAOX INDI driver to use
+                                     pcf::IndiProperty::PropertyStateType newState = pcf::IndiProperty::Ok
+                                   )
+{
+   if( !indiDriver ) return;
+
+   if(!p.find(el)) return;
+   
+   bool changed = false;
+   for(auto elit = p.getElements().begin(); elit != p.getElements().end(); ++elit)
+   {
+      if( elit->first == el )
+      {
+         if(elit->second.getSwitchState() != pcf::IndiElement::On)
+         {
+            p[elit->first].setSwitchState(pcf::IndiElement::On);
+            changed = true;
+         }
+      }
+      else
+      {
+         if(elit->second.getSwitchState() != pcf::IndiElement::Off)
+         {
+            p[elit->first].setSwitchState(pcf::IndiElement::Off);
+            changed = true;
+         }
+      }   
+   }  
+
+   pcf::IndiProperty::PropertyStateType oldState = p.getState();
+   
+   if(changed || oldState != newState)
+   {
+      p.setState (newState);
+      indiDriver->sendSetProperty (p);
+   }
+}
+
 
 } //namespace indi
 } //namespace app

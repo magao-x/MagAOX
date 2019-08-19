@@ -97,12 +97,13 @@ int loadCameraConfig( cameraConfigMap & ccmap,
 /// MagAO-X standard camera interface
 /** Implements the standard interface to a MagAO-X camera
   * 
+  * 
   * The derived class `derivedT` must be a MagAOXApp\<true\>, and should declare this class a friend like so: 
    \code
     friend class dev::dssShutter<derivedT>;
    \endcode
   *
-  *
+  * The default values of m_currentROI should be set before calling stdCamera::appStartup().
   *
   * Calls to this class's `setupConfig`, `loadConfig`, `appStartup`, `appLogic`, `appShutdown`
   * `onPowerOff`, and `whilePowerOff`,  must be placed in the derived class's functions of the same name.
@@ -146,6 +147,30 @@ protected:
    roi m_nextROI;
    
    
+   float m_minROIx {0};
+   float m_maxROIx {1023};
+   float m_stepROIx {0};
+   
+   float m_minROIy {0};
+   float m_maxROIy {1023};
+   float m_stepROIy {0};
+   
+   int m_minROIWidth {1};
+   int m_maxROIWidth {1024};
+   int m_stepROIWidth {1};
+   
+   int m_minROIHeight {1};
+   int m_maxROIHeight {1024};
+   int m_stepROIHeight {1};
+   
+   int m_minROIBinning_x {1};
+   int m_maxROIBinning_x {4};
+   int m_stepROIBinning_x {1};
+   
+   int m_minROIBinning_y {1};
+   int m_maxROIBinning_y {4};
+   int m_stepROIBinning_y {1};
+   
 public:
 
    ///Destructor, destroys the PdvDev structure
@@ -179,6 +204,9 @@ public:
        \endcode
      * with appropriate error checking.
      * 
+     * You should set the default/startup values of m_currentROI as well as the min/max/step values for the ROI parameters
+     * before calling this function.
+     *
      * \returns 0 on success
      * \returns -1 on error, which is logged.
      */
@@ -391,10 +419,10 @@ int stdCamera<derivedT>::appStartup()
    
    if(m_usesModes)
    {
-      derived().createStandardIndiProp( m_indiP_mode, pcf::IndiProperty::Text, "mode");
+      derived().createStandardIndiText( m_indiP_mode, "mode");
       if( derived().registerIndiPropertyNew( m_indiP_mode, st_newCallBack_stdCamera) < 0)
       {
-         #ifndef GENCAMERA_TEST_NOLOG
+         #ifndef STDCAMERA_TEST_NOLOG
          derivedT::template log<software_error>({__FILE__,__LINE__});
          #endif
          return -1;
@@ -403,68 +431,97 @@ int stdCamera<derivedT>::appStartup()
    
    if(m_usesROI)
    {
-      derived().createStandardIndiProp( m_indiP_roi_x, pcf::IndiProperty::Number, "roi_x");
+      //The min/max/step values should be set in derivedT before this is called.
+      derived().createStandardIndiNumber( m_indiP_roi_x, "roi_x", m_minROIx, m_maxROIx, m_stepROIx, "%0.1f");
       if( derived().registerIndiPropertyNew( m_indiP_roi_x, st_newCallBack_stdCamera) < 0)
       {
-         #ifndef GENCAMERA_TEST_NOLOG
+         #ifndef STDCAMERA_TEST_NOLOG
          derivedT::template log<software_error>({__FILE__,__LINE__});
          #endif
          return -1;
       }
       
-      derived().createStandardIndiProp( m_indiP_roi_y, pcf::IndiProperty::Number, "roi_y");
+      derived().createStandardIndiNumber( m_indiP_roi_y, "roi_y", m_minROIy, m_maxROIy, m_stepROIy, "%0.1f");
       if( derived().registerIndiPropertyNew( m_indiP_roi_y, st_newCallBack_stdCamera) < 0)
       {
-         #ifndef GENCAMERA_TEST_NOLOG
+         #ifndef STDCAMERA_TEST_NOLOG
          derivedT::template log<software_error>({__FILE__,__LINE__});
          #endif
          return -1;
       }
       
-      derived().createStandardIndiProp( m_indiP_roi_w, pcf::IndiProperty::Number, "roi_w");
+      derived().createStandardIndiNumber( m_indiP_roi_w, "roi_w", m_minROIWidth, m_maxROIWidth, m_stepROIWidth, "%d");
       if( derived().registerIndiPropertyNew( m_indiP_roi_w, st_newCallBack_stdCamera) < 0)
       {
-         #ifndef GENCAMERA_TEST_NOLOG
+         #ifndef STDCAMERA_TEST_NOLOG
          derivedT::template log<software_error>({__FILE__,__LINE__});
          #endif
          return -1;
       }
       
-      derived().createStandardIndiProp( m_indiP_roi_h, pcf::IndiProperty::Number, "roi_h");
+      derived().createStandardIndiNumber( m_indiP_roi_h, "roi_h", m_minROIHeight, m_maxROIHeight, m_stepROIHeight, "%d");
       if( derived().registerIndiPropertyNew( m_indiP_roi_h, st_newCallBack_stdCamera) < 0)
       {
-         #ifndef GENCAMERA_TEST_NOLOG
+         #ifndef STDCAMERA_TEST_NOLOG
          derivedT::template log<software_error>({__FILE__,__LINE__});
          #endif
          return -1;
       }
       
-      derived().createStandardIndiProp( m_indiP_roi_bin_x, pcf::IndiProperty::Number, "roi_bin_x");
+      derived().createStandardIndiNumber( m_indiP_roi_bin_x, "roi_bin_x", m_minROIBinning_x, m_maxROIBinning_x, m_stepROIBinning_x, "%d");
       if( derived().registerIndiPropertyNew( m_indiP_roi_bin_x, st_newCallBack_stdCamera) < 0)
       {
-         #ifndef GENCAMERA_TEST_NOLOG
+         #ifndef STDCAMERA_TEST_NOLOG
          derivedT::template log<software_error>({__FILE__,__LINE__});
          #endif
          return -1;
       }
       
-      derived().createStandardIndiProp( m_indiP_roi_bin_y, pcf::IndiProperty::Number, "roi_bin_y");
+      derived().createStandardIndiNumber( m_indiP_roi_bin_y, "roi_bin_y", m_minROIBinning_y, m_maxROIBinning_y, m_stepROIBinning_y, "%d");
       if( derived().registerIndiPropertyNew( m_indiP_roi_bin_y, st_newCallBack_stdCamera) < 0)
       {
-         #ifndef GENCAMERA_TEST_NOLOG
+         #ifndef STDCAMERA_TEST_NOLOG
          derivedT::template log<software_error>({__FILE__,__LINE__});
          #endif
          return -1;
       }
    
-      derived().createStandardIndiToggle( m_indiP_roi_set, "roi_set");
+      derived().createStandardIndiRequestSw( m_indiP_roi_set, "roi_set");
       if( derived().registerIndiPropertyNew( m_indiP_roi_set, st_newCallBack_stdCamera) < 0)
       {
-         #ifndef GENCAMERA_TEST_NOLOG
+         #ifndef STDCAMERA_TEST_NOLOG
          derivedT::template log<software_error>({__FILE__,__LINE__});
          #endif
          return -1;
       }
+      
+      //m_currentROI should be set to default/startup values in derivedT before this function is called.
+      m_nextROI.x = m_currentROI.x;
+      m_nextROI.y = m_currentROI.y;
+      m_nextROI.w = m_currentROI.w;
+      m_nextROI.h = m_currentROI.h;
+      m_nextROI.bin_x = m_currentROI.bin_x;
+      m_nextROI.bin_y = m_currentROI.bin_y;
+   
+
+      derived().updateIfChanged(m_indiP_roi_x, "current", m_currentROI.x, INDI_IDLE);
+      derived().updateIfChanged(m_indiP_roi_x, "target", m_nextROI.x, INDI_IDLE);
+   
+      derived().updateIfChanged(m_indiP_roi_y, "current", m_currentROI.y, INDI_IDLE);
+      derived().updateIfChanged(m_indiP_roi_y, "target", m_nextROI.y, INDI_IDLE);
+   
+      derived().updateIfChanged(m_indiP_roi_w, "current", m_currentROI.w, INDI_IDLE);
+      derived().updateIfChanged(m_indiP_roi_w, "target", m_nextROI.w, INDI_IDLE);
+   
+      derived().updateIfChanged(m_indiP_roi_h, "current", m_currentROI.h, INDI_IDLE);
+      derived().updateIfChanged(m_indiP_roi_h, "target", m_nextROI.h, INDI_IDLE);
+   
+      derived().updateIfChanged(m_indiP_roi_bin_x, "current", m_currentROI.bin_x, INDI_IDLE);
+      derived().updateIfChanged(m_indiP_roi_bin_x, "target", m_nextROI.bin_x, INDI_IDLE);
+   
+      derived().updateIfChanged(m_indiP_roi_bin_y, "current", m_currentROI.bin_y, INDI_IDLE);
+      derived().updateIfChanged(m_indiP_roi_bin_y, "target", m_nextROI.bin_y, INDI_IDLE);
+   
    }
    
    return 0;
@@ -484,29 +541,29 @@ int stdCamera<derivedT>::onPowerOff()
    
    if(m_usesModes)
    {
-      indi::updateIfChanged(m_indiP_mode, "current", std::string(""), derived().m_indiDriver);
-      indi::updateIfChanged(m_indiP_mode, "target", std::string(""), derived().m_indiDriver);
+      indi::updateIfChanged(m_indiP_mode, "current", std::string(""), derived().m_indiDriver, INDI_IDLE);
+      indi::updateIfChanged(m_indiP_mode, "target", std::string(""), derived().m_indiDriver, INDI_IDLE);
    }
    
    if(m_usesROI)
    {
-      indi::updateIfChanged(m_indiP_roi_x, "roi_x", std::string(""), derived().m_indiDriver);
-      indi::updateIfChanged(m_indiP_roi_x, "roi_x", std::string(""), derived().m_indiDriver);
+      indi::updateIfChanged(m_indiP_roi_x, "roi_x", std::string(""), derived().m_indiDriver, INDI_IDLE);
+      indi::updateIfChanged(m_indiP_roi_x, "roi_x", std::string(""), derived().m_indiDriver, INDI_IDLE);
       
-      indi::updateIfChanged(m_indiP_roi_y, "roi_y", std::string(""), derived().m_indiDriver);
-      indi::updateIfChanged(m_indiP_roi_y, "roi_y", std::string(""), derived().m_indiDriver);
+      indi::updateIfChanged(m_indiP_roi_y, "roi_y", std::string(""), derived().m_indiDriver, INDI_IDLE);
+      indi::updateIfChanged(m_indiP_roi_y, "roi_y", std::string(""), derived().m_indiDriver, INDI_IDLE);
       
-      indi::updateIfChanged(m_indiP_roi_w, "roi_w", std::string(""), derived().m_indiDriver);
-      indi::updateIfChanged(m_indiP_roi_w, "roi_w", std::string(""), derived().m_indiDriver);
+      indi::updateIfChanged(m_indiP_roi_w, "roi_w", std::string(""), derived().m_indiDriver, INDI_IDLE);
+      indi::updateIfChanged(m_indiP_roi_w, "roi_w", std::string(""), derived().m_indiDriver, INDI_IDLE);
       
-      indi::updateIfChanged(m_indiP_roi_h, "roi_h", std::string(""), derived().m_indiDriver);
-      indi::updateIfChanged(m_indiP_roi_h, "roi_h", std::string(""), derived().m_indiDriver);
+      indi::updateIfChanged(m_indiP_roi_h, "roi_h", std::string(""), derived().m_indiDriver, INDI_IDLE);
+      indi::updateIfChanged(m_indiP_roi_h, "roi_h", std::string(""), derived().m_indiDriver, INDI_IDLE);
       
-      indi::updateIfChanged(m_indiP_roi_bin_x, "roi_bin_x", std::string(""), derived().m_indiDriver);
-      indi::updateIfChanged(m_indiP_roi_bin_x, "roi_bin_x", std::string(""), derived().m_indiDriver);
+      indi::updateIfChanged(m_indiP_roi_bin_x, "roi_bin_x", std::string(""), derived().m_indiDriver, INDI_IDLE);
+      indi::updateIfChanged(m_indiP_roi_bin_x, "roi_bin_x", std::string(""), derived().m_indiDriver, INDI_IDLE);
       
-      indi::updateIfChanged(m_indiP_roi_bin_y, "roi_bin_y", std::string(""), derived().m_indiDriver);
-      indi::updateIfChanged(m_indiP_roi_bin_y, "roi_bin_y", std::string(""), derived().m_indiDriver);
+      indi::updateIfChanged(m_indiP_roi_bin_y, "roi_bin_y", std::string(""), derived().m_indiDriver, INDI_IDLE);
+      indi::updateIfChanged(m_indiP_roi_bin_y, "roi_bin_y", std::string(""), derived().m_indiDriver, INDI_IDLE);
    }
    
    return 0;
@@ -683,14 +740,14 @@ int stdCamera<derivedT>::newCallBack_roi_set( const pcf::IndiProperty &ipRecv )
       return -1;
    }
    
-   if(!ipRecv.find("toggle")) return 0;
+   if(!ipRecv.find("request")) return 0;
    
    std::cerr << "trying to toggle\n";
    
-   if( ipRecv["toggle"].getSwitchState() == pcf::IndiElement::On)
+   if( ipRecv["request"].getSwitchState() == pcf::IndiElement::On)
    {
       std::cerr << "toggling\n";
-      indi::updateSwitchIfChanged(m_indiP_roi_set, "toggle", pcf::IndiElement::On, derived().m_indiDriver, INDI_BUSY);
+      indi::updateSwitchIfChanged(m_indiP_roi_set, "request", pcf::IndiElement::On, derived().m_indiDriver, INDI_BUSY);
       
       return derived().setNextROI();
    }
@@ -707,8 +764,8 @@ int stdCamera<derivedT>::updateINDI()
    {
       if(m_nextMode == m_modeName)
       {
-         indi::updateIfChanged(m_indiP_mode, "current", m_modeName, derived().m_indiDriver, INDI_OK);
-         indi::updateIfChanged(m_indiP_mode, "target", m_nextMode, derived().m_indiDriver, INDI_OK);
+         indi::updateIfChanged(m_indiP_mode, "current", m_modeName, derived().m_indiDriver, INDI_IDLE);
+         indi::updateIfChanged(m_indiP_mode, "target", m_nextMode, derived().m_indiDriver, INDI_IDLE);
       }
       else
       {

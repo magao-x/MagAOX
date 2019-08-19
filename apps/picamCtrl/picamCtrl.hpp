@@ -83,7 +83,7 @@ protected:
    unsigned long m_powerOnWait {2}; ///< Time in sec to wait for camera boot after power on.
 
 
-   float m_startupTemp {-55}; ///< The temperature to set after a power-on.
+   float m_startupTemp {20}; ///< The temperature to set after a power-on.
 
    ///@}
 
@@ -91,6 +91,11 @@ protected:
    float m_ccdTemp;
    float m_ccdTempSetpt; ///< The desired temperature.
 
+   std::vector<std::string> m_adcSpeeds = {"00100_kHz", "01_MHz", "05_MHz", "10_MHz", "20_MHz", "30_MHz"};
+   std::vector<std::string> m_adcSpeedLabels = {"100 kHz", "1 MHz", "5 MHz", "10 MHz", "20 MHz", "30 MHz"};
+   
+   std::vector<float> m_adcSpeedValues = {0.1, 1, 5,10,20,30};
+   
    int m_adcSpeed {30}; ///< The ADC speed, 5, 10, 20, or 30.
 
    float m_expTimeSet {0}; ///< The exposure time, in seconds, as set by user.
@@ -301,9 +306,10 @@ int picamCtrl::appStartup()
    m_indiP_ccdTemp["current"].set(0);
    m_indiP_ccdTemp.add (pcf::IndiElement("target"));
 
-   REG_INDI_NEWPROP(m_indiP_adcspeed, "adcspeed", pcf::IndiProperty::Number);
-   m_indiP_adcspeed.add (pcf::IndiElement("current"));
-   m_indiP_adcspeed.add (pcf::IndiElement("target"));
+   createStandardIndiSelectionSw(m_indiP_adcspeed, "adcspeed", m_adcSpeeds, "ADC Speed");
+   for(size_t n=0; n< m_adcSpeeds.size(); ++n) m_indiP_adcspeed[m_adcSpeeds[n]].setLabel(m_adcSpeedLabels[n]);
+   registerIndiPropertyNew(m_indiP_adcspeed, INDI_NEWCALLBACK(m_indiP_adcspeed));
+   
 
    REG_INDI_NEWPROP_NOCB(m_indiP_ccdTempLock, "ccdtempctrl", pcf::IndiProperty::Text);
    m_indiP_ccdTempLock.add (pcf::IndiElement("state"));
@@ -332,12 +338,7 @@ int picamCtrl::appStartup()
    m_indiP_exptime.add (pcf::IndiElement("delta"));
    m_indiP_exptime["delta"].set(m_expTimeDelta);
 
-   if(dev::stdCamera<picamCtrl>::appStartup() < 0)
-   {
-      return log<software_critical,-1>({__FILE__,__LINE__});
-   }
-   ///\todo document this as stdCamera requirement.
-   
+
    m_currentROI.x = 511.5;
    m_currentROI.y = 511.5;
    m_currentROI.w = 1024;
@@ -345,30 +346,35 @@ int picamCtrl::appStartup()
    m_currentROI.bin_x = 1;
    m_currentROI.bin_y = 1;
    
-   m_nextROI.x = 511.5;
-   m_nextROI.y = 511.5;
-   m_nextROI.w = 1024;
-   m_nextROI.h = 1024;
-   m_nextROI.bin_x = 1;
-   m_nextROI.bin_y = 1;
+   m_minROIx = 0;
+   m_maxROIx = 1023;
+   m_stepROIx = 0;
    
-   updateIfChanged(m_indiP_roi_x, "current", m_currentROI.x, INDI_IDLE);
-   updateIfChanged(m_indiP_roi_x, "target", m_nextROI.x, INDI_IDLE);
+   m_minROIy = 0;
+   m_maxROIy = 1023;
+   m_stepROIy = 0;
    
-   updateIfChanged(m_indiP_roi_y, "current", m_currentROI.y, INDI_IDLE);
-   updateIfChanged(m_indiP_roi_y, "target", m_nextROI.y, INDI_IDLE);
+   m_minROIWidth = 1;
+   m_maxROIWidth = 1024;
+   m_stepROIWidth = 4;
    
-   updateIfChanged(m_indiP_roi_w, "current", m_currentROI.w, INDI_IDLE);
-   updateIfChanged(m_indiP_roi_w, "target", m_nextROI.w, INDI_IDLE);
+   m_minROIHeight = 1;
+   m_maxROIHeight = 1024;
+   m_stepROIHeight = 1;
    
-   updateIfChanged(m_indiP_roi_h, "current", m_currentROI.h, INDI_IDLE);
-   updateIfChanged(m_indiP_roi_h, "target", m_nextROI.h, INDI_IDLE);
+   m_minROIBinning_x = 1;
+   m_maxROIBinning_x = 32;
+   m_stepROIBinning_x = 1;
    
-   updateIfChanged(m_indiP_roi_bin_x, "current", m_currentROI.bin_x, INDI_IDLE);
-   updateIfChanged(m_indiP_roi_bin_x, "target", m_nextROI.bin_x, INDI_IDLE);
+   m_minROIBinning_y = 1;
+   m_maxROIBinning_y = 1024;
+   m_stepROIBinning_y = 1;
    
-   updateIfChanged(m_indiP_roi_bin_y, "current", m_currentROI.bin_y, INDI_IDLE);
-   updateIfChanged(m_indiP_roi_bin_y, "target", m_nextROI.bin_y, INDI_IDLE);
+   if(dev::stdCamera<picamCtrl>::appStartup() < 0)
+   {
+      return log<software_critical,-1>({__FILE__,__LINE__});
+   }
+   
    
    if(dev::frameGrabber<picamCtrl>::appStartup() < 0)
    {
@@ -526,6 +532,20 @@ int picamCtrl::onPowerOff()
    ///\todo error check these base class fxns.
    dssShutter<picamCtrl>::onPowerOff();
 
+   m_currentROI.x = 511.5;
+   m_currentROI.y = 511.5;
+   m_currentROI.w = 1024;
+   m_currentROI.h = 1024;
+   m_currentROI.bin_x = 1;
+   m_currentROI.bin_y = 1;
+   
+   m_nextROI.x = 511.5;
+   m_nextROI.y = 511.5;
+   m_nextROI.w = 1024;
+   m_nextROI.h = 1024;
+   m_nextROI.bin_x = 1;
+   m_nextROI.bin_y = 1;
+   
    return 0;
 }
 
@@ -920,8 +940,6 @@ int picamCtrl::setAdcSpeed(int newspd)
 
    m_adcSpeed = newspd;
 
-   updateIfChanged(m_indiP_adcspeed, "target", m_adcSpeed);
-
    m_reconfig = true;
 
    return 0;
@@ -1050,8 +1068,19 @@ int picamCtrl::configureAcquisition()
       return -1;
    }
 
-   updateIfChanged(m_indiP_adcspeed, "current", m_adcSpeed);
-   updateIfChanged(m_indiP_adcspeed, "target", std::string(""));
+   std::string adcstr;
+   for(size_t n=0; n<m_adcSpeeds.size(); ++n)
+   {
+      if(m_adcSpeedValues[n] == m_adcSpeed)
+      {
+         adcstr = m_adcSpeeds[n];
+         break;
+      }
+   }
+   indi::updateSelectionSwitchIfChanged( m_indiP_adcspeed, adcstr, m_indiDriver, INDI_OK);
+   
+//    updateIfChanged(m_indiP_adcspeed, "current", m_adcSpeed);
+//    updateIfChanged(m_indiP_adcspeed, "target", std::string(""));
 
    log<text_log>( "ADC Speed: " + std::to_string(m_adcSpeed) + " MHz");
 
@@ -1551,76 +1580,43 @@ INDI_NEWCALLBACK_DEFN(picamCtrl, m_indiP_ccdTemp)(const pcf::IndiProperty &ipRec
 
 INDI_NEWCALLBACK_DEFN(picamCtrl, m_indiP_adcspeed)(const pcf::IndiProperty &ipRecv)
 {
-   if (ipRecv.getName() == m_indiP_adcspeed.getName())
+   if(ipRecv.getName() != m_indiP_adcspeed.getName())
    {
-      int current = 0, target = 0;
-
-      if(ipRecv.find("current"))
-      {
-         current = ipRecv["current"].get<int>();
-      }
-
-      if(ipRecv.find("target"))
-      {
-         target = ipRecv["target"].get<int>();
-      }
-
-
-      //Check if target is empty
-      if( target == 0 ) target = current;
-
-      if( target == 0 ) return 0;
-
-      std::unique_lock<std::mutex> lock(m_indiMutex);
-      return setAdcSpeed(target);
+      log<software_error>({__FILE__, __LINE__, "invalid indi property received"});
+      return -1;
    }
-   return -1;
+   
+   std::string newspeed;
+   int newn = -1;
+   size_t i;
+   for(i=0; i< m_adcSpeeds.size(); ++i) 
+   {
+      if(!ipRecv.find(m_adcSpeeds[i])) continue;
+      
+      if(ipRecv[m_adcSpeeds[i]].getSwitchState() == pcf::IndiElement::On)
+      {
+         if(newspeed != "")
+         {
+            log<text_log>("More than one ADC speed selected", logPrio::LOG_ERROR);
+            return -1;
+         }
+         
+         newspeed = m_adcSpeeds[i];
+         newn = i;         
+      }
+   }
+   
+   if(newspeed == "" || newn < 0)
+   {
+      return 0; //This is just a reset of current probably
+   }
+   
+   std::lock_guard<std::mutex> guard(m_indiMutex);
+   return setAdcSpeed(m_adcSpeedValues[newn]);
+   
 }
 
-#if 0
-INDI_NEWCALLBACK_DEFN(picamCtrl, m_indiP_mode)(const pcf::IndiProperty &ipRecv)
-{
-   if (ipRecv.getName() == m_indiP_mode.getName())
-   {
-      std::cerr << "New mode\n";
-      std::string current;
-      std::string target;
-      try
-      {
-         current = ipRecv["current"].get();
-      }
-      catch(...)
-      {
-         current = "";
-      }
 
-      try
-      {
-         target = ipRecv["target"].get();
-      }
-      catch(...)
-      {
-         target = "";
-      }
-
-      if(target == "") target = current;
-
-      if(m_cameraModes.count(target) == 0 )
-      {
-         return log<text_log, -1>("Unrecognized mode requested: " + target, logPrio::LOG_ERROR);
-      }
-
-      updateIfChanged(m_indiP_mode, "target", target);
-
-      //Now signal the f.g. thread to reconfigure
-      m_nextMode = target;
-      m_reconfig = true;
-
-      return 0;
-   }
-   return -1;
-}
-#endif
 
 INDI_NEWCALLBACK_DEFN(picamCtrl, m_indiP_fps)(const pcf::IndiProperty &ipRecv)
 {
