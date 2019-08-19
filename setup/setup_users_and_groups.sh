@@ -30,9 +30,14 @@ else
   log_info "/etc/pam.d/su already includes reference to magaox-dev, not modifying"
 fi
 if [[ $EUID != 0 ]]; then
-  if [[ -z $(groups | grep magaox-dev) ]]; then
+  if [[ -z $(groups | tr ' ' '\n' | grep 'magaox-dev$') ]]; then
     sudo gpasswd -a $USER magaox-dev
     log_success "Added $USER to group magaox-dev"
+    log_warn "Note: You will need to log out and back in before this group takes effect"
+  fi
+  if [[ -z $(groups | tr ' ' '\n' | grep 'magaox$') ]]; then
+    sudo gpasswd -a $USER magaox
+    log_success "Added $USER to group magaox"
     log_warn "Note: You will need to log out and back in before this group takes effect"
   fi
 fi
