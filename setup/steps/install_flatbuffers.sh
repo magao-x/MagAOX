@@ -2,7 +2,7 @@
 DIR="$( cd "$( dirname "${BASH_SOURCE[0]}" )" && pwd )"
 source $DIR/../_common.sh
 set -euo pipefail
-FLATBUFFERS_VERSION="1.9.0"
+FLATBUFFERS_VERSION="1.11.0"
 #
 # Flatbuffers
 #
