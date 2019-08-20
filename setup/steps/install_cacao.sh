@@ -36,3 +36,11 @@ if [[ ! -e /usr/local/bin/milk ]]; then
     sudo ln -s /usr/local/bin/cacao /usr/local/bin/milk
 fi
 echo "export PATH=\$PATH:$CACAO_ABSPATH/src/CommandLineInterface/scripts" | sudo tee /etc/profile.d/cacao_scripts.sh
+
+if ! grep -q "/milk/shm" /etc/fstab; then
+  echo "tmpfs /milk/shm tmpfs rw,nosuid,nodev" | sudo tee -a /etc/fstab
+  sudo mkdir -p /milk/shm
+  log_success "Created /milk/shm tmpfs mountpoint"
+  sudo mount /milk/shm
+  log_success "Mounted /milk/shm"
+fi
