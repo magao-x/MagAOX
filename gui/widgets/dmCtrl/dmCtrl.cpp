@@ -42,6 +42,8 @@ int dmCtrl::handleDefProperty( const pcf::IndiProperty & ipRecv)
 
 int dmCtrl::handleSetProperty( const pcf::IndiProperty & ipRecv)
 {  
+   if(ipRecv.getDevice() != m_dmName) return 0;
+   
    if(ipRecv.getName() == "shmimName")
    {
       if(ipRecv.find("name"))
@@ -85,7 +87,6 @@ int dmCtrl::handleSetProperty( const pcf::IndiProperty & ipRecv)
 
 void dmCtrl::updateGUI()
 {
-   
    ui.labelShmimName_value->setText(m_shmimName.c_str());
    ui.labelFlatName_value->setText(m_flatName.c_str());
    ui.labelFlatShmim_value->setText(m_flatShmim.c_str());
