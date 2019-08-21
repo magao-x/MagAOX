@@ -26,7 +26,9 @@ namespace indi
 #define INDI_OK (pcf::IndiProperty::Ok)
 #define INDI_BUSY (pcf::IndiProperty::Busy)
 #define INDI_ALERT (pcf::IndiProperty::Alert)
-   
+  
+
+
 /// Add a standard INDI Number element
 /**
   * \returns 0 on success 
@@ -74,16 +76,24 @@ void updateIfChanged( pcf::IndiProperty & p,   ///< [in/out] The property contai
 {
    if( !indiDriver ) return;
    
-   T oldVal = p[el].get<T>();
-
-   pcf::IndiProperty::PropertyStateType oldState = p.getState();
-   
-   if(oldVal != newVal || oldState != newState)
+   try
    {
-      p[el].set(newVal);
-      p.setState (newState);
-      indiDriver->sendSetProperty (p);
+      T oldVal = p[el].get<T>();
+
+      pcf::IndiProperty::PropertyStateType oldState = p.getState();
+   
+      if(oldVal != newVal || oldState != newState)
+      {
+         p[el].set(newVal);
+         p.setState (newState);
+         indiDriver->sendSetProperty (p);
+      }
    }
+   catch(...)
+   {
+      log<software_error>({__FILE__, __LINE__});
+   }
+   
 }
 
 /// Update the value of the INDI element, but only if it has changed.
@@ -102,16 +112,23 @@ void updateSwitchIfChanged( pcf::IndiProperty & p,   ///< [in/out] The property 
                           )
 {
    if( !indiDriver ) return;
-   
-   pcf::IndiElement::SwitchStateType oldVal = p[el].getSwitchState();
 
-   pcf::IndiProperty::PropertyStateType oldState = p.getState();
-   
-   if(oldVal != newVal || oldState != newState)
+   try
    {
-      p[el].setSwitchState(newVal);
-      p.setState (newState);
-      indiDriver->sendSetProperty (p);
+      pcf::IndiElement::SwitchStateType oldVal = p[el].getSwitchState();
+
+      pcf::IndiProperty::PropertyStateType oldState = p.getState();
+   
+      if(oldVal != newVal || oldState != newState)
+      {
+         p[el].setSwitchState(newVal);
+         p.setState (newState);
+         indiDriver->sendSetProperty (p);
+      }
+   }
+   catch(...)
+   {
+      log<software_error>({__FILE__, __LINE__});
    }
 }
 
@@ -130,8 +147,15 @@ void updateSelectionSwitchIfChanged( pcf::IndiProperty & p,   ///< [in/out] The 
 {
    if( !indiDriver ) return;
 
-   if(!p.find(el)) return;
+   if(!p.find(el)) 
+   {
+      log<software_error>({__FILE__, __LINE__});
+      return;
+   }
    
+   try
+   {
+      
    bool changed = false;
    for(auto elit = p.getElements().begin(); elit != p.getElements().end(); ++elit)
    {
@@ -159,6 +183,12 @@ void updateSelectionSwitchIfChanged( pcf::IndiProperty & p,   ///< [in/out] The 
    {
       p.setState (newState);
       indiDriver->sendSetProperty (p);
+   }
+   
+   }
+   catch(...)
+   {
+      log<software_error>({__FILE__, __LINE__});
    }
 }
 

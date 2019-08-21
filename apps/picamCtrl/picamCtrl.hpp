@@ -80,16 +80,11 @@ protected:
      */
    std::string m_serialNumber; ///< The camera's identifying serial number
 
-   unsigned long m_powerOnWait {2}; ///< Time in sec to wait for camera boot after power on.
-
-
-   float m_startupTemp {20}; ///< The temperature to set after a power-on.
 
    ///@}
 
    int m_depth {0};
-   float m_ccdTemp;
-   float m_ccdTempSetpt; ///< The desired temperature.
+   
 
    std::vector<std::string> m_adcSpeeds = {"00100_kHz", "01_MHz", "05_MHz", "10_MHz", "20_MHz", "30_MHz"};
    std::vector<std::string> m_adcSpeedLabels = {"100 kHz", "1 MHz", "5 MHz", "10 MHz", "20 MHz", "30 MHz"};
@@ -98,20 +93,11 @@ protected:
    
    int m_adcSpeed {30}; ///< The ADC speed, 5, 10, 20, or 30.
 
-   float m_expTimeSet {0}; ///< The exposure time, in seconds, as set by user.
-   float m_expTimeMin {0}; ///<
-   float m_expTimeMax {0};
-   float m_expTimeDelta {0};
+   
 
+   
+   
 
-   float m_fpsSet {0}; ///< The commanded fps, as set by user.
-
-   float m_fpsCurr {0}; ///< The current FPS as reported by the camera.
-
-   int m_powerOnCounter {0}; ///< Counts numer of loops after power on, implements delay for camera bootup.
-
-   std::string m_modeName;
-   std::string m_nextMode;
 
    PicamHandle m_cameraHandle {0};
    PicamHandle m_modelHandle {0};
@@ -191,18 +177,26 @@ protected:
 
    int getTemps();
 
-   int setTemp(piflt temp);
-
    int adcSpeed();
 
    int setAdcSpeed(int newspd);
 
-   int setExpTime(piflt exptime);
+   
 
-   int setFPS(piflt fps);
+   int setFPS();
 
 
    // stdCamera interface:
+   
+   //This must set the power-on default values of
+   /* -- m_ccdTempSetpt
+    * -- m_currentROI 
+    */
+   int powerOnDefaults();
+   
+   int setTempControl();
+   int setTempSetPt();
+   int setExpTime();
    int setNextROI();
    
    //Framegrabber interface:
@@ -213,34 +207,13 @@ protected:
    int reconfig();
 
 
-
-
-
-
-
-
-
    //INDI:
 protected:
-   //declare our properties
-   pcf::IndiProperty m_indiP_ccdTemp;
-   pcf::IndiProperty m_indiP_ccdTempLock;
 
    pcf::IndiProperty m_indiP_adcspeed;
 
-//   pcf::IndiProperty m_indiP_mode;
-
-   pcf::IndiProperty m_indiP_exptime;
-   pcf::IndiProperty m_indiP_fps;
-
 public:
-   INDI_NEWCALLBACK_DECL(picamCtrl, m_indiP_ccdTemp);
    INDI_NEWCALLBACK_DECL(picamCtrl, m_indiP_adcspeed);
-
-//   INDI_NEWCALLBACK_DECL(picamCtrl, m_indiP_mode);
-   INDI_NEWCALLBACK_DECL(picamCtrl, m_indiP_exptime);
-   INDI_NEWCALLBACK_DECL(picamCtrl, m_indiP_fps);
-
 
 };
 
@@ -275,9 +248,6 @@ void picamCtrl::setupConfig()
 
    config.add("camera.serialNumber", "", "camera.serialNumber", argType::Required, "camera", "serialNumber", false, "int", "The identifying serial number of the camera.");
 
-   config.add("camera.powerOnWait", "", "camera.powerOnWait", argType::Required, "camera", "powerOnWait", false, "int", "Time after power-on to begin attempting connections [sec].  Default is 10 sec.");
-   config.add("camera.startupTemp", "", "camera.startupTemp", argType::Required, "camera", "startupTemp", false, "float", "The temperature setpoint to set after a power-on [C].  Default is -55 C.");
-
    dev::stdCamera<picamCtrl>::setupConfig(config);
    dev::frameGrabber<picamCtrl>::setupConfig(config);
    dev::dssShutter<picamCtrl>::setupConfig(config);
@@ -288,8 +258,6 @@ void picamCtrl::loadConfig()
 {
 
    config(m_serialNumber, "camera.serialNumber");
-   config(m_powerOnWait, "camera.powerOnWait");
-   config(m_startupTemp, "camera.startupTemp");
 
    dev::stdCamera<picamCtrl>::loadConfig(config);
    dev::frameGrabber<picamCtrl>::loadConfig(config);
@@ -300,51 +268,15 @@ void picamCtrl::loadConfig()
 inline
 int picamCtrl::appStartup()
 {
-   // set up the  INDI properties
-   REG_INDI_NEWPROP(m_indiP_ccdTemp, "ccdtemp", pcf::IndiProperty::Number);
-   m_indiP_ccdTemp.add (pcf::IndiElement("current"));
-   m_indiP_ccdTemp["current"].set(0);
-   m_indiP_ccdTemp.add (pcf::IndiElement("target"));
 
    createStandardIndiSelectionSw(m_indiP_adcspeed, "adcspeed", m_adcSpeeds, "ADC Speed");
    for(size_t n=0; n< m_adcSpeeds.size(); ++n) m_indiP_adcspeed[m_adcSpeeds[n]].setLabel(m_adcSpeedLabels[n]);
    registerIndiPropertyNew(m_indiP_adcspeed, INDI_NEWCALLBACK(m_indiP_adcspeed));
    
-
-   REG_INDI_NEWPROP_NOCB(m_indiP_ccdTempLock, "ccdtempctrl", pcf::IndiProperty::Text);
-   m_indiP_ccdTempLock.add (pcf::IndiElement("state"));
-
-//    REG_INDI_NEWPROP(m_indiP_mode, "mode", pcf::IndiProperty::Text);
-//    m_indiP_mode.add (pcf::IndiElement("current"));
-//    m_indiP_mode.add (pcf::IndiElement("target"));
-
-   REG_INDI_NEWPROP(m_indiP_fps, "fps", pcf::IndiProperty::Number);
-   m_indiP_fps.add (pcf::IndiElement("current"));
-   m_indiP_fps["current"].set(0);
-   m_indiP_fps.add (pcf::IndiElement("set"));
-   m_indiP_fps.add (pcf::IndiElement("target"));
-   m_indiP_fps.add (pcf::IndiElement("measured"));
-
-   REG_INDI_NEWPROP(m_indiP_exptime, "exptime", pcf::IndiProperty::Number);
-   m_indiP_exptime.add (pcf::IndiElement("current"));
-   m_indiP_exptime["current"].set(m_expTimeSet);
-   m_indiP_exptime.add (pcf::IndiElement("target"));
-   m_indiP_exptime["target"].set(0);
-
-   m_indiP_exptime.add (pcf::IndiElement("min"));
-   m_indiP_exptime["min"].set(m_expTimeMin);
-   m_indiP_exptime.add (pcf::IndiElement("max"));
-   m_indiP_exptime["max"].set(m_expTimeMax);
-   m_indiP_exptime.add (pcf::IndiElement("delta"));
-   m_indiP_exptime["delta"].set(m_expTimeDelta);
-
-
-   m_currentROI.x = 511.5;
-   m_currentROI.y = 511.5;
-   m_currentROI.w = 1024;
-   m_currentROI.h = 1024;
-   m_currentROI.bin_x = 1;
-   m_currentROI.bin_y = 1;
+   
+   m_minTemp = -55;
+   m_maxTemp = 25;
+   m_stepTemp = 0;
    
    m_minROIx = 0;
    m_maxROIx = 1023;
@@ -393,6 +325,12 @@ int picamCtrl::appStartup()
 inline
 int picamCtrl::appLogic()
 {
+   //and run stdCamera's appLogic
+   if(dev::stdCamera<picamCtrl>::appLogic() < 0)
+   {
+      return log<software_error, -1>({__FILE__, __LINE__});
+   }
+   
    //first run frameGrabber's appLogic to see if the f.g. thread has exited.
    if(dev::frameGrabber<picamCtrl>::appLogic() < 0)
    {
@@ -405,26 +343,11 @@ int picamCtrl::appLogic()
       return log<software_error, -1>({__FILE__, __LINE__});
    }
 
-   if( state() == stateCodes::POWERON )
-   {
-      if(m_powerOnCounter*m_loopPause > ((double) m_powerOnWait)*1e9)
-      {
-         //=================================
-
-
-         state(stateCodes::NOTCONNECTED);
-         m_reconfig = true; //Trigger a f.g. thread reconfig.
-         m_powerOnCounter = 0;
-      }
-      else
-      {
-         ++m_powerOnCounter;
-         return 0;
-      }
-   }
 
    if( state() == stateCodes::NOTCONNECTED || state() == stateCodes::NODEVICE || state() == stateCodes::ERROR)
    {
+      m_reconfig = true; //Trigger a f.g. thread reconfig.
+
       //Might have gotten here because of a power off.
       if(MagAOXAppT::m_powerState == 0) return 0;
 
@@ -447,15 +370,17 @@ int picamCtrl::appLogic()
          return log<software_error,0>({__FILE__,__LINE__});
       }
 
-      if( setTemp(m_startupTemp) < 0 )
+      if( setTempSetPt() < 0 ) //m_ccdTempSetpt already set on power on
       {
          return log<software_error,0>({__FILE__,__LINE__});
       }
 
+      
       if(frameGrabber<picamCtrl>::updateINDI() < 0)
       {
          return log<software_error,0>({__FILE__,__LINE__});
       }
+      
    }
 
    if( state() == stateCodes::READY || state() == stateCodes::OPERATING )
@@ -482,6 +407,11 @@ int picamCtrl::appLogic()
          return 0;
       }
 
+      if(stdCamera<picamCtrl>::updateINDI() < 0)
+      {
+         return log<software_error,0>({__FILE__,__LINE__});
+      }
+      
       if(frameGrabber<picamCtrl>::updateINDI() < 0)
       {
          return log<software_error,0>({__FILE__,__LINE__});
@@ -494,7 +424,6 @@ int picamCtrl::appLogic()
          return 0;
       }
 
-      updateIfChanged(m_indiP_fps, "current", m_fpsCurr);
    }
 
    //Fall through check?
@@ -506,20 +435,9 @@ int picamCtrl::appLogic()
 inline
 int picamCtrl::onPowerOff()
 {
-   m_powerOnCounter = 0;
+   
 
    std::lock_guard<std::mutex> lock(m_indiMutex);
-
-   updateIfChanged(m_indiP_ccdTemp, "current", -999);
-   updateIfChanged(m_indiP_ccdTemp, "target", -999);
-   updateIfChanged(m_indiP_ccdTempLock, "state", std::string(""));
-
-//    updateIfChanged(m_indiP_mode, "current", std::string(""));
-//    updateIfChanged(m_indiP_mode, "target", std::string(""));
-
-   updateIfChanged(m_indiP_fps, "current", 0);
-   updateIfChanged(m_indiP_fps, "target", 0);
-   updateIfChanged(m_indiP_fps, "measured", 0);
 
    if(m_cameraHandle)
    {
@@ -532,19 +450,9 @@ int picamCtrl::onPowerOff()
    ///\todo error check these base class fxns.
    dssShutter<picamCtrl>::onPowerOff();
 
-   m_currentROI.x = 511.5;
-   m_currentROI.y = 511.5;
-   m_currentROI.w = 1024;
-   m_currentROI.h = 1024;
-   m_currentROI.bin_x = 1;
-   m_currentROI.bin_y = 1;
    
-   m_nextROI.x = 511.5;
-   m_nextROI.y = 511.5;
-   m_nextROI.w = 1024;
-   m_nextROI.h = 1024;
-   m_nextROI.bin_x = 1;
-   m_nextROI.bin_y = 1;
+   
+   stdCamera<picamCtrl>::onPowerOff();
    
    return 0;
 }
@@ -910,24 +818,26 @@ int picamCtrl::getTemps()
    else if(status == 2) lockstr = "locked";
    else if(status == 3) lockstr = "faulted";
 
-   updateIfChanged(m_indiP_ccdTemp, "current", currTemperature);
-
-   updateIfChanged(m_indiP_ccdTempLock, "state", lockstr);
+   if(status < 2 )
+   {
+      updateIfChanged(m_indiP_temp, "current", currTemperature, INDI_BUSY);
+      updateIfChanged(m_indiP_tempstat, "status", lockstr, INDI_BUSY);
+   }
+   else if (status == 2)
+   {
+      updateIfChanged(m_indiP_temp, "current", currTemperature, INDI_OK);
+      updateIfChanged(m_indiP_tempstat, "status", lockstr, INDI_OK);
+   }
+   else
+   {
+      updateIfChanged(m_indiP_temp, "current", currTemperature, INDI_ALERT);
+      updateIfChanged(m_indiP_tempstat, "status", lockstr, INDI_ALERT);
+   }
+   
 
    return 0;
 
 }
-
-inline
-int picamCtrl::setTemp(piflt temp)
-{
-   m_ccdTempSetpt = temp;
-
-   m_reconfig = true;
-
-   return 0;
-}
-
 
 inline
 int picamCtrl::setAdcSpeed(int newspd)
@@ -945,22 +855,69 @@ int picamCtrl::setAdcSpeed(int newspd)
    return 0;
 }
 
+
+
+
 inline
-int picamCtrl::setExpTime(piflt exptime)
+int picamCtrl::setFPS()
+{
+   m_expTimeSet = 1.0/m_fpsSet;
+   return setExpTime();
+}
+
+inline 
+int picamCtrl::powerOnDefaults()
+{
+   m_ccdTempSetpt = -55; //This is the power on setpoint
+
+   m_currentROI.x = 511.5;
+   m_currentROI.y = 511.5;
+   m_currentROI.w = 1024;
+   m_currentROI.h = 1024;
+   m_currentROI.bin_x = 1;
+   m_currentROI.bin_y = 1;
+
+   return 0;
+}
+
+inline 
+int picamCtrl::setTempControl()
+{
+   //Always on
+   m_tempControlStatusSet = true;
+   updateSwitchIfChanged(m_indiP_tempcont, "toggle", pcf::IndiElement::On, INDI_IDLE);
+   return 0;
+}
+
+inline 
+int picamCtrl::setTempSetPt()
+{
+   ///\todo bounds check here.
+   m_reconfig = true;
+
+   return 0;
+}
+
+inline
+int picamCtrl::setExpTime()
 {
 
-   long intexptime = exptime * 1000 * 10000 + 0.5;
-   exptime = ((double)intexptime)/10000;
+   long intexptime = m_expTimeSet * 1000 * 10000 + 0.5;
+   piflt exptime = ((double)intexptime)/10000;
 
    int rv;
+   
+   std::string mode;
    if(state() == stateCodes::OPERATING)
    {
-      std::cerr << "setting online...\n";
-      rv = setPicamParameterOnline(m_modelHandle, PicamParameter_ExposureTime, exptime);
+      mode = "online";
+      
+      rv = setPicamParameterOnline(m_modelHandle, PicamParameter_ExposureTime, exptime);      
    }
    else
    {
-      std::cerr << "setting offline...\n";
+      mode = "offline";
+      
       rv = setPicamParameter(m_modelHandle, PicamParameter_ExposureTime, exptime);
    }
 
@@ -970,16 +927,12 @@ int picamCtrl::setExpTime(piflt exptime)
       return -1;
    }
 
-   log<text_log>( "Set exposure time: " + std::to_string(exptime/1000.0) + " sec");
+   
+   log<text_log>( "Set exposure time " + mode + " to: " + std::to_string(exptime/1000.0) + " sec");
+
+   updateIfChanged(m_indiP_exptime, "current", m_expTimeSet, INDI_IDLE);
 
    return 0;
-}
-
-
-inline
-int picamCtrl::setFPS(piflt fps)
-{
-   return setExpTime(1.0/fps);
 }
 
 //Set ROI property to busy if accepted, set toggle to Off and Idlw either way.
@@ -998,7 +951,7 @@ int picamCtrl::setNextROI()
    
    m_reconfig = true;
 
-   updateSwitchIfChanged(m_indiP_roi_set, "toggle", pcf::IndiElement::Off, INDI_IDLE);
+   updateSwitchIfChanged(m_indiP_roi_set, "request", pcf::IndiElement::Off, INDI_IDLE);
    
    return 0;
    
@@ -1050,8 +1003,6 @@ int picamCtrl::configureAcquisition()
       state(stateCodes::ERROR);
       return -1;
    }
-
-   updateIfChanged(m_indiP_ccdTemp, "target", m_ccdTempSetpt);
 
    log<text_log>( "Set temperature set point: " + std::to_string(m_ccdTempSetpt) + " C");
 
@@ -1198,18 +1149,6 @@ int picamCtrl::configureAcquisition()
    //=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*
    //=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*
 
-   piflt exptime;
-   if(getPicamParameter(exptime, PicamParameter_ExposureTime) < 0)
-   {
-      std::cerr << "could not get Exposuretime\n";
-   }
-   else
-   {
-      m_expTimeSet = exptime/1000.0;
-      updateIfChanged(m_indiP_exptime, "current", m_expTimeSet);
-      std::cerr << "ExposureTime is: " << exptime << "\n";
-   }
-
    const PicamRangeConstraint * constraint_array;
    piint constraint_count;
    PicamAdvanced_GetParameterRangeConstraints( m_modelHandle, PicamParameter_ExposureTime, &constraint_array, &constraint_count);
@@ -1219,21 +1158,33 @@ int picamCtrl::configureAcquisition()
       std::cerr << "Constraint count is not 1: " << (int) constraint_count << " constraints" << std::endl;
 
       log<text_log>("Constraint count is not 1: " + std::to_string(constraint_count) + " constraints",logPrio::LOG_ERROR);
-
-      updateIfChanged(m_indiP_exptime, "min", std::string("UNK"));
-      updateIfChanged(m_indiP_exptime, "max", std::string("UNK"));
-      updateIfChanged(m_indiP_exptime, "delta", std::string("UNK"));
    }
    else
    {
-      m_expTimeMin = constraint_array[0].minimum;
-      updateIfChanged(m_indiP_exptime, "min", m_expTimeMin);
-      m_expTimeMax = constraint_array[0].maximum;
-      updateIfChanged(m_indiP_exptime, "max", m_expTimeMax);
-      m_expTimeDelta = constraint_array[0].increment;
-      updateIfChanged(m_indiP_exptime, "delta", m_expTimeDelta);
+      m_minExpTime = constraint_array[0].minimum;
+      m_maxExpTime = constraint_array[0].maximum;
+      m_stepExpTime = constraint_array[0].increment;
+
+      m_indiP_exptime["current"].setMin(m_minExpTime);
+      m_indiP_exptime["current"].setMax(m_maxExpTime);
+      m_indiP_exptime["current"].setStep(m_stepExpTime);
+   
+      m_indiP_exptime["target"].setMin(m_minExpTime);
+      m_indiP_exptime["target"].setMax(m_maxExpTime);
+      m_indiP_exptime["target"].setStep(m_stepExpTime);
    }
 
+   piflt exptime;
+   if(getPicamParameter(exptime, PicamParameter_ExposureTime) < 0)
+   {
+      std::cerr << "could not get Exposuretime\n";
+   }
+   else
+   {
+      m_expTimeSet = exptime/1000.0;
+      updateIfChanged(m_indiP_exptime, "current", m_expTimeSet, INDI_IDLE);
+      std::cerr << "ExposureTime is: " << exptime << "\n";
+   }
 
    piflt FrameRateCalculation;
    if(getPicamParameter(FrameRateCalculation, PicamParameter_FrameRateCalculation) < 0)
@@ -1245,8 +1196,10 @@ int picamCtrl::configureAcquisition()
 
    //std::cerr << "Available readouts: " << available.readout_count << "\n";
    std::cerr << "Frame rate: " << FrameRateCalculation << "\n";
-   m_fpsSet = FrameRateCalculation;
-   updateIfChanged(m_indiP_fps, "set", m_fpsSet);
+   
+   
+//    m_fpsSet = FrameRateCalculation;
+//    updateIfChanged(m_indiP_fps, "current", m_fpsSet, INDI_IDLE);
 
 
 
@@ -1360,7 +1313,7 @@ int picamCtrl::configureAcquisition()
        return -1;
     }
 
-    m_dataType = _DATATYPE_INT16; //Where does this go?
+    m_dataType = _DATATYPE_UINT16; //Where does this go?
     std::cerr << "Acquisition Started\n";
     sleep(1);
     return 0;
@@ -1434,21 +1387,9 @@ int picamCtrl::acquireAndCheckValid()
       return 1;
    }
 
-   m_fpsCurr = status.readout_rate;
+   m_fpsSet = status.readout_rate;
 
    return 0;
-
-   piflt FrameRateCalculation;
-   if(getPicamParameter(FrameRateCalculation, PicamParameter_FrameRateCalculation) < 0)
-   {
-      std::cerr << "could not get FrameRateCalculation\n";
-   }
-
-   //std::cerr << "FrameRateCalculation is: " << FrameRateCalculation << "\n";
-
-   //std::cerr << "Available readouts: " << available.readout_count << "\n";
-   std::cerr << "Frame rate: " << status.readout_rate <<" " << FrameRateCalculation << "\r";
-   if(available.readout_count <= 0) return 1;
 
 }
 
@@ -1543,40 +1484,6 @@ int picamCtrl::reconfig()
 
 
 
-INDI_NEWCALLBACK_DEFN(picamCtrl, m_indiP_ccdTemp)(const pcf::IndiProperty &ipRecv)
-{
-   if (ipRecv.getName() == m_indiP_ccdTemp.getName())
-   {
-      float current = 99, target = 99;
-
-      try
-      {
-         current = ipRecv["current"].get<float>();
-      }
-      catch(...){}
-
-      try
-      {
-         target = ipRecv["target"].get<float>();
-      }
-      catch(...){}
-
-
-      //Check if target is empty
-      if( target == 99 ) target = current;
-
-      //Now check if it's valid?
-      ///\todo implement more configurable max-set-able temperature
-      if( target > 30 ) return 0;
-
-
-      //Lock the mutex, waiting if necessary
-      std::unique_lock<std::mutex> lock(m_indiMutex);
-
-      return setTemp(target);
-   }
-   return -1;
-}
 
 INDI_NEWCALLBACK_DEFN(picamCtrl, m_indiP_adcspeed)(const pcf::IndiProperty &ipRecv)
 {
@@ -1611,6 +1518,8 @@ INDI_NEWCALLBACK_DEFN(picamCtrl, m_indiP_adcspeed)(const pcf::IndiProperty &ipRe
       return 0; //This is just a reset of current probably
    }
    
+   if(newspeed == "00100_kHz" || newspeed == "01_MHz") return 0; //just silently ignore
+   
    std::lock_guard<std::mutex> guard(m_indiMutex);
    return setAdcSpeed(m_adcSpeedValues[newn]);
    
@@ -1618,72 +1527,9 @@ INDI_NEWCALLBACK_DEFN(picamCtrl, m_indiP_adcspeed)(const pcf::IndiProperty &ipRe
 
 
 
-INDI_NEWCALLBACK_DEFN(picamCtrl, m_indiP_fps)(const pcf::IndiProperty &ipRecv)
-{
-   if (ipRecv.getName() == m_indiP_fps.getName())
-   {
-      float current = -99, target = -99;
 
-      try
-      {
-         current = ipRecv["current"].get<float>();
-      }
-      catch(...){}
 
-      try
-      {
-         target = ipRecv["target"].get<float>();
-      }
-      catch(...){}
 
-      if(target == -99) target = current;
-
-      if(target <= 0) return 0;
-
-      //Lock the mutex, waiting if necessary
-      std::unique_lock<std::mutex> lock(m_indiMutex);
-
-      m_ccdTempSetpt = target;
-      updateIfChanged(m_indiP_fps, "target", target);
-
-      return setFPS(target);
-
-   }
-   return -1;
-}
-
-INDI_NEWCALLBACK_DEFN(picamCtrl, m_indiP_exptime)(const pcf::IndiProperty &ipRecv)
-{
-   if (ipRecv.getName() == m_indiP_exptime.getName())
-   {
-      float current = -99, target = -99;
-
-      try
-      {
-         current = ipRecv["current"].get<float>();
-      }
-      catch(...){}
-
-      try
-      {
-         target = ipRecv["target"].get<float>();
-      }
-      catch(...){}
-
-      if(target == -99) target = current;
-
-      if(target <= 0) return 0;
-
-      //Lock the mutex, waiting if necessary
-      std::unique_lock<std::mutex> lock(m_indiMutex);
-
-      updateIfChanged(m_indiP_exptime, "target", target);
-
-      return setExpTime(target);
-
-   }
-   return -1;
-}
 }//namespace app
 } //namespace MagAOX
 #endif

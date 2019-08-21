@@ -59,7 +59,7 @@ protected:
 
    std::vector<std::string> m_filterNames; ///< The names of each position in the wheel.
    
-   std::vector<double> m_filterPositions; ///< The positions, in filter units, of each filter.  If 0, then the integer position number is used to calculate.
+   std::vector<double> m_filterPositions; ///< The positions, in filter units, of each filter.  If 0, then the integer position number (starting from 1) is used to calculate.
    
    ///@}
    
@@ -424,10 +424,11 @@ int stdFilterWheel<derivedT>::newCallBack_filterName( const pcf::IndiProperty &i
       return 0; //This is just an reset of current probably
    }
    
-   m_filter_target = (double) newn + 1.0;
-   indi::updateIfChanged(m_indiP_filter, "target",  m_filter_target , derived().m_indiDriver,INDI_BUSY);
-   
    std::lock_guard<std::mutex> guard(derived().m_indiMutex);
+
+   m_filter_target = m_filterPositions[newn]; //(double) newn + 1.0;
+   derived().updateIfChanged(m_indiP_filter, "target",  m_filter_target, INDI_BUSY);
+   
    return derived().moveTo(m_filter_target);
    
 }

@@ -395,24 +395,28 @@ int zaberLowLevel::appStartup()
       m_indiP_tgt_pos.add (pcf::IndiElement(m_stages[n].name()));
    }
    
+   /*--> Kill this */
    REG_INDI_NEWPROP(m_indiP_tgt_relpos, "tgt_relpos", pcf::IndiProperty::Number);
    for(size_t n=0; n< m_stages.size(); ++n)
    {
       m_indiP_tgt_relpos.add (pcf::IndiElement(m_stages[n].name()));
    }
    
+   /*--> Make a switch */
    REG_INDI_NEWPROP(m_indiP_req_home, "req_home", pcf::IndiProperty::Number);
    for(size_t n=0; n< m_stages.size(); ++n)
    {
       m_indiP_req_home.add (pcf::IndiElement(m_stages[n].name()));
    }
    
+   /*--> Make a switch */
    REG_INDI_NEWPROP(m_indiP_req_halt, "req_halt", pcf::IndiProperty::Number);
    for(size_t n=0; n< m_stages.size(); ++n)
    {
       m_indiP_req_halt.add (pcf::IndiElement(m_stages[n].name()));
    }
    
+   /*--> Make a switch */
    REG_INDI_NEWPROP(m_indiP_req_ehalt, "req_ehalt", pcf::IndiProperty::Number);
    for(size_t n=0; n< m_stages.size(); ++n)
    {

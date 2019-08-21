@@ -123,6 +123,50 @@ protected:
    
    std::string m_startupMode; ///< The camera mode to load during first init after a power-on.
    
+   unsigned long m_powerOnWait {10}; ///< Time in sec to wait for camera boot after power on.
+
+   float m_startupTemp {-999}; ///< The temperature to set after a power-on.  Set to <= -999 to not use [default].
+   
+   ///@}
+   
+   int m_powerOnCounter {0}; ///< Counts numer of loops after power on, implements delay for camera bootup.
+   
+   /** \name Temperature Control Interface 
+     * @{
+     */ 
+   bool m_hasTempControl {true}; ///< Flag to set in constructor determining if this device has temperature control.  Note m_hasTemperature is implied if this is true.
+   bool m_hasTemperature {true}; ///< Flag to set in constructor determining if this device has temperature output.  Only meaningful if m_hasTempControl is false.
+   
+   float m_minTemp {-60};
+   float m_maxTemp {30};
+   float m_stepTemp {0};
+   
+   float m_ccdTemp {-999}; ///< The current temperature, in C
+   
+   float m_ccdTempSetpt {-999}; ///< The desired temperature, in C
+   
+   bool m_tempControlStatusSet {false};
+   
+   std::string m_tempControlStatus;
+   
+   ///@}
+   
+   /** \name Exposure Control 
+     * @{
+     */
+   
+   float m_minExpTime {0};
+   float m_maxExpTime {std::numeric_limits<float>::max()};
+   float m_stepExpTime {0};
+   
+   float m_expTimeSet {0}; ///< The exposure time, in seconds, as set by user.
+   
+   float m_minFPS{0};
+   float m_maxFPS{std::numeric_limits<float>::max()};
+   float m_stepFPS{0};
+   
+   float m_fpsSet {0}; ///< The commanded fps, as set by user.
+   
    ///@}
    
    bool m_usesModes {true}; ///< Flag to set in constructor determining if modes are offered by this camera
@@ -275,6 +319,14 @@ protected:
 protected:
    //declare our properties
    
+   pcf::IndiProperty m_indiP_temp;
+   pcf::IndiProperty m_indiP_tempcont;
+   pcf::IndiProperty m_indiP_tempstat;
+   
+   pcf::IndiProperty m_indiP_exptime;
+   
+   pcf::IndiProperty m_indiP_fps;
+   
    pcf::IndiProperty m_indiP_mode; ///< Property used to report the current mode
    
    pcf::IndiProperty m_indiP_roi_x; ///< Property used to set the ROI x center coordinate
@@ -297,6 +349,34 @@ public:
    static int st_newCallBack_stdCamera( void * app, ///< [in] a pointer to this, will be static_cast-ed to derivedT.
                                         const pcf::IndiProperty &ipRecv ///< [in] the INDI property sent with the the new property request.
                                       );
+   
+   /// Callback to process a NEW CCD temp request
+   /**
+     * \returns 0 on success.
+     * \returns -1 on error.
+     */
+   int newCallBack_temp( const pcf::IndiProperty &ipRecv /**< [in] the INDI property sent with the the new property request.*/);
+   
+   /// Callback to process a NEW CCD temp control request
+   /**
+     * \returns 0 on success.
+     * \returns -1 on error.
+     */
+   int newCallBack_temp_controller( const pcf::IndiProperty &ipRecv /**< [in] the INDI property sent with the the new property request.*/);
+   
+   /// Callback to process a NEW exposure time request
+   /**
+     * \returns 0 on success.
+     * \returns -1 on error.
+     */
+   int newCallBack_exptime( const pcf::IndiProperty &ipRecv /**< [in] the INDI property sent with the the new property request.*/);
+   
+   /// Callback to process a NEW fps request
+   /**
+     * \returns 0 on success.
+     * \returns -1 on error.
+     */
+   int newCallBack_fps( const pcf::IndiProperty &ipRecv /**< [in] the INDI property sent with the the new property request.*/);
    
    /// Callback to process a NEW mode request
    /**
@@ -385,16 +465,25 @@ stdCamera<derivedT>::~stdCamera() noexcept
 template<class derivedT>
 void stdCamera<derivedT>::setupConfig(mx::app::appConfigurator & config)
 {
-   static_cast<void>(config);
    
-   //config.add("framegrabber.pdv_unit", "", "framegrabber.pdv_unit", argType::Required, "framegrabber", "pdv_unit", false, "int", "The EDT PDV framegrabber unit number.  Default is 0.");
+   config.add("camera.powerOnWait", "", "camera.powerOnWait", argType::Required, "camera", "powerOnWait", false, "int", "Time after power-on to begin attempting connections [sec].  Default is 10 sec.");
+   
+   if(m_hasTempControl)
+   {
+      config.add("camera.startupTemp", "", "camera.startupTemp", argType::Required, "camera", "startupTemp", false, "float", "The temperature setpoint to set after a power-on [C].  Default is 20 C.");
+   }
    
 }
 
 template<class derivedT>
 void stdCamera<derivedT>::loadConfig(mx::app::appConfigurator & config)
 {
-   //config(m_unit, "framegrabber.pdv_unit");
+   config(m_powerOnWait, "camera.powerOnWait");
+   
+   if(m_hasTempControl)
+   {
+      config(m_startupTemp, "camera.startupTemp");
+   }
    
    if(m_usesModes)
    {
@@ -416,6 +505,62 @@ void stdCamera<derivedT>::loadConfig(mx::app::appConfigurator & config)
 template<class derivedT>
 int stdCamera<derivedT>::appStartup()
 {
+   
+   if(m_hasTempControl)
+   {
+      //The min/max/step values should be set in derivedT before this is called.
+      derived().createStandardIndiNumber( m_indiP_temp, "temp_ccd", m_minTemp, m_maxTemp, m_stepTemp, "%0.1f","CCD Temperature", "CCD Temperature");
+      m_indiP_temp["current"].set(m_ccdTemp);
+      m_indiP_temp["target"].set(m_ccdTempSetpt);
+      if( derived().registerIndiPropertyNew( m_indiP_temp, st_newCallBack_stdCamera) < 0)
+      {
+         #ifndef STDCAMERA_TEST_NOLOG
+         derivedT::template log<software_error>({__FILE__,__LINE__});
+         #endif
+         return -1;
+      }
+      
+      derived().createStandardIndiToggleSw( m_indiP_tempcont, "temp_controller", "CCD Temperature", "Control On/Off");
+      m_indiP_tempcont["toggle"].set(pcf::IndiElement::Off);
+      if( derived().registerIndiPropertyNew( m_indiP_tempcont, st_newCallBack_stdCamera) < 0)
+      {
+         #ifndef STDCAMERA_TEST_NOLOG
+         derivedT::template log<software_error>({__FILE__,__LINE__});
+         #endif
+         return -1;
+      }
+      
+      derived().createROIndiText( m_indiP_tempstat, "temp_control", "status", "CCD Temperature", "", "CCD Temperature");
+      if( derived().registerIndiPropertyReadOnly( m_indiP_tempstat ) < 0)
+      {
+         #ifndef STDCAMERA_TEST_NOLOG
+         derivedT::template log<software_error>({__FILE__,__LINE__});
+         #endif
+         return -1;
+      }
+      
+   }
+   else if(m_hasTemperature)
+   {
+   }
+   
+   derived().createStandardIndiNumber( m_indiP_exptime, "exptime", m_minExpTime, m_maxExpTime, m_stepExpTime, "%0.3f");
+   if( derived().registerIndiPropertyNew( m_indiP_exptime, st_newCallBack_stdCamera) < 0)
+   {
+      #ifndef STDCAMERA_TEST_NOLOG
+      derivedT::template log<software_error>({__FILE__,__LINE__});
+      #endif
+      return -1;
+   }
+   
+   derived().createStandardIndiNumber( m_indiP_fps, "fps", m_minFPS, m_maxFPS, m_stepFPS, "%0.2f");
+   if( derived().registerIndiPropertyNew( m_indiP_fps, st_newCallBack_stdCamera) < 0)
+   {
+      #ifndef STDCAMERA_TEST_NOLOG
+      derivedT::template log<software_error>({__FILE__,__LINE__});
+      #endif
+      return -1;
+   }
    
    if(m_usesModes)
    {
@@ -495,32 +640,7 @@ int stdCamera<derivedT>::appStartup()
          return -1;
       }
       
-      //m_currentROI should be set to default/startup values in derivedT before this function is called.
-      m_nextROI.x = m_currentROI.x;
-      m_nextROI.y = m_currentROI.y;
-      m_nextROI.w = m_currentROI.w;
-      m_nextROI.h = m_currentROI.h;
-      m_nextROI.bin_x = m_currentROI.bin_x;
-      m_nextROI.bin_y = m_currentROI.bin_y;
-   
-
-      derived().updateIfChanged(m_indiP_roi_x, "current", m_currentROI.x, INDI_IDLE);
-      derived().updateIfChanged(m_indiP_roi_x, "target", m_nextROI.x, INDI_IDLE);
-   
-      derived().updateIfChanged(m_indiP_roi_y, "current", m_currentROI.y, INDI_IDLE);
-      derived().updateIfChanged(m_indiP_roi_y, "target", m_nextROI.y, INDI_IDLE);
-   
-      derived().updateIfChanged(m_indiP_roi_w, "current", m_currentROI.w, INDI_IDLE);
-      derived().updateIfChanged(m_indiP_roi_w, "target", m_nextROI.w, INDI_IDLE);
-   
-      derived().updateIfChanged(m_indiP_roi_h, "current", m_currentROI.h, INDI_IDLE);
-      derived().updateIfChanged(m_indiP_roi_h, "target", m_nextROI.h, INDI_IDLE);
-   
-      derived().updateIfChanged(m_indiP_roi_bin_x, "current", m_currentROI.bin_x, INDI_IDLE);
-      derived().updateIfChanged(m_indiP_roi_bin_x, "target", m_nextROI.bin_x, INDI_IDLE);
-   
-      derived().updateIfChanged(m_indiP_roi_bin_y, "current", m_currentROI.bin_y, INDI_IDLE);
-      derived().updateIfChanged(m_indiP_roi_bin_y, "target", m_nextROI.bin_y, INDI_IDLE);
+      
    
    }
    
@@ -530,6 +650,60 @@ int stdCamera<derivedT>::appStartup()
 template<class derivedT>
 int stdCamera<derivedT>::appLogic()
 {
+   if( derived().state() == stateCodes::POWERON )
+   {
+      if(m_powerOnCounter*derived().m_loopPause > ((double) m_powerOnWait)*1e9)
+      {
+         derived().state(stateCodes::NOTCONNECTED);
+
+         m_powerOnCounter = 0;
+         
+         //Set power-on defaults
+         
+         derived().powerOnDefaults();
+         
+         //then set startupTemp if configured
+         if(m_startupTemp > -999) m_ccdTempSetpt = m_startupTemp;
+         derived().updateIfChanged(m_indiP_temp, "target", m_ccdTempSetpt, INDI_IDLE);
+         
+         if(m_usesROI)
+         {
+            //m_currentROI should be set to default/startup values in derivedT::powerOnDefaults
+            m_nextROI.x = m_currentROI.x;
+            m_nextROI.y = m_currentROI.y;
+            m_nextROI.w = m_currentROI.w;
+            m_nextROI.h = m_currentROI.h;
+            m_nextROI.bin_x = m_currentROI.bin_x;
+            m_nextROI.bin_y = m_currentROI.bin_y;
+   
+            derived().updateIfChanged(m_indiP_roi_x, "current", m_currentROI.x, INDI_IDLE);
+            derived().updateIfChanged(m_indiP_roi_x, "target", m_nextROI.x, INDI_IDLE);
+   
+            derived().updateIfChanged(m_indiP_roi_y, "current", m_currentROI.y, INDI_IDLE);
+            derived().updateIfChanged(m_indiP_roi_y, "target", m_nextROI.y, INDI_IDLE);
+   
+            derived().updateIfChanged(m_indiP_roi_w, "current", m_currentROI.w, INDI_IDLE);
+            derived().updateIfChanged(m_indiP_roi_w, "target", m_nextROI.w, INDI_IDLE);
+   
+            derived().updateIfChanged(m_indiP_roi_h, "current", m_currentROI.h, INDI_IDLE);
+            derived().updateIfChanged(m_indiP_roi_h, "target", m_nextROI.h, INDI_IDLE);
+   
+            derived().updateIfChanged(m_indiP_roi_bin_x, "current", m_currentROI.bin_x, INDI_IDLE);
+            derived().updateIfChanged(m_indiP_roi_bin_x, "target", m_nextROI.bin_x, INDI_IDLE);
+   
+            derived().updateIfChanged(m_indiP_roi_bin_y, "current", m_currentROI.bin_y, INDI_IDLE);
+            derived().updateIfChanged(m_indiP_roi_bin_y, "target", m_nextROI.bin_y, INDI_IDLE);
+         }
+         
+         return 0;
+      }
+      else
+      {
+         ++m_powerOnCounter;
+         return 0;
+      }
+   }
+   
    return 0;
 
 }
@@ -537,6 +711,8 @@ int stdCamera<derivedT>::appLogic()
 template<class derivedT>
 int stdCamera<derivedT>::onPowerOff()
 {
+   m_powerOnCounter = 0;
+   
    if( !derived().m_indiDriver ) return 0;
    
    if(m_usesModes)
@@ -547,23 +723,23 @@ int stdCamera<derivedT>::onPowerOff()
    
    if(m_usesROI)
    {
-      indi::updateIfChanged(m_indiP_roi_x, "roi_x", std::string(""), derived().m_indiDriver, INDI_IDLE);
-      indi::updateIfChanged(m_indiP_roi_x, "roi_x", std::string(""), derived().m_indiDriver, INDI_IDLE);
+      indi::updateIfChanged(m_indiP_roi_x, "current", std::string(""), derived().m_indiDriver, INDI_IDLE);
+      indi::updateIfChanged(m_indiP_roi_x, "target", std::string(""), derived().m_indiDriver, INDI_IDLE);
       
-      indi::updateIfChanged(m_indiP_roi_y, "roi_y", std::string(""), derived().m_indiDriver, INDI_IDLE);
-      indi::updateIfChanged(m_indiP_roi_y, "roi_y", std::string(""), derived().m_indiDriver, INDI_IDLE);
+      indi::updateIfChanged(m_indiP_roi_y, "current", std::string(""), derived().m_indiDriver, INDI_IDLE);
+      indi::updateIfChanged(m_indiP_roi_y, "target", std::string(""), derived().m_indiDriver, INDI_IDLE);
       
-      indi::updateIfChanged(m_indiP_roi_w, "roi_w", std::string(""), derived().m_indiDriver, INDI_IDLE);
-      indi::updateIfChanged(m_indiP_roi_w, "roi_w", std::string(""), derived().m_indiDriver, INDI_IDLE);
+      indi::updateIfChanged(m_indiP_roi_w, "current", std::string(""), derived().m_indiDriver, INDI_IDLE);
+      indi::updateIfChanged(m_indiP_roi_w, "target", std::string(""), derived().m_indiDriver, INDI_IDLE);
       
-      indi::updateIfChanged(m_indiP_roi_h, "roi_h", std::string(""), derived().m_indiDriver, INDI_IDLE);
-      indi::updateIfChanged(m_indiP_roi_h, "roi_h", std::string(""), derived().m_indiDriver, INDI_IDLE);
+      indi::updateIfChanged(m_indiP_roi_h, "current", std::string(""), derived().m_indiDriver, INDI_IDLE);
+      indi::updateIfChanged(m_indiP_roi_h, "target", std::string(""), derived().m_indiDriver, INDI_IDLE);
       
-      indi::updateIfChanged(m_indiP_roi_bin_x, "roi_bin_x", std::string(""), derived().m_indiDriver, INDI_IDLE);
-      indi::updateIfChanged(m_indiP_roi_bin_x, "roi_bin_x", std::string(""), derived().m_indiDriver, INDI_IDLE);
+      indi::updateIfChanged(m_indiP_roi_bin_x, "current", std::string(""), derived().m_indiDriver, INDI_IDLE);
+      indi::updateIfChanged(m_indiP_roi_bin_x, "target", std::string(""), derived().m_indiDriver, INDI_IDLE);
       
-      indi::updateIfChanged(m_indiP_roi_bin_y, "roi_bin_y", std::string(""), derived().m_indiDriver, INDI_IDLE);
-      indi::updateIfChanged(m_indiP_roi_bin_y, "roi_bin_y", std::string(""), derived().m_indiDriver, INDI_IDLE);
+      indi::updateIfChanged(m_indiP_roi_bin_y, "current", std::string(""), derived().m_indiDriver, INDI_IDLE);
+      indi::updateIfChanged(m_indiP_roi_bin_y, "target", std::string(""), derived().m_indiDriver, INDI_IDLE);
    }
    
    return 0;
@@ -590,6 +766,10 @@ int stdCamera<derivedT>::st_newCallBack_stdCamera( void * app,
    std::string name = ipRecv.getName();
    derivedT * _app = static_cast<derivedT *>(app);
    
+   if(name == "temp_ccd") return _app->newCallBack_temp(ipRecv);
+   if(name == "temp_controller") return _app->newCallBack_temp_controller(ipRecv);
+   if(name == "exptime") return _app->newCallBack_exptime(ipRecv);
+   if(name == "fps") return _app->newCallBack_fps(ipRecv);
    if(name == "mode") return _app->newCallBack_mode(ipRecv);
    if(name == "roi_x") return _app->newCallBack_roi_x(ipRecv);
    if(name == "roi_y") return _app->newCallBack_roi_y(ipRecv);
@@ -602,13 +782,100 @@ int stdCamera<derivedT>::st_newCallBack_stdCamera( void * app,
    return -1;
 }
 
+template<class derivedT>
+int stdCamera<derivedT>::newCallBack_temp( const pcf::IndiProperty &ipRecv )
+{
+   float target;
+   
+   std::unique_lock<std::mutex> lock(derived().m_indiMutex);
+   
+   if( derived().indiTargetUpdate( m_indiP_temp, target, ipRecv, true) < 0)
+   {
+      derivedT::template log<software_error>({__FILE__,__LINE__});
+      return -1;
+   }
+
+   std::cerr << "Setting new temperature set point to: " << target << "\n";
+   m_ccdTempSetpt = target;
+   return derived().setTempSetPt();
+}
+   
+template<class derivedT>
+int stdCamera<derivedT>::newCallBack_temp_controller( const pcf::IndiProperty &ipRecv)
+{
+   if(ipRecv.getName() != m_indiP_tempcont.getName())
+   {
+      derivedT::template log<software_error>({__FILE__,__LINE__, "wrong INDI property received."});
+      return -1;
+   }
+   
+   if(!ipRecv.find("toggle")) return 0;
+   
+   
+   m_tempControlStatusSet = false;
+
+   std::unique_lock<std::mutex> lock(derived().m_indiMutex);
+   
+   if( ipRecv["toggle"].getSwitchState() == pcf::IndiElement::On)
+   {
+      m_tempControlStatusSet = true;
+      derived().updateSwitchIfChanged(m_indiP_tempcont, "toggle", pcf::IndiElement::On, INDI_BUSY);
+   }   
+   else if( ipRecv["toggle"].getSwitchState() == pcf::IndiElement::Off)
+   {
+      m_tempControlStatusSet = false;
+      derived().updateSwitchIfChanged(m_indiP_tempcont, "toggle", pcf::IndiElement::Off, INDI_BUSY);
+   }
+   
+     
+   return derived().setTempControl();
+   
+}
+
+template<class derivedT>
+int stdCamera<derivedT>::newCallBack_exptime( const pcf::IndiProperty &ipRecv)
+{
+   float target;
+
+   std::unique_lock<std::mutex> lock(derived().m_indiMutex);
+
+   if( derived().indiTargetUpdate( m_indiP_exptime, target, ipRecv, true) < 0)
+   {
+      derivedT::template log<software_error>({__FILE__,__LINE__});
+      return -1;
+   }
+   
+   m_expTimeSet = target;
+   
+   return derived().setExpTime();
+   
+}
+
+template<class derivedT>
+int stdCamera<derivedT>::newCallBack_fps( const pcf::IndiProperty &ipRecv)
+{
+   float target;
+
+   std::unique_lock<std::mutex> lock(derived().m_indiMutex);
+
+   if( derived().indiTargetUpdate( m_indiP_fps, target, ipRecv, true) < 0)
+   {
+      derivedT::template log<software_error>({__FILE__,__LINE__});
+      return -1;
+   }
+   
+   m_fpsSet = target;
+   
+   return derived().setFPS();
+   
+}
 
 template<class derivedT>
 int stdCamera<derivedT>::newCallBack_mode( const pcf::IndiProperty &ipRecv )
 {
    std::string target;
    
-   ///\todo should lock mutex here
+   std::unique_lock<std::mutex> lock(derived().m_indiMutex);
    
    if( derived().indiTargetUpdate( m_indiP_mode, target, ipRecv, true) < 0)
    {
@@ -634,6 +901,8 @@ int stdCamera<derivedT>::newCallBack_roi_x( const pcf::IndiProperty &ipRecv )
 {
    float target;
    
+   std::unique_lock<std::mutex> lock(derived().m_indiMutex);
+   
    if( derived().indiTargetUpdate( m_indiP_roi_x, target, ipRecv, false) < 0)
    {
       m_nextROI.x = m_currentROI.x;
@@ -650,6 +919,8 @@ template<class derivedT>
 int stdCamera<derivedT>::newCallBack_roi_y( const pcf::IndiProperty &ipRecv )
 {
    float target;
+   
+   std::unique_lock<std::mutex> lock(derived().m_indiMutex);
    
    if( derived().indiTargetUpdate( m_indiP_roi_y, target, ipRecv, false) < 0)
    {
@@ -668,6 +939,8 @@ int stdCamera<derivedT>::newCallBack_roi_w( const pcf::IndiProperty &ipRecv )
 {
    int target;
    
+   std::unique_lock<std::mutex> lock(derived().m_indiMutex);
+   
    if( derived().indiTargetUpdate( m_indiP_roi_w, target, ipRecv, false) < 0)
    {
       m_nextROI.w = m_currentROI.w;
@@ -684,6 +957,8 @@ template<class derivedT>
 int stdCamera<derivedT>::newCallBack_roi_h( const pcf::IndiProperty &ipRecv )
 {
    int target;
+   
+   std::unique_lock<std::mutex> lock(derived().m_indiMutex);
    
    if( derived().indiTargetUpdate( m_indiP_roi_h, target, ipRecv, false) < 0)
    {
@@ -702,6 +977,8 @@ int stdCamera<derivedT>::newCallBack_roi_bin_x ( const pcf::IndiProperty &ipRecv
 {
    int target;
    
+   std::unique_lock<std::mutex> lock(derived().m_indiMutex);
+   
    if( derived().indiTargetUpdate( m_indiP_roi_bin_x, target, ipRecv, false) < 0)
    {
       derivedT::template log<software_error>({__FILE__,__LINE__});
@@ -718,6 +995,8 @@ template<class derivedT>
 int stdCamera<derivedT>::newCallBack_roi_bin_y( const pcf::IndiProperty &ipRecv )
 {
    int target;
+   
+   std::unique_lock<std::mutex> lock(derived().m_indiMutex);
    
    if( derived().indiTargetUpdate( m_indiP_roi_bin_y, target, ipRecv, false) < 0)
    {
@@ -742,16 +1021,16 @@ int stdCamera<derivedT>::newCallBack_roi_set( const pcf::IndiProperty &ipRecv )
    
    if(!ipRecv.find("request")) return 0;
    
-   std::cerr << "trying to toggle\n";
    
    if( ipRecv["request"].getSwitchState() == pcf::IndiElement::On)
    {
-      std::cerr << "toggling\n";
-      indi::updateSwitchIfChanged(m_indiP_roi_set, "request", pcf::IndiElement::On, derived().m_indiDriver, INDI_BUSY);
+      std::unique_lock<std::mutex> lock(derived().m_indiMutex);
+      
+      indi::updateSwitchIfChanged(m_indiP_roi_set, "request", pcf::IndiElement::Off, derived().m_indiDriver, INDI_IDLE);
       
       return derived().setNextROI();
    }
-   std::cerr << "but not\n";
+   
    return 0;  
 }
 
@@ -759,6 +1038,10 @@ template<class derivedT>
 int stdCamera<derivedT>::updateINDI()
 {
    if( !derived().m_indiDriver ) return 0;
+   
+   
+   derived().updateIfChanged(m_indiP_exptime, "current", m_expTimeSet, INDI_IDLE);
+   derived().updateIfChanged(m_indiP_fps, "current", m_fpsSet, INDI_IDLE);
    
    if(m_usesModes)
    {
