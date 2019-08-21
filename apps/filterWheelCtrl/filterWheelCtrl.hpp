@@ -39,10 +39,10 @@ namespace app
   *
   * \ingroup filterWheelCtrl
   */
-class filterWheelCtrl : public MagAOXApp<>, public tty::usbDevice, public dev::stdFilterWheel<filterWheelCtrl>
+class filterWheelCtrl : public MagAOXApp<>, public tty::usbDevice, public dev::stdMotionStage<filterWheelCtrl>
 {
 
-   friend class dev::stdFilterWheel<filterWheelCtrl>;
+   friend class dev::stdMotionStage<filterWheelCtrl>;
    
 protected:
 
@@ -246,6 +246,8 @@ protected:
 inline
 filterWheelCtrl::filterWheelCtrl() : MagAOXApp(MAGAOX_CURRENT_SHA1, MAGAOX_REPO_MODIFIED)
 {
+   m_presetNotation = "filter"; //sets the name of the configs, etc.
+   
    m_powerMgtEnabled = true;
    
    return;
@@ -265,7 +267,7 @@ void filterWheelCtrl::setupConfig()
    config.add("motor.circleSteps", "", "motor.circleSteps", argType::Required, "motor", "circleSteps", false, "long", "The number of steps in 1 revolution.");
    config.add("motor.homeOffset", "", "motor.homeOffset", argType::Required, "motor", "homeOffset", false, "long", "The homing offset in motor counts.");
    
-   dev::stdFilterWheel<filterWheelCtrl>::setupConfig(config);
+   dev::stdMotionStage<filterWheelCtrl>::setupConfig(config);
    
 }
 
@@ -290,7 +292,7 @@ void filterWheelCtrl::loadConfig()
    config(m_homeOffset, "motor.homeOffset");
    
 
-   dev::stdFilterWheel<filterWheelCtrl>::loadConfig(config);
+   dev::stdMotionStage<filterWheelCtrl>::loadConfig(config);
 
 }
 
@@ -308,7 +310,7 @@ int filterWheelCtrl::appStartup()
    registerIndiPropertyNew( m_indiP_counts, INDI_NEWCALLBACK(m_indiP_counts)) ;
 
    
-   dev::stdFilterWheel<filterWheelCtrl>::appStartup();
+   dev::stdMotionStage<filterWheelCtrl>::appStartup();
    
    
 
@@ -551,7 +553,7 @@ int filterWheelCtrl::appLogic()
                m_homingState = 0;
                state(stateCodes::READY);
                
-               m_filter_target = ((double) m_rawPos-m_homeOffset)/m_circleSteps*m_filterNames.size() + 1.0;
+               m_preset_target = ((double) m_rawPos-m_homeOffset)/m_circleSteps*m_presetNames.size() + 1.0;
             }
          }
       }
@@ -567,9 +569,9 @@ int filterWheelCtrl::appLogic()
          updateIfChanged(m_indiP_counts, "current", m_rawPos, INDI_IDLE);
       }
       
-      m_filter = ((double) m_rawPos-m_homeOffset)/m_circleSteps*m_filterNames.size() + 1.0;
+      m_preset = ((double) m_rawPos-m_homeOffset)/m_circleSteps*m_presetNames.size() + 1.0;
       
-      stdFilterWheel<filterWheelCtrl>::updateINDI();
+      stdMotionStage<filterWheelCtrl>::updateINDI();
       
       return 0;
    }
@@ -617,7 +619,7 @@ INDI_NEWCALLBACK_DEFN(filterWheelCtrl, m_indiP_counts)(const pcf::IndiProperty &
       if(target_abs == -1) target_abs = counts;
       
       
-      m_filter_target = ((double) target_abs - m_homeOffset)/m_circleSteps*m_filterNames.size() + 1.0;
+      m_preset_target = ((double) target_abs - m_homeOffset)/m_circleSteps*m_presetNames.size() + 1.0;
 
       std::lock_guard<std::mutex> guard(m_indiMutex);
       return moveToRaw(target_abs);
@@ -823,8 +825,8 @@ int filterWheelCtrl::moveTo( const double & filters )
 {
    long counts;
 
-   if(m_circleSteps ==0 || m_filterNames.size() == 0) counts = filters;
-   else counts = m_homeOffset + m_circleSteps/m_filterNames.size() * (filters-1);
+   if(m_circleSteps ==0 || m_presetNames.size() == 0) counts = filters;
+   else counts = m_homeOffset + m_circleSteps/m_presetNames.size() * (filters-1);
 
    return moveToRaw(counts);
 

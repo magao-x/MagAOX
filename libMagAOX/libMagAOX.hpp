@@ -15,7 +15,7 @@
 #include "app/stateCodes.hpp"
 #include "app/dev/outletController.hpp"
 #include "app/dev/ioDevice.hpp"
-#include "app/dev/stdFilterWheel.hpp"
+#include "app/dev/stdMotionStage.hpp"
 #include "app/dev/frameGrabber.hpp"
 #include "app/dev/stdCamera.hpp"
 #include "app/dev/edtCamera.hpp"

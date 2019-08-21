@@ -1,13 +1,13 @@
-/** \file stdFilterWheel.hpp
-  * \brief Standard filter wheel interface
+/** \file stdMotionStage.hpp
+  * \brief Standard motion stage interface
   *
   * \author Jared R. Males (jaredmales@gmail.com)
   *
   * \ingroup app_files
   */
 
-#ifndef stdFilterWheel_hpp
-#define stdFilterWheel_hpp
+#ifndef stdMotionStage_hpp
+#define stdMotionStage_hpp
 
 
 namespace MagAOX
@@ -18,8 +18,9 @@ namespace dev
 {
 
 
-/// MagAO-X standard filter wheel interface
-/** Implements the standard interface to a MagAO-X filter wheel
+/// MagAO-X standard motion stage interface
+/** Implements the standard interface to a MagAO-X motion stage.
+  * This includes the mcbl filter wheels, the zaber stages. 
   * 
   * The required interface to be implemented in derivedT is
   * \code
@@ -31,12 +32,12 @@ namespace dev
     int moveTo(double); //INDI mutex will be locked on this call.
     \endcode 
   *
-  * In addition the derived class is responsible for setting m_moving and m_filter. m_filter_target should also be set if the wheel
+  * In addition the derived class is responsible for setting m_moving and m_preset. m_preset_target should also be set if the wheel
   * is moved via a low-level position command.
   * 
   * The derived class `derivedT` must be a MagAOXApp\<true\>, and should declare this class a friend like so: 
    \code
-    friend class dev::stdFilterWheel<derivedT>;
+    friend class dev::stdMotionStage<derivedT>;
    \endcode
   *
   *
@@ -47,7 +48,7 @@ namespace dev
   * \ingroup appdev
   */
 template<class derivedT>
-class stdFilterWheel
+class stdMotionStage
 {
 protected:
 
@@ -57,28 +58,29 @@ protected:
    
    bool m_powerOnHome {false}; ///< If true, then the motor is homed at startup (by this software or actual power on)
 
-   std::vector<std::string> m_filterNames; ///< The names of each position in the wheel.
+   std::vector<std::string> m_presetNames; ///< The names of each position on the stage.
    
-   std::vector<double> m_filterPositions; ///< The positions, in filter units, of each filter.  If 0, then the integer position number (starting from 1) is used to calculate.
+   std::vector<double> m_presetPositions; ///< The positions, in arbitrary units, of each preset.  If 0, then the integer position number (starting from 1) is used to calculate.
    
    ///@}
    
+   std::string m_presetNotation {"preset"}; ///< Notation used to refer to a preset, should be singular, as in "preset" or "filter".
    
-   int m_moving {0}; ///< Whether or not the wheel is moving.
+   int m_moving {0}; ///< Whether or not the stage is moving.
    
-   double m_filter {0}; ///< The current numerical filter position [1.0 is index 0 in the filter name vector]
-   double m_filter_target {0}; ///< The target numerical filter position [1.0 is index 0 in the filter name vector]
+   double m_preset {0}; ///< The current numerical preset position [1.0 is index 0 in the preset name vector]
+   double m_preset_target {0}; ///< The target numerical preset position [1.0 is index 0 in the preset name vector]
    
 public:
 
    ///Destructor
-   ~stdFilterWheel() noexcept;
+   ~stdMotionStage() noexcept;
    
    /// Setup the configuration system
    /**
      * This should be called in `derivedT::setupConfig` as
      * \code
-       stdFilterWheel<derivedT>::setupConfig(config);
+       stdMotionStage<derivedT>::setupConfig(config);
        \endcode
      * with appropriate error checking.
      */
@@ -88,7 +90,7 @@ public:
    /**
      * This should be called in `derivedT::loadConfig` as
      * \code
-       stdFilterWheel<derivedT>::loadConfig(config);
+       stdMotionStage<derivedT>::loadConfig(config);
        \endcode
      * with appropriate error checking.
      */
@@ -98,7 +100,7 @@ public:
    /** 
      * This should be called in `derivedT::appStartup` as
      * \code
-       stdFilterWheel<derivedT>::appStartup();
+       stdMotionStage<derivedT>::appStartup();
        \endcode
      * with appropriate error checking.
      * 
@@ -108,11 +110,11 @@ public:
    int appStartup();
 
    /// Application logic 
-   /** Checks the stdFilterWheel thread
+   /** Checks the stdMotionStage thread
      * 
      * This should be called from the derived's appLogic() as in
      * \code
-       stdFilterWheel<derivedT>::appLogic();
+       stdMotionStage<derivedT>::appLogic();
        \endcode
      * with appropriate error checking.
      * 
@@ -125,7 +127,7 @@ public:
    /**
      * This should be called from the derived's onPowerOff() as in
      * \code
-       stdFilterWheel<derivedT>::onPowerOff();
+       stdMotionStage<derivedT>::onPowerOff();
        \endcode
      * with appropriate error checking.
      * 
@@ -138,7 +140,7 @@ public:
    /**
      * This should be called from the derived's whilePowerOff() as in
      * \code
-       stdFilterWheel<derivedT>::whilePowerOff();
+       stdMotionStage<derivedT>::whilePowerOff();
        \endcode
      * with appropriate error checking.
      * 
@@ -148,10 +150,10 @@ public:
    int whilePowerOff();
    
    /// Application the shutdown 
-   /** Shuts down the stdFilterWheel thread
+   /** Shuts down the stdMotionStage thread
      * 
      * \code
-       stdFilterWheel<derivedT>::appShutdown();
+       stdMotionStage<derivedT>::appShutdown();
        \endcode
      * with appropriate error checking.
      * 
@@ -170,43 +172,43 @@ protected:
 protected:
    //declare our properties
    
-   ///The position of the wheel in filters
-   pcf::IndiProperty m_indiP_filter;
+   ///The position of the stage in presets
+   pcf::IndiProperty m_indiP_preset;
 
-   ///The name of the nearest filter for this position
-   pcf::IndiProperty m_indiP_filterName;
+   ///The name of the nearest preset for this position
+   pcf::IndiProperty m_indiP_presetName;
 
-   ///Command the wheel to home.  Any change in this property causes a home.
+   ///Command the stage to home. .
    pcf::IndiProperty m_indiP_home;
    
-   ///Command the wheel to halt.  Any change in this property causes an immediate halt.
+   ///Command the stage to halt. 
    pcf::IndiProperty m_indiP_stop;
 
 public:
 
-   /// The static callback function to be registered for stdFilterWheel properties
+   /// The static callback function to be registered for stdMotionStage properties
    /** Dispatches to the relevant handler
      * 
      * \returns 0 on success.
      * \returns -1 on error.
      */
-   static int st_newCallBack_stdFilterWheel( void * app, ///< [in] a pointer to this, will be static_cast-ed to derivedT.
+   static int st_newCallBack_stdMotionStage( void * app, ///< [in] a pointer to this, will be static_cast-ed to derivedT.
                                              const pcf::IndiProperty &ipRecv ///< [in] the INDI property sent with the the new property request.
                                            );
    
-   /// Callback to process a NEW filter position request
+   /// Callback to process a NEW preset position request
    /**
      * \returns 0 on success.
      * \returns -1 on error.
      */
-   int newCallBack_filter( const pcf::IndiProperty &ipRecv /**< [in] the INDI property sent with the the new property request.*/);
+   int newCallBack_preset( const pcf::IndiProperty &ipRecv /**< [in] the INDI property sent with the the new property request.*/);
    
-   /// Callback to process a NEW filter name request
+   /// Callback to process a NEW preset name request
    /**
      * \returns 0 on success.
      * \returns -1 on error.
      */
-   int newCallBack_filterName( const pcf::IndiProperty &ipRecv /**< [in] the INDI property sent with the the new property request.*/);
+   int newCallBack_presetName( const pcf::IndiProperty &ipRecv /**< [in] the INDI property sent with the the new property request.*/);
    
    /// Callback to process a NEW home request switch toggle
    /**
@@ -241,7 +243,7 @@ private:
 };
 
 template<class derivedT>
-stdFilterWheel<derivedT>::~stdFilterWheel() noexcept
+stdMotionStage<derivedT>::~stdMotionStage() noexcept
 {
    return;
 }
@@ -249,37 +251,37 @@ stdFilterWheel<derivedT>::~stdFilterWheel() noexcept
 
 
 template<class derivedT>
-void stdFilterWheel<derivedT>::setupConfig(mx::app::appConfigurator & config)
+void stdMotionStage<derivedT>::setupConfig(mx::app::appConfigurator & config)
 {
    static_cast<void>(config);
    
    config.add("motor.powerOnHome", "", "motor.powerOnHome", argType::Required, "motor", "powerOnHome", false, "bool", "If true, home at startup/power-on.  Default=false.");
    
-   config.add("filters.names", "", "filters.names",  argType::Required, "filters", "names", false, "vector<string>", "The names of the filters.");
-   config.add("filters.positions", "", "filters.positions",  argType::Required, "filters", "positions", false, "vector<double>", "The positions of the filters.  If omitted or 0 then order is used.");
+   config.add(m_presetNotation + "s.names", "", m_presetNotation + "s.names",  argType::Required, m_presetNotation+"s", "names", false, "vector<string>", "The names of the " + m_presetNotation+ "s.");
+   config.add(m_presetNotation + "s.positions", "", m_presetNotation + "s.positions",  argType::Required, m_presetNotation+"s", "positions", false, "vector<double>", "The positions of the " + m_presetNotation + "s.  If omitted or 0 then order is used.");
    
 }
 
 template<class derivedT>
-void stdFilterWheel<derivedT>::loadConfig(mx::app::appConfigurator & config)
+void stdMotionStage<derivedT>::loadConfig(mx::app::appConfigurator & config)
 {
    config(m_powerOnHome, "motor.powerOnHome");
    
-   config(m_filterNames, "filters.names");
-   m_filterPositions.resize(m_filterNames.size(), 0);
-   for(size_t n=0;n<m_filterPositions.size();++n) m_filterPositions[n] = n+1;
-   config(m_filterPositions, "filters.positions");
-   for(size_t n=0;n<m_filterPositions.size();++n) if(m_filterPositions[n] == 0) m_filterPositions[n] = n+1;
+   config(m_presetNames, m_presetNotation + "s.names");
+   m_presetPositions.resize(m_presetNames.size(), 0);
+   for(size_t n=0;n<m_presetPositions.size();++n) m_presetPositions[n] = n+1;
+   config(m_presetPositions, m_presetNotation + "s.positions");
+   for(size_t n=0;n<m_presetPositions.size();++n) if(m_presetPositions[n] == 0) m_presetPositions[n] = n+1;
 }
    
 
 
 template<class derivedT>
-int stdFilterWheel<derivedT>::appStartup()
+int stdMotionStage<derivedT>::appStartup()
 {
  
-   derived().createStandardIndiNumber( m_indiP_filter, "filter", 1.0, (double) m_filterNames.size(), 0.0, "%0.3d");
-   if( derived().registerIndiPropertyNew( m_indiP_filter, st_newCallBack_stdFilterWheel) < 0)
+   derived().createStandardIndiNumber( m_indiP_preset, m_presetNotation, 1.0, (double) m_presetNames.size(), 0.0, "%0.3d");
+   if( derived().registerIndiPropertyNew( m_indiP_preset, st_newCallBack_stdMotionStage) < 0)
    {
       #ifndef STDFILTERWHEEL_TEST_NOLOG
       derivedT::template log<software_error>({__FILE__,__LINE__});
@@ -287,8 +289,8 @@ int stdFilterWheel<derivedT>::appStartup()
       return -1;
    }
    
-   derived().createStandardIndiSelectionSw( m_indiP_filterName,"filterName", m_filterNames);
-   if( derived().registerIndiPropertyNew( m_indiP_filterName, st_newCallBack_stdFilterWheel) < 0)
+   derived().createStandardIndiSelectionSw( m_indiP_presetName, m_presetNotation + "Name", m_presetNames);
+   if( derived().registerIndiPropertyNew( m_indiP_presetName, st_newCallBack_stdMotionStage) < 0)
    {
       #ifndef STDFILTERWHEEL_TEST_NOLOG
       derivedT::template log<software_error>({__FILE__,__LINE__});
@@ -297,7 +299,7 @@ int stdFilterWheel<derivedT>::appStartup()
    }
    
    derived().createStandardIndiRequestSw( m_indiP_home, "home");
-   if( derived().registerIndiPropertyNew( m_indiP_home, st_newCallBack_stdFilterWheel) < 0)
+   if( derived().registerIndiPropertyNew( m_indiP_home, st_newCallBack_stdMotionStage) < 0)
    {
       #ifndef STDFILTERWHEEL_TEST_NOLOG
       derivedT::template log<software_error>({__FILE__,__LINE__});
@@ -306,7 +308,7 @@ int stdFilterWheel<derivedT>::appStartup()
    }
 
    derived().createStandardIndiRequestSw( m_indiP_stop, "stop");
-   if( derived().registerIndiPropertyNew( m_indiP_stop, st_newCallBack_stdFilterWheel) < 0)
+   if( derived().registerIndiPropertyNew( m_indiP_stop, st_newCallBack_stdMotionStage) < 0)
    {
       #ifndef STDFILTERWHEEL_TEST_NOLOG
       derivedT::template log<software_error>({__FILE__,__LINE__});
@@ -318,34 +320,34 @@ int stdFilterWheel<derivedT>::appStartup()
 }
 
 template<class derivedT>
-int stdFilterWheel<derivedT>::appLogic()
+int stdMotionStage<derivedT>::appLogic()
 {
    return 0;
 
 }
 
 template<class derivedT>
-int stdFilterWheel<derivedT>::onPowerOff()
+int stdMotionStage<derivedT>::onPowerOff()
 {
    if( !derived().m_indiDriver ) return 0;
    return 0;
 }
 
 template<class derivedT>
-int stdFilterWheel<derivedT>::whilePowerOff()
+int stdMotionStage<derivedT>::whilePowerOff()
 {
    return 0;
 }
 
 template<class derivedT>
-int stdFilterWheel<derivedT>::appShutdown()
+int stdMotionStage<derivedT>::appShutdown()
 {
    return 0;
 }
 
 
 template<class derivedT>
-int stdFilterWheel<derivedT>::st_newCallBack_stdFilterWheel( void * app,
+int stdMotionStage<derivedT>::st_newCallBack_stdMotionStage( void * app,
                                                    const pcf::IndiProperty &ipRecv
                                                  )
 {
@@ -354,24 +356,24 @@ int stdFilterWheel<derivedT>::st_newCallBack_stdFilterWheel( void * app,
    
    if(name == "stop") return _app->newCallBack_stop(ipRecv); //Check this first to make sure it 
    if(name == "home") return _app->newCallBack_home(ipRecv);
-   if(name == "filter") return _app->newCallBack_filter(ipRecv);
-   if(name == "filterName") return _app->newCallBack_filterName(ipRecv);
+   if(name == _app->m_presetNotation) return _app->newCallBack_preset(ipRecv);
+   if(name == _app->m_presetNotation + "Name") return _app->newCallBack_presetName (ipRecv);
    
    return -1;
 }
 
 template<class derivedT>
-int stdFilterWheel<derivedT>::newCallBack_filter( const pcf::IndiProperty &ipRecv )
+int stdMotionStage<derivedT>::newCallBack_preset ( const pcf::IndiProperty &ipRecv )
 {
    double target;
    
-   if( derived().indiTargetUpdate( m_indiP_filter, target, ipRecv, true) < 0)
+   if( derived().indiTargetUpdate( m_indiP_preset, target, ipRecv, true) < 0)
    {
       derivedT::template log<software_error>({__FILE__,__LINE__});
       return -1;
    }
    
-   m_filter_target = target;
+   m_preset_target = target;
    
    std::lock_guard<std::mutex> guard(derived().m_indiMutex);
    return derived().moveTo(target);
@@ -379,42 +381,42 @@ int stdFilterWheel<derivedT>::newCallBack_filter( const pcf::IndiProperty &ipRec
 }
 
 template<class derivedT>
-int stdFilterWheel<derivedT>::newCallBack_filterName( const pcf::IndiProperty &ipRecv )
+int stdMotionStage<derivedT>::newCallBack_presetName( const pcf::IndiProperty &ipRecv )
 {
-   if(ipRecv.getName() != m_indiP_filterName.getName())
+   if(ipRecv.getName() != m_indiP_presetName.getName())
    {
       derivedT::template log<software_error>({__FILE__, __LINE__, "invalid indi property received"});
       return -1;
    }
    
-   //First we calculate current filter name
-   int n = floor(m_filter + 0.5) - 1;
+   //First we calculate current preset name
+   int n = floor(m_preset + 0.5) - 1;
    if(n < 0)
    {
-      while(n < 0) n += m_filterNames.size();
+      while(n < 0) n += m_presetNames.size();
    }
-   if( n > (long) m_filterNames.size()-1 )
+   if( n > (long) m_presetNames.size()-1 )
    {
-      while( n > (long) m_filterNames.size()-1 ) n -= m_filterNames.size();
+      while( n > (long) m_presetNames.size()-1 ) n -= m_presetNames.size();
    }
       
    std::string newName = "";
    int newn = -1;
    
    size_t i;
-   for(i=0; i< m_filterNames.size(); ++i) 
+   for(i=0; i< m_presetNames.size(); ++i) 
    {
-      if(!ipRecv.find(m_filterNames[i])) continue;
+      if(!ipRecv.find(m_presetNames[i])) continue;
       
-      if(ipRecv[m_filterNames[i]].getSwitchState() == pcf::IndiElement::On)
+      if(ipRecv[m_presetNames[i]].getSwitchState() == pcf::IndiElement::On)
       {
          if(newName != "")
          {
-            derivedT::template log<text_log>("More than one filter selected", logPrio::LOG_ERROR);
+            derivedT::template log<text_log>("More than one " + m_presetNotation + " selected", logPrio::LOG_ERROR);
             return -1;
          }
          
-         newName = m_filterNames[i];
+         newName = m_presetNames[i];
          newn = i;
       }
    }
@@ -426,15 +428,15 @@ int stdFilterWheel<derivedT>::newCallBack_filterName( const pcf::IndiProperty &i
    
    std::lock_guard<std::mutex> guard(derived().m_indiMutex);
 
-   m_filter_target = m_filterPositions[newn]; //(double) newn + 1.0;
-   derived().updateIfChanged(m_indiP_filter, "target",  m_filter_target, INDI_BUSY);
+   m_preset_target = m_presetPositions[newn]; //(double) newn + 1.0;
+   derived().updateIfChanged(m_indiP_preset, "target",  m_preset_target, INDI_BUSY);
    
-   return derived().moveTo(m_filter_target);
+   return derived().moveTo(m_preset_target);
    
 }
 
 template<class derivedT>
-int stdFilterWheel<derivedT>::newCallBack_home( const pcf::IndiProperty &ipRecv )
+int stdMotionStage<derivedT>::newCallBack_home( const pcf::IndiProperty &ipRecv )
 {
    if(ipRecv.getName() != m_indiP_home.getName())
    {
@@ -455,7 +457,7 @@ int stdFilterWheel<derivedT>::newCallBack_home( const pcf::IndiProperty &ipRecv 
 }
 
 template<class derivedT>
-int stdFilterWheel<derivedT>::newCallBack_stop( const pcf::IndiProperty &ipRecv )
+int stdMotionStage<derivedT>::newCallBack_stop( const pcf::IndiProperty &ipRecv )
 {
    if(ipRecv.getName() != m_indiP_stop.getName())
    {
@@ -476,29 +478,29 @@ int stdFilterWheel<derivedT>::newCallBack_stop( const pcf::IndiProperty &ipRecv 
 }
 
 template<class derivedT>
-int stdFilterWheel<derivedT>::updateINDI()
+int stdMotionStage<derivedT>::updateINDI()
 {
    if( !derived().m_indiDriver ) return 0;
    
-   int n = floor(m_filter + 0.5) - 1;
+   int n = floor(m_preset + 0.5) - 1;
    if(n < 0)
    {
-      while(n < 0) n += m_filterNames.size();
+      while(n < 0) n += m_presetNames.size();
    }
-   if( n > (long) m_filterNames.size()-1 )
+   if( n > (long) m_presetNames.size()-1 )
    {
-      while( n > (long) m_filterNames.size()-1 ) n -= m_filterNames.size();
+      while( n > (long) m_presetNames.size()-1 ) n -= m_presetNames.size();
    }
    
    if( n < 0)
    {
-      derivedT::template log<software_error>({__FILE__,__LINE__, "error calculating filter index, n < 0"});
+      derivedT::template log<software_error>({__FILE__,__LINE__, "error calculating " + m_presetNotation + " index, n < 0"});
       return -1;
    }
    
    size_t nn = n;
  
-   //Check for changes and update the filterNames switch vector
+   //Check for changes and update the filterNames switch vectorm_presetNotation + ".
    bool changed = false;
    
    static int last_moving = m_moving;
@@ -509,22 +511,22 @@ int stdFilterWheel<derivedT>::updateINDI()
       last_moving = m_moving;
    }
    
-   for(size_t i =0; i < m_filterNames.size(); ++i)
+   for(size_t i =0; i < m_presetNames.size(); ++i)
    {
       if( i == nn )
       {
-         if(m_indiP_filterName[m_filterNames[i]] != pcf::IndiElement::On) 
+         if(m_indiP_presetName[m_presetNames[i]] != pcf::IndiElement::On) 
          {
             changed = true;
-            m_indiP_filterName[m_filterNames[i]] = pcf::IndiElement::On;
+            m_indiP_presetName[m_presetNames[i]] = pcf::IndiElement::On;
          }
       }
       else
       {
-         if(m_indiP_filterName[m_filterNames[i]] != pcf::IndiElement::Off) 
+         if(m_indiP_presetName[m_presetNames[i]] != pcf::IndiElement::Off) 
          {
             changed = true;
-            m_indiP_filterName[m_filterNames[i]] = pcf::IndiElement::Off;
+            m_indiP_presetName[m_presetNames[i]] = pcf::IndiElement::Off;
          }
       }
    }
@@ -532,27 +534,27 @@ int stdFilterWheel<derivedT>::updateINDI()
    {
       if(m_moving)
       {
-         m_indiP_filterName.setState(INDI_BUSY);
+         m_indiP_presetName.setState(INDI_BUSY);
       }
       else
       {
-         m_indiP_filterName.setState(INDI_IDLE);
+         m_indiP_presetName.setState(INDI_IDLE);
       }
             
-      derived().m_indiDriver->sendSetProperty(m_indiP_filterName);
+      derived().m_indiDriver->sendSetProperty(m_indiP_presetName);
    }
    
   
    
    if(m_moving)
    {
-      indi::updateIfChanged(m_indiP_filter, "current", m_filter, derived().m_indiDriver,INDI_BUSY);
-      indi::updateIfChanged(m_indiP_filter, "target", m_filter_target, derived().m_indiDriver,INDI_BUSY);
+      indi::updateIfChanged(m_indiP_preset, "current", m_preset, derived().m_indiDriver,INDI_BUSY);
+      indi::updateIfChanged(m_indiP_preset, "target", m_preset_target, derived().m_indiDriver,INDI_BUSY);
    }
    else
    {
-      indi::updateIfChanged(m_indiP_filter, "current", m_filter, derived().m_indiDriver,INDI_IDLE);    
-      indi::updateIfChanged(m_indiP_filter, "target", m_filter_target, derived().m_indiDriver,INDI_IDLE);
+      indi::updateIfChanged(m_indiP_preset, "current", m_preset, derived().m_indiDriver,INDI_IDLE);    
+      indi::updateIfChanged(m_indiP_preset, "target", m_preset_target, derived().m_indiDriver,INDI_IDLE);
    }
    
    
@@ -564,4 +566,4 @@ int stdFilterWheel<derivedT>::updateINDI()
 } //namespace app
 } //namespace MagAOX
 
-#endif //stdFilterWheel_hpp
+#endif //stdMotionStage_hpp
