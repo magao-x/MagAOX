@@ -91,7 +91,8 @@ void updateIfChanged( pcf::IndiProperty & p,   ///< [in/out] The property contai
    }
    catch(...)
    {
-      log<software_error>({__FILE__, __LINE__});
+      std::cerr << "INDI Exception at " << __FILE__ << " " << __LINE__ << "\n";
+      std::cerr << "from " << p.getName() << "." << el << "\n";
    }
    
 }
@@ -128,7 +129,8 @@ void updateSwitchIfChanged( pcf::IndiProperty & p,   ///< [in/out] The property 
    }
    catch(...)
    {
-      log<software_error>({__FILE__, __LINE__});
+      std::cerr << "INDI Exception at " << __FILE__ << " " << __LINE__ << "\n";
+      std::cerr << "from " << p.getName() << "." << el << "\n";
    }
 }
 
@@ -149,7 +151,8 @@ void updateSelectionSwitchIfChanged( pcf::IndiProperty & p,   ///< [in/out] The 
 
    if(!p.find(el)) 
    {
-      log<software_error>({__FILE__, __LINE__});
+      std::cerr << "INDI error at " << __FILE__ << " " << __LINE__ << "\n";
+      std::cerr << p.getName() << " does not have " << el << "\n";
       return;
    }
    
@@ -188,7 +191,8 @@ void updateSelectionSwitchIfChanged( pcf::IndiProperty & p,   ///< [in/out] The 
    }
    catch(...)
    {
-      log<software_error>({__FILE__, __LINE__});
+      std::cerr << "INDI Exception at " << __FILE__ << " " << __LINE__ << "\n";
+      std::cerr << "from " << p.getName() << "." << el << "\n";
    }
 }
 
