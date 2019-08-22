@@ -171,6 +171,8 @@ protected:
      */
    int startHoming();
    
+   int presetNumber();
+   
    /// Start a low-level homing sequence.
    /** This initiates the device homing sequence.
      * 
@@ -726,6 +728,28 @@ int filterWheelCtrl::startHoming()
    m_homingState = 1;
    updateSwitchIfChanged(m_indiP_home, "request", pcf::IndiElement::Off, INDI_IDLE);
    return home();
+}
+
+int filterWheelCtrl::presetNumber()
+{
+   //First we calculate current preset name
+   int n = floor(m_preset + 0.5) - 1;
+   if(n < 0)
+   {
+      while(n < 0) n += m_presetNames.size();
+   }
+   if( n > (long) m_presetNames.size()-1 )
+   {
+      while( n > (long) m_presetNames.size()-1 ) n -= m_presetNames.size();
+   }
+   
+   if( n < 0)
+   {
+      log<software_error>({__FILE__,__LINE__, "error calculating " + m_presetNotation + " index, n < 0"});
+      return -1;
+   }
+      
+   return n;
 }
 
 int filterWheelCtrl::home()

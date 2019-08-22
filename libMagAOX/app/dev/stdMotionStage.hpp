@@ -29,6 +29,8 @@ namespace dev
     
     int startHoming(); //INDI mutex will be locked on this call.
     
+    double presetNumber();
+    
     int moveTo(double); //INDI mutex will be locked on this call.
     \endcode 
   *
@@ -389,17 +391,6 @@ int stdMotionStage<derivedT>::newCallBack_presetName( const pcf::IndiProperty &i
       return -1;
    }
    
-   //First we calculate current preset name
-   int n = floor(m_preset + 0.5) - 1;
-   if(n < 0)
-   {
-      while(n < 0) n += m_presetNames.size();
-   }
-   if( n > (long) m_presetNames.size()-1 )
-   {
-      while( n > (long) m_presetNames.size()-1 ) n -= m_presetNames.size();
-   }
-      
    std::string newName = "";
    int newn = -1;
    
@@ -482,21 +473,7 @@ int stdMotionStage<derivedT>::updateINDI()
 {
    if( !derived().m_indiDriver ) return 0;
    
-   int n = floor(m_preset + 0.5) - 1;
-   if(n < 0)
-   {
-      while(n < 0) n += m_presetNames.size();
-   }
-   if( n > (long) m_presetNames.size()-1 )
-   {
-      while( n > (long) m_presetNames.size()-1 ) n -= m_presetNames.size();
-   }
-   
-   if( n < 0)
-   {
-      derivedT::template log<software_error>({__FILE__,__LINE__, "error calculating " + m_presetNotation + " index, n < 0"});
-      return -1;
-   }
+   int n = derived().presetNumber();
    
    size_t nn = n;
  
