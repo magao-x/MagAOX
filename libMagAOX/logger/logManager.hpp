@@ -21,9 +21,11 @@
 
 
 #include <flatlogs/flatlogs.hpp>
+
 using namespace flatlogs;
 
 #include "generated/logTypes.hpp"
+#include "generated/logStdFormat.hpp"
 
 namespace MagAOX
 {
@@ -423,6 +425,12 @@ void logManager<logFileT>::logThreadExec()
             {
                m_logThreadRunning = false;
                return;
+            }
+                       
+            if( logHeader::logLevel( *it ) <= logPrio::LOG_NOTICE )
+            {
+               logStdFormat(*it);
+               std::cout << "\n";
             }
             
             er = it;
