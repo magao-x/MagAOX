@@ -18,7 +18,8 @@ function _cached_fetch() {
   dest=$PWD
   if [[ ! -e $dest/$filename ]]; then
     if [[ ! -e /opt/MagAOX/.cache/$filename ]]; then
-      curl -A "Mozilla/5.0" -L $url > /opt/MagAOX/.cache/$filename
+      curl -A "Mozilla/5.0" -L $url > /tmp/magaoxcache-$filename && \
+        mv /tmp/magaoxcache-$filename /opt/MagAOX/.cache/$filename
       log_info "Downloaded to /opt/MagAOX/.cache/$filename"
     fi
     cp /opt/MagAOX/.cache/$filename $dest/$filename

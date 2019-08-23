@@ -6,7 +6,7 @@ FLATBUFFERS_VERSION="1.11.0"
 #
 # Flatbuffers
 #
-FLATBUFFERS_DIR="./flatbuffers-$FLATBUFFERS_VERSION"
+FLATBUFFERS_DIR="flatbuffers-$FLATBUFFERS_VERSION"
 if [[ ! -d $FLATBUFFERS_DIR ]]; then
     _cached_fetch https://github.com/google/flatbuffers/archive/v$FLATBUFFERS_VERSION.tar.gz $FLATBUFFERS_DIR.tar.gz
     tar xzf $FLATBUFFERS_DIR.tar.gz
