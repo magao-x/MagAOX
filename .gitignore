@@ -87,5 +87,5 @@ flatlogs/src/logCodes.dat
 
 .vagrant/
 .DS_Store
-setup/vendor_software_bundle.tar.gz
+setup/bundle.zip
 setup/cache

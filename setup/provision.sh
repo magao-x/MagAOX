@@ -77,7 +77,7 @@ if [[ $TARGET_ENV == vm || $TARGET_ENV == ci ]]; then
     sudo bash -l "$DIR/setup_users_and_groups.sh"
 fi
 
-VENDOR_SOFTWARE_BUNDLE=$DIR/vendor_software_bundle.tar.gz
+VENDOR_SOFTWARE_BUNDLE=$DIR/bundle.zip
 if [[ ! -e $VENDOR_SOFTWARE_BUNDLE ]]; then
     echo "Couldn't find vendor software bundle at location $VENDOR_SOFTWARE_BUNDLE"
     echo "(Generate with ~/Box/MagAO-X/Vendor\ Software/generate_bundle.sh)"
@@ -134,13 +134,13 @@ if [[ -e $VENDOR_SOFTWARE_BUNDLE ]]; then
     # Extract bundle
     BUNDLE_TMPDIR=/tmp/vendor_software_bundle
     mkdir -p /tmp/vendor_software_bundle
-    tar xzf $VENDOR_SOFTWARE_BUNDLE -C $BUNDLE_TMPDIR
+    unzip -o $VENDOR_SOFTWARE_BUNDLE -d $BUNDLE_TMPDIR
     for vendorname in alpao bmc andor; do
         if [[ ! -d /opt/MagAOX/vendor/$vendorname ]]; then
-            sudo cp -R $BUNDLE_TMPDIR/$vendorname /opt/MagAOX/vendor
+            sudo cp -R $BUNDLE_TMPDIR/bundle/$vendorname /opt/MagAOX/vendor
         else
             echo "/opt/MagAOX/vendor/$vendorname exists, not overwriting files"
-            echo "(but they're in $BUNDLE_TMPDIR/$vendorname if you want them)"
+            echo "(but they're in $BUNDLE_TMPDIR/bundle/$vendorname if you want them)"
         fi
     done
     sudo bash -l "$DIR/steps/install_alpao.sh"
