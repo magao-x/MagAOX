@@ -196,15 +196,12 @@ void  indiDriver<parentT>::update()
 template<class parentT>
 int  indiDriver<parentT>::sendNewProperty( const pcf::IndiProperty &ipRecv )
 {
-   //Check for a reconnection
+   //Check for an existing client, and delete it.
    if( m_outGoing != nullptr)
    {
-      if(m_outGoing->getQuitProcess())
-      {
-         parentT::template log<logger::text_log>("INDI client disconnect");
-         delete m_outGoing;
-         m_outGoing = nullptr;
-      }
+      m_outGoing->quitProcess();
+      delete m_outGoing;
+      m_outGoing = nullptr;
    }
    
    if( m_outGoing == nullptr)
@@ -218,7 +215,7 @@ int  indiDriver<parentT>::sendNewProperty( const pcf::IndiProperty &ipRecv )
          parentT::template log<logger::software_error>({__FILE__, __LINE__, "Exception thrown while creating IndiClient connection"});
          return -1;
       }
-
+      
       if(m_outGoing == nullptr)
       {
          parentT::template log<logger::software_error>({__FILE__, __LINE__, "Failed to allocate IndiClient connection"});
@@ -227,24 +224,29 @@ int  indiDriver<parentT>::sendNewProperty( const pcf::IndiProperty &ipRecv )
       
       parentT::template log<logger::text_log>("INDI client connected");
    }
-
+   
    try
    {
       m_outGoing->sendNewProperty(ipRecv);
+      m_outGoing->quitProcess();
+      delete m_outGoing;
+      m_outGoing = nullptr;
+      return 0;
    }
    catch(std::exception & e)
    {
-      ///\todo need to log and return -1 here too.  Should look for other places to do this in codebase.
-      parentT::template log<logger::software_error>({__FILE__, __LINE__, std::string("Exception from IndiClient::sendNewProperty: ") + e.what()});
+      parentT::template log<logger::software_error>({__FILE__, __LINE__, std::string("Exception from IndiClient: ") + e.what()});
       return -1;
    }
    catch(...)
    {
-      parentT::template log<logger::software_error>({__FILE__, __LINE__, "Exception from IndiClient::sendNewProperty"});
+      parentT::template log<logger::software_error>({__FILE__, __LINE__, "Exception from IndiClient"});
       return -1;
    }
 
-   return 0;
+   //Should never get here, but we are exiting for some reason sometimes.
+   parentT::template log<logger::software_error>({__FILE__, __LINE__, "fall through in sendNewProperty"});
+   return -1;
 }
 
 } //namespace app
