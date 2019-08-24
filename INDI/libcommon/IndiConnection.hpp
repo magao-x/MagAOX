@@ -93,10 +93,6 @@ class IndiConnection : public pcf::Thread
     /// Returns the version of this component.
     std::string getVersion() const;
 
-    /// This variable and function are used to trap a 'SIGINT' to tell the
-    /// 'processIndiRequests' to exit gracefully.
-    static void handleSignal( int nSignal );
-
     /// Is the driver currently active ('execute' thread running)?
     bool isActive() const;
     /// Are we logging additional messages?
@@ -124,9 +120,9 @@ class IndiConnection : public pcf::Thread
     /// This will cause the process to quit, the same as if a ctrl-c was sent.
     void quitProcess();
 
-    static bool getQuitProcess() 
+    bool getQuitProcess() 
     {
-       return sm_oQuitProcess;
+       return m_oQuitProcess;
     }
     
   // Helper functions.
@@ -148,8 +144,11 @@ class IndiConnection : public pcf::Thread
     int m_iCpuAffinity;
     /// allocate a big buffer to hold the input data.
     std::vector<unsigned char> m_vecInputBuf;
+    
     /// The flag to tell this to quit.
-    static bool sm_oQuitProcess;
+    //Changed from static to prevent app-wide INDI shutdown.
+    bool m_oQuitProcess {false};
+    
     /// This is the object that conglomerates all the INDI XML
     pcf::IndiXmlParser m_ixpIndi;
     /// A mutex to protect output.

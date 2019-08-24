@@ -15,6 +15,7 @@ The following changes were made for use in MagAO-X:
 - IndiDriver.hpp: added noexcept(true) to d'tor decl.
 - Removed logging of config elements, IndiConnection.ccp line 138
 - 2018-09-02: Fully removed logging and config from IndiConnection/Driver/Client, and removed those files from the repo.
+- 2019-08-24: made IndiConnection::m_oQuitProcess not static, prevents app-wide INDI shutdown due to a client disconnect.  Also some signal handling cruft we don't use.
 
 TODO:
 - Should fully remove config system (comment it out), so we don't need to trick it with tmp files.

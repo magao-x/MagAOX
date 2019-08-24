@@ -29,9 +29,6 @@ using pcf::IndiXmlParser;
 using pcf::IndiMessage;
 using pcf::IndiProperty;
 
-////////////////////////////////////////////////////////////////////////////////
-
-bool pcf::IndiConnection::sm_oQuitProcess = false;
 
 ////////////////////////////////////////////////////////////////////////////////
 /// \brief IndiConnection::IndiConnection
@@ -98,7 +95,7 @@ void IndiConnection::construct( const string &szName,
                                 const string &szProtocolVersion )
 {
   // Make sure we are in a known state.
-  sm_oQuitProcess = false;
+  m_oQuitProcess = false;
 
   // The process thread has not been set up yet.
   m_idProcessThread = 0;
@@ -207,17 +204,6 @@ bool IndiConnection::isActive() const
 }
 
 ////////////////////////////////////////////////////////////////////////////////
-/// \brief IndiConnection::handleSignal
-/// This variable and function are used to trap a 'SIGINT' to tell the
-/// 'processIndiRequests' to exit gracefully.
-/// \param nSignal The signal to be handled.
-
-void IndiConnection::handleSignal( int nSignal )
-{
-  sm_oQuitProcess = true;
-}
-
-////////////////////////////////////////////////////////////////////////////////
 /// \brief IndiConnection::processIndiRequests
 /// Called to ensure that incoming INDI messages are received and handled.
 /// It will not exit until we receive a signal. May create a new thread.
@@ -276,7 +262,7 @@ void *IndiConnection::pthreadProcess( void *pUnknown )
 void IndiConnection::process()
 {
   // Loop here until we are told to quit or we hit an error.
-  while ( sm_oQuitProcess == false )
+  while ( m_oQuitProcess == false )
   {
     try
     {
@@ -309,7 +295,7 @@ void IndiConnection::process()
 
       if ( nRetval == -1 )
       {
-        if ( sm_oQuitProcess == false )
+        if ( m_oQuitProcess == false )
         {
           Thread::sleep( 1 );
         }
@@ -325,12 +311,12 @@ void IndiConnection::process()
         nInputBufLen = ::read( m_fdInput, &m_vecInputBuf[0], InputBufSize );
         if ( nInputBufLen < 0 )
         {
-          sm_oQuitProcess = true;
+          m_oQuitProcess = true;
         }
         else if ( nInputBufLen == 0 )
         {
           // If we read an EOF, this is a signal that we should die.
-          sm_oQuitProcess = true;
+          m_oQuitProcess = true;
         }
         else
         {
@@ -489,7 +475,7 @@ string IndiConnection::getProtocolVersion() const
 
 void IndiConnection::quitProcess()
 {
-  sm_oQuitProcess = true;
+  m_oQuitProcess = true;
 }
 
 ////////////////////////////////////////////////////////////////////////////////
