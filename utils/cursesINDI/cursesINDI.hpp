@@ -104,6 +104,10 @@ public:
 
    elementMapT knownElements;
 
+   
+   bool m_deviceSearching {false};
+   std::string m_deviceTarget;
+   
    virtual void handleDefProperty( const pcf::IndiProperty &ipRecv );
 
    virtual void handleDelProperty( const pcf::IndiProperty &ipRecv );
@@ -145,6 +149,9 @@ public:
 
    void keyPressed( int ch );
 
+   /// If a key is pressed in column 1 (the device column), this function searchs for devices alphabetically.
+   void deviceSearch( int ch );
+   
    virtual int postDraw()
    {
       if(fpout) *fpout << "post draw" << std::endl;
@@ -510,6 +517,7 @@ void cursesINDI::moveCurrent( int nextY,
                             )
 {
    std::lock_guard<std::mutex> lock(m_drawMutex);
+   
    _moveCurrent(nextY, nextX);
 }
 
@@ -517,12 +525,148 @@ void cursesINDI::_moveCurrent( int nextY,
                                int nextX
                              )
 {
+   int currX = m_currX;
+   int currY = m_currY;
+   
    moveSelected(nextY, nextX);
+   
+   if(fpout) *fpout << "moved: " << nextX << " " << nextY << " " << currX << "->" << m_currX << " " << currY << "->" << m_currY << std::endl; 
+   
+   if(m_deviceSearching && nextX != 1)
+   {
+      wclear(w_interactWin);
+      wrefresh(w_interactWin);
+      m_deviceSearching = false;
+   }
+   
+   if(nextX == 1)
+   {
+      if( currX != nextX)
+      {
+         wclear(w_interactWin);
+         wprintw(w_interactWin, "search: ");
+         wrefresh(w_interactWin);
+      }
+   }
+   else if(currY != nextY || currX == 1)
+   {
+      wclear(w_interactWin);
+      if(m_currY + m_startRow >= knownElements.size()) 
+      {
+         wrefresh(w_interactWin);
+         return;
+      }
+      auto it = knownElements.begin();
+      while(it != knownElements.end())
+      {
+         if( (size_t) it->second.tableRow == m_currY+m_startRow) break;
+         ++it;
+      }
+      
+      if(it == knownElements.end())
+      {
+         wrefresh(w_interactWin);
+         return;
+      }
+
+      if( knownProps[it->second.propKey].getPerm() != pcf::IndiProperty::ReadWrite)
+      {
+         wrefresh(w_interactWin);
+         return;
+      }
+      
+      if( knownProps[it->second.propKey].getType() == pcf::IndiProperty::Text)
+      {
+         wprintw(w_interactWin, "(e)dit this text");
+      }
+      else if( knownProps[it->second.propKey].getType() == pcf::IndiProperty::Number)
+      {
+         wprintw(w_interactWin, "(e)dit this number");
+      }
+      else if( knownProps[it->second.propKey].getType() == pcf::IndiProperty::Switch)
+      {
+         wprintw(w_interactWin, "(p)ress or (t)oggle this switch");
+      }
+         
+
+      wrefresh(w_interactWin);
+   }
+   
+}
+
+
+void cursesINDI::deviceSearch( int ch )
+{
+   bool updated = false;
+   if( m_deviceSearching == true )
+   {
+      if( ch == KEY_BACKSPACE )
+      {
+         if(m_deviceTarget.size() > 0)
+         {
+            std::lock_guard<std::mutex> lock(m_drawMutex);
+            m_deviceTarget.erase(m_deviceTarget.size()-1,1);
+            wprintw(w_interactWin, "\b \b");
+            wrefresh(w_interactWin);
+            return;
+         }
+      }
+      else if (std::isprint(ch))
+      {
+         m_deviceTarget += ch;
+         updated = true;
+      }
+      else return;
+   }
+   else if (std::isprint(ch))
+   {
+      m_deviceTarget = ch;
+      updated = true;
+   }
+   else return;
+   
+   
+   m_deviceSearching = true;
+   
+   if(updated)
+   {
+      std::lock_guard<std::mutex> lock(m_drawMutex);
+      wprintw(w_interactWin, "%c", ch);
+      wrefresh(w_interactWin);
+   }
+      
+   if(fpout) *fpout << "device searching: " << m_deviceTarget << std::endl; 
+   if(m_deviceTarget.size() == 0) return;
+   
+   auto it = knownElements.lower_bound(m_deviceTarget);
+
+   if(fpout) *fpout << "new row: " << it->second.tableRow << " " << m_startRow << " " << it->second.tableRow-m_startRow << "\n";
+   
+   if(it->second.tableRow == -1) return;
+   
+   moveCurrent( it->second.tableRow-m_startRow, 1);
+   
+   return;
+            
 }
 
 void cursesINDI::keyPressed( int ch )
 {
+   
+   //If in first column, do device selection
+   if(m_currX == 1 )
+   {
+      deviceSearch(ch);
+      return;
+   }
 
+   if(m_deviceSearching)
+   {
+      wclear(w_interactWin);
+      wrefresh(w_interactWin);
+      m_deviceSearching = false;
+   }
+   
    switch(ch)
    {
       case 'e':

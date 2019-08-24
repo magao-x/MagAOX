@@ -91,7 +91,7 @@ retry:
 
 
    topWin = newwin(1, COLS, 0, 0);
-   wprintw(topWin, "(e)dit a property, (p)ress a switch, (t)oggle a switch, (q)uit");
+   wprintw(topWin, "cursesINDI (arrow keys move, ctrl-c to quit)");
    keypad(topWin, TRUE);
    wrefresh(topWin);
 
@@ -100,7 +100,7 @@ retry:
    
    
    //Now main event loop
-   while((ch = wgetch(ci->w_interactWin)) != 'q')
+   while((ch = wgetch(ci->w_interactWin))) // != 'q')
    {
       if(ch == ERR)
       {
