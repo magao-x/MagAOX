@@ -4,4 +4,3 @@ source $DIR/../_common.sh
 set -euo pipefail
 cd bmc
 bash install.sh
-echo "export bmc_calib=/opt/MagAOX/calib/dm/bmc_2k" > /etc/profile.d/bmc.sh

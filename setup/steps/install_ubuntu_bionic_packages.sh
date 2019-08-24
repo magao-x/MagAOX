@@ -40,4 +40,5 @@ apt install -y \
     libgsl-dev \
     bc \
     libczmq-dev \
+    liblog4cxx-dev \
 ;
