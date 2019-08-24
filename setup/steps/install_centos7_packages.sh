@@ -45,6 +45,7 @@ yum install -y \
     gsl \
     gsl-devel \
     bc \
+    log4cxx-devel \
 ;
 
 sudo alternatives --install /usr/local/bin/cmake cmake /usr/bin/cmake3 20 \
