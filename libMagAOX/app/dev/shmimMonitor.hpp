@@ -223,6 +223,9 @@ void shmimMonitor<derivedT>::setupConfig(mx::app::appConfigurator & config)
    config.add("shmimMonitor.threadPrio", "", "shmimMonitor.threadPrio", argType::Required, "shmimMonitor", "threadPrio", false, "int", "The real-time priority of the shmimMonitor thread.");
    
    config.add("shmimMonitor.shmimName", "", "shmimMonitor.shmimName", argType::Required, "shmimMonitor", "shmimName", false, "string", "The name of the ImageStreamIO shared memory image. Will be used as /tmp/<shmimName>.im.shm.");
+   
+   //Set this here to allow derived classes to set their own default before calling loadConfig
+   m_shmimName = derived().configName();
          
 }
 
@@ -230,7 +233,6 @@ template<class derivedT>
 void shmimMonitor<derivedT>::loadConfig(mx::app::appConfigurator & config)
 {
    config(m_smThreadPrio, "shmimMonitor.threadPrio");
-   m_shmimName = derived().configName();
    config(m_shmimName, "shmimMonitor.shmimName");
   
 }

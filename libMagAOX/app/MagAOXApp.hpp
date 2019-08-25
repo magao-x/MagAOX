@@ -560,6 +560,17 @@ public:
                                  const std::string & group = ""  ///< [in] [optional] the group for this property
                                );
    
+   /// Create a ReadOnly INDI Number property
+   /**
+     * \returns 0 on success 
+     * \returns -1 on error
+     */ 
+   int createROIndiNumber( pcf::IndiProperty & prop,           ///< [out] the property to create and setup
+                           const std::string & propName,       ///< [in] the name of the property
+                           const std::string & propLabel = "", ///< [in] [optional] the GUI label suggestion for this property
+                           const std::string & propGroup = ""  ///< [in] [optional] the group for this property
+                         );
+   
    /// Create a standard R/W INDI switch with a single toggle element.
    /** This switch is intended to function like an on/off toggle switch.
      * 
@@ -1913,6 +1924,33 @@ int MagAOXApp<_useINDI>::createStandardIndiNumber( pcf::IndiProperty & prop,
    if(group != "")
    {
       prop.setGroup(group);
+   }
+   
+   return 0;
+}
+
+template<bool _useINDI>
+int MagAOXApp<_useINDI>::createROIndiNumber( pcf::IndiProperty & prop,           
+                                             const std::string & propName,       
+                                             const std::string & propLabel, 
+                                             const std::string & propGroup 
+                                           )
+{
+   prop = pcf::IndiProperty(pcf::IndiProperty::Number);
+   prop.setDevice(configName());
+   prop.setName(propName);
+   prop.setPerm(pcf::IndiProperty::ReadOnly); 
+   prop.setState(pcf::IndiProperty::Idle);
+   
+   //Don't set "" just in case libcommon does something with defaults
+   if(propLabel != "")
+   {
+      prop.setLabel(propLabel);
+   }
+   
+   if(propGroup != "")
+   {
+      prop.setGroup(propGroup);
    }
    
    return 0;
