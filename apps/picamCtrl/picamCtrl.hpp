@@ -1476,15 +1476,6 @@ int picamCtrl::reconfig()
    return 0;
 }
 
-
-
-
-
-
-
-
-
-
 INDI_NEWCALLBACK_DEFN(picamCtrl, m_indiP_adcspeed)(const pcf::IndiProperty &ipRecv)
 {
    if(ipRecv.getName() != m_indiP_adcspeed.getName())

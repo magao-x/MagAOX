@@ -222,8 +222,6 @@ void frameGrabber<derivedT>::setupConfig(mx::app::appConfigurator & config)
    
    config.add("framegrabber.circBuffLength", "", "framegrabber.circBuffLength", argType::Required, "framegrabber", "circBuffLength", false, "size_t", "The length of the circular buffer. Sets m_circBuffLength, default is 1.");
 
-   config.add("framegrabber.savePath", "", "framegrabber.savePath", argType::Required, "framegrabber", "savePath", false, "string", "The absolute path where images are saved. Will use MagAO-X default if not set.");
-      
 }
 
 template<class derivedT>
@@ -249,8 +247,8 @@ int frameGrabber<derivedT>::appStartup()
    //Register the shmimName INDI property
    m_indiP_shmimName = pcf::IndiProperty(pcf::IndiProperty::Text);
    m_indiP_shmimName.setDevice(impl().configName());
-   m_indiP_shmimName.setName("shmimName");
-   m_indiP_shmimName.setPerm(pcf::IndiProperty::ReadWrite); ///\todo why is this ReadWrite?
+   m_indiP_shmimName.setName("fg_shmimName");
+   m_indiP_shmimName.setPerm(pcf::IndiProperty::ReadOnly);
    m_indiP_shmimName.setState(pcf::IndiProperty::Idle);
    m_indiP_shmimName.add(pcf::IndiElement("name"));
    m_indiP_shmimName["name"] = m_shmimName;
@@ -266,8 +264,8 @@ int frameGrabber<derivedT>::appStartup()
    //Register the frameSize INDI property
    m_indiP_frameSize = pcf::IndiProperty(pcf::IndiProperty::Number);
    m_indiP_frameSize.setDevice(impl().configName());
-   m_indiP_frameSize.setName("frameSize");
-   m_indiP_frameSize.setPerm(pcf::IndiProperty::ReadWrite); ///\todo why is this ReadWrite?
+   m_indiP_frameSize.setName("fg_frameSize");
+   m_indiP_frameSize.setPerm(pcf::IndiProperty::ReadOnly);
    m_indiP_frameSize.setState(pcf::IndiProperty::Idle);
    m_indiP_frameSize.add(pcf::IndiElement("width"));
    m_indiP_frameSize["width"] = 0;
@@ -352,6 +350,7 @@ void frameGrabber<derivedT>::fgThreadExec()
    
    while(impl().shutdown() == 0)
    {
+      ///\todo this ought to wait until OPERATING, using READY as a sign of "not integrating"
       while(!impl().shutdown() && (!( impl().state() == stateCodes::READY || impl().state() == stateCodes::OPERATING) || impl().powerState() <= 0 ) )
       {
          sleep(1);
@@ -392,7 +391,6 @@ void frameGrabber<derivedT>::fgThreadExec()
       //This completes the reconfiguration.
       m_reconfig = false;
                   
-      //At the end of this, must have m_width, m_height, m_dataType set.
       if(impl().startAcquisition() < 0) continue;       
          
       uint64_t next_cnt1 = 0; 

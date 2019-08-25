@@ -23,7 +23,7 @@ namespace app
 namespace dev 
 {
 
-/** MagAO-X generic deformable mirror controller
+/** MagAO-X generic shared memory monitor
   *
   * 
   * The derived class `derivedT` must expose the following interface
@@ -241,8 +241,8 @@ int shmimMonitor<derivedT>::appStartup()
    //Register the shmimName INDI property
    m_indiP_shmimName = pcf::IndiProperty(pcf::IndiProperty::Text);
    m_indiP_shmimName.setDevice(derived().configName());
-   m_indiP_shmimName.setName("shmimName");
-   m_indiP_shmimName.setPerm(pcf::IndiProperty::ReadWrite); ///\todo why is this ReadWrite?
+   m_indiP_shmimName.setName("sm_shmimName");
+   m_indiP_shmimName.setPerm(pcf::IndiProperty::ReadOnly);
    m_indiP_shmimName.setState(pcf::IndiProperty::Idle);
    m_indiP_shmimName.add(pcf::IndiElement("name"));
    m_indiP_shmimName["name"] = m_shmimName;
@@ -258,8 +258,8 @@ int shmimMonitor<derivedT>::appStartup()
    //Register the frameSize INDI property
    m_indiP_frameSize = pcf::IndiProperty(pcf::IndiProperty::Number);
    m_indiP_frameSize.setDevice(derived().configName());
-   m_indiP_frameSize.setName("frameSize");
-   m_indiP_frameSize.setPerm(pcf::IndiProperty::ReadWrite); ///\todo why is this ReadWrite?
+   m_indiP_frameSize.setName("sm_frameSize");
+   m_indiP_frameSize.setPerm(pcf::IndiProperty::ReadOnly);
    m_indiP_frameSize.setState(pcf::IndiProperty::Idle);
    m_indiP_frameSize.add(pcf::IndiElement("width"));
    m_indiP_frameSize["width"] = 0;
