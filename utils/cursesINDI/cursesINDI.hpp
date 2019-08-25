@@ -644,7 +644,11 @@ void cursesINDI::deviceSearch( int ch )
    
    if(it->second.tableRow == -1) return;
    
-   moveCurrent( it->second.tableRow-m_startRow, 1);
+   m_startRow = it->second.tableRow;
+   
+   moveCurrent( 0, 1);
+   
+   redrawTable();
    
    return;
             

@@ -98,7 +98,8 @@ retry:
    
    ci->cursStat(0);
    
-   
+    ci->moveCurrent(0, 1);
+    
    //Now main event loop
    while((ch = wgetch(ci->w_interactWin))) // != 'q')
    {
