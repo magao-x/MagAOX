@@ -42,15 +42,23 @@ public:
    {
       std::string m_appName;
       
-      std::thread * m_thread {nullptr}; ///< Thread for monitoring a single log 
+      std::shared_ptr<std::thread>  m_thread; ///< Thread for monitoring a single log 
       
-      logstream * m_lstr;            ///< a pointer to a logstream instance (normally this)
+      logstream * m_lstr {nullptr};            ///< a pointer to a logstream instance (normally this)
       
       ///C'tor to create the thread object
       s_logThread()
       {
-         m_thread = new std::thread;
+         m_thread = std::shared_ptr<std::thread>(new std::thread);
       }      
+      
+      s_logThread( const s_logThread & cplt )
+      {
+         m_appName = cplt.m_appName;
+         m_thread = cplt.m_thread;
+         m_lstr = cplt.m_lstr;
+      }
+
    };
    
    std::vector<s_logThread> m_logThreads; 
@@ -62,10 +70,10 @@ public:
       
       bufferPtrT logBuff;
       
-      s_logEntry( const std::string & appName )
+      explicit s_logEntry( const std::string & appName ) : m_appName{appName}
       {
-         m_appName = appName;
       }
+      
    };
    
    std::multimap<double, s_logEntry> m_logStream;
