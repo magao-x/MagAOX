@@ -24,59 +24,83 @@ makefile.*GUI
 #Ignore any generated code directories:
 **/generated/
 
+
+##########################################
 #Executables and app specifics to ignore:
+
+#b
+apps/baslerCtrl/baslerCtrl
+
+#d
+apps/dmMode/dmMode
+
+#f
+apps/filterWheelCtrl/filterWheelCtrl
+
+apps/magAOXMaths/magAOXMaths
+
+#i
 INDI/INDI/evalINDI
 INDI/INDI/getINDI
 INDI/INDI/indiserver
 INDI/INDI/setINDI
 INDI/xindidriver/xindidriver
 
-apps/baslerCtrl/baslerCtrl
+#m
+apps/mzmqServer/mzmqServer
 
+apps/mzmqClient/mzmqClient
+
+
+#o
+apps/ocam2KCtrl/ocam2KCtrl
+
+#p
+apps/picamCtrl/picamCtrl
+
+apps/pupilFit/pupilFit
+
+#s
+apps/siglentSDG/siglentSDG
+apps/siglentSDG/tests/siglentSDG_test
+
+apps/sshDigger/sshDigger
+
+apps/streamWriter/streamWriter
+
+apps/sysMonitor/sysMonitor
+
+#t
 apps/trippLitePDU/trippLitePDU
 apps/trippLitePDU/tests/
 
-apps/magAOXMaths/magAOXMaths
+apps/ttmModulator/ttmModulator
 
+#x
 apps/xindiserver/tests/remoteDriver_test
 apps/xindiserver/tests/tunneledHost_test
 apps/xindiserver/tests/xindiserver_test
 apps/xindiserver/xindiserver
 
-apps/sysMonitor/sysMonitor
-
-apps/sshDigger/sshDigger
-
-apps/zaberCtrl/zaberCtrl
-
-apps/siglentSDG/siglentSDG
-apps/siglentSDG/tests/siglentSDG_test
-
-apps/ttmModulator/ttmModulator
-
-apps/filterWheelCtrl/filterWheelCtrl
-
-apps/ocam2KCtrl/ocam2KCtrl
-
-apps/streamWriter/streamWriter
-
-apps/mzmqServer/mzmqServer
-apps/mzmqClient/mzmqClient
-
-apps/picamCtrl/picamCtrl
-
 apps/xt1121Ctrl/xt1121Ctrl
 
 apps/xt1121DCDU/xt1121DCDU
 
-apps/dmMode/dmMode
-
+#z
+apps/zaberCtrl/zaberCtrl
 apps/zaberLowLevel/zaberLowLevel
+
+
+##########################################
+#Executables and util specifics to ignore:
+
 
 utils/logdump/logdump
 utils/cursesINDI/cursesINDI
 utils/xrif2shmim/xrif2shmim
 
+###########################3
+#test files to ignore
 tests/singleTest
 tests/testMagAOX
 tests/testMagAOXsetuid

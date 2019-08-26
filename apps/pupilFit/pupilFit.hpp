@@ -109,7 +109,7 @@ public:
 
    int allocate();
    
-   int processImage( char* curr_src);
+   int processImage( void* curr_src);
    
 protected:
 
@@ -292,7 +292,7 @@ int pupilFit::allocate()
 }
    
 inline
-int pupilFit::processImage( char* curr_src )
+int pupilFit::processImage( void* curr_src )
 {
    
    for(unsigned nn=0; nn < m_width*m_height; ++nn)

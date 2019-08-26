@@ -25,10 +25,10 @@ struct pupilFitter
    unsigned m_rows {0}; ///< [in] the size of a quad, in rows
    unsigned m_cols {0}; ///< [in] the size of a quad, in cols
    
-   float m_med[4];
-   float m_avgx[4];
-   float m_avgy[4];
-   float m_avgr[4];
+   float m_med[4] = {0,0,0,0};
+   float m_avgx[4] = {0,0,0,0};
+   float m_avgy[4] = {0,0,0,0};
+   float m_avgr[4] = {0,0,0,0};
    
    float m_thresh {0.5};
    
