@@ -232,9 +232,9 @@ protected:
      * \returns -1 on error
      *
      */
-   int moveTo( const double & filters,          ///< [in] The new position in absolute filters.  Only valid if not -1.
-               const double & counts           ///< [in] The new position in absolute counts.  Only valid if not -1.
-             );
+  // int moveTo( const double & filters,          ///< [in] The new position in absolute filters.  Only valid if not -1.
+  //             const double & counts           ///< [in] The new position in absolute counts.  Only valid if not -1.
+  //           );
 
    /// Move to a new filter by name.
    /**
@@ -506,7 +506,40 @@ int filterWheelCtrl::appLogic()
       {
          if(state() == stateCodes::OPERATING) 
          {
-            state(stateCodes::READY); //stopped moving but was just changing pos
+            if(m_movingState == 1)
+            {
+               std::lock_guard<std::mutex> guard(m_indiMutex);
+               if(moveToRawRelative(-20000) < 0)
+               {
+                  sleep(1);
+                  if(m_powerState == 0) return 0;
+                  
+                  state(stateCodes::ERROR);
+                  return log<software_error,0>({__FILE__,__LINE__});
+               }
+
+               m_movingState=2;
+            }
+            else if(m_movingState == 2)
+            {
+               std::lock_guard<std::mutex> guard(m_indiMutex);
+               if(moveTo(m_preset_target) < 0)
+               {
+                  sleep(1);
+                  if(m_powerState == 0) return 0;
+                  
+                  state(stateCodes::ERROR);
+                  return log<software_error,0>({__FILE__,__LINE__});
+               }
+
+               m_movingState=3;
+            }
+            else
+            {
+               m_movingState = 0;
+               state(stateCodes::READY); //stopped moving but was just changing pos
+            }
+            
          }
          else if (state() == stateCodes::HOMING) //stopped moving but was in the homing sequence
          {
@@ -856,7 +889,8 @@ int filterWheelCtrl::moveTo( const double & filters )
 
 }
 
-int filterWheelCtrl::moveTo( const double & filters,
+
+/*int filterWheelCtrl::moveTo( const double & filters,
                              const double & counts
                            )
 {
@@ -870,7 +904,7 @@ int filterWheelCtrl::moveTo( const double & filters,
       return moveToRaw( counts );
    }
    return 0;
-}
+}*/
 
 } //namespace app
 } //namespace MagAOX

@@ -69,6 +69,7 @@ protected:
    std::string m_presetNotation {"preset"}; ///< Notation used to refer to a preset, should be singular, as in "preset" or "filter".
    
    int m_moving {0}; ///< Whether or not the stage is moving.
+   int m_movingState {0}; ///< Used to track the type of command.  If > 1 this is a command to move to a preset.  If 0 then it is a move to an arbitrary position.
    
    double m_preset {0}; ///< The current numerical preset position [1.0 is index 0 in the preset name vector]
    double m_preset_target {0}; ///< The target numerical preset position [1.0 is index 0 in the preset name vector]
@@ -378,6 +379,7 @@ int stdMotionStage<derivedT>::newCallBack_preset ( const pcf::IndiProperty &ipRe
    m_preset_target = target;
    
    std::lock_guard<std::mutex> guard(derived().m_indiMutex);
+   m_movingState = 0; //this is not a preset move
    return derived().moveTo(target);
    
 }
@@ -422,6 +424,7 @@ int stdMotionStage<derivedT>::newCallBack_presetName( const pcf::IndiProperty &i
    m_preset_target = m_presetPositions[newn]; //(double) newn + 1.0;
    derived().updateIfChanged(m_indiP_preset, "target",  m_preset_target, INDI_BUSY);
    
+   m_movingState = 1; //This is a preset move
    return derived().moveTo(m_preset_target);
    
 }
@@ -442,6 +445,7 @@ int stdMotionStage<derivedT>::newCallBack_home( const pcf::IndiProperty &ipRecv 
       indi::updateSwitchIfChanged(m_indiP_home, "request", pcf::IndiElement::On, derived().m_indiDriver, INDI_BUSY);
       
       std::lock_guard<std::mutex> guard(derived().m_indiMutex);
+      m_movingState = 0;
       return derived().startHoming();
    }
    return 0;  
@@ -463,6 +467,7 @@ int stdMotionStage<derivedT>::newCallBack_stop( const pcf::IndiProperty &ipRecv 
       indi::updateSwitchIfChanged(m_indiP_stop, "request", pcf::IndiElement::On, derived().m_indiDriver, INDI_BUSY);
     
       //-->do not lock mutex!
+      m_movingState = 0;
       return derived().stop();
    }
    return 0;  
@@ -523,7 +528,7 @@ int stdMotionStage<derivedT>::updateINDI()
    
   
    
-   if(m_moving)
+   if(m_moving && m_movingState < 1)
    {
       indi::updateIfChanged(m_indiP_preset, "current", m_preset, derived().m_indiDriver,INDI_BUSY);
       indi::updateIfChanged(m_indiP_preset, "target", m_preset_target, derived().m_indiDriver,INDI_BUSY);

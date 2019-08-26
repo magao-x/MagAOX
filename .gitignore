@@ -28,6 +28,10 @@ makefile.*GUI
 ##########################################
 #Executables and app specifics to ignore:
 
+#a
+apps/alpaoCtrl/alpaoCtrl
+apps/andorCtrl/andorCtrl
+
 #b
 apps/baslerCtrl/baslerCtrl
 
