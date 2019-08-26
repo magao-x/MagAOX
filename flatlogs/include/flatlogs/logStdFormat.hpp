@@ -19,12 +19,14 @@ namespace flatlogs
 {
 
 /// Worker function that formats a log into the standard text representation.
-/** \todo change to using a std::ios as input instead of only using std::cout
+/** 
   *
   * \ingroup logformat
   */
-template<typename logT>
-void stdFormat( bufferPtrT & logBuffer /**< [in] the binary log buffer */)
+template<typename logT, typename iosT>
+iosT & stdFormat( iosT & ios, ///< [out] the iostream to output the log too
+                  bufferPtrT & logBuffer ///< [in] the binary log buffer to output
+                )
 {
    logPrioT prio;
    eventCodeT ec;
@@ -33,7 +35,52 @@ void stdFormat( bufferPtrT & logBuffer /**< [in] the binary log buffer */)
 
    logHeader::extractBasicLog( prio, ec, ts, len, logBuffer);
 
-   std::cout << ts.ISO8601DateTimeStrX() << " " << priorityString(prio) << " " << logT::msgString(logHeader::messageBuffer(logBuffer) , len);
+   ios << ts.ISO8601DateTimeStrX() << " " << priorityString(prio) << " " << logT::msgString(logHeader::messageBuffer(logBuffer) , len);
+   
+   return ios;
+}
+
+/// Worker function that formats a log into the standard text representation with short timespec.
+/** 
+  *
+  * \ingroup logformat
+  */
+template<typename logT, typename iosT>
+iosT & stdShortFormat( iosT & ios, ///< [out] the iostream to output the log to
+                       const std::string & appName,
+                       bufferPtrT & logBuffer ///< [in] the binary log buffer to output
+                     )
+{
+   logPrioT prio;
+   eventCodeT ec;
+   timespecX ts;
+   msgLenT len;
+
+   logHeader::extractBasicLog( prio, ec, ts, len, logBuffer);
+
+   std::string outApp;
+   
+   if(appName.size() > 14)
+   {
+      outApp.resize(16, ' ');
+      outApp[15] = ':';
+      for(size_t n=14; n >= 0; --n)
+      {
+         if( 14-n + 1 > appName.size()) break;
+         outApp[n] = appName[appName.size()-1 - (14-n)];
+      }
+   }
+   else
+   {
+      outApp = appName;
+      outApp += ":";
+      outApp += std::string( 14-appName.size(), ' ');
+   }
+      
+   
+   ios << outApp << " " << ts.secondStrX() << " " << priorityString(prio) << " " << logT::msgString(logHeader::messageBuffer(logBuffer) , len);
+   
+   return ios;
 }
 
 } //namespace flatlogs

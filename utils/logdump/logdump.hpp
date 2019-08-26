@@ -337,7 +337,7 @@ void logdump::printLogBuff( const logPrioT & lvl,
 
    }
 
-   logStdFormat(logBuff);
+   logStdFormat( std::cout, logBuff);
 
    std::cout << "\033[0m";
    std::cout << "\n";

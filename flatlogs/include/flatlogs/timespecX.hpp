@@ -148,6 +148,33 @@ struct timespecX
       
       return std::string(tstr1) + std::string(tstr2);
    }
+   
+   /// Get a date-time string with just the second for timespecX
+   /** Returns a string in the format:
+     * \verbatim
+       SS.SSS
+       \endverbatim
+     * which is useful for real-time streams of log entries.
+     *
+     * \retval std::string containing the formated date/time 
+     * 
+     */ 
+   std::string secondStrX()
+   {
+      tm bdt; //broken down time
+      time_t tt = time_s;
+      gmtime_r( &tt, &bdt);
+      
+      char tstr1[5];
+      
+      strftime(tstr1, sizeof(tstr1), "%S", &bdt);
+      
+      char tstr2[5];
+      
+      snprintf(tstr2, sizeof(tstr2), ".%02i", static_cast<int>(time_ns)); //casting in case we switch to int64_t
+      
+      return std::string(tstr1) + std::string(tstr2);
+   }
 } __attribute__((packed));
 
 ///Convert a timespecX to a native timespec

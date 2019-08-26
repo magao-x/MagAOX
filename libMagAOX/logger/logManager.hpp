@@ -429,7 +429,7 @@ void logManager<logFileT>::logThreadExec()
                        
             if( logHeader::logLevel( *it ) <= logPrio::LOG_NOTICE )
             {
-               logStdFormat(*it);
+               logStdFormat(std::cerr, *it);
                std::cout << "\n";
             }
             
