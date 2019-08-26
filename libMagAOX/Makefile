@@ -24,6 +24,8 @@ INCLUDEDEPS= app/MagAOXApp.hpp \
              common/config.hpp \
              common/defaults.hpp \
              common/environment.hpp \
+             ImageStreamIO/ImageStruct.hpp \
+             ImageStreamIO/pixaccess.hpp \
              logger/logFileRaw.hpp \
              logger/logManager.hpp \
              logger/types/empty_log.hpp \

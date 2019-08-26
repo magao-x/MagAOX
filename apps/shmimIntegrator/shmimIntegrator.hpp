@@ -80,6 +80,8 @@ protected:
    
    sem_t m_smSemaphore; ///< Semaphore used to synchronize the fg thread and the sm thread.
    
+   realT (*pixget)(void *, size_t) {nullptr}; ///< Pointer to a function to extract the image data as our desired type realT.
+   
 public:
    /// Default c'tor.
    shmimIntegrator();
@@ -313,6 +315,13 @@ int shmimIntegrator::allocate()
    
    m_avgImage.resize(shmimMonitorT::m_width, shmimMonitorT::m_height);
    
+   pixget = getPixPointer<realT>(shmimMonitorT::m_dataType);
+   
+   if(pixget == nullptr)
+   {
+      log<software_error>({__FILE__, __LINE__, "bad data type"});
+      return -1;
+   }
    
    updateIfChanged(m_indiP_nAverage, "current", m_nAverage, INDI_IDLE);
    updateIfChanged(m_indiP_nAverage, "target", m_nAverage, INDI_IDLE);
@@ -333,7 +342,8 @@ int shmimIntegrator::processImage( char* curr_src )
    
    for(unsigned nn=0; nn < shmimMonitorT::m_width*shmimMonitorT::m_height; ++nn)
    {
-      data[nn] = *( (int16_t * ) (curr_src + nn*shmimMonitorT::m_typeSize));
+      //data[nn] = *( (int16_t * ) (curr_src + nn*shmimMonitorT::m_typeSize));
+      data[nn] = pixget(curr_src, nn);
    }
    ++m_nprocessed;
    ++m_currImage;

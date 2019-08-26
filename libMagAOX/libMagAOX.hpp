@@ -27,11 +27,15 @@
 #include "common/defaults.hpp"
 #include "common/environment.hpp"
 
+#include "ImageStreamIO/ImageStruct.hpp"
+#include "ImageStreamIO/pixaccess.hpp"
+
 #include "logger/logFileRaw.hpp"
 #include "logger/logManager.hpp"
 #include "logger/generated/logCodes.hpp"
 #include "logger/generated/logStdFormat.hpp"
 #include "logger/generated/logTypes.hpp"
+
 
 //#define TTY_DEBUG
 
