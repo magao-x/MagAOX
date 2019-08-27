@@ -32,6 +32,7 @@ fi
 sudo $DIR/setup_users_and_groups.sh
 log_success "Created users and configured groups"
 if [[ $install_rt == true ]]; then
+    sudo $DIR/steps/install_rt_kernel_pinned.sh
     log_success "Reboot before proceeding"
 else
     log_success "Log out and back in before proceeding"
