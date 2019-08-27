@@ -68,6 +68,8 @@ protected:
    
    std::string m_presetNotation {"preset"}; ///< Notation used to refer to a preset, should be singular, as in "preset" or "filter".
    
+   bool m_defaultPositions {true}; ///< Flag controlling whether the default preset positions (the vector index) are set in loadConfig.
+   
    int m_moving {0}; ///< Whether or not the stage is moving.
    int m_movingState {0}; ///< Used to track the type of command.  If > 1 this is a command to move to a preset.  If 0 then it is a move to an arbitrary position.
    
@@ -271,10 +273,19 @@ void stdMotionStage<derivedT>::loadConfig(mx::app::appConfigurator & config)
    config(m_powerOnHome, "motor.powerOnHome");
    
    config(m_presetNames, m_presetNotation + "s.names");
-   m_presetPositions.resize(m_presetNames.size(), 0);
-   for(size_t n=0;n<m_presetPositions.size();++n) m_presetPositions[n] = n+1;
+   
+   if(m_defaultPositions)
+   {
+      m_presetPositions.resize(m_presetNames.size(), 0);
+      for(size_t n=0;n<m_presetPositions.size();++n) m_presetPositions[n] = n+1;
+   }
+   
    config(m_presetPositions, m_presetNotation + "s.positions");
-   for(size_t n=0;n<m_presetPositions.size();++n) if(m_presetPositions[n] == 0) m_presetPositions[n] = n+1;
+   
+   if(m_defaultPositions)
+   {
+      for(size_t n=0;n<m_presetPositions.size();++n) if(m_presetPositions[n] == 0) m_presetPositions[n] = n+1;
+   }
 }
    
 
@@ -284,6 +295,8 @@ int stdMotionStage<derivedT>::appStartup()
 {
  
    derived().createStandardIndiNumber( m_indiP_preset, m_presetNotation, 1.0, (double) m_presetNames.size(), 0.0, "%0.3d");
+   m_indiP_preset["current"].set(0);
+   m_indiP_preset["target"].set(0);
    if( derived().registerIndiPropertyNew( m_indiP_preset, st_newCallBack_stdMotionStage) < 0)
    {
       #ifndef STDFILTERWHEEL_TEST_NOLOG
@@ -485,7 +498,7 @@ int stdMotionStage<derivedT>::updateINDI()
    //Check for changes and update the filterNames switch vectorm_presetNotation + ".
    bool changed = false;
    
-   static int last_moving = m_moving;
+   static int last_moving = -1; //Initialize so we always update first time through.
    
    if(last_moving != m_moving)
    {
