@@ -1,11 +1,7 @@
 #!/bin/bash
 DIR="$( cd "$( dirname "${BASH_SOURCE[0]}" )" && pwd )"
 source $DIR/../_common.sh
-TARGET_ENV=$1
-if ! [[ $TARGET_ENV == vm || $TARGET_ENV == instrument || $TARGET_ENV == ci || $TARGET_ENV == workstation ]]; then
-  echo "Unknown TARGET_ENV passed as argument 1"
-  exit 1
-fi
+
 set -euo pipefail
 function clone_or_update_and_cd() {
     if [[ ! -d /opt/MagAOX/$1/.git ]]; then
@@ -41,7 +37,7 @@ make install
 echo "Building MagAOX"
 cd /opt/MagAOX/source/MagAOX
 make setup
-if [[ $TARGET_ENV == workstation || $TARGET_ENV == vm ]]; then
+if [[ $MAGAOX_ROLE == workstation || $MAGAOX_ROLE == vm ]]; then
     if ! grep -q "EDT =" local/common.mk; then
         echo "EDT = false" >> local/common.mk
     fi

@@ -3,15 +3,10 @@ DIR="$( cd "$( dirname "${BASH_SOURCE[0]}" )" && pwd )"
 source $DIR/../_common.sh
 set -euo pipefail
 
-TARGET_ENV=$1
-
-if [[ "$TARGET_ENV" == "vm" || "$TARGET_ENV" == "workstation" ]]; then
-  CMAKE_FLAGS=""
-elif [[ "$TARGET_ENV" == "instrument" || "$TARGET_ENV" == "ci" ]]; then
+if [[ $MAGAOX_ROLE == rtc ||$MAGAOX_ROLE == icc ||$MAGAOX_ROLE == aoc || $MAGAOX_ROLE == ci ]]; then
   CMAKE_FLAGS="-DUSE_CUDA=YES -DUSE_MAGMA=YES"
 else
-  echo "Unknown TARGET_ENV passed as argument 1"
-  exit 1
+  CMAKE_FLAGS=""
 fi
 
 if [[ ! -d ./cacao ]]; then
@@ -37,7 +32,7 @@ if [[ ! -e /usr/local/bin/milk ]]; then
 fi
 echo "export PATH=\$PATH:$CACAO_ABSPATH/src/CommandLineInterface/scripts" | sudo tee /etc/profile.d/cacao_scripts.sh
 
-if [[ "$TARGET_ENV" != "ci" ]]; then
+if [[ $MAGAOX_ROLE != ci ]]; then
   if ! grep -q "/milk/shm" /etc/fstab; then
     echo "tmpfs /milk/shm tmpfs rw,nosuid,nodev" | sudo tee -a /etc/fstab
     sudo mkdir -p /milk/shm

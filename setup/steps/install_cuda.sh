@@ -2,19 +2,18 @@
 DIR="$( cd "$( dirname "${BASH_SOURCE[0]}" )" && pwd )"
 source $DIR/../_common.sh
 set -euo pipefail
-TARGET_ENV=$1
-log_info "Setting up CUDA for $TARGET_ENV"
 
-if [[ "$TARGET_ENV" == "vm" || "$TARGET_ENV" == "ci" ]]; then
+log_info "Setting up CUDA for $MAGAOX_ROLE"
+
+if [[ $MAGAOX_ROLE == vm || $MAGAOX_ROLE == ci ]]; then
   TMP_CUDA_DIR=$HOME/tmp
   mkdir -p $TMP_CUDA_DIR
   CUDA_FLAGS="--silent --toolkit --tmpdir=$TMP_CUDA_DIR"
-elif [[ "$TARGET_ENV" == "instrument" ]]; then
+elif [[ $MAGAOX_ROLE == rtc || $MAGAOX_ROLE == icc || $MAGAOX_ROLE == aoc ]]; then
   CUDA_FLAGS="--silent --driver --toolkit --samples"
   export IGNORE_PREEMPT_RT_PRESENCE=1
 else
-  echo "Unknown TARGET_ENV passed as argument 1"
-  exit 1
+  CUDA_FLAGS="--driver --toolkit --samples"
 fi
 CUDA_PACKAGE_DIR=./cuda
 mkdir -p $CUDA_PACKAGE_DIR
