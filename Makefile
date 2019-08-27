@@ -21,7 +21,8 @@ apps_icc = \
 	zaberCtrl \
 	picamCtrl \
 	smc100ccCtrl \
-	zaberLowLevel
+	zaberLowLevel \
+	andorCtrl
 apps_aoc = \
 	magAOXMaths \
 	trippLitePDU \
@@ -41,19 +42,6 @@ else ifeq ($(MAGAOX_ROLE),icc)
 else ifeq ($(MAGAOX_ROLE),rtc)
   apps_to_build += $(apps_rtcicc)
   apps_to_build += $(apps_rtc)
-endif
-
-ifneq ($(PYLON),false)
-apps_to_build += baslerCtrl
-endif
-
-ifneq ($(PICAM),false)
-apps_to_build += picamCtrl
-endif
-
-ifneq ($(EDT),false)
-apps_to_build += ocam2KCtrl
-apps_to_build += andorCtrl
 endif
 
 utils_to_build = logdump \
