@@ -47,13 +47,10 @@ protected:
    int m_warningDiskTemp = 0;   ///< User defined warning temperature for drives
    int m_criticalDiskTemp = 0;   ///< User defined critical temperature for drives
 
-   pcf::IndiProperty core_loads;   ///< Indi variable for reporting CPU core loads
-   pcf::IndiProperty core_temps;   ///< Indi variable for reporting CPU core temperature(s)
-   pcf::IndiProperty drive_temps;   ///< Indi variable for reporting drive temperature(s)
-   pcf::IndiProperty root_usage;   ///< Indi variable for reporting drive usage of root path
-   pcf::IndiProperty boot_usage;   ///< Indi variable for reporting drive usage of /boot path
-   pcf::IndiProperty data_usage;   ///< Indi variable for reporting drive usage of /data path
-   pcf::IndiProperty ram_usage_indi;   ///< Indi variable for reporting ram usage
+   pcf::IndiProperty m_indiP_core_loads;   ///< Indi variable for reporting CPU core loads
+   pcf::IndiProperty m_indiP_core_temps;   ///< Indi variable for reporting CPU core temperature(s)
+   pcf::IndiProperty m_indiP_drive_temps;   ///< Indi variable for reporting drive temperature(s)
+   pcf::IndiProperty m_indiP_usage;   ///< Indi variable for reporting drive usage of all paths
 
    std::vector<float> coreTemps;   ///< List of current core temperature(s)
    std::vector<float> coreLoads;   ///< List of current core load(s)
@@ -178,10 +175,9 @@ public:
      * \returns -1 on invalid string being read in
      * \returns 0 on completion and storing of value
      */
-   int parseDiskTemperature(
-      std::string,  /**< [in] the string to be parsed*/
-      float&   /**< [out] the return value from the string*/
-   );
+   int parseDiskTemperature( std::string,  /**< [in] the string to be parsed*/
+                             float&        /**< [out] the return value from the string*/
+                           );
 
 
    /// Checks if any drive temperatures are warning or critical levels
@@ -191,24 +187,21 @@ public:
      * \returns 2 if a temperature value is at critical level
      * \returns 0 otherwise (all temperatures are considered normal)
      */
-   int criticalDiskTemperature(
-      std::vector<float>&   /**< [in] the vector of temperature values to be checked*/
-   );
+   int criticalDiskTemperature( std::vector<float>&   /**< [in] the vector of temperature values to be checked*/ );
 
 
    /// Finds usages of space for following directory paths: /; /data; /boot
    /** These usage values are stored as integer values between 0 and 100 (e.g. value of 39 means directory is 39% full)
      * If directory is not found, space usage value will remain 0
-     * TODO: What about multiple drives? What does this do?
+     * \TODO: What about multiple drives? What does this do?
      *
      * \returns -1 on error with system command or output reading
      * \returns 0 if at least one of the return values is found
      */
-   int findDiskUsage(
-      float&,   /**< [out] the return value for usage in root path*/
-      float&,   /**< [out] the return value for usage in /data path*/
-      float&    /**< [out] the return value for usage in /boot path*/
-   );
+   int findDiskUsage( float&,   /**< [out] the return value for usage in root path*/
+                      float&,   /**< [out] the return value for usage in /data path*/
+                      float&    /**< [out] the return value for usage in /boot path*/
+                    );
 
 
    /// Parses string from system call to find drive usage space
@@ -217,12 +210,11 @@ public:
      * \returns -1 on invalid string being read in
      * \returns 0 on completion and storing of value
      */
-   int parseDiskUsage(
-      std::string,   /**< [in] the string to be parsed*/
-      float&,   /**< [out] the return value for usage in root path*/
-      float&,   /**< [out] the return value for usage in /data path*/
-      float&    /**< [out] the return value for usage in /boot path*/
-   );
+   int parseDiskUsage( std::string,   /**< [in] the string to be parsed*/
+                       float&,   /**< [out] the return value for usage in root path*/
+                       float&,   /**< [out] the return value for usage in /data path*/
+                       float&    /**< [out] the return value for usage in /boot path*/
+                     );
 
 
    /// Finds current RAM usage
@@ -231,9 +223,7 @@ public:
      * \returns -1 on error with system command or output reading
      * \returns 0 on completion
      */
-   int findRamUsage(
-      float&    /**< [out] the return value for current RAM usage*/
-   );
+   int findRamUsage( float&    /**< [out] the return value for current RAM usage*/ );
 
 
    /// Parses string from system call to find RAM usage
@@ -242,10 +232,9 @@ public:
     * \returns -1 on invalid string being read in
     * \returns 0 on completion and storing of value
     */
-   int parseRamUsage(
-      std::string,   /**< [in] the string to be parsed*/
-      float&    /**< [out] the return value for current RAM usage*/
-   );
+   int parseRamUsage( std::string,   /**< [in] the string to be parsed*/
+                      float&    /**< [out] the return value for current RAM usage*/
+                    );
 
    /// Runs a command (with parameters) passed in using fork/exec
    /** New process is made with fork(), and child runs execvp with command provided
@@ -253,9 +242,7 @@ public:
     * \returns output of command, contained in a vector of strings
     * If an error occurs during the process, an empty vector of strings is returned.
     */
-   std::vector<std::string> runCommand(
-    std::vector<std::string>    /**< [in] command to be run, with any subsequent parameters stored after*/
-   );
+   std::vector<std::string> runCommand( std::vector<std::string>    /**< [in] command to be run, with any subsequent parameters stored after*/);
 
 };
 
@@ -282,56 +269,44 @@ void sysMonitor::loadConfig()
 
 int sysMonitor::appStartup()
 {
-   REG_INDI_NEWPROP_NOCB(core_loads, "core_loads", pcf::IndiProperty::Number);
-   REG_INDI_NEWPROP_NOCB(core_temps, "core_temps", pcf::IndiProperty::Number);
-   REG_INDI_NEWPROP_NOCB(drive_temps, "drive_temps", pcf::IndiProperty::Number);
-   REG_INDI_NEWPROP_NOCB(root_usage, "root_usage", pcf::IndiProperty::Number);
-   REG_INDI_NEWPROP_NOCB(boot_usage, "boot_usage", pcf::IndiProperty::Number);
-   REG_INDI_NEWPROP_NOCB(data_usage, "data_usage", pcf::IndiProperty::Number);
-   REG_INDI_NEWPROP_NOCB(ram_usage_indi, "ram_usage_indi", pcf::IndiProperty::Number);
-
-   unsigned int i;
-   std::string coreStr = {"core"};
-
+   REG_INDI_NEWPROP_NOCB(m_indiP_core_loads, "core_loads", pcf::IndiProperty::Number);
+   REG_INDI_NEWPROP_NOCB(m_indiP_core_temps, "core_temps", pcf::IndiProperty::Number);
+   REG_INDI_NEWPROP_NOCB(m_indiP_drive_temps, "drive_temps", pcf::IndiProperty::Number);
+   REG_INDI_NEWPROP_NOCB(m_indiP_usage, "resource_use", pcf::IndiProperty::Number);
+   
    findCPULoads(coreLoads);
-   for (i = 0; i < coreLoads.size(); i++) 
+   for (unsigned int i = 0; i < coreLoads.size(); i++) 
    {
-      coreStr.append(std::to_string(i));
-      core_loads.add (pcf::IndiElement(coreStr));
-      core_loads[coreStr].set<double>(0.0);
-      coreStr.pop_back();
+      std::string coreStr = "core" + std::to_string(i);
+      m_indiP_core_loads.add (pcf::IndiElement(coreStr));
+      m_indiP_core_loads[coreStr].set<double>(0.0);
    }
 
    findCPUTemperatures(coreTemps);
-   for (i = 0; i < coreTemps.size(); i++) 
+   for (unsigned int i = 0; i < coreTemps.size(); i++) 
    {
-      coreStr.append(std::to_string(i));
-      core_temps.add (pcf::IndiElement(coreStr));
-      core_temps[coreStr].set<double>(0.0);
-      coreStr.pop_back();
+      std::string coreStr = "core" + std::to_string(i);
+      m_indiP_core_temps.add (pcf::IndiElement(coreStr));
+      m_indiP_core_temps[coreStr].set<double>(0.0);
    }
-
-   std::string driveStr = {"drive"};
+   
    findDiskTemperature(diskTemp);
-   for (i = 0; i < diskTemp.size(); i++) 
+   for (unsigned int i = 0; i < diskTemp.size(); i++) 
    {
-      driveStr.append(std::to_string(i));
-      drive_temps.add (pcf::IndiElement(driveStr));
-      drive_temps[driveStr].set<double>(0.0);
-      driveStr.pop_back();
+      std::string driveStr = "drive" + std::to_string(i);
+      m_indiP_drive_temps.add (pcf::IndiElement(driveStr));
+      m_indiP_drive_temps[driveStr].set<double>(0.0);
    }
 
-   root_usage.add(pcf::IndiElement("root_usage"));
-   root_usage["root_usage"].set<double>(0.0);
-
-   boot_usage.add(pcf::IndiElement("boot_usage"));
-   boot_usage["boot_usage"].set<double>(0.0);
-
-   data_usage.add(pcf::IndiElement("data_usage"));
-   data_usage["data_usage"].set<double>(0.0);
-
-   ram_usage_indi.add(pcf::IndiElement("ram_usage"));
-   ram_usage_indi["ram_usage"].set<double>(0.0);
+   m_indiP_usage.add(pcf::IndiElement("root_usage"));
+   m_indiP_usage.add(pcf::IndiElement("boot_usage"));
+   m_indiP_usage.add(pcf::IndiElement("data_usage"));
+   m_indiP_usage.add(pcf::IndiElement("ram_usage"));
+   
+   m_indiP_usage["root_usage"].set<double>(0.0);
+   m_indiP_usage["boot_usage"].set<double>(0.0);
+   m_indiP_usage["data_usage"].set<double>(0.0);
+   m_indiP_usage["ram_usage"].set<double>(0.0);
 
    return 0;
 }
@@ -815,36 +790,17 @@ int sysMonitor::parseRamUsage(std::string line, float& ramUsage)
 
 int sysMonitor::updateVals()
 {
-   MagAOXApp::updateIfChanged(core_loads, "core", coreLoads);
+   MagAOXApp::updateIfChanged(m_indiP_core_loads, "core", coreLoads);
 
-   MagAOXApp::updateIfChanged(core_temps, "core", coreTemps);
+   MagAOXApp::updateIfChanged(m_indiP_core_temps, "core", coreTemps);
 
-   MagAOXApp::updateIfChanged(drive_temps, "drive", diskTemp);
+   MagAOXApp::updateIfChanged(m_indiP_drive_temps, "drive", diskTemp);
 
-   MagAOXApp::updateIfChanged(
-      root_usage,
-      "root_usage",
-      rootUsage
-   );
-
-   MagAOXApp::updateIfChanged(
-      boot_usage,
-      "boot_usage",
-      bootUsage
-   );
-
-   MagAOXApp::updateIfChanged(
-      data_usage,
-      "data_usage",
-      dataUsage
-   );
-
-   MagAOXApp::updateIfChanged(
-      ram_usage_indi,
-      "ram_usage",
-      ramUsage
-   );
-
+   MagAOXApp::updateIfChanged(m_indiP_usage, "root_usage", rootUsage);
+   MagAOXApp::updateIfChanged(m_indiP_usage, "boot_usage", bootUsage);
+   MagAOXApp::updateIfChanged(m_indiP_usage, "data_usage", dataUsage);
+   MagAOXApp::updateIfChanged(m_indiP_usage, "ram_usage", ramUsage);
+   
    return 0;
 }
 
@@ -852,7 +808,7 @@ std::vector<std::string> sysMonitor::runCommand( std::vector<std::string> comman
 {
    int link[2];
    pid_t pid;
-   char commandOutput_c[4096];
+
    std::vector<std::string> commandOutput;
 
    if (pipe(link)==-1) 
@@ -883,6 +839,8 @@ std::vector<std::string> sysMonitor::runCommand( std::vector<std::string> comman
    }
    else 
    {
+      char commandOutput_c[4096];
+         
       wait(NULL);
       close(link[1]);
       if (read(link[0], commandOutput_c, sizeof(commandOutput_c)) < 0) 
