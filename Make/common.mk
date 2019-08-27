@@ -14,14 +14,19 @@ SELF_DIR := $(abspath $(dir $(lastword $(MAKEFILE_LIST))))
 -include $(SELF_DIR)/../local/common.mk
 include $(SELF_DIR)/config.mk
 
-UNAME ?= $(shell uname)
-ifeq ($(UNAME),Darwin)
-	CFLAGS += -D_BSD_SOURCE
-	CXXFLAGS += -D_BSD_SOURCE
+### Set up what libs to require based on the MAGAOX_ROLE
+ifeq($(MAGAOX_ROLE),aoc)
+  EDT ?= true
+else ifeq($(MAGAOX_ROLE),icc)
+  EDT ?= true
+else ifeq($(MAGAOX_ROLE),rtc)
+  EDT ?= true
 else
-	CFLAGS += -D_XOPEN_SOURCE=700
-	CXXFLAGS += -D_XOPEN_SOURCE=700
+  EDT ?= false
 endif
+
+CFLAGS += -D_XOPEN_SOURCE=700
+CXXFLAGS += -D_XOPEN_SOURCE=700
 
 LIB_PATH ?= $(PREFIX)/lib
 INCLUDE_PATH ?= $(PREFIX)/include
@@ -73,13 +78,9 @@ EXTRA_LDLIBS += $(BLAS_LDLIBS)
 ### EDT
 
 EDT_PATH=/opt/EDTpdv
-
 EDT_INCLUDES=-I$(EDT_PATH)
 EDT_LIBS = -L/opt/EDTpdv -lpdv -lpthread -lm -ldl
-#TODO: make EDT a selectable include
 
-
-EDT ?= true
 ifneq ($(EDT),false)
    INCLUDES += $(EDT_INCLUDES)
    EXTRA_LDLIBS += $(EDT_LIBS)

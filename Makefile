@@ -30,6 +30,17 @@ apps_aoc = \
 
 libs_to_build = libtelnet
 
+apps_to_build = $(apps_common)
+ifeq($(MAGAOX_ROLE),aoc)
+  apps_to_build += apps_aoc
+else ifeq($(MAGAOX_ROLE),icc)
+  apps_to_build += apps_rtcicc
+  apps_to_build += apps_icc
+else ifeq($(MAGAOX_ROLE),rtc)
+  apps_to_build += apps_rtcicc
+  apps_to_build += apps_rtc
+endif
+
 ifneq ($(PYLON),false)
 apps_to_build += baslerCtrl
 endif
