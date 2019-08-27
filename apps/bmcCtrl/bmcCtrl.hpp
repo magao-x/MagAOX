@@ -412,12 +412,17 @@ int bmcCtrl::commandDM(void * curr_src)
      3) convert to squared fractional voltage (0 to +1)
      4) calculate the mean
    */
+
+
+   // want to rework the logic here so that we don't have to check
+   // if every actuator is addressable.
+   // Loop over addressable only?
    double mean = 0;
    int address;
    for (uint32_t idx = 0; idx < m_nbAct; ++idx)
    {
      address = m_actuator_mapping[idx];
-     if(address == -1) // rework this logic
+     if(address == -1)
      {
         m_dminputs[idx] = 0.; // addressable but ignored actuators set to 0
      } else {
@@ -434,7 +439,7 @@ int bmcCtrl::commandDM(void * curr_src)
    */
    for (uint32_t idx = 0 ; idx < m_nbAct ; ++idx)
    {
-      m_dminputs[idx] -= mean - 0.5;
+      //m_dminputs[idx] -= mean - 0.5;
       if (m_dminputs[idx] > 1)
       {
          printf("Actuator %d saturated!\n", idx + 1);
@@ -446,6 +451,11 @@ int bmcCtrl::commandDM(void * curr_src)
       }
       m_dminputs[idx] = sqrt(m_dminputs[idx]);
    }
+
+   //for (uint32_t idx = 0 ; idx < m_nbAct ; ++idx){
+   // printf("Acuator %d: %f\n", idx+1, m_dminputs[idx]);
+   //}
+   //printf("Mean %f\n", mean);
     
    /* Finally, send the command to the DM */
    BMCRC ret = BMCSetArray(&m_dm, m_dminputs, NULL);
