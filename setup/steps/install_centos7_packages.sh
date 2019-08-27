@@ -20,7 +20,7 @@ yum install -y \
     vim \
     nano \
     wget \
-    locate \
+    mlocate \
     htop \
     ntp \
     zlib-devel \
