@@ -209,40 +209,6 @@ protected:
      */
    int moveTo( const double & filters /**< [in] The new position in absolute filter units*/ );
 
-   /// Move to a new position relative to current, filter units.
-   /**
-     * \returns 0 on success.
-     * \returns -1 on error.
-     */
-   int moveToRelative( const double & filters /**< [in] The new position in relative filter units*/ );
-
-   /// Move to a new position, based on precendence of each possible source of position.
-   /** The precedence order is:
-     *  # absolute filters
-     *  # relative filters
-     *  # absolute counts
-     *  # relative counts
-     *
-     * That is, it moves based on the first valid position in the list.  To be valid, an absolute position must not
-     * be -1, and a relative position must not be 0.
-     *
-     * This primarily intended for processing the req_position INDI property.
-     *
-     * \returns 0 on success
-     * \returns -1 on error
-     *
-     */
-  // int moveTo( const double & filters,          ///< [in] The new position in absolute filters.  Only valid if not -1.
-  //             const double & counts           ///< [in] The new position in absolute counts.  Only valid if not -1.
-  //           );
-
-   /// Move to a new filter by name.
-   /**
-     * \returns 0 on success.
-     * \returns -1 on error.
-     */
-   int moveTo( const std::string & name /**< [in] The name of the filter to move to*/);
-
 };
 
 inline
@@ -888,23 +854,6 @@ int filterWheelCtrl::moveTo( const double & filters )
    return moveToRaw(counts);
 
 }
-
-
-/*int filterWheelCtrl::moveTo( const double & filters,
-                             const double & counts
-                           )
-{
-   if( filters != -1 )
-   {
-      return moveTo( filters );
-   }
-
-   if( counts != -1 )
-   {
-      return moveToRaw( counts );
-   }
-   return 0;
-}*/
 
 } //namespace app
 } //namespace MagAOX

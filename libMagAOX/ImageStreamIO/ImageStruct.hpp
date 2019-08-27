@@ -1,6 +1,6 @@
 
 
-
+///\todo document this file
 
 #ifndef ImageStruct_hpp
 #define ImageStruct_hpp

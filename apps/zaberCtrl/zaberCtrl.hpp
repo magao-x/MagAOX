@@ -119,7 +119,7 @@ public:
    double presetNumber();
    
    /// Move to a new position in mm.
-   /** 
+   /**  \todo this actually should move to a preset position by nearest integet..  A moveToMM should be used for the mm command.
      * 
      * \returns 0 on success.
      * \returns -1 on error.
