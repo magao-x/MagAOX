@@ -25,7 +25,7 @@ apps_aoc = \
 	magAOXMaths \
 	trippLitePDU \
 	xt1121Ctrl \
-    xt1121DCDU
+    xt1121DCDU \
 	mzmqClient
 
 libs_to_build = libtelnet
