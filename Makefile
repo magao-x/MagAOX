@@ -13,7 +13,8 @@ apps_rtc = \
 	ocam2KCtrl \
 	siglentSDG \
 	ttmModulator \
-	bmcCtrl
+	bmcCtrl \
+	pi335Ctrl
 apps_icc = \
 	filterWheelCtrl \
 	baslerCtrl \
