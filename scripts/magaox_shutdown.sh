@@ -17,8 +17,8 @@ grep -v '^#' < $filename | { while read -r line; do
             tmux send-keys -t $procname "exit" Enter
             log_info "waiting for tmux session $procname to exit..."
             sleep 0.5
-            wait=$((wait+0.5))
-            if (( $wait > 5 )); then
+            wait=$((wait + 1))
+            if (( wait > 5 )); then
                tmux kill-session -t $procname
             fi
          done
