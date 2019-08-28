@@ -24,7 +24,7 @@ dmCtrl::~dmCtrl()
 
 int dmCtrl::subscribe( multiIndiPublisher * publisher )
 {
-   publisher->subscribeProperty(this, m_dmName, "shmimName");
+   publisher->subscribeProperty(this, m_dmName, "sm_shmimName");
    publisher->subscribeProperty(this, m_dmName, "flat");
    publisher->subscribeProperty(this, m_dmName, "test");
 //   publisher->subscribeProperty(this, m_dmName, "");
@@ -44,7 +44,7 @@ int dmCtrl::handleSetProperty( const pcf::IndiProperty & ipRecv)
 {  
    if(ipRecv.getDevice() != m_dmName) return 0;
    
-   if(ipRecv.getName() == "shmimName")
+   if(ipRecv.getName() == "sm_shmimName")
    {
       if(ipRecv.find("name"))
       {
