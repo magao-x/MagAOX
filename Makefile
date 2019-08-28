@@ -8,20 +8,23 @@ apps_common = \
 apps_rtcicc = \
 	mzmqServer \
 	streamWriter \
-	alpaoCtrl
+	alpaoCtrl \
+	dmMode
 apps_rtc = \
 	ocam2KCtrl \
 	siglentSDG \
 	ttmModulator \
 	bmcCtrl \
-	pi335Ctrl
+	pi335Ctrl \
+	pupilFit \
+	shmimIntegrator \
 apps_icc = \
 	filterWheelCtrl \
 	baslerCtrl \
 	zaberCtrl \
+	zaberLowLevel \
 	picamCtrl \
 	smc100ccCtrl \
-	zaberLowLevel \
 	andorCtrl
 apps_aoc = \
 	magAOXMaths \
