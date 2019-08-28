@@ -63,6 +63,16 @@ int dmCtrl::handleSetProperty( const pcf::IndiProperty & ipRecv)
    
    if(ipRecv.getName() == "flat")
    {
+      if(ipRecv.find("current"))
+      {
+         m_flatName = ipRecv["current"].get<std::string>();
+      }
+      
+      if(ipRecv.find("target"))
+      {
+         m_flatTarget = ipRecv["target"].get<std::string>();
+      }
+      
       if(ipRecv.find("shmimName"))
       {
          m_flatShmim = ipRecv["shmimName"].get<std::string>();
@@ -71,6 +81,16 @@ int dmCtrl::handleSetProperty( const pcf::IndiProperty & ipRecv)
    
    if(ipRecv.getName() == "test")
    {
+      if(ipRecv.find("current"))
+      {
+         m_testName = ipRecv["current"].get<std::string>();
+      }
+      
+      if(ipRecv.find("target"))
+      {
+         m_testTarget = ipRecv["target"].get<std::string>();
+      }
+      
       if(ipRecv.find("shmimName"))
       {
          m_testShmim = ipRecv["shmimName"].get<std::string>();
@@ -131,11 +151,26 @@ void dmCtrl::updateGUI()
    ui.buttonZero->setEnabled(true);
    ui.buttonRelease->setEnabled(true);
    ui.buttonLoadFlat->setEnabled(true);
-   ui.buttonSetFlat->setEnabled(true);
-   ui.buttonZeroFlat->setEnabled(true);
    
-   ui.buttonLoadTest->setEnabled(true);
-   ui.buttonSetTest->setEnabled(true);
+
+   if(m_flatName == m_flatTarget && m_flatName != "")
+   {
+      ui.buttonSetFlat->setEnabled(true);   
+   }
+   else
+   {
+      ui.buttonSetFlat->setEnabled(false);
+   }   
+   ui.buttonZeroFlat->setEnabled(true);
+
+   if(m_testName == m_testTarget && m_testName != "")
+   {
+      ui.buttonSetTest->setEnabled(true);   
+   }
+   else
+   {
+      ui.buttonSetTest->setEnabled(false);
+   }
    ui.buttonZeroTest->setEnabled(true);
       
 } //updateGUI()
@@ -183,7 +218,7 @@ void dmCtrl::on_buttonLoadFlat_pressed()
    ipFreq.setDevice(m_dmName);
    ipFreq.setName("flat");
    ipFreq.add(pcf::IndiElement("target"));
-   ipFreq["target"] = "flat2.fits";
+   ipFreq["target"] = "flat.fits";
     
    sendNewProperty(ipFreq);
 }

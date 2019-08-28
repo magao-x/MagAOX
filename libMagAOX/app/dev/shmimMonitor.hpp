@@ -23,6 +23,15 @@ namespace app
 namespace dev 
 {
 
+struct shmimT
+{
+   static std::string indiPrefix()
+   {
+      return "sm";
+   };
+//   constexpr char indiPrefix[3]  {"sm"};
+};
+
 /** MagAO-X generic shared memory monitor
   *
   * 
@@ -32,22 +41,36 @@ namespace dev
     //The allocate function is called after connecting to the shared memory buffer
     //It should check that the buffer has the expected size, and perform any internal allocations
     //to prepare for processing.
-    int derivedT::allocate();
+    int derivedT::allocate( const specificT & ///< [in] tag to differentiate shmimMonitor parents.  Normally this is dev::shmimT for a single parent. 
+                          );
     
+    int derivedT::processImage( void * curr_src,   ///< [in] pointer to the start of the current frame 
+                                const specificT &  ///< [in] tag to differentiate shmimMonitor parents.  Normally this is dev::shmimT for a single parent.
+                              )
    \endcode  
   * Each of the above functions should return 0 on success, and -1 on an error. 
   * 
   * This class should be declared a friend in the derived class, like so:
    \code 
-    friend class dev::shmimMonitor<derivedT>;
+    friend class dev::shmimMonitor<derivedT, specificT>;
    \endcode
   *
   * Calls to this class's `setupConfig`, `loadConfig`, `appStartup`, `appLogic` and `appShutdown`
   * functions must be placed in the derived class's functions of the same name.
   *
+  *
+  * The template specifier `specificT` allows inheritance of multiple shmimMonitor classes.  This type must have at least
+  * the static member function:
+  \code
+  static std::string indiPrefix()
+  \endcode
+  * which returns the string to prefix to INDI properties.  The default `shmimT` uses "sm".
+  * 
+  * \todo move requirement for sigsegv handling to derived class -- it should set m_restart on all shmimMonitors it inherited.
+  *
   * \ingroup appdev
   */
-template<class derivedT>
+template<class derivedT, class specificT=shmimT>
 class shmimMonitor 
 {
 protected:
@@ -77,7 +100,7 @@ public:
    /**
      * This should be called in `derivedT::setupConfig` as
      * \code
-       shmimMonitor<derivedT>::setupConfig(config);
+       shmimMonitor<derivedT, specificT>::setupConfig(config);
        \endcode
      * with appropriate error checking.
      */
@@ -87,7 +110,7 @@ public:
    /**
      * This should be called in `derivedT::loadConfig` as
      * \code
-       shmimMonitor<derivedT>::loadConfig(config);
+       shmimMonitor<derivedT, specificT>::loadConfig(config);
        \endcode
      * with appropriate error checking.
      */
@@ -97,7 +120,7 @@ public:
    /** Starts the shmimMonitor thread
      * This should be called in `derivedT::appStartup` as
      * \code
-       shmimMonitor<derivedT>::appStartup();
+       shmimMonitor<derivedT, specificT>::appStartup();
        \endcode
      * with appropriate error checking.
      * 
@@ -109,7 +132,7 @@ public:
    /// Checks the shmimMonitor thread
    /** This should be called in `derivedT::appLogic` as
      * \code
-       shmimMonitor<derivedT>::appLogic();
+       shmimMonitor<derivedT, specificT>::appLogic();
        \endcode
      * with appropriate error checking.
      * 
@@ -121,7 +144,7 @@ public:
    /// Shuts down the shmimMonitor thread
    /** This should be called in `derivedT::appShutdown` as
      * \code
-       shmimMonitor<derivedT>::appShutdown();
+       shmimMonitor<derivedT, specificT>::appShutdown();
        \endcode
      * with appropriate error checking.
      * 
@@ -212,13 +235,13 @@ private:
 };
 
 //Set self pointer to null so app starts up uninitialized.
-template<class derivedT>
-shmimMonitor<derivedT> * shmimMonitor<derivedT>::m_selfMonitor = nullptr;
+template<class derivedT, class specificT>
+shmimMonitor<derivedT, specificT> * shmimMonitor<derivedT, specificT>::m_selfMonitor = nullptr;
 
 
 
-template<class derivedT>
-void shmimMonitor<derivedT>::setupConfig(mx::app::appConfigurator & config)
+template<class derivedT, class specificT>
+void shmimMonitor<derivedT, specificT>::setupConfig(mx::app::appConfigurator & config)
 {
    config.add("shmimMonitor.threadPrio", "", "shmimMonitor.threadPrio", argType::Required, "shmimMonitor", "threadPrio", false, "int", "The real-time priority of the shmimMonitor thread.");
    
@@ -229,21 +252,21 @@ void shmimMonitor<derivedT>::setupConfig(mx::app::appConfigurator & config)
          
 }
 
-template<class derivedT>
-void shmimMonitor<derivedT>::loadConfig(mx::app::appConfigurator & config)
+template<class derivedT, class specificT>
+void shmimMonitor<derivedT, specificT>::loadConfig(mx::app::appConfigurator & config)
 {
    config(m_smThreadPrio, "shmimMonitor.threadPrio");
    config(m_shmimName, "shmimMonitor.shmimName");
   
 }
    
-template<class derivedT>
-int shmimMonitor<derivedT>::appStartup()
+template<class derivedT, class specificT>
+int shmimMonitor<derivedT, specificT>::appStartup()
 {
    //Register the shmimName INDI property
    m_indiP_shmimName = pcf::IndiProperty(pcf::IndiProperty::Text);
    m_indiP_shmimName.setDevice(derived().configName());
-   m_indiP_shmimName.setName("sm_shmimName");
+   m_indiP_shmimName.setName( specificT::indiPrefix() + "_shmimName");
    m_indiP_shmimName.setPerm(pcf::IndiProperty::ReadOnly);
    m_indiP_shmimName.setState(pcf::IndiProperty::Idle);
    m_indiP_shmimName.add(pcf::IndiElement("name"));
@@ -260,7 +283,7 @@ int shmimMonitor<derivedT>::appStartup()
    //Register the frameSize INDI property
    m_indiP_frameSize = pcf::IndiProperty(pcf::IndiProperty::Number);
    m_indiP_frameSize.setDevice(derived().configName());
-   m_indiP_frameSize.setName("sm_frameSize");
+   m_indiP_frameSize.setName(specificT::indiPrefix() + "_frameSize");
    m_indiP_frameSize.setPerm(pcf::IndiProperty::ReadOnly);
    m_indiP_frameSize.setState(pcf::IndiProperty::Idle);
    m_indiP_frameSize.add(pcf::IndiElement("width"));
@@ -314,8 +337,8 @@ int shmimMonitor<derivedT>::appStartup()
 
 }
 
-template<class derivedT>
-int shmimMonitor<derivedT>::appLogic()
+template<class derivedT, class specificT>
+int shmimMonitor<derivedT, specificT>::appLogic()
 {
    //do a join check to see if other threads have exited.
    if(pthread_tryjoin_np(m_smThread.native_handle(),0) == 0)
@@ -330,8 +353,8 @@ int shmimMonitor<derivedT>::appLogic()
 }
 
 
-template<class derivedT>
-int shmimMonitor<derivedT>::appShutdown()
+template<class derivedT, class specificT>
+int shmimMonitor<derivedT, specificT>::appShutdown()
 {
    pthread_kill(m_smThread.native_handle(), SIGUSR1);
    
@@ -349,13 +372,13 @@ int shmimMonitor<derivedT>::appShutdown()
    return 0;
 }
 
-template<class derivedT>
-int shmimMonitor<derivedT>::setSigSegvHandler()
+template<class derivedT, class specificT>
+int shmimMonitor<derivedT, specificT>::setSigSegvHandler()
 {
    struct sigaction act;
    sigset_t set;
 
-   act.sa_sigaction = &shmimMonitor<derivedT>::_handlerSigSegv;
+   act.sa_sigaction = &shmimMonitor<derivedT, specificT>::_handlerSigSegv;
    act.sa_flags = SA_SIGINFO;
    sigemptyset(&set);
    act.sa_mask = set;
@@ -387,8 +410,8 @@ int shmimMonitor<derivedT>::setSigSegvHandler()
    return 0;
 }
 
-template<class derivedT>
-void shmimMonitor<derivedT>::_handlerSigSegv( int signum,
+template<class derivedT, class specificT>
+void shmimMonitor<derivedT, specificT>::_handlerSigSegv( int signum,
                                               siginfo_t *siginf,
                                               void *ucont
                                             )
@@ -396,8 +419,8 @@ void shmimMonitor<derivedT>::_handlerSigSegv( int signum,
    m_selfMonitor->handlerSigSegv(signum, siginf, ucont);
 }
 
-template<class derivedT>
-void shmimMonitor<derivedT>::handlerSigSegv( int signum,
+template<class derivedT, class specificT>
+void shmimMonitor<derivedT, specificT>::handlerSigSegv( int signum,
                                              siginfo_t *siginf,
                                              void *ucont
                                            )
@@ -411,15 +434,15 @@ void shmimMonitor<derivedT>::handlerSigSegv( int signum,
    return;
 }
 
-template<class derivedT>
-void shmimMonitor<derivedT>::smThreadStart( shmimMonitor * s)
+template<class derivedT, class specificT>
+void shmimMonitor<derivedT, specificT>::smThreadStart( shmimMonitor * s)
 {
    s->smThreadExec();
 }
 
 
-template<class derivedT>
-void shmimMonitor<derivedT>::smThreadExec()
+template<class derivedT, class specificT>
+void shmimMonitor<derivedT, specificT>::smThreadExec()
 {
    //Wait for the thread starter to finish initializing this thread.
    while( m_smThreadInit == true && derived().shutdown() == 0)
@@ -490,7 +513,7 @@ void shmimMonitor<derivedT>::smThreadExec()
       size_t length = m_imageStream.md[0].size[2];
 
       
-      if( derived().allocate() < 0)
+      if( derived().allocate( specificT()) < 0)
       {
          derivedT::template log<software_critical>({__FILE__,__LINE__});
          break;
@@ -536,7 +559,7 @@ void shmimMonitor<derivedT>::smThreadExec()
          
             char * curr_src = (char *)  m_imageStream.array.raw + curr_image*m_width*m_height*m_typeSize;
             
-            if( derived().processImage(curr_src) < 0)
+            if( derived().processImage(curr_src, specificT()) < 0)
             {
                derivedT::template log<software_error>({__FILE__,__LINE__});
             }
@@ -587,8 +610,8 @@ void shmimMonitor<derivedT>::smThreadExec()
 
 
 
-template<class derivedT>
-int shmimMonitor<derivedT>::updateINDI()
+template<class derivedT, class specificT>
+int shmimMonitor<derivedT, specificT>::updateINDI()
 {
    if( !derived().m_indiDriver ) return 0;
    
