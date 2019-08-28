@@ -45,28 +45,28 @@ else
     if [[ -z "$1" && -z $MAGAOX_ROLE ]]; then
         MAGAOX_ROLE=""
         echo "Choose the role for this machine"
-        echo "    aoc - Adaptive optics Operator Computer"
-        echo "    rtc - Real Time control Computer"
-        echo "    icc - Instrument Control Computer"
+        echo "    AOC - Adaptive optics Operator Computer"
+        echo "    RTC - Real Time control Computer"
+        echo "    ICC - Instrument Control Computer"
         echo "    workstation - Any other MagAO-X workstation"
         echo
         while [[ -z $MAGAOX_ROLE ]]; do
             read -p "Role:" roleinput
             case $roleinput in
-                aoc)
-                    MAGAOX_ROLE=aoc
+                AOC)
+                    MAGAOX_ROLE=AOC
                     ;;
-                rtc)
-                    MAGAOX_ROLE=rtc
+                RTC)
+                    MAGAOX_ROLE=RTC
                     ;;
-                icc)
-                    MAGAOX_ROLE=icc
+                ICC)
+                    MAGAOX_ROLE=ICC
                     ;;
                 workstation)
                     MAGAOX_ROLE=workstation
                     ;;
                 *)
-                    echo "Must be one of aoc, rtc, icc, or workstation."
+                    echo "Must be one of AOC, RTC, ICC, or workstation."
                     continue
             esac
         done
@@ -91,20 +91,20 @@ fi
 
 if [[ ! -z "$1" ]]; then
     case $1 in
-        aoc)
-            MAGAOX_ROLE=aoc
+        AOC)
+            MAGAOX_ROLE=AOC
             ;;
-        rtc)
-            MAGAOX_ROLE=rtc
+        RTC)
+            MAGAOX_ROLE=RTC
             ;;
-        icc)
-            MAGAOX_ROLE=icc
+        ICC)
+            MAGAOX_ROLE=ICC
             ;;
         workstation)
             MAGAOX_ROLE=workstation
             ;;
         *)
-            echo "Argument must be one of aoc, rtc, icc, or workstation."
+            echo "Argument must be one of AOC, RTC, ICC, or workstation."
             exit 1
     esac
 fi
@@ -139,7 +139,7 @@ VENDOR_SOFTWARE_BUNDLE=$DIR/bundle.zip
 if [[ ! -e $VENDOR_SOFTWARE_BUNDLE ]]; then
     echo "Couldn't find vendor software bundle at location $VENDOR_SOFTWARE_BUNDLE"
     echo "(Generate with ~/Box/MagAO-X/Vendor\ Software/generate_bundle.sh)"
-    if [[ $MAGAOX_ROLE == rtc || $MAGAOX_ROLE == icc ]]; then
+    if [[ $MAGAOX_ROLE == RTC || $MAGAOX_ROLE == ICC ]]; then
         log_warn "If this instrument computer will be interfacing with the DMs or framegrabbers, you should Ctrl-C now and get the software bundle."
         read -p "If not, press enter to continue"
     fi
@@ -167,7 +167,7 @@ fi
 ## Build third-party dependencies under /opt/MagAOX/vendor
 cd /opt/MagAOX/vendor
 sudo bash -l "$DIR/steps/install_mkl_tarball.sh"
-if [[ $MAGAOX_ROLE == rtc || $MAGAOX_ROLE == icc || $MAGAOX_ROLE == aoc || $MAGAOX_ROLE == ci ]]; then
+if [[ $MAGAOX_ROLE == RTC || $MAGAOX_ROLE == ICC || $MAGAOX_ROLE == AOC || $MAGAOX_ROLE == ci ]]; then
     sudo bash -l "$DIR/steps/install_cuda.sh"
     sudo bash -l "$DIR/steps/install_magma.sh"
 fi
@@ -181,7 +181,7 @@ sudo bash -l "$DIR/steps/install_levmar.sh"
 sudo bash -l "$DIR/steps/install_flatbuffers.sh"
 sudo bash -l "$DIR/steps/install_python.sh"
 sudo bash -l "$DIR/steps/install_xrif.sh"
-if [[ $MAGAOX_ROLE == rtc || $MAGAOX_ROLE == icc || $MAGAOX_ROLE == aoc || "$MAGAOX_ROLE" == "ci" ]]; then
+if [[ $MAGAOX_ROLE == RTC || $MAGAOX_ROLE == ICC || $MAGAOX_ROLE == AOC || "$MAGAOX_ROLE" == "ci" ]]; then
     sudo bash -l "$DIR/steps/install_basler_pylon.sh"
     sudo bash -l "$DIR/steps/install_edt.sh"
     sudo bash -l "$DIR/steps/install_picam.sh"
@@ -202,11 +202,11 @@ if [[ -e $VENDOR_SOFTWARE_BUNDLE ]]; then
         fi
     done
     # Note that 'vm' is in the list for ease of testing the install_* scripts
-    if [[ $MAGAOX_ROLE == rtc || $MAGAOX_ROLE == icc || $MAGAOX_ROLE == vm ]]; then
+    if [[ $MAGAOX_ROLE == RTC || $MAGAOX_ROLE == ICC || $MAGAOX_ROLE == vm ]]; then
         sudo bash -l "$DIR/steps/install_alpao.sh"
         sudo bash -l "$DIR/steps/install_andor.sh"
     fi
-    if [[ $MAGAOX_ROLE == rtc || $MAGAOX_ROLE == vm ]]; then
+    if [[ $MAGAOX_ROLE == RTC || $MAGAOX_ROLE == vm ]]; then
         sudo bash -l "$DIR/steps/install_bmc.sh"
     fi
 fi

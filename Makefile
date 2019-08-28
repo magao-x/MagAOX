@@ -41,12 +41,12 @@ libs_to_build = libtelnet
 
 apps_to_build = $(apps_common)
 
-ifeq ($(MAGAOX_ROLE),aoc)
+ifeq ($(MAGAOX_ROLE),AOC)
   apps_to_build += $(apps_aoc)
-else ifeq ($(MAGAOX_ROLE),icc)
+else ifeq ($(MAGAOX_ROLE),ICC)
   apps_to_build += $(apps_rtcicc)
   apps_to_build += $(apps_icc)
-else ifeq ($(MAGAOX_ROLE),rtc)
+else ifeq ($(MAGAOX_ROLE),RTC)
   apps_to_build += $(apps_rtcicc)
   apps_to_build += $(apps_rtc)
 endif

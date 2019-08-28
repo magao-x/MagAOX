@@ -3,7 +3,7 @@ DIR="$( cd "$( dirname "${BASH_SOURCE[0]}" )" && pwd )"
 source $DIR/../_common.sh
 set -euo pipefail
 
-if [[ $MAGAOX_ROLE == rtc ||$MAGAOX_ROLE == icc ||$MAGAOX_ROLE == aoc || $MAGAOX_ROLE == ci ]]; then
+if [[ $MAGAOX_ROLE == RTC ||$MAGAOX_ROLE == ICC ||$MAGAOX_ROLE == AOC || $MAGAOX_ROLE == ci ]]; then
   CMAKE_FLAGS="-DUSE_CUDA=YES -DUSE_MAGMA=YES"
 else
   CMAKE_FLAGS=""

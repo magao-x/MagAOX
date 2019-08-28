@@ -50,7 +50,7 @@ chown -R root:root /opt/MagAOX/drivers
 chmod -R u=rwX,g=rwX,o=rX /opt/MagAOX/drivers
 chown -R root:magaox /opt/MagAOX/drivers/fifos
 
-if [[ $MAGAOX_ROLE == rtc || $MAGAOX_ROLE == icc || $MAGAOX_ROLE == aoc ]]; then
+if [[ $MAGAOX_ROLE == RTC || $MAGAOX_ROLE == ICC || $MAGAOX_ROLE == AOC ]]; then
   REAL_LOGS_DIR=/data/logs
   mkdir -pv $REAL_LOGS_DIR
   link_if_necessary $REAL_LOGS_DIR /opt/MagAOX/logs
@@ -62,7 +62,7 @@ chown -RP xsup:magaox $REAL_LOGS_DIR
 chmod -R u=rwX,g=rwX,o=rX $REAL_LOGS_DIR
 setgid_all $REAL_LOGS_DIR
 
-if [[ $MAGAOX_ROLE == rtc || $MAGAOX_ROLE == icc || $MAGAOX_ROLE == aoc ]]; then
+if [[ $MAGAOX_ROLE == RTC || $MAGAOX_ROLE == ICC || $MAGAOX_ROLE == AOC ]]; then
   REAL_RAWIMAGES_DIR=/data/rawimages
   mkdir -pv $REAL_RAWIMAGES_DIR
   link_if_necessary $REAL_RAWIMAGES_DIR /opt/MagAOX/rawimages
