@@ -21,7 +21,7 @@ grep -v '^#' < $filename | { while read -r line; do
             log_error "$procname: dead (stale pid: $pid)"
          fi
       fi
-      $magaox_path/bin/logdump $procname 2>&1 | tail -n 5
+      $magaox_path/bin/logdump -n 1 $procname 2>&1 | tail -n 5
    else
       log_warn "Empty procname in line: $line"
    fi
