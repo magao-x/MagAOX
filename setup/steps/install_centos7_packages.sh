@@ -15,12 +15,12 @@ yum -y install centos-release-scl
 
 # Install build tools and utilities
 yum install -y \
-    ssh \
+    openssh \
     cmake3 \
     vim \
     nano \
     wget \
-    locate \
+    mlocate \
     htop \
     ntp \
     zlib-devel \

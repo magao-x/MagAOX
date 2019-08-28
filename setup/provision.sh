@@ -25,13 +25,54 @@ fi
 if [[ -d /vagrant || $CI == true ]]; then
     if [[ -d /vagrant ]]; then
         DIR="/vagrant/setup"
-        TARGET_ENV=vm
+        # If set already (i.e. not the first time we ran this),
+        # don't override what's in the environment
+        if [[ -z $MAGAOX_ROLE ]]; then
+            MAGAOX_ROLE=vm
+        else
+            echo "Would have set MAGAOX_ROLE=vm, but already have MAGAOX_ROLE=$MAGAOX_ROLE"
+        fi
         CI=false
     else
-        TARGET_ENV=ci
+        if [[ -z $MAGAOX_ROLE ]]; then
+            MAGAOX_ROLE=ci
+        else
+            echo "Would have set MAGAOX_ROLE=ci, but already have MAGAOX_ROLE=$MAGAOX_ROLE"
+        fi
     fi
 else
-    TARGET_ENV=instrument
+    # Only bother prompting if no role was specified as the command line arg to provision.sh
+    if [[ -z "$1" && -z $MAGAOX_ROLE ]]; then
+        MAGAOX_ROLE=""
+        echo "Choose the role for this machine"
+        echo "    AOC - Adaptive optics Operator Computer"
+        echo "    RTC - Real Time control Computer"
+        echo "    ICC - Instrument Control Computer"
+        echo "    workstation - Any other MagAO-X workstation"
+        echo
+        while [[ -z $MAGAOX_ROLE ]]; do
+            read -p "Role:" roleinput
+            case $roleinput in
+                AOC)
+                    MAGAOX_ROLE=AOC
+                    ;;
+                RTC)
+                    MAGAOX_ROLE=RTC
+                    ;;
+                ICC)
+                    MAGAOX_ROLE=ICC
+                    ;;
+                workstation)
+                    MAGAOX_ROLE=workstation
+                    ;;
+                *)
+                    echo "Must be one of AOC, RTC, ICC, or workstation."
+                    continue
+            esac
+        done
+    else
+        echo "Already have MAGAOX_ROLE=$MAGAOX_ROLE, not prompting for it. (Edit /etc/profile.d/magaox_role.sh if it's wrong)"
+    fi
     VAGRANT=false
     CI=false
     set +e; groups | grep magaox-dev; set -e
@@ -49,9 +90,26 @@ else
 fi
 
 if [[ ! -z "$1" ]]; then
-    TARGET_ENV="$1"
+    case $1 in
+        AOC)
+            MAGAOX_ROLE=AOC
+            ;;
+        RTC)
+            MAGAOX_ROLE=RTC
+            ;;
+        ICC)
+            MAGAOX_ROLE=ICC
+            ;;
+        workstation)
+            MAGAOX_ROLE=workstation
+            ;;
+        *)
+            echo "Argument must be one of AOC, RTC, ICC, or workstation."
+            exit 1
+    esac
 fi
-echo "Starting '$TARGET_ENV' provisioning"
+echo "Starting '$MAGAOX_ROLE' provisioning"
+echo "export MAGAOX_ROLE=$MAGAOX_ROLE" | sudo tee /etc/profile.d/magaox_role.sh
 
 # Shouldn't be any more undefined variables after (maybe) $1,
 # so tell bash to die if it encounters any
@@ -73,7 +131,7 @@ fi
 
 # The VM and CI provisioning doesn't run setup_users_and_groups.sh
 # separately as in the instrument instructions; we have to run it
-if [[ $TARGET_ENV == vm || $TARGET_ENV == ci ]]; then
+if [[ $MAGAOX_ROLE == vm || $MAGAOX_ROLE == ci ]]; then
     sudo bash -l "$DIR/setup_users_and_groups.sh"
 fi
 
@@ -81,17 +139,17 @@ VENDOR_SOFTWARE_BUNDLE=$DIR/bundle.zip
 if [[ ! -e $VENDOR_SOFTWARE_BUNDLE ]]; then
     echo "Couldn't find vendor software bundle at location $VENDOR_SOFTWARE_BUNDLE"
     echo "(Generate with ~/Box/MagAO-X/Vendor\ Software/generate_bundle.sh)"
-    if [[ $TARGET_ENV == "instrument" ]]; then
+    if [[ $MAGAOX_ROLE == RTC || $MAGAOX_ROLE == ICC ]]; then
         log_warn "If this instrument computer will be interfacing with the DMs or framegrabbers, you should Ctrl-C now and get the software bundle."
         read -p "If not, press enter to continue"
     fi
 fi
 
 ## Set up file structure and permissions
-sudo bash -l "$DIR/steps/ensure_dirs_and_perms.sh" $TARGET_ENV
+sudo bash -l "$DIR/steps/ensure_dirs_and_perms.sh" $MAGAOX_ROLE
 
 # Necessary for forwarding GUIs from the VM to the host
-if [[ $TARGET_ENV == vm ]]; then
+if [[ $MAGAOX_ROLE == vm ]]; then
     if [[ $ID == ubuntu ]]; then
         apt install -y xauth
     elif [[ $ID == centos ]]; then
@@ -99,7 +157,7 @@ if [[ $TARGET_ENV == vm ]]; then
     fi
 fi
 # Install Linux headers (instrument computers use the RT kernel / headers)
-if [[ $TARGET_ENV == ci || $TARGET_ENV == vm ||  $TARGET_ENV == workstation ]]; then
+if [[ $MAGAOX_ROLE == ci || $MAGAOX_ROLE == vm ||  $MAGAOX_ROLE == workstation ]]; then
     if [[ $ID == ubuntu ]]; then
         sudo apt install -y linux-headers-generic
     elif [[ $ID == centos ]]; then
@@ -109,8 +167,8 @@ fi
 ## Build third-party dependencies under /opt/MagAOX/vendor
 cd /opt/MagAOX/vendor
 sudo bash -l "$DIR/steps/install_mkl_tarball.sh"
-if [[ "$TARGET_ENV" == "instrument" || "$TARGET_ENV" == "ci" ]]; then
-    sudo bash -l "$DIR/steps/install_cuda.sh" $TARGET_ENV
+if [[ $MAGAOX_ROLE == RTC || $MAGAOX_ROLE == ICC || $MAGAOX_ROLE == AOC || $MAGAOX_ROLE == ci ]]; then
+    sudo bash -l "$DIR/steps/install_cuda.sh"
     sudo bash -l "$DIR/steps/install_magma.sh"
 fi
 sudo bash -l "$DIR/steps/install_fftw.sh"
@@ -123,7 +181,7 @@ sudo bash -l "$DIR/steps/install_levmar.sh"
 sudo bash -l "$DIR/steps/install_flatbuffers.sh"
 sudo bash -l "$DIR/steps/install_python.sh"
 sudo bash -l "$DIR/steps/install_xrif.sh"
-if [[ "$TARGET_ENV" == "instrument" || "$TARGET_ENV" == "ci" ]]; then
+if [[ $MAGAOX_ROLE == RTC || $MAGAOX_ROLE == ICC || $MAGAOX_ROLE == AOC || "$MAGAOX_ROLE" == "ci" ]]; then
     sudo bash -l "$DIR/steps/install_basler_pylon.sh"
     sudo bash -l "$DIR/steps/install_edt.sh"
     sudo bash -l "$DIR/steps/install_picam.sh"
@@ -143,9 +201,14 @@ if [[ -e $VENDOR_SOFTWARE_BUNDLE ]]; then
             echo "(but they're in $BUNDLE_TMPDIR/bundle/$vendorname if you want them)"
         fi
     done
-    sudo bash -l "$DIR/steps/install_alpao.sh"
-    sudo bash -l "$DIR/steps/install_bmc.sh"
-    sudo bash -l "$DIR/steps/install_andor.sh"
+    # Note that 'vm' is in the list for ease of testing the install_* scripts
+    if [[ $MAGAOX_ROLE == RTC || $MAGAOX_ROLE == ICC || $MAGAOX_ROLE == vm ]]; then
+        sudo bash -l "$DIR/steps/install_alpao.sh"
+        sudo bash -l "$DIR/steps/install_andor.sh"
+    fi
+    if [[ $MAGAOX_ROLE == RTC || $MAGAOX_ROLE == vm ]]; then
+        sudo bash -l "$DIR/steps/install_bmc.sh"
+    fi
 fi
 
 ## Build first-party dependencies
@@ -155,7 +218,7 @@ source /etc/profile.d/mxmakefile.sh
 
 ## Build MagAO-X and install sources to /opt/MagAOX/source/MagAOX
 MAYBE_SUDO=
-if [[ $TARGET_ENV == vm ]]; then
+if [[ $MAGAOX_ROLE == vm ]]; then
     MAYBE_SUDO="$_REAL_SUDO -u vagrant"
     # Create or replace symlink to sources so we develop on the host machine's copy
     # (unlike prod, where we install a new clone of the repo to this location)
@@ -194,14 +257,14 @@ fi
 # On a Vagrant VM, we need to "sudo" to become vagrant since the provisioning
 # runs as root.
 cd /opt/MagAOX/source
-$MAYBE_SUDO bash -l "$DIR/steps/install_cacao.sh" $TARGET_ENV
+$MAYBE_SUDO bash -l "$DIR/steps/install_cacao.sh"
 $MAYBE_SUDO bash -l "$DIR/steps/install_milkzmq.sh"
 
 # CircleCI invokes install_MagAOX.sh as the next step (see .circleci/config.yml)
 # By separating the real build into another step, we can cache the slow provisioning steps
 # and reuse them on subsequent runs.
-if [[ $TARGET_ENV != ci ]]; then
-    $MAYBE_SUDO bash -l "$DIR/steps/install_MagAOX.sh" $TARGET_ENV
+if [[ $MAGAOX_ROLE != ci ]]; then
+    $MAYBE_SUDO bash -l "$DIR/steps/install_MagAOX.sh" $MAGAOX_ROLE
 fi
 
 log_success "Provisioning complete"

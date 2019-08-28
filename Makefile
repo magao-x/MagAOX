@@ -1,34 +1,54 @@
-
 SELF_DIR := $(abspath $(dir $(lastword $(MAKEFILE_LIST))))
 -include $(SELF_DIR)/../local/common.mk
 
+apps_common = \
+	sshDigger \
+	sysMonitor \
+	xindiserver
+
+apps_rtcicc = \
+	mzmqServer \
+	streamWriter \
+	alpaoCtrl \
+	dmMode
+
+apps_rtc = \
+	ocam2KCtrl \
+	siglentSDG \
+	ttmModulator \
+	bmcCtrl \
+	pi335Ctrl \
+	pupilFit \
+	shmimIntegrator
+
+apps_icc = \
+	filterWheelCtrl \
+	baslerCtrl \
+	zaberCtrl \
+	zaberLowLevel \
+	picamCtrl \
+	smc100ccCtrl \
+	andorCtrl
+
+apps_aoc = \
+	magAOXMaths \
+	trippLitePDU \
+	xt1121Ctrl \
+    xt1121DCDU \
+	mzmqClient
+
 libs_to_build = libtelnet
 
-apps_to_build =  filterWheelCtrl \
-                 magAOXMaths \
-                 mzmqServer \
-                 mzmqClient \
-                 siglentSDG \
-                 sshDigger \
-                 sysMonitor \
-                 trippLitePDU \
-                 xindiserver \
-                 xt1121Ctrl \
-                 xt1121DCDU \
-                 zaberCtrl \
-                 zaberLowLevel
+apps_to_build = $(apps_common)
 
-ifneq ($(PYLON),false)
-apps_to_build += baslerCtrl
-endif
-
-ifneq ($(PICAM), false)
-apps_to_build += picamCtrl
-endif
-
-ifneq ($(EDT),false)
-apps_to_build += ocam2KCtrl
-apps_to_build += andorCtrl
+ifeq ($(MAGAOX_ROLE),AOC)
+  apps_to_build += $(apps_aoc)
+else ifeq ($(MAGAOX_ROLE),ICC)
+  apps_to_build += $(apps_rtcicc)
+  apps_to_build += $(apps_icc)
+else ifeq ($(MAGAOX_ROLE),RTC)
+  apps_to_build += $(apps_rtcicc)
+  apps_to_build += $(apps_rtc)
 endif
 
 utils_to_build = logdump \

@@ -2,11 +2,7 @@
 DIR="$( cd "$( dirname "${BASH_SOURCE[0]}" )" && pwd )"
 source $DIR/../_common.sh
 set -euo pipefail
-TARGET_ENV=$1
-if ! [[ $TARGET_ENV == vm || $TARGET_ENV == instrument || $TARGET_ENV == ci || $TARGET_ENV == workstation ]]; then
-  echo "Unknown TARGET_ENV passed as argument 1"
-  exit 1
-fi
+
 function link_if_necessary() {
   thedir=$1
   thelinkname=$2
@@ -54,26 +50,25 @@ chown -R root:root /opt/MagAOX/drivers
 chmod -R u=rwX,g=rwX,o=rX /opt/MagAOX/drivers
 chown -R root:magaox /opt/MagAOX/drivers/fifos
 
-
-if [[ "$TARGET_ENV" == "vm" || "$TARGET_ENV" == "ci" || "$TARGET_ENV" == "workstation" ]]; then
-  REAL_LOGS_DIR=/opt/MagAOX/logs
-  mkdir -pv $REAL_LOGS_DIR
-elif [[ "$TARGET_ENV" == "instrument" ]]; then
+if [[ $MAGAOX_ROLE == RTC || $MAGAOX_ROLE == ICC || $MAGAOX_ROLE == AOC ]]; then
   REAL_LOGS_DIR=/data/logs
   mkdir -pv $REAL_LOGS_DIR
   link_if_necessary $REAL_LOGS_DIR /opt/MagAOX/logs
+else
+  REAL_LOGS_DIR=/opt/MagAOX/logs
+  mkdir -pv $REAL_LOGS_DIR
 fi
 chown -RP xsup:magaox $REAL_LOGS_DIR
 chmod -R u=rwX,g=rwX,o=rX $REAL_LOGS_DIR
 setgid_all $REAL_LOGS_DIR
 
-if [[ "$TARGET_ENV" == "vm" || "$TARGET_ENV" == "ci" || "$TARGET_ENV" == "workstation" ]]; then
-  REAL_RAWIMAGES_DIR=/opt/MagAOX/rawimages
-  mkdir -pv $REAL_RAWIMAGES_DIR
-elif [[ "$TARGET_ENV" == "instrument" ]]; then
+if [[ $MAGAOX_ROLE == RTC || $MAGAOX_ROLE == ICC || $MAGAOX_ROLE == AOC ]]; then
   REAL_RAWIMAGES_DIR=/data/rawimages
   mkdir -pv $REAL_RAWIMAGES_DIR
   link_if_necessary $REAL_RAWIMAGES_DIR /opt/MagAOX/rawimages
+else
+  REAL_RAWIMAGES_DIR=/opt/MagAOX/rawimages
+  mkdir -pv $REAL_RAWIMAGES_DIR
 fi
 chown -RP xsup:magaox $REAL_RAWIMAGES_DIR
 chmod -R u=rwX,g=rwX,o=rX $REAL_RAWIMAGES_DIR
@@ -98,10 +93,10 @@ chown root:magaox-dev /opt/MagAOX/vendor
 chmod u=rwX,g=rwX,o=rX /opt/MagAOX/vendor
 setgid_all /opt/MagAOX/vendor
 
-if [[ "$TARGET_ENV" == "vm" ]]; then
+if [[ "$MAGAOX_ROLE" == "vm" ]]; then
   mkdir -pv /vagrant/setup/cache
   link_if_necessary /vagrant/setup/cache /opt/MagAOX/.cache
-elif [[ "$TARGET_ENV" == "instrument" || "$TARGET_ENV" == "ci" || "$TARGET_ENV" == "workstation" ]]; then
+else
   mkdir -pv /opt/MagAOX/.cache
   chown -R root:root /opt/MagAOX/.cache
   chmod -R u=rwX,g=rwX,o=rX /opt/MagAOX/.cache

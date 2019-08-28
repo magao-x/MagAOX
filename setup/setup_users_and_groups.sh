@@ -17,6 +17,7 @@ source $DIR/_common.sh
 creategroup magaox
 creategroup magaox-dev
 createuser xsup
+
 if sudo test ! -e /home/xsup/.ssh/id_ed25519; then
   $_REAL_SUDO -u xsup ssh-keygen -t ed25519 -N "" -f /home/xsup/.ssh/id_ed25519 -q
 fi
