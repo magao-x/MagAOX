@@ -1,0 +1,145 @@
+#!/bin/bash
+function log_error() {
+    echo -e "$(tput setaf 1 2>/dev/null)$1$(tput sgr0 2>/dev/null)"
+}
+function log_success() {
+    echo -e "$(tput setaf 2 2>/dev/null)$1$(tput sgr0 2>/dev/null)"
+}
+function log_warn() {
+    echo -e "$(tput setaf 3 2>/dev/null)$1$(tput sgr0 2>/dev/null)"
+}
+function log_info() {
+    echo -e "$(tput setaf 4 2>/dev/null)$1$(tput sgr0 2>/dev/null)"
+}
+if [[ -z $1 ]]; then
+    log_info "Usage:"
+    log_info "    magaox status - show status and last few log lines for each process"
+    log_info "    magaox inspect PROCNAME - connect to the tmux session for PROCNAME"
+    log_info "    magaox startup - start all processes in /opt/MagAOX/config/proclist_${MAGAOX_ROLE}.txt"
+    log_info "    magaox shutdown - show status and last few log lines for each process"
+    exit 1
+else
+    case $1 in
+        status|startup|shutdown)
+            action=$1
+            ;;
+        inspect)
+            action=$1
+            procname_to_inspect=$2
+            ;;
+        *)
+            echo "Argument must be status, inspect, startup, or shutdown."
+            exit 1
+    esac
+fi
+if [[ -z $MAGAOX_ROLE ]]; then
+    log_error "Couldn't find \$MAGAOX_ROLE in environment"
+    exit 1
+fi
+
+set -uo pipefail
+
+function as_xsup() {
+    if [ "$(whoami)" != xsup ]; then
+        su xsup -c '"$0" "$@"' -- "$@"
+    else
+        echo "$0" "$@"
+    fi
+}
+
+function session_exists() {
+    procname=$1
+    as_xsup tmux ls -F "#{session_name}" 2>/dev/null | grep "^$procname$" > /dev/null
+    return $?
+}
+
+function status() {
+    procname=$1
+    if [[ ! -e /opt/MagAOX/sys/$procname/pid ]]; then
+        log_error "$procname: not started"
+    else
+        pid=$(cat /opt/MagAOX/sys/$procname/pid)
+        if ps -p $pid > /dev/null; then
+            log_success "$procname: running (pid: $pid)"
+        else
+            log_error "$procname: dead (stale pid: $pid)"
+        fi
+    fi
+    logdump -n 1 $procname 2>&1 | tail -n 5
+    log_info "End recent $procname logs"
+    echo
+}
+
+function startup() {
+    procname=$1
+    appname=$2
+    #1) check if session exists
+    if session_exists $procname; then
+        log_info "Session $procname exists.  Doing nothing."
+        show_brief_status $procname
+        return 0
+    fi
+
+    #2) Start new session and execute command
+    log_info "Session $procname does not exist"
+
+    execpath="/opt/MagAOX/bin/$appname"
+    if [[ ! -x $execpath ]]; then
+        log_error "No executable $execpath found"
+        return 1
+    fi
+    command="$execpath -n $1"
+
+    as_xsup tmux new -s $procname -d
+    log_info "Created tmux session '$procname'"
+    as_xsup tmux send-keys -t $procname "$command" Enter
+    log_success "Executed in $procname session: $command"
+}
+
+function shutdown() {
+    procname=$1
+    appname=$2
+    wait=0
+    if session_exists $procname; then
+        while session_exists $procname; do
+            as_xsup tmux send-keys -t $procname C-c
+            as_xsup tmux send-keys -t $procname "exit" Enter
+            log_info "waiting for tmux session $procname to exit..."
+            sleep 0.5
+            wait=$((wait + 1))
+            if (( wait > 5 )); then
+                as_xsup tmux kill-session -t $procname
+                log_warn "Killed tmux session for $procname"
+            fi
+        done
+        log_success "Ended tmux session for $procname"
+    else
+        log_info "No running tmux session for $procname"
+    fi
+}
+
+function inspect_one_process() {
+    procname=$1
+    as_xsup tmux attach-session -t $procname
+}
+
+proclist=/opt/MagAOX/config/proclist_${MAGAOX_ROLE}.txt
+if [[ ! -e $proclist ]]; then
+    log_error "No process list at $proclist"
+    exit 1
+fi
+
+case $action in
+    status|startup|shutdown)
+        grep -v '^#' < $proclist | while read -r procname appname; do
+            $action $procname $appname
+        done
+        ;;
+    inspect)
+        inspect_one_process $procname_to_inspect
+        ;;
+    *)
+        echo "Should never match! See validation above."
+        exit 1
+esac
+
