@@ -31,11 +31,13 @@ apps_icc = \
 	andorCtrl
 
 apps_aoc = \
-	magAOXMaths \
 	trippLitePDU \
 	xt1121Ctrl \
     xt1121DCDU \
 	mzmqClient
+
+apps_vm = \
+	magAOXMaths
 
 libs_to_build = libtelnet
 
@@ -49,6 +51,8 @@ else ifeq ($(MAGAOX_ROLE),ICC)
 else ifeq ($(MAGAOX_ROLE),RTC)
   apps_to_build += $(apps_rtcicc)
   apps_to_build += $(apps_rtc)
+else ifeq ($(MAGAOX_ROLE),vm)
+  apps_to_build += $(apps_vm)
 endif
 
 utils_to_build = logdump \
