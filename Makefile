@@ -5,11 +5,13 @@ apps_common = \
 	sshDigger \
 	sysMonitor \
 	xindiserver
+
 apps_rtcicc = \
 	mzmqServer \
 	streamWriter \
 	alpaoCtrl \
 	dmMode
+
 apps_rtc = \
 	ocam2KCtrl \
 	siglentSDG \
@@ -17,7 +19,8 @@ apps_rtc = \
 	bmcCtrl \
 	pi335Ctrl \
 	pupilFit \
-	shmimIntegrator \
+	shmimIntegrator
+
 apps_icc = \
 	filterWheelCtrl \
 	baslerCtrl \
@@ -26,6 +29,7 @@ apps_icc = \
 	picamCtrl \
 	smc100ccCtrl \
 	andorCtrl
+
 apps_aoc = \
 	magAOXMaths \
 	trippLitePDU \
