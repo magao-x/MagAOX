@@ -15,13 +15,11 @@ class dmCtrl : public QDialog, public multiIndiSubscriber
    
 protected:
    
-   int m_appState {0};
+   std::string m_appState;
    
    std::string m_dmName;
    std::string m_shmimName;
-   std::string m_flatName;
    std::string m_flatShmim;
-   std::string m_testName;
    std::string m_testShmim;
    
    

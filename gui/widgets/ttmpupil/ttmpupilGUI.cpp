@@ -101,7 +101,6 @@ int ttmpupilGUI::handleSetProperty( const pcf::IndiProperty & ipRecv)
          if(ipRecv.find("state"))
          {
             m_appState = ipRecv["state"].get<std::string>();
-            std::cerr << "appState: " << m_appState << "\n";
          }
       }
    
