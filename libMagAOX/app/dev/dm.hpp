@@ -165,10 +165,12 @@ public:
      * \returns 0 on success
      * \returns -1 if incorrect size or data type in stream.
      */
-   int allocate();
+   int allocate( const dev::shmimT & sp);
    
    /// Called by shmimMonitor when a new DM command is available.  This is just a pass-through to derivedT::commandDM(char*).
-   int processImage(char* curr_src);
+   int processImage( void * curr_src,
+                     const dev::shmimT & sp
+                   );
    
    int loadFlat(std::string & target);
    
@@ -639,8 +641,10 @@ int dm<derivedT,realT>::appShutdown()
 
 
 template<class derivedT, typename realT>
-int dm<derivedT,realT>::allocate()
+int dm<derivedT,realT>::allocate( const dev::shmimT & sp)
 {
+   static_cast<void>(sp); //be unused
+   
    int err = 0;
    
    if(derived().m_width != m_dmWidth)
@@ -667,8 +671,12 @@ int dm<derivedT,realT>::allocate()
 }
 
 template<class derivedT, typename realT>
-int dm<derivedT,realT>::processImage(char* curr_src)
+int dm<derivedT,realT>::processImage( void * curr_src,
+                                      const dev::shmimT & sp
+                                    )
 {
+   static_cast<void>(sp); //be unused
+   
    return derived().commandDM( curr_src );
 }
 
