@@ -125,17 +125,20 @@ function shutdown() {
 
 function inspect_one_process() {
     procname=$1
-    as_xsup tmux attach-session -t $procname
+    if session_exists $procname; then
+        as_xsup tmux attach-session -t $procname
+    else
+        log_error "No running session for $procname"
+    fi
 }
-
-proclist=/opt/MagAOX/config/proclist_${MAGAOX_ROLE}.txt
-if [[ ! -e $proclist ]]; then
-    log_error "No process list at $proclist"
-    exit 1
-fi
 
 case $action in
     status|startup|shutdown)
+        proclist=/opt/MagAOX/config/proclist_${MAGAOX_ROLE}.txt
+        if [[ ! -e $proclist ]]; then
+            log_error "No process list at $proclist"
+            exit 1
+        fi
         grep -v '^#' < $proclist | while read -r procname appname; do
             $action $procname $appname
         done
