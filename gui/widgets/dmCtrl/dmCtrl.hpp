@@ -19,9 +19,14 @@ protected:
    
    std::string m_dmName;
    std::string m_shmimName;
-   std::string m_flatShmim;
-   std::string m_testShmim;
    
+   std::string m_flatShmim;
+   std::string m_flatName;
+   std::string m_flatTarget;
+   
+   std::string m_testShmim;
+   std::string m_testName;
+   std::string m_testTarget;
    
 public:
    dmCtrl( std::string & dmName,

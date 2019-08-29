@@ -25,11 +25,15 @@ namespace dev
 
 struct shmimT
 {
+   static std::string configSection()
+   {
+      return "shmimMonitor";
+   };
+   
    static std::string indiPrefix()
    {
       return "sm";
    };
-//   constexpr char indiPrefix[3]  {"sm"};
 };
 
 /** MagAO-X generic shared memory monitor
@@ -83,6 +87,8 @@ protected:
    int m_smThreadPrio {2}; ///< Priority of the shmimMonitor thread, should normally be > 00.
    
    ///@}
+   
+   bool m_getExistingFirst {false}; ///< If set to true by derivedT, any existing image will be grabbed and sent to processImage before waiting on the semaphore.
    
    int m_semaphoreNumber {0}; ///< The image structure semaphore index.
    
@@ -243,9 +249,9 @@ shmimMonitor<derivedT, specificT> * shmimMonitor<derivedT, specificT>::m_selfMon
 template<class derivedT, class specificT>
 void shmimMonitor<derivedT, specificT>::setupConfig(mx::app::appConfigurator & config)
 {
-   config.add("shmimMonitor.threadPrio", "", "shmimMonitor.threadPrio", argType::Required, "shmimMonitor", "threadPrio", false, "int", "The real-time priority of the shmimMonitor thread.");
+   config.add(specificT::configSection()+".threadPrio", "", specificT::configSection()+".threadPrio", argType::Required, specificT::configSection(), "threadPrio", false, "int", "The real-time priority of the shmimMonitor thread.");
    
-   config.add("shmimMonitor.shmimName", "", "shmimMonitor.shmimName", argType::Required, "shmimMonitor", "shmimName", false, "string", "The name of the ImageStreamIO shared memory image. Will be used as /tmp/<shmimName>.im.shm.");
+   config.add(specificT::configSection()+".shmimName", "", specificT::configSection()+".shmimName", argType::Required, specificT::configSection(), "shmimName", false, "string", "The name of the ImageStreamIO shared memory image. Will be used as /tmp/<shmimName>.im.shm.");
    
    //Set this here to allow derived classes to set their own default before calling loadConfig
    m_shmimName = derived().configName();
@@ -255,8 +261,8 @@ void shmimMonitor<derivedT, specificT>::setupConfig(mx::app::appConfigurator & c
 template<class derivedT, class specificT>
 void shmimMonitor<derivedT, specificT>::loadConfig(mx::app::appConfigurator & config)
 {
-   config(m_smThreadPrio, "shmimMonitor.threadPrio");
-   config(m_shmimName, "shmimMonitor.shmimName");
+   config(m_smThreadPrio, specificT::configSection() + ".threadPrio");
+   config(m_shmimName, specificT::configSection() + ".shmimName");
   
 }
    
@@ -351,7 +357,6 @@ int shmimMonitor<derivedT, specificT>::appLogic()
    return 0;
 
 }
-
 
 template<class derivedT, class specificT>
 int shmimMonitor<derivedT, specificT>::appShutdown()
@@ -459,7 +464,7 @@ void shmimMonitor<derivedT, specificT>::smThreadExec()
          std::cerr << "Pausing \n";
       }
       
-      while(derived().state() != stateCodes::OPERATING && !derived().shutdown() && !m_restart )
+      while((derived().state() != stateCodes::OPERATING || m_shmimName == "" ) && !derived().shutdown() && !m_restart )
       {
          sleep(1);
       }
@@ -522,6 +527,32 @@ void shmimMonitor<derivedT, specificT>::smThreadExec()
       uint8_t atype;
       size_t snx, sny, snz;
       uint64_t curr_image; //The current cnt1 index
+      
+      if(m_getExistingFirst && !m_restart) //If true, we always get the existing image without waiting on the semaphore.
+      {
+         if(m_imageStream.md[0].size[2] > 0) ///\todo change to naxis?
+         {
+            curr_image = m_imageStream.md[0].cnt1;
+         }
+         else curr_image = 0;
+         
+         atype = m_imageStream.md[0].datatype;
+         snx = m_imageStream.md[0].size[0];
+         sny = m_imageStream.md[0].size[1];
+         snz = m_imageStream.md[0].size[2];
+         
+         if( atype!= m_dataType || snx != m_width || sny != m_height || snz != length )
+         {
+            break; //exit the nearest while loop and get the new image setup.
+         }
+         
+         char * curr_src = (char *)  m_imageStream.array.raw + curr_image*m_width*m_height*m_typeSize;
+         
+         if( derived().processImage(curr_src, specificT()) < 0)
+         {
+            derivedT::template log<software_error>({__FILE__,__LINE__});
+         }
+      }
       
       //This is the main image grabbing loop.
       while( derived().shutdown() == 0 && !m_restart && derived().state() == stateCodes::OPERATING)

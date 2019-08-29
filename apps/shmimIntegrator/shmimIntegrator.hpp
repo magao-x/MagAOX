@@ -20,6 +20,18 @@ namespace MagAOX
 namespace app
 {
 
+struct darkShmimT 
+{
+   static std::string configSection()
+   {
+      return "darkShmim";
+   };
+   
+   static std::string indiPrefix()
+   {
+      return "dark";
+   };
+};
    
 /** \defgroup shmimIntegrator ImageStreamIO Stream Integrator
   * \brief Integrates (i.e. averages) an ImageStreamIO image stream.
@@ -39,17 +51,21 @@ namespace app
   * \ingroup shmimIntegrator
   * 
   */
-class shmimIntegrator : public MagAOXApp<true>, public dev::shmimMonitor<shmimIntegrator>, public dev::frameGrabber<shmimIntegrator>
+class shmimIntegrator : public MagAOXApp<true>, public dev::shmimMonitor<shmimIntegrator>, public dev::shmimMonitor<shmimIntegrator,darkShmimT>, public dev::frameGrabber<shmimIntegrator>
 {
 
    //Give the test harness access.
    friend class shmimIntegrator_test;
 
    friend class dev::shmimMonitor<shmimIntegrator>;
+   friend class dev::shmimMonitor<shmimIntegrator,darkShmimT>;
    friend class dev::frameGrabber<shmimIntegrator>;
    
    //The base shmimMonitor type
    typedef dev::shmimMonitor<shmimIntegrator> shmimMonitorT;
+   
+   //The dark shmimMonitor type
+   typedef dev::shmimMonitor<shmimIntegrator, darkShmimT> darkMonitorT;
    
    //The base frameGrabber type
    typedef dev::frameGrabber<shmimIntegrator> frameGrabberT;
@@ -81,6 +97,10 @@ protected:
    sem_t m_smSemaphore; ///< Semaphore used to synchronize the fg thread and the sm thread.
    
    realT (*pixget)(void *, size_t) {nullptr}; ///< Pointer to a function to extract the image data as our desired type realT.
+   
+   mx::improc::eigenImage<realT> m_darkImage;
+   bool m_darkSet {false};
+   realT (*dark_pixget)(void *, size_t) {nullptr}; ///< Pointer to a function to extract the image data as our desired type realT.
    
 public:
    /// Default c'tor.
@@ -118,10 +138,17 @@ public:
      */
    virtual int appShutdown();
 
-   int allocate();
+   int allocate( const dev::shmimT & dummy /**< [in] tag to differentiate shmimMonitor parents.*/);
    
-   int processImage( char* curr_src);
+   int processImage( void * curr_src,          ///< [in] pointer to start of current frame.
+                     const dev::shmimT & dummy ///< [in] tag to differentiate shmimMonitor parents.
+                   );
    
+   int allocate( const darkShmimT & dummy /**< [in] tag to differentiate shmimMonitor parents.*/);
+   
+   int processImage( void * curr_src,          ///< [in] pointer to start of current frame.
+                     const darkShmimT & dummy ///< [in] tag to differentiate shmimMonitor parents.
+                   );
 protected:
 
    /** \name dev::frameGrabber interface
@@ -185,12 +212,13 @@ inline
 void shmimIntegrator::setupConfig()
 {
    shmimMonitorT::setupConfig(config);
+   darkMonitorT::setupConfig(config);
    
    frameGrabberT::setupConfig(config);
    
    config.add("integrator.nAverage", "", "integrator.nAverage", argType::Required, "integrator", "nAverage", false, "string", "The default number of frames to average.  Can be changed via INDI.");
    
-   config.add("integrator.nUpdate", "", "integrator.nUpdate", argType::Required, "integrator", "nUpdate", false, "string", "The rate at which to update the average.  If m_nUpdate < m_nAverage then this is a moving averager.");
+   config.add("integrator.nUpdate", "", "integrator.nUpdate", argType::Required, "integrator", "nUpdate", false, "string", "The rate at which to update the average.  If m_nUpdate < m_nAverage then this is a moving averager.  If 0, then it is a simple average.");
 }
 
 inline
@@ -198,11 +226,11 @@ int shmimIntegrator::loadConfigImpl( mx::app::appConfigurator & _config )
 {
    
    shmimMonitorT::loadConfig(config);
+   darkMonitorT::loadConfig(config);
+   
    frameGrabberT::loadConfig(config);
    
    _config(m_nAverage, "integrator.nAverage");
-   
-   m_nUpdate=m_nAverage;
    
    _config(m_nUpdate, "integrator.nUpdate");
    
@@ -250,6 +278,11 @@ int shmimIntegrator::appStartup()
       return log<software_error,-1>({__FILE__, __LINE__});
    }
    
+   if(darkMonitorT::appStartup() < 0)
+   {
+      return log<software_error,-1>({__FILE__, __LINE__});
+   }
+   
    if(frameGrabberT::appStartup() < 0)
    {
       return log<software_error,-1>({__FILE__, __LINE__});
@@ -268,6 +301,11 @@ int shmimIntegrator::appLogic()
       return log<software_error,-1>({__FILE__,__LINE__});
    }
    
+   if( darkMonitorT::appLogic() < 0)
+   {
+      return log<software_error,-1>({__FILE__,__LINE__});
+   }
+   
    if( frameGrabberT::appLogic() < 0)
    {
       return log<software_error,-1>({__FILE__,__LINE__});
@@ -276,6 +314,11 @@ int shmimIntegrator::appLogic()
    std::unique_lock<std::mutex> lock(m_indiMutex);
    
    if(shmimMonitorT::updateINDI() < 0)
+   {
+      log<software_error>({__FILE__, __LINE__});
+   }
+   
+   if(darkMonitorT::updateINDI() < 0)
    {
       log<software_error>({__FILE__, __LINE__});
    }
@@ -296,24 +339,36 @@ int shmimIntegrator::appShutdown()
 {
    shmimMonitorT::appShutdown();
    
+   darkMonitorT::appShutdown();
+   
    frameGrabberT::appShutdown();
    
    return 0;
 }
 
 inline
-int shmimIntegrator::allocate()
+int shmimIntegrator::allocate(const dev::shmimT & dummy)
 {
+   static_cast<void>(dummy); //be unused
+   
    std::unique_lock<std::mutex> lock(m_indiMutex);
    
-   m_accumImages.resize(shmimMonitorT::m_width, shmimMonitorT::m_height, m_nAverage);
-   m_accumImages.setZero();
+   if(m_nUpdate > 0)
+   {
+      m_accumImages.resize(shmimMonitorT::m_width, shmimMonitorT::m_height, m_nAverage);
+      m_accumImages.setZero();
+   }
+   else
+   {
+      m_accumImages.resize(1,1,1);
+   }
    
    m_nprocessed = 0;
    m_currImage = 0;
    m_sinceUpdate = 0;
    
    m_avgImage.resize(shmimMonitorT::m_width, shmimMonitorT::m_height);
+   m_avgImage.setZero();
    
    pixget = getPixPointer<realT>(shmimMonitorT::m_dataType);
    
@@ -333,62 +388,143 @@ int shmimIntegrator::allocate()
    
    return 0;
 }
-   
+
 inline
-int shmimIntegrator::processImage( char* curr_src )
+int shmimIntegrator::processImage( void * curr_src, 
+                                   const dev::shmimT & dummy 
+                                 )
 {
-  
-   realT * data = m_accumImages.image(m_currImage).data();
+   static_cast<void>(dummy); //be unused
    
-   for(unsigned nn=0; nn < shmimMonitorT::m_width*shmimMonitorT::m_height; ++nn)
+   if(m_nUpdate == 0)
    {
-      //data[nn] = *( (int16_t * ) (curr_src + nn*shmimMonitorT::m_typeSize));
-      data[nn] = pixget(curr_src, nn);
-   }
-   ++m_nprocessed;
-   ++m_currImage;
-   if(m_currImage >= m_nAverage) m_currImage = 0;
+      if(m_sinceUpdate == 0) m_avgImage.setZero();
       
-   if(m_nprocessed < m_nAverage) //Check that we are burned in on first pass through cube
-   {
-      return 0;
-   }
-
-   ++m_sinceUpdate;
-
-   if(m_sinceUpdate >= m_nUpdate)
-   {
-      if(m_updated)
+      realT * data = m_avgImage.data();
+      
+      for(unsigned nn=0; nn < shmimMonitorT::m_width*shmimMonitorT::m_height; ++nn)
       {
-         return 0; //In case f.g. thread is behind, we skip and come back.
+         data[nn] += pixget(curr_src, nn);
       }
-      //Don't use eigenCube functions to avoid any omp 
-      m_avgImage.setZero();
-      for(size_t n =0; n < m_nAverage; ++n)
+      ++m_sinceUpdate;
+      if(m_sinceUpdate >= m_nAverage)
       {
-         for(size_t ii=0; ii< shmimMonitorT::m_width; ++ii)
+         m_avgImage /= m_nAverage;
+         
+         if(m_darkSet) m_avgImage -= m_darkImage;
+         
+         m_updated = true;
+         
+         //Now tell the f.g. to get going
+         if(sem_post(&m_smSemaphore) < 0)
          {
-            for(size_t jj=0; jj< shmimMonitorT::m_height; ++jj)
+            log<software_critical>({__FILE__, __LINE__, errno, 0, "Error posting to semaphore"});
+            return -1;
+         }
+         
+         m_sinceUpdate = 0;
+      }
+   }
+   else
+   {
+      realT * data = m_accumImages.image(m_currImage).data();
+      
+      for(unsigned nn=0; nn < shmimMonitorT::m_width*shmimMonitorT::m_height; ++nn)
+      {
+         //data[nn] = *( (int16_t * ) (curr_src + nn*shmimMonitorT::m_typeSize));
+         data[nn] = pixget(curr_src, nn);
+      }
+      ++m_nprocessed;
+      ++m_currImage;
+      if(m_currImage >= m_nAverage) m_currImage = 0;
+         
+      if(m_nprocessed < m_nAverage) //Check that we are burned in on first pass through cube
+      {
+         return 0;
+      }
+      
+      ++m_sinceUpdate;
+      
+      if(m_sinceUpdate >= m_nUpdate)
+      {
+         if(m_updated)
+         {
+            return 0; //In case f.g. thread is behind, we skip and come back.
+         }
+         //Don't use eigenCube functions to avoid any omp 
+         m_avgImage.setZero();
+         for(size_t n =0; n < m_nAverage; ++n)
+         {
+            for(size_t ii=0; ii< shmimMonitorT::m_width; ++ii)
             {
-               m_avgImage(ii,jj) += m_accumImages.image(n)(ii,jj);
+               for(size_t jj=0; jj< shmimMonitorT::m_height; ++jj)
+               {
+                  m_avgImage(ii,jj) += m_accumImages.image(n)(ii,jj);
+               }
             }
          }
-      }
-      m_avgImage /= m_nAverage;
-      
-      
-      m_updated = true;
-      
-      //Now tell the f.g. to get going
-      if(sem_post(&m_smSemaphore) < 0)
-      {
-         log<software_critical>({__FILE__, __LINE__, errno, 0, "Error posting to semaphore"});
-         return -1;
-      }
+         m_avgImage /= m_nAverage;
          
-      m_sinceUpdate = 0;
+         if(m_darkSet) m_avgImage -= m_darkImage;
+         
+         m_updated = true;
+         
+         //Now tell the f.g. to get going
+         if(sem_post(&m_smSemaphore) < 0)
+         {
+            log<software_critical>({__FILE__, __LINE__, errno, 0, "Error posting to semaphore"});
+            return -1;
+         }
+            
+         m_sinceUpdate = 0;
+      }
    }
+   return 0;
+}
 
+inline
+int shmimIntegrator::allocate(const darkShmimT & dummy)
+{
+   static_cast<void>(dummy); //be unused
+   
+   std::unique_lock<std::mutex> lock(m_indiMutex);
+   
+   if(darkMonitorT::m_width != shmimMonitorT::m_width || darkMonitorT::m_height != shmimMonitorT::m_height)
+   {
+      m_darkSet = false;
+      darkMonitorT::m_restart = true;
+   }
+   
+   m_darkImage.resize(darkMonitorT::m_width, darkMonitorT::m_height);
+   
+   dark_pixget = getPixPointer<realT>(darkMonitorT::m_dataType);
+   
+   if(dark_pixget == nullptr)
+   {
+      log<software_error>({__FILE__, __LINE__, "bad data type"});
+      return -1;
+   }
+   
+   return 0;
+}
+
+inline
+int shmimIntegrator::processImage( void * curr_src, 
+                                   const darkShmimT & dummy 
+                                 )
+{
+   static_cast<void>(dummy); //be unused
+   
+   realT * data = m_darkImage.data();
+   
+   for(unsigned nn=0; nn < darkMonitorT::m_width*darkMonitorT::m_height; ++nn)
+   {
+      //data[nn] = *( (int16_t * ) (curr_src + nn*shmimMonitorT::m_typeSize));
+      data[nn] = dark_pixget(curr_src, nn);
+   }
+   
+   m_darkSet = true;
+   
    return 0;
 }
 
@@ -483,7 +619,7 @@ INDI_NEWCALLBACK_DEFN(shmimIntegrator, m_indiP_nAverage)(const pcf::IndiProperty
    
    m_nAverage = target;
    
-   m_restart = true;
+   shmimMonitorT::m_restart = true;
    
    log<text_log>("set nAverage to " + std::to_string(m_nAverage), logPrio::LOG_NOTICE);
    
@@ -508,7 +644,7 @@ INDI_NEWCALLBACK_DEFN(shmimIntegrator, m_indiP_nUpdate)(const pcf::IndiProperty 
    
    m_nUpdate = target;
    
-   m_restart = true;
+   shmimMonitorT::m_restart = true;
    
    log<text_log>("set nUpdate to " + std::to_string(m_nUpdate), logPrio::LOG_NOTICE);
    
