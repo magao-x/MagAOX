@@ -204,7 +204,7 @@ protected:
 inline
 shmimIntegrator::shmimIntegrator() : MagAOXApp(MAGAOX_CURRENT_SHA1, MAGAOX_REPO_MODIFIED)
 {
-   
+   darkMonitorT::m_getExistingFirst = true;
    return;
 }
 

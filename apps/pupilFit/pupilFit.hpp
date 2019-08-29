@@ -307,6 +307,9 @@ int pupilFit::processImage( void* curr_src,
       m_fitIm.data()[nn] += ((float*)curr_src) [nn];
    }
    
+   ///\todo need a more robust corner averaging system here.
+   m_fitIm -= 0.25*( m_fitIm(0,0) + m_fitIm(0,119) + m_fitIm(119,119) + m_fitIm(119,0));
+   
    m_fitter.m_thresh = m_threshold;
    
    m_fitter.fit(m_fitIm, m_edgeIm);
