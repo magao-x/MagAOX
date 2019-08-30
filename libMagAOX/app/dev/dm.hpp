@@ -9,8 +9,8 @@
 #ifndef dm_hpp
 #define dm_hpp
 
-/* Tests
- -- test that restarting fpsCtrl doesn't scram this
+/** Tests
+ \todo test that restarting fpsCtrl doesn't scram this
  */
 
 #include <mx/improc/eigenImage.hpp>
@@ -73,7 +73,7 @@ protected:
    std::string m_calibPath; ///< The path to this DM's calibration files.
    std::string m_flatPath; ///< The path to this DM's flat files (usually the same as calibPath)
    std::string m_flat {"flat.fits"}; ///< The file name of the this DM's current flat.
-   std::string m_test; ///< The file name of the this DM's current test command.
+   std::string m_test {"test.fits"}; ///< The file name of the this DM's current test command.
    
    std::string m_shmimFlat; ///< The name of the shmim stream to write the flat to.
    std::string m_shmimTest; ///< The name of the shmim stream to write the test to.
@@ -165,10 +165,12 @@ public:
      * \returns 0 on success
      * \returns -1 if incorrect size or data type in stream.
      */
-   int allocate();
+   int allocate( const dev::shmimT & sp);
    
    /// Called by shmimMonitor when a new DM command is available.  This is just a pass-through to derivedT::commandDM(char*).
-   int processImage(char* curr_src);
+   int processImage( void * curr_src,
+                     const dev::shmimT & sp
+                   );
    
    int loadFlat(std::string & target);
    
@@ -390,9 +392,7 @@ void dm<derivedT,realT>::setupConfig(mx::app::appConfigurator & config)
    config.add("dm.calibPath", "", "dm.calibPath", argType::Required, "dm", "calibPath", false, "string", "The path to calibration files, relative to the MagAO-X calibration path.");
    
    config.add("dm.flatPath", "", "dm.flatPath", argType::Required, "dm", "flatPath", false, "string", "The path to flat files.  Default is the calibration path.");
-   
-   config.add("dm.flat", "", "dm.flat", argType::Required, "dm", "flat", false, "string", "The name of the flat file, a FITS file containing the flat command for this DM.  Must be in the directdory flatPath.");
-         
+     
    //Overriding the shmimMonitor setup so that these all go in the dm section
    //Otherwise, would call shmimMonitor<dm<derivedT,realT>>::setupConfig();
    config.add("dm.threadPrio", "", "dm.threadPrio", argType::Required, "dm", "threadPrio", false, "int", "The real-time priority of the dm control thread.");
@@ -418,7 +418,6 @@ void dm<derivedT,realT>::loadConfig(mx::app::appConfigurator & config)
    m_flatPath = m_calibPath;
    
    config( m_flatPath, "dm.flatPath");
-  
   
    //Overriding the shmimMonitor setup so that these all go in the dm section
    //Otherwise, would call shmimMonitor<dm<derivedT,realT>>::loadConfig(config);
@@ -642,8 +641,10 @@ int dm<derivedT,realT>::appShutdown()
 
 
 template<class derivedT, typename realT>
-int dm<derivedT,realT>::allocate()
+int dm<derivedT,realT>::allocate( const dev::shmimT & sp)
 {
+   static_cast<void>(sp); //be unused
+   
    int err = 0;
    
    if(derived().m_width != m_dmWidth)
@@ -670,8 +671,12 @@ int dm<derivedT,realT>::allocate()
 }
 
 template<class derivedT, typename realT>
-int dm<derivedT,realT>::processImage(char* curr_src)
+int dm<derivedT,realT>::processImage( void * curr_src,
+                                      const dev::shmimT & sp
+                                    )
 {
+   static_cast<void>(sp); //be unused
+   
    return derived().commandDM( curr_src );
 }
 
@@ -696,7 +701,7 @@ int dm<derivedT,realT>::loadFlat(std::string & target)
    m_flatLoaded = true;
    
    indi::updateIfChanged(m_indiP_flat, "current", m_flat, derived().m_indiDriver);
-   indi::updateIfChanged(m_indiP_flat, "target", std::string(""), derived().m_indiDriver);
+   indi::updateIfChanged(m_indiP_flat, "target", m_flat, derived().m_indiDriver);
    
    if(m_flatSet) setFlat();
    
@@ -709,7 +714,8 @@ int dm<derivedT,realT>::loadTest(std::string & target)
    
    ///\todo check path for /
    
-   std::string targetPath = m_flatPath + "/" + target;
+   m_test = target;
+   std::string targetPath = m_flatPath + "/" + m_test;
    
    //load into memory.
    mx::improc::fitsFile<realT> ff;
@@ -722,11 +728,11 @@ int dm<derivedT,realT>::loadTest(std::string & target)
    derivedT::template log<text_log>("loaded test file " + targetPath);
    m_testLoaded = true;
    
-   indi::updateIfChanged(m_indiP_test, "current", target, derived().m_indiDriver);
-   indi::updateIfChanged(m_indiP_test, "target", std::string(""), derived().m_indiDriver);
+   indi::updateIfChanged(m_indiP_test, "current", m_test, derived().m_indiDriver);
+   indi::updateIfChanged(m_indiP_test, "target", m_test, derived().m_indiDriver);
    
    if(m_testSet) setTest();
-      
+   
    return 0;
 }
 
@@ -973,6 +979,29 @@ template<class derivedT, typename realT>
 int dm<derivedT,realT>::updateINDI()
 {
    if( !derived().m_indiDriver ) return 0;
+   
+   if(m_flatSet)
+   {
+      derived().updateIfChanged(m_indiP_flat, "current", m_flat);
+      derived().updateIfChanged(m_indiP_flat, "target", m_flat);
+   }
+   else
+   {
+      derived().updateIfChanged(m_indiP_flat, "current", m_flat);
+      derived().updateIfChanged(m_indiP_flat, "target", std::string(""));
+   }
+   
+   
+   if(m_testSet)
+   {
+      derived().updateIfChanged(m_indiP_test, "current", m_test);
+      derived().updateIfChanged(m_indiP_test, "target", m_test);
+   }
+   else
+   {
+      derived().updateIfChanged(m_indiP_test, "current", m_test);
+      derived().updateIfChanged(m_indiP_test, "target", std::string(""));
+   }
    
    return 0;
 }

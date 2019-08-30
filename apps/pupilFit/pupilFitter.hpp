@@ -125,7 +125,6 @@ int pupilFitter<realT>::getQuad( mx::improc::eigenImage<realT> & quad,
       for(size_t j=j0; j<j0+m_cols;++j)
       {
          quad(i-i0, j-j0) = im(i,j);
-         
       }
    }
    
@@ -134,9 +133,9 @@ int pupilFitter<realT>::getQuad( mx::improc::eigenImage<realT> & quad,
 
 template<typename realT>
 int pupilFitter<realT>::putQuad( mx::improc::eigenImage<realT> & im,
-                              mx::improc::eigenImage<realT> & quad,
-                              int quadNo
-                            )
+                                 mx::improc::eigenImage<realT> & quad,
+                                 int quadNo
+                               )
 {
    if(im.rows() != 2*m_rows || im.cols() != 2*m_cols)
    {

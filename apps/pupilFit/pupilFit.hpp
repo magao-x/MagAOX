@@ -107,9 +107,11 @@ public:
      */
    virtual int appShutdown();
 
-   int allocate();
+   int allocate( const dev::shmimT &);
    
-   int processImage( void* curr_src);
+   int processImage( void* curr_src,
+                     const dev::shmimT &
+                    );
    
 protected:
 
@@ -253,8 +255,10 @@ int pupilFit::appShutdown()
 }
 
 inline
-int pupilFit::allocate()
+int pupilFit::allocate(const dev::shmimT & dummy)
 {
+   static_cast<void>(dummy);
+   
    m_fitIm.resize(m_width, m_height);
    m_edgeIm.resize(m_width, m_height);
    
@@ -292,14 +296,18 @@ int pupilFit::allocate()
 }
    
 inline
-int pupilFit::processImage( void* curr_src )
+int pupilFit::processImage( void* curr_src,
+                            const dev::shmimT & dummy
+                          )
 {
+   static_cast<void>(dummy);
    
    for(unsigned nn=0; nn < m_width*m_height; ++nn)
    {
       m_fitIm.data()[nn] += ((float*)curr_src) [nn];
    }
    
+   ///\todo need a more robust corner averaging system here.
    m_fitIm -= 0.25*( m_fitIm(0,0) + m_fitIm(0,119) + m_fitIm(119,119) + m_fitIm(119,0));
    
    m_fitter.m_thresh = m_threshold;
