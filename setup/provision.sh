@@ -227,6 +227,8 @@ if [[ $MAGAOX_ROLE == vm ]]; then
     log_success "Symlinked /opt/MagAOX/source/MagAOX to /vagrant (host folder)"
     usermod -G magaox,magaox-dev vagrant
     log_success "Added vagrant user to magaox,magaox-dev"
+elif [[ $MAGAOX_ROLE == ci ]]; then
+    ln -sfv ~/project/ /opt/MagAOX/source/MagAOX
 else
     if [[ $DIR != /opt/MagAOX/source/MagAOX/setup ]]; then
         if [[ ! -e /opt/MagAOX/source/MagAOX ]]; then
