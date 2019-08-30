@@ -35,7 +35,7 @@ HERE
 else
     log_info "Skipping chronyd setup because this isn't an instrument computer"
 fi
-sudo systemctl enable chrony
+sudo systemctl enable chronyd
 log_info "chronyd enabled"
 systemctl status chronyd
 sudo systemctl start chronyd
