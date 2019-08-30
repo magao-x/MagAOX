@@ -1,5 +1,5 @@
 #!/bin/bash
-read -d '' ETC_HOSTS <<'HERE'
+sudo tee /etc/hosts <<'HERE'
 127.0.0.1      localhost localhost.localdomain localhost4 localhost4.localdomain4
 ::1            localhost localhost.localdomain localhost6 localhost6.localdomain6
 192.168.0.10   exao1 aoc
@@ -11,4 +11,3 @@ read -d '' ETC_HOSTS <<'HERE'
 192.168.0.150   acromag dio
 192.168.0.242   dmsafety
 HERE
-echo $ETC_HOSTS | sudo tee /etc/hosts
