@@ -17,7 +17,7 @@ server lbtntp.as.arizona.edu iburst
 server ntp1.lco.cl iburst
 server ntp2.lco.cl iburst
 pool 0.centos.pool.ntp.org iburst
-allow 192.168.1.0/24
+allow 192.168.0.0/24
 driftfile /var/lib/chrony/drift
 makestep 1.0 3
 rtcsync
@@ -37,7 +37,7 @@ else
 fi
 sudo systemctl enable chronyd
 log_info "chronyd enabled"
-systemctl status chronyd
+systemctl status chronyd || true
 sudo systemctl start chronyd
 log_info "chronyd started"
 chronyc sources
