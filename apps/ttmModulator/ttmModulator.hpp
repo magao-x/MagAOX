@@ -41,6 +41,9 @@ protected:
    double m_modDFreq {500}; ///< The modulation ramp frequency step size [Hz].
    double m_modDVolts {0.1}; ///< The modulation ramp voltage step size [Volts].
 
+   double m_rotAngle {0};
+   double m_rotParity {1};
+   
    ///@}
 
    int m_modState {-1}; ///< -1 = unknown, 0 = off, 1 = rest, 2 = midset, 3 = set, 4 = modulating
@@ -63,6 +66,17 @@ protected:
    double m_C2ofst {-1};  ///< DC offset of fxn gen channel 2.
    double m_C2phse {-1};  ///< Phase of fxn gen channel 2.
 
+   struct modCal
+   {
+      double frequency;
+      double radius;
+      double C1Amp;
+      double C2Amp;
+      double C2Phse;
+   };
+   
+   std::map<std::string, modCal> m_modCals;
+   
 public:
 
    /// Default c'tor.
@@ -131,6 +145,10 @@ public:
                double newFreq ///< The new frequency for modulation [Hz]
              );
 
+   int offsetXY( double dx,
+                 double dy
+               );
+   
 protected:
 
    //declare our properties
@@ -139,6 +157,10 @@ protected:
    pcf::IndiProperty m_indiP_modRadius;
    pcf::IndiProperty m_indiP_modFrequency;
 
+   pcf::IndiProperty m_indiP_offx;
+   pcf::IndiProperty m_indiP_offy;
+   
+   
    pcf::IndiProperty m_indiP_FGState;
 
    pcf::IndiProperty m_indiP_C1outp;
@@ -157,7 +179,9 @@ public:
    INDI_NEWCALLBACK_DECL(ttmModulator, m_indiP_modState);
    INDI_NEWCALLBACK_DECL(ttmModulator, m_indiP_modRadius);
    INDI_NEWCALLBACK_DECL(ttmModulator, m_indiP_modFrequency);
-
+   INDI_NEWCALLBACK_DECL(ttmModulator, m_indiP_offx);
+   INDI_NEWCALLBACK_DECL(ttmModulator, m_indiP_offy);
+   
    INDI_SETCALLBACK_DECL(ttmModulator, m_indiP_C1outp);
    INDI_SETCALLBACK_DECL(ttmModulator, m_indiP_C1freq);
    INDI_SETCALLBACK_DECL(ttmModulator, m_indiP_C1volts);
@@ -196,6 +220,8 @@ void ttmModulator::setupConfig()
    config.add("cal.modDfreq", "", "cal.modDfreq", argType::Required, "cal", "modDfreq", false, "real", "The modulation ramp frequency step size [Hz]");
    config.add("cal.modDvolts", "", "cal.modDvolts", argType::Required, "cal", "modDvolts", false, "real", "The modulation ramp voltage step size [Volts]");
 
+   config.add("cal.rotAngle", "", "cal.rotAngle", argType::Required, "cal", "rotAngle", false, "real", "The offset rotation matrix angle in degrees.");
+   config.add("cal.rotParity", "", "cal.rotParity", argType::Required, "cal", "rotParity", false, "real", "The offset rotation matrix parity, +1 or -1.");
 }
 
 inline
@@ -213,6 +239,50 @@ void ttmModulator::loadConfig()
    config(m_setDVolts, "cal.setDvolts");
    config(m_modDFreq, "cal.modDfreq");
    config(m_modDVolts, "cal.modDvolts");
+   
+   config(m_rotAngle, "cal.rotAngle");
+   m_rotAngle = m_rotAngle*3.14159/180.;
+   
+   config(m_rotParity, "cal.rotParity");
+   if(m_rotParity < 0) m_rotParity = -1;
+   else m_rotParity = 1;
+   
+   //Now get the cal points
+   
+   std::vector<std::string> sections;
+
+   config.unusedSections(sections);
+
+   for(size_t i=0; i< sections.size(); ++i)
+   {
+      bool freqset = config.isSetUnused(mx::app::iniFile::makeKey(sections[i], "frequency" ));
+      bool radset = config.isSetUnused(mx::app::iniFile::makeKey(sections[i], "radius" ));
+      bool c1ampset = config.isSetUnused(mx::app::iniFile::makeKey(sections[i], "C1Amp" ));
+      bool c2ampset = config.isSetUnused(mx::app::iniFile::makeKey(sections[i], "C2Amp" ));
+      bool c2phsset = config.isSetUnused(mx::app::iniFile::makeKey(sections[i], "C2Phase" ));
+      
+      if( freqset && radset&& c1ampset && c2ampset && c2phsset)
+      {
+         log<text_log>("Loading " + sections[i] + " as a modulation calibration");
+         
+         double freq;
+         config.configUnused(freq, mx::app::iniFile::makeKey(sections[i], "frequency" ));
+         double rad;
+         config.configUnused(rad, mx::app::iniFile::makeKey(sections[i], "radius" ));
+         double c1amp;
+         config.configUnused(c1amp, mx::app::iniFile::makeKey(sections[i], "C1Amp" ));
+         double c2amp;
+         config.configUnused(c2amp, mx::app::iniFile::makeKey(sections[i], "C2Amp" ));
+         double c2phse;
+         config.configUnused(c2phse, mx::app::iniFile::makeKey(sections[i], "C2Phase" ));
+         
+         m_modCals.insert(std::pair<std::string, modCal>(sections[i], {freq, rad, c1amp, c2amp, c2phse}));
+      }
+      else
+      {
+         log<text_log>(sections[i] + " is not a valid modulation calibration");
+      }
+   }
 }
 
 inline
@@ -236,7 +306,13 @@ int ttmModulator::appStartup()
    m_indiP_modRadius.add (pcf::IndiElement("requested"));
    m_indiP_modRadius["current"].set(m_modRad);
    m_indiP_modRadius["requested"].set(m_modRadRequested);
-
+  
+   REG_INDI_NEWPROP(m_indiP_offx, "offset-x", pcf::IndiProperty::Number);
+   m_indiP_offx.add (pcf::IndiElement("target"));
+   
+   REG_INDI_NEWPROP(m_indiP_offy, "offset-y", pcf::IndiProperty::Number);
+   m_indiP_offy.add (pcf::IndiElement("target"));
+   
    REG_INDI_SETPROP(m_indiP_C1outp, "fxngenmodwfs", "C1outp");
    REG_INDI_SETPROP(m_indiP_C1freq, "fxngenmodwfs", "C1freq");
    REG_INDI_SETPROP(m_indiP_C1volts, "fxngenmodwfs", "C1amp");
@@ -790,6 +866,23 @@ int ttmModulator::modTTM( double newRad,
    return 0;
 }
 
+inline
+int ttmModulator::offsetXY( double dx,
+                            double dy
+                          )
+{
+   double cs = cos(m_rotAngle);
+   double ss = sin(m_rotAngle);
+   
+   double rdx = dx * cs - dy * ss;
+   double rdy = m_rotParity*(dx * ss + dy * cs);
+   
+   if( sendNewProperty(m_indiP_C1ofst, "value", m_C1ofst + rdx) < 0 ) return log<software_error,-1>({__FILE__,__LINE__});
+   if( sendNewProperty(m_indiP_C2ofst, "value", m_C2ofst + rdy) < 0 ) return log<software_error,-1>({__FILE__,__LINE__});
+   
+   return 0;
+   
+}
 
 INDI_NEWCALLBACK_DEFN(ttmModulator, m_indiP_modState)(const pcf::IndiProperty &ipRecv)
 {
@@ -856,6 +949,37 @@ INDI_NEWCALLBACK_DEFN(ttmModulator, m_indiP_modRadius)(const pcf::IndiProperty &
    return -1;
 }
 
+INDI_NEWCALLBACK_DEFN(ttmModulator, m_indiP_offx)(const pcf::IndiProperty &ipRecv)
+{
+   if (ipRecv.getName() == m_indiP_offx.getName())
+   {
+
+      double dx = 0;
+      if(ipRecv.find("target"))
+      {
+         dx = ipRecv["target"].get<double>();
+      }
+
+      return offsetXY(dx, 0.0);
+   }
+   return -1;
+}
+
+INDI_NEWCALLBACK_DEFN(ttmModulator, m_indiP_offy)(const pcf::IndiProperty &ipRecv)
+{
+   if (ipRecv.getName() == m_indiP_offy.getName())
+   {
+
+      double dy = 0;
+      if(ipRecv.find("target"))
+      {
+         dy = ipRecv["target"].get<double>();
+      }
+
+      return offsetXY(0.0, dy);
+   }
+   return -1;
+}
 
 INDI_SETCALLBACK_DEFN(ttmModulator, m_indiP_C1outp)(const pcf::IndiProperty &ipRecv)
 {
