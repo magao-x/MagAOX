@@ -4,7 +4,12 @@ if [[ -e /etc/chrony/chrony.conf ]]; then
 elif [[ -e /etc/chrony.conf ]]; then
     CHRONYCONF_PATH=/etc/chrony.conf
 fi
-read -d '' MASTER_CONF <<'HERE'
+
+if [[ $MAGAOX_ROLE == aoc ]]; then
+    log_info "Configuring chronyd as a time master for $MAGAOX_ROLE"
+    sudo tee $CHRONYCONF_PATH <<'HERE'
+# chrony.conf installed by MagAO-X
+# for time master
 server lbtntp.as.arizona.edu iburst
 server ntp1.lco.cl iburst
 server ntp2.lco.cl iburst
@@ -14,19 +19,16 @@ driftfile /var/lib/chrony/drift
 makestep 1.0 3
 rtcsync
 HERE
-read -d '' MINION_CONF <<'HERE'
+elif [[ $MAGAOX_ROLE == icc || $MAGAOX_ROLE == rtc ]]; then
+    log_info "Configuring chronyd as a time minion for $MAGAOX_ROLE"
+    sudo tee $CHRONYCONF_PATH <<'HERE'
+# chrony.conf installed by MagAO-X
+# for time minion
 server exao1 iburst
 driftfile /var/lib/chrony/drift
 makestep 1.0 3
 rtcsync
 HERE
-
-if [[ $MAGAOX_ROLE == aoc ]]; then
-    log_info "Configuring chronyd as a time master for $MAGAOX_ROLE"
-    echo $MINON_CONF | sudo tee $CHRONYCONF_PATH
-elif [[ $MAGAOX_ROLE == icc || $MAGAOX_ROLE == rtc ]]; then
-    log_info "Configuring chronyd as a time minion for $MAGAOX_ROLE"
-    echo $MINON_CONF | sudo tee $CHRONYCONF_PATH
 else
     log_info "Skipping chronyd setup because this isn't an instrument computer"
 fi
