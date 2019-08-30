@@ -8,7 +8,7 @@ elif [[ -e /etc/chrony.conf ]]; then
     CHRONYCONF_PATH=/etc/chrony.conf
 fi
 
-if [[ $MAGAOX_ROLE == aoc ]]; then
+if [[ $MAGAOX_ROLE == AOC ]]; then
     log_info "Configuring chronyd as a time master for $MAGAOX_ROLE"
     sudo tee $CHRONYCONF_PATH <<'HERE'
 # chrony.conf installed by MagAO-X
@@ -22,7 +22,7 @@ driftfile /var/lib/chrony/drift
 makestep 1.0 3
 rtcsync
 HERE
-elif [[ $MAGAOX_ROLE == icc || $MAGAOX_ROLE == rtc ]]; then
+elif [[ $MAGAOX_ROLE == ICC || $MAGAOX_ROLE == RTC ]]; then
     log_info "Configuring chronyd as a time minion for $MAGAOX_ROLE"
     sudo tee $CHRONYCONF_PATH <<'HERE'
 # chrony.conf installed by MagAO-X
