@@ -37,7 +37,7 @@ else
 fi
 sudo systemctl enable chronyd
 log_info "chronyd enabled"
-systemctl status chronyd
+systemctl status chronyd || true
 sudo systemctl start chronyd
 log_info "chronyd started"
 chronyc sources
