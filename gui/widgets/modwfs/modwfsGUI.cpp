@@ -81,7 +81,7 @@ int modwfsGUI::subscribe( multiIndiPublisher * publisher )
    publisher->subscribeProperty(this, "modwfs", "modRadius");
    publisher->subscribeProperty(this, "fxngenmodwfs", "C1ofst");
    publisher->subscribeProperty(this, "fxngenmodwfs", "C2ofst");
-   publisher->subscribeProperty(this, "pdu1", "modttm");  ///\todo this ought to get from the modwfs state code.
+   publisher->subscribeProperty(this, "pdu1", "ttmmod");  ///\todo this ought to get from the modwfs state code.
    
    return 0;
 }
@@ -151,7 +151,7 @@ int modwfsGUI::handleSetProperty( const pcf::IndiProperty & ipRecv)
    }
    else if(ipRecv.getDevice() == "pdu1")
    {
-      if(ipRecv.getName() == "modttm")
+      if(ipRecv.getName() == "ttmmod")
       {
          if(ipRecv.find("state"))
          {

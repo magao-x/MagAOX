@@ -89,7 +89,7 @@ public:
        \endcode
      * with appropriate error checking.
      */
-   void setupConfig(mx::app::appConfigurator & config /**< [out] the derived classes configurator*/);
+   int setupConfig(mx::app::appConfigurator & config /**< [out] the derived classes configurator*/);
 
    /// load the configuration system results
    /**
@@ -99,7 +99,7 @@ public:
        \endcode
      * with appropriate error checking.
      */
-   void loadConfig(mx::app::appConfigurator & config /**< [in] the derived classes configurator*/);
+   int loadConfig(mx::app::appConfigurator & config /**< [in] the derived classes configurator*/);
 
    /// Startup function
    /** 
@@ -256,21 +256,22 @@ stdMotionStage<derivedT>::~stdMotionStage() noexcept
 
 
 template<class derivedT>
-void stdMotionStage<derivedT>::setupConfig(mx::app::appConfigurator & config)
+int stdMotionStage<derivedT>::setupConfig(mx::app::appConfigurator & config)
 {
    static_cast<void>(config);
    
-   config.add("motor.powerOnHome", "", "motor.powerOnHome", argType::Required, "motor", "powerOnHome", false, "bool", "If true, home at startup/power-on.  Default=false.");
+   config.add("stage.powerOnHome", "", "stage.powerOnHome", argType::Required, "stage", "powerOnHome", false, "bool", "If true, home at startup/power-on.  Default=false.");
    
    config.add(m_presetNotation + "s.names", "", m_presetNotation + "s.names",  argType::Required, m_presetNotation+"s", "names", false, "vector<string>", "The names of the " + m_presetNotation+ "s.");
    config.add(m_presetNotation + "s.positions", "", m_presetNotation + "s.positions",  argType::Required, m_presetNotation+"s", "positions", false, "vector<double>", "The positions of the " + m_presetNotation + "s.  If omitted or 0 then order is used.");
    
+   return 0;
 }
 
 template<class derivedT>
-void stdMotionStage<derivedT>::loadConfig(mx::app::appConfigurator & config)
+int stdMotionStage<derivedT>::loadConfig(mx::app::appConfigurator & config)
 {
-   config(m_powerOnHome, "motor.powerOnHome");
+   config(m_powerOnHome, "stage.powerOnHome");
    
    config(m_presetNames, m_presetNotation + "s.names");
    
@@ -286,6 +287,8 @@ void stdMotionStage<derivedT>::loadConfig(mx::app::appConfigurator & config)
    {
       for(size_t n=0;n<m_presetPositions.size();++n) if(m_presetPositions[n] == 0) m_presetPositions[n] = n+1;
    }
+   
+   return 0;
 }
    
 
@@ -364,8 +367,8 @@ int stdMotionStage<derivedT>::appShutdown()
 
 template<class derivedT>
 int stdMotionStage<derivedT>::st_newCallBack_stdMotionStage( void * app,
-                                                   const pcf::IndiProperty &ipRecv
-                                                 )
+                                                             const pcf::IndiProperty &ipRecv
+                                                           )
 {
    std::string name = ipRecv.getName();
    derivedT * _app = static_cast<derivedT *>(app);

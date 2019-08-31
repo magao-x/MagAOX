@@ -63,7 +63,8 @@ namespace app
   * all filter wheels.
   *
   *
-  * \todo do we need libMagAOX error handling? (a stack?)
+  * \todo implement libMagAOX error handling? (a stack?)
+  * \todo make m_powerMgtEnabled a template parameter, and static_assert checki if _useINDI== false and power management is true
   *
   * \ingroup magaoxapp
   */
@@ -843,29 +844,47 @@ protected:
      *
      */
 protected:
-   bool m_powerMgtEnabled {false}; ///< Flag controls whether power mgt is used.  Set this in the constructor of a derived app.  If true, then if after loadConfig the powerDevice and powerChannel are empty, then this will revert to false.
+   bool m_powerMgtEnabled {false}; ///< Flag controls whether power mgt is used.  Set this in the constructor of a derived app.  If true, then if after loadConfig the powerDevice and powerChannel are empty, then the app will exit with a critical error.
 
+   /* Configurables . . . */
    std::string m_powerDevice; ///< The INDI device name of the power controller
    std::string m_powerChannel; ///< The INDI property name of the channel controlling this device's power.
    std::string m_powerElement {"state"}; ///< The INDI element name to monitor for this device's power state.
+   std::string m_powerTargetElement {"target"}; ///< The INDI element name to monitor for this device's power state.
 
+   unsigned long m_powerOnWait {0}; ///< Time in sec to wait for device to boot after power on.
+   
+   /* Power on waiting counter . . . */
+   int m_powerOnCounter {0}; ///< Counts numer of loops after power on, implements delay for camera bootup.
+   
+   /* Power state . . . */
    int m_powerState {-1}; ///< Current power state, 1=On, 0=Off, -1=Unk.
-
-   pcf::IndiProperty m_indiP_powerChannel;
+   int m_powerTargetState {-1}; ///< Current target power state, 1=On, 0=Off, -1=Unk.
+   
+   pcf::IndiProperty m_indiP_powerChannel; ///< INDI property used to communicate power state.
 
    /// This method is called when the change to poweroff is detected.
    /**
      * \returns 0 on success.
      * \returns -1 on any error which means the app should exit.
      */
-   virtual int onPowerOff() {return 0;}
+   virtual int onPowerOff();
 
    /// This method is called while the power is off, once per FSM loop.
    /**
      * \returns 0 on success.
      * \returns -1 on any error which means the app should exit.
      */
-   virtual int whilePowerOff() {return 0;}
+   virtual int whilePowerOff();
+   
+   /// This method tests whether the power on wait time has elapsed.
+   /** You would call this once per appLogic loop while in state POWERON.  While false, you would return 0.  
+     * Once it becomes true, take post-power-on actions and go on with life.
+     * 
+     * \returns true if the time since POWERON is greater than the power-on wait, or if power management is not enabled
+     * \returns false otherwise
+     */
+   bool powerOnWaitElapsed();
 
 public:
 
@@ -876,12 +895,16 @@ public:
      * \returns 0 if power is off 
      * \returns 1 if power is on or m_powerMgtEnabled==false
      */ 
-   int powerState()
-   {
-      if(!m_powerMgtEnabled) return 1;
-      
-      return m_powerState;
-   }
+   int powerState();
+   
+   /// Returns the target power state.
+   /** If power management is not enabled, this always returns 1=On.
+     *
+     * \returns -1 if target power state is unknown
+     * \returns 0 if target power state is off 
+     * \returns 1 if target power is on or m_powerMgtEnabled==false
+     */ 
+   int powerStateTarget();
    
    INDI_SETCALLBACK_DECL(MagAOXApp, m_indiP_powerChannel);
 
@@ -1072,10 +1095,19 @@ void MagAOXApp<_useINDI>::setupBasicConfig() //virtual
 
    if( m_powerMgtEnabled)
    {
+      if(_useINDI == false)
+      {
+         //If this condition obtains, we should not go on because it means we'll never leave power off!!!
+         log<software_critical>({__FILE__,__LINE__, "power management is enabled but we are not using INDI"});
+         m_shutdown = true;
+      }
+      
       //Power Management
       config.add("power.device", "", "power.device", argType::Required, "power", "device", false, "string", "Device controlling power for this app's device (INDI name).");
       config.add("power.channel", "", "power.channel", argType::Required, "power", "channel", false, "string", "Channel on device for this app's device (INDI name).");
-      config.add("power.element", "", "power.element", argType::Required, "power", "element", false, "string", "INDI element name.  Default is \"state\", only need to specify if different.");
+      config.add("power.element", "", "power.element", argType::Required, "power", "element", false, "string", "INDI power state element name.  Default is \"state\", only need to specify if different.");
+      config.add("power.targetElement", "", "power.targetElement", argType::Required, "power", "targetElement", false, "string", "INDI power target element name.  Default is \"target\", only need to specify if different.");
+      config.add("power.powerOnWait", "", "power.powerOnWait", argType::Required, "power", "powerOnWait", false, "int", "Time after power-on to wait before continuing [sec].  Default is 0 sec, max is 3600 sec.");
    }
 }
 
@@ -1097,23 +1129,29 @@ void MagAOXApp<_useINDI>::loadBasicConfig() //virtual
       RTPriority(prio);
    }
 
-
    //--------Power Management --------//
    if( m_powerMgtEnabled)
    {
       config(m_powerDevice, "power.device");
       config(m_powerChannel, "power.channel");
       config(m_powerElement, "power.element");
-
+      config(m_powerTargetElement, "power.targetElement");
+      
       if(m_powerDevice != "" && m_powerChannel != "")
       {
-         log<text_log>("enabling power management: " + m_powerDevice + "." + m_powerChannel + "." + m_powerElement);
+         log<text_log>("enabling power management: " + m_powerDevice + "." + m_powerChannel + "." + m_powerElement + "/" + m_powerTargetElement);
          REG_INDI_SETPROP(m_indiP_powerChannel, m_powerDevice, m_powerChannel);
       }
       else
       {
-         log<text_log>("power management not configured: " + m_powerDevice + "." + m_powerChannel + "." + m_powerElement, logPrio::LOG_CRITICAL);
+         log<text_log>("power management not configured!", logPrio::LOG_CRITICAL);
          m_shutdown = true;
+      }
+      
+      config(m_powerOnWait, "power.powerOnWait");
+      if(m_powerOnWait > 3600)
+      {
+         log<text_log>("powerOnWait longer than 1 hour.  Setting to 0.", logPrio::LOG_ERROR);
       }
    }
 }
@@ -1185,7 +1223,11 @@ int MagAOXApp<_useINDI>::execute() //virtual
             if(!stateLogged()) log<text_log>("waiting for power state");
          }
       }
-      if(m_powerState > 0) state(stateCodes::POWERON);
+      if(m_powerState > 0) 
+      {
+         m_powerOnCounter = 0;
+         state(stateCodes::POWERON);
+      }
       else 
       {
          state(stateCodes::POWEROFF);
@@ -1213,6 +1255,7 @@ int MagAOXApp<_useINDI>::execute() //virtual
          {
             if(m_powerState == 1)
             {
+               m_powerOnCounter = 0;
                state(stateCodes::POWERON);
             }
          }
@@ -2676,36 +2719,95 @@ int MagAOXApp<_useINDI>::sendNewProperty( const pcf::IndiProperty & ipSend,
 }
 
 template<bool _useINDI>
+int MagAOXApp<_useINDI>::onPowerOff() 
+{
+   return 0;
+}
+
+template<bool _useINDI>
+int MagAOXApp<_useINDI>::whilePowerOff() 
+{
+   return 0;
+}
+
+template<bool _useINDI>
+bool MagAOXApp<_useINDI>::powerOnWaitElapsed()
+{
+   if(!m_powerMgtEnabled || m_powerOnWait == 0) return true;
+   
+   if(m_powerOnCounter*m_loopPause > ((double) m_powerOnWait)*1e9)
+   {
+      return true;
+   }
+   else
+   {
+      ++m_powerOnCounter;
+      return false;
+   }
+}
+
+template<bool _useINDI>
+int MagAOXApp<_useINDI>::powerState()
+{
+   if(!m_powerMgtEnabled) return 1;
+   
+   return m_powerState;
+}
+
+template<bool _useINDI>
+int MagAOXApp<_useINDI>::powerStateTarget()
+{
+   if(!m_powerMgtEnabled) return 1;
+   
+   return m_powerTargetState;
+}
+
+template<bool _useINDI>
 INDI_SETCALLBACK_DEFN( MagAOXApp<_useINDI>, m_indiP_powerChannel)(const pcf::IndiProperty &ipRecv)
 {
    std::string ps;
 
-   try
+   if( ipRecv.find(m_powerElement))
    {
       ps = ipRecv[m_powerElement].get<std::string>();
-   }
-   catch(...)
-   {
-      log<software_error>({__FILE__, __LINE__, "Exception caught."});
-      return -1;
-   }
 
-   if(ps == "On")
-   {
-      m_powerState = 1;
+      if(ps == "On")
+      {
+         m_powerState = 1;
+      }
+      else if (ps == "Off")
+      {
+         m_powerState = 0;
+      }
+      else
+      {
+         m_powerState = -1;
+      }
    }
-   else if (ps == "Off")
+   
+   if( ipRecv.find(m_powerTargetElement))
    {
-      m_powerState = 0;
-   }
-   else
-   {
-      m_powerState = -1;
-   }
+      ps = ipRecv[m_powerTargetElement].get<std::string>();
 
+      if(ps == "On")
+      {
+         m_powerTargetState = 1;
+      }
+      else if (ps == "Off")
+      {
+         m_powerTargetState = 0;
+      }
+      else
+      {
+         m_powerTargetState = -1;
+      }
+   }
+   
    return 0;
 }
 
+
+   
 template<bool _useINDI>
 std::string MagAOXApp<_useINDI>::configName()
 {
