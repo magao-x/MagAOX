@@ -68,7 +68,7 @@ apps/pupilFit/pupilFit
 #s
 apps/siglentSDG/siglentSDG
 apps/siglentSDG/tests/siglentSDG_test
-
+apps/smc100ccCtrl/smc100ccCtrl
 apps/sshDigger/sshDigger
 
 apps/streamWriter/streamWriter

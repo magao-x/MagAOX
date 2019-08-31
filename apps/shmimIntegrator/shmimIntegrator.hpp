@@ -398,6 +398,7 @@ int shmimIntegrator::processImage( void * curr_src,
    
    if(m_nUpdate == 0)
    {
+      if(m_updated) return 0;
       if(m_sinceUpdate == 0) m_avgImage.setZero();
       
       realT * data = m_avgImage.data();
@@ -431,7 +432,6 @@ int shmimIntegrator::processImage( void * curr_src,
       
       for(unsigned nn=0; nn < shmimMonitorT::m_width*shmimMonitorT::m_height; ++nn)
       {
-         //data[nn] = *( (int16_t * ) (curr_src + nn*shmimMonitorT::m_typeSize));
          data[nn] = pixget(curr_src, nn);
       }
       ++m_nprocessed;
