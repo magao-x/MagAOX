@@ -471,8 +471,8 @@ int outletController<derivedT>::turnChannelOn( const std::string & channel )
    #endif
 
    #ifndef OUTLET_CTRL_TEST_NOINDI
-   m_channels[channel].m_indiP_prop["target"].setValue("On");
-   indi::updateIfChanged(m_channels[channel].m_indiP_prop, "target", std::string("On"), static_cast<derivedT*>(this)->m_indiDriver );
+   //m_channels[channel].m_indiP_prop["target"].setValue("On");
+   indi::updateIfChanged(m_channels[channel].m_indiP_prop, "target", std::string("On"), static_cast<derivedT*>(this)->m_indiDriver, INDI_BUSY );
    #endif
 
    //If order is specified, get first outlet number
@@ -544,8 +544,8 @@ int outletController<derivedT>::turnChannelOff( const std::string & channel )
    #endif
 
    #ifndef OUTLET_CTRL_TEST_NOINDI
-   m_channels[channel].m_indiP_prop["target"].setValue("Off");
-   indi::updateIfChanged(m_channels[channel].m_indiP_prop, "target", std::string("Off"), static_cast<derivedT*>(this)->m_indiDriver );
+   //m_channels[channel].m_indiP_prop["target"].setValue("Off");
+   indi::updateIfChanged(m_channels[channel].m_indiP_prop, "target", std::string("Off"), static_cast<derivedT*>(this)->m_indiDriver, INDI_BUSY );
    #endif
 
    //If order is specified, get first outlet number
