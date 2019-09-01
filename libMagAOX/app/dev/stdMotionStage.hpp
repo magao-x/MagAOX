@@ -308,7 +308,11 @@ int stdMotionStage<derivedT>::appStartup()
       return -1;
    }
    
-   derived().createStandardIndiSelectionSw( m_indiP_presetName, m_presetNotation + "Name", m_presetNames);
+   if(derived().createStandardIndiSelectionSw( m_indiP_presetName, m_presetNotation + "Name", m_presetNames) < 0)
+   {
+      derivedT::template log<software_critical>({__FILE__, __LINE__});
+      return -1;
+   }
    if( derived().registerIndiPropertyNew( m_indiP_presetName, st_newCallBack_stdMotionStage) < 0)
    {
       #ifndef STDFILTERWHEEL_TEST_NOLOG

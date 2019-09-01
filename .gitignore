@@ -44,6 +44,9 @@ apps/filterWheelCtrl/filterWheelCtrl
 
 apps/magAOXMaths/magAOXMaths
 
+#h
+apps/hsfwCtrl/hsfwCtrl
+
 #i
 INDI/INDI/evalINDI
 INDI/INDI/getINDI
@@ -61,14 +64,16 @@ apps/mzmqClient/mzmqClient
 apps/ocam2KCtrl/ocam2KCtrl
 
 #p
+apps/pi335Ctrl/pi335Ctrl
 apps/picamCtrl/picamCtrl
 
 apps/pupilFit/pupilFit
 
 #s
+apps/shmimIntegrator/shmimIntegrator
 apps/siglentSDG/siglentSDG
 apps/siglentSDG/tests/siglentSDG_test
-
+apps/smc100ccCtrl/smc100ccCtrl
 apps/sshDigger/sshDigger
 
 apps/streamWriter/streamWriter
@@ -102,6 +107,7 @@ apps/zaberLowLevel/zaberLowLevel
 
 utils/logdump/logdump
 utils/cursesINDI/cursesINDI
+utils/logstream/logstream
 utils/xrif2shmim/xrif2shmim
 
 ###########################3

@@ -26,12 +26,8 @@ protected:
      * @{
      */
 
-   double m_maxFreq {1000}; ///< The maximum modulation frequency settable by this program
-   double m_maxAmp {6.0}; ///< The maximum modulation amplitude settable by this program
-
-   double m_voltsPerLD_1 {0.87/6.0}; ///< The voltage for 1 lambda/D of motion for channel 1
-   double m_voltsPerLD_2 {0.87/6.0}; ///< The voltage for 1 lambda/D of motion for channel 2
-   double m_phase_2 {75.0}; ///< The phase offset for channel 2 to produce circular motion
+   double m_maxFreq {2000}; ///< The maximum modulation frequency settable by this program
+   double m_maxVolt {0.87}; ///< The maximum modulation voltage settable by this program
 
    double m_setVoltage_1 {5.0}; ///< the set position voltage of Ch. 1.
    double m_setVoltage_2 {5.0}; ///< the set position voltage of Ch. 2.
@@ -66,16 +62,13 @@ protected:
    double m_C2ofst {-1};  ///< DC offset of fxn gen channel 2.
    double m_C2phse {-1};  ///< Phase of fxn gen channel 2.
 
-   struct modCal
-   {
-      double frequency;
-      double radius;
-      double C1Amp;
-      double C2Amp;
-      double C2Phse;
-   };
+   double m_calRadius {3.0};
    
-   std::map<std::string, modCal> m_modCals;
+   std::vector<double> m_calFreqs = {100,400,500,600,700,800,900,1000,1100,1200,1300,1400,1500,1600,1700,1800,1900,2000};
+   std::vector<double> m_calC1Amps = {0.61,0.61,0.57,0.55,0.53,0.51,0.51,0.49,0.46,0.44,0.44,0.43,0.44,0.46,0.49,0.54,0.58,0.62};
+   std::vector<double> m_calC2Amps = {0.6,0.6,0.6,0.57,0.55,0.53,0.51,0.49,0.49,0.49,0.49,0.5,0.52,0.54,0.59,0.64,0.70,0.77};
+   std::vector<double> m_calC2Phse = { 75, 75, 75,  75,  75,  75,  75,  75,  75,  75,  75,  75,  75,  72,  72,  70,  70,  70} ;
+   
    
 public:
 
@@ -228,10 +221,10 @@ inline
 void ttmModulator::loadConfig()
 {
    config(m_maxFreq, "limits.maxfreq");
-   config(m_maxAmp, "limits.maxamp");
-   config(m_voltsPerLD_1, "cal.voltsperld1");
-   config(m_voltsPerLD_2, "cal.voltsperld2");
-   config(m_phase_2, "cal.phase");
+   //config(m_maxAmp, "limits.maxamp");
+   //config(m_voltsPerLD_1, "cal.voltsperld1");
+   //config(m_voltsPerLD_2, "cal.voltsperld2");
+   //config(m_phase_2, "cal.phase");
 
    config(m_setVoltage_1, "cal.setv1");
    config(m_setVoltage_2, "cal.setv2");
@@ -247,42 +240,7 @@ void ttmModulator::loadConfig()
    if(m_rotParity < 0) m_rotParity = -1;
    else m_rotParity = 1;
    
-   //Now get the cal points
    
-   std::vector<std::string> sections;
-
-   config.unusedSections(sections);
-
-   for(size_t i=0; i< sections.size(); ++i)
-   {
-      bool freqset = config.isSetUnused(mx::app::iniFile::makeKey(sections[i], "frequency" ));
-      bool radset = config.isSetUnused(mx::app::iniFile::makeKey(sections[i], "radius" ));
-      bool c1ampset = config.isSetUnused(mx::app::iniFile::makeKey(sections[i], "C1Amp" ));
-      bool c2ampset = config.isSetUnused(mx::app::iniFile::makeKey(sections[i], "C2Amp" ));
-      bool c2phsset = config.isSetUnused(mx::app::iniFile::makeKey(sections[i], "C2Phase" ));
-      
-      if( freqset && radset&& c1ampset && c2ampset && c2phsset)
-      {
-         log<text_log>("Loading " + sections[i] + " as a modulation calibration");
-         
-         double freq;
-         config.configUnused(freq, mx::app::iniFile::makeKey(sections[i], "frequency" ));
-         double rad;
-         config.configUnused(rad, mx::app::iniFile::makeKey(sections[i], "radius" ));
-         double c1amp;
-         config.configUnused(c1amp, mx::app::iniFile::makeKey(sections[i], "C1Amp" ));
-         double c2amp;
-         config.configUnused(c2amp, mx::app::iniFile::makeKey(sections[i], "C2Amp" ));
-         double c2phse;
-         config.configUnused(c2phse, mx::app::iniFile::makeKey(sections[i], "C2Phase" ));
-         
-         m_modCals.insert(std::pair<std::string, modCal>(sections[i], {freq, rad, c1amp, c2amp, c2phse}));
-      }
-      else
-      {
-         log<text_log>(sections[i] + " is not a valid modulation calibration");
-      }
-   }
 }
 
 inline
@@ -453,7 +411,30 @@ int ttmModulator::calcState()
       {
          //Possibly some more checks
          m_modFreq = m_C1freq;
-         m_modRad = m_C1volts/m_voltsPerLD_1;
+         
+         //Interpolate on C1.
+         size_t ngt = 0;
+   
+         for(ngt = 0; ngt < m_calFreqs.size(); ++ngt)
+         {
+            if( m_calFreqs[ngt] >= m_modFreq) break;
+         }
+   
+         double terpC1Amp;
+         if(ngt == 0 || m_calFreqs[ngt] == m_modFreq)
+         {
+            terpC1Amp = m_calC1Amps[ngt];
+         }
+         else
+         {
+            size_t nlt = ngt -1;
+            double dfreq = (m_modFreq - m_calFreqs[nlt])/(m_calFreqs[ngt]-m_calFreqs[nlt]);
+            terpC1Amp = m_calC1Amps[nlt] + (m_calC1Amps[ngt]-m_calC1Amps[nlt])*dfreq;
+      
+         }
+   
+         m_modRad = m_C1volts/terpC1Amp * m_calRadius;
+         
          m_modState = 4;
       }
    }
@@ -753,28 +734,64 @@ int ttmModulator::modTTM( double newRad,
 
    ///\todo here maximum radius should be frequency dependent.
 
-   if(newRad > m_maxAmp)
+   
+   
+   double terpC1Amp = 0;
+   double terpC2Amp = 0;
+   double terpC2Phse = 0;
+   
+   size_t ngt = 0;
+   
+   for(ngt = 0; ngt < m_calFreqs.size(); ++ngt)
    {
-      log<text_log>("Requested amplitude " + std::to_string(newRad) + " lam/D exceeds limit (" + std::to_string(m_maxAmp) + " lam/D at " + std::to_string(newFreq) + " Hz). Limiting.", logPrio::LOG_WARNING);
-      newRad = m_maxAmp;
+      if( m_calFreqs[ngt] >= newFreq) break;
    }
+   
+   if(ngt == 0 || m_calFreqs[ngt] == newFreq)
+   {
+      terpC1Amp = m_calC1Amps[ngt];
+      terpC2Amp = m_calC2Amps[ngt];
+      terpC2Phse = m_calC2Phse[ngt];
+   }
+   else
+   {
+      size_t nlt = ngt -1;
+      double dfreq = (newFreq - m_calFreqs[nlt])/(m_calFreqs[ngt]-m_calFreqs[nlt]);
+      
+      terpC1Amp = m_calC1Amps[nlt] + (m_calC1Amps[ngt]-m_calC1Amps[nlt])*dfreq;
+      terpC2Amp = m_calC2Amps[nlt] + (m_calC2Amps[ngt]-m_calC2Amps[nlt])*dfreq;
+      terpC2Phse = m_calC2Phse[nlt] + (m_calC2Phse[ngt]-m_calC2Phse[nlt])*dfreq;
+   }
+   
 
-   voltageC1 = newRad*m_voltsPerLD_1;
-   voltageC2 = newRad*m_voltsPerLD_2;
+   voltageC1 = terpC1Amp*(newRad/m_calRadius);
+   voltageC2 = terpC2Amp*(newRad/m_calRadius); 
 
-
-
+   
+   if(voltageC1 > m_maxVolt)
+   {
+      log<text_log>("Requested ch-1 voltge " + std::to_string(voltageC1) + " V exceeds limit (" + std::to_string(m_maxVolt) + " V). Limiting.", logPrio::LOG_WARNING);
+      voltageC1 = m_maxVolt;
+   }
+   
+   if(voltageC2 > m_maxVolt)
+   {
+      log<text_log>("Requested ch-2 voltge " + std::to_string(voltageC2) + " V exceeds limit (" + std::to_string(m_maxVolt) + " V). Limiting.", logPrio::LOG_WARNING);
+      voltageC2 = m_maxVolt;
+   }
+   
+   
    //At this point we have safe calibrated voltage for the frequency.
 
    if( m_modState == 3)
    {
       // 0) set phase
-      if( sendNewProperty(m_indiP_C2phse, "value", m_phase_2) < 0 ) return log<software_error,-1>({__FILE__,__LINE__});
+      if( sendNewProperty(m_indiP_C2phse, "value", terpC2Phse) < 0 ) return log<software_error,-1>({__FILE__,__LINE__});
 
       /// \todo should we set the offset here just to be sure?
 
       //Now check if values have changed.
-      if( waitValue(m_C2phse, m_phase_2, 1e-10) < 0  ) return log<software_error, -1>({__FILE__,__LINE__, "fxngen timeout"});
+      if( waitValue(m_C2phse, terpC2Phse, 1e-10) < 0  ) return log<software_error, -1>({__FILE__,__LINE__, "fxngen timeout"});
 
       // 1) set freq to 100 Hz (or requested if < 100 Hz)
       double nextFreq = 100.0;
