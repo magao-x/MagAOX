@@ -6,6 +6,9 @@ if [[ -e /etc/chrony/chrony.conf ]]; then
     CHRONYCONF_PATH=/etc/chrony/chrony.conf
 elif [[ -e /etc/chrony.conf ]]; then
     CHRONYCONF_PATH=/etc/chrony.conf
+else
+    log_error "Can't find chrony.conf. Is chrony installed?"
+    exit 1
 fi
 
 if [[ $MAGAOX_ROLE == AOC ]]; then
@@ -34,6 +37,7 @@ rtcsync
 HERE
 else
     log_info "Skipping chronyd setup because this isn't an instrument computer"
+    exit 0
 fi
 sudo systemctl enable chronyd
 log_info "chronyd enabled"
@@ -41,7 +45,6 @@ systemctl status chronyd || true
 sudo systemctl start chronyd
 log_info "chronyd started"
 chronyc sources
-chronyc tracking
 # see https://chrony.tuxfamily.org/faq.html#_i_keep_getting_the_error_code_501_not_authorised_code
 # for why -a is needed
 sudo chronyc -a makestep
