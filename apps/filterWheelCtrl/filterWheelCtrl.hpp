@@ -233,7 +233,7 @@ void filterWheelCtrl::setupConfig()
    config.add("motor.acceleration", "", "motor.acceleration", argType::Required, "motor", "acceleration", false, "real", "The motor acceleration parameter. Default=1000.");
    config.add("motor.speed", "", "motor.speed", argType::Required, "motor", "speeed", false, "real", "The motor speed parameter.  Default=1000.");
    config.add("motor.circleSteps", "", "motor.circleSteps", argType::Required, "motor", "circleSteps", false, "long", "The number of steps in 1 revolution.");
-   config.add("motor.homeOffset", "", "motor.homeOffset", argType::Required, "motor", "homeOffset", false, "long", "The homing offset in motor counts.");
+   config.add("stage.homeOffset", "", "stage.homeOffset", argType::Required, "stage", "homeOffset", false, "long", "The homing offset in motor counts.");
    
    dev::stdMotionStage<filterWheelCtrl>::setupConfig(config);
    
@@ -257,7 +257,7 @@ void filterWheelCtrl::loadConfig()
    config(m_acceleration, "motor.acceleration");
    config(m_motorSpeed, "motor.speed");
    config(m_circleSteps, "motor.circleSteps");
-   config(m_homeOffset, "motor.homeOffset");
+   config(m_homeOffset, "stage.homeOffset");
    
 
    dev::stdMotionStage<filterWheelCtrl>::loadConfig(config);

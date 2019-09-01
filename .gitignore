@@ -44,6 +44,9 @@ apps/filterWheelCtrl/filterWheelCtrl
 
 apps/magAOXMaths/magAOXMaths
 
+#h
+apps/hsfwCtrl/hsfwCtrl
+
 #i
 INDI/INDI/evalINDI
 INDI/INDI/getINDI
@@ -70,7 +73,7 @@ apps/pupilFit/pupilFit
 apps/shmimIntegrator/shmimIntegrator
 apps/siglentSDG/siglentSDG
 apps/siglentSDG/tests/siglentSDG_test
-
+apps/smc100ccCtrl/smc100ccCtrl
 apps/sshDigger/sshDigger
 
 apps/streamWriter/streamWriter

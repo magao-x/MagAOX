@@ -23,6 +23,7 @@ apps_rtc = \
 
 apps_icc = \
 	filterWheelCtrl \
+	hsfwCtrl \
 	baslerCtrl \
 	zaberCtrl \
 	zaberLowLevel \

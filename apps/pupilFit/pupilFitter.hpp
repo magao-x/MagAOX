@@ -229,7 +229,12 @@ int pupilFitter<realT>::outerpix( float & avgx,
             found = true;
          }
       }
-            
+       
+      if(found == false)
+      {
+         m_circ(m_rows-1, j) = 1;
+      } 
+       
       found = false;
       for(size_t i= 0; i < 0.5*m_rows;++i)
       {
@@ -324,6 +329,7 @@ int pupilFitter<realT>::fit( mx::improc::eigenImage<realT> & im,
       getQuad(m_quad, im, i);
       outerpix(m_avgx[i], m_avgy[i], m_avgr[i], i);
    
+      //m_circ*=(i+1); //for identifying qudrants when needed
       putQuad(edged, m_circ, i);
    }
    return 0;
