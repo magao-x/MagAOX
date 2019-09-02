@@ -278,6 +278,11 @@ if [[ $MAGAOX_ROLE != ci ]]; then
 fi
 
 log_success "Provisioning complete"
-log_info "You'll probably want to run"
-log_info "    source /etc/profile.d/*.sh"
-log_info "to get all the new environment variables set."
+if [[ $MAGAOX_ROLE == vm ]];
+    source /etc/profile.d/*.sh
+    magaox startup
+else
+    log_info "You'll probably want to run"
+    log_info "    source /etc/profile.d/*.sh"
+    log_info "to get all the new environment variables set."
+fi

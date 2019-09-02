@@ -125,3 +125,5 @@ flatlogs/src/logCodes.dat
 .DS_Store
 setup/bundle.zip
 setup/cache
+setup/calib/
+setup/config/

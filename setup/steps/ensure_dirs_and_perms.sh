@@ -35,15 +35,25 @@ mkdir -pv /opt/MagAOX/bin
 chown root:root /opt/MagAOX/bin
 chmod u+rwX,g+rX,o+rX /opt/MagAOX/bin
 
-mkdir -pv /opt/MagAOX/calib
-chown -R root:magaox-dev /opt/MagAOX/calib
-chmod -R u=rwX,g=rwX,o=rX /opt/MagAOX/calib
-setgid_all /opt/MagAOX/calib
+if [[ "$MAGAOX_ROLE" == "vm" ]]; then
+  mkdir -pv /vagrant/setup/calib
+  link_if_necessary /vagrant/setup/calib /opt/MagAOX/calib
+else
+  mkdir -pv /opt/MagAOX/calib
+  chown -R root:magaox-dev /opt/MagAOX/calib
+  chmod -R u=rwX,g=rwX,o=rX /opt/MagAOX/calib
+  setgid_all /opt/MagAOX/calib
+fi
 
-mkdir -pv /opt/MagAOX/config
-chown -R root:magaox-dev /opt/MagAOX/config
-chmod -R u=rwX,g=rwX,o=rX /opt/MagAOX/config
-setgid_all /opt/MagAOX/config
+if [[ "$MAGAOX_ROLE" == "vm" ]]; then
+  mkdir -pv /vagrant/setup/config
+  link_if_necessary /vagrant/setup/config /opt/MagAOX/config
+else
+  mkdir -pv /opt/MagAOX/config
+  chown -R root:magaox-dev /opt/MagAOX/config
+  chmod -R u=rwX,g=rwX,o=rX /opt/MagAOX/config
+  setgid_all /opt/MagAOX/config
+fi
 
 mkdir -pv /opt/MagAOX/drivers/fifos
 chown -R root:root /opt/MagAOX/drivers
