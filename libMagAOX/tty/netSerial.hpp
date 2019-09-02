@@ -106,11 +106,10 @@ int netSerial::serialOut( const char *buf,
                         )
 {
    int i=0;
-   int stat;
       
    while (i<len)
    {
-      stat = send( m_sockfd, buf+i, len-i, 0);
+      int stat = send( m_sockfd, buf+i, len-i, 0);
       if (stat >0)
       {
          i+= stat;
@@ -163,8 +162,6 @@ int netSerial::serialInString( char *buffer,
                                char terminator
                              )
 {
-   int signaled;
-   
    int res=0;
    struct timeval tv0, tv1;
    double t0, t1;
@@ -201,7 +198,7 @@ int netSerial::serialInString( char *buffer,
       /*JRM: otherwise, signals will cause select to return
           causing this loop to never timeout*/
          
-      signaled = 1;
+      int signaled = 1;
 
       retval = 0;
       

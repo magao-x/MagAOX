@@ -69,11 +69,11 @@ protected:
    
    std::vector<std::string> validStateCodes{};
    
-   double m_position;
+   double m_position {0};
    
-   double m_target;
+   double m_target {0};
 
-   bool m_wasHoming;
+   bool m_wasHoming {0};
    
    
 public:
