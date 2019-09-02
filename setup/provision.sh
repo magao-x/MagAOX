@@ -278,7 +278,7 @@ if [[ $MAGAOX_ROLE != ci ]]; then
 fi
 
 log_success "Provisioning complete"
-if [[ $MAGAOX_ROLE == vm ]];
+if [[ $MAGAOX_ROLE == vm ]]; then
     source /etc/profile.d/*.sh
     magaox startup
 else
