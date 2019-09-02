@@ -47,10 +47,9 @@ protected:
 
    /** \name Configurable Parameters
      *@{
-     */
-   unsigned long m_powerOnWait {20}; ///< Time in sec to wait for device boot after power on.
-   
-   //here add parameters which will be config-able at runtime
+     */  
+   float m_homePos1 {17.5}; ///< Home position of axis 1.  Default is 17.5
+   float m_homePos2 {17.5}; ///< Home position of axis 2.  Default is 17.5
    
    ///@}
 
@@ -198,6 +197,9 @@ void pi335Ctrl::setupConfig()
    dev::ioDevice::setupConfig(config);
    tty::usbDevice::setupConfig(config);
    dev::dm<pi335Ctrl,float>::setupConfig(config);
+   
+   config.add("stage.homePos1", "", "stage.homePos1", argType::Required, "stage", "homePos1", false, "float", "Home position of axis 1.  Default is 17.5.");
+   config.add("stage.homePos2", "", "stage.homePos2", argType::Required, "stage", "homePos2", false, "float", "Home position of axis 2.  Default is 17.5.");
 }
 
 int pi335Ctrl::loadConfigImpl( mx::app::appConfigurator & _config )
@@ -215,6 +217,9 @@ int pi335Ctrl::loadConfigImpl( mx::app::appConfigurator & _config )
    dev::ioDevice::loadConfig(_config);
    
    dev::dm<pi335Ctrl,float>::loadConfig(_config);
+   
+   config(m_homePos1, "stage.homePos1");
+   config(m_homePos2, "stage.homePos2");
    
    return 0;
 }
@@ -252,7 +257,7 @@ int pi335Ctrl::appStartup()
    m_indiP_pos2.add (pcf::IndiElement("current"));
    m_indiP_pos2.add (pcf::IndiElement("target"));
    
-   std::cerr << "appStartup complete \n";
+   //std::cerr << "appStartup complete \n";
    return 0;
 }
 
@@ -263,7 +268,11 @@ int pi335Ctrl::appLogic()
    
    if(state() == stateCodes::POWERON)
    {
-      if(m_powerOnCounter*m_loopPause > ((double) m_powerOnWait)*1e9)
+      if(!powerOnWaitElapsed()) 
+      {
+         return 0;
+      }
+      else
       {
          ///\todo promote usbDevice to dev:: and make this part of its appStartup
          //Get the USB device if it's in udev
@@ -275,16 +284,7 @@ int pi335Ctrl::appLogic()
          {
             state(stateCodes::NOTCONNECTED);
          }
-         
-         m_powerOnCounter = 0;
-      }
-      else
-      {
-         ++m_powerOnCounter;
-         return 0;
-      }
-      
-      
+      }  
    }
       
    ///\todo promote usbDevice to dev:: and make this part of its appLogic
@@ -375,7 +375,7 @@ int pi335Ctrl::appLogic()
    
    if(state() == stateCodes::HOMING)
    {
-      std::cerr << "Homing state: " << m_homingState << " " << mx::get_curr_time() - m_homingStart << "\n";
+      //std::cerr << "Homing state: " << m_homingState << " " << mx::get_curr_time() - m_homingStart << "\n";
       if(mx::get_curr_time() - m_homingStart > 20)
       {
          ++m_homingState;
@@ -409,7 +409,7 @@ int pi335Ctrl::appLogic()
       
       m_pos1 = pos1;
       
-      std::cerr << "m_pos1: " << m_pos1 << "\n";
+      //std::cerr << "m_pos1: " << m_pos1 << "\n";
       float mov1;
       if(getMov(mov1, 1) < 0)
       {
@@ -418,7 +418,7 @@ int pi335Ctrl::appLogic()
          return 0;
       }   
       
-      std::cerr << "mov1: " << mov1 << "\n";
+      //std::cerr << "mov1: " << mov1 << "\n";
       
       if(mov1 != m_pos1)
       {
@@ -438,7 +438,7 @@ int pi335Ctrl::appLogic()
       }
       
       m_pos2 = pos2;
-      std::cerr << "m_pos2: " << m_pos2 << "\n";
+      //std::cerr << "m_pos2: " << m_pos2 << "\n";
       
       float mov2;
       if(getMov(mov2, 2) < 0)
@@ -447,7 +447,7 @@ int pi335Ctrl::appLogic()
          state(stateCodes::ERROR);
          return 0;
       }   
-      std::cerr << "mov2: " << mov2 << "\n";
+      //std::cerr << "mov2: " << mov2 << "\n";
       
       if(mov2 != m_pos2)
       {
@@ -482,7 +482,7 @@ int pi335Ctrl::testConnection()
       log<software_error>( {__FILE__, __LINE__, rv, tty::ttyErrorString(rv)});
    }
    
-   std::cerr << "idn response: " << resp << "\n";
+   //std::cerr << "idn response: " << resp << "\n";
    
    if(resp.find("E-727.3SDA") != std::string::npos) return 0;
    
@@ -497,28 +497,28 @@ int pi335Ctrl::initDM()
    
    
    //get open-loop position of axis 1 (should be zero)
-   std::cerr << "Sending: SVA? 1\n";
+   //std::cerr << "Sending: SVA? 1\n";
    rv = tty::ttyWriteRead( resp, "SVA? 1\n", "\n", false, m_fileDescrip, m_writeTimeout, m_readTimeout);
 
    if(rv < 0)
    {
       log<software_error>( {__FILE__, __LINE__, rv, tty::ttyErrorString(rv)});
    }
-   std::cerr << "response: " << resp << "\n";
+   //std::cerr << "response: " << resp << "\n";
    
    //get open-loop position of axis 2 (should be zero)
-   std::cerr << "Sending: SVA? 2\n";
+  // std::cerr << "Sending: SVA? 2\n";
    rv = tty::ttyWriteRead( resp, "SVA? 2\n", "\n", false, m_fileDescrip, m_writeTimeout, m_readTimeout);
 
    if(rv < 0)
    {
       log<software_error>( {__FILE__, __LINE__, rv, tty::ttyErrorString(rv)});
    }
-   std::cerr << "response: " << resp << "\n";
+   //std::cerr << "response: " << resp << "\n";
    
    
    //make sure axis 1 has servo off
-   std::cerr << "Sending: SVO 1 0\n";
+   //std::cerr << "Sending: SVO 1 0\n";
    rv = tty::ttyWrite("SVO 1 0\n",  m_fileDescrip, m_writeTimeout);
 
    if(rv < 0)
@@ -527,7 +527,7 @@ int pi335Ctrl::initDM()
    }
    
    //make sure axis 2 has servo off
-   std::cerr << "Sending: SVO 2 0\n";
+   //std::cerr << "Sending: SVO 2 0\n";
    rv = tty::ttyWrite("SVA 2 0\n",  m_fileDescrip, m_writeTimeout);
 
    if(rv < 0)
@@ -568,7 +568,8 @@ int pi335Ctrl::home_1()
    if(m_servoState != 0)
    {
       log<text_log>("home_1 requested but servos are not off", logPrio::LOG_ERROR);
-      return -1;
+      return -1;std::string com = "MOV 1 " + std::to_string(m_homePos1) + "\n";
+      //std::cerr << "Sending: " << com;
    }
    
    if(m_homingState != 0)
@@ -578,7 +579,7 @@ int pi335Ctrl::home_1()
    }
    
    //zero range found in axis 1 (NOTE this moves mirror full range) TAKES 1min 
-   std::cerr << "Sending: ATZ 1 NaN\n";
+   //std::cerr << "Sending: ATZ 1 NaN\n";
    rv = tty::ttyWrite("ATZ 1 NaN\n",  m_fileDescrip, m_writeTimeout);
 
    if(rv < 0)
@@ -610,7 +611,7 @@ int pi335Ctrl::home_2()
    }
    
    //zero range found in axis 2 (NOTE this moves mirror full range) TAKES 1min 
-   std::cerr << "Sending: ATZ 2 NaN\n";
+   //std::cerr << "Sending: ATZ 2 NaN\n";
    rv = tty::ttyWrite("ATZ 2 NaN\n", m_fileDescrip, m_writeTimeout);
 
    if(rv < 0)
@@ -643,7 +644,7 @@ int pi335Ctrl::finishInit()
    
    
    //goto openloop pos zero (0 V) axis 1
-   std::cerr << "Sending: SVA 1 0.0\n";
+   //std::cerr << "Sending: SVA 1 0.0\n";
    rv = tty::ttyWrite("SVA 1 0.0\n", m_fileDescrip, m_writeTimeout);
 
    if(rv < 0)
@@ -654,7 +655,7 @@ int pi335Ctrl::finishInit()
    mx::milliSleep(2000);
    
    //goto openloop pos zero (0 V) axis 2
-   std::cerr << "Sending: SVA 2 0.0\n";
+   //std::cerr << "Sending: SVA 2 0.0\n";
    rv = tty::ttyWrite("SVA 2 0.0\n", m_fileDescrip, m_writeTimeout);
 
    if(rv < 0)
@@ -665,24 +666,24 @@ int pi335Ctrl::finishInit()
    mx::milliSleep(2000);
 
     //Get the real position of axis 1 (should be 0mrad st start) 
-   std::cerr << "Sending: SVA? 1\n";
+   //std::cerr << "Sending: SVA? 1\n";
    rv = tty::ttyWriteRead( resp, "SVA? 1\n", "\n", false, m_fileDescrip, m_writeTimeout, m_readTimeout);
 
    if(rv < 0)
    {
       log<software_error>( {__FILE__, __LINE__, rv, tty::ttyErrorString(rv)});
    }
-   std::cerr << "response: " << resp << "\n";
+   //std::cerr << "response: " << resp << "\n";
    
    //Get the real position of axis 2 (should be 0mrad st start) 
-   std::cerr << "Sending: SVA? 2\n";
+   //std::cerr << "Sending: SVA? 2\n";
    rv = tty::ttyWriteRead( resp, "SVA? 2\n", "\n", false, m_fileDescrip, m_writeTimeout, m_readTimeout);
 
    if(rv < 0)
    {
       log<software_error>( {__FILE__, __LINE__, rv, tty::ttyErrorString(rv)});
    }
-   std::cerr << "response: " << resp << "\n";
+   //std::cerr << "response: " << resp << "\n";
 
    //now safe to engage servos    
    //(IMPORTANT:    NEVER EVER enable servos on axis 3 -- will damage S-335) 
@@ -690,7 +691,7 @@ int pi335Ctrl::finishInit()
    
    
    //turn on servo to axis 1 (green servo LED goes on 727) 
-   std::cerr << "Sending: SVO 1 1\n";
+   //std::cerr << "Sending: SVO 1 1\n";
    rv = tty::ttyWrite("SVO 1 1\n",  m_fileDescrip, m_writeTimeout);
 
    if(rv < 0)
@@ -701,7 +702,7 @@ int pi335Ctrl::finishInit()
    mx::milliSleep(250);
    
    //turn on servo to axis 1 (green servo LED goes on 727) 
-   std::cerr << "Sending: SVO 2 1\n";
+   //std::cerr << "Sending: SVO 2 1\n";
    rv = tty::ttyWrite("SVO 2 1\n", m_fileDescrip, m_writeTimeout);
 
    if(rv < 0)
@@ -716,8 +717,10 @@ int pi335Ctrl::finishInit()
    
    //now safe for closed loop moves 
    //center axis 1 (to 17.5 mrad)
-   std::cerr << "Sending: MOV 1 17.5\n";
-   rv = tty::ttyWrite("MOV 1 17.5\n", m_fileDescrip, m_writeTimeout);
+   
+   std::string com = "MOV 1 " + std::to_string(m_homePos1) + "\n";
+   //std::cerr << "Sending: " << com;
+   rv = tty::ttyWrite(com, m_fileDescrip, m_writeTimeout);
 
    if(rv < 0)
    {
@@ -725,8 +728,9 @@ int pi335Ctrl::finishInit()
    }
    
    //center axis 1 (to 17.5 mrad)
-   std::cerr << "Sending: MOV 2 17.5\n";
-   rv = tty::ttyWrite("MOV 2 17.5\n",  m_fileDescrip, m_writeTimeout);
+   com = "MOV 2 " + std::to_string(m_homePos2) + "\n";
+   //std::cerr << "Sending: " << com;
+   rv = tty::ttyWrite(com,  m_fileDescrip, m_writeTimeout);
 
    if(rv < 0)
    {
@@ -742,7 +746,7 @@ int pi335Ctrl::releaseDM()
 {
    int rv;
    
-   std::cerr << "Sending: MOV 1 0\n";
+   //std::cerr << "Sending: MOV 1 0\n";
    rv = tty::ttyWrite("MOV 1 0\n", m_fileDescrip, m_writeTimeout);
 
    if(rv < 0)
@@ -750,7 +754,7 @@ int pi335Ctrl::releaseDM()
       log<software_error>( {__FILE__, __LINE__, rv, tty::ttyErrorString(rv)});
    }
    
-   std::cerr << "Sending: MOV 2 0\n";
+   //std::cerr << "Sending: MOV 2 0\n";
    rv = tty::ttyWrite("MOV 2 0\n",  m_fileDescrip, m_writeTimeout);
 
    if(rv < 0)
@@ -758,7 +762,7 @@ int pi335Ctrl::releaseDM()
       log<software_error>( {__FILE__, __LINE__, rv, tty::ttyErrorString(rv) } );
    }
    
-   std::cerr << "Sending: SVO 1 0\n";
+   //std::cerr << "Sending: SVO 1 0\n";
    rv = tty::ttyWrite("SVO 1 0\n", m_fileDescrip, m_writeTimeout);
 
    if(rv < 0)
@@ -766,7 +770,7 @@ int pi335Ctrl::releaseDM()
       log<software_error>( {__FILE__, __LINE__, rv, tty::ttyErrorString(rv)});
    }
    
-   std::cerr << "Sending: SVO 2 0\n";
+   //std::cerr << "Sending: SVO 2 0\n";
    rv = tty::ttyWrite("SVO 2 0\n",  m_fileDescrip, m_writeTimeout);
 
    if(rv < 0)
@@ -797,7 +801,7 @@ int pi335Ctrl::getCom( std::string & resp,
    
    sendcom += "\n";
 
-   std::cerr << "sending: " << sendcom;
+   //std::cerr << "sending: " << sendcom;
    int rv = tty::ttyWriteRead( resp, sendcom, "\n", false, m_fileDescrip, m_writeTimeout, m_readTimeout);
    if(rv < 0)
    {
@@ -805,7 +809,7 @@ int pi335Ctrl::getCom( std::string & resp,
       return -1;
    }
 
-   std::cerr << "response: " << resp << "\n";
+   //std::cerr << "response: " << resp << "\n";
    
    return 0;
 }
@@ -869,7 +873,7 @@ int pi335Ctrl::move_1( float absPos )
    
    std::string com = "MOV 1 " + std::to_string(absPos) + "\n";
    
-   std::cerr << "Sending: " << com;
+   //std::cerr << "Sending: " << com;
    rv = tty::ttyWrite(com, m_fileDescrip, m_writeTimeout);
 
    if(rv < 0)
@@ -892,7 +896,7 @@ int pi335Ctrl::move_2( float absPos )
    
    std::string com = "MOV 2 " + std::to_string(absPos) + "\n";
    
-   std::cerr << "Sending: " << com;
+   //std::cerr << "Sending: " << com;
    rv = tty::ttyWrite(com, m_fileDescrip, m_writeTimeout);
 
    if(rv < 0)
