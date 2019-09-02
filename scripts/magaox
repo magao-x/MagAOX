@@ -37,11 +37,26 @@ if [[ -z $MAGAOX_ROLE ]]; then
     exit 1
 fi
 
-set -uo pipefail
+set -euo pipefail
+
+# CentOS + devtoolset-7 aliases sudo, but breaks command line arguments for it,
+# so if we need those, we must use $_REAL_SUDO.
+if [[ -e /usr/bin/sudo ]]; then
+  _REAL_SUDO=/usr/bin/sudo
+elif [[ -e /bin/sudo ]]; then
+  _REAL_SUDO=/bin/sudo
+else
+  if [[ -z $(command -v sudo) ]]; then
+    echo "Can't find sudo!"
+    exit 1
+  else
+    _REAL_SUDO=$(which sudo)
+  fi
+fi
 
 function as_xsup() {
     if [ "$(whoami)" != xsup ]; then
-        su xsup -c '"$0" "$@"' -- "$@"
+        $_REAL_SUDO -u xsup -s -- "$@"
     else
         "$@"
     fi

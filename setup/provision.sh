@@ -209,7 +209,9 @@ if [[ -e $VENDOR_SOFTWARE_BUNDLE ]]; then
     done
     # Note that 'vm' is in the list for ease of testing the install_* scripts
     if [[ $MAGAOX_ROLE == RTC || $MAGAOX_ROLE == ICC || $MAGAOX_ROLE == vm ]]; then
-        sudo bash -l "$DIR/steps/install_alpao.sh"
+        if [[ $ID == centos ]]; then
+            sudo bash -l "$DIR/steps/install_alpao.sh"
+        fi
         sudo bash -l "$DIR/steps/install_andor.sh"
     fi
     if [[ $MAGAOX_ROLE == RTC || $MAGAOX_ROLE == vm ]]; then
