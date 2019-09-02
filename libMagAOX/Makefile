@@ -56,6 +56,8 @@ INCLUDEDEPS= app/MagAOXApp.hpp \
              tty/ttyIOUtils.hpp \
              tty/ttyUSB.hpp \
              tty/usbDevice.hpp \
+             tty/telnetConn.hpp \
+             tty/netSerial.hpp \
              modbus/modbus.hpp \
              modbus/modbus_exception.hpp
 

@@ -552,7 +552,7 @@ int tcsInterface::getTelData()
    m_telROI = atoi(tdat[0].c_str());
 
    //Parse the telguide string
-   char bit[2];
+   char bit[2] = {0};
    bit[1] = 0;
    bit[0] = tdat[1].c_str()[0];
    m_telTracking= atoi(bit);

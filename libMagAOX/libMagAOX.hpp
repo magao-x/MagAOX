@@ -44,6 +44,7 @@
 #include "tty/ttyUSB.hpp"
 #include "tty/usbDevice.hpp"
 #include "tty/telnetConn.hpp"
+#include "tty/netSerial.hpp"
 
 #include "modbus/modbus.hpp"
 #include "modbus/modbus_exception.hpp"
