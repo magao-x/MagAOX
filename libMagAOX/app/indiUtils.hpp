@@ -11,6 +11,8 @@
 #ifndef app_indiUtils_hpp
 #define app_indiUtils_hpp
 
+#include <limits>
+
 #include "../../INDI/libcommon/IndiProperty.hpp"
 #include "../../INDI/libcommon/IndiElement.hpp"
 

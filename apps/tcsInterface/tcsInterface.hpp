@@ -89,6 +89,19 @@ protected:
    pcf::IndiProperty m_indiP_catalog; ///< INDI Property for the catalog text information
    pcf::IndiProperty m_indiP_catdata; ///< INDI Property for the catalog data
    
+   double m_telSecZ {0};
+   double m_telEncZ {0};
+   double m_telSecX {0};
+   double m_telEncX {0};
+   double m_telSecY {0};
+   double m_telEncY {0};
+   double m_telSecH {0};
+   double m_telEncH {0};
+   double m_telSecV {0};
+   double m_telEncV {0};
+   
+   pcf::IndiProperty m_indiP_vaneend; ///< INDI Property for the vane end positions
+
 public:
    /// Default c'tor.
    tcsInterface();
@@ -143,6 +156,7 @@ public:
    int getTelPos();
    int getTelData();
    int getCatData();
+   int getVaneData();
    
    int updateINDI();
    
@@ -238,6 +252,34 @@ int tcsInterface::appStartup()
    
    registerIndiPropertyReadOnly(m_indiP_catdata);
    
+   
+   
+   createROIndiNumber( m_indiP_vaneend, "vaneend", "Vane End Data", "TCS");
+   indi::addNumberElement<double>( m_indiP_vaneend, "secz", std::numeric_limits<double>::lowest(), std::numeric_limits<double>::max(), 0, "%0.6f");
+   m_indiP_vaneend["secz"] = m_telSecZ;
+   indi::addNumberElement<double>( m_indiP_vaneend, "encz", std::numeric_limits<double>::lowest(), std::numeric_limits<double>::max(), 0, "%0.6f");
+   m_indiP_vaneend["encz"] = m_telEncZ;
+   indi::addNumberElement<double>( m_indiP_vaneend, "secx", std::numeric_limits<double>::lowest(), std::numeric_limits<double>::max(), 0, "%0.6f");
+   m_indiP_vaneend["secx"] = m_telSecX;
+   indi::addNumberElement<double>( m_indiP_vaneend, "encx", std::numeric_limits<double>::lowest(), std::numeric_limits<double>::max(), 0, "%0.6f");
+   m_indiP_vaneend["encx"] = m_telEncX;
+   indi::addNumberElement<double>( m_indiP_vaneend, "secy", std::numeric_limits<double>::lowest(), std::numeric_limits<double>::max(), 0, "%0.6f");
+   m_indiP_vaneend["secy"] = m_telSecY;
+   indi::addNumberElement<double>( m_indiP_vaneend, "ency", std::numeric_limits<double>::lowest(), std::numeric_limits<double>::max(), 0, "%0.6f");
+   m_indiP_vaneend["ency"] = m_telEncY;
+   indi::addNumberElement<double>( m_indiP_vaneend, "sech", std::numeric_limits<double>::lowest(), std::numeric_limits<double>::max(), 0, "%0.6f");
+   m_indiP_vaneend["sech"] = m_telSecH;
+   indi::addNumberElement<double>( m_indiP_vaneend, "ench", std::numeric_limits<double>::lowest(), std::numeric_limits<double>::max(), 0, "%0.6f");
+   m_indiP_vaneend["ench"] = m_telEncH;
+   indi::addNumberElement<double>( m_indiP_vaneend, "secv", std::numeric_limits<double>::lowest(), std::numeric_limits<double>::max(), 0, "%0.6f");
+   m_indiP_vaneend["secv"] = m_telSecV;
+   indi::addNumberElement<double>( m_indiP_vaneend, "encv", std::numeric_limits<double>::lowest(), std::numeric_limits<double>::max(), 0, "%0.6f");
+   m_indiP_vaneend["encv"] = m_telEncV;
+   
+   registerIndiPropertyReadOnly(m_indiP_vaneend);
+   
+   signal(SIGPIPE, SIG_IGN);
+   
    state(stateCodes::NOTCONNECTED);
    return 0;
 }
@@ -245,6 +287,20 @@ int tcsInterface::appStartup()
 inline
 int tcsInterface::appLogic()
 {
+   if(state() == stateCodes::ERROR)
+   {
+      int rv = m_sock.serialInit(m_deviceAddr.c_str(), m_devicePort);
+
+      if(rv == 0)
+      {
+         log<text_log>("In state ERROR, not due to loss of connection.  Can not go on.", logPrio::LOG_CRITICAL);
+         return -1;
+      }
+      
+      state(stateCodes::NOTCONNECTED);
+      return 0;
+   }
+   
    if( state() == stateCodes::NOTCONNECTED )
    {
       static int lastrv = 0; //Used to handle a change in error within the same state.  Make general?
@@ -292,28 +348,36 @@ int tcsInterface::appLogic()
       
       if(getTelPos() < 0)
       {
-         state(stateCodes::ERROR);
          log<text_log>("Error from getTelPos", logPrio::LOG_ERROR);
+         return 0; //app state will be set based on what the error was
       }
       
       if(getTelData() < 0)
       {
-         state(stateCodes::ERROR);
          log<text_log>("Error from getTelData", logPrio::LOG_ERROR);
+         return 0;
       }
       
       if(getCatData() < 0)
       {
-         state(stateCodes::ERROR);
          log<text_log>("Error from getTelData", logPrio::LOG_ERROR);
+         return 0;
+      }
+      
+      if(getVaneData() < 0)
+      {
+         log<text_log>("Error from getVaneData", logPrio::LOG_ERROR);
+         return 0;
       }
       
       if(updateINDI() < 0)
       {
-         state(stateCodes::ERROR);
          log<text_log>("Error from updateINDI", logPrio::LOG_ERROR);
+         return 0;
       }
    }
+   
+   
    
    return 0;
 }
@@ -467,6 +531,7 @@ int tcsInterface::getTelPos()
    
    if(getMagTelStatus( posstr, "telpos") < 0)
    {
+      state(stateCodes::NOTCONNECTED);
       log<text_log>("Error getting telescope position (telpos)", logPrio::LOG_ERROR);
       return -1;
    }
@@ -475,12 +540,14 @@ int tcsInterface::getTelPos()
 
    if(pdat[0] == "-1")
    {
+      state(stateCodes::ERROR);
       log<text_log>("Error getting telescope position (telpos): TCS returned -1", logPrio::LOG_ERROR);
       return -1;
    }
 
    if(pdat.size() != 6)
    {
+      state(stateCodes::ERROR);
       log<text_log>("Error getting telescope position (telpos): TCS response wrong size", logPrio::LOG_ERROR);
       return -1;
    }
@@ -530,6 +597,7 @@ int tcsInterface::getTelData()
 
    if(getMagTelStatus(xstr, "teldata") < 0)
    {
+      state(stateCodes::NOTCONNECTED);
       log<text_log>("Error getting telescope data (teldata)", logPrio::LOG_ERROR);
       return -1;
    }
@@ -538,12 +606,14 @@ int tcsInterface::getTelData()
 
    if(tdat[0] == "-1")
    {
+      state(stateCodes::ERROR);
       log<text_log>("Error getting telescope data (teldata): TCS returned -1", logPrio::LOG_ERROR);
       return -1;
    }
 
    if(tdat.size() != 10)
    {
+      state(stateCodes::ERROR);
       log<text_log>("[TCS] Error getting telescope data (teldata): TCS response wrong size", logPrio::LOG_ERROR);
       return -1;
    }
@@ -592,6 +662,7 @@ int tcsInterface::getCatData()
    
    if( getMagTelStatus(cstr, "catdata") < 0)
    {
+      state(stateCodes::NOTCONNECTED);
       log<text_log>("Error getting catalog data (catdata)", logPrio::LOG_ERROR);
       return -1;
    }
@@ -600,12 +671,14 @@ int tcsInterface::getCatData()
 
    if(cdat[0] == "-1")
    {
+      state(stateCodes::ERROR);
       log<text_log>("Error getting catalog data (catdata): TCS returned -1", logPrio::LOG_ERROR);
       return -1;
    }
 
    if(cdat.size() != 6)
    {
+      state(stateCodes::ERROR);
       log<text_log>("Error getting catalog data (catdata): TCS response wrong size", logPrio::LOG_ERROR);
       return -1;
    }
@@ -637,44 +710,229 @@ int tcsInterface::getCatData()
    return 0;
 }
 
+int tcsInterface::getVaneData()
+{
+   std::string xstr;
+   std::vector<std::string> vedat;
+
+   if(getMagTelStatus(xstr,"vedata") < 0)
+   {
+      state(stateCodes::NOTCONNECTED);
+      log<text_log>("Error getting telescope secondary positions (vedata)",logPrio::LOG_ERROR);
+      return -1;
+   }
+
+   vedat = parse_teldata(xstr);
+
+   if(vedat[0] == "-1")
+   {
+      state(stateCodes::ERROR);
+      log<text_log>("Error getting telescope secondary positions (vedata): TCS returned -1",logPrio::LOG_ERROR);
+      return -1;
+   }
+
+   if(vedat.size() != 10)
+   {
+      state(stateCodes::ERROR);
+      log<text_log>("Error getting telescope secondary positions (vedata): TCS response wrong size",logPrio::LOG_ERROR);
+      return -1;
+   }
+
+
+   m_telSecZ = strtod(vedat[0].c_str(),0);
+   m_telEncZ = strtod(vedat[1].c_str(),0);
+   m_telSecX = strtod(vedat[2].c_str(),0);
+   m_telEncX = strtod(vedat[3].c_str(),0);
+   m_telSecY = strtod(vedat[4].c_str(),0);
+   m_telEncY = strtod(vedat[5].c_str(),0);
+   m_telSecH = strtod(vedat[6].c_str(),0);
+   m_telEncH = strtod(vedat[7].c_str(),0);
+   m_telSecV = strtod(vedat[8].c_str(),0);
+   m_telEncV = strtod(vedat[9].c_str(),0);
+   return 0;
+}
+
 inline
 int tcsInterface::updateINDI()
 {
    
-   m_indiP_telpos["epoch"] = m_telEpoch;
-   m_indiP_telpos["ra"] = m_telRA;
-   m_indiP_telpos["dec"] = m_telDec;
-   m_indiP_telpos["el"] = m_telEl;
-   m_indiP_telpos["ha"] = m_telHA;
-   m_indiP_telpos["am"] = m_telAM;
-   m_indiP_telpos["rotoff"] = m_telRotOff;
-   m_indiP_telpos.setState(INDI_OK);
-   m_indiDriver->sendSetProperty (m_indiP_telpos);
+   try
+   {
+      m_indiP_telpos["epoch"] = m_telEpoch;
+      m_indiP_telpos["ra"] = m_telRA;
+      m_indiP_telpos["dec"] = m_telDec;
+      m_indiP_telpos["el"] = m_telEl;
+      m_indiP_telpos["ha"] = m_telHA;
+      m_indiP_telpos["am"] = m_telAM;
+      m_indiP_telpos["rotoff"] = m_telRotOff;
+   }
+   catch(...)
+   {
+      log<software_error>({__FILE__,__LINE__,"INDI library exception"});
+      return -1;
+   }
    
-   m_indiP_teldata["roi"] = m_telROI;
-   m_indiP_teldata["tracking"] = m_telTracking;
-   m_indiP_teldata["guiding"] = m_telGuiding;
-   m_indiP_teldata["slewing"] = m_telSlewing;
-   m_indiP_teldata["guider_moving"] = m_telGuiderMoving;
-   m_indiP_teldata["az"] = m_telAz;
-   m_indiP_teldata["zd"] = m_telZd;
-   m_indiP_teldata["pa"] = m_telPA;
-   m_indiP_teldata["dome_az"] = m_telDomeAz;
-   m_indiP_teldata["dome_stat"] = m_telDomeStat;
-   m_indiP_teldata.setState(INDI_OK);
-   m_indiDriver->sendSetProperty (m_indiP_teldata);
+   try
+   {
+      m_indiP_telpos.setState(INDI_OK);
+   }
+   catch(...)
+   {
+      log<software_error>({__FILE__,__LINE__,"INDI library exception"});
+      return -1;
+   }
    
-   m_indiP_catalog["object"] = m_catObj;
-   m_indiP_catalog["rotmode"] = m_catRo;
-   m_indiP_catalog.setState(INDI_OK);
-   m_indiDriver->sendSetProperty (m_indiP_catalog);
- 
-   m_indiP_catdata["ra"] = m_catRA;
-   m_indiP_catdata["dec"] = m_catDec;
-   m_indiP_catdata["epoch"] = m_catEp;
-   m_indiP_catdata["rotoff"] = m_catRo;
-   m_indiP_catdata.setState(INDI_OK);
-   m_indiDriver->sendSetProperty (m_indiP_catdata);
+   try
+   {
+      m_indiDriver->sendSetProperty (m_indiP_telpos);
+   }
+   catch(...)
+   {
+      log<software_error>({__FILE__,__LINE__,"INDI library exception"});
+      return -1;
+   }
+   
+   try
+   {
+      m_indiP_teldata["roi"] = m_telROI;
+      m_indiP_teldata["tracking"] = m_telTracking;
+      m_indiP_teldata["guiding"] = m_telGuiding;
+      m_indiP_teldata["slewing"] = m_telSlewing;
+      m_indiP_teldata["guider_moving"] = m_telGuiderMoving;
+      m_indiP_teldata["az"] = m_telAz;
+      m_indiP_teldata["zd"] = m_telZd;
+      m_indiP_teldata["pa"] = m_telPA;
+      m_indiP_teldata["dome_az"] = m_telDomeAz;
+      m_indiP_teldata["dome_stat"] = m_telDomeStat;
+   }
+   catch(...)
+   {
+      log<software_error>({__FILE__,__LINE__,"INDI library exception"});
+      return -1;
+   }
+   
+   try
+   {
+      m_indiP_teldata.setState(INDI_OK);
+   }
+   catch(...)
+   {
+      log<software_error>({__FILE__,__LINE__,"INDI library exception"});
+      return -1;
+   }
+   
+   try
+   {
+      m_indiDriver->sendSetProperty (m_indiP_teldata);
+   }
+   catch(...)
+   {
+      log<software_error>({__FILE__,__LINE__,"INDI library exception"});
+      return -1;
+   }
+   
+   try
+   {
+      m_indiP_catalog["object"] = m_catObj;
+      m_indiP_catalog["rotmode"] = m_catRo;
+   }
+   catch(...)
+   {
+      log<software_error>({__FILE__,__LINE__,"INDI library exception"});
+      return -1;
+   }
+   
+   try
+   {
+      m_indiP_catalog.setState(INDI_OK);
+   }
+   catch(...)
+   {
+      log<software_error>({__FILE__,__LINE__,"INDI library exception"});
+      return -1;
+   }
+   
+   try
+   {
+      m_indiDriver->sendSetProperty (m_indiP_catalog);
+   }
+   catch(...)
+   {
+      log<software_error>({__FILE__,__LINE__,"INDI library exception"});
+      return -1;
+   }
+   
+   try
+   {
+      m_indiP_catdata["ra"] = m_catRA;
+      m_indiP_catdata["dec"] = m_catDec;
+      m_indiP_catdata["epoch"] = m_catEp;
+      m_indiP_catdata["rotoff"] = m_catRo;
+   }
+   catch(...)
+   {
+      log<software_error>({__FILE__,__LINE__,"INDI library exception"});
+      return -1;
+   }
+   
+   try
+   {
+      m_indiP_catdata.setState(INDI_OK);
+   }
+   catch(...)
+   {
+      log<software_error>({__FILE__,__LINE__,"INDI library exception"});
+      return -1;
+   }
+   
+   try
+   {
+      m_indiDriver->sendSetProperty (m_indiP_catdata);
+   }
+   catch(...)
+   {
+      log<software_error>({__FILE__,__LINE__,"INDI library exception"});
+      return -1;
+   }
+   
+   try
+   {
+      m_indiP_vaneend["secz"] = m_telSecZ;
+      m_indiP_vaneend["encz"] = m_telEncZ;
+      m_indiP_vaneend["secx"] = m_telSecX;
+      m_indiP_vaneend["encx"] = m_telEncX;
+      m_indiP_vaneend["secy"] = m_telSecY;
+      m_indiP_vaneend["ency"] = m_telEncY;
+      m_indiP_vaneend["sech"] = m_telSecH;
+      m_indiP_vaneend["ench"] = m_telEncH;
+      m_indiP_vaneend["secv"] = m_telSecV;
+      m_indiP_vaneend["encv"] = m_telEncV;
+   }
+   catch(...)
+   {
+      log<software_error>({__FILE__,__LINE__,"INDI library exception"});
+      return -1;
+   }
+   
+   try
+   {
+      m_indiP_vaneend.setState(INDI_OK);
+   }
+   catch(...)
+   {
+      log<software_error>({__FILE__,__LINE__,"INDI library exception"});
+      return -1;
+   }
+   
+   try
+   {
+      m_indiDriver->sendSetProperty (m_indiP_vaneend);
+   }
+   catch(...)
+   {
+      log<software_error>({__FILE__,__LINE__,"INDI library exception"});
+      return -1;
+   }
    
    return 0;
 }
