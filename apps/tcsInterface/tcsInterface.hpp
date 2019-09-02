@@ -30,7 +30,7 @@ namespace MagAOX
 namespace app
 {
 
-/// The MagAO-X xxxxxxxx
+/// The MagAO-X Clay Telescope TCS Interface
 /** 
   * \ingroup tcsInterface
   */
