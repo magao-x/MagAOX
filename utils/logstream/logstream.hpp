@@ -47,9 +47,8 @@ public:
       logstream * m_lstr {nullptr};            ///< a pointer to a logstream instance (normally this)
       
       ///C'tor to create the thread object
-      s_logThread()
+      s_logThread() : m_thread {std::shared_ptr<std::thread>(new std::thread)}
       {
-         m_thread = std::shared_ptr<std::thread>(new std::thread);
       }      
       
       s_logThread( const s_logThread & cplt ) : m_appName{cplt.m_appName}, m_thread {cplt.m_thread}, m_lstr {cplt.m_lstr}

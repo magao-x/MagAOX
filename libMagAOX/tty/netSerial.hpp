@@ -23,6 +23,12 @@ namespace MagAOX
 namespace tty
 {
 
+/// Manage a connectio to a serial device over a network 
+/**
+  *
+  * \todo document this, including methods
+  * \todo add errors to ttyErrors
+  */ 
 struct netSerial
 {
    
