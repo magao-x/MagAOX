@@ -69,11 +69,11 @@ protected:
    
    std::vector<std::string> validStateCodes{};
    
-   double m_position;
+   double m_position {0};
    
-   double m_target;
+   double m_target {0};
 
-   bool m_wasHoming;
+   bool m_wasHoming {0};
    
    
 public:
@@ -371,8 +371,64 @@ int smc100ccCtrl::appLogic()
    
    if(axState[0] == '0') 
    {
+      std::cerr << "Axis state: " << axState[0] << " " << axState[1] << "\n";
       state(stateCodes::NOTHOMED); //This always means this.
    }
+   else if (axState[0] == '1' && axState[1] == '0')
+   {
+      //Need to download stage info
+      log<text_log>("getting stage information");
+      std::string com;
+      if(makeCom(com, "PW1") < 0)
+      {
+         log<software_error>({__FILE__, __LINE__,"Error making command PW1" });
+         return 0;
+      }
+   
+      int rv = MagAOX::tty::ttyWrite( com, m_fileDescrip, m_writeTimeout); 
+      if (rv != TTY_E_NOERROR)
+      {
+         if(m_powerTargetState == 0) return -1;
+         log<software_error>({__FILE__, __LINE__,MagAOX::tty::ttyErrorString(rv)});
+         return -1;
+      } 
+      
+      sleep(5);
+      if(makeCom(com, "ZX2") < 0)
+      {
+         log<software_error>({__FILE__, __LINE__,"Error making command ZX2" });
+         return 0;
+      }
+   
+      rv = MagAOX::tty::ttyWrite( com, m_fileDescrip, m_writeTimeout); 
+      if (rv != TTY_E_NOERROR)
+      {
+         if(m_powerTargetState == 0) return -1;
+         log<software_error>({__FILE__, __LINE__,MagAOX::tty::ttyErrorString(rv)});
+         return -1;
+      }
+      
+      sleep(5);
+      if(makeCom(com, "PW0") < 0)
+      {
+         log<software_error>({__FILE__, __LINE__,"Error making command PW0" });
+         return 0;
+      }
+   
+      rv = MagAOX::tty::ttyWrite( com, m_fileDescrip, m_writeTimeout); 
+      if (rv != TTY_E_NOERROR)
+      {
+         if(m_powerTargetState == 0) return -1;
+         log<software_error>({__FILE__, __LINE__,MagAOX::tty::ttyErrorString(rv)});
+         return -1;
+      }
+      
+      sleep(5);
+      log<text_log>("stage information loaded");
+      return 0;
+      
+   }
+   
    else if (axState[0] == '1' && (axState[1] == 'E' || axState[1] == 'F'))
    {
       state(stateCodes::HOMING);
@@ -398,12 +454,29 @@ int smc100ccCtrl::appLogic()
          state(stateCodes::READY);
       }
    }
+   else if (axState[0] == '3')
+   {
+      log<text_log>("Stage disabled.  Enabling");
+      std::string com;
+      if(makeCom(com, "MM1") < 0)
+      {
+         log<software_error>({__FILE__, __LINE__,"Error making command PW1" });
+         return 0;
+      }
+      int rv = MagAOX::tty::ttyWrite( com, m_fileDescrip, m_writeTimeout); 
+      if (rv != TTY_E_NOERROR)
+      {
+         if(m_powerTargetState == 0) return -1;
+         log<software_error>({__FILE__, __LINE__,MagAOX::tty::ttyErrorString(rv)});
+         return -1;
+      } 
+   }
    else
    {
       sleep(1);
       if(m_powerState == 0) return 0;
       
-      log<software_error>({__FILE__,__LINE__, "Invalid state for axis " + std::to_string(1)});
+      log<software_error>({__FILE__,__LINE__, "Invalid state: " + axState});
       
       state(stateCodes::ERROR);
    }
@@ -522,6 +595,7 @@ int smc100ccCtrl::appLogic()
       {
          log<text_log>("Error NOT due to loss of USB connection.  I can't fix it myself.", logPrio::LOG_CRITICAL);
       }
+      return -1;
    }
 
    return 0;
@@ -658,6 +732,7 @@ int smc100ccCtrl::getCtrlState( std::string &state )
       return -1;
    } 
    
+   std::cerr << "TS Response: " << resp << "\n";
    int raxis;
    std::string rcom, rval;
    
