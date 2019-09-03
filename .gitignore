@@ -82,6 +82,7 @@ apps/sysMonitor/sysMonitor
 
 #t
 apps/t2wOffloader/t2wOffloader
+apps/timeSeriesSimulator/timeSeriesSimulator
 apps/tcsInterface/tcsInterface
 apps/trippLitePDU/trippLitePDU
 apps/trippLitePDU/tests/
