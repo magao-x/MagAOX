@@ -274,12 +274,14 @@ $MAYBE_SUDO bash -l "$DIR/steps/install_milkzmq.sh"
 # By separating the real build into another step, we can cache the slow provisioning steps
 # and reuse them on subsequent runs.
 if [[ $MAGAOX_ROLE != ci ]]; then
-    $MAYBE_SUDO bash -l "$DIR/steps/install_MagAOX.sh" $MAGAOX_ROLE
+    $MAYBE_SUDO bash -l "$DIR/steps/install_MagAOX.sh"
 fi
 
 log_success "Provisioning complete"
 if [[ $MAGAOX_ROLE == vm ]]; then
+    set +ue
     source /etc/profile.d/*.sh
+    set -ue
     magaox startup
 else
     log_info "You'll probably want to run"

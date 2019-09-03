@@ -13,22 +13,26 @@ function log_info() {
 }
 if [[ -z $1 ]]; then
     log_info "Usage:"
-    log_info "    magaox status - show status and last few log lines for each process"
+    log_info "    magaox status [PROCNAME] - show status and last few log lines for each process (or just PROCNAME)"
     log_info "    magaox inspect PROCNAME - connect to the tmux session for PROCNAME"
-    log_info "    magaox startup - start all processes in /opt/MagAOX/config/proclist_${MAGAOX_ROLE}.txt"
-    log_info "    magaox shutdown - show status and last few log lines for each process"
+    log_info "    magaox startup [PROCNAME] - start all processes in /opt/MagAOX/config/proclist_${MAGAOX_ROLE}.txt (or just PROCNAME)"
+    log_info "    magaox shutdown [PROCNAME] - show status and last few log lines for each process (or just PROCNAME)"
+    log_info "    magaox restart [PROCNAME] - shutdown then startup each process (or just PROCNAME)"
     exit 1
 else
     case $1 in
-        status|startup|shutdown)
+        status|startup|shutdown|restart|inspect)
             action=$1
-            ;;
-        inspect)
-            action=$1
-            procname_to_inspect=$2
+            if [[ ! -z $2 ]]; then
+                procname_of_interest=$2
+                procname_provided=1
+            else
+                procname_of_interest=
+                procname_provided=0
+            fi
             ;;
         *)
-            echo "Argument must be status, inspect, startup, or shutdown."
+            echo "Argument must be status, inspect, startup, shutdown, or restart."
             exit 1
     esac
 fi
@@ -114,6 +118,13 @@ function startup() {
     log_info "Created tmux session '$procname'"
     as_xsup tmux send-keys -t $procname "$command" Enter
     log_success "Executed in $procname session: $command"
+    if [[ $appname == xindiserver ]]; then
+        # Why? Working theory: xindiserver has to set up and/or drain all
+        # FIFOs before the xapps start. Otherwise, (some) drivers fail to start (sometimes)
+        # and (sometimes) xindiserver dies without explanation.
+        log_info "Waiting 5 seconds for xindiserver..."
+        sleep 5
+    fi
 }
 
 function shutdown() {
@@ -155,17 +166,21 @@ case $action in
             exit 1
         fi
         grep -v '^#' < $proclist | while read -r procname appname; do
-            $action $procname $appname
-            if [[ $appname == xindiserver ]]; then
-                # Why? Working theory: xindiserver has to set up and/or drain all
-                # FIFOs before the xapps start. Otherwise, (some) drivers fail to start (sometimes)
-                # and (sometimes) xindiserver dies without explanation.
-                sleep 5
+            if [[ $procname_provided == 0 || ( $procname_provided == 1 && $procname == $procname_of_interest ) ]]; then
+                $action $procname $appname
             fi
         done
         ;;
+    restart)
+        bash $0 shutdown $procname_of_interest
+        bash $0 startup $procname_of_interest
+        ;;
     inspect)
-        inspect_one_process $procname_to_inspect
+        if [[ $procname_provided == 1 ]]; then
+            inspect_one_process $procname_of_interest
+        else
+            log_error "Must provide procname as second argument"
+        fi
         ;;
     *)
         echo "Should never match! See validation above."

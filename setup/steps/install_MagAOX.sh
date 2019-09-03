@@ -32,6 +32,7 @@ clone_or_update_and_cd calib
 
 echo "Building flatlogs"
 cd /opt/MagAOX/source/MagAOX/flatlogs/src
+make clean
 make
 make install
 echo "Building MagAOX"

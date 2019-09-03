@@ -53,7 +53,6 @@ protected:
   // <device>.function.square switch
   // <device>.function.constant switch
   // <device>.duty_cycle.time number
-  // <device>.duty_cycle.frequency number
   // <device>.duty_cycle.amplitude number
   // <device>.simsensor.value number
   enum class SimFunction
@@ -142,50 +141,23 @@ int timeSeriesSimulator::appStartup()
                           pcf::IndiProperty::OneOfMany,
                           INDI_NEWCALLBACK(function));
   function.add(pcf::IndiElement("sin"));
-  function["sin"].set<pcf::IndiElement::SwitchStateType>(pcf::IndiElement::SwitchStateType::On);
+  function["sin"].setSwitchState(pcf::IndiElement::SwitchStateType::On);
   function.add(pcf::IndiElement("cos"));
-  function["sin"].set<pcf::IndiElement::SwitchStateType>(pcf::IndiElement::SwitchStateType::Off);
+  function["cos"].setSwitchState(pcf::IndiElement::SwitchStateType::Off);
   function.add(pcf::IndiElement("square"));
-  function["sin"].set<pcf::IndiElement::SwitchStateType>(pcf::IndiElement::SwitchStateType::Off);
+  function["square"].setSwitchState(pcf::IndiElement::SwitchStateType::Off);
   function.add(pcf::IndiElement("constant"));
-  function["sin"].set<pcf::IndiElement::SwitchStateType>(pcf::IndiElement::SwitchStateType::Off);
+  function["constant"].setSwitchState(pcf::IndiElement::SwitchStateType::Off);
   REG_INDI_NEWPROP_NOCB(simsensor, "simsensor", pcf::IndiProperty::Number);
   simsensor.add(pcf::IndiElement("value"));
-
-  // auto current_time = std::chrono::system_clock::now();
-  // auto duration_in_seconds = std::chrono::duration<double>(current_time.time_since_epoch());
-
-  // startTimeSec = duration_in_seconds.count();
   startTimeSec = mx::get_curr_time();
-  // updateVals();
+  updateVals();
   return 0;
 }
 
 int timeSeriesSimulator::appLogic()
 {
-  if (!m_indiDriver)
-    return 0;
-  // auto current_time = std::chrono::system_clock::now();
-  // auto duration_in_seconds = std::chrono::duration<double>(current_time.time_since_epoch());
-  // double elapsedSeconds = duration_in_seconds.count() - startTimeSec;
-  double elapsedSeconds = mx::get_curr_time() - startTimeSec;
-  switch (myFunction)
-  {
-  case SimFunction::sin:
-    simsensor["value"] = sin(elapsedSeconds);
-    break;
-  case SimFunction::cos:
-    simsensor["value"] = cos(elapsedSeconds);
-    break;
-  case SimFunction::constant:
-    simsensor["value"] = amplitude;
-    break;
-  case SimFunction::square:
-    simsensor["value"] = amplitude * ((int)(elapsedSeconds / time) % 2);
-    break;
-  default:
-    break;
-  }
+  updateVals();
 
   return 0;
 }
@@ -204,9 +176,12 @@ INDI_NEWCALLBACK_DEFN(timeSeriesSimulator, function)
     auto updatedSwitches = ipRecv.getElements();
     for (auto fname : SimFunctionNames)
     {
-      if (updatedSwitches.count(fname)) {
+      if (updatedSwitches.count(fname))
+      {
         function[fname] = ipRecv[fname].getSwitchState();
-      } else {
+      }
+      else
+      {
         function[fname] = pcf::IndiElement::SwitchStateType::Off;
         std::cerr << "Turning" << fname << " off" << std::endl;
       }
@@ -224,6 +199,28 @@ INDI_NEWCALLBACK_DEFN(timeSeriesSimulator, function)
 
 int timeSeriesSimulator::updateVals()
 {
+  double elapsedSeconds = mx::get_curr_time() - startTimeSec;
+  std::cerr << "Updating at t =" << elapsedSeconds << std::endl;
+  switch (myFunction)
+  {
+  case SimFunction::sin:
+    simsensor["value"] = sin(elapsedSeconds);
+    break;
+  case SimFunction::cos:
+    simsensor["value"] = cos(elapsedSeconds);
+    break;
+  case SimFunction::constant:
+    simsensor["value"] = amplitude;
+    break;
+  case SimFunction::square:
+    simsensor["value"] = amplitude * ((int)(elapsedSeconds / time) % 2);
+    break;
+  default:
+    break;
+  }
+  if (m_indiDriver) {
+    m_indiDriver->sendSetProperty(simsensor);
+  }
   return 0;
 }
 
