@@ -59,12 +59,7 @@ endif
 utils_to_build = logdump \
                  cursesINDI
 
-scripts_to_install = \
-	magaox_procstart.sh \
-	magaox_startup.sh \
-	magaox_status.sh \
-	magaox_shutdown.sh \
-	magaox
+scripts_to_install = magaox
 
 all: indi_all libs_all apps_all utils_all
 
