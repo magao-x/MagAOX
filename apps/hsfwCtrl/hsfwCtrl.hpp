@@ -66,7 +66,7 @@ protected:
 
    hsfw_wheel* m_wheel {nullptr};
    
-   double m_pos;
+   double m_pos {0};
    
    ///@}
 

@@ -418,10 +418,9 @@ int bmcCtrl::commandDM(void * curr_src)
    // if every actuator is addressable.
    // Loop over addressable only?
    double mean = 0;
-   int address;
    for (uint32_t idx = 0; idx < m_nbAct; ++idx)
    {
-     address = m_actuator_mapping[idx];
+     int address = m_actuator_mapping[idx];
      if(address == -1)
      {
         m_dminputs[idx] = 0.; // addressable but ignored actuators set to 0
@@ -442,11 +441,11 @@ int bmcCtrl::commandDM(void * curr_src)
       //m_dminputs[idx] -= mean - 0.5;
       if (m_dminputs[idx] > 1)
       {
-         printf("Actuator %d saturated!\n", idx + 1);
+         printf("Actuator %u saturated!\n", idx + 1);
          m_dminputs[idx] = 1;
       } else if (m_dminputs[idx] < 0)
       {
-         printf("Actuator %d saturated!\n", idx + 1);
+         printf("Actuator %u saturated!\n", idx + 1);
          m_dminputs[idx] = 0;
       }
       m_dminputs[idx] = sqrt(m_dminputs[idx]);

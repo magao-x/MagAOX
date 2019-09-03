@@ -129,6 +129,12 @@ else
     exit 1
 fi
 
+# Configure hostname aliases and time synchronization
+if [[ $MAGAOX_ROLE == AOC || $MAGAOX_ROLE == ICC || $MAGAOX_ROLE == RTC ]]; then
+    sudo bash -l "$DIR/configure_etc_hosts.sh"
+    sudo bash -l "$DIR/configure_chrony.sh"
+fi
+
 # The VM and CI provisioning doesn't run setup_users_and_groups.sh
 # separately as in the instrument instructions; we have to run it
 if [[ $MAGAOX_ROLE == vm || $MAGAOX_ROLE == ci ]]; then
@@ -203,7 +209,9 @@ if [[ -e $VENDOR_SOFTWARE_BUNDLE ]]; then
     done
     # Note that 'vm' is in the list for ease of testing the install_* scripts
     if [[ $MAGAOX_ROLE == RTC || $MAGAOX_ROLE == ICC || $MAGAOX_ROLE == vm ]]; then
-        sudo bash -l "$DIR/steps/install_alpao.sh"
+        if [[ $ID == centos ]]; then
+            sudo bash -l "$DIR/steps/install_alpao.sh"
+        fi
         sudo bash -l "$DIR/steps/install_andor.sh"
     fi
     if [[ $MAGAOX_ROLE == RTC || $MAGAOX_ROLE == vm ]]; then
@@ -270,6 +278,11 @@ if [[ $MAGAOX_ROLE != ci ]]; then
 fi
 
 log_success "Provisioning complete"
-log_info "You'll probably want to run"
-log_info "    source /etc/profile.d/*.sh"
-log_info "to get all the new environment variables set."
+if [[ $MAGAOX_ROLE == vm ]]; then
+    source /etc/profile.d/*.sh
+    magaox startup
+else
+    log_info "You'll probably want to run"
+    log_info "    source /etc/profile.d/*.sh"
+    log_info "to get all the new environment variables set."
+fi

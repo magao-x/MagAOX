@@ -10,9 +10,15 @@ if [[ ! -d $MAGMA_FOLDER ]]; then
 fi
 cd $MAGMA_FOLDER
 cp -n make.inc-examples/make.inc.mkl-gcc ./make.inc
-# Limit target architecture to Pascal to save some compilation time
-if ! grep "GPU_TARGET = Pascal" make.inc; then
-  echo "GPU_TARGET = Pascal" >> make.inc
+# Limit target architecture to Pascal (1080Ti) and Volta (2080Ti) to save some compilation time
+if [[ $MAGAOX_ROLE == RTC || $MAGAOX_ROLE == ICC ]]; then
+  if ! grep "GPU_TARGET = Pascal Volta" make.inc; then
+    echo "GPU_TARGET = Pascal Volta" >> make.inc
+  fi
+elif [[ $MAGAOX_ROLE == AOC || $MAGAOX_ROLE == ci ]]; then
+  if ! grep "GPU_TARGET = Pascal" make.inc; then
+    echo "GPU_TARGET = Pascal" >> make.inc
+  fi
 fi
 make -j 32
 make install
