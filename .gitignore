@@ -81,6 +81,7 @@ apps/streamWriter/streamWriter
 apps/sysMonitor/sysMonitor
 
 #t
+apps/t2wOffloader/t2wOffloader
 apps/tcsInterface/tcsInterface
 apps/trippLitePDU/trippLitePDU
 apps/trippLitePDU/tests/

@@ -520,7 +520,7 @@ void shmimMonitor<derivedT, specificT>::smThreadExec()
       
       if( derived().allocate( specificT()) < 0)
       {
-         derivedT::template log<software_critical>({__FILE__,__LINE__});
+         derivedT::template log<software_error>({__FILE__,__LINE__, "allocation failed"});
          break;
       }
       
