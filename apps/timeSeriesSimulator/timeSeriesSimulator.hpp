@@ -8,7 +8,6 @@
 #define timeSeriesSimulator_hpp
 
 #include <cmath>
-#include <ctime>
 #include <iostream>
 #include "../../libMagAOX/libMagAOX.hpp" //Note this is included on command line to trigger pch
 #include "../../magaox_git_version.h"
@@ -107,6 +106,7 @@ public:
   virtual int appShutdown();
 
   INDI_NEWCALLBACK_DECL(timeSeriesSimulator, function);
+  INDI_NEWCALLBACK_DECL(timeSeriesSimulator, duty_cycle);
   int updateVals();
 };
 
@@ -148,12 +148,16 @@ int timeSeriesSimulator::appStartup()
   function["square"].setSwitchState(pcf::IndiElement::SwitchStateType::Off);
   function.add(pcf::IndiElement("constant"));
   function["constant"].setSwitchState(pcf::IndiElement::SwitchStateType::Off);
-  m_indiDriver->sendSetProperty(function);
 
   REG_INDI_NEWPROP_NOCB(simsensor, "simsensor", pcf::IndiProperty::Number);
   simsensor.add(pcf::IndiElement("value"));
   simsensor["value"] = 0.0;
-  m_indiDriver->sendSetProperty(simsensor);
+
+  REG_INDI_NEWPROP(duty_cycle, "duty_cycle", pcf::IndiProperty::Number);
+  duty_cycle.add(pcf::IndiElement("time"));
+  duty_cycle["time"] = time;
+  duty_cycle.add(pcf::IndiElement("amplitude"));
+  duty_cycle["amplitude"] = amplitude;
 
   startTimeSec = mx::get_curr_time();
   updateVals();
@@ -172,10 +176,28 @@ int timeSeriesSimulator::appShutdown()
   return 0;
 }
 
+INDI_NEWCALLBACK_DEFN(timeSeriesSimulator, duty_cycle)
+(const pcf::IndiProperty &ipRecv)
+{
+  std::cerr << "duty_cycle callback" << std::endl;
+  if (ipRecv.getName() == duty_cycle.getName())
+  {
+    duty_cycle["time"] = ipRecv["time"].get<double>();
+    std::cerr << "duty_cycle.time = " << ipRecv["time"].get<double>() << std::endl;
+    duty_cycle["amplitude"] = ipRecv["amplitude"].get<double>();
+    std::cerr << "duty_cycle.amplitude = " << ipRecv["amplitude"].get<double>() << std::endl;
+
+    duty_cycle.setState(pcf::IndiProperty::Ok);
+    m_indiDriver->sendSetProperty(duty_cycle);
+    updateVals();
+    return 0;
+  }
+  return -1;
+}
+
 INDI_NEWCALLBACK_DEFN(timeSeriesSimulator, function)
 (const pcf::IndiProperty &ipRecv)
 {
-
   if (ipRecv.getName() == function.getName())
   {
     auto updatedSwitches = ipRecv.getElements();
