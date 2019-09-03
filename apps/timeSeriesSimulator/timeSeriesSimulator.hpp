@@ -29,6 +29,7 @@ namespace MagAOX
 {
 namespace app
 {
+  const double PI = 3.141592653589793238463;
 
 /// The MagAO-X xxxxxxxx
 /**
@@ -64,7 +65,7 @@ protected:
   SimFunction myFunction = SimFunction::sin;
   std::vector<std::string> SimFunctionNames = {"sin", "cos", "square", "constant"};
   double amplitude = 1.0;
-  double time = 1.0;
+  double time = 5.0;
   // double frequency = 1.0;
   double startTimeSec;
 
@@ -179,13 +180,18 @@ int timeSeriesSimulator::appShutdown()
 INDI_NEWCALLBACK_DEFN(timeSeriesSimulator, duty_cycle)
 (const pcf::IndiProperty &ipRecv)
 {
-  std::cerr << "duty_cycle callback" << std::endl;
   if (ipRecv.getName() == duty_cycle.getName())
   {
-    duty_cycle["time"] = ipRecv["time"].get<double>();
-    std::cerr << "duty_cycle.time = " << ipRecv["time"].get<double>() << std::endl;
-    duty_cycle["amplitude"] = ipRecv["amplitude"].get<double>();
-    std::cerr << "duty_cycle.amplitude = " << ipRecv["amplitude"].get<double>() << std::endl;
+    if (ipRecv.find("time"))
+    {
+      duty_cycle["time"] = ipRecv["time"].get<double>();
+      time = ipRecv["time"].get<double>();
+    }
+    if (ipRecv.find("amplitude"))
+    {
+      duty_cycle["amplitude"] = ipRecv["amplitude"].get<double>();
+      amplitude = ipRecv["amplitude"].get<double>();
+    }
 
     duty_cycle.setState(pcf::IndiProperty::Ok);
     m_indiDriver->sendSetProperty(duty_cycle);
@@ -238,10 +244,10 @@ int timeSeriesSimulator::updateVals()
   switch (myFunction)
   {
   case SimFunction::sin:
-    simsensor["value"] = sin(elapsedSeconds);
+    simsensor["value"] = amplitude * sin(elapsedSeconds * ((2 * PI) / time));
     break;
   case SimFunction::cos:
-    simsensor["value"] = cos(elapsedSeconds);
+    simsensor["value"] = amplitude * cos(elapsedSeconds * ((2 * PI) / time));
     break;
   case SimFunction::constant:
     simsensor["value"] = amplitude;
