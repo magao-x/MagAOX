@@ -148,8 +148,13 @@ int timeSeriesSimulator::appStartup()
   function["square"].setSwitchState(pcf::IndiElement::SwitchStateType::Off);
   function.add(pcf::IndiElement("constant"));
   function["constant"].setSwitchState(pcf::IndiElement::SwitchStateType::Off);
+  m_indiDriver->sendSetProperty(function);
+
   REG_INDI_NEWPROP_NOCB(simsensor, "simsensor", pcf::IndiProperty::Number);
   simsensor.add(pcf::IndiElement("value"));
+  simsensor["value"] = 0.0;
+  m_indiDriver->sendSetProperty(simsensor);
+
   startTimeSec = mx::get_curr_time();
   updateVals();
   return 0;
@@ -176,9 +181,16 @@ INDI_NEWCALLBACK_DEFN(timeSeriesSimulator, function)
     auto updatedSwitches = ipRecv.getElements();
     for (auto fname : SimFunctionNames)
     {
+      // Implements SwitchRule OneOfMany behavior such that you can only
+      // switch things On, not Off. Compliant newSwitch messages will only
+      // contain a value for *one* switch element, so we switch that one On
+      // (if requested to be, otherwise ignore) and set all others to Off.
       if (updatedSwitches.count(fname))
       {
-        function[fname] = ipRecv[fname].getSwitchState();
+        if (ipRecv[fname].getSwitchState() == pcf::IndiElement::SwitchStateType::On)
+        {
+          function[fname] = pcf::IndiElement::SwitchStateType::On;
+        }
       }
       else
       {
