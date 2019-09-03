@@ -156,6 +156,12 @@ case $action in
         fi
         grep -v '^#' < $proclist | while read -r procname appname; do
             $action $procname $appname
+            if [[ $appname == xindiserver ]]; then
+                # Why? Working theory: xindiserver has to set up and/or drain all
+                # FIFOs before the xapps start. Otherwise, (some) drivers fail to start (sometimes)
+                # and (sometimes) xindiserver dies without explanation.
+                sleep 5
+            fi
         done
         ;;
     inspect)
