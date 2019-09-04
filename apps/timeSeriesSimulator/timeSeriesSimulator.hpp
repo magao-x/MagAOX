@@ -9,6 +9,7 @@
 
 #include <cmath>
 #include <iostream>
+#include <sstream>
 #include "../../libMagAOX/libMagAOX.hpp" //Note this is included on command line to trigger pch
 #include "../../magaox_git_version.h"
 
@@ -29,7 +30,6 @@ namespace MagAOX
 {
 namespace app
 {
-  const double PI = 3.141592653589793238463;
 
 /// The MagAO-X xxxxxxxx
 /**
@@ -46,6 +46,8 @@ protected:
   //here add parameters which will be config-able at runtime
 
   ///@}
+  const double PI = 3.141592653589793238463;
+  const uintmax_t nanos_in_milli = 1000000;
 
   pcf::IndiProperty function, duty_cycle, simsensor;
   // <device>.function.sin switch
@@ -62,11 +64,10 @@ protected:
     square,
     constant
   };
-  SimFunction myFunction = SimFunction::sin;
+  SimFunction myFunction = SimFunction::square;
   std::vector<std::string> SimFunctionNames = {"sin", "cos", "square", "constant"};
   double amplitude = 1.0;
   double time = 5.0;
-  // double frequency = 1.0;
   double startTimeSec;
 
 public:
@@ -113,7 +114,7 @@ public:
 
 timeSeriesSimulator::timeSeriesSimulator() : MagAOXApp(MAGAOX_CURRENT_SHA1, MAGAOX_REPO_MODIFIED)
 {
-
+  m_loopPause = nanos_in_milli * 200; // 200 ms sampling rate for signal
   return;
 }
 
@@ -186,11 +187,17 @@ INDI_NEWCALLBACK_DEFN(timeSeriesSimulator, duty_cycle)
     {
       duty_cycle["time"] = ipRecv["time"].get<double>();
       time = ipRecv["time"].get<double>();
+      std::stringstream msg;
+      msg << "Setting 'time' to " << time;
+      log<software_notice>({__FILE__, __LINE__, msg.str()});
     }
     if (ipRecv.find("amplitude"))
     {
       duty_cycle["amplitude"] = ipRecv["amplitude"].get<double>();
       amplitude = ipRecv["amplitude"].get<double>();
+      std::stringstream msg;
+      msg << "Setting 'amplitude' to " << amplitude;
+      log<software_notice>({__FILE__, __LINE__, msg.str()});
     }
 
     duty_cycle.setState(pcf::IndiProperty::Ok);
@@ -204,6 +211,22 @@ INDI_NEWCALLBACK_DEFN(timeSeriesSimulator, duty_cycle)
 INDI_NEWCALLBACK_DEFN(timeSeriesSimulator, function)
 (const pcf::IndiProperty &ipRecv)
 {
+  std::string currentFunctionName;
+  switch (myFunction)
+  {
+  case SimFunction::sin:
+    currentFunctionName = "sin";
+    break;
+  case SimFunction::cos:
+    currentFunctionName = "sin";
+    break;
+  case SimFunction::square:
+    currentFunctionName = "square";
+    break;
+  case SimFunction::constant:
+    currentFunctionName = "constant";
+    break;
+  }
   if (ipRecv.getName() == function.getName())
   {
     auto updatedSwitches = ipRecv.getElements();
@@ -217,13 +240,40 @@ INDI_NEWCALLBACK_DEFN(timeSeriesSimulator, function)
       {
         if (ipRecv[fname].getSwitchState() == pcf::IndiElement::SwitchStateType::On)
         {
-          function[fname] = pcf::IndiElement::SwitchStateType::On;
+          std::cerr << "Got fname " << fname << std::endl;
+          currentFunctionName = fname;
         }
+      }
+    }
+    if (currentFunctionName == "sin")
+    {
+      myFunction = SimFunction::sin;
+      log<software_notice>({__FILE__, __LINE__, "Switching sine 'On'"});
+    }
+    else if (currentFunctionName == "cos")
+    {
+      myFunction = SimFunction::cos;
+      log<software_notice>({__FILE__, __LINE__, "Switching cosine 'On'"});
+    }
+    else if (currentFunctionName == "square")
+    {
+      myFunction = SimFunction::square;
+      log<software_notice>({__FILE__, __LINE__, "Switching square wave 'On'"});
+    }
+    else if (currentFunctionName == "constant")
+    {
+      myFunction = SimFunction::constant;
+      log<software_notice>({__FILE__, __LINE__, "Switching constant 'On'"});
+    }
+    for (auto fname : SimFunctionNames)
+    {
+      if (fname == currentFunctionName)
+      {
+        function[fname] = pcf::IndiElement::SwitchStateType::On;
       }
       else
       {
         function[fname] = pcf::IndiElement::SwitchStateType::Off;
-        std::cerr << "Turning" << fname << " off" << std::endl;
       }
     }
 
@@ -240,7 +290,6 @@ INDI_NEWCALLBACK_DEFN(timeSeriesSimulator, function)
 int timeSeriesSimulator::updateVals()
 {
   double elapsedSeconds = mx::get_curr_time() - startTimeSec;
-  std::cerr << "Updating at t =" << elapsedSeconds << std::endl;
   switch (myFunction)
   {
   case SimFunction::sin:
@@ -258,7 +307,8 @@ int timeSeriesSimulator::updateVals()
   default:
     break;
   }
-  if (m_indiDriver) {
+  if (m_indiDriver)
+  {
     m_indiDriver->sendSetProperty(simsensor);
   }
   return 0;
