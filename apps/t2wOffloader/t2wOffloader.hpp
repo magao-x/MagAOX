@@ -65,6 +65,8 @@ protected:
    std::string m_dmChannel;
    
    float m_gain {0.1};
+   float m_leak {0.0};
+   
    
    
    ///@}
@@ -73,7 +75,7 @@ protected:
    
    mx::improc::eigenImage<realT> m_twRespM;
    mx::improc::eigenImage<realT> m_tweeter;
-   mx::improc::eigenImage<realT> m_woofer;
+   mx::improc::eigenImage<realT> m_woofer, m_wooferDelta;
    
    IMAGE m_dmStream; 
    uint32_t m_dmWidth {0}; ///< The width of the image
@@ -136,9 +138,10 @@ protected:
   
    
    pcf::IndiProperty m_indiP_gain;
-   
+   pcf::IndiProperty m_indiP_leak;
    
    INDI_NEWCALLBACK_DECL(t2wOffloader, m_indiP_gain);
+   INDI_NEWCALLBACK_DECL(t2wOffloader, m_indiP_leak);
 };
 
 inline
@@ -157,6 +160,7 @@ void t2wOffloader::setupConfig()
    config.add("offload.channel", "", "offload.channel", argType::Required, "offload", "channel", false, "string", "The DM channel to offload to.");
    
    config.add("offload.gain", "", "offload.gain", argType::Required, "offload", "gain", false, "float", "The starting offload gain.  Default is 0.1.");
+   config.add("offload.leak", "", "offload.leak", argType::Required, "offload", "leak", false, "float", "The starting offload leak.  Default is 0.0.");
 }
 
 inline
@@ -168,6 +172,7 @@ int t2wOffloader::loadConfigImpl( mx::app::appConfigurator & _config )
    _config(m_twRespMPath, "offload.respMPath");
    _config(m_dmChannel, "offload.channel");
    _config(m_gain, "offload.gain");
+   _config(m_leak, "offload.leak");
    
    return 0;
 }
@@ -192,6 +197,16 @@ int t2wOffloader::appStartup()
       return -1;
    }
    
+   
+   createStandardIndiNumber<unsigned>( m_indiP_leak, "leak", 0, 1, 0, "%0.2f");
+   m_indiP_leak["current"] = m_leak;
+   m_indiP_leak["target"] = m_leak;
+   
+   if( registerIndiPropertyNew( m_indiP_leak, INDI_NEWCALLBACK(m_indiP_leak)) < 0)
+   {
+      log<software_error>({__FILE__,__LINE__});
+      return -1;
+   }
    
    if(shmimMonitorT::appStartup() < 0)
    {
@@ -283,6 +298,8 @@ int t2wOffloader::allocate(const dev::shmimT & dummy)
       
       log<text_log>( "Opened " + m_dmChannel + " " + std::to_string(m_dmWidth) + " x " + std::to_string(m_dmHeight) + " with data type: " + std::to_string(m_dmDataType)); 
    
+      m_woofer.resize(m_dmWidth, m_dmHeight);
+      m_woofer.setZero();
    }
    
    ///\todo size checks here.
@@ -299,7 +316,10 @@ int t2wOffloader::processImage( void * curr_src,
 {
    static_cast<void>(dummy); //be unused
    
-   m_woofer = -m_gain*( m_twRespM.matrix() * Eigen::Map<Matrix<float,-1,-1>>((float *)curr_src,  m_width*m_height,1));
+   
+   m_wooferDelta = m_twRespM.matrix() * Eigen::Map<Matrix<float,-1,-1>>((float *)curr_src,  m_width*m_height,1);
+   
+   m_woofer = m_gain* Eigen::Map<Array<float,-1,-1>>( m_wooferDelta.data(), m_dmWidth, m_dmHeight) + (1.0-m_leak)*m_woofer;
       
    m_dmStream.md[0].write = 1;
    
@@ -340,6 +360,31 @@ INDI_NEWCALLBACK_DEFN(t2wOffloader, m_indiP_gain)(const pcf::IndiProperty &ipRec
    return 0;
 }
 
+INDI_NEWCALLBACK_DEFN(t2wOffloader, m_indiP_leak)(const pcf::IndiProperty &ipRecv)
+{
+   if(ipRecv.getName() != m_indiP_leak.getName())
+   {
+      log<software_error>({__FILE__, __LINE__, "invalid indi property received"});
+      return -1;
+   }
+   
+   float target;
+   
+   if( indiTargetUpdate( m_indiP_leak, target, ipRecv, true) < 0)
+   {
+      log<software_error>({__FILE__,__LINE__});
+      return -1;
+   }
+   
+   m_leak = target;
+   
+   updateIfChanged(m_indiP_leak, "current", m_leak);
+   updateIfChanged(m_indiP_leak, "target", m_leak);
+   
+   log<text_log>("set gain to " + std::to_string(m_leak), logPrio::LOG_NOTICE);
+   
+   return 0;
+}
 
 } //namespace app
 } //namespace MagAOX
