@@ -408,10 +408,10 @@ int ocam2KCtrl::appLogic()
          if(m_fpsSet == 0) state(stateCodes::READY);
          else state(stateCodes::OPERATING);
          
-         if(setTemp(m_startupTemp) < 0)
-         {
-            return log<software_error,0>({__FILE__,__LINE__});
-         }
+         //if(setTemp(m_startupTemp) < 0)
+         //{
+         //   return log<software_error,0>({__FILE__,__LINE__});
+         //}
       }
       else
       {

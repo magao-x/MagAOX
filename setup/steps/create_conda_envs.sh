@@ -20,7 +20,9 @@ fi
 
 # This line breaks.
 #eval "$(/opt/miniconda3/bin/conda shell.bash hook)"
-conda activate py37
+source "/opt/miniconda3/etc/profile.d/conda.sh"
+CONDA_CHANGEPS1=false conda activate py37
+#conda activate py37
 
 # install ImageStreamWrapIO (requires cacao to be installed)
 PACKAGES=$(conda list)
@@ -30,7 +32,7 @@ if [[ $PACKAGES != *imagestreamiowrap* ]]; then
 		ln -s /usr/bin/cmake3 /opt/miniconda3/envs/py37/bin/cmake
 	fi
 	export CUDA_ROOT=$CUDADIR
-	cd /opt/MagAOX/source/cacao.old/src/ImageStreamIO #change me
+	cd /opt/MagAOX/source/cacao/src/ImageStreamIO #change me
 	python setup.py install
 	# clean up cmake
 	rm /opt/miniconda3/envs/py37/bin/cmake

@@ -269,7 +269,7 @@ int bmcCtrl::appLogic()
    
    if(m_nsat > 0)
    {
-      std::cerr << "saturated actuators in last second: " << m_nsat << "\n";
+      log<text_log>("Saturated actuators in last second: " + std::to_string(m_nsat), logPrio::LOG_WARNING);
    }
    m_nsat = 0;
    
@@ -449,30 +449,16 @@ int bmcCtrl::commandDM(void * curr_src)
       //m_dminputs[idx] -= mean - 0.5;
       if (m_dminputs[idx] > 1)
       {
-<<<<<<< HEAD
          ++m_nsat;
-         //printf("Actuator %d saturated!\n", idx + 1);
          m_dminputs[idx] = 1;
       } else if (m_dminputs[idx] < 0)
       {
-         //printf("Actuator %d saturated!\n", idx + 1);
          ++m_nsat;
-=======
-         printf("Actuator %u saturated!\n", idx + 1);
-         m_dminputs[idx] = 1;
-      } else if (m_dminputs[idx] < 0)
-      {
-         printf("Actuator %u saturated!\n", idx + 1);
->>>>>>> 922f7e698cda85397dcc79fdf1b7f5beffc554df
          m_dminputs[idx] = 0;
       }
       m_dminputs[idx] = sqrt(m_dminputs[idx]);
    }
 
-   //if(nsat > 0)
-   //{
-      //std::cerr << nsat << " actuators saturated\n";
-   //}
    
    //for (uint32_t idx = 0 ; idx < m_nbAct ; ++idx){
    // printf("Acuator %d: %f\n", idx+1, m_dminputs[idx]);
