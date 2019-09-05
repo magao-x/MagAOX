@@ -166,6 +166,9 @@ case $action in
             exit 1
         fi
         grep -v '^#' < $proclist | while read -r procname appname; do
+            if [[ -z $procname || -z $appname ]]; then
+                continue
+            fi
             if [[ $procname_provided == 0 || ( $procname_provided == 1 && $procname == $procname_of_interest ) ]]; then
                 $action $procname $appname
             fi
