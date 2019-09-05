@@ -18,6 +18,11 @@ if [ -f "/opt/miniconda3/etc/profile.d/conda.sh" ]; then
 else
     \export PATH="/opt/miniconda3/bin:$PATH"
 fi
+# activate the default MagAO-X user env if it exists
+ENVS=$(conda env list)
+if [[ $ENVS = *py37* ]]; then
+    conda activate py37
+fi
 EOF
     cat << 'EOF' | sudo tee /opt/miniconda3/.condarc
 channels:
