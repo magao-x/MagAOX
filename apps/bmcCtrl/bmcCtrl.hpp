@@ -66,6 +66,8 @@ class bmcCtrl : public MagAOXApp<true>, public dev::dm<bmcCtrl,float>, public de
    
    typedef float realT;  ///< This defines the datatype used to signal the DM using the ImageStreamIO library.
    
+   size_t m_nsat {0};
+   
 protected:
 
    /** \name Configurable Parameters
@@ -265,6 +267,11 @@ int bmcCtrl::appLogic()
       return initDM();
    }
    
+   if(m_nsat > 0)
+   {
+      std::cerr << "saturated actuators in last second: " << m_nsat << "\n";
+   }
+   m_nsat = 0;
    
    return 0;
 }
@@ -437,21 +444,29 @@ int bmcCtrl::commandDM(void * curr_src)
       2) clip to fractional values between 0 and 1.
       3) take the square root to approximate the voltage-displacement curve
    */
+   int nsat = 0;
    for (uint32_t idx = 0 ; idx < m_nbAct ; ++idx)
    {
       //m_dminputs[idx] -= mean - 0.5;
       if (m_dminputs[idx] > 1)
       {
-         printf("Actuator %d saturated!\n", idx + 1);
+         ++m_nsat;
+         //printf("Actuator %d saturated!\n", idx + 1);
          m_dminputs[idx] = 1;
       } else if (m_dminputs[idx] < 0)
       {
-         printf("Actuator %d saturated!\n", idx + 1);
+         //printf("Actuator %d saturated!\n", idx + 1);
+         ++m_nsat;
          m_dminputs[idx] = 0;
       }
       m_dminputs[idx] = sqrt(m_dminputs[idx]);
    }
 
+   //if(nsat > 0)
+   //{
+      //std::cerr << nsat << " actuators saturated\n";
+   //}
+   
    //for (uint32_t idx = 0 ; idx < m_nbAct ; ++idx){
    // printf("Acuator %d: %f\n", idx+1, m_dminputs[idx]);
    //}
