@@ -18,12 +18,12 @@ include $(SELF_DIR)/config.mk
 EDT ?= false
 PYLON ?= false
 PICAM ?= false
-ifeq ($(MAGAOX_ROLE),icc)
+ifeq ($(MAGAOX_ROLE),ICC)
   EDT = true
   PYLON = true
   PICAM = true
 else
-ifeq ($(MAGAOX_ROLE),rtc)
+ifeq ($(MAGAOX_ROLE),RTC)
   EDT = true
 endif
 endif
