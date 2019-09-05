@@ -13,22 +13,26 @@ function log_info() {
 }
 if [[ -z $1 ]]; then
     log_info "Usage:"
-    log_info "    magaox status - show status and last few log lines for each process"
+    log_info "    magaox status [PROCNAME] - show status and last few log lines for each process (or just PROCNAME)"
     log_info "    magaox inspect PROCNAME - connect to the tmux session for PROCNAME"
-    log_info "    magaox startup - start all processes in /opt/MagAOX/config/proclist_${MAGAOX_ROLE}.txt"
-    log_info "    magaox shutdown - show status and last few log lines for each process"
+    log_info "    magaox startup [PROCNAME] - start all processes in /opt/MagAOX/config/proclist_${MAGAOX_ROLE}.txt (or just PROCNAME)"
+    log_info "    magaox shutdown [PROCNAME] - show status and last few log lines for each process (or just PROCNAME)"
+    log_info "    magaox restart [PROCNAME] - shutdown then startup each process (or just PROCNAME)"
     exit 1
 else
     case $1 in
-        status|startup|shutdown)
+        status|startup|shutdown|restart|inspect)
             action=$1
-            ;;
-        inspect)
-            action=$1
-            procname_to_inspect=$2
+            if [[ ! -z $2 ]]; then
+                procname_of_interest=$2
+                procname_provided=1
+            else
+                procname_of_interest=
+                procname_provided=0
+            fi
             ;;
         *)
-            echo "Argument must be status, inspect, startup, or shutdown."
+            echo "Argument must be status, inspect, startup, shutdown, or restart."
             exit 1
     esac
 fi
@@ -37,11 +41,26 @@ if [[ -z $MAGAOX_ROLE ]]; then
     exit 1
 fi
 
-set -uo pipefail
+set -euo pipefail
+
+# CentOS + devtoolset-7 aliases sudo, but breaks command line arguments for it,
+# so if we need those, we must use $_REAL_SUDO.
+if [[ -e /usr/bin/sudo ]]; then
+  _REAL_SUDO=/usr/bin/sudo
+elif [[ -e /bin/sudo ]]; then
+  _REAL_SUDO=/bin/sudo
+else
+  if [[ -z $(command -v sudo) ]]; then
+    echo "Can't find sudo!"
+    exit 1
+  else
+    _REAL_SUDO=$(which sudo)
+  fi
+fi
 
 function as_xsup() {
     if [ "$(whoami)" != xsup ]; then
-        su xsup -c '"$0" "$@"' -- "$@"
+        $_REAL_SUDO -u xsup -s -- "$@"
     else
         "$@"
     fi
@@ -99,6 +118,13 @@ function startup() {
     log_info "Created tmux session '$procname'"
     as_xsup tmux send-keys -t $procname "$command" Enter
     log_success "Executed in $procname session: $command"
+    if [[ $appname == xindiserver ]]; then
+        # Why? Working theory: xindiserver has to set up and/or drain all
+        # FIFOs before the xapps start. Otherwise, (some) drivers fail to start (sometimes)
+        # and (sometimes) xindiserver dies without explanation.
+        log_info "Waiting 5 seconds for xindiserver..."
+        sleep 5
+    fi
 }
 
 function shutdown() {
@@ -140,11 +166,21 @@ case $action in
             exit 1
         fi
         grep -v '^#' < $proclist | while read -r procname appname; do
-            $action $procname $appname
+            if [[ $procname_provided == 0 || ( $procname_provided == 1 && $procname == $procname_of_interest ) ]]; then
+                $action $procname $appname
+            fi
         done
         ;;
+    restart)
+        bash $0 shutdown $procname_of_interest
+        bash $0 startup $procname_of_interest
+        ;;
     inspect)
-        inspect_one_process $procname_to_inspect
+        if [[ $procname_provided == 1 ]]; then
+            inspect_one_process $procname_of_interest
+        else
+            log_error "Must provide procname as second argument"
+        fi
         ;;
     *)
         echo "Should never match! See validation above."

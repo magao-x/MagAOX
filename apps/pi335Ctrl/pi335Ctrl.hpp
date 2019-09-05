@@ -568,8 +568,7 @@ int pi335Ctrl::home_1()
    if(m_servoState != 0)
    {
       log<text_log>("home_1 requested but servos are not off", logPrio::LOG_ERROR);
-      return -1;std::string com = "MOV 1 " + std::to_string(m_homePos1) + "\n";
-      //std::cerr << "Sending: " << com;
+      return -1;
    }
    
    if(m_homingState != 0)

@@ -81,6 +81,9 @@ apps/streamWriter/streamWriter
 apps/sysMonitor/sysMonitor
 
 #t
+apps/t2wOffloader/t2wOffloader
+apps/timeSeriesSimulator/timeSeriesSimulator
+apps/tcsInterface/tcsInterface
 apps/trippLitePDU/trippLitePDU
 apps/trippLitePDU/tests/
 
@@ -124,3 +127,5 @@ flatlogs/src/logCodes.dat
 .DS_Store
 setup/bundle.zip
 setup/cache
+setup/calib/
+setup/config/

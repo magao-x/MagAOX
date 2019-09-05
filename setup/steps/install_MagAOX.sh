@@ -32,15 +32,12 @@ clone_or_update_and_cd calib
 
 echo "Building flatlogs"
 cd /opt/MagAOX/source/MagAOX/flatlogs/src
+make clean
 make
 make install
 echo "Building MagAOX"
 cd /opt/MagAOX/source/MagAOX
 make setup
-if [[ $MAGAOX_ROLE == workstation || $MAGAOX_ROLE == vm ]]; then
-    if ! grep -q "EDT =" local/common.mk; then
-        echo "EDT = false" >> local/common.mk
-    fi
-fi
+make all_clean
 make all
 make install
