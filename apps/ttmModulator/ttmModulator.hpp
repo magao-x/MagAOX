@@ -150,8 +150,7 @@ protected:
    pcf::IndiProperty m_indiP_modRadius;
    pcf::IndiProperty m_indiP_modFrequency;
 
-   pcf::IndiProperty m_indiP_offx;
-   pcf::IndiProperty m_indiP_offy;
+   pcf::IndiProperty m_indiP_offset;
    
    
    pcf::IndiProperty m_indiP_FGState;
@@ -172,8 +171,7 @@ public:
    INDI_NEWCALLBACK_DECL(ttmModulator, m_indiP_modState);
    INDI_NEWCALLBACK_DECL(ttmModulator, m_indiP_modRadius);
    INDI_NEWCALLBACK_DECL(ttmModulator, m_indiP_modFrequency);
-   INDI_NEWCALLBACK_DECL(ttmModulator, m_indiP_offx);
-   INDI_NEWCALLBACK_DECL(ttmModulator, m_indiP_offy);
+   INDI_NEWCALLBACK_DECL(ttmModulator, m_indiP_offset);
    
    INDI_SETCALLBACK_DECL(ttmModulator, m_indiP_C1outp);
    INDI_SETCALLBACK_DECL(ttmModulator, m_indiP_C1freq);
@@ -265,11 +263,9 @@ int ttmModulator::appStartup()
    m_indiP_modRadius["current"].set(m_modRad);
    m_indiP_modRadius["requested"].set(m_modRadRequested);
   
-   REG_INDI_NEWPROP(m_indiP_offx, "offset-x", pcf::IndiProperty::Number);
-   m_indiP_offx.add (pcf::IndiElement("target"));
-   
-   REG_INDI_NEWPROP(m_indiP_offy, "offset-y", pcf::IndiProperty::Number);
-   m_indiP_offy.add (pcf::IndiElement("target"));
+   REG_INDI_NEWPROP(m_indiP_offset, "offset", pcf::IndiProperty::Number);
+   m_indiP_offset.add (pcf::IndiElement("x"));
+   m_indiP_offset.add (pcf::IndiElement("y"));
    
    REG_INDI_SETPROP(m_indiP_C1outp, "fxngenmodwfs", "C1outp");
    REG_INDI_SETPROP(m_indiP_C1freq, "fxngenmodwfs", "C1freq");
@@ -341,8 +337,17 @@ int ttmModulator::appLogic()
       state(stateCodes::CONFIGURING);
       if(newState == 1) restTTM();
       if(newState == 3) setTTM();
-      if(newState == 4) modTTM(newRad, newFreq);
-
+      if(newState == 4) 
+      {
+         if(newRad <= 0.1 || newFreq <= 1)
+         {
+            log<text_log>("radius or frequency too low", logPrio::LOG_ERROR);
+         }
+         else
+         {
+            modTTM(newRad, newFreq);
+         }
+      }
       calcState();
 
       //Do this now for responsiveness.
@@ -966,37 +971,32 @@ INDI_NEWCALLBACK_DEFN(ttmModulator, m_indiP_modRadius)(const pcf::IndiProperty &
    return -1;
 }
 
-INDI_NEWCALLBACK_DEFN(ttmModulator, m_indiP_offx)(const pcf::IndiProperty &ipRecv)
+INDI_NEWCALLBACK_DEFN(ttmModulator, m_indiP_offset)(const pcf::IndiProperty &ipRecv)
 {
-   if (ipRecv.getName() == m_indiP_offx.getName())
+   if (ipRecv.getName() == m_indiP_offset.getName())
    {
 
       double dx = 0;
-      if(ipRecv.find("target"))
+      if(ipRecv.find("x"))
       {
-         dx = ipRecv["target"].get<double>();
+         dx = ipRecv["x"].get<double>();
       }
-
-      return offsetXY(dx, 0.0);
-   }
-   return -1;
-}
-
-INDI_NEWCALLBACK_DEFN(ttmModulator, m_indiP_offy)(const pcf::IndiProperty &ipRecv)
-{
-   if (ipRecv.getName() == m_indiP_offy.getName())
-   {
-
+      std::cerr << "dx: " << dx << "\n";
+      
       double dy = 0;
-      if(ipRecv.find("target"))
+      if(ipRecv.find("y"))
       {
-         dy = ipRecv["target"].get<double>();
+         dy = ipRecv["y"].get<double>();
       }
 
-      return offsetXY(0.0, dy);
+      std::cerr << "dy: " << dy << "\n\n";
+
+      
+      return offsetXY(dx, dy);
    }
    return -1;
 }
+
 
 INDI_SETCALLBACK_DEFN(ttmModulator, m_indiP_C1outp)(const pcf::IndiProperty &ipRecv)
 {
