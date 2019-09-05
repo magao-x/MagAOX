@@ -22,8 +22,10 @@ ifeq ($(MAGAOX_ROLE),icc)
   EDT = true
   PYLON = true
   PICAM = true
-else ifeq ($(MAGAOX_ROLE),rtc)
+else
+ifeq ($(MAGAOX_ROLE),rtc)
   EDT = true
+endif
 endif
 
 CFLAGS += -D_XOPEN_SOURCE=700
