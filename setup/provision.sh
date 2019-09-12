@@ -280,10 +280,7 @@ fi
 
 log_success "Provisioning complete"
 if [[ $MAGAOX_ROLE == vm ]]; then
-    set +ue
-    source /etc/profile.d/*.sh
-    set -ue
-    magaox startup
+    log_info "You'll want to 'vagrant ssh' and then 'magaox startup' next."
 else
     log_info "You'll probably want to run"
     log_info "    source /etc/profile.d/*.sh"
