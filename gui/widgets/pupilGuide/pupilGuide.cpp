@@ -97,6 +97,8 @@ int pupilGuide::subscribe( multiIndiPublisher * publisher )
    publisher->subscribeProperty(this, "fxngenmodwfs", "C2ofst");
    
    publisher->subscribeProperty(this, "ttmpupil", "fsm");
+   publisher->subscribeProperty(this, "ttmpupil", "pos_1");
+   publisher->subscribeProperty(this, "ttmpupil", "pos_2");
    
    return 0;
 }
@@ -823,43 +825,137 @@ void pupilGuide::on_buttonScale_pressed()
 
 void pupilGuide::on_button_pup_u_pressed()
 {
+   pcf::IndiProperty ip(pcf::IndiProperty::Number);
    
+   ip.setDevice("ttmpupil");
+   ip.setName("pos_1");
+   ip.add(pcf::IndiElement("target"));
+   ip["target"] = m_pupCh1 + m_stepSize;
+   
+   sendNewProperty(ip);
 }
 
 void pupilGuide::on_button_pup_ul_pressed()
 {
-  
+  pcf::IndiProperty ip(pcf::IndiProperty::Number);
+   
+   ip.setDevice("ttmpupil");
+   ip.setName("pos_1");
+   ip.add(pcf::IndiElement("target"));
+   ip["target"] = m_pupCh1 + m_stepSize/sqrt(2);
+   
+   sendNewProperty(ip);
+   
+   
+   pcf::IndiProperty ip2(pcf::IndiProperty::Number);
+   
+   ip2.setDevice("ttmpupil");
+   ip2.setName("pos_2");
+   ip2.add(pcf::IndiElement("target"));
+   ip2["target"] = m_pupCh2 - m_stepSize/sqrt(2);
+   
+   sendNewProperty(ip2);
 }
 
 void pupilGuide::on_button_pup_l_pressed()
 {
+   pcf::IndiProperty ip(pcf::IndiProperty::Number);
    
+   ip.setDevice("ttmpupil");
+   ip.setName("pos_2");
+   ip.add(pcf::IndiElement("target"));
+   ip["target"] = m_pupCh2 - m_stepSize;
+   
+   sendNewProperty(ip);
 }
 
 void pupilGuide::on_button_pup_dl_pressed()
 {
-  
+   pcf::IndiProperty ip(pcf::IndiProperty::Number);
+   
+   ip.setDevice("ttmpupil");
+   ip.setName("pos_1");
+   ip.add(pcf::IndiElement("target"));
+   ip["target"] = m_pupCh1 - m_stepSize/sqrt(2);
+   
+   sendNewProperty(ip);
+   
+   pcf::IndiProperty ip2(pcf::IndiProperty::Number);
+   
+   ip2.setDevice("ttmpupil");
+   ip2.setName("pos_2");
+   ip2.add(pcf::IndiElement("target"));
+   ip2["target"] = m_pupCh2 - m_stepSize/sqrt(2);
+   
+   sendNewProperty(ip2);
 }
 
 void pupilGuide::on_button_pup_d_pressed()
 {
+   pcf::IndiProperty ip(pcf::IndiProperty::Number);
    
+   ip.setDevice("ttmpupil");
+   ip.setName("pos_1");
+   ip.add(pcf::IndiElement("target"));
+   ip["target"] = m_pupCh1 - m_stepSize;
+   
+   sendNewProperty(ip);
 }
 
 void pupilGuide::on_button_pup_dr_pressed()
 {
+   pcf::IndiProperty ip(pcf::IndiProperty::Number);
+   
+   ip.setDevice("ttmpupil");
+   ip.setName("pos_1");
+   ip.add(pcf::IndiElement("target"));
+   ip["target"] = m_pupCh1 - m_stepSize/sqrt(2);
+   
+   sendNewProperty(ip);
    
    
+   pcf::IndiProperty ip2(pcf::IndiProperty::Number);
+   
+   ip2.setDevice("ttmpupil");
+   ip2.setName("pos_2");
+   ip2.add(pcf::IndiElement("target"));
+   ip2["target"] = m_pupCh2 + m_stepSize/sqrt(2);
+   
+   sendNewProperty(ip2);
 }
 
 void pupilGuide::on_button_pup_r_pressed()
 {
-
+   pcf::IndiProperty ip(pcf::IndiProperty::Number);
+   
+   ip.setDevice("ttmpupil");
+   ip.setName("pos_2");
+   ip.add(pcf::IndiElement("target"));
+   ip["target"] = m_pupCh2 + m_stepSize;
+   
+   sendNewProperty(ip);
 }
 
 void pupilGuide::on_button_pup_ur_pressed()
 {
-
+   pcf::IndiProperty ip(pcf::IndiProperty::Number);
+   
+   ip.setDevice("ttmpupil");
+   ip.setName("pos_1");
+   ip.add(pcf::IndiElement("target"));
+   ip["target"] = m_pupCh1 + m_stepSize/sqrt(2);
+   
+   sendNewProperty(ip);
+   
+   pcf::IndiProperty ip2(pcf::IndiProperty::Number);
+   
+   ip2.setDevice("ttmpupil");
+   ip2.setName("pos_2");
+   ip2.add(pcf::IndiElement("target"));
+   ip2["target"] = m_pupCh2 + m_stepSize/sqrt(2);
+   
+   sendNewProperty(ip2);
+   
 }
 void pupilGuide::on_button_pup_scale_pressed()
 {

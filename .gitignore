@@ -12,6 +12,7 @@ local/
 **/.*~
 **/*.stash
 **/*-swp
+**/res/
 ui*.h
 
 **/bin/

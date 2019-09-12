@@ -696,21 +696,21 @@
            <item row="2" column="0">
             <widget class="QPushButton" name="button_tip_dl">
              <property name="sizePolicy">
-              <sizepolicy hsizetype="Minimum" vsizetype="Minimum">
+              <sizepolicy hsizetype="MinimumExpanding" vsizetype="MinimumExpanding">
                <horstretch>1</horstretch>
                <verstretch>1</verstretch>
               </sizepolicy>
              </property>
              <property name="minimumSize">
               <size>
-               <width>30</width>
-               <height>30</height>
+               <width>40</width>
+               <height>40</height>
               </size>
              </property>
              <property name="maximumSize">
               <size>
-               <width>50</width>
-               <height>50</height>
+               <width>40</width>
+               <height>40</height>
               </size>
              </property>
              <property name="focusPolicy">
@@ -728,21 +728,21 @@
            <item row="0" column="1">
             <widget class="QPushButton" name="button_tip_u">
              <property name="sizePolicy">
-              <sizepolicy hsizetype="Minimum" vsizetype="Minimum">
+              <sizepolicy hsizetype="MinimumExpanding" vsizetype="MinimumExpanding">
                <horstretch>1</horstretch>
                <verstretch>1</verstretch>
               </sizepolicy>
              </property>
              <property name="minimumSize">
               <size>
-               <width>30</width>
-               <height>30</height>
+               <width>40</width>
+               <height>40</height>
               </size>
              </property>
              <property name="maximumSize">
               <size>
-               <width>50</width>
-               <height>50</height>
+               <width>40</width>
+               <height>40</height>
               </size>
              </property>
              <property name="focusPolicy">
@@ -760,21 +760,21 @@
            <item row="0" column="0">
             <widget class="QPushButton" name="button_tip_ul">
              <property name="sizePolicy">
-              <sizepolicy hsizetype="Minimum" vsizetype="Minimum">
+              <sizepolicy hsizetype="MinimumExpanding" vsizetype="MinimumExpanding">
                <horstretch>1</horstretch>
                <verstretch>1</verstretch>
               </sizepolicy>
              </property>
              <property name="minimumSize">
               <size>
-               <width>30</width>
-               <height>30</height>
+               <width>40</width>
+               <height>40</height>
               </size>
              </property>
              <property name="maximumSize">
               <size>
-               <width>50</width>
-               <height>50</height>
+               <width>40</width>
+               <height>40</height>
               </size>
              </property>
              <property name="focusPolicy">
@@ -792,21 +792,21 @@
            <item row="1" column="0">
             <widget class="QPushButton" name="button_tip_l">
              <property name="sizePolicy">
-              <sizepolicy hsizetype="Minimum" vsizetype="Minimum">
+              <sizepolicy hsizetype="MinimumExpanding" vsizetype="MinimumExpanding">
                <horstretch>1</horstretch>
                <verstretch>1</verstretch>
               </sizepolicy>
              </property>
              <property name="minimumSize">
               <size>
-               <width>30</width>
-               <height>30</height>
+               <width>40</width>
+               <height>40</height>
               </size>
              </property>
              <property name="maximumSize">
               <size>
-               <width>50</width>
-               <height>50</height>
+               <width>40</width>
+               <height>40</height>
               </size>
              </property>
              <property name="focusPolicy">
@@ -824,21 +824,21 @@
            <item row="0" column="2">
             <widget class="QPushButton" name="button_tip_ur">
              <property name="sizePolicy">
-              <sizepolicy hsizetype="Minimum" vsizetype="Minimum">
+              <sizepolicy hsizetype="MinimumExpanding" vsizetype="MinimumExpanding">
                <horstretch>1</horstretch>
                <verstretch>1</verstretch>
               </sizepolicy>
              </property>
              <property name="minimumSize">
               <size>
-               <width>30</width>
-               <height>30</height>
+               <width>40</width>
+               <height>40</height>
               </size>
              </property>
              <property name="maximumSize">
               <size>
-               <width>50</width>
-               <height>50</height>
+               <width>40</width>
+               <height>40</height>
               </size>
              </property>
              <property name="focusPolicy">
@@ -853,21 +853,21 @@
            <item row="1" column="1">
             <widget class="QPushButton" name="buttonScale">
              <property name="sizePolicy">
-              <sizepolicy hsizetype="Minimum" vsizetype="Minimum">
+              <sizepolicy hsizetype="MinimumExpanding" vsizetype="MinimumExpanding">
                <horstretch>1</horstretch>
                <verstretch>1</verstretch>
               </sizepolicy>
              </property>
              <property name="minimumSize">
               <size>
-               <width>45</width>
-               <height>45</height>
+               <width>40</width>
+               <height>40</height>
               </size>
              </property>
              <property name="maximumSize">
               <size>
-               <width>50</width>
-               <height>50</height>
+               <width>40</width>
+               <height>40</height>
               </size>
              </property>
              <property name="font">
@@ -886,21 +886,21 @@
            <item row="1" column="2">
             <widget class="QPushButton" name="button_tip_r">
              <property name="sizePolicy">
-              <sizepolicy hsizetype="Minimum" vsizetype="Minimum">
+              <sizepolicy hsizetype="MinimumExpanding" vsizetype="MinimumExpanding">
                <horstretch>1</horstretch>
                <verstretch>1</verstretch>
               </sizepolicy>
              </property>
              <property name="minimumSize">
               <size>
-               <width>30</width>
-               <height>30</height>
+               <width>40</width>
+               <height>40</height>
               </size>
              </property>
              <property name="maximumSize">
               <size>
-               <width>50</width>
-               <height>50</height>
+               <width>40</width>
+               <height>40</height>
               </size>
              </property>
              <property name="focusPolicy">
@@ -918,21 +918,21 @@
            <item row="2" column="1">
             <widget class="QPushButton" name="button_tip_d">
              <property name="sizePolicy">
-              <sizepolicy hsizetype="Minimum" vsizetype="Minimum">
+              <sizepolicy hsizetype="MinimumExpanding" vsizetype="MinimumExpanding">
                <horstretch>1</horstretch>
                <verstretch>1</verstretch>
               </sizepolicy>
              </property>
              <property name="minimumSize">
               <size>
-               <width>30</width>
-               <height>30</height>
+               <width>40</width>
+               <height>40</height>
               </size>
              </property>
              <property name="maximumSize">
               <size>
-               <width>50</width>
-               <height>50</height>
+               <width>40</width>
+               <height>40</height>
               </size>
              </property>
              <property name="focusPolicy">
@@ -950,21 +950,21 @@
            <item row="2" column="2">
             <widget class="QPushButton" name="button_tip_dr">
              <property name="sizePolicy">
-              <sizepolicy hsizetype="Minimum" vsizetype="Minimum">
+              <sizepolicy hsizetype="MinimumExpanding" vsizetype="MinimumExpanding">
                <horstretch>1</horstretch>
                <verstretch>1</verstretch>
               </sizepolicy>
              </property>
              <property name="minimumSize">
               <size>
-               <width>30</width>
-               <height>30</height>
+               <width>40</width>
+               <height>40</height>
               </size>
              </property>
              <property name="maximumSize">
               <size>
-               <width>50</width>
-               <height>50</height>
+               <width>40</width>
+               <height>40</height>
               </size>
              </property>
              <property name="focusPolicy">
@@ -1059,7 +1059,7 @@
         </layout>
        </item>
        <item>
-        <layout class="QGridLayout" name="gridCoords" rowstretch="1,0,0,0,0,0,0">
+        <layout class="QGridLayout" name="gridCoords" rowstretch="1,0,0,0,0,0">
          <item row="3" column="3">
           <widget class="QLineEdit" name="coordLR_D">
            <property name="alignment">
@@ -1298,21 +1298,21 @@
            <item row="1" column="1">
             <widget class="QPushButton" name="button_pup_scale">
              <property name="sizePolicy">
-              <sizepolicy hsizetype="Minimum" vsizetype="Minimum">
+              <sizepolicy hsizetype="MinimumExpanding" vsizetype="MinimumExpanding">
                <horstretch>1</horstretch>
                <verstretch>1</verstretch>
               </sizepolicy>
              </property>
              <property name="minimumSize">
               <size>
-               <width>45</width>
-               <height>45</height>
+               <width>40</width>
+               <height>40</height>
               </size>
              </property>
              <property name="maximumSize">
               <size>
-               <width>50</width>
-               <height>50</height>
+               <width>40</width>
+               <height>40</height>
               </size>
              </property>
              <property name="font">
@@ -1331,21 +1331,21 @@
            <item row="2" column="2">
             <widget class="QPushButton" name="button_pup_dr">
              <property name="sizePolicy">
-              <sizepolicy hsizetype="Minimum" vsizetype="Minimum">
+              <sizepolicy hsizetype="MinimumExpanding" vsizetype="MinimumExpanding">
                <horstretch>1</horstretch>
                <verstretch>1</verstretch>
               </sizepolicy>
              </property>
              <property name="minimumSize">
               <size>
-               <width>35</width>
-               <height>35</height>
+               <width>40</width>
+               <height>40</height>
               </size>
              </property>
              <property name="maximumSize">
               <size>
-               <width>50</width>
-               <height>50</height>
+               <width>40</width>
+               <height>40</height>
               </size>
              </property>
              <property name="focusPolicy">
@@ -1363,21 +1363,21 @@
            <item row="0" column="1">
             <widget class="QPushButton" name="button_pup_u">
              <property name="sizePolicy">
-              <sizepolicy hsizetype="Minimum" vsizetype="Minimum">
+              <sizepolicy hsizetype="MinimumExpanding" vsizetype="MinimumExpanding">
                <horstretch>1</horstretch>
                <verstretch>1</verstretch>
               </sizepolicy>
              </property>
              <property name="minimumSize">
               <size>
-               <width>35</width>
-               <height>35</height>
+               <width>40</width>
+               <height>40</height>
               </size>
              </property>
              <property name="maximumSize">
               <size>
-               <width>50</width>
-               <height>50</height>
+               <width>40</width>
+               <height>40</height>
               </size>
              </property>
              <property name="focusPolicy">
@@ -1395,21 +1395,21 @@
            <item row="1" column="0">
             <widget class="QPushButton" name="button_pup_l">
              <property name="sizePolicy">
-              <sizepolicy hsizetype="Minimum" vsizetype="Minimum">
+              <sizepolicy hsizetype="MinimumExpanding" vsizetype="MinimumExpanding">
                <horstretch>1</horstretch>
                <verstretch>1</verstretch>
               </sizepolicy>
              </property>
              <property name="minimumSize">
               <size>
-               <width>35</width>
-               <height>35</height>
+               <width>40</width>
+               <height>40</height>
               </size>
              </property>
              <property name="maximumSize">
               <size>
-               <width>50</width>
-               <height>50</height>
+               <width>40</width>
+               <height>40</height>
               </size>
              </property>
              <property name="focusPolicy">
@@ -1427,21 +1427,21 @@
            <item row="2" column="1">
             <widget class="QPushButton" name="button_pup_d">
              <property name="sizePolicy">
-              <sizepolicy hsizetype="Minimum" vsizetype="Minimum">
+              <sizepolicy hsizetype="MinimumExpanding" vsizetype="MinimumExpanding">
                <horstretch>1</horstretch>
                <verstretch>1</verstretch>
               </sizepolicy>
              </property>
              <property name="minimumSize">
               <size>
-               <width>35</width>
-               <height>35</height>
+               <width>40</width>
+               <height>40</height>
               </size>
              </property>
              <property name="maximumSize">
               <size>
-               <width>50</width>
-               <height>50</height>
+               <width>40</width>
+               <height>40</height>
               </size>
              </property>
              <property name="focusPolicy">
@@ -1459,21 +1459,21 @@
            <item row="2" column="0">
             <widget class="QPushButton" name="button_pup_dl">
              <property name="sizePolicy">
-              <sizepolicy hsizetype="Minimum" vsizetype="Minimum">
+              <sizepolicy hsizetype="MinimumExpanding" vsizetype="MinimumExpanding">
                <horstretch>1</horstretch>
                <verstretch>1</verstretch>
               </sizepolicy>
              </property>
              <property name="minimumSize">
               <size>
-               <width>35</width>
-               <height>35</height>
+               <width>40</width>
+               <height>40</height>
               </size>
              </property>
              <property name="maximumSize">
               <size>
-               <width>50</width>
-               <height>50</height>
+               <width>40</width>
+               <height>40</height>
               </size>
              </property>
              <property name="focusPolicy">
@@ -1491,21 +1491,21 @@
            <item row="1" column="2">
             <widget class="QPushButton" name="button_pup_r">
              <property name="sizePolicy">
-              <sizepolicy hsizetype="Minimum" vsizetype="Minimum">
+              <sizepolicy hsizetype="MinimumExpanding" vsizetype="MinimumExpanding">
                <horstretch>1</horstretch>
                <verstretch>1</verstretch>
               </sizepolicy>
              </property>
              <property name="minimumSize">
               <size>
-               <width>35</width>
-               <height>35</height>
+               <width>40</width>
+               <height>40</height>
               </size>
              </property>
              <property name="maximumSize">
               <size>
-               <width>50</width>
-               <height>50</height>
+               <width>40</width>
+               <height>40</height>
               </size>
              </property>
              <property name="focusPolicy">
@@ -1523,21 +1523,21 @@
            <item row="0" column="2">
             <widget class="QPushButton" name="button_pup_ur">
              <property name="sizePolicy">
-              <sizepolicy hsizetype="Minimum" vsizetype="Minimum">
+              <sizepolicy hsizetype="MinimumExpanding" vsizetype="MinimumExpanding">
                <horstretch>1</horstretch>
                <verstretch>1</verstretch>
               </sizepolicy>
              </property>
              <property name="minimumSize">
               <size>
-               <width>35</width>
-               <height>35</height>
+               <width>40</width>
+               <height>40</height>
               </size>
              </property>
              <property name="maximumSize">
               <size>
-               <width>50</width>
-               <height>50</height>
+               <width>40</width>
+               <height>40</height>
               </size>
              </property>
              <property name="focusPolicy">
@@ -1555,21 +1555,21 @@
            <item row="0" column="0">
             <widget class="QPushButton" name="button_pup_ul">
              <property name="sizePolicy">
-              <sizepolicy hsizetype="Minimum" vsizetype="Minimum">
+              <sizepolicy hsizetype="MinimumExpanding" vsizetype="MinimumExpanding">
                <horstretch>1</horstretch>
                <verstretch>1</verstretch>
               </sizepolicy>
              </property>
              <property name="minimumSize">
               <size>
-               <width>35</width>
-               <height>35</height>
+               <width>40</width>
+               <height>40</height>
               </size>
              </property>
              <property name="maximumSize">
               <size>
-               <width>50</width>
-               <height>50</height>
+               <width>40</width>
+               <height>40</height>
               </size>
              </property>
              <property name="focusPolicy">
