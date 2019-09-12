@@ -110,6 +110,7 @@ if [[ ! -z "$1" ]]; then
 fi
 echo "Starting '$MAGAOX_ROLE' provisioning"
 echo "export MAGAOX_ROLE=$MAGAOX_ROLE" | sudo tee /etc/profile.d/magaox_role.sh
+export MAGAOX_ROLE
 
 # Shouldn't be any more undefined variables after (maybe) $1,
 # so tell bash to die if it encounters any
