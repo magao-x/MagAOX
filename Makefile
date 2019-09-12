@@ -38,7 +38,8 @@ apps_aoc = \
 	mzmqClient
 
 apps_vm = \
-	magAOXMaths
+	magAOXMaths \
+	timeSeriesSimulator
 
 libs_to_build = libtelnet
 
