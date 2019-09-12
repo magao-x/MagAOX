@@ -9,6 +9,7 @@
 
 #include <cmath>
 #include <iostream>
+#include <iomanip>
 #include <sstream>
 #include "../../libMagAOX/libMagAOX.hpp" //Note this is included on command line to trigger pch
 #include "../../magaox_git_version.h"
@@ -54,7 +55,7 @@ protected:
   // <device>.function.cos switch
   // <device>.function.square switch
   // <device>.function.constant switch
-  // <device>.duty_cycle.time number
+  // <device>.duty_cycle.period number
   // <device>.duty_cycle.amplitude number
   // <device>.simsensor.value number
   enum class SimFunction
@@ -67,8 +68,23 @@ protected:
   SimFunction myFunction = SimFunction::square;
   std::vector<std::string> SimFunctionNames = {"sin", "cos", "square", "constant"};
   double amplitude = 1.0;
-  double time = 5.0;
+  double period = 5.0;
   double startTimeSec;
+  class MotionRequest
+  {
+  public:
+    pcf::IndiProperty *property;
+    double targetPos;
+    double startPos;
+    double requestTime;
+    MotionRequest(pcf::IndiProperty *property, double startPos, double targetPos, double requestTime);
+    ~MotionRequest() noexcept {};
+  };
+  std::vector<pcf::IndiProperty *> gizmos;
+  pcf::IndiProperty gizmo_presets, gizmo_zero;
+  std::unordered_map<std::string, MotionRequest *> gizmosInMotion;
+  int n_gizmos = 2;
+  double gizmoTimeToTarget = 1;
 
 public:
   /// Default c'tor.
@@ -77,6 +93,13 @@ public:
   /// D'tor, declared and defined for noexcept.
   ~timeSeriesSimulator() noexcept
   {
+    auto it = gizmos.begin();
+
+    while (it != gizmos.end())
+    {
+      delete *it;
+      ++it;
+    }
   }
 
   virtual void setupConfig();
@@ -109,8 +132,23 @@ public:
 
   INDI_NEWCALLBACK_DECL(timeSeriesSimulator, function);
   INDI_NEWCALLBACK_DECL(timeSeriesSimulator, duty_cycle);
-  int updateVals();
+  INDI_NEWCALLBACK_DECL(timeSeriesSimulator, gizmos);
+  INDI_NEWCALLBACK_DECL(timeSeriesSimulator, gizmo_presets);
+  INDI_NEWCALLBACK_DECL(timeSeriesSimulator, gizmo_zero);
+  void updateVals();
+  void updateSimsensor();
+  void updateGizmos();
+  void requestGizmoTarget(pcf::IndiProperty *gizmoPtr, double targetPos);
+  double lerp(double x0, double y0, double x1, double y1, double xnew);
 };
+
+timeSeriesSimulator::MotionRequest::MotionRequest(pcf::IndiProperty *property, double startPos, double targetPos, double requestTime)
+{
+  this->property = property;
+  this->startPos = startPos;
+  this->targetPos = targetPos;
+  this->requestTime = requestTime;
+}
 
 timeSeriesSimulator::timeSeriesSimulator() : MagAOXApp(MAGAOX_CURRENT_SHA1, MAGAOX_REPO_MODIFIED)
 {
@@ -156,10 +194,33 @@ int timeSeriesSimulator::appStartup()
   simsensor["value"] = 0.0;
 
   REG_INDI_NEWPROP(duty_cycle, "duty_cycle", pcf::IndiProperty::Number);
-  duty_cycle.add(pcf::IndiElement("time"));
-  duty_cycle["time"] = time;
+  duty_cycle.add(pcf::IndiElement("period"));
+  duty_cycle["period"] = period;
   duty_cycle.add(pcf::IndiElement("amplitude"));
   duty_cycle["amplitude"] = amplitude;
+
+  for (int i = 0; i < n_gizmos; i++)
+  {
+    std::cerr << "configuring gizmo #" << i << std::endl;
+    gizmos.push_back(new pcf::IndiProperty(pcf::IndiProperty::Number));
+    pcf::IndiProperty *prop = gizmos.back();
+    prop->setDevice(m_configName);
+    std::stringstream propName;
+    propName << "gizmo_" << std::setfill('0') << std::setw(4) << i;
+    prop->setName(propName.str());
+    std::cerr << "gizmo prop name is " << propName.str() << std::endl;
+    prop->setPerm(pcf::IndiProperty::ReadWrite);
+    prop->setState(pcf::IndiProperty::Idle);
+    for (int j = 0; j < 2; j++)
+    {
+      std::cerr << "configuring gizmo element #" << j << std::endl;
+      auto elemName = j == 0 ? "current" : "target";
+      indi::addNumberElement<float>(*prop, elemName, 0, 100, 1, "%f", std::to_string(i));
+      std::cerr << "added " << elemName << " to prop" << std::endl;
+    }
+    registerIndiPropertyNew(*prop, INDI_NEWCALLBACK(gizmos));
+    std::cerr << "added to gizmos" << std::endl;
+  }
 
   startTimeSec = mx::get_curr_time();
   updateVals();
@@ -178,17 +239,84 @@ int timeSeriesSimulator::appShutdown()
   return 0;
 }
 
+void timeSeriesSimulator::requestGizmoTarget(pcf::IndiProperty *gizmoPtr, double targetPos)
+{
+  double currentPos = (*gizmoPtr)["current"].get<double>();
+  (*gizmoPtr)["target"] = targetPos;
+
+  MotionRequest *theReq;
+  std::string ipName = gizmoPtr->getName();
+  if (gizmosInMotion.count(ipName) == 0)
+  {
+    theReq = new MotionRequest(gizmoPtr, currentPos, targetPos, mx::get_curr_time());
+    gizmosInMotion[ipName] = theReq;
+  }
+  else
+  {
+    theReq = gizmosInMotion[ipName];
+    theReq->targetPos = targetPos;
+    theReq->startPos = currentPos;
+    theReq->requestTime = mx::get_curr_time();
+  }
+}
+
+INDI_NEWCALLBACK_DEFN(timeSeriesSimulator, gizmos)
+(const pcf::IndiProperty &ipRecv)
+{
+  std::string ipName = ipRecv.getName();
+  std::cerr << "setProperty cb for gizmos" << std::endl;
+  auto it = gizmos.begin();
+  while (it != gizmos.end())
+  {
+    pcf::IndiProperty *gizmoPtr = *it;
+    pcf::IndiProperty theGizmo = *gizmoPtr;
+    // for (pcf::IndiProperty* gizmoPtr : gizmos) {
+    // pcf::IndiProperty theGizmo = *gizmoPtr;
+    if (ipName == theGizmo.getName())
+    {
+      std::cerr << "Adjusting prop " << ipName << std::endl;
+      if (ipRecv.find("target"))
+      {
+        double currentPos = theGizmo["current"].get<double>();
+        // theGizmo["current"] = currentPos;
+        double targetPos = ipRecv["target"].get<double>();
+        // theGizmo["target"] = targetPos;
+        std::stringstream msg;
+        msg << "Setting '" << theGizmo.getName() << "' to " << targetPos << " currently " << currentPos;
+        log<software_notice>({__FILE__, __LINE__, msg.str()});
+        std::cerr << msg.str() << std::endl;
+        requestGizmoTarget(gizmoPtr, targetPos);
+        // MotionRequest* theReq;
+        // if (gizmosInMotion.count(ipName) == 0) {
+        //   theReq = new MotionRequest(gizmoPtr, currentPos, targetPos, mx::get_curr_time());
+        //   gizmosInMotion[ipName] = theReq;
+        // } else {
+        //   theReq = gizmosInMotion[ipName];
+        //   theReq->targetPos = targetPos;
+        //   theReq->startPos = currentPos;
+        //   theReq->requestTime = mx::get_curr_time();
+        // }
+
+        theGizmo.setState(pcf::IndiProperty::Busy);
+        m_indiDriver->sendSetProperty(theGizmo);
+      }
+    }
+    ++it;
+  }
+  return 0;
+}
+
 INDI_NEWCALLBACK_DEFN(timeSeriesSimulator, duty_cycle)
 (const pcf::IndiProperty &ipRecv)
 {
   if (ipRecv.getName() == duty_cycle.getName())
   {
-    if (ipRecv.find("time"))
+    if (ipRecv.find("period"))
     {
-      duty_cycle["time"] = ipRecv["time"].get<double>();
-      time = ipRecv["time"].get<double>();
+      duty_cycle["period"] = ipRecv["period"].get<double>();
+      period = ipRecv["period"].get<double>();
       std::stringstream msg;
-      msg << "Setting 'time' to " << time;
+      msg << "Setting 'period' to " << period;
       log<software_notice>({__FILE__, __LINE__, msg.str()});
     }
     if (ipRecv.find("amplitude"))
@@ -287,22 +415,22 @@ INDI_NEWCALLBACK_DEFN(timeSeriesSimulator, function)
   return -1;
 }
 
-int timeSeriesSimulator::updateVals()
+void timeSeriesSimulator::updateSimsensor()
 {
   double elapsedSeconds = mx::get_curr_time() - startTimeSec;
   switch (myFunction)
   {
   case SimFunction::sin:
-    simsensor["value"] = amplitude * sin(elapsedSeconds * ((2 * PI) / time));
+    simsensor["value"] = amplitude * sin(elapsedSeconds * ((2 * PI) / period));
     break;
   case SimFunction::cos:
-    simsensor["value"] = amplitude * cos(elapsedSeconds * ((2 * PI) / time));
+    simsensor["value"] = amplitude * cos(elapsedSeconds * ((2 * PI) / period));
     break;
   case SimFunction::constant:
     simsensor["value"] = amplitude;
     break;
   case SimFunction::square:
-    simsensor["value"] = amplitude * ((int)(elapsedSeconds / time) % 2);
+    simsensor["value"] = amplitude * ((int)(elapsedSeconds / period) % 2);
     break;
   default:
     break;
@@ -311,7 +439,53 @@ int timeSeriesSimulator::updateVals()
   {
     m_indiDriver->sendSetProperty(simsensor);
   }
-  return 0;
+}
+
+double timeSeriesSimulator::lerp(double x0, double y0, double x1, double y1, double xnew)
+{
+  return y0 + (xnew - x0) * ((y1 - y0) / (x1 - x0));
+}
+
+void timeSeriesSimulator::updateGizmos()
+{
+  auto it = gizmosInMotion.begin();
+  while (it != gizmosInMotion.end())
+  {
+    pcf::IndiProperty *gizmoProp = it->second->property;
+    MotionRequest *theMotionRequest = it->second;
+    double elapsedSeconds = mx::get_curr_time() - theMotionRequest->requestTime;
+    double currentPos;
+    if (elapsedSeconds < gizmoTimeToTarget)
+    {
+      currentPos = lerp(
+          0,
+          theMotionRequest->startPos,
+          gizmoTimeToTarget,
+          theMotionRequest->targetPos,
+          elapsedSeconds);
+      ++it;
+    }
+    else
+    {
+      currentPos = theMotionRequest->targetPos;
+      it = gizmosInMotion.erase(it);
+      gizmoProp->setState(pcf::IndiProperty::Ok);
+      std::cerr << gizmoProp->getName() << " moved to " << currentPos << std::endl;
+    }
+    (*gizmoProp)["current"] = currentPos;
+    (*gizmoProp)["target"] = theMotionRequest->targetPos;
+
+    if (m_indiDriver)
+    {
+      m_indiDriver->sendSetProperty(*gizmoProp);
+    }
+  }
+}
+
+void timeSeriesSimulator::updateVals()
+{
+  updateSimsensor();
+  updateGizmos();
 }
 
 } //namespace app
