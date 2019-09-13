@@ -155,6 +155,11 @@ fi
 ## Set up file structure and permissions
 sudo bash -l "$DIR/steps/ensure_dirs_and_perms.sh" $MAGAOX_ROLE
 
+# Enable forwarding MagAO-X GUIs to the host for VMs
+if [[ $MAGAOX_ROLE == vm ]]; then
+    sudo bash -l "$DIR/steps/enable_vm_x11_forwarding.sh"
+fi
+
 # Necessary for forwarding GUIs from the VM to the host
 if [[ $MAGAOX_ROLE == vm ]]; then
     if [[ $ID == ubuntu ]]; then
@@ -163,6 +168,12 @@ if [[ $MAGAOX_ROLE == vm ]]; then
         yum install -y xorg-x11-xauth
     fi
 fi
+
+# Install dependencies for the GUIs
+if [[ $MAGAOX_ROLE == ci || $MAGAOX_ROLE == vm ||  $MAGAOX_ROLE == workstation ]]; then
+    sudo bash -l "$DIR/steps/install_gui_dependencies.sh"
+fi
+
 # Install Linux headers (instrument computers use the RT kernel / headers)
 if [[ $MAGAOX_ROLE == ci || $MAGAOX_ROLE == vm ||  $MAGAOX_ROLE == workstation ]]; then
     if [[ $ID == ubuntu ]]; then

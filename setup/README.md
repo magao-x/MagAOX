@@ -4,9 +4,11 @@ The main script that calls the others is `provision.sh` for both the physical ma
 
 The `provision.sh` script does different things depending on the `MAGAOX_ROLE` environment variable of the machine it's run on. (It makes `/etc/profile.d/magaox_role.sh` to set that the first time you run it.) This can be:
 
-  * `aoc` - Adaptive optics Operator Computer
-  * `rtc` - Real Time control Computer
-  * `icc` - Instrument Control Computer
+  * `AOC` - Adaptive optics Operator Computer
+  * `RTC` - Real Time control Computer
+  * `ICC` - Instrument Control Computer
   * `workstation` - Any other MagAO-X workstation
+  * `ci` - Continuous Integration environment (CircleCI, invoked as described in [`.circleci/config.yml`](../.circleci/config.yml) in the repo root)
+  * `vm` - Virtual machine (Vagrant) environment (see [the handbook](https://magao-x.org/docs/handbook/appendices/development_vm.html))
 
 Each script has comments throughout. They should all be *idempotent*. (In other words: running `provision.sh` twice should only do a fresh install the first time, and should not clobber anything or emit an error if run again.)

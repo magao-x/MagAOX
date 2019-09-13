@@ -42,4 +42,5 @@ apt install -y \
     libczmq-dev \
     liblog4cxx-dev \
     chrony \
+    gdb \
 ;
