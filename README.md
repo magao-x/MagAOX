@@ -22,7 +22,7 @@ This is the software which runs the MagAOX ExAO system.
 
 ## 2 Software Configuration
 
-For a standard build, nothing needs to be done here.  However, various defaults can be changed with macros.  To override at build time, the following macros can be redefined in `local/config.mk`.  For example to change the `MAGAOX_env_path` environment variable, one could add 
+For a standard build, nothing needs to be done here.  However, various defaults can be changed with macros.  To override at build time, the following macros can be redefined in `local/config.mk`.  For example to change the `MAGAOX_env_path` environment variable, one could add
 ```
 CXXFLAGS += -DMAGAOX_env_path="/my/magaox/path"
 ```
@@ -90,7 +90,7 @@ Some notes:
 
 * Install requires root privileges.
 
-### 3.1 Selective Build 
+### 3.1 Selective Build
 
 It is sometimes necessary or desired to not build some parts of the system.  For instance on a machine on which not all dependencies are installed.  The make files allow the following to be turned off
 
@@ -100,11 +100,11 @@ To prevent linking against the CACAO library, define `CACAO=false` in `local/com
 #### EDT
 To prevent linking against the EDT framegrabber library, define `EDT=false` in `local/common.mk`.  This will prevent building the `ocam2KCtrl` and `andorCtrl` apps.
 
-#### PICam 
+#### PICam
 To prevent linking against the Princeton Instruments PICam library, define `PICAM=false` in `local/common.mk`.  This will prevent building the `picamCtrl` app.
 
 #### Pylon
-To prevent linking against the Basler Pylon library, define `Pylong=false` in `local/common.mk`.  This will prevent building the `baslerCtrl` app.
+To prevent linking against the Basler Pylon library, define `Pylon=false` in `local/common.mk`.  This will prevent building the `baslerCtrl` app.
 
 ## 4 Software Install
 
@@ -152,18 +152,4 @@ To-do items are listed in the above sections.  Also see the Todo page in the dox
 
 ## 7 Develop in a VM with [Vagrant](https://vagrantup.com)
 
-The MagAOX code is intimately tied to Linux OS internals, and targets CentOS 7 for the realtime control computers. To develop in the most "flight-like" configuration, a Vagrantfile is provided to set up a development VM.
-
-### Prerequisites:
-
-  * VirtualBox
-  * Vagrant
-  * NFS
-
-### Usage:
-
-After cloning the MagAOX repository, `cd` into it and run `vagrant up`. Provisioning uses the `setup/vagrant_provision.sh` script, which in turn calls other scripts in `setup/` and sets permissions. Provisioning is slow (~ 10s of minutes), but only costly the first time you start the VM. Vagrant will download a virtual machine image for CentOS 7 and then set up all the dependencies required. NFS is used to sync the contents of your repository clone to the VM.
-
-To connect to the VM, use `vagrant ssh`. The VM has a view of your copy of this repository under `/vagrant`. For example, no matter where you cloned this repository on your own (host) machine, the virtual machine will see this file at `/vagrant/README.md`. (For consistency with production, we symlink `/opt/MagAOX/source/MagAOX` to `/vagrant`.) Edits to the MagAO-X software source on your computer will be instantly reflected on the VM side, ready for you to `make` or `make install`.
-
-The `vagrant` user you log in as will be a member of the `magaox` and `magaox-dev` groups, and should have all the necessary permissions to run the system (or, at least, the parts you can run in a VM).
+To develop in the most "flight-like" configuration, a Vagrantfile is provided to set up a development VM. A quick-start guide is available [in the handbook](https://magao-x.org/docs/handbook/appendices/development_vm.html).
