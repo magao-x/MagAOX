@@ -19,5 +19,6 @@ Vagrant.configure("2") do |config|
 
   config.vm.define "AOC", primary: true do |aoc|
     aoc.vm.box = "generic/ubuntu1804"
+    aoc.vm.synced_folder ".", "/vagrant"
   end
 end
