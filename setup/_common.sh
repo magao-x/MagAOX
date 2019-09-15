@@ -33,7 +33,7 @@ function clone_or_update_and_cd() {
     parentdir=$3
     if [[ ! -d $parentdir/$reponame/.git ]]; then
       echo "Cloning new copy of $orgname/$reponame"
-      CLONE_DEST=/tmp/$reponame_$(date +"%s")
+      CLONE_DEST=/tmp/${reponame}_$(date +"%s")
       git clone https://github.com/$orgname/$reponame.git $CLONE_DEST
       sudo rsync -av $CLONE_DEST/ $parentdir/$reponame/
       cd $parentdir/$reponame/
