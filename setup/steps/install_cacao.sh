@@ -30,7 +30,8 @@ sudo make install
 if [[ ! -e /usr/local/bin/milk ]]; then
     sudo ln -s /usr/local/bin/cacao /usr/local/bin/milk
 fi
-echo "export PATH=\$PATH:$CACAO_ABSPATH/src/CommandLineInterface/scripts" | sudo tee /etc/profile.d/cacao_scripts.sh
+echo "export PATH=\$PATH:$CACAO_ABSPATH/src/CommandLineInterface/scripts" | sudo tee /etc/profile.d/cacao.sh
+echo "export MILK_SHM_DIR=/milk/shm" | sudo tee -a /etc/profile.d/cacao.sh
 
 if [[ $MAGAOX_ROLE != ci ]]; then
   if ! grep -q "/milk/shm" /etc/fstab; then
