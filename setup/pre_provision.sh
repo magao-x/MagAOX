@@ -8,18 +8,25 @@ if [[ "$EUID" == 0 ]]; then
 fi
 
 source /etc/os-release
+# without hardened_usercopy=off, the ALPAO DM driver (really the Interface Corp card driver) will
+# trigger protections against suspicious copying between kernel and userspace
+# and *bring down the whole system* (by rebooting when you try to run
+# https://github.com/magao-x/ALPAO-interface/blob/master/initalpaoPCIe )
+ALPAO_CMDLINE_FIX="hardened_usercopy=off"
+# make the PCIe expansion card work
+PCIEXPANSION_CMDLINE_FIX="pci=noaer"
+# disable the slow Spectre mitigations
+SPECTRE_CMDLINE_FIX="noibrs noibpb nopti nospectre_v2 nospectre_v1 l1tf=off nospec_store_bypass_disable no_stf_barrier mds=off mitigations=off"
+# Put it all together
+DESIRED_CMDLINE="$ALPAO_CMDLINE_FIX $PCIEXPANSION_CMDLINE_FIX $SPECTRE_CMDLINE_FIX"
 if [[ $ID == ubuntu ]]; then
     log_info "Skipping RT kernel install on Ubuntu"
     install_rt=false
 else
-    if ! grep "hardened_usercopy=off" /etc/default/grub; then
-        # without this option, the ALPAO DM driver (really the Interface Corp card driver) will
-        # trigger protections against suspicious copying between kernel and userspace
-        # and *bring down the whole system* (by rebooting when you try to run
-        # https://github.com/magao-x/ALPAO-interface/blob/master/initalpaoPCIe )
-        echo GRUB_CMDLINE_LINUX_DEFAULT="hardened_usercopy=off" | sudo tee -a /etc/default/grub
+    if ! grep "$DESIRED_CMDLINE" /etc/default/grub; then
+        echo GRUB_CMDLINE_LINUX_DEFAULT="$DESIRED_CMDLINE" | sudo tee -a /etc/default/grub
         sudo grub2-mkconfig -o /boot/grub2/grub.cfg
-        log_success "Applied kernel command line tweak for ALPAO"
+        log_success "Applied kernel command line tweaks for ALPAO, Spectre, PCIe expansion"
     fi
     if [[ $(uname -v) != *"PREEMPT RT"* ]]; then
         mkdir -p /opt/MagAOX/vendor
