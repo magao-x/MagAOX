@@ -7,5 +7,3 @@ orgname=magao-x
 reponame=config
 parentdir=/opt/MagAOX/
 clone_or_update_and_cd $orgname $reponame $parentdir
-log_info "Config branches:"
-git branch

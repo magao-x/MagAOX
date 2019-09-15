@@ -279,24 +279,25 @@ fi
 # On a Vagrant VM, we need to "sudo" to become vagrant since the provisioning
 # runs as root.
 cd /opt/MagAOX/source
+# Initialize the config and calib repos as normal user
+$MAYBE_SUDO bash -l "$DIR/steps/install_magao-x_config.sh"
+$MAYBE_SUDO bash -l "$DIR/steps/install_magao-x_calib.sh"
+# Install first-party deps
 $MAYBE_SUDO bash -l "$DIR/steps/install_cacao.sh"
 $MAYBE_SUDO bash -l "$DIR/steps/install_milkzmq.sh"
+# Create Python env and install Python libs that need special treatment
+# (Depends on presence of /opt/MagAOX/config/conda_env_py37.yml)
+# Note that subsequent steps will use libs from conda since the base
+# env activates by default.
+sudo bash -l "$DIR/steps/install_python.sh"
+sudo bash -l "$DIR/steps/create_conda_envs.sh"
+sudo bash -l "$DIR/steps/install_purepyindi.sh"
+sudo bash -l "$DIR/steps/install_imagestreamio_python.sh"
 
 # AOC, vm, ci, and workstation should all install rtimv
 if [[ $MAGAOX_ROLE == AOC || $MAGAOX_ROLE == ci || $MAGAOX_ROLE == vm ||  $MAGAOX_ROLE == workstation ]]; then
     sudo bash -l "$DIR/steps/install_rtimv.sh"
 fi
-
-# Initialize the config and calib repos as normal user
-$MAYBE_SUDO bash -l "$DIR/steps/install_magao-x_config.sh"
-$MAYBE_SUDO bash -l "$DIR/steps/install_magao-x_calib.sh"
-
-# Create Python env and install Python libs that need special treatment
-# (Depends on presence of /opt/MagAOX/config/conda_env_py37.yml)
-sudo bash -l "$DIR/steps/install_python.sh"
-sudo bash -l "$DIR/steps/create_conda_envs.sh"
-sudo bash -l "$DIR/steps/install_purepyindi.sh"
-sudo bash -l "$DIR/steps/install_imagestreamio_python.sh"
 
 # CircleCI invokes install_MagAOX.sh as the next step (see .circleci/config.yml)
 # By separating the real build into another step, we can cache the slow provisioning steps
