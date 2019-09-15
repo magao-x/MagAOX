@@ -15,7 +15,7 @@ for envname in py37 dev; do
     PACKAGES=$(conda list)
     if [[ $PACKAGES != *purepyindi* ]]; then
         cd /opt/MagAOX/source/purepyindi
-        pip install -e .
+        pip install -e .[all]
     else
         echo "purepyindi already installed in $envname environment!"
     fi

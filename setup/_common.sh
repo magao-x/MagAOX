@@ -31,10 +31,12 @@ function clone_or_update_and_cd() {
     orgname=$1
     reponame=$2
     parentdir=$3
-    if [[ ! -d /opt/MagAOX/source/$reponame/.git ]]; then
+    if [[ ! -d $parentdir/$reponame/.git ]]; then
       echo "Cloning new copy of $orgname/$reponame"
-      git clone https://github.com/$orgname/$reponame.git $parentdir/$reponame
-      cd $parentdir/$reponame
+      CLONE_DEST=/tmp/$reponame_$(date +"%s")
+      git clone https://github.com/$orgname/$reponame.git $CLONE_DEST
+      sudo rsync -av $CLONE_DEST/ $parentdir/$reponame/
+      cd $parentdir/$reponame/
       log_success "Cloned new $parentdir/$reponame"
     else
       cd $parentdir/$reponame

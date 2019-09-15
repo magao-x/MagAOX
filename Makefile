@@ -58,7 +58,9 @@ else ifeq ($(MAGAOX_ROLE),vm)
 endif
 
 utils_to_build = logdump \
-                 cursesINDI
+				 logstream \
+                 cursesINDI \
+				 xrif2shmim
 
 scripts_to_install = magaox
 

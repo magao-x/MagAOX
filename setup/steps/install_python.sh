@@ -31,9 +31,6 @@ channels:
 changeps1: false
 EOF
 fi
-set +u; source /etc/profile.d/miniconda.sh; set -u
 # set group and permissions such that only magaox-dev has write access
 sudo chgrp -R magaox-dev /opt/miniconda3
 sudo chmod -R g=rwx /opt/miniconda3
-# TO DO: Clone git repos for any MagAO-X python utils and install
-echo "You may need to run \"source /etc/profile.d/miniconda.sh\" before conda is ready to use."

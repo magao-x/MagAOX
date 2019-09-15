@@ -282,8 +282,17 @@ cd /opt/MagAOX/source
 $MAYBE_SUDO bash -l "$DIR/steps/install_cacao.sh"
 $MAYBE_SUDO bash -l "$DIR/steps/install_milkzmq.sh"
 
-# We need CACAO instaled before we create Python envs because
-# we will build ImageStreamIOWrap:
+# AOC, vm, ci, and workstation should all install rtimv
+if [[ $MAGAOX_ROLE == AOC || $MAGAOX_ROLE == ci || $MAGAOX_ROLE == vm ||  $MAGAOX_ROLE == workstation ]]; then
+    sudo bash -l "$DIR/steps/install_rtimv.sh"
+fi
+
+# Initialize the config and calib repos as normal user
+$MAYBE_SUDO bash -l "$DIR/steps/install_magao-x_config.sh"
+$MAYBE_SUDO bash -l "$DIR/steps/install_magao-x_calib.sh"
+
+# Create Python env and install Python libs that need special treatment
+# (Depends on presence of /opt/MagAOX/config/conda_env_py37.yml)
 sudo bash -l "$DIR/steps/install_python.sh"
 sudo bash -l "$DIR/steps/create_conda_envs.sh"
 sudo bash -l "$DIR/steps/install_purepyindi.sh"
@@ -297,9 +306,7 @@ if [[ $MAGAOX_ROLE != ci ]]; then
 fi
 
 log_success "Provisioning complete"
-if [[ $MAGAOX_ROLE == vm ]]; then
-    log_info "You'll want to 'vagrant ssh' and then 'magaox startup' next."
-else
+if [[ $MAGAOX_ROLE != vm ]]; then
     log_info "You'll probably want to run"
     log_info "    source /etc/profile.d/*.sh"
     log_info "to get all the new environment variables set."
