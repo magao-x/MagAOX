@@ -163,9 +163,9 @@ fi
 # Necessary for forwarding GUIs from the VM to the host
 if [[ $MAGAOX_ROLE == vm ]]; then
     if [[ $ID == ubuntu ]]; then
-        apt install -y xauth
+        sudo apt install -y xauth
     elif [[ $ID == centos ]]; then
-        yum install -y xorg-x11-xauth
+        sudo yum install -y xorg-x11-xauth
     fi
 fi
 
@@ -197,7 +197,6 @@ sudo bash -l "$DIR/steps/install_eigen.sh"
 sudo bash -l "$DIR/steps/install_cppzmq.sh"
 sudo bash -l "$DIR/steps/install_levmar.sh"
 sudo bash -l "$DIR/steps/install_flatbuffers.sh"
-sudo bash -l "$DIR/steps/install_python.sh"
 sudo bash -l "$DIR/steps/install_xrif.sh"
 if [[ $MAGAOX_ROLE == RTC || $MAGAOX_ROLE == ICC || $MAGAOX_ROLE == AOC || "$MAGAOX_ROLE" == "ci" ]]; then
     sudo bash -l "$DIR/steps/install_basler_pylon.sh"
@@ -208,9 +207,9 @@ fi
 ## Install proprietary / non-public software
 if [[ -e $VENDOR_SOFTWARE_BUNDLE ]]; then
     # Extract bundle
-    BUNDLE_TMPDIR=/tmp/vendor_software_bundle
-    mkdir -p /tmp/vendor_software_bundle
-    unzip -o $VENDOR_SOFTWARE_BUNDLE -d $BUNDLE_TMPDIR
+    BUNDLE_TMPDIR=/tmp/vendor_software_bundle_$(date +"%s")
+    sudo mkdir -p $BUNDLE_TMPDIR
+    sudo unzip -o $VENDOR_SOFTWARE_BUNDLE -d $BUNDLE_TMPDIR
     for vendorname in alpao bmc andor; do
         if [[ ! -d /opt/MagAOX/vendor/$vendorname ]]; then
             sudo cp -R $BUNDLE_TMPDIR/bundle/$vendorname /opt/MagAOX/vendor
@@ -229,6 +228,7 @@ if [[ -e $VENDOR_SOFTWARE_BUNDLE ]]; then
     if [[ $MAGAOX_ROLE == RTC || $MAGAOX_ROLE == vm ]]; then
         sudo bash -l "$DIR/steps/install_bmc.sh"
     fi
+    sudo rm -rf $BUNDLE_TMPDIR
 fi
 
 ## Build first-party dependencies
@@ -242,10 +242,10 @@ if [[ $MAGAOX_ROLE == vm ]]; then
     MAYBE_SUDO="$_REAL_SUDO -u vagrant"
     # Create or replace symlink to sources so we develop on the host machine's copy
     # (unlike prod, where we install a new clone of the repo to this location)
-    ln -nfs /vagrant /opt/MagAOX/source/MagAOX
+    sudo ln -nfs /vagrant /opt/MagAOX/source/MagAOX
     cd /opt/MagAOX/source/MagAOX
     log_success "Symlinked /opt/MagAOX/source/MagAOX to /vagrant (host folder)"
-    usermod -G magaox,magaox-dev vagrant
+    sudo usermod -G magaox,magaox-dev vagrant
     log_success "Added vagrant user to magaox,magaox-dev"
 elif [[ $MAGAOX_ROLE == ci ]]; then
     ln -sfv ~/project/ /opt/MagAOX/source/MagAOX
@@ -271,7 +271,7 @@ else
         log_info "Running from clone located at $(dirname $DIR), nothing to do for cloning step"
     fi
 fi
-# These last steps should work as whatever user is installing, provided
+# These steps should work as whatever user is installing, provided
 # they are a member of magaox-dev and they have sudo access to install to
 # /usr/local. Building as root would leave intermediate build products
 # owned by root, which we probably don't want.
@@ -281,6 +281,13 @@ fi
 cd /opt/MagAOX/source
 $MAYBE_SUDO bash -l "$DIR/steps/install_cacao.sh"
 $MAYBE_SUDO bash -l "$DIR/steps/install_milkzmq.sh"
+
+# We need CACAO instaled before we create Python envs because
+# we will build ImageStreamIOWrap:
+sudo bash -l "$DIR/steps/install_python.sh"
+sudo bash -l "$DIR/steps/create_conda_envs.sh"
+sudo bash -l "$DIR/steps/install_purepyindi.sh"
+sudo bash -l "$DIR/steps/install_imagestreamio_python.sh"
 
 # CircleCI invokes install_MagAOX.sh as the next step (see .circleci/config.yml)
 # By separating the real build into another step, we can cache the slow provisioning steps

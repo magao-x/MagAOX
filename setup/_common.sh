@@ -27,6 +27,29 @@ function _cached_fetch() {
   fi
 }
 
+function clone_or_update_and_cd() {
+    orgname=$1
+    reponame=$2
+    parentdir=$3
+    if [[ ! -d /opt/MagAOX/source/$reponame/.git ]]; then
+      echo "Cloning new copy of $orgname/$reponame"
+      git clone https://github.com/$orgname/$reponame.git $parentdir/$reponame
+      cd $parentdir/$reponame
+      log_success "Cloned new $parentdir/$reponame"
+    else
+      cd $parentdir/$reponame
+      git pull
+      log_success "Updated $parentdir/$reponame"
+    fi
+    git config core.sharedRepository group
+    sudo chown -R :magaox-dev $parentdir/$reponame
+    sudo chmod -R g=rwX $parentdir/$reponame
+    # n.b. can't be recursive because g+s on files means something else
+    # so we find all directories and individually chmod them:
+    sudo find $parentdir/$reponame -type d -exec chmod g+s {} \;
+    log_success "Normalized permissions on $parentdir/$reponame"
+}
+
 DEFAULT_PASSWORD="extremeAO!"
 
 function creategroup() {
