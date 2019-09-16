@@ -54,6 +54,9 @@ namespace logPrio
   /// Used for debugging, providing a 2nd level.
   constexpr static logPrioT LOG_DEBUG2 = 8;
    
+  /// A telemetry recording
+  constexpr static logPrioT LOG_TELEM = 64;
+  
   /// Used to denote "use the default level for this log type".
   constexpr static logPrioT LOG_DEFAULT = std::numeric_limits<logPrioT>::max() - 1;
   
@@ -89,6 +92,8 @@ std::string priorityString( logPrioT & prio /**< [in] the log priority */)
          return "DBG2";   
       case logPrio::LOG_DEFAULT:
          return "DEF?";
+      case logPrio::LOG_TELEM:
+         return "TELM";   
       default:
          return "UNK?";
    }
@@ -110,6 +115,7 @@ std::string priorityString( logPrioT & prio /**< [in] the log priority */)
   * - D, D1, DBG, DBG1, DEBUG = DEBUG
   * - D2, DBG2, DEBUG2 = DEBUG2
   * - DEF = DEFAULT
+  * - T = TELEM
   *
   * \returns the log priority value if parsing is successful.
   * \returns logPrio::LOG_UNKNOWN if parsing is not successful.
@@ -175,7 +181,7 @@ logPrioT logLevelFromString( const std::string & str )
          return logPrio::LOG_UNKNOWN;
       }
 
-      //Anything that stars with DEF
+      //Anything that starts with DEF
       if (s[1] == 'E' && s[2] == 'F') return logPrio::LOG_DEFAULT;
 
       //Now check for DEBUG and DEBUG2
@@ -195,6 +201,11 @@ logPrioT logLevelFromString( const std::string & str )
 
    }
 
+   if(s[0] == 'T')
+   {
+      return logPrio::LOG_TELEM;
+   }
+   
    return logPrio::LOG_UNKNOWN;
 }
 

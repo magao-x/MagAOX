@@ -21,6 +21,7 @@ INCLUDEDEPS= app/MagAOXApp.hpp \
              app/dev/dssShutter.hpp \
              app/dev/shmimMonitor.hpp \
              app/dev/dm.hpp \
+             app/dev/telemeter.hpp \
              common/config.hpp \
              common/defaults.hpp \
              common/environment.hpp \

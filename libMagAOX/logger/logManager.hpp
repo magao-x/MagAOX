@@ -71,6 +71,8 @@ struct logManager : public logFileT
 {
    ///\todo Make these protected members, with appropriate access methods
    //-->
+   std::string m_configSection {"logger"}; ///<The configuration files section name.  Default is `logger`.
+   
    std::list<bufferPtrT> m_logQueue; ///< Log entries are stored here, and writen to the file by the log thread.
 
    std::thread m_logThread; ///< A separate thread for actually writing to the file.
@@ -297,12 +299,12 @@ bool logManager<logFileT>::logThreadRunning()
 template<class logFileT>
 int logManager<logFileT>::setupConfig( mx::app::appConfigurator & config )
 {
-   config.add("logger.logDir","L", "logDir",mx::app::argType::Required, "logger", "logDir", false, "string", "The directory for log files");
-   config.add("logger.logExt","", "logExt",mx::app::argType::Required, "logger", "logExt", false, "string", "The extension for log files");
-   config.add("logger.maxLogSize","", "maxLogSize",mx::app::argType::Required, "logger", "maxLogSize", false, "string", "The maximum size of log files");
-   config.add("logger.writePause","", "writePause",mx::app::argType::Required, "logger", "writePause", false, "unsigned long", "The log thread pause time in ns");
-   config.add("loger.logThreadPrio", "", "logThreadPrio", mx::app::argType::Required, "logger", "logThreadPrio", false, "int", "The log thread priority");
-   config.add("logger.logLevel","l", "logLevel",mx::app::argType::Required, "logger", "logLevel", false, "string", "The log level");
+   config.add(m_configSection+".logDir","L", "logDir",mx::app::argType::Required, m_configSection, "logDir", false, "string", "The directory for log files");
+   config.add(m_configSection+".logExt","", "logExt",mx::app::argType::Required, m_configSection, "logExt", false, "string", "The extension for log files");
+   config.add(m_configSection+".maxLogSize","", "maxLogSize",mx::app::argType::Required, m_configSection, "maxLogSize", false, "string", "The maximum size of log files");
+   config.add(m_configSection+".writePause","", "writePause",mx::app::argType::Required, m_configSection, "writePause", false, "unsigned long", "The log thread pause time in ns");
+   config.add(m_configSection+"logThreadPrio", "", "logThreadPrio", mx::app::argType::Required, m_configSection, "logThreadPrio", false, "int", "The log thread priority");
+   config.add(m_configSection+".logLevel","l", "logLevel",mx::app::argType::Required, m_configSection, "logLevel", false, "string", "The log level");
 
    return 0;
 }
@@ -312,12 +314,12 @@ int logManager<logFileT>::loadConfig( mx::app::appConfigurator & config )
 {
    //-- logDir
    std::string tmp;
-   config(tmp, "logger.logDir");
+   config(tmp, m_configSection+".logDir");
    if(tmp != "") this->logPath(tmp);
 
    //-- logLevel
    tmp = "";
-   config(tmp, "logger.logLevel");
+   config(tmp, m_configSection+".logLevel");
    if(tmp != "")
    {
       logPrioT lev;
@@ -335,16 +337,16 @@ int logManager<logFileT>::loadConfig( mx::app::appConfigurator & config )
 
 
    //logExt
-   config(this->m_logExt, "logger.logExt");
+   config(this->m_logExt, m_configSection+".logExt");
 
    //maxLogSize
-   config(this->m_maxLogSize, "logger.maxLogSize");
+   config(this->m_maxLogSize, m_configSection+".maxLogSize");
 
    //writePause
-   config(m_writePause, "logger.writePause");
+   config(m_writePause, m_configSection+".writePause");
 
    //logThreadPrio
-   config(m_logThreadPrio, "logger.logThreadPrio");
+   config(m_logThreadPrio, m_configSection+".logThreadPrio");
 
    return 0;
 }

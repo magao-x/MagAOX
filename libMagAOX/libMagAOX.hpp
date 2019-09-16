@@ -22,6 +22,7 @@
 #include "app/dev/dssShutter.hpp"
 #include "app/dev/shmimMonitor.hpp"
 #include "app/dev/dm.hpp"
+#include "app/dev/telemeter.hpp"
 
 #include "common/config.hpp"
 #include "common/defaults.hpp"

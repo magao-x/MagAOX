@@ -42,6 +42,25 @@ struct ioDevice
      */
    int loadConfig( appConfigurator & config /**< [in] an application configuration from which to load values */);
    
+   /// Perform application startup steps specific to an ioDevice
+   /**
+     * This is currently an empty function which always returns 0.  Could be ignored,
+     * but for future changes it is recommended to include a call to this in derivedT::appStartup().
+     * 
+     * \returns 0 on success
+     * \returns -1 on error
+     */
+   int appStartup();
+   
+   /// Perform application logic steps specific to an ioDevice during the main event loop
+   /**
+     * This is currently an empty function which always returns 0.  Could be ignored,
+     * but for future changes it is recommended to include a call to this in derivedT::appLogic().
+     * 
+     * \returns 0 on success
+     * \returns -1 on error
+     */
+   int appLogic();
 };
 
 int ioDevice::setupConfig( mx::app::appConfigurator & config )
@@ -60,6 +79,15 @@ int ioDevice::loadConfig( mx::app::appConfigurator & config )
    return 0;
 }
 
+int ioDevice::appStartup()
+{
+   return 0;
+}
+
+int ioDevice::appLogic()
+{
+   return 0;
+}
 
 } //namespace dev
 } //namespace tty

@@ -50,6 +50,13 @@
    #define MAGAOX_logRelPath "logs"
 #endif
 
+#ifndef MAGAOX_telRelPath
+   /// The relative path to the telemetry directory.
+   /** This is the subdirectory for telemetry.
+     */
+   #define MAGAOX_telRelPath "telem"
+#endif
+
 #ifndef MAGAOX_sysRelPath
    /// The relative path to the system directory
    /** This is the subdirectory for the system status files.
