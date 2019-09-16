@@ -12,6 +12,10 @@
 #include "../../libMagAOX/libMagAOX.hpp" //Note this is included on command line to trigger pch
 #include "../../magaox_git_version.h"
 
+
+#include "../../libMagAOX/app/dev/telemeter.hpp"
+
+
 /** \defgroup tcsInterface
   * \brief The MagAO-X application to do interface with the Clay TCS
   *
@@ -34,12 +38,15 @@ namespace app
 /** 
   * \ingroup tcsInterface
   */
-class tcsInterface : public MagAOXApp<true>, public dev::ioDevice
+class tcsInterface : public MagAOXApp<true>, public dev::ioDevice, public dev::telemeter<tcsInterface>
 {
 
    //Give the test harness access.
    friend class tcsInterface_test;
 
+   friend class dev::telemeter<tcsInterface>;
+   
+   
 protected:
 
    /** \name Configurable Parameters
@@ -160,6 +167,16 @@ public:
    
    int updateINDI();
    
+   int checkRecordTimes();
+   
+   int recordTelem( const telem_telpos * );
+   
+   int recordTelem( const telem_teldata * );
+   
+   int recordTelPos(bool force = false);
+   
+   int recordTelData(bool force = false);
+   
 };
 
 inline
@@ -171,12 +188,17 @@ tcsInterface::tcsInterface() : MagAOXApp(MAGAOX_CURRENT_SHA1, MAGAOX_REPO_MODIFI
 inline
 void tcsInterface::setupConfig()
 {
+   dev::ioDevice::setupConfig(config);
+   dev::telemeter<tcsInterface>::setupConfig(config);
 }
 
 inline
 int tcsInterface::loadConfigImpl( mx::app::appConfigurator & _config )
 {
 
+   dev::ioDevice::loadConfig(_config);
+   
+   dev::telemeter<tcsInterface>::loadConfig(_config);
    
    return 0;
 }
@@ -280,7 +302,19 @@ int tcsInterface::appStartup()
    
    signal(SIGPIPE, SIG_IGN);
    
+   
+   if(dev::ioDevice::appStartup() < 0)
+   {
+      return log<software_error,-1>({__FILE__,__LINE__});
+   }
+   
+   if(dev::telemeter<tcsInterface>::appStartup() < 0)
+   {
+      return log<software_error,-1>({__FILE__,__LINE__});
+   }
+   
    state(stateCodes::NOTCONNECTED);
+   
    return 0;
 }
 
@@ -369,6 +403,8 @@ int tcsInterface::appLogic()
          log<text_log>("Error from getVaneData", logPrio::LOG_ERROR);
          return 0;
       }
+      
+      telemeter<tcsInterface>::appLogic();
       
       if(updateINDI() < 0)
       {
@@ -586,6 +622,11 @@ int tcsInterface::getTelPos()
 
    m_telRotOff = strtod(pdat[5].c_str(),0);
 
+   if( recordTelPos() < 0)
+   {
+      return log<software_error,-1>({__FILE__,__LINE__});
+   }
+   
    return 0;
 }
 
@@ -649,6 +690,11 @@ int tcsInterface::getTelData()
 
    m_telDomeStat = atoi(tdat[9].c_str());
 
+   if( recordTelData() < 0)
+   {
+      return log<software_error,-1>({__FILE__,__LINE__});
+   }
+   
    return 0;
 }
 
@@ -936,6 +982,104 @@ int tcsInterface::updateINDI()
    
    return 0;
 }
+
+inline
+int tcsInterface::checkRecordTimes()
+{
+   return telemeter<tcsInterface>::checkRecordTimes(telem_telpos(), telem_teldata());
+}
+
+inline
+int tcsInterface::recordTelem( const telem_telpos * )
+{
+   recordTelPos(true);
+   return 0;
+}
+
+inline
+int tcsInterface::recordTelem( const telem_teldata * )
+{
+   recordTelData(true);
+   return 0;
+}
+   
+inline
+int tcsInterface::recordTelPos(bool force)
+{
+   static double lastEpoch = 0;
+   static double lastRA = 0;
+   static double lastDec = 0;
+   static double lastEl = 0;
+   static double lastHA = 0;
+   static double lastAM = 0;
+   static double lastRotOff = 0;
+   
+   if( force || lastEpoch != m_telEpoch ||
+                lastRA != m_telRA || 
+                lastDec != m_telDec ||
+                lastEl != m_telEl ||
+                lastHA != m_telHA ||
+                lastAM != m_telAM ||
+                lastRotOff != m_telRotOff )
+   {
+      std::cerr << "telem_telpos\n";
+      telem<telem_telpos>({m_telEpoch, m_telRA, m_telDec, m_telEl, m_telHA, m_telAM, m_telRotOff});
+      
+      lastEpoch = m_telEpoch;
+      lastRA = m_telRA;
+      lastDec = m_telDec;
+      lastEl = m_telEl;
+      lastHA = m_telHA;
+      lastAM = m_telAM;
+      lastRotOff = m_telRotOff;
+   }
+   
+   return 0;
+}
+
+inline
+int tcsInterface::recordTelData(bool force)
+{
+   static int lastROI = -999;
+   static int lastTracking = -999;
+   static int lastGuiding = -999;
+   static int lastSlewing = -999;
+   static int lastGuiderMoving = -999;
+   static double lastAz = 0;
+   static double lastZd = 0;
+   static double lastPA = 0;
+   static double lastDomeAz = 0;
+   static int lastDomeStat = -999;
+   
+   if( force || lastROI != m_telROI || 
+                lastTracking != m_telTracking || 
+                lastGuiding != m_telGuiding ||
+                lastSlewing != m_telSlewing ||
+                lastGuiderMoving != m_telGuiderMoving ||
+                lastAz != m_telAz ||
+                lastZd != m_telZd ||
+                lastPA != m_telPA ||
+                lastDomeAz != m_telDomeAz ||
+                lastDomeStat != m_telDomeStat )
+   {
+      std::cerr << "telem_teldata\n";
+      telem<telem_teldata>({m_telROI,m_telTracking,m_telGuiding,m_telSlewing,m_telGuiderMoving,m_telAz, m_telZd, m_telPA,m_telDomeAz,m_telDomeStat});
+      
+      lastROI = m_telROI;
+      lastTracking = m_telTracking;
+      lastGuiding = m_telGuiding;
+      lastSlewing = m_telSlewing;
+      lastGuiderMoving = m_telGuiderMoving;
+      lastAz = m_telAz;
+      lastZd = m_telZd;
+      lastPA = m_telPA;
+      lastDomeAz = m_telDomeAz;
+      lastDomeStat = m_telDomeStat;
+   }
+   
+   return 0;
+}
+
 } //namespace app
 } //namespace MagAOX
 

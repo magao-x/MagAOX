@@ -26,3 +26,4 @@ saving_stop              12501    saving_state_change
 saving_stats             12502    saving_stats
 
 telem_telpos             20000    telem_telpos
+telem_teldata            20001    telem_teldata

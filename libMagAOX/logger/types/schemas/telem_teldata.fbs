@@ -1,0 +1,21 @@
+namespace MagAOX.logger;
+
+
+
+table Telem_teldata_fb
+{
+   roi:int;
+   tracking:int;
+   guiding:int;
+   slewing:int;
+   guiderMoving:int;
+   az:double;
+   zd:double;
+   pa:double;
+   domeAz:double;
+   domeStat:int;
+   
+}
+
+root_type Telem_teldata_fb;
+

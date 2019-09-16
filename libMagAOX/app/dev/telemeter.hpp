@@ -25,20 +25,20 @@ namespace dev
    \code 
   int checkRecordTimes()
   {
-     return dev::telemeter<derivedT>::checkRecordTimes<telem_type1, telem_type2, ..., telem_typeN>(0,0,..,0);
+     return dev::telemeter<derivedT>::checkRecordTimes( telem_type1(), telem_type2(), ..., telem_typeN());
   }
   \endcode
-  * where there is one template parameter for each telemetry log type recorded by this device.  There must be one 0 (or really any valid pointer address)
-  * for each of the types as well.  This is to enable variadic template resolution and these are ignored.
+  * where there is one constructor-call argument for each telemetry log type recorded by this device.  The resultant objects are not used, rather the types
+  * are used for variadic template resolution.
   * 
-  * 3) Next, there must be one overload of the function 
+  * 2) Next, there must be one overload of the function 
   \code 
   int recordTelem( telem_type1 * )
   {
      return m_tel<telem_type1>( { message entered here } );
   }
   \endcode
-  * for each of the telemetry types.  Do not use the point argument -- you should fill in the telemetry log message using internal values.
+  * for each of the telemetry types.  Do not use the pointer argument -- you should fill in the telemetry log message using internal values.
   * 
   * Additionally, calls to this classes setupConfig, `loadConfig`, `appStartup`, `appLogic`, and `appShutdown` should be placed
   * in the corresponding function of `derivedT`.
@@ -126,8 +126,8 @@ struct telemeter
      * \returns -1 on error
      */ 
    template<class telT, class... telTs> 
-   int checkRecordTimes( telT * tel,   ///< [in] [unused] pointer to the telemetry type to record
-                         telTs... tels ///< [in] [unused] pointers to additional telemetry types to record
+   int checkRecordTimes( const telT & tel,   ///< [in] [unused] object of the telemetry type to record
+                         telTs... tels ///< [in] [unused] objects of the additional telemetry types to record
                        );
    
    /// Worker function to actually perform the record time checking logic 
@@ -138,8 +138,8 @@ struct telemeter
      */
    template<class telT, class... telTs> 
    int checkRecordTimes( timespec & ts, ///<[in] [unused] the timestamp that records are compared to 
-                         telT * tel,    ///< [in] [unused] pointer to the telemetry type to record
-                         telTs... tels  ///< [in] [unused] pointers to additional telemetry types to record
+                         const telT & tel,    ///< [in] [unused] objects of the telemetry type to record
+                         telTs... tels  ///< [in] [unused] objects of the additional telemetry types to record
                        );
 
    /// Empty function called at the end of the template list 
@@ -262,7 +262,7 @@ int telemeter<derivedT>::appShutdown()
 
 template<class derivedT>
 template<class telT, class... telTs> 
-int telemeter<derivedT>::checkRecordTimes(telT * tel, telTs... tels)
+int telemeter<derivedT>::checkRecordTimes(const telT & tel, telTs... tels)
 {
    timespec ts;
 
@@ -273,12 +273,12 @@ int telemeter<derivedT>::checkRecordTimes(telT * tel, telTs... tels)
 
 template<class derivedT>
 template<class telT, class... telTs> 
-int telemeter<derivedT>::checkRecordTimes( timespec & ts, telT * tel, telTs... tels)
+int telemeter<derivedT>::checkRecordTimes( timespec & ts, const telT & tel, telTs... tels)
 {   
    //Check if it's been more than maxInterval seconds since the last record.  This is corrected for the pause of the main loop.
    if( ( (double) ts.tv_sec - ((double) ts.tv_nsec)/1e9)-  ((double) telT::lastRecord.tv_sec - ((double) telT::lastRecord.tv_nsec)/1e9) > m_maxInterval - ((double)derived().m_loopPause) / 1e9) 
    {
-      derived().recordTelem( tel );
+      derived().recordTelem( &tel );
    }
    
    return checkRecordTimes(ts, tels...);
