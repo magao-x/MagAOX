@@ -54,7 +54,7 @@ HERE
 chmod +x $JUPYTER_SCRIPT
 UNIT_PATH=/etc/systemd/system/
 
-if [[ $MAGAOX_ROLE != RTC && $MAGAOX_ROLE != ICC ]]; then
+if [[ $MAGAOX_ROLE != RTC && $MAGAOX_ROLE != ICC && $MAGAOX_ROLE != ci ]]; then
 	cp /opt/MagAOX/config/jupyterlab.service $UNIT_PATH/jupyterlab.service
 	log_success "Installed jupyterlab.service to $UNIT_PATH"
 	if [[ $MAGAOX_ROLE == vm ]]; then
