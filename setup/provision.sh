@@ -225,7 +225,7 @@ if [[ -e $VENDOR_SOFTWARE_BUNDLE ]]; then
         fi
         sudo bash -l "$DIR/steps/install_andor.sh"
     fi
-    if [[ $MAGAOX_ROLE == RTC || $MAGAOX_ROLE == vm ]]; then
+    if [[ $ID == centos && ( $MAGAOX_ROLE == RTC || $MAGAOX_ROLE == vm ) ]]; then
         sudo bash -l "$DIR/steps/install_bmc.sh"
     fi
     sudo rm -rf $BUNDLE_TMPDIR

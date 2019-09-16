@@ -85,19 +85,19 @@ indi_clean:
 
 libs_all:
 	for lib in ${libs_to_build}; do \
-		(cd libs/$$lib; ${MAKE} )|| break; \
+		(cd libs/$$lib; ${MAKE} )|| exit 1; \
 	done
 
 libs_install:
 	for lib in ${libs_to_build}; do \
-		(cd libs/$$lib; ${MAKE}  install) || break; \
+		(cd libs/$$lib; ${MAKE}  install) || exit 1; \
 	done
 	sudo bash -c "echo $(LIB_PATH) > /etc/ld.so.conf.d/magaox.conf"
 	sudo ldconfig
 
 libs_clean:
 	for lib in ${libs_to_build}; do \
-		(cd libs/$$lib; ${MAKE}  clean) || break; \
+		(cd libs/$$lib; ${MAKE}  clean) || exit 1; \
 	done
 
 lib_clean:
@@ -106,17 +106,17 @@ lib_clean:
 apps_all: libs_install
 
 	for app in ${apps_to_build}; do \
-		(cd apps/$$app; ${MAKE} )|| break; \
+		(cd apps/$$app; ${MAKE} )|| exit 1; \
 	done
 
 apps_install:
 	for app in ${apps_to_build}; do \
-		(cd apps/$$app; ${MAKE}  install) || break; \
+		(cd apps/$$app; ${MAKE}  install) || exit 1; \
 	done
 
 apps_clean:
 	for app in ${apps_to_build}; do \
-		(cd apps/$$app; ${MAKE}  clean) || break; \
+		(cd apps/$$app; ${MAKE}  clean) || exit 1; \
 	done
 
 scripts_install:
@@ -128,17 +128,17 @@ scripts_install:
 
 utils_all:
 		for app in ${utils_to_build}; do \
-			(cd utils/$$app; ${MAKE}) || break; \
+			(cd utils/$$app; ${MAKE}) || exit 1; \
 		done
 
 utils_install:
 		for app in ${utils_to_build}; do \
-			(cd utils/$$app; ${MAKE} install) || break; \
+			(cd utils/$$app; ${MAKE} install) || exit 1; \
 		done
 
 utils_clean:
 		for app in ${utils_to_build}; do \
-			(cd utils/$$app; ${MAKE} clean) || break; \
+			(cd utils/$$app; ${MAKE} clean) || exit 1; \
 		done
 
 
