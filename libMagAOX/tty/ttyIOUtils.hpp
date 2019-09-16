@@ -219,6 +219,82 @@ int ttyWrite( const std::string & buffWrite, ///< [in] The characters to write t
    return TTY_E_NOERROR;
 }
 
+/// Read from a tty console indicated by a file-descriptor, until a given number of bytes are read.
+/**
+  * \returns TTY_E_NOERROR on success
+  * \returns TTY_E_TIMEOUTONREADPOLL if the poll times out.
+  * \returns TTY_E_ERRORONREADPOLL if an error is returned by poll.
+  * \returns TTY_E_TIMEOUTONREAD if a timeout occurs during the read.
+  * \returns TTY_E_ERRORONREAD if an error occurs reading from the file.
+  * 
+  * \ingroup tty 
+  */
+inline
+int ttyRead( std::string & strRead,   ///< [out] The string in which to store the output.
+             int bytes,               ///< [in] the number of bytes to read
+             int fd,                  ///< [in] The file descriptor of the open tty.
+             int timeoutRead          ///< [in] The timeout in milliseconds.
+           )
+{
+   int rv;
+   int timeoutCurrent;
+   double t0;
+
+   struct pollfd pfd;
+
+   errno = 0;
+
+   pfd.fd = fd;
+   pfd.events = POLLIN;
+
+   strRead.clear();
+   char buffRead[TTY_BUFFSIZE];
+
+   //Start timeout clock for reading.
+   t0 = mx::get_curr_time();
+   timeoutCurrent = timeoutRead;
+
+   //Now read the response up to the eot.
+   strRead.clear();
+
+   rv = poll( &pfd, 1, timeoutCurrent);
+   if( rv == 0 ) return TTY_E_TIMEOUTONREADPOLL;
+   if( rv < 0 ) return TTY_E_ERRORONREADPOLL;
+
+   rv = read(fd, buffRead, TTY_BUFFSIZE);
+   if( rv < 0 ) return TTY_E_ERRORONREAD;
+
+   strRead.append( buffRead, rv);
+
+   int totBytes = rv;
+   
+   while( totBytes < bytes )
+   {
+      timeoutCurrent = timeoutRead - (mx::get_curr_time()-t0)*1000;
+      if(timeoutCurrent < 0) return TTY_E_TIMEOUTONREAD;
+
+      rv = poll( &pfd, 1, timeoutCurrent);
+      if( rv == 0 ) return TTY_E_TIMEOUTONREADPOLL;
+      if( rv < 0 ) return TTY_E_ERRORONREADPOLL;
+
+      rv = read(fd, buffRead, TTY_BUFFSIZE);
+      if( rv < 0 ) return TTY_E_ERRORONREAD;
+      buffRead[rv] ='\0';
+
+      strRead.append( buffRead, rv);
+      totBytes += rv;
+      
+      #ifdef TTY_DEBUG
+      std::cerr << "ttyRead: read " << rv << " bytes. buffRead=" << buffRead << "\n";
+      #endif
+   }
+
+
+   return TTY_E_NOERROR;
+
+
+}
+
 /// Read from a tty console indicated by a file-descriptor, until an end of transmission string is read.
 /**
   * \returns TTY_E_NOERROR on success
