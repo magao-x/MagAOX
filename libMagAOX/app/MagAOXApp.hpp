@@ -296,14 +296,57 @@ private:
    uid_t m_euidReal;     ///< The real user id of the proces (i.e. the lower privileged id of the user)
    uid_t m_euidCalled;   ///< The user id of the process as called (i.e. the higher privileged id of the owner, root if setuid).
    uid_t m_suid;         ///< The save-set user id of the process
-
+   
 protected:
 
+   /// Internal class to manage setuid privilege escalation with RAII
+   /** Upon construction this elevates to the called user id, root in a setuid process.
+     * Restores privileges to real user id upon destruction (i.e. when it goes out of scope).
+     */ 
+   class elevatedPrivileges
+   {
+      private:
+         MagAOXApp * m_app;
+         bool m_elevated {false};
+         
+      public:
+         elevatedPrivileges(MagAOXApp * app)
+         {
+            m_app = app;
+            elevate();
+         }
+      
+         void elevate()
+         {
+            if(m_elevated) return;
+          
+            std::cerr << "Elevating\n";
+            m_app->euidCalled();
+            m_elevated = true;
+         }
+         
+         void restore()
+         {
+            if(!m_elevated) return;
+            
+            std::cerr << "Restoring\n";
+            m_app->euidReal();
+            m_elevated = false;
+         }
+         
+         ~elevatedPrivileges()
+         {
+            restore();
+         }
+   };
+   
    /// Set the effective user ID to the called value, i.e. the highest possible.
    /** If setuid is set on the file, this will be super-user privileges.
      *
      * Reference: http://pubs.opengroup.org/onlinepubs/009695399/functions/seteuid.html
      *
+     * \todo make this private, and change name to enforce use of the above class.
+     * 
      * \returns 0 on success
      * \returns -1 on error from setuid().
      */
@@ -313,6 +356,8 @@ protected:
    /**
      * Reference: http://pubs.opengroup.org/onlinepubs/009695399/functions/seteuid.html
      *
+     * \todo make this private, and change name to enforce use of the above class.
+     * 
      * \returns 0 on success
      * \returns -1 on error from setuid().
      */
