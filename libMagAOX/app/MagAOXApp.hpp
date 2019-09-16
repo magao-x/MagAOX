@@ -320,7 +320,6 @@ protected:
          {
             if(m_elevated) return;
           
-            std::cerr << "Elevating\n";
             m_app->euidCalled();
             m_elevated = true;
          }
@@ -329,7 +328,6 @@ protected:
          {
             if(!m_elevated) return;
             
-            std::cerr << "Restoring\n";
             m_app->euidReal();
             m_elevated = false;
          }
