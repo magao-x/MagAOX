@@ -23,7 +23,7 @@ namespace MagAOX
 namespace tty
 {
 
-///Get the ttyUSB device name
+///Get the ttyUSB device name for a specific device
 /**
   * \returns TTY_E_NOERROR on success
   * \returns TTY_E_NODEVNAMES if no device names found in sys
@@ -93,6 +93,68 @@ int ttyUSBDevName( std::string & devName,       ///< [out] the /dev/ttyUSBX devi
    return TTY_E_DEVNOTFOUND;
 }
 
+///Get the ttyUSB device name for a set of devices specified by their vendor and product ids.
+/**
+  * \returns TTY_E_NOERROR on success
+  * \returns TTY_E_NODEVNAMES if no device names found in sys
+  * \returns TTY_E_UDEVNEWFAILED if initializing libudev failed.
+  * \returns TTY_E_DEVNOTFOUND if no matching device found.
+  * 
+  * \ingroup tty 
+  */
+inline
+int ttyUSBDevNames( std::vector<std::string> & devNames, ///< [out] the /dev/ttyUSBX device names for all matching devices.
+                    const std::string & vendor,           ///< [in] the 4-digit vendor identifier.
+                    const std::string & product           ///< [in] the 4-digit product identifier.
+                  )
+{
+   std::vector<std::string> pdevNames;
+
+   devNames.clear();
+   
+   pdevNames = mx::ioutils::getFileNames("/sys/class/tty/", "ttyUSB", "", "");
+
+   if(pdevNames.size() == 0) return TTY_E_NODEVNAMES;
+
+   struct udev *udev;
+
+
+   /* Create the udev object */
+   udev = udev_new();
+   if (!udev) return TTY_E_UDEVNEWFAILED;
+
+   for(size_t i=0; i< pdevNames.size(); ++i)
+   {
+      struct udev_device *dev;
+
+      dev = udev_device_new_from_syspath(udev, pdevNames[i].c_str());
+
+      if(!dev) continue;
+
+      dev = udev_device_get_parent_with_subsystem_devtype( dev, "usb", "usb_device");
+
+      if (!dev) continue;
+
+      const char * idVendor = udev_device_get_sysattr_value( dev, "idVendor" );
+
+      if(idVendor == nullptr) continue;
+      if( strcmp( idVendor, vendor.c_str()) != 0) continue;
+
+      const char * idProduct = udev_device_get_sysattr_value( dev, "idProduct" );
+
+      if(idProduct == nullptr) continue;
+      if( strcmp( idProduct, product.c_str()) != 0) continue;
+
+      //If we make it through all comparisons we found it!
+      boost::filesystem::path p(pdevNames[i]);
+      devNames.push_back( "/dev/" + p.filename().string());
+   }
+
+
+   if( devNames.size() > 0) return TTY_E_NOERROR;   
+   else return TTY_E_DEVNOTFOUND;
+   
+}
 } //namespace tty
 } //namespace MagAOX
 
