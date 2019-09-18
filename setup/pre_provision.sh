@@ -24,12 +24,12 @@ if [[ $ID == ubuntu ]]; then
     install_rt=false
 else
     if ! grep "$DESIRED_CMDLINE" /etc/default/grub; then
-        echo GRUB_CMDLINE_LINUX_DEFAULT="$DESIRED_CMDLINE" | sudo tee -a /etc/default/grub
+        echo GRUB_CMDLINE_LINUX_DEFAULT=\""$DESIRED_CMDLINE"\" | sudo tee -a /etc/default/grub
         sudo grub2-mkconfig -o /boot/grub2/grub.cfg
         log_success "Applied kernel command line tweaks for ALPAO, Spectre, PCIe expansion"
     fi
     if [[ $(uname -v) != *"PREEMPT RT"* ]]; then
-        mkdir -p /opt/MagAOX/vendor
+        sudo mkdir -p /opt/MagAOX/vendor
         cd /opt/MagAOX/vendor
         sudo $DIR/steps/install_rt_kernel_pinned.sh
         log_success "Installed PREEMPT_RT Linux kernel packages"
