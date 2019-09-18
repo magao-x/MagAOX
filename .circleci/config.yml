@@ -38,7 +38,7 @@ jobs:
           command: gh-pages --dotfiles --message "[skip ci] Update built docs" --dist doc/output/api/
   build_centos:
     docker:
-      - image: centos:7.6.1810
+      - image: centos:7.7.1908
     steps:
       - checkout
       - run:
