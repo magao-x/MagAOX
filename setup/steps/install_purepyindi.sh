@@ -10,6 +10,7 @@ clone_or_update_and_cd $orgname $reponame $parentdir
 
 export CONDA_CHANGEPS1=false
 for envname in py37 dev; do
+    set +u
     conda activate $envname
 
     PACKAGES=$(conda list)
@@ -21,4 +22,5 @@ for envname in py37 dev; do
     fi
     #deactivate the environment before moving on
     conda deactivate
+    set -u
 done
