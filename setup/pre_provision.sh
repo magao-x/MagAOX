@@ -31,12 +31,9 @@ else
         log_success "Applied kernel command line tweaks for ALPAO, Spectre, PCIe expansion"
     fi
     if [[ $(uname -v) != *"PREEMPT RT"* ]]; then
-        sudo mkdir -p /opt/MagAOX/vendor
-        cd /opt/MagAOX/vendor
-        sudo $DIR/steps/install_rt_kernel_pinned.sh
-        log_success "Installed PREEMPT_RT Linux kernel packages"
+        log_info "Will install RT kernel..."
+        install_rt=true
     fi
-    install_rt=true
 fi
 
 if [[ ! -e /etc/modprobe.d/blacklist-nouveau.conf ]]; then
@@ -51,10 +48,8 @@ $DIR/setup_users_and_groups.sh
 log_success "Created users and configured groups"
 
 if [[ $install_rt == true ]]; then
-    sudo $DIR/steps/install_rt_kernel_pinned.sh
-    log_success "Reboot before proceeding"
-else
-    log_success "Log out and back in before proceeding"
+    sudo $DIR/steps/install_rt_kernel.sh
+    log_success "Installed RT kernel"
 fi
 
 log_success "Reboot before proceeding"
