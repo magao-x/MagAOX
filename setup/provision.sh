@@ -132,8 +132,8 @@ fi
 
 # Configure hostname aliases and time synchronization
 if [[ $MAGAOX_ROLE == AOC || $MAGAOX_ROLE == ICC || $MAGAOX_ROLE == RTC ]]; then
-    sudo bash -l "$DIR/configure_etc_hosts.sh"
-    sudo bash -l "$DIR/configure_chrony.sh"
+    sudo bash -l "$DIR/steps/configure_etc_hosts.sh"
+    sudo bash -l "$DIR/steps/configure_chrony.sh"
 fi
 
 # The VM and CI provisioning doesn't run setup_users_and_groups.sh

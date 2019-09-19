@@ -48,6 +48,7 @@ yum install -y \
     log4cxx-devel \
     chrony \
     gdb \
+    yum-utils \
 ;
 
 sudo alternatives --install /usr/local/bin/cmake cmake /usr/bin/cmake3 20 \
