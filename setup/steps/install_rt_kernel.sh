@@ -24,6 +24,7 @@ sudo yum install -y tuned-2.9.0-1.el7fdp.noarch
 sudo yum versionlock tuned
 sudo yum install -y kernel-rt-3.10.0-957.21.3.rt56.935.el7 kernel-rt-devel-3.10.0-957.21.3.rt56.935.el7
 sudo yum versionlock kernel-rt
+sudo yum versionlock kernel
 # Dependencies Resolved
 
 # =====================================================================================================
