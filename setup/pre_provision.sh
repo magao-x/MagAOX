@@ -17,8 +17,10 @@ ALPAO_CMDLINE_FIX="hardened_usercopy=off"
 PCIEXPANSION_CMDLINE_FIX="pci=noaer"
 # disable the slow Spectre mitigations
 SPECTRE_CMDLINE_FIX="noibrs noibpb nopti nospectre_v2 nospectre_v1 l1tf=off nospec_store_bypass_disable no_stf_barrier mds=off mitigations=off"
+# disable 3rd party nvidia drivers
+NVIDIA_DRIVER_FIX="rd.driver.blacklist=nouveau nouveau.modeset=0"
 # Put it all together
-DESIRED_CMDLINE="$ALPAO_CMDLINE_FIX $PCIEXPANSION_CMDLINE_FIX $SPECTRE_CMDLINE_FIX"
+DESIRED_CMDLINE="nosplash $NVIDIA_DRIVER_FIX $ALPAO_CMDLINE_FIX $PCIEXPANSION_CMDLINE_FIX $SPECTRE_CMDLINE_FIX"
 if [[ $ID == ubuntu ]]; then
     log_info "Skipping RT kernel install on Ubuntu"
     install_rt=false
@@ -36,11 +38,23 @@ else
     fi
     install_rt=true
 fi
-sudo $DIR/setup_users_and_groups.sh
+
+if [[ ! -e /etc/modprobe.d/blacklist-nouveau.conf ]]; then
+    echo "blacklist nouveau" | sudo tee /etc/modprobe.d/blacklist-nouveau.conf > /dev/null
+    echo "options nouveau modeset=0" | sudo tee -a /etc/modprobe.d/blacklist-nouveau.conf > /dev/null
+    log_success "Blacklisted nouveau nvidia driver"
+else
+    log_info "nouveau nvidia driver blacklist entry exists"
+fi
+
+$DIR/setup_users_and_groups.sh
 log_success "Created users and configured groups"
+
 if [[ $install_rt == true ]]; then
     sudo $DIR/steps/install_rt_kernel_pinned.sh
     log_success "Reboot before proceeding"
 else
     log_success "Log out and back in before proceeding"
 fi
+
+log_success "Reboot before proceeding"
