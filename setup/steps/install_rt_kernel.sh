@@ -3,6 +3,8 @@ DIR="$( cd "$( dirname "${BASH_SOURCE[0]}" )" && pwd )"
 source $DIR/../_common.sh
 set -euo pipefail
 
+sudo yum install -y yum-versionlock
+
 sudo tee /etc/yum.repos.d/CentOS-rt.repo >/dev/null <<EOF
 # CentOS-rt.repo
 
@@ -19,7 +21,9 @@ if ! rpm -q tuned-2.9.0-1.el7fdp.noarch; then
     sudo yum remove -y tuned
 fi
 sudo yum install -y tuned-2.9.0-1.el7fdp.noarch
-sudo yum install -y kernel-rt kernel-rt-devel
+sudo yum versionlock tuned
+sudo yum install -y kernel-rt-3.10.0-957.21.3.rt56.935.el7 kernel-rt-devel-3.10.0-957.21.3.rt56.935.el7
+sudo yum versionlock kernel-rt
 # Dependencies Resolved
 
 # =====================================================================================================
