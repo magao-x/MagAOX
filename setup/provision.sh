@@ -136,6 +136,9 @@ if [[ $MAGAOX_ROLE == AOC || $MAGAOX_ROLE == ICC || $MAGAOX_ROLE == RTC ]]; then
     sudo bash -l "$DIR/steps/configure_chrony.sh"
 fi
 
+# Configure executable search path
+sudo bash -l "$DIR/steps/put_usr_local_bin_on_path.sh"
+
 # The VM and CI provisioning doesn't run setup_users_and_groups.sh
 # separately as in the instrument instructions; we have to run it
 if [[ $MAGAOX_ROLE == vm || $MAGAOX_ROLE == ci ]]; then
