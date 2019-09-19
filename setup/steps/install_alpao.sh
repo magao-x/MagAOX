@@ -11,3 +11,6 @@ for libFilename in libgpg2x72c.so.2.2.5 libgpgconf.so.1.5.6 libait_pex292144.so 
     sudo chmod -v u=rwx,g=rx,o=rx /usr/lib/$libFilename
     sudo chmod -v u=rwx,g=rx,o=rx /usr/lib64/$libFilename
 done
+
+echo "export ACECFG=/opt/MagAOX/config/alpao" | sudo tee /etc/profile.d/alpao.sh
+log_info "Added /etc/profile.d/alpao.sh"
