@@ -3,7 +3,7 @@ DIR="$( cd "$( dirname "${BASH_SOURCE[0]}" )" && pwd )"
 source $DIR/../_common.sh
 set -euo pipefail
 
-PICAM_RUNFILE_CHECKSUM=37bedee6c828e364750e9b5fd7c2a420
+PICAM_RUNFILE_CHECKSUM=df337d5ff5bea402669b2283eb534d08
 PICAM_RUNFILE=Picam_SDK.run
 PICAM_URL=ftp://ftp.piacton.com/Public/Software/Official/PICam/$PICAM_RUNFILE
 _cached_fetch $PICAM_URL $PICAM_RUNFILE
