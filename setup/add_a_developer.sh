@@ -1,7 +1,12 @@
 #!/bin/bash
+if [[ "$EUID" != 0 ]]; then
+    sudo bash $0 "$@"
+    exit $?
+fi
 set -euo pipefail
 DIR="$( cd "$( dirname "${BASH_SOURCE[0]}" )" && pwd )"
 source $DIR/_common.sh
+
 
 $DIR/add_a_user.sh $1
 gpasswd -a $1 magaox-dev

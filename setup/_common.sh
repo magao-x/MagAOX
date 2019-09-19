@@ -75,10 +75,10 @@ function createuser() {
   sudo usermod -g magaox $1
   log_info "Added user $1 to group magaox"
   sudo mkdir -p /home/$1/.ssh
-  sudo chown -R $1:magaox /home/$1
   sudo touch /home/$1/.ssh/authorized_keys
   sudo chmod -R u=rwx,g=,o= /home/$1/.ssh
   sudo chmod u=rw,g=,o= /home/$1/.ssh/authorized_keys
+  sudo chown -R $1:magaox /home/$1
   sudo chsh $1 -s $(which bash)
   log_info "Append an ecdsa or ed25519 key to /home/$1/.ssh/authorized_keys to enable SSH login"
 }
