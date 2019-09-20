@@ -27,6 +27,36 @@ function setgid_all() {
     find $1 -type d -exec chmod g+s {} \;
 }
 
+function make_on_data_array() {
+  # If run on instrument computer, make the name provided as an arg a link from $2/$1
+  # to /data/$1.
+  # If not on a real instrument computer, just make a normal folder under /opt/MagAOX/
+  if [[ -z $1 ]]; then
+    log_error "Missing target name argument for make_on_data_array"
+    exit 1
+  else
+    TARGET_NAME=$1
+  fi
+  if [[ -z $2 ]]; then
+    log_error "Missing parent dir argument for make_on_data_array"
+    exit 1
+  else
+    PARENT_DIR=$1
+  fi
+
+  if [[ $MAGAOX_ROLE == RTC || $MAGAOX_ROLE == ICC || $MAGAOX_ROLE == AOC ]]; then
+    REAL_DIR=/data/$TARGET_NAME
+    mkdir -pv $REAL_DIR
+    link_if_necessary $REAL_DIR $PARENT_DIR/$TARGET_NAME
+  else
+    REAL_DIR=$PARENT_DIR/$TARGET_NAME
+    mkdir -pv $REAL_DIR
+  fi
+  chown -RP xsup:magaox $REAL_DIR
+  chmod -R u=rwX,g=rwX,o=rX $REAL_DIR
+  setgid_all $REAL_DIR
+}
+
 mkdir -pv /opt/MagAOX
 chown root:root /opt/MagAOX
 
@@ -36,8 +66,8 @@ chown root:root /opt/MagAOX/bin
 chmod u+rwX,g+rX,o+rX /opt/MagAOX/bin
 
 if [[ "$MAGAOX_ROLE" == "vm" ]]; then
-  mkdir -pv /vagrant/setup/calib
-  link_if_necessary /vagrant/setup/calib /opt/MagAOX/calib
+  mkdir -pv /vagrant/vm/calib
+  link_if_necessary /vagrant/vm/calib /opt/MagAOX/calib
 else
   mkdir -pv /opt/MagAOX/calib
   chown -R root:magaox-dev /opt/MagAOX/calib
@@ -46,8 +76,8 @@ else
 fi
 
 if [[ "$MAGAOX_ROLE" == "vm" ]]; then
-  mkdir -pv /vagrant/setup/config
-  link_if_necessary /vagrant/setup/config /opt/MagAOX/config
+  mkdir -pv /vagrant/vm/config
+  link_if_necessary /vagrant/vm/config /opt/MagAOX/config
 else
   mkdir -pv /opt/MagAOX/config
   chown -R root:magaox-dev /opt/MagAOX/config
@@ -60,29 +90,9 @@ chown -R root:root /opt/MagAOX/drivers
 chmod -R u=rwX,g=rwX,o=rX /opt/MagAOX/drivers
 chown -R root:magaox /opt/MagAOX/drivers/fifos
 
-if [[ $MAGAOX_ROLE == RTC || $MAGAOX_ROLE == ICC || $MAGAOX_ROLE == AOC ]]; then
-  REAL_LOGS_DIR=/data/logs
-  mkdir -pv $REAL_LOGS_DIR
-  link_if_necessary $REAL_LOGS_DIR /opt/MagAOX/logs
-else
-  REAL_LOGS_DIR=/opt/MagAOX/logs
-  mkdir -pv $REAL_LOGS_DIR
-fi
-chown -RP xsup:magaox $REAL_LOGS_DIR
-chmod -R u=rwX,g=rwX,o=rX $REAL_LOGS_DIR
-setgid_all $REAL_LOGS_DIR
-
-if [[ $MAGAOX_ROLE == RTC || $MAGAOX_ROLE == ICC || $MAGAOX_ROLE == AOC ]]; then
-  REAL_RAWIMAGES_DIR=/data/rawimages
-  mkdir -pv $REAL_RAWIMAGES_DIR
-  link_if_necessary $REAL_RAWIMAGES_DIR /opt/MagAOX/rawimages
-else
-  REAL_RAWIMAGES_DIR=/opt/MagAOX/rawimages
-  mkdir -pv $REAL_RAWIMAGES_DIR
-fi
-chown -RP xsup:magaox $REAL_RAWIMAGES_DIR
-chmod -R u=rwX,g=rwX,o=rX $REAL_RAWIMAGES_DIR
-setgid_all $REAL_RAWIMAGES_DIR
+make_on_data_array logs /opt/MagAOX
+make_on_data_array rawimages /opt/MagAOX
+make_on_data_array telem /opt/MagAOX
 
 mkdir -pv /opt/MagAOX/secrets
 chown -R root:root /opt/MagAOX/secrets
@@ -104,8 +114,8 @@ chmod u=rwX,g=rwX,o=rX /opt/MagAOX/vendor
 setgid_all /opt/MagAOX/vendor
 
 if [[ "$MAGAOX_ROLE" == "vm" ]]; then
-  mkdir -pv /vagrant/setup/cache
-  link_if_necessary /vagrant/setup/cache /opt/MagAOX/.cache
+  mkdir -pv /vagrant/vm/cache
+  link_if_necessary /vagrant/vm/cache /opt/MagAOX/.cache
 else
   mkdir -pv /opt/MagAOX/.cache
   chown -R root:root /opt/MagAOX/.cache
