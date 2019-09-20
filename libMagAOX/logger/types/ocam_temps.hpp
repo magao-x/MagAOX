@@ -28,8 +28,9 @@ struct ocam_temps : public flatbuffer_log
    static const flatlogs::eventCodeT eventCode = eventCodes::OCAM_TEMPS;
 
    ///The default level
-   static const flatlogs::logPrioT defaultLevel = flatlogs::logPrio::LOG_INFO;
+   static const flatlogs::logPrioT defaultLevel = flatlogs::logPrio::LOG_TELEM;
 
+   static timespec lastRecord; ///< The time of the last time this log was recorded.  Used by the telemetry system.
 
    ///The type of the input message
    struct messageT : public fbMessage
@@ -90,6 +91,7 @@ struct ocam_temps : public flatbuffer_log
    
 }; //ocam_temps
 
+timespec ocam_temps::lastRecord = {0,0};
 
 } //namespace logger
 } //namespace MagAOX
