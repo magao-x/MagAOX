@@ -109,7 +109,7 @@ int loadSSHTunnelConfigs( tunnelMapT & tmap, ///< [out] the tunnel map which wil
 #define XINDISERVER_E_VECTOREXCEPT (-102)
 #define XINDISERVER_E_NOTUNNELS (-103) 
 #define XINDISERVER_E_TUNNELNOTFOUND (-104)
- 
+#define XINDISERVER_E_BADSERVERSPEC (-110) 
 
  
 /** The INDI Server wrapper application class.
@@ -135,6 +135,8 @@ protected:
    std::vector<std::string> m_local; ///< List of local drivers passed in by config
    std::vector<std::string> m_remote; ///< List of remote drivers passed in by config
    std::unordered_set<std::string> m_driverNames; ///< List of driver names processed for command line, used to prevent duplication.
+   
+   std::vector<std::string> m_remoteServers; ///< List of other INDI server config files to read remote drivers from.
    
    tunnelMapT m_tunnels; ///< Map of the ssh tunnels, used for processing the remote drivers in m_remote.
    
@@ -188,6 +190,14 @@ public:
      */ 
    int addRemoteDrivers( std::vector<std::string> & driverArgs /**< [out] the vector of command line arguments for exec*/);
    
+   ///Validate the remote server entries, read the associated config files for local drivers, and append them to the indi server command line arguments as remote ddrivers.
+   /** Parses the remote server specs, then reads the remote server config files, and then
+     * constructs the command line arguments and appends them to the driverArgs vector passed in.
+     *
+     * \returns 0 on success.
+     * \returns -1 on error, either from failed validation or an exception in std::vector.
+     */ 
+   int addRemoteServers( std::vector<std::string> & driverArgs /**< [out] the vector of command line arguments for exec*/);
    
    ///Forks and exec's the indiserver process with the command constructed from local, remote, and hosts.
    /** Also saves the PID and stderr pipe file descriptors for log capture.
@@ -242,9 +252,11 @@ void xindiserver::setupConfig()
    config.add("indiserver.v", "v", "", argType::True, "indiserver", "v", false,  "int", "indiserver: log verbosity, -v, -vv or -vvv");
    config.add("indiserver.x", "x", "", argType::True, "indiserver", "x", false,  "bool", "exit after last client disconnects -- FOR PROFILING ONLY");
    
-   config.add("local.drivers","L", "local" , argType::Required, "local", "drivers", false,  "vector string", "List of local drivers to start.");
-   config.add("remote.drivers","R", "remote" , argType::Required, "remote", "drivers", false,  "vector string", "List of remote drivers to start, in the form of name@tunnel, where tunnel is the name of a tunnel specified in sshTunnels.conf.");
+   config.add("local.drivers","L", "local.drivers" , argType::Required, "local", "drivers", false,  "vector string", "List of local drivers to start.");
+   config.add("remote.drivers","R", "remote.drivers" , argType::Required, "remote", "drivers", false,  "vector string", "List of remote drivers to start, in the form of name@tunnel, where tunnel is the name of a tunnel specified in sshTunnels.conf.");
 
+   config.add("remote.servers","", "remote.servers" , argType::Required, "remote", "servers", false,  "vector string", "List of servers to load remote drivers for, in the form of name@tunnel.  Name is used to load the name.conf configuration file, and tunnel is the name of a tunnel specified in sshTunnels.conf.");
+   
 }
 
 
@@ -263,6 +275,7 @@ void xindiserver::loadConfig()
    
    config(m_local, "local.drivers");
    config(m_remote, "remote.drivers");
+   config(m_remoteServers, "remote.servers");
    
    loadSSHTunnelConfigs(m_tunnels, config);
 }
@@ -404,6 +417,89 @@ int xindiserver::addRemoteDrivers( std::vector<std::string> & driverArgs )
    
    return 0;
 
+}
+
+inline
+int xindiserver::addRemoteServers( std::vector<std::string> & driverArgs )
+{
+   for(size_t j=0; j < m_remoteServers.size(); ++j)
+   {
+      std::string server;
+      std::string tunnel;
+      
+      size_t p = m_remoteServers[j].find('@');
+      
+      if(p == 0 || p == std::string::npos)
+      {
+         log<software_critical>({__FILE__, __LINE__, "Error parsing remote server specification: " + m_remote[j] + "\n"});         
+         return XINDISERVER_E_BADSERVERSPEC;
+      }
+      
+      server = m_remoteServers[j].substr(0, p);
+      tunnel = m_remoteServers[j].substr(p+1);
+      
+      if(m_tunnels.size() == 0)
+      {
+         log<software_critical>({__FILE__, __LINE__, "No tunnels specified.\n"});         
+         return XINDISERVER_E_NOTUNNELS;
+      }
+      
+      if(m_tunnels.count(tunnel) != 1)
+      {
+         log<software_critical>({__FILE__, __LINE__, "Tunnel not found for: " + m_remote[j] + "\n"});         
+         return XINDISERVER_E_TUNNELNOTFOUND;
+      }
+      
+      //Now we create a local app configurator, and read the other server's config file
+      mx::app::appConfigurator rsconfig;
+      
+      rsconfig.add("local.drivers", "", "" , argType::Required, "local", "drivers", false,  "", "");
+      
+      std::string rsconfigPath = m_configDir + "/" + server + ".conf";
+      
+      rsconfig.readConfig(rsconfigPath);
+      
+      std::vector<std::string> local;
+      
+      rsconfig(local, "local.drivers");
+      
+      for(size_t i=0; i < local.size(); ++i)
+      {
+         size_t bad = local[i].find_first_of("@:/", 0);
+      
+         if(bad != std::string::npos)
+         {
+            log<software_critical>({__FILE__, __LINE__, "Remote server's Local driver can't have host spec or path(@,:,/): " + local[i]});
+         
+            return XINDISERVER_E_BADDRIVERSPEC;
+         }
+      
+         if( m_driverNames.count(local[i]) > 0)
+         {
+            log<software_critical>({__FILE__, __LINE__, "Duplicate driver name from remote server: " + local[i]});
+            return XINDISERVER_E_DUPLICATEDRIVER;
+         }
+         
+         m_driverNames.insert(local[i]);
+
+         std::ostringstream oss;
+                           
+         oss << local[i] << "@localhost:" << m_tunnels[tunnel].m_localPort;
+         
+         try
+         {
+            driverArgs.push_back(oss.str());
+         }
+         catch(...)
+         {
+            log<software_critical>({__FILE__, __LINE__, "Exception thrown by vector::push_back."});
+            return XINDISERVER_E_VECTOREXCEPT;
+         }
+      }
+      
+   }
+   
+   return 0;
 }
 
 inline
@@ -655,6 +751,11 @@ int xindiserver::appStartup()
       return -1;
    }
    
+   if( addRemoteServers(m_indiserverCommand) < 0)
+   {
+      log<software_critical>({__FILE__, __LINE__});
+      return -1;
+   }
    //--------------------
    //Make symlinks
    //--------------------
