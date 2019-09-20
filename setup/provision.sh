@@ -42,7 +42,10 @@ if [[ -d /vagrant || $CI == true ]]; then
     fi
 else
     # Only bother prompting if no role was specified as the command line arg to provision.sh
-    if [[ -z "$1" && -z $MAGAOX_ROLE ]]; then
+    if [[ ! -z "$1" ]]; then
+        MAGAOX_ROLE="$1"
+    fi
+    if [[ -z $MAGAOX_ROLE ]]; then
         MAGAOX_ROLE=""
         echo "Choose the role for this machine"
         echo "    AOC - Adaptive optics Operator Computer"
