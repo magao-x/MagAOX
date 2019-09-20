@@ -259,8 +259,10 @@ else
     if [[ $DIR != /opt/MagAOX/source/MagAOX/setup ]]; then
         if [[ ! -e /opt/MagAOX/source/MagAOX ]]; then
             echo "Cloning new copy of MagAOX codebase"
-            git clone $(dirname $DIR) /opt/MagAOX/source/MagAOX
-            cd /opt/MagAOX/source/MagAOX
+            orgname=magao-x
+            reponame=MagAOX
+            parentdir=/opt/MagAOX/source/
+            clone_or_update_and_cd $orgname $reponame $parentdir
             # ensure upstream is set somewhere that isn't on the fs to avoid possibly pushing
             # things and not having them go where we expect
             git remote remove origin

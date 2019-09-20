@@ -41,7 +41,7 @@ function make_on_data_array() {
     log_error "Missing parent dir argument for make_on_data_array"
     exit 1
   else
-    PARENT_DIR=$1
+    PARENT_DIR=$2
   fi
 
   if [[ $MAGAOX_ROLE == RTC || $MAGAOX_ROLE == ICC || $MAGAOX_ROLE == AOC ]]; then
