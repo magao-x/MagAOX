@@ -27,6 +27,33 @@ struct ocamTemps
    float RIGHT {0};         ///< The right amplifier temperature
    float SET {0};           ///< The CCD set temeperature
    float COOLING_POWER {0}; ///< the cooling power in 100 mw.
+   
+   ///Test for equality between two ocamTemps structures
+   /**
+     * \returns true if all members are equal 
+     * \returns false otherwise 
+     */ 
+   bool operator==(const ocamTemps & t /**< [in] the struct to compare to*/)
+   {
+      return (CCD == t.CCD && CPU == t.CPU && POWER == t.POWER && BIAS == t.BIAS && WATER == t.WATER && LEFT == t.LEFT && RIGHT == t.RIGHT && SET == t.SET &&
+               COOLING_POWER == t.COOLING_POWER);
+   }
+   
+   ///Set all values to the invalid value, -999.
+   int setInvalid()
+   {
+      CCD = -999;
+      CPU = -999;
+      POWER = -999;
+      BIAS = -999;
+      WATER = -999;
+      LEFT = -999;
+      RIGHT = -999;
+      SET = -999;
+      COOLING_POWER = -999;
+      
+      return 0;
+   }
 };
 
 ///Parse the OCAM temp query and fill the ocamTemps structure.
