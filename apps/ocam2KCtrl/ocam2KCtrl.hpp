@@ -45,12 +45,13 @@ namespace app
   * \ingroup ocam2KCtrl
   * 
   */
-class ocam2KCtrl : public MagAOXApp<>, /*public dev::ioDevice,*/ public dev::frameGrabber<ocam2KCtrl>, public dev::edtCamera<ocam2KCtrl>, public dev::dssShutter<ocam2KCtrl>
+class ocam2KCtrl : public MagAOXApp<>, /*public dev::ioDevice,*/ public dev::frameGrabber<ocam2KCtrl>, public dev::edtCamera<ocam2KCtrl>, public dev::dssShutter<ocam2KCtrl>, public dev::telemeter<ocam2KCtrl>
 {
 
    friend class dev::frameGrabber<ocam2KCtrl>;
    friend class dev::edtCamera<ocam2KCtrl>;
    friend class dev::dssShutter<ocam2KCtrl>;
+   friend class dev::telemeter<ocam2KCtrl>;
    
    typedef MagAOXApp<> MagAOXAppT;
    
@@ -87,6 +88,8 @@ protected:
 
    unsigned m_emGain {1}; ///< The current EM gain.
 
+   ocamTemps m_temps; ///< Structure holding the last temperature measurement.
+   
 public:
 
    ///Default c'tor
@@ -223,6 +226,13 @@ public:
    INDI_NEWCALLBACK_DECL(ocam2KCtrl, m_indiP_emProtReset);
    INDI_NEWCALLBACK_DECL(ocam2KCtrl, m_indiP_emGain);
 
+   //telemeter:
+   int checkRecordTimes();
+   
+   int recordTelem( const ocam_temps * );
+   
+   int recordTemps(bool force = false);
+   
 };
 
 inline
@@ -255,6 +265,8 @@ void ocam2KCtrl::setupConfig()
    dev::edtCamera<ocam2KCtrl>::setupConfig(config);
    dev::frameGrabber<ocam2KCtrl>::setupConfig(config);
    dev::dssShutter<ocam2KCtrl>::setupConfig(config);
+   
+   dev::telemeter<ocam2KCtrl>::setupConfig(config);
 }
 
 
@@ -281,6 +293,7 @@ void ocam2KCtrl::loadConfig()
    
    dev::frameGrabber<ocam2KCtrl>::loadConfig(config);
    dev::dssShutter<ocam2KCtrl>::loadConfig(config);
+   dev::telemeter<ocam2KCtrl>::loadConfig(config);
 }
 
 inline
@@ -337,6 +350,12 @@ int ocam2KCtrl::appStartup()
       return log<software_critical,-1>({__FILE__,__LINE__});
    }
    
+   m_temps.setInvalid();
+   if(dev::telemeter<ocam2KCtrl>::appStartup() < 0)
+   {
+      return log<software_error,-1>({__FILE__,__LINE__});
+   }
+   
    return 0;
 
 }
@@ -381,6 +400,8 @@ int ocam2KCtrl::appLogic()
 
    if( state() == stateCodes::NOTCONNECTED || state() == stateCodes::ERROR)
    {
+      m_temps.setInvalid();
+      
       std::string response;
 
       //Might have gotten here because of a power off.
@@ -431,7 +452,7 @@ int ocam2KCtrl::appLogic()
       if(getTemps() < 0)
       {
          if(MagAOXAppT::m_powerState == 0) return 0;
-         
+         m_temps.setInvalid();
          state(stateCodes::ERROR);
          return 0;
       }
@@ -483,6 +504,13 @@ int ocam2KCtrl::appLogic()
          state(stateCodes::ERROR);
          return 0;
       }
+      
+      if(telemeter<ocam2KCtrl>::appLogic() < 0)
+      {
+         log<software_error>({__FILE__, __LINE__});
+         return 0;
+      }
+      
    }
 
    //Fall through check?
@@ -498,17 +526,18 @@ int ocam2KCtrl::onPowerOff()
    
    std::lock_guard<std::mutex> lock(m_indiMutex);
    
-   updateIfChanged(m_indiP_ccdtemp, "current", std::string(""));
-   updateIfChanged(m_indiP_ccdtemp, "target", std::string(""));
+   m_temps.setInvalid();
+   updateIfChanged(m_indiP_ccdtemp, "current", m_temps.CCD);
+   updateIfChanged(m_indiP_ccdtemp, "target", m_temps.CCD);
    
-   updateIfChanged(m_indiP_temps, "cpu",std::string(""));
-   updateIfChanged(m_indiP_temps, "power", std::string(""));
-   updateIfChanged(m_indiP_temps, "bias", std::string(""));
-   updateIfChanged(m_indiP_temps, "water", std::string(""));
-   updateIfChanged(m_indiP_temps, "left", std::string(""));
-   updateIfChanged(m_indiP_temps, "right", std::string(""));
-   updateIfChanged(m_indiP_temps, "cooling", std::string(""));
-   
+   updateIfChanged(m_indiP_temps, "cpu", m_temps.CPU);
+   updateIfChanged(m_indiP_temps, "power", m_temps.POWER);
+   updateIfChanged(m_indiP_temps, "bias", m_temps.BIAS);
+   updateIfChanged(m_indiP_temps, "water", m_temps.WATER);
+   updateIfChanged(m_indiP_temps, "left", m_temps.LEFT);
+   updateIfChanged(m_indiP_temps, "right", m_temps.RIGHT);
+   updateIfChanged(m_indiP_temps, "cooling", m_temps.COOLING_POWER);
+      
    updateIfChanged(m_indiP_fps, "current", std::string(""));
    updateIfChanged(m_indiP_fps, "target", std::string(""));
    updateIfChanged(m_indiP_fps, "measured", std::string(""));
@@ -547,6 +576,7 @@ int ocam2KCtrl::appShutdown()
    dev::edtCamera<ocam2KCtrl>::appShutdown();
    dev::frameGrabber<ocam2KCtrl>::appShutdown();
    dev::dssShutter<ocam2KCtrl>::appShutdown();
+   dev::telemeter<ocam2KCtrl>::appShutdown();
    
    return 0;
 }
@@ -564,21 +594,24 @@ int ocam2KCtrl::getTemps()
       if(parseTemps( temps, response ) < 0) 
       {
          if(MagAOXAppT::m_powerState == 0) return -1;
+         m_temps.setInvalid();
+         recordTemps();
          return log<software_error, -1>({__FILE__, __LINE__, "Temp. parse error"});
       }
       
-      log<ocam_temps>({temps.CCD, temps.CPU, temps.POWER, temps.BIAS, temps.WATER, temps.LEFT, temps.RIGHT, temps.COOLING_POWER});
-
-      updateIfChanged(m_indiP_ccdtemp, "current", temps.CCD);
-      updateIfChanged(m_indiP_ccdtemp, "target", temps.SET);
+      m_temps = temps;
+      recordTemps();
       
-      updateIfChanged(m_indiP_temps, "cpu", temps.CPU);
-      updateIfChanged(m_indiP_temps, "power", temps.POWER);
-      updateIfChanged(m_indiP_temps, "bias", temps.BIAS);
-      updateIfChanged(m_indiP_temps, "water", temps.WATER);
-      updateIfChanged(m_indiP_temps, "left", temps.LEFT);
-      updateIfChanged(m_indiP_temps, "right", temps.RIGHT);
-      updateIfChanged(m_indiP_temps, "cooling", temps.COOLING_POWER);
+      updateIfChanged(m_indiP_ccdtemp, "current", m_temps.CCD);
+      updateIfChanged(m_indiP_ccdtemp, "target", m_temps.SET);
+      
+      updateIfChanged(m_indiP_temps, "cpu", m_temps.CPU);
+      updateIfChanged(m_indiP_temps, "power", m_temps.POWER);
+      updateIfChanged(m_indiP_temps, "bias", m_temps.BIAS);
+      updateIfChanged(m_indiP_temps, "water", m_temps.WATER);
+      updateIfChanged(m_indiP_temps, "left", m_temps.LEFT);
+      updateIfChanged(m_indiP_temps, "right", m_temps.RIGHT);
+      updateIfChanged(m_indiP_temps, "cooling", m_temps.COOLING_POWER);
       return 0;
 
    }
@@ -1073,6 +1106,32 @@ INDI_NEWCALLBACK_DEFN(ocam2KCtrl, m_indiP_emGain)(const pcf::IndiProperty &ipRec
    return -1;
 }
 
+
+inline
+int ocam2KCtrl::checkRecordTimes()
+{
+   return telemeter<ocam2KCtrl>::checkRecordTimes(ocam_temps());
+}
+   
+inline
+int ocam2KCtrl::recordTelem( const ocam_temps * )
+{
+   return recordTemps(true);
+}
+ 
+inline
+int ocam2KCtrl::recordTemps( bool force )
+{
+   static ocamTemps lastTemps;
+   
+   if(!(lastTemps == m_temps) || force)
+   {
+      telem<ocam_temps>({m_temps.CCD, m_temps.CPU, m_temps.POWER, m_temps.BIAS, m_temps.WATER, m_temps.LEFT, m_temps.RIGHT, m_temps.COOLING_POWER});
+   }
+   
+   return 0;
+} 
+   
 }//namespace app
 } //namespace MagAOX
 #endif
