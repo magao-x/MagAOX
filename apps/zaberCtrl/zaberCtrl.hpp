@@ -353,7 +353,7 @@ int zaberCtrl::moveTo( const double & target)
 {
    if(target < 0) return 0;
    
-   long tgt = (target*m_countsPerMillimeter + 0.5);
+   m_tgtRawPos = (target*m_countsPerMillimeter + 0.5);
    
    pcf::IndiProperty indiP_stageTgtPos = pcf::IndiProperty(pcf::IndiProperty::Number);
    indiP_stageTgtPos.setDevice(m_lowLevelName);
@@ -362,7 +362,7 @@ int zaberCtrl::moveTo( const double & target)
    indiP_stageTgtPos.setState(pcf::IndiProperty::Idle);
    indiP_stageTgtPos.add(pcf::IndiElement(m_stageName));
    
-   if( sendNewProperty(indiP_stageTgtPos, m_stageName, tgt) < 0 ) return log<software_error,-1>({__FILE__,__LINE__});
+   if( sendNewProperty(indiP_stageTgtPos, m_stageName, m_tgtRawPos) < 0 ) return log<software_error,-1>({__FILE__,__LINE__});
    
    return 0;
 }
@@ -393,8 +393,10 @@ INDI_NEWCALLBACK_DEFN( zaberCtrl, m_indiP_pos)(const pcf::IndiProperty &ipRecv)
          return log<text_log,-1>("no valid target position provided", logPrio::LOG_ERROR);
       }
    }
-      
-   return moveTo(target);
+   m_tgtPos = target;
+   moveTo(m_tgtPos);
+   updateIfChanged(m_indiP_pos, "target", m_tgtPos, INDI_BUSY);
+   updateIfChanged(m_indiP_rawpos, "target", m_tgtRawPos, INDI_BUSY);
 }
 
 INDI_NEWCALLBACK_DEFN( zaberCtrl, m_indiP_rawpos)(const pcf::IndiProperty &ipRecv)
@@ -434,6 +436,10 @@ INDI_NEWCALLBACK_DEFN( zaberCtrl, m_indiP_rawpos)(const pcf::IndiProperty &ipRec
    if( sendNewProperty(indiP_stageTgtPos, m_stageName, target) < 0 ) return log<software_error,-1>({__FILE__,__LINE__});
    
 
+   m_tgtRawPos = target;
+   m_tgtPos = m_tgtRawPos / m_countsPerMillimeter;
+   updateIfChanged(m_indiP_pos, "target", m_tgtPos, INDI_BUSY);
+   updateIfChanged(m_indiP_rawpos, "target", m_tgtRawPos, INDI_BUSY);
    return 0;
 }
 
