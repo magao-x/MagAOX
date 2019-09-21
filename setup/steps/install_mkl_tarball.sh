@@ -2,6 +2,8 @@
 DIR="$( cd "$( dirname "${BASH_SOURCE[0]}" )" && pwd )"
 source $DIR/../_common.sh
 set -euo pipefail
+cd /opt/MagAOX/vendor
+
 INTEL_MKL_VERSION=l_mkl_2019.4.243
 INTEL_MKL_TARBALL=$INTEL_MKL_VERSION.tgz
 INTEL_MKL_TARBALL_URL=http://registrationcenter-download.intel.com/akdlm/irc_nas/tec/15540/$INTEL_MKL_TARBALL

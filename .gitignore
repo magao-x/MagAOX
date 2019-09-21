@@ -127,6 +127,6 @@ flatlogs/src/logCodes.dat
 .vagrant/
 .DS_Store
 setup/bundle.zip
-setup/cache
-setup/calib/
-setup/config/
+vm/cache/
+vm/calib/
+vm/config/

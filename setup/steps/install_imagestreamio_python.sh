@@ -13,15 +13,11 @@ for envname in py37 dev; do
     set +u
     conda activate $envname
 
-    # install ImageStreamWrapIO (requires cacao to be installed)
-    PACKAGES=$(conda list)
-    if [[ $PACKAGES != *imagestreamiowrap* ]]; then
-        cd /opt/MagAOX/source/ImageStreamIO
-        git checkout dev
-        python setup.py install
-    else
-        echo "imagestreamiowrap already installed in $envname environment!"
-    fi
+    # install ImageStreamIOWrap
+    cd /opt/MagAOX/source/ImageStreamIO
+    git checkout dev
+    python setup.py install
+
     #deactivate the environment before moving on
     conda deactivate
     set -u
