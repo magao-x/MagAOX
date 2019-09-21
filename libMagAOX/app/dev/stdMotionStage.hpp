@@ -297,7 +297,7 @@ template<class derivedT>
 int stdMotionStage<derivedT>::appStartup()
 {
  
-   derived().createStandardIndiNumber( m_indiP_preset, m_presetNotation, 1.0, (double) m_presetNames.size(), 0.0, "%0.3d");
+   derived().createStandardIndiNumber( m_indiP_preset, m_presetNotation, 1.0, (double) m_presetNames.size(), 0.0, "%.4f");
    m_indiP_preset["current"].set(0);
    m_indiP_preset["target"].set(0);
    if( derived().registerIndiPropertyNew( m_indiP_preset, st_newCallBack_stdMotionStage) < 0)
