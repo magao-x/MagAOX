@@ -61,7 +61,7 @@ protected:
      */ 
 
    //Camera:
-   unsigned long m_powerOnWait {10}; ///< Time in sec to wait for camera boot after power on.
+   
 
    float m_startupTemp {20.0}; ///< The temperature to set after a power-on.
    
@@ -87,6 +87,7 @@ protected:
 
    unsigned m_emGain {1}; ///< The current EM gain.
 
+   bool m_poweredOn {false};
 public:
 
    ///Default c'tor
@@ -229,7 +230,7 @@ inline
 ocam2KCtrl::ocam2KCtrl() : MagAOXApp(MAGAOX_CURRENT_SHA1, MAGAOX_REPO_MODIFIED)
 {
    m_powerMgtEnabled = true;
-   
+   m_powerOnWait = 10;
    return;
 }
 
@@ -244,7 +245,7 @@ void ocam2KCtrl::setupConfig()
 {
    
    
-   config.add("camera.powerOnWait", "", "camera.powerOnWait", argType::Required, "camera", "powerOnWait", false, "int", "Time after power-on to begin attempting connections [sec].  Default is 10 sec.");
+   //config.add("camera.powerOnWait", "", "camera.powerOnWait", argType::Required, "camera", "powerOnWait", false, "int", "Time after power-on to begin attempting connections [sec].  Default is 10 sec.");
    
    config.add("camera.startupTemp", "", "camera.startupTemp", argType::Required, "camera", "startupTemp", false, "float", "The temperature setpoint to set after a power-on [C].  Default is 20 C.");
    
@@ -263,7 +264,7 @@ void ocam2KCtrl::loadConfig()
 {
    dev::edtCamera<ocam2KCtrl>::loadConfig(config);
    
-   config(m_powerOnWait, "camera.powerOnWait");
+   //config(m_powerOnWait, "camera.powerOnWait");
    config(m_startupTemp, "camera.startupTemp");
    config(m_ocamDescrambleFile, "camera.ocamDescrambleFile");
    config(m_maxEMGain, "camera.maxEMGain");
@@ -366,15 +367,13 @@ int ocam2KCtrl::appLogic()
    
    if( state() == stateCodes::POWERON )
    {
-      if(m_powerOnCounter*m_loopPause > ((double) m_powerOnWait)*1e9)
+      if(powerOnWaitElapsed()) 
       {
          state(stateCodes::NOTCONNECTED);
          m_reconfig = true; //Trigger a f.g. thread reconfig.
-         m_powerOnCounter = 0;
       }
       else
       {
-         ++m_powerOnCounter;
          return 0;
       }
    }
@@ -408,10 +407,14 @@ int ocam2KCtrl::appLogic()
          if(m_fpsSet == 0) state(stateCodes::READY);
          else state(stateCodes::OPERATING);
          
-         //if(setTemp(m_startupTemp) < 0)
-         //{
-         //   return log<software_error,0>({__FILE__,__LINE__});
-         //}
+         if(m_poweredOn)
+         {
+            m_poweredOn = false;
+            if(setTemp(m_startupTemp) < 0)
+            {
+               return log<software_error,0>({__FILE__,__LINE__});
+            }
+         }
       }
       else
       {
@@ -523,6 +526,10 @@ int ocam2KCtrl::onPowerOff()
    edtCamera<ocam2KCtrl>::onPowerOff();
    
    dssShutter<ocam2KCtrl>::onPowerOff();
+
+   //Setting m_poweredOn
+   m_poweredOn = true;
+
    
    return 0;
 }
@@ -536,6 +543,8 @@ int ocam2KCtrl::whilePowerOff()
    edtCamera<ocam2KCtrl>::whilePowerOff();
    
    dssShutter<ocam2KCtrl>::whilePowerOff();
+   
+   
    
    return 0;
 }

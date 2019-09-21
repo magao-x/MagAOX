@@ -19,6 +19,8 @@ outlet_state             12001    outlet_state
 outlet_channel_state     12002    outlet_channel_state
 fxngen_params            12100    fxngen_params
 ttmmod_params            12110    ttmmod_params
+
+#this is a telemetry entry:
 ocam_temps               12120    ocam_temps
 
 saving_start             12500    saving_state_change
@@ -27,3 +29,5 @@ saving_stats             12502    saving_stats
 
 telem_telpos             20000    telem_telpos
 telem_teldata            20001    telem_teldata
+
+telem_temprack           20250    telem_temprack

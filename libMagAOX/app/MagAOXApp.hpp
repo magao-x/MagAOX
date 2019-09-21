@@ -898,7 +898,7 @@ protected:
    unsigned long m_powerOnWait {0}; ///< Time in sec to wait for device to boot after power on.
    
    /* Power on waiting counter . . . */
-   int m_powerOnCounter {0}; ///< Counts numer of loops after power on, implements delay for camera bootup.
+   int m_powerOnCounter {-1}; ///< Counts numer of loops after power on, implements delay for device bootup.  If -1, then device was not powered off on startup.
    
    /* Power state . . . */
    int m_powerState {-1}; ///< Current power state, 1=On, 0=Off, -1=Unk.
@@ -1268,11 +1268,11 @@ int MagAOXApp<_useINDI>::execute() //virtual
       }
       if(m_powerState > 0) 
       {
-         m_powerOnCounter = 0;
          state(stateCodes::POWERON);
       }
       else 
       {
+         m_powerOnCounter = 0;
          state(stateCodes::POWEROFF);
          if(onPowerOff() < 0)
          {
@@ -2776,7 +2776,7 @@ int MagAOXApp<_useINDI>::whilePowerOff()
 template<bool _useINDI>
 bool MagAOXApp<_useINDI>::powerOnWaitElapsed()
 {
-   if(!m_powerMgtEnabled || m_powerOnWait == 0) return true;
+   if(!m_powerMgtEnabled || m_powerOnWait == 0 || m_powerOnCounter < 0) return true;
    
    if(m_powerOnCounter*m_loopPause > ((double) m_powerOnWait)*1e9)
    {
