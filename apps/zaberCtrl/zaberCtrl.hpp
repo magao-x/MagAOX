@@ -50,20 +50,21 @@ protected:
    
    std::string m_lowLevelName {"zaberLowLevel"};
    
-   std::string m_stageName;
+   std::string m_stageName; ///< The name of this stage used for accessing via zaberLowLevel
+    
+   double m_countsPerMillimeter {10078.740157480315}; ///< Counts per millimeter calibration of this stage.
    
-   double m_countsPerMillimeter {10078.740157480315};
+   unsigned long m_maxRawPos {0}; ///< Maximum counts available on this stage.
    
    ///@}
 
-   double m_maxRawPos {0};
-   double m_rawPos {0};
-   double m_tgtRawPos {0};
-   double m_stageTemp{0};
+   double m_rawPos {0};  ///< Current raw position in counts
+   double m_tgtRawPos {0}; ///< Target raw position in counts
+   double m_stageTemp{0}; ///< Temperature reported by the stage
    
-   double m_maxPos {0};
-   double m_pos {0};
-   double m_tgtPos {0};
+   double m_maxPos {0};   ///< Maximum position in mm available on this stage
+   double m_pos {0}; ///< Current position in mm
+   double m_tgtPos {0}; ///< Target position in mm.
 
 public:
    /// Default c'tor.
@@ -73,6 +74,7 @@ public:
    ~zaberCtrl() noexcept
    {}
 
+   /// Setup the configuration of this stage controller.
    virtual void setupConfig();
 
    /// Implementation of loadConfig logic, separated for testing.
@@ -80,6 +82,9 @@ public:
      */
    int loadConfigImpl( mx::app::appConfigurator & _config /**< [in] an application configuration from which to load values*/);
 
+   ///Load the stage configuration 
+   /** Calls loadConfigImpl()
+     */ 
    virtual void loadConfig();
 
    /// Startup function
@@ -153,6 +158,7 @@ protected:
 
 zaberCtrl::zaberCtrl() : MagAOXApp(MAGAOX_CURRENT_SHA1, MAGAOX_REPO_MODIFIED)
 {
+   m_fractionalPresets = false;
    m_defaultPositions = false;
    
    return;
@@ -164,7 +170,9 @@ void zaberCtrl::setupConfig()
    
    config.add("stage.stageName", "", "stage.stageName", argType::Required, "stage", "stageName", false, "string", "the name of this stage in the low-level process INDI properties.  Default is the configuration name.");
    
-   config.add("stage.countsPerMillimeter", "", "stage.countsPerMillimeter", argType::Required, "stage", "countsPerMillimeter", false, "float", "The counts per mm calibration of the stage.  Default is 10078.74.");
+   config.add("stage.countsPerMillimeter", "", "stage.countsPerMillimeter", argType::Required, "stage", "countsPerMillimeter", false, "float", "The counts per mm calibration of the stage.  Default is 10078.74, which applies tot he X-LRQ-DE.");
+   
+   config.add("stage.maxCounts", "", "stage.maxCounts", argType::Required, "stage", "maxCounts", false, "unsigned long", "The maximum counts possible for this stage.");
    
    dev::stdMotionStage<zaberCtrl>::setupConfig(config);
 }
@@ -179,6 +187,8 @@ int zaberCtrl::loadConfigImpl( mx::app::appConfigurator & _config )
    
    _config(m_countsPerMillimeter, "stage.countsPerMillimeter");
    
+   _config(m_maxRawPos, "stage.maxCounts");
+   m_maxPos = ((double) m_maxRawPos)/ m_countsPerMillimeter;
    
    dev::stdMotionStage<zaberCtrl>::loadConfig(_config);
    
@@ -192,8 +202,8 @@ void zaberCtrl::loadConfig()
 
 int zaberCtrl::appStartup()
 {
-   
-   createStandardIndiNumber<float>( m_indiP_pos, "position", 0.0, std::numeric_limits<float>::max(), 0.0, "%0.3d");
+
+   createStandardIndiNumber<float>( m_indiP_pos, "position", 0.0, m_maxPos, 1/m_countsPerMillimeter, "%.4f");
    m_indiP_pos["current"].set(0);
    m_indiP_pos["target"].set(0);
    if( registerIndiPropertyNew( m_indiP_pos, INDI_NEWCALLBACK(m_indiP_pos)) < 0)
@@ -204,7 +214,7 @@ int zaberCtrl::appStartup()
       return -1;
    }
       
-   createStandardIndiNumber<unsigned long>( m_indiP_rawpos, "rawpos", 0.0, std::numeric_limits<unsigned long>::max(), 0.0, "%lu");
+   createStandardIndiNumber<unsigned long>( m_indiP_rawpos, "rawpos", 0.0, m_maxRawPos, 1, "%lu");
    m_indiP_rawpos["current"].set(0);
    m_indiP_rawpos["target"].set(0);
    if( registerIndiPropertyNew( m_indiP_rawpos, INDI_NEWCALLBACK(m_indiP_rawpos)) < 0)
@@ -291,8 +301,8 @@ int zaberCtrl::appLogic()
    }
    else
    {
-      m_preset = n;
-      m_preset_target = n;
+      m_preset = n+1;
+      m_preset_target = n+1;
    }
 
    dev::stdMotionStage<zaberCtrl>::updateINDI();
@@ -353,7 +363,7 @@ int zaberCtrl::moveTo( const double & target)
 {
    if(target < 0) return 0;
    
-   long tgt = (target*m_countsPerMillimeter + 0.5);
+   m_tgtRawPos = (target*m_countsPerMillimeter + 0.5);
    
    pcf::IndiProperty indiP_stageTgtPos = pcf::IndiProperty(pcf::IndiProperty::Number);
    indiP_stageTgtPos.setDevice(m_lowLevelName);
@@ -362,7 +372,7 @@ int zaberCtrl::moveTo( const double & target)
    indiP_stageTgtPos.setState(pcf::IndiProperty::Idle);
    indiP_stageTgtPos.add(pcf::IndiElement(m_stageName));
    
-   if( sendNewProperty(indiP_stageTgtPos, m_stageName, tgt) < 0 ) return log<software_error,-1>({__FILE__,__LINE__});
+   if( sendNewProperty(indiP_stageTgtPos, m_stageName, m_tgtRawPos) < 0 ) return log<software_error,-1>({__FILE__,__LINE__});
    
    return 0;
 }
@@ -393,8 +403,11 @@ INDI_NEWCALLBACK_DEFN( zaberCtrl, m_indiP_pos)(const pcf::IndiProperty &ipRecv)
          return log<text_log,-1>("no valid target position provided", logPrio::LOG_ERROR);
       }
    }
-      
-   return moveTo(target);
+   m_tgtPos = target;
+   moveTo(m_tgtPos);
+   updateIfChanged(m_indiP_pos, "target", m_tgtPos, INDI_BUSY);
+   updateIfChanged(m_indiP_rawpos, "target", m_tgtRawPos, INDI_BUSY);
+   return 0;
 }
 
 INDI_NEWCALLBACK_DEFN( zaberCtrl, m_indiP_rawpos)(const pcf::IndiProperty &ipRecv)
@@ -434,6 +447,10 @@ INDI_NEWCALLBACK_DEFN( zaberCtrl, m_indiP_rawpos)(const pcf::IndiProperty &ipRec
    if( sendNewProperty(indiP_stageTgtPos, m_stageName, target) < 0 ) return log<software_error,-1>({__FILE__,__LINE__});
    
 
+   m_tgtRawPos = target;
+   m_tgtPos = m_tgtRawPos / m_countsPerMillimeter;
+   updateIfChanged(m_indiP_pos, "target", m_tgtPos, INDI_BUSY);
+   updateIfChanged(m_indiP_rawpos, "target", m_tgtRawPos, INDI_BUSY);
    return 0;
 }
 
@@ -508,14 +525,12 @@ INDI_SETCALLBACK_DEFN( zaberCtrl, m_indiP_stageMaxRawPos )(const pcf::IndiProper
       return 0;
    }
    
-   m_maxRawPos = ipRecv[m_stageName].get<double>();
+   unsigned long maxRawPos = ipRecv[m_stageName].get<unsigned long>();
    
-   m_maxPos = m_maxRawPos / m_countsPerMillimeter;
-
-   //updateIfChanged(m_indiP_rawpos, "max", m_maxRawPos);   
-   //updateIfChanged(m_indiP_pos, "max", m_maxPos);
-   
-   
+   if(maxRawPos != m_maxRawPos)
+   {
+      log<text_log>("max position mismatch between config-ed value (" + std::to_string(m_maxRawPos) + ") and stage value (" + std::to_string(maxRawPos) + ")", logPrio::LOG_WARNING);
+   }
 
    return 0;
 }
