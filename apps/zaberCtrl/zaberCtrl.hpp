@@ -193,7 +193,8 @@ void zaberCtrl::loadConfig()
 int zaberCtrl::appStartup()
 {
 
-   createStandardIndiNumber<float>( m_indiP_pos, "position", 0.0, std::numeric_limits<float>::max(), 0.0, "%.4f");  // units of mm, stage has ~ 1/10 um of precision
+   // units of mm, stage has ~ 1/10 um of precision but 0.1 mm is a sensible small step size
+   createStandardIndiNumber<float>( m_indiP_pos, "position", 0.0, std::numeric_limits<float>::max(), 0.1, "%.4f");
    m_indiP_pos["current"].set(0);
    m_indiP_pos["target"].set(0);
    if( registerIndiPropertyNew( m_indiP_pos, INDI_NEWCALLBACK(m_indiP_pos)) < 0)
@@ -204,7 +205,7 @@ int zaberCtrl::appStartup()
       return -1;
    }
       
-   createStandardIndiNumber<unsigned long>( m_indiP_rawpos, "rawpos", 0.0, std::numeric_limits<unsigned long>::max(), 0.0, "%lu");
+   createStandardIndiNumber<unsigned long>( m_indiP_rawpos, "rawpos", 0.0, std::numeric_limits<unsigned long>::max(), 1, "%lu");
    m_indiP_rawpos["current"].set(0);
    m_indiP_rawpos["target"].set(0);
    if( registerIndiPropertyNew( m_indiP_rawpos, INDI_NEWCALLBACK(m_indiP_rawpos)) < 0)
