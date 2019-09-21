@@ -398,6 +398,7 @@ INDI_NEWCALLBACK_DEFN( zaberCtrl, m_indiP_pos)(const pcf::IndiProperty &ipRecv)
    moveTo(m_tgtPos);
    updateIfChanged(m_indiP_pos, "target", m_tgtPos, INDI_BUSY);
    updateIfChanged(m_indiP_rawpos, "target", m_tgtRawPos, INDI_BUSY);
+   return 0;
 }
 
 INDI_NEWCALLBACK_DEFN( zaberCtrl, m_indiP_rawpos)(const pcf::IndiProperty &ipRecv)
