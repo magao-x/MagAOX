@@ -193,7 +193,6 @@ void zaberCtrl::loadConfig()
 int zaberCtrl::appStartup()
 {
 
-   // units of mm, stage has ~ 1/10 um of precision but 0.1 mm is a sensible small step size
    createStandardIndiNumber<float>( m_indiP_pos, "position", 0.0, std::numeric_limits<float>::max(), 1/m_countsPerMillimeter, "%.4f");
    m_indiP_pos["current"].set(0);
    m_indiP_pos["target"].set(0);
