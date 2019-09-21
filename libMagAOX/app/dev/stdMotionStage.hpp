@@ -68,6 +68,8 @@ protected:
    
    std::string m_presetNotation {"preset"}; ///< Notation used to refer to a preset, should be singular, as in "preset" or "filter".
    
+   bool m_fractionalPresets {true}; ///< Flag to set in constructor determining if fractional presets are allowed.  Used for INDI/GUIs.
+   
    bool m_defaultPositions {true}; ///< Flag controlling whether the default preset positions (the vector index) are set in loadConfig.
    
    int m_moving {0}; ///< Whether or not the stage is moving.
@@ -296,8 +298,15 @@ int stdMotionStage<derivedT>::loadConfig(mx::app::appConfigurator & config)
 template<class derivedT>
 int stdMotionStage<derivedT>::appStartup()
 {
+   double step = 0.0;
+   std::string format = "%.4f";
+   if(!m_fractionalPresets)
+   {
+      step = 1.0;
+      format = "%d";
+   }
  
-   derived().createStandardIndiNumber( m_indiP_preset, m_presetNotation, 1.0, (double) m_presetNames.size(), 0.0, "%.4f");
+   derived().createStandardIndiNumber( m_indiP_preset, m_presetNotation, 1.0, (double) m_presetNames.size(), step, format);
    m_indiP_preset["current"].set(0);
    m_indiP_preset["target"].set(0);
    if( derived().registerIndiPropertyNew( m_indiP_preset, st_newCallBack_stdMotionStage) < 0)
