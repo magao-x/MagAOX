@@ -60,9 +60,28 @@ int pwrChannel::switchState()
    
    return 0;
 }
-   
+
+void pwrChannel::switchTarget( int swstate)
+{
+   m_swTarget = swstate;
+}   
+
 void pwrChannel::switchState( int swstate)
 {
+   if(m_swTarget == -1) m_swTarget = swstate;
+   
+   if(swstate != m_swTarget)
+   {
+      m_channelSwitch->setEnabled(false);
+      if(swstate == 1)
+      {
+         m_channelSwitch->setSliderPosition(m_channelSwitch->minimum() + 0.5*(m_channelSwitch->maximum()-m_channelSwitch->minimum()));
+         m_setSwitchState = 1;
+      }
+      
+      return;
+   }
+   
    if(swstate == 2) 
    {
       m_channelSwitch->setSliderPosition(m_channelSwitch->maximum());
@@ -82,8 +101,6 @@ void pwrChannel::switchState( int swstate)
       m_channelSwitch->setEnabled(true);
       emit switchTargetReached();
    }
-   
-   
 }   
 
 QwtTextLabel * pwrChannel::channelNameLabel()

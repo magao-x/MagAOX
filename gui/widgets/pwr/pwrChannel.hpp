@@ -30,6 +30,8 @@ protected:
    
    QSlider * m_channelSwitch {nullptr}; ///< The widget providing user control
    
+   int m_swTarget {-1};
+   
    int m_setSwitchState {0}; ///< The last state set by the user.
    
    std::vector<int> m_outlets; ///< The outlets controlled by this channel.
@@ -69,6 +71,8 @@ public:
    void channelName( const std::string & nname /**< [in] the new channel name*/);
    
    int switchState();
+   
+   void switchTarget( int swstate);
    
    void switchState( int swstate);
 

@@ -156,6 +156,15 @@ void pwrDevice::handleSetProperty( const pcf::IndiProperty & ipRecv )
    {
       if( ipRecv.getName() == m_channels[i]->channelName())
       {
+         if( ipRecv.find("target") )
+         {
+            std::string tmp = ipRecv["target"].get();
+            
+            if(tmp == "On") m_channels[i]->switchTarget(2);
+            if(tmp == "Int") m_channels[i]->switchTarget(1);
+            if(tmp == "Off") m_channels[i]->switchTarget(0);
+         }
+         
          if( ipRecv.find("state") )
          {
             std::string tmp = ipRecv["state"].get();
