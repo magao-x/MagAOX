@@ -35,7 +35,7 @@ struct ocamTemps
      */ 
    bool operator==(const ocamTemps & t /**< [in] the struct to compare to*/)
    {
-      return (CCD == t.CCD && OWER == t.POWER && BIAS == t.BIAS && WATER == t.WATER && LEFT == t.LEFT && RIGHT == t.RIGHT && SET == t.SET &&
+      return (CCD == t.CCD && POWER == t.POWER && BIAS == t.BIAS && WATER == t.WATER && LEFT == t.LEFT && RIGHT == t.RIGHT && SET == t.SET &&
                COOLING_POWER == t.COOLING_POWER);
    }
    
