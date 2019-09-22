@@ -45,7 +45,8 @@ namespace app
   * \ingroup ocam2KCtrl
   * 
   */
-class ocam2KCtrl : public MagAOXApp<>, public dev::stdCamera<ocam2KCtrl>, public dev::edtCamera<ocam2KCtrl>, public dev::frameGrabber<ocam2KCtrl>,  public dev::dssShutter<ocam2KCtrl>, public dev::telemeter<ocam2KCtrl>
+class ocam2KCtrl : public MagAOXApp<>, public dev::stdCamera<ocam2KCtrl>, public dev::edtCamera<ocam2KCtrl>, public dev::frameGrabber<ocam2KCtrl>,  
+                                           public dev::dssShutter<ocam2KCtrl>, public dev::telemeter<ocam2KCtrl>
 {
    friend class dev::stdCamera<ocam2KCtrl>;
    friend class dev::edtCamera<ocam2KCtrl>;
@@ -71,8 +72,6 @@ protected:
    
    ocam2_id m_ocam2_id {0}; ///< OCAM SDK id.
    
-   float m_fpsSet {0}; ///< The commanded fps, as returned by the camera
-
    long m_currImageNumber {-1}; ///< The current image number, retrieved from the image itself.
        
    long m_lastImageNumber {-1};  ///< The last image number, saved from the last loop through.
@@ -126,13 +125,6 @@ public:
      */ 
    int getTemps();
    
-   /// Set the CCD temperature setpoint.
-   /**
-     * \returns 0 on success
-     * \returns -1 on error
-     */
-   int setTemp( float temp /**< [in] The new CCD temp setpoing [C] */ );
-   
    /// Get the current frame rate.
    /**
      * \returns 0 on success
@@ -140,12 +132,54 @@ public:
      */
    int getFPS();
    
-   /// Set the frame rate.
-   /**
+   
+   /** \name stdCamera Interface 
+     * 
+     * @{
+     */
+   
+   /// Set defaults for a power on state.
+   /** 
+     * \returns 0 on success
+     * \returns -1 on error
+     */ 
+   int powerOnDefaults();
+   
+   /// Turn temperature control on or off.
+   /** Sets temperature control on or off based on the current value of m_tempControlStatus
+     * \returns 0 on success
+     * \returns -1 on error
+     */ 
+   int setTempControl();
+   
+   /// Set the CCD temperature setpoint [stdCamera interface].
+   /** Sets the temperature to m_ccdTempSetpt.
      * \returns 0 on success
      * \returns -1 on error
      */
-   int setFPS( float fps  /**< [in] the new value of framerate [fps] */ );
+   int setTempSetPt();
+   
+   /// Set the frame rate. [stdCamera interface]
+   /** Sets the frame rate to m_fpsSet.
+     * 
+     * \returns 0 on success
+     * \returns -1 on error
+     */
+   int setFPS();
+   
+   /// Required by stdCamera, but this does not do anything for this camera [stdCamera interface]
+   /**
+     * \returns 0 always
+     */ 
+   int setExpTime();
+   
+   /// Required by stdCamera, but this does not do anything for this camera [stdCamera interface]
+   /**
+     * \returns 0 always
+     */
+   int setNextROI();
+   
+   ///@}
    
    /// Reset the EM Protection 
    /** 
@@ -212,23 +246,24 @@ public:
 protected:
    //declare our properties
    pcf::IndiProperty m_indiP_temps;
-   pcf::IndiProperty m_indiP_fps;
    pcf::IndiProperty m_indiP_emProtReset;
    pcf::IndiProperty m_indiP_emGain;
 
 public:
-   //INDI_NEWCALLBACK_DECL(ocam2KCtrl, m_indiP_ccdtemp);
-   INDI_NEWCALLBACK_DECL(ocam2KCtrl, m_indiP_fps);
    INDI_NEWCALLBACK_DECL(ocam2KCtrl, m_indiP_emProtReset);
    INDI_NEWCALLBACK_DECL(ocam2KCtrl, m_indiP_emGain);
 
-   //telemeter:
+   /** \name Telemeter Interface
+     * 
+     * @{
+     */ 
    int checkRecordTimes();
    
    int recordTelem( const ocam_temps * );
    
    int recordTemps(bool force = false);
    
+   ///@}
 };
 
 inline
@@ -239,8 +274,9 @@ ocam2KCtrl::ocam2KCtrl() : MagAOXApp(MAGAOX_CURRENT_SHA1, MAGAOX_REPO_MODIFIED)
    m_powerOnWait = 10;
    
    //--- stdCamera ---
+   m_usesExpTime = false;
    m_usesROI = false;
-   //m_usesModes is set to true by edtCamera
+   //note: m_usesModes is set to true by edtCamera
    m_startupTemp = 20;
    
    return;
@@ -315,12 +351,6 @@ int ocam2KCtrl::appStartup()
    m_indiP_temps.add (pcf::IndiElement("cooling"));
    m_indiP_temps["cooling"].set(0);
 
-   REG_INDI_NEWPROP(m_indiP_fps, "fps", pcf::IndiProperty::Number);
-   m_indiP_fps.add (pcf::IndiElement("current"));
-   m_indiP_fps["current"].set(0);
-   m_indiP_fps.add (pcf::IndiElement("target"));
-   m_indiP_fps.add (pcf::IndiElement("measured"));
-
    REG_INDI_NEWPROP(m_indiP_emProtReset, "emProtectionReset", pcf::IndiProperty::Text);
    m_indiP_emProtReset.add (pcf::IndiElement("current"));
    m_indiP_emProtReset.add (pcf::IndiElement("target"));
@@ -365,14 +395,6 @@ int ocam2KCtrl::appStartup()
 inline
 int ocam2KCtrl::appLogic()
 {
-   //first run frameGrabber's appLogic to see if the f.g. thread has exited.
-   //Also does a POWERON check, so this should be before stdCamera
-   ///\todo the frameGrabber POWERON check can probably be handled by onPowerOff...
-   if(dev::frameGrabber<ocam2KCtrl>::appLogic() < 0)
-   {
-      return log<software_error, -1>({__FILE__, __LINE__});
-   }
-   
    //and run stdCamera's appLogic
    if(dev::stdCamera<ocam2KCtrl>::appLogic() < 0)
    {
@@ -385,25 +407,20 @@ int ocam2KCtrl::appLogic()
       return log<software_error, -1>({__FILE__, __LINE__});
    }
    
+   //first run frameGrabber's appLogic to see if the f.g. thread has exited.
+   if(dev::frameGrabber<ocam2KCtrl>::appLogic() < 0)
+   {
+      return log<software_error, -1>({__FILE__, __LINE__});
+   }
+   
    //and run dssShutter's appLogic
    if(dev::dssShutter<ocam2KCtrl>::appLogic() < 0)
    {
       return log<software_error, -1>({__FILE__, __LINE__});
    }
-   
-   /*if( state() == stateCodes::POWERON )
-   {
-      if(powerOnWaitElapsed()) 
-      {
-         state(stateCodes::NOTCONNECTED);
-         m_reconfig = true; //Trigger a f.g. thread reconfig.
-      }
-      else
-      {
-         return 0;
-      }
-   }*/
 
+   if( state() == stateCodes::POWERON) return 0;
+   
    if( state() == stateCodes::NOTCONNECTED || state() == stateCodes::ERROR)
    {
       m_temps.setInvalid();
@@ -530,7 +547,7 @@ int ocam2KCtrl::appLogic()
       
    }
 
-   //Fall through check?
+   ///\todo Fall through check?
 
    return 0;
 
@@ -544,8 +561,6 @@ int ocam2KCtrl::onPowerOff()
    std::lock_guard<std::mutex> lock(m_indiMutex);
    
    m_temps.setInvalid();
-   //updateIfChanged(m_indiP_ccdtemp, "current", m_temps.CCD);
-   //updateIfChanged(m_indiP_ccdtemp, "target", m_temps.CCD);
    
    updateIfChanged(m_indiP_temps, "cpu", m_temps.CPU);
    updateIfChanged(m_indiP_temps, "power", m_temps.POWER);
@@ -555,10 +570,6 @@ int ocam2KCtrl::onPowerOff()
    updateIfChanged(m_indiP_temps, "right", m_temps.RIGHT);
    updateIfChanged(m_indiP_temps, "cooling", m_temps.COOLING_POWER);
       
-   updateIfChanged(m_indiP_fps, "current", std::string(""));
-   updateIfChanged(m_indiP_fps, "target", std::string(""));
-   updateIfChanged(m_indiP_fps, "measured", std::string(""));
-   
    updateIfChanged(m_indiP_emProtReset, "current", std::string(""));
    updateIfChanged(m_indiP_emProtReset, "target", std::string(""));
    
@@ -569,6 +580,8 @@ int ocam2KCtrl::onPowerOff()
    stdCamera<ocam2KCtrl>::onPowerOff();
    
    edtCamera<ocam2KCtrl>::onPowerOff();
+   
+   frameGrabber<ocam2KCtrl>::onPowerOff();
    
    dssShutter<ocam2KCtrl>::onPowerOff();
 
@@ -613,7 +626,7 @@ int ocam2KCtrl::getTemps()
 {
    std::string response;
 
-   if( pdvSerialWriteRead( response, "temp") == 0)// m_pdv, "temp", m_readTimeout) == 0)
+   if( pdvSerialWriteRead( response, "temp") == 0)
    {
       ocamTemps temps;
 
@@ -623,8 +636,8 @@ int ocam2KCtrl::getTemps()
          m_temps.setInvalid();
          m_ccdTemp = m_temps.CCD;
          m_ccdTempSetpt = m_temps.SET;
-         
-         m_tempControlStatus = "UNKNOWN";
+         m_tempControlStatus = false;
+         m_tempControlStatusStr = "UNKNOWN";
          
          recordTemps();
          return log<software_error, -1>({__FILE__, __LINE__, "Temp. parse error"});
@@ -636,16 +649,34 @@ int ocam2KCtrl::getTemps()
       m_ccdTemp = m_temps.CCD;
       m_ccdTempSetpt = m_temps.SET;
       
-      if(fabs(m_temps.CCD - m_temps.SET) < 1.0)
+      //Detect the weird case on startup where it doesn't seem to be actually doing anything
+      if(m_temps.POWER < 2.0)
       {
-         m_tempControlStatus = "ON TARGET";
-         m_tempControlOnTarget = true;
+         if( fabs(m_temps.CCD - m_temps.SET) > 1.0 )
+         {
+            m_tempControlStatus = false;
+         }
+      }
+ 
+      if(m_tempControlStatus == true)
+      {
+         if(fabs(m_temps.CCD - m_temps.SET) < 1.0)
+         {
+            m_tempControlStatusStr = "ON TARGET";
+            m_tempControlOnTarget = true;
+         }
+         else
+         {
+            m_tempControlStatusStr = "OFF TARGET";
+            m_tempControlOnTarget = false;
+         }
       }
       else
       {
-         m_tempControlStatus = "OFF TARGET";
+         m_tempControlStatusStr = "TEMP OFF";
          m_tempControlOnTarget = false;
       }
+      
       
       //Telemeter:
       recordTemps();
@@ -665,14 +696,63 @@ int ocam2KCtrl::getTemps()
 }
 
 inline
-int ocam2KCtrl::.setTempSetPt()
+int ocam2KCtrl::powerOnDefaults()
+{
+   //Camera boots up with this true in most cases.
+   m_tempControlStatusSet = true;
+   m_tempControlStatus = true;
+      
+   return 0;
+}
+
+inline
+int ocam2KCtrl::setTempControl()
+{
+   std::string response;
+
+   std::string command;
+   
+   std::string comStr = "temp ";
+   if(m_tempControlStatusSet)
+   {
+      command = "on";
+      m_tempControlStatusSet = true;
+      m_tempControlStatus = true;
+   }
+   else
+   {
+      if( m_ccdTemp > 19) //19 is 20 with a 1 C slop
+      {
+         command = "off";
+         m_tempControlStatusSet = false;
+         m_tempControlStatus = false;
+      }
+      else
+      {
+         return log<text_log,-1>("Can not turn temp control off when not at 20 C or higher", logPrio::LOG_ERROR);
+      }
+   }
+    
+   comStr += command;
+   
+   if( pdvSerialWriteRead( response, command) == 0)
+   {
+      ///\todo check response
+      return log<text_log,0>({"Set temperature control to " + command});
+   }
+   else return log<software_error,-1>({__FILE__, __LINE__});
+   
+}
+
+inline
+int ocam2KCtrl::setTempSetPt()
 {
    std::string response;
 
    std::string tempStr = std::to_string( m_ccdTempSetpt );
    
    ///\todo make more configurable
-   if(temp >= 30 || temp < -50) 
+   if(m_ccdTempSetpt >= 30 || m_ccdTempSetpt < -50) 
    {
       return log<text_log,-1>({"attempt to set temperature outside valid range: " + tempStr}, logPrio::LOG_ERROR);
    }
@@ -699,14 +779,8 @@ int ocam2KCtrl::getFPS()
          if(MagAOXAppT::m_powerState == 0) return -1;
          return log<software_error, -1>({__FILE__, __LINE__, "fps parse error"});
       }
-      m_fpsSet = fps;
+      m_fps = fps;
 
-      updateIfChanged(m_indiP_fps, "current", m_fpsSet);
-
-      double fpsMeas = 0;
-      
-      updateIfChanged(m_indiP_fps, "measured", fpsMeas);
-      
       return 0;
 
    }
@@ -715,14 +789,14 @@ int ocam2KCtrl::getFPS()
 }
 
 inline
-int ocam2KCtrl::setFPS(float fps)
+int ocam2KCtrl::setFPS()
 {
    std::string response;
 
    ///\todo should we have fps range checks or let camera deal with it?
    
-   std::string fpsStr= std::to_string(fps);
-   if( pdvSerialWriteRead( response, "fps " + fpsStr ) == 0) //m_pdv, "fps " + fpsStr, m_readTimeout) == 0)
+   std::string fpsStr= std::to_string(m_fpsSet);
+   if( pdvSerialWriteRead( response, "fps " + fpsStr ) == 0)
    {
       ///\todo check response
       log<text_log>({"set fps: " + fpsStr});
@@ -733,6 +807,18 @@ int ocam2KCtrl::setFPS(float fps)
 
 }
 
+inline 
+int ocam2KCtrl::setExpTime()
+{
+   return 0;
+}
+   
+inline 
+int ocam2KCtrl::setNextROI()
+{
+   return 0;
+}
+   
 inline 
 int ocam2KCtrl::resetEMProtection()
 {
@@ -823,14 +909,11 @@ int ocam2KCtrl::configureAcquisition()
     ///\todo check response of pdvSerialWriteRead
    log<text_log>("camera configured with: " +m_cameraModes[m_modeName].m_serialCommand);
    
-   if(m_fpsSet > 0) setFPS(m_fpsSet);
+   if(m_fpsSet > 0) setFPS();
    
    log<text_log>("Send command to set mode: " + m_cameraModes[m_modeName].m_serialCommand);
    log<text_log>("Response was: " + response);
   
-   updateIfChanged(m_indiP_mode, "current", m_modeName);
-   updateIfChanged(m_indiP_mode, "target", std::string(""));
-   
  
    /* Initialize the OCAM2 SDK
        */
@@ -973,99 +1056,6 @@ int ocam2KCtrl::reconfig()
    return edtCamera<ocam2KCtrl>::pdvReconfig();
 }
    
-
-      
-         
-   
-     
-   
-   
-
-         
-
-         
-         
-     
-           
-    
-     
-
-INDI_NEWCALLBACK_DEFN(ocam2KCtrl, m_indiP_ccdtemp)(const pcf::IndiProperty &ipRecv)
-{
-   if(MagAOXAppT::m_powerState == 0) return 0;
-   
-   if (ipRecv.getName() == m_indiP_ccdtemp.getName())
-   {
-      float current = 99, target = 99;
-
-      try
-      {
-         current = ipRecv["current"].get<float>();
-      }
-      catch(...){}
-
-      try
-      {
-         target = ipRecv["target"].get<float>();
-      }
-      catch(...){}
-
-      
-      //Check if target is empty
-      if( target == 99 ) target = current;
-      
-      //Now check if it's valid?
-      ///\todo implement more configurable max-set-able temperature
-      if( target > 30 ) return 0;
-      
-      
-      //Lock the mutex, waiting if necessary
-      std::unique_lock<std::mutex> lock(m_indiMutex);
-      
-      updateIfChanged(m_indiP_ccdtemp, "target", target);
-      
-      return setTemp(target);
-   }
-   return -1;
-}
-
-
-
-INDI_NEWCALLBACK_DEFN(ocam2KCtrl, m_indiP_fps)(const pcf::IndiProperty &ipRecv)
-{
-   if(MagAOXAppT::m_powerState == 0) return 0;
-   
-   if (ipRecv.getName() == m_indiP_fps.getName())
-   {
-      float current = -99, target = -99;
-
-      try
-      {
-         current = ipRecv["current"].get<float>();
-      }
-      catch(...){}
-      
-      try
-      {
-         target = ipRecv["target"].get<float>();
-      }
-      catch(...){}
-      
-      if(target == -99) target = current;
-      
-      if(target <= 0) return 0;
-      
-      //Lock the mutex, waiting if necessary
-      std::unique_lock<std::mutex> lock(m_indiMutex);
-
-      updateIfChanged(m_indiP_fps, "target", target);
-      
-      return setFPS(target);
-      
-   }
-   return -1;
-}
-
 INDI_NEWCALLBACK_DEFN(ocam2KCtrl, m_indiP_emProtReset)(const pcf::IndiProperty &ipRecv)
 {
    if(MagAOXAppT::m_powerState == 0) return 0;
@@ -1179,4 +1169,5 @@ int ocam2KCtrl::recordTemps( bool force )
    
 }//namespace app
 } //namespace MagAOX
+
 #endif

@@ -183,9 +183,6 @@ protected:
 
    
 
-   int setFPS();
-
-
    // stdCamera interface:
    
    //This must set the power-on default values of
@@ -197,6 +194,7 @@ protected:
    int setTempControl();
    int setTempSetPt();
    int setExpTime();
+   int setFPS();
    int setNextROI();
    
    //Framegrabber interface:
@@ -225,6 +223,7 @@ picamCtrl::picamCtrl() : MagAOXApp(MAGAOX_CURRENT_SHA1, MAGAOX_REPO_MODIFIED)
    m_acqBuff.memory_size = 0;
    m_acqBuff.memory = 0;
 
+   m_usesFPS = false;
    m_usesModes = false;
    
    return;
@@ -435,8 +434,6 @@ int picamCtrl::appLogic()
 inline
 int picamCtrl::onPowerOff()
 {
-   
-
    std::lock_guard<std::mutex> lock(m_indiMutex);
 
    if(m_cameraHandle)
@@ -450,8 +447,6 @@ int picamCtrl::onPowerOff()
    ///\todo error check these base class fxns.
    dssShutter<picamCtrl>::onPowerOff();
 
-   
-   
    stdCamera<picamCtrl>::onPowerOff();
    
    return 0;
@@ -801,6 +796,8 @@ int picamCtrl::getTemps()
       return -1;
    }
 
+   m_ccdTemp = currTemperature;
+   
    //PicamSensorTemperatureStatus
    piint status;
 
@@ -813,27 +810,32 @@ int picamCtrl::getTemps()
       return -1;
    }
 
-   std::string lockstr = "unknown";
-   if(status == 1) lockstr = "unlocked";
-   else if(status == 2) lockstr = "locked";
-   else if(status == 3) lockstr = "faulted";
-
-   if(status < 2 )
+   if(status == 1) 
    {
-      updateIfChanged(m_indiP_temp, "current", currTemperature, INDI_BUSY);
-      updateIfChanged(m_indiP_tempstat, "status", lockstr, INDI_BUSY);
+      m_tempControlStatus = true;
+      m_tempControlOnTarget = false;
+      m_tempControlStatusStr = "UNLOCKED";
    }
-   else if (status == 2)
+   else if(status == 2) 
    {
-      updateIfChanged(m_indiP_temp, "current", currTemperature, INDI_OK);
-      updateIfChanged(m_indiP_tempstat, "status", lockstr, INDI_OK);
+      m_tempControlStatus = true;
+      m_tempControlOnTarget = true;
+      m_tempControlStatusStr = "LOCKED";
+   }
+   else if(status == 3) 
+   {
+      m_tempControlStatus = false;
+      m_tempControlOnTarget = false;
+      m_tempControlStatusStr = "FAULTED";
+      log<text_log>("temperature control faulted", logPrio::LOG_ALERT);
    }
    else
    {
-      updateIfChanged(m_indiP_temp, "current", currTemperature, INDI_ALERT);
-      updateIfChanged(m_indiP_tempstat, "status", lockstr, INDI_ALERT);
-   }
-   
+      m_tempControlStatus = false;
+      m_tempControlOnTarget = false;
+      m_tempControlStatusStr = "UNKNOWN";
+   }   
+
 
    return 0;
 
@@ -861,8 +863,7 @@ int picamCtrl::setAdcSpeed(int newspd)
 inline
 int picamCtrl::setFPS()
 {
-   m_expTimeSet = 1.0/m_fpsSet;
-   return setExpTime();
+   return 0;
 }
 
 inline 
@@ -884,6 +885,7 @@ inline
 int picamCtrl::setTempControl()
 {
    //Always on
+   m_tempControlStatus = true;
    m_tempControlStatusSet = true;
    updateSwitchIfChanged(m_indiP_tempcont, "toggle", pcf::IndiElement::On, INDI_IDLE);
    return 0;
@@ -901,7 +903,6 @@ int picamCtrl::setTempSetPt()
 inline
 int picamCtrl::setExpTime()
 {
-
    long intexptime = m_expTimeSet * 1000 * 10000 + 0.5;
    piflt exptime = ((double)intexptime)/10000;
 
@@ -927,10 +928,11 @@ int picamCtrl::setExpTime()
       return -1;
    }
 
+   m_expTime = exptime/1000.0;
    
    log<text_log>( "Set exposure time " + mode + " to: " + std::to_string(exptime/1000.0) + " sec");
 
-   updateIfChanged(m_indiP_exptime, "current", m_expTimeSet, INDI_IDLE);
+   updateIfChanged(m_indiP_exptime, "current", m_expTime, INDI_IDLE);
 
    return 0;
 }
@@ -1040,13 +1042,6 @@ int picamCtrl::configureAcquisition()
    // Dimensions
    //=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*
    //=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*
-
-   std::cerr << "ROI: would set x=" << (m_nextROI.x - 0.5*( (float) m_nextROI.w - 1.0)) << "\n";
-   std::cerr << "               y=" << (m_nextROI.y - 0.5*( (float) m_nextROI.h - 1.0)) << "\n";
-   std::cerr << "               w=" << m_nextROI.w << "\n";
-   std::cerr << "               h=" << m_nextROI.h << "\n";
-   std::cerr << "           bin_x=" << m_nextROI.bin_x << "\n";
-   std::cerr << "           bin_y=" << m_nextROI.bin_y << "\n";
    
    PicamRois  nextrois;
    PicamRoi nextroi;
@@ -1155,8 +1150,6 @@ int picamCtrl::configureAcquisition()
 
    if(constraint_count != 1)
    {
-      std::cerr << "Constraint count is not 1: " << (int) constraint_count << " constraints" << std::endl;
-
       log<text_log>("Constraint count is not 1: " + std::to_string(constraint_count) + " constraints",logPrio::LOG_ERROR);
    }
    else
@@ -1174,6 +1167,21 @@ int picamCtrl::configureAcquisition()
       m_indiP_exptime["target"].setStep(m_stepExpTime);
    }
 
+   if(m_expTimeSet > 0)
+   {
+      long intexptime = m_expTimeSet * 1000 * 10000 + 0.5;
+      piflt exptime = ((double)intexptime)/10000;
+   
+      std::cerr << "Setting exposure time to " << m_expTimeSet << "\n";
+      int rv = setPicamParameter(m_modelHandle, PicamParameter_ExposureTime, exptime);
+   
+      if(rv < 0)
+      {
+         log<software_error>({__FILE__, __LINE__, "Error setting exposure time"});
+         return -1;
+      }
+   }
+   
    piflt exptime;
    if(getPicamParameter(exptime, PicamParameter_ExposureTime) < 0)
    {
@@ -1181,37 +1189,18 @@ int picamCtrl::configureAcquisition()
    }
    else
    {
-      m_expTimeSet = exptime/1000.0;
-      updateIfChanged(m_indiP_exptime, "current", m_expTimeSet, INDI_IDLE);
-      std::cerr << "ExposureTime is: " << exptime << "\n";
+      m_expTime = exptime/1000.0;
+      m_expTimeSet = m_expTime; //At this point it must be true.
+      updateIfChanged(m_indiP_exptime, "current", m_expTime, INDI_IDLE);
+      updateIfChanged(m_indiP_exptime, "target", m_expTimeSet, INDI_IDLE);
    }
 
-   piflt FrameRateCalculation;
-   if(getPicamParameter(FrameRateCalculation, PicamParameter_FrameRateCalculation) < 0)
-   {
-      std::cerr << "could not get FrameRateCalculation\n";
-   }
-
-   //std::cerr << "FrameRateCalculation is: " << FrameRateCalculation << "\n";
-
-   //std::cerr << "Available readouts: " << available.readout_count << "\n";
-   std::cerr << "Frame rate: " << FrameRateCalculation << "\n";
+//    piflt FrameRateCalculation;
+//    if(getPicamParameter(FrameRateCalculation, PicamParameter_FrameRateCalculation) < 0)
+//    {
+//       std::cerr << "could not get FrameRateCalculation\n";
+//    }
    
-   
-//    m_fpsSet = FrameRateCalculation;
-//    updateIfChanged(m_indiP_fps, "current", m_fpsSet, INDI_IDLE);
-
-
-
-
-
-
-
-
-
-
-
-
    piint AdcQuality;
    if(getPicamParameter(AdcQuality, PicamParameter_AdcQuality) < 0)
    {
@@ -1238,7 +1227,7 @@ int picamCtrl::configureAcquisition()
 
 
 
-
+/*
 
 
    std::cerr << "Onlineable:\n";
@@ -1265,10 +1254,7 @@ int picamCtrl::configureAcquisition()
    std::cerr << "FrameRateCalculation: " << onlineable << "\n"; //0
 
    std::cerr << "************************************************************\n";
-
-//          Picam_CanSetParameterOnline(m_modelHandle, PicamParameter_ ,&onlineable);
-//          std::cerr << ": " << onlineable << "\n";
-
+*/
 
    //If not previously allocated, allocate a nice big buffer to play with
    pi64s newbuffsz = framesPerReadout*readoutStride*10; //Save room for 10 frames
@@ -1314,8 +1300,7 @@ int picamCtrl::configureAcquisition()
     }
 
     m_dataType = _DATATYPE_UINT16; //Where does this go?
-    std::cerr << "Acquisition Started\n";
-    sleep(1);
+    
     return 0;
 
 }
@@ -1329,8 +1314,7 @@ int picamCtrl::startAcquisition()
 inline
 int picamCtrl::acquireAndCheckValid()
 {
-
-   piint camTimeOut = 1000;
+   piint camTimeOut = 1000; //1 second keeps us responsive without busy-waiting too much
 
    PicamAcquisitionStatus status;
 
@@ -1339,55 +1323,28 @@ int picamCtrl::acquireAndCheckValid()
    PicamError error;
    error = Picam_WaitForAcquisitionUpdate(m_cameraHandle, camTimeOut, &available, &status);
 
-
-
-   if(! status.running )
+   if(error == PicamError_TimeOutOccurred) 
    {
-      std::cerr << "Not running \n";
-
-      std::cerr << "status.running: " << status.running << "\n";
-      std::cerr << "status.errors: " << status.errors << "\n";
-      std::cerr << "CameraFaulted: " << (int)(status.errors & PicamAcquisitionErrorsMask_CameraFaulted) << "\n";
-      std::cerr << "CannectionLost: " << (int)(status.errors & PicamAcquisitionErrorsMask_ConnectionLost) << "\n";
-      std::cerr << "DataLost: " << (int)(status.errors & PicamAcquisitionErrorsMask_DataLost) << "\n";
-      std::cerr << "DataNotArriving: " << (int)(status.errors & PicamAcquisitionErrorsMask_DataNotArriving) << "\n";
-      std::cerr << "None: " << (int)(status.errors & PicamAcquisitionErrorsMask_None) << "\n";
-      std::cerr << "ShutterOverheated: " << (int)(status.errors & PicamAcquisitionErrorsMask_ShutterOverheated) << "\n";
-      std::cerr << "status.readout_rate: " << status.readout_rate << "\n";
-
-      error = Picam_StartAcquisition(m_cameraHandle);
-      if(error != PicamError_None)
-      {
-         log<software_error>({__FILE__, __LINE__, 0, error, PicamEnum2String(PicamEnumeratedType_Error, error)});
-         state(stateCodes::ERROR);
-
-         return -1;
-      }
+      return 1; //This sends it back to framegrabber to cehck for reconfig, etc.
    }
-
 
    clock_gettime(CLOCK_REALTIME, &m_currImageTimestamp);
 
-   m_available.initial_readout = available.initial_readout;
-   m_available.readout_count = available.readout_count;
-
-   if(error == PicamError_TimeOutOccurred)
-   {
-      return 1;
-   }
-   else if(error != PicamError_None)
+   if(error != PicamError_None)
    {
       log<software_error>({__FILE__, __LINE__, 0, error, PicamEnum2String(PicamEnumeratedType_Error, error)});
       state(stateCodes::ERROR);
 
       return -1;
    }
+      
+   m_available.initial_readout = available.initial_readout;
+   m_available.readout_count = available.readout_count;
+
    if(m_available.initial_readout == 0)
    {
       return 1;
    }
-
-   m_fpsSet = status.readout_rate;
 
    return 0;
 
@@ -1405,8 +1362,7 @@ inline
 int picamCtrl::reconfig()
 {
    ///\todo clean this up.  Just need to wait on acquisition update the first time probably.
-   std::cerr << "In reconfig " << std::endl;
-
+   
    PicamError error = Picam_StopAcquisition(m_cameraHandle);
    if(error != PicamError_None)
    {
@@ -1422,8 +1378,6 @@ int picamCtrl::reconfig()
 
    while(running)
    {
-      std::cerr << "running..." << std::endl;
-
       if(MagAOXAppT::m_powerState == 0) return 0;
       sleep(1);
 
@@ -1436,32 +1390,28 @@ int picamCtrl::reconfig()
          return -1;
       }
 
-     piint camTimeOut = 1000;
+      piint camTimeOut = 1000;
 
-   PicamAcquisitionStatus status;
+      PicamAcquisitionStatus status;
 
-   PicamAvailableData available;
+      PicamAvailableData available;
 
-   error = Picam_WaitForAcquisitionUpdate(m_cameraHandle, camTimeOut, &available, &status);
+      error = Picam_WaitForAcquisitionUpdate(m_cameraHandle, camTimeOut, &available, &status);
 
-
-
-   if(! status.running )
-   {
-      std::cerr << "Not running \n";
-
-      std::cerr << "status.running: " << status.running << "\n";
-      std::cerr << "status.errors: " << status.errors << "\n";
-      std::cerr << "CameraFaulted: " << (int)(status.errors & PicamAcquisitionErrorsMask_CameraFaulted) << "\n";
-      std::cerr << "CannectionLost: " << (int)(status.errors & PicamAcquisitionErrorsMask_ConnectionLost) << "\n";
-      std::cerr << "DataLost: " << (int)(status.errors & PicamAcquisitionErrorsMask_DataLost) << "\n";
-      std::cerr << "DataNotArriving: " << (int)(status.errors & PicamAcquisitionErrorsMask_DataNotArriving) << "\n";
-      std::cerr << "None: " << (int)(status.errors & PicamAcquisitionErrorsMask_None) << "\n";
-      std::cerr << "ShutterOverheated: " << (int)(status.errors & PicamAcquisitionErrorsMask_ShutterOverheated) << "\n";
-      std::cerr << "status.readout_rate: " << status.readout_rate << "\n";
-
-
-   }
+//       if(! status.running )
+//       {
+//          std::cerr << "Not running \n";
+// 
+//          std::cerr << "status.running: " << status.running << "\n";
+//          std::cerr << "status.errors: " << status.errors << "\n";
+//          std::cerr << "CameraFaulted: " << (int)(status.errors & PicamAcquisitionErrorsMask_CameraFaulted) << "\n";
+//          std::cerr << "CannectionLost: " << (int)(status.errors & PicamAcquisitionErrorsMask_ConnectionLost) << "\n";
+//          std::cerr << "DataLost: " << (int)(status.errors & PicamAcquisitionErrorsMask_DataLost) << "\n";
+//          std::cerr << "DataNotArriving: " << (int)(status.errors & PicamAcquisitionErrorsMask_DataNotArriving) << "\n";
+//          std::cerr << "None: " << (int)(status.errors & PicamAcquisitionErrorsMask_None) << "\n";
+//          std::cerr << "ShutterOverheated: " << (int)(status.errors & PicamAcquisitionErrorsMask_ShutterOverheated) << "\n";
+//          std::cerr << "status.readout_rate: " << status.readout_rate << "\n";
+//       }
 
       error = Picam_IsAcquisitionRunning(m_cameraHandle, &running);
       if(error != PicamError_None)
@@ -1470,7 +1420,6 @@ int picamCtrl::reconfig()
          state(stateCodes::ERROR);
          return -1;
       }
-
    }
 
    return 0;

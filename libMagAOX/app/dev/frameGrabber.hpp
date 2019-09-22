@@ -146,6 +146,18 @@ public:
      */
    int appLogic();
 
+   /// On power off, sets m_reconfig to true.
+   /** This should be called in `derivedT::onPowerOff` as
+     * \code
+       framegrabber<derivedT>::onPowerOff();
+       \endcode
+     * with appropriate error checking.
+     * 
+     * \returns 0 on success
+     * \returns -1 on error, which is logged.
+     */
+   int onPowerOff();
+   
    /// Shuts down the framegrabber thread
    /** This should be called in `derivedT::appShutdown` as
      * \code
@@ -207,7 +219,7 @@ public:
    ///@}
    
 private:
-   derivedT & impl()
+   derivedT & derived()
    {
       return *static_cast<derivedT *>(this);
    }
@@ -228,7 +240,7 @@ template<class derivedT>
 void frameGrabber<derivedT>::loadConfig(mx::app::appConfigurator & config)
 {
    config(m_fgThreadPrio, "framegrabber.threadPrio");
-   m_shmimName = impl().configName();
+   m_shmimName = derived().configName();
    config(m_shmimName, "framegrabber.shmimName");
   
    config(m_circBuffLength, "framegrabber.circBuffLength");
@@ -246,14 +258,14 @@ int frameGrabber<derivedT>::appStartup()
 {
    //Register the shmimName INDI property
    m_indiP_shmimName = pcf::IndiProperty(pcf::IndiProperty::Text);
-   m_indiP_shmimName.setDevice(impl().configName());
+   m_indiP_shmimName.setDevice(derived().configName());
    m_indiP_shmimName.setName("fg_shmimName");
    m_indiP_shmimName.setPerm(pcf::IndiProperty::ReadOnly);
    m_indiP_shmimName.setState(pcf::IndiProperty::Idle);
    m_indiP_shmimName.add(pcf::IndiElement("name"));
    m_indiP_shmimName["name"] = m_shmimName;
    
-   if( impl().registerIndiPropertyNew( m_indiP_shmimName, nullptr) < 0)
+   if( derived().registerIndiPropertyNew( m_indiP_shmimName, nullptr) < 0)
    {
       #ifndef FRAMEGRABBER_TEST_NOLOG
       derivedT::template log<software_error>({__FILE__,__LINE__});
@@ -263,7 +275,7 @@ int frameGrabber<derivedT>::appStartup()
    
    //Register the frameSize INDI property
    m_indiP_frameSize = pcf::IndiProperty(pcf::IndiProperty::Number);
-   m_indiP_frameSize.setDevice(impl().configName());
+   m_indiP_frameSize.setDevice(derived().configName());
    m_indiP_frameSize.setName("fg_frameSize");
    m_indiP_frameSize.setPerm(pcf::IndiProperty::ReadOnly);
    m_indiP_frameSize.setState(pcf::IndiProperty::Idle);
@@ -272,7 +284,7 @@ int frameGrabber<derivedT>::appStartup()
    m_indiP_frameSize.add(pcf::IndiElement("height"));
    m_indiP_frameSize["height"] = 0;
    
-   if( impl().registerIndiPropertyNew( m_indiP_frameSize, nullptr) < 0)
+   if( derived().registerIndiPropertyNew( m_indiP_frameSize, nullptr) < 0)
    {
       #ifndef FRAMEGRABBER_TEST_NOLOG
       derivedT::template log<software_error>({__FILE__,__LINE__});
@@ -280,7 +292,7 @@ int frameGrabber<derivedT>::appStartup()
       return -1;
    }
    
-   if(impl().threadStart( m_fgThread, m_fgThreadInit, m_fgThreadPrio, "framegrabber", this, fgThreadStart) < 0)
+   if(derived().threadStart( m_fgThread, m_fgThreadInit, m_fgThreadPrio, "framegrabber", this, fgThreadStart) < 0)
    {
       derivedT::template log<software_error, -1>({__FILE__, __LINE__});
       return -1;
@@ -305,6 +317,14 @@ int frameGrabber<derivedT>::appLogic()
 
 }
 
+template<class derivedT>
+int frameGrabber<derivedT>::onPowerOff()
+{ 
+   m_reconfig = true;
+
+   return 0;
+}
+   
 
 template<class derivedT>
 int frameGrabber<derivedT>::appShutdown()
@@ -340,7 +360,7 @@ void frameGrabber<derivedT>::fgThreadExec()
    timespec writestart;
    
    //Wait fpr the thread starter to finish initializing this thread.
-   while(m_fgThreadInit == true && impl().shutdown() == 0)
+   while(m_fgThreadInit == true && derived().shutdown() == 0)
    {
        sleep(1);
    }
@@ -348,26 +368,26 @@ void frameGrabber<derivedT>::fgThreadExec()
    uint32_t imsize[3] = {0,0,0};
    std::string shmimName;
    
-   while(impl().shutdown() == 0)
+   while(derived().shutdown() == 0)
    {
       ///\todo this ought to wait until OPERATING, using READY as a sign of "not integrating"
-      while(!impl().shutdown() && (!( impl().state() == stateCodes::READY || impl().state() == stateCodes::OPERATING) || impl().powerState() <= 0 ) )
+      while(!derived().shutdown() && (!( derived().state() == stateCodes::READY || derived().state() == stateCodes::OPERATING) || derived().powerState() <= 0 ) )
       {
          sleep(1);
       }
       
-      if(impl().shutdown()) continue;
+      if(derived().shutdown()) continue;
       else 
       {
          //At the end of this, must have m_width, m_height, m_dataType set.
-         if(impl().configureAcquisition() < 0) continue;        
+         if(derived().configureAcquisition() < 0) continue;        
          
          m_typeSize = ImageStreamIO_typesize(m_dataType);
       }
 
       /* Initialize ImageStreamIO
        */
-      if(m_shmimName == "") m_shmimName = impl().configName();
+      if(m_shmimName == "") m_shmimName = derived().configName();
 
       if(m_width != imsize[0] || m_height != imsize[1] || m_circBuffLength != imsize[2] || m_shmimName != shmimName)
       {
@@ -391,7 +411,7 @@ void frameGrabber<derivedT>::fgThreadExec()
       //This completes the reconfiguration.
       m_reconfig = false;
                   
-      if(impl().startAcquisition() < 0) continue;       
+      if(derived().startAcquisition() < 0) continue;       
          
       uint64_t next_cnt1 = 0; 
       char * next_dest = (char *) imageStream.array.raw;
@@ -400,12 +420,12 @@ void frameGrabber<derivedT>::fgThreadExec()
       uint64_t * next_cntarr = &imageStream.cntarray[0];
       
       //This is the main image grabbing loop.      
-      while(!impl().shutdown() && !m_reconfig && impl().powerState() > 0)
+      while(!derived().shutdown() && !m_reconfig && derived().powerState() > 0)
       {
          //==================
          //Get next image, process validity.
          //====================         
-         int isValid = impl().acquireAndCheckValid();
+         int isValid = derived().acquireAndCheckValid();
          if(isValid != 0)
          {
             if( isValid < 0)
@@ -424,7 +444,7 @@ void frameGrabber<derivedT>::fgThreadExec()
          //Set the time of last write
          clock_gettime(CLOCK_REALTIME, &writestart);
          
-         if(impl().loadImageIntoStream(next_dest) < 0) 
+         if(derived().loadImageIntoStream(next_dest) < 0) 
          {
             break;
          }
@@ -450,12 +470,13 @@ void frameGrabber<derivedT>::fgThreadExec()
          ImageStreamIO_sempost(&imageStream,-1);
  
          
-         if(imageStream.md[0].cnt0 % 2000 == 0)
+         //This is a diagnostic of latency:
+         /*if(imageStream.md[0].cnt0 % 2000 == 0)
          {
             std::cerr << ( (double) imageStream.md->writetime.tv_sec + ((double) imageStream.md->writetime.tv_nsec)/1e9) - ( (double) imageStream.md->atime.tv_sec + ((double) imageStream.md->atime.tv_nsec)/1e9) << " ";
             std::cerr << ( (double) imageStream.md->writetime.tv_sec + ((double) imageStream.md->writetime.tv_nsec)/1e9) - ( (double) writestart.tv_sec + ((double) writestart.tv_nsec)/1e9) << "\n";
 
-         }
+         }*/
          
          //Now we increment pointers outside the time-critical part of the loop.
          next_cnt1 = imageStream.md->cnt1+1;
@@ -474,9 +495,9 @@ void frameGrabber<derivedT>::fgThreadExec()
          
       }
     
-      if(m_reconfig && !impl().shutdown())
+      if(m_reconfig && !derived().shutdown())
       {
-         impl().reconfig();
+         derived().reconfig();
       }
 
    } //outer loop, will exit if m_shutdown==true
@@ -492,11 +513,11 @@ void frameGrabber<derivedT>::fgThreadExec()
 template<class derivedT>
 int frameGrabber<derivedT>::updateINDI()
 {
-   if( !impl().m_indiDriver ) return 0;
+   if( !derived().m_indiDriver ) return 0;
    
-   indi::updateIfChanged(m_indiP_shmimName, "name", m_shmimName, impl().m_indiDriver);                     
-   indi::updateIfChanged(m_indiP_frameSize, "width", m_width, impl().m_indiDriver);
-   indi::updateIfChanged(m_indiP_frameSize, "height", m_height, impl().m_indiDriver);
+   indi::updateIfChanged(m_indiP_shmimName, "name", m_shmimName, derived().m_indiDriver);                     
+   indi::updateIfChanged(m_indiP_frameSize, "width", m_width, derived().m_indiDriver);
+   indi::updateIfChanged(m_indiP_frameSize, "height", m_height, derived().m_indiDriver);
    
    
    return 0;

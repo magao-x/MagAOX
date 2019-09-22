@@ -19,10 +19,13 @@ namespace dev
 
 #define CAMCTRL_E_NOCONFIGS (-10)
 
+/// A camera configuration
+/** a.k.a. a mode
+ */   
 struct cameraConfig 
 {
-   std::string m_configFile;
-   std::string m_serialCommand;
+   std::string m_configFile; ///< The file to use for this mode, e.g. an EDT configuration file.
+   std::string m_serialCommand; ///< The command to send to the camera to place it in this mode.
    unsigned m_centerX {0};
    unsigned m_centerY {0};
    unsigned m_sizeX {0};
@@ -35,9 +38,10 @@ struct cameraConfig
 
 typedef std::unordered_map<std::string, cameraConfig> cameraConfigMap;
 
+///Load the camera configurations contained in the app configuration into a map
 inline
-int loadCameraConfig( cameraConfigMap & ccmap,
-                      mx::app::appConfigurator & config 
+int loadCameraConfig( cameraConfigMap & ccmap, ///< [out] the map in which to place the configurations found in config
+                      mx::app::appConfigurator & config ///< [in] the application configuration structure
                     )
 {
    std::vector<std::string> sections;
@@ -100,7 +104,7 @@ int loadCameraConfig( cameraConfigMap & ccmap,
   * 
   * The derived class `derivedT` must be a MagAOXApp\<true\>, and should declare this class a friend like so: 
    \code
-    friend class dev::dssShutter<derivedT>;
+    friend class dev::stdCamera<derivedT>;
    \endcode
   *
   * The default values of m_currentROI should be set before calling stdCamera::appStartup().
@@ -123,13 +127,9 @@ protected:
    
    std::string m_startupMode; ///< The camera mode to load during first init after a power-on.
    
-   unsigned long m_powerOnWait {10}; ///< Time in sec to wait for camera boot after power on.
-
    float m_startupTemp {-999}; ///< The temperature to set after a power-on.  Set to <= -999 to not use [default].
    
    ///@}
-   
-   int m_powerOnCounter {0}; ///< Counts numer of loops after power on, implements delay for camera bootup.
    
    /** \name Temperature Control Interface 
      * @{
@@ -144,10 +144,13 @@ protected:
    float m_ccdTemp {-999}; ///< The current temperature, in C
    
    float m_ccdTempSetpt {-999}; ///< The desired temperature, in C
+
+   bool m_tempControlStatus {false}; ///< Whether or not temperature control is active 
+   bool m_tempControlStatusSet {false}; ///< Desired state of temperature control
    
-   bool m_tempControlStatusSet {false};
+   bool m_tempControlOnTarget {false}; ///< Whether or not the temperature control system is on its target temperature
    
-   std::string m_tempControlStatus;
+   std::string m_tempControlStatusStr; ///< Camera specific description of temperature control status.
    
    ///@}
    
@@ -155,16 +158,22 @@ protected:
      * @{
      */
    
-   float m_minExpTime {0};
-   float m_maxExpTime {std::numeric_limits<float>::max()};
-   float m_stepExpTime {0};
+   bool m_usesExpTime {true}; ///< Set to false in constructor to not expose the exposure time interface
    
+   float m_minExpTime {0}; ///< The minimum exposure time, used for INDI attributes
+   float m_maxExpTime {std::numeric_limits<float>::max()}; ///< The maximum exposure time, used for INDI attributes
+   float m_stepExpTime {0}; ///< The maximum exposure time stepsize, used for INDI attributes
+   
+   float m_expTime {0}; ///< The current exposure time, in seconds.
    float m_expTimeSet {0}; ///< The exposure time, in seconds, as set by user.
    
-   float m_minFPS{0};
-   float m_maxFPS{std::numeric_limits<float>::max()};
-   float m_stepFPS{0};
+   bool m_usesFPS {true}; ///< Set to false in constructor to not expose the FPS interface
    
+   float m_minFPS{0};  ///< The minimum FPS, used for INDI attributes
+   float m_maxFPS{std::numeric_limits<float>::max()}; ///< The maximum FPS, used for INDI attributes
+   float m_stepFPS{0}; ///< The FPS step size, used for INDI attributes
+   
+   float m_fps {0}; ///< The current FPS.
    float m_fpsSet {0}; ///< The commanded fps, as set by user.
    
    ///@}
@@ -465,9 +474,6 @@ stdCamera<derivedT>::~stdCamera() noexcept
 template<class derivedT>
 void stdCamera<derivedT>::setupConfig(mx::app::appConfigurator & config)
 {
-   
-   config.add("camera.powerOnWait", "", "camera.powerOnWait", argType::Required, "camera", "powerOnWait", false, "int", "Time after power-on to begin attempting connections [sec].  Default is 10 sec.");
-   
    if(m_hasTempControl)
    {
       config.add("camera.startupTemp", "", "camera.startupTemp", argType::Required, "camera", "startupTemp", false, "float", "The temperature setpoint to set after a power-on [C].  Default is 20 C.");
@@ -478,8 +484,6 @@ void stdCamera<derivedT>::setupConfig(mx::app::appConfigurator & config)
 template<class derivedT>
 void stdCamera<derivedT>::loadConfig(mx::app::appConfigurator & config)
 {
-   config(m_powerOnWait, "camera.powerOnWait");
-   
    if(m_hasTempControl)
    {
       config(m_startupTemp, "camera.startupTemp");
@@ -544,22 +548,28 @@ int stdCamera<derivedT>::appStartup()
    {
    }
    
-   derived().createStandardIndiNumber( m_indiP_exptime, "exptime", m_minExpTime, m_maxExpTime, m_stepExpTime, "%0.3f");
-   if( derived().registerIndiPropertyNew( m_indiP_exptime, st_newCallBack_stdCamera) < 0)
+   if(m_usesExpTime)
    {
-      #ifndef STDCAMERA_TEST_NOLOG
-      derivedT::template log<software_error>({__FILE__,__LINE__});
-      #endif
-      return -1;
+      derived().createStandardIndiNumber( m_indiP_exptime, "exptime", m_minExpTime, m_maxExpTime, m_stepExpTime, "%0.3f");
+      if( derived().registerIndiPropertyNew( m_indiP_exptime, st_newCallBack_stdCamera) < 0)
+      {
+         #ifndef STDCAMERA_TEST_NOLOG
+         derivedT::template log<software_error>({__FILE__,__LINE__});
+         #endif
+         return -1;
+      }
    }
    
-   derived().createStandardIndiNumber( m_indiP_fps, "fps", m_minFPS, m_maxFPS, m_stepFPS, "%0.2f");
-   if( derived().registerIndiPropertyNew( m_indiP_fps, st_newCallBack_stdCamera) < 0)
+   if(m_usesFPS)
    {
-      #ifndef STDCAMERA_TEST_NOLOG
-      derivedT::template log<software_error>({__FILE__,__LINE__});
-      #endif
-      return -1;
+      derived().createStandardIndiNumber( m_indiP_fps, "fps", m_minFPS, m_maxFPS, m_stepFPS, "%0.2f");
+      if( derived().registerIndiPropertyNew( m_indiP_fps, st_newCallBack_stdCamera) < 0)
+      {
+         #ifndef STDCAMERA_TEST_NOLOG
+         derivedT::template log<software_error>({__FILE__,__LINE__});
+         #endif
+         return -1;
+      }
    }
    
    if(m_usesModes)
@@ -652,14 +662,11 @@ int stdCamera<derivedT>::appLogic()
 {
    if( derived().state() == stateCodes::POWERON )
    {
-      if(m_powerOnCounter*derived().m_loopPause > ((double) m_powerOnWait)*1e9)
+      if(derived().powerOnWaitElapsed()) 
       {
          derived().state(stateCodes::NOTCONNECTED);
 
-         m_powerOnCounter = 0;
-         
-         //Set power-on defaults
-         
+         //Set power-on defaults         
          derived().powerOnDefaults();
          
          //then set startupTemp if configured
@@ -699,7 +706,6 @@ int stdCamera<derivedT>::appLogic()
       }
       else
       {
-         ++m_powerOnCounter;
          return 0;
       }
    }
@@ -711,8 +717,6 @@ int stdCamera<derivedT>::appLogic()
 template<class derivedT>
 int stdCamera<derivedT>::onPowerOff()
 {
-   m_powerOnCounter = 0;
-   
    if( !derived().m_indiDriver ) return 0;
    
    if(m_usesModes)
@@ -1039,9 +1043,17 @@ int stdCamera<derivedT>::updateINDI()
 {
    if( !derived().m_indiDriver ) return 0;
    
+   if(m_usesExpTime)
+   {
+      derived().updateIfChanged(m_indiP_exptime, "current", m_expTime, INDI_IDLE);
+      derived().updateIfChanged(m_indiP_exptime, "target", m_expTimeSet, INDI_IDLE);
+   }
    
-   derived().updateIfChanged(m_indiP_exptime, "current", m_expTimeSet, INDI_IDLE);
-   derived().updateIfChanged(m_indiP_fps, "current", m_fpsSet, INDI_IDLE);
+   if(m_usesFPS)
+   {
+      derived().updateIfChanged(m_indiP_fps, "current", m_fps, INDI_IDLE);
+      derived().updateIfChanged(m_indiP_fps, "target", m_fpsSet, INDI_IDLE);
+   }
    
    if(m_usesModes)
    {
@@ -1057,6 +1069,37 @@ int stdCamera<derivedT>::updateINDI()
       }
    }
    
+   if(m_hasTempControl)
+   {
+      if(m_tempControlStatus == false)
+      {
+         derived().updateSwitchIfChanged( m_indiP_tempcont, "toggle", pcf::IndiElement::Off, INDI_IDLE);
+         derived().updateIfChanged(m_indiP_temp, "current", m_ccdTemp, INDI_IDLE);
+         derived().updateIfChanged(m_indiP_temp, "target", m_ccdTempSetpt, INDI_IDLE);
+         derived().updateIfChanged( m_indiP_tempstat, "status", m_tempControlStatusStr, INDI_IDLE);
+      }
+      else
+      {
+         if(m_tempControlOnTarget)
+         {
+            derived().updateSwitchIfChanged( m_indiP_tempcont, "toggle", pcf::IndiElement::On, INDI_OK);
+            derived().updateIfChanged(m_indiP_temp, "current", m_ccdTemp, INDI_OK);
+            derived().updateIfChanged(m_indiP_temp, "target", m_ccdTempSetpt, INDI_OK);
+            derived().updateIfChanged( m_indiP_tempstat, "status", m_tempControlStatusStr, INDI_OK);
+         }
+         else
+         {
+            derived().updateSwitchIfChanged( m_indiP_tempcont, "toggle", pcf::IndiElement::On, INDI_BUSY);
+            derived().updateIfChanged(m_indiP_temp, "current", m_ccdTemp, INDI_BUSY);
+            derived().updateIfChanged(m_indiP_temp, "target", m_ccdTempSetpt, INDI_BUSY);
+            derived().updateIfChanged( m_indiP_tempstat, "status", m_tempControlStatusStr, INDI_BUSY);
+         }
+      }      
+   }
+   else if(m_hasTemperature)
+   {
+      derived().updateIfChanged(m_indiP_temp, "current", m_ccdTemp, INDI_IDLE);
+   }
    
    return 0;
 }

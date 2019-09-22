@@ -898,7 +898,7 @@ protected:
    unsigned long m_powerOnWait {0}; ///< Time in sec to wait for device to boot after power on.
    
    /* Power on waiting counter . . . */
-   int m_powerOnCounter {-1}; ///< Counts numer of loops after power on, implements delay for device bootup.  If -1, then device was not powered off on startup.
+   int m_powerOnCounter {-1}; ///< Counts numer of loops after power on, implements delay for device bootup.  If -1, then device was NOT powered off on app startup.
    
    /* Power state . . . */
    int m_powerState {-1}; ///< Current power state, 1=On, 0=Off, -1=Unk.
@@ -1292,6 +1292,7 @@ int MagAOXApp<_useINDI>::execute() //virtual
     */
    while( m_shutdown == 0)
    {
+      //First check power state.
       if(m_powerMgtEnabled)
       {
          if(state() == stateCodes::POWEROFF)

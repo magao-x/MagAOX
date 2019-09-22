@@ -50,6 +50,10 @@ namespace dev
 template<class derivedT>
 class edtCamera : public ioDevice
 {
+
+public:
+   
+   
 protected:
 
    /** \name Configurable Parameters
@@ -60,9 +64,9 @@ protected:
    int m_channel {0}; ///< EDT PDV board channel number
    int m_numBuffs {4}; ///< EDT PDV DMA buffer size, indicating number of images.
     
-   cameraConfigMap m_cameraModes; ///< Map holding the possible camera mode configurations
+   //cameraConfigMap derived().m_cameraModes; ///< Map holding the possible camera mode configurations
    
-   std::string m_startupMode; ///< The camera mode to load during first init after a power-on.
+   //std::string derived().m_startupMode; ///< The camera mode to load during first init after a power-on.
    
    ///@}
    
@@ -70,9 +74,9 @@ protected:
    
    u_char * m_image_p {nullptr}; ///< The image data grabbed
 
-   std::string m_modeName; ///< The current mode name
+   //std::string m_modeName; ///< The current mode name
    
-   std::string m_nextMode; ///< The mode to be set by the next reconfiguration
+   //std::string derived().m_nextMode; ///< The mode to be set by the next reconfiguration
    
    int m_raw_height {0}; ///< The height of the frame, according to the framegrabber
    int m_raw_width {0}; ///< The width of the frame, according to the framegrabber
@@ -81,6 +85,9 @@ protected:
    
 public:
 
+   ///C'tor, sets up stdCamera
+   edtCamera();
+   
    ///Destructor, destroys the PdvDev structure
    ~edtCamera() noexcept;
    
@@ -195,7 +202,7 @@ protected:
 protected:
    //declare our properties
    
-   pcf::IndiProperty m_indiP_mode; ///< Property used to report the current mode
+   //pcf::IndiProperty m_indiP_mode; ///< Property used to report the current mode
    
 
 public:
@@ -205,16 +212,16 @@ public:
      * \returns 0 on success.
      * \returns -1 on error.
      */
-   static int st_newCallBack_mode( void * app, ///< [in] a pointer to this, will be static_cast-ed to derivedT.
-                                   const pcf::IndiProperty &ipRecv ///< [in] the INDI property sent with the the new property request.
-                                 );
+  // static int st_newCallBack_mode( void * app, ///< [in] a pointer to this, will be static_cast-ed to derivedT.
+  //                                   const pcf::IndiProperty &ipRecv ///< [in] the INDI property sent with the the new property request.
+  //                               );
 
    /// The callback called by the static version, to actually process the new request.
    /**
      * \returns 0 on success.
      * \returns -1 on error.
      */
-   int newCallBack_mode( const pcf::IndiProperty &ipRecv /**< [in] the INDI property sent with the the new property request.*/);
+   //int newCallBack_mode( const pcf::IndiProperty &ipRecv /**< [in] the INDI property sent with the the new property request.*/);
    
    /// Update the INDI properties for this device controller
    /** You should call this once per main loop.
@@ -234,6 +241,13 @@ private:
    }
 };
 
+template<class derivedT>
+edtCamera<derivedT>::edtCamera()
+{
+   derived().m_usesModes = true;
+}
+
+   
 template<class derivedT>
 edtCamera<derivedT>::~edtCamera() noexcept
 {
@@ -314,18 +328,18 @@ int edtCamera<derivedT>::pdvConfig(std::string & modeName)
       m_pdv = nullptr;
    }
       
-   m_modeName = modeName;
+   derived().m_modeName = modeName;
    if( derived().m_indiDriver )
    {
-      indi::updateIfChanged(m_indiP_mode, "target", m_modeName, derived().m_indiDriver);
+      indi::updateIfChanged(derived().m_indiP_mode, "target", derived().m_modeName, derived().m_indiDriver);
    }
    
-   if(m_cameraModes.count(modeName) != 1)
+   if(derived().m_cameraModes.count(modeName) != 1)
    {
       return derivedT::template log<text_log, -1>("No mode named " + modeName + " found.", logPrio::LOG_ERROR);
    }
    
-   std::string configFile = derived().configDir() + "/" +m_cameraModes[modeName].m_configFile;
+   std::string configFile = derived().configDir() + "/" +derived().m_cameraModes[modeName].m_configFile;
    
    derivedT::template log<text_log>("Loading EDT PDV config file: " + configFile);
       
@@ -411,8 +425,6 @@ void edtCamera<derivedT>::setupConfig(mx::app::appConfigurator & config)
    config.add("framegrabber.pdv_channel", "", "framegrabber.pdv_channel", argType::Required, "framegrabber", "pdv_channel", false, "int", "The EDT PDV framegrabber channel number.  Default is 0.");
    config.add("framegrabber.numBuffs", "", "framegrabber.numBuffs", argType::Required, "framegrabber", "numBuffs", false, "int", "The EDT PDV framegrabber DMA buffer size [images].  Default is 4.");
    
-   config.add("camera.startupMode", "", "camera.startupMode", argType::Required, "camera", "startupMode", false, "string", "The name of the configuration to set at startup.");
-      
    dev::ioDevice::setupConfig(config);
 }
 
@@ -423,24 +435,10 @@ void edtCamera<derivedT>::loadConfig(mx::app::appConfigurator & config)
    config(m_channel, "framegrabber.pdv_channel");
    config(m_numBuffs, "framegrabber.numBuffs");
    
-   config(m_startupMode, "camera.startupMode");
-   
    m_readTimeout = 1000;
    m_writeTimeout = 1000;
    dev::ioDevice::loadConfig(config);
-   
-   
-   int rv = loadCameraConfig(m_cameraModes, config);
-   
-   if(rv < 0)
-   {
-      if(rv == CAMCTRL_E_NOCONFIGS)
-      {
-         derivedT::template log<text_log>("No camera configurations found.", logPrio::LOG_CRITICAL);
-      }
-      
-      //derived().m_shutdown = true;
-   }
+
 }
    
 
@@ -449,25 +447,25 @@ int edtCamera<derivedT>::appStartup()
 {
    
    //Register the shmimName INDI property
-   m_indiP_mode = pcf::IndiProperty(pcf::IndiProperty::Text);
-   m_indiP_mode.setDevice(derived().configName());
-   m_indiP_mode.setName("mode");
-   m_indiP_mode.setPerm(pcf::IndiProperty::ReadWrite); 
-   m_indiP_mode.setState(pcf::IndiProperty::Idle);
-   m_indiP_mode.add(pcf::IndiElement("current"));
-   m_indiP_mode["current"] = "";
-   m_indiP_mode.add(pcf::IndiElement("target"));
-   m_indiP_mode["target"] = "";
+//    m_indiP_mode = pcf::IndiProperty(pcf::IndiProperty::Text);
+//    m_indiP_mode.setDevice(derived().configName());
+//    m_indiP_mode.setName("mode");
+//    m_indiP_mode.setPerm(pcf::IndiProperty::ReadWrite); 
+//    m_indiP_mode.setState(pcf::IndiProperty::Idle);
+//    m_indiP_mode.add(pcf::IndiElement("current"));
+//    m_indiP_mode["current"] = "";
+//    m_indiP_mode.add(pcf::IndiElement("target"));
+//    m_indiP_mode["target"] = "";
+//    
+//    if( derived().registerIndiPropertyNew( m_indiP_mode, st_newCallBack_mode) < 0)
+//    {
+//       #ifndef EDTCAMERA_TEST_NOLOG
+//       derivedT::template log<software_error>({__FILE__,__LINE__});
+//       #endif
+//       return -1;
+//    }
    
-   if( derived().registerIndiPropertyNew( m_indiP_mode, st_newCallBack_mode) < 0)
-   {
-      #ifndef EDTCAMERA_TEST_NOLOG
-      derivedT::template log<software_error>({__FILE__,__LINE__});
-      #endif
-      return -1;
-   }
-   
-   if(pdvConfig(m_startupMode) < 0) 
+   if(pdvConfig(derived().m_startupMode) < 0) 
    {
       derivedT::template log<software_error>({__FILE__, __LINE__});
       return -1;
@@ -487,11 +485,11 @@ int edtCamera<derivedT>::appLogic()
 template<class derivedT>
 int edtCamera<derivedT>::onPowerOff()
 {
-   if( !derived().m_indiDriver ) return 0;
-   
-   indi::updateIfChanged(m_indiP_mode, "current", std::string(""), derived().m_indiDriver);
-   indi::updateIfChanged(m_indiP_mode, "target", std::string(""), derived().m_indiDriver);
-   
+//    if( !derived().m_indiDriver ) return 0;
+//    
+//    indi::updateIfChanged(m_indiP_mode, "current", std::string(""), derived().m_indiDriver);
+//    indi::updateIfChanged(m_indiP_mode, "target", std::string(""), derived().m_indiDriver);
+//    
    return 0;
 }
 
@@ -535,87 +533,87 @@ template<class derivedT>
 int edtCamera<derivedT>::pdvReconfig( )
 {
    
-   if(pdvConfig(m_nextMode) < 0)
+   if(pdvConfig(derived().m_nextMode) < 0)
    {
-      derivedT::template log<text_log>("error trying to re-configure with " + m_nextMode, logPrio::LOG_ERROR);
+      derivedT::template log<text_log>("error trying to re-configure with " + derived().m_nextMode, logPrio::LOG_ERROR);
       sleep(1);
    }
    else
    {
-      m_nextMode = "";
+      derived().m_nextMode = "";
    }
    
    return 0;
 }
 
-template<class derivedT>
-int edtCamera<derivedT>::st_newCallBack_mode( void * app,
-                                              const pcf::IndiProperty &ipRecv
-                                            )
-{
-   return static_cast<derivedT *>(app)->newCallBack_mode(ipRecv);
-}
-
-template<class derivedT>
-int edtCamera<derivedT>::newCallBack_mode( const pcf::IndiProperty &ipRecv )
-{
-   if (ipRecv.getName() == m_indiP_mode.getName())
-   {
-      std::cerr << "New mode\n";
-      std::string current;
-      std::string target;
-      try 
-      {
-         current = ipRecv["current"].get();
-      }
-      catch(...)
-      {
-         current = "";
-      }
-      
-      try 
-      {
-         target = ipRecv["target"].get();
-      }
-      catch(...)
-      {
-         target = "";
-      }
-      
-      if(target == "") target = current;
-      
-      if(m_cameraModes.count(target) == 0 )
-      {
-         return derivedT::template log<text_log, -1>("Unrecognized mode requested: " + target, logPrio::LOG_ERROR);
-      }
-      
-      ///\todo should lock mutex here
-      indi::updateIfChanged(m_indiP_mode, "current", target, derived().m_indiDriver);
-      
-      //Now signal the f.g. thread to reconfigure
-      m_nextMode = target;
-      derived().m_reconfig = true;
-      
-      return 0;
-   }
-   return -1;
-}
+// template<class derivedT>
+// int edtCamera<derivedT>::st_newCallBack_mode( void * app,
+//                                               const pcf::IndiProperty &ipRecv
+//                                             )
+// {
+//    return static_cast<derivedT *>(app)->newCallBack_mode(ipRecv);
+// }
+// 
+// template<class derivedT>
+// int edtCamera<derivedT>::newCallBack_mode( const pcf::IndiProperty &ipRecv )
+// {
+//    if (ipRecv.getName() == m_indiP_mode.getName())
+//    {
+//       std::cerr << "New mode\n";
+//       std::string current;
+//       std::string target;
+//       try 
+//       {
+//          current = ipRecv["current"].get();
+//       }
+//       catch(...)
+//       {
+//          current = "";
+//       }
+//       
+//       try 
+//       {
+//          target = ipRecv["target"].get();
+//       }
+//       catch(...)
+//       {
+//          target = "";
+//       }
+//       
+//       if(target == "") target = current;
+//       
+//       if(derived().m_cameraModes.count(target) == 0 )
+//       {
+//          return derivedT::template log<text_log, -1>("Unrecognized mode requested: " + target, logPrio::LOG_ERROR);
+//       }
+//       
+//       ///\todo should lock mutex here
+//       indi::updateIfChanged(m_indiP_mode, "current", target, derived().m_indiDriver);
+//       
+//       //Now signal the f.g. thread to reconfigure
+//       derived().m_nextMode = target;
+//       derived().m_reconfig = true;
+//       
+//       return 0;
+//    }
+//    return -1;
+// }
    
 template<class derivedT>
 int edtCamera<derivedT>::updateINDI()
 {
-   if( !derived().m_indiDriver ) return 0;
-   
-   indi::updateIfChanged(m_indiP_mode, "current", m_modeName, derived().m_indiDriver);
-   
-   if(m_nextMode == m_modeName)
-   {
-      indi::updateIfChanged(m_indiP_mode, "target", std::string(""), derived().m_indiDriver);
-   }
-   else
-   {
-      indi::updateIfChanged(m_indiP_mode, "target", m_nextMode, derived().m_indiDriver);
-   }
+//    if( !derived().m_indiDriver ) return 0;
+//    
+//    indi::updateIfChanged(m_indiP_mode, "current", derived().m_modeName, derived().m_indiDriver);
+//    
+//    if(derived().m_nextMode == derived().m_modeName)
+//    {
+//       indi::updateIfChanged(m_indiP_mode, "target", std::string(""), derived().m_indiDriver);
+//    }
+//    else
+//    {
+//       indi::updateIfChanged(m_indiP_mode, "target", derived().m_nextMode, derived().m_indiDriver);
+//    }
    
    
    return 0;
