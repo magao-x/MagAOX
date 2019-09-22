@@ -479,6 +479,10 @@ void stdCamera<derivedT>::setupConfig(mx::app::appConfigurator & config)
       config.add("camera.startupTemp", "", "camera.startupTemp", argType::Required, "camera", "startupTemp", false, "float", "The temperature setpoint to set after a power-on [C].  Default is 20 C.");
    }
    
+   if(m_usesModes)
+   {
+      config.add("camera.startupMode", "", "camera.startupMode", argType::Required, "camera", "startupMode", false, "string", "The mode to set upon power on or application startup.");
+   }
 }
 
 template<class derivedT>
@@ -500,6 +504,9 @@ void stdCamera<derivedT>::loadConfig(mx::app::appConfigurator & config)
             derivedT::template log<text_log>("No camera configurations found.", logPrio::LOG_CRITICAL);
          }
       }
+      
+      config(m_startupMode, "camera.startupMode");
+      
    }
    
 }
@@ -575,6 +582,7 @@ int stdCamera<derivedT>::appStartup()
    if(m_usesModes)
    {
       derived().createStandardIndiText( m_indiP_mode, "mode");
+      m_indiP_mode["target"] = m_startupMode;
       if( derived().registerIndiPropertyNew( m_indiP_mode, st_newCallBack_stdCamera) < 0)
       {
          #ifndef STDCAMERA_TEST_NOLOG
@@ -799,7 +807,6 @@ int stdCamera<derivedT>::newCallBack_temp( const pcf::IndiProperty &ipRecv )
       return -1;
    }
 
-   std::cerr << "Setting new temperature set point to: " << target << "\n";
    m_ccdTempSetpt = target;
    return derived().setTempSetPt();
 }

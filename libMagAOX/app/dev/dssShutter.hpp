@@ -432,8 +432,15 @@ int dssShutter<derivedT>::appLogic()
 template<class derivedT>
 int dssShutter<derivedT>::appShutdown()
 {
-   pthread_kill(m_openThread.native_handle(), SIGUSR1);
-   pthread_kill(m_shutThread.native_handle(), SIGUSR1);
+   if(m_openThread.joinable())
+   {
+      pthread_kill(m_openThread.native_handle(), SIGUSR1);
+   }
+   
+   if(m_shutThread.joinable())
+   {
+      pthread_kill(m_shutThread.native_handle(), SIGUSR1);
+   }
    
    if(m_openThread.joinable())
    {

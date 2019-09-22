@@ -1236,8 +1236,13 @@ int MagAOXApp<_useINDI>::execute() //virtual
 
    //----------------------------------------//
 
-   setSigTermHandler();
-
+   //Install signal handling
+   if(m_shutdown == 0)
+   {
+      setSigTermHandler();
+   }
+   
+   //We are not initialized, begin application startup.
    if( m_shutdown == 0 )
    {
       state(stateCodes::INITIALIZED);
@@ -1256,7 +1261,7 @@ int MagAOXApp<_useINDI>::execute() //virtual
    }
 
    //We have to wait for power status to become available
-   if(m_powerMgtEnabled)
+   if(m_powerMgtEnabled && m_shutdown == 0)
    {
       while(m_powerState < 0 && !m_shutdown)
       {

@@ -395,6 +395,7 @@ int ocam2KCtrl::appStartup()
 inline
 int ocam2KCtrl::appLogic()
 {
+   
    //and run stdCamera's appLogic
    if(dev::stdCamera<ocam2KCtrl>::appLogic() < 0)
    {
@@ -611,10 +612,15 @@ inline
 int ocam2KCtrl::appShutdown()
 {
    ///\todo error check these base class fxns.
+   
    dev::stdCamera<ocam2KCtrl>::appShutdown();
+   
    dev::edtCamera<ocam2KCtrl>::appShutdown();
+   
    dev::frameGrabber<ocam2KCtrl>::appShutdown();
+   
    dev::dssShutter<ocam2KCtrl>::appShutdown();
+   
    dev::telemeter<ocam2KCtrl>::appShutdown();
    
    return 0;
@@ -649,15 +655,16 @@ int ocam2KCtrl::getTemps()
       m_ccdTemp = m_temps.CCD;
       m_ccdTempSetpt = m_temps.SET;
       
-      //Detect the weird case on startup where it doesn't seem to be actually doing anything
-      if(m_temps.POWER < 2.0)
+      //Detect that temperature control is off
+      if(m_temps.COOLING_POWER < 5)
       {
-         if( fabs(m_temps.CCD - m_temps.SET) > 1.0 )
+         if( m_temps.CCD - m_temps.SET > 2.99 )
          {
             m_tempControlStatus = false;
          }
       }
- 
+      else m_tempControlStatus = true;
+      
       if(m_tempControlStatus == true)
       {
          if(fabs(m_temps.CCD - m_temps.SET) < 1.0)
@@ -699,8 +706,8 @@ inline
 int ocam2KCtrl::powerOnDefaults()
 {
    //Camera boots up with this true in most cases.
-   m_tempControlStatusSet = true;
-   m_tempControlStatus = true;
+   m_tempControlStatusSet = false;
+   m_tempControlStatus =false;
       
    return 0;
 }
@@ -735,13 +742,20 @@ int ocam2KCtrl::setTempControl()
     
    comStr += command;
    
-   if( pdvSerialWriteRead( response, command) == 0)
+   if( pdvSerialWriteRead( response, comStr) == 0)
    {
+      std::cerr << "response: " << response << "\n";
       ///\todo check response
-      return log<text_log,0>({"Set temperature control to " + command});
+      log<text_log,0>({"Set temperature control to " + command});
    }
    else return log<software_error,-1>({__FILE__, __LINE__});
    
+   if( m_tempControlStatusSet && m_ccdTempSetpt > -999)
+   {
+      return setTempSetPt();
+   }
+   
+   return 0;
 }
 
 inline
@@ -759,6 +773,7 @@ int ocam2KCtrl::setTempSetPt()
    
    if( pdvSerialWriteRead( response, "temp " + tempStr) == 0)
    {
+      std::cerr << "response: " << response << "\n";
       ///\todo check response
       return log<text_log,0>({"set temperature: " + tempStr});
    }
