@@ -3,7 +3,7 @@ DIR="$( cd "$( dirname "${BASH_SOURCE[0]}" )" && pwd )"
 source $DIR/../_common.sh
 set -euo pipefail
 cd /opt/MagAOX/vendor
-
+log_info "Began MKL tarball install"
 INTEL_MKL_VERSION=l_mkl_2019.4.243
 INTEL_MKL_TARBALL=$INTEL_MKL_VERSION.tgz
 INTEL_MKL_TARBALL_URL=http://registrationcenter-download.intel.com/akdlm/irc_nas/tec/15540/$INTEL_MKL_TARBALL
@@ -22,3 +22,4 @@ else
     log_warn "/opt/intel already exists. Run sudo $PWD/install.sh interactively to uninstall before reinstalling"
 fi
 echo "source /opt/intel/compilers_and_libraries/linux/bin/compilervars.sh intel64" > /etc/profile.d/mklvars.sh
+log_info "Finished MKL tarball install"

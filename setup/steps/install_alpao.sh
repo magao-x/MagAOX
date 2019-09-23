@@ -3,6 +3,7 @@ DIR="$( cd "$( dirname "${BASH_SOURCE[0]}" )" && pwd )"
 source $DIR/../_common.sh
 set -euo pipefail
 cd /opt/MagAOX/vendor/alpao
+log_info "Began Alpao install"
 sudo patch -Np1 < alpao_build_fix.patch || true
 # option 2 - "Install ASDK and Interface Corp. PEX-292144 support"
 echo 2 | sudo bash Linux/InstallASDK.sh
@@ -14,3 +15,4 @@ done
 
 echo "export ACECFG=/opt/MagAOX/config/alpao" | sudo tee /etc/profile.d/alpao.sh
 log_info "Added /etc/profile.d/alpao.sh"
+log_info "Finished Alpao install"
