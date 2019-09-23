@@ -421,9 +421,13 @@ void IndiDriver::sendMessage( const IndiProperty &ipSend )
 
 void IndiDriver::sendSetProperty( const IndiProperty &ipSend ) const
 {
+   IndiProperty _ipSend = ipSend;
+   
+   _ipSend.setTimeStamp(TimeStamp::now());
+   
   if ( isResponseModeEnabled() == true )
   {
-    IndiXmlParser ixp( IndiMessage( IndiMessage::SetProperty, ipSend ),
+    IndiXmlParser ixp( IndiMessage( IndiMessage::SetProperty, _ipSend ),
                        getProtocolVersion() );
     sendXml( ixp.createXmlString() );
   }
