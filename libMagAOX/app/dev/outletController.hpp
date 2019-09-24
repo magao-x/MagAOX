@@ -40,12 +40,16 @@ namespace dev
 /** Controls a set of outlets on a device, such as A/C power outlets or digital outputs.
   * The outlets are organized into channels, which could be made up of multiple outlets.
   *
+  * Requirements:
+  * - call `setNumberOfOutlets` in the derived class constructor
+  * 
+  * 
   * \tparam derivedT specifies a MagAOXApp parent base class which is accessed with a `static_cast` (downcast)to perform various methods.
   *
   * \ingroup appdev
   *
   * \todo finalize 0-counting vs 1-counting rules --> do we subtract one from config-ed outlet indices if m_firstOne is true?
-  * \todo this needs to be refactored to current style for CRTP base classes, using derived(), etc.
+  * 
   */
 template<class derivedT>
 struct outletController
@@ -135,7 +139,7 @@ struct outletController
 
    /// Get the state of the outlet from the device.
    /** This will be implemented in derived classes to update the outlet state.
-     *
+     * \todo this is declared pure virtual, but there is an implementation.
      * \returns 0 on success.
      * \returns -1 on error.
      */
@@ -271,6 +275,13 @@ struct outletController
    int updateINDI();
 
    ///@}
+   
+   
+private:
+   derivedT & derived()
+   {
+      return *static_cast<derivedT *>(this);
+   }
 };
 
 template<class derivedT>
@@ -473,7 +484,7 @@ int outletController<derivedT>::turnChannelOn( const std::string & channel )
 
    #ifndef OUTLET_CTRL_TEST_NOINDI
    //m_channels[channel].m_indiP_prop["target"].setValue("On");
-   indi::updateIfChanged(m_channels[channel].m_indiP_prop, "target", std::string("On"), static_cast<derivedT*>(this)->m_indiDriver, INDI_BUSY );
+   indi::updateIfChanged(m_channels[channel].m_indiP_prop, "target", std::string("On"), derived().m_indiDriver, INDI_BUSY );
    #endif
 
    //If order is specified, get first outlet number
@@ -546,7 +557,7 @@ int outletController<derivedT>::turnChannelOff( const std::string & channel )
 
    #ifndef OUTLET_CTRL_TEST_NOINDI
    //m_channels[channel].m_indiP_prop["target"].setValue("Off");
-   indi::updateIfChanged(m_channels[channel].m_indiP_prop, "target", std::string("Off"), static_cast<derivedT*>(this)->m_indiDriver, INDI_BUSY );
+   indi::updateIfChanged(m_channels[channel].m_indiP_prop, "target", std::string("Off"), derived().m_indiDriver, INDI_BUSY );
    #endif
 
    //If order is specified, get first outlet number
@@ -623,18 +634,15 @@ int outletController<derivedT>::newCallBack_channels( const pcf::IndiProperty &i
 
    std::string state, target;
 
-   ///\todo change these to the "find" members
-   try
+   if(ipRecv.find("state"))
    {
       state = ipRecv["state"].get<std::string>();
    }
-   catch(...){}
 
-   try
+   if(ipRecv.find("target"))
    {
       target = ipRecv["target"].get<std::string>();
    }
-   catch(...){}
 
    if( target == "" ) target = state;
    target = mx::ioutils::toUpper(target);
@@ -657,12 +665,12 @@ int outletController<derivedT>::setupINDI()
 {
    //Register the static INDI properties
    m_indiP_chOutlets = pcf::IndiProperty(pcf::IndiProperty::Text);
-   m_indiP_chOutlets.setDevice(static_cast<derivedT *>(this)->configName());
+   m_indiP_chOutlets.setDevice(derived().configName());
    m_indiP_chOutlets.setName("channelOutlets");
    m_indiP_chOutlets.setPerm(pcf::IndiProperty::ReadOnly);
    m_indiP_chOutlets.setState(pcf::IndiProperty::Idle);
     
-   if(static_cast<derivedT *>(this)->registerIndiPropertyReadOnly(m_indiP_chOutlets) < 0)
+   if(derived().registerIndiPropertyReadOnly(m_indiP_chOutlets) < 0)
    {
       #ifndef OUTLET_CTRL_TEST_NOLOG
       derivedT::template log<software_error>({__FILE__,__LINE__});   
@@ -671,12 +679,12 @@ int outletController<derivedT>::setupINDI()
    }  
    
    m_indiP_chOnDelays = pcf::IndiProperty (pcf::IndiProperty::Number);
-   m_indiP_chOnDelays.setDevice(static_cast<derivedT *>(this)->configName());
+   m_indiP_chOnDelays.setDevice(derived().configName());
    m_indiP_chOnDelays.setName("channelOnDelays");
    m_indiP_chOnDelays.setPerm(pcf::IndiProperty::ReadOnly);
    m_indiP_chOnDelays.setState(pcf::IndiProperty::Idle);
    
-   if(static_cast<derivedT *>(this)->registerIndiPropertyReadOnly(m_indiP_chOnDelays) < 0)
+   if(derived().registerIndiPropertyReadOnly(m_indiP_chOnDelays) < 0)
    {
       #ifndef OUTLET_CTRL_TEST_NOLOG
       derivedT::template log<software_error>({__FILE__,__LINE__});
@@ -685,12 +693,12 @@ int outletController<derivedT>::setupINDI()
    }
       
    m_indiP_chOffDelays = pcf::IndiProperty (pcf::IndiProperty::Number);
-   m_indiP_chOffDelays.setDevice(static_cast<derivedT *>(this)->configName());
+   m_indiP_chOffDelays.setDevice(derived().configName());
    m_indiP_chOffDelays.setName("channelOffDelays");
    m_indiP_chOffDelays.setPerm(pcf::IndiProperty::ReadOnly);
    m_indiP_chOffDelays.setState(pcf::IndiProperty::Idle);
    
-   if(static_cast<derivedT *>(this)->registerIndiPropertyReadOnly(m_indiP_chOffDelays) < 0)
+   if(derived().registerIndiPropertyReadOnly(m_indiP_chOffDelays) < 0)
    {
       #ifndef OUTLET_CTRL_TEST_NOLOG
       derivedT::template log<software_error>({__FILE__,__LINE__});
@@ -702,7 +710,7 @@ int outletController<derivedT>::setupINDI()
    for(auto it = m_channels.begin(); it != m_channels.end(); ++it)
    {
       it->second.m_indiP_prop = pcf::IndiProperty (pcf::IndiProperty::Text);
-      it->second.m_indiP_prop.setDevice(static_cast<derivedT *>(this)->configName());
+      it->second.m_indiP_prop.setDevice(derived().configName());
       it->second.m_indiP_prop.setName(it->first);
       it->second.m_indiP_prop.setPerm(pcf::IndiProperty::ReadWrite);
       it->second.m_indiP_prop.setState( pcf::IndiProperty::Idle );
@@ -711,7 +719,7 @@ int outletController<derivedT>::setupINDI()
       it->second.m_indiP_prop.add (pcf::IndiElement("state"));
       it->second.m_indiP_prop.add (pcf::IndiElement("target"));
 
-      if( static_cast<derivedT *>(this)->registerIndiPropertyNew( it->second.m_indiP_prop, st_newCallBack_channels) < 0)
+      if( derived().registerIndiPropertyNew( it->second.m_indiP_prop, st_newCallBack_channels) < 0)
       {
          #ifndef OUTLET_CTRL_TEST_NOLOG
          derivedT::template log<software_error>({__FILE__,__LINE__});
@@ -739,12 +747,12 @@ int outletController<derivedT>::setupINDI()
    
    //Register the outletStates INDI property, and add an element for each outlet.
    m_indiP_outletStates = pcf::IndiProperty (pcf::IndiProperty::Text);
-   m_indiP_outletStates.setDevice(static_cast<derivedT *>(this)->configName());
+   m_indiP_outletStates.setDevice(derived().configName());
    m_indiP_outletStates.setName("outlet");
    m_indiP_outletStates.setPerm(pcf::IndiProperty::ReadWrite);
    m_indiP_outletStates.setState( pcf::IndiProperty::Idle );
 
-   if( static_cast<derivedT *>(this)->registerIndiPropertyReadOnly(m_indiP_outletStates) < 0)
+   if( derived().registerIndiPropertyReadOnly(m_indiP_outletStates) < 0)
    {
       #ifndef OUTLET_CTRL_TEST_NOLOG
       derivedT::template log<software_error>({__FILE__,__LINE__});
@@ -752,7 +760,7 @@ int outletController<derivedT>::setupINDI()
       return -1;
    }
 /*      
-   auto result =  static_cast<derivedT *>(this)->m_indiNewCallBacks.insert( { "outlet", {&m_indiP_outletStates, nullptr}});
+   auto result =  derived().m_indiNewCallBacks.insert( { "outlet", {&m_indiP_outletStates, nullptr}});
 
    if(!result.second)
    {
@@ -778,12 +786,12 @@ std::string stateIntToString(int st)
 template<class derivedT>
 int outletController<derivedT>::updateINDI()
 {
-   if( !static_cast<derivedT*>(this)->m_indiDriver ) return 0;
+   if( !derived().m_indiDriver ) return 0;
 
    //Publish outlet states (only bother if they've changed)
    for(size_t i=0; i< m_outletStates.size(); ++i)
    {
-      indi::updateIfChanged(m_indiP_outletStates, std::to_string(i+m_firstOne), stateIntToString(m_outletStates[i]), static_cast<derivedT*>(this)->m_indiDriver);
+      indi::updateIfChanged(m_indiP_outletStates, std::to_string(i+m_firstOne), stateIntToString(m_outletStates[i]), derived().m_indiDriver);
    }
 
    //Publish channel states (only bother if they've changed)
@@ -797,8 +805,8 @@ int outletController<derivedT>::updateINDI()
 
       //if(target == state) target = "";
 
-      indi::updateIfChanged( it->second.m_indiP_prop, "state", state, static_cast<derivedT*>(this)->m_indiDriver );
-      indi::updateIfChanged( it->second.m_indiP_prop, "target", target, static_cast<derivedT*>(this)->m_indiDriver );
+      indi::updateIfChanged( it->second.m_indiP_prop, "state", state, derived().m_indiDriver );
+      indi::updateIfChanged( it->second.m_indiP_prop, "target", target, derived().m_indiDriver );
    }
 
    

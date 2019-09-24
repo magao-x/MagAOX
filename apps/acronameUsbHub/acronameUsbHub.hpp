@@ -36,6 +36,9 @@ namespace app
 
 /** MagAO-X application to control an Acroname USB 3.0 8-port hub
   *
+  * \todo add current, temperature, etc. monitoring
+  * \todo telemetry
+  * 
   * \ingroup acronameUsbHub
   * 
   */
@@ -52,8 +55,9 @@ protected:
    ///@}
    
    
-   aUSBHub3p m_hub;
-   bool m_connected {false};
+   aUSBHub3p m_hub; ///< BrainStem library handle
+   
+   bool m_connected {false}; ///< Whether or not the hub is currently connected
    
 public:
 
@@ -87,18 +91,29 @@ public:
    /// Do any needed shutdown tasks.  Currently nothing in this app.
    virtual int appShutdown();
    
-         
-   int updateOutletState( int outletNum );
+   /// Get the state of the outlet from the device.
+   /** dev::outletController interface.
+     *
+     * \returns 0 on success.
+     * \returns -1 on error.
+     */
+   int updateOutletState( int outletNum /**< [in] the outlet number to update */);
 
-   int turnOutletOn( int outletNum );
+   /// Turn an outlet on.
+   /** dev::outletController interface.
+     *
+     * \returns 0 on success.
+     * \returns -1 on error.
+     */
+   int turnOutletOn( int outletNum /**< [in] the outlet number to turn on */);
 
-   int turnOutletOff( int outletNum );
-
-   //INDI:
-protected:
-
-public:
-   
+   /// Turn an outlet off.
+   /** dev::outletController interface.
+     *
+     * \returns 0 on success.
+     * \returns -1 on error.
+     */
+   int turnOutletOff( int outletNum /**< [in] the outlet number to turn off */);
 
 
 };
