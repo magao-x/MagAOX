@@ -140,8 +140,11 @@ protected:
    pcf::IndiProperty m_indiP_gain;
    pcf::IndiProperty m_indiP_leak;
    
+   pcf::IndiProperty m_indiP_zero;
+   
    INDI_NEWCALLBACK_DECL(t2wOffloader, m_indiP_gain);
    INDI_NEWCALLBACK_DECL(t2wOffloader, m_indiP_leak);
+   INDI_NEWCALLBACK_DECL(t2wOffloader, m_indiP_zero);
 };
 
 inline
@@ -213,6 +216,13 @@ int t2wOffloader::appStartup()
       return log<software_error,-1>({__FILE__, __LINE__});
    }
    
+   
+   createStandardIndiRequestSw( m_indiP_zero, "zero", "zero loop");
+   if( registerIndiPropertyNew( m_indiP_zero, INDI_NEWCALLBACK(m_indiP_zero)) < 0)
+   {
+      log<software_error>({__FILE__,__LINE__});
+      return -1;
+   }
    
    state(stateCodes::OPERATING);
     
@@ -289,7 +299,6 @@ int t2wOffloader::allocate(const dev::shmimT & dummy)
    }
    else
    {
-      log<text_log>( "Opened " + m_dmChannel + " " + std::to_string(m_dmWidth) + " x " + std::to_string(m_dmHeight) + " with data type: " + std::to_string(m_dmDataType)); 
       m_dmWidth = m_dmStream.md->size[0]; 
       m_dmHeight = m_dmStream.md->size[1]; 
    
@@ -383,6 +392,25 @@ INDI_NEWCALLBACK_DEFN(t2wOffloader, m_indiP_leak)(const pcf::IndiProperty &ipRec
    
    log<text_log>("set gain to " + std::to_string(m_leak), logPrio::LOG_NOTICE);
    
+   return 0;
+}
+
+INDI_NEWCALLBACK_DEFN(t2wOffloader, m_indiP_zero)(const pcf::IndiProperty &ipRecv)
+{
+   if(ipRecv.getName() != m_indiP_zero.getName())
+   {
+      log<software_error>({__FILE__, __LINE__, "invalid indi property received"});
+      return -1;
+   }
+   
+   float target;
+   
+   if( ipRecv["toggle"].getSwitchState() == pcf::IndiElement::On)
+   {
+      m_woofer.setZero();
+      log<text_log>("set gain to " + std::to_string(m_leak), logPrio::LOG_NOTICE);
+   
+   }
    return 0;
 }
 

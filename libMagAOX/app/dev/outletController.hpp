@@ -45,6 +45,7 @@ namespace dev
   * \ingroup appdev
   *
   * \todo finalize 0-counting vs 1-counting rules --> do we subtract one from config-ed outlet indices if m_firstOne is true?
+  * \todo this needs to be refactored to current style for CRTP base classes, using derived(), etc.
   */
 template<class derivedT>
 struct outletController
@@ -254,7 +255,7 @@ struct outletController
 
    /// Setup the INDI properties for this device controller
    /** This should be called in the `appStartup` function of the derived MagAOXApp.
-     *
+     * \todo change this to be appStartup like other devs.
      * \returns 0 on success.
      * \returns -1 on error.
      */

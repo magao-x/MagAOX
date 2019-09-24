@@ -240,6 +240,8 @@ public:
      */
    int updateINDI();
 
+   int recordStage( bool force = false );
+   
    ///@}
    
 private:
@@ -511,7 +513,7 @@ int stdMotionStage<derivedT>::updateINDI()
    
    size_t nn = n;
  
-   //Check for changes and update the filterNames switch vectorm_presetNotation + ".
+   //Check for changes and update the filterNames
    bool changed = false;
    
    static int last_moving = -1; //Initialize so we always update first time through.
@@ -554,7 +556,7 @@ int stdMotionStage<derivedT>::updateINDI()
             
       derived().m_indiDriver->sendSetProperty(m_indiP_presetName);
    }
-   
+      
   
    
    if(m_moving && m_movingState < 1)
@@ -568,10 +570,34 @@ int stdMotionStage<derivedT>::updateINDI()
       indi::updateIfChanged(m_indiP_preset, "target", m_preset_target, derived().m_indiDriver,INDI_IDLE);
    }
    
+   return recordStage();
+}
+
+template<class derivedT>
+int stdMotionStage<derivedT>::recordStage(bool force)
+{
+   static int last_moving = m_moving + 1; //guarantee first run
+   static double last_preset;
+   static std::string last_presetName;
+   
+   size_t n = derived().presetNumber();
+
+   std::string presetName;
+   if(n >= 0 && n < m_presetNames.size()) presetName = m_presetNames[n];
+   
+   if( m_moving != last_moving || m_preset != last_preset || presetName != last_presetName || force)
+   {
+      derived().template telem<telem_stage>({m_moving, m_preset, m_presetNames[n]});
+      last_moving = m_moving;
+      last_preset = m_preset;
+      last_presetName = presetName;
+
+   }
+   
    
    return 0;
 }
-
+   
 
 } //namespace dev
 } //namespace app

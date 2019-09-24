@@ -372,7 +372,7 @@ int pupilFit::appStartup()
    m_indiP_thresh["target"].set(m_threshold);
    registerIndiPropertyNew(m_indiP_thresh, INDI_NEWCALLBACK(m_indiP_thresh));
    
-   createStandardIndiToggleSw( m_indiP_averaging, "averaging", "Averaging", "Start/Stop Averaging");
+   createStandardIndiToggleSw( m_indiP_averaging, "averaging", "Start/Stop Averaging");
    m_indiP_averaging["toggle"].set(pcf::IndiElement::Off);
    if( registerIndiPropertyNew( m_indiP_averaging, INDI_NEWCALLBACK(m_indiP_averaging)) < 0)
    {

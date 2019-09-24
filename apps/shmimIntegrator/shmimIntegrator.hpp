@@ -32,7 +32,20 @@ struct darkShmimT
       return "dark";
    };
 };
+
+struct dark2ShmimT 
+{
+   static std::string configSection()
+   {
+      return "dark2Shmim";
+   };
    
+   static std::string indiPrefix()
+   {
+      return "dark2";
+   };
+};
+
 /** \defgroup shmimIntegrator ImageStreamIO Stream Integrator
   * \brief Integrates (i.e. averages) an ImageStreamIO image stream.
   *
@@ -51,7 +64,7 @@ struct darkShmimT
   * \ingroup shmimIntegrator
   * 
   */
-class shmimIntegrator : public MagAOXApp<true>, public dev::shmimMonitor<shmimIntegrator>, public dev::shmimMonitor<shmimIntegrator,darkShmimT>, public dev::frameGrabber<shmimIntegrator>
+class shmimIntegrator : public MagAOXApp<true>, public dev::shmimMonitor<shmimIntegrator>, public dev::shmimMonitor<shmimIntegrator,darkShmimT>, public dev::shmimMonitor<shmimIntegrator,dark2ShmimT>, public dev::frameGrabber<shmimIntegrator>
 {
 
    //Give the test harness access.
@@ -59,6 +72,7 @@ class shmimIntegrator : public MagAOXApp<true>, public dev::shmimMonitor<shmimIn
 
    friend class dev::shmimMonitor<shmimIntegrator>;
    friend class dev::shmimMonitor<shmimIntegrator,darkShmimT>;
+   friend class dev::shmimMonitor<shmimIntegrator,dark2ShmimT>;
    friend class dev::frameGrabber<shmimIntegrator>;
    
    //The base shmimMonitor type
@@ -66,6 +80,9 @@ class shmimIntegrator : public MagAOXApp<true>, public dev::shmimMonitor<shmimIn
    
    //The dark shmimMonitor type
    typedef dev::shmimMonitor<shmimIntegrator, darkShmimT> darkMonitorT;
+   
+   //The dark shmimMonitor type for a 2nd dark
+   typedef dev::shmimMonitor<shmimIntegrator, dark2ShmimT> dark2MonitorT;
    
    //The base frameGrabber type
    typedef dev::frameGrabber<shmimIntegrator> frameGrabberT;
@@ -101,6 +118,10 @@ protected:
    mx::improc::eigenImage<realT> m_darkImage;
    bool m_darkSet {false};
    realT (*dark_pixget)(void *, size_t) {nullptr}; ///< Pointer to a function to extract the image data as our desired type realT.
+   
+   mx::improc::eigenImage<realT> m_dark2Image;
+   bool m_dark2Set {false};
+   realT (*dark2_pixget)(void *, size_t) {nullptr}; ///< Pointer to a function to extract the image data as our desired type realT.
    
 public:
    /// Default c'tor.
@@ -148,6 +169,12 @@ public:
    
    int processImage( void * curr_src,          ///< [in] pointer to start of current frame.
                      const darkShmimT & dummy ///< [in] tag to differentiate shmimMonitor parents.
+                   );
+   
+   int allocate( const dark2ShmimT & dummy /**< [in] tag to differentiate shmimMonitor parents.*/);
+   
+   int processImage( void * curr_src,          ///< [in] pointer to start of current frame.
+                     const dark2ShmimT & dummy ///< [in] tag to differentiate shmimMonitor parents.
                    );
 protected:
 
@@ -213,6 +240,7 @@ void shmimIntegrator::setupConfig()
 {
    shmimMonitorT::setupConfig(config);
    darkMonitorT::setupConfig(config);
+   dark2MonitorT::setupConfig(config);
    
    frameGrabberT::setupConfig(config);
    
@@ -227,6 +255,7 @@ int shmimIntegrator::loadConfigImpl( mx::app::appConfigurator & _config )
    
    shmimMonitorT::loadConfig(config);
    darkMonitorT::loadConfig(config);
+   dark2MonitorT::loadConfig(config);
    
    frameGrabberT::loadConfig(config);
    
@@ -283,6 +312,11 @@ int shmimIntegrator::appStartup()
       return log<software_error,-1>({__FILE__, __LINE__});
    }
    
+   if(dark2MonitorT::appStartup() < 0)
+   {
+      return log<software_error,-1>({__FILE__, __LINE__});
+   }
+   
    if(frameGrabberT::appStartup() < 0)
    {
       return log<software_error,-1>({__FILE__, __LINE__});
@@ -306,6 +340,11 @@ int shmimIntegrator::appLogic()
       return log<software_error,-1>({__FILE__,__LINE__});
    }
    
+   if( dark2MonitorT::appLogic() < 0)
+   {
+      return log<software_error,-1>({__FILE__,__LINE__});
+   }
+   
    if( frameGrabberT::appLogic() < 0)
    {
       return log<software_error,-1>({__FILE__,__LINE__});
@@ -322,6 +361,12 @@ int shmimIntegrator::appLogic()
    {
       log<software_error>({__FILE__, __LINE__});
    }
+   
+   if(dark2MonitorT::updateINDI() < 0)
+   {
+      log<software_error>({__FILE__, __LINE__});
+   }
+   
    
    if(frameGrabberT::updateINDI() < 0)
    {
@@ -412,7 +457,9 @@ int shmimIntegrator::processImage( void * curr_src,
       {
          m_avgImage /= m_nAverage;
          
-         if(m_darkSet) m_avgImage -= m_darkImage;
+         if(m_darkSet && !m_dark2Set) m_avgImage -= m_darkImage;
+         else if(!m_darkSet && m_dark2Set) m_avgImage -= m_dark2Image;
+         else if(m_darkSet && m_dark2Set) m_avgImage -= m_darkImage + m_dark2Image;
          
          m_updated = true;
          
@@ -527,6 +574,53 @@ int shmimIntegrator::processImage( void * curr_src,
    
    return 0;
 }
+
+inline
+int shmimIntegrator::allocate(const dark2ShmimT & dummy)
+{
+   static_cast<void>(dummy); //be unused
+   
+   std::unique_lock<std::mutex> lock(m_indiMutex);
+   
+   if(dark2MonitorT::m_width != shmimMonitorT::m_width || dark2MonitorT::m_height != shmimMonitorT::m_height)
+   {
+      m_dark2Set = false;
+      dark2MonitorT::m_restart = true;
+   }
+   
+   m_dark2Image.resize(dark2MonitorT::m_width, dark2MonitorT::m_height);
+   
+   dark2_pixget = getPixPointer<realT>(dark2MonitorT::m_dataType);
+   
+   if(dark2_pixget == nullptr)
+   {
+      log<software_error>({__FILE__, __LINE__, "bad data type"});
+      return -1;
+   }
+   
+   return 0;
+}
+
+inline
+int shmimIntegrator::processImage( void * curr_src, 
+                                   const dark2ShmimT & dummy 
+                                 )
+{
+   static_cast<void>(dummy); //be unused
+   
+   realT * data = m_dark2Image.data();
+   
+   for(unsigned nn=0; nn < dark2MonitorT::m_width*dark2MonitorT::m_height; ++nn)
+   {
+      //data[nn] = *( (int16_t * ) (curr_src + nn*shmimMonitorT::m_typeSize));
+      data[nn] = dark2_pixget(curr_src, nn);
+   }
+   
+   m_dark2Set = true;
+   
+   return 0;
+}
+
 
 inline
 int shmimIntegrator::configureAcquisition()

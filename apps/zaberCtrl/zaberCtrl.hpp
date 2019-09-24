@@ -34,13 +34,15 @@ namespace app
   * 
   * \ingroup zaberCtrl
   */
-class zaberCtrl : public MagAOXApp<>, public dev::stdMotionStage<zaberCtrl>
+class zaberCtrl : public MagAOXApp<>, public dev::stdMotionStage<zaberCtrl>, public dev::telemeter<zaberCtrl>
 {
 
    //Give the test harness access.
    friend class zaberCtrl_test;
    
    friend class dev::stdMotionStage<zaberCtrl>;
+   
+   friend class dev::telemeter<zaberCtrl>;
 
 protected:
 
@@ -154,6 +156,20 @@ protected:
    INDI_SETCALLBACK_DECL(zaberCtrl, m_indiP_stageRawPos);
    INDI_SETCALLBACK_DECL(zaberCtrl, m_indiP_stageTgtPos);
    INDI_SETCALLBACK_DECL(zaberCtrl, m_indiP_stageTemp);
+   
+   /** \name Telemeter Interface
+     * 
+     * @{
+     */ 
+   int checkRecordTimes();
+   
+   int recordTelem( const telem_stage * );
+   
+   int recordTelem( const telem_zaber * );
+   
+   int recordZaber(bool force = false);
+   
+   ///@}
 };
 
 zaberCtrl::zaberCtrl() : MagAOXApp(MAGAOX_CURRENT_SHA1, MAGAOX_REPO_MODIFIED)
@@ -372,6 +388,7 @@ int zaberCtrl::moveTo( const double & target)
    indiP_stageTgtPos.setState(pcf::IndiProperty::Idle);
    indiP_stageTgtPos.add(pcf::IndiElement(m_stageName));
    
+   dev::stdMotionStage<zaberCtrl>::recordStage(true);
    if( sendNewProperty(indiP_stageTgtPos, m_stageName, m_tgtRawPos) < 0 ) return log<software_error,-1>({__FILE__,__LINE__});
    
    return 0;
@@ -404,6 +421,7 @@ INDI_NEWCALLBACK_DEFN( zaberCtrl, m_indiP_pos)(const pcf::IndiProperty &ipRecv)
       }
    }
    m_tgtPos = target;
+   
    moveTo(m_tgtPos);
    updateIfChanged(m_indiP_pos, "target", m_tgtPos, INDI_BUSY);
    updateIfChanged(m_indiP_rawpos, "target", m_tgtRawPos, INDI_BUSY);
@@ -443,6 +461,8 @@ INDI_NEWCALLBACK_DEFN( zaberCtrl, m_indiP_rawpos)(const pcf::IndiProperty &ipRec
    indiP_stageTgtPos.setPerm(pcf::IndiProperty::ReadWrite); 
    indiP_stageTgtPos.setState(pcf::IndiProperty::Idle);
    indiP_stageTgtPos.add(pcf::IndiElement(m_stageName));
+   
+   dev::stdMotionStage<zaberCtrl>::recordStage(true);
    
    if( sendNewProperty(indiP_stageTgtPos, m_stageName, target) < 0 ) return log<software_error,-1>({__FILE__,__LINE__});
    
@@ -563,6 +583,7 @@ INDI_SETCALLBACK_DEFN( zaberCtrl, m_indiP_stageRawPos )(const pcf::IndiProperty 
       updateIfChanged(m_indiP_pos, "current", m_pos, INDI_IDLE);
    }
    
+   dev::stdMotionStage<zaberCtrl>::recordStage();
 
    return 0;
 }
@@ -629,6 +650,40 @@ INDI_SETCALLBACK_DEFN( zaberCtrl, m_indiP_stageTemp )(const pcf::IndiProperty &i
    return 0;
 }
 
+int zaberCtrl::checkRecordTimes()
+{
+   return telemeter<zaberCtrl>::checkRecordTimes(telem_stage(), telem_zaber());
+}
+   
+int zaberCtrl::recordTelem( const telem_stage * )
+{
+   return stdMotionStage<zaberCtrl>::recordStage(true);
+}
+
+int zaberCtrl::recordTelem( const telem_zaber * )
+{
+   return recordZaber(true);
+}
+   
+int zaberCtrl::recordZaber(bool force)
+{
+   static double last_pos = m_pos - 1000;
+   static double last_rawPos = m_rawPos;
+   static double last_temp = m_stageTemp;
+   
+   if( m_pos != last_pos || m_rawPos != last_rawPos || m_stageTemp != last_temp || force)
+   {
+      telem<telem_zaber>({m_pos, m_rawPos, m_stageTemp});
+      
+      last_pos = m_pos;
+      last_rawPos = m_rawPos;
+      last_temp = m_stageTemp;
+   }
+   
+   
+   return 0;
+}
+   
 } //namespace app
 } //namespace MagAOX
 
