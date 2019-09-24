@@ -4,7 +4,7 @@ source $DIR/../_common.sh
 set -eo pipefail
 
 orgname=magao-x
-reponame=purepyindi
+reponame=magpyx
 parentdir=/opt/MagAOX/source
 clone_or_update_and_cd $orgname $reponame $parentdir
 
@@ -14,13 +14,13 @@ for envname in py37 dev; do
     conda activate $envname
 
     PACKAGES=$(conda list)
-    if [[ $PACKAGES != *purepyindi* ]]; then
-        cd /opt/MagAOX/source/purepyindi
-        pip install -e .[all]
+    if [[ $PACKAGES != *magpyx* ]]; then
+        cd /opt/MagAOX/source/magpyx
+        pip install -e .
     else
-        echo "purepyindi already installed in $envname environment!"
+        echo "magpyx already installed in $envname environment!"
     fi
-    python -c "import purepyindi"
+    python -c "import magpyx"
     #deactivate the environment before moving on
     conda deactivate
     set -u
