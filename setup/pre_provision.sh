@@ -7,6 +7,41 @@ if [[ "$EUID" == 0 ]]; then
     exit 1
 fi
 
+if [[ -z $MAGAOX_ROLE ]]; then
+    MAGAOX_ROLE=""
+    echo "Choose the role for this machine"
+    echo "    AOC - Adaptive optics Operator Computer"
+    echo "    RTC - Real Time control Computer"
+    echo "    ICC - Instrument Control Computer"
+    echo "    workstation - Any other MagAO-X workstation"
+    echo
+    while [[ -z $MAGAOX_ROLE ]]; do
+        read -p "Role:" roleinput
+        case $roleinput in
+            AOC)
+                MAGAOX_ROLE=AOC
+                ;;
+            RTC)
+                MAGAOX_ROLE=RTC
+                ;;
+            ICC)
+                MAGAOX_ROLE=ICC
+                ;;
+            workstation)
+                MAGAOX_ROLE=workstation
+                ;;
+            *)
+                echo "Must be one of AOC, RTC, ICC, or workstation."
+                continue
+        esac
+    done
+else
+    echo "Already have MAGAOX_ROLE=$MAGAOX_ROLE, not prompting for it. (Edit /etc/profile.d/magaox_role.sh if it's wrong)"
+fi
+
+echo "export MAGAOX_ROLE=$MAGAOX_ROLE" | sudo tee /etc/profile.d/magaox_role.sh
+export MAGAOX_ROLE
+
 source /etc/os-release
 # without hardened_usercopy=off, the ALPAO DM driver (really the Interface Corp card driver) will
 # trigger protections against suspicious copying between kernel and userspace
@@ -19,21 +54,24 @@ PCIEXPANSION_CMDLINE_FIX="pci=noaer"
 SPECTRE_CMDLINE_FIX="noibrs noibpb nopti nospectre_v2 nospectre_v1 l1tf=off nospec_store_bypass_disable no_stf_barrier mds=off mitigations=off"
 # disable 3rd party nvidia drivers
 NVIDIA_DRIVER_FIX="rd.driver.blacklist=nouveau nouveau.modeset=0"
-# Put it all together
-DESIRED_CMDLINE="nosplash $NVIDIA_DRIVER_FIX $ALPAO_CMDLINE_FIX $PCIEXPANSION_CMDLINE_FIX $SPECTRE_CMDLINE_FIX"
-if [[ $ID == ubuntu ]]; then
-    log_info "Skipping RT kernel install on Ubuntu"
+
+if [[ $MAGAOX_ROLE != ICC && $MAGAOX_ROLE != RTC ]]; then
+    log_info "Skipping RT kernel install on non-realtime roles"
     install_rt=false
+    # Put it all together
+    DESIRED_CMDLINE="nosplash $NVIDIA_DRIVER_FIX $SPECTRE_CMDLINE_FIX"
 else
-    if ! grep "$DESIRED_CMDLINE" /etc/default/grub; then
-        echo GRUB_CMDLINE_LINUX_DEFAULT=\""$DESIRED_CMDLINE"\" | sudo tee -a /etc/default/grub
-        sudo grub2-mkconfig -o /boot/grub2/grub.cfg
-        log_success "Applied kernel command line tweaks for ALPAO, Spectre, PCIe expansion"
-    fi
     if [[ $(uname -v) != *"PREEMPT RT"* ]]; then
         log_info "Will install RT kernel..."
         install_rt=true
     fi
+    # Put it all together
+    DESIRED_CMDLINE="nosplash $NVIDIA_DRIVER_FIX $ALPAO_CMDLINE_FIX $PCIEXPANSION_CMDLINE_FIX $SPECTRE_CMDLINE_FIX"
+fi
+if ! grep "$DESIRED_CMDLINE" /etc/default/grub; then
+    echo GRUB_CMDLINE_LINUX_DEFAULT=\""$DESIRED_CMDLINE"\" | sudo tee -a /etc/default/grub
+    sudo grub2-mkconfig -o /boot/grub2/grub.cfg
+    log_success "Applied kernel command line tweaks for ALPAO, Spectre, PCIe expansion"
 fi
 
 if [[ ! -e /etc/modprobe.d/blacklist-nouveau.conf ]]; then
