@@ -181,7 +181,7 @@ if [[ $MAGAOX_ROLE == ci || $MAGAOX_ROLE == vm ||  $MAGAOX_ROLE == workstation ]
 fi
 
 # Install Linux headers (instrument computers use the RT kernel / headers)
-if [[ $MAGAOX_ROLE == ci || $MAGAOX_ROLE == vm ||  $MAGAOX_ROLE == workstation ]]; then
+if [[ $MAGAOX_ROLE == ci || $MAGAOX_ROLE == vm || $MAGAOX_ROLE == workstation || $MAGAOX_ROLE == AOC ]]; then
     if [[ $ID == ubuntu ]]; then
         sudo apt install -y linux-headers-generic
     elif [[ $ID == centos ]]; then
@@ -194,6 +194,10 @@ sudo bash -l "$DIR/steps/install_mkl_tarball.sh"
 if [[ $MAGAOX_ROLE == RTC || $MAGAOX_ROLE == ICC || $MAGAOX_ROLE == AOC || $MAGAOX_ROLE == ci ]]; then
     sudo bash -l "$DIR/steps/install_cuda.sh"
     sudo bash -l "$DIR/steps/install_magma.sh"
+fi
+# Can't enable GUI until CUDA is installed
+if [[ $MAGAOX_ROLE == AOC || $MAGAOX_ROLE == workstation ]]; then
+    sudo bash -l "$DIR/steps/enable_kde.sh"
 fi
 sudo bash -l "$DIR/steps/install_fftw.sh"
 sudo bash -l "$DIR/steps/install_cfitsio.sh"
