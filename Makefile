@@ -4,7 +4,9 @@ SELF_DIR := $(abspath $(dir $(lastword $(MAKEFILE_LIST))))
 apps_common = \
 	sshDigger \
 	sysMonitor \
-	xindiserver
+	xindiserver \
+	xt1121Ctrl \
+	xt1121DCDU
 
 apps_rtcicc = \
 	mzmqServer \
@@ -33,8 +35,6 @@ apps_icc = \
 
 apps_aoc = \
 	trippLitePDU \
-	xt1121Ctrl \
-    xt1121DCDU \
 	mzmqClient
 
 apps_vm = \

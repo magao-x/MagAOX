@@ -300,6 +300,7 @@ $MAYBE_SUDO bash -l "$DIR/steps/install_milkzmq.sh"
 sudo bash -l "$DIR/steps/install_python.sh"
 sudo bash -l "$DIR/steps/create_conda_envs.sh"
 sudo bash -l "$DIR/steps/install_purepyindi.sh"
+sudo bash -l "$DIR/steps/install_sup.sh"
 sudo bash -l "$DIR/steps/install_magpyx.sh"
 sudo bash -l "$DIR/steps/install_imagestreamio_python.sh"
 
