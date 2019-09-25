@@ -1,6 +1,6 @@
 #!/bin/bash
 DIR="$( cd "$( dirname "${BASH_SOURCE[0]}" )" && pwd )"
-set -euo pipefail
+
 source $DIR/_common.sh
 if [[ "$EUID" == 0 ]]; then
     log_error "Can't add you to the magaox-dev group when you're running as root! Aborting."
@@ -41,6 +41,7 @@ fi
 
 echo "export MAGAOX_ROLE=$MAGAOX_ROLE" | sudo tee /etc/profile.d/magaox_role.sh
 export MAGAOX_ROLE
+set -euo pipefail
 
 source /etc/os-release
 # without hardened_usercopy=off, the ALPAO DM driver (really the Interface Corp card driver) will
