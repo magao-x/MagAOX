@@ -8,6 +8,7 @@ PACKAGE_FILENAME=qwt-${PACKAGE_VERSION}.tar.bz2
 QWT_ROOT_DEFAULT=/usr/local/qwt-6.1.4
 
 cd /opt/MagAOX/vendor
+source /etc/os-release
 if [[ $ID == centos && $VERSION_ID == 7 ]]; then
     _cached_fetch https://downloads.sourceforge.net/project/qwt/qwt/${PACKAGE_VERSION}/${PACKAGE_FILENAME} ${PACKAGE_FILENAME}
     tar xvf ${PACKAGE_FILENAME}
