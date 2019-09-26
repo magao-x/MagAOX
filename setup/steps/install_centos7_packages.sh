@@ -50,6 +50,7 @@ yum install -y \
     gdb \
     yum-utils \
     yum-versionlock \
+    dkms \
 ;
 
 sudo alternatives --install /usr/local/bin/cmake cmake /usr/bin/cmake3 20 \
