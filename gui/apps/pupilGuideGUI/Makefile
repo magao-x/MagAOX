@@ -27,8 +27,8 @@ $(TARGET):
 	$(QMAKE) -makefile $(TARGET).pro
 	$(MAKE) -f makefile.$(TARGET)
 
-#install: $(TARGET)
-#	install bin/$(TARGET) /usr/local/bin
+install: $(TARGET)
+	sudo install bin/$(TARGET) /usr/local/bin
 
 clean:
 	rm -f obj/*.o *~

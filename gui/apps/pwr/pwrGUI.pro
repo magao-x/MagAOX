@@ -6,12 +6,6 @@ TEMPLATE = app
 TARGET = pwrGUI
 DESTDIR = bin/ 
 DEPENDPATH += ./ ../../lib 
-#INCLUDEPATH += /usr/include/x86_64-linux-gnu/qt5/
-#INCLUDEPATH += /usr/include/qt5/
-
-INCLUDEPATH += /usr/include/qwt/
-INCLUDEPATH += /home/jrmales/include 
-
 INCLUDEPATH +=../../widgets/multiDial
 
 MOC_DIR = moc/
@@ -22,8 +16,11 @@ UI_DIR = ../../widgets/pwr
 CONFIG(release, debug|release) {
     CONFIG += optimize_full
 }
-
 CONFIG += c++14
+CONFIG += qwt
+exists( $$(CONDA_PREFIX)/include ) {
+    INCLUDEPATH += $$(CONDA_PREFIX)/include
+}
 
 MAKEFILE = makefile.pwrGUI
 
@@ -42,7 +39,6 @@ SOURCES += pwrGUI.cpp \
 FORMS += ../../widgets/pwr/pwr.ui
      
 LIBS += ../../../INDI/libcommon/libcommon.a \
-        ../../../INDI/liblilxml/liblilxml.a \
-        -lqwt-qt5
+        ../../../INDI/liblilxml/liblilxml.a
 
 QT += widgets

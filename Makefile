@@ -57,6 +57,21 @@ else ifeq ($(MAGAOX_ROLE),vm)
   apps_to_build += $(apps_vm)
 endif
 
+all_guis = dmCtrlGUI \
+	dmModeGUI \
+	modwfsGUI \
+	pupilGuideGUI \
+	pwr \
+	ttmpupilGUI
+
+ifeq ($(MAGAOX_ROLE),RTC)
+  guis_to_build =
+else ifeq ($(MAGAOX_ROLE),ICC)
+  guis_to_build =
+else
+  guis_to_build = $(all_guis)
+endif
+
 utils_to_build = logdump \
 				 logstream \
                  cursesINDI \
@@ -118,6 +133,23 @@ apps_clean:
 	for app in ${apps_to_build}; do \
 		(cd apps/$$app; ${MAKE}  clean) || exit 1; \
 	done
+
+
+guis_all: libs_install
+	for gui in ${guis_to_build}; do \
+		(cd gui/apps/$$gui; ${MAKE} )|| exit 1; \
+	done
+
+guis_install:
+	for gui in ${guis_to_build}; do \
+		(cd gui/apps/$$gui; ${MAKE}  install) || exit 1; \
+	done
+
+guis_clean:
+	for gui in ${guis_to_build}; do \
+		(cd gui/apps/$$gui; ${MAKE}  clean) || exit 1; \
+	done
+
 
 scripts_install:
 	for script in ${scripts_to_install}; do \
