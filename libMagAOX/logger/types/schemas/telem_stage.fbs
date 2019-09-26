@@ -1,0 +1,13 @@
+namespace MagAOX.logger;
+
+
+
+table Telem_stage_fb
+{
+   moving:uint8;
+   preset:float;
+   presetName:string;
+}
+
+root_type Telem_stage_fb;
+
