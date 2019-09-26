@@ -118,6 +118,6 @@ if [[ "$MAGAOX_ROLE" == "vm" ]]; then
   link_if_necessary /vagrant/vm/cache /opt/MagAOX/.cache
 else
   mkdir -pv /opt/MagAOX/.cache
-  chown -R root:root /opt/MagAOX/.cache
-  chmod -R u=rwX,g=rwX,o=rX /opt/MagAOX/.cache
+  chown -R root:magaox-dev /opt/MagAOX/.cache
+  chmod -R u=rwX,g=rwsX,o=rX /opt/MagAOX/.cache
 fi

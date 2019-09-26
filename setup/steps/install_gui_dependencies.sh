@@ -13,7 +13,7 @@ if [[ $ID == ubuntu ]]; then
 elif [[ $ID == centos && $VERSION_ID == 7 ]]; then
     sudo yum install -y \
         qt5-qtbase-devel \
-        qwt-devel \
         xorg-x11-apps \
     ;
+    sudo bash -l "$DIR/install_qwt.sh"
 fi
