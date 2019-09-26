@@ -59,6 +59,8 @@ sudo alternatives --install /usr/local/bin/cmake cmake /usr/bin/cmake3 20 \
     --slave /usr/local/bin/ccmake ccmake /usr/bin/ccmake3 \
     --family cmake
 
+sudo alternatives --install /usr/local/bin/qmake qmake /usr/bin/qmake-qt5 20
+
 yum-config-manager --add-repo https://download.opensuse.org/repositories/network:/messaging:/zeromq:/release-stable/CentOS_7/network:messaging:zeromq:release-stable.repo
 yum install -y zeromq-devel
 
