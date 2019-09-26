@@ -23,8 +23,8 @@ cd $CUDA_PACKAGE_DIR
 CUDA_VERSION=10.1
 CUDA_RUNFILE=cuda_10.1.168_418.67_linux.run
 CUDA_URL=https://developer.nvidia.com/compute/cuda/10.1/Prod/local_installers/$CUDA_RUNFILE
+_cached_fetch $CUDA_URL $CUDA_RUNFILE
 if [[ ! -e /usr/local/cuda-$CUDA_VERSION ]]; then
-    _cached_fetch $CUDA_URL $CUDA_RUNFILE
     bash $CUDA_RUNFILE $CUDA_FLAGS
 fi
 echo "export CUDADIR=/usr/local/cuda" > /etc/profile.d/cuda.sh
