@@ -40,10 +40,12 @@ namespace app
   *
   * \ingroup filterWheelCtrl
   */
-class filterWheelCtrl : public MagAOXApp<>, public tty::usbDevice, public dev::stdMotionStage<filterWheelCtrl>
+class filterWheelCtrl : public MagAOXApp<>, public tty::usbDevice, public dev::stdMotionStage<filterWheelCtrl>, public dev::telemeter<filterWheelCtrl>
 {
 
    friend class dev::stdMotionStage<filterWheelCtrl>;
+   
+   friend class dev::telemeter<filterWheelCtrl>;
    
 protected:
 
@@ -210,6 +212,16 @@ protected:
      */
    int moveTo( const double & filters /**< [in] The new position in absolute filter units*/ );
 
+   /** \name Telemeter Interface
+     * 
+     * @{
+     */ 
+   int checkRecordTimes();
+   
+   int recordTelem( const telem_stage * );
+   
+   
+   ///@}
 };
 
 inline
@@ -854,6 +866,16 @@ int filterWheelCtrl::moveTo( const double & filters )
 
    return moveToRaw(counts);
 
+}
+
+int filterWheelCtrl::checkRecordTimes()
+{
+   return telemeter<filterWheelCtrl>::checkRecordTimes(telem_stage());
+}
+   
+int filterWheelCtrl::recordTelem( const telem_stage * )
+{
+   return stdMotionStage<filterWheelCtrl>::recordStage(true);
 }
 
 } //namespace app
