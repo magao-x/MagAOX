@@ -43,6 +43,8 @@ class hsfwCtrl : public MagAOXApp<>,  public dev::stdMotionStage<hsfwCtrl>
 
    friend class dev::stdMotionStage<hsfwCtrl>;
    
+   friend class dev::telemeter<hsfwCtrl>;
+   
 protected:
 
    /** \name Non-configurable parameters
@@ -147,6 +149,14 @@ protected:
      */
    int moveTo( const double & filters /**< [in] The new position in absolute filter units*/ );
 
+   /** \name Telemeter Interface
+     * 
+     * @{
+     */ 
+   int checkRecordTimes();
+   
+   int recordTelem( const telem_stage * );
+   
 };
 
 inline
@@ -427,6 +437,16 @@ int hsfwCtrl::moveTo( const double & filters )
    }
    
    return 0;
+}
+
+int hsfwCtrl::checkRecordTimes()
+{
+   return telemeter<hsfwCtrl>::checkRecordTimes(telem_stage());
+}
+   
+int hsfwCtrl::recordTelem( const telem_stage * )
+{
+   return stdMotionStage<hsfwCtrl>::recordStage(true);
 }
 
 } //namespace app
