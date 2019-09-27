@@ -16,10 +16,15 @@ function _cached_fetch() {
   url=$1
   filename=$2
   dest=$PWD
+  if [[ $filename == *levmar* ]]; then
+    EXTRA_CURL_OPTS='-A "Mozilla/5.0"'
+  else
+    EXTRA_CURL_OPTS=''
+  fi
   mkdir -p /opt/MagAOX/.cache
   if [[ ! -e $dest/$filename ]]; then
     if [[ ! -e /opt/MagAOX/.cache/$filename ]]; then
-      curl -A "Mozilla/5.0" -L $url > /tmp/magaoxcache-$filename && \
+      curl $EXTRA_CURL_OPTS -L $url > /tmp/magaoxcache-$filename && \
         mv /tmp/magaoxcache-$filename /opt/MagAOX/.cache/$filename
       log_info "Downloaded to /opt/MagAOX/.cache/$filename"
     fi

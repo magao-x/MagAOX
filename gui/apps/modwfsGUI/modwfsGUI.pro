@@ -6,10 +6,6 @@ TEMPLATE = app
 TARGET = modwfsGUI
 DESTDIR = bin/ 
 DEPENDPATH += ./ ../../lib 
-INCLUDEPATH += /usr/include/x86_64-linux-gnu/qt5/
-#INCLUDEPATH += /usr/include/qt5/
-
-INCLUDEPATH += /usr/include/qwt/ 
 
 MOC_DIR = moc/
 OBJECTS_DIR = obj/
@@ -21,6 +17,10 @@ CONFIG(release, debug|release) {
 }
 
 CONFIG += c++14
+CONFIG += qwt
+exists( $$(CONDA_PREFIX)/include ) {
+    INCLUDEPATH += $$(CONDA_PREFIX)/include
+}
 
 MAKEFILE = makefile.modwfsGUI
 
@@ -34,7 +34,6 @@ SOURCES += modwfsGUI_main.cpp \
 FORMS += ../../widgets/modwfs/modwfs.ui
      
 LIBS += ../../../INDI/libcommon/libcommon.a \
-        ../../../INDI/liblilxml/liblilxml.a \
-        -lqwt-qt5
+        ../../../INDI/liblilxml/liblilxml.a
 
 QT += widgets

@@ -72,7 +72,7 @@ fi
 if ! grep "$DESIRED_CMDLINE" /etc/default/grub; then
     echo GRUB_CMDLINE_LINUX_DEFAULT=\""$DESIRED_CMDLINE"\" | sudo tee -a /etc/default/grub
     sudo grub2-mkconfig -o /boot/grub2/grub.cfg
-    log_success "Applied kernel command line tweaks for ALPAO, Spectre, PCIe expansion"
+    log_success "Applied kernel command line tweaks"
 fi
 
 if [[ ! -e /etc/modprobe.d/blacklist-nouveau.conf ]]; then

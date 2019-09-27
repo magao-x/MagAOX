@@ -166,17 +166,8 @@ if [[ $MAGAOX_ROLE == vm ]]; then
     sudo bash -l "$DIR/steps/enable_vm_x11_forwarding.sh"
 fi
 
-# Necessary for forwarding GUIs from the VM to the host
-if [[ $MAGAOX_ROLE == vm ]]; then
-    if [[ $ID == ubuntu ]]; then
-        sudo apt install -y xauth
-    elif [[ $ID == centos ]]; then
-        sudo yum install -y xorg-x11-xauth
-    fi
-fi
-
 # Install dependencies for the GUIs
-if [[ $MAGAOX_ROLE == ci || $MAGAOX_ROLE == vm ||  $MAGAOX_ROLE == workstation ]]; then
+if [[ $MAGAOX_ROLE == AOC || $MAGAOX_ROLE == ci || $MAGAOX_ROLE == vm ||  $MAGAOX_ROLE == workstation ]]; then
     sudo bash -l "$DIR/steps/install_gui_dependencies.sh"
 fi
 
@@ -194,10 +185,6 @@ sudo bash -l "$DIR/steps/install_mkl_tarball.sh"
 if [[ $MAGAOX_ROLE == RTC || $MAGAOX_ROLE == ICC || $MAGAOX_ROLE == AOC || $MAGAOX_ROLE == ci ]]; then
     sudo bash -l "$DIR/steps/install_cuda.sh"
     sudo bash -l "$DIR/steps/install_magma.sh"
-fi
-# Can't enable GUI until CUDA is installed
-if [[ $MAGAOX_ROLE == AOC || $MAGAOX_ROLE == workstation ]]; then
-    sudo bash -l "$DIR/steps/enable_kde.sh"
 fi
 sudo bash -l "$DIR/steps/install_fftw.sh"
 sudo bash -l "$DIR/steps/install_cfitsio.sh"
