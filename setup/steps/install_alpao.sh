@@ -15,4 +15,11 @@ done
 
 echo "export ACECFG=/opt/MagAOX/config/alpao" | sudo tee /etc/profile.d/alpao.sh
 log_info "Added /etc/profile.d/alpao.sh"
+
+# Install systemd unit to init alpao on boot
+UNIT_PATH=/etc/systemd/system/
+if [[ ! -e $UNIT_PATH/initialize_alpao.service ]]; then
+    ln -s /opt/MagAOX/config/initialize_alpao.service $UNIT_PATH/initialize_alpao.service
+fi
+sudo systemctl enable initialize_alpao.service || true
 log_info "Finished Alpao install"
