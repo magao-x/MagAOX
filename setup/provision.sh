@@ -207,7 +207,7 @@ if [[ -e $VENDOR_SOFTWARE_BUNDLE ]]; then
     BUNDLE_TMPDIR=/tmp/vendor_software_bundle_$(date +"%s")
     sudo mkdir -p $BUNDLE_TMPDIR
     sudo unzip -o $VENDOR_SOFTWARE_BUNDLE -d $BUNDLE_TMPDIR
-    for vendorname in alpao bmc andor; do
+    for vendorname in alpao bmc andor libhsfw; do
         if [[ ! -d /opt/MagAOX/vendor/$vendorname ]]; then
             sudo cp -R $BUNDLE_TMPDIR/bundle/$vendorname /opt/MagAOX/vendor
         else
@@ -224,6 +224,9 @@ if [[ -e $VENDOR_SOFTWARE_BUNDLE ]]; then
     fi
     if [[ $ID == centos && ( $MAGAOX_ROLE == RTC || $MAGAOX_ROLE == vm ) ]]; then
         sudo bash -l "$DIR/steps/install_bmc.sh"
+    fi
+    if [[ $MAGAOX_ROLE == ICC ]]; then
+        sudo bash -l "$DIR/steps/install_libhsfw.sh"
     fi
     sudo rm -rf $BUNDLE_TMPDIR
 fi
