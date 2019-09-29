@@ -637,6 +637,7 @@ int trippLitePDU::parsePDUStatus( std::string & strRead )
                
             for(size_t i=0;i<m_outletStates.size();++i) m_outletStates[i]=outletStates[i];
          }
+	 else if( sstr[7] == 'V' || sstr[7] == 'F') continue;
          else return -1;
       }
       else return -1;
