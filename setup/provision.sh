@@ -295,7 +295,7 @@ sudo bash -l "$DIR/steps/install_sup.sh"
 sudo bash -l "$DIR/steps/install_magpyx.sh"
 sudo bash -l "$DIR/steps/install_imagestreamio_python.sh"
 
-# AOC, vm, ci, and workstation should all install rtimv
+# AOC, vm, and workstation should all install rtimv
 if [[ $MAGAOX_ROLE == AOC || $MAGAOX_ROLE == vm ||  $MAGAOX_ROLE == workstation ]]; then
     sudo bash -l "$DIR/steps/install_rtimv.sh"
 fi
