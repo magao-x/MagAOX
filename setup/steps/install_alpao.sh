@@ -18,8 +18,6 @@ log_info "Added /etc/profile.d/alpao.sh"
 
 # Install systemd unit to init alpao on boot
 UNIT_PATH=/etc/systemd/system/
-if [[ ! -e $UNIT_PATH/initialize_alpao.service ]]; then
-    ln -s /opt/MagAOX/config/initialize_alpao.service $UNIT_PATH/initialize_alpao.service
-fi
-sudo systemctl enable initialize_alpao.service || true
+cp /opt/MagAOX/config/initialize_alpao.service $UNIT_PATH/initialize_alpao.service
+sudo systemctl enable initialize_alpao || true
 log_info "Finished Alpao install"
