@@ -134,7 +134,6 @@ apps_clean:
 		(cd apps/$$app; ${MAKE}  clean) || exit 1; \
 	done
 
-
 guis_all: libs_install
 	for gui in ${guis_to_build}; do \
 		(cd gui/apps/$$gui; ${MAKE} )|| exit 1; \
@@ -142,14 +141,13 @@ guis_all: libs_install
 
 guis_install:
 	for gui in ${guis_to_build}; do \
-		(cd gui/apps/$$gui; ${MAKE}  install) || exit 1; \
+		(cd gui/apps/$$gui; ${MAKE} install) || exit 1; \
 	done
 
 guis_clean:
 	for gui in ${guis_to_build}; do \
-		(cd gui/apps/$$gui; ${MAKE}  clean) || exit 1; \
+		(cd gui/apps/$$gui; ${MAKE} clean) || exit 1; \
 	done
-
 
 scripts_install:
 	for script in ${scripts_to_install}; do \
