@@ -13,5 +13,6 @@ elif [[ $ID == centos && $VERSION_ID == 7 ]]; then
         xorg-x11-apps \
         kate \
         wmctrl \
+        mesa-libGL-devel \
     ;
 fi
