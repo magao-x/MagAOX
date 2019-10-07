@@ -3,6 +3,11 @@
 # This script is still a bit broken and to be run with the '-i' bash flag
 # in order to activate a conda environment
 #
+# If not started as root, sudo yourself
+if [[ "$EUID" != 0 ]]; then
+    sudo bash -l $0 "$@"
+    exit $?
+fi
 DIR="$( cd "$( dirname "${BASH_SOURCE[0]}" )" && pwd )"
 source $DIR/../_common.sh
 set -eo pipefail

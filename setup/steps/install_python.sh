@@ -1,4 +1,9 @@
 #!/bin/bash
+# If not started as root, sudo yourself
+if [[ "$EUID" != 0 ]]; then
+    sudo bash -l $0 "$@"
+    exit $?
+fi
 DIR="$( cd "$( dirname "${BASH_SOURCE[0]}" )" && pwd )"
 source $DIR/../_common.sh
 set -euo pipefail
@@ -6,6 +11,7 @@ MINICONDA_VERSION="3-4.7.10"
 #
 # MINICONDA
 #
+cd /opt/MagAOX/vendor
 if [[ ! -d /opt/miniconda3 ]]; then
     MINICONDA_INSTALLER="Miniconda$MINICONDA_VERSION-Linux-x86_64.sh"
     _cached_fetch "https://repo.continuum.io/miniconda/$MINICONDA_INSTALLER" $MINICONDA_INSTALLER
