@@ -3,13 +3,6 @@ DIR="$( cd "$( dirname "${BASH_SOURCE[0]}" )" && pwd )"
 source $DIR/../_common.sh
 set -euo pipefail
 
-
-function setgid_all() {
-    # n.b. can't be recursive because g+s on files means something else
-    # so we find all directories and individually chmod them:
-    find $1 -type d -exec chmod g+s {} \;
-}
-
 function make_on_data_array() {
   # If run on instrument computer, make the name provided as an arg a link from $2/$1
   # to /data/$1.

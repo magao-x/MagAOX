@@ -30,6 +30,12 @@ function link_if_necessary() {
   fi
 }
 
+function setgid_all() {
+    # n.b. can't be recursive because g+s on files means something else
+    # so we find all directories and individually chmod them:
+    find $1 -type d -exec chmod g+s {} \;
+}
+
 function _cached_fetch() {
   url=$1
   filename=$2
@@ -121,4 +127,9 @@ fi
 # (why? https://serverfault.com/a/838552)
 if [[ $PATH != "*/usr/local/bin*" ]]; then
     export PATH="/usr/local/bin:$PATH"
+fi
+if [[ $(which sudo) == *devtoolset* ]]; then
+  REAL_SUDO=/usr/bin/sudo
+else
+  REAL_SUDO=$(which sudo)
 fi
