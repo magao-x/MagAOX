@@ -15,9 +15,9 @@ cd /opt/MagAOX/vendor
 if [[ ! -d /opt/miniconda3 ]]; then
     MINICONDA_INSTALLER="Miniconda$MINICONDA_VERSION-Linux-x86_64.sh"
     _cached_fetch "https://repo.continuum.io/miniconda/$MINICONDA_INSTALLER" $MINICONDA_INSTALLER
-    sudo bash $MINICONDA_INSTALLER -b -p /opt/miniconda3
+    bash $MINICONDA_INSTALLER -b -p /opt/miniconda3
     # Set environment variables for miniconda
-    cat << 'EOF' | sudo tee /etc/profile.d/miniconda.sh
+    cat << 'EOF' | tee /etc/profile.d/miniconda.sh
 if [ -f "/opt/miniconda3/etc/profile.d/conda.sh" ]; then
     . "/opt/miniconda3/etc/profile.d/conda.sh"
     CONDA_CHANGEPS1=false conda activate base
@@ -30,7 +30,7 @@ if [[ $ENVS = *py37* ]]; then
     conda activate py37
 fi
 EOF
-    cat << 'EOF' | sudo tee /opt/miniconda3/.condarc
+    cat << 'EOF' | tee /opt/miniconda3/.condarc
 channels:
   - conda-forge
   - defaults
@@ -38,5 +38,6 @@ changeps1: false
 EOF
 fi
 # set group and permissions such that only magaox-dev has write access
-sudo chgrp -R magaox-dev /opt/miniconda3
-sudo chmod -R g=rwx /opt/miniconda3
+chgrp -R magaox-dev /opt/miniconda3
+chmod -R g=rwX /opt/miniconda3
+setgid_all /opt/miniconda3
