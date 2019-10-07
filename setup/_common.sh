@@ -12,6 +12,24 @@ function log_info() {
     echo -e "$(tput setaf 4 2>/dev/null)$1$(tput sgr0 2>/dev/null)"
 }
 
+function link_if_necessary() {
+  thedir=$1
+  thelinkname=$2
+  if [[ "$thedir" != "$thelinkname" ]]; then
+    if [[ -L $thelinkname ]]; then
+      if [[ "$(readlink -- "$thelinkname")" != $thedir ]]; then
+        echo "$thelinkname is an existing link, but doesn't point to $thedir. Aborting."
+        exit 1
+      fi
+    elif [[ -e $thelinkname ]]; then
+      echo "$thelinkname exists, but is not a symlink and we want the destination to be $thedir. Aborting."
+      exit 1
+    else
+        ln -sv "$thedir" "$thelinkname"
+    fi
+  fi
+}
+
 function _cached_fetch() {
   url=$1
   filename=$2
@@ -37,6 +55,10 @@ function clone_or_update_and_cd() {
     orgname=$1
     reponame=$2
     parentdir=$3
+    if [[ $MAGAOX_ROLE == vm ]]; then
+        link_if_necessary /vagrant/vm/$reponame $parentdir/$reponame
+        parentdir=/vagrant/vm
+    fi
     if [[ ! -d $parentdir/$reponame/.git ]]; then
       echo "Cloning new copy of $orgname/$reponame"
       CLONE_DEST=/tmp/${reponame}_$(date +"%s")
