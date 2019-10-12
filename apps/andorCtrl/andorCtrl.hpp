@@ -46,11 +46,12 @@ namespace app
   * \ingroup andorCtrl
   *
   */
-class andorCtrl : public MagAOXApp<>, public dev::edtCamera<andorCtrl>, public dev::frameGrabber<andorCtrl>
+class andorCtrl : public MagAOXApp<>, public dev::stdCamera<andorCtrl>, public dev::edtCamera<andorCtrl>, public dev::frameGrabber<andorCtrl>
 {
 
-   friend class dev::frameGrabber<andorCtrl>;
+   friend class dev::stdCamera<andorCtrl>;
    friend class dev::edtCamera<andorCtrl>;
+   friend class dev::frameGrabber<andorCtrl>;
 
 protected:
 

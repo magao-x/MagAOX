@@ -51,6 +51,7 @@ yum install -y \
     yum-utils \
     yum-versionlock \
     ntfs-3g \
+    screen \
 ;
 
 sudo alternatives --install /usr/local/bin/cmake cmake /usr/bin/cmake3 20 \

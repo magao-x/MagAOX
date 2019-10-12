@@ -11,5 +11,7 @@ if [[ $ID == ubuntu ]]; then
 elif [[ $ID == centos && $VERSION_ID == 7 ]]; then
     sudo yum install -y \
         xorg-x11-apps \
+        kate \
+        wmctrl \
     ;
 fi
