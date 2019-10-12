@@ -870,12 +870,12 @@ int filterWheelCtrl::moveTo( const double & filters )
 
 int filterWheelCtrl::checkRecordTimes()
 {
-   return telemeter<filterWheelCtrl>::checkRecordTimes(telem_stage());
+   return dev::telemeter<filterWheelCtrl>::checkRecordTimes(telem_stage());
 }
    
 int filterWheelCtrl::recordTelem( const telem_stage * )
 {
-   return stdMotionStage<filterWheelCtrl>::recordStage(true);
+   return dev::stdMotionStage<filterWheelCtrl>::recordStage(true);
 }
 
 } //namespace app

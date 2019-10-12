@@ -38,7 +38,7 @@ namespace app
   *
   * \ingroup hsfwCtrl
   */
-class hsfwCtrl : public MagAOXApp<>,  public dev::stdMotionStage<hsfwCtrl> 
+class hsfwCtrl : public MagAOXApp<>,  public dev::stdMotionStage<hsfwCtrl>, public dev::telemeter<hsfwCtrl>
 {
 
    friend class dev::stdMotionStage<hsfwCtrl>;
@@ -441,12 +441,12 @@ int hsfwCtrl::moveTo( const double & filters )
 
 int hsfwCtrl::checkRecordTimes()
 {
-   return telemeter<hsfwCtrl>::checkRecordTimes(telem_stage());
+   return dev::telemeter<hsfwCtrl>::checkRecordTimes(telem_stage());
 }
    
 int hsfwCtrl::recordTelem( const telem_stage * )
 {
-   return stdMotionStage<hsfwCtrl>::recordStage(true);
+   return dev::stdMotionStage<hsfwCtrl>::recordStage(true);
 }
 
 } //namespace app
