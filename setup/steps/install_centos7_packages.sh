@@ -1,6 +1,5 @@
 #!/bin/bash
 DIR="$( cd "$( dirname "${BASH_SOURCE[0]}" )" && pwd )"
-source $DIR/../_common.sh
 set -euo pipefail
 
 # needed for (at least) git:
@@ -52,6 +51,8 @@ yum install -y \
     yum-versionlock \
     ntfs-3g \
     screen \
+    which \
+    sudo \
 ;
 
 sudo alternatives --install /usr/local/bin/cmake cmake /usr/bin/cmake3 20 \
