@@ -292,14 +292,14 @@ $MAYBE_SUDO bash -l "$DIR/steps/install_milkzmq.sh"
 # env activates by default.
 sudo bash -l "$DIR/steps/install_python.sh"
 sudo bash -l "$DIR/steps/create_conda_envs.sh"
-sudo bash -l "$DIR/steps/install_purepyindi.sh"
-sudo bash -l "$DIR/steps/install_sup.sh"
-sudo bash -l "$DIR/steps/install_magpyx.sh"
-sudo bash -l "$DIR/steps/install_imagestreamio_python.sh"
+$MAYBE_SUDO bash -l "$DIR/steps/install_purepyindi.sh"
+$MAYBE_SUDO bash -l "$DIR/steps/install_sup.sh"
+$MAYBE_SUDO bash -l "$DIR/steps/install_magpyx.sh"
+$MAYBE_SUDO bash -l "$DIR/steps/install_imagestreamio_python.sh"
 
 # AOC, vm, and workstation should all install rtimv
 if [[ $MAGAOX_ROLE == AOC || $MAGAOX_ROLE == vm ||  $MAGAOX_ROLE == workstation ]]; then
-    sudo bash -l "$DIR/steps/install_rtimv.sh"
+    $MAYBE_SUDO bash -l "$DIR/steps/install_rtimv.sh"
 fi
 
 # CircleCI invokes install_MagAOX.sh as the next step (see .circleci/config.yml)
