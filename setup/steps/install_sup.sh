@@ -2,17 +2,22 @@
 DIR="$( cd "$( dirname "${BASH_SOURCE[0]}" )" && pwd )"
 source $DIR/../_common.sh
 set -euo pipefail
-cd /opt/MagAOX/source
-if [[ $MAGAOX_ROLE == vm ]]; then
-    parentdir=/vagrant/vm
-else
-    parentdir=/opt/MagAOX/source
-fi
-clone_or_update_and_cd magao-x sup $parentdir
-pip install -e .
+SUP_COMMIT_ISH=master
+orgname=magao-x
+reponame=sup
+parentdir=/opt/MagAOX/source
+clone_or_update_and_cd $orgname $reponame $parentdir
+git checkout $SUP_COMMIT_ISH
+
+for envname in py37 dev; do
+    set +u; conda activate $envname; set -u
+    cd $parentdir/$reponame
+    pip install -e .
+    python -c 'import sup'
+done
 UNIT_PATH=/etc/systemd/system/
 if [[ ! -e $UNIT_PATH/sup.service ]]; then
-    cp /opt/MagAOX/config/sup.service $UNIT_PATH/sup.service
+    sudo cp /opt/MagAOX/config/sup.service $UNIT_PATH/sup.service
 fi
 sudo systemctl enable sup.service || true
 sudo systemctl restart sup.service || true

@@ -2,9 +2,12 @@
 DIR="$( cd "$( dirname "${BASH_SOURCE[0]}" )" && pwd )"
 source $DIR/../_common.sh
 set -eo pipefail
-
+RTIMV_COMMIT_ISH=master
 orgname=jaredmales
 reponame=rtimv
 parentdir=/opt/MagAOX/source
 clone_or_update_and_cd $orgname $reponame $parentdir
-make install
+git checkout $RTIMV_COMMIT_ISH
+set +u; conda activate py37; set -u
+make
+sudo make install
