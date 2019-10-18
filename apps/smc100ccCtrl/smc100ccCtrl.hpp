@@ -50,13 +50,15 @@ namespace app
   Change to stateCodes::OPERATING and stateCodes::READY
 
   */
-class smc100ccCtrl : public MagAOXApp<>, public tty::usbDevice, public dev::ioDevice, public dev::stdMotionStage<smc100ccCtrl>
+class smc100ccCtrl : public MagAOXApp<>, public tty::usbDevice, public dev::ioDevice, public dev::stdMotionStage<smc100ccCtrl>, public dev::telemeter<smc100ccCtrl>
+
 {
 
    friend class dev::stdMotionStage<smc100ccCtrl>;
-protected:   
-   
-   /** \name Configurable Parameters 
+   friend class dev::telemeter<smc100ccCtrl>;
+protected:
+
+   /** \name Configurable Parameters
      *
      *@{
      */
