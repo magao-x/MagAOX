@@ -133,6 +133,11 @@ else
     exit 1
 fi
 
+# Disable firewall on the VM
+if [[ $MAGAOX_ROLE == vm ]]; then
+    sudo systemctl disable firewalld || true
+    sudo systemctl stop firewalld || true
+fi
 # Configure hostname aliases and time synchronization
 if [[ $MAGAOX_ROLE == AOC || $MAGAOX_ROLE == ICC || $MAGAOX_ROLE == RTC ]]; then
     sudo bash -l "$DIR/steps/configure_etc_hosts.sh"
