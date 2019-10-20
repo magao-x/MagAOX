@@ -38,6 +38,10 @@ changeps1: false
 EOF
 fi
 
+# Make sure the newly created shell tidbit
+# is sourced before we try to use `conda` below
+source /etc/profile.d/miniconda.sh
+
 #
 # Create the standard MagAOX user python environment
 #
