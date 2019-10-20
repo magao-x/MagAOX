@@ -296,7 +296,6 @@ $MAYBE_SUDO bash -l "$DIR/steps/install_milkzmq.sh"
 # Note that subsequent steps will use libs from conda since the base
 # env activates by default.
 sudo bash -l "$DIR/steps/install_python.sh"
-sudo bash -l "$DIR/steps/create_conda_envs.sh"
 $MAYBE_SUDO bash -l "$DIR/steps/install_purepyindi.sh"
 $MAYBE_SUDO bash -l "$DIR/steps/install_sup.sh"
 $MAYBE_SUDO bash -l "$DIR/steps/install_magpyx.sh"
