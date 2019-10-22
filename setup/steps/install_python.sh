@@ -64,6 +64,16 @@ else
 fi
 
 #
+# install Jupyter Lab extensions for matplotlib interaction
+#
+for envname in py37 dev; do
+	set +u; conda activate $envname; set -u
+	jupyter labextension install @jupyter-widgets/jupyterlab-manager --minimize=False
+	jupyter labextension install jupyter-matplotlib --minimize=False
+done
+log_success "installed jupyterlab extensions in envs py37 and dev"
+
+#
 # Set up auto-starting xsup Jupyter Lab instance
 #
 if [[ $MAGAOX_ROLE == vm ]]; then
