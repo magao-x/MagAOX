@@ -53,8 +53,6 @@ protected:
    
    ///@}
 
-   int m_powerOnCounter {0}; ///< Counts numer of loops after power on, implements delay for camera bootup.
-
    double m_homingStart {0};
    int m_homingState {0};
    
@@ -109,10 +107,42 @@ public:
    
    int initDM();
    
+   ///Start the homing procedure
+   /** Checks that servos are off (the manual says this doesn't matter), 
+     * and then begins homing by calling 'home_1()'.
+     * Sets FSM state to homing.
+     *
+     * \returns 0 on success (from 'home_1()')
+     * \returns -1 on error
+     */ 
    int home();
    
+   ///Get the status of homing on an axiz
+   /** Homing is also autozero, ATZ.  This uses the ATZ? query to 
+     * check if the autozero procedure has completed on the given axis.
+     *
+     * \returns 0 if ATZ not complete
+     * \returns 1 if ATZ complete
+     * \returns -1 on an error
+     */ 
+   int homeState(int axis /**< [in] the axis to check, 0 or 1 */);
+   
+   ///Being homing (ATZ) axis 1
+   /** Repeats check that servos are off (the manual says this doesn't matter)
+     * and checks that 'm_homingStatte' is 0.  Then sends 'ATZ 1 NaN'.
+     *
+     * \returns 0 on success
+     * \returns -1 on error
+     */ 
    int home_1();
    
+   ///Being homing (ATZ) axis 2
+   /** Repeats check that servos are off (the manual says this doesn't matter)
+     * and checks that 'm_homingStatte' is 1.  Then sends 'ATZ 2 NaN'.
+     *
+     * \returns 0 on success
+     * \returns -1 on error
+     */ 
    int home_2();
    
    int finishInit();
@@ -376,7 +406,17 @@ int pi335Ctrl::appLogic()
    if(state() == stateCodes::HOMING)
    {
       //std::cerr << "Homing state: " << m_homingState << " " << mx::get_curr_time() - m_homingStart << "\n";
-      if(mx::get_curr_time() - m_homingStart > 20)
+      int ax = m_homingState + 1;
+      
+      int atz = homeState(ax);
+      
+      if(! (atz == 0 || atz == 1))
+      {
+         state(stateCodes::ERROR);
+         log<software_error,-1>({__FILE__, __LINE__, "error getting ATZ? home state."});
+      }
+      
+      if(atz == 1) //mx::get_curr_time() - m_homingStart > 20)
       {
          ++m_homingState;
          
@@ -561,6 +601,32 @@ int pi335Ctrl::home()
    
 }
    
+int pi335Ctrl::homeState( int axis) 
+{
+   std::string resp;
+   
+   if( getCom( resp, "ATZ?", axis) < 0) 
+   {
+      log<software_error>( {__FILE__, __LINE__});
+      
+      return -1;
+   }
+   
+   ///\todo this should be a separate unit-tested parser
+   size_t st = resp.find('=');
+   if(st == std::string::npos || st > resp.size()-2)
+   {
+      log<software_error>( {__FILE__, __LINE__, "error parsing response"});
+      return -1;
+   }
+   st += 1;
+
+   return mx::ioutils::convertFromString<double>(resp.substr(st));
+   
+   
+}
+
+
 int pi335Ctrl::home_1()
 {
    int rv;
@@ -586,7 +652,7 @@ int pi335Ctrl::home_1()
       log<software_error>( {__FILE__, __LINE__, rv, tty::ttyErrorString(rv)});
    }
 
-   m_homingStart = mx::get_curr_time();
+   m_homingStart = mx::get_curr_time(); ///\todo remmove m_homingStart once ATZ? works.
    m_homingState = 0;
    log<text_log>("commenced homing x");
    
