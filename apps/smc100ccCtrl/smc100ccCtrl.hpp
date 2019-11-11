@@ -50,10 +50,13 @@ namespace app
   Change to stateCodes::OPERATING and stateCodes::READY
 
   */
-class smc100ccCtrl : public MagAOXApp<>, public tty::usbDevice, public dev::ioDevice, public dev::stdMotionStage<smc100ccCtrl>
+class smc100ccCtrl : public MagAOXApp<>, public tty::usbDevice, public dev::ioDevice, public dev::stdMotionStage<smc100ccCtrl>, public dev::telemeter<smc100ccCtrl>
 {
 
    friend class dev::stdMotionStage<smc100ccCtrl>;
+   
+   friend class dev::telemeter<smc100ccCtrl>;
+   
 protected:   
    
    /** \name Configurable Parameters 
@@ -153,6 +156,17 @@ public:
    
    int moveTo(double position);
    
+   
+   ///@}
+   
+   
+   /** \name Telemeter Interface
+     * 
+     * @{
+     */ 
+   int checkRecordTimes();
+   
+   int recordTelem( const telem_stage * );
    
    ///@}
 };
@@ -1005,6 +1019,16 @@ int smc100ccCtrl::moveTo(double position)
    }
 }
    
+int smc100ccCtrl::checkRecordTimes()
+{
+   return telemeter<smc100ccCtrl>::checkRecordTimes(telem_stage());
+}
+   
+int smc100ccCtrl::recordTelem( const telem_stage * )
+{
+   return stdMotionStage<smc100ccCtrl>::recordStage(true);
+}
+
 } //namespace app
 } //namespace MagAOX
 
