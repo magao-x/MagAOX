@@ -4,8 +4,8 @@ source $DIR/../_common.sh
 set -euo pipefail
 
 PICAM_RUNFILE_CHECKSUM=37bedee6c828e364750e9b5fd7c2a420
-PICAM_RUNFILE=Picam_SDK.run
-PICAM_URL=ftp://ftp.piacton.com/Public/Software/Official/PICam/$PICAM_RUNFILE
+PICAM_RUNFILE=Picam_SDK-v5.7.2.run
+PICAM_URL=ftp://ftp.piacton.com/Public/Software/Official/PICam/Archives/$PICAM_RUNFILE
 _cached_fetch $PICAM_URL $PICAM_RUNFILE
 if [[ $(md5sum ./$PICAM_RUNFILE) != *$PICAM_RUNFILE_CHECKSUM* ]]; then
     log_error "$PICAM_RUNFILE has md5 checksum $(md5sum ./$PICAM_RUNFILE)"
@@ -17,7 +17,7 @@ chmod +x ./$PICAM_RUNFILE
 if [[ ! -e /opt/PrincetonInstruments/picam ]]; then
     # This (|| true) isn't great, but sometimes it has a nonzero
     # exit code and sometimes it doesn't. Both states are accompanied
-    # by "Picam v5.7.1 Installation complete."
+    # by "Picam v5.7.2 Installation complete."
     yes yes | ./$PICAM_RUNFILE || true
     log_success "Ran Picam SDK installer"
 fi

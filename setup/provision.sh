@@ -133,6 +133,11 @@ else
     exit 1
 fi
 
+# Disable firewall on the VM
+if [[ $MAGAOX_ROLE == vm ]]; then
+    sudo systemctl disable firewalld || true
+    sudo systemctl stop firewalld || true
+fi
 # Configure hostname aliases and time synchronization
 if [[ $MAGAOX_ROLE == AOC || $MAGAOX_ROLE == ICC || $MAGAOX_ROLE == RTC ]]; then
     sudo bash -l "$DIR/steps/configure_etc_hosts.sh"
@@ -151,7 +156,6 @@ fi
 VENDOR_SOFTWARE_BUNDLE=$DIR/bundle.zip
 if [[ ! -e $VENDOR_SOFTWARE_BUNDLE ]]; then
     echo "Couldn't find vendor software bundle at location $VENDOR_SOFTWARE_BUNDLE"
-    echo "(Generate with ~/Box/MagAO-X/Vendor\ Software/generate_bundle.sh)"
     if [[ $MAGAOX_ROLE == RTC || $MAGAOX_ROLE == ICC ]]; then
         log_warn "If this instrument computer will be interfacing with the DMs or framegrabbers, you should Ctrl-C now and get the software bundle."
         read -p "If not, press enter to continue"
@@ -167,7 +171,7 @@ if [[ $MAGAOX_ROLE == vm ]]; then
 fi
 
 # Install dependencies for the GUIs
-if [[ $MAGAOX_ROLE == AOC || $MAGAOX_ROLE == ci || $MAGAOX_ROLE == vm ||  $MAGAOX_ROLE == workstation ]]; then
+if [[ $MAGAOX_ROLE == AOC || $MAGAOX_ROLE == ci || $MAGAOX_ROLE == vm || $MAGAOX_ROLE == workstation ]]; then
     sudo bash -l "$DIR/steps/install_gui_dependencies.sh"
 fi
 
@@ -195,7 +199,7 @@ sudo bash -l "$DIR/steps/install_cppzmq.sh"
 sudo bash -l "$DIR/steps/install_levmar.sh"
 sudo bash -l "$DIR/steps/install_flatbuffers.sh"
 sudo bash -l "$DIR/steps/install_xrif.sh"
-if [[ $MAGAOX_ROLE == RTC || $MAGAOX_ROLE == ICC || $MAGAOX_ROLE == AOC || "$MAGAOX_ROLE" == "ci" ]]; then
+if [[ $MAGAOX_ROLE == RTC || $MAGAOX_ROLE == ICC || $MAGAOX_ROLE == AOC || $MAGAOX_ROLE == ci || $MAGAOX_ROLE == vm ]]; then
     sudo bash -l "$DIR/steps/install_basler_pylon.sh"
     sudo bash -l "$DIR/steps/install_edt.sh"
     sudo bash -l "$DIR/steps/install_picam.sh"
@@ -292,15 +296,14 @@ $MAYBE_SUDO bash -l "$DIR/steps/install_milkzmq.sh"
 # Note that subsequent steps will use libs from conda since the base
 # env activates by default.
 sudo bash -l "$DIR/steps/install_python.sh"
-sudo bash -l "$DIR/steps/create_conda_envs.sh"
-sudo bash -l "$DIR/steps/install_purepyindi.sh"
-sudo bash -l "$DIR/steps/install_sup.sh"
-sudo bash -l "$DIR/steps/install_magpyx.sh"
-sudo bash -l "$DIR/steps/install_imagestreamio_python.sh"
+$MAYBE_SUDO bash -l "$DIR/steps/install_purepyindi.sh"
+$MAYBE_SUDO bash -l "$DIR/steps/install_sup.sh"
+$MAYBE_SUDO bash -l "$DIR/steps/install_magpyx.sh"
+$MAYBE_SUDO bash -l "$DIR/steps/install_imagestreamio_python.sh"
 
 # AOC, vm, and workstation should all install rtimv
 if [[ $MAGAOX_ROLE == AOC || $MAGAOX_ROLE == vm ||  $MAGAOX_ROLE == workstation ]]; then
-    sudo bash -l "$DIR/steps/install_rtimv.sh"
+    $MAYBE_SUDO bash -l "$DIR/steps/install_rtimv.sh"
 fi
 
 # CircleCI invokes install_MagAOX.sh as the next step (see .circleci/config.yml)

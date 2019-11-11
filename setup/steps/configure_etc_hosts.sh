@@ -8,6 +8,7 @@ sudo tee /etc/hosts <<'HERE'
 192.168.0.140  pdu0
 192.168.0.141  pdu1
 192.168.0.142  pdu2
+192.168.0.143  pdu3
 192.168.0.150  acromagdio1
 192.168.0.151  acromagdio2
 192.168.0.242  dmsafety
