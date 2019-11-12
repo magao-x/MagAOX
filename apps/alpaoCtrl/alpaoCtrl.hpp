@@ -243,9 +243,13 @@ int alpaoCtrl::appLogic()
    
    if(state()==stateCodes::POWEROFF) return 0;
    
-   if(state()==stateCodes::POWERON)
+   if(state() == stateCodes::POWERON)
    {
-      sleep(5);
+      if(!powerOnWaitElapsed()) 
+      {
+         return 0;
+      }
+      
       return initDM();
    }
    
