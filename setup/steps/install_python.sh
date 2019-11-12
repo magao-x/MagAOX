@@ -40,7 +40,7 @@ fi
 
 # Make sure the newly created shell tidbit
 # is sourced before we try to use `conda` below
-source /etc/profile.d/miniconda.sh
+set +u; source /etc/profile.d/miniconda.sh; set -u
 
 #
 # Create the standard MagAOX user python environment
@@ -104,7 +104,7 @@ if [[ $MAGAOX_ROLE != RTC && $MAGAOX_ROLE != ICC && $MAGAOX_ROLE != ci ]]; then
 	log_success "Installed jupyterlab.service to $UNIT_PATH"
 	if [[ $MAGAOX_ROLE == vm ]]; then
 		sed -iE "s_WorkingDirectory=/home/xsup_WorkingDirectory=/vagrant_g" $UNIT_PATH/jupyterlab.service
-		sed -iE "s/xsup/vagrant/g" $UNIT_PATH/jupyterlab.service
+	        sed -iE "s/xsup/vagrant/g" $UNIT_PATH/jupyterlab.service
 		log_info "Rewrote service for vagrant"
 	fi
 	systemctl enable jupyterlab
