@@ -12,8 +12,9 @@ git checkout $SUP_COMMIT_ISH
 for envname in py37 dev; do
     set +u; conda activate $envname; set -u
     cd $parentdir/$reponame
-    pip install -e .
-    python -c 'import sup'
+    make  # installs Python module in editable mode, builds all js
+    cd
+    python -c 'import sup'  # verify sup is on PYTHONPATH
 done
 UNIT_PATH=/etc/systemd/system/
 if [[ ! -e $UNIT_PATH/sup.service ]]; then
