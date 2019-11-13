@@ -46,7 +46,7 @@ if [[ "$MAGAOX_ROLE" == "vm" ]]; then
   link_if_necessary /vagrant/vm/calib /opt/MagAOX/calib
 else
   mkdir -pv /opt/MagAOX/calib
-  chown -R root:magaox-dev /opt/MagAOX/calib
+  chown -R root:magaox /opt/MagAOX/calib
   chmod -R u=rwX,g=rwX,o=rX /opt/MagAOX/calib
   setgid_all /opt/MagAOX/calib
 fi
