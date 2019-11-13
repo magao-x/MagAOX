@@ -17,6 +17,7 @@ fi
 if [[ ! -e /etc/profile.d/node_bin_path.sh ]]; then
     echo "export PATH=\"\$PATH:/opt/node/bin\"" | sudo tee /etc/profile.d/node_bin_path.sh
 fi
+source /etc/profile.d/node_bin_path.sh
 if [[ -z $(command -v yarn) ]]; then
     npm install --global yarn
 fi
