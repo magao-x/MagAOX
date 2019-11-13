@@ -184,7 +184,7 @@ int w2tcsOffloader::appStartup(){
    {
      return log<text_log,-1>("Could not open mode mask file", logPrio::LOG_ERROR);
    }
-   
+
    m_norm = m_wMask.sum();
 
    createStandardIndiNumber<unsigned>( m_indiP_gain, "gain", 0, 1, 0, "%0.2f");
@@ -298,9 +298,9 @@ int w2tcsOffloader::processImage( void * curr_src,
     modes that shouldn't be offloaded (but might have been
     previously set)
     */
-    float coeff;
     if(i < m_nModes)
     {
+       float coeff;
        coeff = ( Eigen::Map<mx::improc::eigenImage<realT>>((float *)curr_src, shmimMonitorT::m_width, shmimMonitorT::m_height) * m_wZModes.image(i) * m_wMask).sum() / m_norm;
        m_indiP_zCoeffs[m_elNames[i]] = m_gain * coeff;
     }
