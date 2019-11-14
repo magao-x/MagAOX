@@ -802,17 +802,25 @@ void pupilGuide::on_button_tip_ur_pressed()
 
 void pupilGuide::on_buttonScale_pressed()
 {
-   if(((int) (100*m_stepSize)) == 1)
+   if(((int) (100*m_stepSize)) == 100)
    {
-      m_stepSize = 0.05;
+      m_stepSize = 0.5;
    }
-   else if(((int) (100*m_stepSize)) == 5)
+   else if(((int) (100*m_stepSize)) == 50)
    {
       m_stepSize = 0.1;
    }
    else if(((int) (100*m_stepSize)) == 10)
    {
+      m_stepSize = 0.05;
+   }
+   else if(((int) (100*m_stepSize)) == 5)
+   {
       m_stepSize = 0.01;
+   }
+   else if(((int) (100*m_stepSize)) == 1)
+   {
+      m_stepSize = 1.0;
    }
    
    char ss[5];
@@ -959,17 +967,25 @@ void pupilGuide::on_button_pup_ur_pressed()
 }
 void pupilGuide::on_button_pup_scale_pressed()
 {
-   if(((int) (100*m_pupStepSize)) == 1)
+   if(((int) (100*m_pupStepSize)) == 100)
    {
-      m_pupStepSize = 0.05;
+      m_pupStepSize = 0.5;
    }
-   else if(((int) (100*m_pupStepSize)) == 5)
+   else if(((int) (100*m_pupStepSize)) == 50)
    {
       m_pupStepSize = 0.1;
    }
    else if(((int) (100*m_pupStepSize)) == 10)
    {
+      m_pupStepSize = 0.05;
+   }
+   else if(((int) (100*m_pupStepSize)) == 5)
+   {
       m_pupStepSize = 0.01;
+   }
+   else if(((int) (100*m_pupStepSize)) == 1)
+   {
+      m_pupStepSize = 1.0;
    }
    
    char ss[5];
@@ -1024,7 +1040,6 @@ void pupilGuide::on_buttonMod_set_pressed()
    ip.setName("modState");
    ip.add(pcf::IndiElement("requested"));
    ip["requested"] = 3;
-   
    sendNewProperty(ip);
 }
    
