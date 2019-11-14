@@ -435,7 +435,7 @@ INDI_NEWCALLBACK_DEFN(t2wOffloader, m_indiP_zero)(const pcf::IndiProperty &ipRec
 
 INDI_NEWCALLBACK_DEFN(t2wOffloader, m_indiP_offloadToggle )(const pcf::IndiProperty &ipRecv)
 {
-   if(ipRecv.getName() != m_indiP_zero.getName())
+   if(ipRecv.getName() != m_indiP_offloadToggle.getName())
    {
       log<software_error>({__FILE__, __LINE__, "invalid indi property received"});
       return -1;

@@ -54,7 +54,11 @@ Now free to move as needed.....
 
 ***************************************************************
 Power down 
-"SVO 1 0"
-"SVO 2 0" 
-"MOV 1 0"
-"MOV 2 0" 
+"SVO 1 0\n"
+"SVO 2 0\n" 
+"MOV 1 0\n"
+"MOV 2 0\n" 
+
+To implement:
+HLT, or #24
+

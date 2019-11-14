@@ -380,6 +380,9 @@ int picamCtrl::appLogic()
          return log<software_error,0>({__FILE__,__LINE__});
       }
       
+      setPicamParameter(m_modelHandle, PicamParameter_DisableCoolingFan, PicamCoolingFanStatus_On);
+      
+      
    }
 
    if( state() == stateCodes::READY || state() == stateCodes::OPERATING )
