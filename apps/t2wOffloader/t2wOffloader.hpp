@@ -68,7 +68,6 @@ protected:
    float m_leak {0.0};
    
    
-   
    ///@}
 
    
@@ -86,6 +85,8 @@ protected:
    
    bool m_dmOpened {false};
    bool m_dmRestart {false};
+   
+   bool m_offloading {false};
    
 public:
    /// Default c'tor.
@@ -142,9 +143,12 @@ protected:
    
    pcf::IndiProperty m_indiP_zero;
    
+   pcf::IndiProperty m_indiP_offloadToggle;
+   
    INDI_NEWCALLBACK_DECL(t2wOffloader, m_indiP_gain);
    INDI_NEWCALLBACK_DECL(t2wOffloader, m_indiP_leak);
    INDI_NEWCALLBACK_DECL(t2wOffloader, m_indiP_zero);
+   INDI_NEWCALLBACK_DECL(t2wOffloader, m_indiP_offloadToggle);
 };
 
 inline
@@ -164,6 +168,7 @@ void t2wOffloader::setupConfig()
    
    config.add("offload.gain", "", "offload.gain", argType::Required, "offload", "gain", false, "float", "The starting offload gain.  Default is 0.1.");
    config.add("offload.leak", "", "offload.leak", argType::Required, "offload", "leak", false, "float", "The starting offload leak.  Default is 0.0.");
+   config.add("offload.startupOffloading", "", "offload.startupOffloading", argType::Required, "offload", "startupOffloading", false, "bool", "Flag controlling whether offloading is on at startup.  Default is false.");
 }
 
 inline
@@ -176,6 +181,14 @@ int t2wOffloader::loadConfigImpl( mx::app::appConfigurator & _config )
    _config(m_dmChannel, "offload.channel");
    _config(m_gain, "offload.gain");
    _config(m_leak, "offload.leak");
+   
+   bool startupOffloading = false;
+   
+   if(_config.isSet("offload.startupOffloading"))
+   {
+      _config(startupOffloading, "offload.startupOffloading");
+   }
+   m_offloading = startupOffloading;
    
    return 0;
 }
@@ -219,6 +232,13 @@ int t2wOffloader::appStartup()
    
    createStandardIndiRequestSw( m_indiP_zero, "zero", "zero loop");
    if( registerIndiPropertyNew( m_indiP_zero, INDI_NEWCALLBACK(m_indiP_zero)) < 0)
+   {
+      log<software_error>({__FILE__,__LINE__});
+      return -1;
+   }
+   
+   createStandardIndiToggleSw( m_indiP_offloadToggle, "offload");  
+   if( registerIndiPropertyNew( m_indiP_offloadToggle, INDI_NEWCALLBACK(m_indiP_offloadToggle)) < 0)
    {
       log<software_error>({__FILE__,__LINE__});
       return -1;
@@ -325,6 +345,7 @@ int t2wOffloader::processImage( void * curr_src,
 {
    static_cast<void>(dummy); //be unused
    
+   if(!m_offloading) return 0;
    
    m_wooferDelta = m_twRespM.matrix() * Eigen::Map<Matrix<float,-1,-1>>((float *)curr_src,  m_width*m_height,1);
    
@@ -390,7 +411,7 @@ INDI_NEWCALLBACK_DEFN(t2wOffloader, m_indiP_leak)(const pcf::IndiProperty &ipRec
    updateIfChanged(m_indiP_leak, "current", m_leak);
    updateIfChanged(m_indiP_leak, "target", m_leak);
    
-   log<text_log>("set gain to " + std::to_string(m_leak), logPrio::LOG_NOTICE);
+   log<text_log>("set leak to " + std::to_string(m_leak), logPrio::LOG_NOTICE);
    
    return 0;
 }
@@ -403,14 +424,50 @@ INDI_NEWCALLBACK_DEFN(t2wOffloader, m_indiP_zero)(const pcf::IndiProperty &ipRec
       return -1;
    }
    
-   float target;
-   
-   if( ipRecv["toggle"].getSwitchState() == pcf::IndiElement::On)
+   if( ipRecv["request"].getSwitchState() == pcf::IndiElement::On)
    {
       m_woofer.setZero();
-      log<text_log>("set gain to " + std::to_string(m_leak), logPrio::LOG_NOTICE);
+      log<text_log>("zeroed", logPrio::LOG_NOTICE);
    
    }
+   return 0;
+}
+
+INDI_NEWCALLBACK_DEFN(t2wOffloader, m_indiP_offloadToggle )(const pcf::IndiProperty &ipRecv)
+{
+   if(ipRecv.getName() != m_indiP_zero.getName())
+   {
+      log<software_error>({__FILE__, __LINE__, "invalid indi property received"});
+      return -1;
+   }
+   
+   //switch is toggled to on
+   if( ipRecv["toggle"].getSwitchState() == pcf::IndiElement::On)
+   {
+      if(!m_offloading) //not offloading so change
+      {
+         m_woofer.setZero(); //always zero when offloading starts
+         log<text_log>("zeroed", logPrio::LOG_NOTICE);
+      
+         m_offloading = true;
+         log<text_log>("started offloading", logPrio::LOG_NOTICE);
+         updateSwitchIfChanged(m_indiP_offloadToggle, "toggle", pcf::IndiElement::On, INDI_BUSY);
+      }
+      return 0;
+   }
+
+   //switch is toggle to off
+   if( ipRecv["toggle"].getSwitchState() == pcf::IndiElement::Off)
+   {
+      if(m_offloading) //offloading so change it
+      {
+         m_offloading = false;
+         log<text_log>("stopped offloading", logPrio::LOG_NOTICE);
+         updateSwitchIfChanged(m_indiP_offloadToggle, "toggle", pcf::IndiElement::Off, INDI_IDLE);
+      }
+      return 0;
+   }
+   
    return 0;
 }
 
