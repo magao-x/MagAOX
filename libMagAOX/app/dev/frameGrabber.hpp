@@ -471,12 +471,12 @@ void frameGrabber<derivedT>::fgThreadExec()
  
          
          //This is a diagnostic of latency:
-         /*if(imageStream.md[0].cnt0 % 2000 == 0)
+         /**/if(imageStream.md[0].cnt0 % 2000 == 0)
          {
             std::cerr << ( (double) imageStream.md->writetime.tv_sec + ((double) imageStream.md->writetime.tv_nsec)/1e9) - ( (double) imageStream.md->atime.tv_sec + ((double) imageStream.md->atime.tv_nsec)/1e9) << " ";
             std::cerr << ( (double) imageStream.md->writetime.tv_sec + ((double) imageStream.md->writetime.tv_nsec)/1e9) - ( (double) writestart.tv_sec + ((double) writestart.tv_nsec)/1e9) << "\n";
 
-         }*/
+         }/**/
          
          //Now we increment pointers outside the time-critical part of the loop.
          next_cnt1 = imageStream.md->cnt1+1;
