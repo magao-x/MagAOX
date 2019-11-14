@@ -498,14 +498,18 @@ void shmimMonitor<derivedT, specificT>::smThreadExec()
       
       if(derived().m_shutdown || !opened) return;
     
-      m_semaphoreNumber = ImageStreamIO_getsemwaitindex(&m_imageStream, m_semaphoreNumber); //ask for semaphore we had before
-      if(m_semaphoreNumber == -1)
+      m_semaphoreNumber = 1;
+      while(m_semaphoreNumber == 1)//Don't accept semaphore 1 cuz it don't work.
       {
-         derivedT::template log<software_critical>({__FILE__,__LINE__, "could not get semaphore index"});
-         return;
+         m_semaphoreNumber = ImageStreamIO_getsemwaitindex(&m_imageStream, m_semaphoreNumber); //ask for semaphore we had before
+         if(m_semaphoreNumber == -1)
+         {
+            derivedT::template log<software_critical>({__FILE__,__LINE__, "could not get semaphore index"});
+            return;
+         }
       }
       
-      derivedT::template log<software_info>({__FILE__,__LINE__, "got semaphore index " + std::to_string(m_semaphoreNumber) });
+      derivedT::template log<software_info>({__FILE__,__LINE__, "got semaphore index " + std::to_string(m_semaphoreNumber) + " for " + m_shmimName });
       
       ImageStreamIO_semflush(&m_imageStream, m_semaphoreNumber);
       
