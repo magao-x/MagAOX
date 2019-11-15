@@ -42,6 +42,7 @@ apps/dmMode/dmMode
 
 #f
 apps/filterWheelCtrl/filterWheelCtrl
+apps/flipperCtrl/flipperCtrl
 
 apps/magAOXMaths/magAOXMaths
 
@@ -89,6 +90,9 @@ apps/trippLitePDU/trippLitePDU
 apps/trippLitePDU/tests/
 
 apps/ttmModulator/ttmModulator
+
+#u
+apps/usbtempMon/usbtempMon
 
 #x
 apps/xindiserver/tests/remoteDriver_test

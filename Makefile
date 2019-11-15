@@ -31,7 +31,8 @@ apps_icc = \
 	zaberLowLevel \
 	picamCtrl \
 	smc100ccCtrl \
-	andorCtrl
+	andorCtrl \
+        usbtempMon
 
 apps_aoc = \
 	trippLitePDU \
