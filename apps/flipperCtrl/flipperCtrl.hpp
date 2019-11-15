@@ -33,12 +33,13 @@ namespace app
 /** 
   * \ingroup flipperCtrl
   */
-class flipperCtrl : public MagAOXApp<true>, public tty::usbDevice, public dev::ioDevice
+class flipperCtrl : public MagAOXApp<true>, public tty::usbDevice, public dev::ioDevice, public dev::telemeter<flipperCtrl>
 {
 
    //Give the test harness access.
    friend class flipperCtrl_test;
 
+   friend class dev::telemeter<flipperCtrl>;
 protected:
 
    /** \name Configurable Parameters
@@ -100,6 +101,14 @@ public:
    
    INDI_NEWCALLBACK_DECL(flipperCtrl, m_indiP_position);
 
+   
+   /* Telemetry */
+   int checkRecordTimes();
+   
+   int recordTelem( const telem_stage *);
+   
+   int recordStage( bool force = false);
+   
 };
 
 flipperCtrl::flipperCtrl() : MagAOXApp(MAGAOX_CURRENT_SHA1, MAGAOX_REPO_MODIFIED)
@@ -114,6 +123,8 @@ void flipperCtrl::setupConfig()
    dev::ioDevice::setupConfig(config);
    
    config.add("flipper.reverse", "", "flipper.reverse", argType::Required, "flipper", "reverse", false, "bool", "If true, reverse the positions for in and out.");
+   
+   dev::telemeter<flipperCtrl>::setupConfig(config);
 }
 
 int flipperCtrl::loadConfigImpl( mx::app::appConfigurator & _config )
@@ -138,6 +149,8 @@ int flipperCtrl::loadConfigImpl( mx::app::appConfigurator & _config )
       m_inPos = 2;
       m_outPos = 1;
    }
+   
+   dev::telemeter<flipperCtrl>::loadConfig(_config);
    
    return 0;
 }
@@ -172,6 +185,12 @@ int flipperCtrl::appStartup()
       return -1;
    }
       
+   
+   if(dev::telemeter<flipperCtrl>::appStartup() < 0)
+   {
+      return log<software_error,-1>({__FILE__,__LINE__});
+   }
+   
    return 0;
 }
 
@@ -298,6 +317,13 @@ int flipperCtrl::appLogic()
          }
       }
       
+      recordStage();
+      
+      if(telemeter<flipperCtrl>::appLogic() < 0)
+      {
+         log<software_error>({__FILE__, __LINE__});
+         return 0;
+      }
     /*  */
       
       //sleep(2);
@@ -417,6 +443,8 @@ INDI_NEWCALLBACK_DEFN(flipperCtrl, m_indiP_position )(const pcf::IndiProperty &i
          return log<software_error,-1>({__FILE__, __LINE__});
       }
       
+      recordStage();
+         
       return 0;
    }
    
@@ -424,6 +452,41 @@ INDI_NEWCALLBACK_DEFN(flipperCtrl, m_indiP_position )(const pcf::IndiProperty &i
    
    return 0;
 }
+
+
+int flipperCtrl::checkRecordTimes()
+{
+   return telemeter<flipperCtrl>::checkRecordTimes(telem_stage());
+}
+   
+int flipperCtrl::recordTelem( const telem_stage * )
+{
+   return recordStage(true);
+}
+
+inline
+int flipperCtrl::recordStage( bool force )
+{
+   static int last_pos = -1;
+   static int last_moving = -1;
+   
+   int moving = (m_tgt != m_pos);
+   
+   if(last_pos != m_pos || last_moving != moving || force)
+   {
+      std::string ps = "in";
+      if(m_pos == m_outPos) ps = "out";
+      
+      telem<telem_stage>({moving, (double) m_pos, ps});
+      
+      last_pos = m_pos;
+      last_moving = moving;
+   }
+   
+
+   return 0;
+}
+
 
 } //namespace app
 } //namespace MagAOX
