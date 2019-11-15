@@ -368,7 +368,9 @@ int streamWriter::appStartup()
    {
       return log<software_critical, -1>({__FILE__,__LINE__, "xrif handle allocation or initialization error. Code = " + std::to_string(rv)});
    }
-   
+  
+   m_xrif->reorder_method = XRIF_REORDER_BYTEPACK;
+ 
    m_xrif_header = (char *) malloc( XRIF_HEADER_SIZE * sizeof(char));
       
    rv = xrif_new(&m_xrif_timing);
@@ -376,6 +378,8 @@ int streamWriter::appStartup()
    {
       return log<software_critical, -1>({__FILE__,__LINE__, "xrif handle allocation or initialization error. Code = " + std::to_string(rv)});
    }
+
+   m_xrif_timing->reorder_method = XRIF_REORDER_NONE;
    
    m_xrif_timing_header = (char *) malloc( XRIF_HEADER_SIZE * sizeof(char));
    
@@ -880,7 +884,8 @@ void streamWriter::swThreadExec()
          {
             log<saving_start>({1,m_currSaveStartFrameNo});
             m_logSaveStart = false;
-         }
+            std::cerr << "Method: " << m_xrif->reorder_method << "\n";
+ 	 }
          
          timespec tw0, tw1, tw2;
          
