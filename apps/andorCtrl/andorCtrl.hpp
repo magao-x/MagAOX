@@ -62,18 +62,11 @@ protected:
    //Camera:
    unsigned long m_powerOnWait {10}; ///< Time in sec to wait for camera boot after power on.
 
-   //dev::cameraConfigMap m_cameraModes; ///< Map holding the possible camera mode configurations
-
    float m_startupTemp {20.0}; ///< The temperature to set after a power-on.
 
    unsigned m_maxEMGain {600};
 
    ///@}
-
-   int m_powerOnCounter {0}; ///< Counts numer of loops after power on, implements delay for camera bootup.
-
-   std::string m_modeName;
-   std::string m_nextMode;
 
 
    unsigned m_emGain {1};
@@ -122,6 +115,19 @@ public:
 
    int cameraSelect(int camNo);
 
+   
+   
+   
+   
+   
+   
+   
+   
+   
+   
+   
+   
+   
    int getTemp();
 
    int setTemp(float temp);
@@ -138,6 +144,62 @@ public:
 
    int setShutter( unsigned os);
 
+   
+   /** \name stdCamera Interface 
+     * 
+     * @{
+     */
+   
+   /// Set defaults for a power on state.
+   /** 
+     * \returns 0 on success
+     * \returns -1 on error
+     */ 
+   int powerOnDefaults();
+   
+   /// Turn temperature control on or off.
+   /** Sets temperature control on or off based on the current value of m_tempControlStatus
+     * \returns 0 on success
+     * \returns -1 on error
+     */ 
+   int setTempControl();
+   
+   /// Set the CCD temperature setpoint [stdCamera interface].
+   /** Sets the temperature to m_ccdTempSetpt.
+     * \returns 0 on success
+     * \returns -1 on error
+     */
+   int setTempSetPt();
+   
+   /// Set the frame rate. [stdCamera interface]
+   /** Sets the frame rate to m_fpsSet.
+     * 
+     * \returns 0 on success
+     * \returns -1 on error
+     */
+   int setFPS();
+   
+   /// Required by stdCamera, but this does not do anything for this camera [stdCamera interface]
+   /**
+     * \returns 0 always
+     */ 
+   int setExpTime();
+   
+   /// Required by stdCamera, but this does not do anything for this camera [stdCamera interface]
+   /**
+     * \returns 0 always
+     */
+   int setNextROI();
+   
+   ///@}
+   
+   
+   
+   /** \name framegrabber Interface 
+     * 
+     * @{
+     */
+   
    int configureAcquisition();
    int startAcquisition();
    int acquireAndCheckValid();
@@ -147,22 +209,12 @@ public:
 
    //INDI:
 protected:
-   //declare our properties
-   pcf::IndiProperty m_indiP_ccdtemp;
-   pcf::IndiProperty m_indiP_cooling;
-
-
-   pcf::IndiProperty m_indiP_fps;
+  
    pcf::IndiProperty m_indiP_emGain;
 
    pcf::IndiProperty m_indiP_shutter;
 
 public:
-   INDI_NEWCALLBACK_DECL(andorCtrl, m_indiP_ccdtemp);
-   INDI_NEWCALLBACK_DECL(andorCtrl, m_indiP_cooling);
-
-   INDI_NEWCALLBACK_DECL(andorCtrl, m_indiP_mode);
-   INDI_NEWCALLBACK_DECL(andorCtrl, m_indiP_fps);
    INDI_NEWCALLBACK_DECL(andorCtrl, m_indiP_emGain);
 
    INDI_NEWCALLBACK_DECL(andorCtrl, m_indiP_shutter);
@@ -172,7 +224,9 @@ inline
 andorCtrl::andorCtrl() : MagAOXApp(MAGAOX_CURRENT_SHA1, MAGAOX_REPO_MODIFIED)
 {
    m_powerMgtEnabled = true;
-
+   m_powerOnWait = 10;
+   
+   m_startupTemp = 20;
    return;
 }
 
@@ -185,15 +239,14 @@ andorCtrl::~andorCtrl() noexcept
 inline
 void andorCtrl::setupConfig()
 {
+   dev::stdCamera<andorCtrl>::setupConfig(config);
    dev::edtCamera<andorCtrl>::setupConfig(config);
-   dev::frameGrabber<andorCtrl>::setupConfig(config);
-
-   config.add("camera.powerOnWait", "", "camera.powerOnWait", argType::Required, "camera", "powerOnWait", false, "int", "Time after power-on to begin attempting connections [sec].  Default is 10 sec.");
-
-   config.add("camera.startupTemp", "", "camera.startupTemp", argType::Required, "camera", "startupTemp", false, "float", "The temperature setpoint to set after a power-on [C].  Default is 20 C.");
-
+   
    config.add("camera.maxEMGain", "", "camera.maxEMGain", argType::Required, "camera", "maxEMGain", false, "unsigned", "The maximum EM gain which can be set by  user. Default is 600.  Min is 1, max is 600.");
 
+   dev::frameGrabber<andorCtrl>::setupConfig(config);
+
+   
 
 }
 
@@ -202,10 +255,9 @@ void andorCtrl::setupConfig()
 inline
 void andorCtrl::loadConfig()
 {
+   dev::stdCamera<andorCtrl>::loadConfig(config);
    dev::edtCamera<andorCtrl>::loadConfig(config);
 
-   config(m_powerOnWait, "camera.powerOnWait");
-   config(m_startupTemp, "camera.startupTemp");
    config(m_maxEMGain, "camera.maxEMGain");
 
    if(m_maxEMGain < 1)
@@ -232,23 +284,7 @@ void andorCtrl::loadConfig()
 inline
 int andorCtrl::appStartup()
 {
-   // set up the  INDI properties
-   REG_INDI_NEWPROP(m_indiP_ccdtemp, "ccdtemp", pcf::IndiProperty::Number);
-   m_indiP_ccdtemp.add (pcf::IndiElement("current"));
-   m_indiP_ccdtemp["current"].set(0);
-   m_indiP_ccdtemp.add (pcf::IndiElement("target"));
-
-   REG_INDI_NEWPROP(m_indiP_cooling, "cooling", pcf::IndiProperty::Number);
-   m_indiP_cooling.add (pcf::IndiElement("current"));
-   m_indiP_cooling.add (pcf::IndiElement("target"));
-
-
-   REG_INDI_NEWPROP(m_indiP_fps, "fps", pcf::IndiProperty::Number);
-   m_indiP_fps.add (pcf::IndiElement("current"));
-   m_indiP_fps["current"].set(0);
-   m_indiP_fps.add (pcf::IndiElement("target"));
-   m_indiP_fps.add (pcf::IndiElement("measured"));
-
+   
    REG_INDI_NEWPROP(m_indiP_emGain, "emgain", pcf::IndiProperty::Number);
    m_indiP_emGain.add (pcf::IndiElement("current"));
    m_indiP_emGain["current"].set(m_emGain);
@@ -264,6 +300,12 @@ int andorCtrl::appStartup()
 //       log<software_error>({__FILE__, __LINE__});
 //       return -1;
 //    }
+   
+   if(dev::stdCamera<andorCtrl>::appStartup() < 0)
+   {
+      return log<software_critical,-1>({__FILE__,__LINE__});
+   }
+
    if(dev::edtCamera<andorCtrl>::appStartup() < 0)
    {
       return log<software_critical,-1>({__FILE__,__LINE__});
@@ -285,27 +327,26 @@ int andorCtrl::appStartup()
 inline
 int andorCtrl::appLogic()
 {
+   //and run stdCamera's appLogic
+   if(dev::stdCamera<andorCtrl>::appLogic() < 0)
+   {
+      return log<software_error, -1>({__FILE__, __LINE__});
+   }
+   
+   //and run edtCamera's appLogic
+   if(dev::edtCamera<andorCtrl>::appLogic() < 0)
+   {
+      return log<software_error, -1>({__FILE__, __LINE__});
+   }
+   
    //first run frameGrabber's appLogic to see if the f.g. thread has exited.
    if(dev::frameGrabber<andorCtrl>::appLogic() < 0)
    {
       return log<software_error, -1>({__FILE__, __LINE__});
    }
 
-   if( state() == stateCodes::POWERON )
-   {
-      if(m_powerOnCounter*m_loopPause > ((double) m_powerOnWait)*1e9)
-      {
-         state(stateCodes::NOTCONNECTED);
-         m_reconfig = true; //Trigger a f.g. thread reconfig.
-         m_powerOnCounter = 0;
-      }
-      else
-      {
-         ++m_powerOnCounter;
-         return 0;
-      }
-   }
-
+   if( state() == stateCodes::POWERON) return 0;
+   
    if( state() == stateCodes::NOTCONNECTED || state() == stateCodes::ERROR)
    {
       std::string response;
@@ -424,21 +465,8 @@ int andorCtrl::onPowerOff()
 
    std::lock_guard<std::mutex> lock(m_indiMutex);
 
-   std::cerr << "1" << std::endl;
-   updateIfChanged(m_indiP_ccdtemp, "current", -999);
-   std::cerr << "2" << std::endl;
-   updateIfChanged(m_indiP_ccdtemp, "target", -999);
-
-   updateIfChanged(m_indiP_fps, "current", 0);
-   std::cerr << "6" << std::endl;
-   updateIfChanged(m_indiP_fps, "target", 0);
-   std::cerr << "7" << std::endl;
-   updateIfChanged(m_indiP_fps, "measured", 0);
-
    updateIfChanged(m_indiP_emGain, "current", 0);
-   std::cerr << "9" << std::endl;
    updateIfChanged(m_indiP_emGain, "target", 0);
-   std::cerr << "10" << std::endl;
 
    edtCamera<andorCtrl>::onPowerOff();
    return 0;
@@ -496,7 +524,6 @@ int andorCtrl::getTemp()
 //   std::cerr << error << "\n";
    unsigned long status=GetTemperature(&temp);
 
-   updateIfChanged(m_indiP_ccdtemp, "current", temp);
 
 //    std::cout << "Current Temperature: " << temp << " C" << std::endl;
 //    std::cout << "Temp Range: {" << temp_low << "," << temp_high << "}" << std::endl;
@@ -511,11 +538,7 @@ int andorCtrl::getTemp()
       case DRV_TEMPERATURE_DRIFT: cooling = "DRIFTING"; break;
       default: cooling =  "UNKOWN";
    }
-   updateIfChanged(m_indiP_cooling, "current", cooling);
-
-   //log<ocam_temps>({temps.CCD, temps.CPU, temps.POWER, temps.BIAS, temps.WATER, temps.LEFT, temps.RIGHT, temps.COOLING_POWER});
-
-
+  
    return 0;
 
 
@@ -527,50 +550,9 @@ int andorCtrl::setTemp(float temp)
    return 0;
 }
 
-inline
-int andorCtrl::getFPS()
-{
-   float exptime;
-   float accumCycletime;
-   float kinCycletime;
-
-   unsigned long error = GetAcquisitionTimings(&exptime, &accumCycletime, &kinCycletime);
-   if(error != DRV_SUCCESS)
-   {
-      return log<software_error,-1>({__FILE__, __LINE__, "Error from GetAcquisitionTimings"});
-   }
-
-   m_fpsSet = 1./exptime;
-
-   updateIfChanged(m_indiP_fps, "current", m_fpsSet);
-
-   if(m_fpsSet == m_fpsTgt) updateIfChanged(m_indiP_fps, "target", std::string(""));
-
-   m_fpsMeasured = 0;
-
-   updateIfChanged(m_indiP_fps, "measured", std::string(""));
-
-   return 0;
-
-}
-
-inline
-int andorCtrl::setFPS(float fps)
-{
-   AbortAcquisition();
-
-   unsigned long err = SetExposureTime(1.0/fps);
-
-   StartAcquisition();
 
 
-   if(err != DRV_SUCCESS)
-   {
-      return log<software_error, -1>({__FILE__, __LINE__, "error from SetExposureTime"});
-   }
-   return 0;
 
-}
 
 inline
 int andorCtrl::getEMGain()
@@ -630,6 +612,91 @@ int andorCtrl::setShutter( unsigned os )
 
    return 0;
 }
+
+//------------------------------------------------------------------------
+//-----------------------  stdCamera interface ---------------------------
+//------------------------------------------------------------------------
+
+inline
+int andorCtrl::powerOnDefaults()
+{
+   //Camera boots up with this true in most cases.
+   m_tempControlStatusSet = false;
+   m_tempControlStatus =false;
+      
+   return 0;
+}
+
+inline
+int andorCtrl::setTempControl()
+{  
+   return 0;
+}
+
+inline
+int andorCtrl::setTempSetPt()
+{
+  return 0;
+
+}
+
+inline
+int andorCtrl::getFPS()
+{
+   float exptime;
+   float accumCycletime;
+   float kinCycletime;
+
+   unsigned long error = GetAcquisitionTimings(&exptime, &accumCycletime, &kinCycletime);
+   if(error != DRV_SUCCESS)
+   {
+      return log<software_error,-1>({__FILE__, __LINE__, "Error from GetAcquisitionTimings"});
+   }
+
+   m_fps = 1./exptime;
+
+   return 0;
+
+}
+
+inline
+int andorCtrl::setFPS()
+{
+   AbortAcquisition();
+
+   unsigned long err = SetExposureTime(1.0/m_fpsSet);
+
+   StartAcquisition();
+
+
+   if(err != DRV_SUCCESS)
+   {
+      return log<software_error, -1>({__FILE__, __LINE__, "error from SetExposureTime"});
+   }
+   
+   log<text_log>({"set fps " + std::to_string(m_fpsSet)});
+   
+   return 0;
+
+}
+
+
+
+inline 
+int andorCtrl::setExpTime()
+{
+   return 0;
+}
+   
+inline 
+int andorCtrl::setNextROI()
+{
+   return 0;
+}
+
+//------------------------------------------------------------------------
+//-------------------   framegrabber interface ---------------------------
+//------------------------------------------------------------------------
 
 inline
 int andorCtrl::configureAcquisition()
@@ -738,152 +805,6 @@ int andorCtrl::reconfig()
    std::unique_lock<std::mutex> lock(m_indiMutex);
 
    return edtCamera<andorCtrl>::pdvReconfig();
-}
-
-INDI_NEWCALLBACK_DEFN(andorCtrl, m_indiP_ccdtemp)(const pcf::IndiProperty &ipRecv)
-{
-   if (ipRecv.getName() == m_indiP_ccdtemp.getName())
-   {
-      float current = 99, target = 99;
-
-      try
-      {
-         current = ipRecv["current"].get<float>();
-      }
-      catch(...){}
-
-      try
-      {
-         target = ipRecv["target"].get<float>();
-      }
-      catch(...){}
-
-
-      //Check if target is empty
-      if( target == 99 ) target = current;
-
-      //Now check if it's valid?
-      ///\todo implement more configurable max-set-able temperature
-      if( target > 30 ) return 0;
-
-
-      //Lock the mutex, waiting if necessary
-      std::unique_lock<std::mutex> lock(m_indiMutex);
-
-      updateIfChanged(m_indiP_ccdtemp, "target", target);
-
-      return setTemp(target);
-   }
-   return -1;
-}
-
-INDI_NEWCALLBACK_DEFN(andorCtrl, m_indiP_cooling)(const pcf::IndiProperty &ipRecv)
-{
-   if (ipRecv.getName() == m_indiP_cooling.getName())
-   {
-      std::string current, target;
-
-      if(ipRecv.find("current"))
-      {
-         current = ipRecv["current"].get<std::string>();
-      }
-
-      if(ipRecv.find("target"))
-      {
-         target = ipRecv["target"].get<std::string>();
-      }
-
-      //Check if target is empty
-      if( target == "" ) target = current;
-
-      target = mx::ioutils::toUpper(target);
-
-      if( target != "ON" && target != "OFF") return 0;
-
-      //Lock the mutex, waiting if necessary
-      std::unique_lock<std::mutex> lock(m_indiMutex);
-
-      updateIfChanged(m_indiP_cooling, "target", target);
-
-      return 0;
-      //return setCooling(target);
-   }
-   return -1;
-}
-
-INDI_NEWCALLBACK_DEFN(andorCtrl, m_indiP_mode)(const pcf::IndiProperty &ipRecv)
-{
-   if (ipRecv.getName() == m_indiP_mode.getName())
-   {
-      std::cerr << "New mode\n";
-      std::string current;
-      std::string target;
-      try
-      {
-         current = ipRecv["current"].get();
-      }
-      catch(...)
-      {
-         current = "";
-      }
-
-      try
-      {
-         target = ipRecv["target"].get();
-      }
-      catch(...)
-      {
-         target = "";
-      }
-
-      if(target == "") target = current;
-
-      if(m_cameraModes.count(target) == 0 )
-      {
-         return log<text_log, -1>("Unrecognized mode requested: " + target, logPrio::LOG_ERROR);
-      }
-
-      updateIfChanged(m_indiP_mode, "target", target);
-
-      //Now signal the f.g. thread to reconfigure
-      m_nextMode = target;
-      m_reconfig = true;
-
-      return 0;
-   }
-   return -1;
-}
-
-INDI_NEWCALLBACK_DEFN(andorCtrl, m_indiP_fps)(const pcf::IndiProperty &ipRecv)
-{
-   if (ipRecv.getName() == m_indiP_fps.getName())
-   {
-      float current = -99, target = -99;
-
-      if(ipRecv.find("current"))
-      {
-         current = ipRecv["current"].get<float>();
-      }
-
-      if(ipRecv.find("target"))
-      {
-         target = ipRecv["target"].get<float>();
-      }
-
-      if(target == -99) target = current;
-
-      if(target <= 0) return 0;
-
-      //Lock the mutex, waiting if necessary
-      std::unique_lock<std::mutex> lock(m_indiMutex);
-
-      m_fpsTgt = target;
-      updateIfChanged(m_indiP_fps, "target", m_fpsTgt);
-
-      return setFPS(m_fpsTgt);
-
-   }
-   return -1;
 }
 
 INDI_NEWCALLBACK_DEFN(andorCtrl, m_indiP_emGain)(const pcf::IndiProperty &ipRecv)
