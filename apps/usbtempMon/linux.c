@@ -17,7 +17,7 @@ int ut_errno;
 int owReset(int fd)
 {
   int rv;
-  int wbytes, rbytes;
+  int wbytes;
   unsigned char wbuff, rbuff;
   fd_set readset;
   struct timeval timeout_tv;
@@ -51,7 +51,7 @@ int owReset(int fd)
   if (select(fd + 1, &readset, NULL, NULL, &timeout_tv) > 0) {
 
     if (FD_ISSET(fd, &readset)) {
-      rbytes = read(fd, &rbuff, 1);
+      int rbytes = read(fd, &rbuff, 1);
       if (rbytes != 1) {
         return -1;
       }

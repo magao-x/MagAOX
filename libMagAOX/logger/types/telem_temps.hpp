@@ -25,7 +25,7 @@ namespace logger
 struct telem_temps : public flatbuffer_log
 {
    ///The event code
-   static const flatlogs::eventCodeT eventCode = eventCodes::TELEM_TELPOS;
+   static const flatlogs::eventCodeT eventCode = eventCodes::TELEM_TEMPS;
 
    ///The default level
    static const flatlogs::logPrioT defaultLevel = flatlogs::logPrio::LOG_TELEM;

@@ -310,7 +310,7 @@ protected:
          bool m_elevated {false};
          
       public:
-         elevatedPrivileges(MagAOXApp * app)
+         explicit elevatedPrivileges(MagAOXApp * app)
          {
             m_app = app;
             elevate();

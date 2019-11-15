@@ -45,12 +45,13 @@ static char* ut_msgs[] = {
 
 static unsigned char lsb_crc8(unsigned char *data_in, unsigned int len, const unsigned char generator)
 {
-  unsigned char i, bit_counter;
+  unsigned char i;
   unsigned char crc = 0;
 
-  for (i = 0; i < len; i++) {
+  for (i = 0; i < len; i++) 
+  {
     crc ^= *(data_in + i);
-    bit_counter = 8;
+    unsigned char bit_counter = 8;
     do {
       if (crc & 0x01) {
         crc = (((crc >> 1) & 0x7f) ^ generator);
