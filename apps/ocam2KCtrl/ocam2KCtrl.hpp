@@ -1177,6 +1177,7 @@ int ocam2KCtrl::recordTemps( bool force )
    if(!(lastTemps == m_temps) || force)
    {
       telem<ocam_temps>({m_temps.CCD, m_temps.CPU, m_temps.POWER, m_temps.BIAS, m_temps.WATER, m_temps.LEFT, m_temps.RIGHT, m_temps.COOLING_POWER});
+      lastTemps = m_temps;
    }
    
    return 0;
