@@ -226,8 +226,11 @@ int usbtempMon::appLogic()
             continue;
          }
          
+         m_probes[n].m_temperature = temperature;
          updateIfChanged(m_indiP_temps, m_probes[n].m_location, temperature);
-         //std::cout << m_probes[n].m_location << " " << temperature << " C\n";
+         
+         recordTemps(); //log it in telemeter
+         
          
          if (DS18B20_measure(m_probes[n].m_fd) < 0) 
          {
@@ -382,6 +385,7 @@ int usbtempMon::recordTemps(bool force)
    if(force || log)
    {
       telem<telem_temps>(temps);
+      for(size_t n=0; n<m_lastTemps.size(); ++n) m_lastTemps[n] = temps[n];
    }
    
    return 0;
