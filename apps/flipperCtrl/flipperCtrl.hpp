@@ -46,11 +46,14 @@ protected:
      */
    
    //here add parameters which will be config-able at runtime
+   int m_inPos {1};
+   int m_outPos {2};
    
    ///@}
 
 
-
+   int m_pos {1};
+   int m_tgt {0};
 
 public:
    /// Default c'tor.
@@ -90,12 +93,18 @@ public:
 
    
    int getPos();
+   
+   int moveTo(int pos);
+   
+   pcf::IndiProperty m_indiP_position;
+   
+   INDI_NEWCALLBACK_DECL(flipperCtrl, m_indiP_position);
 
 };
 
 flipperCtrl::flipperCtrl() : MagAOXApp(MAGAOX_CURRENT_SHA1, MAGAOX_REPO_MODIFIED)
 {
-   
+   m_powerMgtEnabled = true;
    return;
 }
 
@@ -103,6 +112,8 @@ void flipperCtrl::setupConfig()
 {
    tty::usbDevice::setupConfig(config);
    dev::ioDevice::setupConfig(config);
+   
+   config.add("flipper.reverse", "", "flipper.reverse", argType::Required, "flipper", "reverse", false, "bool", "If true, reverse the positions for in and out.");
 }
 
 int flipperCtrl::loadConfigImpl( mx::app::appConfigurator & _config )
@@ -119,6 +130,15 @@ int flipperCtrl::loadConfigImpl( mx::app::appConfigurator & _config )
    
    dev::ioDevice::loadConfig(_config);
    
+   bool rev = false;
+   _config(rev, "flipper.reverse");
+   
+   if(rev)
+   {
+      m_inPos = 2;
+      m_outPos = 1;
+   }
+   
    return 0;
 }
 
@@ -134,7 +154,7 @@ void flipperCtrl::loadConfig()
 
 int flipperCtrl::appStartup()
 {
-
+/*
    if(m_deviceName == "") state(stateCodes::NODEVICE);
    else
    {
@@ -142,14 +162,25 @@ int flipperCtrl::appStartup()
       std::stringstream logs;
       logs << "USB Device " << m_idVendor << ":" << m_idProduct << ":" << m_serial << " found in udev as " << m_deviceName;
       log<text_log>(logs.str());
-   }
+   }*/
 
+   createStandardIndiSelectionSw( m_indiP_position, "position", {"in", "out"});
+   
+   if( registerIndiPropertyNew( m_indiP_position, INDI_NEWCALLBACK(m_indiP_position)) < 0)
+   {
+      log<software_error>({__FILE__,__LINE__});
+      return -1;
+   }
       
    return 0;
 }
 
 int flipperCtrl::appLogic()
 {
+   if(state() == stateCodes::POWERON)
+   {
+      state(stateCodes::NODEVICE);
+   }
       
    if( state() == stateCodes::NODEVICE )
    {
@@ -223,47 +254,51 @@ int flipperCtrl::appLogic()
         
    if( state() == stateCodes::CONNECTED )
    {
-      /*std::string header(6,'\0');
-      header[0] = 0x23;
-      header[1] = 0x02;
-      header[2] = 0x00;
-      header[3] = 0x00;
-      header[4] = 0x50;
-      header[5] = 0x01;
+      std::unique_lock<std::mutex> lock(m_indiMutex);
+      getPos();
+      m_tgt = m_pos;
       
-      tty::ttyWrite( header, m_fileDescrip, m_writeTimeout);*/
+      state(stateCodes::READY);
+   }
+   
+   if( state() == stateCodes::READY || state() == stateCodes::OPERATING)
+   {
+      std::unique_lock<std::mutex> lock(m_indiMutex);
       
       getPos();
       
-      std::string header(6,'\0');
-      
-      static int move = 0;
-      
-      header[0] = 0x6A;
-      header[1] = 0x04;
-      header[2] = 0x00;
-      if(move == 0)
+      if(m_pos == m_inPos)
       {
-         header[3] = 0x01;
-         move = 1;
-      }
-      else if(move == 5)
-      {
-         header[3] = 0x02;
-         move = 6;
+         if(m_pos == m_tgt)
+         {
+            updateSwitchIfChanged(m_indiP_position, "in", pcf::IndiElement::On, INDI_IDLE);
+            updateSwitchIfChanged(m_indiP_position, "out", pcf::IndiElement::Off, INDI_IDLE);
+            state(stateCodes::READY);
+         }
+         else
+         {
+            updateSwitchIfChanged(m_indiP_position, "in", pcf::IndiElement::On, INDI_BUSY);
+            updateSwitchIfChanged(m_indiP_position, "out", pcf::IndiElement::Off, INDI_BUSY);
+            state(stateCodes::OPERATING);
+         }
       }
       else
       {
-         ++move;
-         
-         if(move > 10) move = 0;
-         return 0;
+         if(m_pos == m_tgt)
+         {
+            updateSwitchIfChanged(m_indiP_position, "in", pcf::IndiElement::Off, INDI_IDLE);
+            updateSwitchIfChanged(m_indiP_position, "out", pcf::IndiElement::On, INDI_IDLE);
+            state(stateCodes::READY);
+         }
+         else
+         {
+            updateSwitchIfChanged(m_indiP_position, "in", pcf::IndiElement::Off, INDI_BUSY);
+            updateSwitchIfChanged(m_indiP_position, "out", pcf::IndiElement::On, INDI_BUSY);
+            state(stateCodes::OPERATING);
+         }
       }
       
-      header[4] = 0x50;
-      header[5] = 0x01;
-      
-      tty::ttyWrite( header, m_fileDescrip, m_writeTimeout);
+    /*  */
       
       //sleep(2);
    }
@@ -291,31 +326,103 @@ int flipperCtrl::getPos()
    tty::ttyWrite( header, m_fileDescrip, m_writeTimeout);
       
    std::string response;
-   int rv = tty::ttyRead(response, 20, m_fileDescrip, m_readTimeout);
-      
-   std::cout << "Read: " << response.size() << " bytes\n";
-      
-//    if(rv > 0)
-//    {
-//       for(int i=0; i < rv; ++i)
-//       {
-//          std::cerr << i << " " << (int) response[i] << "\n";
-//       }
-//    }
-//    else
-//    {
-//       return 0;
-//    }
-   
+   if(tty::ttyRead(response, 20, m_fileDescrip, m_readTimeout) < 0)
+   {
+      log<software_error>({__FILE__,__LINE__, "error getting response from flipper"});
+   }
    
    if(response[16] == 1)
    {
-      std::cerr << "position 1\n";
+      m_pos = 1;
    }
    else
    {
-      std::cerr << "position 2\n";
+      m_pos = 2;
    }
+   
+   return 0;
+}
+
+int flipperCtrl::moveTo(int pos)
+{
+   std::string header(6,'\0');
+      
+   header[0] = 0x6A;
+   header[1] = 0x04;
+   header[2] = 0x00;
+   if(pos == 1)
+   {
+      header[3] = 0x01;
+   }
+   else if(pos == 2)
+   {
+      header[3] = 0x02;
+   }
+   else
+   {
+      return log<software_error,-1>({__FILE__,__LINE__, "invalid position"});
+   }
+   header[4] = 0x50;
+   header[5] = 0x01;
+     
+   tty::ttyWrite( header, m_fileDescrip, m_writeTimeout);
+   
+   return 0;
+}
+
+INDI_NEWCALLBACK_DEFN(flipperCtrl, m_indiP_position )(const pcf::IndiProperty &ipRecv)
+{
+   if(ipRecv.getName() != m_indiP_position.getName())
+   {
+      log<software_error>({__FILE__, __LINE__, "invalid indi property received"});
+      return -1;
+   }
+   
+
+   int newpos = 0;
+   
+   if(ipRecv.find("in"))
+   {
+      if(ipRecv["in"].getSwitchState() == pcf::IndiElement::On)
+      {
+         newpos = m_inPos;
+      }
+   }
+   
+   if(ipRecv.find("out"))
+   {
+      if(ipRecv["out"].getSwitchState() == pcf::IndiElement::On)
+      {
+         if(newpos)
+         {
+            log<text_log>("can not set position to both in and out", logPrio::LOG_ERROR);
+         }
+         else newpos = m_outPos;
+      }
+   }
+   
+   if(newpos)
+   {
+      m_tgt = newpos;
+      
+      std::unique_lock<std::mutex> lock(m_indiMutex);
+      
+      m_indiP_position.setState (INDI_BUSY);
+      m_indiDriver->sendSetProperty (m_indiP_position);
+      
+      state(stateCodes::OPERATING);
+      
+      if(moveTo(m_tgt) < 0)
+      {
+         return log<software_error,-1>({__FILE__, __LINE__});
+      }
+      
+      return 0;
+   }
+   
+
+   
+   return 0;
 }
 
 } //namespace app
