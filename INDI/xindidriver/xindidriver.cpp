@@ -23,6 +23,11 @@
 std::string myName;
 bool timeToDie;
 
+#ifdef DEBUG
+#include <fstream>
+std::ofstream debug;
+#endif
+
 /// The details of one driver FIFO, this is passed to xoverThread to start the rd/wr thread for the indicated FIFO.
 struct driverFIFO
 {
@@ -41,13 +46,21 @@ struct driverFIFO
 int flushFIFO(const std::string & fileName)
 {
    int fd {-1};
+ 
+   #ifdef DEBUG
+   debug << __FILE__ << " " << __LINE__ << std::endl;
+   #endif
    
-   fd = open( fileName.c_str(), O_RDONLY);
+   fd = open( fileName.c_str(), O_RDONLY | O_NONBLOCK);
    
    char flushBuff[1024];
    
    int rd = 1;
    int totrd = 0;
+   
+   #ifdef DEBUG
+   debug << __FILE__ << " " << __LINE__ << std::endl;
+   #endif
    
    // Create and clear out the FD set, set to watch the reader.
    fd_set fdsRead;
@@ -59,13 +72,21 @@ int flushFIFO(const std::string & fileName)
    tv.tv_sec = 1;
    tv.tv_usec = 0;
 
+   #ifdef DEBUG
+   debug << __FILE__ << " " << __LINE__ << std::endl;
+   #endif
    std::cerr << "Starting flush of " << fileName << "\n";
 
+   
    while(rd > 0)
    {
       int nRetval = ::select( fd + 1, &fdsRead, NULL, NULL, &tv );
+
+      #ifdef DEBUG      
+      debug << __FILE__ << " " << __LINE__ << std::endl;
+      debug << nRetval << std::endl;
+      #endif
       
-   
       if(nRetval != 0)
       {
          rd = read(fd, flushBuff, sizeof(flushBuff));
@@ -76,6 +97,9 @@ int flushFIFO(const std::string & fileName)
          
    }
       
+   #ifdef DEBUG
+   debug << __FILE__ << " " << __LINE__ << std::endl;
+   #endif
    
    std::cerr << "flushed " << totrd << " bytes from " << fileName << "\n";
    
@@ -357,6 +381,10 @@ int main( int argc, char **argv)
       return -1;
    }
 
+   #ifdef DEBUG
+   debug.open("/tmp/" + myName + ".dbg");
+   #endif
+   
    //Now that myName is known, install signal handler
    if( setSigTermHandler() < 0) return -1;
 
@@ -366,8 +394,21 @@ int main( int argc, char **argv)
    std::string stdoutFifo = std::string(XINDID_FIFODIR) + "/" + myName + ".out";
    std::string ctrlFifo = std::string(XINDID_FIFODIR) + "/" + myName + ".ctrl";
 
+   #ifdef DEBUG
+   debug << __FILE__ << " " << __LINE__ << std::endl;
+   #endif
+   
    flushFIFO(stdinFifo);
+   
+   #ifdef DEBUG
+   debug << __FILE__ << " " << __LINE__ << std::endl;
+   #endif
+   
    flushFIFO(stdoutFifo);
+   
+   #ifdef DEBUG
+   debug << __FILE__ << " " << __LINE__ << std::endl;
+   #endif
    
    std::cerr << " (" << XINDID_COMPILEDNAME << "): starting with " << stdinFifo << " & " << stdoutFifo << std::endl;
 
