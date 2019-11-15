@@ -250,6 +250,7 @@ void filterWheelCtrl::setupConfig()
    
    dev::stdMotionStage<filterWheelCtrl>::setupConfig(config);
    
+   dev::telemeter<filterWheelCtrl>::setupConfig(config);
 }
 
 inline
@@ -275,6 +276,7 @@ void filterWheelCtrl::loadConfig()
 
    dev::stdMotionStage<filterWheelCtrl>::loadConfig(config);
 
+   dev::telemeter<filterWheelCtrl>::loadConfig(config);
 }
 
 inline
@@ -293,8 +295,10 @@ int filterWheelCtrl::appStartup()
    
    dev::stdMotionStage<filterWheelCtrl>::appStartup();
    
-   
-
+   if(dev::telemeter<filterWheelCtrl>::appStartup() < 0)
+   {
+      return log<software_error,-1>({__FILE__,__LINE__});
+   }
    
    return 0;
 }
@@ -586,6 +590,12 @@ int filterWheelCtrl::appLogic()
       m_preset = ((double) m_rawPos-m_homeOffset)/m_circleSteps*m_presetNames.size() + 1.0;
       
       stdMotionStage<filterWheelCtrl>::updateINDI();
+      
+      if(telemeter<filterWheelCtrl>::appLogic() < 0)
+      {
+         log<software_error>({__FILE__, __LINE__});
+         return 0;
+      }
       
       return 0;
    }
