@@ -309,6 +309,9 @@ if [[ $MAGAOX_ROLE == AOC || $MAGAOX_ROLE == vm ||  $MAGAOX_ROLE == workstation 
     $MAYBE_SUDO bash -l "$DIR/steps/install_rtimv.sh"
 fi
 
+# aliases to improve ergonomics of MagAO-X ops
+sudo bash -l "$DIR/steps/install_aliases.sh"
+
 # CircleCI invokes install_MagAOX.sh as the next step (see .circleci/config.yml)
 # By separating the real build into another step, we can cache the slow provisioning steps
 # and reuse them on subsequent runs.
