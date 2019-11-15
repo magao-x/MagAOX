@@ -191,6 +191,8 @@ void zaberCtrl::setupConfig()
    config.add("stage.maxCounts", "", "stage.maxCounts", argType::Required, "stage", "maxCounts", false, "unsigned long", "The maximum counts possible for this stage.");
    
    dev::stdMotionStage<zaberCtrl>::setupConfig(config);
+   
+   dev::telemeter<zaberCtrl>::setupConfig(config);
 }
 
 
@@ -207,6 +209,8 @@ int zaberCtrl::loadConfigImpl( mx::app::appConfigurator & _config )
    m_maxPos = ((double) m_maxRawPos)/ m_countsPerMillimeter;
    
    dev::stdMotionStage<zaberCtrl>::loadConfig(_config);
+   
+   dev::telemeter<zaberCtrl>::loadConfig(_config);
    
    return 0;
 }
@@ -262,6 +266,11 @@ int zaberCtrl::appStartup()
    m_presetPositions.insert(m_presetPositions.begin(), -1);
    
    dev::stdMotionStage<zaberCtrl>::appStartup();
+   
+   if(dev::telemeter<zaberCtrl>::appStartup() < 0)
+   {
+      return log<software_error,-1>({__FILE__,__LINE__});
+   }
    
    return 0;
 }
@@ -323,7 +332,11 @@ int zaberCtrl::appLogic()
 
    dev::stdMotionStage<zaberCtrl>::updateINDI();
    
-
+   if(telemeter<zaberCtrl>::appLogic() < 0)
+   {
+      log<software_error>({__FILE__, __LINE__});
+      return 0;
+   }
       
    return 0;
 }

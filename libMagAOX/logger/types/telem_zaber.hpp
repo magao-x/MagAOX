@@ -66,7 +66,7 @@ struct telem_zaber : public flatbuffer_log
       msg += std::to_string(fbs->rawPos()) + " ";
       
       msg += "temp: ";
-      msg += fbs->temp();
+      msg += std::to_string(fbs->temp());
       
       return msg;
    
