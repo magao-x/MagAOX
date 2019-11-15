@@ -43,7 +43,6 @@ INCLUDEDEPS= app/MagAOXApp.hpp \
              logger/types/software_log.hpp \
              logger/types/state_change.hpp \
              logger/types/string_log.hpp \
-             logger/types/text_log.hpp \
              logger/types/user_log.hpp \
 	     logger/types/ram_usage.hpp \
 	     logger/types/core_mon.hpp \
@@ -53,6 +52,12 @@ INCLUDEDEPS= app/MagAOXApp.hpp \
 	     logger/types/saving_start.hpp \
 	     logger/types/saving_stop.hpp \
 	     logger/types/saving_stats.hpp \
+	     logger/types/telem_stage.hpp \
+	     logger/types/telem_teldata.hpp \
+	     logger/types/telem_telpos.hpp \
+	     logger/types/telem_temps.hpp \
+	     logger/types/telem_zaber.hpp \
+	     logger/types/text_log.hpp \
              tty/ttyErrors.hpp \
              tty/ttyIOUtils.hpp \
              tty/ttyUSB.hpp \

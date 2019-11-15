@@ -1,5 +1,5 @@
-/** \file telem_temprack.hpp
-  * \brief The MagAO-X logger telem_temprack log type.
+/** \file telem_temps.hpp
+  * \brief The MagAO-X logger telem_temps log type.
   * \author Jared R. Males (jaredmales@gmail.com)
   *
   * \ingroup logger_types_files
@@ -7,10 +7,10 @@
   * History:
   * - 2018-09-06 created by JRM
   */
-#ifndef logger_types_telem_temprack_hpp
-#define logger_types_telem_temprack_hpp
+#ifndef logger_types_telem_temps_hpp
+#define logger_types_telem_temps_hpp
 
-#include "generated/telem_temprack_generated.h"
+#include "generated/telem_temps_generated.h"
 #include "flatbuffer_log.hpp"
 
 namespace MagAOX
@@ -22,7 +22,7 @@ namespace logger
 /// Log entry recording electronics rack temperature
 /** \ingroup logger_types
   */
-struct telem_temprack : public flatbuffer_log
+struct telem_temps : public flatbuffer_log
 {
    ///The event code
    static const flatlogs::eventCodeT eventCode = eventCodes::TELEM_TELPOS;
@@ -36,12 +36,12 @@ struct telem_temprack : public flatbuffer_log
    struct messageT : public fbMessage
    {
       ///Construct from components
-      messageT( const double & lower,  ///<[in] lower rack temp
-                const double & middle, ///<[in] middle rack temp
-                const double & upper   ///<[in] upper rack temp
+      messageT( const std::vector<float> & temps  ///<[in] vector of temperatures
               )
       {
-         auto fp = CreateTelem_temprack_fb(builder, lower, middle, upper);
+         auto _temps = builder.CreateVector(temps);
+         auto fp = CreateTelem_temps_fb(builder, _temps);
+         
          builder.Finish(fp);
       }
 
@@ -55,29 +55,30 @@ struct telem_temprack : public flatbuffer_log
    {
       static_cast<void>(len);
 
-      auto fbs = GetTelem_temprack_fb(msgBuffer);
+      auto fbs = GetTelem_temps_fb(msgBuffer);
 
-      std::string msg = "[temprack] ";
+      std::string msg = "[temps] ";
       
-      msg += "lr: ";
-      msg += std::to_string(fbs->lower()) + " ";
       
-      msg += "md: ";
-      msg += std::to_string(fbs->middle()) + " ";
-      
-      msg += "up: ";
-      msg += std::to_string(fbs->upper()) + " ";
-      
+      if( fbs->temps() )
+      {
+         for(size_t i=0; i< fbs->temps()->Length(); ++i)
+         {
+            msg += " ";
+            msg += std::to_string(fbs->temps()->Get(i));
+         }
+      }
+            
       return msg;
    
    }
    
-}; //telem_temprack
+}; //telem_temps
 
-timespec telem_temprack::lastRecord = {0,0};
+timespec telem_temps::lastRecord = {0,0};
 
 } //namespace logger
 } //namespace MagAOX
 
-#endif //logger_types_telem_temprack_hpp
+#endif //logger_types_telem_temps_hpp
 

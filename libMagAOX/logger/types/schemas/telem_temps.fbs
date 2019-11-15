@@ -1,0 +1,11 @@
+namespace MagAOX.logger;
+
+
+
+table Telem_temps_fb
+{
+   temps:[float];
+}
+
+root_type Telem_temps_fb;
+

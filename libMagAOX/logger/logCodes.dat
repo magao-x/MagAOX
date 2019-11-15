@@ -33,4 +33,4 @@ telem_teldata            20001    telem_teldata
 telem_stage              20050    telem_stage
 telem_zaber              20055    telem_zaber
 
-telem_temprack           20250    telem_temprack
+telem_temps              20250    telem_temps

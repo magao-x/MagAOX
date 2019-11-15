@@ -38,12 +38,14 @@ namespace app
 /** 
   * \ingroup usbtempMon
   */
-class usbtempMon : public MagAOXApp<true>, public tty::usbDevice
+class usbtempMon : public MagAOXApp<true>, public tty::usbDevice, public dev::telemeter<usbtempMon>
 {
 
    //Give the test harness access.
    friend class usbtempMon_test;
 
+   friend class dev::telemeter<usbtempMon>;
+   
 protected:
 
    /** \name Configurable Parameters
@@ -63,6 +65,11 @@ protected:
       std::string m_devName;
       
       float m_temperature;
+      
+      bool operator<(const probe& p) const
+      {
+        return m_location < p.m_location;
+      }
    };
    
    std::vector<probe> m_probes;
@@ -109,6 +116,19 @@ public:
    
    int checkConnections();
 
+   /** \name Telemeter Interface
+     * 
+     * @{
+     */ 
+   int checkRecordTimes();
+   
+   int recordTelem( const telem_temps * );
+   
+protected:
+   std::vector<float> m_lastTemps;
+   
+   int recordTemps( bool force = false );
+   
 };
 
 usbtempMon::usbtempMon() : MagAOXApp(MAGAOX_CURRENT_SHA1, MAGAOX_REPO_MODIFIED)
@@ -121,6 +141,8 @@ void usbtempMon::setupConfig()
 {
    config.add("usb.idVendor", "", "usb.idVendor", argType::Required, "usb", "idVendor", false, "string", "USB vendor id, 4 digits");
    config.add("usb.idProduct", "", "usb.idProduct", argType::Required, "usb", "idProduct", false, "string", "USB product id, 4 digits");
+   
+   dev::telemeter<usbtempMon>::setupConfig(config);
 }
 
 int usbtempMon::loadConfigImpl( mx::app::appConfigurator & _config )
@@ -156,6 +178,10 @@ int usbtempMon::loadConfigImpl( mx::app::appConfigurator & _config )
       }
    }
    
+   std::sort( m_probes.begin(), m_probes.end());
+   
+   dev::telemeter<usbtempMon>::loadConfig(_config);
+   
    return 0;
 }
 
@@ -174,6 +200,11 @@ int usbtempMon::appStartup()
    }
    registerIndiPropertyReadOnly(m_indiP_temps);
    
+   
+   if(dev::telemeter<usbtempMon>::appStartup() < 0)
+   {
+      return log<software_error,-1>({__FILE__,__LINE__});
+   }
    
    return checkConnections();
 }
@@ -221,6 +252,13 @@ int usbtempMon::appLogic()
    {
       checkConnections();
    }
+   
+   if(telemeter<usbtempMon>::appLogic() < 0)
+   {
+      log<software_error>({__FILE__, __LINE__});
+      return 0;
+   }
+      
    return 0;
 }
 
@@ -313,6 +351,42 @@ int usbtempMon::checkConnections()
    return 0;
 }
 
+int usbtempMon::checkRecordTimes()
+{
+   return dev::telemeter<usbtempMon>::checkRecordTimes(telem_temps());
+}
+   
+int usbtempMon::recordTelem( const telem_temps * )
+{
+   return recordTemps(true);
+}
+
+inline 
+int usbtempMon::recordTemps(bool force)
+{
+   if(m_lastTemps.size() != m_probes.size())
+   {
+      m_lastTemps.resize(m_probes.size());
+      for(size_t n=0; n<m_lastTemps.size(); ++n) m_lastTemps[n] = -1e30;
+   }
+   
+   bool log = false;
+   std::vector<float> temps;
+   temps.resize(m_probes.size());
+   for(size_t n=0; n<temps.size(); ++n) 
+   {
+      temps[n] = m_probes[n].m_temperature;
+      if(temps[n] != m_lastTemps[n]) log = true;
+   }
+   
+   if(force || log)
+   {
+      telem<telem_temps>(temps);
+   }
+   
+   return 0;
+
+}
 
 } //namespace app
 } //namespace MagAOX
