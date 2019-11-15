@@ -231,14 +231,20 @@ int zaberLowLevel::connect()
             za_disconnect(m_port);
             m_port = 0;
          }
-         state(stateCodes::ERROR); //Should not get this here.  Probably means no device.
+         
+         if(!stateLogged())
+         {
+            log<software_error>({__FILE__, __LINE__, "can not connect to zaber stage(s)"});
+         }
+         
          return ZC_NOT_CONNECTED; //We aren't connected.
       }
    }
 
    if(m_port <= 0)
    {
-      state(stateCodes::ERROR); //Should not get this here.  Probably means no device.
+      //state(stateCodes::ERROR); //Should not get this here.  Probably means no device.
+      log<text_log>("can not connect to zaber stage(s): no port", logPrio::LOG_WARNING);
       return ZC_NOT_CONNECTED; //We aren't connected.
    }
    
@@ -423,17 +429,6 @@ int zaberLowLevel::appStartup()
       m_indiP_req_ehalt.add (pcf::IndiElement(m_stages[n].name()));
    }
    
-   //Get the USB device if it's in udev
-   if(m_deviceName == "") state(stateCodes::NODEVICE);
-   else
-   {
-      state(stateCodes::NOTCONNECTED);
-      std::stringstream logs;
-      logs << "USB Device " << m_idVendor << ":" << m_idProduct << ":" << m_serial << " found in udev as " << m_deviceName;
-      log<text_log>(logs.str());
-   }
-
-
    return 0;
 }
 
@@ -443,6 +438,11 @@ int zaberLowLevel::appLogic()
    {
       log<text_log>( "In appLogic but in state INITIALIZED.", logPrio::LOG_CRITICAL );
       return -1;
+   }
+
+   if( state() == stateCodes::POWERON)
+   {
+      state(stateCodes::NODEVICE);
    }
 
    if( state() == stateCodes::NODEVICE )
@@ -472,22 +472,17 @@ int zaberLowLevel::appLogic()
       }
       else
       {
+         std::stringstream logs;
+         logs << "USB Device " << m_idVendor << ":" << m_idProduct << ":" << m_serial << " found in udev as " << m_deviceName;
+         log<text_log>(logs.str());
+         
          state(stateCodes::NOTCONNECTED);
-         if(!stateLogged())
-         {
-            std::stringstream logs;
-            logs << "USB Device " << m_idVendor << ":" << m_idProduct << ":" << m_serial << " found in udev as " << m_deviceName;
-            log<text_log>(logs.str());
-         }
+         
+         return 0; //we return to give the stage time to initialize the connection if this is a USB-FTDI power on/plug-in event.
       }
 
    }
 
-   if( state() == stateCodes::POWERON)
-   {
-      state(stateCodes::NOTCONNECTED);
-   }
-   
    if( state() == stateCodes::NOTCONNECTED )
    {
       std::lock_guard<std::mutex> guard(m_indiMutex);
@@ -502,6 +497,14 @@ int zaberLowLevel::appLogic()
          {
             log<text_log>("Connected to stage(s) on " + m_deviceName);
          }
+      }
+      else if(rv == ZC_NOT_CONNECTED)
+      {
+         return 0;
+      }
+      else
+      {
+         
       }
    }
 
@@ -568,7 +571,13 @@ int zaberLowLevel::appLogic()
          m_stages[i].updateTemp(m_port);
          updateIfChanged(m_indiP_temp, m_stages[i].name(), m_stages[i].temp());
          
-         m_stages[i].getWarnings(m_port);
+         if(m_stages[i].getWarnings(m_port) < 0)
+         {
+            if(m_powerState == 0) return 0;
+            log<software_error>({__FILE__, __LINE__});
+            state(stateCodes::ERROR);
+            return 0;
+         }
             
       }
    }
@@ -600,10 +609,9 @@ int zaberLowLevel::appLogic()
       }
 
       state(stateCodes::FAILURE);
-      if(!stateLogged())
-      {
-         log<text_log>("Error NOT due to loss of USB connection.  I can't fix it myself.", logPrio::LOG_CRITICAL);
-      }
+      
+      log<software_critical>({__FILE__, __LINE__});
+      log<text_log>("Error NOT due to loss of USB connection.  I can't fix it myself.", logPrio::LOG_CRITICAL);
    }
 
 
@@ -633,10 +641,6 @@ int zaberLowLevel::onPowerOff()
    
    for(size_t i=0; i < m_stages.size();++i)
    {
-      //Don't erase positions.
-      //updateIfChanged(m_indiP_curr_pos, m_stages[i].name(), -1); <------- do not zero curr_pos
-      
-      
       updateIfChanged(m_indiP_tgt_pos, m_stages[i].name(), std::string(""));
       updateIfChanged(m_indiP_tgt_relpos, m_stages[i].name(), std::string(""));
       updateIfChanged(m_indiP_temp, m_stages[i].name(), std::string(""));

@@ -547,7 +547,7 @@ INDI_SETCALLBACK_DEFN( zaberCtrl, m_indiP_stageMaxRawPos )(const pcf::IndiProper
    
    unsigned long maxRawPos = ipRecv[m_stageName].get<unsigned long>();
    
-   if(maxRawPos != m_maxRawPos)
+   if(maxRawPos != m_maxRawPos && !(state() == stateCodes::POWERON || state() == stateCodes::POWEROFF || state() == stateCodes::NOTCONNECTED))
    {
       log<text_log>("max position mismatch between config-ed value (" + std::to_string(m_maxRawPos) + ") and stage value (" + std::to_string(maxRawPos) + ")", logPrio::LOG_WARNING);
    }
@@ -606,8 +606,6 @@ INDI_SETCALLBACK_DEFN( zaberCtrl, m_indiP_stageTgtPos )(const pcf::IndiProperty 
    
    if(test == "")
    {
-//       updateIfChanged(m_indiP_rawpos, "target", std::string(""));   
-//       updateIfChanged(m_indiP_pos, "target", std::string(""));
       return 0;
    }
    

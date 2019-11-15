@@ -133,12 +133,11 @@ int flipperCtrl::loadConfigImpl( mx::app::appConfigurator & _config )
 
    int rv = tty::usbDevice::loadConfig(_config);
    
-   if(rv < 0)
+   if(rv != 0 && rv != TTY_E_NODEVNAMES && rv != TTY_E_DEVNOTFOUND) //Ignore error if not plugged in
    {
-      log<software_critical>({__FILE__, __LINE__});
-      return -1;
+      log<software_error>( {__FILE__, __LINE__, rv, tty::ttyErrorString(rv)});
    }
-   
+      
    dev::ioDevice::loadConfig(_config);
    
    bool rev = false;
