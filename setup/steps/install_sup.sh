@@ -12,6 +12,7 @@ git checkout $SUP_COMMIT_ISH
 for envname in py37 dev; do
     set +u; conda activate $envname; set -u
     cd $parentdir/$reponame
+    conda install nodejs yarn
     make  # installs Python module in editable mode, builds all js
     cd
     python -c 'import sup'  # verify sup is on PYTHONPATH
