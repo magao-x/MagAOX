@@ -53,6 +53,7 @@ yum install -y \
     screen \
     which \
     sudo \
+    sysstat \
 ;
 
 sudo alternatives --install /usr/local/bin/cmake cmake /usr/bin/cmake3 20 \
