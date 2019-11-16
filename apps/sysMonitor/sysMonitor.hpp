@@ -38,9 +38,11 @@ namespace app
 /** MagAO-X application to read and report system statistics
   *
   */
-class sysMonitor : public MagAOXApp<> 
+class sysMonitor : public MagAOXApp<>, public dev::telemeter<sysMonitor>
 {
 
+   friend class dev::telemeter<sysMonitor>;
+   
 protected:
    int m_warningCoreTemp = 0;   ///< User defined warning temperature for CPU cores
    int m_criticalCoreTemp = 0;   ///< User defined critical temperature for CPU cores
@@ -53,15 +55,15 @@ protected:
    pcf::IndiProperty m_indiP_usage;   ///< Indi variable for reporting drive usage of all paths
 
    std::vector<float> m_coreTemps;   ///< List of current core temperature(s)
-   std::vector<float> coreLoads;   ///< List of current core load(s)
+   std::vector<float> m_coreLoads;   ///< List of current core load(s)
    
    std::vector<std::string> m_diskNames; ///< vector of names of the hard disks
    std::vector<float> m_diskTemps;        ///< vector of current disk temperature(s)
    
-   float rootUsage = 0;   ///< Disk usage in root path as a value out of 100
-   float dataUsage = 0;   ///< Disk usage in /data path as a value out of 100
-   float bootUsage = 0;   ///< Disk usage in /boot path as a value out of 100
-   float ramUsage = 0;   ///< RAM usage as a decimal value between 0 and 1
+   float m_rootUsage = 0;   ///< Disk usage in root path as a value out of 100
+   float m_dataUsage = 0;   ///< Disk usage in /data path as a value out of 100
+   float m_bootUsage = 0;   ///< Disk usage in /boot path as a value out of 100
+   float m_ramUsage = 0;   ///< RAM usage as a decimal value between 0 and 1
 
    /// Updates Indi property values of all system statistics
    /** This includes updating values for core loads, core temps, drive temps, / usage, /boot usage, /data usage, and RAM usage
@@ -247,6 +249,31 @@ public:
     * If an error occurs during the process, an empty vector of strings is returned.
     */
    std::vector<std::string> runCommand( std::vector<std::string>    /**< [in] command to be run, with any subsequent parameters stored after*/);
+   
+   
+   /** \name Telemeter Interface
+     * 
+     * @{
+     */ 
+   int checkRecordTimes();
+   
+   int recordTelem( const telem_coreloads * );
+   
+   int recordTelem( const telem_coretemps * );
+   
+   int recordTelem( const telem_drivetemps * );
+   
+   int recordTelem( const telem_usage * );
+   
+   int recordCoreLoads(bool force = false);
+   
+   int recordCoreTemps(bool force = false);
+   
+   int recordDriveTemps(bool force = false);
+   
+   int recordUsage(bool force = false);
+   
+   ///@}
 
 };
 
@@ -262,6 +289,8 @@ void sysMonitor::setupConfig()
    config.add("criticalCoreTemp", "", "criticalCoreTemp", argType::Required, "", "criticalCoreTemp", false, "int", "The critical temperature for CPU cores.");
    config.add("warningDiskTemp", "", "warningDiskTemp", argType::Required, "", "warningDiskTemp", false, "int", "The warning temperature for the disk.");
    config.add("criticalDiskTemp", "", "criticalDiskTemp", argType::Required, "", "criticalDiskTemp", false, "int", "The critical temperature for disk.");
+   
+   dev::telemeter<sysMonitor>::setupConfig(config);
 }
 
 void sysMonitor::loadConfig()
@@ -270,6 +299,8 @@ void sysMonitor::loadConfig()
    config(m_criticalCoreTemp, "criticalCoreTemp");
    config(m_warningDiskTemp, "warningDiskTemp");
    config(m_criticalDiskTemp, "criticalDiskTemp");
+   
+   dev::telemeter<sysMonitor>::loadConfig(config);
 }
 
 int sysMonitor::appStartup()
@@ -287,8 +318,8 @@ int sysMonitor::appStartup()
       m_indiP_core_temps[coreStr].set<double>(0.0);
    }
    
-   findCPULoads(coreLoads);
-   for (unsigned int i = 0; i < coreLoads.size(); i++) 
+   findCPULoads(m_coreLoads);
+   for (unsigned int i = 0; i < m_coreLoads.size(); i++) 
    {
       std::string coreStr = "core" + std::to_string(i);
       m_indiP_core_loads.add (pcf::IndiElement(coreStr));
@@ -312,6 +343,11 @@ int sysMonitor::appStartup()
    m_indiP_usage["data_usage"].set<double>(0.0);
    m_indiP_usage["ram_usage"].set<double>(0.0);
 
+   if(dev::telemeter<sysMonitor>::appStartup() < 0)
+   {
+      return log<software_error,-1>({__FILE__,__LINE__});
+   }
+   
    return 0;
 }
 
@@ -334,22 +370,20 @@ int sysMonitor::appLogic()
       {
          log<telem_coretemps>(m_coreTemps, logPrio::LOG_ALERT);
       } 
-      else 
-      {
-         log<telem_coretemps>(m_coreTemps, logPrio::LOG_INFO);
-      }
+
+      recordCoreTemps();
    }
    else 
    {
       log<software_error>({__FILE__, __LINE__,"Could not log values for CPU core temps."});
    }
    
-   coreLoads.clear();
-   int rvCPULoad = findCPULoads(coreLoads);
+   m_coreLoads.clear();
+   int rvCPULoad = findCPULoads(m_coreLoads);
    
    if(rvCPULoad >= 0)
    {
-      log<telem_coreloads>(coreLoads, logPrio::LOG_INFO);
+      recordCoreLoads();
    }
    else 
    {
@@ -377,7 +411,7 @@ int sysMonitor::appLogic()
       } 
       else 
       {
-         log<telem_drivetemps>({m_diskNames, m_diskTemps}, logPrio::LOG_INFO);
+         recordDriveTemps();
       }
    }
    else 
@@ -385,13 +419,13 @@ int sysMonitor::appLogic()
       log<software_error>({__FILE__, __LINE__,"Could not log values for drive temps."});
    }
 
-   int rvDiskUsage = findDiskUsage(rootUsage, dataUsage, bootUsage);
-   int rvRamUsage = findRamUsage(ramUsage);
+   int rvDiskUsage = findDiskUsage(m_rootUsage, m_dataUsage, m_bootUsage);
+   int rvRamUsage = findRamUsage(m_ramUsage);
 
    
    if (rvDiskUsage >= 0 && rvRamUsage >= 0)
    {
-      log<telem_usage>({ramUsage, bootUsage, rootUsage, dataUsage}, logPrio::LOG_INFO);
+      recordUsage();
    }
    else 
    {
@@ -399,6 +433,11 @@ int sysMonitor::appLogic()
    }
    
 
+   if(telemeter<sysMonitor>::appLogic() < 0)
+   {
+      log<software_error>({__FILE__, __LINE__});
+      return 0;
+   }
    
    updateVals();
 
@@ -407,7 +446,9 @@ int sysMonitor::appLogic()
 
 int sysMonitor::appShutdown()
 {
-    return 0;
+   dev::telemeter<sysMonitor>::appShutdown();
+   
+   return 0;
 }
 
 int sysMonitor::findCPUTemperatures(std::vector<float>& temps) 
@@ -796,16 +837,16 @@ int sysMonitor::parseRamUsage(std::string line, float& ramUsage)
 
 int sysMonitor::updateVals()
 {
-   updateIfChanged(m_indiP_core_loads, "core", coreLoads);
+   updateIfChanged(m_indiP_core_loads, "core", m_coreLoads);
 
    updateIfChanged(m_indiP_core_temps, "core", m_coreTemps);
 
    updateIfChanged(m_indiP_drive_temps, m_diskNames, m_diskTemps);
 
-   updateIfChanged(m_indiP_usage, "root_usage", rootUsage);
-   updateIfChanged(m_indiP_usage, "boot_usage", bootUsage);
-   updateIfChanged(m_indiP_usage, "data_usage", dataUsage);
-   updateIfChanged(m_indiP_usage, "ram_usage", ramUsage);
+   updateIfChanged(m_indiP_usage, "root_usage", m_rootUsage);
+   updateIfChanged(m_indiP_usage, "boot_usage", m_bootUsage);
+   updateIfChanged(m_indiP_usage, "data_usage", m_dataUsage);
+   updateIfChanged(m_indiP_usage, "ram_usage", m_ramUsage);
    
    return 0;
 }
@@ -854,8 +895,10 @@ std::vector<std::string> sysMonitor::runCommand( std::vector<std::string> comman
       if ( (rd = read(link[0], commandOutput_c, sizeof(commandOutput_c))) < 0) 
       {
          perror("Read error");
+         close(link[0]);
          return commandOutput;
       }
+      close(link[0]);
       
       std::string line{};
       
@@ -873,6 +916,139 @@ std::vector<std::string> sysMonitor::runCommand( std::vector<std::string> comman
    }
 }
 
+inline
+int sysMonitor::checkRecordTimes()
+{
+   return telemeter<sysMonitor>::checkRecordTimes(telem_coreloads(),telem_coretemps(),telem_drivetemps(),telem_usage());
+}
+
+int sysMonitor::recordTelem( const telem_coreloads * )
+{
+   return recordCoreLoads(true);
+}
+   
+int sysMonitor::recordTelem( const telem_coretemps * )
+{
+   return recordCoreTemps(true);
+}
+
+int sysMonitor::recordTelem( const telem_drivetemps * )
+{
+   return recordDriveTemps(true);
+}
+  
+int sysMonitor::recordTelem( const telem_usage * )
+{
+   return recordUsage(true);
+}
+ 
+int sysMonitor::recordCoreLoads(bool force)
+{
+   static std::vector<float> old_coreLoads;
+   
+   if(old_coreLoads.size() != m_coreLoads.size())
+   {
+      old_coreLoads.resize(m_coreLoads.size(), -1e30);
+   }
+   
+   bool write = false;
+   
+   for(size_t n = 0; n < m_coreLoads.size(); ++n)
+   {
+      if( m_coreLoads[n] != old_coreLoads[n]) write = true;
+   }
+   
+   if(force || write)
+   {
+      telem<telem_coreloads>(m_coreLoads);
+      
+      for(size_t n = 0; n < m_coreLoads.size(); ++n)
+      {
+         old_coreLoads[n] = m_coreLoads[n];
+      }
+   }
+   
+   return 0;
+}
+   
+int sysMonitor::recordCoreTemps(bool force)
+{
+   static std::vector<float> old_coreTemps;
+   
+   if(old_coreTemps.size() != m_coreTemps.size())
+   {
+      old_coreTemps.resize(m_coreTemps.size(), -1e30);
+   }
+   
+   bool write = false;
+   
+   for(size_t n = 0; n < m_coreTemps.size(); ++n)
+   {
+      if( m_coreTemps[n] != old_coreTemps[n]) write = true;
+   }
+   
+   if(force || write)
+   {
+      telem<telem_coretemps>(m_coreTemps);
+      for(size_t n = 0; n < m_coreTemps.size(); ++n)
+      {
+         old_coreTemps[n] = m_coreTemps[n];
+      }
+   }
+   
+   return 0;
+}
+
+int sysMonitor::recordDriveTemps(bool force)
+{
+   static std::vector<std::string> old_diskNames;
+   static std::vector<float> old_diskTemps;
+   
+   if(old_diskTemps.size() != m_diskTemps.size() || old_diskNames.size() != m_diskNames.size())
+   {
+      old_diskNames.resize(m_diskNames.size());
+      old_diskTemps.resize(m_diskTemps.size(), -1e30);
+   }
+   
+   bool write = false;
+   
+   for(size_t n = 0; n < m_diskTemps.size(); ++n)
+   {
+      if( m_diskTemps[n] != old_diskTemps[n] || m_diskNames[n] != old_diskNames[n]) write = true;
+   }
+   
+   if(force || write)
+   {
+      telem<telem_drivetemps>({m_diskNames, m_diskTemps});
+      for(size_t n = 0; n < m_diskTemps.size(); ++n)
+      {
+         old_diskNames[n] = m_diskNames[n];
+         old_diskTemps[n] = m_diskTemps[n];
+      }
+   }
+   
+   return 0;
+}
+
+int sysMonitor::recordUsage(bool force)
+{
+   static float old_ramUsage = 0;
+   static float old_bootUsage = 0;
+   static float old_rootUsage = 0;
+   static float old_dataUsage = 0;
+   
+   if( old_ramUsage != m_ramUsage || old_bootUsage != m_bootUsage || old_rootUsage != m_rootUsage || old_dataUsage != m_dataUsage || force)
+   {
+      telem<telem_usage>({m_ramUsage, m_bootUsage, m_rootUsage, m_dataUsage});
+      
+      old_ramUsage = m_ramUsage;
+      old_bootUsage = m_bootUsage;
+      old_rootUsage = m_rootUsage;
+      old_dataUsage = m_dataUsage;
+   }
+   
+   return 0;
+}
 
 } //namespace app
 } //namespace MagAOX
