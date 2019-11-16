@@ -336,7 +336,7 @@ int sysMonitor::appLogic()
       } 
       else 
       {
-         log<telem_coretemps>(m_coreTemps);
+         log<telem_coretemps>(m_coreTemps, logPrio::LOG_INFO);
       }
    }
    else 
@@ -349,7 +349,7 @@ int sysMonitor::appLogic()
    
    if(rvCPULoad >= 0)
    {
-      log<telem_coreloads>(coreLoads);
+      log<telem_coreloads>(coreLoads, logPrio::LOG_INFO);
    }
    else 
    {
@@ -377,7 +377,7 @@ int sysMonitor::appLogic()
       } 
       else 
       {
-         log<telem_drivetemps>({m_diskNames, m_diskTemps});
+         log<telem_drivetemps>({m_diskNames, m_diskTemps}, logPrio::LOG_INFO);
       }
    }
    else 
@@ -391,7 +391,7 @@ int sysMonitor::appLogic()
    
    if (rvDiskUsage >= 0 && rvRamUsage >= 0)
    {
-      log<telem_usage>({ramUsage, bootUsage, rootUsage, dataUsage});
+      log<telem_usage>({ramUsage, bootUsage, rootUsage, dataUsage}, logPrio::LOG_INFO);
    }
    else 
    {
