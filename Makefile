@@ -3,9 +3,11 @@ SELF_DIR := $(abspath $(dir $(lastword $(MAKEFILE_LIST))))
 
 apps_common = \
 	sshDigger \
-	systemMonitor \
-	xindiserver 
-       
+	sysMonitor \
+	xindiserver \
+	xt1121Ctrl \
+	xt1121DCDU
+
 apps_rtcicc = \
 	mzmqServer \
 	streamWriter \
@@ -30,15 +32,11 @@ apps_icc = \
 	picamCtrl \
 	smc100ccCtrl \
 	andorCtrl \
-        usbtempMon \
-        xt1121Ctrl \
-        xt1121DCDU
-
+        usbtempMon
 
 apps_aoc = \
 	trippLitePDU \
-	mzmqClient \
-        tcsInterface
+	mzmqClient
 
 apps_vm = \
 	magAOXMaths \
@@ -76,9 +74,9 @@ else
 endif
 
 utils_to_build = logdump \
-	         logstream \
+				 logstream \
                  cursesINDI \
-		 xrif2shmim
+				 xrif2shmim
 
 scripts_to_install = magaox
 
