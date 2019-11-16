@@ -4,15 +4,14 @@ SELF_DIR := $(abspath $(dir $(lastword $(MAKEFILE_LIST))))
 apps_common = \
 	sshDigger \
 	sysMonitor \
-	xindiserver \
-	xt1121Ctrl \
-	xt1121DCDU
+	xindiserver 
 
 apps_rtcicc = \
 	mzmqServer \
 	streamWriter \
 	alpaoCtrl \
-	dmMode
+	dmMode \
+        shmimIntegrator
 
 apps_rtc = \
 	ocam2KCtrl \
@@ -20,8 +19,7 @@ apps_rtc = \
 	ttmModulator \
 	bmcCtrl \
 	pi335Ctrl \
-	pupilFit \
-	shmimIntegrator
+	pupilFit 
 
 apps_icc = \
 	filterWheelCtrl \
@@ -32,11 +30,15 @@ apps_icc = \
 	picamCtrl \
 	smc100ccCtrl \
 	andorCtrl \
-        usbtempMon
+        usbtempMon \
+        xt1121Ctrl \
+        xt1121DCDU
+
 
 apps_aoc = \
 	trippLitePDU \
-	mzmqClient
+	mzmqClient \
+        tcsInterface
 
 apps_vm = \
 	magAOXMaths \
