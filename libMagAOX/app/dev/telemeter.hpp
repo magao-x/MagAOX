@@ -21,7 +21,7 @@ namespace dev
   * The `derivedT` class must be a MagAOXApp, and must implement the following interface:
   *
   * 1) `int checkRecordTimes()`
-  *  This function should be implement as follows:
+  *  This function MUST be implemented as follows:
    \code 
   int checkRecordTimes()
   {
@@ -38,10 +38,11 @@ namespace dev
      return m_tel<telem_type1>( { message entered here } );
   }
   \endcode
-  * for each of the telemetry types.  Do not use the pointer argument -- you should fill in the telemetry log message using internal values.
+  * for each of the telemetry types.  You MUST NOT use the pointer argument, it is for type resolution only -- you should fill in the telemetry log message using internal values. Note that 
+  * calls to this function should result in a telemetry log entry every time -- it is called when the minimum interval has elapsed since the last entry.
   * 
   * Additionally, calls to this classes setupConfig, `loadConfig`, `appStartup`, `appLogic`, and `appShutdown` should be placed
-  * in the corresponding function of `derivedT`.
+  * in the corresponding function of `derivedT`, with error checking.
   *
   * \ingroup appdev
   */
@@ -58,7 +59,7 @@ struct telemeter
    telemeter();
    
    /// Make a telemetry recording
-   /** Wrapper for logManager::log
+   /** Wrapper for logManager::log, which updates telT::lastRecord.
      *
      * \tparam logT the log entry type
      * \tparam retval the value returned by this method.
@@ -68,7 +69,7 @@ struct telemeter
    int telem( const typename telT::messageT & msg /**< [in] the data to log */);
 
    /// Make a telemetry recording, for an empty record
-   /** Wrapper for logManager::log
+   /** Wrapper for logManager::log, which updates telT::lastRecord.
      *
      * \tparam logT the log entry type
      * \tparam retval the value returned by this method.

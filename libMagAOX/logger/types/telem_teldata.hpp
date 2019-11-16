@@ -30,7 +30,7 @@ struct telem_teldata : public flatbuffer_log
    ///The default level
    static const flatlogs::logPrioT defaultLevel = flatlogs::logPrio::LOG_TELEM;
 
-   static timespec lastRecord; ///< The time of the last time this log wastelem_telpos             20000    telem_telpos recorded.  Used by the telemetry system.
+   static timespec lastRecord; ///< The time of the last time this log was recorded.  Used by the telemetry system.
 
    ///The type of the input message
    struct messageT : public fbMessage

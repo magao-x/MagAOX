@@ -31,7 +31,6 @@ INCLUDEDEPS= app/MagAOXApp.hpp \
              logger/logManager.hpp \
              logger/types/empty_log.hpp \
              logger/types/flatbuffer_log.hpp \
-             logger/types/fxngen_params.hpp \
              logger/types/git_state.hpp \
              logger/types/indidriver_start.hpp \
              logger/types/indidriver_stop.hpp \
@@ -49,6 +48,7 @@ INCLUDEDEPS= app/MagAOXApp.hpp \
 	     logger/types/saving_start.hpp \
 	     logger/types/saving_stop.hpp \
 	     logger/types/saving_stats.hpp \
+	     logger/types/telem_fxngen.hpp \
 	     logger/types/telem_stage.hpp \
 	     logger/types/telem_teldata.hpp \
 	     logger/types/telem_telpos.hpp \

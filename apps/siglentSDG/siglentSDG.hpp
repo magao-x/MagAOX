@@ -23,12 +23,15 @@ namespace app
   * \todo need telnet device, with optional username/password.
   * 
   */
-class siglentSDG : public MagAOXApp<>
+class siglentSDG : public MagAOXApp<>, public dev::telemeter<siglentSDG>
 {
 
+   friend class dev::telemeter<siglentSDG>;
+   
    constexpr static double cs_MaxAmp = 0.87;
    constexpr static double cs_MaxOfst = 10.0;
-   constexpr static double cs_MaxFreq = 3623.0;
+   constexpr static double cs_MaxVolts = 10.0;
+   constexpr static double cs_MaxFreq = 3622.0;
 
 protected:
 
@@ -64,8 +67,6 @@ protected:
    double m_C2ofst {0}; ///< The offset voltage of channel 2
    double m_C2phse {0}; ///< The phase of channel 2
    std::string m_C2wvtp; ///< The wave type of channel 2
-
-   int m_changeToLog {1}; ///< Flag telling the main loop that a log entry should be made
 
 private:
 
@@ -298,6 +299,9 @@ public:
                    const pcf::IndiProperty &ipRecv ///< [in] INDI property containing the requested new wavetype
                  );
 
+   /** \name INDI
+     * @{
+     */ 
 protected:
 
    //declare our properties
@@ -341,6 +345,22 @@ public:
    INDI_NEWCALLBACK_DECL(siglentSDG, m_indiP_C2ofst);
    INDI_NEWCALLBACK_DECL(siglentSDG, m_indiP_C2phse);
    INDI_NEWCALLBACK_DECL(siglentSDG, m_indiP_C2wvtp);
+   
+   ///@}
+   
+   
+   /** \name Telemeter Interface 
+     *
+     * @{
+     */
+   
+   int checkRecordTimes();
+   
+   int recordTelem( const telem_fxngen * );
+   
+   int recordParams(bool force = false);
+   
+   /// @}
 
 };
 
@@ -361,6 +381,8 @@ void siglentSDG::setupConfig()
 
    config.add("timeouts.write", "", "timeouts.write", argType::Required, "timeouts", "write", false, "int", "The timeout for writing to the device [msec]. Default = 1000");
    config.add("timeouts.read", "", "timeouts.read", argType::Required, "timeouts", "read", false, "int", "The timeout for reading the device [msec]. Default = 2000");
+   
+   dev::telemeter<siglentSDG>::setupConfig(config);
 }
 
 inline
@@ -371,6 +393,8 @@ void siglentSDG::loadConfig()
 
    config(m_writeTimeOut, "timeouts.write");
    config(m_readTimeOut, "timeouts.read");
+   
+   dev::telemeter<siglentSDG>::loadConfig(config);
 }
 
 inline
@@ -421,10 +445,6 @@ int siglentSDG::appStartup()
    m_indiP_C1llev.add (pcf::IndiElement("value"));
    m_indiP_C1llev["value"].set(0);
 
-   REG_INDI_NEWPROP_NOCB(m_indiP_C1phse, "C1phse", pcf::IndiProperty::Number);
-   m_indiP_C1phse.add (pcf::IndiElement("value"));
-   m_indiP_C1phse["value"].set(0);
-
    REG_INDI_NEWPROP(m_indiP_C2outp, "C2outp", pcf::IndiProperty::Text);
    m_indiP_C2outp.add (pcf::IndiElement("value"));
    m_indiP_C2outp["value"].set("");
@@ -465,10 +485,11 @@ int siglentSDG::appStartup()
    m_indiP_C2llev.add (pcf::IndiElement("value"));
    m_indiP_C2llev["value"].set(0);
 
-   REG_INDI_NEWPROP_NOCB(m_indiP_C2phse, "C2phse", pcf::IndiProperty::Number);
-   m_indiP_C2phse.add (pcf::IndiElement("value"));
-   m_indiP_C2phse["value"].set(0);
-
+   if(dev::telemeter<siglentSDG>::appStartup() < 0)
+   {
+      return log<software_error,-1>({__FILE__,__LINE__});
+   }
+   
    return 0;
 }
 
@@ -627,12 +648,7 @@ int siglentSDG::appLogic()
             state(stateCodes::READY);
          }
 
-         int start = m_changeToLog;
-         log<fxngen_params>({m_C1outp, m_C1frequency, m_C1vpp, m_C1ofst, m_C1phse, m_C1wvtp,
-                             m_C2outp, m_C2frequency, m_C2vpp, m_C2ofst, m_C2phse, m_C2wvtp});
-
-         m_changeToLog -= start;
-         if(m_changeToLog < 0) m_changeToLog = 0;
+         recordParams(true); 
 
       }
       else
@@ -734,19 +750,16 @@ int siglentSDG::appLogic()
          {
             state(stateCodes::READY);
          }
+         
+         recordParams(); //This will check if anything changed.
       }
 
-      if( m_changeToLog )
+      if(telemeter<siglentSDG>::appLogic() < 0)
       {
-         int start = m_changeToLog;
-         log<fxngen_params>({m_C1outp, m_C1frequency, m_C1vpp, m_C1ofst, m_C1phse, m_C1wvtp,
-                             m_C2outp, m_C2frequency, m_C2vpp, m_C2ofst, m_C2phse, m_C2wvtp});
-
-         m_changeToLog -= start;
-         if(m_changeToLog < 0) m_changeToLog = 0;
-
+         log<software_error>({__FILE__, __LINE__});
+         return 0;
       }
-
+      
       return 0;
 
    }
@@ -820,7 +833,8 @@ int siglentSDG::whilePowerOff()
 inline
 int siglentSDG::appShutdown()
 {
-   //don't bother
+   dev::telemeter<siglentSDG>::appShutdown();
+   
    return 0;
 }
 
@@ -1123,6 +1137,8 @@ int siglentSDG::queryBSWV( int channel)
          m_C1ofst = resp_ofst;
          m_C1phse = resp_phse;
 
+         recordParams();
+         
          updateIfChanged(m_indiP_C1wvtp, "value", resp_wvtp);
          updateIfChanged(m_indiP_C1freq, "value", resp_freq);
          updateIfChanged(m_indiP_C1peri, "value", resp_peri);
@@ -1140,7 +1156,8 @@ int siglentSDG::queryBSWV( int channel)
          m_C2vpp = resp_amp;
          m_C2ofst = resp_ofst;
          m_C2phse = resp_phse;
-
+         recordParams();
+         
          updateIfChanged(m_indiP_C2wvtp, "value", resp_wvtp);
          updateIfChanged(m_indiP_C2freq, "value", resp_freq);
          updateIfChanged(m_indiP_C2peri, "value", resp_peri);
@@ -1201,12 +1218,14 @@ int siglentSDG::queryOUTP( int channel )
       if(channel == 1)
       {
          m_C1outp = resp_output;
+         recordParams();
          updateIfChanged(m_indiP_C1outp, "value", ro);
       }
 
       else if(channel == 2)
       {
          m_C2outp = resp_output;
+         recordParams();
          updateIfChanged(m_indiP_C2outp, "value", ro);
       }
    }
@@ -1439,8 +1458,6 @@ int siglentSDG::changeOutp( int channel,
 
    int rv = writeCommand(command);
 
-   ++m_changeToLog;
-
    if(rv < 0)
    {
       if(m_powerState) log<software_error>({__FILE__, __LINE__});
@@ -1495,6 +1512,11 @@ int siglentSDG::changeFreq( int channel,
    {
       newFreq = cs_MaxFreq;
    }
+   
+   if(newFreq < 0)
+   {
+      newFreq = 0;
+   }
 
    std::string afterColon = "BSWV FRQ," + mx::ioutils::convertToString<double>(newFreq);
    std::string command = makeCommand(channel, afterColon);
@@ -1502,8 +1524,6 @@ int siglentSDG::changeFreq( int channel,
    log<text_log>("Ch. " + std::to_string(channel) + " FREQ to " + std::to_string(newFreq), logPrio::LOG_NOTICE);
 
    int rv = writeCommand(command);
-
-   ++m_changeToLog;
 
    if(rv < 0)
    {
@@ -1554,19 +1574,41 @@ int siglentSDG::changeAmp( int channel,
 {
    if(channel < 1 || channel > 2) return -1;
 
+   double offst = m_C1ofst;
+   if(channel == 2) offst = m_C2ofst;
+   
+   //Ensure we won't excede the 0-10V range
+   if(offst + 0.5*newAmp > 10) 
+   {
+      newAmp = 2.*(10.0 - offst);
+      log<text_log>("Ch. " + std::to_string(channel) + " AMP limited at 10 V by OFST to " + std::to_string(newAmp), logPrio::LOG_WARNING);
+   }
+   
+   if(offst - 0.5*newAmp < 0)
+   {
+      newAmp = 2*(offst);
+      log<text_log>("Ch. " + std::to_string(channel) + " AMP limited at 0 V by OFST to " + std::to_string(newAmp), logPrio::LOG_WARNING);
+   }
+   
+   //Ensure we don't exced safe ranges for device
    if(newAmp > cs_MaxAmp)
    {
       newAmp = cs_MaxAmp;
+      log<text_log>("Ch. " + std::to_string(channel) + " AMP max-limited to " + std::to_string(newAmp), logPrio::LOG_WARNING);
    }
 
+   if(newAmp < 0)
+   {
+      newAmp = 0;
+      log<text_log>("Ch. " + std::to_string(channel) + " AMP min-limited to " + std::to_string(newAmp), logPrio::LOG_WARNING);
+   }
+   
    std::string afterColon = "BSWV AMP," + mx::ioutils::convertToString<double>(newAmp);
    std::string command = makeCommand(channel, afterColon);
 
-   log<text_log>("Ch. " + std::to_string(channel) + " AMP to " + std::to_string(newAmp), logPrio::LOG_NOTICE);
+   log<text_log>("Ch. " + std::to_string(channel) + " AMP set to " + std::to_string(newAmp), logPrio::LOG_NOTICE);
 
    int rv = writeCommand(command);
-
-   ++m_changeToLog;
 
    if(rv < 0)
    {
@@ -1618,24 +1660,39 @@ int siglentSDG::changeOfst( int channel,
 {
    if(channel < 1 || channel > 2) return -1;
 
+   double amp = m_C1vpp; 
+   if(channel == 2) amp = m_C2vpp;
+   
+   if(newOfst + 0.5*amp > 10) 
+   {
+      newOfst = 10 - 0.5*amp;
+      log<text_log>("Ch. " + std::to_string(channel) + " OFST limited at 10 V by AMP to " + std::to_string(newOfst), logPrio::LOG_WARNING);
+   }
+   
+   if(newOfst - 0.5*amp < 0)
+   {
+      newOfst = 0.5*amp;
+      log<text_log>("Ch. " + std::to_string(channel) + " OFST limited at 0 V by AMP to " + std::to_string(newOfst), logPrio::LOG_WARNING);
+   }
+   
    if(newOfst > cs_MaxOfst)
    {
       newOfst = cs_MaxOfst;
+      log<text_log>("Ch. " + std::to_string(channel) + " OFST max-limited to " + std::to_string(newOfst), logPrio::LOG_WARNING);
    }
 
    if(newOfst < 0.0)
    {
       newOfst = 0.0;
+      log<text_log>("Ch. " + std::to_string(channel) + " OFST min-limited to " + std::to_string(newOfst), logPrio::LOG_WARNING);
    }
 
    std::string afterColon = "BSWV OFST," + mx::ioutils::convertToString<double>(newOfst);
    std::string command = makeCommand(channel, afterColon);
 
-   log<text_log>("Ch. " + std::to_string(channel) + " OFST to " + std::to_string(newOfst), logPrio::LOG_NOTICE);
+   log<text_log>("Ch. " + std::to_string(channel) + " OFST set to " + std::to_string(newOfst), logPrio::LOG_NOTICE);
 
    int rv = writeCommand(command);
-
-   ++m_changeToLog;
 
    if(rv < 0)
    {
@@ -1694,8 +1751,6 @@ int siglentSDG::changePhse( int channel,
 
    int rv = writeCommand(command);
 
-   ++m_changeToLog;
-
    if(rv < 0)
    {
       if(m_powerState) log<software_error>({__FILE__, __LINE__});
@@ -1752,8 +1807,6 @@ int siglentSDG::changeWvtp( int channel,
    log<text_log>("Ch. " + std::to_string(channel) + " WVTP to " + newWvtp, logPrio::LOG_NOTICE);
 
    int rv = writeCommand(command);
-
-   ++m_changeToLog;
 
    if(rv < 0)
    {
@@ -1906,6 +1959,75 @@ INDI_NEWCALLBACK_DEFN(siglentSDG, m_indiP_C2wvtp)(const pcf::IndiProperty &ipRec
    return -1;
 }
 
+inline
+int siglentSDG::checkRecordTimes()
+{
+   return telemeter<siglentSDG>::checkRecordTimes(telem_fxngen());
+}
+   
+inline
+int siglentSDG::recordTelem( const telem_fxngen * )
+{
+   return recordParams(true);
+}
+ 
+inline 
+int siglentSDG::recordParams(bool force)
+{
+   static double old_C1outp = m_C1outp; 
+   static double old_C1frequency = m_C1frequency; 
+   static double old_C1vpp = m_C1vpp; 
+   static double old_C1ofst = m_C1ofst; 
+   static double old_C1phse = m_C1phse; 
+   static std::string old_C1wvtp = m_C1wvtp;
+   static double old_C2outp = m_C2outp; 
+   static double old_C2frequency = m_C2frequency; 
+   static double old_C2vpp = m_C2vpp; 
+   static double old_C2ofst = m_C2ofst; 
+   static double old_C2phse = m_C2phse; 
+   static std::string old_C2wvtp = m_C2wvtp;
+                  
+   bool write = false;
+   
+   if(!force)
+   {
+      if( old_C1outp != m_C1outp ) write = true;
+      else if( old_C1frequency != m_C1frequency ) write = true;
+      else if( old_C1vpp != m_C1vpp ) write = true;
+      else if( old_C1ofst != m_C1ofst ) write = true;
+      else if( old_C1phse != m_C1phse ) write = true;
+      else if( old_C1wvtp != m_C1wvtp ) write = true;
+      else if( old_C2outp != m_C2outp ) write = true;
+      else if( old_C2frequency != m_C2frequency ) write = true;
+      else if( old_C2vpp != m_C2vpp ) write = true;
+      else if( old_C2ofst != m_C2ofst ) write = true;
+      else if( old_C2phse != m_C2phse ) write = true;
+      else if( old_C2wvtp != m_C2wvtp ) write = true;
+   }
+   
+   if(force || write)
+   {
+      telem<telem_fxngen>({m_C1outp, m_C1frequency, m_C1vpp, m_C1ofst, m_C1phse, m_C1wvtp,
+                             m_C2outp, m_C2frequency, m_C2vpp, m_C2ofst, m_C2phse, m_C2wvtp});
+      
+      old_C1outp = m_C1outp;
+      old_C1frequency = m_C1frequency;
+      old_C1vpp = m_C1vpp;
+      old_C1ofst = m_C1ofst;
+      old_C1phse = m_C1phse;
+      old_C1wvtp = m_C1wvtp;
+      
+      old_C2outp = m_C2outp;
+      old_C2frequency = m_C2frequency;
+      old_C2vpp = m_C2vpp;
+      old_C2ofst = m_C2ofst;
+      old_C2phse = m_C2phse;
+      old_C2wvtp = m_C2wvtp;
+   }
+   
+   return 0;
+}
+   
 } //namespace app
 } //namespace MagAOX
 

@@ -2,7 +2,7 @@ namespace MagAOX.logger;
 
 
 
-table Fxngen_params_fb
+table Telem_fxngen_fb
 {
    C1outp:uint8;
    C1freq:double;
@@ -19,5 +19,5 @@ table Fxngen_params_fb
    C2wvtp:uint8;
 }
 
-root_type Fxngen_params_fb;
+root_type Telem_fxngen_fb;
 

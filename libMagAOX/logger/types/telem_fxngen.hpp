@@ -1,5 +1,5 @@
-/** \file fxngen_params.hpp
-  * \brief The MagAO-X logger fxngen_params log type.
+/** \file telem_fxngen.hpp
+  * \brief The MagAO-X logger telem_fxngen log type.
   * \author Jared R. Males (jaredmales@gmail.com)
   *
   * \ingroup logger_types_files
@@ -7,10 +7,10 @@
   * History:
   * - 2018-09-06 created by JRM
   */
-#ifndef logger_types_fxngen_params_hpp
-#define logger_types_fxngen_params_hpp
+#ifndef logger_types_telem_fxngen_hpp
+#define logger_types_telem_fxngen_hpp
 
-#include "generated/fxngen_params_generated.h"
+#include "generated/telem_fxngen_generated.h"
 #include "flatbuffer_log.hpp"
 
 namespace MagAOX
@@ -22,15 +22,16 @@ namespace logger
 /// Log entry recording the function generator parameters
 /** \ingroup logger_types
   */
-struct fxngen_params : public flatbuffer_log
+struct telem_fxngen : public flatbuffer_log
 {
    ///The event code
-   static const flatlogs::eventCodeT eventCode = eventCodes::FXNGEN_PARAMS;
+   static const flatlogs::eventCodeT eventCode = eventCodes::TELEM_FXNGEN;
 
    ///The default level
-   static const flatlogs::logPrioT defaultLevel = flatlogs::logPrio::LOG_INFO;
+   static const flatlogs::logPrioT defaultLevel = flatlogs::logPrio::LOG_TELEM;
 
-
+   static timespec lastRecord; ///< The timestamp of the last time this log was recorded.  Used by the telemetry system.
+   
    ///The type of the input message
    struct messageT : public fbMessage
    {
@@ -59,7 +60,7 @@ struct fxngen_params : public flatbuffer_log
          else if(C2wvtp == "SINE") _C2wvtp = 1;
          
          
-         auto fp = CreateFxngen_params_fb(builder, C1outp, C1freq, C1vpp, C1ofst, C1phse, _C1wvtp, C2outp, C2freq, C2vpp, C2ofst, C2phse, _C2wvtp);
+         auto fp = CreateTelem_fxngen_fb(builder, C1outp, C1freq, C1vpp, C1ofst, C1phse, _C1wvtp, C2outp, C2freq, C2vpp, C2ofst, C2phse, _C2wvtp);
          builder.Finish(fp);
 
       }
@@ -73,7 +74,7 @@ struct fxngen_params : public flatbuffer_log
    {
       static_cast<void>(len);
 
-      auto fbs = GetFxngen_params_fb(msgBuffer);
+      auto fbs = GetTelem_fxngen_fb(msgBuffer);
 
       std::string msg = "Ch 1: ";
       
@@ -109,11 +110,12 @@ struct fxngen_params : public flatbuffer_log
    
    }
    
-}; //fxngen_params
+}; //telem_fxngen
 
+timespec telem_fxngen::lastRecord = {0,0};
 
 } //namespace logger
 } //namespace MagAOX
 
-#endif //logger_types_fxngen_params_hpp
+#endif //logger_types_telem_fxngen_hpp
 
