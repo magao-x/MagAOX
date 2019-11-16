@@ -1,9 +1,0 @@
-namespace MagAOX.logger;
-
-table ram_usage_fb
-{
-   ramUsage:float;
-}
-
-root_type ram_usage_fb;
-

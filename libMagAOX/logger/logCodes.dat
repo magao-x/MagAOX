@@ -8,9 +8,6 @@ config_log               60       config_log
 indidriver_start         140      empty_log
 indidriver_stop          141      empty_log
 
-core_mon                 826      core_mon
-drive_mon                827      drive_mon
-ram_usage                865      ram_usage
 
 loop_closed              1001     empty_log
 loop_paused              1002     empty_log
@@ -34,3 +31,11 @@ telem_stage              20050    telem_stage
 telem_zaber              20055    telem_zaber
 
 telem_temps              20250    telem_temps
+
+
+telem_coretemps          20825    telem_coretemps
+telem_coreloads          20826    telem_coreloads
+telem_drivetemps         20827    telem_drivetemps
+telem_usage              20828    telem_usage
+
+

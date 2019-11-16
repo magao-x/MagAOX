@@ -52,9 +52,12 @@ protected:
    pcf::IndiProperty m_indiP_drive_temps;   ///< Indi variable for reporting drive temperature(s)
    pcf::IndiProperty m_indiP_usage;   ///< Indi variable for reporting drive usage of all paths
 
-   std::vector<float> coreTemps;   ///< List of current core temperature(s)
+   std::vector<float> m_coreTemps;   ///< List of current core temperature(s)
    std::vector<float> coreLoads;   ///< List of current core load(s)
-   std::vector<float> diskTemp;   ///< List of current disk temperature(s)
+   
+   std::vector<std::string> m_diskNames; ///< vector of names of the hard disks
+   std::vector<float> m_diskTemps;        ///< vector of current disk temperature(s)
+   
    float rootUsage = 0;   ///< Disk usage in root path as a value out of 100
    float dataUsage = 0;   ///< Disk usage in /data path as a value out of 100
    float bootUsage = 0;   ///< Disk usage in /boot path as a value out of 100
@@ -154,7 +157,7 @@ public:
 
 
    /// Finds all drive temperatures
-   /** Makes system call and then parses result to add temperatures to vector of values
+   /** Makes 'hddtemp' system call and then parses result to add temperatures to vector of values
      * For hard drive temp utility:
      * `wget http://dl.fedoraproject.org/pub/epel/7/x86_64/Packages/h/hddtemp-0.3-0.31.beta15.el7.x86_64.rpm`
      * `su`
@@ -164,19 +167,20 @@ public:
      * \returns -1 on error with system command or output reading
      * \returns 0 on successful completion otherwise
      */
-   int findDiskTemperature(
-      std::vector<float>&   /**< [out] the vector of measured drive temperatures*/
-   );
+   int findDiskTemperature( std::vector<std::string> & hdd_names, ///< [out] the names of the drives reported by hddtemp 
+                            std::vector<float> & hdd_temps        ///< [out] the vector of measured drive temperatures
+                          );
 
 
    /// Parses string from system call to find drive temperatures
-   /** When a valid string is read in, the value from that string is stored
+   /** When a valid string is read in, the drive name and value from that string is stored
      * 
      * \returns -1 on invalid string being read in
      * \returns 0 on completion and storing of value
      */
-   int parseDiskTemperature( std::string,  /**< [in] the string to be parsed*/
-                             float&        /**< [out] the return value from the string*/
+   int parseDiskTemperature( std::string & driveName, ///< [out] the name of the drive
+                             float & temp,            ///< [out] the return value from the string
+                             const std::string & line ///< [in] the string to be parsed
                            );
 
 
@@ -248,6 +252,7 @@ public:
 
 inline sysMonitor::sysMonitor() : MagAOXApp(MAGAOX_CURRENT_SHA1, MAGAOX_REPO_MODIFIED)
 {
+   //m_loopPause = 100000; //Set default to 1 milli-second due to mpstat averaging time of 1 sec.
    return;
 }
 
@@ -274,6 +279,14 @@ int sysMonitor::appStartup()
    REG_INDI_NEWPROP_NOCB(m_indiP_drive_temps, "drive_temps", pcf::IndiProperty::Number);
    REG_INDI_NEWPROP_NOCB(m_indiP_usage, "resource_use", pcf::IndiProperty::Number);
    
+   findCPUTemperatures(m_coreTemps);
+   for (unsigned int i = 0; i < m_coreTemps.size(); i++) 
+   {
+      std::string coreStr = "core" + std::to_string(i);
+      m_indiP_core_temps.add (pcf::IndiElement(coreStr));
+      m_indiP_core_temps[coreStr].set<double>(0.0);
+   }
+   
    findCPULoads(coreLoads);
    for (unsigned int i = 0; i < coreLoads.size(); i++) 
    {
@@ -281,21 +294,12 @@ int sysMonitor::appStartup()
       m_indiP_core_loads.add (pcf::IndiElement(coreStr));
       m_indiP_core_loads[coreStr].set<double>(0.0);
    }
-
-   findCPUTemperatures(coreTemps);
-   for (unsigned int i = 0; i < coreTemps.size(); i++) 
+ 
+   findDiskTemperature(m_diskNames, m_diskTemps);
+   for (unsigned int i = 0; i < m_diskTemps.size(); i++) 
    {
-      std::string coreStr = "core" + std::to_string(i);
-      m_indiP_core_temps.add (pcf::IndiElement(coreStr));
-      m_indiP_core_temps[coreStr].set<double>(0.0);
-   }
-   
-   findDiskTemperature(diskTemp);
-   for (unsigned int i = 0; i < diskTemp.size(); i++) 
-   {
-      std::string driveStr = "drive" + std::to_string(i);
-      m_indiP_drive_temps.add (pcf::IndiElement(driveStr));
-      m_indiP_drive_temps[driveStr].set<double>(0.0);
+      m_indiP_drive_temps.add (pcf::IndiElement(m_diskNames[i]));
+      m_indiP_drive_temps[m_diskNames[i]].set<double>(m_diskTemps[i]);
    }
 
    m_indiP_usage.add(pcf::IndiElement("root_usage"));
@@ -313,103 +317,89 @@ int sysMonitor::appStartup()
 
 int sysMonitor::appLogic()
 {
-   coreTemps.clear();
-   int rvCPUTemp = findCPUTemperatures(coreTemps);
+   m_coreTemps.clear();
+   int rvCPUTemp = findCPUTemperatures(m_coreTemps);
    if (rvCPUTemp >= 0) 
    {
-      for (auto i: coreTemps)
+      rvCPUTemp = criticalCoreTemperature(m_coreTemps);
+   }
+   
+   if (rvCPUTemp >= 0)
+   {
+      if (rvCPUTemp == 1)
       {
-         std::cout << "Core temp: " << i << ' ';
-      }   
-      std::cout << std::endl;
-      rvCPUTemp = criticalCoreTemperature(coreTemps);
+         log<telem_coretemps>(m_coreTemps, logPrio::LOG_WARNING);
+      } 
+      else if (rvCPUTemp == 2) 
+      {
+         log<telem_coretemps>(m_coreTemps, logPrio::LOG_ALERT);
+      } 
+      else 
+      {
+         log<telem_coretemps>(m_coreTemps);
+      }
+   }
+   else 
+   {
+      log<software_error>({__FILE__, __LINE__,"Could not log values for CPU core temps."});
    }
    
    coreLoads.clear();
    int rvCPULoad = findCPULoads(coreLoads);
-   if (rvCPULoad >= 0) 
-   {
-      for (auto i: coreLoads)
-      {
-         std::cout << "CPU load: " << i << ' ';
-      }
-      std::cout << std::endl;
-   }
    
-   if (rvCPUTemp >= 0 && rvCPULoad >= 0)
+   if(rvCPULoad >= 0)
    {
-      if (rvCPUTemp == 1)
-      {
-         log<core_mon>({coreTemps, coreLoads}, logPrio::LOG_WARNING);
-      } 
-      else if (rvCPUTemp == 2) 
-      {
-         log<core_mon>({coreTemps, coreLoads}, logPrio::LOG_ALERT);
-      } 
-      else 
-      {
-         log<core_mon>({coreTemps, coreLoads}, logPrio::LOG_INFO);
-      }
+      log<telem_coreloads>(coreLoads);
    }
    else 
    {
-      log<software_error>({__FILE__, __LINE__,"Could not log values for CPU core temperatures and usages."});
+      log<software_error>({__FILE__, __LINE__,"Could not log values for CPU core loads."});
    }
 
-   diskTemp.clear();
-   int rvDiskTemp = findDiskTemperature(diskTemp);
+   m_diskNames.clear();
+   m_diskTemps.clear();
+   int rvDiskTemp = findDiskTemperature(m_diskNames, m_diskTemps);
+   
    if (rvDiskTemp >= 0)
    {
-      for (auto i: diskTemp)
-      {
-         std::cout << "Disk temp: " << i << ' ';
-      }
-      std::cout << std::endl;
-      rvDiskTemp = criticalDiskTemperature(diskTemp);
+      rvDiskTemp = criticalDiskTemperature(m_diskTemps);
    }  
 
-
-   int rvDiskUsage = findDiskUsage(rootUsage, dataUsage, bootUsage);
-
-   if (rvDiskUsage >= 0)
-   {
-      std::cout << "/ usage: " << rootUsage << std::endl;
-      std::cout << "/data usage: " << dataUsage << std::endl; 
-      std::cout << "/boot usage: " << bootUsage << std::endl;
-   }
-   
-   if (rvDiskTemp >= 0 && rvDiskUsage >= 0)
+   if (rvDiskTemp >= 0)
    {
       if (rvDiskTemp == 1) 
       {
-         log<drive_mon>({diskTemp, rootUsage, dataUsage, bootUsage}, logPrio::LOG_WARNING);
+         log<telem_drivetemps>({m_diskNames, m_diskTemps}, logPrio::LOG_WARNING);
       } 
       else if (rvDiskTemp == 2) 
       {
-         log<drive_mon>({diskTemp, rootUsage, dataUsage, bootUsage}, logPrio::LOG_ALERT);
+         log<telem_drivetemps>({m_diskNames, m_diskTemps}, logPrio::LOG_ALERT);
       } 
       else 
       {
-         log<drive_mon>({diskTemp, rootUsage, dataUsage, bootUsage}, logPrio::LOG_INFO);
+         log<telem_drivetemps>({m_diskNames, m_diskTemps});
       }
    }
    else 
    {
-      log<software_error>({__FILE__, __LINE__,"Could not log values for drive temperatures and usages."});
+      log<software_error>({__FILE__, __LINE__,"Could not log values for drive temps."});
    }
-   
 
+   int rvDiskUsage = findDiskUsage(rootUsage, dataUsage, bootUsage);
    int rvRamUsage = findRamUsage(ramUsage);
-   if (rvRamUsage >= 0)
+
+   
+   if (rvDiskUsage >= 0 && rvRamUsage >= 0)
    {
-      std::cout << "Ram usage: " << ramUsage << std::endl;
-      log<ram_usage>({ramUsage}, logPrio::LOG_INFO);
+      log<telem_usage>({ramUsage, bootUsage, rootUsage, dataUsage});
    }
    else 
    {
-      log<software_error>({__FILE__, __LINE__,"Could not log values for RAM usage."});
+      log<software_error>({__FILE__, __LINE__,"Could not log values for usage."});
    }
+   
 
+   
    updateVals();
 
    return 0;
@@ -423,7 +413,9 @@ int sysMonitor::appShutdown()
 int sysMonitor::findCPUTemperatures(std::vector<float>& temps) 
 {
    std::vector<std::string> commandList{"sensors"};
+   
    std::vector<std::string> commandOutput = runCommand(commandList);
+   
    int rv = -1;
    for (auto line: commandOutput) 
    {  
@@ -498,7 +490,7 @@ int sysMonitor::parseCPUTemperatures(std::string line, float& temps)
             log<software_error>({__FILE__, __LINE__,"Invalid read occured when parsing critical CPU temperatures."});
             return -1;
          }
-      }
+      }                           
       return 0;
    }
    else 
@@ -534,7 +526,7 @@ int sysMonitor::criticalCoreTemperature(std::vector<float>& v)
 
 int sysMonitor::findCPULoads(std::vector<float>& loads) 
 {
-   std::vector<std::string> commandList{"mpstat", "-P", "ALL"};
+   std::vector<std::string> commandList{"mpstat", "-P", "ALL", "1", "1"};
    std::vector<std::string> commandOutput = runCommand(commandList);
    int rv = -1;
    // If output lines are less than 5 (with one CPU, guarenteed output is 5)
@@ -581,36 +573,49 @@ int sysMonitor::parseCPULoads(std::string line, float& loadVal)
    return 0;
 }
 
-int sysMonitor::findDiskTemperature(std::vector<float>& hdd_temp) 
+int sysMonitor::findDiskTemperature( std::vector<std::string> & hdd_names,
+                                     std::vector<float>& hdd_temps
+                                   ) 
 {
    std::vector<std::string> commandList{"hddtemp"};
    std::vector<std::string> commandOutput = runCommand(commandList);
+   
    int rv = -1;
    for (auto line: commandOutput) 
    {  
+      std::string driveName;
       float tempVal;
-      if (parseDiskTemperature(line, tempVal) == 0)
+      if (parseDiskTemperature(driveName, tempVal, line) == 0)
       {
-         hdd_temp.push_back(tempVal);
+         hdd_names.push_back(driveName);
+         hdd_temps.push_back(tempVal);
          rv = 0;
       }
    }
    return rv;
 }
 
-int sysMonitor::parseDiskTemperature(std::string line, float& hdd_temp) 
+int sysMonitor::parseDiskTemperature( std::string & driveName,
+                                      float & hdd_temp,
+                                      const std::string & line
+                                    ) 
 {
    float tempValue;
-   if (line.length() <= 1) 
+   if (line.length() <= 6) 
    {
       return -1;
    }
+   
+   size_t sp = line.find(':',0);
+   driveName = line.substr(5, sp-5);
+
    std::istringstream iss(line);
    std::vector<std::string> tokens{std::istream_iterator<std::string>{iss},std::istream_iterator<std::string>{}};
 
    for(auto temp_s: tokens) 
    {
-      try {
+      try 
+      {
          if (isdigit(temp_s.at(0)) && temp_s.substr(temp_s.length() - 1, 1) == "C") 
          {
             temp_s.pop_back();
@@ -636,7 +641,8 @@ int sysMonitor::parseDiskTemperature(std::string line, float& hdd_temp)
             return 0;
          }
       }
-      catch (const std::out_of_range& e) {
+      catch (const std::out_of_range& e) 
+      {
          return -1;
       }
    }
@@ -790,16 +796,16 @@ int sysMonitor::parseRamUsage(std::string line, float& ramUsage)
 
 int sysMonitor::updateVals()
 {
-   MagAOXApp::updateIfChanged(m_indiP_core_loads, "core", coreLoads);
+   updateIfChanged(m_indiP_core_loads, "core", coreLoads);
 
-   MagAOXApp::updateIfChanged(m_indiP_core_temps, "core", coreTemps);
+   updateIfChanged(m_indiP_core_temps, "core", m_coreTemps);
 
-   MagAOXApp::updateIfChanged(m_indiP_drive_temps, "drive", diskTemp);
+   updateIfChanged(m_indiP_drive_temps, m_diskNames, m_diskTemps);
 
-   MagAOXApp::updateIfChanged(m_indiP_usage, "root_usage", rootUsage);
-   MagAOXApp::updateIfChanged(m_indiP_usage, "boot_usage", bootUsage);
-   MagAOXApp::updateIfChanged(m_indiP_usage, "data_usage", dataUsage);
-   MagAOXApp::updateIfChanged(m_indiP_usage, "ram_usage", ramUsage);
+   updateIfChanged(m_indiP_usage, "root_usage", rootUsage);
+   updateIfChanged(m_indiP_usage, "boot_usage", bootUsage);
+   updateIfChanged(m_indiP_usage, "data_usage", dataUsage);
+   updateIfChanged(m_indiP_usage, "ram_usage", ramUsage);
    
    return 0;
 }
@@ -808,7 +814,7 @@ std::vector<std::string> sysMonitor::runCommand( std::vector<std::string> comman
 {
    int link[2];
    pid_t pid;
-
+   
    std::vector<std::string> commandOutput;
 
    if (pipe(link)==-1) 
@@ -843,14 +849,21 @@ std::vector<std::string> sysMonitor::runCommand( std::vector<std::string> comman
          
       wait(NULL);
       close(link[1]);
-      if (read(link[0], commandOutput_c, sizeof(commandOutput_c)) < 0) 
+      
+      int rd;
+      if ( (rd = read(link[0], commandOutput_c, sizeof(commandOutput_c))) < 0) 
       {
          perror("Read error");
          return commandOutput;
       }
+      
       std::string line{};
+      
+      commandOutput_c[rd] = '\0';
       std::string commandOutputString(commandOutput_c);
+      
       std::istringstream iss(commandOutputString);
+      
       while (getline(iss, line)) 
       {
          commandOutput.push_back(line);
