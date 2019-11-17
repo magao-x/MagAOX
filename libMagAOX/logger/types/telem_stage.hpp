@@ -36,7 +36,7 @@ struct telem_stage : public flatbuffer_log
    struct messageT : public fbMessage
    {
       ///Construct from components
-      messageT( const bool & moving,           ///<[in] whether or not stage is in motion
+      messageT( const int8_t & moving,           ///<[in] whether or not stage is in motion
                 const double & preset,         ///<[in] current position of stage in preset units
                 const std::string & presetName ///<[in] current prest name
               )
@@ -61,8 +61,12 @@ struct telem_stage : public flatbuffer_log
 
       std::string msg = "[stage] ";
       
-      msg += "moving: ";
-      msg += std::to_string(fbs->moving()) + " ";
+      msg += "status: ";
+      if(fbs->moving() == -2) msg += " OFF ";
+      else if(fbs->moving() == -1) msg += " NOTHOMED ";
+      else if(fbs->moving() == 0) msg += " STOPPED ";
+      else if(fbs->moving() == 1) msg += " MOVING ";
+      else if(fbs->moving() == 2) msg += " HOMING ";
       
       msg += "preset: ";
       msg += std::to_string(fbs->preset()) + " ";
