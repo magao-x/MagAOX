@@ -600,7 +600,7 @@ int stdMotionStage<derivedT>::recordStage(bool force)
    
    if( m_moving != last_moving || m_preset != last_preset || presetName != last_presetName || force)
    {
-      derived().template telem<telem_stage>({m_moving, m_preset, m_presetNames[n]});
+      derived().template telem<telem_stage>({m_moving, m_preset, presetName});
       last_moving = m_moving;
       last_preset = m_preset;
       last_presetName = presetName;
