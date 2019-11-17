@@ -285,13 +285,26 @@ int zaberCtrl::appLogic()
    if(state() == stateCodes::NOTCONNECTED || state() == stateCodes::POWEROFF || state() == stateCodes::POWERON)
    {
       //Here do poweroff update
+      if( stdMotionStage<zaberCtrl>::onPowerOff() < 0)
+      {
+         log<software_error>({__FILE__,__LINE__});
+      }
+      
+      recordStage();
+      
+      //record telem if it's been longer than 10 sec:
+      if(telemeter<zaberCtrl>::appLogic() < 0)
+      {
+         log<software_error>({__FILE__, __LINE__});
+      }
+      
       return 0;
    }
    
 
    //Otherwise we don't do anything differently
    
-   static int last_moving = -1;
+   static int last_moving = -10;
    
    bool changed = false;
    if(last_moving != m_moving)
@@ -357,6 +370,7 @@ int zaberCtrl::startHoming()
    indiP_stageHome.setState(pcf::IndiProperty::Idle);
    indiP_stageHome.add(pcf::IndiElement(m_stageName));
    
+   m_moving = 2;
    if( sendNewProperty(indiP_stageHome, m_stageName, "1") < 0 ) return log<software_error,-1>({__FILE__,__LINE__});
    
    return 0;
@@ -401,7 +415,9 @@ int zaberCtrl::moveTo( const double & target)
    indiP_stageTgtPos.setState(pcf::IndiProperty::Idle);
    indiP_stageTgtPos.add(pcf::IndiElement(m_stageName));
    
+   m_moving = 1;
    dev::stdMotionStage<zaberCtrl>::recordStage(true);
+   
    if( sendNewProperty(indiP_stageTgtPos, m_stageName, m_tgtRawPos) < 0 ) return log<software_error,-1>({__FILE__,__LINE__});
    
    return 0;
@@ -509,22 +525,22 @@ INDI_SETCALLBACK_DEFN( zaberCtrl, m_indiP_stageState)(const pcf::IndiProperty &i
    if(sstr == "POWEROFF") 
    {
       state(stateCodes::POWEROFF);
-      m_moving = 0;
+      m_moving = -2;
    }
    else if(sstr == "POWERON") 
    {
       state(stateCodes::POWERON);
-      m_moving = 0;
+      m_moving = -1;
    }
    else if(sstr == "NOTHOMED") 
    {
       state(stateCodes::NOTHOMED);
-      m_moving = 0;
+      m_moving = -1;
    }
    else if(sstr == "HOMING") 
    {
       state(stateCodes::HOMING);
-      m_moving = 1;
+      m_moving = 2;
    }
    else if(sstr == "READY") 
    {
@@ -539,7 +555,7 @@ INDI_SETCALLBACK_DEFN( zaberCtrl, m_indiP_stageState)(const pcf::IndiProperty &i
    else if(sstr == "SHUTDOWN") 
    {
       state(stateCodes::NOTCONNECTED);
-      m_moving = 0;
+      m_moving = -2;
    }
 
    return 0;

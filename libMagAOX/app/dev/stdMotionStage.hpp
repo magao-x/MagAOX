@@ -72,7 +72,7 @@ protected:
    
    bool m_defaultPositions {true}; ///< Flag controlling whether the default preset positions (the vector index) are set in loadConfig.
    
-   int m_moving {0}; ///< Whether or not the stage is moving.
+   int m_moving {0}; ///< Whether or not the stage is moving.  -2 means powered off, -1 means not homed, 0 means not moving, 1 means moving, 2 means homing.  
    int m_movingState {0}; ///< Used to track the type of command.  If > 1 this is a command to move to a preset.  If 0 then it is a move to an arbitrary position.
    
    double m_preset {0}; ///< The current numerical preset position [1.0 is index 0 in the preset name vector]
@@ -240,6 +240,12 @@ public:
      */
    int updateINDI();
 
+    ///@}
+
+   /** \name Telemeter Interface 
+     * @{
+     */
+   
    int recordStage( bool force = false );
    
    ///@}
@@ -363,13 +369,20 @@ int stdMotionStage<derivedT>::appLogic()
 template<class derivedT>
 int stdMotionStage<derivedT>::onPowerOff()
 {
+   m_moving = -2;
+   m_preset = 0; 
+   m_preset_target = 0;
+   
    if( !derived().m_indiDriver ) return 0;
+   
    return 0;
 }
 
 template<class derivedT>
 int stdMotionStage<derivedT>::whilePowerOff()
 {
+   if( !derived().m_indiDriver ) return 0;
+   
    return 0;
 }
 
@@ -545,7 +558,7 @@ int stdMotionStage<derivedT>::updateINDI()
    }
    if(changed)
    {
-      if(m_moving)
+      if(m_moving > 0)
       {
          m_indiP_presetName.setState(INDI_BUSY);
       }
@@ -576,7 +589,7 @@ int stdMotionStage<derivedT>::updateINDI()
 template<class derivedT>
 int stdMotionStage<derivedT>::recordStage(bool force)
 {
-   static int last_moving = m_moving + 1; //guarantee first run
+   static int last_moving = m_moving + 1000; //guarantee first run
    static double last_preset;
    static std::string last_presetName;
    
