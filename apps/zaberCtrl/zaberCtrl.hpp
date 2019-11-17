@@ -282,7 +282,7 @@ int zaberCtrl::appLogic()
       state(stateCodes::NOTCONNECTED);
    }
    
-   if(state() == stateCodes::NOTCONNECTED || state() == stateCodes::POWEROFF || state() == stateCodes::POWERON)
+   if(state() == stateCodes::NOTCONNECTED || state() == stateCodes::POWEROFF) 
    {
       //Here do poweroff update
       if( stdMotionStage<zaberCtrl>::onPowerOff() < 0)
@@ -291,7 +291,7 @@ int zaberCtrl::appLogic()
       }
       
       recordStage();
-      
+
       //record telem if it's been longer than 10 sec:
       if(telemeter<zaberCtrl>::appLogic() < 0)
       {
@@ -301,7 +301,12 @@ int zaberCtrl::appLogic()
       return 0;
    }
    
-
+   if(state() == stateCodes::POWERON)
+   {
+      recordStage();
+      return 0;
+   }
+   
    //Otherwise we don't do anything differently
    
    static int last_moving = -10;
@@ -343,6 +348,9 @@ int zaberCtrl::appLogic()
       m_preset_target = n+1;
    }
 
+   recordStage();
+   recordZaber();
+   
    dev::stdMotionStage<zaberCtrl>::updateINDI();
    
    if(telemeter<zaberCtrl>::appLogic() < 0)
@@ -417,6 +425,7 @@ int zaberCtrl::moveTo( const double & target)
    
    m_moving = 1;
    dev::stdMotionStage<zaberCtrl>::recordStage(true);
+   recordZaber(true);
    
    if( sendNewProperty(indiP_stageTgtPos, m_stageName, m_tgtRawPos) < 0 ) return log<software_error,-1>({__FILE__,__LINE__});
    
