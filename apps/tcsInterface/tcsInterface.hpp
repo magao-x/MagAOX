@@ -186,6 +186,28 @@ public:
    
    INDI_SETCALLBACK_DECL(tcsInterface, m_indiP_loopState);
    
+   /** \name Elevation Rotation Tracking
+     * Setting the k-mirror and ADCs based on telescope elevation
+     * @{
+     */
+
+   float m_kmirrRotZeroPt {-40.0};
+   float m_kmirrRotFactor {0.5};
+   float m_kmirrRotSign {-1.0};
+   
+   bool m_rotThreadInit {true}; ///< Initialization flag for the offload thread.
+   
+   std::thread m_rotThread; ///< The offloading thread.
+
+   /// Offload thread starter function
+   static void rotThreadStart( tcsInterface * t /**< [in] pointer to this */);
+   
+   /// Offload thread function
+   /** Runs until m_shutdown is true.
+     */
+   void rotThreadExec();
+   
+   ///@}
    
    /** \name Woofer Offloading
      * Handling of offloads from the average woofer shape to the telescope
@@ -465,6 +487,18 @@ int tcsInterface::appStartup()
       return log<software_error,-1>({__FILE__,__LINE__});
    }
    
+   
+   
+   
+   if(threadStart( m_rotThread, m_rotThreadInit, 0, "rotation", this, rotThreadStart) < 0)
+   {
+      log<software_error>({__FILE__, __LINE__});
+      return -1;
+   }
+   
+   
+   
+   
    createStandardIndiRequestSw( m_indiP_offlTTdump, "offlTT_dump");
    if( registerIndiPropertyNew( m_indiP_offlTTdump, st_newCallBack_m_indiP_offlTTdump) < 0)
    {
@@ -675,6 +709,18 @@ int tcsInterface::appLogic()
 inline
 int tcsInterface::appShutdown()
 {
+   //Wait for rotation thread to exit on m_shutdown.
+   if(m_rotThread.joinable())
+   {
+      try
+      {
+         m_rotThread.join(); //this will throw if it was already joined
+      }
+      catch(...)
+      {
+      }
+   }
+   
    //Wait for offload thread to exit on m_shutdown.
    if(m_offloadThread.joinable())
    {
@@ -1374,6 +1420,33 @@ int tcsInterface::recordTelData(bool force)
    
    return 0;
 }
+
+void tcsInterface::rotThreadStart( tcsInterface * t )
+{
+   t->rotThreadExec();
+}
+
+void tcsInterface::rotThreadExec( )
+{
+   while( m_rotThreadInit == true && shutdown() == 0)
+   {
+      sleep(1);
+   }
+   
+   while(shutdown() == 0)
+   {
+      float kpos = m_kmirrRotZeroPt + m_kmirrRotSign * m_kmirrRotFactor * (90.0-m_telEl);
+      
+      std::cerr << "New kpos: " << kpos << "\n";
+      
+      sleep(1);
+   }
+   
+   
+   
+   
+}
+
 
 void tcsInterface::offloadThreadStart( tcsInterface * t )
 {
