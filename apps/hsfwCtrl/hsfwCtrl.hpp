@@ -111,6 +111,19 @@ public:
    virtual int appShutdown();
 
 
+   /// This method is called when the change to poweroff is detected.
+   /**
+     * \returns 0 on success.
+     * \returns -1 on any error which means the app should exit.
+     */
+   virtual int onPowerOff();
+
+   /// This method is called while the power is off, once per FSM loop.
+   /**
+     * \returns 0 on success.
+     * \returns -1 on any error which means the app should exit.
+     */
+   virtual int whilePowerOff();
 
 
 protected:
@@ -157,6 +170,8 @@ protected:
    
    int recordTelem( const telem_stage * );
    
+   int recordStage( bool force = false );
+   
 };
 
 inline
@@ -173,7 +188,10 @@ inline
 void hsfwCtrl::setupConfig()
 {
    config.add("stage.serialNumber", "", "stage.serialNumber", argType::Required, "stage", "serialNumber", false, "string", "The device serial number.");
+   
    dev::stdMotionStage<hsfwCtrl>::setupConfig(config);
+   
+   dev::telemeter<hsfwCtrl>::setupConfig(config);
    
 }
 
@@ -186,6 +204,7 @@ void hsfwCtrl::loadConfig()
    
    dev::stdMotionStage<hsfwCtrl>::loadConfig(config);
 
+   dev::telemeter<hsfwCtrl>::loadConfig(config);
 }
 
 inline
@@ -203,7 +222,10 @@ int hsfwCtrl::appStartup()
       return log<software_critical,-1>({__FILE__,__LINE__});
    }
    
-   
+   if(dev::telemeter<hsfwCtrl>::appStartup() < 0)
+   {
+      return log<software_error,-1>({__FILE__,__LINE__});
+   }
    return 0;
 }
 
@@ -290,6 +312,7 @@ int hsfwCtrl::appLogic()
       }
      
       if(m_wheel) close_hsfw(m_wheel);
+      
       euidCalled();
       m_wheel = open_hsfw(cur_dev->vendor_id, cur_dev->product_id, cur_dev->serial_number);
       euidReal();
@@ -317,13 +340,6 @@ int hsfwCtrl::appLogic()
       return 0;
    }
    
-/*   printf("Report ID: %d\n", status.report_id);
-   printf("Position: %d\n", status.position);
-   printf("Moving: %d\n", status.is_moving);
-   printf("Homed: %d\n", status.is_homed);
-   printf("Homing: %d\n", status.is_homing);
-   printf("Error: %d\n\n", status.error_state);*/
-   
    if (status.error_state != 0) 
    {
       printf("Clearing Error\n");
@@ -335,6 +351,7 @@ int hsfwCtrl::appLogic()
    if(!status.is_homed && !status.is_homing)
    {
       state(stateCodes::NOTHOMED);
+      m_moving = -1;
       
       if(m_powerOnHome) 
       {
@@ -343,7 +360,7 @@ int hsfwCtrl::appLogic()
    }
    else if( status.is_homing)
    {
-      m_moving=1;
+      m_moving=2;
       state(stateCodes::HOMING);
    }
    else if (status.is_moving)
@@ -369,7 +386,19 @@ int hsfwCtrl::appLogic()
       m_preset_target = n+1;
    }
 
+   //record telem if there have been any changes
+   recordStage();
+   
+   
    dev::stdMotionStage<hsfwCtrl>::updateINDI();
+   
+   //record telem if it's been longer than 10 sec:
+   if(telemeter<hsfwCtrl>::appLogic() < 0)
+   {
+      log<software_error>({__FILE__, __LINE__});
+      return 0;
+   }
+   
    
    return 0;
 }
@@ -386,15 +415,50 @@ int hsfwCtrl::appShutdown()
    return 0;
 }
 
+inline
+int hsfwCtrl::onPowerOff()
+{
+   if( stdMotionStage<hsfwCtrl>::onPowerOff() < 0)
+   {
+      log<software_error>({__FILE__,__LINE__});
+   }
+   
+   recordStage();
+
+   return 0;
+}
+   
+
+inline
+int hsfwCtrl::whilePowerOff()
+{
+   if( stdMotionStage<hsfwCtrl>::whilePowerOff() < 0)
+   {
+      log<software_error>({__FILE__,__LINE__});
+   }
+   
+   //record telem if it's been longer than 10 sec:
+   if(telemeter<hsfwCtrl>::appLogic() < 0)
+   {
+      log<software_error>({__FILE__, __LINE__});
+   }
+   
+   return 0;
+}
+
+   
 int hsfwCtrl::startHoming()
 {
    updateSwitchIfChanged(m_indiP_home, "request", pcf::IndiElement::Off, INDI_IDLE);
+   
    
    if(home_hsfw(m_wheel)) 
    {
       log<software_error>({__FILE__,__LINE__, "libhswf error"});
       return -1;
    }
+   
+   m_moving = 2;
    
    return 0;
 }
@@ -415,8 +479,6 @@ int hsfwCtrl::stop()
 
 int hsfwCtrl::moveTo( const double & filters )
 {
-   std::cerr << "Got Filters: " << filters << "\n";
-   
    double ffilters = filters;
    if(ffilters< 0.5)
    {
@@ -426,13 +488,13 @@ int hsfwCtrl::moveTo( const double & filters )
          return log<software_error,-1>({__FILE__,__LINE__, "error getting modulo filter number"});
       }
    }
-   
-   std::cerr << "Got FFilters: " << ffilters << "\n";
-   
-   std::cerr << "Making it: " << (unsigned short) (ffilters + 0.5) << "\n";
+
+   m_moving = 1;   
+   recordStage();
    
    if( move_hsfw(m_wheel, (unsigned short) (ffilters + 0.5)) < 0)
    {
+      
       return log<software_error,-1>({__FILE__,__LINE__, "libhsfw error"});
    }
    
@@ -446,7 +508,12 @@ int hsfwCtrl::checkRecordTimes()
    
 int hsfwCtrl::recordTelem( const telem_stage * )
 {
-   return dev::stdMotionStage<hsfwCtrl>::recordStage(true);
+   return recordStage(true);
+}
+
+int hsfwCtrl::recordStage( bool force )
+{
+   return dev::stdMotionStage<hsfwCtrl>::recordStage(force);
 }
 
 } //namespace app
