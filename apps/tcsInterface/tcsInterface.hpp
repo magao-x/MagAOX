@@ -1435,9 +1435,11 @@ void tcsInterface::rotThreadExec( )
    
    while(shutdown() == 0)
    {
-      float kpos = m_kmirrRotZeroPt + m_kmirrRotSign * m_kmirrRotFactor * (90.0-m_telEl);
+      float kpos = m_kmirrRotZeroPt + m_kmirrRotSign * m_kmirrRotFactor * m_telZd;
       
       std::cerr << "New kpos: " << kpos << "\n";
+      
+      
       
       sleep(1);
    }
