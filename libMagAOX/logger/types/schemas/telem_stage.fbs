@@ -4,7 +4,7 @@ namespace MagAOX.logger;
 
 table Telem_stage_fb
 {
-   moving:uint8;
+   moving:int8;
    preset:float;
    presetName:string;
 }

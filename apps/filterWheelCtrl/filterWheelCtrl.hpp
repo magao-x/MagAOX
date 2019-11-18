@@ -124,7 +124,20 @@ public:
    virtual int appShutdown();
 
 
+   /// This method is called when the change to poweroff is detected.
+   /**
+     * \returns 0 on success.
+     * \returns -1 on any error which means the app should exit.
+     */
+   virtual int onPowerOff();
 
+   /// This method is called while the power is off, once per FSM loop.
+   /**
+     * \returns 0 on success.
+     * \returns -1 on any error which means the app should exit.
+     */
+   virtual int whilePowerOff();
+   
 protected:
 
    //declare our properties
@@ -220,6 +233,7 @@ protected:
    
    int recordTelem( const telem_stage * );
    
+   int recordStage( bool force = false );
    
    ///@}
 };
@@ -621,6 +635,36 @@ int filterWheelCtrl::appShutdown()
    return 0;
 }
 
+inline
+int filterWheelCtrl::onPowerOff()
+{
+   if( stdMotionStage<filterWheelCtrl>::onPowerOff() < 0)
+   {
+      log<software_error>({__FILE__,__LINE__});
+   }
+   
+   recordStage();
+   
+   return 0;
+}
+
+inline
+int filterWheelCtrl::whilePowerOff()
+{
+   if( stdMotionStage<filterWheelCtrl>::whilePowerOff() < 0)
+   {
+      log<software_error>({__FILE__,__LINE__});
+   }
+   
+   //record telem if it's been longer than 10 sec:
+   if(telemeter<filterWheelCtrl>::appLogic() < 0)
+   {
+      log<software_error>({__FILE__, __LINE__});
+   }
+   
+   return 0;
+}
+   
 INDI_NEWCALLBACK_DEFN(filterWheelCtrl, m_indiP_counts)(const pcf::IndiProperty &ipRecv)
 {
    if (ipRecv.getName() == m_indiP_counts.getName())
@@ -716,8 +760,12 @@ int filterWheelCtrl::getMoving()
       try{ speed = std::stol(resp.c_str());}
       catch(...){speed=0;}
 
-      if(fabs(speed) > 0.1*m_motorSpeed) m_moving = true;
-      else m_moving = false;
+      if(fabs(speed) > 0.1*m_motorSpeed) 
+      {
+         if(m_homingState) m_moving = 2;
+         else m_moving = 1;
+      }
+      else m_moving = 0;
 
       return 0;
    }
@@ -748,6 +796,9 @@ int filterWheelCtrl::getPos()
 int filterWheelCtrl::startHoming()
 {
    m_homingState = 1;
+   m_moving = 2;
+   recordStage();
+   
    updateSwitchIfChanged(m_indiP_home, "request", pcf::IndiElement::Off, INDI_IDLE);
    return home();
 }
@@ -830,6 +881,9 @@ int filterWheelCtrl::moveToRaw( const long & counts )
 
    std::string com;
    int rv;
+   
+   m_moving = 1;
+   recordStage();
 
    rv = tty::ttyWrite( "EN\r", m_fileDescrip, m_writeTimeOut);
    if(rv < 0) return log<software_error,-1>({__FILE__,__LINE__,rv, tty::ttyErrorString(rv)});
@@ -852,6 +906,9 @@ int filterWheelCtrl::moveToRawRelative( const long & counts_relative )
    std::string com;
    int rv;
 
+   m_moving = 1;
+   recordStage();
+   
    rv = tty::ttyWrite( "EN\r", m_fileDescrip, m_writeTimeOut);
    if(rv < 0) return log<software_error,-1>({__FILE__,__LINE__,rv, tty::ttyErrorString(rv)});
 
@@ -885,7 +942,12 @@ int filterWheelCtrl::checkRecordTimes()
    
 int filterWheelCtrl::recordTelem( const telem_stage * )
 {
-   return dev::stdMotionStage<filterWheelCtrl>::recordStage(true);
+   return recordStage(true);
+}
+
+int filterWheelCtrl::recordStage(bool force)
+{
+   return dev::stdMotionStage<filterWheelCtrl>::recordStage(force);
 }
 
 } //namespace app
