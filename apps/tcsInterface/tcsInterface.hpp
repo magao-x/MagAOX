@@ -675,6 +675,18 @@ int tcsInterface::appLogic()
 inline
 int tcsInterface::appShutdown()
 {
+   //Wait for offload thread to exit on m_shutdown.
+   if(m_offloadThread.joinable())
+   {
+      try
+      {
+         m_offloadThread.join(); //this will throw if it was already joined
+      }
+      catch(...)
+      {
+      }
+   }
+   
    return 0;
 }
 
