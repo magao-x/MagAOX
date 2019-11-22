@@ -60,11 +60,17 @@ function _cached_fetch() {
   fi
 }
 
+if [[ -e /vagrant/windows_host.txt ]]; then
+  VM_WINDOWS_HOST=1
+else
+  VM_WINDOWS_HOST=0
+fi
+
 function clone_or_update_and_cd() {
     orgname=$1
     reponame=$2
     parentdir=$3
-    if [[ $MAGAOX_ROLE == vm ]]; then
+    if [[ $MAGAOX_ROLE == vm && "$VM_WINDOWS_HOST" == 0 ]]; then
         link_if_necessary /vagrant/vm/$reponame $parentdir/$reponame
         parentdir=/vagrant/vm
     fi

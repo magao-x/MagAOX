@@ -41,7 +41,7 @@ mkdir -pv /opt/MagAOX/bin
 chown root:root /opt/MagAOX/bin
 chmod u+rwX,g+rX,o+rX /opt/MagAOX/bin
 
-if [[ "$MAGAOX_ROLE" == "vm" ]]; then
+if [[ "$MAGAOX_ROLE" == "vm" && "$VM_WINDOWS_HOST" == 0 ]]; then
   mkdir -pv /vagrant/vm/calib
   link_if_necessary /vagrant/vm/calib /opt/MagAOX/calib
 else
@@ -51,7 +51,7 @@ else
   setgid_all /opt/MagAOX/calib
 fi
 
-if [[ "$MAGAOX_ROLE" == "vm" ]]; then
+if [[ "$MAGAOX_ROLE" == "vm" && "$VM_WINDOWS_HOST" == 0 ]]; then
   mkdir -pv /vagrant/vm/config
   link_if_necessary /vagrant/vm/config /opt/MagAOX/config
 else
@@ -89,7 +89,7 @@ chown root:magaox-dev /opt/MagAOX/vendor
 chmod u=rwX,g=rwX,o=rX /opt/MagAOX/vendor
 setgid_all /opt/MagAOX/vendor
 
-if [[ "$MAGAOX_ROLE" == "vm" ]]; then
+if [[ "$MAGAOX_ROLE" == "vm" && "$VM_WINDOWS_HOST" == 0 ]]; then
   mkdir -pv /vagrant/vm/cache
   link_if_necessary /vagrant/vm/cache /opt/MagAOX/.cache
 else
