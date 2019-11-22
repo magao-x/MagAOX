@@ -22,8 +22,7 @@ function link_if_necessary() {
         exit 1
       fi
     elif [[ -e $thelinkname ]]; then
-      echo "$thelinkname exists, but is not a symlink and we want the destination to be $thedir. Aborting."
-      exit 1
+      echo "$thelinkname exists, but is not a symlink and we want the destination to be $thedir."
     else
         ln -sv "$thedir" "$thelinkname"
     fi
