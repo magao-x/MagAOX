@@ -19,7 +19,7 @@
 /** \defgroup tcsInterface
   * \brief The MagAO-X application to do interface with the Clay TCS
   *
-  * <a href="../handbook/operating/software/apps/XXXXXX.html">Application Documentation</a>
+  * <a href="../handbook/operating/software/apps/tcsInterface.html">Application Documentation</a>
   *
   * \ingroup apps
   *
@@ -53,8 +53,8 @@ protected:
      *@{
      */
    
-   std::string m_deviceAddr {"localhost"}; ///< The device address
-   int m_devicePort {5811}; ///< The device port
+   std::string m_deviceAddr {"localhost"}; ///< The IP address or resolvable name of the TCS.
+   int m_devicePort {5811}; ///< The IP port for TCS communications. Should be the command port.  Default is 5811
    
    ///@}
 
@@ -321,6 +321,9 @@ tcsInterface::tcsInterface() : MagAOXApp(MAGAOX_CURRENT_SHA1, MAGAOX_REPO_MODIFI
 inline
 void tcsInterface::setupConfig()
 {
+   config.add("device.address", "", "device.address", argType::Required, "device", "address", false, "string", "The IP address or resolvable name of the TCS.");
+   config.add("device.port", "", "device.port", argType::Required, "device", "port", false, "int", "The IP port for TCS communications. Should be the command port.  Default is 5811.");
+   
    config.add("offload.TT_avgInt", "", "offload.TT_avgInt", argType::Required, "offload", "TT_avgInt", false, "float", "Woofer to Telescope T/T offload averaging interval [sec] ");
    config.add("offload.TT_gain", "", "offload.TT_gain", argType::Required, "offload", "TT_gain", false, "float", "Woofer to Telescope T/T offload gain");
    config.add("offload.TT_thresh", "", "offload.TT_thresh", argType::Required, "offload", "TT_thresh", false, "float", "Woofer to Telescope T/T offload threshold");
