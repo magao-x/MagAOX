@@ -19,7 +19,7 @@
 /** \defgroup tcsInterface
   * \brief The MagAO-X application to do interface with the Clay TCS
   *
-  * <a href="../handbook/apps/XXXXXX.html">Application Documentation</a>
+  * <a href="../handbook/operating/software/apps/XXXXXX.html">Application Documentation</a>
   *
   * \ingroup apps
   *
