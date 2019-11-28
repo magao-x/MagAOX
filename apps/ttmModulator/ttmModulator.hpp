@@ -138,6 +138,10 @@ public:
                double newFreq ///< The new frequency for modulation [Hz]
              );
 
+   int offset12( double d1,
+                 double d2
+               );
+   
    int offsetXY( double dx,
                  double dy
                );
@@ -150,6 +154,7 @@ protected:
    pcf::IndiProperty m_indiP_modRadius;
    pcf::IndiProperty m_indiP_modFrequency;
 
+   pcf::IndiProperty m_indiP_offset12;
    pcf::IndiProperty m_indiP_offset;
    
    
@@ -171,6 +176,7 @@ public:
    INDI_NEWCALLBACK_DECL(ttmModulator, m_indiP_modState);
    INDI_NEWCALLBACK_DECL(ttmModulator, m_indiP_modRadius);
    INDI_NEWCALLBACK_DECL(ttmModulator, m_indiP_modFrequency);
+   INDI_NEWCALLBACK_DECL(ttmModulator, m_indiP_offset12);
    INDI_NEWCALLBACK_DECL(ttmModulator, m_indiP_offset);
    
    INDI_SETCALLBACK_DECL(ttmModulator, m_indiP_C1outp);
@@ -263,6 +269,10 @@ int ttmModulator::appStartup()
    m_indiP_modRadius["current"].set(m_modRad);
    m_indiP_modRadius["requested"].set(m_modRadRequested);
   
+   REG_INDI_NEWPROP(m_indiP_offset12, "offset12", pcf::IndiProperty::Number);
+   m_indiP_offset12.add (pcf::IndiElement("dC1"));
+   m_indiP_offset12.add (pcf::IndiElement("dC2"));
+   
    REG_INDI_NEWPROP(m_indiP_offset, "offset", pcf::IndiProperty::Number);
    m_indiP_offset.add (pcf::IndiElement("x"));
    m_indiP_offset.add (pcf::IndiElement("y"));
@@ -889,6 +899,19 @@ int ttmModulator::modTTM( double newRad,
 }
 
 inline
+int ttmModulator::offset12( double d1,
+                            double d2
+                          )
+{
+   
+   if( sendNewProperty(m_indiP_C1ofst, "value", m_C1ofst + d1) < 0 ) return log<software_error,-1>({__FILE__,__LINE__});
+   if( sendNewProperty(m_indiP_C2ofst, "value", m_C2ofst + d2) < 0 ) return log<software_error,-1>({__FILE__,__LINE__});
+   
+   return 0;
+   
+}
+
+inline
 int ttmModulator::offsetXY( double dx,
                             double dy
                           )
@@ -967,6 +990,32 @@ INDI_NEWCALLBACK_DEFN(ttmModulator, m_indiP_modRadius)(const pcf::IndiProperty &
       if(nr > 0) m_modRadRequested = nr;
 
       return 0;
+   }
+   return -1;
+}
+
+INDI_NEWCALLBACK_DEFN(ttmModulator, m_indiP_offset12)(const pcf::IndiProperty &ipRecv)
+{
+   if (ipRecv.getName() == m_indiP_offset12.getName())
+   {
+
+      double dx = 0;
+      if(ipRecv.find("dC1"))
+      {
+         dx = ipRecv["dC1"].get<double>();
+      }
+      std::cerr << "dC1: " << dx << "\n";
+      
+      double dy = 0;
+      if(ipRecv.find("dC2"))
+      {
+         dy = ipRecv["dC2"].get<double>();
+      }
+
+      std::cerr << "dC2: " << dy << "\n\n";
+
+      
+      return offset12(dx, dy);
    }
    return -1;
 }

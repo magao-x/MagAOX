@@ -167,6 +167,9 @@ public:
    
    int updateINDI();
    
+   /** \name Telemeter Interface
+     * @{
+     */ 
    int checkRecordTimes();
    
    int recordTelem( const telem_telpos * );
@@ -176,7 +179,137 @@ public:
    int recordTelPos(bool force = false);
    
    int recordTelData(bool force = false);
+   ///@}
    
+   int m_loopState = 0;
+   pcf::IndiProperty m_indiP_loopState; ///< Property used to report the loop state
+   
+   INDI_SETCALLBACK_DECL(tcsInterface, m_indiP_loopState);
+   
+   /** \name Elevation Rotation Tracking
+     * Setting the k-mirror and ADCs based on telescope elevation
+     * @{
+     */
+
+   float m_kmirrRotZeroPt {-40.0};
+   float m_kmirrRotFactor {0.5};
+   float m_kmirrRotSign {-1.0};
+   
+   bool m_rotThreadInit {true}; ///< Initialization flag for the offload thread.
+   
+   std::thread m_rotThread; ///< The offloading thread.
+
+   /// Offload thread starter function
+   static void rotThreadStart( tcsInterface * t /**< [in] pointer to this */);
+   
+   /// Offload thread function
+   /** Runs until m_shutdown is true.
+     */
+   void rotThreadExec();
+   
+   ///@}
+   
+   /** \name Woofer Offloading
+     * Handling of offloads from the average woofer shape to the telescope
+     * @{
+     */
+   
+   bool m_offloadThreadInit {true}; ///< Initialization flag for the offload thread.
+   
+   std::thread m_offloadThread; ///< The offloading thread.
+
+   /// Offload thread starter function
+   static void offloadThreadStart( tcsInterface * t /**< [in] pointer to this */);
+   
+   /// Offload thread function
+   /** Runs until m_shutdown is true.
+     */
+   void offloadThreadExec();
+   
+   int doTToffload( float TT_0,
+                    float TT_1
+                  );
+   
+   int sendTToffload( float TT_0,
+                    float TT_1
+                  );
+   
+   int doFoffload( float F_0 );
+   
+   int sendFoffload( float F_0 );
+   
+   
+   pcf::IndiProperty m_indiP_offloadCoeffs; ///< Property used to report the latest woofer modal coefficients for offloading
+   
+   INDI_SETCALLBACK_DECL(tcsInterface, m_indiP_offloadCoeffs);
+   
+   std::vector<std::vector<float>> m_offloadRequests;
+   size_t m_firstRequest {0};
+   size_t m_lastRequest {std::numeric_limits<size_t>::max()};
+   size_t m_nRequests {0};
+   size_t m_last_nRequests {0};
+   
+   //The TT control matrix
+   float m_offlTT_C_00 {1};
+   float m_offlTT_C_01 {0};
+   float m_offlTT_C_10 {1};
+   float m_offlTT_C_11 {0};
+   
+   bool m_offlTT_enabled {false};
+   bool m_offlTT_dump {false};
+   float m_offlTT_avgInt {1.0};
+   float m_offlTT_gain {0.1};
+   float m_offlTT_thresh {0.1};
+   
+   pcf::IndiProperty m_indiP_offlTTenable;
+   INDI_NEWCALLBACK_DECL(tcsInterface, m_indiP_offlTTenable);
+   
+   pcf::IndiProperty m_indiP_offlTTdump;
+   INDI_NEWCALLBACK_DECL(tcsInterface, m_indiP_offlTTdump);
+   
+   pcf::IndiProperty m_indiP_offlTTavgInt;
+   INDI_NEWCALLBACK_DECL(tcsInterface, m_indiP_offlTTavgInt);
+   
+   pcf::IndiProperty m_indiP_offlTTgain;
+   INDI_NEWCALLBACK_DECL(tcsInterface, m_indiP_offlTTgain);
+   
+   pcf::IndiProperty m_indiP_offlTTthresh;
+   INDI_NEWCALLBACK_DECL(tcsInterface, m_indiP_offlTTthresh);
+   
+   //The Focus control constant
+   float m_offlCFocus_00 {1};
+   
+   bool m_offlF_enabled {false};
+   bool m_offlF_dump {false};
+   float m_offlF_avgInt {1.0};
+   float m_offlF_gain {0.1};
+   float m_offlF_thresh {0.1};
+   
+   pcf::IndiProperty m_indiP_offlFenable;
+   INDI_NEWCALLBACK_DECL(tcsInterface, m_indiP_offlFenable);
+   
+   pcf::IndiProperty m_indiP_offlFdump;
+   INDI_NEWCALLBACK_DECL(tcsInterface, m_indiP_offlFdump);
+   
+   pcf::IndiProperty m_indiP_offlFavgInt;
+   INDI_NEWCALLBACK_DECL(tcsInterface, m_indiP_offlFavgInt);
+   
+   pcf::IndiProperty m_indiP_offlFgain;
+   INDI_NEWCALLBACK_DECL(tcsInterface, m_indiP_offlFgain);
+   
+   pcf::IndiProperty m_indiP_offlFthresh;
+   INDI_NEWCALLBACK_DECL(tcsInterface, m_indiP_offlFthresh);
+   
+   
+   
+   
+   
+   float m_offlCComa_00 {1};
+   float m_offlCComa_01 {0};
+   float m_offlCComa_10 {1};
+   float m_offlCComa_11 {0};
+   
+   ///@}
 };
 
 inline
@@ -188,6 +321,28 @@ tcsInterface::tcsInterface() : MagAOXApp(MAGAOX_CURRENT_SHA1, MAGAOX_REPO_MODIFI
 inline
 void tcsInterface::setupConfig()
 {
+   config.add("offload.TT_avgInt", "", "offload.TT_avgInt", argType::Required, "offload", "TT_avgInt", false, "float", "Woofer to Telescope T/T offload averaging interval [sec] ");
+   config.add("offload.TT_gain", "", "offload.TT_gain", argType::Required, "offload", "TT_gain", false, "float", "Woofer to Telescope T/T offload gain");
+   config.add("offload.TT_thresh", "", "offload.TT_thresh", argType::Required, "offload", "TT_thresh", false, "float", "Woofer to Telescope T/T offload threshold");
+   
+   config.add("offload.TT_C_00", "", "offload.TT_C_00", argType::Required, "offload", "TT_C_00", false, "float", "Woofer to Telescope T/T offload control matrix [0,0] of a 2x2 matrix");
+   config.add("offload.TT_C_01", "", "offload.TT_C_01", argType::Required, "offload", "TT_C_01", false, "float", "Woofer to Telescope T/T offload control matrix [0,1] of a 2x2 matrix ");
+   config.add("offload.TT_C_10", "", "offload.TT_C_10", argType::Required, "offload", "TT_C_10", false, "float", "Woofer to Telescope T/T offload control matrix [1,0] of a 2x2 matrix ");
+   config.add("offload.TT_C_11", "", "offload.TT_C_11", argType::Required, "offload", "TT_C_11", false, "float", "Woofer to Telescope T/T offload control matrix [1,1] of a 2x2 matrix ");
+   
+   
+   config.add("offload.F_avgInt", "", "offload.F_avgInt", argType::Required, "offload", "F_avgInt", false, "float", "Woofer to Telescope Focus offload averaging interval [sec] ");
+   config.add("offload.F_gain", "", "offload.F_gain", argType::Required, "offload", "F_gain", false, "float", "Woofer to Telescope Focus offload gain");
+   config.add("offload.F_thresh", "", "offload.F_thresh", argType::Required, "offload", "F_thresh", false, "float", "Woofer to Telescope Focus offload threshold");
+   
+   config.add("offload.CFocus00", "", "offload.CFocus00", argType::Required, "offload", "CFocus00", false, "float", "Woofer to Telescope Focus offload control scale factor.");
+   
+   config.add("offload.CComa00", "", "offload.CComa00", argType::Required, "offload", "CComa00", false, "float", "Woofer to Telescope Coma offload control matrix [0,0] of a 2x2 matrix");
+   config.add("offload.CComa01", "", "offload.CComa01", argType::Required, "offload", "CComa01", false, "float", "Woofer to Telescope Coma offload control matrix [0,1] of a 2x2 matrix ");
+   config.add("offload.CComa10", "", "offload.CComa10", argType::Required, "offload", "CComa10", false, "float", "Woofer to Telescope Coma offload control matrix [1,0] of a 2x2 matrix ");
+   config.add("offload.CComa11", "", "offload.CComa11", argType::Required, "offload", "CComa11", false, "float", "Woofer to Telescope Coma offload control matrix [1,1] of a 2x2 matrix ");
+   
+   
    dev::ioDevice::setupConfig(config);
    dev::telemeter<tcsInterface>::setupConfig(config);
 }
@@ -195,7 +350,26 @@ void tcsInterface::setupConfig()
 inline
 int tcsInterface::loadConfigImpl( mx::app::appConfigurator & _config )
 {
-
+   _config(m_offlTT_avgInt, "offload.TT_avgInt");
+   _config(m_offlTT_gain, "offload.TT_gain");
+   _config(m_offlTT_thresh, "offload.TT_thresh");
+   
+   _config(m_offlTT_C_00, "offload.TT_C_00");
+   _config(m_offlTT_C_01, "offload.TT_C_01");
+   _config(m_offlTT_C_10, "offload.TT_C_10");
+   _config(m_offlTT_C_11, "offload.TT_C_11");
+   
+   _config(m_offlF_avgInt, "offload.F_avgInt");
+   _config(m_offlF_gain, "offload.F_gain");
+   _config(m_offlF_thresh, "offload.F_thresh");
+   
+   _config(m_offlCFocus_00, "offload.CFocus00");
+   
+   _config(m_offlCComa_00, "offload.CComa00");
+   _config(m_offlCComa_01, "offload.CComa01");
+   _config(m_offlCComa_10, "offload.CComa10");
+   _config(m_offlCComa_11, "offload.CComa11");
+   
    dev::ioDevice::loadConfig(_config);
    
    dev::telemeter<tcsInterface>::loadConfig(_config);
@@ -313,7 +487,121 @@ int tcsInterface::appStartup()
       return log<software_error,-1>({__FILE__,__LINE__});
    }
    
+   
+   
+   
+   if(threadStart( m_rotThread, m_rotThreadInit, 0, "rotation", this, rotThreadStart) < 0)
+   {
+      log<software_error>({__FILE__, __LINE__});
+      return -1;
+   }
+   
+   
+   
+   
+   createStandardIndiRequestSw( m_indiP_offlTTdump, "offlTT_dump");
+   if( registerIndiPropertyNew( m_indiP_offlTTdump, st_newCallBack_m_indiP_offlTTdump) < 0)
+   {
+      log<software_error>({__FILE__,__LINE__});
+      return -1;
+   }
+      
+   createStandardIndiToggleSw( m_indiP_offlTTenable, "offlTT_enable");
+   if( registerIndiPropertyNew( m_indiP_offlTTenable, st_newCallBack_m_indiP_offlTTenable) < 0)
+   {
+      log<software_error>({__FILE__,__LINE__});
+      return -1;
+   }
+   
+   createStandardIndiNumber( m_indiP_offlTTavgInt, "offlTT_avgInt", 0, 3600, 1, "%d");
+   m_indiP_offlTTavgInt["current"].set(m_offlTT_avgInt);
+   m_indiP_offlTTavgInt["target"].set(m_offlTT_avgInt);
+   if( registerIndiPropertyNew( m_indiP_offlTTavgInt, st_newCallBack_m_indiP_offlTTavgInt) < 0)
+   {
+      log<software_error>({__FILE__,__LINE__});
+      return -1;
+   }
+   
+   createStandardIndiNumber( m_indiP_offlTTgain, "offlTT_gain", 0.0, 1.0, 0.0, "%0.2f");
+   m_indiP_offlTTgain["current"].set(m_offlTT_gain);
+   m_indiP_offlTTgain["target"].set(m_offlTT_gain);
+   if( registerIndiPropertyNew( m_indiP_offlTTgain, st_newCallBack_m_indiP_offlTTgain) < 0)
+   {
+      log<software_error>({__FILE__,__LINE__});
+      return -1;
+   }
+   
+   createStandardIndiNumber( m_indiP_offlTTthresh, "offlTT_thresh", 0.0, 1.0, 0.0, "%0.2f");
+   m_indiP_offlTTthresh["current"].set(m_offlTT_thresh);
+   m_indiP_offlTTthresh["target"].set(m_offlTT_thresh);
+   if( registerIndiPropertyNew( m_indiP_offlTTthresh, st_newCallBack_m_indiP_offlTTthresh) < 0)
+   {
+      log<software_error>({__FILE__,__LINE__});
+      return -1;
+   }
+   
+   createStandardIndiRequestSw( m_indiP_offlFdump, "offlF_dump");
+   if( registerIndiPropertyNew( m_indiP_offlFdump, st_newCallBack_m_indiP_offlFdump) < 0)
+   {
+      log<software_error>({__FILE__,__LINE__});
+      return -1;
+   }
+      
+   createStandardIndiToggleSw( m_indiP_offlFenable, "offlF_enable");
+   if( registerIndiPropertyNew( m_indiP_offlFenable, st_newCallBack_m_indiP_offlFenable) < 0)
+   {
+      log<software_error>({__FILE__,__LINE__});
+      return -1;
+   }
+   
+   createStandardIndiNumber( m_indiP_offlFavgInt, "offlF_avgInt", 0, 3600, 1, "%d");
+   m_indiP_offlFavgInt["current"].set(m_offlF_avgInt);
+   m_indiP_offlFavgInt["target"].set(m_offlF_avgInt);
+   if( registerIndiPropertyNew( m_indiP_offlFavgInt, st_newCallBack_m_indiP_offlFavgInt) < 0)
+   {
+      log<software_error>({__FILE__,__LINE__});
+      return -1;
+   }
+   
+   createStandardIndiNumber( m_indiP_offlFgain, "offlF_gain", 0.0, 1.0, 0.0, "%0.2f");
+   m_indiP_offlFgain["current"].set(m_offlF_gain);
+   m_indiP_offlFgain["target"].set(m_offlF_gain);
+   if( registerIndiPropertyNew( m_indiP_offlFgain, st_newCallBack_m_indiP_offlFgain) < 0)
+   {
+      log<software_error>({__FILE__,__LINE__});
+      return -1;
+   }
+   
+   createStandardIndiNumber( m_indiP_offlFthresh, "offlF_thresh", 0.0, 1.0, 0.0, "%0.2f");
+   m_indiP_offlFthresh["current"].set(m_offlF_thresh);
+   m_indiP_offlFthresh["target"].set(m_offlF_thresh);
+   if( registerIndiPropertyNew( m_indiP_offlFthresh, st_newCallBack_m_indiP_offlFthresh) < 0)
+   {
+      log<software_error>({__FILE__,__LINE__});
+      return -1;
+   }
+   
+   //Get the loop state for managing offloading
+   REG_INDI_SETPROP(m_indiP_loopState, "aoloop", "loopState");
+   
+   
+   m_offloadRequests.resize(5);
+   for(size_t n=0; n < m_offloadRequests.size();++n) m_offloadRequests[n].resize(10,0);
+   
+   
+   if(threadStart( m_offloadThread, m_offloadThreadInit, 0, "offload", this, offloadThreadStart) < 0)
+   {
+      log<software_error>({__FILE__, __LINE__});
+      return -1;
+   }
+   
+   
+   //Register to receive the coeff updates from Kyle
+   REG_INDI_SETPROP(m_indiP_offloadCoeffs, "w2tcsOffloader", "zCoeffs");
+   
+   
    state(stateCodes::NOTCONNECTED);
+   
    
    return 0;
 }
@@ -421,6 +709,30 @@ int tcsInterface::appLogic()
 inline
 int tcsInterface::appShutdown()
 {
+   //Wait for rotation thread to exit on m_shutdown.
+   if(m_rotThread.joinable())
+   {
+      try
+      {
+         m_rotThread.join(); //this will throw if it was already joined
+      }
+      catch(...)
+      {
+      }
+   }
+   
+   //Wait for offload thread to exit on m_shutdown.
+   if(m_offloadThread.joinable())
+   {
+      try
+      {
+         m_offloadThread.join(); //this will throw if it was already joined
+      }
+      catch(...)
+      {
+      }
+   }
+   
    return 0;
 }
 
@@ -980,6 +1292,37 @@ int tcsInterface::updateINDI()
       return -1;
    }
    
+   try
+   {
+      if(m_offlTT_dump)
+      {
+         updateSwitchIfChanged(m_indiP_offlTTdump, "request", pcf::IndiElement::On, INDI_BUSY);
+      }
+      else
+      {
+         updateSwitchIfChanged(m_indiP_offlTTdump, "request", pcf::IndiElement::Off, INDI_IDLE);
+      }
+      
+      if(m_offlTT_enabled)
+      {
+         updateSwitchIfChanged(m_indiP_offlTTenable, "toggle", pcf::IndiElement::On, INDI_BUSY);
+      }
+      else
+      {
+         updateSwitchIfChanged(m_indiP_offlTTenable, "toggle", pcf::IndiElement::Off, INDI_IDLE);
+      }
+      
+      updateIfChanged(m_indiP_offlTTavgInt, "current", m_offlTT_avgInt);
+      updateIfChanged(m_indiP_offlTTgain, "current", m_offlTT_gain);
+      updateIfChanged(m_indiP_offlTTthresh, "current", m_offlTT_thresh);
+      
+   }
+   catch(...)
+   {
+      log<software_error>({__FILE__,__LINE__,"INDI library exception"});
+      return -1;
+   }
+   
    return 0;
 }
 
@@ -1022,7 +1365,6 @@ int tcsInterface::recordTelPos(bool force)
                 lastAM != m_telAM ||
                 lastRotOff != m_telRotOff )
    {
-      std::cerr << "telem_telpos\n";
       telem<telem_telpos>({m_telEpoch, m_telRA, m_telDec, m_telEl, m_telHA, m_telAM, m_telRotOff});
       
       lastEpoch = m_telEpoch;
@@ -1062,7 +1404,6 @@ int tcsInterface::recordTelData(bool force)
                 lastDomeAz != m_telDomeAz ||
                 lastDomeStat != m_telDomeStat )
    {
-      std::cerr << "telem_teldata\n";
       telem<telem_teldata>({m_telROI,m_telTracking,m_telGuiding,m_telSlewing,m_telGuiderMoving,m_telAz, m_telZd, m_telPA,m_telDomeAz,m_telDomeStat});
       
       lastROI = m_telROI;
@@ -1077,6 +1418,514 @@ int tcsInterface::recordTelData(bool force)
       lastDomeStat = m_telDomeStat;
    }
    
+   return 0;
+}
+
+void tcsInterface::rotThreadStart( tcsInterface * t )
+{
+   t->rotThreadExec();
+}
+
+void tcsInterface::rotThreadExec( )
+{
+   while( m_rotThreadInit == true && shutdown() == 0)
+   {
+      sleep(1);
+   }
+   
+   while(shutdown() == 0)
+   {
+      float kpos = m_kmirrRotZeroPt + m_kmirrRotSign * m_kmirrRotFactor * m_telZd;
+      
+      std::cerr << "New kpos: " << kpos << "\n";
+      
+      
+      
+      sleep(1);
+   }
+   
+   
+   
+   
+}
+
+
+void tcsInterface::offloadThreadStart( tcsInterface * t )
+{
+   t->offloadThreadExec();
+}
+
+void tcsInterface::offloadThreadExec( )
+{
+   static int last_loopState = -1;
+   
+   while( m_offloadThreadInit == true && shutdown() == 0)
+   {
+      sleep(1);
+   }
+   
+   
+   float avg_TT_0;
+   float avg_TT_1;
+   int sincelast_TT = 0;
+   
+   float avg_F_0;
+   int sincelast_F = 0;
+   
+   while(shutdown() == 0)
+   {
+      //Check if loop open
+      if(m_loopState == 0)
+      {
+         //If this is new, then reset the averaging buffer
+         if(m_loopState != last_loopState)
+         {
+            std::cerr << "resetting\n";
+            m_firstRequest = 0;
+            m_lastRequest = std::numeric_limits<size_t>::max();
+            m_nRequests = 0;
+            m_last_nRequests = 0;
+            
+         }         
+         sleep(1);
+         last_loopState = m_loopState;
+         continue;
+      }
+      
+      //Check if loop paused
+      if(m_loopState == 1)
+      {
+         sleep(1);
+         last_loopState = m_loopState;
+         continue;
+      }
+ 
+      //Ok loop closed
+      
+      if(m_firstRequest == m_lastRequest) continue; //this really should mutexed instead
+      
+      //If we got a new offload request, process it
+      if(m_last_nRequests != m_nRequests)
+      {
+         std::cerr << m_firstRequest << " " << m_lastRequest << " " << m_nRequests << std::endl;
+         
+         ///\todo offloading: These sections ought to be separate functions for clarity
+         /* --- TT --- */ 
+         avg_TT_0 = 0;
+         avg_TT_1 = 0;
+         
+         int navg = 0;
+ 
+         size_t i = m_lastRequest;
+         
+         for(size_t n=0; n < m_offlTT_avgInt; ++n)
+         {
+            avg_TT_0 += m_offloadRequests[0][i];
+            avg_TT_1 += m_offloadRequests[1][i];
+            ++navg;
+            
+            if(i== m_firstRequest) break;
+            
+            if(i == 0) i = m_offloadRequests[0].size()-1;
+            else --i;
+         }
+         
+         avg_TT_0 /= navg;
+         avg_TT_1 /= navg;
+   
+         ++sincelast_TT;
+         if(sincelast_TT > m_offlTT_avgInt)
+         {
+            doTToffload(avg_TT_0, avg_TT_1);
+            sincelast_TT = 0;
+         }
+         
+         
+         /* --- Focus --- */
+         avg_F_0 = 0;
+         
+         navg = 0;
+ 
+         i = m_lastRequest;
+         
+         for(size_t n=0; n < m_offlF_avgInt; ++n)
+         {
+            avg_F_0 += m_offloadRequests[2][i];
+            ++navg;
+            
+            if(i== m_firstRequest) break;
+            
+            if(i == 0) i = m_offloadRequests[0].size()-1;
+            else --i;
+         }
+         
+         avg_F_0 /= navg;
+   
+         ++sincelast_F;
+         if(sincelast_F > m_offlF_avgInt)
+         {
+            doFoffload(avg_F_0);
+            sincelast_F = 0;
+         }
+         
+         
+         
+         
+         
+         m_last_nRequests = m_nRequests;
+      }
+      last_loopState = m_loopState;
+
+      sleep(1);
+      
+
+   }
+   
+   return;
+}
+
+int tcsInterface::doTToffload( float tt_0,
+                               float tt_1
+                             )
+{
+   if(m_offlTT_dump)
+   {
+      std::cerr << "dumping: " << tt_0 << " " << tt_1 << "\n";
+      sendTToffload(tt_0, tt_1);
+      m_offlTT_dump = false;
+   }
+   else 
+   {
+      tt_0 *= m_offlTT_gain;
+      tt_1 *= m_offlTT_gain;
+      
+      std::cerr << tt_0 << " " << tt_1 << "\n";
+      
+      if(fabs(tt_0) < m_offlTT_thresh) tt_0 = 0;
+      if(fabs(tt_1) < m_offlTT_thresh) tt_1 = 0;
+
+            
+      if(tt_0 ==0 && tt_1 == 0)
+      {
+         std::cerr << "TT offload below threshold\n";
+      }
+      else if(m_offlTT_enabled)
+      {
+         std::cerr << "sendimg: " << tt_0 << " " << tt_1 << "\n";
+         sendTToffload(tt_0, tt_1);
+      }
+      else
+      {
+         log<text_log>("TT offload above threshold but TT offloading disabled", logPrio::LOG_WARNING);
+      }
+   }
+   return 0;
+   
+}
+
+int tcsInterface::sendTToffload( float tt_0,
+                                 float tt_1
+                               )
+{
+   pcf::IndiProperty ip(pcf::IndiProperty::Number);
+   ip.setDevice("modwfs");
+   ip.setName("offset12");
+   ip.add(pcf::IndiElement("dC1"));
+   ip.add(pcf::IndiElement("dC2"));
+   
+   
+   
+   sendNewProperty (ip); 
+   
+   
+   ip["dC1"] = tt_0;
+   ip["dC2"] = tt_1;
+   
+   sendNewProperty(ip);
+   
+   return 0;
+}
+
+int tcsInterface::doFoffload( float F_0 )
+{
+   if(m_offlF_dump)
+   {
+      std::cerr << "Focus dumping: " << F_0 << "\n";
+      sendFoffload(F_0);
+      m_offlF_dump = false;
+   }
+   else 
+   {
+      F_0 *= m_offlF_gain;
+            
+      if(fabs(F_0) < m_offlF_thresh) F_0 = 0;
+            
+      if(F_0 == 0)
+      {
+         std::cerr << "Focus offload below threshold\n";
+      }
+      else if(m_offlF_enabled)
+      {
+         std::cerr << "Focus sendimg: " << F_0 << "\n";
+         sendFoffload(F_0);
+      }
+      else
+      {
+         log<text_log>("Focus offload above threshold but Focus offloading disabled", logPrio::LOG_WARNING);
+      }
+   }
+   return 0;
+   
+}
+
+int tcsInterface::sendFoffload( float F_0 )
+{
+   static_cast<void>(F_0);
+   
+   log<text_log>("focus offloading not implemented!", logPrio::LOG_WARNING);
+   
+   return 0;
+}
+
+INDI_SETCALLBACK_DEFN(tcsInterface, m_indiP_loopState)(const pcf::IndiProperty &ipRecv)
+{
+   std::string state = ipRecv["state"].get();
+   
+   if(state == "open") m_loopState = 0;
+   else if(state == "paused") m_loopState = 1;
+   else m_loopState = 2;
+   
+   return 0;
+}
+
+INDI_SETCALLBACK_DEFN(tcsInterface, m_indiP_offloadCoeffs)(const pcf::IndiProperty &ipRecv)
+{
+   
+   if(m_loopState != 2) return 0;
+   
+   size_t nextReq = m_lastRequest + 1;
+   
+   if(nextReq >= m_offloadRequests[0].size()) nextReq = 0;
+     
+   std::cerr << "nextReq: " << nextReq << "\n";
+   
+
+   //Tip-Tilt
+   float tt0 = ipRecv["00"].get<float>();
+   float tt1 = ipRecv["01"].get<float>();
+   
+   m_offloadRequests[0][nextReq] = m_offlTT_C_00 * tt0 + m_offlTT_C_01 * tt1;
+   m_offloadRequests[1][nextReq] = m_offlTT_C_10 * tt0 + m_offlTT_C_11 * tt1;
+
+   //Focus
+   float f0 = ipRecv["02"].get<float>();
+   
+   m_offloadRequests[2][nextReq] = m_offlCFocus_00 * f0;
+   
+   
+   //Coma
+   float c0 = ipRecv["03"].get<float>();
+   float c1 = ipRecv["04"].get<float>();
+   
+   m_offloadRequests[3][nextReq] = m_offlCComa_00 * c0 + m_offlCComa_01 * c1;
+   m_offloadRequests[4][nextReq] = m_offlCComa_10 * c0 + m_offlCComa_11 * c1; 
+
+   //Now update circ buffer
+   m_lastRequest = nextReq;
+   ++m_nRequests;
+   if(m_nRequests > m_offloadRequests[0].size()) ++m_firstRequest;
+   if(m_firstRequest >= m_offloadRequests[0].size()) m_firstRequest = 0;
+   return 0;
+}
+
+INDI_NEWCALLBACK_DEFN(tcsInterface, m_indiP_offlTTenable)(const pcf::IndiProperty &ipRecv)
+{
+   if(ipRecv.getName() != m_indiP_offlTTenable.getName())
+   {
+      log<software_error>({__FILE__,__LINE__, "wrong INDI property received."});
+      return -1;
+   }
+   
+   if(!ipRecv.find("toggle")) return 0;
+   
+   if( ipRecv["toggle"].getSwitchState() == pcf::IndiElement::On && m_offlTT_enabled == false)
+   {
+      updateSwitchIfChanged(m_indiP_offlTTenable, "toggle", pcf::IndiElement::On, INDI_BUSY);
+    
+      m_offlTT_enabled = true;
+   }
+   else if( ipRecv["toggle"].getSwitchState() == pcf::IndiElement::Off && m_offlTT_enabled == true)
+   {
+      updateSwitchIfChanged(m_indiP_offlTTenable, "toggle", pcf::IndiElement::Off, INDI_IDLE);
+    
+      m_offlTT_enabled = false;
+   }
+   
+   return 0;  
+
+}
+
+INDI_NEWCALLBACK_DEFN(tcsInterface, m_indiP_offlTTdump)(const pcf::IndiProperty &ipRecv)
+{
+   if(ipRecv.getName() != m_indiP_offlTTdump.getName())
+   {
+      log<software_error>({__FILE__,__LINE__, "wrong INDI property received."});
+      return -1;
+   }
+   
+   if(!ipRecv.find("request")) return 0;
+   
+   if( ipRecv["request"].getSwitchState() == pcf::IndiElement::On)
+   {
+      updateSwitchIfChanged(m_indiP_offlTTdump, "request", pcf::IndiElement::On, INDI_BUSY);
+    
+      m_offlTT_dump = true;
+   }
+   
+   return 0;  
+
+}
+
+INDI_NEWCALLBACK_DEFN(tcsInterface, m_indiP_offlTTavgInt)(const pcf::IndiProperty &ipRecv)
+{
+   int target;
+   
+   if( indiTargetUpdate( m_indiP_offlTTavgInt, target, ipRecv, true) < 0)
+   {
+      log<software_error>({__FILE__,__LINE__});
+      return -1;
+   }
+   
+   m_offlTT_avgInt = target;
+      
+   return 0;
+}
+
+INDI_NEWCALLBACK_DEFN(tcsInterface, m_indiP_offlTTgain)(const pcf::IndiProperty &ipRecv)
+{
+   float target;
+   
+   if( indiTargetUpdate( m_indiP_offlTTgain, target, ipRecv, true) < 0)
+   {
+      log<software_error>({__FILE__,__LINE__});
+      return -1;
+   }
+   
+   m_offlTT_gain = target;
+      
+   return 0;
+}
+
+INDI_NEWCALLBACK_DEFN(tcsInterface, m_indiP_offlTTthresh)(const pcf::IndiProperty &ipRecv)
+{
+   float target;
+   
+   std::cerr << "Got offl thresh\n";
+   
+   if( indiTargetUpdate( m_indiP_offlTTthresh, target, ipRecv, true) < 0)
+   {
+      log<software_error>({__FILE__,__LINE__});
+      return -1;
+   }
+   
+   m_offlTT_thresh = target;
+      
+   return 0;
+}
+
+
+INDI_NEWCALLBACK_DEFN(tcsInterface, m_indiP_offlFenable)(const pcf::IndiProperty &ipRecv)
+{
+   if(ipRecv.getName() != m_indiP_offlFenable.getName())
+   {
+      log<software_error>({__FILE__,__LINE__, "wrong INDI property received."});
+      return -1;
+   }
+   
+   if(!ipRecv.find("toggle")) return 0;
+   
+   if( ipRecv["toggle"].getSwitchState() == pcf::IndiElement::On && m_offlF_enabled == false)
+   {
+      updateSwitchIfChanged(m_indiP_offlFenable, "toggle", pcf::IndiElement::On, INDI_BUSY);
+    
+      m_offlF_enabled = true;
+   }
+   else if( ipRecv["toggle"].getSwitchState() == pcf::IndiElement::Off && m_offlF_enabled == true)
+   {
+      updateSwitchIfChanged(m_indiP_offlFenable, "toggle", pcf::IndiElement::Off, INDI_IDLE);
+    
+      m_offlF_enabled = false;
+   }
+   
+   return 0;  
+
+}
+
+INDI_NEWCALLBACK_DEFN(tcsInterface, m_indiP_offlFdump)(const pcf::IndiProperty &ipRecv)
+{
+   if(ipRecv.getName() != m_indiP_offlFdump.getName())
+   {
+      log<software_error>({__FILE__,__LINE__, "wrong INDI property received."});
+      return -1;
+   }
+   
+   if(!ipRecv.find("request")) return 0;
+   
+   if( ipRecv["request"].getSwitchState() == pcf::IndiElement::On)
+   {
+      updateSwitchIfChanged(m_indiP_offlFdump, "request", pcf::IndiElement::On, INDI_BUSY);
+    
+      m_offlF_dump = true;
+   }
+   
+   return 0;  
+
+}
+
+INDI_NEWCALLBACK_DEFN(tcsInterface, m_indiP_offlFavgInt)(const pcf::IndiProperty &ipRecv)
+{
+   int target;
+   
+   if( indiTargetUpdate( m_indiP_offlFavgInt, target, ipRecv, true) < 0)
+   {
+      log<software_error>({__FILE__,__LINE__});
+      return -1;
+   }
+   
+   m_offlF_avgInt = target;
+      
+   return 0;
+}
+
+INDI_NEWCALLBACK_DEFN(tcsInterface, m_indiP_offlFgain)(const pcf::IndiProperty &ipRecv)
+{
+   float target;
+   
+   if( indiTargetUpdate( m_indiP_offlFgain, target, ipRecv, true) < 0)
+   {
+      log<software_error>({__FILE__,__LINE__});
+      return -1;
+   }
+   
+   m_offlF_gain = target;
+      
+   return 0;
+}
+
+INDI_NEWCALLBACK_DEFN(tcsInterface, m_indiP_offlFthresh)(const pcf::IndiProperty &ipRecv)
+{
+   float target;
+   
+   std::cerr << "Got offl thresh\n";
+   
+   if( indiTargetUpdate( m_indiP_offlFthresh, target, ipRecv, true) < 0)
+   {
+      log<software_error>({__FILE__,__LINE__});
+      return -1;
+   }
+   
+   m_offlF_thresh = target;
+      
    return 0;
 }
 

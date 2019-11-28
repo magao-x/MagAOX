@@ -868,7 +868,14 @@ protected:
                         const std::string & el, ///< [in] The element of the property to change
                         const T & newVal ///< [in] The value to request for the element.
                       );
-
+   /// Send a newProperty command to another device (using the INDI Client interface)
+   /** 
+     *
+     * \returns 0 on success.
+     * \returns -1 on an errory.
+     */
+   int sendNewProperty( const pcf::IndiProperty & ipSend /**< [in] The property to send a "new" INDI command for */);
+   
    ///indi Property to report the application state.
    pcf::IndiProperty m_indiP_state;
 
@@ -2758,6 +2765,27 @@ int MagAOXApp<_useINDI>::sendNewProperty( const pcf::IndiProperty & ipSend,
    }
 
    int rv = m_indiDriver->sendNewProperty(ipToSend);
+   if(rv < 0)
+   {
+      log<software_error>({__FILE__, __LINE__});
+      return -1;
+   }
+
+   return 0;
+}
+
+template<bool _useINDI>
+int MagAOXApp<_useINDI>::sendNewProperty( const pcf::IndiProperty & ipSend )
+{
+   if(!_useINDI) return 0;
+
+   if(!m_indiDriver)
+   {
+      log<software_error>({__FILE__, __LINE__, "INDI communications not initialized."});
+      return -1;
+   }
+   
+   int rv = m_indiDriver->sendNewProperty(ipSend);
    if(rv < 0)
    {
       log<software_error>({__FILE__, __LINE__});
