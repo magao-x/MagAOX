@@ -24,7 +24,7 @@ namespace app
 /** \defgroup acronameUsbHub Acroname USB Hub Controller
   * \brief Control of an Acroname USB 3.0 8-port hub
   *
-  * <a href="../handbook/apps/acronameUsbHub.html">Application Documentation</a>
+  * <a href="../handbook/operating/software/apps/acronameUsbHub.html">Application Documentation</a>
   *
   * \ingroup apps
   *

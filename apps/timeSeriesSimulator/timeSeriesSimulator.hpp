@@ -17,7 +17,7 @@
 /** \defgroup timeSeriesSimulator
   * \brief The XXXXXX application to do YYYYYYY
   *
-  * <a href="../handbook/apps/XXXXXX.html">Application Documentation</a>
+  * <a href="../handbook/operating/software/apps/XXXXXX.html">Application Documentation</a>
   *
   * \ingroup apps
   *

@@ -21,7 +21,7 @@
   * \todo update md doc
   * \todo the current_amps/target_amps thing is dumb.  Should consider mode00.target, mode00.current maybe.
   *
-  * <a href="../handbook/apps/dmMode.html">Application Documentation</a>
+  * <a href="../handbook/operating/software/apps/dmMode.html">Application Documentation</a>
   *
   * \ingroup apps
   *

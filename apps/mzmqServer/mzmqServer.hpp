@@ -30,7 +30,7 @@ namespace app
 /** \defgroup mzmqServer ImageStreamIO Stream Server
   * \brief Writes the contents of an ImageStreamIO image stream over a zeroMQ channel
   *
-  * <a href="../handbook/apps/mzmqServer.html">Application Documentation</a>
+  * <a href="../handbook/operating/software/apps/mzmqServer.html">Application Documentation</a>
   *
   * \ingroup apps
   *

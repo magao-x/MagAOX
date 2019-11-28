@@ -16,7 +16,7 @@
 /** \defgroup xt1121DCDU xt1121-based DC distribution unit
   * \brief Control of MagAO-X D.C. power distrubition via the xt1121 DIO module.
   *
-  * <a href="../handbook/apps/xt1121DCDU.html">Application Documentation</a>
+  * <a href="../handbook/operating/software/apps/xt1121DCDU.html">Application Documentation</a>
   *
   * \ingroup apps
   *

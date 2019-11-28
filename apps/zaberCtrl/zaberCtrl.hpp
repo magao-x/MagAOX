@@ -14,7 +14,7 @@
 /** \defgroup zaberCtrl
   * \brief The MagAO-X application to control a single Zaber stage
   *
-  * <a href="../handbook/apps/zaberCtrl.html">Application Documentation</a>
+  * <a href="../handbook/operating/software/apps/zaberCtrl.html">Application Documentation</a>
   *
   * \ingroup apps
   *
