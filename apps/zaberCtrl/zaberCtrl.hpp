@@ -472,15 +472,9 @@ INDI_NEWCALLBACK_DEFN( zaberCtrl, m_indiP_pos)(const pcf::IndiProperty &ipRecv)
       }*/
    }
    
-   if(state() != stateCodes::READY)
+   if(m_moving != 0)
    {
-      log<text_log>("abs move to " + std::to_string(target) + " rejected due to not READY");
-      return 0;
-   }
-   
-   if(state() != stateCodes::READY)
-   {
-      log<text_log>("abs move to " + std::to_string(target) + " rejected due to not READY");
+      log<text_log>("abs move to " + std::to_string(target) + " rejected due to already moving");
       return 0;
    }
    
@@ -523,9 +517,9 @@ INDI_NEWCALLBACK_DEFN( zaberCtrl, m_indiP_rawpos)(const pcf::IndiProperty &ipRec
       }
    }
       
-   if(state() != stateCodes::READY)
+   if(m_moving != 0)
    {
-      log<text_log>("rel move rejected due to not READY");
+      log<text_log>("rel move rejected due to already moving");
       return 0;
    }
    
