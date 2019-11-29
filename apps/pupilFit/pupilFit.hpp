@@ -59,8 +59,12 @@ protected:
    
    float m_threshold {0.5};
    
+   std::string m_wfsrefPath {"/opt/MagAOX/cacao/tweeter"};
+   std::string m_wfsrefName {"wfsref0.fits"};
+   
    ///@}
 
+   mx::improc::eigenImage<float> m_refIm;
    mx::improc::eigenImage<float> m_fitIm;
    mx::improc::eigenImage<float> m_edgeIm;
 
@@ -272,6 +276,11 @@ protected:
    pcf::IndiProperty m_indiP_quad3;
    pcf::IndiProperty m_indiP_quad4;
    
+   pcf::IndiProperty m_indiP_avg;
+   
+   pcf::IndiProperty m_indiP_reload;
+   INDI_NEWCALLBACK_DECL(pupilFit, m_indiP_reload);
+   
    ///@}
 };
 
@@ -305,22 +314,9 @@ void pupilFit::setupConfig()
    config.add("fit.threshold", "", "fit.threshold", argType::Required, "fit", "threshold", false, "float", "The pupil finding threshold. 0 < threshold < 1");
    config.add("fit.threshShmimName", "", "fit.threshShmimName", argType::Required, "fit", "threshShmimName", false, "float", "The name of the image stream for the thresholded images.  Default is camwfs_thresh.");
    config.add("fit.edgeShmimName", "", "fit.edgeShmimName", argType::Required, "fit", "edgeShmimName", false, "float", "The name of the image stream for the edge images.  Default is camwfs_edge.");
-   
-   config.add("setpoints.x1", "" , "setpoints.x1", argType::Required, "setpoints", "x1", false, "float", "The x-center of quadrant 1 (ll) set point");
-   config.add("setpoints.y1", "" , "setpoints.y1", argType::Required, "setpoints", "y1", false, "float", "The y-center of quadrant 1 (ll) set point");
-   config.add("setpoints.D1", "" , "setpoints.D1", argType::Required, "setpoints", "D1", false, "float", "The diameter of quadrant 1 (ll) set point");
-   
-   config.add("setpoints.x2", "" , "setpoints.x2", argType::Required, "setpoints", "x2", false, "float", "The x-center of quadrant 2 (ll) set point");
-   config.add("setpoints.y2", "" , "setpoints.y2", argType::Required, "setpoints", "y2", false, "float", "The y-center of quadrant 2 (ll) set point");
-   config.add("setpoints.D2", "" , "setpoints.D2", argType::Required, "setpoints", "D2", false, "float", "The diameter of quadrant 2 (ll) set point");
-   
-   config.add("setpoints.x3", "" , "setpoints.x3", argType::Required, "setpoints", "x3", false, "float", "The x-center of quadrant 3 (ll) set point");
-   config.add("setpoints.y3", "" , "setpoints.y3", argType::Required, "setpoints", "y3", false, "float", "The y-center of quadrant 3 (ll) set point");
-   config.add("setpoints.D3", "" , "setpoints.D3", argType::Required, "setpoints", "D3", false, "float", "The diameter of quadrant 3 (ll) set point");
-   
-   config.add("setpoints.x4", "" , "setpoints.x4", argType::Required, "setpoints", "x4", false, "float", "The x-center of quadrant 4 (ll) set point");
-   config.add("setpoints.y4", "" , "setpoints.y4", argType::Required, "setpoints", "y4", false, "float", "The y-center of quadrant 4 (ll) set point");
-   config.add("setpoints.D4", "" , "setpoints.D4", argType::Required, "setpoints", "D4", false, "float", "The diameter of quadrant 4 (ll) set point");
+      
+   config.add("wfsref.path", "" , "wfsref.path", argType::Required, "wfsref", "path", false, "float", "The path to the WFS reference image.  Default is /opt/MagAOX/cacao/tweeter");
+   config.add("wfsref.name", "" , "wfsref.name", argType::Required, "wfsref", "name", false, "float", "The name the WFS reference image. Default is wfsref0.fits");
 }
 
 
@@ -334,21 +330,8 @@ int pupilFit::loadConfigImpl( mx::app::appConfigurator & _config )
    _config(m_threshShmimName, "fit.threshShmimName");
    _config(m_edgeShmimName, "fit.edgeShmimName");
    
-   _config(m_setx1, "setpoints.x1");
-   _config(m_sety1, "setpoints.y1");
-   _config(m_setD1, "setpoints.D1");
-   
-   _config(m_setx2, "setpoints.x2");
-   _config(m_sety2, "setpoints.y2");
-   _config(m_setD2, "setpoints.D2");
-   
-   _config(m_setx3, "setpoints.x3");
-   _config(m_sety3, "setpoints.y3");
-   _config(m_setD3, "setpoints.D3");
-   
-   _config(m_setx4, "setpoints.x4");
-   _config(m_sety4, "setpoints.y4");
-   _config(m_setD4, "setpoints.D4");
+   _config(m_wfsrefPath, "wfsref.path");
+   _config(m_wfsrefName, "wfsref.name");
    
    return 0;
 }
@@ -382,8 +365,11 @@ int pupilFit::appStartup()
       
    createROIndiNumber( m_indiP_quad1, "quadrant1", "Quadrant 1");
    indi::addNumberElement<float>( m_indiP_quad1, "x", 0, 59, 0, "%0.2f", "center x");
+   indi::addNumberElement<float>( m_indiP_quad1, "dx", 0, 59, 0, "%0.2f", "delta-x");
    indi::addNumberElement<float>( m_indiP_quad1, "y", 0, 59, 0, "%0.2f", "center x");
+   indi::addNumberElement<float>( m_indiP_quad1, "dy", 0, 59, 0, "%0.2f", "delta-y");
    indi::addNumberElement<float>( m_indiP_quad1, "D", 0, 59, 0, "%0.2f", "diameter");
+   indi::addNumberElement<float>( m_indiP_quad1, "dD", 0, 59, 0, "%0.2f", "delta-D");
    indi::addNumberElement<float>( m_indiP_quad1, "med", 0, std::numeric_limits<uint16_t>::max(), 0, "%0.1f", "flux");
    indi::addNumberElement<float>( m_indiP_quad1, "set-x", 0, 59, 0, "%0.2f", "set pt. center x");
    m_indiP_quad1["set-x"] = m_setx1;
@@ -396,8 +382,11 @@ int pupilFit::appStartup()
    
    createROIndiNumber( m_indiP_quad2, "quadrant2", "Quadrant 2");
    indi::addNumberElement<float>( m_indiP_quad2, "x", 0, 59, 0, "%0.2f", "center x");
+   indi::addNumberElement<float>( m_indiP_quad2, "dx", 0, 59, 0, "%0.2f", "delta-x");
    indi::addNumberElement<float>( m_indiP_quad2, "y", 0, 59, 0, "%0.2f", "center y");
+   indi::addNumberElement<float>( m_indiP_quad2, "dy", 0, 59, 0, "%0.2f", "delta-y");
    indi::addNumberElement<float>( m_indiP_quad2, "D", 0, 59, 0, "%0.2f", "diameter");
+   indi::addNumberElement<float>( m_indiP_quad2, "dD", 0, 59, 0, "%0.2f", "delta-D");
    indi::addNumberElement<float>( m_indiP_quad2, "med", 0, std::numeric_limits<uint16_t>::max(), 0, "%0.1f", "flux");
    indi::addNumberElement<float>( m_indiP_quad2, "set-x", 0, 59, 0, "%0.2f", "set pt. center x");
    m_indiP_quad2["set-x"] = m_setx2;
@@ -409,8 +398,11 @@ int pupilFit::appStartup()
    
    createROIndiNumber( m_indiP_quad3, "quadrant3", "Quadrant 3");
    indi::addNumberElement<float>( m_indiP_quad3, "x", 0, 59, 0, "%0.2f", "center x");
+   indi::addNumberElement<float>( m_indiP_quad3, "dx", 0, 59, 0, "%0.2f", "delta-x");
    indi::addNumberElement<float>( m_indiP_quad3, "y", 0, 59, 0, "%0.2f", "center y");
+   indi::addNumberElement<float>( m_indiP_quad3, "dy", 0, 59, 0, "%0.2f", "delta-y");
    indi::addNumberElement<float>( m_indiP_quad3, "D", 0, 59, 0, "%0.2f", "diameter");
+   indi::addNumberElement<float>( m_indiP_quad3, "dD", 0, 59, 0, "%0.2f", "delta-D");
    indi::addNumberElement<float>( m_indiP_quad3, "med", 0, std::numeric_limits<uint16_t>::max(), 0, "%0.1f", "flux");
    indi::addNumberElement<float>( m_indiP_quad3, "set-x", 0, 59, 0, "%0.2f", "set pt. center x");
    m_indiP_quad3["set-x"] = m_setx3;
@@ -422,8 +414,11 @@ int pupilFit::appStartup()
    
    createROIndiNumber( m_indiP_quad4, "quadrant4", "Quadrant 4");
    indi::addNumberElement<float>( m_indiP_quad4, "x", 0, 59, 0, "%0.2f", "center x");
+   indi::addNumberElement<float>( m_indiP_quad4, "dx", 0, 59, 0, "%0.2f", "delta-x");
    indi::addNumberElement<float>( m_indiP_quad4, "y", 0, 59, 0, "%0.2f", "center y");
+   indi::addNumberElement<float>( m_indiP_quad4, "dy", 0, 59, 0, "%0.2f", "delta-y");
    indi::addNumberElement<float>( m_indiP_quad4, "D", 0, 59, 0, "%0.2f", "diameter");
+   indi::addNumberElement<float>( m_indiP_quad4, "dD", 0, 59, 0, "%0.2f", "delta-D");
    indi::addNumberElement<float>( m_indiP_quad4, "med", 0, std::numeric_limits<uint16_t>::max(), 0, "%0.1f", "flux");
    indi::addNumberElement<float>( m_indiP_quad4, "set-x", 0, 59, 0, "%0.2f", "set pt. center x");
    m_indiP_quad4["set-x"] = m_setx4;
@@ -433,6 +428,23 @@ int pupilFit::appStartup()
    m_indiP_quad4["set-D"] = m_setD4;
    registerIndiPropertyReadOnly(m_indiP_quad4);
 
+   createROIndiNumber( m_indiP_avg, "average", "Average");
+   indi::addNumberElement<float>( m_indiP_avg, "x", 0, 59, 0, "%0.2f", "center x");
+   indi::addNumberElement<float>( m_indiP_avg, "dx", 0, 59, 0, "%0.2f", "delta-x");
+   indi::addNumberElement<float>( m_indiP_avg, "y", 0, 59, 0, "%0.2f", "center y");
+   indi::addNumberElement<float>( m_indiP_avg, "dy", 0, 59, 0, "%0.2f", "delta-y");
+   indi::addNumberElement<float>( m_indiP_avg, "D", 0, 59, 0, "%0.2f", "diameter");
+   indi::addNumberElement<float>( m_indiP_avg, "dD", 0, 59, 0, "%0.2f", "delta-D");
+   registerIndiPropertyReadOnly(m_indiP_avg);
+   
+   createStandardIndiRequestSw( m_indiP_reload, "reload", "Reload Calibration");
+   m_indiP_reload["request"].set(pcf::IndiElement::Off);
+   if( registerIndiPropertyNew( m_indiP_reload, INDI_NEWCALLBACK(m_indiP_reload)) < 0)
+   {
+      log<software_error>({__FILE__,__LINE__});
+      return -1;
+   }
+   
    state(stateCodes::OPERATING);
    
    return 0;
@@ -472,6 +484,53 @@ int pupilFit::allocate(const dev::shmimT & dummy)
    m_edgeIm.resize(m_width, m_height);
    
    m_fitter.setSize(0.5*m_width, 0.5*m_height);
+   m_fitter.m_thresh = m_threshold;
+   
+   //Load and fit the reference image
+   std::string reffits = m_wfsrefPath + "/" + m_wfsrefName;
+   m_fitter.m_thresh = m_threshold;
+   mx::improc::fitsFile<float> ff;
+   mx::improc::eigenImage<float> refedge;
+   
+   ff.read(m_refIm, reffits);
+   
+   if(m_refIm.rows() == m_width && m_refIm.cols() == m_height)
+   {
+      if(m_fitter.fit(m_refIm, refedge) < 0)
+      {
+         log<software_error>({__FILE__, __LINE__, "error from fitter"});
+      }
+      else
+      {
+         m_setx1 = m_fitter.m_avgx[0];
+         m_sety1 = m_fitter.m_avgy[0];
+         m_setD1 = 2*m_fitter.m_avgr[0];
+         
+         m_setx2 = m_fitter.m_avgx[1];
+         m_sety2 = m_fitter.m_avgy[1];
+         m_setD2 = 2*m_fitter.m_avgr[1];
+         
+         m_setx3 = m_fitter.m_avgx[2];
+         m_sety3 = m_fitter.m_avgy[2];
+         m_setD3 = 2*m_fitter.m_avgr[2];
+         
+         m_setx4 = m_fitter.m_avgx[3];
+         m_sety4 = m_fitter.m_avgy[3];
+         m_setD4 = 2*m_fitter.m_avgr[3];
+         
+         log<text_log>("Read reference image: " + reffits);
+         log<text_log>("Quad 1 set points: " + std::to_string(m_setx1) + " " +  std::to_string(m_sety1) + " " + std::to_string(m_setD1));
+         log<text_log>("Quad 2 set points: " + std::to_string(m_setx2) + " " +  std::to_string(m_sety2) + " " + std::to_string(m_setD2));
+         log<text_log>("Quad 3 set points: " + std::to_string(m_setx3) + " " +  std::to_string(m_sety3) + " " + std::to_string(m_setD3));
+         log<text_log>("Quad 4 set points: " + std::to_string(m_setx4) + " " +  std::to_string(m_sety4) + " " + std::to_string(m_setD4));
+      }
+   }
+   else
+   {
+      log<text_log>("Reference image " + reffits + " size does not match shmim stream.", logPrio::LOG_ERROR);
+   }
+   
+   
    
    
    uint32_t imsize[3];
@@ -526,33 +585,68 @@ int pupilFit::processImage( void* curr_src,
    {//mutex scope
       
       std::lock_guard<std::mutex> guard(m_indiMutex);
+      m_indiP_quad1["set-x"].set(m_setx1);
       m_indiP_quad1["x"].set(m_fitter.m_avgx[0]);
+      m_indiP_quad1["dx"].set(m_fitter.m_avgx[0]-m_setx1);
+      m_indiP_quad1["set-y"].set(m_sety1);
       m_indiP_quad1["y"].set(m_fitter.m_avgy[0]);
+      m_indiP_quad1["dy"].set(m_fitter.m_avgy[0]-m_sety1);
+      m_indiP_quad1["set-D"].set(m_setD1);
       m_indiP_quad1["D"].set(2*m_fitter.m_avgr[0]);
+      m_indiP_quad1["dD"].set(2*m_fitter.m_avgr[0]-m_setD1);
       m_indiP_quad1["med"].set(m_fitter.m_med[0]);
       m_indiP_quad1.setState (INDI_BUSY);
       m_indiDriver->sendSetProperty (m_indiP_quad1);
    
+      m_indiP_quad2["set-x"].set(m_setx2);
       m_indiP_quad2["x"].set(m_fitter.m_avgx[1]);
+      m_indiP_quad2["dx"].set(m_fitter.m_avgx[1]-m_setx2);
+      m_indiP_quad2["set-y"].set(m_sety2);
       m_indiP_quad2["y"].set(m_fitter.m_avgy[1]);
+      m_indiP_quad2["dy"].set(m_fitter.m_avgy[1]-m_sety2);
+      m_indiP_quad2["set-D"].set(m_setD2);
       m_indiP_quad2["D"].set(2*m_fitter.m_avgr[1]);
+      m_indiP_quad2["dD"].set(2*m_fitter.m_avgr[1]-m_setD2);
       m_indiP_quad2["med"].set(m_fitter.m_med[1]);
       m_indiP_quad2.setState (INDI_BUSY);
       m_indiDriver->sendSetProperty (m_indiP_quad2);
    
+      m_indiP_quad3["set-x"].set(m_setx3);
       m_indiP_quad3["x"].set(m_fitter.m_avgx[2]);
+      m_indiP_quad3["dx"].set(m_fitter.m_avgx[2]-m_setx3);
+      m_indiP_quad3["set-y"].set(m_sety3);
       m_indiP_quad3["y"].set(m_fitter.m_avgy[2]);
+      m_indiP_quad3["dy"].set(m_fitter.m_avgy[2]-m_sety3);
+      m_indiP_quad3["set-D"].set(m_setD3);
       m_indiP_quad3["D"].set(2*m_fitter.m_avgr[2]);
+      m_indiP_quad3["dD"].set(2*m_fitter.m_avgr[2]-m_setD3);
       m_indiP_quad3["med"].set(m_fitter.m_med[2]);
       m_indiP_quad3.setState (INDI_BUSY);
       m_indiDriver->sendSetProperty (m_indiP_quad3);
    
+      m_indiP_quad4["set-x"].set(m_setx4);
       m_indiP_quad4["x"].set(m_fitter.m_avgx[3]);
+      m_indiP_quad4["dx"].set(m_fitter.m_avgx[3]-m_setx4);
+      m_indiP_quad4["set-y"].set(m_sety4);
       m_indiP_quad4["y"].set(m_fitter.m_avgy[3]);
+      m_indiP_quad4["dy"].set(m_fitter.m_avgy[3]-m_sety4);
+      m_indiP_quad4["set-D"].set(m_setD4);
       m_indiP_quad4["D"].set(2*m_fitter.m_avgr[3]);
+      m_indiP_quad4["dD"].set(2*m_fitter.m_avgr[3]-m_setD4);
       m_indiP_quad4["med"].set(m_fitter.m_med[3]);
       m_indiP_quad4.setState (INDI_BUSY);
       m_indiDriver->sendSetProperty (m_indiP_quad4);
+      
+      m_indiP_avg["x"].set(.25*(m_fitter.m_avgx[0] + m_fitter.m_avgx[1] + m_fitter.m_avgx[2] + m_fitter.m_avgx[3]));
+      m_indiP_avg["y"].set(.25*(m_fitter.m_avgy[0] + m_fitter.m_avgy[1] + m_fitter.m_avgy[2] + m_fitter.m_avgy[3]));
+      m_indiP_avg["D"].set(.5*(m_fitter.m_avgr[0] + m_fitter.m_avgr[1] + m_fitter.m_avgr[2] + m_fitter.m_avgr[3]));
+      
+      m_indiP_avg["dx"].set(.25*(m_fitter.m_avgx[0] + m_fitter.m_avgx[1] + m_fitter.m_avgx[2] + m_fitter.m_avgx[3]) - 0.25*(m_setx1 + m_setx2 + m_setx3 + m_setx4));
+      m_indiP_avg["dy"].set(.25*(m_fitter.m_avgy[0] + m_fitter.m_avgy[1] + m_fitter.m_avgy[2] + m_fitter.m_avgy[3]) - 0.25*(m_sety1 + m_sety2 + m_sety3 + m_sety4));
+      m_indiP_avg["dD"].set(.5*(m_fitter.m_avgr[0] + m_fitter.m_avgr[1] + m_fitter.m_avgr[2] + m_fitter.m_avgr[3]) - 0.25*(m_setD1 + m_setD2 + m_setD3 + m_setD4));
+      
+      m_indiDriver->sendSetProperty (m_indiP_avg);
+      
    }
    
    
@@ -756,6 +850,8 @@ INDI_NEWCALLBACK_DEFN(pupilFit, m_indiP_thresh)(const pcf::IndiProperty & ipRecv
    
    m_threshold = target;
    
+   m_restart = true; //need to re-process the reference
+   
    log<text_log>("set threshold = " + std::to_string(m_threshold), logPrio::LOG_NOTICE);
    return 0;
 }
@@ -836,6 +932,26 @@ INDI_NEWCALLBACK_DEFN(pupilFit, m_indiP_averaging)(const pcf::IndiProperty & ipR
    return 0;
 }
 
+INDI_NEWCALLBACK_DEFN(pupilFit, m_indiP_reload)(const pcf::IndiProperty & ipRecv)
+{
+   if(ipRecv.getName() != m_indiP_reload.getName())
+   {
+      log<software_error>({__FILE__,__LINE__, "wrong INDI property received."});
+      return -1;
+   }
+   
+   
+   
+   if( ipRecv["request"].getSwitchState() == pcf::IndiElement::On)
+   {
+      log<text_log>("reloading");
+      m_restart = 1;
+   }
+   
+   return 0;
+}
+
+      
 } //namespace app
 } //namespace MagAOX
 
