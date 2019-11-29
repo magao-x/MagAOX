@@ -478,6 +478,12 @@ INDI_NEWCALLBACK_DEFN( zaberCtrl, m_indiP_pos)(const pcf::IndiProperty &ipRecv)
       return 0;
    }
    
+   if(state() != stateCodes::READY)
+   {
+      log<text_log>("abs move to " + std::to_string(target) + " rejected due to not READY");
+      return 0;
+   }
+   
    log<text_log>("moving stage to " + std::to_string(target));
    
    std::lock_guard<std::mutex> guard(m_indiMutex);
