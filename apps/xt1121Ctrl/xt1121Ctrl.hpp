@@ -24,7 +24,7 @@ namespace app
 /** \defgroup xt1121Ctrl Acromag xt1121Controller
   * \brief Control of an Acromag xt1121digital I/O module
   *
-  * <a href="../handbook/apps/xt1121Ctrl.html">Application Documentation</a>
+  * <a href="../handbook/operating/software/apps/xt1121Ctrl.html">Application Documentation</a>
   *
   * \ingroup apps
   *

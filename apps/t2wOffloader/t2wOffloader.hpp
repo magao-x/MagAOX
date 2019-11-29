@@ -25,7 +25,7 @@ namespace app
 /** \defgroup t2wOffloader Tweeter to Woofer Offloading
   * \brief Monitors the averaged tweeter shape, and sends it to the woofer.
   *
-  * <a href="../handbook/apps/t2wOffloader.html">Application Documentation</a>
+  * <a href="../handbook/operating/software/apps/t2wOffloader.html">Application Documentation</a>
   *
   * \ingroup apps
   *

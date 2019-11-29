@@ -14,7 +14,7 @@
 /** \defgroup zaberCtrl
   * \brief The MagAO-X application to control a single Zaber stage
   *
-  * <a href="../handbook/apps/zaberCtrl.html">Application Documentation</a>
+  * <a href="../handbook/operating/software/apps/zaberCtrl.html">Application Documentation</a>
   *
   * \ingroup apps
   *
@@ -308,6 +308,7 @@ int zaberCtrl::appLogic()
    }
    
    //Otherwise we don't do anything differently
+   std::lock_guard<std::mutex> guard(m_indiMutex);
    
    static int last_moving = -10;
    
@@ -334,6 +335,17 @@ int zaberCtrl::appLogic()
       }
       m_indiDriver->sendSetProperty(m_indiP_pos);
       m_indiDriver->sendSetProperty(m_indiP_rawpos);
+   }
+   
+   if(m_moving && m_movingState < 1)
+   {
+      updateIfChanged(m_indiP_pos, "current", m_pos, INDI_BUSY);
+      updateIfChanged(m_indiP_rawpos, "current", m_rawPos, INDI_BUSY);
+   }
+   else
+   {
+      updateIfChanged(m_indiP_pos, "current", m_pos,INDI_IDLE);
+      updateIfChanged(m_indiP_rawpos, "current", m_rawPos,INDI_IDLE);
    }
    
    int n = presetNumber();
@@ -448,7 +460,8 @@ INDI_NEWCALLBACK_DEFN( zaberCtrl, m_indiP_pos)(const pcf::IndiProperty &ipRecv)
 
    if(target < 0)
    {
-      if( ipRecv.find("current") ) //Just not our stage.
+      return 0;
+      /*if( ipRecv.find("current") ) //Just not our stage.
       {
          target = ipRecv["current"].get<double>();
       }
@@ -456,8 +469,19 @@ INDI_NEWCALLBACK_DEFN( zaberCtrl, m_indiP_pos)(const pcf::IndiProperty &ipRecv)
       if(target < 0 )
       {
          return log<text_log,-1>("no valid target position provided", logPrio::LOG_ERROR);
-      }
+      }*/
    }
+   
+   if(m_moving != 0)
+   {
+      log<text_log>("abs move to " + std::to_string(target) + " rejected due to already moving");
+      return 0;
+   }
+   
+   log<text_log>("moving stage to " + std::to_string(target));
+   
+   std::lock_guard<std::mutex> guard(m_indiMutex);
+   
    m_tgtPos = target;
    
    moveTo(m_tgtPos);
@@ -493,6 +517,16 @@ INDI_NEWCALLBACK_DEFN( zaberCtrl, m_indiP_rawpos)(const pcf::IndiProperty &ipRec
       }
    }
       
+   if(m_moving != 0)
+   {
+      log<text_log>("rel move rejected due to already moving");
+      return 0;
+   }
+   
+   log<text_log>("moving stage by " + std::to_string(target));
+   
+   std::lock_guard<std::mutex> guard(m_indiMutex);
+   
    pcf::IndiProperty indiP_stageTgtPos = pcf::IndiProperty(pcf::IndiProperty::Text);
    indiP_stageTgtPos.setDevice(m_lowLevelName);
    indiP_stageTgtPos.setName("tgt_pos");
@@ -530,6 +564,8 @@ INDI_SETCALLBACK_DEFN( zaberCtrl, m_indiP_stageState)(const pcf::IndiProperty &i
    m_indiP_stageState = ipRecv;
    
    std::string sstr = ipRecv[m_stageName].get<std::string>();
+   
+   std::lock_guard<std::mutex> guard(m_indiMutex);
    
    if(sstr == "POWEROFF") 
    {
@@ -583,6 +619,8 @@ INDI_SETCALLBACK_DEFN( zaberCtrl, m_indiP_stageMaxRawPos )(const pcf::IndiProper
       return 0;
    }
    
+   std::lock_guard<std::mutex> guard(m_indiMutex);
+   
    unsigned long maxRawPos = ipRecv[m_stageName].get<unsigned long>();
    
    if(maxRawPos != m_maxRawPos && !(state() == stateCodes::POWERON || state() == stateCodes::POWEROFF || state() == stateCodes::NOTCONNECTED))
@@ -605,6 +643,8 @@ INDI_SETCALLBACK_DEFN( zaberCtrl, m_indiP_stageRawPos )(const pcf::IndiProperty 
    {
       return 0;
    }
+   
+   std::lock_guard<std::mutex> guard(m_indiMutex);
    
    m_rawPos = ipRecv[m_stageName].get<double>();
    
@@ -647,6 +687,8 @@ INDI_SETCALLBACK_DEFN( zaberCtrl, m_indiP_stageTgtPos )(const pcf::IndiProperty 
       return 0;
    }
    
+   std::lock_guard<std::mutex> guard(m_indiMutex);
+   
    m_tgtRawPos = ipRecv[m_stageName].get<double>();
    m_tgtPos = m_tgtRawPos / m_countsPerMillimeter;
    
@@ -676,6 +718,8 @@ INDI_SETCALLBACK_DEFN( zaberCtrl, m_indiP_stageTemp )(const pcf::IndiProperty &i
    {
       return 0;
    }
+   
+   std::lock_guard<std::mutex> guard(m_indiMutex);
    
    m_stageTemp = ipRecv[m_stageName].get<double>();
    

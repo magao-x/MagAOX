@@ -33,7 +33,7 @@ namespace app
 /** \defgroup streamWriter ImageStreamIO Stream Writing
   * \brief Writes the contents of an ImageStreamIO image stream to disk.
   *
-  * <a href="../handbook/apps/streamWriter.html">Application Documentation</a>
+  * <a href="../handbook/operating/software/apps/streamWriter.html">Application Documentation</a>
   *
   * \ingroup apps
   *

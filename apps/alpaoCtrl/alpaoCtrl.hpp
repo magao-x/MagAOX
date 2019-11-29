@@ -19,7 +19,7 @@
 /** \defgroup alpaoCtrl
   * \brief The MagAO-X application to control an ALPAO DM
   *
-  * <a href="../handbook/apps/alpaoCtrl.html">Application Documentation</a>
+  * <a href="../handbook/operating/software/apps/alpaoCtrl.html">Application Documentation</a>
   *
   * \ingroup apps
   *

@@ -301,8 +301,6 @@ $MAYBE_SUDO bash -l "$DIR/steps/install_magpyx.sh"
 $MAYBE_SUDO bash -l "$DIR/steps/install_imagestreamio_python.sh"
 
 if [[ $MAGAOX_ROLE == AOC || $MAGAOX_ROLE == vm ||  $MAGAOX_ROLE == workstation ]]; then
-    # Install JavaScript runtime and tools for building sup
-    sudo bash -l "$DIR/steps/install_node_and_yarn.sh"
     # sup web interface
     $MAYBE_SUDO bash -l "$DIR/steps/install_sup.sh"
     # realtime image viewer

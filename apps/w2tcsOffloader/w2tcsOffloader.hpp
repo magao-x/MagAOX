@@ -23,7 +23,7 @@ namespace app
 /** \defgroup w2tcsOffloader Woofer to TCS Offloading
   * \brief Monitors the averaged woofer shape, fits Zernikes, and sends it to INDI.
   *
-  * <a href="../handbook/apps/w2tcsOffloader.html">Application Documentation</a>
+  * <a href="../handbook/operating/software/apps/w2tcsOffloader.html">Application Documentation</a>
   *
   * \ingroup apps
   *
