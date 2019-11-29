@@ -60,7 +60,7 @@ int dmModeGUI::handleSetProperty( const pcf::IndiProperty & ipRecv /**< [in] the
       std::string elName;
       for(size_t n=0; n<11; ++n)
       {
-         elName = mx::ioutils::convertToString<size_t, 2, '0'>(n);
+         elName = mx::ioutils::convertToString<size_t, 4, '0'>(n);
       
          if(ipRecv.find(elName))
          {
