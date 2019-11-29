@@ -17,7 +17,7 @@
 /** \defgroup hsfwCtrl Optec HSFW Filter Wheel Control
   * \brief Control of an Optec HSFW f/w.
   *
-  * <a href="../handbook/apps/hsfwCtrl.html">Application Documentation</a>
+  * <a href="../handbook/operating/software/apps/hsfwCtrl.html">Application Documentation</a>
   *
   * \ingroup apps
   *

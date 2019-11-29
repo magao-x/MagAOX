@@ -49,7 +49,7 @@ struct dark2ShmimT
 /** \defgroup shmimIntegrator ImageStreamIO Stream Integrator
   * \brief Integrates (i.e. averages) an ImageStreamIO image stream.
   *
-  * <a href="../handbook/apps/shmimIntegrator.html">Application Documentation</a>
+  * <a href="../handbook/operating/software/apps/shmimIntegrator.html">Application Documentation</a>
   *
   * \ingroup apps
   *

@@ -337,6 +337,17 @@ int zaberCtrl::appLogic()
       m_indiDriver->sendSetProperty(m_indiP_rawpos);
    }
    
+   if(m_moving && m_movingState < 1)
+   {
+      updateIfChanged(m_indiP_pos, "current", m_pos, INDI_BUSY);
+      updateIfChanged(m_indiP_rawpos, "current", m_rawPos, INDI_BUSY);
+   }
+   else
+   {
+      updateIfChanged(m_indiP_pos, "current", m_pos,INDI_IDLE);
+      updateIfChanged(m_indiP_rawpos, "current", m_rawPos,INDI_IDLE);
+   }
+   
    int n = presetNumber();
    if(n == -1)
    {
@@ -351,6 +362,8 @@ int zaberCtrl::appLogic()
 
    recordStage();
    recordZaber();
+   
+   std::cerr << __LINE__ << "\n";
    
    dev::stdMotionStage<zaberCtrl>::updateINDI();
    
@@ -449,7 +462,8 @@ INDI_NEWCALLBACK_DEFN( zaberCtrl, m_indiP_pos)(const pcf::IndiProperty &ipRecv)
 
    if(target < 0)
    {
-      if( ipRecv.find("current") ) //Just not our stage.
+      return 0;
+      /*if( ipRecv.find("current") ) //Just not our stage.
       {
          target = ipRecv["current"].get<double>();
       }
@@ -457,7 +471,13 @@ INDI_NEWCALLBACK_DEFN( zaberCtrl, m_indiP_pos)(const pcf::IndiProperty &ipRecv)
       if(target < 0 )
       {
          return log<text_log,-1>("no valid target position provided", logPrio::LOG_ERROR);
-      }
+      }*/
+   }
+   
+   if(state() != stateCodes::READY)
+   {
+      log<text_log>("abs move to " + std::to_string(target) + " rejected due to not READY");
+      return 0;
    }
    
    if(state() != stateCodes::READY)

@@ -16,7 +16,7 @@
 /** \defgroup trippLitePDU Tripp Lite PDU
   * \brief Control of MagAO-X Tripp Lite PDUs.
   *
-  * <a href="../handbook/apps/trippLitePDU.html">Application Documentation</a>
+  * <a href="../handbook/operating/software/apps/trippLitePDU.html">Application Documentation</a>
   *
   * \ingroup apps
   *

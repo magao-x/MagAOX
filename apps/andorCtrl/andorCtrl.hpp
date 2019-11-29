@@ -31,7 +31,7 @@ namespace app
 /** \defgroup andorCtrl Andor EMCCD Camera
   * \brief Control of the Andor EMCCD Camera.
   *
-  * <a href="../handbook/apps/andorCtrl.html">Application Documentation</a>
+  * <a href="../handbook/operating/software/apps/andorCtrl.html">Application Documentation</a>
   *
   * \ingroup apps
   *

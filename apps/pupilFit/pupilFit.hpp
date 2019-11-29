@@ -15,7 +15,7 @@
 /** \defgroup pupilFit 
   * \brief The MagAO-X pyramid pupil fitter.
   *
-  * <a href="../handbook/apps/pupilFit.html">Application Documentation</a>
+  * <a href="../handbook/operating/software/apps/pupilFit.html">Application Documentation</a>
   *
   * \ingroup apps
   *

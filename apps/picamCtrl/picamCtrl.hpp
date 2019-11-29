@@ -47,7 +47,7 @@ namespace app
 /** \defgroup picamCtrl Princeton Instruments EMCCD Camera
   * \brief Control of a Princeton Instruments EMCCD Camera.
   *
-  * <a href="../handbook/apps/picamCtrl.html">Application Documentation</a>
+  * <a href="../handbook/operating/software/apps/picamCtrl.html">Application Documentation</a>
   *
   * \ingroup apps
   *

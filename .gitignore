@@ -25,6 +25,9 @@ makefile.*GUI
 #Ignore any generated code directories:
 **/generated/
 
+libMagAOX/doc/sw_html/
+apps/doc/
+doc/www/
 
 ##########################################
 #Executables and app specifics to ignore:
@@ -117,6 +120,8 @@ utils/logdump/logdump
 utils/cursesINDI/cursesINDI
 utils/logstream/logstream
 utils/xrif2shmim/xrif2shmim
+
+utils/doc
 
 ###########################3
 #test files to ignore
