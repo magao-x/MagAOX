@@ -680,7 +680,7 @@ INDI_NEWCALLBACK_DEFN(zaberLowLevel, m_indiP_tgt_pos)(const pcf::IndiProperty &i
             {
                std::lock_guard<std::mutex> guard(m_indiMutex);
                std::cerr << "moving " << m_stages[n].name() << " to " << std::to_string(tgt) << "\n";
-               
+               updateIfChanged(m_indiP_curr_state, m_stages[n].name(), std::string("OPERATING"));
                return m_stages[n].moveAbs(m_port, tgt);
             }
          }
@@ -703,6 +703,7 @@ INDI_NEWCALLBACK_DEFN(zaberLowLevel, m_indiP_tgt_relpos)(const pcf::IndiProperty
             {
                std::lock_guard<std::mutex> guard(m_indiMutex);
                std::cerr << "moving " << m_stages[n].name() << " to " << std::to_string(tgt) << "\n";
+               updateIfChanged(m_indiP_curr_state, m_stages[n].name(), std::string("OPERATING"));
                return m_stages[n].moveAbs(m_port, tgt);
             }
          }
