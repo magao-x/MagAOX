@@ -363,8 +363,6 @@ int zaberCtrl::appLogic()
    recordStage();
    recordZaber();
    
-   std::cerr << __LINE__ << "\n";
-   
    dev::stdMotionStage<zaberCtrl>::updateINDI();
    
    if(telemeter<zaberCtrl>::appLogic() < 0)
