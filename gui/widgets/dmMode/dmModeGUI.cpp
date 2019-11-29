@@ -147,7 +147,7 @@ void dmModeGUI::setChannel( size_t ch, float amp )
    
    ip.setDevice(m_deviceName);
    ip.setName("target_amps");
-   std::string elName = mx::ioutils::convertToString<size_t, 2, '0'>(ch);
+   std::string elName = mx::ioutils::convertToString<size_t, 4, '0'>(ch);
    ip.add(pcf::IndiElement(elName));
    ip[elName] = amp;
    
@@ -418,7 +418,7 @@ void dmModeGUI::on_modeZero_all_pressed()
    
    for(size_t n =0; n <= 10; ++n)
    {
-      std::string elName = mx::ioutils::convertToString<size_t, 2, '0'>(n);
+      std::string elName = mx::ioutils::convertToString<size_t, 4, '0'>(n);
       ip.add(pcf::IndiElement(elName));
       ip[elName] = 0.0;
    }
