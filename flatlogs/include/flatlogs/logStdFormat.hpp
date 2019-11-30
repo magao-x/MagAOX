@@ -60,21 +60,21 @@ iosT & stdShortFormat( iosT & ios, ///< [out] the iostream to output the log to
 
    std::string outApp;
    
-   if(appName.size() > 14)
+   if(appName.size() > 15)
    {
-      outApp.resize(16, ' ');
-      outApp[15] = ':';
-      for(size_t n=14; n >= 0; --n)
+      outApp.resize(17, ' ');
+      outApp[16] = ':';
+      for(size_t n=15; n >= 0; --n)
       {
-         if( 14-n + 1 > appName.size()) break;
-         outApp[n] = appName[appName.size()-1 - (14-n)];
+         if( 15-n + 1 > appName.size()) break;
+         outApp[n] = appName[appName.size()-1 - (15-n)];
       }
    }
    else
    {
       outApp = appName;
       outApp += ":";
-      outApp += std::string( 14-appName.size(), ' ');
+      outApp += std::string( 15-appName.size(), ' ');
    }
       
    

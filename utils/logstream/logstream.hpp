@@ -139,11 +139,27 @@ int logstream::getAppsWithLogs( std::set<std::string> & appNames )
    
    //m_shutdown = true;
    
+   int last_min = -1;
+   bool min_printed = false;
    while(!m_shutdown)
    {
       if( m_logStream.size() > 0)
       {
          auto it=m_logStream.begin();
+         
+         timespecX ts = logHeader::timespec(it->second.logBuff);
+      
+         if(ts.minute() != last_min)
+         {
+            char tstr1[25];
+      
+            //strftime(tstr1, 25, "%FT%H:%M:", &bdt);
+            
+            std::cout << ts.ISO8601DateTimeStr2MinX() << ":\n";
+            
+            last_min = ts.minute();
+         }
+         min_printed = false;
          
          while(it != m_logStream.end())
          {
@@ -156,6 +172,22 @@ int logstream::getAppsWithLogs( std::set<std::string> & appNames )
       else
       {
          std::this_thread::sleep_for( std::chrono::duration<unsigned long, std::milli>(m_pauseTime));
+         
+         tm bdt; //broken down time
+         time_t tt = time(0);
+         gmtime_r( &tt, &bdt);
+         
+         if(bdt.tm_min != last_min && min_printed == false)
+         {
+            char tstr1[25];
+      
+            strftime(tstr1, 25, "%FT%H:%M:", &bdt);
+            
+            std::cout << tstr1 << "\n";
+            
+            last_min = bdt.tm_min;
+            min_printed = true;
+         }
       }
    }
    

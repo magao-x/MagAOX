@@ -149,6 +149,19 @@ struct timespecX
       return std::string(tstr1) + std::string(tstr2);
    }
    
+   std::string ISO8601DateTimeStr2MinX()
+   {
+      tm bdt; //broken down time
+      time_t tt = time_s;
+      gmtime_r( &tt, &bdt);
+      
+      char tstr1[25];
+      
+      strftime(tstr1, 25, "%FT%H:%M", &bdt);
+      
+      return std::string(tstr1);
+   }
+   
    /// Get a date-time string with just the second for timespecX
    /** Returns a string in the format:
      * \verbatim
@@ -175,6 +188,22 @@ struct timespecX
       
       return std::string(tstr1) + std::string(tstr2);
    }
+   
+   /// Get the minute from a timespecX
+   /** 
+     *
+     * \returns the minute part. 
+     * 
+     */ 
+   int minute()
+   {
+      tm bdt; //broken down time
+      time_t tt = time_s;
+      gmtime_r( &tt, &bdt);
+      
+      return bdt.tm_min;
+   }
+   
 } __attribute__((packed));
 
 ///Convert a timespecX to a native timespec
