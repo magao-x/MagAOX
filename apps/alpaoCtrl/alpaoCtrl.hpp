@@ -61,6 +61,7 @@ protected:
    ///@}
 
 
+   size_t m_nsat {0};
 
 
 public:
@@ -253,6 +254,11 @@ int alpaoCtrl::appLogic()
       return initDM();
    }
    
+   if(m_nsat > 0)
+   {
+      log<text_log>("Saturated actuators in last second: " + std::to_string(m_nsat), logPrio::LOG_WARNING);
+   }
+   m_nsat = 0;
    
    return 0;
 }
@@ -404,11 +410,11 @@ int alpaoCtrl::commandDM(void * curr_src)
       m_dminputs[idx] -= mean;
       if (m_dminputs[idx] > 1)
       {
-         printf("Actuator %d saturated!\n", idx + 1);
+         ++m_nsat;
          m_dminputs[idx] = 1;
       } else if (m_dminputs[idx] < -1)
       {
-         printf("Actuator %d saturated!\n", idx + 1);
+         ++m_nsat;
          m_dminputs[idx] = - 1;
       }
    }
