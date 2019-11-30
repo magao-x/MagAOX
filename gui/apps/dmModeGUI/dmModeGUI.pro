@@ -29,6 +29,6 @@ SOURCES += ../../widgets/dmMode/dmModeGUI.cpp \
 FORMS += ../../widgets/dmMode/dmMode.ui
      
 LIBS += ../../../INDI/libcommon/libcommon.a \
-        ../../../INDI/liblilxml/liblilxml.a
+        ../../../INDI/liblilxml/liblilxml.a 
 
 QT += widgets

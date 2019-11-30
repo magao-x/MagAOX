@@ -33,6 +33,7 @@ doc/www/
 #Executables and app specifics to ignore:
 
 #a
+apps/adcTracker/adcTracker
 apps/alpaoCtrl/alpaoCtrl
 apps/andorCtrl/andorCtrl
 
