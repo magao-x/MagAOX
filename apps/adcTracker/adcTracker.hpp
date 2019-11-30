@@ -51,9 +51,14 @@ protected:
    //here add parameters which will be config-able at runtime
    std::string m_lookupFile {"adc_lookup_table.txt"}; ///< The name of the file, in the calib directory, containing the adc lookup table.  Default is 'adc_lookup_table.txt'.
    
-   float m_adc1zero {0}; ///< The starting point for ADC 1. Default is 0.
    
+   float m_adc1zero {0}; ///< The starting point for ADC 1. Default is 0.
+
+   int m_adc1lupsign {1}; ///< The sign to apply to the lookup table value for ADC 1
+
    float m_adc2zero {0}; ///< The starting point for ADC 2. Default is 0.
+   
+   int m_adc2lupsign {1}; ///< The sign to apply to the lookup table value for ADC 2
    
    float m_deltaAngle {0}; ///< The offset angle to apply to the looked-up values, applied to both.  Default is 0.
    
@@ -61,7 +66,7 @@ protected:
    
    float m_adc2delta {0}; ///< The offset angle to apply to the looked-up value for ADC 2, applied in addition to deltaAngle.  Default is 0.
    
-   float m_minZD {0}; ///< "The minimum zenith distance at which to interpolate and move the ADCs.  Default is 0.
+   float m_minZD {5.1}; ///< "The minimum zenith distance at which to interpolate and move the ADCs.  Default is 0.
    
    
    std::string m_adc1DevName {"stageadc1"}; ///< The device name of the ADC 1 stage.  Default is 'stageadc1'
@@ -168,7 +173,12 @@ void adcTracker::setupConfig()
    config.add("adcs.lookupFile", "", "adcs.lookupFile", argType::Required, "adcs", "lookupFile", false, "string", "The name of the file, in the calib directory, containing the adc lookup table.  Default is 'adc_lookup_table.txt'.");
    
    config.add("adcs.adc1zero", "", "adcs.adc1zero", argType::Required, "adcs", "adc1zero", false, "float", "The starting point for ADC 1. Default is 0.");
+   
+   config.add("adcs.adc1lupsign", "", "adcs.adc1lupsign", argType::Required, "adcs", "adc1lupsign", false, "int", "The sign to apply for the LUP values for ADC 1. Default is +1.");
+   
    config.add("adcs.adc2zero", "", "adcs.adc2zero", argType::Required, "adcs", "adc2zero", false, "float", "The starting point for ADC 2. Default is 0.");
+   
+   config.add("adcs.adc2lupsign", "", "adcs.adc2lupsign", argType::Required, "adcs", "adc2lupsign", false, "int", "The sign to apply for the LUP values for ADC 2. Default is +1.");
    
    config.add("adcs.deltaAngle", "", "adcs.deltaAngle", argType::Required, "adcs", "deltaAngle", false, "float", "The offset angle to apply to the looked-up values, applied to both.  Default is 0.");
    
@@ -176,7 +186,7 @@ void adcTracker::setupConfig()
    
    config.add("adcs.adc2delta", "", "adcs.adc2delta", argType::Required, "adcs", "adc2delta", false, "float", "The offset angle to apply to the looked-up value for ADC 2, applied in addition to deltaAngle.  Default is 0.");
    
-   config.add("adcs.minZD", "", "adcs.minZD", argType::Required, "adcs", "minZD", false, "float", "The minimum zenith distance at which to interpolate and move the ADCs.  Default is 0.");
+   config.add("adcs.minZD", "", "adcs.minZD", argType::Required, "adcs", "minZD", false, "float", "The minimum zenith distance at which to interpolate and move the ADCs.  Default is 5.1");
    
    config.add("adcs.adc1DevName", "", "adcs.adc1devName", argType::Required, "adcs", "adc1DevName", false, "string", "The device name of the ADC 1 stage.  Default is 'stageadc1'");
    
@@ -189,7 +199,9 @@ int adcTracker::loadConfigImpl( mx::app::appConfigurator & _config )
 {
    _config(m_lookupFile, "adcs.lookupFile");
    _config(m_adc1zero, "adcs.adc1zero");
+   _config(m_adc1lupsign, "adcs.adc1lupsign");
    _config(m_adc2zero, "adcs.adc2zero");
+   _config(m_adc2lupsign, "adcs.adc2lupsign");
    _config(m_deltaAngle, "adcs.deltaAngle");
    _config(m_adc1delta, "adcs.adc1delta");
    _config(m_adc2delta, "adcs.adc2delta");
@@ -282,12 +294,12 @@ int adcTracker::appLogic()
       
       if(m_zd >= m_minZD)
       {
-         dadc1 = m_terpADC1(m_zd); 
-         dadc2 = m_terpADC2(m_zd);
+         dadc1 = fabs(m_terpADC1(m_zd)); 
+         dadc2 = fabs(m_terpADC2(m_zd));
       }
       
-      float adc1 = m_adc1zero + dadc1 - (m_adc1delta + m_deltaAngle);
-      float adc2 = m_adc2zero + dadc2 + (m_adc2delta + m_deltaAngle);
+      float adc1 = m_adc1zero + m_adc1lupsign*(dadc1 + m_adc1delta + m_deltaAngle);
+      float adc2 = m_adc2zero + m_adc2lupsign*(dadc2 + m_adc2delta + m_deltaAngle);
       
       std::cerr << "Sending adcs to: " << adc1 << " " << adc2 << "\n";
       
