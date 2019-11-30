@@ -54,6 +54,10 @@ protected:
    
    //here add parameters which will be config-able at runtime
    
+   float m_warnTemp {40};
+   float m_alertTemp {50};
+   float m_emergTemp {55};
+   
    ///@}
 
 
@@ -139,6 +143,11 @@ usbtempMon::usbtempMon() : MagAOXApp(MAGAOX_CURRENT_SHA1, MAGAOX_REPO_MODIFIED)
 
 void usbtempMon::setupConfig()
 {
+   config.add("temp.warning", "", "temp.warning", argType::Required, "temp", "warning", false, "float", "Temperature at which to issue a warning.  Default is 40.");
+   config.add("temp.alert", "", "temp.alert", argType::Required, "temp", "alert", false, "float", "Temperature at which to issue an alert.  Default is 50.");
+   config.add("temp.emergency", "", "temp.emergency", argType::Required, "temp", "emergency", false, "float", "Temperature at which to issue an emergency.  Default is 55.");
+   
+   
    config.add("usb.idVendor", "", "usb.idVendor", argType::Required, "usb", "idVendor", false, "string", "USB vendor id, 4 digits");
    config.add("usb.idProduct", "", "usb.idProduct", argType::Required, "usb", "idProduct", false, "string", "USB product id, 4 digits");
    
@@ -148,6 +157,10 @@ void usbtempMon::setupConfig()
 int usbtempMon::loadConfigImpl( mx::app::appConfigurator & _config )
 {
 
+   _config(m_warnTemp, "temp.warning");
+   _config(m_alertTemp, "temp.alert");
+   _config(m_emergTemp, "temp.emergency");
+   
    m_idVendor = "067b";
    _config(m_idVendor, "usb.idVendor");
    m_idProduct = "2303";
@@ -228,6 +241,19 @@ int usbtempMon::appLogic()
          
          m_probes[n].m_temperature = temperature;
          updateIfChanged(m_indiP_temps, m_probes[n].m_location, temperature);
+         
+         if(temperature >= m_warnTemp)
+         {
+            log<text_log>(m_probes[n].m_location + " temp = " + std::to_string(temperature), logPrio::LOG_WARNING);
+         }
+         else if(temperature >= m_alertTemp)
+         {
+            log<text_log>(m_probes[n].m_location + " temp = " + std::to_string(temperature), logPrio::LOG_ALERT);
+         }
+         else if(temperature >= m_emergTemp)
+         {
+            log<text_log>(m_probes[n].m_location + " temp = " + std::to_string(temperature), logPrio::LOG_EMERGENCY);
+         }
          
          recordTemps(); //log it in telemeter
          
