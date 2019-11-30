@@ -321,8 +321,6 @@ tcsInterface::tcsInterface() : MagAOXApp(MAGAOX_CURRENT_SHA1, MAGAOX_REPO_MODIFI
 inline
 void tcsInterface::setupConfig()
 {
-   config.add("device.address", "", "device.address", argType::Required, "device", "address", false, "string", "The IP address or resolvable name of the TCS.");
-   config.add("device.port", "", "device.port", argType::Required, "device", "port", false, "int", "The IP port for TCS communications. Should be the command port.  Default is 5811.");
    
    config.add("offload.TT_avgInt", "", "offload.TT_avgInt", argType::Required, "offload", "TT_avgInt", false, "float", "Woofer to Telescope T/T offload averaging interval [sec] ");
    config.add("offload.TT_gain", "", "offload.TT_gain", argType::Required, "offload", "TT_gain", false, "float", "Woofer to Telescope T/T offload gain");
@@ -345,7 +343,9 @@ void tcsInterface::setupConfig()
    config.add("offload.CComa10", "", "offload.CComa10", argType::Required, "offload", "CComa10", false, "float", "Woofer to Telescope Coma offload control matrix [1,0] of a 2x2 matrix ");
    config.add("offload.CComa11", "", "offload.CComa11", argType::Required, "offload", "CComa11", false, "float", "Woofer to Telescope Coma offload control matrix [1,1] of a 2x2 matrix ");
    
-   
+   config.add("device.address", "", "device.address", argType::Required, "device", "address", false, "string", "The IP address or resolvable name of the TCS.");
+   config.add("device.port", "", "device.port", argType::Required, "device", "port", false, "int", "The IP port for TCS communications. Should be the command port.  Default is 5811.");
+  
    dev::ioDevice::setupConfig(config);
    dev::telemeter<tcsInterface>::setupConfig(config);
 }
@@ -372,7 +372,10 @@ int tcsInterface::loadConfigImpl( mx::app::appConfigurator & _config )
    _config(m_offlCComa_01, "offload.CComa01");
    _config(m_offlCComa_10, "offload.CComa10");
    _config(m_offlCComa_11, "offload.CComa11");
-   
+  
+   _config(m_deviceAddr, "device.address"); 
+   _config(m_devicePort, "device.port");
+
    dev::ioDevice::loadConfig(_config);
    
    dev::telemeter<tcsInterface>::loadConfig(_config);
