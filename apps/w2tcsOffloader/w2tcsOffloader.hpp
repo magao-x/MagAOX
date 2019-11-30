@@ -197,7 +197,6 @@ int w2tcsOffloader::appStartup(){
       return -1;
    }
 
-
    createStandardIndiNumber<unsigned>( m_indiP_nModes, "nModes", 1, std::numeric_limits<unsigned>::max(), 1, "%u");
    m_indiP_nModes["current"] = m_nModes;
 
