@@ -188,7 +188,7 @@ int dmMode::appStartup()
    for(size_t n=0; n < m_amps.size(); ++n)
    {
       //std::string el = std::to_string(n);
-      m_elNames[n] = mx::ioutils::convertToString<size_t, 2, '0'>(n);
+      m_elNames[n] = mx::ioutils::convertToString<size_t, 4, '0'>(n);
       
       m_indiP_currAmps.add( pcf::IndiElement(m_elNames[n]) );
       m_indiP_currAmps[m_elNames[n]].set(0);
