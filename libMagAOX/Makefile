@@ -52,6 +52,7 @@ INCLUDEDEPS= app/MagAOXApp.hpp \
 	     logger/types/telem_stage.hpp \
 	     logger/types/telem_teldata.hpp \
 	     logger/types/telem_telpos.hpp \
+	     logger/types/telem_telvane.hpp \
 	     logger/types/telem_temps.hpp \
 	     logger/types/telem_zaber.hpp \
 	     logger/types/text_log.hpp \

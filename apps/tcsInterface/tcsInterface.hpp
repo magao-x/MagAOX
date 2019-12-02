@@ -86,6 +86,7 @@ protected:
    
    pcf::IndiProperty m_indiP_teldata;
    
+   //Telescope Catalog Information
    double m_catRA {0};
    double m_catDec {0};
    double m_catEp {0};
@@ -95,7 +96,8 @@ protected:
    
    pcf::IndiProperty m_indiP_catalog; ///< INDI Property for the catalog text information
    pcf::IndiProperty m_indiP_catdata; ///< INDI Property for the catalog data
-   
+
+   //Telescope Vane-End positions
    double m_telSecZ {0};
    double m_telEncZ {0};
    double m_telSecX {0};
@@ -109,6 +111,22 @@ protected:
    
    pcf::IndiProperty m_indiP_vaneend; ///< INDI Property for the vane end positions
 
+   
+   //Environment
+   double m_wxtemp {0};     ///< Outside temperature, Celsius
+   double m_wxpres {0};     ///< Outside pressue, millibars
+   double m_wxhumid {0};    ///< Outside humidity, percent
+   double m_wxwind {0};     ///< outside wind intensity, mph
+   double m_wxwdir {0};     ///< outside wind direction, degrees
+   double m_ttruss {0};     ///< Telescope truss temperature, Celsius
+   double m_tcell {0};      ///< Primary mirror cell temperature, Celsius
+   double m_tseccell {0};   ///< Secondary mirror cell temperature, Celsius
+   double m_tambient {0};   ///< Dome air temperature, Celsius
+   double m_wxdewpoint {0}; ///<Dew point from weather station
+
+   pcf::IndiProperty m_indiP_env; ///< INDI Property for environment
+
+   
 public:
    /// Default c'tor.
    tcsInterface();
@@ -164,6 +182,7 @@ public:
    int getTelData();
    int getCatData();
    int getVaneData();
+   int getEnvData();
    
    int updateINDI();
    
@@ -176,9 +195,18 @@ public:
    
    int recordTelem( const telem_teldata * );
    
+   int recordTelem( const telem_telvane * );
+   
+   int recordTelem( const telem_telenv * );
+   
    int recordTelPos(bool force = false);
    
    int recordTelData(bool force = false);
+   
+   int recordTelVane(bool force = false);
+   
+   int recordTelEnv(bool force = false);
+   
    ///@}
    
    int m_loopState = 0;
@@ -186,28 +214,6 @@ public:
    
    INDI_SETCALLBACK_DECL(tcsInterface, m_indiP_loopState);
    
-   /** \name Elevation Rotation Tracking
-     * Setting the k-mirror and ADCs based on telescope elevation
-     * @{
-     */
-
-   float m_kmirrRotZeroPt {-40.0};
-   float m_kmirrRotFactor {0.5};
-   float m_kmirrRotSign {-1.0};
-   
-   bool m_rotThreadInit {true}; ///< Initialization flag for the offload thread.
-   
-   std::thread m_rotThread; ///< The offloading thread.
-
-   /// Offload thread starter function
-   static void rotThreadStart( tcsInterface * t /**< [in] pointer to this */);
-   
-   /// Offload thread function
-   /** Runs until m_shutdown is true.
-     */
-   void rotThreadExec();
-   
-   ///@}
    
    /** \name Woofer Offloading
      * Handling of offloads from the average woofer shape to the telescope
@@ -480,6 +486,31 @@ int tcsInterface::appStartup()
    
    registerIndiPropertyReadOnly(m_indiP_vaneend);
    
+   
+   createROIndiNumber( m_indiP_env, "environment", "Environment Data", "TCS");
+   indi::addNumberElement<double>( m_indiP_env, "temp-out", std::numeric_limits<double>::lowest(), std::numeric_limits<double>::max(), 0, "%0.2f");
+   m_indiP_env["temp-out"] = m_wxtemp;
+   indi::addNumberElement<double>( m_indiP_env, "pressure", std::numeric_limits<double>::lowest(), std::numeric_limits<double>::max(), 0, "%0.2f");
+   m_indiP_env["pressure"] = m_wxpres;
+   indi::addNumberElement<double>( m_indiP_env, "humidity", std::numeric_limits<double>::lowest(), std::numeric_limits<double>::max(), 0, "%0.2f");
+   m_indiP_env["humidity"] = m_wxhumid;
+   indi::addNumberElement<double>( m_indiP_env, "wind", std::numeric_limits<double>::lowest(), std::numeric_limits<double>::max(), 0, "%0.2f");
+   m_indiP_env["wind"] = m_wxwind;
+   indi::addNumberElement<double>( m_indiP_env, "winddir", std::numeric_limits<double>::lowest(), std::numeric_limits<double>::max(), 0, "%0.2f");
+   m_indiP_env["winddir"] = m_wxwdir;
+   indi::addNumberElement<double>( m_indiP_env, "temp-truss", std::numeric_limits<double>::lowest(), std::numeric_limits<double>::max(), 0, "%0.2f");
+   m_indiP_env["temp-truss"] = m_ttruss;
+   indi::addNumberElement<double>( m_indiP_env, "temp-cell", std::numeric_limits<double>::lowest(), std::numeric_limits<double>::max(), 0, "%0.2f");
+   m_indiP_env["temp-cell"] = m_tcell;
+   indi::addNumberElement<double>( m_indiP_env, "temp-seccell", std::numeric_limits<double>::lowest(), std::numeric_limits<double>::max(), 0, "%0.2f");
+   m_indiP_env["temp-seccell"] = m_tseccell;
+   indi::addNumberElement<double>( m_indiP_env, "temp-amb", std::numeric_limits<double>::lowest(), std::numeric_limits<double>::max(), 0, "%0.2f");
+   m_indiP_env["temp-amb"] = m_tambient;
+   indi::addNumberElement<double>( m_indiP_env, "dewpoint", std::numeric_limits<double>::lowest(), std::numeric_limits<double>::max(), 0, "%0.2f");
+   m_indiP_env["dewpoint"] = m_wxdewpoint;
+   
+   registerIndiPropertyReadOnly(m_indiP_env);
+   
    signal(SIGPIPE, SIG_IGN);
    
    
@@ -491,15 +522,6 @@ int tcsInterface::appStartup()
    if(dev::telemeter<tcsInterface>::appStartup() < 0)
    {
       return log<software_error,-1>({__FILE__,__LINE__});
-   }
-   
-   
-   
-   
-   if(threadStart( m_rotThread, m_rotThreadInit, 0, "rotation", this, rotThreadStart) < 0)
-   {
-      log<software_error>({__FILE__, __LINE__});
-      return -1;
    }
    
    
@@ -698,6 +720,12 @@ int tcsInterface::appLogic()
          return 0;
       }
       
+      if(getEnvData() < 0)
+      {
+         log<text_log>("Error from getVaneData", logPrio::LOG_ERROR);
+         return 0;
+      }
+      
       telemeter<tcsInterface>::appLogic();
       
       if(updateINDI() < 0)
@@ -714,19 +742,7 @@ int tcsInterface::appLogic()
 
 inline
 int tcsInterface::appShutdown()
-{
-   //Wait for rotation thread to exit on m_shutdown.
-   if(m_rotThread.joinable())
-   {
-      try
-      {
-         m_rotThread.join(); //this will throw if it was already joined
-      }
-      catch(...)
-      {
-      }
-   }
-   
+{   
    //Wait for offload thread to exit on m_shutdown.
    if(m_offloadThread.joinable())
    {
@@ -946,7 +962,7 @@ int tcsInterface::getTelPos()
    }
    
    return 0;
-}
+}//int tcsInterface::getTelPos()
 
 inline
 int tcsInterface::getTelData()
@@ -1014,7 +1030,7 @@ int tcsInterface::getTelData()
    }
    
    return 0;
-}
+}//int tcsInterface::getTelData()
 
 inline
 int tcsInterface::getCatData()
@@ -1072,8 +1088,9 @@ int tcsInterface::getCatData()
    m_catObj = cdat[5];
    
    return 0;
-}
+}//int tcsInterface::getCatData()
 
+inline
 int tcsInterface::getVaneData()
 {
    std::string xstr;
@@ -1113,8 +1130,62 @@ int tcsInterface::getVaneData()
    m_telEncH = strtod(vedat[7].c_str(),0);
    m_telSecV = strtod(vedat[8].c_str(),0);
    m_telEncV = strtod(vedat[9].c_str(),0);
+   
+   if( recordTelVane() < 0)
+   {
+      return log<software_error,-1>({__FILE__,__LINE__});
+   }
+   
    return 0;
-}
+}//int tcsInterface::getVaneData()
+
+inline
+int tcsInterface::getEnvData()
+{
+   std::string estr;
+   std::vector<std::string> edat;
+
+   if(getMagTelStatus(estr,"telenv") < 0)
+   {
+      state(stateCodes::NOTCONNECTED);
+      log<text_log>("Error getting telescope environment data (telenv)",logPrio::LOG_ERROR);
+      return -1;
+   }
+   
+   edat = parse_teldata(estr);
+
+   if(edat[0] == "-1")
+   {
+      state(stateCodes::NOTCONNECTED);
+      log<text_log>("Error getting telescope environment data (telenv): TCS returned -1",logPrio::LOG_ERROR);
+      return -1;
+   }
+   
+   if(edat.size() != 10)
+   {
+      state(stateCodes::NOTCONNECTED);
+      log<text_log>("Error getting telescope environment data (telenv): TCS response wrong size",logPrio::LOG_ERROR);
+      return -1;      
+   }
+
+   m_wxtemp = strtod(edat[0].c_str(), 0);
+   m_wxpres = strtod(edat[1].c_str(), 0);
+   m_wxhumid = strtod(edat[2].c_str(), 0);
+   m_wxwind = strtod(edat[3].c_str(), 0);
+   m_wxwdir = strtod(edat[4].c_str(), 0);
+   m_ttruss = strtod(edat[5].c_str(), 0);
+   m_tcell = strtod(edat[6].c_str(), 0);
+   m_tseccell = strtod(edat[7].c_str(), 0);
+   m_tambient = strtod(edat[8].c_str(), 0);
+   m_wxdewpoint = strtod(edat[9].c_str(),0);
+   
+   if( recordTelEnv() < 0)
+   {
+      return log<software_error,-1>({__FILE__,__LINE__});
+   }
+   
+   return 0;
+} //int tcsInterface::getEnvData()
 
 inline
 int tcsInterface::updateINDI()
@@ -1259,6 +1330,7 @@ int tcsInterface::updateINDI()
       return -1;
    }
    
+   //---- Vane End ----//
    try
    {
       m_indiP_vaneend["secz"] = m_telSecZ;
@@ -1298,6 +1370,51 @@ int tcsInterface::updateINDI()
       return -1;
    }
    
+   
+   //---- Environment ----//
+   try
+   {
+      m_indiP_env["temp-out"] = m_wxtemp;
+      m_indiP_env["pressure"] = m_wxpres;
+      m_indiP_env["humidity"] = m_wxhumid;
+      m_indiP_env["wind"] = m_wxwind;
+      m_indiP_env["winddir"] = m_wxwdir;
+      m_indiP_env["temp-truss"] = m_ttruss;
+      m_indiP_env["temp-cell"] = m_tcell;
+      m_indiP_env["temp-seccell"] = m_tseccell;
+      m_indiP_env["temp-amb"] = m_tambient;
+      m_indiP_env["dewpoint"] = m_wxdewpoint;
+   }
+   catch(...)
+   {
+      log<software_error>({__FILE__,__LINE__,"INDI library exception"});
+      return -1;
+   }
+   
+   try
+   {
+      m_indiP_env.setState(INDI_OK);
+   }
+   catch(...)
+   {
+      log<software_error>({__FILE__,__LINE__,"INDI library exception"});
+      return -1;
+   }
+   
+   try
+   {
+      m_indiDriver->sendSetProperty (m_indiP_env);
+   }
+   catch(...)
+   {
+      log<software_error>({__FILE__,__LINE__,"INDI library exception"});
+      return -1;
+   }
+   
+   
+   //--- Offloading ---//
+   
+   
    try
    {
       if(m_offlTT_dump)
@@ -1335,7 +1452,7 @@ int tcsInterface::updateINDI()
 inline
 int tcsInterface::checkRecordTimes()
 {
-   return telemeter<tcsInterface>::checkRecordTimes(telem_telpos(), telem_teldata());
+   return telemeter<tcsInterface>::checkRecordTimes(telem_telpos(), telem_teldata(), telem_telvane(), telem_telenv());
 }
 
 inline
@@ -1351,7 +1468,21 @@ int tcsInterface::recordTelem( const telem_teldata * )
    recordTelData(true);
    return 0;
 }
-   
+ 
+inline
+int tcsInterface::recordTelem( const telem_telvane * )
+{
+   recordTelVane(true);
+   return 0;
+}
+
+inline
+int tcsInterface::recordTelem( const telem_telenv * )
+{
+   recordTelEnv(true);
+   return 0;
+}
+
 inline
 int tcsInterface::recordTelPos(bool force)
 {
@@ -1427,34 +1558,91 @@ int tcsInterface::recordTelData(bool force)
    return 0;
 }
 
-void tcsInterface::rotThreadStart( tcsInterface * t )
+inline
+int tcsInterface::recordTelVane(bool force)
 {
-   t->rotThreadExec();
-}
-
-void tcsInterface::rotThreadExec( )
-{
-   while( m_rotThreadInit == true && shutdown() == 0)
+   static double lastSecZ = -999;
+   static double lastEncZ = -999;
+   static double lastSecX = -999;
+   static double lastEncX = -999;
+   static double lastSecY = -999;
+   static double lastEncY = -999;
+   static double lastSecH = -999;
+   static double lastEncH = -999;
+   static double lastSecV = -999;
+   static double lastEncV = -999;
+   
+   if( force || lastSecZ != m_telSecZ ||
+                lastEncZ != m_telEncZ ||
+                lastSecX != m_telSecX ||
+                lastEncX != m_telEncX ||
+                lastSecY != m_telSecY ||
+                lastEncY != m_telEncY ||
+                lastSecH != m_telSecH ||
+                lastEncH != m_telEncH ||
+                lastSecV != m_telSecV ||
+                lastEncV != m_telEncV )
    {
-      sleep(1);
+      telem<telem_telvane>({m_telSecZ, m_telEncZ, m_telSecX, m_telEncX, m_telSecY, m_telEncY, m_telSecH, m_telEncH, m_telSecV, m_telEncV});
+      
+      lastSecZ = m_telSecZ;
+      lastEncZ = m_telEncZ;
+      lastSecX = m_telSecX;
+      lastEncX = m_telEncX;
+      lastSecY = m_telSecY;
+      lastEncY = m_telEncY;
+      lastSecH = m_telSecH;
+      lastEncH = m_telEncH;
+      lastSecV = m_telSecV;
+      lastEncV = m_telEncV;
    }
    
-   while(shutdown() == 0)
-   {
-      float kpos = m_kmirrRotZeroPt + m_kmirrRotSign * m_kmirrRotFactor * m_telZd;
-      
-      std::cerr << "New kpos: " << kpos << "\n";
-      
-      
-      
-      sleep(1);
-   }
-   
-   
-   
-   
+   return 0;
 }
 
+inline
+int tcsInterface::recordTelEnv(bool force)
+{
+   static double lastWxtemp = -999;  
+   static double lastWxpres = -999;   
+   static double lastWxhumid = -999;
+   static double lastWxwind = -999;   
+   static double lastWxwdir = -999;   
+   static double lastTtruss = -999;   
+   static double lastTcell = -999;    
+   static double lastTseccell = -999; 
+   static double lastTambient = -999; 
+   static double lastWxdewpoint = -999; 
+   
+   
+   if( force ||  lastWxtemp != m_wxtemp ||
+                 lastWxpres != m_wxpres ||
+                 lastWxhumid != m_wxhumid ||
+                 lastWxwind != m_wxwind ||
+                 lastWxwdir != m_wxwdir ||
+                 lastTtruss != m_ttruss ||
+                 lastTcell != m_tcell ||
+                 lastTseccell != m_tseccell ||
+                 lastTambient !=   m_tambient ||
+                 lastWxdewpoint != m_wxdewpoint )
+   {
+      telem<telem_telenv>({m_wxtemp, m_wxpres, m_wxhumid, m_wxwind, m_wxwdir, m_ttruss, m_tcell, m_tseccell, m_tambient, m_wxdewpoint});
+      
+      lastWxtemp = m_wxtemp;
+      lastWxpres = m_wxpres;
+      lastWxhumid = m_wxhumid;
+      lastWxwind = m_wxwind;
+      lastWxwdir = m_wxwdir;
+      lastTtruss = m_ttruss;
+      lastTcell = m_tcell;
+      lastTseccell = m_tseccell;
+      lastTambient =   m_tambient;
+      lastWxdewpoint = m_wxdewpoint;
+
+   }
+   
+   return 0;
+}
 
 void tcsInterface::offloadThreadStart( tcsInterface * t )
 {

@@ -1,0 +1,20 @@
+namespace MagAOX.logger;
+
+
+
+table Telem_telvane_fb
+{
+   secz:double;
+   encz:double;
+   secx:double;
+   encx:double;
+   secy:double;
+   ency:double;
+   sech:double;
+   ench:double;
+   secv:double;
+   encv:double;
+}
+
+root_type Telem_telvane_fb;
+

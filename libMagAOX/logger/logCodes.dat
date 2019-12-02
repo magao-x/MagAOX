@@ -31,6 +31,8 @@ saving_stats             12502    saving_stats
 
 telem_telpos             20000    telem_telpos
 telem_teldata            20001    telem_teldata
+telem_telvane            20002    telem_telvane
+telem_telenv             20003    telem_telenv
 
 telem_stage              20050    telem_stage
 telem_zaber              20055    telem_zaber
