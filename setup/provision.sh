@@ -305,6 +305,7 @@ if [[ $MAGAOX_ROLE == AOC || $MAGAOX_ROLE == vm ||  $MAGAOX_ROLE == workstation 
     $MAYBE_SUDO bash -l "$DIR/steps/install_sup.sh"
     # realtime image viewer
     $MAYBE_SUDO bash -l "$DIR/steps/install_rtimv.sh"
+    sudo bash -l "$DIR/steps/install_ds9.sh"
 fi
 
 # aliases to improve ergonomics of MagAO-X ops
