@@ -1,4 +1,5 @@
 #!/bin/bash
+set -e
 # Query for seeing measurements from DIMM and Magellans
 # Joseph Long - 2019B
 # Database assistance (and access for exao1) by Gabriel Prieto
@@ -10,7 +11,7 @@ fi
 
 # DIMM columns
 # tm - timestamp
-# fw - FWHM
+# se - FWHM
 # el - elevation
 export dimm=$(mysql \
     --raw \
