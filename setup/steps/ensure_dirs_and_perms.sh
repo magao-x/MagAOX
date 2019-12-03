@@ -89,6 +89,12 @@ chown root:magaox-dev /opt/MagAOX/vendor
 chmod u=rwX,g=rwX,o=rX /opt/MagAOX/vendor
 setgid_all /opt/MagAOX/vendor
 
+if [[ "$MAGAOX_ROLE" == "AOC" ]]; then
+  mkdir -pv /opt/MagAOX/rtc/cacao
+  chown xsup:magaox /opt/MagAOX/rtc /opt/MagAOX/rtc/cacao
+  chmod u=rwX,g=rwX,o=rX /opt/MagAOX/rtc /opt/MagAOX/rtc/cacao
+fi
+
 if [[ "$MAGAOX_ROLE" == "vm" && "$VM_WINDOWS_HOST" == 0 ]]; then
   mkdir -pv /vagrant/vm/cache
   link_if_necessary /vagrant/vm/cache /opt/MagAOX/.cache
