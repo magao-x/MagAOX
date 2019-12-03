@@ -1,0 +1,59 @@
+#!/bin/bash
+# Query for seeing measurements from DIMM and Magellans
+# Joseph Long - 2019B
+# Database assistance (and access for exao1) by Gabriel Prieto
+
+# Don't run except at LCO
+if ! nmcli con show --active | grep www-lco &> /dev/null; then
+    exit
+fi
+
+SEEING_TELEM_DIR=/opt/MagAOX/telem/seeing_monitor
+
+mkdir -p $SEEING_TELEM_DIR
+echo -e "site\ttime\t\t\tfwhm\televation"
+# DIMM columns
+# tm - timestamp
+# fw - FWHM
+# el - elevation
+export dimm=$(mysql \
+    --silent \
+    --raw \
+    --batch \
+    --skip-column-names \
+    --connect-timeout=1 \
+    --host clima.lco.cl \
+    --user read_data_ao \
+    --execute "select tm as datetime, se as fwhm, el as elevation from dimm_data where un = 0 order by tm desc limit 1" \
+    weather)
+echo -e "dimm\t$dimm"
+echo "$dimm" > $SEEING_TELEM_DIR/dimm.tsv
+
+# Magellan Baade and Clay columns
+# tm - timestamp
+# fw - fwhm
+# el - elevation
+export mag1=$(mysql \
+    --silent \
+    --raw \
+    --batch \
+    --skip-column-names \
+    --connect-timeout=1 \
+    --host clima.lco.cl \
+    --user read_data_ao \
+    --execute "select tm as datetime, fw as fwhm, el as elevation from magellan_data where un = 0 order by tm desc limit 1" \
+    weather)
+echo -e "mag1\t$mag1"
+echo "$mag1" > $SEEING_TELEM_DIR/mag1.tsv
+export mag2=$(mysql \
+    --silent \
+    --raw \
+    --batch \
+    --skip-column-names \
+    --connect-timeout=1 \
+    --host clima.lco.cl \
+    --user read_data_ao \
+    --execute "select tm as datetime, fw as fwhm, el as elevation from magellan_data where un = 1 order by tm desc limit 1" \
+    weather)
+echo -e "mag2\t$mag2"
+echo "$mag2" > $SEEING_TELEM_DIR/mag2.tsv
