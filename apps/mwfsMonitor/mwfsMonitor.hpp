@@ -479,7 +479,6 @@ int mwfsMonitor::processImage( void * curr_src,
    //background subtract
    m_im -= (m_im.coeff(0, 0) + m_im.coeff(0,shmimMonitorT::m_height-1) + m_im.coeff(shmimMonitorT::m_width-1, 0) + m_im.coeff(shmimMonitorT::m_width-1,shmimMonitorT::m_height-1)) / 4.;
 
-
    // dark subtract
    /*
    if(m_darkSet && !m_dark2Set) m_avgImage -= m_darkImage;
@@ -498,6 +497,7 @@ int mwfsMonitor::processImage( void * curr_src,
 
       if( x > 0  && y > 0)
       {
+         // just take maximum within psf cutout for now
          m_Peaks[n] = m_im.block(x, y, m_boxSize, m_boxSize).maxCoeff();
          //std::cout << "Peak " << std::to_string(n) << ": " << std::to_string(m_Peaks[n]) << "\n";
       }
@@ -510,9 +510,16 @@ int mwfsMonitor::processImage( void * curr_src,
 
    for(size_t n=0; n < m_mSignals.size(); ++n)
    {
-      // you could divide by zero here
-      m_mSignals[n] = m_Peaks[n] - m_Peaks[n+m_nSpots/2] /  (m_Peaks[n] +m_Peaks[n+m_nSpots/2]);
-      //std::cout << "Signal " << std::to_string(n) << ": " << std::to_string(m_mSignals[n]) << "\n";
+      realT sum = (m_Peaks[n] + m_Peaks[n+m_nSpots/2]);
+      realT diff = (m_Peaks[n] - m_Peaks[n+m_nSpots/2]);
+      if(sum != 0)
+      {
+         m_mSignals[n] = diff / sum;
+      }
+      else // avoid dividing by 0
+      {
+         m_mSignals[n] = 0;
+      }
    }
 
    m_updated = true;
