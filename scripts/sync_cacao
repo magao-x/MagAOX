@@ -1,0 +1,8 @@
+#!/bin/bash
+set -euo pipefail
+
+if [[ -z $MAGAOX_ROLE || $MAGAOX_ROLE != AOC ]]; then
+  echo "You probably want to run this on AOC! Aborting."
+  exit 1
+fi
+/usr/bin/sudo -u xsup rsync -avz rtc:/opt/MagAOX/cacao /opt/MagAOX/rtc/cacao

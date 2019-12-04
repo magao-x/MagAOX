@@ -4,7 +4,7 @@ SELF_DIR := $(abspath $(dir $(lastword $(MAKEFILE_LIST))))
 apps_common = \
 	sshDigger \
 	sysMonitor \
-	xindiserver 
+	xindiserver
 
 apps_rtcicc = \
 	mzmqServer \
@@ -19,7 +19,7 @@ apps_rtc = \
 	ttmModulator \
 	bmcCtrl \
 	pi335Ctrl \
-	pupilFit 
+	pupilFit
 
 apps_icc = \
 	filterWheelCtrl \
@@ -80,7 +80,7 @@ utils_to_build = logdump \
                  cursesINDI \
 				 xrif2shmim
 
-scripts_to_install = magaox
+scripts_to_install = magaox query_seeing sync_cacao
 
 all: indi_all libs_all apps_all utils_all
 
