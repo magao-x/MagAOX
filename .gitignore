@@ -60,6 +60,9 @@ INDI/INDI/indiserver
 INDI/INDI/setINDI
 INDI/xindidriver/xindidriver
 
+#k
+apps/kTracker/kTracker
+
 #m
 apps/mzmqServer/mzmqServer
 

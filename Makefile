@@ -38,7 +38,9 @@ apps_icc = \
 apps_aoc = \
 	trippLitePDU \
 	mzmqClient \
-        tcsInterface
+        tcsInterface \
+        adcTracker \
+        kTracker
 
 apps_vm = \
 	magAOXMaths \
