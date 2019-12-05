@@ -15,6 +15,7 @@
 
 #include "../../libMagAOX/app/dev/telemeter.hpp"
 
+//#define LOG_TCS_STATUS
 
 /** \defgroup tcsInterface
   * \brief The MagAO-X application to do interface with the Clay TCS
@@ -60,6 +61,9 @@ protected:
 
 
    tty::netSerial m_sock; 
+   
+   ///Mutex for locking INDI communications.
+   std::mutex m_tcsMutex;
    
    //Telescope position:
    double m_telEpoch {0};
@@ -127,6 +131,7 @@ protected:
    pcf::IndiProperty m_indiP_env; ///< INDI Property for environment
 
    
+   
 public:
    /// Default c'tor.
    tcsInterface();
@@ -166,6 +171,10 @@ public:
    int getMagTelStatus( std::string & response,
                         const std::string &statreq
                       );
+
+   int sendMagTelCommand( const std::string &command, 
+                          int timeout
+                        );
 
    int parse_xms( double &x, 
                   double &m, 
@@ -214,6 +223,25 @@ public:
    
    INDI_SETCALLBACK_DECL(tcsInterface, m_indiP_loopState);
    
+   /** \name Pyramid Nudging
+     * Handling of nudges on pyramid tip.
+     * @{
+     */
+   
+   //The Pyramid to AEG control matrix
+   float m_pyrNudge_C_00 {1};
+   float m_pyrNudge_C_01 {0};
+   float m_pyrNudge_C_10 {0};
+   float m_pyrNudge_C_11 {1};
+   
+   int sendPyrNudge( float n_0,
+                     float n_1
+                   );
+   
+   pcf::IndiProperty m_indiP_pyrNudge; ///< Property used to request a pyramid nudge
+   INDI_NEWCALLBACK_DECL(tcsInterface, m_indiP_pyrNudge);
+   
+   ///@}
    
    /** \name Woofer Offloading
      * Handling of offloads from the average woofer shape to the telescope
@@ -258,8 +286,8 @@ public:
    //The TT control matrix
    float m_offlTT_C_00 {1};
    float m_offlTT_C_01 {0};
-   float m_offlTT_C_10 {1};
-   float m_offlTT_C_11 {0};
+   float m_offlTT_C_10 {0};
+   float m_offlTT_C_11 {1};
    
    bool m_offlTT_enabled {false};
    bool m_offlTT_dump {false};
@@ -327,6 +355,10 @@ tcsInterface::tcsInterface() : MagAOXApp(MAGAOX_CURRENT_SHA1, MAGAOX_REPO_MODIFI
 inline
 void tcsInterface::setupConfig()
 {
+   config.add("pyrNudger.C_00", "", "pyrNudger.C_00", argType::Required, "pyrNudger", "C_00", false, "float", "Pyramid to AEG control matrix [0,0] of a 2x2 matrix");
+   config.add("pyrNudger.C_01", "", "pyrNudger.C_01", argType::Required, "pyrNudger", "C_01", false, "float", "Pyramid to AEG control matrix [0,1] of a 2x2 matrix ");
+   config.add("pyrNudger.C_10", "", "pyrNudger.C_10", argType::Required, "pyrNudger", "C_10", false, "float", "Pyramid to AEG control matrix [1,0] of a 2x2 matrix ");
+   config.add("pyrNudger.C_11", "", "pyrNudger.C_11", argType::Required, "pyrNudger", "C_11", false, "float", "Pyramid to AEG control matrix [1,1] of a 2x2 matrix ");
    
    config.add("offload.TT_avgInt", "", "offload.TT_avgInt", argType::Required, "offload", "TT_avgInt", false, "float", "Woofer to Telescope T/T offload averaging interval [sec] ");
    config.add("offload.TT_gain", "", "offload.TT_gain", argType::Required, "offload", "TT_gain", false, "float", "Woofer to Telescope T/T offload gain");
@@ -359,6 +391,11 @@ void tcsInterface::setupConfig()
 inline
 int tcsInterface::loadConfigImpl( mx::app::appConfigurator & _config )
 {
+   _config(m_pyrNudge_C_00, "pyrNudger.C_00");
+   _config(m_pyrNudge_C_01, "pyrNudger.C_01");
+   _config(m_pyrNudge_C_10, "pyrNudger.C_10");
+   _config(m_pyrNudge_C_11, "pyrNudger.C_11");
+   
    _config(m_offlTT_avgInt, "offload.TT_avgInt");
    _config(m_offlTT_gain, "offload.TT_gain");
    _config(m_offlTT_thresh, "offload.TT_thresh");
@@ -524,7 +561,9 @@ int tcsInterface::appStartup()
       return log<software_error,-1>({__FILE__,__LINE__});
    }
    
-   
+   REG_INDI_NEWPROP(m_indiP_pyrNudge, "pyrNudge", pcf::IndiProperty::Number);
+   m_indiP_pyrNudge.add(pcf::IndiElement("updown"));
+   m_indiP_pyrNudge.add(pcf::IndiElement("leftright"));
    
    
    createStandardIndiRequestSw( m_indiP_offlTTdump, "offlTT_dump");
@@ -768,13 +807,12 @@ int tcsInterface::getMagTelStatus( std::string & response,
    char answer[512];
    std::string statreq_nl;
 
-
-   //pthread_mutex_lock(&aoiMutex);
-
    #ifdef LOG_TCS_STATUS
-   log<text_log<("Sending status request: " + statreq);
+   log<text_log>("Sending status request: " + statreq);
    #endif
 
+   std::lock_guard<std::mutex> guard(m_tcsMutex);
+   
    statreq_nl = statreq;
    statreq_nl += '\n';
    stat = m_sock.serialOut(statreq_nl.c_str(), statreq_nl.length());
@@ -799,13 +837,57 @@ int tcsInterface::getMagTelStatus( std::string & response,
    if(nl) answer[nl-answer] = '\0';
 
    #ifdef LOG_TCS_STATUS
-   log<text_log>("Received response: " + answer);
+   log<text_log>(std::string("Received response: ") + answer);
    #endif
 
    response = answer;
    
    return 0;
-}
+}//int tcsInterface::getMagTelStatus
+
+inline
+int tcsInterface::sendMagTelCommand( const std::string &command, 
+                                     int timeout
+                                   )
+{
+   int stat;
+   char answer[512];
+   std::string command_nl;
+   
+   #ifdef LOG_TCS_STATUS
+   log<text_log>("Sending command: " + command);
+   #endif
+   
+   std::lock_guard<std::mutex> guard(m_tcsMutex);
+   
+   command_nl = command;
+   command_nl += '\n';
+   stat = m_sock.serialOut(command_nl.c_str(), command_nl.length());
+
+   if(stat != NETSERIAL_E_NOERROR)
+   {
+      log<text_log>("Error sending command: " + command, logPrio::LOG_ERROR);
+      return -1000;
+   }
+   
+   stat = m_sock.serialInString(answer, sizeof(answer), timeout, '\n');
+   
+   if(stat <= 0)
+   {
+      log<text_log>("No response received to command: " + command, logPrio::LOG_ERROR);
+      return -1000;
+   }
+   
+   char * nl = strchr(answer, '\n');
+   if(nl) answer[nl-answer] = '\0';
+   
+   #ifdef LOG_TCS_STATUS
+   log<text_log>(std::string("Received response: ") + answer);
+   #endif
+   
+   return atoi(answer);
+   
+}//int tcsInterface::sendMagTelCommand
 
 inline
 std::vector<std::string> tcsInterface::parse_teldata( std::string &tdat )
@@ -1446,6 +1528,37 @@ int tcsInterface::updateINDI()
       return -1;
    }
    
+   try
+   {
+      if(m_offlF_dump)
+      {
+         updateSwitchIfChanged(m_indiP_offlFdump, "request", pcf::IndiElement::On, INDI_BUSY);
+      }
+      else
+      {
+         updateSwitchIfChanged(m_indiP_offlFdump, "request", pcf::IndiElement::Off, INDI_IDLE);
+      }
+      
+      if(m_offlF_enabled)
+      {
+         updateSwitchIfChanged(m_indiP_offlFenable, "toggle", pcf::IndiElement::On, INDI_BUSY);
+      }
+      else
+      {
+         updateSwitchIfChanged(m_indiP_offlFenable, "toggle", pcf::IndiElement::Off, INDI_IDLE);
+      }
+      
+      updateIfChanged(m_indiP_offlFavgInt, "current", m_offlF_avgInt);
+      updateIfChanged(m_indiP_offlFgain, "current", m_offlF_gain);
+      updateIfChanged(m_indiP_offlFthresh, "current", m_offlF_thresh);
+      
+   }
+   catch(...)
+   {
+      log<software_error>({__FILE__,__LINE__,"INDI library exception"});
+      return -1;
+   }
+   
    return 0;
 }
 
@@ -1644,6 +1757,22 @@ int tcsInterface::recordTelEnv(bool force)
    return 0;
 }
 
+int tcsInterface::sendPyrNudge( float n_0,
+                                float n_1
+                              )
+{
+   float pn_0 = m_pyrNudge_C_00 * n_0 + m_pyrNudge_C_01 * n_1;
+   float pn_1 = m_pyrNudge_C_10 * n_0 + m_pyrNudge_C_11 * n_1;
+   
+   char ttstr[64];
+   snprintf(ttstr, sizeof(ttstr) , "aeg %f %f", pn_0, pn_1);
+
+   std::cerr << "sending " << ttstr << "\n";
+   return sendMagTelCommand(ttstr, 1000);
+   
+   return 0;
+}
+
 void tcsInterface::offloadThreadStart( tcsInterface * t )
 {
    t->offloadThreadExec();
@@ -1653,7 +1782,7 @@ void tcsInterface::offloadThreadExec( )
 {
    static int last_loopState = -1;
    
-   while( m_offloadThreadInit == true && shutdown() == 0)
+   while( (m_offloadThreadInit == true || state() != stateCodes::CONNECTED) && shutdown() == 0)
    {
       sleep(1);
    }
@@ -1674,7 +1803,6 @@ void tcsInterface::offloadThreadExec( )
          //If this is new, then reset the averaging buffer
          if(m_loopState != last_loopState)
          {
-            std::cerr << "resetting\n";
             m_firstRequest = 0;
             m_lastRequest = std::numeric_limits<size_t>::max();
             m_nRequests = 0;
@@ -1821,23 +1949,30 @@ int tcsInterface::sendTToffload( float tt_0,
                                  float tt_1
                                )
 {
+#if 0
    pcf::IndiProperty ip(pcf::IndiProperty::Number);
    ip.setDevice("modwfs");
    ip.setName("offset12");
    ip.add(pcf::IndiElement("dC1"));
    ip.add(pcf::IndiElement("dC2"));
    
-   
-   
    sendNewProperty (ip); 
-   
    
    ip["dC1"] = tt_0;
    ip["dC2"] = tt_1;
    
    sendNewProperty(ip);
+#endif
+
+   char ttstr[64];
+   snprintf(ttstr, sizeof(ttstr) , "aeg %f %f", tt_0, tt_1);
+
+   std::cerr << "**********************\n\n";
+   std::cerr << ttstr << "\n";
+   std::cerr << "**********************\n\n";
    
-   return 0;
+   
+   return sendMagTelCommand(ttstr, 1000);
 }
 
 int tcsInterface::doFoffload( float F_0 )
@@ -1874,11 +2009,40 @@ int tcsInterface::doFoffload( float F_0 )
 
 int tcsInterface::sendFoffload( float F_0 )
 {
-   static_cast<void>(F_0);
+   char fstr[64];
    
-   log<text_log>("focus offloading not implemented!", logPrio::LOG_WARNING);
+   //Use zimr to update the IMA values
+   snprintf(fstr, sizeof(fstr), "zimr %f", F_0);
    
-   return 0;
+   std::cerr << "+++++++++++++++++++++++\n\n";
+   std::cerr << fstr << "\n";
+   std::cerr << "+++++++++++++++++++++++\n\n";
+   
+   return sendMagTelCommand(fstr, 1000);
+}
+
+INDI_NEWCALLBACK_DEFN(tcsInterface, m_indiP_pyrNudge)(const pcf::IndiProperty &ipRecv)
+{
+   if(ipRecv.getName() != m_indiP_pyrNudge.getName())
+   {
+      log<software_error>({__FILE__,__LINE__, "wrong INDI property received."});
+      return -1;
+   }
+   
+   float ud = 0;
+   float lr = 0;
+   
+   if(ipRecv.find("updown"))
+   {
+      ud = ipRecv["updown"].get<float>();
+   }
+   
+   if(ipRecv.find("leftright"))
+   {
+      lr = ipRecv["leftright"].get<float>();
+   }
+   
+   return sendPyrNudge(ud, lr);
 }
 
 INDI_SETCALLBACK_DEFN(tcsInterface, m_indiP_loopState)(const pcf::IndiProperty &ipRecv)

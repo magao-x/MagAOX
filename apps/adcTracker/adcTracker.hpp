@@ -74,6 +74,8 @@ protected:
    
    std::string m_tcsDevName {"tcsi"}; ///< The device name of the TCS Interface providing 'teldata.zd'.  Default is 'tcsi'
    
+   float m_updateInterval {10};
+   
    ///@}
 
 
@@ -193,6 +195,8 @@ void adcTracker::setupConfig()
    config.add("adcs.adc2DevName", "", "adcs.adc2devName", argType::Required, "adcs", "adc2DevName", false, "string", "The device name of the ADC 2 stage.  Default is 'stageadc2'");
    
    config.add("tcs.devName", "", "tcs.devName", argType::Required, "tcs", "devName", false, "string", "The device name of the TCS Interface providing 'teldata.zd'.  Default is 'tcsi'");
+
+   config.add("tracking.updateInterval", "", "tracking.updateInterval", argType::Required, "tracking", "updateInterval", false, "float", "The interval at which to update positions, in seconds.  Default is 10 secs.");
 }
 
 int adcTracker::loadConfigImpl( mx::app::appConfigurator & _config )
@@ -210,6 +214,8 @@ int adcTracker::loadConfigImpl( mx::app::appConfigurator & _config )
    _config(m_adc2DevName, "adcs.adc2DevName");
    
    _config(m_tcsDevName, "tcs.devName");
+   
+   _config(m_updateInterval, "tracking.updateInterval");
    
    return 0;
 }
@@ -286,8 +292,9 @@ int adcTracker::appStartup()
 int adcTracker::appLogic()
 {
    
+   static double lastupdate = 0;
    
-   if(m_tracking)
+   if(m_tracking && mx::get_curr_time() - lastupdate > m_updateInterval)
    {
       float dadc1 = 0.0;
       float dadc2 = 0.0;
@@ -305,12 +312,14 @@ int adcTracker::appLogic()
       
       
       m_indiP_adc1pos["target"] = adc1;
-      //sendNewProperty (m_indiP_adc1pos); 
+      sendNewProperty (m_indiP_adc1pos); 
       
       m_indiP_adc2pos["target"] = adc2;
-      //sendNewProperty (m_indiP_adc2pos); 
+      sendNewProperty (m_indiP_adc2pos); 
+      
+      lastupdate = mx::get_curr_time();
    }
-   
+   else if(!m_tracking) lastupdate = 0;
       
    return 0;
 }

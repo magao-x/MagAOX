@@ -56,9 +56,11 @@ protected:
    std::string m_devName {"stagek"}; ///< The device name of the K-mirror stage.  Default is 'stagek'
    std::string m_tcsDevName {"tcsi"}; ///< The device name of the TCS Interface providing 'teldata.zd'.  Default is 'tcsi'
    
+   float m_updateInterval {10};
+   
    ///@}
 
-   bool m_tracking {false};
+   bool m_tracking {false}; ///< The interval at which to update positions, in seconds.  Default is 10 secs.
    
    float m_zd {0};
    
@@ -140,6 +142,8 @@ void kTracker::setupConfig()
    config.add("k.devName", "", "k.devName", argType::Required, "k", "devName", false, "string", "The device name of the k-mirrorstage.  Default is 'stagek'");
    
    config.add("tcs.devName", "", "tcs.devName", argType::Required, "tcs", "devName", false, "string", "The device name of the TCS Interface providing 'teldata.zd'.  Default is 'tcsi'");
+   
+   config.add("tracking.updateInterval", "", "tracking.updateInterval", argType::Required, "tracking", "updateInterval", false, "float", "The interval at which to update positions, in seconds.  Default is 10 secs.");
 }
 
 int kTracker::loadConfigImpl( mx::app::appConfigurator & _config )
@@ -150,6 +154,8 @@ int kTracker::loadConfigImpl( mx::app::appConfigurator & _config )
    
    _config(m_tcsDevName, "tcs.devName");
    
+   _config(m_updateInterval, "tracking.updateInterval");
+
    return 0;
 }
 
@@ -181,19 +187,22 @@ int kTracker::appStartup()
 int kTracker::appLogic()
 {
    
+   static double lastupdate = 0;
    
-   if(m_tracking)
+   if(m_tracking && mx::get_curr_time() - lastupdate > m_updateInterval)
    {
       float k = m_zero + m_sign*0.5*m_zd;
       
       std::cerr << "Sending k-mirror to: " << k << "\n";
       
-      
       m_indiP_kpos["target"] = k;
-      //sendNewProperty (m_indiP_adc1pos); 
+      sendNewProperty (m_indiP_kpos); 
+      
+      lastupdate = mx::get_curr_time();
+      
       
    }
-   
+   else if(!m_tracking) lastupdate = 0;
       
    return 0;
 }
