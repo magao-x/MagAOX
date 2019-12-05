@@ -399,10 +399,8 @@ inline
 int t2wOffloader::zero()
 {
    
-   std::cerr << "trying to zero\n";
    //Check if processImage is running
    while(m_dmStream.md[0].write == 1);
-   std::cerr << "starting to zero\n";
    
    m_dmStream.md[0].write = 1;
    
