@@ -79,18 +79,17 @@ protected:
      * @{
      */
 
-   uint32_t m_width {0}; ///< The width of the image.
-   uint32_t m_height {0}; ///< The height of the image.
+   //uint32_t m_width {0}; ///< The width of the image.
+   //uint32_t m_height {0}; ///< The height of the image.
 
-   mx::improc::eigenCube<float> m_frames;
+   //mx::improc::eigenCube<unsigned short> m_frames;
 
-   uint8_t m_dataType; ///< The ImageStreamIO type code.
+   //uint8_t m_dataType; ///< The ImageStreamIO type code.
 
-   size_t m_typeSize {0}; ///< The size of the type, in bytes.  Result of sizeof.
+   //size_t m_typeSize {0}; ///< The size of the type, in bytes.  Result of sizeof.
 
 
-   IMAGE m_imageStream; ///< The ImageStreamIO shared memory buffer.
-
+   
 
    ///@}
 
@@ -200,95 +199,12 @@ int xrif2fits::execute()
       return -1;
    }
 
-   long st = 0;
-   long ed = m_files.size();
-   int stp = 1;
-
-
    char header[XRIF_HEADER_SIZE];
 
-   size_t nframes = 0;
-
-   //First get number of frames.
-   for(long n=st; n != ed; n += stp)
-   {
-      FILE * fp_xrif = fopen(m_files[n].c_str(), "rb");
-      size_t nr = fread(header, 1, XRIF_HEADER_SIZE, fp_xrif);
-      fclose(fp_xrif);
-      if(nr != XRIF_HEADER_SIZE)
-      {
-         std::cerr << " (" << invokedName << "): Error reading header of " << m_files[n] << "\n";
-         std::cerr << " read " << nr << "\n";
-         return -1;
-      }
-
-      uint32_t header_size;
-      xrif_read_header(m_xrif, &header_size , header);
-
-      if(n==st)
-      {
-         m_width = m_xrif->width;
-         m_height = m_xrif->height;
-         m_dataType = m_xrif->type_code;
-      }
-      else
-      {
-         if(m_xrif->width != m_width)
-         {
-            std::cerr << " (" << invokedName << "): width mis-match in " << m_files[n] << "\n";
-            return -1;
-         }
-         if(m_xrif->height != m_height)
-         {
-            std::cerr << " (" << invokedName << "): height mis-match in " << m_files[n] << "\n";
-            return -1;
-         }
-         if(m_xrif->type_code != m_dataType)
-         {
-            std::cerr << " (" << invokedName << "): data type mismatch in " << m_files[n] << "\n";
-         }
-      }
-
-      if(m_xrif->depth != 1)
-      {
-         std::cerr << " (" << invokedName << "): Cubes detected in " << m_files[n] << "\n";
-         return -1;
-      }
-
-      /*if(m_dataType !=  XRIF_TYPECODE_INT16)
-      {
-         std::cerr << " (" << invokedName << "): Only 16-bit signed integers (short) supported" << "\n";
-         return -1;
-      }*/
-
-      nframes += m_xrif->frames;
-
-   }
-
-   if(g_timeToDie != false)
-   {
-      std::cerr << " (" << invokedName << "): exiting.\n";
-      return -1;
-   }
-
-   //Now record the actual number of frames
-   //m_numFrames = nframes;
-
-   std::cerr << " (" << invokedName << "): Reading " << nframes << " frames in " << (ed-st)*stp << " file";
-   if( (ed-st)*stp > 1) std::cerr << "s";
-   std::cerr << "\n";
-
-   //Allocate the storage
-   m_typeSize = xrif_typesize(m_dataType);
-
-   m_frames.resize(m_width, m_height, nframes);
-
    
-   int findex = 0;
-
    //Now de-compress and load the frames
    //Only decompressing the number of files needed, and only copying the number of frames needed
-   for(long n=st; n < ed; ++n)
+   for(size_t n=0; n < m_files.size(); ++n)
    {
       if(g_timeToDie == true) break; //check before going on
 
@@ -337,36 +253,17 @@ int xrif2fits::execute()
 
       mx::improc::eigenCube<unsigned short> tmpc( (unsigned short*) m_xrif->raw_buffer, m_xrif->width, m_xrif->height, m_xrif->frames);
 
-      //Determine the order in which frames in tmpc are read
-      long pst = 0;
-      long ped = tmpc.planes();
       
-      for( int p = pst; p != ped; ++p)
-      {
-         for(int ii=0;ii<m_frames.rows();++ii)
-         {
-            for(int jj=0;jj<m_frames.cols();++jj)
-            {
-               m_frames.image(findex)(ii,jj) = tmpc.image(p)(ii,jj);
-            }
-         }
-         ++findex;
-      }
-   
-      //De-allocate xrif
-      xrif_delete(m_xrif);
-      m_xrif = nullptr; //This is so destructor doesn't choke
-
       
-      std::cerr << " (" << invokedName << "): Creating fits file: " << "  (" << m_width << " x " << m_height << " x " << nframes << ")\n";
+      std::cerr << " (" << invokedName << "): Creating fits file: " << "  (" << m_xrif->width << " x " <<  m_xrif->height << " x " << m_xrif->frames << ")\n";
 
-      mx::improc::fitsFile<float> ff;
+      mx::improc::fitsFile<unsigned short> ff;
    
       std::string outname = m_files[n];
       size_t ext = outname.find(".xrif");
       outname.replace( ext, 5, ".fits");
    
-      ff.write(outname, m_frames);
+      ff.write(outname, tmpc);
    }
 
    std::cerr << " (" << invokedName << "): exited normally.\n";
