@@ -217,7 +217,7 @@ void cacaoInterface::fmThreadExec( )
    
    while(shutdown() == 0)
    {
-      f_loop.open("/opt/MagAOX/cacao/tweeter/status/stat_loopON.txt");
+      f_loop.open("/opt/MagAOX/cacao/woofer/status/stat_loopON.txt");
       
       if(!f_loop.is_open()) 
       {
@@ -226,7 +226,7 @@ void cacaoInterface::fmThreadExec( )
       }
       
       
-      f_gain.open("/opt/MagAOX/cacao/tweeter/conf/param_loopgain.txt");
+      f_gain.open("/opt/MagAOX/cacao/woofer/conf/param_loopgain.txt");
       
       if(!f_gain.is_open()) 
       {

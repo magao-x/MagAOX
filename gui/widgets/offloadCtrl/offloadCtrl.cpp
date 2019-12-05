@@ -196,15 +196,8 @@ void offloadCtrl::on_t2w_zero_pressed()
    ip.setName("zero");
    ip.add(pcf::IndiElement("request"));
    
-   if(m_t2wOffloadingEnabled)
-   {
-      ip["request"].setSwitchState(pcf::IndiElement::Off);
-   }
-   else
-   {
-      ip["request"].setSwitchState(pcf::IndiElement::On);
-   }
-   
+   ip["request"].setSwitchState(pcf::IndiElement::On);
+      
    sendNewProperty(ip);
    
 }

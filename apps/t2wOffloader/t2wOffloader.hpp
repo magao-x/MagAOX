@@ -135,6 +135,8 @@ public:
                    );
    
 
+   int zero();
+   
 protected:
 
   
@@ -363,6 +365,9 @@ int t2wOffloader::processImage( void * curr_src,
    if(!m_offloading) return 0;
    
    m_wooferDelta = m_twRespM.matrix() * Eigen::Map<Matrix<float,-1,-1>>((float *)curr_src,  m_width*m_height,1);
+
+   while(m_dmStream.md[0].write == 1); //Check if zero() is running
+   
    
    m_woofer = m_gain* Eigen::Map<Array<float,-1,-1>>( m_wooferDelta.data(), m_dmWidth, m_dmHeight) + (1.0-m_leak)*m_woofer;
       
@@ -390,6 +395,31 @@ int t2wOffloader::processImage( void * curr_src,
    return 0;
 }
 
+inline
+int t2wOffloader::zero()
+{
+   
+   std::cerr << "trying to zero\n";
+   //Check if processImage is running
+   while(m_dmStream.md[0].write == 1);
+   std::cerr << "starting to zero\n";
+   
+   m_dmStream.md[0].write = 1;
+   
+   m_woofer.setZero();
+
+   memcpy(m_dmStream.array.raw, m_woofer.data(),  m_woofer.rows()*m_woofer.cols()*m_typeSize);
+   
+   m_dmStream.md[0].cnt0++;
+   
+   m_dmStream.md->write=0;
+   ImageStreamIO_sempost(&m_dmStream,-1);
+   
+   log<text_log>("zeroed", logPrio::LOG_NOTICE);
+   
+   return 0;
+      
+}
 
 INDI_NEWCALLBACK_DEFN(t2wOffloader, m_indiP_gain)(const pcf::IndiProperty &ipRecv)
 {
@@ -479,8 +509,7 @@ INDI_NEWCALLBACK_DEFN(t2wOffloader, m_indiP_zero)(const pcf::IndiProperty &ipRec
    
    if( ipRecv["request"].getSwitchState() == pcf::IndiElement::On)
    {
-      m_woofer.setZero();
-      log<text_log>("zeroed", logPrio::LOG_NOTICE);
+      return zero();
    
    }
    return 0;

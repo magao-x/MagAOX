@@ -456,6 +456,14 @@ public:
 
    ///@}
    
+   /** \name Telemeter Interface 
+     * @{
+     */
+   
+   int recordCamera( bool force = false );
+   
+   ///@}
+   
 private:
    derivedT & derived()
    {
@@ -1109,6 +1117,18 @@ int stdCamera<derivedT>::updateINDI()
    }
    
    return 0;
+}
+
+int recordCamera( bool force )
+{
+   if(!force)
+   {
+      return 0;
+   }
+   
+   
+   return 0;
+   
 }
 
 
