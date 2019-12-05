@@ -67,6 +67,7 @@ protected:
    float m_gain {0.1};
    float m_leak {0.0};
    
+   float m_actLim {7.0}; ///< the upper limit on woofer actuator commands.  default is 7.0.
    
    ///@}
 
@@ -140,6 +141,7 @@ protected:
    
    pcf::IndiProperty m_indiP_gain;
    pcf::IndiProperty m_indiP_leak;
+   pcf::IndiProperty m_indiP_actLim;
    
    pcf::IndiProperty m_indiP_zero;
    
@@ -147,6 +149,8 @@ protected:
    
    INDI_NEWCALLBACK_DECL(t2wOffloader, m_indiP_gain);
    INDI_NEWCALLBACK_DECL(t2wOffloader, m_indiP_leak);
+   INDI_NEWCALLBACK_DECL(t2wOffloader, m_indiP_actLim);
+   
    INDI_NEWCALLBACK_DECL(t2wOffloader, m_indiP_zero);
    INDI_NEWCALLBACK_DECL(t2wOffloader, m_indiP_offloadToggle);
 };
@@ -169,6 +173,7 @@ void t2wOffloader::setupConfig()
    config.add("offload.gain", "", "offload.gain", argType::Required, "offload", "gain", false, "float", "The starting offload gain.  Default is 0.1.");
    config.add("offload.leak", "", "offload.leak", argType::Required, "offload", "leak", false, "float", "The starting offload leak.  Default is 0.0.");
    config.add("offload.startupOffloading", "", "offload.startupOffloading", argType::Required, "offload", "startupOffloading", false, "bool", "Flag controlling whether offloading is on at startup.  Default is false.");
+   config.add("offload.actLim", "", "offload.actLim", argType::Required, "offload", "actLim", false, "float", "The woofer actuator command limit.  Default is 7.0.");
 }
 
 inline
@@ -181,6 +186,7 @@ int t2wOffloader::loadConfigImpl( mx::app::appConfigurator & _config )
    _config(m_dmChannel, "offload.channel");
    _config(m_gain, "offload.gain");
    _config(m_leak, "offload.leak");
+   _config(m_actLim, "offload.actLim");
    
    bool startupOffloading = false;
    
@@ -203,7 +209,7 @@ inline
 int t2wOffloader::appStartup()
 {
    
-   createStandardIndiNumber<unsigned>( m_indiP_gain, "gain", 0, 1, 0, "%0.2f");
+   createStandardIndiNumber<float>( m_indiP_gain, "gain", 0, 1, 0, "%0.2f");
    m_indiP_gain["current"] = m_gain;
    m_indiP_gain["target"] = m_gain;
    
@@ -214,7 +220,7 @@ int t2wOffloader::appStartup()
    }
    
    
-   createStandardIndiNumber<unsigned>( m_indiP_leak, "leak", 0, 1, 0, "%0.2f");
+   createStandardIndiNumber<float>( m_indiP_leak, "leak", 0, 1, 0, "%0.2f");
    m_indiP_leak["current"] = m_leak;
    m_indiP_leak["target"] = m_leak;
    
@@ -224,11 +230,20 @@ int t2wOffloader::appStartup()
       return -1;
    }
    
+   createStandardIndiNumber<float>( m_indiP_actLim, "actLim", 0, 8, 0, "%0.2f");
+   m_indiP_actLim["current"] = m_actLim;
+   m_indiP_actLim["target"] = m_actLim;
+   
+   if( registerIndiPropertyNew( m_indiP_actLim, INDI_NEWCALLBACK(m_indiP_actLim)) < 0)
+   {
+      log<software_error>({__FILE__,__LINE__});
+      return -1;
+   }
+   
    if(shmimMonitorT::appStartup() < 0)
    {
       return log<software_error,-1>({__FILE__, __LINE__});
    }
-   
    
    createStandardIndiRequestSw( m_indiP_zero, "zero", "zero loop");
    if( registerIndiPropertyNew( m_indiP_zero, INDI_NEWCALLBACK(m_indiP_zero)) < 0)
@@ -351,6 +366,18 @@ int t2wOffloader::processImage( void * curr_src,
    
    m_woofer = m_gain* Eigen::Map<Array<float,-1,-1>>( m_wooferDelta.data(), m_dmWidth, m_dmHeight) + (1.0-m_leak)*m_woofer;
       
+   for(int ii = 0; ii < m_woofer.rows(); ++ii)
+   {
+      for(int jj = 0; jj < m_woofer.cols(); ++jj)
+      {
+         if( fabs(m_woofer(ii,jj)) > m_actLim)
+         {
+            if(m_woofer(ii,jj) > 0) m_woofer(ii,jj) = m_actLim;
+            else m_woofer(ii,jj) = -m_actLim;
+         }
+      }
+   }
+   
    m_dmStream.md[0].write = 1;
    
    memcpy(m_dmStream.array.raw, m_woofer.data(),  m_woofer.rows()*m_woofer.cols()*m_typeSize);
@@ -412,6 +439,32 @@ INDI_NEWCALLBACK_DEFN(t2wOffloader, m_indiP_leak)(const pcf::IndiProperty &ipRec
    updateIfChanged(m_indiP_leak, "target", m_leak);
    
    log<text_log>("set leak to " + std::to_string(m_leak), logPrio::LOG_NOTICE);
+   
+   return 0;
+}
+
+INDI_NEWCALLBACK_DEFN(t2wOffloader, m_indiP_actLim)(const pcf::IndiProperty &ipRecv)
+{
+   if(ipRecv.getName() != m_indiP_actLim.getName())
+   {
+      log<software_error>({__FILE__, __LINE__, "invalid indi property received"});
+      return -1;
+   }
+   
+   float target;
+   
+   if( indiTargetUpdate( m_indiP_actLim, target, ipRecv, true) < 0)
+   {
+      log<software_error>({__FILE__,__LINE__});
+      return -1;
+   }
+   
+   m_actLim = target;
+   
+   updateIfChanged(m_indiP_actLim, "current", m_actLim);
+   updateIfChanged(m_indiP_actLim, "target", m_actLim);
+   
+   log<text_log>("set actuator limit to " + std::to_string(m_actLim), logPrio::LOG_NOTICE);
    
    return 0;
 }

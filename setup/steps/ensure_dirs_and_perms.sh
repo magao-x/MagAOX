@@ -70,6 +70,7 @@ make_on_data_array logs /opt/MagAOX
 make_on_data_array rawimages /opt/MagAOX
 make_on_data_array telem /opt/MagAOX
 
+
 mkdir -pv /opt/MagAOX/secrets
 chown -R root:root /opt/MagAOX/secrets
 chmod -R u=rwX,g=,o= /opt/MagAOX/secrets
@@ -90,9 +91,8 @@ chmod u=rwX,g=rwX,o=rX /opt/MagAOX/vendor
 setgid_all /opt/MagAOX/vendor
 
 if [[ "$MAGAOX_ROLE" == "AOC" ]]; then
-  mkdir -pv /opt/MagAOX/rtc/cacao
-  chown xsup:magaox /opt/MagAOX/rtc /opt/MagAOX/rtc/cacao
-  chmod u=rwX,g=rwX,o=rX /opt/MagAOX/rtc /opt/MagAOX/rtc/cacao
+  make_on_data_array rtc /opt/MagAOX
+  make_on_data_array icc /opt/MagAOX
 fi
 
 if [[ "$MAGAOX_ROLE" == "vm" && "$VM_WINDOWS_HOST" == 0 ]]; then
