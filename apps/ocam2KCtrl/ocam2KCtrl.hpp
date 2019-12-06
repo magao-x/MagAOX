@@ -80,7 +80,7 @@ protected:
 
    double m_protectionResetReqTime {0}; ///< The time at which protection reset was requested.  You have 10 seconds to confirm.
 
-   unsigned m_emGain {1}; ///< The current EM gain.
+   //unsigned m_emGain {1}; ///< The current EM gain.
 
    bool m_poweredOn {false};
    
@@ -260,6 +260,8 @@ public:
    int checkRecordTimes();
    
    int recordTelem( const ocam_temps * );
+   
+   int recordTelem( const telem_stdcam * );
    
    int recordTemps(bool force = false);
    
@@ -646,6 +648,7 @@ int ocam2KCtrl::getTemps()
          m_tempControlStatusStr = "UNKNOWN";
          
          recordTemps();
+         recordCamera();
          return log<software_error, -1>({__FILE__, __LINE__, "Temp. parse error"});
       }
       
@@ -687,6 +690,7 @@ int ocam2KCtrl::getTemps()
       
       //Telemeter:
       recordTemps();
+      recordCamera();
       
       updateIfChanged(m_indiP_temps, "cpu", m_temps.CPU);
       updateIfChanged(m_indiP_temps, "power", m_temps.POWER);
@@ -755,6 +759,8 @@ int ocam2KCtrl::setTempControl()
       return setTempSetPt();
    }
    
+   recordCamera();
+   
    return 0;
 }
 
@@ -774,6 +780,9 @@ int ocam2KCtrl::setTempSetPt()
    if( pdvSerialWriteRead( response, "temp " + tempStr) == 0)
    {
       std::cerr << "response: " << response << "\n";
+      
+      recordCamera();
+      
       ///\todo check response
       return log<text_log,0>({"set temperature: " + tempStr});
    }
@@ -796,6 +805,8 @@ int ocam2KCtrl::getFPS()
       }
       m_fps = fps;
 
+      recordCamera();
+      
       return 0;
 
    }
@@ -920,6 +931,15 @@ int ocam2KCtrl::configureAcquisition()
       sleep(1);
       return -1;
    }
+   
+   m_currentROI.x = 119.5;
+   m_currentROI.y = 119.5;
+   m_currentROI.w = 240;
+   m_currentROI.h = 240;
+   m_currentROI.bin_x = m_cameraModes[m_modeName].m_binningX;
+   m_currentROI.bin_y = m_cameraModes[m_modeName].m_binningY;
+   
+   recordCamera();
    
     ///\todo check response of pdvSerialWriteRead
    log<text_log>("camera configured with: " +m_cameraModes[m_modeName].m_serialCommand);
@@ -1160,7 +1180,7 @@ INDI_NEWCALLBACK_DEFN(ocam2KCtrl, m_indiP_emGain)(const pcf::IndiProperty &ipRec
 inline
 int ocam2KCtrl::checkRecordTimes()
 {
-   return telemeter<ocam2KCtrl>::checkRecordTimes(ocam_temps());
+   return telemeter<ocam2KCtrl>::checkRecordTimes(ocam_temps(), telem_stdcam());
 }
    
 inline
@@ -1169,6 +1189,12 @@ int ocam2KCtrl::recordTelem( const ocam_temps * )
    return recordTemps(true);
 }
  
+inline
+int ocam2KCtrl::recordTelem( const telem_stdcam * )
+{
+   return recordCamera(true);
+}
+
 inline
 int ocam2KCtrl::recordTemps( bool force )
 {
