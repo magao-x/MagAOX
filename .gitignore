@@ -124,6 +124,7 @@ utils/logdump/logdump
 utils/cursesINDI/cursesINDI
 utils/logstream/logstream
 utils/xrif2shmim/xrif2shmim
+utils/xrif2fits/xrif2fits
 
 utils/doc
 
