@@ -39,6 +39,7 @@ telem_zaber              20055    telem_zaber
 
 telem_temps              20250    telem_temps
 
+telem_stdcam             20260    telem_stdcam
 
 telem_coretemps          20825    telem_coretemps
 telem_coreloads          20826    telem_coreloads

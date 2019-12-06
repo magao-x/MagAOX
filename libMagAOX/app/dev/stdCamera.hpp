@@ -154,6 +154,16 @@ protected:
    
    ///@}
    
+   /** \name Readout Control 
+     * @{
+     */
+   
+   float m_adcSpeed {0}; ///< The ADC speed in MHz
+   
+   float m_emGain {1};
+   
+   ///@}
+   
    /** \name Exposure Control 
      * @{
      */
@@ -188,12 +198,12 @@ protected:
    
    struct roi
    {
-      float x;
-      float y;
-      int w;
-      int h;
-      int bin_x;
-      int bin_y;
+      float x {0};
+      float y {0};
+      int w {0};
+      int h {0};
+      int bin_x {0};
+      int bin_y {0};
    };
    
    roi m_currentROI;
@@ -1119,11 +1129,55 @@ int stdCamera<derivedT>::updateINDI()
    return 0;
 }
 
-int recordCamera( bool force )
+template<class derivedT>
+int stdCamera<derivedT>::recordCamera( bool force )
 {
-   if(!force)
+   static std::string last_mode;
+   static roi last_roi;
+   static float last_expTime = 0;
+   static float last_fps = 0;
+   static float last_adcSpeed = -1;
+   static float last_emGain = -1;
+   static float last_ccdTemp = 0;
+   static float last_ccdTempSetpt = 0;
+   static bool last_tempControlStatus = 0;
+   static bool last_tempControlOnTarget = 0;
+   static std::string last_tempControlStatusStr;
+   
+   if(force || m_modeName != last_mode ||
+               m_currentROI.x != last_roi.x ||
+               m_currentROI.y != last_roi.y ||
+               m_currentROI.w != last_roi.w ||
+               m_currentROI.h != last_roi.h ||
+               m_currentROI.bin_x != last_roi.bin_x ||
+               m_currentROI.bin_y != last_roi.bin_y ||
+               m_expTime != last_expTime ||
+               m_fps != last_fps ||
+               m_emGain != last_emGain ||
+               m_adcSpeed != last_adcSpeed ||
+               m_ccdTemp != last_ccdTemp ||
+               m_ccdTempSetpt != last_ccdTempSetpt ||
+               m_tempControlStatus != last_tempControlStatus ||
+               m_tempControlOnTarget != last_tempControlOnTarget ||
+               m_tempControlStatusStr != last_tempControlStatusStr )
    {
-      return 0;
+      derived().template telem<telem_stdcam>({m_modeName, m_currentROI.x, m_currentROI.y, 
+                                                    m_currentROI.w, m_currentROI.h, m_currentROI.bin_x, m_currentROI.bin_y,
+                                                       m_expTime, m_fps, m_emGain, m_adcSpeed, m_ccdTemp, m_ccdTempSetpt, (uint8_t) m_tempControlStatus, 
+                                                             (uint8_t) m_tempControlOnTarget, m_tempControlStatusStr});
+      
+      last_mode = m_modeName;
+      last_roi = m_currentROI;
+      last_expTime = m_expTime;
+      last_fps = m_fps;
+      last_emGain = m_emGain;
+      last_adcSpeed = m_adcSpeed;
+      last_ccdTemp = m_ccdTemp;
+      last_ccdTempSetpt = m_ccdTempSetpt;
+      last_tempControlStatus = m_tempControlStatus;
+      last_tempControlOnTarget = m_tempControlOnTarget;
+      last_tempControlStatusStr = m_tempControlStatusStr;
+      
    }
    
    

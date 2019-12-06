@@ -64,12 +64,13 @@ namespace app
   * \todo Config item for ImageStreamIO name filename
   * \todo implement ImageStreamIO circular buffer, with config setting
   */
-class picamCtrl : public MagAOXApp<>, public dev::stdCamera<picamCtrl>, public dev::frameGrabber<picamCtrl>, public dev::dssShutter<picamCtrl>
+class picamCtrl : public MagAOXApp<>, public dev::stdCamera<picamCtrl>, public dev::frameGrabber<picamCtrl>, public dev::dssShutter<picamCtrl>, public dev::telemeter<picamCtrl>
 {
 
    friend class dev::stdCamera<picamCtrl>;
    friend class dev::frameGrabber<picamCtrl>;
    friend class dev::dssShutter<picamCtrl>;
+   friend class dev::telemeter<picamCtrl>;
 
    typedef MagAOXApp<> MagAOXAppT;
 
@@ -91,7 +92,7 @@ protected:
    
    std::vector<float> m_adcSpeedValues = {0.1, 1, 5,10,20,30};
    
-   int m_adcSpeed {30}; ///< The ADC speed, 5, 10, 20, or 30.
+   //< The ADC speed, 5, 10, 20, or 30.
 
    
 
@@ -213,6 +214,16 @@ protected:
 public:
    INDI_NEWCALLBACK_DECL(picamCtrl, m_indiP_adcspeed);
 
+   /** \name Telemeter Interface
+     * 
+     * @{
+     */ 
+   int checkRecordTimes();
+   
+   int recordTelem( const telem_stdcam * );
+   
+   
+   ///@}
 };
 
 inline
@@ -226,6 +237,7 @@ picamCtrl::picamCtrl() : MagAOXApp(MAGAOX_CURRENT_SHA1, MAGAOX_REPO_MODIFIED)
    m_usesFPS = false;
    m_usesModes = false;
    
+   m_adcSpeed = 10;
    return;
 }
 
@@ -250,6 +262,7 @@ void picamCtrl::setupConfig()
    dev::stdCamera<picamCtrl>::setupConfig(config);
    dev::frameGrabber<picamCtrl>::setupConfig(config);
    dev::dssShutter<picamCtrl>::setupConfig(config);
+   dev::telemeter<picamCtrl>::setupConfig(config);
 }
 
 inline
@@ -261,6 +274,8 @@ void picamCtrl::loadConfig()
    dev::stdCamera<picamCtrl>::loadConfig(config);
    dev::frameGrabber<picamCtrl>::loadConfig(config);
    dev::dssShutter<picamCtrl>::loadConfig(config);
+   dev::telemeter<picamCtrl>::loadConfig(config);
+   
 
 }
 
@@ -317,6 +332,11 @@ int picamCtrl::appStartup()
       return log<software_critical,-1>({__FILE__,__LINE__});
    }
 
+   if(dev::telemeter<picamCtrl>::appStartup() < 0)
+   {
+      return log<software_error,-1>({__FILE__,__LINE__});
+   }
+   
    return 0;
 
 }
@@ -423,6 +443,12 @@ int picamCtrl::appLogic()
       {
          log<software_error>({__FILE__, __LINE__});
          state(stateCodes::ERROR);
+         return 0;
+      }
+      
+      if(telemeter<picamCtrl>::appLogic() < 0)
+      {
+         log<software_error>({__FILE__, __LINE__});
          return 0;
       }
 
@@ -839,6 +865,7 @@ int picamCtrl::getTemps()
       m_tempControlStatusStr = "UNKNOWN";
    }   
 
+   recordCamera();
 
    return 0;
 
@@ -891,6 +918,7 @@ int picamCtrl::setTempControl()
    m_tempControlStatus = true;
    m_tempControlStatusSet = true;
    updateSwitchIfChanged(m_indiP_tempcont, "toggle", pcf::IndiElement::On, INDI_IDLE);
+   recordCamera();
    return 0;
 }
 
@@ -900,6 +928,7 @@ int picamCtrl::setTempSetPt()
    ///\todo bounds check here.
    m_reconfig = true;
 
+   recordCamera();
    return 0;
 }
 
@@ -932,8 +961,9 @@ int picamCtrl::setExpTime()
    }
 
    m_expTime = exptime/1000.0;
-   
-   log<text_log>( "Set exposure time " + mode + " to: " + std::to_string(exptime/1000.0) + " sec");
+
+   recordCamera();
+   //log<text_log>( "Set exposure time " + mode + " to: " + std::to_string(exptime/1000.0) + " sec");
 
    updateIfChanged(m_indiP_exptime, "current", m_expTime, INDI_IDLE);
 
@@ -1009,7 +1039,7 @@ int picamCtrl::configureAcquisition()
       return -1;
    }
 
-   log<text_log>( "Set temperature set point: " + std::to_string(m_ccdTempSetpt) + " C");
+   //log<text_log>( "Set temperature set point: " + std::to_string(m_ccdTempSetpt) + " C");
 
    //=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*
    //=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*
@@ -1293,18 +1323,20 @@ int picamCtrl::configureAcquisition()
       return -1;
    }
 
-    error = Picam_StartAcquisition(m_cameraHandle);
-    if(error != PicamError_None)
-    {
-       log<software_error>({__FILE__, __LINE__, 0, error, PicamEnum2String(PicamEnumeratedType_Error, error)});
-       state(stateCodes::ERROR);
+   recordCamera();
+   
+   error = Picam_StartAcquisition(m_cameraHandle);
+   if(error != PicamError_None)
+   {
+      log<software_error>({__FILE__, __LINE__, 0, error, PicamEnum2String(PicamEnumeratedType_Error, error)});
+      state(stateCodes::ERROR);
 
-       return -1;
-    }
+      return -1;
+   }
 
-    m_dataType = _DATATYPE_UINT16; //Where does this go?
+   m_dataType = _DATATYPE_UINT16; //Where does this go?
     
-    return 0;
+   return 0;
 
 }
 
@@ -1468,8 +1500,15 @@ INDI_NEWCALLBACK_DEFN(picamCtrl, m_indiP_adcspeed)(const pcf::IndiProperty &ipRe
    
 }
 
-
-
+int picamCtrl::checkRecordTimes()
+{
+   return telemeter<picamCtrl>::checkRecordTimes(telem_stdcam());
+}
+   
+int picamCtrl::recordTelem(const telem_stdcam *)
+{
+   return recordCamera(true);
+}
 
 
 
