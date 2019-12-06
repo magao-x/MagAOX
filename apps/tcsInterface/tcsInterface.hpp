@@ -57,6 +57,8 @@ protected:
    std::string m_deviceAddr {"localhost"}; ///< The IP address or resolvable name of the TCS.
    int m_devicePort {5811}; ///< The IP port for TCS communications. Should be the command port.  Default is 5811
    
+   bool m_labMode {true};
+   
    ///@}
 
 
@@ -287,11 +289,17 @@ public:
    size_t m_nRequests {0};
    size_t m_last_nRequests {0};
    
-   //The TT control matrix
-   float m_offlTT_C_00 {1};
+   //The TT control matrix -- LAb
+   float m_lab_offlTT_C_00 {0.17};
+   float m_lab_offlTT_C_01 {1.03};
+   float m_lab_offlTT_C_10 {-1.03};
+   float m_lab_offlTT_C_11 {0.48};
+   
+   //The TT control matrix -- Telescope
+   float m_offlTT_C_00 {-0.5};
    float m_offlTT_C_01 {0};
    float m_offlTT_C_10 {0};
-   float m_offlTT_C_11 {1};
+   float m_offlTT_C_11 {-0.25};
    
    bool m_offlTT_enabled {false};
    bool m_offlTT_dump {false};
@@ -359,6 +367,8 @@ tcsInterface::tcsInterface() : MagAOXApp(MAGAOX_CURRENT_SHA1, MAGAOX_REPO_MODIFI
 inline
 void tcsInterface::setupConfig()
 {
+   config.add("labMode", "", "labMode", argType::Required, "", "labMode", false, "bool", "Flag to enable lab mode.  Default is true.");
+   
    config.add("pyrNudger.C_00", "", "pyrNudger.C_00", argType::Required, "pyrNudger", "C_00", false, "float", "Pyramid to AEG control matrix [0,0] of a 2x2 matrix");
    config.add("pyrNudger.C_01", "", "pyrNudger.C_01", argType::Required, "pyrNudger", "C_01", false, "float", "Pyramid to AEG control matrix [0,1] of a 2x2 matrix ");
    config.add("pyrNudger.C_10", "", "pyrNudger.C_10", argType::Required, "pyrNudger", "C_10", false, "float", "Pyramid to AEG control matrix [1,0] of a 2x2 matrix ");
@@ -367,6 +377,11 @@ void tcsInterface::setupConfig()
    config.add("offload.TT_avgInt", "", "offload.TT_avgInt", argType::Required, "offload", "TT_avgInt", false, "float", "Woofer to Telescope T/T offload averaging interval [sec] ");
    config.add("offload.TT_gain", "", "offload.TT_gain", argType::Required, "offload", "TT_gain", false, "float", "Woofer to Telescope T/T offload gain");
    config.add("offload.TT_thresh", "", "offload.TT_thresh", argType::Required, "offload", "TT_thresh", false, "float", "Woofer to Telescope T/T offload threshold");
+   
+   config.add("offload.lab_TT_C_00", "", "offload.lab_TT_C_00", argType::Required, "offload", "lab_TT_C_00", false, "float", "Woofer to TTM T/T offload control matrix [0,0] of a 2x2 matrix");
+   config.add("offload.lab_TT_C_01", "", "offload.lab_TT_C_01", argType::Required, "offload", "lab_TT_C_01", false, "float", "Woofer to TTM T/T offload control matrix [0,1] of a 2x2 matrix ");
+   config.add("offload.lab_TT_C_10", "", "offload.lab_TT_C_10", argType::Required, "offload", "lab_TT_C_10", false, "float", "Woofer to TTM T/T offload control matrix [1,0] of a 2x2 matrix ");
+   config.add("offload.lab_TT_C_11", "", "offload.lab_TT_C_11", argType::Required, "offload", "lab_TT_C_11", false, "float", "Woofer to TTM T/T offload control matrix [1,1] of a 2x2 matrix ");
    
    config.add("offload.TT_C_00", "", "offload.TT_C_00", argType::Required, "offload", "TT_C_00", false, "float", "Woofer to Telescope T/T offload control matrix [0,0] of a 2x2 matrix");
    config.add("offload.TT_C_01", "", "offload.TT_C_01", argType::Required, "offload", "TT_C_01", false, "float", "Woofer to Telescope T/T offload control matrix [0,1] of a 2x2 matrix ");
@@ -395,6 +410,10 @@ void tcsInterface::setupConfig()
 inline
 int tcsInterface::loadConfigImpl( mx::app::appConfigurator & _config )
 {
+   
+   _config(m_labMode, "labMode");
+   std::cerr << "\n\n labMode=\n\n" << m_labMode << "\n";
+   
    _config(m_pyrNudge_C_00, "pyrNudger.C_00");
    _config(m_pyrNudge_C_01, "pyrNudger.C_01");
    _config(m_pyrNudge_C_10, "pyrNudger.C_10");
@@ -403,6 +422,11 @@ int tcsInterface::loadConfigImpl( mx::app::appConfigurator & _config )
    _config(m_offlTT_avgInt, "offload.TT_avgInt");
    _config(m_offlTT_gain, "offload.TT_gain");
    _config(m_offlTT_thresh, "offload.TT_thresh");
+   
+   _config(m_lab_offlTT_C_00, "offload.lab_TT_C_00");
+   _config(m_lab_offlTT_C_01, "offload.lab_TT_C_01");
+   _config(m_lab_offlTT_C_10, "offload.lab_TT_C_10");
+   _config(m_lab_offlTT_C_11, "offload.lab_TT_C_11");
    
    _config(m_offlTT_C_00, "offload.TT_C_00");
    _config(m_offlTT_C_01, "offload.TT_C_01");
@@ -1990,29 +2014,27 @@ int tcsInterface::sendTToffload( float tt_0,
                                  float tt_1
                                )
 {
-#if 0
-   pcf::IndiProperty ip(pcf::IndiProperty::Number);
-   ip.setDevice("modwfs");
-   ip.setName("offset12");
-   ip.add(pcf::IndiElement("dC1"));
-   ip.add(pcf::IndiElement("dC2"));
+
+   if(m_labMode)
+   {
+      pcf::IndiProperty ip(pcf::IndiProperty::Number);
+      ip.setDevice("modwfs");
+      ip.setName("offset12");
+      ip.add(pcf::IndiElement("dC1"));
+      ip.add(pcf::IndiElement("dC2"));
    
-   sendNewProperty (ip); 
+      sendNewProperty (ip); 
    
-   ip["dC1"] = tt_0;
-   ip["dC2"] = tt_1;
+      ip["dC1"] = tt_0;
+      ip["dC2"] = tt_1;
    
-   sendNewProperty(ip);
-#endif
+      sendNewProperty(ip);
+      return 0;
+   }
 
    char ttstr[64];
    snprintf(ttstr, sizeof(ttstr) , "aeg %f %f", tt_0, tt_1);
 
-   std::cerr << "**********************\n\n";
-   std::cerr << ttstr << "\n";
-   std::cerr << "**********************\n\n";
-   
-   
    return sendMagTelCommand(ttstr, 1000);
 }
 
@@ -2113,9 +2135,17 @@ INDI_SETCALLBACK_DEFN(tcsInterface, m_indiP_offloadCoeffs)(const pcf::IndiProper
    float tt0 = ipRecv["00"].get<float>();
    float tt1 = ipRecv["01"].get<float>();
    
-   m_offloadRequests[0][nextReq] = m_offlTT_C_00 * tt0 + m_offlTT_C_01 * tt1;
-   m_offloadRequests[1][nextReq] = m_offlTT_C_10 * tt0 + m_offlTT_C_11 * tt1;
-
+   if(m_labMode)
+   {
+      m_offloadRequests[0][nextReq] = m_lab_offlTT_C_00 * tt0 + m_lab_offlTT_C_01 * tt1;
+      m_offloadRequests[1][nextReq] = m_lab_offlTT_C_10 * tt0 + m_lab_offlTT_C_11 * tt1;
+   }
+   else
+   {
+      m_offloadRequests[0][nextReq] = m_offlTT_C_00 * tt0 + m_offlTT_C_01 * tt1;
+      m_offloadRequests[1][nextReq] = m_offlTT_C_10 * tt0 + m_offlTT_C_11 * tt1;
+   }
+   
    //Focus
    float f0 = ipRecv["02"].get<float>();
    
