@@ -147,8 +147,10 @@ fi
 # Configure executable search path
 sudo bash -l "$DIR/steps/put_usr_local_bin_on_path.sh"
 
-# Increase inotify watches
-sudo bash -l "$DIR/steps/increase_fs_watcher_limits.sh"
+if [[ $MAGAOX_ROLE != ci ]]; then
+    # Increase inotify watches
+    sudo bash -l "$DIR/steps/increase_fs_watcher_limits.sh"
+fi
 
 # The VM and CI provisioning doesn't run setup_users_and_groups.sh
 # separately as in the instrument instructions; we have to run it
