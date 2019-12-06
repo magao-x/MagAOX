@@ -1,0 +1,16 @@
+namespace MagAOX.logger;
+
+
+
+table Telem_telcat_fb
+{
+   catObj:string;
+   catRm:string;
+   catRa:double;
+   catDec:double;
+   catEp:double;
+   catRo:double;   
+}
+
+root_type Telem_telcat_fb;
+

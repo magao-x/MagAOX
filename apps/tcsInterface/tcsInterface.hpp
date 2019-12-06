@@ -208,6 +208,8 @@ public:
    
    int recordTelem( const telem_telenv * );
    
+   int recordTelem( const telem_telcat *);
+   
    int recordTelPos(bool force = false);
    
    int recordTelData(bool force = false);
@@ -215,6 +217,8 @@ public:
    int recordTelVane(bool force = false);
    
    int recordTelEnv(bool force = false);
+   
+   int recordTelCat(bool force = false);
    
    ///@}
    
@@ -1565,7 +1569,7 @@ int tcsInterface::updateINDI()
 inline
 int tcsInterface::checkRecordTimes()
 {
-   return telemeter<tcsInterface>::checkRecordTimes(telem_telpos(), telem_teldata(), telem_telvane(), telem_telenv());
+   return telemeter<tcsInterface>::checkRecordTimes(telem_telpos(), telem_teldata(), telem_telvane(), telem_telenv(), telem_telcat());
 }
 
 inline
@@ -1593,6 +1597,13 @@ inline
 int tcsInterface::recordTelem( const telem_telenv * )
 {
    recordTelEnv(true);
+   return 0;
+}
+
+inline
+int tcsInterface::recordTelem( const telem_telcat * )
+{
+   recordTelCat(true);
    return 0;
 }
 
@@ -1752,6 +1763,36 @@ int tcsInterface::recordTelEnv(bool force)
       lastTambient =   m_tambient;
       lastWxdewpoint = m_wxdewpoint;
 
+   }
+   
+   return 0;
+}
+
+inline
+int tcsInterface::recordTelCat(bool force)
+{
+   static std::string last_catObj;
+   static std::string last_catRm;
+   static double last_catRA = 0;
+   static double last_catDec = 0;
+   static double last_catEp = 0;
+   static double last_catRo = 0;
+   
+   if(force || m_catObj != last_catObj ||
+               m_catRm != last_catRm ||
+               m_catRA != last_catRA ||
+               m_catDec != last_catDec ||
+               m_catEp != last_catEp ||
+               m_catRo != last_catRo )
+   {
+      telem<telem_telcat>({m_catObj, m_catRm, m_catRA, m_catDec, m_catEp, m_catRo});
+      
+      last_catObj = m_catObj;
+      last_catRm = m_catRm;
+      last_catRA = m_catRA;
+      last_catDec = m_catDec;
+      last_catEp = m_catEp;
+      last_catRo = m_catRo;
    }
    
    return 0;
