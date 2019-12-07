@@ -595,11 +595,17 @@ void streamWriter::fgThreadExec()
       
       if(m_shutdown || !opened) return;
     
-      m_semaphoreNumber = ImageStreamIO_getsemwaitindex(&image, m_semaphoreNumber); //ask for semaphore we had before
-      if(m_semaphoreNumber == -1)
+      m_semaphoreNumber = 6; //get past the CACAO hard code.
+      int actSem = 1;
+      while(actSem == 1) //because it won't work.
       {
-         log<software_critical>({__FILE__,__LINE__, "could not get semaphore index"});
-         return;
+         m_semaphoreNumber = ImageStreamIO_getsemwaitindex(&image, m_semaphoreNumber); //ask for semaphore we had before
+         if(m_semaphoreNumber == -1)
+         {
+            log<software_critical>({__FILE__,__LINE__, "could not get semaphore index"});
+            return;
+         }
+         actSem = m_semaphoreNumber;
       }
       
       sem = image.semptr[m_semaphoreNumber];

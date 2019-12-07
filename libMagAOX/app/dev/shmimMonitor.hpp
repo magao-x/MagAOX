@@ -498,8 +498,9 @@ void shmimMonitor<derivedT, specificT>::smThreadExec()
       
       if(derived().m_shutdown || !opened) return;
     
-      m_semaphoreNumber = 1;
-      while(m_semaphoreNumber == 1)//Don't accept semaphore 1 cuz it don't work.
+      m_semaphoreNumber = 5; ///Move past CACAO hard coded things -- \todo need to return to this being a config/
+      int actSem = 1;
+      while(actSem == 1)//Don't accept semaphore 1 cuz it don't work.
       {
          m_semaphoreNumber = ImageStreamIO_getsemwaitindex(&m_imageStream, m_semaphoreNumber); //ask for semaphore we had before
          if(m_semaphoreNumber == -1)
@@ -507,6 +508,7 @@ void shmimMonitor<derivedT, specificT>::smThreadExec()
             derivedT::template log<software_critical>({__FILE__,__LINE__, "could not get semaphore index"});
             return;
          }
+         actSem = m_semaphoreNumber;
       }
       
       derivedT::template log<software_info>({__FILE__,__LINE__, "got semaphore index " + std::to_string(m_semaphoreNumber) + " for " + m_shmimName });
