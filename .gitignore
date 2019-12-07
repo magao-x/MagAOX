@@ -146,3 +146,5 @@ vm/calib/
 vm/config/
 vm/
 apps/acronameUsbHub/acronameUsbHub
+apps/cacaoInterface/cacaoInterface
+apps/w2tcsOffloader/w2tcsOffloader
