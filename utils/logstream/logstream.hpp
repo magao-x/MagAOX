@@ -26,14 +26,17 @@ public:
    std::string m_dir {"/opt/MagAOX/logs/"};
    std::string m_ext {".binlog"};
       
-   unsigned long m_pauseTime {250};
-   int m_fileCheckInterval {4}; ///When following, number of loops to wait before checking for a new file.  Default is 4.
+   unsigned long m_pauseTime {1000};
+   int m_fileCheckInterval {5}; ///When following, number of loops to wait before checking for a new file.  Default is 20 (5 seconds).
    
    logPrioT m_level {logPrio::LOG_DEFAULT};
    
    double m_startTime {0};
    
    bool m_shutdown {false};
+   
+   ///Mutex for disk access
+   std::mutex m_diskMutex;
    
    ///Mutex for locking stream access
    std::mutex m_streamMutex;
@@ -291,14 +294,23 @@ int logstream::logThreadStart( size_t thno )
 
 void logstream::logThreadExec( const std::string & appName )
 {
+   int counter = m_fileCheckInterval;
+   
    while(!m_shutdown)
    {
+      if(counter <  m_fileCheckInterval)
+      {
+         std::this_thread::sleep_for( std::chrono::duration<unsigned long, std::milli>(m_pauseTime));
+         ++counter;
+         continue;
+      }
       
+      counter = 0;
+      FILE * fin = 0;
+   
       std::vector<std::string> logs = mx::ioutils::getFileNames( m_dir, appName, "", m_ext);
 
       std::string fname = logs[logs.size()-1];
-
-      FILE * fin;
 
       bufferPtrT head(new char[logHeader::maxHeadSize]);
 
@@ -318,6 +330,7 @@ void logstream::logThreadExec( const std::string & appName )
             int check = 0;
             while(nrd == 0 && !m_shutdown)
             {
+               //if(appName != "camwfs-avg") std::cerr << appName << " sleeping here \n";
                std::this_thread::sleep_for( std::chrono::duration<unsigned long, std::milli>(m_pauseTime));
                clearerr(fin);
                nrd = fread( head.get(), sizeof(char), logHeader::minHeadSize, fin);
@@ -326,6 +339,9 @@ void logstream::logThreadExec( const std::string & appName )
                ++check;
                if(check >= m_fileCheckInterval)
                {
+                  std::unique_lock<std::mutex> lock(m_diskMutex);
+                  std::this_thread::sleep_for( std::chrono::duration<unsigned long, std::milli>(m_pauseTime)); //Hold the lock for a bit to prevent slamming the disk
+                  //if(appName != "camwfs-avg") std::cerr << appName << " getting files \n";
                   //Check if a new file exists now.
                   size_t oldsz = logs.size();
                   logs = mx::ioutils::getFileNames( m_dir, appName, "", m_ext);
