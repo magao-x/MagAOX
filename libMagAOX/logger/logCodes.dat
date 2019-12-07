@@ -34,6 +34,7 @@ telem_teldata            20001    telem_teldata
 telem_telvane            20002    telem_telvane
 telem_telenv             20003    telem_telenv
 telem_telcat             20004    telem_telcat
+telem_telsee             20005    telem_telsee
 
 telem_stage              20050    telem_stage
 telem_zaber              20055    telem_zaber
