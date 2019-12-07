@@ -57,6 +57,8 @@ protected:
    std::string m_deviceAddr {"localhost"}; ///< The IP address or resolvable name of the TCS.
    int m_devicePort {5811}; ///< The IP port for TCS communications. Should be the command port.  Default is 5811
    
+   int m_seeingInterval {2};
+   
    bool m_labMode {true};
    
    ///@}
@@ -132,7 +134,23 @@ protected:
 
    pcf::IndiProperty m_indiP_env; ///< INDI Property for environment
 
+   //Seeing
+   double m_dimm_el {0};        ///< DIMM elevation at time of seeing measurement
+   double m_dimm_fwhm {0};      ///< DIMM raw FWHM
+   double m_dimm_fwhm_corr {0}; ///< DIMM elevation corrected FWHM
+   int m_dimm_time {0};         ///< Seconds since midnight of DIMM measurement.
    
+   double m_mag1_el {0};        ///< MAG1 elevation at time of seeing measurement
+   double m_mag1_fwhm {0};      ///< MAG1 raw FWHM
+   double m_mag1_fwhm_corr {0}; ///< MAG1 elevation corrected FWHM
+   int m_mag1_time {0};         ///< Seconds since midnight of MAG1 measurement.
+   
+   double m_mag2_el {0};        ///< MAG2 elevation at time of seeing measurement
+   double m_mag2_fwhm {0};      ///< MAG2 raw FWHM
+   double m_mag2_fwhm_corr {0}; ///< MAG2 elevation corrected FWHM
+   int m_mag2_time {0};         ///< Seconds since midnight of MAG2 measurement.
+   
+   pcf::IndiProperty m_indiP_seeing; ///< INDI Property for seeing
    
 public:
    /// Default c'tor.
@@ -194,6 +212,7 @@ public:
    int getCatData();
    int getVaneData();
    int getEnvData();
+   int getSeeing();
    
    int updateINDI();
    
@@ -212,6 +231,8 @@ public:
    
    int recordTelem( const telem_telcat *);
    
+   int recordTelem( const telem_telsee *);
+   
    int recordTelPos(bool force = false);
    
    int recordTelData(bool force = false);
@@ -221,6 +242,8 @@ public:
    int recordTelEnv(bool force = false);
    
    int recordTelCat(bool force = false);
+   
+   int recordTelSee(bool force = false);
    
    ///@}
    
@@ -576,6 +599,34 @@ int tcsInterface::appStartup()
    
    registerIndiPropertyReadOnly(m_indiP_env);
    
+   createROIndiNumber( m_indiP_seeing, "seeing", "Seeing Data", "TCS");
+   indi::addNumberElement<unsigned>( m_indiP_seeing, "dimm_time", std::numeric_limits<unsigned>::lowest(), std::numeric_limits<unsigned>::max(), 0, "%d");
+   m_indiP_seeing["dimm_time"] = m_dimm_time;
+   indi::addNumberElement<double>( m_indiP_seeing, "dimm_el", std::numeric_limits<double>::lowest(), std::numeric_limits<double>::max(), 0, "%0.2f");
+   m_indiP_seeing["dimm_el"] = m_dimm_el;
+   indi::addNumberElement<double>( m_indiP_seeing, "dimm_fwhm", std::numeric_limits<double>::lowest(), std::numeric_limits<double>::max(), 0, "%0.2f");
+   m_indiP_seeing["dimm_fwhm"] = m_dimm_fwhm;
+   indi::addNumberElement<double>( m_indiP_seeing, "dimm_fwhm_corr", std::numeric_limits<double>::lowest(), std::numeric_limits<double>::max(), 0, "%0.2f");
+   m_indiP_seeing["dimm_fwhm_corr"] = m_dimm_fwhm_corr;
+   indi::addNumberElement<unsigned>( m_indiP_seeing, "mag1_time", std::numeric_limits<unsigned>::lowest(), std::numeric_limits<unsigned>::max(), 0, "%d");
+   m_indiP_seeing["mag1_time"] = m_mag1_time;
+   indi::addNumberElement<double>( m_indiP_seeing, "mag1_el", std::numeric_limits<double>::lowest(), std::numeric_limits<double>::max(), 0, "%0.2f");
+   m_indiP_seeing["mag1_el"] = m_mag1_el;
+   indi::addNumberElement<double>( m_indiP_seeing, "mag1_fwhm", std::numeric_limits<double>::lowest(), std::numeric_limits<double>::max(), 0, "%0.2f");
+   m_indiP_seeing["mag1_fwhm"] = m_mag1_fwhm;
+   indi::addNumberElement<double>( m_indiP_seeing, "mag1_fwhm_corr", std::numeric_limits<double>::lowest(), std::numeric_limits<double>::max(), 0, "%0.2f");
+   m_indiP_seeing["mag1_fwhm_corr"] = m_mag1_fwhm_corr;
+   indi::addNumberElement<unsigned>( m_indiP_seeing, "mag2_time", std::numeric_limits<unsigned>::lowest(), std::numeric_limits<unsigned>::max(), 0, "%d");
+   m_indiP_seeing["mag2_time"] = m_mag2_time;
+   indi::addNumberElement<double>( m_indiP_seeing, "mag2_el", std::numeric_limits<double>::lowest(), std::numeric_limits<double>::max(), 0, "%0.2f");
+   m_indiP_seeing["mag2_el"] = m_mag2_el;
+   indi::addNumberElement<double>( m_indiP_seeing, "mag2_fwhm", std::numeric_limits<double>::lowest(), std::numeric_limits<double>::max(), 0, "%0.2f");
+   m_indiP_seeing["mag2_fwhm"] = m_mag2_fwhm;
+   indi::addNumberElement<double>( m_indiP_seeing, "mag2_fwhm_corr", std::numeric_limits<double>::lowest(), std::numeric_limits<double>::max(), 0, "%0.2f");
+   m_indiP_seeing["mag2_fwhm_corr"] = m_mag2_fwhm_corr;
+   
+   registerIndiPropertyReadOnly(m_indiP_seeing);
+   
    signal(SIGPIPE, SIG_IGN);
    
    
@@ -790,6 +841,12 @@ int tcsInterface::appLogic()
       if(getEnvData() < 0)
       {
          log<text_log>("Error from getVaneData", logPrio::LOG_ERROR);
+         return 0;
+      }
+      
+      if(getSeeing() < 0)
+      {
+         log<text_log>("Error from getSeeing", logPrio::LOG_ERROR);
          return 0;
       }
       
@@ -1298,6 +1355,149 @@ int tcsInterface::getEnvData()
 } //int tcsInterface::getEnvData()
 
 inline
+int tcsInterface::getSeeing()
+{
+   static int last_query = 0;
+
+   time_t sec_midnight;
+   time_t dt;
+
+   if(time(0) - last_query > m_seeingInterval)
+   {
+      int rv = system("query_seeing > /dev/null");
+      if(rv < 0)
+      {
+         log<software_error>({__FILE__, __LINE__, "Error from seeing query"});
+         return -1;
+      }
+      
+      
+      last_query = time(0);
+      sec_midnight = last_query % 86400;
+
+      std::ifstream fin;
+      std::string label, datestr, timestr, fwhmstr;
+      double h, m,s;
+
+      /* process DIMM */
+      fin.open("/tmp/dimm.tsv");
+   
+      if(fin.fail())
+      {
+         log<software_error>({__FILE__, __LINE__, "Error reading dimm seeing"});
+         return -1;
+      }
+
+      fin >> label;
+      fin >> label;
+      fin >> label;
+      fin >> datestr;
+      fin >> timestr;
+
+      fin >> m_dimm_fwhm;
+      fin >> m_dimm_el;
+      fin.close();
+      
+      parse_xms(h, m, s, timestr);
+
+      m_dimm_time = (int) (h*3600 + m*60 + s + 0.5);
+
+      dt = sec_midnight - m_dimm_time;
+      if(dt < 0) dt = 86400-dt;
+
+      if(dt > 300 ||m_dimm_fwhm <= 0)
+      {
+         m_dimm_fwhm = -1;
+         m_dimm_fwhm_corr = -1;
+      }
+      else
+      {
+         m_dimm_fwhm_corr = m_dimm_fwhm * pow(cos( (90.-m_dimm_el)*3.14159/180.), 3./5.);
+      }
+      
+      /* process mag1 */
+      fin.open("/tmp/mag1.tsv");
+   
+      if(fin.fail())
+      {
+         log<software_error>({__FILE__, __LINE__, "Error reading mag1 seeing"});
+         return -1;
+      }
+
+      fin >> label;
+      fin >> label;
+      fin >> label;
+      fin >> datestr;
+      fin >> timestr;
+
+      fin >> m_mag1_fwhm;
+      fin >> m_mag1_el;
+      fin.close();
+      
+      parse_xms(h, m, s, timestr);
+
+      m_mag1_time = (int) (h*3600 + m*60 + s + 0.5);
+
+      dt = sec_midnight - m_mag1_time;
+      if(dt < 0) dt = 86400-dt;
+
+      if(dt > 300 ||m_mag1_fwhm <= 0)
+      {
+         m_mag1_fwhm = -1;
+         m_mag1_fwhm_corr = -1;
+      }
+      else
+      {
+         m_mag1_fwhm_corr = m_mag1_fwhm * pow(cos( (90.-m_mag1_el)*3.14159/180.), 3./5.);
+      }
+      
+      /* process mag2 */
+      fin.open("/tmp/mag2.tsv");
+   
+      if(fin.fail())
+      {
+         log<software_error>({__FILE__, __LINE__, "Error reading mag2 seeing"});
+         return -1;
+      }
+
+      fin >> label;
+      fin >> label;
+      fin >> label;
+      fin >> datestr;
+      fin >> timestr;
+
+      fin >> m_mag2_fwhm;
+      fin >> m_mag2_el;
+      fin.close();
+      
+      parse_xms(h, m, s, timestr);
+
+      m_mag2_time = (int) (h*3600 + m*60 + s + 0.5);
+
+      dt = sec_midnight - m_mag2_time;
+      if(dt < 0) dt = 86400-dt;
+
+      if(dt > 300 ||m_mag2_fwhm <= 0)
+      {
+         m_mag2_fwhm = -1;
+         m_mag2_fwhm_corr = -1;
+      }
+      else
+      {
+         m_mag2_fwhm_corr = m_mag2_fwhm * pow(cos( (90.-m_mag2_el)*3.14159/180.), 3./5.);
+      }
+      
+      if( recordTelSee() < 0)
+      {
+         return log<software_error,-1>({__FILE__,__LINE__});
+      }
+      
+   }
+   
+   return 0;
+}
+
+inline
 int tcsInterface::updateINDI()
 {
    
@@ -1522,6 +1722,50 @@ int tcsInterface::updateINDI()
    }
    
    
+   //---- Seeing ----//
+   try
+   {
+      m_indiP_seeing["dimm_time"] = m_dimm_time;
+      m_indiP_seeing["dimm_el"] = m_dimm_el;
+      m_indiP_seeing["dimm_fwhm"] = m_dimm_fwhm;
+      m_indiP_seeing["dimm_fwhm_corr"] = m_dimm_fwhm_corr;
+      
+      m_indiP_seeing["mag1_time"] = m_mag1_time;
+      m_indiP_seeing["mag1_el"] = m_mag1_el;
+      m_indiP_seeing["mag1_fwhm"] = m_mag1_fwhm;
+      m_indiP_seeing["mag1_fwhm_corr"] = m_mag1_fwhm_corr;
+      
+      m_indiP_seeing["mag2_time"] = m_mag2_time;
+      m_indiP_seeing["mag2_el"] = m_mag2_el;
+      m_indiP_seeing["mag2_fwhm"] = m_mag2_fwhm;
+      m_indiP_seeing["mag2_fwhm_corr"] = m_mag2_fwhm_corr;
+   }
+   catch(...)
+   {
+      log<software_error>({__FILE__,__LINE__,"INDI library exception"});
+      return -1;
+   }
+   
+   try
+   {
+      m_indiP_seeing.setState(INDI_OK);
+   }
+   catch(...)
+   {
+      log<software_error>({__FILE__,__LINE__,"INDI library exception"});
+      return -1;
+   }
+   
+   try
+   {
+      m_indiDriver->sendSetProperty (m_indiP_seeing);
+   }
+   catch(...)
+   {
+      log<software_error>({__FILE__,__LINE__,"INDI library exception"});
+      return -1;
+   }
+   
    //--- Offloading ---//
    
    
@@ -1593,7 +1837,7 @@ int tcsInterface::updateINDI()
 inline
 int tcsInterface::checkRecordTimes()
 {
-   return telemeter<tcsInterface>::checkRecordTimes(telem_telpos(), telem_teldata(), telem_telvane(), telem_telenv(), telem_telcat());
+   return telemeter<tcsInterface>::checkRecordTimes(telem_telpos(), telem_teldata(), telem_telvane(), telem_telenv(), telem_telcat(), telem_telsee());
 }
 
 inline
@@ -1628,6 +1872,13 @@ inline
 int tcsInterface::recordTelem( const telem_telcat * )
 {
    recordTelCat(true);
+   return 0;
+}
+
+inline
+int tcsInterface::recordTelem( const telem_telsee * )
+{
+   recordTelSee(true);
    return 0;
 }
 
@@ -1817,6 +2068,59 @@ int tcsInterface::recordTelCat(bool force)
       last_catDec = m_catDec;
       last_catEp = m_catEp;
       last_catRo = m_catRo;
+   }
+   
+   return 0;
+}
+
+inline
+int tcsInterface::recordTelSee(bool force)
+{
+   static int last_dimm_time = 0;
+   static double last_dimm_el = 0;
+   static double last_dimm_fwhm = 0;
+   static double last_dimm_fwhm_corr = 0;
+   
+   static int last_mag1_time = 0;
+   static double last_mag1_el = 0;
+   static double last_mag1_fwhm = 0;
+   static double last_mag1_fwhm_corr = 0;
+   
+   static int last_mag2_time = 0;
+   static double last_mag2_el = 0;
+   static double last_mag2_fwhm = 0;
+   static double last_mag2_fwhm_corr = 0;
+   
+   if(force || m_dimm_time != last_dimm_time ||
+               m_dimm_el != last_dimm_el ||
+               m_dimm_fwhm != last_dimm_fwhm ||
+               m_dimm_fwhm_corr != last_dimm_fwhm_corr ||
+               m_mag1_time != last_mag1_time ||
+               m_mag1_el != last_mag1_el ||
+               m_mag1_fwhm != last_mag1_fwhm ||
+               m_mag1_fwhm_corr != last_mag1_fwhm_corr ||
+               m_mag2_time != last_mag2_time ||
+               m_mag2_el != last_mag2_el ||
+               m_mag2_fwhm != last_mag2_fwhm ||
+               m_mag2_fwhm_corr != last_mag2_fwhm_corr)
+
+   {
+      telem<telem_telsee>({m_dimm_time, m_dimm_el, m_dimm_fwhm, m_dimm_fwhm_corr, m_mag1_time, m_mag1_el, m_mag1_fwhm, m_mag1_fwhm_corr, m_mag2_time, m_mag2_el, m_mag2_fwhm, m_mag2_fwhm_corr});
+
+      last_dimm_time = m_dimm_time;
+      last_dimm_el = m_dimm_el;
+      last_dimm_fwhm = m_dimm_fwhm;
+      last_dimm_fwhm_corr = m_dimm_fwhm_corr;
+      
+      last_mag1_time = m_mag1_time;
+      last_mag1_el = m_mag1_el;
+      last_mag1_fwhm = m_mag1_fwhm;
+      last_mag1_fwhm_corr = m_mag1_fwhm_corr;
+      
+      last_mag2_time = m_mag2_time;
+      last_mag2_el = m_mag2_el;
+      last_mag2_fwhm = m_mag2_fwhm;
+      last_mag2_fwhm_corr = m_mag2_fwhm_corr;
    }
    
    return 0;
