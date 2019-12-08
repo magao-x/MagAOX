@@ -22,6 +22,6 @@ elif [[ $MAGAOX_ROLE == AOC || $MAGAOX_ROLE == ci ]]; then
 fi
 make -j 32
 make install
+echo "/usr/local/magma/lib" | sudo tee /etc/ld.so.conf.d/magma.conf
 echo "# Configure MAGMA library environment variables (do not edit, see /opt/MagAOX/source/MagAOX/setup/install_magma.sh)" > /etc/profile.d/magma.sh
-echo "export LD_LIBRARY_PATH=/usr/local/magma/lib:\$LD_LIBRARY_PATH" >> /etc/profile.d/magma.sh
 echo "export PKG_CONFIG_PATH=\$PKG_CONFIG_PATH:/usr/local/magma/lib/pkgconfig" >> /etc/profile.d/magma.sh
