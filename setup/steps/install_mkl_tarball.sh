@@ -22,4 +22,5 @@ else
     log_warn "/opt/intel already exists. Run sudo $PWD/install.sh interactively to uninstall before reinstalling"
 fi
 echo "source /opt/intel/compilers_and_libraries/linux/bin/compilervars.sh intel64" > /etc/profile.d/mklvars.sh
+echo "/opt/intel/compilers_and_libraries_2019.4.243/linux/mkl/lib/intel64_lin" | sudo tee /etc/ld.so.conf.d/mkl.conf
 log_info "Finished MKL tarball install"
