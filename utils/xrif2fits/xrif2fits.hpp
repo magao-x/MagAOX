@@ -74,6 +74,7 @@ protected:
 
 
    xrif_t m_xrif {nullptr};
+   xrif_t m_xrif_timing {nullptr};
 
    /** \name Image Data
      * @{
@@ -110,6 +111,11 @@ xrif2fits::~xrif2fits()
    if(m_xrif)
    {
       xrif_delete(m_xrif);
+   }
+   
+   if(m_xrif_timing)
+   {
+      xrif_delete(m_xrif_timing);
    }
 }
 
@@ -199,6 +205,14 @@ int xrif2fits::execute()
       return -1;
    }
 
+   rv = xrif_new(&m_xrif_timing);
+
+   if(rv < 0)
+   {
+      std::cerr << " (" << invokedName << "): Error allocating xrif_timing.\n";
+      return -1;
+   }
+   
    char header[XRIF_HEADER_SIZE];
 
    
@@ -237,18 +251,43 @@ int xrif2fits::execute()
       xrif_allocate_reordered(m_xrif);
 
       nr = fread(m_xrif->raw_buffer, 1, m_xrif->compressed_size, fp_xrif);
-      fclose(fp_xrif);
-
-      if(g_timeToDie == true) break; //check after the long read.
-
+      
       if(nr != m_xrif->compressed_size)
       {
          std::cerr << " (" << invokedName << "): Error reading data from " << m_files[n] << "\n";
          return -1;
       }
+      
+      //Now get timing data
+      nr = fread(header, 1, XRIF_HEADER_SIZE, fp_xrif);
+      if(nr != XRIF_HEADER_SIZE)
+      {
+         std::cerr << " (" << invokedName << "): Error reading timing header of " << m_files[n] << "\n";
+         fclose(fp_xrif);
+         return -1;
+      }
+      
+      xrif_read_header(m_xrif_timing, &header_size , header);
+      xrif_allocate_raw(m_xrif_timing);
+      xrif_allocate_reordered(m_xrif_timing);
+      nr = fread(m_xrif_timing->raw_buffer, 1, m_xrif_timing->compressed_size, fp_xrif);
+   
+      if(nr != m_xrif_timing->compressed_size)
+      {
+         std::cerr << " (" << invokedName << "): Error reading timing data from " << m_files[n] << "\n";
+         return -1;
+      }
+      
+      fclose(fp_xrif);
+
+      if(g_timeToDie == true) break; //check after the long read.
+
+     
 
       xrif_decode(m_xrif);
 
+      xrif_decode(m_xrif_timing);
+      
       if(g_timeToDie == true) break; //check after the decompress.
 
       mx::improc::eigenCube<unsigned short> tmpc( (unsigned short*) m_xrif->raw_buffer, m_xrif->width, m_xrif->height, m_xrif->frames);
@@ -264,6 +303,20 @@ int xrif2fits::execute()
       outname.replace( ext, 5, ".fits");
    
       ff.write(outname, tmpc);
+      
+      outname = m_files[n];
+      ext = outname.find(".xrif");
+      outname.replace( ext, 5, ".time");
+      
+      std::ofstream fout;
+      fout.open(outname);
+      fout << "#cnt0   atime-sec  atime-nsec wtime-sec  wtime-nsec\n";
+      for(int i=0; i< tmpc.planes(); ++i)
+      {
+         uint64_t * curr_timing = (uint64_t*) m_xrif_timing->raw_buffer + 5*i;
+         
+         fout << curr_timing[0] << " " << curr_timing[1] << " " << curr_timing[2] << "  " << curr_timing[3] << " " << curr_timing[4] << "\n";
+      }
    }
 
    std::cerr << " (" << invokedName << "): exited normally.\n";
