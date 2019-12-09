@@ -59,7 +59,7 @@ protected:
    
    float m_threshold {0.5};
    
-   std::string m_wfsrefPath {"/opt/MagAOX/cacao/tweeter"};
+   std::string m_wfsrefPath {"/opt/MagAOX/cacao/tweeter/conf"};
    std::string m_wfsrefName {"wfsref0.fits"};
    
    ///@}
