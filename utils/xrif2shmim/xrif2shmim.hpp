@@ -288,11 +288,13 @@ int xrif2shmim::execute()
          return -1;
       }
 
+      /*
       if(m_dataType !=  XRIF_TYPECODE_INT16)
       {
          std::cerr << " (" << invokedName << "): Only 16-bit signed integerss (short) supported" << "\n";
          return -1;
       }
+      */
 
       nframes += m_xrif->frames;
 

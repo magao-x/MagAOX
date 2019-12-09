@@ -90,7 +90,7 @@ protected:
    
    bool m_getExistingFirst {false}; ///< If set to true by derivedT, any existing image will be grabbed and sent to processImage before waiting on the semaphore.
    
-   int m_semaphoreNumber {0}; ///< The image structure semaphore index.
+   int m_semaphoreNumber {5}; ///< The image structure semaphore index.
    
    uint32_t m_width {0}; ///< The width of the images in the stream
    uint32_t m_height {0}; ///< The height of the images in the stream
@@ -498,7 +498,7 @@ void shmimMonitor<derivedT, specificT>::smThreadExec()
       
       if(derived().m_shutdown || !opened) return;
     
-      m_semaphoreNumber = 5; ///Move past CACAO hard coded things -- \todo need to return to this being a config/
+      if(m_semaphoreNumber == 0) m_semaphoreNumber = 5; ///Move past CACAO hard coded things -- \todo need to return to this being a config/
       int actSem = 1;
       while(actSem == 1)//Don't accept semaphore 1 cuz it don't work.
       {
