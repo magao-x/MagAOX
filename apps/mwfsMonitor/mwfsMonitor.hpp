@@ -66,25 +66,17 @@ struct dark2ShmimT
   * \ingroup mwfsMonitor
   * 
   */
-class mwfsMonitor : public MagAOXApp<true>, public dev::shmimMonitor<mwfsMonitor>, public dev::shmimMonitor<mwfsMonitor,darkShmimT>, public dev::shmimMonitor<mwfsMonitor,dark2ShmimT>, public dev::frameGrabber<mwfsMonitor>
+class mwfsMonitor : public MagAOXApp<true>, public dev::shmimMonitor<mwfsMonitor>, public dev::frameGrabber<mwfsMonitor>
 {
 
    //Give the test harness access.
    friend class mwfsMonitor_test;
 
    friend class dev::shmimMonitor<mwfsMonitor>;
-   friend class dev::shmimMonitor<mwfsMonitor,darkShmimT>;
-   friend class dev::shmimMonitor<mwfsMonitor,dark2ShmimT>;
    friend class dev::frameGrabber<mwfsMonitor>;
    
    //The base shmimMonitor type
    typedef dev::shmimMonitor<mwfsMonitor> shmimMonitorT;
-   
-   //The dark shmimMonitor type
-   typedef dev::shmimMonitor<mwfsMonitor, darkShmimT> darkMonitorT;
-   
-   //The dark shmimMonitor type for a 2nd dark
-   typedef dev::shmimMonitor<mwfsMonitor, dark2ShmimT> dark2MonitorT;
    
    //The base frameGrabber type
    typedef dev::frameGrabber<mwfsMonitor> frameGrabberT;
@@ -101,8 +93,8 @@ protected:
    std::vector<std::string> m_elNames;
    int m_leakBox {30};
    int m_mwfsBox {180};
-   int m_xLeak {255};
-   int m_yLeak {248};
+   int m_xLeak {628};
+   int m_yLeak {622};
    int m_xmwfs {120};
    int m_ymwfs {140};
    bool m_mwfs_toggle {false};
@@ -127,13 +119,7 @@ protected:
    realT (*pixget)(void *, size_t) {nullptr}; ///< Pointer to a function to extract the image data as our desired type realT.
    realT (*mwfs_pixget)(void *, size_t) {nullptr}; ///< Pointer to a function to extract the image data as our desired type realT.
    
-   mx::improc::eigenImage<realT> m_darkImage;
-   bool m_darkSet {false};
-   realT (*dark_pixget)(void *, size_t) {nullptr}; ///< Pointer to a function to extract the image data as our desired type realT.
    
-   mx::improc::eigenImage<realT> m_dark2Image;
-   bool m_dark2Set {false};
-   realT (*dark2_pixget)(void *, size_t) {nullptr}; ///< Pointer to a function to extract the image data as our desired type realT.
    
 public:
    /// Default c'tor.
@@ -177,17 +163,6 @@ public:
                      const dev::shmimT & dummy ///< [in] tag to differentiate shmimMonitor parents.
                    );
    
-   int allocate( const darkShmimT & dummy /**< [in] tag to differentiate shmimMonitor parents.*/);
-   
-   int processImage( void * curr_src,          ///< [in] pointer to start of current frame.
-                     const darkShmimT & dummy ///< [in] tag to differentiate shmimMonitor parents.
-                   );
-   
-   int allocate( const dark2ShmimT & dummy /**< [in] tag to differentiate shmimMonitor parents.*/);
-   
-   int processImage( void * curr_src,          ///< [in] pointer to start of current frame.
-                     const dark2ShmimT & dummy ///< [in] tag to differentiate shmimMonitor parents.
-                   );
 protected:
 
    /** \name dev::frameGrabber interface
@@ -253,8 +228,7 @@ protected:
 inline
 mwfsMonitor::mwfsMonitor() : MagAOXApp(MAGAOX_CURRENT_SHA1, MAGAOX_REPO_MODIFIED)
 {
-   darkMonitorT::m_getExistingFirst = true;
-   //shmimMonitorT::m_semaphoreNumber = 5;
+   shmimMonitorT::m_semaphoreNumber = 5;
    return;
 }
 
@@ -262,8 +236,6 @@ inline
 void mwfsMonitor::setupConfig()
 {
    shmimMonitorT::setupConfig(config);
-   darkMonitorT::setupConfig(config);
-   dark2MonitorT::setupConfig(config);
    
    frameGrabberT::setupConfig(config);
 
@@ -277,8 +249,6 @@ int mwfsMonitor::loadConfigImpl( mx::app::appConfigurator & _config )
 {
    
    shmimMonitorT::loadConfig(config);
-   darkMonitorT::loadConfig(config);
-   dark2MonitorT::loadConfig(config);
    
    frameGrabberT::loadConfig(config);
    
@@ -369,16 +339,6 @@ int mwfsMonitor::appStartup()
       return log<software_error,-1>({__FILE__, __LINE__});
    }
    
-   if(darkMonitorT::appStartup() < 0)
-   {
-      return log<software_error,-1>({__FILE__, __LINE__});
-   }
-   
-   if(dark2MonitorT::appStartup() < 0)
-   {
-      return log<software_error,-1>({__FILE__, __LINE__});
-   }
-   
    if(frameGrabberT::appStartup() < 0)
    {
       return log<software_error,-1>({__FILE__, __LINE__});
@@ -397,16 +357,6 @@ int mwfsMonitor::appLogic()
       return log<software_error,-1>({__FILE__,__LINE__});
    }
    
-   if( darkMonitorT::appLogic() < 0)
-   {
-      return log<software_error,-1>({__FILE__,__LINE__});
-   }
-   
-   if( dark2MonitorT::appLogic() < 0)
-   {
-      return log<software_error,-1>({__FILE__,__LINE__});
-   }
-   
    if( frameGrabberT::appLogic() < 0)
    {
       return log<software_error,-1>({__FILE__,__LINE__});
@@ -419,15 +369,6 @@ int mwfsMonitor::appLogic()
       log<software_error>({__FILE__, __LINE__});
    }
    
-   if(darkMonitorT::updateINDI() < 0)
-   {
-      log<software_error>({__FILE__, __LINE__});
-   }
-   
-   if(dark2MonitorT::updateINDI() < 0)
-   {
-      log<software_error>({__FILE__, __LINE__});
-   }
    
    
    if(frameGrabberT::updateINDI() < 0)
@@ -442,8 +383,6 @@ inline
 int mwfsMonitor::appShutdown()
 {
    shmimMonitorT::appShutdown();
-   
-   darkMonitorT::appShutdown();
    
    frameGrabberT::appShutdown();
    
@@ -553,10 +492,8 @@ int mwfsMonitor::processImage( void * curr_src,
    m_im_delta = m_im_centered - m_im_rot180;
 
    // cut down to mwfs block
-   //int mwfs_block_x = static_cast<int>(m_xmwfs - m_mwfsBox/2. + m_xLeak);
-   //int mwfs_block_y = static_cast<int>(m_ymwfs - m_mwfsBox/2. + m_yLeak);
-   int mwfs_block_x = static_cast<int>(m_xmwfs - m_mwfsBox/2. + shift_x);
-   int mwfs_block_y = static_cast<int>(m_ymwfs - m_mwfsBox/2. + shift_y);
+   int mwfs_block_x = static_cast<int>(m_xmwfs - m_mwfsBox/2. + xcen);
+   int mwfs_block_y = static_cast<int>(m_ymwfs - m_mwfsBox/2. + ycen);
    if( mwfs_block_x > 0  && mwfs_block_y > 0)
    {
       m_im_mwfs = m_im_delta.block(mwfs_block_x, mwfs_block_y, m_mwfsBox, m_mwfsBox);
@@ -565,6 +502,7 @@ int mwfsMonitor::processImage( void * curr_src,
    {
       return 0;
    }
+   
 
    m_updated = true;
 
@@ -578,97 +516,6 @@ int mwfsMonitor::processImage( void * curr_src,
    return 0;
 }
 
-inline
-int mwfsMonitor::allocate(const darkShmimT & dummy)
-{
-   static_cast<void>(dummy); //be unused
-   
-   std::unique_lock<std::mutex> lock(m_indiMutex);
-   
-   if(darkMonitorT::m_width != shmimMonitorT::m_width || darkMonitorT::m_height != shmimMonitorT::m_height)
-   {
-      m_darkSet = false;
-      darkMonitorT::m_restart = true;
-   }
-   
-   m_darkImage.resize(darkMonitorT::m_width, darkMonitorT::m_height);
-   
-   dark_pixget = getPixPointer<realT>(darkMonitorT::m_dataType);
-   
-   if(dark_pixget == nullptr)
-   {
-      log<software_error>({__FILE__, __LINE__, "bad data type"});
-      return -1;
-   }
-   
-   return 0;
-}
-
-inline
-int mwfsMonitor::processImage( void * curr_src, 
-                                   const darkShmimT & dummy 
-                                 )
-{
-   static_cast<void>(dummy); //be unused
-   
-   realT * data = m_darkImage.data();
-   
-   for(unsigned nn=0; nn < darkMonitorT::m_width*darkMonitorT::m_height; ++nn)
-   {
-      //data[nn] = *( (int16_t * ) (curr_src + nn*shmimMonitorT::m_typeSize));
-      data[nn] = dark_pixget(curr_src, nn);
-   }
-   
-   m_darkSet = true;
-   
-   return 0;
-}
-
-inline
-int mwfsMonitor::allocate(const dark2ShmimT & dummy)
-{
-   static_cast<void>(dummy); //be unused
-   
-   std::unique_lock<std::mutex> lock(m_indiMutex);
-   
-   if(dark2MonitorT::m_width != shmimMonitorT::m_width || dark2MonitorT::m_height != shmimMonitorT::m_height)
-   {
-      m_dark2Set = false;
-      dark2MonitorT::m_restart = true;
-   }
-   
-   m_dark2Image.resize(dark2MonitorT::m_width, dark2MonitorT::m_height);
-   
-   dark2_pixget = getPixPointer<realT>(dark2MonitorT::m_dataType);
-   
-   if(dark2_pixget == nullptr)
-   {
-      log<software_error>({__FILE__, __LINE__, "bad data type"});
-      return -1;
-   }
-   
-   return 0;
-}
-
-inline
-int mwfsMonitor::processImage( void * curr_src, 
-                                   const dark2ShmimT & dummy 
-                                 )
-{
-   static_cast<void>(dummy); //be unused
-   
-   realT * data = m_dark2Image.data();
-   
-   for(unsigned nn=0; nn < dark2MonitorT::m_width*dark2MonitorT::m_height; ++nn)
-   {
-      //data[nn] = *( (int16_t * ) (curr_src + nn*shmimMonitorT::m_typeSize));
-      data[nn] = dark2_pixget(curr_src, nn);
-   }
-   
-   m_dark2Set = true;
-   
-   return 0;
-}
 
 
 inline
