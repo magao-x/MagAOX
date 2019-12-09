@@ -400,7 +400,7 @@ void frameGrabber<derivedT>::fgThreadExec()
       
          ImageStreamIO_createIm_gpu(&imageStream, m_shmimName.c_str(), 3, imsize, m_dataType, -1, 1, IMAGE_NB_SEMAPHORE, 0, CIRCULAR_BUFFER | ZAXIS_TEMPORAL);
        
-         imageStream.md->cnt1 = m_circBuffLength;
+         imageStream.md->cnt1 = m_circBuffLength - 1;
       }
       else
       {
