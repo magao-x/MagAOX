@@ -143,14 +143,6 @@ public:
      */
    static eventCodeT eventCode( bufferPtrT & logBuffer /**< [in] a shared_ptr\<char\> containing a raw lag entry buffer.*/);
       
-   ///Extract the timespec of a log entry
-   /**
-     * \returns the timespec
-     * 
-     * \ingroup logbuff
-     */
-   static timespecX timespec( bufferPtrT & logBuffer /**< [in] a shared_ptr\<char\> containing a raw lag entry buffer.*/);
-
    ///Set the timespec of a log entry
    /**
      * \returns 0 on success
@@ -161,6 +153,14 @@ public:
    static int timespec( bufferPtrT & logBuffer,    ///< [in, out] a shared_ptr\<char\> containing a raw lag entry buffer.*/ 
                         const timespecX & ts ///< [in] the new timespec
                       );
+   
+   ///Extract the timespec of a log entry
+   /**
+     * \returns the timespec
+     * 
+     * \ingroup logbuff
+     */
+   static timespecX timespec( bufferPtrT & logBuffer /**< [in] a shared_ptr\<char\> containing a raw lag entry buffer.*/);
 
    ///Get the size in bytes of the length field for an existing logBuffer.
    /**
@@ -320,12 +320,6 @@ eventCodeT logHeader::eventCode( bufferPtrT & logBuffer)
 }
 
 inline
-timespecX logHeader::timespec( bufferPtrT & logBuffer)
-{
-   return reinterpret_cast<internal_logHeader *>(logBuffer.get())->m_timespecX;
-}
-
-inline
 int logHeader::timespec( bufferPtrT & logBuffer,
                           const timespecX & ts
                         )
@@ -333,6 +327,12 @@ int logHeader::timespec( bufferPtrT & logBuffer,
    reinterpret_cast<internal_logHeader *>(logBuffer.get())->m_timespecX = ts;
    
    return 0;
+}
+
+inline
+timespecX logHeader::timespec( bufferPtrT & logBuffer)
+{
+   return reinterpret_cast<internal_logHeader *>(logBuffer.get())->m_timespecX;
 }
 
 inline
