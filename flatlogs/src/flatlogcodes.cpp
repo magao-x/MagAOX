@@ -336,6 +336,7 @@ int main()
       ++it;
    }
 
+   std::cerr << "flatc command: " << flatc << "\n";
    int rv = system(flatc.c_str());
    
    if(rv < 0) std::cerr << "Error running flatc.\n";
