@@ -219,6 +219,51 @@ int ttyWrite( const std::string & buffWrite, ///< [in] The characters to write t
    return TTY_E_NOERROR;
 }
 
+/// Read from a tty console indicated by a file-descriptor, up to a given number of bytes.
+/** Polls before attempting to read, but does not wait for all bytes to be ready.
+  * 
+  * \returns TTY_E_NOERROR on success
+  * \returns TTY_E_TIMEOUTONREADPOLL if the poll times out.
+  * \returns TTY_E_ERRORONREADPOLL if an error is returned by poll.
+  * \returns TTY_E_ERRORONREAD if an error occurs reading from the file.
+  * 
+  * \ingroup tty 
+  */
+inline
+int ttyReadRaw( std::vector<unsigned char> & vecRead, ///< [out] The buffer in which to store the output.
+                int & readBytes,                      ///< [out] The number of bytes read.
+                int fd,                               ///< [in] The file descriptor of the open tty.
+                int timeoutRead                       ///< [in] The timeout in milliseconds.
+              )
+{
+   int rv;
+
+   struct pollfd pfd;
+
+   errno = 0;
+
+   pfd.fd = fd;
+   pfd.events = POLLIN;
+
+
+   rv = poll( &pfd, 1, timeoutRead);
+   if( rv == 0 ) return TTY_E_TIMEOUTONREADPOLL;
+   if( rv < 0 ) return TTY_E_ERRORONREADPOLL;
+
+   readBytes = 0;
+   
+   rv = read(fd, vecRead.data(), vecRead.size());
+   if( rv < 0 ) return TTY_E_ERRORONREAD;
+
+
+   readBytes = rv;
+   
+
+   return TTY_E_NOERROR;
+
+
+}
+
 /// Read from a tty console indicated by a file-descriptor, until a given number of bytes are read.
 /**
   * \returns TTY_E_NOERROR on success
