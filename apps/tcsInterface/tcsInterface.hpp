@@ -252,7 +252,7 @@ public:
    
    INDI_SETCALLBACK_DECL(tcsInterface, m_indiP_loopState);
    
-   /** \name Pyramid Nudging
+   /** \name Pyramid Nudging and Acquisition
      * Handling of nudges on pyramid tip.
      * @{
      */
@@ -262,13 +262,27 @@ public:
    float m_pyrNudge_C_01 {0};
    float m_pyrNudge_C_10 {0};
    float m_pyrNudge_C_11 {1};
+   float m_pyrNudge_F_sign {1};
    
-   int sendPyrNudge( float n_0,
-                     float n_1
+   float m_pyrNudge_ang {45.0};
+   float m_pyrNudge_ang0 {0.0};
+   float m_pyrNudge_parity {-1};
+   
+   int sendPyrNudge( float x,
+                     float y,
+                     float z
                    );
    
    pcf::IndiProperty m_indiP_pyrNudge; ///< Property used to request a pyramid nudge
    INDI_NEWCALLBACK_DECL(tcsInterface, m_indiP_pyrNudge);
+   
+   int m_acqZdSign {-1};
+   float m_acqAz0 {18.5};
+   float m_acqEl0 {10};
+   int acquireFromGuider();
+   
+   pcf::IndiProperty m_indiP_acqFromGuider; ///< Property used to request a pyramid nudge
+   INDI_NEWCALLBACK_DECL(tcsInterface, m_indiP_acqFromGuider);
    
    ///@}
    
@@ -397,6 +411,16 @@ void tcsInterface::setupConfig()
    config.add("pyrNudger.C_10", "", "pyrNudger.C_10", argType::Required, "pyrNudger", "C_10", false, "float", "Pyramid to AEG control matrix [1,0] of a 2x2 matrix ");
    config.add("pyrNudger.C_11", "", "pyrNudger.C_11", argType::Required, "pyrNudger", "C_11", false, "float", "Pyramid to AEG control matrix [1,1] of a 2x2 matrix ");
    
+   config.add("pyrNudger.ang", "", "pyrNudger.ang", argType::Required, "pyrNudger", "ang", false, "float", "");
+   config.add("pyrNudger.ang0", "", "pyrNudger.ang0", argType::Required, "pyrNudger0", "ang0", false, "float", "");
+   config.add("pyrNudger.parity", "", "pyrNudger.parity", argType::Required, "pyrNudger", "parity", false, "float", "");
+ 
+   config.add("pyrNudger.F_sign", "", "pyrNudger.F_sign", argType::Required, "pyrNudger", "F_sign", false, "int", "Pyramid to AEG control matrix [1,1] of a 2x2 matrix ");
+   
+   config.add("acqFromGuider.zdSign", "", "acqFromGuider.zdSign", argType::Required, "acqFromGuider", "zdSign", false, "int", "Sign of the Zd to rotation angle, +1 or -1, -1 default");
+   config.add("acqFromGuider.az0", "", "acqFromGuider.az0", argType::Required, "acqFromGuider", "az0", false, "float", "az component of acquisition vector a 0 zd.");
+   config.add("acqFromGuider.el0", "", "acqFromGuider.el0", argType::Required, "acqFromGuider", "el0", false, "float", "el component of acquisition vector a 0 zd.");
+   
    config.add("offload.TT_avgInt", "", "offload.TT_avgInt", argType::Required, "offload", "TT_avgInt", false, "float", "Woofer to Telescope T/T offload averaging interval [sec] ");
    config.add("offload.TT_gain", "", "offload.TT_gain", argType::Required, "offload", "TT_gain", false, "float", "Woofer to Telescope T/T offload gain");
    config.add("offload.TT_thresh", "", "offload.TT_thresh", argType::Required, "offload", "TT_thresh", false, "float", "Woofer to Telescope T/T offload threshold");
@@ -435,12 +459,20 @@ int tcsInterface::loadConfigImpl( mx::app::appConfigurator & _config )
 {
    
    _config(m_labMode, "labMode");
-   std::cerr << "\n\n labMode=\n\n" << m_labMode << "\n";
+   std::cerr << "\n\n labMode= " << m_labMode << "\n\n";
    
    _config(m_pyrNudge_C_00, "pyrNudger.C_00");
    _config(m_pyrNudge_C_01, "pyrNudger.C_01");
    _config(m_pyrNudge_C_10, "pyrNudger.C_10");
    _config(m_pyrNudge_C_11, "pyrNudger.C_11");
+   
+   _config(m_pyrNudge_ang, "pyrNudger.ang");
+   _config(m_pyrNudge_ang0, "pyrNudger.ang0");
+   _config(m_pyrNudge_parity, "pyrNudger.parity");
+   
+   _config(m_acqZdSign, "acqFromGuider.zdSign");
+   _config(m_acqAz0, "acqFromGuider.az0");
+   _config(m_acqEl0, "acqFromGuider.el0");
    
    _config(m_offlTT_avgInt, "offload.TT_avgInt");
    _config(m_offlTT_gain, "offload.TT_gain");
@@ -641,9 +673,16 @@ int tcsInterface::appStartup()
    }
    
    REG_INDI_NEWPROP(m_indiP_pyrNudge, "pyrNudge", pcf::IndiProperty::Number);
-   m_indiP_pyrNudge.add(pcf::IndiElement("updown"));
-   m_indiP_pyrNudge.add(pcf::IndiElement("leftright"));
+   m_indiP_pyrNudge.add(pcf::IndiElement("y"));
+   m_indiP_pyrNudge.add(pcf::IndiElement("x"));
+   m_indiP_pyrNudge.add(pcf::IndiElement("z"));
    
+   createStandardIndiRequestSw( m_indiP_acqFromGuider, "acqFromGuider");
+   if( registerIndiPropertyNew( m_indiP_acqFromGuider, st_newCallBack_m_indiP_acqFromGuider) < 0)
+   {
+      log<software_error>({__FILE__,__LINE__});
+      return -1;
+   }
    
    createStandardIndiRequestSw( m_indiP_offlTTdump, "offlTT_dump");
    if( registerIndiPropertyNew( m_indiP_offlTTdump, st_newCallBack_m_indiP_offlTTdump) < 0)
@@ -828,7 +867,7 @@ int tcsInterface::appLogic()
       
       if(getCatData() < 0)
       {
-         log<text_log>("Error from getTelData", logPrio::LOG_ERROR);
+         log<text_log>("Error from getCatData", logPrio::LOG_ERROR);
          return 0;
       }
       
@@ -840,7 +879,7 @@ int tcsInterface::appLogic()
       
       if(getEnvData() < 0)
       {
-         log<text_log>("Error from getVaneData", logPrio::LOG_ERROR);
+         log<text_log>("Error from getEnvData", logPrio::LOG_ERROR);
          return 0;
       }
       
@@ -1225,14 +1264,26 @@ int tcsInterface::getCatData()
 
    if(cdat.size() != 6)
    {
-      state(stateCodes::ERROR);
-      log<text_log>("Error getting catalog data (catdata): TCS response wrong size", logPrio::LOG_ERROR);
-      return -1;
+      //This can occur if no target selected by operator
+      log<text_log>("Catalog data (catdata): TCS response wrong size", logPrio::LOG_WARNING);
+      m_catRA = 0;
+   
+      m_catDec = 0;
+
+      m_catEp = 0;
+
+      m_catRo = 0;
+
+      m_catRm = "";
+
+      m_catObj = "none";
+      
+      return 1;
    }
 
    if(parse_xms(h,m,s,cdat[0]) != 0)
    {
-      log<text_log>("Error parsing catalg RA", logPrio::LOG_ERROR);
+      log<text_log>("Error parsing catalog RA", logPrio::LOG_ERROR);
       return -1;
    }
 
@@ -2126,19 +2177,70 @@ int tcsInterface::recordTelSee(bool force)
    return 0;
 }
 
-int tcsInterface::sendPyrNudge( float n_0,
-                                float n_1
+int tcsInterface::sendPyrNudge( float x,
+                                float y,
+                                float z
                               )
 {
-   float pn_0 = m_pyrNudge_C_00 * n_0 + m_pyrNudge_C_01 * n_1;
-   float pn_1 = m_pyrNudge_C_10 * n_0 + m_pyrNudge_C_11 * n_1;
+   if(x != 0 || y != 0)
+   {
+      float dx = m_pyrNudge_C_00 * x + m_pyrNudge_C_01 * y;
+      float dy = m_pyrNudge_C_10 * x + m_pyrNudge_C_11 * y;
+   
+      //float cs = cos((m_pyrNudge_ang + m_pyrNudge_ang0 + m_telZd)*3.14159*180);
+      //float ss = sin((m_pyrNudge_ang + m_pyrNudge_ang0 + m_telZd)*3.14159*180);
+   
+      //float dx = x * cs - y * ss;
+      //float dy = m_pyrNudge_parity*(x * ss + y * cs);
+   
+      char ttstr[64];
+      snprintf(ttstr, sizeof(ttstr) , "aeg %f %f", dx, dy);
+
+      ///\todo need logtypes for nudges and offloads
+      log<text_log>(std::string("[PYRNUDGE] ")  + ttstr, logPrio::LOG_NOTICE);
+      if(sendMagTelCommand(ttstr, 1000) < 0)
+      {
+         log<software_error>({__FILE__,__LINE__, std::string("error sending command: ") + ttstr});
+         return -1;
+      }
+   }
+   
+   if(z != 0)
+   {
+      char ttstr[64];
+      snprintf(ttstr, sizeof(ttstr) , "zimr %f", z*m_pyrNudge_F_sign);
+
+      log<text_log>(std::string("[PYRNUDGE] ") + ttstr, logPrio::LOG_NOTICE);
+      if(sendMagTelCommand(ttstr, 1000) < 0)
+      {
+         log<software_error>({__FILE__,__LINE__, std::string("error sending command: ") + ttstr});
+         return -1;
+      }
+   }
+   
+   return 0;
+}
+
+int tcsInterface::acquireFromGuider()
+{
+   //Convert current telescope rotator angle to radians
+   float q = (m_acqZdSign*m_telZd)*3.14159/180.;
+
+   //The rotation matrix
+   float az = m_acqAz0*cos(q) - m_acqEl0*sin(q);
+   float el = m_acqAz0*sin(q) + m_acqEl0*cos(q);
    
    char ttstr[64];
-   snprintf(ttstr, sizeof(ttstr) , "aeg %f %f", pn_0, pn_1);
+   snprintf(ttstr, sizeof(ttstr) , "aeg %f %f", az, el);
 
-   std::cerr << "sending " << ttstr << "\n";
-   return sendMagTelCommand(ttstr, 1000);
-   
+   ///\todo need logtypes for nudges and offloads
+   log<text_log>(std::string("[ACQUIRE] ")  + ttstr, logPrio::LOG_NOTICE);
+   if(sendMagTelCommand(ttstr, 1000) < 0)
+   {
+      log<software_error>({__FILE__,__LINE__, std::string("error sending command: ") + ttstr});
+      return -1;
+   }
+      
    return 0;
 }
 
@@ -2198,7 +2300,7 @@ void tcsInterface::offloadThreadExec( )
       //If we got a new offload request, process it
       if(m_last_nRequests != m_nRequests)
       {
-         std::cerr << m_firstRequest << " " << m_lastRequest << " " << m_nRequests << std::endl;
+         //std::cerr << m_firstRequest << " " << m_lastRequest << " " << m_nRequests << std::endl;
          
          ///\todo offloading: These sections ought to be separate functions for clarity
          /* --- TT --- */ 
@@ -2281,7 +2383,7 @@ int tcsInterface::doTToffload( float tt_0,
 {
    if(m_offlTT_dump)
    {
-      std::cerr << "dumping: " << tt_0 << " " << tt_1 << "\n";
+      log<text_log>("[OFFL] TT dumping: " + std::to_string(tt_0) + " " + std::to_string(tt_1));
       sendTToffload(tt_0, tt_1);
       m_offlTT_dump = false;
    }
@@ -2290,19 +2392,17 @@ int tcsInterface::doTToffload( float tt_0,
       tt_0 *= m_offlTT_gain;
       tt_1 *= m_offlTT_gain;
       
-      std::cerr << tt_0 << " " << tt_1 << "\n";
-      
       if(fabs(tt_0) < m_offlTT_thresh) tt_0 = 0;
       if(fabs(tt_1) < m_offlTT_thresh) tt_1 = 0;
 
             
       if(tt_0 ==0 && tt_1 == 0)
       {
-         std::cerr << "TT offload below threshold\n";
+         //Do nothing
       }
       else if(m_offlTT_enabled)
       {
-         std::cerr << "sendimg: " << tt_0 << " " << tt_1 << "\n";
+         log<text_log>("[OFFL] TT offloading: " + std::to_string(tt_0) + " " + std::to_string(tt_1));
          sendTToffload(tt_0, tt_1);
       }
       else
@@ -2337,8 +2437,12 @@ int tcsInterface::sendTToffload( float tt_0,
    }
 
    char ttstr[64];
+   
+   
    snprintf(ttstr, sizeof(ttstr) , "aeg %f %f", tt_0, tt_1);
 
+   log<text_log>(std::string("[OFFL] sending: ") + ttstr);
+   
    return sendMagTelCommand(ttstr, 1000);
 }
 
@@ -2346,7 +2450,7 @@ int tcsInterface::doFoffload( float F_0 )
 {
    if(m_offlF_dump)
    {
-      std::cerr << "Focus dumping: " << F_0 << "\n";
+      log<text_log>("[OFFL] Focus dumping: " + std::to_string(F_0));
       sendFoffload(F_0);
       m_offlF_dump = false;
    }
@@ -2358,11 +2462,11 @@ int tcsInterface::doFoffload( float F_0 )
             
       if(F_0 == 0)
       {
-         std::cerr << "Focus offload below threshold\n";
+         
       }
       else if(m_offlF_enabled)
       {
-         std::cerr << "Focus sendimg: " << F_0 << "\n";
+         log<text_log>("[OFFL] Focus sending: " + std::to_string(F_0));
          sendFoffload(F_0);
       }
       else
@@ -2381,9 +2485,7 @@ int tcsInterface::sendFoffload( float F_0 )
    //Use zimr to update the IMA values
    snprintf(fstr, sizeof(fstr), "zimr %f", F_0);
    
-   std::cerr << "+++++++++++++++++++++++\n\n";
-   std::cerr << fstr << "\n";
-   std::cerr << "+++++++++++++++++++++++\n\n";
+   log<text_log>(std::string("[OFFL] sending: ") + fstr);
    
    return sendMagTelCommand(fstr, 1000);
 }
@@ -2396,20 +2498,49 @@ INDI_NEWCALLBACK_DEFN(tcsInterface, m_indiP_pyrNudge)(const pcf::IndiProperty &i
       return -1;
    }
    
-   float ud = 0;
-   float lr = 0;
+   float x = 0;
+   float y = 0;
+   float z = 0;
    
-   if(ipRecv.find("updown"))
+   if(ipRecv.find("y"))
    {
-      ud = ipRecv["updown"].get<float>();
+      x = ipRecv["y"].get<float>();
    }
    
-   if(ipRecv.find("leftright"))
+   if(ipRecv.find("x"))
    {
-      lr = ipRecv["leftright"].get<float>();
+      y = ipRecv["x"].get<float>();
    }
    
-   return sendPyrNudge(ud, lr);
+   if(ipRecv.find("z"))
+   {
+      z = ipRecv["z"].get<float>();
+   }
+   
+   return sendPyrNudge(x, y, z);
+}
+
+
+
+INDI_NEWCALLBACK_DEFN(tcsInterface, m_indiP_acqFromGuider)(const pcf::IndiProperty &ipRecv)
+{
+   if(ipRecv.getName() != m_indiP_acqFromGuider.getName())
+   {
+      log<software_error>({__FILE__,__LINE__, "wrong INDI property received."});
+      return -1;
+   }
+   
+   if(!ipRecv.find("request"))
+   {
+      return 0;
+   }
+
+   if( ipRecv["request"].getSwitchState() == pcf::IndiElement::On)
+   {
+      return acquireFromGuider();
+   }
+   
+   return 0;
 }
 
 INDI_SETCALLBACK_DEFN(tcsInterface, m_indiP_loopState)(const pcf::IndiProperty &ipRecv)
@@ -2432,9 +2563,6 @@ INDI_SETCALLBACK_DEFN(tcsInterface, m_indiP_offloadCoeffs)(const pcf::IndiProper
    
    if(nextReq >= m_offloadRequests[0].size()) nextReq = 0;
      
-   std::cerr << "nextReq: " << nextReq << "\n";
-   
-
    //Tip-Tilt
    float tt0 = ipRecv["00"].get<float>();
    float tt1 = ipRecv["01"].get<float>();
@@ -2552,8 +2680,6 @@ INDI_NEWCALLBACK_DEFN(tcsInterface, m_indiP_offlTTgain)(const pcf::IndiProperty 
 INDI_NEWCALLBACK_DEFN(tcsInterface, m_indiP_offlTTthresh)(const pcf::IndiProperty &ipRecv)
 {
    float target;
-   
-   std::cerr << "Got offl thresh\n";
    
    if( indiTargetUpdate( m_indiP_offlTTthresh, target, ipRecv, true) < 0)
    {
