@@ -91,11 +91,13 @@ protected:
      */
 
    std::vector<std::string> m_elNames;
-   int m_leakBox {30};
+   int m_PSFBox {30};
    int m_mwfsBox {180};
-   int m_xLeak {628};
-   int m_yLeak {622};
-   int m_xmwfs {120};
+   int m_xPSF1 {245};
+   int m_yPSF1 {600};
+   int m_xPSF2 {400};
+   int m_yPSF2 {740};
+   int m_xmwfs {-130};
    int m_ymwfs {140};
    bool m_mwfs_toggle {false};
 
@@ -103,7 +105,8 @@ protected:
    mx::math::fit::fitGaussian2D<mx::math::fit::gaussian2D_gen_fitter<float>> m_fit;
 
    mx::improc::eigenImage<realT> m_im; // full vAPP image
-   mx::improc::eigenImage<realT> m_im_leak; // cut out around leak
+   mx::improc::eigenImage<realT> m_im_psf1; // cut out around psf1
+   mx::improc::eigenImage<realT> m_im_psf2; // cut out around psf2
    mx::improc::eigenImage<realT> m_im_centered; // vAPP image centered on leak
    mx::improc::eigenImage<realT> m_im_rot180; // rotated vAPP for subtraction
    mx::improc::eigenImage<realT> m_im_delta; // delta image
@@ -162,6 +165,9 @@ public:
    int processImage( void * curr_src,          ///< [in] pointer to start of current frame.
                      const dev::shmimT & dummy ///< [in] tag to differentiate shmimMonitor parents.
                    );
+
+   int centroid(mx::improc::eigenImage<realT> & image, mx::improc::eigenImage<realT> & im_block,
+                int x, int y, int boxsize, realT & x_psf, realT & y_psf);
    
 protected:
 
@@ -207,19 +213,23 @@ protected:
    
    ///@}
    
-   pcf::IndiProperty m_indiP_leakBox;
+   pcf::IndiProperty m_indiP_PSFBox;
    pcf::IndiProperty m_indiP_mwfsBox;
-   pcf::IndiProperty m_indiP_xLeak;
-   pcf::IndiProperty m_indiP_yLeak;
+   pcf::IndiProperty m_indiP_xPSF1;
+   pcf::IndiProperty m_indiP_yPSF1;
+   pcf::IndiProperty m_indiP_xPSF2;
+   pcf::IndiProperty m_indiP_yPSF2;
    pcf::IndiProperty m_indiP_xmwfs;
    pcf::IndiProperty m_indiP_ymwfs;
    pcf::IndiProperty m_indiP_mwfs_toggle;
 
 
-   INDI_NEWCALLBACK_DECL(mwfsMonitor, m_indiP_leakBox);
+   INDI_NEWCALLBACK_DECL(mwfsMonitor, m_indiP_PSFBox);
    INDI_NEWCALLBACK_DECL(mwfsMonitor, m_indiP_mwfsBox);
-   INDI_NEWCALLBACK_DECL(mwfsMonitor, m_indiP_xLeak);
-   INDI_NEWCALLBACK_DECL(mwfsMonitor, m_indiP_yLeak);
+   INDI_NEWCALLBACK_DECL(mwfsMonitor, m_indiP_xPSF1);
+   INDI_NEWCALLBACK_DECL(mwfsMonitor, m_indiP_yPSF1);
+   INDI_NEWCALLBACK_DECL(mwfsMonitor, m_indiP_xPSF2);
+   INDI_NEWCALLBACK_DECL(mwfsMonitor, m_indiP_yPSF2);
    INDI_NEWCALLBACK_DECL(mwfsMonitor, m_indiP_xmwfs);
    INDI_NEWCALLBACK_DECL(mwfsMonitor, m_indiP_ymwfs);
    INDI_NEWCALLBACK_DECL(mwfsMonitor, m_indiP_mwfs_toggle);
@@ -239,7 +249,7 @@ void mwfsMonitor::setupConfig()
    
    frameGrabberT::setupConfig(config);
 
-   config.add("mwfs.leakBox", "", "mwfs.leakBox", argType::Required, "mwfs", "leakBox", false, "int", "Size of box (length of a side) around leak term in which to centroid");
+   config.add("mwfs.PSFBox", "", "mwfs.PSFBox", argType::Required, "mwfs", "PSFBox", false, "int", "Size of box (length of a side) around PSFs in which to centroid");
    config.add("mwfs.mwfsBox", "", "mwfs.mwfsBox", argType::Required, "mwfs", "mwfsBox", false, "int", "Size of box (length of a side) around mwfs spots");
 
 }
@@ -252,7 +262,7 @@ int mwfsMonitor::loadConfigImpl( mx::app::appConfigurator & _config )
    
    frameGrabberT::loadConfig(config);
    
-   _config(m_leakBox, "mwfs.leakBox");
+   _config(m_PSFBox, "mwfs.PSFBox");
    _config(m_mwfsBox, "mwfs.mwfsBox");
    
    return 0;
@@ -269,10 +279,10 @@ int mwfsMonitor::appStartup()
 {
    
    // leakBox
-   createStandardIndiNumber<unsigned>( m_indiP_leakBox, "leakBox", 1, std::numeric_limits<unsigned>::max(), 1, "%u");
-   m_indiP_leakBox["current"] = m_leakBox;
+   createStandardIndiNumber<unsigned>( m_indiP_PSFBox, "PSFBox", 1, std::numeric_limits<unsigned>::max(), 1, "%u");
+   m_indiP_PSFBox["current"] = m_PSFBox;
 
-   if( registerIndiPropertyNew( m_indiP_leakBox, INDI_NEWCALLBACK(m_indiP_leakBox)) < 0)
+   if( registerIndiPropertyNew( m_indiP_PSFBox, INDI_NEWCALLBACK(m_indiP_PSFBox)) < 0)
    {
       log<software_error>({__FILE__,__LINE__});
       return -1;
@@ -288,18 +298,34 @@ int mwfsMonitor::appStartup()
       return -1;
    }
 
-   // leak and mwfs positions
-   createStandardIndiNumber<unsigned>( m_indiP_xLeak, "xLeak", 1, std::numeric_limits<unsigned>::max(), 1, "%u");
-   m_indiP_xLeak["current"] = m_xLeak;
-   if( registerIndiPropertyNew( m_indiP_xLeak, INDI_NEWCALLBACK(m_indiP_xLeak)) < 0)
+   // psf and mwfs positions
+   createStandardIndiNumber<unsigned>( m_indiP_xPSF1, "xPSF1", 1, std::numeric_limits<unsigned>::max(), 1, "%u");
+   m_indiP_xPSF1["current"] = m_xPSF1;
+   if( registerIndiPropertyNew( m_indiP_xPSF1, INDI_NEWCALLBACK(m_indiP_xPSF1)) < 0)
    {
       log<software_error>({__FILE__,__LINE__});
       return -1;
    }
    
-   createStandardIndiNumber<realT>( m_indiP_yLeak, "yLeak", 1, std::numeric_limits<realT>::max(), 1, "%u");
-   m_indiP_yLeak["current"] = m_yLeak;
-   if( registerIndiPropertyNew( m_indiP_yLeak, INDI_NEWCALLBACK(m_indiP_yLeak)) < 0)
+   createStandardIndiNumber<realT>( m_indiP_yPSF1, "yPSF1", 1, std::numeric_limits<realT>::max(), 1, "%u");
+   m_indiP_yPSF1["current"] = m_yPSF1;
+   if( registerIndiPropertyNew( m_indiP_yPSF1, INDI_NEWCALLBACK(m_indiP_yPSF1)) < 0)
+   {
+      log<software_error>({__FILE__,__LINE__});
+      return -1;
+   }
+
+   createStandardIndiNumber<unsigned>( m_indiP_xPSF2, "xPSF2", 1, std::numeric_limits<unsigned>::max(), 1, "%u");
+   m_indiP_xPSF2["current"] = m_xPSF2;
+   if( registerIndiPropertyNew( m_indiP_xPSF2, INDI_NEWCALLBACK(m_indiP_xPSF2)) < 0)
+   {
+      log<software_error>({__FILE__,__LINE__});
+      return -1;
+   }
+   
+   createStandardIndiNumber<realT>( m_indiP_yPSF2, "yPSF2", 1, std::numeric_limits<realT>::max(), 1, "%u");
+   m_indiP_yPSF2["current"] = m_yPSF2;
+   if( registerIndiPropertyNew( m_indiP_yPSF2, INDI_NEWCALLBACK(m_indiP_yPSF2)) < 0)
    {
       log<software_error>({__FILE__,__LINE__});
       return -1;
@@ -400,8 +426,10 @@ int mwfsMonitor::allocate(const dev::shmimT & dummy)
 
    m_im.resize(shmimMonitorT::m_width, shmimMonitorT::m_height);
    m_im.setZero();
-   m_im_leak.resize(m_leakBox, m_leakBox);
-   m_im_leak.setZero();
+   m_im_psf1.resize(m_PSFBox, m_PSFBox);
+   m_im_psf1.setZero();
+   m_im_psf2.resize(m_PSFBox, m_PSFBox);
+   m_im_psf2.setZero();
    m_im_centered.resize(shmimMonitorT::m_width, shmimMonitorT::m_height);
    m_im_centered.setZero();
    m_im_rot180.resize(shmimMonitorT::m_width, shmimMonitorT::m_height);
@@ -419,8 +447,8 @@ int mwfsMonitor::allocate(const dev::shmimT & dummy)
       return -1;
    }
    
-   updateIfChanged(m_indiP_leakBox, "current", m_leakBox, INDI_IDLE);
-   updateIfChanged(m_indiP_leakBox, "target", m_leakBox, INDI_IDLE);
+   updateIfChanged(m_indiP_PSFBox, "current", m_PSFBox, INDI_IDLE);
+   updateIfChanged(m_indiP_PSFBox, "target", m_PSFBox, INDI_IDLE);
    updateIfChanged(m_indiP_mwfsBox, "current", m_mwfsBox, INDI_IDLE);
    updateIfChanged(m_indiP_mwfsBox, "target", m_mwfsBox, INDI_IDLE);
    
@@ -465,23 +493,15 @@ int mwfsMonitor::processImage( void * curr_src,
    //else if(!m_darkSet && m_dark2Set) m_avgImage -= m_dark2Image;
    //else if(m_darkSet && m_dark2Set) m_avgImage -= m_darkImage + m_dark2Image;
 
-   // run gauss fitter on leak block
-   int leak_block_x = static_cast<int>(m_xLeak - m_leakBox/2.);
-   int leak_block_y = static_cast<int>(m_yLeak - m_leakBox/2.);
-   m_im_leak = m_im.block(leak_block_x, leak_block_y, m_leakBox, m_leakBox);
+   // get PSF centroids
+   realT shift_x1, shift_y1, shift_x2, shift_y2;
+   centroid(m_im, m_im_psf1, m_xPSF1, m_yPSF1, m_PSFBox, shift_x1, shift_y1);
+   centroid(m_im, m_im_psf2, m_xPSF2, m_yPSF2, m_PSFBox, shift_x2, shift_y2);
 
-   m_fit.setArray(m_im_leak.data(), m_im_leak.rows(), m_im_leak.cols());
-   m_fit.setGuess(0, m_im_leak.maxCoeff(),  m_leakBox/2.,  m_leakBox/2., 3, 3, 0); 
-   m_fit.fit();
-
-   // get fit centroid
-   realT leak_x = m_fit.x0();
-   realT leak_y = m_fit.y0();
-
-   // convert from subarray to full image coordinates
-   realT shift_x = leak_x + leak_block_x;
-   realT shift_y = leak_y + leak_block_y;
-
+   // take the mean centroid
+   realT shift_x = (shift_x1 + shift_x2) / 2.;
+   realT shift_y = (shift_y1 + shift_y2) / 2.;
+   
    // shift image to center on leak term
    realT ycen = (shmimMonitorT::m_height - 1) / 2.;
    realT xcen = (shmimMonitorT::m_width - 1) / 2.;
@@ -516,7 +536,28 @@ int mwfsMonitor::processImage( void * curr_src,
    return 0;
 }
 
+inline
+int mwfsMonitor::centroid(mx::improc::eigenImage<realT> & image, mx::improc::eigenImage<realT> & im_block, int x, int y, int boxsize, realT & x_psf, realT & y_psf)
+{
+   // run gauss fitter on image block
+   int block_x = static_cast<int>(x - boxsize/2.);
+   int block_y = static_cast<int>(y - boxsize/2.);
+   im_block = image.block(block_x, block_y, boxsize, boxsize);
 
+   m_fit.setArray(im_block.data(), im_block.rows(), im_block.cols());
+   m_fit.setGuess(0, im_block.maxCoeff(),  boxsize/2.,  boxsize/2., 3, 3, 0); 
+   m_fit.fit();
+
+   // get fit centroid
+   realT fit_x = m_fit.x0();
+   realT fit_y = m_fit.y0();
+
+   // convert from subarray to full image coordinates
+   x_psf = fit_x + block_x;
+   y_psf = fit_y + block_y;
+
+   return 0;
+}
 
 inline
 int mwfsMonitor::configureAcquisition()
@@ -600,9 +641,9 @@ int mwfsMonitor::reconfig()
    return 0;
 }
 
-INDI_NEWCALLBACK_DEFN(mwfsMonitor, m_indiP_leakBox)(const pcf::IndiProperty &ipRecv)
+INDI_NEWCALLBACK_DEFN(mwfsMonitor, m_indiP_PSFBox)(const pcf::IndiProperty &ipRecv)
 {
-   if(ipRecv.getName() != m_indiP_leakBox.getName())
+   if(ipRecv.getName() != m_indiP_PSFBox.getName())
    {
       log<software_error>({__FILE__, __LINE__, "invalid indi property received"});
       return -1;
@@ -610,18 +651,18 @@ INDI_NEWCALLBACK_DEFN(mwfsMonitor, m_indiP_leakBox)(const pcf::IndiProperty &ipR
    
    unsigned target;
    
-   if( indiTargetUpdate( m_indiP_leakBox, target, ipRecv, true) < 0)
+   if( indiTargetUpdate( m_indiP_PSFBox, target, ipRecv, true) < 0)
    {
       log<software_error>({__FILE__,__LINE__});
       return -1;
    }
    
-   m_leakBox = target;
+   m_PSFBox = target;
 
-   updateIfChanged(m_indiP_leakBox, "current", m_leakBox);
-   updateIfChanged(m_indiP_leakBox, "target", m_leakBox);
+   updateIfChanged(m_indiP_PSFBox, "current", m_PSFBox);
+   updateIfChanged(m_indiP_PSFBox, "target", m_PSFBox);
    
-   log<text_log>("set leakBox to " + std::to_string(m_leakBox) + " pixels", logPrio::LOG_NOTICE);
+   log<text_log>("set PSFBox to " + std::to_string(m_PSFBox) + " pixels", logPrio::LOG_NOTICE);
    
    return 0;
 }
@@ -654,9 +695,9 @@ INDI_NEWCALLBACK_DEFN(mwfsMonitor, m_indiP_mwfsBox)(const pcf::IndiProperty &ipR
    return 0;
 }
 
-INDI_NEWCALLBACK_DEFN(mwfsMonitor, m_indiP_xLeak)(const pcf::IndiProperty &ipRecv)
+INDI_NEWCALLBACK_DEFN(mwfsMonitor, m_indiP_xPSF1)(const pcf::IndiProperty &ipRecv)
 {
-   if(ipRecv.getName() != m_indiP_xLeak.getName())
+   if(ipRecv.getName() != m_indiP_xPSF1.getName())
    {
       log<software_error>({__FILE__, __LINE__, "invalid indi property received"});
       return -1;
@@ -664,25 +705,25 @@ INDI_NEWCALLBACK_DEFN(mwfsMonitor, m_indiP_xLeak)(const pcf::IndiProperty &ipRec
    
    unsigned target;
    
-   if( indiTargetUpdate( m_indiP_xLeak, target, ipRecv, true) < 0)
+   if( indiTargetUpdate( m_indiP_xPSF1, target, ipRecv, true) < 0)
    {
       log<software_error>({__FILE__,__LINE__});
       return -1;
    }
    
-   m_xLeak = target;
+   m_xPSF1 = target;
 
-   updateIfChanged(m_indiP_xLeak, "current", m_xLeak);
-   updateIfChanged(m_indiP_xLeak, "target", m_xLeak);
+   updateIfChanged(m_indiP_xPSF1, "current", m_xPSF1);
+   updateIfChanged(m_indiP_xPSF1, "target", m_xPSF1);
    
-   log<text_log>("set xLeak to pixel " + std::to_string(m_xLeak), logPrio::LOG_NOTICE);
+   log<text_log>("set xPSF1 to pixel " + std::to_string(m_xPSF1), logPrio::LOG_NOTICE);
    
    return 0;
 }
 
-INDI_NEWCALLBACK_DEFN(mwfsMonitor, m_indiP_yLeak)(const pcf::IndiProperty &ipRecv)
+INDI_NEWCALLBACK_DEFN(mwfsMonitor, m_indiP_yPSF1)(const pcf::IndiProperty &ipRecv)
 {
-   if(ipRecv.getName() != m_indiP_yLeak.getName())
+   if(ipRecv.getName() != m_indiP_yPSF1.getName())
    {
       log<software_error>({__FILE__, __LINE__, "invalid indi property received"});
       return -1;
@@ -690,18 +731,70 @@ INDI_NEWCALLBACK_DEFN(mwfsMonitor, m_indiP_yLeak)(const pcf::IndiProperty &ipRec
    
    unsigned target;
    
-   if( indiTargetUpdate( m_indiP_yLeak, target, ipRecv, true) < 0)
+   if( indiTargetUpdate( m_indiP_yPSF1, target, ipRecv, true) < 0)
    {
       log<software_error>({__FILE__,__LINE__});
       return -1;
    }
    
-   m_yLeak = target;
+   m_yPSF1 = target;
 
-   updateIfChanged(m_indiP_yLeak, "current", m_yLeak);
-   updateIfChanged(m_indiP_yLeak, "target", m_yLeak);
+   updateIfChanged(m_indiP_yPSF1, "current", m_yPSF1);
+   updateIfChanged(m_indiP_yPSF1, "target", m_yPSF1);
    
-   log<text_log>("set yLeak to pixel " + std::to_string(m_yLeak), logPrio::LOG_NOTICE);
+   log<text_log>("set yPSF1 to pixel " + std::to_string(m_yPSF1), logPrio::LOG_NOTICE);
+   
+   return 0;
+}
+
+INDI_NEWCALLBACK_DEFN(mwfsMonitor, m_indiP_xPSF2)(const pcf::IndiProperty &ipRecv)
+{
+   if(ipRecv.getName() != m_indiP_xPSF2.getName())
+   {
+      log<software_error>({__FILE__, __LINE__, "invalid indi property received"});
+      return -1;
+   }
+   
+   unsigned target;
+   
+   if( indiTargetUpdate( m_indiP_xPSF2, target, ipRecv, true) < 0)
+   {
+      log<software_error>({__FILE__,__LINE__});
+      return -1;
+   }
+   
+   m_xPSF2 = target;
+
+   updateIfChanged(m_indiP_xPSF2, "current", m_xPSF2);
+   updateIfChanged(m_indiP_xPSF2, "target", m_xPSF2);
+   
+   log<text_log>("set xPSF2 to pixel " + std::to_string(m_xPSF2), logPrio::LOG_NOTICE);
+   
+   return 0;
+}
+
+INDI_NEWCALLBACK_DEFN(mwfsMonitor, m_indiP_yPSF2)(const pcf::IndiProperty &ipRecv)
+{
+   if(ipRecv.getName() != m_indiP_yPSF2.getName())
+   {
+      log<software_error>({__FILE__, __LINE__, "invalid indi property received"});
+      return -1;
+   }
+   
+   unsigned target;
+   
+   if( indiTargetUpdate( m_indiP_yPSF2, target, ipRecv, true) < 0)
+   {
+      log<software_error>({__FILE__,__LINE__});
+      return -1;
+   }
+   
+   m_yPSF2 = target;
+
+   updateIfChanged(m_indiP_yPSF2, "current", m_yPSF2);
+   updateIfChanged(m_indiP_yPSF2, "target", m_yPSF2);
+   
+   log<text_log>("set yPSF2 to pixel " + std::to_string(m_yPSF2), logPrio::LOG_NOTICE);
    
    return 0;
 }
