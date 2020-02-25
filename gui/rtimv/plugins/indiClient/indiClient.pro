@@ -11,7 +11,6 @@ CONFIG += -O3
 
 QT           += widgets
 
-INCLUDEPATH  += /home/jrmales/Source/rtimv/src
 INCLUDEPATH  += ../../../../INDI/libcommon/
 HEADERS       = indiClient.hpp
 SOURCES       = indiClient.cpp
@@ -21,3 +20,6 @@ LIBS         += ../../../../INDI/liblilxml/liblilxml.a
 
 TARGET        = $$qtLibraryTarget(rtimv_indiClientPlugin)
 DESTDIR       = ./
+
+unix:target.path=/usr/local/bin/plugins
+INSTALLS+=target

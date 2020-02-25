@@ -1,7 +1,7 @@
 #ifndef pwfsAlignment_hpp
 #define pwfsAlignment_hpp
 
-#include <rtimvInterfaces.hpp>
+#include <rtimv/rtimvInterfaces.hpp>
 
 #include <QObject>
 #include <QtPlugin>
@@ -37,25 +37,25 @@ class pwfsAlignment : public QObject,
       double m_4y {0};
       double m_4D {0};
       
-      QGraphicsLineItem * m_1to2;
-      QGraphicsLineItem * m_1to3;
-      QGraphicsLineItem * m_3to4;
-      QGraphicsLineItem * m_2to4;
+      QGraphicsLineItem * m_1to2 {nullptr};
+      QGraphicsLineItem * m_1to3 {nullptr};
+      QGraphicsLineItem * m_3to4 {nullptr};
+      QGraphicsLineItem * m_2to4 {nullptr};
       
-      QGraphicsLineItem * m_1to2s;
-      QGraphicsLineItem * m_1to3s;
-      QGraphicsLineItem * m_3to4s;
-      QGraphicsLineItem * m_2to4s;
+      QGraphicsLineItem * m_1to2s {nullptr};
+      QGraphicsLineItem * m_1to3s {nullptr};
+      QGraphicsLineItem * m_3to4s {nullptr};
+      QGraphicsLineItem * m_2to4s {nullptr};
       
-      QGraphicsEllipseItem * m_c1;
-      QGraphicsEllipseItem * m_c2;
-      QGraphicsEllipseItem * m_c3;
-      QGraphicsEllipseItem * m_c4;
+      QGraphicsEllipseItem * m_c1 {nullptr};
+      QGraphicsEllipseItem * m_c2 {nullptr};
+      QGraphicsEllipseItem * m_c3 {nullptr};
+      QGraphicsEllipseItem * m_c4 {nullptr};
       
-      QGraphicsEllipseItem * m_c1s;
-      QGraphicsEllipseItem * m_c2s;
-      QGraphicsEllipseItem * m_c3s;
-      QGraphicsEllipseItem * m_c4s;
+      QGraphicsEllipseItem * m_c1s {nullptr};
+      QGraphicsEllipseItem * m_c2s {nullptr};
+      QGraphicsEllipseItem * m_c3s {nullptr};
+      QGraphicsEllipseItem * m_c4s {nullptr};
       
    public:
       pwfsAlignment();

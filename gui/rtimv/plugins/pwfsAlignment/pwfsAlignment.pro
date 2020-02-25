@@ -11,8 +11,11 @@ CONFIG += -O3
 
 QT           += widgets
 
-INCLUDEPATH  += /home/jrmales/Source/rtimv/src
 HEADERS       = pwfsAlignment.hpp
 SOURCES       = pwfsAlignment.cpp
 TARGET        = $$qtLibraryTarget(rtimv_pwfsAlignmentPlugin)
 DESTDIR       = ./
+
+
+unix:target.path=/usr/local/bin/plugins
+INSTALLS+=target

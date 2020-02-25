@@ -1,7 +1,7 @@
 #ifndef indiClient_hpp
 #define indiClient_hpp
 
-#include <rtimvInterfaces.hpp>
+#include <rtimv/rtimvInterfaces.hpp>
 
 #include <QObject>
 #include <QtPlugin>
