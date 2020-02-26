@@ -76,6 +76,8 @@ protected:
    IMAGE m_edgeShmim;
    bool m_edgeShmimConnected {false};
    
+   bool m_useRefIm {false};
+   
    double m_setx1 {29.5};
    double m_sety1 {29.5};
    double m_setD1 {56.0};
@@ -494,6 +496,8 @@ int pupilFit::allocate(const dev::shmimT & dummy)
    
    ff.read(m_refIm, reffits);
    
+   if(m_useRefIm)
+   {
    if(m_refIm.rows() == m_width && m_refIm.cols() == m_height)
    {
       if(m_fitter.fit(m_refIm, refedge) < 0)
@@ -528,6 +532,25 @@ int pupilFit::allocate(const dev::shmimT & dummy)
    else
    {
       log<text_log>("Reference image " + reffits + " size does not match shmim stream.", logPrio::LOG_ERROR);
+   }
+   }
+   else
+   {
+      m_setx1 = 29.5;
+      m_sety1 = 29.5;
+      m_setD1 = 56.0;
+      
+      m_setx2 = 89.5;
+      m_sety2 = 29.5;
+      m_setD2 = 56.0;
+      
+      m_setx3 = 29.5;
+      m_sety3 = 89.5;
+      m_setD3 = 56.0;
+      
+      m_setx4 = 89.5;
+      m_sety4 = 89.5;
+      m_setD4 = 56.0;
    }
    
    
