@@ -25,11 +25,12 @@ exists( $$(CONDA_PREFIX)/include ) {
 MAKEFILE = makefile.pupilGuideGUI
 
 # Input
+INCLUDEPATH += ../../lib ../../widgets/pupilGuide
+
 HEADERS += ../../widgets/pupilGuide/pupilGuide.hpp \
+           ../../lib/multiIndiManager.hpp 
            
-SOURCES += pupilGuideGUI_main.cpp \
-           ../../widgets/pupilGuide/pupilGuide.cpp
-        
+SOURCES += pupilGuideGUI_main.cpp 
            
 FORMS += ../../widgets/pupilGuide/pupilGuide.ui
      

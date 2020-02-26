@@ -25,11 +25,15 @@ exists( $$(CONDA_PREFIX)/include ) {
 MAKEFILE = makefile.dmCtrlGUI
 
 # Input
+INCLUDEPATH += ../../lib ../../widgets/dmCtrl
+
 HEADERS += ../../widgets/dmCtrl/dmCtrl.hpp \
+           ../../lib/multiIndi.hpp \
+           ../../lib/multiIndiManager.hpp
            
-SOURCES += dmCtrlGUI_main.cpp \
-           ../../widgets/dmCtrl/dmCtrl.cpp
-        
+SOURCES += dmCtrlGUI_main.cpp 
+#\
+#           ../../widgets/dmCtrl/dmCtrl.cpp \
            
 FORMS += ../../widgets/dmCtrl/dmCtrl.ui
      

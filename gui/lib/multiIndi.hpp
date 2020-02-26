@@ -43,6 +43,7 @@ public:
      */
    virtual ~multiIndiSubscriber();
    
+   virtual int subscribe( multiIndiPublisher * publisher ) = 0;
    
    virtual int handleDefProperty( const pcf::IndiProperty &ipRecv );
    
@@ -85,6 +86,9 @@ public:
    typedef subSetT::iterator subSetIteratorT;
 
 protected:
+   
+   std::string m_hostAddress;
+   std::string m_hostPort;
    
    /// Contains the subscriber pointers
    propMapT subscribedProperties;
