@@ -443,6 +443,7 @@ int pwfsSlopeCalc::loadImageIntoStream(void * dest)
    Eigen::Map<eigenImage<unsigned short>> pwfsIm( static_cast<unsigned short *>(m_curr_src), shmimMonitorT::m_width, shmimMonitorT::m_height );
    Eigen::Map<eigenImage<float>> slopesIm(static_cast<float*>(dest), frameGrabberT::m_width, frameGrabberT::m_height );
    
+   float norm = 0;
    for(int ii=0; ii< m_quadSize; ++ii)
    {
       for(int jj=0; jj< m_quadSize; ++jj)
@@ -452,13 +453,21 @@ int pwfsSlopeCalc::loadImageIntoStream(void * dest)
          float I3 = pwfsIm(jj, ii + m_quadSize) - m_darkImage(jj, ii+m_quadSize);
          float I4 = pwfsIm(jj+m_quadSize, ii + m_quadSize) - m_darkImage(jj+m_quadSize, ii+m_quadSize);
          
-         float sum = I1+I2+I3+I4;
+         norm += I1+I2+I3+I4;
          
-         slopesIm(jj,ii) = ((I1+I3) - (I2+I4))/sum;
-         slopesIm(jj,ii+m_quadSize) = ((I1+I2)-(I3+I4))/sum;
+         slopesIm(jj,ii) = ((I1+I3) - (I2+I4));
+         slopesIm(jj,ii+m_quadSize) = ((I1+I2)-(I3+I4));
       }
    }
       
+   for(size_t ii=0; ii< frameGrabberT::m_width; ++ii)
+   {
+      for(size_t jj=0; jj < frameGrabberT::m_height; ++jj)
+      {
+         slopesIm(jj,ii)/=norm;
+      }
+   }
+   
    return 0;
 }
 
