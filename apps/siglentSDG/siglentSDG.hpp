@@ -28,10 +28,10 @@ class siglentSDG : public MagAOXApp<>, public dev::telemeter<siglentSDG>
 
    friend class dev::telemeter<siglentSDG>;
    
-   constexpr static double cs_MaxAmp = 0.87;
+   constexpr static double cs_MaxAmp = 0.87;//2.1;//0.87;
    constexpr static double cs_MaxOfst = 10.0;
    constexpr static double cs_MaxVolts = 10.0;
-   constexpr static double cs_MaxFreq = 3622.0;
+   constexpr static double cs_MaxFreq = 3622.0;//101;//3622.0;
 
 protected:
 
