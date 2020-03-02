@@ -43,7 +43,7 @@ namespace dev
     // returns 0 if valid, < 0 on error, > 0 on no data.
     int derivedT::acquireAndCheckValid()
     
-    //Loads the acquired image into the stream, copying it to the appropriate member of imageStream.array.
+    //Loads the acquired image into the stream, copying it to the appropriate member of m_imageStream->array.
     //This could simply be a memcpy.
     int derivedT::loadImageIntoStream(void * dest);
     
@@ -90,7 +90,7 @@ protected:
    
    bool m_reconfig {false}; ///< Flag to set if a camera reconfiguration requires a framegrabber reset.
    
-   IMAGE imageStream; ///< The ImageStreamIO shared memory buffer. \todo why isn't this m_imageStream?
+   IMAGE * m_imageStream {nullptr}; ///< The ImageStreamIO shared memory buffer. \todo why isn't this m_imageStream?
    
    timespec m_dummy_ts {0,0};
    uint64_t m_dummy_cnt {0};
@@ -389,8 +389,16 @@ void frameGrabber<derivedT>::fgThreadExec()
        */
       if(m_shmimName == "") m_shmimName = derived().configName();
 
-      if(m_width != imsize[0] || m_height != imsize[1] || m_circBuffLength != imsize[2] || m_shmimName != shmimName)
+      if(m_width != imsize[0] || m_height != imsize[1] || m_circBuffLength != imsize[2] || m_shmimName != shmimName || m_imageStream == nullptr)
       {
+         if(m_imageStream != nullptr)
+         {
+            ImageStreamIO_destroyIm(m_imageStream);
+            free(m_imageStream);
+         }
+         
+         m_imageStream = (IMAGE *) malloc(sizeof(IMAGE));
+         
          imsize[0] = m_width; 
          imsize[1] = m_height;
          imsize[2] = m_circBuffLength;
@@ -398,9 +406,9 @@ void frameGrabber<derivedT>::fgThreadExec()
       
          std::cerr << "Creating: " << m_shmimName << " " << m_width << " " << m_height << " " << m_circBuffLength << "\n";
       
-         ImageStreamIO_createIm_gpu(&imageStream, m_shmimName.c_str(), 3, imsize, m_dataType, -1, 1, IMAGE_NB_SEMAPHORE, 0, CIRCULAR_BUFFER | ZAXIS_TEMPORAL);
+         ImageStreamIO_createIm_gpu(m_imageStream, m_shmimName.c_str(), 3, imsize, m_dataType, -1, 1, IMAGE_NB_SEMAPHORE, 0, CIRCULAR_BUFFER | ZAXIS_TEMPORAL);
        
-         imageStream.md->cnt1 = m_circBuffLength - 1;
+         m_imageStream->md->cnt1 = m_circBuffLength - 1;
       }
       else
       {
@@ -414,10 +422,10 @@ void frameGrabber<derivedT>::fgThreadExec()
       if(derived().startAcquisition() < 0) continue;       
          
       uint64_t next_cnt1 = 0; 
-      char * next_dest = (char *) imageStream.array.raw;
-      timespec * next_wtimearr = &imageStream.writetimearray[0];
-      timespec * next_atimearr = &imageStream.atimearray[0];
-      uint64_t * next_cntarr = &imageStream.cntarray[0];
+      char * next_dest = (char *) m_imageStream->array.raw;
+      timespec * next_wtimearr = &m_imageStream->writetimearray[0];
+      timespec * next_atimearr = &m_imageStream->atimearray[0];
+      uint64_t * next_cntarr = &m_imageStream->cntarray[0];
       
       //This is the main image grabbing loop.      
       while(!derived().shutdown() && !m_reconfig && derived().powerState() > 0)
@@ -439,7 +447,7 @@ void frameGrabber<derivedT>::fgThreadExec()
          }
          
          //Ok, no timeout, so we process the image and publish it.
-         imageStream.md->write=1;
+         m_imageStream->md->write=1;
          
          //Set the time of last write
          clock_gettime(CLOCK_REALTIME, &writestart);
@@ -450,49 +458,47 @@ void frameGrabber<derivedT>::fgThreadExec()
          }
          
          //Set the time of last write
-         clock_gettime(CLOCK_REALTIME, &imageStream.md->writetime);
+         clock_gettime(CLOCK_REALTIME, &m_imageStream->md->writetime);
 
          //Set the image acquisition timestamp
-         imageStream.md->atime = m_currImageTimestamp;
+         m_imageStream->md->atime = m_currImageTimestamp;
          
          //Update cnt1
-         imageStream.md->cnt1 = next_cnt1;
+         m_imageStream->md->cnt1 = next_cnt1;
           
          //Update cnt0
-         imageStream.md->cnt0++;
+         m_imageStream->md->cnt0++;
          
-         *next_wtimearr = imageStream.md->writetime;
+         *next_wtimearr = m_imageStream->md->writetime;
          *next_atimearr = m_currImageTimestamp;
-         *next_cntarr = imageStream.md->cnt0;
+         *next_cntarr = m_imageStream->md->cnt0;
          
          //And post
-         imageStream.md->write=0;
-         ImageStreamIO_sempost(&imageStream,-1);
+         m_imageStream->md->write=0;
+         ImageStreamIO_sempost(m_imageStream,-1);
  
          
          //This is a diagnostic of latency:
-         /**/if(imageStream.md[0].cnt0 % 2000 == 0)
+         /**/if(m_imageStream->md[0].cnt0 % 2000 == 0)
          {
-            std::cerr << ( (double) imageStream.md->writetime.tv_sec + ((double) imageStream.md->writetime.tv_nsec)/1e9) - ( (double) imageStream.md->atime.tv_sec + ((double) imageStream.md->atime.tv_nsec)/1e9) << " ";
-            std::cerr << ( (double) imageStream.md->writetime.tv_sec + ((double) imageStream.md->writetime.tv_nsec)/1e9) - ( (double) writestart.tv_sec + ((double) writestart.tv_nsec)/1e9) << "\n";
+            std::cerr << ( (double) m_imageStream->md->writetime.tv_sec + ((double) m_imageStream->md->writetime.tv_nsec)/1e9) - ( (double) m_imageStream->md->atime.tv_sec + ((double) m_imageStream->md->atime.tv_nsec)/1e9) << " ";
+            std::cerr << ( (double) m_imageStream->md->writetime.tv_sec + ((double) m_imageStream->md->writetime.tv_nsec)/1e9) - ( (double) writestart.tv_sec + ((double) writestart.tv_nsec)/1e9) << "\n";
 
          }/**/
          
          //Now we increment pointers outside the time-critical part of the loop.
-         next_cnt1 = imageStream.md->cnt1+1;
+         next_cnt1 = m_imageStream->md->cnt1+1;
          if(next_cnt1 >= m_circBuffLength) next_cnt1 = 0;
          
-         next_dest = (char *) imageStream.array.raw + next_cnt1*m_width*m_height*m_typeSize;
-         next_wtimearr = &imageStream.writetimearray[next_cnt1];
-         next_atimearr = &imageStream.atimearray[next_cnt1];
-         next_cntarr = &imageStream.cntarray[next_cnt1];
+         next_dest = (char *) m_imageStream->array.raw + next_cnt1*m_width*m_height*m_typeSize;
+         next_wtimearr = &m_imageStream->writetimearray[next_cnt1];
+         next_atimearr = &m_imageStream->atimearray[next_cnt1];
+         next_cntarr = &m_imageStream->cntarray[next_cnt1];
          
          //Touch them to make sure we move
          m_dummy_c = next_dest[0];
          m_dummy_ts.tv_sec = next_wtimearr[0].tv_sec + next_atimearr[0].tv_sec;
          m_dummy_cnt = next_cntarr[0];
-         
-         
       }
     
       if(m_reconfig && !derived().shutdown())
@@ -502,8 +508,12 @@ void frameGrabber<derivedT>::fgThreadExec()
 
    } //outer loop, will exit if m_shutdown==true
 
-   ImageStreamIO_destroyIm( &imageStream );
-   
+   if(m_imageStream != nullptr)
+   {
+      ImageStreamIO_destroyIm( m_imageStream );
+      free(m_imageStream);
+      m_imageStream = nullptr;
+   }
 }
 
 
