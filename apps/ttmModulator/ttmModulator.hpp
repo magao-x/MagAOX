@@ -26,7 +26,7 @@ protected:
      * @{
      */
 
-   double m_maxFreq {2000}; ///< The maximum modulation frequency settable by this program
+   double m_maxFreq {3622.0}; ///< The maximum modulation frequency settable by this program
    double m_maxVolt {0.87}; ///< The maximum modulation voltage settable by this program
 
    double m_setVoltage_1 {5.0}; ///< the set position voltage of Ch. 1.

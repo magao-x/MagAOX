@@ -448,25 +448,26 @@ int pwfsSlopeCalc::loadImageIntoStream(void * dest)
    {
       for(int jj=0; jj< m_quadSize; ++jj)
       {
-         float I1 = pwfsIm(jj,ii) - m_darkImage(jj,jj);
-         float I2 = pwfsIm(jj + m_quadSize,ii) - m_darkImage(jj+m_quadSize,jj);
+         float I1 = pwfsIm(jj,ii) - m_darkImage(jj,ii);
+         float I2 = pwfsIm(jj + m_quadSize,ii) - m_darkImage(jj+m_quadSize,ii);
          float I3 = pwfsIm(jj, ii + m_quadSize) - m_darkImage(jj, ii+m_quadSize);
          float I4 = pwfsIm(jj+m_quadSize, ii + m_quadSize) - m_darkImage(jj+m_quadSize, ii+m_quadSize);
          
-         norm += I1+I2+I3+I4;
+         norm = I1+I2+I3+I4;
          
-         slopesIm(jj,ii) = ((I1+I3) - (I2+I4));
-         slopesIm(jj,ii+m_quadSize) = ((I1+I2)-(I3+I4));
+         slopesIm(jj,ii) = ((I1+I3) - (I2+I4))/norm;
+         slopesIm(jj,ii+m_quadSize) = ((I1+I2)-(I3+I4))/norm;
       }
    }
-      
-   for(size_t ii=0; ii< frameGrabberT::m_width; ++ii)
+    /*
+   norm/=(120.*120.) * 10;  
+   for(size_t ii=0; ii< frameGrabberT::m_height; ++ii)
    {
-      for(size_t jj=0; jj < frameGrabberT::m_height; ++jj)
+      for(size_t jj=0; jj < frameGrabberT::m_width; ++jj)
       {
          slopesIm(jj,ii)/=norm;
       }
-   }
+   }*/
    
    return 0;
 }
