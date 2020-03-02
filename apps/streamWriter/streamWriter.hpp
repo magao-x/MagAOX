@@ -595,7 +595,7 @@ void streamWriter::fgThreadExec()
       
       if(m_shutdown || !opened) return;
     
-      m_semaphoreNumber = 6; //get past the CACAO hard code.
+      m_semaphoreNumber = 5; //get past the CACAO hard code.
       int actSem = 1;
       while(actSem == 1) //because it won't work.
       {
@@ -607,6 +607,9 @@ void streamWriter::fgThreadExec()
          }
          actSem = m_semaphoreNumber;
       }
+      
+      log<software_info>({__FILE__,__LINE__, "got semaphore index " + std::to_string(m_semaphoreNumber) + " for " + m_shmimName });
+      ImageStreamIO_semflush(&image, m_semaphoreNumber);
       
       sem = image.semptr[m_semaphoreNumber];
       
