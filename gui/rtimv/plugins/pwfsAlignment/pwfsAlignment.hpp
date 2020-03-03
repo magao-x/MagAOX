@@ -66,6 +66,8 @@ class pwfsAlignment : public QObject,
       
       virtual int updateOverlay();
 
+      virtual void keyPressEvent( QKeyEvent * ke);
+      
       virtual bool overlayEnabled();
       
       virtual void enableOverlay();

@@ -36,11 +36,16 @@ int pwfsAlignment::attachOverlay(QGraphicsScene* qgs, std::unordered_map<std::st
    m_c3s = qgs->addEllipse(29.5-28.0, 119-89.5-28.0, 56.0, 56.0, QPen(QBrush(QColor("lime")), 0.1));
    m_c4s = qgs->addEllipse(89.5-28.0, 119-89.5-28.0, 56.0, 56.0, QPen(QBrush(QColor("lime")), 0.1));
    
+   if(m_enabled) enableOverlay();
+   else disableOverlay();
+   
    return 0;
 }
       
 int pwfsAlignment::updateOverlay()
 {
+   if(!m_enabled) return 0;
+   
    if(m_dict == nullptr) return 0;
    
    char * str;
@@ -135,6 +140,17 @@ int pwfsAlignment::updateOverlay()
    return 0;
 }
 
+void pwfsAlignment::keyPressEvent( QKeyEvent * ke)
+{
+   char key = ke->text()[0].toLatin1();
+   
+   if(key == 'P')
+   {
+      if(m_enabled) disableOverlay();
+      else enableOverlay();
+   }
+}
+
 bool pwfsAlignment::overlayEnabled()
 {
    return m_enabled;
@@ -143,9 +159,53 @@ bool pwfsAlignment::overlayEnabled()
 void pwfsAlignment::enableOverlay()
 {
    std::cerr << "pwfsAlignment enabled\n";
+   
+   if(m_1to2) m_1to2->setVisible(true); 
+   if(m_1to3) m_1to3->setVisible(true); 
+   if(m_3to4) m_3to4->setVisible(true);
+   if(m_2to4) m_2to4->setVisible(true); 
+   
+   if(m_1to2s) m_1to2s->setVisible(true);
+   if(m_1to3s) m_1to3s->setVisible(true);
+   if(m_3to4s) m_3to4s->setVisible(true);
+   if(m_2to4s) m_2to4s->setVisible(true);
+   
+   if(m_c1) m_c1->setVisible(true);
+   if(m_c2) m_c2->setVisible(true);
+   if(m_c3) m_c3->setVisible(true);
+   if(m_c4) m_c4->setVisible(true);
+   
+   if(m_c1s) m_c1s->setVisible(true);
+   if(m_c2s) m_c2s->setVisible(true);
+   if(m_c3s) m_c3s->setVisible(true);
+   if(m_c4s) m_c4s->setVisible(true);
+ 
+   m_enabled = true;
 }
 
 void pwfsAlignment::disableOverlay()
 {
    std::cerr << "pwfsAlignment disabled\n";
+
+   if(m_1to2) m_1to2->setVisible(false); 
+   if(m_1to3) m_1to3->setVisible(false); 
+   if(m_3to4) m_3to4->setVisible(false);
+   if(m_2to4) m_2to4->setVisible(false); 
+   
+   if(m_1to2s) m_1to2s->setVisible(false);
+   if(m_1to3s) m_1to3s->setVisible(false);
+   if(m_3to4s) m_3to4s->setVisible(false);
+   if(m_2to4s) m_2to4s->setVisible(false);
+   
+   if(m_c1) m_c1->setVisible(false);
+   if(m_c2) m_c2->setVisible(false);
+   if(m_c3) m_c3->setVisible(false);
+   if(m_c4) m_c4->setVisible(false);
+   
+   if(m_c1s) m_c1s->setVisible(false);
+   if(m_c2s) m_c2s->setVisible(false);
+   if(m_c3s) m_c3s->setVisible(false);
+   if(m_c4s) m_c4s->setVisible(false);
+   
+   m_enabled = false;
 }
