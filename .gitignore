@@ -69,6 +69,7 @@ INDI/xindidriver/xindidriver
 
 #k
 apps/kTracker/kTracker
+apps/koolanceCtrl/koolanceCtrl
 
 #m
 apps/mzmqServer/mzmqServer
