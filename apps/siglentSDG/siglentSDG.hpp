@@ -28,11 +28,14 @@ class siglentSDG : public MagAOXApp<>, public dev::telemeter<siglentSDG>
 
    friend class dev::telemeter<siglentSDG>;
    
-   constexpr static double cs_MaxAmp = 0.87;//2.1;//0.87;
+   //constexpr static double cs_MaxAmp = 0.87;//2.1;//0.87;
    constexpr static double cs_MaxOfst = 10.0;
    constexpr static double cs_MaxVolts = 10.0;
-   constexpr static double cs_MaxFreq = 3622.0;//101;//3622.0;
+   //constexpr static double cs_MaxFreq = 3622.0;//101;//3622.0;
 
+private:
+   std::vector<double> m_maxAmp = {2.1, 0.87};
+   std::vector<double> m_maxFreq = {100.0, 3622.0};
 protected:
 
    /** \name Configurable Parameters
@@ -68,6 +71,13 @@ protected:
    double m_C2phse {0}; ///< The phase of channel 2
    std::string m_C2wvtp; ///< The wave type of channel 2
 
+   
+   double m_C1frequency_tgt {-1};
+   double m_C1vpp_tgt {-1};
+   
+   double m_C2frequency_tgt {-1};
+   double m_C2vpp_tgt {-1};
+   
 private:
 
    bool m_poweredOn {false};
@@ -793,6 +803,9 @@ int siglentSDG::onPowerOff()
    m_C1ofst = 0.0;
    m_C1outp = 0;
 
+   m_C1frequency_tgt = -1;
+   m_C1vpp_tgt = -1;
+   
    updateIfChanged(m_indiP_C1wvtp, "value", m_C1wvtp);
    updateIfChanged(m_indiP_C1freq, "value", 0.0);
    updateIfChanged(m_indiP_C1peri, "value", 0.0);
@@ -810,6 +823,9 @@ int siglentSDG::onPowerOff()
    m_C2ofst = 0.0;
    m_C2outp = 0;
 
+   m_C2frequency_tgt = -1;
+   m_C2vpp_tgt = -1;
+   
    updateIfChanged(m_indiP_C2wvtp, "value", m_C2wvtp);
    updateIfChanged(m_indiP_C2freq, "value", 0.0);
    updateIfChanged(m_indiP_C2peri, "value", 0.0);
@@ -1137,6 +1153,9 @@ int siglentSDG::queryBSWV( int channel)
          m_C1ofst = resp_ofst;
          m_C1phse = resp_phse;
 
+         if(m_C1frequency_tgt == -1) m_C1frequency_tgt = m_C1frequency;
+         if(m_C1vpp_tgt == -1) m_C1vpp_tgt = m_C1vpp;
+         
          recordParams();
          
          updateIfChanged(m_indiP_C1wvtp, "value", resp_wvtp);
@@ -1156,6 +1175,10 @@ int siglentSDG::queryBSWV( int channel)
          m_C2vpp = resp_amp;
          m_C2ofst = resp_ofst;
          m_C2phse = resp_phse;
+         
+         if(m_C2frequency_tgt == -1) m_C2frequency_tgt = m_C2frequency;
+         if(m_C2vpp_tgt == -1) m_C2vpp_tgt = m_C2vpp;
+         
          recordParams();
          
          updateIfChanged(m_indiP_C2wvtp, "value", resp_wvtp);
@@ -1508,9 +1531,9 @@ int siglentSDG::changeFreq( int channel,
 {
    if(channel < 1 || channel > 2) return -1;
 
-   if(newFreq > cs_MaxFreq)
+   if(newFreq > m_maxFreq.back())
    {
-      newFreq = cs_MaxFreq;
+      newFreq = m_maxFreq.back();
    }
    
    if(newFreq < 0)
@@ -1518,6 +1541,35 @@ int siglentSDG::changeFreq( int channel,
       newFreq = 0;
    }
 
+   double amp = m_C1vpp_tgt;
+   if(channel == 2) amp = m_C2vpp_tgt;
+   
+   size_t i =0;
+   while( i < m_maxAmp.size())
+   {
+      if( m_maxFreq[i] >= newFreq) break;
+      ++i;
+   }
+   
+   std::cerr << "Max Amp @ " << amp << " = " << m_maxAmp[i] << " (freq)\n"; 
+   
+   if( amp > m_maxAmp[i] )
+   {
+      log<text_log>("Ch. " + std::to_string(channel) + " FREQ not set due to amplitude exceeding limit for " + std::to_string(newFreq), logPrio::LOG_WARNING);
+      return 0;
+   }
+   
+   //Now we update target
+   if(channel==1)
+   {
+      m_C1frequency_tgt = newFreq;
+   }
+   else
+   {
+      m_C2frequency_tgt = newFreq;
+   }
+   
+   
    std::string afterColon = "BSWV FRQ," + mx::ioutils::convertToString<double>(newFreq);
    std::string command = makeCommand(channel, afterColon);
 
@@ -1590,10 +1642,24 @@ int siglentSDG::changeAmp( int channel,
       log<text_log>("Ch. " + std::to_string(channel) + " AMP limited at 0 V by OFST to " + std::to_string(newAmp), logPrio::LOG_WARNING);
    }
    
-   //Ensure we don't exced safe ranges for device
-   if(newAmp > cs_MaxAmp)
+   double freq = m_C1frequency_tgt;
+   if(channel == 2) freq = m_C2frequency_tgt;
+   
+   double maxAmp;
+   size_t i=0;
+   while(i < m_maxAmp.size())
    {
-      newAmp = cs_MaxAmp;
+      if( m_maxFreq[i] >= freq ) break;
+      ++i;
+   }
+   maxAmp = m_maxAmp[i];
+   
+   std::cerr << "Max Amp @ " << freq << " = " << maxAmp << "\n";
+   
+   //Ensure we don't exced safe ranges for device
+   if(newAmp > maxAmp)
+   {
+      newAmp = maxAmp;
       log<text_log>("Ch. " + std::to_string(channel) + " AMP max-limited to " + std::to_string(newAmp), logPrio::LOG_WARNING);
    }
 
@@ -1602,6 +1668,17 @@ int siglentSDG::changeAmp( int channel,
       newAmp = 0;
       log<text_log>("Ch. " + std::to_string(channel) + " AMP min-limited to " + std::to_string(newAmp), logPrio::LOG_WARNING);
    }
+   
+   //Now update target
+   if(channel==1)
+   {
+      m_C1vpp_tgt = newAmp;
+   }
+   else
+   {
+      m_C2vpp_tgt = newAmp;
+   }
+   
    
    std::string afterColon = "BSWV AMP," + mx::ioutils::convertToString<double>(newAmp);
    std::string command = makeCommand(channel, afterColon);
