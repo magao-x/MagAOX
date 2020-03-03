@@ -51,6 +51,12 @@ apps/flipperCtrl/flipperCtrl
 
 apps/magAOXMaths/magAOXMaths
 
+#g/gui
+gui/rtimv/plugins/indiClient/Makefile
+gui/rtimv/plugins/pwfsAlignment/Makefile
+
+
+
 #h
 apps/hsfwCtrl/hsfwCtrl
 

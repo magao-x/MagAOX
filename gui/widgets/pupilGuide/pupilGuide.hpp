@@ -93,6 +93,13 @@ protected:
    
    float m_pupStepSize {0.1};
     
+   std::string m_camlensxFsmState;
+   std::string m_camlensyFsmState;
+   float m_camlensx_pos {0};
+   float m_camlensy_pos {0};
+   
+   float m_camlensStepSize {0.01};
+   
 public:
    pupilGuide( QWidget * Parent = 0, Qt::WindowFlags f = 0);
    
@@ -140,53 +147,18 @@ public slots:
    void on_fitThreshold_target_returnPressed();
    void on_nAverage_target_returnPressed();
    
+   void on_button_camlens_u_pressed();
+   void on_button_camlens_ul_pressed();
+   void on_button_camlens_l_pressed();
+   void on_button_camlens_dl_pressed();
+   void on_button_camlens_d_pressed();
+   void on_button_camlens_dr_pressed();
+   void on_button_camlens_r_pressed();
+   void on_button_camlens_ur_pressed();
+   void on_button_camlens_scale_pressed();
 private:
      
    Ui::pupilGuide ui;
-};
-
-void synchActiveInactive( QPalette * p)
-{
-   p->setColor(QPalette::Inactive, QPalette::Window, p->color(QPalette::Active, QPalette::Window));
-   p->setColor(QPalette::Inactive, QPalette::Background, p->color(QPalette::Active, QPalette::Background));
-   p->setColor(QPalette::Inactive, QPalette::WindowText, p->color(QPalette::Active, QPalette::WindowText));
-   p->setColor(QPalette::Inactive, QPalette::Foreground, p->color(QPalette::Active, QPalette::Foreground));
-   p->setColor(QPalette::Inactive, QPalette::Base, p->color(QPalette::Active, QPalette::Base));
-   p->setColor(QPalette::Inactive, QPalette::AlternateBase, p->color(QPalette::Active, QPalette::AlternateBase));
-   p->setColor(QPalette::Inactive, QPalette::ToolTipBase, p->color(QPalette::Active, QPalette::ToolTipBase));
-   p->setColor(QPalette::Inactive, QPalette::ToolTipText, p->color(QPalette::Active, QPalette::ToolTipText));
-   //p->setColor(QPalette::Inactive, QPalette::PlaceholderTetxt, p->color(QPalette::Active, QPalette::PlaceholderTetxt));
-   p->setColor(QPalette::Inactive, QPalette::Text, p->color(QPalette::Active, QPalette::Text));
-   p->setColor(QPalette::Inactive, QPalette::Button, p->color(QPalette::Active, QPalette::Button));
-   p->setColor(QPalette::Inactive, QPalette::ButtonText, p->color(QPalette::Active, QPalette::ButtonText));
-   p->setColor(QPalette::Inactive, QPalette::BrightText, p->color(QPalette::Active, QPalette::BrightText));
-   p->setColor(QPalette::Inactive, QPalette::Light, p->color(QPalette::Active, QPalette::Light));
-   p->setColor(QPalette::Inactive, QPalette::Midlight, p->color(QPalette::Active, QPalette::Midlight));
-   p->setColor(QPalette::Inactive, QPalette::Dark, p->color(QPalette::Active, QPalette::Dark));
-   p->setColor(QPalette::Inactive, QPalette::Mid, p->color(QPalette::Active, QPalette::Mid));
-   p->setColor(QPalette::Inactive, QPalette::Shadow, p->color(QPalette::Active, QPalette::Shadow));
-   p->setColor(QPalette::Inactive, QPalette::Highlight, p->color(QPalette::Active, QPalette::Highlight));
-   p->setColor(QPalette::Inactive, QPalette::HighlightedText, p->color(QPalette::Active, QPalette::HighlightedText));
-   //p->setColor(QPalette::Inactive, QPalette::, p->color(QPalette::Active, QPalette::));
-}
-
-void setXDialPalette( QPalette * p)
-{
-   p->setColor(QPalette::Active, QPalette::Foreground, QColor(0,0,0,0));
-   p->setColor(QPalette::Active, QPalette::Base, QColor(0,0,0,0));
-   p->setColor(QPalette::Active, QPalette::Text, QColor(22,111,117,255));
-   p->setColor(QPalette::Active, QPalette::BrightText, QColor(113,0,0,255)); // Scale text and line
-   
-   p->setColor(QPalette::Inactive, QPalette::Foreground, QColor(0,0,0,0));//Dial circle color   
-   p->setColor(QPalette::Inactive, QPalette::Base, QColor(0,0,0,0));//Overall Background
-   p->setColor(QPalette::Inactive, QPalette::Text, QColor(22,111,117,255)); // Scale text and line
-   p->setColor(QPalette::Inactive, QPalette::BrightText, QColor(113,0,0,255)); // Scale text and line
-   
-   p->setColor(QPalette::Disabled, QPalette::Foreground, QColor(0,0,0,0));//Dial circle color   
-   p->setColor(QPalette::Disabled, QPalette::Base, QColor(0,0,0,0));//Overall Background
-   p->setColor(QPalette::Disabled, QPalette::Text, QColor(22,111,117,255)); // Scale text and line
-   p->setColor(QPalette::Disabled, QPalette::BrightText, QColor(113,0,0,255)); // Scale text and line
-   
 };
 
 pupilGuide::pupilGuide( QWidget * Parent, Qt::WindowFlags f) : QDialog(Parent, f)
@@ -210,6 +182,9 @@ pupilGuide::pupilGuide( QWidget * Parent, Qt::WindowFlags f) : QDialog(Parent, f
    
    snprintf(ss, 5, "%0.2f", m_pupStepSize);
    ui.button_pup_scale->setText(ss);
+   
+   snprintf(ss, 5, "%0.2f", m_camlensStepSize);
+   ui.button_camlens_scale->setText(ss);
 }
    
 pupilGuide::~pupilGuide()
@@ -238,12 +213,25 @@ int pupilGuide::subscribe( multiIndiPublisher * publisher )
    publisher->subscribeProperty(this, "ttmpupil", "pos_1");
    publisher->subscribeProperty(this, "ttmpupil", "pos_2");
    
+   publisher->subscribeProperty(this, "stagecamlensx", "fsm");
+   publisher->subscribeProperty(this, "stagecamlensx", "position");
+   
+   publisher->subscribeProperty(this, "stagecamlensy", "fsm");
+   publisher->subscribeProperty(this, "stagecamlensy", "position");
+   
    return 0;
 }
    
 int pupilGuide::handleDefProperty( const pcf::IndiProperty & ipRecv)
 {  
-   if(ipRecv.getDevice() == "camwfs-avg" || ipRecv.getDevice() == "camwfs-fit" || ipRecv.getDevice() == "modwfs" || ipRecv.getDevice() == "fxngenmodwfs" || ipRecv.getDevice() == "ttmpupil") 
+   std::string dev = ipRecv.getDevice();
+   if( dev == "camwfs-avg" || 
+       dev == "camwfs-fit" || 
+       dev == "modwfs" || 
+       dev == "fxngenmodwfs" || 
+       dev == "ttmpupil" || 
+       dev == "stagecamlensx" || 
+       dev == "stagecamlensy") 
    {
       return handleSetProperty(ipRecv);
    }
@@ -253,9 +241,10 @@ int pupilGuide::handleDefProperty( const pcf::IndiProperty & ipRecv)
 
 int pupilGuide::handleSetProperty( const pcf::IndiProperty & ipRecv)
 {
-  
+   std::string dev = ipRecv.getDevice();
+   
    //m_mutex.lock();
-   if(ipRecv.getDevice() == "camwfs-avg")
+   if(dev == "camwfs-avg")
    {
       if(ipRecv.getName() == "nAverage")
       {
@@ -263,11 +252,9 @@ int pupilGuide::handleSetProperty( const pcf::IndiProperty & ipRecv)
          {
             m_nAverage_current = ipRecv["current"].get<unsigned>();
          }
-         
       }
    }
-   
-   if(ipRecv.getDevice() == "camwfs-fit")
+   else if(dev == "camwfs-fit")
    {
       if(ipRecv.getName() == "quadrant1")
       {
@@ -429,7 +416,7 @@ int pupilGuide::handleSetProperty( const pcf::IndiProperty & ipRecv)
          }
       }
    }
-   else if(ipRecv.getDevice() == "modwfs")
+   else if(dev == "modwfs")
    {
       if(ipRecv.getName() == "modFrequency")
       {
@@ -441,7 +428,6 @@ int pupilGuide::handleSetProperty( const pcf::IndiProperty & ipRecv)
          {
             m_modFreq_tgt = ipRecv["requested"].get<double>();
          }
-         
       }
       
       if(ipRecv.getName() == "modRadius")
@@ -472,7 +458,7 @@ int pupilGuide::handleSetProperty( const pcf::IndiProperty & ipRecv)
          }
       }
    }
-   else if(ipRecv.getDevice() == "fxngenmodwfs")
+   else if(dev == "fxngenmodwfs")
    {
       if(ipRecv.getName() == "C1ofst")
       {
@@ -489,7 +475,7 @@ int pupilGuide::handleSetProperty( const pcf::IndiProperty & ipRecv)
          }
       }
    }
-   else if(ipRecv.getDevice() == "ttmpupil")
+   else if(dev == "ttmpupil")
    {
       if(ipRecv.getName() == "fsm")
       {
@@ -515,6 +501,41 @@ int pupilGuide::handleSetProperty( const pcf::IndiProperty & ipRecv)
          }
       }
    }
+   else if(dev == "stagecamlensx")
+   {
+      if(ipRecv.getName() == "fsm")
+      {
+         if(ipRecv.find("state"))
+         {
+            m_camlensxFsmState = ipRecv["state"].get<std::string>();
+         }
+      }
+      else if(ipRecv.getName() == "position")
+      {
+         if(ipRecv.find("current"))
+         {
+            m_camlensx_pos = ipRecv["current"].get<float>();
+         }
+      }
+   }
+   else if(dev == "stagecamlensy")
+   {
+      if(ipRecv.getName() == "fsm")
+      {
+         if(ipRecv.find("state"))
+         {
+            m_camlensyFsmState = ipRecv["state"].get<std::string>();
+         }
+      }
+      else if(ipRecv.getName() == "position")
+      {
+         if(ipRecv.find("current"))
+         {
+            m_camlensy_pos = ipRecv["current"].get<float>();
+         }
+      }
+   }
+   
    return 0;
    
 }
@@ -543,9 +564,9 @@ void pupilGuide::updateGUI()
       ui.modState->setText(m_modFsmState.c_str());
    }
    
-   snprintf(str,sizeof(str), "%0.2f V", m_modCh1);
+   snprintf(str,sizeof(str), "%0.2f", m_modCh1);
    ui.modCh1->setText(str);
-   snprintf(str,sizeof(str), "%0.2f V", m_modCh2);
+   snprintf(str,sizeof(str), "%0.2f", m_modCh2);
    ui.modCh2->setText(str);
    
    
@@ -575,9 +596,9 @@ void pupilGuide::updateGUI()
       ui.buttonPup_rest->setEnabled(false);
    }
    
-   snprintf(str,sizeof(str), "%0.2f mr", m_pupCh1);
+   snprintf(str,sizeof(str), "%0.2f", m_pupCh1);
    ui.pupCh1->setText(str);
-   snprintf(str,sizeof(str), "%0.2f mr", m_pupCh2);
+   snprintf(str,sizeof(str), "%0.2f", m_pupCh2);
    ui.pupCh2->setText(str);
    
    if(m_modState == 3)
@@ -811,6 +832,77 @@ void pupilGuide::updateGUI()
    ui.coordAvg_y->setText(str);
    ui.coordAvg_y->setEnabled(true);
    
+   
+   if( (m_camlensxFsmState == "READY" || m_camlensxFsmState == "OPERATING") &&
+          (m_camlensyFsmState == "READY" || m_camlensyFsmState == "OPERATING") )
+   {
+      ui.camlens_fsm->setEnabled(true);
+      ui.camlens_x_label->setEnabled(true);
+      ui.camlens_x_pos->setEnabled(true);
+      ui.camlens_y_label->setEnabled(true);
+      ui.camlens_y_pos->setEnabled(true);
+      ui.button_camlens_ul->setEnabled(true);
+      ui.button_camlens_u->setEnabled(true);
+      ui.button_camlens_ur->setEnabled(true);
+      ui.button_camlens_l->setEnabled(true);
+      ui.button_camlens_r->setEnabled(true);
+      ui.button_camlens_dl->setEnabled(true);
+      ui.button_camlens_d->setEnabled(true);
+      ui.button_camlens_dr->setEnabled(true);
+      ui.button_camlens_scale->setEnabled(true);
+      
+      if(m_camlensxFsmState == "OPERATING" || m_camlensyFsmState == "OPERATING")
+      {
+         ui.camlens_fsm->setText("OPERATING");
+      }
+      else
+      {
+         ui.camlens_fsm->setText("READY");
+      }
+      
+      snprintf(str, 16, "%0.4f", m_camlensx_pos);
+      ui.camlens_x_pos->setText(str);
+      snprintf(str, 16, "%0.4f", m_camlensy_pos);
+      ui.camlens_y_pos->setText(str);
+   }
+   else
+   {
+      ui.camlens_fsm->setEnabled(false);
+      ui.camlens_x_label->setEnabled(false);
+      ui.camlens_x_pos->setEnabled(false);
+      ui.camlens_y_label->setEnabled(false);
+      ui.camlens_y_pos->setEnabled(false);
+      ui.button_camlens_ul->setEnabled(false);
+      ui.button_camlens_u->setEnabled(false);
+      ui.button_camlens_ur->setEnabled(false);
+      ui.button_camlens_l->setEnabled(false);
+      ui.button_camlens_r->setEnabled(false);
+      ui.button_camlens_dl->setEnabled(false);
+      ui.button_camlens_d->setEnabled(false);
+      ui.button_camlens_dr->setEnabled(false);
+      ui.button_camlens_scale->setEnabled(false);
+      
+      if(m_camlensxFsmState == "HOMING" || m_camlensyFsmState == "HOMING")
+      {
+         ui.camlens_fsm->setText("HOMING");
+      }
+      else if(m_camlensxFsmState == "POWERON" || m_camlensyFsmState == "POWERON")
+      {
+         ui.camlens_fsm->setText("POWERON");
+      }
+      else if(m_camlensxFsmState == "POWEROFF" && m_camlensyFsmState == "POWEROFF")
+      {
+         ui.camlens_fsm->setText("POWEROFF");
+      }
+      else
+      {
+         ui.camlens_fsm->setText(m_camlensxFsmState.c_str());
+      }
+      
+      ui.camlens_x_pos->setText("---");
+      ui.camlens_y_pos->setText("---");
+   }
+      
 } //updateGUI()
 
 void pupilGuide::on_button_tip_u_pressed()
@@ -1129,6 +1221,185 @@ void pupilGuide::on_button_pup_scale_pressed()
    char ss[5];
    snprintf(ss, 5, "%0.2f", m_pupStepSize);
    ui.button_pup_scale->setText(ss);
+
+
+}
+
+
+void pupilGuide::on_button_camlens_u_pressed()
+{
+   if(m_camlensyFsmState != "READY") return;
+   
+   pcf::IndiProperty ip(pcf::IndiProperty::Number);
+   
+   ip.setDevice("stagecamlensy");
+   ip.setName("position");
+   ip.add(pcf::IndiElement("target"));
+   ip["target"] = m_camlensy_pos + m_camlensStepSize;
+   
+   sendNewProperty(ip);
+}
+
+void pupilGuide::on_button_camlens_ul_pressed()
+{
+   if(m_camlensyFsmState != "READY" || m_camlensxFsmState != "READY") return;
+   
+   pcf::IndiProperty ip(pcf::IndiProperty::Number);
+   
+   ip.setDevice("stagecamlensy");
+   ip.setName("position");
+   ip.add(pcf::IndiElement("target"));
+   ip["target"] = m_camlensy_pos + sqrt(2)*m_camlensStepSize;
+   
+   sendNewProperty(ip);
+   
+   pcf::IndiProperty ip2(pcf::IndiProperty::Number);
+   
+   ip2.setDevice("stagecamlensx");
+   ip2.setName("position");
+   ip2.add(pcf::IndiElement("target"));
+   ip2["target"] = m_camlensx_pos - sqrt(2)*m_camlensStepSize;
+   
+   sendNewProperty(ip2);
+}
+
+void pupilGuide::on_button_camlens_l_pressed()
+{
+   if(m_camlensxFsmState != "READY") return;
+   
+   pcf::IndiProperty ip(pcf::IndiProperty::Number);
+   
+   ip.setDevice("stagecamlensx");
+   ip.setName("position");
+   ip.add(pcf::IndiElement("target"));
+   ip["target"] = m_camlensx_pos - m_camlensStepSize;
+   
+   sendNewProperty(ip);
+}
+
+void pupilGuide::on_button_camlens_dl_pressed()
+{
+   if(m_camlensyFsmState != "READY" || m_camlensxFsmState != "READY") return;
+   
+   pcf::IndiProperty ip(pcf::IndiProperty::Number);
+   
+   ip.setDevice("stagecamlensy");
+   ip.setName("position");
+   ip.add(pcf::IndiElement("target"));
+   ip["target"] = m_camlensy_pos - sqrt(2)*m_camlensStepSize;
+   
+   sendNewProperty(ip);
+   
+   pcf::IndiProperty ip2(pcf::IndiProperty::Number);
+   
+   ip2.setDevice("stagecamlensx");
+   ip2.setName("position");
+   ip2.add(pcf::IndiElement("target"));
+   ip2["target"] = m_camlensx_pos - sqrt(2)*m_camlensStepSize;
+   
+   sendNewProperty(ip2);
+}
+
+void pupilGuide::on_button_camlens_d_pressed()
+{
+   if(m_camlensyFsmState != "READY") return;
+   
+   pcf::IndiProperty ip(pcf::IndiProperty::Number);
+   
+   ip.setDevice("stagecamlensy");
+   ip.setName("position");
+   ip.add(pcf::IndiElement("target"));
+   ip["target"] = m_camlensy_pos - m_camlensStepSize;
+   
+   sendNewProperty(ip);
+}
+
+void pupilGuide::on_button_camlens_dr_pressed()
+{
+   if(m_camlensyFsmState != "READY" || m_camlensxFsmState != "READY") return;
+   
+   pcf::IndiProperty ip(pcf::IndiProperty::Number);
+   
+   ip.setDevice("stagecamlensy");
+   ip.setName("position");
+   ip.add(pcf::IndiElement("target"));
+   ip["target"] = m_camlensy_pos + sqrt(2)*m_camlensStepSize;
+   
+   sendNewProperty(ip);
+   
+   pcf::IndiProperty ip2(pcf::IndiProperty::Number);
+   
+   ip2.setDevice("stagecamlensx");
+   ip2.setName("position");
+   ip2.add(pcf::IndiElement("target"));
+   ip2["target"] = m_camlensx_pos + sqrt(2)*m_camlensStepSize;
+   
+   sendNewProperty(ip2);
+}
+
+void pupilGuide::on_button_camlens_r_pressed()
+{
+   if(m_camlensxFsmState != "READY") return;
+   
+   pcf::IndiProperty ip(pcf::IndiProperty::Number);
+   
+   ip.setDevice("stagecamlensx");
+   ip.setName("position");
+   ip.add(pcf::IndiElement("target"));
+   ip["target"] = m_camlensx_pos + m_camlensStepSize;
+   
+   sendNewProperty(ip);
+}
+
+void pupilGuide::on_button_camlens_ur_pressed()
+{
+   if(m_camlensyFsmState != "READY" || m_camlensxFsmState != "READY") return;
+   
+   pcf::IndiProperty ip(pcf::IndiProperty::Number);
+   
+   ip.setDevice("stagecamlensy");
+   ip.setName("position");
+   ip.add(pcf::IndiElement("target"));
+   ip["target"] = m_camlensy_pos + sqrt(2)*m_camlensStepSize;
+   
+   sendNewProperty(ip);
+   
+   pcf::IndiProperty ip2(pcf::IndiProperty::Number);
+   
+   ip2.setDevice("stagecamlensx");
+   ip2.setName("position");
+   ip2.add(pcf::IndiElement("target"));
+   ip2["target"] = m_camlensx_pos + sqrt(2)*m_camlensStepSize;
+   
+   sendNewProperty(ip2);
+}
+void pupilGuide::on_button_camlens_scale_pressed()
+{
+   /*if(((int) (100*m_camlensStepSize)) == 100)
+   {
+      m_camlensStepSize = 0.5;
+   }
+   else if(((int) (100*m_camlensStepSize)) == 50)
+   {
+      m_camlensStepSize = 0.1;
+   }
+   else*/ 
+   if(((int) (100*m_camlensStepSize)) == 10)
+   {
+      m_camlensStepSize = 0.05;
+   }
+   else if(((int) (100*m_camlensStepSize)) == 5)
+   {
+      m_camlensStepSize = 0.01;
+   }
+   else if(((int) (100*m_camlensStepSize)) == 1)
+   {
+      m_camlensStepSize = 0.1;
+   }
+   
+   char ss[5];
+   snprintf(ss, 5, "%0.2f", m_camlensStepSize);
+   ui.button_camlens_scale->setText(ss);
 
 
 }
