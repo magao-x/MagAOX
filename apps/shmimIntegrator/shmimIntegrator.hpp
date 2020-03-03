@@ -123,6 +123,9 @@ protected:
    bool m_dark2Set {false};
    realT (*dark2_pixget)(void *, size_t) {nullptr}; ///< Pointer to a function to extract the image data as our desired type realT.
    
+   bool m_continuous {true}; ///< Set to false in configuration to have this run once then stop until triggered.
+   bool m_running {true}; ///< Set to false in configuration to have it not start averaging until triggered.
+   
 public:
    /// Default c'tor.
    shmimIntegrator();
@@ -224,8 +227,11 @@ protected:
    
    pcf::IndiProperty m_indiP_nUpdate;
    
+   pcf::IndiProperty m_indiP_startAveraging;
+   
    INDI_NEWCALLBACK_DECL(shmimIntegrator, m_indiP_nAverage);
    INDI_NEWCALLBACK_DECL(shmimIntegrator, m_indiP_nUpdate);
+   INDI_NEWCALLBACK_DECL(shmimIntegrator, m_indiP_startAveraging);
 };
 
 inline
@@ -247,6 +253,9 @@ void shmimIntegrator::setupConfig()
    config.add("integrator.nAverage", "", "integrator.nAverage", argType::Required, "integrator", "nAverage", false, "string", "The default number of frames to average.  Can be changed via INDI.");
    
    config.add("integrator.nUpdate", "", "integrator.nUpdate", argType::Required, "integrator", "nUpdate", false, "string", "The rate at which to update the average.  If m_nUpdate < m_nAverage then this is a moving averager.  If 0, then it is a simple average.");
+   
+   config.add("integrator.continuous", "", "integrator.continuous", argType::Required, "integrator", "continuous", false, "bool", "Flag controlling whether averaging is continuous or only when triggered.  Default true.");
+   config.add("integrator.running", "", "integrator.running", argType::Required, "integrator", "running", false, "bool", "Flag controlling whether averaging is running at startup.  Default true.");
 }
 
 inline
@@ -262,6 +271,10 @@ int shmimIntegrator::loadConfigImpl( mx::app::appConfigurator & _config )
    _config(m_nAverage, "integrator.nAverage");
    
    _config(m_nUpdate, "integrator.nUpdate");
+   
+   _config(m_continuous, "integrator.continuous");
+   
+   _config(m_running, "integrator.running");
    
    return 0;
 }
@@ -295,6 +308,15 @@ int shmimIntegrator::appStartup()
       log<software_error>({__FILE__,__LINE__});
       return -1;
    }
+   
+   createStandardIndiToggleSw( m_indiP_startAveraging, "start");
+   if( registerIndiPropertyNew( m_indiP_startAveraging, INDI_NEWCALLBACK(m_indiP_startAveraging)) < 0)
+   {
+      log<software_error>({__FILE__,__LINE__});
+      return -1;
+   }
+   
+   
    
    if(sem_init(&m_smSemaphore, 0,0) < 0)
    {
@@ -441,6 +463,8 @@ int shmimIntegrator::processImage( void * curr_src,
 {
    static_cast<void>(dummy); //be unused
    
+   if(!m_running) return 0;
+   
    if(m_nUpdate == 0)
    {
       if(m_updated) return 0;
@@ -471,6 +495,7 @@ int shmimIntegrator::processImage( void * curr_src,
          }
          
          m_sinceUpdate = 0;
+         if(!m_continuous) m_running = false;
       }
    }
    else
@@ -742,6 +767,28 @@ INDI_NEWCALLBACK_DEFN(shmimIntegrator, m_indiP_nUpdate)(const pcf::IndiProperty 
    
    log<text_log>("set nUpdate to " + std::to_string(m_nUpdate), logPrio::LOG_NOTICE);
    
+   return 0;
+}
+
+INDI_NEWCALLBACK_DEFN(shmimIntegrator, m_indiP_startAveraging)(const pcf::IndiProperty &ipRecv)
+{
+   if(ipRecv.getName() != m_indiP_startAveraging.getName())
+   {
+      log<software_error>({__FILE__, __LINE__, "invalid indi property received"});
+      return -1;
+   }
+   
+   if(!ipRecv.find("toggle")) return 0;
+   
+   if( ipRecv["toggle"].getSwitchState() == pcf::IndiElement::Off)
+   {
+      m_running = false;
+   }
+   
+   if( ipRecv["toggle"].getSwitchState() == pcf::IndiElement::On)
+   {
+      m_running = true;;
+   }
    return 0;
 }
 
