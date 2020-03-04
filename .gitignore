@@ -44,6 +44,8 @@ apps/bmcCtrl/bmcCtrl
 
 #d
 apps/dmMode/dmMode
+apps/dmModulator/dmModulator
+
 
 #f
 apps/filterWheelCtrl/filterWheelCtrl
@@ -85,6 +87,7 @@ apps/pi335Ctrl/pi335Ctrl
 apps/picamCtrl/picamCtrl
 
 apps/pupilFit/pupilFit
+apps/pwfsSlopeCalc/pwfsSlopeCalc
 
 #s
 apps/shmimIntegrator/shmimIntegrator

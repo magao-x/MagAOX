@@ -142,12 +142,14 @@ protected:
    pcf::IndiProperty m_indiP_dm;
    pcf::IndiProperty m_indiP_frequency;
    pcf::IndiProperty m_indiP_modulating;
+   pcf::IndiProperty m_indiP_zero;
 
    std::vector<std::string> m_elNames;
 public:
    INDI_NEWCALLBACK_DECL(dmModulator, m_indiP_frequency);
    INDI_NEWCALLBACK_DECL(dmModulator, m_indiP_modulating);
-
+   INDI_NEWCALLBACK_DECL(dmModulator, m_indiP_zero);
+   
 };
 
 dmModulator::dmModulator() : MagAOXApp(MAGAOX_CURRENT_SHA1, MAGAOX_REPO_MODIFIED)
@@ -198,6 +200,11 @@ int dmModulator::appStartup()
    m_indiP_dm["channel"] = m_dmChannelName;
    
    
+   createStandardIndiNumber<float>(m_indiP_frequency, "frequency", 0, 0,10000, "%f");
+   updateIfChanged(m_indiP_frequency, "current", m_frequency);
+   updateIfChanged(m_indiP_frequency, "target", m_frequency);
+   registerIndiPropertyNew( m_indiP_frequency, INDI_NEWCALLBACK(m_indiP_frequency));
+   
    createStandardIndiToggleSw( m_indiP_modulating, "modulating");
    if( registerIndiPropertyNew( m_indiP_modulating, INDI_NEWCALLBACK(m_indiP_modulating)) < 0)
    {
@@ -205,6 +212,12 @@ int dmModulator::appStartup()
       return -1;
    }
    
+   createStandardIndiRequestSw( m_indiP_zero, "zero");
+   if( registerIndiPropertyNew( m_indiP_zero, INDI_NEWCALLBACK(m_indiP_zero)) < 0)
+   {
+      log<software_error>({__FILE__,__LINE__});
+      return -1;
+   }
    
    if(threadStart( m_modThread, m_modThreadInit, m_modThreadPrio, "modulator", this, modThreadStart)  < 0)
    {
@@ -340,7 +353,7 @@ void dmModulator::modThreadExec()
                ImageStreamIO_sempost(&m_imageStream,-1);
    
                ++idx;
-               if(idx > m_shapes.planes()) idx=0;
+               if(idx >= m_shapes.planes()) idx=0;
                
                modstart.tv_nsec += freqNsec;
                if(modstart.tv_nsec >= 1000000000)
@@ -356,6 +369,39 @@ void dmModulator::modThreadExec()
    
 }
 
+INDI_NEWCALLBACK_DEFN(dmModulator, m_indiP_frequency)(const pcf::IndiProperty &ipRecv)
+{
+   if(ipRecv.getName() != m_indiP_frequency.getName())
+   {
+      log<software_error>({__FILE__,__LINE__, "wrong INDI property received."});
+      return -1;
+   }
+
+   float freq = -1;
+   
+   if( ipRecv.find("current") )
+   {
+      freq = ipRecv["current"].get<float>();
+   }
+   
+   if( ipRecv.find("target") )
+   {
+      freq = ipRecv["target"].get<float>();
+   }
+
+   if(freq < 0)
+   {
+      log<software_error>({__FILE__,__LINE__, "Invalid request frequency: " + std::to_string(freq)});
+      return 0;
+   }
+   
+   std::unique_lock<std::mutex> lock(m_indiMutex);
+   m_frequency = freq;
+   updateIfChanged(m_indiP_frequency, "current", m_frequency);
+   updateIfChanged(m_indiP_frequency, "target", m_frequency);
+   return 0;
+}
+
 INDI_NEWCALLBACK_DEFN(dmModulator, m_indiP_modulating)(const pcf::IndiProperty &ipRecv)
 {
    if(ipRecv.getName() != m_indiP_modulating.getName())
@@ -365,6 +411,8 @@ INDI_NEWCALLBACK_DEFN(dmModulator, m_indiP_modulating)(const pcf::IndiProperty &
    }
    
    if(!ipRecv.find("toggle")) return 0;
+   
+   std::unique_lock<std::mutex> lock(m_indiMutex);
    
    if( ipRecv["toggle"].getSwitchState() == pcf::IndiElement::Off)
    {
@@ -376,6 +424,42 @@ INDI_NEWCALLBACK_DEFN(dmModulator, m_indiP_modulating)(const pcf::IndiProperty &
    {
       m_modulating = true;
       indi::updateSwitchIfChanged(m_indiP_modulating, "toggle", pcf::IndiElement::On, m_indiDriver, INDI_OK);
+   }
+   
+   
+   return 0;
+}
+
+INDI_NEWCALLBACK_DEFN(dmModulator, m_indiP_zero)(const pcf::IndiProperty &ipRecv)
+{
+   if(ipRecv.getName() != m_indiP_zero.getName())
+   {
+      log<software_error>({__FILE__, __LINE__, "invalid indi property received"});
+      return -1;
+   }
+
+   if(m_modulating == true)
+   {
+      log<text_log>("zero requested but currently modulating", logPrio::LOG_NOTICE);
+      return 0;
+   }
+
+   if(!ipRecv.find("request")) return 0;
+   
+   if( ipRecv["request"].getSwitchState() == pcf::IndiElement::On)
+   {
+      m_imageStream.md->write = 1;
+   
+      memset(m_imageStream.array.raw, 0, m_width*m_height*m_typeSize);
+      timespec currtime;
+      clock_gettime(CLOCK_REALTIME, &currtime);
+      m_imageStream.md->atime = currtime;
+      m_imageStream.md->writetime = currtime;
+               
+      m_imageStream.md->cnt0++;
+   
+      m_imageStream.md->write=0;
+      ImageStreamIO_sempost(&m_imageStream,-1);      
    }
    
    
