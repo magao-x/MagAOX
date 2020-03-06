@@ -72,7 +72,7 @@ protected:
       
    int m_fgThreadPrio {2}; ///< Priority of the framegrabber thread, should normally be > 00.
     
-   uint32_t m_circBuffLength {1024}; ///< Length of the circular buffer, in frames
+   uint32_t m_circBuffLength {1}; ///< Length of the circular buffer, in frames
        
    ///@}
    
