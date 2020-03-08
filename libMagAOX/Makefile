@@ -29,6 +29,9 @@ INCLUDEDEPS= app/MagAOXApp.hpp \
              ImageStreamIO/pixaccess.hpp \
              logger/logFileRaw.hpp \
              logger/logManager.hpp \
+             logger/logFileName.hpp \
+             logger/logMap.hpp \
+             logger/logMeta.hpp \
              logger/types/empty_log.hpp \
              logger/types/flatbuffer_log.hpp \
              logger/types/git_state.hpp \

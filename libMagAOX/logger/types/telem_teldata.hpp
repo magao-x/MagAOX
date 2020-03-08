@@ -100,6 +100,90 @@ struct telem_teldata : public flatbuffer_log
    
    }
    
+   static int roi( void * msgBuffer )
+   {
+       auto fbs = GetTelem_teldata_fb(msgBuffer);
+       return fbs->roi();
+   }
+   
+   static int tracking( void * msgBuffer )
+   {
+       auto fbs = GetTelem_teldata_fb(msgBuffer);
+       return fbs->tracking();
+   }
+   
+   static int guiding( void * msgBuffer )
+   {
+       auto fbs = GetTelem_teldata_fb(msgBuffer);
+       return fbs->guiding();
+   }
+   
+   static int slewing( void * msgBuffer )
+   {
+       auto fbs = GetTelem_teldata_fb(msgBuffer);
+       return fbs->slewing();
+   }      
+   
+   static int guiderMoving( void * msgBuffer )
+   {
+       auto fbs = GetTelem_teldata_fb(msgBuffer);
+       return fbs->guiderMoving();
+   }
+   
+   static double az( void * msgBuffer )
+   {
+       auto fbs = GetTelem_teldata_fb(msgBuffer);
+       return fbs->az();
+   }
+   
+   static double zd( void * msgBuffer )
+   {
+       auto fbs = GetTelem_teldata_fb(msgBuffer);
+       return fbs->zd();
+   }
+   
+   static double pa( void * msgBuffer )
+   {
+       auto fbs = GetTelem_teldata_fb(msgBuffer);
+       return fbs->pa();
+   }
+   
+   static double domeAz( void * msgBuffer )
+   {
+       auto fbs = GetTelem_teldata_fb(msgBuffer);
+       return fbs->domeAz();
+   }
+   
+   static int domeStat( void * msgBuffer )
+   {
+       auto fbs = GetTelem_teldata_fb(msgBuffer);
+       return fbs->domeStat();
+   }
+   
+   /// Get pointer to the accessor for a member by name 
+   /**
+     * \returns the function pointer cast to void*
+     * \returns -1 for an unknown member
+     */ 
+   static void * getAccessor( const std::string & member /**< [in] the name of the member */ )
+   {
+      if(member == "roi") return (void *) &roi;
+      else if(member == "tracking") return (void *) &tracking;
+      else if(member == "guiding") return (void *) &guiding;
+      else if(member == "slewing") return (void *) &slewing;
+      else if(member == "guiderMoving") return (void *) &guiderMoving;
+      else if(member == "az") return (void *) &az;
+      else if(member == "zd") return (void *) &zd;
+      else if(member == "pa") return (void *) &pa;
+      else if(member == "domeAz") return (void *) &domeAz;
+      else if(member == "domeStat") return (void *) &domeStat;
+      else
+      {
+         std::cerr << "No string member " << member << " in telem_teldata\n";
+         return 0;
+      }
+   }
+   
 }; //telem_teldata
 
 timespec telem_teldata::lastRecord = {0,0};

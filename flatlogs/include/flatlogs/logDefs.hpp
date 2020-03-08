@@ -10,6 +10,8 @@
 #ifndef flatlogs_logDefs_hpp
 #define flatlogs_logDefs_hpp
 
+#include <cstdint>
+
 namespace flatlogs 
 {
 

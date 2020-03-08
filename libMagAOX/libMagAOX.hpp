@@ -33,6 +33,9 @@
 
 #include "logger/logFileRaw.hpp"
 #include "logger/logManager.hpp"
+#include "logger/logFileName.hpp"
+#include "logger/logMap.hpp"
+#include "logger/logMeta.hpp"
 #include "logger/generated/logCodes.hpp"
 #include "logger/generated/logStdFormat.hpp"
 #include "logger/generated/logTypes.hpp"

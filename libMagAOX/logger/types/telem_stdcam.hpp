@@ -68,7 +68,7 @@ struct telem_stdcam : public flatbuffer_log
    };
                  
  
-   ///Get the message formatte for human consumption.
+   ///Get the message formatted for human consumption.
    static std::string msgString( void * msgBuffer,  /**< [in] Buffer containing the flatbuffer serialized message.*/
                                  flatlogs::msgLenT len  /**< [in] [unused] length of msgBuffer.*/
                                )
@@ -132,6 +132,27 @@ struct telem_stdcam : public flatbuffer_log
    
    }
    
+   static double exptime( void * msgBuffer )
+   {
+      auto fbs = GetTelem_stdcam_fb(msgBuffer);
+      return fbs->exptime();
+   }
+   
+   /// Get pointer to the accessor for a member by name 
+   /**
+     * \returns the function pointer cast to void*
+     * \returns -1 for an unknown member
+     */ 
+   static void * getAccessor( const std::string & member /**< [in] the name of the member */ )
+   {
+      if(member == "exptime") return (void *) &exptime;
+      else
+      {
+         std::cerr << "No string member " << member << " in telem_stdcam\n";
+         return 0;
+      }
+   }
+      
 }; //telem_stdcam
 
 timespec telem_stdcam::lastRecord = {0,0};
