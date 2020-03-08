@@ -1,3 +1,12 @@
+/** \file logMap.hpp
+  * \brief Declares and defines the logMap class and related classes.
+  * \author Jared R. Males (jaredmales@gmail.com)
+  *
+  * \ingroup logger_files
+  * 
+  * History:
+  * - 2020-01-02 created by JRM
+  */
 
 #ifndef logger_logMap_hpp
 #define logger_logMap_hpp
@@ -134,7 +143,7 @@ struct logMap
    
    int getNearestLogs( bufferPtrT & logBefore,
                        bufferPtrT & logAfter,
-                       const std::string appName
+                       const std::string & appName
                      );
                        
    int loadFiles( const std::string & appName, ///< MagAO-X app name for which to load files

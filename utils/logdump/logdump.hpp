@@ -149,7 +149,7 @@ int logdump::execute()
    std::vector<std::string> logs = mx::ioutils::getFileNames( m_dir, m_prefixes[0], "", m_ext);
 
    ///\todo if follow is set, then should nfiles default to 1 unless explicitly set?
-   if(m_nfiles <= 0)
+   if(m_nfiles == 0)
    {
       m_nfiles = logs.size();
    }

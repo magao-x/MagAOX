@@ -225,8 +225,6 @@ int telnetConn::connect( const std::string & host,
   
    m_loggedin = 0;
  
-   int rs;
-
    struct sockaddr_in addr;
    struct addrinfo *ai;
    struct addrinfo hints;
@@ -235,7 +233,7 @@ int telnetConn::connect( const std::string & host,
    memset(&hints, 0, sizeof(hints));
    hints.ai_family = AF_UNSPEC;
    hints.ai_socktype = SOCK_STREAM;
-   if ((rs = getaddrinfo(host.c_str(), port.c_str(), &hints, &ai)) != 0)
+   if( getaddrinfo(host.c_str(), port.c_str(), &hints, &ai) != 0)
    {
       return TELNET_E_GETADDR;
    }

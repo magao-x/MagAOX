@@ -443,7 +443,7 @@ int pwfsSlopeCalc::loadImageIntoStream(void * dest)
    Eigen::Map<eigenImage<unsigned short>> pwfsIm( static_cast<unsigned short *>(m_curr_src), shmimMonitorT::m_width, shmimMonitorT::m_height );
    Eigen::Map<eigenImage<float>> slopesIm(static_cast<float*>(dest), frameGrabberT::m_width, frameGrabberT::m_height );
    
-   float norm = 0;
+   float norm;
    for(int ii=0; ii< m_quadSize; ++ii)
    {
       for(int jj=0; jj< m_quadSize; ++jj)

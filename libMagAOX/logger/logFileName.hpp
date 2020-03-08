@@ -171,10 +171,8 @@ logFileName::logFileName()
 }
 
 inline
-logFileName::logFileName(const std::string & fn)
+logFileName::logFileName(const std::string & fn) : m_fullName {fn}
 {
-   m_fullName = fn;
-   
    parseName();
 }
 

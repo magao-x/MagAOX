@@ -622,11 +622,9 @@ void shmimMonitor<derivedT, specificT>::smThreadExec()
       // call derived().cleanup()
       //*******
       
-      if(opened) 
-      {
-         ImageStreamIO_closeIm(&m_imageStream);
-         opened = false;
-      }
+      //opened == true if we can get to this 
+      ImageStreamIO_closeIm(&m_imageStream);
+      opened = false;
       
    } //outer loop, will exit if m_shutdown==true
       

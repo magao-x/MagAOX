@@ -1,10 +1,19 @@
-
+/** \file logMeta.hpp
+  * \brief Declares and defines the logMeta class and related classes.
+  * \author Jared R. Males (jaredmales@gmail.com)
+  *
+  * \ingroup logger_files
+  * 
+  * History:
+  * - 2020-01-02 created by JRM
+  */
 
 #ifndef logger_logMeta_hpp
 #define logger_logMega_hpp
 
 #include "logMap.hpp"
 
+///\todo this needs to be auto-generated.
 void * logMemberAccessor( flatlogs::eventCodeT ec,
                           const std::string & memberName
                         )
@@ -164,7 +173,7 @@ public:
    std::string comment();
    
    int setLog( eventCodeT ec,
-               const std::string mn
+               const std::string & mn
              );
    
    std::string value( logMap & lm,
@@ -198,17 +207,9 @@ logMeta::logMeta( const std::string & keyword,
                   const std::string & format,
                   const int metaType,
                   const int valType 
-                )
+                ) : m_keyword {keyword}, m_comment {comment}, m_appName {appName}, m_format {format}, m_metaType {metaType}, m_valType {valType}
 {
-   m_keyword = keyword;
-   m_comment = comment;
-   m_appName = appName;
-   
-   setLog(logCode, memberName);
-   
-   m_format = format;
-   m_metaType = metaType;
-   m_valType = valType;
+   setLog(logCode, memberName);   
 }
        
 std::string logMeta::keyword()
@@ -222,7 +223,7 @@ std::string logMeta::comment()
 }
 
 int logMeta::setLog( eventCodeT ec,
-                     const std::string mn
+                     const std::string & mn
                    )
 {
    m_logCode = ec;

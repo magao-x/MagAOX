@@ -42,10 +42,8 @@ struct timespecX
    }
    
    ///Construct with time values
-   timespecX( secT s, nanosecT ns )
+   timespecX( secT s, nanosecT ns ) : time_s {s}, time_ns {ns}
    {
-      time_s = s;
-      time_ns = ns;
    }
    
    ///Construct from timespec

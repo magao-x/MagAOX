@@ -361,13 +361,15 @@ int xrif2fits::execute()
       mx::improc::fitsFile<unsigned short> ff;
       mx::improc::fitsHeader fh;
       
-      uint64_t cnt0;
-      timespec atime; //This is the acquisition time of the exposure
-      timespec wtime;
-      timespec stime = {0,0}; //This is the start time of the exposure, calculated as atime-exptime.
+
       
       for( int q=0; q < tmpc.planes(); ++q)
       {
+          uint64_t cnt0;
+         timespec atime; //This is the acquisition time of the exposure
+         timespec wtime;
+         timespec stime = {0,0}; //This is the start time of the exposure, calculated as atime-exptime.
+      
          uint64_t * curr_timing = (uint64_t*) m_xrif_timing->raw_buffer + 5*q;
          
          cnt0 = curr_timing[0];
@@ -377,11 +379,12 @@ int xrif2fits::execute()
          wtime.tv_nsec = curr_timing[4];
 
          //We have to bootstrap the exposure time
-         char * prior =0, *priorprior=0;
+         char * prior = nullptr;
          tels.getPriorLog(prior, lfn.appName(), eventCodes::TELEM_STDCAM, atime);
          double exptime = -1;
          if(prior)
          {
+            char * priorprior = nullptr;
             exptime = telem_stdcam::exptime(logHeader::messageBuffer(prior));
          
             stime = atime-exptime;
