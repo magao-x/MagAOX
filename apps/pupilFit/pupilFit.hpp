@@ -490,7 +490,7 @@ int pupilFit::allocate(const dev::shmimT & dummy)
    
    //Load and fit the reference image
    std::string reffits = m_wfsrefPath + "/" + m_wfsrefName;
-   m_fitter.m_thresh = m_threshold;
+  
    mx::improc::fitsFile<float> ff;
    mx::improc::eigenImage<float> refedge;
    

@@ -220,9 +220,6 @@ int bmcCtrl::loadConfigImpl( mx::app::appConfigurator & _config )
    
    m_calibRelDir = "dm/bmc_2k";
    
-   std::string ser = mx::ioutils::toLower(m_serialNumber);
-   
-   //m_calibRelDir += ser;
    dev::dm<bmcCtrl,float>::loadConfig(_config);
    
    return 0;
@@ -424,19 +421,21 @@ int bmcCtrl::commandDM(void * curr_src)
    // want to rework the logic here so that we don't have to check
    // if every actuator is addressable.
    // Loop over addressable only?
-   double mean = 0;
+   //double mean = 0;
    for (uint32_t idx = 0; idx < m_nbAct; ++idx)
    {
      int address = m_actuator_mapping[idx];
      if(address == -1)
      {
         m_dminputs[idx] = 0.; // addressable but ignored actuators set to 0
-     } else {
+     } 
+     else 
+     {
         m_dminputs[idx] = ((double)  ((realT *) curr_src)[address]) * m_volume_factor/m_act_gain;
-        mean += m_dminputs[idx];
+        //mean += m_dminputs[idx];
      }
    }
-   mean /= m_nbAct;
+   //mean /= m_nbAct;
 
    /*This loop performas the following steps:
       1) remove mean from each actuator input (and add midpoint bias)

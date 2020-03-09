@@ -13,7 +13,7 @@
 #include "generated/telem_telpos_generated.h"
 #include "flatbuffer_log.hpp"
 
-#include "../logInterp.hpp"
+#include <cmath>
 
 namespace MagAOX
 {
@@ -34,6 +34,8 @@ struct telem_telpos : public flatbuffer_log
 
    static timespec lastRecord; ///< The time of the last time this log was recorded.  Used by the telemetry system.
 
+   enum member{ em_epoch, em_ra, em_dec, em_el, em_ha, em_am, em_rotoff};
+   
    ///The type of the input message
    struct messageT : public fbMessage
    {
@@ -90,97 +92,31 @@ struct telem_telpos : public flatbuffer_log
    
    }
    
-   
-   int epoch( double & epoch,
-              timespec & tm,
-              flatlogs::bufferPtrT & buffer0,
-              flatlogs::bufferPtrT & buffer1 
-            )
+   static double getDouble( flatlogs::bufferPtrT & buffer,
+                            member m 
+                          )
    {
-
-      auto fbs0 = GetTelem_telpos_fb(logHeader::messageBuffer(buffer0));
-      auto fbs1 = GetTelem_telpos_fb(logHeader::messageBuffer(buffer1));
-      
-      return interpLog(epoch, tm, fbs0->epoch(), buffer0, fbs1->epoch(), buffer1); 
+      switch(m)
+      {
+         case em_epoch:
+            return GetTelem_telpos_fb(logHeader::messageBuffer(buffer))->epoch();
+         case em_ra:
+            return GetTelem_telpos_fb(logHeader::messageBuffer(buffer))->ra();
+         case em_dec:
+            return GetTelem_telpos_fb(logHeader::messageBuffer(buffer))->dec();
+         case em_el:
+            return GetTelem_telpos_fb(logHeader::messageBuffer(buffer))->el();
+         case em_ha:
+            return GetTelem_telpos_fb(logHeader::messageBuffer(buffer))->ha();
+         case em_am:
+            return GetTelem_telpos_fb(logHeader::messageBuffer(buffer))->am();
+         case em_rotoff:
+            return GetTelem_telpos_fb(logHeader::messageBuffer(buffer))->rotoff();
+         default:
+            return nan("");
+      }
    }
    
-   int ra( double & ra,
-           timespec & tm,
-           flatlogs::bufferPtrT & buffer0,
-           flatlogs::bufferPtrT & buffer1 
-         )
-   {
-
-      auto fbs0 = GetTelem_telpos_fb(logHeader::messageBuffer(buffer0));
-      auto fbs1 = GetTelem_telpos_fb(logHeader::messageBuffer(buffer1));
-      
-      return interpLog(ra, tm, fbs0->ra(), buffer0, fbs1->ra(), buffer1); 
-   }
-   
-   int dec( double & dec,
-            timespec & tm,
-            flatlogs::bufferPtrT & buffer0,
-            flatlogs::bufferPtrT & buffer1 
-          )
-   {
-
-      auto fbs0 = GetTelem_telpos_fb(logHeader::messageBuffer(buffer0));
-      auto fbs1 = GetTelem_telpos_fb(logHeader::messageBuffer(buffer1));
-      
-      return interpLog(dec, tm, fbs0->dec(), buffer0, fbs1->dec(), buffer1); 
-   }
-   
-   int el( double & el,
-           timespec & tm,
-           flatlogs::bufferPtrT & buffer0,
-           flatlogs::bufferPtrT & buffer1 
-         )
-   {
-
-      auto fbs0 = GetTelem_telpos_fb(logHeader::messageBuffer(buffer0));
-      auto fbs1 = GetTelem_telpos_fb(logHeader::messageBuffer(buffer1));
-      
-      return interpLog(el, tm, fbs0->el(), buffer0, fbs1->el(), buffer1); 
-   }
-   
-   int ha( double & ha,
-           timespec & tm,
-           flatlogs::bufferPtrT & buffer0,
-           flatlogs::bufferPtrT & buffer1 
-         )
-   {
-
-      auto fbs0 = GetTelem_telpos_fb(logHeader::messageBuffer(buffer0));
-      auto fbs1 = GetTelem_telpos_fb(logHeader::messageBuffer(buffer1));
-      
-      return interpLog(ha, tm, fbs0->ha(), buffer0, fbs1->ha(), buffer1); 
-   }
-   
-   int am( double & am,
-           timespec & tm,
-           flatlogs::bufferPtrT & buffer0,
-           flatlogs::bufferPtrT & buffer1 
-         )
-   {
-
-      auto fbs0 = GetTelem_telpos_fb(logHeader::messageBuffer(buffer0));
-      auto fbs1 = GetTelem_telpos_fb(logHeader::messageBuffer(buffer1));
-      
-      return interpLog(am, tm, fbs0->am(), buffer0, fbs1->am(), buffer1); 
-   }
-   
-   int rotoff( double & ro,
-               timespec & tm,
-               flatlogs::bufferPtrT & buffer0,
-               flatlogs::bufferPtrT & buffer1 
-             )
-   {
-
-      auto fbs0 = GetTelem_telpos_fb(logHeader::messageBuffer(buffer0));
-      auto fbs1 = GetTelem_telpos_fb(logHeader::messageBuffer(buffer1));
-      
-      return interpLog(ro, tm, fbs0->rotoff(), buffer0, fbs1->rotoff(), buffer1); 
-   }
    
 }; //telem_telpos
 

@@ -1410,11 +1410,13 @@ int tcsInterface::getSeeing()
 {
    static int last_query = 0;
 
-   time_t sec_midnight;
-   time_t dt;
+   
 
    if(time(0) - last_query > m_seeingInterval)
    {
+      time_t sec_midnight;
+      time_t dt;
+   
       int rv = system("query_seeing > /dev/null");
       if(rv < 0)
       {

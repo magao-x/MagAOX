@@ -12,6 +12,7 @@
 #ifndef flatlogs_logHeader_hpp
 #define flatlogs_logHeader_hpp
 
+#include <memory>
 #include "logDefs.hpp"
 #include "timespecX.hpp"
 #include "logPriority.hpp"
@@ -61,7 +62,7 @@ typedef std::shared_ptr<char> bufferPtrT;
 /** 
   * This class is designed to work with the log header only as a shared pointer to it, 
   * not directly on the members.  The actual header struct is private so we ensure that it is 
-  * accessed properly.As such all of the member methods are static and take a shared_ptr as 
+  * accessed properly. As such all of the member methods are static and take a shared_ptr as 
   * first argument.
   *
   * \ingroup logbuff
@@ -112,7 +113,7 @@ public:
      * 
      * \ingroup logbuff
      */
-   static int logLevel( bufferPtrT & logBuffer, ///< [in/out] a shared_ptr\<char\> containing a raw lag entry buffer.
+   static int logLevel( bufferPtrT & logBuffer, ///< [in/out] a shared_ptr\<char\> containing a raw log entry buffer.
                         const logPrioT & lvl   ///< [in] the new log level.
                       );
    
@@ -122,7 +123,15 @@ public:
      * 
      * \ingroup logbuff
      */
-   static logPrioT logLevel( bufferPtrT & logBuffer /**< [in] a shared_ptr\<char\> containing a raw lag entry buffer.*/);
+   static logPrioT logLevel( bufferPtrT & logBuffer /**< [in] a shared_ptr\<char\> containing a raw log entry buffer.*/);
+   
+   ///Extract the level of a log entry
+   /**
+     * \returns the level
+     * 
+     * \ingroup logbuff
+     */
+   static logPrioT logLevel( char * logBuffer /**< [in] a pointer to a raw log entry buffer.*/);
    
    ///Set the event code of a log entry
    /**
@@ -131,7 +140,7 @@ public:
      * 
      * \ingroup logbuff
      */
-   static int eventCode( bufferPtrT & logBuffer, ///< [in,out] a shared_ptr\<char\> containing a raw lag entry buffer.
+   static int eventCode( bufferPtrT & logBuffer, ///< [in,out] a shared_ptr\<char\> containing a raw log entry buffer.
                          const eventCodeT & ec   ///< [in] the new event code.
                        );
    
@@ -141,8 +150,16 @@ public:
      * 
      * \ingroup logbuff
      */
-   static eventCodeT eventCode( bufferPtrT & logBuffer /**< [in] a shared_ptr\<char\> containing a raw lag entry buffer.*/);
-      
+   static eventCodeT eventCode( bufferPtrT & logBuffer /**< [in] a shared_ptr\<char\> containing a raw log entry buffer.*/);
+   
+   ///Extract the event code of a log entry
+   /**
+     * \returns the event code
+     * 
+     * \ingroup logbuff
+     */
+   static eventCodeT eventCode( char * logBuffer /**< [in] a pointer a raw log entry buffer.*/);
+   
    ///Set the timespec of a log entry
    /**
      * \returns 0 on success
@@ -150,7 +167,7 @@ public:
      * 
      * \ingroup logbuff
      */
-   static int timespec( bufferPtrT & logBuffer,    ///< [in, out] a shared_ptr\<char\> containing a raw lag entry buffer.*/ 
+   static int timespec( bufferPtrT & logBuffer,    ///< [in, out] a shared_ptr\<char\> containing a raw log entry buffer.*/ 
                         const timespecX & ts ///< [in] the new timespec
                       );
    
@@ -160,7 +177,15 @@ public:
      * 
      * \ingroup logbuff
      */
-   static timespecX timespec( bufferPtrT & logBuffer /**< [in] a shared_ptr\<char\> containing a raw lag entry buffer.*/);
+   static timespecX timespec( bufferPtrT & logBuffer /**< [in] a shared_ptr\<char\> containing a raw log entry buffer.*/);
+   
+   ///Extract the timespec of a log entry
+   /**
+     * \returns the timespec
+     * 
+     * \ingroup logbuff
+     */
+   static timespecX timespec( char * logBuffer /**< [in] a pointer to a raw log entry buffer.*/);
 
    ///Get the size in bytes of the length field for an existing logBuffer.
    /**
@@ -168,7 +193,15 @@ public:
      * 
      * \ingroup logbuff
      */
-   static size_t lenSize(  bufferPtrT & logBuffer /**< [in] a shared_ptr\<char\> containing a raw lag entry buffer.*/);
+   static size_t lenSize(  bufferPtrT & logBuffer /**< [in] a shared_ptr\<char\> containing a raw log entry buffer.*/);
+   
+   ///Get the size in bytes of the length field for an existing logBuffer.
+   /**
+     * \returns the number of bytes in the length field.
+     * 
+     * \ingroup logbuff
+     */
+   static size_t lenSize( char * logBuffer /**< [in] a pointer to a raw log entry buffer.*/);
    
    ///Get the size in bytes of the length field for a logBuffer given the intended message length
    /**
@@ -187,7 +220,7 @@ public:
      * 
      * \ingroup logbuff
      */
-   static int msgLen( bufferPtrT & logBuffer, ///< [out] a shared_ptr\<char\> containing a raw lag entry buffer allocated with large enough header for this message length.
+   static int msgLen( bufferPtrT & logBuffer, ///< [out] a shared_ptr\<char\> containing a raw log entry buffer allocated with large enough header for this message length.
                       const msgLenT & msgLen  ///< [in] the message length to set.
                     );
    
@@ -198,7 +231,16 @@ public:
      * 
      * \ingroup logbuff
      */
-   static msgLen0T msgLen0(  bufferPtrT & logBuffer /**< [in] a shared_ptr\<char\> containing a raw lag entry buffer.*/);
+   static msgLen0T msgLen0(  bufferPtrT & logBuffer /**< [in] a shared_ptr\<char\> containing a raw log entry buffer.*/);
+   
+   ///Extract the short message length of a log entry message
+   /** This is always safe on a minimally allocated logBuffer, can be used to test for progressive reading.
+     * 
+     * \returns the short message length field
+     * 
+     * \ingroup logbuff
+     */
+   static msgLen0T msgLen0( char * logBuffer /**< [in] a pointer to a raw log entry buffer.*/);
    
    ///Extract the medium message length of a log entry message
    /** This is NOT always safe, and should only be caled if msgLen0 is 0xFE. Can be used to test for progressive reading.
@@ -207,7 +249,16 @@ public:
      * 
      * \ingroup logbuff
      */
-   static msgLen1T msgLen1(  bufferPtrT & logBuffer /**< [in] a shared_ptr\<char\> containing a raw lag entry buffer.*/);
+   static msgLen1T msgLen1(  bufferPtrT & logBuffer /**< [in] a shared_ptr\<char\> containing a raw log entry buffer.*/);
+   
+   ///Extract the medium message length of a log entry message
+   /** This is NOT always safe, and should only be caled if msgLen0 is 0xFE. Can be used to test for progressive reading.
+     * 
+     * \returns the medium message length field
+     * 
+     * \ingroup logbuff
+     */
+   static msgLen1T msgLen1( char * logBuffer /**< [in] a pointer to a raw log entry buffer.*/);
    
    ///Extract the message length of a log entry message
    /**
@@ -215,16 +266,32 @@ public:
      * 
      * \ingroup logbuff
      */
-   static msgLenT msgLen(  bufferPtrT & logBuffer /**< [in] a shared_ptr\<char\> containing a raw lag entry buffer.*/);
+   static msgLenT msgLen(  bufferPtrT & logBuffer /**< [in] a shared_ptr\<char\> containing a raw log entry buffer.*/);
          
+   ///Extract the message length of a log entry message
+   /**
+     * \returns the message length
+     * 
+     * \ingroup logbuff
+     */
+   static msgLenT msgLen( char * logBuffer /**< [in] a pointer to a raw log entry buffer.*/);
+   
    ///Get the size of the header, including the variable size length field, for an existing logBuffer.
    /**
      * \returns the size of the header in this log entry.
      * 
      * \ingroup logbuff
      */
-   static size_t headerSize(  bufferPtrT & logBuffer /**< [in] a shared_ptr\<char\> containing a raw lag entry buffer.*/);
+   static size_t headerSize(  bufferPtrT & logBuffer /**< [in] a shared_ptr\<char\> containing a raw log entry buffer.*/);
 
+   ///Get the size of the header, including the variable size length field, for an existing logBuffer.
+   /**
+     * \returns the size of the header in this log entry.
+     * 
+     * \ingroup logbuff
+     */
+   static size_t headerSize( char* logBuffer /**< [in] a pointer to a raw log entry buffer.*/);
+   
    ///Get the size of the header, including the variable size length field, given a message size.
    /**
      * \returns the size to be used for the header.
@@ -239,7 +306,15 @@ public:
      * 
      * \ingroup logbuff
      */
-   static size_t totalSize(  bufferPtrT & logBuffer /**< [in] a shared_ptr\<char\> containing a raw lag entry buffer.*/);
+   static size_t totalSize(  bufferPtrT & logBuffer /**< [in] a shared_ptr\<char\> containing a raw log entry buffer.*/);
+   
+   ///Get the total size of the log entry, including the message buffer.
+   /**
+     * \returns the total size of this log entry.
+     * 
+     * \ingroup logbuff
+     */
+   static size_t totalSize( char * logBuffer /**< [in] a pointer to a raw log entry buffer.*/);
    
    ///Get the total size of a log entry, given the message buffer size.
    /**
@@ -255,7 +330,15 @@ public:
      * 
      * \ingroup logbuff
      */
-   static void * messageBuffer(  bufferPtrT & logBuffer /**< [in] a shared_ptr\<char\> containing a raw lag entry buffer.*/);
+   static void * messageBuffer(  bufferPtrT & logBuffer /**< [in] a shared_ptr\<char\> containing a raw log entry buffer.*/);
+   
+   ///Get the message buffer address.
+   /**
+     * \returns the address of the message buffer.
+     * 
+     * \ingroup logbuff
+     */
+   static void * messageBuffer( char * logBuffer /**< [in] a pointer to a raw log entry buffer.*/);
    
    /// Create a formatted log entry, filling in a buffer.
    /** This version has the timestamp provided.
@@ -278,11 +361,25 @@ public:
      * 
      * \ingroup logbuff
      */
-   static int extractBasicLog( logPrioT & lvl,           ///< [out] The log level
-                               eventCodeT & ec,           ///< [out] the event code
-                               timespecX & ts,      ///< [out] the timestamp of the log entry
-                               msgLenT & len, ///< [out] the message length
-                               bufferPtrT & logBuffer     ///< [in] a shared_ptr\<char\> containing a raw log entry buffer.
+   static int extractBasicLog( logPrioT & lvl,        ///< [out] The log level
+                               eventCodeT & ec,       ///< [out] the event code
+                               timespecX & ts,        ///< [out] the timestamp of the log entry
+                               msgLenT & len,         ///< [out] the message length
+                               bufferPtrT & logBuffer ///< [in] a shared_ptr\<char\> containing a raw log entry buffer.
+                             );
+   
+   ///Extract the basic details of a log entry
+   /** Convenience wrapper for the other extraction functions.
+     * 
+     * \returns 0 on success, -1 on error.
+     * 
+     * \ingroup logbuff
+     */
+   static int extractBasicLog( logPrioT & lvl,  ///< [out] The log level
+                               eventCodeT & ec, ///< [out] the event code
+                               timespecX & ts,  ///< [out] the timestamp of the log entry
+                               msgLenT & len,   ///< [out] the message length
+                               char* logBuffer  ///< [in] a pointer to a raw log entry buffer.
                              );
    
 };
@@ -300,7 +397,15 @@ int logHeader::logLevel( bufferPtrT & logBuffer,
 inline
 logPrioT logHeader::logLevel( bufferPtrT & logBuffer)
 {
-   return reinterpret_cast<internal_logHeader *>(logBuffer.get())->m_logLevel;
+   return logLevel( logBuffer.get() );
+   
+   //return reinterpret_cast<internal_logHeader *>(logBuffer.get())->m_logLevel;
+}
+
+inline
+logPrioT logHeader::logLevel( char * logBuffer)
+{
+   return reinterpret_cast<internal_logHeader *>(logBuffer)->m_logLevel;
 }
 
 inline
@@ -316,7 +421,14 @@ int logHeader::eventCode( bufferPtrT & logBuffer,
 inline
 eventCodeT logHeader::eventCode( bufferPtrT & logBuffer)
 {
-   return reinterpret_cast<internal_logHeader *>(logBuffer.get())->m_eventCode;
+   return eventCode(logBuffer.get());
+   //return reinterpret_cast<internal_logHeader *>(logBuffer.get())->m_eventCode;
+}
+
+inline
+eventCodeT logHeader::eventCode( char * logBuffer)
+{
+   return reinterpret_cast<internal_logHeader *>(logBuffer)->m_eventCode;
 }
 
 inline
@@ -332,13 +444,36 @@ int logHeader::timespec( bufferPtrT & logBuffer,
 inline
 timespecX logHeader::timespec( bufferPtrT & logBuffer)
 {
-   return reinterpret_cast<internal_logHeader *>(logBuffer.get())->m_timespecX;
+   return timespec(logBuffer.get());
+   //return reinterpret_cast<internal_logHeader *>(logBuffer.get())->m_timespecX;
 }
 
 inline
-size_t logHeader::lenSize(  bufferPtrT & logBuffer)
+timespecX logHeader::timespec( char * logBuffer)
 {
-   msgLen0T len0 = reinterpret_cast<internal_logHeader *>(logBuffer.get())->msgLen0;
+   return reinterpret_cast<internal_logHeader *>(logBuffer)->m_timespecX;
+}
+
+inline
+size_t logHeader::lenSize( bufferPtrT & logBuffer )
+{
+   return lenSize(logBuffer.get());
+//    msgLen0T len0 = reinterpret_cast<internal_logHeader *>(logBuffer.get())->msgLen0;
+//    
+//    if(len0 < MAX_LEN0-1) return sizeof(msgLen0T);
+//    
+//    if(len0 == MAX_LEN0-1)
+//    {
+//       return sizeof(msgLen0T) + sizeof(msgLen1T);
+//    }
+// 
+//    return sizeof(msgLen0T) + sizeof(msgLen2T);
+}
+
+inline
+size_t logHeader::lenSize( char* logBuffer )
+{
+   msgLen0T len0 = reinterpret_cast<internal_logHeader *>(logBuffer)->msgLen0;
    
    if(len0 < MAX_LEN0-1) return sizeof(msgLen0T);
    
@@ -362,6 +497,13 @@ size_t logHeader::lenSize(  msgLenT & msgSz /**< [in] the size of the intended m
 
 inline
 size_t logHeader::headerSize(  bufferPtrT & logBuffer )
+{
+   return headerSize(logBuffer.get());
+   //return sizeof(logPrioT) + sizeof(eventCodeT) + sizeof(secT) + sizeof(nanosecT) + lenSize(logBuffer);
+}
+
+inline
+size_t logHeader::headerSize(  char* logBuffer )
 {
    return sizeof(logPrioT) + sizeof(eventCodeT) + sizeof(secT) + sizeof(nanosecT) + lenSize(logBuffer);
 }
@@ -400,37 +542,74 @@ int logHeader::msgLen( bufferPtrT & logBuffer,
 inline
 msgLen0T logHeader::msgLen0( bufferPtrT & logBuffer )
 {
-   return reinterpret_cast<internal_logHeader *>(logBuffer.get())->msgLen0;
+   return msgLen0(logBuffer.get());
+   //return reinterpret_cast<internal_logHeader *>(logBuffer.get())->msgLen0;
+}
+
+inline
+msgLen0T logHeader::msgLen0( char * logBuffer )
+{
+   return reinterpret_cast<internal_logHeader *>(logBuffer)->msgLen0;
 }
 
 inline
 msgLen1T logHeader::msgLen1( bufferPtrT & logBuffer )
 {
-   return reinterpret_cast<internal_logHeader *>(logBuffer.get())->msgLen1;
+   return msgLen1(logBuffer.get());
+   //return reinterpret_cast<internal_logHeader *>(logBuffer.get())->msgLen1;
+}
 
+inline
+msgLen1T logHeader::msgLen1( char* logBuffer )
+{
+   return reinterpret_cast<internal_logHeader *>(logBuffer)->msgLen1;
 }
 
 inline
 msgLenT logHeader::msgLen(  bufferPtrT & logBuffer )
 {
-   msgLen0T len0 = reinterpret_cast<internal_logHeader *>(logBuffer.get())->msgLen0;
+   return msgLen(logBuffer.get());
+//    msgLen0T len0 = reinterpret_cast<internal_logHeader *>(logBuffer.get())->msgLen0;
+//    
+//    if(len0 < MAX_LEN0-1) return len0;
+//    
+//    if(len0 == MAX_LEN0-1)
+//    {
+//       return reinterpret_cast<internal_logHeader *>(logBuffer.get())->msgLen1;
+//    }
+//    
+//    return reinterpret_cast<internal_logHeader *>(logBuffer.get())->msgLen2;
+}
+
+inline
+msgLenT logHeader::msgLen(  char* logBuffer )
+{
+   msgLen0T len0 = reinterpret_cast<internal_logHeader *>(logBuffer)->msgLen0;
+   
+   //std::cerr << "len0: " << (int) len0 << "\n";
    
    if(len0 < MAX_LEN0-1) return len0;
    
    if(len0 == MAX_LEN0-1)
    {
-      return reinterpret_cast<internal_logHeader *>(logBuffer.get())->msgLen1;
+      return reinterpret_cast<internal_logHeader *>(logBuffer)->msgLen1;
    }
    
-   return reinterpret_cast<internal_logHeader *>(logBuffer.get())->msgLen2;
+   return reinterpret_cast<internal_logHeader *>(logBuffer)->msgLen2;
 }
 
 inline
 size_t logHeader::totalSize(  bufferPtrT & logBuffer )
 {
-   return headerSize(logBuffer) + msgLen(logBuffer);
+   return totalSize(logBuffer.get());
+   //return headerSize(logBuffer) + msgLen(logBuffer);
 }
 
+inline
+size_t logHeader::totalSize( char* logBuffer )
+{
+   return headerSize(logBuffer) + msgLen(logBuffer);
+}
 
 inline
 size_t logHeader::totalSize(  msgLenT & msgSz )
@@ -441,7 +620,14 @@ size_t logHeader::totalSize(  msgLenT & msgSz )
 inline
 void * logHeader::messageBuffer(  bufferPtrT & logBuffer )
 {
-   return logBuffer.get() + headerSize(logBuffer);
+   return messageBuffer(logBuffer.get());
+   //return logBuffer.get() + headerSize(logBuffer);
+}
+
+inline
+void * logHeader::messageBuffer( char* logBuffer )
+{
+   return logBuffer + headerSize(logBuffer);
 }
 
 template<typename logT>
@@ -485,6 +671,26 @@ int logHeader::extractBasicLog( logPrioT & lvl,
                                 bufferPtrT & logBuffer 
                               )
 {
+   return extractBasicLog(lvl, ec, ts, len, logBuffer.get());
+//    lvl = logLevel(logBuffer); 
+//    
+//    ec = eventCode(logBuffer); 
+// 
+//    ts = timespec(logBuffer);
+// 
+//    len =  logHeader::msgLen(logBuffer);
+//       
+//    return 0;
+}
+   
+inline
+int logHeader::extractBasicLog( logPrioT & lvl,       
+                                eventCodeT & ec,       
+                                timespecX & ts,  
+                                msgLenT & len,
+                                char* logBuffer 
+                              )
+{
    lvl = logLevel(logBuffer); 
    
    ec = eventCode(logBuffer); 
@@ -495,8 +701,6 @@ int logHeader::extractBasicLog( logPrioT & lvl,
       
    return 0;
 }
-   
-
    
 
 

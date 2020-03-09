@@ -81,6 +81,45 @@ struct telem_stage : public flatbuffer_log
    
    }
    
+   static int8_t moving( void * msgBuffer )
+   {
+      auto fbs = GetTelem_stage_fb(msgBuffer);
+      return fbs->moving();
+   }
+   
+   static double preset( void * msgBuffer )
+   {
+      auto fbs = GetTelem_stage_fb(msgBuffer);
+      return fbs->preset();
+   }
+   
+   static std::string presetName( void * msgBuffer )
+   {
+      auto fbs = GetTelem_stage_fb(msgBuffer);
+      if(fbs->presetName())
+      {
+         return std::string(fbs->presetName()->c_str());
+      }
+      else return std::string();
+   }
+   
+   /// Get pointer to the accessor for a member by name 
+   /**
+     * \returns the function pointer cast to void*
+     * \returns -1 for an unknown member
+     */ 
+   static void * getAccessor( const std::string & member /**< [in] the name of the member */ )
+   {
+      if(member == "moving") return (void *) &moving;
+      else if(member == "preset") return (void *) &preset;
+      else if(member == "presetName") return (void *) &presetName;
+      else
+      {
+         std::cerr << "No string member " << member << " in telem_telcat\n";
+         return 0;
+      }
+   }
+   
 }; //telem_stage
 
 timespec telem_stage::lastRecord = {0,0};

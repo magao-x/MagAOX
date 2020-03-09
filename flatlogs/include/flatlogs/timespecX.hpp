@@ -13,6 +13,9 @@
 #define flatlogs_timespecX_hpp
 
 #include <cstdint>
+#include <iostream>
+#include <cmath>
+#include <ctime>
 
 #include "logDefs.hpp"
 
@@ -30,10 +33,25 @@ namespace flatlogs
   */
 struct timespecX 
 {
-   secT time_s; ///< Time since the Unix epoch
-   nanosecT time_ns; ///< Nanoseconds.  
+   secT time_s {0}; ///< Time since the Unix epoch
+   nanosecT time_ns {0}; ///< Nanoseconds.  
 
-
+   ///Default c'tor
+   timespecX()
+   {
+   }
+   
+   ///Construct with time values
+   timespecX( secT s, nanosecT ns ) : time_s {s}, time_ns {ns}
+   {
+   }
+   
+   ///Construct from timespec
+   timespecX( const timespec & ts)
+   {
+      operator=(ts);
+   }
+   
    ///Convert a native timespec to a timespecX.
    /**
      * \returns this reference, if values are 0 and 0 then the input was too big or negative. 
@@ -204,7 +222,128 @@ struct timespecX
       return bdt.tm_min;
    }
    
+   /// Get the time as a double from a timespecX
+   /** 
+     *
+     * \returns the time as a double. 
+     * 
+     */ 
+   double asDouble()
+   {
+      return ((double) time_s) + ((double) time_ns)/1e9;
+   }
+   
 } __attribute__((packed));
+
+
+
+/// TimespecX comparison operator \< (see caveats)
+/** Caveats:
+  * - If the inputs are in UTC (or similar scale) this does not account for leap seconds
+  * - Assumes that the `time_ns` field does not exceed 999999999 nanoseconds
+  * 
+  * \returns true if tsL is earlier than tsR
+  * \returns false otherwise
+  * 
+  * \ingroup timeutils_tscomp
+  */  
+bool operator<( timespecX const& tsL, ///< [in] the left hand side of the comparison
+                timespecX const& tsR  ///< [in] the right hand side of the comparison 
+              )
+{
+   return ( ((tsL.time_s == tsR.time_s) && (tsL.time_ns < tsR.time_ns)) || (tsL.time_s < tsR.time_s));   
+}
+
+/// TimespecX comparison operator \> (see caveats)
+/** Caveats:
+  * - If the inputs are in UTC (or similar scale) this does not account for leap seconds
+  * - Assumes that the `time_ns` field does not exceed 999999999 nanoseconds
+  * 
+  * \returns true if tsL is later than tsR
+  * \returns false otherwise
+  * 
+  * \ingroup timeutils_tscomp
+  */
+bool operator>( timespecX const& tsL, ///< [in] the left hand side of the comparison
+                timespecX const& tsR  ///< [in] the right hand side of the comparison 
+              )
+{
+   return ( ((tsL.time_s == tsR.time_s) && (tsL.time_ns > tsR.time_ns)) || (tsL.time_s > tsR.time_s)); 
+}
+
+/// TimespecX comparison operator == (see caveats)
+/** Caveats:
+  * - If the inputs are in UTC (or similar scale) this does not account for leap seconds
+  * - Assumes that the `time_ns` field does not exceed 999999999 nanoseconds
+  * 
+  * \returns true if tsL is exactly the same as tsR
+  * \returns false otherwise
+  * 
+  * \ingroup timeutils_tscomp
+  */
+bool operator==( timespecX const& tsL, ///< [in] the left hand side of the comparison
+                 timespecX const& tsR  ///< [in] the right hand side of the comparison 
+               )
+{
+   return ( (tsL.time_s == tsR.time_s)  &&  (tsL.time_ns == tsR.time_ns) );
+}
+
+/// TimespecX comparison operator \<= (see caveats)
+/** Caveats:
+  * - If the inputs are in UTC (or similar scale) this does not account for leap seconds
+  * - Assumes that the `time_ns` field does not exceed 999999999 nanoseconds.  
+  * 
+  * \returns true if tsL is earlier than or exactly equal to tsR
+  * \returns false otherwise
+  * 
+  * \ingroup timeutils_tscomp
+  */
+bool operator<=( timespecX const& tsL, ///< [in] the left hand side of the comparison
+                 timespecX const& tsR  ///< [in] the right hand side of the comparison 
+               )
+{
+   return ( tsL < tsR || tsL == tsR );   
+}
+
+/// TimespecX comparison operator \>= (see caveats)
+/** Caveats:
+  * - If the inputs are in UTC (or similar scale) this does not account for leap seconds
+  * - Assumes that the `time_ns` field does not exceed 999999999 nanoseconds
+  * 
+  * \returns true if tsL is exactly equal to or is later than tsR
+  * \returns false otherwise
+  * 
+  * \ingroup timeutils_tscomp
+  */
+bool operator>=( timespecX const& tsL, ///< [in] the left hand side of the comparison
+                 timespecX const& tsR  ///< [in] the right hand side of the comparison 
+               )
+{
+   return ( tsL > tsR || tsL == tsR );   
+}
+
+
+timespecX meanTimespecX( timespecX ts1, timespecX ts2)
+{
+   double means = ((double)(ts1.time_s + ts2.time_s))/2.0;
+   double meanns = ((double)(ts1.time_ns + ts2.time_ns))/2.0;
+   
+   ts1.time_s = std::floor(means);
+   ts1.time_ns = std::round(meanns);
+   
+   if( means != floor(means) )
+   {
+      ts1.time_ns += 5e8;
+      
+      if(ts1.time_ns >= 1e9)
+      {
+         ts1.time_s += 1;
+         ts1.time_ns -= 1e9;
+      }
+   }
+   
+   return ts1;
+}
 
 ///Convert a timespecX to a native timespec
 /**

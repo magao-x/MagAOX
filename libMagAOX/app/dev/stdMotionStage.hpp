@@ -596,7 +596,7 @@ int stdMotionStage<derivedT>::recordStage(bool force)
    size_t n = derived().presetNumber();
 
    std::string presetName;
-   if(n >= 0 && n < m_presetNames.size()) presetName = m_presetNames[n];
+   if(n < m_presetNames.size()) presetName = m_presetNames[n];
    
    if( m_moving != last_moving || m_preset != last_preset || presetName != last_presetName || force)
    {
