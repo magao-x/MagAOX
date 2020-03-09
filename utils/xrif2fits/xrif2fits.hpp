@@ -213,6 +213,9 @@ int xrif2fits::execute()
    }
    else
    {
+      //Make sure the slash exists, then mkdir
+      if(m_outDir[m_outDir.size()-1] != '/') m_outDir += '/';
+      
       mkdir(m_outDir.c_str(), S_IRWXU | S_IRWXG | S_IROTH | S_IXOTH);
    }
    
@@ -282,7 +285,7 @@ int xrif2fits::execute()
       logMeta exptimeMeta({"EXPTIME", "exposure time in seconds", lfn.appName(), telem_stdcam::eventCode, "exptime", "%f", 0, 1});
          
       std::cout << "******************************************************\n";
-      std::cout << "* xrif2fits: decoding for " << lfn.appName() << "\n";
+      std::cout << "* xrif2fits: decoding for " << lfn.appName() << " (" + m_files[n] << ")\n";
       std::cout << "******************************************************\n";
       
       FILE * fp_xrif = fopen(m_files[n].c_str(), "rb");
@@ -305,7 +308,7 @@ int xrif2fits::execute()
       {
          std::cout << "    LZ4 acceleration: " << m_xrif->lz4_acceleration << '\n';
       }
-      
+      std::cout << "  dimensions:         " << m_xrif->width << " x " << m_xrif->height << " x " << m_xrif->depth << " x " << m_xrif->frames << "\n";
       std::cout << "  raw size:           " << m_xrif->width*m_xrif->height*m_xrif->depth*m_xrif->frames*m_xrif->data_size << " bytes\n";
       std::cout << "  encoded size:       " << m_xrif->compressed_size << " bytes\n";
       std::cout << "  ratio:              " << ((double)m_xrif->compressed_size) / (m_xrif->width*m_xrif->height*m_xrif->depth*m_xrif->frames*m_xrif->data_size) << '\n';
@@ -365,7 +368,7 @@ int xrif2fits::execute()
       
       for( int q=0; q < tmpc.planes(); ++q)
       {
-          uint64_t cnt0;
+         uint64_t cnt0;
          timespec atime; //This is the acquisition time of the exposure
          timespec wtime;
          timespec stime = {0,0}; //This is the start time of the exposure, calculated as atime-exptime.
@@ -430,11 +433,10 @@ int xrif2fits::execute()
                fh.append(logMetas[u].card(tels, stime, atime));
                if(!m_noMeta) metaOut << " " << logMetas[u].value(tels, stime, atime) ;
             }
-            
-            if(!m_noMeta) metaOut << "\n";
-            
          }
-
+         
+         if(!m_noMeta) metaOut << "\n";
+            
          if(!m_metaOnly)
          {
             mx::improc::eigenImage<unsigned short> im = tmpc.image(q);
