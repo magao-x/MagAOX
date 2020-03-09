@@ -281,9 +281,12 @@ void * ctrlThread( void * vdf /**< [in] pointer to a driverFIFO struct */)
    //Now we try to read from it.  Anything at all will cause us to set timeToDie and thus this program will exit.
    int rd = read(df->fd, rdbuff, XINDID_BUFFSIZE);
    
+   std::cerr << " (" << XINDID_COMPILEDNAME << "): control signaled -- time to die" << std::endl;
+   
    static_cast<void>(rd); //suppress warning
    
    timeToDie = true;
+   
    
    return 0;
 }
@@ -471,6 +474,8 @@ int main( int argc, char **argv)
    pthread_join(stdOut_th, 0);
    pthread_join(ctrl_th, 0);
 
+   std::cerr << " (" << XINDID_COMPILEDNAME << "): exiting" << std::endl;
+   
    return 0;
 
 }
