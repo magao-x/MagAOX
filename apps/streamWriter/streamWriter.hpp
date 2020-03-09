@@ -657,6 +657,8 @@ void streamWriter::fgThreadExec()
       m_currChunkStart = 0;
       m_nextChunkStart = 0;
       
+      uint64_t last_cnt0 = ((uint64_t) -1);
+      
       //This is the main image grabbing loop.
       while(!m_shutdown && !m_restart)
       {
@@ -691,6 +693,13 @@ void streamWriter::fgThreadExec()
             if(m_shutdown || m_restart) break; //Check for exit signals
          
            
+            if( image.cntarray[curr_image] == last_cnt0 )
+            {
+               log<text_log>("semaphore raised but cnt0 has not changed -- trying to re-start", logPrio::LOG_WARNING);
+               m_restart = true;
+               break;
+            }
+            last_cnt0 = image.cntarray[curr_image];
             
             char * curr_dest = m_rawImageCircBuff + m_currImage*m_width*m_height*m_typeSize;
             char * curr_src = (char *) image.array.raw + curr_image*m_width*m_height*m_typeSize;
@@ -894,7 +903,7 @@ void streamWriter::swThreadExec()
             log<saving_start>({1,m_currSaveStartFrameNo});
             m_logSaveStart = false;
             std::cerr << "Method: " << m_xrif->reorder_method << "\n";
- 	 }
+         }
          
          timespec tw0, tw1, tw2;
          
