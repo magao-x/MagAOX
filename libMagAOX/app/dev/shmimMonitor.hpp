@@ -498,7 +498,7 @@ void shmimMonitor<derivedT, specificT>::smThreadExec()
       
       if(derived().m_shutdown || !opened) return;
     
-      if(m_semaphoreNumber == 0) m_semaphoreNumber = 5; ///Move past CACAO hard coded things -- \todo need to return to this being a config/
+      if(m_semaphoreNumber == 0) m_semaphoreNumber = 6; ///Move past CACAO hard coded things -- \todo need to return to this being a config/
       int actSem = 1;
       while(actSem == 1)//Don't accept semaphore 1 cuz it don't work.
       {
