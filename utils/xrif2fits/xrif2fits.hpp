@@ -77,9 +77,9 @@ protected:
 
    std::vector<std::string> m_files; ///< List of files to use.  If dir is not empty, it will be pre-pended to each name.
 
-   std::string m_logDir = "/home/jrmales/Data/MagAO-X/Tel/2019B/logs/";
+   std::string m_logDir = "/home/jrmales/Data/MagAOX/Tel/2019B/logs/";
    
-   std::string m_telDir = "/home/jrmales/Data/MagAO-X/Tel/2019B/telem/";
+   std::string m_telDir = "/home/jrmales/Data/MagAOX/Tel/2019B/telem/";
    
    std::string m_outDir = "fits/";   
    
@@ -444,7 +444,6 @@ int xrif2fits::execute()
          }
       }
       
-      metaOut.close();
       //Below is for cubes
       /*
       outname = m_files[n];
@@ -462,8 +461,11 @@ int xrif2fits::execute()
       }*/
    }
 
+   if(!m_noMeta) metaOut.close();
+   
    std::cerr << " (" << invokedName << "): exited normally.\n";
 
+   
    return 0;
 }
 
