@@ -5,6 +5,7 @@
 
 #include <QObject>
 #include <QtPlugin>
+#include <QTimer>
 
 #include <iostream>
 
@@ -92,7 +93,13 @@ class indiClient : public QObject,
    Q_INTERFACES(rtimvDictionaryInterface)
     
    protected:
-      rtimvIndiClient * m_client {nullptr};      
+      
+      std::unordered_map<std::string, rtimvDictBlob> * m_dict {nullptr};
+      
+      rtimvIndiClient * m_client {nullptr};  
+      
+      QTimer m_connTimer;
+      
    public:
       indiClient();
       
@@ -100,7 +107,8 @@ class indiClient : public QObject,
 
       virtual int attachDictionary(std::unordered_map<std::string, rtimvDictBlob> * dict); 
 
-      
+   public slots:
+      void checkConnection();
    
 
 };
