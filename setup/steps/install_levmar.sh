@@ -13,6 +13,8 @@ if [[ ! -d $LEVMAR_DIR ]]; then
 fi
 cd $LEVMAR_DIR
 if [[ ! -e /usr/local/lib/liblevmar.a ]]; then
+    sed -i 's/#define LINSOLVERS_RETAIN_MEMORY/\/\/#define LINSOLVERS_RETAIN_MEMORY/' levmar.h
     make liblevmar.a
     install liblevmar.a /usr/local/lib/
+    install levmar.h /usr/local/include/
 fi
