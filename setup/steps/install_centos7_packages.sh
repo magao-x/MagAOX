@@ -65,10 +65,11 @@ sudo alternatives --install /usr/local/bin/cmake cmake /usr/bin/cmake3 20 \
 sudo alternatives --install /usr/local/bin/qmake qmake /usr/bin/qmake-qt5 20
 
 # Undo installing stable ZeroMQ without draft APIs
+yum remove -y zeromq-devel libzmq5 || true
 yum-config-manager --disable network_messaging_zeromq_release-stable || true
 # Install stable ZeroMQ with draft APIs
 yum-config-manager --add-repo https://download.opensuse.org/repositories/network:/messaging:/zeromq:/release-draft/CentOS_7/network:messaging:zeromq:release-draft.repo
-yum install -y zeromq-devel
+yum install -y zeromq-devel libzmq5
 
 # For some reason, pkg-config doesn't automatically look here?
 echo "export PKG_CONFIG_PATH=\$PKG_CONFIG_PATH:/usr/local/lib/pkgconfig" > /etc/profile.d/pkg-config-path.sh
