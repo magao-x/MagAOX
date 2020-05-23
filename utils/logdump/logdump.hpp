@@ -169,7 +169,8 @@ int logdump::execute()
 
       //--> get size here!!
       off_t finSize = mx::ioutils::fileSize( fileno(fin) );
-      std::cerr << fname << " " << finSize << "\n";
+      
+      std::cerr << fname << "\n";
 
       off_t totNrd = 0;
       
