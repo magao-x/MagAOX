@@ -12,6 +12,7 @@ sudo tee /etc/hosts <<'HERE'
 192.168.0.150  acromagdio1
 192.168.0.151  acromagdio2
 192.168.0.160  picomotorctl0
+192.168.0.170  moxadio1
 192.168.0.230  fxgenmodwfs
 192.168.0.242  dmsafety
 HERE
