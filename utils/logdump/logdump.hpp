@@ -167,14 +167,20 @@ int logdump::execute()
 
       fin = fopen(fname.c_str(), "rb");
 
-      std::cerr << fname << "\n";
+      //--> get size here!!
+      off_t finSize = mx::ioutils::fileSize( fileno(fin) );
+      std::cerr << fname << " " << finSize << "\n";
 
+      off_t totNrd = 0;
+      
       size_t buffSz = 0;
       while(!feof(fin)) //<--This should be an exit condition controlled by loop logic, not feof.
       {
          int nrd;
 
          ///\todo check for errors on all reads . . .
+         
+         //Read next header
          nrd = fread( head.get(), sizeof(char), logHeader::minHeadSize, fin);
          if(nrd == 0)
          {
@@ -213,7 +219,8 @@ int logdump::execute()
          //We got here without any data, probably means time to get a new file.
          if(nrd == 0) break;
 
-
+         totNrd += nrd;
+         
          if( logHeader::msgLen0(head) == logHeader::MAX_LEN0-1)
          {
             //Intermediate size message, read two more bytes
@@ -271,6 +278,10 @@ int logdump::execute()
          // If not following, exit loop without printing the incomplete log entry (go on to next file).
          // If following, wait for it, but also be checking for new log file in case of crash
 
+         totNrd += nrd;
+         
+         if(m_follow && finSize > 1024 && totNrd < finSize-1024) continue;
+         
          printLogBuff(lvl, ec, len, logBuff);
 
 
