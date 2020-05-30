@@ -242,10 +242,14 @@ int xrif2fits::execute()
    std::vector<logMeta> logMetas;
    logMetas.push_back({"CATOBJ", "catalog name of object", "tcsi", telem_telcat::eventCode, "catObj", "", 0, 0});
    logMetas.push_back({"PARANG", "parallactic angle at time of observation", "tcsi", telem_teldata::eventCode, "pa", "%0.4f", 1, 1});
+   logMetas.push_back({"FWPPFILT", "filter name of fwpupil", "fwpupil", telem_stage::eventCode, "presetName", "", 0, 0});
+   logMetas.push_back({"FWPPPOS", "filter position of fwpupil", "fwpupil", telem_stage::eventCode, "preset", "%0.2f", 1, 1});
+   
    logMetas.push_back({"SCIBS", "science beamsplitter name", "stagescibs", telem_stage::eventCode, "presetName", "", 0, 0});
    logMetas.push_back({"SCIBSPOS", "preset index of science beamsplitter", "stagescibs", telem_stage::eventCode, "preset", "%0.2f", 1, 1});
    logMetas.push_back({"FWS1FILT", "filter name of fwsci1", "fwsci1", telem_stage::eventCode, "presetName", "", 0, 0});
    logMetas.push_back({"FWS1FPOS", "filter position of fwsci1", "fwsci1", telem_stage::eventCode, "preset", "%0.2f",1, 1});
+   
    logMetas.push_back({"FWS2FILT", "filter name of fwsci2", "fwsci2", telem_stage::eventCode, "presetName", "", 0, 0});
    logMetas.push_back({"FWS2FPOS", "filter position of fwsci2", "fwsci2", telem_stage::eventCode, "preset", "%0.2f", 1, 1});
    
@@ -313,9 +317,21 @@ int xrif2fits::execute()
       std::cout << "  encoded size:       " << m_xrif->compressed_size << " bytes\n";
       std::cout << "  ratio:              " << ((double)m_xrif->compressed_size) / (m_xrif->width*m_xrif->height*m_xrif->depth*m_xrif->frames*m_xrif->data_size) << '\n';
 
-         
-      xrif_allocate_raw(m_xrif);
-      xrif_allocate_reordered(m_xrif);
+      rv = xrif_allocate_raw(m_xrif); 
+      if( rv != XRIF_NOERROR)
+      {
+         std::cerr << " (" << invokedName << "): Error allocating raw buffer for " << m_files[n] << "\n";
+         std::cerr << "\t code: " << rv << "\n";
+         return -1;
+      }
+      
+      rv = xrif_allocate_reordered(m_xrif); 
+      if(rv != XRIF_NOERROR)
+      {
+         std::cerr << " (" << invokedName << "): Error allocating reordered buffer for " << m_files[n] << "\n";
+         std::cerr << "\t code: " << rv << "\n";
+         return -1;
+      }
 
       nr = fread(m_xrif->raw_buffer, 1, m_xrif->compressed_size, fp_xrif);
       
@@ -336,8 +352,36 @@ int xrif2fits::execute()
       }
       
       xrif_read_header(m_xrif_timing, &header_size , header);
-      xrif_allocate_raw(m_xrif_timing);
-      xrif_allocate_reordered(m_xrif_timing);
+      
+      std::cout << "xrif timing data compression details:\n";
+      std::cout << "  difference method:  " << xrif_difference_method_string(m_xrif_timing->difference_method) << '\n';
+      std::cout << "  reorder method:     " << xrif_reorder_method_string(m_xrif_timing->reorder_method) << '\n';
+      std::cout << "  compression method: " << xrif_compress_method_string( m_xrif_timing->compress_method) << '\n';
+      if(m_xrif_timing->compress_method == XRIF_COMPRESS_LZ4)
+      {
+         std::cout << "    LZ4 acceleration: " << m_xrif_timing->lz4_acceleration << '\n';
+      }
+      std::cout << "  dimensions:         " << m_xrif_timing->width << " x " << m_xrif_timing->height << " x " << m_xrif_timing->depth << " x " << m_xrif_timing->frames << "\n";
+      std::cout << "  raw size:           " << m_xrif_timing->width*m_xrif_timing->height*m_xrif_timing->depth*m_xrif_timing->frames*m_xrif_timing->data_size << " bytes\n";
+      std::cout << "  encoded size:       " << m_xrif_timing->compressed_size << " bytes\n";
+      std::cout << "  ratio:              " << ((double)m_xrif_timing->compressed_size) / (m_xrif_timing->width*m_xrif_timing->height*m_xrif_timing->depth*m_xrif_timing->frames*m_xrif_timing->data_size) << '\n';
+      
+      rv = xrif_allocate_raw(m_xrif_timing);
+      if(rv != XRIF_NOERROR)
+      {
+         std::cerr << " (" << invokedName << "): Error allocating raw buffer for timing data from " << m_files[n] << "\n";
+         std::cerr << "\t code: " << rv << "\n";
+         return -1;
+      }
+      
+      rv = xrif_allocate_reordered(m_xrif_timing);
+      if(rv != XRIF_NOERROR)
+      {
+         std::cerr << " (" << invokedName << "): Error allocating reordered buffer for  timing data from " << m_files[n] << "\n";
+         std::cerr << "\t code: " << rv << "\n";
+         return -1;
+      }
+      
       nr = fread(m_xrif_timing->raw_buffer, 1, m_xrif_timing->compressed_size, fp_xrif);
     
       if(nr != m_xrif_timing->compressed_size)
@@ -352,11 +396,23 @@ int xrif2fits::execute()
 
       if(!m_metaOnly)
       {
-         xrif_decode(m_xrif);
+         rv = xrif_decode(m_xrif);
+         if(rv != XRIF_NOERROR)
+         {
+            std::cerr << " (" << invokedName << "): Error decoding image data from " << m_files[n] << "\n";
+            std::cerr << "\t code: " << rv << "\n";
+            return -1;
+         }
       }
       
-      xrif_decode(m_xrif_timing);
-      
+      rv = xrif_decode(m_xrif_timing); 
+      if(rv != XRIF_NOERROR)
+      {
+         std::cerr << " (" << invokedName << "): Error decoding timing data from " << m_files[n] << "\n";
+         std::cerr << "\t code: " << rv << "\n";
+         return -1;
+      }
+               
       if(g_timeToDie == true) break; //check after the decompress.
 
       mx::improc::eigenCube<unsigned short> tmpc( (unsigned short*) m_xrif->raw_buffer, m_xrif->width, m_xrif->height, m_xrif->frames);
