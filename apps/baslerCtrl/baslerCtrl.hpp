@@ -54,10 +54,12 @@ namespace app
   * \ingroup baslerCtrl
   * 
   */
-class baslerCtrl : public MagAOXApp<>, public dev::frameGrabber<baslerCtrl>
+class baslerCtrl : public MagAOXApp<>, public dev::stdCamera<baslerCtrl>, public dev::frameGrabber<baslerCtrl>, public dev::telemeter<baslerCtrl>
 {
 
-   //friend class dev::frameGrabber<baslerCtrl>;
+   friend class dev::stdCamera<baslerCtrl>;
+   friend class dev::frameGrabber<baslerCtrl>;
+   friend class dev::telemeter<baslerCtrl>;
    
 protected:
 
@@ -68,11 +70,6 @@ protected:
    
    
    ///@}
-
-   float m_ccdTemp {0.0};  ///< The temperature of the camera.
-   
-   float m_expTimeSet {0}; ///< The exposure time, in seconds, as set by user.
-   float m_fpsSet {0}; ///< The commanded fps, as set by user.
 
    
    CBaslerUsbInstantCamera * camera {nullptr};
@@ -119,32 +116,77 @@ protected:
       
    int getExpTime();
    
-   int setExpTime(double exptime);
    
-   int setFPS(double fps);
+   /** \name stdCamera Interface 
+     * 
+     * @{
+     */
    
+   /// Set defaults for a power on state.
+   /** 
+     * \returns 0 on success
+     * \returns -1 on error
+     */ 
+   int powerOnDefaults();
    
-   //INDI:
-protected:
-   //declare our properties
-   pcf::IndiProperty m_indiP_temp;
+   /// Required by stdCamera, but this does not do anything for this camera [stdCamera interface]
+   /** 
+     * \returns 0 always
+     */ 
+   int setTempControl();
    
-//   pcf::IndiProperty m_indiP_mode;
+   /// Required by stdCamera, but this does not do anything for this camera [stdCamera interface]
+   /** 
+     * \returns 0 always
+     */
+   int setTempSetPt();
    
-   pcf::IndiProperty m_indiP_exptime;
-   pcf::IndiProperty m_indiP_fps;
+   /// Required by stdCamera, but this does not do anything for this camera [stdCamera interface]
+   /**
+     * \returns 0 always
+     */ 
+   int setFPS();
+   
+   /// Set the frame rate. [stdCamera interface]
+   /** Sets the frame rate to m_fpsSet.
+     * 
+     * \returns 0 on success
+     * \returns -1 on error
+     */
+   int setExpTime();
+   
+   /// Required by stdCamera, but this does not do anything for this camera [stdCamera interface]
+   /**
+     * \returns 0 always
+     */
+   int setNextROI();
+   
+   ///@}
+   
+   /** \name Telemeter Interface
+     * 
+     * @{
+     */ 
 
-public:
-   INDI_NEWCALLBACK_DECL(baslerCtrl, m_indiP_exptime);
-   INDI_NEWCALLBACK_DECL(baslerCtrl, m_indiP_fps);
+   int checkRecordTimes();
    
-
+   int recordTelem( const telem_stdcam * );
+   
+   ///@}
+   
 };
 
 inline
 baslerCtrl::baslerCtrl() : MagAOXApp(MAGAOX_CURRENT_SHA1, MAGAOX_REPO_MODIFIED)
 {
    m_powerMgtEnabled = false;
+   
+   //--- stdCamera ---
+   m_hasTempControl = false;
+   m_usesExpTime = true;
+   m_usesFPS = false;
+   m_usesModes = false;
+   m_usesROI = false;
    
    return;
 }
@@ -158,50 +200,53 @@ baslerCtrl::~baslerCtrl() noexcept
 inline
 void baslerCtrl::setupConfig()
 {
+   dev::stdCamera<baslerCtrl>::setupConfig(config);
+   
+   dev::frameGrabber<baslerCtrl>::setupConfig(config);
    
    config.add("camera.serialNumber", "", "camera.serialNumber", argType::Required, "camera", "serialNumber", false, "int", "The identifying serial number of the camera.");
    
-   dev::frameGrabber<baslerCtrl>::setupConfig(config);
+   dev::telemeter<baslerCtrl>::setupConfig(config);
+   
 }
 
 inline
 void baslerCtrl::loadConfig()
 {
+   dev::stdCamera<baslerCtrl>::loadConfig(config);
+   
    config(m_serialNumber, "camera.serialNumber");
    
    dev::frameGrabber<baslerCtrl>::loadConfig(config);
+   
+   dev::telemeter<baslerCtrl>::loadConfig(config);
 }
    
 
 inline
 int baslerCtrl::appStartup()
 {
-   // set up the  INDI properties
-   REG_INDI_NEWPROP_NOCB(m_indiP_temp, "temp", pcf::IndiProperty::Number);
-   m_indiP_temp.add (pcf::IndiElement("current"));
-   m_indiP_temp["current"].set(0);
-
-   REG_INDI_NEWPROP(m_indiP_fps, "fps", pcf::IndiProperty::Number);
-   m_indiP_fps.add (pcf::IndiElement("current"));
-   m_indiP_fps["current"].set(0);
-   m_indiP_fps.add (pcf::IndiElement("target"));
-   m_indiP_fps.add (pcf::IndiElement("measured"));
-   
-   REG_INDI_NEWPROP(m_indiP_exptime, "exptime", pcf::IndiProperty::Number);
-   m_indiP_exptime.add (pcf::IndiElement("current"));
-   m_indiP_exptime["current"].set(0);
-   m_indiP_exptime.add (pcf::IndiElement("target"));
-
-
    
    //=================================
    // Do camera configuration here
   
    PylonInitialize(); // Initializes pylon runtime before using any pylon methods
 
+   
+   if(dev::stdCamera<baslerCtrl>::appStartup() < 0)
+   {
+      return log<software_critical,-1>({__FILE__,__LINE__});
+   }
+   
    if(dev::frameGrabber<baslerCtrl>::appStartup() < 0)
    {
       return log<software_critical,-1>({__FILE__,__LINE__});
+   }
+   
+   
+   if(dev::telemeter<baslerCtrl>::appStartup() < 0)
+   {
+      return log<software_error,-1>({__FILE__,__LINE__});
    }
    
    state(stateCodes::NOTCONNECTED);
@@ -213,7 +258,13 @@ int baslerCtrl::appStartup()
 inline
 int baslerCtrl::appLogic()
 {
-   //first run frameGrabber's appLogic to see if the f.g. thread has exited.
+   //and run stdCamera's appLogic
+   if(dev::stdCamera<baslerCtrl>::appLogic() < 0)
+   {
+      return log<software_error, -1>({__FILE__, __LINE__});
+   }
+   
+   //and run frameGrabber's appLogic to see if the f.g. thread has exited.
    if(dev::frameGrabber<baslerCtrl>::appLogic() < 0)
    {
       return log<software_error, -1>({__FILE__, __LINE__});
@@ -259,10 +310,23 @@ int baslerCtrl::appLogic()
          return 0;
       }
 
+      if(stdCamera<baslerCtrl>::updateINDI() < 0)
+      {
+         log<software_error>({__FILE__, __LINE__});
+         state(stateCodes::ERROR);
+         return 0;
+      }
+      
       if(frameGrabber<baslerCtrl>::updateINDI() < 0)
       {
          log<software_error>({__FILE__, __LINE__});
          state(stateCodes::ERROR);
+         return 0;
+      }
+      
+      if(telemeter<baslerCtrl>::appLogic() < 0)
+      {
+         log<software_error>({__FILE__, __LINE__});
          return 0;
       }
    }
@@ -277,12 +341,15 @@ int baslerCtrl::appLogic()
 inline
 int baslerCtrl::appShutdown()
 {
+   dev::stdCamera<baslerCtrl>::appShutdown();
+   
    dev::frameGrabber<baslerCtrl>::appShutdown();
    
    if(camera) camera->Close();
    
    PylonTerminate();
       
+   dev::telemeter<baslerCtrl>::appShutdown();
     
    return 0;
 }
@@ -420,21 +487,19 @@ int baslerCtrl::getTemp()
 {
    if( camera == nullptr) return 0;
    
-   float tempcam;
    try 
    {
-      tempcam = (float)camera->DeviceTemperature.GetValue();
+      m_ccdTemp = (float)camera->DeviceTemperature.GetValue();
+      recordCamera();
    }
    catch(...)
    {
+      m_ccdTemp = -999;
+      recordCamera();
       state(stateCodes::NOTCONNECTED);
       return -1;
    }
-   
-   
-   updateIfChanged(m_indiP_temp, "current", tempcam);
-   
-   
+      
    return 0;
 
 }
@@ -444,31 +509,54 @@ int baslerCtrl::getExpTime()
 {
    if( camera == nullptr) return 0;
    
-   float tempet;
    try 
    {
-      tempet = (float)camera->ExposureTime.GetValue();
+      m_expTime = (float)camera->ExposureTime.GetValue()/1e6;
+      recordCamera();
    }
    catch(...)
    {
+      m_expTime = -999;
+      recordCamera();
       state(stateCodes::NOTCONNECTED);
       return -1;
    }
-   
-   updateIfChanged(m_indiP_exptime, "current", tempet/1e6);
-   
-   
+      
    return 0;
 
 }
 
 inline
-int baslerCtrl::setExpTime(double exptime)
+int baslerCtrl::powerOnDefaults()
 {
-   
+   return 0;
+}
+
+inline
+int baslerCtrl::setTempControl()
+{
+   return 0;
+}
+
+inline
+int baslerCtrl::setTempSetPt()
+{
+   return 0;
+}
+
+inline
+int baslerCtrl::setFPS()
+{
+   return 0;
+}
+
+inline
+int baslerCtrl::setExpTime()
+{
    try
    {
-      camera->ExposureTime.SetValue(exptime*1e6);
+      recordCamera(true);
+      camera->ExposureTime.SetValue(m_expTimeSet*1e6);
    }
    catch(...)
    {
@@ -476,84 +564,30 @@ int baslerCtrl::setExpTime(double exptime)
       return -1;
    }
    
-   log<text_log>( "Set exposure time: " + std::to_string(exptime) + " sec");
+   log<text_log>( "Set exposure time: " + std::to_string(m_expTimeSet) + " sec");
    
    return 0;
 }
 
+inline
+int baslerCtrl::setNextROI()
+{
+   return 0;
+}
 
 inline
-int baslerCtrl::setFPS(double fps)
+int baslerCtrl::checkRecordTimes()
 {
-   return setExpTime(1.0/fps);
+   return telemeter<baslerCtrl>::checkRecordTimes(telem_stdcam());
+}
+
+inline
+int baslerCtrl::recordTelem( const telem_stdcam * )
+{
+   return recordCamera(true);
 }
 
 
-INDI_NEWCALLBACK_DEFN(baslerCtrl, m_indiP_fps)(const pcf::IndiProperty &ipRecv)
-{
-   if (ipRecv.getName() == m_indiP_fps.getName())
-   {
-      float current = -99, target = -99;
-
-      try
-      {
-         current = ipRecv["current"].get<float>();
-      }
-      catch(...){}
-      
-      try
-      {
-         target = ipRecv["target"].get<float>();
-      }
-      catch(...){}
-      
-      if(target == -99) target = current;
-      
-      if(target <= 0) return 0;
-      
-      //Lock the mutex, waiting if necessary
-      std::unique_lock<std::mutex> lock(m_indiMutex);
-
-      updateIfChanged(m_indiP_fps, "target", target);
-      
-      return setFPS(target);
-      
-   }
-   return -1;
-}
-
-INDI_NEWCALLBACK_DEFN(baslerCtrl, m_indiP_exptime)(const pcf::IndiProperty &ipRecv)
-{
-   if (ipRecv.getName() == m_indiP_exptime.getName())
-   {
-      float current = -99, target = -99;
-
-      try
-      {
-         current = ipRecv["current"].get<float>();
-      }
-      catch(...){}
-      
-      try
-      {
-         target = ipRecv["target"].get<float>();
-      }
-      catch(...){}
-      
-      if(target == -99) target = current;
-      
-      if(target <= 0) return 0;
-      
-      //Lock the mutex, waiting if necessary
-      std::unique_lock<std::mutex> lock(m_indiMutex);
-
-      updateIfChanged(m_indiP_exptime, "target", target);
-      
-      return setExpTime(target);
-      
-   }
-   return -1;
-}
 }//namespace app
 } //namespace MagAOX
 #endif

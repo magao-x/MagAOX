@@ -571,6 +571,16 @@ int stdCamera<derivedT>::appStartup()
    }
    else if(m_hasTemperature)
    {
+      derived().createROIndiNumber( m_indiP_temp, "temp_ccd", "CCD Temperature", "CCD Temperature");
+      m_indiP_temp.add(pcf::IndiElement("current"));
+      m_indiP_temp["current"].set(m_ccdTemp);
+      if( derived().registerIndiPropertyReadOnly( m_indiP_temp) < 0)
+      {
+         #ifndef STDCAMERA_TEST_NOLOG
+         derivedT::template log<software_error>({__FILE__,__LINE__});
+         #endif
+         return -1;
+      }
    }
    
    if(m_usesExpTime)
