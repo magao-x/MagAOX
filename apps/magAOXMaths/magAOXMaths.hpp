@@ -34,6 +34,8 @@ protected:
 
    pcf::IndiProperty other_val;
 
+   pcf::IndiProperty set_other_val;
+   
    std::string m_myVal {"x"};
    std::string m_other_devName;
    std::string m_other_valName;
@@ -69,6 +71,8 @@ public:
    INDI_NEWCALLBACK_DECL(magAOXMaths, my_val);
 
    INDI_SETCALLBACK_DECL(magAOXMaths, other_val);
+   
+   INDI_NEWCALLBACK_DECL(magAOXMaths, set_other_val);
 
 };
 
@@ -96,71 +100,27 @@ int magAOXMaths::appStartup()
 {
    // set up the x input property
    REG_INDI_NEWPROP(my_val, m_myVal, pcf::IndiProperty::Number);
-   indi::addNumberElement<double>(
-      my_val,
-      "value",
-      std::numeric_limits<double>::min(),
-      std::numeric_limits<double>::max(),
-      1.0,
-      "%f",
-      ""
-   );
+   indi::addNumberElement<double>( my_val, "value",  std::numeric_limits<double>::min(),  std::numeric_limits<double>::max(), 1.0,  "%f", "");
    my_val["value"].set<double>(0.0);
 
 
    // set up the result maths property
    REG_INDI_NEWPROP_NOCB(my_val_maths, "maths", pcf::IndiProperty::Number);
-   indi::addNumberElement<double>(
-      my_val_maths,
-      "value",
-      std::numeric_limits<double>::min(),
-      std::numeric_limits<double>::max(),
-      1.0,
-      "%f",
-      ""
-   );
-   indi::addNumberElement<double>(
-      my_val_maths,
-      "sqr",
-      std::numeric_limits<double>::min(),
-      std::numeric_limits<double>::max(),
-      1.0,
-      "%f",
-      ""
-   );
-   indi::addNumberElement<double>(
-      my_val_maths,
-      "sqrt",
-      std::numeric_limits<double>::min(),
-      std::numeric_limits<double>::max(),
-      1.0,
-      "%f",
-      ""
-   );
-   indi::addNumberElement<double>(
-      my_val_maths,
-      "abs",
-      std::numeric_limits<double>::min(),
-      std::numeric_limits<double>::max(),
-      1.0,
-      "%f",
-      ""
-   );
-   indi::addNumberElement<double>(
-      my_val_maths,
-      "prod",
-      std::numeric_limits<double>::min(),
-      std::numeric_limits<double>::max(),
-      1.0,
-      "%f",
-      ""
-   );
-
+   indi::addNumberElement<double>(my_val_maths,"value", std::numeric_limits<double>::min(), std::numeric_limits<double>::max(), 1.0, "%f", "");
+   indi::addNumberElement<double>(my_val_maths, "sqr", std::numeric_limits<double>::min(), std::numeric_limits<double>::max(), 1.0, "%f", "");
+   indi::addNumberElement<double>(my_val_maths, "sqrt", std::numeric_limits<double>::min(), std::numeric_limits<double>::max(), 1.0, "%f", "");
+   indi::addNumberElement<double>(my_val_maths, "abs", std::numeric_limits<double>::min(), std::numeric_limits<double>::max(), 1.0, "%f", "");
+   indi::addNumberElement<double>(my_val_maths, "prod", std::numeric_limits<double>::min(), std::numeric_limits<double>::max(), 1.0, "%f", "");
 
    REG_INDI_SETPROP(other_val, m_other_devName, m_other_valName);
    other_val.add (pcf::IndiElement("value"));
    other_val["value"].set<double>(0.0);
 
+   REG_INDI_NEWPROP(set_other_val, "other_val", pcf::IndiProperty::Number);
+   indi::addNumberElement<double>( set_other_val, "value",  std::numeric_limits<double>::min(),  std::numeric_limits<double>::max(), 1.0,  "%f", "");
+   set_other_val["value"].set<double>(0.0);
+   
+   
    updateVals();
    state(stateCodes::READY);
    return 0;
@@ -221,6 +181,27 @@ INDI_SETCALLBACK_DEFN(magAOXMaths, other_val)(const pcf::IndiProperty &ipRecv)
 
    updateVals();
    return 0;
+}
+
+INDI_NEWCALLBACK_DEFN(magAOXMaths, set_other_val)(const pcf::IndiProperty &ipRecv)
+{
+
+   if (ipRecv.getName() == set_other_val.getName())
+   {
+      std::cerr << "set_other_val\n";
+      
+      // received a new value for property val
+      set_other_val["value"] = ipRecv["value"].get<double>();
+      set_other_val.setState (pcf::IndiProperty::Ok);
+      //m_indiDriver->sendSetProperty (my_val);
+
+      sendNewProperty(other_val, "value", set_other_val["value"].get<double>());
+      
+      //updateVals();
+
+      return 0;
+   }
+   return -1;
 }
 
 } //namespace app

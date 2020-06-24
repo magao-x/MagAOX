@@ -23,6 +23,31 @@ namespace MagAOX
 namespace app
 {
 
+///Simple INDI Client class
+class indiClient : public pcf::IndiClient
+{
+
+public:
+
+   /// Constructor, which establishes the INDI client connection.
+   indiClient( const std::string & clientName,
+               const std::string & hostAddress,
+               const int hostPort
+             ) : pcf::IndiClient( clientName, "none", "1.7", hostAddress, hostPort)
+   {
+   }
+   
+   
+   /// Implementation of the pcf::IndiClient interface, called by activate to actually begins the INDI event loop.
+   /** This is necessary to detect server restarts.
+     */
+   void execute()
+   {
+      processIndiRequests(false);
+   }
+   
+};   
+   
 template<class _parentT>
 class indiDriver : public pcf::IndiDriver
 {
@@ -37,7 +62,7 @@ protected:
    parentT * m_parent {nullptr};
 
    ///An INDI Client is used to send commands to other drivers.
-   pcf::IndiClient * m_outGoing {nullptr};
+   indiClient * m_outGoing {nullptr};
 
    ///The IP address of the server for the INDI Client connection
    std::string m_serverIPAddress {"127.0.01"};
@@ -196,19 +221,26 @@ void  indiDriver<parentT>::update()
 template<class parentT>
 int  indiDriver<parentT>::sendNewProperty( const pcf::IndiProperty &ipRecv )
 {
-   //Check for an existing client, and delete it.
+   //If there is an existing client, check if it has exited.
    if( m_outGoing != nullptr)
    {
-      m_outGoing->quitProcess();
-      delete m_outGoing;
-      m_outGoing = nullptr;
+      if(m_outGoing->getQuitProcess())
+      {
+         parentT::template log<logger::text_log>("INDI client disconnected.");
+         m_outGoing->quitProcess();
+         m_outGoing->deactivate();
+         delete m_outGoing;
+         m_outGoing = nullptr;
+      }
    }
    
+   //Connect if needed
    if( m_outGoing == nullptr)
    {
       try
       {
-         m_outGoing = new pcf::IndiClient(m_serverIPAddress, m_serverPort);
+         m_outGoing = new indiClient(m_parent->configName()+"-client", m_serverIPAddress, m_serverPort);
+         m_outGoing->activate();
       }
       catch(...)
       {
@@ -222,15 +254,21 @@ int  indiDriver<parentT>::sendNewProperty( const pcf::IndiProperty &ipRecv )
          return -1;
       }
       
-      parentT::template log<logger::text_log>("INDI client connected");
+      parentT::template log<logger::text_log>("INDI client connected and activated");
    }
    
    try
    {
       m_outGoing->sendNewProperty(ipRecv);
-      m_outGoing->quitProcess();
-      delete m_outGoing;
-      m_outGoing = nullptr;
+      if(m_outGoing->getQuitProcess())
+      {
+         parentT::template log<logger::software_error>({__FILE__, __LINE__, "INDI client appears to be disconnected -- NEW not sent."});
+         return -1;
+      }
+      
+      //m_outGoing->quitProcess();
+      //delete m_outGoing;
+      //m_outGoing = nullptr;
       return 0;
    }
    catch(std::exception & e)
