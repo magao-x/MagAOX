@@ -240,23 +240,19 @@ int mzmqServer::appShutdown()
 {
    m_timeToDie = true;
    
-   serverThreadKill();
-   
-   if(m_serverThread.joinable())
-   {
-      m_serverThread.join();
-   }
-      
    for(size_t n=0; n < m_imageThreads.size(); ++n)
    {
-      imageThreadKill(n);
-      
+      imageThreadKill(n);      
+   }
+   
+   for(size_t n=0; n < m_imageThreads.size(); ++n)
+   {
       if( m_imageThreads[n].m_thread->joinable())
       {
          m_imageThreads[n].m_thread->join();
       }
    }
-      
+   
    return 0;
 }
 
