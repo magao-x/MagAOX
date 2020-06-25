@@ -21,7 +21,7 @@ UNIT_PATH=/etc/systemd/system/
 if [[ ! -e $UNIT_PATH/sup.service ]]; then
     sudo cp /opt/MagAOX/config/sup.service $UNIT_PATH/sup.service
     OVERRIDE_PATH=$UNIT_PATH/sup.service.d/
-    mkdir -p $OVERRIDE_PATH
+    sudo mkdir -p $OVERRIDE_PATH
     echo "[Service]" | sudo tee $OVERRIDE_PATH/override.conf
     echo "Environment=\"MAGAOX_ROLE=$MAGAOX_ROLE\"" | sudo tee -a $OVERRIDE_PATH/override.conf
 fi
