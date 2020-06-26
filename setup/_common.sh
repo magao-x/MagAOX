@@ -33,9 +33,9 @@ function setgid_all() {
     # n.b. can't be recursive because g+s on files means something else
     # so we find all directories and individually chmod them:
     if [[ "$EUID" != 0 ]]; then
-      find $1 -type d -exec sudo chmod -v g+rxs {} \;
+      find $1 -type d -exec sudo chmod g+rxs {} \;
     else
-      find $1 -type d -exec chmod -v g+rxs {} \;
+      find $1 -type d -exec chmod g+rxs {} \;
     fi
 }
 
