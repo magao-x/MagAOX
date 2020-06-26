@@ -37,17 +37,11 @@ def debug(msg):
 
 def _make_output_funcs(color):
     def output_func(msg):
-        stdout_b.write(color)
-        stdout_b.write(msg.encode('utf8') + b'\n')
-        stdout_b.write(RESET_SEQ)
+        stdout_b.write(color + msg.encode('utf8') + RESET_SEQ + b'\n')
         stdout_b.flush()
-        # stdout_b.write(b'\n')
 
     def output_func_bytes(msg):
-        stdout_b.write(color)
-        stdout_b.write(msg)
-        stdout_b.write(RESET_SEQ)
-        # stdout_b.write(b'\n')
+        stdout_b.write(color + msg + RESET_SEQ + b'\n')
         stdout_b.flush()
     return output_func, output_func_bytes
 
