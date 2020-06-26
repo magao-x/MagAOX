@@ -47,7 +47,7 @@ set +u; source /etc/profile.d/miniconda.sh; set -u
 #
 ENVS=$(conda env list)
 if [[ $ENVS != *py37* ]]; then
-	conda env create -f /opt/MagAOX/config/conda_env_py37.yml
+	conda env create -qf /opt/MagAOX/config/conda_env_py37.yml
 	log_success "created conda env py37"
 else
 	log_info "py37 environment already exists"
@@ -57,7 +57,7 @@ fi
 # Clone to create a development environment
 #
 if [[ $ENVS != *dev* ]]; then
-	conda create --name dev --clone py37
+	conda create -q --name dev --clone py37
 	log_success "created conda env dev from env py37"
 else
 	log_info "dev environment already exists"
@@ -68,8 +68,10 @@ fi
 #
 for envname in py37 dev; do
 	set +u; conda activate $envname; set -u
-	jupyter labextension install @jupyter-widgets/jupyterlab-manager --minimize=False
-	jupyter labextension install jupyter-matplotlib --minimize=False
+	log_info "Installing lab extension @jupyter-widgets/jupyterlab-manager in $envname: jupyter labextension install @jupyter-widgets/jupyterlab-manager --minimize=False"
+	jupyter labextension install @jupyter-widgets/jupyterlab-manager --minimize=False &> /dev/null || exit 1
+	log_info "Installing lab extension jupyter-matplotlib in $envname: jupyter labextension install jupyter-matplotlib --minimize=False"
+	jupyter labextension install jupyter-matplotlib --minimize=False &> /dev/null || exit 1
 done
 log_success "installed jupyterlab extensions in envs py37 and dev"
 
