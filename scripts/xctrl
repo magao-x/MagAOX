@@ -1,0 +1,309 @@
+#!/usr/bin/env python
+# pylint: disable=W1309
+'''MagAO-X Process Control
+
+Usage:
+    xctrl status [PROCNAME ...]
+        - show status and last few log lines for each process (or just PROCNAME)
+    xctrl inspect PROCNAME
+        - connect to the tmux session for PROCNAME
+    xctrl startup [PROCNAME ...]
+        - start all processes in /opt/MagAOX/config/processes_${MAGAOX_ROLE}.txt (or just PROCNAME)
+    xctrl shutdown [PROCNAME ...]
+        - show status and last few log lines for each process (or just PROCNAME)
+    xctrl restart [PROCNAME ...]
+        - shutdown then startup each process (or just PROCNAME)
+'''
+import psutil
+import sys
+import os
+import subprocess
+import getpass
+import threading
+import time
+import shlex
+
+stdout_b = os.fdopen(sys.stdout.fileno(), 'wb')
+RED_SEQ = subprocess.check_output('tput setaf 1', shell=True)
+GREEN_SEQ = subprocess.check_output('tput setaf 2', shell=True)
+YELLOW_SEQ = subprocess.check_output('tput setaf 3', shell=True)
+BLUE_SEQ = subprocess.check_output('tput setaf 4', shell=True)
+RESET_SEQ = subprocess.check_output('tput sgr0', shell=True)
+
+DEBUG = os.environ.get('XCTRL_DEBUG') is not None
+def debug(msg):
+    if DEBUG:
+        print(msg)
+
+def _make_output_funcs(color):
+    def output_func(msg):
+        stdout_b.write(color)
+        stdout_b.write(msg.encode('utf8') + b'\n')
+        stdout_b.write(RESET_SEQ)
+        stdout_b.flush()
+        # stdout_b.write(b'\n')
+
+    def output_func_bytes(msg):
+        stdout_b.write(color)
+        stdout_b.write(msg)
+        stdout_b.write(RESET_SEQ)
+        # stdout_b.write(b'\n')
+        stdout_b.flush()
+    return output_func, output_func_bytes
+
+
+success, success_bytes = _make_output_funcs(GREEN_SEQ)
+failure, failure_bytes = _make_output_funcs(RED_SEQ)
+warning, warning_bytes = _make_output_funcs(YELLOW_SEQ)
+info, info_bytes = _make_output_funcs(BLUE_SEQ)
+
+WHO_AM_I = getpass.getuser()
+
+# CentOS + devtoolset-7 aliases sudo, but breaks command line arguments for it,
+# so if we need those, we must use _REAL_SUDO. Of course, sudo may live in
+# different places depending on distro. We fall back to
+# whatever `which sudo` says.
+SUDO_PATHS = [
+    '/usr/bin/sudo',
+    '/bin/sudo',
+    subprocess.check_output('which sudo', shell=True)
+]
+
+REAL_SUDO = None
+for sudo_candidate in SUDO_PATHS:
+    if os.path.exists(sudo_candidate):
+        REAL_SUDO = sudo_candidate
+if REAL_SUDO is None:
+    raise RuntimeError(
+        "Couldn't find sudo, which is necessary for this script to work")
+
+
+def _run_as_xsup(command, capture_output=True, check=True):
+    if WHO_AM_I != 'xsup':
+        args = [
+            REAL_SUDO,
+            '-u',
+            'xsup',
+            '-s',
+            '--',
+        ]
+    else:
+        args = []
+    args.extend(shlex.split(command))
+    # print('Running as xsup:', ' '.join(args))
+    res = subprocess.run(args, capture_output=capture_output, check=check)
+    return res.returncode, res.stdout, res.stderr
+
+
+def _read_processes(filepath):
+    processes = {}
+    with open(filepath) as procfile:
+        for line in procfile:
+            if line[0] == '#':
+                continue
+            process_name, executable = line.strip().split()
+            processes[process_name] = executable
+    return processes
+
+
+def _brief_status(process_name):
+    pid_filepath = f'/opt/MagAOX/sys/{process_name}/pid'
+    if not os.path.exists(pid_filepath):
+        warning(f'{process_name}: not started')
+    else:
+        with open(pid_filepath) as pid_file:
+            pid = int(pid_file.read().strip())
+        if psutil.pid_exists(pid):
+            proc = psutil.Process(pid)
+            with proc.oneshot():
+                success(f'{process_name}: running (pid: {pid})')
+        else:
+            failure(f'{process_name}: dead (stale pid)')
+    _peek_logs(process_name)
+
+
+def _peek_logs(process_name):
+    os.system(f'logdump -n 1 {process_name} 2>&1 | tail -n 5')
+    info(f"End {process_name} logs")
+    print()
+
+
+def status(processes, targets):
+    if not len(targets):
+        targets = processes.keys()
+    debug(f"Querying status for: {list(targets)}")
+    for process_name in targets:
+        _brief_status(process_name)
+    return 0
+
+
+def inspect_session(_, targets):
+    if len(targets) != 1:
+        failure(f"Can only specify a single process "
+                f"name to inspect, got: {targets}")
+        return 1
+    code, out, err = _run_as_xsup(f"tmux attach-session -t {targets[0]}")
+    info_bytes(out)
+    if len(err):
+        failure_bytes(err)
+    return code
+
+
+def _session_exists(process_name):
+    _, out, __ = _run_as_xsup(
+        "tmux ls -F \"#{session_name}\"",
+        check=False
+    )
+    sessions = out.decode('utf8').split('\n')
+    return process_name in sessions
+
+
+def _shutdown_helper(process_name):
+    attempts = 0
+    if _session_exists(process_name):
+        while _session_exists(process_name):
+            if attempts > 5:
+                _run_as_xsup(f'tmux kill-session -t {process_name}')
+                warning(f'Killed tmux session for {process_name}')
+            else:
+                _run_as_xsup(f'tmux send-keys -t {process_name} C-c')
+                _run_as_xsup(f'tmux send-keys -t {process_name} "exit" Enter')
+                attempts += 1
+                info(f'Waiting for tmux session for {process_name} to exit...')
+                time.sleep(1)
+        success(f'Ended tmux session for {process_name}')
+    else:
+        info(f'No running tmux session for {process_name}')
+    return 0
+
+
+def shutdown(processes, targets):
+    handle_indi_server = False
+    if not len(targets):
+        targets = list(processes.keys())
+    indi_server_name = None
+    for process_name in targets:
+        if process_name.startswith('is'):
+            indi_server_name = process_name
+    if len(targets) > 1 and indi_server_name in targets:
+        # special case for INDI server: needs to be last to shut down
+        # or delProperty from drivers will get lost
+        targets.remove(indi_server_name)
+        handle_indi_server = True
+    helpers = []
+    for process_name in targets:
+        th = threading.Thread(
+            target=_shutdown_helper,
+            args=(process_name,)
+        )
+        th.start()
+        helpers.append(th)
+    for th in helpers:
+        th.join()
+    if handle_indi_server:
+        _shutdown_helper(indi_server_name)
+    return 0
+
+
+def _startup_helper(process_name, executable_name):
+    '''Start a new tmux session as the parent for a MagAO-X process
+    and start the process as well.
+
+    Parameters
+    ----------
+    process_name : str
+        The name for the particular instance of this executable
+    executable_name : str
+        The executable (MagAOXApp) name
+
+    Returns
+    -------
+    did_anything : bool
+        Whether a new session was started for `process_name`
+    '''
+    if _session_exists(process_name):
+        info(f"Session exists for {process_name}, doing nothing")
+        return False
+    info(f"Session {process_name} does not exist")
+    execpath = f"/opt/MagAOX/bin/{executable_name}"
+    if not os.path.exists(execpath):
+        raise RuntimeError(
+            f"No executable {execpath} found for {process_name}")
+    _run_as_xsup(f"tmux new -s {process_name} -d")
+    success(f"Created tmux session for {process_name}")
+    cmd = f"{execpath} -n {process_name}"
+    _run_as_xsup(f"tmux send-keys -t {process_name} \"{cmd}\" Enter")
+    success(f"Executed in {process_name} session: '{cmd}'")
+    return True
+
+def startup(processes, targets):
+    if not len(targets):
+        targets = list(processes.keys())
+    indi_server_name = None
+    for process_name in targets:
+        if process_name.startswith('is'):
+            indi_server_name = process_name
+    if len(targets) > 1 and indi_server_name in targets:
+        # special case for INDI server: needs to be first to start
+        # and have time to flux FIFOs
+        targets.remove(indi_server_name)
+        did_anything = _startup_helper(indi_server_name, processes[indi_server_name])
+        if did_anything:
+            info(f"Waiting 5 seconds for {indi_server_name} to start...")
+            time.sleep(5)
+    helpers = []
+    for process_name in targets:
+        th = threading.Thread(
+            target=_startup_helper,
+            args=(process_name, processes[process_name])
+        )
+        th.start()
+        helpers.append(th)
+    for th in helpers:
+        th.join()
+    return 0
+
+
+def restart(processes, targets):
+    exit_code_1 = shutdown(processes, targets)
+    if exit_code_1 != 0:
+        return exit_code_1
+    return startup(processes, targets)
+
+VERBS = {
+    'status': status,
+    'inspect': inspect_session,
+    'shutdown': shutdown,
+    'restart': restart,
+    'startup': startup,
+}
+
+
+def main(verb, targets):
+    debug(f'Got {verb} {targets}')
+    if 'MAGAOX_ROLE' not in os.environ:
+        failure(f"No $MAGAOX_ROLE variable in environment")
+        return 1
+    role = os.environ['MAGAOX_ROLE']
+    debug(f"Got role: {role}")
+    processes_filepath = f"/opt/MagAOX/config/proclist_{role}.txt"
+    processes = _read_processes(processes_filepath)
+    debug(f'Read processes from {processes_filepath}: {processes}')
+
+    if verb not in VERBS:
+        failure(f"Valid verbs: {', '.join(VERBS.keys())}")
+        failure(f"Got: {verb}")
+        return 1
+
+    return VERBS[verb](processes, targets)
+
+
+if __name__ == "__main__":
+    # logging.basicConfig(level=logging.DEBUG)
+    try:
+        arg_verb = sys.argv[1].lower().strip()
+        arg_targets = sys.argv[2:]
+    except IndexError:
+        print(__doc__, file=sys.stderr)
+        sys.exit(1)
+    sys.exit(main(arg_verb, arg_targets))
