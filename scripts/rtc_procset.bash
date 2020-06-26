@@ -1,13 +1,12 @@
-o ""
 
 pidlist=$( pgrep DMcomb-000000.r | xargs echo | sed 's/ /,/g' )
 echo "DMcomb 0            : $pidlist"
-echo /bin/echo $pidlist > /dev/cpuset/dm00comb/tasks
+/bin/echo $pidlist > /dev/cpuset/dm00comb/tasks
 echo ""
 
 pidlist=$( pgrep DMcomb-000001.r | xargs echo | sed 's/ /,/g' )
 echo "DMcomb 1            : $pidlist"
-echo /bin/echo $pidlist > /dev/cpuset/dm01comb/tasks
+/bin/echo $pidlist > /dev/cpuset/dm01comb/tasks
 echo ""
 
 pidlist=$( pgrep aol1run | xargs echo | sed 's/ /,/g' )
