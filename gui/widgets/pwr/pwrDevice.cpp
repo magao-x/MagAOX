@@ -11,6 +11,7 @@ pwrDevice::pwrDevice( QWidget * parent,
                       ) : QWidget(parent, flags)
 {
    m_deviceNameLabel = new QwtTextLabel;
+   m_deviceNameLabel->setStyleSheet("*{color: white;}");
    
    m_current.resize(60);
    m_voltage.resize(60);
