@@ -13,3 +13,8 @@ cd /opt/MagAOX/source/MagAOX
 make setup
 make all
 make install
+
+if [[ $MAGAOX_ROLE == AOC || $MAGAOX_ROLE == vm || $MAGAOX_ROLE == ci ]]; then
+    make guis_all
+    make guis_install
+fi

@@ -40,4 +40,6 @@ FORMS += ../../widgets/dmCtrl/dmCtrl.ui
 LIBS += ../../../INDI/libcommon/libcommon.a \
         ../../../INDI/liblilxml/liblilxml.a
 
+RESOURCES += ../../vendor/BreezeStyleSheets/breeze.qrc
+
 QT += widgets

@@ -64,10 +64,9 @@ endif
 
 all_guis = dmCtrlGUI \
 	dmModeGUI \
-	modwfsGUI \
+	offloadCtrlGUI \
 	pupilGuideGUI \
-	pwr \
-	ttmpupilGUI
+	pwr
 
 ifeq ($(MAGAOX_ROLE),RTC)
   guis_to_build =

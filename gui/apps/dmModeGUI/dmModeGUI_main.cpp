@@ -1,5 +1,7 @@
 
 #include <QApplication>
+#include <QFile>
+#include <QTextStream>
 
 #include "dmModeGUI.hpp"
 #include <iostream>
@@ -16,6 +18,12 @@ int main(int argc, char *argv[])
    std::string deviceName = argv[1];
    
    QApplication app(argc, argv);
+
+   // set stylesheet
+   QFile file(":/dark.qss");
+   file.open(QFile::ReadOnly | QFile::Text);
+   QTextStream stream(&file);
+   app.setStyleSheet(stream.readAll());
    
    multiIndiPublisher client(deviceName+"GUI", "127.0.0.1", 7624);
 

@@ -71,26 +71,6 @@ dmCtrl::dmCtrl( std::string & dmName,
 {
    ui.setupUi(this);
    ui.labelDMName->setText(m_dmName.c_str());
-   ui.labelDMName->setStyleSheet("*{color: white;}");
-   
-   ui.labelShmimName->setStyleSheet("*{color: white;}");
-   ui.labelFlatShmim->setStyleSheet("*{color: white;}");
-   ui.labelTestShmim->setStyleSheet("*{color: white;}");
-   
-   ui.labelShmimName_value->setStyleSheet("*{color: white;}");
-   ui.labelFlatShmim_value->setStyleSheet("*{color: white;}");
-   ui.labelTestShmim_value->setStyleSheet("*{color: white;}");
-   
-   ui.buttonInit->setStyleSheet("*{color: white;}");
-   ui.buttonZero->setStyleSheet("*{color: white;}");
-   ui.buttonRelease->setStyleSheet("*{color: white;}");
-   ui.buttonLoadFlat->setStyleSheet("*{color: white;}");
-   ui.buttonSetFlat->setStyleSheet("*{color: white;}");
-   ui.buttonZeroFlat->setStyleSheet("*{color: white;}");
-   
-   ui.buttonLoadTest->setStyleSheet("*{color: white;}");
-   ui.buttonSetTest->setStyleSheet("*{color: white;}");
-   ui.buttonZeroTest->setStyleSheet("*{color: white;}");
    
    setWindowTitle(QString(m_dmName.c_str()));
 }
