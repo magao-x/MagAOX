@@ -23,6 +23,53 @@ dmModeGUI::dmModeGUI( std::string deviceName,
    
    setWindowTitle(QString(deviceName.c_str()));
    
+   ui.title->setStyleSheet("*{color: white;}");
+   ui.channel->setStyleSheet("*{color: white;}");
+   ui.modeName_0->setStyleSheet("*{color: white;}");
+   ui.modeTarget_0->setStyleSheet("*{color: white;}");
+   ui.modeCurrent_0->setStyleSheet("*{color: white;}");
+   ui.modeZero_0->setStyleSheet("*{color: white;}");
+   ui.modeName_1->setStyleSheet("*{color: white;}");
+   ui.modeTarget_1->setStyleSheet("*{color: white;}");
+   ui.modeCurrent_1->setStyleSheet("*{color: white;}");
+   ui.modeZero_1->setStyleSheet("*{color: white;}");
+   ui.modeName_2->setStyleSheet("*{color: white;}");
+   ui.modeTarget_2->setStyleSheet("*{color: white;}");
+   ui.modeCurrent_2->setStyleSheet("*{color: white;}");
+   ui.modeZero_2->setStyleSheet("*{color: white;}");
+   ui.modeName_3->setStyleSheet("*{color: white;}");
+   ui.modeTarget_3->setStyleSheet("*{color: white;}");
+   ui.modeCurrent_3->setStyleSheet("*{color: white;}");
+   ui.modeZero_3->setStyleSheet("*{color: white;}");
+   ui.modeName_4->setStyleSheet("*{color: white;}");
+   ui.modeTarget_4->setStyleSheet("*{color: white;}");
+   ui.modeCurrent_4->setStyleSheet("*{color: white;}");
+   ui.modeZero_4->setStyleSheet("*{color: white;}");
+   ui.modeName_5->setStyleSheet("*{color: white;}");
+   ui.modeTarget_5->setStyleSheet("*{color: white;}");
+   ui.modeCurrent_5->setStyleSheet("*{color: white;}");
+   ui.modeZero_5->setStyleSheet("*{color: white;}");
+   ui.modeName_6->setStyleSheet("*{color: white;}");
+   ui.modeTarget_6->setStyleSheet("*{color: white;}");
+   ui.modeCurrent_6->setStyleSheet("*{color: white;}");
+   ui.modeZero_6->setStyleSheet("*{color: white;}");
+   ui.modeName_7->setStyleSheet("*{color: white;}");
+   ui.modeTarget_7->setStyleSheet("*{color: white;}");
+   ui.modeCurrent_7->setStyleSheet("*{color: white;}");
+   ui.modeZero_7->setStyleSheet("*{color: white;}");
+   ui.modeName_8->setStyleSheet("*{color: white;}");
+   ui.modeTarget_8->setStyleSheet("*{color: white;}");
+   ui.modeCurrent_8->setStyleSheet("*{color: white;}");
+   ui.modeZero_8->setStyleSheet("*{color: white;}");
+   ui.modeName_9->setStyleSheet("*{color: white;}");
+   ui.modeTarget_9->setStyleSheet("*{color: white;}");
+   ui.modeCurrent_9->setStyleSheet("*{color: white;}");
+   ui.modeZero_9->setStyleSheet("*{color: white;}");
+   ui.modeName_10->setStyleSheet("*{color: white;}");
+   ui.modeTarget_10->setStyleSheet("*{color: white;}");
+   ui.modeCurrent_10->setStyleSheet("*{color: white;}");
+   ui.modeZero_10->setStyleSheet("*{color: white;}");
+   ui.modeZero_all->setStyleSheet("*{color: white;}");
 }
    
 dmModeGUI::~dmModeGUI()
