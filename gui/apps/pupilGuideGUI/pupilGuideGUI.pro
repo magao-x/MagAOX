@@ -39,6 +39,6 @@ LIBS += ../../../INDI/libcommon/libcommon.a \
 
 RESOURCES += ../../widgets/pupilGuide/res/pupilGuide.qrc
 
-RESOURCES += ../../vendor/BreezeStyleSheets/breeze.qrc
+RESOURCES += ../../resources/MagAOXStyleSheets/MagAOXStyle.qrc 
 
 QT += widgets

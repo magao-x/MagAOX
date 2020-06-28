@@ -155,6 +155,12 @@ void multiIndiManager::connectClient(bool force)
          m_publisher->deactivate();
          delete m_publisher;
          m_publisher = nullptr;
+         
+         for(size_t n=0;n<m_subscribers.size();++n)
+         {
+            m_subscribers[n]->onDisconnect();
+         }
+   
       }
       else 
       {

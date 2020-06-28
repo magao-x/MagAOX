@@ -170,7 +170,7 @@
               <string>current</string>
              </property>
              <property name="alignment">
-              <set>Qt::AlignCenter</set>
+              <set>Qt::AlignBottom|Qt::AlignHCenter</set>
              </property>
             </widget>
            </item>
@@ -180,7 +180,7 @@
               <string>target</string>
              </property>
              <property name="alignment">
-              <set>Qt::AlignCenter</set>
+              <set>Qt::AlignBottom|Qt::AlignHCenter</set>
              </property>
             </widget>
            </item>
@@ -528,7 +528,7 @@
               </widget>
              </item>
              <item row="1" column="1">
-              <widget class="QPushButton" name="buttonScale">
+              <widget class="QPushButton" name="button_tip_scale">
                <property name="sizePolicy">
                 <sizepolicy hsizetype="MinimumExpanding" vsizetype="MinimumExpanding">
                  <horstretch>1</horstretch>
@@ -771,7 +771,7 @@
               <string>target</string>
              </property>
              <property name="alignment">
-              <set>Qt::AlignCenter</set>
+              <set>Qt::AlignBottom|Qt::AlignHCenter</set>
              </property>
             </widget>
            </item>
@@ -798,7 +798,7 @@
               <string>current</string>
              </property>
              <property name="alignment">
-              <set>Qt::AlignCenter</set>
+              <set>Qt::AlignBottom|Qt::AlignHCenter</set>
              </property>
             </widget>
            </item>
@@ -1385,6 +1385,9 @@
           <layout class="QGridLayout" name="gridCoords" rowstretch="1,0,0,0,0,0">
            <item row="3" column="3">
             <widget class="QLineEdit" name="coordLR_D">
+             <property name="focusPolicy">
+              <enum>Qt::NoFocus</enum>
+             </property>
              <property name="alignment">
               <set>Qt::AlignCenter</set>
              </property>
@@ -1392,6 +1395,9 @@
            </item>
            <item row="1" column="2">
             <widget class="QLineEdit" name="coordUR_y">
+             <property name="focusPolicy">
+              <enum>Qt::NoFocus</enum>
+             </property>
              <property name="alignment">
               <set>Qt::AlignCenter</set>
              </property>
@@ -1399,6 +1405,9 @@
            </item>
            <item row="4" column="2">
             <widget class="QLineEdit" name="coordLL_y">
+             <property name="focusPolicy">
+              <enum>Qt::NoFocus</enum>
+             </property>
              <property name="alignment">
               <set>Qt::AlignCenter</set>
              </property>
@@ -1406,6 +1415,9 @@
            </item>
            <item row="4" column="3">
             <widget class="QLineEdit" name="coordLL_D">
+             <property name="focusPolicy">
+              <enum>Qt::NoFocus</enum>
+             </property>
              <property name="alignment">
               <set>Qt::AlignCenter</set>
              </property>
@@ -1413,6 +1425,9 @@
            </item>
            <item row="2" column="3">
             <widget class="QLineEdit" name="coordUL_D">
+             <property name="focusPolicy">
+              <enum>Qt::NoFocus</enum>
+             </property>
              <property name="alignment">
               <set>Qt::AlignCenter</set>
              </property>
@@ -1420,6 +1435,9 @@
            </item>
            <item row="2" column="2">
             <widget class="QLineEdit" name="coordUL_y">
+             <property name="focusPolicy">
+              <enum>Qt::NoFocus</enum>
+             </property>
              <property name="alignment">
               <set>Qt::AlignCenter</set>
              </property>
@@ -1427,6 +1445,9 @@
            </item>
            <item row="2" column="1">
             <widget class="QLineEdit" name="coordUL_x">
+             <property name="focusPolicy">
+              <enum>Qt::NoFocus</enum>
+             </property>
              <property name="alignment">
               <set>Qt::AlignCenter</set>
              </property>
@@ -1434,6 +1455,9 @@
            </item>
            <item row="5" column="1">
             <widget class="QLineEdit" name="coordAvg_x">
+             <property name="focusPolicy">
+              <enum>Qt::NoFocus</enum>
+             </property>
              <property name="alignment">
               <set>Qt::AlignCenter</set>
              </property>
@@ -1441,6 +1465,9 @@
            </item>
            <item row="3" column="2">
             <widget class="QLineEdit" name="coordLR_y">
+             <property name="focusPolicy">
+              <enum>Qt::NoFocus</enum>
+             </property>
              <property name="alignment">
               <set>Qt::AlignCenter</set>
              </property>
@@ -1448,6 +1475,9 @@
            </item>
            <item row="4" column="1">
             <widget class="QLineEdit" name="coordLL_x">
+             <property name="focusPolicy">
+              <enum>Qt::NoFocus</enum>
+             </property>
              <property name="alignment">
               <set>Qt::AlignCenter</set>
              </property>
@@ -1455,6 +1485,9 @@
            </item>
            <item row="1" column="3">
             <widget class="QLineEdit" name="coordUR_D">
+             <property name="focusPolicy">
+              <enum>Qt::NoFocus</enum>
+             </property>
              <property name="alignment">
               <set>Qt::AlignCenter</set>
              </property>
@@ -1493,6 +1526,9 @@
            </item>
            <item row="1" column="1">
             <widget class="QLineEdit" name="coordUR_x">
+             <property name="focusPolicy">
+              <enum>Qt::NoFocus</enum>
+             </property>
              <property name="alignment">
               <set>Qt::AlignCenter</set>
              </property>
@@ -1500,6 +1536,9 @@
            </item>
            <item row="5" column="3">
             <widget class="QLineEdit" name="coordAvg_D">
+             <property name="focusPolicy">
+              <enum>Qt::NoFocus</enum>
+             </property>
              <property name="alignment">
               <set>Qt::AlignCenter</set>
              </property>
@@ -1507,6 +1546,9 @@
            </item>
            <item row="3" column="1">
             <widget class="QLineEdit" name="coordLR_x">
+             <property name="focusPolicy">
+              <enum>Qt::NoFocus</enum>
+             </property>
              <property name="alignment">
               <set>Qt::AlignCenter</set>
              </property>
@@ -1514,6 +1556,9 @@
            </item>
            <item row="5" column="2">
             <widget class="QLineEdit" name="coordAvg_y">
+             <property name="focusPolicy">
+              <enum>Qt::NoFocus</enum>
+             </property>
              <property name="alignment">
               <set>Qt::AlignCenter</set>
              </property>
@@ -1935,8 +1980,6 @@
    </item>
   </layout>
  </widget>
- <resources>
-  <include location="../../../../c/rtimv/res/imviewer.qrc"/>
- </resources>
+ <resources/>
  <connections/>
 </ui>

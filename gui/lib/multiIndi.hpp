@@ -45,6 +45,12 @@ public:
    
    virtual int subscribe( multiIndiPublisher * publisher ) = 0;
    
+   /// Called when the publisher disconnects.
+   virtual void onDisconnect()
+   {
+      std::cerr << "disconnected\n";
+   }
+   
    virtual int handleDefProperty( const pcf::IndiProperty &ipRecv );
    
    /// Callback for a SET PROPERTY message notifying us that the propery has changed.
@@ -127,7 +133,7 @@ public:
    /** This is mainly called by the multiIndiSubscriber destructor.
      */
    void unsubscribe( multiIndiSubscriber * sub /**< [in] the subscriber being un-subscribed*/);
-
+   
    void handleDefProperty( const pcf::IndiProperty &ipRecv );
    
    /// Responds to SET PROPERTY
