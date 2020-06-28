@@ -669,6 +669,11 @@ QPushButton:pressed
     padding-bottom: -1.7ex;
 }
 
+QPushButton[isScaleButton="true"]
+{
+   font-size: 10pt;
+}
+
 QComboBox
 {
     selection-background-color: #3daee9;
@@ -833,6 +838,15 @@ QLabel[isStatus="true"]
    color: #08ebff;
 }
 QLabel:disabled[isStatus="true"]
+{
+   color: #047782;
+}
+
+QLCDNumber[isStatus="true"]
+{
+   color: #08ebff;
+}
+QLCDNumber:disabled[isStatus="true"]
 {
    color: #047782;
 }

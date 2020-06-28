@@ -19,6 +19,7 @@ protected:
 
    std::unordered_map<std::string, rtimvDictBlob> * m_dict {nullptr};
    
+   
 public:
    rtimvIndiClient( const std::string &szName,
                     const std::string &szVersion,
@@ -92,6 +93,9 @@ class indiClient : public QObject,
    Q_PLUGIN_METADATA(IID "rtimv.dictionaryInterface/1.0")
    Q_INTERFACES(rtimvDictionaryInterface)
     
+   std::string m_ipAddress {"127.0.0.1"};
+   int m_port {7624};
+   
    protected:
       
       std::unordered_map<std::string, rtimvDictBlob> * m_dict {nullptr};
@@ -105,7 +109,9 @@ class indiClient : public QObject,
       
       virtual ~indiClient();
 
-      virtual int attachDictionary(std::unordered_map<std::string, rtimvDictBlob> * dict); 
+      virtual int attachDictionary( std::unordered_map<std::string, rtimvDictBlob> * dict,
+                                    mx::app::appConfigurator & config
+                                  ); 
 
    public slots:
       void checkConnection();

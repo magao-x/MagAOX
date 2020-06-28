@@ -169,20 +169,23 @@ void multiIndiManager::connectClient(bool force)
       }
    }
    
-   //std::cerr << "connecting\n";
-   
    m_publisher = new multiIndiPublisher(m_clientName, m_hostAddress, m_hostPort);
+   
    m_publisher->activate();
    
-   sleep(2);
+   sleep(2); //This is to give time for the connection to fail
    
    if(m_publisher->getQuitProcess())
    {
-      //std::cerr << "connection failed\n";
       m_publisher->quitProcess();
       m_publisher->deactivate();
       delete m_publisher;
       m_publisher = nullptr;
+      for(size_t n=0;n<m_subscribers.size();++n) ///\todo should move this call to publisher deactivate
+      {
+         m_subscribers[n]->onDisconnect();
+      }
+         
       m_timer.start(1000);
       return;
    }
@@ -191,7 +194,7 @@ void multiIndiManager::connectClient(bool force)
    {
       m_subscribers[n]->subscribe(m_publisher);
    }
-   
+
    m_timer.start(1000);
 }
 

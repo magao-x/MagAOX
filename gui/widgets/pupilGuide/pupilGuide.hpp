@@ -176,6 +176,9 @@ pupilGuide::pupilGuide( QWidget * Parent, Qt::WindowFlags f) : QDialog(Parent, f
    ui.modState->setProperty("isStatus", true);
    ui.pupState->setProperty("isStatus", true);
    ui.camlens_fsm->setProperty("isStatus", true);
+   ui.button_camlens_scale->setProperty("isScaleButton", true);
+   ui.button_tip_scale->setProperty("isScaleButton", true);
+   ui.button_pup_scale->setProperty("isScaleButton", true);
    
    QTimer *timer = new QTimer(this);
    connect(timer, SIGNAL(timeout()), this, SLOT(updateGUI()));

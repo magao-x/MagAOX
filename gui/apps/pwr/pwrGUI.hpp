@@ -41,6 +41,10 @@ public:
    
    int subscribe( multiIndiPublisher * publisher );
                                    
+   virtual void onConnect();
+   
+   virtual void onDisconnect();
+   
    int handleDefProperty( const pcf::IndiProperty & ipRecv /**< [in] the property which has been defined*/);
    
    int handleSetProperty( const pcf::IndiProperty & ipRecv /**< [in] the property which has changed*/);
@@ -54,6 +58,8 @@ public slots:
    
    void chChange( pcf::IndiProperty & ip );
    void updateGauges();
+   
+   void on_buttonReconnect_pressed();
 
 signals:
    void gotNewDevice( std::string * devName,
@@ -61,8 +67,6 @@ signals:
                     );
    
 private:
-      
-   QwtDialSimpleNeedle * pdu1Needle {nullptr};
       
    Ui::pwr ui;
 };

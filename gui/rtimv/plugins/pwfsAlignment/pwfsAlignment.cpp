@@ -9,9 +9,12 @@ pwfsAlignment::~pwfsAlignment()
 {
 }
 
-int pwfsAlignment::attachOverlay(QGraphicsScene* qgs, std::unordered_map<std::string, rtimvDictBlob> * dict)
+int pwfsAlignment::attachOverlay( QGraphicsScene* qgs, 
+                                  std::unordered_map<std::string, rtimvDictBlob> * dict,
+                                  mx::app::appConfigurator & config
+                                )
 {
-   std::cerr << "pwfsAlignment attached\n";
+   std::cerr << "pwfsAlignment attached -- w config\n";
    static_cast<void>(qgs);
    
    m_dict = dict;
