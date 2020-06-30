@@ -16,3 +16,9 @@ elif [[ $ID == centos && $VERSION_ID == 7 ]]; then
         mesa-libGL-devel \
     ;
 fi
+
+if [[ $MAGAOX_ROLE == vm ]]; then
+    # For some reason, Qt won't hear any keyboard events unless this is set.
+    # (Hinted at by: "Qt: Failed to create XKB context!")
+    echo "export QT_XKB_CONFIG_ROOT=/usr/lib/kbd/keymaps/xkb" | sudo tee /etc/profile.d/qt_xkb_config_env_var.sh
+fi
