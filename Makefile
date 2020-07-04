@@ -58,6 +58,8 @@ else ifeq ($(MAGAOX_ROLE),ICC)
 else ifeq ($(MAGAOX_ROLE),RTC)
   apps_to_build += $(apps_rtcicc)
   apps_to_build += $(apps_rtc)
+else ifeq ($(MAGAOX_ROLE),TCC)
+  apps_to_build += $(apps_vm)
 else ifeq ($(MAGAOX_ROLE),vm)
   apps_to_build += $(apps_vm)
 endif
