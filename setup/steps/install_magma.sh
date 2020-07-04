@@ -19,6 +19,10 @@ elif [[ $MAGAOX_ROLE == AOC || $MAGAOX_ROLE == ci ]]; then
   if ! grep "GPU_TARGET = Pascal" make.inc; then
     echo "GPU_TARGET = Pascal" >> make.inc
   fi
+elif [[ $MAGAOX_ROLE == TCC ]]; then
+  if ! grep "GPU_TARGET = Kepler" make.inc; then
+    echo "GPU_TARGET = Kepler" >> make.inc
+  fi
 fi
 make -j 32
 make install
