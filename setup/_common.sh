@@ -70,11 +70,16 @@ function clone_or_update_and_cd() {
     orgname=$1
     reponame=$2
     parentdir=$3
+    # Disable unbound var check because we do it ourselves:
+    set +u
     if [[ ! -z $4 ]]; then
       destdir=$4
     else
       destdir="$parentdir/$reponame"
     fi
+    set -u
+    # and re-enable.
+
     if [[ $MAGAOX_ROLE == vm && "$VM_WINDOWS_HOST" == 0 ]]; then
         link_if_necessary /vagrant/vm/$reponame $destdir
     fi
@@ -85,6 +90,8 @@ function clone_or_update_and_cd() {
       sudo rsync -av $CLONE_DEST/ $destdir/
       cd $destdir/
       log_success "Cloned new $destdir"
+      rm -rf $CLONE_DEST
+      log_success "Removed temporary clone at $CLONE_DEST"
     else
       cd $destdir
       git pull
