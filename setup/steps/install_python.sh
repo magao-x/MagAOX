@@ -49,7 +49,7 @@ set +u; source /etc/profile.d/miniconda.sh; set -u
 # Create the standard MagAOX user python environment
 #
 ENVS=$(conda env list)
-if [[ $ENVS != *py37* ]]; then
+if [[ $ENVS != */opt/miniconda3/envs/py37* ]]; then
 	conda env create -qf /opt/MagAOX/config/conda_env_py37.yml
 	log_success "created conda env py37"
 else
@@ -59,7 +59,7 @@ fi
 #
 # Clone to create a development environment
 #
-if [[ $ENVS != *dev* ]]; then
+if [[ $ENVS != */opt/miniconda3/envs/dev* ]]; then
 	conda create -q --name dev --clone py37
 	log_success "created conda env dev from env py37"
 else
