@@ -16,6 +16,8 @@ if [[ ! -d /opt/miniconda3 ]]; then
     MINICONDA_INSTALLER="Miniconda$MINICONDA_VERSION-Linux-x86_64.sh"
     _cached_fetch "https://repo.continuum.io/miniconda/$MINICONDA_INSTALLER" $MINICONDA_INSTALLER
     bash $MINICONDA_INSTALLER -b -p /opt/miniconda3
+	# Ensure magaox-dev can write to /opt/miniconda3 or env creation will fail
+	chown -R :magaox-dev /opt/miniconda3
     # Set environment variables for miniconda
     cat << 'EOF' | tee /etc/profile.d/miniconda.sh
 if [ -f "/opt/miniconda3/etc/profile.d/conda.sh" ]; then
