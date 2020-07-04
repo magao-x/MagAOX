@@ -28,7 +28,8 @@ else
 fi
 # activate the default MagAO-X user env if it exists
 ENVS=$(conda env list)
-if [[ $ENVS = *py37* ]]; then
+# note full path used so name collisions with personal minicondas don't happen
+if [[ $ENVS = */opt/miniconda3/envs/py37* ]]; then
     conda activate py37
 fi
 EOF
