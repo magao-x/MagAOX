@@ -70,30 +70,34 @@ function clone_or_update_and_cd() {
     orgname=$1
     reponame=$2
     parentdir=$3
+    if [[ ! -z $4 ]]; then
+      destdir=$4
+    else
+      destdir="$parentdir/$reponame"
+    fi
     if [[ $MAGAOX_ROLE == vm && "$VM_WINDOWS_HOST" == 0 ]]; then
-        link_if_necessary /vagrant/vm/$reponame $parentdir/$reponame
-        parentdir=/vagrant/vm
+        link_if_necessary /vagrant/vm/$reponame $destdir
     fi
     if [[ ! -d $parentdir/$reponame/.git ]]; then
       echo "Cloning new copy of $orgname/$reponame"
       CLONE_DEST=/tmp/${reponame}_$(date +"%s")
       git clone https://github.com/$orgname/$reponame.git $CLONE_DEST
-      sudo rsync -av $CLONE_DEST/ $parentdir/$reponame/
-      cd $parentdir/$reponame/
-      log_success "Cloned new $parentdir/$reponame"
+      sudo rsync -av $CLONE_DEST/ $destdir/
+      cd $destdir/
+      log_success "Cloned new $destdir"
     else
-      cd $parentdir/$reponame
+      cd $destdir
       git pull
-      log_success "Updated $parentdir/$reponame"
+      log_success "Updated $destdir"
     fi
     git config core.sharedRepository group
     if [[ $MAGAOX_ROLE != vm ]]; then
-      sudo chown -R :magaox-dev $parentdir/$reponame
-      sudo chmod -R g=rwX $parentdir/$reponame
+      sudo chown -R :magaox-dev $destdir
+      sudo chmod -R g=rwX $destdir
       # n.b. can't be recursive because g+s on files means something else
       # so we find all directories and individually chmod them:
-      sudo find $parentdir/$reponame -type d -exec chmod g+s {} \;
-      log_success "Normalized permissions on $parentdir/$reponame"
+      sudo find $destdir -type d -exec chmod g+s {} \;
+      log_success "Normalized permissions on $destdir"
     fi
 }
 

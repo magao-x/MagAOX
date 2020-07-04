@@ -6,5 +6,5 @@ set -eo pipefail
 orgname=magao-x
 reponame=testbed_calib
 parentdir=/opt/MagAOX/
-clone_or_update_and_cd $orgname $reponame $parentdir
-ln -s mv $parentdir/$reponame $parentdir/calib
+destdir=$parentdir/calib
+clone_or_update_and_cd $orgname $reponame $parentdir $destdir
