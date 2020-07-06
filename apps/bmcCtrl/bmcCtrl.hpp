@@ -74,7 +74,8 @@ protected:
      *@{
      */
    
-   std::string m_serialNumber; ///< The BMC serial number used to find the default config directory.
+   std::string m_serialNumber; ///< The BMC serial number used to open the correct DM profile
+   std::string m_calibRelDir; ///< Path to calibration directory
    
    ///@}
 
@@ -217,8 +218,9 @@ void bmcCtrl::setupConfig()
 int bmcCtrl::loadConfigImpl( mx::app::appConfigurator & _config )
 {
    config(m_serialNumber, "dm.serialNumber");
+   config(m_calibRelDir, "dm.calibRelDir");
    
-   m_calibRelDir = "dm/bmc_2k";
+   //m_calibRelDir = "dm/bmc_2k";
    
    dev::dm<bmcCtrl,float>::loadConfig(_config);
    
