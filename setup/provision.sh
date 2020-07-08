@@ -174,9 +174,13 @@ fi
 ## Set up file structure and permissions
 sudo bash -l "$DIR/steps/ensure_dirs_and_perms.sh" $MAGAOX_ROLE
 
-# Enable forwarding MagAO-X GUIs to the host for VMs
+
 if [[ $MAGAOX_ROLE == vm ]]; then
+    # Enable forwarding MagAO-X GUIs to the host for VMs
     sudo bash -l "$DIR/steps/enable_vm_x11_forwarding.sh"
+    # Install a config in ~/.ssh/config for the Vagrant user
+    # to it easier to make tunnels work
+    sudo bash -l "$DIR/steps/configure_vm_ssh.sh"
 fi
 
 # Install dependencies for the GUIs
