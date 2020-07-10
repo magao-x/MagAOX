@@ -14,6 +14,7 @@ Usage:
     xctrl restart [PROCNAME ...]
         - shutdown then startup each process (or just PROCNAME)
 '''
+import argparse
 import psutil
 import sys
 import os
@@ -283,12 +284,8 @@ VERBS = {
 }
 
 
-def main(verb, targets):
+def main(verb, targets, role):
     debug(f'Got {verb} {targets}')
-    if 'MAGAOX_ROLE' not in os.environ:
-        failure(f"No $MAGAOX_ROLE variable in environment")
-        return 1
-    role = os.environ['MAGAOX_ROLE']
     debug(f"Got role: {role}")
     processes_filepath = f"/opt/MagAOX/config/proclist_{role}.txt"
     processes = _read_processes(processes_filepath)
@@ -301,13 +298,29 @@ def main(verb, targets):
 
     return VERBS[verb](processes, targets)
 
-
 if __name__ == "__main__":
     # logging.basicConfig(level=logging.DEBUG)
-    try:
-        arg_verb = sys.argv[1].lower().strip()
-        arg_targets = sys.argv[2:]
-    except IndexError:
-        print(__doc__, file=sys.stderr)
+    parser = argparse.ArgumentParser(prog='xctrl', description=__doc__)
+    parser.add_argument('-r', '--role', help='Specify role to read proclist for (default: $MAGAOX_ROLE)')
+    subparsers = parser.add_subparsers(help='verb for action to take', dest='verb')
+    for verb in VERBS:
+        sp = subparsers.add_parser(verb)
+        if verb == 'inspect': # special case, can only inspect one thing at a time
+            sp.add_argument('target', nargs=1, help='Process name to target')
+        else:
+            sp.add_argument('target', nargs='*', help='Process names to target')
+    args = parser.parse_args()
+    print(args)
+    if args.role is None:
+        if 'MAGAOX_ROLE' not in os.environ:
+            failure(f"No $MAGAOX_ROLE variable in environment and no --role option supplied")
+            sys.exit(1)
+        role = os.environ['MAGAOX_ROLE']
+    else:
+        role = args.role
+
+    if args.verb is None:
+        parser.print_help()
         sys.exit(1)
-    sys.exit(main(arg_verb, arg_targets))
+
+    sys.exit(main(args.verb, args.target, role))
