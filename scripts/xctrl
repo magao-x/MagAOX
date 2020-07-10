@@ -52,6 +52,10 @@ warning, warning_bytes = _make_output_funcs(YELLOW_SEQ)
 info, info_bytes = _make_output_funcs(BLUE_SEQ)
 
 WHO_AM_I = getpass.getuser()
+if os.environ.get('MAGAOX_ROLE') == 'vm':
+    INSTRUMENT_USER = 'vagrant'
+else:
+    INSTRUMENT_USER = 'xsup'
 
 # CentOS + devtoolset-7 aliases sudo, but breaks command line arguments for it,
 # so if we need those, we must use _REAL_SUDO. Of course, sudo may live in
@@ -73,18 +77,20 @@ if REAL_SUDO is None:
 
 
 def _run_as_xsup(command, capture_output=True, check=True):
-    if WHO_AM_I != 'xsup':
+    # Special case: if we're running as xsup or in the VM (as vagrant)
+    # we just run the command as supplied by prepending sudo appropriately
+    if WHO_AM_I != INSTRUMENT_USER:
         args = [
             REAL_SUDO,
             '-u',
-            'xsup',
+            INSTRUMENT_USER,
             '-s',
             '--',
         ]
     else:
         args = []
     args.extend(shlex.split(command))
-    # print('Running as xsup:', ' '.join(args))
+    info(f'Running as {WHO_AM_I}: {" ".join(args)}')
     res = subprocess.run(args, capture_output=capture_output, check=check)
     return res.returncode, res.stdout, res.stderr
 
