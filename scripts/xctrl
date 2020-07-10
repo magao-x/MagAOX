@@ -143,11 +143,16 @@ def inspect_session(_, targets):
         failure(f"Can only specify a single process "
                 f"name to inspect, got: {targets}")
         return 1
-    code, out, err = _run_as_xsup(f"tmux attach-session -t {targets[0]}")
-    info_bytes(out)
-    if len(err):
-        failure_bytes(err)
-    return code
+    target = targets[0]
+    if _session_exists(targets[0]):
+        exitcode, out, err = _run_as_xsup(f"tmux attach-session -t {target}")
+        info_bytes(out)
+        if len(err):
+            failure_bytes(err)
+    else:
+        failure(f'No tmux session exists named {target}')
+        exitcode = 1
+    return exitcode
 
 
 def _session_exists(process_name):
@@ -178,7 +183,7 @@ def _shutdown_helper(process_name):
                 time.sleep(1)
         success(f'Ended tmux session for {process_name}')
     else:
-        info(f'No running tmux session for {process_name}')
+        info(f'No tmux session exists named {process_name}')
     return 0
 
 
