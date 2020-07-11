@@ -214,6 +214,21 @@ def shutdown(processes, targets):
         _shutdown_helper(indi_server_name)
     return 0
 
+def _indiserver_startup(process_name, executable_name):
+    '''Wraps _startup_helper to insert some zombie-removal
+    '''
+    # Check for zombie xindidrivers
+    for proc in psutil.process_iter():
+        with proc.oneshot():
+            try:
+                exe = proc.exe()
+            except (psutil.NoSuchProcess, psutil.AccessDenied):
+                continue
+            if exe == '/opt/MagAOX/bin/xindidriver' and proc.ppid() == 1:
+                # this proc is a zombie (reparented to PID 1)
+                _run_as_xsup(f'kill -9 {proc.pid}')
+                warning(f"Killing zombie: {' '.join(proc.cmdline())}")
+    return _startup_helper(process_name, executable_name)
 
 def _startup_helper(process_name, executable_name):
     '''Start a new tmux session as the parent for a MagAO-X process
@@ -254,10 +269,11 @@ def startup(processes, targets):
         if process_name.startswith('is'):
             indi_server_name = process_name
     if len(targets) > 1 and indi_server_name in targets:
-        # special case for INDI server: needs to be first to start
-        # and have time to flux FIFOs
+        # special case for INDI server: needs to be first to start,
+        # have a chance to kill orphaned xindidriver processes,
+        # and have time to flush FIFOs
         targets.remove(indi_server_name)
-        did_anything = _startup_helper(indi_server_name, processes[indi_server_name])
+        did_anything = _indiserver_startup(indi_server_name, processes[indi_server_name])
         if did_anything:
             info(f"Waiting 5 seconds for {indi_server_name} to start...")
             time.sleep(5)
