@@ -3,6 +3,11 @@ DIR="$( cd "$( dirname "${BASH_SOURCE[0]}" )" && pwd )"
 source $DIR/../_common.sh
 set -euo pipefail
 
+instrument_user=xsup
+if [[ $MAGAOX_ROLE == vm ]]; then
+  instrument_user=vagrant
+fi
+
 function make_on_data_array() {
   # If run on instrument computer, make the name provided as an arg a link from $2/$1
   # to /data/$1.
@@ -28,7 +33,7 @@ function make_on_data_array() {
     REAL_DIR=$PARENT_DIR/$TARGET_NAME
     mkdir -pv $REAL_DIR
   fi
-  chown -RP xsup:magaox $REAL_DIR
+  chown -RP $instrument_user:magaox $REAL_DIR
   chmod -R u=rwX,g=rwX,o=rX $REAL_DIR
   setgid_all $REAL_DIR
 }
