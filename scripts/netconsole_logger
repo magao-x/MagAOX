@@ -66,6 +66,7 @@ def listener(port_num, name):
 
 
 def main():
+    os.makedirs(NETCONSOLE_LOG_DIR, exist_ok=True)
     threads = []
     
     for part in NETCONSOLE_PORTS.split(':'):
