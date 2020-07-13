@@ -21,15 +21,17 @@ if [[ $MAGAOX_ROLE == AOC ]]; then
 [Service]
 Environment="NETCONSOLE_PORTS=$NETCONSOLE_PORTS"
 Environment="NETCONSOLE_LOG_DIR=$NETCONSOLE_LOG_DIR"
-Environment="NETCONSOLE_BIND_IP=$NETCONSOLE_BIND_IP
+Environment="NETCONSOLE_BIND_IP=$NETCONSOLE_BIND_IP"
 HERE
 
     fi
-    sudo mkdir $NETCONSOLE_LOG_DIR
+    sudo mkdir -p $NETCONSOLE_LOG_DIR
     sudo chown :magaox $NETCONSOLE_LOG_DIR
     sudo chmod g+w $NETCONSOLE_LOG_DIR
+    log_info "Set permissions on $NETCONSOLE_LOG_DIR"
     sudo systemctl enable netconsole_logger.service || true
     sudo systemctl restart netconsole_logger.service || true
+    log_info "Enabled netconsole_logger service in SystemD"
 elif [[ $MAGAOX_ROLE == ICC || $MAGAOX_ROLE == RTC ]]; then
     echo 'netconsole' | sudo tee /etc/modules-load.d/netconsole.conf
     if [[ $MAGAOX_ROLE == ICC ]]; then
