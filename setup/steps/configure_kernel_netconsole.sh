@@ -6,6 +6,7 @@ set -euo pipefail
 RTC_DEST_PORT=6666
 ICC_DEST_PORT=6669
 NETCONSOLE_PORTS=$RTC_DEST_PORT,rtc:$ICC_DEST_PORT,icc
+NETCONSOLE_LOG_DIR=/var/log/netconsole_logger
 # Interface to bind to for log *listener* (AOC on instrument LAN)
 NETCONSOLE_BIND_IP=192.168.0.10
 
@@ -19,6 +20,7 @@ if [[ $MAGAOX_ROLE == AOC ]]; then
         sudo tee $OVERRIDE_PATH/override.conf <<HERE
 [Service]
 Environment="NETCONSOLE_PORTS=$NETCONSOLE_PORTS"
+Environment="NETCONSOLE_LOG_DIR=$NETCONSOLE_LOG_DIR"
 Environment="NETCONSOLE_BIND_IP=$NETCONSOLE_BIND_IP
 HERE
 
