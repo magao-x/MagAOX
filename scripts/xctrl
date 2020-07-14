@@ -172,9 +172,12 @@ def _shutdown_helper(process_name):
                 _run_as_xsup(f'tmux kill-session -t {process_name}')
                 warning(f'Killed tmux session for {process_name}')
             else:
-                code, _, __ = _run_as_xsup(f'tmux send-keys -t {process_name} C-c', check=False)
-                if code != 0:  # maybe it already exited?
-                    continue
+                if attempts == 0:
+                    # Only interrupt the app on the first go-round so it doesn't segfault while
+                    # exiting
+                    code, _, __ = _run_as_xsup(f'tmux send-keys -t {process_name} C-c', check=False)
+                    if code != 0:  # maybe it already exited?
+                        continue
                 code, _, __ = _run_as_xsup(f'tmux send-keys -t {process_name} "exit" Enter', check=False)
                 if code != 0:
                     continue
