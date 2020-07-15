@@ -32,7 +32,7 @@ echo "export CUDA_ROOT=/usr/local/cuda" >> /etc/profile.d/cuda.sh
 echo "export PATH=\"\$PATH:/usr/local/cuda/bin\"" >> /etc/profile.d/cuda.sh
 
 # Install nvidia-persistenced
-if [[ ! -e /usr/lib/systemd/system/nvidia-persistenced.service ]]; then
+if [[ $MAGAOX_ROLE != vm && $MAGAOX_ROLE != ci && ! -e /usr/lib/systemd/system/nvidia-persistenced.service ]]; then
   workdir=/tmp/persistenced_setup_$(date +%s)
   mkdir $workdir
   cd $workdir
