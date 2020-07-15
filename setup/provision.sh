@@ -344,6 +344,13 @@ if [[ $MAGAOX_ROLE != ci ]]; then
     $MAYBE_SUDO bash -l "$DIR/steps/install_MagAOX.sh"
 fi
 
+# To try and debug hardware issues, ICC and RTC replicate their
+# kernel console log over UDP to AOC over the instrument LAN.
+# The script that collects these messages is in ../scripts/netconsole_logger
+# so we have to install its service unit after 'make scripts_install'
+# runs.
+sudo bash -l "$DIR/steps/configure_kernel_netconsole.sh"
+
 log_success "Provisioning complete"
 if [[ $MAGAOX_ROLE != vm ]]; then
     log_info "You'll probably want to run"
