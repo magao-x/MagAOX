@@ -30,3 +30,17 @@ fi
 echo "export CUDADIR=/usr/local/cuda" > /etc/profile.d/cuda.sh
 echo "export CUDA_ROOT=/usr/local/cuda" >> /etc/profile.d/cuda.sh
 echo "export PATH=\"\$PATH:/usr/local/cuda/bin\"" >> /etc/profile.d/cuda.sh
+
+# Install nvidia-persistenced
+if [[ ! -e /usr/lib/systemd/system/nvidia-persistenced.service ]]; then
+  workdir=/tmp/persistenced_setup_$(date +%s)
+  mkdir $workdir
+  cd $workdir
+  cp /usr/share/doc/NVIDIA_GLX-1.0/sample/nvidia-persistenced-init.tar.bz2 .
+  tar xjf nvidia-persistenced-init.tar.bz2
+  cd nvidia-persistenced-init
+  # NVIDIA's install script adds the user, adds a systemd unit
+  # enables it, and starts it.
+  sudo bash install.sh systemd
+  rm -r $workdir
+fi
