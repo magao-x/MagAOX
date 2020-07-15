@@ -54,14 +54,19 @@ def listener(port_num, name):
                          socket.SOCK_DGRAM) # UDP
     sock.bind((NETCONSOLE_BIND_IP, port_num))
     debug_log(f'Bound to {NETCONSOLE_BIND_IP}:{port_num}, accepting connections')
-    with open(f'{NETCONSOLE_LOG_DIR}/{name}_{ts_digitsonly}', 'w') as log_file:
+    output_filename = f'{NETCONSOLE_LOG_DIR}/{name}_{ts_digitsonly}'
+
+    debug_log(f'Opening {output_filename} for writing...')
+    with open(output_filename, 'w') as log_file:
         while True:
             data, _ = sock.recvfrom(1024) # buffer size is 1024 bytes
             msg_ts = datetime.datetime.now()
             message = data.decode('utf8')
-            log_file.write(f'{msg_ts.isoformat()} {message}\n')
-            if DEBUG:
-                print(f'{name} {msg_ts.isoformat()} {message}')
+            log_file.write(f'{msg_ts.isoformat()} {message}')
+            log_file.flush()
+            if message[-1] == '\n':
+                message = message[:-1]
+            debug_log(f'{name} {msg_ts.isoformat()} {message}')
 
 
 

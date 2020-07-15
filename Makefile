@@ -83,7 +83,7 @@ utils_to_build = logdump \
                  cursesINDI \
 				 xrif2shmim
 
-scripts_to_install = magaox query_seeing sync_cacao xctrl
+scripts_to_install = magaox query_seeing sync_cacao xctrl netconsole_logger
 
 all: indi_all libs_all apps_all utils_all
 
