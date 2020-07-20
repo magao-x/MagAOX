@@ -1,4 +1,9 @@
 #!/bin/bash
+# If not started as root, sudo yourself
+if [[ "$EUID" != 0 ]]; then
+    sudo bash -l $0 "$@"
+    exit $?
+fi
 DIR="$( cd "$( dirname "${BASH_SOURCE[0]}" )" && pwd )"
 source $DIR/../_common.sh
 set -euo pipefail
@@ -26,6 +31,9 @@ CUDA_URL=https://developer.nvidia.com/compute/cuda/10.1/Prod/local_installers/$C
 _cached_fetch $CUDA_URL $CUDA_RUNFILE
 if [[ ! -e /usr/local/cuda-$CUDA_VERSION ]]; then
     bash $CUDA_RUNFILE $CUDA_FLAGS
+else
+    log_info "Existing CUDA install found in /usr/local/cuda-$CUDA_VERSION"
+    log_info "sudo /usr/local/cuda-$CUDA_VERSION/bin/cuda-uninstaller to uninstall"
 fi
 echo "export CUDADIR=/usr/local/cuda" > /etc/profile.d/cuda.sh
 echo "export CUDA_ROOT=/usr/local/cuda" >> /etc/profile.d/cuda.sh
