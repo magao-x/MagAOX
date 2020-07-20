@@ -125,7 +125,7 @@ apps/xt1121DCDU/xt1121DCDU
 #z
 apps/zaberCtrl/zaberCtrl
 apps/zaberLowLevel/zaberLowLevel
-
+apps/zylaCtrl/zylaCtrl
 
 ##########################################
 #Executables and util specifics to ignore:
