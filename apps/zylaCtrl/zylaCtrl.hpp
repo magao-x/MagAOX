@@ -208,11 +208,13 @@ zylaCtrl::zylaCtrl() : MagAOXApp(MAGAOX_CURRENT_SHA1, MAGAOX_REPO_MODIFIED)
    m_powerOnWait = 10;
    
 
+   m_usesFPS = true;
    m_usesModes = false;
 
    m_startupTemp = 20;
    
    m_expTimeSet = 0.05; //Set default for startup
+   m_fpsSet = 20; //Set default for startup
    
    return;
 }
@@ -258,6 +260,30 @@ void zylaCtrl::loadConfig()
 inline
 int zylaCtrl::appStartup()
 {
+   m_minROIx = 0;
+   m_maxROIx = 2047;
+   m_stepROIx = 0;
+   
+   m_minROIy = 0;
+   m_maxROIy = 2047;
+   m_stepROIy = 0;
+   
+   m_minROIWidth = 1;
+   m_maxROIWidth = 2048;
+   m_stepROIWidth = 4;
+   
+   m_minROIHeight = 1;
+   m_maxROIHeight = 2048;
+   m_stepROIHeight = 1;
+   
+   m_minROIBinning_x = 1;
+   m_maxROIBinning_x = 32;
+   m_stepROIBinning_x = 1;
+   
+   m_minROIBinning_y = 1;
+   m_maxROIBinning_y = 1024;
+   m_stepROIBinning_y = 1;
+   
    if(dev::stdCamera<zylaCtrl>::appStartup() < 0)
    {
       return log<software_critical,-1>({__FILE__,__LINE__});
@@ -682,6 +708,15 @@ int zylaCtrl::powerOnDefaults()
    m_tempControlStatusSet = false;
    m_tempControlStatus =false;
       
+   m_ccdTempSetpt = 0; //This is the power on setpoint
+
+   m_currentROI.x = 1075;
+   m_currentROI.y = 975;
+   m_currentROI.w = 128;
+   m_currentROI.h = 128;
+   m_currentROI.bin_x = 1;
+   m_currentROI.bin_y = 1;
+   
    return 0;
 }
 
@@ -730,6 +765,7 @@ inline
 int zylaCtrl::setFPS()
 {
    std::cerr << "setFPS\n";
+   m_reconfig = true;
    return 0;
 }
 
@@ -737,7 +773,18 @@ int zylaCtrl::setFPS()
 inline 
 int zylaCtrl::setNextROI()
 {
-   std::cerr << "setNextROI\n";
+   std::cerr << "setNextROI:\n";
+   std::cerr << "  m_nextROI.x = " << m_nextROI.x << "\n";
+   std::cerr << "  m_nextROI.y = " << m_nextROI.y << "\n";
+   std::cerr << "  m_nextROI.w = " << m_nextROI.w << "\n";
+   std::cerr << "  m_nextROI.h = " << m_nextROI.h << "\n";
+   std::cerr << "  m_nextROI.bin_x = " << m_nextROI.bin_x << "\n";
+   std::cerr << "  m_nextROI.bin_y = " << m_nextROI.bin_y << "\n";
+   
+   m_reconfig = true;
+
+   updateSwitchIfChanged(m_indiP_roi_set, "request", pcf::IndiElement::Off, INDI_IDLE);
+   
    return 0;
 }
 
@@ -760,10 +807,71 @@ int zylaCtrl::configureAcquisition()
    std::unique_lock<std::mutex> lock(m_indiMutex);
 
 
-
+   AT_BOOL faoi;
+   AT_GetBool(m_handle, L"FullAOIControl", &faoi);
+   std::cerr << "FullAOIControl: " << std::boolalpha << faoi << "\n";
+   
+   //Configure ROI:
+   AT_64 xbin = m_nextROI.bin_x;
+   AT_64 ybin = m_nextROI.bin_y;
+   AT_64 left= (m_nextROI.x - 0.5*( (float) m_nextROI.w - 1.0)) + 1;
+   AT_64 top =  (m_nextROI.y - 0.5*( (float) m_nextROI.h - 1.0)) + 1;
+   AT_64 width = m_nextROI.w;
+   AT_64 height = m_nextROI.h;
+   
+   std::cerr << xbin << " " << ybin << " " << left << " " << top << " " << width << " " << height << " " << "\n";
+   
+   rv = AT_SetInt(m_handle, L"AOIHBin", xbin);
+   if(rv != AT_SUCCESS)
+   {
+      return log<software_error,-1>({__FILE__,__LINE__, "Error from AT_SetInt(<AOIHBin>): [" + std::to_string(xbin) + "] err: " + std::to_string(rv)});
+   }
+   
+   rv = AT_SetInt(m_handle, L"AOIVBin", ybin);
+   if(rv != AT_SUCCESS)
+   {
+      return log<software_error,-1>({__FILE__,__LINE__, "Error from AT_SetInt(<AOIVBin>): [" + std::to_string(ybin) + "] err: " + std::to_string(rv)});
+   }
+   
+   rv = AT_SetInt(m_handle, L"AOIWidth", width);
+   if(rv != AT_SUCCESS)
+   {
+      return log<software_error,-1>({__FILE__,__LINE__, "Error from AT_SetInt(<AOIWidth>): [" + std::to_string(width) + "] err: " + std::to_string(rv)});
+   }
+   
+   rv = AT_SetInt(m_handle, L"AOILeft", left);
+   if(rv != AT_SUCCESS)
+   {
+      return log<software_error,-1>({__FILE__,__LINE__, "Error from AT_SetInt(<AOILeft>): [" + std::to_string(left) + "] err: " + std::to_string(rv)});
+   }
+   
+   rv = AT_SetInt(m_handle, L"AOIHeight", height);
+   if(rv != AT_SUCCESS)
+   {
+      return log<software_error,-1>({__FILE__,__LINE__, "Error from AT_SetInt(<AOIHeight>): [" + std::to_string(height) + "] err: " + std::to_string(rv)});
+   }
+   
+   rv = AT_SetInt(m_handle, L"AOITop", top);
+   if(rv != AT_SUCCESS)
+   {
+      return log<software_error,-1>({__FILE__,__LINE__, "Error from AT_SetInt(<AOITop>): [" + std::to_string(top) + "] err: " + std::to_string(rv)});
+   }
+   
    //Get Detector dimensions
-   AT_64 width, height, stride;
+   AT_64 stride;
     
+   rv = AT_GetInt(m_handle, L"AOI Left", &left);    
+   if(rv != AT_SUCCESS)
+   {
+      return log<software_error,-1>({__FILE__,__LINE__, "Error from AT_GetInt(<AOI Left>): " + std::to_string(rv)});
+   }
+
+   rv = AT_GetInt(m_handle, L"AOI Top", &top);    
+   if(rv != AT_SUCCESS)
+   {
+      return log<software_error,-1>({__FILE__,__LINE__, "Error from AT_GetInt(<AOI Top>): " + std::to_string(rv)});
+   }
+   
    rv = AT_GetInt(m_handle, L"AOI Width", &width);    
    if(rv != AT_SUCCESS)
    {
@@ -775,6 +883,19 @@ int zylaCtrl::configureAcquisition()
    {
       return log<software_error,-1>({__FILE__,__LINE__, "Error from AT_GetInt(<AOI Height>): " + std::to_string(rv)});
    }
+   
+   m_currentROI.x = left + 0.5*( (float) (width - 1.0)) ;
+   m_currentROI.y = top + 0.5*( (float) (height - 1.0)) ;
+   
+   m_currentROI.w = width;
+   m_currentROI.h = height;
+   
+   updateIfChanged( m_indiP_roi_x, "current", m_currentROI.x, INDI_OK);
+   updateIfChanged( m_indiP_roi_y, "current", m_currentROI.y, INDI_OK);
+   updateIfChanged( m_indiP_roi_w, "current", m_currentROI.w, INDI_OK);
+   updateIfChanged( m_indiP_roi_h, "current", m_currentROI.h, INDI_OK);
+   updateIfChanged( m_indiP_roi_bin_x, "current", m_currentROI.bin_x, INDI_OK);
+   updateIfChanged( m_indiP_roi_bin_y, "current", m_currentROI.bin_y, INDI_OK);
    
    rv = AT_GetInt(m_handle, L"AOI Stride", &stride);    
    if(rv != AT_SUCCESS)
@@ -838,6 +959,12 @@ int zylaCtrl::configureAcquisition()
    }
    m_expTime = m_expTimeSet;
    
+   AT_SetFloat(m_handle, L"FrameRate", m_fpsSet);
+   if(rv != AT_SUCCESS)
+   {
+      return log<software_error,-1>({__FILE__,__LINE__, "Error from AT_SetFloat(<FrameRate>): " + std::to_string(rv)});
+   }
+   m_fps = m_fpsSet;
    
    int pixelEncodingIndex = 0;
 

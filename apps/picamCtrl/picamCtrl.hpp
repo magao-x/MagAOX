@@ -93,13 +93,6 @@ protected:
    std::vector<float> m_adcSpeedValues = {0.1, 1, 5,10,20,30};
    
    //< The ADC speed, 5, 10, 20, or 30.
-
-   
-
-   
-   
-
-
    PicamHandle m_cameraHandle {0};
    PicamHandle m_modelHandle {0};
 
