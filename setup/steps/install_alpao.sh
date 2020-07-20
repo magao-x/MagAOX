@@ -1,9 +1,10 @@
 #!/bin/bash
 DIR="$( cd "$( dirname "${BASH_SOURCE[0]}" )" && pwd )"
+export BUILDING_KERNEL_STUFF=1  # disable loading devtoolset-7 for agreement w/ kernel gcc
 source $DIR/../_common.sh
 set -euo pipefail
 cd /opt/MagAOX/vendor/alpao
-log_info "Began Alpao install"
+log_info "Began Alpao install with $(which gcc)"
 sudo patch -Np1 < alpao_build_fix.patch || true
 # option 2 - "Install ASDK and Interface Corp. PEX-292144 support"
 echo 2 | sudo bash Linux/InstallASDK.sh

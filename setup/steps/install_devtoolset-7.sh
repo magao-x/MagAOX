@@ -9,8 +9,12 @@ set -euo pipefail
 # so we don't want it enabled when, e.g., Vagrant
 # sshes in to change things. (Complete sudo functionality
 # is available to interactive shells by specifying /bin/sudo.)
-yum -y install devtoolset-7
-echo "if tty -s; then source /opt/rh/devtoolset-7/enable; fi" | tee /etc/profile.d/devtoolset-7.sh
+sudo yum -y install devtoolset-7
+cat << 'EOF' | sudo tee /etc/profile.d/devtoolset-7.sh
+if tty -s; then
+  if [[ $USER != root ]]; then source /opt/rh/devtoolset-7/enable; fi
+fi
+EOF
 set +u
 source /opt/rh/devtoolset-7/enable
 set -u

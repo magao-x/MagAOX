@@ -5,6 +5,7 @@ if [[ "$EUID" != 0 ]]; then
     exit $?
 fi
 DIR="$( cd "$( dirname "${BASH_SOURCE[0]}" )" && pwd )"
+export BUILDING_KERNEL_STUFF=1  # disable loading devtoolset-7 for agreement w/ kernel gcc
 source $DIR/../_common.sh
 set -euo pipefail
 
@@ -20,7 +21,7 @@ elif [[ $MAGAOX_ROLE == RTC || $MAGAOX_ROLE == ICC || $MAGAOX_ROLE == AOC || $MA
 else
   CUDA_FLAGS="--driver --toolkit --samples"
 fi
-CUDA_PACKAGE_DIR=./cuda
+CUDA_PACKAGE_DIR=/opt/MagAOX/vendor/cuda
 mkdir -p $CUDA_PACKAGE_DIR
 cd $CUDA_PACKAGE_DIR
 # We use the local CUDA installer (2.5 GB download) to ensure
