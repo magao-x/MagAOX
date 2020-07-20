@@ -140,6 +140,10 @@ function createuser() {
 # We work around the buggy devtoolset /bin/sudo wrapper in provision.sh, but
 # that means we have to explicitly enable it ourselves.
 # (This crap again: https://bugzilla.redhat.com/show_bug.cgi?id=1319936)
+# Also, we control whether to build with the devtoolset gcc7 compiler or the
+# included gcc4 compiler with $BUILDING_KERNEL_STUFF. If that's set to 1,
+# use the included gcc4 for consistency with the running kernel.
+set +u; if [[ -z $BUILDING_KERNEL_STUFF ]]; then BUILDING_KERNEL_STUFF=0; fi; set -u # Temporarily disable checking for unbound variables to set a default value
 if [[ $BUILDING_KERNEL_STUFF != 1 && -e /opt/rh/devtoolset-7/enable ]]; then
     set +u; source /opt/rh/devtoolset-7/enable; set -u
 fi
