@@ -16,19 +16,22 @@ source $DIR/_common.sh
 
 creategroup magaox
 creategroup magaox-dev
-createuser xsup
 
-if sudo test ! -e /home/xsup/.ssh/id_ed25519; then
-  $_REAL_SUDO -u xsup ssh-keygen -t ed25519 -N "" -f /home/xsup/.ssh/id_ed25519 -q
-fi
-if ! grep -q magaox-dev /etc/pam.d/su; then
-  cat <<'HERE' | sudo sed -i '/pam_rootok.so$/r /dev/stdin' /etc/pam.d/su
+if [[ $MAGAOX_ROLE != vm ]]; then
+  createuser xsup
+
+  if sudo test ! -e /home/xsup/.ssh/id_ed25519; then
+    $_REAL_SUDO -u xsup ssh-keygen -t ed25519 -N "" -f /home/xsup/.ssh/id_ed25519 -q
+  fi
+  if ! grep -q magaox-dev /etc/pam.d/su; then
+    cat <<'HERE' | sudo sed -i '/pam_rootok.so$/r /dev/stdin' /etc/pam.d/su
 auth            [success=ignore default=1] pam_succeed_if.so user = xsup
 auth            sufficient      pam_succeed_if.so use_uid user ingroup magaox-dev
 HERE
-  log_info "Modified /etc/pam.d/su"
-else
-  log_info "/etc/pam.d/su already includes reference to magaox-dev, not modifying"
+    log_info "Modified /etc/pam.d/su"
+  else
+    log_info "/etc/pam.d/su already includes reference to magaox-dev, not modifying"
+  fi
 fi
 if [[ $EUID != 0 ]]; then
   if [[ -z $(groups | tr ' ' '\n' | grep 'magaox-dev$') ]]; then

@@ -4,14 +4,17 @@ SELF_DIR := $(abspath $(dir $(lastword $(MAKEFILE_LIST))))
 apps_common = \
 	sshDigger \
 	sysMonitor \
-	xindiserver
+	xindiserver \
+	mzmqClient \
+	magAOXMaths \
+	timeSeriesSimulator
 
 apps_rtcicc = \
 	mzmqServer \
 	streamWriter \
 	alpaoCtrl \
 	dmMode \
-        shmimIntegrator
+    shmimIntegrator
 
 apps_rtc = \
 	ocam2KCtrl \
@@ -30,21 +33,18 @@ apps_icc = \
 	picamCtrl \
 	smc100ccCtrl \
 	andorCtrl \
-        usbtempMon \
-        xt1121Ctrl \
-        xt1121DCDU
-
+	usbtempMon \
+	xt1121Ctrl \
+	xt1121DCDU
 
 apps_aoc = \
 	trippLitePDU \
-	mzmqClient \
-        tcsInterface \
-        adcTracker \
-        kTracker
+    tcsInterface \
+    adcTracker \
+    kTracker
 
-apps_vm = \
-	magAOXMaths \
-	timeSeriesSimulator
+# apps_vm = none yet
+# apps_tcc = none yet
 
 libs_to_build = libtelnet
 
@@ -58,10 +58,10 @@ else ifeq ($(MAGAOX_ROLE),ICC)
 else ifeq ($(MAGAOX_ROLE),RTC)
   apps_to_build += $(apps_rtcicc)
   apps_to_build += $(apps_rtc)
-else ifeq ($(MAGAOX_ROLE),TCC)
-  apps_to_build += $(apps_vm)
-else ifeq ($(MAGAOX_ROLE),vm)
-  apps_to_build += $(apps_vm)
+# else ifeq ($(MAGAOX_ROLE),TCC)
+#   apps_to_build += $(apps_tcc)
+# else ifeq ($(MAGAOX_ROLE),vm)
+#   apps_to_build += $(apps_vm)
 endif
 
 all_guis = dmCtrlGUI \
@@ -83,7 +83,7 @@ utils_to_build = logdump \
                  cursesINDI \
 				 xrif2shmim
 
-scripts_to_install = magaox query_seeing sync_cacao xctrl
+scripts_to_install = magaox query_seeing sync_cacao xctrl netconsole_logger
 
 all: indi_all libs_all apps_all utils_all
 

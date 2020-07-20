@@ -174,9 +174,13 @@ fi
 ## Set up file structure and permissions
 sudo bash -l "$DIR/steps/ensure_dirs_and_perms.sh" $MAGAOX_ROLE
 
-# Enable forwarding MagAO-X GUIs to the host for VMs
+
 if [[ $MAGAOX_ROLE == vm ]]; then
+    # Enable forwarding MagAO-X GUIs to the host for VMs
     sudo bash -l "$DIR/steps/enable_vm_x11_forwarding.sh"
+    # Install a config in ~/.ssh/config for the Vagrant user
+    # to it easier to make tunnels work
+    sudo bash -l "$DIR/steps/configure_vm_ssh.sh"
 fi
 
 # Install dependencies for the GUIs
@@ -339,6 +343,13 @@ sudo bash -l "$DIR/steps/install_aliases.sh"
 if [[ $MAGAOX_ROLE != ci ]]; then
     $MAYBE_SUDO bash -l "$DIR/steps/install_MagAOX.sh"
 fi
+
+# To try and debug hardware issues, ICC and RTC replicate their
+# kernel console log over UDP to AOC over the instrument LAN.
+# The script that collects these messages is in ../scripts/netconsole_logger
+# so we have to install its service unit after 'make scripts_install'
+# runs.
+sudo bash -l "$DIR/steps/configure_kernel_netconsole.sh"
 
 log_success "Provisioning complete"
 if [[ $MAGAOX_ROLE != vm ]]; then
