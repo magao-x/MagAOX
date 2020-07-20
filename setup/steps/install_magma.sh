@@ -1,8 +1,13 @@
 #!/bin/bash
+# If not started as root, sudo yourself
+if [[ "$EUID" != 0 ]]; then
+    sudo bash -l $0 "$@"
+    exit $?
+fi
 DIR="$( cd "$( dirname "${BASH_SOURCE[0]}" )" && pwd )"
 source $DIR/../_common.sh
 set -euo pipefail
-MAGMA_VERSION=2.5.1-alpha1
+MAGMA_VERSION=2.5.3
 MAGMA_FOLDER=./magma-$MAGMA_VERSION
 if [[ ! -d $MAGMA_FOLDER ]]; then
   _cached_fetch http://icl.utk.edu/projectsfiles/magma/downloads/magma-$MAGMA_VERSION.tar.gz magma-$MAGMA_VERSION.tar.gz
