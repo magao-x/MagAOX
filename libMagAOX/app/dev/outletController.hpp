@@ -799,14 +799,7 @@ int outletController<derivedT>::updateINDI()
    {
       std::string state = stateIntToString( channelState( it->first ));
 
-      std::string target;
-
-      target = it->second.m_indiP_prop["target"].get();
-
-      //if(target == state) target = "";
-
       indi::updateIfChanged( it->second.m_indiP_prop, "state", state, derived().m_indiDriver );
-      indi::updateIfChanged( it->second.m_indiP_prop, "target", target, derived().m_indiDriver );
    }
 
    
