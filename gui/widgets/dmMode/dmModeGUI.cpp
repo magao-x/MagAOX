@@ -22,7 +22,6 @@ dmModeGUI::dmModeGUI( std::string deviceName,
    ui.setupUi(this);
    
    setWindowTitle(QString(deviceName.c_str()));
-   
 }
    
 dmModeGUI::~dmModeGUI()

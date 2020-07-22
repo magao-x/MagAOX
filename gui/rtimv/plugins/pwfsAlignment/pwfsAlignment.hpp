@@ -62,7 +62,10 @@ class pwfsAlignment : public QObject,
       
       virtual ~pwfsAlignment();
 
-      virtual int attachOverlay(QGraphicsScene*, std::unordered_map<std::string, rtimvDictBlob> *); 
+      virtual int attachOverlay( rtimvGraphicsView*, 
+                                 std::unordered_map<std::string, rtimvDictBlob> *,
+                                 mx::app::appConfigurator & config
+                               ); 
       
       virtual int updateOverlay();
 

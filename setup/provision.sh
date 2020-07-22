@@ -51,6 +51,7 @@ else
         echo "    AOC - Adaptive optics Operator Computer"
         echo "    RTC - Real Time control Computer"
         echo "    ICC - Instrument Control Computer"
+        echo "    TCC - Testbed Control Computer"
         echo "    workstation - Any other MagAO-X workstation"
         echo
         while [[ -z $MAGAOX_ROLE ]]; do
@@ -65,11 +66,14 @@ else
                 ICC)
                     MAGAOX_ROLE=ICC
                     ;;
+                TCC)
+                    MAGAOX_ROLE=TCC
+                    ;;
                 workstation)
                     MAGAOX_ROLE=workstation
                     ;;
                 *)
-                    echo "Must be one of AOC, RTC, ICC, or workstation."
+                    echo "Must be one of AOC, RTC, ICC, TCC, or workstation."
                     continue
             esac
         done
@@ -170,18 +174,22 @@ fi
 ## Set up file structure and permissions
 sudo bash -l "$DIR/steps/ensure_dirs_and_perms.sh" $MAGAOX_ROLE
 
-# Enable forwarding MagAO-X GUIs to the host for VMs
+
 if [[ $MAGAOX_ROLE == vm ]]; then
+    # Enable forwarding MagAO-X GUIs to the host for VMs
     sudo bash -l "$DIR/steps/enable_vm_x11_forwarding.sh"
+    # Install a config in ~/.ssh/config for the Vagrant user
+    # to it easier to make tunnels work
+    sudo bash -l "$DIR/steps/configure_vm_ssh.sh"
 fi
 
 # Install dependencies for the GUIs
-if [[ $MAGAOX_ROLE == AOC || $MAGAOX_ROLE == ci || $MAGAOX_ROLE == vm || $MAGAOX_ROLE == workstation ]]; then
+if [[ $MAGAOX_ROLE == AOC || $MAGAOX_ROLE == TCC || $MAGAOX_ROLE == ci || $MAGAOX_ROLE == vm || $MAGAOX_ROLE == workstation ]]; then
     sudo bash -l "$DIR/steps/install_gui_dependencies.sh"
 fi
 
 # Install Linux headers (instrument computers use the RT kernel / headers)
-if [[ $MAGAOX_ROLE == ci || $MAGAOX_ROLE == vm || $MAGAOX_ROLE == workstation || $MAGAOX_ROLE == AOC ]]; then
+if [[ $MAGAOX_ROLE == ci || $MAGAOX_ROLE == vm || $MAGAOX_ROLE == workstation || $MAGAOX_ROLE == AOC || $MAGAOX_ROLE == TCC ]]; then
     if [[ $ID == ubuntu ]]; then
         sudo apt install -y linux-headers-generic
     elif [[ $ID == centos ]]; then
@@ -191,7 +199,7 @@ fi
 ## Build third-party dependencies under /opt/MagAOX/vendor
 cd /opt/MagAOX/vendor
 sudo bash -l "$DIR/steps/install_mkl_tarball.sh"
-if [[ $MAGAOX_ROLE == RTC || $MAGAOX_ROLE == ICC || $MAGAOX_ROLE == AOC || $MAGAOX_ROLE == ci ]]; then
+if [[ $MAGAOX_ROLE == RTC || $MAGAOX_ROLE == ICC || $MAGAOX_ROLE == AOC || $MAGAOX_ROLE == TCC || $MAGAOX_ROLE == ci ]]; then
     sudo bash -l "$DIR/steps/install_cuda.sh"
     sudo bash -l "$DIR/steps/install_magma.sh"
 fi
@@ -204,8 +212,10 @@ sudo bash -l "$DIR/steps/install_cppzmq.sh"
 sudo bash -l "$DIR/steps/install_levmar.sh"
 sudo bash -l "$DIR/steps/install_flatbuffers.sh"
 sudo bash -l "$DIR/steps/install_xrif.sh"
-if [[ $MAGAOX_ROLE == RTC || $MAGAOX_ROLE == ICC || $MAGAOX_ROLE == AOC || $MAGAOX_ROLE == ci || $MAGAOX_ROLE == vm ]]; then
+if [[ $MAGAOX_ROLE == RTC || $MAGAOX_ROLE == ICC || $MAGAOX_ROLE == AOC || $MAGAOX_ROLE == TCC || $MAGAOX_ROLE == ci || $MAGAOX_ROLE == vm ]]; then
     sudo bash -l "$DIR/steps/install_basler_pylon.sh"
+fi
+if [[ $MAGAOX_ROLE == RTC || $MAGAOX_ROLE == ICC || $MAGAOX_ROLE == AOC || $MAGAOX_ROLE == ci || $MAGAOX_ROLE == vm ]]; then
     sudo bash -l "$DIR/steps/install_edt.sh"
     sudo bash -l "$DIR/steps/install_picam.sh"
 fi
@@ -231,7 +241,7 @@ if [[ -e $VENDOR_SOFTWARE_BUNDLE ]]; then
         fi
         sudo bash -l "$DIR/steps/install_andor.sh"
     fi
-    if [[ $ID == centos && ( $MAGAOX_ROLE == RTC || $MAGAOX_ROLE == vm ) ]]; then
+    if [[ $ID == centos && ( $MAGAOX_ROLE == RTC || $MAGAOX_ROLE == TCC || $MAGAOX_ROLE == vm) ]]; then
         sudo bash -l "$DIR/steps/install_bmc.sh"
     fi
     if [[ $MAGAOX_ROLE == ICC ]]; then
@@ -290,9 +300,15 @@ fi
 # On a Vagrant VM, we need to "sudo" to become vagrant since the provisioning
 # runs as root.
 cd /opt/MagAOX/source
-# Initialize the config and calib repos as normal user
-$MAYBE_SUDO bash -l "$DIR/steps/install_magao-x_config.sh"
-$MAYBE_SUDO bash -l "$DIR/steps/install_magao-x_calib.sh"
+if [[ $MAGAOX_ROLE == TCC ]]; then
+    # Initialize the config and calib repos as normal user
+    $MAYBE_SUDO bash -l "$DIR/steps/install_testbed_config.sh"
+    $MAYBE_SUDO bash -l "$DIR/steps/install_testbed_calib.sh"
+else
+    # Initialize the config and calib repos as normal user
+    $MAYBE_SUDO bash -l "$DIR/steps/install_magao-x_config.sh"
+    $MAYBE_SUDO bash -l "$DIR/steps/install_magao-x_calib.sh"
+fi
 # Install first-party deps
 $MAYBE_SUDO bash -l "$DIR/steps/install_cacao.sh"
 $MAYBE_SUDO bash -l "$DIR/steps/install_milkzmq.sh"
@@ -305,11 +321,16 @@ $MAYBE_SUDO bash -l "$DIR/steps/install_purepyindi.sh"
 $MAYBE_SUDO bash -l "$DIR/steps/install_magpyx.sh"
 $MAYBE_SUDO bash -l "$DIR/steps/install_imagestreamio_python.sh"
 
+
 if [[ $MAGAOX_ROLE == AOC || $MAGAOX_ROLE == vm ||  $MAGAOX_ROLE == workstation ]]; then
     # sup web interface
     $MAYBE_SUDO bash -l "$DIR/steps/install_sup.sh"
+fi
+
+if [[ $MAGAOX_ROLE == AOC || $MAGAOX_ROLE == TCC || $MAGAOX_ROLE == vm ||  $MAGAOX_ROLE == workstation ]]; then
     # realtime image viewer
     $MAYBE_SUDO bash -l "$DIR/steps/install_rtimv.sh"
+    # regular old ds9 image viewer
     sudo bash -l "$DIR/steps/install_ds9.sh"
 fi
 
@@ -322,6 +343,13 @@ sudo bash -l "$DIR/steps/install_aliases.sh"
 if [[ $MAGAOX_ROLE != ci ]]; then
     $MAYBE_SUDO bash -l "$DIR/steps/install_MagAOX.sh"
 fi
+
+# To try and debug hardware issues, ICC and RTC replicate their
+# kernel console log over UDP to AOC over the instrument LAN.
+# The script that collects these messages is in ../scripts/netconsole_logger
+# so we have to install its service unit after 'make scripts_install'
+# runs.
+sudo bash -l "$DIR/steps/configure_kernel_netconsole.sh"
 
 log_success "Provisioning complete"
 if [[ $MAGAOX_ROLE != vm ]]; then

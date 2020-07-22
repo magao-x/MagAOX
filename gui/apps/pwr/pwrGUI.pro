@@ -6,7 +6,8 @@ TEMPLATE = app
 TARGET = pwrGUI
 DESTDIR = bin/ 
 DEPENDPATH += ./ ../../lib 
-INCLUDEPATH +=../../widgets/multiDial
+INCLUDEPATH += ../../widgets/multiDial
+INCLUDEPATH += ../../lib
 
 MOC_DIR = moc/
 OBJECTS_DIR = obj/
@@ -28,7 +29,8 @@ MAKEFILE = makefile.pwrGUI
 HEADERS += pwrGUI.hpp \
            ../../widgets/multiDial/xqwt_multi_dial.h \
            ../../widgets/pwr/pwrDevice.hpp \
-           ../../widgets/pwr/pwrChannel.hpp
+           ../../widgets/pwr/pwrChannel.hpp \
+           ../../lib/multiIndiManager.hpp 
            
 SOURCES += pwrGUI.cpp \
            pwr_main.cpp \
@@ -40,5 +42,8 @@ FORMS += ../../widgets/pwr/pwr.ui
      
 LIBS += ../../../INDI/libcommon/libcommon.a \
         ../../../INDI/liblilxml/liblilxml.a
+
+RESOURCES += ../../resources/magaox.qrc         
+RESOURCES += ../../resources/MagAOXStyleSheets/MagAOXStyle.qrc 
 
 QT += widgets

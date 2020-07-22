@@ -85,7 +85,7 @@
        <item>
         <layout class="QVBoxLayout" name="verticalLayout_3">
          <item>
-          <widget class="QLabel" name="label_11">
+          <widget class="QLabel" name="labelModAndCenter">
            <property name="maximumSize">
             <size>
              <width>16777215</width>
@@ -155,7 +155,7 @@
          <item>
           <layout class="QGridLayout" name="gridLayout_2" columnstretch="1,1,1">
            <item row="2" column="0">
-            <widget class="QLabel" name="label_2">
+            <widget class="QLabel" name="labelRadius">
              <property name="text">
               <string>Radius:</string>
              </property>
@@ -165,22 +165,22 @@
             </widget>
            </item>
            <item row="0" column="1">
-            <widget class="QLabel" name="label_3">
+            <widget class="QLabel" name="labelFreqCurrent">
              <property name="text">
               <string>current</string>
              </property>
              <property name="alignment">
-              <set>Qt::AlignCenter</set>
+              <set>Qt::AlignBottom|Qt::AlignHCenter</set>
              </property>
             </widget>
            </item>
            <item row="0" column="2">
-            <widget class="QLabel" name="label_4">
+            <widget class="QLabel" name="labelFreqTarget">
              <property name="text">
               <string>target</string>
              </property>
              <property name="alignment">
-              <set>Qt::AlignCenter</set>
+              <set>Qt::AlignBottom|Qt::AlignHCenter</set>
              </property>
             </widget>
            </item>
@@ -211,7 +211,7 @@
             <widget class="QLineEdit" name="modRad_target"/>
            </item>
            <item row="1" column="0">
-            <widget class="QLabel" name="label">
+            <widget class="QLabel" name="labelFreq">
              <property name="text">
               <string>Frequency:</string>
              </property>
@@ -255,7 +255,7 @@
          <item>
           <layout class="QHBoxLayout" name="horizontalLayout_7" stretch="0,3,0,3">
            <item>
-            <widget class="QLabel" name="label_15">
+            <widget class="QLabel" name="labelCh1">
              <property name="text">
               <string>Ch1:</string>
              </property>
@@ -265,7 +265,7 @@
             <widget class="QLineEdit" name="modCh1"/>
            </item>
            <item>
-            <widget class="QLabel" name="label_17">
+            <widget class="QLabel" name="labelCh2">
              <property name="text">
               <string>Ch2:</string>
              </property>
@@ -277,7 +277,7 @@
           </layout>
          </item>
          <item>
-          <widget class="QLabel" name="label_9">
+          <widget class="QLabel" name="labelMedianFluxes">
            <property name="maximumSize">
             <size>
              <width>16777215</width>
@@ -528,7 +528,7 @@
               </widget>
              </item>
              <item row="1" column="1">
-              <widget class="QPushButton" name="buttonScale">
+              <widget class="QPushButton" name="button_tip_scale">
                <property name="sizePolicy">
                 <sizepolicy hsizetype="MinimumExpanding" vsizetype="MinimumExpanding">
                  <horstretch>1</horstretch>
@@ -720,7 +720,7 @@
        <item>
         <layout class="QVBoxLayout" name="gridPupilMeds" stretch="0,0,0,0">
          <item>
-          <widget class="QLabel" name="label_8">
+          <widget class="QLabel" name="labelPupilFitting">
            <property name="maximumSize">
             <size>
              <width>16777215</width>
@@ -746,7 +746,7 @@
             <widget class="QLineEdit" name="fitThreshold_target"/>
            </item>
            <item row="1" column="0">
-            <widget class="QLabel" name="label_5">
+            <widget class="QLabel" name="labelThreshold">
              <property name="text">
               <string>Threshold:</string>
              </property>
@@ -766,17 +766,17 @@
             </widget>
            </item>
            <item row="0" column="2">
-            <widget class="QLabel" name="layout_fitting">
+            <widget class="QLabel" name="labelThreshTarget">
              <property name="text">
               <string>target</string>
              </property>
              <property name="alignment">
-              <set>Qt::AlignCenter</set>
+              <set>Qt::AlignBottom|Qt::AlignHCenter</set>
              </property>
             </widget>
            </item>
            <item row="2" column="0">
-            <widget class="QLabel" name="label_6">
+            <widget class="QLabel" name="labelNoAvg">
              <property name="text">
               <string>No. Avg.</string>
              </property>
@@ -793,12 +793,12 @@
             </widget>
            </item>
            <item row="0" column="1">
-            <widget class="QLabel" name="label_14">
+            <widget class="QLabel" name="labelThreshCurrent">
              <property name="text">
               <string>current</string>
              </property>
              <property name="alignment">
-              <set>Qt::AlignCenter</set>
+              <set>Qt::AlignBottom|Qt::AlignHCenter</set>
              </property>
             </widget>
            </item>
@@ -1266,7 +1266,7 @@
        <item>
         <layout class="QVBoxLayout" name="layout_pupilalign" stretch="1,0,0,0,5,1,0,0">
          <item>
-          <widget class="QLabel" name="label_12">
+          <widget class="QLabel" name="labelPupilSteering">
            <property name="maximumSize">
             <size>
              <width>16777215</width>
@@ -1360,7 +1360,7 @@
          <item>
           <layout class="QHBoxLayout" name="horizontalLayout_8" stretch="1,3,1,3">
            <item>
-            <widget class="QLabel" name="label_18">
+            <widget class="QLabel" name="labelPupCh1">
              <property name="text">
               <string>Ch1:</string>
              </property>
@@ -1370,7 +1370,7 @@
             <widget class="QLineEdit" name="pupCh1"/>
            </item>
            <item>
-            <widget class="QLabel" name="label_19">
+            <widget class="QLabel" name="labelPupCh2">
              <property name="text">
               <string>Ch2:</string>
              </property>
@@ -1385,6 +1385,9 @@
           <layout class="QGridLayout" name="gridCoords" rowstretch="1,0,0,0,0,0">
            <item row="3" column="3">
             <widget class="QLineEdit" name="coordLR_D">
+             <property name="focusPolicy">
+              <enum>Qt::NoFocus</enum>
+             </property>
              <property name="alignment">
               <set>Qt::AlignCenter</set>
              </property>
@@ -1392,6 +1395,9 @@
            </item>
            <item row="1" column="2">
             <widget class="QLineEdit" name="coordUR_y">
+             <property name="focusPolicy">
+              <enum>Qt::NoFocus</enum>
+             </property>
              <property name="alignment">
               <set>Qt::AlignCenter</set>
              </property>
@@ -1399,6 +1405,9 @@
            </item>
            <item row="4" column="2">
             <widget class="QLineEdit" name="coordLL_y">
+             <property name="focusPolicy">
+              <enum>Qt::NoFocus</enum>
+             </property>
              <property name="alignment">
               <set>Qt::AlignCenter</set>
              </property>
@@ -1406,6 +1415,9 @@
            </item>
            <item row="4" column="3">
             <widget class="QLineEdit" name="coordLL_D">
+             <property name="focusPolicy">
+              <enum>Qt::NoFocus</enum>
+             </property>
              <property name="alignment">
               <set>Qt::AlignCenter</set>
              </property>
@@ -1413,6 +1425,9 @@
            </item>
            <item row="2" column="3">
             <widget class="QLineEdit" name="coordUL_D">
+             <property name="focusPolicy">
+              <enum>Qt::NoFocus</enum>
+             </property>
              <property name="alignment">
               <set>Qt::AlignCenter</set>
              </property>
@@ -1420,6 +1435,9 @@
            </item>
            <item row="2" column="2">
             <widget class="QLineEdit" name="coordUL_y">
+             <property name="focusPolicy">
+              <enum>Qt::NoFocus</enum>
+             </property>
              <property name="alignment">
               <set>Qt::AlignCenter</set>
              </property>
@@ -1427,6 +1445,9 @@
            </item>
            <item row="2" column="1">
             <widget class="QLineEdit" name="coordUL_x">
+             <property name="focusPolicy">
+              <enum>Qt::NoFocus</enum>
+             </property>
              <property name="alignment">
               <set>Qt::AlignCenter</set>
              </property>
@@ -1434,6 +1455,9 @@
            </item>
            <item row="5" column="1">
             <widget class="QLineEdit" name="coordAvg_x">
+             <property name="focusPolicy">
+              <enum>Qt::NoFocus</enum>
+             </property>
              <property name="alignment">
               <set>Qt::AlignCenter</set>
              </property>
@@ -1441,6 +1465,9 @@
            </item>
            <item row="3" column="2">
             <widget class="QLineEdit" name="coordLR_y">
+             <property name="focusPolicy">
+              <enum>Qt::NoFocus</enum>
+             </property>
              <property name="alignment">
               <set>Qt::AlignCenter</set>
              </property>
@@ -1448,6 +1475,9 @@
            </item>
            <item row="4" column="1">
             <widget class="QLineEdit" name="coordLL_x">
+             <property name="focusPolicy">
+              <enum>Qt::NoFocus</enum>
+             </property>
              <property name="alignment">
               <set>Qt::AlignCenter</set>
              </property>
@@ -1455,6 +1485,9 @@
            </item>
            <item row="1" column="3">
             <widget class="QLineEdit" name="coordUR_D">
+             <property name="focusPolicy">
+              <enum>Qt::NoFocus</enum>
+             </property>
              <property name="alignment">
               <set>Qt::AlignCenter</set>
              </property>
@@ -1493,6 +1526,9 @@
            </item>
            <item row="1" column="1">
             <widget class="QLineEdit" name="coordUR_x">
+             <property name="focusPolicy">
+              <enum>Qt::NoFocus</enum>
+             </property>
              <property name="alignment">
               <set>Qt::AlignCenter</set>
              </property>
@@ -1500,6 +1536,9 @@
            </item>
            <item row="5" column="3">
             <widget class="QLineEdit" name="coordAvg_D">
+             <property name="focusPolicy">
+              <enum>Qt::NoFocus</enum>
+             </property>
              <property name="alignment">
               <set>Qt::AlignCenter</set>
              </property>
@@ -1507,6 +1546,9 @@
            </item>
            <item row="3" column="1">
             <widget class="QLineEdit" name="coordLR_x">
+             <property name="focusPolicy">
+              <enum>Qt::NoFocus</enum>
+             </property>
              <property name="alignment">
               <set>Qt::AlignCenter</set>
              </property>
@@ -1514,6 +1556,9 @@
            </item>
            <item row="5" column="2">
             <widget class="QLineEdit" name="coordAvg_y">
+             <property name="focusPolicy">
+              <enum>Qt::NoFocus</enum>
+             </property>
              <property name="alignment">
               <set>Qt::AlignCenter</set>
              </property>
@@ -1527,7 +1572,7 @@
             </widget>
            </item>
            <item row="0" column="3">
-            <widget class="QLabel" name="laber">
+            <widget class="QLabel" name="labelD">
              <property name="text">
               <string>D</string>
              </property>
@@ -1935,8 +1980,6 @@
    </item>
   </layout>
  </widget>
- <resources>
-  <include location="../../../../c/rtimv/res/imviewer.qrc"/>
- </resources>
+ <resources/>
  <connections/>
 </ui>

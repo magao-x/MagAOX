@@ -13,6 +13,7 @@ if [[ -z $MAGAOX_ROLE ]]; then
     echo "    AOC - Adaptive optics Operator Computer"
     echo "    RTC - Real Time control Computer"
     echo "    ICC - Instrument Control Computer"
+    echo "    TCC - Testbed Control Computer"
     echo "    workstation - Any other MagAO-X workstation"
     echo
     while [[ -z $MAGAOX_ROLE ]]; do
@@ -27,11 +28,14 @@ if [[ -z $MAGAOX_ROLE ]]; then
             ICC)
                 MAGAOX_ROLE=ICC
                 ;;
+            TCC)
+                MAGAOX_ROLE=TCC
+                ;;
             workstation)
                 MAGAOX_ROLE=workstation
                 ;;
             *)
-                echo "Must be one of AOC, RTC, ICC, or workstation."
+                echo "Must be one of AOC, RTC, ICC, TCC, or workstation."
                 continue
         esac
     done

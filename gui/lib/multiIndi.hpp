@@ -29,7 +29,7 @@ class multiIndiSubscriber
 protected:
    
    /// The parent publisher to which the instance is subscribed.
-   multiIndiPublisher * publisher {nullptr};
+   multiIndiPublisher * m_publisher {nullptr};
 
    /// Set the publisher to which this instance is subscribed.
    void setPublisher(multiIndiPublisher * p /**< [in] the publisher to which this instance is subscribed */);
@@ -44,7 +44,13 @@ public:
    virtual ~multiIndiSubscriber();
    
    virtual int subscribe( multiIndiPublisher * publisher ) = 0;
+
+   /// Called once the publisher is connected.
+   virtual void onConnect(){}
    
+   /// Called when the publisher disconnects.
+   virtual void onDisconnect(){}
+
    virtual int handleDefProperty( const pcf::IndiProperty &ipRecv );
    
    /// Callback for a SET PROPERTY message notifying us that the propery has changed.
@@ -127,7 +133,7 @@ public:
    /** This is mainly called by the multiIndiSubscriber destructor.
      */
    void unsubscribe( multiIndiSubscriber * sub /**< [in] the subscriber being un-subscribed*/);
-
+   
    void handleDefProperty( const pcf::IndiProperty &ipRecv );
    
    /// Responds to SET PROPERTY
@@ -156,16 +162,16 @@ multiIndiSubscriber::multiIndiSubscriber()
 inline
 multiIndiSubscriber::~multiIndiSubscriber()
 {
-   if(publisher) 
+   if(m_publisher) 
    {
-      publisher->unsubscribe(this);
+      m_publisher->unsubscribe(this);
    }
 }
 
 inline
 void multiIndiSubscriber::setPublisher(multiIndiPublisher * p)
 {
-   publisher = p;
+   m_publisher = p;
 }
 
 inline
@@ -187,9 +193,9 @@ int multiIndiSubscriber::handleSetProperty( const pcf::IndiProperty & ipRecv)
 inline
 void multiIndiSubscriber::sendNewProperty( const pcf::IndiProperty &ipSend )
 {
-   if(publisher == nullptr) return;
+   if(m_publisher == nullptr) return;
    
-   publisher->sendNewProperty(ipSend);
+   m_publisher->sendNewProperty(ipSend);
 }
 
 //--**************************************************************--//
@@ -212,6 +218,8 @@ int multiIndiPublisher::subscribe( multiIndiSubscriber * sub )
    subscribers.insert(sub);
    
    sub->setPublisher(this);
+   
+   sub->onConnect();
    
    return 0;
 }

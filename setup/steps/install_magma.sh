@@ -1,8 +1,13 @@
 #!/bin/bash
+# If not started as root, sudo yourself
+if [[ "$EUID" != 0 ]]; then
+    sudo bash -l $0 "$@"
+    exit $?
+fi
 DIR="$( cd "$( dirname "${BASH_SOURCE[0]}" )" && pwd )"
 source $DIR/../_common.sh
 set -euo pipefail
-MAGMA_VERSION=2.5.1-alpha1
+MAGMA_VERSION=2.5.3
 MAGMA_FOLDER=./magma-$MAGMA_VERSION
 if [[ ! -d $MAGMA_FOLDER ]]; then
   _cached_fetch http://icl.utk.edu/projectsfiles/magma/downloads/magma-$MAGMA_VERSION.tar.gz magma-$MAGMA_VERSION.tar.gz
@@ -18,6 +23,10 @@ if [[ $MAGAOX_ROLE == RTC || $MAGAOX_ROLE == ICC ]]; then
 elif [[ $MAGAOX_ROLE == AOC || $MAGAOX_ROLE == ci ]]; then
   if ! grep "GPU_TARGET = Pascal" make.inc; then
     echo "GPU_TARGET = Pascal" >> make.inc
+  fi
+elif [[ $MAGAOX_ROLE == TCC ]]; then
+  if ! grep "GPU_TARGET = Kepler" make.inc; then
+    echo "GPU_TARGET = Kepler" >> make.inc
   fi
 fi
 make -j 32

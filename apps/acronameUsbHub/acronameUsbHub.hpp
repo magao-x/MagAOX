@@ -51,6 +51,7 @@ protected:
      *@{
      */ 
 
+   uint32_t m_serialNumber {0}; ///< The Acroname device serial number.
    
    ///@}
    
@@ -121,7 +122,7 @@ public:
 inline
 acronameUsbHub::acronameUsbHub() : MagAOXApp(MAGAOX_CURRENT_SHA1, MAGAOX_REPO_MODIFIED)
 {
-   //m_powerMgtEnabled = true;
+   m_powerMgtEnabled = true;
    
    setNumberOfOutlets(8);
    
@@ -133,11 +134,7 @@ acronameUsbHub::~acronameUsbHub() noexcept
 {
    // Disconnect
     
-   aErr err = m_hub.disconnect();
-   if (err == aErrNone) 
-   {
-      std::cerr << "Disconnected from BrainStem module." << std::endl;
-   }
+   m_hub.disconnect();
     
    return;
 }
@@ -145,6 +142,8 @@ acronameUsbHub::~acronameUsbHub() noexcept
 inline
 void acronameUsbHub::setupConfig()
 {
+   config.add("device.serialNumber", "", "device.serialNumber", argType::Required, "device", "serialNumber", false, "uint32", "The identifying serial number of the hub.");
+   
    dev::outletController<acronameUsbHub>::setupConfig(config);
 }
 
@@ -154,6 +153,7 @@ void acronameUsbHub::setupConfig()
 inline
 void acronameUsbHub::loadConfig()
 {
+   config(m_serialNumber, "device.serialNumber");
    dev::outletController<acronameUsbHub>::loadConfig(config);
 }
 
@@ -168,17 +168,18 @@ int acronameUsbHub::appStartup()
       return log<text_log,-1>("Error setting up INDI for outlet control.", logPrio::LOG_CRITICAL);
    }
    
-   state(stateCodes::NOTCONNECTED);
-   
    return 0;
 
 }
 
-
-
 inline
 int acronameUsbHub::appLogic()
 {
+   if( state() == stateCodes::POWERON)
+   {
+      state(stateCodes::NOTCONNECTED);
+   }
+   
    if( state() == stateCodes::NOTCONNECTED )
    {
 
@@ -192,8 +193,9 @@ int acronameUsbHub::appLogic()
 
       elevatedPrivileges ep(this);
       
-      err = m_hub.discoverAndConnect(USB);
-      
+      //std::cerr << m_serialNumber << "\n";
+      //err = m_hub.discoverAndConnect(USB, m_serialNumber);
+      err = m_hub.connect(USB, m_serialNumber);
       if (err != aErrNone) 
       {
          if(!stateLogged())
@@ -208,7 +210,22 @@ int acronameUsbHub::appLogic()
       {
          state(stateCodes::CONNECTED);
 
-         log<text_log>("Connected to usb hub", logPrio::LOG_INFO);
+         SystemClass sys;
+         sys.init(&m_hub,0);
+   
+         uint8_t model;
+         sys.getModel(&model);
+         std::string modelName = aDefs_GetModelName(model);
+         
+         uint32_t version;
+         sys.getVersion(&version);
+         char versionStr[256];
+         aVersion_ParseString(version, versionStr, sizeof(versionStr));
+      
+         uint32_t serial;
+         sys.getSerialNumber(&serial);
+   
+         log<text_log>("Connected to " + modelName + " #" + std::to_string(serial) + " w/fimrware version " + versionStr, logPrio::LOG_INFO);
          
          m_connected = true;
          state(stateCodes::READY);
@@ -244,6 +261,22 @@ int acronameUsbHub::onPowerOff()
       m_hub.disconnect();
       m_connected = false;
    }
+   
+   for(size_t n=0;n<m_outletStates.size();++n)
+   {
+      m_outletStates[n] = OUTLET_STATE_OFF;
+   }
+
+   std::lock_guard<std::mutex> guard(m_indiMutex);  //Lock the mutex before doing INDI
+   dev::outletController<acronameUsbHub>::updateINDI(); //Update the outlets and channel states
+
+   //Update INDI targets to off.
+   for(auto it = m_channels.begin(); it != m_channels.end(); ++it)
+   {
+      updateIfChanged( it->second.m_indiP_prop, "target", "Off"); 
+   }
+
+
    
    return 0;
 }

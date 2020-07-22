@@ -33,9 +33,9 @@ function setgid_all() {
     # n.b. can't be recursive because g+s on files means something else
     # so we find all directories and individually chmod them:
     if [[ "$EUID" != 0 ]]; then
-      find $1 -type d -exec sudo chmod -v g+rxs {} \;
+      find $1 -type d -exec sudo chmod g+rxs {} \;
     else
-      find $1 -type d -exec chmod -v g+rxs {} \;
+      find $1 -type d -exec chmod g+rxs {} \;
     fi
 }
 
@@ -70,30 +70,41 @@ function clone_or_update_and_cd() {
     orgname=$1
     reponame=$2
     parentdir=$3
+    # Disable unbound var check because we do it ourselves:
+    set +u
+    if [[ ! -z $4 ]]; then
+      destdir=$4
+    else
+      destdir="$parentdir/$reponame"
+    fi
+    set -u
+    # and re-enable.
+
     if [[ $MAGAOX_ROLE == vm && "$VM_WINDOWS_HOST" == 0 ]]; then
-        link_if_necessary /vagrant/vm/$reponame $parentdir/$reponame
-        parentdir=/vagrant/vm
+        link_if_necessary /vagrant/vm/$reponame $destdir
     fi
     if [[ ! -d $parentdir/$reponame/.git ]]; then
       echo "Cloning new copy of $orgname/$reponame"
       CLONE_DEST=/tmp/${reponame}_$(date +"%s")
       git clone https://github.com/$orgname/$reponame.git $CLONE_DEST
-      sudo rsync -av $CLONE_DEST/ $parentdir/$reponame/
-      cd $parentdir/$reponame/
-      log_success "Cloned new $parentdir/$reponame"
+      sudo rsync -av $CLONE_DEST/ $destdir/
+      cd $destdir/
+      log_success "Cloned new $destdir"
+      rm -rf $CLONE_DEST
+      log_success "Removed temporary clone at $CLONE_DEST"
     else
-      cd $parentdir/$reponame
+      cd $destdir
       git pull
-      log_success "Updated $parentdir/$reponame"
+      log_success "Updated $destdir"
     fi
     git config core.sharedRepository group
     if [[ $MAGAOX_ROLE != vm ]]; then
-      sudo chown -R :magaox-dev $parentdir/$reponame
-      sudo chmod -R g=rwX $parentdir/$reponame
+      sudo chown -R :magaox-dev $destdir
+      sudo chmod -R g=rwX $destdir
       # n.b. can't be recursive because g+s on files means something else
       # so we find all directories and individually chmod them:
-      sudo find $parentdir/$reponame -type d -exec chmod g+s {} \;
-      log_success "Normalized permissions on $parentdir/$reponame"
+      sudo find $destdir -type d -exec chmod g+s {} \;
+      log_success "Normalized permissions on $destdir"
     fi
 }
 
@@ -129,7 +140,11 @@ function createuser() {
 # We work around the buggy devtoolset /bin/sudo wrapper in provision.sh, but
 # that means we have to explicitly enable it ourselves.
 # (This crap again: https://bugzilla.redhat.com/show_bug.cgi?id=1319936)
-if [[ -e /opt/rh/devtoolset-7/enable ]]; then
+# Also, we control whether to build with the devtoolset gcc7 compiler or the
+# included gcc4 compiler with $BUILDING_KERNEL_STUFF. If that's set to 1,
+# use the included gcc4 for consistency with the running kernel.
+set +u; if [[ -z $BUILDING_KERNEL_STUFF ]]; then BUILDING_KERNEL_STUFF=0; fi; set -u # Temporarily disable checking for unbound variables to set a default value
+if [[ $BUILDING_KERNEL_STUFF != 1 && -e /opt/rh/devtoolset-7/enable ]]; then
     set +u; source /opt/rh/devtoolset-7/enable; set -u
 fi
 # root doesn't get /usr/local/bin on their path, so add it

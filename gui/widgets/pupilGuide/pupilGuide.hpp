@@ -38,19 +38,10 @@ protected:
    double m_modRad {0};
    double m_modRad_tgt{0};
    
-   
-   std::string m_pupFsmState;
-   double m_pupCh1 {0};
-   double m_pupCh2 {0};
-   
-   double m_threshold_current {0};
-   double m_threshold_target {0};
-   
-   unsigned m_nAverage_current {0};
-   unsigned m_nAverage_target {0};
-   
-   
-   
+
+
+   // --- camwfs-fit
+   std::string m_camwfsfitState;
    double m_med1 {0};
    double m_med2 {0};
    double m_med3 {0};
@@ -87,6 +78,22 @@ protected:
    double m_setx4 {0};
    double m_sety4 {0};
    double m_setD4 {0};
+
+   double m_threshold_current {0};
+   double m_threshold_target {0};
+
+   // -- camwfs-avg
+   std::string m_camwfsavgState;
+   unsigned m_nAverage_current {0};
+   unsigned m_nAverage_target {0};
+
+   
+   
+   std::string m_pupFsmState;
+   double m_pupCh1 {0};
+   double m_pupCh2 {0};
+   
+   
    
    float m_stepSize {0.1};
    
@@ -107,6 +114,8 @@ public:
    
    int subscribe( multiIndiPublisher * publisher );
                                    
+   virtual void onDisconnect();
+   
    int handleDefProperty( const pcf::IndiProperty & ipRecv /**< [in] the property which has changed*/);
    int handleSetProperty( const pcf::IndiProperty & ipRecv /**< [in] the property which has changed*/);
    
@@ -122,7 +131,7 @@ public slots:
    void on_button_tip_dr_pressed();
    void on_button_tip_r_pressed();
    void on_button_tip_ur_pressed();
-   void on_buttonScale_pressed();
+   void on_button_tip_scale_pressed();
    
    
    void on_button_pup_u_pressed();
@@ -163,28 +172,28 @@ private:
 
 pupilGuide::pupilGuide( QWidget * Parent, Qt::WindowFlags f) : QDialog(Parent, f)
 {
-//    QPalette p = palette();
-//    synchActiveInactive(&p);
-//    setPalette(p);
-   
    ui.setupUi(this);
-   //QPalette p = ui.buttonRest->palette();
-   //synchActiveInactive(&p);
-   //ui.buttonRest->setPalette(p);
+   ui.modState->setProperty("isStatus", true);
+   ui.pupState->setProperty("isStatus", true);
+   ui.camlens_fsm->setProperty("isStatus", true);
+   ui.button_camlens_scale->setProperty("isScaleButton", true);
+   ui.button_tip_scale->setProperty("isScaleButton", true);
+   ui.button_pup_scale->setProperty("isScaleButton", true);
    
-    QTimer *timer = new QTimer(this);
-    connect(timer, SIGNAL(timeout()), this, SLOT(updateGUI()));
-    timer->start(250);
+   QTimer *timer = new QTimer(this);
+   connect(timer, SIGNAL(timeout()), this, SLOT(updateGUI()));
+   timer->start(250);
       
    char ss[5];
    snprintf(ss, 5, "%0.2f", m_stepSize);
-   ui.buttonScale->setText(ss);
+   ui.button_tip_scale->setText(ss);
    
    snprintf(ss, 5, "%0.2f", m_pupStepSize);
    ui.button_pup_scale->setText(ss);
    
    snprintf(ss, 5, "%0.2f", m_camlensStepSize);
    ui.button_camlens_scale->setText(ss);
+   
 }
    
 pupilGuide::~pupilGuide()
@@ -193,19 +202,21 @@ pupilGuide::~pupilGuide()
 
 int pupilGuide::subscribe( multiIndiPublisher * publisher )
 {
-   publisher->subscribeProperty(this, "camwfs-avg", "nAverage");
-   
+   publisher->subscribeProperty(this, "modwfs", "modFrequency");
+   publisher->subscribeProperty(this, "modwfs", "modRadius");
+   publisher->subscribeProperty(this, "modwfs", "modState");
+   publisher->subscribeProperty(this, "modwfs", "fsm");
+
+   publisher->subscribeProperty(this, "camwfs-fit", "fsm");
    publisher->subscribeProperty(this, "camwfs-fit", "quadrant1");
    publisher->subscribeProperty(this, "camwfs-fit", "quadrant2");
    publisher->subscribeProperty(this, "camwfs-fit", "quadrant3");
    publisher->subscribeProperty(this, "camwfs-fit", "quadrant4");
    publisher->subscribeProperty(this, "camwfs-fit", "threshold");
    
-   publisher->subscribeProperty(this, "modwfs", "modFrequency");
-   publisher->subscribeProperty(this, "modwfs", "modRadius");
-   publisher->subscribeProperty(this, "modwfs", "modState");
-   publisher->subscribeProperty(this, "modwfs", "fsm");
-   
+   publisher->subscribeProperty(this, "camwfs-avg", "fsm");
+   publisher->subscribeProperty(this, "camwfs-avg", "nAverage");
+
    publisher->subscribeProperty(this, "fxngenmodwfs", "C1ofst");
    publisher->subscribeProperty(this, "fxngenmodwfs", "C2ofst");
    
@@ -220,6 +231,16 @@ int pupilGuide::subscribe( multiIndiPublisher * publisher )
    publisher->subscribeProperty(this, "stagecamlensy", "position");
    
    return 0;
+}
+   
+void pupilGuide::onDisconnect()
+{
+   m_modFsmState = "";
+   m_pupFsmState = "";
+   m_camlensxFsmState = "";
+   m_camlensyFsmState = "";
+   m_camwfsavgState = "";
+   m_camwfsfitState = "";
 }
    
 int pupilGuide::handleDefProperty( const pcf::IndiProperty & ipRecv)
@@ -253,9 +274,17 @@ int pupilGuide::handleSetProperty( const pcf::IndiProperty & ipRecv)
             m_nAverage_current = ipRecv["current"].get<unsigned>();
          }
       }
+      else if(ipRecv.getName() == "fsm")
+      {
+         if(ipRecv.find("state"))
+         {
+            m_camwfsavgState = ipRecv["state"].get<std::string>();
+         }
+      }
    }
    else if(dev == "camwfs-fit")
    {
+      
       if(ipRecv.getName() == "quadrant1")
       {
          if(ipRecv.find("med"))
@@ -293,8 +322,7 @@ int pupilGuide::handleSetProperty( const pcf::IndiProperty & ipRecv)
             m_setD1 = ipRecv["set-D"].get<double>();
          }
       }
-   
-      if(ipRecv.getName() == "quadrant2")
+      else if(ipRecv.getName() == "quadrant2")
       {
          if(ipRecv.find("med"))
          {
@@ -331,8 +359,7 @@ int pupilGuide::handleSetProperty( const pcf::IndiProperty & ipRecv)
             m_setD2 = ipRecv["set-D"].get<double>();
          }
       }
-      
-      if(ipRecv.getName() == "quadrant3")
+      else if(ipRecv.getName() == "quadrant3")
       {
          if(ipRecv.find("med"))
          {
@@ -369,8 +396,7 @@ int pupilGuide::handleSetProperty( const pcf::IndiProperty & ipRecv)
             m_setD3 = ipRecv["set-D"].get<double>();
          }
       }
-   
-      if(ipRecv.getName() == "quadrant4")
+      else if(ipRecv.getName() == "quadrant4")
       {
          if(ipRecv.find("med"))
          {
@@ -407,14 +433,22 @@ int pupilGuide::handleSetProperty( const pcf::IndiProperty & ipRecv)
             m_setD4 = ipRecv["set-D"].get<double>();
          }
       }   
-      
-      if(ipRecv.getName() == "threshold")
+      else if(ipRecv.getName() == "threshold")
       {
          if(ipRecv.find("current"))
          {
             m_threshold_current = ipRecv["current"].get<double>();
          }
       }
+      else if(ipRecv.getName() == "fsm")
+      {
+         if(ipRecv.find("state"))
+         {
+            m_camwfsfitState = ipRecv["state"].get<std::string>();
+         }
+      }
+      
+      
    }
    else if(dev == "modwfs")
    {
@@ -543,12 +577,18 @@ int pupilGuide::handleSetProperty( const pcf::IndiProperty & ipRecv)
 void pupilGuide::updateGUI()
 {
    
+   //--------- Modulation 
+   
+   bool enableModGUI = true;
+   bool enableModArrows = true;
+   
    char str[16];
    if(m_modFsmState == "READY")
    {
       if(m_modState == 1)
       {
          ui.modState->setText("RIP");
+         enableModArrows = false;
       }
       else
       {
@@ -561,7 +601,90 @@ void pupilGuide::updateGUI()
    }
    else
    {
-      ui.modState->setText(m_modFsmState.c_str());
+      enableModGUI = false;
+      if(m_modFsmState == "")
+      {
+         ui.modState->setText("STATE UNKNOWN");
+         ui.modState->setEnabled(false);
+      }
+      else
+      {
+         ui.modState->setText(m_modFsmState.c_str());
+         ui.modState->setEnabled(true);
+      }
+   }
+   
+   if(enableModGUI)
+   {
+      ui.modState->setEnabled(true);
+      ui.labelFreqCurrent->setEnabled(true);
+      ui.labelFreqTarget->setEnabled(true);
+      ui.labelFreq->setEnabled(true);
+      ui.labelRadius->setEnabled(true);
+      ui.modFreq_current->setEnabled(true);
+      ui.modRad_current->setEnabled(true);
+      //ui.modFreq_target->setEnabled(true);
+      //ui.modRad_target->setEnabled(true);
+      //ui.buttonMod_rest->setEnabled(true);
+      //ui.buttonMod_set->setEnabled(true);
+      //ui.buttonMod_mod->setEnabled(true);
+      ui.labelCh1->setEnabled(true);
+      ui.modCh1->setEnabled(true);
+      ui.labelCh2->setEnabled(true);
+      ui.modCh2->setEnabled(true);
+      
+      if(enableModArrows)
+      {
+         ui.button_tip_ul->setEnabled(true); 
+         ui.button_tip_u->setEnabled(true);
+         ui.button_tip_ur->setEnabled(true); 
+         ui.button_tip_l->setEnabled(true); 
+         ui.button_tip_scale->setEnabled(true);
+         ui.button_tip_r->setEnabled(true);
+         ui.button_tip_dl->setEnabled(true);
+         ui.button_tip_d->setEnabled(true);
+         ui.button_tip_dr->setEnabled(true);
+      }
+      else
+      {
+         ui.button_tip_ul->setEnabled(false); 
+         ui.button_tip_u->setEnabled(false);
+         ui.button_tip_ur->setEnabled(false); 
+         ui.button_tip_l->setEnabled(false); 
+         ui.button_tip_scale->setEnabled(false);
+         ui.button_tip_r->setEnabled(false);
+         ui.button_tip_dl->setEnabled(false);
+         ui.button_tip_d->setEnabled(false);
+         ui.button_tip_dr->setEnabled(false);
+      }
+   }
+   else
+   {
+      ui.labelFreqCurrent->setEnabled(false);
+      ui.labelFreqTarget->setEnabled(false);
+      ui.labelFreq->setEnabled(false);
+      ui.labelRadius->setEnabled(false);
+      ui.modFreq_current->setEnabled(false);
+      ui.modRad_current->setEnabled(false);
+      ui.modFreq_target->setEnabled(false);
+      ui.modRad_target->setEnabled(false);
+      ui.buttonMod_rest->setEnabled(false);
+      ui.buttonMod_set->setEnabled(false);
+      ui.buttonMod_mod->setEnabled(false);
+      ui.labelCh1->setEnabled(false);
+      ui.modCh1->setEnabled(false);
+      ui.labelCh2->setEnabled(false);
+      ui.modCh2->setEnabled(false);
+      
+      ui.button_tip_ul->setEnabled(false); 
+      ui.button_tip_u->setEnabled(false);
+      ui.button_tip_ur->setEnabled(false); 
+      ui.button_tip_l->setEnabled(false); 
+      ui.button_tip_scale->setEnabled(false);
+      ui.button_tip_r->setEnabled(false);
+      ui.button_tip_dl->setEnabled(false);
+      ui.button_tip_d->setEnabled(false);
+      ui.button_tip_dr->setEnabled(false);
    }
    
    snprintf(str,sizeof(str), "%0.2f", m_modCh1);
@@ -569,39 +692,7 @@ void pupilGuide::updateGUI()
    snprintf(str,sizeof(str), "%0.2f", m_modCh2);
    ui.modCh2->setText(str);
    
-   
-   
-   if(m_pupFsmState == "READY")
-   {
-      ui.pupState->setText("SET");
-      ui.buttonPup_set->setEnabled(false);
-      ui.buttonPup_rest->setEnabled(true);
-   }
-   else if(m_pupFsmState == "NOTHOMED")
-   {
-      ui.pupState->setText("RIP");
-      ui.buttonPup_set->setEnabled(true);
-      ui.buttonPup_rest->setEnabled(false);
-   }
-   else if(m_pupFsmState == "HOMING")
-   {
-      ui.pupState->setText("SETTING");
-      ui.buttonPup_set->setEnabled(false);
-      ui.buttonPup_rest->setEnabled(true);
-   }
-   else
-   {
-      ui.pupState->setText(m_pupFsmState.c_str());
-      ui.buttonPup_set->setEnabled(false);
-      ui.buttonPup_rest->setEnabled(false);
-   }
-   
-   snprintf(str,sizeof(str), "%0.2f", m_pupCh1);
-   ui.pupCh1->setText(str);
-   snprintf(str,sizeof(str), "%0.2f", m_pupCh2);
-   ui.pupCh2->setText(str);
-   
-   if(m_modState == 3)
+   if(m_modState == 3 && enableModGUI)
    {
       ui.modFreq_current->setText("---");
       ui.modRad_current->setText("---");
@@ -638,7 +729,7 @@ void pupilGuide::updateGUI()
       ui.buttonMod_set->setEnabled(false);
       ui.buttonMod_mod->setEnabled(true);
    }
-   else if(m_modState == 4)
+   else if(m_modState == 4 && enableModGUI)
    {
       snprintf(str, sizeof(str),"%0.1f Hz", m_modFreq);
       ui.modFreq_current->setText(str);
@@ -671,14 +762,13 @@ void pupilGuide::updateGUI()
          }
       }
       
-      
       ui.modFreq_target->setEnabled(true);
       ui.modRad_target->setEnabled(true);
       ui.buttonMod_rest->setEnabled(true);
       ui.buttonMod_set->setEnabled(true);
       ui.buttonMod_mod->setEnabled(true);
    }
-   else
+   else 
    {
       ui.modFreq_current->setText("---");
       ui.modRad_current->setText("---");
@@ -686,151 +776,354 @@ void pupilGuide::updateGUI()
       ui.modFreq_target->setText("");
       ui.modRad_target->setText("");
       
-      ui.modFreq_target->setEnabled(false);
-      ui.modRad_target->setEnabled(false);
-      ui.buttonMod_rest->setEnabled(true);
-      ui.buttonMod_set->setEnabled(true);
-      ui.buttonMod_mod->setEnabled(false);
+      if(enableModGUI)
+      {
+         ui.modFreq_target->setEnabled(false);
+         ui.modRad_target->setEnabled(false);
+         ui.buttonMod_rest->setEnabled(true);
+         ui.buttonMod_set->setEnabled(true);
+         ui.buttonMod_mod->setEnabled(false);
+      }
    }
    
    
-   double m1, m2, m3,m4;
    
-   if(ui.setDelta->checkState() == Qt::Checked)
+   // ------Pupil Fitting
+   
+   if( !(m_camwfsfitState == "READY" || m_camwfsfitState == "OPERATING"))
    {
-      double ave = 0.25*(m_med1 + m_med2 + m_med3 + m_med4);
-      m1 = m_med1-ave;
-      m2 = m_med2-ave;
-      m3 = m_med3-ave;
-      m4 = m_med4-ave;
+      ui.labelMedianFluxes->setEnabled(false);
+      ui.med1->setEnabled(false);
+      ui.med2->setEnabled(false);
+      ui.med3->setEnabled(false);
+      ui.med4->setEnabled(false);
+      ui.setDelta->setEnabled(false);
+      ui.labelThreshCurrent->setEnabled(false);
+      ui.labelThreshTarget->setEnabled(false);
+      ui.labelThreshold->setEnabled(false);
+      ui.fitThreshold_current->setEnabled(false);
+      ui.fitThreshold_target->setEnabled(false);
+      
+      ui.med1->setText("");
+      ui.med2->setText("");
+      ui.med3->setText("");
+      ui.med4->setText("");
+      ui.fitThreshold_current->setText("");
+      
+      ui.coordLL_D->setEnabled(false);
+      ui.coordLR_D->setEnabled(false);
+      ui.coordUL_D->setEnabled(false);
+      ui.coordUR_D->setEnabled(false);
+      ui.coordLL_x->setEnabled(false);
+      ui.coordLR_x->setEnabled(false);
+      ui.coordUL_x->setEnabled(false);
+      ui.coordUR_x->setEnabled(false);
+      ui.coordLL_y->setEnabled(false);
+      ui.coordLR_y->setEnabled(false);
+      ui.coordUL_y->setEnabled(false);
+      ui.coordUR_y->setEnabled(false);
+      ui.coordAvg_D->setEnabled(false);
+      ui.coordAvg_x->setEnabled(false);
+      ui.coordAvg_y->setEnabled(false);
+      ui.setDelta_pup->setEnabled(false);
+      ui.labelx->setEnabled(false);
+      ui.labely->setEnabled(false);
+      ui.labelD->setEnabled(false);
+      ui.labelUR->setEnabled(false);
+      ui.labelUL->setEnabled(false);
+      ui.labelLR->setEnabled(false);
+      ui.labelLL->setEnabled(false);
+      ui.labelAvg->setEnabled(false);
    }
    else
    {
-      m1 = m_med1;
-      m2 = m_med2;
-      m3 = m_med3;
-      m4 = m_med4;
+      ui.labelMedianFluxes->setEnabled(true);
+      ui.med1->setEnabled(true);
+      ui.med2->setEnabled(true);
+      ui.med3->setEnabled(true);
+      ui.med4->setEnabled(true);
+      ui.setDelta->setEnabled(true);
+      ui.labelThreshCurrent->setEnabled(true);
+      ui.labelThreshTarget->setEnabled(true);
+      ui.labelThreshold->setEnabled(true);
+      ui.fitThreshold_current->setEnabled(true);
+      ui.fitThreshold_target->setEnabled(true);
+   
+      ui.coordLL_D->setEnabled(true);
+      ui.coordLR_D->setEnabled(true);
+      ui.coordUL_D->setEnabled(true);
+      ui.coordUR_D->setEnabled(true);
+      ui.coordLL_x->setEnabled(true);
+      ui.coordLR_x->setEnabled(true);
+      ui.coordUL_x->setEnabled(true);
+      ui.coordUR_x->setEnabled(true);
+      ui.coordLL_y->setEnabled(true);
+      ui.coordLR_y->setEnabled(true);
+      ui.coordUL_y->setEnabled(true);
+      ui.coordUR_y->setEnabled(true);
+      ui.coordAvg_D->setEnabled(true);
+      ui.coordAvg_x->setEnabled(true);
+      ui.coordAvg_y->setEnabled(true);
+      ui.setDelta_pup->setEnabled(true);
+      ui.labelx->setEnabled(true);
+      ui.labely->setEnabled(true);
+      ui.labelD->setEnabled(true);
+      ui.labelUR->setEnabled(true);
+      ui.labelUL->setEnabled(true);
+      ui.labelLR->setEnabled(true);
+      ui.labelLL->setEnabled(true);
+      ui.labelAvg->setEnabled(true);
+
+      double m1, m2, m3,m4;
+      
+      if(ui.setDelta->checkState() == Qt::Checked)
+      {
+         double ave = 0.25*(m_med1 + m_med2 + m_med3 + m_med4);
+         m1 = m_med1-ave;
+         m2 = m_med2-ave;
+         m3 = m_med3-ave;
+         m4 = m_med4-ave;
+      }
+      else
+      {
+         m1 = m_med1;
+         m2 = m_med2;
+         m3 = m_med3;
+         m4 = m_med4;
+      }
+      
+      snprintf(str, 16, "%0.1f", m1);
+      ui.med1->setText(str);
+      
+      snprintf(str, 16, "%0.1f", m2);
+      ui.med2->setText(str);
+      
+      snprintf(str, 16, "%0.1f", m3);
+      ui.med3->setText(str);
+      
+      snprintf(str, 16, "%0.1f", m4);
+      ui.med4->setText(str);
+      
+      snprintf(str, 16, "%0.4f", m_threshold_current);
+      ui.fitThreshold_current->setText(str);
+      
+      double x1 = m_x1;
+      double y1 = m_y1;
+      double D1 = m_D1;
+      double x2 = m_x2;
+      double y2 = m_y2;
+      double D2 = m_D2;
+      double x3 = m_x3;
+      double y3 = m_y3;
+      double D3 = m_D3;
+      double x4 = m_x4;
+      double y4 = m_y4;
+      double D4 = m_D4;
+      
+      if(ui.setDelta_pup->checkState() == Qt::Checked)
+      {
+         x1 -= m_setx1;
+         y1 -= m_sety1;
+         D1 -= m_setD1;
+         
+         x2 -= m_setx2;
+         y2 -= m_sety2;
+         D2 -= m_setD2;
+         
+         x3 -= m_setx3;
+         y3 -= m_sety3;
+         D3 -= m_setD3;
+         
+         x4 -= m_setx4;
+         y4 -= m_sety4;
+         D4 -= m_setD4;
+      }
+      
+      snprintf(str, 16, "%0.2f", D1);
+      ui.coordLL_D->setText(str);
+     
+      snprintf(str, 16, "%0.2f", D2);
+      ui.coordLR_D->setText(str);
+     
+      snprintf(str, 16, "%0.2f", D3);         
+      ui.coordUL_D->setText(str);
+
+      snprintf(str, 16, "%0.2f", D4);
+      ui.coordUR_D->setText(str);
+
+      snprintf(str, 16, "%0.2f", x1);
+      ui.coordLL_x->setText(str);
+      
+      snprintf(str, 16, "%0.2f", x2);
+      ui.coordLR_x->setText(str);
+
+      snprintf(str, 16, "%0.2f", x3);
+      ui.coordUL_x->setText(str);
+      
+      snprintf(str, 16, "%0.2f", x4);
+      ui.coordUR_x->setText(str);
+            
+      snprintf(str, 16, "%0.2f", y1);
+      ui.coordLL_y->setText(str);
+      
+      snprintf(str, 16, "%0.2f", y2);
+      ui.coordLR_y->setText(str);
+      
+      snprintf(str, 16, "%0.2f", y3);
+      ui.coordUL_y->setText(str);
+      
+      
+      snprintf(str, 16, "%0.2f", y4);
+      ui.coordUR_y->setText(str);
+      
+      
+      snprintf(str, 16, "%0.2f", 0.25*(D1+D2+D3+D4));
+      ui.coordAvg_D->setText(str);
+            
+      snprintf(str, 16, "%0.2f", 0.25*(x1+x2+x3+x4));
+      ui.coordAvg_x->setText(str);
+      
+      snprintf(str, 16, "%0.2f", 0.25*(y1+y2+y3+y4));
+      ui.coordAvg_y->setText(str);
+      
    }
    
-   snprintf(str, 16, "%0.1f", m1);
-   ui.med1->setText(str);
-   ui.med1->setEnabled(true);
-   
-   snprintf(str, 16, "%0.1f", m2);
-   ui.med2->setText(str);
-   ui.med2->setEnabled(true);
-   
-   snprintf(str, 16, "%0.1f", m3);
-   ui.med3->setText(str);
-   ui.med3->setEnabled(true);
-   
-   snprintf(str, 16, "%0.1f", m4);
-   ui.med4->setText(str);
-   ui.med4->setEnabled(true);
-   
-   snprintf(str, 16, "%0.4f", m_threshold_current);
-   ui.fitThreshold_current->setText(str);
-   
-   snprintf(str, 16, "%u", m_nAverage_current);
-   ui.nAverage_current->setText(str);
-   
-   
-   
-   
-   double x1 = m_x1;
-   double y1 = m_y1;
-   double D1 = m_D1;
-   double x2 = m_x2;
-   double y2 = m_y2;
-   double D2 = m_D2;
-   double x3 = m_x3;
-   double y3 = m_y3;
-   double D3 = m_D3;
-   double x4 = m_x4;
-   double y4 = m_y4;
-   double D4 = m_D4;
-   
-   if(ui.setDelta_pup->checkState() == Qt::Checked)
+   // ------ camwfs averaging 
+   if( !(m_camwfsavgState == "READY" || m_camwfsavgState == "OPERATING"))
    {
-      x1 -= m_setx1;
-      y1 -= m_sety1;
-      D1 -= m_setD1;
+      //ui.labelThreshCurrent->setEnabled(false); //these may or may not be enabled by camwfs-fit above
+      //ui.labelThreshTarget->setEnabled(false);
+      ui.labelNoAvg->setEnabled(false);
+      ui.nAverage_current->setEnabled(false);
+      ui.nAverage_target->setEnabled(false);
       
-      x2 -= m_setx2;
-      y2 -= m_sety2;
-      D2 -= m_setD2;
-      
-      x3 -= m_setx3;
-      y3 -= m_sety3;
-      D3 -= m_setD3;
-      
-      x4 -= m_setx4;
-      y4 -= m_sety4;
-      D4 -= m_setD4;
+      ui.nAverage_current->setText("");
+   }
+   else
+   {
+      ui.labelThreshCurrent->setEnabled(true); //always enable if we need them here
+      ui.labelThreshTarget->setEnabled(true);
+      ui.labelNoAvg->setEnabled(true);
+      ui.nAverage_current->setEnabled(true);
+      ui.nAverage_target->setEnabled(true);
+      snprintf(str, 16, "%u", m_nAverage_current);
+      ui.nAverage_current->setText(str);
+   
    }
    
-   snprintf(str, 16, "%0.2f", D1);
-   ui.coordLL_D->setText(str);
-   ui.coordLL_D->setEnabled(true);
+   // ------ Pupil Steering
+   bool enablePupFSM = true;
+   bool enablePupFSMArrows = true;
    
-   snprintf(str, 16, "%0.2f", D2);
-   ui.coordLR_D->setText(str);
-   ui.coordLR_D->setEnabled(true);
+   if(m_pupFsmState == "READY")
+   {
+      ui.pupState->setText("SET");
+      ui.pupState->setEnabled(true);
+      ui.buttonPup_set->setEnabled(false);
+      ui.buttonPup_rest->setEnabled(true);
+   }
+   else if(m_pupFsmState == "NOTHOMED")
+   {
+      ui.pupState->setText("RIP");
+      ui.pupState->setEnabled(true);
+      ui.buttonPup_set->setEnabled(true);
+      ui.buttonPup_rest->setEnabled(false);
+      enablePupFSMArrows = false;
+   }
+   else if(m_pupFsmState == "HOMING")
+   {
+      ui.pupState->setText("SETTING");
+      ui.pupState->setEnabled(true);
+      ui.buttonPup_set->setEnabled(false);
+      ui.buttonPup_rest->setEnabled(true);
+      enablePupFSMArrows = false;
+   }
+   else
+   {
+      enablePupFSM = false;
+      if(m_pupFsmState == "")
+      {
+         ui.pupState->setText("STATE UNKNOWN");
+         ui.pupState->setEnabled(false);
+      }
+      else 
+      {
+         ui.pupState->setEnabled(true);
+         ui.pupState->setText(m_pupFsmState.c_str());
+      }
+   }
+
+   if(enablePupFSM)
+   {
+      ui.buttonPup_set->setEnabled(true);
+      ui.buttonPup_rest->setEnabled(true);
+      ui.labelPupCh1->setEnabled(true); 
+      ui.pupCh1->setEnabled(true);
+      ui.labelPupCh2->setEnabled(true);
+      ui.pupCh2->setEnabled(true);
+      
+      snprintf(str,sizeof(str), "%0.2f", m_pupCh1);
+      ui.pupCh1->setText(str);
+      snprintf(str,sizeof(str), "%0.2f", m_pupCh2);
+      ui.pupCh2->setText(str);
+      
+      if(enablePupFSMArrows)
+      {
+         ui.button_pup_ul->setEnabled(true); 
+         ui.button_pup_u->setEnabled(true);
+         ui.button_pup_ur->setEnabled(true); 
+         ui.button_pup_l->setEnabled(true); 
+         ui.button_pup_scale->setEnabled(true);
+         ui.button_pup_r->setEnabled(true);
+         ui.button_pup_dl->setEnabled(true);
+         ui.button_pup_d->setEnabled(true);
+         ui.button_pup_dr->setEnabled(true);
+      }
+      else
+      {
+         ui.button_pup_ul->setEnabled(false); 
+         ui.button_pup_u->setEnabled(false);
+         ui.button_pup_ur->setEnabled(false); 
+         ui.button_pup_l->setEnabled(false); 
+         ui.button_pup_scale->setEnabled(false);
+         ui.button_pup_r->setEnabled(false);
+         ui.button_pup_dl->setEnabled(false);
+         ui.button_pup_d->setEnabled(false);
+         ui.button_pup_dr->setEnabled(false);
+      }
+   }
+   else
+   {
+      ui.buttonPup_set->setEnabled(false);
+      ui.buttonPup_rest->setEnabled(false);
+      ui.labelPupCh1->setEnabled(false); 
+      ui.pupCh1->setEnabled(false);
+      ui.labelPupCh2->setEnabled(false);
+      ui.pupCh2->setEnabled(false);
+      
+      ui.pupCh1->setText("");
+      ui.pupCh2->setText("");
+      
+      ui.button_pup_ul->setEnabled(false); 
+      ui.button_pup_u->setEnabled(false);
+      ui.button_pup_ur->setEnabled(false); 
+      ui.button_pup_l->setEnabled(false); 
+      ui.button_pup_scale->setEnabled(false);
+      ui.button_pup_r->setEnabled(false);
+      ui.button_pup_dl->setEnabled(false);
+      ui.button_pup_d->setEnabled(false);
+      ui.button_pup_dr->setEnabled(false);
+   }
    
-   snprintf(str, 16, "%0.2f", D3);         
-   ui.coordUL_D->setText(str);
-   ui.coordUL_D->setEnabled(true);
-   
-   snprintf(str, 16, "%0.2f", D4);
-   ui.coordUR_D->setText(str);
-   ui.coordUR_D->setEnabled(true);
    
    
-   snprintf(str, 16, "%0.2f", x1);
-   ui.coordLL_x->setText(str);
-   ui.coordLL_x->setEnabled(true);
-   
-   snprintf(str, 16, "%0.2f", x2);
-   ui.coordLR_x->setText(str);
-   ui.coordLR_x->setEnabled(true);
-   
-   snprintf(str, 16, "%0.2f", x3);
-   ui.coordUL_x->setText(str);
-   ui.coordUL_x->setEnabled(true);
-   
-   snprintf(str, 16, "%0.2f", x4);
-   ui.coordUR_x->setText(str);
-   ui.coordUR_x->setEnabled(true);
    
    
-   snprintf(str, 16, "%0.2f", y1);
-   ui.coordLL_y->setText(str);
-   ui.coordLL_y->setEnabled(true);
-   
-   snprintf(str, 16, "%0.2f", y2);
-   ui.coordLR_y->setText(str);
-   ui.coordLR_y->setEnabled(true);
-   
-   snprintf(str, 16, "%0.2f", y3);
-   ui.coordUL_y->setText(str);
-   ui.coordUL_y->setEnabled(true);
-   
-   snprintf(str, 16, "%0.2f", y4);
-   ui.coordUR_y->setText(str);
-   ui.coordUR_y->setEnabled(true);
    
    
-   snprintf(str, 16, "%0.2f", 0.25*(D1+D2+D3+D4));
-   ui.coordAvg_D->setText(str);
-   ui.coordAvg_D->setEnabled(true);
    
-   snprintf(str, 16, "%0.2f", 0.25*(x1+x2+x3+x4));
-   ui.coordAvg_x->setText(str);
-   ui.coordAvg_x->setEnabled(true);
    
-   snprintf(str, 16, "%0.2f", 0.25*(y1+y2+y3+y4));
-   ui.coordAvg_y->setText(str);
-   ui.coordAvg_y->setEnabled(true);
+   // --- camera lens
    
    
    if( (m_camlensxFsmState == "READY" || m_camlensxFsmState == "OPERATING") &&
@@ -867,7 +1160,6 @@ void pupilGuide::updateGUI()
    }
    else
    {
-      ui.camlens_fsm->setEnabled(false);
       ui.camlens_x_label->setEnabled(false);
       ui.camlens_x_pos->setEnabled(false);
       ui.camlens_y_label->setEnabled(false);
@@ -884,19 +1176,31 @@ void pupilGuide::updateGUI()
       
       if(m_camlensxFsmState == "HOMING" || m_camlensyFsmState == "HOMING")
       {
+         ui.camlens_fsm->setEnabled(true);
          ui.camlens_fsm->setText("HOMING");
       }
       else if(m_camlensxFsmState == "POWERON" || m_camlensyFsmState == "POWERON")
       {
+         ui.camlens_fsm->setEnabled(true);
          ui.camlens_fsm->setText("POWERON");
       }
       else if(m_camlensxFsmState == "POWEROFF" && m_camlensyFsmState == "POWEROFF")
       {
+         ui.camlens_fsm->setEnabled(true);
          ui.camlens_fsm->setText("POWEROFF");
       }
       else
       {
-         ui.camlens_fsm->setText(m_camlensxFsmState.c_str());
+         if(m_camlensxFsmState == "" && m_camlensyFsmState == "")
+         {
+            ui.camlens_fsm->setEnabled(false);
+            ui.camlens_fsm->setText("STATE UNKNOWN");
+         }
+         else
+         {
+            ui.camlens_fsm->setEnabled(true);
+            ui.camlens_fsm->setText(m_camlensxFsmState.c_str());
+         }
       }
       
       ui.camlens_x_pos->setText("---");
@@ -1030,7 +1334,7 @@ void pupilGuide::on_button_tip_ur_pressed()
    
 }
 
-void pupilGuide::on_buttonScale_pressed()
+void pupilGuide::on_button_tip_scale_pressed()
 {
    if(((int) (100*m_stepSize)) == 100)
    {
@@ -1055,7 +1359,7 @@ void pupilGuide::on_buttonScale_pressed()
    
    char ss[5];
    snprintf(ss, 5, "%0.2f", m_stepSize);
-   ui.buttonScale->setText(ss);
+   ui.button_tip_scale->setText(ss);
 
 
 }

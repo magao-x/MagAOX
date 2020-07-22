@@ -71,6 +71,7 @@ dmCtrl::dmCtrl( std::string & dmName,
 {
    ui.setupUi(this);
    ui.labelDMName->setText(m_dmName.c_str());
+   
    setWindowTitle(QString(m_dmName.c_str()));
 }
    

@@ -74,12 +74,9 @@ protected:
      *@{
      */
    
-   std::string m_serialNumber; ///< The BMC serial number used to find the default config directory.
+   std::string m_serialNumber; ///< The BMC serial number used to open the correct DM profile
    
    ///@}
-
-
-
 
 public:
    /// Default c'tor.
@@ -209,16 +206,18 @@ bmcCtrl::~bmcCtrl() noexcept
    
 void bmcCtrl::setupConfig()
 {
-   config.add("dm.serialNumber", "", "dm.serialNumber", argType::Required, "dm", "serialNumber", false, "string", "The BMC serial number used to find the default config directory.");
+   config.add("dm.serialNumber", "", "dm.serialNumber", argType::Required, "dm", "serialNumber", false, "string", "The BMC serial number used to find correct DM Profile.");
+   config.add("dm.calibRelDir", "", "dm.calibRelDir", argType::Required, "dm", "calibRelDir", false, "string", "Used to find the default config directory.");
    dev::dm<bmcCtrl,float>::setupConfig(config);
    
 }
 
 int bmcCtrl::loadConfigImpl( mx::app::appConfigurator & _config )
 {
+   config(m_calibRelDir, "dm.calibRelDir");
    config(m_serialNumber, "dm.serialNumber");
-   
-   m_calibRelDir = "dm/bmc_2k";
+      
+   //m_calibRelDir = "dm/bmc_2k";
    
    dev::dm<bmcCtrl,float>::loadConfig(_config);
    

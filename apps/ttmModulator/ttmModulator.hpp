@@ -196,6 +196,7 @@ public:
 inline
 ttmModulator::ttmModulator() : MagAOXApp(MAGAOX_CURRENT_SHA1, MAGAOX_REPO_MODIFIED)
 {
+   m_powerMgtEnabled = true;
    return;
 }
 
@@ -295,6 +296,13 @@ int ttmModulator::appStartup()
 inline
 int ttmModulator::appLogic()
 {
+   if(state()==stateCodes::POWEROFF) return 0;
+   
+   if(state()==stateCodes::POWERON)
+   {
+      sleep(2);
+   }
+   
    if( calcState() < 0 )
    {
       //application failure if we can't determine state

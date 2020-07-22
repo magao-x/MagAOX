@@ -7,10 +7,11 @@ namespace xqt
 {
    
 pwrDevice::pwrDevice( QWidget * parent, 
-                        Qt::WindowFlags flags
-                      ) : QWidget(parent, flags)
+                      Qt::WindowFlags flags
+                    ) : QWidget(parent, flags)
 {
    m_deviceNameLabel = new QwtTextLabel;
+   m_deviceNameLabel->setStyleSheet("*{color: white;}");
    
    m_current.resize(60);
    m_voltage.resize(60);

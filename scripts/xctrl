@@ -14,6 +14,7 @@ Usage:
     xctrl restart [PROCNAME ...]
         - shutdown then startup each process (or just PROCNAME)
 '''
+import argparse
 import psutil
 import sys
 import os
@@ -52,6 +53,10 @@ warning, warning_bytes = _make_output_funcs(YELLOW_SEQ)
 info, info_bytes = _make_output_funcs(BLUE_SEQ)
 
 WHO_AM_I = getpass.getuser()
+if os.environ.get('MAGAOX_ROLE') == 'vm':
+    INSTRUMENT_USER = 'vagrant'
+else:
+    INSTRUMENT_USER = 'xsup'
 
 # CentOS + devtoolset-7 aliases sudo, but breaks command line arguments for it,
 # so if we need those, we must use _REAL_SUDO. Of course, sudo may live in
@@ -73,18 +78,20 @@ if REAL_SUDO is None:
 
 
 def _run_as_xsup(command, capture_output=True, check=True):
-    if WHO_AM_I != 'xsup':
+    # Special case: if we're running as xsup or in the VM (as vagrant)
+    # we just run the command as supplied by prepending sudo appropriately
+    if WHO_AM_I != INSTRUMENT_USER:
         args = [
             REAL_SUDO,
             '-u',
-            'xsup',
+            INSTRUMENT_USER,
             '-s',
             '--',
         ]
     else:
         args = []
     args.extend(shlex.split(command))
-    # print('Running as xsup:', ' '.join(args))
+    info(f'Running as {WHO_AM_I}: {" ".join(args)}')
     res = subprocess.run(args, capture_output=capture_output, check=check)
     return res.returncode, res.stdout, res.stderr
 
@@ -136,11 +143,16 @@ def inspect_session(_, targets):
         failure(f"Can only specify a single process "
                 f"name to inspect, got: {targets}")
         return 1
-    code, out, err = _run_as_xsup(f"tmux attach-session -t {targets[0]}")
-    info_bytes(out)
-    if len(err):
-        failure_bytes(err)
-    return code
+    target = targets[0]
+    if _session_exists(targets[0]):
+        exitcode, out, err = _run_as_xsup(f"tmux attach-session -t {target}")
+        info_bytes(out)
+        if len(err):
+            failure_bytes(err)
+    else:
+        failure(f'No tmux session exists named {target}')
+        exitcode = 1
+    return exitcode
 
 
 def _session_exists(process_name):
@@ -160,9 +172,12 @@ def _shutdown_helper(process_name):
                 _run_as_xsup(f'tmux kill-session -t {process_name}')
                 warning(f'Killed tmux session for {process_name}')
             else:
-                code, _, __ = _run_as_xsup(f'tmux send-keys -t {process_name} C-c', check=False)
-                if code != 0:  # maybe it already exited?
-                    continue
+                if attempts == 0:
+                    # Only interrupt the app on the first go-round so it doesn't segfault while
+                    # exiting
+                    code, _, __ = _run_as_xsup(f'tmux send-keys -t {process_name} C-c', check=False)
+                    if code != 0:  # maybe it already exited?
+                        continue
                 code, _, __ = _run_as_xsup(f'tmux send-keys -t {process_name} "exit" Enter', check=False)
                 if code != 0:
                     continue
@@ -171,7 +186,7 @@ def _shutdown_helper(process_name):
                 time.sleep(1)
         success(f'Ended tmux session for {process_name}')
     else:
-        info(f'No running tmux session for {process_name}')
+        info(f'No tmux session exists named {process_name}')
     return 0
 
 
@@ -202,6 +217,21 @@ def shutdown(processes, targets):
         _shutdown_helper(indi_server_name)
     return 0
 
+def _indiserver_startup(process_name, executable_name):
+    '''Wraps _startup_helper to insert some zombie-removal
+    '''
+    # Check for zombie xindidrivers
+    for proc in psutil.process_iter():
+        with proc.oneshot():
+            try:
+                exe = proc.exe()
+            except (psutil.NoSuchProcess, psutil.AccessDenied):
+                continue
+            if exe == '/opt/MagAOX/bin/xindidriver' and proc.ppid() == 1:
+                # this proc is a zombie (reparented to PID 1)
+                _run_as_xsup(f'kill -9 {proc.pid}')
+                warning(f"Killing zombie: {' '.join(proc.cmdline())}")
+    return _startup_helper(process_name, executable_name)
 
 def _startup_helper(process_name, executable_name):
     '''Start a new tmux session as the parent for a MagAO-X process
@@ -242,10 +272,11 @@ def startup(processes, targets):
         if process_name.startswith('is'):
             indi_server_name = process_name
     if len(targets) > 1 and indi_server_name in targets:
-        # special case for INDI server: needs to be first to start
-        # and have time to flux FIFOs
+        # special case for INDI server: needs to be first to start,
+        # have a chance to kill orphaned xindidriver processes,
+        # and have time to flush FIFOs
         targets.remove(indi_server_name)
-        did_anything = _startup_helper(indi_server_name, processes[indi_server_name])
+        did_anything = _indiserver_startup(indi_server_name, processes[indi_server_name])
         if did_anything:
             info(f"Waiting 5 seconds for {indi_server_name} to start...")
             time.sleep(5)
@@ -277,12 +308,8 @@ VERBS = {
 }
 
 
-def main(verb, targets):
+def main(verb, targets, role):
     debug(f'Got {verb} {targets}')
-    if 'MAGAOX_ROLE' not in os.environ:
-        failure(f"No $MAGAOX_ROLE variable in environment")
-        return 1
-    role = os.environ['MAGAOX_ROLE']
     debug(f"Got role: {role}")
     processes_filepath = f"/opt/MagAOX/config/proclist_{role}.txt"
     processes = _read_processes(processes_filepath)
@@ -295,13 +322,29 @@ def main(verb, targets):
 
     return VERBS[verb](processes, targets)
 
-
 if __name__ == "__main__":
     # logging.basicConfig(level=logging.DEBUG)
-    try:
-        arg_verb = sys.argv[1].lower().strip()
-        arg_targets = sys.argv[2:]
-    except IndexError:
-        print(__doc__, file=sys.stderr)
+    parser = argparse.ArgumentParser(prog='xctrl', description=__doc__)
+    parser.add_argument('-r', '--role', help='Specify role to read proclist for (default: $MAGAOX_ROLE)')
+    subparsers = parser.add_subparsers(help='verb for action to take', dest='verb')
+    for verb in VERBS:
+        sp = subparsers.add_parser(verb)
+        if verb == 'inspect': # special case, can only inspect one thing at a time
+            sp.add_argument('target', nargs=1, help='Process name to target')
+        else:
+            sp.add_argument('target', nargs='*', help='Process names to target')
+    args = parser.parse_args()
+    print(args)
+    if args.role is None:
+        if 'MAGAOX_ROLE' not in os.environ:
+            failure(f"No $MAGAOX_ROLE variable in environment and no --role option supplied")
+            sys.exit(1)
+        role = os.environ['MAGAOX_ROLE']
+    else:
+        role = args.role
+
+    if args.verb is None:
+        parser.print_help()
         sys.exit(1)
-    sys.exit(main(arg_verb, arg_targets))
+
+    sys.exit(main(args.verb, args.target, role))

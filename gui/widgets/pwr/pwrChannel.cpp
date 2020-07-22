@@ -11,6 +11,7 @@ pwrChannel::pwrChannel( QWidget * parent,
                       ) : QWidget(parent, flags)
 {
    m_channelNameLabel = new QwtTextLabel(this);
+   m_channelNameLabel->setStyleSheet("*{color: white;}");
    
    m_channelSwitch = new QSlider(this);
    m_channelSwitch->setOrientation(Qt::Horizontal);
