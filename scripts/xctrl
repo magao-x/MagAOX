@@ -31,11 +31,6 @@ YELLOW_SEQ = subprocess.check_output('tput setaf 3', shell=True)
 BLUE_SEQ = subprocess.check_output('tput setaf 4', shell=True)
 RESET_SEQ = subprocess.check_output('tput sgr0', shell=True)
 
-DEBUG = os.environ.get('XCTRL_DEBUG') is not None
-def debug(msg):
-    if DEBUG:
-        print(msg)
-
 def _make_output_funcs(color):
     def output_func(msg):
         stdout_b.write(color + msg.encode('utf8') + RESET_SEQ + b'\n')
@@ -51,6 +46,11 @@ success, success_bytes = _make_output_funcs(GREEN_SEQ)
 failure, failure_bytes = _make_output_funcs(RED_SEQ)
 warning, warning_bytes = _make_output_funcs(YELLOW_SEQ)
 info, info_bytes = _make_output_funcs(BLUE_SEQ)
+
+DEBUG = os.environ.get('XCTRL_DEBUG') is not None
+def debug(msg):
+    if DEBUG:
+        print(msg)
 
 WHO_AM_I = getpass.getuser()
 if os.environ.get('MAGAOX_ROLE') == 'vm':
@@ -91,7 +91,7 @@ def _run_as_xsup(command, capture_output=True, check=True):
     else:
         args = []
     args.extend(shlex.split(command))
-    info(f'Running as {WHO_AM_I}: {" ".join(args)}')
+    debug(f'Running as {WHO_AM_I}: {" ".join(args)}')
     res = subprocess.run(args, capture_output=capture_output, check=check)
     return res.returncode, res.stdout, res.stderr
 
@@ -110,7 +110,10 @@ def _read_processes(filepath):
 def _brief_status(process_name):
     pid_filepath = f'/opt/MagAOX/sys/{process_name}/pid'
     if not os.path.exists(pid_filepath):
-        warning(f'{process_name}: not started')
+        if _session_exists(process_name):
+            failure(f'{process_name}: session exists, but process is not running')
+        else:
+            warning(f'{process_name}: not started')
     else:
         with open(pid_filepath) as pid_file:
             pid = int(pid_file.read().strip())
@@ -120,14 +123,6 @@ def _brief_status(process_name):
                 success(f'{process_name}: running (pid: {pid})')
         else:
             failure(f'{process_name}: dead (stale pid)')
-    _peek_logs(process_name)
-
-
-def _peek_logs(process_name):
-    os.system(f'logdump -n 1 {process_name} 2>&1 | tail -n 5')
-    info(f"End {process_name} logs")
-    print()
-
 
 def status(processes, targets):
     if not len(targets):
@@ -137,6 +132,19 @@ def status(processes, targets):
         _brief_status(process_name)
     return 0
 
+def _peek_logs(process_name, n_lines):
+    os.system(f'logdump -n 1 {process_name} 2>&1 | tail -n {n_lines}')
+    info(f"End {process_name} logs")
+    print()
+
+def peek(processes, targets):
+    if not len(targets):
+        targets = processes.keys()
+    debug(f"Querying status for: {list(targets)}")
+    for process_name in targets:
+        _brief_status(process_name)
+        _peek_logs(process_name, n_lines=10)
+    return 0
 
 def inspect_session(_, targets):
     if len(targets) != 1:
@@ -264,9 +272,17 @@ def _startup_helper(process_name, executable_name):
     success(f"Executed in {process_name} session: '{cmd}'")
     return True
 
-def startup(processes, targets):
+def validate_targets(processes, targets):
     if not len(targets):
         targets = list(processes.keys())
+    else:
+        if not set(targets).issubset(processes.keys()):
+            difference = set(targets) - set(processes.keys())
+            failure(f'Unknown process names: {difference}')
+            sys.exit(1)
+    return targets
+
+def startup(processes, targets):
     indi_server_name = None
     for process_name in targets:
         if process_name.startswith('is'):
@@ -302,28 +318,14 @@ def restart(processes, targets):
 VERBS = {
     'status': status,
     'inspect': inspect_session,
+    'peek': peek,
     'shutdown': shutdown,
     'restart': restart,
     'startup': startup,
 }
 
 
-def main(verb, targets, role):
-    debug(f'Got {verb} {targets}')
-    debug(f"Got role: {role}")
-    processes_filepath = f"/opt/MagAOX/config/proclist_{role}.txt"
-    processes = _read_processes(processes_filepath)
-    debug(f'Read processes from {processes_filepath}: {processes}')
-
-    if verb not in VERBS:
-        failure(f"Valid verbs: {', '.join(VERBS.keys())}")
-        failure(f"Got: {verb}")
-        return 1
-
-    return VERBS[verb](processes, targets)
-
-if __name__ == "__main__":
-    # logging.basicConfig(level=logging.DEBUG)
+def main():
     parser = argparse.ArgumentParser(prog='xctrl', description=__doc__)
     parser.add_argument('-r', '--role', help='Specify role to read proclist for (default: $MAGAOX_ROLE)')
     subparsers = parser.add_subparsers(help='verb for action to take', dest='verb')
@@ -334,7 +336,8 @@ if __name__ == "__main__":
         else:
             sp.add_argument('target', nargs='*', help='Process names to target')
     args = parser.parse_args()
-    print(args)
+    debug(f"Parsed args: {args}")
+
     if args.role is None:
         if 'MAGAOX_ROLE' not in os.environ:
             failure(f"No $MAGAOX_ROLE variable in environment and no --role option supplied")
@@ -347,4 +350,21 @@ if __name__ == "__main__":
         parser.print_help()
         sys.exit(1)
 
-    sys.exit(main(args.verb, args.target, role))
+
+    debug(f"Got role: {role}")
+    processes_filepath = f"/opt/MagAOX/config/proclist_{role}.txt"
+    processes = _read_processes(processes_filepath)
+    debug(f'Read processes from {processes_filepath}: {processes}')
+
+    verb = args.verb
+    targets = validate_targets(processes, args.target)
+    debug(f'Got verb = {verb}, targets = {targets}')
+    if verb not in VERBS:
+        failure(f"Valid verbs: {', '.join(VERBS.keys())}")
+        failure(f"Got: {verb}")
+        return 1
+
+    return VERBS[verb](processes, targets)
+
+if __name__ == "__main__":
+    sys.exit(main())
