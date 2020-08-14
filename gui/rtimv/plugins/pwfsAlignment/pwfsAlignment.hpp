@@ -19,7 +19,7 @@ class pwfsAlignment : public QObject,
    protected:
       bool m_enabled {false};
       
-      std::unordered_map<std::string, rtimvDictBlob> * m_dict {nullptr};
+      dictionaryT * m_dict {nullptr};
       
       double m_1x {0};
       double m_1y {0};
@@ -63,7 +63,7 @@ class pwfsAlignment : public QObject,
       virtual ~pwfsAlignment();
 
       virtual int attachOverlay( rtimvGraphicsView*, 
-                                 std::unordered_map<std::string, rtimvDictBlob> *,
+                                 dictionaryT *,
                                  mx::app::appConfigurator & config
                                ); 
       

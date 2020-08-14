@@ -10,10 +10,12 @@ pwfsAlignment::~pwfsAlignment()
 }
 
 int pwfsAlignment::attachOverlay( rtimvGraphicsView* gv, 
-                                  std::unordered_map<std::string, rtimvDictBlob> * dict,
+                                  dictionaryT * dict,
                                   mx::app::appConfigurator & config
                                 )
 {
+   static_cast<void>(config);
+   
    std::cerr << "pwfsAlignment attached -- w config\n";
    
    QGraphicsScene * qgs = gv->scene();

@@ -12,7 +12,7 @@ indiClient::~indiClient()
    if(m_client) delete m_client;
 }
 
-int indiClient::attachDictionary( std::unordered_map<std::string, rtimvDictBlob> * dict,
+int indiClient::attachDictionary( dictionaryT * dict,
                                   mx::app::appConfigurator & config
                                 )
 {
