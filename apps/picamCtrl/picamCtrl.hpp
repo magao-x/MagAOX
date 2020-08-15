@@ -225,6 +225,7 @@ protected:
    int capExpTime(piflt& exptime);
    int setFPS();
    int setNextROI();
+   int setShutter(int sh);
    
    //Framegrabber interface:
    int configureAcquisition();
@@ -489,13 +490,6 @@ int picamCtrl::appLogic()
          return log<software_error,0>({__FILE__,__LINE__});
       }
 
-      if(dssShutter<picamCtrl>::updateINDI() < 0)
-      {
-         log<software_error>({__FILE__, __LINE__});
-         state(stateCodes::ERROR);
-         return 0;
-      }
-      
       if(telemeter<picamCtrl>::appLogic() < 0)
       {
          log<software_error>({__FILE__, __LINE__});
@@ -537,6 +531,7 @@ int picamCtrl::whilePowerOff()
 
    dssShutter<picamCtrl>::whilePowerOff();
 
+   stdCamera<picamCtrl>::onPowerOff();
 
    return 0;
 }
@@ -995,7 +990,7 @@ int picamCtrl::setAdcQuality(int newquality)
    // what should m_adcQuality be?
    // add checks here
 
-   if(newquality < 0 || newquality > m_adcQualities.size())
+   if(newquality < 0 || (size_t) newquality > m_adcQualities.size())
    {
       log<text_log>("Invalid ADC quality requested.", logPrio::LOG_ERROR);
       return -1;
@@ -1107,6 +1102,8 @@ int picamCtrl::capExpTime(piflt& exptime)
       long intexptime = m_ReadOutTimeCalculation * 10000 + 0.5;
       exptime = ((double)intexptime)/10000;
    }
+   
+   return 0;
 }
 
 //Set ROI property to busy if accepted, set toggle to Off and Idlw either way.
@@ -1129,6 +1126,12 @@ int picamCtrl::setNextROI()
    
    return 0;
    
+}
+
+inline 
+int picamCtrl::setShutter( int sh )
+{
+   return dssShutter<picamCtrl>::setShutter(sh);
 }
 
 inline
@@ -1694,8 +1697,7 @@ INDI_NEWCALLBACK_DEFN(picamCtrl, m_indiP_adcspeed)(const pcf::IndiProperty &ipRe
    
    std::string newspeed;
    int newn = -1;
-   piint i;
-   for(i=0; i< m_adcSpeeds.size(); ++i) 
+   for(size_t i=0; i< m_adcSpeeds.size(); ++i) 
    {
       if(!ipRecv.find(m_adcSpeeds[i])) continue;
       
@@ -1734,8 +1736,8 @@ INDI_NEWCALLBACK_DEFN(picamCtrl, m_indiP_verticalshiftrate)(const pcf::IndiPrope
    
    std::string newvsr;
    int newn = -1;
-   piint i;
-   for(i=0; i< m_verticalShiftRates.size(); ++i) 
+   
+   for(size_t i=0; i< m_verticalShiftRates.size(); ++i) 
    {
       if(!ipRecv.find(m_verticalShiftRates[i])) continue;
       
