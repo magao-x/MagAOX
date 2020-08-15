@@ -46,12 +46,14 @@ namespace app
   * \ingroup andorCtrl
   *
   */
-class andorCtrl : public MagAOXApp<>, public dev::stdCamera<andorCtrl>, public dev::edtCamera<andorCtrl>, public dev::frameGrabber<andorCtrl>
+class andorCtrl : public MagAOXApp<>, public dev::stdCamera<andorCtrl>, public dev::edtCamera<andorCtrl>, 
+                                          public dev::frameGrabber<andorCtrl>, public dev::telemeter<andorCtrl>
 {
 
    friend class dev::stdCamera<andorCtrl>;
    friend class dev::edtCamera<andorCtrl>;
    friend class dev::frameGrabber<andorCtrl>;
+   friend class dev::telemeter<andorCtrl>;
 
 protected:
 
@@ -68,6 +70,7 @@ protected:
 
    ///@}
 
+   bool m_initialized {false};
 
    unsigned m_emGain {1};
 
@@ -75,8 +78,6 @@ protected:
    float m_fpsSet {0};
    float m_fpsTgt {0};
    float m_fpsMeasured {0};
-
-   bool m_shutter {false};
 
 public:
 
@@ -115,18 +116,6 @@ public:
 
    int cameraSelect(int camNo);
 
-   
-   
-   
-   
-   
-   
-   
-   
-   
-   
-   
-   
    
    int getTemp();
 
@@ -212,12 +201,19 @@ protected:
   
    pcf::IndiProperty m_indiP_emGain;
 
-   pcf::IndiProperty m_indiP_shutter;
-
 public:
    INDI_NEWCALLBACK_DECL(andorCtrl, m_indiP_emGain);
 
-   INDI_NEWCALLBACK_DECL(andorCtrl, m_indiP_shutter);
+   
+   /** \name Telemeter Interface
+     * 
+     * @{
+     */ 
+   int checkRecordTimes();
+   
+   int recordTelem( const telem_stdcam * );
+      
+   ///@}
 };
 
 inline
@@ -227,6 +223,8 @@ andorCtrl::andorCtrl() : MagAOXApp(MAGAOX_CURRENT_SHA1, MAGAOX_REPO_MODIFIED)
    m_powerOnWait = 10;
    
    m_startupTemp = 20;
+   
+   m_hasShutter = true;
    return;
 }
 
@@ -246,6 +244,7 @@ void andorCtrl::setupConfig()
 
    dev::frameGrabber<andorCtrl>::setupConfig(config);
 
+   dev::telemeter<andorCtrl>::setupConfig(config);
    
 
 }
@@ -273,7 +272,7 @@ void andorCtrl::loadConfig()
    }
 
    dev::frameGrabber<andorCtrl>::loadConfig(config);
-
+   dev::telemeter<andorCtrl>::loadConfig(config);
 
 
 
@@ -290,17 +289,6 @@ int andorCtrl::appStartup()
    m_indiP_emGain["current"].set(m_emGain);
    m_indiP_emGain.add (pcf::IndiElement("target"));
 
-   REG_INDI_NEWPROP(m_indiP_shutter, "shutter", pcf::IndiProperty::Text);
-   m_indiP_shutter.add (pcf::IndiElement("current"));
-   m_indiP_shutter["current"].set("UNKNOWN");
-   m_indiP_shutter.add (pcf::IndiElement("target"));
-
-//    if(pdvConfig(m_startupMode) < 0)
-//    {
-//       log<software_error>({__FILE__, __LINE__});
-//       return -1;
-//    }
-   
    if(dev::stdCamera<andorCtrl>::appStartup() < 0)
    {
       return log<software_critical,-1>({__FILE__,__LINE__});
@@ -316,6 +304,11 @@ int andorCtrl::appStartup()
       return log<software_critical,-1>({__FILE__,__LINE__});
    }
 
+   if(dev::telemeter<andorCtrl>::appStartup() < 0)
+   {
+      return log<software_error,-1>({__FILE__,__LINE__});
+   }
+   
    state(stateCodes::NOTCONNECTED);
 
    return 0;
@@ -353,6 +346,24 @@ int andorCtrl::appLogic()
 
       //Might have gotten here because of a power off.
       if(m_powerState == 0) return 0;
+      
+      
+      if(m_initialized)
+      {
+         ShutDown();
+         m_initialized = false;
+      }
+      
+      int error = Initialize((char *)"/usr/local/etc/andor");
+
+      std::cout << "The Error code is " << error << std::endl;
+
+      if(error!=DRV_SUCCESS)
+      {
+         std::cerr << "Initialisation error...exiting" << std::endl;
+         return -1;
+      }
+      m_initialized = true;
 
       int ret = cameraSelect(0); ///\todo make camera number configurable
 
@@ -362,19 +373,8 @@ int andorCtrl::appLogic()
          return 0;
       }
 
-      int error = Initialize((char *)"/usr/local/etc/andor");
-
-      std::cout << "The Error code is " << error << std::endl;
-
-      if(error!=DRV_SUCCESS)
-      {
-		std::cerr << "Initialisation error...exiting" << std::endl;
-		return -1;
-	}
 
       state(stateCodes::CONNECTED);
-
-
    }
 
    if( state() == stateCodes::CONNECTED )
@@ -382,24 +382,9 @@ int andorCtrl::appLogic()
       //Get a lock
       std::unique_lock<std::mutex> lock(m_indiMutex);
 
-
+      m_shutterStatus = "READY";
 
       state(stateCodes::READY);
-//       if( getFPS() == 0 )
-//       {
-//          if(m_fpsSet == 0) state(stateCodes::READY);
-//          else state(stateCodes::OPERATING);
-//
-//          if(setTemp(m_startupTemp) < 0)
-//          {
-//             return log<software_error,0>({__FILE__,__LINE__});
-//          }
-//       }
-//       else
-//       {
-//          state(stateCodes::ERROR);
-//          return log<software_error,0>({__FILE__,__LINE__});
-//       }
    }
 
    if( state() == stateCodes::READY || state() == stateCodes::OPERATING )
@@ -434,22 +419,33 @@ int andorCtrl::appLogic()
          return 0;
       }
 
-      if(m_shutter == false)
-      {
-         updateIfChanged(m_indiP_shutter, "current", std::string("SHUT"));
-         updateIfChanged(m_indiP_shutter, "target", std::string(""));
-      }
-      else
-      {
-         updateIfChanged(m_indiP_shutter, "current", std::string("OPEN"));
-         updateIfChanged(m_indiP_shutter, "target", std::string(""));
-      }
-      /*if(frameGrabber<andorCtrl>::updateINDI() < 0)
+      if(frameGrabber<andorCtrl>::updateINDI() < 0)
       {
          log<software_error>({__FILE__, __LINE__});
          state(stateCodes::ERROR);
          return 0;
-      }*/
+      }
+      
+      if(stdCamera<andorCtrl>::updateINDI() < 0)
+      {
+         log<software_error>({__FILE__, __LINE__});
+         state(stateCodes::ERROR);
+         return 0;
+      }
+      
+      if(edtCamera<andorCtrl>::updateINDI() < 0)
+      {
+         log<software_error>({__FILE__, __LINE__});
+         state(stateCodes::ERROR);
+         return 0;
+      }
+      
+      if(telemeter<andorCtrl>::appLogic() < 0)
+      {
+         log<software_error>({__FILE__, __LINE__});
+         return 0;
+      }
+      
    }
 
    //Fall through check?
@@ -461,6 +457,12 @@ int andorCtrl::appLogic()
 inline
 int andorCtrl::onPowerOff()
 {
+   if(m_initialized)
+   {
+      ShutDown();
+      m_initialized = false;
+   }
+      
    m_powerOnCounter = 0;
 
    std::lock_guard<std::mutex> lock(m_indiMutex);
@@ -468,21 +470,60 @@ int andorCtrl::onPowerOff()
    updateIfChanged(m_indiP_emGain, "current", 0);
    updateIfChanged(m_indiP_emGain, "target", 0);
 
-   edtCamera<andorCtrl>::onPowerOff();
+   m_shutterStatus = "POWEROFF";
+   m_shutterState = 1;
+   
+   if(stdCamera<andorCtrl>::onPowerOff() < 0)
+   {
+      log<software_error>({__FILE__, __LINE__});
+   }
+   
+   if(edtCamera<andorCtrl>::onPowerOff() < 0)
+   {
+      log<software_error>({__FILE__, __LINE__});
+   }
+   
+   if(frameGrabber<andorCtrl>::onPowerOff() < 0)
+   {
+      log<software_error>({__FILE__, __LINE__});
+   }
+   
    return 0;
 }
 
 inline
 int andorCtrl::whilePowerOff()
 {
+   m_shutterStatus = "POWEROFF";
+   m_shutterState = 1;
+   
+   if(stdCamera<andorCtrl>::whilePowerOff() < 0)
+   {
+      log<software_error>({__FILE__, __LINE__});
+   }
+   
+   if(edtCamera<andorCtrl>::whilePowerOff() < 0)
+   {
+      log<software_error>({__FILE__, __LINE__});
+   }
+   
    return 0;
 }
+
 
 inline
 int andorCtrl::appShutdown()
 {
+   if(m_initialized)
+   {
+      ShutDown();
+      m_initialized = false;
+   }
+      
    dev::frameGrabber<andorCtrl>::appShutdown();
 
+   dev::telemeter<andorCtrl>::appShutdown();
+   
    return 0;
 }
 
@@ -597,15 +638,15 @@ int andorCtrl::setShutter( unsigned os )
 {
    AbortAcquisition();
 
-   if(os == 0)
+   if(os == 1) //Shut
    {
       SetShutter(1,2,50,50);
-      m_shutter = 0;
+      m_shutterState = 1;
    }
-   else
+   else //Open
    {
       SetShutter(1,1,50,50);
-      m_shutter = 1;
+      m_shutterState = 0;
    }
 
    StartAcquisition();
@@ -704,11 +745,6 @@ int andorCtrl::configureAcquisition()
    //lock mutex
    std::unique_lock<std::mutex> lock(m_indiMutex);
 
-
-
-
-
-
     //Get Detector dimensions
     int width, height;
     GetDetector(&width, &height);
@@ -742,7 +778,8 @@ int andorCtrl::configureAcquisition()
 
     //Initialize Shutter to SHUT
     int ss = 2;
-    if(m_shutter) ss = 1;
+    if(m_shutterState == 0) ss = 1;
+    else m_shutterState = 1; //handles startup case
     SetShutter(1,ss,50,50);
 
     SetNumberAccumulations(1);
@@ -838,45 +875,16 @@ INDI_NEWCALLBACK_DEFN(andorCtrl, m_indiP_emGain)(const pcf::IndiProperty &ipRecv
    return -1;
 }
 
-INDI_NEWCALLBACK_DEFN(andorCtrl, m_indiP_shutter)(const pcf::IndiProperty &ipRecv)
+inline
+int andorCtrl::checkRecordTimes()
 {
-   if (ipRecv.getName() == m_indiP_shutter.getName())
-   {
-      std::string current, target;
-
-      if(ipRecv.find("current"))
-      {
-         current = ipRecv["current"].get<std::string>();
-      }
-
-      if(ipRecv.find("target"))
-      {
-         target = ipRecv["target"].get<std::string>();
-      }
-
-      if(target == "") target = current;
-
-      target = mx::ioutils::toUpper(target);
-
-      if(target != "OPEN" && target != "SHUT")
-      {
-         return log<software_error,-1>({__FILE__, __LINE__, "invalid shutter request"});
-      }
-      else
-      {
-
-         //Lock the mutex, waiting if necessary
-         std::unique_lock<std::mutex> lock(m_indiMutex);
-
-         updateIfChanged(m_indiP_shutter, "target", target);
-      }
-
-      int os = 0;
-      if(target == "OPEN") os = 1;
-      return setShutter(os);
-
-   }
-   return -1;
+   return telemeter<andorCtrl>::checkRecordTimes(telem_stdcam());
+}
+  
+inline
+int andorCtrl::recordTelem( const telem_stdcam * )
+{
+   return recordCamera(true);
 }
 
 }//namespace app
