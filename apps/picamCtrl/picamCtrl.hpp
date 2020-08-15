@@ -372,7 +372,6 @@ int picamCtrl::appStartup()
       return log<software_critical,-1>({__FILE__,__LINE__});
    }
    
-   
    if(dev::frameGrabber<picamCtrl>::appStartup() < 0)
    {
       return log<software_critical,-1>({__FILE__,__LINE__});
@@ -516,10 +515,15 @@ int picamCtrl::onPowerOff()
 
    Picam_UninitializeLibrary();
 
-   ///\todo error check these base class fxns.
-   dssShutter<picamCtrl>::onPowerOff();
+   if(dssShutter<picamCtrl>::onPowerOff() < 0)
+   {
+      log<software_error>({__FILE__, __LINE__});
+   }
 
-   stdCamera<picamCtrl>::onPowerOff();
+   if(stdCamera<picamCtrl>::onPowerOff() < 0)
+   {
+      log<software_error>({__FILE__, __LINE__});
+   }
    
    return 0;
 }
@@ -527,12 +531,16 @@ int picamCtrl::onPowerOff()
 inline
 int picamCtrl::whilePowerOff()
 {
-   ///\todo error check these base class fxns.
+   if(dssShutter<picamCtrl>::whilePowerOff() < 0)
+   {
+      log<software_error>({__FILE__, __LINE__});
+   }
 
-   dssShutter<picamCtrl>::whilePowerOff();
-
-   stdCamera<picamCtrl>::onPowerOff();
-
+   if(stdCamera<picamCtrl>::onPowerOff() < 0 )
+   {
+      log<software_error>({__FILE__, __LINE__});
+   }
+   
    return 0;
 }
 
