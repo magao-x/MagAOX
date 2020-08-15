@@ -20,6 +20,12 @@ table TempCtrl
    statusStr:string;
 }
 
+table Shutter
+{
+   statusStr:string;
+   state:int;
+}
+
 table Telem_stdcam_fb
 {
    mode:string;
@@ -35,6 +41,8 @@ table Telem_stdcam_fb
    adcSpeed:float;
    
    tempCtrl:TempCtrl;
+   
+   shutter:Shutter;
 }
 
 root_type Telem_stdcam_fb;

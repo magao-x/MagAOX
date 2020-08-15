@@ -109,6 +109,17 @@ int loadCameraConfig( cameraConfigMap & ccmap, ///< [out] the map in which to pl
   *
   * The default values of m_currentROI should be set before calling stdCamera::appStartup().
   *
+  * The derived class must implement:
+  \code
+   int powerOnDefaults();
+   int setTempControl();
+   int setTempSetPt();
+   int setExpTime();
+   int setFPS();
+   int setNextROI();
+   int setShutter(int); 
+  \endcode
+  * 
   * Calls to this class's `setupConfig`, `loadConfig`, `appStartup`, `appLogic`, `appShutdown`
   * `onPowerOff`, and `whilePowerOff`,  must be placed in the derived class's functions of the same name.
   *
@@ -188,12 +199,22 @@ protected:
    
    ///@}
    
+   /** \name Modes
+     *
+     * @{
+     */ 
    bool m_usesModes {true}; ///< Flag to set in constructor determining if modes are offered by this camera
    
    std::string m_modeName; ///< The current mode name
    
    std::string m_nextMode; ///< The mode to be set by the next reconfiguration
    
+   ///@}
+   
+   /** \name ROIs 
+     *
+     * @{
+     */ 
    bool m_usesROI {true}; ///< Flag to set in constructor determining if ROIs are offered by this camera
    
    struct roi
@@ -233,6 +254,19 @@ protected:
    int m_minROIBinning_y {1};
    int m_maxROIBinning_y {4};
    int m_stepROIBinning_y {1};
+   ///@}
+   
+   /** \name Shutter Control
+     *
+     * @{
+     */
+   
+   bool m_hasShutter {false};
+   
+   std::string m_shutterStatus {"UNKNOWN"};
+   int m_shutterState {-1}; /// State of the shutter.  0 = shut, 1 = open, -1 = unknown.
+   
+   ///@}
    
 public:
 
@@ -296,6 +330,8 @@ public:
        stdCamera<derivedT>::onPowerOff();
        \endcode
      * with appropriate error checking.
+     *
+     * The INDI mutex should be locked before calling.
      * 
      * \returns 0 on success
      * \returns -1 on error, which is logged.
@@ -357,6 +393,8 @@ protected:
 
    pcf::IndiProperty m_indiP_roi_set; ///< Property used to trigger setting the ROI 
    
+   pcf::IndiProperty m_indiP_shutterStatus; ///< Property to report shutter status
+   pcf::IndiProperty m_indiP_shutter; ///< Property used to control the shutter, a switch.
 public:
 
    /// The static callback function to be registered for stdCamera properties
@@ -446,7 +484,6 @@ public:
      */
    int newCallBack_roi_bin_y( const pcf::IndiProperty &ipRecv /**< [in] the INDI property sent with the the new property request.*/);
    
-   
    /// Callback to process a NEW roi_set request
    /**
      * \returns 0 on success.
@@ -454,6 +491,12 @@ public:
      */
    int newCallBack_roi_set( const pcf::IndiProperty &ipRecv /**< [in] the INDI property sent with the the new property request.*/);
    
+   /// Callback to process a NEW shutter request
+   /**
+     * \returns 0 on success.
+     * \returns -1 on error.
+     */
+   int newCallBack_shutter( const pcf::IndiProperty &ipRecv /**< [in] the INDI property sent with the the new property request.*/);
    
    /// Update the INDI properties for this device controller
    /** You should call this once per main loop.
@@ -690,6 +733,30 @@ int stdCamera<derivedT>::appStartup()
    
    }
    
+   //Set up INDI for shutter
+   if(m_hasShutter)
+   {
+      derived().createROIndiText( m_indiP_shutterStatus, "shutter_status", "status", "Shutter Status", "Shutter", "Status");
+      m_indiP_shutterStatus["status"] = m_shutterStatus;
+      if( derived().registerIndiPropertyReadOnly( m_indiP_shutterStatus ) < 0)
+      {
+         #ifndef STDCAMERA_TEST_NOLOG
+         derivedT::template log<software_error>({__FILE__,__LINE__});
+         #endif
+         return -1;
+      }
+      
+      derived().createStandardIndiToggleSw( m_indiP_shutter, "shutter", "Shutter", "Shutter");  
+      if( derived().registerIndiPropertyNew( m_indiP_shutter, st_newCallBack_stdCamera) < 0)
+      {
+         #ifndef STDCAMERA_TEST_NOLOG
+         derivedT::template log<software_error>({__FILE__,__LINE__});
+         #endif
+         return -1;
+      }
+      
+   }
+   
    return 0;
 }
 
@@ -738,6 +805,31 @@ int stdCamera<derivedT>::appLogic()
             derived().updateIfChanged(m_indiP_roi_bin_y, "target", m_nextROI.bin_y, INDI_IDLE);
          }
          
+         if(m_hasShutter)
+         {
+            if(m_shutterStatus == "OPERATING")
+            {
+               derived().updateIfChanged(m_indiP_shutterStatus, "status", m_shutterStatus, INDI_BUSY);
+            }
+            if(m_shutterStatus == "POWERON" || m_shutterStatus == "READY")
+            {
+               derived().updateIfChanged(m_indiP_shutterStatus, "status", m_shutterStatus, INDI_OK);
+            }
+            else
+            {
+               derived().updateIfChanged(m_indiP_shutterStatus, "status", m_shutterStatus, INDI_IDLE);
+            }
+            
+            if(m_shutterState == 1)
+            {
+               derived().updateSwitchIfChanged(m_indiP_shutter, "toggle", pcf::IndiElement::On, INDI_BUSY);
+            }
+            else
+            {
+               derived().updateSwitchIfChanged(m_indiP_shutter, "toggle", pcf::IndiElement::Off, INDI_IDLE);
+            }
+         }
+            
          return 0;
       }
       else
@@ -782,12 +874,64 @@ int stdCamera<derivedT>::onPowerOff()
       indi::updateIfChanged(m_indiP_roi_bin_y, "target", std::string(""), derived().m_indiDriver, INDI_IDLE);
    }
    
+   //Shutters can be independent pieces of hardware . . .
+   if(m_hasShutter)
+   {
+      if(m_shutterStatus == "OPERATING")
+      {
+         derived().updateIfChanged(m_indiP_shutterStatus, "status", m_shutterStatus, INDI_BUSY);
+      }
+      if(m_shutterStatus == "POWERON" || m_shutterStatus == "READY")
+      {
+         derived().updateIfChanged(m_indiP_shutterStatus, "status", m_shutterStatus, INDI_OK);
+      }
+      else
+      {
+         derived().updateIfChanged(m_indiP_shutterStatus, "status", m_shutterStatus, INDI_IDLE);
+      }
+          
+      if(m_shutterState == 1)
+      {
+         derived().updateSwitchIfChanged(m_indiP_shutter, "toggle", pcf::IndiElement::On, INDI_BUSY);
+      }
+      else
+      {
+         derived().updateSwitchIfChanged(m_indiP_shutter, "toggle", pcf::IndiElement::Off, INDI_IDLE);
+      }
+   }
+   
    return 0;
 }
 
 template<class derivedT>
 int stdCamera<derivedT>::whilePowerOff()
 {
+   //Shutters can be independent pieces of hardware . . .
+   if(m_hasShutter)
+   {
+      if(m_shutterStatus == "OPERATING")
+      {
+         derived().updateIfChanged(m_indiP_shutterStatus, "status", m_shutterStatus, INDI_BUSY);
+      }
+      if(m_shutterStatus == "POWERON" || m_shutterStatus == "READY")
+      {
+         derived().updateIfChanged(m_indiP_shutterStatus, "status", m_shutterStatus, INDI_OK);
+      }
+      else
+      {
+         derived().updateIfChanged(m_indiP_shutterStatus, "status", m_shutterStatus, INDI_IDLE);
+      }
+      
+      if(m_shutterState == 1)
+      {
+         derived().updateSwitchIfChanged(m_indiP_shutter, "toggle", pcf::IndiElement::On, INDI_BUSY);
+      }
+      else
+      {
+         derived().updateSwitchIfChanged(m_indiP_shutter, "toggle", pcf::IndiElement::Off, INDI_IDLE);
+      }
+   }
+   
    return 0;
 }
 
@@ -818,7 +962,9 @@ int stdCamera<derivedT>::st_newCallBack_stdCamera( void * app,
    if(name == "roi_bin_x") return _app->newCallBack_roi_bin_x(ipRecv);
    if(name == "roi_bin_y") return _app->newCallBack_roi_bin_y(ipRecv);
    if(name == "roi_set") return _app->newCallBack_roi_set(ipRecv);
+   if(name == "shutter") return _app->newCallBack_shutter(ipRecv);
    
+   derivedT::template log<software_error>({__FILE__,__LINE__, "unknown INDI property"});
    return -1;
 }
 
@@ -1074,6 +1220,33 @@ int stdCamera<derivedT>::newCallBack_roi_set( const pcf::IndiProperty &ipRecv )
 }
 
 template<class derivedT>
+int stdCamera<derivedT>::newCallBack_shutter( const pcf::IndiProperty &ipRecv )
+{
+   if(ipRecv.getName() != m_indiP_shutter.getName())
+   {
+      derivedT::template log<software_error>({__FILE__,__LINE__, "wrong INDI property received."});
+      return -1;
+   }
+   
+   if(!ipRecv.find("toggle")) return 0;
+   
+   if( ipRecv["toggle"].getSwitchState() == pcf::IndiElement::Off )
+   {
+      derived().setShutter(0);
+   }
+   
+   if( ipRecv["toggle"].getSwitchState() == pcf::IndiElement::On )
+   {
+      derived().setShutter(1);
+   }
+   
+   return 0;
+   
+   
+   return 0;  
+}
+
+template<class derivedT>
 int stdCamera<derivedT>::updateINDI()
 {
    if( !derived().m_indiDriver ) return 0;
@@ -1136,6 +1309,31 @@ int stdCamera<derivedT>::updateINDI()
       derived().updateIfChanged(m_indiP_temp, "current", m_ccdTemp, INDI_IDLE);
    }
    
+   if(m_hasShutter)
+   {
+      if(m_shutterStatus == "OPERATING")
+      {
+         derived().updateIfChanged(m_indiP_shutterStatus, "status", m_shutterStatus, INDI_BUSY);
+      }
+      if(m_shutterStatus == "POWERON" || m_shutterStatus == "READY")
+      {
+         derived().updateIfChanged(m_indiP_shutterStatus, "status", m_shutterStatus, INDI_OK);
+      }
+      else
+      {
+         derived().updateIfChanged(m_indiP_shutterStatus, "status", m_shutterStatus, INDI_IDLE);
+      }
+          
+      if(m_shutterState == 1)
+      {
+         derived().updateSwitchIfChanged(m_indiP_shutter, "toggle", pcf::IndiElement::On, INDI_BUSY);
+      }
+      else
+      {
+         derived().updateSwitchIfChanged(m_indiP_shutter, "toggle", pcf::IndiElement::Off, INDI_IDLE);
+      }
+   }
+   
    return 0;
 }
 
@@ -1153,6 +1351,8 @@ int stdCamera<derivedT>::recordCamera( bool force )
    static bool last_tempControlStatus = 0;
    static bool last_tempControlOnTarget = 0;
    static std::string last_tempControlStatusStr;
+   static std::string last_shutterStatus;
+   static int last_shutterState;
    
    if(force || m_modeName != last_mode ||
                m_currentROI.x != last_roi.x ||
@@ -1169,12 +1369,14 @@ int stdCamera<derivedT>::recordCamera( bool force )
                m_ccdTempSetpt != last_ccdTempSetpt ||
                m_tempControlStatus != last_tempControlStatus ||
                m_tempControlOnTarget != last_tempControlOnTarget ||
-               m_tempControlStatusStr != last_tempControlStatusStr )
+               m_tempControlStatusStr != last_tempControlStatusStr ||
+               m_shutterStatus != last_shutterStatus ||
+               m_shutterState != last_shutterState )
    {
       derived().template telem<telem_stdcam>({m_modeName, m_currentROI.x, m_currentROI.y, 
                                                     m_currentROI.w, m_currentROI.h, m_currentROI.bin_x, m_currentROI.bin_y,
                                                        m_expTime, m_fps, m_emGain, m_adcSpeed, m_ccdTemp, m_ccdTempSetpt, (uint8_t) m_tempControlStatus, 
-                                                             (uint8_t) m_tempControlOnTarget, m_tempControlStatusStr});
+                                                             (uint8_t) m_tempControlOnTarget, m_tempControlStatusStr, m_shutterStatus, (int8_t) m_shutterState});
       
       last_mode = m_modeName;
       last_roi = m_currentROI;
@@ -1187,7 +1389,8 @@ int stdCamera<derivedT>::recordCamera( bool force )
       last_tempControlStatus = m_tempControlStatus;
       last_tempControlOnTarget = m_tempControlOnTarget;
       last_tempControlStatusStr = m_tempControlStatusStr;
-      
+      last_shutterStatus = m_shutterStatus;
+      last_shutterState = m_shutterState;
    }
    
    
