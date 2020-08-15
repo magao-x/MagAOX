@@ -10,7 +10,7 @@ cameraStatus::~cameraStatus()
 }
 
 int cameraStatus::attachOverlay( rtimvGraphicsView* gv, 
-                                 std::unordered_map<std::string, rtimvDictBlob> * dict,
+                                 dictionaryT * dict,
                                  mx::app::appConfigurator & config
                                )
 {
@@ -30,8 +30,11 @@ int cameraStatus::attachOverlay( rtimvGraphicsView* gv,
    }
    
    m_enableable = true;
-   
+   m_enabled = true;
    std::cerr << "cameraStatus deviceName: " << m_deviceName << "\n";
+   
+   config.configUnused(m_filterDeviceName, mx::app::iniFile::makeKey("camera", "filterDevice"));
+   
    
    if(m_enabled) enableOverlay();
    else disableOverlay();
@@ -95,6 +98,48 @@ int cameraStatus::updateOverlay()
    }
    if(n > m_gv->statusTextNo()-1) return 0;   
    
+   if(m_filterDeviceName != "")
+   {
+      if( m_dict->count(m_filterDeviceName + ".fsm.state") > 0)
+      {
+         std::string fwstate = std::string((char *)(*m_dict)[m_filterDeviceName + ".fsm.state"].m_blob);
+         
+         if(fwstate == "READY" || fwstate == "OPERATING")
+         {
+            dictionaryIteratorT start = m_dict->lower_bound(m_filterDeviceName + ".filterName");
+            dictionaryIteratorT end = m_dict->upper_bound(m_filterDeviceName + ".filterNameZ");
+            
+            std::string fkey;
+            while(start != end)
+            {
+//               std::cerr << start->first << " " << std::string((char*)start->second.m_blob) << "\n";
+               if(std::string((char*)start->second.m_blob) == "on")
+               {
+                  fkey = start->first;
+                  break;
+               }
+               ++start;
+            }
+            
+            size_t pp = fkey.rfind('.');
+            if(pp != std::string::npos && pp < fkey.size()-1) //need to be able to add 1
+            {
+               m_gv->statusTextText(n, fkey.substr(pp+1).c_str());
+            }
+            else
+            {
+               m_gv->statusTextText(n, "filt unk");
+            }
+         }
+         else
+         {
+            fwstate = "f/w " + fwstate;
+            m_gv->statusTextText(n, fwstate.c_str());
+            ++n;
+         }
+      }
+      if(n > m_gv->statusTextNo()-1) return 0;   
+   }
    
    return 0;
 }

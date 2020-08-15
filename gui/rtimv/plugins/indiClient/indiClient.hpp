@@ -17,7 +17,7 @@ protected:
    bool m_shutdown {false};
    bool m_connectionLost{false};
 
-   std::unordered_map<std::string, rtimvDictBlob> * m_dict {nullptr};
+   dictionaryT * m_dict {nullptr};
    
    
 public:
@@ -26,7 +26,7 @@ public:
                     const std::string &szProtocolVersion,
                     const std::string & ipAddress,
                     const int port,
-                    std::unordered_map<std::string, rtimvDictBlob> * dict
+                    dictionaryT * dict
                   ) : pcf::IndiClient(szName, szVersion, szProtocolVersion, ipAddress, port)  //"127.0.0.1", 7624)
    {
       m_dict = dict;
@@ -50,8 +50,19 @@ public:
       {
          std::string elKey = key + "." + elIt->second.getName();
 
-         std::string val = ipRecv[elIt->second.getName()].get();
-                  
+         std::string val;
+         
+         if(ipRecv.getType() == pcf::IndiProperty::Switch)
+         {
+            if(ipRecv[elIt->second.getName()].getSwitchState() == pcf::IndiElement::On) val = "on";
+            else if (ipRecv[elIt->second.getName()].getSwitchState() == pcf::IndiElement::Off) val = "off";
+            else val = "unk";
+         }
+         else
+         {
+            val = ipRecv[elIt->second.getName()].get();
+         }
+         
          (*m_dict)[elKey].setBlob(val.c_str(), val.size()+1);
          
          //val = (char *) (*m_dict)[elKey].m_blob;
@@ -98,7 +109,7 @@ class indiClient : public QObject,
    
    protected:
       
-      std::unordered_map<std::string, rtimvDictBlob> * m_dict {nullptr};
+      dictionaryT * m_dict {nullptr};
       
       rtimvIndiClient * m_client {nullptr};  
       
@@ -109,7 +120,7 @@ class indiClient : public QObject,
       
       virtual ~indiClient();
 
-      virtual int attachDictionary( std::unordered_map<std::string, rtimvDictBlob> * dict,
+      virtual int attachDictionary( dictionaryT * dict,
                                     mx::app::appConfigurator & config
                                   ); 
 

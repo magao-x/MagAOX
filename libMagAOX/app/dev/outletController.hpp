@@ -628,6 +628,16 @@ int outletController<derivedT>::st_newCallBack_channels( void * app,
 template<class derivedT>
 int outletController<derivedT>::newCallBack_channels( const pcf::IndiProperty &ipRecv )
 {
+   //Check if we're in state READY before doing anything
+   if(derived().state() != stateCodes::READY)
+   {
+      #ifndef OUTLET_CTRL_TEST_NOLOG
+      derivedT::template log<text_log>("can't change outlet state when not READY", logPrio::LOG_ERROR);
+      #endif
+   
+      return -1;
+   }
+   
    //Interogate ipRecv to figure out which channel it is.
    //And then call turn on or turn off based on requested state.
    std::string name = ipRecv.getName();

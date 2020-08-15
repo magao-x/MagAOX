@@ -21,9 +21,11 @@ class cameraStatus : public QObject,
       
       bool m_enableable {false};
       
-      std::unordered_map<std::string, rtimvDictBlob> * m_dict {nullptr};
+      dictionaryT * m_dict {nullptr};
       
       std::string m_deviceName;
+      
+      std::string m_filterDeviceName;
       
       rtimvGraphicsView* m_gv {nullptr}; 
       
@@ -33,7 +35,7 @@ class cameraStatus : public QObject,
       virtual ~cameraStatus();
 
       virtual int attachOverlay( rtimvGraphicsView *, 
-                                 std::unordered_map<std::string, rtimvDictBlob> *,
+                                 dictionaryT *,
                                  mx::app::appConfigurator & config
                                ); 
       
