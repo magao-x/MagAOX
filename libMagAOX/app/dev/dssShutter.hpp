@@ -18,7 +18,7 @@ namespace dev
 {
 
 /// MagAO-X Uniblitz DSS Shutter interface
-/**
+/** This is actually an interface to the digital I/O system, which controls the shutter.
   * 
   * The derived class `derivedT` must be a MagAOXApp\<true\>, and should declare this class a friend like so: 
    \code
@@ -61,6 +61,11 @@ protected:
    
 public:
 
+   /// Default c'tor
+   /**
+     * Sets derived().m_hasShutter to true.
+     */
+   dssShutter();
    
    /// Setup the configuration system
    /**
@@ -142,6 +147,13 @@ public:
      * \returns -1 on error, which is logged.
      */
    int whilePowerOff();
+
+   /// Change shutter state 
+   /** Sets m_doOpen or m_doShut and signals the appropriate thread.
+     * \returns 0 on success
+     * \returns -1 on error
+     */ 
+   int setShutter( int sh /**< Desired shutter state. 0 for shut,1 for open*/);
    
    /// Open the shutter
    /** Do not lock the mutex before calling this.
@@ -212,22 +224,8 @@ protected:
    pcf::IndiProperty m_indiP_sensorChannel; ///< Property used to monitor the shutter's hall sensor
    pcf::IndiProperty m_indiP_triggerChannel; ///< Property used to monitor and set the shutter's trigger
    
-   pcf::IndiProperty m_indiP_shutterState; ///< Property used to report the current shutter state (unkown, off, shut, open)
-   
-   
-   
 public:
 
-   /// Update the INDI properties for this device controller
-   /** You should call this once per main loop, with the INDI mutex locked.
-     * It is not called automatically.
-     *
-     * \returns 0 on success.
-     * \returns -1 on error.
-     */
-   int updateINDI();
-
-   
    /// The static callback function to be registered for shutter power channel changes
    /**
      * \returns 0 on success.
@@ -278,23 +276,6 @@ public:
    int setCallBack_triggerChannel( const pcf::IndiProperty &ipRecv /**< [in] the INDI property sent with the the new property request.*/);
    
    
-   /// The static callback function to be registered for shutter state change requests.
-   /**
-     * \returns 0 on success.
-     * \returns -1 on error.
-     */
-   static int st_newCallBack_state( void * app, ///< [in] a pointer to this, will be static_cast-ed to derivedT.
-                                    const pcf::IndiProperty &ipRecv ///< [in] the INDI property sent with the the new property request.
-                                  );
-
-   /// The callback called by the static version, to actually process the new request.
-   /**
-     * \returns 0 on success.
-     * \returns -1 on error.
-     */
-   int newCallBack_state( const pcf::IndiProperty &ipRecv /**< [in] the INDI property sent with the the new property request.*/);
-   
-
    ///@}
    
 private:
@@ -306,6 +287,11 @@ private:
    }
 };
 
+template<class derivedT>
+dssShutter<derivedT>::dssShutter()
+{
+   derived().m_hasShutter = true;
+}
 
 template<class derivedT>
 void dssShutter<derivedT>::setupConfig(mx::app::appConfigurator & config)
@@ -368,24 +354,7 @@ int dssShutter<derivedT>::appStartup()
       return -1;
    }
    
-   //Register the shmimName INDI property
-   m_indiP_shutterState = pcf::IndiProperty(pcf::IndiProperty::Text);
-   m_indiP_shutterState.setDevice(derived().configName());
-   m_indiP_shutterState.setName("shutter");
-   m_indiP_shutterState.setPerm(pcf::IndiProperty::ReadWrite); 
-   m_indiP_shutterState.setState(pcf::IndiProperty::Idle);
-   m_indiP_shutterState.add(pcf::IndiElement("current"));
-   m_indiP_shutterState["current"] = "";
-   m_indiP_shutterState.add(pcf::IndiElement("target"));
-   m_indiP_shutterState["target"] = "";
-   
-   if( derived().registerIndiPropertyNew( m_indiP_shutterState, st_newCallBack_state) < 0)
-   {
-      #ifndef DSSSHUTTER_TEST_NOLOG
-      derivedT::template log<software_error>({__FILE__,__LINE__});
-      #endif
-      return -1;
-   }
+
    
    if(derived().threadStart( m_openThread, m_openThreadInit, 0, "open", this, openThreadStart) < 0)
    {
@@ -426,6 +395,34 @@ int dssShutter<derivedT>::appStartup()
 template<class derivedT>
 int dssShutter<derivedT>::appLogic()
 {
+   if(m_powerState !=0 && m_powerState != 1)
+   {
+      derived().m_shutterStatus = "UNKNOWN";
+      derived().m_shutterState = -1;
+      return 0;
+   }
+   
+   if(m_powerState == 0)
+   {
+      derived().m_shutterStatus = "POWEROFF";
+      derived().m_shutterState = -1;
+      return 0;      
+   }
+
+   derived().m_shutterStatus = "READY";
+         
+   if(m_sensorState == 0)
+   {
+      derived().m_shutterState = 0;
+      return 0;
+   }
+   
+   if(m_sensorState == 1)
+   {
+      derived().m_shutterState = 1;
+      return 0;
+   }
+   
    return 0;
 }
 
@@ -469,13 +466,40 @@ int dssShutter<derivedT>::appShutdown()
 template<class derivedT>
 int dssShutter<derivedT>::onPowerOff()
 {
-   return updateINDI();
+   return appLogic(); //Power state of derived() does not say anything about power state of the shutter
 }
 
 template<class derivedT>
 int dssShutter<derivedT>::whilePowerOff()
 {
-   return updateINDI();
+   return appLogic(); //Power state of derived() does not say anything about power state of the shutter
+}
+
+template<class derivedT>
+int dssShutter<derivedT>::setShutter( int sh )
+{
+   if( sh == 1 )
+   {
+      m_doOpen = true;
+         
+      pthread_kill(m_openThread.native_handle(), SIGUSR1);
+         
+      return 0;
+   }
+   else if( sh == 0)
+   {
+      m_doShut = true;
+         
+      pthread_kill(m_shutThread.native_handle(), SIGUSR1);
+        
+      return 0;
+   }
+   else
+   {
+      derivedT::template log<software_error>({ __FILE__, __LINE__,"invalid shutter request"});
+      
+      return -1;
+   }
 }
 
 template<class derivedT>
@@ -485,6 +509,7 @@ int dssShutter<derivedT>::open()
    
    int startss = m_sensorState;
    
+   derived().recordCamera(true);
    if(startss) return 0; //already open
    
    //First try:
@@ -499,9 +524,9 @@ int dssShutter<derivedT>::open()
       if( (mx::get_curr_time() - t0)*1000 > m_shutterTimeout) break;
    }
 
-   ///\todo need shutter log types
    if(m_sensorState == 1)
    {
+      derived().recordCamera(true);
       derivedT::template log<text_log>("shutter open");
       return 0;
    }
@@ -526,6 +551,7 @@ int dssShutter<derivedT>::open()
    ///\todo need shutter log types
    if(m_sensorState == 1)
    {
+      derived().recordCamera(true);
       derivedT::template log<text_log>("shutter open");
       return 0;
    }
@@ -562,6 +588,7 @@ int dssShutter<derivedT>::shut()
    ///\todo need shutter log types
    if(m_sensorState == 0)
    {
+      derived().recordCamera(true);
       derivedT::template log<text_log>("shutter shut");
       return 0;
    }
@@ -587,6 +614,7 @@ int dssShutter<derivedT>::shut()
    ///\todo need shutter log types
    if(m_sensorState == 0)
    {
+      derived().recordCamera(true);
       derivedT::template log<text_log>("shutter shut");
       return 0;
    }
@@ -662,44 +690,6 @@ void dssShutter<derivedT>::shutThreadExec( )
    }
    
    return;
-}
-
-template<class derivedT>
-int dssShutter<derivedT>::updateINDI()
-{
-   if(m_powerState !=0 && m_powerState != 1)
-   {
-      indi::updateIfChanged(m_indiP_shutterState, "current", std::string("UNKNOWN"), derived().m_indiDriver);
-      indi::updateIfChanged(m_indiP_shutterState, "target", std::string(""), derived().m_indiDriver);
-   
-      return 0;
-   }
-   
-   if(m_powerState == 0)
-   {
-      indi::updateIfChanged(m_indiP_shutterState, "current", std::string("OFF"), derived().m_indiDriver);
-      indi::updateIfChanged(m_indiP_shutterState, "target", std::string(""), derived().m_indiDriver);
-   
-      return 0;
-   }
-   
-   if(m_sensorState == 0)
-   {
-      indi::updateIfChanged(m_indiP_shutterState, "current", std::string("SHUT"), derived().m_indiDriver);
-      if(m_indiP_shutterState["target"].get<std::string>() == "SHUT") indi::updateIfChanged(m_indiP_shutterState, "target", std::string(""), derived().m_indiDriver);
-   
-      return 0;
-   }
-   
-   if(m_sensorState == 1)
-   {
-      indi::updateIfChanged(m_indiP_shutterState, "current", std::string("OPEN"), derived().m_indiDriver);
-      if(m_indiP_shutterState["target"].get<std::string>() == "OPEN") indi::updateIfChanged(m_indiP_shutterState, "target", std::string(""), derived().m_indiDriver);
-   
-      return 0;
-   }
-   
-   return 0;
 }
 
 template<class derivedT>
@@ -811,63 +801,7 @@ int dssShutter<derivedT>::setCallBack_triggerChannel( const pcf::IndiProperty &i
    return 0;
 }
 
-template<class derivedT>
-int dssShutter<derivedT>::st_newCallBack_state( void * app,
-                                              const pcf::IndiProperty &ipRecv
-                                            )
-{
-   return static_cast<derivedT *>(app)->newCallBack_state(ipRecv);
-}
 
-template<class derivedT>
-int dssShutter<derivedT>::newCallBack_state( const pcf::IndiProperty &ipRecv )
-{
-   if (ipRecv.getName() == m_indiP_shutterState.getName())
-   {
-      std::string current;
-      std::string target;
-      
-      if(ipRecv.find("curent")) current = ipRecv["current"].get();
-      
-      if(ipRecv.find("target")) target = ipRecv["target"].get();
-      
-      if(target == "") target = current;
-      
-      target = mx::ioutils::toUpper(target);
-      
-      if(target != "OPEN" && target != "SHUT")
-      {
-         return derivedT::template log<software_error,-1>({__FILE__, __LINE__, "invalid shutter request"});
-      }
-      else
-      {
-         //Get a lock
-         std::unique_lock<std::mutex> lock(derived().m_indiMutex);
-         indi::updateIfChanged(m_indiP_shutterState, "target", target, derived().m_indiDriver);
-      }
-      
-      if(target == "OPEN") 
-      {
-         m_doOpen = true;
-         
-         pthread_kill(m_openThread.native_handle(), SIGUSR1);
-         
-         return 0;
-      }
-      
-      if(target == "SHUT")
-      {
-         m_doShut = true;
-         
-         pthread_kill(m_shutThread.native_handle(), SIGUSR1);
-         
-         return 0;
-      }
-      
-      return -1; //never get here
-   }
-   return derivedT::template log<software_error,-1>({__FILE__, __LINE__, "wrong INDI-P in callback"});
-}
    
 
 

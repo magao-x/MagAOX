@@ -51,14 +51,20 @@ INCLUDEDEPS= app/MagAOXApp.hpp \
 	     logger/types/saving_start.hpp \
 	     logger/types/saving_stop.hpp \
 	     logger/types/saving_stats.hpp \
+	     logger/types/telem_coreloads.hpp \
+	     logger/types/telem_coretemps.hpp \
+	     logger/types/telem_drivetemps.hpp \
 	     logger/types/telem_fxngen.hpp \
 	     logger/types/telem_stage.hpp \
+	     logger/types/telem_stdcam.hpp \
 	     logger/types/telem_telcat.hpp \
 	     logger/types/telem_teldata.hpp \
+	     logger/types/telem_telenv.hpp \
 	     logger/types/telem_telpos.hpp \
-	     logger/types/telem_telvane.hpp \
 	     logger/types/telem_telsee.hpp \
+	     logger/types/telem_telvane.hpp \
 	     logger/types/telem_temps.hpp \
+	     logger/types/telem_usage.hpp \
 	     logger/types/telem_zaber.hpp \
 	     logger/types/text_log.hpp \
              tty/ttyErrors.hpp \

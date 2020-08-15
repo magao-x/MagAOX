@@ -36,32 +36,37 @@ struct telem_stdcam : public flatbuffer_log
    struct messageT : public fbMessage
    {
       ///Construct from components
-      messageT( const std::string & mode,     ///<[in]
-                const float & xcen,           ///<[in]
-                const float & ycen,           ///<[in] 
-                const int & width,            ///<[in]
-                const int & height,           ///<[in]
-                const int & xbin,             ///<[in]
-                const int & ybin,             ///<[in]
-                const float & exptime,        ///<[in]
-                const float & fps,            ///<[in]
-                const float & emGain,
-                const float & adcSpeed,
-                const float & temp,           ///<[in]
-                const float & setpt,          ///<[in]
-                const uint8_t & status,       ///<[in]
-                const uint8_t & ontarget,     ///<[in]
-                const std::string & statusStr ///<[in]
+      messageT( const std::string & mode,            ///<[in]
+                const float & xcen,                  ///<[in]
+                const float & ycen,                  ///<[in] 
+                const int & width,                   ///<[in]
+                const int & height,                  ///<[in]
+                const int & xbin,                    ///<[in]
+                const int & ybin,                    ///<[in]
+                const float & exptime,               ///<[in]
+                const float & fps,                   ///<[in]
+                const float & emGain,                ///<[in]
+                const float & adcSpeed,              ///<[in]
+                const float & temp,                  ///<[in]
+                const float & setpt,                 ///<[in]
+                const uint8_t & status,              ///<[in]
+                const uint8_t & ontarget,            ///<[in]
+                const std::string & statusStr,       ///<[in]
+                const std::string & shutterStatusSr, ///<[in]
+                const int8_t & shutterState          ///<[in]
               )
       {         
          auto _mode = builder.CreateString(mode);
          auto _roi = CreateROI(builder,xcen, ycen, width, height, xbin, ybin);
+         
          auto _statusStr = builder.CreateString(statusStr);
          auto _tempCtrl = CreateTempCtrl(builder, temp, setpt, status, ontarget, _statusStr);
          
+         auto _shutterStatusStr = builder.CreateString(shutterStatusSr);
+         auto _shutter = CreateShutter(builder, _shutterStatusStr, shutterState);
          
          
-         auto fp = CreateTelem_stdcam_fb(builder, _mode, _roi, exptime, fps, emGain, adcSpeed, _tempCtrl);
+         auto fp = CreateTelem_stdcam_fb(builder, _mode, _roi, exptime, fps, emGain, adcSpeed, _tempCtrl, _shutter);
          builder.Finish(fp);
       }
 
@@ -126,6 +131,26 @@ struct telem_stdcam : public flatbuffer_log
             msg += " tempctr-statstr: ";
             msg += fbs->tempCtrl()->statusStr()->c_str();
          }
+         
+         if(fbs->shutter()->statusStr())
+         {
+            msg += " shutter-statstr: ";
+            msg += fbs->shutter()->statusStr()->c_str();
+         }
+         msg+= " shutter: ";
+         if( fbs->shutter()->state() == -1)
+         {
+            msg += "UNKN";
+         }
+         else if( fbs->shutter()->state() == 0)
+         {
+            msg += "OPEN";
+         }
+         else if( fbs->shutter()->state() == 1)
+         {
+            msg += "SHUT";
+         }
+         
       }
       
       return msg;
@@ -138,6 +163,12 @@ struct telem_stdcam : public flatbuffer_log
       return fbs->exptime();
    }
    
+   static int shutter( void * msgBuffer )
+   {
+      auto fbs = GetTelem_stdcam_fb(msgBuffer);
+      return fbs->shutter()->state();
+   }
+   
    /// Get pointer to the accessor for a member by name 
    /**
      * \returns the function pointer cast to void*
@@ -146,6 +177,7 @@ struct telem_stdcam : public flatbuffer_log
    static void * getAccessor( const std::string & member /**< [in] the name of the member */ )
    {
       if(member == "exptime") return (void *) &exptime;
+      if(member == "shutter") return (void *) &shutter;
       else
       {
          std::cerr << "No string member " << member << " in telem_stdcam\n";

@@ -179,6 +179,12 @@ public:
      */
    int setNextROI();
    
+   /// Sets the shutter state, via call to dssShutter::setShutter(int) [stdCamera interface]
+   /**
+     * \returns 0 always
+     */
+   int setShutter(int sh);
+   
    ///@}
    
    /// Reset the EM Protection 
@@ -535,13 +541,6 @@ int ocam2KCtrl::appLogic()
          return 0;
       }
       
-      if(dssShutter<ocam2KCtrl>::updateINDI() < 0)
-      {
-         log<software_error>({__FILE__, __LINE__});
-         state(stateCodes::ERROR);
-         return 0;
-      }
-      
       if(telemeter<ocam2KCtrl>::appLogic() < 0)
       {
          log<software_error>({__FILE__, __LINE__});
@@ -844,7 +843,13 @@ int ocam2KCtrl::setNextROI()
 {
    return 0;
 }
-   
+
+inline 
+int ocam2KCtrl::setShutter(int sh)
+{
+   return dssShutter<ocam2KCtrl>::setShutter(sh);
+}
+
 inline 
 int ocam2KCtrl::resetEMProtection()
 {
