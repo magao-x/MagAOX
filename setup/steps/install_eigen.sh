@@ -13,5 +13,5 @@ if [[ ! -e /usr/local/include/Eigen ]]; then
         tar xzf eigen-$EIGEN_VERSION.tar.gz
     fi
     ln -sv "$EIGEN_DIR/Eigen" "/usr/local/include/Eigen"
-    echo "/usr/local/include/Eigen is now a symlink to $EIGEN_DIR"
+    echo "/usr/local/include/Eigen is now a symlink to $EIGEN_DIR/Eigen"
 fi
