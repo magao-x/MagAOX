@@ -7,9 +7,11 @@ EIGEN_VERSION="3.3.4"
 # Eigen
 #
 if [[ ! -e /usr/local/include/Eigen ]]; then
-    _cached_fetch https://gitlab.com/libeigen/eigen/-/archive/$EIGEN_VERSION/eigen-$EIGEN_VERSION.tar.gz eigen-$EIGEN_VERSION.tar.gz
-    tar xzf eigen-$EIGEN_VERSION.tar.gz
-    EIGEN_DIR=$(realpath $(find . -type d -name "eigen-eigen-*" | head -n 1))
+    EIGEN_DIR="/opt/MagAOX/vendor/eigen-$EIGEN_VERSION"
+    if [[ ! -d $EIGEN_DIR ]]; then
+        _cached_fetch https://gitlab.com/libeigen/eigen/-/archive/$EIGEN_VERSION/eigen-$EIGEN_VERSION.tar.gz eigen-$EIGEN_VERSION.tar.gz
+        tar xzf eigen-$EIGEN_VERSION.tar.gz
+    fi
     ln -sv "$EIGEN_DIR/Eigen" "/usr/local/include/Eigen"
     echo "/usr/local/include/Eigen is now a symlink to $EIGEN_DIR"
 fi
