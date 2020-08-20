@@ -154,7 +154,7 @@ if [[ $_WAS_NOUNSET == 1 ]]; then set -u; fi
 
 if [[ $BUILDING_KERNEL_STUFF != 1 && -e /opt/rh/devtoolset-7/enable ]]; then
   if [[ "$SHELLOPTS" =~ "nounset" ]]; then _WAS_NOUNSET=1; set +u; fi
-    set +u; source /opt/rh/devtoolset-7/enable; set -u
+    source /opt/rh/devtoolset-7/enable
   if [[ $_WAS_NOUNSET == 1 ]]; then set -u; fi
 fi
 # root doesn't get /usr/local/bin on their path, so add it
