@@ -1,4 +1,9 @@
 #!/bin/bash
+if [[ "$SHELLOPTS" =~ "nounset" ]]; then
+  _WAS_NOUNSET=1
+else
+  _WAS_NOUNSET=0
+fi
 function log_error() {
     echo -e "$(tput setaf 1 2>/dev/null)$1$(tput sgr0 2>/dev/null)"
 }
