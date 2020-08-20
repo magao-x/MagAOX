@@ -15,7 +15,7 @@ if [[ $MAGAOX_ROLE == vm || $MAGAOX_ROLE == ci ]]; then
   TMP_CUDA_DIR=$HOME/tmp
   mkdir -p $TMP_CUDA_DIR
   CUDA_FLAGS="--silent --toolkit --tmpdir=$TMP_CUDA_DIR"
-elif [[ $MAGAOX_ROLE == RTC || $MAGAOX_ROLE == ICC || $MAGAOX_ROLE == AOC || $MAGAOX_ROLE == TCC ]]; then
+elif [[ $MAGAOX_ROLE == RTC || $MAGAOX_ROLE == ICC || $MAGAOX_ROLE == AOC || $MAGAOX_ROLE == TIC ]]; then
   CUDA_FLAGS="--silent --driver --toolkit --samples"
   export IGNORE_PREEMPT_RT_PRESENCE=1
 else
