@@ -51,7 +51,8 @@ else
         echo "    AOC - Adaptive optics Operator Computer"
         echo "    RTC - Real Time control Computer"
         echo "    ICC - Instrument Control Computer"
-        echo "    TCC - Testbed Control Computer"
+        echo "    TIC - Testbed Instrument Computer"
+        echo "    TOC - Testbed Operator Computer"
         echo "    workstation - Any other MagAO-X workstation"
         echo
         while [[ -z $MAGAOX_ROLE ]]; do
@@ -66,14 +67,17 @@ else
                 ICC)
                     MAGAOX_ROLE=ICC
                     ;;
-                TCC)
-                    MAGAOX_ROLE=TCC
+                TIC)
+                    MAGAOX_ROLE=TIC
+                    ;;
+                TOC)
+                    MAGAOX_ROLE=TOC
                     ;;
                 workstation)
                     MAGAOX_ROLE=workstation
                     ;;
                 *)
-                    echo "Must be one of AOC, RTC, ICC, TCC, or workstation."
+                    echo "Must be one of AOC, RTC, ICC, TIC, TOC, or workstation."
                     continue
             esac
         done
@@ -184,12 +188,12 @@ if [[ $MAGAOX_ROLE == vm ]]; then
 fi
 
 # Install dependencies for the GUIs
-if [[ $MAGAOX_ROLE == AOC || $MAGAOX_ROLE == TCC || $MAGAOX_ROLE == ci || $MAGAOX_ROLE == vm || $MAGAOX_ROLE == workstation ]]; then
+if [[ $MAGAOX_ROLE == AOC || $MAGAOX_ROLE == TOC || $MAGAOX_ROLE == ci || $MAGAOX_ROLE == vm || $MAGAOX_ROLE == workstation ]]; then
     sudo bash -l "$DIR/steps/install_gui_dependencies.sh"
 fi
 
 # Install Linux headers (instrument computers use the RT kernel / headers)
-if [[ $MAGAOX_ROLE == ci || $MAGAOX_ROLE == vm || $MAGAOX_ROLE == workstation || $MAGAOX_ROLE == AOC || $MAGAOX_ROLE == TCC ]]; then
+if [[ $MAGAOX_ROLE == ci || $MAGAOX_ROLE == vm || $MAGAOX_ROLE == workstation || $MAGAOX_ROLE == AOC || $MAGAOX_ROLE == TOC ]]; then
     if [[ $ID == ubuntu ]]; then
         sudo apt install -y linux-headers-generic
     elif [[ $ID == centos ]]; then
@@ -199,7 +203,7 @@ fi
 ## Build third-party dependencies under /opt/MagAOX/vendor
 cd /opt/MagAOX/vendor
 sudo bash -l "$DIR/steps/install_mkl_tarball.sh"
-if [[ $MAGAOX_ROLE == RTC || $MAGAOX_ROLE == ICC || $MAGAOX_ROLE == AOC || $MAGAOX_ROLE == TCC || $MAGAOX_ROLE == ci ]]; then
+if [[ $MAGAOX_ROLE == RTC || $MAGAOX_ROLE == ICC || $MAGAOX_ROLE == AOC || $MAGAOX_ROLE == TIC || $MAGAOX_ROLE == ci ]]; then
     sudo bash -l "$DIR/steps/install_cuda.sh"
     sudo bash -l "$DIR/steps/install_magma.sh"
 fi
@@ -212,7 +216,7 @@ sudo bash -l "$DIR/steps/install_cppzmq.sh"
 sudo bash -l "$DIR/steps/install_levmar.sh"
 sudo bash -l "$DIR/steps/install_flatbuffers.sh"
 sudo bash -l "$DIR/steps/install_xrif.sh"
-if [[ $MAGAOX_ROLE == RTC || $MAGAOX_ROLE == ICC || $MAGAOX_ROLE == AOC || $MAGAOX_ROLE == TCC || $MAGAOX_ROLE == ci || $MAGAOX_ROLE == vm ]]; then
+if [[ $MAGAOX_ROLE == RTC || $MAGAOX_ROLE == ICC || $MAGAOX_ROLE == AOC || $MAGAOX_ROLE == TIC || $MAGAOX_ROLE == ci || $MAGAOX_ROLE == vm ]]; then
     sudo bash -l "$DIR/steps/install_basler_pylon.sh"
 fi
 if [[ $MAGAOX_ROLE == RTC || $MAGAOX_ROLE == ICC || $MAGAOX_ROLE == AOC || $MAGAOX_ROLE == ci || $MAGAOX_ROLE == vm ]]; then
@@ -241,7 +245,7 @@ if [[ -e $VENDOR_SOFTWARE_BUNDLE ]]; then
         fi
         sudo bash -l "$DIR/steps/install_andor.sh"
     fi
-    if [[ $ID == centos && ( $MAGAOX_ROLE == RTC || $MAGAOX_ROLE == TCC || $MAGAOX_ROLE == vm) ]]; then
+    if [[ $ID == centos && ( $MAGAOX_ROLE == RTC || $MAGAOX_ROLE == TIC || $MAGAOX_ROLE == vm ) ]]; then
         sudo bash -l "$DIR/steps/install_bmc.sh"
     fi
     if [[ $MAGAOX_ROLE == ICC ]]; then
@@ -300,7 +304,7 @@ fi
 # On a Vagrant VM, we need to "sudo" to become vagrant since the provisioning
 # runs as root.
 cd /opt/MagAOX/source
-if [[ $MAGAOX_ROLE == TCC ]]; then
+if [[ $MAGAOX_ROLE == TIC || $MAGAOX_ROLE == TOC ]]; then
     # Initialize the config and calib repos as normal user
     $MAYBE_SUDO bash -l "$DIR/steps/install_testbed_config.sh"
     $MAYBE_SUDO bash -l "$DIR/steps/install_testbed_calib.sh"
@@ -327,7 +331,7 @@ if [[ $MAGAOX_ROLE == AOC || $MAGAOX_ROLE == vm ||  $MAGAOX_ROLE == workstation 
     $MAYBE_SUDO bash -l "$DIR/steps/install_sup.sh"
 fi
 
-if [[ $MAGAOX_ROLE == AOC || $MAGAOX_ROLE == TCC || $MAGAOX_ROLE == vm ||  $MAGAOX_ROLE == workstation ]]; then
+if [[ $MAGAOX_ROLE == AOC || $MAGAOX_ROLE == TOC || $MAGAOX_ROLE == vm ||  $MAGAOX_ROLE == workstation ]]; then
     # realtime image viewer
     $MAYBE_SUDO bash -l "$DIR/steps/install_rtimv.sh"
     # regular old ds9 image viewer
