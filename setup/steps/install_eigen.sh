@@ -12,6 +12,6 @@ if [[ ! -e /usr/local/include/Eigen ]]; then
         _cached_fetch https://gitlab.com/libeigen/eigen/-/archive/$EIGEN_VERSION/eigen-$EIGEN_VERSION.tar.gz eigen-$EIGEN_VERSION.tar.gz
         tar xzf eigen-$EIGEN_VERSION.tar.gz
     fi
-    ln -sv "$EIGEN_DIR/Eigen" "/usr/local/include/Eigen"
+    ln -svf "$EIGEN_DIR/Eigen" "/usr/local/include/Eigen"
     echo "/usr/local/include/Eigen is now a symlink to $EIGEN_DIR/Eigen"
 fi
