@@ -361,10 +361,9 @@ int shmimMonitor<derivedT, specificT>::appLogic()
 template<class derivedT, class specificT>
 int shmimMonitor<derivedT, specificT>::appShutdown()
 {
-   pthread_kill(m_smThread.native_handle(), SIGUSR1);
-   
    if(m_smThread.joinable())
    {
+      pthread_kill(m_smThread.native_handle(), SIGUSR1);
       try
       {
          m_smThread.join(); //this will throw if it was already joined
