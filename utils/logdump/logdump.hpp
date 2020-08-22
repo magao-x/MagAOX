@@ -156,6 +156,8 @@ int logdump::execute()
 
    if(m_nfiles > logs.size()) m_nfiles = logs.size();
 
+   bool firstRun = true; //for only showing latest entries on first run when following.
+   
    for(size_t i=logs.size() - m_nfiles; i < logs.size(); ++i)
    {
       std::string fname = logs[i];
@@ -189,6 +191,7 @@ int logdump::execute()
             if( m_follow == true  && i == logs.size()-1)
             {
                int check = 0;
+               firstRun = false; //from now on we show all logs
                while(nrd == 0)
                {
                   std::this_thread::sleep_for( std::chrono::duration<unsigned long, std::milli>(m_pauseTime));
@@ -281,8 +284,11 @@ int logdump::execute()
 
          totNrd += nrd;
          
-         if(m_follow && finSize > 1024 && totNrd < finSize-1024) continue;
-         
+         if(m_follow && firstRun && finSize > 512 && totNrd < finSize-512) 
+         {
+//            firstRun = false;
+            continue;
+         }
          printLogBuff(lvl, ec, len, logBuff);
 
 
