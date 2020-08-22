@@ -171,6 +171,12 @@ public:
      */
    int setNextROI();
    
+   /// Required by stdCamera, but this does not do anything for this camera [stdCamera interface]
+   /**
+     * \returns 0 always
+     */
+   int setShutter(int sh);
+   
    ///@}
    
    
@@ -784,6 +790,14 @@ int zylaCtrl::setNextROI()
    m_reconfig = true;
 
    updateSwitchIfChanged(m_indiP_roi_set, "request", pcf::IndiElement::Off, INDI_IDLE);
+   
+   return 0;
+}
+
+inline
+int zylaCtrl::setShutter(int sh)
+{
+   static_cast<void>(sh);
    
    return 0;
 }
