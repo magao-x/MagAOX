@@ -13,7 +13,8 @@ if [[ -z $MAGAOX_ROLE ]]; then
     echo "    AOC - Adaptive optics Operator Computer"
     echo "    RTC - Real Time control Computer"
     echo "    ICC - Instrument Control Computer"
-    echo "    TCC - Testbed Control Computer"
+    echo "    TIC - Testbed Instrument Computer"
+    echo "    TOC - Testbed Operator Computer"
     echo "    workstation - Any other MagAO-X workstation"
     echo
     while [[ -z $MAGAOX_ROLE ]]; do
@@ -28,14 +29,17 @@ if [[ -z $MAGAOX_ROLE ]]; then
             ICC)
                 MAGAOX_ROLE=ICC
                 ;;
-            TCC)
-                MAGAOX_ROLE=TCC
+            TIC)
+                MAGAOX_ROLE=TIC
+                ;;
+            TOC)
+                MAGAOX_ROLE=TOC
                 ;;
             workstation)
                 MAGAOX_ROLE=workstation
                 ;;
             *)
-                echo "Must be one of AOC, RTC, ICC, TCC, or workstation."
+                echo "Must be one of AOC, RTC, ICC, TIC, TOC, or workstation."
                 continue
         esac
     done
@@ -60,7 +64,7 @@ SPECTRE_CMDLINE_FIX="noibrs noibpb nopti nospectre_v2 nospectre_v1 l1tf=off nosp
 # disable 3rd party nvidia drivers
 NVIDIA_DRIVER_FIX="rd.driver.blacklist=nouveau nouveau.modeset=0"
 
-if [[ $MAGAOX_ROLE != ICC && $MAGAOX_ROLE != RTC ]]; then
+if [[ $MAGAOX_ROLE != ICC && $MAGAOX_ROLE != RTC && $MAGAOX_ROLE != TIC ]]; then
     log_info "Skipping RT kernel install on non-realtime roles"
     install_rt=false
     # Put it all together

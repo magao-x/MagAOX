@@ -1,4 +1,9 @@
 #!/bin/bash
+if [[ "$SHELLOPTS" =~ "nounset" ]]; then
+  _WAS_NOUNSET=1
+else
+  _WAS_NOUNSET=0
+fi
 function log_error() {
     echo -e "$(tput setaf 1 2>/dev/null)$1$(tput sgr0 2>/dev/null)"
 }
@@ -77,7 +82,7 @@ function clone_or_update_and_cd() {
     else
       destdir="$parentdir/$reponame"
     fi
-    if [[ _WAS_NOUNSET == 1 ]]; then set -u; fi
+    if [[ $_WAS_NOUNSET == 1 ]]; then set -u; fi
     # and re-enable.
 
     if [[ $MAGAOX_ROLE == vm && "$VM_WINDOWS_HOST" == 0 ]]; then
@@ -145,12 +150,12 @@ function createuser() {
 # use the included gcc4 for consistency with the running kernel.
 if [[ "$SHELLOPTS" =~ "nounset" ]]; then _WAS_NOUNSET=1; set +u; fi # Temporarily disable checking for unbound variables to set a default value
   if [[ -z $BUILDING_KERNEL_STUFF ]]; then BUILDING_KERNEL_STUFF=0; fi
-if [[ _WAS_NOUNSET == 1 ]]; then set -u; fi
+if [[ $_WAS_NOUNSET == 1 ]]; then set -u; fi
 
 if [[ $BUILDING_KERNEL_STUFF != 1 && -e /opt/rh/devtoolset-7/enable ]]; then
   if [[ "$SHELLOPTS" =~ "nounset" ]]; then _WAS_NOUNSET=1; set +u; fi
-    set +u; source /opt/rh/devtoolset-7/enable; set -u
-  if [[ _WAS_NOUNSET == 1 ]]; then set -u; fi
+    source /opt/rh/devtoolset-7/enable
+  if [[ $_WAS_NOUNSET == 1 ]]; then set -u; fi
 fi
 # root doesn't get /usr/local/bin on their path, so add it
 # (why? https://serverfault.com/a/838552)

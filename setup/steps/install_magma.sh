@@ -7,6 +7,7 @@ fi
 DIR="$( cd "$( dirname "${BASH_SOURCE[0]}" )" && pwd )"
 source $DIR/../_common.sh
 set -euo pipefail
+cd /opt/MagAOX/vendor
 MAGMA_VERSION=2.5.3
 MAGMA_FOLDER=./magma-$MAGMA_VERSION
 if [[ ! -d $MAGMA_FOLDER ]]; then
@@ -20,13 +21,9 @@ if [[ $MAGAOX_ROLE == RTC || $MAGAOX_ROLE == ICC ]]; then
   if ! grep "GPU_TARGET = Pascal Volta" make.inc; then
     echo "GPU_TARGET = Pascal Volta" >> make.inc
   fi
-elif [[ $MAGAOX_ROLE == AOC || $MAGAOX_ROLE == ci ]]; then
+elif [[ $MAGAOX_ROLE == AOC || $MAGAOX_ROLE == TIC || $MAGAOX_ROLE == ci ]]; then
   if ! grep "GPU_TARGET = Pascal" make.inc; then
     echo "GPU_TARGET = Pascal" >> make.inc
-  fi
-elif [[ $MAGAOX_ROLE == TCC ]]; then
-  if ! grep "GPU_TARGET = Kepler" make.inc; then
-    echo "GPU_TARGET = Kepler" >> make.inc
   fi
 fi
 make -j 32

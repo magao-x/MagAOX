@@ -161,6 +161,12 @@ protected:
      */
    int setNextROI();
    
+   /// Required by stdCamera, does not currently do anything. [stdCamera interface]
+   /**
+     * \returns 0 always
+     */ 
+   int setShutter(int sh);
+ 
    ///@}
    
    /** \name Telemeter Interface
@@ -572,6 +578,13 @@ int baslerCtrl::setExpTime()
 inline
 int baslerCtrl::setNextROI()
 {
+   return 0;
+}
+
+inline
+int baslerCtrl::setShutter(int sh)
+{
+   static_cast<void>(sh);
    return 0;
 }
 

@@ -7,7 +7,8 @@ The `provision.sh` script does different things depending on the `MAGAOX_ROLE` e
   * `AOC` - Adaptive optics Operator Computer
   * `RTC` - Real Time control Computer
   * `ICC` - Instrument Control Computer
-  * `TCC` - Testbed Control Computer
+  * `TIC` - Testbed Instrument Computer
+  * `TOC` - Testbed Operator Computer
   * `workstation` - Any other MagAO-X workstation
   * `ci` - Continuous Integration environment (CircleCI, invoked as described in [`.circleci/config.yml`](../.circleci/config.yml) in the repo root)
   * `vm` - Virtual machine (Vagrant) environment (see [the handbook](https://magao-x.org/docs/handbook/appendices/development_vm.html))
