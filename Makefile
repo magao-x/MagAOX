@@ -7,14 +7,13 @@ apps_common = \
 	xindiserver \
 	mzmqClient \
 	magAOXMaths \
-	timeSeriesSimulator
-
-apps_rtcicc = \
 	mzmqServer \
 	streamWriter \
-	alpaoCtrl \
 	dmMode \
-    shmimIntegrator
+	shmimIntegrator \
+	timeSeriesSimulator
+
+apps_rtcicc = alpaoCtrl
 
 apps_rtc = \
 	ocam2KCtrl \
@@ -44,7 +43,13 @@ apps_aoc = \
     kTracker
 
 # apps_vm = none yet
-# apps_tcc = none yet
+apps_tic = \
+	acronameUsbHub \
+	baslerCtrl \
+	bmcCtrl \
+	trippLitePDU \
+	zylaCtrl
+
 
 libs_to_build = libtelnet
 
