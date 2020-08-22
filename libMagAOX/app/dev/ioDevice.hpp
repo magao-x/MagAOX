@@ -19,7 +19,8 @@ namespace dev
 {
    
 /// An input/output capable device.
-/**   
+/** Standardizes read and write timeout configuration.
+  * 
   * \ingroup appdev
   */ 
 struct ioDevice

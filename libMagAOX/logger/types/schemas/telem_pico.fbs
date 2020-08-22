@@ -1,0 +1,9 @@
+namespace MagAOX.logger;
+
+table Telem_pico_fb
+{
+   counts:[long];
+}
+
+root_type Telem_pico_fb;
+

@@ -38,7 +38,8 @@ namespace dev
      return m_tel<telem_type1>( { message entered here } );
   }
   \endcode
-  * for each of the telemetry types.  You MUST NOT use the pointer argument, it is for type resolution only -- you should fill in the telemetry log message using internal values. Note that 
+  * for each of the telemetry types.  You MUST NOT use the pointer argument, it is for type resolution only -- you should fill in the telemetry log 
+  * message using internal values. Note that 
   * calls to this function should result in a telemetry log entry every time -- it is called when the minimum interval has elapsed since the last entry.
   * 
   * Additionally, calls to this classes setupConfig, `loadConfig`, `appStartup`, `appLogic`, and `appShutdown` should be placed

@@ -42,6 +42,7 @@ INCLUDEDEPS= app/MagAOXApp.hpp \
              logger/types/loop_paused.hpp \
              logger/types/outlet_state.hpp \
              logger/types/outlet_channel_state.hpp \
+             logger/types/pico_channel.hpp \
              logger/types/software_log.hpp \
              logger/types/state_change.hpp \
              logger/types/string_log.hpp \
@@ -55,6 +56,7 @@ INCLUDEDEPS= app/MagAOXApp.hpp \
 	     logger/types/telem_coretemps.hpp \
 	     logger/types/telem_drivetemps.hpp \
 	     logger/types/telem_fxngen.hpp \
+	     logger/types/telem_pico.hpp \
 	     logger/types/telem_stage.hpp \
 	     logger/types/telem_stdcam.hpp \
 	     logger/types/telem_telcat.hpp \
