@@ -113,6 +113,27 @@ protected:
    ///@}
 
 
+   /** \name milkzmq Status and Error Handling
+     * Implementation of status updates, warnings, and errors from milkzmq using logs.
+     *
+     * @{
+     */
+   
+   /// Log status (with LOG_INFO level of priority).
+   virtual void reportInfo( const std::string & msg /**< [in] the status message */);
+   
+   /// Log status (with LOG_NOTICE level of priority).
+   virtual void reportNotice( const std::string & msg /**< [in] the status message */);
+   
+   /// Log a warning.
+   virtual void reportWarning( const std::string & msg /**< [in] the warning message */);
+   
+   /// Log an error.
+   virtual void reportError( const std::string & msg,  ///< [in] the error message 
+                             const std::string & file, ///< [in] the name of the file where the error occurred
+                             int line                  ///< [in] the line number of the error
+                           );
+   ///@}
 };
 
 //Set self pointer to null so app starts up uninitialized.
@@ -295,6 +316,32 @@ void mzmqClient::handlerSigSegv( int signum,
    return;
 }
 
+inline
+void mzmqClient::reportInfo( const std::string & msg )
+{
+   log<text_log>(msg, logPrio::LOG_INFO);
+}
+
+inline
+void mzmqClient::reportNotice( const std::string & msg )
+{
+   log<text_log>(msg, logPrio::LOG_NOTICE);
+}
+
+inline
+void mzmqClient::reportWarning( const std::string & msg )
+{
+   log<text_log>(msg, logPrio::LOG_WARNING);
+}
+
+inline
+void mzmqClient::reportError( const std::string & msg,
+                              const std::string & file,
+                              int line
+                            )
+{
+   log<software_error>({file.c_str(), (uint32_t) line, msg});
+}
 
 
 
