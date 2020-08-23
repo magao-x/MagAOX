@@ -52,4 +52,4 @@ telem_coreloads          20826    telem_coreloads
 telem_drivetemps         20827    telem_drivetemps
 telem_usage              20828    telem_usage
 
-
+telem_cooler             20850    telem_cooler

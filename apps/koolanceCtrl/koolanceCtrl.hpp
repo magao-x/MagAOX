@@ -35,12 +35,13 @@ namespace app
   * 
   * \ingroup koolanceCtrl
   */
-class koolanceCtrl : public MagAOXApp<true>, public tty::usbDevice
+class koolanceCtrl : public MagAOXApp<true>, public tty::usbDevice, public dev::telemeter<koolanceCtrl>
 {
 
    //Give the test harness access.
    friend class koolanceCtrl_test;
 
+   friend class dev::telemeter<koolanceCtrl>;
 protected:
 
    /** \name Configurable Parameters
@@ -154,6 +155,20 @@ public:
    INDI_NEWCALLBACK_DECL(koolanceCtrl, m_indiP_fanlvl);
    
    ///@}
+   
+   /** \name Telemeter Interface
+     * 
+     * @{
+     */ 
+   int checkRecordTimes();
+   
+   int recordTelem( const telem_cooler * );
+   
+   int recordCooler(bool force = false);
+   
+   ///@}
+
+
 };
 
 koolanceCtrl::koolanceCtrl() : MagAOXApp(MAGAOX_CURRENT_SHA1, MAGAOX_REPO_MODIFIED)
@@ -165,6 +180,7 @@ void koolanceCtrl::setupConfig()
 {
    tty::usbDevice::setupConfig(config);
    
+   dev::telemeter<koolanceCtrl>::setupConfig(config);
    
 }
 
@@ -185,6 +201,8 @@ int koolanceCtrl::loadConfigImpl( mx::app::appConfigurator & _config )
 void koolanceCtrl::loadConfig()
 {
    loadConfigImpl(config);
+   
+   dev::telemeter<koolanceCtrl>::loadConfig(config);
 }
 
 int koolanceCtrl::appStartup()
@@ -202,7 +220,10 @@ int koolanceCtrl::appStartup()
    m_indiP_status.add(pcf::IndiElement("pump_rpm"));
    m_indiP_status.add(pcf::IndiElement("fan_rpm"));
    
-   
+   if(dev::telemeter<koolanceCtrl>::appStartup() < 0)
+   {
+      return log<software_error,-1>({__FILE__,__LINE__});
+   }
    
    state(stateCodes::NODEVICE);
    return 0;
@@ -315,10 +336,18 @@ int koolanceCtrl::appLogic()
 
    if( state() == stateCodes::READY )
    {
-      std::unique_lock<std::mutex> lock(m_indiMutex);
-      if(getStatus() < 0)
+      { //mutex scope
+         std::unique_lock<std::mutex> lock(m_indiMutex);
+         if(getStatus() < 0)
+         {
+            log<software_error>({__FILE__,__LINE__});
+         }
+      }
+      
+      if(telemeter<koolanceCtrl>::appLogic() < 0)
       {
-         log<software_error>({__FILE__,__LINE__});
+         log<software_error>({__FILE__, __LINE__});
+         return 0;
       }
       return 0;
    }
@@ -328,6 +357,7 @@ int koolanceCtrl::appLogic()
 
 int koolanceCtrl::appShutdown()
 {
+   dev::telemeter<koolanceCtrl>::appShutdown();
    return 0;
 }
 
@@ -457,13 +487,14 @@ int koolanceCtrl::getStatus()
       m_fanLvl = (unsigned char)resp[15];
       m_pumpLvl = (unsigned char)resp[17];
       
-      std::cout << std::dec;
-      std::cout << "liq. temp: " << m_liqTemp << " C\n";
-      std::cout << "flow rate: " << m_flowRate << " LPM\n";
-      std::cout << "pump lvl:  " << m_pumpLvl << "\n";
-      std::cout << "pump speed:" << m_pumpRPM << " RPM\n";
-      std::cout << "fan lvl:  " << m_fanLvl << "\n";
-      std::cout << "fan speed:" << m_fanRPM << " RPM\n";
+      recordCooler();
+//       std::cout << std::dec;
+//       std::cout << "liq. temp: " << m_liqTemp << " C\n";
+//       std::cout << "flow rate: " << m_flowRate << " LPM\n";
+//       std::cout << "pump lvl:  " << m_pumpLvl << "\n";
+//       std::cout << "pump speed:" << m_pumpRPM << " RPM\n";
+//       std::cout << "fan lvl:  " << m_fanLvl << "\n";
+//       std::cout << "fan speed:" << m_fanRPM << " RPM\n";
       
       updateIfChanged(m_indiP_status, "liquid_temp", m_liqTemp);
       updateIfChanged(m_indiP_status, "flow_rate", m_flowRate);
@@ -646,6 +677,44 @@ INDI_NEWCALLBACK_DEFN(koolanceCtrl, m_indiP_fanlvl)(const pcf::IndiProperty &ipR
    std::unique_lock<std::mutex> lock(m_indiMutex);
    updateIfChanged(m_indiP_fanlvl, "target", lvl);
    return setFanLvl(lvl);
+   
+   return 0;
+}
+
+inline
+int koolanceCtrl::checkRecordTimes()
+{
+   return telemeter<koolanceCtrl>::checkRecordTimes(telem_cooler());
+}
+   
+inline
+int koolanceCtrl::recordTelem( const telem_cooler * )
+{
+   return recordCooler(true);
+}
+ 
+inline
+int koolanceCtrl::recordCooler( bool force )
+{
+   static float last_liqTemp = std::numeric_limits<float>::max();
+   static float last_flowRate = std::numeric_limits<float>::max();
+   static int last_pumpLvl = std::numeric_limits<int>::max();
+   static int last_pumpRPM = std::numeric_limits<int>::max();
+   static int last_fanRPM = std::numeric_limits<int>::max();
+   static int last_fanLvl = std::numeric_limits<int>::max();
+   
+   if( m_liqTemp != last_liqTemp || m_flowRate != last_flowRate || m_pumpLvl != last_pumpLvl ||
+          m_pumpRPM != last_pumpRPM || m_fanRPM != last_fanRPM || m_fanLvl != last_fanLvl || force )
+   {
+      telem<telem_cooler>({m_liqTemp, m_flowRate, (uint8_t) m_pumpLvl, (uint16_t) m_pumpRPM, (uint8_t) m_fanLvl, (uint16_t) m_fanRPM});
+      
+      last_liqTemp = m_liqTemp;
+      last_flowRate = m_flowRate;
+      last_pumpLvl = m_pumpLvl;
+      last_pumpRPM = m_pumpRPM;
+      last_fanLvl = m_fanLvl;
+      last_fanRPM = m_fanRPM;
+   }
    
    return 0;
 }
