@@ -144,11 +144,11 @@ struct telem_stdcam : public flatbuffer_log
          }
          else if( fbs->shutter()->state() == 0)
          {
-            msg += "OPEN";
+            msg += "SHUT";
          }
          else if( fbs->shutter()->state() == 1)
          {
-            msg += "SHUT";
+            msg += "OPEN";
          }
          
       }

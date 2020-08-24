@@ -1232,12 +1232,12 @@ int stdCamera<derivedT>::newCallBack_shutter( const pcf::IndiProperty &ipRecv )
    
    if( ipRecv["toggle"].getSwitchState() == pcf::IndiElement::Off )
    {
-      derived().setShutter(0);
+      derived().setShutter(1);
    }
    
    if( ipRecv["toggle"].getSwitchState() == pcf::IndiElement::On )
    {
-      derived().setShutter(1);
+      derived().setShutter(0);
    }
    
    return 0;
@@ -1324,7 +1324,7 @@ int stdCamera<derivedT>::updateINDI()
          derived().updateIfChanged(m_indiP_shutterStatus, "status", m_shutterStatus, INDI_IDLE);
       }
           
-      if(m_shutterState == 1)
+      if(m_shutterState == 0) //0 shut, 1 open
       {
          derived().updateSwitchIfChanged(m_indiP_shutter, "toggle", pcf::IndiElement::On, INDI_BUSY);
       }
