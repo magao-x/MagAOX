@@ -9,6 +9,8 @@ CONFIG += c++14
 
 CONFIG += -O3
 
+MAKEFILE = makefile.cameraStatus
+
 QT           += widgets
 
 HEADERS       = cameraStatus.hpp

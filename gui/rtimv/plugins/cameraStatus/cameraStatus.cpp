@@ -53,6 +53,7 @@ int cameraStatus::updateOverlay()
    size_t n = 0;
    char * str;
    char tstr[128];
+   std::string sstr;
    
    if( m_dict->count(m_deviceName + ".temp_ccd.current") > 0)
    {
@@ -66,7 +67,23 @@ int cameraStatus::updateOverlay()
    if( m_dict->count(m_deviceName + ".exptime.current") > 0)
    {
       str = (char *)(*m_dict)[m_deviceName + ".exptime.current"].m_blob;
-      snprintf(tstr, sizeof(tstr), "%s sec", str);
+      double et = strtod(str,0);
+      if(et >= 100)
+      {
+        snprintf(tstr, sizeof(tstr), "%0.1f s", et);
+      }
+      else if(et >= 10)
+      {
+         snprintf(tstr, sizeof(tstr), "%0.2f s", et);
+      }
+      else if(et >= 0.1)
+      {
+         snprintf(tstr, sizeof(tstr), "%0.3f s", et);
+      }
+      else
+      {
+         snprintf(tstr, sizeof(tstr), "%0.3e s", et);
+      }
       m_gv->statusTextText(n, tstr);
       ++n;
    }
@@ -90,12 +107,29 @@ int cameraStatus::updateOverlay()
    }
    if(n > m_gv->statusTextNo()-1) return 0;
    
-   if( m_dict->count(m_deviceName + ".shutter.current") > 0)
+   if( m_dict->count(m_deviceName + ".shutter_status.status") > 0)
    {
-      str = (char *)(*m_dict)[m_deviceName + ".shutter.current"].m_blob;
-      m_gv->statusTextText(n, str);
-      ++n;
+      sstr = std::string((char *)(*m_dict)[m_deviceName + ".shutter_status.status"].m_blob);
+      
+      if(sstr == "READY")
+      {
+         if( m_dict->count(m_deviceName + ".shutter.toggle") > 0)
+         {
+            sstr = std::string((char *)(*m_dict)[m_deviceName + ".shutter.toggle"].m_blob);
+            if(sstr == "on") sstr = "SHUT";
+            else sstr = "OPEN";
+            m_gv->statusTextText(n, sstr.c_str());
+            ++n;
+         }
+      }
+      else
+      {
+         sstr = "sh " + sstr;
+         m_gv->statusTextText(n, sstr.c_str());
+         ++n;
+      }
    }
+         
    if(n > m_gv->statusTextNo()-1) return 0;   
    
    if(m_filterDeviceName != "")
