@@ -91,6 +91,7 @@ class picoMotorCtrl : public MagAOXApp<>, public dev::ioDevice, public dev::tele
      */
 
    std::string m_deviceAddr; ///< The device address
+   std::string m_devicePort {"23"}; ///< The device address
    
    int m_nChannels {4}; ///< The number of motor channels total on the hardware.  Number of attached motors inferred from config.
    
@@ -199,6 +200,8 @@ public:
 
 picoMotorCtrl::picoMotorCtrl() : MagAOXApp(MAGAOX_CURRENT_SHA1, MAGAOX_REPO_MODIFIED)
 {   
+   m_powerMgtEnabled = true;
+   m_telnetConn.m_prompt = "\r\n";
    return;
 }
 
@@ -366,23 +369,71 @@ int picoMotorCtrl::appLogic()
       state(stateCodes::NOTCONNECTED);
    }
    
-   if(state() == stateCodes::NOTCONNECTED)
+   if(state() == stateCodes::NOTCONNECTED || state() == stateCodes::ERROR)
    {
-      state(stateCodes::CONNECTED);
+      //== CHECK CONNECTION HERE ==
+      
+      int rv = m_telnetConn.connect(m_deviceAddr, m_devicePort);
+      
+      if(rv == 0)
+      {
+         state(stateCodes::CONNECTED);
+         m_telnetConn.noLogin();
+      }
+      else
+      {
+         if(!stateLogged())
+         {
+            log<text_log>("Failed to connect on " + m_deviceAddr + ":" + m_devicePort);
+         }
+         
+         return 0;
+      }
+      
    }
    
    if(state() == stateCodes::CONNECTED)
    {
-      //== CHECK CONNECTION HERE ==
-      state(stateCodes::READY);
+         
+      std::unique_lock<std::mutex> lock(m_telnetMutex);
+      m_telnetConn.write("*IDN?\r\n", m_writeTimeout);
       
+      m_telnetConn.read("\r\n", m_readTimeout, true);
+      
+      if(m_telnetConn.m_strRead == "New_Focus 8742 v3.04 09/09/16 61371\r\n")
+      {
+         log<text_log>("Connected to New_Focus 8742 v3.04 09/09/16 61371");
+         state(stateCodes::READY);
+      }
+      else
+      {
+         if(m_powerState == 0) return 0;
+         
+         log<software_error>({__FILE__, __LINE__, "wrong response to IDN query"});
+         state(stateCodes::ERROR);
+      }
       return 0;
    }
    
    if(state() == stateCodes::READY || state() == stateCodes::OPERATING)
    {
-      //== CHECK CONNECTION HERE ==
+      //check connection      
+      {
+         std::unique_lock<std::mutex> lock(m_telnetMutex);
+         m_telnetConn.write("*IDN?\r\n", m_writeTimeout);
+         m_telnetConn.read("\r\n", m_readTimeout, true);
       
+         if(m_telnetConn.m_strRead != "New_Focus 8742 v3.04 09/09/16 61371\r\n")
+         {
+            if(m_powerState == 0) return 0;
+         
+            log<software_error>({__FILE__, __LINE__, "wrong response to IDN query"});
+            state(stateCodes::ERROR);
+            return 0;
+         }
+      }
+      
+      //Now check state of motors
       bool anymoving = false;
       
       //This is where we'd check for moving
@@ -390,7 +441,17 @@ int picoMotorCtrl::appLogic()
       {
          std::unique_lock<std::mutex> lock(m_telnetMutex);
       
+         std::string query = std::to_string(it->second.m_channel) + "MD?";
+         
+         //std::cerr << "Query: " << query << "\n";
+         
+         m_telnetConn.write(query + "\r\n", m_writeTimeout);
+         m_telnetConn.read("\r\n", m_readTimeout, true);
+         
+         //std::cerr << "Response: " << m_telnetConn.m_strRead << "\n";
+         
          //The check for moving here. With power off detection
+         if(std::stoi(m_telnetConn.m_strRead) == 0) anymoving = true;
          it->second.m_moving = false;
          //If it were moving, set anymoving = true.
       
@@ -484,8 +545,13 @@ void picoMotorCtrl::channelThreadExec( motorChannel * mc)
          std::unique_lock<std::mutex> lock(m_telnetMutex);
          state(stateCodes::OPERATING);
          mc->m_moving = true;
-         std::cerr << "would move " << mc->m_name << " by " << dr << "\n";
+         log<text_log>("moving " + mc->m_name + " by " + std::to_string(dr) + " counts");
 
+         std::string comm = std::to_string(mc->m_channel) + "PR" + std::to_string(dr);
+                  
+         m_telnetConn.write(comm + "\r\n", m_writeTimeout);
+         m_telnetConn.read("\r\n", m_readTimeout, true);
+         
       }
       
       sleep(1);
