@@ -1,4 +1,4 @@
-TARGET=cameraStatus
+TARGET=pwfsAlignment
 
 #############################
 # The qt5 qmake 

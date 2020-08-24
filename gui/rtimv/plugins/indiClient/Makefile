@@ -1,4 +1,4 @@
-TARGET=cameraStatus
+TARGET=indiClient
 
 #############################
 # The qt5 qmake 

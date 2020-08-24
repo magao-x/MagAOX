@@ -9,6 +9,8 @@ CONFIG += c++14
 
 CONFIG += -O3
 
+MAKEFILE = makefile.indiClient
+
 QT           += widgets
 
 INCLUDEPATH  += ../../../../INDI/libcommon/
