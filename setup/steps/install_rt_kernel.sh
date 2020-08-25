@@ -27,6 +27,4 @@ sudo yum versionlock kernel
 
 # Patch kernel module makefile for CONFIG_RETPOLINE
 # https://bitsanddragons.wordpress.com/2018/03/20/config_retpoliney-error-on-centos-7/
-sed \
-    -i 's/$(error CONFIG_RETPOLINE=y/$(echo CONFIG_REPOLINE=y/' \
-    /usr/src/kernels/$(uname -r)/arch/x86/Makefile
+sed -i 's/$(error CONFIG_RETPOLINE=y/$(echo CONFIG_REPOLINE=y/' /usr/src/kernels/*/arch/x86/Makefile
