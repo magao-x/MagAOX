@@ -80,8 +80,6 @@ protected:
 
    double m_protectionResetReqTime {0}; ///< The time at which protection reset was requested.  You have 10 seconds to confirm.
 
-   //unsigned m_emGain {1}; ///< The current EM gain.
-
    bool m_poweredOn {false};
    
    ocamTemps m_temps; ///< Structure holding the last temperature measurement.
@@ -252,7 +250,9 @@ public:
 protected:
    //declare our properties
    pcf::IndiProperty m_indiP_temps;
+   pcf::IndiProperty m_indiP_emProt;
    pcf::IndiProperty m_indiP_emProtReset;
+   
    pcf::IndiProperty m_indiP_emGain;
 
 public:
@@ -359,9 +359,13 @@ int ocam2KCtrl::appStartup()
    m_indiP_temps.add (pcf::IndiElement("cooling"));
    m_indiP_temps["cooling"].set(0);
 
-   REG_INDI_NEWPROP(m_indiP_emProtReset, "emProtectionReset", pcf::IndiProperty::Text);
-   m_indiP_emProtReset.add (pcf::IndiElement("current"));
-   m_indiP_emProtReset.add (pcf::IndiElement("target"));
+   REG_INDI_NEWPROP_NOCB(m_indiP_emProt, "emProtection", pcf::IndiProperty::Text);
+   m_indiP_emProt.add(pcf::IndiElement("status"));
+   m_indiP_emProt["status"].set("UNKNOWN");
+   m_indiP_emProt.setState(INDI_IDLE);
+   
+   createStandardIndiRequestSw( m_indiP_emProtReset, "emProtectionReset", "Reset", "EM Protection"); 
+   registerIndiPropertyNew( m_indiP_emProtReset, INDI_NEWCALLBACK(m_indiP_emProtReset));
    
    REG_INDI_NEWPROP(m_indiP_emGain, "emgain", pcf::IndiProperty::Number);
    m_indiP_emGain.add (pcf::IndiElement("current"));
@@ -506,8 +510,7 @@ int ocam2KCtrl::appLogic()
          if( mx::get_curr_time() - m_protectionResetReqTime > 10.0)
          {
             m_protectionResetConfirmed = 0;
-            updateIfChanged(m_indiP_emProtReset, "current", std::string(""));
-            updateIfChanged(m_indiP_emProtReset, "target", std::string(""));
+            updateIfChanged(m_indiP_emProt, "status", std::string("UNCONFIRMED"));
             log<text_log>("protection reset request not confirmed", logPrio::LOG_NOTICE);
          }
       }
@@ -562,6 +565,8 @@ int ocam2KCtrl::onPowerOff()
    
    std::lock_guard<std::mutex> lock(m_indiMutex);
    
+   updateIfChanged(m_indiP_emProt, "status", std::string("UNKNOWN"), INDI_IDLE);
+   
    m_temps.setInvalid();
    
    updateIfChanged(m_indiP_temps, "cpu", m_temps.CPU);
@@ -572,21 +577,30 @@ int ocam2KCtrl::onPowerOff()
    updateIfChanged(m_indiP_temps, "right", m_temps.RIGHT);
    updateIfChanged(m_indiP_temps, "cooling", m_temps.COOLING_POWER);
       
-   updateIfChanged(m_indiP_emProtReset, "current", std::string(""));
-   updateIfChanged(m_indiP_emProtReset, "target", std::string(""));
-   
    updateIfChanged(m_indiP_emGain, "current", std::string(""));
    updateIfChanged(m_indiP_emGain, "target", std::string(""));
    
-   ///\todo error check these base class fxns.
-   stdCamera<ocam2KCtrl>::onPowerOff();
    
-   edtCamera<ocam2KCtrl>::onPowerOff();
+   if(stdCamera<ocam2KCtrl>::onPowerOff() < 0)
+   {
+      log<software_error>({__FILE__, __LINE__});
+   }
    
-   frameGrabber<ocam2KCtrl>::onPowerOff();
+   if(edtCamera<ocam2KCtrl>::onPowerOff() < 0)
+   {
+      log<software_error>({__FILE__, __LINE__});
+   }
    
-   dssShutter<ocam2KCtrl>::onPowerOff();
-
+   if(frameGrabber<ocam2KCtrl>::onPowerOff() < 0)
+   {
+      log<software_error>({__FILE__, __LINE__});
+   }
+   
+   if(dssShutter<ocam2KCtrl>::onPowerOff() < 0)
+   {
+      log<software_error>({__FILE__, __LINE__});
+   }
+   
    //Setting m_poweredOn
    m_poweredOn = true;
 
@@ -599,12 +613,20 @@ int ocam2KCtrl::whilePowerOff()
 {
    std::lock_guard<std::mutex> lock(m_indiMutex);
    
-   ///\todo error check these base class fxns.
-   stdCamera<ocam2KCtrl>::whilePowerOff();
+   if(stdCamera<ocam2KCtrl>::whilePowerOff() < 0)
+   {
+      log<software_error>({__FILE__, __LINE__});
+   }
    
-   edtCamera<ocam2KCtrl>::whilePowerOff();
+   if(edtCamera<ocam2KCtrl>::whilePowerOff() < 0)
+   {
+      log<software_error>({__FILE__, __LINE__});
+   }
    
-   dssShutter<ocam2KCtrl>::whilePowerOff();
+   if(dssShutter<ocam2KCtrl>::whilePowerOff() < 0)
+   {
+      log<software_error>({__FILE__, __LINE__});
+   }
    
    return 0;
 }
@@ -863,8 +885,7 @@ int ocam2KCtrl::resetEMProtection()
       std::cerr << "\n******************************************\n";
       ///\todo check response.
       
-      updateIfChanged(m_indiP_emProtReset, "current", std::string("RESET"));
-      updateIfChanged(m_indiP_emProtReset, "target", std::string(""));
+      updateIfChanged(m_indiP_emProt, "status", std::string("RESET"), INDI_OK);
       
       log<text_log>("overillumination protection has been reset", logPrio::LOG_NOTICE);
       
@@ -1100,51 +1121,42 @@ INDI_NEWCALLBACK_DEFN(ocam2KCtrl, m_indiP_emProtReset)(const pcf::IndiProperty &
 {
    if(MagAOXAppT::m_powerState == 0) return 0;
    
-   if (ipRecv.getName() == m_indiP_emProtReset.getName())
+   if (ipRecv.getName() != m_indiP_emProtReset.getName())
    {
-      std::string current, target;
-
-      if(ipRecv.find("current"))
-      {
-         current = ipRecv["current"].get<std::string>();
-      }
-
-      if(ipRecv.find("target"))
-      {
-         target = ipRecv["target"].get<std::string>();
-      }
-      
-      if(target == "") target = current;
-      
-      target = mx::ioutils::toUpper(target);
-      
-      if(target != "RESET") return 0;
-      
-      //Lock the mutex, waiting if necessary
-      std::unique_lock<std::mutex> lock(m_indiMutex);
-
-      updateIfChanged(m_indiP_emProtReset, "target", target);
-      
-      
-      if(m_protectionResetConfirmed == 0)
-      {
-         updateIfChanged(m_indiP_emProtReset, "current", std::string("CONFIRM"));
-       
-         m_protectionResetConfirmed = 1;
-         
-         m_protectionResetReqTime = mx::get_curr_time();
-         
-         log<text_log>("protection reset requested", logPrio::LOG_NOTICE);
-         
-         return 0;
-      }
-      
-      //If here, this is a confirmation.
-      return resetEMProtection();
-
-      
+      log<software_error>({__FILE__,__LINE__, "wrong INDI property received."});
+      return -1;
    }
-   return -1;
+   
+   if(!ipRecv.find("request")) 
+   {
+      return 0;
+   }
+   
+   if( ipRecv["request"].getSwitchState() == pcf::IndiElement::Off )
+   {
+      return 0;
+   }
+
+   std::unique_lock<std::mutex> lock(m_indiMutex);
+
+   if(m_protectionResetConfirmed == 0)
+   {
+      updateIfChanged(m_indiP_emProt, "status", std::string("CONFIRM"), INDI_BUSY);
+       
+      m_protectionResetConfirmed = 1;
+         
+      m_protectionResetReqTime = mx::get_curr_time();
+         
+      log<text_log>("protection reset requested", logPrio::LOG_NOTICE);
+        
+      return 0;
+   }
+      
+   //If here, this is a confirmation.      
+   return resetEMProtection();
+
+      
+
 }
 
 

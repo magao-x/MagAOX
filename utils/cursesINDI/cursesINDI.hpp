@@ -578,7 +578,7 @@ void cursesINDI::_moveCurrent( int nextY,
       if( knownProps[it->second.propKey].getType() == pcf::IndiProperty::Text)
       {
          wprintw(w_interactWin, "(e)dit this text");
-      }
+      }pcf::IndiProperty::Switch
       else if( knownProps[it->second.propKey].getType() == pcf::IndiProperty::Number)
       {
          wprintw(w_interactWin, "(e)dit this number");
