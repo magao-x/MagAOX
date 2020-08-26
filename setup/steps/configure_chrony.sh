@@ -26,11 +26,33 @@ makestep 1.0 3
 rtcsync
 HERE
 elif [[ $MAGAOX_ROLE == ICC || $MAGAOX_ROLE == RTC ]]; then
-    log_info "Configuring chronyd as a time minion for $MAGAOX_ROLE"
+    log_info "Configuring chronyd for $MAGAOX_ROLE as a time minion to exao1"
     sudo tee $CHRONYCONF_PATH <<'HERE'
 # chrony.conf installed by MagAO-X
 # for time minion
 server exao1 iburst
+driftfile /var/lib/chrony/drift
+makestep 1.0 3
+rtcsync
+HERE
+elif [[ $MAGAOX_ROLE == TIC ]]; then
+    log_info "Configuring chronyd as a time master for $MAGAOX_ROLE"
+    sudo tee $CHRONYCONF_PATH <<'HERE'
+# chrony.conf installed by MagAO-X
+# for time master
+server lbtntp.as.arizona.edu iburst
+pool 0.centos.pool.ntp.org iburst
+allow 192.168.1.0/24
+driftfile /var/lib/chrony/drift
+makestep 1.0 3
+rtcsync
+HERE
+elif [[ $MAGAOX_ROLE == TIC ]]; then
+    log_info "Configuring chronyd for $MAGAOX_ROLE as a time minion to exao0"
+    sudo tee $CHRONYCONF_PATH <<'HERE'
+# chrony.conf installed by MagAO-X
+# for time minion
+server exao0.as.arizona.edu iburst
 driftfile /var/lib/chrony/drift
 makestep 1.0 3
 rtcsync
