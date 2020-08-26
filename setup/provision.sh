@@ -334,9 +334,12 @@ if [[ $MAGAOX_ROLE == AOC || $MAGAOX_ROLE == vm ||  $MAGAOX_ROLE == workstation 
     $MAYBE_SUDO bash -l "$DIR/steps/install_sup.sh"
 fi
 
-if [[ $MAGAOX_ROLE == AOC || $MAGAOX_ROLE == TOC || $MAGAOX_ROLE == vm ||  $MAGAOX_ROLE == workstation ]]; then
+if [[ $MAGAOX_ROLE == AOC || $MAGAOX_ROLE == TOC || $MAGAOX_ROLE == vm || $MAGAOX_ROLE == workstation || $MAGAOX_ROLE == ci ]]; then
     # realtime image viewer
     $MAYBE_SUDO bash -l "$DIR/steps/install_rtimv.sh"
+fi
+
+if [[ $MAGAOX_ROLE == AOC || $MAGAOX_ROLE == TOC || $MAGAOX_ROLE == vm ||  $MAGAOX_ROLE == workstation ]]; then
     # regular old ds9 image viewer
     sudo bash -l "$DIR/steps/install_ds9.sh"
 fi
