@@ -1,4 +1,4 @@
-TARGET=indiClient
+TARGET=indiDictionary
 
 #############################
 # The qt5 qmake 
@@ -30,7 +30,7 @@ $(TARGET):
 	$(MAKE) -f makefile.$(TARGET)
 
 install: $(TARGET)
-	$(MAKE) -f makefile.$(TARGET) install
+	sudo $(MAKE) -f makefile.$(TARGET) install
 	
 clean:
 	rm -f *.so *.o *~

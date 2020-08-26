@@ -1,18 +1,18 @@
 
-#include "indiClient.hpp"
+#include "indiDictionary.hpp"
 
-indiClient::indiClient() : rtimvDictionaryInterface()
+indiDictionary::indiDictionary() : rtimvDictionaryInterface()
 {
    connect(&m_connTimer, SIGNAL(timeout()), this, SLOT(checkConnection()));
    m_connTimer.start(1000); ///\todo make timeout a config-able variable
 }
 
-indiClient::~indiClient()
+indiDictionary::~indiDictionary()
 {
    if(m_client) delete m_client;
 }
 
-int indiClient::attachDictionary( dictionaryT * dict,
+int indiDictionary::attachDictionary( dictionaryT * dict,
                                   mx::app::appConfigurator & config
                                 )
 {
@@ -27,7 +27,7 @@ int indiClient::attachDictionary( dictionaryT * dict,
    return 0;
 }
       
-void indiClient::checkConnection()
+void indiDictionary::checkConnection()
 {
    if(!m_client)
    {
@@ -46,7 +46,7 @@ void indiClient::checkConnection()
       delete m_client;
       m_client = nullptr;
       
-      //std::cerr << "indiClient disconnected\n";
+      //std::cerr << "indiDictionary disconnected\n";
       
       return;
    }

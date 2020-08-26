@@ -54,8 +54,7 @@ apps/flipperCtrl/flipperCtrl
 apps/magAOXMaths/magAOXMaths
 
 #g/gui
-gui/rtimv/plugins/cameraStatus/makefile.cameraStatus
-
+gui/rtimv/plugins/*/makefile.*
 
 #h
 apps/hsfwCtrl/hsfwCtrl
@@ -149,6 +148,8 @@ flatlogs/src/logCodes.dat
 
 .vagrant/
 .DS_Store
+.vscode
+.ipynb_checkpoints
 setup/bundle.zip
 vm/cache/
 vm/calib/
