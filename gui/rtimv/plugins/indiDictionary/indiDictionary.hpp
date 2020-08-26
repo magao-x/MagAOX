@@ -1,5 +1,5 @@
-#ifndef indiClient_hpp
-#define indiClient_hpp
+#ifndef indiDictionary_hpp
+#define indiDictionary_hpp
 
 #include <rtimv/rtimvInterfaces.hpp>
 
@@ -97,7 +97,7 @@ public:
 
 };
 
-class indiClient : public QObject,
+class indiDictionary : public QObject,
                    public rtimvDictionaryInterface
 {
    Q_OBJECT
@@ -116,9 +116,9 @@ class indiClient : public QObject,
       QTimer m_connTimer;
       
    public:
-      indiClient();
+      indiDictionary();
       
-      virtual ~indiClient();
+      virtual ~indiDictionary();
 
       virtual int attachDictionary( dictionaryT * dict,
                                     mx::app::appConfigurator & config
@@ -130,4 +130,4 @@ class indiClient : public QObject,
 
 };
 
-#endif //indiClient_hpp
+#endif //indiDictionary_hpp

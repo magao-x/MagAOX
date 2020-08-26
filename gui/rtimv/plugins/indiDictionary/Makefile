@@ -1,4 +1,4 @@
-TARGET=indiClient
+TARGET=indiDictionary
 
 #############################
 # The qt5 qmake 

@@ -79,8 +79,25 @@ ifeq ($(MAGAOX_ROLE),RTC)
   guis_to_build =
 else ifeq ($(MAGAOX_ROLE),ICC)
   guis_to_build =
+else ifeq ($(MAGAOX_ROLE),TIC)
+  guis_to_build =
 else
   guis_to_build = $(all_guis)
+endif
+
+all_rtimv_plugins = \
+	cameraStatus \
+	indiDictionary \
+	pwfsAlignment
+
+ifeq ($(MAGAOX_ROLE),RTC)
+  rtimv_plugins_to_build =
+else ifeq ($(MAGAOX_ROLE),ICC)
+  rtimv_plugins_to_build =
+else ifeq ($(MAGAOX_ROLE),TIC)
+  rtimv_plugins_to_build =
+else
+  rtimv_plugins_to_build = $(all_rtimv_plugins)
 endif
 
 utils_to_build = logdump \
@@ -145,19 +162,34 @@ apps_clean:
 		(cd apps/$$app; ${MAKE}  clean) || exit 1; \
 	done
 
-guis_all: libs_install
+guis_all: libs_install rtimv_plugins_all
 	for gui in ${guis_to_build}; do \
 		(cd gui/apps/$$gui; ${MAKE} )|| exit 1; \
 	done
 
-guis_install:
+guis_install: rtimv_plugins_install
 	for gui in ${guis_to_build}; do \
 		(cd gui/apps/$$gui; ${MAKE} install) || exit 1; \
 	done
 
-guis_clean:
+guis_clean: rtimv_plugins_clean
 	for gui in ${guis_to_build}; do \
 		(cd gui/apps/$$gui; ${MAKE} clean) || exit 1; \
+	done
+
+rtimv_plugins_all: libs_install
+	for plg in ${rtimv_plugins_to_build}; do \
+		(cd gui/rtimv/plugins/$$plg; ${MAKE} )|| exit 1; \
+	done
+
+rtimv_plugins_install:
+	for plg in ${rtimv_plugins_to_build}; do \
+		(cd gui/rtimv/plugins/$$plg; ${MAKE} install) || exit 1; \
+	done
+
+rtimv_plugins_clean:
+	for plg in ${rtimv_plugins_to_build}; do \
+		(cd gui/rtimv/plugins/$$plg; ${MAKE} clean) || exit 1; \
 	done
 
 scripts_install:

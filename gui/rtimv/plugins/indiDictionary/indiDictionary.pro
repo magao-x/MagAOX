@@ -9,18 +9,18 @@ CONFIG += c++14
 
 CONFIG += -O3
 
-MAKEFILE = makefile.indiClient
+MAKEFILE = makefile.indiDictionary
 
 QT           += widgets
 
 INCLUDEPATH  += ../../../../INDI/libcommon/
-HEADERS       = indiClient.hpp
-SOURCES       = indiClient.cpp
+HEADERS       = indiDictionary.hpp
+SOURCES       = indiDictionary.cpp
 
 LIBS         += ../../../../INDI/libcommon/libcommon.a
 LIBS         += ../../../../INDI/liblilxml/liblilxml.a
 
-TARGET        = $$qtLibraryTarget(rtimv_indiClientPlugin)
+TARGET        = $$qtLibraryTarget(rtimv_indiDictionaryPlugin)
 DESTDIR       = ./
 
 unix:target.path=/usr/local/bin/plugins
