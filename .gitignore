@@ -54,7 +54,7 @@ apps/flipperCtrl/flipperCtrl
 apps/magAOXMaths/magAOXMaths
 
 #g/gui
-
+gui/rtimv/plugins/cameraStatus/makefile.cameraStatus
 
 
 #h
