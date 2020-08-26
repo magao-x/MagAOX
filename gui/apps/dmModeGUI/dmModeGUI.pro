@@ -31,6 +31,6 @@ FORMS += ../../widgets/dmMode/dmMode.ui
 LIBS += ../../../INDI/libcommon/libcommon.a \
         ../../../INDI/liblilxml/liblilxml.a 
 
-RESOURCES += ../../vendor/BreezeStyleSheets/breeze.qrc
+RESOURCES += ../../resources/MagAOXStyleSheets/MagAOXStyle.qrc 
 
 QT += widgets

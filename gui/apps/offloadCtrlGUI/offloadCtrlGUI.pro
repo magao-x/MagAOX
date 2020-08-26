@@ -36,8 +36,6 @@ FORMS += ../../widgets/offloadCtrl/offloadCtrl.ui
 LIBS += ../../../INDI/libcommon/libcommon.a \
         ../../../INDI/liblilxml/liblilxml.a
 
-#RESOURCES += ../../widgets/offloadCtrl/res/offloadCtrl.qrc
+RESOURCES += ../../resources/MagAOXStyleSheets/MagAOXStyle.qrc 
 
-RESOURCES += ../../vendor/BreezeStyleSheets/breeze.qrc
-        
 QT += widgets

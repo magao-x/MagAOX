@@ -35,3 +35,4 @@ clean:
 	rm -f moc/moc_* res/qrc_* forms/ui_*
 	rm -f makefile.$(TARGET)
 	rm -f bin/$(TARGET)
+	rm -rf bin moc obj res

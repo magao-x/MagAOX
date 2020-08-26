@@ -37,7 +37,7 @@ FORMS += ../../widgets/pupilGuide/pupilGuide.ui
 LIBS += ../../../INDI/libcommon/libcommon.a \
         ../../../INDI/liblilxml/liblilxml.a
 
-RESOURCES += ../../widgets/pupilGuide/res/pupilGuide.qrc
+RESOURCES += ../../resources/magaox.qrc 
 
 RESOURCES += ../../resources/MagAOXStyleSheets/MagAOXStyle.qrc 
 
