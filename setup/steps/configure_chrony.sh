@@ -47,7 +47,7 @@ driftfile /var/lib/chrony/drift
 makestep 1.0 3
 rtcsync
 HERE
-elif [[ $MAGAOX_ROLE == TIC ]]; then
+elif [[ $MAGAOX_ROLE == TOC ]]; then
     log_info "Configuring chronyd for $MAGAOX_ROLE as a time minion to exao0"
     sudo tee $CHRONYCONF_PATH <<'HERE'
 # chrony.conf installed by MagAO-X
