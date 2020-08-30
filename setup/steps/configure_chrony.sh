@@ -48,11 +48,11 @@ makestep 1.0 3
 rtcsync
 HERE
 elif [[ $MAGAOX_ROLE == TOC ]]; then
-    log_info "Configuring chronyd for $MAGAOX_ROLE as a time minion to exao0"
+    log_info "Configuring chronyd for $MAGAOX_ROLE as a time minion to tic"
     sudo tee $CHRONYCONF_PATH <<'HERE'
 # chrony.conf installed by MagAO-X
 # for time minion
-server exao0.as.arizona.edu iburst
+server tic iburst
 driftfile /var/lib/chrony/drift
 makestep 1.0 3
 rtcsync
