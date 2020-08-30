@@ -57,7 +57,8 @@ protected:
    std::vector<float> m_coreTemps;   ///< List of current core temperature(s)
    std::vector<float> m_coreLoads;   ///< List of current core load(s)
    
-   std::vector<std::string> m_diskNames; ///< vector of names of the hard disks
+   std::vector<std::string> m_diskNameList; ///< vector of names of the hard disks to monitor
+   std::vector<std::string> m_diskNames; ///< vector of names of the hard disks returned by hdd_temp
    std::vector<float> m_diskTemps;        ///< vector of current disk temperature(s)
    
    float m_rootUsage = 0;   ///< Disk usage in root path as a value out of 100
@@ -285,6 +286,7 @@ inline sysMonitor::sysMonitor() : MagAOXApp(MAGAOX_CURRENT_SHA1, MAGAOX_REPO_MOD
 
 void sysMonitor::setupConfig()
 {
+   config.add("diskNames", "", "diskNames", argType::Required, "", "diskNames", false, "vector<string>", "The names (/dev/sdX) of the drives to monitor");
    config.add("warningCoreTemp", "", "warningCoreTemp", argType::Required, "", "warningCoreTemp", false, "int", "The warning temperature for CPU cores.");
    config.add("criticalCoreTemp", "", "criticalCoreTemp", argType::Required, "", "criticalCoreTemp", false, "int", "The critical temperature for CPU cores.");
    config.add("warningDiskTemp", "", "warningDiskTemp", argType::Required, "", "warningDiskTemp", false, "int", "The warning temperature for the disk.");
@@ -295,6 +297,7 @@ void sysMonitor::setupConfig()
 
 void sysMonitor::loadConfig()
 {
+   config(m_diskNameList, "diskNames");
    config(m_warningCoreTemp, "warningCoreTemp");
    config(m_criticalCoreTemp, "criticalCoreTemp");
    config(m_warningDiskTemp, "warningDiskTemp");
@@ -353,6 +356,7 @@ int sysMonitor::appStartup()
 
 int sysMonitor::appLogic()
 {
+
    m_coreTemps.clear();
    int rvCPUTemp = findCPUTemperatures(m_coreTemps);
    if (rvCPUTemp >= 0) 
@@ -389,6 +393,7 @@ int sysMonitor::appLogic()
    {
       log<software_error>({__FILE__, __LINE__,"Could not log values for CPU core loads."});
    }
+
 
    m_diskNames.clear();
    m_diskTemps.clear();
@@ -458,10 +463,10 @@ int sysMonitor::findCPUTemperatures(std::vector<float>& temps)
    std::vector<std::string> commandOutput = runCommand(commandList);
    
    int rv = -1;
-   for (auto line: commandOutput) 
+   for(size_t n=0; n < commandOutput.size(); ++n)
    {  
       float tempVal;
-      if (parseCPUTemperatures(line, tempVal) == 0)
+      if (parseCPUTemperatures(commandOutput[n], tempVal) == 0)
       {
          temps.push_back(tempVal);
          rv = 0;
@@ -480,7 +485,15 @@ int sysMonitor::parseCPUTemperatures(std::string line, float& temps)
    std::string str = line.substr(0, 5);
    if (str.compare("Core ") == 0) 
    {
-      std::string temp_str = line.substr(17, 4);
+      size_t st = line.find(':',0);
+      ++st;
+      size_t ed = line.find('C', st);
+      --ed;
+      
+      std::string temp_str = line.substr(st, ed-st);
+      //std::cerr << str << " " << temp_str << "\n";
+      
+      
       float temp;
       try
       {
@@ -618,7 +631,12 @@ int sysMonitor::findDiskTemperature( std::vector<std::string> & hdd_names,
                                      std::vector<float>& hdd_temps
                                    ) 
 {
-   std::vector<std::string> commandList{"hddtemp"};
+   std::vector<std::string> commandList{"hddtemp"};//, "/dev/sda",  "/dev/sdb", "/dev/sdc", "/dev/sdd", "/dev/sde", "/dev/sdf"};
+   for(size_t n=0;n<m_diskNameList.size();++n)
+   {
+      commandList.push_back(m_diskNameList[n]);
+   }
+   
    std::vector<std::string> commandOutput = runCommand(commandList);
    
    int rv = -1;
