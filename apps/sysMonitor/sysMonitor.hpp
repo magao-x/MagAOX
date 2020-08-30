@@ -251,6 +251,31 @@ public:
     */
    std::vector<std::string> runCommand( std::vector<std::string>    /**< [in] command to be run, with any subsequent parameters stored after*/);
    
+   /** \name Set Latency
+     * This thread spins up the cpus to minimize latency when requested
+     *
+     * @{
+     */ 
+   bool m_setLatency {false};
+   
+   int m_setlatThreadPrio {0}; ///< Priority of the set latency thread, should normally be > 00.
+
+   std::thread m_setlatThread; ///< A separate thread for the actual setting of low latency
+
+   bool m_setlatThreadInit {true}; ///< Synchronizer to ensure set lat thread initializes before doing dangerous things.
+   
+   ///Thread starter, called by threadStart on thread construction.  Calls setlatThreadExec.
+   static void setlatThreadStart( sysMonitor * s /**< [in] a pointer to a sysMonitor instance (normally this) */);
+
+   /// Execute the frame grabber main loop.
+   void setlatThreadExec();
+
+   pcf::IndiProperty m_indiP_setlat;
+   
+public:
+   INDI_NEWCALLBACK_DECL(sysMonitor, m_indiP_setlat);
+   
+   ///@}
    
    /** \name Telemeter Interface
      * 
@@ -346,9 +371,18 @@ int sysMonitor::appStartup()
    m_indiP_usage["data_usage"].set<double>(0.0);
    m_indiP_usage["ram_usage"].set<double>(0.0);
 
+   createStandardIndiToggleSw(m_indiP_setlat, "set_latency");
+   registerIndiPropertyNew(m_indiP_setlat, INDI_NEWCALLBACK(m_indiP_setlat));
+   
    if(dev::telemeter<sysMonitor>::appStartup() < 0)
    {
       return log<software_error,-1>({__FILE__,__LINE__});
+   }
+   
+   if(threadStart( m_setlatThread, m_setlatThreadInit, m_setlatThreadPrio, "set latency", this, setlatThreadStart)  < 0)
+   {
+      log<software_critical>({__FILE__, __LINE__});
+      return -1;
    }
    
    return 0;
@@ -866,6 +900,15 @@ int sysMonitor::updateVals()
    updateIfChanged(m_indiP_usage, "data_usage", m_dataUsage);
    updateIfChanged(m_indiP_usage, "ram_usage", m_ramUsage);
    
+   if(m_setLatency)
+   {
+      updateSwitchIfChanged( m_indiP_setlat, "toggle", pcf::IndiElement::On, INDI_BUSY);
+   }
+   else
+   {
+      updateSwitchIfChanged( m_indiP_setlat, "toggle", pcf::IndiElement::Off, INDI_IDLE);
+   }
+   
    return 0;
 }
 
@@ -932,6 +975,85 @@ std::vector<std::string> sysMonitor::runCommand( std::vector<std::string> comman
       wait(NULL);
       return commandOutput;
    }
+}
+
+inline
+void sysMonitor::setlatThreadStart( sysMonitor * s)
+{
+   s->setlatThreadExec();
+}
+
+inline
+void sysMonitor::setlatThreadExec()
+{
+   //Wait fpr the thread starter to finish initializing this thread.
+   while(m_setlatThreadInit == true && m_shutdown == 0)
+   {
+       sleep(1);
+   }
+   
+   int fd = 0;      
+   while(m_shutdown == 0)
+   {
+      if(m_setLatency)
+      {
+         if(fd <= 0)
+         {
+            elevatedPrivileges ep(this);
+            fd = open("/dev/cpu_dma_latency", O_WRONLY);
+            
+            if(fd <=0) log<software_error>({__FILE__,__LINE__,"error opening cpu_dma_latency"});
+            else
+            {
+               int l=0;
+               if (write(fd, &l, sizeof(l)) != sizeof(l)) 
+               {
+                  log<software_error>({__FILE__,__LINE__,"error writing to cpu_dma_latency"});
+               }
+               else
+               {
+                  log<text_log>("set latency to 0", logPrio::LOG_NOTICE);
+               }
+            }
+         }
+      }
+      else
+      {
+         if(fd != 0)
+         {
+            close(fd);
+            fd = 0;
+            log<text_log>("restored CPU latency to default", logPrio::LOG_NOTICE);
+         }
+      }
+      
+      sleep(1);
+   }
+   
+   if(fd) close(fd);
+      
+}
+
+INDI_NEWCALLBACK_DEFN(sysMonitor, m_indiP_setlat)(const pcf::IndiProperty &ipRecv)
+{
+   if(ipRecv.getName() != m_indiP_setlat.getName())
+   {
+      log<software_error>({__FILE__,__LINE__, "wrong INDI property received."});
+      return -1;
+   }
+   
+   if(!ipRecv.find("toggle")) return 0;
+   
+   if( ipRecv["toggle"].getSwitchState() == pcf::IndiElement::Off)
+   {
+      m_setLatency = false;
+   }
+   
+   if( ipRecv["toggle"].getSwitchState() == pcf::IndiElement::On)
+   {
+      m_setLatency = true;
+   }
+   return 0;
 }
 
 inline
