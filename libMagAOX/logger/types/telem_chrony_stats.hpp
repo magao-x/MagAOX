@@ -69,31 +69,31 @@ struct telem_chrony_stats : public flatbuffer_log
       std::string msg = "[chrony_stats] ";
 
       msg += "sys_time: ";
-      msg += fbs->systemTime();
+      msg += std::to_string(fbs->systemTime());
       
       msg += " last_off: ";
-      msg += fbs->lastOffset();
+      msg += std::to_string(fbs->lastOffset());
       
       msg += " rms_off: ";
-      msg += fbs->rmsOffset();
+      msg += std::to_string(fbs->rmsOffset());
       
       msg += " freq: ";
-      msg += fbs->freq();
+      msg += std::to_string(fbs->freq());
       
       msg += " rfreq: ";
-      msg += fbs->residFreq();
+      msg += std::to_string(fbs->residFreq());
       
       msg += " skew: ";
-      msg += fbs->skew();
+      msg += std::to_string(fbs->skew());
       
       msg += " root_del: ";
-      msg += fbs->rootDelay();
+      msg += std::to_string(fbs->rootDelay());
       
       msg += " root_disp: ";
-      msg += fbs->rootDispersion();
+      msg += std::to_string(fbs->rootDispersion());
       
       msg += " upd_int: ";
-      msg += fbs->updateInt();
+      msg += std::to_string(fbs->updateInt());
       
       return msg;
    
