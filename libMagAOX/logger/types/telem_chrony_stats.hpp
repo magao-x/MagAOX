@@ -63,34 +63,43 @@ struct telem_chrony_stats : public flatbuffer_log
                                )
    {
       static_cast<void>(len);
-
+      char num[128];
+      
       auto fbs = GetTelem_chrony_stats_fb(msgBuffer);
 
       std::string msg = "[chrony_stats] ";
-
+   
       msg += "sys_time: ";
-      msg += std::to_string(fbs->systemTime());
+      snprintf(num, sizeof(num), "%f",fbs->systemTime());
+      msg += num;
       
       msg += " last_off: ";
-      msg += std::to_string(fbs->lastOffset());
+      snprintf(num, sizeof(num), "%f",fbs->lastOffset());
+      msg += num;
       
       msg += " rms_off: ";
-      msg += std::to_string(fbs->rmsOffset());
+      snprintf(num, sizeof(num), "%f",fbs->rmsOffset());
+      msg += num;
       
       msg += " freq: ";
-      msg += std::to_string(fbs->freq());
+      snprintf(num, sizeof(num), "%f",fbs->freq());
+      msg += num;
       
       msg += " rfreq: ";
-      msg += std::to_string(fbs->residFreq());
+      snprintf(num, sizeof(num), "%f",fbs->residFreq());
+      msg += num;
       
       msg += " skew: ";
-      msg += std::to_string(fbs->skew());
+      snprintf(num, sizeof(num), "%f",fbs->skew());
+      msg += num;
       
       msg += " root_del: ";
-      msg += std::to_string(fbs->rootDelay());
+      snprintf(num, sizeof(num), "%f",fbs->rootDelay());
+      msg += num;
       
       msg += " root_disp: ";
-      msg += std::to_string(fbs->rootDispersion());
+      snprintf(num, sizeof(num), "%f",fbs->rootDispersion());
+      msg += num;
       
       msg += " upd_int: ";
       msg += std::to_string(fbs->updateInt());
