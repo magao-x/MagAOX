@@ -107,9 +107,7 @@ public:
      * \returns -1 on error with system command or output reading
      * \returns 0 on successful completion otherwise
      */
-   int findCPUTemperatures(
-      std::vector<float>&  /**< [out] the vector of measured CPU core temperatures*/
-   );
+   int findCPUTemperatures( std::vector<float>&  /**< [out] the vector of measured CPU core temperatures*/ );
 
 
    /// Parses string from system call to find CPU temperatures
@@ -118,10 +116,9 @@ public:
      * \returns -1 on invalid string being read in
      * \returns 0 on completion and storing of value
      */
-   int parseCPUTemperatures(
-      std::string,  /**< [in] the string to be parsed*/
-      float&   /**< [out] the return value from the string*/
-   );
+   int parseCPUTemperatures( std::string,  /**< [in] the string to be parsed*/
+                             float&   /**< [out] the return value from the string*/
+                           );
 
 
    /// Checks if any core temperatures are warning or critical levels
@@ -131,10 +128,7 @@ public:
      * \returns 2 if a temperature value is at critical level
      * \returns 0 otherwise (all temperatures are considered normal)
      */
-   int criticalCoreTemperature(
-      std::vector<float>&   /**< [in] the vector of temperature values to be checked*/
-   );
-
+   int criticalCoreTemperature( std::vector<float>&   /**< [in] the vector of temperature values to be checked*/ );
 
    /// Finds all CPU core usage loads
    /** Makes system call and then parses result to add usage loads to vector of values
@@ -142,9 +136,7 @@ public:
      * \returns -1 on error with system command or output file reading
      * \returns 0 on completion
      */
-   int findCPULoads(
-      std::vector<float>&   /**< [out] the vector of measured CPU usages*/
-   );
+   int findCPULoads( std::vector<float>&   /**< [out] the vector of measured CPU usages*/ );
 
 
    /// Parses string from system call to find CPU usage loads
@@ -153,10 +145,9 @@ public:
      * \returns -1 on invalid string being read in
      * \returns 0 on completion and storing of value
      */
-   int parseCPULoads(
-      std::string,   /**< [in] the string to be parsed*/
-      float&   /**< [out] the return value from the string*/
-   );
+   int parseCPULoads( std::string,   /**< [in] the string to be parsed*/
+                      float&   /**< [out] the return value from the string*/
+                    );
 
 
    /// Finds all drive temperatures
@@ -243,6 +234,38 @@ public:
                       float&    /**< [out] the return value for current RAM usage*/
                     );
 
+   /** \name Chrony Status
+     * @{
+     */
+protected:
+   std::string m_chronySourceMac;
+   std::string m_chronySourceIP;
+   std::string m_chronySynch;
+   double m_chronySystemTime {0};
+   double m_chronyLastOffset {0};
+   double m_chronyRMSOffset {0};
+   double m_chronyFreq {0};
+   double m_chronyResidFreq {0};
+   double m_chronySkew {0};
+   double m_chronyRootDelay {0};
+   double m_chronyRootDispersion {0};
+   double m_chronyUpdateInt {0};
+   std::string m_chronyLeap;
+   
+   pcf::IndiProperty m_indiP_chronyStatus;
+   pcf::IndiProperty m_indiP_chronyStats;
+   
+public:
+   /// Finds current chronyd status
+   /** Uses the chrony tracking command
+     * 
+     * \returns -1 on error
+     * \returns 0 on success 
+     */
+   int findChronyStatus();
+   
+   ///@}
+   
    /// Runs a command (with parameters) passed in using fork/exec
    /** New process is made with fork(), and child runs execvp with command provided
     * 
@@ -291,6 +314,10 @@ public:
    
    int recordTelem( const telem_usage * );
    
+   int recordTelem( const telem_chrony_status * );
+   
+   int recordTelem( const telem_chrony_stats * );
+   
    int recordCoreLoads(bool force = false);
    
    int recordCoreTemps(bool force = false);
@@ -298,6 +325,10 @@ public:
    int recordDriveTemps(bool force = false);
    
    int recordUsage(bool force = false);
+   
+   int recordChronyStatus(bool force = false);
+   
+   int recordChronyStats(bool force = false);
    
    ///@}
 
@@ -333,27 +364,22 @@ void sysMonitor::loadConfig()
 
 int sysMonitor::appStartup()
 {
-   REG_INDI_NEWPROP_NOCB(m_indiP_core_loads, "core_loads", pcf::IndiProperty::Number);
+   
+   //REG_INDI_NEWPROP_NOCB(m_indiP_core_temps, "core_temps", pcf::IndiProperty::Number);
+   
+   
+   
    REG_INDI_NEWPROP_NOCB(m_indiP_core_temps, "core_temps", pcf::IndiProperty::Number);
+   m_indiP_core_temps.add(pcf::IndiElement("max"));
+   m_indiP_core_temps.add(pcf::IndiElement("min"));
+   m_indiP_core_temps.add(pcf::IndiElement("mean"));
+   
+   REG_INDI_NEWPROP_NOCB(m_indiP_core_loads, "core_loads", pcf::IndiProperty::Number);
+   m_indiP_core_loads.add(pcf::IndiElement("max"));
+   m_indiP_core_loads.add(pcf::IndiElement("min"));
+   m_indiP_core_loads.add(pcf::IndiElement("mean"));
+   
    REG_INDI_NEWPROP_NOCB(m_indiP_drive_temps, "drive_temps", pcf::IndiProperty::Number);
-   REG_INDI_NEWPROP_NOCB(m_indiP_usage, "resource_use", pcf::IndiProperty::Number);
-   
-   findCPUTemperatures(m_coreTemps);
-   for (unsigned int i = 0; i < m_coreTemps.size(); i++) 
-   {
-      std::string coreStr = "core" + std::to_string(i);
-      m_indiP_core_temps.add (pcf::IndiElement(coreStr));
-      m_indiP_core_temps[coreStr].set<double>(0.0);
-   }
-   
-   findCPULoads(m_coreLoads);
-   for (unsigned int i = 0; i < m_coreLoads.size(); i++) 
-   {
-      std::string coreStr = "core" + std::to_string(i);
-      m_indiP_core_loads.add (pcf::IndiElement(coreStr));
-      m_indiP_core_loads[coreStr].set<double>(0.0);
-   }
- 
    findDiskTemperature(m_diskNames, m_diskTemps);
    for (unsigned int i = 0; i < m_diskTemps.size(); i++) 
    {
@@ -361,6 +387,7 @@ int sysMonitor::appStartup()
       m_indiP_drive_temps[m_diskNames[i]].set<double>(m_diskTemps[i]);
    }
 
+   REG_INDI_NEWPROP_NOCB(m_indiP_usage, "resource_use", pcf::IndiProperty::Number);
    m_indiP_usage.add(pcf::IndiElement("root_usage"));
    m_indiP_usage.add(pcf::IndiElement("boot_usage"));
    m_indiP_usage.add(pcf::IndiElement("data_usage"));
@@ -371,6 +398,17 @@ int sysMonitor::appStartup()
    m_indiP_usage["data_usage"].set<double>(0.0);
    m_indiP_usage["ram_usage"].set<double>(0.0);
 
+  
+   
+   REG_INDI_NEWPROP_NOCB(m_indiP_chronyStatus, "chrony_status", pcf::IndiProperty::Text);
+   m_indiP_chronyStatus.add(pcf::IndiElement("synch"));
+   m_indiP_chronyStatus.add(pcf::IndiElement("source"));
+   
+   REG_INDI_NEWPROP_NOCB(m_indiP_chronyStats, "chrony_stats", pcf::IndiProperty::Number);
+   m_indiP_chronyStats.add(pcf::IndiElement("system_time"));
+   m_indiP_chronyStats.add(pcf::IndiElement("last_offset"));
+   m_indiP_chronyStats.add(pcf::IndiElement("rms_offset"));
+   
    createStandardIndiToggleSw(m_indiP_setlat, "set_latency");
    registerIndiPropertyNew(m_indiP_setlat, INDI_NEWCALLBACK(m_indiP_setlat));
    
@@ -385,6 +423,7 @@ int sysMonitor::appStartup()
       return -1;
    }
    
+   state(stateCodes::READY);
    return 0;
 }
 
@@ -472,6 +511,14 @@ int sysMonitor::appLogic()
    }
    
 
+   if( findChronyStatus() == 0)
+   {
+   }
+   else
+   {
+      log<software_error>({__FILE__, __LINE__,"Could not get chronyd status."});
+   }
+   
    if(telemeter<sysMonitor>::appLogic() < 0)
    {
       log<software_error>({__FILE__, __LINE__});
@@ -485,6 +532,15 @@ int sysMonitor::appLogic()
 
 int sysMonitor::appShutdown()
 {
+   try
+   {
+      if(m_setlatThread.joinable())
+      {
+         m_setlatThread.join();
+      }
+   }
+   catch(...){}
+   
    dev::telemeter<sysMonitor>::appShutdown();
    
    return 0;
@@ -887,18 +943,112 @@ int sysMonitor::parseRamUsage(std::string line, float& ramUsage)
    }
 }
 
+int sysMonitor::findChronyStatus()
+{
+   std::vector<std::string> commandList{"chronyc", "-c", "tracking"};
+   std::vector<std::string> commandOutput = runCommand(commandList);
+   
+   if(commandOutput.size() < 1)
+   {
+      log<software_error>({__FILE__,__LINE__, "no response from chronyc -c"});
+      return -1;
+   }
+   
+   std::vector<std::string> results;
+   mx::ioutils::parseStringVector(results, commandOutput[0], ',');
+   
+   if(results.size() < 1)
+   {
+      log<software_error>({__FILE__,__LINE__, "wrong number of fields from chronyc -c"});
+      return -1;
+   }
+   
+   static std::string last_mac;
+   static std::string last_ip;
+   m_chronySourceMac = results[0];
+   m_chronySourceIP = results[1];
+   if(m_chronySourceMac == "7F7F0101" || m_chronySourceIP == "127.0.0.1")
+   {
+      m_chronySynch = "NO";
+      log<text_log>("chrony is not synchronized", logPrio::LOG_WARNING);
+   }
+   else
+   {
+      m_chronySynch = "YES";
+   }
+
+   if(last_mac != m_chronySourceMac || last_ip != m_chronySourceIP)
+   {
+      log<text_log>("chrony is synchronizing to " + m_chronySourceMac + " / " + m_chronySourceIP);
+      last_mac = m_chronySourceMac;
+      last_ip = m_chronySourceIP;
+   }
+   
+   
+   
+   m_chronySystemTime = std::stod(results[4]);
+   m_chronyLastOffset = std::stod(results[5]);
+   m_chronyRMSOffset = std::stod(results[6]);
+   m_chronyFreq = std::stod(results[7]);
+   m_chronyResidFreq = std::stod(results[8]);
+   m_chronySkew = std::stod(results[9]);
+   m_chronyRootDelay = std::stod(results[10]);
+   m_chronyRootDispersion = std::stod(results[11]);
+   m_chronyUpdateInt = std::stod(results[12]);
+   m_chronyLeap = results[13];
+   
+   recordChronyStatus();
+   recordChronyStats();
+   
+   return 0;
+}
+
 int sysMonitor::updateVals()
 {
-   updateIfChanged(m_indiP_core_loads, "core", m_coreLoads);
+   float min, max, mean;
+   
+   if(m_coreLoads.size() > 0)
+   {
+      min = m_coreLoads[0];
+      max = m_coreLoads[0];
+      mean = m_coreLoads[0];
+      for(size_t n=1; n<m_coreLoads.size(); ++n)
+      {
+         if(m_coreLoads[n] < min) min = m_coreLoads[n];
+         if(m_coreLoads[n] > max) max = m_coreLoads[n];
+         mean += m_coreLoads[n];
+      }
+      mean /= m_coreLoads.size();
+      
+      updateIfChanged<float>(m_indiP_core_loads, {"min","max","mean"}, {min,max,mean});
+   }
 
-   updateIfChanged(m_indiP_core_temps, "core", m_coreTemps);
-
+   
+   if(m_coreTemps.size() > 0)
+   {
+      min = m_coreTemps[0];
+      max = m_coreTemps[0];
+      mean = m_coreTemps[0];
+      for(size_t n=1; n<m_coreTemps.size(); ++n)
+      {
+         if(m_coreTemps[n] < min) min = m_coreTemps[n];
+         if(m_coreTemps[n] > max) max = m_coreTemps[n];
+         mean += m_coreTemps[n];
+      }
+      mean /= m_coreTemps.size();
+      
+      updateIfChanged<float>(m_indiP_core_temps, {"min","max","mean"}, {min,max,mean});
+   }
+   
    updateIfChanged(m_indiP_drive_temps, m_diskNames, m_diskTemps);
 
-   updateIfChanged(m_indiP_usage, "root_usage", m_rootUsage);
-   updateIfChanged(m_indiP_usage, "boot_usage", m_bootUsage);
-   updateIfChanged(m_indiP_usage, "data_usage", m_dataUsage);
-   updateIfChanged(m_indiP_usage, "ram_usage", m_ramUsage);
+   updateIfChanged<float>(m_indiP_usage, {"root_usage","boot_usage","data_usage","ram_usage"}, {m_rootUsage,m_bootUsage,m_dataUsage,m_ramUsage});
+   
+   
+   updateIfChanged(m_indiP_chronyStatus, "synch", m_chronySynch);
+   updateIfChanged(m_indiP_chronyStatus, "source", m_chronySourceIP);
+   
+   updateIfChanged<double>(m_indiP_chronyStats, {"system_time", "last_offset", "rms_offset"}, {m_chronySystemTime, m_chronyLastOffset, m_chronyRMSOffset});
    
    if(m_setLatency)
    {
@@ -1059,7 +1209,7 @@ INDI_NEWCALLBACK_DEFN(sysMonitor, m_indiP_setlat)(const pcf::IndiProperty &ipRec
 inline
 int sysMonitor::checkRecordTimes()
 {
-   return telemeter<sysMonitor>::checkRecordTimes(telem_coreloads(),telem_coretemps(),telem_drivetemps(),telem_usage());
+   return telemeter<sysMonitor>::checkRecordTimes(telem_coreloads(),telem_coretemps(),telem_drivetemps(),telem_usage(),telem_chrony_status(),telem_chrony_stats());
 }
 
 int sysMonitor::recordTelem( const telem_coreloads * )
@@ -1082,6 +1232,16 @@ int sysMonitor::recordTelem( const telem_usage * )
    return recordUsage(true);
 }
  
+int sysMonitor::recordTelem( const telem_chrony_status * )
+{
+   return recordChronyStatus(true);
+}
+
+int sysMonitor::recordTelem( const telem_chrony_stats * )
+{
+   return recordChronyStats(true);
+}
+
 int sysMonitor::recordCoreLoads(bool force)
 {
    static std::vector<float> old_coreLoads;
@@ -1187,6 +1347,63 @@ int sysMonitor::recordUsage(bool force)
       old_dataUsage = m_dataUsage;
    }
    
+   return 0;
+}
+
+int sysMonitor::recordChronyStatus(bool force)
+{
+   std::string old_chronySourceMac;
+   std::string old_chronySourceIP;
+   std::string old_chronySynch;
+   std::string old_chronyLeap;
+   
+   
+   if( old_chronySourceMac != m_chronySourceMac || old_chronySourceIP != m_chronySourceIP || old_chronySynch != m_chronySynch || old_chronyLeap != m_chronyLeap ||force)
+   {
+      telem<telem_chrony_status>({m_chronySourceMac, m_chronySourceIP, m_chronySynch, m_chronyLeap});
+      
+      old_chronySourceMac = m_chronySourceMac;
+      old_chronySourceIP = m_chronySourceIP;
+      old_chronySynch = m_chronySynch;
+      old_chronyLeap = m_chronyLeap;
+   }
+   
+   return 0;
+}
+
+int sysMonitor::recordChronyStats(bool force)
+{
+   double old_chronySystemTime = 1e50; //to force an update the first time no matter what
+   double old_chronyLastOffset = 0;
+   double old_chronyRMSOffset = 0;
+   double old_chronyFreq = 0;
+   double old_chronyResidFreq = 0;
+   double old_chronySkew = 0;
+   double old_chronyRootDelay = 0;
+   double old_chronyRootDispersion = 0;
+   double old_chronyUpdateInt = 0;
+
+   if( old_chronySystemTime == m_chronySystemTime || old_chronyLastOffset == m_chronyLastOffset ||
+          old_chronyRMSOffset == m_chronyRMSOffset || old_chronyFreq == m_chronyFreq ||
+             old_chronyResidFreq == m_chronyResidFreq || old_chronySkew == m_chronySkew ||
+                old_chronyRootDelay == m_chronyRootDelay || old_chronyRootDispersion == m_chronyRootDispersion ||
+                   old_chronyUpdateInt == m_chronyUpdateInt || force )
+   {
+      
+      telem<telem_chrony_stats>({m_chronySystemTime, m_chronyLastOffset, m_chronyRMSOffset, m_chronyFreq, m_chronyResidFreq, m_chronySkew, 
+                                     m_chronyRootDelay, m_chronyRootDispersion, m_chronyUpdateInt});
+      
+      old_chronySystemTime = m_chronySystemTime;
+      old_chronyLastOffset = m_chronyLastOffset;
+      old_chronyRMSOffset = m_chronyRMSOffset;
+      old_chronyFreq = m_chronyFreq;
+      old_chronyResidFreq = m_chronyResidFreq;
+      old_chronySkew = m_chronySkew;
+      old_chronyRootDelay = m_chronyRootDelay;
+      old_chronyRootDispersion = m_chronyRootDispersion;
+      old_chronyUpdateInt = m_chronyUpdateInt;
+      
+   }
    return 0;
 }
 

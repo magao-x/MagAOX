@@ -788,6 +788,7 @@ protected:
      * This comparison is done in the true
      * type of the value.
      * 
+     * For a property with multiple elements, you should use the vector version to minimize network traffic.
      */
    template<typename T>
    void updateIfChanged( pcf::IndiProperty & p, ///< [in/out] The property containing the element to possibly update
@@ -805,6 +806,7 @@ protected:
      * 
      * This is a specialization for `const char *` to `std::string`.
      * 
+     * For a property with multiple elements, you should use the vector version to minimize network traffic.
      * \overload
      */
    void updateIfChanged( pcf::IndiProperty & p, ///< [in/out] The property containing the element to possibly update
@@ -824,25 +826,39 @@ protected:
                                pcf::IndiProperty::PropertyStateType ipState = pcf::IndiProperty::Ok
                              );
    
-   /** 
-     * \overload void updateIfChanged(pcf::IndiProperty & p, const std::string & el, const std::vector<T> & newVal)
-     * Takes in a vector of values, such that each element in the vector will have an element name of el+(index of value)
+   /// Update an INDI property if values have changed.
+   /** Will only peform a SetProperty if at least one value has changed
+     * compared to the stored value, or if the property state has changed.  
+     * 
+     * Constructs the element names for each value as elX where X is the index of the vector.
+     * 
+     * This comparison is done in the true
+     * type of the value.
+     * 
+     * 
+     * \overload
      */
    template<typename T>
    void updateIfChanged( pcf::IndiProperty & p, ///< [in/out] The property containing the element to possibly update
                          const std::string & el, ///< [in] Beginning of each element name
-                         const std::vector<T> & newVal, ///< [in] the new values
-                         pcf::IndiProperty::PropertyStateType ipState = pcf::IndiProperty::Ok
+                         const std::vector<T> & newVals, ///< [in] the new values
+                         pcf::IndiProperty::PropertyStateType ipState = pcf::IndiProperty::Ok ///< [in] [optional] the new state
                       );
 
-  /** 
-     * \overload void updateIfChanged(pcf::IndiProperty & p, const std::string & el, const std::vector<T> & newVal)
-     * Takes in a vector of values, such that each element in the vector will have an element name of el+(index of value)
+  /// Update an INDI property if values have changed.
+   /** Will only peform a SetProperty if at least one value has changed
+     * compared to the stored value, or if the property state has changed.  
+     * 
+     * This comparison is done in the true
+     * type of the value.
+     * 
+     * 
+     * \overload
      */
    template<typename T>
    void updateIfChanged( pcf::IndiProperty & p, ///< [in/out] The property containing the element to possibly update
-                         const std::vector<std::string> & el, ///< [in] String vector of element names
-                         const std::vector<T> & newVal ///< [in] the new values
+                         const std::vector<std::string> & els, ///< [in] String vector of element names
+                         const std::vector<T> & newVals ///< [in] the new values
                       );
 
    /// Get the target element value from an new property 
@@ -2615,17 +2631,18 @@ void MagAOXApp<_useINDI>::updateIfChanged( pcf::IndiProperty & p,
 
    if(!m_indiDriver) return;
 
+   std::vector<std::string> descriptors(newVals.size(), el);
    for (size_t index = 0; index < newVals.size(); ++index) 
    {
-      std::string descriptor = el+std::to_string(index);
-      indi::updateIfChanged( p, descriptor, newVals.at(index), m_indiDriver, ipState);
+      descriptors[index] += std::to_string(index);
    }
+   indi::updateIfChanged(p, descriptors, newVals, m_indiDriver);
 }
 
 template<bool _useINDI>
 template<typename T>
 void MagAOXApp<_useINDI>::updateIfChanged( pcf::IndiProperty & p,
-                                           const std::vector<std::string> & el,
+                                           const std::vector<std::string> & els,
                                            const std::vector<T> & newVals
                                          )
 {
@@ -2633,11 +2650,7 @@ void MagAOXApp<_useINDI>::updateIfChanged( pcf::IndiProperty & p,
 
    if(!m_indiDriver) return;
 
-   for (size_t index = 0; index < newVals.size(); ++index) 
-   {
-      std::string descriptor = el.at(index);
-      indi::updateIfChanged( p, descriptor, newVals.at(index), m_indiDriver);
-   }
+   indi::updateIfChanged(p, els, newVals, m_indiDriver);
 }
 
 

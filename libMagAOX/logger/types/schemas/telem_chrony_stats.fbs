@@ -1,0 +1,17 @@
+namespace MagAOX.logger;
+
+table Telem_chrony_stats_fb
+{
+   systemTime:double;
+   lastOffset:double;
+   rmsOffset:double;
+   freq:double;
+   residFreq:double;
+   skew:double;
+   rootDelay:double;
+   rootDispersion:double;
+   updateInt:double;
+}
+
+root_type Telem_chrony_stats_fb;
+

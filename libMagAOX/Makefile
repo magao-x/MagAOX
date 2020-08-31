@@ -52,6 +52,8 @@ INCLUDEDEPS= app/MagAOXApp.hpp \
 	     logger/types/saving_start.hpp \
 	     logger/types/saving_stop.hpp \
 	     logger/types/saving_stats.hpp \
+	     logger/types/telem_chrony_status.hpp \
+	     logger/types/telem_chrony_stats.hpp \
 	     logger/types/telem_cooler.hpp \
 	     logger/types/telem_coreloads.hpp \
 	     logger/types/telem_coretemps.hpp \

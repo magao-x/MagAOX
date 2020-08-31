@@ -63,7 +63,8 @@ int addNumberElement( pcf::IndiProperty & prop, ///< [out] the property to which
 
 /// Update the value of the INDI element, but only if it has changed.
 /** Only sends the set property message if the new value is different.
-  *
+  * For properties with more than one element that may have changed, you should use the vector version below.
+  * 
   * \todo investigate how this handles floating point values and string conversions.
   * \todo this needs a const char specialization to std::string
   * 
@@ -95,6 +96,58 @@ void updateIfChanged( pcf::IndiProperty & p,   ///< [in/out] The property contai
    {
       std::cerr << "INDI Exception at " << __FILE__ << " " << __LINE__ << "\n";
       std::cerr << "from " << p.getName() << "." << el << "\n";
+   }
+   
+}
+
+/// Update the elements of an INDI propery, but only if there has been a change in at least one.
+/** Only sends the set property message if at least one of the new values is different, or if the state has changed.
+  *
+  * \todo investigate how this handles floating point values and string conversions.
+  * \todo this needs a const char specialization to std::string
+  * 
+  */  
+template<typename T, class indiDriverT>
+void updateIfChanged( pcf::IndiProperty & p,   ///< [in/out] The property containing the element to possibly update
+                      const std::vector<std::string> & els,  ///< [in] The element names
+                      const std::vector<T> & newVals,        ///< [in] the new values
+                      indiDriverT * indiDriver, ///< [in] the MagAOX INDI driver to use
+                      pcf::IndiProperty::PropertyStateType newState = pcf::IndiProperty::Ok
+                    )
+{
+   if( !indiDriver ) return;
+   
+   size_t n; //loop index outside so we can use it for error reporting.
+   try
+   {
+      //First we look for any changes
+      bool changed = false;
+      pcf::IndiProperty::PropertyStateType oldState = p.getState();
+      
+      if(oldState != newState) changed = true;
+      
+      for(n=0; n< els.size() && changed != true; ++n)
+      {
+         T oldVal = p[els[n]].get<T>();
+
+         if(oldVal != newVals[n]) changed = true;
+      }
+      
+      //and if there are changes, we send an update
+      if(changed)
+      {
+         for(n=0; n< els.size(); ++n)
+         {
+            p[els[n]].set(newVals[n]);
+         }
+         p.setState (newState);
+         indiDriver->sendSetProperty (p);
+      }
+   }
+   catch(...)
+   {
+      std::cerr << "INDI Exception at " << __FILE__ << " " << __LINE__ << "\n";
+      std::cerr << "from " << p.getName() << "." << els[n] << "\n";
    }
    
 }
