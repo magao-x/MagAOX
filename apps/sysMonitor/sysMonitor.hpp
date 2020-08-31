@@ -1352,13 +1352,13 @@ int sysMonitor::recordUsage(bool force)
 
 int sysMonitor::recordChronyStatus(bool force)
 {
-   std::string old_chronySourceMac;
-   std::string old_chronySourceIP;
-   std::string old_chronySynch;
-   std::string old_chronyLeap;
+   static std::string old_chronySourceMac;
+   static std::string old_chronySourceIP;
+   static std::string old_chronySynch;
+   static std::string old_chronyLeap;
    
    
-   if( old_chronySourceMac != m_chronySourceMac || old_chronySourceIP != m_chronySourceIP || old_chronySynch != m_chronySynch || old_chronyLeap != m_chronyLeap ||force)
+   if( old_chronySourceMac != m_chronySourceMac || old_chronySourceIP != m_chronySourceIP || old_chronySynch != m_chronySynch || old_chronyLeap != m_chronyLeap || force)
    {
       telem<telem_chrony_status>({m_chronySourceMac, m_chronySourceIP, m_chronySynch, m_chronyLeap});
       
