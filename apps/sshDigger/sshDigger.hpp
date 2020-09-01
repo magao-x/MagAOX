@@ -254,6 +254,34 @@ int sshDigger::loadConfigImpl( mx::app::appConfigurator & _config )
 
    _config.configUnused( m_monitorPort, mx::app::iniFile::makeKey(m_configName, "monitorPort" ) );
    
+   
+   //Here we go through and check access each unused config just to avoid the critical error for unrecognized configs.
+   for(size_t i=0;i<sections.size(); ++i)
+   {
+      if( sections[i] == "") continue; //this is an error
+      if( sections[i] == m_configName ) continue; //already done.
+      std::string rh;
+      _config.configUnused(rh, mx::app::iniFile::makeKey(sections[i], "remoteHost" ) );
+      if( rh == "" )
+      {
+         log<text_log>( "Config section [" + sections[i] + "] may be an invalid tunnel configuration (no remoteHost).",  logPrio::LOG_WARNING);
+      }
+      int lp=0;
+      _config.configUnused(lp, mx::app::iniFile::makeKey(sections[i], "localPort" ) );
+      if( lp == 0 )
+      {
+         log<text_log>( "Config section [" + sections[i] + "] may be an invalid tunnel configuration (no localPort).",  logPrio::LOG_WARNING);
+      }
+      int rp = 0;
+      _config.configUnused(rp, mx::app::iniFile::makeKey(sections[i], "remotePort" ) );
+      if( rp == 0 )
+      {
+         log<text_log>( "Config section [" + sections[i] + "] may be an invalid tunnel configuration (no remotePort).",  logPrio::LOG_WARNING);
+      }
+      int mp = 0;
+      _config.configUnused( mp, mx::app::iniFile::makeKey(sections[i], "monitorPort" ) );
+   }
+   
    return 0;
 }
 
