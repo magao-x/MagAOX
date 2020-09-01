@@ -163,6 +163,12 @@ public:
      */
    virtual void loadBasicConfig();
 
+   /// Check for unused and unrecognized config options and settings.
+   /** Logs the unused targets as warnings.  Unrecognized and unused options are logged as critical, and m_shutdown is set.
+     * Any command line argument (not an option) will also be critical and cause shutdown.
+     */  
+   virtual void checkConfig();
+   
    /// The execute method implementing the standard main loop.  Should not normally be overridden.
    /** Performs final startup steps.  That is:
      * - PID locking lockPID()
@@ -1222,11 +1228,55 @@ void MagAOXApp<_useINDI>::loadBasicConfig() //virtual
    }
 }
 
+template<bool _useINDI>
+void MagAOXApp<_useINDI>::checkConfig() //virtual
+{
+   //This checks for unused config options and arguments, and logs them.
+   //This will catch both bad options, and options we aren't actually using (debugging).
+   for( auto it = config.m_targets.begin(); it != config.m_targets.end(); ++it )
+   {
+      if(it->second.used == false)
+      {
+         std::string msg = it->second.name;
+         if(config.m_sources && it->second.sources.size() > 0) msg += " [" + it->second.sources[0]  + "]";
+         log<text_log>("Unused config target: " + msg, logPrio::LOG_WARNING);
+      }
+   }
+         
+   if(config.m_unusedConfigs.size() > 0)
+   {
+      for( auto it = config.m_unusedConfigs.begin(); it != config.m_unusedConfigs.end(); ++it )
+      {
+         if(it->second.used == true) continue;
+                     
+         std::string msg = it->second.name;
+         if(config.m_sources && it->second.sources.size() > 0 ) msg += " [" + it->second.sources[0]  + "]";
+                       
+         log<text_log>("Unrecognized config setting: " + msg, logPrio::LOG_CRITICAL);
+         m_shutdown = true;
+      }
+      
+   }
 
-
+   if(config.nonOptions.size() > 0)
+   {
+      for(size_t n =0; n < config.nonOptions.size(); ++n)
+      {
+         log<text_log>("Unrecognized command line argument: " + config.nonOptions[n], logPrio::LOG_CRITICAL);
+      }
+      m_shutdown = true;
+   }
+   
+}
+   
+   
+   
 template<bool _useINDI>
 int MagAOXApp<_useINDI>::execute() //virtual
 {
+   //----------------------------------------//
+   //        Get the PID Lock
+   //----------------------------------------//
    if( lockPID() < 0 )
    {
       state(stateCodes::FAILURE);
