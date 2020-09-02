@@ -384,6 +384,8 @@ protected:
    
    pcf::IndiProperty m_indiP_mode; ///< Property used to report the current mode
    
+   pcf::IndiProperty m_indiP_reconfig; ///< Request switch which forces the framegrabber to go through the reconfigure process.
+   
    pcf::IndiProperty m_indiP_roi_x; ///< Property used to set the ROI x center coordinate
    pcf::IndiProperty m_indiP_roi_y; ///< Property used to set the ROI x center coordinate
    pcf::IndiProperty m_indiP_roi_w; ///< Property used to set the ROI width 
@@ -441,6 +443,13 @@ public:
      * \returns -1 on error.
      */
    int newCallBack_mode( const pcf::IndiProperty &ipRecv /**< [in] the INDI property sent with the the new property request.*/);
+   
+   /// Callback to process a NEW reconfigure request
+   /**
+     * \returns 0 on success.
+     * \returns -1 on error.
+     */
+   int newCallBack_reconfigure( const pcf::IndiProperty &ipRecv /**< [in] the INDI property sent with the the new property request.*/);
    
    /// Callback to process a NEW roi_x request
    /**
@@ -652,8 +661,17 @@ int stdCamera<derivedT>::appStartup()
    
    if(m_usesModes)
    {
-      derived().createStandardIndiText( m_indiP_mode, "mode");
-      m_indiP_mode["target"] = m_startupMode;
+      std::vector<std::string> modeNames;
+      for(auto it = m_cameraModes.begin(); it!=m_cameraModes.end(); ++it)
+      {
+         modeNames.push_back(it->first);
+      }
+      
+      if(derived().createStandardIndiSelectionSw( m_indiP_mode, "mode", modeNames) < 0)
+      {
+         derivedT::template log<software_critical>({__FILE__, __LINE__});
+         return -1;
+      }
       if( derived().registerIndiPropertyNew( m_indiP_mode, st_newCallBack_stdCamera) < 0)
       {
          #ifndef STDCAMERA_TEST_NOLOG
@@ -663,6 +681,15 @@ int stdCamera<derivedT>::appStartup()
       }
    }
    
+   derived().createStandardIndiRequestSw( m_indiP_reconfig, "reconfigure");
+   if( derived().registerIndiPropertyNew( m_indiP_reconfig, st_newCallBack_stdCamera) < 0)
+   {
+      #ifndef STDCAMERA_TEST_NOLOG
+      derivedT::template log<software_error>({__FILE__,__LINE__});
+      #endif
+      return -1;
+   }
+      
    if(m_usesROI)
    {
       //The min/max/step values should be set in derivedT before this is called.
@@ -849,8 +876,10 @@ int stdCamera<derivedT>::onPowerOff()
    
    if(m_usesModes)
    {
-      indi::updateIfChanged(m_indiP_mode, "current", std::string(""), derived().m_indiDriver, INDI_IDLE);
-      indi::updateIfChanged(m_indiP_mode, "target", std::string(""), derived().m_indiDriver, INDI_IDLE);
+      for(auto it = m_cameraModes.begin();it!=m_cameraModes.end();++it)
+      {
+         derived().updateSwitchIfChanged(m_indiP_mode, it->first, pcf::IndiElement::Off, INDI_IDLE);
+      }
    }
    
    if(m_usesROI)
@@ -951,18 +980,19 @@ int stdCamera<derivedT>::st_newCallBack_stdCamera( void * app,
    derivedT * _app = static_cast<derivedT *>(app);
    
    if(name == "temp_ccd") return _app->newCallBack_temp(ipRecv);
-   if(name == "temp_controller") return _app->newCallBack_temp_controller(ipRecv);
-   if(name == "exptime") return _app->newCallBack_exptime(ipRecv);
-   if(name == "fps") return _app->newCallBack_fps(ipRecv);
-   if(name == "mode") return _app->newCallBack_mode(ipRecv);
-   if(name == "roi_x") return _app->newCallBack_roi_x(ipRecv);
-   if(name == "roi_y") return _app->newCallBack_roi_y(ipRecv);
-   if(name == "roi_w") return _app->newCallBack_roi_w(ipRecv);
-   if(name == "roi_h") return _app->newCallBack_roi_h(ipRecv);
-   if(name == "roi_bin_x") return _app->newCallBack_roi_bin_x(ipRecv);
-   if(name == "roi_bin_y") return _app->newCallBack_roi_bin_y(ipRecv);
-   if(name == "roi_set") return _app->newCallBack_roi_set(ipRecv);
-   if(name == "shutter") return _app->newCallBack_shutter(ipRecv);
+   else if(name == "temp_controller") return _app->newCallBack_temp_controller(ipRecv);
+   else if(name == "exptime") return _app->newCallBack_exptime(ipRecv);
+   else if(name == "fps") return _app->newCallBack_fps(ipRecv);
+   else if(name == "mode") return _app->newCallBack_mode(ipRecv);
+   else if(name == "reconfigure") return _app->newCallBack_reconfigure(ipRecv);
+   else if(name == "roi_x") return _app->newCallBack_roi_x(ipRecv);
+   else if(name == "roi_y") return _app->newCallBack_roi_y(ipRecv);
+   else if(name == "roi_w") return _app->newCallBack_roi_w(ipRecv);
+   else if(name == "roi_h") return _app->newCallBack_roi_h(ipRecv);
+   else if(name == "roi_bin_x") return _app->newCallBack_roi_bin_x(ipRecv);
+   else if(name == "roi_bin_y") return _app->newCallBack_roi_bin_y(ipRecv);
+   else if(name == "roi_set") return _app->newCallBack_roi_set(ipRecv);
+   else if(name == "shutter") return _app->newCallBack_shutter(ipRecv);
    
    derivedT::template log<software_error>({__FILE__,__LINE__, "unknown INDI property"});
    return -1;
@@ -1058,29 +1088,72 @@ int stdCamera<derivedT>::newCallBack_fps( const pcf::IndiProperty &ipRecv)
 template<class derivedT>
 int stdCamera<derivedT>::newCallBack_mode( const pcf::IndiProperty &ipRecv )
 {
-   std::string target;
-   
    std::unique_lock<std::mutex> lock(derived().m_indiMutex);
    
-   if( derived().indiTargetUpdate( m_indiP_mode, target, ipRecv, true) < 0)
+   if(ipRecv.getName() != m_indiP_mode.getName())
    {
-      derivedT::template log<software_error>({__FILE__,__LINE__});
+      derivedT::template log<software_error>({__FILE__, __LINE__, "invalid indi property received"});
       return -1;
    }
    
-   if(m_cameraModes.count(target) == 0 )
+   //look for selected mode switch which matches a known mode.  Make sure only one is selected.
+   std::string newName = "";
+   for(auto it=m_cameraModes.begin(); it != m_cameraModes.end(); ++it) 
    {
-      return derivedT::template log<text_log, -1>("Unrecognized mode requested: " + target, logPrio::LOG_ERROR);
+      if(!ipRecv.find(it->first)) continue;
+      
+      if(ipRecv[it->first].getSwitchState() == pcf::IndiElement::On)
+      {
+         if(newName != "")
+         {
+            derivedT::template log<text_log>("More than one camera mode selected", logPrio::LOG_ERROR);
+            return -1;
+         }
+         
+         newName = it->first;
+      }
    }
    
+   if(newName == "")
+   {
+      return 0; 
+   }
+   
+   
    //Now signal the f.g. thread to reconfigure
-   m_nextMode = target;
+   m_nextMode = newName;
    derived().m_reconfig = true;
    
    return 0;
   
 }
    
+template<class derivedT>
+int stdCamera<derivedT>::newCallBack_reconfigure( const pcf::IndiProperty &ipRecv )
+{
+   if(ipRecv.getName() != m_indiP_reconfig.getName())
+   {
+      derivedT::template log<software_error>({__FILE__,__LINE__, "wrong INDI property received."});
+      return -1;
+   }
+   
+   if(!ipRecv.find("request")) return 0;
+   
+   
+   if( ipRecv["request"].getSwitchState() == pcf::IndiElement::On)
+   {
+      std::unique_lock<std::mutex> lock(derived().m_indiMutex);
+      
+      indi::updateSwitchIfChanged(m_indiP_reconfig, "request", pcf::IndiElement::Off, derived().m_indiDriver, INDI_IDLE);
+      
+      m_nextMode = m_modeName;
+      derived().m_reconfig = true;
+      return 0;
+   }
+   
+   return 0;  
+}
+
 template<class derivedT>
 int stdCamera<derivedT>::newCallBack_roi_x( const pcf::IndiProperty &ipRecv )
 {
@@ -1265,16 +1338,15 @@ int stdCamera<derivedT>::updateINDI()
    
    if(m_usesModes)
    {
-      if(m_nextMode == m_modeName)
+      auto st = pcf::IndiProperty::Ok;
+      if(m_nextMode != "") st = pcf::IndiProperty::Busy;
+      
+      for(auto it = m_cameraModes.begin();it!=m_cameraModes.end();++it)
       {
-         indi::updateIfChanged(m_indiP_mode, "current", m_modeName, derived().m_indiDriver, INDI_IDLE);
-         indi::updateIfChanged(m_indiP_mode, "target", m_nextMode, derived().m_indiDriver, INDI_IDLE);
+         if(it->first == m_modeName) derived().updateSwitchIfChanged(m_indiP_mode, it->first, pcf::IndiElement::On, st);
+         else derived().updateSwitchIfChanged(m_indiP_mode, it->first, pcf::IndiElement::Off, st);
       }
-      else
-      {
-         indi::updateIfChanged(m_indiP_mode, "current", m_modeName, derived().m_indiDriver, INDI_BUSY);
-         indi::updateIfChanged(m_indiP_mode, "target", m_nextMode, derived().m_indiDriver, INDI_BUSY);
-      }
+            
    }
    
    if(m_hasTempControl)
