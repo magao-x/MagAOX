@@ -91,7 +91,7 @@ class picoMotorCtrl : public MagAOXApp<>, public dev::ioDevice, public dev::tele
      */
 
    std::string m_deviceAddr; ///< The device address
-   std::string m_devicePort {"23"}; ///< The device address
+   std::string m_devicePort {"23"}; ///< The device port
    
    int m_nChannels {4}; ///< The number of motor channels total on the hardware.  Number of attached motors inferred from config.
    
@@ -371,8 +371,6 @@ int picoMotorCtrl::appLogic()
    
    if(state() == stateCodes::NOTCONNECTED || state() == stateCodes::ERROR)
    {
-      //== CHECK CONNECTION HERE ==
-      
       int rv = m_telnetConn.connect(m_deviceAddr, m_devicePort);
       
       if(rv == 0)
@@ -403,7 +401,6 @@ int picoMotorCtrl::appLogic()
       if(m_telnetConn.m_strRead == "New_Focus 8742 v3.04 09/09/16 61371\r\n")
       {
          log<text_log>("Connected to New_Focus 8742 v3.04 09/09/16 61371");
-         state(stateCodes::READY);
       }
       else
       {
@@ -411,7 +408,39 @@ int picoMotorCtrl::appLogic()
          
          log<software_error>({__FILE__, __LINE__, "wrong response to IDN query"});
          state(stateCodes::ERROR);
+         return 0;
       }
+      
+      //Do a motor scan
+      m_telnetConn.write("MC\r\n", m_writeTimeout);
+      sleep(1);
+      
+      //Now check for each motor attached
+      for(auto it=m_channels.begin(); it!=m_channels.end();++it)
+      {
+         std::string query = std::to_string(it->second.m_channel) + "QM?";
+         m_telnetConn.write(query + "\r\n", m_writeTimeout);
+         m_telnetConn.read("\r\n", m_readTimeout, true);
+         
+         int moType = std::stoi(m_telnetConn.m_strRead);
+         if(moType == 0)
+         {
+            log<text_log>("No motor connected on channel " + std::to_string(it->second.m_channel) + " [" + it->second.m_name + "]", logPrio::LOG_CRITICAL);
+            state(stateCodes::FAILURE);
+            return -1;
+         }
+         else if (moType != 2)
+         {
+            log<text_log>("Wrong motor type connected on channel " + std::to_string(it->second.m_channel) + " [" + it->second.m_name + "]", logPrio::LOG_CRITICAL);
+            state(stateCodes::FAILURE);
+            return -1;
+         }
+      }
+      
+         
+      state(stateCodes::READY);
+      
+      
       return 0;
    }
    
