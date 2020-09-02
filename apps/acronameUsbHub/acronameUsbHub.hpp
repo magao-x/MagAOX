@@ -122,7 +122,7 @@ public:
 inline
 acronameUsbHub::acronameUsbHub() : MagAOXApp(MAGAOX_CURRENT_SHA1, MAGAOX_REPO_MODIFIED)
 {
-   m_powerMgtEnabled = true;
+   m_powerMgtEnabled = false;
    
    setNumberOfOutlets(8);
    
@@ -167,6 +167,8 @@ int acronameUsbHub::appStartup()
    {
       return log<text_log,-1>("Error setting up INDI for outlet control.", logPrio::LOG_CRITICAL);
    }
+   
+   state(stateCodes::NOTCONNECTED);
    
    return 0;
 
