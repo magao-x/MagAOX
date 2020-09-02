@@ -458,11 +458,6 @@ void shmimMonitor<derivedT, specificT>::smThreadExec()
    
    while(derived().shutdown() == 0)
    {
-      if(derived().state() != stateCodes::OPERATING)
-      {
-         std::cerr << "Pausing \n";
-      }
-      
       while((derived().state() != stateCodes::OPERATING || m_shmimName == "" ) && !derived().shutdown() && !m_restart )
       {
          sleep(1);
@@ -475,8 +470,27 @@ void shmimMonitor<derivedT, specificT>::smThreadExec()
       opened = false;
       m_restart = false; //Set this up front, since we're about to restart.
       
+      int logged = 0;
       while(!opened && !derived().m_shutdown && !m_restart && derived().state() == stateCodes::OPERATING)
       {
+         //b/c ImageStreamIO prints every single time, and latest version don't support stopping it yet, and that isn't thread-safe-able anyway
+         //we do our own checks.  This is the same code in ImageStreamIO_openIm...
+         int SM_fd;
+         char SM_fname[200];
+         ImageStreamIO_filename(SM_fname, sizeof(SM_fname), m_shmimName.c_str());
+         SM_fd = open(SM_fname, O_RDWR);
+         if(SM_fd == -1)
+         {
+            if(!logged) derivedT::template log<text_log>("ImageStream " + m_shmimName + " not found (yet).  Retrying . . .", logPrio::LOG_NOTICE);
+            logged = 1;
+            sleep(1); //be patient
+            continue;
+         }
+         
+         //Found and opened,  close it and then use ImageStreamIO
+         logged = 0;
+         close(SM_fd);
+         
          if( ImageStreamIO_openIm(&m_imageStream, m_shmimName.c_str()) == 0)
          {
             if(m_imageStream.md[0].sem <= m_semaphoreNumber) ///<\todo this isn't right--> isn't there a define in cacao to use? 

@@ -290,8 +290,8 @@ int shmimIntegrator::appStartup()
 {
    
    createStandardIndiNumber<unsigned>( m_indiP_nAverage, "nAverage", 1, std::numeric_limits<unsigned>::max(), 1, "%u");
-   updateIfChanged(m_indiP_nAverage, "current", m_nAverage, INDI_IDLE);
-   updateIfChanged(m_indiP_nAverage, "target", m_nAverage, INDI_IDLE);
+   m_indiP_nAverage["current"].set(m_nAverage);
+   m_indiP_nAverage["target"].set(m_nAverage);
    
    if( registerIndiPropertyNew( m_indiP_nAverage, INDI_NEWCALLBACK(m_indiP_nAverage)) < 0)
    {
@@ -300,8 +300,8 @@ int shmimIntegrator::appStartup()
    }
    
    createStandardIndiNumber<unsigned>( m_indiP_nUpdate, "nUpdate", 1, std::numeric_limits<unsigned>::max(), 1, "%u");
-   updateIfChanged(m_indiP_nUpdate, "current", m_nUpdate, INDI_IDLE);
-   updateIfChanged(m_indiP_nUpdate, "target", m_nUpdate, INDI_IDLE);
+   m_indiP_nUpdate["current"].set(m_nUpdate);
+   m_indiP_nUpdate["target"].set(m_nUpdate);
    
    if( registerIndiPropertyNew( m_indiP_nUpdate, INDI_NEWCALLBACK(m_indiP_nUpdate)) < 0)
    {
@@ -315,8 +315,6 @@ int shmimIntegrator::appStartup()
       log<software_error>({__FILE__,__LINE__});
       return -1;
    }
-   
-   
    
    if(sem_init(&m_smSemaphore, 0,0) < 0)
    {
