@@ -54,7 +54,9 @@ apps/flipperCtrl/flipperCtrl
 apps/magAOXMaths/magAOXMaths
 
 #g/gui
-gui/rtimv/plugins/*/makefile.*
+gui/rtimv/plugins/cameraStatus/makefile.cameraStatus
+gui/rtimv/plugins/indiDictionary/makefile.indiDictionary
+gui/rtimv/plugins/pwfsAlignment/makefile.pwfsAlignment
 
 #h
 apps/hsfwCtrl/hsfwCtrl
