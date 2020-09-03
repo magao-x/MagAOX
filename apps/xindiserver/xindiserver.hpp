@@ -671,6 +671,7 @@ int xindiserver::processISLog( std::string logs )
    if(ed == std::string::npos)
    {
       log<software_error>({__FILE__, __LINE__, "Did not find timestamp : in log entry"});
+      log<text_log>("--> " + logs, logPrio::LOG_ERROR);
       return -1;
    }
    
