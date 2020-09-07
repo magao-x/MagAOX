@@ -37,10 +37,15 @@ doc/www/
 apps/adcTracker/adcTracker
 apps/alpaoCtrl/alpaoCtrl
 apps/andorCtrl/andorCtrl
+apps/acronameUsbHub/acronameUsbHub
+apps/acronameUsbHub/utils/configusbhub
 
 #b
 apps/baslerCtrl/baslerCtrl
 apps/bmcCtrl/bmcCtrl
+
+#c
+apps/cacaoInterface/cacaoInterface
 
 #d
 apps/dmMode/dmMode
@@ -84,6 +89,7 @@ apps/ocam2KCtrl/ocam2KCtrl
 #p
 apps/pi335Ctrl/pi335Ctrl
 apps/picamCtrl/picamCtrl
+apps/picoMotorCtrl/picoMotorCtrl
 
 apps/pupilFit/pupilFit
 apps/pwfsSlopeCalc/pwfsSlopeCalc
@@ -110,6 +116,9 @@ apps/ttmModulator/ttmModulator
 
 #u
 apps/usbtempMon/usbtempMon
+
+#w
+apps/w2tcsOffloader/w2tcsOffloader
 
 #x
 apps/xindiserver/tests/remoteDriver_test
@@ -157,6 +166,3 @@ vm/cache/
 vm/calib/
 vm/config/
 vm/
-apps/acronameUsbHub/acronameUsbHub
-apps/cacaoInterface/cacaoInterface
-apps/w2tcsOffloader/w2tcsOffloader

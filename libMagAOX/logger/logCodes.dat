@@ -13,6 +13,8 @@ loop_closed              1001     empty_log
 loop_paused              1002     empty_log
 loop_open                1003     empty_log
 
+observer                 1050     observer
+
 pico_channel             11025    pico_channel
 
 outlet_state             12001    outlet_state
@@ -42,6 +44,8 @@ telem_telsee             20005    telem_telsee
 telem_stage              20050    telem_stage
 telem_zaber              20055    telem_zaber
 telem_pico               20060    telem_pico
+
+telem_observer           20070    telem_observer
 
 telem_temps              20250    telem_temps
 
