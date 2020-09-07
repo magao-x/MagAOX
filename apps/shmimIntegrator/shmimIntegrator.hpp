@@ -393,7 +393,14 @@ int shmimIntegrator::appLogic()
       log<software_error>({__FILE__, __LINE__});
    }
       
-  
+   if(m_running == false)
+   {
+      updateSwitchIfChanged(m_indiP_startAveraging, "toggle", pcf::IndiElement::Off, INDI_IDLE);
+   }
+   else
+   {
+      updateSwitchIfChanged(m_indiP_startAveraging, "toggle", pcf::IndiElement::On, INDI_BUSY);
+   }
    
    
    return 0;
@@ -778,14 +785,18 @@ INDI_NEWCALLBACK_DEFN(shmimIntegrator, m_indiP_startAveraging)(const pcf::IndiPr
    
    if(!ipRecv.find("toggle")) return 0;
    
+   std::unique_lock<std::mutex> lock(m_indiMutex);
+   
    if( ipRecv["toggle"].getSwitchState() == pcf::IndiElement::Off)
    {
       m_running = false;
+      updateSwitchIfChanged(m_indiP_startAveraging, "toggle", pcf::IndiElement::Off, INDI_IDLE);
    }
    
    if( ipRecv["toggle"].getSwitchState() == pcf::IndiElement::On)
    {
-      m_running = true;;
+      m_running = true;
+      updateSwitchIfChanged(m_indiP_startAveraging, "toggle", pcf::IndiElement::On, INDI_BUSY);
    }
    return 0;
 }
