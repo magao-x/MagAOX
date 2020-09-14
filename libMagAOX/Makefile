@@ -74,6 +74,8 @@ INCLUDEDEPS= app/MagAOXApp.hpp \
 	     logger/types/telem_usage.hpp \
 	     logger/types/telem_zaber.hpp \
 	     logger/types/text_log.hpp \
+	     sys/thSetuid.hpp \
+	     sys/runCommand.hpp \
              tty/ttyErrors.hpp \
              tty/ttyIOUtils.hpp \
              tty/ttyUSB.hpp \

@@ -266,14 +266,6 @@ public:
    
    ///@}
    
-   /// Runs a command (with parameters) passed in using fork/exec
-   /** New process is made with fork(), and child runs execvp with command provided
-    * 
-    * \returns output of command, contained in a vector of strings
-    * If an error occurs during the process, an empty vector of strings is returned.
-    */
-   std::vector<std::string> runCommand( std::vector<std::string>    /**< [in] command to be run, with any subsequent parameters stored after*/);
-   
    /** \name Set Latency
      * This thread spins up the cpus to minimize latency when requested
      *
@@ -550,7 +542,13 @@ int sysMonitor::findCPUTemperatures(std::vector<float>& temps)
 {
    std::vector<std::string> commandList{"sensors"};
    
-   std::vector<std::string> commandOutput = runCommand(commandList);
+   std::vector<std::string> commandOutput;
+   
+   if(sys::runCommand(commandOutput, commandList) < 0)
+   {
+      if(commandOutput.size() < 1) return log<software_error,-1>({__FILE__, __LINE__});
+      else return log<software_error,-1>({__FILE__, __LINE__, commandOutput[0]});
+   }
    
    int rv = -1;
    for(size_t n=0; n < commandOutput.size(); ++n)
@@ -671,7 +669,14 @@ int sysMonitor::criticalCoreTemperature(std::vector<float>& v)
 int sysMonitor::findCPULoads(std::vector<float>& loads) 
 {
    std::vector<std::string> commandList{"mpstat", "-P", "ALL", "1", "1"};
-   std::vector<std::string> commandOutput = runCommand(commandList);
+   std::vector<std::string> commandOutput;
+   
+   if(sys::runCommand(commandOutput, commandList) < 0)
+   {
+      if(commandOutput.size() < 1) return log<software_error,-1>({__FILE__, __LINE__});
+      else return log<software_error,-1>({__FILE__, __LINE__, commandOutput[0]});
+   }
+   
    int rv = -1;
    // If output lines are less than 5 (with one CPU, guarenteed output is 5)
    if (commandOutput.size() < 5) 
@@ -727,7 +732,13 @@ int sysMonitor::findDiskTemperature( std::vector<std::string> & hdd_names,
       commandList.push_back(m_diskNameList[n]);
    }
    
-   std::vector<std::string> commandOutput = runCommand(commandList);
+   std::vector<std::string> commandOutput;
+   
+   if(sys::runCommand(commandOutput, commandList) < 0)
+   {
+      if(commandOutput.size() < 1) return log<software_error,-1>({__FILE__, __LINE__});
+      else return log<software_error,-1>({__FILE__, __LINE__, commandOutput[0]});
+   }
    
    int rv = -1;
    for (auto line: commandOutput) 
@@ -824,7 +835,15 @@ int sysMonitor::criticalDiskTemperature(std::vector<float>& v)
 int sysMonitor::findDiskUsage(float &rootUsage, float &dataUsage, float &bootUsage) 
 {
    std::vector<std::string> commandList{"df"};
-   std::vector<std::string> commandOutput = runCommand(commandList);
+   
+   std::vector<std::string> commandOutput;
+   
+   if(sys::runCommand(commandOutput, commandList) < 0)
+   {
+      if(commandOutput.size() < 1) return log<software_error,-1>({__FILE__, __LINE__});
+      else return log<software_error,-1>({__FILE__, __LINE__, commandOutput[0]});
+   }
+   
    int rv = -1;
    for (auto line: commandOutput) 
    {  
@@ -900,7 +919,15 @@ int sysMonitor::parseDiskUsage(std::string line, float& rootUsage, float& dataUs
 int sysMonitor::findRamUsage(float& ramUsage) 
 {
    std::vector<std::string> commandList{"free", "-m"};
-   std::vector<std::string> commandOutput = runCommand(commandList);
+   
+   std::vector<std::string> commandOutput;
+   
+   if(sys::runCommand(commandOutput, commandList) < 0)
+   {
+      if(commandOutput.size() < 1) return log<software_error,-1>({__FILE__, __LINE__});
+      else return log<software_error,-1>({__FILE__, __LINE__, commandOutput[0]});
+   }
+   
    for (auto line: commandOutput) 
    {  
       if (parseRamUsage(line, ramUsage) == 0)
@@ -946,7 +973,14 @@ int sysMonitor::parseRamUsage(std::string line, float& ramUsage)
 int sysMonitor::findChronyStatus()
 {
    std::vector<std::string> commandList{"chronyc", "-c", "tracking"};
-   std::vector<std::string> commandOutput = runCommand(commandList);
+   
+   std::vector<std::string> commandOutput;
+   
+   if(sys::runCommand(commandOutput, commandList) < 0)
+   {
+      if(commandOutput.size() < 1) return log<software_error,-1>({__FILE__, __LINE__});
+      else return log<software_error,-1>({__FILE__, __LINE__, commandOutput[0]});
+   }
    
    if(commandOutput.size() < 1)
    {
@@ -1060,71 +1094,6 @@ int sysMonitor::updateVals()
    }
    
    return 0;
-}
-
-std::vector<std::string> sysMonitor::runCommand( std::vector<std::string> commandList) 
-{
-   int link[2];
-   pid_t pid;
-   
-   std::vector<std::string> commandOutput;
-
-   if (pipe(link)==-1) 
-   {
-      perror("Pipe error");
-      return commandOutput;
-   }
-
-   if ((pid = fork()) == -1) 
-   {
-      perror("Fork error");
-      return commandOutput;
-   }
-
-   if(pid == 0) 
-   {
-      dup2 (link[1], STDOUT_FILENO);
-      close(link[0]);
-      close(link[1]);
-      std::vector<const char *>charCommandList( commandList.size()+1, NULL);
-      for(int index = 0; index < (int) commandList.size(); ++index)
-      {
-         charCommandList[index]=commandList[index].c_str();
-      }
-      execvp( charCommandList[0], const_cast<char**>(charCommandList.data()));
-      perror("exec");
-      return commandOutput;
-   }
-   else 
-   {
-      char commandOutput_c[4096];
-         
-      wait(NULL);
-      close(link[1]);
-      
-      int rd;
-      if ( (rd = read(link[0], commandOutput_c, sizeof(commandOutput_c))) < 0) 
-      {
-         perror("Read error");
-         close(link[0]);
-         return commandOutput;
-      }
-      close(link[0]);
-      
-      std::string line{};
-      
-      commandOutput_c[rd] = '\0';
-      std::string commandOutputString(commandOutput_c);
-      
-      std::istringstream iss(commandOutputString);
-      
-      while (getline(iss, line)) 
-      {
-         commandOutput.push_back(line);
-      }
-      wait(NULL);
-      return commandOutput;
-   }
 }
 
 inline

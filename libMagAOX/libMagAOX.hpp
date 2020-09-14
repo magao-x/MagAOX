@@ -24,6 +24,8 @@
 #include "app/dev/dm.hpp"
 #include "app/dev/telemeter.hpp"
 
+#include "sys/runCommand.hpp"
+
 #include "common/config.hpp"
 #include "common/defaults.hpp"
 #include "common/environment.hpp"
