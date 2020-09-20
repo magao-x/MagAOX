@@ -10,16 +10,14 @@
 #ifndef sys_runCommand_hpp
 #define sys_runCommand_hpp
 
+#include <unistd.h>
+#include <sys/wait.h>
+
 namespace MagAOX 
 {
 namespace sys 
 {
-
-#include <unistd.h>
-#include <sys/wait.h>
-
    
-
 /// Runs a command (with parameters) passed in using fork/exec
 /** New process is made with fork(), and child runs execvp with command provided.
   * 
