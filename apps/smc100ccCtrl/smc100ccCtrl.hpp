@@ -379,10 +379,14 @@ int smc100ccCtrl::appLogic()
       }
    }
 
+ 
    //If we're here, we can get state from controller...
    std::string axState;
-   getCtrlState(axState); /// \todo error check
-   
+   //mutex scope
+   {
+      std::unique_lock<std::mutex> lock(m_indiMutex);
+      getCtrlState(axState); /// \todo error check
+   }   
    if(axState[0] == '0') 
    {
       std::cerr << "Axis state: " << axState[0] << " " << axState[1] << "\n";
@@ -743,6 +747,7 @@ int smc100ccCtrl::getCtrlState( std::string &state )
    {
       if(m_powerTargetState == 0) return -1;
       log<software_error>({__FILE__, __LINE__,MagAOX::tty::ttyErrorString(rv)});
+      std::cerr << __FILE__ << " " <<  __LINE__ << rv << "\n";
       return -1;
    } 
    
@@ -818,6 +823,8 @@ int smc100ccCtrl::getLastError( std::string& errorString)
    {
       if(m_powerTargetState == 0) return -1;
       log<software_error>({__FILE__, __LINE__});
+      std::cerr << __FILE__ << " " << __LINE__ << " " << rv << "\n";
+
       errorString = MagAOX::tty::ttyErrorString(rv);
       return -1;
    } 
@@ -901,6 +908,7 @@ int smc100ccCtrl::getLastError( std::string& errorString)
             break;
          default:
             errorString = "unknown status";
+            std::cerr << "unkown status: " << status << "\n";
       }
       
       log<software_error>({__FILE__, __LINE__});
