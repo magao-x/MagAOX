@@ -10,15 +10,14 @@
 #ifndef sys_thSetuid_hpp
 #define sys_thSetuid_hpp
 
-namespace MagAOX 
-{
-namespace sys 
-{
-
 #include <unistd.h>
 
 #include <sys/syscall.h>
 
+namespace MagAOX 
+{
+namespace sys 
+{
 
 /// Sets the effective user id of the calling thread, rather than the whole process
 /** Uses the syscall directly so that only the calling thread has modified privileges.

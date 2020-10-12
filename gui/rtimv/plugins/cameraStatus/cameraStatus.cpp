@@ -13,9 +13,7 @@ int cameraStatus::attachOverlay( rtimvGraphicsView* gv,
                                  dictionaryT * dict,
                                  mx::app::appConfigurator & config
                                )
-{
-   std::cerr << "cameraStatus attached -- w config\n";
-   
+{   
    m_gv = gv;
    
    m_dict = dict;
