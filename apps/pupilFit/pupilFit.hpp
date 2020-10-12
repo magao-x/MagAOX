@@ -62,6 +62,7 @@ protected:
    std::string m_wfsrefPath {"/opt/MagAOX/cacao/tweeter/conf"};
    std::string m_wfsrefName {"wfsref0.fits"};
    
+   int m_numPupils {4}; ///< The number of pupils.  Default is 4.  3 is also supported.
    ///@}
 
    mx::improc::eigenImage<float> m_refIm;
@@ -273,6 +274,8 @@ protected:
    pcf::IndiProperty m_indiP_averaging;
    INDI_NEWCALLBACK_DECL(pupilFit, m_indiP_averaging);
    
+   pcf::IndiProperty m_indiP_numPupils;
+   
    pcf::IndiProperty m_indiP_quad1;
    pcf::IndiProperty m_indiP_quad2;
    pcf::IndiProperty m_indiP_quad3;
@@ -317,6 +320,9 @@ void pupilFit::setupConfig()
    config.add("fit.threshShmimName", "", "fit.threshShmimName", argType::Required, "fit", "threshShmimName", false, "float", "The name of the image stream for the thresholded images.  Default is camwfs_thresh.");
    config.add("fit.edgeShmimName", "", "fit.edgeShmimName", argType::Required, "fit", "edgeShmimName", false, "float", "The name of the image stream for the edge images.  Default is camwfs_edge.");
       
+   config.add("fit.numPupils", "", "fit.numPupils", argType::Required, "fit", "numPupils", false, "int", "The number of pupils.  Default is 4.  3 is also supported.");
+   config.add("fit.pupMedIndex", "", "fit.pupMedIndex", argType::Required, "fit", "pupMedIndex", false, "float", "The index of the pupil median in a sorted quadrant.");
+   
    config.add("wfsref.path", "" , "wfsref.path", argType::Required, "wfsref", "path", false, "float", "The path to the WFS reference image.  Default is /opt/MagAOX/cacao/tweeter");
    config.add("wfsref.name", "" , "wfsref.name", argType::Required, "wfsref", "name", false, "float", "The name the WFS reference image. Default is wfsref0.fits");
 }
@@ -331,6 +337,8 @@ int pupilFit::loadConfigImpl( mx::app::appConfigurator & _config )
    _config(m_threshold, "fit.threshold");
    _config(m_threshShmimName, "fit.threshShmimName");
    _config(m_edgeShmimName, "fit.edgeShmimName");
+   _config(m_numPupils, "fit.numPupils");
+   _config(m_fitter.m_pupMedIndex, "fit.pupMedIndex");
    
    _config(m_wfsrefPath, "wfsref.path");
    _config(m_wfsrefName, "wfsref.name");
@@ -365,6 +373,11 @@ int pupilFit::appStartup()
       return -1;
    }
       
+   createROIndiNumber( m_indiP_numPupils, "numPupils", "Number of Pupils");
+   indi::addNumberElement<int>( m_indiP_numPupils, "value", 3, 4, 1, "%d", "");
+   m_indiP_numPupils["value"].set(m_numPupils);
+   registerIndiPropertyReadOnly(m_indiP_numPupils);
+   
    createROIndiNumber( m_indiP_quad1, "quadrant1", "Quadrant 1");
    indi::addNumberElement<float>( m_indiP_quad1, "x", 0, 59, 0, "%0.2f", "center x");
    indi::addNumberElement<float>( m_indiP_quad1, "dx", 0, 59, 0, "%0.2f", "delta-x");
@@ -414,22 +427,25 @@ int pupilFit::appStartup()
    m_indiP_quad3["set-D"] = m_setD3;
    registerIndiPropertyReadOnly(m_indiP_quad3);
    
-   createROIndiNumber( m_indiP_quad4, "quadrant4", "Quadrant 4");
-   indi::addNumberElement<float>( m_indiP_quad4, "x", 0, 59, 0, "%0.2f", "center x");
-   indi::addNumberElement<float>( m_indiP_quad4, "dx", 0, 59, 0, "%0.2f", "delta-x");
-   indi::addNumberElement<float>( m_indiP_quad4, "y", 0, 59, 0, "%0.2f", "center y");
-   indi::addNumberElement<float>( m_indiP_quad4, "dy", 0, 59, 0, "%0.2f", "delta-y");
-   indi::addNumberElement<float>( m_indiP_quad4, "D", 0, 59, 0, "%0.2f", "diameter");
-   indi::addNumberElement<float>( m_indiP_quad4, "dD", 0, 59, 0, "%0.2f", "delta-D");
-   indi::addNumberElement<float>( m_indiP_quad4, "med", 0, std::numeric_limits<uint16_t>::max(), 0, "%0.1f", "flux");
-   indi::addNumberElement<float>( m_indiP_quad4, "set-x", 0, 59, 0, "%0.2f", "set pt. center x");
-   m_indiP_quad4["set-x"] = m_setx4;
-   indi::addNumberElement<float>( m_indiP_quad4, "set-y", 0, 59, 0, "%0.2f", "set pt. center x");
-   m_indiP_quad4["set-y"] = m_sety4;
-   indi::addNumberElement<float>( m_indiP_quad4, "set-D", 0, 59, 0, "%0.2f", "set pt. diameter");
-   m_indiP_quad4["set-D"] = m_setD4;
-   registerIndiPropertyReadOnly(m_indiP_quad4);
-
+   if(m_numPupils != 3)
+   {
+      createROIndiNumber( m_indiP_quad4, "quadrant4", "Quadrant 4");
+      indi::addNumberElement<float>( m_indiP_quad4, "x", 0, 59, 0, "%0.2f", "center x");
+      indi::addNumberElement<float>( m_indiP_quad4, "dx", 0, 59, 0, "%0.2f", "delta-x");
+      indi::addNumberElement<float>( m_indiP_quad4, "y", 0, 59, 0, "%0.2f", "center y");
+      indi::addNumberElement<float>( m_indiP_quad4, "dy", 0, 59, 0, "%0.2f", "delta-y");
+      indi::addNumberElement<float>( m_indiP_quad4, "D", 0, 59, 0, "%0.2f", "diameter");
+      indi::addNumberElement<float>( m_indiP_quad4, "dD", 0, 59, 0, "%0.2f", "delta-D");
+      indi::addNumberElement<float>( m_indiP_quad4, "med", 0, std::numeric_limits<uint16_t>::max(), 0, "%0.1f", "flux");
+      indi::addNumberElement<float>( m_indiP_quad4, "set-x", 0, 59, 0, "%0.2f", "set pt. center x");
+      m_indiP_quad4["set-x"] = m_setx4;
+      indi::addNumberElement<float>( m_indiP_quad4, "set-y", 0, 59, 0, "%0.2f", "set pt. center x");
+      m_indiP_quad4["set-y"] = m_sety4;
+      indi::addNumberElement<float>( m_indiP_quad4, "set-D", 0, 59, 0, "%0.2f", "set pt. diameter");
+      m_indiP_quad4["set-D"] = m_setD4;
+      registerIndiPropertyReadOnly(m_indiP_quad4);
+   }
+   
    createROIndiNumber( m_indiP_avg, "average", "Average");
    indi::addNumberElement<float>( m_indiP_avg, "x", 0, 59, 0, "%0.2f", "center x");
    indi::addNumberElement<float>( m_indiP_avg, "dx", 0, 59, 0, "%0.2f", "delta-x");
@@ -485,6 +501,7 @@ int pupilFit::allocate(const dev::shmimT & dummy)
    m_fitIm.resize(m_width, m_height);
    m_edgeIm.resize(m_width, m_height);
    
+   m_fitter.m_numPupils = m_numPupils;
    m_fitter.setSize(0.5*m_width, 0.5*m_height);
    m_fitter.m_thresh = m_threshold;
    
@@ -498,59 +515,76 @@ int pupilFit::allocate(const dev::shmimT & dummy)
    
    if(m_useRefIm)
    {
-   if(m_refIm.rows() == m_width && m_refIm.cols() == m_height)
-   {
-      if(m_fitter.fit(m_refIm, refedge) < 0)
+      if(m_refIm.rows() == m_width && m_refIm.cols() == m_height)
       {
-         log<software_error>({__FILE__, __LINE__, "error from fitter"});
+         if(m_fitter.fit(m_refIm, refedge) < 0)
+         {
+            log<software_error>({__FILE__, __LINE__, "error from fitter"});
+         }
+         else
+         {
+            m_setx1 = m_fitter.m_avgx[0];
+            m_sety1 = m_fitter.m_avgy[0];
+            m_setD1 = 2*m_fitter.m_avgr[0];
+            
+            m_setx2 = m_fitter.m_avgx[1];
+            m_sety2 = m_fitter.m_avgy[1];
+            m_setD2 = 2*m_fitter.m_avgr[1];
+            
+            m_setx3 = m_fitter.m_avgx[2];
+            m_sety3 = m_fitter.m_avgy[2];
+            m_setD3 = 2*m_fitter.m_avgr[2];
+            
+            m_setx4 = m_fitter.m_avgx[3];
+            m_sety4 = m_fitter.m_avgy[3];
+            m_setD4 = 2*m_fitter.m_avgr[3];
+            
+            log<text_log>("Read reference image: " + reffits);
+            log<text_log>("Quad 1 set points: " + std::to_string(m_setx1) + " " +  std::to_string(m_sety1) + " " + std::to_string(m_setD1));
+            log<text_log>("Quad 2 set points: " + std::to_string(m_setx2) + " " +  std::to_string(m_sety2) + " " + std::to_string(m_setD2));
+            log<text_log>("Quad 3 set points: " + std::to_string(m_setx3) + " " +  std::to_string(m_sety3) + " " + std::to_string(m_setD3));
+            log<text_log>("Quad 4 set points: " + std::to_string(m_setx4) + " " +  std::to_string(m_sety4) + " " + std::to_string(m_setD4));
+         }
       }
       else
       {
-         m_setx1 = m_fitter.m_avgx[0];
-         m_sety1 = m_fitter.m_avgy[0];
-         m_setD1 = 2*m_fitter.m_avgr[0];
-         
-         m_setx2 = m_fitter.m_avgx[1];
-         m_sety2 = m_fitter.m_avgy[1];
-         m_setD2 = 2*m_fitter.m_avgr[1];
-         
-         m_setx3 = m_fitter.m_avgx[2];
-         m_sety3 = m_fitter.m_avgy[2];
-         m_setD3 = 2*m_fitter.m_avgr[2];
-         
-         m_setx4 = m_fitter.m_avgx[3];
-         m_sety4 = m_fitter.m_avgy[3];
-         m_setD4 = 2*m_fitter.m_avgr[3];
-         
-         log<text_log>("Read reference image: " + reffits);
-         log<text_log>("Quad 1 set points: " + std::to_string(m_setx1) + " " +  std::to_string(m_sety1) + " " + std::to_string(m_setD1));
-         log<text_log>("Quad 2 set points: " + std::to_string(m_setx2) + " " +  std::to_string(m_sety2) + " " + std::to_string(m_setD2));
-         log<text_log>("Quad 3 set points: " + std::to_string(m_setx3) + " " +  std::to_string(m_sety3) + " " + std::to_string(m_setD3));
-         log<text_log>("Quad 4 set points: " + std::to_string(m_setx4) + " " +  std::to_string(m_sety4) + " " + std::to_string(m_setD4));
+         log<text_log>("Reference image " + reffits + " size does not match shmim stream.", logPrio::LOG_ERROR);
       }
    }
    else
    {
-      log<text_log>("Reference image " + reffits + " size does not match shmim stream.", logPrio::LOG_ERROR);
-   }
-   }
-   else
-   {
-      m_setx1 = 29.5;
-      m_sety1 = 29.5;
-      m_setD1 = 56.0;
-      
-      m_setx2 = 89.5;
-      m_sety2 = 29.5;
-      m_setD2 = 56.0;
-      
-      m_setx3 = 29.5;
-      m_sety3 = 89.5;
-      m_setD3 = 56.0;
-      
-      m_setx4 = 89.5;
-      m_sety4 = 89.5;
-      m_setD4 = 56.0;
+      if(m_numPupils == 4)
+      {
+         m_setx1 = 29.5;
+         m_sety1 = 29.5;
+         m_setD1 = 56.0;
+         
+         m_setx2 = 89.5;
+         m_sety2 = 29.5;
+         m_setD2 = 56.0;
+         
+         m_setx3 = 29.5;
+         m_sety3 = 89.5;
+         m_setD3 = 56.0;
+         
+         m_setx4 = 89.5;
+         m_sety4 = 89.5;
+         m_setD4 = 56.0;
+      }
+      else
+      {
+         m_setx1 = 30.0;
+         m_sety1 = 38.0;
+         m_setD1 = 14.0;
+         
+         m_setx2 = 96.0;
+         m_sety2 = 38.0;
+         m_setD2 = 14.0;
+         
+         m_setx3 = 65.0;
+         m_sety3 = 95.0;
+         m_setD3 = 14.0;
+      }
    }
    
    
@@ -599,7 +633,7 @@ int pupilFit::processImage( void* curr_src,
    }
    
    ///\todo need a more robust corner averaging system here.
-   m_fitIm -= 0.25*( m_fitIm(0,0) + m_fitIm(0,119) + m_fitIm(119,119) + m_fitIm(119,0));
+   m_fitIm -= 0.25*( m_fitIm(0,0) + m_fitIm(0,m_height-1) + m_fitIm(m_width-1,m_height-1) + m_fitIm(m_width-1,0));
    
    m_fitter.m_thresh = m_threshold;
    
@@ -647,28 +681,41 @@ int pupilFit::processImage( void* curr_src,
       m_indiP_quad3.setState (INDI_BUSY);
       m_indiDriver->sendSetProperty (m_indiP_quad3);
    
-      m_indiP_quad4["set-x"].set(m_setx4);
-      m_indiP_quad4["x"].set(m_fitter.m_avgx[3]);
-      m_indiP_quad4["dx"].set(m_fitter.m_avgx[3]-m_setx4);
-      m_indiP_quad4["set-y"].set(m_sety4);
-      m_indiP_quad4["y"].set(m_fitter.m_avgy[3]);
-      m_indiP_quad4["dy"].set(m_fitter.m_avgy[3]-m_sety4);
-      m_indiP_quad4["set-D"].set(m_setD4);
-      m_indiP_quad4["D"].set(2*m_fitter.m_avgr[3]);
-      m_indiP_quad4["dD"].set(2*m_fitter.m_avgr[3]-m_setD4);
-      m_indiP_quad4["med"].set(m_fitter.m_med[3]);
-      m_indiP_quad4.setState (INDI_BUSY);
-      m_indiDriver->sendSetProperty (m_indiP_quad4);
-      
-      m_indiP_avg["x"].set(.25*(m_fitter.m_avgx[0] + m_fitter.m_avgx[1] + m_fitter.m_avgx[2] + m_fitter.m_avgx[3]));
-      m_indiP_avg["y"].set(.25*(m_fitter.m_avgy[0] + m_fitter.m_avgy[1] + m_fitter.m_avgy[2] + m_fitter.m_avgy[3]));
-      m_indiP_avg["D"].set(.5*(m_fitter.m_avgr[0] + m_fitter.m_avgr[1] + m_fitter.m_avgr[2] + m_fitter.m_avgr[3]));
-      
-      m_indiP_avg["dx"].set(.25*(m_fitter.m_avgx[0] + m_fitter.m_avgx[1] + m_fitter.m_avgx[2] + m_fitter.m_avgx[3]) - 0.25*(m_setx1 + m_setx2 + m_setx3 + m_setx4));
-      m_indiP_avg["dy"].set(.25*(m_fitter.m_avgy[0] + m_fitter.m_avgy[1] + m_fitter.m_avgy[2] + m_fitter.m_avgy[3]) - 0.25*(m_sety1 + m_sety2 + m_sety3 + m_sety4));
-      m_indiP_avg["dD"].set(.5*(m_fitter.m_avgr[0] + m_fitter.m_avgr[1] + m_fitter.m_avgr[2] + m_fitter.m_avgr[3]) - 0.25*(m_setD1 + m_setD2 + m_setD3 + m_setD4));
-      
-      m_indiDriver->sendSetProperty (m_indiP_avg);
+      if(m_numPupils == 3)
+      {
+         m_indiP_avg["x"].set(.333*(m_fitter.m_avgx[0] + m_fitter.m_avgx[1] + m_fitter.m_avgx[2]));
+         m_indiP_avg["y"].set(.333*(m_fitter.m_avgy[0] + m_fitter.m_avgy[1] + m_fitter.m_avgy[2]));
+         m_indiP_avg["D"].set(.667*(m_fitter.m_avgr[0] + m_fitter.m_avgr[1] + m_fitter.m_avgr[2]));
+         
+         m_indiP_avg["dx"].set(.333*(m_fitter.m_avgx[0] + m_fitter.m_avgx[1] + m_fitter.m_avgx[2]) - 0.333*(m_setx1 + m_setx2 + m_setx3));
+         m_indiP_avg["dy"].set(.333*(m_fitter.m_avgy[0] + m_fitter.m_avgy[1] + m_fitter.m_avgy[2]) - 0.333*(m_sety1 + m_sety2 + m_sety3));
+         m_indiP_avg["dD"].set(.667*(m_fitter.m_avgr[0] + m_fitter.m_avgr[1] + m_fitter.m_avgr[2]) - 0.333*(m_setD1 + m_setD2 + m_setD3));
+      }
+      else
+      {
+         m_indiP_quad4["set-x"].set(m_setx4);
+         m_indiP_quad4["x"].set(m_fitter.m_avgx[3]);
+         m_indiP_quad4["dx"].set(m_fitter.m_avgx[3]-m_setx4);
+         m_indiP_quad4["set-y"].set(m_sety4);
+         m_indiP_quad4["y"].set(m_fitter.m_avgy[3]);
+         m_indiP_quad4["dy"].set(m_fitter.m_avgy[3]-m_sety4);
+         m_indiP_quad4["set-D"].set(m_setD4);
+         m_indiP_quad4["D"].set(2*m_fitter.m_avgr[3]);
+         m_indiP_quad4["dD"].set(2*m_fitter.m_avgr[3]-m_setD4);
+         m_indiP_quad4["med"].set(m_fitter.m_med[3]);
+         m_indiP_quad4.setState (INDI_BUSY);
+         m_indiDriver->sendSetProperty (m_indiP_quad4);
+         
+         m_indiP_avg["x"].set(.25*(m_fitter.m_avgx[0] + m_fitter.m_avgx[1] + m_fitter.m_avgx[2] + m_fitter.m_avgx[3]));
+         m_indiP_avg["y"].set(.25*(m_fitter.m_avgy[0] + m_fitter.m_avgy[1] + m_fitter.m_avgy[2] + m_fitter.m_avgy[3]));
+         m_indiP_avg["D"].set(.5*(m_fitter.m_avgr[0] + m_fitter.m_avgr[1] + m_fitter.m_avgr[2] + m_fitter.m_avgr[3]));
+         
+         m_indiP_avg["dx"].set(.25*(m_fitter.m_avgx[0] + m_fitter.m_avgx[1] + m_fitter.m_avgx[2] + m_fitter.m_avgx[3]) - 0.25*(m_setx1 + m_setx2 + m_setx3 + m_setx4));
+         m_indiP_avg["dy"].set(.25*(m_fitter.m_avgy[0] + m_fitter.m_avgy[1] + m_fitter.m_avgy[2] + m_fitter.m_avgy[3]) - 0.25*(m_sety1 + m_sety2 + m_sety3 + m_sety4));
+         m_indiP_avg["dD"].set(.5*(m_fitter.m_avgr[0] + m_fitter.m_avgr[1] + m_fitter.m_avgr[2] + m_fitter.m_avgr[3]) - 0.25*(m_setD1 + m_setD2 + m_setD3 + m_setD4));
+         m_indiDriver->sendSetProperty (m_indiP_avg);
+         
+      }
       
    }
    
@@ -751,83 +798,135 @@ int pupilFit::processImage( void* curr_src,
       m_avgmed3 = m_avgmed3_accum / m_navg;
       m_varmed3 = m_avgmed3sq_accum / m_navg - m_avgmed3*m_avgmed3;
       
-      
-      m_avgx4_accum += m_fitter.m_avgx[3];
-      m_avgx4sq_accum += m_fitter.m_avgx[3]*m_fitter.m_avgx[3];
-      
-      m_avgy4_accum += m_fitter.m_avgy[3];
-      m_avgy4sq_accum += m_fitter.m_avgy[3]*m_fitter.m_avgy[3];
-      
-      m_avgD4_accum += 2*m_fitter.m_avgr[3];
-      m_avgD4sq_accum += 4*m_fitter.m_avgr[3]*m_fitter.m_avgr[3];
-      
-      m_avgmed4_accum += m_fitter.m_med[3];
-      m_avgmed4sq_accum += m_fitter.m_med[3]*m_fitter.m_med[3];
-      
-      m_avgx4 = m_avgx4_accum / m_navg;
-      m_varx4 = m_avgx4sq_accum / m_navg - m_avgx4*m_avgx4;
-      
-      m_avgy4 = m_avgy4_accum / m_navg;
-      m_vary4 = m_avgy4sq_accum / m_navg - m_avgy4*m_avgy4;
-      
-      m_avgD4 = m_avgD4_accum / m_navg;
-      m_varD4 = m_avgD4sq_accum / m_navg - m_avgD4*m_avgD4;
-      
-      m_avgmed4 = m_avgmed4_accum / m_navg;
-      m_varmed4 = m_avgmed4sq_accum / m_navg - m_avgmed4*m_avgmed4;
-      
-      
-      double tmp = 0.25*(m_fitter.m_avgx[0]+m_fitter.m_avgx[1]+m_fitter.m_avgx[2]+m_fitter.m_avgx[3]);
-      m_avgxAll_accum += tmp;
-      m_avgxAllsq_accum += tmp*tmp;
-      
-      tmp = 0.25*(m_fitter.m_avgy[0]+m_fitter.m_avgy[1]+m_fitter.m_avgy[2]+m_fitter.m_avgy[3]);
-      m_avgyAll_accum += tmp;
-      m_avgyAllsq_accum += tmp*tmp;
-      
-      tmp = 2*0.25*(m_fitter.m_avgr[0]+m_fitter.m_avgr[1]+m_fitter.m_avgr[2]+m_fitter.m_avgr[3]);
-      m_avgDAll_accum += tmp;
-      m_avgDAllsq_accum += tmp*tmp;
-      
-      tmp = 0.25*(m_fitter.m_med[0]+m_fitter.m_med[1]+m_fitter.m_med[2]+m_fitter.m_med[3]);
-      m_avgmedAll_accum += tmp;
-      m_avgmedAllsq_accum += tmp*tmp;
-      
-      m_avgxAll = m_avgxAll_accum / m_navg;
-      m_varxAll = m_avgxAllsq_accum / m_navg - m_avgxAll*m_avgxAll;
-      
-      m_avgyAll = m_avgyAll_accum / m_navg;
-      m_varyAll = m_avgyAllsq_accum / m_navg - m_avgyAll*m_avgyAll;
-      
-      m_avgDAll = m_avgDAll_accum / m_navg;
-      m_varDAll = m_avgDAllsq_accum / m_navg - m_avgDAll*m_avgDAll;
-      
-      m_avgmedAll = m_avgmedAll_accum / m_navg;
-      m_varmedAll = m_avgmedAllsq_accum / m_navg - m_avgmedAll*m_avgmedAll;
-      
-      
-      std::cerr << "****************************************************************\n";
-      std::cerr << "Averaged: " << m_navg << "\n";
-      std::cerr << "Average x1: " << m_avgx1 << " +/- " << sqrt(m_varx1) << "\n";
-      std::cerr << "Average y1: " << m_avgy1 << " +/- " << sqrt(m_vary1) << "\n";
-      std::cerr << "Average D1: " << m_avgD1 << " +/- " << sqrt(m_varD1) << "\n";
-      std::cerr << "Average med1: " << m_avgmed1 << " +/- " << sqrt(m_varmed1) << "\n\n";
-      std::cerr << "Average x2: " << m_avgx2 << " +/- " << sqrt(m_varx2) << "\n";
-      std::cerr << "Average y2: " << m_avgy2 << " +/- " << sqrt(m_vary2) << "\n";
-      std::cerr << "Average D2: " << m_avgD2 << " +/- " << sqrt(m_varD2) << "\n";
-      std::cerr << "Average med2: " << m_avgmed2 << " +/- " << sqrt(m_varmed2) << "\n\n";
-      std::cerr << "Average x3: " << m_avgx3 << " +/- " << sqrt(m_varx3) << "\n";
-      std::cerr << "Average y3: " << m_avgy3 << " +/- " << sqrt(m_vary3) << "\n";
-      std::cerr << "Average D3: " << m_avgD3 << " +/- " << sqrt(m_varD3) << "\n";
-      std::cerr << "Average med3: " << m_avgmed3 << " +/- " << sqrt(m_varmed3) << "\n\n";
-      std::cerr << "Average x4: " << m_avgx4 << " +/- " << sqrt(m_varx4) << "\n";
-      std::cerr << "Average y4: " << m_avgy4 << " +/- " << sqrt(m_vary4) << "\n";
-      std::cerr << "Average D4: " << m_avgD4 << " +/- " << sqrt(m_varD4) << "\n";
-      std::cerr << "Average med4: " << m_avgmed4 << " +/- " << sqrt(m_varmed4) << "\n\n";
-      std::cerr << "Average xAll: " << m_avgxAll << " +/- " << sqrt(m_varxAll) << "\n";
-      std::cerr << "Average yAll: " << m_avgyAll << " +/- " << sqrt(m_varyAll) << "\n";
-      std::cerr << "Average DAll: " << m_avgDAll << " +/- " << sqrt(m_varDAll) << "\n";
-      std::cerr << "Average medAll: " << m_avgmedAll << " +/- " << sqrt(m_varmedAll) << "\n\n";
+      if(m_numPupils == 3)
+      {
+         double tmp = 0.333*(m_fitter.m_avgx[0]+m_fitter.m_avgx[1]+m_fitter.m_avgx[2]+m_fitter.m_avgx[3]);
+         m_avgxAll_accum += tmp;
+         m_avgxAllsq_accum += tmp*tmp;
+         
+         tmp = 0.333*(m_fitter.m_avgy[0]+m_fitter.m_avgy[1]+m_fitter.m_avgy[2]);
+         m_avgyAll_accum += tmp;
+         m_avgyAllsq_accum += tmp*tmp;
+         
+         tmp = 2*0.333*(m_fitter.m_avgr[0]+m_fitter.m_avgr[1]+m_fitter.m_avgr[2]);
+         m_avgDAll_accum += tmp;
+         m_avgDAllsq_accum += tmp*tmp;
+         
+         tmp = 0.333*(m_fitter.m_med[0]+m_fitter.m_med[1]+m_fitter.m_med[2]);
+         m_avgmedAll_accum += tmp;
+         m_avgmedAllsq_accum += tmp*tmp;
+         
+         m_avgxAll = m_avgxAll_accum / m_navg;
+         m_varxAll = m_avgxAllsq_accum / m_navg - m_avgxAll*m_avgxAll;
+         
+         m_avgyAll = m_avgyAll_accum / m_navg;
+         m_varyAll = m_avgyAllsq_accum / m_navg - m_avgyAll*m_avgyAll;
+         
+         m_avgDAll = m_avgDAll_accum / m_navg;
+         m_varDAll = m_avgDAllsq_accum / m_navg - m_avgDAll*m_avgDAll;
+         
+         m_avgmedAll = m_avgmedAll_accum / m_navg;
+         m_varmedAll = m_avgmedAllsq_accum / m_navg - m_avgmedAll*m_avgmedAll;
+         
+         
+         std::cerr << "****************************************************************\n";
+         std::cerr << "Averaged: " << m_navg << "\n";
+         std::cerr << "Average x1: " << m_avgx1 << " +/- " << sqrt(m_varx1) << "\n";
+         std::cerr << "Average y1: " << m_avgy1 << " +/- " << sqrt(m_vary1) << "\n";
+         std::cerr << "Average D1: " << m_avgD1 << " +/- " << sqrt(m_varD1) << "\n";
+         std::cerr << "Average med1: " << m_avgmed1 << " +/- " << sqrt(m_varmed1) << "\n\n";
+         std::cerr << "Average x2: " << m_avgx2 << " +/- " << sqrt(m_varx2) << "\n";
+         std::cerr << "Average y2: " << m_avgy2 << " +/- " << sqrt(m_vary2) << "\n";
+         std::cerr << "Average D2: " << m_avgD2 << " +/- " << sqrt(m_varD2) << "\n";
+         std::cerr << "Average med2: " << m_avgmed2 << " +/- " << sqrt(m_varmed2) << "\n\n";
+         std::cerr << "Average x3: " << m_avgx3 << " +/- " << sqrt(m_varx3) << "\n";
+         std::cerr << "Average y3: " << m_avgy3 << " +/- " << sqrt(m_vary3) << "\n";
+         std::cerr << "Average D3: " << m_avgD3 << " +/- " << sqrt(m_varD3) << "\n";
+         std::cerr << "Average med3: " << m_avgmed3 << " +/- " << sqrt(m_varmed3) << "\n\n";
+         std::cerr << "Average xAll: " << m_avgxAll << " +/- " << sqrt(m_varxAll) << "\n";
+         std::cerr << "Average yAll: " << m_avgyAll << " +/- " << sqrt(m_varyAll) << "\n";
+         std::cerr << "Average DAll: " << m_avgDAll << " +/- " << sqrt(m_varDAll) << "\n";
+         std::cerr << "Average medAll: " << m_avgmedAll << " +/- " << sqrt(m_varmedAll) << "\n\n";
+      }
+      else
+      {
+         m_avgx4_accum += m_fitter.m_avgx[3];
+         m_avgx4sq_accum += m_fitter.m_avgx[3]*m_fitter.m_avgx[3];
+         
+         m_avgy4_accum += m_fitter.m_avgy[3];
+         m_avgy4sq_accum += m_fitter.m_avgy[3]*m_fitter.m_avgy[3];
+         
+         m_avgD4_accum += 2*m_fitter.m_avgr[3];
+         m_avgD4sq_accum += 4*m_fitter.m_avgr[3]*m_fitter.m_avgr[3];
+         
+         m_avgmed4_accum += m_fitter.m_med[3];
+         m_avgmed4sq_accum += m_fitter.m_med[3]*m_fitter.m_med[3];
+         
+         m_avgx4 = m_avgx4_accum / m_navg;
+         m_varx4 = m_avgx4sq_accum / m_navg - m_avgx4*m_avgx4;
+         
+         m_avgy4 = m_avgy4_accum / m_navg;
+         m_vary4 = m_avgy4sq_accum / m_navg - m_avgy4*m_avgy4;
+         
+         m_avgD4 = m_avgD4_accum / m_navg;
+         m_varD4 = m_avgD4sq_accum / m_navg - m_avgD4*m_avgD4;
+         
+         m_avgmed4 = m_avgmed4_accum / m_navg;
+         m_varmed4 = m_avgmed4sq_accum / m_navg - m_avgmed4*m_avgmed4;
+         
+         
+         double tmp = 0.25*(m_fitter.m_avgx[0]+m_fitter.m_avgx[1]+m_fitter.m_avgx[2]+m_fitter.m_avgx[3]);
+         m_avgxAll_accum += tmp;
+         m_avgxAllsq_accum += tmp*tmp;
+         
+         tmp = 0.25*(m_fitter.m_avgy[0]+m_fitter.m_avgy[1]+m_fitter.m_avgy[2]+m_fitter.m_avgy[3]);
+         m_avgyAll_accum += tmp;
+         m_avgyAllsq_accum += tmp*tmp;
+         
+         tmp = 2*0.25*(m_fitter.m_avgr[0]+m_fitter.m_avgr[1]+m_fitter.m_avgr[2]+m_fitter.m_avgr[3]);
+         m_avgDAll_accum += tmp;
+         m_avgDAllsq_accum += tmp*tmp;
+         
+         tmp = 0.25*(m_fitter.m_med[0]+m_fitter.m_med[1]+m_fitter.m_med[2]+m_fitter.m_med[3]);
+         m_avgmedAll_accum += tmp;
+         m_avgmedAllsq_accum += tmp*tmp;
+         
+         m_avgxAll = m_avgxAll_accum / m_navg;
+         m_varxAll = m_avgxAllsq_accum / m_navg - m_avgxAll*m_avgxAll;
+         
+         m_avgyAll = m_avgyAll_accum / m_navg;
+         m_varyAll = m_avgyAllsq_accum / m_navg - m_avgyAll*m_avgyAll;
+         
+         m_avgDAll = m_avgDAll_accum / m_navg;
+         m_varDAll = m_avgDAllsq_accum / m_navg - m_avgDAll*m_avgDAll;
+         
+         m_avgmedAll = m_avgmedAll_accum / m_navg;
+         m_varmedAll = m_avgmedAllsq_accum / m_navg - m_avgmedAll*m_avgmedAll;
+         
+         
+         std::cerr << "****************************************************************\n";
+         std::cerr << "Averaged: " << m_navg << "\n";
+         std::cerr << "Average x1: " << m_avgx1 << " +/- " << sqrt(m_varx1) << "\n";
+         std::cerr << "Average y1: " << m_avgy1 << " +/- " << sqrt(m_vary1) << "\n";
+         std::cerr << "Average D1: " << m_avgD1 << " +/- " << sqrt(m_varD1) << "\n";
+         std::cerr << "Average med1: " << m_avgmed1 << " +/- " << sqrt(m_varmed1) << "\n\n";
+         std::cerr << "Average x2: " << m_avgx2 << " +/- " << sqrt(m_varx2) << "\n";
+         std::cerr << "Average y2: " << m_avgy2 << " +/- " << sqrt(m_vary2) << "\n";
+         std::cerr << "Average D2: " << m_avgD2 << " +/- " << sqrt(m_varD2) << "\n";
+         std::cerr << "Average med2: " << m_avgmed2 << " +/- " << sqrt(m_varmed2) << "\n\n";
+         std::cerr << "Average x3: " << m_avgx3 << " +/- " << sqrt(m_varx3) << "\n";
+         std::cerr << "Average y3: " << m_avgy3 << " +/- " << sqrt(m_vary3) << "\n";
+         std::cerr << "Average D3: " << m_avgD3 << " +/- " << sqrt(m_varD3) << "\n";
+         std::cerr << "Average med3: " << m_avgmed3 << " +/- " << sqrt(m_varmed3) << "\n\n";
+         std::cerr << "Average x4: " << m_avgx4 << " +/- " << sqrt(m_varx4) << "\n";
+         std::cerr << "Average y4: " << m_avgy4 << " +/- " << sqrt(m_vary4) << "\n";
+         std::cerr << "Average D4: " << m_avgD4 << " +/- " << sqrt(m_varD4) << "\n";
+         std::cerr << "Average med4: " << m_avgmed4 << " +/- " << sqrt(m_varmed4) << "\n\n";
+         std::cerr << "Average xAll: " << m_avgxAll << " +/- " << sqrt(m_varxAll) << "\n";
+         std::cerr << "Average yAll: " << m_avgyAll << " +/- " << sqrt(m_varyAll) << "\n";
+         std::cerr << "Average DAll: " << m_avgDAll << " +/- " << sqrt(m_varDAll) << "\n";
+         std::cerr << "Average medAll: " << m_avgmedAll << " +/- " << sqrt(m_varmedAll) << "\n\n";
+      }
    }
    
    m_threshShmim.md->write=1;

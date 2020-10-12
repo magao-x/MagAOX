@@ -37,6 +37,8 @@ class pwfsAlignment : public QObject,
       double m_4y {0};
       double m_4D {0};
       
+      QGraphicsScene * qgs;
+      
       QGraphicsLineItem * m_1to2 {nullptr};
       QGraphicsLineItem * m_1to3 {nullptr};
       QGraphicsLineItem * m_3to4 {nullptr};
@@ -56,6 +58,11 @@ class pwfsAlignment : public QObject,
       QGraphicsEllipseItem * m_c2s {nullptr};
       QGraphicsEllipseItem * m_c3s {nullptr};
       QGraphicsEllipseItem * m_c4s {nullptr};
+      
+      std::string m_deviceName;
+      int m_numPupils {0};
+      int m_width {0};
+      int m_height {0};
       
    public:
       pwfsAlignment();
