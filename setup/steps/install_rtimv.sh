@@ -8,6 +8,5 @@ reponame=rtimv
 parentdir=/opt/MagAOX/source
 clone_or_update_and_cd $orgname $reponame $parentdir
 git checkout $RTIMV_COMMIT_ISH
-set +u; conda activate py37; set -u
 make
 sudo make install
