@@ -68,13 +68,14 @@ fi
 
 #
 # install Jupyter Lab extensions for matplotlib interaction
+# (note: this was killing CI builds while working in VM so I added || true)
 #
 for envname in py37 dev; do
 	set +u; conda activate $envname; set -u
 	log_info "Installing lab extension @jupyter-widgets/jupyterlab-manager in $envname: jupyter labextension install @jupyter-widgets/jupyterlab-manager --minimize=False"
-	jupyter labextension install @jupyter-widgets/jupyterlab-manager --minimize=False &> /dev/null || exit 1
+	jupyter labextension install @jupyter-widgets/jupyterlab-manager --minimize=False &> /dev/null || true
 	log_info "Installing lab extension jupyter-matplotlib in $envname: jupyter labextension install jupyter-matplotlib --minimize=False"
-	jupyter labextension install jupyter-matplotlib --minimize=False &> /dev/null || exit 1
+	jupyter labextension install jupyter-matplotlib --minimize=False &> /dev/null || true
 done
 log_success "installed jupyterlab extensions in envs py37 and dev"
 
