@@ -9,25 +9,9 @@ source $DIR/../_common.sh
 set -euo pipefail
 
 #
-# Create the standard MagAOX user python environment
+# Install the standard MagAOX user python environment
 #
-ENVS=$(conda env list)
-if [[ $ENVS != */opt/miniconda3/envs/py37* ]]; then
-	conda env create -qf /opt/MagAOX/config/conda_env_py37.yml
-	log_success "created conda env py37"
-else
-	log_info "py37 environment already exists"
-fi
-
-#
-# Clone to create a development environment
-#
-if [[ $ENVS != */opt/miniconda3/envs/dev* ]]; then
-	conda create -q --name dev --clone py37
-	log_success "created conda env dev from env py37"
-else
-	log_info "dev environment already exists"
-fi
+conda env update -qf /opt/MagAOX/config/conda_env_pinned.yml
 
 #
 # Set up auto-starting xsup Jupyter Notebook instance
@@ -43,10 +27,10 @@ NOTEBOOK_CONFIG_PATH=/opt/MagAOX/config/jupyter_notebook_config.py
 # when jupyter tries to start, so we make a copy within the VM's local
 # storage.
 if [[ $MAGAOX_ROLE == vm ]]; then
-	cp $NOTEBOOK_CONFIG_PATH /opt/miniconda3/envs/py37/etc/jupyter_notebook_config.py
-	NOTEBOOK_CONFIG_PATH=/opt/miniconda3/envs/py37/etc/jupyter_notebook_config.py
+	cp $NOTEBOOK_CONFIG_PATH /opt/miniconda3/etc/jupyter_notebook_config.py
+	NOTEBOOK_CONFIG_PATH=/opt/miniconda3/etc/jupyter_notebook_config.py
 fi
-JUPYTER_SCRIPT=/opt/miniconda3/envs/py37/bin/start_notebook.sh
+JUPYTER_SCRIPT=/opt/miniconda3/bin/start_notebook.sh
 sudo tee $JUPYTER_SCRIPT >/dev/null <<HERE
 #!/bin/bash
 source /etc/profile
@@ -56,10 +40,8 @@ chmod +x $JUPYTER_SCRIPT
 UNIT_PATH=/etc/systemd/system/
 
 # clean up old files if they exist
-if [[ -e /opt/miniconda3/envs/py37/bin/start_jupyterlab.sh ]]; then
-	rm /opt/miniconda3/envs/py37/bin/start_jupyterlab.sh
-fi
 if [[ -e $UNIT_PATH/jupyterlab.service ]]; then
+    systemctl stop jupyterlab || true
 	rm $UNIT_PATH/jupyterlab.service
 fi
 
@@ -73,7 +55,7 @@ if [[ $MAGAOX_ROLE != ci ]]; then
 	fi
 	systemctl daemon-reload
 	systemctl enable jupyternotebook
-	log_success "Enabled jupyter notebook service"
+	log_success "Enabled jupyternotebook service"
 	systemctl start jupyternotebook
-	log_success "Started jupyter notebook service"
+	log_success "Started jupyternotebook service"
 fi
