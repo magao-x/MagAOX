@@ -10,9 +10,6 @@ parentdir=/opt/MagAOX/source
 clone_or_update_and_cd $orgname $reponame $parentdir
 git checkout $IMAGESTREAMIO_COMMIT_ISH
 
-for envname in py37 dev; do
-    set +u; conda activate $envname; set -u
-    cd $parentdir/$reponame
-    python setup.py install
-    python -c 'import ImageStreamIOWrap'
-done
+cd $parentdir/$reponame
+python setup.py install
+python -c 'import ImageStreamIOWrap'

@@ -10,15 +10,9 @@ if [[ $MAGAOX_ROLE == AOC || $MAGAOX_ROLE == vm || $MAGAOX_ROLE == ci ]]; then
     parentdir=/opt/MagAOX/source
     clone_or_update_and_cd $orgname $reponame $parentdir
     git checkout $SUP_COMMIT_ISH
-
-    for envname in py37 dev; do
-        conda activate $envname
-        cd $parentdir/$reponame
-        conda install -y nodejs yarn
-        make  # installs Python module in editable mode, builds all js
-        cd
-        python -c 'import sup'  # verify sup is on PYTHONPATH
-    done
+    make  # installs Python module in editable mode, builds all js (needs node/yarn)
+    cd
+    python -c 'import sup'  # verify sup is on PYTHONPATH
     UNIT_PATH=/etc/systemd/system/
     sudo cp /opt/MagAOX/config/sup.service $UNIT_PATH/sup.service
     OVERRIDE_PATH=$UNIT_PATH/sup.service.d/
