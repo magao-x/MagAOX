@@ -86,6 +86,7 @@ function clone_or_update_and_cd() {
     # and re-enable.
 
     if [[ $MAGAOX_ROLE == vm && "$VM_WINDOWS_HOST" == 0 ]]; then
+        mkdir -p $destdir
         link_if_necessary /vagrant/vm/$reponame $destdir
     fi
     if [[ ! -d $parentdir/$reponame/.git ]]; then
