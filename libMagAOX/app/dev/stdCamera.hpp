@@ -140,6 +140,13 @@ protected:
    
    float m_startupTemp {-999}; ///< The temperature to set after a power-on.  Set to <= -999 to not use [default].
    
+   float m_startup_x {0};   ///< Power-on ROI center x coordinate.
+   float m_startup_y {0};   ///< Power-on ROI center y coordinate.
+   int m_startup_w {0};     ///< Power-on ROI width.
+   int m_startup_h {0};     ///< Power-on ROI height.
+   int m_startup_bin_x {1}; ///< Power-on ROI x binning. 
+   int m_startup_bin_y {1}; ///< Power-on ROI y binning.
+      
    ///@}
    
    /** \name Temperature Control Interface 
@@ -553,6 +560,16 @@ void stdCamera<derivedT>::setupConfig(mx::app::appConfigurator & config)
    {
       config.add("camera.startupMode", "", "camera.startupMode", argType::Required, "camera", "startupMode", false, "string", "The mode to set upon power on or application startup.");
    }
+   
+   if(m_usesROI)
+   {
+      config.add("camera.startup_x", "", "camera.startup_x", argType::Required, "camera", "startup_x", false, "float", "The default ROI x position.");
+      config.add("camera.startup_y", "", "camera.startup_y", argType::Required, "camera", "startup_y", false, "float", "The default ROI y position.");
+      config.add("camera.startup_w", "", "camera.startup_w", argType::Required, "camera", "startup_w", false, "int", "The default ROI width.");
+      config.add("camera.startup_h", "", "camera.startup_h", argType::Required, "camera", "startup_h", false, "int", "The default ROI height.");
+      config.add("camera.startup_bin_x", "", "camera.startup_bin_x", argType::Required, "camera", "startup_bin_x", false, "int", "The default ROI x binning.");
+      config.add("camera.startup_bin_y", "", "camera.startup_bin_y", argType::Required, "camera", "startup_bin_y", false, "int", "The default ROI y binning.");
+   }
 }
 
 template<class derivedT>
@@ -579,6 +596,15 @@ void stdCamera<derivedT>::loadConfig(mx::app::appConfigurator & config)
       
    }
    
+   if(m_usesROI)
+   {
+      config(m_startup_x, "camera.startup_x");
+      config(m_startup_y, "camera.startup_y");
+      config(m_startup_w, "camera.startup_w");
+      config(m_startup_h, "camera.startup_h");
+      config(m_startup_bin_x, "camera.startup_bin_x");
+      config(m_startup_bin_y, "camera.startup_bin_y");
+   }
 }
    
 
