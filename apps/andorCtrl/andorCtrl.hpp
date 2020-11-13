@@ -471,7 +471,7 @@ int andorCtrl::onPowerOff()
    updateIfChanged(m_indiP_emGain, "target", 0);
 
    m_shutterStatus = "POWEROFF";
-   m_shutterState = 1;
+   m_shutterState = 0;
    
    if(stdCamera<andorCtrl>::onPowerOff() < 0)
    {
@@ -495,7 +495,7 @@ inline
 int andorCtrl::whilePowerOff()
 {
    m_shutterStatus = "POWEROFF";
-   m_shutterState = 1;
+   m_shutterState = 0;
    
    if(stdCamera<andorCtrl>::whilePowerOff() < 0)
    {
@@ -638,15 +638,15 @@ int andorCtrl::setShutter( unsigned os )
 {
    AbortAcquisition();
 
-   if(os == 1) //Shut
+   if(os == 0) //Shut
    {
       SetShutter(1,2,50,50);
-      m_shutterState = 1;
+      m_shutterState = 0;
    }
    else //Open
    {
       SetShutter(1,1,50,50);
-      m_shutterState = 0;
+      m_shutterState = 1;
    }
 
    StartAcquisition();
@@ -778,8 +778,8 @@ int andorCtrl::configureAcquisition()
 
     //Initialize Shutter to SHUT
     int ss = 2;
-    if(m_shutterState == 0) ss = 1;
-    else m_shutterState = 1; //handles startup case
+    if(m_shutterState == 1) ss = 1;
+    else m_shutterState = 0; //handles startup case
     SetShutter(1,ss,50,50);
 
     SetNumberAccumulations(1);
