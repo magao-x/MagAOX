@@ -68,11 +68,12 @@ protected:
      */ 
    std::string m_serialNumber; ///< The camera's identifying serial number
    
+   int m_bits {10}; ///< The number of bits used by the camera.
    
    ///@}
 
    
-   CBaslerUsbInstantCamera * camera {nullptr};
+   CBaslerUsbInstantCamera * m_camera {nullptr};
    CGrabResultPtr ptrGrabResult;
    
 public:
@@ -211,6 +212,7 @@ void baslerCtrl::setupConfig()
    dev::frameGrabber<baslerCtrl>::setupConfig(config);
    
    config.add("camera.serialNumber", "", "camera.serialNumber", argType::Required, "camera", "serialNumber", false, "int", "The identifying serial number of the camera.");
+   config.add("camera.bits", "", "camera.bits", argType::Required, "camera", "bits", false, "int", "The number of bits used by the camera.  Default is 10.");
    
    dev::telemeter<baslerCtrl>::setupConfig(config);
    
@@ -222,6 +224,7 @@ void baslerCtrl::loadConfig()
    dev::stdCamera<baslerCtrl>::loadConfig(config);
    
    config(m_serialNumber, "camera.serialNumber");
+   config(m_bits, "camera.bits");
    
    dev::frameGrabber<baslerCtrl>::loadConfig(config);
    
@@ -351,7 +354,7 @@ int baslerCtrl::appShutdown()
    
    dev::frameGrabber<baslerCtrl>::appShutdown();
    
-   if(camera) camera->Close();
+   if(m_camera) m_camera->Close();
    
    PylonTerminate();
       
@@ -370,50 +373,125 @@ int baslerCtrl::connect()
    
    try 
    {
-      if(camera) 
+      if(m_camera) 
       {
-         camera->Close();
-         delete camera;
+         m_camera->Close();
+         delete m_camera;
       }
-      camera = nullptr;
+      m_camera = nullptr;
       
-      camera = new CBaslerUsbInstantCamera( CTlFactory::GetInstance().CreateFirstDevice(info) );
-      
-      if(m_shmimName == "")
-      {
-         m_shmimName = (std::string)camera->GetDeviceInfo().GetModelName() + "_" + (std::string)camera->GetDeviceInfo().GetSerialNumber(); // Gets camera model name and serial number
-      }
-      
-      camera->RegisterConfiguration( new CAcquireContinuousConfiguration , RegistrationMode_ReplaceAll, Cleanup_Delete);
-      
-      camera->Open(); // Opens camera parameters to grab images and set exposure time
-   
-      camera->ExposureAuto.SetValue(ExposureAuto_Off); 
-   
-      camera->PixelFormat.SetValue(PixelFormat_Mono10); // Set to 10 bits
-   
-      state(stateCodes::CONNECTED);
-      if(!stateLogged())
-      {
-         log<text_log>("Found camera of type " + (std::string)camera->GetDeviceInfo().GetModelName() + " with serial number " + m_serialNumber + ".");
-         log<text_log>("Using shared memory name " + m_shmimName + ".");
-      }
-   }
+      m_camera = new CBaslerUsbInstantCamera( CTlFactory::GetInstance().CreateFirstDevice(info) );
+    }
    catch(...)
    {
-      if(camera) 
+      if(m_camera) 
       {
-         camera->Close();
-         delete camera;
+         m_camera->Close();
+         delete m_camera;
       }
-      camera = nullptr;
+      m_camera = nullptr;
       
       state(stateCodes::NODEVICE);
       if(!stateLogged())
       {
          log<text_log>("no camera with serial number " + m_serialNumber + " found.");
       }
+      return 0;
    }
+   
+      
+   try
+   {
+      if(m_shmimName == "")
+      {
+         m_shmimName = (std::string)m_camera->GetDeviceInfo().GetModelName() + "_" + (std::string)m_camera->GetDeviceInfo().GetSerialNumber(); // Gets m_camera model name and serial number
+      }
+      
+      m_camera->RegisterConfiguration( new CAcquireContinuousConfiguration , RegistrationMode_ReplaceAll, Cleanup_Delete);
+      
+      m_camera->Open(); // Opens camera parameters to grab images and set exposure time
+   }
+   catch(...)
+   {
+      if(m_camera) 
+      {
+         m_camera->Close();
+         delete m_camera;
+      }
+      m_camera = nullptr;
+      
+      state(stateCodes::NODEVICE);
+      if(!stateLogged())
+      {
+         log<text_log>("error opening camera " + m_serialNumber + ".");
+      }
+      return -1;
+   }
+   
+   try 
+   {
+      m_camera->ExposureAuto.SetValue(ExposureAuto_Off); 
+   }
+   catch(...)
+   {
+      if(m_camera) 
+      {
+         m_camera->Close();
+         delete m_camera;
+      }
+      m_camera = nullptr;
+      
+      state(stateCodes::NODEVICE);
+      if(!stateLogged())
+      {
+         log<text_log>("failed to set exposure auto off for camera  " + m_serialNumber);
+      }
+      return -1;
+   }
+   
+   try
+   {
+      if(m_bits == 8)
+      {
+         m_camera->PixelFormat.SetValue(PixelFormat_Mono8);
+      }
+      else if(m_bits == 10)
+      {
+         m_camera->PixelFormat.SetValue(PixelFormat_Mono10); // Set to 10 bits
+      }
+      else if(m_bits == 12)
+      {
+         m_camera->PixelFormat.SetValue(PixelFormat_Mono12);
+      }
+      else
+      {
+         log<text_log>("unsupported bit depth for camera" + m_serialNumber + "");
+      }
+   }
+   catch(...)
+   {
+      if(m_camera) 
+      {
+         m_camera->Close();
+         delete m_camera;
+      }
+      m_camera = nullptr;
+      
+      state(stateCodes::NODEVICE);
+      if(!stateLogged())
+      {
+         log<text_log>("failed to set bit depth for camera" + m_serialNumber + "");
+      }
+      return -1;
+   }
+   
+   state(stateCodes::CONNECTED);
+   if(!stateLogged())
+   {
+      log<text_log>("Found camera of type " + (std::string)m_camera->GetDeviceInfo().GetModelName() + " with serial number " + m_serialNumber + ".");
+      log<text_log>("Using shared memory name " + m_shmimName + ".");
+   }
+   
    
    return 0;
 }
@@ -421,8 +499,10 @@ int baslerCtrl::connect()
 
 int baslerCtrl::configureAcquisition()
 {
-   m_width = 640;
-   m_height = 480;
+   if(!m_camera) return -1;
+   
+   m_width = m_camera->Width.GetValue();
+   m_height = m_camera->Height.GetValue();
    m_dataType = _DATATYPE_INT16;
 
    return 0;
@@ -432,7 +512,7 @@ int baslerCtrl::startAcquisition()
 {    
    try
    {
-      camera->StartGrabbing(GrabStrategy_LatestImageOnly ); // Start grabbing, and always grab just the last image.
+      m_camera->StartGrabbing(GrabStrategy_LatestImageOnly ); // Start grabbing, and always grab just the last image.
    }
    catch(...)
    {
@@ -447,7 +527,7 @@ int baslerCtrl::acquireAndCheckValid()
 {
    try
    {
-      camera->RetrieveResult(1000, ptrGrabResult, TimeoutHandling_ThrowException);
+      m_camera->RetrieveResult(1000, ptrGrabResult, TimeoutHandling_ThrowException);
    }
    catch(...)
    {
@@ -491,11 +571,11 @@ int baslerCtrl::reconfig()
 inline
 int baslerCtrl::getTemp()
 {
-   if( camera == nullptr) return 0;
+   if( m_camera == nullptr) return 0;
    
    try 
    {
-      m_ccdTemp = (float)camera->DeviceTemperature.GetValue();
+      m_ccdTemp = (float)m_camera->DeviceTemperature.GetValue();
       recordCamera();
    }
    catch(...)
@@ -513,11 +593,11 @@ int baslerCtrl::getTemp()
 inline
 int baslerCtrl::getExpTime()
 {
-   if( camera == nullptr) return 0;
+   if( m_camera == nullptr) return 0;
    
    try 
    {
-      m_expTime = (float)camera->ExposureTime.GetValue()/1e6;
+      m_expTime = (float)m_camera->ExposureTime.GetValue()/1e6;
       recordCamera();
    }
    catch(...)
@@ -562,7 +642,7 @@ int baslerCtrl::setExpTime()
    try
    {
       recordCamera(true);
-      camera->ExposureTime.SetValue(m_expTimeSet*1e6);
+      m_camera->ExposureTime.SetValue(m_expTimeSet*1e6);
    }
    catch(...)
    {
