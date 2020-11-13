@@ -222,6 +222,14 @@ zylaCtrl::zylaCtrl() : MagAOXApp(MAGAOX_CURRENT_SHA1, MAGAOX_REPO_MODIFIED)
    m_expTimeSet = 0.05; //Set default for startup
    m_fpsSet = 20; //Set default for startup
    
+   m_startup_x = 1075;
+   m_startup_y = 975;
+   m_startup_w = 128;
+   m_startup_h = 128;
+   m_startup_bin_x = 1;
+   m_startup_bin_y = 1;
+   
+   
    return;
 }
 
@@ -716,12 +724,12 @@ int zylaCtrl::powerOnDefaults()
       
    m_ccdTempSetpt = 0; //This is the power on setpoint
 
-   m_currentROI.x = 1075;
-   m_currentROI.y = 975;
-   m_currentROI.w = 128;
-   m_currentROI.h = 128;
-   m_currentROI.bin_x = 1;
-   m_currentROI.bin_y = 1;
+   m_currentROI.x = m_startup_x;
+   m_currentROI.y = m_startup_y;
+   m_currentROI.w = m_startup_w;
+   m_currentROI.h = m_startup_h;
+   m_currentROI.bin_x = m_startup_bin_x;
+   m_currentROI.bin_y = m_startup_bin_y;
    
    return 0;
 }
