@@ -1127,7 +1127,7 @@ void MagAOXApp<_useINDI>::setDefaults( int argc,
    if(m_configBase != "")
    {
       //We use mx::application's configPathUser for this components base config file
-      configPathUser = m_configDir + "/" + m_configBase + ".conf";
+      m_configPathUser = m_configDir + "/" + m_configBase + ".conf";
    }
 
    //Parse CL just to get the "name".
