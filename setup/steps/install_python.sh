@@ -18,6 +18,11 @@ if [[ ! -d /opt/miniconda3 ]]; then
     bash $MINICONDA_INSTALLER -b -p /opt/miniconda3
 	# Ensure magaox-dev can write to /opt/miniconda3 or env creation will fail
 	chown -R :magaox-dev /opt/miniconda3
+    # set group and permissions such that only magaox-dev has write access
+    chmod -R g=rwX /opt/miniconda3
+    find /opt/miniconda3 -type d -exec sudo chmod g+rwxs {} \;
+    # Backup plan: use ACLs
+    # sudo setfacl -Rm g:magaox-dev:rwX,d:g:magaox-dev:rwX /opt/miniconda3
     # Set environment variables for miniconda
     cat << 'EOF' | tee /etc/profile.d/miniconda.sh
 if [ -f "/opt/miniconda3/etc/profile.d/conda.sh" ]; then
@@ -32,9 +37,6 @@ channels:
   - conda-forge
   - defaults
 changeps1: false
+channel_priority: flexible
 EOF
 fi
-
-# set group and permissions such that only magaox-dev has write access
-chgrp -R magaox-dev /opt/miniconda3
-chmod -R g=rwX /opt/miniconda3
