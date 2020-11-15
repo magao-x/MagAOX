@@ -320,7 +320,6 @@ fi
 $MAYBE_SUDO bash -l "$DIR/steps/install_cacao.sh"
 $MAYBE_SUDO bash -l "$DIR/steps/install_milkzmq.sh"
 # Create Python env and install Python libs that need special treatment
-# (Depends on presence of /opt/MagAOX/config/conda_env_pinned.yml)
 # Note that subsequent steps will use libs from conda since the base
 # env activates by default.
 sudo bash -l "$DIR/steps/install_python.sh"

@@ -11,7 +11,7 @@ set -euo pipefail
 #
 # Install the standard MagAOX user python environment
 #
-conda env update -qf /opt/MagAOX/config/conda_env_pinned.yml
+conda env update -qf $DIR/../conda_env_pinned.yml
 
 #
 # Set up auto-starting xsup Jupyter Notebook instance
@@ -21,7 +21,7 @@ if [[ $MAGAOX_ROLE == vm ]]; then
 else
 	NOTEBOOK_OPTIONS=''
 fi
-NOTEBOOK_CONFIG_PATH=/opt/MagAOX/config/jupyter_notebook_config.py
+NOTEBOOK_CONFIG_PATH=$DIR/../jupyter_notebook_config.py
 
 # Note that there's a race condition where /vagrant isn't available yet
 # when jupyter tries to start, so we make a copy within the VM's local
@@ -46,7 +46,7 @@ if [[ -e $UNIT_PATH/jupyterlab.service ]]; then
 fi
 
 if [[ $MAGAOX_ROLE != ci ]]; then
-	cp /opt/MagAOX/config/jupyternotebook.service $UNIT_PATH/jupyternotebook.service
+	cp $DIR/../systemd_units/jupyternotebook.service $UNIT_PATH/jupyternotebook.service
 	log_success "Installed jupyternotebook.service to $UNIT_PATH"
 	if [[ $MAGAOX_ROLE == vm ]]; then
 		sed -iE "s_WorkingDirectory=/home/xsup_WorkingDirectory=/vagrant_g" $UNIT_PATH/jupyternotebook.service

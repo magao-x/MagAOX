@@ -1,0 +1,57 @@
+channels:
+  - conda-forge
+  - defaults
+dependencies:
+  - jupyter
+  - astropy
+  - ipython
+  - ipywidgets
+  - notebook
+  - blas=*=mkl
+  - numpy
+  - scipy
+  - matplotlib
+  - numexpr
+  - Pillow
+  - scikit-image
+  - pip
+  - nb_conda_kernels
+  - pytest
+  - psutil
+  - cupy
+  - cudatoolkit=10.1
+  - line_profiler
+  - pyfftw
+  # GUIs
+  - qt=5
+  - qwt
+  # video streaming
+  - cffi
+  - crc32c
+  - cryptography
+  - av
+  - pyee
+  - ffmpeg
+  - libopus
+  - libvpx
+  # web ui
+  - nodejs
+  - yarn
+  - websockets
+  - ujson
+  - uvloop
+  # hcipy deps available in conda
+  - asdf
+  - pyyaml
+  - imageio
+  - xxhash
+
+  - pip:
+      - hcipy
+      - poppy
+      # web ui
+      - aiortc
+      - python-engineio
+      - python-socketio
+      - starlette
+      - uvicorn

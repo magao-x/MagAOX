@@ -14,7 +14,7 @@ if [[ $MAGAOX_ROLE == AOC || $MAGAOX_ROLE == vm || $MAGAOX_ROLE == ci ]]; then
     cd
     python -c 'import sup'  # verify sup is on PYTHONPATH
     UNIT_PATH=/etc/systemd/system/
-    sudo cp /opt/MagAOX/config/sup.service $UNIT_PATH/sup.service
+    sudo cp $DIR/../sup/sup.service $UNIT_PATH/sup.service
     OVERRIDE_PATH=$UNIT_PATH/sup.service.d/
     sudo mkdir -p $OVERRIDE_PATH
     echo "[Service]" | sudo tee $OVERRIDE_PATH/override.conf

@@ -11,5 +11,6 @@ clone_or_update_and_cd $orgname $reponame $parentdir
 git checkout $IMAGESTREAMIO_COMMIT_ISH
 
 cd $parentdir/$reponame
-python setup.py install
+pip uninstall -y imagestreamiowrap
+pip install -e .
 python -c 'import ImageStreamIOWrap'
