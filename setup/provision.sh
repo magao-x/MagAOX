@@ -218,7 +218,6 @@ sudo bash -l "$DIR/steps/install_eigen.sh"
 sudo bash -l "$DIR/steps/install_cppzmq.sh"
 sudo bash -l "$DIR/steps/install_levmar.sh"
 sudo bash -l "$DIR/steps/install_flatbuffers.sh"
-sudo bash -l "$DIR/steps/install_xrif.sh"
 if [[ $MAGAOX_ROLE == RTC || $MAGAOX_ROLE == ICC || $MAGAOX_ROLE == AOC || $MAGAOX_ROLE == TIC || $MAGAOX_ROLE == ci || $MAGAOX_ROLE == vm ]]; then
     sudo bash -l "$DIR/steps/install_basler_pylon.sh"
 fi
@@ -259,6 +258,7 @@ fi
 
 ## Build first-party dependencies
 cd /opt/MagAOX/source
+sudo bash -l "$DIR/steps/install_xrif.sh"
 sudo bash -l "$DIR/steps/install_mxlib.sh"
 source /etc/profile.d/mxmakefile.sh
 
