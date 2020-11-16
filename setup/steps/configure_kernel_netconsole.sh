@@ -13,7 +13,7 @@ NETCONSOLE_BIND_IP=192.168.0.10
 if [[ $MAGAOX_ROLE == AOC ]]; then
     UNIT_PATH=/etc/systemd/system/
     if [[ ! -e $UNIT_PATH/netconsole_logger.service ]]; then
-        sudo cp /opt/MagAOX/config/netconsole_logger.service $UNIT_PATH/netconsole_logger.service
+        sudo cp $DIR/../systemd_units/netconsole_logger.service $UNIT_PATH/netconsole_logger.service
         log_info "Installed unit file to $UNIT_PATH/netconsole_logger.service"
         OVERRIDE_PATH=$UNIT_PATH/netconsole.service.d/
         sudo mkdir -p $OVERRIDE_PATH
