@@ -9,14 +9,18 @@ else
   CMAKE_FLAGS=""
 fi
 
-if [[ ! -d ./cacao ]]; then
+CACAO_DIR=/opt/MagAOX/source/cacao
+
+cd /opt/MagAOX/source
+
+if [[ ! -d $CACAO_DIR ]]; then
     git clone --recursive --branch dev https://github.com/magao-x/cacao.git cacao
     cd ./cacao
     git config core.sharedRepository true
     git remote add upstream https://github.com/cacao-org/cacao.git
 else
+    log_info "Not touching cacao since it's already present"
     cd ./cacao
-    git pull
 fi
 CACAO_ABSPATH=$PWD
 
@@ -30,7 +34,7 @@ sudo make install
 if [[ ! -e /usr/local/bin/milk ]]; then
     sudo ln -s /usr/local/bin/cacao /usr/local/bin/milk
 fi
-echo "export PATH=\$PATH:$CACAO_ABSPATH/src/CommandLineInterface/scripts" | sudo tee /etc/profile.d/cacao.sh
+echo "export PATH=\$PATH:$CACAO_DIR/src/CommandLineInterface/scripts" | sudo tee /etc/profile.d/cacao.sh
 echo "export MILK_SHM_DIR=/milk/shm" | sudo tee -a /etc/profile.d/cacao.sh
 
 if [[ $MAGAOX_ROLE != ci ]]; then
