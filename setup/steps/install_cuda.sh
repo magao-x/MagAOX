@@ -53,3 +53,6 @@ if [[ $MAGAOX_ROLE != vm && $MAGAOX_ROLE != ci && ! -e /usr/lib/systemd/system/n
   sudo bash install.sh systemd
   rm -r $workdir
 fi
+
+# Pick up new /etc/ld.so.conf.d/cuda*.conf file
+ldconfig
