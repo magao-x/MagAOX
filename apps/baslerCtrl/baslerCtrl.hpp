@@ -72,6 +72,12 @@ protected:
    
    ///@}
 
+   int m_incX {1};
+   int m_incY {1};
+   int m_maxW {0};
+   int m_incW {1};
+   int m_maxH {0};
+   int m_incH {1};
    
    CBaslerUsbInstantCamera * m_camera {nullptr};
    CGrabResultPtr ptrGrabResult;
@@ -193,7 +199,7 @@ baslerCtrl::baslerCtrl() : MagAOXApp(MAGAOX_CURRENT_SHA1, MAGAOX_REPO_MODIFIED)
    m_usesExpTime = true;
    m_usesFPS = false;
    m_usesModes = false;
-   m_usesROI = false;
+   m_usesROI = true;
    
    return;
 }
@@ -492,6 +498,31 @@ int baslerCtrl::connect()
       log<text_log>("Using shared memory name " + m_shmimName + ".");
    }
    
+   //set offsets to 0 so full field will be registered.
+   m_camera->StopGrabbing();
+   m_camera->OffsetX.SetValue(0);
+   m_camera->OffsetY.SetValue(0);
+      
+   if(m_startup_w == 0) m_startup_w = m_camera->Width.GetMax();
+   if(m_startup_h == 0) m_startup_h = m_camera->Height.GetMax();
+   if(m_startup_x == 0) m_startup_x = 0.5*(m_camera->Width.GetMax()-1);
+   if(m_startup_y == 0) m_startup_y = 0.5*(m_camera->Height.GetMax()-1);
+   if(m_startup_bin_x == 0) m_startup_bin_x = 1;
+   if(m_startup_bin_y == 0) m_startup_bin_y = 1;
+      
+   m_incX = m_camera->OffsetX.GetInc();
+   m_incY = m_camera->OffsetY.GetInc();
+   m_maxW = m_camera->Width.GetMax();
+   m_incW = m_camera->Width.GetInc();
+   m_maxH = m_camera->Height.GetMax();
+   m_incH = m_camera->Height.GetInc();
+   
+   m_nextROI.x = m_startup_x;
+   m_nextROI.y = m_startup_y;
+   m_nextROI.w = m_startup_w;
+   m_nextROI.h = m_startup_h;
+   m_nextROI.bin_x = m_startup_bin_x;
+   m_nextROI.bin_y = m_startup_bin_y;
    
    return 0;
 }
@@ -500,11 +531,67 @@ int baslerCtrl::connect()
 int baslerCtrl::configureAcquisition()
 {
    if(!m_camera) return -1;
-   
-   m_width = m_camera->Width.GetValue();
-   m_height = m_camera->Height.GetValue();
-   m_dataType = _DATATYPE_INT16;
 
+   try
+   {
+      recordCamera(true); 
+      m_camera->StopGrabbing();
+      
+      //set offsets to 0 so any valid w/h will work.
+      m_camera->OffsetX.SetValue(0);
+      m_camera->OffsetY.SetValue(0);
+      
+      if(m_nextROI.w > m_maxW) m_nextROI.w = m_maxW;
+      m_nextROI.w -= m_nextROI.w % m_incW;
+      
+      if(m_nextROI.h > m_maxH) m_nextROI.h = m_maxH;
+      m_nextROI.h -= m_nextROI.h % m_incH;
+      
+      //Set ROI.
+      int xoff = m_nextROI.x - 0.5*((float) m_nextROI.w - 1);
+      int yoff = m_nextROI.y - 0.5*((float) m_nextROI.h - 1);
+      
+      xoff -= xoff % m_incX;
+      yoff -= yoff % m_incY;
+
+      m_camera->Width.SetValue(m_nextROI.w);
+      m_camera->Height.SetValue(m_nextROI.h);
+      
+      m_camera->OffsetX.SetValue(xoff);
+      m_camera->OffsetY.SetValue(yoff);
+
+      
+      
+      m_currentROI.w = m_camera->Width.GetValue();
+      m_currentROI.h = m_camera->Height.GetValue();
+      m_currentROI.x = m_camera->OffsetX.GetValue() + 0.5*((float) m_currentROI.w - 1);
+      m_currentROI.y = m_camera->OffsetY.GetValue() + 0.5*((float) m_currentROI.h - 1);
+      
+      updateIfChanged( m_indiP_roi_x, "current", m_currentROI.x, INDI_OK);
+      updateIfChanged( m_indiP_roi_y, "current", m_currentROI.y, INDI_OK);
+      updateIfChanged( m_indiP_roi_w, "current", m_currentROI.w, INDI_OK);
+      updateIfChanged( m_indiP_roi_h, "current", m_currentROI.h, INDI_OK);
+      updateIfChanged( m_indiP_roi_bin_x, "current", m_currentROI.bin_x, INDI_OK);
+      updateIfChanged( m_indiP_roi_bin_y, "current", m_currentROI.bin_y, INDI_OK);
+   
+      m_width = m_currentROI.w;
+      m_height = m_currentROI.h;
+      m_dataType = _DATATYPE_INT16;
+      
+      recordCamera(true); 
+   }
+   catch(...)
+   {
+      log<software_error>({__FILE__, __LINE__, "invalid ROI specifications"});
+      m_camera->OffsetX.SetValue(0);
+      m_camera->OffsetY.SetValue(0);
+      m_camera->Width.SetValue(m_maxW);
+      m_camera->Height.SetValue(m_maxH);
+      
+      state(stateCodes::NOTCONNECTED);
+      return -1;
+   }
+   
    return 0;
 }
 
@@ -564,6 +651,8 @@ int baslerCtrl::loadImageIntoStream(void * dest)
 
 int baslerCtrl::reconfig()
 {
+   
+   
    return 0;
 }
    
@@ -615,6 +704,13 @@ int baslerCtrl::getExpTime()
 inline
 int baslerCtrl::powerOnDefaults()
 {
+   m_nextROI.x = m_startup_x;
+   m_nextROI.y = m_startup_y;
+   m_nextROI.w = m_startup_w;
+   m_nextROI.h = m_startup_h;
+   m_nextROI.bin_x = m_startup_bin_x;
+   m_nextROI.bin_y = m_startup_bin_y;
+   
    return 0;
 }
 
@@ -658,6 +754,18 @@ int baslerCtrl::setExpTime()
 inline
 int baslerCtrl::setNextROI()
 {
+   std::cerr << "setNextROI:\n";
+   std::cerr << "  m_nextROI.x = " << m_nextROI.x << "\n";
+   std::cerr << "  m_nextROI.y = " << m_nextROI.y << "\n";
+   std::cerr << "  m_nextROI.w = " << m_nextROI.w << "\n";
+   std::cerr << "  m_nextROI.h = " << m_nextROI.h << "\n";
+   std::cerr << "  m_nextROI.bin_x = " << m_nextROI.bin_x << "\n";
+   std::cerr << "  m_nextROI.bin_y = " << m_nextROI.bin_y << "\n";
+   
+   m_reconfig = true;
+
+   updateSwitchIfChanged(m_indiP_roi_set, "request", pcf::IndiElement::Off, INDI_IDLE);
+   
    return 0;
 }
 
