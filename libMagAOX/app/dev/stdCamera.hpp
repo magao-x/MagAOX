@@ -147,6 +147,11 @@ protected:
    int m_startup_bin_x {1}; ///< Power-on ROI x binning. 
    int m_startup_bin_y {1}; ///< Power-on ROI y binning.
       
+   float m_full_x{0}; ///< The full ROI center x coordinate.
+   float m_full_y{0}; ///< The full ROI center y coordinate.
+   int m_full_w{0}; ///< The full ROI width.
+   int m_full_h{0}; ///< The full ROI height.
+   
    ///@}
    
    /** \name Temperature Control Interface 
@@ -236,7 +241,7 @@ protected:
    
    roi m_currentROI;
    roi m_nextROI;
-   
+   roi m_lastROI;
    
    float m_minROIx {0};
    float m_maxROIx {1023};
@@ -402,6 +407,10 @@ protected:
 
    pcf::IndiProperty m_indiP_roi_set; ///< Property used to trigger setting the ROI 
    
+   pcf::IndiProperty m_indiP_roi_full; ///< Property used to trigger setting the full ROI.
+   pcf::IndiProperty m_indiP_roi_last; ///< Property used to trigger setting the last ROI.
+   pcf::IndiProperty m_indiP_roi_startup; ///< Property used to trigger setting the startup ROI.
+   
    pcf::IndiProperty m_indiP_shutterStatus; ///< Property to report shutter status
    pcf::IndiProperty m_indiP_shutter; ///< Property used to control the shutter, a switch.
 public:
@@ -506,6 +515,27 @@ public:
      * \returns -1 on error.
      */
    int newCallBack_roi_set( const pcf::IndiProperty &ipRecv /**< [in] the INDI property sent with the the new property request.*/);
+   
+   /// Callback to process a NEW roi_full request
+   /**
+     * \returns 0 on success.
+     * \returns -1 on error.
+     */
+   int newCallBack_roi_full( const pcf::IndiProperty &ipRecv /**< [in] the INDI property sent with the the new property request.*/);
+   
+   /// Callback to process a NEW roi_last request
+   /**
+     * \returns 0 on success.
+     * \returns -1 on error.
+     */
+   int newCallBack_roi_last( const pcf::IndiProperty &ipRecv /**< [in] the INDI property sent with the the new property request.*/);
+   
+   /// Callback to process a NEW roi_startup request
+   /**
+     * \returns 0 on success.
+     * \returns -1 on error.
+     */
+   int newCallBack_roi_startup( const pcf::IndiProperty &ipRecv /**< [in] the INDI property sent with the the new property request.*/);
    
    /// Callback to process a NEW shutter request
    /**
@@ -719,7 +749,7 @@ int stdCamera<derivedT>::appStartup()
    if(m_usesROI)
    {
       //The min/max/step values should be set in derivedT before this is called.
-      derived().createStandardIndiNumber( m_indiP_roi_x, "roi_x", m_minROIx, m_maxROIx, m_stepROIx, "%0.1f");
+      derived().createStandardIndiNumber( m_indiP_roi_x, "roi_region_x", m_minROIx, m_maxROIx, m_stepROIx, "%0.1f");
       if( derived().registerIndiPropertyNew( m_indiP_roi_x, st_newCallBack_stdCamera) < 0)
       {
          #ifndef STDCAMERA_TEST_NOLOG
@@ -728,7 +758,7 @@ int stdCamera<derivedT>::appStartup()
          return -1;
       }
       
-      derived().createStandardIndiNumber( m_indiP_roi_y, "roi_y", m_minROIy, m_maxROIy, m_stepROIy, "%0.1f");
+      derived().createStandardIndiNumber( m_indiP_roi_y, "roi_region_y", m_minROIy, m_maxROIy, m_stepROIy, "%0.1f");
       if( derived().registerIndiPropertyNew( m_indiP_roi_y, st_newCallBack_stdCamera) < 0)
       {
          #ifndef STDCAMERA_TEST_NOLOG
@@ -737,7 +767,7 @@ int stdCamera<derivedT>::appStartup()
          return -1;
       }
       
-      derived().createStandardIndiNumber( m_indiP_roi_w, "roi_w", m_minROIWidth, m_maxROIWidth, m_stepROIWidth, "%d");
+      derived().createStandardIndiNumber( m_indiP_roi_w, "roi_region_w", m_minROIWidth, m_maxROIWidth, m_stepROIWidth, "%d");
       if( derived().registerIndiPropertyNew( m_indiP_roi_w, st_newCallBack_stdCamera) < 0)
       {
          #ifndef STDCAMERA_TEST_NOLOG
@@ -746,7 +776,7 @@ int stdCamera<derivedT>::appStartup()
          return -1;
       }
       
-      derived().createStandardIndiNumber( m_indiP_roi_h, "roi_h", m_minROIHeight, m_maxROIHeight, m_stepROIHeight, "%d");
+      derived().createStandardIndiNumber( m_indiP_roi_h, "roi_region_h", m_minROIHeight, m_maxROIHeight, m_stepROIHeight, "%d");
       if( derived().registerIndiPropertyNew( m_indiP_roi_h, st_newCallBack_stdCamera) < 0)
       {
          #ifndef STDCAMERA_TEST_NOLOG
@@ -755,7 +785,7 @@ int stdCamera<derivedT>::appStartup()
          return -1;
       }
       
-      derived().createStandardIndiNumber( m_indiP_roi_bin_x, "roi_bin_x", m_minROIBinning_x, m_maxROIBinning_x, m_stepROIBinning_x, "%d");
+      derived().createStandardIndiNumber( m_indiP_roi_bin_x, "roi_region_bin_x", m_minROIBinning_x, m_maxROIBinning_x, m_stepROIBinning_x, "%d");
       if( derived().registerIndiPropertyNew( m_indiP_roi_bin_x, st_newCallBack_stdCamera) < 0)
       {
          #ifndef STDCAMERA_TEST_NOLOG
@@ -764,7 +794,7 @@ int stdCamera<derivedT>::appStartup()
          return -1;
       }
       
-      derived().createStandardIndiNumber( m_indiP_roi_bin_y, "roi_bin_y", m_minROIBinning_y, m_maxROIBinning_y, m_stepROIBinning_y, "%d");
+      derived().createStandardIndiNumber( m_indiP_roi_bin_y, "roi_region_bin_y", m_minROIBinning_y, m_maxROIBinning_y, m_stepROIBinning_y, "%d");
       if( derived().registerIndiPropertyNew( m_indiP_roi_bin_y, st_newCallBack_stdCamera) < 0)
       {
          #ifndef STDCAMERA_TEST_NOLOG
@@ -782,8 +812,32 @@ int stdCamera<derivedT>::appStartup()
          return -1;
       }
       
-      
+      derived().createStandardIndiRequestSw( m_indiP_roi_full, "roi_set_full");
+      if( derived().registerIndiPropertyNew( m_indiP_roi_full, st_newCallBack_stdCamera) < 0)
+      {
+         #ifndef STDCAMERA_TEST_NOLOG
+         derivedT::template log<software_error>({__FILE__,__LINE__});
+         #endif
+         return -1;
+      }
    
+      derived().createStandardIndiRequestSw( m_indiP_roi_last, "roi_set_last");
+      if( derived().registerIndiPropertyNew( m_indiP_roi_last, st_newCallBack_stdCamera) < 0)
+      {
+         #ifndef STDCAMERA_TEST_NOLOG
+         derivedT::template log<software_error>({__FILE__,__LINE__});
+         #endif
+         return -1;
+      }
+      
+      derived().createStandardIndiRequestSw( m_indiP_roi_startup, "roi_set_startup");
+      if( derived().registerIndiPropertyNew( m_indiP_roi_startup, st_newCallBack_stdCamera) < 0)
+      {
+         #ifndef STDCAMERA_TEST_NOLOG
+         derivedT::template log<software_error>({__FILE__,__LINE__});
+         #endif
+         return -1;
+      }
    }
    
    //Set up INDI for shutter
@@ -1011,13 +1065,16 @@ int stdCamera<derivedT>::st_newCallBack_stdCamera( void * app,
    else if(name == "fps") return _app->newCallBack_fps(ipRecv);
    else if(name == "mode") return _app->newCallBack_mode(ipRecv);
    else if(name == "reconfigure") return _app->newCallBack_reconfigure(ipRecv);
-   else if(name == "roi_x") return _app->newCallBack_roi_x(ipRecv);
-   else if(name == "roi_y") return _app->newCallBack_roi_y(ipRecv);
-   else if(name == "roi_w") return _app->newCallBack_roi_w(ipRecv);
-   else if(name == "roi_h") return _app->newCallBack_roi_h(ipRecv);
-   else if(name == "roi_bin_x") return _app->newCallBack_roi_bin_x(ipRecv);
-   else if(name == "roi_bin_y") return _app->newCallBack_roi_bin_y(ipRecv);
+   else if(name == "roi_region_x") return _app->newCallBack_roi_x(ipRecv);
+   else if(name == "roi_region_y") return _app->newCallBack_roi_y(ipRecv);
+   else if(name == "roi_region_w") return _app->newCallBack_roi_w(ipRecv);
+   else if(name == "roi_region_h") return _app->newCallBack_roi_h(ipRecv);
+   else if(name == "roi_region_bin_x") return _app->newCallBack_roi_bin_x(ipRecv);
+   else if(name == "roi_region_bin_y") return _app->newCallBack_roi_bin_y(ipRecv);
    else if(name == "roi_set") return _app->newCallBack_roi_set(ipRecv);
+   else if(name == "roi_set_full") return _app->newCallBack_roi_full(ipRecv);
+   else if(name == "roi_set_last") return _app->newCallBack_roi_last(ipRecv);
+   else if(name == "roi_set_startup") return _app->newCallBack_roi_startup(ipRecv);
    else if(name == "shutter") return _app->newCallBack_shutter(ipRecv);
    
    derivedT::template log<software_error>({__FILE__,__LINE__, "unknown INDI property"});
@@ -1312,6 +1369,96 @@ int stdCamera<derivedT>::newCallBack_roi_set( const pcf::IndiProperty &ipRecv )
       
       indi::updateSwitchIfChanged(m_indiP_roi_set, "request", pcf::IndiElement::Off, derived().m_indiDriver, INDI_IDLE);
       
+      m_lastROI = m_currentROI;
+      return derived().setNextROI();
+   }
+   
+   return 0;  
+}
+
+template<class derivedT>
+int stdCamera<derivedT>::newCallBack_roi_full( const pcf::IndiProperty &ipRecv )
+{
+   if(ipRecv.getName() != m_indiP_roi_full.getName())
+   {
+      derivedT::template log<software_error>({__FILE__,__LINE__, "wrong INDI property received."});
+      return -1;
+   }
+   
+   if(!ipRecv.find("request")) return 0;
+   
+   
+   if( ipRecv["request"].getSwitchState() == pcf::IndiElement::On)
+   {
+      std::unique_lock<std::mutex> lock(derived().m_indiMutex);
+      
+      indi::updateSwitchIfChanged(m_indiP_roi_full, "request", pcf::IndiElement::Off, derived().m_indiDriver, INDI_IDLE);
+   
+      m_nextROI.x = m_full_x;
+      m_nextROI.y = m_full_y;
+      m_nextROI.w = m_full_w;
+      m_nextROI.h = m_full_h;
+      m_nextROI.bin_x = 1;
+      m_nextROI.bin_y = 1;
+      m_lastROI = m_currentROI;
+      return derived().setNextROI();
+   }
+   
+   
+   return 0;  
+}
+
+template<class derivedT>
+int stdCamera<derivedT>::newCallBack_roi_last( const pcf::IndiProperty &ipRecv )
+{
+   if(ipRecv.getName() != m_indiP_roi_last.getName())
+   {
+      derivedT::template log<software_error>({__FILE__,__LINE__, "wrong INDI property received."});
+      return -1;
+   }
+   
+   if(!ipRecv.find("request")) return 0;
+   
+   
+   if( ipRecv["request"].getSwitchState() == pcf::IndiElement::On)
+   {
+      std::unique_lock<std::mutex> lock(derived().m_indiMutex);
+      
+      indi::updateSwitchIfChanged(m_indiP_roi_full, "request", pcf::IndiElement::Off, derived().m_indiDriver, INDI_IDLE);
+      
+      m_nextROI = m_lastROI;
+      m_lastROI = m_currentROI;
+      return derived().setNextROI();
+   }
+   
+   return 0;  
+}
+
+template<class derivedT>
+int stdCamera<derivedT>::newCallBack_roi_startup( const pcf::IndiProperty &ipRecv )
+{
+   if(ipRecv.getName() != m_indiP_roi_startup.getName())
+   {
+      derivedT::template log<software_error>({__FILE__,__LINE__, "wrong INDI property received."});
+      return -1;
+   }
+   
+   if(!ipRecv.find("request")) return 0;
+   
+   
+   if( ipRecv["request"].getSwitchState() == pcf::IndiElement::On)
+   {
+      std::unique_lock<std::mutex> lock(derived().m_indiMutex);
+      
+      indi::updateSwitchIfChanged(m_indiP_roi_startup, "request", pcf::IndiElement::Off, derived().m_indiDriver, INDI_IDLE);
+      
+      m_nextROI.x = m_startup_x;
+      m_nextROI.y = m_startup_y;
+      m_nextROI.w = m_startup_w;
+      m_nextROI.h = m_startup_h;
+      m_nextROI.bin_x = m_startup_bin_x;
+      m_nextROI.bin_y = m_startup_bin_y;
+      m_lastROI = m_currentROI;
       return derived().setNextROI();
    }
    

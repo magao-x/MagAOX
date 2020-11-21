@@ -274,6 +274,19 @@ picamCtrl::picamCtrl() : MagAOXApp(MAGAOX_CURRENT_SHA1, MAGAOX_REPO_MODIFIED)
    m_adcSpeed = 10;
    m_verticalShiftRate = 1.2;
    m_adcQuality = PicamAdcQuality_ElectronMultiplied;
+   
+   
+   m_startup_x = 511.5; 
+   m_startup_y = 511.5; 
+   m_startup_w = 1024;  
+   m_startup_h = 1024;  
+      
+   m_full_x = 511.5; 
+   m_full_y = 511.5; 
+   m_full_w = 1024; 
+   m_full_h = 1024; 
+   
+   
    return;
 }
 

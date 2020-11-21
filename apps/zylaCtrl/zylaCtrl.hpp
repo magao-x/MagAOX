@@ -229,6 +229,10 @@ zylaCtrl::zylaCtrl() : MagAOXApp(MAGAOX_CURRENT_SHA1, MAGAOX_REPO_MODIFIED)
    m_startup_bin_x = 1;
    m_startup_bin_y = 1;
    
+   m_full_x = 1023.5;
+   m_full_y = 1023.5;
+   m_full_w = 2048;
+   m_full_h = 2048;
    
    return;
 }

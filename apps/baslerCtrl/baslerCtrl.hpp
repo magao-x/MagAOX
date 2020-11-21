@@ -162,12 +162,12 @@ protected:
      */
    int setExpTime();
    
-   /// Required by stdCamera, but this does not do anything for this camera [stdCamera interface]
+   /// Set the next ROI
    /**
      * \returns 0 always
      */
    int setNextROI();
-   
+      
    /// Required by stdCamera, does not currently do anything. [stdCamera interface]
    /**
      * \returns 0 always
@@ -574,6 +574,13 @@ int baslerCtrl::configureAcquisition()
       updateIfChanged( m_indiP_roi_bin_x, "current", m_currentROI.bin_x, INDI_OK);
       updateIfChanged( m_indiP_roi_bin_y, "current", m_currentROI.bin_y, INDI_OK);
    
+      updateIfChanged( m_indiP_roi_x, "target", m_nextROI.x, INDI_OK);
+      updateIfChanged( m_indiP_roi_y, "target", m_nextROI.y, INDI_OK);
+      updateIfChanged( m_indiP_roi_w, "target", m_nextROI.w, INDI_OK);
+      updateIfChanged( m_indiP_roi_h, "target", m_nextROI.h, INDI_OK);
+      updateIfChanged( m_indiP_roi_bin_x, "target", m_nextROI.bin_x, INDI_OK);
+      updateIfChanged( m_indiP_roi_bin_y, "target", m_nextROI.bin_y, INDI_OK);
+      
       m_width = m_currentROI.w;
       m_height = m_currentROI.h;
       m_dataType = _DATATYPE_INT16;
@@ -765,9 +772,13 @@ int baslerCtrl::setNextROI()
    m_reconfig = true;
 
    updateSwitchIfChanged(m_indiP_roi_set, "request", pcf::IndiElement::Off, INDI_IDLE);
-   
+   updateSwitchIfChanged(m_indiP_roi_full, "request", pcf::IndiElement::Off, INDI_IDLE);
+   updateSwitchIfChanged(m_indiP_roi_last, "request", pcf::IndiElement::Off, INDI_IDLE);
+   updateSwitchIfChanged(m_indiP_roi_startup, "request", pcf::IndiElement::Off, INDI_IDLE);
    return 0;
 }
+
+
 
 inline
 int baslerCtrl::setShutter(int sh)
