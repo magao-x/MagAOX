@@ -118,11 +118,26 @@ public:
    
 protected:
    
-   
+   /// Get the current detector temperature 
+   /** 
+     * \returns 0 on success
+     * \returns -1 on an error.
+     */ 
    int getTemp();
-      
+   
+   /// Get the current exposure time 
+   /** 
+     * \returns 0 on success
+     * \returns -1 on an error.
+     */   
    int getExpTime();
    
+   /// Get the current framerate
+   /** 
+     * \returns 0 on success
+     * \returns -1 on an error.
+     */
+   int getFPS();
    
    /** \name stdCamera Interface 
      * 
@@ -148,8 +163,12 @@ protected:
      */
    int setTempSetPt();
    
-   /// Required by stdCamera, but this does not do anything for this camera [stdCamera interface]
-   /**
+   /// Set the framerate.
+   /** This uses the acquistion framerate feature.  If m_fpsSet is 0, acuisition framerate is disabled
+     * and the resultant framerate is based solely on exposure time and ROI.  If non-zero, then the 
+     * framerate will be set to m_fpsSet and the camera will maintain this (as long as exposure time 
+     * and ROI allow).
+     * 
      * \returns 0 always
      */ 
    int setFPS();
@@ -197,7 +216,7 @@ baslerCtrl::baslerCtrl() : MagAOXApp(MAGAOX_CURRENT_SHA1, MAGAOX_REPO_MODIFIED)
    //--- stdCamera ---
    m_hasTempControl = false;
    m_usesExpTime = true;
-   m_usesFPS = false;
+   m_usesFPS = true;
    m_usesModes = false;
    m_usesROI = true;
    
@@ -325,6 +344,12 @@ int baslerCtrl::appLogic()
          return 0;
       }
 
+      if(getFPS() < 0)
+      {
+         if(state() == stateCodes::READY || state() == stateCodes::OPERATING)  state(stateCodes::ERROR);
+         return 0;
+      }
+      
       if(stdCamera<baslerCtrl>::updateINDI() < 0)
       {
          log<software_error>({__FILE__, __LINE__});
@@ -714,6 +739,28 @@ int baslerCtrl::getExpTime()
 }
 
 inline
+int baslerCtrl::getFPS()
+{
+   if( m_camera == nullptr) return 0;
+   
+   try 
+   {
+      m_fps = m_camera->ResultingFrameRate.GetValue();
+      recordCamera();
+   }
+   catch(...)
+   {
+      m_fps = -999;
+      recordCamera();
+      state(stateCodes::NOTCONNECTED);
+      return -1;
+   }
+      
+   return 0;
+
+}
+
+inline
 int baslerCtrl::powerOnDefaults()
 {
    m_nextROI.x = m_startup_x;
@@ -741,12 +788,42 @@ int baslerCtrl::setTempSetPt()
 inline
 int baslerCtrl::setFPS()
 {
+   if( m_camera == nullptr) return 0;
+    
+   recordCamera(true);
+   
+   if(m_fpsSet == 0)
+   {
+      try
+      {
+         m_camera->AcquisitionFrameRateEnable.SetValue(false);
+      }
+      catch(...)
+      {
+         return log<software_error,-1>({__FILE__, __LINE__, "Error disabling frame rate limit."});
+      }
+   }
+   else
+   {
+      try 
+      {
+         m_camera->AcquisitionFrameRateEnable.SetValue(true);
+         m_camera->AcquisitionFrameRate.SetValue(m_fpsSet);
+      }
+      catch(...)
+      {
+         return log<software_error,-1>({__FILE__, __LINE__, "Error setting frame rate limit."});
+      }
+   }
+   
    return 0;
 }
 
 inline
 int baslerCtrl::setExpTime()
 {
+   if( m_camera == nullptr) return 0;
+    
    try
    {
       recordCamera(true);
