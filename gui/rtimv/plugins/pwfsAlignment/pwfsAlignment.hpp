@@ -19,7 +19,7 @@ class pwfsAlignment : public QObject,
    protected:
       bool m_enabled {false};
       
-      dictionaryT * m_dict {nullptr};
+      rtimvOverlayAccess m_roa;
       
       double m_1x {0};
       double m_1y {0};
@@ -69,8 +69,7 @@ class pwfsAlignment : public QObject,
       
       virtual ~pwfsAlignment();
 
-      virtual int attachOverlay( rtimvGraphicsView*, 
-                                 dictionaryT *,
+      virtual int attachOverlay( rtimvOverlayAccess &,
                                  mx::app::appConfigurator & config
                                ); 
       

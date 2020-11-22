@@ -405,6 +405,8 @@ protected:
    pcf::IndiProperty m_indiP_roi_bin_x; ///< Property used to set the ROI x binning
    pcf::IndiProperty m_indiP_roi_bin_y; ///< Property used to set the ROI y binning
 
+   pcf::IndiProperty m_indiP_fullROI; ///< Property used to preset the full ROI dimensions.
+   
    pcf::IndiProperty m_indiP_roi_set; ///< Property used to trigger setting the ROI 
    
    pcf::IndiProperty m_indiP_roi_full; ///< Property used to trigger setting the full ROI.
@@ -785,7 +787,7 @@ int stdCamera<derivedT>::appStartup()
          return -1;
       }
       
-      derived().createStandardIndiNumber( m_indiP_roi_bin_x, "roi_region_bin_x", m_minROIBinning_x, m_maxROIBinning_x, m_stepROIBinning_x, "%d");
+      derived().createStandardIndiNumber( m_indiP_roi_bin_x, "roi_region_bin_x", m_minROIBinning_x, m_maxROIBinning_x, m_stepROIBinning_x, "%f");
       if( derived().registerIndiPropertyNew( m_indiP_roi_bin_x, st_newCallBack_stdCamera) < 0)
       {
          #ifndef STDCAMERA_TEST_NOLOG
@@ -794,7 +796,7 @@ int stdCamera<derivedT>::appStartup()
          return -1;
       }
       
-      derived().createStandardIndiNumber( m_indiP_roi_bin_y, "roi_region_bin_y", m_minROIBinning_y, m_maxROIBinning_y, m_stepROIBinning_y, "%d");
+      derived().createStandardIndiNumber( m_indiP_roi_bin_y, "roi_region_bin_y", m_minROIBinning_y, m_maxROIBinning_y, m_stepROIBinning_y, "%f");
       if( derived().registerIndiPropertyNew( m_indiP_roi_bin_y, st_newCallBack_stdCamera) < 0)
       {
          #ifndef STDCAMERA_TEST_NOLOG
@@ -803,6 +805,23 @@ int stdCamera<derivedT>::appStartup()
          return -1;
       }
    
+      derived().createROIndiNumber( m_indiP_fullROI, "roi_full_region");
+      m_indiP_fullROI.add(pcf::IndiElement("x"));
+      m_indiP_fullROI["x"] = 0;
+      m_indiP_fullROI.add(pcf::IndiElement("y"));
+      m_indiP_fullROI["y"] = 0;
+      m_indiP_fullROI.add(pcf::IndiElement("w"));
+      m_indiP_fullROI["w"] = 0;
+      m_indiP_fullROI.add(pcf::IndiElement("h"));
+      m_indiP_fullROI["h"] = 0;
+      if( derived().registerIndiPropertyReadOnly( m_indiP_fullROI ) < 0)
+      {
+         #ifndef STDCAMERA_TEST_NOLOG
+         derivedT::template log<software_error>({__FILE__,__LINE__});
+         #endif
+         return -1;
+      }
+      
       derived().createStandardIndiRequestSw( m_indiP_roi_set, "roi_set");
       if( derived().registerIndiPropertyNew( m_indiP_roi_set, st_newCallBack_stdCamera) < 0)
       {
@@ -1522,6 +1541,16 @@ int stdCamera<derivedT>::updateINDI()
             
    }
    
+   if(m_usesROI)
+   {
+      //These can't change after initialization, but might not be discoverable until powered on and connected.
+      //so we'll check every time I guess.
+      derived().updateIfChanged(m_indiP_fullROI, "x", m_full_x, INDI_IDLE);
+      derived().updateIfChanged(m_indiP_fullROI, "y", m_full_y, INDI_IDLE);
+      derived().updateIfChanged(m_indiP_fullROI, "w", m_full_w, INDI_IDLE);
+      derived().updateIfChanged(m_indiP_fullROI, "h", m_full_h, INDI_IDLE);
+   }
+   
    if(m_hasTempControl)
    {
       if(m_tempControlStatus == false)
@@ -1553,6 +1582,8 @@ int stdCamera<derivedT>::updateINDI()
    {
       derived().updateIfChanged(m_indiP_temp, "current", m_ccdTemp, INDI_IDLE);
    }
+   
+   
    
    if(m_hasShutter)
    {

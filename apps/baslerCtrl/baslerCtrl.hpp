@@ -510,6 +510,11 @@ int baslerCtrl::connect()
    if(m_startup_bin_x == 0) m_startup_bin_x = 1;
    if(m_startup_bin_y == 0) m_startup_bin_y = 1;
       
+   m_full_w = m_camera->Width.GetMax();
+   m_full_h = m_camera->Height.GetMax();
+   m_full_x = 0.5*(m_camera->Width.GetMax()-1);
+   m_full_y = 0.5*(m_camera->Height.GetMax()-1);
+   
    m_incX = m_camera->OffsetX.GetInc();
    m_incY = m_camera->OffsetY.GetInc();
    m_maxW = m_camera->Width.GetMax();

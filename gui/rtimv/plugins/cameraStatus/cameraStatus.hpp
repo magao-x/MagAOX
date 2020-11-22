@@ -2,10 +2,11 @@
 #define cameraStatus_hpp
 
 #include <rtimv/rtimvInterfaces.hpp>
+#include <rtimv/StretchBox.hpp>
 
 #include <QObject>
 #include <QtPlugin>
-#include <QGraphicsLineItem>
+//#include <QGraphicsLineItem>
 
 #include <iostream>
 
@@ -17,25 +18,35 @@ class cameraStatus : public QObject,
    Q_INTERFACES(rtimvOverlayInterface)
     
    protected:
+      rtimvOverlayAccess m_roa;
+      
       bool m_enabled {false};
       
       bool m_enableable {false};
-      
-      dictionaryT * m_dict {nullptr};
       
       std::string m_deviceName;
       
       std::string m_filterDeviceName;
       
-      rtimvGraphicsView* m_gv {nullptr}; 
+      QGraphicsScene * m_qgs {nullptr};
+      
+      StretchBox * m_roiBox {nullptr};
+      StretchBox * m_roiFullBox {nullptr};
+      
+      int m_width {0};
+      int m_height {0};
+      
+      float m_fullROI_x {0};
+      float m_fullROI_y {0};
+      int m_fullROI_w {0};
+      int m_fullROI_h {0};
       
    public:
       cameraStatus();
       
       virtual ~cameraStatus();
 
-      virtual int attachOverlay( rtimvGraphicsView *, 
-                                 dictionaryT *,
+      virtual int attachOverlay( rtimvOverlayAccess &,
                                  mx::app::appConfigurator & config
                                ); 
       
