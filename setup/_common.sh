@@ -129,7 +129,7 @@ function createuser() {
   if getent passwd $1 > /dev/null 2>&1; then
     log_info "User account $1 exists"
   else
-    sudo useradd $1
+    sudo useradd -U $1
     echo -e "$DEFAULT_PASSWORD\n$DEFAULT_PASSWORD" | sudo passwd $1
     log_success "Created user account $1 with default password $DEFAULT_PASSWORD"
   fi
