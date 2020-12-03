@@ -100,7 +100,7 @@ protected:
    float m_pupil_cy_4; ///< the center y coordinate of pupil 4
    float m_pupil_D_4 {0}; ///< the diameter of pupil 4, used only for averaging the fitter output
 
-   int m_pupil_D; ///< the pupil diameter, just one applied to all pupils.
+   int m_pupil_D {56}; ///< the pupil diameter, just one applied to all pupils.
    
    int m_pupil_buffer {1}; ///< the edge buffer for the pupils, just one applied to all pupils.  Default is 1.
    
@@ -250,13 +250,15 @@ void pwfsSlopeCalc::setupConfig()
    
    frameGrabberT::setupConfig(config);
    
-   config.add("pupil.fitter", "", "pupil.fitter", argType::Required, "pupil", "fitter", false, "int", "The device name of the pupil fitter.  If set, then pupil number, position, and size are set by the fitter reference.");
+   config.add("pupil.fitter", "", "pupil.fitter", argType::Required, "pupil", "fitter", false, "int", "The device name of the pupil fitter.  If set, then pupil position is set by the fitter reference.");
+
+   config.add("pupil.D", "", "pupil.D", argType::Required, "pupil", "D", false, "int", "The diameter of the pupils, fixed. Default is 56.");
+
+   config.add("pupil.buffer", "", "pupil.buffer", argType::Required, "pupil", "buffer", false, "int", "The edge buffer for the pupils.  Default is 1.");
    
    config.add("pupil.numPupils", "", "pupil.numPupils", argType::Required, "pupil", "numPupils", false, "int", "The number of pupils.  Default is 4.  3 is also supported.");
    
-   config.add("pupil.D", "", "pupil.D", argType::Required, "pupil", "D", false, "int", "The default diameter of the pupils.  Can be updated from real-time fitter.");
    
-   config.add("pupil.buffer", "", "pupil.buffer", argType::Required, "pupil", "buffer", false, "int", "The edge buffer for the pupils.  Default is 1.");
    
    config.add("pupil.cx_1", "", "pupil.cx_1", argType::Required, "pupil", "cx_1", false, "int", "The default x-coordinate of pupil 1 (LL).  Can be updated from real-time fitter.");
    config.add("pupil.cy_1", "", "pupil.cy_1", argType::Required, "pupil", "cy_1", false, "int", "The default y-coordinate of pupil 1 (LL).  Can be updated from real-time fitter.");
@@ -483,7 +485,7 @@ int pwfsSlopeCalc::configureAcquisition()
       return -1;
    }
    
-   if(m_fitter != "")
+   /*if(m_fitter != "")
    {
       if(m_numPupils == 3)
       {
@@ -493,7 +495,7 @@ int pwfsSlopeCalc::configureAcquisition()
       {
          m_pupil_D = (1./4.)*(m_pupil_D_1 + m_pupil_D_2 + m_pupil_D_3 + m_pupil_D_4);
       }
-   }
+   }*/
    
    m_quadSize = m_pupil_D + 2*m_pupil_buffer;
    
@@ -564,7 +566,7 @@ int pwfsSlopeCalc::loadImageIntoStream(void * dest)
          float I3 = pwfsIm(rr+m_pupil_sx_3,cc+m_pupil_sy_3) - m_darkImage(rr+m_pupil_sx_3,cc+m_pupil_sy_3);
          float I4 = pwfsIm(rr+m_pupil_sx_4,cc+m_pupil_sy_4) - m_darkImage(rr+m_pupil_sx_4,cc+m_pupil_sy_4);
          
-         norm = I1+I2+I3+I4;
+         norm = 1;//I1+I2+I3+I4;
          
          slopesIm(rr,cc) = ((I1+I3) - (I2+I4))/norm;
          slopesIm(rr,cc+m_quadSize) = ((I1+I2)-(I3+I4))/norm;
