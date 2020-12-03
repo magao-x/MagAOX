@@ -117,9 +117,9 @@ struct timespecX
          return -1;
       }
    
-      char buffer[24];
+      char buffer[48];
 
-      snprintf(buffer, 24, "%04i%02i%02i%02i%02i%02i%09i", uttime.tm_year+1900, uttime.tm_mon+1, uttime.tm_mday, uttime.tm_hour, uttime.tm_min, uttime.tm_sec, static_cast<int>(time_ns)); //casting in case we switch type of time_ns.
+      snprintf(buffer, sizeof(buffer), "%04i%02i%02i%02i%02i%02i%09i", uttime.tm_year+1900, uttime.tm_mon+1, uttime.tm_mday, uttime.tm_hour, uttime.tm_min, uttime.tm_sec, static_cast<int>(time_ns)); //casting in case we switch type of time_ns.
    
       tstamp = buffer;
 
