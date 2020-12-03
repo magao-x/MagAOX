@@ -71,6 +71,23 @@ int pwfsAlignment::updateOverlay()
    }
    //std::cerr << "1: " << m_1x << " " << m_1y << " " << m_1D << "\n";
    
+   if( m_roa.m_dictionary->count(m_deviceName + ".quadrant1.set-x") > 0)
+   {
+      str = (char *)(*m_roa.m_dictionary)[m_deviceName + ".quadrant1.set-x"].m_blob;
+      m_set1x = strtod(str,0);
+   }
+   
+   if( m_roa.m_dictionary->count(m_deviceName + ".quadrant1.set-y") > 0)
+   {
+      str = (char *)(*m_roa.m_dictionary)[m_deviceName + ".quadrant1.set-y"].m_blob;
+      m_set1y = strtod(str,0);
+   }
+   
+   if( m_roa.m_dictionary->count(m_deviceName + ".quadrant1.set-D") > 0)
+   {
+      str = (char *)(*m_roa.m_dictionary)[m_deviceName + ".quadrant1.set-D"].m_blob;
+      m_set1D = strtod(str,0);
+   }
    
    if( m_roa.m_dictionary->count(m_deviceName + ".quadrant2.x") > 0)
    {
@@ -91,6 +108,24 @@ int pwfsAlignment::updateOverlay()
    }
    //std::cerr << "2: " <<  m_2x << " " << m_2y << " " << m_2D << "\n";
    
+   if( m_roa.m_dictionary->count(m_deviceName + ".quadrant2.set-x") > 0)
+   {
+      str = (char *)(*m_roa.m_dictionary)[m_deviceName + ".quadrant2.set-x"].m_blob;
+      m_set2x = strtod(str,0);
+   }
+   
+   if( m_roa.m_dictionary->count(m_deviceName + ".quadrant2.set-y") > 0)
+   {
+      str = (char *)(*m_roa.m_dictionary)[m_deviceName + ".quadrant2.set-y"].m_blob;
+      m_set2y = strtod(str,0);
+   }
+   
+   if( m_roa.m_dictionary->count(m_deviceName + ".quadrant2.set-D") > 0)
+   {
+      str = (char *)(*m_roa.m_dictionary)[m_deviceName + ".quadrant2.set-D"].m_blob;
+      m_set2D = strtod(str,0);
+   }
+   
    if( m_roa.m_dictionary->count(m_deviceName + ".quadrant3.x") > 0)
    {
       str = (char *)(*m_roa.m_dictionary)[m_deviceName + ".quadrant3.x"].m_blob;
@@ -110,6 +145,23 @@ int pwfsAlignment::updateOverlay()
    }
    //std::cerr << "3: " <<  m_3x << " " << m_3y << " " << m_3D << "\n";
    
+   if( m_roa.m_dictionary->count(m_deviceName + ".quadrant3.set-x") > 0)
+   {
+      str = (char *)(*m_roa.m_dictionary)[m_deviceName + ".quadrant3.set-x"].m_blob;
+      m_set3x = strtod(str,0);
+   }
+   
+   if( m_roa.m_dictionary->count(m_deviceName + ".quadrant3.set-y") > 0)
+   {
+      str = (char *)(*m_roa.m_dictionary)[m_deviceName + ".quadrant3.set-y"].m_blob;
+      m_set3y = strtod(str,0);
+   }
+   
+   if( m_roa.m_dictionary->count(m_deviceName + ".quadrant3.set-D") > 0)
+   {
+      str = (char *)(*m_roa.m_dictionary)[m_deviceName + ".quadrant3.set-D"].m_blob;
+      m_set3D = strtod(str,0);
+   }
    
    if( m_roa.m_dictionary->count(m_deviceName + ".quadrant4.x") > 0)
    {
@@ -127,6 +179,24 @@ int pwfsAlignment::updateOverlay()
    {
       str = (char *)(*m_roa.m_dictionary)[m_deviceName + ".quadrant4.D"].m_blob;
       m_4D = strtod(str,0);
+   }
+   
+   if( m_roa.m_dictionary->count(m_deviceName + ".quadrant4.set-x") > 0)
+   {
+      str = (char *)(*m_roa.m_dictionary)[m_deviceName + ".quadrant4.set-x"].m_blob;
+      m_set4x = strtod(str,0);
+   }
+   
+   if( m_roa.m_dictionary->count(m_deviceName + ".quadrant4.set-y") > 0)
+   {
+      str = (char *)(*m_roa.m_dictionary)[m_deviceName + ".quadrant4.set-y"].m_blob;
+      m_set4y = strtod(str,0);
+   }
+   
+   if( m_roa.m_dictionary->count(m_deviceName + ".quadrant4.set-D") > 0)
+   {
+      str = (char *)(*m_roa.m_dictionary)[m_deviceName + ".quadrant4.set-D"].m_blob;
+      m_set4D = strtod(str,0);
    }
    
    if(!initialized)
@@ -193,10 +263,20 @@ int pwfsAlignment::updateOverlay()
       m_2to4->setLine(QLineF(m_2x,m_height-1-m_2y, m_4x, m_height-1-m_4y ));
       m_3to4->setLine(QLineF(m_3x,m_height-1-m_3y, m_4x, m_height-1-m_4y ));
    
+      m_1to2s->setLine(QLineF(m_set1x,m_height-1-m_set1y, m_set2x, m_height-1-m_set2y ));
+      m_1to3s->setLine(QLineF(m_set1x,m_height-1-m_set1y, m_set3x, m_height-1-m_set3y ));
+      m_2to4s->setLine(QLineF(m_set2x,m_height-1-m_set2y, m_set4x, m_height-1-m_set4y ));
+      m_3to4s->setLine(QLineF(m_set3x,m_height-1-m_set3y, m_set4x, m_height-1-m_set4y ));
+      
       m_c1->setRect(m_1x-0.5*m_1D, m_height-1-m_1y-0.5*m_1D, m_1D, m_1D);
       m_c2->setRect(m_2x-0.5*m_2D, m_height-1-m_2y-0.5*m_2D, m_2D, m_2D);
       m_c3->setRect(m_3x-0.5*m_3D, m_height-1-m_3y-0.5*m_3D, m_3D, m_3D);
       m_c4->setRect(m_4x-0.5*m_4D, m_height-1-m_4y-0.5*m_4D, m_4D, m_4D);
+      
+      m_c1s->setRect(m_set1x-0.5*m_set1D, m_height-1-m_set1y-0.5*m_set1D, m_set1D, m_set1D);
+      m_c2s->setRect(m_set2x-0.5*m_set2D, m_height-1-m_set2y-0.5*m_set2D, m_set2D, m_set2D);
+      m_c3s->setRect(m_set3x-0.5*m_set3D, m_height-1-m_set3y-0.5*m_set3D, m_set3D, m_set3D);
+      m_c4s->setRect(m_set4x-0.5*m_set4D, m_height-1-m_set4y-0.5*m_set4D, m_set4D, m_set4D);
    }
    
    return 0;
