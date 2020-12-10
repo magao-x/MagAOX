@@ -282,6 +282,7 @@ int pwfsSlopeCalc::loadConfigImpl( mx::app::appConfigurator & _config )
    frameGrabberT::loadConfig(_config);
    
    config(m_fitter, "pupil.fitter");
+   config(m_numPupils, "pupil.numPupils");
    config(m_pupil_D, "pupil.D");
    config(m_pupil_buffer, "pupil.buffer");
    config(m_pupil_cx_1, "pupil.cx_1");
@@ -330,7 +331,10 @@ int pwfsSlopeCalc::appStartup()
       REG_INDI_SETPROP(m_indiP_quad1, m_fitter, "quadrant1");
       REG_INDI_SETPROP(m_indiP_quad2, m_fitter, "quadrant2");
       REG_INDI_SETPROP(m_indiP_quad3, m_fitter, "quadrant3");
-      REG_INDI_SETPROP(m_indiP_quad4, m_fitter, "quadrant4");
+      if(m_numPupils == 4)
+      {
+         REG_INDI_SETPROP(m_indiP_quad4, m_fitter, "quadrant4");
+      }
    }
    
    state(stateCodes::OPERATING);
@@ -556,20 +560,44 @@ int pwfsSlopeCalc::loadImageIntoStream(void * dest)
    Eigen::Map<eigenImage<unsigned short>> pwfsIm( static_cast<unsigned short *>(m_curr_src), shmimMonitorT::m_width, shmimMonitorT::m_height );
    Eigen::Map<eigenImage<float>> slopesIm(static_cast<float*>(dest), frameGrabberT::m_width, frameGrabberT::m_height );
    
+   static float sqrt32 = sqrt(3.0)/2;
+   
    float norm;
-   for(int rr=0; rr< m_quadSize; ++rr)
+   
+   if(m_numPupils == 3)
    {
-      for(int cc=0; cc< m_quadSize; ++cc)
+      for(int rr=0; rr< m_quadSize; ++rr)
       {
-         float I1 = pwfsIm(rr+m_pupil_sx_1,cc+m_pupil_sy_1) - m_darkImage(rr+m_pupil_sx_1,cc+m_pupil_sy_1);
-         float I2 = pwfsIm(rr+m_pupil_sx_2,cc+m_pupil_sy_2) - m_darkImage(rr+m_pupil_sx_2,cc+m_pupil_sy_2);
-         float I3 = pwfsIm(rr+m_pupil_sx_3,cc+m_pupil_sy_3) - m_darkImage(rr+m_pupil_sx_3,cc+m_pupil_sy_3);
-         float I4 = pwfsIm(rr+m_pupil_sx_4,cc+m_pupil_sy_4) - m_darkImage(rr+m_pupil_sx_4,cc+m_pupil_sy_4);
+         for(int cc=0; cc< m_quadSize; ++cc)
+         {
+            float I1 = pwfsIm(rr+m_pupil_sx_1,cc+m_pupil_sy_1) - m_darkImage(rr+m_pupil_sx_1,cc+m_pupil_sy_1);
+            float I2 = pwfsIm(rr+m_pupil_sx_2,cc+m_pupil_sy_2) - m_darkImage(rr+m_pupil_sx_2,cc+m_pupil_sy_2);
+            float I3 = pwfsIm(rr+m_pupil_sx_3,cc+m_pupil_sy_3) - m_darkImage(rr+m_pupil_sx_3,cc+m_pupil_sy_3);
+           
+            norm = 1;//I1+I2+I3+I4;
          
-         norm = 1;//I1+I2+I3+I4;
+            slopesIm(rr,cc) = sqrt32*(I2-I3)/norm;
+            slopesIm(rr,cc+m_quadSize) = (I1-0.5*(I2+I3))/norm;
+         }
+      }
+   }
+   else
+   {
+   
+      for(int rr=0; rr< m_quadSize; ++rr)
+      {
+         for(int cc=0; cc< m_quadSize; ++cc)
+         {
+            float I1 = pwfsIm(rr+m_pupil_sx_1,cc+m_pupil_sy_1) - m_darkImage(rr+m_pupil_sx_1,cc+m_pupil_sy_1);
+            float I2 = pwfsIm(rr+m_pupil_sx_2,cc+m_pupil_sy_2) - m_darkImage(rr+m_pupil_sx_2,cc+m_pupil_sy_2);
+            float I3 = pwfsIm(rr+m_pupil_sx_3,cc+m_pupil_sy_3) - m_darkImage(rr+m_pupil_sx_3,cc+m_pupil_sy_3);
+            float I4 = pwfsIm(rr+m_pupil_sx_4,cc+m_pupil_sy_4) - m_darkImage(rr+m_pupil_sx_4,cc+m_pupil_sy_4);
          
-         slopesIm(rr,cc) = ((I1+I3) - (I2+I4))/norm;
-         slopesIm(rr,cc+m_quadSize) = ((I1+I2)-(I3+I4))/norm;
+            norm = 1;//I1+I2+I3+I4;
+         
+            slopesIm(rr,cc) = ((I1+I3) - (I2+I4))/norm;
+            slopesIm(rr,cc+m_quadSize) = ((I1+I2)-(I3+I4))/norm;
+         }
       }
    }
     /*

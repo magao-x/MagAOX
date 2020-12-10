@@ -215,10 +215,17 @@ int pwfsAlignment::updateOverlay()
          m_1to3 = m_roa.m_graphicsView->scene()->addLine(QLineF(dQw,(m_height-1)-dQh, 0.5*m_height, dQh ), QColor("red"));
          m_3to4 = m_roa.m_graphicsView->scene()->addLine(QLineF(0.5*m_height, dQh, 0.5*m_width+dQw, (m_height-1)-dQh), QColor("red"));
          
+         m_1to2s = m_roa.m_graphicsView->scene()->addLine(QLineF(29.5,119-29.5, 89.5, 119-29.5 ), QPen(QBrush(QColor("lime")), 0.1));
+         m_1to3s = m_roa.m_graphicsView->scene()->addLine(QLineF(29.5,119-29.5, 29.5, 119-89.5 ), QPen(QBrush(QColor("lime")), 0.1));
+         m_3to4s = m_roa.m_graphicsView->scene()->addLine(QLineF(29.5,119-89.5, 89.5, 119-89.5 ), QPen(QBrush(QColor("lime")), 0.1));
+         
          m_c1 = m_roa.m_graphicsView->scene()->addEllipse(dQw-14,(m_height-1)-dQh-14, 28.0, 28.0, QColor("red"));
          m_c2 = m_roa.m_graphicsView->scene()->addEllipse(0.5*m_width+dQw-14, (m_height-1)-dQh-14, 28.0, 28.0, QColor("red"));
          m_c3 = m_roa.m_graphicsView->scene()->addEllipse(0.5*m_height-14, dQh-14, 28.0, 28.0, QColor("red"));
 
+         m_c1s = m_roa.m_graphicsView->scene()->addEllipse(29.5-28.0, 119-29.5-28.0, 56.0, 56.0, QPen(QBrush(QColor("lime")), 0.1));
+         m_c2s = m_roa.m_graphicsView->scene()->addEllipse(89.5-28.0, 119-29.5-28.0, 56.0, 56.0, QPen(QBrush(QColor("lime")), 0.1));
+         m_c3s = m_roa.m_graphicsView->scene()->addEllipse(29.5-28.0, 119-89.5-28.0, 56.0, 56.0, QPen(QBrush(QColor("lime")), 0.1));
       }
       else
       {
@@ -252,9 +259,17 @@ int pwfsAlignment::updateOverlay()
       m_1to3->setLine(QLineF(m_1x,m_height-1-m_1y, m_3x, m_height-1-m_3y ));
       m_3to4->setLine(QLineF(m_3x,m_height-1-m_3y, m_2x, m_height-1-m_2y ));
       
+      m_1to2s->setLine(QLineF(m_set1x,m_height-1-m_set1y, m_set2x, m_height-1-m_set2y ));
+      m_1to3s->setLine(QLineF(m_set1x,m_height-1-m_set1y, m_set3x, m_height-1-m_set3y ));
+      m_3to4s->setLine(QLineF(m_set3x,m_height-1-m_set3y, m_set2x, m_height-1-m_set2y ));
+      
       m_c1->setRect(m_1x-0.5*m_1D, m_height-1-m_1y-0.5*m_1D, m_1D, m_1D);
       m_c2->setRect(m_2x-0.5*m_2D, m_height-1-m_2y-0.5*m_2D, m_2D, m_2D);
       m_c3->setRect(m_3x-0.5*m_3D, m_height-1-m_3y-0.5*m_3D, m_3D, m_3D);
+      
+      m_c1s->setRect(m_set1x-0.5*m_set1D, m_height-1-m_set1y-0.5*m_set1D, m_set1D, m_set1D);
+      m_c2s->setRect(m_set2x-0.5*m_set2D, m_height-1-m_set2y-0.5*m_set2D, m_set2D, m_set2D);
+      m_c3s->setRect(m_set3x-0.5*m_set3D, m_height-1-m_set3y-0.5*m_set3D, m_set3D, m_set3D);
    }
    else
    {
