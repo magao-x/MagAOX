@@ -570,9 +570,9 @@ int pwfsSlopeCalc::loadImageIntoStream(void * dest)
       {
          for(int cc=0; cc< m_quadSize; ++cc)
          {
-            float I1 = pwfsIm(rr+m_pupil_sx_1,cc+m_pupil_sy_1) - m_darkImage(rr+m_pupil_sx_1,cc+m_pupil_sy_1);
-            float I2 = pwfsIm(rr+m_pupil_sx_2,cc+m_pupil_sy_2) - m_darkImage(rr+m_pupil_sx_2,cc+m_pupil_sy_2);
-            float I3 = pwfsIm(rr+m_pupil_sx_3,cc+m_pupil_sy_3) - m_darkImage(rr+m_pupil_sx_3,cc+m_pupil_sy_3);
+            float I2 = pwfsIm(rr+m_pupil_sx_1,cc+m_pupil_sy_1) - m_darkImage(rr+m_pupil_sx_1,cc+m_pupil_sy_1);
+            float I3 = pwfsIm(rr+m_pupil_sx_2,cc+m_pupil_sy_2) - m_darkImage(rr+m_pupil_sx_2,cc+m_pupil_sy_2);
+            float I1 = pwfsIm(rr+m_pupil_sx_3,cc+m_pupil_sy_3) - m_darkImage(rr+m_pupil_sx_3,cc+m_pupil_sy_3);
            
             norm = 1;//I1+I2+I3+I4;
          
