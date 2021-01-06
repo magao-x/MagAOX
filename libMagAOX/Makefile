@@ -92,6 +92,10 @@ $(TARGET).gch: $(TARGET) $(INCLUDEDEPS) logger/generated/logTypes.hpp
 logger/generated/logTypes.hpp: logger/logCodes.dat
 	cd logger; ../../flatlogs/bin/flatlogcodes
 
+libMagAOX.a: $(TARGET).gch app/MagAOXApp.o
+	ar rvs libMagAOX.a app/MagAOXApp.o
+
+
 .PHONY: clean
 clean:
 	rm -f $(TARGET).gch

@@ -2772,34 +2772,17 @@ pcf::IndiProperty::Type propType()
    return pcf::IndiProperty::Unknown;
 }
 
+template<>
+pcf::IndiProperty::Type propType<char *>();
 
 template<>
-inline
-pcf::IndiProperty::Type propType<char *>()
-{
-   return pcf::IndiProperty::Text;
-}
+pcf::IndiProperty::Type propType<std::string>();
 
 template<>
-inline
-pcf::IndiProperty::Type propType<std::string>()
-{
-   return pcf::IndiProperty::Text;
-}
+pcf::IndiProperty::Type propType<int>();
 
 template<>
-inline
-pcf::IndiProperty::Type propType<int>()
-{
-   return pcf::IndiProperty::Number;
-}
-
-template<>
-inline
-pcf::IndiProperty::Type propType<double>()
-{
-   return pcf::IndiProperty::Number;
-}
+pcf::IndiProperty::Type propType<double>();
 
 template<bool _useINDI>
 template<typename T>
@@ -2977,6 +2960,9 @@ std::string MagAOXApp<_useINDI>::driverCtrlName()
 {
    return m_driverCtrlName;
 }
+
+extern template class MagAOXApp<true>;
+extern template class MagAOXApp<false>;
 
 } //namespace app
 } //namespace MagAOX

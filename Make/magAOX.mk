@@ -49,7 +49,7 @@ pch:
 $(TARGET).o: $(abspath $(SELF_DIR)/../libMagAOX/libMagAOX.hpp.gch) $(TARGET).hpp $(OTHER_HEADERS)
 
 $(TARGET):  $(TARGET).o  $(OTHER_OBJS)
-	$(LINK.o)  -o $(TARGET) $(TARGET).o $(OTHER_OBJS) $(LDFLAGS) $(LDLIBS)
+	$(LINK.o)  -o $(TARGET) $(TARGET).o $(OTHER_OBJS) $(abspath $(SELF_DIR)/../libMagAOX/libMagAOX.a) $(LDFLAGS) $(LDLIBS) 
 
 
 #The GIT status header
