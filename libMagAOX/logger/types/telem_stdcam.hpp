@@ -187,7 +187,7 @@ struct telem_stdcam : public flatbuffer_log
       
 }; //telem_stdcam
 
-timespec telem_stdcam::lastRecord = {0,0};
+
 
 } //namespace logger
 } //namespace MagAOX

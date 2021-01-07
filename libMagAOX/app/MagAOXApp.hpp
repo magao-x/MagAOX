@@ -1581,14 +1581,7 @@ void MagAOXApp<_useINDI>::handlerSigTerm( int signum,
 void sigUsr1Handler( int signum,
                      siginfo_t * siginf,
                      void *ucont 
-                   )
-{
-   static_cast<void>(signum);
-   static_cast<void>(siginf);
-   static_cast<void>(ucont);
-   
-   return;
-}
+                   );
 
 template<bool _useINDI>
 int MagAOXApp<_useINDI>::euidCalled()

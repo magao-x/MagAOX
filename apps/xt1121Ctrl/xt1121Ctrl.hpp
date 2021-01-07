@@ -149,9 +149,6 @@ public:
    INDI_NEWCALLBACK_DECL(xt1121Ctrl, m_indiP_ch13);
    INDI_NEWCALLBACK_DECL(xt1121Ctrl, m_indiP_ch14);
    INDI_NEWCALLBACK_DECL(xt1121Ctrl, m_indiP_ch15);
-   
-
-
 };
 
 inline

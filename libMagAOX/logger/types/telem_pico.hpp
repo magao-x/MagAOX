@@ -75,7 +75,7 @@ struct telem_pico : public flatbuffer_log
 
 }; //telem_pico
 
-timespec telem_pico::lastRecord = {0,0};
+
 
 } //namespace logger
 } //namespace MagAOX

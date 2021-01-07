@@ -187,8 +187,6 @@ struct telem_chrony_stats : public flatbuffer_log
    
 }; //telem_chrony_stats
 
-timespec telem_chrony_stats::lastRecord = {0,0};
-
 } //namespace logger
 } //namespace MagAOX
 

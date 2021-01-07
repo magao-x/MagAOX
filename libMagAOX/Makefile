@@ -4,7 +4,7 @@
 include ../Make/common.mk
 
 
-TARGET=libMagAOX.hpp
+TARGET=
 
 #Dependencies to trigger recompile
 INCLUDEDEPS= app/MagAOXApp.hpp \
@@ -85,20 +85,38 @@ INCLUDEDEPS= app/MagAOXApp.hpp \
              modbus/modbus.hpp \
              modbus/modbus_exception.hpp
 
+OBJS = app/MagAOXApp.o \
+       app/stateCodes.o \
+       app/dev/stdCamera.o \
+       logger/types/telem.o \
+       logger/logFileName.o \
+       logger/logFileRaw.o \
+       logger/logMap.o \
+       modbus/modbus.o \
+       sys/runCommand.o \
+       sys/thSetuid.o \
+       tty/telnetConn.o \
+       tty/ttyIOUtils.o \
+       tty/ttyErrors.o \
+       tty/ttyUSB.o \
+       tty/usbDevice.o
 
+all: libMagAOX.hpp.gch libMagAOX.a  
 
-$(TARGET).gch: $(TARGET) $(INCLUDEDEPS) logger/generated/logTypes.hpp
+libMagAOX.hpp.gch: libMagAOX.hpp $(INCLUDEDEPS) logger/generated/logTypes.hpp
 
 logger/generated/logTypes.hpp: logger/logCodes.dat
 	cd logger; ../../flatlogs/bin/flatlogcodes
 
-libMagAOX.a: $(TARGET).gch app/MagAOXApp.o
-	ar rvs libMagAOX.a app/MagAOXApp.o
+libMagAOX.a: libMagAOX.hpp.gch $(OBJS)
+	ar rvs libMagAOX.a $(OBJS)
 
 
 .PHONY: clean
 clean:
-	rm -f $(TARGET).gch
+	rm -f libMagAOX.hpp.gch
+	rm -f libMagAOX.a
+	rm -f $(OBJS)
 	rm -f *~
 	rm -rf logger/generated
 	rm -rf logger/types/generated

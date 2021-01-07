@@ -99,19 +99,19 @@ struct telem_telpos : public flatbuffer_log
       switch(m)
       {
          case em_epoch:
-            return GetTelem_telpos_fb(logHeader::messageBuffer(buffer))->epoch();
+            return GetTelem_telpos_fb(flatlogs::logHeader::messageBuffer(buffer))->epoch();
          case em_ra:
-            return GetTelem_telpos_fb(logHeader::messageBuffer(buffer))->ra();
+            return GetTelem_telpos_fb(flatlogs::logHeader::messageBuffer(buffer))->ra();
          case em_dec:
-            return GetTelem_telpos_fb(logHeader::messageBuffer(buffer))->dec();
+            return GetTelem_telpos_fb(flatlogs::logHeader::messageBuffer(buffer))->dec();
          case em_el:
-            return GetTelem_telpos_fb(logHeader::messageBuffer(buffer))->el();
+            return GetTelem_telpos_fb(flatlogs::logHeader::messageBuffer(buffer))->el();
          case em_ha:
-            return GetTelem_telpos_fb(logHeader::messageBuffer(buffer))->ha();
+            return GetTelem_telpos_fb(flatlogs::logHeader::messageBuffer(buffer))->ha();
          case em_am:
-            return GetTelem_telpos_fb(logHeader::messageBuffer(buffer))->am();
+            return GetTelem_telpos_fb(flatlogs::logHeader::messageBuffer(buffer))->am();
          case em_rotoff:
-            return GetTelem_telpos_fb(logHeader::messageBuffer(buffer))->rotoff();
+            return GetTelem_telpos_fb(flatlogs::logHeader::messageBuffer(buffer))->rotoff();
          default:
             return nan("");
       }
@@ -120,7 +120,7 @@ struct telem_telpos : public flatbuffer_log
    
 }; //telem_telpos
 
-timespec telem_telpos::lastRecord = {0,0};
+
 
 } //namespace logger
 } //namespace MagAOX

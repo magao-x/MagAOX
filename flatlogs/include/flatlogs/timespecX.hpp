@@ -227,7 +227,7 @@ struct timespecX
      *
      * \returns the time as a double. 
      * 
-     */ 
+     */
    double asDouble()
    {
       return ((double) time_s) + ((double) time_ns)/1e9;
@@ -247,6 +247,7 @@ struct timespecX
   * 
   * \ingroup timeutils_tscomp
   */  
+inline
 bool operator<( timespecX const& tsL, ///< [in] the left hand side of the comparison
                 timespecX const& tsR  ///< [in] the right hand side of the comparison 
               )
@@ -264,6 +265,7 @@ bool operator<( timespecX const& tsL, ///< [in] the left hand side of the compar
   * 
   * \ingroup timeutils_tscomp
   */
+inline
 bool operator>( timespecX const& tsL, ///< [in] the left hand side of the comparison
                 timespecX const& tsR  ///< [in] the right hand side of the comparison 
               )
@@ -281,6 +283,7 @@ bool operator>( timespecX const& tsL, ///< [in] the left hand side of the compar
   * 
   * \ingroup timeutils_tscomp
   */
+inline
 bool operator==( timespecX const& tsL, ///< [in] the left hand side of the comparison
                  timespecX const& tsR  ///< [in] the right hand side of the comparison 
                )
@@ -298,6 +301,7 @@ bool operator==( timespecX const& tsL, ///< [in] the left hand side of the compa
   * 
   * \ingroup timeutils_tscomp
   */
+inline
 bool operator<=( timespecX const& tsL, ///< [in] the left hand side of the comparison
                  timespecX const& tsR  ///< [in] the right hand side of the comparison 
                )
@@ -315,6 +319,7 @@ bool operator<=( timespecX const& tsL, ///< [in] the left hand side of the compa
   * 
   * \ingroup timeutils_tscomp
   */
+inline
 bool operator>=( timespecX const& tsL, ///< [in] the left hand side of the comparison
                  timespecX const& tsR  ///< [in] the right hand side of the comparison 
                )
@@ -322,7 +327,7 @@ bool operator>=( timespecX const& tsL, ///< [in] the left hand side of the compa
    return ( tsL > tsR || tsL == tsR );   
 }
 
-
+inline
 timespecX meanTimespecX( timespecX ts1, timespecX ts2)
 {
    double means = ((double)(ts1.time_s + ts2.time_s))/2.0;

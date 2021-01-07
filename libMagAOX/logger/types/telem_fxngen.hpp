@@ -112,7 +112,7 @@ struct telem_fxngen : public flatbuffer_log
    
 }; //telem_fxngen
 
-timespec telem_fxngen::lastRecord = {0,0};
+
 
 } //namespace logger
 } //namespace MagAOX

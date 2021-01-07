@@ -122,7 +122,7 @@ struct telem_stage : public flatbuffer_log
    
 }; //telem_stage
 
-timespec telem_stage::lastRecord = {0,0};
+
 
 } //namespace logger
 } //namespace MagAOX

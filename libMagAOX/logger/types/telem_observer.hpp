@@ -90,7 +90,7 @@ struct telem_observer : public flatbuffer_log
    
 }; //telem_observer
 
-timespec telem_observer::lastRecord = {0,0};
+
 
 } //namespace logger
 } //namespace MagAOX

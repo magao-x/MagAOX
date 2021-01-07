@@ -74,7 +74,7 @@ struct telem_zaber : public flatbuffer_log
    
 }; //telem_zaber
 
-timespec telem_zaber::lastRecord = {0,0};
+
 
 } //namespace logger
 } //namespace MagAOX

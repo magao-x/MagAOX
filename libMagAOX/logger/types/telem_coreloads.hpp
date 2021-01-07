@@ -77,7 +77,7 @@ struct telem_coreloads : public flatbuffer_log
 
 }; //telem_coreloads
 
-timespec telem_coreloads::lastRecord = {0,0};
+
 
 } //namespace logger
 } //namespace MagAOX

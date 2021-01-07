@@ -268,7 +268,7 @@ struct telem_telcat : public flatbuffer_log
 
 }; //telem_telcat
 
-timespec telem_telcat::lastRecord = {0,0};
+
 
 } //namespace logger
 } //namespace MagAOX

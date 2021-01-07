@@ -91,7 +91,7 @@ struct ocam_temps : public flatbuffer_log
    
 }; //ocam_temps
 
-timespec ocam_temps::lastRecord = {0,0};
+
 
 } //namespace logger
 } //namespace MagAOX

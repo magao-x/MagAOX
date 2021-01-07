@@ -116,7 +116,7 @@ struct telem_telsee : public flatbuffer_log
    
 }; //telem_telsee
 
-timespec telem_telsee::lastRecord = {0,0};
+
 
 } //namespace logger
 } //namespace MagAOX

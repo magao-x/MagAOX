@@ -285,6 +285,8 @@ int emitLogTypes( const std::string & fileName,
    }   
    fout << "#endif\n";
    fout.close();
+   
+   return 0;
 }
 
 ///\todo needs to make generated directory
