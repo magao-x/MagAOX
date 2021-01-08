@@ -14,7 +14,7 @@
  */
 
 #include <mx/improc/eigenImage.hpp>
-#include <mx/improc/fitsFile.hpp>
+#include <mx/ioutils/fits/fitsFile.hpp>
 
 namespace MagAOX
 {
@@ -690,7 +690,7 @@ int dm<derivedT,realT>::loadFlat(std::string & target)
    std::string targetPath = m_flatPath + "/" + m_flat;
    
    //load into memory.
-   mx::improc::fitsFile<realT> ff;
+   mx::fits::fitsFile<realT> ff;
    if(ff.read(m_flatCommand, targetPath) < 0)
    {
       derivedT::template log<text_log>("flat file " + targetPath + " not found", logPrio::LOG_ERROR);
@@ -718,7 +718,7 @@ int dm<derivedT,realT>::loadTest(std::string & target)
    std::string targetPath = m_flatPath + "/" + m_test;
    
    //load into memory.
-   mx::improc::fitsFile<realT> ff;
+   mx::fits::fitsFile<realT> ff;
    if(ff.read(m_testCommand, targetPath) < 0)
    {
       derivedT::template log<text_log>("test file " + targetPath + " not found", logPrio::LOG_ERROR);

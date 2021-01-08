@@ -12,7 +12,7 @@
 #include <poll.h>
 #include <termios.h>
 
-#include <mx/timeUtils.hpp>
+#include <mx/sys/timeUtils.hpp>
 
 #include "ttyErrors.hpp"
 
@@ -141,12 +141,12 @@ int ttyWrite( const std::string & buffWrite, // [in] The characters to write to 
    pfd.fd = fd;
    pfd.events = POLLOUT;
 
-   t0 = mx::get_curr_time();
+   t0 = mx::sys::get_curr_time();
 
    size_t totWritten = 0;
    while( totWritten < buffWrite.size())
    {
-      int timeoutCurrent = timeoutWrite - (mx::get_curr_time()-t0)*1000;
+      int timeoutCurrent = timeoutWrite - (mx::sys::get_curr_time()-t0)*1000;
       if(timeoutCurrent < 0) return TTY_E_TIMEOUTONWRITE;
 
       int rv = poll( &pfd, 1, timeoutCurrent);
@@ -163,7 +163,7 @@ int ttyWrite( const std::string & buffWrite, // [in] The characters to write to 
 
       totWritten += rv;
 
-      if( ( mx::get_curr_time()-t0)*1000 > timeoutWrite ) return TTY_E_TIMEOUTONWRITE;
+      if( ( mx::sys::get_curr_time()-t0)*1000 > timeoutWrite ) return TTY_E_TIMEOUTONWRITE;
    }
 
    return TTY_E_NOERROR;
@@ -224,7 +224,7 @@ int ttyRead( std::string & strRead,   // [out] The string in which to store the 
    char buffRead[TTY_BUFFSIZE];
 
    //Start timeout clock for reading.
-   t0 = mx::get_curr_time();
+   t0 = mx::sys::get_curr_time();
    timeoutCurrent = timeoutRead;
 
    //Now read the response up to the eot.
@@ -243,7 +243,7 @@ int ttyRead( std::string & strRead,   // [out] The string in which to store the 
    
    while( totBytes < bytes )
    {
-      timeoutCurrent = timeoutRead - (mx::get_curr_time()-t0)*1000;
+      timeoutCurrent = timeoutRead - (mx::sys::get_curr_time()-t0)*1000;
       if(timeoutCurrent < 0) return TTY_E_TIMEOUTONREAD;
 
       rv = poll( &pfd, 1, timeoutCurrent);
@@ -289,7 +289,7 @@ int ttyRead( std::string & strRead,   // [out] The string in which to store the 
    char buffRead[TTY_BUFFSIZE];
 
    //Start timeout clock for reading.
-   t0 = mx::get_curr_time();
+   t0 = mx::sys::get_curr_time();
    timeoutCurrent = timeoutRead;
 
    //Now read the response up to the eot.
@@ -306,7 +306,7 @@ int ttyRead( std::string & strRead,   // [out] The string in which to store the 
 
    while( !isEndOfTrans(strRead, eot) )
    {
-      timeoutCurrent = timeoutRead - (mx::get_curr_time()-t0)*1000;
+      timeoutCurrent = timeoutRead - (mx::sys::get_curr_time()-t0)*1000;
       if(timeoutCurrent < 0) return TTY_E_TIMEOUTONREAD;
 
       rv = poll( &pfd, 1, timeoutCurrent);
@@ -354,7 +354,7 @@ int ttyWriteRead( std::string & strRead,        // [out] The string in which to 
 
 
    //Start timeout clock for reading.
-   t0 = mx::get_curr_time();;
+   t0 = mx::sys::get_curr_time();;
 
    if(swallowEcho)
    {
@@ -368,7 +368,7 @@ int ttyWriteRead( std::string & strRead,        // [out] The string in which to 
       //First swallow the echo.
       while( totrv <= strWrite.size() )
       {
-         timeoutCurrent = timeoutRead - (mx::get_curr_time()-t0)*1000;
+         timeoutCurrent = timeoutRead - (mx::sys::get_curr_time()-t0)*1000;
          if(timeoutCurrent < 0) return TTY_E_TIMEOUTONREAD;
 
          rv = poll( &pfd, 1, timeoutCurrent);
@@ -382,7 +382,7 @@ int ttyWriteRead( std::string & strRead,        // [out] The string in which to 
       }
    }
 
-   timeoutCurrent = timeoutRead - (mx::get_curr_time()-t0)*1000;
+   timeoutCurrent = timeoutRead - (mx::sys::get_curr_time()-t0)*1000;
    if(timeoutCurrent < 0) return TTY_E_TIMEOUTONREAD;
 
    //Now read the response up to the eot.

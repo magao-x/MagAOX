@@ -20,12 +20,10 @@
 
 #include <unordered_map>
 
-#include <boost/filesystem.hpp>
-
 #include <mx/mxlib.hpp>
 #include <mx/app/application.hpp>
-#include <mx/environment.hpp>
-
+#include <mx/sys/environment.hpp>
+#include <mx/ioutils/fileUtils.hpp>
 
 
 #include "../common/environment.hpp"
@@ -1081,7 +1079,7 @@ void MagAOXApp<_useINDI>::setDefaults( int argc,
 {
    std::string tmpstr;
 
-   tmpstr = mx::getEnv(MAGAOX_env_path);
+   tmpstr = mx::sys::getEnv(MAGAOX_env_path);
    if(tmpstr != "")
    {
       MagAOXPath = tmpstr;
@@ -1092,7 +1090,7 @@ void MagAOXApp<_useINDI>::setDefaults( int argc,
    }
 
    //Set the config path relative to MagAOXPath
-   tmpstr = mx::getEnv(MAGAOX_env_config);
+   tmpstr = mx::sys::getEnv(MAGAOX_env_config);
    if(tmpstr == "")
    {
       tmpstr = MAGAOX_configRelPath;
@@ -1101,7 +1099,7 @@ void MagAOXApp<_useINDI>::setDefaults( int argc,
    configPathGlobal = m_configDir + "/magaox.conf";
 
    //Set the calib path relative to MagAOXPath
-   tmpstr = mx::getEnv(MAGAOX_env_calib);
+   tmpstr = mx::sys::getEnv(MAGAOX_env_calib);
    if(tmpstr == "")
    {
       tmpstr = MAGAOX_calibRelPath;
@@ -1138,8 +1136,7 @@ void MagAOXApp<_useINDI>::setDefaults( int argc,
 
    if(m_configName == "")
    {
-      boost::filesystem::path p(invokedName);
-      m_configName = p.stem().string();
+      m_configName = mx::ioutils::pathStem(invokedName);
       log<text_log>("Application name (-n --name) not set.  Using argv[0].");
    }
 
@@ -1582,6 +1579,7 @@ void sigUsr1Handler( int signum,
                      siginfo_t * siginf,
                      void *ucont 
                    );
+
 
 template<bool _useINDI>
 int MagAOXApp<_useINDI>::euidCalled()

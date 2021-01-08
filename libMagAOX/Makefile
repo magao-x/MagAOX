@@ -87,14 +87,18 @@ INCLUDEDEPS= app/MagAOXApp.hpp \
 
 OBJS = app/MagAOXApp.o \
        app/stateCodes.o \
+       app/dev/ioDevice.o \
+       app/dev/outletController.o \
        app/dev/stdCamera.o \
        logger/types/telem.o \
        logger/logFileName.o \
        logger/logFileRaw.o \
        logger/logMap.o \
+       logger/logMeta.o \
        modbus/modbus.o \
        sys/runCommand.o \
        sys/thSetuid.o \
+       tty/netSerial.o \
        tty/telnetConn.o \
        tty/ttyIOUtils.o \
        tty/ttyErrors.o \

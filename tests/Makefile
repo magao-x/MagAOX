@@ -1,13 +1,12 @@
 
 
        
-OBJS = ../apps/streamWriter/tests/streamWriter_test.cpp
-
-#../libMagAOX/app/dev/tests/outletController_tests.o \
-#       ../libMagAOX/sys/tests/thSetuid_tests.o \
-#       ../libMagAOX/tty/tests/ttyIOUtils_test.o \
-#       ../apps/ocam2KCtrl/tests/ocamUtils_test.o \
-#       ../apps/siglentSDG/tests/siglentSDG_test.o
+OBJS = ../apps/streamWriter/tests/streamWriter_test.o \
+       ../libMagAOX/app/dev/tests/outletController_tests.o \
+        ../libMagAOX/sys/tests/thSetuid_tests.o \
+        ../libMagAOX/tty/tests/ttyIOUtils_test.o \
+        ../apps/ocam2KCtrl/tests/ocamUtils_test.o \
+        ../apps/siglentSDG/tests/siglentSDG_test.o
 
        
        
@@ -29,7 +28,7 @@ include $(SELF_DIR)/../Make/common.mk
 TARGET ?= testMagAOX.o
 
 all: $(TARGET) $(OBJS) magaox_git_version.h
-	$(LINK.o)  -o testMagAOX $(TARGET) $(OBJS) $(LDFLAGS) $(LDLIBS)
+	$(LINK.o)  -o testMagAOX $(TARGET) $(OBJS) $(abspath $(SELF_DIR)/../libMagAOX/libMagAOX.a) $(LDFLAGS) $(LDLIBS)
 
 #The GIT status header
 #This always gets regenerated.

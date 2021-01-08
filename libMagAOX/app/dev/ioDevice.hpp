@@ -9,7 +9,7 @@
 #ifndef app_tty_ioDevice_hpp
 #define app_tty_ioDevice_hpp
 
-
+#include <mx/app/appConfigurator.hpp>
 
 namespace MagAOX
 {
@@ -33,7 +33,7 @@ struct ioDevice
      * \returns 0 on success.
      * \returns -1 on error (nothing implemented yet)
      */ 
-   int setupConfig( appConfigurator & config /**< [in] an application configuration to setup */);
+   int setupConfig( mx::app::appConfigurator & config /**< [in] an application configuration to setup */);
 
    ///Load the device section from an application configurator
    /**
@@ -41,7 +41,7 @@ struct ioDevice
      * \returns 0 on success
      * \returns -1 on error (nothing implemented yet)
      */
-   int loadConfig( appConfigurator & config /**< [in] an application configuration from which to load values */);
+   int loadConfig( mx::app::appConfigurator & config /**< [in] an application configuration from which to load values */);
    
    /// Perform application startup steps specific to an ioDevice
    /**
@@ -64,31 +64,6 @@ struct ioDevice
    int appLogic();
 };
 
-int ioDevice::setupConfig( mx::app::appConfigurator & config )
-{
-   config.add("device.readTimeout", "", "device.readTimeout", argType::Required, "device", "readTimeout", false, "int", "timeout for reading from device");
-   config.add("device.writeTimeout", "", "device.writeTimeout", argType::Required, "device", "writeTimeout", false, "int", "timeout for writing to device");
-
-   return 0;
-}
-
-int ioDevice::loadConfig( mx::app::appConfigurator & config )
-{
-   config(m_readTimeout, "device.readTimeout");
-   config(m_writeTimeout, "device.writeTimeout");
-   
-   return 0;
-}
-
-int ioDevice::appStartup()
-{
-   return 0;
-}
-
-int ioDevice::appLogic()
-{
-   return 0;
-}
 
 } //namespace dev
 } //namespace tty

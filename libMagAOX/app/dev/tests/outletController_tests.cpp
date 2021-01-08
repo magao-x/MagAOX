@@ -1,7 +1,7 @@
 //#define CATCH_CONFIG_MAIN
 #include "../../../../tests/catch2/catch.hpp"
 
-#include <mx/timeUtils.hpp>
+#include <mx/sys/timeUtils.hpp>
 
 #define OUTLET_CTRL_TEST_NOINDI
 #define OUTLET_CTRL_TEST_NOLOG
@@ -33,7 +33,7 @@ struct outletControllerTest : public MagAOX::app::dev::outletController<outletCo
    virtual int turnOutletOn( int outletNum )
    {
       m_outletStates[outletNum] = 2;
-      m_timestamps[outletNum] = mx::get_curr_time();
+      m_timestamps[outletNum] = mx::sys::get_curr_time();
       
       return 0;
    }
@@ -41,7 +41,7 @@ struct outletControllerTest : public MagAOX::app::dev::outletController<outletCo
    virtual int turnOutletOff( int outletNum )
    {
       m_outletStates[outletNum] = 0;
-      m_timestamps[outletNum] = mx::get_curr_time();
+      m_timestamps[outletNum] = mx::sys::get_curr_time();
       
       return 0;
    }

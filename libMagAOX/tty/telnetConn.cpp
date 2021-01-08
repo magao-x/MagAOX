@@ -5,6 +5,7 @@
   * \ingroup tty_files
   */
 
+
 #include <cstring>
 
 #include <sys/types.h>
@@ -193,12 +194,12 @@ int telnetConn::write( const std::string & buffWrite,
    telnetCRLF(_buffWrite, buffWrite);
 
 
-   t0 = mx::get_curr_time();
+   t0 = mx::sys::get_curr_time();
 
    size_t totWritten = 0;
    while( totWritten < _buffWrite.size())
    {
-      int timeoutCurrent = timeoutWrite - (mx::get_curr_time()-t0)*1000;
+      int timeoutCurrent = timeoutWrite - (mx::sys::get_curr_time()-t0)*1000;
       if(timeoutCurrent < 0) return TTY_E_TIMEOUTONWRITE;
 
       int rv = poll( &pfd, 1, timeoutCurrent);
@@ -213,7 +214,7 @@ int telnetConn::write( const std::string & buffWrite,
       #endif
 
 
-      if( ( mx::get_curr_time()-t0)*1000 > timeoutWrite ) return TTY_E_TIMEOUTONWRITE;
+      if( ( mx::sys::get_curr_time()-t0)*1000 > timeoutWrite ) return TTY_E_TIMEOUTONWRITE;
    }
 
    return TTY_E_NOERROR;
@@ -238,7 +239,7 @@ int telnetConn::read( const std::string & eot,
    char buffRead[TELNET_BUFFSIZE];
 
    //Start timeout clock for reading.
-   t0 = mx::get_curr_time();
+   t0 = mx::sys::get_curr_time();
    timeoutCurrent = timeoutRead;
 
    //Now read the response up to the eot.
@@ -258,7 +259,7 @@ int telnetConn::read( const std::string & eot,
 
    while( !isEndOfTrans(m_strRead, eot) )
    {
-      timeoutCurrent = timeoutRead - (mx::get_curr_time()-t0)*1000;
+      timeoutCurrent = timeoutRead - (mx::sys::get_curr_time()-t0)*1000;
       if(timeoutCurrent < 0) return TTY_E_TIMEOUTONREAD;
 
       rv = poll( &pfd, 1, timeoutCurrent);
@@ -314,7 +315,7 @@ int telnetConn::writeRead( const std::string & strWrite,
 
 
    //Start timeout clock for reading.
-   t0 = mx::get_curr_time();;
+   t0 = mx::sys::get_curr_time();;
 
    if(swallowEcho)
    {
@@ -323,7 +324,7 @@ int telnetConn::writeRead( const std::string & strWrite,
       //First swallow the echo.
       while( m_strRead.size() <= strWrite.size() )
       {
-         timeoutCurrent = timeoutRead - (mx::get_curr_time()-t0)*1000;
+         timeoutCurrent = timeoutRead - (mx::sys::get_curr_time()-t0)*1000;
          if(timeoutCurrent < 0) return TTY_E_TIMEOUTONREAD;
 
          rv = poll( &pfd, 1, timeoutCurrent);
@@ -342,7 +343,7 @@ int telnetConn::writeRead( const std::string & strWrite,
 
    if(isEndOfTrans(m_strRead, m_prompt)) return TTY_E_NOERROR;
 
-   timeoutCurrent = timeoutRead - (mx::get_curr_time()-t0)*1000;
+   timeoutCurrent = timeoutRead - (mx::sys::get_curr_time()-t0)*1000;
    if(timeoutCurrent < 0) return TTY_E_TIMEOUTONREAD;
 
    //Now read the response up to the eot.

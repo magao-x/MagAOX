@@ -11,7 +11,7 @@
 
 #include <mx/mxlib.hpp>
 #include <mx/app/application.hpp>
-#include <mx/timeUtils.hpp>
+#include <mx/sys/timeUtils.hpp>
 
 
 #include "../../INDI/libcommon/IndiProperty.hpp"
@@ -518,7 +518,7 @@ int outletController<derivedT>::turnChannelOn( const std::string & channel )
       //Delay if specified
       if( m_channels[channel].m_onDelays.size() == m_channels[channel].m_outlets.size() )
       {
-         mx::milliSleep(m_channels[channel].m_onDelays[i]);
+         mx::sys::milliSleep(m_channels[channel].m_onDelays[i]);
       }
 
       //turn on next outlet
@@ -590,7 +590,7 @@ int outletController<derivedT>::turnChannelOff( const std::string & channel )
       //Delay if specified
       if( m_channels[channel].m_offDelays.size() == m_channels[channel].m_outlets.size() )
       {
-         mx::milliSleep(m_channels[channel].m_offDelays[i]);
+         mx::sys::milliSleep(m_channels[channel].m_offDelays[i]);
       }
 
       //turn off next outlet
@@ -785,13 +785,7 @@ int outletController<derivedT>::setupINDI()
    return 0;
 }
 
-std::string stateIntToString(int st)
-{
-   if( st == OUTLET_STATE_OFF ) return "Off";
-   else if( st == OUTLET_STATE_INTERMEDIATE ) return "Int";
-   else if( st == OUTLET_STATE_ON ) return "On";
-   else return "Unk";
-}
+std::string stateIntToString(int st);
 
 template<class derivedT>
 int outletController<derivedT>::updateINDI()

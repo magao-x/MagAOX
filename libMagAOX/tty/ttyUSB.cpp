@@ -11,7 +11,9 @@
 #include <libudev.h>
 
 #include <string>
+#include <cstring>
 
+#include <boost/filesystem.hpp>
 #include <mx/ioutils/fileUtils.hpp>
 
 #include "ttyUSB.hpp"

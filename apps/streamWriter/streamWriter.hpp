@@ -15,7 +15,7 @@
 
 #include <xrif/xrif.h>
 
-#include <mx/timeUtils.hpp>
+#include <mx/sys/timeUtils.hpp>
 
 #include "../../libMagAOX/app/MagAOXApp.hpp"
 
@@ -724,7 +724,7 @@ void streamWriter::fgThreadExec()
             if(image.md[0].sem <= m_semaphoreNumber) 
             {
                ImageStreamIO_closeIm(&image);
-               mx::sleep(1); //We just need to wait for the server process to finish startup.
+               mx::sys::sleep(1); //We just need to wait for the server process to finish startup.
             }
             else
             {
@@ -733,7 +733,7 @@ void streamWriter::fgThreadExec()
          }
          else
          {
-            mx::sleep(1); //be patient
+            mx::sys::sleep(1); //be patient
          }
       }
       
@@ -793,7 +793,7 @@ void streamWriter::fgThreadExec()
             return;
          }
          
-         mx::timespecAddNsec(ts, m_semWait);
+         mx::sys::timespecAddNsec(ts, m_semWait);
          
          if(sem_timedwait(sem, &ts) == 0)
          {
@@ -1002,7 +1002,7 @@ void streamWriter::swThreadExec()
          return; //will trigger a shutdown
       }
        
-      mx::timespecAddNsec(ts, m_semWait);
+      mx::sys::timespecAddNsec(ts, m_semWait);
       
       if(sem_timedwait(&m_swSemaphore, &ts) == 0)
       {

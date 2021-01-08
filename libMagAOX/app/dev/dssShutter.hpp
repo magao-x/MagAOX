@@ -517,11 +517,11 @@ int dssShutter<derivedT>::open()
    
    derived().sendNewProperty (m_indiP_triggerChannel, "target", (int) !m_triggerState);
 
-   double t0 = mx::get_curr_time();
+   double t0 = mx::sys::get_curr_time();
    while( m_sensorState != 1 )
    {
-      mx::milliSleep( m_shutterWait );
-      if( (mx::get_curr_time() - t0)*1000 > m_shutterTimeout) break;
+      mx::sys::milliSleep( m_shutterWait );
+      if( (mx::sys::get_curr_time() - t0)*1000 > m_shutterTimeout) break;
    }
 
    if(m_sensorState == 1)
@@ -541,11 +541,11 @@ int dssShutter<derivedT>::open()
 
    derived().sendNewProperty (m_indiP_triggerChannel, "target", (int) !m_triggerState);
    
-   t0 = mx::get_curr_time();
+   t0 = mx::sys::get_curr_time();
    while( m_sensorState != 1 )
    {
-      mx::milliSleep( m_shutterWait );
-      if( (mx::get_curr_time() - t0)*1000 > m_shutterTimeout) break;
+      mx::sys::milliSleep( m_shutterWait );
+      if( (mx::sys::get_curr_time() - t0)*1000 > m_shutterTimeout) break;
    }
    
    ///\todo need shutter log types
@@ -578,11 +578,11 @@ int dssShutter<derivedT>::shut()
    
    derived().sendNewProperty (m_indiP_triggerChannel, "target", (int) !m_triggerState);
    
-   double t0 = mx::get_curr_time();
+   double t0 = mx::sys::get_curr_time();
    while( m_sensorState != 0 )
    {
-      mx::milliSleep( m_shutterWait );
-      if( (mx::get_curr_time() - t0)*1000 > m_shutterTimeout) break;
+      mx::sys::milliSleep( m_shutterWait );
+      if( (mx::sys::get_curr_time() - t0)*1000 > m_shutterTimeout) break;
    }
    
    ///\todo need shutter log types
@@ -604,11 +604,11 @@ int dssShutter<derivedT>::shut()
    
    derived().sendNewProperty (m_indiP_triggerChannel, "target", (int) !m_triggerState);
    
-   t0 = mx::get_curr_time();
+   t0 = mx::sys::get_curr_time();
    while( m_sensorState != 0 )
    {
-      mx::milliSleep( m_shutterWait );
-      if( (mx::get_curr_time() - t0)*1000 > m_shutterTimeout) break;
+      mx::sys::milliSleep( m_shutterWait );
+      if( (mx::sys::get_curr_time() - t0)*1000 > m_shutterTimeout) break;
    }
    
    ///\todo need shutter log types

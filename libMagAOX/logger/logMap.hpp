@@ -11,8 +11,8 @@
 #ifndef logger_logMap_hpp
 #define logger_logMap_hpp
 
-#include <mx/timeUtils.hpp>
-using namespace mx::tscomp;
+#include <mx/sys/timeUtils.hpp>
+using namespace mx::sys::tscomp;
 
 #include <mx/ioutils/fileUtils.hpp>
 

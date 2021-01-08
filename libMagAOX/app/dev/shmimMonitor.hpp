@@ -496,7 +496,7 @@ void shmimMonitor<derivedT, specificT>::smThreadExec()
             if(m_imageStream.md[0].sem <= m_semaphoreNumber) ///<\todo this isn't right--> isn't there a define in cacao to use? 
             {
                ImageStreamIO_closeIm(&m_imageStream);
-               mx::sleep(1); //We just need to wait for the server process to finish startup.
+               mx::sys::sleep(1); //We just need to wait for the server process to finish startup.
             }
             else
             {
@@ -505,7 +505,7 @@ void shmimMonitor<derivedT, specificT>::smThreadExec()
          }
          else
          {
-            mx::sleep(1); //be patient
+            mx::sys::sleep(1); //be patient
          }
       }
       

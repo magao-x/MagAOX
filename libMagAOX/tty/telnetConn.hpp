@@ -28,7 +28,7 @@
  */
 
 
-#include <mx/timeUtils.hpp>
+#include <mx/sys/timeUtils.hpp>
 
 #include "../../libs/libtelnet/libtelnet.h"
 #include "ttyErrors.hpp"
