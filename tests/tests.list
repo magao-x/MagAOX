@@ -1,0 +1,13 @@
+
+../libMagAOX/app/dev/tests/outletController_tests 
+../libMagAOX/sys/tests/thSetuid_tests 
+../libMagAOX/tty/tests/ttyIOUtils_test 
+../apps/ocam2KCtrl/tests/ocamUtils_test 
+../apps/siglentSDG/tests/siglentSDG_test
+../apps/sshDigger/tests/sshDigger_test
+../apps/streamWriter/tests/streamWriter_test 
+../apps/xindiserver/tests/xindiserver_test
+../apps/xt1121Ctrl/tests/xtChannels_test
+../apps/zaberLowLevel/tests/zaberStage_test
+../apps/zaberLowLevel/tests/zaberUtils_test
+

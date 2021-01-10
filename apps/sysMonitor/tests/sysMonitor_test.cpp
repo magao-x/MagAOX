@@ -12,7 +12,6 @@
    * `./singleTest`
    ****/
 
-#define CATCH_CONFIG_MAIN
 #include "../../../tests/catch2/catch.hpp"
 
 
@@ -53,28 +52,28 @@ SCENARIO( "System monitor is constructed and CPU temperature results are passed 
       {
          rv = sm.parseCPUTemperatures("", temps);
          REQUIRE(rv == -1);
-         REQUIRE(temps == -1);
+         REQUIRE(temps == -999);
       }
 
       WHEN("Incorrect line is given")
       {
          rv = sm.parseCPUTemperatures("coretemp-isa-0000", temps);
          REQUIRE(rv == -1);
-         REQUIRE(temps == -1);
+         REQUIRE(temps == -999);
       }
       
       WHEN("Corrupted line is given")
       {
-         rv = sm.parseCPUTemperatures("Core 3:+91.0°C  (high = +100.0°C, crit = +100.0°C)", temps);
+         rv = sm.parseCPUTemperatures("Core 3:+91.0° XXXXXXX", temps);
          REQUIRE(rv == -1);
-         REQUIRE(temps == -1);
+         REQUIRE(temps == -999);
       }
 
       WHEN("Corrupted line is given")
       {
          rv = sm.parseCPUTemperatures("Core2:      +91.0°C(high =+100.0°C, crit= +100.0°C)", temps);
          REQUIRE(rv == -1);
-         REQUIRE(temps == -1);
+         REQUIRE(temps == -999);
       }
    }
 }
@@ -140,49 +139,56 @@ SCENARIO( "System monitor is constructed and disk temperature result is passed i
       MagAOX::app::sysMonitor sm;
       int rv;
       float hdd_temp = -1;
-
+      std::string dname;
+      
       // Fails with whitespace in front, but is this necessary to correct for?
       
       WHEN("Correct line is given for hard drive")
       {
-         rv = sm.parseDiskTemperature("/dev/sda: ST1000LM024 HN-M101MBB: 31°C", hdd_temp);
+         rv = sm.parseDiskTemperature(dname, hdd_temp, "/dev/sda: ST1000LM024 HN-M101MBB: 31°C");
          REQUIRE(rv == 0);
+         REQUIRE(dname == "sda");
          REQUIRE(hdd_temp == 31);
       }
       
       WHEN("Correct line is given for ssd")
       {
-         rv = sm.parseDiskTemperature("/dev/sda: Samsung SSD 860 EVO 500GB: 27°C", hdd_temp);
+         rv = sm.parseDiskTemperature(dname, hdd_temp, "/dev/sda: Samsung SSD 860 EVO 500GB: 27°C");
          REQUIRE(rv == 0);
+         REQUIRE(dname == "sda");
          REQUIRE(hdd_temp == 27);
       }
       
       WHEN("Correct line is given for ssd")
       {
-         rv = sm.parseDiskTemperature("/dev/sdd: Samsung SSD 860 EVO 1TB: 100°C", hdd_temp);
+         rv = sm.parseDiskTemperature(dname, hdd_temp, "/dev/sdd: Samsung SSD 860 EVO 1TB: 100°C");
          REQUIRE(rv == 0);
+         REQUIRE(dname == "sdd");
          REQUIRE(hdd_temp == 100);
       }
       
       WHEN("Blank line is given")
       {
-         rv = sm.parseDiskTemperature("", hdd_temp);
+         rv = sm.parseDiskTemperature(dname,  hdd_temp,"");
          REQUIRE(rv == -1);
-         REQUIRE(hdd_temp == -1);
+         REQUIRE(dname == "");
+         REQUIRE(hdd_temp == -999);
       }
 
       WHEN("Incorrect line is given")
       {
-         rv = sm.parseDiskTemperature("/dev/sda: ST1000LM024_HN-M101MBB: 999999", hdd_temp);
+         rv = sm.parseDiskTemperature(dname, hdd_temp,"/dev/sda: ST1000LM024_HN-M101MBB: 999999");
          REQUIRE(rv == -1);
-         REQUIRE(hdd_temp == -1);
+         REQUIRE(dname == "");
+         REQUIRE(hdd_temp == -999);
       }
 
       WHEN("Corrupted line is given")
       {
-         rv = sm.parseDiskTemperature("/dev/sdaT10 00L M0 24N-M101 MBB:31°CMBB", hdd_temp);
+         rv = sm.parseDiskTemperature(dname, hdd_temp, "/dev/sdaT10 00L M0 24N-M101 MBB:31°CMBB");
          REQUIRE(rv == -1);
-         REQUIRE(hdd_temp == -1);
+         REQUIRE(dname == "");
+         REQUIRE(hdd_temp == -999);
       }
    }
 }

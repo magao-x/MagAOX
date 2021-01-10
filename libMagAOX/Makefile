@@ -93,6 +93,7 @@ OBJS = app/MagAOXApp.o \
        logger/types/telem.o \
        logger/logFileName.o \
        logger/logFileRaw.o \
+       logger/logManager.o \
        logger/logMap.o \
        logger/logMeta.o \
        modbus/modbus.o \

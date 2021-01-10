@@ -567,6 +567,7 @@ int sysMonitor::parseCPUTemperatures(std::string line, float& temps)
 {
    if (line.length() <= 1)
    {
+      temps = -999;
       return -1;
    }
 
@@ -574,8 +575,23 @@ int sysMonitor::parseCPUTemperatures(std::string line, float& temps)
    if (str.compare("Core ") == 0) 
    {
       size_t st = line.find(':',0);
+      if(st == std::string::npos)
+      {
+         log<software_error>({__FILE__, __LINE__,"Invalid read occured when parsing CPU temperatures."});
+         temps = -999;
+         return -1;
+      }
+      
       ++st;
+      
       size_t ed = line.find('C', st);
+      if(ed == std::string::npos)
+      {
+         log<software_error>({__FILE__, __LINE__,"Invalid read occured when parsing CPU temperatures."});
+         temps = -999;
+         return -1;
+      }
+      
       --ed;
       
       std::string temp_str = line.substr(st, ed-st);
@@ -590,6 +606,7 @@ int sysMonitor::parseCPUTemperatures(std::string line, float& temps)
       catch (const std::invalid_argument& e) 
       {
          log<software_error>({__FILE__, __LINE__,"Invalid read occured when parsing CPU temperatures."});
+         temps = -999;
          return -1;
       }
 
@@ -630,6 +647,7 @@ int sysMonitor::parseCPUTemperatures(std::string line, float& temps)
          catch (const std::invalid_argument& e) 
          {
             log<software_error>({__FILE__, __LINE__,"Invalid read occured when parsing critical CPU temperatures."});
+            temps = -999;
             return -1;
          }
       }                           
@@ -637,6 +655,7 @@ int sysMonitor::parseCPUTemperatures(std::string line, float& temps)
    }
    else 
    {
+      temps = -999;
       return -1;
    }
 
@@ -763,6 +782,8 @@ int sysMonitor::parseDiskTemperature( std::string & driveName,
    float tempValue;
    if (line.length() <= 6) 
    {
+      driveName = "";
+      hdd_temp = -999;
       return -1;
    }
    
@@ -787,6 +808,8 @@ int sysMonitor::parseDiskTemperature( std::string & driveName,
             catch (const std::invalid_argument& e) 
             {
                log<software_error>({__FILE__, __LINE__,"Invalid read occured when parsing drive temperatures."});
+               hdd_temp = -999;
+               driveName = "";
                return -1;
             }
             hdd_temp = tempValue;
@@ -803,9 +826,14 @@ int sysMonitor::parseDiskTemperature( std::string & driveName,
       }
       catch (const std::out_of_range& e) 
       {
+         hdd_temp = -999;
+         driveName = "";
          return -1;
       }
    }
+   
+   hdd_temp = -999;
+   driveName = "";
    return -1;
 }
 

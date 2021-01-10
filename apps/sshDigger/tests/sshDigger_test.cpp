@@ -1,7 +1,6 @@
 //#define CATCH_CONFIG_MAIN
 #include "../../../tests/catch2/catch.hpp"
 
-#include <mx/timeUtils.hpp>
 
 #define SSHDIGGER_TEST_NOINDI
 #define SSHDIGGER_TEST_NOLOG

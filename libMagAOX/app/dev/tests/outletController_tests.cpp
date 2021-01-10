@@ -33,6 +33,7 @@ struct outletControllerTest : public MagAOX::app::dev::outletController<outletCo
    virtual int turnOutletOn( int outletNum )
    {
       m_outletStates[outletNum] = 2;
+      mx::sys::nanoSleep(1);
       m_timestamps[outletNum] = mx::sys::get_curr_time();
       
       return 0;
@@ -41,6 +42,7 @@ struct outletControllerTest : public MagAOX::app::dev::outletController<outletCo
    virtual int turnOutletOff( int outletNum )
    {
       m_outletStates[outletNum] = 0;
+      mx::sys::nanoSleep(1);
       m_timestamps[outletNum] = mx::sys::get_curr_time();
       
       return 0;
@@ -1031,6 +1033,7 @@ SCENARIO( "outletController Operation", "[outletController]" )
          REQUIRE( pdt.outletState(2) == 2 );
          REQUIRE( pdt.outletState(3) == 2 );
 
+         //verify outlet order
          REQUIRE( pdt.m_timestamps[3] > pdt.m_timestamps[2]);
          
          //Verify channel state 
@@ -1204,7 +1207,7 @@ SCENARIO( "outletController Operation", "[outletController]" )
          //Turn on channel2
          pdt.turnChannelOn("channel2");
          
-
+         //verify outlet order
          REQUIRE( pdt.m_timestamps[3] > pdt.m_timestamps[2]);
          
          //Verify channel state 
@@ -1262,7 +1265,7 @@ SCENARIO( "outletController Operation", "[outletController]" )
          //Turn on channel2
          pdt.turnChannelOn("channel2");
          
-
+         //verify outlet order
          REQUIRE( pdt.m_timestamps[2] > pdt.m_timestamps[3]);
          
          //Verify channel state 
@@ -1312,6 +1315,8 @@ SCENARIO( "outletController Operation", "[outletController]" )
          
          //Turn off channel1
          pdt.turnChannelOff("channel1");
+         
+         //verify outlet order
          REQUIRE( pdt.m_timestamps[1] > pdt.m_timestamps[0]);
          
          //Verify channel state 
@@ -1321,7 +1326,7 @@ SCENARIO( "outletController Operation", "[outletController]" )
          //Turn on channel2
          pdt.turnChannelOn("channel2");
          
-
+         //verify outlet order
          REQUIRE( pdt.m_timestamps[3] > pdt.m_timestamps[2]);
          
          //Verify channel state 
@@ -1331,7 +1336,7 @@ SCENARIO( "outletController Operation", "[outletController]" )
          //Turn off channel2
          pdt.turnChannelOff("channel2");
          
-         REQUIRE( pdt.m_timestamps[3] > pdt.m_timestamps[2]);
+         REQUIRE( pdt.m_timestamps[3] >= pdt.m_timestamps[2]);
          
          //Verify channel state 
          REQUIRE( pdt.channelState("channel1") == 0 );
@@ -1375,6 +1380,7 @@ SCENARIO( "outletController Operation", "[outletController]" )
          //Turn off channel1
          pdt.turnChannelOff("channel1");
          
+         //verify outlet order
          REQUIRE( pdt.m_timestamps[0] > pdt.m_timestamps[1]);
          
          //Verify channel state 
@@ -1385,6 +1391,7 @@ SCENARIO( "outletController Operation", "[outletController]" )
          pdt.turnChannelOn("channel2");
          
 
+         //verify outlet order
          REQUIRE( pdt.m_timestamps[3] > pdt.m_timestamps[2]);
          
          //Verify channel state 
@@ -1394,6 +1401,7 @@ SCENARIO( "outletController Operation", "[outletController]" )
          //Turn off channel2
          pdt.turnChannelOff("channel2");
          
+         //verify outlet order
          REQUIRE( pdt.m_timestamps[2] > pdt.m_timestamps[3]);
          
          //Verify channel state 
@@ -1438,6 +1446,7 @@ SCENARIO( "outletController Operation", "[outletController]" )
          //Turn off channel1
          pdt.turnChannelOff("channel1");
          
+         //verify outlet order
          REQUIRE( pdt.m_timestamps[1] > pdt.m_timestamps[0]);
          
          //Verify channel state 
@@ -1448,6 +1457,7 @@ SCENARIO( "outletController Operation", "[outletController]" )
          pdt.turnChannelOn("channel2");
          
 
+         //verify outlet order
          REQUIRE( pdt.m_timestamps[2] > pdt.m_timestamps[3]);
          
          //Verify channel state 
@@ -1457,6 +1467,7 @@ SCENARIO( "outletController Operation", "[outletController]" )
          //Turn off channel2
          pdt.turnChannelOff("channel2");
          
+         //verify outlet order
          REQUIRE( pdt.m_timestamps[3] > pdt.m_timestamps[2]);
          
          //Verify channel state 

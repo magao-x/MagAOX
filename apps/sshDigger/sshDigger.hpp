@@ -11,7 +11,7 @@
 
 #include <iostream>
 
-#include <mx/timeUtils.hpp>
+#include <mx/sys/timeUtils.hpp>
 
 #include "../../libMagAOX/libMagAOX.hpp" //Note this is included on command line to trigger pch
 #include "../../magaox_git_version.h"
@@ -560,7 +560,7 @@ void sshDigger::autosshLogThreadExec()
       {
          log<software_error>({__FILE__, __LINE__, errno});
          log<software_error>({__FILE__, __LINE__, "unable to open auto ssh log fifo"});
-         mx::sleep(1);
+         mx::sys::sleep(1);
       }
    }
 

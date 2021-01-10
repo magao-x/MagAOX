@@ -9,7 +9,6 @@
 #ifndef app_outletController_hpp
 #define app_outletController_hpp
 
-#include <mx/mxlib.hpp>
 #include <mx/app/application.hpp>
 #include <mx/sys/timeUtils.hpp>
 

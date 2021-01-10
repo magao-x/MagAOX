@@ -19,10 +19,13 @@
 #include <mutex>
 #include <ratio>
 
+#include <mx/app/appConfigurator.hpp>
 
 #include <flatlogs/flatlogs.hpp>
 
 using namespace flatlogs;
+
+#include "../common/defaults.hpp"
 
 #include "generated/logTypes.hpp"
 #include "generated/logStdFormat.hpp"
@@ -432,7 +435,7 @@ void logManager<logFileT>::logThreadExec()
             if( logHeader::logLevel( *it ) <= logPrio::LOG_NOTICE )
             {
                logStdFormat(std::cerr, *it);
-               std::cout << "\n";
+               std::cerr << "\n";
             }
             
             er = it;
@@ -541,6 +544,9 @@ void logManager<logFileT>::log( timespecX & ts,
    log<logT>( ts, emptyMessage(), level );
 }
 
+class logFileRaw;
+
+extern template struct logManager<logFileRaw>;
 
 } //namespace logger
 } //namespace MagAOX

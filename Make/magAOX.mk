@@ -40,16 +40,23 @@ CXXFLAGS += -include $(abspath $(SELF_DIR)/../libMagAOX/libMagAOX.hpp)
 # or `t=` for short
 TARGET ?= $(t)
 
-all:  pch magaox_git_version.h $(TARGET)
-	rm $(SELF_DIR)/../magaox_git_version.h
+#allow passing of .o, .hpp, or any extension, or no extension
+BASENAME=$(basename $(TARGET))
+PATHNAME=$(dir $(TARGET))
+OBJNAME = $(PATHNAME)$(notdir $(BASENAME)).o
+TARGETNAME = $(PATHNAME)$(notdir $(BASENAME))
 
+
+all:  pch magaox_git_version.h $(TARGETNAME)
+	rm $(SELF_DIR)/../magaox_git_version.h
+	
 pch:
 	cd $(SELF_DIR)/../libMagAOX; ${MAKE}
 
-$(TARGET).o: $(abspath $(SELF_DIR)/../libMagAOX/libMagAOX.hpp.gch) $(TARGET).hpp $(OTHER_HEADERS)
+$(OBJNAME): $(abspath $(SELF_DIR)/../libMagAOX/libMagAOX.hpp.gch) $(TARGETNAME).hpp $(OTHER_HEADERS)
 
-$(TARGET):  $(TARGET).o  $(OTHER_OBJS)
-	$(LINK.o)  -o $(TARGET) $(TARGET).o $(OTHER_OBJS) $(abspath $(SELF_DIR)/../libMagAOX/libMagAOX.a) $(LDFLAGS) $(LDLIBS) 
+$(TARGETNAME):  $(OBJNAME)  $(OTHER_OBJS)
+	$(LINK.o)  -o $(TARGETNAME) $(OBJNAME) $(OTHER_OBJS) $(abspath $(SELF_DIR)/../libMagAOX/libMagAOX.a) $(LDFLAGS) $(LDLIBS) 
 
 
 #The GIT status header
@@ -60,7 +67,7 @@ magaox_git_version.h:
 
 .PHONY: clean
 clean:
-	rm -f $(TARGET)
+	rm -f $(TARGETNAME)
 	rm -f $(SELF_DIR)/../magaox_git_version.h
 	rm -f *.o
 	rm -f *~

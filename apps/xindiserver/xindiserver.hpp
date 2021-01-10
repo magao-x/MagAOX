@@ -680,7 +680,7 @@ int xindiserver::processISLog( std::string logs )
    double dsec;
 
    tm bdt;   
-   mx::ISO8601dateBreakdown(bdt.tm_year, bdt.tm_mon, bdt.tm_mday, bdt.tm_hour, bdt.tm_min, dsec, ts);
+   mx::sys::ISO8601dateBreakdown(bdt.tm_year, bdt.tm_mon, bdt.tm_mday, bdt.tm_hour, bdt.tm_min, dsec, ts);
    
    bdt.tm_year -= 1900;
    bdt.tm_mon -= 1;
