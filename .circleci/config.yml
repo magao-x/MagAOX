@@ -1,6 +1,9 @@
 version: 2
 jobs:
   build_centos:
+    branches:
+      ignore:
+        - /.*_dev/
     docker:
       - image: centos:7.6.1810
     steps:
