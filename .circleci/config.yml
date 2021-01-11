@@ -30,6 +30,6 @@ workflows:
   centos:
     jobs:
       - build_centos:
-        filters:
-          branches:
-            ignore: /.*_dev/
+          filters:
+            branches:
+              ignore: /.*_dev/
