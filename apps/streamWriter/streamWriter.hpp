@@ -15,7 +15,10 @@
 
 #include <xrif/xrif.h>
 
-#include "../../libMagAOX/libMagAOX.hpp" //Note this is included on command line to trigger pch
+#include <mx/timeUtils.hpp>
+
+#include "../../libMagAOX/app/MagAOXApp.hpp"
+
 #include "../../magaox_git_version.h"
 
 
@@ -50,7 +53,9 @@ namespace app
   */
 class streamWriter : public MagAOXApp<>
 {
-
+   //Give the test harness access.
+   friend class streamWriter_test;
+   
 protected:
 
    /** \name configurable parameters 
@@ -108,6 +113,7 @@ protected:
    ///Storage for the xrif image data file header
    char * m_xrif_timing_header {nullptr};
    
+   
 public:
 
    ///Default c'tor
@@ -147,6 +153,14 @@ protected:
    
    static streamWriter * m_selfWriter; ///< Static pointer to this (set in constructor).  Used for getting out of the static SIGSEGV handler.
 
+   /// Initialize the xrif system.
+   /** Allocates the handles and headers pointers.
+     *
+     * \returns 0 on success.
+     * \returns -1 on error.
+     */
+   int initialize_xrif();
+   
    ///Sets the handler for SIGSEGV and SIGBUS
    /** These are caused by ImageStreamIO server resets.
      */
@@ -176,6 +190,23 @@ protected:
 
    bool m_fgThreadInit {true}; ///< Synchronizer to ensure f.g. thread initializes before doing dangerous things.
    
+   /// Worker function to allocate the circular buffers.
+   /** This takes place in the fg thread after connecting to the stream.
+     * 
+     * \returns 0 on sucess.
+     * \returns -1 on error.
+     */ 
+   int allocate_circbufs();
+   
+   /// Worker function to configure and allocate the xrif handles.
+   /** This takes place in the fg thread after connecting to the stream.
+     * 
+     * \returns 0 on sucess.
+     * \returns -1 on error.
+     */ 
+   int allocate_xrif();
+
+   
    ///Thread starter, called by fgThreadStart on thread construction.  Calls fgThreadExec.
    static void fgThreadStart( streamWriter * s /**< [in] a pointer to an streamWriter instance (normally this) */);
 
@@ -197,12 +228,20 @@ protected:
 
    bool m_swThreadInit {true}; ///< Synchronizer to ensure s.w. thread initializes before doing dangerous things.
    
+   size_t m_fnameSz {0};
+   
+   char * m_fname {nullptr};
+      
+   std::string m_fnameBase;
+   
    ///Thread starter, called by swThreadStart on thread construction.  Calls swThreadExec.
    static void swThreadStart( streamWriter * s /**< [in] a pointer to an streamWriter instance (normally this) */);
 
    /// Execute the stream writer main loop.
    void swThreadExec();
 
+   /// Function called when semaphore is raised to do the encode and write.
+   int doEncode();
    ///@}
    
    //INDI:
@@ -278,7 +317,8 @@ void streamWriter::loadConfig()
    config(m_writeChunkLength, "writer.writeChunkLength");
    config(m_swThreadPrio, "writer.threadPrio");
    config(m_lz4accel, "writer.lz4accel");
-   if(m_lz4accel < 1) m_lz4accel = 1;
+   if(m_lz4accel < XRIF_LZ4_ACCEL_MIN) m_lz4accel = XRIF_LZ4_ACCEL_MIN;
+   if(m_lz4accel > XRIF_LZ4_ACCEL_MAX) m_lz4accel = XRIF_LZ4_ACCEL_MAX;
    
    config(m_shmimName, "framegrabber.shmimName");
    config(m_semWait, "framegrabber.semWait");
@@ -345,54 +385,26 @@ int streamWriter::appStartup()
    // - initialize the semaphore 
    // - start the threads
    
-   if(setSigSegvHandler() < 0)
-   {
-      log<software_error>({__FILE__, __LINE__});
-      return -1;
-   }
+   if(setSigSegvHandler() < 0) return log<software_error, -1>({__FILE__, __LINE__});
    
-   if(sem_init(&m_swSemaphore, 0,0) < 0)
-   {
-      log<software_critical>({__FILE__, __LINE__, errno,0, "Initializing S.W. semaphore"});
-      return -1;
-   }
-
+   if(sem_init(&m_swSemaphore, 0,0) < 0) return log<software_critical, -1>({__FILE__, __LINE__, errno,0, "Initializing S.W. semaphore"});
+   
    //Check if we have a safe writeChunkLengthh
    if( m_circBuffLength % m_writeChunkLength != 0)
    {
       return log<software_critical, -1>({__FILE__,__LINE__, "Write chunk length is not a divisor of circular buffer length."});
    }
    
-   int rv = xrif_new(&m_xrif);
-   if( rv != XRIF_NOERROR )
-   {
-      return log<software_critical, -1>({__FILE__,__LINE__, "xrif handle allocation or initialization error. Code = " + std::to_string(rv)});
-   }
-  
-   m_xrif->reorder_method = XRIF_REORDER_BYTEPACK;
- 
-   m_xrif_header = (char *) malloc( XRIF_HEADER_SIZE * sizeof(char));
-      
-   rv = xrif_new(&m_xrif_timing);
-   if( rv != XRIF_NOERROR )
-   {
-      return log<software_critical, -1>({__FILE__,__LINE__, "xrif handle allocation or initialization error. Code = " + std::to_string(rv)});
-   }
-
-   m_xrif_timing->reorder_method = XRIF_REORDER_NONE;
-   
-   m_xrif_timing_header = (char *) malloc( XRIF_HEADER_SIZE * sizeof(char));
+   if(initialize_xrif() < 0) log<software_critical,-1>({__FILE__, __LINE__});
    
    if(threadStart( m_fgThread, m_fgThreadInit, m_fgThreadPrio, "framegrabber", this, fgThreadStart)  < 0)
    {
-      log<software_critical>({__FILE__, __LINE__});
-      return -1;
+      return log<software_critical,-1>({__FILE__, __LINE__});
    }
 
    if(threadStart( m_swThread, m_swThreadInit, m_swThreadPrio, "streamwriter", this, swThreadStart) < 0)
    {
-      log<software_critical>({__FILE__, __LINE__});
-      return -1;
+      log<software_critical,-1>({__FILE__, __LINE__});
    }
    
    return 0;
@@ -483,6 +495,50 @@ int streamWriter::appShutdown()
    
    return 0;
 }
+inline
+int streamWriter::initialize_xrif()
+{
+   xrif_error_t rv = xrif_new(&m_xrif);
+   if( rv != XRIF_NOERROR )
+   {
+      return log<software_critical, -1>({__FILE__,__LINE__, 0, rv, "xrif handle allocation or initialization error."});
+   }
+  
+   rv = xrif_configure(m_xrif, XRIF_DIFFERENCE_PREVIOUS, XRIF_REORDER_BYTEPACK, XRIF_COMPRESS_LZ4);
+   if( rv != XRIF_NOERROR )
+   {
+      return log<software_critical, -1>({__FILE__,__LINE__, 0, rv, "xrif handle configuration error."});
+   }
+ 
+   errno = 0;
+   m_xrif_header = (char *) malloc( XRIF_HEADER_SIZE * sizeof(char));
+   if(m_xrif_header == NULL)
+   {
+      return log<software_critical, -1>({__FILE__,__LINE__, errno, 0, "xrif header allocation failed."});
+   }
+   
+   rv = xrif_new(&m_xrif_timing);
+   if( rv != XRIF_NOERROR )
+   {
+      return log<software_critical, -1>({__FILE__,__LINE__, 0, rv, "xrif handle allocation or initialization error."});
+   }
+
+   //m_xrif_timing->reorder_method = XRIF_REORDER_NONE;
+   rv = xrif_configure(m_xrif_timing, XRIF_DIFFERENCE_NONE, XRIF_REORDER_NONE, XRIF_COMPRESS_NONE);
+   if( rv != XRIF_NOERROR )
+   {
+      return log<software_critical, -1>({__FILE__,__LINE__, 0, rv, "xrif handle configuration error."});
+   }
+   
+   errno = 0;
+   m_xrif_timing_header = (char *) malloc( XRIF_HEADER_SIZE * sizeof(char));
+   if(m_xrif_timing_header == NULL)
+   {
+      return log<software_critical, -1>({__FILE__,__LINE__, errno, 0, "xrif header allocation failed."});
+   }
+   
+   return 0;
+}
 
 inline
 int streamWriter::setSigSegvHandler()
@@ -545,6 +601,94 @@ void streamWriter::handlerSigSegv( int signum,
 
    return;
 }
+
+inline 
+int streamWriter::allocate_circbufs()
+{
+   if(m_rawImageCircBuff)
+   {
+      free(m_rawImageCircBuff);
+   }
+
+   errno = 0;
+   m_rawImageCircBuff = (char *) malloc( m_width*m_height*m_typeSize*m_circBuffLength );
+   
+   if(m_rawImageCircBuff == NULL)
+   {
+      return log<software_critical,-1>({__FILE__,__LINE__, errno, 0, "buffer allocation failure"});
+   }
+   
+   if(m_timingCircBuff)
+   {
+      free(m_timingCircBuff);
+   }
+   
+   errno = 0;
+   m_timingCircBuff = (uint64_t *) malloc( 5*sizeof(uint64_t)*m_circBuffLength);
+   if(m_timingCircBuff == NULL)
+   {
+      return log<software_critical,-1>({__FILE__,__LINE__, errno, 0, "buffer allocation failure"});
+   }
+   
+   return 0;
+}
+
+inline
+int streamWriter::allocate_xrif()
+{   
+   //Set up the image data xrif handle
+   xrif_error_t rv = xrif_configure(m_xrif, XRIF_DIFFERENCE_PREVIOUS, XRIF_REORDER_BYTEPACK, XRIF_COMPRESS_LZ4);
+   if( rv != XRIF_NOERROR )
+   {
+      return log<software_critical,-1>({__FILE__,__LINE__, 0, rv, "xrif handle configuration error."});
+   }
+   
+   rv = xrif_set_size(m_xrif, m_width, m_height, 1, m_writeChunkLength, m_dataType);
+   if( rv != XRIF_NOERROR )
+   {
+      return log<software_critical,-1>({__FILE__,__LINE__, 0, rv, "xrif_set_size error."});
+   }
+   
+   rv = xrif_allocate_raw(m_xrif);
+   if( rv != XRIF_NOERROR )
+   {
+      return log<software_critical,-1>({__FILE__,__LINE__, 0, rv, "xrif_allocate_raw error."});
+   }
+   
+   rv = xrif_allocate_reordered(m_xrif);
+   if( rv != XRIF_NOERROR )
+   {
+      return log<software_critical,-1>({__FILE__,__LINE__, 0, rv, "xrif_allocate_reordered error."});
+   }
+   
+   //Set up the timing data xrif handle
+   rv = xrif_configure(m_xrif_timing, XRIF_DIFFERENCE_NONE, XRIF_REORDER_NONE, XRIF_COMPRESS_NONE);
+   if( rv != XRIF_NOERROR )
+   {
+      return log<software_critical,-1>({__FILE__,__LINE__, 0, rv, "xrif handle configuration error."});
+   }
+   
+   rv = xrif_set_size(m_xrif_timing, 5,1,1, m_writeChunkLength, XRIF_TYPECODE_UINT64);
+   if( rv != XRIF_NOERROR )
+   {
+      return log<software_critical,-1>({__FILE__,__LINE__, 0, rv, "xrif_set_size error."});
+   }
+   
+   rv = xrif_allocate_raw(m_xrif_timing);      
+   if( rv != XRIF_NOERROR )
+   {
+      return log<software_critical,-1>({__FILE__,__LINE__, 0, rv, "xrif_allocate_raw error."});
+   }
+   
+   rv = xrif_allocate_reordered(m_xrif_timing);
+   if( rv != XRIF_NOERROR )
+   {
+      return log<software_critical,-1>({__FILE__,__LINE__, 0, rv, "xrif_allocate_reordered error."});
+   }
+   
+   return 0;
+}
+
 
 inline
 void streamWriter::fgThreadStart( streamWriter * o)
@@ -620,34 +764,13 @@ void streamWriter::fgThreadExec()
       size_t length = image.md[0].size[2];
 
       
-      //Now allocate teh circBuff 
+      //Now allocate the circBuffs 
+      if(allocate_circbufs() < 0) return; //will cause shutdown!
       
-      m_rawImageCircBuff = (char *) malloc( m_width*m_height*m_typeSize*m_circBuffLength );
       
-      m_timingCircBuff = (uint64_t *) malloc( 5*sizeof(uint64_t)*m_circBuffLength);
-      
-      // And allocate teh xrif
-      
-      //Set up the image data xrif handle
-      xrif_set_size(m_xrif, m_width, m_height, 1, m_writeChunkLength, m_dataType);
-      
-      m_xrif->compress_on_raw = 1;
-      xrif_allocate_reordered(m_xrif);
-      xrif_allocate_raw(m_xrif);
+      // And allocate the xrifs
+      if(allocate_xrif() < 0) return; //Will cause shutdown!
 
-      //Set up the timing data xrif handle
-      xrif_set_size(m_xrif_timing, 5,1,1, m_writeChunkLength, XRIF_TYPECODE_UINT64);
-      m_xrif_timing->compress_on_raw = 1;
-      m_xrif_timing->difference_method = XRIF_DIFFERENCE_NONE;
-      m_xrif_timing->reorder_method = XRIF_REORDER_NONE;
-      m_xrif_timing->compress_method = XRIF_COMPRESS_NONE;
-      xrif_allocate_reordered(m_xrif_timing);
-      xrif_allocate_raw(m_xrif_timing);
-      
-      
-      
-      
-      
       uint8_t atype;
       size_t snx, sny, snz;
 
@@ -790,6 +913,12 @@ void streamWriter::fgThreadExec()
          m_rawImageCircBuff = 0;
       }
       
+      if(m_timingCircBuff)
+      {
+         free(m_timingCircBuff);
+         m_timingCircBuff = 0;
+      }
+      
       if(opened) 
       {
          ImageStreamIO_closeIm(&image);
@@ -804,6 +933,12 @@ void streamWriter::fgThreadExec()
    {
       free(m_rawImageCircBuff);
       m_rawImageCircBuff = 0;
+   }
+      
+   if(m_timingCircBuff)
+   {
+      free(m_timingCircBuff);
+      m_timingCircBuff = 0;
    }
       
    if(opened) ImageStreamIO_closeIm(&image);
@@ -826,26 +961,15 @@ void streamWriter::swThreadExec()
        sleep(1);
    }
 
-   char * fname = nullptr;
-   char * fnameTiming = nullptr;
-      
-   std::string fnameBase;
-   std::string fnameTimingBase;
       
    while(!m_shutdown)
    {
       while(!shutdown() && (!( state() == stateCodes::READY || state() == stateCodes::OPERATING) ) )
       {
-         if(fname) 
+         if(m_fname) 
          {
-            free(fname);
-            fname = nullptr;
-         }
-         
-         if(fnameTiming) 
-         {
-            free(fnameTiming);
-            fnameTiming = nullptr;
+            free(m_fname);
+            m_fname = nullptr;
          }
          sleep(1);
       }
@@ -853,29 +977,18 @@ void streamWriter::swThreadExec()
       if(shutdown()) break;
       
       //This will happen after a reconnection, and could update m_shmimName, etc.
-      if(fname == nullptr)
+      if(m_fname == nullptr)
       {
-         fnameBase = m_rawimageDir + "/" + m_shmimName + "_";
+         m_fnameBase = m_rawimageDir + "/" + m_shmimName + "_";
       
-         size_t fnameSz = fnameBase.size() + sizeof("YYYYMMDDHHMMSSNNNNNNNNN.xrif");
-         fname = (char*) malloc(fnameSz);
+         m_fnameSz = m_fnameBase.size() + sizeof("YYYYMMDDHHMMSSNNNNNNNNN.xrif"); //the sizeof includes the \0
+         m_fname = (char*) malloc(m_fnameSz);
       
-         snprintf(fname, fnameSz, "%sYYYYMMDDHHMMSSNNNNNNNNN.xrif", fnameBase.c_str());
+         snprintf(m_fname, m_fnameSz, "%sYYYYMMDDHHMMSSNNNNNNNNN.xrif", m_fnameBase.c_str());
 
       }
-      
-      if(fnameTiming == nullptr)
-      {
-         fnameTimingBase = m_rawimageDir + "/" + m_shmimName + "_timing_";
-      
-         size_t fnameSz = fnameTimingBase.size() + sizeof("YYYYMMDDHHMMSSNNNNNNNNN.dat");
-         fnameTiming = (char*) malloc(fnameSz);
-      
-         snprintf(fnameTiming, fnameSz, "%sYYYYMMDDHHMMSSNNNNNNNNN.dat", fnameTimingBase.c_str());
-
-      }
-      
-      //at this point fname and fnameTiming are not null.
+            
+      //at this point fname is not null.
       
       timespec ts;
        
@@ -883,11 +996,8 @@ void streamWriter::swThreadExec()
       {
          log<software_critical>({__FILE__,__LINE__,errno,0,"clock_gettime"}); 
          
-         free(fname);
-         fname = nullptr;
-         
-         free(fnameTiming);
-         fnameTiming = nullptr;
+         free(m_fname);
+         m_fname = nullptr;
          
          return; //will trigger a shutdown
       }
@@ -896,158 +1006,8 @@ void streamWriter::swThreadExec()
       
       if(sem_timedwait(&m_swSemaphore, &ts) == 0)
       {
-         if(m_writing == NOT_WRITING) continue;
-         
-         if(m_logSaveStart) 
-         {
-            log<saving_start>({1,m_currSaveStartFrameNo});
-            m_logSaveStart = false;
-            std::cerr << "Method: " << m_xrif->reorder_method << "\n";
-         }
-         
-         timespec tw0, tw1, tw2;
-         
-         clock_gettime(CLOCK_REALTIME, &tw0);
-         
-         //Configure xrif and copy image data
-         xrif_set_size(m_xrif, m_width, m_height, 1, (m_currSaveStop-m_currSaveStart), m_dataType);
-
-         memcpy(m_xrif->raw_buffer,  m_rawImageCircBuff + m_currSaveStart*m_width*m_height*m_typeSize, (m_currSaveStop-m_currSaveStart)*m_width*m_height*m_typeSize);
-         
-         //Configure xrif and copy timing data
-         xrif_set_size(m_xrif_timing, 5, 1, 1, (m_currSaveStop-m_currSaveStart), XRIF_TYPECODE_UINT64);
-
-         memcpy(m_xrif_timing->raw_buffer, m_timingCircBuff + m_currSaveStart*5, (m_currSaveStop-m_currSaveStart)*5*sizeof(uint64_t));
-
-         m_xrif->lz4_acceleration=m_lz4accel;
-         
-         xrif_encode(m_xrif);
-
-         xrif_write_header( m_xrif_header, m_xrif);
-
-         xrif_encode(m_xrif_timing);
-      
-         xrif_write_header( m_xrif_timing_header, m_xrif_timing);
-
-         //Now break down the acq time of the first image in the buffer for use in file name
-         tm uttime;//The broken down time.   
-         timespec * fts = (timespec *) (m_timingCircBuff + m_currSaveStart*5 +1);
-                  
-         if(gmtime_r(&fts->tv_sec, &uttime) == 0)
-         {
-            log<software_critical>({__FILE__,__LINE__,errno,0,"gmtime_r"}); 
-            free(fname);
-            fname = nullptr;
-            
-            free(fnameTiming);
-            fnameTiming = nullptr;
-            
-            return; //will trigger a shutdown
-         }
-         
-         snprintf(fname + fnameBase.size(), 24, "%04i%02i%02i%02i%02i%02i%09i", uttime.tm_year+1900, uttime.tm_mon+1, uttime.tm_mday, 
-                                                                uttime.tm_hour, uttime.tm_min, uttime.tm_sec, static_cast<int>(fts->tv_nsec));
-         snprintf(fnameTiming + fnameTimingBase.size(), 24, "%04i%02i%02i%02i%02i%02i%09i", uttime.tm_year+1900, uttime.tm_mon+1, uttime.tm_mday, 
-                                                                            uttime.tm_hour, uttime.tm_min, uttime.tm_sec, static_cast<int>(fts->tv_nsec));
-         
-         //Cover up the \0 inserted by snprintf
-         (fname + fnameBase.size())[23] = '.';
-         (fnameTiming + fnameTimingBase.size())[23] = '.';
-         
-         clock_gettime(CLOCK_REALTIME, &tw1);
-         
-         FILE * fp_xrif = fopen(fname, "wb");
-         if(fp_xrif == NULL)
-         {
-            log<software_critical>({__FILE__,__LINE__,errno,0,"failed to open file for writing"}); 
-            
-            free(fname);
-            fname = nullptr;
-            
-            free(fnameTiming);
-            fnameTiming = nullptr;
-            
-            return; //will trigger a shutdown
-         }
-         
-         size_t bw = fwrite(m_xrif_header, sizeof(uint8_t), XRIF_HEADER_SIZE, fp_xrif);
-         
-         if(bw != XRIF_HEADER_SIZE)
-         {
-            log<software_critical>({__FILE__,__LINE__,errno,0,"failure writing header to file"}); 
-            fclose(fp_xrif);
-            
-            free(fname);
-            fname = nullptr;
-
-            free(fnameTiming);
-            fnameTiming = nullptr;
-            
-            return; //will trigger a shutdown
-         }
-         
-         bw = fwrite(m_xrif->raw_buffer, sizeof(uint8_t), m_xrif->compressed_size, fp_xrif);
-
-         if(bw != m_xrif->compressed_size)
-         {
-            log<software_critical>({__FILE__,__LINE__,errno,0,"failure writing data to file"}); 
-            fclose(fp_xrif);
-            
-            free(fname);
-            fname = nullptr;
-
-            free(fnameTiming);
-            fnameTiming = nullptr;
-            
-            return; //will trigger a shutdown
-         }
-         
-         bw = fwrite(m_xrif_timing_header, sizeof(uint8_t), XRIF_HEADER_SIZE, fp_xrif);
-         
-         if(bw != XRIF_HEADER_SIZE)
-         {
-            log<software_critical>({__FILE__,__LINE__,errno,0,"failure writing timing header to file"}); 
-            fclose(fp_xrif);
-            
-            free(fname);
-            fname = nullptr;
-
-            free(fnameTiming);
-            fnameTiming = nullptr;
-            
-            return; //will trigger a shutdown
-         }
-         
-         bw = fwrite(m_xrif_timing->raw_buffer, sizeof(uint8_t), m_xrif_timing->compressed_size, fp_xrif);
-
-         if(bw != m_xrif_timing->compressed_size)
-         {
-            log<software_critical>({__FILE__,__LINE__,errno,0,"failure writing timing data to file"}); 
-            fclose(fp_xrif);
-            
-            free(fname);
-            fname = nullptr;
-
-            free(fnameTiming);
-            fnameTiming = nullptr;
-            
-            return; //will trigger a shutdown
-         }
-         
-         fclose(fp_xrif);
-         
-         clock_gettime(CLOCK_REALTIME, &tw2);
-         
-         double wt = ( (double) tw2.tv_sec + ((double) tw2.tv_nsec)/1e9) - ( (double) tw1.tv_sec + ((double) tw1.tv_nsec)/1e9);
-
-         std::cerr << wt << "\n";
-         
-         if(m_writing == STOP_WRITING) 
-         {
-            m_writing = NOT_WRITING;
-            log<saving_stop>({0,m_currSaveStopFrameNo});
-         }
-         
+         if(doEncode() < 0) return;
+         //Otherwise, success, and we just go on.
       }
       else
       {
@@ -1065,18 +1025,173 @@ void streamWriter::swThreadExec()
    } //outer loop, will exit if m_shutdown==true
    
    
-   if(fname) 
+   if(m_fname) 
    {
-      free(fname);
-      fname = nullptr;
-   }
-   if(fnameTiming) 
-   {
-      free(fnameTiming);
-      fnameTiming = nullptr;
+      free(m_fname);
+      m_fname = nullptr;
    }
 }
 
+inline
+int streamWriter::doEncode()
+{
+   if(m_writing == NOT_WRITING) return 0;
+   
+   if(m_logSaveStart) 
+   {
+      log<saving_start>({1,m_currSaveStartFrameNo});
+      m_logSaveStart = false;
+   }
+   
+   timespec tw0, tw1, tw2;
+   
+   clock_gettime(CLOCK_REALTIME, &tw0);
+   
+   //Configure xrif and copy image data -- this does no allocations
+   int rv = xrif_set_size(m_xrif, m_width, m_height, 1, (m_currSaveStop-m_currSaveStart), m_dataType);
+   if(rv != XRIF_NOERROR)
+   {
+      //This is a big problem.  Report it as "ALERT" and go on.
+      log<software_alert>({__FILE__,__LINE__, 0, rv, "xrif set size error. DATA POSSIBLY LOST"});
+   }
+   
+   rv = xrif_set_lz4_acceleration(m_xrif, m_lz4accel);
+   if(rv != XRIF_NOERROR)
+   {
+      //This may just be out of range, it's only an error.
+      log<software_error>({__FILE__,__LINE__, 0, rv, "xrif set LZ4 acceleration error."});
+   }
+   
+   memcpy(m_xrif->raw_buffer,  m_rawImageCircBuff + m_currSaveStart*m_width*m_height*m_typeSize, (m_currSaveStop-m_currSaveStart)*m_width*m_height*m_typeSize);
+   
+   //Configure xrif and copy timing data -- no allocations
+   rv = xrif_set_size(m_xrif_timing, 5, 1, 1, (m_currSaveStop-m_currSaveStart), XRIF_TYPECODE_UINT64);
+   if(rv != XRIF_NOERROR)
+   {
+      //This is a big problem.  Report it as "ALERT" and go on.
+      log<software_alert>({__FILE__,__LINE__, 0, rv, "xrif set size error. DATA POSSIBLY LOST."});
+   }
+   
+   rv = xrif_set_lz4_acceleration(m_xrif_timing, m_lz4accel);
+   if(rv != XRIF_NOERROR)
+   {
+      //This may just be out of range, it's only an error.
+      log<software_error>({__FILE__,__LINE__, 0, rv, "xrif set LZ4 acceleration error."});
+   }
+   
+   memcpy(m_xrif_timing->raw_buffer, m_timingCircBuff + m_currSaveStart*5, (m_currSaveStop-m_currSaveStart)*5*sizeof(uint64_t));
+   
+   
+   rv = xrif_encode(m_xrif);
+   if(rv != XRIF_NOERROR)
+   {
+      //This is a big problem.  Report it as "ALERT" and go on.
+      log<software_alert>({__FILE__,__LINE__, 0, rv, "xrif encode error. DATA POSSIBLY LOST."});
+   }
+   
+   rv = xrif_write_header( m_xrif_header, m_xrif);
+   if(rv != XRIF_NOERROR)
+   {
+      //This is a big problem.  Report it as "ALERT" and go on.
+      log<software_alert>({__FILE__,__LINE__, 0, rv, "xrif write header error. DATA POSSIBLY LOST."});
+   }
+   
+   rv = xrif_encode(m_xrif_timing);
+   if(rv != XRIF_NOERROR)
+   {
+      //This is a big problem.  Report it as "ALERT" and go on.
+      log<software_alert>({__FILE__,__LINE__, 0, rv, "xrif encode error. DATA POSSIBLY LOST."});
+   }
+   
+   rv = xrif_write_header( m_xrif_timing_header, m_xrif_timing);
+   if(rv != XRIF_NOERROR)
+   {
+      //This is a big problem.  Report it as "ALERT" and go on.
+      log<software_alert>({__FILE__,__LINE__, 0, rv, "xrif write header error. DATA POSSIBLY LOST"});
+   }
+   
+   //Now break down the acq time of the first image in the buffer for use in file name
+   tm uttime;//The broken down time.   
+   timespec * fts = (timespec *) (m_timingCircBuff + m_currSaveStart*5 +1);
+            
+   if(gmtime_r(&fts->tv_sec, &uttime) == 0)
+   {
+      //Yell at operator but keep going
+      log<software_alert>({__FILE__,__LINE__,errno,0,"gmtime_r error.  possible loss of timing information."}); 
+   }
+   
+   //Available size = m_fnameSz-m_fnameBase.size(), rather than assuming sizeof("YYYYMMDDHHMMSSNNNNNNNNN"), in case we screwed up somewhere.
+   rv = snprintf(m_fname + m_fnameBase.size(), m_fnameSz-m_fnameBase.size(), "%04i%02i%02i%02i%02i%02i%09i", uttime.tm_year+1900, 
+                            uttime.tm_mon+1, uttime.tm_mday, uttime.tm_hour, uttime.tm_min, uttime.tm_sec, static_cast<int>(fts->tv_nsec));
+   
+   if(rv != sizeof("YYYYMMDDHHMMSSNNNNNNNNN")-1) 
+   {
+      //Something is very wrong.  Keep going to try to get it on disk.
+      log<software_alert>({__FILE__,__LINE__, errno, rv, "did not write enough chars to timestamp"}); 
+   }
+   
+   //Cover up the \0 inserted by snprintf
+   (m_fname + m_fnameBase.size())[23] = '.';
+   
+   clock_gettime(CLOCK_REALTIME, &tw1);
+   
+   FILE * fp_xrif = fopen(m_fname, "wb");
+   if(fp_xrif == NULL)
+   {
+      //This is it.  If we can't write data to disk need to fix.
+      log<software_alert>({__FILE__,__LINE__,errno,0,"failed to open file for writing"}); 
+      
+      free(m_fname);
+      m_fname = nullptr;
+      
+      return -1; //will trigger a shutdown
+   }
+   
+   size_t bw = fwrite(m_xrif_header, sizeof(uint8_t), XRIF_HEADER_SIZE, fp_xrif);
+   
+   if(bw != XRIF_HEADER_SIZE)
+   {
+      log<software_alert>({__FILE__,__LINE__,errno, 0,"failure writing header to file.  DATA LOSS LIKELY. bytes = " + std::to_string(bw)}); 
+      //We go on . . .
+   }
+   
+   bw = fwrite(m_xrif->raw_buffer, sizeof(uint8_t), m_xrif->compressed_size, fp_xrif);
+   
+   if(bw != m_xrif->compressed_size)
+   {
+      log<software_alert>({__FILE__,__LINE__,errno,0,"failure writing data to file.  DATA LOSS LIKELY. bytes = " + std::to_string(bw)}); 
+   }
+   
+   bw = fwrite(m_xrif_timing_header, sizeof(uint8_t), XRIF_HEADER_SIZE, fp_xrif);
+   
+   if(bw != XRIF_HEADER_SIZE)
+   {
+      log<software_alert>({__FILE__,__LINE__,errno, 0,"failure writing timing header to file.  DATA LOSS LIKELY.  bytes = " + std::to_string(bw)}); 
+   }
+   
+   bw = fwrite(m_xrif_timing->raw_buffer, sizeof(uint8_t), m_xrif_timing->compressed_size, fp_xrif);
+   
+   if(bw != m_xrif_timing->compressed_size)
+   {
+      log<software_alert>({__FILE__,__LINE__,errno,0,"failure writing timing data to file. DATA LOSS LIKELY. bytes = " + std::to_string(bw)}); 
+   }
+   
+   fclose(fp_xrif);
+   
+   clock_gettime(CLOCK_REALTIME, &tw2);
+   
+   double wt = ( (double) tw2.tv_sec + ((double) tw2.tv_nsec)/1e9) - ( (double) tw1.tv_sec + ((double) tw1.tv_nsec)/1e9);
+   
+   std::cerr << wt << "\n";
+   
+   if(m_writing == STOP_WRITING) 
+   {
+      m_writing = NOT_WRITING;
+      log<saving_stop>({0,m_currSaveStopFrameNo});
+   }
+   
+   return 0;
+}
 
 INDI_NEWCALLBACK_DEFN(streamWriter, m_indiP_writing)(const pcf::IndiProperty &ipRecv)
 {

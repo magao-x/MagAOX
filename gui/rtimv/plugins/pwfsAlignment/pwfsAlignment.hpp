@@ -25,17 +25,33 @@ class pwfsAlignment : public QObject,
       double m_1y {0};
       double m_1D {0};
       
+      double m_set1x {0};
+      double m_set1y {0};
+      double m_set1D {0};
+      
       double m_2x {0};
       double m_2y {0};
       double m_2D {0};
+      
+      double m_set2x {0};
+      double m_set2y {0};
+      double m_set2D {0};
       
       double m_3x {0};
       double m_3y {0};
       double m_3D {0};
       
+      double m_set3x {0};
+      double m_set3y {0};
+      double m_set3D {0};
+      
       double m_4x {0};
       double m_4y {0};
       double m_4D {0};
+      
+      double m_set4x {0};
+      double m_set4y {0};
+      double m_set4D {0};
       
       QGraphicsScene * qgs;
       

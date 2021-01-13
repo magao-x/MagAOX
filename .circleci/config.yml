@@ -29,4 +29,7 @@ workflows:
   version: 2
   centos:
     jobs:
-      - build_centos
+      - build_centos:
+          filters:
+            branches:
+              ignore: /.*_dev/

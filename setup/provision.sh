@@ -328,11 +328,11 @@ $MAYBE_SUDO bash -l "$DIR/steps/install_purepyindi.sh"
 $MAYBE_SUDO bash -l "$DIR/steps/install_magpyx.sh"
 $MAYBE_SUDO bash -l "$DIR/steps/install_imagestreamio_python.sh"
 
-
-if [[ $MAGAOX_ROLE == AOC || $MAGAOX_ROLE == vm ||  $MAGAOX_ROLE == workstation ]]; then
-    # sup web interface
-    $MAYBE_SUDO bash -l "$DIR/steps/install_sup.sh"
-fi
+# TODO:jlong: uncomment when it's back in working order
+# if [[ $MAGAOX_ROLE == AOC || $MAGAOX_ROLE == vm ||  $MAGAOX_ROLE == workstation ]]; then
+#     # sup web interface
+#     $MAYBE_SUDO bash -l "$DIR/steps/install_sup.sh"
+# fi
 
 if [[ $MAGAOX_ROLE == AOC || $MAGAOX_ROLE == TOC || $MAGAOX_ROLE == vm || $MAGAOX_ROLE == workstation || $MAGAOX_ROLE == ci ]]; then
     # realtime image viewer
