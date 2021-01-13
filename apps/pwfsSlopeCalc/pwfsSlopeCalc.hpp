@@ -81,6 +81,29 @@ protected:
      *@{
      */
    
+   std::string m_fitter; ///< Device name of the pupil fitter process. If set, the number of pupils
+   int m_numPupils {4};
+   
+   float m_pupil_cx_1; ///< the center x coordinate of pupil 1
+   float m_pupil_cy_1; ///< the center y coordinate of pupil 1
+   float m_pupil_D_1 {0}; ///< the diameter of pupil 1, used only for averaging the fitter output
+   
+   float m_pupil_cx_2; ///< the center x coordinate of pupil 2
+   float m_pupil_cy_2; ///< the center y coordinate of pupil 2
+   float m_pupil_D_2 {0}; ///< the diameter of pupil 2, used only for averaging the fitter output
+   
+   float m_pupil_cx_3; ///< the center x coordinate of pupil 3
+   float m_pupil_cy_3; ///< the center y coordinate of pupil 3
+   float m_pupil_D_3 {0}; ///< the diameter of pupil 3, used only for averaging the fitter output
+   
+   float m_pupil_cx_4; ///< the center x coordinate of pupil 4
+   float m_pupil_cy_4; ///< the center y coordinate of pupil 4
+   float m_pupil_D_4 {0}; ///< the diameter of pupil 4, used only for averaging the fitter output
+
+   int m_pupil_D {56}; ///< the pupil diameter, just one applied to all pupils.
+   
+   int m_pupil_buffer {1}; ///< the edge buffer for the pupils, just one applied to all pupils.  Default is 1.
+   
    ///@}
 
    sem_t m_smSemaphore; ///< Semaphore used to synchronize the fg thread and the sm thread.
@@ -94,6 +117,18 @@ protected:
    mx::improc::eigenImage<realT> m_darkImage;
    realT (*dark_pixget)(void *, size_t) {nullptr}; ///< Pointer to a function to extract the image data as our desired type realT.
    bool m_darkSet {false};
+   
+   int m_pupil_sx_1; ///< the starting x-coordinate of pupil 1 quadrant, calculated from the pupil center, diameter, and buffer.
+   int m_pupil_sy_1; ///< the starting y-coordinate of pupil 1 quadrant, calculated from the pupil center, diameter, and buffer.
+   
+   int m_pupil_sx_2; ///< the starting x-coordinate of pupil 2 quadrant, calculated from the pupil center, diameter, and buffer.
+   int m_pupil_sy_2; ///< the starting y-coordinate of pupil 2 quadrant, calculated from the pupil center, diameter, and buffer.
+   
+   int m_pupil_sx_3; ///< the starting x-coordinate of pupil 3 quadrant, calculated from the pupil center, diameter, and buffer.
+   int m_pupil_sy_3; ///< the starting y-coordinate of pupil 3 quadrant, calculated from the pupil center, diameter, and buffer.
+   
+   int m_pupil_sx_4; ///< the starting x-coordinate of pupil 4 quadrant, calculated from the pupil center, diameter, and buffer.
+   int m_pupil_sy_4; ///< the starting y-coordinate of pupil 4 quadrant, calculated from the pupil center, diameter, and buffer.
    
 public:
    /// Default c'tor.
@@ -187,7 +222,18 @@ protected:
    
    ///@}
    
+   pcf::IndiProperty m_indiP_quad1;
+   pcf::IndiProperty m_indiP_quad2;
+   pcf::IndiProperty m_indiP_quad3;
+   pcf::IndiProperty m_indiP_quad4;
+   
+public:
+   INDI_SETCALLBACK_DECL(pwfsSlopeCalc, m_indiP_quad1);
+   INDI_SETCALLBACK_DECL(pwfsSlopeCalc, m_indiP_quad2);
+   INDI_SETCALLBACK_DECL(pwfsSlopeCalc, m_indiP_quad3);
+   INDI_SETCALLBACK_DECL(pwfsSlopeCalc, m_indiP_quad4);
 };
+
 
 inline
 pwfsSlopeCalc::pwfsSlopeCalc() : MagAOXApp(MAGAOX_CURRENT_SHA1, MAGAOX_REPO_MODIFIED)
@@ -203,6 +249,28 @@ void pwfsSlopeCalc::setupConfig()
    darkMonitorT::setupConfig(config);
    
    frameGrabberT::setupConfig(config);
+   
+   config.add("pupil.fitter", "", "pupil.fitter", argType::Required, "pupil", "fitter", false, "int", "The device name of the pupil fitter.  If set, then pupil position is set by the fitter reference.");
+
+   config.add("pupil.D", "", "pupil.D", argType::Required, "pupil", "D", false, "int", "The diameter of the pupils, fixed. Default is 56.");
+
+   config.add("pupil.buffer", "", "pupil.buffer", argType::Required, "pupil", "buffer", false, "int", "The edge buffer for the pupils.  Default is 1.");
+   
+   config.add("pupil.numPupils", "", "pupil.numPupils", argType::Required, "pupil", "numPupils", false, "int", "The number of pupils.  Default is 4.  3 is also supported.");
+   
+   
+   
+   config.add("pupil.cx_1", "", "pupil.cx_1", argType::Required, "pupil", "cx_1", false, "int", "The default x-coordinate of pupil 1 (LL).  Can be updated from real-time fitter.");
+   config.add("pupil.cy_1", "", "pupil.cy_1", argType::Required, "pupil", "cy_1", false, "int", "The default y-coordinate of pupil 1 (LL).  Can be updated from real-time fitter.");
+   
+   config.add("pupil.cx_2", "", "pupil.cx_2", argType::Required, "pupil", "cx_2", false, "int", "The default x-coordinate of pupil 2 (LL).  Can be updated from real-time fitter.");
+   config.add("pupil.cy_2", "", "pupil.cy_2", argType::Required, "pupil", "cy_2", false, "int", "The default y-coordinate of pupil 2 (LL).  Can be updated from real-time fitter.");
+   
+   config.add("pupil.cx_3", "", "pupil.cx_3", argType::Required, "pupil", "cx_3", false, "int", "The default x-coordinate of pupil 3 (LL).  Can be updated from real-time fitter.");
+   config.add("pupil.cy_3", "", "pupil.cy_3", argType::Required, "pupil", "cy_3", false, "int", "The default y-coordinate of pupil 3 (LL).  Can be updated from real-time fitter.");
+   
+   config.add("pupil.cx_4", "", "pupil.cx_4", argType::Required, "pupil", "cx_4", false, "int", "The default x-coordinate of pupil 4 (LL).  Can be updated from real-time fitter.");
+   config.add("pupil.cy_4", "", "pupil.cy_4", argType::Required, "pupil", "cy_4", false, "int", "The default y-coordinate of pupil 4 (LL).  Can be updated from real-time fitter.");
 }
 
 inline
@@ -213,6 +281,18 @@ int pwfsSlopeCalc::loadConfigImpl( mx::app::appConfigurator & _config )
    darkMonitorT::loadConfig(_config);
    frameGrabberT::loadConfig(_config);
    
+   config(m_fitter, "pupil.fitter");
+   config(m_numPupils, "pupil.numPupils");
+   config(m_pupil_D, "pupil.D");
+   config(m_pupil_buffer, "pupil.buffer");
+   config(m_pupil_cx_1, "pupil.cx_1");
+   config(m_pupil_cy_1, "pupil.cy_1");
+   config(m_pupil_cx_2, "pupil.cx_2");
+   config(m_pupil_cy_2, "pupil.cy_2");
+   config(m_pupil_cx_3, "pupil.cx_3");
+   config(m_pupil_cy_3, "pupil.cy_3");
+   config(m_pupil_cx_4, "pupil.cx_4");
+   config(m_pupil_cy_4, "pupil.cy_4");
    return 0;
 }
 
@@ -244,6 +324,17 @@ int pwfsSlopeCalc::appStartup()
    if(frameGrabberT::appStartup() < 0)
    {
       return log<software_error,-1>({__FILE__, __LINE__});
+   }
+   
+   if(m_fitter != "")
+   {
+      REG_INDI_SETPROP(m_indiP_quad1, m_fitter, "quadrant1");
+      REG_INDI_SETPROP(m_indiP_quad2, m_fitter, "quadrant2");
+      REG_INDI_SETPROP(m_indiP_quad3, m_fitter, "quadrant3");
+      if(m_numPupils == 4)
+      {
+         REG_INDI_SETPROP(m_indiP_quad4, m_fitter, "quadrant4");
+      }
    }
    
    state(stateCodes::OPERATING);
@@ -398,9 +489,35 @@ int pwfsSlopeCalc::configureAcquisition()
       return -1;
    }
    
-   m_quadSize = shmimMonitorT::m_width/2;
-   frameGrabberT::m_width = shmimMonitorT::m_width/2;
-   frameGrabberT::m_height = shmimMonitorT::m_height;
+   /*if(m_fitter != "")
+   {
+      if(m_numPupils == 3)
+      {
+         m_pupil_D = (1./3.)*(m_pupil_D_1 + m_pupil_D_2 + m_pupil_D_3);
+      }
+      else
+      {
+         m_pupil_D = (1./4.)*(m_pupil_D_1 + m_pupil_D_2 + m_pupil_D_3 + m_pupil_D_4);
+      }
+   }*/
+   
+   m_quadSize = m_pupil_D + 2*m_pupil_buffer;
+   
+   m_pupil_sx_1 = m_pupil_cx_1 - 0.5*m_quadSize;
+   m_pupil_sy_1 = m_pupil_cy_1 - 0.5*m_quadSize;
+   
+   m_pupil_sx_2 = m_pupil_cx_2 - 0.5*m_quadSize;
+   m_pupil_sy_2 = m_pupil_cy_2 - 0.5*m_quadSize;
+
+   m_pupil_sx_3 = m_pupil_cx_3 - 0.5*m_quadSize;
+   m_pupil_sy_3 = m_pupil_cy_3 - 0.5*m_quadSize;
+   
+   m_pupil_sx_4 = m_pupil_cx_4 - 0.5*m_quadSize;
+   m_pupil_sy_4 = m_pupil_cy_4 - 0.5*m_quadSize;
+   
+   //m_quadSize = shmimMonitorT::m_width/2;
+   frameGrabberT::m_width = m_quadSize;
+   frameGrabberT::m_height = 2*m_quadSize;
    frameGrabberT::m_dataType = _DATATYPE_FLOAT;
    
    return 0;
@@ -443,20 +560,44 @@ int pwfsSlopeCalc::loadImageIntoStream(void * dest)
    Eigen::Map<eigenImage<unsigned short>> pwfsIm( static_cast<unsigned short *>(m_curr_src), shmimMonitorT::m_width, shmimMonitorT::m_height );
    Eigen::Map<eigenImage<float>> slopesIm(static_cast<float*>(dest), frameGrabberT::m_width, frameGrabberT::m_height );
    
+   static float sqrt32 = sqrt(3.0)/2;
+   
    float norm;
-   for(int ii=0; ii< m_quadSize; ++ii)
+   
+   if(m_numPupils == 3)
    {
-      for(int jj=0; jj< m_quadSize; ++jj)
+      for(int rr=0; rr< m_quadSize; ++rr)
       {
-         float I1 = pwfsIm(jj,ii) - m_darkImage(jj,ii);
-         float I2 = pwfsIm(jj + m_quadSize,ii) - m_darkImage(jj+m_quadSize,ii);
-         float I3 = pwfsIm(jj, ii + m_quadSize) - m_darkImage(jj, ii+m_quadSize);
-         float I4 = pwfsIm(jj+m_quadSize, ii + m_quadSize) - m_darkImage(jj+m_quadSize, ii+m_quadSize);
+         for(int cc=0; cc< m_quadSize; ++cc)
+         {
+            float I2 = pwfsIm(rr+m_pupil_sx_1,cc+m_pupil_sy_1) - m_darkImage(rr+m_pupil_sx_1,cc+m_pupil_sy_1);
+            float I3 = pwfsIm(rr+m_pupil_sx_2,cc+m_pupil_sy_2) - m_darkImage(rr+m_pupil_sx_2,cc+m_pupil_sy_2);
+            float I1 = pwfsIm(rr+m_pupil_sx_3,cc+m_pupil_sy_3) - m_darkImage(rr+m_pupil_sx_3,cc+m_pupil_sy_3);
+           
+            norm = 1;//I1+I2+I3+I4;
          
-         norm = I1+I2+I3+I4;
+            slopesIm(rr,cc) = sqrt32*(I2-I3)/norm;
+            slopesIm(rr,cc+m_quadSize) = (I1-0.5*(I2+I3))/norm;
+         }
+      }
+   }
+   else
+   {
+   
+      for(int rr=0; rr< m_quadSize; ++rr)
+      {
+         for(int cc=0; cc< m_quadSize; ++cc)
+         {
+            float I1 = pwfsIm(rr+m_pupil_sx_1,cc+m_pupil_sy_1) - m_darkImage(rr+m_pupil_sx_1,cc+m_pupil_sy_1);
+            float I2 = pwfsIm(rr+m_pupil_sx_2,cc+m_pupil_sy_2) - m_darkImage(rr+m_pupil_sx_2,cc+m_pupil_sy_2);
+            float I3 = pwfsIm(rr+m_pupil_sx_3,cc+m_pupil_sy_3) - m_darkImage(rr+m_pupil_sx_3,cc+m_pupil_sy_3);
+            float I4 = pwfsIm(rr+m_pupil_sx_4,cc+m_pupil_sy_4) - m_darkImage(rr+m_pupil_sx_4,cc+m_pupil_sy_4);
          
-         slopesIm(jj,ii) = ((I1+I3) - (I2+I4))/norm;
-         slopesIm(jj,ii+m_quadSize) = ((I1+I2)-(I3+I4))/norm;
+            norm = 1;//I1+I2+I3+I4;
+         
+            slopesIm(rr,cc) = ((I1+I3) - (I2+I4))/norm;
+            slopesIm(rr,cc+m_quadSize) = ((I1+I2)-(I3+I4))/norm;
+         }
       }
    }
     /*
@@ -478,7 +619,129 @@ int pwfsSlopeCalc::reconfig()
    return 0;
 }
 
+INDI_SETCALLBACK_DEFN(pwfsSlopeCalc, m_indiP_quad1)(const pcf::IndiProperty &ipRecv)
+{
+   if(ipRecv.getName() != m_indiP_quad1.getName())
+   {
+      log<software_error>({__FILE__,__LINE__,"wrong INDI property received"});
+      
+      return -1;
+   }
+   
+   if(ipRecv.find("set-x"))
+   {
+      float newval = ipRecv["set-x"].get<float>();
+      if(newval != m_pupil_cx_1)
+      {
+         m_pupil_cx_1 = newval;
+         m_reconfig = true;
+      }
+   }
+   
+   if(ipRecv.find("set-y"))
+   {
+      float newval = ipRecv["set-y"].get<float>();
+      if(newval != m_pupil_cy_1)
+      {
+         m_pupil_cy_1 = newval;
+         m_reconfig = true;
+      }
+   }
+   
+   if(ipRecv.find("set-D"))
+   {
+      float newval = ipRecv["set-D"].get<float>();
+      if(newval != m_pupil_D_1)
+      {
+         m_pupil_D_1 = newval;
+         m_reconfig = true;
+      }
+   }
+   
+   
+   return 0;
+}
 
+INDI_SETCALLBACK_DEFN(pwfsSlopeCalc, m_indiP_quad2)(const pcf::IndiProperty &ipRecv)
+{
+   if(ipRecv.getName() != m_indiP_quad2.getName())
+   {
+      log<software_error>({__FILE__,__LINE__,"wrong INDI property received"});
+      
+      return -2;
+   }
+   
+   if(ipRecv.find("set-x"))
+   {
+      m_pupil_cx_2 = ipRecv["set-x"].get<float>();
+   }
+   
+   if(ipRecv.find("set-y"))
+   {
+      m_pupil_cy_2 = ipRecv["set-y"].get<float>();
+   }
+   if(ipRecv.find("set-D"))
+   {
+      m_pupil_D_2 = ipRecv["set-D"].get<float>();
+   }
+   
+   
+   return 0;
+}
+
+INDI_SETCALLBACK_DEFN(pwfsSlopeCalc, m_indiP_quad3)(const pcf::IndiProperty &ipRecv)
+{
+   if(ipRecv.getName() != m_indiP_quad3.getName())
+   {
+      log<software_error>({__FILE__,__LINE__,"wrong INDI property received"});
+      
+      return -3;
+   }
+   
+   if(ipRecv.find("set-x"))
+   {
+      m_pupil_cx_3 = ipRecv["set-x"].get<float>();
+   }
+   
+   if(ipRecv.find("set-y"))
+   {
+      m_pupil_cy_3 = ipRecv["set-y"].get<float>();
+   }
+   if(ipRecv.find("set-D"))
+   {
+      m_pupil_D_3 = ipRecv["set-D"].get<float>();
+   }
+   
+   
+   return 0;
+}
+
+INDI_SETCALLBACK_DEFN(pwfsSlopeCalc, m_indiP_quad4)(const pcf::IndiProperty &ipRecv)
+{
+   if(ipRecv.getName() != m_indiP_quad4.getName())
+   {
+      log<software_error>({__FILE__,__LINE__,"wrong INDI property received"});
+      
+      return -4;
+   }
+   
+   if(ipRecv.find("set-x"))
+   {
+      m_pupil_cx_4 = ipRecv["set-x"].get<float>();
+   }
+   
+   if(ipRecv.find("set-y"))
+   {
+      m_pupil_cy_4 = ipRecv["set-y"].get<float>();
+   }
+   if(ipRecv.find("set-D"))
+   {
+      m_pupil_D_4 = ipRecv["set-D"].get<float>();
+   }
+   
+   
+   return 0;
+}
 
 } //namespace app
 } //namespace MagAOX

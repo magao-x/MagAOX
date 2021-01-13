@@ -41,6 +41,7 @@ namespace tty
   * \returns -1 on error (nothing yet)
   * 
   */
+inline
 int telnetCRLF( std::string & telnetStr,     ///< [out] the string with \\r an \\n converted to \\r\\n
                 const std::string & inputStr ///< [in] the string to be converted
               )
@@ -98,6 +99,7 @@ int telnetCRLF( std::string & telnetStr,     ///< [out] the string with \\r an \
   *
   * \ingroup tty 
   */
+inline
 int ttyOpenRaw( int & fileDescrip,        ///< [out] the file descriptor.  Set to 0 on an error.
                 std::string & deviceName, ///< [in] the device path name, e.g. /dev/ttyUSB0
                 speed_t speed             ///< [in] indicates the baud rate (see http://pubs.opengroup.org/onlinepubs/7908799/xsh/termios.h.html)

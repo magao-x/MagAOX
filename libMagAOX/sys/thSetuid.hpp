@@ -29,6 +29,7 @@ namespace sys
  * 
  * \ingroup sys
  */
+inline
 int th_seteuid(uid_t euid /**< [in] the desired new effective user id */)
 {
    int rv = syscall(SYS_setreuid, -1, euid);

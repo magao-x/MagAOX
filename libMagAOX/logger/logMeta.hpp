@@ -45,10 +45,11 @@ int getLogStateVal( valT & val,
                     char ** hint = 0
                   )
 {
-   char * atprior;
-   char * stprior;
+   char * atprior = nullptr;
+   char * stprior = nullptr;
    
-   char * _hint;
+   char * _hint = nullptr;
+   
    if(hint) _hint = *hint;
    else _hint = 0;
 

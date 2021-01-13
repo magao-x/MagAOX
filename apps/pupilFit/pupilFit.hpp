@@ -79,6 +79,8 @@ protected:
    
    bool m_useRefIm {false};
    
+   bool m_refUpdated {false}; ///< Flag set if the online reference update is used.
+   
    double m_setx1 {29.5};
    double m_sety1 {29.5};
    double m_setD1 {56.0};
@@ -286,6 +288,9 @@ protected:
    pcf::IndiProperty m_indiP_reload;
    INDI_NEWCALLBACK_DECL(pupilFit, m_indiP_reload);
    
+   pcf::IndiProperty m_indiP_update;
+   INDI_NEWCALLBACK_DECL(pupilFit, m_indiP_update);
+   
    ///@}
 };
 
@@ -463,6 +468,13 @@ int pupilFit::appStartup()
       return -1;
    }
    
+   createStandardIndiRequestSw( m_indiP_update, "update_ref", "Update Reference");
+   m_indiP_update["request"].set(pcf::IndiElement::Off);
+   if( registerIndiPropertyNew( m_indiP_update, INDI_NEWCALLBACK(m_indiP_update)) < 0)
+   {
+      log<software_error>({__FILE__,__LINE__});
+      return -1;
+   }
    state(stateCodes::OPERATING);
    
    return 0;
@@ -553,7 +565,7 @@ int pupilFit::allocate(const dev::shmimT & dummy)
    }
    else
    {
-      if(m_numPupils == 4)
+      if(m_numPupils == 4 && !m_refUpdated)
       {
          m_setx1 = 29.5;
          m_sety1 = 29.5;
@@ -571,7 +583,7 @@ int pupilFit::allocate(const dev::shmimT & dummy)
          m_sety4 = 89.5;
          m_setD4 = 56.0;
       }
-      else
+      else if(!m_refUpdated)
       {
          m_setx1 = 30.0;
          m_sety1 = 38.0;
@@ -586,9 +598,6 @@ int pupilFit::allocate(const dev::shmimT & dummy)
          m_setD3 = 14.0;
       }
    }
-   
-   
-   
    
    uint32_t imsize[3];
    imsize[0] = m_width;
@@ -1073,6 +1082,45 @@ INDI_NEWCALLBACK_DEFN(pupilFit, m_indiP_reload)(const pcf::IndiProperty & ipRecv
    return 0;
 }
 
+INDI_NEWCALLBACK_DEFN(pupilFit, m_indiP_update)(const pcf::IndiProperty & ipRecv)
+{
+   if(ipRecv.getName() != m_indiP_update.getName())
+   {
+      log<software_error>({__FILE__,__LINE__, "wrong INDI property received."});
+      return -1;
+   }
+   
+   
+   
+   if( ipRecv["request"].getSwitchState() == pcf::IndiElement::On)
+   {
+      std::lock_guard<std::mutex> guard(m_indiMutex);
+      
+      log<text_log>("updating cal");
+      m_setx1 =  m_indiP_quad1["x"].get<float>();
+      m_sety1 =  m_indiP_quad1["y"].get<float>();
+      m_setD1 =  m_indiP_quad1["D"].get<float>();
+      
+      m_setx2 =  m_indiP_quad2["x"].get<float>();
+      m_sety2 =  m_indiP_quad2["y"].get<float>();
+      m_setD2 =  m_indiP_quad2["D"].get<float>();
+      
+      m_setx3 =  m_indiP_quad3["x"].get<float>();
+      m_sety3 =  m_indiP_quad3["y"].get<float>();
+      m_setD3 =  m_indiP_quad3["D"].get<float>();
+      
+      if(m_numPupils == 4)
+      {
+         m_setx4 =  m_indiP_quad4["x"].get<float>();
+         m_sety4 =  m_indiP_quad4["y"].get<float>();
+         m_setD4 =  m_indiP_quad4["D"].get<float>();
+      }
+      
+      m_refUpdated = true;
+   }
+   
+   return 0;
+}
       
 } //namespace app
 } //namespace MagAOX

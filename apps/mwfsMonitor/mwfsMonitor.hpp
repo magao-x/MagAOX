@@ -251,6 +251,12 @@ void mwfsMonitor::setupConfig()
 
    config.add("mwfs.PSFBox", "", "mwfs.PSFBox", argType::Required, "mwfs", "PSFBox", false, "int", "Size of box (length of a side) around PSFs in which to centroid");
    config.add("mwfs.mwfsBox", "", "mwfs.mwfsBox", argType::Required, "mwfs", "mwfsBox", false, "int", "Size of box (length of a side) around mwfs spots");
+   config.add("mwfs.xPSF1", "", "mwfs.xPSF1", argType::Required, "mwfs", "xPSF1", false, "int", "X Centroid of PSF1");
+   config.add("mwfs.xPSF2", "", "mwfs.xPSF2", argType::Required, "mwfs", "xPSF2", false, "int", "X Centroid of PSF2");
+   config.add("mwfs.yPSF1", "", "mwfs.yPSF1", argType::Required, "mwfs", "yPSF1", false, "int", "Y Centroid of PSF1");
+   config.add("mwfs.yPSF2", "", "mwfs.yPSF2", argType::Required, "mwfs", "yPSF2", false, "int", "Y Centroid of PSF2");
+   config.add("mwfs.xmwfs", "", "mwfs.xmwfs", argType::Required, "mwfs", "xmwfs", false, "int", "X Centroid of mwfs box");
+   config.add("mwfs.ymwfs", "", "mwfs.ymwfs", argType::Required, "mwfs", "ymwfs", false, "int", "Y Centroid of mwfs box");
 
 }
 
@@ -264,6 +270,12 @@ int mwfsMonitor::loadConfigImpl( mx::app::appConfigurator & _config )
    
    _config(m_PSFBox, "mwfs.PSFBox");
    _config(m_mwfsBox, "mwfs.mwfsBox");
+   _config(m_xPSF1, "mwfs.xPSF1");
+   _config(m_xPSF2, "mwfs.xPSF2");
+   _config(m_yPSF1, "mwfs.yPSF1");
+   _config(m_yPSF2, "mwfs.yPSF2");
+   _config(m_xmwfs, "mwfs.xmwfs");
+   _config(m_ymwfs, "mwfs.ymwfs");
    
    return 0;
 }
