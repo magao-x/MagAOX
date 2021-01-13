@@ -11,7 +11,7 @@
 #include "../../libMagAOX/libMagAOX.hpp" //Note this is included on command line to trigger pch
 #include "../../magaox_git_version.h"
 
-#include <mx/gslInterpolation.hpp>
+#include <mx/math/gslInterpolation.hpp>
 #include <mx/ioutils/readColumns.hpp>
 
 /** \defgroup adcTracker
@@ -294,7 +294,7 @@ int adcTracker::appLogic()
    
    static double lastupdate = 0;
    
-   if(m_tracking && mx::get_curr_time() - lastupdate > m_updateInterval)
+   if(m_tracking && mx::sys::get_curr_time() - lastupdate > m_updateInterval)
    {
       float dadc1 = 0.0;
       float dadc2 = 0.0;
@@ -317,7 +317,7 @@ int adcTracker::appLogic()
       m_indiP_adc2pos["target"] = adc2;
       sendNewProperty (m_indiP_adc2pos); 
       
-      lastupdate = mx::get_curr_time();
+      lastupdate = mx::sys::get_curr_time();
    }
    else if(!m_tracking) lastupdate = 0;
       
