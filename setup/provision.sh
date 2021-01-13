@@ -331,7 +331,8 @@ $MAYBE_SUDO bash -l "$DIR/steps/install_imagestreamio_python.sh"
 
 if [[ $MAGAOX_ROLE == AOC || $MAGAOX_ROLE == vm ||  $MAGAOX_ROLE == workstation ]]; then
     # sup web interface
-    $MAYBE_SUDO bash -l "$DIR/steps/install_sup.sh"
+    log_info "sup install skipped because yarn is stupid right now"
+    #$MAYBE_SUDO bash -l "$DIR/steps/install_sup.sh"
 fi
 
 if [[ $MAGAOX_ROLE == AOC || $MAGAOX_ROLE == TOC || $MAGAOX_ROLE == vm || $MAGAOX_ROLE == workstation || $MAGAOX_ROLE == ci ]]; then
