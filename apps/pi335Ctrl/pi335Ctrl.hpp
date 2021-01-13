@@ -409,7 +409,7 @@ int pi335Ctrl::appLogic()
    
    if(state() == stateCodes::HOMING)
    {
-      //std::cerr << "Homing state: " << m_homingState << " " << mx::get_curr_time() - m_homingStart << "\n";
+      //std::cerr << "Homing state: " << m_homingState << " " << mx::sys::get_curr_time() - m_homingStart << "\n";
       int ax = m_homingState + 1;
       
       int atz = homeState(ax);
@@ -420,7 +420,7 @@ int pi335Ctrl::appLogic()
          log<software_error,-1>({__FILE__, __LINE__, "error getting ATZ? home state."});
       }
       
-      if(atz == 1) //mx::get_curr_time() - m_homingStart > 20)
+      if(atz == 1) //mx::sys::get_curr_time() - m_homingStart > 20)
       {
          ++m_homingState;
          
@@ -653,7 +653,7 @@ int pi335Ctrl::home_1()
       log<software_error>( {__FILE__, __LINE__, rv, tty::ttyErrorString(rv)});
    }
 
-   m_homingStart = mx::get_curr_time(); ///\todo remmove m_homingStart once ATZ? works.
+   m_homingStart = mx::sys::get_curr_time(); ///\todo remmove m_homingStart once ATZ? works.
    m_homingState = 0;
    log<text_log>("commenced homing x");
    
@@ -685,7 +685,7 @@ int pi335Ctrl::home_2()
       log<software_error>( {__FILE__, __LINE__, rv, tty::ttyErrorString(rv)});
    }
 
-   m_homingStart = mx::get_curr_time();
+   m_homingStart = mx::sys::get_curr_time();
    log<text_log>("commenced homing y");
    
    return 0;
@@ -717,7 +717,7 @@ int pi335Ctrl::finishInit()
       log<software_error>( {__FILE__, __LINE__, rv, tty::ttyErrorString(rv)});
    }
    
-   mx::milliSleep(2000);
+   mx::sys::milliSleep(2000);
    
    //goto openloop pos zero (0 V) axis 2
    rv = tty::ttyWrite("SVA 2 0.0\n", m_fileDescrip, m_writeTimeout);
@@ -727,7 +727,7 @@ int pi335Ctrl::finishInit()
       log<software_error>( {__FILE__, __LINE__, rv, tty::ttyErrorString(rv)});
    }
    
-   mx::milliSleep(2000);
+   mx::sys::milliSleep(2000);
 
    //Get the real position of axis 1 (should be 0mrad st start) 
    rv = tty::ttyWriteRead( resp, "SVA? 1\n", "\n", false, m_fileDescrip, m_writeTimeout, m_readTimeout);
@@ -756,7 +756,7 @@ int pi335Ctrl::finishInit()
       log<software_error>( {__FILE__, __LINE__, rv, tty::ttyErrorString(rv)});
    }
 
-   mx::milliSleep(250);
+   mx::sys::milliSleep(250);
    
    //turn on servo to axis 1 (green servo LED goes on 727) 
    rv = tty::ttyWrite("SVO 2 1\n", m_fileDescrip, m_writeTimeout);
@@ -769,7 +769,7 @@ int pi335Ctrl::finishInit()
    m_servoState = 1;
    log<text_log>("servos engaged", logPrio::LOG_NOTICE);
 
-   mx::milliSleep(1000);
+   mx::sys::milliSleep(1000);
    
    //now safe for closed loop moves 
    //center axis 1 (to configured home position)

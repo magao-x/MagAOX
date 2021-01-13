@@ -507,7 +507,7 @@ int ocam2KCtrl::appLogic()
       
       if(m_protectionResetConfirmed > 0 )
       {
-         if( mx::get_curr_time() - m_protectionResetReqTime > 10.0)
+         if( mx::sys::get_curr_time() - m_protectionResetReqTime > 10.0)
          {
             m_protectionResetConfirmed = 0;
             updateIfChanged(m_indiP_emProt, "status", std::string("UNCONFIRMED"));
@@ -1145,7 +1145,7 @@ INDI_NEWCALLBACK_DEFN(ocam2KCtrl, m_indiP_emProtReset)(const pcf::IndiProperty &
        
       m_protectionResetConfirmed = 1;
          
-      m_protectionResetReqTime = mx::get_curr_time();
+      m_protectionResetReqTime = mx::sys::get_curr_time();
          
       log<text_log>("protection reset requested", logPrio::LOG_NOTICE);
         
