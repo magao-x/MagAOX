@@ -78,6 +78,7 @@ apps/kTracker/kTracker
 apps/koolanceCtrl/koolanceCtrl
 
 #m
+apps/mwfsMonitor/mwfsMonitor
 apps/mzmqServer/mzmqServer
 
 apps/mzmqClient/mzmqClient
