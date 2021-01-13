@@ -15,12 +15,8 @@
 
 #include <milkzmqClient.hpp>
 
-#include <mx/timeUtils.hpp>
-
 #include "../../libMagAOX/libMagAOX.hpp" //Note this is included on command line to trigger pch
 #include "../../magaox_git_version.h"
-
-
 
 namespace MagAOX
 {

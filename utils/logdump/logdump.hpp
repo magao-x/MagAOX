@@ -90,7 +90,7 @@ void logdump::loadConfig()
    config(m_fileCheckInterval, "fileCheckInterval");
 
    //Get default log dir
-   std::string tmpstr = mx::getEnv(MAGAOX_env_path);
+   std::string tmpstr = mx::sys::getEnv(MAGAOX_env_path);
    if(tmpstr == "")
    {
       tmpstr = MAGAOX_path;

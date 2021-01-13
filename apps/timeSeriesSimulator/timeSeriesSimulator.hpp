@@ -212,7 +212,7 @@ int timeSeriesSimulator::appStartup()
     std::cerr << "added to gizmos" << std::endl;
   }
 
-  startTimeSec = mx::get_curr_time();
+  startTimeSec = mx::sys::get_curr_time();
   updateVals();
   state(stateCodes::READY);
   return 0;
@@ -243,7 +243,7 @@ void timeSeriesSimulator::requestGizmoTarget(pcf::IndiProperty *gizmoPtr, double
     theReq->property = gizmoPtr;
     theReq->startPos = currentPos;
     theReq->targetPos = targetPos;
-    theReq->requestTime = mx::get_curr_time();
+    theReq->requestTime = mx::sys::get_curr_time();
     gizmosInMotion[ipName] = theReq;
   }
   else
@@ -251,7 +251,7 @@ void timeSeriesSimulator::requestGizmoTarget(pcf::IndiProperty *gizmoPtr, double
     theReq = gizmosInMotion[ipName];
     theReq->targetPos = targetPos;
     theReq->startPos = currentPos;
-    theReq->requestTime = mx::get_curr_time();
+    theReq->requestTime = mx::sys::get_curr_time();
   }
 }
 
@@ -397,7 +397,7 @@ INDI_NEWCALLBACK_DEFN(timeSeriesSimulator, function)
 
 void timeSeriesSimulator::updateSimsensor()
 {
-  double elapsedSeconds = mx::get_curr_time() - startTimeSec;
+  double elapsedSeconds = mx::sys::get_curr_time() - startTimeSec;
   switch (myFunction)
   {
   case SimFunction::sin:
@@ -433,7 +433,7 @@ void timeSeriesSimulator::updateGizmos()
   {
     pcf::IndiProperty *gizmoProp = it->second->property;
     MotionRequest *theMotionRequest = it->second;
-    double elapsedSeconds = mx::get_curr_time() - theMotionRequest->requestTime;
+    double elapsedSeconds = mx::sys::get_curr_time() - theMotionRequest->requestTime;
     double currentPos;
     if (elapsedSeconds < gizmoTimeToTarget)
     {

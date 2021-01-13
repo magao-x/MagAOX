@@ -8,10 +8,10 @@
 #define dmMode_hpp
 
 #include <mx/improc/eigenCube.hpp>
-#include <mx/improc/fitsFile.hpp>
+#include <mx/ioutils/fits/fitsFile.hpp>
 #include <mx/improc/eigenImage.hpp>
 #include <mx/ioutils/stringUtils.hpp>
-#include <mx/timeUtils.hpp>
+#include <mx/sys/timeUtils.hpp>
 
 #include "../../libMagAOX/libMagAOX.hpp" //Note this is included on command line to trigger pch
 #include "../../magaox_git_version.h"
@@ -164,7 +164,7 @@ void dmMode::loadConfig()
 
 int dmMode::appStartup()
 {
-   mx::improc::fitsFile<realT> ff;
+   mx::fits::fitsFile<realT> ff;
    
    if(ff.read(m_modes, m_modeCube) < 0) 
    {
@@ -288,7 +288,7 @@ int dmMode::sendCommand()
    
    if(m_imageStream.md[0].write)
    {
-      while(m_imageStream.md[0].write) mx::microSleep(10);
+      while(m_imageStream.md[0].write) mx::sys::microSleep(10);
    }
    
    m_imageStream.md[0].write = 1;

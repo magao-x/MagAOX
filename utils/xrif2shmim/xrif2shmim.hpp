@@ -14,9 +14,9 @@
 
 #include <mx/ioutils/fileUtils.hpp>
 #include <mx/improc/eigenCube.hpp>
-#include <mx/improc/fitsFile.hpp>
+#include <mx/ioutils/fits/fitsFile.hpp>
 
-#include <mx/timeUtils.hpp>
+#include <mx/sys/timeUtils.hpp>
 
 #include "../../libMagAOX/libMagAOX.hpp"
 
@@ -421,7 +421,7 @@ int xrif2shmim::execute()
    uint64_t * next_cntarr = &m_imageStream.cntarray[0];
 
    findex = 0;
-   double lastSend = mx::get_curr_time();
+   double lastSend = mx::sys::get_curr_time();
    double delta = 0;
    while(g_timeToDie == false)
    {
@@ -460,7 +460,7 @@ int xrif2shmim::execute()
       if(findex >= m_frames.planes()) findex = 0;
 
 
-      double ct = mx::get_curr_time();
+      double ct = mx::sys::get_curr_time();
       delta += 0.1 * (ct-lastSend - 1.0/m_fps);
       lastSend = ct;
 
