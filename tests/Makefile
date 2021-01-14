@@ -1,38 +1,21 @@
-####################################################
-# Makefile for building the MagAOX test program
-#
-# See tests/README.md for instructions.
-#
-# Manages creation of the git repo status header.
-#
-####################################################
-
-## Add complete path to tests here:
-## NOTE: follow same order as in testMagAOX.cpp!!
-
-TEST_INCLUDES ?= ../libMagAOX/tty/tests/ttyIOUtils_test.cpp \
-                 ../libMagAOX/app/dev/tests/outletController_tests.cpp \
-                 ../apps/ocam2KCtrl/tests/ocamUtils_test.cpp \
-                 ../apps/siglentSDG/tests/siglentSDG_test.cpp \
-                 ../apps/sshDigger/tests/sshDigger_tests.cpp \
-                 ../apps/sysMonitor/tests/sysMonitor_test.cpp  \
-                 ../apps/xindiserver/tests/xindiserver_test.cpp
-
-                 
-                 
 
 
+       
+OBJS = ../apps/streamWriter/tests/streamWriter_test.cpp
 
+#../libMagAOX/app/dev/tests/outletController_tests.o \
+#       ../libMagAOX/sys/tests/thSetuid_tests.o \
+#       ../libMagAOX/tty/tests/ttyIOUtils_test.o \
+#       ../apps/ocam2KCtrl/tests/ocamUtils_test.o \
+#       ../apps/siglentSDG/tests/siglentSDG_test.o
 
-
-
-
+       
+       
 ##################################################
 ## Should not need to edit from here on:
 ##################################################
 
 SELF_DIR := $(abspath $(dir $(lastword $(MAKEFILE_LIST))))
--include $(SELF_DIR)/../local/magAOXApp.mk
 include $(SELF_DIR)/../Make/common.mk
 
 
@@ -43,32 +26,21 @@ include $(SELF_DIR)/../Make/common.mk
 
 # Single-file app name can be supplied as `TARGET=`,
 # or `t=` for short
-TARGET ?= testMagAOX
+TARGET ?= testMagAOX.o
 
-all:  magaox_git_version.h $(TARGET) testMagAOXsetuid
-	rm ../magaox_git_version.h
-
-single: magaox_git_version.h $(TARGET)
-	rm ../magaox_git_version.h
-
-$(TARGET): $(TARGET).o $(TARGET).cpp $(TEST_INCLUDES)
-	$(LINK.o) -o $(TARGET) $(TARGET).o  $(LDFLAGS) $(LDLIBS)
-
-
-testMagAOXsetuid: testMagAOXsetuid.o ../libMagAOX/sys/tests/thSetuid_tests.cpp
-	$(LINK.o) -o testMagAOXsetuid testMagAOXsetuid.o $(LDFLAGS) $(LDLIBS)
-	sudo chown root:root testMagAOXsetuid && sudo chmod u+s testMagAOXsetuid
-
+all: $(TARGET) $(OBJS) magaox_git_version.h
+	$(LINK.o)  -o testMagAOX $(TARGET) $(OBJS) $(LDFLAGS) $(LDLIBS)
 
 #The GIT status header
 #This always gets regenerated.
 .PHONY: magaox_git_version.h
 magaox_git_version.h:
-	gengithead.sh $(abspath ../) ../magaox_git_version.h MAGAOX
-
-
+	gengithead.sh $(abspath $(SELF_DIR)/../) $(SELF_DIR)/../magaox_git_version.h MAGAOX
+	
 .PHONY: clean
 clean:
-	rm -f $(TARGET)
-	rm -f *.o
+	rm -f testMagaOX
+	rm -f $(OBJS)
 	rm -f *~
+			
+	
