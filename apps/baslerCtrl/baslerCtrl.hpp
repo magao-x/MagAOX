@@ -139,6 +139,8 @@ protected:
      */
    int getFPS();
    
+   float fps();
+   
    /** \name stdCamera Interface 
      * 
      * @{
@@ -615,6 +617,8 @@ int baslerCtrl::configureAcquisition()
       m_height = m_currentROI.h;
       m_dataType = _DATATYPE_INT16;
       
+      getFPS();
+      
       recordCamera(true); 
    }
    catch(...)
@@ -644,6 +648,8 @@ int baslerCtrl::startAcquisition()
       return -1;
    }
    
+   state(stateCodes::OPERATING);
+    
    return 0;
 }
 
@@ -757,6 +763,13 @@ int baslerCtrl::getFPS()
    }
       
    return 0;
+
+}
+
+inline
+float baslerCtrl::fps()
+{
+   return m_fps;
 
 }
 

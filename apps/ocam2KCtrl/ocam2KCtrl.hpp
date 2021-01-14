@@ -214,6 +214,11 @@ public:
      */
    int configureAcquisition();
    
+   /// Implementation of the frameGrabber fps interface
+   /** Just returns the value of m_fps
+     */
+   float fps();
+   
    /// Implementation of the framegrabber startAcquisition interface
    /** Initializes m_lastImageNumber, and calls edtCamera::pdvStartAcquisition
      * 
@@ -848,6 +853,10 @@ int ocam2KCtrl::setFPS()
       ///\todo check response
       log<text_log>({"set fps: " + fpsStr});
       
+      //We always want to reset the latency circular buffers
+      ///\todo verify that this works!!  
+      m_reconfig = true;
+      
       return 0;
    }
    else return log<software_error,-1>({__FILE__, __LINE__});
@@ -1023,7 +1032,13 @@ int ocam2KCtrl::configureAcquisition()
    
    return 0;
 }
-   
+ 
+inline
+float ocam2KCtrl::fps()
+{
+   return m_fps;
+}
+
 inline
 int ocam2KCtrl::startAcquisition()
 {

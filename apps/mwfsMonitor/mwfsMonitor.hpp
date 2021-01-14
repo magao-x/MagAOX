@@ -183,6 +183,14 @@ protected:
      */
    int configureAcquisition();
    
+   /// Implementation of the frameGrabber fps interface
+   /** \todo this needs to infer and report the stream fps.
+     */
+   float fps()
+   {
+      return 1;
+   }
+   
    /// Implementation of the framegrabber startAcquisition interface
    /** 
      * \returns 0 on success

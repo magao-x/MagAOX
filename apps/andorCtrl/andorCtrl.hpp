@@ -190,6 +190,7 @@ public:
      */
    
    int configureAcquisition();
+   float fps();
    int startAcquisition();
    int acquireAndCheckValid();
    int loadImageIntoStream(void * dest);
@@ -807,6 +808,12 @@ int andorCtrl::configureAcquisition()
 
 
    return 0;
+}
+
+inline
+float andorCtrl::fps()
+{
+   return m_fps;
 }
 
 inline

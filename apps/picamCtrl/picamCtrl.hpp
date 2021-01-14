@@ -229,6 +229,7 @@ protected:
    
    //Framegrabber interface:
    int configureAcquisition();
+   float fps();
    int startAcquisition();
    int acquireAndCheckValid();
    int loadImageIntoStream(void * dest);
@@ -1562,6 +1563,12 @@ int picamCtrl::configureAcquisition()
     
    return 0;
 
+}
+
+inline
+float picamCtrl::fps()
+{
+   return m_FrameRateCalculation;
 }
 
 inline

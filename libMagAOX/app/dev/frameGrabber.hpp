@@ -9,6 +9,8 @@
 #ifndef frameGrabber_hpp
 #define frameGrabber_hpp
 
+#include <mx/sigproc/circularBuffer.hpp>
+#include <mx/math/vectorUtils.hpp>
 
 #include <ImageStruct.h>
 #include <ImageStreamIO.h>
@@ -35,6 +37,10 @@ namespace dev
     //so that the share memory can be allocated
     int derivedT::configureAcquisition();
 
+    //Gets the frames-per-second readout rate 
+    //used for the latency statistics
+    float derivedT::fps();
+    
     //Start acquisition.
     int derivedT::startAcquisition();
     
@@ -74,6 +80,9 @@ protected:
     
    uint32_t m_circBuffLength {1}; ///< Length of the circular buffer, in frames
        
+   uint16_t m_latencyCircBuffMaxLength {3600}; ///< Maximum length of the latency measurement circular buffers
+   float m_latencyCircBuffMaxTime {5}; ///< Maximum time of the latency meaurement circular buffers
+   
    ///@}
    
    uint32_t m_width {0}; ///< The width of the image, once deinterlaced etc.
@@ -91,6 +100,15 @@ protected:
    bool m_reconfig {false}; ///< Flag to set if a camera reconfiguration requires a framegrabber reset.
    
    IMAGE * m_imageStream {nullptr}; ///< The ImageStreamIO shared memory buffer. \todo why isn't this m_imageStream?
+   
+   typedef uint16_t cbIndexT;
+   
+   mx::sigproc::circularBufferIndex<timespec, cbIndexT> m_atimes;
+   mx::sigproc::circularBufferIndex<timespec, cbIndexT> m_wtimes;
+   
+   std::vector<double> m_atimesD;
+   std::vector<double> m_wtimesD;
+   std::vector<double> m_watimesD;
    
    timespec m_dummy_ts {0,0};
    uint64_t m_dummy_cnt {0};
@@ -313,6 +331,45 @@ int frameGrabber<derivedT>::appLogic()
       return -1;
    }
    
+   if( derived().state() == stateCodes::OPERATING )
+   {
+      if(m_atimes.size() >= m_atimes.maxEntries())
+      {
+         cbIndexT refEntry = m_atimes.nextEntry();
+         
+         m_atimesD.resize(m_atimes.maxEntries()-1);
+         m_wtimesD.resize(m_wtimes.maxEntries()-1);
+         m_watimesD.resize(m_wtimes.maxEntries()-1);
+         
+         double a0 = m_atimes.at(refEntry, 0).tv_sec + ((double) m_atimes.at(refEntry, 0).tv_nsec)/1e9;
+         double w0 = m_wtimes.at(refEntry, 0).tv_sec + ((double) m_wtimes.at(refEntry, 0).tv_nsec)/1e9;
+         for(size_t n=1; n < m_atimesD.size(); ++n)
+         {
+            double a = m_atimes.at(refEntry, n).tv_sec + ((double) m_atimes.at(refEntry, n).tv_nsec)/1e9;
+            double w = m_wtimes.at(refEntry, n).tv_sec + ((double) m_wtimes.at(refEntry, n).tv_nsec)/1e9;
+            m_atimesD[n-1] = a - a0;
+            m_wtimesD[n-1] = w - w0;
+            m_watimesD[n-1] = w - a;
+            a0 = a;
+            w0 = w;
+         }
+         
+         double mna = mx::math::vectorMean(m_atimesD);
+         double vara = mx::math::vectorVariance(m_atimesD, mna);
+         
+         double mnw = mx::math::vectorMean(m_wtimesD);
+         double varw = mx::math::vectorVariance(m_wtimesD, mnw);
+         
+         double mnwa = mx::math::vectorMean(m_watimesD);
+         double varwa = mx::math::vectorVariance(m_watimesD, mnwa);
+         
+         std::cout << mna << " +/- " << sqrt(vara) << " | ";
+         std::cout << mnw << " +/- " << sqrt(varw) << " | ";
+         std::cout << mnwa << " +/- " << sqrt(varwa) << "\n";
+         
+      }
+   }
+   
    return 0;
 
 }
@@ -379,8 +436,15 @@ void frameGrabber<derivedT>::fgThreadExec()
       if(derived().shutdown()) continue;
       else 
       {
-         //At the end of this, must have m_width, m_height, m_dataType set.
+         //At the end of this, must have m_width, m_height, m_dataType set, and derived()->fps must be valid.
          if(derived().configureAcquisition() < 0) continue;        
+         
+         //Set up the latency circ. buffs
+         cbIndexT cbSz = m_latencyCircBuffMaxTime * derived().fps();
+         if(cbSz > m_latencyCircBuffMaxLength) cbSz = m_latencyCircBuffMaxLength;
+         if(cbSz < 3) cbSz = 3; //Make variance meaningful
+         m_atimes.maxEntries(cbSz);
+         m_wtimes.maxEntries(cbSz);
          
          m_typeSize = ImageStreamIO_typesize(m_dataType);
       }
@@ -477,14 +541,9 @@ void frameGrabber<derivedT>::fgThreadExec()
          m_imageStream->md->write=0;
          ImageStreamIO_sempost(m_imageStream,-1);
  
-         
-         //This is a diagnostic of latency:
-         /**/if(m_imageStream->md[0].cnt0 % 2000 == 0)
-         {
-            std::cerr << ( (double) m_imageStream->md->writetime.tv_sec + ((double) m_imageStream->md->writetime.tv_nsec)/1e9) - ( (double) m_imageStream->md->atime.tv_sec + ((double) m_imageStream->md->atime.tv_nsec)/1e9) << " ";
-            std::cerr << ( (double) m_imageStream->md->writetime.tv_sec + ((double) m_imageStream->md->writetime.tv_nsec)/1e9) - ( (double) writestart.tv_sec + ((double) writestart.tv_nsec)/1e9) << "\n";
-
-         }/**/
+         //Update the latency circ. buffs
+         m_atimes.nextEntry(m_imageStream->md->atime);
+         m_wtimes.nextEntry(m_imageStream->md->writetime);
          
          //Now we increment pointers outside the time-critical part of the loop.
          next_cnt1 = m_imageStream->md->cnt1+1;
