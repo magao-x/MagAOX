@@ -287,6 +287,8 @@ picamCtrl::picamCtrl() : MagAOXApp(MAGAOX_CURRENT_SHA1, MAGAOX_REPO_MODIFIED)
    m_full_w = 1024; 
    m_full_h = 1024; 
    
+   //--- frameGrabber ---
+   m_flippable = true;
    
    return;
 }
@@ -1643,7 +1645,7 @@ int picamCtrl::acquireAndCheckValid()
 inline
 int picamCtrl::loadImageIntoStream(void * dest)
 {
-   memcpy(dest, m_available.initial_readout, m_width*m_height*m_typeSize);
+   if( frameGrabber<picamCtrl>::loadImageIntoStreamCopy(dest, m_available.initial_readout, m_width, m_height, m_typeSize) == nullptr) return -1;
 
    return 0;
 }

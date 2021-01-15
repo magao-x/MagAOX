@@ -222,6 +222,9 @@ baslerCtrl::baslerCtrl() : MagAOXApp(MAGAOX_CURRENT_SHA1, MAGAOX_REPO_MODIFIED)
    m_usesModes = false;
    m_usesROI = true;
    
+   //--- frameGrabber ---
+   m_flippable = true;
+   
    return;
 }
 
@@ -677,17 +680,26 @@ int baslerCtrl::acquireAndCheckValid()
    }
 }
 
+
+
+
+
 int baslerCtrl::loadImageIntoStream(void * dest)
 {
+   pixelT * src = nullptr;
    try 
    {
-      memcpy( dest, (pixelT *) ptrGrabResult->GetBuffer(), m_width*m_height*sizeof(pixelT));
+      src = (pixelT *) ptrGrabResult->GetBuffer();
    }
    catch(...)
    {
       state(stateCodes::NOTCONNECTED);
       return -1;
    }
+
+   if(src == nullptr) return -1;
+             
+   if( frameGrabber<baslerCtrl>::loadImageIntoStreamCopy(dest, src, m_width, m_height, sizeof(pixelT)) == nullptr) return -1;
    
    return 0;
 }

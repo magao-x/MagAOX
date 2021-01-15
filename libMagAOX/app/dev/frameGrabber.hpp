@@ -11,6 +11,7 @@
 
 #include <mx/sigproc/circularBuffer.hpp>
 #include <mx/math/vectorUtils.hpp>
+#include <mx/improc/imageUtils.hpp>
 
 #include <ImageStruct.h>
 #include <ImageStreamIO.h>
@@ -69,6 +70,8 @@ namespace dev
 template<class derivedT>
 class frameGrabber 
 {
+   enum fgFlip { fgFlipNone, fgFlipUD, fgFlipLR, fgFlipUDLR };
+   
 protected:
 
    /** \name Configurable Parameters
@@ -83,7 +86,12 @@ protected:
    uint16_t m_latencyCircBuffMaxLength {3600}; ///< Maximum length of the latency measurement circular buffers
    float m_latencyCircBuffMaxTime {5}; ///< Maximum time of the latency meaurement circular buffers
    
+   int m_defaultFlip {fgFlipNone};
+   
    ///@}
+   
+   bool m_flippable {false};
+   int m_currentFlip {fgFlipNone};
    
    uint32_t m_width {0}; ///< The width of the image, once deinterlaced etc.
    uint32_t m_height {0}; ///< The height of the image, once deinterlaced etc.
@@ -119,7 +127,7 @@ protected:
    
 public:
 
-   /// Setup the configuration system
+   /// Setup the configuration system520-485-9699
    /**
      * This should be called in `derivedT::setupConfig` as
      * \code
@@ -209,7 +217,12 @@ protected:
    
    ///@}
   
-   
+   void * loadImageIntoStreamCopy( void * dest,
+                                   void * src,
+                                   size_t width,
+                                   size_t height,
+                                   size_t szof
+                                 );
     
    
     /** \name INDI 
@@ -252,6 +265,10 @@ void frameGrabber<derivedT>::setupConfig(mx::app::appConfigurator & config)
    
    config.add("framegrabber.circBuffLength", "", "framegrabber.circBuffLength", argType::Required, "framegrabber", "circBuffLength", false, "size_t", "The length of the circular buffer. Sets m_circBuffLength, default is 1.");
 
+   if(m_flippable)
+   {
+      config.add("framegrabber.defaultFlip", "", "framegrabber.defaultFlip", argType::Required, "framegrabber", "defaultFlip", false, "string", "The default flip of the image.  Options are flipNone, flipUD, flipLR, flipUDLR.  The default is flipNone.");
+   }
 }
 
 template<class derivedT>
@@ -267,6 +284,33 @@ void frameGrabber<derivedT>::loadConfig(mx::app::appConfigurator & config)
    {
       m_circBuffLength = 1;
       derivedT::template log<text_log>("circBuffLength set to 1");
+   }
+   
+   if(m_flippable)
+   {
+      std::string flip = "flipNone";
+      config(flip, "framegrabber.defaultFlip");
+      if(flip == "flipNone")
+      {
+         m_defaultFlip = fgFlipNone;
+      }
+      else if(flip == "flipUD")
+      {
+         m_defaultFlip = fgFlipUD;
+      }
+      else if(flip == "flipLR")
+      {
+         m_defaultFlip = fgFlipLR;
+      }
+      else if(flip == "flipUDLR")
+      {
+         m_defaultFlip = fgFlipUDLR;
+      }
+      else
+      {
+         derivedT::template log<text_log>({std::string("invalid framegrabber flip specification (") + flip + "), setting flipNone"}, logPrio::LOG_ERROR);
+         m_defaultFlip = fgFlipNone;
+      }
    }
 }
    
@@ -447,6 +491,9 @@ void frameGrabber<derivedT>::fgThreadExec()
          m_wtimes.maxEntries(cbSz);
          
          m_typeSize = ImageStreamIO_typesize(m_dataType);
+         
+         //Here we resolve currentFlip somehow.
+         m_currentFlip = m_defaultFlip;
       }
 
       /* Initialize ImageStreamIO
@@ -575,7 +622,28 @@ void frameGrabber<derivedT>::fgThreadExec()
    }
 }
 
-
+template<class derivedT>
+void * frameGrabber<derivedT>::loadImageIntoStreamCopy( void * dest,
+                                                        void * src,
+                                                        size_t width,
+                                                        size_t height,
+                                                        size_t szof
+                                                      )
+{
+   switch(m_currentFlip)
+   {
+      case fgFlipNone:
+         return mx::improc::imcpy(dest, src, width, height, szof);
+      case fgFlipUD:
+         return mx::improc::imcpy_flipUD(dest, src, width, height, szof);
+      case fgFlipLR:
+         return mx::improc::imcpy_flipLR(dest, src, width, height, szof);  
+      case fgFlipUDLR:
+         return mx::improc::imcpy_flipUDLR(dest, src, width, height, szof);
+      default:
+         return nullptr;
+   }
+}
 
 
 
