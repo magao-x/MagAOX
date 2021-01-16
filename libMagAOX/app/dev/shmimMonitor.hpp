@@ -196,6 +196,10 @@ protected:
    
    bool m_smThreadInit {true}; ///< Synchronizer for thread startup, to allow priority setting to finish.
    
+   pid_t m_smThreadID {0}; ///< The s.m. thread PID.
+   
+   pcf::IndiProperty m_smThreadProp; ///< The property to hold the s.m. thread details.
+   
    std::thread m_smThread; ///< A separate thread for the actual monitoring
 
    ///Thread starter, called by MagAOXApp::threadStart on thread construction.  Calls smThreadExec.
@@ -333,7 +337,7 @@ int shmimMonitor<derivedT, specificT>::appStartup()
       return -1;
    }
    
-   if(derived().threadStart( m_smThread, m_smThreadInit, m_smThreadPrio, "shmimMonitor", this, smThreadStart) < 0)
+   if(derived().threadStart( m_smThread, m_smThreadInit, m_smThreadID, m_smThreadProp, m_smThreadPrio, "shmimMonitor", this, smThreadStart) < 0)
    {
       derivedT::template log<software_error>({__FILE__, __LINE__});
       return -1;
@@ -448,6 +452,8 @@ void shmimMonitor<derivedT, specificT>::smThreadStart( shmimMonitor * s)
 template<class derivedT, class specificT>
 void shmimMonitor<derivedT, specificT>::smThreadExec()
 {
+   m_smThreadID = syscall(SYS_gettid);
+   
    //Wait for the thread starter to finish initializing this thread.
    while( m_smThreadInit == true && derived().shutdown() == 0)
    {

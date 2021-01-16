@@ -14,6 +14,7 @@
 
 #include <signal.h>
 #include <sys/stat.h>
+#include <sys/syscall.h>
 
 #include <cstdlib>
 #include <fstream>
@@ -23,6 +24,7 @@
 #include <mx/mxlib.hpp>
 #include <mx/app/application.hpp>
 #include <mx/sys/environment.hpp>
+#include <mx/sys/timeUtils.hpp>
 #include <mx/ioutils/fileUtils.hpp>
 
 
@@ -435,7 +437,7 @@ public:
      \code
      static void impl::myThreadStart( impl * o )
      {
-        o->myThreadExec(); //A member function which actually exectues the thread
+        o->myThreadExec(); //A member function which actually executes the thread
      }
      \endcode
      * where `impl` is the derived class, and `mThreadStart` and `myThreadExec` are members
@@ -447,6 +449,8 @@ public:
    template<class thisPtr, class Function>
    int threadStart( std::thread & thrd,           ///< [out] The thread object to start executing
                     bool & thrdInit,              ///< [in/out] The thread initilization synchronizer.  
+                    pid_t & tpid,                 ///< [in/out] The thread pid to be filled in by thrdStart immediately upon call
+                    pcf::IndiProperty & thProp,   ///< [in/out] The INDI property to publish the thread details
                     int thrdPrio,                 ///< [in] The r/t priority to set for this thread
                     const std::string & thrdName, ///< [in] The name of the thread (just for logging)
                     thisPtr * thrdThis,           ///< [in] The `this` pointer to pass to the thread starter function
@@ -1850,6 +1854,8 @@ template<bool _useINDI>
 template<class thisPtr, class Function>
 int MagAOXApp<_useINDI>::threadStart( std::thread & thrd,
                                       bool & thrdInit,
+                                      pid_t & tpid,
+                                      pcf::IndiProperty & thProp,
                                       int thrdPrio,
                                       const std::string & thrdName,
                                       thisPtr * thrdThis,
@@ -1857,6 +1863,8 @@ int MagAOXApp<_useINDI>::threadStart( std::thread & thrd,
                                     )
 {
    thrdInit = true;
+   
+   tpid = 0;
    
    try
    {
@@ -1909,13 +1917,50 @@ int MagAOXApp<_useINDI>::threadStart( std::thread & thrd,
    
    if(rv < 0)
    {
-      return log<software_error,-1>({__FILE__, __LINE__, errno, "Setting " + thrdName + " thread scheduler priority to " + std::to_string(thrdPrio) + " failed."});
+      log<software_error>({__FILE__, __LINE__, errno, "Setting " + thrdName + " thread scheduler priority to " + std::to_string(thrdPrio) + " failed."});
    }
    else
    {
-      thrdInit = false;
-      return log<text_log,0>(thrdName + " thread scheduler priority set to " + std::to_string(thrdPrio));
+      log<text_log>(thrdName + " thread scheduler priority set to " + std::to_string(thrdPrio));
    }
+   
+   thrdInit = false;
+   
+   // Wait for tpid to be filled in, but only for one total second.
+   if(tpid == 0) 
+   {
+      for(int i=0;i<10;++i)
+      {
+         mx::sys::milliSleep(100);
+         if(tpid!=0) break;
+      }
+   }
+   
+   if(tpid == 0)
+   {
+      return log<software_error,-1>({__FILE__, __LINE__, errno, "tpid for " + thrdName + " not set."});
+   }
+   else
+   {
+      log<text_log>(thrdName + " thread pid is " + std::to_string(tpid));
+      
+      if(_useINDI)
+      {
+         thProp = pcf::IndiProperty(pcf::IndiProperty::Number);
+         thProp.setDevice(configName());
+         thProp.setName(std::string("th-") + thrdName);
+         thProp.setPerm(pcf::IndiProperty::ReadOnly); 
+         thProp.setState(pcf::IndiProperty::Idle);
+         thProp.add(pcf::IndiElement("pid"));
+         thProp["pid"] = tpid;
+         thProp.add(pcf::IndiElement("prio"));
+         thProp["prio"] = thrdPrio;
+         registerIndiPropertyReadOnly(thProp);
+      }
+   }
+   
+   return 0; 
+   
 }
 
 template<bool _useINDI>

@@ -187,6 +187,10 @@ protected:
    
    bool m_openThreadInit {true}; ///< Initialization flag for the open thread.
    
+   pid_t m_openThreadID {0}; ///< Open thread PID.
+   
+   pcf::IndiProperty m_openThreadProp; ///< The property to hold the open thread details.
+   
    std::thread m_openThread; ///< The opening thread.
 
    /// Open thread starter function
@@ -200,6 +204,10 @@ protected:
    bool m_doShut {false}; ///< Flag telling the shut thread that it should actually shut the shutter, not just go back to sleep.
    
    bool m_shutThreadInit {true}; ///< Initialization flag for the shut thread.
+   
+   pid_t m_shutThreadID {0}; ///< Shut thread PID.
+   
+   pcf::IndiProperty m_shutThreadProp; ///< The property to hold the shut thread details.
    
    std::thread m_shutThread; ///< The shutting thread
    
@@ -356,13 +364,13 @@ int dssShutter<derivedT>::appStartup()
    
 
    
-   if(derived().threadStart( m_openThread, m_openThreadInit, 0, "open", this, openThreadStart) < 0)
+   if(derived().threadStart( m_openThread, m_openThreadInit, m_openThreadID, m_openThreadProp, 0, "open", this, openThreadStart) < 0)
    {
       derivedT::template log<software_error>({__FILE__, __LINE__});
       return -1;
    }
       
-   if(derived().threadStart( m_shutThread, m_shutThreadInit, 0, "shut", this, shutThreadStart) < 0)
+   if(derived().threadStart( m_shutThread, m_shutThreadInit, m_shutThreadID, m_shutThreadProp, 0, "shut", this, shutThreadStart) < 0)
    {
       derivedT::template log<software_error>({__FILE__, __LINE__});
       return -1;
@@ -638,6 +646,8 @@ void dssShutter<derivedT>::openThreadStart( dssShutter * d )
 template<class derivedT>
 void dssShutter<derivedT>::openThreadExec( )
 {
+   m_openThreadID = syscall(SYS_gettid);
+   
    while( m_openThreadInit == true && derived().shutdown() == 0)
    {
       sleep(1);
@@ -670,6 +680,8 @@ void dssShutter<derivedT>::shutThreadStart( dssShutter * d )
 template<class derivedT>
 void dssShutter<derivedT>::shutThreadExec( )
 {
+   m_shutThreadID = syscall(SYS_gettid);
+   
    while( m_shutThreadInit == true && derived().shutdown() == 0)
    {
       sleep(1);

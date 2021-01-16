@@ -9,6 +9,8 @@
 #ifndef frameGrabber_hpp
 #define frameGrabber_hpp
 
+#include <sys/syscall.h>
+       
 #include <mx/sigproc/circularBuffer.hpp>
 #include <mx/math/vectorUtils.hpp>
 #include <mx/improc/imageUtils.hpp>
@@ -206,6 +208,10 @@ protected:
    
    bool m_fgThreadInit {true}; ///< Synchronizer for thread startup, to allow priority setting to finish.
    
+   pid_t m_fgThreadID {0}; ///< The ID of the framegrabber thread.
+   
+   pcf::IndiProperty m_fgThreadProp; ///< The property to hold the f.g. thread details.
+   
    std::thread m_fgThread; ///< A separate thread for the actual framegrabbings
 
    ///Thread starter, called by MagAOXApp::threadStart on thread construction.  Calls fgThreadExec.
@@ -354,7 +360,7 @@ int frameGrabber<derivedT>::appStartup()
       return -1;
    }
    
-   if(derived().threadStart( m_fgThread, m_fgThreadInit, m_fgThreadPrio, "framegrabber", this, fgThreadStart) < 0)
+   if(derived().threadStart( m_fgThread, m_fgThreadInit, m_fgThreadID, m_fgThreadProp, m_fgThreadPrio, "framegrabber", this, fgThreadStart) < 0)
    {
       derivedT::template log<software_error, -1>({__FILE__, __LINE__});
       return -1;
@@ -458,6 +464,9 @@ void frameGrabber<derivedT>::fgThreadStart( frameGrabber * o)
 template<class derivedT>
 void frameGrabber<derivedT>::fgThreadExec()
 {
+   //Get the thread PID immediately so the caller can return.
+   m_fgThreadID = syscall(SYS_gettid);
+   
    timespec writestart;
    
    //Wait fpr the thread starter to finish initializing this thread.

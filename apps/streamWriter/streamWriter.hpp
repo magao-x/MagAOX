@@ -189,7 +189,11 @@ protected:
    std::thread m_fgThread; ///< A separate thread for the actual framegrabbings
 
    bool m_fgThreadInit {true}; ///< Synchronizer to ensure f.g. thread initializes before doing dangerous things.
-   
+  
+   pid_t m_fgThreadID {0}; ///< F.g. thread PID.
+
+   pcf::IndiProperty m_fgThreadProp; ///< The property to hold the f.g. thread details.
+ 
    /// Worker function to allocate the circular buffers.
    /** This takes place in the fg thread after connecting to the stream.
      * 
@@ -228,6 +232,10 @@ protected:
 
    bool m_swThreadInit {true}; ///< Synchronizer to ensure s.w. thread initializes before doing dangerous things.
    
+   pid_t m_swThreadID {0}; ///< S.w. thread pid.
+ 
+   pcf::IndiProperty m_swThreadProp; ///< The property to hold the s.w. thread details.
+
    size_t m_fnameSz {0};
    
    char * m_fname {nullptr};
@@ -397,12 +405,12 @@ int streamWriter::appStartup()
    
    if(initialize_xrif() < 0) log<software_critical,-1>({__FILE__, __LINE__});
    
-   if(threadStart( m_fgThread, m_fgThreadInit, m_fgThreadPrio, "framegrabber", this, fgThreadStart)  < 0)
+   if(threadStart( m_fgThread, m_fgThreadInit, m_fgThreadID, m_fgThreadProp, m_fgThreadPrio, "framegrabber", this, fgThreadStart)  < 0)
    {
       return log<software_critical,-1>({__FILE__, __LINE__});
    }
 
-   if(threadStart( m_swThread, m_swThreadInit, m_swThreadPrio, "streamwriter", this, swThreadStart) < 0)
+   if(threadStart( m_swThread, m_swThreadInit, m_swThreadID, m_swThreadProp, m_swThreadPrio, "streamwriter", this, swThreadStart) < 0)
    {
       log<software_critical,-1>({__FILE__, __LINE__});
    }
@@ -699,6 +707,8 @@ void streamWriter::fgThreadStart( streamWriter * o)
 inline
 void streamWriter::fgThreadExec()
 {
+   m_fgThreadID = syscall(SYS_gettid);
+
    //Wait fpr the thread starter to finish initializing this thread.
    while(m_fgThreadInit == true && m_shutdown == 0)
    {
@@ -955,6 +965,8 @@ void streamWriter::swThreadStart( streamWriter * s)
 inline
 void streamWriter::swThreadExec()
 {
+   m_swThreadID = syscall(SYS_gettid);
+
    //Wait fpr the thread starter to finish initializing this thread.
    while(m_swThreadInit == true && m_shutdown == 0)
    {

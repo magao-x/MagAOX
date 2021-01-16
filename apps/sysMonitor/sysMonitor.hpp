@@ -278,7 +278,11 @@ public:
    std::thread m_setlatThread; ///< A separate thread for the actual setting of low latency
 
    bool m_setlatThreadInit {true}; ///< Synchronizer to ensure set lat thread initializes before doing dangerous things.
-   
+  
+   pid_t m_setlatThreadID {0}; ///< Set latency thread ID.
+
+   pcf::IndiProperty m_setlatThreadProp; ///< The property to hold the setlat thread details.
+ 
    ///Thread starter, called by threadStart on thread construction.  Calls setlatThreadExec.
    static void setlatThreadStart( sysMonitor * s /**< [in] a pointer to a sysMonitor instance (normally this) */);
 
@@ -409,7 +413,7 @@ int sysMonitor::appStartup()
       return log<software_error,-1>({__FILE__,__LINE__});
    }
    
-   if(threadStart( m_setlatThread, m_setlatThreadInit, m_setlatThreadPrio, "set latency", this, setlatThreadStart)  < 0)
+   if(threadStart( m_setlatThread, m_setlatThreadInit, m_setlatThreadID, m_setlatThreadProp, m_setlatThreadPrio, "set latency", this, setlatThreadStart)  < 0)
    {
       log<software_critical>({__FILE__, __LINE__});
       return -1;
@@ -1133,6 +1137,8 @@ void sysMonitor::setlatThreadStart( sysMonitor * s)
 inline
 void sysMonitor::setlatThreadExec()
 {
+   m_setlatThreadID = syscall(SYS_gettid);
+
    //Wait fpr the thread starter to finish initializing this thread.
    while(m_setlatThreadInit == true && m_shutdown == 0)
    {
