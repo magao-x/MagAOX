@@ -419,10 +419,22 @@ int alpaoCtrl::commandDM(void * curr_src)
       }
    }
     
-
    /* Finally, send the command to the DM */
    ret = asdkSend(m_dm, m_dminputs);
 
+   /* Now update the instantaneous sat map */
+   for (UInt idx = 0; idx < m_nbAct; ++idx)
+   {
+      if(m_dminputs[idx] >= 1 || m_dminputs[idx] <= -1)
+      {
+         m_instSatMap.data()[m_actuator_mapping[idx]] = 1;
+      }
+      else
+      {
+         m_instSatMap.data()[m_actuator_mapping[idx]] = 0;
+      }
+   }
+   
    return ret;
     
 }

@@ -16,6 +16,8 @@
 #include <mx/improc/eigenImage.hpp>
 #include <mx/ioutils/fits/fitsFile.hpp>
 
+#include "../../ImageStreamIO/ImageStruct.hpp"
+
 namespace MagAOX
 {
 namespace app
@@ -77,7 +79,13 @@ protected:
    
    std::string m_shmimFlat; ///< The name of the shmim stream to write the flat to.
    std::string m_shmimTest; ///< The name of the shmim stream to write the test to.
+   std::string m_shmimSat; ///< The name of the shmim stream to write the saturation map to.
+   std::string m_shmimSatPerc; ///< The name of the shmim stream to write the saturation percentage map to.
    
+   int m_satAvgInt {100}; ///< The time in milliseconds to accumulate saturation over.
+   
+   int m_satThreadPrio {0}; ///< Priority of the saturation thread, should normally be > 0.
+    
    uint32_t m_dmWidth {0}; ///< The width of the images in the stream
    uint32_t m_dmHeight {0}; ///< The height of the images in the stream
    
@@ -99,7 +107,6 @@ protected:
    
    IMAGE m_testImageStream; ///< The ImageStreamIO shared memory buffer for the test.
    bool m_testSet {false}; ///< Flag indicating whether the test command has been set.
-   
    
 public:
 
@@ -183,6 +190,39 @@ public:
    int setTest();
    
    int zeroTest();
+   
+protected:
+   
+   mx::improc::eigenImage<uint8_t> m_instSatMap; ///< The instantaneous saturation map, 0/1, set by the commandDM() function of the derived class.
+   mx::improc::eigenImage<uint16_t> m_accumSatMap; ///< The accumulated saturation map, which acccumulates for m_satAvgInt then is publised as a 0/1 image. 
+   mx::improc::eigenImage<float> m_satPercMap; ///< Map of the percentage of time each actator was saturated during the avg. interval.
+   
+   IMAGE m_satImageStream; ///< The ImageStreamIO shared memory buffer for the sat map.
+   IMAGE m_satPercImageStream; ///< The ImageStreamIO shared memory buffer for the sat percentage map.
+   
+   /** \name Saturation Thread
+     * This thread processes the saturation maps
+     * @{
+     */
+   
+   sem_t m_satSemaphore; ///< Semaphore used to tell the saturation thread to run.
+   
+   bool m_satThreadInit {true}; ///< Synchronizer for thread startup, to allow priority setting to finish.
+   
+   pid_t m_satThreadID {0}; ///< The ID of the saturation thread.
+   
+   pcf::IndiProperty m_satThreadProp; ///< The property to hold the saturation thread details.
+   
+   std::thread m_satThread; ///< A separate thread for the actual saturation processing
+
+   ///Thread starter, called by MagAOXApp::threadStart on thread construction.  Calls satThreadExec.
+   static void satThreadStart( dm * d /**< [in] a pointer to a dm instance (normally this) */);
+
+   /// Execute saturation processing
+   void satThreadExec();
+
+   
+   ///@}
    
 protected:
    
@@ -403,6 +443,12 @@ void dm<derivedT,realT>::setupConfig(mx::app::appConfigurator & config)
    
    config.add("dm.shmimTest", "", "dm.shmimTest", argType::Required, "dm", "shmimTest", false, "string", "The name of the ImageStreamIO shared memory image to write the test command to.  Default is shmimName with 01 apended (i.e. dm00disp -> dm00disp01). ");
    
+   config.add("dm.shmimSat", "", "dm.shmimSat", argType::Required, "dm", "shmimSat", false, "string", "The name of the ImageStreamIO shared memory image to write the saturation map to.  Default is shmimName with SA apended (i.e. dm00disp -> dm00dispSA).  This is created.");
+   
+   config.add("dm.shmimSatPerc", "", "dm.shmimSatPerc", argType::Required, "dm", "shmimSatPerc", false, "string", "The name of the ImageStreamIO shared memory image to write the saturation percentage map to.  Default is shmimName with SP apended (i.e. dm00disp -> dm00dispSP).  This is created.");
+   
+   config.add("dm.satAvgInt", "", "dm.satAvgInt", argType::Required, "dm", "satAvgInt", false, "int", "The interval in milliseconds over which saturation is accumulated before updating.  Default is 100 ms.");
+   
    config.add("dm.width", "", "dm.width", argType::Required, "dm", "width", false, "string", "The width of the DM in actuators.");
    config.add("dm.height", "", "dm.height", argType::Required, "dm", "height", false, "string", "The height of the DM in actuators.");
 }
@@ -429,6 +475,14 @@ void dm<derivedT,realT>::loadConfig(mx::app::appConfigurator & config)
   
    m_shmimTest = derived().m_shmimName + "02";
    config(m_shmimTest, "dm.shmimTest");
+   
+   m_shmimSat = derived().m_shmimName + "ST";
+   config(m_shmimSat, "dm.shmimSat");
+   
+   m_shmimSatPerc = derived().m_shmimName + "SP";
+   config(m_shmimSatPerc, "dm.shmimSatPerc");
+   
+   config(m_satAvgInt, "dm.satAvgInt");
    
    config(m_dmWidth, "dm.width");
    config(m_dmHeight, "dm.height");
@@ -616,6 +670,14 @@ int dm<derivedT,realT>::appStartup()
       loadFlat(m_flat);
    }
    
+   if(sem_init(&m_satSemaphore, 0,0) < 0) return derivedT::template log<software_critical, -1>({__FILE__, __LINE__, errno,0, "Initializing sat semaphore"});
+   
+   if(derived().threadStart( m_satThread, m_satThreadInit, m_satThreadID, m_satThreadProp, m_satThreadPrio, "saturation", this, satThreadStart) < 0)
+   {
+      derivedT::template log<software_error, -1>({__FILE__, __LINE__});
+      return -1;
+   }
+   
    return 0;
 
 }
@@ -623,7 +685,13 @@ int dm<derivedT,realT>::appStartup()
 template<class derivedT, typename realT>
 int dm<derivedT,realT>::appLogic()
 {
-   
+   //do a join check to see if other threads have exited.
+   if(pthread_tryjoin_np(m_satThread.native_handle(),0) == 0)
+   {
+      derivedT::template log<software_error>({__FILE__, __LINE__, "saturation thread has exited"});
+      
+      return -1;
+   }
    
    return 0;
 
@@ -633,7 +701,17 @@ int dm<derivedT,realT>::appLogic()
 template<class derivedT, typename realT>
 int dm<derivedT,realT>::appShutdown()
 {
-   
+   if(m_satThread.joinable())
+   {
+      pthread_kill(m_satThread.native_handle(), SIGUSR1);
+      try
+      {
+         m_satThread.join(); //this will throw if it was already joined
+      }
+      catch(...)
+      {
+      }
+   }
    
    return 0;
 }
@@ -667,6 +745,15 @@ int dm<derivedT,realT>::allocate( const dev::shmimT & sp)
    
    if(err) return -1;
    
+   m_instSatMap.resize(m_dmWidth,m_dmHeight);
+   m_instSatMap.setZero();
+   
+   m_accumSatMap.resize(m_dmWidth,m_dmHeight);
+   m_accumSatMap.setZero();
+   
+   m_satPercMap.resize(m_dmWidth,m_dmHeight);
+   m_satPercMap.setZero();
+   
    return 0;
 }
 
@@ -677,7 +764,21 @@ int dm<derivedT,realT>::processImage( void * curr_src,
 {
    static_cast<void>(sp); //be unused
    
-   return derived().commandDM( curr_src );
+   int rv = derived().commandDM( curr_src );
+   
+   if(rv < 0)
+   {
+      derivedT::template log<software_critical>({__FILE__, __LINE__, errno, rv, "Error from commandDM"});
+      return rv;
+   }
+   //Tell the sat thread to get going
+   if(sem_post(&m_satSemaphore) < 0)
+   {
+      derivedT::template log<software_critical>({__FILE__, __LINE__, errno, 0, "Error posting to semaphore"});
+      return -1;
+   }
+   
+   return rv;
 }
 
 template<class derivedT, typename realT>
@@ -974,6 +1075,155 @@ int dm<derivedT,realT>::zeroTest()
    return 0;
 }
 
+template<class derivedT, typename realT>
+void dm<derivedT,realT>::satThreadStart(dm *d)
+{
+   d->satThreadExec();
+}
+
+template<class derivedT, typename realT>
+void dm<derivedT,realT>::satThreadExec()
+{
+   //Get the thread PID immediately so the caller can return.
+   m_satThreadID = syscall(SYS_gettid);
+   
+   //Wait for the thread starter to finish initializing this thread.
+   while(m_satThreadInit == true && derived().shutdown() == 0)
+   {
+      sleep(1);
+   }
+   if(derived().shutdown()) return;
+   
+   uint32_t imsize[3] = {0,0,0};
+   
+   //Check for allocation to have happened.
+   while((m_accumSatMap.rows() == 0 || m_accumSatMap.cols() == 0) && !derived().shutdown())
+   {
+      sleep(1);
+   }
+   if(derived().shutdown()) return;
+
+   imsize[0] = m_dmWidth; 
+   imsize[1] = m_dmHeight;
+   imsize[2] = 1;
+      
+   std::cerr << "Creating: " << m_shmimSat << " " << m_dmWidth << " " << m_dmHeight << " " << 1 << "\n";
+      
+   ImageStreamIO_createIm_gpu(&m_satImageStream, m_shmimSat.c_str(), 3, imsize, IMAGESTRUCT_UINT8, -1, 1, IMAGE_NB_SEMAPHORE, 0, CIRCULAR_BUFFER | ZAXIS_TEMPORAL);
+   ImageStreamIO_createIm_gpu(&m_satPercImageStream, m_shmimSatPerc.c_str(), 3, imsize, IMAGESTRUCT_FLOAT, -1, 1, IMAGE_NB_SEMAPHORE, 0, CIRCULAR_BUFFER | ZAXIS_TEMPORAL);
+       
+   bool opened = true;
+   
+   m_satImageStream.md->cnt1 = 0;
+   m_satPercImageStream.md->cnt1 = 0;
+   
+   //This is the working memory for making the 1/0 mask out of m_accumSatMap
+   mx::improc::eigenImage<uint8_t> satmap(m_dmWidth, m_dmHeight);
+   
+   int naccum = 0;
+   double t_accumst = mx::sys::get_curr_time();
+   
+   //This is the main image grabbing loop.      
+   while(!derived().shutdown())
+   {
+      //Get timespec for sem_timedwait
+      timespec ts;
+      if(clock_gettime(CLOCK_REALTIME, &ts) < 0)
+      {
+         derivedT::template log<software_critical>({__FILE__,__LINE__,errno,0,"clock_gettime"}); 
+         return;
+      }
+      ts.tv_sec += 1;
+      
+      //Wait on semaphore
+      if(sem_timedwait(&m_satSemaphore, &ts) == 0)
+      {
+         //not a timeout -->accumulate
+         for(int rr=0; rr < m_instSatMap.rows(); ++rr)
+         {
+            for(int cc=0; cc< m_instSatMap.cols(); ++cc)
+            {
+               m_accumSatMap(rr,cc) += m_instSatMap(rr,cc);
+            }
+         }
+         ++naccum;
+
+         // If less than avg int --> go back and wait again
+         if(mx::sys::get_curr_time(ts) - t_accumst < m_satAvgInt/1000.0) continue;
+         
+         // If greater than avg int --> calc stats, write to streams.
+         for(int rr=0; rr < m_instSatMap.rows(); ++rr)
+         {
+            for(int cc=0; cc< m_instSatMap.cols(); ++cc)
+            {
+               m_satPercMap(rr,cc) = m_accumSatMap(rr,cc)/naccum;           
+               satmap(rr,cc) = (m_accumSatMap(rr,cc) > 0); //it's  1/0 map
+            }
+         }
+      
+         m_satImageStream.md->write=1;
+         m_satPercImageStream.md->write=1;
+         
+         memcpy( m_satImageStream.array.raw, satmap.data() , m_dmWidth*m_dmHeight*sizeof(uint8_t));
+         memcpy( m_satPercImageStream.array.raw, m_satPercMap.data() , m_dmWidth*m_dmHeight*sizeof(float));
+         
+         //Set the time of last write
+         clock_gettime(CLOCK_REALTIME, &m_satImageStream.md->writetime);
+         m_satPercImageStream.md->writetime = m_satImageStream.md->writetime;
+
+         //Set the image acquisition timestamp
+         m_satImageStream.md->atime = m_satImageStream.md->writetime;
+         m_satPercImageStream.md->atime = m_satPercImageStream.md->writetime;
+         
+         //Update cnt1
+         m_satImageStream.md->cnt1 = 0;
+         m_satPercImageStream.md->cnt1 = 0;
+          
+         //Update cnt0
+         m_satImageStream.md->cnt0++;
+         m_satPercImageStream.md->cnt0++;
+         
+         m_satImageStream.writetimearray[0] = m_satImageStream.md->writetime;
+         m_satImageStream.atimearray[0] = m_satImageStream.md->atime;
+         m_satImageStream.cntarray[0] = m_satImageStream.md->cnt0;
+         
+         m_satPercImageStream.writetimearray[0] = m_satPercImageStream.md->writetime;
+         m_satPercImageStream.atimearray[0] = m_satPercImageStream.md->atime;
+         m_satPercImageStream.cntarray[0] = m_satPercImageStream.md->cnt0;
+         
+         //And post
+         m_satImageStream.md->write=0;
+         ImageStreamIO_sempost(&m_satImageStream,-1);
+         
+         m_satPercImageStream.md->write=0;
+         ImageStreamIO_sempost(&m_satPercImageStream,-1);
+         
+         m_accumSatMap.setZero();
+         naccum = 0;
+         t_accumst = mx::sys::get_curr_time(ts);
+      }
+      else
+      {
+         //Check for why we timed out
+         if(errno == EINTR) break; //This indicates signal interrupted us, time to restart or shutdown, loop will exit normally if flags set.
+            
+         //ETIMEDOUT just means we should wait more.
+         //Otherwise, report an error.
+         if(errno != ETIMEDOUT)
+         {
+            derivedT::template log<software_error>({__FILE__, __LINE__,errno, "sem_timedwait"});
+            break;
+         }
+      }
+   }
+
+   if(opened)
+   {
+      ImageStreamIO_destroyIm( &m_satImageStream );
+  
+      ImageStreamIO_destroyIm( &m_satPercImageStream );
+   }
+}
 
 template<class derivedT, typename realT>
 int dm<derivedT,realT>::updateINDI()
@@ -1008,8 +1258,8 @@ int dm<derivedT,realT>::updateINDI()
 
 template<class derivedT, typename realT>
 int dm<derivedT,realT>::st_newCallBack_flat( void * app,
-                                       const pcf::IndiProperty &ipRecv
-                                     )
+                                             const pcf::IndiProperty &ipRecv
+                                           )
 {
    return static_cast<derivedT *>(app)->newCallBack_flat(ipRecv);
 }
