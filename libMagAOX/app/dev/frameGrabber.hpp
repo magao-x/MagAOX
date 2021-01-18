@@ -37,7 +37,7 @@ namespace dev
   * The derived class `derivedT` must expose the following interface
   * \code 
     //Configures the camera for acquistion, must also set m_width, m_height, and m_dataType
-    //so that the share memory can be allocated
+    //so that the shared memory can be allocated
     int derivedT::configureAcquisition();
 
     //Gets the frames-per-second readout rate 
@@ -59,7 +59,7 @@ namespace dev
     //Take any actions needed to reconfigure the system.  Called if m_reconfig is set to true.
     int derivedT::reconfig()
   * \endcode  
-  * Each of the above functions should return 0 on success, and -1 on an error. 
+  * Each of the above functions should return 0 on success, and -1 on an error (except fps). 
   * For `acquireAndCheckValid` >0 will indicate no data but not an error.  In most cases, 
   * an appropriate state code, such as NOTCONNECTED, should be set as well.
   *

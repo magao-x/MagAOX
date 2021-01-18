@@ -84,6 +84,7 @@ protected:
    
    int m_satAvgInt {100}; ///< The time in milliseconds to accumulate saturation over.
    
+   ///\todo satThreadPrio configuration is not actually implemented.
    int m_satThreadPrio {0}; ///< Priority of the saturation thread, should normally be > 0.
     
    uint32_t m_dmWidth {0}; ///< The width of the images in the stream
