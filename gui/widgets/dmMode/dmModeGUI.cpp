@@ -2,6 +2,7 @@
 #include "dmModeGUI.hpp"
 
 
+#include <cmath>
 
 #include <qframe.h>
 #include <qpalette.h>
@@ -14,6 +15,35 @@
 namespace xqt
 {
    
+double slider2amp( double sl )
+{
+   static double a = -log(0.01);
+   static double b = log(1.01)/a;
+   
+   double lamp = (b-log(1.01-fabs(sl))/a)/(1+b);
+   
+   if(lamp < 0) lamp = 0;
+   else if(lamp > 1) lamp = 1;
+   
+   if(sl < 0) lamp *= -1;
+   
+   return lamp;
+}
+
+double amp2slider( double lamp )
+{
+   static double a = -log(0.01);
+   static double b = log(1.01)/a;
+   
+   double sl = 1.01 - exp(-a*(fabs(lamp)*(1+b) - b));
+   
+   if(sl < 0) sl = 0;
+   else if(sl > 1) sl = 1;
+                          
+   if(lamp < 0) sl *= -1;
+   
+   return sl;
+}
 
 dmModeGUI::dmModeGUI( std::string deviceName,
                       QWidget * Parent, 
@@ -30,9 +60,7 @@ dmModeGUI::~dmModeGUI()
 }
 
 int dmModeGUI::subscribe( multiIndiPublisher * publisher )
-{
-   std::cerr << "subscribing: " << m_deviceName << ".\n";
-   
+{   
    publisher->subscribeProperty(this, m_deviceName, "current_amps");
    publisher->subscribeProperty(this, m_deviceName, "target_amps");
    
@@ -67,6 +95,21 @@ int dmModeGUI::handleSetProperty( const pcf::IndiProperty & ipRecv /**< [in] the
             updateGUI(n, amp);
          }
       }
+      
+      if(m_maxmode == -1)
+      {
+         std::string elName;
+         for(int n=0; n<9999; ++n)
+         {
+            elName = mx::ioutils::convertToString<size_t, 4, '0'>(n);
+      
+            if(ipRecv.find(elName))
+            {
+               if(n > m_maxmode) m_maxmode = n;
+            }
+         }
+      }
+         
    }
 
    if(ipRecv.getName() == "dm")
@@ -95,10 +138,13 @@ int dmModeGUI::updateGUI( QLabel * currLabel,
                           float amp
                         )
 {
-   currLabel->setText(QString::number(amp));
+   char nstr[8];
+   snprintf(nstr, sizeof(nstr), "%0.3f", amp);
+   
+   currLabel->setText(QString(nstr));
    tgtLabel->setText(QString(""));
    
-   slider->setValue(amp);
+   slider->setValue(amp2slider(amp));
    
    return 0;
 }
@@ -140,8 +186,6 @@ int dmModeGUI::updateGUI( size_t ch,
    
 void dmModeGUI::setChannel( size_t ch, float amp )
 {
-   std::cerr << ch << " " << amp << "\n";
-   
    pcf::IndiProperty ip(pcf::IndiProperty::Number);
    
    ip.setDevice(m_deviceName);
@@ -153,124 +197,146 @@ void dmModeGUI::setChannel( size_t ch, float amp )
    sendNewProperty(ip);
 }
       
-void dmModeGUI::on_modeSlider_0_sliderMoved( double amp )
+void dmModeGUI::on_modeSlider_0_sliderMoved( double sl)
 {
-   ui.modeTarget_0->setText(QString::number(amp));
+   char nstr[8];
+   snprintf(nstr, sizeof(nstr), "%0.3f", slider2amp(sl));
+   ui.modeTarget_0->setText(QString(nstr));
 }
 
-void dmModeGUI::on_modeSlider_1_sliderMoved( double amp )
+void dmModeGUI::on_modeSlider_1_sliderMoved( double sl)
 {
-   ui.modeTarget_1->setText(QString::number(amp));
+   char nstr[8];
+   snprintf(nstr, sizeof(nstr), "%0.3f", slider2amp(sl));
+   ui.modeTarget_1->setText(QString(nstr));
 }
 
-void dmModeGUI::on_modeSlider_2_sliderMoved( double amp )
+void dmModeGUI::on_modeSlider_2_sliderMoved( double sl)
 {
-   ui.modeTarget_2->setText(QString::number(amp));
+   char nstr[8];
+   snprintf(nstr, sizeof(nstr), "%0.3f", slider2amp(sl));
+   ui.modeTarget_2->setText(QString(nstr));
 }
 
-void dmModeGUI::on_modeSlider_3_sliderMoved( double amp )
+void dmModeGUI::on_modeSlider_3_sliderMoved( double sl)
 {
-   ui.modeTarget_3->setText(QString::number(amp));
+   char nstr[8];
+   snprintf(nstr, sizeof(nstr), "%0.3f", slider2amp(sl));
+   ui.modeTarget_3->setText(QString(nstr));
 }
 
-void dmModeGUI::on_modeSlider_4_sliderMoved( double amp )
+void dmModeGUI::on_modeSlider_4_sliderMoved( double sl)
 {
-   ui.modeTarget_4->setText(QString::number(amp));
+   char nstr[8];
+   snprintf(nstr, sizeof(nstr), "%0.3f", slider2amp(sl));
+   ui.modeTarget_4->setText(QString(nstr));
 }
 
-void dmModeGUI::on_modeSlider_5_sliderMoved( double amp )
+void dmModeGUI::on_modeSlider_5_sliderMoved( double sl)
 {
-   ui.modeTarget_5->setText(QString::number(amp));
+   char nstr[8];
+   snprintf(nstr, sizeof(nstr), "%0.3f", slider2amp(sl));
+   ui.modeTarget_5->setText(QString(nstr));
 }
 
-void dmModeGUI::on_modeSlider_6_sliderMoved( double amp )
+void dmModeGUI::on_modeSlider_6_sliderMoved( double sl)
 {
-   ui.modeTarget_6->setText(QString::number(amp));
+   char nstr[8];
+   snprintf(nstr, sizeof(nstr), "%0.3f", slider2amp(sl));
+   ui.modeTarget_6->setText(QString(nstr));
 }
 
-void dmModeGUI::on_modeSlider_7_sliderMoved( double amp )
+void dmModeGUI::on_modeSlider_7_sliderMoved( double sl)
 {
-   ui.modeTarget_7->setText(QString::number(amp));
+   char nstr[8];
+   snprintf(nstr, sizeof(nstr), "%0.3f", slider2amp(sl));
+   ui.modeTarget_7->setText(QString(nstr));
 }
 
-void dmModeGUI::on_modeSlider_8_sliderMoved( double amp )
+void dmModeGUI::on_modeSlider_8_sliderMoved( double sl)
 {
-   ui.modeTarget_8->setText(QString::number(amp));
+   char nstr[8];
+   snprintf(nstr, sizeof(nstr), "%0.3f", slider2amp(sl));
+   ui.modeTarget_8->setText(QString(nstr));
 }
 
-void dmModeGUI::on_modeSlider_9_sliderMoved( double amp )
+void dmModeGUI::on_modeSlider_9_sliderMoved( double sl)
 {
-   ui.modeTarget_9->setText(QString::number(amp));
+   char nstr[8];
+   snprintf(nstr, sizeof(nstr), "%0.3f", slider2amp(sl));
+   ui.modeTarget_9->setText(QString(nstr));
 }
 
-void dmModeGUI::on_modeSlider_10_sliderMoved( double amp )
+void dmModeGUI::on_modeSlider_10_sliderMoved( double sl)
 {
-   ui.modeTarget_10->setText(QString::number(amp));
+   char nstr[8];
+   snprintf(nstr, sizeof(nstr), "%0.3f", slider2amp(sl));
+   ui.modeTarget_10->setText(QString(nstr));
 }
 
 void dmModeGUI::on_modeSlider_0_sliderReleased()
 {
-   float amp = ui.modeSlider_0->value();
+   float amp = slider2amp(ui.modeSlider_0->value());
    setChannel(0, amp);
 }
 
 void dmModeGUI::on_modeSlider_1_sliderReleased()
 {
-   float amp = ui.modeSlider_1->value();
+   float amp = slider2amp(ui.modeSlider_1->value());
    setChannel(1, amp);
 }
 
 void dmModeGUI::on_modeSlider_2_sliderReleased()
 {
-   float amp = ui.modeSlider_2->value();
+   float amp = slider2amp(ui.modeSlider_2->value());
    setChannel(2, amp);
 }
 
 void dmModeGUI::on_modeSlider_3_sliderReleased()
 {
-   float amp = ui.modeSlider_3->value();
+   float amp = slider2amp(ui.modeSlider_3->value());
    setChannel(3, amp);
 }
 
 void dmModeGUI::on_modeSlider_4_sliderReleased()
 {
-   float amp = ui.modeSlider_4->value();
+   float amp = slider2amp(ui.modeSlider_4->value());
    setChannel(4, amp);
 }
 
 void dmModeGUI::on_modeSlider_5_sliderReleased()
 {
-   float amp = ui.modeSlider_5->value();
+   float amp = slider2amp(ui.modeSlider_5->value());
    setChannel(5, amp);
 }
 
 void dmModeGUI::on_modeSlider_6_sliderReleased()
 {
-   float amp = ui.modeSlider_6->value();
+   float amp = slider2amp(ui.modeSlider_6->value());
    setChannel(6, amp);
 }
 
 void dmModeGUI::on_modeSlider_7_sliderReleased()
 {
-   float amp = ui.modeSlider_7->value();
+   float amp = slider2amp(ui.modeSlider_7->value());
    setChannel(7, amp);
 }
 
 void dmModeGUI::on_modeSlider_8_sliderReleased()
 {
-   float amp = ui.modeSlider_8->value();
+   float amp = slider2amp(ui.modeSlider_8->value());
    setChannel(8, amp);
 }
 
 void dmModeGUI::on_modeSlider_9_sliderReleased()
 {
-   float amp = ui.modeSlider_9->value();
+   float amp = slider2amp(ui.modeSlider_9->value());
    setChannel(9, amp);
 }
 
 void dmModeGUI::on_modeSlider_10_sliderReleased()
 {
-   float amp = ui.modeSlider_10->value();
+   float amp = slider2amp(ui.modeSlider_10->value());
    setChannel(10, amp);
 }
 
@@ -408,7 +474,7 @@ void dmModeGUI::on_modeZero_10_pressed()
    setChannel(10, 0.0);
 }
 
-void dmModeGUI::on_modeZero_all_pressed()
+void dmModeGUI::on_modeZero_these_pressed()
 {
    pcf::IndiProperty ip(pcf::IndiProperty::Number);
    
@@ -418,6 +484,25 @@ void dmModeGUI::on_modeZero_all_pressed()
    for(size_t n =0; n <= 10; ++n)
    {
       std::string elName = mx::ioutils::convertToString<size_t, 4, '0'>(n);
+      ip.add(pcf::IndiElement(elName));
+      ip[elName] = 0.0;
+   }
+   
+   sendNewProperty(ip);
+}
+
+void dmModeGUI::on_modeZero_all_pressed()
+{
+   if(m_maxmode < 0) return;
+   
+   pcf::IndiProperty ip(pcf::IndiProperty::Number);
+   
+   ip.setDevice(m_deviceName);
+   ip.setName("target_amps");
+   
+   for(int n =0; n <= m_maxmode; ++n)
+   {
+      std::string elName = mx::ioutils::convertToString<int, 4, '0'>(n);
       ip.add(pcf::IndiElement(elName));
       ip[elName] = 0.0;
    }

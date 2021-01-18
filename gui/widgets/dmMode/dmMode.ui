@@ -6,7 +6,7 @@
    <rect>
     <x>0</x>
     <y>0</y>
-    <width>801</width>
+    <width>757</width>
     <height>918</height>
    </rect>
   </property>
@@ -195,6 +195,9 @@
              <height>5</height>
             </size>
            </property>
+           <property name="focusPolicy">
+            <enum>Qt::NoFocus</enum>
+           </property>
            <property name="text">
             <string>0</string>
            </property>
@@ -301,6 +304,9 @@
              <width>0</width>
              <height>5</height>
             </size>
+           </property>
+           <property name="focusPolicy">
+            <enum>Qt::NoFocus</enum>
            </property>
            <property name="text">
             <string>0</string>
@@ -409,6 +415,9 @@
              <height>5</height>
             </size>
            </property>
+           <property name="focusPolicy">
+            <enum>Qt::NoFocus</enum>
+           </property>
            <property name="text">
             <string>0</string>
            </property>
@@ -515,6 +524,9 @@
              <width>0</width>
              <height>5</height>
             </size>
+           </property>
+           <property name="focusPolicy">
+            <enum>Qt::NoFocus</enum>
            </property>
            <property name="text">
             <string>0</string>
@@ -623,6 +635,9 @@
              <height>5</height>
             </size>
            </property>
+           <property name="focusPolicy">
+            <enum>Qt::NoFocus</enum>
+           </property>
            <property name="text">
             <string>0</string>
            </property>
@@ -730,6 +745,9 @@
              <height>5</height>
             </size>
            </property>
+           <property name="focusPolicy">
+            <enum>Qt::NoFocus</enum>
+           </property>
            <property name="text">
             <string>0</string>
            </property>
@@ -808,6 +826,9 @@
              <width>0</width>
              <height>5</height>
             </size>
+           </property>
+           <property name="focusPolicy">
+            <enum>Qt::NoFocus</enum>
            </property>
            <property name="text">
             <string>0</string>
@@ -908,6 +929,9 @@
              <width>0</width>
              <height>5</height>
             </size>
+           </property>
+           <property name="focusPolicy">
+            <enum>Qt::NoFocus</enum>
            </property>
            <property name="text">
             <string>0</string>
@@ -1051,6 +1075,9 @@
              <height>5</height>
             </size>
            </property>
+           <property name="focusPolicy">
+            <enum>Qt::NoFocus</enum>
+           </property>
            <property name="text">
             <string>0</string>
            </property>
@@ -1157,6 +1184,9 @@
              <width>0</width>
              <height>5</height>
             </size>
+           </property>
+           <property name="focusPolicy">
+            <enum>Qt::NoFocus</enum>
            </property>
            <property name="text">
             <string>0</string>
@@ -1265,6 +1295,9 @@
              <height>5</height>
             </size>
            </property>
+           <property name="focusPolicy">
+            <enum>Qt::NoFocus</enum>
+           </property>
            <property name="text">
             <string>0</string>
            </property>
@@ -1305,6 +1338,28 @@
       </spacer>
      </item>
      <item>
+      <widget class="QPushButton" name="modeZero_these">
+       <property name="sizePolicy">
+        <sizepolicy hsizetype="Minimum" vsizetype="Minimum">
+         <horstretch>0</horstretch>
+         <verstretch>0</verstretch>
+        </sizepolicy>
+       </property>
+       <property name="minimumSize">
+        <size>
+         <width>0</width>
+         <height>5</height>
+        </size>
+       </property>
+       <property name="focusPolicy">
+        <enum>Qt::NoFocus</enum>
+       </property>
+       <property name="text">
+        <string>zero these</string>
+       </property>
+      </widget>
+     </item>
+     <item>
       <widget class="QPushButton" name="modeZero_all">
        <property name="sizePolicy">
         <sizepolicy hsizetype="Minimum" vsizetype="Minimum">
@@ -1317,6 +1372,9 @@
          <width>0</width>
          <height>5</height>
         </size>
+       </property>
+       <property name="focusPolicy">
+        <enum>Qt::NoFocus</enum>
        </property>
        <property name="text">
         <string>zero all</string>

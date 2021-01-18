@@ -21,6 +21,7 @@ public:
    std::string m_dmName;
    std::string m_dmChannel;
    
+   int m_maxmode {-1};
    
    dmModeGUI( std::string deviceName,
               QWidget * Parent = 0, 
@@ -54,17 +55,17 @@ public slots:
    
    
       
-   void on_modeSlider_0_sliderMoved( double amp );
-   void on_modeSlider_1_sliderMoved( double amp );
-   void on_modeSlider_2_sliderMoved( double amp );
-   void on_modeSlider_3_sliderMoved( double amp );
-   void on_modeSlider_4_sliderMoved( double amp );
-   void on_modeSlider_5_sliderMoved( double amp );
-   void on_modeSlider_6_sliderMoved( double amp );
-   void on_modeSlider_7_sliderMoved( double amp );
-   void on_modeSlider_8_sliderMoved( double amp );
-   void on_modeSlider_9_sliderMoved( double amp );
-   void on_modeSlider_10_sliderMoved( double amp );
+   void on_modeSlider_0_sliderMoved( double sl );
+   void on_modeSlider_1_sliderMoved( double sl );
+   void on_modeSlider_2_sliderMoved( double sl );
+   void on_modeSlider_3_sliderMoved( double sl );
+   void on_modeSlider_4_sliderMoved( double sl );
+   void on_modeSlider_5_sliderMoved( double sl );
+   void on_modeSlider_6_sliderMoved( double sl );
+   void on_modeSlider_7_sliderMoved( double sl );
+   void on_modeSlider_8_sliderMoved( double sl );
+   void on_modeSlider_9_sliderMoved( double sl );
+   void on_modeSlider_10_sliderMoved( double sl );
 
    void on_modeSlider_0_sliderReleased();
    void on_modeSlider_1_sliderReleased();
@@ -104,6 +105,7 @@ public slots:
    void on_modeZero_9_pressed();
    void on_modeZero_10_pressed();
    
+   void on_modeZero_these_pressed();
    void on_modeZero_all_pressed();
    
 signals:
