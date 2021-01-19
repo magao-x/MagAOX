@@ -49,6 +49,7 @@ public slots:
    void updateGUI();
    
    void on_buttonInit_pressed();
+   void on_buttonZeroAll_pressed();
    void on_buttonZero_pressed();
    void on_buttonRelease_pressed();
    
@@ -244,6 +245,20 @@ void dmCtrl::on_buttonInit_pressed()
    ipFreq["request"] = 1;
     
    sendNewProperty(ipFreq);   
+}
+
+void dmCtrl::on_buttonZeroAll_pressed()
+{
+   
+   pcf::IndiProperty ip(pcf::IndiProperty::Switch);
+   
+   ip.setDevice(m_dmName);
+   ip.setName("zeroAll");
+   ip.add(pcf::IndiElement("request"));
+   
+   ip["request"].setSwitchState(pcf::IndiElement::On);
+   
+   sendNewProperty(ip);   
 }
 
 void dmCtrl::on_buttonZero_pressed()

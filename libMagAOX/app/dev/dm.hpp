@@ -97,6 +97,8 @@ protected:
    
    std::string m_calibRelDir; ///< The directory relative to the calibPath.  Set this before calling dm<derivedT,realT>::loadConfig().
    
+   int m_channels; ///< The number of dmcomb channels found as part of allocation.
+   
    mx::improc::eigenImage<realT> m_flatCommand; ///< Data storage for the flat command
    bool m_flatLoaded {false}; ///< Flag indicating whether a flat is loaded in memory
    
@@ -168,6 +170,12 @@ public:
      */
    int appShutdown();
    
+   /// Find the DM comb channels
+   /** Introspectively fines all dmXXdispYY channels, zeroes them, and raises the semapahore
+     * on the last to cause dmcomb to update.
+     */
+   int findDMChannels();
+   
    /// Called after shmimMonitor connects to the dmXXdisp stream.  Checks for proper size.
    /**
      * \returns 0 on success
@@ -191,6 +199,13 @@ public:
    int setTest();
    
    int zeroTest();
+   
+   /// Zero all channels
+   /**
+     * \returns 0 on sucess
+     * \returns \<0 on an error
+     */ 
+   int zeroAll();
    
 protected:
    
@@ -245,6 +260,8 @@ protected:
    pcf::IndiProperty m_indiP_setTest;
    pcf::IndiProperty m_indiP_zeroTest;
 
+   pcf::IndiProperty m_indiP_zeroAll;
+   
 public:
 
    /// The static callback function to be registered for changing the flat command file
@@ -404,8 +421,23 @@ public:
      * \returns -1 on error.
      */
    int newCallBack_zeroTest( const pcf::IndiProperty &ipRecv /**< [in] the INDI property sent with the the new property request.*/);
+
    
+   /// The static callback function to be registered for zeroing all channels
+   /**
+     * \returns 0 on success.
+     * \returns -1 on error.
+     */
+   static int st_newCallBack_zeroAll( void * app, ///< [in] a pointer to this, will be static_cast-ed to derivedT.
+                                      const pcf::IndiProperty &ipRecv ///< [in] the INDI property sent with the the new property request.
+                                    );
    
+   /// The callback for the zeroAll toggle switch, called by the static version
+   /**
+     * \returns 0 on success.
+     * \returns -1 on error.
+     */
+   int newCallBack_zeroAll( const pcf::IndiProperty &ipRecv /**< [in] the INDI property sent with the the new property request.*/);
    
    
    
@@ -666,6 +698,15 @@ int dm<derivedT,realT>::appStartup()
       return -1;
    }
    
+   derived().createStandardIndiRequestSw( m_indiP_zeroAll, "zeroAll");
+   if( derived().registerIndiPropertyNew( m_indiP_zeroAll, st_newCallBack_zeroAll) < 0)
+   {
+      #ifndef DM_TEST_NOLOG
+      derivedT::template log<software_error>({__FILE__,__LINE__});
+      #endif
+      return -1;
+   }
+   
    if(m_flat != "")
    {
       loadFlat(m_flat);
@@ -717,7 +758,41 @@ int dm<derivedT,realT>::appShutdown()
    return 0;
 }
 
-
+template<class derivedT, typename realT>
+int dm<derivedT,realT>::findDMChannels()
+{
+   std::vector<std::string> dmlist = mx::ioutils::getFileNames("/milk/shm/", derived().m_shmimName, ".im", ".shm");
+   
+   if(dmlist.size() == 0)
+   {
+      derivedT::template log<software_error>({__FILE__, __LINE__, "no dm channels found for " + derived().m_shmimName});
+      return -1;
+   }
+   
+   m_channels = -1;
+   for(size_t n =0; n < dmlist.size(); ++n)
+   {  
+      char nstr[16]; 
+      snprintf(nstr, sizeof(nstr), "%02d.im.shm", (int) n);
+      std::string tgt = derived().m_shmimName;
+      tgt += nstr;
+        
+      for(size_t m=0; m < dmlist.size(); ++m)
+      {  
+         if( dmlist[m].find(tgt) != std::string::npos)
+         {  
+            if((int) n > m_channels) m_channels = n;
+         }
+      }
+   }
+   
+   ++m_channels;
+   
+   
+   derivedT::template log<text_log>({std::string("Found ") + std::to_string(m_channels) + " channels for " + derived().m_shmimName});
+   
+   return 0;
+}
 
 template<class derivedT, typename realT>
 int dm<derivedT,realT>::allocate( const dev::shmimT & sp)
@@ -754,6 +829,13 @@ int dm<derivedT,realT>::allocate( const dev::shmimT & sp)
    
    m_satPercMap.resize(m_dmWidth,m_dmHeight);
    m_satPercMap.setZero();
+   
+   if(findDMChannels() < 0) 
+   {
+      derivedT::template log<software_critical>({__FILE__,__LINE__, "error finding DM channels"});
+      
+      return -1;
+   }
    
    return 0;
 }
@@ -1064,11 +1146,12 @@ int dm<derivedT,realT>::zeroTest()
          
    m_testImageStream.md->cnt0++;
    m_testImageStream.md->write=0;
+   
+   //Post the semaphore
    ImageStreamIO_sempost(&m_testImageStream,-1);
          
    m_testSet = false;
-   
-   //Post the semaphore
+     
    ImageStreamIO_closeIm(&m_testImageStream);
    
    derivedT::template log<text_log>("test zeroed");
@@ -1076,6 +1159,64 @@ int dm<derivedT,realT>::zeroTest()
    return 0;
 }
 
+template<class derivedT, typename realT>
+int dm<derivedT,realT>::zeroAll()
+{
+   
+   IMAGE imageStream;
+   
+   for(int n=0; n <m_channels; ++n)
+   {
+      char nstr[16];
+      snprintf(nstr,sizeof(nstr), "%02d", n);
+      std::string shmimN = derived().m_shmimName + nstr;
+      
+      if( ImageStreamIO_openIm(&imageStream, shmimN.c_str()) != 0)
+      {
+         derivedT::template log<text_log>("could not connect to flat channel " + shmimN, logPrio::LOG_WARNING);
+      }
+   
+      if( imageStream.md->size[0] != m_dmWidth)
+      {
+         ImageStreamIO_closeIm(&imageStream);
+         derivedT::template log<text_log>("width mismatch between " + shmimN + " and configured DM", logPrio::LOG_ERROR);
+         derived().updateSwitchIfChanged(m_indiP_zeroAll, "request", pcf::IndiElement::Off, INDI_IDLE);
+         return -1;
+      }
+   
+      if( imageStream.md->size[1] != m_dmHeight)
+      {
+         ImageStreamIO_closeIm(&imageStream);
+         derivedT::template log<text_log>("height mismatch between " + shmimN + " and configured DM", logPrio::LOG_ERROR);
+         derived().updateSwitchIfChanged(m_indiP_zeroAll, "request", pcf::IndiElement::Off, INDI_IDLE);
+         return -1;
+      }
+      
+      imageStream.md->write=1;
+      memset( imageStream.array.raw, 0, m_dmWidth*m_dmHeight*sizeof(realT));
+      
+      clock_gettime(CLOCK_REALTIME, &imageStream.md->writetime);
+
+      //Set the image acquisition timestamp
+      imageStream.md->atime = imageStream.md->writetime;
+         
+      imageStream.md->cnt0++;
+      imageStream.md->write=0;
+   
+      //Raise the semaphore on last one.
+      if(n == m_channels-1) ImageStreamIO_sempost(&imageStream,-1);
+   
+      ImageStreamIO_closeIm(&imageStream);
+   }
+   
+   derivedT::template log<text_log>("all channels zeroed", logPrio::LOG_NOTICE);
+
+   derived().updateSwitchIfChanged(m_indiP_zeroAll, "request", pcf::IndiElement::Off, INDI_IDLE);
+   
+   return 0;
+}
+      
+   
 template<class derivedT, typename realT>
 void dm<derivedT,realT>::satThreadStart(dm *d)
 {
@@ -1503,6 +1644,34 @@ int dm<derivedT,realT>::newCallBack_zeroTest( const pcf::IndiProperty &ipRecv )
    if(request == "") return 0;
    
    return zeroTest();
+}
+
+template<class derivedT, typename realT>
+int dm<derivedT,realT>::st_newCallBack_zeroAll( void * app,
+                                                const pcf::IndiProperty &ipRecv
+                                              )
+{
+   return static_cast< derivedT *>(app)->newCallBack_zeroAll(ipRecv);
+}
+
+template<class derivedT, typename realT>
+int dm<derivedT,realT>::newCallBack_zeroAll( const pcf::IndiProperty &ipRecv )
+{
+   if ( ipRecv.getName() != m_indiP_zeroAll.getName())
+   {
+      return derivedT::template log<software_error,-1>({__FILE__, __LINE__, "wrong INDI-P in callback"});
+   }
+      
+   if(!ipRecv.find("request")) return 0;
+   
+   if( ipRecv["request"].getSwitchState() == pcf::IndiElement::On)
+   {
+      indi::updateSwitchIfChanged(m_indiP_zeroAll, "request", pcf::IndiElement::On, derived().m_indiDriver, INDI_BUSY);
+      
+      std::lock_guard<std::mutex> guard(derived().m_indiMutex);
+      return zeroAll();
+   }
+   return 0;  
 }
 
 } //namespace dev
