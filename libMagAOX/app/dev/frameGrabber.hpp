@@ -72,6 +72,7 @@ namespace dev
 template<class derivedT>
 class frameGrabber 
 {
+public:
    enum fgFlip { fgFlipNone, fgFlipUD, fgFlipLR, fgFlipUDLR };
    
 protected:

@@ -1304,8 +1304,25 @@ int picamCtrl::configureAcquisition()
    nextrois.roi_array = &nextroi;
    nextrois.roi_count = 1;
    
-   nextroi.x = (m_nextROI.x - 0.5*( (float) m_nextROI.w - 1.0));
-   nextroi.y = (m_nextROI.y - 0.5*( (float) m_nextROI.h - 1.0));
+   if(m_currentFlip == fgFlipLR || m_currentFlip == fgFlipUDLR)
+   {
+      nextroi.x = ((1023-m_nextROI.x) - 0.5*( (float) m_nextROI.w - 1.0));
+   }
+   else
+   {
+      nextroi.x = (m_nextROI.x - 0.5*( (float) m_nextROI.w - 1.0));
+   }
+   
+   if(m_currentFlip == fgFlipUD || m_currentFlip == fgFlipUDLR)
+   {
+      nextroi.y = ((1023 - m_nextROI.y) - 0.5*( (float) m_nextROI.h - 1.0));
+   }
+   else
+   {
+      nextroi.y = (m_nextROI.y - 0.5*( (float) m_nextROI.h - 1.0));
+   }
+   
+   
    nextroi.width = m_nextROI.w;
    nextroi.height = m_nextROI.h;
    nextroi.x_binning = m_nextROI.bin_x;
