@@ -854,7 +854,8 @@ int ocam2KCtrl::setFPS()
       log<text_log>({"set fps: " + fpsStr});
       
       //We always want to reset the latency circular buffers
-      ///\todo verify that this works!!  
+      ///\todo verify that this works!! 
+      m_nextMode = m_modeName;
       m_reconfig = true;
       
       return 0;
@@ -1029,6 +1030,8 @@ int ocam2KCtrl::configureAcquisition()
    m_width = OCAM_SZ;
    m_height = OCAM_SZ;
    m_dataType = _DATATYPE_INT16;
+   
+   state(stateCodes::OPERATING);
    
    return 0;
 }
