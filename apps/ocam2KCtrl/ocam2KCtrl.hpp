@@ -1132,7 +1132,10 @@ int ocam2KCtrl::reconfig()
    //lock mutex
    std::unique_lock<std::mutex> lock(m_indiMutex);
    
-   return edtCamera<ocam2KCtrl>::pdvReconfig();
+   int rv = edtCamera<ocam2KCtrl>::pdvReconfig();
+   if(rv < 0) return rv;
+   state(stateCodes::READY);
+   return 0;
 }
    
 INDI_NEWCALLBACK_DEFN(ocam2KCtrl, m_indiP_emProtReset)(const pcf::IndiProperty &ipRecv)

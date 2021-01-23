@@ -202,9 +202,6 @@ protected:
 protected:
    //declare our properties
    
-   //pcf::IndiProperty m_indiP_mode; ///< Property used to report the current mode
-   
-
 public:
 
    /// The static callback function to be registered for the channel properties.
@@ -329,10 +326,6 @@ int edtCamera<derivedT>::pdvConfig(std::string & modeName)
    }
       
    derived().m_modeName = modeName;
-   if( derived().m_indiDriver )
-   {
-      indi::updateIfChanged(derived().m_indiP_mode, "target", derived().m_modeName, derived().m_indiDriver);
-   }
    
    if(modeName == "")
    {
@@ -471,11 +464,6 @@ int edtCamera<derivedT>::appLogic()
 template<class derivedT>
 int edtCamera<derivedT>::onPowerOff()
 {
-//    if( !derived().m_indiDriver ) return 0;
-//    
-//    indi::updateIfChanged(m_indiP_mode, "current", std::string(""), derived().m_indiDriver);
-//    indi::updateIfChanged(m_indiP_mode, "target", std::string(""), derived().m_indiDriver);
-//    
    return 0;
 }
 

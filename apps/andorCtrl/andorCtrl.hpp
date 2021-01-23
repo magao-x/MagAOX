@@ -70,14 +70,10 @@ protected:
 
    ///@}
 
-   bool m_initialized {false};
+   bool m_libInit {false}; ///< Whether or not the Andor SDK library is initialized.
 
    unsigned m_emGain {1};
 
-   float m_expTime {0};
-   float m_fpsSet {0};
-   float m_fpsTgt {0};
-   float m_fpsMeasured {0};
 
 public:
 
@@ -114,12 +110,10 @@ public:
 
 
 
-   int cameraSelect(int camNo);
+   int cameraSelect();
 
    
    int getTemp();
-
-   int setTemp(float temp);
 
    int getFPS();
 
@@ -226,6 +220,8 @@ andorCtrl::andorCtrl() : MagAOXApp(MAGAOX_CURRENT_SHA1, MAGAOX_REPO_MODIFIED)
    m_startupTemp = 20;
    
    m_hasShutter = true;
+   
+   
    return;
 }
 
@@ -341,48 +337,21 @@ int andorCtrl::appLogic()
 
    if( state() == stateCodes::POWERON) return 0;
    
-   if( state() == stateCodes::NOTCONNECTED || state() == stateCodes::ERROR)
+   if( state() == stateCodes::NOTCONNECTED || state() == stateCodes::NODEVICE || state() == stateCodes::ERROR)
    {
-      std::string response;
-
       //Might have gotten here because of a power off.
       if(m_powerState == 0) return 0;
       
-      
-      if(m_initialized)
+      int ret = cameraSelect();
+
+      if( ret != 0) 
       {
-         ShutDown();
-         m_initialized = false;
+         return log<software_critical,-1>({__FILE__, __LINE__});
       }
-      
-      int error = Initialize((char *)"/usr/local/etc/andor");
-
-      std::cout << "The Error code is " << error << std::endl;
-
-      if(error!=DRV_SUCCESS)
-      {
-         std::cerr << "Initialisation error...exiting" << std::endl;
-         return -1;
-      }
-      m_initialized = true;
-
-      int ret = cameraSelect(0); ///\todo make camera number configurable
-
-      if( ret != 0) //Probably not powered on yet.
-      {
-         sleep(1);
-         return 0;
-      }
-
-
-      state(stateCodes::CONNECTED);
    }
 
    if( state() == stateCodes::CONNECTED )
    {
-      //Get a lock
-      std::unique_lock<std::mutex> lock(m_indiMutex);
-
       m_shutterStatus = "READY";
 
       state(stateCodes::READY);
@@ -458,10 +427,10 @@ int andorCtrl::appLogic()
 inline
 int andorCtrl::onPowerOff()
 {
-   if(m_initialized)
+   if(m_libInit)
    {
       ShutDown();
-      m_initialized = false;
+      m_libInit = false;
    }
       
    m_powerOnCounter = 0;
@@ -515,10 +484,10 @@ int andorCtrl::whilePowerOff()
 inline
 int andorCtrl::appShutdown()
 {
-   if(m_initialized)
+   if(m_libInit)
    {
       ShutDown();
-      m_initialized = false;
+      m_libInit = false;
    }
       
    dev::frameGrabber<andorCtrl>::appShutdown();
@@ -528,73 +497,253 @@ int andorCtrl::appShutdown()
    return 0;
 }
 
-inline
-int andorCtrl::cameraSelect(int camNo)
+std::string andorSDKErrorName(unsigned int error)
 {
-   std::cerr << "In cameraSelect(0) \n";
-   at_32 lNumCameras;
-   GetAvailableCameras(&lNumCameras);
-
-   std::cerr << "Number of cameras: " << lNumCameras << "\n";
-
-   int iSelectedCamera = camNo;
-
-   if (iSelectedCamera < lNumCameras && iSelectedCamera >= 0)
+   switch(error)
    {
-      at_32 lCameraHandle;
-      GetCameraHandle(iSelectedCamera, &lCameraHandle);
+      case DRV_SUCCESS:
+         return "DRV_SUCCESS";
+      case DRV_VXDNOTINSTALLED:
+         return "DRV_VXDNOTINSTALLED";
+      case DRV_INIERROR:
+         return "DRV_INIERROR";
+      case DRV_COFERROR:
+         return "DRV_COFERROR";
+      case DRV_FLEXERROR:
+         return "DRV_FLEXERROR";
+      case DRV_ERROR_ACK:
+         return "DRV_ERROR_ACK";
+      case DRV_ERROR_FILELOAD:
+         return "DRV_ERROR_FILELOAD";
+      case DRV_ERROR_PAGELOCK:
+         return "DRV_ERROR_PAGELOCK";
+      case DRV_USBERROR:
+         return "DRV_USBERROR";
+      case DRV_ERROR_NOCAMERA:
+         return "DRV_ERROR_NOCAMERA";
+      case DRV_NOT_INITIALIZED:
+         return "DRV_NOT_INITIALIZED";
+      case DRV_ACQUIRING:
+         return "DRV_ACQUIRING";
+      case DRV_P1INVALID:
+         return "DRV_P1INVALID";
+      case DRV_NOT_SUPPORTED:
+         return "DRV_NOT_SUPPORTED";
+      default:
+         return "UNKNOWN";
+   }
+}
+ 
+inline
+int andorCtrl::cameraSelect()
+{
+   unsigned int error;
+   
+   if(!m_libInit)
+   {
+      char path[] = "/usr/local/etc/andor/";
+      error = Initialize(path);
 
-      SetCurrentCamera(lCameraHandle);
+      if(error == DRV_USBERROR || error == DRV_ERROR_NOCAMERA || error == DRV_VXDNOTINSTALLED)
+      {
+         state(stateCodes::NODEVICE);
+         if(!stateLogged())
+         {
+            log<text_log>("No Andor USB camera found", logPrio::LOG_WARNING);
+         }
+         
+         //Not an error, appLogic should just go on.
+         return 0;
+      }
+      else if(error!=DRV_SUCCESS)
+      {
+         log<software_critical>({__FILE__, __LINE__, "ANDOR SDK initialization failed:" + andorSDKErrorName(error)});
+         return -1;
+      }
+      
+      m_libInit = true;
+   }
+   
+   at_32 lNumCameras = 0;
+   error = GetAvailableCameras(&lNumCameras);
 
+   if(error != DRV_SUCCESS)
+   {
+      log<software_critical>({__FILE__, __LINE__, "ANDOR SDK GetAvailableCameras failed."});
+      return -1;
+   }
+   
+   if(lNumCameras < 1)
+   {
+      if(!stateLogged())
+      {
+         log<text_log>("No Andor cameras found after initialization", logPrio::LOG_WARNING);
+      }
+      state(stateCodes::NODEVICE);
       return 0;
    }
-   else
+   
+   int iSelectedCamera = 0; //We're hard-coded for just one camera!
+
+   int serialNumber = 0;
+   error = GetCameraSerialNumber(&serialNumber);
+   
+   if(error != DRV_SUCCESS)
    {
-      return log<text_log,-1>("No Andor cameras found.");
+      log<software_critical>({__FILE__, __LINE__, "ANDOR SDK GetCameraSerialNumber failed."});
+      return -1;
    }
+   
+   log<text_log>(std::string("Found Andor USB Camera with serial number ") + std::to_string(serialNumber));
+   
+   at_32 lCameraHandle;
+   error = GetCameraHandle(iSelectedCamera, &lCameraHandle);
+
+   if(error != DRV_SUCCESS)
+   {
+      log<software_critical>({__FILE__, __LINE__, "ANDOR SDK GetCameraHandle failed."});
+      return -1;
+   }
+   
+   error = SetCurrentCamera(lCameraHandle);
+
+   if(error != DRV_SUCCESS)
+   {
+      log<software_critical>({__FILE__, __LINE__, "ANDOR SDK SetCurrentCamera failed."});
+      return -1;
+   }
+   
+   char name[MAX_PATH];
+   
+   error = GetHeadModel(name);
+   if(error != DRV_SUCCESS)
+   {
+      log<software_critical>({__FILE__, __LINE__, "ANDOR SDK GetHeadModel failed."});
+      return -1;
+   }
+
+   state(stateCodes::CONNECTED);
+   log<text_log>(std::string("Connected to ") + name +  " with serial number " + std::to_string(serialNumber));
+   
+   //Initialize Shutter to SHUT
+   int ss = 2;
+   if(m_shutterState == 1) ss = 1;
+   else m_shutterState = 0; //handles startup case
+   error = SetShutter(1,ss,50,50);
+   if(error != DRV_SUCCESS)
+   {
+      log<software_critical>({__FILE__, __LINE__, "ANDOR SDK SetShutter failed."});
+      return -1;
+   }
+   
+   // Set CameraLink
+   error = SetCameraLinkMode(1);
+   if(error != DRV_SUCCESS)
+   {
+      log<software_critical>({__FILE__, __LINE__, "ANDOR SDK SetCameraLinkMode failed."});
+      return -1;
+   }
+   
+   //Set Read Mode to --Image--
+   /* 0 - Full Vertical Binning
+    * 1 - Multi-Track; Need to call SetMultiTrack(int NumTracks, int height, int offset, int* bottom, int *gap)
+    * 2 - Random-Track; Need to call SetRandomTracks
+    * 3 - Single-Track; Need to call SetSingleTrack(int center, int height)
+    * 4 - Image; See SetImage, need shutter during readout
+    */
+   error = SetReadMode(4);
+   if(error != DRV_SUCCESS)
+   {
+      return log<software_error,-1>({__FILE__, __LINE__, "Andor SDK Error from SetReadMode: " + andorSDKErrorName(error)});
+   }
+   
+   //Set Acquisition mode to --Run Till Abort--
+   /* 1 - Single Scan
+    * 2 - Accumulate
+    * 3 - Kinetic Series
+    * 5 - Run Till Abort
+    *
+    * See Page 53 of SDK User's Guide for Frame Transfer Info
+    */
+   error = SetAcquisitionMode(5);
+   if(error != DRV_SUCCESS)
+   {
+      return log<software_error,-1>({__FILE__, __LINE__, "Andor SDK Error from SetAcquisitionMode: " + andorSDKErrorName(error)});
+   }
+
+   //Set to frame transfer mode
+   /* See Page 53 of SDK User's Guide for Frame Transfer Info
+    */
+   error = SetFrameTransferMode(1);
+   if(error != DRV_SUCCESS)
+   {
+      return log<software_error,-1>({__FILE__, __LINE__, "Andor SDK Error from SetFrameTransferMode: " + andorSDKErrorName(error)});
+   }
+   
+   //Set initial exposure time
+   error = SetExposureTime(0.1);
+   if(error != DRV_SUCCESS)
+   {
+      return log<software_error,-1>({__FILE__, __LINE__, "Andor SDK Error from SetExposureTime: " + andorSDKErrorName(error)});
+   }
+   
+   return 0;
 
 }
 
 inline
 int andorCtrl::getTemp()
 {
-   std::string response;
+   //unsigned int error;
+   //int temp_low {999}, temp_high {999};
+   //error = GetTemperatureRange(&temp_low, &temp_high); 
 
-   int temp {999}, temp_low {999}, temp_high {999};
-   unsigned long error=GetTemperatureRange(&temp_low, &temp_high); ///\todo need error check
-
-//   std::cerr << error << "\n";
-   unsigned long status=GetTemperature(&temp);
-
-
-//    std::cout << "Current Temperature: " << temp << " C" << std::endl;
-//    std::cout << "Temp Range: {" << temp_low << "," << temp_high << "}" << std::endl;
-//    std::cout << "Status             : ";
+   float temp = -999;
+   unsigned int status = GetTemperatureF(&temp);
+   
    std::string cooling;
    switch(status)
    {
-      case DRV_TEMPERATURE_OFF: cooling =  "OFF"; break;
-      case DRV_TEMPERATURE_STABILIZED: cooling = "STABILIZED"; break;
-      case DRV_TEMPERATURE_NOT_REACHED: cooling = "COOLING"; break;
-      case DRV_TEMPERATURE_NOT_STABILIZED: cooling = "NOT STABILIZED"; break;
-      case DRV_TEMPERATURE_DRIFT: cooling = "DRIFTING"; break;
-      default: cooling =  "UNKOWN";
+      case DRV_TEMPERATURE_OFF: 
+         m_tempControlStatusStr =  "OFF"; 
+         m_tempControlStatus = false;
+         m_tempControlOnTarget = false;
+         break;
+      case DRV_TEMPERATURE_STABILIZED: 
+         m_tempControlStatusStr = "STABILIZED"; 
+         m_tempControlStatus = true;
+         m_tempControlOnTarget = true;
+         break;
+      case DRV_TEMPERATURE_NOT_REACHED: 
+         m_tempControlStatusStr = "COOLING";
+         m_tempControlStatus = true;
+         m_tempControlOnTarget = false;
+         break;
+      case DRV_TEMPERATURE_NOT_STABILIZED: 
+         m_tempControlStatusStr = "NOT STABILIZED";
+         m_tempControlStatus = true;
+         m_tempControlOnTarget = false;
+         break;
+      case DRV_TEMPERATURE_DRIFT: 
+         m_tempControlStatusStr = "DRIFTING";
+         m_tempControlStatus = true;
+         m_tempControlOnTarget = false;
+         break;
+      default: 
+         m_tempControlStatusStr =  "UNKOWN";
+         m_tempControlStatus = false;
+         m_tempControlOnTarget = false;
+         m_ccdTemp = -999;
+         log<software_error>({__FILE__, __LINE__, "ANDOR SDK GetTemperatureF:" + andorSDKErrorName(status)});
+         return -1;
    }
-  
+
+   m_ccdTemp = temp;
+   recordCamera();
+      
    return 0;
 
-
 }
-
-inline
-int andorCtrl::setTemp(float temp)
-{
-   return 0;
-}
-
-
-
-
 
 inline
 int andorCtrl::getEMGain()
@@ -637,7 +786,9 @@ int andorCtrl::setEMGain( unsigned emg )
 inline
 int andorCtrl::setShutter( unsigned os )
 {
+   recordCamera(true);
    AbortAcquisition();
+   state(stateCodes::CONFIGURING);
 
    if(os == 0) //Shut
    {
@@ -650,7 +801,8 @@ int andorCtrl::setShutter( unsigned os )
       m_shutterState = 1;
    }
 
-   StartAcquisition();
+   m_nextMode = m_modeName;
+   m_reconfig = true;
 
    return 0;
 }
@@ -662,9 +814,11 @@ int andorCtrl::setShutter( unsigned os )
 inline
 int andorCtrl::powerOnDefaults()
 {
-   //Camera boots up with this true in most cases.
-   m_tempControlStatusSet = false;
-   m_tempControlStatus =false;
+    //Camera boots up with this true in most cases.
+    m_tempControlStatus = false;
+    m_tempControlStatusSet = false;
+    m_tempControlStatusStr =  "OFF"; 
+    m_tempControlOnTarget = false;
       
    return 0;
 }
@@ -672,12 +826,49 @@ int andorCtrl::powerOnDefaults()
 inline
 int andorCtrl::setTempControl()
 {  
-   return 0;
+   if(m_tempControlStatusSet)
+   {
+      unsigned int error = CoolerON();
+      if(error != DRV_SUCCESS)
+      {
+         log<software_critical>({__FILE__, __LINE__, "ANDOR SDK CoolerOFF failed: " + andorSDKErrorName(error)});
+         return -1;
+      }
+      m_tempControlStatus = true;
+      m_tempControlStatusStr = "COOLING";
+      recordCamera();
+      log<text_log>("enabled temperature control");
+      return 0;
+   }
+   else
+   {
+      unsigned int error = CoolerOFF();
+      if(error != DRV_SUCCESS)
+      {
+         log<software_critical>({__FILE__, __LINE__, "ANDOR SDK CoolerOFF failed: " + andorSDKErrorName(error)});
+         return -1;
+      }
+      m_tempControlStatus = false;
+      m_tempControlStatusStr = "OFF";
+      recordCamera();
+      log<text_log>("disabled temperature control");
+      return 0;
+   }
 }
 
 inline
 int andorCtrl::setTempSetPt()
 {
+   int temp = m_ccdTempSetpt + 0.5;
+   
+   unsigned int error = SetTemperature(temp);
+   
+   if(error != DRV_SUCCESS)
+   {
+      log<software_critical>({__FILE__, __LINE__, "ANDOR SDK setTemperature failed: " + andorSDKErrorName(error)});
+      return -1;
+   }
+   
   return 0;
 
 }
@@ -689,14 +880,27 @@ int andorCtrl::getFPS()
    float accumCycletime;
    float kinCycletime;
 
-   unsigned long error = GetAcquisitionTimings(&exptime, &accumCycletime, &kinCycletime);
+   unsigned int error = GetAcquisitionTimings(&exptime, &accumCycletime, &kinCycletime);
    if(error != DRV_SUCCESS)
    {
-      return log<software_error,-1>({__FILE__, __LINE__, "Error from GetAcquisitionTimings"});
+      return log<software_error,-1>({__FILE__, __LINE__, "ANDOR SDK error from GetAcquisitionTimings: " + andorSDKErrorName(error)});
    }
 
-   m_fps = 1./exptime;
-
+   m_expTime = exptime;
+   
+   //std::cerr << accumCycletime << " " << kinCycletime << "\n";
+   
+   float readoutTime;
+   error = GetReadOutTime(&readoutTime);
+   if(error != DRV_SUCCESS)
+   {
+      return log<software_error,-1>({__FILE__, __LINE__, "ANDOR SDK error from GetReadOutTime: " + andorSDKErrorName(error)});
+   }
+   
+   //if(readoutTime < exptime) m_fps = 1./m_expTime;
+   //else m_fps = 1.0/readoutTime;
+   m_fps = 1.0/accumCycletime;
+   
    return 0;
 
 }
@@ -704,19 +908,18 @@ int andorCtrl::getFPS()
 inline
 int andorCtrl::setFPS()
 {
+   recordCamera(true);
    AbortAcquisition();
+   state(stateCodes::CONFIGURING);
 
    unsigned long err = SetExposureTime(1.0/m_fpsSet);
-
-   StartAcquisition();
-
 
    if(err != DRV_SUCCESS)
    {
       return log<software_error, -1>({__FILE__, __LINE__, "error from SetExposureTime"});
    }
-   
-   log<text_log>({"set fps " + std::to_string(m_fpsSet)});
+   m_nextMode = m_modeName;
+   m_reconfig = true;
    
    return 0;
 
@@ -727,6 +930,18 @@ int andorCtrl::setFPS()
 inline 
 int andorCtrl::setExpTime()
 {
+   recordCamera(true);
+   AbortAcquisition();
+   state(stateCodes::CONFIGURING);
+   
+   unsigned int error = SetExposureTime(m_expTimeSet);
+   if(error != DRV_SUCCESS)
+   {
+      log<software_critical>({__FILE__, __LINE__, "ANDOR SDK SetExposureTime failed: " + andorSDKErrorName(error)});
+      return -1;
+   }
+   m_nextMode = m_modeName;
+   m_reconfig = true;
    return 0;
 }
    
@@ -746,48 +961,25 @@ int andorCtrl::configureAcquisition()
    //lock mutex
    std::unique_lock<std::mutex> lock(m_indiMutex);
 
-    //Get Detector dimensions
-    int width, height;
-    GetDetector(&width, &height);
+   unsigned int error;
+   
+   //Get Detector dimensions
+   int width, height;
+   error = GetDetector(&width, &height);
+   if(error != DRV_SUCCESS)
+   {
+      return log<software_error,-1>({__FILE__, __LINE__, "Andor SDK Error from GetDetector: " + andorSDKErrorName(error)});
+   }
+   
+   ///\todo This should check whether we have a match between EDT and the camera right?
+   m_width = width;
+   m_height = height;
+   m_dataType = _DATATYPE_INT16;
 
-    ///\todo This should check whether we have a match between EDT and the camera right?
-    m_width = width;
-    m_height = height;
-    m_dataType = _DATATYPE_INT16;
-
-    //Set Read Mode to --Image--
-    SetReadMode(4);
-    /* 0 - Full Vertical Binning
-     * 1 - Multi-Track; Need to call SetMultiTrack(int NumTracks, int height, int offset, int* bottom, int *gap)
-     * 2 - Random-Track; Need to call SetRandomTracks
-     * 3 - Single-Track; Need to call SetSingleTrack(int center, int height)
-     * 4 - Image; See SetImage, need shutter during readout
-     */
-
-    //Set Acquisition mode to --Run Till Abort--
-    SetAcquisitionMode(5);
-    /* 1 - Single Scan
-     * 2 - Accumulate
-     * 3 - Kinetic Series
-     * 5 - Run Till Abort
-     *
-     * See Page 53 of SDK User's Guide for Frame Transfer Info
-     */
-
-    //Set initial exposure time
-    SetExposureTime(0.1);
-
-    //Initialize Shutter to SHUT
-    int ss = 2;
-    if(m_shutterState == 1) ss = 1;
-    else m_shutterState = 0; //handles startup case
-    SetShutter(1,ss,50,50);
-
-    SetNumberAccumulations(1);
-    SetFrameTransferMode(1);
-
-    // Set CameraLink
-    SetCameraLinkMode(1);
+    
+   
+   //SetNumberAccumulations(1);
+   //SetKineticCycleTime(0);
 
     // Set Output Amplifier
     SetOutputAmplifier(1);
@@ -806,6 +998,7 @@ int andorCtrl::configureAcquisition()
     // Print Detector Frame Size
     std::cout << "Detector Frame is: " << width << "x" << height << "\n";
 
+    
 
    return 0;
 }
@@ -819,11 +1012,10 @@ float andorCtrl::fps()
 inline
 int andorCtrl::startAcquisition()
 {
-   SetKineticCycleTime(0);
    StartAcquisition();
-
-   std::cout << "\n" << "Starting Continuous Acquisition" << "\n";
-
+   state(stateCodes::OPERATING);
+   recordCamera();
+   
    return edtCamera<andorCtrl>::pdvStartAcquisition();
 }
 
@@ -848,7 +1040,11 @@ int andorCtrl::reconfig()
    //lock mutex
    std::unique_lock<std::mutex> lock(m_indiMutex);
 
-   return edtCamera<andorCtrl>::pdvReconfig();
+   int rv = edtCamera<andorCtrl>::pdvReconfig();
+   if(rv < 0) return rv;
+   
+   state(stateCodes::READY);
+   return 0;
 }
 
 INDI_NEWCALLBACK_DEFN(andorCtrl, m_indiP_emGain)(const pcf::IndiProperty &ipRecv)
