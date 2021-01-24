@@ -70,6 +70,8 @@ protected:
 
    ///@}
 
+   std::string m_configFile; ///< The path, relative to configDir, where to write and read the temporary config file.
+   
    bool m_libInit {false}; ///< Whether or not the Andor SDK library is initialized.
 
    unsigned m_emGain {1};
@@ -127,6 +129,8 @@ public:
 
    int setShutter( unsigned os);
 
+   
+   int writeConfig();
    
    /** \name stdCamera Interface 
      * 
@@ -221,6 +225,25 @@ andorCtrl::andorCtrl() : MagAOXApp(MAGAOX_CURRENT_SHA1, MAGAOX_REPO_MODIFIED)
    
    m_hasShutter = true;
    
+   m_startup_x = 255.5; 
+   m_startup_y = 255.5; 
+   m_startup_w = 512;  
+   m_startup_h = 512;  
+      
+   m_nextROI.x = m_startup_x;
+   m_nextROI.y = m_startup_y;
+   m_nextROI.w = m_startup_w;
+   m_nextROI.h = m_startup_h;
+   m_nextROI.bin_x = 1;
+   m_nextROI.bin_y = 1;
+   
+   m_full_x = 255.5; 
+   m_full_y = 255.5; 
+   m_full_w = 512; 
+   m_full_h = 512; 
+   
+   //--- frameGrabber ---
+   m_flippable = true;
    
    return;
 }
@@ -234,6 +257,9 @@ andorCtrl::~andorCtrl() noexcept
 inline
 void andorCtrl::setupConfig()
 {
+   //Here we override edt camera and take over mode management.
+   m_usesModes = false;
+
    dev::stdCamera<andorCtrl>::setupConfig(config);
    dev::edtCamera<andorCtrl>::setupConfig(config);
    
@@ -252,6 +278,20 @@ inline
 void andorCtrl::loadConfig()
 {
    dev::stdCamera<andorCtrl>::loadConfig(config);
+   
+   m_configFile = "../../../tmp/andor_";
+   m_configFile += configName();
+   m_configFile += ".cfg";
+   m_cameraModes["onlymode"] = dev::cameraConfig({m_configFile, "", 255, 255, 512, 512, 1, 1, 1000});
+   m_startupMode = "onlymode";
+   
+   if(writeConfig() < 0)
+   {
+      log<software_critical>({__FILE__,__LINE__});
+      m_shutdown = true;
+      return;
+   }
+   
    dev::edtCamera<andorCtrl>::loadConfig(config);
 
    config(m_maxEMGain, "camera.maxEMGain");
@@ -269,6 +309,7 @@ void andorCtrl::loadConfig()
    }
 
    dev::frameGrabber<andorCtrl>::loadConfig(config);
+   
    dev::telemeter<andorCtrl>::loadConfig(config);
 
 
@@ -807,6 +848,33 @@ int andorCtrl::setShutter( unsigned os )
    return 0;
 }
 
+inline 
+int andorCtrl::writeConfig()
+{
+   std::ofstream fout;
+   fout.open(m_configFile);
+   
+   if(fout.fail())
+   {
+      log<software_error>({__FILE__, __LINE__, "error opening config file for writing"});
+      return -1;
+   }
+   
+   fout << "camera_class:                  \"Andor\"\n";
+   fout << "camera_model:                  \"iXon Ultra 897\"\n";
+   fout << "camera_info:                   \"512x512 (1-tap, freerun)\"\n";
+   fout << "width:                         " << m_nextROI.w << "\n";
+   fout << "height:                        " << m_nextROI.h << "\n";
+   fout << "depth:                         16\n";
+   fout << "extdepth:                      16\n";
+   fout << "CL_DATA_PATH_NORM:             0f       # single tap\n";
+   fout << "CL_CFG_NORM:                   02\n";
+   
+   fout.close();
+   
+   return 0;
+
+}
 //------------------------------------------------------------------------
 //-----------------------  stdCamera interface ---------------------------
 //------------------------------------------------------------------------
@@ -814,12 +882,26 @@ int andorCtrl::setShutter( unsigned os )
 inline
 int andorCtrl::powerOnDefaults()
 {
-    //Camera boots up with this true in most cases.
-    m_tempControlStatus = false;
-    m_tempControlStatusSet = false;
-    m_tempControlStatusStr =  "OFF"; 
-    m_tempControlOnTarget = false;
+   //Camera boots up with this true in most cases.
+   m_tempControlStatus = false;
+   m_tempControlStatusSet = false;
+   m_tempControlStatusStr =  "OFF"; 
+   m_tempControlOnTarget = false;
       
+   m_currentROI.x = m_startup_x;
+   m_currentROI.y = m_startup_y;
+   m_currentROI.w = m_startup_w;
+   m_currentROI.h = m_startup_h;
+   m_currentROI.bin_x = 1;
+   m_currentROI.bin_y = 1;
+   
+   m_nextROI.x = m_startup_x;
+   m_nextROI.y = m_startup_y;
+   m_nextROI.w = m_startup_w;
+   m_nextROI.h = m_startup_h;
+   m_nextROI.bin_x = 1;
+   m_nextROI.bin_y = 1;
+   
    return 0;
 }
 
@@ -948,6 +1030,23 @@ int andorCtrl::setExpTime()
 inline 
 int andorCtrl::setNextROI()
 {
+   std::cerr << "setNextROI:\n";
+   std::cerr << "  m_nextROI.x = " << m_nextROI.x << "\n";
+   std::cerr << "  m_nextROI.y = " << m_nextROI.y << "\n";
+   std::cerr << "  m_nextROI.w = " << m_nextROI.w << "\n";
+   std::cerr << "  m_nextROI.h = " << m_nextROI.h << "\n";
+   std::cerr << "  m_nextROI.bin_x = " << m_nextROI.bin_x << "\n";
+   std::cerr << "  m_nextROI.bin_y = " << m_nextROI.bin_y << "\n";
+ 
+   recordCamera(true);
+   AbortAcquisition();
+   state(stateCodes::CONFIGURING);
+   
+   m_nextMode = m_modeName;
+   m_reconfig = true;
+
+   updateSwitchIfChanged(m_indiP_roi_set, "request", pcf::IndiElement::Off, INDI_IDLE);
+   
    return 0;
 }
 
@@ -963,40 +1062,103 @@ int andorCtrl::configureAcquisition()
 
    unsigned int error;
    
-   //Get Detector dimensions
-   int width, height;
-   error = GetDetector(&width, &height);
-   if(error != DRV_SUCCESS)
-   {
-      return log<software_error,-1>({__FILE__, __LINE__, "Andor SDK Error from GetDetector: " + andorSDKErrorName(error)});
-   }
-   
-   ///\todo This should check whether we have a match between EDT and the camera right?
-   m_width = width;
-   m_height = height;
-   m_dataType = _DATATYPE_INT16;
+//    //Get Detector dimensions
+//    int width, height;
+//    error = GetDetector(&width, &height);
+//    if(error != DRV_SUCCESS)
+//    {
+//       return log<software_error,-1>({__FILE__, __LINE__, "Andor SDK Error from GetDetector: " + andorSDKErrorName(error)});
+//    }
 
-    
-   
    //SetNumberAccumulations(1);
    //SetKineticCycleTime(0);
 
-    // Set Output Amplifier
-    SetOutputAmplifier(1);
+   // Set Output Amplifier
+   SetOutputAmplifier(1);
 
-    //Setup Image dimensions
-    SetImage(1,1,1,width,1,height);
-    /* SetImage(int hbin, int vbin, int hstart, int hend, int vstart, int vend)
-     * hbin: number of pixels to bin horizontally
-     * vbin: number of pixels to bin vertically
-     * hstart: Starting Column (inclusive)
-     * hend: End column (inclusive)
-     * vstart: Start row (inclusive)
-     * vend: End row (inclusive)
-     */
+    
+   int x0 = (m_nextROI.x - 0.5*(m_nextROI.w - 1)) + 1;
+   int y0 = (m_nextROI.y - 0.5*(m_nextROI.h - 1)) + 1;
+    
+   //Setup Image dimensions
+   /* SetImage(int hbin, int vbin, int hstart, int hend, int vstart, int vend)
+    * hbin: number of pixels to bin horizontally
+    * vbin: number of pixels to bin vertically
+    * hstart: Starting Column (inclusive)
+    * hend: End column (inclusive)
+    * vstart: Start row (inclusive)
+    * vend: End row (inclusive)
+    */
+   error = SetImage(m_nextROI.bin_x, m_nextROI.bin_y, x0, x0 + m_nextROI.w - 1, y0, y0 + m_nextROI.h - 1);
+   if(error != DRV_SUCCESS)
+   {
+      if(error == DRV_P1INVALID)
+      {
+         log<text_log>(std::string("invalid x-binning: ") + std::to_string(m_nextROI.bin_x), logPrio::LOG_ERROR);
+      }
+      else if(error == DRV_P2INVALID)
+      {
+         log<text_log>(std::string("invalid y-binning: ") + std::to_string(m_nextROI.bin_y), logPrio::LOG_ERROR);
+      }
+      else if(error == DRV_P3INVALID)
+      {
+         log<text_log>(std::string("invalid x-center: ") + std::to_string(m_nextROI.x) + "/" + std::to_string(x0), logPrio::LOG_ERROR);
+      }
+      else if(error == DRV_P4INVALID)
+      {
+         log<text_log>(std::string("invalid width: ") + std::to_string(m_nextROI.w), logPrio::LOG_ERROR);
+      }
+      else if(error == DRV_P5INVALID)
+      {
+         log<text_log>(std::string("invalid y-center: ") + std::to_string(m_nextROI.y) + "/" + std::to_string(y0), logPrio::LOG_ERROR);
+      }
+      else if(error == DRV_P6INVALID)
+      {
+         log<text_log>(std::string("invalid height: ") + std::to_string(m_nextROI.h), logPrio::LOG_ERROR);
+      }
+      else
+      {
+         return log<software_error,-1>({__FILE__, __LINE__, "Andor SDK Error from SetImage: " + andorSDKErrorName(error)});
+      }
+   
+      m_nextROI.x = m_currentROI.x;
+      m_nextROI.y = m_currentROI.y;
+      m_nextROI.w = m_currentROI.w;
+      m_nextROI.h = m_currentROI.h;
+      m_nextROI.bin_x = m_currentROI.bin_x;
+      m_nextROI.bin_y = m_currentROI.bin_y;
+            
+      m_nextMode = m_modeName;
 
-    // Print Detector Frame Size
-    std::cout << "Detector Frame is: " << width << "x" << height << "\n";
+      state(stateCodes::ERROR);
+      return -1;
+   
+   }
+   
+    = m_nextROI.x 
+   
+   m_currentROI.bin_x = m_nextROI.bin_x;
+   m_currentROI.bin_y = m_nextROI.bin_y;
+   m_currentROI.x = x0 - 1.0 +  0.5*(m_nextROI.w - 1);
+   m_currentROI.y = y0 - 1.0 +  0.5*(m_nextROI.h - 1);
+   m_currentROI.w = m_nextROI.w;
+   m_currentROI.h = m_nextROI.h;
+   
+   updateIfChanged( m_indiP_roi_x, "current", m_currentROI.x, INDI_OK);
+   updateIfChanged( m_indiP_roi_y, "current", m_currentROI.y, INDI_OK);
+   updateIfChanged( m_indiP_roi_w, "current", m_currentROI.w, INDI_OK);
+   updateIfChanged( m_indiP_roi_h, "current", m_currentROI.h, INDI_OK);
+   updateIfChanged( m_indiP_roi_bin_x, "current", m_currentROI.bin_x, INDI_OK);
+   updateIfChanged( m_indiP_roi_bin_y, "current", m_currentROI.bin_y, INDI_OK);
+   
+       ///\todo This should check whether we have a match between EDT and the camera right?
+   m_width = m_currentROI.w;
+   m_height = m_currentROI.h;
+   m_dataType = _DATATYPE_INT16;
+
+   
+   // Print Detector Frame Size
+   //std::cout << "Detector Frame is: " << width << "x" << height << "\n";
 
     
 
@@ -1040,6 +1202,8 @@ int andorCtrl::reconfig()
    //lock mutex
    std::unique_lock<std::mutex> lock(m_indiMutex);
 
+   writeConfig();
+   
    int rv = edtCamera<andorCtrl>::pdvReconfig();
    if(rv < 0) return rv;
    
