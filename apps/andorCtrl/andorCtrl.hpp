@@ -1135,8 +1135,6 @@ int andorCtrl::configureAcquisition()
    
    }
    
-    = m_nextROI.x 
-   
    m_currentROI.bin_x = m_nextROI.bin_x;
    m_currentROI.bin_y = m_nextROI.bin_y;
    m_currentROI.x = x0 - 1.0 +  0.5*(m_nextROI.w - 1);
@@ -1150,6 +1148,14 @@ int andorCtrl::configureAcquisition()
    updateIfChanged( m_indiP_roi_h, "current", m_currentROI.h, INDI_OK);
    updateIfChanged( m_indiP_roi_bin_x, "current", m_currentROI.bin_x, INDI_OK);
    updateIfChanged( m_indiP_roi_bin_y, "current", m_currentROI.bin_y, INDI_OK);
+   
+   //We also update target to the settable values
+   updateIfChanged( m_indiP_roi_x, "target", m_currentROI.x, INDI_OK);
+   updateIfChanged( m_indiP_roi_y, "target", m_currentROI.y, INDI_OK);
+   updateIfChanged( m_indiP_roi_w, "target", m_currentROI.w, INDI_OK);
+   updateIfChanged( m_indiP_roi_h, "target", m_currentROI.h, INDI_OK);
+   updateIfChanged( m_indiP_roi_bin_x, "target", m_currentROI.bin_x, INDI_OK);
+   updateIfChanged( m_indiP_roi_bin_y, "target", m_currentROI.bin_y, INDI_OK);
    
        ///\todo This should check whether we have a match between EDT and the camera right?
    m_width = m_currentROI.w;
