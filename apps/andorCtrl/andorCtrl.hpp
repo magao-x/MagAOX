@@ -61,11 +61,8 @@ protected:
      *@{
      */
 
-   //Camera:
-   unsigned long m_powerOnWait {10}; ///< Time in sec to wait for camera boot after power on.
-
-   float m_startupTemp {20.0}; ///< The temperature to set after a power-on.
-
+   int m_defaultAmp {1}; ///< The default amplifier.  0 is EMCCD, 1 is conventional CCD.
+   
    unsigned m_maxEMGain {600};
 
    ///@}
@@ -74,8 +71,9 @@ protected:
    
    bool m_libInit {false}; ///< Whether or not the Andor SDK library is initialized.
 
+   int m_currentAmp {1}; ///< The current amplifier. 0 is EMCCD, 1 is conventional CCD.
+   
    unsigned m_emGain {1};
-
 
 public:
 
@@ -109,11 +107,7 @@ public:
    /// Do any needed shutdown tasks.  Currently nothing in this app.
    virtual int appShutdown();
 
-
-
-
    int cameraSelect();
-
    
    int getTemp();
 
@@ -129,6 +123,10 @@ public:
 
    int setShutter( unsigned os);
 
+   /// Set the output amplifier
+   /** 0 is EMCCD, 1 is conventional ccd.
+     */
+   int setAmplifier( int amp );
    
    int writeConfig();
    
@@ -199,10 +197,12 @@ public:
 protected:
   
    pcf::IndiProperty m_indiP_emGain;
-
+   pcf::IndiProperty m_indiP_amp;
+   
 public:
    INDI_NEWCALLBACK_DECL(andorCtrl, m_indiP_emGain);
 
+   INDI_NEWCALLBACK_DECL(andorCtrl, m_indiP_amp);
    
    /** \name Telemeter Interface
      * 
@@ -265,14 +265,14 @@ void andorCtrl::setupConfig()
    
    config.add("camera.maxEMGain", "", "camera.maxEMGain", argType::Required, "camera", "maxEMGain", false, "unsigned", "The maximum EM gain which can be set by  user. Default is 600.  Min is 1, max is 600.");
 
+   config.add("camera.defaultAmp", "", "camera.defaultAmp", argType::Required, "camera", "defaultAmp", false, "string", "The default amplifier, ccd (the default default) or emccd.");
+   
    dev::frameGrabber<andorCtrl>::setupConfig(config);
 
    dev::telemeter<andorCtrl>::setupConfig(config);
    
 
 }
-
-
 
 inline
 void andorCtrl::loadConfig()
@@ -308,11 +308,14 @@ void andorCtrl::loadConfig()
       log<text_log>("maxEMGain set to 600");
    }
 
+   std::string defamp;
+   config(defamp, "camera.defaultAmp");
+   if(defamp == "ccd") m_defaultAmp = 1;
+   else if(defamp == "emccd") m_defaultAmp = 0;
+   
    dev::frameGrabber<andorCtrl>::loadConfig(config);
    
    dev::telemeter<andorCtrl>::loadConfig(config);
-
-
 
 }
 
@@ -327,6 +330,9 @@ int andorCtrl::appStartup()
    m_indiP_emGain["current"].set(m_emGain);
    m_indiP_emGain.add (pcf::IndiElement("target"));
 
+   createStandardIndiSelectionSw(m_indiP_amp, "amplifier", {"ccd", "emccd"}, "Amplifier");
+   registerIndiPropertyNew(m_indiP_amp, INDI_NEWCALLBACK(m_indiP_amp));
+   
    if(dev::stdCamera<andorCtrl>::appStartup() < 0)
    {
       return log<software_critical,-1>({__FILE__,__LINE__});
@@ -430,6 +436,11 @@ int andorCtrl::appLogic()
          return 0;
       }
 
+      std::string ampstr;
+      if(m_currentAmp == 0) ampstr = "emccd";
+      else ampstr = "ccd";
+      indi::updateSelectionSwitchIfChanged( m_indiP_amp, ampstr, m_indiDriver, INDI_OK);
+   
       if(frameGrabber<andorCtrl>::updateINDI() < 0)
       {
          log<software_error>({__FILE__, __LINE__});
@@ -570,8 +581,16 @@ std::string andorSDKErrorName(unsigned int error)
          return "DRV_P1INVALID";
       case DRV_NOT_SUPPORTED:
          return "DRV_NOT_SUPPORTED";
+      case DRV_ACQUISITION_ERRORS:
+         return "DRV_ACQUISITION_ERRORS";
+      case DRV_INVALID_FILTER:
+         return "DRV_INVALID_FILTER";
+      case DRV_BINNING_ERROR:
+         return "DRV_BINNING_ERROR";
+      case DRV_SPOOLSETUPERROR:
+         return "DRV_SPOOLSETUPERROR";
       default:
-         return "UNKNOWN";
+         return "UNKNOWN: " + std::to_string(error);
    }
 }
  
@@ -721,12 +740,29 @@ int andorCtrl::cameraSelect()
       return log<software_error,-1>({__FILE__, __LINE__, "Andor SDK Error from SetFrameTransferMode: " + andorSDKErrorName(error)});
    }
    
+   //Set default amplifier
+   /* See page 298
+    */
+   error = SetOutputAmplifier(m_defaultAmp);
+   if(error != DRV_SUCCESS)
+   {
+      return log<software_error,-1>({__FILE__, __LINE__, "Andor SDK Error from SetOutputAmplifier: " + andorSDKErrorName(error)});
+   }
+   m_currentAmp = m_defaultAmp;
+   
    //Set initial exposure time
    error = SetExposureTime(0.1);
    if(error != DRV_SUCCESS)
    {
       return log<software_error,-1>({__FILE__, __LINE__, "Andor SDK Error from SetExposureTime: " + andorSDKErrorName(error)});
    }
+   
+   int nc;
+   GetNumberADChannels(&nc);
+   std::cout << "NumberADChannels: " << nc << "\n";
+   
+   GetNumberAmp(&nc);
+   std::cout << "NumberAmp; " << nc << "\n";
    
    return 0;
 
@@ -799,7 +835,9 @@ int andorCtrl::getEMGain()
       log<software_error>({__FILE__,__LINE__, "error getting em advanced"});
       return -1;
    }
-
+   
+   std::cerr << "EM Advanced State: " << state << "\n";
+   
    if(GetEMCCDGain(&gain) !=DRV_SUCCESS)
    {
       log<software_error>({__FILE__,__LINE__, "error getting em gain"});
@@ -808,6 +846,8 @@ int andorCtrl::getEMGain()
 
    m_emGain = gain;
 
+   std::cerr << "EMCCD gain: " << m_emGain << "\n";
+   
    ///\todo this needs to be done on connection, and the max/min field updated.
    if(GetEMGainRange(&low, &high) !=DRV_SUCCESS)
    {
@@ -815,13 +855,15 @@ int andorCtrl::getEMGain()
       return -1;
    }
 
+   std::cerr << "EM Gain Range: " << low << " " << high << "\n";
+   
    return 0;
 }
 
 inline
 int andorCtrl::setEMGain( unsigned emg )
 {
-
+   return 0;
 }
 
 inline
@@ -848,6 +890,49 @@ int andorCtrl::setShutter( unsigned os )
    return 0;
 }
 
+
+
+inline
+int andorCtrl::setAmplifier( int newa )
+{
+   recordCamera(true);
+   AbortAcquisition();
+   state(stateCodes::CONFIGURING);
+
+   // Set the HSSpeed to first index
+   /* See page 284
+    */
+   unsigned int error = SetHSSpeed(newa,0);
+   if(error != DRV_SUCCESS)
+   {
+      return log<software_error,-1>({__FILE__, __LINE__, std::string("Andor SDK Error from SetHSSpeed: ") + andorSDKErrorName(error)});
+   }
+   
+   // Set the amplifier
+   /* See page 298
+    */
+   error = SetOutputAmplifier(newa);
+   if(error != DRV_SUCCESS)
+   {
+      return log<software_error,-1>({__FILE__, __LINE__, std::string("Andor SDK Error from SetOutputAmplifier: ") + andorSDKErrorName(error)});
+   }
+
+   m_currentAmp = newa;
+   
+   std::string ampstr;
+   if(m_currentAmp == 0) ampstr = "emccd";
+   else ampstr = "ccd";
+   indi::updateSelectionSwitchIfChanged( m_indiP_amp, ampstr, m_indiDriver, INDI_OK);
+
+   log<text_log>("set amplifier to " + ampstr);
+   
+   m_nextMode = m_modeName;
+   m_reconfig = true;
+
+   return 0;
+}
+
+
 inline 
 int andorCtrl::writeConfig()
 {
@@ -869,6 +954,8 @@ int andorCtrl::writeConfig()
    fout << "extdepth:                      16\n";
    fout << "CL_DATA_PATH_NORM:             0f       # single tap\n";
    fout << "CL_CFG_NORM:                   02\n";
+   //fout << "fv_once: 1\n";
+   //fout << "method_framesync: EMULATE_TIMEOUT\n";
    
    fout.close();
    
@@ -1073,8 +1160,6 @@ int andorCtrl::configureAcquisition()
    //SetNumberAccumulations(1);
    //SetKineticCycleTime(0);
 
-   // Set Output Amplifier
-   SetOutputAmplifier(1);
 
     
    int x0 = (m_nextROI.x - 0.5*(m_nextROI.w - 1)) + 1;
@@ -1180,7 +1265,13 @@ float andorCtrl::fps()
 inline
 int andorCtrl::startAcquisition()
 {
-   StartAcquisition();
+   unsigned int error = StartAcquisition();
+   if(error != DRV_SUCCESS)
+   {
+      state(stateCodes::ERROR);
+      return log<software_error,-1>({__FILE__, __LINE__, "Andor SDK Error from StartAcquisition: " + andorSDKErrorName(error)});
+   }
+   
    state(stateCodes::OPERATING);
    recordCamera();
    
@@ -1206,7 +1297,7 @@ inline
 int andorCtrl::reconfig()
 {
    //lock mutex
-   std::unique_lock<std::mutex> lock(m_indiMutex);
+   //std::unique_lock<std::mutex> lock(m_indiMutex);
 
    writeConfig();
    
@@ -1238,7 +1329,7 @@ INDI_NEWCALLBACK_DEFN(andorCtrl, m_indiP_emGain)(const pcf::IndiProperty &ipRecv
       if(target == 0) return 0;
 
       //Lock the mutex, waiting if necessary
-      std::unique_lock<std::mutex> lock(m_indiMutex);
+      //std::unique_lock<std::mutex> lock(m_indiMutex);
 
       updateIfChanged(m_indiP_emGain, "target", target);
 
@@ -1246,6 +1337,46 @@ INDI_NEWCALLBACK_DEFN(andorCtrl, m_indiP_emGain)(const pcf::IndiProperty &ipRecv
 
    }
    return -1;
+}
+
+INDI_NEWCALLBACK_DEFN(andorCtrl, m_indiP_amp)(const pcf::IndiProperty &ipRecv)
+{
+   if(ipRecv.getName() != m_indiP_amp.getName())
+   {
+      return log<software_error, -1>({__FILE__, __LINE__, "invalid indi property received"});
+   }
+   
+   int newa = -1;
+   
+   //Check each option, looking for the one that's on, and check that it is the only one that is on.
+   
+   if(ipRecv.find("ccd"))
+   {
+      if(ipRecv["ccd"].getSwitchState() == pcf::IndiElement::On)
+      {
+         newa = 1;         
+      }
+   }
+   
+   if(ipRecv.find("emccd"))
+   {
+      if(ipRecv["emccd"].getSwitchState() == pcf::IndiElement::On)
+      {
+         if(newa != -1)
+         {
+            return log<software_error,-1>({__FILE__, __LINE__, "More than one amplifier selected"});
+         }
+         
+         newa = 0;         
+      }
+   }
+
+   if(newa < 0)
+   {
+      return log<software_error,-1>({__FILE__, __LINE__, "No amplifier selected"});
+   }
+      
+   return setAmplifier(newa);
 }
 
 inline
