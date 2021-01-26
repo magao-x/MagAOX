@@ -376,6 +376,7 @@ protected:
    
    pcf::IndiProperty m_indiP_shutterStatus; ///< Property to report shutter status
    pcf::IndiProperty m_indiP_shutter; ///< Property used to control the shutter, a switch.
+   
 public:
 
    /// The static callback function to be registered for stdCamera properties
@@ -401,6 +402,18 @@ public:
      * \returns -1 on error.
      */
    int newCallBack_temp_controller( const pcf::IndiProperty &ipRecv /**< [in] the INDI property sent with the the new property request.*/);
+   
+   /// Interface to setEMGain when the derivedT has EM Gain
+   /** Tag-dispatch resolution of c_stdCamera_emGain==true will call this function.
+     * Calls derivedT::setEMGain. 
+     */
+   int setEMGain( const mx::meta::trueFalseT<true> & t);
+   
+   /// Interface to setEMGain when the derivedT does not have EM Gain
+   /** Tag-dispatch resolution of c_stdCamera_emGain==false will call this function.
+     * This prevents requiring derivedT to have its own setEMGain(). 
+     */
+   int setEMGain( const mx::meta::trueFalseT<false> & f);
    
    /// Callback to process a NEW EM gain request
    /**
@@ -1141,6 +1154,20 @@ int stdCamera<derivedT>::newCallBack_temp_controller( const pcf::IndiProperty &i
 }
 
 template<class derivedT>
+int stdCamera<derivedT>::setEMGain( const mx::meta::trueFalseT<true> & t)
+{
+   static_cast<void>(t);
+   return derived().setEMGain();
+}
+
+template<class derivedT>
+int stdCamera<derivedT>::setEMGain( const mx::meta::trueFalseT<false> & f)
+{
+   static_cast<void>(f);
+   return 0;
+}
+   
+template<class derivedT>
 int stdCamera<derivedT>::newCallBack_emgain( const pcf::IndiProperty &ipRecv)
 {
    if(derivedT::c_stdCamera_emGain)
@@ -1157,7 +1184,8 @@ int stdCamera<derivedT>::newCallBack_emgain( const pcf::IndiProperty &ipRecv)
    
       m_emGainSet = target;
    
-      return derived().setEMGain();
+      mx::meta::trueFalseT<derivedT::c_stdCamera_emGain> tf;
+      return setEMGain(tf);
    }
    
    return 0;

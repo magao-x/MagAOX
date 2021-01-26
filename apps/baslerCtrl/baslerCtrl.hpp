@@ -177,8 +177,6 @@ protected:
      */
    int setTempSetPt();
    
-   int setEMGain(){ return 0;}
-   
    /// Set the framerate.
    /** This uses the acquistion framerate feature.  If m_fpsSet is 0, acuisition framerate is disabled
      * and the resultant framerate is based solely on exposure time and ROI.  If non-zero, then the 
@@ -189,8 +187,8 @@ protected:
      */ 
    int setFPS();
    
-   /// Set the frame rate. [stdCamera interface]
-   /** Sets the frame rate to m_fpsSet.
+   /// Set the Exposure Time. [stdCamera interface]
+   /** Sets the frame rate to m_expTimeSet.
      * 
      * \returns 0 on success
      * \returns -1 on error
@@ -593,10 +591,27 @@ int baslerCtrl::configureAcquisition()
       
       if(m_nextROI.h > m_maxH) m_nextROI.h = m_maxH;
       m_nextROI.h -= m_nextROI.h % m_incH;
+
+      //Set ROI.      
+      int xoff;
+      int yoff;
+      if(m_currentFlip == fgFlipLR || m_currentFlip == fgFlipUDLR)
+      {
+         xoff = (m_full_w - 1 - m_nextROI.x) - 0.5*((float) m_nextROI.w - 1);
+      }
+      else
+      {
+         xoff = m_nextROI.x - 0.5*((float) m_nextROI.w - 1);
+      }
       
-      //Set ROI.
-      int xoff = m_nextROI.x - 0.5*((float) m_nextROI.w - 1);
-      int yoff = m_nextROI.y - 0.5*((float) m_nextROI.h - 1);
+      if(m_currentFlip == fgFlipUD || m_currentFlip == fgFlipUDLR)
+      {
+         yoff = (m_full_h - 1 - m_nextROI.y) - 0.5*((float) m_nextROI.h - 1);
+      }
+      else
+      {
+         yoff = m_nextROI.y - 0.5*((float) m_nextROI.h - 1);
+      }
       
       xoff -= xoff % m_incX;
       yoff -= yoff % m_incY;
@@ -611,8 +626,24 @@ int baslerCtrl::configureAcquisition()
       
       m_currentROI.w = m_camera->Width.GetValue();
       m_currentROI.h = m_camera->Height.GetValue();
-      m_currentROI.x = m_camera->OffsetX.GetValue() + 0.5*((float) m_currentROI.w - 1);
-      m_currentROI.y = m_camera->OffsetY.GetValue() + 0.5*((float) m_currentROI.h - 1);
+      
+      if(m_currentFlip == fgFlipLR || m_currentFlip == fgFlipUDLR)
+      {
+         m_currentROI.x = m_full_w - 1 - (m_camera->OffsetX.GetValue() + 0.5*((float) m_currentROI.w - 1));
+      }
+      else
+      {
+         m_currentROI.x = m_camera->OffsetX.GetValue() + 0.5*((float) m_currentROI.w - 1);
+      }
+      
+      if(m_currentFlip == fgFlipUD || m_currentFlip == fgFlipUDLR)
+      {
+         m_currentROI.y = m_full_h - 1 - (m_camera->OffsetY.GetValue() + 0.5*((float) m_currentROI.h - 1));
+      }
+      else
+      {
+         m_currentROI.y = m_camera->OffsetY.GetValue() + 0.5*((float) m_currentROI.h - 1);
+      }
       
       updateIfChanged( m_indiP_roi_x, "current", m_currentROI.x, INDI_OK);
       updateIfChanged( m_indiP_roi_y, "current", m_currentROI.y, INDI_OK);
@@ -691,9 +722,6 @@ int baslerCtrl::acquireAndCheckValid()
       return -1;
    }
 }
-
-
-
 
 
 int baslerCtrl::loadImageIntoStream(void * dest)
