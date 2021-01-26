@@ -55,6 +55,18 @@ class andorCtrl : public MagAOXApp<>, public dev::stdCamera<andorCtrl>, public d
    friend class dev::frameGrabber<andorCtrl>;
    friend class dev::telemeter<andorCtrl>;
 
+public:
+   /** \name app::dev Configurations
+     *@{
+     */
+   static constexpr bool c_stdCamera_emGain = true; ///< app::dev config to tell stdCamera to expose EM gain controls 
+   
+   static constexpr bool c_edtCamera_relativeConfigPath = false; ///< app::dev config to tell edtCamera to use absolute path to camera config file
+   
+   static constexpr bool c_frameGrabber_flippable = false; ///< app:dev config to tell framegrabber this camera can not be flipped
+   
+   ///@}
+   
 protected:
 
    /** \name configurable parameters
@@ -63,7 +75,6 @@ protected:
 
    int m_defaultAmp {1}; ///< The default amplifier.  0 is EMCCD, 1 is conventional CCD.
    
-   unsigned m_maxEMGain {600};
 
    ///@}
 
@@ -73,8 +84,6 @@ protected:
 
    int m_currentAmp {1}; ///< The current amplifier. 0 is EMCCD, 1 is conventional CCD.
    
-   unsigned m_emGain {1};
-
 public:
 
    ///Default c'tor
@@ -117,7 +126,7 @@ public:
 
    int getEMGain();
 
-   int setEMGain( unsigned emg );
+   int setEMGain();
 
    int getShutter();
 
@@ -196,12 +205,10 @@ public:
    //INDI:
 protected:
   
-   pcf::IndiProperty m_indiP_emGain;
    pcf::IndiProperty m_indiP_amp;
    
 public:
-   INDI_NEWCALLBACK_DECL(andorCtrl, m_indiP_emGain);
-
+   
    INDI_NEWCALLBACK_DECL(andorCtrl, m_indiP_amp);
    
    /** \name Telemeter Interface
@@ -223,6 +230,9 @@ andorCtrl::andorCtrl() : MagAOXApp(MAGAOX_CURRENT_SHA1, MAGAOX_REPO_MODIFIED)
    
    m_startupTemp = 20;
    
+   m_maxEMGain = 300;
+
+      
    m_hasShutter = true;
    
    m_startup_x = 255.5; 
@@ -242,8 +252,6 @@ andorCtrl::andorCtrl() : MagAOXApp(MAGAOX_CURRENT_SHA1, MAGAOX_REPO_MODIFIED)
    m_full_w = 512; 
    m_full_h = 512; 
    
-   //--- frameGrabber ---
-   m_flippable = true;
    
    return;
 }
@@ -263,8 +271,6 @@ void andorCtrl::setupConfig()
    dev::stdCamera<andorCtrl>::setupConfig(config);
    dev::edtCamera<andorCtrl>::setupConfig(config);
    
-   config.add("camera.maxEMGain", "", "camera.maxEMGain", argType::Required, "camera", "maxEMGain", false, "unsigned", "The maximum EM gain which can be set by  user. Default is 600.  Min is 1, max is 600.");
-
    config.add("camera.defaultAmp", "", "camera.defaultAmp", argType::Required, "camera", "defaultAmp", false, "string", "The default amplifier, ccd (the default default) or emccd.");
    
    dev::frameGrabber<andorCtrl>::setupConfig(config);
@@ -279,7 +285,7 @@ void andorCtrl::loadConfig()
 {
    dev::stdCamera<andorCtrl>::loadConfig(config);
    
-   m_configFile = "../../../tmp/andor_";
+   m_configFile = "/tmp/andor_";
    m_configFile += configName();
    m_configFile += ".cfg";
    m_cameraModes["onlymode"] = dev::cameraConfig({m_configFile, "", 255, 255, 512, 512, 1, 1, 1000});
@@ -287,6 +293,7 @@ void andorCtrl::loadConfig()
    
    if(writeConfig() < 0)
    {
+      std::cerr << "m_configFile: " << m_configFile << "\n";
       log<software_critical>({__FILE__,__LINE__});
       m_shutdown = true;
       return;
@@ -294,7 +301,6 @@ void andorCtrl::loadConfig()
    
    dev::edtCamera<andorCtrl>::loadConfig(config);
 
-   config(m_maxEMGain, "camera.maxEMGain");
 
    if(m_maxEMGain < 1)
    {
@@ -302,10 +308,10 @@ void andorCtrl::loadConfig()
       log<text_log>("maxEMGain set to 1");
    }
 
-   if(m_maxEMGain > 600)
+   if(m_maxEMGain > 300)
    {
-      m_maxEMGain = 600;
-      log<text_log>("maxEMGain set to 600");
+      m_maxEMGain = 300;
+      log<text_log>("maxEMGain set to 300");
    }
 
    std::string defamp;
@@ -319,17 +325,10 @@ void andorCtrl::loadConfig()
 
 }
 
-
-
 inline
 int andorCtrl::appStartup()
 {
    
-   REG_INDI_NEWPROP(m_indiP_emGain, "emgain", pcf::IndiProperty::Number);
-   m_indiP_emGain.add (pcf::IndiElement("current"));
-   m_indiP_emGain["current"].set(m_emGain);
-   m_indiP_emGain.add (pcf::IndiElement("target"));
-
    createStandardIndiSelectionSw(m_indiP_amp, "amplifier", {"ccd", "emccd"}, "Amplifier");
    registerIndiPropertyNew(m_indiP_amp, INDI_NEWCALLBACK(m_indiP_amp));
    
@@ -489,9 +488,6 @@ int andorCtrl::onPowerOff()
 
    std::lock_guard<std::mutex> lock(m_indiMutex);
 
-   updateIfChanged(m_indiP_emGain, "current", 0);
-   updateIfChanged(m_indiP_emGain, "target", 0);
-
    m_shutterStatus = "POWEROFF";
    m_shutterState = 0;
    
@@ -553,42 +549,252 @@ std::string andorSDKErrorName(unsigned int error)
 {
    switch(error)
    {
+      case DRV_ERROR_CODES:
+         return "DRV_ERROR_CODES";
       case DRV_SUCCESS:
          return "DRV_SUCCESS";
       case DRV_VXDNOTINSTALLED:
          return "DRV_VXDNOTINSTALLED";
+      case DRV_ERROR_SCAN:
+         return "DRV_ERROR_SCAN";
+      case DRV_ERROR_CHECK_SUM:
+         return "DRV_ERROR_CHECK_SUM";
+      case DRV_ERROR_FILELOAD:
+         return "DRV_ERROR_FILELOAD";
+      case DRV_UNKNOWN_FUNCTION:
+         return "DRV_UNKNOWN_FUNCTION";
+      case DRV_ERROR_VXD_INIT:
+         return "DRV_ERROR_VXD_INIT";
+      case DRV_ERROR_ADDRESS:
+         return "DRV_ERROR_ADDRESS";
+      case DRV_ERROR_PAGELOCK:
+         return "DRV_ERROR_PAGELOCK";
+      case DRV_ERROR_PAGEUNLOCK:
+         return "DRV_ERROR_PAGEUNLOCK";
+      case DRV_ERROR_BOARDTEST:
+         return "DRV_ERROR_BOARDTEST";
+      case DRV_ERROR_ACK:
+         return "DRV_ERROR_ACK";
+      case DRV_ERROR_UP_FIFO:
+         return "DRV_ERROR_UP_FIFO";
+      case DRV_ERROR_PATTERN:
+         return "DRV_ERROR_PATTERN";
+      case DRV_ACQUISITION_ERRORS:
+         return "DRV_ACQUISITION_ERRORS";
+      case DRV_ACQ_BUFFER:
+         return "DRV_ACQ_BUFFER";
+      case DRV_ACQ_DOWNFIFO_FULL:
+         return "DRV_ACQ_DOWNFIFO_FULL";
+      case DRV_PROC_UNKONWN_INSTRUCTION:
+         return "DRV_PROC_UNKONWN_INSTRUCTION";
+      case DRV_ILLEGAL_OP_CODE:
+         return "DRV_ILLEGAL_OP_CODE";
+      case DRV_KINETIC_TIME_NOT_MET:
+         return "DRV_KINETIC_TIME_NOT_MET";
+      case DRV_ACCUM_TIME_NOT_MET:
+         return "DRV_ACCUM_TIME_NOT_MET";
+      case DRV_NO_NEW_DATA:
+         return "DRV_NO_NEW_DATA";
+      case DRV_SPOOLERROR:
+         return "DRV_SPOOLERROR";
+      case DRV_SPOOLSETUPERROR:
+         return "DRV_SPOOLSETUPERROR";
+      case DRV_FILESIZELIMITERROR:
+         return "DRV_FILESIZELIMITERROR";
+      case DRV_ERROR_FILESAVE:
+         return "DRV_ERROR_FILESAVE";
+      case DRV_TEMPERATURE_CODES:
+         return "DRV_TEMPERATURE_CODES";
+      case DRV_TEMPERATURE_OFF:
+         return "DRV_TEMPERATURE_OFF";
+      case DRV_TEMPERATURE_NOT_STABILIZED:
+         return "DRV_TEMPERATURE_NOT_STABILIZED";
+      case DRV_TEMPERATURE_STABILIZED:
+         return "DRV_TEMPERATURE_STABILIZED";
+      case DRV_TEMPERATURE_NOT_REACHED:
+         return "DRV_TEMPERATURE_NOT_REACHED";
+      case DRV_TEMPERATURE_OUT_RANGE:
+         return "DRV_TEMPERATURE_OUT_RANGE";
+      case DRV_TEMPERATURE_NOT_SUPPORTED:
+         return "DRV_TEMPERATURE_NOT_SUPPORTED";
+      case DRV_TEMPERATURE_DRIFT:
+         return "DRV_TEMPERATURE_DRIFT";
+      case DRV_GENERAL_ERRORS:
+         return "DRV_GENERAL_ERRORS";
+      case DRV_INVALID_AUX:
+         return "DRV_INVALID_AUX";
+      case DRV_COF_NOTLOADED:
+         return "DRV_COF_NOTLOADED";
+      case DRV_FPGAPROG:
+         return "DRV_FPGAPROG";
+      case DRV_FLEXERROR:
+         return "DRV_FLEXERROR";
+      case DRV_GPIBERROR:
+         return "DRV_GPIBERROR";
+      case DRV_EEPROMVERSIONERROR:
+         return "DRV_EEPROMVERSIONERROR";
+      case DRV_DATATYPE:
+         return "DRV_DATATYPE";
+      case DRV_DRIVER_ERRORS:
+         return "DRV_DRIVER_ERRORS";
+      case DRV_P1INVALID:
+         return "DRV_P1INVALID";
+      case DRV_P2INVALID:
+         return "DRV_P2INVALID";
+      case DRV_P3INVALID:
+         return "DRV_P3INVALID";
+      case DRV_P4INVALID:
+         return "DRV_P4INVALID";
       case DRV_INIERROR:
          return "DRV_INIERROR";
       case DRV_COFERROR:
          return "DRV_COFERROR";
-      case DRV_FLEXERROR:
-         return "DRV_FLEXERROR";
-      case DRV_ERROR_ACK:
-         return "DRV_ERROR_ACK";
-      case DRV_ERROR_FILELOAD:
-         return "DRV_ERROR_FILELOAD";
-      case DRV_ERROR_PAGELOCK:
-         return "DRV_ERROR_PAGELOCK";
-      case DRV_USBERROR:
-         return "DRV_USBERROR";
-      case DRV_ERROR_NOCAMERA:
-         return "DRV_ERROR_NOCAMERA";
-      case DRV_NOT_INITIALIZED:
-         return "DRV_NOT_INITIALIZED";
       case DRV_ACQUIRING:
          return "DRV_ACQUIRING";
-      case DRV_P1INVALID:
-         return "DRV_P1INVALID";
-      case DRV_NOT_SUPPORTED:
-         return "DRV_NOT_SUPPORTED";
-      case DRV_ACQUISITION_ERRORS:
-         return "DRV_ACQUISITION_ERRORS";
+      case DRV_IDLE:
+         return "DRV_IDLE";
+      case DRV_TEMPCYCLE:
+         return "DRV_TEMPCYCLE";
+      case DRV_NOT_INITIALIZED:
+         return "DRV_NOT_INITIALIZED";
+      case DRV_P5INVALID:
+         return "DRV_P5INVALID";
+      case DRV_P6INVALID:
+         return "DRV_P6INVALID";
+      case DRV_INVALID_MODE:
+         return "DRV_INVALID_MODE";
       case DRV_INVALID_FILTER:
          return "DRV_INVALID_FILTER";
+      case DRV_I2CERRORS:
+         return "DRV_I2CERRORS";
+      case DRV_I2CDEVNOTFOUND:
+         return "DRV_I2CDEVNOTFOUND";
+      case DRV_I2CTIMEOUT:
+         return "DRV_I2CTIMEOUT";
+      case DRV_P7INVALID:
+         return "DRV_P7INVALID";
+      case DRV_P8INVALID:
+         return "DRV_P8INVALID";
+      case DRV_P9INVALID:
+         return "DRV_P9INVALID";
+      case DRV_P10INVALID:
+         return "DRV_P10INVALID";
+      case DRV_P11INVALID:
+         return "DRV_P11INVALID";
+      case DRV_USBERROR:
+         return "DRV_USBERROR";
+      case DRV_IOCERROR:
+         return "DRV_IOCERROR";
+      case DRV_VRMVERSIONERROR:
+         return "DRV_VRMVERSIONERROR";
+      case DRV_GATESTEPERROR:
+         return "DRV_GATESTEPERROR";
+      case DRV_USB_INTERRUPT_ENDPOINT_ERROR:
+         return "DRV_USB_INTERRUPT_ENDPOINT_ERROR";
+      case DRV_RANDOM_TRACK_ERROR:
+         return "DRV_RANDOM_TRACK_ERROR";
+      case DRV_INVALID_TRIGGER_MODE:
+         return "DRV_INVALID_TRIGGER_MODE";
+      case DRV_LOAD_FIRMWARE_ERROR:
+         return "DRV_LOAD_FIRMWARE_ERROR";
+      case DRV_DIVIDE_BY_ZERO_ERROR:
+         return "DRV_DIVIDE_BY_ZERO_ERROR";
+      case DRV_INVALID_RINGEXPOSURES:
+         return "DRV_INVALID_RINGEXPOSURES";
       case DRV_BINNING_ERROR:
          return "DRV_BINNING_ERROR";
-      case DRV_SPOOLSETUPERROR:
-         return "DRV_SPOOLSETUPERROR";
+      case DRV_INVALID_AMPLIFIER:
+         return "DRV_INVALID_AMPLIFIER";
+      case DRV_INVALID_COUNTCONVERT_MODE:
+         return "DRV_INVALID_COUNTCONVERT_MODE";
+      case DRV_USB_INTERRUPT_ENDPOINT_TIMEOUT:
+         return "DRV_USB_INTERRUPT_ENDPOINT_TIMEOUT";
+      case DRV_ERROR_NOCAMERA:
+         return "DRV_ERROR_NOCAMERA";
+      case DRV_NOT_SUPPORTED:
+         return "DRV_NOT_SUPPORTED";
+      case DRV_NOT_AVAILABLE:
+         return "DRV_NOT_AVAILABLE";
+      case DRV_ERROR_MAP:
+         return "DRV_ERROR_MAP";
+      case DRV_ERROR_UNMAP:
+         return "DRV_ERROR_UNMAP";
+      case DRV_ERROR_MDL:
+         return "DRV_ERROR_MDL";
+      case DRV_ERROR_UNMDL:
+         return "DRV_ERROR_UNMDL";
+      case DRV_ERROR_BUFFSIZE:
+         return "DRV_ERROR_BUFFSIZE";
+      case DRV_ERROR_NOHANDLE:
+         return "DRV_ERROR_NOHANDLE";
+      case DRV_GATING_NOT_AVAILABLE:
+         return "DRV_GATING_NOT_AVAILABLE";
+      case DRV_FPGA_VOLTAGE_ERROR:
+         return "DRV_FPGA_VOLTAGE_ERROR";
+      case DRV_OW_CMD_FAIL:
+         return "DRV_OW_CMD_FAIL";
+      case DRV_OWMEMORY_BAD_ADDR:
+         return "DRV_OWMEMORY_BAD_ADDR";
+      case DRV_OWCMD_NOT_AVAILABLE:
+         return "DRV_OWCMD_NOT_AVAILABLE";
+      case DRV_OW_NO_SLAVES:
+         return "DRV_OW_NO_SLAVES";
+      case DRV_OW_NOT_INITIALIZED:
+         return "DRV_OW_NOT_INITIALIZED";
+      case DRV_OW_ERROR_SLAVE_NUM:
+         return "DRV_OW_ERROR_SLAVE_NUM";
+      case DRV_MSTIMINGS_ERROR:
+         return "DRV_MSTIMINGS_ERROR";
+      case DRV_OA_NULL_ERROR:
+         return "DRV_OA_NULL_ERROR";
+      case DRV_OA_PARSE_DTD_ERROR:
+         return "DRV_OA_PARSE_DTD_ERROR";
+      case DRV_OA_DTD_VALIDATE_ERROR:
+         return "DRV_OA_DTD_VALIDATE_ERROR";
+      case DRV_OA_FILE_ACCESS_ERROR:
+         return "DRV_OA_FILE_ACCESS_ERROR";
+      case DRV_OA_FILE_DOES_NOT_EXIST:
+         return "DRV_OA_FILE_DOES_NOT_EXIST";
+      case DRV_OA_XML_INVALID_OR_NOT_FOUND_ERROR:
+         return "DRV_OA_XML_INVALID_OR_NOT_FOUND_ERROR";
+      case DRV_OA_PRESET_FILE_NOT_LOADED:
+         return "DRV_OA_PRESET_FILE_NOT_LOADED";
+      case DRV_OA_USER_FILE_NOT_LOADED:
+         return "DRV_OA_USER_FILE_NOT_LOADED";
+      case DRV_OA_PRESET_AND_USER_FILE_NOT_LOADED:
+         return "DRV_OA_PRESET_AND_USER_FILE_NOT_LOADED";
+      case DRV_OA_INVALID_FILE:
+         return "DRV_OA_INVALID_FILE";
+      case DRV_OA_FILE_HAS_BEEN_MODIFIED:
+         return "DRV_OA_FILE_HAS_BEEN_MODIFIED";
+      case DRV_OA_BUFFER_FULL:
+         return "DRV_OA_BUFFER_FULL";
+      case DRV_OA_INVALID_STRING_LENGTH:
+         return "DRV_OA_INVALID_STRING_LENGTH";
+      case DRV_OA_INVALID_CHARS_IN_NAME:
+         return "DRV_OA_INVALID_CHARS_IN_NAME";
+      case DRV_OA_INVALID_NAMING:
+         return "DRV_OA_INVALID_NAMING";
+      case DRV_OA_GET_CAMERA_ERROR:
+         return "DRV_OA_GET_CAMERA_ERROR";
+      case DRV_OA_MODE_ALREADY_EXISTS:
+         return "DRV_OA_MODE_ALREADY_EXISTS";
+      case DRV_OA_STRINGS_NOT_EQUAL:
+         return "DRV_OA_STRINGS_NOT_EQUAL";
+      case DRV_OA_NO_USER_DATA:
+         return "DRV_OA_NO_USER_DATA";
+      case DRV_OA_VALUE_NOT_SUPPORTED:
+         return "DRV_OA_VALUE_NOT_SUPPORTED";
+      case DRV_OA_MODE_DOES_NOT_EXIST:
+         return "DRV_OA_MODE_DOES_NOT_EXIST";
+      case DRV_OA_CAMERA_NOT_SUPPORTED:
+         return "DRV_OA_CAMERA_NOT_SUPPORTED";
+      case DRV_OA_FAILED_TO_GET_MODE:
+         return "DRV_OA_FAILED_TO_GET_MODE";
+      case DRV_OA_CAMERA_NOT_AVAILABLE:
+         return "DRV_OA_CAMERA_NOT_AVAILABLE";
+      case DRV_PROCESSING_FAILED:
+         return "DRV_PROCESSING_FAILED";
       default:
          return "UNKNOWN: " + std::to_string(error);
    }
@@ -740,6 +946,13 @@ int andorCtrl::cameraSelect()
       return log<software_error,-1>({__FILE__, __LINE__, "Andor SDK Error from SetFrameTransferMode: " + andorSDKErrorName(error)});
    }
    
+   //Set to real gain mode 
+   error = SetEMGainMode(3);
+   if(error != DRV_SUCCESS)
+   {
+      return log<software_error,-1>({__FILE__, __LINE__, "Andor SDK Error from SetEMGainMode: " + andorSDKErrorName(error)});
+   }
+   
    //Set default amplifier
    /* See page 298
     */
@@ -825,44 +1038,52 @@ int andorCtrl::getTemp()
 inline
 int andorCtrl::getEMGain()
 {
-   int state;
+   unsigned int error;
    int gain;
-   int low, high;
 
-   ///\todo what is EM advanced?
-   if(GetEMAdvanced(&state) != DRV_SUCCESS)
+   error = GetEMCCDGain(&gain);
+   if( error !=DRV_SUCCESS)
    {
-      log<software_error>({__FILE__,__LINE__, "error getting em advanced"});
-      return -1;
-   }
-   
-   std::cerr << "EM Advanced State: " << state << "\n";
-   
-   if(GetEMCCDGain(&gain) !=DRV_SUCCESS)
-   {
-      log<software_error>({__FILE__,__LINE__, "error getting em gain"});
+      log<software_error>({__FILE__,__LINE__, "Andor SDK error from GetEMCCDGain: " + andorSDKErrorName(error)});
       return -1;
    }
 
    m_emGain = gain;
-
-   std::cerr << "EMCCD gain: " << m_emGain << "\n";
-   
-   ///\todo this needs to be done on connection, and the max/min field updated.
-   if(GetEMGainRange(&low, &high) !=DRV_SUCCESS)
-   {
-      log<software_error>({__FILE__,__LINE__, "error getting em gain range"});
-      return -1;
-   }
-
-   std::cerr << "EM Gain Range: " << low << " " << high << "\n";
    
    return 0;
 }
 
 inline
-int andorCtrl::setEMGain( unsigned emg )
+int andorCtrl::setEMGain()
 {
+   if(m_currentAmp != 0)
+   {
+      log<text_log>("Attempt to set EM gain while in conventional amplifier.", logPrio::LOG_NOTICE);
+      return 0;
+   }
+   
+   int emg = m_emGainSet;
+   if(emg < 0)
+   {
+      emg = 0;
+      log<text_log>("EM gain limited to 0", logPrio::LOG_WARNING);
+   }
+   
+   if(emg > m_maxEMGain)
+   {
+      emg = m_maxEMGain;
+      log<text_log>("EM gain limited to maxEMGain = " + std::to_string(emg), logPrio::LOG_WARNING);
+   }
+   
+   unsigned int error = SetEMCCDGain(emg);
+   if( error !=DRV_SUCCESS)
+   {
+      log<software_error>({__FILE__,__LINE__, "Andor SDK error from SetEMCCDGain: " + andorSDKErrorName(error)});
+      return -1;
+   }
+
+   log<text_log>("Set EM Gain to: " + std::to_string(emg), logPrio::LOG_WARNING);
+   
    return 0;
 }
 
@@ -936,8 +1157,12 @@ int andorCtrl::setAmplifier( int newa )
 inline 
 int andorCtrl::writeConfig()
 {
+   std::string configFile = "/tmp/andor_";
+   configFile += configName();
+   configFile += ".cfg";
+   
    std::ofstream fout;
-   fout.open(m_configFile);
+   fout.open(configFile);
    
    if(fout.fail())
    {
@@ -1288,9 +1513,12 @@ int andorCtrl::acquireAndCheckValid()
 inline
 int andorCtrl::loadImageIntoStream(void * dest)
 {
-   memcpy(dest, m_image_p, m_width*m_height*m_typeSize);
+   if( frameGrabber<andorCtrl>::loadImageIntoStreamCopy(dest, m_image_p, m_width, m_height, m_typeSize) == nullptr) return -1;
 
    return 0;
+   
+   //memcpy(dest, m_image_p, m_width*m_height*m_typeSize);
+   //return 0;
 }
 
 inline
@@ -1306,37 +1534,6 @@ int andorCtrl::reconfig()
    
    state(stateCodes::READY);
    return 0;
-}
-
-INDI_NEWCALLBACK_DEFN(andorCtrl, m_indiP_emGain)(const pcf::IndiProperty &ipRecv)
-{
-   if (ipRecv.getName() == m_indiP_emGain.getName())
-   {
-      unsigned current = 0, target = 0;
-
-      if(ipRecv.find("current"))
-      {
-         current = ipRecv["current"].get<unsigned>();
-      }
-
-      if(ipRecv.find("target"))
-      {
-         target = ipRecv["target"].get<unsigned>();
-      }
-
-      if(target == 0) target = current;
-
-      if(target == 0) return 0;
-
-      //Lock the mutex, waiting if necessary
-      //std::unique_lock<std::mutex> lock(m_indiMutex);
-
-      updateIfChanged(m_indiP_emGain, "target", target);
-
-      return setEMGain(target);
-
-   }
-   return -1;
 }
 
 INDI_NEWCALLBACK_DEFN(andorCtrl, m_indiP_amp)(const pcf::IndiProperty &ipRecv)

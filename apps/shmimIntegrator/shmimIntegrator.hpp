@@ -90,6 +90,15 @@ class shmimIntegrator : public MagAOXApp<true>, public dev::shmimMonitor<shmimIn
    ///Floating point type in which to do all calculations.
    typedef float realT;
    
+public:
+   /** \name app::dev Configurations
+     *@{
+     */
+   
+   static constexpr bool c_frameGrabber_flippable = false; ///< app:dev config to tell framegrabber these images can not be flipped
+   
+   ///@}
+   
 protected:
 
    /** \name Configurable Parameters
@@ -330,12 +339,12 @@ int shmimIntegrator::appStartup()
       log<software_critical>({__FILE__, __LINE__, errno,0, "Initializing S.M. semaphore"});
       return -1;
    }
-   
+
    if(shmimMonitorT::appStartup() < 0)
    {
       return log<software_error,-1>({__FILE__, __LINE__});
    }
-   
+  
    if(darkMonitorT::appStartup() < 0)
    {
       return log<software_error,-1>({__FILE__, __LINE__});
@@ -345,13 +354,13 @@ int shmimIntegrator::appStartup()
    {
       return log<software_error,-1>({__FILE__, __LINE__});
    }
-   
+
    if(frameGrabberT::appStartup() < 0)
    {
       return log<software_error,-1>({__FILE__, __LINE__});
    }
-   
-   state(stateCodes::OPERATING);
+
+   state(stateCodes::READY);
     
    return 0;
 }
@@ -363,22 +372,22 @@ int shmimIntegrator::appLogic()
    {
       return log<software_error,-1>({__FILE__,__LINE__});
    }
-   
+
    if( darkMonitorT::appLogic() < 0)
    {
       return log<software_error,-1>({__FILE__,__LINE__});
    }
-   
+
    if( dark2MonitorT::appLogic() < 0)
    {
       return log<software_error,-1>({__FILE__,__LINE__});
    }
-   
+
    if( frameGrabberT::appLogic() < 0)
    {
       return log<software_error,-1>({__FILE__,__LINE__});
    }
-   
+
    std::unique_lock<std::mutex> lock(m_indiMutex);
    
    if(shmimMonitorT::updateINDI() < 0)
@@ -396,7 +405,6 @@ int shmimIntegrator::appLogic()
       log<software_error>({__FILE__, __LINE__});
    }
    
-   
    if(frameGrabberT::updateINDI() < 0)
    {
       log<software_error>({__FILE__, __LINE__});
@@ -410,8 +418,7 @@ int shmimIntegrator::appLogic()
    {
       updateSwitchIfChanged(m_indiP_startAveraging, "toggle", pcf::IndiElement::On, INDI_BUSY);
    }
-   
-   
+
    return 0;
 }
 
@@ -686,6 +693,7 @@ int shmimIntegrator::configureAcquisition()
 inline
 int shmimIntegrator::startAcquisition()
 {
+   state(stateCodes::OPERATING);
    return 0;
 }
 

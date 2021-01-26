@@ -337,7 +337,7 @@ int shmimMonitor<derivedT, specificT>::appStartup()
       return -1;
    }
    
-   if(derived().threadStart( m_smThread, m_smThreadInit, m_smThreadID, m_smThreadProp, m_smThreadPrio, "shmimMonitor", this, smThreadStart) < 0)
+   if(derived().threadStart( m_smThread, m_smThreadInit, m_smThreadID, m_smThreadProp, m_smThreadPrio, specificT::configSection(), this, smThreadStart) < 0)
    {
       derivedT::template log<software_error>({__FILE__, __LINE__});
       return -1;

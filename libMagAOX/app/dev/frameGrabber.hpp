@@ -63,6 +63,11 @@ namespace dev
   * For `acquireAndCheckValid` >0 will indicate no data but not an error.  In most cases, 
   * an appropriate state code, such as NOTCONNECTED, should be set as well.
   *
+  * A static configuration variable must be defined in derivedT as
+  * \code
+  * static constexpr bool c_frameGrabber_flippable =true; //or: false
+  * \endcode
+  * which determines whether or not the images can be flipped programatically.
   *
   * Calls to this class's `setupConfig`, `loadConfig`, `appStartup`, `appLogic` and `appShutdown`
   * functions must be placed in the derived class's functions of the same name.
@@ -93,7 +98,6 @@ protected:
    
    ///@}
    
-   bool m_flippable {false};
    int m_currentFlip {fgFlipNone};
    
    uint32_t m_width {0}; ///< The width of the image, once deinterlaced etc.
@@ -272,7 +276,7 @@ void frameGrabber<derivedT>::setupConfig(mx::app::appConfigurator & config)
    
    config.add("framegrabber.circBuffLength", "", "framegrabber.circBuffLength", argType::Required, "framegrabber", "circBuffLength", false, "size_t", "The length of the circular buffer. Sets m_circBuffLength, default is 1.");
 
-   if(m_flippable)
+   if(derivedT::c_frameGrabber_flippable)
    {
       config.add("framegrabber.defaultFlip", "", "framegrabber.defaultFlip", argType::Required, "framegrabber", "defaultFlip", false, "string", "The default flip of the image.  Options are flipNone, flipUD, flipLR, flipUDLR.  The default is flipNone.");
    }
@@ -293,7 +297,7 @@ void frameGrabber<derivedT>::loadConfig(mx::app::appConfigurator & config)
       derivedT::template log<text_log>("circBuffLength set to 1");
    }
    
-   if(m_flippable)
+   if(derivedT::c_frameGrabber_flippable)
    {
       std::string flip = "flipNone";
       config(flip, "framegrabber.defaultFlip");
@@ -640,18 +644,25 @@ void * frameGrabber<derivedT>::loadImageIntoStreamCopy( void * dest,
                                                         size_t szof
                                                       )
 {
-   switch(m_currentFlip)
+   if(!derivedT::c_frameGrabber_flippable)
    {
-      case fgFlipNone:
-         return mx::improc::imcpy(dest, src, width, height, szof);
-      case fgFlipUD:
-         return mx::improc::imcpy_flipUD(dest, src, width, height, szof);
-      case fgFlipLR:
-         return mx::improc::imcpy_flipLR(dest, src, width, height, szof);  
-      case fgFlipUDLR:
-         return mx::improc::imcpy_flipUDLR(dest, src, width, height, szof);
-      default:
-         return nullptr;
+      return memcpy(dest, src, width*height*szof);
+   }
+   else
+   {
+      switch(m_currentFlip)
+      {
+         case fgFlipNone:
+            return mx::improc::imcpy(dest, src, width, height, szof);
+         case fgFlipUD:
+            return mx::improc::imcpy_flipUD(dest, src, width, height, szof);
+         case fgFlipLR:
+            return mx::improc::imcpy_flipLR(dest, src, width, height, szof);  
+         case fgFlipUDLR:
+            return mx::improc::imcpy_flipUDLR(dest, src, width, height, szof);
+         default:
+            return nullptr;
+      }
    }
 }
 

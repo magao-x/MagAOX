@@ -54,9 +54,15 @@ int loadCameraConfig( cameraConfigMap & ccmap, ///< [out] the map in which to pl
   * 
   * 
   * The derived class `derivedT` must be a MagAOXApp\<true\>, and should declare this class a friend like so: 
-   \code
-    friend class dev::stdCamera<derivedT>;
-   \endcode
+  * \code
+  *  friend class dev::stdCamera<derivedT>;
+  * \endcode
+  *
+  * A static configuration variable must be defined in derivedT as
+  * \code
+  * static constexpr bool c_stdCamera_emGain = true; //or: false
+  * \endcode
+  * which determines whether or not EM gain controls are exposed.
   *
   * The default values of m_currentROI should be set before calling stdCamera::appStartup().
   *
@@ -134,7 +140,9 @@ protected:
    
    float m_adcSpeed {0}; ///< The ADC speed in MHz
    
-   float m_emGain {1};
+   float m_emGain {1}; ///< The camera's current EM gain (if available).
+   float m_emGainSet {1}; ///< The camera's EM gain, as set by the user.
+   float m_maxEMGain {1}; ///< The configurable maximum EM gain.  To be enforced in derivedT.
    
    ///@}
    
@@ -341,6 +349,8 @@ protected:
    pcf::IndiProperty m_indiP_tempcont;
    pcf::IndiProperty m_indiP_tempstat;
    
+   pcf::IndiProperty m_indiP_emGain;
+   
    pcf::IndiProperty m_indiP_exptime;
    
    pcf::IndiProperty m_indiP_fps;
@@ -391,6 +401,13 @@ public:
      * \returns -1 on error.
      */
    int newCallBack_temp_controller( const pcf::IndiProperty &ipRecv /**< [in] the INDI property sent with the the new property request.*/);
+   
+   /// Callback to process a NEW EM gain request
+   /**
+     * \returns 0 on success.
+     * \returns -1 on error.
+     */
+   int newCallBack_emgain( const pcf::IndiProperty &ipRecv /**< [in] the INDI property sent with the the new property request.*/);
    
    /// Callback to process a NEW exposure time request
    /**
@@ -539,6 +556,11 @@ void stdCamera<derivedT>::setupConfig(mx::app::appConfigurator & config)
       config.add("camera.startupTemp", "", "camera.startupTemp", argType::Required, "camera", "startupTemp", false, "float", "The temperature setpoint to set after a power-on [C].  Default is 20 C.");
    }
    
+   if(derivedT::c_stdCamera_emGain)
+   {
+      config.add("camera.maxEMGain", "", "camera.maxEMGain", argType::Required, "camera", "maxEMGain", false, "unsigned", "The maximum EM gain which can be set by the user.");
+   }
+   
    if(m_usesModes)
    {
       config.add("camera.startupMode", "", "camera.startupMode", argType::Required, "camera", "startupMode", false, "string", "The mode to set upon power on or application startup.");
@@ -561,6 +583,11 @@ void stdCamera<derivedT>::loadConfig(mx::app::appConfigurator & config)
    if(m_hasTempControl)
    {
       config(m_startupTemp, "camera.startupTemp");
+   }
+   
+   if(derivedT::c_stdCamera_emGain)
+   {
+      config(m_maxEMGain, "camera.maxEMGain");
    }
    
    if(m_usesModes)
@@ -636,6 +663,18 @@ int stdCamera<derivedT>::appStartup()
       m_indiP_temp.add(pcf::IndiElement("current"));
       m_indiP_temp["current"].set(m_ccdTemp);
       if( derived().registerIndiPropertyReadOnly( m_indiP_temp) < 0)
+      {
+         #ifndef STDCAMERA_TEST_NOLOG
+         derivedT::template log<software_error>({__FILE__,__LINE__});
+         #endif
+         return -1;
+      }
+   }
+   
+   if(derivedT::c_stdCamera_emGain)
+   {
+      derived().createStandardIndiNumber( m_indiP_emGain, "emgain", 0, 1000, 1, "%0.3f");
+      if( derived().registerIndiPropertyNew( m_indiP_emGain, st_newCallBack_stdCamera) < 0)
       {
          #ifndef STDCAMERA_TEST_NOLOG
          derivedT::template log<software_error>({__FILE__,__LINE__});
@@ -1031,6 +1070,7 @@ int stdCamera<derivedT>::st_newCallBack_stdCamera( void * app,
    
    if(name == "temp_ccd") return _app->newCallBack_temp(ipRecv);
    else if(name == "temp_controller") return _app->newCallBack_temp_controller(ipRecv);
+   else if(name == "emgain") return _app->newCallBack_emgain(ipRecv);
    else if(name == "exptime") return _app->newCallBack_exptime(ipRecv);
    else if(name == "fps") return _app->newCallBack_fps(ipRecv);
    else if(name == "mode") return _app->newCallBack_mode(ipRecv);
@@ -1098,6 +1138,29 @@ int stdCamera<derivedT>::newCallBack_temp_controller( const pcf::IndiProperty &i
      
    return derived().setTempControl();
    
+}
+
+template<class derivedT>
+int stdCamera<derivedT>::newCallBack_emgain( const pcf::IndiProperty &ipRecv)
+{
+   if(derivedT::c_stdCamera_emGain)
+   {
+      float target;
+
+      std::unique_lock<std::mutex> lock(derived().m_indiMutex);
+
+      if( derived().indiTargetUpdate( m_indiP_emGain, target, ipRecv, true) < 0)
+      {
+         derivedT::template log<software_error>({__FILE__,__LINE__});
+         return -1;
+      }
+   
+      m_emGainSet = target;
+   
+      return derived().setEMGain();
+   }
+   
+   return 0;
 }
 
 template<class derivedT>
@@ -1466,6 +1529,12 @@ template<class derivedT>
 int stdCamera<derivedT>::updateINDI()
 {
    if( !derived().m_indiDriver ) return 0;
+   
+   if(derivedT::c_stdCamera_emGain)
+   {
+      derived().updateIfChanged(m_indiP_emGain, "current", m_emGain, INDI_IDLE);
+      derived().updateIfChanged(m_indiP_emGain, "target", m_emGainSet, INDI_IDLE);
+   }
    
    if(m_usesExpTime)
    {

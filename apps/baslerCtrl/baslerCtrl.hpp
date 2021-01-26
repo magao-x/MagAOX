@@ -61,6 +61,18 @@ class baslerCtrl : public MagAOXApp<>, public dev::stdCamera<baslerCtrl>, public
    friend class dev::frameGrabber<baslerCtrl>;
    friend class dev::telemeter<baslerCtrl>;
    
+public:
+   /** \name app::dev Configurations
+     *@{
+     */
+   static constexpr bool c_stdCamera_emGain = false; ///< app::dev config to tell stdCamera to not expose EM gain controls 
+   
+   static constexpr bool c_edtCamera_relativeConfigPath = true; ///< app::dev config to tell edtCamera to use relative path to camera config file
+   
+   static constexpr bool c_frameGrabber_flippable = true; ///< app:dev config to tell framegrabber this camera can be flipped
+   
+   ///@}
+   
 protected:
 
    /** \name configurable parameters 
@@ -165,6 +177,8 @@ protected:
      */
    int setTempSetPt();
    
+   int setEMGain(){ return 0;}
+   
    /// Set the framerate.
    /** This uses the acquistion framerate feature.  If m_fpsSet is 0, acuisition framerate is disabled
      * and the resultant framerate is based solely on exposure time and ROI.  If non-zero, then the 
@@ -222,8 +236,6 @@ baslerCtrl::baslerCtrl() : MagAOXApp(MAGAOX_CURRENT_SHA1, MAGAOX_REPO_MODIFIED)
    m_usesModes = false;
    m_usesROI = true;
    
-   //--- frameGrabber ---
-   m_flippable = true;
    
    return;
 }

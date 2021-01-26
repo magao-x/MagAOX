@@ -74,6 +74,18 @@ class picamCtrl : public MagAOXApp<>, public dev::stdCamera<picamCtrl>, public d
 
    typedef MagAOXApp<> MagAOXAppT;
 
+public:
+   /** \name app::dev Configurations
+     *@{
+     */
+   static constexpr bool c_stdCamera_emGain = false; ///< app::dev config to tell stdCamera to expose EM gain controls 
+   
+   static constexpr bool c_edtCamera_relativeConfigPath = true; ///< app::dev config to tell edtCamera to use realtive path to camera config file
+   
+   static constexpr bool c_frameGrabber_flippable = true; ///< app:dev config to tell framegrabber this camera can be flipped
+   
+   ///@}
+   
 protected:
 
    /** \name configurable parameters
@@ -221,6 +233,7 @@ protected:
    
    int setTempControl();
    int setTempSetPt();
+   int setEMGain(){return 0;}
    int setExpTime();
    int capExpTime(piflt& exptime);
    int setFPS();
@@ -287,8 +300,6 @@ picamCtrl::picamCtrl() : MagAOXApp(MAGAOX_CURRENT_SHA1, MAGAOX_REPO_MODIFIED)
    m_full_w = 1024; 
    m_full_h = 1024; 
    
-   //--- frameGrabber ---
-   m_flippable = true;
    
    return;
 }
