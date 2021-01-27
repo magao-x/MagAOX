@@ -9,8 +9,7 @@
 
 #include <iostream>
 
-class pwfsAlignment : public QObject,
-                      public rtimvOverlayInterface
+class pwfsAlignment : public rtimvOverlayInterface
 {
    Q_OBJECT
    Q_PLUGIN_METADATA(IID "rtimv.overlayInterface/1.0")
@@ -99,6 +98,11 @@ class pwfsAlignment : public QObject,
 
       virtual void disableOverlay();
 
+   signals:
+         
+      void newStretchBox(StretchBox *);
+      void newStretchCircle(StretchCircle *);
+      void newStretchLine(StretchLine *);
 };
 
 #endif //pwfsAlignment_hpp

@@ -10,7 +10,7 @@
 
 #include <iostream>
 
-class cameraStatus : public QObject,
+class cameraStatus :
                      public rtimvOverlayInterface
 {
    Q_OBJECT
@@ -42,7 +42,7 @@ class cameraStatus : public QObject,
       int m_fullROI_h {0};
       
    public:
-      cameraStatus();
+      cameraStatus() ;
       
       virtual ~cameraStatus();
 
@@ -59,7 +59,12 @@ class cameraStatus : public QObject,
       virtual void enableOverlay();
 
       virtual void disableOverlay();
-
+      
+   signals:
+         
+      void newStretchBox(StretchBox *);
+      void newStretchCircle(StretchCircle *);
+      void newStretchLine(StretchLine *);
 };
 
 #endif //cameraStatus_hpp

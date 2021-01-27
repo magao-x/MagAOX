@@ -116,8 +116,8 @@ int cameraStatus::updateOverlay()
                m_roiBox->setVisible(true);
                m_roiBox->setStretchable(false);
                m_roiBox->setRemovable(false);
-               m_roa.m_userBoxes->insert(m_roiBox);
-               m_qgs->addItem(m_roiBox);
+               //m_roa.m_userBoxes->insert(m_roiBox);
+               emit newStretchBox(m_roiBox);
             }
             
             float xc = xt-x + 0.5*((float)m_width-1);
@@ -145,7 +145,7 @@ int cameraStatus::updateOverlay()
             m_roiFullBox->setStretchable(false);
             m_roiFullBox->setRemovable(false);
             m_roa.m_userBoxes->insert(m_roiFullBox);
-            m_qgs->addItem(m_roiFullBox);
+            emit newStretchBox(m_roiFullBox);
          }
          
          float xc = m_fullROI_x-x + 0.5*((float)m_width-1);
