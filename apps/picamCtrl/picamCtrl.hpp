@@ -80,6 +80,10 @@ public:
      */
    static constexpr bool c_stdCamera_emGain = false; ///< app::dev config to tell stdCamera to expose EM gain controls 
    
+   static constexpr bool c_stdCamera_tempControl = true; ///< app::dev config to tell stdCamera to expose temperature controls
+   
+   static constexpr bool c_stdCamera_temp = true; ///< app::dev config to tell stdCamera to expose temperature
+   
    static constexpr bool c_edtCamera_relativeConfigPath = true; ///< app::dev config to tell edtCamera to use realtive path to camera config file
    
    static constexpr bool c_frameGrabber_flippable = true; ///< app:dev config to tell framegrabber this camera can be flipped
@@ -95,9 +99,6 @@ protected:
 
 
    ///@}
-
-   // DELETE ME
-   //FILE * m_outfile;
 
    int m_depth {0};
    piint m_adcQuality {PicamAdcQuality_ElectronMultiplied}; // should this go in stdCamera?

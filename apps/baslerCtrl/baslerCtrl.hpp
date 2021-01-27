@@ -67,6 +67,10 @@ public:
      */
    static constexpr bool c_stdCamera_emGain = false; ///< app::dev config to tell stdCamera to not expose EM gain controls 
    
+   static constexpr bool c_stdCamera_tempControl = false; ///< app::dev config to tell stdCamera to not expose temperature controls
+   
+   static constexpr bool c_stdCamera_temp = true; ///< app::dev config to tell stdCamera to expose temperature
+   
    static constexpr bool c_edtCamera_relativeConfigPath = true; ///< app::dev config to tell edtCamera to use relative path to camera config file
    
    static constexpr bool c_frameGrabber_flippable = true; ///< app:dev config to tell framegrabber this camera can be flipped
@@ -169,13 +173,13 @@ protected:
    /** 
      * \returns 0 always
      */ 
-   int setTempControl();
+   //int setTempControl();
    
    /// Required by stdCamera, but this does not do anything for this camera [stdCamera interface]
    /** 
      * \returns 0 always
      */
-   int setTempSetPt();
+   //int setTempSetPt();
    
    /// Set the framerate.
    /** This uses the acquistion framerate feature.  If m_fpsSet is 0, acuisition framerate is disabled
@@ -228,7 +232,6 @@ baslerCtrl::baslerCtrl() : MagAOXApp(MAGAOX_CURRENT_SHA1, MAGAOX_REPO_MODIFIED)
    m_powerMgtEnabled = false;
    
    //--- stdCamera ---
-   m_hasTempControl = false;
    m_usesExpTime = true;
    m_usesFPS = true;
    m_usesModes = false;
@@ -835,18 +838,6 @@ int baslerCtrl::powerOnDefaults()
    m_nextROI.bin_x = m_startup_bin_x;
    m_nextROI.bin_y = m_startup_bin_y;
    
-   return 0;
-}
-
-inline
-int baslerCtrl::setTempControl()
-{
-   return 0;
-}
-
-inline
-int baslerCtrl::setTempSetPt()
-{
    return 0;
 }
 

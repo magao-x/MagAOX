@@ -61,6 +61,10 @@ public:
      */
    static constexpr bool c_stdCamera_emGain = true; ///< app::dev config to tell stdCamera to expose EM gain controls 
    
+   static constexpr bool c_stdCamera_tempControl = true; ///< app::dev config to tell stdCamera to expose temperature controls
+   
+   static constexpr bool c_stdCamera_temp = true; ///< app::dev config to tell stdCamera to expose temperature
+   
    static constexpr bool c_edtCamera_relativeConfigPath = false; ///< app::dev config to tell edtCamera to use absolute path to camera config file
    
    static constexpr bool c_frameGrabber_flippable = false; ///< app:dev config to tell framegrabber this camera can not be flipped

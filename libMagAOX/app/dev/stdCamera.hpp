@@ -64,6 +64,18 @@ int loadCameraConfig( cameraConfigMap & ccmap, ///< [out] the map in which to pl
   * \endcode
   * which determines whether or not EM gain controls are exposed.
   *
+  * A static configuration variable must be defined in derivedT as
+  * \code
+  * static constexpr bool c_stdCamera_tempControl = true; //or: false
+  * \endcode
+  * which determines whether or not temperature controls are exposed.
+  * 
+  * A static configuration variable must be defined in derivedT as
+  * \code
+  * static constexpr bool c_stdCamera_temp = true; //or: false
+  * \endcode
+  * which determines whether or not temperature is exposed.  Note that if c_stdCamera_tempControl == true, this setting does not matter, but the constexpr must still be defined.
+  * 
   * The default values of m_currentROI should be set before calling stdCamera::appStartup().
   *
   * The derived class must implement:
@@ -114,8 +126,6 @@ protected:
    /** \name Temperature Control Interface 
      * @{
      */ 
-   bool m_hasTempControl {true}; ///< Flag to set in constructor determining if this device has temperature control.  Note m_hasTemperature is implied if this is true.
-   bool m_hasTemperature {true}; ///< Flag to set in constructor determining if this device has temperature output.  Only meaningful if m_hasTempControl is false.
    
    float m_minTemp {-60};
    float m_maxTemp {30};
@@ -389,12 +399,36 @@ public:
                                         const pcf::IndiProperty &ipRecv ///< [in] the INDI property sent with the the new property request.
                                       );
    
+   /// Interface to setTempSetPt when the derivedT has temperature control
+   /** Tag-dispatch resolution of c_stdCamera_tempControl==true will call this function.
+     * Calls derivedT::setTempSetPt. 
+     */
+   int setTempSetPt( const mx::meta::trueFalseT<true> & t);
+
+   /// Interface to setTempSetPt when the derivedT does not have temperature control
+   /** Tag-dispatch resolution of c_stdCamera_tempControl==false will call this function.
+     * Prevents requiring derivedT::setTempSetPt. 
+     */
+   int setTempSetPt( const mx::meta::trueFalseT<false> & f);
+   
    /// Callback to process a NEW CCD temp request
    /**
      * \returns 0 on success.
      * \returns -1 on error.
      */
    int newCallBack_temp( const pcf::IndiProperty &ipRecv /**< [in] the INDI property sent with the the new property request.*/);
+
+   /// Interface to setTempControl when the derivedT has temperature control
+   /** Tag-dispatch resolution of c_stdCamera_tempControl==true will call this function.
+     * Calls derivedT::setTempControl. 
+     */
+   int setTempControl( const mx::meta::trueFalseT<true> & t);
+
+   /// Interface to setTempControl when the derivedT does not have temperature control
+   /** Tag-dispatch resolution of c_stdCamera_tempControl==false will call this function.
+     * Prevents requiring derivedT::setTempControl. 
+     */
+   int setTempControl( const mx::meta::trueFalseT<false> & f); 
    
    /// Callback to process a NEW CCD temp control request
    /**
@@ -564,7 +598,7 @@ stdCamera<derivedT>::~stdCamera() noexcept
 template<class derivedT>
 void stdCamera<derivedT>::setupConfig(mx::app::appConfigurator & config)
 {
-   if(m_hasTempControl)
+   if(derivedT::c_stdCamera_tempControl)
    {
       config.add("camera.startupTemp", "", "camera.startupTemp", argType::Required, "camera", "startupTemp", false, "float", "The temperature setpoint to set after a power-on [C].  Default is 20 C.");
    }
@@ -593,7 +627,7 @@ void stdCamera<derivedT>::setupConfig(mx::app::appConfigurator & config)
 template<class derivedT>
 void stdCamera<derivedT>::loadConfig(mx::app::appConfigurator & config)
 {
-   if(m_hasTempControl)
+   if(derivedT::c_stdCamera_tempControl)
    {
       config(m_startupTemp, "camera.startupTemp");
    }
@@ -636,7 +670,7 @@ template<class derivedT>
 int stdCamera<derivedT>::appStartup()
 {
    
-   if(m_hasTempControl)
+   if(derivedT::c_stdCamera_tempControl)
    {
       //The min/max/step values should be set in derivedT before this is called.
       derived().createStandardIndiNumber( m_indiP_temp, "temp_ccd", m_minTemp, m_maxTemp, m_stepTemp, "%0.1f","CCD Temperature", "CCD Temperature");
@@ -670,7 +704,7 @@ int stdCamera<derivedT>::appStartup()
       }
       
    }
-   else if(m_hasTemperature)
+   else if(derivedT::c_stdCamera_temp)
    {
       derived().createROIndiNumber( m_indiP_temp, "temp_ccd", "CCD Temperature", "CCD Temperature");
       m_indiP_temp.add(pcf::IndiElement("current"));
@@ -901,9 +935,12 @@ int stdCamera<derivedT>::appLogic()
          //Set power-on defaults         
          derived().powerOnDefaults();
          
-         //then set startupTemp if configured
-         if(m_startupTemp > -999) m_ccdTempSetpt = m_startupTemp;
-         derived().updateIfChanged(m_indiP_temp, "target", m_ccdTempSetpt, INDI_IDLE);
+         if(derivedT::c_stdCamera_tempControl)
+         {
+            //then set startupTemp if configured
+            if(m_startupTemp > -999) m_ccdTempSetpt = m_startupTemp;
+            derived().updateIfChanged(m_indiP_temp, "target", m_ccdTempSetpt, INDI_IDLE);
+         }
          
          if(m_usesROI)
          {
@@ -1105,51 +1142,95 @@ int stdCamera<derivedT>::st_newCallBack_stdCamera( void * app,
 }
 
 template<class derivedT>
+int stdCamera<derivedT>::setTempSetPt( const mx::meta::trueFalseT<true> & t)
+{
+   static_cast<void>(t);
+   return derived().setTempSetPt();
+}
+
+template<class derivedT>
+int stdCamera<derivedT>::setTempSetPt( const mx::meta::trueFalseT<false> & f)
+{
+   static_cast<void>(f);
+   return 0;
+}
+
+template<class derivedT>
 int stdCamera<derivedT>::newCallBack_temp( const pcf::IndiProperty &ipRecv )
 {
-   float target;
-   
-   std::unique_lock<std::mutex> lock(derived().m_indiMutex);
-   
-   if( derived().indiTargetUpdate( m_indiP_temp, target, ipRecv, true) < 0)
+   if(derivedT::c_stdCamera_tempControl)
    {
-      derivedT::template log<software_error>({__FILE__,__LINE__});
-      return -1;
+      float target;
+      
+      std::unique_lock<std::mutex> lock(derived().m_indiMutex);
+      
+      if( derived().indiTargetUpdate( m_indiP_temp, target, ipRecv, true) < 0)
+      {
+         derivedT::template log<software_error>({__FILE__,__LINE__});
+         return -1;
+      }
+      
+      m_ccdTempSetpt = target;
+      
+      mx::meta::trueFalseT<derivedT::c_stdCamera_tempControl> tf;
+      return setTempSetPt(tf);
    }
-
-   m_ccdTempSetpt = target;
-   return derived().setTempSetPt();
+   else
+   {
+      return 0;
+   }
 }
    
 template<class derivedT>
+int stdCamera<derivedT>::setTempControl( const mx::meta::trueFalseT<true> & t)
+{
+   static_cast<void>(t);
+   return derived().setTempControl();
+}
+
+template<class derivedT>
+int stdCamera<derivedT>::setTempControl( const mx::meta::trueFalseT<false> & f)
+{
+   static_cast<void>(f);
+   return 0;
+}
+
+template<class derivedT>
 int stdCamera<derivedT>::newCallBack_temp_controller( const pcf::IndiProperty &ipRecv)
 {
-   if(ipRecv.getName() != m_indiP_tempcont.getName())
+   if(derivedT::c_stdCamera_tempControl)
    {
-      derivedT::template log<software_error>({__FILE__,__LINE__, "wrong INDI property received."});
-      return -1;
-   }
-   
-   if(!ipRecv.find("toggle")) return 0;
-   
-   
-   m_tempControlStatusSet = false;
-
-   std::unique_lock<std::mutex> lock(derived().m_indiMutex);
-   
-   if( ipRecv["toggle"].getSwitchState() == pcf::IndiElement::On)
-   {
-      m_tempControlStatusSet = true;
-      derived().updateSwitchIfChanged(m_indiP_tempcont, "toggle", pcf::IndiElement::On, INDI_BUSY);
-   }   
-   else if( ipRecv["toggle"].getSwitchState() == pcf::IndiElement::Off)
-   {
+      if(ipRecv.getName() != m_indiP_tempcont.getName())
+      {
+         derivedT::template log<software_error>({__FILE__,__LINE__, "wrong INDI property received."});
+         return -1;
+      }
+      
+      if(!ipRecv.find("toggle")) return 0;
+      
+      
       m_tempControlStatusSet = false;
-      derived().updateSwitchIfChanged(m_indiP_tempcont, "toggle", pcf::IndiElement::Off, INDI_BUSY);
+      
+      std::unique_lock<std::mutex> lock(derived().m_indiMutex);
+      
+      if( ipRecv["toggle"].getSwitchState() == pcf::IndiElement::On)
+      {
+         m_tempControlStatusSet = true;
+         derived().updateSwitchIfChanged(m_indiP_tempcont, "toggle", pcf::IndiElement::On, INDI_BUSY);
+      }   
+      else if( ipRecv["toggle"].getSwitchState() == pcf::IndiElement::Off)
+      {
+         m_tempControlStatusSet = false;
+         derived().updateSwitchIfChanged(m_indiP_tempcont, "toggle", pcf::IndiElement::Off, INDI_BUSY);
+      }
+      
+      mx::meta::trueFalseT<derivedT::c_stdCamera_emGain> tf;
+      return setTempControl(tf);
    }
-   
-     
-   return derived().setTempControl();
+   else
+   {
+      return 0;
+   }
    
 }
 
@@ -1599,7 +1680,7 @@ int stdCamera<derivedT>::updateINDI()
       derived().updateIfChanged(m_indiP_fullROI, "h", m_full_h, INDI_IDLE);
    }
    
-   if(m_hasTempControl)
+   if(derivedT::c_stdCamera_tempControl)
    {
       if(m_tempControlStatus == false)
       {
@@ -1626,7 +1707,7 @@ int stdCamera<derivedT>::updateINDI()
          }
       }      
    }
-   else if(m_hasTemperature)
+   else if(derivedT::c_stdCamera_temp)
    {
       derived().updateIfChanged(m_indiP_temp, "current", m_ccdTemp, INDI_IDLE);
    }
