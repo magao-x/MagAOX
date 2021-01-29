@@ -51,7 +51,6 @@ EXTRA_LDFLAGS ?=
 
 #the required librarires
 EXTRA_LDLIBS ?=  -lmxlib \
-  -lsofa_c \
   -lboost_system \
   -lboost_filesystem \
   -ludev \
@@ -59,11 +58,9 @@ EXTRA_LDLIBS ?=  -lmxlib \
   -ltelnet \
   -lcfitsio \
   -lxrif \
-  -lxpa \
   -lfftw3 -lfftw3f -lfftw3l -lfftw3q \
   -lgsl \
   -lcudart -lcublas -lcufft -lcurand \
-  -llevmar \
   $(abspath \
   $(SELF_DIR)/../INDI/libcommon/libcommon.a) \
   $(abspath $(SELF_DIR)/../INDI/liblilxml/liblilxml.a) 
