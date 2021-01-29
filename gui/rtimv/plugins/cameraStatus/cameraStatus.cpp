@@ -31,6 +31,7 @@ int cameraStatus::attachOverlay( rtimvOverlayAccess & roa,
    
    config.configUnused(m_filterDeviceName, mx::app::iniFile::makeKey("camera", "filterDevice"));
    
+   connect(this, SIGNAL(newStretchBox(StretchBox *)), m_roa.m_mainWindowObject, SLOT(addStretchBox(StretchBox *)));
    
    if(m_enabled) enableOverlay();
    else disableOverlay();

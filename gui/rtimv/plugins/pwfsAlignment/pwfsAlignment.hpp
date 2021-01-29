@@ -98,11 +98,6 @@ class pwfsAlignment : public rtimvOverlayInterface
 
       virtual void disableOverlay();
 
-   signals:
-         
-      void newStretchBox(StretchBox *);
-      void newStretchCircle(StretchCircle *);
-      void newStretchLine(StretchLine *);
 };
 
 #endif //pwfsAlignment_hpp
