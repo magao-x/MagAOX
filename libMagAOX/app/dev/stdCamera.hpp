@@ -64,14 +64,18 @@ int loadCameraConfig( cameraConfigMap & ccmap, ///< [out] the map in which to pl
   * \code
   * static constexpr bool c_stdCamera_tempControl = true; //or: false
   * \endcode
-  * which determines whether or not temperature controls are exposed.
+  * which determines whether or not temperature controls are exposed. If this is true then the derived class must implement
+  * \code
+  * int setTempControl(); // set temp control status according to m_tempControlStatusSet
+  * int setTempSetPt(); // set the temperature set point accordin gto m_ccdTempSetpt
+  * \endcode
   * 
   * A static configuration variable must be defined in derivedT as
   * \code
   * static constexpr bool c_stdCamera_temp = true; //or: false
   * \endcode
-  * which determines whether or not temperature is exposed.  Note that if c_stdCamera_tempControl == true, this setting does not matter, 
-  * but the constexpr must still be defined.
+  * which determines whether or not temperature reporting is exposed.  Note that if c_stdCamera_tempControl == true, this setting does not matter, 
+  * but the constexpr must still be defined.  If true the INDI property temp_ccd will be updated from the value of m_ccdTemp.
   *
   * Readout Speed:
   * A static configuration variable must be defined in derivedT as
@@ -97,6 +101,31 @@ int loadCameraConfig( cameraConfigMap & ccmap, ///< [out] the map in which to pl
   * The implementation must also manage m_vShiftSpeedName, keeping it up to date.  The configuration setting camera.defaultVShiftSpeed
   * is also exposed, and the implementation can set this default with m_defaultVShiftSpeed. 
   * 
+  * Exposure Time:
+  * A static configuration variable must be defined in derivedT as
+  * \code
+  * static constexpr bool c_stdCamera_exptimeCtrl = true; //or: false
+  * \endcode
+  * \code
+  * int setExpTime();
+  * \endcode
+  * 
+  * FPS Control:
+  * A static configuration variable must be defined in derivedT as
+  * \code
+  * static constexpr bool c_stdCamera_fpsCtrl = true; //or: false
+  * \endcode
+  * \code
+  * int setFPS();
+  * \endcode
+  * 
+  * FPS Status:
+  * A static configuration variable must be defined in derivedT as
+  * \code
+  * static constexpr bool c_stdCamera_fps = true; //or: false
+  * \endcode
+  * Note that the value of c_stdCamera_fps does not matter if c_stdCamera_fpsCtrl == true.
+  * 
   * EM Gain:
   * A static configuration variable must be defined in derivedT as
   * \code
@@ -107,38 +136,41 @@ int loadCameraConfig( cameraConfigMap & ccmap, ///< [out] the map in which to pl
   * must also keep m_emGain up to date.  The value of m_maxEMGain should be set by the implementation and managed
   * as needed.
   * 
+  * Camera Modes:
   * A static configuration variable must be defined in derivedT as
   * \code
   * static constexpr bool c_stdCamera_usesModes= true; //or: false
   * \endcode
   * 
+  * Regions of Interest 
+  * A static configuration variable must be defined in derivedT as
+  * \code
+  * static constexpr bool c_stdCamera_usesROI = true; //or: false
+  * \endcode
+  * The default values of m_currentROI should be set before calling stdCamera::appStartup().
+  * \code
+  * int setNextROI();
+  * \endcode
+  * 
+  * Crop Mode ROIs:
   * A static configuration variable must be defined in derivedT as
   * \code
   * static constexpr bool c_stdCamera_cropMode = true; //or: false
   * \endcode
   * 
-  * A static configuration variable must be defined in derivedT as
-  * \code
-  * static constexpr bool c_stdCamera_usesROI = true; //or: false
-  * \endcode
-  * 
+  * Shutters:
   * A static configuration variable must be defined in derivedT as
   * \code
   * static constexpr bool c_stdCamera_hasShutter = true; //or: false
   * \endcode
-  * 
-  * The default values of m_currentROI should be set before calling stdCamera::appStartup().
+  * \code
+  * int setShutter(int); 
+  * \endcode
   *
   * The derived class must implement:
-  \code
-   int powerOnDefaults();
-   int setTempControl();
-   int setTempSetPt();
-   int setExpTime();
-   int setFPS();
-   int setNextROI();
-   int setShutter(int); 
-  \endcode
+  * \code
+  * int powerOnDefaults(); // called on power-on after powerOnWaitElapsed has occurred.
+  * \endcode
   * 
   * Calls to this class's `setupConfig`, `loadConfig`, `appStartup`, `appLogic`, `appShutdown`
   * `onPowerOff`, and `whilePowerOff`,  must be placed in the derived class's functions of the same name.
@@ -425,7 +457,7 @@ public:
      */
    int whilePowerOff();
    
-   /// Application the shutdown 
+   /// Application shutdown 
    /** Shuts down the stdCamera thread
      * 
      * \code

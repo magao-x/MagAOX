@@ -1164,6 +1164,19 @@ int andorCtrl::cameraSelect()
       return log<software_error,-1>({__FILE__, __LINE__, "Andor SDK Error from SetExposureTime: " + andorSDKErrorName(error)});
    }
    
+   //Turn cooling on:
+   if(m_ccdTempSetpt > -999)
+   {
+      error = CoolerON();
+      if(error != DRV_SUCCESS)
+      {
+         log<software_critical,-1>({__FILE__, __LINE__, "ANDOR SDK CoolerON failed: " + andorSDKErrorName(error)});
+      }
+      m_tempControlStatus = true;
+      m_tempControlStatusStr = "COOLING";
+      log<text_log>("enabled temperature control");
+   }
+   
    int nc;
    GetNumberADChannels(&nc);
    std::cout << "NumberADChannels: " << nc << "\n";
@@ -1493,7 +1506,7 @@ int andorCtrl::setTempControl()
       unsigned int error = CoolerON();
       if(error != DRV_SUCCESS)
       {
-         log<software_critical>({__FILE__, __LINE__, "ANDOR SDK CoolerOFF failed: " + andorSDKErrorName(error)});
+         log<software_critical>({__FILE__, __LINE__, "ANDOR SDK CoolerON failed: " + andorSDKErrorName(error)});
          return -1;
       }
       m_tempControlStatus = true;
