@@ -246,7 +246,6 @@ private:
 template<class derivedT>
 edtCamera<derivedT>::edtCamera()
 {
-   derived().m_usesModes = true;
 }
 
    

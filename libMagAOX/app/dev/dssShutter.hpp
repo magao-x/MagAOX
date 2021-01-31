@@ -298,7 +298,6 @@ private:
 template<class derivedT>
 dssShutter<derivedT>::dssShutter()
 {
-   derived().m_hasShutter = true;
 }
 
 template<class derivedT>

@@ -65,15 +65,33 @@ public:
    /** \name app::dev Configurations
      *@{
      */
-   static constexpr bool c_stdCamera_emGain = false; ///< app::dev config to tell stdCamera to not expose EM gain controls 
-   
    static constexpr bool c_stdCamera_tempControl = false; ///< app::dev config to tell stdCamera to not expose temperature controls
    
    static constexpr bool c_stdCamera_temp = true; ///< app::dev config to tell stdCamera to expose temperature
    
-   static constexpr bool c_edtCamera_relativeConfigPath = true; ///< app::dev config to tell edtCamera to use relative path to camera config file
+   static constexpr bool c_stdCamera_readoutSpeed = false; ///< app::dev config to tell stdCamera not to  expose readout speed controls
    
-   static constexpr bool c_frameGrabber_flippable = true; ///< app:dev config to tell framegrabber this camera can be flipped
+   static constexpr bool c_stdCamera_vShiftSpeed = false; ///< app:dev config to tell stdCamera not to expose vertical shift speed control
+
+   static constexpr bool c_stdCamera_emGain = false; ///< app::dev config to tell stdCamera to not expose EM gain controls 
+   
+   static constexpr bool c_stdCamera_exptimeCtrl = true; ///< app::dev config to tell stdCamera to expose exposure time controls
+   
+   static constexpr bool c_stdCamera_fpsCtrl = true; ///< app::dev config to tell stdCamera to expose FPS controls
+   
+   static constexpr bool c_stdCamera_fps = true; ///< app::dev config to tell stdCamera not to expose FPS status (ignored since fpsCtrl=true)
+   
+   static constexpr bool c_stdCamera_usesModes = false; ///< app:dev config to tell stdCamera not to expose mode controls
+   
+   static constexpr bool c_stdCamera_usesROI = true; ///< app:dev config to tell stdCamera to expose ROI controls
+
+   static constexpr bool c_stdCamera_cropMode = false; ///< app:dev config to tell stdCamera not to expose Crop Mode controls
+   
+   static constexpr bool c_stdCamera_hasShutter = false; ///< app:dev config to tell stdCamera to expose shutter controls
+
+
+   
+   static constexpr bool c_frameGrabber_flippable = true; ///< app:dev config to tell framegrabber that this camera can be flipped
    
    ///@}
    
@@ -169,18 +187,6 @@ protected:
      */ 
    int powerOnDefaults();
    
-   /// Required by stdCamera, but this does not do anything for this camera [stdCamera interface]
-   /** 
-     * \returns 0 always
-     */ 
-   //int setTempControl();
-   
-   /// Required by stdCamera, but this does not do anything for this camera [stdCamera interface]
-   /** 
-     * \returns 0 always
-     */
-   //int setTempSetPt();
-   
    /// Set the framerate.
    /** This uses the acquistion framerate feature.  If m_fpsSet is 0, acuisition framerate is disabled
      * and the resultant framerate is based solely on exposure time and ROI.  If non-zero, then the 
@@ -205,12 +211,6 @@ protected:
      */
    int setNextROI();
       
-   /// Required by stdCamera, does not currently do anything. [stdCamera interface]
-   /**
-     * \returns 0 always
-     */ 
-   int setShutter(int sh);
- 
    ///@}
    
    /** \name Telemeter Interface
@@ -230,13 +230,6 @@ inline
 baslerCtrl::baslerCtrl() : MagAOXApp(MAGAOX_CURRENT_SHA1, MAGAOX_REPO_MODIFIED)
 {
    m_powerMgtEnabled = false;
-   
-   //--- stdCamera ---
-   m_usesExpTime = true;
-   m_usesFPS = true;
-   m_usesModes = false;
-   m_usesROI = true;
-   
    
    return;
 }
@@ -913,15 +906,6 @@ int baslerCtrl::setNextROI()
    updateSwitchIfChanged(m_indiP_roi_full, "request", pcf::IndiElement::Off, INDI_IDLE);
    updateSwitchIfChanged(m_indiP_roi_last, "request", pcf::IndiElement::Off, INDI_IDLE);
    updateSwitchIfChanged(m_indiP_roi_startup, "request", pcf::IndiElement::Off, INDI_IDLE);
-   return 0;
-}
-
-
-
-inline
-int baslerCtrl::setShutter(int sh)
-{
-   static_cast<void>(sh);
    return 0;
 }
 
