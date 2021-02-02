@@ -16,6 +16,8 @@ int pwfsAlignment::attachOverlay( rtimvOverlayAccess & roa,
    
    config.configUnused(m_deviceName, mx::app::iniFile::makeKey("pwfsAlignment", "name"));
    
+   if(m_deviceName == "") return 1; //Tell rtimv we can't be used.
+   
    m_roa = roa;
    
    if(m_enabled) enableOverlay();

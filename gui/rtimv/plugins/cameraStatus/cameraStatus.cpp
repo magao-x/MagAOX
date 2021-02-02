@@ -23,7 +23,7 @@ int cameraStatus::attachOverlay( rtimvOverlayAccess & roa,
    {
       m_enableable = false;
       disableOverlay();
-      return 0;
+      return 1; //Tell rtimv to unload me since not configured.
    }
    
    m_enableable = true;
