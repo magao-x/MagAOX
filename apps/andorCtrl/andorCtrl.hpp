@@ -440,7 +440,6 @@ protected:
    
    bool m_libInit {false}; ///< Whether or not the Andor SDK library is initialized.
 
-   int m_currentAmp {1}; ///< The current amplifier. 0 is EMCCD, 1 is conventional CCD.
    
 public:
 
@@ -1347,7 +1346,12 @@ int andorCtrl::setVShiftSpeed()
 inline
 int andorCtrl::setEMGain()
 {
-   if(m_currentAmp != 0)
+   int amp;
+   int hss;
+      
+   readoutParams(amp,hss, m_readoutSpeedName);
+      
+   if(amp != 0)
    {
       log<text_log>("Attempt to set EM gain while in conventional amplifier.", logPrio::LOG_NOTICE);
       return 0;
