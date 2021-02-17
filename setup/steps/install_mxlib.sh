@@ -14,7 +14,8 @@ if [[ -d "$MXLIBROOT" ]]; then
     git pull
     echo "Updated mxlib"
 else
-    git clone --depth=1 https://github.com/jaredmales/mxlib.git "$MXLIBROOT"
+    # TODO: use _common checkout function
+    git clone https://github.com/jaredmales/mxlib.git "$MXLIBROOT"
     echo "Cloned a new copy of mxlib"
     cd "$MXLIBROOT"
 fi
