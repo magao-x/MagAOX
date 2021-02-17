@@ -1100,7 +1100,7 @@ void MagAOXApp<_useINDI>::setDefaults( int argc,
       tmpstr = MAGAOX_configRelPath;
    }
    m_configDir = MagAOXPath + "/" + tmpstr;
-   configPathGlobal = m_configDir + "/magaox.conf";
+   m_configPathGlobal = m_configDir + "/magaox.conf";
 
    //Set the calib path relative to MagAOXPath
    tmpstr = mx::sys::getEnv(MAGAOX_env_calib);
@@ -1145,7 +1145,7 @@ void MagAOXApp<_useINDI>::setDefaults( int argc,
    }
 
    //We use mx::application's configPathLocal for this component's config file
-   configPathLocal = m_configDir + "/" + m_configName + ".conf";
+   m_configPathLocal = m_configDir + "/" + m_configName + ".conf";
 
    //Now we can setup common INDI properties
    REG_INDI_NEWPROP_NOCB(m_indiP_state, "fsm", pcf::IndiProperty::Text);
