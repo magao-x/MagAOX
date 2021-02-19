@@ -14,10 +14,11 @@ if [[ -d "$MXLIBROOT" ]]; then
     git pull
     echo "Updated mxlib"
 else
-    git clone --depth=1 https://github.com/jaredmales/mxlib.git "$MXLIBROOT"
+    git clone https://github.com/jaredmales/mxlib.git "$MXLIBROOT"
     echo "Cloned a new copy of mxlib"
     cd "$MXLIBROOT"
 fi
+git checkout magaox
 git config core.sharedRepository group
 export MXMAKEFILE="$MXLIBROOT/mk/MxApp.mk"
 # Populate $MXLIBROOT/local/ with example makefiles:
