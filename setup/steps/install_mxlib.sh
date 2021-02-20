@@ -9,26 +9,30 @@ MXLIBROOT=/opt/MagAOX/source/mxlib
 #
 # mxLib
 #
-if [[ -d "$MXLIBROOT" ]]; then
-    cd "$MXLIBROOT"
-    git pull
-    echo "Updated mxlib"
-else
-    git clone https://github.com/jaredmales/mxlib.git "$MXLIBROOT"
-    echo "Cloned a new copy of mxlib"
-    cd "$MXLIBROOT"
-fi
-git checkout magaox
+MXLIB_COMMIT_ISH=magaox
+orgname=jaredmales
+reponame=mxlib
+parentdir=/opt/MagAOX/source
+clone_or_update_and_cd $orgname $reponame $parentdir
+
 git config core.sharedRepository group
+git checkout $MXLIB_COMMIT_ISH
 export MXMAKEFILE="$MXLIBROOT/mk/MxApp.mk"
 # Populate $MXLIBROOT/local/ with example makefiles:
 make setup
 
+cat <<'HERE' > /tmp/mxlibCommon.mk
+PREFIX = /usr/local
+CXXFLAGS += -DMX_OLD_GSL
+INCLUDES += -I/usr/local/cuda-11.1/targets/x86_64-linux/include/
+NEED_CUDA = no
+HERE
+
 # Ensure mxlib installs to /usr/local (not $HOME)
 if diff local/Common.mk local/Common.example.mk; then
-  echo "PREFIX = /usr/local" > local/Common.mk
-elif echo "PREFIX = /usr/local" | diff local/Common.mk -; then
-  echo "PREFIX already set to /usr/local"
+  mv /tmp/mxlibCommon.mk local/Common.mk
+elif diff /tmp/mxlibCommon.mk local/Common.mk ; then
+  echo "mxlib options configured"
 else
   echo "Unexpected modifications in $MXLIBROOT/local/Common.mk! Aborting." >&2
   exit 1
