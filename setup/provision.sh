@@ -212,7 +212,6 @@ if [[ $MAGAOX_ROLE == RTC || $MAGAOX_ROLE == ICC || $MAGAOX_ROLE == AOC || $MAGA
 fi
 sudo bash -l "$DIR/steps/install_fftw.sh"
 sudo bash -l "$DIR/steps/install_cfitsio.sh"
-sudo bash -l "$DIR/steps/install_xpa.sh"
 sudo bash -l "$DIR/steps/install_eigen.sh"
 sudo bash -l "$DIR/steps/install_cppzmq.sh"
 sudo bash -l "$DIR/steps/install_flatbuffers.sh"
