@@ -12,12 +12,12 @@ gpgcheck = 1
 gpgkey = https://repos.influxdata.com/influxdb.key
 EOF
 
-sudo yum install telegraf
+sudo yum install -y telegraf
 sudo systemctl start telegraf
-if ! grep nvidia_smi /etc/telegraf/telegraf.conf; then
+if ! grep INFLUX_TOKEN /etc/telegraf/telegraf.conf; then
     sudo mv /etc/telegraf/telegraf.conf /etc/telegraf/telegraf.conf.dist
     sudo cp $DIR/../telegraf.conf /etc/telegraf/telegraf.conf.dist
 fi
-if [[ ! -e /etc/default/telegraf ]]; then
+if ! sudo grep INFLUX_TOKEN /etc/default/telegraf; then
     log_warn "Set INFLUX_TOKEN in /etc/default/telegraf"
 fi
