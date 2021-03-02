@@ -437,6 +437,8 @@ int shmimIntegrator::appShutdown()
    
    darkMonitorT::appShutdown();
    
+   dark2MonitorT::appShutdown();
+   
    frameGrabberT::appShutdown();
    
    return 0;
