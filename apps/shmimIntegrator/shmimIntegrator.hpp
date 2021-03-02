@@ -412,13 +412,21 @@ int shmimIntegrator::appLogic()
       
    if(m_running == false)
    {
+      state(stateCodes::READY);
       updateSwitchIfChanged(m_indiP_startAveraging, "toggle", pcf::IndiElement::Off, INDI_IDLE);
    }
    else
    {
+      state(stateCodes::OPERATING);
       updateSwitchIfChanged(m_indiP_startAveraging, "toggle", pcf::IndiElement::On, INDI_BUSY);
    }
 
+   updateIfChanged(m_indiP_nAverage, "current", m_nAverage, INDI_IDLE);
+   updateIfChanged(m_indiP_nAverage, "target", m_nAverage, INDI_IDLE);
+   
+   updateIfChanged(m_indiP_nUpdate, "current", m_nUpdate, INDI_IDLE);
+   updateIfChanged(m_indiP_nUpdate, "target", m_nUpdate, INDI_IDLE);
+   
    return 0;
 }
 
@@ -760,6 +768,9 @@ INDI_NEWCALLBACK_DEFN(shmimIntegrator, m_indiP_nAverage)(const pcf::IndiProperty
    
    m_nAverage = target;
    
+   updateIfChanged(m_indiP_nAverage, "current", m_nAverage, INDI_IDLE);
+   updateIfChanged(m_indiP_nAverage, "target", m_nAverage, INDI_IDLE);
+   
    shmimMonitorT::m_restart = true;
    
    log<text_log>("set nAverage to " + std::to_string(m_nAverage), logPrio::LOG_NOTICE);
@@ -785,6 +796,10 @@ INDI_NEWCALLBACK_DEFN(shmimIntegrator, m_indiP_nUpdate)(const pcf::IndiProperty 
    
    m_nUpdate = target;
    
+   updateIfChanged(m_indiP_nUpdate, "current", m_nUpdate, INDI_IDLE);
+   updateIfChanged(m_indiP_nUpdate, "target", m_nUpdate, INDI_IDLE);
+   
+   
    shmimMonitorT::m_restart = true;
    
    log<text_log>("set nUpdate to " + std::to_string(m_nUpdate), logPrio::LOG_NOTICE);
@@ -802,17 +817,19 @@ INDI_NEWCALLBACK_DEFN(shmimIntegrator, m_indiP_startAveraging)(const pcf::IndiPr
    
    if(!ipRecv.find("toggle")) return 0;
    
-   std::unique_lock<std::mutex> lock(m_indiMutex);
-   
    if( ipRecv["toggle"].getSwitchState() == pcf::IndiElement::Off)
    {
       m_running = false;
+      state(stateCodes::READY);
+      std::unique_lock<std::mutex> lock(m_indiMutex);
       updateSwitchIfChanged(m_indiP_startAveraging, "toggle", pcf::IndiElement::Off, INDI_IDLE);
    }
    
    if( ipRecv["toggle"].getSwitchState() == pcf::IndiElement::On)
    {
       m_running = true;
+      state(stateCodes::OPERATING);
+      std::unique_lock<std::mutex> lock(m_indiMutex);
       updateSwitchIfChanged(m_indiP_startAveraging, "toggle", pcf::IndiElement::On, INDI_BUSY);
    }
    return 0;

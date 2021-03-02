@@ -156,7 +156,7 @@ public:
    
    static constexpr bool c_stdCamera_vShiftSpeed = true; ///< app:dev config to tell stdCamera to expose vertical shift speed control
 
-   static constexpr bool c_stdCamera_emGain = false; ///< app::dev config to tell stdCamera to expose EM gain controls 
+   static constexpr bool c_stdCamera_emGain = true; ///< app::dev config to tell stdCamera to expose EM gain controls 
 
    static constexpr bool c_stdCamera_exptimeCtrl = true; ///< app::dev config to tell stdCamera to expose exposure time controls
    
@@ -288,6 +288,15 @@ protected:
                                 piflt value
                               );
 
+   int setPicamParameterOnline( PicamHandle handle,
+                                PicamParameter parameter,
+                                piint value
+                              );
+
+   int setPicamParameterOnline( PicamParameter parameter,
+                                piint value
+                              );
+   
    int connect();
 
    int getAcquisitionState();
@@ -306,7 +315,7 @@ protected:
    int setTempSetPt();
    int setReadoutSpeed();
    int setVShiftSpeed();
-   int setEMGain(){return 0;}
+   int setEMGain();
    int setExpTime();
    int capExpTime(piflt& exptime);
    int setFPS();
@@ -369,6 +378,7 @@ picamCtrl::picamCtrl() : MagAOXApp(MAGAOX_CURRENT_SHA1, MAGAOX_REPO_MODIFIED)
    m_full_w = 1024; 
    m_full_h = 1024; 
    
+   m_maxEMGain = 100;
    
    return;
 }
@@ -842,6 +852,31 @@ int picamCtrl::setPicamParameterOnline( PicamParameter parameter,
 {
    return setPicamParameterOnline(m_cameraHandle, parameter, value);
 }
+
+inline
+int picamCtrl::setPicamParameterOnline( PicamHandle handle,
+                                        PicamParameter parameter,
+                                        piint value
+                                       )
+{
+   PicamError error = Picam_SetParameterIntegerValueOnline( handle, parameter, value );
+   if(error != PicamError_None)
+   {
+      log<software_error>({__FILE__, __LINE__, 0, error, PicamEnum2String(PicamEnumeratedType_Error, error)});
+      return -1;
+   }
+
+   return 0;
+}
+
+inline
+int picamCtrl::setPicamParameterOnline( PicamParameter parameter,
+                                        piint value
+                                       )
+{
+   return setPicamParameterOnline(m_cameraHandle, parameter, value);
+}
+
 inline
 int picamCtrl::connect()
 {
@@ -1119,6 +1154,54 @@ int picamCtrl::setVShiftSpeed()
 {
    m_reconfig = true;
    recordCamera();
+   return 0;
+}
+
+inline
+int picamCtrl::setEMGain()
+{
+   piint adcQual;
+   piflt adcSpeed;
+   
+   if(readoutParams(adcQual, adcSpeed, m_readoutSpeedName) < 0)
+   {
+      log<software_error>({__FILE__, __LINE__, "Invalid readout speed: " + m_readoutSpeedNameSet});
+      state(stateCodes::ERROR);
+      return -1;
+   }
+   
+   if(adcQual != PicamAdcQuality_ElectronMultiplied)
+   {
+      log<text_log>("Attempt to set EM gain while in conventional amplifier.", logPrio::LOG_NOTICE);
+      return 0;
+   }
+   
+   piint emg = m_emGainSet;
+   if(emg < 0)
+   {
+      emg = 0;
+      log<text_log>("EM gain limited to 0", logPrio::LOG_WARNING);
+   }
+   
+   if(emg > m_maxEMGain)
+   {
+      emg = m_maxEMGain;
+      log<text_log>("EM gain limited to maxEMGain = " + std::to_string(emg), logPrio::LOG_WARNING);
+   }
+   
+   if(setPicamParameterOnline(m_modelHandle, PicamParameter_AdcEMGain, emg) < 0)
+   {
+      log<software_error>({__FILE__, __LINE__, "Error setting EM gain"});
+      return -1;
+   }
+   
+   piint AdcEMGain;
+   if(getPicamParameter(AdcEMGain, PicamParameter_AdcEMGain) < 0)
+   {
+      std::cerr << "could not get AdcEMGain\n";
+   }
+   m_emGain = AdcEMGain;
+   
    return 0;
 }
 
@@ -1538,7 +1621,23 @@ int picamCtrl::configureAcquisition()
 
 
    std::cerr << "************************************************************\n";
+   
+   
+   piint AdcAnalogGain;
+   if(getPicamParameter(AdcAnalogGain, PicamParameter_AdcAnalogGain) < 0)
+   {
+      std::cerr << "could not get AdcAnalogGain\n";
+   }
+   std::string adcgStr = PicamEnum2String( PicamEnumeratedType_AdcAnalogGain, AdcAnalogGain );
+   std::cerr << "AdcAnalogGain is: " << adcgStr << "\n";
 
+   piint AdcEMGain;
+   if(getPicamParameter(AdcEMGain, PicamParameter_AdcEMGain) < 0)
+   {
+      std::cerr << "could not get AdcEMGain\n";
+   }
+   m_emGain = AdcEMGain;
+   
 /*
    std::cerr << "Onlineable:\n";
    pibln onlineable;
