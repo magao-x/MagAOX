@@ -43,6 +43,8 @@ FORMS += ../../widgets/pwr/pwr.ui
 LIBS += ../../../INDI/libcommon/libcommon.a \
         ../../../INDI/liblilxml/liblilxml.a
 
+LIBS += -lmxlib 
+
 RESOURCES += ../../resources/magaox.qrc         
 RESOURCES += ../../resources/MagAOXStyleSheets/MagAOXStyle.qrc 
 
