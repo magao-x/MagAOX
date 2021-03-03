@@ -1365,7 +1365,7 @@ void pupilGuide::on_button_tip_scale_pressed()
 }
 
 
-void pupilGuide::on_button_pup_u_pressed()
+void pupilGuide::on_button_pup_l_pressed()
 {
    pcf::IndiProperty ip(pcf::IndiProperty::Number);
    
@@ -1394,12 +1394,12 @@ void pupilGuide::on_button_pup_ul_pressed()
    ip2.setDevice("ttmpupil");
    ip2.setName("pos_2");
    ip2.add(pcf::IndiElement("target"));
-   ip2["target"] = m_pupCh2 - m_pupStepSize/sqrt(2);
+   ip2["target"] = m_pupCh2 + m_pupStepSize/sqrt(2);
    
    sendNewProperty(ip2);
 }
 
-void pupilGuide::on_button_pup_l_pressed()
+void pupilGuide::on_button_pup_d_pressed()
 {
    pcf::IndiProperty ip(pcf::IndiProperty::Number);
    
@@ -1418,7 +1418,7 @@ void pupilGuide::on_button_pup_dl_pressed()
    ip.setDevice("ttmpupil");
    ip.setName("pos_1");
    ip.add(pcf::IndiElement("target"));
-   ip["target"] = m_pupCh1 - m_pupStepSize/sqrt(2);
+   ip["target"] = m_pupCh1 + m_pupStepSize/sqrt(2);
    
    sendNewProperty(ip);
    
@@ -1432,7 +1432,7 @@ void pupilGuide::on_button_pup_dl_pressed()
    sendNewProperty(ip2);
 }
 
-void pupilGuide::on_button_pup_d_pressed()
+void pupilGuide::on_button_pup_r_pressed()
 {
    pcf::IndiProperty ip(pcf::IndiProperty::Number);
    
@@ -1461,12 +1461,12 @@ void pupilGuide::on_button_pup_dr_pressed()
    ip2.setDevice("ttmpupil");
    ip2.setName("pos_2");
    ip2.add(pcf::IndiElement("target"));
-   ip2["target"] = m_pupCh2 + m_pupStepSize/sqrt(2);
+   ip2["target"] = m_pupCh2 - m_pupStepSize/sqrt(2);
    
    sendNewProperty(ip2);
 }
 
-void pupilGuide::on_button_pup_r_pressed()
+void pupilGuide::on_button_pup_u_pressed()
 {
    pcf::IndiProperty ip(pcf::IndiProperty::Number);
    
@@ -1485,7 +1485,7 @@ void pupilGuide::on_button_pup_ur_pressed()
    ip.setDevice("ttmpupil");
    ip.setName("pos_1");
    ip.add(pcf::IndiElement("target"));
-   ip["target"] = m_pupCh1 + m_pupStepSize/sqrt(2);
+   ip["target"] = m_pupCh1 - m_pupStepSize/sqrt(2);
    
    sendNewProperty(ip);
    

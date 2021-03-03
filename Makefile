@@ -34,7 +34,8 @@ apps_icc = \
 	andorCtrl \
 	usbtempMon \
 	xt1121Ctrl \
-	xt1121DCDU
+	xt1121DCDU \
+        picoMotorCtrl
 
 apps_aoc = \
 	trippLitePDU \
@@ -73,7 +74,8 @@ all_guis = dmCtrlGUI \
 	dmModeGUI \
 	offloadCtrlGUI \
 	pupilGuideGUI \
-	pwr
+	pwr \
+	coronAlignGUI
 
 ifeq ($(MAGAOX_ROLE),RTC)
   guis_to_build =
