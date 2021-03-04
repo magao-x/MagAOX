@@ -313,6 +313,11 @@ else
     $MAYBE_SUDO bash -l "$DIR/steps/install_magao-x_config.sh"
     $MAYBE_SUDO bash -l "$DIR/steps/install_magao-x_calib.sh"
 fi
+
+if [[ $MAGAOX_ROLE == AOC || $MAGAOX_ROLE == TOC || $MAGAOX_ROLE == vm ]]; then
+    echo "export RTIMV_CONFIG_PATH=/opt/MagAOX/config" | tee /etc/profile.d/rtimv_config_path.sh
+fi
+
 # Install first-party deps
 $MAYBE_SUDO bash -l "$DIR/steps/install_cacao.sh"
 $MAYBE_SUDO bash -l "$DIR/steps/install_milkzmq.sh"
