@@ -462,6 +462,8 @@ void shmimMonitor<derivedT, specificT>::smThreadExec()
    
    bool opened = false;
    
+   bool semgot = false;
+
    while(derived().shutdown() == 0)
    {
       while((derived().state() != stateCodes::OPERATING || m_shmimName == "" ) && !derived().shutdown() && !m_restart )
@@ -517,19 +519,24 @@ void shmimMonitor<derivedT, specificT>::smThreadExec()
       
       if(derived().m_shutdown || !opened) return;
     
-      if(m_semaphoreNumber == 0) m_semaphoreNumber = 6; ///Move past CACAO hard coded things -- \todo need to return to this being a config/
-      int actSem = 1;
-      while(actSem == 1)//Don't accept semaphore 1 cuz it don't work.
+      ///\todo once we upgrade to the mythical new CACAO, nuke this entire dumpster fire from orbit.  Just to be sure.
+      if(!semgot) //this is a gross hack to prevent running up the semaphore number and exhausting it.
       {
-         m_semaphoreNumber = ImageStreamIO_getsemwaitindex(&m_imageStream, m_semaphoreNumber); //ask for semaphore we had before
-         if(m_semaphoreNumber == -1)
+         if(m_semaphoreNumber == 0) m_semaphoreNumber = 6; ///Move past CACAO hard coded things -- \todo need to return to this being a config/
+         int actSem = 1;
+         while(actSem == 1)//Don't accept semaphore 1 cuz it don't work.
          {
-            derivedT::template log<software_critical>({__FILE__,__LINE__, "could not get semaphore index"});
-            return;
+            m_semaphoreNumber = ImageStreamIO_getsemwaitindex(&m_imageStream, m_semaphoreNumber); //ask for semaphore we had before
+            if(m_semaphoreNumber == -1)
+            {
+               derivedT::template log<software_critical>({__FILE__,__LINE__, "could not get semaphore index"});
+               return;
+            }
+            actSem = m_semaphoreNumber;
          }
-         actSem = m_semaphoreNumber;
       }
-      
+      semgot = true;
+
       derivedT::template log<software_info>({__FILE__,__LINE__, "got semaphore index " + std::to_string(m_semaphoreNumber) + " for " + m_shmimName });
       
       ImageStreamIO_semflush(&m_imageStream, m_semaphoreNumber);

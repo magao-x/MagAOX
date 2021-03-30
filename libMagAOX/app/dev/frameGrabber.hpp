@@ -386,7 +386,7 @@ int frameGrabber<derivedT>::appLogic()
       return -1;
    }
    
-   if( derived().state() == stateCodes::OPERATING )
+   if( derived().state() == stateCodes::OPERATING && m_atimes.size() > 0 )
    {
       if(m_atimes.size() >= m_atimes.maxEntries())
       {
