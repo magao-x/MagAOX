@@ -60,6 +60,8 @@ protected:
    
    bool m_powerOnHome {false}; ///< If true, then the motor is homed at startup (by this software or actual power on)
 
+   int m_homePreset {-1}; ///< If >=0, this preset position is moved to after homing
+   
    std::vector<std::string> m_presetNames; ///< The names of each position on the stage.
    
    std::vector<double> m_presetPositions; ///< The positions, in arbitrary units, of each preset.  If 0, then the integer position number (starting from 1) is used to calculate.
@@ -272,6 +274,8 @@ int stdMotionStage<derivedT>::setupConfig(mx::app::appConfigurator & config)
    
    config.add("stage.powerOnHome", "", "stage.powerOnHome", argType::Required, "stage", "powerOnHome", false, "bool", "If true, home at startup/power-on.  Default=false.");
    
+   config.add("stage.homePreset", "", "stage.homePreset", argType::Required, "stage", "homePreset", false, "int", "If >=0, this preset number is moved to after homing.");
+   
    config.add(m_presetNotation + "s.names", "", m_presetNotation + "s.names",  argType::Required, m_presetNotation+"s", "names", false, "vector<string>", "The names of the " + m_presetNotation+ "s.");
    config.add(m_presetNotation + "s.positions", "", m_presetNotation + "s.positions",  argType::Required, m_presetNotation+"s", "positions", false, "vector<double>", "The positions of the " + m_presetNotation + "s.  If omitted or 0 then order is used.");
    
@@ -282,6 +286,7 @@ template<class derivedT>
 int stdMotionStage<derivedT>::loadConfig(mx::app::appConfigurator & config)
 {
    config(m_powerOnHome, "stage.powerOnHome");
+   config(m_homePreset, "stage.homePreset");
    
    config(m_presetNames, m_presetNotation + "s.names");
    

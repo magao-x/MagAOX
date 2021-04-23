@@ -580,6 +580,17 @@ int filterWheelCtrl::appLogic()
                }
                m_homingState=4;
             }
+            else if(m_homingState == 4)
+            {
+               if(m_homePreset >= 0)
+               {
+                  m_preset_target = m_presetPositions[m_homePreset];
+                  updateIfChanged(m_indiP_preset, "target",  m_preset_target, INDI_BUSY);
+   
+                  moveTo(m_preset_target);
+               }
+               m_homingState = 5;
+            }
             else
             {
                m_homingState = 0;
