@@ -268,14 +268,24 @@ void cursesINDI::handleDelProperty( const pcf::IndiProperty &ipRecv )
             else ++elIt;
          }
          
-         
-         knownProps.erase(ipRecv.getDevice());
-         
+         for(propMapIteratorT pIt = knownProps.begin(); pIt != knownProps.end();)
+         {
+            if( pIt->first == ipRecv.createUniqueKey() ) pIt = knownProps.erase(pIt);
+            else ++pIt;
+         }
       }
       else
       {
          if(fpout) *fpout << "will delete: " << ipRecv.createUniqueKey() << "\n";
-         knownElements.erase(ipRecv.createUniqueKey());
+         
+         for(elementMapIteratorT elIt = knownElements.begin(); elIt != knownElements.end();)
+         {
+            if( elIt->second.propKey == ipRecv.createUniqueKey()) elIt = knownElements.erase(elIt);
+            else ++elIt;
+         }
+         
+         knownProps.erase(ipRecv.createUniqueKey());
+         
       }
    }
    
