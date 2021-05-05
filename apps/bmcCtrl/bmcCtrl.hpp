@@ -115,6 +115,16 @@ public:
      */
    virtual int appShutdown();
 
+   /// Cleanup after a power off.
+   /**
+     */ 
+   int onPowerOff();
+   
+   /// Maintenace while powered off.
+   /**
+     */
+   int whilePowerOff();
+   
    /** \name DM Base Class Interface
      *
      *@{
@@ -282,6 +292,15 @@ int bmcCtrl::appShutdown()
    return 0;
 }
 
+int bmcCtrl::onPowerOff()
+{
+   return dm<bmcCtrl,float>::onPowerOff();;
+}
+
+int bmcCtrl::whilePowerOff()
+{
+   return dm<bmcCtrl,float>::whilePowerOff();;
+}
 
 int bmcCtrl::initDM()
 {

@@ -74,8 +74,10 @@ protected:
    
    std::string m_calibPath; ///< The path to this DM's calibration files.
    std::string m_flatPath; ///< The path to this DM's flat files (usually the same as calibPath)
-   std::string m_flat {"flat.fits"}; ///< The file name of the this DM's current flat.
-   std::string m_test {"test.fits"}; ///< The file name of the this DM's current test command.
+   std::string m_testPath; ///< The path to this DM's test files (default is calibPath/tests;
+   
+   std::string m_flatDefault; ///< The file name of the this DM's default flat command. Path and extension will be ignored and can be omitted.
+   std::string m_testDefault; ///< The file name of the this DM's default test command. Path and extension will be ignored and can be omitted.
    
    std::string m_shmimFlat; ///< The name of the shmim stream to write the flat to.
    std::string m_shmimTest; ///< The name of the shmim stream to write the test to.
@@ -99,11 +101,18 @@ protected:
    
    int m_channels; ///< The number of dmcomb channels found as part of allocation.
    
+   std::map<std::string, std::string> m_flatCommands; ///< Map of flat file name to full path 
+   std::string m_flatCurrent;  ///< The name of the current flat command
+   
    mx::improc::eigenImage<realT> m_flatCommand; ///< Data storage for the flat command
    bool m_flatLoaded {false}; ///< Flag indicating whether a flat is loaded in memory
    
    IMAGE m_flatImageStream; ///< The ImageStreamIO shared memory buffer for the flat.
    bool m_flatSet {false}; ///< Flag indicating whether the flat command has been set.
+   
+   
+   std::map<std::string, std::string> m_testCommands; ///< Map of test file name to full path 
+   std::string m_testCurrent;
    
    mx::improc::eigenImage<realT> m_testCommand; ///< Data storage for the test command
    bool m_testLoaded {false}; ///< Flag indicating whether a test command is loaded in memory
@@ -170,8 +179,32 @@ public:
      */
    int appShutdown();
    
+   /// DM Poweroff
+   /** This should be called in `derivedT::onPowerOff` as
+     * \code
+       dm<derivedT,realT>::onPowerOff();
+       \endcode
+     * with appropriate error checking.
+     * 
+     * \returns 0 on success
+     * \returns -1 on error, which is logged.
+     */
+   int onPowerOff();
+   
+   /// DM Poweroff Updates
+   /** This should be called in `derivedT::whilePowerOff` as
+     * \code
+       dm<derivedT,realT>::whilePowerOff();
+       \endcode
+     * with appropriate error checking.
+     * 
+     * \returns 0 on success
+     * \returns -1 on error, which is logged.
+     */
+   int whilePowerOff();
+   
    /// Find the DM comb channels
-   /** Introspectively fines all dmXXdispYY channels, zeroes them, and raises the semapahore
+   /** Introspectively finds all dmXXdispYY channels, zeroes them, and raises the semapahore
      * on the last to cause dmcomb to update.
      */
    int findDMChannels();
@@ -188,16 +221,69 @@ public:
                      const dev::shmimT & sp
                    );
    
-   int loadFlat(std::string & target);
+   /// Check the flats directory and update the list of flats if anything changes
+   /** This is called once per appLogic and whilePowerOff loops.
+     *
+     * \returns 0 on success
+     * \returns -1 on error
+     */
+   int checkFlats();
    
-   int loadTest(std::string & target);
+   /// Load a flat file
+   /** Uses the target argument for lookup in m_flatCommands to find the path
+     * and loads the command in the local memory.  Calls setFlat if the flat 
+     * is currently set.
+     * 
+     * \returns 0 on success
+     * \returns -1 on error
+     */
+   int loadFlat(const std::string & target /**< [in] the name of the flat to load */);
    
+   /// Send the current flat command to the DM
+   /** Writes the command to the designated shmim.
+     *
+     * \returns 0 on success
+     * \returns -1 on error
+     */
    int setFlat();
    
+   /// Zero the flat command on the DM
+   /** Writes a 0 array the designated shmim.
+     *
+     * \returns 0 on success
+     * \returns -1 on error
+     */
    int zeroFlat();
+
+   /// Check the tests directory and update the list of tests if anything changes
+   /** This is called once per appLogic and whilePowerOff loops.
+     *
+     * \returns 0 on success
+     * \returns -1 on error
+     */
+   int checkTests();
    
+   /// Load a test file
+   /** Uses the target argument for lookup in m_testCommands to find the path
+     * and loads the command in the local memory.  Calls setTest if the test 
+     * is currently set.
+     */
+   int loadTest(const std::string & target);
+   
+   /// Send the current test command to the DM
+   /** Writes the command to the designated shmim.
+     *
+     * \returns 0 on success
+     * \returns -1 on error
+     */
    int setTest();
    
+   /// Zero the test command on the DM
+   /** Writes a 0 array the designated shmim.
+     *
+     * \returns 0 on success
+     * \returns -1 on error
+     */
    int zeroTest();
    
    /// Zero all channels
@@ -250,57 +336,24 @@ protected:
    //declare our properties
    
    pcf::IndiProperty m_indiP_flat; ///< Property used to set and report the current flat
-   pcf::IndiProperty m_indiP_test; ///< Property used to set and report the current test
    
    pcf::IndiProperty m_indiP_init;
    pcf::IndiProperty m_indiP_zero;
    pcf::IndiProperty m_indiP_release;
-   pcf::IndiProperty m_indiP_setFlat;
-   pcf::IndiProperty m_indiP_zeroFlat;
-   pcf::IndiProperty m_indiP_setTest;
-   pcf::IndiProperty m_indiP_zeroTest;
+   
+   pcf::IndiProperty m_indiP_flats;     ///< INDI Selection switch containing the flat files.
+   pcf::IndiProperty m_indiP_flatShmim; ///< Publish the shmim being used for the flat
+   pcf::IndiProperty m_indiP_setFlat;   ///< INDI toggle switch to set the current flat.
+
+   
+   pcf::IndiProperty m_indiP_tests;     ///< INDI Selection switch containing the test pattern files.
+   pcf::IndiProperty m_indiP_testShmim; ///< Publish the shmim being used for the test command
+   pcf::IndiProperty m_indiP_setTest;   ///< INDI toggle switch to set the current test pattern.
 
    pcf::IndiProperty m_indiP_zeroAll;
    
 public:
 
-   /// The static callback function to be registered for changing the flat command file
-   /**
-     * \returns 0 on success.
-     * \returns -1 on error.
-     */
-   static int st_newCallBack_flat( void * app, ///< [in] a pointer to this, will be static_cast-ed to derivedT.
-                                   const pcf::IndiProperty &ipRecv ///< [in] the INDI property sent with the the new property request.
-                                 );
-
-   /// The callback called by the static version, to actually process the new request.
-   /**
-     * \returns 0 on success.
-     * \returns -1 on error.
-     */
-   int newCallBack_flat( const pcf::IndiProperty &ipRecv /**< [in] the INDI property sent with the the new property request.*/);
-   
-   
-   
-   /// The static callback function to be registered for changing the test command file
-   /**
-     * \returns 0 on success.
-     * \returns -1 on error.
-     */
-   static int st_newCallBack_test( void * app, ///< [in] a pointer to this, will be static_cast-ed to derivedT.
-                                   const pcf::IndiProperty &ipRecv ///< [in] the INDI property sent with the the new property request.
-                                 );
-
-   /// The callback called by the static version, to actually process the new request.
-   /**
-     * \returns 0 on success.
-     * \returns -1 on error.
-     */
-   int newCallBack_test( const pcf::IndiProperty &ipRecv /**< [in] the INDI property sent with the the new property request.*/);
-   
-   
-   
-   
    /// The static callback function to be registered for initializing the DM.
    /**
      * \returns 0 on success.
@@ -352,6 +405,22 @@ public:
    int newCallBack_release( const pcf::IndiProperty &ipRecv /**< [in] the INDI property sent with the the new property request.*/);
    
    
+   /// The static callback function to be registered for selecting the flat file
+   /**
+     * \returns 0 on success.
+     * \returns -1 on error.
+     */
+   static int st_newCallBack_flats( void * app, ///< [in] a pointer to this, will be static_cast-ed to derivedT.
+                                    const pcf::IndiProperty &ipRecv ///< [in] the INDI property sent with the the new property request.
+                                  );
+
+   /// The callback called by the static version, to actually process the new request.
+   /**
+     * \returns 0 on success.
+     * \returns -1 on error.
+     */
+   int newCallBack_flats( const pcf::IndiProperty &ipRecv /**< [in] the INDI property sent with the the new property request.*/);
+   
    /// The static callback function to be registered for setting the flat
    /**
      * \returns 0 on success.
@@ -371,23 +440,23 @@ public:
    
    
    
-   /// The static callback function to be registered for zeroing the flat
+  
+   
+   /// The static callback function to be registered for selecting the test file
    /**
      * \returns 0 on success.
      * \returns -1 on error.
      */
-   static int st_newCallBack_zeroFlat( void * app, ///< [in] a pointer to this, will be static_cast-ed to derivedT.
-                                           const pcf::IndiProperty &ipRecv ///< [in] the INDI property sent with the the new property request.
-                                         );
+   static int st_newCallBack_tests( void * app, ///< [in] a pointer to this, will be static_cast-ed to derivedT.
+                                    const pcf::IndiProperty &ipRecv ///< [in] the INDI property sent with the the new property request.
+                                  );
 
    /// The callback called by the static version, to actually process the new request.
    /**
      * \returns 0 on success.
      * \returns -1 on error.
      */
-   int newCallBack_zeroFlat( const pcf::IndiProperty &ipRecv /**< [in] the INDI property sent with the the new property request.*/);
-   
-   
+   int newCallBack_tests( const pcf::IndiProperty &ipRecv /**< [in] the INDI property sent with the the new property request.*/);
    
    
    /// The static callback function to be registered for setting the test shape
@@ -405,23 +474,6 @@ public:
      * \returns -1 on error.
      */
    int newCallBack_setTest( const pcf::IndiProperty &ipRecv /**< [in] the INDI property sent with the the new property request.*/);
-   
-   /// The static callback function to be registered for zeroing the test
-   /**
-     * \returns 0 on success.
-     * \returns -1 on error.
-     */
-   static int st_newCallBack_zeroTest( void * app, ///< [in] a pointer to this, will be static_cast-ed to derivedT.
-                                           const pcf::IndiProperty &ipRecv ///< [in] the INDI property sent with the the new property request.
-                                         );
-
-   /// The callback called by the static version, to actually process the new request.
-   /**
-     * \returns 0 on success.
-     * \returns -1 on error.
-     */
-   int newCallBack_zeroTest( const pcf::IndiProperty &ipRecv /**< [in] the INDI property sent with the the new property request.*/);
-
    
    /// The static callback function to be registered for zeroing all channels
    /**
@@ -465,7 +517,11 @@ void dm<derivedT,realT>::setupConfig(mx::app::appConfigurator & config)
    config.add("dm.calibPath", "", "dm.calibPath", argType::Required, "dm", "calibPath", false, "string", "The path to calibration files, relative to the MagAO-X calibration path.");
    
    config.add("dm.flatPath", "", "dm.flatPath", argType::Required, "dm", "flatPath", false, "string", "The path to flat files.  Default is the calibration path.");
-     
+   config.add("dm.flatDefault", "", "dm.flatDefault", argType::Required, "dm", "flatDefault", false, "string", "The default flat file (path and extension are not required).");
+   
+   config.add("dm.testPath", "", "dm.testPath", argType::Required, "dm", "testPath", false, "string", "The path to test files.  Default is the calibration path plus /tests.");
+   config.add("dm.testDefault", "", "dm.testDefault", argType::Required, "dm", "testDefault", false, "string", "The default test file (path and extension are not required).");
+   
    //Overriding the shmimMonitor setup so that these all go in the dm section
    //Otherwise, would call shmimMonitor<dm<derivedT,realT>>::setupConfig();
    config.add("dm.threadPrio", "", "dm.threadPrio", argType::Required, "dm", "threadPrio", false, "int", "The real-time priority of the dm control thread.");
@@ -491,13 +547,30 @@ void dm<derivedT,realT>::loadConfig(mx::app::appConfigurator & config)
 {
    
    m_calibPath = derived().m_calibDir + "/" + m_calibRelDir;
-   
    config( m_calibPath, "dm.calibPath");
    
-   m_flatPath = m_calibPath;
-   
+   //setup flats
+   m_flatPath = m_calibPath + "/flats";
    config( m_flatPath, "dm.flatPath");
+   
+   config(m_flatDefault, "dm.flatDefault");
+   if(m_flatDefault != "") 
+   {
+      m_flatDefault = mx::ioutils::pathStem(m_flatDefault); //strip off path and extension if provided.
+      m_flatCurrent = "default";
+   }
+
+   //setup tests
+   m_testPath = m_calibPath + "/tests";
+   config(m_testPath, "dm.testPath");
   
+   config(m_testDefault, "dm.testDefault");
+   if(m_testDefault != "") 
+   {
+      m_testDefault = mx::ioutils::pathStem(m_testDefault); //strip off path and extension if provided.
+      m_testCurrent = "default";
+   }
+   
    //Overriding the shmimMonitor setup so that these all go in the dm section
    //Otherwise, would call shmimMonitor<dm<derivedT,realT>>::loadConfig(config);
    config(derived().m_smThreadPrio, "dm.threadPrio");
@@ -531,22 +604,20 @@ int dm<derivedT,realT>::appStartup()
       return -1;
    }
    
-   //Register the flat INDI property
-   m_indiP_flat = pcf::IndiProperty(pcf::IndiProperty::Text);
-   m_indiP_flat.setDevice(derived().configName());
-   m_indiP_flat.setName("flat");
-   m_indiP_flat.setPerm(pcf::IndiProperty::ReadWrite); 
-   m_indiP_flat.setState(pcf::IndiProperty::Idle);
-   m_indiP_flat.add(pcf::IndiElement("current"));
-   m_indiP_flat["current"] = m_flat;
-   m_indiP_flat.add(pcf::IndiElement("target"));
-   m_indiP_flat["target"] = "";
-   m_indiP_flat.add(pcf::IndiElement("path"));
-   m_indiP_flat["path"] = m_flatPath;
-   m_indiP_flat.add(pcf::IndiElement("shmimName"));
-   m_indiP_flat["shmimName"] = m_shmimFlat;
+   //-----------------
+   //Get the flats
+   checkFlats();
+           
+   //Register the test shmim INDI property
+   m_indiP_flatShmim = pcf::IndiProperty(pcf::IndiProperty::Text);
+   m_indiP_flatShmim.setDevice(derived().configName());
+   m_indiP_flatShmim.setName("flat_shmim");
+   m_indiP_flatShmim.setPerm(pcf::IndiProperty::ReadOnly); 
+   m_indiP_flatShmim.setState(pcf::IndiProperty::Idle);
+   m_indiP_flatShmim.add(pcf::IndiElement("channel"));
+   m_indiP_flatShmim["channel"] = m_shmimFlat;
    
-   if( derived().registerIndiPropertyNew( m_indiP_flat, st_newCallBack_flat) < 0)
+   if( derived().registerIndiPropertyReadOnly( m_indiP_flatShmim) < 0)
    {
       #ifndef DM_TEST_NOLOG
       derivedT::template log<software_error>({__FILE__,__LINE__});
@@ -554,21 +625,17 @@ int dm<derivedT,realT>::appStartup()
       return -1;
    }
    
+   //Register the setFlat INDI property
+   m_indiP_setFlat = pcf::IndiProperty(pcf::IndiProperty::Switch);
+   m_indiP_setFlat.setDevice(derived().configName());
+   m_indiP_setFlat.setName("flat_set");
+   m_indiP_setFlat.setPerm(pcf::IndiProperty::ReadWrite); 
+   m_indiP_setFlat.setState(pcf::IndiProperty::Idle);
+   m_indiP_setFlat.setRule(pcf::IndiProperty::AtMostOne);
+   m_indiP_setFlat.add(pcf::IndiElement("toggle"));
+   m_indiP_setFlat["toggle"] = pcf::IndiElement::Off;
    
-   //Register the test INDI property
-   m_indiP_test = pcf::IndiProperty(pcf::IndiProperty::Text);
-   m_indiP_test.setDevice(derived().configName());
-   m_indiP_test.setName("test");
-   m_indiP_test.setPerm(pcf::IndiProperty::ReadWrite); 
-   m_indiP_test.setState(pcf::IndiProperty::Idle);
-   m_indiP_test.add(pcf::IndiElement("current"));
-   m_indiP_test["current"] = m_test;
-   m_indiP_test.add(pcf::IndiElement("target"));
-   m_indiP_test["target"] = "";
-   m_indiP_test.add(pcf::IndiElement("shmimName"));
-   m_indiP_test["shmimName"] = m_shmimTest;
-   
-   if( derived().registerIndiPropertyNew( m_indiP_test, st_newCallBack_test) < 0)
+   if( derived().registerIndiPropertyNew( m_indiP_setFlat, st_newCallBack_setFlat) < 0)
    {
       #ifndef DM_TEST_NOLOG
       derivedT::template log<software_error>({__FILE__,__LINE__});
@@ -576,7 +643,44 @@ int dm<derivedT,realT>::appStartup()
       return -1;
    }
    
+   //-----------------
+   //Get the tests
+   checkTests();
+      
+   //Register the test shmim INDI property
+   m_indiP_testShmim = pcf::IndiProperty(pcf::IndiProperty::Text);
+   m_indiP_testShmim.setDevice(derived().configName());
+   m_indiP_testShmim.setName("test_shmim");
+   m_indiP_testShmim.setPerm(pcf::IndiProperty::ReadOnly); 
+   m_indiP_testShmim.setState(pcf::IndiProperty::Idle);
+   m_indiP_testShmim.add(pcf::IndiElement("channel"));
+   m_indiP_testShmim["channel"] = m_shmimTest;
    
+   if( derived().registerIndiPropertyReadOnly( m_indiP_testShmim) < 0)
+   {
+      #ifndef DM_TEST_NOLOG
+      derivedT::template log<software_error>({__FILE__,__LINE__});
+      #endif
+      return -1;
+   }
+   
+   //Register the setTest INDI property
+   m_indiP_setTest = pcf::IndiProperty(pcf::IndiProperty::Switch);
+   m_indiP_setTest.setDevice(derived().configName());
+   m_indiP_setTest.setName("test_set");
+   m_indiP_setTest.setPerm(pcf::IndiProperty::ReadWrite); 
+   m_indiP_setTest.setState(pcf::IndiProperty::Idle);
+   m_indiP_setTest.setRule(pcf::IndiProperty::AtMostOne);
+   m_indiP_setTest.add(pcf::IndiElement("toggle"));
+   m_indiP_setTest["toggle"] = pcf::IndiElement::Off;
+   
+   if( derived().registerIndiPropertyNew( m_indiP_setTest, st_newCallBack_setTest) < 0)
+   {
+      #ifndef DM_TEST_NOLOG
+      derivedT::template log<software_error>({__FILE__,__LINE__});
+      #endif
+      return -1;
+   }
    
    //Register the init INDI property
    m_indiP_init = pcf::IndiProperty(pcf::IndiProperty::Text);
@@ -629,75 +733,6 @@ int dm<derivedT,realT>::appStartup()
       return -1;
    }
    
-   //Register the setFlat INDI property
-   m_indiP_setFlat = pcf::IndiProperty(pcf::IndiProperty::Text);
-   m_indiP_setFlat.setDevice(derived().configName());
-   m_indiP_setFlat.setName("setFlat");
-   m_indiP_setFlat.setPerm(pcf::IndiProperty::ReadWrite); 
-   m_indiP_setFlat.setState(pcf::IndiProperty::Idle);
-   m_indiP_setFlat.add(pcf::IndiElement("request"));
-   m_indiP_setFlat["request"] = "";
-   
-   if( derived().registerIndiPropertyNew( m_indiP_setFlat, st_newCallBack_setFlat) < 0)
-   {
-      #ifndef DM_TEST_NOLOG
-      derivedT::template log<software_error>({__FILE__,__LINE__});
-      #endif
-      return -1;
-   }
-   
-   //Register the zeroFlat INDI property
-   m_indiP_zeroFlat = pcf::IndiProperty(pcf::IndiProperty::Text);
-   m_indiP_zeroFlat.setDevice(derived().configName());
-   m_indiP_zeroFlat.setName("zeroFlat");
-   m_indiP_zeroFlat.setPerm(pcf::IndiProperty::ReadWrite); 
-   m_indiP_zeroFlat.setState(pcf::IndiProperty::Idle);
-   m_indiP_zeroFlat.add(pcf::IndiElement("request"));
-   m_indiP_zeroFlat["request"] = "";
-   
-   if( derived().registerIndiPropertyNew( m_indiP_zeroFlat, st_newCallBack_zeroFlat) < 0)
-   {
-      #ifndef DM_TEST_NOLOG
-      derivedT::template log<software_error>({__FILE__,__LINE__});
-      #endif
-      return -1;
-   }
-   
-   
-   //Register the setTest INDI property
-   m_indiP_setTest = pcf::IndiProperty(pcf::IndiProperty::Text);
-   m_indiP_setTest.setDevice(derived().configName());
-   m_indiP_setTest.setName("setTest");
-   m_indiP_setTest.setPerm(pcf::IndiProperty::ReadWrite); 
-   m_indiP_setTest.setState(pcf::IndiProperty::Idle);
-   m_indiP_setTest.add(pcf::IndiElement("request"));
-   m_indiP_setTest["request"] = "";
-   
-   if( derived().registerIndiPropertyNew( m_indiP_setTest, st_newCallBack_setTest) < 0)
-   {
-      #ifndef DM_TEST_NOLOG
-      derivedT::template log<software_error>({__FILE__,__LINE__});
-      #endif
-      return -1;
-   }
-   
-   //Register the zeroTest INDI property
-   m_indiP_zeroTest = pcf::IndiProperty(pcf::IndiProperty::Text);
-   m_indiP_zeroTest.setDevice(derived().configName());
-   m_indiP_zeroTest.setName("zeroTest");
-   m_indiP_zeroTest.setPerm(pcf::IndiProperty::ReadWrite); 
-   m_indiP_zeroTest.setState(pcf::IndiProperty::Idle);
-   m_indiP_zeroTest.add(pcf::IndiElement("request"));
-   m_indiP_zeroTest["request"] = "";
-   
-   if( derived().registerIndiPropertyNew( m_indiP_zeroTest, st_newCallBack_zeroTest) < 0)
-   {
-      #ifndef DM_TEST_NOLOG
-      derivedT::template log<software_error>({__FILE__,__LINE__});
-      #endif
-      return -1;
-   }
-   
    derived().createStandardIndiRequestSw( m_indiP_zeroAll, "zeroAll");
    if( derived().registerIndiPropertyNew( m_indiP_zeroAll, st_newCallBack_zeroAll) < 0)
    {
@@ -707,9 +742,14 @@ int dm<derivedT,realT>::appStartup()
       return -1;
    }
    
-   if(m_flat != "")
+   if(m_flatDefault != "")
    {
-      loadFlat(m_flat);
+      loadFlat("default");
+   }
+
+   if(m_testDefault != "")
+   {
+      loadTest("default");
    }
    
    if(sem_init(&m_satSemaphore, 0,0) < 0) return derivedT::template log<software_critical, -1>({__FILE__, __LINE__, errno,0, "Initializing sat semaphore"});
@@ -735,6 +775,9 @@ int dm<derivedT,realT>::appLogic()
       return -1;
    }
    
+   checkFlats();
+   checkTests();
+   
    return 0;
 
 }
@@ -754,6 +797,21 @@ int dm<derivedT,realT>::appShutdown()
       {
       }
    }
+   
+   return 0;
+}
+
+template<class derivedT, typename realT>
+int dm<derivedT,realT>::onPowerOff()
+{
+   return 0;
+}
+
+template<class derivedT, typename realT>
+int dm<derivedT,realT>::whilePowerOff()
+{
+   checkFlats();
+   checkTests();
    
    return 0;
 }
@@ -865,14 +923,114 @@ int dm<derivedT,realT>::processImage( void * curr_src,
 }
 
 template<class derivedT, typename realT>
-int dm<derivedT,realT>::loadFlat(std::string & target)
+int dm<derivedT,realT>::checkFlats()
 {
+   std::vector<std::string> tfs = mx::ioutils::getFileNames(m_flatPath, "", "", ".fits");
    
-   ///\todo check path for /
+   for(auto it = m_flatCommands.begin(); it != m_flatCommands.end(); ++it)
+   {
+      it->second = "";
+   }
    
-   m_flat = target;
-   std::string targetPath = m_flatPath + "/" + m_flat;
+   bool changed = false;
+   for(size_t n=0; n<tfs.size(); ++n)
+   {
+      auto ir = m_flatCommands.insert(std::pair<std::string,std::string>(mx::ioutils::pathStem(tfs[n]), tfs[n]));
+      if(ir.second == true) changed = true;
+      else ir.first->second = tfs[n];
+   }
    
+   for(auto it = m_flatCommands.begin(); it != m_flatCommands.end(); ++it)
+   {
+      if(it->second == "")
+      {
+         changed = true;
+         //Erase the current iterator safely, even if the first one.
+         auto itdel = it;
+         ++it;
+         m_flatCommands.erase(itdel);
+         --it;
+      };
+   }
+   
+   if(changed)
+   {
+      if(derived().m_indiDriver)
+      {
+         derived().m_indiDriver->sendDelProperty(m_indiP_flats);
+         derived().m_indiNewCallBacks.erase(m_indiP_flats.getName());
+      }
+   
+      m_indiP_flats = pcf::IndiProperty(pcf::IndiProperty::Switch);
+      m_indiP_flats.setDevice(derived().configName());
+      m_indiP_flats.setName("flat");
+      m_indiP_flats.setPerm(pcf::IndiProperty::ReadWrite); 
+      m_indiP_flats.setState(pcf::IndiProperty::Idle);
+      m_indiP_flats.setRule(pcf::IndiProperty::OneOfMany);
+   
+      //Add the toggle element initialized to Off
+      for(auto it = m_flatCommands.begin(); it != m_flatCommands.end(); ++it)
+      {
+         if(it->first == m_flatCurrent)
+         {
+            m_indiP_flats.add(pcf::IndiElement(it->first, pcf::IndiElement::On));
+         }
+         else
+         {
+            m_indiP_flats.add(pcf::IndiElement(it->first, pcf::IndiElement::Off));
+         }
+      }
+      
+      if(m_flatDefault != "")
+      {
+         if(m_flatCurrent == "default")
+         {
+            m_indiP_flats.add(pcf::IndiElement("default", pcf::IndiElement::On));
+         }
+         else
+         {
+            m_indiP_flats.add(pcf::IndiElement("default", pcf::IndiElement::Off));
+         }
+      }
+   
+   
+      if( derived().registerIndiPropertyNew( m_indiP_flats, st_newCallBack_flats) < 0)
+      {
+         #ifndef DM_TEST_NOLOG
+         derivedT::template log<software_error>({__FILE__,__LINE__});
+         #endif
+         return -1;
+      }
+      
+      if(derived().m_indiDriver)
+      {
+         derived().m_indiDriver->sendDefProperty(m_indiP_flats);
+      }
+   }
+   
+   return 0;
+}
+
+template<class derivedT, typename realT>
+int dm<derivedT,realT>::loadFlat(const std::string & intarget)
+{
+   std::string target = intarget;
+   
+   if(target == "default") target = m_flatDefault;
+   
+   std::string targetPath;
+   
+   try 
+   {
+      targetPath = m_flatCommands.at(target);
+   }
+   catch(...)
+   {
+      derivedT::template log<text_log>("flat file " + target + " not found", logPrio::LOG_ERROR);
+      return -1;
+   }
+   
+   m_flatLoaded = false;
    //load into memory.
    mx::fits::fitsFile<realT> ff;
    if(ff.read(m_flatCommand, targetPath) < 0)
@@ -884,41 +1042,41 @@ int dm<derivedT,realT>::loadFlat(std::string & target)
    derivedT::template log<text_log>("loaded flat file " + targetPath);
    m_flatLoaded = true;
    
-   indi::updateIfChanged(m_indiP_flat, "current", m_flat, derived().m_indiDriver);
-   indi::updateIfChanged(m_indiP_flat, "target", m_flat, derived().m_indiDriver);
+   m_flatCurrent = intarget;
+
+   if(m_flatCurrent == "default")
+   {
+      m_indiP_flats["default"] = pcf::IndiElement::On;
+   }
+   else
+   {
+      m_indiP_flats["default"] = pcf::IndiElement::Off;
+   }
    
-   if(m_flatSet) setFlat();
+   for(auto i = m_flatCommands.begin(); i != m_flatCommands.end(); ++i)
+   {
+      if(!m_indiP_flats.find(i->first)) continue;
+      
+      if( i->first == m_flatCurrent )
+      {
+         m_indiP_flats[i->first] = pcf::IndiElement::On;
+      }
+      else
+      {
+         m_indiP_flats[i->first] = pcf::IndiElement::Off;
+      }
+   }
+   
+   
+   if(derived().m_indiDriver) derived().m_indiDriver->sendSetProperty (m_indiP_flats);
+
+   
+   if(m_flatSet) setTest();
    
    return 0;
 }
 
-template<class derivedT, typename realT>
-int dm<derivedT,realT>::loadTest(std::string & target)
-{
-   
-   ///\todo check path for /
-   
-   m_test = target;
-   std::string targetPath = m_flatPath + "/" + m_test;
-   
-   //load into memory.
-   mx::fits::fitsFile<realT> ff;
-   if(ff.read(m_testCommand, targetPath) < 0)
-   {
-      derivedT::template log<text_log>("test file " + targetPath + " not found", logPrio::LOG_ERROR);
-      return -1;
-   }
-   
-   derivedT::template log<text_log>("loaded test file " + targetPath);
-   m_testLoaded = true;
-   
-   indi::updateIfChanged(m_indiP_test, "current", m_test, derived().m_indiDriver);
-   indi::updateIfChanged(m_indiP_test, "target", m_test, derived().m_indiDriver);
-   
-   if(m_testSet) setTest();
-   
-   return 0;
-}
+
 
 template<class derivedT, typename realT>
 int dm<derivedT,realT>::setFlat()
@@ -1038,7 +1196,161 @@ int dm<derivedT,realT>::zeroFlat()
    
    return 0;
 }
-  
+ 
+template<class derivedT, typename realT>
+int dm<derivedT,realT>::checkTests()
+{
+   std::vector<std::string> tfs = mx::ioutils::getFileNames(m_testPath, "", "", ".fits");
+   
+   for(auto it = m_testCommands.begin(); it != m_testCommands.end(); ++it)
+   {
+      it->second = "";
+   }
+   
+   bool changed = false;
+   for(size_t n=0; n<tfs.size(); ++n)
+   {
+      auto ir = m_testCommands.insert(std::pair<std::string,std::string>(mx::ioutils::pathStem(tfs[n]), tfs[n]));
+      if(ir.second == true) changed = true;
+      else ir.first->second = tfs[n];
+   }
+   
+   for(auto it = m_testCommands.begin(); it != m_testCommands.end(); ++it)
+   {
+      if(it->second == "")
+      {
+         changed = true;
+         //Erase the current iterator safely, even if the first one.
+         auto itdel = it;
+         ++it;
+         m_testCommands.erase(itdel);
+         --it;
+      };
+   }
+   
+   if(changed)
+   {
+      if(derived().m_indiDriver)
+      {
+         derived().m_indiDriver->sendDelProperty(m_indiP_tests);
+         derived().m_indiNewCallBacks.erase(m_indiP_tests.getName());
+      }
+   
+      m_indiP_tests = pcf::IndiProperty(pcf::IndiProperty::Switch);
+      m_indiP_tests.setDevice(derived().configName());
+      m_indiP_tests.setName("test");
+      m_indiP_tests.setPerm(pcf::IndiProperty::ReadWrite); 
+      m_indiP_tests.setState(pcf::IndiProperty::Idle);
+      m_indiP_tests.setRule(pcf::IndiProperty::OneOfMany);
+   
+      //Add the toggle element initialized to Off
+      for(auto it = m_testCommands.begin(); it != m_testCommands.end(); ++it)
+      {
+         if(it->first == m_testCurrent)
+         {
+            m_indiP_tests.add(pcf::IndiElement(it->first, pcf::IndiElement::On));
+         }
+         else
+         {
+            m_indiP_tests.add(pcf::IndiElement(it->first, pcf::IndiElement::Off));
+         }
+      }
+      
+      if(m_testDefault != "")
+      {
+         if(m_testCurrent == "default")
+         {
+            m_indiP_tests.add(pcf::IndiElement("default", pcf::IndiElement::On));
+         }
+         else
+         {
+            m_indiP_tests.add(pcf::IndiElement("default", pcf::IndiElement::Off));
+         }
+      }
+   
+   
+      if( derived().registerIndiPropertyNew( m_indiP_tests, st_newCallBack_tests) < 0)
+      {
+         #ifndef DM_TEST_NOLOG
+         derivedT::template log<software_error>({__FILE__,__LINE__});
+         #endif
+         return -1;
+      }
+      
+      if(derived().m_indiDriver)
+      {
+         derived().m_indiDriver->sendDefProperty(m_indiP_tests);
+      }
+   }
+   
+   return 0;
+}
+
+template<class derivedT, typename realT>
+int dm<derivedT,realT>::loadTest(const std::string & intarget)
+{
+   std::string target = intarget; //store this for later to resolve default next:
+   
+   if(target == "default") target = m_testDefault;
+   
+   std::string targetPath;
+   
+   try 
+   {
+      targetPath = m_testCommands.at(target);
+   }
+   catch(...)
+   {
+      derivedT::template log<text_log>("test file " + target + " not found", logPrio::LOG_ERROR);
+      return -1;
+   }
+   
+   m_testLoaded = false;
+   //load into memory.
+   mx::fits::fitsFile<realT> ff;
+   if(ff.read(m_testCommand, targetPath) < 0)
+   {
+      derivedT::template log<text_log>("test file " + targetPath + " not found", logPrio::LOG_ERROR);
+      return -1;
+   }
+   
+   derivedT::template log<text_log>("loaded test file " + targetPath);
+   m_testLoaded = true;
+   
+   m_testCurrent = intarget;
+
+   if(m_testCurrent == "default")
+   {
+      m_indiP_tests["default"] = pcf::IndiElement::On;
+   }
+   else
+   {
+      m_indiP_tests["default"] = pcf::IndiElement::Off;
+   }
+   
+   for(auto i = m_testCommands.begin(); i != m_testCommands.end(); ++i)
+   {
+      if(!m_indiP_tests.find(i->first)) continue;
+      
+      if( i->first == m_testCurrent )
+      {
+         m_indiP_tests[i->first] = pcf::IndiElement::On;
+      }
+      else
+      {
+         m_indiP_tests[i->first] = pcf::IndiElement::Off;
+      }
+   }
+   
+   
+   if(derived().m_indiDriver) derived().m_indiDriver->sendSetProperty (m_indiP_tests);
+
+   
+   if(m_testSet) setTest();
+   
+   return 0;
+}
+
 template<class derivedT, typename realT>  
 int dm<derivedT,realT>::setTest()
 {
@@ -1060,6 +1372,14 @@ int dm<derivedT,realT>::setTest()
       ImageStreamIO_closeIm(&m_testImageStream);
       derivedT::template log<text_log>("height mismatch between " + m_shmimTest + " and configured DM", logPrio::LOG_ERROR);
       return -1;
+   }
+   
+   if(!m_testLoaded)
+   {
+      if(loadTest(m_testCurrent)<0)
+      {
+         derivedT::template log<text_log>("error loading test " + m_testCurrent, logPrio::LOG_ERROR);
+      }
    }
    
    if(!m_testLoaded)
@@ -1103,6 +1423,8 @@ int dm<derivedT,realT>::setTest()
    
    //Post the semaphore
    ImageStreamIO_closeIm(&m_testImageStream);
+   
+   derived().updateSwitchIfChanged(m_indiP_setTest, "toggle", pcf::IndiElement::On, pcf::IndiProperty::Busy);
    
    derivedT::template log<text_log>("test set");
    
@@ -1153,6 +1475,8 @@ int dm<derivedT,realT>::zeroTest()
    m_testSet = false;
      
    ImageStreamIO_closeIm(&m_testImageStream);
+   
+   derived().updateSwitchIfChanged(m_indiP_setTest, "toggle", pcf::IndiElement::Off, pcf::IndiProperty::Idle);
    
    derivedT::template log<text_log>("test zeroed");
    
@@ -1248,8 +1572,6 @@ void dm<derivedT,realT>::satThreadExec()
    imsize[0] = m_dmWidth; 
    imsize[1] = m_dmHeight;
    imsize[2] = 1;
-      
-   std::cerr << "Creating: " << m_shmimSat << " " << m_dmWidth << " " << m_dmHeight << " " << 1 << "\n";
       
    ImageStreamIO_createIm_gpu(&m_satImageStream, m_shmimSat.c_str(), 3, imsize, IMAGESTRUCT_UINT8, -1, 1, IMAGE_NB_SEMAPHORE, 0, CIRCULAR_BUFFER | ZAXIS_TEMPORAL);
    ImageStreamIO_createIm_gpu(&m_satPercImageStream, m_shmimSatPerc.c_str(), 3, imsize, IMAGESTRUCT_FLOAT, -1, 1, IMAGE_NB_SEMAPHORE, 0, CIRCULAR_BUFFER | ZAXIS_TEMPORAL);
@@ -1372,103 +1694,9 @@ int dm<derivedT,realT>::updateINDI()
 {
    if( !derived().m_indiDriver ) return 0;
    
-   if(m_flatSet)
-   {
-      derived().updateIfChanged(m_indiP_flat, "current", m_flat);
-      derived().updateIfChanged(m_indiP_flat, "target", m_flat);
-   }
-   else
-   {
-      derived().updateIfChanged(m_indiP_flat, "current", m_flat);
-      derived().updateIfChanged(m_indiP_flat, "target", std::string(""));
-   }
    
-   
-   if(m_testSet)
-   {
-      derived().updateIfChanged(m_indiP_test, "current", m_test);
-      derived().updateIfChanged(m_indiP_test, "target", m_test);
-   }
-   else
-   {
-      derived().updateIfChanged(m_indiP_test, "current", m_test);
-      derived().updateIfChanged(m_indiP_test, "target", std::string(""));
-   }
    
    return 0;
-}
-
-template<class derivedT, typename realT>
-int dm<derivedT,realT>::st_newCallBack_flat( void * app,
-                                             const pcf::IndiProperty &ipRecv
-                                           )
-{
-   return static_cast<derivedT *>(app)->newCallBack_flat(ipRecv);
-}
-
-template<class derivedT, typename realT>
-int dm<derivedT,realT>::newCallBack_flat( const pcf::IndiProperty &ipRecv )
-{
-   if ( ipRecv.getName() != m_indiP_flat.getName())
-   {
-      return derivedT::template log<software_error,-1>({__FILE__, __LINE__, "wrong INDI-P in callback"});
-   }
-   
-   std::string target, current;
-   
-   if(ipRecv.find("target"))
-   {
-      target = ipRecv["target"].get<std::string>();
-   }
-   
-   if(target == "" )
-   {
-      if(ipRecv.find("current"))
-      {
-         target = ipRecv["current"].get<std::string>();
-      }
-   }
-   
-   if(target == "") return 0;
-   
-   return loadFlat(target);
-}
-
-
-template<class derivedT, typename realT>
-int dm<derivedT,realT>::st_newCallBack_test( void * app,
-                                       const pcf::IndiProperty &ipRecv
-                                     )
-{
-   return static_cast<derivedT *>(app)->newCallBack_test(ipRecv);
-}
-
-template<class derivedT, typename realT>
-int dm<derivedT,realT>::newCallBack_test( const pcf::IndiProperty &ipRecv )
-{
-   if ( ipRecv.getName() != m_indiP_test.getName())
-   {
-      return derivedT::template log<software_error,-1>({__FILE__, __LINE__, "wrong INDI-P in callback"});
-   }
-   
-   std::string target, current;
-   
-   if(ipRecv.find("target"))
-   {
-      target = ipRecv["target"].get<std::string>();
-   }
-   
-   if(target == "" )
-   {
-      if(ipRecv.find("current"))
-      {
-         target = ipRecv["current"].get<std::string>();
-      }
-   }
-   
-   if(target == "") return 0;
-   
-   return loadTest(target);
 }
 
 template<class derivedT, typename realT>
@@ -1547,11 +1775,60 @@ int dm<derivedT,realT>::newCallBack_release( const pcf::IndiProperty &ipRecv )
 }
 
 template<class derivedT, typename realT>
-int dm<derivedT,realT>::st_newCallBack_setFlat( void * app,
-                                           const pcf::IndiProperty &ipRecv
-                                         )
+int dm<derivedT,realT>::st_newCallBack_flats( void * app,
+                                              const pcf::IndiProperty &ipRecv
+                                             )
 {
-   return static_cast<derivedT *>(app)->newCallBack_setFlat(ipRecv);
+   return static_cast< derivedT *>(app)->newCallBack_flats(ipRecv);
+}
+
+template<class derivedT, typename realT>
+int dm<derivedT,realT>::newCallBack_flats( const pcf::IndiProperty &ipRecv )
+{
+   if(ipRecv.getName() != m_indiP_flats.getName())
+   {
+      derivedT::template log<software_error>({__FILE__, __LINE__, "invalid indi property received"});
+      return -1;
+   }
+   
+   std::string newFlat;
+   
+   if(ipRecv.find("default"))
+   {
+      if(ipRecv["default"].getSwitchState() == pcf::IndiElement::On)
+      {
+         newFlat = "default";
+      }
+   }
+   
+   //always do this to check for error:
+   for(auto i=m_flatCommands.begin(); i != m_flatCommands.end(); ++i) 
+   {
+      if(!ipRecv.find(i->first)) continue;
+      
+      if(ipRecv[i->first].getSwitchState() == pcf::IndiElement::On)
+      {
+         if(newFlat != "")
+         {
+            derivedT::template log<text_log>("More than one flat selected", logPrio::LOG_ERROR);
+            return -1;
+         }
+         
+         newFlat = i->first;
+      }
+   }
+   
+   if(newFlat == "") return 0;
+   
+   return loadFlat(newFlat);
+}
+
+template<class derivedT, typename realT>
+int dm<derivedT,realT>::st_newCallBack_setFlat( void * app,
+                                                const pcf::IndiProperty &ipRecv
+                                              )
+{
+   return static_cast< derivedT *>(app)->newCallBack_setFlat(ipRecv);
 }
 
 template<class derivedT, typename realT>
@@ -1562,44 +1839,71 @@ int dm<derivedT,realT>::newCallBack_setFlat( const pcf::IndiProperty &ipRecv )
       return derivedT::template log<software_error,-1>({__FILE__, __LINE__, "wrong INDI-P in callback"});
    }
    
-   if(!ipRecv.find("request")) return 0;
+   if(!ipRecv.find("toggle")) return 0;
    
-   std::string request = ipRecv["request"].get();
-      
-   if(request == "") return 0;
-   
-   return setFlat();
-}
-
-template<class derivedT, typename realT>
-int dm<derivedT,realT>::st_newCallBack_zeroFlat( void * app,
-                                           const pcf::IndiProperty &ipRecv
-                                         )
-{
-   return static_cast< derivedT *>(app)->newCallBack_zeroFlat(ipRecv);
-}
-
-template<class derivedT, typename realT>
-int dm<derivedT,realT>::newCallBack_zeroFlat( const pcf::IndiProperty &ipRecv )
-{
-   if ( ipRecv.getName() != m_indiP_zeroFlat.getName())
+   if(ipRecv["toggle"] == pcf::IndiElement::On)
    {
-      return derivedT::template log<software_error,-1>({__FILE__, __LINE__, "wrong INDI-P in callback"});
+      return setFlat();
+   }
+   else
+   {
+      return zeroFlat();
+   }
+}
+
+template<class derivedT, typename realT>
+int dm<derivedT,realT>::st_newCallBack_tests( void * app,
+                                              const pcf::IndiProperty &ipRecv
+                                             )
+{
+   return static_cast< derivedT *>(app)->newCallBack_tests(ipRecv);
+}
+
+template<class derivedT, typename realT>
+int dm<derivedT,realT>::newCallBack_tests( const pcf::IndiProperty &ipRecv )
+{
+   if(ipRecv.getName() != m_indiP_tests.getName())
+   {
+      derivedT::template log<software_error>({__FILE__, __LINE__, "invalid indi property received"});
+      return -1;
    }
    
-   if(!ipRecv.find("request")) return 0;
+   std::string newTest;
    
-   std::string request = ipRecv["request"].get();
+   if(ipRecv.find("default"))
+   {
+      if(ipRecv["default"].getSwitchState() == pcf::IndiElement::On)
+      {
+         newTest = "default";
+      }
+   }
+   
+   //always do this to check for error:
+   for(auto i=m_testCommands.begin(); i != m_testCommands.end(); ++i) 
+   {
+      if(!ipRecv.find(i->first)) continue;
       
-   if(request == "") return 0;
+      if(ipRecv[i->first].getSwitchState() == pcf::IndiElement::On)
+      {
+         if(newTest != "")
+         {
+            derivedT::template log<text_log>("More than one test selected", logPrio::LOG_ERROR);
+            return -1;
+         }
+         
+         newTest = i->first;
+      }
+   }
    
-   return zeroFlat();
+   if(newTest == "") return 0;
+   
+   return loadTest(newTest);
 }
 
 template<class derivedT, typename realT>
 int dm<derivedT,realT>::st_newCallBack_setTest( void * app,
-                                           const pcf::IndiProperty &ipRecv
-                                         )
+                                                const pcf::IndiProperty &ipRecv
+                                              )
 {
    return static_cast< derivedT *>(app)->newCallBack_setTest(ipRecv);
 }
@@ -1612,39 +1916,18 @@ int dm<derivedT,realT>::newCallBack_setTest( const pcf::IndiProperty &ipRecv )
       return derivedT::template log<software_error,-1>({__FILE__, __LINE__, "wrong INDI-P in callback"});
    }
    
-   if(!ipRecv.find("request")) return 0;
+   if(!ipRecv.find("toggle")) return 0;
    
-   std::string request = ipRecv["request"].get();
-      
-   if(request == "") return 0;
-   
-   return setTest();
-}
-
-template<class derivedT, typename realT>
-int dm<derivedT,realT>::st_newCallBack_zeroTest( void * app,
-                                           const pcf::IndiProperty &ipRecv
-                                         )
-{
-   return static_cast< derivedT *>(app)->newCallBack_zeroTest(ipRecv);
-}
-
-template<class derivedT, typename realT>
-int dm<derivedT,realT>::newCallBack_zeroTest( const pcf::IndiProperty &ipRecv )
-{
-   if ( ipRecv.getName() != m_indiP_zeroTest.getName())
+   if(ipRecv["toggle"] == pcf::IndiElement::On)
    {
-      return derivedT::template log<software_error,-1>({__FILE__, __LINE__, "wrong INDI-P in callback"});
+      return setTest();
    }
-   
-   if(!ipRecv.find("request")) return 0;
-   
-   std::string request = ipRecv["request"].get();
-      
-   if(request == "") return 0;
-   
-   return zeroTest();
+   else
+   {
+      return zeroTest();
+   }
 }
+
 
 template<class derivedT, typename realT>
 int dm<derivedT,realT>::st_newCallBack_zeroAll( void * app,
