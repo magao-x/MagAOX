@@ -94,7 +94,7 @@
            </property>
            <property name="font">
             <font>
-             <pointsize>12</pointsize>
+             <pointsize>10</pointsize>
              <weight>75</weight>
              <bold>true</bold>
             </font>
@@ -119,7 +119,7 @@
          <item>
           <widget class="QLabel" name="dmStatus">
            <property name="sizePolicy">
-            <sizepolicy hsizetype="Expanding" vsizetype="Maximum">
+            <sizepolicy hsizetype="Expanding" vsizetype="Expanding">
              <horstretch>0</horstretch>
              <verstretch>0</verstretch>
             </sizepolicy>
@@ -164,7 +164,7 @@
            <property name="font">
             <font>
              <family>Tlwg Typist</family>
-             <pointsize>18</pointsize>
+             <pointsize>16</pointsize>
             </font>
            </property>
            <property name="frameShape">
@@ -185,6 +185,11 @@
           <layout class="QGridLayout" name="layoutLabels" columnstretch="1,5">
            <item row="2" column="1">
             <widget class="QLabel" name="labelTestShmim_value">
+             <property name="font">
+              <font>
+               <pointsize>9</pointsize>
+              </font>
+             </property>
              <property name="frameShape">
               <enum>QFrame::Panel</enum>
              </property>
@@ -198,6 +203,11 @@
            </item>
            <item row="0" column="1">
             <widget class="QLabel" name="labelShmimName_value">
+             <property name="font">
+              <font>
+               <pointsize>9</pointsize>
+              </font>
+             </property>
              <property name="frameShape">
               <enum>QFrame::Panel</enum>
              </property>
@@ -211,6 +221,11 @@
            </item>
            <item row="2" column="0">
             <widget class="QLabel" name="labelTestShmim">
+             <property name="font">
+              <font>
+               <pointsize>9</pointsize>
+              </font>
+             </property>
              <property name="text">
               <string>test shmim:</string>
              </property>
@@ -218,6 +233,11 @@
            </item>
            <item row="1" column="1">
             <widget class="QLabel" name="labelFlatShmim_value">
+             <property name="font">
+              <font>
+               <pointsize>9</pointsize>
+              </font>
+             </property>
              <property name="frameShape">
               <enum>QFrame::Panel</enum>
              </property>
@@ -231,6 +251,11 @@
            </item>
            <item row="0" column="0">
             <widget class="QLabel" name="labelShmimName">
+             <property name="font">
+              <font>
+               <pointsize>9</pointsize>
+              </font>
+             </property>
              <property name="text">
               <string>shmim name:</string>
              </property>
@@ -238,6 +263,11 @@
            </item>
            <item row="1" column="0">
             <widget class="QLabel" name="labelFlatShmim">
+             <property name="font">
+              <font>
+               <pointsize>9</pointsize>
+              </font>
+             </property>
              <property name="text">
               <string>flat shmim:</string>
              </property>
@@ -257,6 +287,11 @@
              <verstretch>0</verstretch>
             </sizepolicy>
            </property>
+           <property name="font">
+            <font>
+             <pointsize>9</pointsize>
+            </font>
+           </property>
            <property name="text">
             <string>initialize</string>
            </property>
@@ -269,6 +304,11 @@
              <horstretch>0</horstretch>
              <verstretch>0</verstretch>
             </sizepolicy>
+           </property>
+           <property name="font">
+            <font>
+             <pointsize>9</pointsize>
+            </font>
            </property>
            <property name="text">
             <string>zero all ch</string>
@@ -283,6 +323,11 @@
              <verstretch>0</verstretch>
             </sizepolicy>
            </property>
+           <property name="font">
+            <font>
+             <pointsize>9</pointsize>
+            </font>
+           </property>
            <property name="text">
             <string>zero DM</string>
            </property>
@@ -295,6 +340,11 @@
              <horstretch>0</horstretch>
              <verstretch>0</verstretch>
             </sizepolicy>
+           </property>
+           <property name="font">
+            <font>
+             <pointsize>9</pointsize>
+            </font>
            </property>
            <property name="text">
             <string>release</string>
@@ -330,13 +380,24 @@
          <verstretch>0</verstretch>
         </sizepolicy>
        </property>
+       <property name="font">
+        <font>
+         <pointsize>9</pointsize>
+        </font>
+       </property>
        <property name="text">
         <string>set flat</string>
        </property>
       </widget>
      </item>
      <item row="1" column="0">
-      <widget class="QComboBox" name="comboSelectTest"/>
+      <widget class="QComboBox" name="comboSelectTest">
+       <property name="font">
+        <font>
+         <pointsize>8</pointsize>
+        </font>
+       </property>
+      </widget>
      </item>
      <item row="0" column="2">
       <widget class="QPushButton" name="buttonZeroFlat">
@@ -345,6 +406,11 @@
          <horstretch>0</horstretch>
          <verstretch>0</verstretch>
         </sizepolicy>
+       </property>
+       <property name="font">
+        <font>
+         <pointsize>9</pointsize>
+        </font>
        </property>
        <property name="text">
         <string>zero flat</string>
@@ -359,6 +425,11 @@
          <verstretch>0</verstretch>
         </sizepolicy>
        </property>
+       <property name="font">
+        <font>
+         <pointsize>9</pointsize>
+        </font>
+       </property>
        <property name="text">
         <string>zero test</string>
        </property>
@@ -372,13 +443,24 @@
          <verstretch>0</verstretch>
         </sizepolicy>
        </property>
+       <property name="font">
+        <font>
+         <pointsize>9</pointsize>
+        </font>
+       </property>
        <property name="text">
         <string>set test</string>
        </property>
       </widget>
      </item>
      <item row="0" column="0">
-      <widget class="QComboBox" name="comboSelectFlat"/>
+      <widget class="QComboBox" name="comboSelectFlat">
+       <property name="font">
+        <font>
+         <pointsize>8</pointsize>
+        </font>
+       </property>
+      </widget>
      </item>
     </layout>
    </item>
