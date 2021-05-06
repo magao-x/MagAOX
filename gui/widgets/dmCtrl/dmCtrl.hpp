@@ -208,12 +208,12 @@ void dmCtrl::updateGUI()
    ui.labelFlatShmim_value->setText(m_flatShmim.c_str());
    ui.labelTestShmim_value->setText(m_testShmim.c_str());
 
-   ui.buttonSetFlat->setEnabled(true);
-   ui.buttonZeroFlat->setEnabled(true);
-   
-   ui.buttonSetTest->setEnabled(true);
-   ui.buttonZeroTest->setEnabled(true);
-      
+//    ui.buttonSetFlat->setEnabled(true);
+//    ui.buttonZeroFlat->setEnabled(true);
+//    
+//    ui.buttonSetTest->setEnabled(true);
+//    ui.buttonZeroTest->setEnabled(true);
+//       
    if( m_appState != "READY" && m_appState != "OPERATING" )
    {
       //Disable & zero all
@@ -222,11 +222,11 @@ void dmCtrl::updateGUI()
       ui.buttonZero->setEnabled(false);
       ui.buttonRelease->setEnabled(false);
 
-      //ui.buttonSetFlat->setEnabled(false);
-      //ui.buttonZeroFlat->setEnabled(false);
+      ui.buttonSetFlat->setEnabled(false);
+      ui.buttonZeroFlat->setEnabled(false);
       
-      //ui.buttonSetTest->setEnabled(false);
-      //ui.buttonZeroTest->setEnabled(false);
+      ui.buttonSetTest->setEnabled(false);
+      ui.buttonZeroTest->setEnabled(false);
       
       return;
    }
@@ -278,12 +278,12 @@ void dmCtrl::updateGUI()
 
 void dmCtrl::on_buttonInit_pressed()
 {
-   pcf::IndiProperty ipFreq(pcf::IndiProperty::Text);
+   pcf::IndiProperty ipFreq(pcf::IndiProperty::Switch);
    
    ipFreq.setDevice(m_dmName);
    ipFreq.setName("initDM");
    ipFreq.add(pcf::IndiElement("request"));
-   ipFreq["request"] = 1;
+   ipFreq["request"].setSwitchState(pcf::IndiElement::On);
     
    sendNewProperty(ipFreq);   
 }
@@ -304,24 +304,24 @@ void dmCtrl::on_buttonZeroAll_pressed()
 
 void dmCtrl::on_buttonZero_pressed()
 {
-   pcf::IndiProperty ipFreq(pcf::IndiProperty::Text);
+   pcf::IndiProperty ipFreq(pcf::IndiProperty::Switch);
    
    ipFreq.setDevice(m_dmName);
    ipFreq.setName("zeroDM");
    ipFreq.add(pcf::IndiElement("request"));
-   ipFreq["request"] = 1;
+   ipFreq["request"].setSwitchState(pcf::IndiElement::On);
     
    sendNewProperty(ipFreq);
 }
 
 void dmCtrl::on_buttonRelease_pressed()
 {
-   pcf::IndiProperty ipFreq(pcf::IndiProperty::Text);
+   pcf::IndiProperty ipFreq(pcf::IndiProperty::Switch);
    
    ipFreq.setDevice(m_dmName);
    ipFreq.setName("releaseDM");
    ipFreq.add(pcf::IndiElement("request"));
-   ipFreq["request"] = 1;
+   ipFreq["request"].setSwitchState(pcf::IndiElement::On);
     
    sendNewProperty(ipFreq);
 }
@@ -338,6 +338,7 @@ void dmCtrl::on_comboSelectFlat_activated(int index)
    for(int i=0; i < ui.comboSelectFlat->count(); ++i)
    {
       std::string eln = ui.comboSelectFlat->itemText(i).toStdString();
+      std::cerr << eln << "\n";
       ipFreq.add(pcf::IndiElement(eln));
       if(eln == choice) ipFreq[eln] = pcf::IndiElement::On;
       else ipFreq[eln] = pcf::IndiElement::Off;

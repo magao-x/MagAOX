@@ -101,6 +101,16 @@ public:
      */
    virtual int appShutdown();
 
+   /// Cleanup after a power off.
+   /**
+     */ 
+   virtual int onPowerOff();
+   
+   /// Maintenace while powered off.
+   /**
+     */
+   virtual int whilePowerOff();
+   
    /** \name DM Base Class Interface
      *
      *@{
@@ -273,6 +283,16 @@ int alpaoCtrl::appShutdown()
 
    
    return 0;
+}
+
+int alpaoCtrl::onPowerOff()
+{
+   return dm<alpaoCtrl,float>::onPowerOff();;
+}
+
+int alpaoCtrl::whilePowerOff()
+{
+   return dm<alpaoCtrl,float>::whilePowerOff();;
 }
 
 int alpaoCtrl::initDM()

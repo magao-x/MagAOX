@@ -626,15 +626,7 @@ int dm<derivedT,realT>::appStartup()
    }
    
    //Register the setFlat INDI property
-   m_indiP_setFlat = pcf::IndiProperty(pcf::IndiProperty::Switch);
-   m_indiP_setFlat.setDevice(derived().configName());
-   m_indiP_setFlat.setName("flat_set");
-   m_indiP_setFlat.setPerm(pcf::IndiProperty::ReadWrite); 
-   m_indiP_setFlat.setState(pcf::IndiProperty::Idle);
-   m_indiP_setFlat.setRule(pcf::IndiProperty::AtMostOne);
-   m_indiP_setFlat.add(pcf::IndiElement("toggle"));
-   m_indiP_setFlat["toggle"] = pcf::IndiElement::Off;
-   
+   derived().createStandardIndiToggleSw( m_indiP_setFlat, "flat_set");
    if( derived().registerIndiPropertyNew( m_indiP_setFlat, st_newCallBack_setFlat) < 0)
    {
       #ifndef DM_TEST_NOLOG
@@ -655,7 +647,7 @@ int dm<derivedT,realT>::appStartup()
    m_indiP_testShmim.setState(pcf::IndiProperty::Idle);
    m_indiP_testShmim.add(pcf::IndiElement("channel"));
    m_indiP_testShmim["channel"] = m_shmimTest;
-   
+   derived().createStandardIndiToggleSw( m_indiP_setTest, "test_shmim");
    if( derived().registerIndiPropertyReadOnly( m_indiP_testShmim) < 0)
    {
       #ifndef DM_TEST_NOLOG
@@ -665,15 +657,7 @@ int dm<derivedT,realT>::appStartup()
    }
    
    //Register the setTest INDI property
-   m_indiP_setTest = pcf::IndiProperty(pcf::IndiProperty::Switch);
-   m_indiP_setTest.setDevice(derived().configName());
-   m_indiP_setTest.setName("test_set");
-   m_indiP_setTest.setPerm(pcf::IndiProperty::ReadWrite); 
-   m_indiP_setTest.setState(pcf::IndiProperty::Idle);
-   m_indiP_setTest.setRule(pcf::IndiProperty::AtMostOne);
-   m_indiP_setTest.add(pcf::IndiElement("toggle"));
-   m_indiP_setTest["toggle"] = pcf::IndiElement::Off;
-   
+   derived().createStandardIndiToggleSw( m_indiP_setTest, "test_set");
    if( derived().registerIndiPropertyNew( m_indiP_setTest, st_newCallBack_setTest) < 0)
    {
       #ifndef DM_TEST_NOLOG
@@ -683,14 +667,7 @@ int dm<derivedT,realT>::appStartup()
    }
    
    //Register the init INDI property
-   m_indiP_init = pcf::IndiProperty(pcf::IndiProperty::Text);
-   m_indiP_init.setDevice(derived().configName());
-   m_indiP_init.setName("initDM");
-   m_indiP_init.setPerm(pcf::IndiProperty::ReadWrite); 
-   m_indiP_init.setState(pcf::IndiProperty::Idle);
-   m_indiP_init.add(pcf::IndiElement("request"));
-   m_indiP_init["request"] = "";
-   
+   derived().createStandardIndiRequestSw( m_indiP_init, "initDM");
    if( derived().registerIndiPropertyNew( m_indiP_init, st_newCallBack_init) < 0)
    {
       #ifndef DM_TEST_NOLOG
@@ -700,14 +677,7 @@ int dm<derivedT,realT>::appStartup()
    }
    
    //Register the zero INDI property
-   m_indiP_zero = pcf::IndiProperty(pcf::IndiProperty::Text);
-   m_indiP_zero.setDevice(derived().configName());
-   m_indiP_zero.setName("zeroDM");
-   m_indiP_zero.setPerm(pcf::IndiProperty::ReadWrite); 
-   m_indiP_zero.setState(pcf::IndiProperty::Idle);
-   m_indiP_zero.add(pcf::IndiElement("request"));
-   m_indiP_zero["request"] = "";
-   
+   derived().createStandardIndiRequestSw( m_indiP_zero, "zeroDM");
    if( derived().registerIndiPropertyNew( m_indiP_zero, st_newCallBack_zero) < 0)
    {
       #ifndef DM_TEST_NOLOG
@@ -717,14 +687,7 @@ int dm<derivedT,realT>::appStartup()
    }
    
    //Register the release INDI property
-   m_indiP_release = pcf::IndiProperty(pcf::IndiProperty::Text);
-   m_indiP_release.setDevice(derived().configName());
-   m_indiP_release.setName("releaseDM");
-   m_indiP_release.setPerm(pcf::IndiProperty::ReadWrite); 
-   m_indiP_release.setState(pcf::IndiProperty::Idle);
-   m_indiP_release.add(pcf::IndiElement("request"));
-   m_indiP_release["request"] = "";
-   
+   derived().createStandardIndiRequestSw( m_indiP_release, "releaseDM");
    if( derived().registerIndiPropertyNew( m_indiP_release, st_newCallBack_release) < 0)
    {
       #ifndef DM_TEST_NOLOG
@@ -1071,7 +1034,7 @@ int dm<derivedT,realT>::loadFlat(const std::string & intarget)
    if(derived().m_indiDriver) derived().m_indiDriver->sendSetProperty (m_indiP_flats);
 
    
-   if(m_flatSet) setTest();
+   if(m_flatSet) setFlat();
    
    return 0;
 }
@@ -1143,6 +1106,8 @@ int dm<derivedT,realT>::setFlat()
    //Post the semaphore
    ImageStreamIO_closeIm(&m_flatImageStream);
    
+   derived().updateSwitchIfChanged(m_indiP_setFlat, "toggle", pcf::IndiElement::On, pcf::IndiProperty::Busy);
+   
    derivedT::template log<text_log>("flat set");
    
    return 0;
@@ -1191,6 +1156,8 @@ int dm<derivedT,realT>::zeroFlat()
    
    //Post the semaphore
    ImageStreamIO_closeIm(&m_flatImageStream);
+   
+   derived().updateSwitchIfChanged(m_indiP_setFlat, "toggle", pcf::IndiElement::Off, pcf::IndiProperty::Idle);
    
    derivedT::template log<text_log>("flat zeroed");
    
@@ -1714,14 +1681,14 @@ int dm<derivedT,realT>::newCallBack_init( const pcf::IndiProperty &ipRecv )
    {
       return derivedT::template log<software_error,-1>({__FILE__, __LINE__, "wrong INDI-P in callback"});
    }
-   
+      
    if(!ipRecv.find("request")) return 0;
    
-   std::string request = ipRecv["request"].get();
-      
-   if(request == "") return 0;
-   
-   return derived().initDM();
+   if( ipRecv["request"].getSwitchState() == pcf::IndiElement::On)
+   {
+      return derived().initDM();
+   }
+   return 0;  
 }
 
 template<class derivedT, typename realT>
@@ -1739,14 +1706,14 @@ int dm<derivedT,realT>::newCallBack_zero( const pcf::IndiProperty &ipRecv )
    {
       return derivedT::template log<software_error,-1>({__FILE__, __LINE__, "wrong INDI-P in callback"});
    }
-   
+      
    if(!ipRecv.find("request")) return 0;
    
-   std::string request = ipRecv["request"].get();
-      
-   if(request == "") return 0;
-   
-   return derived().zeroDM();
+   if( ipRecv["request"].getSwitchState() == pcf::IndiElement::On)
+   {
+      return derived().zeroDM();
+   }
+   return 0;  
 }
 
 template<class derivedT, typename realT>
@@ -1764,14 +1731,14 @@ int dm<derivedT,realT>::newCallBack_release( const pcf::IndiProperty &ipRecv )
    {
       return derivedT::template log<software_error,-1>({__FILE__, __LINE__, "wrong INDI-P in callback"});
    }
-   
+      
    if(!ipRecv.find("request")) return 0;
    
-   std::string request = ipRecv["request"].get();
-      
-   if(request == "") return 0;
-   
-   return derived().releaseDM();
+   if( ipRecv["request"].getSwitchState() == pcf::IndiElement::On)
+   {
+      return derived().releaseDM();
+   }
+   return 0;  
 }
 
 template<class derivedT, typename realT>

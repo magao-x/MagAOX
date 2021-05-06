@@ -118,12 +118,12 @@ public:
    /// Cleanup after a power off.
    /**
      */ 
-   int onPowerOff();
+   virtual int onPowerOff();
    
    /// Maintenace while powered off.
    /**
      */
-   int whilePowerOff();
+   virtual int whilePowerOff();
    
    /** \name DM Base Class Interface
      *
