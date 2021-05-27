@@ -93,7 +93,6 @@ OBJS = app/MagAOXApp.o \
        logger/types/telem.o \
        logger/logFileName.o \
        logger/logFileRaw.o \
-       logger/logManager.o \
        logger/logMap.o \
        logger/logMeta.o \
        modbus/modbus.o \
@@ -106,6 +105,9 @@ OBJS = app/MagAOXApp.o \
        tty/ttyUSB.o \
        tty/usbDevice.o
 
+#logger/logManager.o \
+
+              
 all: libMagAOX.hpp.gch libMagAOX.a  
 
 libMagAOX.hpp.gch: libMagAOX.hpp $(INCLUDEDEPS) logger/generated/logTypes.hpp

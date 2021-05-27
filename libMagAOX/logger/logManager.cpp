@@ -15,7 +15,7 @@ namespace MagAOX
 namespace logger
 {
 
-template struct logManager<logFileRaw>;
+//template struct logManager<logFileRaw>;
 
 } //namespace logger
 } //namespace MagAOX

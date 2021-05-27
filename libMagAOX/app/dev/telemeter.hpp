@@ -51,7 +51,7 @@ template<class derivedT>
 struct telemeter
 {
    ///The log manager type.
-   typedef logger::logManager<logFileRaw> logManagerT;
+   typedef logger::logManager<derivedT, logFileRaw> logManagerT;
    
    logManagerT m_tel;
    
@@ -170,7 +170,7 @@ template<typename telT>
 int telemeter<derivedT>::telem( const typename telT::messageT & msg)
 {
    
-   m_tel.log<telT>(msg, logPrio::LOG_TELEM);
+   m_tel.template log<telT>(msg, logPrio::LOG_TELEM);
 
    //Set timestamp   
    clock_gettime(CLOCK_REALTIME, &telT::lastRecord);
@@ -183,7 +183,7 @@ template<typename telT>
 int telemeter<derivedT>::telem( )
 {
    
-   m_tel.log<telT>(logPrio::LOG_TELEM);
+   m_tel.template log<telT>(logPrio::LOG_TELEM);
 
    //Set timestamp   
    clock_gettime(CLOCK_REALTIME, &telT::lastRecord);

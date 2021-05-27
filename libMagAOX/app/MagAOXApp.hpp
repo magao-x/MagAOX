@@ -75,7 +75,7 @@ class MagAOXApp : public application
 public:
 
    ///The log manager type.
-   typedef logger::logManager<logFileRaw> logManagerT;
+   typedef logger::logManager<MagAOXApp<_useINDI>, logFileRaw> logManagerT;
 
 protected:
 
@@ -264,10 +264,10 @@ private:
      * You never need to call this directly.
      */
    static void configLog( const std::string & name,  ///< [in] The name of the config value
-                          const int & code,          ///< [in] numeric code specifying the type
-                          const std::string & value, ///< [in] the value read by the config system
-                          const std::string & source ///< [in] the source of the value.
-                        );
+                   const int & code,          ///< [in] numeric code specifying the type
+                   const std::string & value, ///< [in] the value read by the config system
+                   const std::string & source ///< [in] the source of the value.
+                 );
 
    ///@} -- logging
 
@@ -1466,7 +1466,7 @@ int MagAOXApp<_useINDI>::log( const typename logT::messageT & msg,
                               logPrioT level
                             )
 {
-   m_log.log<logT>(msg, level);
+   m_log.template log<logT>(msg, level);
    return retval;
 }
 
@@ -1474,7 +1474,7 @@ template<bool _useINDI>
 template<typename logT, int retval>
 int MagAOXApp<_useINDI>::log( logPrioT level)
 {
-   m_log.log<logT>(level);
+   m_log.template log<logT>(level);
    return retval;
 }
 
@@ -1485,7 +1485,7 @@ void MagAOXApp<_useINDI>::configLog( const std::string & name,
                                      const std::string & source
                                    )
 {
-   m_log.log<config_log>({name, code, value, source});
+   m_log.template log<config_log>({name, code, value, source});
 }
 
 template<bool _useINDI>
