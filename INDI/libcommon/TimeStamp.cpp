@@ -9,6 +9,8 @@
 #include <algorithm>
 #include <limits>
 #include <stdio.h>
+#include <iostream>
+
 #include "TimeStamp.hpp"
 
 using std::string;
@@ -872,7 +874,8 @@ void TimeStamp::fromFormattedIso8601Str( const string &szIso8601 )
   tmCurr.tm_min = nMinute;
   tmCurr.tm_sec = nSecond;
 
-  m_tvCurr.tv_sec = long( local_timegm( &tmCurr ) );
+  //JRM changed to timegm from local_timegm
+  m_tvCurr.tv_sec = long( timegm( &tmCurr ) );
   m_tvCurr.tv_usec = nMicros;
 }
 
@@ -924,7 +927,8 @@ double TimeStamp::getMJD() const
   return tUtc;
 }
 
-////////////////////////////////////////////////////////////////////////////////
+////////////////////////////////////////////////////
+////////////////////////////
 /// Handles streaming the TimeStamp formatted string. See 'getFormattedStr'
 /// for details about the format of the string.
 /// @param strmOut The stream to be written to.

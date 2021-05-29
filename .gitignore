@@ -85,6 +85,7 @@ apps/mzmqClient/mzmqClient
 
 
 #o
+apps/observerCtrl/observerCtrl
 apps/ocam2KCtrl/ocam2KCtrl
 
 #p

@@ -18,6 +18,7 @@
 
 #include <cstdlib>
 #include <fstream>
+#include <sstream>
 
 #include <unordered_map>
 
@@ -258,6 +259,13 @@ public:
    template<typename logT, int retval=0>
    static int log( logPrioT level = logPrio::LOG_DEFAULT /**< [in] [optional] the log level.  The default is used if not specified.*/);
 
+   /// Handle a log message from the logging system
+   /** This is a callback from the logManager, and is called when the log thread is processing log entries.
+     * 
+     * Decides whether to display to stderr and whether to send via INDI.
+     */
+   void logMessage( bufferPtrT & b );
+   
 private:
    /// Callback for config system logging.
    /** Called by appConfigurator each time a value is set using the config() operator.
@@ -1043,6 +1051,8 @@ MagAOXApp<_useINDI>::MagAOXApp( const std::string & git_sha1,
 
    m_self = this;
 
+   m_log.parent(this);
+   
    //Set up config logging
    config.m_sources = true;
    config.configLog = configLog;
@@ -1476,6 +1486,37 @@ int MagAOXApp<_useINDI>::log( logPrioT level)
 {
    m_log.template log<logT>(level);
    return retval;
+}
+
+template<bool _useINDI>
+void MagAOXApp<_useINDI>::logMessage( bufferPtrT & b )
+{
+   if( logHeader::logLevel( b ) <= logPrio::LOG_NOTICE )
+   {
+      logStdFormat(std::cerr, b);
+      std::cerr << "\n";
+   }
+   
+   if(_useINDI && m_indiDriver)
+   {
+      pcf::IndiProperty msg;
+      msg.setDevice(m_configName);
+      
+      std::stringstream logstdf;
+      logMinStdFormat(logstdf, b);
+      
+      msg.setMessage(logstdf.str());
+      
+      //Set the INDI prop timespec to match the log entry
+      timespecX ts = logHeader::timespec(b);
+      timeval tv;
+      tv.tv_sec = ts.time_s;
+      tv.tv_usec = (long int) ( ((double) ts.time_ns)/1e3 );
+      
+      msg.setTimeStamp(pcf::TimeStamp(tv));
+      
+      m_indiDriver->sendMessage(msg);
+   }
 }
 
 template<bool _useINDI>

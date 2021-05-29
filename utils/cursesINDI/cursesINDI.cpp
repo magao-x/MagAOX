@@ -2,7 +2,6 @@
 //#define DEBUG_TMPOUT
 
 
-
 #include "cursesINDI.hpp"
 
 
@@ -18,11 +17,11 @@ int main()
    std::ofstream *fpout {nullptr};
    
    #ifdef DEBUG_TMPOUT
-   std::string fname = "/tmp/cursesINDI.txt";
+   std::string fname = "/tmp/cursesINDI_DEBUG.txt";
    fpout = new std::ofstream;
    fpout->open(fname);
-   
    #endif
+   
    
    
 
@@ -33,10 +32,8 @@ retry:
 
    while(notConnected)
    {   
-       
       ci = new cursesINDI("cursesINDI", "1.7", "1.7");
-
-
+      
       #ifdef DEBUG_TMPOUT
       ci->fpout = fpout;
       #endif
@@ -52,17 +49,24 @@ retry:
          ci->quitProcess();
          ci->deactivate();
          delete ci;
-         std::cout << "\r cursesINDI: Connection to INDI server failed.  Will retry in 5...";
+         std::cout << "\rcursesINDI: Connection to INDI server failed.  Will retry in 5...";
+         std::cout.flush();
          sleep(1);
          for(int i=4; i > 0; --i)
          {
             std::cout << i << "...";
+            std::cout.flush();
             sleep(1);
          }
-         std::cout << "\r cursesINDI: Retrying connection to INDI server . . .                                            \r";
+         std::cout << '\r';
+         std::cout << "cursesINDI: Retrying connection to INDI server . . .                             ";
+         std::cout.flush();
       }
       else
       {
+         std::cout << '\r';
+         std::cout << "cursesINDI: connected . . .                                                      ";
+         std::cout.flush();
          notConnected = false;
       }
    }
@@ -182,7 +186,7 @@ retry:
 
       std::cout << "\r cursesINDI: lost connection to indiserver.  Will retry in 5...";
       
-      sleep(1);
+      sleep(5);
       for(int i=4; i > 0; --i)
       {
          std::cout << i << "...";

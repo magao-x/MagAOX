@@ -151,6 +151,7 @@ int magAOXMaths::updateVals()
 
    my_val_maths["prod"] = v*other_val["value"].get<double>();
 
+   log<text_log>("set new value: " + std::to_string(v), logPrio::LOG_NOTICE);
    // publish maths
    my_val_maths.setState (pcf::IndiProperty::Ok);
    if(m_indiDriver) m_indiDriver->sendSetProperty (my_val_maths);
