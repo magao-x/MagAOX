@@ -314,7 +314,7 @@ void cursesINDI::handleMessage( const pcf::IndiProperty &ipRecv )
    
    char tstr1[25];
    
-   strftime(tstr1, 25, "%FT%H:%M:%S", &bdt);
+   strftime(tstr1, 25, "%H:%M:%S", &bdt);
    
    char tstr2[11];
    
