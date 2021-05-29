@@ -281,6 +281,8 @@ int sshDigger::loadConfigImpl( mx::app::appConfigurator & _config )
       }
       int mp = 0;
       _config.configUnused( mp, mx::app::iniFile::makeKey(sections[i], "monitorPort" ) );
+      bool cmp = false;
+      _config.configUnused( cmp, mx::app::iniFile::makeKey(sections[i], "compress" ) );
    }
    
    return 0;
