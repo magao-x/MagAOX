@@ -1539,7 +1539,7 @@ void pupilGuide::on_button_camlens_u_pressed()
    ip.setDevice("stagecamlensy");
    ip.setName("position");
    ip.add(pcf::IndiElement("target"));
-   ip["target"] = m_camlensy_pos + m_camlensStepSize;
+   ip["target"] = m_camlensy_pos - m_camlensStepSize;
    
    sendNewProperty(ip);
 }
@@ -1553,7 +1553,7 @@ void pupilGuide::on_button_camlens_ul_pressed()
    ip.setDevice("stagecamlensy");
    ip.setName("position");
    ip.add(pcf::IndiElement("target"));
-   ip["target"] = m_camlensy_pos + sqrt(2)*m_camlensStepSize;
+   ip["target"] = m_camlensy_pos - sqrt(2)*m_camlensStepSize;
    
    sendNewProperty(ip);
    
@@ -1590,7 +1590,7 @@ void pupilGuide::on_button_camlens_dl_pressed()
    ip.setDevice("stagecamlensy");
    ip.setName("position");
    ip.add(pcf::IndiElement("target"));
-   ip["target"] = m_camlensy_pos - sqrt(2)*m_camlensStepSize;
+   ip["target"] = m_camlensy_pos + sqrt(2)*m_camlensStepSize;
    
    sendNewProperty(ip);
    
@@ -1613,7 +1613,7 @@ void pupilGuide::on_button_camlens_d_pressed()
    ip.setDevice("stagecamlensy");
    ip.setName("position");
    ip.add(pcf::IndiElement("target"));
-   ip["target"] = m_camlensy_pos - m_camlensStepSize;
+   ip["target"] = m_camlensy_pos + m_camlensStepSize;
    
    sendNewProperty(ip);
 }
@@ -1664,7 +1664,7 @@ void pupilGuide::on_button_camlens_ur_pressed()
    ip.setDevice("stagecamlensy");
    ip.setName("position");
    ip.add(pcf::IndiElement("target"));
-   ip["target"] = m_camlensy_pos + sqrt(2)*m_camlensStepSize;
+   ip["target"] = m_camlensy_pos - sqrt(2)*m_camlensStepSize;
    
    sendNewProperty(ip);
    
@@ -1770,12 +1770,12 @@ void pupilGuide::on_buttonMod_rest_pressed()
    
 void pupilGuide::on_buttonPup_rest_pressed()
 {
-   pcf::IndiProperty ip(pcf::IndiProperty::Number);
+   pcf::IndiProperty ip(pcf::IndiProperty::Switch);
    
    ip.setDevice("ttmpupil");
    ip.setName("releaseDM");
    ip.add(pcf::IndiElement("request"));
-   ip["request"] = 1;
+   ip["request"].setSwitchState(pcf::IndiElement::On);
    
    sendNewProperty(ip);
    
@@ -1783,12 +1783,12 @@ void pupilGuide::on_buttonPup_rest_pressed()
 
 void pupilGuide::on_buttonPup_set_pressed()
 {
-   pcf::IndiProperty ip(pcf::IndiProperty::Number);
+   pcf::IndiProperty ip(pcf::IndiProperty::Switch);
    
    ip.setDevice("ttmpupil");
    ip.setName("initDM");
    ip.add(pcf::IndiElement("request"));
-   ip["request"] = 1;
+   ip["request"].setSwitchState(pcf::IndiElement::On);
    
    sendNewProperty(ip);
 }
