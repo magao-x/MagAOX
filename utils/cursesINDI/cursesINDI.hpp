@@ -69,6 +69,7 @@ public:
 
    WINDOW * w_interactWin {nullptr};
    WINDOW * w_curvalWin {nullptr};
+   WINDOW * w_attentionWin {nullptr};
    
    WINDOW * w_countWin {nullptr};
 
@@ -313,14 +314,46 @@ void cursesINDI::handleMessage( const pcf::IndiProperty &ipRecv )
    gmtime_r( &tt, &bdt);
    
    char tstr1[25];
-   
-   strftime(tstr1, 25, "%H:%M:%S", &bdt);
-   
+   strftime(tstr1, sizeof(tstr1), "%H:%M:%S", &bdt);
    char tstr2[11];
-   
-   snprintf(tstr2, 11, ".%06i", static_cast<int>(ipRecv.getTimeStamp().getTimeVal().tv_usec)); //casting in case we switch to int64_t
+   snprintf(tstr2, sizeof(tstr2), ".%06i", static_cast<int>(ipRecv.getTimeStamp().getTimeVal().tv_usec)); //casting in case we switch to int64_t
          
-   m_msgout << std::string(tstr1) << std::string(tstr2) << " [" << ipRecv.getDevice() << "] " << ipRecv.getMessage() << std::endl;
+   
+   std::string msg = ipRecv.getMessage();
+   
+   if(msg.size() > 4)
+   {
+      std::string prio = msg.substr(0,4);
+      if(prio == "NOTE")
+      {
+         m_msgout << "\033[1m";
+      }
+      else if(prio == "WARN")
+      {
+         m_msgout << "\033[93m\033[1m";
+      }
+      else if(prio == "ERR ")
+      {
+         m_msgout << "\033[91m\033[1m";
+      }
+      else if(prio == "CRIT")
+      {
+         m_msgout << "\033[41m\033[1m";
+      }
+      else if(prio == "ALRT")
+      {
+         m_msgout << "\033[41m\033[1m";
+      }
+      else if(prio == "EMER")
+      {
+         m_msgout << "\033[41m\033[1m";
+      }
+   }   
+   m_msgout << std::string(tstr1) << std::string(tstr2) << " [" << ipRecv.getDevice() << "] " << msg;
+   
+   m_msgout << "\033[0m";
+   m_msgout << std::endl;
+   
    
    ++m_msgsPrinted;
    if(m_msgsPrinted > m_msgsMax)
@@ -364,6 +397,11 @@ void cursesINDI::startUp()
    if(w_curvalWin == nullptr)
    {
       w_curvalWin = newwin( 1, m_minWidth, m_yTop-2, m_xLeft);
+   }
+   
+   if(w_attentionWin == nullptr)
+   {
+      w_attentionWin = newwin( 1, m_minWidth, m_yTop-4, m_xLeft);
    }
    
    keypad(w_interactWin, TRUE);
@@ -464,9 +502,14 @@ void cursesINDI::redrawTable()
    
    m_cellContents.clear();
 
+   bool fsmAlerts = false;
+   
    for( elementMapIteratorT es = knownElements.begin(); es != knownElements.end(); ++es)
    {
+      if(fpout) *fpout << knownProps[es->second.propKey].getName() << " " << knownProps[es->second.propKey].getState() << "\n";
       
+      if(knownProps[es->second.propKey].getName() == "fsm" &&
+            knownProps[es->second.propKey].getState() == pcf::IndiProperty::Alert) fsmAlerts = true;
 
       std::vector<std::string> s;
 
@@ -485,6 +528,15 @@ void cursesINDI::redrawTable()
    }
 
    draw();
+   
+   if(fpout) *fpout << "fsmAlerts: " << fsmAlerts << "\n";
+   
+   wclear(w_attentionWin);
+   if(fsmAlerts)
+   {
+      wprintw(w_attentionWin, "!! there are FSM alerts !!");
+   }
+   wrefresh(w_attentionWin);
    
    m_redraw -= start_redraw;
    if(m_redraw <0) m_redraw = 0;
@@ -513,8 +565,15 @@ void cursesINDI::updateTable()
    
    updateCurVal();
    
+   bool fsmAlerts {false};
+   
    for(auto it = knownElements.begin(); it != knownElements.end(); ++it)
    {
+      if(fpout) *fpout << knownProps[it->second.propKey].getName() << " " << knownProps[it->second.propKey].getState() << "\n";
+      
+      if(knownProps[it->second.propKey].getName() == "fsm" &&
+            knownProps[it->second.propKey].getState() == pcf::IndiProperty::Alert) fsmAlerts = true;
+      
       if(it->second.tableRow == -1) continue;
       
       if(m_cellContents[it->second.tableRow][2] != displayProperty(knownProps[it->second.propKey]) )
@@ -552,6 +611,14 @@ void cursesINDI::updateTable()
       //updateContents( it->second.tableRow, 4,  knownProps[it->second.propKey][it->second.name].getValue());
    }
 
+   if(fpout) *fpout << "fsmAlerts: " << fsmAlerts << "\n";
+   
+   wclear(w_attentionWin);
+   if(fsmAlerts)
+   {
+      wprintw(w_attentionWin, "!! there are FSM alerts !!");
+   }
+   wrefresh(w_attentionWin);
    //print();
    
 //    wmove(w_interactWin,cy,cx);
