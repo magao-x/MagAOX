@@ -27,6 +27,7 @@ namespace sys
   * \ingroup sys
   */
 int runCommand( std::vector<std::string> & commandOutput, ///< [out] the output, line by line.  If an error, first entry contains the message.
+                std::vector<std::string> & commandStderr, ///< [out] the output of stderr.
                 std::vector<std::string> & commandList    ///< [in] command to be run, with one entry per command line word
               );
 

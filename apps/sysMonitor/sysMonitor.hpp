@@ -546,12 +546,20 @@ int sysMonitor::findCPUTemperatures(std::vector<float>& temps)
 {
    std::vector<std::string> commandList{"sensors"};
    
-   std::vector<std::string> commandOutput;
+   std::vector<std::string> commandOutput, commandError;
    
-   if(sys::runCommand(commandOutput, commandList) < 0)
+   if(sys::runCommand(commandOutput, commandError, commandList) < 0)
    {
       if(commandOutput.size() < 1) return log<software_error,-1>({__FILE__, __LINE__});
       else return log<software_error,-1>({__FILE__, __LINE__, commandOutput[0]});
+   }
+   
+   if(commandError.size() > 0)
+   {
+      for(size_t n=0; n< commandError.size(); ++n)
+      {
+         log<software_error>({__FILE__, __LINE__, "sensors stderr: " + commandError[n]});
+      }
    }
    
    int rv = -1;
@@ -692,12 +700,20 @@ int sysMonitor::criticalCoreTemperature(std::vector<float>& v)
 int sysMonitor::findCPULoads(std::vector<float>& loads) 
 {
    std::vector<std::string> commandList{"mpstat", "-P", "ALL", "1", "1"};
-   std::vector<std::string> commandOutput;
+   std::vector<std::string> commandOutput, commandError;
    
-   if(sys::runCommand(commandOutput, commandList) < 0)
+   if(sys::runCommand(commandOutput, commandError, commandList) < 0)
    {
       if(commandOutput.size() < 1) return log<software_error,-1>({__FILE__, __LINE__});
       else return log<software_error,-1>({__FILE__, __LINE__, commandOutput[0]});
+   }
+   
+   if(commandError.size() > 0)
+   {
+      for(size_t n=0; n< commandError.size(); ++n)
+      {
+         log<software_error>({__FILE__, __LINE__, "mpstat stderr: " + commandError[n]});
+      }
    }
    
    int rv = -1;
@@ -755,12 +771,20 @@ int sysMonitor::findDiskTemperature( std::vector<std::string> & hdd_names,
       commandList.push_back(m_diskNameList[n]);
    }
    
-   std::vector<std::string> commandOutput;
+   std::vector<std::string> commandOutput, commandError;
    
-   if(sys::runCommand(commandOutput, commandList) < 0)
+   if(sys::runCommand(commandOutput, commandError, commandList) < 0)
    {
       if(commandOutput.size() < 1) return log<software_error,-1>({__FILE__, __LINE__});
       else return log<software_error,-1>({__FILE__, __LINE__, commandOutput[0]});
+   }
+   
+   if(commandError.size() > 0)
+   {
+      for(size_t n=0; n< commandError.size(); ++n)
+      {
+         log<software_error>({__FILE__, __LINE__, "hddtemp stderr: " + commandError[n]});
+      }
    }
    
    int rv = -1;
@@ -868,12 +892,20 @@ int sysMonitor::findDiskUsage(float &rootUsage, float &dataUsage, float &bootUsa
 {
    std::vector<std::string> commandList{"df"};
    
-   std::vector<std::string> commandOutput;
+   std::vector<std::string> commandOutput, commandError;
    
-   if(sys::runCommand(commandOutput, commandList) < 0)
+   if(sys::runCommand(commandOutput, commandError, commandList) < 0)
    {
       if(commandOutput.size() < 1) return log<software_error,-1>({__FILE__, __LINE__});
       else return log<software_error,-1>({__FILE__, __LINE__, commandOutput[0]});
+   }
+   
+   if(commandError.size() > 0)
+   {
+      for(size_t n=0; n< commandError.size(); ++n)
+      {
+         log<software_error>({__FILE__, __LINE__, "df stderr: " + commandError[n]});
+      }
    }
    
    int rv = -1;
@@ -952,12 +984,20 @@ int sysMonitor::findRamUsage(float& ramUsage)
 {
    std::vector<std::string> commandList{"free", "-m"};
    
-   std::vector<std::string> commandOutput;
+   std::vector<std::string> commandOutput, commandError;
    
-   if(sys::runCommand(commandOutput, commandList) < 0)
+   if(sys::runCommand(commandOutput, commandError, commandList) < 0)
    {
       if(commandOutput.size() < 1) return log<software_error,-1>({__FILE__, __LINE__});
       else return log<software_error,-1>({__FILE__, __LINE__, commandOutput[0]});
+   }
+   
+   if(commandError.size() > 0)
+   {
+      for(size_t n=0; n< commandError.size(); ++n)
+      {
+         log<software_error>({__FILE__, __LINE__, "free stderr: " + commandError[n]});
+      }
    }
    
    for (auto line: commandOutput) 
@@ -1006,12 +1046,20 @@ int sysMonitor::findChronyStatus()
 {
    std::vector<std::string> commandList{"chronyc", "-c", "tracking"};
    
-   std::vector<std::string> commandOutput;
+   std::vector<std::string> commandOutput, commandError;
    
-   if(sys::runCommand(commandOutput, commandList) < 0)
+   if(sys::runCommand(commandOutput, commandError, commandList) < 0)
    {
       if(commandOutput.size() < 1) return log<software_error,-1>({__FILE__, __LINE__});
       else return log<software_error,-1>({__FILE__, __LINE__, commandOutput[0]});
+   }
+   
+   if(commandError.size() > 0)
+   {
+      for(size_t n=0; n< commandError.size(); ++n)
+      {
+         log<software_error>({__FILE__, __LINE__, "chronyc stderr: " + commandError[n]});
+      }
    }
    
    if(commandOutput.size() < 1)
