@@ -474,6 +474,10 @@ public:
 private:
    stateCodes::stateCodeT m_state {stateCodes::UNINITIALIZED}; ///< The application's state.  Never ever set this directly, use state(const stateCodeT & s).
 
+   bool m_stateAlert {false}; //Flag to control whether the FSM is in an alert state.  Once set, only user acknowledgement can change this.
+   
+   bool m_gitAlert {false}; //Flag set if there is a git modified warning to alert on.
+   
    int m_stateLogged {0} ;///< Counter and flag for use to log errors just once.  Never ever access directly, use stateLogged().
 
 public:
@@ -483,11 +487,14 @@ public:
    stateCodes::stateCodeT state();
 
    /// Set the current state code
-   /** If no change, returns immediately with no actions.
-     *
+    /*
      * If it is a change, the state change is logged.  Also resets m_stateLogged to 0.
+     * 
+     * Will also update INDI if there is a change.
      */
-   void state(const stateCodes::stateCodeT & s /**< [in] The new application state */);
+   void state( const stateCodes::stateCodeT & s, ///< [in] The new application state 
+               bool stateAlert = false ///< [in] [optional] flag to set the alert state of the FSM property.
+             );
 
    /// Updates and returns the value of m_stateLogged.  Will be 0 on first call after a state change, \>0 afterwards.
    /** This method exists to facilitate logging the reason for a state change once, but not
@@ -510,6 +517,14 @@ public:
 
    ///@} --Application State
 
+private:
+   
+   /// Clear the FSM alert state.
+   /** This can only be done from within this class, and this
+     * should only be possible via user action via INDI.
+     */ 
+   int clearFSMAlert();
+   
    /** \name INDI Interface
      *
      * For reference: "Get" and "New" refer to properties we own. "Set" refers to properties owned by others.
@@ -911,6 +926,25 @@ protected:
    ///indi Property to report the application state.
    pcf::IndiProperty m_indiP_state;
 
+   ///indi Property to clear an FSM alert.
+   pcf::IndiProperty m_indiP_clearFSMAlert;
+   
+   /// The static callback function to be registered for requesting to clear the FSM alert
+   /**
+     * \returns 0 on success.
+     * \returns -1 on error.
+     */
+   static int st_newCallBack_clearFSMAlert( void * app, ///< [in] a pointer to this, will be static_cast-ed to MagAOXApp.
+                                            const pcf::IndiProperty &ipRecv ///< [in] the INDI property sent with the the new property request.
+                                          );
+
+   /// The callback called by the static version, to actually process the FSM Alert Clear request.
+   /**
+     * \returns 0 on success.
+     * \returns -1 on error.
+     */
+   int newCallBack_clearFSMAlert( const pcf::IndiProperty &ipRecv /**< [in] the INDI property sent with the the new property request.*/);
+   
    ///@} --INDI Interface
 
    /** \name Power Management
@@ -1059,11 +1093,20 @@ MagAOXApp<_useINDI>::MagAOXApp( const std::string & git_sha1,
 
    //We log the current GIT status.
    logPrioT gl = logPrio::LOG_INFO;
-   if(git_modified) gl = logPrio::LOG_WARNING;
+   if(git_modified) 
+   {
+      gl = logPrio::LOG_WARNING;
+      m_gitAlert = true;
+   }
    log<git_state>(git_state::messageT("MagAOX", git_sha1, git_modified), gl);
 
    gl = logPrio::LOG_INFO;
-   if(MXLIB_UNCOMP_REPO_MODIFIED) gl = logPrio::LOG_WARNING;
+   if(MXLIB_UNCOMP_REPO_MODIFIED) 
+   {
+      gl = logPrio::LOG_WARNING;
+      m_gitAlert = true;
+   }
+   
    log<git_state>(git_state::messageT("mxlib", MXLIB_UNCOMP_CURRENT_SHA1, MXLIB_UNCOMP_REPO_MODIFIED), gl);
 
    //Get the uids of this process.
@@ -1161,7 +1204,9 @@ void MagAOXApp<_useINDI>::setDefaults( int argc,
    REG_INDI_NEWPROP_NOCB(m_indiP_state, "fsm", pcf::IndiProperty::Text);
    m_indiP_state.add (pcf::IndiElement("state"));
 
-
+   createStandardIndiRequestSw( m_indiP_clearFSMAlert, "fsm_clear_alert", "Clear FSM Alert", "FSM");                                                     
+   registerIndiPropertyNew(m_indiP_clearFSMAlert, st_newCallBack_clearFSMAlert);
+   
    return;
 
 }
@@ -1171,8 +1216,10 @@ void MagAOXApp<_useINDI>::setupBasicConfig() //virtual
 {
    //App stuff
    config.add("loopPause", "p", "loopPause", argType::Required, "", "loopPause", false, "unsigned long", "The main loop pause time in ns");
-   config.add("RTPriority", "P", "RTPriority", argType::Required, "", "RTPriority", false, "unsigned", "The real-time priority (0-99)");
+   //config.add("RTPriority", "P", "RTPriority", argType::Required, "", "RTPriority", false, "unsigned", "The real-time priority (0-99)");
 
+   config.add("ignore_git", "", "ignore_git", argType::True, "", "", false, "bool", "set to true to ignore git status");
+   
    //Logger Stuff
    m_log.setupConfig(config);
 
@@ -1197,6 +1244,14 @@ void MagAOXApp<_useINDI>::setupBasicConfig() //virtual
 template<bool _useINDI>
 void MagAOXApp<_useINDI>::loadBasicConfig() //virtual
 {
+   bool ig {false};
+   config(ig, "ignore_git");
+   
+   if(!ig && m_gitAlert)
+   {
+      m_stateAlert = true;
+   }
+   
    //---------- Setup the logger ----------//
    m_log.logName(m_configName);
    m_log.loadConfig(config);
@@ -1495,6 +1550,11 @@ void MagAOXApp<_useINDI>::logMessage( bufferPtrT & b )
    {
       logStdFormat(std::cerr, b);
       std::cerr << "\n";
+   }
+   
+   if( logHeader::logLevel( b ) < logPrio::LOG_ERROR )
+   {
+      state(m_state, true); //For anything worse than error, we set the FSM state to alert
    }
    
    if(_useINDI && m_indiDriver)
@@ -2011,9 +2071,11 @@ stateCodes::stateCodeT MagAOXApp<_useINDI>::state()
 }
 
 template<bool _useINDI>
-void MagAOXApp<_useINDI>::state(const stateCodes::stateCodeT & s)
+void MagAOXApp<_useINDI>::state( const stateCodes::stateCodeT & s,
+                                 bool stateAlert
+                               )
 {
-   //Only do anything if it's a change
+   //Only log anything if it's a change
    if(m_state != s)
    {
       logPrioT lvl = logPrio::LOG_INFO;
@@ -2025,6 +2087,13 @@ void MagAOXApp<_useINDI>::state(const stateCodes::stateCodeT & s)
       m_state = s;
       m_stateLogged = 0;
    }
+
+   if(m_stateAlert != stateAlert && stateAlert == true)
+   {
+      m_stateAlert = stateAlert;
+      log<text_log>("FSM alert set", logPrio::LOG_WARNING );
+      
+   }
    
    //Check to make sure INDI is up to date
    std::unique_lock<std::mutex> lock(m_indiMutex, std::try_to_lock);  //Lock the mutex before conducting INDI communications.
@@ -2034,11 +2103,20 @@ void MagAOXApp<_useINDI>::state(const stateCodes::stateCodeT & s)
    {  
       ///\todo move this to a function in stateCodes
       pcf::IndiProperty::PropertyStateType stst = INDI_IDLE;
-      if(m_state == stateCodes::READY) stst = INDI_OK;
-      if(m_state == stateCodes::OPERATING || m_state == stateCodes::HOMING || m_state == stateCodes::CONFIGURING) stst = INDI_BUSY;
-      if( m_state < stateCodes::NODEVICE ) stst = INDI_ALERT;
-      else if (m_state <= stateCodes::LOGGEDIN ) stst = INDI_IDLE;
-      else if (m_state == stateCodes::NOTHOMED || m_state == stateCodes::SHUTDOWN) stst = INDI_IDLE;
+      
+      //If it's already in the "ALERT" state, then this can't take it out of it.
+      if(m_stateAlert == true) 
+      {
+         stst = INDI_ALERT;
+      }
+      else
+      {
+         if(m_state == stateCodes::READY) stst = INDI_OK;
+         else if(m_state == stateCodes::OPERATING || m_state == stateCodes::HOMING || m_state == stateCodes::CONFIGURING) stst = INDI_BUSY;
+         else if( m_state < stateCodes::NODEVICE ) stst = INDI_ALERT;
+         else if (m_state <= stateCodes::LOGGEDIN ) stst = INDI_IDLE;
+         else if (m_state == stateCodes::NOTHOMED || m_state == stateCodes::SHUTDOWN) stst = INDI_IDLE;
+      }
       
       updateIfChanged(m_indiP_state, "state", stateCodes::codeText(m_state), stst);
    }
@@ -2057,6 +2135,27 @@ int MagAOXApp<_useINDI>::stateLogged()
       m_stateLogged = 1;
       return 0;
    }
+}
+
+template<bool _useINDI>
+int MagAOXApp<_useINDI>::clearFSMAlert()
+{
+   if(m_stateAlert == false) return 0;
+   m_stateAlert = false;
+   log<text_log>("FSM alert cleared", logPrio::LOG_WARNING );
+   
+   pcf::IndiProperty::PropertyStateType stst = INDI_IDLE;
+   
+   if(m_state == stateCodes::READY) stst = INDI_OK;
+   else if(m_state == stateCodes::OPERATING || m_state == stateCodes::HOMING || m_state == stateCodes::CONFIGURING) stst = INDI_BUSY;
+   else if( m_state < stateCodes::NODEVICE ) stst = INDI_ALERT;
+   else if (m_state <= stateCodes::LOGGEDIN ) stst = INDI_IDLE;
+   else if (m_state == stateCodes::NOTHOMED || m_state == stateCodes::SHUTDOWN) stst = INDI_IDLE;
+         
+   updateIfChanged(m_indiP_state, "state", stateCodes::codeText(m_state), stst);
+   
+   return 0;
+      
 }
 
 /*-------------------------------------------------------------------------------------*/
@@ -2915,6 +3014,35 @@ int MagAOXApp<_useINDI>::sendNewProperty( const pcf::IndiProperty & ipSend )
       return -1;
    }
 
+   return 0;
+}
+
+template<bool _useINDI>
+int MagAOXApp<_useINDI>::st_newCallBack_clearFSMAlert( void * app,
+                                                       const pcf::IndiProperty &ipRecv
+                                                     )
+{
+   return static_cast<MagAOXApp<_useINDI> *>(app)->newCallBack_clearFSMAlert(ipRecv);
+}
+
+template<bool _useINDI>
+int MagAOXApp<_useINDI>::newCallBack_clearFSMAlert( const pcf::IndiProperty &ipRecv )
+{
+
+   if(ipRecv.getName() != m_indiP_clearFSMAlert.getName()) 
+   {
+      return log<software_error, -1>({__FILE__, __LINE__, "wrong indi property received"});      
+   }
+   
+   if(!ipRecv.find("request")) return 0;
+   
+   if(ipRecv["request"].getSwitchState() == pcf::IndiElement::On )
+   {
+      clearFSMAlert();
+      updateSwitchIfChanged(m_indiP_clearFSMAlert, "request", pcf::IndiElement::Off, INDI_IDLE); 
+   }
+
+   
    return 0;
 }
 

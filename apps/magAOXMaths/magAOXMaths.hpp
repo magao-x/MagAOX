@@ -143,6 +143,12 @@ int magAOXMaths::updateVals()
    // extract value
    double v = my_val["value"].get<double>();
 
+   if(v == -1) log<text_log>( "value set to -1!", logPrio::LOG_WARNING);
+   if(v == -2) log<text_log>( "value set to -2!", logPrio::LOG_ERROR);
+   if(v == -3) log<text_log>( "value set to -3!", logPrio::LOG_CRITICAL);
+   if(v == -4) log<text_log>( "value set to -4!", logPrio::LOG_ALERT);
+   if(v == -5) log<text_log>( "value set to -5!", logPrio::LOG_EMERGENCY);
+   
    // fill maths
    my_val_maths["value"] = v;
    my_val_maths["sqr"] = v*v;
