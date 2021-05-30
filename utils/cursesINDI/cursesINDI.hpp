@@ -212,6 +212,9 @@ cursesINDI::cursesINDI( const std::string &szName,
 cursesINDI::~cursesINDI()
 {
    if( w_interactWin ) delwin(w_interactWin);
+   if( w_curvalWin ) delwin(w_curvalWin);
+   if( w_attentionWin ) delwin(w_attentionWin);
+   if( w_countWin) delwin(w_countWin);
 }
 
 void cursesINDI::handleDefProperty( const pcf::IndiProperty &ipRecv )
@@ -531,6 +534,11 @@ void cursesINDI::redrawTable()
    
    if(fpout) *fpout << "fsmAlerts: " << fsmAlerts << "\n";
    
+   int cx, cy;
+   getyx(w_interactWin, cy, cx);
+   int cs = cursStat();
+   cursStat(0);
+   
    wclear(w_attentionWin);
    if(fsmAlerts)
    {
@@ -538,12 +546,13 @@ void cursesINDI::redrawTable()
    }
    wrefresh(w_attentionWin);
    
+   wmove(w_interactWin,cy,cx);
+   cursStat(cs);
+   wrefresh(w_interactWin);
+   
    m_redraw -= start_redraw;
    if(m_redraw <0) m_redraw = 0;
-
    
-   
-
    _moveCurrent(m_currY, m_currX);
 }
 
@@ -613,12 +622,19 @@ void cursesINDI::updateTable()
 
    if(fpout) *fpout << "fsmAlerts: " << fsmAlerts << "\n";
    
+   getyx(w_interactWin, cy, cx);
+   cs = cursStat();
+   cursStat(0);
    wclear(w_attentionWin);
    if(fsmAlerts)
    {
       wprintw(w_attentionWin, "!! there are FSM alerts !!");
    }
    wrefresh(w_attentionWin);
+   wmove(w_interactWin,cy,cx);
+   cursStat(cs);
+   wrefresh(w_interactWin);
+            
    //print();
    
 //    wmove(w_interactWin,cy,cx);
@@ -631,6 +647,11 @@ void cursesINDI::updateTable()
 
 void cursesINDI::updateCurVal( )
 {
+   int cx, cy;
+   getyx(w_interactWin, cy, cx);
+   int cs = cursStat();
+   
+   cursStat(0);
    wclear(w_curvalWin);
       
    auto it = knownElements.begin();
@@ -649,20 +670,14 @@ void cursesINDI::updateCurVal( )
    std::string cval = "> " + it->second.propKey + "." + it->second.name + " = ";
    
    cval += displayValue( knownProps[it->second.propKey], it->second.name);
-//    if( knownProps[it->second.propKey].getType() == pcf::IndiProperty::Text || knownProps[it->second.propKey].getType() == pcf::IndiProperty::Number)
-//    {
-//       cval += knownProps[it->second.propKey][it->second.name].getValue();
-//    }
-//    else if( knownProps[it->second.propKey].getType() == pcf::IndiProperty::Switch)
-//    {
-//       if( knownProps[it->second.propKey][it->second.name].getSwitchState() == pcf::IndiElement::Off ) cv += "|O|";
-//       if( knownProps[it->second.propKey][it->second.name].getSwitchState() == pcf::IndiElement::On ) cv += "|X|";
-//       
-//    }
 
    wprintw(w_curvalWin, cval.c_str());
    wrefresh(w_curvalWin);
 
+   wmove(w_interactWin,cy,cx);
+   cursStat(cs);
+   wrefresh(w_interactWin);
+   
    return;
 }
 
