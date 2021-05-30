@@ -234,6 +234,8 @@ void pi335Ctrl::setupConfig()
    
    config.add("stage.homePos1", "", "stage.homePos1", argType::Required, "stage", "homePos1", false, "float", "Home position of axis 1.  Default is 17.5.");
    config.add("stage.homePos2", "", "stage.homePos2", argType::Required, "stage", "homePos2", false, "float", "Home position of axis 2.  Default is 17.5.");
+   
+   config.add("dm.calibRelDir", "", "dm.calibRelDir", argType::Required, "dm", "calibRelDir", false, "string", "Used to find the default calib directory.");
 }
 
 int pi335Ctrl::loadConfigImpl( mx::app::appConfigurator & _config )
@@ -249,7 +251,10 @@ int pi335Ctrl::loadConfigImpl( mx::app::appConfigurator & _config )
    }
    
    dev::ioDevice::loadConfig(_config);
-   
+
+   m_calibRelDir = "ttmpupil";
+   config(m_calibRelDir, "dm.calibRelDir");
+      
    dev::dm<pi335Ctrl,float>::loadConfig(_config);
    
    config(m_homePos1, "stage.homePos1");
