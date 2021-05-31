@@ -30,6 +30,28 @@ namespace indi
 #define INDI_ALERT (pcf::IndiProperty::Alert)
   
 
+/// Add a standard INDI Text element
+/**
+  * \returns 0 on success 
+  * \returns -1 on error
+  */ 
+inline
+int addTextElement( pcf::IndiProperty & prop, ///< [out] the property to which to add the elemtn
+                    const std::string & name,  ///< [in] the name of the element
+                    const std::string & label = "" ///< [in] [optional] the GUI label suggestion for this property
+                  )                                                
+{
+   prop.add(pcf::IndiElement(name, 0));
+      
+   //Don't set "" just in case libcommon does something with defaults
+   if(label != "")
+   {
+      prop[name].setLabel(label);
+   }
+   
+   return 0;
+}
+
 
 /// Add a standard INDI Number element
 /**
