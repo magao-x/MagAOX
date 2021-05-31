@@ -100,9 +100,13 @@ def _read_processes(filepath):
     processes = {}
     with open(filepath) as procfile:
         for line in procfile:
-            if line[0] == '#':
+            if line[0] == '#' or len(line.strip()) == 0:
                 continue
-            process_name, executable = line.strip().split()
+            try:
+                process_name, executable = line.strip().split()
+            except ValueError:
+                failure(f"Could not parse line {repr(line)} from {filepath}")
+                raise
             processes[process_name] = executable
     return processes
 
