@@ -1218,7 +1218,7 @@ void MagAOXApp<_useINDI>::setupBasicConfig() //virtual
    config.add("loopPause", "p", "loopPause", argType::Required, "", "loopPause", false, "unsigned long", "The main loop pause time in ns");
    //config.add("RTPriority", "P", "RTPriority", argType::Required, "", "RTPriority", false, "unsigned", "The real-time priority (0-99)");
 
-   config.add("ignore_git", "", "ignore_git", argType::True, "", "", false, "bool", "set to true to ignore git status");
+   config.add("ignore_git", "", "ignore-git", argType::True, "", "", false, "bool", "set to true to ignore git status");
    
    //Logger Stuff
    m_log.setupConfig(config);
