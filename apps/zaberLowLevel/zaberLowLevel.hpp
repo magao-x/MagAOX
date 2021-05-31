@@ -516,10 +516,10 @@ int zaberLowLevel::appLogic()
 
          m_stages[i].getMaxPos(m_port);
          updateIfChanged(m_indiP_max_pos, m_stages[i].name(), m_stages[i].maxPos());
+         
       }
-      
       state(stateCodes::READY);
-      
+      return 0;
    }
 
    if( state() == stateCodes::READY )
