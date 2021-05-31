@@ -21,9 +21,11 @@ apps_rtc = \
 	ttmModulator \
 	bmcCtrl \
 	pi335Ctrl \
-	pupilFit
+	pupilFit \
+        cacaoInterface
 
 apps_icc = \
+        cacaoInterface \
 	filterWheelCtrl \
 	hsfwCtrl \
 	baslerCtrl \
@@ -39,9 +41,9 @@ apps_icc = \
 
 apps_aoc = \
 	trippLitePDU \
-    tcsInterface \
-    adcTracker \
-    kTracker
+        tcsInterface \
+        adcTracker \
+        kTracker
 
 # apps_vm = none yet
 apps_tic = \
