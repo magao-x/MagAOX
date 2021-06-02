@@ -51,10 +51,7 @@ public:
                                      QLineEdit * modeTarget 
                                    );
 public slots:
-
-   
-   
-      
+    
    void on_modeSlider_0_sliderMoved( double sl );
    void on_modeSlider_1_sliderMoved( double sl );
    void on_modeSlider_2_sliderMoved( double sl );
@@ -65,7 +62,6 @@ public slots:
    void on_modeSlider_7_sliderMoved( double sl );
    void on_modeSlider_8_sliderMoved( double sl );
    void on_modeSlider_9_sliderMoved( double sl );
-   void on_modeSlider_10_sliderMoved( double sl );
 
    void on_modeSlider_0_sliderReleased();
    void on_modeSlider_1_sliderReleased();
@@ -77,9 +73,6 @@ public slots:
    void on_modeSlider_7_sliderReleased();
    void on_modeSlider_8_sliderReleased();
    void on_modeSlider_9_sliderReleased();
-   void on_modeSlider_10_sliderReleased();
-   
-   
    
    void on_modeTarget_0_returnPressed();
    void on_modeTarget_1_returnPressed();
@@ -91,7 +84,6 @@ public slots:
    void on_modeTarget_7_returnPressed();
    void on_modeTarget_8_returnPressed();
    void on_modeTarget_9_returnPressed();
-   void on_modeTarget_10_returnPressed();
    
    void on_modeZero_0_pressed();
    void on_modeZero_1_pressed();
@@ -103,7 +95,6 @@ public slots:
    void on_modeZero_7_pressed();
    void on_modeZero_8_pressed();
    void on_modeZero_9_pressed();
-   void on_modeZero_10_pressed();
    
    void on_modeZero_these_pressed();
    void on_modeZero_all_pressed();

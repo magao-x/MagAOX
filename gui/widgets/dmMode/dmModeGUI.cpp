@@ -85,7 +85,7 @@ int dmModeGUI::handleSetProperty( const pcf::IndiProperty & ipRecv /**< [in] the
    if(ipRecv.getName() == "current_amps")
    {
       std::string elName;
-      for(size_t n=0; n<11; ++n)
+      for(size_t n=0; n<10; ++n)
       {
          elName = mx::ioutils::convertToString<size_t, 4, '0'>(n);
       
@@ -175,8 +175,6 @@ int dmModeGUI::updateGUI( size_t ch,
          return updateGUI( ui.modeCurrent_8, ui.modeTarget_8, ui.modeSlider_8, amp );
       case 9:
          return updateGUI( ui.modeCurrent_9, ui.modeTarget_9, ui.modeSlider_9, amp );
-      case 10:
-         return updateGUI( ui.modeCurrent_10, ui.modeTarget_10, ui.modeSlider_10, amp );
       default:
          std::cerr << "bad channel number in updateGUI\n";
          return -1;
@@ -267,13 +265,6 @@ void dmModeGUI::on_modeSlider_9_sliderMoved( double sl)
    ui.modeTarget_9->setText(QString(nstr));
 }
 
-void dmModeGUI::on_modeSlider_10_sliderMoved( double sl)
-{
-   char nstr[8];
-   snprintf(nstr, sizeof(nstr), "%0.3f", slider2amp(sl));
-   ui.modeTarget_10->setText(QString(nstr));
-}
-
 void dmModeGUI::on_modeSlider_0_sliderReleased()
 {
    float amp = slider2amp(ui.modeSlider_0->value());
@@ -332,12 +323,6 @@ void dmModeGUI::on_modeSlider_9_sliderReleased()
 {
    float amp = slider2amp(ui.modeSlider_9->value());
    setChannel(9, amp);
-}
-
-void dmModeGUI::on_modeSlider_10_sliderReleased()
-{
-   float amp = slider2amp(ui.modeSlider_10->value());
-   setChannel(10, amp);
 }
 
 void dmModeGUI::on_modeTarget_returnPressed( size_t ch,
@@ -414,11 +399,6 @@ void dmModeGUI::on_modeTarget_9_returnPressed()
    on_modeTarget_returnPressed(9, ui.modeTarget_9);
 }
 
-void dmModeGUI::on_modeTarget_10_returnPressed()
-{
-   on_modeTarget_returnPressed(10, ui.modeTarget_10);
-}
-
 void dmModeGUI::on_modeZero_0_pressed()
 {
    setChannel(0, 0.0);
@@ -469,11 +449,6 @@ void dmModeGUI::on_modeZero_9_pressed()
    setChannel(9, 0.0);
 }
 
-void dmModeGUI::on_modeZero_10_pressed()
-{
-   setChannel(10, 0.0);
-}
-
 void dmModeGUI::on_modeZero_these_pressed()
 {
    pcf::IndiProperty ip(pcf::IndiProperty::Number);
@@ -481,7 +456,7 @@ void dmModeGUI::on_modeZero_these_pressed()
    ip.setDevice(m_deviceName);
    ip.setName("target_amps");
    
-   for(size_t n =0; n <= 10; ++n)
+   for(size_t n =0; n <= 9; ++n)
    {
       std::string elName = mx::ioutils::convertToString<size_t, 4, '0'>(n);
       ip.add(pcf::IndiElement(elName));
