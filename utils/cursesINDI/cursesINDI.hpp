@@ -507,13 +507,18 @@ void cursesINDI::redrawTable()
 
    bool fsmAlerts = false;
    
+   std::set<std::string> alertDev;
+   
    for( elementMapIteratorT es = knownElements.begin(); es != knownElements.end(); ++es)
    {
       if(fpout) *fpout << knownProps[es->second.propKey].getName() << " " << knownProps[es->second.propKey].getState() << "\n";
       
       if(knownProps[es->second.propKey].getName() == "fsm" &&
-            knownProps[es->second.propKey].getState() == pcf::IndiProperty::Alert) fsmAlerts = true;
-
+            knownProps[es->second.propKey].getState() == pcf::IndiProperty::Alert) 
+      {
+         fsmAlerts = true;
+         alertDev.insert(knownProps[es->second.propKey].getDevice());
+      }
       std::vector<std::string> s;
 
       s.resize( m_colFraction.size() );
@@ -542,7 +547,10 @@ void cursesINDI::redrawTable()
    wclear(w_attentionWin);
    if(fsmAlerts)
    {
-      wprintw(w_attentionWin, "!! there are FSM alerts !!");
+      std::string alrt = "!! FSM alert: " + *alertDev.begin();
+      if(alertDev.size() > 1) alrt += " (+" + std::to_string(alertDev.size()-1) + ")";
+      
+      wprintw(w_attentionWin, alrt.c_str());
    }
    wrefresh(w_attentionWin);
    
@@ -575,13 +583,18 @@ void cursesINDI::updateTable()
    updateCurVal();
    
    bool fsmAlerts {false};
+   std::set<std::string> alertDev;
    
    for(auto it = knownElements.begin(); it != knownElements.end(); ++it)
    {
       if(fpout) *fpout << knownProps[it->second.propKey].getName() << " " << knownProps[it->second.propKey].getState() << "\n";
       
       if(knownProps[it->second.propKey].getName() == "fsm" &&
-            knownProps[it->second.propKey].getState() == pcf::IndiProperty::Alert) fsmAlerts = true;
+            knownProps[it->second.propKey].getState() == pcf::IndiProperty::Alert) 
+      {
+         fsmAlerts = true;
+         alertDev.insert(knownProps[it->second.propKey].getDevice());
+      }
       
       if(it->second.tableRow == -1) continue;
       
@@ -628,7 +641,10 @@ void cursesINDI::updateTable()
    wclear(w_attentionWin);
    if(fsmAlerts)
    {
-      wprintw(w_attentionWin, "!! there are FSM alerts !!");
+      std::string alrt = "!! FSM alert: " + *alertDev.begin();
+      if(alertDev.size() > 1) alrt += " (+" + std::to_string(alertDev.size()-1) + ")";
+      
+      wprintw(w_attentionWin, alrt.c_str());
    }
    wrefresh(w_attentionWin);
    wmove(w_interactWin,cy,cx);
