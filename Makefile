@@ -77,7 +77,8 @@ all_guis = dmCtrlGUI \
 	offloadCtrlGUI \
 	pupilGuideGUI \
 	pwr \
-	coronAlignGUI
+	coronAlignGUI \
+        loopCtrlGUI
 
 ifeq ($(MAGAOX_ROLE),RTC)
   guis_to_build =
