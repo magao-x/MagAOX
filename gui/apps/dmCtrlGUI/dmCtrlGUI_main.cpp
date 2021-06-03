@@ -3,12 +3,9 @@
 #include <QFile>
 #include <QTextStream>
 
-
 #include "dmCtrl.hpp"
-
    
 #include "multiIndiManager.hpp"
-   
    
 int main(int argc, char *argv[])
 {
@@ -36,7 +33,6 @@ int main(int argc, char *argv[])
    dm.show();
    
    int rv = app.exec();
-   
    
    return rv;
 }

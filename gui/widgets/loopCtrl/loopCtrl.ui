@@ -47,7 +47,7 @@
      <item>
       <layout class="QHBoxLayout" name="horizontalLayout_2" stretch="5,1,5,1,5">
        <item>
-        <layout class="QVBoxLayout" name="vl_loopStatus" stretch="2,3,0,0,0">
+        <layout class="QVBoxLayout" name="vl_loopStatus" stretch="2,3,1,1,2,0">
          <item>
           <widget class="QLabel" name="label_loop">
            <property name="font">
@@ -150,6 +150,51 @@
            </property>
           </spacer>
          </item>
+         <item>
+          <layout class="QHBoxLayout" name="horizontalLayout" stretch="1,3,1">
+           <item>
+            <spacer name="horizontalSpacer_5">
+             <property name="orientation">
+              <enum>Qt::Horizontal</enum>
+             </property>
+             <property name="sizeHint" stdset="0">
+              <size>
+               <width>40</width>
+               <height>20</height>
+              </size>
+             </property>
+            </spacer>
+           </item>
+           <item>
+            <widget class="QPushButton" name="button_LoopZero">
+             <property name="font">
+              <font>
+               <pointsize>12</pointsize>
+              </font>
+             </property>
+             <property name="focusPolicy">
+              <enum>Qt::NoFocus</enum>
+             </property>
+             <property name="text">
+              <string>Loop Zero</string>
+             </property>
+            </widget>
+           </item>
+           <item>
+            <spacer name="horizontalSpacer_6">
+             <property name="orientation">
+              <enum>Qt::Horizontal</enum>
+             </property>
+             <property name="sizeHint" stdset="0">
+              <size>
+               <width>40</width>
+               <height>20</height>
+              </size>
+             </property>
+            </spacer>
+           </item>
+          </layout>
+         </item>
         </layout>
        </item>
        <item>
@@ -227,14 +272,14 @@
               <widget class="QPushButton" name="button_zeroGain">
                <property name="font">
                 <font>
-                 <pointsize>14</pointsize>
+                 <pointsize>12</pointsize>
                 </font>
                </property>
                <property name="focusPolicy">
                 <enum>Qt::NoFocus</enum>
                </property>
                <property name="text">
-                <string>Zero Gain</string>
+                <string>Gain Zero</string>
                </property>
               </widget>
              </item>
@@ -378,7 +423,7 @@
               <widget class="QPushButton" name="button_oneMultCoeff">
                <property name="font">
                 <font>
-                 <pointsize>14</pointsize>
+                 <pointsize>12</pointsize>
                 </font>
                </property>
                <property name="focusPolicy">

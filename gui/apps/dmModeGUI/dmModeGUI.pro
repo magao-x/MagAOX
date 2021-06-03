@@ -21,10 +21,13 @@ exists( $$(CONDA_PREFIX)/include ) {
 MAKEFILE = makefile.dmModeGUI
 
 # Input
-HEADERS += ../../widgets/dmMode/dmModeGUI.hpp
+INCLUDEPATH += ../../lib ../../widgets/dmMode
+
+HEADERS += ../../widgets/dmMode/dmMode.hpp \
+           ../../lib/multiIndi.hpp \
+           ../../lib/multiIndiManager.hpp
            
-SOURCES += ../../widgets/dmMode/dmModeGUI.cpp \
-           dmModeGUI_main.cpp
+SOURCES += dmModeGUI_main.cpp
            
 FORMS += ../../widgets/dmMode/dmMode.ui
      
