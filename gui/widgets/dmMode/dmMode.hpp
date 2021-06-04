@@ -237,6 +237,8 @@ void dmMode::onConnect()
    ui.modeZero_these->setEnabled(true);
    ui.modeZero_all->setEnabled(true);
    
+   setWindowTitle(QString(m_deviceName.c_str()));
+   
 }
    
 void dmMode::onDisconnect()
@@ -307,7 +309,7 @@ void dmMode::onDisconnect()
    ui.modeZero_these->setEnabled(false);
    ui.modeZero_all->setEnabled(false);
    
-   
+   setWindowTitle(QString(m_deviceName.c_str()) + QString(" (disconnected)"));
 }
    
    

@@ -177,6 +177,8 @@ void coronAlign::onConnect()
    ui.button_lyot_l->setEnabled(true);
    ui.button_lyot_r->setEnabled(true);
    ui.button_lyot_scale->setEnabled(true);
+   
+   setWindowTitle("Coronagraph Alignment");
 }
 
 void coronAlign::onDisconnect()
@@ -208,6 +210,8 @@ void coronAlign::onDisconnect()
    ui.button_lyot_l->setEnabled(false);
    ui.button_lyot_r->setEnabled(false);
    ui.button_lyot_scale->setEnabled(false);
+   
+   setWindowTitle("Coronagraph Alignment (disconnected)");
 }
    
 int coronAlign::handleDefProperty( const pcf::IndiProperty & ipRecv)

@@ -40,7 +40,10 @@ public:
    ~dmCtrl();
    
    int subscribe( multiIndiPublisher * publisher );
-                                   
+             
+   virtual void onConnect();
+   virtual void onDisconnect();
+   
    int handleDefProperty( const pcf::IndiProperty & ipRecv /**< [in] the property which has changed*/);
    
    int handleSetProperty( const pcf::IndiProperty & ipRecv /**< [in] the property which has changed*/);
@@ -98,7 +101,54 @@ int dmCtrl::subscribe( multiIndiPublisher * publisher )
    
    return 0;
 }
+  
+void dmCtrl::onConnect()
+{
+   ui.labelDMName->setEnabled(true);
+   ui.dmStatus->setEnabled(true);
+   ui.labelShmimName->setEnabled(true);
+   ui.labelShmimName_value->setEnabled(true);
+   ui.labelFlatShmim->setEnabled(true);
+   ui.labelFlatShmim_value->setEnabled(true);
+   ui.labelTestShmim->setEnabled(true);
+   ui.labelTestShmim_value->setEnabled(true);
+
+   ui.buttonZeroAll->setEnabled(true);
+      
+   ui.comboSelectFlat->setEnabled(true);
+   ui.comboSelectTest->setEnabled(true);
    
+   setWindowTitle(QString(m_dmName.c_str()));
+}
+
+void dmCtrl::onDisconnect()
+{
+   ui.labelDMName->setEnabled(false);
+   ui.dmStatus->setEnabled(false);
+   ui.labelShmimName->setEnabled(false);
+   ui.labelShmimName_value->setEnabled(false);
+   ui.labelFlatShmim->setEnabled(false);
+   ui.labelFlatShmim_value->setEnabled(false);
+   ui.labelTestShmim->setEnabled(false);
+   ui.labelTestShmim_value->setEnabled(false);
+   
+   ui.buttonInit->setEnabled(false);
+   ui.buttonZero->setEnabled(false);
+   ui.buttonZeroAll->setEnabled(false);
+   ui.buttonRelease->setEnabled(false);
+
+   ui.buttonSetFlat->setEnabled(false);
+   ui.buttonZeroFlat->setEnabled(false);
+   
+   ui.buttonSetTest->setEnabled(false);
+   ui.buttonZeroTest->setEnabled(false);
+      
+   ui.comboSelectFlat->setEnabled(false);
+   ui.comboSelectTest->setEnabled(false);
+   
+   setWindowTitle(QString(m_dmName.c_str()) + QString(" (disconnected)"));
+}
+
 int dmCtrl::handleDefProperty( const pcf::IndiProperty & ipRecv)
 {  
    return handleSetProperty(ipRecv);
