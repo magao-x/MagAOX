@@ -1381,7 +1381,7 @@ int MagAOXApp<_useINDI>::execute() //virtual
          }
          
          ++nwaits;
-         if(nwaits == 10)
+         if(nwaits == 30)
          {
             log<text_log>("stalled waiting for power state", logPrio::LOG_ERROR);
             state(stateCodes::ERROR, true);
