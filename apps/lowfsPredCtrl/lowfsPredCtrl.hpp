@@ -234,10 +234,10 @@ int lowfsPredCtrl::processImage( void * curr_src,
    static_cast<void>(dummy); //be unused
    
    // Cast data to a 1D vector
-   new_image =  Eigen::Map<Matrix<float,-1,-1>>((float *)curr_src,  m_width*m_height, 1)
-
+   // new_image =  Eigen::Map<Matrix<float,-1,-1>>((float *)curr_src,  m_width*m_height, 1)
+   // auto test_im = Eigen::Map<Matrix<float,-1,-1>>((float *)curr_src,  m_width*m_height, 1);
    // Calculate the centroid
-   centroid = transfer_matrix * new_image;
+   // centroid = transfer_matrix * new_image;
    
    return 0;
 }
