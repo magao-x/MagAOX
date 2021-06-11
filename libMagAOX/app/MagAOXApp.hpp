@@ -1097,6 +1097,7 @@ template<bool _useINDI>
 MagAOXApp<_useINDI>::~MagAOXApp() noexcept(true)
 {
    if(m_indiDriver) delete m_indiDriver;
+   m_log.parent(nullptr);
 
    MagAOXApp<_useINDI>::m_self = nullptr;
 }
