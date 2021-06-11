@@ -71,7 +71,8 @@ public:
    ~coronAlign();
    
    int subscribe( multiIndiPublisher * publisher );
-                                   
+                               
+   virtual void onConnect();
    virtual void onDisconnect();
    
    int handleDefProperty( const pcf::IndiProperty & ipRecv /**< [in] the property which has changed*/);
@@ -151,13 +152,66 @@ int coronAlign::subscribe( multiIndiPublisher * publisher )
    
    return 0;
 }
+ 
+void coronAlign::onConnect()
+{
+   ui.labelTitle->setEnabled(true);
+   ui.labelPupil->setEnabled(true);
+   ui.labelFocal->setEnabled(true);
+   ui.labelLyot->setEnabled(true);
    
+   ui.button_pupil_u->setEnabled(true);
+   ui.button_pupil_d->setEnabled(true);
+   ui.button_pupil_l->setEnabled(true);
+   ui.button_pupil_r->setEnabled(true);
+   ui.button_pupil_scale->setEnabled(true);
+   
+   ui.button_focal_u->setEnabled(true);
+   ui.button_focal_d->setEnabled(true);
+   ui.button_focal_l->setEnabled(true);
+   ui.button_focal_r->setEnabled(true);
+   ui.button_focal_scale->setEnabled(true);
+   
+   ui.button_lyot_u->setEnabled(true);
+   ui.button_lyot_d->setEnabled(true);
+   ui.button_lyot_l->setEnabled(true);
+   ui.button_lyot_r->setEnabled(true);
+   ui.button_lyot_scale->setEnabled(true);
+   
+   setWindowTitle("Coronagraph Alignment");
+}
+
 void coronAlign::onDisconnect()
 {
    m_picoState = "";
    m_fwPupilState = "";
    m_fwFocalState = "";
    m_fwLyotState = "";
+   
+   ui.labelTitle->setEnabled(false);
+   ui.labelPupil->setEnabled(false);
+   ui.labelFocal->setEnabled(false);
+   ui.labelLyot->setEnabled(false);
+   
+   ui.button_pupil_u->setEnabled(false);
+   ui.button_pupil_d->setEnabled(false);
+   ui.button_pupil_l->setEnabled(false);
+   ui.button_pupil_r->setEnabled(false);
+   ui.button_pupil_scale->setEnabled(false);
+   
+   ui.button_focal_u->setEnabled(false);
+   ui.button_focal_d->setEnabled(false);
+   ui.button_focal_l->setEnabled(false);
+   ui.button_focal_r->setEnabled(false);
+   ui.button_focal_scale->setEnabled(false);
+   
+   ui.button_lyot_u->setEnabled(false);
+   ui.button_lyot_d->setEnabled(false);
+   ui.button_lyot_l->setEnabled(false);
+   ui.button_lyot_r->setEnabled(false);
+   ui.button_lyot_scale->setEnabled(false);
+   
+   setWindowTitle("Coronagraph Alignment (disconnected)");
 }
    
 int coronAlign::handleDefProperty( const pcf::IndiProperty & ipRecv)
@@ -282,33 +336,45 @@ void coronAlign::updateGUI()
    {
       ui.button_pupil_l->setEnabled(false);
       ui.button_pupil_r->setEnabled(false);
+      ui.button_pupil_scale->setEnabled(false);
+      ui.labelPupil->setEnabled(false);
    }
    else
    {
       ui.button_pupil_l->setEnabled(true);
       ui.button_pupil_r->setEnabled(true);
+      ui.button_pupil_scale->setEnabled(true);
+      ui.labelPupil->setEnabled(true);
    }
    
    if(m_fwFocalState != "READY")
    {
       ui.button_focal_l->setEnabled(false);
       ui.button_focal_r->setEnabled(false);
+      ui.button_focal_scale->setEnabled(false);
+      ui.labelFocal->setEnabled(false);
    }
    else
    {
       ui.button_focal_l->setEnabled(true);
       ui.button_focal_r->setEnabled(true);
+      ui.button_focal_scale->setEnabled(true);
+      ui.labelFocal->setEnabled(true);
    }
    
    if(m_fwLyotState != "READY")
    {
       ui.button_lyot_u->setEnabled(false);
       ui.button_lyot_d->setEnabled(false);
+      ui.button_lyot_scale->setEnabled(false);
+      ui.labelLyot->setEnabled(false);
    }
    else
    {
       ui.button_lyot_u->setEnabled(true);
       ui.button_lyot_d->setEnabled(true);
+      ui.button_lyot_scale->setEnabled(true);
+      ui.labelLyot->setEnabled(true);
    }
    
    if(m_picoState != "READY")

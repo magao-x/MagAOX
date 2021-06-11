@@ -113,12 +113,21 @@ public:
    ~pupilGuide();
    
    int subscribe( multiIndiPublisher * publisher );
-                                   
+                               
+   virtual void onConnect();
    virtual void onDisconnect();
    
    int handleDefProperty( const pcf::IndiProperty & ipRecv /**< [in] the property which has changed*/);
    int handleSetProperty( const pcf::IndiProperty & ipRecv /**< [in] the property which has changed*/);
    
+   
+   void modGUISetEnable( bool enableModGUI,
+                         bool enableModArrows
+                       );
+   
+   void camwfsfitSetEnabled(bool enabled);
+   
+   void camlensSetEnabled(bool enabled);
    
 public slots:
    void updateGUI();
@@ -233,6 +242,16 @@ int pupilGuide::subscribe( multiIndiPublisher * publisher )
    return 0;
 }
    
+void pupilGuide::onConnect()
+{
+   ui.labelModAndCenter->setEnabled(true);
+   ui.labelPupilFitting->setEnabled(true);
+   ui.labelPupilSteering->setEnabled(true);
+   ui.camlens_label->setEnabled(true);
+   
+   setWindowTitle("Pupil Alignment");
+}
+
 void pupilGuide::onDisconnect()
 {
    m_modFsmState = "";
@@ -241,6 +260,14 @@ void pupilGuide::onDisconnect()
    m_camlensyFsmState = "";
    m_camwfsavgState = "";
    m_camwfsfitState = "";
+
+   ui.labelModAndCenter->setEnabled(false);
+   ui.labelPupilFitting->setEnabled(false);
+   ui.labelPupilSteering->setEnabled(false);
+   ui.camlens_label->setEnabled(false);
+   
+   setWindowTitle("Pupil Alignment (disconnected)");
+   
 }
    
 int pupilGuide::handleDefProperty( const pcf::IndiProperty & ipRecv)
@@ -574,46 +601,10 @@ int pupilGuide::handleSetProperty( const pcf::IndiProperty & ipRecv)
    
 }
 
-void pupilGuide::updateGUI()
+void pupilGuide::modGUISetEnable( bool enableModGUI,
+                                  bool enableModArrows
+                                )
 {
-   
-   //--------- Modulation 
-   
-   bool enableModGUI = true;
-   bool enableModArrows = true;
-   
-   char str[16];
-   if(m_modFsmState == "READY")
-   {
-      if(m_modState == 1)
-      {
-         ui.modState->setText("RIP");
-         enableModArrows = false;
-      }
-      else
-      {
-         ui.modState->setText("SET");
-      }
-   }
-   else if(m_modFsmState == "OPERATING")
-   {
-      ui.modState->setText("MODULATING");
-   }
-   else
-   {
-      enableModGUI = false;
-      if(m_modFsmState == "")
-      {
-         ui.modState->setText("STATE UNKNOWN");
-         ui.modState->setEnabled(false);
-      }
-      else
-      {
-         ui.modState->setText(m_modFsmState.c_str());
-         ui.modState->setEnabled(true);
-      }
-   }
-   
    if(enableModGUI)
    {
       ui.modState->setEnabled(true);
@@ -686,6 +677,116 @@ void pupilGuide::updateGUI()
       ui.button_tip_d->setEnabled(false);
       ui.button_tip_dr->setEnabled(false);
    }
+}
+
+void pupilGuide::camwfsfitSetEnabled(bool enabled)
+{
+   ui.labelMedianFluxes->setEnabled(enabled);
+   ui.med1->setEnabled(enabled);
+   ui.med2->setEnabled(enabled);
+   ui.med3->setEnabled(enabled);
+   ui.med4->setEnabled(enabled);
+   ui.setDelta->setEnabled(enabled);
+   ui.labelThreshCurrent->setEnabled(enabled);
+   ui.labelThreshTarget->setEnabled(enabled);
+   ui.labelThreshold->setEnabled(enabled);
+   ui.fitThreshold_current->setEnabled(enabled);
+   ui.fitThreshold_target->setEnabled(enabled);
+   
+   if(enabled == false)
+   {
+      ui.med1->setText("");
+      ui.med2->setText("");
+      ui.med3->setText("");
+      ui.med4->setText("");
+      ui.fitThreshold_current->setText("");
+   }
+   
+   ui.coordLL_D->setEnabled(enabled);
+   ui.coordLR_D->setEnabled(enabled);
+   ui.coordUL_D->setEnabled(enabled);
+   ui.coordUR_D->setEnabled(enabled);
+   ui.coordLL_x->setEnabled(enabled);
+   ui.coordLR_x->setEnabled(enabled);
+   ui.coordUL_x->setEnabled(enabled);
+   ui.coordUR_x->setEnabled(enabled);
+   ui.coordLL_y->setEnabled(enabled);
+   ui.coordLR_y->setEnabled(enabled);
+   ui.coordUL_y->setEnabled(enabled);
+   ui.coordUR_y->setEnabled(enabled);
+   ui.coordAvg_D->setEnabled(enabled);
+   ui.coordAvg_x->setEnabled(enabled);
+   ui.coordAvg_y->setEnabled(enabled);
+   ui.setDelta_pup->setEnabled(enabled);
+   ui.labelx->setEnabled(enabled);
+   ui.labely->setEnabled(enabled);
+   ui.labelD->setEnabled(enabled);
+   ui.labelUR->setEnabled(enabled);
+   ui.labelUL->setEnabled(enabled);
+   ui.labelLR->setEnabled(enabled);
+   ui.labelLL->setEnabled(enabled);
+   ui.labelAvg->setEnabled(enabled);
+}
+
+void pupilGuide::camlensSetEnabled(bool enabled)
+{
+   ui.camlens_fsm->setEnabled(enabled);
+   ui.camlens_x_label->setEnabled(enabled);
+   ui.camlens_x_pos->setEnabled(enabled);
+   ui.camlens_y_label->setEnabled(enabled);
+   ui.camlens_y_pos->setEnabled(enabled);
+   ui.button_camlens_ul->setEnabled(enabled);
+   ui.button_camlens_u->setEnabled(enabled);
+   ui.button_camlens_ur->setEnabled(enabled);
+   ui.button_camlens_l->setEnabled(enabled);
+   ui.button_camlens_r->setEnabled(enabled);
+   ui.button_camlens_dl->setEnabled(enabled);
+   ui.button_camlens_d->setEnabled(enabled);
+   ui.button_camlens_dr->setEnabled(enabled);
+   ui.button_camlens_scale->setEnabled(enabled);
+}
+
+void pupilGuide::updateGUI()
+{
+   
+   //--------- Modulation 
+   
+   bool enableModGUI = true;
+   bool enableModArrows = true;
+   
+   char str[16];
+   if(m_modFsmState == "READY")
+   {
+      if(m_modState == 1)
+      {
+         ui.modState->setText("RIP");
+         enableModArrows = false;
+      }
+      else
+      {
+         ui.modState->setText("SET");
+      }
+   }
+   else if(m_modFsmState == "OPERATING")
+   {
+      ui.modState->setText("MODULATING");
+   }
+   else
+   {
+      enableModGUI = false;
+      if(m_modFsmState == "")
+      {
+         ui.modState->setText("STATE UNKNOWN");
+         ui.modState->setEnabled(false);
+      }
+      else
+      {
+         ui.modState->setText(m_modFsmState.c_str());
+         ui.modState->setEnabled(true);
+      }
+   }
+   
+   modGUISetEnable(enableModGUI, enableModArrows);
    
    snprintf(str,sizeof(str), "%0.2f", m_modCh1);
    ui.modCh1->setText(str);
@@ -792,87 +893,11 @@ void pupilGuide::updateGUI()
    
    if( !(m_camwfsfitState == "READY" || m_camwfsfitState == "OPERATING"))
    {
-      ui.labelMedianFluxes->setEnabled(false);
-      ui.med1->setEnabled(false);
-      ui.med2->setEnabled(false);
-      ui.med3->setEnabled(false);
-      ui.med4->setEnabled(false);
-      ui.setDelta->setEnabled(false);
-      ui.labelThreshCurrent->setEnabled(false);
-      ui.labelThreshTarget->setEnabled(false);
-      ui.labelThreshold->setEnabled(false);
-      ui.fitThreshold_current->setEnabled(false);
-      ui.fitThreshold_target->setEnabled(false);
-      
-      ui.med1->setText("");
-      ui.med2->setText("");
-      ui.med3->setText("");
-      ui.med4->setText("");
-      ui.fitThreshold_current->setText("");
-      
-      ui.coordLL_D->setEnabled(false);
-      ui.coordLR_D->setEnabled(false);
-      ui.coordUL_D->setEnabled(false);
-      ui.coordUR_D->setEnabled(false);
-      ui.coordLL_x->setEnabled(false);
-      ui.coordLR_x->setEnabled(false);
-      ui.coordUL_x->setEnabled(false);
-      ui.coordUR_x->setEnabled(false);
-      ui.coordLL_y->setEnabled(false);
-      ui.coordLR_y->setEnabled(false);
-      ui.coordUL_y->setEnabled(false);
-      ui.coordUR_y->setEnabled(false);
-      ui.coordAvg_D->setEnabled(false);
-      ui.coordAvg_x->setEnabled(false);
-      ui.coordAvg_y->setEnabled(false);
-      ui.setDelta_pup->setEnabled(false);
-      ui.labelx->setEnabled(false);
-      ui.labely->setEnabled(false);
-      ui.labelD->setEnabled(false);
-      ui.labelUR->setEnabled(false);
-      ui.labelUL->setEnabled(false);
-      ui.labelLR->setEnabled(false);
-      ui.labelLL->setEnabled(false);
-      ui.labelAvg->setEnabled(false);
+      camwfsfitSetEnabled(false);
    }
    else
    {
-      ui.labelMedianFluxes->setEnabled(true);
-      ui.med1->setEnabled(true);
-      ui.med2->setEnabled(true);
-      ui.med3->setEnabled(true);
-      ui.med4->setEnabled(true);
-      ui.setDelta->setEnabled(true);
-      ui.labelThreshCurrent->setEnabled(true);
-      ui.labelThreshTarget->setEnabled(true);
-      ui.labelThreshold->setEnabled(true);
-      ui.fitThreshold_current->setEnabled(true);
-      ui.fitThreshold_target->setEnabled(true);
-   
-      ui.coordLL_D->setEnabled(true);
-      ui.coordLR_D->setEnabled(true);
-      ui.coordUL_D->setEnabled(true);
-      ui.coordUR_D->setEnabled(true);
-      ui.coordLL_x->setEnabled(true);
-      ui.coordLR_x->setEnabled(true);
-      ui.coordUL_x->setEnabled(true);
-      ui.coordUR_x->setEnabled(true);
-      ui.coordLL_y->setEnabled(true);
-      ui.coordLR_y->setEnabled(true);
-      ui.coordUL_y->setEnabled(true);
-      ui.coordUR_y->setEnabled(true);
-      ui.coordAvg_D->setEnabled(true);
-      ui.coordAvg_x->setEnabled(true);
-      ui.coordAvg_y->setEnabled(true);
-      ui.setDelta_pup->setEnabled(true);
-      ui.labelx->setEnabled(true);
-      ui.labely->setEnabled(true);
-      ui.labelD->setEnabled(true);
-      ui.labelUR->setEnabled(true);
-      ui.labelUL->setEnabled(true);
-      ui.labelLR->setEnabled(true);
-      ui.labelLL->setEnabled(true);
-      ui.labelAvg->setEnabled(true);
+      camwfsfitSetEnabled(true);
 
       double m1, m2, m3,m4;
       
@@ -1117,32 +1142,14 @@ void pupilGuide::updateGUI()
    
    
    
-   
-   
-   
-   
-   
-   
    // --- camera lens
    
    
    if( (m_camlensxFsmState == "READY" || m_camlensxFsmState == "OPERATING") &&
           (m_camlensyFsmState == "READY" || m_camlensyFsmState == "OPERATING") )
    {
-      ui.camlens_fsm->setEnabled(true);
-      ui.camlens_x_label->setEnabled(true);
-      ui.camlens_x_pos->setEnabled(true);
-      ui.camlens_y_label->setEnabled(true);
-      ui.camlens_y_pos->setEnabled(true);
-      ui.button_camlens_ul->setEnabled(true);
-      ui.button_camlens_u->setEnabled(true);
-      ui.button_camlens_ur->setEnabled(true);
-      ui.button_camlens_l->setEnabled(true);
-      ui.button_camlens_r->setEnabled(true);
-      ui.button_camlens_dl->setEnabled(true);
-      ui.button_camlens_d->setEnabled(true);
-      ui.button_camlens_dr->setEnabled(true);
-      ui.button_camlens_scale->setEnabled(true);
+      
+      camlensSetEnabled(true);
       
       if(m_camlensxFsmState == "OPERATING" || m_camlensyFsmState == "OPERATING")
       {
@@ -1160,19 +1167,7 @@ void pupilGuide::updateGUI()
    }
    else
    {
-      ui.camlens_x_label->setEnabled(false);
-      ui.camlens_x_pos->setEnabled(false);
-      ui.camlens_y_label->setEnabled(false);
-      ui.camlens_y_pos->setEnabled(false);
-      ui.button_camlens_ul->setEnabled(false);
-      ui.button_camlens_u->setEnabled(false);
-      ui.button_camlens_ur->setEnabled(false);
-      ui.button_camlens_l->setEnabled(false);
-      ui.button_camlens_r->setEnabled(false);
-      ui.button_camlens_dl->setEnabled(false);
-      ui.button_camlens_d->setEnabled(false);
-      ui.button_camlens_dr->setEnabled(false);
-      ui.button_camlens_scale->setEnabled(false);
+      camlensSetEnabled(false);
       
       if(m_camlensxFsmState == "HOMING" || m_camlensyFsmState == "HOMING")
       {

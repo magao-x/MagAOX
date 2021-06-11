@@ -135,7 +135,11 @@ multiIndiManager::~multiIndiManager()
 void multiIndiManager::addSubscriber( multiIndiSubscriber * sub )
 {
    m_subscribers.push_back(sub);
-   if(m_publisher) sub->subscribe(m_publisher);
+   if(m_publisher) 
+   {
+      sub->onConnect();
+      sub->subscribe(m_publisher);
+   }
 }
 
 void multiIndiManager::timerout()
@@ -192,6 +196,7 @@ void multiIndiManager::connectClient(bool force)
       
    for(size_t n=0;n<m_subscribers.size();++n)
    {
+      m_subscribers[n]->onConnect();
       m_subscribers[n]->subscribe(m_publisher);
    }
 

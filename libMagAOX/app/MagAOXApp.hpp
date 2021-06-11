@@ -375,29 +375,7 @@ protected:
      */
    int euidReal();
 
-
    ///@} -- Privilege Management
-
-   /** \name RT Priority
-     * @{
-     */
-private:
-   int m_RTPriority {0}; ///< The real-time scheduling priority.  Default is 0.
-
-protected:
-   /// Set the real-time priority of this process.
-   /** This method attempts to set euid to 'called' with \ref euidCalled.  It then sets the priority
-     * but will fail if it does not have sufficient privileges.  Regardless, it will then restore
-     * privileges with \ref euidReal.
-     *
-     * If prio < 0, it is changed to 0.  If prio is > 99, then it is changed to 99.
-     *
-     * \returns 0 on success.
-     * \returns -1 on an error.  In this case priority will not have been changed.
-     */
-   int RTPriority( int prio /**< [in] the desired new RT priority */ );
-
-   ///@} -- RT Priority
 
    /** \name PID Locking
      *
@@ -1216,7 +1194,6 @@ void MagAOXApp<_useINDI>::setupBasicConfig() //virtual
 {
    //App stuff
    config.add("loopPause", "p", "loopPause", argType::Required, "", "loopPause", false, "unsigned long", "The main loop pause time in ns");
-   //config.add("RTPriority", "P", "RTPriority", argType::Required, "", "RTPriority", false, "unsigned", "The real-time priority (0-99)");
 
    config.add("ignore_git", "", "ignore-git", argType::True, "", "", false, "bool", "set to true to ignore git status");
    
@@ -1258,14 +1235,6 @@ void MagAOXApp<_useINDI>::loadBasicConfig() //virtual
 
    //--------- Loop Pause Time --------//
    config(m_loopPause, "loopPause");
-
-   //--------- RT Priority ------------//
-   int prio = m_RTPriority;
-   config(prio, "RTPriority");
-   if(prio != m_RTPriority)
-   {
-      RTPriority(prio);
-   }
 
    //--------Power Management --------//
    if( m_powerMgtEnabled)
@@ -1402,6 +1371,7 @@ int MagAOXApp<_useINDI>::execute() //virtual
    //We have to wait for power status to become available
    if(m_powerMgtEnabled && m_shutdown == 0)
    {
+      int nwaits = 0;
       while(m_powerState < 0 && !m_shutdown)
       {
          sleep(1);
@@ -1409,7 +1379,15 @@ int MagAOXApp<_useINDI>::execute() //virtual
          {
             if(!stateLogged()) log<text_log>("waiting for power state");
          }
+         
+         ++nwaits;
+         if(nwaits == 30)
+         {
+            log<text_log>("stalled waiting for power state", logPrio::LOG_ERROR);
+            state(stateCodes::ERROR, true);
+         }
       }
+      
       if(m_powerState > 0) 
       {
          state(stateCodes::POWERON);
@@ -1723,55 +1701,6 @@ int MagAOXApp<_useINDI>::euidReal()
 
    return 0;
 
-}
-
-template<bool _useINDI>
-int MagAOXApp<_useINDI>::RTPriority( int prio)
-{
-   struct sched_param schedpar;
-
-   if(prio < 0) prio = 0;
-   if(prio > 99) prio = 99;
-   schedpar.sched_priority = prio;
-
-   //Get the maximum privileges available
-   if( euidCalled() < 0 )
-   {
-      log<software_error>({__FILE__, __LINE__, 0, 0,"Seeting euid to called failed."});
-      return -1;
-   }
-
-
-   //We set return value based on result from sched_setscheduler
-   //But we make sure to restore privileges no matter what happens.
-   errno = 0;
-   int rv = 0;
-   if(prio > 0) rv = sched_setscheduler(0, MAGAOX_RT_SCHED_POLICY, &schedpar);
-   else rv = sched_setscheduler(0, SCHED_OTHER, &schedpar);
-
-   if(rv < 0)
-   {
-      std::stringstream logss;
-      logss << "Setting scheduler priority to " << prio <<" failed.  Errno says: " << strerror(errno) << ".  ";
-      log<software_error>({__FILE__, __LINE__, errno, 0, logss.str()});
-   }
-   else
-   {
-      m_RTPriority = prio;
-
-      std::stringstream logss;
-      logss << "Scheduler priority (RT_priority) set to " << m_RTPriority << ".";
-      log<text_log>(logss.str());
-   }
-
-   //Go back to regular privileges
-   if( euidReal() < 0 )
-   {
-      log<software_error>({__FILE__, __LINE__, 0, 0, "Setting euid to real failed."});
-      return -1;
-   }
-
-   return rv;
 }
 
 template<bool _useINDI>
@@ -2672,7 +2601,7 @@ int MagAOXApp<_useINDI>::startINDI()
    m_indiDriver->activate();
    log<indidriver_start>();
 
-   sendGetPropertySetList();
+   sendGetPropertySetList(true);
 
    return 0;
 }

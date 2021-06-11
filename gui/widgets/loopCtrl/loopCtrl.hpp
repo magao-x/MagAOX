@@ -69,6 +69,8 @@ public slots:
    
    void on_slider_loop_sliderReleased();
    
+   void on_button_LoopZero_pressed();
+   
 private:
      
    Ui::loopCtrl ui;
@@ -454,6 +456,11 @@ void loopCtrl::on_slider_loop_sliderReleased()
    }
    
    sendNewProperty(ipFreq);
+}
+
+void loopCtrl::on_button_LoopZero_pressed()
+{
+   std::cerr << "loop zero\n";
 }
 
 } //namespace xqt
