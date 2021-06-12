@@ -1060,7 +1060,7 @@ MagAOXApp<_useINDI>::MagAOXApp( const std::string & git_sha1,
       std::cerr << "Attempt to instantiate 2nd MagAOXApp.  Exiting immediately.\n";
       exit(-1);
    }
-
+   
    m_self = this;
 
    m_log.parent(this);
@@ -1310,6 +1310,22 @@ void MagAOXApp<_useINDI>::checkConfig() //virtual
 template<bool _useINDI>
 int MagAOXApp<_useINDI>::execute() //virtual
 {
+   //----------------------------------------//
+   //        Check user
+   //----------------------------------------//
+   struct stat logstat;
+
+   if( stat(m_log.logPath().c_str(), &logstat) < 0)
+   {
+      return log<text_log,-1>({"Can not stat the log path."}, logPrio::LOG_CRITICAL);
+   }
+   
+   if( logstat.st_uid != geteuid() )
+   {
+      return log<text_log,-1>({"You are running this app as the wrong user."}, logPrio::LOG_CRITICAL);
+   }
+   
+   
    //----------------------------------------//
    //        Get the PID Lock
    //----------------------------------------//
