@@ -48,11 +48,34 @@ protected:
    /** \name Configurable Parameters
      *@{
      */  
+   
+   
+   
    float m_homePos1 {17.5}; ///< Home position of axis 1.  Default is 17.5
    float m_homePos2 {17.5}; ///< Home position of axis 2.  Default is 17.5
+   float m_homePos3 {0.0}; ///< Home position of axis 2.  Default is 17.5
    
    ///@}
 
+private:
+   std::string m_ctrl; ///< The controller connected.
+   std::string m_stage; ///< The stage connected.  
+   int m_naxes{2}; ///< The number of axes, default is 2.  Max is 3.
+
+   bool m_pos_3_sent {false};
+   
+   bool m_actuallyATZ {true};
+   
+protected:   
+   float m_min1 {0}; ///< The minimum value for axis 1
+   float m_max1 {35}; ///< The maximum value for axis 1
+   
+   float m_min2 {0}; ///< The minimum value for axis 2
+   float m_max2 {35}; ///< The maximum value for axis 2
+   
+   float m_min3 {0}; ///< The minimum value for axis 3
+   float m_max3 {0}; ///< The maximum value for axis 3
+   
    double m_homingStart {0};
    int m_homingState {0};
    
@@ -60,10 +83,11 @@ protected:
 
    float m_pos1 {0};
    float m_pos2 {0};
+   float m_pos3 {0};
    
-   float m_sva1{0};
-   float m_sva2{0};
-   
+   float m_sva1 {0};
+   float m_sva2 {0};
+   float m_sva3 {0};
 public:
    /// Default c'tor.
    pi335Ctrl();
@@ -130,7 +154,7 @@ public:
      */ 
    int homeState(int axis /**< [in] the axis to check, 0 or 1 */);
    
-   ///Being homing (ATZ) axis 1
+   ///Begin homing (ATZ) axis 1
    /** Repeats check that servos are off (the manual says this doesn't matter)
      * and checks that 'm_homingStatte' is 0.  Then sends 'ATZ 1 NaN'.
      *
@@ -139,7 +163,7 @@ public:
      */ 
    int home_1();
    
-   ///Being homing (ATZ) axis 2
+   ///Begin homing (ATZ) axis 2
    /** Repeats check that servos are off (the manual says this doesn't matter)
      * and checks that 'm_homingStatte' is 1.  Then sends 'ATZ 2 NaN'.
      *
@@ -147,6 +171,15 @@ public:
      * \returns -1 on error
      */ 
    int home_2();
+   
+   ///Begin homing (ATZ) axis 3
+   /** Repeats check that servos are off (the manual says this doesn't matter)
+     * and checks that 'm_homingStatte' is 1.  Then sends 'ATZ 3 NaN'.
+     *
+     * \returns 0 on success
+     * \returns -1 on error
+     */ 
+   int home_3();
    
    int finishInit();
    
@@ -156,7 +189,7 @@ public:
      * \returns 0 on success 
      * \returns -1 on error
      */
-   int zeroDM() { return 0;}
+   int zeroDM();
    
    /// Send a command to the DM
    /** This is called by the shmim monitoring thread in response to a semaphore trigger.
@@ -164,12 +197,7 @@ public:
      * \returns 0 on success 
      * \returns -1 on error
      */
-   int commandDM(void * curr_src) 
-   { 
-      static_cast<void>(curr_src);
-      return 0;
-      
-   }
+   int commandDM(void * curr_src);
    
    /// Release the DM, making it safe to turn off power.
    /** The application will be state READY at the conclusion of this.
@@ -208,15 +236,18 @@ public:
    
    int move_2( float absPos );
   
+   int move_3( float absPos );
+   
 protected:
    //declare our properties
    pcf::IndiProperty m_indiP_pos1;
    pcf::IndiProperty m_indiP_pos2;
-
+   pcf::IndiProperty m_indiP_pos3;
+   
 public:
    INDI_NEWCALLBACK_DECL(pi335Ctrl, m_indiP_pos1);
    INDI_NEWCALLBACK_DECL(pi335Ctrl, m_indiP_pos2);
-   
+   INDI_NEWCALLBACK_DECL(pi335Ctrl, m_indiP_pos3);
 };
 
 pi335Ctrl::pi335Ctrl() : MagAOXApp(MAGAOX_CURRENT_SHA1, MAGAOX_REPO_MODIFIED)
@@ -232,8 +263,11 @@ void pi335Ctrl::setupConfig()
    tty::usbDevice::setupConfig(config);
    dev::dm<pi335Ctrl,float>::setupConfig(config);
    
+   config.add("stage.naxes", "", "stage.naxes", argType::Required, "stage", "naxes", false, "int", "Number of axes.  Default is 2.  Max is 3.");
+   
    config.add("stage.homePos1", "", "stage.homePos1", argType::Required, "stage", "homePos1", false, "float", "Home position of axis 1.  Default is 17.5.");
    config.add("stage.homePos2", "", "stage.homePos2", argType::Required, "stage", "homePos2", false, "float", "Home position of axis 2.  Default is 17.5.");
+   config.add("stage.homePos3", "", "stage.homePos3", argType::Required, "stage", "homePos3", false, "float", "Home position of axis 3.  Default is 17.5.");
    
    config.add("dm.calibRelDir", "", "dm.calibRelDir", argType::Required, "dm", "calibRelDir", false, "string", "Used to find the default calib directory.");
 }
@@ -257,8 +291,10 @@ int pi335Ctrl::loadConfigImpl( mx::app::appConfigurator & _config )
       
    dev::dm<pi335Ctrl,float>::loadConfig(_config);
    
+   config(m_naxes, "stage.naxes");
    config(m_homePos1, "stage.homePos1");
    config(m_homePos2, "stage.homePos2");
+   config(m_homePos3, "stage.homePos3");
    
    return 0;
 }
@@ -291,10 +327,15 @@ int pi335Ctrl::appStartup()
    REG_INDI_NEWPROP(m_indiP_pos1, "pos_1", pcf::IndiProperty::Number);
    m_indiP_pos1.add (pcf::IndiElement("current"));
    m_indiP_pos1.add (pcf::IndiElement("target"));
+   m_indiP_pos1["current"] = -99999;
+   m_indiP_pos1["target"] = -99999;
    
    REG_INDI_NEWPROP(m_indiP_pos2, "pos_2", pcf::IndiProperty::Number);
    m_indiP_pos2.add (pcf::IndiElement("current"));
    m_indiP_pos2.add (pcf::IndiElement("target"));
+   m_indiP_pos2["current"] = -99999;
+   m_indiP_pos2["target"] = -99999;
+   
    
    //std::cerr << "appStartup complete \n";
    return 0;
@@ -399,7 +440,6 @@ int pi335Ctrl::appLogic()
       if( testConnection() == 0 ) 
       {
          state(stateCodes::CONNECTED);
-         log<text_log>(std::string("Connected to pi 335 on ") + m_deviceName);
       }
       else
       {
@@ -433,28 +473,42 @@ int pi335Ctrl::appLogic()
          {
             home_2();
          }
-         else if(m_homingState == 2) //y complete
+         else if(m_homingState == 2 && m_naxes == 2) //y complete, done
          {
             finishInit();            
+         }
+         else if(m_homingState == 2 && m_naxes == 3) //y complete
+         {
+            home_3();            
+         }
+         else if(m_homingState > 2)
+         {
+            finishInit();
          }
       }
    }
    
-   if(state() == stateCodes::READY)
+   if(state() == stateCodes::READY || state() == stateCodes::OPERATING)
    {
-      //Get a lock if we can
-      std::unique_lock<std::mutex> lock(m_indiMutex, std::try_to_lock);
-
-      //but don't wait for it, just go back around.
-      if(!lock.owns_lock()) return 0;
-
       float pos1;
+      float sva1;
+      float pos2;
+      float sva2;
+      float pos3;
+      float sva3;
+      
+      //Get a lock if we can
+      std::unique_lock<std::mutex> lock(m_indiMutex);
+
       if(getPos(pos1, 1) < 0)
       {
          log<software_error>({__FILE__,__LINE__});
          state(stateCodes::ERROR);
          return 0;
       }
+      
+      lock.unlock();
+      mx::sys::milliSleep(1); //Put this thread to sleep to make sure other thread gets a lock
       
       if(fabs(m_pos1-pos1) > 0.1)
       {
@@ -465,8 +519,7 @@ int pi335Ctrl::appLogic()
          updateIfChanged(m_indiP_pos1, "current", m_pos1, INDI_IDLE);
       }
 
-      
-      float sva1;
+      lock.lock();
       if(getSva(sva1, 1) < 0)
       {
          log<software_error>({__FILE__,__LINE__});
@@ -475,14 +528,19 @@ int pi335Ctrl::appLogic()
       }   
       m_sva1 = sva1;
       
-      float pos2;
+      lock.unlock();
+      mx::sys::milliSleep(1); //Put this thread to sleep to make sure other thread gets a lock
+      
+      lock.lock();
       if(getPos(pos2, 2) < 0)
       {
          log<software_error>({__FILE__,__LINE__});
          state(stateCodes::ERROR);
          return 0;
       }
-      
+      lock.unlock();
+      mx::sys::milliSleep(1); //Put this thread to sleep to make sure other thread gets a lock
+            
       if(fabs(m_pos2 - pos2) > 0.1) //sva2 != m_sva2)
       {
          updateIfChanged(m_indiP_pos2, "current", m_pos2, INDI_BUSY);
@@ -492,18 +550,56 @@ int pi335Ctrl::appLogic()
          updateIfChanged(m_indiP_pos2, "current", m_pos2, INDI_IDLE);
       }
       
-      float sva2;
+      lock.lock();
       if(getSva(sva2, 2) < 0)
       {
          log<software_error>({__FILE__,__LINE__});
          state(stateCodes::ERROR);
          return 0;
       }  
-      
+      lock.unlock();
+      mx::sys::milliSleep(1); //Put this thread to sleep to make sure other thread gets a lock
+            
       m_sva2 = sva2;
       
+      if(m_naxes == 3)
+      {
+         lock.lock();
+         if(getPos(pos3, 3) < 0)
+         {
+            log<software_error>({__FILE__,__LINE__});
+            state(stateCodes::ERROR);
+            return 0;
+         }
+         lock.unlock();
+         mx::sys::milliSleep(1); //Put this thread to sleep to make sure other thread gets a lock
+               
+         if(fabs(m_pos3 - pos3) > 0.1) //sva2 != m_sva2)
+         {
+            updateIfChanged(m_indiP_pos3, "current", m_pos3, INDI_BUSY);
+         }
+         else
+         {
+            updateIfChanged(m_indiP_pos3, "current", m_pos3, INDI_IDLE);
+         }
+         
+         lock.lock();
+         if(getSva(sva3, 2) < 0)
+         {
+            log<software_error>({__FILE__,__LINE__});
+            state(stateCodes::ERROR);
+            return 0;
+         }  
+         lock.unlock();
+         mx::sys::milliSleep(1); //Put this thread to sleep to make sure other thread gets a lock
+               
+         m_sva3 = sva3;
+      }
       
-      std::cerr << m_pos1 << " " << pos1 << " " << m_sva1 << " " << m_pos2 << " " << pos2 << " " << m_sva2 << "\n";
+      
+      //std::cerr << m_pos1 << " " << pos1 << " " << m_sva1 << " " << m_pos2 << " " << pos2 << " " << m_sva2;
+      //if(m_naxes == 3) std::cerr << " " << m_pos3 << " " << pos3 << " " << m_sva3;
+      //std::cerr << "\n";
    }
    return 0;
 }
@@ -521,18 +617,186 @@ int pi335Ctrl::testConnection()
    int rv;
    std::string resp;
    
-   rv = tty::ttyWriteRead( resp, "*IDN?\n", "\n", false, m_fileDescrip, m_writeTimeout, m_readTimeout);
-
-   if(rv < 0)
+   if( (rv = tty::ttyWriteRead( resp, "*IDN?\n", "\n", false, m_fileDescrip, m_writeTimeout, m_readTimeout)) < 0)
    {
-      log<software_error>( {__FILE__, __LINE__, rv, tty::ttyErrorString(rv)});
+      return log<software_critical, -1>( {__FILE__, __LINE__, rv, tty::ttyErrorString(rv)});
+   }
+  
+   std::cerr << "idn response: " << resp << "\n";
+   
+   size_t st;
+   if( (st = resp.find("E-727.3SDA")) == std::string::npos) 
+   {
+      return log<text_log,-1>("Unknown device found: " + resp, logPrio::LOG_CRITICAL);
+   }
+   m_ctrl = mx::ioutils::removeWhiteSpace(resp.substr(st));
+   log<text_log>(std::string("Connected to " + m_ctrl + " on ") + m_deviceName);
+    
+   std::string resp1, resp2, resp3;
+   
+   if( (rv = tty::ttyWriteRead( resp1, "CST? 1\n", "\n", false, m_fileDescrip, m_writeTimeout, m_readTimeout)) < 0)
+   {
+      return log<software_critical, -1>( {__FILE__, __LINE__, rv, tty::ttyErrorString(rv)});
+   }
+   resp1 = mx::ioutils::removeWhiteSpace(resp1);
+   
+   std::cerr << "CST? 1 response: " << resp1 << "\n";
+
+   if( (rv = tty::ttyWriteRead( resp2, "CST? 2\n", "\n", false, m_fileDescrip, m_writeTimeout, m_readTimeout)) < 0)
+   {
+      return log<software_critical,-1>( {__FILE__, __LINE__, rv, tty::ttyErrorString(rv)});
+   }
+   resp2 = mx::ioutils::removeWhiteSpace(resp2);
+   
+   std::cerr << "CST? 2 response: " << resp2 << "\n";
+
+   if( (rv = tty::ttyWriteRead( resp3, "CST? 3\n", "\n", false, m_fileDescrip, m_writeTimeout, m_readTimeout)) < 0)
+   {
+      return log<software_critical,-1>( {__FILE__, __LINE__, rv, tty::ttyErrorString(rv)});
+   }
+   resp3 = mx::ioutils::removeWhiteSpace(resp3);
+   
+   std::cerr << "CST? 3 response: " << resp3 << "\n";
+   
+   updateIfChanged(m_indiP_pos1, "current", 0.0);
+   updateIfChanged(m_indiP_pos1, "target", 0.0);
+         
+   updateIfChanged(m_indiP_pos2, "current", 0.0);
+   updateIfChanged(m_indiP_pos2, "target", 0.0);
+   
+   if( resp1.find("1=S-335") == 0 &&  resp2.find("2=S-335") == 0 && resp3.find("3=0") == 0)
+   {
+      m_stage = resp1.substr(2);
+      m_naxes = 2;
+      m_actuallyATZ = true;
+   }
+   else if( resp1.find("1=S-325") == 0 &&  resp2.find("2=S-325") == 0 && resp3.find("3=S-325") == 0)
+   {
+      m_stage = resp1.substr(2);
+      m_naxes = 3;
+      m_actuallyATZ = false;
+      if(!m_pos_3_sent)
+      {
+         ///\todo this needs to only happen once, and then never again
+         REG_INDI_NEWPROP(m_indiP_pos3, "pos_3", pcf::IndiProperty::Number);
+         m_indiP_pos3.add (pcf::IndiElement("current"));
+         m_indiP_pos3.add (pcf::IndiElement("target"));
+         m_indiP_pos3["current"] = -99999999;
+         m_indiP_pos3["target"] = -99999999;
+         updateIfChanged(m_indiP_pos3, "current", 0.0);
+         updateIfChanged(m_indiP_pos3, "target", 0.0);
+         m_pos_3_sent = true;
+      }
+   }
+   else
+   {
+      return log<text_log,-1>("Unknown stage found: " + resp1 + " " + resp2 + " " + resp3, logPrio::LOG_CRITICAL);
    }
    
-   //std::cerr << "idn response: " << resp << "\n";
+   log<text_log>("Found " + m_stage + " with " + std::to_string(m_naxes) + " axes");
    
-   if(resp.find("E-727.3SDA") != std::string::npos) return 0;
+   //-------- now get axis limits
    
-   return -1;
+   // axis 1
+   
+   if( (rv = tty::ttyWriteRead( resp, "TMN? 1\n", "\n", false, m_fileDescrip, m_writeTimeout, m_readTimeout)) < 0)
+   {
+      return log<software_critical, -1>( {__FILE__, __LINE__, rv, tty::ttyErrorString(rv)});
+   }
+   
+   if((st = resp.find('=')) == std::string::npos)
+   {
+      return log<software_critical, -1>( {__FILE__, __LINE__, "invalid response"});
+   }
+   
+   m_min1 = mx::ioutils::convertFromString<float>(resp.substr(st+1));
+   log<text_log>("axis 1 min: " + std::to_string(m_min1));
+   
+   if( (rv = tty::ttyWriteRead( resp, "TMX? 1\n", "\n", false, m_fileDescrip, m_writeTimeout, m_readTimeout)) < 0)
+   {
+      return log<software_critical, -1>( {__FILE__, __LINE__, rv, tty::ttyErrorString(rv)});
+   }
+      
+   if((st = resp.find('=')) == std::string::npos)
+   {
+      return log<software_critical, -1>( {__FILE__, __LINE__, "invalid response"});
+   }
+   
+   m_max1 = mx::ioutils::convertFromString<float>(resp.substr(st+1));
+   log<text_log>("axis 1 max: " + std::to_string(m_max1));
+   
+   if( (rv = tty::ttyWriteRead( resp, "TMN? 2\n", "\n", false, m_fileDescrip, m_writeTimeout, m_readTimeout)) < 0)
+   {
+      return log<software_critical, -1>( {__FILE__, __LINE__, rv, tty::ttyErrorString(rv)});
+   }   
+
+   if((st = resp.find('=')) == std::string::npos)
+   {
+      return log<software_critical, -1>( {__FILE__, __LINE__, "invalid response"});
+   }
+
+   m_min2 = mx::ioutils::convertFromString<float>(resp.substr(st+1));
+   log<text_log>("axis 2 min: " + std::to_string(m_min2));
+   
+   if( (rv = tty::ttyWriteRead( resp, "TMX? 2\n", "\n", false, m_fileDescrip, m_writeTimeout, m_readTimeout)) < 0)
+   {
+      return log<software_critical, -1>( {__FILE__, __LINE__, rv, tty::ttyErrorString(rv)});
+   }
+         
+   if((st = resp.find('=')) == std::string::npos)
+   {
+      return log<software_critical, -1>( {__FILE__, __LINE__, "invalid response"});
+   }
+
+   m_max2 = mx::ioutils::convertFromString<float>(resp.substr(st+1));
+   log<text_log>("axis 2 max: " + std::to_string(m_max2));
+   
+   if(m_naxes == 3)
+   {
+      if( (rv = tty::ttyWriteRead( resp, "TMN? 3\n", "\n", false, m_fileDescrip, m_writeTimeout, m_readTimeout)) < 0)
+      {
+         return log<software_critical, -1>( {__FILE__, __LINE__, rv, tty::ttyErrorString(rv)});
+      }
+         
+      if((st = resp.find('=')) == std::string::npos)
+      {
+         return log<software_critical, -1>( {__FILE__, __LINE__, "invalid response"});
+      }
+
+      m_min3 = mx::ioutils::convertFromString<float>(resp.substr(st+1));
+      log<text_log>("axis 3 min: " + std::to_string(m_min3));
+      
+      if( (rv = tty::ttyWriteRead( resp, "TMX? 3\n", "\n", false, m_fileDescrip, m_writeTimeout, m_readTimeout)) < 0)
+      {
+         return log<software_critical, -1>( {__FILE__, __LINE__, rv, tty::ttyErrorString(rv)});
+      }
+         
+      if((st = resp.find('=')) == std::string::npos)
+      {
+         return log<software_critical, -1>( {__FILE__, __LINE__, "invalid response"});
+      }
+
+      m_max3 = mx::ioutils::convertFromString<float>(resp.substr(st+1));
+      log<text_log>("axis 3 max: " + std::to_string(m_max3));
+   }
+   
+   std::cerr << "Limits axis-1: " << m_min1 << " " << m_max1 << "\n";
+   std::cerr << "Limits axis-2: " << m_min2 << " " << m_max2 << "\n";
+   std::cerr << "Limits axis-3: " << m_min3 << " " << m_max3 << "\n";
+   
+   if( (rv = tty::ttyWriteRead( resp, "PUN?\n", "\n", false, m_fileDescrip, m_writeTimeout, m_readTimeout)) < 0)
+   {
+      return log<software_critical, -1>( {__FILE__, __LINE__, rv, tty::ttyErrorString(rv)});
+   }
+         
+   if((st = resp.find('=')) == std::string::npos)
+   {
+      return log<software_critical, -1>( {__FILE__, __LINE__, "invalid response"});
+   }
+   
+   std::cerr << resp << "\n";
+   
+   return 0;
    
 }
 
@@ -553,7 +817,7 @@ int pi335Ctrl::initDM()
    //std::cerr << "response: " << resp << "\n";
    
    //get open-loop position of axis 2 (should be zero)
-  // std::cerr << "Sending: SVA? 2\n";
+   // std::cerr << "Sending: SVA? 2\n";
    rv = tty::ttyWriteRead( resp, "SVA? 2\n", "\n", false, m_fileDescrip, m_writeTimeout, m_readTimeout);
 
    if(rv < 0)
@@ -562,7 +826,19 @@ int pi335Ctrl::initDM()
    }
    //std::cerr << "response: " << resp << "\n";
    
-   
+   if(m_naxes == 3)
+   {
+      //get open-loop position of axis 2 (should be zero)
+      // std::cerr << "Sending: SVA? 2\n";
+      rv = tty::ttyWriteRead( resp, "SVA? 3\n", "\n", false, m_fileDescrip, m_writeTimeout, m_readTimeout);
+
+      if(rv < 0)
+      {
+         log<software_error>( {__FILE__, __LINE__, rv, tty::ttyErrorString(rv)});
+      }
+      //std::cerr << "response: " << resp << "\n";
+   }
+ 
    //make sure axis 1 has servo off
    //std::cerr << "Sending: SVO 1 0\n";
    rv = tty::ttyWrite("SVO 1 0\n",  m_fileDescrip, m_writeTimeout);
@@ -580,6 +856,19 @@ int pi335Ctrl::initDM()
    {
       log<software_error>( {__FILE__, __LINE__, rv, tty::ttyErrorString(rv)});
    }
+   
+   if(m_naxes == 0)
+   {
+      //make sure axis 3 has servo off
+      //std::cerr << "Sending: SVO 2 0\n";
+      rv = tty::ttyWrite("SVA 3 0\n",  m_fileDescrip, m_writeTimeout);
+
+      if(rv < 0)
+      {
+         log<software_error>( {__FILE__, __LINE__, rv, tty::ttyErrorString(rv)});
+      }
+   }
+   
    
    m_servoState = 0;
    
@@ -609,6 +898,7 @@ int pi335Ctrl::home()
    
 int pi335Ctrl::homeState( int axis) 
 {
+   if(!m_actuallyATZ) return 1;
    std::string resp;
    
    if( getCom( resp, "ATZ?", axis) < 0) 
@@ -649,13 +939,16 @@ int pi335Ctrl::home_1()
       return -1;
    }
    
-   //zero range found in axis 1 (NOTE this moves mirror full range) TAKES 1min 
-   //std::cerr << "Sending: ATZ 1 NaN\n";
-   rv = tty::ttyWrite("ATZ 1 NaN\n",  m_fileDescrip, m_writeTimeout);
-
-   if(rv < 0)
+   if(m_actuallyATZ)
    {
-      log<software_error>( {__FILE__, __LINE__, rv, tty::ttyErrorString(rv)});
+      //zero range found in axis 1 (NOTE this moves mirror full range) TAKES 1min 
+      //std::cerr << "Sending: ATZ 1 NaN\n";
+      rv = tty::ttyWrite("ATZ 1 NaN\n",  m_fileDescrip, m_writeTimeout);
+
+      if(rv < 0)
+      {
+         log<software_error>( {__FILE__, __LINE__, rv, tty::ttyErrorString(rv)});
+      }
    }
 
    m_homingStart = mx::sys::get_curr_time(); ///\todo remmove m_homingStart once ATZ? works.
@@ -681,13 +974,16 @@ int pi335Ctrl::home_2()
       return -1;
    }
    
-   //zero range found in axis 2 (NOTE this moves mirror full range) TAKES 1min 
-   //std::cerr << "Sending: ATZ 2 NaN\n";
-   rv = tty::ttyWrite("ATZ 2 NaN\n", m_fileDescrip, m_writeTimeout);
-
-   if(rv < 0)
+   if(m_actuallyATZ)
    {
-      log<software_error>( {__FILE__, __LINE__, rv, tty::ttyErrorString(rv)});
+      //zero range found in axis 2 (NOTE this moves mirror full range) TAKES 1min 
+      //std::cerr << "Sending: ATZ 2 NaN\n";
+      rv = tty::ttyWrite("ATZ 2 NaN\n", m_fileDescrip, m_writeTimeout);
+
+      if(rv < 0)
+      {
+         log<software_error>( {__FILE__, __LINE__, rv, tty::ttyErrorString(rv)});
+      }
    }
 
    m_homingStart = mx::sys::get_curr_time();
@@ -696,6 +992,40 @@ int pi335Ctrl::home_2()
    return 0;
 }
  
+int pi335Ctrl::home_3()
+{
+   int rv;
+   
+   if(m_servoState != 0)
+   {
+      log<text_log>("home_3 requested but servos are not off", logPrio::LOG_ERROR);
+      return -1;
+   }
+   
+   if(m_homingState != 2)
+   {
+      log<text_log>("home_3 requested but not in correct homing state", logPrio::LOG_ERROR);
+      return -1;
+   }
+   
+   if(m_actuallyATZ)
+   {
+      //zero range found in axis 3 (NOTE this moves mirror full range) TAKES 1min 
+      //std::cerr << "Sending: ATZ 3 NaN\n";
+      rv = tty::ttyWrite("ATZ 3 NaN\n", m_fileDescrip, m_writeTimeout);
+
+      if(rv < 0)
+      {
+         log<software_error>( {__FILE__, __LINE__, rv, tty::ttyErrorString(rv)});
+      }
+   }
+
+   m_homingStart = mx::sys::get_curr_time();
+   log<text_log>("commenced homing z");
+   
+   return 0;
+}
+
 int pi335Ctrl::finishInit()
 {
    int rv;
@@ -707,12 +1037,16 @@ int pi335Ctrl::finishInit()
       return -1;
    }
    
-   if(m_homingState != 2)
+   if( m_naxes==2 && m_homingState != 2)
    {
       log<text_log>("finishInit requested but not in correct homing state", logPrio::LOG_ERROR);
       return -1;
    }
-   
+   if( m_naxes==3 && m_homingState != 3)
+   {
+      log<text_log>("finishInit requested but not in correct homing state", logPrio::LOG_ERROR);
+      return -1;
+   }
    
    //goto openloop pos zero (0 V) axis 1
    rv = tty::ttyWrite("SVA 1 0.0\n", m_fileDescrip, m_writeTimeout);
@@ -734,6 +1068,19 @@ int pi335Ctrl::finishInit()
    
    mx::sys::milliSleep(2000);
 
+   if(m_naxes == 3)
+   {
+      //goto openloop pos zero (0 V) axis 3
+      rv = tty::ttyWrite("SVA 3 0.0\n", m_fileDescrip, m_writeTimeout);
+
+      if(rv < 0)
+      {    
+         log<software_error>( {__FILE__, __LINE__, rv, tty::ttyErrorString(rv)});
+      }
+      
+      mx::sys::milliSleep(2000);
+   }
+   
    //Get the real position of axis 1 (should be 0mrad st start) 
    rv = tty::ttyWriteRead( resp, "SVA? 1\n", "\n", false, m_fileDescrip, m_writeTimeout, m_readTimeout);
 
@@ -750,8 +1097,21 @@ int pi335Ctrl::finishInit()
    {
       log<software_error>( {__FILE__, __LINE__, rv, tty::ttyErrorString(rv)});
    }
+   
+   if(m_naxes == 3)
+   {
+      //Get the real position of axis 3 (should be 0mrad st start) 
+      rv = tty::ttyWriteRead( resp, "SVA? 3\n", "\n", false, m_fileDescrip, m_writeTimeout, m_readTimeout);
+
+      if(rv < 0)
+      {
+         log<software_error>( {__FILE__, __LINE__, rv, tty::ttyErrorString(rv)});
+      }
+   }
+   
    //now safe to engage servos    
    //(IMPORTANT:    NEVER EVER enable servos on axis 3 -- will damage S-335) 
+   //(CAVEAT: for S-325 you CAN enable servors on axis 3)
    
    //turn on servo to axis 1 (green servo LED goes on 727) 
    rv = tty::ttyWrite("SVO 1 1\n",  m_fileDescrip, m_writeTimeout);
@@ -763,7 +1123,7 @@ int pi335Ctrl::finishInit()
 
    mx::sys::milliSleep(250);
    
-   //turn on servo to axis 1 (green servo LED goes on 727) 
+   //turn on servo to axis 3 (green servo LED goes on 727) 
    rv = tty::ttyWrite("SVO 2 1\n", m_fileDescrip, m_writeTimeout);
 
    if(rv < 0)
@@ -771,10 +1131,26 @@ int pi335Ctrl::finishInit()
       log<software_error>( {__FILE__, __LINE__, rv, tty::ttyErrorString(rv)});
    }
 
+   if(m_naxes == 3)
+   {
+      mx::sys::milliSleep(250);
+   
+      //turn on servo to axis 3 (green servo LED goes on 727) 
+      rv = tty::ttyWrite("SVO 3 1\n", m_fileDescrip, m_writeTimeout);
+
+      if(rv < 0)
+      {
+         log<software_error>( {__FILE__, __LINE__, rv, tty::ttyErrorString(rv)});
+      }
+   }
+   
+   
    m_servoState = 1;
    log<text_log>("servos engaged", logPrio::LOG_NOTICE);
 
    mx::sys::milliSleep(1000);
+   
+   
    
    //now safe for closed loop moves 
    //center axis 1 (to configured home position)
@@ -788,8 +1164,9 @@ int pi335Ctrl::finishInit()
    }
 
    m_pos1 = m_homePos1;
+   updateIfChanged(m_indiP_pos1, "target", m_homePos1);   
    
-   //center axis 1 (to configured home position)
+   //center axis 2 (to configured home position)
    com = "MOV 2 " + std::to_string(m_homePos2) + "\n";
    rv = tty::ttyWrite(com,  m_fileDescrip, m_writeTimeout);
 
@@ -799,6 +1176,24 @@ int pi335Ctrl::finishInit()
    }
    
    m_pos2 = m_homePos2;
+   updateIfChanged(m_indiP_pos2, "target", m_homePos2);
+   
+   if(m_naxes == 3)
+   {
+      //center axis 3 (to configured home position)
+      com = "MOV 3 " + std::to_string(m_homePos3) + "\n";
+      rv = tty::ttyWrite(com,  m_fileDescrip, m_writeTimeout);
+
+      if(rv < 0)
+      {
+         log<software_error>( {__FILE__, __LINE__, rv, tty::ttyErrorString(rv) } );
+      }
+ 
+      m_pos3 = m_homePos3;
+      updateIfChanged(m_indiP_pos3, "target", m_homePos3);
+      
+   }
+   
    /*
    sleep(3);
    
@@ -839,10 +1234,44 @@ int pi335Ctrl::finishInit()
    
    m_sva2 = sva2;
    */
-   state(stateCodes::READY);
-   
+   //state(stateCodes::READY);
+   state(stateCodes::OPERATING);
    return 0;
 }
+
+int pi335Ctrl::zeroDM()
+{
+   move_1(0.0);
+   move_2(0.0);
+   if(m_naxes == 3) move_3(0.0);
+   
+   log<text_log>("DM zeroed");
+   return 0;
+}
+
+int pi335Ctrl::commandDM(void * curr_src)
+{
+   std::cerr << "command\n";
+   float pos1 = ((float *) curr_src)[0];
+   float pos2 = ((float *) curr_src)[1];
+   
+   float pos3 = 0;
+   if(m_naxes == 3) pos3 = ((float *) curr_src)[2];
+   
+   std::unique_lock<std::mutex> lock(m_indiMutex);
+   
+   std::cerr << pos1 << " " << pos2 << " " << pos3 << "\n";
+//    int rv;
+//    if( (rv = move_1(pos1)) < 0) return rv;
+//    
+//    if( (rv = move_2(pos2)) < 0) return rv;
+//    
+//    if(m_naxes == 3) if( (rv = move_3(pos3)) < 0) return rv;
+   
+   return 0;
+   
+}
+
 
 int pi335Ctrl::releaseDM()
 {
@@ -865,20 +1294,23 @@ int pi335Ctrl::releaseDM()
       log<text_log>("servos off", logPrio::LOG_NOTICE);
    }
    
-   rv = tty::ttyWrite("SVA 1 0\n", m_fileDescrip, m_writeTimeout);
-
-   if(rv < 0)
+   if( (rv = tty::ttyWrite("SVA 1 0\n", m_fileDescrip, m_writeTimeout)) < 0)
    {
       log<software_error>( {__FILE__, __LINE__, rv, tty::ttyErrorString(rv)});
    }
    
-   rv = tty::ttyWrite("SVA 2 0\n",  m_fileDescrip, m_writeTimeout);
-
-   if(rv < 0)
+   if( (rv = tty::ttyWrite("SVA 2 0\n",  m_fileDescrip, m_writeTimeout)) < 0)
    {
       log<software_error>( {__FILE__, __LINE__, rv, tty::ttyErrorString(rv) } );
    }
    
+   if(m_naxes == 3)
+   {
+      if( (rv = tty::ttyWrite("SVA 2 0\n",  m_fileDescrip, m_writeTimeout)) < 0)
+      {
+         log<software_error>( {__FILE__, __LINE__, rv, tty::ttyErrorString(rv) } );
+      }
+   }
 
    state(stateCodes::NOTHOMED);
    
@@ -963,7 +1395,7 @@ int pi335Ctrl::move_1( float absPos )
 {
    int rv;
    
-   if(absPos < 0 || absPos > 35)
+   if(absPos < m_min1 || absPos > m_max1)
    {
       log<text_log>("request move on azis 1 out of range", logPrio::LOG_ERROR);
       return -1;
@@ -988,7 +1420,7 @@ int pi335Ctrl::move_2( float absPos )
 {
    int rv;
    
-   if(absPos < 0 || absPos > 35)
+   if(absPos < m_min2 || absPos > m_max2)
    {
       log<text_log>("request move on azis 2 out of range", logPrio::LOG_ERROR);
       return -1;
@@ -1007,14 +1439,43 @@ int pi335Ctrl::move_2( float absPos )
    
    return 0;
 }
+ 
+int pi335Ctrl::move_3( float absPos )
+{
+   if(m_naxes < 3) 
+   {
+      return log<software_error,-1>({__FILE__, __LINE__, "tried to move axis 3 but we don't have that"});
+   }
    
+   int rv;
+   
+   if(absPos < m_min3 || absPos > m_max3)
+   {
+      log<text_log>("request move on azis 3 out of range", logPrio::LOG_ERROR);
+      return -1;
+   }
+   
+   m_pos3 = absPos;
+   std::string com = "MOV 3 " + std::to_string(absPos) + "\n";
+   
+   //std::cerr << "Sending: " << com;
+   rv = tty::ttyWrite(com, m_fileDescrip, m_writeTimeout);
+
+   if(rv < 0)
+   {
+      log<software_error>( {__FILE__, __LINE__, rv, tty::ttyErrorString(rv)});
+   }
+   
+   return 0;
+}
+
 INDI_NEWCALLBACK_DEFN(pi335Ctrl, m_indiP_pos1)(const pcf::IndiProperty &ipRecv)
 {
    //if(MagAOXAppT::m_powerState == 0) return 0;
    
    if (ipRecv.getName() == m_indiP_pos1.getName())
    {
-      float current = -1, target = -1;
+      float current = -999999, target = -999999;
 
       if(ipRecv.find("current"))
       {
@@ -1026,9 +1487,9 @@ INDI_NEWCALLBACK_DEFN(pi335Ctrl, m_indiP_pos1)(const pcf::IndiProperty &ipRecv)
          target = ipRecv["target"].get<float>();
       }
       
-      if(target == -1) target = current;
+      if(target == -999999) target = current;
       
-      if(target == -1) return 0;
+      if(target == -999999) return 0;
       
       //Lock the mutex, waiting if necessary
       std::unique_lock<std::mutex> lock(m_indiMutex);
@@ -1047,7 +1508,7 @@ INDI_NEWCALLBACK_DEFN(pi335Ctrl, m_indiP_pos2)(const pcf::IndiProperty &ipRecv)
    
    if (ipRecv.getName() == m_indiP_pos2.getName())
    {
-      float current = -1, target = -1;
+      float current = -999999, target = -999999;
 
       if(ipRecv.find("current"))
       {
@@ -1059,9 +1520,11 @@ INDI_NEWCALLBACK_DEFN(pi335Ctrl, m_indiP_pos2)(const pcf::IndiProperty &ipRecv)
          target = ipRecv["target"].get<float>();
       }
       
-      if(target == -1) target = current;
+      std::cerr << current << " " << target << "\n";
       
-      if(target == -1) return 0;
+      if(target == -999999) target = current;
+      
+      if(target == -999999) return 0;
       
       //Lock the mutex, waiting if necessary
       std::unique_lock<std::mutex> lock(m_indiMutex);
@@ -1069,6 +1532,39 @@ INDI_NEWCALLBACK_DEFN(pi335Ctrl, m_indiP_pos2)(const pcf::IndiProperty &ipRecv)
       updateIfChanged(m_indiP_pos2, "target", target);
       
       return move_2(target);
+      
+   }
+   return -1;
+}
+
+INDI_NEWCALLBACK_DEFN(pi335Ctrl, m_indiP_pos3)(const pcf::IndiProperty &ipRecv)
+{
+   //if(MagAOXAppT::m_powerState == 0) return 0;
+   
+   if (ipRecv.getName() == m_indiP_pos3.getName())
+   {
+      float current = -999999, target = -999999;
+
+      if(ipRecv.find("current"))
+      {
+         current = ipRecv["current"].get<float>();
+      }
+
+      if(ipRecv.find("target"))
+      {
+         target = ipRecv["target"].get<float>();
+      }
+      
+      if(target == -999999) target = current;
+      
+      if(target == -999999) return 0;
+      
+      //Lock the mutex, waiting if necessary
+      std::unique_lock<std::mutex> lock(m_indiMutex);
+
+      updateIfChanged(m_indiP_pos3, "target", target);
+      
+      return move_3(target);
       
    }
    return -1;
