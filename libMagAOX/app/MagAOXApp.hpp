@@ -172,6 +172,7 @@ public:
    
    /// The execute method implementing the standard main loop.  Should not normally be overridden.
    /** Performs final startup steps.  That is:
+     * - Verifies correct effectiver user-id by comparison to logs directory.
      * - PID locking lockPID()
      * - log thread startup by logThreadStart()
      * - signal handling installation by setSigTermHandler()
