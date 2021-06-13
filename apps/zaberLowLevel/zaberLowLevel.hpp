@@ -204,25 +204,14 @@ int zaberLowLevel::connect()
    
    if(m_port <= 0)
    {
-      int rv = euidCalled();
-
-      if(rv < 0)
-      {
-         log<software_critical>({__FILE__, __LINE__});
-         state(stateCodes::FAILURE);
-         return ZC_NOT_CONNECTED;
+      
+      
+      int zrv;
+      
+      {//scope for elPriv
+         elevatedPrivileges elPriv(this);
+         zrv = za_connect(&m_port, m_deviceName.c_str());
       }
-
-      int zrv = za_connect(&m_port, m_deviceName.c_str());
-
-      rv = euidReal();
-      if(rv < 0)
-      {
-         log<software_critical>({__FILE__, __LINE__});
-         state(stateCodes::FAILURE);
-         return ZC_NOT_CONNECTED;
-      }
-
 
       if(zrv != Z_SUCCESS)
       {

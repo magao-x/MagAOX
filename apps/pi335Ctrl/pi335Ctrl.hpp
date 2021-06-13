@@ -362,9 +362,11 @@ int pi335Ctrl::appLogic()
    
    if( state() == stateCodes::NOTCONNECTED)
    {
-      euidCalled();
-      int rv = connect();
-      euidReal();
+      int rv;
+      { //scope for elPriv
+         elevatedPrivileges elPriv(this);
+         rv = connect();
+      }
       
       if(rv < 0) 
       {
