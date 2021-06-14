@@ -313,9 +313,10 @@ int hsfwCtrl::appLogic()
      
       if(m_wheel) close_hsfw(m_wheel);
       
-      euidCalled();
-      m_wheel = open_hsfw(cur_dev->vendor_id, cur_dev->product_id, cur_dev->serial_number);
-      euidReal();
+      {
+         elevatedPrivileges elPriv(this);
+         m_wheel = open_hsfw(cur_dev->vendor_id, cur_dev->product_id, cur_dev->serial_number);
+      }
    
       if(m_wheel == NULL)
       {

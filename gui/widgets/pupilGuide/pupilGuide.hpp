@@ -1494,6 +1494,7 @@ void pupilGuide::on_button_pup_ur_pressed()
    sendNewProperty(ip2);
    
 }
+
 void pupilGuide::on_button_pup_scale_pressed()
 {
    if(((int) (100*m_pupStepSize)) == 100)
@@ -1520,8 +1521,6 @@ void pupilGuide::on_button_pup_scale_pressed()
    char ss[5];
    snprintf(ss, 5, "%0.2f", m_pupStepSize);
    ui.button_pup_scale->setText(ss);
-
-
 }
 
 

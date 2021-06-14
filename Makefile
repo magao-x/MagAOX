@@ -22,6 +22,7 @@ apps_rtc = \
 	bmcCtrl \
 	pi335Ctrl \
 	pupilFit \
+        t2wOffloader \
         cacaoInterface
 
 apps_icc = \

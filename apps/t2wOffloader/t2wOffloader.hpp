@@ -304,7 +304,7 @@ int t2wOffloader::allocate(const dev::shmimT & dummy)
       
    m_tweeter.resize(shmimMonitorT::m_width, shmimMonitorT::m_height);
 
-   mx::improc::fitsFile<float> ff;
+   mx::fits::fitsFile<float> ff;
    ff.read(m_twRespM, m_twRespMPath);
    
    std::cerr << "Read a " << m_twRespM.rows() << " x " << m_twRespM.cols() << " matrix.\n";
@@ -364,12 +364,12 @@ int t2wOffloader::processImage( void * curr_src,
    
    if(!m_offloading) return 0;
    
-   m_wooferDelta = m_twRespM.matrix() * Eigen::Map<Matrix<float,-1,-1>>((float *)curr_src,  m_width*m_height,1);
+   m_wooferDelta = m_twRespM.matrix() * Eigen::Map<Eigen::Matrix<float,-1,-1>>((float *)curr_src,  m_width*m_height,1);
 
    while(m_dmStream.md[0].write == 1); //Check if zero() is running
    
    
-   m_woofer = m_gain* Eigen::Map<Array<float,-1,-1>>( m_wooferDelta.data(), m_dmWidth, m_dmHeight) + (1.0-m_leak)*m_woofer;
+   m_woofer = m_gain* Eigen::Map<Eigen::Array<float,-1,-1>>( m_wooferDelta.data(), m_dmWidth, m_dmHeight) + (1.0-m_leak)*m_woofer;
       
    for(int ii = 0; ii < m_woofer.rows(); ++ii)
    {
