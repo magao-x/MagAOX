@@ -765,28 +765,16 @@ int xindiserver::appStartup()
    std::string path1 = "/opt/MagAOX/bin/xindidriver";
    for(size_t i=0; i<m_local.size(); ++i)
    {
-      int rv = euidCalled();
-      
-      if(rv < 0)
-      {
-         log<software_error>({__FILE__, __LINE__, "Failed to create symlink for driver: " + m_local[i] + ". Continuing."});
-      }
+      elevatedPrivileges elPriv(this);
       
       std::cerr << "creating symlink " << path1 << " " << m_driverPath + m_local[i] << "\n";
       
-      rv = symlink(path1.c_str(), (m_driverPath + m_local[i]).c_str());
+      int rv = symlink(path1.c_str(), (m_driverPath + m_local[i]).c_str());
       
       if(rv < 0 && errno != EEXIST)
       {
          log<software_error>({__FILE__, __LINE__, errno});
          log<software_error>({__FILE__, __LINE__, "Failed to create symlink for driver: " + m_local[i] + ". Continuing."});
-      }
-      
-      rv = euidReal();
-      if(rv < 0)
-      {
-         log<software_critical>({__FILE__, __LINE__, "Failed to reset privileges."});
-         return -1;
       }
    }
 

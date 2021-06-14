@@ -172,6 +172,7 @@ public:
    
    /// The execute method implementing the standard main loop.  Should not normally be overridden.
    /** Performs final startup steps.  That is:
+     * - Verifies correct effective user-id by comparison to logs directory.
      * - PID locking lockPID()
      * - log thread startup by logThreadStart()
      * - signal handling installation by setSigTermHandler()
@@ -334,7 +335,7 @@ protected:
          {
             if(m_elevated) return;
           
-            m_app->euidCalled();
+            m_app->setEuidCalled();
             m_elevated = true;
          }
          
@@ -342,7 +343,7 @@ protected:
          {
             if(!m_elevated) return;
             
-            m_app->euidReal();
+            m_app->setEuidReal();
             m_elevated = false;
          }
          
@@ -352,30 +353,29 @@ protected:
          }
    };
    
+private:
    /// Set the effective user ID to the called value, i.e. the highest possible.
    /** If setuid is set on the file, this will be super-user privileges.
      *
      * Reference: http://pubs.opengroup.org/onlinepubs/009695399/functions/seteuid.html
      *
-     * \todo make this private, and change name to enforce use of the above class.
-     * 
      * \returns 0 on success
      * \returns -1 on error from setuid().
      */
-   int euidCalled();
+   int setEuidCalled();
 
    /// Set the effective user ID to the real value, i.e. the file owner.
    /**
      * Reference: http://pubs.opengroup.org/onlinepubs/009695399/functions/seteuid.html
      *
-     * \todo make this private, and change name to enforce use of the above class.
-     * 
      * \returns 0 on success
      * \returns -1 on error from setuid().
      */
-   int euidReal();
+   int setEuidReal();
 
    ///@} -- Privilege Management
+
+protected:
 
    /** \name PID Locking
      *
@@ -1060,8 +1060,12 @@ MagAOXApp<_useINDI>::MagAOXApp( const std::string & git_sha1,
       std::cerr << "Attempt to instantiate 2nd MagAOXApp.  Exiting immediately.\n";
       exit(-1);
    }
-
+   
    m_self = this;
+
+   //Get the uids of this process.
+   getresuid(&m_euidReal, &m_euidCalled, &m_suid);
+   setEuidReal(); //immediately step down to unpriveleged uid.
 
    m_log.parent(this);
    
@@ -1087,16 +1091,13 @@ MagAOXApp<_useINDI>::MagAOXApp( const std::string & git_sha1,
    
    log<git_state>(git_state::messageT("mxlib", MXLIB_UNCOMP_CURRENT_SHA1, MXLIB_UNCOMP_REPO_MODIFIED), gl);
 
-   //Get the uids of this process.
-   getresuid(&m_euidReal, &m_euidCalled, &m_suid);
-   euidReal(); //immediately step down to unpriveleged uid.
-
 }
 
 template<bool _useINDI>
 MagAOXApp<_useINDI>::~MagAOXApp() noexcept(true)
 {
    if(m_indiDriver) delete m_indiDriver;
+   m_log.parent(nullptr);
 
    MagAOXApp<_useINDI>::m_self = nullptr;
 }
@@ -1310,6 +1311,22 @@ template<bool _useINDI>
 int MagAOXApp<_useINDI>::execute() //virtual
 {
    //----------------------------------------//
+   //        Check user
+   //----------------------------------------//
+   struct stat logstat;
+
+   if( stat(m_log.logPath().c_str(), &logstat) < 0)
+   {
+      return log<text_log,-1>({"Can not stat the log path."}, logPrio::LOG_CRITICAL);
+   }
+   
+   if( logstat.st_uid != geteuid() )
+   {
+      return log<text_log,-1>({"You are running this app as the wrong user."}, logPrio::LOG_CRITICAL);
+   }
+   
+   
+   //----------------------------------------//
    //        Get the PID Lock
    //----------------------------------------//
    if( lockPID() < 0 )
@@ -1381,7 +1398,7 @@ int MagAOXApp<_useINDI>::execute() //virtual
          }
          
          ++nwaits;
-         if(nwaits == 10)
+         if(nwaits == 30)
          {
             log<text_log>("stalled waiting for power state", logPrio::LOG_ERROR);
             state(stateCodes::ERROR, true);
@@ -1665,7 +1682,7 @@ void sigUsr1Handler( int signum,
 
 
 template<bool _useINDI>
-int MagAOXApp<_useINDI>::euidCalled()
+int MagAOXApp<_useINDI>::setEuidCalled()
 {
    errno = 0;
    if(sys::th_seteuid(m_euidCalled) < 0)
@@ -1684,7 +1701,7 @@ int MagAOXApp<_useINDI>::euidCalled()
 }
 
 template<bool _useINDI>
-int MagAOXApp<_useINDI>::euidReal()
+int MagAOXApp<_useINDI>::setEuidReal()
 {
    errno = 0;
    if(sys::th_seteuid(m_euidReal) < 0)
@@ -1711,11 +1728,7 @@ int MagAOXApp<_useINDI>::lockPID()
    std::string statusDir = sysPath;
 
    //Get the maximum privileges available
-   if( euidCalled() < 0 )
-   {
-      log<software_error>({__FILE__, __LINE__, 0, 0, "Seeting euid to called failed."});
-      return -1;
-   }
+   elevatedPrivileges elPriv(this);
 
    // Create statusDir root with read/write/search permissions for owner and group, and with read/search permissions for others.
    errno = 0;
@@ -1726,10 +1739,6 @@ int MagAOXApp<_useINDI>::lockPID()
          std::stringstream logss;
          logss << "Failed to create root of statusDir (" << statusDir << ").  Errno says: " << strerror(errno);
          log<software_critical>({__FILE__, __LINE__, errno, 0, logss.str()});
-
-         //Go back to regular privileges
-         euidReal();
-
          return -1;
       }
 
@@ -1749,10 +1758,6 @@ int MagAOXApp<_useINDI>::lockPID()
          std::stringstream logss;
          logss << "Failed to create statusDir (" << statusDir << ").  Errno says: " << strerror(errno);
          log<software_critical>({__FILE__, __LINE__, errno, 0, logss.str()});
-
-         //Go back to regular privileges
-         euidReal();
-
          return -1;
       }
 
@@ -1784,7 +1789,6 @@ int MagAOXApp<_useINDI>::lockPID()
          catch( ... )
          {
             log<software_critical>({__FILE__, __LINE__, 0, 0, "exception caught testing /proc/pid"});
-            euidReal();
             return -1;
          }
 
@@ -1808,9 +1812,6 @@ int MagAOXApp<_useINDI>::lockPID()
 
             log<text_log>(logss.str(), logPrio::LOG_CRITICAL);
 
-            //Go back to regular privileges
-            euidReal();
-
             return -1;
          }
       }
@@ -1828,7 +1829,7 @@ int MagAOXApp<_useINDI>::lockPID()
    if(!pidOut.good())
    {
       log<software_critical>({__FILE__, __LINE__, errno, 0, "could not open pid file for writing."});
-      euidReal();
+      //euidReal();
       return -1;
    }
 
@@ -1841,11 +1842,11 @@ int MagAOXApp<_useINDI>::lockPID()
    log<text_log>(logss.str());
 
    //Go back to regular privileges
-   if( euidReal() < 0 )
+   /*if( euidReal() < 0 )
    {
       log<software_error>({__FILE__, __LINE__, 0, 0, "Seeting euid to real failed."});
       return -1;
-   }
+   }*/
 
    return 0;
 }
@@ -1853,24 +1854,16 @@ int MagAOXApp<_useINDI>::lockPID()
 template<bool _useINDI>
 int MagAOXApp<_useINDI>::unlockPID()
 {
-   //Get the maximum privileges available
-   if( euidCalled() < 0 )
-   {
-      log<software_error>({__FILE__, __LINE__, 0, 0, "Seeting euid to called failed."});
-      return -1;
-   }
-   
-   if( ::remove(pidFileName.c_str()) < 0)
-   {
-      log<software_error>({__FILE__, __LINE__, errno, 0, std::string("Failed to remove PID file: ") + strerror(errno)});
-      return -1;
-   }
+   {//scope for elPriv
 
-   //Go back to regular privileges
-   if( euidReal() < 0 )
-   {
-      log<software_error>({__FILE__, __LINE__, 0, 0, "Seeting euid to real failed."});
-      return -1;
+      //Get the maximum privileges available
+      elevatedPrivileges elPriv(this);
+   
+      if( ::remove(pidFileName.c_str()) < 0)
+      {
+         log<software_error>({__FILE__, __LINE__, errno, 0, std::string("Failed to remove PID file: ") + strerror(errno)});
+         return -1;
+      }
    }
    
    std::stringstream logss;
@@ -1925,24 +1918,17 @@ int MagAOXApp<_useINDI>::threadStart( std::thread & thrd,
    sched_param sp;
    sp.sched_priority = thrdPrio;
 
-   //Get the maximum privileges available
-   if( euidCalled() < 0 )
-   {
-      log<software_error>({__FILE__, __LINE__, "Setting euid to called failed for " + thrdName});
-      return -1;
-   }
-   
-   //We set return value based on result from sched_setscheduler
-   //But we make sure to restore privileges no matter what happens.
-   errno = 0;
    int rv = 0;
-   if(thrdPrio > 0) rv = pthread_setschedparam(thrd.native_handle(), MAGAOX_RT_SCHED_POLICY, &sp);
-   else rv = pthread_setschedparam(thrd.native_handle(), SCHED_OTHER, &sp);
+
+   {//scope for elPriv
+      //Get the maximum privileges available
+      elevatedPrivileges elPriv(this);
    
-   //Go back to regular privileges
-   if( euidReal() < 0 )
-   {
-      log<software_error>({__FILE__, __LINE__, "Setting euid to real failed for " + thrdName});
+      //We set return value based on result from sched_setscheduler
+      //But we make sure to restore privileges no matter what happens.
+      errno = 0;
+      if(thrdPrio > 0) rv = pthread_setschedparam(thrd.native_handle(), MAGAOX_RT_SCHED_POLICY, &sp);
+      else rv = pthread_setschedparam(thrd.native_handle(), SCHED_OTHER, &sp);
    }
    
    if(rv < 0)
@@ -2509,7 +2495,7 @@ int MagAOXApp<_useINDI>::createINDIFIFOS()
    m_driverCtrlName = driverFIFOPath + "/" + configName() + ".ctrl";
 
    //Get max permissions
-   euidCalled();
+   elevatedPrivileges elPriv(this);
 
    //Clear the file mode creation mask so mkfifo does what we want. Don't forget to restore it.
    mode_t prev = umask(0);
@@ -2520,7 +2506,6 @@ int MagAOXApp<_useINDI>::createINDIFIFOS()
       if(errno != EEXIST)
       {
          umask(prev);
-         euidReal();
          log<software_critical>({__FILE__, __LINE__, errno, 0, "mkfifo failed"});
          log<text_log>("Failed to create input FIFO.", logPrio::LOG_CRITICAL);
          return -1;
@@ -2533,7 +2518,7 @@ int MagAOXApp<_useINDI>::createINDIFIFOS()
       if(errno != EEXIST)
       {
          umask(prev);
-         euidReal();
+         //euidReal();
          log<software_critical>({__FILE__, __LINE__, errno, 0, "mkfifo failed"});
          log<text_log>("Failed to create ouput FIFO.", logPrio::LOG_CRITICAL);
          return -1;
@@ -2546,7 +2531,7 @@ int MagAOXApp<_useINDI>::createINDIFIFOS()
       if(errno != EEXIST)
       {
          umask(prev);
-         euidReal();
+         //euidReal();
          log<software_critical>({__FILE__, __LINE__, errno, 0, "mkfifo failed"});
          log<text_log>("Failed to create ouput FIFO.", logPrio::LOG_CRITICAL);
          return -1;
@@ -2554,7 +2539,7 @@ int MagAOXApp<_useINDI>::createINDIFIFOS()
    }
 
    umask(prev);
-   euidReal();
+   //euidReal();
    return 0;
 }
 
