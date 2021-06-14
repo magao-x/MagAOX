@@ -784,7 +784,22 @@ int pi335Ctrl::testConnection()
    std::cerr << "Limits axis-2: " << m_min2 << " " << m_max2 << "\n";
    std::cerr << "Limits axis-3: " << m_min3 << " " << m_max3 << "\n";
    
-   if( (rv = tty::ttyWriteRead( resp, "PUN?\n", "\n", false, m_fileDescrip, m_writeTimeout, m_readTimeout)) < 0)
+   m_flatCommand.resize(3,1);
+   if(m_naxes == 2)
+   {
+      m_flatCommand(0,0) = m_homePos1;
+      m_flatCommand(0,1) = m_homePos2;
+      m_flatCommand(0,2) = 0.0;
+   }
+   else if(m_naxes == 3)
+   {
+      m_flatCommand(0,0) = m_homePos1;
+      m_flatCommand(0,1) = m_homePos2;
+      m_flatCommand(0,2) = m_homePos3;
+   }
+   m_flatLoaded = true;
+
+   /*if( (rv = tty::ttyWriteRead( resp, "PUN?\n", "\n", false, m_fileDescrip, m_writeTimeout, m_readTimeout)) < 0)
    {
       return log<software_critical, -1>( {__FILE__, __LINE__, rv, tty::ttyErrorString(rv)});
    }
@@ -794,7 +809,7 @@ int pi335Ctrl::testConnection()
       return log<software_critical, -1>( {__FILE__, __LINE__, "invalid response"});
    }
    
-   std::cerr << resp << "\n";
+   std::cerr << resp << "\n";*/
    
    return 0;
    
