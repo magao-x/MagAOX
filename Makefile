@@ -51,8 +51,7 @@ apps_tic = \
 	acronameUsbHub \
 	baslerCtrl \
 	bmcCtrl \
-	trippLitePDU \
-	zylaCtrl
+	trippLitePDU 
 
 
 libs_to_build = libtelnet
