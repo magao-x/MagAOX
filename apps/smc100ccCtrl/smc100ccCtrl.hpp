@@ -387,11 +387,15 @@ int smc100ccCtrl::appLogic()
    //mutex scope
    {
       std::unique_lock<std::mutex> lock(m_indiMutex);
-      getCtrlState(axState); /// \todo error check
+      if(getCtrlState(axState) < 0)
+      {
+         if(m_powerTargetState == 0) return 0;
+         return log<software_error, 0>({__FILE__,__LINE__});
+      }
    }   
+
    if(axState[0] == '0') 
    {
-      std::cerr << "Axis state: " << axState[0] << " " << axState[1] << "\n";
       state(stateCodes::NOTHOMED); //This always means this.
    }
    else if (axState[0] == '1' && axState[1] == '0')
@@ -408,7 +412,7 @@ int smc100ccCtrl::appLogic()
       int rv = MagAOX::tty::ttyWrite( com, m_fileDescrip, m_writeTimeout); 
       if (rv != TTY_E_NOERROR)
       {
-         if(m_powerTargetState == 0) return -1;
+         if(m_powerTargetState == 0) return 0;
          log<software_error>({__FILE__, __LINE__,MagAOX::tty::ttyErrorString(rv)});
          return -1;
       } 
@@ -423,7 +427,7 @@ int smc100ccCtrl::appLogic()
       rv = MagAOX::tty::ttyWrite( com, m_fileDescrip, m_writeTimeout); 
       if (rv != TTY_E_NOERROR)
       {
-         if(m_powerTargetState == 0) return -1;
+         if(m_powerTargetState == 0) return 0;
          log<software_error>({__FILE__, __LINE__,MagAOX::tty::ttyErrorString(rv)});
          return -1;
       }
@@ -438,7 +442,7 @@ int smc100ccCtrl::appLogic()
       rv = MagAOX::tty::ttyWrite( com, m_fileDescrip, m_writeTimeout); 
       if (rv != TTY_E_NOERROR)
       {
-         if(m_powerTargetState == 0) return -1;
+         if(m_powerTargetState == 0) return 0;
          log<software_error>({__FILE__, __LINE__,MagAOX::tty::ttyErrorString(rv)});
          return -1;
       }
@@ -448,7 +452,6 @@ int smc100ccCtrl::appLogic()
       return 0;
       
    }
-   
    else if (axState[0] == '1' && (axState[1] == 'E' || axState[1] == 'F'))
    {
       state(stateCodes::HOMING);
@@ -486,18 +489,24 @@ int smc100ccCtrl::appLogic()
       int rv = MagAOX::tty::ttyWrite( com, m_fileDescrip, m_writeTimeout); 
       if (rv != TTY_E_NOERROR)
       {
-         if(m_powerTargetState == 0) return -1;
+         if(m_powerTargetState == 0) return 0;
          log<software_error>({__FILE__, __LINE__,MagAOX::tty::ttyErrorString(rv)});
          return -1;
       } 
+   }
+   else if( axState[0] == '\0' && axState[1] == '\0' )
+   {
+      //a non-response, this means we should go back around and ask again
+      //this doesn't seem to be an error, but isn't documented.
+      //Occurs after a power off, but also sometimes after homing completes.
+      return 0;
    }
    else
    {
       sleep(1);
       if(m_powerState == 0) return 0;
       
-      log<software_error>({__FILE__,__LINE__, "Invalid state: " + axState});
-      
+      log<software_error>({__FILE__,__LINE__, "Invalid state: |" + std::to_string(axState[0]) + "|" + std::to_string(axState[1]) + "|"});  
       state(stateCodes::ERROR);
    }
       
@@ -749,11 +758,10 @@ int smc100ccCtrl::getCtrlState( std::string &state )
    {
       if(m_powerTargetState == 0) return -1;
       log<software_error>({__FILE__, __LINE__,MagAOX::tty::ttyErrorString(rv)});
-      std::cerr << __FILE__ << " " <<  __LINE__ << rv << "\n";
       return -1;
    } 
    
-   std::cerr << "TS Response: " << resp << "\n";
+   //std::cerr << "TS Response: " << resp << "\n";
    int raxis;
    std::string rcom, rval;
    

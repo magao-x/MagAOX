@@ -247,6 +247,9 @@ int hsfwCtrl::appLogic()
    {
       hsfw_wheel_info *devs, *cur_dev;
 
+      //Make sure we don't try anything while off.
+      if( state() == stateCodes::POWEROFF ) return 0;
+
       devs = enumerate_wheels();
       
       if(devs == NULL)
@@ -283,6 +286,9 @@ int hsfwCtrl::appLogic()
 
    if( state() == stateCodes::NOTCONNECTED )
    {
+      //Make sure we don't try anything while off.
+      if( state() == stateCodes::POWEROFF ) return 0;
+
       hsfw_wheel_info *devs, *cur_dev;
       devs = enumerate_wheels();
       
@@ -311,6 +317,9 @@ int hsfwCtrl::appLogic()
          return 0;
       }
      
+      //Make sure we don't try anything while off.
+      if( state() == stateCodes::POWEROFF ) return 0;
+
       if(m_wheel) close_hsfw(m_wheel);
       
       {
@@ -333,6 +342,9 @@ int hsfwCtrl::appLogic()
    //If here, we're connected.
    
    std::lock_guard<std::mutex> guard(m_indiMutex);
+   
+   //Make sure we don't try anything while off.
+   if( state() == stateCodes::POWEROFF ) return 0;
    
    wheel_status status;
    if (get_hsfw_status(m_wheel, &status) < 0) 
@@ -452,7 +464,9 @@ int hsfwCtrl::startHoming()
 {
    updateSwitchIfChanged(m_indiP_home, "request", pcf::IndiElement::Off, INDI_IDLE);
    
-   
+   //Make sure we don't try anything while off.
+   if( state() == stateCodes::POWEROFF ) return 0;
+
    if(home_hsfw(m_wheel)) 
    {
       log<software_error>({__FILE__,__LINE__, "libhswf error"});
@@ -480,6 +494,9 @@ int hsfwCtrl::stop()
 
 int hsfwCtrl::moveTo( const double & filters )
 {
+   //Make sure we don't try anything while off.
+   if( state() == stateCodes::POWEROFF ) return 0;
+
    double ffilters = filters;
    if(ffilters< 0.5)
    {
