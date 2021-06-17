@@ -232,10 +232,21 @@ public:
                int n
              );
    
+   ///Update the flat command and propagate
+   /** Writes the new desired position to the flat shmim, which is then propagated via the dmcomb 
+     */
+   int updateFlat( float absPos1, ///< [in] The new position of axis 1
+                   float absPos2, ///< [in] The new position of axis 2
+                   float absPos3  ///< [in] The new position of axis 3
+                 );
+
+   /// Send command to device to move axis 1
    int move_1( float absPos );
    
+   /// Send command to device to move axis 2
    int move_2( float absPos );
   
+   /// Send command to device to move axis 3
    int move_3( float absPos );
    
 protected:
@@ -492,6 +503,12 @@ int pi335Ctrl::appLogic()
    
    if(state() == stateCodes::READY || state() == stateCodes::OPERATING)
    {
+      if(m_flatSet) state(stateCodes::OPERATING);
+      else state(stateCodes::READY);
+   }
+
+   if(state() == stateCodes::READY)
+   {
       float pos1;
       float sva1;
       float pos2;
@@ -602,6 +619,12 @@ int pi335Ctrl::appLogic()
       //std::cerr << m_pos1 << " " << pos1 << " " << m_sva1 << " " << m_pos2 << " " << pos2 << " " << m_sva2;
       //if(m_naxes == 3) std::cerr << " " << m_pos3 << " " << pos3 << " " << m_sva3;
       //std::cerr << "\n";
+   }
+   else if(state() == stateCodes::OPERATING)
+   {
+      updateIfChanged(m_indiP_pos1, "current", m_pos1, INDI_BUSY);
+      updateIfChanged(m_indiP_pos2, "current", m_pos2, INDI_BUSY);
+      if(m_naxes == 3) updateIfChanged(m_indiP_pos3, "current", m_pos3, INDI_BUSY);
    }
    return 0;
 }
@@ -790,14 +813,14 @@ int pi335Ctrl::testConnection()
    if(m_naxes == 2)
    {
       m_flatCommand(0,0) = m_homePos1;
-      m_flatCommand(0,1) = m_homePos2;
-      m_flatCommand(0,2) = 0.0;
+      m_flatCommand(1,0) = m_homePos2;
+      m_flatCommand(2,0) = 0.0;
    }
    else if(m_naxes == 3)
    {
       m_flatCommand(0,0) = m_homePos1;
-      m_flatCommand(0,1) = m_homePos2;
-      m_flatCommand(0,2) = m_homePos3;
+      m_flatCommand(1,0) = m_homePos2;
+      m_flatCommand(2,0) = m_homePos3;
    }
    m_flatLoaded = true;
 
@@ -1251,8 +1274,8 @@ int pi335Ctrl::finishInit()
    
    m_sva2 = sva2;
    */
-   //state(stateCodes::READY);
-   state(stateCodes::OPERATING);
+   state(stateCodes::READY);
+   //state(stateCodes::OPERATING);
    return 0;
 }
 
@@ -1268,7 +1291,7 @@ int pi335Ctrl::zeroDM()
 
 int pi335Ctrl::commandDM(void * curr_src)
 {
-   std::cerr << "command\n";
+   if(state() != stateCodes::OPERATING) return 0;
    float pos1 = ((float *) curr_src)[0];
    float pos2 = ((float *) curr_src)[1];
    
@@ -1277,18 +1300,16 @@ int pi335Ctrl::commandDM(void * curr_src)
    
    std::unique_lock<std::mutex> lock(m_indiMutex);
    
-   std::cerr << pos1 << " " << pos2 << " " << pos3 << "\n";
-//    int rv;
-//    if( (rv = move_1(pos1)) < 0) return rv;
-//    
-//    if( (rv = move_2(pos2)) < 0) return rv;
-//    
-//    if(m_naxes == 3) if( (rv = move_3(pos3)) < 0) return rv;
+   int rv;
+   if( (rv = move_1(pos1)) < 0) return rv;
+    
+   if( (rv = move_2(pos2)) < 0) return rv;
+    
+   if(m_naxes == 3) if( (rv = move_3(pos3)) < 0) return rv;
    
    return 0;
    
 }
-
 
 int pi335Ctrl::releaseDM()
 {
@@ -1329,6 +1350,7 @@ int pi335Ctrl::releaseDM()
       }
    }
 
+   m_flatSet = false;
    state(stateCodes::NOTHOMED);
    
    return 0;
@@ -1406,6 +1428,18 @@ int pi335Ctrl::getSva( float & sva,
    sva = mx::ioutils::convertFromString<double>(resp.substr(st));
    
    return 0;
+}
+
+int pi335Ctrl::updateFlat( float absPos1,
+                           float absPos2,
+                           float absPos3
+                         )
+{
+   m_flatCommand(0,0) = absPos1;
+   m_flatCommand(1,0) = absPos2;
+   m_flatCommand(2,0) = absPos3;
+
+   return setFlat(true);
 }
 
 int pi335Ctrl::move_1( float absPos )
@@ -1508,12 +1542,19 @@ INDI_NEWCALLBACK_DEFN(pi335Ctrl, m_indiP_pos1)(const pcf::IndiProperty &ipRecv)
       
       if(target == -999999) return 0;
       
-      //Lock the mutex, waiting if necessary
-      std::unique_lock<std::mutex> lock(m_indiMutex);
+      if(state() == stateCodes::READY)
+      {
+         //Lock the mutex, waiting if necessary
+         std::unique_lock<std::mutex> lock(m_indiMutex);
 
-      updateIfChanged(m_indiP_pos1, "target", target);
+         updateIfChanged(m_indiP_pos1, "target", target);
       
-      return move_1(target);
+         return move_1(target);
+      }
+      else if(state() == stateCodes::OPERATING)
+      {
+         return updateFlat(target, m_pos2, m_pos3);
+      }
       
    }
    return -1;
@@ -1543,12 +1584,19 @@ INDI_NEWCALLBACK_DEFN(pi335Ctrl, m_indiP_pos2)(const pcf::IndiProperty &ipRecv)
       
       if(target == -999999) return 0;
       
-      //Lock the mutex, waiting if necessary
-      std::unique_lock<std::mutex> lock(m_indiMutex);
+      if(state() == stateCodes::READY)
+      {
+         //Lock the mutex, waiting if necessary
+         std::unique_lock<std::mutex> lock(m_indiMutex);
 
-      updateIfChanged(m_indiP_pos2, "target", target);
+         updateIfChanged(m_indiP_pos2, "target", target);
       
-      return move_2(target);
+         return move_2(target);
+      }
+      else if(state() == stateCodes::OPERATING)
+      {
+         return updateFlat(m_pos1, target, m_pos3);
+      }
       
    }
    return -1;
@@ -1576,13 +1624,20 @@ INDI_NEWCALLBACK_DEFN(pi335Ctrl, m_indiP_pos3)(const pcf::IndiProperty &ipRecv)
       
       if(target == -999999) return 0;
       
-      //Lock the mutex, waiting if necessary
-      std::unique_lock<std::mutex> lock(m_indiMutex);
+      if(state() == stateCodes::READY)
+      {
+         //Lock the mutex, waiting if necessary
+         std::unique_lock<std::mutex> lock(m_indiMutex);
 
-      updateIfChanged(m_indiP_pos3, "target", target);
+         updateIfChanged(m_indiP_pos3, "target", target);
       
-      return move_3(target);
-      
+         return move_3(target);
+      }
+      else if(state() == stateCodes::OPERATING)
+      {
+         return updateFlat(m_pos1, m_pos2, target);
+      }
+
    }
    return -1;
 }
