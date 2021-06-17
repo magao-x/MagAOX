@@ -923,7 +923,7 @@ int zaberStage::processWarning( std::string & warn )
    {
       if(m_warnWRreported == false)
       {
-         MagAOXAppT::log<text_log>(m_name + " No Reference Position (WR): Axis has not had a reference position established. [homing required]" , logPrio::LOG_WARNING);
+         //MagAOXAppT::log<text_log>(m_name + " No Reference Position (WR): Axis has not had a reference position established. [homing required]" , logPrio::LOG_WARNING);
          m_warnWRreported = true;
       }
       m_warnWR = true;
@@ -1004,7 +1004,7 @@ int zaberStage::parseWarnings( std::string & response )
    {
       if(!m_warnWR) 
       {
-         MagAOXAppT::log<text_log>(m_name + " homed.  WR clear." , logPrio::LOG_NOTICE);
+         //MagAOXAppT::log<text_log>(m_name + " homed.  WR clear." , logPrio::LOG_NOTICE);
          m_warnWRreported = false;
       }
    }
