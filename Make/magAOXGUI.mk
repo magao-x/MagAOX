@@ -43,7 +43,7 @@ install: $(TARGET)
 	sudo install bin/$(TARGET) /usr/local/bin
 
 clean:
-ifeq (,$(wildcard ./makefile.$(TARGET)))  #Test if the generated makefile exists to avoid errors on 2nd make clean
+ifneq (,$(wildcard ./makefile.$(TARGET)))  #Test if the generated makefile exists to avoid errors on 2nd make clean
 	$(MAKE) -f makefile.$(TARGET) distclean
 endif
 	rm -f *~
