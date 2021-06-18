@@ -75,6 +75,8 @@ class pwfsSlopeCalc : public MagAOXApp<true>, public dev::shmimMonitor<pwfsSlope
    ///Floating point type in which to do all calculations.
    typedef float realT;
    
+   static constexpr bool c_frameGrabber_flippable = false; ///< app:dev config to tell framegrabber these images can not be flipped
+   
 protected:
 
    /** \name Configurable Parameters
@@ -177,6 +179,11 @@ public:
    int processImage( void * curr_src,          ///< [in] pointer to start of current frame.
                      const darkShmimT & dummy ///< [in] tag to differentiate shmimMonitor parents.
                    );
+   
+   float fps()
+   {
+      return 250;
+   }
    
 protected:
 
@@ -562,8 +569,8 @@ int pwfsSlopeCalc::loadImageIntoStream(void * dest)
    
    static float sqrt32 = sqrt(3.0)/2;
    
-   float norm;
-   
+   float norm = 0;
+   int N = 0;
    if(m_numPupils == 3)
    {
       for(int rr=0; rr< m_quadSize; ++rr)
@@ -574,10 +581,11 @@ int pwfsSlopeCalc::loadImageIntoStream(void * dest)
             float I3 = pwfsIm(rr+m_pupil_sx_2,cc+m_pupil_sy_2) - m_darkImage(rr+m_pupil_sx_2,cc+m_pupil_sy_2);
             float I1 = pwfsIm(rr+m_pupil_sx_3,cc+m_pupil_sy_3) - m_darkImage(rr+m_pupil_sx_3,cc+m_pupil_sy_3);
            
-            norm = 1;//I1+I2+I3+I4;
-         
-            slopesIm(rr,cc) = sqrt32*(I2-I3)/norm;
-            slopesIm(rr,cc+m_quadSize) = (I1-0.5*(I2+I3))/norm;
+            norm += I1+I2+I3;
+            ++N;
+            
+            slopesIm(rr,cc) = sqrt32*(I2-I3);///norm;
+            slopesIm(rr,cc+m_quadSize) = (I1-0.5*(I2+I3));///norm;
          }
       }
    }
@@ -593,15 +601,16 @@ int pwfsSlopeCalc::loadImageIntoStream(void * dest)
             float I3 = pwfsIm(rr+m_pupil_sx_3,cc+m_pupil_sy_3) - m_darkImage(rr+m_pupil_sx_3,cc+m_pupil_sy_3);
             float I4 = pwfsIm(rr+m_pupil_sx_4,cc+m_pupil_sy_4) - m_darkImage(rr+m_pupil_sx_4,cc+m_pupil_sy_4);
          
-            norm = 1;//I1+I2+I3+I4;
-         
-            slopesIm(rr,cc) = ((I1+I3) - (I2+I4))/norm;
-            slopesIm(rr,cc+m_quadSize) = ((I1+I2)-(I3+I4))/norm;
+            norm += I1+I2+I3+I4;
+            ++N;
+            
+            slopesIm(rr,cc) = ((I1+I3) - (I2+I4));///norm;
+            slopesIm(rr,cc+m_quadSize) = ((I1+I2)-(I3+I4));///norm;
          }
       }
    }
-    /*
-   norm/=(120.*120.) * 10;  
+    
+   norm /= N;/*
    for(size_t ii=0; ii< frameGrabberT::m_height; ++ii)
    {
       for(size_t jj=0; jj < frameGrabberT::m_width; ++jj)
