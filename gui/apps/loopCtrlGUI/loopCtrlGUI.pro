@@ -1,4 +1,6 @@
-#Project file for loopCtrlGUI
+######################################################################
+# project file for loopCtrlGUI
+######################################################################
 
 TEMPLATE = app
 TARGET = loopCtrlGUI

@@ -73,12 +73,12 @@ else ifeq ($(MAGAOX_ROLE),TIC)
 endif
 
 all_guis = dmCtrlGUI \
-	dmModeGUI \
-	offloadCtrlGUI \
-	pupilGuideGUI \
-	pwr \
-	coronAlignGUI \
-        loopCtrlGUI
+	   dmModeGUI \
+	   offloadCtrlGUI \
+	   pupilGuideGUI \
+	   pwr \
+	   coronAlignGUI \
+           loopCtrlGUI
 
 ifeq ($(MAGAOX_ROLE),RTC)
   guis_to_build =
