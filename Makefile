@@ -112,15 +112,15 @@ utils_to_build = logdump \
 
 scripts_to_install = magaox query_seeing sync_cacao xctrl netconsole_logger
 
-all: indi_all libs_all flatlogs apps_all utils_all
+all: indi_all libs_all flatlogs apps_all guis_all utils_all
 
-install: indi_install libs_install flatlogs_all apps_install utils_install scripts_install
+install: indi_install libs_install flatlogs_all apps_install guis_install utils_install scripts_install
 
-#We clean just libMagAOX, and the apps and utils for normal devel work.
-clean: lib_clean apps_clean utils_clean
+#We clean just libMagAOX, and the apps, guis, and utils for normal devel work.
+clean: lib_clean apps_clean guis_clean utils_clean
 
 #Clean everything.
-all_clean: indi_clean libs_clean flatlogs_clean lib_clean apps_clean utils_clean doc_clean
+all_clean: indi_clean libs_clean flatlogs_clean lib_clean apps_clean guis_clean utils_clean doc_clean
 
 flatlogs_all:
 	cd flatlogs/src/; ${MAKE} install
