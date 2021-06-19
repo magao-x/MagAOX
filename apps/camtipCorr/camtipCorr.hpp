@@ -15,10 +15,8 @@
 #include "../../magaox_git_version.h"
 
 #include <fftw3.h>
-#include "reg_functions.h"
-#include "cc-functions.h"
-#include "reg_functions.c"
-#include "cc-functions.cpp"
+#include "reg_functions.hpp" 
+#include "cc-functions.hpp"
 
 namespace MagAOX::app
 {
@@ -107,7 +105,7 @@ public:
      */
    virtual int appStartup();
 
-   /// Implementation of the FSM for imCentroid.
+   /// Implementation of the FSM for camtipCorr.
    /** 
      * \returns 0 on no critical error
      * \returns -1 on an error requiring shutdown
@@ -296,7 +294,7 @@ int camtipCorr::processImage( void * curr_src,
       m_data[2] = getStrehlMod(m_input, m_rows, m_cols, m_xctr, m_yctr) / 1; //FPK_FTOT;
       std::cout << "SR: " << m_data[1] << "\n";
 
-      m_shifts.md[0].write=1; // seg-faults here
+      m_shifts.md[0].write=1;
       memcpy(m_shifts.array.D, m_data, 3 * sizeof(double)); 
       std::cout << "post-memcpy\n";
       m_shifts.md[0].cnt0++;               

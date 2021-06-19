@@ -1,4 +1,4 @@
-//#include "cc-functions.h"
+#include "cc-functions.hpp"
 
 
 void GaussFit(size_t ROWS,    // number of rows in input 
