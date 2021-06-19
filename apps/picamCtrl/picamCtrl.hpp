@@ -319,6 +319,15 @@ protected:
    int setExpTime();
    int capExpTime(piflt& exptime);
    int setFPS();
+
+   /// Check the next ROI
+   /** Checks if the target values are valid and adjusts them to the closest valid values if needed.
+     *
+     * \returns 0 if successful
+     * \returns -1 otherwise
+     */
+   int checkNextROI();
+
    int setNextROI();
    int setShutter(int sh);
    
@@ -1262,6 +1271,12 @@ int picamCtrl::capExpTime(piflt& exptime)
       exptime = ((double)intexptime)/10000;
    }
    
+   return 0;
+}
+
+inline
+int picamCtrl::checkNextROI()
+{
    return 0;
 }
 

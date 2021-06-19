@@ -148,8 +148,10 @@ int loadCameraConfig( cameraConfigMap & ccmap, ///< [out] the map in which to pl
   * static constexpr bool c_stdCamera_usesROI = true; //or: false
   * \endcode
   * The default values of m_currentROI should be set before calling stdCamera::appStartup().
+  * The derived class must implement:
   * \code
-  * int setNextROI();
+  * int checkNextROI(); // verifies m_nextROI values and modifies to closest valid values if needed
+  * int setNextROI(); // sets the ROI to the new target values.
   * \endcode
   * 
   * Crop Mode ROIs:
@@ -333,6 +335,8 @@ protected:
 
    pcf::IndiProperty m_indiP_fullROI; ///< Property used to preset the full ROI dimensions.
    
+   pcf::IndiProperty m_indiP_roi_check; ///< Property used to trigger checking the target ROI
+
    pcf::IndiProperty m_indiP_roi_set; ///< Property used to trigger setting the ROI 
    
    pcf::IndiProperty m_indiP_roi_full; ///< Property used to trigger setting the full ROI.
@@ -722,6 +726,25 @@ public:
      */
    int newCallBack_roi_bin_y( const pcf::IndiProperty &ipRecv /**< [in] the INDI property sent with the the new property request.*/);
    
+   /// Interface to checkNextROI when the derivedT uses ROIs
+   /** Tag-dispatch resolution of c_stdCamera_usesROI==true will call this function.
+     * Calls derivedT::checkNextROI. 
+     */
+   int checkNextROI( const mx::meta::trueFalseT<true> & t);
+   
+   /// Interface to checkNextROI when the derivedT does not use ROIs.
+   /** Tag-dispatch resolution of c_stdCamera_usesROI==false will call this function.
+     * This prevents requiring derivedT to have its own checkNextROI(). 
+     */
+   int checkNextROI( const mx::meta::trueFalseT<false> & f);
+   
+   /// Callback to process a NEW roi_check request
+   /**
+     * \returns 0 on success.
+     * \returns -1 on error.
+     */
+   int newCallBack_roi_check( const pcf::IndiProperty &ipRecv /**< [in] the INDI property sent with the the new property request.*/);
+
    /// Interface to setNextROI when the derivedT uses ROIs
    /** Tag-dispatch resolution of c_stdCamera_usesROI==true will call this function.
      * Calls derivedT::setNextROI. 
@@ -1187,6 +1210,15 @@ int stdCamera<derivedT>::appStartup()
          return -1;
       }
       
+      derived().createStandardIndiRequestSw( m_indiP_roi_check, "roi_region_check");
+      if( derived().registerIndiPropertyNew( m_indiP_roi_check, st_newCallBack_stdCamera) < 0)
+      {
+         #ifndef STDCAMERA_TEST_NOLOG
+         derivedT::template log<software_error>({__FILE__,__LINE__});
+         #endif
+         return -1;
+      }
+
       derived().createStandardIndiRequestSw( m_indiP_roi_set, "roi_set");
       if( derived().registerIndiPropertyNew( m_indiP_roi_set, st_newCallBack_stdCamera) < 0)
       {
@@ -1343,6 +1375,29 @@ int stdCamera<derivedT>::appLogic()
          return 0;
       }
    }
+   else if( derived().state() == stateCodes::READY || derived().state() == stateCodes::OPERATING )
+   {
+      if(derivedT::c_stdCamera_usesROI)
+      {
+         derived().updateIfChanged(m_indiP_roi_x, "current", m_currentROI.x, INDI_IDLE);
+         derived().updateIfChanged(m_indiP_roi_x, "target", m_nextROI.x, INDI_IDLE);
+   
+         derived().updateIfChanged(m_indiP_roi_y, "current", m_currentROI.y, INDI_IDLE);
+         derived().updateIfChanged(m_indiP_roi_y, "target", m_nextROI.y, INDI_IDLE);
+   
+         derived().updateIfChanged(m_indiP_roi_w, "current", m_currentROI.w, INDI_IDLE);
+         derived().updateIfChanged(m_indiP_roi_w, "target", m_nextROI.w, INDI_IDLE);
+   
+         derived().updateIfChanged(m_indiP_roi_h, "current", m_currentROI.h, INDI_IDLE);
+         derived().updateIfChanged(m_indiP_roi_h, "target", m_nextROI.h, INDI_IDLE);
+   
+         derived().updateIfChanged(m_indiP_roi_bin_x, "current", m_currentROI.bin_x, INDI_IDLE);
+         derived().updateIfChanged(m_indiP_roi_bin_x, "target", m_nextROI.bin_x, INDI_IDLE);
+   
+         derived().updateIfChanged(m_indiP_roi_bin_y, "current", m_currentROI.bin_y, INDI_IDLE);
+         derived().updateIfChanged(m_indiP_roi_bin_y, "target", m_nextROI.bin_y, INDI_IDLE);
+      }
+   }
    
    return 0;
 
@@ -1475,6 +1530,7 @@ int stdCamera<derivedT>::st_newCallBack_stdCamera( void * app,
    else if(derivedT::c_stdCamera_usesROI &&      name == "roi_region_h") return _app->newCallBack_roi_h(ipRecv);
    else if(derivedT::c_stdCamera_usesROI &&      name == "roi_region_bin_x") return _app->newCallBack_roi_bin_x(ipRecv);
    else if(derivedT::c_stdCamera_usesROI &&      name == "roi_region_bin_y") return _app->newCallBack_roi_bin_y(ipRecv);
+   else if(derivedT::c_stdCamera_usesROI &&      name == "roi_region_check") return _app->newCallBack_roi_check(ipRecv);
    else if(derivedT::c_stdCamera_usesROI &&      name == "roi_set") return _app->newCallBack_roi_set(ipRecv);
    else if(derivedT::c_stdCamera_usesROI &&      name == "roi_set_full") return _app->newCallBack_roi_full(ipRecv);
    else if(derivedT::c_stdCamera_usesROI &&      name == "roi_set_last") return _app->newCallBack_roi_last(ipRecv);
@@ -2031,6 +2087,49 @@ int stdCamera<derivedT>::newCallBack_roi_bin_y( const pcf::IndiProperty &ipRecv 
    m_nextROI.bin_y = target;
    
    return 0;  
+}
+
+template<class derivedT>
+int stdCamera<derivedT>::checkNextROI( const mx::meta::trueFalseT<true> & t)
+{
+   static_cast<void>(t);
+   return derived().checkNextROI();
+}
+
+template<class derivedT>
+int stdCamera<derivedT>::checkNextROI( const mx::meta::trueFalseT<false> & f)
+{
+   static_cast<void>(f);
+   return 0;
+}
+
+template<class derivedT>
+int stdCamera<derivedT>::newCallBack_roi_check( const pcf::IndiProperty &ipRecv )
+{
+   if(derivedT::c_stdCamera_usesROI)
+   {
+      if(ipRecv.getName() != m_indiP_roi_check.getName())
+      {
+         derivedT::template log<software_error>({__FILE__,__LINE__, "wrong INDI property received."});
+         return -1;
+      }
+      
+      if(!ipRecv.find("request")) return 0;
+      
+      if( ipRecv["request"].getSwitchState() == pcf::IndiElement::On)
+      {
+         std::unique_lock<std::mutex> lock(derived().m_indiMutex);
+         
+         indi::updateSwitchIfChanged(m_indiP_roi_check, "request", pcf::IndiElement::Off, derived().m_indiDriver, INDI_IDLE);
+         
+         mx::meta::trueFalseT<derivedT::c_stdCamera_usesROI> tf;
+         return checkNextROI(tf);
+      }
+      
+      return 0;  
+   }
+   
+   return 0;
 }
 
 template<class derivedT>

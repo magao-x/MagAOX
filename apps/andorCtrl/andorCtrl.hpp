@@ -9,14 +9,8 @@
 #ifndef andorCtrl_hpp
 #define andorCtrl_hpp
 
-
-
-
-
-
 #include "../../libMagAOX/libMagAOX.hpp" //Note this is included on command line to trigger pch
 #include "../../magaox_git_version.h"
-
 
 #include "atmcdLXd.h"
 
@@ -536,6 +530,14 @@ public:
      */ 
    int setExpTime();
    
+   /// Check the next ROI
+   /** Checks if the target values are valid and adjusts them to the closest valid values if needed.
+     *
+     * \returns 0 if successfull
+     * \returns -1 otherwise
+     */
+   int checkNextROI();
+
    /// Required by stdCamera, but this does not do anything for this camera [stdCamera interface]
    /**
      * \returns 0 always
@@ -1601,7 +1603,13 @@ int andorCtrl::setExpTime()
    m_reconfig = true;
    return 0;
 }
-   
+
+inline 
+int andorCtrl::checkNextROI()
+{
+   return 0;
+}
+
 inline 
 int andorCtrl::setNextROI()
 {

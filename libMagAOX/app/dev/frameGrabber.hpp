@@ -114,7 +114,7 @@ protected:
    
    bool m_reconfig {false}; ///< Flag to set if a camera reconfiguration requires a framegrabber reset.
    
-   IMAGE * m_imageStream {nullptr}; ///< The ImageStreamIO shared memory buffer. \todo why isn't this m_imageStream?
+   IMAGE * m_imageStream {nullptr}; ///< The ImageStreamIO shared memory buffer.
    
    typedef uint16_t cbIndexT;
    

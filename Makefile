@@ -22,8 +22,8 @@ apps_rtc = \
 	bmcCtrl \
 	pi335Ctrl \
 	pupilFit \
-        t2wOffloader \
-        cacaoInterface
+   t2wOffloader \
+   cacaoInterface
 
 apps_icc = \
         cacaoInterface \
@@ -42,9 +42,9 @@ apps_icc = \
 
 apps_aoc = \
 	trippLitePDU \
-        tcsInterface \
-        adcTracker \
-        kTracker
+   tcsInterface \
+   adcTracker \
+   kTracker
 
 # apps_vm = none yet
 apps_tic = \
@@ -73,12 +73,12 @@ else ifeq ($(MAGAOX_ROLE),TIC)
 endif
 
 all_guis = dmCtrlGUI \
-	   dmModeGUI \
-	   offloadCtrlGUI \
-	   pupilGuideGUI \
-	   pwr \
-	   coronAlignGUI \
-           loopCtrlGUI
+	dmModeGUI \
+	offloadCtrlGUI \
+	pupilGuideGUI \
+	pwr \
+	coronAlignGUI \
+   loopCtrlGUI
 
 ifeq ($(MAGAOX_ROLE),RTC)
   guis_to_build =
@@ -106,20 +106,21 @@ else
 endif
 
 utils_to_build = logdump \
+				 logstream \
                  cursesINDI \
-		 xrif2shmim
+				 xrif2shmim
 
 scripts_to_install = magaox query_seeing sync_cacao xctrl netconsole_logger
 
-all: indi_all libs_all apps_all utils_all guis_all rtimv_plugins_all
+all: indi_all libs_all apps_all utils_all
 
-install: indi_install libs_install apps_install utils_install scripts_install guis_install rtimv_plugins_install
+install: indi_install libs_install apps_install utils_install scripts_install
 
 #We clean just libMagAOX, and the apps and utils for normal devel work.
-clean: lib_clean apps_clean utils_clean guis_clean rtimv_plugins_clean
+clean: lib_clean apps_clean utils_clean
 
 #Clean everything.
-all_clean: indi_clean libs_clean lib_clean apps_clean utils_clean doc_clean guis_clean rtimv_plugins_clean
+all_clean: indi_clean libs_clean lib_clean apps_clean utils_clean doc_clean
 
 indi_all:
 	cd INDI; ${MAKE} all
