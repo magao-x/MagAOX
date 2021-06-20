@@ -72,13 +72,15 @@ else ifeq ($(MAGAOX_ROLE),TIC)
 #   apps_to_build += $(apps_vm)
 endif
 
-all_guis = dmCtrlGUI \
+all_guis = \
+   dmCtrlGUI \
 	dmModeGUI \
 	offloadCtrlGUI \
 	pupilGuideGUI \
 	pwr \
 	coronAlignGUI \
-   loopCtrlGUI
+   loopCtrlGUI \
+	roiGUI
 
 ifeq ($(MAGAOX_ROLE),RTC)
   guis_to_build =
