@@ -90,7 +90,15 @@ protected:
 
    
    // Data for a thread to run the Welch method
-   std::thread welchRun;
+   
+   bool m_welchThreadInit {false}; ///< Synchronizer for thread startup, to allow priority setting to finish.
+   
+   pid_t m_welchThreadID {0}; ///< The welch method thread PID.
+   
+   pcf::IndiProperty m_welchThreadProp; ///< The property to hold the welch method thread details.
+   
+   std::thread m_weclhRun; ///< A separate thread for the Welch method calculations
+
 
 public:
    /// Default c'tor.
@@ -252,32 +260,35 @@ int camtipPSD::allocate(const dev::shmimT & dummy)
       ImageStreamIO_createIm(&m_shiftPSDs, m_outputKey.c_str(), 2, imsize,
                              _DATATYPE_DOUBLE, 1, 0);
 
-      welch_config = welch_init(m_num_modes, m_pts_1sec, m_pts_10sec,
+      m_welchConfig = welch_init(m_num_modes, m_pts_1sec, m_pts_10sec,
                                              m_sampleTime, m_window, &im_in);
         
 
-      m_inbuf = buf_init( welch_config.psd.num_modes * (welch_config.psd.signal_length / 2),
-                          welch_config.psd.num_modes, 
+      m_inbuf = buf_init( welchConfig.psd.num_modes * (welchConfig.psd.signal_length / 2),
+                          welchConfig.psd.num_modes, 
                           4
                         );
 
-      m_circbuf = buf_init( welch_config.num_psds * (welch_config.psd.signal_length / 2 + 1),
-                            welch_config.num_psds, 
-                            welch_config.psd.num_modes
+      m_circbuf = buf_init( welchConfig.num_psds * (welchConfig.psd.signal_length / 2 + 1),
+                            welchConfig.num_psds, 
+                            welchConfig.psd.num_modes
                           );
 
       m_psd0 = true;
 
-      struct wc_inputs thrd_in = {
-         .wconfig = &welch_config,
+      struct wc_inputs thrdIn = {
+         .wconfig = &welchConfig,
          .in_buf = &inbuf,
          .circ_buf = &circbuf,
-         .image = welch_psd
+         .image = &m_shiftPSDs
       };
 
-      std::thread estimation; // this thread calculates the PSDs
-      pthread_create(&estimation, NULL, welch_calculate, (void *)&thrd_in);
-      //derived().thread_startup();
+      if(derived().threadStart(m_welchThread, m_welchThreadInit, m_welchThreadID, m_welchThreadProp, m_welchThreadPrio, specificT::configSection(), (void *)&thrdIn, welch_calculate) < 0)
+      {
+         derivedT::template log<software_error>({__FILE__, __LINE__});
+         return -1;
+      }
+      
       ///\todo size checks here.
    }
  
