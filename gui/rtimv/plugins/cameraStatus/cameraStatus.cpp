@@ -85,11 +85,15 @@ int cameraStatus::updateOverlay()
    }
    
    if( m_roa.m_dictionary->count(m_deviceName + ".roi_region_w.current") > 0 && m_roa.m_dictionary->count(m_deviceName + ".roi_region_h.current") > 0
-        && m_roa.m_dictionary->count(m_deviceName + ".roi_region_x.current") > 0 && m_roa.m_dictionary->count(m_deviceName + ".roi_region_y.current") > 0   )
+        && m_roa.m_dictionary->count(m_deviceName + ".roi_region_x.current") > 0 && m_roa.m_dictionary->count(m_deviceName + ".roi_region_y.current") > 0 
+          && m_roa.m_dictionary->count(m_deviceName + ".roi_region_bin_x.current") > 0 && m_roa.m_dictionary->count(m_deviceName + ".roi_region_bin_y.current") > 0 )
    {
       char * strw = (char *)(*m_roa.m_dictionary)[m_deviceName + ".roi_region_w.current"].m_blob;
       char * strh = (char *)(*m_roa.m_dictionary)[m_deviceName + ".roi_region_h.current"].m_blob;
-      snprintf(tstr, sizeof(tstr), "%s x %s", strw, strh );
+      char * strbx = (char *)(*m_roa.m_dictionary)[m_deviceName + ".roi_region_bin_x.current"].m_blob;
+      char * strby = (char *)(*m_roa.m_dictionary)[m_deviceName + ".roi_region_bin_y.current"].m_blob;
+      snprintf(tstr, sizeof(tstr), "%sx%s [%sx%s]", strw, strh, strbx, strby );
+
       m_roa.m_graphicsView->statusTextText(n, tstr);
       ++n;
     
@@ -97,16 +101,23 @@ int cameraStatus::updateOverlay()
       int h = atoi(strh);
       float x = strtod((char *)(*m_roa.m_dictionary)[m_deviceName + ".roi_region_x.current"].m_blob, NULL);
       float y = strtod((char *)(*m_roa.m_dictionary)[m_deviceName + ".roi_region_y.current"].m_blob, NULL);
-         
+      //bin is float for doing math
+      float bx = atoi((char *)(*m_roa.m_dictionary)[m_deviceName + ".roi_region_bin_x.current"].m_blob);
+      float by = atoi((char *)(*m_roa.m_dictionary)[m_deviceName + ".roi_region_bin_y.current"].m_blob);
+
       if( m_roa.m_dictionary->count(m_deviceName + ".roi_region_w.target") > 0 && m_roa.m_dictionary->count(m_deviceName + ".roi_region_h.target") > 0
-            && m_roa.m_dictionary->count(m_deviceName + ".roi_region_x.target") > 0 && m_roa.m_dictionary->count(m_deviceName + ".roi_region_y.target") > 0)
+            && m_roa.m_dictionary->count(m_deviceName + ".roi_region_x.target") > 0 && m_roa.m_dictionary->count(m_deviceName + ".roi_region_y.target") > 0
+              && m_roa.m_dictionary->count(m_deviceName + ".roi_region_bin_x.target") > 0 && m_roa.m_dictionary->count(m_deviceName + ".roi_region_bin_y.target") > 0 )
       {
          
          int wt = atoi((char *)(*m_roa.m_dictionary)[m_deviceName + ".roi_region_w.target"].m_blob);
          int ht = atoi((char *)(*m_roa.m_dictionary)[m_deviceName + ".roi_region_h.target"].m_blob);
          float xt = strtod((char *)(*m_roa.m_dictionary)[m_deviceName + ".roi_region_x.target"].m_blob, NULL);
          float yt = strtod((char *)(*m_roa.m_dictionary)[m_deviceName + ".roi_region_y.target"].m_blob, NULL);
-         
+         //bin is float for doing math
+         float bxt = atoi((char *)(*m_roa.m_dictionary)[m_deviceName + ".roi_region_bin_x.target"].m_blob);
+         float byt = atoi((char *)(*m_roa.m_dictionary)[m_deviceName + ".roi_region_bin_y.target"].m_blob);
+
          if(wt != w || ht != h || xt != x || yt != y)
          {
             if(!m_roiBox)
@@ -121,11 +132,12 @@ int cameraStatus::updateOverlay()
                emit newStretchBox(m_roiBox);
             }
             
-            float xc = xt-x + 0.5*((float)m_width-1);
             
-            float yc = m_height - ( yt-y + 0.5*((float)m_height-1));
+            float xc = (xt*bxt-x*bx + 0.5*((float)m_width*bx-1))/bx;
             
-            m_roiBox->setRect(m_roiBox->mapRectFromScene(xc-0.5*(wt-1.0),yc-0.5*(ht-1.0),wt,ht));
+            float yc = (m_height*by - ( yt*byt-y*by + 0.5*((float)m_height*by-1)))/by;
+            
+            m_roiBox->setRect(m_roiBox->mapRectFromScene(xc-0.5*(wt*bxt/bx-1.0),yc-0.5*(ht*byt/by-1.0),wt*bxt/bx,ht*byt/by));
             m_roiBox->setVisible(true);
             
          }
@@ -292,6 +304,10 @@ void cameraStatus::keyPressEvent( QKeyEvent * ke)
    {
       if(m_enabled) disableOverlay();
       else enableOverlay();
+   }
+   else if(key == 'R')
+   {
+      std::cerr << "ROI\n";
    }
 }
 

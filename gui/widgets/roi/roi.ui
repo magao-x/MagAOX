@@ -479,6 +479,26 @@
    <item row="1" column="2">
     <layout class="QVBoxLayout" name="vl_buttons">
      <item>
+      <widget class="QPushButton" name="button_reset">
+       <property name="focusPolicy">
+        <enum>Qt::NoFocus</enum>
+       </property>
+       <property name="text">
+        <string>reset</string>
+       </property>
+      </widget>
+     </item>
+     <item>
+      <widget class="QPushButton" name="button_loadlast">
+       <property name="focusPolicy">
+        <enum>Qt::NoFocus</enum>
+       </property>
+       <property name="text">
+        <string>load last</string>
+       </property>
+      </widget>
+     </item>
+     <item>
       <spacer name="verticalSpacer_2">
        <property name="orientation">
         <enum>Qt::Vertical</enum>
@@ -494,7 +514,7 @@
      <item>
       <widget class="QPushButton" name="button_check">
        <property name="focusPolicy">
-        <enum>Qt::NoFocus</enum>
+        <enum>Qt::TabFocus</enum>
        </property>
        <property name="text">
         <string>check</string>
@@ -504,7 +524,7 @@
      <item>
       <widget class="QPushButton" name="button_set">
        <property name="focusPolicy">
-        <enum>Qt::NoFocus</enum>
+        <enum>Qt::TabFocus</enum>
        </property>
        <property name="text">
         <string>set</string>
@@ -531,6 +551,16 @@
        </property>
        <property name="text">
         <string>last</string>
+       </property>
+      </widget>
+     </item>
+     <item>
+      <widget class="QPushButton" name="button_fullbin">
+       <property name="focusPolicy">
+        <enum>Qt::NoFocus</enum>
+       </property>
+       <property name="text">
+        <string>full-bin</string>
        </property>
       </widget>
      </item>

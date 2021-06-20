@@ -71,9 +71,12 @@ public slots:
    void on_le_width_editingFinished();
    void on_le_height_editingFinished();
 
+   void on_button_loadlast_pressed();
+   void on_button_reset_pressed();
    void on_button_check_pressed();
    void on_button_set_pressed();
    void on_button_last_pressed();
+   void on_button_fullbin_pressed();
    void on_button_full_pressed();
    void on_button_default_pressed();
       
@@ -438,8 +441,6 @@ void roi::clear_focus()
 
 void roi::on_le_bin_x_editingFinished()
 {
-   clear_focus();
-
    pcf::IndiProperty ip(pcf::IndiProperty::Number);
    
    ip.setDevice(m_camName);
@@ -452,8 +453,6 @@ void roi::on_le_bin_x_editingFinished()
 
 void roi::on_le_bin_y_editingFinished()
 {
-   clear_focus();
-
    pcf::IndiProperty ip(pcf::IndiProperty::Number);
    
    ip.setDevice(m_camName);
@@ -466,8 +465,6 @@ void roi::on_le_bin_y_editingFinished()
 
 void roi::on_le_center_x_editingFinished()
 {
-   clear_focus();
-
    pcf::IndiProperty ip(pcf::IndiProperty::Number);
    
    ip.setDevice(m_camName);
@@ -480,8 +477,6 @@ void roi::on_le_center_x_editingFinished()
 
 void roi::on_le_center_y_editingFinished()
 {
-   clear_focus();
-
    pcf::IndiProperty ip(pcf::IndiProperty::Number);
    
    ip.setDevice(m_camName);
@@ -494,8 +489,6 @@ void roi::on_le_center_y_editingFinished()
 
 void roi::on_le_width_editingFinished()
 {
-   clear_focus();
-
    pcf::IndiProperty ip(pcf::IndiProperty::Number);
    
    ip.setDevice(m_camName);
@@ -508,8 +501,6 @@ void roi::on_le_width_editingFinished()
 
 void roi::on_le_height_editingFinished()
 {
-   clear_focus();
-
    pcf::IndiProperty ip(pcf::IndiProperty::Number);
    
    ip.setDevice(m_camName);
@@ -519,6 +510,55 @@ void roi::on_le_height_editingFinished()
    
    sendNewProperty(ip);
 }
+
+void roi::on_button_loadlast_pressed()
+{
+   clear_focus();
+
+   pcf::IndiProperty ipFreq(pcf::IndiProperty::Switch);
+   
+   ipFreq.setDevice(m_camName);
+   ipFreq.setName("roi_load_last");
+   ipFreq.add(pcf::IndiElement("request"));
+   ipFreq["request"].setSwitchState(pcf::IndiElement::On);
+    
+   sendNewProperty(ipFreq);  
+}
+
+void roi::on_button_reset_pressed()
+{
+   clear_focus();
+
+   pcf::IndiProperty ip(pcf::IndiProperty::Number);
+   ip.setDevice(m_camName);
+   
+   ip.setName("roi_region_bin_x");
+   ip.add(pcf::IndiElement("target"));
+   ip["target"] = m_bin_x_curr;
+   sendNewProperty(ip);
+
+   ip.setName("roi_region_bin_y");
+   ip["target"] = m_bin_y_curr;
+   sendNewProperty(ip);
+
+   ip.setName("roi_region_x");
+   ip["target"] = m_cen_x_curr;
+   sendNewProperty(ip);
+
+   ip.setName("roi_region_y");
+   ip["target"] = m_cen_y_curr;
+   sendNewProperty(ip);
+
+   ip.setName("roi_region_w");
+   ip["target"] = m_wid_curr;
+   sendNewProperty(ip);
+
+   ip.setName("roi_region_h");
+   ip["target"] = m_hgt_curr;
+   sendNewProperty(ip);
+
+}
+
 
 void roi::on_button_check_pressed()
 {
@@ -561,6 +601,21 @@ void roi::on_button_last_pressed()
     
    sendNewProperty(ipFreq); 
 }
+
+void roi::on_button_fullbin_pressed()
+{
+   clear_focus();
+
+   pcf::IndiProperty ipFreq(pcf::IndiProperty::Switch);
+   
+   ipFreq.setDevice(m_camName);
+   ipFreq.setName("roi_set_full_bin");
+   ipFreq.add(pcf::IndiElement("request"));
+   ipFreq["request"].setSwitchState(pcf::IndiElement::On);
+    
+   sendNewProperty(ipFreq); 
+}
+
 
 void roi::on_button_full_pressed()
 {
