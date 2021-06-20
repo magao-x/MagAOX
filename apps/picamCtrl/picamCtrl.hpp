@@ -377,10 +377,10 @@ picamCtrl::picamCtrl() : MagAOXApp(MAGAOX_CURRENT_SHA1, MAGAOX_REPO_MODIFIED)
    m_vShiftSpeedNameLabels = {"0.7 us", "1.2 us", "2.0 us", "5.0 us"};
    
    
-   m_startup_x = 511.5; 
-   m_startup_y = 511.5; 
-   m_startup_w = 1024;  
-   m_startup_h = 1024;  
+   m_default_x = 511.5; 
+   m_default_y = 511.5; 
+   m_default_w = 1024;  
+   m_default_h = 1024;  
       
    m_full_x = 511.5; 
    m_full_y = 511.5; 

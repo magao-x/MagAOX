@@ -629,19 +629,19 @@ int baslerCtrl::connect()
    m_full_x = 0.5*((float) m_full_w-1.0);
    m_full_y = 0.5*((float) m_full_h-1.0);
 
-   if(m_startup_w == 0) m_startup_w = m_full_w;
-   if(m_startup_h == 0) m_startup_h = m_full_h;
-   if(m_startup_x == 0) m_startup_x = m_full_x;
-   if(m_startup_y == 0) m_startup_y = m_full_y;
-   if(m_startup_bin_x == 0) m_binXs[0];
-   if(m_startup_bin_y == 0) m_binYs[0];
+   if(m_default_w == 0) m_default_w = m_full_w;
+   if(m_default_h == 0) m_default_h = m_full_h;
+   if(m_default_x == 0) m_default_x = m_full_x;
+   if(m_default_y == 0) m_default_y = m_full_y;
+   if(m_default_bin_x == 0) m_binXs[0];
+   if(m_default_bin_y == 0) m_binYs[0];
 
-   m_nextROI.x = m_startup_x;
-   m_nextROI.y = m_startup_y;
-   m_nextROI.w = m_startup_w;
-   m_nextROI.h = m_startup_h;
-   m_nextROI.bin_x = m_startup_bin_x;
-   m_nextROI.bin_y = m_startup_bin_y;
+   m_nextROI.x = m_default_x;
+   m_nextROI.y = m_default_y;
+   m_nextROI.w = m_default_w;
+   m_nextROI.h = m_default_h;
+   m_nextROI.bin_x = m_default_bin_x;
+   m_nextROI.bin_y = m_default_bin_y;
    
    return 0;
 }
@@ -772,6 +772,13 @@ int baslerCtrl::configureAcquisition()
          m_currentROI.y = m_camera->OffsetY.GetValue() + 0.5*((float) m_currentROI.h - 1);
       }
 
+      //Set the full window for this binning
+      m_full_currbin_w = m_maxWs[bx];
+      m_full_currbin_x = 0.5*((float) m_full_currbin_w - 1.0);
+      m_full_currbin_h = m_maxHs[by];
+      m_full_currbin_y = 0.5*((float) m_full_currbin_h - 1.0);
+
+      //Update binning
       updateIfChanged( m_indiP_roi_x, "current", m_currentROI.x, INDI_OK);
       updateIfChanged( m_indiP_roi_y, "current", m_currentROI.y, INDI_OK);
       updateIfChanged( m_indiP_roi_w, "current", m_currentROI.w, INDI_OK);
@@ -950,12 +957,12 @@ float baslerCtrl::fps()
 inline
 int baslerCtrl::powerOnDefaults()
 {
-   m_nextROI.x = m_startup_x;
-   m_nextROI.y = m_startup_y;
-   m_nextROI.w = m_startup_w;
-   m_nextROI.h = m_startup_h;
-   m_nextROI.bin_x = m_startup_bin_x;
-   m_nextROI.bin_y = m_startup_bin_y;
+   m_nextROI.x = m_default_x;
+   m_nextROI.y = m_default_y;
+   m_nextROI.w = m_default_w;
+   m_nextROI.h = m_default_h;
+   m_nextROI.bin_x = m_default_bin_x;
+   m_nextROI.bin_y = m_default_bin_y;
    
    return 0;
 }
@@ -1163,7 +1170,7 @@ int baslerCtrl::setNextROI()
    updateSwitchIfChanged(m_indiP_roi_set, "request", pcf::IndiElement::Off, INDI_IDLE);
    updateSwitchIfChanged(m_indiP_roi_full, "request", pcf::IndiElement::Off, INDI_IDLE);
    updateSwitchIfChanged(m_indiP_roi_last, "request", pcf::IndiElement::Off, INDI_IDLE);
-   updateSwitchIfChanged(m_indiP_roi_startup, "request", pcf::IndiElement::Off, INDI_IDLE);
+   updateSwitchIfChanged(m_indiP_roi_default, "request", pcf::IndiElement::Off, INDI_IDLE);
    return 0;
 }
 
