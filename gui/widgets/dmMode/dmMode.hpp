@@ -153,6 +153,17 @@ dmMode::dmMode( std::string & deviceName,
 {
    ui.setupUi(this);
    
+   ui.modeCurrent_0->setProperty("isStatus", true);
+   ui.modeCurrent_1->setProperty("isStatus", true);
+   ui.modeCurrent_2->setProperty("isStatus", true);
+   ui.modeCurrent_3->setProperty("isStatus", true);
+   ui.modeCurrent_4->setProperty("isStatus", true);
+   ui.modeCurrent_5->setProperty("isStatus", true);
+   ui.modeCurrent_6->setProperty("isStatus", true);
+   ui.modeCurrent_7->setProperty("isStatus", true);
+   ui.modeCurrent_8->setProperty("isStatus", true);
+   ui.modeCurrent_9->setProperty("isStatus", true);
+
    setWindowTitle(QString(deviceName.c_str()));
 }
    

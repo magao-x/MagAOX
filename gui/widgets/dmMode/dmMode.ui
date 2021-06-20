@@ -149,7 +149,7 @@
        <item row="0" column="3">
         <widget class="QLabel" name="modeCurrent_0">
          <property name="frameShape">
-          <enum>QFrame::Panel</enum>
+          <enum>QFrame::StyledPanel</enum>
          </property>
          <property name="frameShadow">
           <enum>QFrame::Sunken</enum>
@@ -159,6 +159,9 @@
          </property>
          <property name="textFormat">
           <enum>Qt::PlainText</enum>
+         </property>
+         <property name="alignment">
+          <set>Qt::AlignCenter</set>
          </property>
         </widget>
        </item>
@@ -271,7 +274,7 @@
        <item row="0" column="3">
         <widget class="QLabel" name="modeCurrent_1">
          <property name="frameShape">
-          <enum>QFrame::Panel</enum>
+          <enum>QFrame::Box</enum>
          </property>
          <property name="frameShadow">
           <enum>QFrame::Sunken</enum>
@@ -281,6 +284,9 @@
          </property>
          <property name="textFormat">
           <enum>Qt::PlainText</enum>
+         </property>
+         <property name="alignment">
+          <set>Qt::AlignCenter</set>
          </property>
         </widget>
        </item>
@@ -424,7 +430,7 @@
        <item row="0" column="3">
         <widget class="QLabel" name="modeCurrent_2">
          <property name="frameShape">
-          <enum>QFrame::Panel</enum>
+          <enum>QFrame::Box</enum>
          </property>
          <property name="frameShadow">
           <enum>QFrame::Sunken</enum>
@@ -434,6 +440,9 @@
          </property>
          <property name="textFormat">
           <enum>Qt::PlainText</enum>
+         </property>
+         <property name="alignment">
+          <set>Qt::AlignCenter</set>
          </property>
         </widget>
        </item>
@@ -515,7 +524,7 @@
        <item row="0" column="3">
         <widget class="QLabel" name="modeCurrent_3">
          <property name="frameShape">
-          <enum>QFrame::Panel</enum>
+          <enum>QFrame::Box</enum>
          </property>
          <property name="frameShadow">
           <enum>QFrame::Sunken</enum>
@@ -525,6 +534,9 @@
          </property>
          <property name="textFormat">
           <enum>Qt::PlainText</enum>
+         </property>
+         <property name="alignment">
+          <set>Qt::AlignCenter</set>
          </property>
         </widget>
        </item>
@@ -637,7 +649,7 @@
        <item row="0" column="3">
         <widget class="QLabel" name="modeCurrent_4">
          <property name="frameShape">
-          <enum>QFrame::Panel</enum>
+          <enum>QFrame::Box</enum>
          </property>
          <property name="frameShadow">
           <enum>QFrame::Sunken</enum>
@@ -647,6 +659,9 @@
          </property>
          <property name="textFormat">
           <enum>Qt::PlainText</enum>
+         </property>
+         <property name="alignment">
+          <set>Qt::AlignCenter</set>
          </property>
         </widget>
        </item>
@@ -759,7 +774,7 @@
        <item row="0" column="3">
         <widget class="QLabel" name="modeCurrent_5">
          <property name="frameShape">
-          <enum>QFrame::Panel</enum>
+          <enum>QFrame::Box</enum>
          </property>
          <property name="frameShadow">
           <enum>QFrame::Sunken</enum>
@@ -769,6 +784,9 @@
          </property>
          <property name="textFormat">
           <enum>Qt::PlainText</enum>
+         </property>
+         <property name="alignment">
+          <set>Qt::AlignCenter</set>
          </property>
         </widget>
        </item>
@@ -881,7 +899,7 @@
        <item row="0" column="3">
         <widget class="QLabel" name="modeCurrent_6">
          <property name="frameShape">
-          <enum>QFrame::Panel</enum>
+          <enum>QFrame::Box</enum>
          </property>
          <property name="frameShadow">
           <enum>QFrame::Sunken</enum>
@@ -891,6 +909,9 @@
          </property>
          <property name="textFormat">
           <enum>Qt::PlainText</enum>
+         </property>
+         <property name="alignment">
+          <set>Qt::AlignCenter</set>
          </property>
         </widget>
        </item>
@@ -1003,7 +1024,7 @@
        <item row="0" column="3">
         <widget class="QLabel" name="modeCurrent_7">
          <property name="frameShape">
-          <enum>QFrame::Panel</enum>
+          <enum>QFrame::Box</enum>
          </property>
          <property name="frameShadow">
           <enum>QFrame::Sunken</enum>
@@ -1013,6 +1034,9 @@
          </property>
          <property name="textFormat">
           <enum>Qt::PlainText</enum>
+         </property>
+         <property name="alignment">
+          <set>Qt::AlignCenter</set>
          </property>
         </widget>
        </item>
@@ -1125,7 +1149,7 @@
        <item row="0" column="3">
         <widget class="QLabel" name="modeCurrent_8">
          <property name="frameShape">
-          <enum>QFrame::Panel</enum>
+          <enum>QFrame::Box</enum>
          </property>
          <property name="frameShadow">
           <enum>QFrame::Sunken</enum>
@@ -1135,6 +1159,9 @@
          </property>
          <property name="textFormat">
           <enum>Qt::PlainText</enum>
+         </property>
+         <property name="alignment">
+          <set>Qt::AlignCenter</set>
          </property>
         </widget>
        </item>
@@ -1247,7 +1274,7 @@
        <item row="0" column="3">
         <widget class="QLabel" name="modeCurrent_9">
          <property name="frameShape">
-          <enum>QFrame::Panel</enum>
+          <enum>QFrame::Box</enum>
          </property>
          <property name="frameShadow">
           <enum>QFrame::Sunken</enum>
@@ -1257,6 +1284,9 @@
          </property>
          <property name="textFormat">
           <enum>Qt::PlainText</enum>
+         </property>
+         <property name="alignment">
+          <set>Qt::AlignCenter</set>
          </property>
         </widget>
        </item>
