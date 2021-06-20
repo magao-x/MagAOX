@@ -22,13 +22,8 @@
 #include <ImageStruct.h>
 #include <ImageStreamIO.h>
 
-#include <buffer.h>
+#include "buffer.hpp"
 
-
-
-#ifdef __cplusplus
-extern "C" {
-#endif
 
 /* Contains configuration for psd calcuations
  *
@@ -61,9 +56,9 @@ struct psd_config {
 struct welch_config {
         IMAGE* image;
         
-        struct psd_config psd;
-        size_t            total_duration;
-        size_t            num_psds;
+        psd_config psd;
+        size_t     total_duration;
+        size_t     num_psds;
 
         sem_t* fetch_complete;        
 };
@@ -77,10 +72,11 @@ struct welch_config {
  * by reference to a pthread.
  */
 struct wc_inputs {
-        struct welch_config* wconfig; 
-        struct buffer* in_buf;
-        struct buffer* circ_buf;
-        IMAGE* image;
+   welch_config* wconfig; 
+   buffer* in_buf;
+   buffer* circ_buf;
+   IMAGE* image;
+   bool welchThreadRestart;     
 };
 
 
@@ -88,23 +84,21 @@ struct wc_inputs {
 /********************
 *     Functions     *
 *********************/
-struct psd_config psd_init(size_t mode_count, size_t signal_len,
+psd_config psd_init(size_t mode_count, size_t signal_len,
                            double dt, double (*win)(size_t, size_t));
 
-struct welch_config welch_init(size_t mode_count, size_t signal_len,
+welch_config welch_init(size_t mode_count, size_t signal_len,
                                size_t total_pts, double dt,
                                double (*win)(size_t, size_t),
                                IMAGE* image);
 
 
-void get_psd(struct psd_config* psd_setup);
+void get_psd(psd_config* psd_setup);
 
-void run_welch_rt(struct welch_config welch, IMAGE* welch_psd);
+void run_welch_rt(welch_config welch, IMAGE* welch_psd);
 
-void free_welch_rt(struct welch_config* welch);
+void* welch_calculate(void* inputs);
+
+void free_welch_rt(welch_config* welch);
 
 void free_psd(struct psd_config* psd);
-
-#ifdef __cplusplus
-}
-#endif // extern "C"

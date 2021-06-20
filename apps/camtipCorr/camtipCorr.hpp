@@ -68,7 +68,7 @@ protected:
    IMAGE m_image;    // input stream
 
    int m_semNum {0};
-   std::string m_resChannel {"coord-shifts"};
+   std::string m_resChannel {"camtip-shifts"};
    uint32_t m_imsize[3];
    IMAGE m_shifts;   // output stream
 
@@ -296,11 +296,9 @@ int camtipCorr::processImage( void * curr_src,
 
       m_shifts.md[0].write=1;
       memcpy(m_shifts.array.D, m_data, 3 * sizeof(double)); 
-      std::cout << "post-memcpy\n";
       m_shifts.md[0].cnt0++;               
       m_shifts.md[0].write=0;             
       ImageStreamIO_sempost(&m_shifts,-1); 
-      std::cout << "False end\n"; 
       break;
    } 
    

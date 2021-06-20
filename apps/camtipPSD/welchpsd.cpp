@@ -17,7 +17,7 @@
  */
 
 
-#include "welchpsd.h"
+#include "welchpsd.hpp"
 
 
 /* ----------------------------- *
@@ -26,18 +26,18 @@
  * ----------------------------- */
 
 static
-void load_inputpsd(struct psd_config* psd, double* inbuf)
+void load_inputpsd(psd_config* psd, double* inbuf)
 {
         double mean = 0;
-        for (int i = 0; i < psd->num_modes; ++i) {
+        for (size_t i = 0; i < psd->num_modes; ++i) {
                 
-                for (int j = 0; j < psd->signal_length; ++j) {
+                for (size_t j = 0; j < psd->signal_length; ++j) {
                         mean += inbuf[i + j * psd->num_modes];
                 }
 
                 mean /= psd->signal_length;
                 
-                for (int j = 0; j < psd->signal_length; ++j) {
+                for (size_t j = 0; j < psd->signal_length; ++j) {
                         psd->in[i + (j * psd->num_modes)] = 
                               (inbuf[i + (j * psd->num_modes)] - mean) * psd->window[j];
                 }
@@ -48,7 +48,7 @@ void load_inputpsd(struct psd_config* psd, double* inbuf)
 
 
 
-static void get_psd_rt(struct psd_config* psd)
+static void get_psd_rt(psd_config* psd)
 {
         size_t max_index = psd->num_modes * (psd->signal_length / 2 + 1);
         fftw_execute(psd->plan);
@@ -62,7 +62,7 @@ static void get_psd_rt(struct psd_config* psd)
 
 
 
-static void sum_psds(struct welch_config* welch, struct buffer* circbuf, 
+static void sum_psds(welch_config* welch, buffer* circbuf, 
                      double* res)
 {
         size_t signal_len = (welch->psd.signal_length / 2) + 1;
@@ -87,7 +87,7 @@ static void sum_psds(struct welch_config* welch, struct buffer* circbuf,
 
 
 static
-void update_psd(struct psd_config* psd, struct buffer* out, 
+void update_psd(psd_config* psd, buffer* out, 
                 size_t num_psds, size_t index) 
 {
         size_t sig_len = (psd->signal_length / 2) + 1;
@@ -104,13 +104,14 @@ void update_psd(struct psd_config* psd, struct buffer* out,
 
 
 
-static void* welch_calculate(void* inputs)
+void* welch_calculate(void* inputs)
 {
-        struct wc_inputs* wc_input = (struct wc_inputs *)inputs;
-        struct welch_config* welch = wc_input->wconfig;
-        struct buffer* buf = wc_input->in_buf;
-        struct buffer* circbuf = wc_input->circ_buf;
+        wc_inputs* wc_input = (struct wc_inputs *)inputs;
+        welch_config* welch = wc_input->wconfig;
+        buffer* buf = wc_input->in_buf;
+        buffer* circbuf = wc_input->circ_buf;
         IMAGE* image_out = wc_input->image;
+        bool reset = wc_input->welchThreadRestart;
 
         bool   firstPSD = true;
         size_t numPSDs  = 0;
@@ -119,13 +120,19 @@ static void* welch_calculate(void* inputs)
 
         struct timespec ts;
         struct timespec ts_out;
-        FILE* fp = fopen("psd_out.dat","w");
-
 
         while(1) {
                 clock_gettime(CLOCK_REALTIME, &ts);
                 ts.tv_sec += 2; // assuming a 1 second psd
-                sem_timedwait(welch->fetch_complete, &ts); 
+                sem_timedwait(welch->fetch_complete, &ts);
+
+                if (reset == true) {
+                   reset = false;
+                   ready = 0;
+                   cycle = 0;
+                   firstPSD = true;
+                   numPSDs = 0;
+                } 
 
                 if (firstPSD == true) {
                         load_inputpsd(&welch->psd, buf->buffer);
@@ -176,7 +183,6 @@ static void* welch_calculate(void* inputs)
 
         }
         
-        fclose(fp);
 }
 
 
@@ -187,7 +193,7 @@ static void* welch_calculate(void* inputs)
  *              FUNCTIONS                 *
  *========================================*/
 
-struct psd_config psd_init(size_t mode_count, size_t signal_len,
+psd_config psd_init(size_t mode_count, size_t signal_len,
                            double dt, double (*win)(size_t, size_t))
 {
         size_t in_size = 
@@ -204,20 +210,20 @@ struct psd_config psd_init(size_t mode_count, size_t signal_len,
         int idist = 1, odist = 1;
         const int *inembed = m, *onembed = m;
 
-        struct psd_config psd = {
-                .num_modes = mode_count,
-                .signal_length = signal_len,
-                .sample_time = dt,
+        psd_config psd;
+                psd.num_modes = mode_count;
+                psd.signal_length = signal_len;
+                psd.sample_time = dt;
 
-                .in = (double *)fftw_malloc(in_size),
-                .out = (fftw_complex *)fftw_malloc(out_size),
-                .res = (double *)fftw_malloc(res_size),
+                psd.in = (double *)fftw_malloc(in_size);
+                psd.out = (fftw_complex *)fftw_malloc(out_size);
+                psd.res = (double *)fftw_malloc(res_size);
 
-                .window = (double *)fftw_malloc(signal_len * sizeof(double))
-        };
+                psd.window = (double *)fftw_malloc(signal_len * sizeof(double));
+        
         psd.plan = fftw_plan_many_dft_r2c(rank, m, howmany, psd.in, inembed, 
                                        istride, idist, psd.out, onembed, 
-                                       ostride, odist, FFTW_MEASURE),
+                                       ostride, odist, FFTW_MEASURE);
         
         psd.norm_squared = 0;
         for (size_t i = 0; i < signal_len; ++i) {
@@ -230,18 +236,17 @@ struct psd_config psd_init(size_t mode_count, size_t signal_len,
 
 
 
-struct welch_config welch_init(size_t mode_count, size_t signal_len,
+welch_config welch_init(size_t mode_count, size_t signal_len,
                                size_t total_pts,  double dt, 
                                double (*win)(size_t, size_t),
                                IMAGE* image)
 {
-        struct welch_config welch = {
-                .psd = psd_init(mode_count, signal_len, dt, win),
-                .total_duration = total_pts,
-                .num_psds = total_pts / (signal_len/2) - 1,
-                .image = image,
-                .fetch_complete = (sem_t *)malloc(sizeof(sem_t *))
-        };
+        welch_config welch;
+                welch.psd = psd_init(mode_count, signal_len, dt, win);
+                welch.total_duration = total_pts;
+                welch.num_psds = total_pts / (signal_len/2) - 1;
+                welch.image = image;
+                welch.fetch_complete = (sem_t *)malloc(sizeof(sem_t *));
 
         sem_init(welch.fetch_complete, 0, 0);
         return welch;
@@ -249,7 +254,7 @@ struct welch_config welch_init(size_t mode_count, size_t signal_len,
 
 
 
-void get_psd(struct psd_config* psd)
+void get_psd(psd_config* psd)
 {
         size_t max_index = psd->num_modes * (psd->signal_length / 2 + 1);
         fftw_execute(psd->plan);
@@ -258,72 +263,6 @@ void get_psd(struct psd_config* psd)
                         + (psd->out[i])[1] * (psd->out[i])[1];
         }
 }
-
-
-
-void run_welch_rt(struct welch_config welch, IMAGE* welch_psd)
-{
-        struct buffer inbuf 
-                = buf_init(welch.psd.num_modes * (welch.psd.signal_length / 2),
-                                          welch.psd.num_modes, 4);
-        struct buffer circbuf 
-                = buf_init(welch.num_psds * (welch.psd.signal_length/2 + 1),
-                                          welch.num_psds, welch.psd.num_modes);
-        struct timespec ts;
-        sem_t* sem = (welch.image)->semptr[0];
-
-        struct wc_inputs thrd_in = {
-                .wconfig = &welch,
-                .in_buf = &inbuf,
-                .circ_buf = &circbuf,
-                .image = welch_psd
-        };
-
-        pthread_t estimation;
-        pthread_create(&estimation, NULL, welch_calculate, (void *)&thrd_in);
-       
-        bool psd0 = true; 
-        while(1) { 
-                clock_gettime(CLOCK_REALTIME, &ts); 
-                ts.tv_sec += 1;
-       
-                if(sem_timedwait(sem, &ts) == 0) {
-                        if (psd0 == true) {
-                                add_buf_line(&inbuf, welch.image->array.D);
-                                if (inbuf.dataptr == inbuf.blocks[2]) {
-                                        psd0 = false;
-                                        sem_post(welch.fetch_complete);
-                                }		
-                        } else {
-                                add_buf_line(&inbuf, welch.image->array.D);
-                                if (inbuf.dataptr == inbuf.blocks[3]) {
-                                        sem_post(welch.fetch_complete);
-                                }
-                                else if (inbuf.dataptr == inbuf.blocks[4]) {
-                                        inbuf.dataptr = inbuf.blocks[2];
-                                        sem_post(welch.fetch_complete);
-                                }
-                        }
-	        } else {
-                        puts("Timed out.");
-                        if((welch.image)->md[0].sem <= 0) break; // Server cleaned up.
-           
-                        if(errno == EINTR) break; 
-           
-                        if(errno != ETIMEDOUT) {
-                                fprintf(stderr, "Error in PSD esimation \
-                                               (Welch): Unknown error.\n");
-                                break;
-                        }
-                }
-        }
-
-        pthread_join(estimation, NULL);
-        
-        free_buf(inbuf);
-        free_buf(circbuf);
-}
-
 
 
 void free_welch_rt(struct welch_config* welch)

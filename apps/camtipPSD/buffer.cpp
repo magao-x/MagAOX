@@ -16,22 +16,18 @@
  * along with this program.  If not, see <https://www.gnu.org/licenses/>.
  */
 
-#include <buffer.h>
+#include "buffer.hpp"
 
-
-#ifdef __cplusplus
-extern "C" {
-#endif
 
 struct buffer buf_init(size_t blocksize, size_t linesize, size_t numblocks)
 {
-        struct buffer buf = {
-                .block_size = blocksize,
-                .line_size = linesize,
+        buffer buf;
         
-                .buffer = (double *)malloc(blocksize * numblocks * sizeof(double)),
-                .blocks = (double **)malloc(numblocks * sizeof(double *))
-        };
+        buf.block_size = blocksize;
+        buf.line_size = linesize;
+        
+        buf.buffer = (double *)malloc(blocksize * numblocks * sizeof(double));
+        buf.blocks = (double **)malloc(numblocks * sizeof(double *));
 
         buf.dataptr = buf.buffer;
 
@@ -67,8 +63,3 @@ void free_buf(struct buffer buf)
         free(buf.buffer);
         free(buf.blocks);
 }
-
-
-#ifdef __cplusplus
-}
-#endif // extern "C"

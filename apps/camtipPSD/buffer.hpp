@@ -14,10 +14,6 @@
 #include <string.h>
 
 
-#ifdef __cplusplus
-extern "C" {
-#endif
-
 /**
  * Data structure for holding values.
  */
@@ -40,7 +36,3 @@ struct buffer buf_init(size_t blocksize, size_t linesize, size_t numblocks);
 void copy_buf_block(struct buffer* buf, double* dest, double* src);
 
 void free_buf(struct buffer buf);
-
-#ifdef __cplusplus
-}
-#endif // extern "C"

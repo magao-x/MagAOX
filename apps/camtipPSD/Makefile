@@ -10,6 +10,6 @@ func: $(H_FILES) $(C_FILES)
 OPTIMIZE = -O3 -fopenmp -ffast-math -march=native 
 
 OTHER_HEADERS=
-OTHER_OBJ=buffer.o welchpsd.o
+OTHER_OBJS=buffer.o welchpsd.o
 TARGET=camtipPSD
 include ../../Make/magAOXApp.mk

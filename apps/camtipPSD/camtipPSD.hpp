@@ -65,23 +65,23 @@ class camtipPSD : public MagAOXApp<false>, public dev::shmimMonitor<camtipPSD>
    
 protected:
   
-   m_imOpened  {false};
-   m_imRestart {false};
+   bool m_imOpened  {false};
+   bool m_imRestart {false};
  
    double m_sampleTime {0};
    size_t m_num_modes  {0};
    size_t m_pts_1sec   {0}; 
    size_t m_pts_10sec  {0};
 
-   struct buffer m_inbuf;
-   struct buffer m_circbuf;
+   buffer m_inbuf;
+   buffer m_circbuf;
    bool m_psd0 {false};
 
-   struct welch_config m_welchConfig;
+   welch_config m_welchConfig;
  
 
    IMAGE m_shifts;
-   std::string m_shiftsKey {"coord-shift"};
+   std::string m_shiftsKey {"camtip-shifts"};
 
 
    IMAGE m_shiftPSDs;
@@ -91,14 +91,19 @@ protected:
    
    // Data for a thread to run the Welch method
    
-   bool m_welchThreadInit {false}; ///< Synchronizer for thread startup, to allow priority setting to finish.
+   bool m_welchThreadInit {true}; ///< Synchronizer for thread startup, to allow priority setting to finish.
    
    pid_t m_welchThreadID {0}; ///< The welch method thread PID.
    
    pcf::IndiProperty m_welchThreadProp; ///< The property to hold the welch method thread details.
-   
-   std::thread m_weclhRun; ///< A separate thread for the Welch method calculations
 
+   int m_welchThreadPrio; ///< The property to hold the welch method thread priority.
+   
+   std::thread m_welchThread; ///< A separate thread for the Welch method calculations
+
+   wc_inputs m_thrdIn;
+
+   bool m_alloc0 {true};
 
 public:
    /// Default c'tor.
@@ -183,7 +188,14 @@ int camtipPSD::appStartup()
    {
       return log<software_error,-1>({__FILE__, __LINE__});
    }
-  
+ 
+
+   m_thrdIn.wconfig = &m_welchConfig;
+   m_thrdIn.in_buf = &m_inbuf;
+   m_thrdIn.circ_buf = &m_circbuf;
+   m_thrdIn.image = &m_shiftPSDs;
+   m_thrdIn.welchThreadRestart = true;
+   std::cout << "Startup done.\n"; 
    state(stateCodes::OPERATING);  
    return 0;
 }
@@ -243,7 +255,7 @@ int camtipPSD::allocate(const dev::shmimT & dummy)
       
    if (!m_imOpened) {
 
-      log<software_error>({__FILE__, __LINE__, m_resChannel + " not opened."});
+      log<software_error>({__FILE__, __LINE__, m_outputKey + " not opened."});
       return -1;
 
    } else {
@@ -261,35 +273,34 @@ int camtipPSD::allocate(const dev::shmimT & dummy)
                              _DATATYPE_DOUBLE, 1, 0);
 
       m_welchConfig = welch_init(m_num_modes, m_pts_1sec, m_pts_10sec,
-                                             m_sampleTime, m_window, &im_in);
+                                             m_sampleTime, window, &m_shifts);
         
 
-      m_inbuf = buf_init( welchConfig.psd.num_modes * (welchConfig.psd.signal_length / 2),
-                          welchConfig.psd.num_modes, 
+      m_inbuf = buf_init( m_welchConfig.psd.num_modes * (m_welchConfig.psd.signal_length / 2),
+                          m_welchConfig.psd.num_modes, 
                           4
                         );
 
-      m_circbuf = buf_init( welchConfig.num_psds * (welchConfig.psd.signal_length / 2 + 1),
-                            welchConfig.num_psds, 
-                            welchConfig.psd.num_modes
+      m_circbuf = buf_init( m_welchConfig.num_psds * (m_welchConfig.psd.signal_length / 2 + 1),
+                            m_welchConfig.num_psds, 
+                            m_welchConfig.psd.num_modes
                           );
 
       m_psd0 = true;
-
-      struct wc_inputs thrdIn = {
-         .wconfig = &welchConfig,
-         .in_buf = &inbuf,
-         .circ_buf = &circbuf,
-         .image = &m_shiftPSDs
-      };
-
-      if(derived().threadStart(m_welchThread, m_welchThreadInit, m_welchThreadID, m_welchThreadProp, m_welchThreadPrio, specificT::configSection(), (void *)&thrdIn, welch_calculate) < 0)
+      m_inbuf.dataptr = m_inbuf.buffer;
+      m_circbuf.dataptr = m_circbuf.buffer;
+      m_thrdIn.welchThreadRestart = true;
+      std::cout << "About to start welch method.\n";
+      if (m_alloc0) 
       {
-         derivedT::template log<software_error>({__FILE__, __LINE__});
-         return -1;
+         if(threadStart(m_welchThread, m_welchThreadInit, m_welchThreadID, m_welchThreadProp, m_welchThreadPrio, "welchCalculate", (void *)&m_thrdIn, welch_calculate) < 0)
+         {
+            camtipPSD::template log<software_error>({__FILE__, __LINE__});
+            return -1;
+         }
+         m_alloc0 = false;
       }
-      
-      ///\todo size checks here.
+
    }
  
    //state(stateCodes::OPERATING);
