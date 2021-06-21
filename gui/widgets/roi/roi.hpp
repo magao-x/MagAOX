@@ -185,9 +185,12 @@ void roi::onDisconnect()
    ui.le_height->setText("");
    ui.le_height->setEnabled(false);
 
+   ui.button_reset->setEnabled(false);
+   ui.button_loadlast->setEnabled(false);
    ui.button_check->setEnabled(false);
    ui.button_set->setEnabled(false);
    ui.button_last->setEnabled(false);
+   ui.button_fullbin->setEnabled(false);
    ui.button_full->setEnabled(false);
    ui.button_default->setEnabled(false);
 
@@ -345,9 +348,12 @@ void roi::updateGUI()
       ui.le_height->setText("");
       ui.le_height->setEnabled(false);
    
+      ui.button_reset->setEnabled(false);
+      ui.button_loadlast->setEnabled(false);
       ui.button_check->setEnabled(false);
       ui.button_set->setEnabled(false);
       ui.button_last->setEnabled(false);
+      ui.button_fullbin->setEnabled(false);
       ui.button_full->setEnabled(false);
       ui.button_default->setEnabled(false);
       
@@ -417,10 +423,12 @@ void roi::updateGUI()
    if( m_appState == "OPERATING" )
    {
       //Enable buttons too   
-      
+      ui.button_reset->setEnabled(true);
+      ui.button_loadlast->setEnabled(true);
       ui.button_check->setEnabled(true);
       ui.button_set->setEnabled(true);
       ui.button_last->setEnabled(true);
+      ui.button_fullbin->setEnabled(true);
       ui.button_full->setEnabled(true);
       ui.button_default->setEnabled(true);
 
