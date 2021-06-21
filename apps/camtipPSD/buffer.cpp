@@ -19,47 +19,86 @@
 #include "buffer.hpp"
 
 
-struct buffer buf_init(size_t blocksize, size_t linesize, size_t numblocks)
+buffer::buffer()
+: buffer_start { nullptr },
+  dataptr { nullptr },
+  blocks { nullptr },
+  block_size { 0 },
+  line_size { 0 }
 {
-        buffer buf;
+}
+
+buffer::buffer(size_t blocksize, size_t linesize, size_t numblocks)
+{
+
+   block_size = blocksize;
+   line_size = linesize;
         
-        buf.block_size = blocksize;
-        buf.line_size = linesize;
+   buffer_start = (double *)malloc(blocksize * numblocks * sizeof(double));
+   blocks = (double **)malloc(numblocks * sizeof(double *));
+
+   dataptr = buffer_start;
+
+   for (size_t i = 0; i <= numblocks; ++i)
+      blocks[i] = buffer_start + (i * blocksize);
+
+}
+
+void buffer::buf_init(size_t blocksize, size_t linesize, size_t numblocks)
+{
+   if (buffer_start == nullptr && blocks == nullptr)
+   {
+      block_size = blocksize;
+      line_size = linesize;
         
-        buf.buffer = (double *)malloc(blocksize * numblocks * sizeof(double));
-        buf.blocks = (double **)malloc(numblocks * sizeof(double *));
+      buffer_start = (double *)malloc(blocksize * numblocks * sizeof(double));
+      blocks = (double **)malloc(numblocks * sizeof(double *));
 
-        buf.dataptr = buf.buffer;
+      dataptr = buffer_start;
 
-        for (size_t i = 0; i <= numblocks; ++i)
-                buf.blocks[i] = buf.buffer + (i * blocksize);
+      for (size_t i {0}; i <= numblocks; ++i)
+         blocks[i] = buffer_start + (i * blocksize);
+   }
+   else
+   {
+      block_size = blocksize;
+      line_size = linesize;
+   
+      free(buffer_start); free(blocks);
 
-        return buf;
+      buffer_start = (double *)malloc(blocksize * numblocks * sizeof(double));
+      blocks = (double **)malloc(numblocks * sizeof(double*));
+      
+      dataptr = buffer_start;
+
+      for (size_t i {0}; i <= numblocks; ++i)
+         blocks[i] = buffer_start + (i * blocksize);
+   }
 }
 
 
-void add_buf_line(struct buffer* buf, double* src)
+void buffer::add_buf_line(double* src)
 {
-        memcpy(buf->dataptr, src, buf->line_size * sizeof(double));
-        buf->dataptr += buf->line_size;
+   memcpy(dataptr, src, line_size * sizeof(double));
+   dataptr += line_size;
 }
 
 
-void add_buf_block(struct buffer* buf, double* src)
+void buffer::add_buf_block(double* src)
 {
-        memcpy(buf->dataptr, src, buf->block_size * sizeof(double));
-        buf->dataptr += buf->block_size;
+   memcpy(dataptr, src, block_size * sizeof(double));
+   dataptr += block_size;
 }
 
 
-void copy_buf_block(struct buffer* buf, double* dest, double* src)
+void buffer::copy_buf_block(double* dest, double* src)
 {
-        memcpy(dest, src, buf->block_size * sizeof(double));
+   memcpy(dest, src, block_size * sizeof(double));
 }
 
 
-void free_buf(struct buffer buf)
+buffer::~buffer()
 {
-        free(buf.buffer);
-        free(buf.blocks);
+   free(buffer_start);
+   free(blocks);
 }

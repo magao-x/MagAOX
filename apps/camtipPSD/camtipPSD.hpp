@@ -52,7 +52,9 @@ namespace MagAOX::app
   * \ingroup camtipPSD
   * 
   */
-class camtipPSD : public MagAOXApp<false>, public dev::shmimMonitor<camtipPSD>
+class camtipPSD : public MagAOXApp<false>, 
+                  public dev::shmimMonitor<camtipPSD>, 
+                  public welchmethod
 {
 
    friend class dev::shmimMonitor<camtipPSD>;
@@ -89,20 +91,6 @@ protected:
    int semNum {0};
 
    
-   // Data for a thread to run the Welch method
-   
-   bool m_welchThreadInit {true}; ///< Synchronizer for thread startup, to allow priority setting to finish.
-   
-   pid_t m_welchThreadID {0}; ///< The welch method thread PID.
-   
-   pcf::IndiProperty m_welchThreadProp; ///< The property to hold the welch method thread details.
-
-   int m_welchThreadPrio; ///< The property to hold the welch method thread priority.
-   
-   std::thread m_welchThread; ///< A separate thread for the Welch method calculations
-
-   wc_inputs m_thrdIn;
-
    bool m_alloc0 {true};
 
 public:
@@ -188,14 +176,8 @@ int camtipPSD::appStartup()
    {
       return log<software_error,-1>({__FILE__, __LINE__});
    }
- 
 
-   m_thrdIn.wconfig = &m_welchConfig;
-   m_thrdIn.in_buf = &m_inbuf;
-   m_thrdIn.circ_buf = &m_circbuf;
-   m_thrdIn.image = &m_shiftPSDs;
-   m_thrdIn.welchThreadRestart = true;
-   std::cout << "Startup done.\n"; 
+
    state(stateCodes::OPERATING);  
    return 0;
 }
@@ -269,43 +251,50 @@ int camtipPSD::allocate(const dev::shmimT & dummy)
       imsize[1] = 1;
       imsize[2] = 1;
 
-      ImageStreamIO_createIm(&m_shiftPSDs, m_outputKey.c_str(), 2, imsize,
-                             _DATATYPE_DOUBLE, 1, 0);
+      ImageStreamIO_createIm( &m_shiftPSDs, m_outputKey.c_str(), 
+                              2, imsize,_DATATYPE_DOUBLE, 1, 0
+                            );
 
-      m_welchConfig = welch_init(m_num_modes, m_pts_1sec, m_pts_10sec,
-                                             m_sampleTime, window, &m_shifts);
+      welch_init(m_num_modes, m_pts_1sec, m_pts_10sec, m_sampleTime, window, &m_shifts);
         
+      m_inbuf.buf_init(m_num_modes * (m_pts_1sec / 2), m_num_modes, 4);
 
-      m_inbuf = buf_init( m_welchConfig.psd.num_modes * (m_welchConfig.psd.signal_length / 2),
-                          m_welchConfig.psd.num_modes, 
-                          4
-                        );
-
-      m_circbuf = buf_init( m_welchConfig.num_psds * (m_welchConfig.psd.signal_length / 2 + 1),
-                            m_welchConfig.num_psds, 
-                            m_welchConfig.psd.num_modes
-                          );
+      m_circbuf.buf_init( m_num_psds * (m_pts_1sec / 2 + 1), m_num_psds, m_num_modes);
 
       m_psd0 = true;
-      m_inbuf.dataptr = m_inbuf.buffer;
-      m_circbuf.dataptr = m_circbuf.buffer;
+      m_inbuf.dataptr = m_inbuf.buffer_start;
+      m_circbuf.dataptr = m_circbuf.buffer_start;
       m_thrdIn.welchThreadRestart = true;
-      std::cout << "About to start welch method.\n";
+      
       if (m_alloc0) 
       {
-         if(threadStart(m_welchThread, m_welchThreadInit, m_welchThreadID, m_welchThreadProp, m_welchThreadPrio, "welchCalculate", (void *)&m_thrdIn, welch_calculate) < 0)
+         if( threadStart( m_welchThread, 
+                          m_welchThreadInit, 
+                          m_welchThreadID, 
+                          m_welchThreadProp, 
+                          m_welchThreadPrio, 
+                          "welchCalculate", 
+                          this, 
+                          &welchmethod::welchCalculate
+                        ) < 0
+           )
          {
             camtipPSD::template log<software_error>({__FILE__, __LINE__});
             return -1;
          }
          m_alloc0 = false;
       }
+   
+      std::cout << "Allocate over.\n";
 
    }
  
    //state(stateCodes::OPERATING);
    return 0;
 }
+
+
+
 
 inline
 int camtipPSD::processImage( void * curr_src, 
@@ -314,11 +303,12 @@ int camtipPSD::processImage( void * curr_src,
 {
    static_cast<void>(dummy); //be unused
 
+   std::cout << "begin processImage,\n";
    switch (m_psd0) {
    
       case true:
 
-         add_buf_line(&m_inbuf, m_welchConfig.image->array.D);
+         m_inbuf.add_buf_line(m_welchConfig.image->array.D);
          if (m_inbuf.dataptr == m_inbuf.blocks[2]) {
             m_psd0 = false;
             sem_post(m_welchConfig.fetch_complete);
@@ -326,7 +316,7 @@ int camtipPSD::processImage( void * curr_src,
 
       case false:
 
-            add_buf_line(&m_inbuf, m_welchConfig.image->array.D);
+            m_inbuf.add_buf_line(m_welchConfig.image->array.D);
             if (m_inbuf.dataptr == m_inbuf.blocks[3])
                sem_post(m_welchConfig.fetch_complete);
             else 

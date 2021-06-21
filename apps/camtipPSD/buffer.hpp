@@ -17,22 +17,22 @@
 /**
  * Data structure for holding values.
  */
-struct buffer {
-        double*  buffer; 
-        double** blocks;
-        double* dataptr;
+class buffer {
+   public:
+      double*  buffer_start; 
+      double** blocks;
+      double*  dataptr;
 
-        size_t block_size;
-        size_t line_size;
+      size_t block_size;
+      size_t line_size;
+
+      buffer();
+      buffer(size_t blocksize, size_t linesize, size_t numblocks);
+      ~buffer();
+
+      void add_buf_line(double* src);
+      void add_buf_block(double* src);
+      void copy_buf_block(double* dest, double* src);
+
+      void buf_init(size_t block_size, size_t linesize, size_t numblocks);
 };
-
-void add_buf_line(struct buffer* buf, double* src);
-
-void add_buf_block(struct buffer* buf, double* src);
-
-// blocksize and linesize are the number of elements, not bytes
-struct buffer buf_init(size_t blocksize, size_t linesize, size_t numblocks);
-
-void copy_buf_block(struct buffer* buf, double* dest, double* src);
-
-void free_buf(struct buffer buf);
