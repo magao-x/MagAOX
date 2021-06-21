@@ -35,20 +35,20 @@ welchmethod::welchmethod()
 
 
 
-void welchmethod::load_inputpsd(double* inbuf)
+void welchmethod::loadInputPSD(double* inbuf)
 {
    double mean = 0;
-   for (size_t i = 0; i < m_psd.num_modes; ++i) {
+   for (size_t i = 0; i < m_psd.m_num_modes; ++i) {
                 
-      for (size_t j = 0; j < m_psd.signal_length; ++j) {
-         mean += inbuf[i + j * m_psd.num_modes];
+      for (size_t j = 0; j < m_psd.m_signal_length; ++j) {
+         mean += inbuf[i + j * m_psd.m_num_modes];
       }
 
-      mean /= m_psd.signal_length;
+      mean /= m_psd.m_signal_length;
                 
-      for (size_t j = 0; j < m_psd.signal_length; ++j) {
-         m_psd.in[i + (j * m_psd.num_modes)] = (inbuf[i + (j * m_psd.num_modes)] - mean) 
-                                             * m_psd.window[j];
+      for (size_t j = 0; j < m_psd.m_signal_length; ++j) {
+         m_psd.m_in[i + (j * m_psd.m_num_modes)] = (inbuf[i + (j * m_psd.m_num_modes)] - mean) 
+                                             * m_psd.m_window[j];
       }
 
       mean = 0;
@@ -59,26 +59,25 @@ void welchmethod::load_inputpsd(double* inbuf)
 
 void welchmethod::get_psd_rt()
 {
-   size_t max_index = m_psd.num_modes * (m_psd.signal_length / 2 + 1);
-   fftw_execute(m_psd.plan);
+   size_t max_index = m_psd.m_num_modes * (m_psd.m_signal_length / 2 + 1);
+   fftw_execute(m_psd.m_plan);
 
    for (size_t i = 0; i < max_index; ++i) {
-      m_psd.res[i] = (m_psd.out[i])[0] * (m_psd.out[i])[0]
-                   + (m_psd.out[i])[1] * (m_psd.out[i])[1];
+      m_psd.m_res[i] = (m_psd.m_out[i])[0] * (m_psd.m_out[i])[0]
+                   + (m_psd.m_out[i])[1] * (m_psd.m_out[i])[1];
    }
 
 }
 
 
 
-void welchmethod::sum_psds(welch_config* welch, buffer* circbuf, 
-                     double* res)
+void welchmethod::sum_psds(double* res)
 {
-   size_t signal_len = (welch->psd.signal_length / 2) + 1;
-   size_t numpsds = welch->num_psds;
-   size_t signals = welch->psd.num_modes;
-   double norm2 = welch->psd.norm_squared;
-   double dt = welch->psd.sample_time;        
+   size_t signal_len = (m_psd.m_signal_length / 2) + 1;
+   size_t numpsds = m_numPsds;
+   size_t signals = m_psd.m_num_modes;
+   double norm2 = m_psd.m_norm_squared;
+   double dt = m_psd.m_sample_time;        
 
    for (size_t mode = 0; mode < signals; ++mode) {
 
@@ -87,7 +86,7 @@ void welchmethod::sum_psds(welch_config* welch, buffer* circbuf,
 
          sum = 0;
          for(size_t k = 0; k < numpsds; ++k) {
-            sum += circbuf->buffer_start[k + numpsds * (j + signal_len * mode)];
+            sum += m_circbuf.buffer_start[k + numpsds * (j + signal_len * mode)];
          }
 
          res[mode + (j * signals)] = (2 * dt * sum) / (numpsds * norm2);
@@ -100,16 +99,15 @@ void welchmethod::sum_psds(welch_config* welch, buffer* circbuf,
 
 
 
-void welchmethod::update_psd(buffer* out, 
-                size_t num_psds, size_t index) 
+void welchmethod::update_psd(size_t index) 
 {
-   size_t sig_len = (psd.m_signal_length / 2) + 1;
-   size_t num_modes = psd.m_num_modes;
+   size_t sig_len = (m_psd.m_signal_length / 2) + 1;
+   size_t num_modes = m_psd.m_num_modes;
 
    for (size_t i = 0; i < num_modes; ++i) {
 	   for (size_t k = 0; k < sig_len; ++k) {
-         out->buffer_start[index + num_psds * (k + sig_len * i)] 
-         = psd.res[i + (k * num_modes)]; 
+         m_circbuf.buffer_start[index + m_numPsds * (k + sig_len * i)] 
+         = m_psd.m_res[i + (k * num_modes)]; 
       }
    }
 }
@@ -117,11 +115,8 @@ void welchmethod::update_psd(buffer* out,
 
 
 
-void* welchmethod::welch_calculate()
+void* welchmethod::welchCalculate()
 {
-   buffer* buf = wc_input->in_buf;
-   buffer* circbuf = wc_input->circ_buf;
-   IMAGE* image_out = wc_input->image;
    m_welchThreadRestart = false;
 
    m_welchThreadID = syscall(SYS_gettid);
@@ -140,56 +135,56 @@ void* welchmethod::welch_calculate()
       sem_timedwait(m_fetch, &ts);
 
       if (m_welchThreadRestart == true) {
-         reset = false;
          ready = 0;
          cycle = 0;
          firstPSD = true;
          numPSDs = 0;
+         m_welchThreadRestart = false;
       } 
 
       if (firstPSD == true) {
-         load_inputpsd(buf->buffer_start);
+         loadInputPSD(m_inbuf.buffer_start);
          get_psd_rt();
-         update_psd(circbuf, m_num_psds, numPSDs); 
-         buf->copy_buf_block(buf->blocks[0], buf->blocks[1]);
+         update_psd(numPSDs); 
+         m_inbuf.copy_buf_block(m_inbuf.blocks[0], m_inbuf.blocks[1]);
          firstPSD = false;
       } else 
          switch(cycle) {	
          case 0:
-            buf->copy_buf_block(buf->blocks[1], buf->blocks[2]);
-            load_inputpsd(buf->buffer_start);
+            m_inbuf.copy_buf_block(m_inbuf.blocks[1], m_inbuf.blocks[2]);
+            loadInputPSD(m_inbuf.buffer_start);
             get_psd_rt();
                        
-            update_psd(circbuf, m_num_psds, numPSDs);
-            buf->copy_buf_block(buf->blocks[0], buf->blocks[1]);
+            update_psd(numPSDs);
+            m_inbuf.copy_buf_block(m_inbuf.blocks[0], m_inbuf.blocks[1]);
             cycle = 1;
             break;
          case 1:
-            buf->copy_buf_block(buf->blocks[1], buf->blocks[3]);
-            load_inputpsd(buf->buffer_start);
+            m_inbuf.copy_buf_block(m_inbuf.blocks[1], m_inbuf.blocks[3]);
+            loadInputPSD(m_inbuf.buffer_start);
             get_psd_rt();	
                         
-            update_psd(circbuf, m_num_psds, numPSDs);
-            buf->copy_buf_block(buf->blocks[0], buf->blocks[1]);
+            update_psd(numPSDs);
+            m_inbuf.copy_buf_block(m_inbuf.blocks[0], m_inbuf.blocks[1]);
             cycle = 0;
             break;
       }          
 
-      if (ready || (numPSDs == (m_num_psds - 1))) {
+      if (ready || (numPSDs == (m_numPsds - 1))) {
       
          ready = 1;
          
-         if (numPSDs == (m_num_psds-1))
+         if (numPSDs == (m_numPsds-1))
             numPSDs = 0;
          else ++numPSDs;
 
          clock_gettime(CLOCK_REALTIME, &ts_out);
-         image_out->md[0].write = 1;
-         sum_psds(welch, circbuf, image_out->array.D);
-         image_out->md[0].cnt0++;
-         image_out->md[0].atime = ts_out;
-         image_out->md[0].write = 0;
-         ImageStreamIO_sempost(image_out, -1); 
+         m_imageOut->md[0].write = 1;
+         sum_psds(m_imageOut->array.D);
+         m_imageOut->md[0].cnt0++;
+         m_imageOut->md[0].atime = ts_out;
+         m_imageOut->md[0].write = 0;
+         ImageStreamIO_sempost(m_imageOut, -1); 
       } else { 
          ++numPSDs;
       }
@@ -200,8 +195,36 @@ void* welchmethod::welch_calculate()
 
 
 
-welchmethod::welchFetch()
+void welchmethod::welchFetch()
 {
+   switch (m_psd0) {
+   
+      case true:
+
+         m_inbuf.add_buf_line(m_imageIn->array.D);
+
+         if (m_inbuf.dataptr == m_inbuf.blocks[2]) {
+            m_psd0 = false;
+            sem_post(m_fetch);
+         } 
+
+         break; 
+
+      case false:
+
+            m_inbuf.add_buf_line(m_imageIn->array.D);
+
+            if (m_inbuf.dataptr == m_inbuf.blocks[3])
+               sem_post(m_fetch);
+            else if (m_inbuf.dataptr == m_inbuf.blocks[4]) 
+               {
+                  m_inbuf.dataptr = m_inbuf.blocks[2];
+                  sem_post(m_fetch);
+               }
+         
+            break;
+            
+   }
 
 
 }
@@ -251,34 +274,74 @@ void psd_config::psd_init(size_t mode_count, size_t signal_len,
 
 
 
-void welchmethod::welch_init(size_t mode_count, size_t signal_len,
-                               size_t total_pts,  double dt, 
-                               double (*win)(size_t, size_t),
-                               IMAGE* image)
+void welchmethod::welch_init( size_t mode_count, size_t signal_len,
+                              size_t total_pts,  double dt, 
+                              double (*win)(size_t, size_t),
+                              IMAGE* image1,
+                              IMAGE* image2
+                            )
 {
-   m_psd = psd_init(mode_count, signal_len, dt, win);
-   m_total_duration = total_pts;
-   m_num_psds = total_pts / (signal_len/2) - 1;
-   m_image = image;
-   m_fetch = (sem_t *)fftw_malloc(sizeof(sem_t *));
+   if (!m_welchRunning)
+   {
 
-   sem_init(m_fetch, 0, 0);
+      m_psd.psd_init(mode_count, signal_len, dt, win);
+      m_totalDuration = total_pts;
+      m_numPsds = total_pts / (signal_len/2) - 1;
+      m_imageIn = image1;
+      m_imageOut = image2;
+      m_fetch = (sem_t *)fftw_malloc(sizeof(sem_t *));
 
+      sem_init(m_fetch, 0, 0);
 
-   buffer
+      m_inbuf.buf_init(mode_count * (signal_len / 2), mode_count, 4);
+      m_circbuf.buf_init(m_numPsds * (signal_len / 2 + 1),  m_numPsds, mode_count);
+   }
+   else 
+   {
+      //free current memory 
+      m_inbuf.buf_free();
+      m_circbuf.buf_free();
+      m_psd.psd_free();
+      
+      // reallocate new memory
+      m_psd.psd_init(mode_count, signal_len, dt, win);
+      m_totalDuration = total_pts;
+      m_numPsds = total_pts / (signal_len/2) - 1;
+      m_imageIn = image1;
+      m_imageOut = image2;
+      m_fetch = (sem_t *)fftw_malloc(sizeof(sem_t *));
+   
+      m_inbuf.buf_init(mode_count * (signal_len / 2), mode_count, 4);
+      m_circbuf.buf_init(m_numPsds * (signal_len / 2 + 1),  m_numPsds, mode_count);
+   }
 }
+
 
 
 welchmethod::~welchmethod()
 {
+   m_inbuf.buf_free();
+   m_circbuf.buf_free();
 }
+
+
+
+void psd_config::psd_free()
+{
+   fftw_destroy_plan(m_plan);
+   fftw_free(m_in);
+   fftw_free(m_out);
+   fftw_free(m_res);
+   fftw_free(m_window);
+}
+
 
 
 psd_config::~psd_config()
 {
-        fftw_destroy_plan(m_plan);
-        fftw_free(m_in);
-        fftw_free(m_out);
-        fftw_free(m_res);
-        fftw_free(m_window);
+   fftw_destroy_plan(m_plan);
+   fftw_free(m_in);
+   fftw_free(m_out);
+   fftw_free(m_res);
+   fftw_free(m_window);
 }

@@ -97,6 +97,14 @@ void buffer::copy_buf_block(double* dest, double* src)
 }
 
 
+void buffer::buf_free()
+{
+   free(buffer_start);
+   free(blocks);
+}
+
+
+
 buffer::~buffer()
 {
    free(buffer_start);

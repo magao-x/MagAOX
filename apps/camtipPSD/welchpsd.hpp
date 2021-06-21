@@ -25,66 +25,21 @@
 #include "buffer.hpp"
 
 
-
-class welchmethod {
-
-   public:
-
-      void welchFetch();
-      
-      void welchCalculate();
-
-      void welch_init( size_t mode_count,
-                       size_t signal_length,
-                       size_t total_pts,
-                       double dt,
-                       double (*win) (size_t, size_t),
-                       IMAGE* image
-                     );
-
-   protected:
-      psd_config m_psd;
-
-      IMAGE* image_out;
-
-      size_t m_totalDuration;
-      size_t m_numPsds;
-
-      sem_t* m_fetch;
-
-      // configuration variables for welchCalculate thread 
-      bool m_welchThreadInit;
-      pid_t m_welchThreadID; 
-      pcf::IndiProperty m_welchThreadProp;
-      int m_welchThreadPrio;
-      std::thread m_welchThread;
-
-   private:
-      void loadInputPSD(psd_config* psd, double* inbuf);
-
-      void get_psd_rt();
-
-      void sum_psds()
-
-      void update_psd()
-};
-
-
 /** Configuration class for psd calcuations.
   *
   */ 
 struct psd_config {
-   size_t num_modes;
-   size_t signal_length;
-   double sample_time;
+   size_t m_num_modes;
+   size_t m_signal_length;
+   double m_sample_time;
 
-   double*       in;
-   fftw_complex* out; 
-   fftw_plan     plan;
-   double*       res;
+   double*       m_in;
+   fftw_complex* m_out; 
+   fftw_plan     m_plan;
+   double*       m_res;
          
-   double* window;
-   double norm_squared;
+   double* m_window;
+   double m_norm_squared;
 
    void psd_init( size_t num_modes, 
                   size_t signal_len,
@@ -92,6 +47,65 @@ struct psd_config {
                   double (*win) (size_t, size_t)
                 );
 
-   psd_config::psd_config() {}
-   psd_config::~psd_config();
+   psd_config() {}
+   void psd_free();
+   ~psd_config();
+};
+
+
+
+class welchmethod {
+
+   public:
+
+      welchmethod();
+      ~welchmethod();
+
+      void welchFetch();
+      
+      void* welchCalculate();
+
+      void welch_init( size_t mode_count,
+                       size_t signal_length,
+                       size_t total_pts,
+                       double dt,
+                       double (*win) (size_t, size_t),
+                       IMAGE* imageIn,
+                       IMAGE* imageOut
+                     );
+
+      void launchWelchThread(bool& zero);
+
+   protected:
+      psd_config m_psd;
+      bool m_psd0;
+      bool m_welchRunning;
+
+      IMAGE* m_imageIn;
+      IMAGE* m_imageOut;
+
+      size_t m_totalDuration;
+      size_t m_numPsds;
+
+      sem_t* m_fetch;
+
+      buffer m_inbuf;
+      buffer m_circbuf;
+
+      // configuration variables for welchCalculate thread 
+      bool m_welchThreadInit;
+      pid_t m_welchThreadID; 
+      pcf::IndiProperty m_welchThreadProp;
+      int m_welchThreadPrio;
+      std::thread m_welchThread;
+      bool m_welchThreadRestart;
+
+   private:
+      void loadInputPSD(double* inbuf);
+
+      void get_psd_rt();
+
+      void sum_psds(double* res);
+
+      void update_psd(size_t index);
 };

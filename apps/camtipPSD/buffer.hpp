@@ -35,4 +35,5 @@ class buffer {
       void copy_buf_block(double* dest, double* src);
 
       void buf_init(size_t block_size, size_t linesize, size_t numblocks);
+      void buf_free();
 };
