@@ -18,6 +18,8 @@ Host rtc
 Host icc
   HostName icc
   ProxyJump aoc
+Host tic
+  HostName exao0.as.arizona.edu
 Host *
   User YOURUSERNAME
 HERE
