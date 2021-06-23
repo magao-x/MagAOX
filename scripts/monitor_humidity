@@ -1,0 +1,26 @@
+#!/usr/bin/env python
+import sys
+import time
+
+# ex
+# 82 char
+# "Humidity: 10.70 %\tTemperature: 22.80 *C 73.04 *F\tHeat index: 21.41 *C 70.55 *F\n"
+
+def main(dev_file):
+    with open(dev_file) as f:
+        buf = ''
+        last = 0
+        while True:
+            c = f.read(1)
+            if c == '\n':
+                if buf[:8] == 'Humidity':
+                    now = time.time()
+                    if now - last > 5 * 60:
+                        print(buf)
+                        last = now
+                buf = ''
+            else:
+                buf += c
+
+if __name__ == "__main__":
+    main(sys.argv[1])
