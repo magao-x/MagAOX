@@ -73,7 +73,7 @@ void GaussFit(size_t ROWS,    // number of rows in input
    coeff(0,5) = coeff(3,3);
    coeff(2,5) = coeff(4,4);
 
-   // ca
+   // Calculate the remaining diagonal and upper triangular terms
    double txy;
    for (size_t i {0}; i < range; ++i)
       for (size_t j {0}; j < range; ++j) {

@@ -212,17 +212,17 @@ void welchmethod::welchFetch()
 
       case false:
 
-            m_inbuf.add_buf_line(m_imageIn->array.D);
+         m_inbuf.add_buf_line(m_imageIn->array.D);
 
-            if (m_inbuf.dataptr == m_inbuf.blocks[3])
+         if (m_inbuf.dataptr == m_inbuf.blocks[3])
+            sem_post(m_fetch);
+         else if (m_inbuf.dataptr == m_inbuf.blocks[4]) 
+            {
+               m_inbuf.dataptr = m_inbuf.blocks[2];
                sem_post(m_fetch);
-            else if (m_inbuf.dataptr == m_inbuf.blocks[4]) 
-               {
-                  m_inbuf.dataptr = m_inbuf.blocks[2];
-                  sem_post(m_fetch);
-               }
+            }
          
-            break;
+         break;
             
    }
 
@@ -230,11 +230,6 @@ void welchmethod::welchFetch()
 }
 
 
-/*========================================*
- *               PUBLIC                   *
- *              INTERFACE                 *
- *              FUNCTIONS                 *
- *========================================*/
 
 void psd_config::psd_init(size_t mode_count, size_t signal_len,
                            double dt, double (*win)(size_t, size_t))
@@ -295,6 +290,8 @@ void welchmethod::welch_init( size_t mode_count, size_t signal_len,
 
       m_inbuf.buf_init(mode_count * (signal_len / 2), mode_count, 4);
       m_circbuf.buf_init(m_numPsds * (signal_len / 2 + 1),  m_numPsds, mode_count);
+
+      m_welchRunning = true;
    }
    else 
    {

@@ -70,13 +70,6 @@ protected:
    bool m_imOpened  {false};
    bool m_imRestart {false};
  
-   double m_sampleTime {0};
-   size_t m_num_modes  {0};
-   size_t m_pts_1sec   {0}; 
-   size_t m_pts_10sec  {0};
-
-   bool m_psd0 {false};
-
    IMAGE m_shifts;
    std::string m_shiftsKey {"camtip-shifts"};
 
@@ -235,9 +228,9 @@ int camtipPSD::allocate(const dev::shmimT & dummy)
 
    } else {
      
-      m_sampleTime = 0.02; // 500 Hz, this value should be hard-coded 
+      double sampleTime = 0.02; // 500 Hz, this value should be hard-coded 
       size_t num_modes = m_shifts.md[0].size[0];
-      size_t pts_10sec = (size_t) 10/m_sampleTime;  // we are using a 10 sec window
+      size_t pts_10sec = (size_t) 10/sampleTime;  // we are using a 10 sec window
       size_t pts_1sec = 500;  //\todo this should not be hard-coded 
 
       uint32_t imsize[3];
@@ -249,7 +242,7 @@ int camtipPSD::allocate(const dev::shmimT & dummy)
                               2, imsize, _DATATYPE_DOUBLE, 1, 0
                             );
 
-      welch_init(num_modes, pts_1sec, pts_10sec, m_sampleTime, window, &m_shifts, &m_shiftPSDs);
+      welch_init(num_modes, pts_1sec, pts_10sec, sampleTime, window, &m_shifts, &m_shiftPSDs);
         
       m_psd0 = true;
       m_welchThreadRestart = true;

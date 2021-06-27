@@ -74,8 +74,6 @@ class welchmethod {
                        IMAGE* imageOut
                      );
 
-      void launchWelchThread(bool& zero);
-
    protected:
       psd_config m_psd;
       bool m_psd0;
@@ -94,10 +92,15 @@ class welchmethod {
 
       // configuration variables for welchCalculate thread 
       bool m_welchThreadInit;
-      pid_t m_welchThreadID; 
+
+      pid_t m_welchThreadID;
+ 
       pcf::IndiProperty m_welchThreadProp;
+
       int m_welchThreadPrio;
+
       std::thread m_welchThread;
+
       bool m_welchThreadRestart;
 
    private:
