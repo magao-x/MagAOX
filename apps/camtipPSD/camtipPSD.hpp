@@ -54,16 +54,24 @@ namespace MagAOX::app
   */
 class camtipPSD : public MagAOXApp<false>, 
                   public dev::shmimMonitor<camtipPSD>, 
-                  public welchmethod
+                  public welchmethod,
+                  public dev::frameGrabber<camtipPSD>
 {
 
    friend class dev::shmimMonitor<camtipPSD>;
-   
+ 
+   friend class dev::frameGrabber<camtipPSD>;
+  
    //The base shmimMonitor type
    typedef dev::shmimMonitor<camtipPSD> shmimMonitorT;
+
+   //The base frameGrabber type
+   typedef dev::frameGrabber<camtipPSD>;
       
    ///Floating point type in which to do all calculations.
    typedef double realT;
+
+   typedef fftw_complex complexT;
    
 protected:
   
@@ -72,10 +80,6 @@ protected:
  
    IMAGE m_shifts;
    std::string m_shiftsKey {"camtip-shifts"};
-
-   IMAGE m_shiftPSDs;
-   std::string m_outputKey {"camtip-psd"};
-   int semNum {0};
 
    bool m_alloc0 {true};
 
@@ -121,6 +125,22 @@ public:
    int processImage( void * curr_src,          ///< [in] pointer to start of current frame.
                      const dev::shmimT & dummy ///< [in] tag to differentiate shmimMonitor parents.
                    );
+
+
+   protected: //frameGrabber functionality
+      static constexpr bool c_frameGrabber_flippable = false;
+
+      sem_t m_smSemaphore; ///< synchronizes the fg and sm threads
+
+      bool m_update {false};
+
+      int configureAcquisition(); 
+      int startAcquisition();
+      int acquireAndCheckValid();
+      int loadImageIntoStream(void * dest);
+      int reconfig();
+
+
 };
 
 
@@ -233,16 +253,7 @@ int camtipPSD::allocate(const dev::shmimT & dummy)
       size_t pts_10sec = (size_t) 10/sampleTime;  // we are using a 10 sec window
       size_t pts_1sec = 500;  //\todo this should not be hard-coded 
 
-      uint32_t imsize[3];
-      imsize[0] = (num_modes / 2) + 1;
-      imsize[1] = 1;
-      imsize[2] = 1;
-
-      ImageStreamIO_createIm( &m_shiftPSDs, m_outputKey.c_str(), 
-                              2, imsize, _DATATYPE_DOUBLE, 1, 0
-                            );
-
-      welch_init(num_modes, pts_1sec, pts_10sec, sampleTime, window, &m_shifts, &m_shiftPSDs);
+      welch_init(num_modes, pts_1sec, pts_10sec, sampleTime, window, &m_shifts);
         
       m_psd0 = true;
       m_welchThreadRestart = true;
@@ -266,8 +277,6 @@ int camtipPSD::allocate(const dev::shmimT & dummy)
          m_alloc0 = false;
       }
    
-      std::cout << "Allocate over.\n";
-
    }
  
    //state(stateCodes::OPERATING);
@@ -278,16 +287,105 @@ int camtipPSD::allocate(const dev::shmimT & dummy)
 
 
 inline
-int camtipPSD::processImage( void * curr_src, 
+int camtipPSD::processImage( void * curr_src __attribute__((unused)), 
                              const dev::shmimT & dummy 
                            )
 {
    static_cast<void>(dummy); //be unused
 
-   std::cout << "begin processImage,\n";
-   
    welchFetch(); 
 
+   return 0;
+}
+
+
+
+// ============================ //
+//    frameGrabber functions    //
+// ============================ //
+inline
+float camtipPSD::fps()
+{
+   return m_fps;
+}
+
+
+inline
+int camtipPSD::configureAcquisition()
+{
+   std::unique_lock<std::mutex> lock(m_indiMutex);
+   
+   if (shmimMonitorT::m_width == 0 || shmimMonitorT::m_height == 0 || shmimMonitorT::m_dataType == 0)
+   {
+      sleep(1);
+      return -1;
+   }
+   
+   frameGrabberT::m_width = shmimMonitorT::m_width; //columns
+   frameGrabberT::m_height = (shmimMonitorT::m_height / 2) + 1; //rows
+   frameGrabberT::m_dataType = _DATATYPE_DOUBLE;
+   
+   std::cerr << "shmimMonitorT::m_dataType: " << (int) shmimMonitorT::m_dataType << "\n";
+   std::cerr << "frameGrabberT::m_dataType: " << (int) frameGrabberT::m_dataType << "\n";
+
+   return 0;
+}
+
+
+inline
+int camtipPSD::startAcquisition()
+{
+   state(stateCodes::OPERATING); 
+   return 0;
+}
+
+
+inline
+int camtipPSD::acquireAndCheckValid()
+{
+   timespec ts;
+         
+   if (clock_gettime(CLOCK_REALTIME, &ts) < 0)
+   {
+      log<software_critical>({__FILE__, __LINE__, errno, 0, "clock_gettime"}); 
+      return -1;
+   }
+         
+   ts.tv_sec += 1;
+        
+   if (sem_timedwait(&m_smSemaphore, &ts) == 0)
+   {
+      if (m_update)
+      {
+         clock_gettime(CLOCK_REALTIME, &m_currImageTimestamp);
+         return 0;
+      }
+      else
+      {
+         return 1;
+      }
+   }
+   else
+   {
+      return 1;
+   }
+
+   return -1;
+}
+
+
+inline
+int camtipPSD::loadImageIntoStream(void * dest)
+{
+   memcpy(dest, m_data, frameGrabberT::m_width*frameGrabberT::m_height*frameGrabberT::m_typeSize); 
+   m_update = false;
+   return 0;
+}
+
+
+inline
+int camtipPSD::reconfig()
+{
    return 0;
 }
 
