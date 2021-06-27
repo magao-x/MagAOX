@@ -71,7 +71,7 @@ class welchmethod {
                        double dt,
                        double (*win) (size_t, size_t),
                        IMAGE* imageIn,
-                       IMAGE* imageOut
+                       sem_t* semOut
                      );
 
    protected:
@@ -86,9 +86,11 @@ class welchmethod {
       size_t m_numPsds;
 
       sem_t* m_fetch;
+      sem_t* m_wfgSem;
 
       buffer m_inbuf;
       buffer m_circbuf;
+      double* m_resultArray;
 
       // configuration variables for welchCalculate thread 
       bool m_welchThreadInit;
@@ -108,7 +110,7 @@ class welchmethod {
 
       void get_psd_rt();
 
-      void sum_psds(double* res);
+      void sum_psds();
 
       void update_psd(size_t index);
 };

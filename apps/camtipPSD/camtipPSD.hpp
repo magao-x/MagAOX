@@ -66,7 +66,7 @@ class camtipPSD : public MagAOXApp<false>,
    typedef dev::shmimMonitor<camtipPSD> shmimMonitorT;
 
    //The base frameGrabber type
-   typedef dev::frameGrabber<camtipPSD>;
+   typedef dev::frameGrabber<camtipPSD> frameGrabberT;
       
    ///Floating point type in which to do all calculations.
    typedef double realT;
@@ -134,6 +134,8 @@ public:
 
       bool m_update {false};
 
+      float fps();
+
       int configureAcquisition(); 
       int startAcquisition();
       int acquireAndCheckValid();
@@ -156,6 +158,7 @@ inline
 void camtipPSD::setupConfig()
 {
    shmimMonitorT::setupConfig(config);
+   frameGrabberT::setupConfig(config);
 }
 
 
@@ -172,6 +175,7 @@ inline
 void camtipPSD::loadConfig()
 {
    loadConfigImpl(config);
+   frameGrabberT::loadConfig(config);
 }
 
 inline
@@ -180,9 +184,19 @@ int camtipPSD::appStartup()
   
    if(shmimMonitorT::appStartup() < 0)
    {
-      return log<software_error,-1>({__FILE__, __LINE__});
+      return log<software_error, -1>({__FILE__, __LINE__});
    }
 
+   if (frameGrabberT::appStartup() < 0)
+   {
+      return log<software_error, -1>({__FILE__, __LINE__});
+   }
+   
+   if (sem_init(&m_smSemaphore, 0, 0) < 0)
+   {
+      log<software_critical>({__FILE__, __LINE__, errno, 0, "Initializing S.M. semaphore."});
+      return -1;
+   }
 
    state(stateCodes::OPERATING);  
    return 0;
@@ -204,7 +218,19 @@ int camtipPSD::appLogic()
       log<software_error>({__FILE__, __LINE__});
    }
    
+
+   if (frameGrabberT::appLogic() < 0)
+   {
+      return log<software_error,-1>({__FILE__,__LINE__});
+   }
    
+   
+   if (frameGrabberT::updateINDI() < 0)
+   {
+      log<software_error>({__FILE__, __LINE__});
+      state(stateCodes::ERROR);
+   }
+
    return 0;
 }
 
@@ -212,7 +238,8 @@ inline
 int camtipPSD::appShutdown()
 {
    shmimMonitorT::appShutdown(); 
-   
+   frameGrabberT::appShutdown();
+ 
    return 0;
 }
 
@@ -241,26 +268,29 @@ int camtipPSD::allocate(const dev::shmimT & dummy)
       }
    }
       
-   if (!m_imOpened) {
+   if (!m_imOpened) 
+   {
 
-      log<software_error>({__FILE__, __LINE__, m_outputKey + " not opened."});
+      log<software_error>({__FILE__, __LINE__, m_shiftsKey + " not opened."});
       return -1;
 
-   } else {
+   } 
+   else 
+   {
      
-      double sampleTime = 0.02; // 500 Hz, this value should be hard-coded 
+      double sampleTime = 0.02; // 500 Hz, this value should not be hard-coded 
       size_t num_modes = m_shifts.md[0].size[0];
       size_t pts_10sec = (size_t) 10/sampleTime;  // we are using a 10 sec window
       size_t pts_1sec = 500;  //\todo this should not be hard-coded 
 
-      welch_init(num_modes, pts_1sec, pts_10sec, sampleTime, window, &m_shifts);
+      welch_init(num_modes, pts_1sec, pts_10sec, sampleTime, window, &m_shifts, &m_smSemaphore);
         
       m_psd0 = true;
       m_welchThreadRestart = true;
       
       if (m_alloc0) 
       {
-         if( threadStart( m_welchThread, 
+         if (threadStart( m_welchThread, 
                           m_welchThreadInit, 
                           m_welchThreadID, 
                           m_welchThreadProp, 
@@ -269,17 +299,17 @@ int camtipPSD::allocate(const dev::shmimT & dummy)
                           this, 
                           &welchmethod::welchCalculate
                         ) < 0
-           )
+            )
          {
             camtipPSD::template log<software_error>({__FILE__, __LINE__});
             return -1;
          }
+
          m_alloc0 = false;
       }
    
    }
  
-   //state(stateCodes::OPERATING);
    return 0;
 }
 
@@ -306,7 +336,8 @@ int camtipPSD::processImage( void * curr_src __attribute__((unused)),
 inline
 float camtipPSD::fps()
 {
-   return m_fps;
+   //return m_fps;
+   return 1.0;
 }
 
 
@@ -322,7 +353,7 @@ int camtipPSD::configureAcquisition()
    }
    
    frameGrabberT::m_width = shmimMonitorT::m_width; //columns
-   frameGrabberT::m_height = (shmimMonitorT::m_height / 2) + 1; //rows
+   frameGrabberT::m_height = (fps() / 2) + 1; //rows
    frameGrabberT::m_dataType = _DATATYPE_DOUBLE;
    
    std::cerr << "shmimMonitorT::m_dataType: " << (int) shmimMonitorT::m_dataType << "\n";
@@ -377,7 +408,7 @@ int camtipPSD::acquireAndCheckValid()
 inline
 int camtipPSD::loadImageIntoStream(void * dest)
 {
-   memcpy(dest, m_data, frameGrabberT::m_width*frameGrabberT::m_height*frameGrabberT::m_typeSize); 
+   memcpy(dest, m_resultArray, frameGrabberT::m_width*frameGrabberT::m_height*frameGrabberT::m_typeSize); 
    m_update = false;
    return 0;
 }
