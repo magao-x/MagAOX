@@ -147,13 +147,12 @@ class camtipCorr : public MagAOXApp<false>,
       int loadImageIntoStream(void * dest);
       int reconfig();
 
-   protected: //publishing to INDI functionality
+   protected:
       pcf::IndiProperty m_indiP_shifts;
 
       realT m_xshiftRMS {0}, m_yshiftRMS {0}, m_strehlMean {0}, m_strehlRMS {0};
-      std::vector<std::vector<realT>> vecShift;
-      
-      size_t indexOneSec {0}; 
+      std::array<std::array<realT, 2>, 3> m_means;
+      size_t n;
 };
 
 
@@ -164,7 +163,6 @@ class camtipCorr : public MagAOXApp<false>,
 inline
 camtipCorr::camtipCorr() : MagAOXApp(MAGAOX_CURRENT_SHA1, MAGAOX_REPO_MODIFIED)
 {
-   vecShift.resize(4);
 }
 
 
@@ -313,7 +311,8 @@ int camtipCorr::allocate(const dev::shmimT & dummy)
       return -1;
 
    } else {
- 
+
+      // setup the FFT data structures 
       m_rows = m_image.md[0].size[0];
       m_cols = m_image.md[0].size[1];
       size_t realArrSize {m_rows * m_cols * sizeof(realT)};
@@ -333,10 +332,17 @@ int camtipCorr::allocate(const dev::shmimT & dummy)
 
       m_dataType = m_image.md->datatype;
       m_typeSize = ImageStreamIO_typesize(m_dataType);
-     
-   /*   for (auto& v : vecShifts)
-         v.resize(fps());
-      indexOneSec = 0; */
+
+      // initalize data structure for rolling mean and RMS calculations
+      for (auto& i : m_means)
+         for(size_t j {0}; j < i.size(); ++j)
+            i[j] = 0;
+
+      m_xshiftRMS = 0;
+      m_yshiftRMS = 0;
+      m_strehlmean = 0;
+      ms_strehlRMS = 0;
+      n = 0;
        
    }
   
@@ -364,7 +370,8 @@ int camtipCorr::processImage( void * curr_src __attribute__((unused)),
          break;
 
       case false:
-      
+
+         // calculate shifts in strehl and position 
          copy_image(m_input, &m_image);
          fftw_execute(m_planF);
          point_multiply(m_image0_fft, m_output, m_cc_fft, m_rows, m_cols / 2 + 1);
@@ -375,19 +382,21 @@ int camtipCorr::processImage( void * curr_src __attribute__((unused)),
          m_data[2] = 
             getStrehlMod(m_input, m_rows, m_cols, m_xctr, m_yctr) / 1; // '1' represents F_PK/F_TOT;
 
-     /*    for (short i {0}; i < 3; ++i)
-            vecShfits[i][indexOneSec] = m_data[i]; */
+         // update means
+         m_means[0][1] = m_means[0][0] + (data[1] - m_means[0][0]) / n;
+         m_means[1][1] = m_means[1][0] + (data[0] - m_means[1][0]) / n;
+         m_means[2][1] = m_means[2][0] + (data[2] - m_means[2][0]) / n;
 
-  /*       if (indexOneSec == fps()) // update the RMS and mean values
-         {   
-               m_xshiftRMS 
+         // update RMS values
+         m_xshiftRMS += (xshiftRMS + (data[1] - m_means[0][0]) * (data[1] - m_means[0][1]));
+         m_yshiftRMS += (yshiftRMS + (data[0] - m_means[1][0]) * (data[0] - m_means[1][1]));
+         m_strehlRMS += (m_strehlRMS + (m_data[2] - m_means[2][0]) * (m_data[2] - m_means[2][1]));
 
-               m_yshiftRMS
-
-               m_strehlMean
-   
-               m_strehlRMS   
-         } */
+         // cycle the buffer
+         m_means[0][0] = m_means[0][1];
+         m_means[1][0] = m_means[1][1];
+         m_means[2][0] = m_means[2][1];
+         ++n;
 
          break;
    }
