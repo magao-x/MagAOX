@@ -83,6 +83,11 @@ protected:
 
    bool m_alloc0 {true};
 
+   float m_fps {0.0};
+   pcf::IndiProperty m_indiP_fps;
+   INDI_SETCALLBACK_DECL(camtipPSD, m_indiP_fps);
+
+
 public:
    /// Default c'tor.
    camtipPSD();
@@ -142,7 +147,6 @@ public:
       int loadImageIntoStream(void * dest);
       int reconfig();
 
-
 };
 
 
@@ -150,9 +154,10 @@ public:
 //          FUNCTIONS            /
 //===============================/
 inline
-camtipPSD::camtipPSD() 
+camtipPSD::camtipPSD()
 : MagAOXApp(MAGAOX_CURRENT_SHA1, MAGAOX_REPO_MODIFIED)
 {}
+
 
 inline
 void camtipPSD::setupConfig()
@@ -164,12 +169,12 @@ void camtipPSD::setupConfig()
 
 inline
 int camtipPSD::loadConfigImpl( mx::app::appConfigurator & _config )
-{
-   
+{ 
    shmimMonitorT::loadConfig(_config);
    
    return 0;
 }
+
 
 inline
 void camtipPSD::loadConfig()
@@ -177,6 +182,7 @@ void camtipPSD::loadConfig()
    loadConfigImpl(config);
    frameGrabberT::loadConfig(config);
 }
+
 
 inline
 int camtipPSD::appStartup()
@@ -201,6 +207,7 @@ int camtipPSD::appStartup()
    state(stateCodes::OPERATING);  
    return 0;
 }
+
 
 inline
 int camtipPSD::appLogic()
@@ -234,6 +241,7 @@ int camtipPSD::appLogic()
    return 0;
 }
 
+
 inline
 int camtipPSD::appShutdown()
 {
@@ -243,10 +251,11 @@ int camtipPSD::appShutdown()
    return 0;
 }
 
+
 inline
 int camtipPSD::allocate(const dev::shmimT & dummy)
 {
-   static_cast<void>(dummy); //be unused
+   static_cast<void>(dummy);
 
    if(m_imOpened)
    {
@@ -270,18 +279,16 @@ int camtipPSD::allocate(const dev::shmimT & dummy)
       
    if (!m_imOpened) 
    {
-
       log<software_error>({__FILE__, __LINE__, m_shiftsKey + " not opened."});
       return -1;
-
    } 
    else 
    {
      
-      double sampleTime = 0.02; // 500 Hz, this value should not be hard-coded 
+      double sampleTime = 1 / fps();
       size_t num_modes = m_shifts.md[0].size[0];
-      size_t pts_10sec = (size_t) 10/sampleTime;  // we are using a 10 sec window
-      size_t pts_1sec = 500;  //\todo this should not be hard-coded 
+      size_t pts_10sec = (size_t) 10 * fps();  // we are using a 10 sec window
+      size_t pts_1sec = (size_t) fps(); 
 
       welch_init(num_modes, pts_1sec, pts_10sec, sampleTime, window, &m_shifts, &m_smSemaphore);
         
@@ -290,16 +297,9 @@ int camtipPSD::allocate(const dev::shmimT & dummy)
       
       if (m_alloc0) 
       {
-         if (threadStart( m_welchThread, 
-                          m_welchThreadInit, 
-                          m_welchThreadID, 
-                          m_welchThreadProp, 
-                          m_welchThreadPrio, 
-                          "camtipWelchMethod", 
-                          this, 
-                          &welchmethod::welchCalculate
-                        ) < 0
-            )
+         if (threadStart( m_welchThread, m_welchThreadInit, m_welchThreadID, 
+                          m_welchThreadProp, m_welchThreadPrio, "camtipWelchMethod", 
+                          this, &welchmethod::welchCalculate) < 0)
          {
             camtipPSD::template log<software_error>({__FILE__, __LINE__});
             return -1;
@@ -321,7 +321,7 @@ int camtipPSD::processImage( void * curr_src __attribute__((unused)),
                              const dev::shmimT & dummy 
                            )
 {
-   static_cast<void>(dummy); //be unused
+   static_cast<void>(dummy);
 
    welchFetch(); 
 
@@ -336,8 +336,7 @@ int camtipPSD::processImage( void * curr_src __attribute__((unused)),
 inline
 float camtipPSD::fps()
 {
-   //return m_fps;
-   return 1.0;
+   return m_fps;
 }
 
 
@@ -417,6 +416,28 @@ int camtipPSD::loadImageIntoStream(void * dest)
 inline
 int camtipPSD::reconfig()
 {
+   return 0;
+}
+
+
+
+INDI_SETCALLBACK_DEFN( camtipPSD, m_indiP_fps)(const pcf::IndiProperty &ipRecv)
+{
+   if (ipRecv.getDevice() != m_indiP_fps.getDevice() || ipRecv.getName() != m_indiP_fps.getName())
+   {
+      log<software_error>({__FILE__, __LINE__, "Invalid INDI property."});
+      return -1;
+   }
+   
+   if (ipRecv.find("current") != true )
+   {
+      return 0;
+   }
+
+   m_indiP_fps = ipRecv;
+   
+   m_fps = ipRecv["current"].get<float>();
+   
    return 0;
 }
 

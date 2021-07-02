@@ -38,7 +38,7 @@ void GaussFit(size_t ROWS, // number of rows in input
  *  @param xctr     approximate center of ring pattern in X
  *  @param yctr     approximate center of ring pattern in Y
  */
-double getStrehlMod(double *detector, int ROWS, int COLS, int xctr, int yctr);
+double getStrehlMod(double *detector, size_t ROWS, size_t COLS, size_t xctr, size_t yctr);
 
 
 /**

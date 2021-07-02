@@ -87,7 +87,6 @@ class camtipCorr : public MagAOXApp<false>,
       size_t m_xctr;
       size_t m_yctr;
 
-      size_t getFPS();
       float     fps();
 
    public:
@@ -140,6 +139,8 @@ class camtipCorr : public MagAOXApp<false>,
       sem_t m_smSemaphore; ///< synchronizes the fg and sm threads
 
       bool m_update {false};
+
+      float m_fps {0};
 
       int configureAcquisition(); 
       int startAcquisition();
@@ -340,9 +341,9 @@ int camtipCorr::allocate(const dev::shmimT & dummy)
 
       m_xshiftRMS = 0;
       m_yshiftRMS = 0;
-      m_strehlmean = 0;
-      ms_strehlRMS = 0;
-      n = 0;
+      m_strehlMean = 0;
+      m_strehlRMS = 0;
+      n = 1;
        
    }
   
@@ -383,14 +384,15 @@ int camtipCorr::processImage( void * curr_src __attribute__((unused)),
             getStrehlMod(m_input, m_rows, m_cols, m_xctr, m_yctr) / 1; // '1' represents F_PK/F_TOT;
 
          // update means
-         m_means[0][1] = m_means[0][0] + (data[1] - m_means[0][0]) / n;
-         m_means[1][1] = m_means[1][0] + (data[0] - m_means[1][0]) / n;
-         m_means[2][1] = m_means[2][0] + (data[2] - m_means[2][0]) / n;
+         m_means[0][1] = m_means[0][0] + (m_data[1] - m_means[0][0]) / n;
+         m_means[1][1] = m_means[1][0] + (m_data[0] - m_means[1][0]) / n;
+         m_means[2][1] = m_means[2][0] + (m_data[2] - m_means[2][0]) / n;
 
          // update RMS values
-         m_xshiftRMS += (xshiftRMS + (data[1] - m_means[0][0]) * (data[1] - m_means[0][1]));
-         m_yshiftRMS += (yshiftRMS + (data[0] - m_means[1][0]) * (data[0] - m_means[1][1]));
+         m_xshiftRMS += (m_xshiftRMS + (m_data[1] - m_means[0][0]) * (m_data[1] - m_means[0][1]));
+         m_yshiftRMS += (m_yshiftRMS + (m_data[0] - m_means[1][0]) * (m_data[0] - m_means[1][1]));
          m_strehlRMS += (m_strehlRMS + (m_data[2] - m_means[2][0]) * (m_data[2] - m_means[2][1]));
+         m_strehlMean = m_means[2][1];
 
          // cycle the buffer
          m_means[0][0] = m_means[0][1];

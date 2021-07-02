@@ -132,7 +132,7 @@ void GaussFit(size_t ROWS,    // number of rows in input
 
 
 
-double getStrehlMod(double *detector, int ROWS, int COLS, int xctr, int yctr)
+double getStrehlMod(double *detector, size_t ROWS, size_t COLS, size_t xctr, size_t yctr)
 {
         size_t numBytesD = sizeof(double);
      // Setup arrays to track maximum image values
@@ -140,7 +140,7 @@ double getStrehlMod(double *detector, int ROWS, int COLS, int xctr, int yctr)
         double *heights = (double *)malloc(numBytesD * numlines) ; 
         double *search_angles = (double *)malloc(numBytesD * numlines) ;
 
-        for (int i = 0; i < numlines; ++i)
+        for (size_t i {0}; i < numlines; ++i)
           {
             search_angles[i] = (2.0 * M_PI * i) / numlines;
           }
@@ -153,7 +153,6 @@ double getStrehlMod(double *detector, int ROWS, int COLS, int xctr, int yctr)
         __m128 iteratorC = _mm_set1_ps(0.0) ;
         __m128 iteratorS = _mm_set1_ps(0.0) ;
         __m128 cos_angle, sin_angle;
-        __m128 ones = _mm_set1_ps(1.0) ;
         __m256d comp;  
      
         __m128i zeros = _mm_set1_epi32(0) ;
