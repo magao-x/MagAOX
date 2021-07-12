@@ -2,16 +2,15 @@
 #ifndef loopCtrl_hpp
 #define loopCtrl_hpp
 
-#include <QDialog>
 
 #include "ui_loopCtrl.h"
 
-#include "../../lib/multiIndi.hpp"
+#include "../xWidgets/xWidget.hpp"
 
 namespace xqt 
 {
    
-class loopCtrl : public QDialog, public multiIndiSubscriber
+class loopCtrl : public xWidget
 {
    Q_OBJECT
    
@@ -43,11 +42,11 @@ public:
    
    ~loopCtrl();
    
-   int subscribe( multiIndiPublisher * publisher );
+   void subscribe();
                                    
-   int handleDefProperty( const pcf::IndiProperty & ipRecv /**< [in] the property which has changed*/);
+   void handleDefProperty( const pcf::IndiProperty & ipRecv /**< [in] the property which has changed*/);
    
-   int handleSetProperty( const pcf::IndiProperty & ipRecv /**< [in] the property which has changed*/);
+   void handleSetProperty( const pcf::IndiProperty & ipRecv /**< [in] the property which has changed*/);
    
    void sendNewGain(double ng);
    void sendNewMultCoeff(double nm);
@@ -78,7 +77,7 @@ private:
    
 loopCtrl::loopCtrl( std::string & procName,
                     QWidget * Parent, 
-                    Qt::WindowFlags f) : QDialog(Parent, f), m_procName{procName}
+                    Qt::WindowFlags f) : xWidget(Parent, f), m_procName{procName}
 {
    ui.setupUi(this);
    
@@ -87,36 +86,36 @@ loopCtrl::loopCtrl( std::string & procName,
    ui.label_loop_state->setProperty("isStatus", true);
    ui.lcd_gain->setProperty("isStatus", true);
    ui.lcd_multcoeff->setProperty("isStatus", true);
+
+   onDisconnect();
 }
    
 loopCtrl::~loopCtrl()
 {
 }
 
-int loopCtrl::subscribe( multiIndiPublisher * publisher )
+void loopCtrl::subscribe()
 {
-   if(!publisher) return -1;
+   if(!m_parent) return;
    
-   publisher->subscribeProperty(this, m_procName, "fsm");
-   publisher->subscribeProperty(this, m_procName, "loop");
-   publisher->subscribeProperty(this, m_procName, "loop_gain");
-   publisher->subscribeProperty(this, m_procName, "loop_multcoeff");
-   publisher->subscribeProperty(this, m_procName, "loop_processes");
-   publisher->subscribeProperty(this, m_procName, "loop_state");
+   m_parent->addSubscriberProperty(this, m_procName, "fsm");
+   m_parent->addSubscriberProperty(this, m_procName, "loop");
+   m_parent->addSubscriberProperty(this, m_procName, "loop_gain");
+   m_parent->addSubscriberProperty(this, m_procName, "loop_multcoeff");
+   m_parent->addSubscriberProperty(this, m_procName, "loop_processes");
+   m_parent->addSubscriberProperty(this, m_procName, "loop_state");
    
-   return 0;
+   return;
 }
    
-int loopCtrl::handleDefProperty( const pcf::IndiProperty & ipRecv)
+void loopCtrl::handleDefProperty( const pcf::IndiProperty & ipRecv)
 {  
    return handleSetProperty(ipRecv);
-   
-   return 0;
 }
 
-int loopCtrl::handleSetProperty( const pcf::IndiProperty & ipRecv)
+void loopCtrl::handleSetProperty( const pcf::IndiProperty & ipRecv)
 {  
-   if(ipRecv.getDevice() != m_procName) return 0;
+   if(ipRecv.getDevice() != m_procName) return;
    
    if(ipRecv.getName() == "fsm")
    {
@@ -186,10 +185,6 @@ int loopCtrl::handleSetProperty( const pcf::IndiProperty & ipRecv)
    }
    
    updateGUI();
-   
-   //If we get here then we need to add this device
-   return 0;
-   
 }
 
 void loopCtrl::sendNewGain(double ng)

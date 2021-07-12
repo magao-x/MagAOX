@@ -5,13 +5,13 @@
 
 #include "ui_offloadCtrl.h"
 
-#include "../../lib/multiIndi.hpp"
+#include "../xWidgets/xWidget.hpp"
 
 
 namespace xqt 
 {
    
-class offloadCtrl : public QDialog, public multiIndiSubscriber
+class offloadCtrl : public xWidget
 {
    Q_OBJECT
    
@@ -32,12 +32,11 @@ public:
    
    ~offloadCtrl();
    
-   int subscribe( multiIndiPublisher * publisher );
+   void subscribe();
                                    
-   int handleDefProperty( const pcf::IndiProperty & ipRecv /**< [in] the property which has changed*/);
-   int handleSetProperty( const pcf::IndiProperty & ipRecv /**< [in] the property which has changed*/);
-   
-   
+   void handleDefProperty( const pcf::IndiProperty & ipRecv /**< [in] the property which has changed*/);
+   void handleSetProperty( const pcf::IndiProperty & ipRecv /**< [in] the property which has changed*/);
+
 public slots:
    void updateGUI();
    

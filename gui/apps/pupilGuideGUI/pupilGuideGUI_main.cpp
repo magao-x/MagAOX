@@ -20,11 +20,12 @@ int main(int argc, char *argv[])
    app.setStyleSheet(stream.readAll());
 
    multiIndiManager mgr("pupilGuide", "127.0.0.1", 7624);
+   xqt::pupilGuide pg;
    
-   xqt::pupilGuide dm;
-   mgr.addSubscriber(&dm);
-      
-   dm.show();
+   mgr.addSubscriber(&pg);
+   mgr.activate();
+
+   pg.show();
 
    int rv = app.exec();
    

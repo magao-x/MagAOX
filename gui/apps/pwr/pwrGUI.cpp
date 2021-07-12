@@ -41,51 +41,55 @@ pwrGUI::pwrGUI( QWidget * Parent, Qt::WindowFlags f) : QWidget(Parent, f)
    frequencies.resize(n_ACpdus, -1);
 }
    
-pwrGUI::~pwrGUI()
+pwrGUI::~pwrGUI() noexcept
 {
-   for(size_t i=0; i< m_devices.size(); ++i) delete m_devices[i];
+   if(m_parent) m_parent->unsubscribe(this);
+   //for(size_t i=0; i< m_devices.size(); ++i) delete m_devices[i];
 }
 
-int pwrGUI::subscribe( multiIndiPublisher * publisher )
-{
-   if(publisher == nullptr) return -1;
-   
-   publisher->subscribe(this);
+// int pwrGUI::subscribe( multiIndiParent * parent )
+// {
+//    if(parent == nullptr) return -1;
+
+//    std::cerr << "pwrGUI::subscribe [subscribing to parent]\n";  
+//    parent->subscribe(this);
       
-   return 0;
-}
+//    return 0;
+// }
 
-void pwrGUI::pwrGUI::onConnect()
-{
-   if(m_publisher == nullptr) return;
+// void pwrGUI::pwrGUI::onConnect()
+// {
+//    if(m_parent == nullptr) return;
    
-   pcf::IndiProperty ipSend;
-   m_publisher->sendGetProperties( ipSend );
-}
+//    m_parent->onConnect();
+//    //pcf::IndiProperty ipSend;
+//    //m_parent->sendGetProperties( ipSend );
+// }
 
 void pwrGUI::pwrGUI::onDisconnect()
 {
    QLayoutItem *child;
    while ((child = ui.switchGrid->takeAt(0)) != nullptr) 
    {
-      delete child->widget(); // delete the widget
+      child->widget()->deleteLater(); // delete the widget
       delete child;   // delete the layout item
    }
 
    for(size_t n=0; n<m_devices.size(); ++n)
    {
-      delete m_devices[n];
+      m_devices[n]->deleteLater();
    }
-      
+   
    m_devices.clear();
 
    updateGauges();
 
-   m_publisher = nullptr;
+   multiIndiSubscriber::onDisconnect();
+   
 }
 
  
-int pwrGUI::handleDefProperty( const pcf::IndiProperty & ipRecv /**< [in] the property which has changed*/)
+void pwrGUI::handleDefProperty( const pcf::IndiProperty & ipRecv /**< [in] the property which has changed*/)
 {
    bool have = false;
    for(size_t i=0;i<m_devices.size(); ++i)
@@ -117,8 +121,6 @@ int pwrGUI::handleDefProperty( const pcf::IndiProperty & ipRecv /**< [in] the pr
          
             emit gotNewDevice( devName, elements);
          }
-         
-         return 0;
       }
    }
    
@@ -155,17 +157,17 @@ void pwrGUI::addNewDevice( std::string * devName,
    QObject::connect(m_devices.back(), SIGNAL(chChange(pcf::IndiProperty &)), this, SLOT(chChange(pcf::IndiProperty &)));
    QObject::connect(m_devices.back(), SIGNAL(loadChanged()), this, SLOT(updateGauges()));
       
-   m_publisher->subscribeProperty(this, m_devices.back()->deviceName(), "load");
-   m_publisher->subscribeProperty(this, m_devices.back()->deviceName(), "channelOutlets");
-   m_publisher->subscribeProperty(this, m_devices.back()->deviceName(), "channelOnDelays");
-   m_publisher->subscribeProperty(this, m_devices.back()->deviceName(), "channelOffDelays");
+   m_parent->addSubscriberProperty(this, m_devices.back()->deviceName(), "load");
+   m_parent->addSubscriberProperty(this, m_devices.back()->deviceName(), "channelOutlets");
+   m_parent->addSubscriberProperty(this, m_devices.back()->deviceName(), "channelOnDelays");
+   m_parent->addSubscriberProperty(this, m_devices.back()->deviceName(), "channelOffDelays");
    
    
    ui.switchGrid->addWidget(m_devices.back()->deviceNameLabel(), currRow, 0, 2, 1);
    
    for(size_t i=0;i<m_devices.back()->numChannels();++i)
    {
-      m_publisher->subscribeProperty(this, m_devices.back()->deviceName(), m_devices.back()->channel(i)->channelName());
+      m_parent->addSubscriberProperty(this, m_devices.back()->deviceName(), m_devices.back()->channel(i)->channelName());
       
       ui.switchGrid->addWidget(m_devices.back()->channel(i)->channelNameLabel(), currRow, i+1);
       ui.switchGrid->addWidget(m_devices.back()->channel(i)->channelSwitch(), currRow+1, i+1);
@@ -178,7 +180,8 @@ void pwrGUI::addNewDevice( std::string * devName,
    
    
 }
-int pwrGUI::handleSetProperty( const pcf::IndiProperty & ipRecv /**< [in] the property which has changed*/)
+
+void pwrGUI::handleSetProperty( const pcf::IndiProperty & ipRecv /**< [in] the property which has changed*/)
 {
    for(size_t n=0; n<m_devices.size(); ++n)
    {
@@ -186,12 +189,9 @@ int pwrGUI::handleSetProperty( const pcf::IndiProperty & ipRecv /**< [in] the pr
       {
          m_devices[n]->handleSetProperty(ipRecv);
          
-         return 0;
+         return;
       }
    }
-
-   return 0;
-   
 }
  
 void pwrGUI::chChange( pcf::IndiProperty & ip )
@@ -267,11 +267,12 @@ void pwrGUI::updateGauges()
 
 void pwrGUI::on_buttonReconnect_pressed()
 {
-   if(m_publisher == nullptr) return;
-   
-   multiIndiPublisher * publisher = m_publisher;
-   onDisconnect();
-   subscribe(publisher);
+   if(m_parent == nullptr) return;
+   m_parent->setDisconnect();
+
+   //multiIndiPublisher * publisher = m_parent;
+   //onDisconnect();
+   //m_parent->addSubscriber(this);
 }
 
 } //namespace xqt

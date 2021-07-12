@@ -24,9 +24,9 @@ int main(int argc, char *argv[])
    xqt::pwrGUI pwr;
       
    mgr.addSubscriber(&pwr);
-   
+   mgr.activate();
+
    pwr.show();
-   
    
    int rv = app.exec();
     

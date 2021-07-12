@@ -1186,7 +1186,7 @@ void IndiXmlParser::clear()
   ::delXMLEle( m_pxeRoot );
   m_plxMessage = ::newLilXML();
   m_pxeRoot = NULL;
-  ::memset( m_pcMessage, 0, MaxErrorMsgSize );
+  ::memset( m_pcMessage, 0, MaxErrorMsgSize*sizeof(char) );
   m_szPrevXml = "";
   m_ssXml.str( "" );
 }
@@ -1199,7 +1199,7 @@ void IndiXmlParser::init( const string &szProtocolVersion )
   m_szProtocolVersion = szProtocolVersion;
   m_plxMessage = ::newLilXML();
   m_pxeRoot = NULL;
-  ::memset( m_pcMessage, 0, MaxErrorMsgSize );
+  ::memset( m_pcMessage, 0, MaxErrorMsgSize*sizeof(char) );
 }
 
 ////////////////////////////////////////////////////////////////////////////////
@@ -1256,7 +1256,7 @@ void IndiXmlParser::parseXml( const string &szXml,
 
   // Make sure the message is empty.
   szErrorMsg.clear();
-  ::memset( m_pcMessage, 0, sizeof( char ) * MaxErrorMsgSize );
+  ::memset( m_pcMessage, 0, MaxErrorMsgSize * sizeof(char) );
 
   // Reset the internal data.
   ::delXMLEle( m_pxeRoot );

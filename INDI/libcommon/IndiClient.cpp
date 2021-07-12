@@ -46,9 +46,10 @@ IndiClient::IndiClient( const string &szName,
 /// Copy constructor.
 /// \param icRhs Another version of the driver.
 
-IndiClient::IndiClient(const IndiClient &icRhs )
+IndiClient::IndiClient(const IndiClient &icRhs ) : IndiConnection()
 //  : IndiConnection( icRhs )  // can't invoke - private
 {
+  static_cast<void>(icRhs);
   // Empty because this is private.
 }
 
@@ -61,6 +62,7 @@ IndiClient::IndiClient(const IndiClient &icRhs )
 const IndiClient &IndiClient::operator= ( const IndiClient &icRhs )
 //  : IndiConnection::operator= ( icRhs )  // can't invoke - private
 {
+  static_cast<void>(icRhs);
   // Empty because this is private.
   return *this;
 }
@@ -123,11 +125,13 @@ void IndiClient::setup( const string & szIPAddr,
   {
     m_socClient.close();
     Thread::msleep( 10 );
+    return;
   }
   catch ( const runtime_error &excepRuntime )
   {
     m_socClient.close();
     Thread::msleep( 10 );
+    return;
   }
 }
 
@@ -196,6 +200,7 @@ void IndiClient::execute()
 
 void IndiClient::handleDefProperty( const pcf::IndiProperty &ipRecv )
 {
+  static_cast<void>(ipRecv);
 }
 
 ////////////////////////////////////////////////////////////////////////////////
@@ -205,6 +210,7 @@ void IndiClient::handleDefProperty( const pcf::IndiProperty &ipRecv )
 
 void IndiClient::handleDelProperty( const pcf::IndiProperty &ipRecv )
 {
+  static_cast<void>(ipRecv);
 }
 
 ////////////////////////////////////////////////////////////////////////////////
@@ -213,6 +219,7 @@ void IndiClient::handleDelProperty( const pcf::IndiProperty &ipRecv )
 
 void IndiClient::handleMessage( const pcf::IndiProperty &ipRecv )
 {
+  static_cast<void>(ipRecv);
 }
 
 ////////////////////////////////////////////////////////////////////////////////
@@ -221,6 +228,7 @@ void IndiClient::handleMessage( const pcf::IndiProperty &ipRecv )
 
 void IndiClient::handleNewProperty( const pcf::IndiProperty &ipRecv )
 {
+  static_cast<void>(ipRecv);
 }
 
 ////////////////////////////////////////////////////////////////////////////////
@@ -229,6 +237,7 @@ void IndiClient::handleNewProperty( const pcf::IndiProperty &ipRecv )
 
 void IndiClient::handleSetProperty( const pcf::IndiProperty &ipRecv )
 {
+  static_cast<void>(ipRecv);
 }
 
 ////////////////////////////////////////////////////////////////////////////////

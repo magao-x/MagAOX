@@ -25,7 +25,10 @@ exists( $$(CONDA_PREFIX)/include ) {
 MAKEFILE = makefile.offloadCtrlGUI
 
 # Input
+INCLUDEPATH += ../../lib ../../widgets/offloadCtrl
+
 HEADERS += ../../widgets/offloadCtrl/offloadCtrl.hpp \
+           ../../widgets/xWidgets/xWidget.hpp 
            
 SOURCES += offloadCtrlGUI_main.cpp \
            ../../widgets/offloadCtrl/offloadCtrl.cpp

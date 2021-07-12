@@ -35,10 +35,6 @@ pwrChannel::pwrChannel( QWidget * parent,
 
 pwrChannel::~pwrChannel()
 {
-   //These are all taken care of by parent destruct
-   //if(m_channelNameLabel) delete m_channelNameLabel;
-   //if(m_channelSwitch) delete m_channelSwitch;
-   //if(m_timer) delete m_timer;
 }
 
 std::string pwrChannel::channelName()
