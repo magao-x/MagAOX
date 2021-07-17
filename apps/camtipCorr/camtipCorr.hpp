@@ -23,10 +23,11 @@ namespace MagAOX::app
 
 
    
-/** \defgroup camtipCorr Image registrator and Strehl ratio monitor
-  * \brief Calculates the movement in images over time and fetches their Strehl ratio
+/** \defgroup  camtipCorr Image registrator and Strehl ratio monitor
+  * \brief  Calculates the tilt in the x and y directions, as well as the
+  *         strehl ratio of the image
   *
-  * \ingroup apps
+  * \ingroup  apps
   *
   */
 
@@ -51,10 +52,10 @@ class camtipCorr : public MagAOXApp<false>,
      
    friend class dev::frameGrabber<camtipCorr>;
 
-   // The base frameGrabber type
+   //The base frameGrabber type
    typedef dev::frameGrabber<camtipCorr> frameGrabberT;
 
-   // datatypes 
+   //Datatypes 
    typedef double realT;
    
    typedef fftw_complex complexT;
@@ -87,8 +88,6 @@ class camtipCorr : public MagAOXApp<false>,
       size_t m_xctr;
       size_t m_yctr;
 
-      float     fps();
-
    public:
       /// Default c'tor.
       camtipCorr();
@@ -102,7 +101,7 @@ class camtipCorr : public MagAOXApp<false>,
       /// Implementation of loadConfig logic, separated for testing.
       /** This is called by loadConfig().
         */
-      int loadConfigImpl( mx::app::appConfigurator & _config /**< [in] an application configuration from which to load values*/);
+      int loadConfigImpl(mx::app::appConfigurator& _config /**< [in] an application configuration from which to load values*/);
 
       virtual void loadConfig();
 
@@ -126,10 +125,10 @@ class camtipCorr : public MagAOXApp<false>,
       virtual int appShutdown();
 
    
-      int allocate( const dev::shmimT & dummy /**< [in] tag to differentiate shmimMonitor parents.*/);
+      int allocate(const dev::shmimT & dummy /**< [in] tag to differentiate shmimMonitor parents.*/);
    
-      int processImage( void * curr_src,          ///< [in] pointer to start of current frame.
-                        const dev::shmimT & dummy ///< [in] tag to differentiate shmimMonitor parents.
+      int processImage(void * curr_src,          ///< [in] pointer to start of current frame.
+                       const dev::shmimT & dummy ///< [in] tag to differentiate shmimMonitor parents.
                       );
 
 
@@ -141,6 +140,7 @@ class camtipCorr : public MagAOXApp<false>,
       bool m_update {false};
 
       float m_fps {0};
+      float fps();
 
       int configureAcquisition(); 
       int startAcquisition();
@@ -150,9 +150,16 @@ class camtipCorr : public MagAOXApp<false>,
 
    protected:
       pcf::IndiProperty m_indiP_shifts;
+      realT m_xshiftRMS {0};
+      realT m_yshiftRMS {0};
+      realT m_strehlMean {0};
+      realT m_strehlRMS {0};
 
-      realT m_xshiftRMS {0}, m_yshiftRMS {0}, m_strehlMean {0}, m_strehlRMS {0};
+      //m_means[0] holds mean 'x' shifts
+      //m_means[1] holds mean 'y' shifts
+      //m_means[2] holds mean Strehl Ratios 'SR' 
       std::array<std::array<realT, 2>, 3> m_means;
+
       size_t n;
 };
 
@@ -201,20 +208,16 @@ int camtipCorr::appStartup()
 {
   
    if (shmimMonitorT::appStartup() < 0)
-   {
-      return log<software_error,-1>({__FILE__, __LINE__});
-   }
-
+      return log<software_error, -1>({__FILE__, __LINE__});
 
    if (frameGrabberT::appStartup() < 0) 
-   {
       return log<software_error, -1>({__FILE__, __LINE__});
-   }
 
 
    if(sem_init(&m_smSemaphore, 0, 0) < 0)
    {
-      log<software_critical>({__FILE__, __LINE__, errno, 0, "Initializing S.M. semaphore."});
+      log<software_critical>({__FILE__, __LINE__, errno, 0, 
+                              "Initializing S.M. semaphore."});
       return -1;
    }
 
@@ -277,7 +280,7 @@ int camtipCorr::appLogic()
 
 
 inline
-int camtipCorr::appShutdown()
+int camtipCorr::appShutdown() 
 {
 
    shmimMonitorT::appShutdown(); 
@@ -294,25 +297,31 @@ int camtipCorr::allocate(const dev::shmimT & dummy)
    static_cast<void>(dummy);
    
    if (m_imOpened) 
-   { ImageStreamIO_closeIm(&m_image); }
+      ImageStreamIO_closeIm(&m_image);
    
    m_imOpened  = false;
    m_imRestart = false;
 
-   if (ImageStreamIO_openIm(&m_image, m_shmemKey.c_str()) == 0) { 
-      if(m_image.md[0].sem < 10) 
+   if (ImageStreamIO_openIm(&m_image, m_shmemKey.c_str()) == 0)
+   { 
+      if(m_image.md[0].sem < 10)
+      {
             ImageStreamIO_closeIm(&m_image);
+      }
       else
+      {
          m_imOpened = true;
+      }
    }
       
-   if(!m_imOpened) {
-
-      log<software_error>({__FILE__, __LINE__, m_shmemKey + " not opened."});
+   if(!m_imOpened) 
+   {
+      log<software_error>({__FILE__, __LINE__, 
+                           m_shmemKey + " not opened."});
       return -1;
-
-   } else {
-
+   } 
+   else 
+   {
       // setup the FFT data structures 
       m_rows = m_image.md[0].size[0];
       m_cols = m_image.md[0].size[1];
@@ -326,8 +335,19 @@ int camtipCorr::allocate(const dev::shmimT & dummy)
       m_image0_fft = (complexT *)fftw_malloc(fftArrSize);
       m_cc_fft     = (complexT *)fftw_malloc(fftArrSize);
 
-      m_planF = fftw_plan_dft_r2c_2d(m_rows, m_cols, m_input,  m_output,   FFTW_MEASURE);
-      m_planB = fftw_plan_dft_c2r_2d(m_rows, m_cols, m_cc_fft, m_cc_array, FFTW_MEASURE);
+      m_planF = fftw_plan_dft_r2c_2d(
+                        m_rows, 
+                        m_cols,
+                        m_input, 
+                        m_output, 
+                        FFTW_MEASURE);
+
+      m_planB = fftw_plan_dft_c2r_2d(
+                        m_rows, 
+                        m_cols, 
+                        m_cc_fft, 
+                        m_cc_array, 
+                        FFTW_MEASURE);
 
       memset(m_cc_fft, 0, fftArrSize); 
 
@@ -336,15 +356,16 @@ int camtipCorr::allocate(const dev::shmimT & dummy)
 
       // initalize data structure for rolling mean and RMS calculations
       for (auto& i : m_means)
+      {
          for(size_t j {0}; j < i.size(); ++j)
             i[j] = 0;
+      }
 
       m_xshiftRMS = 0;
       m_yshiftRMS = 0;
       m_strehlMean = 0;
       m_strehlRMS = 0;
-      n = 1;
-       
+      n = 1;      
    }
   
    return 0;
@@ -353,19 +374,20 @@ int camtipCorr::allocate(const dev::shmimT & dummy)
 
 
 inline
-int camtipCorr::processImage( void * curr_src __attribute__((unused)), 
-                              const dev::shmimT & dummy 
-                            )
+int camtipCorr::processImage(void * curr_src __attribute__((unused)), 
+                             const dev::shmimT & dummy)
 {
    static_cast<void>(dummy); //be unused
-   
+
+   size_t memSz = m_rows * (m_cols / 2 + 1) * sizeof(complexT);  
+ 
    switch (m_template) { 
       case true: // may move template fetching to allocate()
       
          copy_image(m_input, &m_image);
          fftw_execute(m_planF);
          image0_fft_fill(m_image0_fft, m_output, m_rows, m_cols / 2 + 1);
-         memset(m_cc_fft, 0, m_rows * (m_cols / 2 + 1) * sizeof(complexT));
+         memset(m_cc_fft, 0, memSz);
          m_template = false;
 
          break;
@@ -374,14 +396,23 @@ int camtipCorr::processImage( void * curr_src __attribute__((unused)),
 
          // calculate shifts in strehl and position 
          copy_image(m_input, &m_image);
+
          fftw_execute(m_planF);
-         point_multiply(m_image0_fft, m_output, m_cc_fft, m_rows, m_cols / 2 + 1);
+
+         point_multiply(
+               m_image0_fft, 
+               m_output, 
+               m_cc_fft, 
+               m_rows, 
+               m_cols / 2 + 1);
+
          fftw_execute(m_planB); 
-         memset(m_cc_fft, 0, (m_cols / 2 + 1) * m_rows * sizeof(complexT));
+
+         memset(m_cc_fft, 0, memSz);
 
          GaussFit(m_rows, m_cols, m_cc_array, m_sz, m_data);
-         m_data[2] = 
-            getStrehlMod(m_input, m_rows, m_cols, m_xctr, m_yctr) / 1; // '1' represents F_PK/F_TOT;
+         m_data[2] 
+               = getStrehlMod(m_input, m_rows, m_cols, m_xctr, m_yctr);
 
          // update means
          m_means[0][1] = m_means[0][0] + (m_data[1] - m_means[0][0]) / n;
@@ -392,6 +423,7 @@ int camtipCorr::processImage( void * curr_src __attribute__((unused)),
          m_xshiftRMS += (m_xshiftRMS + (m_data[1] - m_means[0][0]) * (m_data[1] - m_means[0][1]));
          m_yshiftRMS += (m_yshiftRMS + (m_data[0] - m_means[1][0]) * (m_data[0] - m_means[1][1]));
          m_strehlRMS += (m_strehlRMS + (m_data[2] - m_means[2][0]) * (m_data[2] - m_means[2][1]));
+
          m_strehlMean = m_means[2][1];
 
          // cycle the buffer
@@ -405,7 +437,8 @@ int camtipCorr::processImage( void * curr_src __attribute__((unused)),
  
    if(sem_post(&m_smSemaphore) < 0)
    {
-      log<software_critical>({__FILE__, __LINE__, errno, 0, "Error posting to semaphore."});
+      log<software_critical>({__FILE__, __LINE__, errno, 0, 
+                              "Error posting to semaphore."});
       return -1;
    }
 
@@ -431,7 +464,9 @@ int camtipCorr::configureAcquisition()
 {
    std::unique_lock<std::mutex> lock(m_indiMutex);
    
-   if (shmimMonitorT::m_width == 0 || shmimMonitorT::m_height == 0 || shmimMonitorT::m_dataType == 0)
+   if (shmimMonitorT::m_width == 0
+       || shmimMonitorT::m_height == 0
+       || shmimMonitorT::m_dataType == 0)
    {
       sleep(1);
       return -1;
@@ -441,8 +476,12 @@ int camtipCorr::configureAcquisition()
    frameGrabberT::m_height = 1;
    frameGrabberT::m_dataType = _DATATYPE_DOUBLE;
    
-   std::cerr << "shmimMonitorT::m_dataType: " << (int) shmimMonitorT::m_dataType << "\n";
-   std::cerr << "frameGrabberT::m_dataType: " << (int) frameGrabberT::m_dataType << "\n";
+   std::cerr << "shmimMonitorT::m_dataType: " 
+             << (int) shmimMonitorT::m_dataType 
+             << "\n";
+   std::cerr << "frameGrabberT::m_dataType: " 
+             << (int) frameGrabberT::m_dataType 
+             << "\n";
 
    return 0;
 }
@@ -461,9 +500,9 @@ int camtipCorr::acquireAndCheckValid()
 {
    timespec ts;
          
-   if (clock_gettime(CLOCK_REALTIME, &ts) < 0)
-   {
-      log<software_critical>({__FILE__, __LINE__, errno, 0, "clock_gettime"}); 
+   if (clock_gettime(CLOCK_REALTIME, &ts) < 0) {
+
+      log<software_critical>({__FILE__, __LINE__, errno, 0, "clock_gettime"});
       return -1;
    }
          
@@ -493,7 +532,11 @@ int camtipCorr::acquireAndCheckValid()
 inline
 int camtipCorr::loadImageIntoStream(void * dest)
 {
-   memcpy(dest, m_data, shmimMonitorT::m_width*shmimMonitorT::m_height*frameGrabberT::m_typeSize); 
+   size_t memSz = shmimMonitorT::m_width 
+                * shmimMonitorT::m_height 
+                * frameGrabberT::m_typeSize;
+
+   memcpy(dest, m_data, memSz); 
    m_update = false;
    return 0;
 }
