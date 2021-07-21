@@ -4,6 +4,16 @@
   * \ingroup irisaoCtrl_files
   */
 
+/*
+To do:
+* get the code compiling
+* create conf file
+* rewrite zero_dm fcn
+* figure out how to check for saturation (does position query state before or after sending commands to the driver?)
+* figure out shmim shape
+* error checking (IrisAO API functions don't return error codes)
+* figure out install for irisAO .so and .h
+*/
 
 
 
@@ -64,7 +74,9 @@ protected:
      *@{
      */
    
-   std::string m_serialNumber; ///< The IrisAO serial number used to open the correct DM profile
+   std::string m_mserialNumber; ///< The IrisAO MIRROR serial number
+   std::string m_dserialNumber; ///< The IrisAO DRIVER serial number
+   bool m_hardwareDisable; ///< Hardware disable flag (set to true to disable sending commands)
    
    ///@}
 
@@ -159,36 +171,17 @@ public:
      */
    
 protected:
-   double m_act_gain {0}; ///< Actuator gain (microns/volt)
-   double m_volume_factor {0}; ///< the volume factor to convert from displacement to commands
+
    uint32_t m_nbAct {0}; ///< The number of actuators
-   
-   int * m_actuator_mapping {nullptr}; ///< Array containing the mapping from 2D grid position to linear index in the command vector
    
    double * m_dminputs {nullptr}; ///< Pre-allocated command vector, used only in commandDM
    
-   DM m_dm = {}; ///< IrisAO SDK handle for the DM.
+   MirrorHandle m_dm = {}; ///< IrisAO SDK handle for the DM.
    
    bool m_dmopen {false}; ///< Track whether the DM connection has been opened
    
 public:
    
-   /// Parse the IrisAO calibration file
-   /** \returns 0 on success
-     * \returns -1 on error
-     */  
-   int parse_calibration_file(); 
-   
-   /// Read the actuator mapping from a FITS file
-   /**
-     * \todo convert this to use mxlib::fitsFile
-     *
-     * \returns 0 on success
-     * \returns -1 on error
-     */ 
-   int get_actuator_mapping();
-   
-   ///@}
 };
 
 irisaoCtrl::irisaoCtrl() : MagAOXApp(MAGAOX_CURRENT_SHA1, MAGAOX_REPO_MODIFIED)
@@ -199,14 +192,16 @@ irisaoCtrl::irisaoCtrl() : MagAOXApp(MAGAOX_CURRENT_SHA1, MAGAOX_REPO_MODIFIED)
 
 irisaoCtrl::~irisaoCtrl() noexcept
 {
-   if(m_actuator_mapping) free(m_actuator_mapping);
+   //f(m_actuator_mapping) free(m_actuator_mapping);
    if(m_dminputs) free(m_dminputs);
    
 }   
    
 void irisaoCtrl::setupConfig()
 {
-   config.add("dm.serialNumber", "", "dm.serialNumber", argType::Required, "dm", "serialNumber", false, "string", "The IrisAO serial number used to find correct DM Profile.");
+   config.add("dm.mserialNumber", "", "dm.mserialNumber", argType::Required, "dm", "mserialNumber", false, "string", "The IrisAO MIRROR serial number used to find correct DM Profile.");
+   config.add("dm.dserialNumber", "", "dm.dserialNumber", argType::Required, "dm", "dserialNumber", false, "string", "The IrisAO DRIVER serial number used to find correct DM Profile.");
+   config.add("dm.hardwareDisable", "", "dm.hardwareDisable", argType::Required, "dm", "hardwareDisable", false, "bool", "Set to true to disable hardware for testing purposes.");
    config.add("dm.calibRelDir", "", "dm.calibRelDir", argType::Required, "dm", "calibRelDir", false, "string", "Used to find the default config directory.");
    dev::dm<irisaoCtrl,float>::setupConfig(config);
    
@@ -215,10 +210,10 @@ void irisaoCtrl::setupConfig()
 int irisaoCtrl::loadConfigImpl( mx::app::appConfigurator & _config )
 {
    config(m_calibRelDir, "dm.calibRelDir");
-   config(m_serialNumber, "dm.serialNumber");
-      
-   //m_calibRelDir = "dm/IrisAO_2k";
-   
+   config(m_mserialNumber, "dm.mserialNumber");
+   config(m_dserialNumber, "dm.dserialNumber");
+   config(m_hardwareDisable, "dm.hardwareDisable");
+         
    dev::dm<irisaoCtrl,float>::loadConfig(_config);
    
    return 0;
@@ -232,18 +227,7 @@ void irisaoCtrl::loadConfig()
 
 int irisaoCtrl::appStartup()
 {
-   if(parse_calibration_file() < 0)
-   {
-      log<software_critical>({__FILE__,__LINE__});
-      return -1;
-   }
-   
-   if(m_act_gain == 0 || m_volume_factor == 0)
-   {
-      log<software_critical>({__FILE__,__LINE__, "calibration not loaded properly"});
-      return -1;
-   }
-   
+
    dev::dm<irisaoCtrl,float>::appStartup();
    shmimMonitor<irisaoCtrl>::appStartup();
    
@@ -300,11 +284,14 @@ int irisaoCtrl::initDM()
       return -1;
    }
 
-   std::string ser = mx::ioutils::toUpper(m_serialNumber);
-   IrisAORC ret = NO_ERR;
-   ret = IrisAOOpen(&m_dm, ser.c_str());
+   std::string mser = mx::ioutils::toUpper(m_mserialNumber);
+   std::string dser = mx::ioutils::toUpper(m_dserialNumber);
+   m_dm = MirrorConnect(mser.c_str(), dser.c_str(), m_hardwareDisable);
 
-   if(ret == NO_ERR) m_dmopen = true; // remember that the DM connection has been opened 
+   // not sure the irisAO API gives us any output to check for success/failure
+   m_dmopen = true;
+
+   /*if(ret == NO_ERR) m_dmopen = true; // remember that the DM connection has been opened 
 
    if(ret != NO_ERR)
    {
@@ -320,58 +307,26 @@ int irisaoCtrl::initDM()
    {
       log<text_log>("DM initialization failed. Couldn't open DM handle.", logPrio::LOG_ERROR);
       return -1;
-   }
+   }*/
    
-   log<text_log>("IrisAO " + m_serialNumber + " initialized", logPrio::LOG_NOTICE);
+   log<text_log>("IrisAO mirror " + mser + "with driver " +  dser + " initialized", logPrio::LOG_NOTICE);
 
    // Get number of actuators
-   m_nbAct = m_dm.ActCount;
-
-
-   // Load the DM map
-   uint32_t *map_lut;
-   map_lut = (uint32_t *)malloc(sizeof(uint32_t)*MAX_DM_SIZE);
-   ret = IrisAOLoadMap(&m_dm, NULL, map_lut);
-
-   if(ret != NO_ERR)
-   {
-      const char *err;
-      err = IrisAOErrorString(ret);
-      log<text_log>(std::string("DM initialization failed. Couldn't load map.") + err, logPrio::LOG_ERROR);
-      
-      m_dm = {};
-      return -1;
+   // this is stupid, but I don't know how else to get this number
+   SegmentNumber segment = 0;
+   while (MirrorIterate(m_dm, segment)){
+      segment++;
    }
+   m_nbAct = 3*segment;
+   log<text_log>("Found " + std::to_string(segment) + "segments for IrisAO mirror " + mser, logPrio::LOG_NOTICE);
 
-   
+   // cacao input -- FIX ME?
    if(m_dminputs) free(m_dminputs);
    m_dminputs = (double*) calloc( m_nbAct, sizeof( double ) );
    
    if(zeroDM() < 0)
    {
       log<text_log>("DM initialization failed.  Error zeroing DM.", logPrio::LOG_ERROR);
-      return -1;
-   }
-   
-   /* get actuator mapping from 2D cacao image to 1D vector for IrisAO input */
-   if(m_actuator_mapping) free(m_actuator_mapping);
-   m_actuator_mapping = (int *) malloc(m_nbAct * sizeof(int)); /* memory for actuator mapping */
-
-    /* initialize to -1 to allow for handling addressable but ignored actuators */
-    for (uint32_t idx = 0; idx < m_nbAct; ++idx)
-    {
-        m_actuator_mapping[idx] = -1;
-    }
-   
-   if(get_actuator_mapping() < 0)
-   {
-      log<text_log>("DM initialization failed.  Failed to get actuator mapping.", logPrio::LOG_ERROR);
-      return -1;
-   }
-
-   if(m_actuator_mapping == nullptr)
-   {
-      log<text_log>("DM initialization failed.  null pointer.", logPrio::LOG_ERROR);
       return -1;
    }
    
@@ -393,22 +348,14 @@ int irisaoCtrl::zeroDM()
       log<text_log>("DM not initialized (number of actuators)", logPrio::LOG_ERROR);
       return -1;
    }
-
-   double * dminputs = (double*) calloc( m_nbAct, sizeof( double ) );
    
    /* Send the all 0 command to the DM */
-   IrisAORC ret = IrisAOSetArray(&m_dm, dminputs, NULL);
-
-   /* Release memory */
-   free( dminputs );
-
-   if(ret != NO_ERR)
-   {
-      const char *err;
-      err = IrisAOErrorString(ret);
-      log<text_log>(std::string("Error zeroing DM: ") + err, logPrio::LOG_ERROR);
-      return -1;
+   SegmentNumber segment = 0;
+   while (MirrorIterate(m_dm, segment)){
+      SetMirrorPosition(m_dm, segment, 0, 0, 0); // z, xgrad, ygrad
+      segment++;
    }
+   MirrorCommand(m_dm, MirrorSendSettings);
    
    log<text_log>("DM zeroed");
    return 0;
@@ -416,85 +363,40 @@ int irisaoCtrl::zeroDM()
 
 int irisaoCtrl::commandDM(void * curr_src)
 {
-   //This is based on Kyle Van Gorkoms original sendCommand function.
+   //Based on Alex Rodack's IrisAO script
+   SegmentNumber segment = 0; // start at 0 or 1?
+   MirrorPosition position;
+   int idx;
+   while (MirrorIterate(m_dm, segment)){
+
+      // need shmim array formatted in a way that's consistent with this loop
+      idx = segment * 3; // may need (segment - 1) if they start counting segments at 1
+      SetMirrorPosition(m_dm, segment, ((float *)curr_src)[idx], ((float *)curr_src)[idx+1], ((float *)curr_src)[idx+2]); // z, xgrad, ygrad
    
-   /*This loop performs the following steps:
-     1) converts from float to double
-     2) convert to volume-normalized displacement
-     3) convert to squared fractional voltage (0 to +1)
-     4) calculate the mean
-   */
-
-
-   // want to rework the logic here so that we don't have to check
-   // if every actuator is addressable.
-   // Loop over addressable only?
-   //double mean = 0;
-   for (uint32_t idx = 0; idx < m_nbAct; ++idx)
-   {
-     int address = m_actuator_mapping[idx];
-     if(address == -1)
-     {
-        m_dminputs[idx] = 0.; // addressable but ignored actuators set to 0
-     } 
-     else 
-     {
-        m_dminputs[idx] = ((double)  ((realT *) curr_src)[address]) * m_volume_factor/m_act_gain;
-        //mean += m_dminputs[idx];
-     }
-   }
-   //mean /= m_nbAct;
-
-   /*This loop performas the following steps:
-      1) remove mean from each actuator input (and add midpoint bias)
-      2) clip to fractional values between 0 and 1.
-      3) take the square root to approximate the voltage-displacement curve
-   */
-   for (uint32_t idx = 0 ; idx < m_nbAct ; ++idx)
-   {
-      //m_dminputs[idx] -= mean - 0.5;
-      if (m_dminputs[idx] > 1)
+      // check if the current segment was saturated
+      // not sure you can do this here. might need to send the commands first (depends on what this is actually querying)
+      // not sure how to handle ptt in the m_instSatMap. I guess I need to saturate a whole row at once??
+      GetMirrorPosition(m_dm, segment, &position);
+      if (!position.reachable)
       {
-         ++m_nsat;
-         m_dminputs[idx] = 1;
-      } else if (m_dminputs[idx] < 0)
-      {
-         ++m_nsat;
-         m_dminputs[idx] = 0;
-      }
-      m_dminputs[idx] = sqrt(m_dminputs[idx]);
-   }
-
-   /* Finally, send the command to the DM */
-   IrisAORC ret = IrisAOSetArray(&m_dm, m_dminputs, NULL);
-
-   /* Return immediately upon error, logging the error
-   message first and then return the failure code. */
-   if(ret != NO_ERR)
-   {
-      const char *err;
-      err = IrisAOErrorString(ret);
-      log<text_log>(std::string("DM command failed: ") + err, logPrio::LOG_ERROR);
-      return -1;
-   }
-
-   /* Now update the instantaneous sat map */
-   for (uint32_t idx = 0; idx < m_nbAct; ++idx)
-   {
-      int address = m_actuator_mapping[idx];
-      if(address == -1) continue;
-     
-      if(m_dminputs[idx] >= 1 || m_dminputs[idx] <= 0)
-      {
-         m_instSatMap.data()[address] = 1;
+         m_instSatMap.data()[idx] = 1;
+         m_instSatMap.data()[idx+1] = 1;
+         m_instSatMap.data()[idx+2] = 1;
       }
       else
       {
-         m_instSatMap.data()[address] = 0;
+         m_instSatMap.data()[idx] = 0;
+         m_instSatMap.data()[idx+1] = 0;
+         m_instSatMap.data()[idx+2] = 0;
       }
+
+       segment++;
    }
+
+   /* Finally, send the command to the DM */
+   MirrorCommand(m_dm, MirrorSendSettings);
    
-   return ret;
+   return 0 ;
 }
 
 int irisaoCtrl::releaseDM()
@@ -521,152 +423,16 @@ int irisaoCtrl::releaseDM()
       log<text_log>("DM release failed.  Error zeroing DM.", logPrio::LOG_ERROR);
       return -1;
    }
-
-    // Zero all actuators (this is probably redundant after zeroing the DM above)
-    IrisAORC ret = NO_ERR;
-    ret = IrisAOClearArray(&m_dm);
-
-   if(ret != NO_ERR)
-   {
-      const char *err;
-      err = IrisAOErrorString(ret);
-      log<text_log>(std::string("DM reset failed: ") + err, logPrio::LOG_ERROR);
-      return -1;
-   }
    
    // Close IrisAO connection
-   ret = IrisAOClose(&m_dm);
+   MirrorRelease(m_dm);
 
-   if(ret == NO_ERR) m_dmopen = false;
-
-   if(ret != NO_ERR)
-   {
-      const char *err;
-      err = IrisAOErrorString(ret);
-      log<text_log>(std::string("DM release failed: ") + err, logPrio::LOG_ERROR);
-      return -1;
-   }
-
+   m_dmopen = false;
    m_dm = {};
    
-   log<text_log>("IrisAO " + m_serialNumber + " reset and released", logPrio::LOG_NOTICE);
+   log<text_log>("IrisAO " + m_mserialNumber + " with driver " + m_dserialNumber + " reset and released", logPrio::LOG_NOTICE);
    
    return 0;
-}
-
-/* Read in a configuration file with user-calibrated
-values to determine the conversion from physical to
-fractional stroke as well as the volume displaced by
-the influence function. */
-int irisaoCtrl::parse_calibration_file()
-{
-    FILE * fp;
-    char * line = NULL;
-    size_t len = 0;
-    ssize_t read;
-    double * calibvals;
-
-    std::string calibpath = m_calibPath + "/" + "IrisAO_2k_userconfig.txt";
-    
-    // open file
-    fp = fopen(calibpath.c_str(), "r");
-    if (fp == NULL)
-    {
-       log<text_log>("Could not read configuration file at " + calibpath, logPrio::LOG_ERROR);
-        return -1;
-    }
-
-    calibvals = (double*) malloc(2*sizeof(double));
-    int idx = 0;
-    while ((read = getline(&line, &len, fp)) != -1)
-    {
-        // grab first value from each line
-        calibvals[idx] = strtod(line, NULL);
-        idx++;
-    }
-
-    fclose(fp);
-
-    // assign stroke and volume factors
-    m_act_gain = calibvals[0];
-    m_volume_factor = calibvals[1];
-
-    free(calibvals);
-    
-    log<text_log>("IrisAO " + m_serialNumber + ": Using stroke and volume calibration from " + calibpath);
-    std::cerr << m_act_gain << " " << m_volume_factor << "\n";
-    return 0;
-}
-
-int irisaoCtrl::get_actuator_mapping() //const char * serial, int nbAct, int * actuator_mapping)
-{
-    /* This function closely follows the CFITSIO imstat
-    example */
-
-    fitsfile *fptr;  /* FITS file pointer */
-    int status = 0;  /* CFITSIO status value MUST be initialized to zero! */
-    
-
-    // get file path to actuator map
-    std::string calibpath = m_calibPath + "/" + "IrisAO_2k_actuator_mapping.fits";
-
-    if ( !fits_open_image(&fptr, calibpath.c_str(), READONLY, &status) )
-    {
-      int hdutype, naxis;
-      long naxes[2];   
-       
-      if (fits_get_hdu_type(fptr, &hdutype, &status) || hdutype != IMAGE_HDU) { 
-        printf("Error: this program only works on images, not tables\n");
-        return(1);
-      }
-
-      fits_get_img_dim(fptr, &naxis, &status);
-      fits_get_img_size(fptr, 2, naxes, &status);
-
-      if (status || naxis != 2) { 
-        printf("Error: NAXIS = %d.  Only 2-D images are supported.\n", naxis);
-        return(1);
-      }
-
-      int * pix = (int *) malloc(naxes[0] * sizeof(int)); /* memory for 1 row */
-
-      if (pix == NULL) {
-        printf("Memory allocation error\n");
-        return(1);
-      }
-
-      long fpixel[2];
-      //totpix = naxes[0] * naxes[1];
-      fpixel[0] = 1;  /* read starting with first pixel in each row */
-
-      /* process image one row at a time; increment row # in each loop */
-      int ij = 0;/* actuator mapping index */
-      for (fpixel[1] = 1; fpixel[1] <= naxes[1]; fpixel[1]++)
-      {  
-         /* give starting pixel coordinate and number of pixels to read */
-         if (fits_read_pix(fptr, TINT, fpixel, naxes[0],0, pix,0, &status))
-            break;   /* jump out of loop on error */
-
-         // get indices of active actuators in order
-         for (int ii = 0; ii < naxes[0]; ii++) {
-           if (pix[ii] > 0) {
-                m_actuator_mapping[pix[ii] - 1] = ij;
-           }
-           ij++;
-         }
-      }
-      fits_close_file(fptr, &status);
-      
-      free(pix);
-    }
-
-    if (status)  {
-        fits_report_error(stderr, status); /* print any error message */
-    }
-
-
-    log<text_log>("IrisAO " + m_serialNumber + ": Using actuator mapping from " + calibpath);
-    return 0;
 }
 
 } //namespace app
