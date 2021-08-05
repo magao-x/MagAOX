@@ -1,0 +1,223 @@
+#!/bin/bash
+set -eo pipefail
+
+
+# number of arguments to script
+NBARGS=3
+
+
+
+# ======================= PROCESS NAME =================================
+pname=`echo "$0" | sed "s/\.\///g"`
+
+
+function printHELP {
+echo "------------------------------------------------------------------------"
+echo "$(tput bold) $pname : SEND IMAGE STREAM TO TCP port $(tput sgr0)"
+echo "------------------------------------------------------------------------"
+echo "  Send stream to another computer through TCP"
+echo "  Runs inside tmux session named sTCPtx-$1"
+echo "  MUST BE LAUNCHED AFTER TCP RECEIVE RUNNING ON the other machine"
+echo "   "
+echo " $(tput bold)USAGE:$(tput sgr0)"
+echo "     $0 [-hc] <stream> <IP> <port>"
+echo ""
+echo " $(tput bold)OPTIONS:$(tput sgr0)"
+echo "     $(tput bold)-h$(tput sgr0)             help"
+echo "     $(tput bold)-p$(tput sgr0) RTprio      RT priority (default = 80)"
+echo "     $(tput bold)-c$(tput sgr0)             force using counter for synchro"
+echo "     $(tput bold)-k$(tput sgr0)             kill TCP transmit session, do not restart"
+echo ""
+echo " $(tput bold)INPUT:$(tput sgr0)"
+echo "  <data stream name>   : shared memory stream name. Actual file is \$MILK_SHM_DIR/<stream name>.im.shm"
+echo "  <IP>                 : IP number"
+echo "  <port>               : port number"
+echo ""
+echo " $(tput bold)EXAMPLE:$(tput sgr0)"
+echo "     $0 -c ircam1 10.20.20.2 30105"
+echo ""
+echo "------------------------------------------------------------------------"
+}
+
+
+printHELP1 ()
+{
+    printf "%20s       Send image stream to TCP port\n" "$0" 
+}
+
+
+
+
+EXITSTATUS=0
+
+function checkFile {
+if [ -f $1 ]
+  then
+    echo "[$(tput setaf 2)$(tput bold)   OK   $(tput sgr0)] File $(tput bold)$1$(tput sgr0) found"
+   else
+    echo "[$(tput setaf 1)$(tput bold) FAILED $(tput sgr0)] File $(tput bold)$1$(tput sgr0) not found"
+    EXITSTATUS=1
+fi
+}
+
+function checkDir {
+if [ -d $1 ]
+  then
+    echo "[$(tput setaf 2)$(tput bold)   OK   $(tput sgr0)] Directory $(tput bold)$1$(tput sgr0) found"
+   else
+    echo "[$(tput setaf 1)$(tput bold) FAILED $(tput sgr0)] Directory $(tput bold)$1$(tput sgr0) not found"
+    EXITSTATUS=1
+fi
+}
+
+function cmdexists()
+{
+  command -v "$1" >/dev/null 2>&1
+}
+
+
+function checkCommand {
+if cmdexists $1; then
+    echo "[$(tput setaf 2)$(tput bold)   OK   $(tput sgr0)] Command $(tput bold)$1$(tput sgr0) found"
+else
+    echo "[$(tput setaf 1)$(tput bold) FAILED $(tput sgr0)] Command $(tput bold)$1$(tput sgr0) not installed.  Aborting."; EXITSTATUS=1;
+fi
+
+}
+
+
+# ================= OPTIONS =============================
+
+# Transform long options to short ones
+singlelinehelp=0
+for arg in "$@"; do
+  shift
+  case "$arg" in
+    "--help") set -- "$@" "-h" ;;
+    "--help1") 
+set -- "$@" "-h" 
+singlelinehelp=1;
+;;
+    *)        set -- "$@" "$arg"
+  esac
+done
+
+
+
+SYNCMODE="0"
+KILLCONN="1"
+RESTARTCONN="1"
+RTprio="80"
+
+while getopts :hckp: FLAG; do
+  case $FLAG in
+    h)  #show help
+      if [ "$singlelinehelp" -eq "0" ]; then
+      printHELP
+      else
+      printHELP1
+      fi
+      exit
+      ;;
+    p)
+    RTprio=$OPTARG
+    ;;
+    c) 
+    echo "use counter for sync"
+    SYNCMODE="1"
+    ;;
+    k)
+    RESTARTCONN="0"
+    ;;
+    \?) #unrecognized option - show help
+      echo -e \\n"Option -${BOLD}$OPTARG${NORM} not allowed."
+      printHELP
+      ;;
+  esac
+done
+
+shift $((OPTIND-1))  #This tells getopts to move on to the next argument.
+
+if [ "$1" = "help" ] || [ "$#" -ne $NBARGS ]; then
+if [ "$#" -ne $NBARGS ]; then
+    echo "$(tput setaf 1)$(tput bold) Illegal number of parameters ($NBARGS params required, $# entered) $(tput sgr0)"
+fi
+printHELP
+        exit
+fi
+
+
+
+
+# ======================= CHECK REQUIRED FILES =================================
+source $HOME/.profile
+echo ""
+checkFile $MILK_SHM_DIR/$1.im.shm
+
+
+# ============================= CHECK IF COMMAND EXISTS ==========================
+
+checkCommand cacao
+
+
+
+
+
+
+
+if [ $EXITSTATUS -eq 1 ]; then
+echo ""
+echo "$(tput setaf 1)$(tput bold) REQUIRED FILES, COMMANDS NOT FOUND: EXITING $(tput sgr0)"
+echo ""
+exit
+else
+echo ""
+fi
+
+
+
+# ======================= SCRIPT CODE STARTS HERE =================================
+
+
+if [ "$KILLCONN" = "1" ]; then
+tmuxname="sTCPtx-$1"
+tmux send-keys -t ${tmuxname} C-c
+tmux send-keys -t ${tmuxname} C-c
+tmux send-keys -t ${tmuxname} "exit" C-m
+tmux kill-session -t ${tmuxname}
+fi
+
+
+if [ "$RESTARTCONN" = "1" ]; then
+echo "Measuring DM size"
+
+cacao << EOF
+readshmimsize $1 __$1_size.txt
+quit
+EOF
+
+sizestring=$( cat _$1_size.txt )
+rm _$1_size.txt
+
+tmux new-session -d -s ${tmuxname}
+tmux send-keys -t ${tmuxname} "" C-m
+echo "CREATING SESSION ${tmuxname}"
+
+
+cacao << EOF
+readshmimsize $1 $1_size.txt
+quit
+EOF
+sizestring=$( cat $1_size.txt )
+rm $1_size.txt
+
+#ssh $2 "LD_LIBRARY_PATH=/usr/local/lib /home/scexao/bin/creashmim $1 $sizestring"
+tmux send-keys -t ${tmuxname} "echo \"SYNCMODE = ${SYNCMODE}\"" C-m
+tmux send-keys -t ${tmuxname} "cacao -n shmimTCPtransmit-$1" C-m
+if [ "$CPUSETFLAG" = "1" ]; then
+tmux send-keys -t ${tmuxname} "csetpmove ${CPUset}" C-m
+fi
+tmux send-keys -t ${tmuxname} "readshmim $1" C-m
+tmux send-keys -t ${tmuxname} "imnetwtransmit $1 $2 $3 ${SYNCMODE} ${RTprio}" C-m
+
+fi
