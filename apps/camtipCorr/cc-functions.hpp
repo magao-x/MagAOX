@@ -4,6 +4,7 @@
  *   Program: cc-functions.h
  *   Purpose: Collection of functions for image analysis
  */
+#pragma  once 
 
 #include <iostream>
 #include <stdio.h>

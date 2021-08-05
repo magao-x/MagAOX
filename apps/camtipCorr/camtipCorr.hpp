@@ -160,7 +160,7 @@ class camtipCorr : public MagAOXApp<false>,
       //m_means[2] holds mean Strehl Ratios 'SR' 
       std::array<std::array<realT, 2>, 3> m_means;
 
-      size_t n;
+      uint64_t n;
 };
 
 
