@@ -18,6 +18,11 @@
 #include "reg_functions.hpp" 
 #include "cc-functions.hpp"
 
+// Pointer to linked theoretical Strehl amplitude values
+extern double _binary_sa_dat_start;
+extern double _binary_sa_dat_end;
+
+
 namespace MagAOX::app
 {
 
@@ -161,6 +166,9 @@ class camtipCorr : public MagAOXApp<false>,
       std::array<std::array<realT, 2>, 3> m_means;
 
       uint64_t n;
+
+   private:
+      double* sa_ptr;
 };
 
 
@@ -171,6 +179,7 @@ class camtipCorr : public MagAOXApp<false>,
 inline
 camtipCorr::camtipCorr() : MagAOXApp(MAGAOX_CURRENT_SHA1, MAGAOX_REPO_MODIFIED)
 {
+   sa_ptr = &_binary_sa_dat_start;
 }
 
 

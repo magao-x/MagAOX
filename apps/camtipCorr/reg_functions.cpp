@@ -157,7 +157,7 @@ void image0_fft_fill(fftw_complex *image0_fft_FDZP, fftw_complex *image_fft, int
 
 void crop_image(double *dest, double *src, int IMROWS, int IMCOLS, int x, int y, int SZ)
 { 
-    int lx=x-SZ, ux=x+SZ, ly=y-SZ, uy=y+SZ;
+    int lx=x-SZ, ly=y-SZ;
     int array_x[2*SZ+1], array_y[2*SZ+1];
     
     for (int i=0; i<2*SZ+1; i++) {
