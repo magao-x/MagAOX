@@ -1,16 +1,16 @@
-/** \file camtipCorr.cpp
+/** \file imgChar.cpp
   * \brief The MagAO-X Image Registrator and Strehl
   * ratio monitor
   *
-  * \ingroup camtipCorr_files
+  * \ingroup imgChar_files
   */
 
-#include "camtipCorr.hpp"
+#include "imgChar.hpp"
 
 
 int main(int argc, char **argv)
 {
-   MagAOX::app::camtipCorr xapp;
+   MagAOX::app::imgChar xapp;
 
    return xapp.main(argc, argv);
 

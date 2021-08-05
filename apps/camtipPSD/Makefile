@@ -11,5 +11,5 @@ OPTIMIZE = -O3 -fopenmp -ffast-math -march=native
 
 OTHER_HEADERS=
 OTHER_OBJS=buffer.o welchpsd.o
-TARGET=camtipPSD
+TARGET=jitterPSD
 include ../../Make/magAOXApp.mk

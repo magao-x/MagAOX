@@ -21,8 +21,8 @@
 
 buffer::buffer()
 : buffer_start { nullptr },
-  dataptr { nullptr },
   blocks { nullptr },
+  dataptr { nullptr },
   block_size { 0 },
   line_size { 0 }
 {

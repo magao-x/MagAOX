@@ -1,4 +1,4 @@
-/** \file camtipPSD.hpp
+/** \file jitterPSD.hpp
   * \brief Calculates the PSDs of the movement and Strehl of the camtip
   * images
   *
@@ -36,37 +36,37 @@ static double window(size_t n, size_t N) {
 namespace MagAOX::app
 {
   
-/** \defgroup camtipPSD Estimates PSD of camtip image movements and Strehl ratio
+/** \defgroup jitterPSD Estimates PSD of camtip image movements and Strehl ratio
   * \brief Calculates the PSD of camtip image movements and Strehl ratio
   *
   * \ingroup apps
   *
   */
 
-/** \defgroup camtipPSD_files PSD estimation
-  * \ingroup camtipPSD
+/** \defgroup jitterPSD_files PSD estimation
+  * \ingroup jitterPSD
   */
 
 /** MagAO-X application to get PSDs of camtip image motion and Strehl ratios.
   *
-  * \ingroup camtipPSD
+  * \ingroup jitterPSD
   * 
   */
-class camtipPSD : public MagAOXApp<false>, 
-                  public dev::shmimMonitor<camtipPSD>, 
+class jitterPSD : public MagAOXApp<false>, 
+                  public dev::shmimMonitor<jitterPSD>, 
                   public welchmethod,
-                  public dev::frameGrabber<camtipPSD>
+                  public dev::frameGrabber<jitterPSD>
 {
 
-   friend class dev::shmimMonitor<camtipPSD>;
+   friend class dev::shmimMonitor<jitterPSD>;
  
-   friend class dev::frameGrabber<camtipPSD>;
+   friend class dev::frameGrabber<jitterPSD>;
   
    //The base shmimMonitor type
-   typedef dev::shmimMonitor<camtipPSD> shmimMonitorT;
+   typedef dev::shmimMonitor<jitterPSD> shmimMonitorT;
 
    //The base frameGrabber type
-   typedef dev::frameGrabber<camtipPSD> frameGrabberT;
+   typedef dev::frameGrabber<jitterPSD> frameGrabberT;
       
    ///Floating point type in which to do all calculations.
    typedef double realT;
@@ -85,15 +85,15 @@ protected:
 
    float m_fps {0.0};
    pcf::IndiProperty m_indiP_fps;
-   INDI_SETCALLBACK_DECL(camtipPSD, m_indiP_fps);
+   INDI_SETCALLBACK_DECL(jitterPSD, m_indiP_fps);
 
 
 public:
    /// Default c'tor.
-   camtipPSD();
+   jitterPSD();
 
-   /// D'tor, declared and defined for noexcept.   ~camtipPSD() noexcept
-   ~camtipPSD() noexcept
+   /// D'tor, declared and defined for noexcept.   ~jitterPSD() noexcept
+   ~jitterPSD() noexcept
    {}
 
    virtual void setupConfig();
@@ -111,7 +111,7 @@ public:
      */
    virtual int appStartup();
 
-   /// Implementation of the FSM for camtipPSD.
+   /// Implementation of the FSM for jitterPSD.
    /** 
      * \returns 0 on no critical error
      * \returns -1 on an error requiring shutdown
@@ -154,13 +154,13 @@ public:
 //          FUNCTIONS            /
 //===============================/
 inline
-camtipPSD::camtipPSD()
+jitterPSD::jitterPSD()
 : MagAOXApp(MAGAOX_CURRENT_SHA1, MAGAOX_REPO_MODIFIED)
 {}
 
 
 inline
-void camtipPSD::setupConfig()
+void jitterPSD::setupConfig()
 {
    shmimMonitorT::setupConfig(config);
    frameGrabberT::setupConfig(config);
@@ -168,7 +168,7 @@ void camtipPSD::setupConfig()
 
 
 inline
-int camtipPSD::loadConfigImpl( mx::app::appConfigurator & _config )
+int jitterPSD::loadConfigImpl( mx::app::appConfigurator & _config )
 { 
    shmimMonitorT::loadConfig(_config);
    
@@ -177,7 +177,7 @@ int camtipPSD::loadConfigImpl( mx::app::appConfigurator & _config )
 
 
 inline
-void camtipPSD::loadConfig()
+void jitterPSD::loadConfig()
 {
    loadConfigImpl(config);
    frameGrabberT::loadConfig(config);
@@ -185,7 +185,7 @@ void camtipPSD::loadConfig()
 
 
 inline
-int camtipPSD::appStartup()
+int jitterPSD::appStartup()
 {
   
    if(shmimMonitorT::appStartup() < 0)
@@ -210,7 +210,7 @@ int camtipPSD::appStartup()
 
 
 inline
-int camtipPSD::appLogic()
+int jitterPSD::appLogic()
 {
    if( shmimMonitorT::appLogic() < 0)
    {
@@ -243,7 +243,7 @@ int camtipPSD::appLogic()
 
 
 inline
-int camtipPSD::appShutdown()
+int jitterPSD::appShutdown()
 {
    shmimMonitorT::appShutdown(); 
    frameGrabberT::appShutdown();
@@ -253,7 +253,7 @@ int camtipPSD::appShutdown()
 
 
 inline
-int camtipPSD::allocate(const dev::shmimT & dummy)
+int jitterPSD::allocate(const dev::shmimT & dummy)
 {
    static_cast<void>(dummy);
 
@@ -301,7 +301,7 @@ int camtipPSD::allocate(const dev::shmimT & dummy)
                           m_welchThreadProp, m_welchThreadPrio, "camtipWelchMethod", 
                           this, &welchmethod::welchCalculate) < 0)
          {
-            camtipPSD::template log<software_error>({__FILE__, __LINE__});
+            jitterPSD::template log<software_error>({__FILE__, __LINE__});
             return -1;
          }
 
@@ -317,7 +317,7 @@ int camtipPSD::allocate(const dev::shmimT & dummy)
 
 
 inline
-int camtipPSD::processImage( void * curr_src __attribute__((unused)), 
+int jitterPSD::processImage( void * curr_src __attribute__((unused)), 
                              const dev::shmimT & dummy 
                            )
 {
@@ -334,14 +334,14 @@ int camtipPSD::processImage( void * curr_src __attribute__((unused)),
 //    frameGrabber functions    //
 // ============================ //
 inline
-float camtipPSD::fps()
+float jitterPSD::fps()
 {
    return m_fps;
 }
 
 
 inline
-int camtipPSD::configureAcquisition()
+int jitterPSD::configureAcquisition()
 {
    std::unique_lock<std::mutex> lock(m_indiMutex);
    
@@ -363,7 +363,7 @@ int camtipPSD::configureAcquisition()
 
 
 inline
-int camtipPSD::startAcquisition()
+int jitterPSD::startAcquisition()
 {
    state(stateCodes::OPERATING); 
    return 0;
@@ -371,7 +371,7 @@ int camtipPSD::startAcquisition()
 
 
 inline
-int camtipPSD::acquireAndCheckValid()
+int jitterPSD::acquireAndCheckValid()
 {
    timespec ts;
          
@@ -405,7 +405,7 @@ int camtipPSD::acquireAndCheckValid()
 
 
 inline
-int camtipPSD::loadImageIntoStream(void * dest)
+int jitterPSD::loadImageIntoStream(void * dest)
 {
    memcpy(dest, m_resultArray, frameGrabberT::m_width*frameGrabberT::m_height*frameGrabberT::m_typeSize); 
    m_update = false;
@@ -414,14 +414,14 @@ int camtipPSD::loadImageIntoStream(void * dest)
 
 
 inline
-int camtipPSD::reconfig()
+int jitterPSD::reconfig()
 {
    return 0;
 }
 
 
 
-INDI_SETCALLBACK_DEFN( camtipPSD, m_indiP_fps)(const pcf::IndiProperty &ipRecv)
+INDI_SETCALLBACK_DEFN( jitterPSD, m_indiP_fps)(const pcf::IndiProperty &ipRecv)
 {
    if (ipRecv.getDevice() != m_indiP_fps.getDevice() || ipRecv.getName() != m_indiP_fps.getName())
    {

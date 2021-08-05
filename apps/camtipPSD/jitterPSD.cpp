@@ -1,16 +1,16 @@
-/** \file camtipPSD.cpp
+/** \file jitterPSD.cpp
   * \brief Calculates the PSDs of the movement and Strehl ratio of the camtip
   * images
   *
-  * \ingroup camtipPSD_files
+  * \ingroup jitterPSD_files
   */
 
-#include "camtipPSD.hpp"
+#include "jitterPSD.hpp"
 
 
 int main(int argc, char **argv)
 {
-   MagAOX::app::camtipPSD xapp;
+   MagAOX::app::jitterPSD xapp;
 
    return xapp.main(argc, argv);
 

@@ -28,7 +28,7 @@ class buffer {
 
       buffer();
       buffer(size_t blocksize, size_t linesize, size_t numblocks);
-      ~buffer();
+      ~buffer() noexcept;
 
       void add_buf_line(double* src);
       void add_buf_block(double* src);
