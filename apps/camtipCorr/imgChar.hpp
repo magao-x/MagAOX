@@ -1,4 +1,4 @@
-/** \file camtipCorr.hpp
+/** \file imgChar.hpp
   * \brief The MagAO-X image registrator and Strehl ratio monitor
   *
   * \ingroup app_files
@@ -28,7 +28,7 @@ namespace MagAOX::app
 
 
    
-/** \defgroup  camtipCorr Image registrator and Strehl ratio monitor
+/** \defgroup  imgChar Image registrator and Strehl ratio monitor
   * \brief  Calculates the tilt in the x and y directions, as well as the
   *         strehl ratio of the image
   *
@@ -36,29 +36,29 @@ namespace MagAOX::app
   *
   */
 
-/** \defgroup camtipCorr_files Image monitoring
-  * \ingroup camtipCorr
+/** \defgroup imgChar_files Image monitoring
+  * \ingroup imgChar
   */
 
 /** MagAO-X application to monitor image quality.
   *
-  * \ingroup camtipCorr
+  * \ingroup imgChar
   * 
   */
-class camtipCorr : public MagAOXApp<false>, 
-                   public dev::shmimMonitor<camtipCorr>,
-                   public dev::frameGrabber<camtipCorr>
+class imgChar : public MagAOXApp<false>, 
+                   public dev::shmimMonitor<imgChar>,
+                   public dev::frameGrabber<imgChar>
 {
 
-   friend class dev::shmimMonitor<camtipCorr>;
+   friend class dev::shmimMonitor<imgChar>;
    
    //The base shmimMonitor type
-   typedef dev::shmimMonitor<camtipCorr> shmimMonitorT;
+   typedef dev::shmimMonitor<imgChar> shmimMonitorT;
      
-   friend class dev::frameGrabber<camtipCorr>;
+   friend class dev::frameGrabber<imgChar>;
 
    //The base frameGrabber type
-   typedef dev::frameGrabber<camtipCorr> frameGrabberT;
+   typedef dev::frameGrabber<imgChar> frameGrabberT;
 
    //Datatypes 
    typedef double realT;
@@ -95,10 +95,10 @@ class camtipCorr : public MagAOXApp<false>,
 
    public:
       /// Default c'tor.
-      camtipCorr();
+      imgChar();
 
-      /// D'tor, declared and defined for noexcept.   ~camtipCorr() noexcept
-      ~camtipCorr() noexcept
+      /// D'tor, declared and defined for noexcept.   ~imgChar() noexcept
+      ~imgChar() noexcept
       {}
 
       virtual void setupConfig();
@@ -116,7 +116,7 @@ class camtipCorr : public MagAOXApp<false>,
         */
       virtual int appStartup();
 
-      /// Implementation of the FSM for camtipCorr.
+      /// Implementation of the FSM for imgChar.
       /** 
         * \returns 0 on no critical error
         * \returns -1 on an error requiring shutdown
@@ -155,10 +155,10 @@ class camtipCorr : public MagAOXApp<false>,
 
    protected:
       pcf::IndiProperty m_indiP_shifts;
-      realT m_xshiftRMS {0};
-      realT m_yshiftRMS {0};
+      realT m_xshiftRMS  {0};
+      realT m_yshiftRMS  {0};
       realT m_strehlMean {0};
-      realT m_strehlRMS {0};
+      realT m_strehlRMS  {0};
 
       //m_means[0] holds mean 'x' shifts
       //m_means[1] holds mean 'y' shifts
@@ -177,7 +177,7 @@ class camtipCorr : public MagAOXApp<false>,
 //            FUNCTIONS            //
 // =============================== //
 inline
-camtipCorr::camtipCorr() : MagAOXApp(MAGAOX_CURRENT_SHA1, MAGAOX_REPO_MODIFIED)
+imgChar::imgChar() : MagAOXApp(MAGAOX_CURRENT_SHA1, MAGAOX_REPO_MODIFIED)
 {
    sa_ptr = &_binary_sa_dat_start;
 }
@@ -185,7 +185,7 @@ camtipCorr::camtipCorr() : MagAOXApp(MAGAOX_CURRENT_SHA1, MAGAOX_REPO_MODIFIED)
 
 
 inline
-void camtipCorr::setupConfig()
+void imgChar::setupConfig()
 {
    shmimMonitorT::setupConfig(config);
    frameGrabberT::setupConfig(config);
@@ -194,7 +194,7 @@ void camtipCorr::setupConfig()
 
 
 inline
-int camtipCorr::loadConfigImpl( mx::app::appConfigurator & _config )
+int imgChar::loadConfigImpl( mx::app::appConfigurator & _config )
 {
    
    shmimMonitorT::loadConfig(_config);
@@ -204,7 +204,7 @@ int camtipCorr::loadConfigImpl( mx::app::appConfigurator & _config )
 
 
 inline
-void camtipCorr::loadConfig()
+void imgChar::loadConfig()
 {
    loadConfigImpl(config);
    frameGrabberT::loadConfig(config); 
@@ -213,7 +213,7 @@ void camtipCorr::loadConfig()
 
 
 inline
-int camtipCorr::appStartup()
+int imgChar::appStartup()
 {
   
    if (shmimMonitorT::appStartup() < 0)
@@ -247,7 +247,7 @@ int camtipCorr::appStartup()
 
 
 inline
-int camtipCorr::appLogic()
+int imgChar::appLogic()
 {
    if (shmimMonitorT::appLogic() < 0)
    {
@@ -289,7 +289,7 @@ int camtipCorr::appLogic()
 
 
 inline
-int camtipCorr::appShutdown() 
+int imgChar::appShutdown() 
 {
 
    shmimMonitorT::appShutdown(); 
@@ -301,7 +301,7 @@ int camtipCorr::appShutdown()
 
 
 inline
-int camtipCorr::allocate(const dev::shmimT & dummy)
+int imgChar::allocate(const dev::shmimT & dummy)
 {
    static_cast<void>(dummy);
    
@@ -383,7 +383,7 @@ int camtipCorr::allocate(const dev::shmimT & dummy)
 
 
 inline
-int camtipCorr::processImage(void * curr_src __attribute__((unused)), 
+int imgChar::processImage(void * curr_src __attribute__((unused)), 
                              const dev::shmimT & dummy)
 {
    static_cast<void>(dummy); //be unused
@@ -461,7 +461,7 @@ int camtipCorr::processImage(void * curr_src __attribute__((unused)),
 //    frameGrabber functions    //
 // ============================ //
 inline
-float camtipCorr::fps()
+float imgChar::fps()
 {
    return m_fps;
 }
@@ -469,7 +469,7 @@ float camtipCorr::fps()
 
 
 inline
-int camtipCorr::configureAcquisition()
+int imgChar::configureAcquisition()
 {
    std::unique_lock<std::mutex> lock(m_indiMutex);
    
@@ -497,7 +497,7 @@ int camtipCorr::configureAcquisition()
 
 
 inline
-int camtipCorr::startAcquisition()
+int imgChar::startAcquisition()
 {
    state(stateCodes::OPERATING); 
    return 0;
@@ -505,7 +505,7 @@ int camtipCorr::startAcquisition()
 
 
 inline
-int camtipCorr::acquireAndCheckValid()
+int imgChar::acquireAndCheckValid()
 {
    timespec ts;
          
@@ -539,7 +539,7 @@ int camtipCorr::acquireAndCheckValid()
 
 
 inline
-int camtipCorr::loadImageIntoStream(void * dest)
+int imgChar::loadImageIntoStream(void * dest)
 {
    size_t memSz = shmimMonitorT::m_width 
                 * shmimMonitorT::m_height 
@@ -552,7 +552,7 @@ int camtipCorr::loadImageIntoStream(void * dest)
 
 
 inline
-int camtipCorr::reconfig()
+int imgChar::reconfig()
 {
    return 0;
 }

@@ -13,5 +13,5 @@ OPTIMIZE = -O3 -fopenmp -ffast-math -march=native
 
 OTHER_HEADERS=
 OTHER_OBJS=reg_functions.o cc-functions.o sa.o
-TARGET=camtipCorr
+TARGET=imgChar
 include ../../Make/magAOXApp.mk
