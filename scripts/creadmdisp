@@ -34,7 +34,6 @@ echo "------------------------------------------------------------------------"
 # ================= OPTIONS =============================
 
 # Transform long options to short ones
-singlelinehelp=0
 for arg in "$@"; do
   shift
   case "$arg" in
@@ -58,6 +57,7 @@ done
 
 
 ip=$(dig $2 +short)
+me=$(hostname)
 
 for i in {0..11}
 do
@@ -72,7 +72,7 @@ do
 
    echo $port
 
-   com="cd shmimTCP && tmux new-session -d -s sTCPrc-"$2"-dm"$1"disp"$chnum" && tmux send-keys -t sTCPrc-"$2"-dm"$1"disp"$chnum" \"bash ./shmimTCPreceive.bash "$port"\" C-m"
+   com="cd shmimTCP && tmux new-session -d -s sTCPrc-"$me"-dm"$1"disp"$chnum" && tmux send-keys -t sTCPrc-"$me"-dm"$1"disp"$chnum" \"bash ./shmimTCPreceive.bash "$port"\" C-m"
 
    echo $com
 
@@ -80,10 +80,12 @@ do
    ssh -t rtc $com
 
    #create shmim locally
-   bash ../scripts/creaimshm "dm"$1"disp"$chnum 50 50
+   bash creaimshm "dm"$1"disp"$chnum 50 50
 
    #start transmitting
-   tmux new -d -s sTCPtx-"dm"$"disp"$chnum
-   bash ./shmimTCPtransmit "dm"$1"disp"$chnum $ip $port
+   #echo "starting detached session"
+   #tmux new -d -s "sTCPtx-"$me"-dm"$1"disp"$chnum
+   echo "starting shmimTCPtransmit"
+   bash shmimTCPtransmit "dm"$1"disp"$chnum $ip $port
 done
 
