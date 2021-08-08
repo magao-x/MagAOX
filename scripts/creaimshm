@@ -1,0 +1,68 @@
+#!/bin/bash
+set -eo pipefail
+
+#######################################################
+# creaimshm: create a MILK shared memory stream
+#
+#
+#######################################################
+
+# ======================= PROCESS NAME =================================
+pname=`echo "$0" | sed "s/\.\///g"`
+
+function printHELP {
+echo "------------------------------------------------------------------------"
+echo "$(tput bold) $pname : CREATE IMAGE STREAM $(tput sgr0)"
+echo "------------------------------------------------------------------------"
+echo "  Create an image stream"
+echo "   "
+echo " $(tput bold)USAGE:$(tput sgr0)"
+echo "     $0 [-h] <stream name> <w> <h>"
+echo ""
+echo ""
+echo " $(tput bold)INPUT:$(tput sgr0)"
+echo "  <stream name>   : shared memory stream name. Actual file is \$MILK_SHM_DIR/<stream name>.im.shm"
+echo "  <w>             : size in pixels, width dimension"
+echo "  <h>             : size in pixels, height dimension"
+echo ""
+echo " $(tput bold)EXAMPLE:$(tput sgr0)"
+echo "     $0 camwfs 120 120"
+echo ""
+echo "------------------------------------------------------------------------"
+}
+
+
+
+
+
+# ================= OPTIONS =============================
+
+# Transform long options to short ones
+singlelinehelp=0
+for arg in "$@"; do
+  shift
+  case "$arg" in
+    "--help") set -- "$@" "-h" ;;
+    *)        set -- "$@" "$arg"
+  esac
+done
+
+while getopts :hckp: FLAG; do
+  case $FLAG in
+    h)  #show help
+      printHELP
+      exit
+      ;;
+    \?) #unrecognized option - show help
+      echo -e \\n"Option -${BOLD}$OPTARG${NORM} not allowed."
+      printHELP
+      ;;
+  esac
+done
+
+
+cacao << EOF
+creaimshm $1 $2 $3
+quit
+EOF
+

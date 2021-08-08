@@ -2,16 +2,14 @@
 #ifndef roi_hpp
 #define roi_hpp
 
-#include <QDialog>
-
 #include "ui_roi.h"
 
-#include "../../lib/multiIndi.hpp"
+#include "../xWidgets/xWidget.hpp"
 
 namespace xqt 
 {
    
-class roi : public QDialog, public multiIndiSubscriber
+class roi : public xWidget
 {
    Q_OBJECT
    
@@ -22,22 +20,34 @@ protected:
    std::string m_camName;
    std::string m_winTitle;
 
+   bool m_bin_x_curr_changed {false};
    int m_bin_x_curr {0};
+   bool m_bin_x_tgt_changed {false};
    int m_bin_x_tgt {0};
    
+   bool m_bin_y_curr_changed {false};
    int m_bin_y_curr {0};
+   bool m_bin_y_tgt_changed {false};
    int m_bin_y_tgt {0};
 
+   bool m_cen_x_curr_changed {false};
    float m_cen_x_curr {0};
+   bool m_cen_x_tgt_changed {false};
    float m_cen_x_tgt {0};
 
+   bool m_cen_y_curr_changed {false};
    float m_cen_y_curr {0};
+   bool m_cen_y_tgt_changed {false};
    float m_cen_y_tgt {0};
 
+   bool m_wid_curr_changed {false};
    int m_wid_curr {0};
+   bool m_wid_tgt_changed {false};
    int m_wid_tgt {0};
 
+   bool m_hgt_curr_changed {false};
    int m_hgt_curr {0};
+   bool m_hgt_tgt_changed {false};
    int m_hgt_tgt {0};
 
 public:
@@ -48,14 +58,14 @@ public:
    
    ~roi();
    
-   int subscribe( multiIndiPublisher * publisher );
+   void subscribe();
              
    virtual void onConnect();
    virtual void onDisconnect();
    
-   int handleDefProperty( const pcf::IndiProperty & ipRecv /**< [in] the property which has changed*/);
+   void handleDefProperty( const pcf::IndiProperty & ipRecv /**< [in] the property which has changed*/);
    
-   int handleSetProperty( const pcf::IndiProperty & ipRecv /**< [in] the property which has changed*/);
+   void handleSetProperty( const pcf::IndiProperty & ipRecv /**< [in] the property which has changed*/);
    
    void clear_focus();
 
@@ -87,13 +97,13 @@ private:
    
 roi::roi( std::string & camName,
           QWidget * Parent, 
-          Qt::WindowFlags f) : QDialog(Parent, f), m_camName{camName}
+          Qt::WindowFlags f) : xWidget(Parent, f), m_camName{camName}
 {
    ui.setupUi(this);
 
    m_winTitle = m_camName;
    m_winTitle += " ROI";
-   ui.lab_title->setText(m_winTitle.c_str());
+   //ui.lab_title->setText(m_winTitle.c_str());
    
    ui.val_bin_x->setProperty("isStatus", true);
    ui.val_bin_y->setProperty("isStatus", true);
@@ -109,80 +119,94 @@ roi::~roi()
 {
 }
 
-int roi::subscribe( multiIndiPublisher * publisher )
+void roi::subscribe()
 {
-   if(!publisher) return -1;
+   if(!m_parent) return;
    
-   publisher->subscribeProperty(this, m_camName, "fsm");
-   publisher->subscribeProperty(this, m_camName, "roi_region_bin_x");
-   publisher->subscribeProperty(this, m_camName, "roi_region_bin_y");
-   publisher->subscribeProperty(this, m_camName, "roi_region_x");
-   publisher->subscribeProperty(this, m_camName, "roi_region_y");
-   publisher->subscribeProperty(this, m_camName, "roi_region_w");
-   publisher->subscribeProperty(this, m_camName, "roi_region_h");
+   m_parent->addSubscriberProperty(this, m_camName, "fsm");
+   m_parent->addSubscriberProperty(this, m_camName, "roi_region_bin_x");
+   m_parent->addSubscriberProperty(this, m_camName, "roi_region_bin_y");
+   m_parent->addSubscriberProperty(this, m_camName, "roi_region_x");
+   m_parent->addSubscriberProperty(this, m_camName, "roi_region_y");
+   m_parent->addSubscriberProperty(this, m_camName, "roi_region_w");
+   m_parent->addSubscriberProperty(this, m_camName, "roi_region_h");
 
-   return 0;
+   return;
 }
   
 void roi::onConnect()
 {
-   ui.lab_title->setEnabled(true);
+   //ui.lab_title->setEnabled(true);
 
    setWindowTitle(QString(m_winTitle.c_str()));
+
+   //Reset the changed flags
+   m_bin_x_curr_changed = true;
+   m_bin_x_tgt_changed = true;
+   m_bin_y_curr_changed = true;
+   m_bin_y_tgt_changed = true;
+   m_cen_x_curr_changed = true;
+   m_cen_x_tgt_changed = true;
+   m_cen_y_curr_changed = true;
+   m_cen_y_tgt_changed = true;
+   m_wid_curr_changed = true;
+   m_wid_tgt_changed = true;
+   m_hgt_curr_changed = true;
+   m_hgt_tgt_changed = true;
 
    clearFocus();
 }
 
 void roi::onDisconnect()
 {
-   ui.lab_title->setEnabled(false);
+   //ui.lab_title->setEnabled(false);
    
    ui.lab_bin_x_title->setEnabled(false);
    ui.lab_bin_x_curr->setEnabled(false);
    ui.lab_bin_x_tgt->setEnabled(false);
-   ui.val_bin_x->setText("");
+   ui.val_bin_x->setText("---");
    ui.val_bin_x->setEnabled(false);
-   ui.le_bin_x->setText("");
+   ui.le_bin_x->setText("---");
    ui.le_bin_x->setEnabled(false);
 
    ui.lab_bin_y_title->setEnabled(false);
    ui.lab_bin_y_curr->setEnabled(false);
    ui.lab_bin_y_tgt->setEnabled(false);
-   ui.val_bin_y->setText("");
+   ui.val_bin_y->setText("---");
    ui.val_bin_y->setEnabled(false);
-   ui.le_bin_y->setText("");
+   ui.le_bin_y->setText("---");
    ui.le_bin_y->setEnabled(false);
    
    ui.lab_center_x_title->setEnabled(false);
    ui.lab_center_x_curr->setEnabled(false);
    ui.lab_center_x_tgt->setEnabled(false);
-   ui.val_center_x->setText("");
+   ui.val_center_x->setText("---");
    ui.val_center_x->setEnabled(false);
-   ui.le_center_x->setText("");
+   ui.le_center_x->setText("---");
    ui.le_center_x->setEnabled(false);
 
    ui.lab_center_y_title->setEnabled(false);
    ui.lab_center_y_curr->setEnabled(false);
    ui.lab_center_y_tgt->setEnabled(false);
-   ui.val_center_y->setText("");
+   ui.val_center_y->setText("---");
    ui.val_center_y->setEnabled(false);
-   ui.le_center_y->setText("");
+   ui.le_center_y->setText("---");
    ui.le_center_y->setEnabled(false);
 
    ui.lab_width_title->setEnabled(false);
    ui.lab_width_curr->setEnabled(false);
    ui.lab_width_tgt->setEnabled(false);
-   ui.val_width->setText("");
+   ui.val_width->setText("---");
    ui.val_width->setEnabled(false);
-   ui.le_width->setText("");
+   ui.le_width->setText("---");
    ui.le_width->setEnabled(false);
 
    ui.lab_height_title->setEnabled(false);
    ui.lab_height_curr->setEnabled(false);
    ui.lab_height_tgt->setEnabled(false);
-   ui.val_height->setText("");
+   ui.val_height->setText("---");
    ui.val_height->setEnabled(false);
-   ui.le_height->setText("");
+   ui.le_height->setText("---");
    ui.le_height->setEnabled(false);
 
    ui.button_reset->setEnabled(false);
@@ -197,16 +221,14 @@ void roi::onDisconnect()
    setWindowTitle(QString(m_winTitle.c_str()) + QString(" (disconnected)"));
 }
 
-int roi::handleDefProperty( const pcf::IndiProperty & ipRecv)
+void roi::handleDefProperty( const pcf::IndiProperty & ipRecv)
 {  
    return handleSetProperty(ipRecv);
-   
-   return 0;
 }
 
-int roi::handleSetProperty( const pcf::IndiProperty & ipRecv)
+void roi::handleSetProperty( const pcf::IndiProperty & ipRecv)
 {  
-   if(ipRecv.getDevice() != m_camName) return 0;
+   if(ipRecv.getDevice() != m_camName) return;
    
    if(ipRecv.getName() == "fsm")
    {
@@ -219,80 +241,100 @@ int roi::handleSetProperty( const pcf::IndiProperty & ipRecv)
    {
       if(ipRecv.find("current"))
       {
-         m_bin_x_curr = ipRecv["current"].get<int>();
+         int val = ipRecv["current"].get<int>();
+         if(val != m_bin_x_curr) m_bin_x_curr_changed = true;
+         m_bin_x_curr = val;
       }
 
       if(ipRecv.find("target"))
       {
-         m_bin_x_tgt = ipRecv["target"].get<int>();
+         int val = ipRecv["target"].get<int>();
+         if(val != m_bin_x_tgt) m_bin_x_tgt_changed = true;
+         m_bin_x_tgt = val;
       }
    }
    else if(ipRecv.getName() == "roi_region_bin_y")
    {
       if(ipRecv.find("current"))
       {
-         m_bin_y_curr = ipRecv["current"].get<int>();
+         int val = ipRecv["current"].get<int>();
+         if(val != m_bin_y_curr) m_bin_y_curr_changed = true;
+         m_bin_y_curr = val;
       }
 
       if(ipRecv.find("target"))
       {
-         m_bin_y_tgt = ipRecv["target"].get<int>();
+         int val = ipRecv["target"].get<int>();
+         if(val != m_bin_y_tgt) m_bin_y_tgt_changed = true;
+         m_bin_y_tgt = val;
       }
    }
    else if(ipRecv.getName() == "roi_region_x")
    {
       if(ipRecv.find("current"))
       {
-         m_cen_x_curr = ipRecv["current"].get<float>();
+         float val = ipRecv["current"].get<float>();;
+         if(val != m_cen_x_curr) m_cen_x_curr_changed = true;
+         m_cen_x_curr = val;
       }
 
       if(ipRecv.find("target"))
       {
-         m_cen_x_tgt = ipRecv["target"].get<float>();
+         float val = ipRecv["target"].get<float>();;
+         if(val != m_cen_x_tgt) m_cen_x_tgt_changed = true;
+         m_cen_x_tgt = val;
       }
    }
    else if(ipRecv.getName() == "roi_region_y")
    {
       if(ipRecv.find("current"))
       {
-         m_cen_y_curr = ipRecv["current"].get<float>();
+         float val = ipRecv["current"].get<float>();;
+         if(val != m_cen_y_curr) m_cen_y_curr_changed = true;
+         m_cen_y_curr = val;
       }
 
       if(ipRecv.find("target"))
       {
-         m_cen_y_tgt = ipRecv["target"].get<float>();
+         float val = ipRecv["target"].get<float>();;
+         if(val != m_cen_y_tgt) m_cen_y_tgt_changed = true;
+         m_cen_y_tgt = val;
       }
    }
    else if(ipRecv.getName() == "roi_region_w")
    {
       if(ipRecv.find("current"))
       {
-         m_wid_curr = ipRecv["current"].get<int>();
+         int val = ipRecv["current"].get<int>();
+         if(val != m_wid_curr) m_wid_curr_changed = true;
+         m_wid_curr = val;
       }
 
       if(ipRecv.find("target"))
       {
-         m_wid_tgt = ipRecv["target"].get<int>();
+         int val = ipRecv["target"].get<int>();
+         if(val != m_wid_tgt) m_wid_tgt_changed = true;
+         m_wid_tgt = val;
       }
    }
    else if(ipRecv.getName() == "roi_region_h")
    {
       if(ipRecv.find("current"))
       {
-         m_hgt_curr = ipRecv["current"].get<int>();
+         int val = ipRecv["current"].get<int>();
+         if(val != m_hgt_curr) m_hgt_curr_changed = true;
+         m_hgt_curr = val;
       }
 
       if(ipRecv.find("target"))
       {
-         m_hgt_tgt = ipRecv["target"].get<int>();
+         int val = ipRecv["target"].get<int>();
+         if(val != m_hgt_tgt) m_hgt_tgt_changed = true;
+         m_hgt_tgt = val;
       }
    }
 
-   updateGUI();
-   
-   //If we get here then we need to add this device
-   return 0;
-   
+   updateGUI();   
 }
 
 void roi::updateGUI()
@@ -303,49 +345,49 @@ void roi::updateGUI()
       ui.lab_bin_x_title->setEnabled(false);
       ui.lab_bin_x_curr->setEnabled(false);
       ui.lab_bin_x_tgt->setEnabled(false);
-      ui.val_bin_x->setText("");
+      ui.val_bin_x->setText("---");
       ui.val_bin_x->setEnabled(false);
-      ui.le_bin_x->setText("");
+      ui.le_bin_x->setText("---");
       ui.le_bin_x->setEnabled(false);
    
       ui.lab_bin_y_title->setEnabled(false);
       ui.lab_bin_y_curr->setEnabled(false);
       ui.lab_bin_y_tgt->setEnabled(false);
-      ui.val_bin_y->setText("");
+      ui.val_bin_y->setText("---");
       ui.val_bin_y->setEnabled(false);
-      ui.le_bin_y->setText("");
+      ui.le_bin_y->setText("---");
       ui.le_bin_y->setEnabled(false);
       
       ui.lab_center_x_title->setEnabled(false);
       ui.lab_center_x_curr->setEnabled(false);
       ui.lab_center_x_tgt->setEnabled(false);
-      ui.val_center_x->setText("");
+      ui.val_center_x->setText("---");
       ui.val_center_x->setEnabled(false);
-      ui.le_center_x->setText("");
+      ui.le_center_x->setText("---");
       ui.le_center_x->setEnabled(false);
    
       ui.lab_center_y_title->setEnabled(false);
       ui.lab_center_y_curr->setEnabled(false);
       ui.lab_center_y_tgt->setEnabled(false);
-      ui.val_center_y->setText("");
+      ui.val_center_y->setText("---");
       ui.val_center_y->setEnabled(false);
-      ui.le_center_y->setText("");
+      ui.le_center_y->setText("---");
       ui.le_center_y->setEnabled(false);
    
       ui.lab_width_title->setEnabled(false);
       ui.lab_width_curr->setEnabled(false);
       ui.lab_width_tgt->setEnabled(false);
-      ui.val_width->setText("");
+      ui.val_width->setText("---");
       ui.val_width->setEnabled(false);
-      ui.le_width->setText("");
+      ui.le_width->setText("---");
       ui.le_width->setEnabled(false);
    
       ui.lab_height_title->setEnabled(false);
       ui.lab_height_curr->setEnabled(false);
       ui.lab_height_tgt->setEnabled(false);
-      ui.val_height->setText("");
+      ui.val_height->setText("---");
       ui.val_height->setEnabled(false);
-      ui.le_height->setText("");
+      ui.le_height->setText("---");
       ui.le_height->setEnabled(false);
    
       ui.button_reset->setEnabled(false);
@@ -401,23 +443,71 @@ void roi::updateGUI()
       ui.val_height->setEnabled(true);
       ui.le_height->setEnabled(true);
       
-      ui.val_bin_x->setText(QString::number(m_bin_x_curr));
-      if(!ui.le_bin_x->hasFocus()) ui.le_bin_x->setText(QString::number(m_bin_x_tgt));
+      if(m_bin_x_curr_changed)
+      {
+         ui.val_bin_x->setTextChanged(QString::number(m_bin_x_curr));
+         m_bin_x_curr_changed = false;
+      }
+      if(m_bin_x_tgt_changed)
+      {
+         ui.le_bin_x->setTextChanged(QString::number(m_bin_x_tgt));
+         m_bin_x_tgt_changed = false;
+      }
 
-      ui.val_bin_y->setText(QString::number(m_bin_y_curr));
-      if(!ui.le_bin_y->hasFocus()) ui.le_bin_y->setText(QString::number(m_bin_y_tgt));
+      if(m_bin_y_curr_changed)
+      {
+         ui.val_bin_y->setTextChanged(QString::number(m_bin_y_curr));
+         m_bin_y_curr_changed = false;
+      }
+      if(m_bin_y_tgt_changed)
+      {
+         ui.le_bin_y->setTextChanged(QString::number(m_bin_y_tgt));
+         m_bin_y_tgt_changed = false;
+      }
 
-      ui.val_center_x->setText(QString::number(m_cen_x_curr));
-      if(!ui.le_center_x->hasFocus()) ui.le_center_x->setText(QString::number(m_cen_x_tgt));
+      if(m_cen_x_curr_changed)
+      {
+         ui.val_center_x->setTextChanged(QString::number(m_cen_x_curr));
+         m_cen_x_curr_changed = false;
+      }
+      if(m_cen_x_tgt_changed)
+      {
+         ui.le_center_x->setTextChanged(QString::number(m_cen_x_tgt));
+         m_cen_x_tgt_changed = false;
+      }
 
-      ui.val_center_y->setText(QString::number(m_cen_y_curr));
-      if(!ui.le_center_y->hasFocus()) ui.le_center_y->setText(QString::number(m_cen_y_tgt));
+      if(m_cen_y_curr_changed)
+      {
+         ui.val_center_y->setTextChanged(QString::number(m_cen_y_curr));
+         m_cen_y_curr_changed = false;
+      }
+      if(m_cen_y_tgt_changed)
+      {
+         ui.le_center_y->setTextChanged(QString::number(m_cen_y_tgt));
+         m_cen_y_tgt_changed = false;
+      }
 
-      ui.val_width->setText(QString::number(m_wid_curr));
-      if(!ui.le_width->hasFocus()) ui.le_width->setText(QString::number(m_wid_tgt));
+      if(m_wid_curr_changed)
+      {
+         ui.val_width->setTextChanged(QString::number(m_wid_curr));
+         m_wid_curr_changed = false;
+      }
+      if(m_wid_tgt_changed)
+      {
+         ui.le_width->setTextChanged(QString::number(m_wid_tgt));
+         m_wid_tgt_changed = false;
+      }
 
-      ui.val_height->setText(QString::number(m_hgt_curr));
-      if(!ui.le_height->hasFocus()) ui.le_height->setText(QString::number(m_hgt_tgt));
+      if(m_hgt_curr_changed)
+      {
+         ui.val_height->setTextChanged(QString::number(m_hgt_curr));
+         m_hgt_curr_changed = false;
+      }
+      if(m_hgt_tgt_changed)
+      {
+         ui.le_height->setTextChanged(QString::number(m_hgt_tgt));
+         m_hgt_tgt_changed = false;
+      }
    }
    
    if( m_appState == "OPERATING" )
@@ -454,7 +544,7 @@ void roi::on_le_bin_x_editingFinished()
    ip.setDevice(m_camName);
    ip.setName("roi_region_bin_x");
    ip.add(pcf::IndiElement("target"));
-   ip["target"] = ui.le_bin_x->text().toDouble();
+   ip["target"] = ui.le_bin_x->editText().toDouble();
    
    sendNewProperty(ip);
 }
@@ -466,7 +556,7 @@ void roi::on_le_bin_y_editingFinished()
    ip.setDevice(m_camName);
    ip.setName("roi_region_bin_y");
    ip.add(pcf::IndiElement("target"));
-   ip["target"] = ui.le_bin_y->text().toDouble();
+   ip["target"] = ui.le_bin_y->editText().toDouble();
    
    sendNewProperty(ip);
 }
@@ -478,7 +568,7 @@ void roi::on_le_center_x_editingFinished()
    ip.setDevice(m_camName);
    ip.setName("roi_region_x");
    ip.add(pcf::IndiElement("target"));
-   ip["target"] = ui.le_center_x->text().toDouble();
+   ip["target"] = ui.le_center_x->editText().toDouble();
    
    sendNewProperty(ip);
 }
@@ -490,7 +580,7 @@ void roi::on_le_center_y_editingFinished()
    ip.setDevice(m_camName);
    ip.setName("roi_region_y");
    ip.add(pcf::IndiElement("target"));
-   ip["target"] = ui.le_center_y->text().toDouble();
+   ip["target"] = ui.le_center_y->editText().toDouble();
    
    sendNewProperty(ip);
 }
@@ -502,7 +592,7 @@ void roi::on_le_width_editingFinished()
    ip.setDevice(m_camName);
    ip.setName("roi_region_w");
    ip.add(pcf::IndiElement("target"));
-   ip["target"] = ui.le_width->text().toDouble();
+   ip["target"] = ui.le_width->editText().toDouble();
    
    sendNewProperty(ip);
 }
@@ -514,8 +604,8 @@ void roi::on_le_height_editingFinished()
    ip.setDevice(m_camName);
    ip.setName("roi_region_h");
    ip.add(pcf::IndiElement("target"));
-   ip["target"] = ui.le_height->text().toDouble();
-   
+   ip["target"] = ui.le_height->editText().toDouble();
+
    sendNewProperty(ip);
 }
 

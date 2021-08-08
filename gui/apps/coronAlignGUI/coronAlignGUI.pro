@@ -28,6 +28,7 @@ MAKEFILE = makefile.coronAlignGUI
 INCLUDEPATH += ../../lib ../../widgets/coronAlign
 
 HEADERS += ../../widgets/coronAlign/coronAlign.hpp \
+           ../../widgets/xWidgets/xWidget.hpp \
            ../../lib/multiIndiManager.hpp 
            
 SOURCES += coronAlignGUI_main.cpp 

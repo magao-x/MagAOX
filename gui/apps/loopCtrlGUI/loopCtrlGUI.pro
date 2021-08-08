@@ -28,7 +28,7 @@ MAKEFILE = makefile.loopCtrlGUI
 INCLUDEPATH += ../../lib ../../widgets/loopCtrl
 
 HEADERS += ../../widgets/loopCtrl/loopCtrl.hpp \
-           ../../lib/multiIndi.hpp \
+           ../../widgets/xWidgets/xWidget.hpp \
            ../../lib/multiIndiManager.hpp
            
 SOURCES += loopCtrlGUI_main.cpp 

@@ -26,7 +26,7 @@ pwrDevice::~pwrDevice()
    {
       for(size_t i=0; i<m_numChannels; ++i)
       {
-         delete m_channels[i];
+         m_channels[i]->deleteLater();
       }
    }
    
@@ -55,16 +55,16 @@ void pwrDevice::setChannels( const std::vector<std::string> & channelNames)
    {
       for(size_t i=0; i<m_numChannels; ++i)
       {
-         delete m_channels[i];
+         m_channels[i]->deleteLater();
       }
    }
    
    if(m_channels) delete[] m_channels;
-   
+   m_channels = nullptr;
+
    m_numChannels = channelNames.size();
    if(m_numChannels == 0)
    {
-      m_channels = nullptr;
       return;
    }
    

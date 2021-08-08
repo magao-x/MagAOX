@@ -28,6 +28,7 @@ MAKEFILE = makefile.pupilGuideGUI
 INCLUDEPATH += ../../lib ../../widgets/pupilGuide
 
 HEADERS += ../../widgets/pupilGuide/pupilGuide.hpp \
+           ../../widgets/xWidgets/xWidget.hpp \
            ../../lib/multiIndiManager.hpp 
            
 SOURCES += pupilGuideGUI_main.cpp 

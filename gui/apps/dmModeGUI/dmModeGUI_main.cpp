@@ -29,7 +29,8 @@ int main(int argc, char *argv[])
    
    xqt::dmMode dmm(deviceName);
    mgr.addSubscriber(&dmm); 
-
+   mgr.activate();
+   
    dmm.show();
 
    int rv = app.exec();

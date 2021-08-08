@@ -10,13 +10,13 @@
 
 #include "ui_pupilGuide.h"
 
-#include "../../lib/multiIndi.hpp"
+#include "../xWidgets/xWidget.hpp"
 
 
 namespace xqt 
 {
    
-class pupilGuide : public QDialog, public multiIndiSubscriber
+class pupilGuide : public xWidget
 {
    Q_OBJECT
    
@@ -112,13 +112,13 @@ public:
    
    ~pupilGuide();
    
-   int subscribe( multiIndiPublisher * publisher );
+   void subscribe();
                                
    virtual void onConnect();
    virtual void onDisconnect();
    
-   int handleDefProperty( const pcf::IndiProperty & ipRecv /**< [in] the property which has changed*/);
-   int handleSetProperty( const pcf::IndiProperty & ipRecv /**< [in] the property which has changed*/);
+   void handleDefProperty( const pcf::IndiProperty & ipRecv /**< [in] the property which has changed*/);
+   void handleSetProperty( const pcf::IndiProperty & ipRecv /**< [in] the property which has changed*/);
    
    
    void modGUISetEnable( bool enableModGUI,
@@ -179,7 +179,7 @@ private:
    Ui::pupilGuide ui;
 };
 
-pupilGuide::pupilGuide( QWidget * Parent, Qt::WindowFlags f) : QDialog(Parent, f)
+pupilGuide::pupilGuide( QWidget * Parent, Qt::WindowFlags f) : xWidget(Parent, f)
 {
    ui.setupUi(this);
    ui.modState->setProperty("isStatus", true);
@@ -203,43 +203,46 @@ pupilGuide::pupilGuide( QWidget * Parent, Qt::WindowFlags f) : QDialog(Parent, f
    snprintf(ss, 5, "%0.2f", m_camlensStepSize);
    ui.button_camlens_scale->setText(ss);
    
+   onDisconnect();
 }
    
 pupilGuide::~pupilGuide()
 {
 }
 
-int pupilGuide::subscribe( multiIndiPublisher * publisher )
+void pupilGuide::subscribe()
 {
-   publisher->subscribeProperty(this, "modwfs", "modFrequency");
-   publisher->subscribeProperty(this, "modwfs", "modRadius");
-   publisher->subscribeProperty(this, "modwfs", "modState");
-   publisher->subscribeProperty(this, "modwfs", "fsm");
+   if(m_parent == nullptr) return;
 
-   publisher->subscribeProperty(this, "camwfs-fit", "fsm");
-   publisher->subscribeProperty(this, "camwfs-fit", "quadrant1");
-   publisher->subscribeProperty(this, "camwfs-fit", "quadrant2");
-   publisher->subscribeProperty(this, "camwfs-fit", "quadrant3");
-   publisher->subscribeProperty(this, "camwfs-fit", "quadrant4");
-   publisher->subscribeProperty(this, "camwfs-fit", "threshold");
-   
-   publisher->subscribeProperty(this, "camwfs-avg", "fsm");
-   publisher->subscribeProperty(this, "camwfs-avg", "nAverage");
+   m_parent->addSubscriberProperty(this, "modwfs", "modFrequency");
+   m_parent->addSubscriberProperty(this, "modwfs", "modRadius");
+   m_parent->addSubscriberProperty(this, "modwfs", "modState");
+   m_parent->addSubscriberProperty(this, "modwfs", "fsm");
 
-   publisher->subscribeProperty(this, "fxngenmodwfs", "C1ofst");
-   publisher->subscribeProperty(this, "fxngenmodwfs", "C2ofst");
+   m_parent->addSubscriberProperty(this, "camwfs-fit", "fsm");
+   m_parent->addSubscriberProperty(this, "camwfs-fit", "quadrant1");
+   m_parent->addSubscriberProperty(this, "camwfs-fit", "quadrant2");
+   m_parent->addSubscriberProperty(this, "camwfs-fit", "quadrant3");
+   m_parent->addSubscriberProperty(this, "camwfs-fit", "quadrant4");
+   m_parent->addSubscriberProperty(this, "camwfs-fit", "threshold");
    
-   publisher->subscribeProperty(this, "ttmpupil", "fsm");
-   publisher->subscribeProperty(this, "ttmpupil", "pos_1");
-   publisher->subscribeProperty(this, "ttmpupil", "pos_2");
+   m_parent->addSubscriberProperty(this, "camwfs-avg", "fsm");
+   m_parent->addSubscriberProperty(this, "camwfs-avg", "nAverage");
+
+   m_parent->addSubscriberProperty(this, "fxngenmodwfs", "C1ofst");
+   m_parent->addSubscriberProperty(this, "fxngenmodwfs", "C2ofst");
    
-   publisher->subscribeProperty(this, "stagecamlensx", "fsm");
-   publisher->subscribeProperty(this, "stagecamlensx", "position");
+   m_parent->addSubscriberProperty(this, "ttmpupil", "fsm");
+   m_parent->addSubscriberProperty(this, "ttmpupil", "pos_1");
+   m_parent->addSubscriberProperty(this, "ttmpupil", "pos_2");
    
-   publisher->subscribeProperty(this, "stagecamlensy", "fsm");
-   publisher->subscribeProperty(this, "stagecamlensy", "position");
+   m_parent->addSubscriberProperty(this, "stagecamlensx", "fsm");
+   m_parent->addSubscriberProperty(this, "stagecamlensx", "position");
    
-   return 0;
+   m_parent->addSubscriberProperty(this, "stagecamlensy", "fsm");
+   m_parent->addSubscriberProperty(this, "stagecamlensy", "position");
+   
+   return;
 }
    
 void pupilGuide::onConnect()
@@ -270,7 +273,7 @@ void pupilGuide::onDisconnect()
    
 }
    
-int pupilGuide::handleDefProperty( const pcf::IndiProperty & ipRecv)
+void pupilGuide::handleDefProperty( const pcf::IndiProperty & ipRecv)
 {  
    std::string dev = ipRecv.getDevice();
    if( dev == "camwfs-avg" || 
@@ -284,10 +287,10 @@ int pupilGuide::handleDefProperty( const pcf::IndiProperty & ipRecv)
       return handleSetProperty(ipRecv);
    }
    
-   return 0;
+   return;
 }
 
-int pupilGuide::handleSetProperty( const pcf::IndiProperty & ipRecv)
+void pupilGuide::handleSetProperty( const pcf::IndiProperty & ipRecv)
 {
    std::string dev = ipRecv.getDevice();
    
@@ -490,8 +493,7 @@ int pupilGuide::handleSetProperty( const pcf::IndiProperty & ipRecv)
             m_modFreq_tgt = ipRecv["requested"].get<double>();
          }
       }
-      
-      if(ipRecv.getName() == "modRadius")
+      else if(ipRecv.getName() == "modRadius")
       {
          if(ipRecv.find("current"))
          {
@@ -502,16 +504,14 @@ int pupilGuide::handleSetProperty( const pcf::IndiProperty & ipRecv)
             m_modRad_tgt = ipRecv["requested"].get<double>();
          }
       }
-      
-      if(ipRecv.getName() == "modState")
+      else if(ipRecv.getName() == "modState")
       {
          if(ipRecv.find("current"))
          {
             m_modState = ipRecv["current"].get<int>();
          }
       }
-      
-      if(ipRecv.getName() == "fsm")
+      else if(ipRecv.getName() == "fsm")
       {
          if(ipRecv.find("state"))
          {
@@ -528,7 +528,7 @@ int pupilGuide::handleSetProperty( const pcf::IndiProperty & ipRecv)
             m_modCh1 = ipRecv["value"].get<double>();
          }
       }
-      if(ipRecv.getName() == "C2ofst")
+      else if(ipRecv.getName() == "C2ofst")
       {
          if(ipRecv.find("value"))
          {
@@ -545,16 +545,14 @@ int pupilGuide::handleSetProperty( const pcf::IndiProperty & ipRecv)
             m_pupFsmState = ipRecv["state"].get<std::string>();
          }
       }
-      
-      if(ipRecv.getName() == "pos_1")
+      else if(ipRecv.getName() == "pos_1")
       {
          if(ipRecv.find("current"))
          {
             m_pupCh1 = ipRecv["current"].get<double>();
          }
       }
-      
-      if(ipRecv.getName() == "pos_2")
+      else if(ipRecv.getName() == "pos_2")
       {
          if(ipRecv.find("current"))
          {
@@ -597,7 +595,7 @@ int pupilGuide::handleSetProperty( const pcf::IndiProperty & ipRecv)
       }
    }
    
-   return 0;
+   return;
    
 }
 

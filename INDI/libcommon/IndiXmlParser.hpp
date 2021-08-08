@@ -149,7 +149,7 @@ class IndiXmlParser
     /// This structure holds the actual data structure for the XML.
     mutable XMLEle *m_pxeRoot;
     /// Used to hold the error message which is used in the lilxml calls.
-    char *m_pcMessage[MaxErrorMsgSize];
+    char m_pcMessage[MaxErrorMsgSize];
     /// This is left-over text from the previous call that is part of the
     /// next xml document.
     std::string m_szPrevXml;

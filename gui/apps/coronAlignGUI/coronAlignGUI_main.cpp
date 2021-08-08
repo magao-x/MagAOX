@@ -23,6 +23,7 @@ int main(int argc, char *argv[])
    
    xqt::coronAlign ca;
    mgr.addSubscriber(&ca);
+   mgr.activate();
       
    ca.show();
 

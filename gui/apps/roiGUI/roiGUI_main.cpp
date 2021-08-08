@@ -29,6 +29,7 @@ int main(int argc, char *argv[])
 
    xqt::roi roi(roiName);
    mgr.addSubscriber(&roi);
+   mgr.activate();
    
    roi.show();
    

@@ -332,9 +332,51 @@ void ttm::updateGUI()
       ui.button_flat->setEnabled(false);
       ui.button_release->setEnabled(false);  
    }
-   else if(m_appState == "READY" || m_appState == "OPERATING")
+   else if(m_appState == "READY")
    {
       ui.label_device_status->setText("SET");
+      
+      ui.label_1->setEnabled(true);
+      ui.lcd_1->setEnabled(true);
+      ui.lineEdit_1->setEnabled(true);
+      ui.button_up_1->setEnabled(true);
+      ui.button_scale_1->setEnabled(true);
+      ui.button_down_1->setEnabled(true);
+         
+      ui.label_2->setEnabled(true);
+      ui.lcd_2->setEnabled(true);
+      ui.lineEdit_2->setEnabled(true);
+      ui.button_up_2->setEnabled(true);
+      ui.button_scale_2->setEnabled(true);
+      ui.button_down_2->setEnabled(true);
+      
+      if(m_naxes == 2)
+      {
+         ui.label_3->setEnabled(false);
+         ui.lcd_3->setEnabled(false);
+         ui.lineEdit_3->setEnabled(false);
+         ui.button_up_3->setEnabled(false);
+         ui.button_scale_3->setEnabled(false);
+         ui.button_down_3->setEnabled(false);
+      }
+      else
+      {
+         ui.label_3->setEnabled(true);
+         ui.lcd_3->setEnabled(true);
+         ui.lineEdit_3->setEnabled(true);
+         ui.button_up_3->setEnabled(true);
+         ui.button_scale_3->setEnabled(true);
+         ui.button_down_3->setEnabled(true);
+      }
+      
+      ui.button_home->setEnabled(false);
+      ui.button_zero->setEnabled(true);
+      ui.button_flat->setEnabled(true);
+      ui.button_release->setEnabled(true);
+   }
+   else if(m_appState == "OPERATING")
+   {
+      ui.label_device_status->setText("OPERATING");
       
       ui.label_1->setEnabled(true);
       ui.lcd_1->setEnabled(true);
@@ -602,156 +644,7 @@ void ttm::on_button_down_3_pressed()
    sendNewProperty(ip);
 }
 
-// void ttm::on_button_gainScale_pressed()
-// {
-//    //Can only be 0.01, 0.05, or 0.1, but we make sure floating point doesn't scew us up.  
-//    //the progresion is:
-//    // 0.01->0.1->0.05->0.01
-//    if(m_gainScale < 0.05) //0.01
-//    {
-//       m_gainScale = 0.1;
-//    }
-//    else if(m_gainScale < 0.1) //0.05
-//    {
-//       m_gainScale = 0.01;
-//    }
-//    else //0.1
-//    {
-//       m_gainScale = 0.05;
-//    }
-//    
-//    ui.button_gainScale->setText(QString::number(m_gainScale));
-// }
-// 
-// void ttm::on_button_gainUp_pressed()
-// {
-//    double ng = m_gain + m_gainScale;
-//    sendNewGain(ng);
-// }
-// 
-// void ttm::on_button_gainDown_pressed()
-// {
-//    double ng = m_gain - m_gainScale;
-//    if(ng < 0.00001) ng = 0; //Stop floating point nonsense
-//    sendNewGain(ng);
-// }
-// 
-// void ttm::on_lineEdit_gain_returnPressed()
-// {
-//    double ng = ui.lineEdit_gain->text().toDouble();
-//    
-//    if(ng < 0) ng = 0;
-// 
-//    sendNewGain(ng);
-//    
-//    ui.lineEdit_gain->setText("");
-// }
-// 
-// void ttm::on_button_zeroGain_pressed()
-// {
-//    sendNewGain(0.0);
-// }
-// 
-// void ttm::on_button_multcoeffScale_pressed()
-// {
-//    //Can only be 0.001, 0.002, 0.005, or 0.01 but we make sure floating point doesn't scew us up.  
-//    //the progresion is:
-//    // 0.001->0.01->0.005->0.002->0.001
-//    if(m_multcoeffScale < 0.002) //0.001
-//    {
-//       m_multcoeffScale = 0.01;
-//    }
-//    else if(m_multcoeffScale < 0.005) //0.002
-//    {
-//       m_multcoeffScale = 0.001;
-//    }
-//    else if(m_multcoeffScale < 0.01) //0.005
-//    {
-//       m_multcoeffScale = 0.002;
-//    }
-//    else //0.01
-//    {
-//       m_multcoeffScale = 0.005;
-//    }
-//    
-//    ui.button_multcoeffScale->setText(QString::number(m_multcoeffScale));
-// }
-// 
-// void ttm::on_button_multcoeffUp_pressed()
-// {
-//    double nm = m_multcoeff + m_multcoeffScale;
-//    if(nm > 1) nm = 1;
-//    sendNewMultCoeff(nm);
-// }
-// 
-// void ttm::on_button_multcoeffDown_pressed()
-// {
-//    double nm = m_multcoeff - m_multcoeffScale;
-//    if(nm < 0.00001) nm = 0; //Stop floating point nonsense
-//    sendNewMultCoeff(nm);
-// }
-// 
-// void ttm::on_lineEdit_multcoeff_returnPressed()
-// {
-//    double nm = ui.lineEdit_multcoeff->text().toDouble();
-//    
-//    if(nm < 0) nm = 0;
-//    if(nm > 1) nm = 1;
-//    
-//    sendNewMultCoeff(nm);
-//    
-//    ui.lineEdit_multcoeff->setText("");
-// }
-// 
-// void ttm::on_button_oneMultCoeff_pressed()
-// {
-//    sendNewMultCoeff(1.0);
-// }
-// 
-// void ttm::on_slider_loop_sliderReleased()
-// {
-//    double relpos = ((double)(ui.slider_loop->sliderPosition() - ui.slider_loop->minimum()))/(ui.slider_loop->maximum() - ui.slider_loop->minimum());
-//    
-//    if(relpos > 0.1 && relpos < 0.9)
-//    {
-//       if(m_loopState)
-//       {
-//          ui.slider_loop->setSliderPosition(ui.slider_loop->maximum());
-//       }
-//       else
-//       {
-//          ui.slider_loop->setSliderPosition(ui.slider_loop->minimum());
-//       }
-//       return;
-//    }
-//    
-//    ui.label_loop_state->setText("-----");
-//    ui.label_loop_state->setEnabled(false);
-//    ui.slider_loop->setEnabled(false);
-//    m_loopWaiting = true;
-//    
-//    pcf::IndiProperty ipFreq(pcf::IndiProperty::Switch);
-//    
-//    ipFreq.setDevice(m_procName);
-//    ipFreq.setName("loop_state");
-//    ipFreq.add(pcf::IndiElement("toggle"));
-//    
-//    if(relpos >= 0.9)
-//    {
-//       ipFreq["toggle"] = pcf::IndiElement::On;
-//    }
-//    else
-//    {
-//       ipFreq["toggle"] = pcf::IndiElement::Off;
-//    }
-//    
-//    sendNewProperty(ipFreq);
-// }
-// 
-// void ttm::on_button_LoopZero_pressed()
-// {
-//    std::cerr << "loop zero\n";
-// }
+
 
 } //namespace xqt
    

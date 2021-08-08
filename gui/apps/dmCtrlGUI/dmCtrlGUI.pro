@@ -28,7 +28,7 @@ MAKEFILE = makefile.dmCtrlGUI
 INCLUDEPATH += ../../lib ../../widgets/dmCtrl
 
 HEADERS += ../../widgets/dmCtrl/dmCtrl.hpp \
-           ../../lib/multiIndi.hpp \
+           ../../widgets/xWidgets/xWidget.hpp \
            ../../lib/multiIndiManager.hpp
            
 SOURCES += dmCtrlGUI_main.cpp 

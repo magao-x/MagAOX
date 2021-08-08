@@ -29,6 +29,7 @@ int main(int argc, char *argv[])
 
    xqt::dmCtrl dm(dmName);
    mgr.addSubscriber(&dm);
+   mgr.activate();
    
    dm.show();
    
