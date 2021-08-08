@@ -6,13 +6,14 @@
 
 /*
 To do:
-* get the code compiling
-* create conf file
-* rewrite zero_dm fcn
-* figure out how to check for saturation (does position query state before or after sending commands to the driver?)
-* figure out shmim shape
+X get the code compiling
+X create conf file
+X rewrite zero_dm fcn
+* figure out best way to check for saturation (does position query state before or after sending commands to the driver?)
+* figure out shmim shape (3x37 or 37x3?)
 * error checking (IrisAO API functions don't return error codes)
-* figure out install for irisAO .so and .h
+* figure out install process for irisAO .so and .h
+X re-enable power management
 */
 
 
@@ -176,7 +177,7 @@ protected:
    
    double * m_dminputs {nullptr}; ///< Pre-allocated command vector, used only in commandDM
    
-   MirrorHandle m_dm = {}; ///< IrisAO SDK handle for the DM.
+   MirrorHandle m_dm; ///< IrisAO SDK handle for the DM.
    
    bool m_dmopen {false}; ///< Track whether the DM connection has been opened
    
@@ -243,6 +244,7 @@ int irisaoCtrl::appLogic()
    
    if(state()==stateCodes::POWERON)
    {
+      log<text_log>("detected POWERON");
       sleep(5);
       return initDM();
    }
@@ -278,6 +280,9 @@ int irisaoCtrl::whilePowerOff()
 
 int irisaoCtrl::initDM()
 {
+   log<text_log>("trying to init DM");
+   sleep(2);
+
    if(m_dmopen)
    {
       log<text_log>("DM is already initialized.  Release first.", logPrio::LOG_ERROR);
@@ -286,7 +291,19 @@ int irisaoCtrl::initDM()
 
    std::string mser = mx::ioutils::toUpper(m_mserialNumber);
    std::string dser = mx::ioutils::toUpper(m_dserialNumber);
-   m_dm = MirrorConnect(mser.c_str(), dser.c_str(), m_hardwareDisable);
+
+   log<text_log>("Okay, connecting now");
+   sleep(2);
+   try
+   {
+      m_dm = MirrorConnect(mser.c_str(), dser.c_str(), m_hardwareDisable); // segfault
+   }
+   catch (...)
+   {
+      return -1;
+   }
+   log<text_log>("GOT THE MIRROR HANDLE");
+   sleep(2);
 
    // not sure the irisAO API gives us any output to check for success/failure
    m_dmopen = true;
@@ -313,12 +330,12 @@ int irisaoCtrl::initDM()
 
    // Get number of actuators
    // this is stupid, but I don't know how else to get this number
-   SegmentNumber segment = 0;
+   SegmentNumber segment = 0; // don't know if this should start at 0 or 1
    while (MirrorIterate(m_dm, segment)){
       segment++;
    }
-   m_nbAct = 3*segment;
-   log<text_log>("Found " + std::to_string(segment) + "segments for IrisAO mirror " + mser, logPrio::LOG_NOTICE);
+   m_nbAct = 3*segment; // 3*(segment+1)
+   log<text_log>("Found " + std::to_string(segment) + " segments for IrisAO mirror " + mser, logPrio::LOG_NOTICE);
 
    // cacao input -- FIX ME?
    if(m_dminputs) free(m_dminputs);
@@ -375,7 +392,7 @@ int irisaoCtrl::commandDM(void * curr_src)
    
       // check if the current segment was saturated
       // not sure you can do this here. might need to send the commands first (depends on what this is actually querying)
-      // not sure how to handle ptt in the m_instSatMap. I guess I need to saturate a whole row at once??
+      // not sure how to handle ptt in the m_instSatMap. I guess I need to saturate a whole row/column at once??
       GetMirrorPosition(m_dm, segment, &position);
       if (!position.reachable)
       {
