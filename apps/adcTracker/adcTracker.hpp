@@ -83,8 +83,8 @@ protected:
    std::vector<double> m_lupADC1;
    std::vector<double> m_lupADC2;
 
-   mx::gslInterpolator<double> m_terpADC1;
-   mx::gslInterpolator<double> m_terpADC2;
+   mx::math::gslInterpolator<double> m_terpADC1;
+   mx::math::gslInterpolator<double> m_terpADC2;
    
    bool m_tracking {false};
    
