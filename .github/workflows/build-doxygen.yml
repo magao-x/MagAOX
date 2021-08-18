@@ -4,5 +4,5 @@ jobs:
   build-and-deploy:
     runs-on: ubuntu-latest
     steps:
-      - run: apt install -y doxygen
+      - run: sudo apt-get install -y doxygen
       - run: doxygen doc/config/Doxyfile.libMagAOX
