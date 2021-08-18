@@ -1126,6 +1126,14 @@ int stdCamera<derivedT>::appStartup()
       m_indiP_fps["current"].setMax(m_maxFPS);
       m_indiP_fps["current"].setStep(m_stepFPS);
       m_indiP_fps["current"].setFormat("%0.2f");
+
+      if( derived().registerIndiPropertyReadOnly( m_indiP_fps ) < 0)
+      {
+         #ifndef STDCAMERA_TEST_NOLOG
+         derivedT::template log<software_error>({__FILE__,__LINE__});
+         #endif
+         return -1;
+      }
    }
    
    if(derivedT::c_stdCamera_usesModes)
