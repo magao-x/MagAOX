@@ -5,4 +5,6 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - run: sudo apt-get install -y doxygen
-      - run: doxygen doc/config/Doxyfile.libMagAOX
+      - name: Check out repository code
+        uses: actions/checkout@v2
+      - run: cd ${{ github.workspace }} && doxygen doc/config/Doxyfile.libMagAOX
