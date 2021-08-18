@@ -241,60 +241,58 @@ double getStrehlMod(double *detector, size_t ROWS, size_t COLS, size_t xctr, siz
 
 
 
-// static void center_estimate(IMAGE newImage, int* &xtr, int* &yctr);
+void copy_image(double* in, void * image, size_t rows, size_t cols, int datatype) {
 
-void copy_image(double* in, IMAGE* image) {
+   size_t IMEND = rows * cols; 
 
-   size_t IMEND = image->md[0].size[0] * image->md[0].size[1]; 
-
-   switch (image->md[0].datatype) {
+   switch (datatype) {
       case _DATATYPE_UINT8:
       for (size_t i = 0; i < IMEND; ++i)
-         in[i] = image->array.UI8[i];
+         in[i] = ((uint8_t *) image)[i];
       break; 
 
       case _DATATYPE_INT8:
       for (size_t i = 0; i < IMEND; ++i)
-         in[i] = image->array.SI8[i];
+         in[i] = ((int8_t *) image)[i];
       break; 
 
       case _DATATYPE_UINT16:
       for (size_t i = 0; i < IMEND; ++i)
-         in[i] = image->array.UI16[i];
+         in[i] = ((uint16_t *) image)[i];
       break; 
 
       case _DATATYPE_INT16:
       for (size_t i = 0; i < IMEND; ++i)
-         in[i] = image->array.SI16[i];
+         in[i] = ((int16_t *) image)[i];
       break;
 
       case _DATATYPE_UINT32: 
       for (size_t i = 0; i < IMEND; ++i)
-         in[i] = image->array.UI32[i];
+         in[i] = ((uint32_t *) image)[i];
       break;
 
       case _DATATYPE_INT32:
       for (size_t i = 0; i < IMEND; ++i)
-         in[i] = image->array.SI32[i];
+         in[i] = ((int32_t *) image)[i];
       break;
       
       case _DATATYPE_UINT64:                                                                                                                                                                                 for (size_t i = 0; i < IMEND; ++i)
-         in[i] = image->array.UI64[i];
+         in[i] = ((uint64_t *) image)[i];
       break;
 
       case _DATATYPE_INT64:
       for (size_t i = 0; i < IMEND; ++i)
-         in[i] = image->array.SI64[i];
+         in[i] = ((int64_t *) image)[i];
       break;
 
       case _DATATYPE_FLOAT:
       for (size_t i = 0; i < IMEND; ++i)
-         in[i] = image->array.F[i];
+         in[i] = ((float *) image)[i];
       break;
 
       case _DATATYPE_DOUBLE:
       for (size_t i = 0; i < IMEND; ++i)
-         in[i] = image->array.D[i];
+         in[i] = ((double *) image)[i];
       break;     
       
       default:

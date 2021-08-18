@@ -48,4 +48,4 @@ double getStrehlMod(double *detector, size_t ROWS, size_t COLS, size_t xctr, siz
  *
  * @return n/a
  */
-void copy_image(double* in, IMAGE* image);
+void copy_image(double* in, void * image, size_t rows, size_t cols, int datatype);

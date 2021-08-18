@@ -304,36 +304,10 @@ inline
 int imgChar::allocate(const dev::shmimT & dummy)
 {
    static_cast<void>(dummy);
-   
-   if (m_imOpened) 
-      ImageStreamIO_closeIm(&m_image);
-   
-   m_imOpened  = false;
-   m_imRestart = false;
 
-   if (ImageStreamIO_openIm(&m_image, m_shmemKey.c_str()) == 0)
-   { 
-      if(m_image.md[0].sem < 10)
-      {
-            ImageStreamIO_closeIm(&m_image);
-      }
-      else
-      {
-         m_imOpened = true;
-      }
-   }
-      
-   if(!m_imOpened) 
-   {
-      log<software_error>({__FILE__, __LINE__, 
-                           m_shmemKey + " not opened."});
-      return -1;
-   } 
-   else 
-   {
       // setup the FFT data structures 
-      m_rows = m_image.md[0].size[0];
-      m_cols = m_image.md[0].size[1];
+      m_rows = shmimMonitorT::m_height;
+      m_cols = shmimMonitorT::m_width;
       size_t realArrSize {m_rows * m_cols * sizeof(realT)};
       size_t fftArrSize {m_rows * (m_cols / 2 + 1) * sizeof(complexT)};
    
@@ -360,7 +334,7 @@ int imgChar::allocate(const dev::shmimT & dummy)
 
       memset(m_cc_fft, 0, fftArrSize); 
 
-      m_dataType = m_image.md->datatype;
+      m_dataType = shmimMonitorT::m_dataType;
       m_typeSize = ImageStreamIO_typesize(m_dataType);
 
       // initalize data structure for rolling mean and RMS calculations
@@ -375,7 +349,6 @@ int imgChar::allocate(const dev::shmimT & dummy)
       m_strehlMean = 0;
       m_strehlRMS = 0;
       n = 1;      
-   }
   
    return 0;
 }
@@ -383,8 +356,7 @@ int imgChar::allocate(const dev::shmimT & dummy)
 
 
 inline
-int imgChar::processImage(void * curr_src __attribute__((unused)), 
-                             const dev::shmimT & dummy)
+int imgChar::processImage(void * curr_src, const dev::shmimT & dummy)
 {
    static_cast<void>(dummy); //be unused
 
@@ -393,7 +365,7 @@ int imgChar::processImage(void * curr_src __attribute__((unused)),
    switch (m_template) { 
       case true: // may move template fetching to allocate()
       
-         copy_image(m_input, &m_image);
+         copy_image(m_input, curr_src, m_rows, m_cols, m_dataType);
          fftw_execute(m_planF);
          image0_fft_fill(m_image0_fft, m_output, m_rows, m_cols / 2 + 1);
          memset(m_cc_fft, 0, memSz);
@@ -403,8 +375,8 @@ int imgChar::processImage(void * curr_src __attribute__((unused)),
 
       case false:
 
-         // calculate shifts in strehl and position 
-         copy_image(m_input, &m_image);
+         // calculate shifts in strehl and position
+         copy_image(m_input, curr_src, m_rows, m_cols, m_dataType);
 
          fftw_execute(m_planF);
 
