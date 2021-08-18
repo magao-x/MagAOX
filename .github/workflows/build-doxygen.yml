@@ -1,0 +1,8 @@
+name: Build C++ Doxygen documentation
+on: [push]
+jobs:
+  build-and-deploy:
+    runs-on: ubuntu-latest
+    steps:
+      - run: apt install -y doxygen
+      - run: doxygen doc/config/Doxyfile.libMagAOX
