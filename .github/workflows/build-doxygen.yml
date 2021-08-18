@@ -22,4 +22,4 @@ jobs:
         env:
             SSH_AUTH_SOCK: /tmp/ssh_agent.sock
         run: |
-            rsync -rz --delete doc/output/api/ gary@xwcl.science:/srv/www/main/docs/api/ || true
+            rsync -rz --delete doc/output/api/ gary@xwcl.science:/srv/www/main/docs/api/
