@@ -45,7 +45,7 @@ namespace MagAOX::app
   * \ingroup imgChar
   * 
   */
-class imgChar : public MagAOXApp<false>, 
+class imgChar : public MagAOXApp<true>, 
                    public dev::shmimMonitor<imgChar>,
                    public dev::frameGrabber<imgChar>
 {
@@ -254,20 +254,18 @@ int imgChar::appLogic()
       return log<software_error,-1>({__FILE__,__LINE__});
    }
    
-   
+ 
+   if(frameGrabberT::appLogic() < 0)
+   {
+      return log<software_error, -1>({__FILE__, __LINE__});
+   }  
+
    std::unique_lock<std::mutex> lock(m_indiMutex);
    
    if(shmimMonitorT::updateINDI() < 0)
    {
       log<software_error>({__FILE__, __LINE__});
    }
-  
-
-   if(frameGrabberT::appLogic() < 0)
-   {
-      return log<software_error, -1>({__FILE__, __LINE__});
-   }
-
 
    if(frameGrabberT::updateINDI() < 0)
    {
@@ -443,8 +441,6 @@ float imgChar::fps()
 inline
 int imgChar::configureAcquisition()
 {
-   std::unique_lock<std::mutex> lock(m_indiMutex);
-   
    if (shmimMonitorT::m_width == 0
        || shmimMonitorT::m_height == 0
        || shmimMonitorT::m_dataType == 0)
@@ -513,12 +509,12 @@ int imgChar::acquireAndCheckValid()
 inline
 int imgChar::loadImageIntoStream(void * dest)
 {
-   size_t memSz = shmimMonitorT::m_width 
-                * shmimMonitorT::m_height 
+   size_t memSz = frameGrabberT::m_width 
+                * frameGrabberT::m_height 
                 * frameGrabberT::m_typeSize;
 
    memcpy(dest, m_data, memSz); 
-   m_update = false;
+   m_update = true;
    return 0;
 }
 
