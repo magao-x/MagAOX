@@ -18,7 +18,7 @@ if [[ $MAGAOX_ROLE == AOC ]]; then
     for remote in rtc icc; do
         for path in /data/logs /data/rawimages /data/telem; do
             if ! grep -q "$remote:$path" /etc/fstab; then
-                mountpoint="/data/$remote$path"
+                mountpoint="/data/$remote${path/\/data\///}"
                 sudo mkdir -p $mountpoint
                 echo "$remote:$path $mountpoint	nfs	defaults	0 0" | sudo tee -a /etc/fstab
                 sudo mount $mountpoint || true
