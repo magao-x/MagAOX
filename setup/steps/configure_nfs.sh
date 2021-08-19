@@ -20,7 +20,7 @@ if [[ $MAGAOX_ROLE == AOC ]]; then
             if ! grep -q "$remote:$path" /etc/fstab; then
                 mountpoint="/data/$remote$path"
                 sudo mkdir -p $mountpoint
-                echo "$remote:$path 	nfs	defaults	0 0" | sudo tee -a /etc/fstab
+                echo "$remote:$path $mountpoint	nfs	defaults	0 0" | sudo tee -a /etc/fstab
                 sudo mount $mountpoint || true
             fi
         done
