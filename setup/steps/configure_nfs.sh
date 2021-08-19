@@ -7,7 +7,7 @@ sudo yum -y install nfs-utils
 if [[ $MAGAOX_ROLE == RTC || $MAGAOX_ROLE == ICC ]]; then
     sudo systemctl enable nfs-server.service
     sudo systemctl start nfs-server.service
-    echo <<<'HERE' | sudo tee /etc/exports
+    echo <<'HERE' | sudo tee /etc/exports
 /data/logs      aoc(ro,sync,all_squash)
 /data/rawimages aoc(ro,sync,all_squash)
 /data/telem     aoc(ro,sync,all_squash)
