@@ -11,12 +11,17 @@ if [[ $MAGAOX_ROLE == RTC || $MAGAOX_ROLE == ICC ]]; then
 /data/logs      aoc(ro,sync,all_squash)
 /data/rawimages aoc(ro,sync,all_squash)
 /data/telem     aoc(ro,sync,all_squash)
+HERE
+    sudo exportfs -a
 fi
 if [[ $MAGAOX_ROLE == AOC ]]; then
     for remote in rtc icc; do
         for path in /data/logs /data/rawimages /data/telem; do
             if ! grep -q "$remote:$path"; then
-                echo "$remote:$path /data/$role$path	nfs	defaults	0 0" | sudo tee -a /etc/fstab
+                mountpoint="/data/$role$path"
+                mkdir -p $mountpoint
+                echo "$remote:$path 	nfs	defaults	0 0" | sudo tee -a /etc/fstab
+                sudo mount $mountpoint || true
             fi
         done
     done
