@@ -25,4 +25,4 @@ if [[ $MAGAOX_ROLE == AOC ]]; then
             fi
         done
     done
-done
+fi
