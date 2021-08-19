@@ -46,8 +46,8 @@ namespace MagAOX::app
   * 
   */
 class imgChar : public MagAOXApp<true>, 
-                   public dev::shmimMonitor<imgChar>,
-                   public dev::frameGrabber<imgChar>
+                public dev::shmimMonitor<imgChar>,
+                public dev::frameGrabber<imgChar>
 {
 
    friend class dev::shmimMonitor<imgChar>;
@@ -70,7 +70,9 @@ class imgChar : public MagAOXApp<true>,
 
       size_t m_rows {0}, m_cols {0};
       size_t m_sz {5};
-      realT m_data[3];
+      realT m_data[3]; // [0] = current y-shift
+                       // [1] = current x-shift 
+                       // [2] = current Strehl ratio
 
       realT*         m_input      {nullptr};
       realT*         m_cc_array   {nullptr};
@@ -80,12 +82,7 @@ class imgChar : public MagAOXApp<true>,
 
       fftw_plan m_planF, m_planB;
 
-      std::string m_shmemKey {"camtip"};
-      IMAGE m_image;    // input stream
-
       bool m_template  {true};
-      bool m_imOpened  {false};
-      bool m_imRestart {false};
 
       uint8_t m_dataType;
       size_t  m_typeSize; 
@@ -155,6 +152,11 @@ class imgChar : public MagAOXApp<true>,
 
    protected:
       pcf::IndiProperty m_indiP_shifts;
+      
+      realT m_rx      {0};
+      realT m_ry      {0};
+      realT m_rstrehl {0};
+
       realT m_xshiftRMS  {0};
       realT m_yshiftRMS  {0};
       realT m_strehlMean {0};
@@ -317,18 +319,10 @@ int imgChar::allocate(const dev::shmimT & dummy)
       m_cc_fft     = (complexT *)fftw_malloc(fftArrSize);
 
       m_planF = fftw_plan_dft_r2c_2d(
-                        m_rows, 
-                        m_cols,
-                        m_input, 
-                        m_output, 
-                        FFTW_MEASURE);
+                  m_rows, m_cols, m_input, m_output, FFTW_MEASURE);
 
       m_planB = fftw_plan_dft_c2r_2d(
-                        m_rows, 
-                        m_cols, 
-                        m_cc_fft, 
-                        m_cc_array, 
-                        FFTW_MEASURE);
+                  m_rows, m_cols, m_cm_cc_array, m_cc_array, FFTW_MEASURE);
 
       memset(m_cc_fft, 0, fftArrSize); 
 
@@ -337,16 +331,18 @@ int imgChar::allocate(const dev::shmimT & dummy)
 
       // initalize data structure for rolling mean and RMS calculations
       for (auto& i : m_means)
-      {
          for(size_t j {0}; j < i.size(); ++j)
             i[j] = 0;
-      }
 
-      m_xshiftRMS = 0;
-      m_yshiftRMS = 0;
+      m_xshiftRMS  = 0;
+      m_yshiftRMS  = 0;
       m_strehlMean = 0;
-      m_strehlRMS = 0;
-      n = 1;      
+      m_strehlRMS  = 0;
+
+      m_rx      = 0;
+      m_ry      = 0;
+      m_rstrehl = 0;
+      n         = 1;      
   
    return 0;
 }
@@ -373,44 +369,31 @@ int imgChar::processImage(void * curr_src, const dev::shmimT & dummy)
 
       case false:
 
-         // calculate shifts in strehl and position
+         // calculate shifts for both Strehl ratio and position
          copy_image(m_input, curr_src, m_rows, m_cols, m_dataType);
 
          fftw_execute(m_planF);
 
          point_multiply(
-               m_image0_fft, 
-               m_output, 
-               m_cc_fft, 
-               m_rows, 
-               m_cols / 2 + 1);
+               m_image0_fft, m_output, m_cc_fft, m_rows, m_cols/2+1);
 
          fftw_execute(m_planB); 
 
          memset(m_cc_fft, 0, memSz);
 
          GaussFit(m_rows, m_cols, m_cc_array, m_sz, m_data);
-         m_data[2] 
-               = getStrehlMod(m_input, m_rows, m_cols, m_xctr, m_yctr);
-
-         // update means
-         m_means[0][1] = m_means[0][0] + (m_data[1] - m_means[0][0]) / n;
-         m_means[1][1] = m_means[1][0] + (m_data[0] - m_means[1][0]) / n;
-         m_means[2][1] = m_means[2][0] + (m_data[2] - m_means[2][0]) / n;
+         m_data[2] = getStrehlMod(m_input, m_rows, m_cols, m_xctr, m_yctr); //\todo - estimate xctr and yctr
+         m_strehlMean = m_strehlMean + ( (m_data[2] - m_strehlMean) / n);
 
          // update RMS values
-         m_xshiftRMS += (m_xshiftRMS + (m_data[1] - m_means[0][0]) * (m_data[1] - m_means[0][1]));
-         m_yshiftRMS += (m_yshiftRMS + (m_data[0] - m_means[1][0]) * (m_data[0] - m_means[1][1]));
-         m_strehlRMS += (m_strehlRMS + (m_data[2] - m_means[2][0]) * (m_data[2] - m_means[2][1]));
+         m_rx = ((data[1] * data[1]) + (n - 1) * m_rx) / n;
+         m_ry = ((data[0] * data[0]) + (n - 1) * m_ry) / n;
+         m_rstrehl = ((data[2] * data[2]) + (n - 1) * m_rstrehl) / n;
 
-         m_strehlMean = m_means[2][1];
-
-         // cycle the buffer
-         m_means[0][0] = m_means[0][1];
-         m_means[1][0] = m_means[1][1];
-         m_means[2][0] = m_means[2][1];
+         m_xshiftRMS = sqrt(m_rx);
+         m_yshiftRMS = sqrt(m_ry);
+         m_strehlRMS = sqrt(m_rstrehl);
          ++n;
-
          break;
    }
  
