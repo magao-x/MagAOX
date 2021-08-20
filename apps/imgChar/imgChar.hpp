@@ -161,13 +161,12 @@ class imgChar : public MagAOXApp<true>,
       realT m_yshiftRMS  {0};
       realT m_strehlMean {0};
       realT m_strehlRMS  {0};
-
-      //m_means[0] holds mean 'x' shifts
-      //m_means[1] holds mean 'y' shifts
-      //m_means[2] holds mean Strehl Ratios 'SR' 
-      std::array<std::array<realT, 2>, 3> m_means;
-
+      
       uint64_t n;
+
+      pcf::IndiProperty m_indiP_modRadius;
+      float m_modRadius {0};
+      INDI_SETCALLBACK_DECL(imgChar, m_indiP_modRadius);
 
    private:
       double* sa_ptr;
@@ -311,8 +310,8 @@ int imgChar::allocate(const dev::shmimT & dummy)
       size_t realArrSize {m_rows * m_cols * sizeof(realT)};
       size_t fftArrSize {m_rows * (m_cols / 2 + 1) * sizeof(complexT)};
    
-      m_input    = (realT *)fftw_malloc(realArrSize);
-      m_cc_array = (realT *)fftw_malloc(realArrSize);
+      m_input      = (realT *)fftw_malloc(realArrSize);
+      m_cc_array   = (realT *)fftw_malloc(realArrSize);
 
       m_output     = (complexT *)fftw_malloc(fftArrSize);
       m_image0_fft = (complexT *)fftw_malloc(fftArrSize);
@@ -322,17 +321,12 @@ int imgChar::allocate(const dev::shmimT & dummy)
                   m_rows, m_cols, m_input, m_output, FFTW_MEASURE);
 
       m_planB = fftw_plan_dft_c2r_2d(
-                  m_rows, m_cols, m_cm_cc_array, m_cc_array, FFTW_MEASURE);
+                  m_rows, m_cols, m_cc_fft, m_cc_array, FFTW_MEASURE);
 
       memset(m_cc_fft, 0, fftArrSize); 
 
       m_dataType = shmimMonitorT::m_dataType;
       m_typeSize = ImageStreamIO_typesize(m_dataType);
-
-      // initalize data structure for rolling mean and RMS calculations
-      for (auto& i : m_means)
-         for(size_t j {0}; j < i.size(); ++j)
-            i[j] = 0;
 
       m_xshiftRMS  = 0;
       m_yshiftRMS  = 0;
@@ -357,38 +351,38 @@ int imgChar::processImage(void * curr_src, const dev::shmimT & dummy)
    size_t memSz = m_rows * (m_cols / 2 + 1) * sizeof(complexT);  
  
    switch (m_template) { 
-      case true: // may move template fetching to allocate()
-      
-         copy_image(m_input, curr_src, m_rows, m_cols, m_dataType);
+         case true:
+         copy_image0(m_input, curr_src, m_rows, m_cols, m_dataType, &m_xctr, &m_yctr);
          fftw_execute(m_planF);
          image0_fft_fill(m_image0_fft, m_output, m_rows, m_cols / 2 + 1);
          memset(m_cc_fft, 0, memSz);
          m_template = false;
-
          break;
 
-      case false:
-
-         // calculate shifts for both Strehl ratio and position
+         case false:
          copy_image(m_input, curr_src, m_rows, m_cols, m_dataType);
-
          fftw_execute(m_planF);
-
-         point_multiply(
-               m_image0_fft, m_output, m_cc_fft, m_rows, m_cols/2+1);
-
+         point_multiply(m_image0_fft, m_output, m_cc_fft, m_rows, m_cols/2+1);
          fftw_execute(m_planB); 
-
          memset(m_cc_fft, 0, memSz);
 
          GaussFit(m_rows, m_cols, m_cc_array, m_sz, m_data);
-         m_data[2] = getStrehlMod(m_input, m_rows, m_cols, m_xctr, m_yctr); //\todo - estimate xctr and yctr
-         m_strehlMean = m_strehlMean + ( (m_data[2] - m_strehlMean) / n);
+         if (m_modRadius == 0) 
+         {
+            m_data[2] = max(curr_src, m_rows * m_cols, m_dataType); 
+            m_data[2] /= sa_ptr[0];
+         } 
+         else 
+         {
+            m_data[2] = getStrehlMod(m_input, m_rows, m_cols, m_xctr, m_yctr); 
+            m_data[2] /= sa_ptr[(size_t)(40*m_modRadius)];
+         }
 
+         m_strehlMean = m_strehlMean + ( (m_data[2] - m_strehlMean) / n);
          // update RMS values
-         m_rx = ((data[1] * data[1]) + (n - 1) * m_rx) / n;
-         m_ry = ((data[0] * data[0]) + (n - 1) * m_ry) / n;
-         m_rstrehl = ((data[2] * data[2]) + (n - 1) * m_rstrehl) / n;
+         m_rx = ((m_data[1] * m_data[1]) + (n - 1) * m_rx) / n;
+         m_ry = ((m_data[0] * m_data[0]) + (n - 1) * m_ry) / n;
+         m_rstrehl = ((m_data[2] * m_data[2]) + (n - 1) * m_rstrehl) / n;
 
          m_xshiftRMS = sqrt(m_rx);
          m_yshiftRMS = sqrt(m_ry);
@@ -405,6 +399,28 @@ int imgChar::processImage(void * curr_src, const dev::shmimT & dummy)
    }
 
   
+   return 0;
+}
+
+
+
+INDI_SETCALLBACK_DEFN( imgChar, m_indiP_modRadius)(const pcf::IndiProperty &ipRecv)
+{
+   if (ipRecv.getDevice() != m_indiP_modRadius.getDevice() || ipRecv.getName() != m_indiP_modRadius.getName())
+   {
+      log<software_error>({__FILE__, __LINE__, "Invalid INDI property."});
+      return -1;
+   }
+   
+   if (ipRecv.find("current") != true )
+   {
+      return 0;
+   }
+
+   m_indiP_modRadius = ipRecv;
+   
+   m_modRadius = ipRecv["current"].get<float>();
+   
    return 0;
 }
 

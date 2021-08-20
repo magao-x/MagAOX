@@ -231,7 +231,6 @@ double getStrehlMod(double *detector, size_t ROWS, size_t COLS, size_t xctr, siz
           }
 
         strehl /= flux;   // strehl = pk_flux / total_flux
-        strehl /= 1;//fPSF;
 
         free(heights);
         free(search_angles); 
@@ -276,7 +275,8 @@ void copy_image(double* in, void * image, size_t rows, size_t cols, int datatype
          in[i] = ((int32_t *) image)[i];
       break;
       
-      case _DATATYPE_UINT64:                                                                                                                                                                                 for (size_t i = 0; i < IMEND; ++i)
+      case _DATATYPE_UINT64:
+      for (size_t i = 0; i < IMEND; ++i)
          in[i] = ((uint64_t *) image)[i];
       break;
 
@@ -296,7 +296,205 @@ void copy_image(double* in, void * image, size_t rows, size_t cols, int datatype
       break;     
       
       default:
-      fprintf(stderr, "Error: Image type not supported.\n");
+      fprintf(stderr, "Error: Image datatype not supported.\n");
+      exit(EXIT_FAILURE);
+
+   }
+}
+
+
+void copy_image0(double* in, void * image, size_t rows, size_t cols, 
+                 int datatype, size_t * xctr, size_t * yctr) {
+
+   xctr[0] = 0;
+   yctr[0] = 0; 
+
+   switch (datatype) {
+      case _DATATYPE_UINT8:
+      for (size_t i = 0; i < rows; ++i)
+         for (size_t j = 0; j < cols; ++j)
+         {
+            in[j + i * cols] = ((uint8_t *) image)[j + i * cols];
+            xctr[0] += (in[j + i * cols] * j);
+            yctr[0] += (in[j + i * cols] * i);
+         }
+      break; 
+
+      case _DATATYPE_INT8:
+      for (size_t i = 0; i < rows; ++i)
+         for (size_t j = 0; j < cols; ++j)
+         {
+            in[j + i * cols] = ((int8_t *) image)[j + i * cols];
+            xctr[0] += (in[j + i * cols] * j);
+            yctr[0] += (in[j + i * cols] * i);
+         }
+      break; 
+
+      case _DATATYPE_UINT16:
+      for (size_t i = 0; i < rows; ++i)
+         for (size_t j = 0; j < cols; ++j)
+         {
+            in[j + i * cols] = ((uint16_t *) image)[j + i * cols];
+            xctr[0] += (in[j + i * cols] * j);
+            yctr[0] += (in[j + i * cols] * i);
+         }
+      break; 
+
+      case _DATATYPE_INT16:
+      for (size_t i = 0; i < rows; ++i)
+         for (size_t j = 0; j < cols; ++j)
+         {
+            in[j + i * cols] = ((int16_t *) image)[j + i * cols];
+            xctr[0] += (in[j + i * cols] * j);
+            yctr[0] += (in[j + i * cols] * i);
+         }
+      break;
+
+      case _DATATYPE_UINT32: 
+      for (size_t i = 0; i < rows; ++i)
+         for (size_t j = 0; j < cols; ++j)
+         {
+            in[j + i * cols] = ((uint32_t *) image)[j + i * cols];
+            xctr[0] += (in[j + i * cols] * j);
+            yctr[0] += (in[j + i * cols] * i);
+         }
+      break;
+
+      case _DATATYPE_INT32:
+      for (size_t i = 0; i < rows; ++i)
+         for (size_t j = 0; j < cols; ++j)
+         {
+            in[j + i * cols] = ((int32_t *) image)[j + i * cols];
+            xctr[0] += (in[j + i * cols] * j);
+            yctr[0] += (in[j + i * cols] * i);
+         }
+      break;
+      
+      case _DATATYPE_UINT64:
+      for (size_t i = 0; i < rows; ++i)
+         for (size_t j = 0; j < cols; ++j)
+         {
+            in[j + i * cols] = ((uint64_t *) image)[j + i * cols];
+            xctr[0] += (in[j + i * cols] * j);
+            yctr[0] += (in[j + i * cols] * i);
+         }
+      break;
+
+      case _DATATYPE_INT64:
+      for (size_t i = 0; i < rows; ++i)
+         for (size_t j = 0; j < cols; ++j)
+         {
+            in[j + i * cols] = ((int64_t *) image)[j + i * cols];
+            xctr[0] += (in[j + i * cols] * j);
+            yctr[0] += (in[j + i * cols] * i);
+         }
+      break;
+
+      case _DATATYPE_FLOAT:
+      for (size_t i = 0; i < rows; ++i)
+         for (size_t j = 0; j < cols; ++j)
+         {
+            in[j + i * cols] = ((float *) image)[j + i * cols];
+            xctr[0] += (in[j + i * cols] * j);
+            yctr[0] += (in[j + i * cols] * i);
+         }
+      break;
+
+      case _DATATYPE_DOUBLE:
+      for (size_t i = 0; i < rows; ++i)
+         for (size_t j = 0; j < cols; ++j)
+         {
+            in[j + i * cols] = ((double *) image)[j + i * cols];
+            xctr[0] += (in[j + i * cols] * j);
+            yctr[0] += (in[j + i * cols] * i);
+         }
+      break;     
+      
+      default:
+      fprintf(stderr, "Error: Image datatype not supported.\n");
+      exit(EXIT_FAILURE);
+
+   }
+}
+
+
+double max(void * image, size_t IMEND, int datatype) {
+
+   double maximum {0};
+
+   switch (datatype) {
+      case _DATATYPE_UINT8:
+      for (size_t i = 0; i < IMEND; ++i)
+         if (maximum < ((uint8_t *) image)[i])
+            maximum = ((uint8_t *) image)[i];
+      return maximum;
+      break; 
+
+      case _DATATYPE_INT8:
+      for (size_t i = 0; i < IMEND; ++i)
+         if (maximum < ((int8_t *) image)[i])
+            maximum = ((int8_t *) image)[i];
+      return maximum;
+      break; 
+
+      case _DATATYPE_UINT16:
+      for (size_t i = 0; i < IMEND; ++i)
+         if (maximum < ((uint16_t *) image)[i])
+            maximum = ((uint16_t *) image)[i];
+      return maximum;
+      break; 
+
+      case _DATATYPE_INT16:
+      for (size_t i = 0; i < IMEND; ++i)
+         if (maximum < ((int16_t *) image)[i])
+            maximum = ((int16_t *) image)[i];
+      return maximum;
+      break;
+
+      case _DATATYPE_UINT32: 
+      for (size_t i = 0; i < IMEND; ++i)
+         if (maximum < ((uint32_t *) image)[i])
+            maximum = ((uint32_t *) image)[i];
+      return maximum;
+      break;
+
+      case _DATATYPE_INT32:
+      for (size_t i = 0; i < IMEND; ++i)
+         if (maximum < ((int32_t *) image)[i])
+            maximum = ((int32_t *) image)[i];
+      return maximum;
+      break;
+      
+      case _DATATYPE_UINT64:
+      for (size_t i = 0; i < IMEND; ++i)
+         if (maximum < ((uint64_t *) image)[i])
+            maximum = ((uint64_t *) image)[i];
+      return maximum;
+      break;
+
+      case _DATATYPE_INT64:
+      for (size_t i = 0; i < IMEND; ++i)
+         if (maximum < ((int64_t *) image)[i])
+            maximum = ((int64_t *) image)[i];
+      return maximum;
+      break;
+
+      case _DATATYPE_FLOAT:
+      for (size_t i = 0; i < IMEND; ++i)
+         if (maximum < ((float *) image)[i])
+            maximum = ((float *) image)[i];
+      return maximum;
+      break;
+
+      case _DATATYPE_DOUBLE:
+      for (size_t i = 0; i < IMEND; ++i)
+         if (maximum < ((double *) image)[i])
+            maximum = ((double *) image)[i];
+      return maximum;
+      break;     
+      
+      default:
+      fprintf(stderr, "Error: Image datatype not supported.\n");
       exit(EXIT_FAILURE);
 
    }

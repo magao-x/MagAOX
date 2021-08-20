@@ -49,3 +49,23 @@ double getStrehlMod(double *detector, size_t ROWS, size_t COLS, size_t xctr, siz
  * @return n/a
  */
 void copy_image(double* in, void * image, size_t rows, size_t cols, int datatype);
+
+
+/**
+ * @name copy_image0
+ * @brief copy template image in memory and find image center
+ *
+ * @return n/a
+ */
+void copy_image0(double* in, void * image, size_t rows, size_t cols, 
+                 int datatype, size_t * xctr, size_t * yctr);
+
+
+
+/**
+ * @name    max
+ * @brief   get the max pixel value in an image
+ *
+ * @return  max pixel value
+ */
+double max(void * image, size_t IMEND, int datatype);
