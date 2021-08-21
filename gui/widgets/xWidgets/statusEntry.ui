@@ -41,6 +41,12 @@
      </item>
      <item>
       <widget class="xqt::statusLineEdit" name="value">
+       <property name="minimumSize">
+        <size>
+         <width>0</width>
+         <height>40</height>
+        </size>
+       </property>
        <property name="font">
         <font>
          <italic>false</italic>

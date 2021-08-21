@@ -50,6 +50,8 @@ protected:
    bool m_hgt_tgt_changed {false};
    int m_hgt_tgt {0};
 
+   bool m_onDisconnected {false};
+
 public:
    roi( std::string & camName,
         QWidget * Parent = 0, 
@@ -90,6 +92,8 @@ public slots:
    void on_button_full_pressed();
    void on_button_default_pressed();
       
+   
+
 private:
      
    Ui::roi ui;
@@ -136,8 +140,6 @@ void roi::subscribe()
   
 void roi::onConnect()
 {
-   //ui.lab_title->setEnabled(true);
-
    setWindowTitle(QString(m_winTitle.c_str()));
 
    //Reset the changed flags
@@ -154,13 +156,15 @@ void roi::onConnect()
    m_hgt_curr_changed = true;
    m_hgt_tgt_changed = true;
 
+   m_onDisconnected = false;
+
    clearFocus();
 }
 
 void roi::onDisconnect()
 {
-   //ui.lab_title->setEnabled(false);
-   
+   setWindowTitle(QString(m_winTitle.c_str()) + QString(" (disconnected)"));
+
    ui.lab_bin_x_title->setEnabled(false);
    ui.lab_bin_x_curr->setEnabled(false);
    ui.lab_bin_x_tgt->setEnabled(false);
@@ -218,7 +222,7 @@ void roi::onDisconnect()
    ui.button_full->setEnabled(false);
    ui.button_default->setEnabled(false);
 
-   setWindowTitle(QString(m_winTitle.c_str()) + QString(" (disconnected)"));
+   m_onDisconnected = true;
 }
 
 void roi::handleDefProperty( const pcf::IndiProperty & ipRecv)
@@ -332,6 +336,27 @@ void roi::handleSetProperty( const pcf::IndiProperty & ipRecv)
          if(val != m_hgt_tgt) m_hgt_tgt_changed = true;
          m_hgt_tgt = val;
       }
+   }
+
+   if( m_onDisconnected && isEnabled() ) 
+   {
+      setWindowTitle(QString(m_winTitle.c_str()));
+
+      //Reset the changed flags
+      m_bin_x_curr_changed = true;
+      m_bin_x_tgt_changed = true;
+      m_bin_y_curr_changed = true;
+      m_bin_y_tgt_changed = true;
+      m_cen_x_curr_changed = true;
+      m_cen_x_tgt_changed = true;
+      m_cen_y_curr_changed = true;
+      m_cen_y_tgt_changed = true;
+      m_wid_curr_changed = true;
+      m_wid_tgt_changed = true;
+      m_hgt_curr_changed = true;
+      m_hgt_tgt_changed = true;
+
+      m_onDisconnected = false;
    }
 
    updateGUI();   

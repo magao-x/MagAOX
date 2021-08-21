@@ -232,7 +232,7 @@ void statusLineEdit::readOnly(bool ro)
    }
    else
    {
-      setFocusPolicy(Qt::TabFocus);
+      setFocusPolicy(Qt::StrongFocus);
    }
 
 }

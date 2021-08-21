@@ -8,7 +8,7 @@
 
 #include "ui_statusEntry.h"
 
-#include "../../lib/multiIndi.hpp"
+#include "../../lib/multiIndiSubscriber.hpp"
 
 namespace xqt 
 {
@@ -199,9 +199,13 @@ QString floatAutoFormat(const std::string & value)
    double v = std::stod(value);
    std::string format = "%f";
 
-   if(v >= 1000)
+   if(v >= 10000)
    {
       format = "%0.3g";
+   }
+   else if(v >= 100)
+   {
+      format = "%0.1f";
    }
    else if(v >= 0.1)
    {
@@ -278,6 +282,7 @@ void statusEntry::subscribe()
   
 void statusEntry::onConnect()
 {
+   m_valChanged = true;
 }
 
 void statusEntry::onDisconnect()
@@ -345,10 +350,6 @@ void statusEntry::updateGUI()
           ui.value->setTextChanged(formattedValue());
           m_valChanged = false;
       }
-   }
-   else
-   {
-      ui.value->setText("---");
    }
 
 } //updateGUI()

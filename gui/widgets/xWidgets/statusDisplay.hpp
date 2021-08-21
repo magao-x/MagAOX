@@ -4,7 +4,7 @@
 #include "ui_statusDisplay.h"
 
 #include "xWidget.hpp"
-#include "../../lib/multiIndi.hpp"
+#include "../../lib/multiIndiSubscriber.hpp"
 
 namespace xqt 
 {
@@ -55,19 +55,32 @@ public:
 
    virtual void onDisconnect();
    
-   virtual void clearFocus();
-
    virtual void handleDefProperty( const pcf::IndiProperty & ipRecv /**< [in] the property which has changed*/);
    
    virtual void handleSetProperty( const pcf::IndiProperty & ipRecv /**< [in] the property which has changed*/);
    
    virtual void updateGUI();
 
+   /// 
+   virtual void changeEvent(QEvent * e)
+   {
+      if(e->type() == QEvent::EnabledChange && !isEnabledTo(nullptr))
+      {
+         if(m_ctrlWidget) m_ctrlWidget->hide();
+      }
+      
+      xWidget::changeEvent(e);
+   }
+
 public slots:
 
    void on_button_pressed()
    {
-      if(m_ctrlWidget) m_ctrlWidget->show();
+      if(m_ctrlWidget) 
+      {
+         m_ctrlWidget->show();
+         m_ctrlWidget->onConnect();
+      }
    }
 
 protected:
@@ -168,16 +181,9 @@ void statusDisplay::updateGUI()
          m_valChanged = false;
       }
    }
-   else
-   {
-      ui.status->setText("---");
-   }
 
 } //updateGUI()
 
-void statusDisplay::clearFocus()
-{
-}
 
 } //namespace xqt
    
