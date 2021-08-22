@@ -96,6 +96,9 @@ apps/picoMotorCtrl/picoMotorCtrl
 apps/pupilFit/pupilFit
 apps/pwfsSlopeCalc/pwfsSlopeCalc
 
+#r
+apps/rhusbMon/rhusbMon
+
 #s
 apps/shmimIntegrator/shmimIntegrator
 apps/siglentSDG/siglentSDG

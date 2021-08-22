@@ -3,6 +3,7 @@
 ../libMagAOX/sys/tests/thSetuid_tests 
 ../libMagAOX/tty/tests/ttyIOUtils_test 
 ../apps/ocam2KCtrl/tests/ocamUtils_test 
+../apps/rhusbMon/tests/rhusbMonParsers_test
 ../apps/siglentSDG/tests/siglentSDG_test
 ../apps/sshDigger/tests/sshDigger_test
 ../apps/streamWriter/tests/streamWriter_test 
