@@ -3,20 +3,19 @@
 
 #include <cmath>
 
-#include <QDialog>
 #include <QMessageBox>
 
 #include <mx/ioutils/stringUtils.hpp>
 
 #include "ui_dmMode.h"
 
-#include "../../lib/multiIndi.hpp"
+#include "../xWidgets/xWidget.hpp"
 
 
 namespace xqt 
 {
    
-class dmMode : public QDialog, public multiIndiSubscriber
+class dmMode : public xWidget
 {
    Q_OBJECT
    
@@ -31,28 +30,28 @@ public:
    int m_maxmode {-1};
    
    dmMode( std::string & deviceName,
-              QWidget * Parent = 0, 
-              Qt::WindowFlags f = 0);
+           QWidget * Parent = 0, 
+           Qt::WindowFlags f = 0);
    
    ~dmMode();
    
-   int subscribe( multiIndiPublisher * publisher );
+   void subscribe();
                                    
-   /// Called once the publisher is connected.
+   /// Called once the m_parent is connected.
    virtual void onConnect();
    
-   /// Called when the publisher disconnects.
+   /// Called when the m_parent disconnects.
    virtual void onDisconnect();
    
-   virtual int handleDefProperty( const pcf::IndiProperty &ipRecv );
+   virtual void handleDefProperty( const pcf::IndiProperty &ipRecv );
    
-   virtual int handleSetProperty( const pcf::IndiProperty & ipRecv /**< [in] the property which has changed*/);
+   virtual void handleSetProperty( const pcf::IndiProperty & ipRecv /**< [in] the property which has changed*/);
    
    int updateGUI( QLabel * currLabel,
                   QLineEdit * tgtLabel,
                   QwtSlider * slider,
-                float amp
-              );
+                  float amp
+                );
    
    int updateGUI( size_t ch,
                   float amp
@@ -149,11 +148,24 @@ double amp2slider( double lamp )
 
 dmMode::dmMode( std::string & deviceName,
                       QWidget * Parent, 
-                      Qt::WindowFlags f) : QDialog(Parent, f), m_deviceName{deviceName} 
+                      Qt::WindowFlags f) : xWidget(Parent, f), m_deviceName{deviceName} 
 {
    ui.setupUi(this);
    
+   ui.modeCurrent_0->setProperty("isStatus", true);
+   ui.modeCurrent_1->setProperty("isStatus", true);
+   ui.modeCurrent_2->setProperty("isStatus", true);
+   ui.modeCurrent_3->setProperty("isStatus", true);
+   ui.modeCurrent_4->setProperty("isStatus", true);
+   ui.modeCurrent_5->setProperty("isStatus", true);
+   ui.modeCurrent_6->setProperty("isStatus", true);
+   ui.modeCurrent_7->setProperty("isStatus", true);
+   ui.modeCurrent_8->setProperty("isStatus", true);
+   ui.modeCurrent_9->setProperty("isStatus", true);
+
    setWindowTitle(QString(deviceName.c_str()));
+
+   onDisconnect();
 }
    
 dmMode::~dmMode()
@@ -161,12 +173,14 @@ dmMode::~dmMode()
 
 }
 
-int dmMode::subscribe( multiIndiPublisher * publisher )
+void dmMode::subscribe()
 {   
-   publisher->subscribeProperty(this, m_deviceName, "current_amps");
-   publisher->subscribeProperty(this, m_deviceName, "target_amps");
-   publisher->subscribeProperty(this, m_deviceName, "dm");
-   return 0;
+   if(m_parent == nullptr) return;
+
+   m_parent->addSubscriberProperty(this, m_deviceName, "current_amps");
+   m_parent->addSubscriberProperty(this, m_deviceName, "target_amps");
+   m_parent->addSubscriberProperty(this, m_deviceName, "dm");
+   return;
 }
  
 void dmMode::onConnect()
@@ -313,21 +327,20 @@ void dmMode::onDisconnect()
 }
    
    
-int dmMode::handleDefProperty( const pcf::IndiProperty & ipRecv /**< [in] the property which has changed*/)
+void dmMode::handleDefProperty( const pcf::IndiProperty & ipRecv /**< [in] the property which has changed*/)
 {
    if(ipRecv.getDevice() == m_deviceName)
-   {
-      
+   {  
       return handleSetProperty(ipRecv);
    }
    
-   return 0;
+   return;
    
 }
 
-int dmMode::handleSetProperty( const pcf::IndiProperty & ipRecv /**< [in] the property which has changed*/)
+void dmMode::handleSetProperty( const pcf::IndiProperty & ipRecv /**< [in] the property which has changed*/)
 {
-   if(ipRecv.getDevice() != m_deviceName) return 0;
+   if(ipRecv.getDevice() != m_deviceName) return;
    
    if(ipRecv.getName() == "current_amps")
    {
@@ -358,8 +371,7 @@ int dmMode::handleSetProperty( const pcf::IndiProperty & ipRecv /**< [in] the pr
       }
          
    }
-
-   if(ipRecv.getName() == "dm")
+   else if(ipRecv.getName() == "dm")
    {
       if(ipRecv.find("name"))
       {
@@ -375,15 +387,15 @@ int dmMode::handleSetProperty( const pcf::IndiProperty & ipRecv /**< [in] the pr
       }
    }
    
-   return 0;
+   return;
    
 }
  
 int dmMode::updateGUI( QLabel * currLabel,
-                          QLineEdit * tgtLabel,
-                          QwtSlider * slider,
-                          float amp
-                        )
+                       QLineEdit * tgtLabel,
+                       QwtSlider * slider,
+                       float amp
+                     )
 {
    char nstr[8];
    snprintf(nstr, sizeof(nstr), "%0.3f", amp);

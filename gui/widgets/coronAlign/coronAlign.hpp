@@ -10,13 +10,13 @@
 
 #include "ui_coronAlign.h"
 
-#include "../../lib/multiIndi.hpp"
+#include "../xWidgets/xWidget.hpp"
 
 
 namespace xqt 
 {
    
-class coronAlign : public QDialog, public multiIndiSubscriber
+class coronAlign : public xWidget
 {
    Q_OBJECT
    
@@ -70,13 +70,13 @@ public:
    
    ~coronAlign();
    
-   int subscribe( multiIndiPublisher * publisher );
+   void subscribe();
                                
    virtual void onConnect();
    virtual void onDisconnect();
    
-   int handleDefProperty( const pcf::IndiProperty & ipRecv /**< [in] the property which has changed*/);
-   int handleSetProperty( const pcf::IndiProperty & ipRecv /**< [in] the property which has changed*/);
+   void handleDefProperty( const pcf::IndiProperty & ipRecv /**< [in] the property which has changed*/);
+   void handleSetProperty( const pcf::IndiProperty & ipRecv /**< [in] the property which has changed*/);
    
    void enablePicoButtons();
    void disablePicoButtons();
@@ -107,7 +107,7 @@ private:
    Ui::coronAlign ui;
 };
 
-coronAlign::coronAlign( QWidget * Parent, Qt::WindowFlags f) : QDialog(Parent, f)
+coronAlign::coronAlign( QWidget * Parent, Qt::WindowFlags f) : xWidget(Parent, f)
 {
    ui.setupUi(this);
    ui.button_pupil_scale->setProperty("isScaleButton", true);
@@ -128,29 +128,32 @@ coronAlign::coronAlign( QWidget * Parent, Qt::WindowFlags f) : QDialog(Parent, f
    snprintf(ss, 5, "%d", m_lyotScale);
    ui.button_lyot_scale->setText(ss);
    
+   onDisconnect();
 }
    
 coronAlign::~coronAlign()
 {
 }
 
-int coronAlign::subscribe( multiIndiPublisher * publisher )
+void coronAlign::subscribe()
 {
-   publisher->subscribeProperty(this, "fwpupil", "filter");
-   publisher->subscribeProperty(this, "fwpupil", "fsm");
+   if(m_parent == nullptr) return;
+
+   m_parent->addSubscriberProperty(this, "fwpupil", "filter");
+   m_parent->addSubscriberProperty(this, "fwpupil", "fsm");
    
-   publisher->subscribeProperty(this, "fwfpm", "filter");
-   publisher->subscribeProperty(this, "fwfpm", "fsm");
+   m_parent->addSubscriberProperty(this, "fwfpm", "filter");
+   m_parent->addSubscriberProperty(this, "fwfpm", "fsm");
    
-   publisher->subscribeProperty(this, "fwlyot", "filter");
-   publisher->subscribeProperty(this, "fwlyot", "fsm");
+   m_parent->addSubscriberProperty(this, "fwlyot", "filter");
+   m_parent->addSubscriberProperty(this, "fwlyot", "fsm");
    
-   publisher->subscribeProperty(this, "picomotors", "picopupil_pos");
-   publisher->subscribeProperty(this, "picomotors", "picofpm_pos");
-   publisher->subscribeProperty(this, "picomotors", "picolyot_pos");
-   publisher->subscribeProperty(this, "picomotors", "fsm");
+   m_parent->addSubscriberProperty(this, "picomotors", "picopupil_pos");
+   m_parent->addSubscriberProperty(this, "picomotors", "picofpm_pos");
+   m_parent->addSubscriberProperty(this, "picomotors", "picolyot_pos");
+   m_parent->addSubscriberProperty(this, "picomotors", "fsm");
    
-   return 0;
+   return;
 }
  
 void coronAlign::onConnect()
@@ -214,7 +217,7 @@ void coronAlign::onDisconnect()
    setWindowTitle("Coronagraph Alignment (disconnected)");
 }
    
-int coronAlign::handleDefProperty( const pcf::IndiProperty & ipRecv)
+void coronAlign::handleDefProperty( const pcf::IndiProperty & ipRecv)
 {  
    std::string dev = ipRecv.getDevice();
    if( dev == "picomotors" || 
@@ -225,10 +228,10 @@ int coronAlign::handleDefProperty( const pcf::IndiProperty & ipRecv)
       return handleSetProperty(ipRecv);
    }
    
-   return 0;
+   return;
 }
 
-int coronAlign::handleSetProperty( const pcf::IndiProperty & ipRecv)
+void coronAlign::handleSetProperty( const pcf::IndiProperty & ipRecv)
 {
    std::string dev = ipRecv.getDevice();
    
@@ -239,7 +242,7 @@ int coronAlign::handleSetProperty( const pcf::IndiProperty & ipRecv)
          if(ipRecv.find("current"))
          {
             m_fwPupilPos = ipRecv["current"].get<double>();
-            return 0;
+            return;
          }
       }
       else if(ipRecv.getName() == "fsm")
@@ -247,7 +250,7 @@ int coronAlign::handleSetProperty( const pcf::IndiProperty & ipRecv)
          if(ipRecv.find("state"))
          {
             m_fwPupilState = ipRecv["state"].get();
-            return 0;
+            return;
          }
       }
    }
@@ -258,7 +261,7 @@ int coronAlign::handleSetProperty( const pcf::IndiProperty & ipRecv)
          if(ipRecv.find("current"))
          {
             m_fwFocalPos = ipRecv["current"].get<double>();
-            return 0;
+            return;
          }
       }
       else if(ipRecv.getName() == "fsm")
@@ -266,7 +269,7 @@ int coronAlign::handleSetProperty( const pcf::IndiProperty & ipRecv)
          if(ipRecv.find("state"))
          {
             m_fwFocalState = ipRecv["state"].get();
-            return 0;
+            return;
          }
       }
    }
@@ -277,7 +280,7 @@ int coronAlign::handleSetProperty( const pcf::IndiProperty & ipRecv)
          if(ipRecv.find("current"))
          {
             m_fwLyotPos = ipRecv["current"].get<double>();
-            return 0;
+            return;
          }
       }
       else if(ipRecv.getName() == "fsm")
@@ -285,7 +288,7 @@ int coronAlign::handleSetProperty( const pcf::IndiProperty & ipRecv)
          if(ipRecv.find("state"))
          {
             m_fwLyotState = ipRecv["state"].get();
-            return 0;
+            return;
          }
       }
    }
@@ -296,7 +299,7 @@ int coronAlign::handleSetProperty( const pcf::IndiProperty & ipRecv)
          if(ipRecv.find("current"))
          {
             m_picoPupilPos = ipRecv["current"].get<long>();
-            return 0;
+            return;
          }
       }
       else if(ipRecv.getName() == "picofpm_pos")
@@ -304,7 +307,7 @@ int coronAlign::handleSetProperty( const pcf::IndiProperty & ipRecv)
          if(ipRecv.find("current"))
          {
             m_picoFocalPos = ipRecv["current"].get<long>();
-            return 0;
+            return;
          }
       }
       else if(ipRecv.getName() == "picolyot_pos")
@@ -312,7 +315,7 @@ int coronAlign::handleSetProperty( const pcf::IndiProperty & ipRecv)
          if(ipRecv.find("current"))
          {
             m_picoLyotPos = ipRecv["current"].get<long>();
-            return 0;
+            return;
          }
       }
       else if(ipRecv.getName() == "fsm")
@@ -320,12 +323,12 @@ int coronAlign::handleSetProperty( const pcf::IndiProperty & ipRecv)
          if(ipRecv.find("state"))
          {
             m_picoState = ipRecv["state"].get();
-            return 0;
+            return;
          }
       }
    }
    
-   return 0;
+   return;
 
 }
 

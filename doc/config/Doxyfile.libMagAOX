@@ -825,12 +825,7 @@ INPUT                  = libMagAOX \
                          libMagAOX/logger/doc/logger.dox \
                          libMagAOX/tty/doc/screen.dox \
                          flatlogs/include/flatlogs/ \
-                         apps/sshDigger/ \
-                         apps/filterWheelCtrl/ \
-                         apps/trippLitePDU/ \
-                         apps/ocam2KCtrl/ \
-                         apps/xindiserver/ \
-                         apps/xt1121DCDU/ \
+                         apps/ \
                          utils/logdump/ \
                          utils/xrif2shmim/
 
@@ -874,7 +869,7 @@ RECURSIVE              = YES
 # Note that relative paths are relative to the directory from which doxygen is
 # run.
 
-EXCLUDE                =
+EXCLUDE                = apps/template
 
 # The EXCLUDE_SYMLINKS tag can be used to select whether or not files or
 # directories that are symbolic links (a Unix file system feature) are excluded

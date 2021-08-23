@@ -9,14 +9,8 @@
 #ifndef andorCtrl_hpp
 #define andorCtrl_hpp
 
-
-
-
-
-
 #include "../../libMagAOX/libMagAOX.hpp" //Note this is included on command line to trigger pch
 #include "../../magaox_git_version.h"
-
 
 #include "atmcdLXd.h"
 
@@ -536,6 +530,14 @@ public:
      */ 
    int setExpTime();
    
+   /// Check the next ROI
+   /** Checks if the target values are valid and adjusts them to the closest valid values if needed.
+     *
+     * \returns 0 if successfull
+     * \returns -1 otherwise
+     */
+   int checkNextROI();
+
    /// Required by stdCamera, but this does not do anything for this camera [stdCamera interface]
    /**
      * \returns 0 always
@@ -594,15 +596,15 @@ andorCtrl::andorCtrl() : MagAOXApp(MAGAOX_CURRENT_SHA1, MAGAOX_REPO_MODIFIED)
    m_maxEMGain = 300;
 
       
-   m_startup_x = 255.5; 
-   m_startup_y = 255.5; 
-   m_startup_w = 512;  
-   m_startup_h = 512;  
+   m_default_x = 255.5; 
+   m_default_y = 255.5; 
+   m_default_w = 512;  
+   m_default_h = 512;  
       
-   m_nextROI.x = m_startup_x;
-   m_nextROI.y = m_startup_y;
-   m_nextROI.w = m_startup_w;
-   m_nextROI.h = m_startup_h;
+   m_nextROI.x = m_default_x;
+   m_nextROI.y = m_default_y;
+   m_nextROI.w = m_default_w;
+   m_nextROI.h = m_default_h;
    m_nextROI.bin_x = 1;
    m_nextROI.bin_y = 1;
    
@@ -1485,17 +1487,17 @@ int andorCtrl::powerOnDefaults()
    m_tempControlStatusStr =  "OFF"; 
    m_tempControlOnTarget = false;
       
-   m_currentROI.x = m_startup_x;
-   m_currentROI.y = m_startup_y;
-   m_currentROI.w = m_startup_w;
-   m_currentROI.h = m_startup_h;
+   m_currentROI.x = m_default_x;
+   m_currentROI.y = m_default_y;
+   m_currentROI.w = m_default_w;
+   m_currentROI.h = m_default_h;
    m_currentROI.bin_x = 1;
    m_currentROI.bin_y = 1;
    
-   m_nextROI.x = m_startup_x;
-   m_nextROI.y = m_startup_y;
-   m_nextROI.w = m_startup_w;
-   m_nextROI.h = m_startup_h;
+   m_nextROI.x = m_default_x;
+   m_nextROI.y = m_default_y;
+   m_nextROI.w = m_default_w;
+   m_nextROI.h = m_default_h;
    m_nextROI.bin_x = 1;
    m_nextROI.bin_y = 1;
    
@@ -1601,7 +1603,13 @@ int andorCtrl::setExpTime()
    m_reconfig = true;
    return 0;
 }
-   
+
+inline 
+int andorCtrl::checkNextROI()
+{
+   return 0;
+}
+
 inline 
 int andorCtrl::setNextROI()
 {

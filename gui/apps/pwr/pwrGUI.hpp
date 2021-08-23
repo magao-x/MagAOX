@@ -9,7 +9,7 @@
 
 #include "ui_pwr.h"
 
-#include "../../lib/multiIndi.hpp"
+#include "../../lib/multiIndiSubscriber.hpp"
 
 #include "../../widgets/pwr/pwrDevice.hpp"
 #include "../../widgets/pwr/pwrChannel.hpp"
@@ -37,17 +37,14 @@ protected:
 public:
    pwrGUI( QWidget * Parent = 0, Qt::WindowFlags f = 0);
    
-   ~pwrGUI();
+   virtual ~pwrGUI() noexcept;
    
-   int subscribe( multiIndiPublisher * publisher );
-                                   
-   virtual void onConnect();
-   
+      
    virtual void onDisconnect();
    
-   int handleDefProperty( const pcf::IndiProperty & ipRecv /**< [in] the property which has been defined*/);
+   virtual void handleDefProperty( const pcf::IndiProperty & ipRecv /**< [in] the property which has been defined*/);
    
-   int handleSetProperty( const pcf::IndiProperty & ipRecv /**< [in] the property which has changed*/);
+   virtual void handleSetProperty( const pcf::IndiProperty & ipRecv /**< [in] the property which has changed*/);
    
    
    

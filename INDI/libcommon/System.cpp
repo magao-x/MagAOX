@@ -12,6 +12,7 @@
 #include <string.h>             // provides 'strerror'
 #include <sys/resource.h>
 #include <cerrno>
+#include <iostream>
 #include <sys/types.h>
 #include <stdexcept>
 #include <algorithm>
@@ -43,6 +44,7 @@ System::System()
 
 System::System( const System& ecRhs )
 {
+  static_cast<void>(ecRhs);
   // Empty because this is private.
 }
 
@@ -51,6 +53,7 @@ System::System( const System& ecRhs )
 
 const System& System::operator=( const System& sysRhs )
 {
+  static_cast<void>(sysRhs);
   // Empty because this is private.
   return *this;
 }
@@ -115,7 +118,8 @@ void System::setCoreFilePath( const string &szCoreFilePath )
   makePath( szCoreFilePath );
 
   // make the current working directory one that is set by the user.
-  ::chdir( szCoreFilePath.c_str() );
+  int rv = ::chdir( szCoreFilePath.c_str() );
+  if(rv < 0) std::cerr << __FILE__ << " " << __LINE__ << " " << strerror(errno) << "\n";
 }
 
 ////////////////////////////////////////////////////////////////////////////////

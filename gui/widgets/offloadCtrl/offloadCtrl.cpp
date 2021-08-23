@@ -7,51 +7,52 @@
 namespace xqt
 {
    
-void synchActiveInactive( QPalette * p)
-{
-   p->setColor(QPalette::Inactive, QPalette::Window, p->color(QPalette::Active, QPalette::Window));
-   p->setColor(QPalette::Inactive, QPalette::Background, p->color(QPalette::Active, QPalette::Background));
-   p->setColor(QPalette::Inactive, QPalette::WindowText, p->color(QPalette::Active, QPalette::WindowText));
-   p->setColor(QPalette::Inactive, QPalette::Foreground, p->color(QPalette::Active, QPalette::Foreground));
-   p->setColor(QPalette::Inactive, QPalette::Base, p->color(QPalette::Active, QPalette::Base));
-   p->setColor(QPalette::Inactive, QPalette::AlternateBase, p->color(QPalette::Active, QPalette::AlternateBase));
-   p->setColor(QPalette::Inactive, QPalette::ToolTipBase, p->color(QPalette::Active, QPalette::ToolTipBase));
-   p->setColor(QPalette::Inactive, QPalette::ToolTipText, p->color(QPalette::Active, QPalette::ToolTipText));
-   //p->setColor(QPalette::Inactive, QPalette::PlaceholderTetxt, p->color(QPalette::Active, QPalette::PlaceholderTetxt));
-   p->setColor(QPalette::Inactive, QPalette::Text, p->color(QPalette::Active, QPalette::Text));
-   p->setColor(QPalette::Inactive, QPalette::Button, p->color(QPalette::Active, QPalette::Button));
-   p->setColor(QPalette::Inactive, QPalette::ButtonText, p->color(QPalette::Active, QPalette::ButtonText));
-   p->setColor(QPalette::Inactive, QPalette::BrightText, p->color(QPalette::Active, QPalette::BrightText));
-   p->setColor(QPalette::Inactive, QPalette::Light, p->color(QPalette::Active, QPalette::Light));
-   p->setColor(QPalette::Inactive, QPalette::Midlight, p->color(QPalette::Active, QPalette::Midlight));
-   p->setColor(QPalette::Inactive, QPalette::Dark, p->color(QPalette::Active, QPalette::Dark));
-   p->setColor(QPalette::Inactive, QPalette::Mid, p->color(QPalette::Active, QPalette::Mid));
-   p->setColor(QPalette::Inactive, QPalette::Shadow, p->color(QPalette::Active, QPalette::Shadow));
-   p->setColor(QPalette::Inactive, QPalette::Highlight, p->color(QPalette::Active, QPalette::Highlight));
-   p->setColor(QPalette::Inactive, QPalette::HighlightedText, p->color(QPalette::Active, QPalette::HighlightedText));
-   //p->setColor(QPalette::Inactive, QPalette::, p->color(QPalette::Active, QPalette::));
-}
+// void synchActiveInactive( QPalette * p)
+// {
+//    p->setColor(QPalette::Inactive, QPalette::Window, p->color(QPalette::Active, QPalette::Window));
+//    p->setColor(QPalette::Inactive, QPalette::Background, p->color(QPalette::Active, QPalette::Background));
+//    p->setColor(QPalette::Inactive, QPalette::WindowText, p->color(QPalette::Active, QPalette::WindowText));
+//    p->setColor(QPalette::Inactive, QPalette::Foreground, p->color(QPalette::Active, QPalette::Foreground));
+//    p->setColor(QPalette::Inactive, QPalette::Base, p->color(QPalette::Active, QPalette::Base));
+//    p->setColor(QPalette::Inactive, QPalette::AlternateBase, p->color(QPalette::Active, QPalette::AlternateBase));
+//    p->setColor(QPalette::Inactive, QPalette::ToolTipBase, p->color(QPalette::Active, QPalette::ToolTipBase));
+//    p->setColor(QPalette::Inactive, QPalette::ToolTipText, p->color(QPalette::Active, QPalette::ToolTipText));
+//    //p->setColor(QPalette::Inactive, QPalette::PlaceholderTetxt, p->color(QPalette::Active, QPalette::PlaceholderTetxt));
+//    p->setColor(QPalette::Inactive, QPalette::Text, p->color(QPalette::Active, QPalette::Text));
+//    p->setColor(QPalette::Inactive, QPalette::Button, p->color(QPalette::Active, QPalette::Button));
+//    p->setColor(QPalette::Inactive, QPalette::ButtonText, p->color(QPalette::Active, QPalette::ButtonText));
+//    p->setColor(QPalette::Inactive, QPalette::BrightText, p->color(QPalette::Active, QPalette::BrightText));
+//    p->setColor(QPalette::Inactive, QPalette::Light, p->color(QPalette::Active, QPalette::Light));
+//    p->setColor(QPalette::Inactive, QPalette::Midlight, p->color(QPalette::Active, QPalette::Midlight));
+//    p->setColor(QPalette::Inactive, QPalette::Dark, p->color(QPalette::Active, QPalette::Dark));
+//    p->setColor(QPalette::Inactive, QPalette::Mid, p->color(QPalette::Active, QPalette::Mid));
+//    p->setColor(QPalette::Inactive, QPalette::Shadow, p->color(QPalette::Active, QPalette::Shadow));
+//    p->setColor(QPalette::Inactive, QPalette::Highlight, p->color(QPalette::Active, QPalette::Highlight));
+//    p->setColor(QPalette::Inactive, QPalette::HighlightedText, p->color(QPalette::Active, QPalette::HighlightedText));
+//    //p->setColor(QPalette::Inactive, QPalette::, p->color(QPalette::Active, QPalette::));
+// }
 
-void setXDialPalette( QPalette * p)
-{
-   p->setColor(QPalette::Active, QPalette::Foreground, QColor(0,0,0,0));
-   p->setColor(QPalette::Active, QPalette::Base, QColor(0,0,0,0));
-   p->setColor(QPalette::Active, QPalette::Text, QColor(22,111,117,255));
-   p->setColor(QPalette::Active, QPalette::BrightText, QColor(113,0,0,255)); // Scale text and line
+// void setXDialPalette( QPalette * p)
+// {
+//    p->setColor(QPalette::Active, QPalette::Foreground, QColor(0,0,0,0));
+//    p->setColor(QPalette::Active, QPalette::Base, QColor(0,0,0,0));
+//    p->setColor(QPalette::Active, QPalette::Text, QColor(22,111,117,255));
+//    p->setColor(QPalette::Active, QPalette::BrightText, QColor(113,0,0,255)); // Scale text and line
    
-   p->setColor(QPalette::Inactive, QPalette::Foreground, QColor(0,0,0,0));//Dial circle color   
-   p->setColor(QPalette::Inactive, QPalette::Base, QColor(0,0,0,0));//Overall Background
-   p->setColor(QPalette::Inactive, QPalette::Text, QColor(22,111,117,255)); // Scale text and line
-   p->setColor(QPalette::Inactive, QPalette::BrightText, QColor(113,0,0,255)); // Scale text and line
+//    p->setColor(QPalette::Inactive, QPalette::Foreground, QColor(0,0,0,0));//Dial circle color   
+//    p->setColor(QPalette::Inactive, QPalette::Base, QColor(0,0,0,0));//Overall Background
+//    p->setColor(QPalette::Inactive, QPalette::Text, QColor(22,111,117,255)); // Scale text and line
+//    p->setColor(QPalette::Inactive, QPalette::BrightText, QColor(113,0,0,255)); // Scale text and line
    
-   p->setColor(QPalette::Disabled, QPalette::Foreground, QColor(0,0,0,0));//Dial circle color   
-   p->setColor(QPalette::Disabled, QPalette::Base, QColor(0,0,0,0));//Overall Background
-   p->setColor(QPalette::Disabled, QPalette::Text, QColor(22,111,117,255)); // Scale text and line
-   p->setColor(QPalette::Disabled, QPalette::BrightText, QColor(113,0,0,255)); // Scale text and line
+//    p->setColor(QPalette::Disabled, QPalette::Foreground, QColor(0,0,0,0));//Dial circle color   
+//    p->setColor(QPalette::Disabled, QPalette::Base, QColor(0,0,0,0));//Overall Background
+//    p->setColor(QPalette::Disabled, QPalette::Text, QColor(22,111,117,255)); // Scale text and line
+//    p->setColor(QPalette::Disabled, QPalette::BrightText, QColor(113,0,0,255)); // Scale text and line
    
-};
+// };
 
-offloadCtrl::offloadCtrl( QWidget * Parent, Qt::WindowFlags f) : QDialog(Parent, f)
+offloadCtrl::offloadCtrl( QWidget * Parent, 
+                          Qt::WindowFlags f) : xWidget(Parent, f)
 {
 //    QPalette p = palette();
 //    synchActiveInactive(&p);
@@ -65,6 +66,8 @@ offloadCtrl::offloadCtrl( QWidget * Parent, Qt::WindowFlags f) : QDialog(Parent,
     QTimer *timer = new QTimer(this);
     connect(timer, SIGNAL(timeout()), this, SLOT(updateGUI()));
     timer->start(250);
+
+    onDisconnect();
       
 }
    
@@ -72,17 +75,19 @@ offloadCtrl::~offloadCtrl()
 {
 }
 
-int offloadCtrl::subscribe( multiIndiPublisher * publisher )
+void offloadCtrl::subscribe()
 {
-   publisher->subscribeProperty(this, "t2wOffloader", "offload");
-   publisher->subscribeProperty(this, "t2wOffloader", "zero");
-   publisher->subscribeProperty(this, "t2wOffloader", "gain");
-   publisher->subscribeProperty(this, "t2wOffloader", "leak");
-   publisher->subscribeProperty(this, "dmtweeter-avg", "nAverage");
-   return 0;
+   if(!m_parent) return;
+
+   m_parent->addSubscriberProperty(this, "t2wOffloader", "offload");
+   m_parent->addSubscriberProperty(this, "t2wOffloader", "zero");
+   m_parent->addSubscriberProperty(this, "t2wOffloader", "gain");
+   m_parent->addSubscriberProperty(this, "t2wOffloader", "leak");
+   m_parent->addSubscriberProperty(this, "dmtweeter-avg", "nAverage");
+   return;
 }
    
-int offloadCtrl::handleDefProperty( const pcf::IndiProperty & ipRecv)
+void offloadCtrl::handleDefProperty( const pcf::IndiProperty & ipRecv)
 {  
    
    if(ipRecv.getDevice() == "t2wOffloader" || ipRecv.getDevice() == "dmtweeter-avg") 
@@ -90,10 +95,10 @@ int offloadCtrl::handleDefProperty( const pcf::IndiProperty & ipRecv)
       return handleSetProperty(ipRecv);
    }
    
-   return 0;
+   return;
 }
 
-int offloadCtrl::handleSetProperty( const pcf::IndiProperty & ipRecv)
+void offloadCtrl::handleSetProperty( const pcf::IndiProperty & ipRecv)
 {
    //m_mutex.lock();
    if(ipRecv.getDevice() == "t2wOffloader")
@@ -124,8 +129,7 @@ int offloadCtrl::handleSetProperty( const pcf::IndiProperty & ipRecv)
          
       }
    }
-   
-   if(ipRecv.getDevice() == "dmtweeter-avg")
+   else if(ipRecv.getDevice() == "dmtweeter-avg")
    {
       if(ipRecv.getName() == "nAverage")
       {
@@ -136,9 +140,7 @@ int offloadCtrl::handleSetProperty( const pcf::IndiProperty & ipRecv)
          }
       }
    }
-
-   return 0;
-   
+   return;   
 }
 
 void offloadCtrl::updateGUI()

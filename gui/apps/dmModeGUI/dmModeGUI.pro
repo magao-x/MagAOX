@@ -1,3 +1,6 @@
+######################################################################
+# project file for dmModeGUI
+######################################################################
 
 TEMPLATE = app
 TARGET = dmModeGUI
@@ -24,7 +27,7 @@ MAKEFILE = makefile.dmModeGUI
 INCLUDEPATH += ../../lib ../../widgets/dmMode
 
 HEADERS += ../../widgets/dmMode/dmMode.hpp \
-           ../../lib/multiIndi.hpp \
+           ../../widgets/xWidgets/xWidget.hpp \
            ../../lib/multiIndiManager.hpp
            
 SOURCES += dmModeGUI_main.cpp

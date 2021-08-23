@@ -47,6 +47,8 @@ telem_pico               20060    telem_pico
 
 telem_observer           20070    telem_observer
 
+telem_rhusb              20100    telem_rhusb
+
 telem_temps              20250    telem_temps
 
 telem_stdcam             20260    telem_stdcam

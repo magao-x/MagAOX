@@ -319,6 +319,15 @@ protected:
    int setExpTime();
    int capExpTime(piflt& exptime);
    int setFPS();
+
+   /// Check the next ROI
+   /** Checks if the target values are valid and adjusts them to the closest valid values if needed.
+     *
+     * \returns 0 if successful
+     * \returns -1 otherwise
+     */
+   int checkNextROI();
+
    int setNextROI();
    int setShutter(int sh);
    
@@ -368,10 +377,10 @@ picamCtrl::picamCtrl() : MagAOXApp(MAGAOX_CURRENT_SHA1, MAGAOX_REPO_MODIFIED)
    m_vShiftSpeedNameLabels = {"0.7 us", "1.2 us", "2.0 us", "5.0 us"};
    
    
-   m_startup_x = 511.5; 
-   m_startup_y = 511.5; 
-   m_startup_w = 1024;  
-   m_startup_h = 1024;  
+   m_default_x = 511.5; 
+   m_default_y = 511.5; 
+   m_default_w = 1024;  
+   m_default_h = 1024;  
       
    m_full_x = 511.5; 
    m_full_y = 511.5; 
@@ -1262,6 +1271,12 @@ int picamCtrl::capExpTime(piflt& exptime)
       exptime = ((double)intexptime)/10000;
    }
    
+   return 0;
+}
+
+inline
+int picamCtrl::checkNextROI()
+{
    return 0;
 }
 

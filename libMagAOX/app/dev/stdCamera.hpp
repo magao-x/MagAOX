@@ -148,8 +148,10 @@ int loadCameraConfig( cameraConfigMap & ccmap, ///< [out] the map in which to pl
   * static constexpr bool c_stdCamera_usesROI = true; //or: false
   * \endcode
   * The default values of m_currentROI should be set before calling stdCamera::appStartup().
+  * The derived class must implement:
   * \code
-  * int setNextROI();
+  * int checkNextROI(); // verifies m_nextROI values and modifies to closest valid values if needed
+  * int setNextROI(); // sets the ROI to the new target values.
   * \endcode
   * 
   * Crop Mode ROIs:
@@ -312,18 +314,25 @@ protected:
    int m_maxROIBinning_y {4};
    int m_stepROIBinning_y {1};
    
-   float m_startup_x {0};   ///< Power-on ROI center x coordinate.
-   float m_startup_y {0};   ///< Power-on ROI center y coordinate.
-   int m_startup_w {0};     ///< Power-on ROI width.
-   int m_startup_h {0};     ///< Power-on ROI height.
-   int m_startup_bin_x {1}; ///< Power-on ROI x binning. 
-   int m_startup_bin_y {1}; ///< Power-on ROI y binning.
+   float m_default_x {0};   ///< Power-on ROI center x coordinate.
+   float m_default_y {0};   ///< Power-on ROI center y coordinate.
+   int m_default_w {0};     ///< Power-on ROI width.
+   int m_default_h {0};     ///< Power-on ROI height.
+   int m_default_bin_x {1}; ///< Power-on ROI x binning. 
+   int m_default_bin_y {1}; ///< Power-on ROI y binning.
       
    float m_full_x{0}; ///< The full ROI center x coordinate.
    float m_full_y{0}; ///< The full ROI center y coordinate.
    int m_full_w{0}; ///< The full ROI width.
    int m_full_h{0}; ///< The full ROI height.
-   
+   int m_full_bin_x{1}; ///< The x-binning in the full ROI. 
+   int m_full_bin_y{1}; ///< The y-binning in the full ROI. 
+
+   float m_full_currbin_x{0}; ///< The current-binning full ROI center x coordinate.
+   float m_full_currbin_y{0}; ///< The current-binning full ROI center y coordinate.
+   int m_full_currbin_w{0}; ///< The current-binning full ROI width.
+   int m_full_currbin_h{0}; ///< The current-binning full ROI height.
+
    pcf::IndiProperty m_indiP_roi_x; ///< Property used to set the ROI x center coordinate
    pcf::IndiProperty m_indiP_roi_y; ///< Property used to set the ROI x center coordinate
    pcf::IndiProperty m_indiP_roi_w; ///< Property used to set the ROI width 
@@ -333,11 +342,15 @@ protected:
 
    pcf::IndiProperty m_indiP_fullROI; ///< Property used to preset the full ROI dimensions.
    
+   pcf::IndiProperty m_indiP_roi_check; ///< Property used to trigger checking the target ROI
+
    pcf::IndiProperty m_indiP_roi_set; ///< Property used to trigger setting the ROI 
    
    pcf::IndiProperty m_indiP_roi_full; ///< Property used to trigger setting the full ROI.
+   pcf::IndiProperty m_indiP_roi_fullbin; ///< Property used to trigger setting the full in current binning ROI.
+   pcf::IndiProperty m_indiP_roi_loadlast; ///< Property used to trigger loading the last ROI as the target.
    pcf::IndiProperty m_indiP_roi_last; ///< Property used to trigger setting the last ROI.
-   pcf::IndiProperty m_indiP_roi_startup; ///< Property used to trigger setting the startup ROI.
+   pcf::IndiProperty m_indiP_roi_default; ///< Property used to trigger setting the default and startup ROI.
    
    ///@}
    
@@ -722,6 +735,25 @@ public:
      */
    int newCallBack_roi_bin_y( const pcf::IndiProperty &ipRecv /**< [in] the INDI property sent with the the new property request.*/);
    
+   /// Interface to checkNextROI when the derivedT uses ROIs
+   /** Tag-dispatch resolution of c_stdCamera_usesROI==true will call this function.
+     * Calls derivedT::checkNextROI. 
+     */
+   int checkNextROI( const mx::meta::trueFalseT<true> & t);
+   
+   /// Interface to checkNextROI when the derivedT does not use ROIs.
+   /** Tag-dispatch resolution of c_stdCamera_usesROI==false will call this function.
+     * This prevents requiring derivedT to have its own checkNextROI(). 
+     */
+   int checkNextROI( const mx::meta::trueFalseT<false> & f);
+   
+   /// Callback to process a NEW roi_check request
+   /**
+     * \returns 0 on success.
+     * \returns -1 on error.
+     */
+   int newCallBack_roi_check( const pcf::IndiProperty &ipRecv /**< [in] the INDI property sent with the the new property request.*/);
+
    /// Interface to setNextROI when the derivedT uses ROIs
    /** Tag-dispatch resolution of c_stdCamera_usesROI==true will call this function.
      * Calls derivedT::setNextROI. 
@@ -748,6 +780,20 @@ public:
      */
    int newCallBack_roi_full( const pcf::IndiProperty &ipRecv /**< [in] the INDI property sent with the the new property request.*/);
    
+   /// Callback to process a NEW roi_fullbin request
+   /**
+     * \returns 0 on success.
+     * \returns -1 on error.
+     */
+   int newCallBack_roi_fullbin( const pcf::IndiProperty &ipRecv /**< [in] the INDI property sent with the the new property request.*/);
+
+   /// Callback to process a NEW roi_loadlast request
+   /**
+     * \returns 0 on success.
+     * \returns -1 on error.
+     */
+   int newCallBack_roi_loadlast( const pcf::IndiProperty &ipRecv /**< [in] the INDI property sent with the the new property request.*/);
+
    /// Callback to process a NEW roi_last request
    /**
      * \returns 0 on success.
@@ -755,12 +801,12 @@ public:
      */
    int newCallBack_roi_last( const pcf::IndiProperty &ipRecv /**< [in] the INDI property sent with the the new property request.*/);
    
-   /// Callback to process a NEW roi_startup request
+   /// Callback to process a NEW roi_default request
    /**
      * \returns 0 on success.
      * \returns -1 on error.
      */
-   int newCallBack_roi_startup( const pcf::IndiProperty &ipRecv /**< [in] the INDI property sent with the the new property request.*/);
+   int newCallBack_roi_default( const pcf::IndiProperty &ipRecv /**< [in] the INDI property sent with the the new property request.*/);
    
    /// Interface to setShutter when the derivedT has a shutter
    /** Tag-dispatch resolution of c_stdCamera_hasShutter==true will call this function.
@@ -849,12 +895,12 @@ void stdCamera<derivedT>::setupConfig(mx::app::appConfigurator & config)
    
    if(derivedT::c_stdCamera_usesROI)
    {
-      config.add("camera.startup_x", "", "camera.startup_x", argType::Required, "camera", "startup_x", false, "float", "The default ROI x position.");
-      config.add("camera.startup_y", "", "camera.startup_y", argType::Required, "camera", "startup_y", false, "float", "The default ROI y position.");
-      config.add("camera.startup_w", "", "camera.startup_w", argType::Required, "camera", "startup_w", false, "int", "The default ROI width.");
-      config.add("camera.startup_h", "", "camera.startup_h", argType::Required, "camera", "startup_h", false, "int", "The default ROI height.");
-      config.add("camera.startup_bin_x", "", "camera.startup_bin_x", argType::Required, "camera", "startup_bin_x", false, "int", "The default ROI x binning.");
-      config.add("camera.startup_bin_y", "", "camera.startup_bin_y", argType::Required, "camera", "startup_bin_y", false, "int", "The default ROI y binning.");
+      config.add("camera.default_x", "", "camera.default_x", argType::Required, "camera", "default_x", false, "float", "The default ROI x position.");
+      config.add("camera.default_y", "", "camera.default_y", argType::Required, "camera", "default_y", false, "float", "The default ROI y position.");
+      config.add("camera.default_w", "", "camera.default_w", argType::Required, "camera", "default_w", false, "int", "The default ROI width.");
+      config.add("camera.default_h", "", "camera.default_h", argType::Required, "camera", "default_h", false, "int", "The default ROI height.");
+      config.add("camera.default_bin_x", "", "camera.default_bin_x", argType::Required, "camera", "default_bin_x", false, "int", "The default ROI x binning.");
+      config.add("camera.default_bin_y", "", "camera.default_bin_y", argType::Required, "camera", "default_bin_y", false, "int", "The default ROI y binning.");
    }
 }
 
@@ -899,12 +945,12 @@ void stdCamera<derivedT>::loadConfig(mx::app::appConfigurator & config)
    
    if(derivedT::c_stdCamera_usesROI)
    {
-      config(m_startup_x, "camera.startup_x");
-      config(m_startup_y, "camera.startup_y");
-      config(m_startup_w, "camera.startup_w");
-      config(m_startup_h, "camera.startup_h");
-      config(m_startup_bin_x, "camera.startup_bin_x");
-      config(m_startup_bin_y, "camera.startup_bin_y");
+      config(m_default_x, "camera.default_x");
+      config(m_default_y, "camera.default_y");
+      config(m_default_w, "camera.default_w");
+      config(m_default_h, "camera.default_h");
+      config(m_default_bin_x, "camera.default_bin_x");
+      config(m_default_bin_y, "camera.default_bin_y");
    }
 }
    
@@ -1080,6 +1126,14 @@ int stdCamera<derivedT>::appStartup()
       m_indiP_fps["current"].setMax(m_maxFPS);
       m_indiP_fps["current"].setStep(m_stepFPS);
       m_indiP_fps["current"].setFormat("%0.2f");
+
+      if( derived().registerIndiPropertyReadOnly( m_indiP_fps ) < 0)
+      {
+         #ifndef STDCAMERA_TEST_NOLOG
+         derivedT::template log<software_error>({__FILE__,__LINE__});
+         #endif
+         return -1;
+      }
    }
    
    if(derivedT::c_stdCamera_usesModes)
@@ -1187,6 +1241,15 @@ int stdCamera<derivedT>::appStartup()
          return -1;
       }
       
+      derived().createStandardIndiRequestSw( m_indiP_roi_check, "roi_region_check");
+      if( derived().registerIndiPropertyNew( m_indiP_roi_check, st_newCallBack_stdCamera) < 0)
+      {
+         #ifndef STDCAMERA_TEST_NOLOG
+         derivedT::template log<software_error>({__FILE__,__LINE__});
+         #endif
+         return -1;
+      }
+
       derived().createStandardIndiRequestSw( m_indiP_roi_set, "roi_set");
       if( derived().registerIndiPropertyNew( m_indiP_roi_set, st_newCallBack_stdCamera) < 0)
       {
@@ -1205,6 +1268,24 @@ int stdCamera<derivedT>::appStartup()
          return -1;
       }
    
+      derived().createStandardIndiRequestSw( m_indiP_roi_fullbin, "roi_set_full_bin");
+      if( derived().registerIndiPropertyNew( m_indiP_roi_fullbin, st_newCallBack_stdCamera) < 0)
+      {
+         #ifndef STDCAMERA_TEST_NOLOG
+         derivedT::template log<software_error>({__FILE__,__LINE__});
+         #endif
+         return -1;
+      }
+
+      derived().createStandardIndiRequestSw( m_indiP_roi_loadlast, "roi_load_last");
+      if( derived().registerIndiPropertyNew( m_indiP_roi_loadlast, st_newCallBack_stdCamera) < 0)
+      {
+         #ifndef STDCAMERA_TEST_NOLOG
+         derivedT::template log<software_error>({__FILE__,__LINE__});
+         #endif
+         return -1;
+      }
+
       derived().createStandardIndiRequestSw( m_indiP_roi_last, "roi_set_last");
       if( derived().registerIndiPropertyNew( m_indiP_roi_last, st_newCallBack_stdCamera) < 0)
       {
@@ -1214,8 +1295,8 @@ int stdCamera<derivedT>::appStartup()
          return -1;
       }
       
-      derived().createStandardIndiRequestSw( m_indiP_roi_startup, "roi_set_startup");
-      if( derived().registerIndiPropertyNew( m_indiP_roi_startup, st_newCallBack_stdCamera) < 0)
+      derived().createStandardIndiRequestSw( m_indiP_roi_default, "roi_set_default");
+      if( derived().registerIndiPropertyNew( m_indiP_roi_default, st_newCallBack_stdCamera) < 0)
       {
          #ifndef STDCAMERA_TEST_NOLOG
          derivedT::template log<software_error>({__FILE__,__LINE__});
@@ -1341,6 +1422,29 @@ int stdCamera<derivedT>::appLogic()
       else
       {
          return 0;
+      }
+   }
+   else if( derived().state() == stateCodes::READY || derived().state() == stateCodes::OPERATING )
+   {
+      if(derivedT::c_stdCamera_usesROI)
+      {
+         derived().updateIfChanged(m_indiP_roi_x, "current", m_currentROI.x, INDI_IDLE);
+         derived().updateIfChanged(m_indiP_roi_x, "target", m_nextROI.x, INDI_IDLE);
+   
+         derived().updateIfChanged(m_indiP_roi_y, "current", m_currentROI.y, INDI_IDLE);
+         derived().updateIfChanged(m_indiP_roi_y, "target", m_nextROI.y, INDI_IDLE);
+   
+         derived().updateIfChanged(m_indiP_roi_w, "current", m_currentROI.w, INDI_IDLE);
+         derived().updateIfChanged(m_indiP_roi_w, "target", m_nextROI.w, INDI_IDLE);
+   
+         derived().updateIfChanged(m_indiP_roi_h, "current", m_currentROI.h, INDI_IDLE);
+         derived().updateIfChanged(m_indiP_roi_h, "target", m_nextROI.h, INDI_IDLE);
+   
+         derived().updateIfChanged(m_indiP_roi_bin_x, "current", m_currentROI.bin_x, INDI_IDLE);
+         derived().updateIfChanged(m_indiP_roi_bin_x, "target", m_nextROI.bin_x, INDI_IDLE);
+   
+         derived().updateIfChanged(m_indiP_roi_bin_y, "current", m_currentROI.bin_y, INDI_IDLE);
+         derived().updateIfChanged(m_indiP_roi_bin_y, "target", m_nextROI.bin_y, INDI_IDLE);
       }
    }
    
@@ -1475,10 +1579,13 @@ int stdCamera<derivedT>::st_newCallBack_stdCamera( void * app,
    else if(derivedT::c_stdCamera_usesROI &&      name == "roi_region_h") return _app->newCallBack_roi_h(ipRecv);
    else if(derivedT::c_stdCamera_usesROI &&      name == "roi_region_bin_x") return _app->newCallBack_roi_bin_x(ipRecv);
    else if(derivedT::c_stdCamera_usesROI &&      name == "roi_region_bin_y") return _app->newCallBack_roi_bin_y(ipRecv);
+   else if(derivedT::c_stdCamera_usesROI &&      name == "roi_region_check") return _app->newCallBack_roi_check(ipRecv);
    else if(derivedT::c_stdCamera_usesROI &&      name == "roi_set") return _app->newCallBack_roi_set(ipRecv);
    else if(derivedT::c_stdCamera_usesROI &&      name == "roi_set_full") return _app->newCallBack_roi_full(ipRecv);
+   else if(derivedT::c_stdCamera_usesROI &&      name == "roi_set_full_bin") return _app->newCallBack_roi_fullbin(ipRecv);
+   else if(derivedT::c_stdCamera_usesROI &&      name == "roi_load_last") return _app->newCallBack_roi_loadlast(ipRecv);
    else if(derivedT::c_stdCamera_usesROI &&      name == "roi_set_last") return _app->newCallBack_roi_last(ipRecv);
-   else if(derivedT::c_stdCamera_usesROI &&      name == "roi_set_startup") return _app->newCallBack_roi_startup(ipRecv);
+   else if(derivedT::c_stdCamera_usesROI &&      name == "roi_set_default") return _app->newCallBack_roi_default(ipRecv);
    else if(derivedT::c_stdCamera_hasShutter &&   name == "shutter") return _app->newCallBack_shutter(ipRecv);
    
    derivedT::template log<software_error>({__FILE__,__LINE__, "unknown INDI property"});
@@ -2034,6 +2141,49 @@ int stdCamera<derivedT>::newCallBack_roi_bin_y( const pcf::IndiProperty &ipRecv 
 }
 
 template<class derivedT>
+int stdCamera<derivedT>::checkNextROI( const mx::meta::trueFalseT<true> & t)
+{
+   static_cast<void>(t);
+   return derived().checkNextROI();
+}
+
+template<class derivedT>
+int stdCamera<derivedT>::checkNextROI( const mx::meta::trueFalseT<false> & f)
+{
+   static_cast<void>(f);
+   return 0;
+}
+
+template<class derivedT>
+int stdCamera<derivedT>::newCallBack_roi_check( const pcf::IndiProperty &ipRecv )
+{
+   if(derivedT::c_stdCamera_usesROI)
+   {
+      if(ipRecv.getName() != m_indiP_roi_check.getName())
+      {
+         derivedT::template log<software_error>({__FILE__,__LINE__, "wrong INDI property received."});
+         return -1;
+      }
+      
+      if(!ipRecv.find("request")) return 0;
+      
+      if( ipRecv["request"].getSwitchState() == pcf::IndiElement::On)
+      {
+         std::unique_lock<std::mutex> lock(derived().m_indiMutex);
+         
+         indi::updateSwitchIfChanged(m_indiP_roi_check, "request", pcf::IndiElement::Off, derived().m_indiDriver, INDI_IDLE);
+         
+         mx::meta::trueFalseT<derivedT::c_stdCamera_usesROI> tf;
+         return checkNextROI(tf);
+      }
+      
+      return 0;  
+   }
+   
+   return 0;
+}
+
+template<class derivedT>
 int stdCamera<derivedT>::setNextROI( const mx::meta::trueFalseT<true> & t)
 {
    static_cast<void>(t);
@@ -2101,11 +2251,106 @@ int stdCamera<derivedT>::newCallBack_roi_full( const pcf::IndiProperty &ipRecv )
          m_nextROI.y = m_full_y;
          m_nextROI.w = m_full_w;
          m_nextROI.h = m_full_h;
-         m_nextROI.bin_x = 1;
-         m_nextROI.bin_y = 1;
+         m_nextROI.bin_x = m_full_bin_x;
+         m_nextROI.bin_y = m_full_bin_y;
          m_lastROI = m_currentROI;
          mx::meta::trueFalseT<derivedT::c_stdCamera_usesROI> tf;
          return setNextROI(tf);
+      }
+      
+      return 0;  
+   }
+   
+   return 0;
+}
+
+template<class derivedT>
+int stdCamera<derivedT>::newCallBack_roi_fullbin( const pcf::IndiProperty &ipRecv )
+{
+   if(derivedT::c_stdCamera_usesROI)
+   {
+      if(ipRecv.getName() != m_indiP_roi_fullbin.getName())
+      {
+         derivedT::template log<software_error>({__FILE__,__LINE__, "wrong INDI property received."});
+         return -1;
+      }
+      
+      if(!ipRecv.find("request")) return 0;
+      
+      if( ipRecv["request"].getSwitchState() == pcf::IndiElement::On)
+      {
+         std::unique_lock<std::mutex> lock(derived().m_indiMutex);
+         
+         indi::updateSwitchIfChanged(m_indiP_roi_fullbin, "request", pcf::IndiElement::Off, derived().m_indiDriver, INDI_IDLE);
+      
+         bool reset = false;
+
+         if(m_full_currbin_x == 0) //still defaulted 
+         {
+            derivedT::template log<text_log>("current-binning full ROI not implemented for this camera", logPrio::LOG_WARNING);
+            m_full_currbin_x = m_full_x;
+            m_full_currbin_y = m_full_y;
+            m_full_currbin_w = m_full_w;
+            m_full_currbin_h = m_full_h;
+            reset = true;
+         }
+
+         
+
+         m_nextROI.x = m_full_currbin_x;
+         m_nextROI.y = m_full_currbin_y;
+         m_nextROI.w = m_full_currbin_w;
+         m_nextROI.h = m_full_currbin_h;
+         if(reset)
+         {
+            //Use full binning
+            m_nextROI.bin_x = m_full_bin_x;
+            m_nextROI.bin_y = m_full_bin_y;
+
+            //restore defaults for next time
+            m_full_currbin_x = 0;
+            m_full_currbin_y = 0;
+            m_full_currbin_w = 0;
+            m_full_currbin_h = 0;
+         }
+         else 
+         {
+            m_nextROI.bin_x = m_currentROI.bin_x;
+            m_nextROI.bin_y = m_currentROI.bin_y;
+         }
+
+         m_lastROI = m_currentROI;
+         mx::meta::trueFalseT<derivedT::c_stdCamera_usesROI> tf;
+         return setNextROI(tf);
+      }
+      
+      return 0;  
+   }
+   
+   return 0;
+}
+
+template<class derivedT>
+int stdCamera<derivedT>::newCallBack_roi_loadlast( const pcf::IndiProperty &ipRecv )
+{
+   if(derivedT::c_stdCamera_usesROI)
+   {
+      if(ipRecv.getName() != m_indiP_roi_loadlast.getName())
+      {
+         derivedT::template log<software_error>({__FILE__,__LINE__, "wrong INDI property received."});
+         return -1;
+      }
+      
+      if(!ipRecv.find("request")) return 0;      
+
+      if( ipRecv["request"].getSwitchState() == pcf::IndiElement::On)
+      {
+         std::unique_lock<std::mutex> lock(derived().m_indiMutex);
+         
+         indi::updateSwitchIfChanged(m_indiP_roi_loadlast, "request", pcf::IndiElement::Off, derived().m_indiDriver, INDI_IDLE);
+         
+         m_nextROI = m_lastROI;
+         return 0;
       }
       
       return 0;  
@@ -2131,7 +2376,7 @@ int stdCamera<derivedT>::newCallBack_roi_last( const pcf::IndiProperty &ipRecv )
       {
          std::unique_lock<std::mutex> lock(derived().m_indiMutex);
          
-         indi::updateSwitchIfChanged(m_indiP_roi_full, "request", pcf::IndiElement::Off, derived().m_indiDriver, INDI_IDLE);
+         indi::updateSwitchIfChanged(m_indiP_roi_last, "request", pcf::IndiElement::Off, derived().m_indiDriver, INDI_IDLE);
          
          m_nextROI = m_lastROI;
          m_lastROI = m_currentROI;
@@ -2146,12 +2391,12 @@ int stdCamera<derivedT>::newCallBack_roi_last( const pcf::IndiProperty &ipRecv )
 }
 
 template<class derivedT>
-int stdCamera<derivedT>::newCallBack_roi_startup( const pcf::IndiProperty &ipRecv )
+int stdCamera<derivedT>::newCallBack_roi_default( const pcf::IndiProperty &ipRecv )
 {
    if(derivedT::c_stdCamera_usesROI)
    {
       
-      if(ipRecv.getName() != m_indiP_roi_startup.getName())
+      if(ipRecv.getName() != m_indiP_roi_default.getName())
       {
          derivedT::template log<software_error>({__FILE__,__LINE__, "wrong INDI property received."});
          return -1;
@@ -2164,14 +2409,14 @@ int stdCamera<derivedT>::newCallBack_roi_startup( const pcf::IndiProperty &ipRec
       {
          std::unique_lock<std::mutex> lock(derived().m_indiMutex);
          
-         indi::updateSwitchIfChanged(m_indiP_roi_startup, "request", pcf::IndiElement::Off, derived().m_indiDriver, INDI_IDLE);
+         indi::updateSwitchIfChanged(m_indiP_roi_default, "request", pcf::IndiElement::Off, derived().m_indiDriver, INDI_IDLE);
          
-         m_nextROI.x = m_startup_x;
-         m_nextROI.y = m_startup_y;
-         m_nextROI.w = m_startup_w;
-         m_nextROI.h = m_startup_h;
-         m_nextROI.bin_x = m_startup_bin_x;
-         m_nextROI.bin_y = m_startup_bin_y;
+         m_nextROI.x = m_default_x;
+         m_nextROI.y = m_default_y;
+         m_nextROI.w = m_default_w;
+         m_nextROI.h = m_default_h;
+         m_nextROI.bin_x = m_default_bin_x;
+         m_nextROI.bin_y = m_default_bin_y;
          m_lastROI = m_currentROI;
          mx::meta::trueFalseT<derivedT::c_stdCamera_usesROI> tf;
          return setNextROI(tf);

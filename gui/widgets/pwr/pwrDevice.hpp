@@ -6,7 +6,7 @@
 
 #include <mx/ioutils/stringUtils.hpp>
 
-#include "../../lib/multiIndi.hpp"
+#include "../../lib/multiIndiSubscriber.hpp"
 
 #include "pwrChannel.hpp"
 

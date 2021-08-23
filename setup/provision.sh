@@ -151,6 +151,10 @@ if [[ $MAGAOX_ROLE == AOC || $MAGAOX_ROLE == ICC || $MAGAOX_ROLE == RTC ]]; then
     sudo bash -l "$DIR/steps/configure_etc_hosts.sh"
 fi
 
+if [[ $MAGAOX_ROLE == AOC || $MAGAOX_ROLE == ICC || $MAGAOX_ROLE == RTC ]]; then
+    sudo bash -l "$DIR/steps/configure_nfs.sh"
+fi
+
 if [[ $MAGAOX_ROLE == AOC || $MAGAOX_ROLE == ICC || $MAGAOX_ROLE == RTC || $MAGAOX_ROLE == TOC || $MAGAOX_ROLE == TIC ]]; then
     sudo bash -l "$DIR/steps/configure_chrony.sh"
 fi

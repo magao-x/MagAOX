@@ -58,8 +58,9 @@ IndiConnection::IndiConnection( const string &szName,
 /// Copy constructor.
 /// \param idRhs Another version of the driver.
 
-IndiConnection::IndiConnection( const IndiConnection &idRhs )
+IndiConnection::IndiConnection( const IndiConnection &idRhs ) : Thread()
 {
+  static_cast<void>(idRhs);
   // Empty because this is private.
 }
 
@@ -71,6 +72,7 @@ IndiConnection::IndiConnection( const IndiConnection &idRhs )
 
 const IndiConnection &IndiConnection::operator= ( const IndiConnection &idRhs )
 {
+  static_cast<void>(idRhs);
   // Empty because this is private.
   return *this;
 }

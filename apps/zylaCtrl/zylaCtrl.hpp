@@ -197,6 +197,14 @@ public:
      */ 
    int setExpTime();
    
+   /// Required by stdCamera, checks the next ROI [stdCamera interface]
+   /** Checks if the target values are valid and adjusts them to the closest valid values if needed.
+     *
+     * \returns 0 if successful
+     * \returns -1 on error
+     */
+   int checkNextROI();
+
    /// Required by stdCamera, but this does not do anything for this camera [stdCamera interface]
    /**
      * \returns 0 always
@@ -821,7 +829,12 @@ int zylaCtrl::setFPS()
    return 0;
 }
 
-   
+inline 
+int zylaCtrl::checkNextROI()
+{
+   return 0;
+}
+
 inline 
 int zylaCtrl::setNextROI()
 {

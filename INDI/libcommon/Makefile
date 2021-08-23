@@ -19,7 +19,6 @@ all: libcommon.a
 
 SRCS = \
 	 Cmd.cpp \
-	 Fits.cpp \
 	 IndiConnection.cpp \
 	 IndiClient.cpp \
 	 IndiDriver.cpp \
@@ -28,15 +27,16 @@ SRCS = \
 	 IndiProperty.cpp \
 	 IndiPropertyMap.cpp \
 	 IndiXmlParser.cpp \
-	 LogFile.cpp \
-	 Logger.cpp \
 	 System.cpp \
 	 SystemSocket.cpp \
-	 TCPConnection.cpp \
-	 TCPListener.cpp \
 	 Thread.cpp \
 	 TimeStamp.cpp
 
+#   TCPConnection.cpp \
+#	 TCPListener.cpp \
+#	 LogFile.cpp \
+#	 Logger.cpp \
+#   Fits.cpp \
 #	 Config.cpp \
 #	 ConfigFile.cpp \
 

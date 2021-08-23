@@ -62,6 +62,14 @@ struct usbDevice
    int getDeviceName();
 
    ///Connect to the device.
+   /** Closes the device file descriptor if open, then calls ttyOpenRaw.
+     * 
+     * \returns TTY_E_NOERROR on success.
+     * \returns TTY_E_TCGETATTR on a error from tcgetattr.
+     * \returns TTY_E_TCSETATTR on an error from tcsetattr.
+     * \returns TTY_E_SETISPEED on a cfsetispeed error.
+     * \returns TTY_E_SETOSPEED on a cfsetospeed error.
+     */
    int connect();
 };
 

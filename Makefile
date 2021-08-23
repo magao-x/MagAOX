@@ -22,8 +22,8 @@ apps_rtc = \
 	bmcCtrl \
 	pi335Ctrl \
 	pupilFit \
-        t2wOffloader \
-        cacaoInterface
+   t2wOffloader \
+   cacaoInterface
 
 apps_icc = \
         cacaoInterface \
@@ -42,9 +42,9 @@ apps_icc = \
 
 apps_aoc = \
 	trippLitePDU \
-        tcsInterface \
-        adcTracker \
-        kTracker
+   tcsInterface \
+   adcTracker \
+   kTracker
 
 # apps_vm = none yet
 apps_tic = \
@@ -72,13 +72,15 @@ else ifeq ($(MAGAOX_ROLE),TIC)
 #   apps_to_build += $(apps_vm)
 endif
 
-all_guis = dmCtrlGUI \
+all_guis = \
+   dmCtrlGUI \
 	dmModeGUI \
 	offloadCtrlGUI \
 	pupilGuideGUI \
 	pwr \
 	coronAlignGUI \
-        loopCtrlGUI
+   loopCtrlGUI \
+	roiGUI
 
 ifeq ($(MAGAOX_ROLE),RTC)
   guis_to_build =
@@ -112,15 +114,22 @@ utils_to_build = logdump \
 
 scripts_to_install = magaox query_seeing sync_cacao xctrl netconsole_logger
 
-all: indi_all libs_all apps_all utils_all
+all: indi_all libs_all flatlogs apps_all guis_all utils_all
 
-install: indi_install libs_install apps_install utils_install scripts_install
+install: indi_install libs_install flatlogs_all apps_install guis_install utils_install scripts_install
 
-#We clean just libMagAOX, and the apps and utils for normal devel work.
-clean: lib_clean apps_clean utils_clean
+#We clean just libMagAOX, and the apps, guis, and utils for normal devel work.
+clean: lib_clean apps_clean guis_clean utils_clean
 
 #Clean everything.
-all_clean: indi_clean libs_clean lib_clean apps_clean utils_clean doc_clean
+all_clean: indi_clean libs_clean flatlogs_clean lib_clean apps_clean guis_clean utils_clean doc_clean
+
+flatlogs_all:
+	cd flatlogs/src/; ${MAKE} install
+
+flatlogs_clean:
+	cd flatlogs/src/; ${MAKE} clean
+	rm -rf flatlogs/bin
 
 indi_all:
 	cd INDI; ${MAKE} all
@@ -151,13 +160,13 @@ libs_clean:
 lib_clean:
 	cd libMagAOX; ${MAKE} clean
 
-apps_all: libs_install
+apps_all: libs_install flatlogs_all
 
 	for app in ${apps_to_build}; do \
 		(cd apps/$$app; ${MAKE} )|| exit 1; \
 	done
 
-apps_install:
+apps_install: flatlogs_all
 	for app in ${apps_to_build}; do \
 		(cd apps/$$app; ${MAKE}  install) || exit 1; \
 	done
@@ -204,12 +213,12 @@ scripts_install:
 		sudo ln -fs /opt/MagAOX/bin/$$script /usr/local/bin/$$script; \
 	done
 
-utils_all:
+utils_all: flatlogs_all
 		for app in ${utils_to_build}; do \
 			(cd utils/$$app; ${MAKE}) || exit 1; \
 		done
 
-utils_install:
+utils_install: flatlogs_all
 		for app in ${utils_to_build}; do \
 			(cd utils/$$app; ${MAKE} install) || exit 1; \
 		done

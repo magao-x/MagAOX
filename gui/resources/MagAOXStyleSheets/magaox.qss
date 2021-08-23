@@ -842,6 +842,34 @@ QLabel:disabled[isStatus="true"]
    color: #047782;
 }
 
+QLabel[isStatusChanged="true"]
+{
+    border-width : 0.1ex;
+    border-style:inset;
+    border-radius:0.2ex;
+    border-color: #08ebff;
+}
+
+QLineEdit[isStatus="true"]
+{
+   color: #08ebff;
+}
+QLineEdit:disabled[isStatus="true"]
+{
+   color: #047782;
+}
+
+QLineEdit[isStatusChanged="true"]
+{
+   border-color: #08ebff;
+}
+
+QLineEdit[isEditing="true"]
+{
+   color: #eff0f1;
+}
+
+
 QLCDNumber[isStatus="true"]
 {
    color: #08ebff;

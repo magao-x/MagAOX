@@ -43,9 +43,10 @@ IndiDriver::IndiDriver( const string &szName,
 /// Copy constructor.
 /// \param idRhs Another version of the driver.
 
-IndiDriver::IndiDriver(const IndiDriver &idRhs )
+IndiDriver::IndiDriver(const IndiDriver &idRhs ) : IndiConnection()
 //  : IndiConnection( idRhs )  // can't invoke - private
 {
+  static_cast<void>(idRhs);
   // Empty because this is private.
 }
 
@@ -58,6 +59,7 @@ IndiDriver::IndiDriver(const IndiDriver &idRhs )
 const IndiDriver &IndiDriver::operator= ( const IndiDriver &idRhs )
 //  : IndiConnection::operator= ( idRhs )  // can't invoke - private
 {
+  static_cast<void>(idRhs);
   // Empty because this is private.
   return *this;
 }
@@ -176,8 +178,9 @@ void IndiDriver::dispatch( const IndiMessage::Type &tType,
     case IndiMessage::NewProperty:
       if ( handleDriverNewProperty( ipDispatch ) == false )
       {
-        handleNewProperty( ipDispatch ); break;
+        handleNewProperty( ipDispatch );
       }
+      break;
     case IndiMessage::SetProperty:
       handleSetProperty( ipDispatch ); break;
     default:
@@ -219,6 +222,8 @@ void IndiDriver::execute()
 
 bool IndiDriver::handleDriverGetProperties( const IndiProperty &ipRecv )
 {
+  static_cast<void>(ipRecv);
+
   // Log the fact that we can now respond to INDI requests.
   if ( isResponseModeEnabled() == false )
   {
@@ -241,6 +246,8 @@ bool IndiDriver::handleDriverGetProperties( const IndiProperty &ipRecv )
 
 bool IndiDriver::handleDriverNewProperty( const IndiProperty &ipRecv )
 {
+  static_cast<void>(ipRecv);
+
   // Assume we didn't handle the NEW and it will be handled by
   // the derived class.
   bool oHandledProperty = false;
@@ -255,6 +262,7 @@ bool IndiDriver::handleDriverNewProperty( const IndiProperty &ipRecv )
 
 void IndiDriver::handleDefProperty( const pcf::IndiProperty &ipRecv )
 {
+  static_cast<void>(ipRecv);
 }
 
 ////////////////////////////////////////////////////////////////////////////////
@@ -264,6 +272,7 @@ void IndiDriver::handleDefProperty( const pcf::IndiProperty &ipRecv )
 
 void IndiDriver::handleDelProperty( const pcf::IndiProperty &ipRecv )
 {
+  static_cast<void>(ipRecv);
 }
 
 ////////////////////////////////////////////////////////////////////////////////
@@ -273,6 +282,7 @@ void IndiDriver::handleDelProperty( const pcf::IndiProperty &ipRecv )
 
 void IndiDriver::handleGetProperties( const pcf::IndiProperty &ipRecv )
 {
+  static_cast<void>(ipRecv);
 }
 
 ////////////////////////////////////////////////////////////////////////////////
@@ -281,6 +291,7 @@ void IndiDriver::handleGetProperties( const pcf::IndiProperty &ipRecv )
 
 void IndiDriver::handleMessage( const pcf::IndiProperty &ipRecv )
 {
+  static_cast<void>(ipRecv);
 }
 
 ////////////////////////////////////////////////////////////////////////////////
@@ -289,6 +300,7 @@ void IndiDriver::handleMessage( const pcf::IndiProperty &ipRecv )
 
 void IndiDriver::handleNewProperty( const pcf::IndiProperty &ipRecv )
 {
+  static_cast<void>(ipRecv);
 }
 
 ////////////////////////////////////////////////////////////////////////////////
@@ -297,6 +309,7 @@ void IndiDriver::handleNewProperty( const pcf::IndiProperty &ipRecv )
 
 void IndiDriver::handleSetProperty( const pcf::IndiProperty &ipRecv )
 {
+  static_cast<void>(ipRecv);
 }
 
 ////////////////////////////////////////////////////////////////////////////////
