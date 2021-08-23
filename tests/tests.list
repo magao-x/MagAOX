@@ -1,6 +1,6 @@
 
-../libMagAOX/app/dev/tests/outletController_tests 
-../libMagAOX/sys/tests/thSetuid_tests 
+../libMagAOX/app/dev/tests/outletController_test
+../libMagAOX/sys/tests/thSetuid_test
 ../libMagAOX/tty/tests/ttyIOUtils_test 
 ../apps/ocam2KCtrl/tests/ocamUtils_test 
 ../apps/rhusbMon/tests/rhusbMonParsers_test

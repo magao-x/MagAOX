@@ -30,6 +30,9 @@ libMagAOX/doc/sw_html/
 apps/doc/
 doc/www/
 
+#ignore test executables
+**/tests/*_test
+
 ##########################################
 #Executables and app specifics to ignore:
 
