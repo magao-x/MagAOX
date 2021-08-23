@@ -31,8 +31,11 @@ namespace MagAOX
 namespace app
 {
 
-/// The MagAO-X RH USB monitoring class
-/** 
+/// The MagAO-X RH-USB monitoring class
+/** Interacts with the Omega RH-USB probe used for DM chamber humidity monitoring.
+  * 
+  * \todo need a test mode (compile-time) which adds a way (INDI?) to initiate testing of parameter limits.
+  * 
   * \ingroup rhusbMon
   */
 class rhusbMon : public MagAOXApp<true>, public tty::usbDevice, public dev::ioDevice, public dev::telemeter<rhusbMon>
@@ -41,19 +44,17 @@ class rhusbMon : public MagAOXApp<true>, public tty::usbDevice, public dev::ioDe
    //Give the test harness access.
    friend class rhusbMon_test;
 
+   //Let telemeter work.
    friend class dev::telemeter<rhusbMon>;
    
 protected:
 
    /** \name Configurable Parameters
      *@{
-     */
-   
-   //here add parameters which will be config-able at runtime
-   
-   float m_warnTemp {30};
-   float m_alertTemp {35};
-   float m_emergTemp {40};
+     */   
+   float m_warnTemp {30};  ///< This is abnormally high if the system is working, but still safe.
+   float m_alertTemp {35}; ///< This is the actual limit, shut down should occur.
+   float m_emergTemp {40}; ///< Must shutdown immediately.
    
    float m_warnHumid {18};  ///< This is abnormally high if the system is working, but still safe.
    float m_alertHumid {20}; ///< This is the actual limit, shut down should occur.
@@ -61,11 +62,11 @@ protected:
 
    ///@}
    
-   float m_temp {-99};
-   float m_rh {-99};
+   float m_temp {-999};
+   float m_rh {-999};
    
    pcf::IndiProperty m_indiP_temp;
-   pcf::IndiProperty m_indiP_humid;
+   pcf::IndiProperty m_indiP_rh;
    
 
 public:
@@ -104,8 +105,23 @@ public:
      */
    virtual int appShutdown();
 
+   /// Connect to the probe
+   /** Search for the USB device in udev and attempt ot open it.
+     * The result is reported via the FSM state (NODEVICE, NOTCONNECTED, CONNECTED).
+     * 
+     * \returns -1 on an error attempting to read udev 
+     * \returns 0 if device not found, or connection does not work, or if connected. 
+     */
    int connect();
 
+   /// Read current values from the RH-USB probe
+   /** Issues the 'C' and 'H' commands to get temperature and humidity.
+     * 
+     * \returns -1 on error writing or reading, or on a parsing error
+     * 
+     * \see \parseC( float &, const std::string)
+     * \see \parseH( float &, const std::string)
+     */ 
    int readProbe();
 
    /** \name Telemeter Interface
@@ -114,12 +130,13 @@ public:
      */ 
    int checkRecordTimes();
    
-   int recordTelem( const telem_temps * );
+   int recordTelem( const telem_rhusb * );
    
 protected:
-   std::vector<float> m_lastTemps;
-   
-   int recordTemps( bool force = false );
+
+   int recordRH( bool force = false );
+
+   ///@}
    
 };
 
@@ -174,14 +191,14 @@ void rhusbMon::loadConfig()
 int rhusbMon::appStartup()
 {
    createROIndiNumber( m_indiP_temp, "temperature", "Temperature [C]");
-   indi::addNumberElement<double>( m_indiP_temp, "current", -20., 120., 0, "%0.1f");
+   indi::addNumberElement<float>( m_indiP_temp, "current", -20., 120., 0, "%0.1f");
    m_indiP_temp["current"] = -999;
    registerIndiPropertyReadOnly(m_indiP_temp);
    
-   createROIndiNumber( m_indiP_humid, "humidity", "Humidity [%]");
-   indi::addNumberElement<double>( m_indiP_humid, "current", 0., 100., 0, "%0.1f");
-   m_indiP_humid["current"] = -999;
-   registerIndiPropertyReadOnly(m_indiP_humid);
+   createROIndiNumber( m_indiP_rh, "humidity", "Relative Humidity [%]");
+   indi::addNumberElement<float>( m_indiP_rh, "current", 0., 100., 0, "%0.1f");
+   m_indiP_rh["current"] = -999;
+   registerIndiPropertyReadOnly(m_indiP_rh);
 
    
    if(dev::telemeter<rhusbMon>::appStartup() < 0)
@@ -202,12 +219,12 @@ int rhusbMon::appLogic()
       if(rv < 0) return log<software_error,-1>({__FILE__, __LINE__});
    }
 
-   if(state() == stateCodes::CONNECTED || state() == stateCodes::READY)
+   if(state() == stateCodes::CONNECTED || state() == stateCodes::OPERATING)
    {
       int rv = readProbe();
       if(rv == 0)
       {
-         state(stateCodes::READY);
+         state(stateCodes::OPERATING);
       }
       else
       {
@@ -216,6 +233,51 @@ int rhusbMon::appLogic()
       }
    }
    
+   pcf::IndiProperty::PropertyStateType rhState = pcf::IndiProperty::Ok;
+   //Check warning and alert values
+   if(m_rh > m_emergHumid)
+   {
+      log<text_log>("RH > " + std::to_string(m_emergHumid) + "% : " + std::to_string(m_rh) + "%!  Shutdown immediately!", logPrio::LOG_EMERGENCY); 
+      rhState = pcf::IndiProperty::Alert;
+   }
+   else if(m_rh > m_alertHumid)
+   {
+      log<text_log>("RH > " + std::to_string(m_alertHumid) + "% : " + std::to_string(m_rh) + "%.  Fix or shutdown.", logPrio::LOG_ALERT); 
+      rhState = pcf::IndiProperty::Alert;
+   }
+   else if(m_rh > m_warnHumid)
+   {
+      log<text_log>("RH > " + std::to_string(m_warnHumid) + "% : " + std::to_string(m_rh) + "%.", logPrio::LOG_WARNING);
+      rhState = pcf::IndiProperty::Alert;
+   }
+
+   pcf::IndiProperty::PropertyStateType tState = pcf::IndiProperty::Ok;
+   //Check warning and alert values
+   if(m_temp > m_emergTemp)
+   {
+      log<text_log>("Temp > " + std::to_string(m_emergTemp) + "C : " + std::to_string(m_temp) + "C!  Shutdown immediately!", logPrio::LOG_EMERGENCY); 
+      tState = pcf::IndiProperty::Alert;
+   }
+   else if(m_temp > m_alertTemp)
+   {
+      log<text_log>("Temp > " + std::to_string(m_alertTemp) + "C : " + std::to_string(m_temp) + "C.  Fix or shutdown.", logPrio::LOG_ALERT); 
+      tState = pcf::IndiProperty::Alert;
+   }
+   else if(m_temp > m_warnTemp)
+   {
+      log<text_log>("Temp > " + std::to_string(m_warnTemp) + "C : " + std::to_string(m_temp) + "C.", logPrio::LOG_WARNING);
+      tState = pcf::IndiProperty::Alert;
+   }
+
+   //Scope for mutex
+   { 
+      std::unique_lock<std::mutex> lock(m_indiMutex);
+      updateIfChanged(m_indiP_temp, "current", m_temp, tState);
+
+      m_indiP_rh["current"].set<float>(-999); //Force the update to get a new timestamp
+      updateIfChanged(m_indiP_rh, "current", m_rh, rhState); ///\todo updateIfChanged should have a force flag
+   }
+
    if(telemeter<rhusbMon>::appLogic() < 0)
    {
       return log<software_error,0>({__FILE__, __LINE__});
@@ -234,12 +296,9 @@ int rhusbMon::connect()
    int rv = tty::usbDevice::getDeviceName();
    if(rv < 0 && rv != TTY_E_DEVNOTFOUND && rv != TTY_E_NODEVNAMES)
    {
+      //There is no device reason for this to error.  Something is wrong.
       state(stateCodes::FAILURE);
-      if(!stateLogged())
-      {
-         log<software_critical>({__FILE__, __LINE__, rv, tty::ttyErrorString(rv)});
-      }
-      return -1;
+      return log<software_critical, -1>({__FILE__, __LINE__, rv, tty::ttyErrorString(rv)});
    }
 
    if(rv == TTY_E_DEVNOTFOUND || rv == TTY_E_NODEVNAMES)
@@ -264,7 +323,8 @@ int rhusbMon::connect()
          log<text_log>(logs.str());
       }
 
-      {//scope for elPriv
+      //scope for elevated priv
+      {
          elevatedPrivileges elPriv(this);
          rv = tty::usbDevice::connect();
       }
@@ -281,7 +341,9 @@ int rhusbMon::connect()
       }
       else
       {
-         std::cerr << rv << "\n";
+         //There is no power or other reason this should happen.  It means something is wrong and needs to be corrected.
+         state(stateCodes::FAILURE);
+         return log<software_critical, -1>({__FILE__,__LINE__, errno, rv, "Error opening connection: " + tty::ttyErrorString(rv)});
       }
    }
 
@@ -355,16 +417,16 @@ int rhusbMon::readProbe()
 
 int rhusbMon::checkRecordTimes()
 {
-   return dev::telemeter<rhusbMon>::checkRecordTimes(telem_temps());
+   return dev::telemeter<rhusbMon>::checkRecordTimes(telem_rhusb());
 }
    
-int rhusbMon::recordTelem( const telem_temps * )
+int rhusbMon::recordTelem( const telem_rhusb * )
 {
-   return recordTemps(true);
+   return recordRH(true);
 }
 
 inline 
-int rhusbMon::recordTemps(bool force)
+int rhusbMon::recordRH(bool force)
 {
    static float lastTemp = -99;
    static float lastRH = -99;
