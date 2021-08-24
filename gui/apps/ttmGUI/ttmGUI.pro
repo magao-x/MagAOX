@@ -25,9 +25,10 @@ exists( $$(CONDA_PREFIX)/include ) {
 MAKEFILE = makefile.ttmGUI
 
 # Input
-INCLUDEPATH += ../../lib ../../widgets/ttm
+INCLUDEPATH += ../../lib ../../lib ../../widgets 
 
 HEADERS += ../../widgets/ttm/ttm.hpp \
+           ../../widgets/xWidgets/xWidget.hpp \
            ../../lib/multiIndi.hpp \
            ../../lib/multiIndiManager.hpp
            

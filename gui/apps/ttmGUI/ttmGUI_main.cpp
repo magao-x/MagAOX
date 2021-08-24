@@ -33,6 +33,7 @@ int main(int argc, char *argv[])
    xqt::ttm loop(procName);
    mgr.addSubscriber(&loop);
    
+   mgr.activate();
    loop.show();
    
    int rv = app.exec();

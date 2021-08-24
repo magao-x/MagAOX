@@ -6,12 +6,14 @@
 
 #include "ui_ttm.h"
 
-#include "../../lib/multiIndi.hpp"
+#include "xWidgets/xWidget.hpp"
+// #include "../../lib/multiIndiSubscriber.hpp"
+// #include "../../lib/multiIndiPublisher.hpp"
 
 namespace xqt 
 {
    
-class ttm : public QDialog, public multiIndiSubscriber
+class ttm : public xWidget
 {
    Q_OBJECT
    
@@ -44,11 +46,11 @@ public:
    
    ~ttm();
    
-   int subscribe( multiIndiPublisher * publisher );
+   void subscribe();
                                    
-   int handleDefProperty( const pcf::IndiProperty & ipRecv /**< [in] the property which has changed*/);
+   void handleDefProperty( const pcf::IndiProperty & ipRecv /**< [in] the property which has changed*/);
    
-   int handleSetProperty( const pcf::IndiProperty & ipRecv /**< [in] the property which has changed*/);
+   void handleSetProperty( const pcf::IndiProperty & ipRecv /**< [in] the property which has changed*/);
    
    void sendNewPos1(double np);
    void sendNewPos2(double np);
@@ -82,7 +84,7 @@ private:
    
 ttm::ttm( std::string & procName,
                     QWidget * Parent, 
-                    Qt::WindowFlags f) : QDialog(Parent, f), m_procName{procName}
+                    Qt::WindowFlags f) : xWidget(Parent, f), m_procName{procName}
 {
    ui.setupUi(this);
    
@@ -96,41 +98,39 @@ ttm::ttm( std::string & procName,
    ui.label_device->setText(m_procName.c_str());
    ui.label_device_status->setText("unkown");
    
+   onDisconnect();
 }
    
 ttm::~ttm()
 {
 }
 
-int ttm::subscribe( multiIndiPublisher * publisher )
+void ttm::subscribe()
 {
-   if(!publisher) return -1;
+   if(!m_parent) return;
    
-   publisher->subscribeProperty(this, m_procName, "fsm");
-   publisher->subscribeProperty(this, m_procName, "pos_1");
-   publisher->subscribeProperty(this, m_procName, "pos_2");
-   publisher->subscribeProperty(this, m_procName, "pos_3");
+   m_parent->addSubscriberProperty((multiIndiSubscriber *) this, m_procName, "fsm");
+   m_parent->addSubscriberProperty((multiIndiSubscriber *) this, m_procName, "pos_1");
+   m_parent->addSubscriberProperty((multiIndiSubscriber *) this, m_procName, "pos_2");
+   m_parent->addSubscriberProperty((multiIndiSubscriber *) this, m_procName, "pos_3");
    
-   publisher->subscribeProperty(this, m_procName, "sm_shmimName");
-   publisher->subscribeProperty(this, m_procName, "flat");
-   publisher->subscribeProperty(this, m_procName, "flat_shmim");
-   publisher->subscribeProperty(this, m_procName, "flat_set");
-   publisher->subscribeProperty(this, m_procName, "test");
-   publisher->subscribeProperty(this, m_procName, "test_shmim");
-   publisher->subscribeProperty(this, m_procName, "test_set");
-   return 0;
+   m_parent->addSubscriberProperty((multiIndiSubscriber *) this, m_procName, "sm_shmimName");
+   m_parent->addSubscriberProperty((multiIndiSubscriber *) this, m_procName, "flat_shmim");
+   m_parent->addSubscriberProperty((multiIndiSubscriber *) this, m_procName, "flat_set");
+   m_parent->addSubscriberProperty((multiIndiSubscriber *) this, m_procName, "test");
+   m_parent->addSubscriberProperty((multiIndiSubscriber *) this, m_procName, "test_shmim");
+   m_parent->addSubscriberProperty((multiIndiSubscriber *) this, m_procName, "test_set");
+   return;
 }
    
-int ttm::handleDefProperty( const pcf::IndiProperty & ipRecv)
+void ttm::handleDefProperty( const pcf::IndiProperty & ipRecv)
 {  
    return handleSetProperty(ipRecv);
-   
-   return 0;
 }
 
-int ttm::handleSetProperty( const pcf::IndiProperty & ipRecv)
+void ttm::handleSetProperty( const pcf::IndiProperty & ipRecv)
 {  
-   if(ipRecv.getDevice() != m_procName) return 0;
+   if(ipRecv.getDevice() != m_procName) return;
    
    if(ipRecv.getName() == "fsm")
    {
@@ -187,7 +187,7 @@ int ttm::handleSetProperty( const pcf::IndiProperty & ipRecv)
 
    updateGUI();
    
-   return 0;
+   return;
    
 }
 
