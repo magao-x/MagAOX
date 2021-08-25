@@ -20,10 +20,11 @@ apps_rtc = \
 	siglentSDG \
 	ttmModulator \
 	bmcCtrl \
+        rhusbMon \
 	pi335Ctrl \
 	pupilFit \
-   t2wOffloader \
-   cacaoInterface
+        t2wOffloader \
+        cacaoInterface
 
 apps_icc = \
         cacaoInterface \
