@@ -1,7 +1,7 @@
 /**
  * \author  Jacob Trzaska
  * \file    cstrehl.cpp
- * \date    2021-07-20
+ * \date    2021-08-28
  */
 #include <iostream>
 #include <cstdio>
@@ -15,22 +15,22 @@
 #include <x86intrin.h>
 
 /* Parameters */
-#define IMROWS      (16384)              //Unitless
-#define IMCOLS      (16384)              //Unitless
-#define IMELEMENTS  (IMROWS * IMCOLS)    //Unitless
-
 #define MSKROWS     (1024)               //Unitless
 #define MSKCOLS     (1024)               //Unitless
 #define MSKELEMENTS (MSKROWS * MSKCOLS)  //Unitless
 
-#define MODROWS     (360)                //Unitless
-#define MODCOLS     (360)                //Unitless
+#define MODROWS     (128)                //Unitless
+#define MODCOLS     (128)                //Unitless
 #define MODELEMENTS (MODROWS * MODCOLS)  //Unitless
 
 #define DPX         (962.56)             //Unitless
 
 #define NUMRADII    (241)                //Unitless
 #define FNUM        (69.0)               //Unitless
+#define PIXEL_SIZE  (4.8)                //Units - um
+
+//Array containing WFS wavelengths.
+std::array<double, 2> wlArray {0.791, 0.837};  //Units - um
 
 
 /* Function Decalarations */
@@ -62,142 +62,113 @@ imshiftMov(double * im, size_t rows, size_t cols, int xshift, int yshift,
 
 int main()
 {
-     /// Overal strategy
-     /** The code is broken into series of steps 1, 2, 3, and 4.
-       * 
-       *  \1  Load in and build a zero-padded pupil mask.
-       *  \2  Fourier transform the pupil to get the PSF.
-       *  \3  Modulate the PSF in a circle, with varying
-       *       radii.
-       *  \4  Store Strehl amplitude values in binary file.
-       */
+      /* Table for the Strehl amplitude values. */
+      std::vector<double> saTable(NUMRADII * wlArray.size());
 
-     /* Initialize the memory buffers */
-     double * psfR
-          = new double[IMELEMENTS];
-     std::complex<double> * psfC 
-          = new std::complex<double>[IMELEMENTS];
-     std::complex<double> * mask 
-          = new std::complex<double>[IMELEMENTS];
+      /* Read in the pupil mask. */ 
+      double * temp = new double[MSKELEMENTS];
+      FILE *fptr = fopen("magMask.dat", "rb");
+      int stat = fread(temp, sizeof(double), MSKELEMENTS, fptr);
+      if (stat <= 0)
+          return 1;
+      fclose(fptr);
 
-     fftw_plan planF = fftw_plan_dft_2d(IMROWS, IMCOLS, 
+      
+      for (int n {0}; n < wlArray.size(); ++n)
+      {
+         int64_t NPX { (int64_t) ((wlArray[n] * FNUM * DPX) / PIXEL_SIZE) };
+
+         /* Table of modulation radii (in pixels). */
+         std::vector<double> radii(NUMRADII);
+         for (size_t i {0}; i < NUMRADII; ++i)
+            radii[i] = ((0.1 * NPX) / static_cast<double>(DPX)) 
+                     * i;
+
+         /* Initialize the memory buffers */
+         double * psfR
+             = new double[NPX * NPX];
+         std::complex<double> * psfC 
+             = new std::complex<double>[NPX * NPX];
+         std::complex<double> * mask 
+             = new std::complex<double>[NPX * NPX];
+
+         fftw_plan planF = fftw_plan_dft_2d(NPX, NPX, 
                               reinterpret_cast<fftw_complex*>(mask), 
                               reinterpret_cast<fftw_complex*>(psfC),
                               FFTW_FORWARD,
                               FFTW_MEASURE);
 
+         /* Calculate the PSF from magMask data */
+         for (size_t i{0}; i < (NPX * NPX); ++i)
+             mask[i] = 0;
 
-     /* Calculate the PSF from magMask data */
-     double * temp = new double[MSKELEMENTS];
-     
-     FILE *fptr = fopen("magMask.dat", "rb");
-     int stat = fread(temp, sizeof(double), MSKELEMENTS, fptr);
-     if (stat <= 0)
-          return 1;
-     fclose(fptr);
+        for (size_t i{0}; i < MSKROWS; ++i)
+             for (size_t j{0}; j < MSKCOLS; ++j)
+                  mask[j + i * NPX] = temp[j + i * MSKCOLS];
 
-     for (size_t i{0}; i < IMELEMENTS; ++i)
-          mask[i] = 0;
+         fftw_execute(planF);
 
-     for (size_t i{0}; i < MSKROWS; ++i)
-          for (size_t j{0}; j < MSKCOLS; ++j)
-          {
-               mask[j + i * IMCOLS] = temp[j + i * MSKCOLS];
-          }
-     delete[] temp;
-     temp = nullptr;
+         for (size_t i{0}; i < (NPX * NPX); ++i)
+             psfR[i] = abs(psfC[i]) * abs(psfC[i]);
 
-     fftw_execute(planF);
-
-     for (size_t i{0}; i < IMELEMENTS; ++i)
-          psfR[i] = abs(psfC[i]) * abs(psfC[i]);
-
-     fft_center(psfR, IMROWS, IMCOLS);
+         fft_center(psfR, NPX, NPX);
 
 
-     /* Crop the PSF into a N x N grid */
-     size_t N {MODCOLS};
-     double * im0 = new double[N * N];
+         /* Crop the PSF into a N x N grid */
+         size_t N {MODCOLS};
+         double * im0 = new double[N * N];
 
-     for (size_t i {IMROWS/2 - N/2}; i < IMROWS/2 + N/2; ++i)
-     {
-          for (size_t j {IMCOLS/2 - N/2}; j < IMCOLS/2 + N/2; ++j)
-          {
-               im0[(j - IMCOLS/2 + N/2) + (i - IMROWS/2 + N/2) * N] = psfR[j + i * IMCOLS];
-          }
-     }
+         for (size_t i {NPX/2 - N/2}; i < NPX/2 + N/2; ++i)
+         {
+            for (size_t j {NPX/2 - N/2}; j < NPX/2 + N/2; ++j)
+            {
+               im0[(j - NPX/2 + N/2) + (i - NPX/2 + N/2) * N] = psfR[j + i * NPX];
+            }
+         }
  
-     /*** Time to modulate the PSF. */
+         /*** Time to modulate the PSF. */
+         double * modIm {nullptr};
+         double  ctr[2] {0, 0};     
 
-     /* Set up a table for the Strehl amplitude values. */
-     std::vector<double> saTable(NUMRADII);
+         double sMax   {0};
+         double sTotal {0};
 
-     /* Simulate modulated point spread functions. */
-     std::vector<double> radii(NUMRADII);
-     for (size_t i {0}; i < NUMRADII; ++i)
-          radii[i] = 0.025 
-                   * (static_cast<double>(IMCOLS) / static_cast<double>(DPX)) 
-                   * i;
+         for (size_t i {0}; i < NUMRADII; ++i)
+         {
+            // Revolve the point spread function in a circle
+            modIm = modulate(im0, N, N, radii[i]);
 
-     double * modIm {nullptr};
-     double  ctr[2] {0, 0};     
-
-     double sMax   {0};
-     double sTotal {0};
-
-     for (size_t i {0}; i < NUMRADII; ++i)
-     {
-          // Revolve the point spread function in a circle
-          modIm = modulate(im0, N, N, radii[i]);
-
-          // Calculate the theoretical Strehl amplitude
-          estimateCentroid(modIm, N, N, ctr);
-          sMax = getStrehlMod(modIm, N, N, ctr);
-          sTotal = getFluxTotal(modIm, N, N);
-          saTable[i] = sMax / sTotal;
+            // Calculate the theoretical Strehl amplitude
+            estimateCentroid(modIm, N, N, ctr);
+            sMax = getStrehlMod(modIm, N, N, ctr);
+            sTotal = getFluxTotal(modIm, N, N);
+            saTable[i + n * NUMRADII] = sMax / sTotal;
         
-          // reset modIm for the next iteration 
-          delete[] modIm;
-          modIm = nullptr; 
-     }
+            // reset modIm for the next iteration 
+            delete[] modIm;
+            modIm = nullptr; 
+         }
 
-     /* Write to binary file */
-     double * sa_data = new double[NUMRADII];
-     for (size_t r {0}; r < NUMRADII; ++r)
+         fftw_destroy_plan(planF);
+         delete[] psfR;
+         delete[] psfC;
+         delete[] mask;
+         delete[] im0;
+      }
+
+      /* Write to binary file */
+      double * sa_data = new double[NUMRADII * wlArray.size()];
+      for (size_t r {0}; r < NUMRADII * wlArray.size(); ++r)
                sa_data[r] = saTable[r];
     
-     FILE * sa_ptr = fopen("sa.dat", "wb"); 
-     fwrite(sa_data, sizeof(double), NUMRADII, sa_ptr);
-     fclose(sa_ptr);
-     delete[] sa_data;
+      FILE * sa_ptr = fopen("sa.dat", "wb"); 
+      fwrite(sa_data, sizeof(double), NUMRADII * wlArray.size(), sa_ptr);
+      fclose(sa_ptr);
 
-     /// Testing
-     /** Final step: Use the Strehl amplitude table to try and get an
-       * accurate estimate of 'camtip.dat's Strehl ratio
-       * Testing gives a Strehl ratio of about 0.87 .
-       */
-     double * camtip_data = new double[128 * 128];
+      delete[] sa_data;
+      delete[] temp;
 
-     FILE * fptr2 = fopen("camtip.dat", "rb");
-     stat = fread(camtip_data, sizeof(double), 128 * 128, fptr2);
-     if (stat <= 0)
-          return 1;
-     fclose(fptr2);
-
-     estimateCentroid(camtip_data, 128, 128, ctr);
-     sMax = getStrehlMod(camtip_data, 128, 128, ctr);
-     sTotal = getFluxTotal(camtip_data, 128, 128);
-     double saActual = sMax / sTotal;
-
-     double saTheory = saTable[106];
-
-     std::cout << "[Result] Estimated Strehl ratio = " 
-               << (saActual / saTheory)
-               << std::endl;
-
-     delete[] camtip_data;
-
-     return 0;
+      return 0;
 }
 
 

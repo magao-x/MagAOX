@@ -8,4 +8,4 @@ data: sa.dat
 .PHONY: clean
 
 clean:
-	rm sratio *.o
+	rm sratio
