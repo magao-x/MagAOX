@@ -307,7 +307,8 @@ void copy_image0(double* in, void * image, size_t rows, size_t cols,
                  int datatype, size_t * xctr, size_t * yctr) {
 
    xctr[0] = 0;
-   yctr[0] = 0; 
+   yctr[0] = 0;
+   double tot {0}; 
 
    switch (datatype) {
       case _DATATYPE_UINT8:
@@ -315,6 +316,7 @@ void copy_image0(double* in, void * image, size_t rows, size_t cols,
          for (size_t j = 0; j < cols; ++j)
          {
             in[j + i * cols] = ((uint8_t *) image)[j + i * cols];
+            tot += in[j + i * cols];
             xctr[0] += (in[j + i * cols] * j);
             yctr[0] += (in[j + i * cols] * i);
          }
@@ -325,6 +327,7 @@ void copy_image0(double* in, void * image, size_t rows, size_t cols,
          for (size_t j = 0; j < cols; ++j)
          {
             in[j + i * cols] = ((int8_t *) image)[j + i * cols];
+            tot += in[j + i * cols];
             xctr[0] += (in[j + i * cols] * j);
             yctr[0] += (in[j + i * cols] * i);
          }
@@ -335,6 +338,7 @@ void copy_image0(double* in, void * image, size_t rows, size_t cols,
          for (size_t j = 0; j < cols; ++j)
          {
             in[j + i * cols] = ((uint16_t *) image)[j + i * cols];
+            tot += in[j + i * cols];
             xctr[0] += (in[j + i * cols] * j);
             yctr[0] += (in[j + i * cols] * i);
          }
@@ -345,6 +349,7 @@ void copy_image0(double* in, void * image, size_t rows, size_t cols,
          for (size_t j = 0; j < cols; ++j)
          {
             in[j + i * cols] = ((int16_t *) image)[j + i * cols];
+            tot += in[j + i * cols];
             xctr[0] += (in[j + i * cols] * j);
             yctr[0] += (in[j + i * cols] * i);
          }
@@ -355,6 +360,7 @@ void copy_image0(double* in, void * image, size_t rows, size_t cols,
          for (size_t j = 0; j < cols; ++j)
          {
             in[j + i * cols] = ((uint32_t *) image)[j + i * cols];
+            tot += in[j + i * cols];
             xctr[0] += (in[j + i * cols] * j);
             yctr[0] += (in[j + i * cols] * i);
          }
@@ -365,6 +371,7 @@ void copy_image0(double* in, void * image, size_t rows, size_t cols,
          for (size_t j = 0; j < cols; ++j)
          {
             in[j + i * cols] = ((int32_t *) image)[j + i * cols];
+            tot += in[j + i * cols];
             xctr[0] += (in[j + i * cols] * j);
             yctr[0] += (in[j + i * cols] * i);
          }
@@ -375,6 +382,7 @@ void copy_image0(double* in, void * image, size_t rows, size_t cols,
          for (size_t j = 0; j < cols; ++j)
          {
             in[j + i * cols] = ((uint64_t *) image)[j + i * cols];
+            tot += in[j + i * cols];
             xctr[0] += (in[j + i * cols] * j);
             yctr[0] += (in[j + i * cols] * i);
          }
@@ -385,6 +393,7 @@ void copy_image0(double* in, void * image, size_t rows, size_t cols,
          for (size_t j = 0; j < cols; ++j)
          {
             in[j + i * cols] = ((int64_t *) image)[j + i * cols];
+            tot += in[j + i * cols];
             xctr[0] += (in[j + i * cols] * j);
             yctr[0] += (in[j + i * cols] * i);
          }
@@ -395,6 +404,7 @@ void copy_image0(double* in, void * image, size_t rows, size_t cols,
          for (size_t j = 0; j < cols; ++j)
          {
             in[j + i * cols] = ((float *) image)[j + i * cols];
+            tot += in[j + i * cols];
             xctr[0] += (in[j + i * cols] * j);
             yctr[0] += (in[j + i * cols] * i);
          }
@@ -405,6 +415,7 @@ void copy_image0(double* in, void * image, size_t rows, size_t cols,
          for (size_t j = 0; j < cols; ++j)
          {
             in[j + i * cols] = ((double *) image)[j + i * cols];
+            tot += in[j + i * cols];
             xctr[0] += (in[j + i * cols] * j);
             yctr[0] += (in[j + i * cols] * i);
          }
@@ -415,6 +426,10 @@ void copy_image0(double* in, void * image, size_t rows, size_t cols,
       exit(EXIT_FAILURE);
 
    }
+
+   xctr[0] /= tot;
+   yctr[0] /= tot;
+
 }
 
 
