@@ -141,7 +141,6 @@ class imgChar : public MagAOXApp<true>,
 
       bool m_update {false};
 
-      float m_fps {0};
       float fps();
 
       int configureAcquisition(); 
@@ -166,7 +165,11 @@ class imgChar : public MagAOXApp<true>,
 
       pcf::IndiProperty m_indiP_modRadius;
       float m_modRadius {0};
-      INDI_SETCALLBACK_DECL(imgChar, m_indiP_modRadius);
+      INDI_SETCALLBACK_DECL( imgChar, m_indiP_modRadius);
+
+      pcf::IndiProperty m_indiP_fps;
+      float m_fps {0};
+      INDI_SETCALLBACK_DECL( imgChar, m_indiP_fps);
 
    private:
       double* sa_ptr;
@@ -233,12 +236,15 @@ int imgChar::appStartup()
 
    createROIndiNumber( m_indiP_shifts, "Shifts", "Shift [pixels]");
 
-   indi::addNumberElement<realT>( m_indiP_shifts, "x", -20., 120., 0, "%0.2f");
-   indi::addNumberElement<realT>( m_indiP_shifts, "y", -20., 120., 0, "%0.2f");
-   indi::addNumberElement<realT>( m_indiP_shifts, "SRM", -20, 120., 0, "%0.2f");
-   indi::addNumberElement<realT>( m_indiP_shifts, "SRR", -20, 120., 0, "%0.2f");
+   indi::addNumberElement<realT>( m_indiP_shifts, "x-rms", -20., 120., 0, "%0.2f");
+   indi::addNumberElement<realT>( m_indiP_shifts, "y-rms", -20., 120., 0, "%0.2f");
+   indi::addNumberElement<realT>( m_indiP_shifts, "strehl-mean", -20, 120., 0, "%0.2f");
+   indi::addNumberElement<realT>( m_indiP_shifts, "strehl-rms", -20, 120., 0, "%0.2f");
 
    registerIndiPropertyReadOnly(m_indiP_shifts);
+
+   REG_INDI_SETPROP( m_indiP_fps, "camtip", "fps");
+   REG_INDI_SETPROP( m_indiP_modRadius, "modwfs", "modRadius");
  
    state(stateCodes::OPERATING);  
 
@@ -277,10 +283,10 @@ int imgChar::appLogic()
       return 0;
    }
 
-   updateIfChanged(m_indiP_shifts, "x", m_xshiftRMS);
-   updateIfChanged(m_indiP_shifts, "y", m_yshiftRMS);
-   updateIfChanged(m_indiP_shifts, "SRM", m_strehlMean);
-   updateIfChanged(m_indiP_shifts, "SRR", m_strehlRMS);
+   updateIfChanged(m_indiP_shifts, "x-rms", m_xshiftRMS);
+   updateIfChanged(m_indiP_shifts, "y-rms", m_yshiftRMS);
+   updateIfChanged(m_indiP_shifts, "strehl-mean", m_strehlMean);
+   updateIfChanged(m_indiP_shifts, "strehl-rms", m_strehlRMS);
    
    return 0;
 }
@@ -347,10 +353,12 @@ inline
 int imgChar::processImage(void * curr_src, const dev::shmimT & dummy)
 {
    static_cast<void>(dummy); //be unused
+   m_update = false;
 
    size_t memSz = m_rows * (m_cols / 2 + 1) * sizeof(complexT);  
  
-   switch (m_template) { 
+   switch (m_template) 
+   { 
          case true:
          copy_image0(m_input, curr_src, m_rows, m_cols, m_dataType, &m_xctr, &m_yctr);
          fftw_execute(m_planF);
@@ -376,13 +384,13 @@ int imgChar::processImage(void * curr_src, const dev::shmimT & dummy)
          {
             m_data[2] = getStrehlMod(m_input, m_rows, m_cols, m_xctr, m_yctr); 
             m_data[2] /= sa_ptr[(size_t)(40*m_modRadius)];
+            std::cout << m_data[2] << "\n";
          }
 
-         m_strehlMean = m_strehlMean + ( (m_data[2] - m_strehlMean) / n);
-         // update RMS values
          m_rx = ((m_data[1] * m_data[1]) + (n - 1) * m_rx) / n;
          m_ry = ((m_data[0] * m_data[0]) + (n - 1) * m_ry) / n;
          m_rstrehl = ((m_data[2] * m_data[2]) + (n - 1) * m_rstrehl) / n;
+         m_strehlMean = m_strehlMean + ( (m_data[2] - m_strehlMean) / n);
 
          m_xshiftRMS = sqrt(m_rx);
          m_yshiftRMS = sqrt(m_ry);
@@ -398,6 +406,7 @@ int imgChar::processImage(void * curr_src, const dev::shmimT & dummy)
       return -1;
    }
 
+   m_update = true;
   
    return 0;
 }
@@ -421,6 +430,28 @@ INDI_SETCALLBACK_DEFN( imgChar, m_indiP_modRadius)(const pcf::IndiProperty &ipRe
    
    m_modRadius = ipRecv["current"].get<float>();
    
+   return 0;
+}
+
+
+
+INDI_SETCALLBACK_DEFN( imgChar, m_indiP_fps)(const pcf::IndiProperty &ipRecv)`
+{
+   if (ipRecv.getDevice() != m_indiP_fps.getDevice() || ipRecv.getName() != m_indiP_fps.getName())
+   {
+      log<software_error>({__FILE__, __LINE__, "Invalid INDI property."});
+      return -1;
+   }
+
+   if (ipRecv.find("current") != true)
+   {
+      return 0;
+   }
+
+   m_indiP_fps = ipRecv;
+
+   m_fps = ipRecv["current"].get<float>();
+
    return 0;
 }
 
@@ -513,7 +544,6 @@ int imgChar::loadImageIntoStream(void * dest)
                 * frameGrabberT::m_typeSize;
 
    memcpy(dest, m_data, memSz); 
-   m_update = true;
    return 0;
 }
 
