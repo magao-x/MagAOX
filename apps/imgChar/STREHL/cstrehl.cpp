@@ -25,7 +25,7 @@
 
 #define DPX         (962.56)             //Unitless
 
-#define NUMRADII    (241)                //Unitless
+#define NUMRADII    (61)                 //Unitless
 #define FNUM        (69.0)               //Unitless
 #define PIXEL_SIZE  (4.8)                //Units - um
 
