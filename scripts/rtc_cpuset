@@ -4,6 +4,9 @@
 ## 
 ## See https://linux.die.net/man/7/cpuset
 ##
+## Run this as sudo at startup of the system
+## Then run rtc_procset.bash after starting all loop processes
+##
 ####################################################
 
 
@@ -126,8 +129,6 @@ mkdir /dev/cpuset/aol1RT2
 /bin/echo 32,33 > /dev/cpuset/aol1RT2/cpuset.cpus
 /bin/echo 1 > /dev/cpuset/aol1RT2/cpuset.cpu_exclusive
 /bin/echo 0-1 > /dev/cpuset/aol1RT2/cpuset.mems
-
-/bin/echo $pid > /dev/cpuset/$cpusetname/tasks
 
 #aol1RT3 -- aol1-ProcessModeCo
 mkdir /dev/cpuset/aol1RT3
