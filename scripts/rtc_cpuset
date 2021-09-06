@@ -10,6 +10,11 @@
 ####################################################
 
 
+#Disable hyperthreading on cores 18-35 
+for cpu in {54..71}
+do
+   /bin/echo 0 > /sys/devices/system/cpu/cpu$cpu/online 
+done
 
 #Create and mount the root cpuset
 mkdir /dev/cpuset
