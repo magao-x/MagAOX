@@ -152,8 +152,8 @@ class imgChar : public MagAOXApp<true>,
    protected:
       pcf::IndiProperty m_indiP_shifts;
 
-      uint64_t idx_1s;
-      uint64_t idx_10buf;
+      uint64_t idx_1s {0};
+      uint64_t idx_10buf {0};
 
       std::vector<realT> x_1sec; // 1-second long buffer of x-shifts^2
       std::vector<realT> y_1sec; // 1-second long buffer of y-shifts^2
@@ -178,16 +178,20 @@ class imgChar : public MagAOXApp<true>,
       realT m_yshiftRMS_10  {0};
       realT m_strehlMean_10 {0};
       realT m_strehlRMS_10  {0};
+
+      uint64_t NUMRADII {61};
       
       uint64_t n;
 
       pcf::IndiProperty m_indiP_modRadius;
-      float m_modRadius {0};
+      float m_modRadius;
       INDI_SETCALLBACK_DECL( imgChar, m_indiP_modRadius);
 
       pcf::IndiProperty m_indiP_fps;
-      float m_fps {0};
+      float m_fps;
       INDI_SETCALLBACK_DECL( imgChar, m_indiP_fps);
+
+      bool rmsRun {false};
 
    private:
       double* sa_ptr;
@@ -311,6 +315,10 @@ int imgChar::appLogic()
       return 0;
    }
 
+
+   if (rmsRun == false)
+      goto WAIT_RMS;
+
    m_xshiftRMS_1  = 0;
    m_yshiftRMS_1  = 0;
    m_strehlMean_1 = 0;
@@ -420,6 +428,8 @@ int imgChar::appLogic()
    ++idx_10buf;
    idx_10buf = ( idx_10buf % 10 );
 
+   WAIT_RMS:
+std::cout << "tstLFinal\n";
    return 0;
 }
 
@@ -466,10 +476,11 @@ int imgChar::allocate(const dev::shmimT & dummy)
    m_dataType = shmimMonitorT::m_dataType;
    m_typeSize = ImageStreamIO_typesize(m_dataType);
 
-   x_1sec.resize( (int)fps(), 0);
-   y_1sec.resize( (int)fps(), 0);
-   s_1sec.resize( (int)fps(), 0);
+   x_1sec.resize( (uint64_t)fps(), 0);
+   y_1sec.resize( (uint64_t)fps(), 0);
+   s_1sec.resize( (uint64_t)fps(), 0);
 
+   std::cout << fps() << std::endl;
    m_xshiftRMS_1  = 0;
    m_yshiftRMS_1  = 0;
    m_strehlMean_1 = 0;
@@ -485,9 +496,10 @@ int imgChar::allocate(const dev::shmimT & dummy)
    m_strehlMean_10 = 0;
    m_strehlRMS_10  = 0;
 
-   idx_1s    = 0;
-   idx_10buf = 0;
+   idx_1s     = 0;
+   idx_10buf  = 0;
    m_template = true;
+   rmsRun     = true;
 
    return 0;
 }
@@ -518,36 +530,34 @@ int imgChar::processImage(void * curr_src, const dev::shmimT & dummy)
          point_multiply(m_image0_fft, m_output, m_cc_fft, m_rows, m_cols/2+1);
          fftw_execute(m_planB); 
          memset(m_cc_fft, 0, memSz);
-
+         
          GaussFit(m_rows, m_cols, m_cc_array, m_sz, m_data);
          if (m_modRadius == 0) 
-         {
+         { 
             m_data[2] = max(curr_src, m_rows * m_cols, m_dataType); 
-            m_data[2] /= sa_ptr[0]; // need to account for wavelength
+            m_data[2] /= sa_ptr[NUMRADII];
          } 
          else 
-         {
+         { 
             m_data[2] = getStrehlMod(m_input, m_rows, m_cols, m_xctr, m_yctr); 
-            m_data[2] /= sa_ptr[(size_t)(40*m_modRadius)]; // need to account for wavelength, and change the 40
-            std::cout << m_data[2] << "\n";
+            m_data[2] /= sa_ptr[(size_t)(10*m_modRadius) + NUMRADII];
          }
 
-         x_1sec[idx_1s] = m_data[1] * m_data[1];
+         x_1sec[idx_1s] = m_data[1] * m_data[1]; std::cout << "post strehl\n";
          y_1sec[idx_1s] = m_data[0] * m_data[0];
          s_1sec[idx_1s] = m_data[2];
-
+         std::cout << "Post arrays\n";
          ++idx_1s;
          idx_1s = idx_1s % ( (uint64_t)(fps()) );
          break;
    }
- 
+    
    if(sem_post(&m_smSemaphore) < 0)
    {
       log<software_critical>({__FILE__, __LINE__, errno, 0, 
                               "Error posting to semaphore."});
       return -1;
    }
-
    m_update = true;
   
    return 0;
@@ -685,7 +695,8 @@ int imgChar::loadImageIntoStream(void * dest)
                 * frameGrabberT::m_height 
                 * frameGrabberT::m_typeSize;
 
-   memcpy(dest, m_data, memSz); 
+   memcpy(dest, m_data, memSz);
+
    return 0;
 }
 
