@@ -52,7 +52,7 @@ namespace MagAOX::app
   * \ingroup jitterPSD
   * 
   */
-class jitterPSD : public MagAOXApp<false>, 
+class jitterPSD : public MagAOXApp<true>, 
                   public dev::shmimMonitor<jitterPSD>, 
                   public welchmethod,
                   public dev::frameGrabber<jitterPSD>
@@ -75,12 +75,6 @@ class jitterPSD : public MagAOXApp<false>,
    
 protected:
   
-   bool m_imOpened  {false};
-   bool m_imRestart {false};
- 
-   IMAGE m_shifts;
-   std::string m_shiftsKey {"camtip-shifts"};
-
    bool m_alloc0 {true};
 
    float m_fps {0.0};
@@ -204,6 +198,8 @@ int jitterPSD::appStartup()
       return -1;
    }
 
+   REG_INDI_SETPROP( m_indiP_fps, "camtip", "fps");
+
    state(stateCodes::OPERATING);  
    return 0;
 }
@@ -217,20 +213,18 @@ int jitterPSD::appLogic()
       return log<software_error,-1>({__FILE__,__LINE__});
    }
    
-   
+ 
+   if (frameGrabberT::appLogic() < 0)
+   {
+      return log<software_error,-1>({__FILE__,__LINE__});
+   }
+     
    std::unique_lock<std::mutex> lock(m_indiMutex);
    
    if(shmimMonitorT::updateINDI() < 0)
    {
       log<software_error>({__FILE__, __LINE__});
    }
-   
-
-   if (frameGrabberT::appLogic() < 0)
-   {
-      return log<software_error,-1>({__FILE__,__LINE__});
-   }
-   
    
    if (frameGrabberT::updateINDI() < 0)
    {
@@ -255,42 +249,16 @@ int jitterPSD::appShutdown()
 inline
 int jitterPSD::allocate(const dev::shmimT & dummy)
 {
-   static_cast<void>(dummy);
+      static_cast<void>(dummy);
 
-   if(m_imOpened)
-   {
-      ImageStreamIO_closeIm(&m_shifts);
-   }
-   
-   m_imOpened  = false;
-   m_imRestart = false;
-
-   if (ImageStreamIO_openIm(&m_shifts, m_shiftsKey.c_str()) == 0)
-   {
-      if (m_shifts.md[0].sem < 10) 
-      {
-            ImageStreamIO_closeIm(&m_shifts);
-      }
-      else
-      {
-         m_imOpened = true;
-      }
-   }
-      
-   if (!m_imOpened) 
-   {
-      log<software_error>({__FILE__, __LINE__, m_shiftsKey + " not opened."});
-      return -1;
-   } 
-   else 
-   {
-     
       double sampleTime = 1 / fps();
-      size_t num_modes = m_shifts.md[0].size[0];
+      size_t num_modes = shmimMonitor::m_width;
       size_t pts_10sec = (size_t) 10 * fps();  // we are using a 10 sec window
+
+      while (m_fps == 0) {}
       size_t pts_1sec = (size_t) fps(); 
 
-      welch_init(num_modes, pts_1sec, pts_10sec, sampleTime, window, &m_shifts, &m_smSemaphore);
+      welch_init(num_modes, pts_1sec, pts_10sec, sampleTime, window, &m_smSemaphore);
         
       m_psd0 = true;
       m_welchThreadRestart = true;
@@ -308,23 +276,18 @@ int jitterPSD::allocate(const dev::shmimT & dummy)
          m_alloc0 = false;
       }
    
-   }
- 
-   return 0;
+      return 0;
 }
 
 
 
 
 inline
-int jitterPSD::processImage( void * curr_src __attribute__((unused)), 
-                             const dev::shmimT & dummy 
-                           )
+int jitterPSD::processImage( void * curr_src, const dev::shmimT & dummy)
 {
    static_cast<void>(dummy);
-
-   welchFetch(); 
-
+   welchFetch( (double *) curr_src); 
+   m_update = true;
    return 0;
 }
 

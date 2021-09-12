@@ -1,10 +1,9 @@
+// Jacob Trzaska
 // welchpsd.h
 //
-// Module containing the code base for realtime 
-// welch method estimation of power spectral
-// densities.
-// Use ImageStreamIO and ImageStruct for interprocess
-// communication.
+// Module containing the code base for realtime welch method estimation 
+// of power spectral densities. Uses ImageStreamIO and ImageStruct for 
+// interprocess communication.
 
 #pragma once // WELCH_PSD_H
 
@@ -19,8 +18,6 @@
 #include <semaphore.h>
 
 #include <fftw3.h> // should be compiled with AVX/AVX2
-#include <ImageStruct.h>
-#include <ImageStreamIO.h>
 
 #include "buffer.hpp"
 
@@ -29,9 +26,9 @@
   *
   */ 
 struct psd_config {
-   size_t m_num_modes;
-   size_t m_signal_length;
-   double m_sample_time;
+   size_t m_num_modes;     // number of psds to calculate
+   size_t m_signal_length; // number of points for each psd
+   double m_sample_time;   // sampling time
 
    double*       m_in;
    fftw_complex* m_out; 
@@ -61,7 +58,7 @@ class welchmethod {
       welchmethod();
       ~welchmethod();
 
-      void welchFetch();
+      void welchFetch(double * data);
       
       void* welchCalculate();
 
@@ -70,7 +67,6 @@ class welchmethod {
                        size_t total_pts,
                        double dt,
                        double (*win) (size_t, size_t),
-                       IMAGE* imageIn,
                        sem_t* semOut
                      );
 
@@ -78,9 +74,6 @@ class welchmethod {
       psd_config m_psd;
       bool m_psd0;
       bool m_welchRunning;
-
-      IMAGE* m_imageIn;
-      IMAGE* m_imageOut;
 
       size_t m_totalDuration;
       size_t m_numPsds;

@@ -192,13 +192,13 @@ void* welchmethod::welchCalculate()
 
 
 
-void welchmethod::welchFetch()
+void welchmethod::welchFetch(double * data)
 {
    switch (m_psd0) {
    
       case true:
 
-         m_inbuf.add_buf_line(m_imageIn->array.D);
+         m_inbuf.add_buf_line(data);
 
          if (m_inbuf.dataptr == m_inbuf.blocks[2]) {
             m_psd0 = false;
@@ -209,7 +209,7 @@ void welchmethod::welchFetch()
 
       case false:
 
-         m_inbuf.add_buf_line(m_imageIn->array.D);
+         m_inbuf.add_buf_line(data);
 
          if (m_inbuf.dataptr == m_inbuf.blocks[3])
             sem_post(m_fetch);
@@ -269,7 +269,6 @@ void psd_config::psd_init(size_t mode_count, size_t signal_len,
 void welchmethod::welch_init( size_t mode_count, size_t signal_len,
                               size_t total_pts,  double dt, 
                               double (*win)(size_t, size_t),
-                              IMAGE* image1,
                               sem_t* semOut
                             )
 {
@@ -279,7 +278,6 @@ void welchmethod::welch_init( size_t mode_count, size_t signal_len,
       m_psd.psd_init(mode_count, signal_len, dt, win);
       m_totalDuration = total_pts;
       m_numPsds = total_pts / (signal_len/2) - 1;
-      m_imageIn = image1;
       m_wfgSem = semOut;
       m_fetch = (sem_t *)fftw_malloc(sizeof(sem_t *));
 
@@ -303,7 +301,6 @@ void welchmethod::welch_init( size_t mode_count, size_t signal_len,
       m_psd.psd_init(mode_count, signal_len, dt, win);
       m_totalDuration = total_pts;
       m_numPsds = total_pts / (signal_len/2) - 1;
-      m_imageIn = image1;
       m_wfgSem = semOut;
       m_fetch = (sem_t *)fftw_malloc(sizeof(sem_t *));
    
