@@ -1,7 +1,7 @@
 /**
  * \author  Jacob Trzaska
  * \file    cstrehl.cpp
- * \date    2021-08-28
+ * \date    2021-09-12
  */
 #include <iostream>
 #include <cstdio>
@@ -209,7 +209,7 @@ static void fft_center(double * im, size_t rows, size_t cols)
 static double * 
 modulate(double * im, size_t rows, size_t cols, double radius)
 {
-     const size_t NUM_ANGLES {300};
+     const size_t NUM_ANGLES {1200};
      std::vector<double> angles(NUM_ANGLES);
      for (size_t i{0}; i < NUM_ANGLES; ++i)
           angles[i] = (2 * M_PI * i) / NUM_ANGLES;

@@ -152,36 +152,43 @@ class imgChar : public MagAOXApp<true>,
    protected:
       pcf::IndiProperty m_indiP_shifts;
 
-      uint64_t idx_1s {0};
-      uint64_t idx_10buf {0};
+      uint64_t idx_rms1   {0};
+      uint64_t idx_rms5   {0};
+      uint64_t idx_rms10  {0};
+      uint64_t numSeconds {0};
+      std::mutex rmsMutex;
 
-      std::vector<realT> x_1sec; // 1-second long buffer of x-shifts^2
-      std::vector<realT> y_1sec; // 1-second long buffer of y-shifts^2
-      std::vector<realT> s_1sec; // 1-second long buffer of Strehl ratios
-
-      std::array<realT, 10> x_10_1s;  // 10 element long buffer holding 1 second rms shifts
-      std::array<realT, 10> y_10_1s;  // 10 element long buffer holding 1 second rms shifts
-      std::array<realT, 10> s_10_1sR; // 10 element long buffer holding 1 second rms Strehl
-      std::array<realT, 10> s_10_1sM; // 10 element long buffer holding 1 second mean Strehl
+      realT x2_1; // 1-second long accumulator of x-shifts^2
+      realT y2_1; // 1-second long accumulator of y-shifts^2
+      realT  s_1; // 1-second long accumulator of Strehl ratios
+      realT s2_1; // 1-second long accumulator of Strehl ratios^2
 
       realT m_xshiftRMS_1  {0};
       realT m_yshiftRMS_1  {0};
       realT m_strehlMean_1 {0};
       realT m_strehlRMS_1  {0};
- 
+
+      realT x2_5; // 5-second long accumulator of x-shifts^2
+      realT y2_5; // 5-second long accumulator of y-shifts^2
+      realT  s_5; // 5-second long accumulator of Strehl ratios
+      realT s2_5; // 5-second long accumulator of Strehl ratios^2
+
       realT m_xshiftRMS_5  {0};
       realT m_yshiftRMS_5  {0};
       realT m_strehlMean_5 {0};
       realT m_strehlRMS_5  {0};
- 
+
+      realT x2_10; // 1-second long accumulator of x-shifts^2
+      realT y2_10; // 1-second long accumulator of y-shifts^2
+      realT  s_10; // 1-second long accumulator of Strehl ratios
+      realT s2_10; // 1-second long accumulator of Strehl ratios^2
+
       realT m_xshiftRMS_10  {0};
       realT m_yshiftRMS_10  {0};
       realT m_strehlMean_10 {0};
       realT m_strehlRMS_10  {0};
 
       uint64_t NUMRADII {61};
-      
-      uint64_t n;
 
       pcf::IndiProperty m_indiP_modRadius;
       float m_modRadius;
@@ -191,7 +198,8 @@ class imgChar : public MagAOXApp<true>,
       float m_fps;
       INDI_SETCALLBACK_DECL( imgChar, m_indiP_fps);
 
-      bool rmsRun {false};
+      bool m_modRadFetched {false};
+      bool m_fpsFetched    {false};
 
    private:
       double* sa_ptr;
@@ -315,100 +323,114 @@ int imgChar::appLogic()
       return 0;
    }
 
+   // Calculate RMS shift averages and publish to INDI
 
-   if (rmsRun == false)
-      goto WAIT_RMS;
-
-   m_xshiftRMS_1  = 0;
-   m_yshiftRMS_1  = 0;
-   m_strehlMean_1 = 0;
-   m_strehlRMS_1  = 0;
-
-   for (size_t i{0}; i < (size_t)fps(); ++i)
+   switch(numSeconds)
    {
-      m_xshiftRMS_1  += x_1sec[i];
-      m_yshiftRMS_1  += y_1sec[i];
-      m_strehlMean_1 += s_1sec[i];
-      m_strehlRMS_1  += s_1sec[i] * s_1sec[i];
-   }
+      default:
+         rmsMutex.lock();
+         m_xshiftRMS_1  = x2_1;
+         m_yshiftRMS_1  = y2_1;
+         m_strehlMean_1 = s_1;
+         m_strehlRMS_1  = s2_1;
 
-   m_xshiftRMS_1  /= (size_t)fps();
-   m_yshiftRMS_1  /= (size_t)fps();
-   m_strehlMean_1 /= (size_t)fps();
-   m_strehlRMS_1  /= (size_t)fps();
+         idx_rms1 = 1; 
+         x2_1 = 0;
+         y2_1 = 0;
+         s2_1 = 0;
+         s_1  = 0;
+         rmsMutex.unlock();
 
-   x_10_1s[idx_10buf]  = m_xshiftRMS_1;
-   y_10_1s[idx_10buf]  = m_yshiftRMS_1;
-   s_10_1sR[idx_10buf] = m_strehlRMS_1;
-   s_10_1sM[idx_10buf] = m_strehlMean_1;
+         m_xshiftRMS_1 = sqrt(m_xshiftRMS_1);
+         m_yshiftRMS_1 = sqrt(m_yshiftRMS_1);
+         m_strehlRMS_1 = sqrt(m_strehlRMS_1);
+         break;
 
-   switch (idx_10buf)
-   {
       case 4:
-         m_xshiftRMS_5  = 0;
-         m_yshiftRMS_5  = 0;
-         m_strehlMean_5 = 0;
-         m_strehlRMS_5  = 0;
-     
-         for (int i{0}; i < 5; ++i)
-         {
-            m_xshiftRMS_5  += x_10_1s[i];
-            m_yshiftRMS_5  += y_10_1s[i];
-            m_strehlMean_5 += s_10_1sM[i];
-            m_strehlRMS_5  += s_10_1sR[i];
-         }
+         rmsMutex.lock();
+         m_xshiftRMS_1  = x2_1;
+         m_yshiftRMS_1  = y2_1;
+         m_strehlMean_1 = s_1;
+         m_strehlRMS_1  = s2_1;
 
-         m_xshiftRMS_5  = sqrt(m_xshiftRMS_5 / 5);
-         m_yshiftRMS_5  = sqrt(m_yshiftRMS_5 / 5);
-         m_strehlMean_5 = m_strehlMean_5 / 5;
-         m_strehlRMS_5  = sqrt(m_strehlRMS_5 / 5);
+         idx_rms1 = 1; 
+         x2_1 = 0;
+         y2_1 = 0;
+         s2_1 = 0;
+         s_1  = 0;
+
+         m_xshiftRMS_5  = x2_5;
+         m_yshiftRMS_5  = y2_5;
+         m_strehlMean_5 = s_5;
+         m_strehlRMS_5  = s2_5;
+
+         idx_rms5 = 1; 
+         x2_5 = 0;
+         y2_5 = 0;
+         s2_5 = 0;
+         s_5  = 0;
+         rmsMutex.unlock();
+
+         m_xshiftRMS_1 = sqrt(m_xshiftRMS_1);
+         m_yshiftRMS_1 = sqrt(m_yshiftRMS_1);
+         m_strehlRMS_1 = sqrt(m_strehlRMS_1);
+
+         m_xshiftRMS_5  = sqrt(m_xshiftRMS_5);
+         m_yshiftRMS_5  = sqrt(m_yshiftRMS_5);
+         m_strehlRMS_5  = sqrt(m_strehlRMS_5);
          break;
 
 
       case 9:
-         m_xshiftRMS_5  = 0;
-         m_yshiftRMS_5  = 0;
-         m_strehlMean_5 = 0;
-         m_strehlRMS_5  = 0;
- 
-         m_xshiftRMS_10  = 0;
-         m_yshiftRMS_10  = 0;
-         m_strehlMean_10 = 0;
-         m_strehlRMS_10  = 0;
+         rmsMutex.lock();
+         m_xshiftRMS_1  = x2_1;
+         m_yshiftRMS_1  = y2_1;
+         m_strehlMean_1 = s_1;
+         m_strehlRMS_1  = s2_1;
 
-         for (int i{0}; i < 5; ++i)
-         {
-            m_xshiftRMS_5  += x_10_1s[i];
-            m_yshiftRMS_5  += y_10_1s[i];
-            m_strehlMean_5 += s_10_1sM[i];
-            m_strehlRMS_5  += s_10_1sR[i];  
-         }
+         idx_rms1 = 1; 
+         x2_1 = 0;
+         y2_1 = 0;
+         s2_1 = 0;
+         s_1  = 0;
 
-         for (int i{0}; i < 10; ++i)
-         {
-            m_xshiftRMS_10  += x_10_1s[i];
-            m_yshiftRMS_10  += y_10_1s[i];
-            m_strehlMean_10 += s_10_1sM[i];
-            m_strehlRMS_10  += s_10_1sR[i];
-         }
+         m_xshiftRMS_5  = x2_5;
+         m_yshiftRMS_5  = y2_5;
+         m_strehlMean_5 = s_5;
+         m_strehlRMS_5  = s2_5;
 
-         m_xshiftRMS_5  = sqrt(m_xshiftRMS_5 / 5);
-         m_yshiftRMS_5  = sqrt(m_yshiftRMS_5 / 5);
-         m_strehlMean_5 = m_strehlMean_5 / 5;
-         m_strehlRMS_5  = sqrt(m_strehlRMS_5 / 5);
+         idx_rms5 = 1; 
+         x2_5 = 0;
+         y2_5 = 0;
+         s2_5 = 0;
+         s_5  = 0;
 
-         m_xshiftRMS_10  = sqrt(m_xshiftRMS_10 / 10);
-         m_yshiftRMS_10  = sqrt(m_yshiftRMS_10 / 10);
-         m_strehlMean_10 = m_strehlMean_10 / 10;
-         m_strehlRMS_10  = sqrt(m_strehlRMS_10 / 10);
+         m_xshiftRMS_10  = x2_10;
+         m_yshiftRMS_10  = y2_10;
+         m_strehlMean_10 = s_10;
+         m_strehlRMS_10  = s2_10;
+
+         idx_rms10 = 1;
+         x2_10 = 0;
+         y2_10 = 0;
+         s2_10 = 0;
+         s_10  = 0;
+         rmsMutex.unlock();
+
+         m_xshiftRMS_1 = sqrt(m_xshiftRMS_1);
+         m_yshiftRMS_1 = sqrt(m_yshiftRMS_1);
+         m_strehlRMS_1 = sqrt(m_strehlRMS_1);
+
+         m_xshiftRMS_5  = sqrt(m_xshiftRMS_5);
+         m_yshiftRMS_5  = sqrt(m_yshiftRMS_5);
+         m_strehlRMS_5  = sqrt(m_strehlRMS_5);
+
+         m_xshiftRMS_10  = sqrt(m_xshiftRMS_10);
+         m_yshiftRMS_10  = sqrt(m_yshiftRMS_10);
+         m_strehlRMS_10  = sqrt(m_strehlRMS_10);
          break;
      
-      default: break;
    }
-
-   m_xshiftRMS_1 = sqrt(m_xshiftRMS_1);
-   m_yshiftRMS_1 = sqrt(m_yshiftRMS_1);
-   m_strehlRMS_1 = sqrt(m_strehlRMS_1);
 
    updateIfChanged(m_indiP_shifts, "x-rms1", m_xshiftRMS_1);
    updateIfChanged(m_indiP_shifts, "y-rms1", m_yshiftRMS_1);
@@ -425,11 +447,8 @@ int imgChar::appLogic()
    updateIfChanged(m_indiP_shifts, "strehl-mean10", m_strehlMean_10);
    updateIfChanged(m_indiP_shifts, "strehl-rms10", m_strehlRMS_10);
 
-   ++idx_10buf;
-   idx_10buf = ( idx_10buf % 10 );
+   ++numSeconds;
 
-   WAIT_RMS:
-std::cout << "tstLFinal\n";
    return 0;
 }
 
@@ -476,30 +495,42 @@ int imgChar::allocate(const dev::shmimT & dummy)
    m_dataType = shmimMonitorT::m_dataType;
    m_typeSize = ImageStreamIO_typesize(m_dataType);
 
-   x_1sec.resize( (uint64_t)fps(), 0);
-   y_1sec.resize( (uint64_t)fps(), 0);
-   s_1sec.resize( (uint64_t)fps(), 0);
+   while (m_modRadFetched && m_fpsFetched == false) {}
 
-   std::cout << fps() << std::endl;
+   x2_1 = 0;
+   y2_1 = 0;
+   s2_1 = 0;
+   s_1  = 0;
+
    m_xshiftRMS_1  = 0;
    m_yshiftRMS_1  = 0;
    m_strehlMean_1 = 0;
    m_strehlRMS_1  = 0;
+
+   x2_5 = 0;
+   y2_5 = 0;
+   s2_5 = 0;
+   s_5  = 0;
 
    m_xshiftRMS_5  = 0;
    m_yshiftRMS_5  = 0;
    m_strehlMean_5 = 0;
    m_strehlRMS_5  = 0;
 
+   x2_10 = 0;
+   y2_10 = 0;
+   s2_10 = 0;
+   s_10  = 0;
+
    m_xshiftRMS_10  = 0;
    m_yshiftRMS_10  = 0;
    m_strehlMean_10 = 0;
    m_strehlRMS_10  = 0;
 
-   idx_1s     = 0;
-   idx_10buf  = 0;
+   idx_rms1   = 1;
+   idx_rms5   = 1;
+   idx_rms10  = 1;
    m_template = true;
-   rmsRun     = true;
 
    return 0;
 }
@@ -510,46 +541,66 @@ inline
 int imgChar::processImage(void * curr_src, const dev::shmimT & dummy)
 {
    static_cast<void>(dummy); //be unused
-   m_update = false;
 
+   m_update = false;
    size_t memSz = m_rows * (m_cols / 2 + 1) * sizeof(complexT);  
  
    switch (m_template) 
    { 
          case true:
-         copy_image0(m_input, curr_src, m_rows, m_cols, m_dataType, &m_xctr, &m_yctr);
-         fftw_execute(m_planF);
-         image0_fft_fill(m_image0_fft, m_output, m_rows, m_cols / 2 + 1);
-         memset(m_cc_fft, 0, memSz);
-         m_template = false;
-         break;
-
-         case false:
-         copy_image(m_input, curr_src, m_rows, m_cols, m_dataType);
-         fftw_execute(m_planF);
-         point_multiply(m_image0_fft, m_output, m_cc_fft, m_rows, m_cols/2+1);
-         fftw_execute(m_planB); 
-         memset(m_cc_fft, 0, memSz);
-         
-         GaussFit(m_rows, m_cols, m_cc_array, m_sz, m_data);
-         if (m_modRadius == 0) 
-         { 
-            m_data[2] = max(curr_src, m_rows * m_cols, m_dataType); 
-            m_data[2] /= sa_ptr[NUMRADII];
-         } 
-         else 
-         { 
-            m_data[2] = getStrehlMod(m_input, m_rows, m_cols, m_xctr, m_yctr); 
-            m_data[2] /= sa_ptr[(size_t)(10*m_modRadius) + NUMRADII];
+         {
+            copy_image0(m_input, curr_src, m_rows, m_cols, m_dataType, &m_xctr, &m_yctr);
+            fftw_execute(m_planF);
+            image0_fft_fill(m_image0_fft, m_output, m_rows, m_cols / 2 + 1);
+            memset(m_cc_fft, 0, memSz);
+            m_template = false;
+            break;
          }
 
-         x_1sec[idx_1s] = m_data[1] * m_data[1]; std::cout << "post strehl\n";
-         y_1sec[idx_1s] = m_data[0] * m_data[0];
-         s_1sec[idx_1s] = m_data[2];
-         std::cout << "Post arrays\n";
-         ++idx_1s;
-         idx_1s = idx_1s % ( (uint64_t)(fps()) );
-         break;
+         case false:
+         {
+            copy_image(m_input, curr_src, m_rows, m_cols, m_dataType);
+            fftw_execute(m_planF);
+            point_multiply(m_image0_fft, m_output, m_cc_fft, m_rows, m_cols/2+1);
+            fftw_execute(m_planB); 
+            memset(m_cc_fft, 0, memSz);
+         
+            GaussFit(m_rows, m_cols, m_cc_array, m_sz, m_data);
+            if (m_modRadius == 0) 
+            { 
+               m_data[2]  = max(curr_src, m_rows * m_cols, m_dataType); 
+               m_data[2] /= sa_ptr[NUMRADII];
+            } 
+            else 
+            { 
+               m_data[2]  = getStrehlMod(m_input, m_rows, m_cols, m_xctr, m_yctr); 
+               m_data[2] /= sa_ptr[(size_t)(10 * m_modRadius) + NUMRADII];
+            }
+
+            // Update 1-second rms values
+            rmsMutex.lock();
+
+            x2_1 += x2_1 + (m_data[1] * m_data[1] - x2_1) / idx_rms1;
+            y2_1 += y2_1 + (m_data[0] * m_data[0] - y2_1) / idx_rms1;
+            s_1  +=  s_1 + (m_data[2]             -  s_1) / idx_rms1;
+            s2_1 += s2_1 + (m_data[2] * m_data[2] - s2_1) / idx_rms1;
+            ++idx_rms1;
+
+            x2_5 += x2_5 + (m_data[1] * m_data[1] - x2_5) / idx_rms5;
+            y2_5 += y2_5 + (m_data[0] * m_data[0] - y2_5) / idx_rms5;
+            s_5  +=  s_5 + (m_data[2]             -  s_5) / idx_rms5;
+            s2_5 += s2_5 + (m_data[2] * m_data[2] - s2_5) / idx_rms5;
+            ++idx_rms5;
+
+            x2_10 += x2_10 + (m_data[1] * m_data[1] - x2_10) / idx_rms10;
+            y2_10 += y2_10 + (m_data[0] * m_data[0] - y2_10) / idx_rms10;
+            s_10  +=  s_10 + (m_data[2]             -  s_10) / idx_rms10;
+            s2_10 += s2_10 + (m_data[2] * m_data[2] - s2_10) / idx_rms10;
+            ++idx_rms10;
+
+            rmsMutex.unlock();
+            break;
+         }
    }
     
    if(sem_post(&m_smSemaphore) < 0)
@@ -581,6 +632,8 @@ INDI_SETCALLBACK_DEFN( imgChar, m_indiP_modRadius)(const pcf::IndiProperty &ipRe
    m_indiP_modRadius = ipRecv;
    
    m_modRadius = ipRecv["current"].get<float>();
+
+   m_modRadFetched = true;
    
    return 0;
 }
@@ -603,6 +656,8 @@ INDI_SETCALLBACK_DEFN( imgChar, m_indiP_fps)(const pcf::IndiProperty &ipRecv)
    m_indiP_fps = ipRecv;
 
    m_fps = ipRecv["current"].get<float>();
+
+   m_fpsFetched = true;
 
    return 0;
 }
