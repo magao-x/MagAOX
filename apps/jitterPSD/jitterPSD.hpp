@@ -252,10 +252,19 @@ int jitterPSD::allocate(const dev::shmimT & dummy)
       static_cast<void>(dummy);
 
       double sampleTime = 1 / fps();
-      size_t num_modes = shmimMonitor::m_width;
+      size_t num_modes = shmimMonitorT::m_width;
       size_t pts_10sec = (size_t) 10 * fps();  // we are using a 10 sec window
 
-      while (m_fps == 0) {}
+      // Wait for INDI to get fps
+      timespec wait;
+      wait.tv_sec = 0;
+      wait.tv_nsec = 10000000;
+      while (m_fps == 0)
+      {
+         nanosleep(&wait, NULL);
+      }
+
+
       size_t pts_1sec = (size_t) fps(); 
 
       welch_init(num_modes, pts_1sec, pts_10sec, sampleTime, window, &m_smSemaphore);
@@ -399,8 +408,15 @@ INDI_SETCALLBACK_DEFN( jitterPSD, m_indiP_fps)(const pcf::IndiProperty &ipRecv)
 
    m_indiP_fps = ipRecv;
    
+   float fpsPrior { m_fps };
    m_fps = ipRecv["current"].get<float>();
    
+   if (m_fps != fpsPrior)
+   {
+      shmimMonitorT::m_restart  = true;
+      frameGrabberT::m_reconfig = true;  
+   }
+
    return 0;
 }
 
