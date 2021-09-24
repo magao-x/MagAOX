@@ -17,6 +17,10 @@
 #include <fftw3.h>
 #include "reg_functions.hpp" 
 #include "cc-functions.hpp"
+#include <gsl/gsl_sf_bessel.h>
+
+
+#define FNUM 69.0
 
 // Pointer to linked theoretical Strehl amplitude values
 extern double _binary_sa_dat_start;
@@ -81,6 +85,7 @@ class imgChar : public MagAOXApp<true>,
       fftw_complex*  m_cc_fft     {nullptr};
 
       fftw_plan m_planF, m_planB;
+      fftw_plan m_otf2psf;
 
       bool m_template  {true};
 
@@ -132,7 +137,6 @@ class imgChar : public MagAOXApp<true>,
       int processImage(void * curr_src,          ///< [in] pointer to start of current frame.
                        const dev::shmimT & dummy ///< [in] tag to differentiate shmimMonitor parents.
                       );
-
 
    protected: //frameGrabber functionality
       static constexpr bool c_frameGrabber_flippable = false;
@@ -203,6 +207,8 @@ class imgChar : public MagAOXApp<true>,
 
    private:
       double* sa_ptr;
+
+      void besselStrehl();
 };
 
 
@@ -490,12 +496,22 @@ int imgChar::allocate(const dev::shmimT & dummy)
    m_planB = fftw_plan_dft_c2r_2d(
                   m_rows, m_cols, m_cc_fft, m_cc_array, FFTW_MEASURE);
 
+   m_otf2psf = fftw_plan_dft_c2r_2d(
+                  m_rows, m_cols, m_output, m_input, FFTW_MEASURE);
+
    memset(m_cc_fft, 0, fftArrSize); 
 
    m_dataType = shmimMonitorT::m_dataType;
    m_typeSize = ImageStreamIO_typesize(m_dataType);
 
-   while (m_modRadFetched && m_fpsFetched == false) {}
+   // Wait until INDI has retrieved fps and radius
+   timespec wait;
+   wait.tv_sec = 0;
+   wait.tv_nsec = 10000000;
+   while (m_modRadFetched && m_fpsFetched == false)
+   {
+      nanosleep(&wait, NULL);
+   }
 
    x2_1 = 0;
    y2_1 = 0;
@@ -568,16 +584,17 @@ int imgChar::processImage(void * curr_src, const dev::shmimT & dummy)
             GaussFit(m_rows, m_cols, m_cc_array, m_sz, m_data);
             if (m_modRadius == 0) 
             { 
-               m_data[2]  = max(curr_src, m_rows * m_cols, m_dataType); 
-               m_data[2] /= sa_ptr[NUMRADII];
+               m_data[2]  = strehlAmp(curr_src, m_rows * m_cols, m_dataType); 
+               m_data[2] /= sa_ptr[1];
             } 
             else 
             { 
-               m_data[2]  = getStrehlMod(m_input, m_rows, m_cols, m_xctr, m_yctr); 
-               m_data[2] /= sa_ptr[(size_t)(10 * m_modRadius) + NUMRADII];
+               besselStrehl();
+             //  m_data[2]  = getStrehlMod(m_input, m_rows, m_cols, m_xctr, m_yctr); 
+               m_data[2] = strehlAmp(m_input, m_rows, m_cols) / sa_ptr[1];
             }
 
-            // Update 1-second rms values
+            // Update rms values
             rmsMutex.lock();
 
             x2_1 += x2_1 + (m_data[1] * m_data[1] - x2_1) / idx_rms1;
@@ -662,6 +679,40 @@ INDI_SETCALLBACK_DEFN( imgChar, m_indiP_fps)(const pcf::IndiProperty &ipRecv)
    return 0;
 }
 
+
+void imgChar::besselStrehl()
+{
+   double temp { 0 };
+
+   for (size_t j{0}; j < m_cols/2 + 1; ++j)
+   {
+      (m_output[j])[0] /= gsl_sf_bessel_J0((2 * M_PI * j) * ((m_modRadius * 0.837 * FNUM) / 4.8) / m_cols);
+      (m_output[j])[1] /= gsl_sf_bessel_J0((2 * M_PI * j) * ((m_modRadius * 0.837 * FNUM) / 4.8) / m_cols);
+   }
+
+   for (size_t i {1}; i < m_rows/2; ++i)
+      for (size_t j {0}; j < m_cols/2 + 1; ++j)
+      {
+         temp = 1.0 / gsl_sf_bessel_J0((2 * M_PI) * ((m_modRadius * 0.837 * FNUM) / 4.8) *
+                                                               sqrt(i * i + j * j) / m_cols);
+         (m_output[j + i * (m_cols/2 + 1)])[0] *= temp;
+         (m_output[j + (m_rows - i) * (m_cols/2 + 1)])[0] *= temp;
+         (m_output[j + i * (m_cols/2 + 1)])[1] *= temp;
+         (m_output[j + (m_rows - i) * (m_cols/2 + 1)])[1] *= temp;
+      }
+
+   for (size_t j{0}; j < m_cols/2 + 1; ++j)
+   {
+      (m_output[j + (m_rows/2) * (m_cols/2 + 1)])[0] /= gsl_sf_bessel_J0((2 * M_PI) * ((m_modRadius * 0.837 * FNUM) / 4.8) *
+                                                         sqrt((m_rows/2) * (m_rows/2) + j * j) / m_cols);
+      (m_output[j + (m_rows/2) * (m_cols/2 + 1)])[1] /= gsl_sf_bessel_J0((2 * M_PI) * ((m_modRadius * 0.837 * FNUM) / 4.8) *
+                                                         sqrt((m_rows/2) * (m_rows/2) + j * j) / m_cols);
+   }
+
+
+
+   fftw_execute(m_otf2psf);
+}
 
 
 // ============================ //

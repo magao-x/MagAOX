@@ -433,78 +433,109 @@ void copy_image0(double* in, void * image, size_t rows, size_t cols,
 }
 
 
-double max(void * image, size_t IMEND, int datatype) {
+double strehlAmp(void * image, size_t IMEND, int datatype) {
 
-   double maximum {0};
+   double maximum   { 0 };
+   double totalFlux { 0 };
 
    switch (datatype) {
       case _DATATYPE_UINT8:
       for (size_t i = 0; i < IMEND; ++i)
+      {
          if (maximum < ((uint8_t *) image)[i])
             maximum = ((uint8_t *) image)[i];
+         totalFlux += ((uint8_t *) image)[i];
+      }
       return maximum;
       break; 
 
       case _DATATYPE_INT8:
       for (size_t i = 0; i < IMEND; ++i)
+      {
          if (maximum < ((int8_t *) image)[i])
             maximum = ((int8_t *) image)[i];
+         totalFlux += ((int8_t *) image)[i];
+      }
       return maximum;
       break; 
 
       case _DATATYPE_UINT16:
       for (size_t i = 0; i < IMEND; ++i)
+      {
          if (maximum < ((uint16_t *) image)[i])
             maximum = ((uint16_t *) image)[i];
+         totalFlux += ((uint16_t *) image)[i];
+      }
       return maximum;
       break; 
 
       case _DATATYPE_INT16:
       for (size_t i = 0; i < IMEND; ++i)
+      {
          if (maximum < ((int16_t *) image)[i])
             maximum = ((int16_t *) image)[i];
+         totalFlux += ((int16_t *) image)[i];
+      }
       return maximum;
       break;
 
       case _DATATYPE_UINT32: 
       for (size_t i = 0; i < IMEND; ++i)
+      {
          if (maximum < ((uint32_t *) image)[i])
             maximum = ((uint32_t *) image)[i];
+         totalFlux += ((uint32_t *) image)[i];
+      }
       return maximum;
       break;
 
       case _DATATYPE_INT32:
       for (size_t i = 0; i < IMEND; ++i)
+      {
          if (maximum < ((int32_t *) image)[i])
             maximum = ((int32_t *) image)[i];
+         totalFlux += ((int32_t *) image)[i];
+      }
       return maximum;
       break;
       
       case _DATATYPE_UINT64:
       for (size_t i = 0; i < IMEND; ++i)
+      {
          if (maximum < ((uint64_t *) image)[i])
             maximum = ((uint64_t *) image)[i];
+         totalFlux += ((uint64_t *) image)[i];
+      }
       return maximum;
       break;
 
       case _DATATYPE_INT64:
       for (size_t i = 0; i < IMEND; ++i)
+      {
          if (maximum < ((int64_t *) image)[i])
             maximum = ((int64_t *) image)[i];
+         totalFlux += ((int64_t *) image)[i];
+      }
       return maximum;
       break;
 
       case _DATATYPE_FLOAT:
       for (size_t i = 0; i < IMEND; ++i)
+      {
          if (maximum < ((float *) image)[i])
             maximum = ((float *) image)[i];
+         totalFlux += ((float *) image)[i];
+      }
       return maximum;
       break;
 
       case _DATATYPE_DOUBLE:
       for (size_t i = 0; i < IMEND; ++i)
+      {
          if (maximum < ((double *) image)[i])
             maximum = ((double *) image)[i];
+         totalFlux += ((double *) image)[i];
+      }
       return maximum;
       break;     
       

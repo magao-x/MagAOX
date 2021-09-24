@@ -9,7 +9,7 @@ func: $(C_FILES) $(H_FILES)
 sa.o: 
 	cd STREHL && make data
 
-OPTIMIZE = -O3 -fopenmp -ffast-math -march=native
+OPTIMIZE = -O3 -fopenmp -ffast-math -march=native -lgsl -lgslcblas
 
 OTHER_HEADERS=
 OTHER_OBJS=reg_functions.o cc-functions.o sa.o

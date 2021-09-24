@@ -63,9 +63,9 @@ void copy_image0(double* in, void * image, size_t rows, size_t cols,
 
 
 /**
- * @name    max
- * @brief   get the max pixel value in an image
+ * @name    strehlAmp
+ * @brief   get the Fpk/Ftot value for a given PSF
  *
- * @return  max pixel value
+ * @return  Fpk/Ftot
  */
-double max(void * image, size_t IMEND, int datatype);
+double strehlAmp(void * image, size_t IMEND, int datatype);
