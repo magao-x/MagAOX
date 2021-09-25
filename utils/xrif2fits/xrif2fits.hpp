@@ -18,11 +18,12 @@
 #include <mx/ioutils/fileUtils.hpp>
 #include <mx/improc/eigenCube.hpp>
 #include <mx/improc/eigenImage.hpp>
-#include <mx/improc/fitsFile.hpp>
 
-#include <mx/timeUtils.hpp>
-using namespace mx::tscomp;
-using namespace mx::tsop;
+#include <mx/ioutils/fits/fitsFile.hpp>
+
+#include <mx/sys/timeUtils.hpp>
+using namespace mx::sys::tscomp;
+using namespace mx::sys::tsop;
 
 
 #include "../../libMagAOX/libMagAOX.hpp"
@@ -417,8 +418,8 @@ int xrif2fits::execute()
 
       mx::improc::eigenCube<unsigned short> tmpc( (unsigned short*) m_xrif->raw_buffer, m_xrif->width, m_xrif->height, m_xrif->frames);
 
-      mx::improc::fitsFile<unsigned short> ff;
-      mx::improc::fitsHeader fh;
+      mx::fits::fitsFile<unsigned short> ff;
+      mx::fits::fitsHeader fh;
       
 
       
@@ -460,12 +461,12 @@ int xrif2fits::execute()
          
          
          std::string timestamp;
-         mx::timeStamp(timestamp, atime);
+         mx::sys::timeStamp(timestamp, atime);
          std::string outfname = m_outDir + lfn.appName() + "_" + timestamp + ".fits";
 
          fh.clear();
          
-         std::string dateobs = mx::ISO8601DateTimeStr(atime, 1);
+         std::string dateobs = mx::sys::ISO8601DateTimeStr(atime, 1);
          
          fh.append("DATE-OBS", dateobs, "Date of obs. YYYY-mm-ddTHH:MM:SS");
          fh.append("FRAMENO", cnt0);
