@@ -188,7 +188,7 @@ void camera::onConnect()
 {
    ui.lab_camName->setEnabled(true);
 
-   setWindowTitle(QString(m_camName.c_str()));
+   setWindowTitle(QString((m_camName+"Ctrl").c_str()));
 
    ui_fsmState->onConnect();
 
@@ -213,7 +213,7 @@ void camera::onConnect()
 void camera::onDisconnect()
 {
 
-   setWindowTitle(QString(m_camName.c_str()) + QString(" (disconnected)"));
+   setWindowTitle(QString((m_camName+"Ctrl").c_str()) + QString(" (disconnected)"));
 
    ui_fsmState->onDisconnect();
 

@@ -31,12 +31,22 @@ void indiDictionary::checkConnection()
 {
    if(!m_client)
    {
-      m_client = new rtimvIndiClient("rtimvIndiClient", "1.7", "1.7", m_ipAddress, m_port, m_dict);
+      try
+      {
+         m_client = new rtimvIndiClient("rtimvIndiClient", "1.7", "1.7", m_ipAddress, m_port, m_dict);
+      }   
+      catch(...)
+      {
+         //This means failed to connect, often b/c tunnel not open.  m_client will still be nullptr.
+         //just go on and try again
+         return;
+      }
+
       m_client->activate();
    
       pcf::IndiProperty ipSend;
       m_client->sendGetProperties( ipSend );
-    
+      
       return;
    }
    else if(m_client->getQuitProcess())
@@ -45,9 +55,6 @@ void indiDictionary::checkConnection()
       m_client->deactivate();
       delete m_client;
       m_client = nullptr;
-      
-      //std::cerr << "indiDictionary disconnected\n";
-      
       return;
    }
    
