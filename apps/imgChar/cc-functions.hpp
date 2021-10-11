@@ -21,14 +21,13 @@
  *  @param COLS     number of columns in input image
  *  @param input    pointer to input image
  *  @param SZ       determines crop size (2 * SZ + 1)
- *  @param results  2-elements array containing shifts
+ *  Returns  5 element vector containing {<y>, <x> sigma_y, sigma_x, theta}
  */
-void GaussFit(size_t ROWS, // number of rows in input 
-              size_t COLS, // number of cols in input 
-              double *input, // input image 
-              size_t SZ,      // determines size of crop region
-              double *result // holds results of the fit 
-              );
+std::vector<double> GaussFit(size_t ROWS,    // number of rows in input 
+                             size_t COLS,    // number of cols in input 
+                             double *input,  // input image 
+                             size_t SZ,      // determines size of crop region
+                            );
 
 
 /**

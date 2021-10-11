@@ -74,9 +74,6 @@ class imgChar : public MagAOXApp<true>,
 
       size_t m_rows {0}, m_cols {0};
       size_t m_sz {5};
-      realT m_data[3]; // [0] = current y-shift
-                       // [1] = current x-shift 
-                       // [2] = current Strehl ratio
 
       realT*         m_input      {nullptr};
       realT*         m_cc_array   {nullptr};
@@ -581,38 +578,38 @@ int imgChar::processImage(void * curr_src, const dev::shmimT & dummy)
             fftw_execute(m_planB); 
             memset(m_cc_fft, 0, memSz);
          
-            GaussFit(m_rows, m_cols, m_cc_array, m_sz, m_data);
+            std::vector<double> res { GaussFit(m_rows, m_cols, m_cc_array, m_sz, m_data) };
+            realT SR { 0 };
             if (m_modRadius == 0) 
             { 
-               m_data[2]  = strehlAmp(curr_src, m_rows * m_cols, m_dataType); 
-               m_data[2] /= sa_ptr[1];
+               SR  = strehlAmp(curr_src, m_rows * m_cols, m_dataType); 
+               SR /= sa_ptr[1];
             } 
             else 
             { 
-               besselStrehl();
-             //  m_data[2]  = getStrehlMod(m_input, m_rows, m_cols, m_xctr, m_yctr); 
-               m_data[2] = strehlAmp(m_input, m_rows, m_cols) / sa_ptr[1];
+             //  SR = getStrehlMod(m_input, m_rows, m_cols, m_xctr, m_yctr); 
+               SR = strehlAmp(m_input, m_rows, m_cols) / sa_ptr[1];
             }
 
             // Update rms values
             rmsMutex.lock();
 
-            x2_1 += x2_1 + (m_data[1] * m_data[1] - x2_1) / idx_rms1;
-            y2_1 += y2_1 + (m_data[0] * m_data[0] - y2_1) / idx_rms1;
-            s_1  +=  s_1 + (m_data[2]             -  s_1) / idx_rms1;
-            s2_1 += s2_1 + (m_data[2] * m_data[2] - s2_1) / idx_rms1;
+            x2_1 += x2_1 + (res[1] * res[1] - x2_1) / idx_rms1;
+            y2_1 += y2_1 + (res[0] * res[0] - y2_1) / idx_rms1;
+            s_1  +=  s_1 + (SR             -  s_1) / idx_rms1;
+            s2_1 += s2_1 + (SR * SR - s2_1) / idx_rms1;
             ++idx_rms1;
 
-            x2_5 += x2_5 + (m_data[1] * m_data[1] - x2_5) / idx_rms5;
-            y2_5 += y2_5 + (m_data[0] * m_data[0] - y2_5) / idx_rms5;
-            s_5  +=  s_5 + (m_data[2]             -  s_5) / idx_rms5;
-            s2_5 += s2_5 + (m_data[2] * m_data[2] - s2_5) / idx_rms5;
+            x2_5 += x2_5 + (res[1] * res[1] - x2_5) / idx_rms5;
+            y2_5 += y2_5 + (res[0] * res[0] - y2_5) / idx_rms5;
+            s_5  +=  s_5 + (SR             -  s_5) / idx_rms5;
+            s2_5 += s2_5 + (SR * SR - s2_5) / idx_rms5;
             ++idx_rms5;
 
-            x2_10 += x2_10 + (m_data[1] * m_data[1] - x2_10) / idx_rms10;
-            y2_10 += y2_10 + (m_data[0] * m_data[0] - y2_10) / idx_rms10;
-            s_10  +=  s_10 + (m_data[2]             -  s_10) / idx_rms10;
-            s2_10 += s2_10 + (m_data[2] * m_data[2] - s2_10) / idx_rms10;
+            x2_10 += x2_10 + (res[1] * res[1] - x2_10) / idx_rms10;
+            y2_10 += y2_10 + (res[0] * res[0] - y2_10) / idx_rms10;
+            s_10  +=  s_10 + (SR              -  s_10) / idx_rms10;
+            s2_10 += s2_10 + (SR * SR         - s2_10) / idx_rms10;
             ++idx_rms10;
 
             rmsMutex.unlock();
@@ -677,41 +674,6 @@ INDI_SETCALLBACK_DEFN( imgChar, m_indiP_fps)(const pcf::IndiProperty &ipRecv)
    m_fpsFetched = true;
 
    return 0;
-}
-
-
-void imgChar::besselStrehl()
-{
-   double temp { 0 };
-
-   for (size_t j{0}; j < m_cols/2 + 1; ++j)
-   {
-      (m_output[j])[0] /= gsl_sf_bessel_J0((2 * M_PI * j) * ((m_modRadius * 0.837 * FNUM) / 4.8) / m_cols);
-      (m_output[j])[1] /= gsl_sf_bessel_J0((2 * M_PI * j) * ((m_modRadius * 0.837 * FNUM) / 4.8) / m_cols);
-   }
-
-   for (size_t i {1}; i < m_rows/2; ++i)
-      for (size_t j {0}; j < m_cols/2 + 1; ++j)
-      {
-         temp = 1.0 / gsl_sf_bessel_J0((2 * M_PI) * ((m_modRadius * 0.837 * FNUM) / 4.8) *
-                                                               sqrt(i * i + j * j) / m_cols);
-         (m_output[j + i * (m_cols/2 + 1)])[0] *= temp;
-         (m_output[j + (m_rows - i) * (m_cols/2 + 1)])[0] *= temp;
-         (m_output[j + i * (m_cols/2 + 1)])[1] *= temp;
-         (m_output[j + (m_rows - i) * (m_cols/2 + 1)])[1] *= temp;
-      }
-
-   for (size_t j{0}; j < m_cols/2 + 1; ++j)
-   {
-      (m_output[j + (m_rows/2) * (m_cols/2 + 1)])[0] /= gsl_sf_bessel_J0((2 * M_PI) * ((m_modRadius * 0.837 * FNUM) / 4.8) *
-                                                         sqrt((m_rows/2) * (m_rows/2) + j * j) / m_cols);
-      (m_output[j + (m_rows/2) * (m_cols/2 + 1)])[1] /= gsl_sf_bessel_J0((2 * M_PI) * ((m_modRadius * 0.837 * FNUM) / 4.8) *
-                                                         sqrt((m_rows/2) * (m_rows/2) + j * j) / m_cols);
-   }
-
-
-
-   fftw_execute(m_otf2psf);
 }
 
 

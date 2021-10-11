@@ -2,11 +2,10 @@
 
 #define NEW_TEST 1
 
-void GaussFit(size_t ROWS,    // number of rows in input 
+std::vector<double> GaussFit(size_t ROWS,    // number of rows in input 
               size_t COLS,    // number of cols in input 
               double *input,  // input image 
               size_t SZ,      // determines size of crop region
-              double *result  // holds results of the fit 
               )
 {
    size_t range = ((2 * SZ) + 1);
@@ -125,8 +124,14 @@ void GaussFit(size_t ROWS,    // number of rows in input
    // solve system with Eigen tools; calculate shifts
    Eigen::VectorXd v(6);
    v = coeff.fullPivHouseholderQr().solve(b);                    
-   result[0] = (v(0)*v(4) - 2*v(1)*v(3)) / (v(1)*v(1) - 4*v(0)*v(2)); // y-component
-   result[1] = (2*v(2)*v(3) - v(1)*v(4)) / (v(1)*v(1) - 4*v(0)*v(2)); // x-component
+
+   std::vector<double> res(5);
+   double theta { 0.5 * atan(2 * v[1] / (v[0] - v[2])) };
+   res[0] = (v(0)*v(4) - 2*v(1)*v(3)) / (v(1)*v(1) - 4*v(0)*v(2));    // y-mean
+   res[1] = (2*v(2)*v(3) - v(1)*v(4)) / (v(1)*v(1) - 4*v(0)*v(2));    // x-mean
+   res[2] = 1.0 / sqrt(-v[0] - v[2] + (v[0] - v[2]) * sec(2*theta));  // sigma_y
+   res[3] = 1.0 / sqrt(-v[0] - v[2] + (v[2] - v[0]) * sec(2*theta));  // sigma_x
+   res[4] = theta; // Tilt angle
 }
 
 
