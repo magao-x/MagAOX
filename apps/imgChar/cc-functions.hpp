@@ -26,7 +26,7 @@
 std::vector<double> GaussFit(size_t ROWS,    // number of rows in input 
                              size_t COLS,    // number of cols in input 
                              double *input,  // input image 
-                             size_t SZ,      // determines size of crop region
+                             size_t SZ       // determines size of crop region
                             );
 
 

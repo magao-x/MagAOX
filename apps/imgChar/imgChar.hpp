@@ -74,6 +74,9 @@ class imgChar : public MagAOXApp<true>,
 
       size_t m_rows {0}, m_cols {0};
       size_t m_sz {5};
+      realT  m_data[3]; // [0] for y-mean
+                        // [1] for x-mean
+                        // [2] for Strehl ratio
 
       realT*         m_input      {nullptr};
       realT*         m_cc_array   {nullptr};
@@ -578,7 +581,10 @@ int imgChar::processImage(void * curr_src, const dev::shmimT & dummy)
             fftw_execute(m_planB); 
             memset(m_cc_fft, 0, memSz);
          
-            std::vector<double> res { GaussFit(m_rows, m_cols, m_cc_array, m_sz, m_data) };
+            std::vector<double> res { GaussFit(m_rows, m_cols, m_cc_array, m_sz) };
+            m_data[0] = res[0];
+            m_data[1] = res[1];
+            
             realT SR { 0 };
             if (m_modRadius == 0) 
             { 
@@ -590,20 +596,22 @@ int imgChar::processImage(void * curr_src, const dev::shmimT & dummy)
              //  SR = getStrehlMod(m_input, m_rows, m_cols, m_xctr, m_yctr); 
                SR = strehlAmp(m_input, m_rows, m_cols) / sa_ptr[1];
             }
+      
+            m_data[2] = SR;
 
             // Update rms values
             rmsMutex.lock();
 
             x2_1 += x2_1 + (res[1] * res[1] - x2_1) / idx_rms1;
             y2_1 += y2_1 + (res[0] * res[0] - y2_1) / idx_rms1;
-            s_1  +=  s_1 + (SR             -  s_1) / idx_rms1;
-            s2_1 += s2_1 + (SR * SR - s2_1) / idx_rms1;
+            s_1  +=  s_1 + (SR              -  s_1) / idx_rms1;
+            s2_1 += s2_1 + (SR * SR         - s2_1) / idx_rms1;
             ++idx_rms1;
 
             x2_5 += x2_5 + (res[1] * res[1] - x2_5) / idx_rms5;
             y2_5 += y2_5 + (res[0] * res[0] - y2_5) / idx_rms5;
-            s_5  +=  s_5 + (SR             -  s_5) / idx_rms5;
-            s2_5 += s2_5 + (SR * SR - s2_5) / idx_rms5;
+            s_5  +=  s_5 + (SR              -  s_5) / idx_rms5;
+            s2_5 += s2_5 + (SR * SR         - s2_5) / idx_rms5;
             ++idx_rms5;
 
             x2_10 += x2_10 + (res[1] * res[1] - x2_10) / idx_rms10;
