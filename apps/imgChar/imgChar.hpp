@@ -163,7 +163,9 @@ class imgChar : public MagAOXApp<true>,
       std::mutex rmsMutex;
 
       realT x2_1; // 1-second long accumulator of x-shifts^2
+      realT  x_1; // 1-second long accumulator of x-shifts
       realT y2_1; // 1-second long accumulator of y-shifts^2
+      realT  y_1; // 1-second long accumulator of y-shifts
       realT  s_1; // 1-second long accumulator of Strehl ratios
       realT s2_1; // 1-second long accumulator of Strehl ratios^2
 
@@ -173,7 +175,9 @@ class imgChar : public MagAOXApp<true>,
       realT m_strehlRMS_1  {0};
 
       realT x2_5; // 5-second long accumulator of x-shifts^2
+      realT  x_5; // "                          " x-shifts
       realT y2_5; // 5-second long accumulator of y-shifts^2
+      realT  y_5; // "                          " y-shifts
       realT  s_5; // 5-second long accumulator of Strehl ratios
       realT s2_5; // 5-second long accumulator of Strehl ratios^2
 
@@ -182,10 +186,12 @@ class imgChar : public MagAOXApp<true>,
       realT m_strehlMean_5 {0};
       realT m_strehlRMS_5  {0};
 
-      realT x2_10; // 1-second long accumulator of x-shifts^2
-      realT y2_10; // 1-second long accumulator of y-shifts^2
-      realT  s_10; // 1-second long accumulator of Strehl ratios
-      realT s2_10; // 1-second long accumulator of Strehl ratios^2
+      realT x2_10; // 10-second long accumulator of x-shifts^2
+      realT  x_10; // "                           " x-shifts
+      realT y2_10; // 10-second long accumulator of y-shifts^2
+      realT  y_10; // "                           " y-shifts
+      realT  s_10; // 10-second long accumulator of Strehl ratios
+      realT s2_10; // 10-second long accumulator of Strehl ratios^2
 
       realT m_xshiftRMS_10  {0};
       realT m_yshiftRMS_10  {0};
@@ -331,12 +337,14 @@ int imgChar::appLogic()
    {
       default:
          rmsMutex.lock();
-         m_xshiftRMS_1  = x2_1;
-         m_yshiftRMS_1  = y2_1;
+         m_xshiftRMS_1  = x2_1 - x_1*x_1;
+         m_yshiftRMS_1  = y2_1 - y_1*y_1;
          m_strehlMean_1 = s_1;
          m_strehlRMS_1  = s2_1;
 
-         idx_rms1 = 1; 
+         idx_rms1 = 1;
+         x_1  = 0;
+         y_1  = 0;
          x2_1 = 0;
          y2_1 = 0;
          s2_1 = 0;
@@ -350,23 +358,27 @@ int imgChar::appLogic()
 
       case 4:
          rmsMutex.lock();
-         m_xshiftRMS_1  = x2_1;
-         m_yshiftRMS_1  = y2_1;
+         m_xshiftRMS_1  = x2_1 - x_1*x_1;
+         m_yshiftRMS_1  = y2_1 - y_1*y_1;
          m_strehlMean_1 = s_1;
          m_strehlRMS_1  = s2_1;
 
-         idx_rms1 = 1; 
+         idx_rms1 = 1;
+         x_1  = 0;
+         y_1  = 0;
          x2_1 = 0;
          y2_1 = 0;
          s2_1 = 0;
          s_1  = 0;
 
-         m_xshiftRMS_5  = x2_5;
-         m_yshiftRMS_5  = y2_5;
+         m_xshiftRMS_5  = x2_5 - x_5 * x_5;
+         m_yshiftRMS_5  = y2_5 - y_5 * y_5;
          m_strehlMean_5 = s_5;
          m_strehlRMS_5  = s2_5;
 
-         idx_rms5 = 1; 
+         idx_rms5 = 1;
+         x_5  = 0;
+         y_5  = 0;
          x2_5 = 0;
          y2_5 = 0;
          s2_5 = 0;
@@ -385,34 +397,40 @@ int imgChar::appLogic()
 
       case 9:
          rmsMutex.lock();
-         m_xshiftRMS_1  = x2_1;
-         m_yshiftRMS_1  = y2_1;
+         m_xshiftRMS_1  = x2_1 - x_1 * x_1;
+         m_yshiftRMS_1  = y2_1 - y_1 * y_1;
          m_strehlMean_1 = s_1;
          m_strehlRMS_1  = s2_1;
 
-         idx_rms1 = 1; 
+         idx_rms1 = 1;
+         x_1  = 0;
+         y_1  = 0; 
          x2_1 = 0;
          y2_1 = 0;
          s2_1 = 0;
          s_1  = 0;
 
-         m_xshiftRMS_5  = x2_5;
-         m_yshiftRMS_5  = y2_5;
+         m_xshiftRMS_5  = x2_5 - x_5 * x_5;
+         m_yshiftRMS_5  = y2_5 - y_5 * y_5;
          m_strehlMean_5 = s_5;
          m_strehlRMS_5  = s2_5;
 
          idx_rms5 = 1; 
+         x_5  = 0;
+         y_5  = 0;
          x2_5 = 0;
          y2_5 = 0;
          s2_5 = 0;
          s_5  = 0;
 
-         m_xshiftRMS_10  = x2_10;
-         m_yshiftRMS_10  = y2_10;
+         m_xshiftRMS_10  = x2_10 - x_10 * x_10;
+         m_yshiftRMS_10  = y2_10 - y_10 * y_10;
          m_strehlMean_10 = s_10;
          m_strehlRMS_10  = s2_10;
 
          idx_rms10 = 1;
+         x_10  = 0;
+         y_10  = 0;
          x2_10 = 0;
          y2_10 = 0;
          s2_10 = 0;
@@ -510,7 +528,9 @@ int imgChar::allocate(const dev::shmimT & dummy)
       nanosleep(&wait, NULL);
    }
 
+   x_1  = 0;
    x2_1 = 0;
+   y_1  = 0;
    y2_1 = 0;
    s2_1 = 0;
    s_1  = 0;
@@ -520,7 +540,9 @@ int imgChar::allocate(const dev::shmimT & dummy)
    m_strehlMean_1 = 0;
    m_strehlRMS_1  = 0;
 
+   x_5  = 0;
    x2_5 = 0;
+   y_5  = 0;
    y2_5 = 0;
    s2_5 = 0;
    s_5  = 0;
@@ -530,7 +552,9 @@ int imgChar::allocate(const dev::shmimT & dummy)
    m_strehlMean_5 = 0;
    m_strehlRMS_5  = 0;
 
+   x_10  = 0;
    x2_10 = 0;
+   y_10  = 0;
    y2_10 = 0;
    s2_10 = 0;
    s_10  = 0;
@@ -599,19 +623,25 @@ int imgChar::processImage(void * curr_src, const dev::shmimT & dummy)
             // Update rms values
             rmsMutex.lock();
 
+            x_1  += (res[1]          -  x_1) / idx_rms1;
             x2_1 += (res[1] * res[1] - x2_1) / idx_rms1;
+            y_1  += (res[0]          -  y_1) / idx_rms1;
             y2_1 += (res[0] * res[0] - y2_1) / idx_rms1;
             s_1  += (SR              -  s_1) / idx_rms1;
             s2_1 += (SR * SR         - s2_1) / idx_rms1;
             ++idx_rms1;
 
+            x_5  += (res[1]          - x_5 ) / idx_rms5;
             x2_5 += (res[1] * res[1] - x2_5) / idx_rms5;
+            y_5  += (res[0]          - y_5 ) / idx_rms5;
             y2_5 += (res[0] * res[0] - y2_5) / idx_rms5;
             s_5  += (SR              -  s_5) / idx_rms5;
             s2_5 += (SR * SR         - s2_5) / idx_rms5;
             ++idx_rms5;
 
+            x_10  += (res[1]          - x_10 ) / idx_rms10;
             x2_10 += (res[1] * res[1] - x2_10) / idx_rms10;
+            y_10  += (res[0]          - y_10 ) / idx_rms10;
             y2_10 += (res[0] * res[0] - y2_10) / idx_rms10;
             s_10  += (SR              -  s_10) / idx_rms10;
             s2_10 += (SR * SR         - s2_10) / idx_rms10;
