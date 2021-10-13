@@ -30,6 +30,8 @@ class dmStatus :
       
       QGraphicsScene * m_qgs {nullptr};
       
+      time_t m_lastrht {0};
+      
    public:
       dmStatus() ;
       

@@ -10,8 +10,8 @@ dmStatus::~dmStatus()
 }
 
 int dmStatus::attachOverlay( rtimvOverlayAccess & roa,
-                                 mx::app::appConfigurator & config
-                               )
+                             mx::app::appConfigurator & config
+                           )
 {   
    m_roa = roa;
    m_qgs = roa.m_graphicsView->scene();
@@ -52,11 +52,29 @@ int dmStatus::updateOverlay()
    
    if( m_roa.m_dictionary->count(m_rhDeviceName + ".humidity.current") > 0)
    {
-      str = (char *)(*m_roa.m_dictionary)[m_rhDeviceName + ".humidity.current"].m_blob;
-      snprintf(tstr, sizeof(tstr), "RH: %0.1f%%", strtod(str,0));
+
+      time_t t0 = (*m_roa.m_dictionary)[m_rhDeviceName + ".humidity.current"].m_lastMod.tv_sec;
+
+      if(time(0) - t0 < 10)
+      {
+         str = (char *)(*m_roa.m_dictionary)[m_rhDeviceName + ".humidity.current"].m_blob;
+         snprintf(tstr, sizeof(tstr), "RH: %0.1f%%", strtod(str,0));
+         m_roa.m_graphicsView->statusTextText(n, tstr);
+      }
+      else
+      {
+         snprintf(tstr, sizeof(tstr), "RH: !XXX!");
+         m_roa.m_graphicsView->statusTextText(n, tstr);
+      }
+      ++n;
+   }
+   else
+   {
+      snprintf(tstr, sizeof(tstr), "RH: !XXX!");
       m_roa.m_graphicsView->statusTextText(n, tstr);
       ++n;
    }
+
    if(n > m_roa.m_graphicsView->statusTextNo()-1) return 0;
    
    

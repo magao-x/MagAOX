@@ -65,6 +65,7 @@ apps/magAOXMaths/magAOXMaths
 gui/rtimv/plugins/cameraStatus/makefile.cameraStatus
 gui/rtimv/plugins/indiDictionary/makefile.indiDictionary
 gui/rtimv/plugins/pwfsAlignment/makefile.pwfsAlignment
+gui/rtimv/plugins/dmStatus/makefile.dmStatus
 
 #h
 apps/hsfwCtrl/hsfwCtrl
