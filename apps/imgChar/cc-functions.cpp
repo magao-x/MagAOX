@@ -130,7 +130,7 @@ GaussFit(size_t ROWS,    // number of rows in input
    double theta { 0.5 * atan(2 * v[1] / (v[0] - v[2])) };
    double sec   { 1.0 / cos(2 * theta) };
 
-   res[0] = (v(0)*v(4) - 2*v(1)*v(3)) / (v(1)*v(1) - 4*v(0)*v(2));    // y-mean
+   res[0] = (2*v(0)*v(4) - v(1)*v(3)) / (v(1)*v(1) - 4*v(0)*v(2));    // y-mean
    res[1] = (2*v(2)*v(3) - v(1)*v(4)) / (v(1)*v(1) - 4*v(0)*v(2));    // x-mean
    res[2] = 1.0 / sqrt(-v[0] - v[2] + (v[0] - v[2]) * sec);  // sigma_y
    res[3] = 1.0 / sqrt(-v[0] - v[2] + (v[2] - v[0]) * sec);  // sigma_x

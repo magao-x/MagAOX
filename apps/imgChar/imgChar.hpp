@@ -192,8 +192,6 @@ class imgChar : public MagAOXApp<true>,
       realT m_strehlMean_10 {0};
       realT m_strehlRMS_10  {0};
 
-      uint64_t NUMRADII {61};
-
       pcf::IndiProperty m_indiP_modRadius;
       float m_modRadius;
       INDI_SETCALLBACK_DECL( imgChar, m_indiP_modRadius);
@@ -207,8 +205,6 @@ class imgChar : public MagAOXApp<true>,
 
    private:
       double* sa_ptr;
-
-      void besselStrehl();
 };
 
 
@@ -454,6 +450,7 @@ int imgChar::appLogic()
    updateIfChanged(m_indiP_shifts, "strehl-rms10", m_strehlRMS_10);
 
    ++numSeconds;
+   numSeconds = (numSeconds % 10);
 
    return 0;
 }
@@ -594,7 +591,7 @@ int imgChar::processImage(void * curr_src, const dev::shmimT & dummy)
             else 
             { 
              //  SR = getStrehlMod(m_input, m_rows, m_cols, m_xctr, m_yctr); 
-               SR = strehlAmp(m_input, m_rows, m_cols) / sa_ptr[1];
+             //  SR = strehlAmp(m_input, m_rows, m_cols) / sa_ptr[1];
             }
       
             m_data[2] = SR;
@@ -602,22 +599,22 @@ int imgChar::processImage(void * curr_src, const dev::shmimT & dummy)
             // Update rms values
             rmsMutex.lock();
 
-            x2_1 += x2_1 + (res[1] * res[1] - x2_1) / idx_rms1;
-            y2_1 += y2_1 + (res[0] * res[0] - y2_1) / idx_rms1;
-            s_1  +=  s_1 + (SR              -  s_1) / idx_rms1;
-            s2_1 += s2_1 + (SR * SR         - s2_1) / idx_rms1;
+            x2_1 += (res[1] * res[1] - x2_1) / idx_rms1;
+            y2_1 += (res[0] * res[0] - y2_1) / idx_rms1;
+            s_1  += (SR              -  s_1) / idx_rms1;
+            s2_1 += (SR * SR         - s2_1) / idx_rms1;
             ++idx_rms1;
 
-            x2_5 += x2_5 + (res[1] * res[1] - x2_5) / idx_rms5;
-            y2_5 += y2_5 + (res[0] * res[0] - y2_5) / idx_rms5;
-            s_5  +=  s_5 + (SR              -  s_5) / idx_rms5;
-            s2_5 += s2_5 + (SR * SR         - s2_5) / idx_rms5;
+            x2_5 += (res[1] * res[1] - x2_5) / idx_rms5;
+            y2_5 += (res[0] * res[0] - y2_5) / idx_rms5;
+            s_5  += (SR              -  s_5) / idx_rms5;
+            s2_5 += (SR * SR         - s2_5) / idx_rms5;
             ++idx_rms5;
 
-            x2_10 += x2_10 + (res[1] * res[1] - x2_10) / idx_rms10;
-            y2_10 += y2_10 + (res[0] * res[0] - y2_10) / idx_rms10;
-            s_10  +=  s_10 + (SR              -  s_10) / idx_rms10;
-            s2_10 += s2_10 + (SR * SR         - s2_10) / idx_rms10;
+            x2_10 += (res[1] * res[1] - x2_10) / idx_rms10;
+            y2_10 += (res[0] * res[0] - y2_10) / idx_rms10;
+            s_10  += (SR              -  s_10) / idx_rms10;
+            s2_10 += (SR * SR         - s2_10) / idx_rms10;
             ++idx_rms10;
 
             rmsMutex.unlock();
