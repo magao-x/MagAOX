@@ -221,6 +221,14 @@ public:
                      const dev::shmimT & sp
                    );
    
+   /// Calls derived()->releaseDM() and then 0s all channels and the sat map.
+   /** This is called by the relevant INDI callback
+     *
+     * \returns 0 on success
+     * \returns -1 on error
+     */
+   int releaseDM();
+
    /// Check the flats directory and update the list of flats if anything changes
    /** This is called once per appLogic and whilePowerOff loops.
      *
@@ -291,7 +299,7 @@ public:
      * \returns 0 on sucess
      * \returns \<0 on an error
      */ 
-   int zeroAll();
+   int zeroAll(bool nosem = false /**< [in] [optional] if true then the semaphore is not raised after zeroing all channels*/);
    
 protected:
    
@@ -302,6 +310,13 @@ protected:
    IMAGE m_satImageStream; ///< The ImageStreamIO shared memory buffer for the sat map.
    IMAGE m_satPercImageStream; ///< The ImageStreamIO shared memory buffer for the sat percentage map.
    
+   /// Clear the saturation maps and zero the shared membory.
+   /**
+     * \returns 0 on success
+     * \returns -1 on error
+     */ 
+   int clearSat();
+
    /** \name Saturation Thread
      * This thread processes the saturation maps
      * @{
@@ -886,6 +901,25 @@ int dm<derivedT,realT>::processImage( void * curr_src,
 }
 
 template<class derivedT, typename realT>
+int dm<derivedT,realT>::releaseDM()
+{
+   int rv;
+   if( (rv = derived().releaseDM()) < 0)
+   {
+      derivedT::template log<software_critical>({__FILE__, __LINE__, errno, rv, "Error from releaseDM"});
+      return rv;
+   }
+
+   if( (rv = zeroAll(true)) < 0)
+   {
+      derivedT::template log<software_error>({__FILE__, __LINE__, errno, rv, "Error from zeroAll"});
+      return rv;
+   }
+
+   return 0;
+
+}
+template<class derivedT, typename realT>
 int dm<derivedT,realT>::checkFlats()
 {
    std::vector<std::string> tfs = mx::ioutils::getFileNames(m_flatPath, "", "", ".fits");
@@ -1451,12 +1485,11 @@ int dm<derivedT,realT>::zeroTest()
 }
 
 template<class derivedT, typename realT>
-int dm<derivedT,realT>::zeroAll()
+int dm<derivedT,realT>::zeroAll(bool nosem)
 {
-   
    IMAGE imageStream;
    
-   for(int n=0; n <m_channels; ++n)
+   for(int n=0; n < m_channels; ++n)
    {
       char nstr[16];
       snprintf(nstr,sizeof(nstr), "%02d", n);
@@ -1464,7 +1497,7 @@ int dm<derivedT,realT>::zeroAll()
       
       if( ImageStreamIO_openIm(&imageStream, shmimN.c_str()) != 0)
       {
-         derivedT::template log<text_log>("could not connect to flat channel " + shmimN, logPrio::LOG_WARNING);
+         derivedT::template log<text_log>("could not connect to channel " + shmimN, logPrio::LOG_WARNING);
       }
    
       if( imageStream.md->size[0] != m_dmWidth)
@@ -1495,7 +1528,7 @@ int dm<derivedT,realT>::zeroAll()
       imageStream.md->write=0;
    
       //Raise the semaphore on last one.
-      if(n == m_channels-1) ImageStreamIO_sempost(&imageStream,-1);
+      if(n == m_channels-1 && !nosem) ImageStreamIO_sempost(&imageStream,-1);
    
       ImageStreamIO_closeIm(&imageStream);
    }
@@ -1503,11 +1536,78 @@ int dm<derivedT,realT>::zeroAll()
    derivedT::template log<text_log>("all channels zeroed", logPrio::LOG_NOTICE);
 
    derived().updateSwitchIfChanged(m_indiP_zeroAll, "request", pcf::IndiElement::Off, INDI_IDLE);
+
+   //Also cleanup flat and test
+   m_flatSet = false;   
+   derived().updateSwitchIfChanged(m_indiP_setFlat, "toggle", pcf::IndiElement::Off, pcf::IndiProperty::Idle);
    
+   //Also cleanup flat and test
+   m_testSet = false;   
+   derived().updateSwitchIfChanged(m_indiP_setTest, "toggle", pcf::IndiElement::Off, pcf::IndiProperty::Idle);
+
+   int rv;
+   if( (rv = clearSat()) < 0)
+   {
+      derivedT::template log<software_error>({__FILE__, __LINE__, errno, rv, "Error from clearSat"});
+      return rv;
+   }
+
    return 0;
 }
       
+template<class derivedT, typename realT>
+int dm<derivedT,realT>::clearSat()
+{
+   IMAGE imageStream;
+
+   std::vector<std::string> sats = {m_shmimSat, m_shmimSatPerc};
+
+   for(size_t n=0; n < sats.size(); ++n)
+   {
+      std::string shmimN = sats[n];
+      
+      if( ImageStreamIO_openIm(&imageStream, shmimN.c_str()) != 0)
+      {
+         derivedT::template log<text_log>("could not connect to sat map " + shmimN, logPrio::LOG_WARNING);
+      }
    
+      if( imageStream.md->size[0] != m_dmWidth)
+      {
+         ImageStreamIO_closeIm(&imageStream);
+         derivedT::template log<text_log>("width mismatch between " + shmimN + " and configured DM", logPrio::LOG_ERROR);
+         derived().updateSwitchIfChanged(m_indiP_zeroAll, "request", pcf::IndiElement::Off, INDI_IDLE);
+         return -1;
+      }
+   
+      if( imageStream.md->size[1] != m_dmHeight)
+      {
+         ImageStreamIO_closeIm(&imageStream);
+         derivedT::template log<text_log>("height mismatch between " + shmimN + " and configured DM", logPrio::LOG_ERROR);
+         derived().updateSwitchIfChanged(m_indiP_zeroAll, "request", pcf::IndiElement::Off, INDI_IDLE);
+         return -1;
+      }
+      
+      imageStream.md->write=1;
+      memset( imageStream.array.raw, 0, m_dmWidth*m_dmHeight*sizeof(realT));
+      
+      clock_gettime(CLOCK_REALTIME, &imageStream.md->writetime);
+
+      //Set the image acquisition timestamp
+      imageStream.md->atime = imageStream.md->writetime;
+         
+      imageStream.md->cnt0++;
+      imageStream.md->write=0;
+      
+      ImageStreamIO_closeIm(&imageStream);
+   }
+
+   m_accumSatMap.setZero();
+   m_instSatMap.setZero();
+      
+
+   return 0;
+}
+
 template<class derivedT, typename realT>
 void dm<derivedT,realT>::satThreadStart(dm *d)
 {
@@ -1736,7 +1836,7 @@ int dm<derivedT,realT>::newCallBack_release( const pcf::IndiProperty &ipRecv )
    
    if( ipRecv["request"].getSwitchState() == pcf::IndiElement::On)
    {
-      return derived().releaseDM();
+      return releaseDM();
    }
    return 0;  
 }
