@@ -17,7 +17,7 @@
 #include <fftw3.h>
 #include "reg_functions.hpp" 
 #include "cc-functions.hpp"
-#include <gsl/gsl_sf_bessel.h>
+#include "psfReconstruct.hpp"
 
 
 #define FNUM 69.0
@@ -210,7 +210,10 @@ class imgChar : public MagAOXApp<true>,
       bool m_fpsFetched    {false};
 
    private:
-      double* sa_ptr;
+      double * sa_ptr;
+      double * spatialModMask;
+      fftw_complex * freqModMask;
+      fftw_plan planGetModMask;
 };
 
 
@@ -505,14 +508,17 @@ int imgChar::allocate(const dev::shmimT & dummy)
    m_image0_fft = (complexT *)fftw_malloc(fftArrSize);
    m_cc_fft     = (complexT *)fftw_malloc(fftArrSize);
 
-   m_planF = fftw_plan_dft_r2c_2d(
-                  m_rows, m_cols, m_input, m_output, FFTW_MEASURE);
+   m_planF = fftw_plan_dft_r2c_2d(m_rows, m_cols, m_input, m_output,
+                                          FFTW_MEASURE);
+   m_planB = fftw_plan_dft_c2r_2d(m_rows, m_cols, m_cc_fft, m_cc_array,
+                                          FFTW_MEASURE);
+   m_otf2psf = fftw_plan_dft_c2r_2d(m_rows, m_cols, m_output, m_input, 
+                                          FFTW_MEASURE);
 
-   m_planB = fftw_plan_dft_c2r_2d(
-                  m_rows, m_cols, m_cc_fft, m_cc_array, FFTW_MEASURE);
-
-   m_otf2psf = fftw_plan_dft_c2r_2d(
-                  m_rows, m_cols, m_output, m_input, FFTW_MEASURE);
+   spatialModMask = (realT    *)fftw_malloc(realArrSize);
+   freqModMask    = (complexT *)fftw_malloc(fftArrSize);
+   planGetModMask = fftw_plan_dft_r2c_2d(m_rows, m_cols, spatialModMask, freqModMask,
+                                          FFTW_MEASURE);
 
    memset(m_cc_fft, 0, fftArrSize); 
 
@@ -607,15 +613,32 @@ int imgChar::processImage(void * curr_src, const dev::shmimT & dummy)
             m_data[1] = res[1];
             
             realT SR { 0 };
+            std::vector<double> rpsfParams;
             if (m_modRadius == 0) 
             { 
+               // Get the Strehl ratio of the point spread function
                SR  = strehlAmp(curr_src, m_rows * m_cols, m_dataType); 
                SR /= sa_ptr[1];
+
+               // Get fwhm of point spread function
+               rpsfParams = psfGaussFit(m_rows, m_cols, m_input);
             } 
             else 
-            { 
-             //  SR = getStrehlMod(m_input, m_rows, m_cols, m_xctr, m_yctr); 
-             //  SR = strehlAmp(m_input, m_rows, m_cols) / sa_ptr[1];
+            {
+               // Demodulate the point spread function 
+               double rad { m_modRadius * 0.837 * 69.0 / 4.8 };
+               createModMask(spatialModMask, m_rows, m_cols, rad);
+               fftw_execute(planGetModMask);
+
+               applyWienerFilter(freqModMask, m_output, m_rows, m_cols);
+               maskHighFreq(m_output, m_rows, m_cols, 11);
+               fftw_execute(m_otf2psf);
+
+               SR  = strehlAmp(m_input, m_rows, m_cols);
+               SR /= sa_ptr[1];
+
+               // Measure the fwhm of the point spread function
+               rpsfParams = psfGaussFit(m_rows, m_cols, m_input);
             }
       
             m_data[2] = SR;

@@ -13,8 +13,7 @@
 #include <fftw3.h>
 
 
-
-/// Calculate the Strehl amplitude of a given Point Spread Function
+/// Calculate the Strehl amplitude of a given point spread function
 /**
  *
  *
@@ -22,21 +21,21 @@
  */
 double strehlAmp(double * im, size_t rows, size_t cols)
 {
-     double totalFlux { 0 };
-     double max { im[0] };
+   double totalFlux { 0 };
+   double max { im[0] };
 
-     for (size_t i {0}; i < rows; ++i)
-          for (size_t j {0}; j < cols; ++j)
-          {
-               if (im[j + i * cols] > max) {
-                    max = im[j + i * cols];
-               }
+   for (size_t i { 0 }; i < rows; ++i)
+      for (size_t j { 0 }; j < cols; ++j)
+      {
+         if (im[j + i * cols] > max)
+            max = im[j + i * cols];
 
-               totalFlux += im[j + i * cols];
-          }
+         totalFlux += im[j + i * cols];
+      }
 
-     return max / totalFlux;
+   return max / totalFlux;
 }
+
 
 
 /// Create a spatial representation of the the modulation mask
@@ -173,16 +172,16 @@ void applyWienerFilter(fftw_complex * H, fftw_complex * OTF, uint64_t nx, uint64
                     + (OTF[j + i * (nx/2 + 1)])[1] * (OTF[j + i * (nx/2 + 1)])[1]; 
                absO = ( (OTF[j + i * (nx/2 + 1)])[0] == 0.0 && (OTF[j + i * (nx/2 + 1)])[1] == 0.0) ? 1e-100 : absH;
 
-               (OTF[j + i * (nx/2 + 1)])[0] *= (  (H[j + i * (nx/2 + 1)])[0] / (absH * absH + noiseFloor / (absO * absO) ) );
-               (OTF[j + i * (nx/2 + 1)])[1] *= ( -(H[j + i * (nx/2 + 1)])[1] / (absH * absH + noiseFloor / (absO * absO) ) );
+               (OTF[j + i * (nx/2 + 1)])[0] *= (  (H[j + i * (nx/2 + 1)])[0] / (absH + noiseFloor / absO ) );
+               (OTF[j + i * (nx/2 + 1)])[1] *= ( -(H[j + i * (nx/2 + 1)])[1] / (absH + noiseFloor / absO ) );
           }
 }
 
 /// Mask out high frequencies in the provided Optical Transfer Function
 /**
  *
- *
  * FCO is the index of the first pixel to be masked out
+ * This function should be called after applyWienerFilter().
  */
 void 
 maskHighFreq(fftw_complex * otf, size_t nx, size_t ny, size_t FCO)
@@ -210,35 +209,18 @@ maskHighFreq(fftw_complex * otf, size_t nx, size_t ny, size_t FCO)
 }
 
 
-
-void crop_image(double *dest, double *src, int IMROWS, int IMCOLS, int x, int y, int SZ)
-{ 
-    int lx=x-SZ, ly=y-SZ;
-    int array_x[2*SZ+1], array_y[2*SZ+1];
-    
-    for (int i=0; i<2*SZ+1; i++) {
-        array_x[i] = ( (lx+i<0) ? IMCOLS+(lx+i) : lx+i );
-        array_y[i] = ( (ly+i<0) ? IMROWS+(ly+i) : ly+i );
-    }
-
-    for (int i=0; i<2*SZ+1; i++)
-        for (int j=0; j<2*SZ+1; j++) {
-            dest[j+i*(2*SZ+1)] = src[array_x[j]+array_y[i]*IMCOLS];
-        }
-
-}
-
-
-
-double locate_max(size_t ROWS, size_t COLS, double *mat, size_t *delta_i, size_t *delta_j)
+static
+double locateMax(size_t ROWS, size_t COLS, double *mat, size_t *delta_i, size_t *delta_j)
 {
     double max = fabs(mat[0]);
 
-    for ( int i=0; i<ROWS; i++ )
-        for ( int j=0; j<COLS; j++ )
+    for ( size_t i { 0 }; i < ROWS; i++ )
+        for ( size_t j { 0 }; j < COLS; j++ )
           if ( fabs(mat[j+i*COLS]) > max )
           {
-              *delta_i=i; *delta_j=j; max = fabs(mat[j+i*COLS]);
+             *delta_i = i;
+             *delta_j = j;
+             max = fabs(mat[j+i*COLS]);
           }
 
      return max;
@@ -268,7 +250,7 @@ std::vector<double> psfGaussFit(size_t ROWS,     // number of rows in input
    size_t ymax {0}, xmax {0};
    std::vector<double> image2;   
  
-   double max { locate_max(ROWS, COLS, input, &ymax, &xmax) };
+   double max { locateMax(ROWS, COLS, input, &ymax, &xmax) };
 
    // Find the radius needed for the fit
    double n { 3.5 }; // adjustable parameter
@@ -276,15 +258,13 @@ std::vector<double> psfGaussFit(size_t ROWS,     // number of rows in input
 
    for (size_t y { ymax }; y < ROWS; ++y)
       if (input[xmax + y * COLS] <= max / n) {
-         yrad = (y - ymax < 0) ? (ymax - y)
-                               : (y - ymax);
+         yrad = y - ymax;
          break;
       } 
 
    for (size_t x { xmax }; x < COLS; ++x)
       if (input[x + ymax * COLS] <= max / n) {
-         xrad = (x - xmax < 0) ? (xmax - x)
-                               : (x - xmax);
+         xrad = x - xmax;
          break;
       } 
 
@@ -400,8 +380,6 @@ std::vector<double> psfGaussFit(size_t ROWS,     // number of rows in input
      res[3] = sqrt( 0.5 * cos(2*theta) / (v[2] * sin(theta) * sin(theta) - v[0] * cos(theta) * cos(theta)) );  // sigma_x
      res[4] = theta;                                                                                           // Tilt angle
    }
-
-     std::cout << "fwhm_x = " << 2*sqrt(2*std::log(2)) / sqrt( cos(theta) * cos(theta) / (res[2]*res[2]) + sin(theta) * sin(theta) / (res[3]*res[3])) << "\n";
 
    return res;
 }

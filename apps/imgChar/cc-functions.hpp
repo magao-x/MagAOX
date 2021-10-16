@@ -31,17 +31,6 @@ std::vector<double> GaussFit(size_t ROWS,    // number of rows in input
 
 
 /**
- *  Calculates the strehl ratio of a modulated Point Spread Function
- *  @param detector pointer to PSF image
- *  @param ROWS     number of rows in image
- *  @param COLS     number of columns in image
- *  @param xctr     approximate center of ring pattern in X
- *  @param yctr     approximate center of ring pattern in Y
- */
-double getStrehlMod(double *detector, size_t ROWS, size_t COLS, size_t xctr, size_t yctr);
-
-
-/**
  * @name copy_image
  * @brief copy images from shmem to input buffer
  *
