@@ -2257,6 +2257,9 @@ void tcsInterface::offloadThreadStart( tcsInterface * t )
 
 void tcsInterface::offloadThreadExec( )
 {
+   //Get the thread PID immediately so the caller can return.
+   m_offloadThreadID = syscall(SYS_gettid);
+
    static int last_loopState = -1;
    
    while( (m_offloadThreadInit == true || state() != stateCodes::CONNECTED) && shutdown() == 0)
