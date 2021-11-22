@@ -55,6 +55,7 @@ yum install -y \
     sudo \
     sysstat \
     fuse \
+    psmisc \
 ;
 
 alternatives --install /usr/local/bin/cmake cmake /usr/bin/cmake3 20 \
