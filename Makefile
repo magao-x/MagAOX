@@ -81,7 +81,8 @@ all_guis = \
 	pwr \
 	coronAlignGUI \
    loopCtrlGUI \
-	roiGUI
+	roiGUI \
+	cameraGUI
 
 ifeq ($(MAGAOX_ROLE),RTC)
   guis_to_build =
@@ -96,7 +97,8 @@ endif
 all_rtimv_plugins = \
 	cameraStatus \
 	indiDictionary \
-	pwfsAlignment
+	pwfsAlignment \
+	dmStatus
 
 ifeq ($(MAGAOX_ROLE),RTC)
   rtimv_plugins_to_build =
