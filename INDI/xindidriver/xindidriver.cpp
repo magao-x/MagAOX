@@ -124,6 +124,9 @@ void * xoverThread( void * vdf /**< [in] pointer to a driverFIFO struct */)
       return nullptr;
    }
 
+   //The buffer for reading from the FIFO.
+   char rdbuff[XINDID_BUFFSIZE];
+
    //Open the controller's FIFO
    while(df->fd < 0 && !timeToDie)
    {
@@ -134,6 +137,30 @@ void * xoverThread( void * vdf /**< [in] pointer to a driverFIFO struct */)
       {
          if( errno == ENOENT ) //If it's just cuz the file doesn't exist, we'll be patient.
          {
+            std::cerr << " (" << XINDID_COMPILEDNAME << "): no driver fifo " << df->fileName << ".\n";
+
+            //Consume any waiting input on stdin
+            if(df->stdfd == STDIN_FILENO)
+            {
+               int rd = read(STDIN_FILENO, rdbuff, XINDID_BUFFSIZE);
+
+               while(rd > 0 && !timeToDie)
+               {
+                  std::cerr << " (" << XINDID_COMPILEDNAME << "): consumed " << rd << " bytes.\n";
+                  rd = read(STDIN_FILENO, rdbuff, XINDID_BUFFSIZE);
+               }
+
+               if(timeToDie) break; //Woke up from a blocking read due to a signal
+
+               if( rd < 0 && !timeToDie)
+               {
+                  //An error on the read.  Report it, and go back around.
+                  std::cerr << " (" << XINDID_COMPILEDNAME << "): " << std::strerror( errno);
+                  std::cerr << " in " << __FILE__ << " at " << __LINE__ << "\n";
+                  break;
+               }
+            }
+
             sleep(1);
          }
          else
@@ -144,8 +171,6 @@ void * xoverThread( void * vdf /**< [in] pointer to a driverFIFO struct */)
       }
    }
 
-   //The buffer for reading from the FIFO.
-   char rdbuff[XINDID_BUFFSIZE];
 
    //Setup the file descriptors.
    int fdRead, fdWrite;
@@ -226,6 +251,7 @@ void * xoverThread( void * vdf /**< [in] pointer to a driverFIFO struct */)
             //We write until we have written all that was read.
             int totwr = 0;
 
+            //std::cerr << " (" << XINDID_COMPILEDNAME << "): starting write\n";
             while(totwr != rd && !timeToDie)
             {
                int wr = write(fdWrite, rdbuff + totwr, rd - totwr);
@@ -240,6 +266,7 @@ void * xoverThread( void * vdf /**< [in] pointer to a driverFIFO struct */)
 
                totwr += wr;
             }
+            //std::cerr << " (" << XINDID_COMPILEDNAME << "): finished write\n";
          }
       }
    }
