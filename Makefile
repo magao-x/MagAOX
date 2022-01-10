@@ -189,8 +189,8 @@ guis_install: rtimv_plugins_install
 		(cd gui/apps/$$gui; ${MAKE} install) || exit 1; \
 	done
 
-guis_clean: rtimv_plugins_clean
-	for gui in ${guis_to_build}; do \
+guis_clean: rtimv_plugins_clean 
+	for gui in ${all_guis}; do \
 		(cd gui/apps/$$gui; ${MAKE} clean) || exit 1; \
 	done
 
