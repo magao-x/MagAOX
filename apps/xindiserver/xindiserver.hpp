@@ -631,7 +631,7 @@ void xindiserver::isLogThreadExec()
    while(m_shutdown == 0)
    {
       ssize_t count = read(m_isSTDERR, buffer, sizeof(buffer));
-      if (count <= 0) 
+      if (count <= 0 || m_shutdown == 1) 
       {
          continue;
       }
