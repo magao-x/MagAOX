@@ -1391,7 +1391,7 @@ int MagAOXApp<_useINDI>::execute() //virtual
             m_shutdown = 1;
          }
 
-         sleep(5); //1 sec seems too short based on repeated attempts needed, this seems like a good "normal" startup time.
+         sleep(1); //This can produce some restarts, but seems necessary to get this to work.
 
          if(!m_indiAlive)
          {
