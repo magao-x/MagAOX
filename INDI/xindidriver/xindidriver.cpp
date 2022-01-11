@@ -137,7 +137,7 @@ void * xoverThread( void * vdf /**< [in] pointer to a driverFIFO struct */)
       {
          if( errno == ENOENT ) //If it's just cuz the file doesn't exist, we'll be patient.
          {
-            std::cerr << " (" << XINDID_COMPILEDNAME << "): no driver fifo " << df->fileName << ".\n";
+            //std::cerr << " (" << XINDID_COMPILEDNAME << "): no driver fifo " << df->fileName << ".\n";
 
             //Consume any waiting input on stdin
             if(df->stdfd == STDIN_FILENO)
@@ -146,7 +146,7 @@ void * xoverThread( void * vdf /**< [in] pointer to a driverFIFO struct */)
 
                while(rd > 0 && !timeToDie)
                {
-                  std::cerr << " (" << XINDID_COMPILEDNAME << "): consumed " << rd << " bytes.\n";
+                  //std::cerr << " (" << XINDID_COMPILEDNAME << "): consumed " << rd << " bytes.\n";
                   rd = read(STDIN_FILENO, rdbuff, XINDID_BUFFSIZE);
                }
 
@@ -440,6 +440,12 @@ int main( int argc, char **argv)
    debug << __FILE__ << " " << __LINE__ << std::endl;
    #endif
    
+   flushFIFO(ctrlFifo);
+   
+   #ifdef DEBUG
+   debug << __FILE__ << " " << __LINE__ << std::endl;
+   #endif
+
    std::cerr << " (" << XINDID_COMPILEDNAME << "): starting with " << stdinFifo << " & " << stdoutFifo << std::endl;
 
    driverFIFO dfIn (stdinFifo, STDIN_FILENO);

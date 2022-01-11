@@ -518,9 +518,6 @@ protected:
    ///Flag controlling whether INDI is used.  If false, then no INDI code ipRecv.getName()executes.
    constexpr static bool m_useINDI = _useINDI;
 
-   ///Flag used to indicate that a response from INDI server has been received, and restart after an interval if not.
-   bool m_indiAlive {false};
-
 ///\todo instead of making this public, provide an accessor.
 public:
    ///The INDI driver wrapper.  Constructed and initialized by execute, which starts and stops communications.
@@ -1382,23 +1379,11 @@ int MagAOXApp<_useINDI>::execute() //virtual
    //====Begin INDI Communications
    if(m_useINDI && m_shutdown == 0) //if we're using INDI and not already dead, that is
    {
-      m_indiAlive = false;
-      while(!m_indiAlive)
+      if(startINDI() < 0)
       {
-         if(startINDI() < 0)
-         {
-            state(stateCodes::FAILURE);
-            m_shutdown = 1;
-         }
-
-         sleep(1); //This can produce some restarts, but seems necessary to get this to work.
-
-         if(!m_indiAlive)
-         {
-            log<text_log>("no INDI response, retrying");
-         }
+         state(stateCodes::FAILURE);
+         m_shutdown = 1;
       }
-      
    }
 
    //We have to wait for power status to become available
@@ -2656,8 +2641,6 @@ void MagAOXApp<_useINDI>::handleGetProperties( const pcf::IndiProperty &ipRecv )
    if(!m_useINDI) return;
    if(m_indiDriver == nullptr) return;
 
-   m_indiAlive = true;
-
    //Ignore if not our device
    if (ipRecv.hasValidDevice() && ipRecv.getDevice() != m_indiDriver->getName())
    {
@@ -2704,8 +2687,6 @@ void MagAOXApp<_useINDI>::handleNewProperty( const pcf::IndiProperty &ipRecv )
    if(!m_useINDI) return;
    if(m_indiDriver == nullptr) return;
 
-   m_indiAlive = true;
-
    //Check if this is a valid name for us.
    if( m_indiNewCallBacks.count(ipRecv.getName()) == 0 )
    {
@@ -2727,8 +2708,6 @@ void MagAOXApp<_useINDI>::handleSetProperty( const pcf::IndiProperty &ipRecv )
 {
    if(!m_useINDI) return;
    if(m_indiDriver == nullptr) return;
-
-   m_indiAlive = true;
 
    std::string key = ipRecv.getDevice() + "." + ipRecv.getName();
 
