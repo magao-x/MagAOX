@@ -64,19 +64,9 @@ SPECTRE_CMDLINE_FIX="noibrs noibpb nopti nospectre_v2 nospectre_v1 l1tf=off nosp
 # disable 3rd party nvidia drivers
 NVIDIA_DRIVER_FIX="rd.driver.blacklist=nouveau nouveau.modeset=0"
 
-if [[ $MAGAOX_ROLE != ICC && $MAGAOX_ROLE != RTC && $MAGAOX_ROLE != TIC ]]; then
-    log_info "Skipping RT kernel install on non-realtime roles"
-    install_rt=false
-    # Put it all together
-    DESIRED_CMDLINE="nosplash $NVIDIA_DRIVER_FIX $SPECTRE_CMDLINE_FIX"
-else
-    if [[ $(uname -v) != *"PREEMPT RT"* ]]; then
-        log_info "Will install RT kernel..."
-        install_rt=true
-    fi
-    # Put it all together
-    DESIRED_CMDLINE="nosplash $NVIDIA_DRIVER_FIX $ALPAO_CMDLINE_FIX $PCIEXPANSION_CMDLINE_FIX $SPECTRE_CMDLINE_FIX"
-fi
+# Put it all together
+DESIRED_CMDLINE="nosplash $NVIDIA_DRIVER_FIX $ALPAO_CMDLINE_FIX $PCIEXPANSION_CMDLINE_FIX $SPECTRE_CMDLINE_FIX"
+
 if ! grep "$DESIRED_CMDLINE" /etc/default/grub; then
     echo GRUB_CMDLINE_LINUX_DEFAULT=\""$DESIRED_CMDLINE"\" | sudo tee -a /etc/default/grub
     sudo grub2-mkconfig -o /boot/grub2/grub.cfg
@@ -91,12 +81,12 @@ else
     log_info "nouveau nvidia driver blacklist entry exists"
 fi
 
+if ! grep "Storage=persistent" /etc/systemd/journald.conf; then
+    echo "Storage=persistent" | sudo tee -a /etc/systemd/journald.conf
+    log_success "Enabled persistent systemd journald log across reboots"
+fi
+
 $DIR/setup_users_and_groups.sh
 log_success "Created users and configured groups"
-
-if [[ $install_rt == true ]]; then
-    sudo $DIR/steps/install_rt_kernel.sh
-    log_success "Installed RT kernel"
-fi
 
 log_success "Reboot before proceeding"
