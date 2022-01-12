@@ -236,13 +236,14 @@ def _indiserver_startup(process_name, executable_name):
     for proc in psutil.process_iter():
         with proc.oneshot():
             try:
+                cmdline = proc.cmdline()
                 exe = proc.exe()
             except (psutil.NoSuchProcess, psutil.AccessDenied):
                 continue
             if exe == '/opt/MagAOX/bin/xindidriver' and proc.ppid() == 1:
                 # this proc is a zombie (reparented to PID 1)
                 _run_as_xsup(f'kill -9 {proc.pid}')
-                warning(f"Killing zombie: {' '.join(proc.cmdline())}")
+                warning(f"Killing zombie: {' '.join(cmdline)}")
     return _startup_helper(process_name, executable_name)
 
 def _startup_helper(process_name, executable_name):
