@@ -240,7 +240,7 @@ def _indiserver_startup(process_name, executable_name):
                 exe = proc.exe()
             except (psutil.NoSuchProcess, psutil.AccessDenied):
                 continue
-            if exe == '/opt/MagAOX/bin/xindidriver' and proc.ppid() == 1:
+            if '/opt/MagAOX/drivers' in exe and proc.ppid() == 1:
                 # this proc is a zombie (reparented to PID 1)
                 _run_as_xsup(f'kill -9 {proc.pid}')
                 warning(f"Killing zombie: {' '.join(cmdline)}")
