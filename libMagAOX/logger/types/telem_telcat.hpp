@@ -12,6 +12,7 @@
 
 #include "generated/telem_telcat_generated.h"
 #include "flatbuffer_log.hpp"
+#include "../logMeta.hpp"
 
 namespace MagAOX
 {
@@ -32,23 +33,16 @@ struct telem_telcat : public flatbuffer_log
 
    static timespec lastRecord; ///< The time of the last time this log was recorded.  Used by the telemetry system.
 
-//    static constexpr int getCatObj = 0;
-//    static constexpr int getCatRm = 1;
-//    static constexpr int getCatRa = 2;
-//    static constexpr int getCatDec = 3;
-//    static constexpr int getCatEp = 4;
-//    static constexpr int getCatRo = 5;
-   
    ///The type of the input message
    struct messageT : public fbMessage
    {
       ///Construct from components
-      messageT( const std::string & catObj,     ///< [in] 
-                const std::string & catRm,    ///< [in] 
-                const double & catRa,    ///< [in] 
-                const double & catDec,        ///< [in] 
-                const double & catEp,     ///< [in] 
-                const double & catRo   ///< [in] 
+      messageT( const std::string & catObj, ///< [in] Catalog object name
+                const std::string & catRm,  ///< [in] Catalog rotator mode 
+                const double & catRa,       ///< [in] Catalog right ascension [degrees]
+                const double & catDec,      ///< [in] Catalog declination [degrees]
+                const double & catEp,       ///< [in] Catalog epoch
+                const double & catRo        ///< [in] Catalog rotator offset
               )
       {
          auto _catObj = builder.CreateString(catObj);
@@ -153,119 +147,26 @@ struct telem_telcat : public flatbuffer_log
       return fbs->catRo();
    }
    
-   /// Get pointer to the accessor for a member by name 
+   /// Get the logMetaDetail for a member by name
    /**
      * \returns the function pointer cast to void*
      * \returns -1 for an unknown member
      */ 
-   static void * getAccessor( const std::string & member /**< [in] the name of the member */ )
+   static logMetaDetail getAccessor( const std::string & member /**< [in] the name of the member */ )
    {
-      if(member == "catObj") return (void *) &catObj;
-      else if(member == "catRm") return (void *) &catRm;
-      else if(member == "catRA") return (void *) &catRA;
-      else if(member == "catDec") return (void *) &catDec;
-      else if(member == "catEp") return (void *) &catEp;
-      else if(member == "catRo") return (void *) &catRo;
+      if(     member == "catObj") return logMetaDetail({"CAT OBJ", logMeta::valTypes::String, logMeta::metaTypes::State, (void *) &catObj});
+      else if(member == "catRm")  return logMetaDetail({"CAT ROTMODE", logMeta::valTypes::String, logMeta::metaTypes::State, (void *) &catRm});
+      else if(member == "catRA")  return logMetaDetail({"CAT RA", logMeta::valTypes::Double, logMeta::metaTypes::State, (void *) &catRA});
+      else if(member == "catDec") return logMetaDetail({"CAT DEC", logMeta::valTypes::Double, logMeta::metaTypes::State, (void *) &catDec});
+      else if(member == "catEp")  return logMetaDetail({"CAT EPOCH", logMeta::valTypes::Double, logMeta::metaTypes::State, (void *) &catEp});
+      else if(member == "catRo")  return logMetaDetail({"CAT ROTOFF", logMeta::valTypes::Double, logMeta::metaTypes::State, (void *) &catRo});
       else
       {
          std::cerr << "No string member " << member << " in telem_telcat\n";
-         return 0;
+         return logMetaDetail();
       }
    }
    
-#if 0   
-   /// Get the lookup index for a member by name 
-   /**
-     * \returns the index for a valid member
-     * \returns -1 for an unknown member
-     */ 
-   static int getIndex( const std::string & member /**< [in] the name of the member */ )
-   {
-      if(member == "catObj") return getCatObj;
-      else if(member == "catRm") return getCatRm;
-      else if(member == "catRA") return getCatRa;
-      else if(member == "catDec") return getCatDec;
-      else if(member == "catEp") return getCatEp;
-      else if(member == "catRo") return getCatRo;
-      else 
-      {
-         std::cerr << "No member " << member << " in telem_telcat\n";
-         return -1;
-      }
-   }
-   
-   /// Get a string value for a member by name
-   /**
-     * \returns the value for a valid member name 
-     * \returns an empty string for an unknown member name
-     */  
-   static std::string getString( const std::string & member, ///< [in] the member name
-                                 void * msgBuffer            ///< [in] the message buffer to decode
-                               )
-   {
-      return getString(getIndex(member), msgBuffer);
-   }
-   
-   /// Get a string value for a member by index
-   /**
-     * \returns the value for a valid member index 
-     * \returns an empty string for an unknown member index
-     */
-   static std::string getString( int index,       ///< [in] the member index
-                                 void * msgBuffer ///< [in] the message buffer to decode
-                               )
-   {
-      switch(index)
-      {
-         case getCatObj:
-            return catObj(msgBuffer);
-         case getCatRm:
-            return catRm(msgBuffer);
-         default:
-            std::cerr << "Invalid index " << index << " for type std::string\n";
-            return "";
-      }
-   }
-   
-   /// Get a double value for a member by name
-   /**
-     * \returns the value for a valid member name 
-     * \returns -1e50 for an unknown member name
-     */ 
-   static double  getDouble( const std::string & member, ///< [in] the member name
-                             void * msgBuffer            ///< [in] the message buffer to decode
-                           )
-   {
-      return getDouble(getIndex(member), msgBuffer);
-   }
-   
-   /// Get a double value for a member by index
-   /**
-     * \returns the value for a valid member name 
-     * \returns -1e50 for an unknown member name
-     */
-   static double  getDouble( int index,       ///< [in] the member index
-                             void * msgBuffer ///< [in] the message buffer to decode
-                           )
-   {
-      switch(index)
-      {
-         case getCatRa:
-            return catRA(msgBuffer);
-         case getCatDec:
-            return catDec(msgBuffer);
-         case getCatEp:
-            return catEp(msgBuffer);
-         case getCatRo:
-            return catRo(msgBuffer);
-         default:
-            std::cerr << "Invalid index " << index << " for type double\n";
-            return -1e50;
-      }
-   }
-   
-#endif
-
 }; //telem_telcat
 
 

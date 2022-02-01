@@ -12,6 +12,7 @@
 
 #include "generated/telem_teldata_generated.h"
 #include "flatbuffer_log.hpp"
+#include "../logMeta.hpp"
 
 namespace MagAOX
 {
@@ -160,27 +161,27 @@ struct telem_teldata : public flatbuffer_log
        return fbs->domeStat();
    }
    
-   /// Get pointer to the accessor for a member by name 
+   /// Get the logMetaDetail for a member by name
    /**
      * \returns the function pointer cast to void*
      * \returns -1 for an unknown member
      */ 
-   static void * getAccessor( const std::string & member /**< [in] the name of the member */ )
+   static logMetaDetail getAccessor( const std::string & member /**< [in] the name of the member */ )
    {
-      if(member == "roi") return (void *) &roi;
-      else if(member == "tracking") return (void *) &tracking;
-      else if(member == "guiding") return (void *) &guiding;
-      else if(member == "slewing") return (void *) &slewing;
-      else if(member == "guiderMoving") return (void *) &guiderMoving;
-      else if(member == "az") return (void *) &az;
-      else if(member == "zd") return (void *) &zd;
-      else if(member == "pa") return (void *) &pa;
-      else if(member == "domeAz") return (void *) &domeAz;
-      else if(member == "domeStat") return (void *) &domeStat;
+      if(     member == "roi") return logMetaDetail({"ROI", logMeta::valTypes::Int, logMeta::metaTypes::State, (void *) &roi});
+      else if(member == "tracking") return logMetaDetail({"TRACKING", logMeta::valTypes::Int, logMeta::metaTypes::State, (void *) &tracking}); 
+      else if(member == "guiding") return logMetaDetail({"GUIDING", logMeta::valTypes::Int, logMeta::metaTypes::State, (void *) &guiding}); 
+      else if(member == "slewing") return logMetaDetail({"SLEWING", logMeta::valTypes::Int, logMeta::metaTypes::State, (void *) &slewing}); 
+      else if(member == "guiderMoving") return logMetaDetail({"GUIDER MOVING", logMeta::valTypes::Int, logMeta::metaTypes::State, (void *) &guiderMoving}); 
+      else if(member == "az") return logMetaDetail({"AZ", logMeta::valTypes::Double, logMeta::metaTypes::Continuous, (void *) &az});
+      else if(member == "zd") return logMetaDetail({"ZD", logMeta::valTypes::Double, logMeta::metaTypes::Continuous, (void *) &zd});
+      else if(member == "pa") return logMetaDetail({"PARANG", logMeta::valTypes::Double, logMeta::metaTypes::Continuous, (void *) &pa});
+      else if(member == "domeAz") return logMetaDetail({"DOME AZ", logMeta::valTypes::Double, logMeta::metaTypes::Continuous, (void *) &domeAz}); 
+      else if(member == "domeStat") return logMetaDetail({"DOME STATUS", logMeta::valTypes::Int, logMeta::metaTypes::State, (void *) &domeStat});
       else
       {
          std::cerr << "No string member " << member << " in telem_teldata\n";
-         return 0;
+         return logMetaDetail();
       }
    }
    
