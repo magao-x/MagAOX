@@ -115,7 +115,7 @@ utils_to_build = logdump \
                  cursesINDI \
 				 xrif2shmim
 
-scripts_to_install = magaox query_seeing sync_cacao xctrl netconsole_logger rtc_cpuset rtc_procset
+scripts_to_install = magaox query_seeing sync_cacao xctrl netconsole_logger rtc_cpuset rtc_procset creaimshm dmdispbridge shmimTCPreceive shmimTCPtransmit
 
 all: indi_all libs_all flatlogs apps_all guis_all utils_all
 
