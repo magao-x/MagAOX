@@ -10,8 +10,8 @@
 #define shmimMonitor_hpp
 
 
-#include <ImageStruct.h>
-#include <ImageStreamIO.h>
+#include <ImageStreamIO/ImageStruct.h>
+#include <ImageStreamIO/ImageStreamIO.h>
 
 #include "../../libMagAOX/common/paths.hpp"
 

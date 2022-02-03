@@ -7,8 +7,8 @@
 #ifndef xrif2shmim_hpp
 #define xrif2shmim_hpp
 
-#include <ImageStruct.h>
-#include <ImageStreamIO.h>
+#include <ImageStreamIO/ImageStruct.h>
+#include <ImageStreamIO/ImageStreamIO.h>
 
 #include <xrif/xrif.h>
 
@@ -409,7 +409,7 @@ int xrif2shmim::execute()
 
    std::cerr << " (" << invokedName << "): Creating stream: " << m_shmimName << "  (" << m_width << " x " << m_height << " x " << m_circBuffLength << ")\n";
 
-   ImageStreamIO_createIm_gpu(&m_imageStream, m_shmimName.c_str(), 3, imsize, m_dataType, -1, 1, IMAGE_NB_SEMAPHORE, 0, CIRCULAR_BUFFER | ZAXIS_TEMPORAL);
+   ImageStreamIO_createIm_gpu(&m_imageStream, m_shmimName.c_str(), 3, imsize, m_dataType, -1, 1, IMAGE_NB_SEMAPHORE, 0, CIRCULAR_BUFFER | ZAXIS_TEMPORAL, 0);
 
    m_imageStream.md->cnt1 = m_circBuffLength;
 

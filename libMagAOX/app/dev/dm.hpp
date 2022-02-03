@@ -1640,8 +1640,8 @@ void dm<derivedT,realT>::satThreadExec()
    imsize[1] = m_dmHeight;
    imsize[2] = 1;
       
-   ImageStreamIO_createIm_gpu(&m_satImageStream, m_shmimSat.c_str(), 3, imsize, IMAGESTRUCT_UINT8, -1, 1, IMAGE_NB_SEMAPHORE, 0, CIRCULAR_BUFFER | ZAXIS_TEMPORAL);
-   ImageStreamIO_createIm_gpu(&m_satPercImageStream, m_shmimSatPerc.c_str(), 3, imsize, IMAGESTRUCT_FLOAT, -1, 1, IMAGE_NB_SEMAPHORE, 0, CIRCULAR_BUFFER | ZAXIS_TEMPORAL);
+   ImageStreamIO_createIm_gpu(&m_satImageStream, m_shmimSat.c_str(), 3, imsize, IMAGESTRUCT_UINT8, -1, 1, IMAGE_NB_SEMAPHORE, 0, CIRCULAR_BUFFER | ZAXIS_TEMPORAL, 0);
+   ImageStreamIO_createIm_gpu(&m_satPercImageStream, m_shmimSatPerc.c_str(), 3, imsize, IMAGESTRUCT_FLOAT, -1, 1, IMAGE_NB_SEMAPHORE, 0, CIRCULAR_BUFFER | ZAXIS_TEMPORAL, 0);
        
    bool opened = true;
    

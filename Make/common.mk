@@ -35,7 +35,7 @@ LIB_PATH ?= $(PREFIX)/lib
 INCLUDE_PATH ?= $(PREFIX)/include
 LIB_SOFA ?= $(LIB_PATH)/libsofa_c.a
 
-INCLUDES += -I$(INCLUDE_PATH) -I$(abspath $(SELF_DIR)/../flatlogs/include)
+INCLUDES += -I$(INCLUDE_PATH) -I$(abspath $(SELF_DIR)/../flatlogs/include) 
 
 
 ########################################
@@ -72,7 +72,8 @@ endif
 
 CACAO ?= true
 ifneq ($(CACAO),false)
-  EXTRA_LDLIBS +=  -lImageStreamIO
+  EXTRA_LDLIBS +=  -L/usr/local/milk/lib -lImageStreamIO
+  INCLUDES += -I/usr/local/milk/include
 endif
 
 ### MKL BLAS

@@ -616,10 +616,10 @@ int pupilFit::allocate(const dev::shmimT & dummy)
       m_edgeShmimConnected = false;
    }
    
-   ImageStreamIO_createIm_gpu(&m_threshShmim , m_threshShmimName .c_str(), 3, imsize, m_dataType, -1, 1, IMAGE_NB_SEMAPHORE, 0, CIRCULAR_BUFFER | ZAXIS_TEMPORAL);
+   ImageStreamIO_createIm_gpu(&m_threshShmim , m_threshShmimName .c_str(), 3, imsize, m_dataType, -1, 1, IMAGE_NB_SEMAPHORE, 0, CIRCULAR_BUFFER | ZAXIS_TEMPORAL,0);
    m_threshShmimConnected = true;
    
-   ImageStreamIO_createIm_gpu(&m_edgeShmim , m_edgeShmimName .c_str(), 3, imsize, m_dataType, -1, 1, IMAGE_NB_SEMAPHORE, 0, CIRCULAR_BUFFER | ZAXIS_TEMPORAL);
+   ImageStreamIO_createIm_gpu(&m_edgeShmim , m_edgeShmimName .c_str(), 3, imsize, m_dataType, -1, 1, IMAGE_NB_SEMAPHORE, 0, CIRCULAR_BUFFER | ZAXIS_TEMPORAL,0);
    m_edgeShmimConnected = true;
    
    if(m_edgeShmimConnected)
