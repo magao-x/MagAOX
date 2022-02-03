@@ -1116,14 +1116,15 @@ int ocam2KCtrl::acquireAndCheckValid()
          { 
             //This we handle as a non-timeout -- report how many frames were skipped
             long framesSkipped = m_currImageNumber - m_lastImageNumber;
-            //and don't `continue` to top of loop
             
             log<text_log>("frames skipped: " + std::to_string(framesSkipped), logPrio::LOG_ERROR);
             
-            m_nextMode = m_modeName;
-            m_reconfig = 1;
+	    // and go on and try to use it.
+	    //
+            //m_nextMode = m_modeName;
+            //m_reconfig = 1;
            
-            return 1;
+            //return 1;
             
          }
          else //but if it's any bigger or < 0, it's probably garbage
