@@ -67,6 +67,9 @@ int logMeta::setLog( const logMetaSpec & lms )
          case valTypes::String:
             m_spec.format = "%s";
             break;
+         case valTypes::Bool:
+            m_spec.format = "%d";
+            break;
          case valTypes::Char:
             m_spec.format = "%d";
             break;
@@ -140,6 +143,83 @@ std::string logMeta::valueNumber( logMap & lm,
    {
       switch(m_detail.valType)
       {
+         case valTypes::Bool:
+         {
+            bool val;
+            if( getLogStateVal(val,lm, m_spec.device,m_spec.eventCode,stime,atime,(bool(*)(void*))m_detail.accessor, &m_hint) != 0) return m_invalidValue;
+            snprintf(str, sizeof(str), m_spec.format.c_str(), val);
+            return std::string(str);
+         }
+         case valTypes::Char:
+         {
+            char val;
+            if( getLogStateVal(val,lm, m_spec.device,m_spec.eventCode,stime,atime,(char(*)(void*))m_detail.accessor, &m_hint) != 0) return m_invalidValue;
+            snprintf(str, sizeof(str), m_spec.format.c_str(), val);
+            return std::string(str);
+         }
+         case valTypes::UChar:
+         {
+            unsigned char val;
+            if( getLogStateVal(val,lm, m_spec.device,m_spec.eventCode,stime,atime,(unsigned char(*)(void*))m_detail.accessor, &m_hint) != 0) return m_invalidValue;
+            snprintf(str, sizeof(str), m_spec.format.c_str(), val);
+            return std::string(str);
+         }
+         case valTypes::Short:
+         {
+            short val;
+            if( getLogStateVal(val,lm, m_spec.device,m_spec.eventCode,stime,atime,(short(*)(void*))m_detail.accessor, &m_hint) != 0) return m_invalidValue;
+            snprintf(str, sizeof(str), m_spec.format.c_str(), val);
+            return std::string(str);
+         }
+         case valTypes::UShort:
+         {
+            unsigned short val;
+            if( getLogStateVal(val,lm, m_spec.device,m_spec.eventCode,stime,atime,(unsigned short(*)(void*))m_detail.accessor, &m_hint) != 0) return m_invalidValue;
+            snprintf(str, sizeof(str), m_spec.format.c_str(), val);
+            return std::string(str);
+         }
+         case valTypes::Int:
+         {
+            int val;
+            if( getLogStateVal(val,lm, m_spec.device,m_spec.eventCode,stime,atime,(int(*)(void*))m_detail.accessor, &m_hint) != 0) return m_invalidValue;
+            snprintf(str, sizeof(str), m_spec.format.c_str(), val);
+            return std::string(str);
+         }
+         case valTypes::UInt:
+         {
+            unsigned int val;
+            if( getLogStateVal(val,lm, m_spec.device,m_spec.eventCode,stime,atime,(unsigned int(*)(void*))m_detail.accessor, &m_hint) != 0) return m_invalidValue;
+            snprintf(str, sizeof(str), m_spec.format.c_str(), val);
+            return std::string(str);
+         }
+         case valTypes::Long:
+         {
+            long val;
+            if( getLogStateVal(val,lm, m_spec.device,m_spec.eventCode,stime,atime,(long(*)(void*))m_detail.accessor, &m_hint) != 0) return m_invalidValue;
+            snprintf(str, sizeof(str), m_spec.format.c_str(), val);
+            return std::string(str);
+         }
+         case valTypes::ULong:
+         {
+            unsigned long val;
+            if( getLogStateVal(val,lm, m_spec.device,m_spec.eventCode,stime,atime,(unsigned long(*)(void*))m_detail.accessor, &m_hint) != 0) return m_invalidValue;
+            snprintf(str, sizeof(str), m_spec.format.c_str(), val);
+            return std::string(str);
+         }
+         case valTypes::LongLong:
+         {
+            long long val;
+            if( getLogStateVal(val,lm, m_spec.device,m_spec.eventCode,stime,atime,(long long(*)(void*))m_detail.accessor, &m_hint) != 0) return m_invalidValue;
+            snprintf(str, sizeof(str), m_spec.format.c_str(), val);
+            return std::string(str);
+         }
+         case valTypes::ULongLong:
+         {
+            unsigned long long val;
+            if( getLogStateVal(val,lm, m_spec.device,m_spec.eventCode,stime,atime,(unsigned long long(*)(void*))m_detail.accessor, &m_hint) != 0) return m_invalidValue;
+            snprintf(str, sizeof(str), m_spec.format.c_str(), val);
+            return std::string(str);
+         }
          case valTypes::Float:
          {
             float val;
@@ -162,6 +242,83 @@ std::string logMeta::valueNumber( logMap & lm,
    {
       switch(m_detail.valType)
       {
+         case valTypes::Bool:
+         {
+            bool val;
+            if( getLogContVal(val,lm, m_spec.device,m_spec.eventCode,stime,atime,(bool(*)(void*))m_detail.accessor, &m_hint) != 0) return m_invalidValue;
+            snprintf(str, sizeof(str), m_spec.format.c_str(), val);
+            return std::string(str);
+         }
+         case valTypes::Char:
+         {
+            char val;
+            if( getLogContVal(val,lm, m_spec.device,m_spec.eventCode,stime,atime,(char(*)(void*))m_detail.accessor, &m_hint) != 0) return m_invalidValue;
+            snprintf(str, sizeof(str), m_spec.format.c_str(), val);
+            return std::string(str);
+         }
+         case valTypes::UChar:
+         {
+            unsigned char val;
+            if( getLogContVal(val,lm, m_spec.device,m_spec.eventCode,stime,atime,(unsigned char(*)(void*))m_detail.accessor, &m_hint) != 0) return m_invalidValue;
+            snprintf(str, sizeof(str), m_spec.format.c_str(), val);
+            return std::string(str);
+         }
+         case valTypes::Short:
+         {
+            short val;
+            if( getLogContVal(val,lm, m_spec.device,m_spec.eventCode,stime,atime,(short(*)(void*))m_detail.accessor, &m_hint) != 0) return m_invalidValue;
+            snprintf(str, sizeof(str), m_spec.format.c_str(), val);
+            return std::string(str);
+         }
+         case valTypes::UShort:
+         {
+            unsigned short val;
+            if( getLogContVal(val,lm, m_spec.device,m_spec.eventCode,stime,atime,(unsigned short(*)(void*))m_detail.accessor, &m_hint) != 0) return m_invalidValue;
+            snprintf(str, sizeof(str), m_spec.format.c_str(), val);
+            return std::string(str);
+         }
+         case valTypes::Int:
+         {
+            int val;
+            if( getLogContVal(val,lm, m_spec.device,m_spec.eventCode,stime,atime,(int(*)(void*))m_detail.accessor, &m_hint) != 0) return m_invalidValue;
+            snprintf(str, sizeof(str), m_spec.format.c_str(), val);
+            return std::string(str);
+         }
+         case valTypes::UInt:
+         {
+            unsigned int val;
+            if( getLogContVal(val,lm, m_spec.device,m_spec.eventCode,stime,atime,(unsigned int(*)(void*))m_detail.accessor, &m_hint) != 0) return m_invalidValue;
+            snprintf(str, sizeof(str), m_spec.format.c_str(), val);
+            return std::string(str);
+         }
+         case valTypes::Long:
+         {
+            long val;
+            if( getLogContVal(val,lm, m_spec.device,m_spec.eventCode,stime,atime,(long(*)(void*))m_detail.accessor, &m_hint) != 0) return m_invalidValue;
+            snprintf(str, sizeof(str), m_spec.format.c_str(), val);
+            return std::string(str);
+         }
+         case valTypes::ULong:
+         {
+            unsigned long val;
+            if( getLogContVal(val,lm, m_spec.device,m_spec.eventCode,stime,atime,(unsigned long(*)(void*))m_detail.accessor, &m_hint) != 0) return m_invalidValue;
+            snprintf(str, sizeof(str), m_spec.format.c_str(), val);
+            return std::string(str);
+         }
+         case valTypes::LongLong:
+         {
+            long long val;
+            if( getLogContVal(val,lm, m_spec.device,m_spec.eventCode,stime,atime,(long long(*)(void*))m_detail.accessor, &m_hint) != 0) return m_invalidValue;
+            snprintf(str, sizeof(str), m_spec.format.c_str(), val);
+            return std::string(str);
+         }
+         case valTypes::ULongLong:
+         {
+            unsigned long long val;
+            if( getLogContVal(val,lm, m_spec.device,m_spec.eventCode,stime,atime,(unsigned long long(*)(void*))m_detail.accessor, &m_hint) != 0) return m_invalidValue;
+            snprintf(str, sizeof(str), m_spec.format.c_str(), val);
+            return std::string(str);
+         }
          case valTypes::Float:
          {
             float val;

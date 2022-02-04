@@ -191,9 +191,6 @@ int getLogContVal( valT & val,
    return 0;
 }
 
-//-- setLogCode [set the function pointers]
-//-- setMemberName [get the index]
-//--> above two should be same function.
 
 /// Manage meta data for a log entry
 /** Handles cases where log is a state, i.e. has one of a finite number of values, or is a
@@ -207,7 +204,7 @@ public:
    enum valTypes
    {
       String = mx::fits::fitsType<std::string>(),
-      Bool = mx::fits::fitsType<unsigned char>(),
+      Bool = mx::fits::fitsType<bool>(),
       Char = mx::fits::fitsType<char>(),
       UChar = mx::fits::fitsType<unsigned char>(),
       Short = mx::fits::fitsType<short>(),
@@ -216,6 +213,8 @@ public:
       UInt = mx::fits::fitsType<unsigned int>(),
       Long = mx::fits::fitsType<long>(),
       ULong = mx::fits::fitsType<unsigned long>(),
+      LongLong = mx::fits::fitsType<long long>(),
+      ULongLong = mx::fits::fitsType<unsigned long long>(),
       Float = mx::fits::fitsType<float>(),
       Double = mx::fits::fitsType<double>()
    };
