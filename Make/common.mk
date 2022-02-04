@@ -65,7 +65,7 @@ EXTRA_LDLIBS ?=  -lmxlib \
   $(abspath $(SELF_DIR)/../INDI/liblilxml/liblilxml.a) 
   
 ifneq ($(NEED_CUDA),no)
-   EXTRA_LDLIBS+= -lcudart -lcublas -lcufft -lcurand 
+   EXTRA_LDLIBS+= $(CUDA_LIBPATH) -lcudart -lcublas -lcufft -lcurand 
 endif
 
 #2021-01-07: added xpa to levmar

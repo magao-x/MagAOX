@@ -105,6 +105,10 @@ statusLabel::statusLabel( QWidget *parent ) : QLabel(parent)
    setProperty("isStatus", true);
    m_changeTimer = new QTimer(this);
    connect(m_changeTimer, SIGNAL(timeout()), this, SLOT(changeTimerOut()));
+
+   QFont qf = font();
+   qf.setPixelSize(XW_FONT_SIZE);
+   setFont(qf);
 }
 
 void statusLabel::highlightChanges(bool hc)

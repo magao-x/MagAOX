@@ -140,6 +140,8 @@ statusEntry::statusEntry( const std::string & device,
 {
    construct();
    setup(device, property, type, label, units);
+
+   
 }
 
 statusEntry::~statusEntry() noexcept
@@ -150,6 +152,14 @@ void statusEntry::construct()
 {
    ui.setupUi(this);
    ui.value->setProperty("isStatus", true);
+
+   QFont qf = ui.label->font();
+   qf.setPixelSize(XW_FONT_SIZE);
+   ui.label->setFont(qf);
+
+   qf = ui.value->font();
+   qf.setPixelSize(XW_FONT_SIZE);
+   ui.value->setFont(qf);
 }
 
 void statusEntry::setup( const std::string & device,

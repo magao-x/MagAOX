@@ -10,6 +10,8 @@
 
 #include "../../lib/multiIndiSubscriber.hpp"
 
+#define XW_FONT_SIZE (15)
+
 namespace xqt 
 {
 
