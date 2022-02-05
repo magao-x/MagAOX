@@ -1,41 +1,84 @@
 #!/bin/bash
+
 #####################################################
 ## MagAO-X RTC cpuset configuration 
 ## 
 ## See https://linux.die.net/man/7/cpuset
 ##
 ## Run this as sudo at startup of the system
-## Then run rtc_procset.bash after starting all loop processes
+## Then run rtc_procset after starting all loop processes
 ##
 ####################################################
 
+# On RTC we have 2x18 = 36 real cores, which maps to 72 cpus
+# To see the list: cat /proc/cpuinfo | egrep 'processor|physical id|core id'
+# Each row in this table corresponds to a real core, and two logical processors.
+#
+# processor   physical-id    core-id    processor    physical-id    core-id  
+#     0           0            0           36            0            0
+#     1           0            1           37            0            1
+#     2           0            2           38            0            2
+#     3           0            3           39            0            3 
+#     4           0            4           40            0            4 
+#     5           0            8           41            0            8 
+#     6           0            9           42            0            9 
+#     7           0            10          43            0            10 
+#     8           0            11          44            0            11 
+#     9           0            16          45            0            16 
+#    10           0            17          46            0            17 
+#    11           0            18          47            0            18 
+#    12           0            19          48            0            19  
+#    13           0            20          49            0            20 
+#    14           0            24          50            0            24 
+#    15           0            25          51            0            25  
+#    16           0            26          52            0            26 
+#    17           0            27          53            0            27 
+#    18           1            0           54            1            0  
+#    19           1            1           55            1            1  
+#    20           1            2           56            1            2  
+#    21           1            3           57            1            3  
+#    22           1            4           58            1            4  
+#    23           1            8           59            1            8  
+#    24           1            9           60            1            9  
+#    25           1            10          61            1            10 
+#    26           1            11          62            1            11 
+#    27           1            16          63            1            16 
+#    28           1            17          64            1            17 
+#    29           1            18          65            1            18 
+#    30           1            19          66            1            19 
+#    31           1            20          67            1            20     
+#    32           1            24          68            1            24      
+#    33           1            25          69            1            25            
+#    34           1            26          70            1            26 
+#    35           1            27          71            1            27 
+            
+# we will use processors 0-13 and 36-49 as the hyperthread system cpus,
+# so we disable processors 50-71. This leaves us 14-35 as single thread processors.
 
-#Disable hyperthreading on cores 18-35 
-for cpu in {54..71}
+# Disable processors 50-71
+for cpu in {50..71}
 do
    /bin/echo 0 > /sys/devices/system/cpu/cpu$cpu/online 
 done
 
 #Create and mount the root cpuset
-mkdir /dev/cpuset
+mkdir -p /dev/cpuset
 mount -t cpuset cpuset /dev/cpuset
 cd /dev/cpuset
 
 #############################
 # The system cpuset
 #
-# Assumes 18 cores (1 cpu, but this isn't necessary) have hyperthreading enabled, and 18 have it disabled.
-# We use the hyperthread cores as the system cpuset
 ############################
-
-mkdir /dev/cpuset/system
-/bin/echo 0-17,36-53 > /dev/cpuset/system/cpuset.cpus
+mkdir -p /dev/cpuset/system
+/bin/echo 0-13,36-49 > /dev/cpuset/system/cpuset.cpus
 /bin/echo 0-1 > /dev/cpuset/system/cpuset.mems
 
 # Now move all current tasks to system cpuset
-# Note that this moves pid=1 (init) so all new process created should live here (right)?
+# Note that this moves pid=1 (init) so all new process created should live here.
+# we suppress the errors from echo b/c they are for dead pids still in tasks
 #
-while read i; do /bin/echo $i; done < tasks > system/tasks 
+while read i; do /bin/echo -n $i; done < tasks > system/tasks 2> /dev/null
 
 #A guess at how to setup load balancing 
 echo 0 > cpuset.sched_load_balance
@@ -43,101 +86,130 @@ echo 1 > system/cpuset.sched_load_balance
 
 ###############
 # Now setup cpusets for the RTC processes
-# We have cores 18-35 (18 cores) to use.
-# Curently unused: 35
+# We have cores 14-35 (22 cores) to use.
+# Curently unused: 14-16 (3)  These are created as "spareN"
 ###############
 
-#camwfs
-mkdir /dev/cpuset/camwfs
+#spare14
+mkdir -p /dev/cpuset/spare14
+/bin/echo 14 > /dev/cpuset/spare14/cpuset.cpus
+/bin/echo 1 > /dev/cpuset/spare14/cpuset.cpu_exclusive
+/bin/echo 0-1 > /dev/cpuset/spare14/cpuset.mems
+
+#spare15
+mkdir -p /dev/cpuset/spare15
+/bin/echo 15 > /dev/cpuset/spare15/cpuset.cpus
+/bin/echo 1 > /dev/cpuset/spare15/cpuset.cpu_exclusive
+/bin/echo 0-1 > /dev/cpuset/spare15/cpuset.mems
+
+#spare16
+mkdir -p /dev/cpuset/spare16
+/bin/echo 16 > /dev/cpuset/spare16/cpuset.cpus
+/bin/echo 1 > /dev/cpuset/spare16/cpuset.cpu_exclusive
+/bin/echo 0-1 > /dev/cpuset/spare16/cpuset.mems
+
+#camwfs-sw - 17
+mkdir -p /dev/cpuset/camwfs-sw
+/bin/echo 17 > /dev/cpuset/camwfs-sw/cpuset.cpus
+/bin/echo 1 > /dev/cpuset/camwfs-sw/cpuset.cpu_exclusive
+/bin/echo 0-1 > /dev/cpuset/camwfs-sw/cpuset.mems
+
+#camwfs - 18
+mkdir -p /dev/cpuset/camwfs
 /bin/echo 18 > /dev/cpuset/camwfs/cpuset.cpus
 /bin/echo 1 > /dev/cpuset/camwfs/cpuset.cpu_exclusive
 /bin/echo 0-1 > /dev/cpuset/camwfs/cpuset.mems
 
 #Woofer
-mkdir /dev/cpuset/dm00comb
+mkdir -p /dev/cpuset/dm00comb
 /bin/echo 19 > /dev/cpuset/dm00comb/cpuset.cpus
 /bin/echo 1 > /dev/cpuset/dm00comb/cpuset.cpu_exclusive
 /bin/echo 0-1 > /dev/cpuset/dm00comb/cpuset.mems
 
-mkdir /dev/cpuset/woofer
+mkdir -p /dev/cpuset/woofer
 /bin/echo 20 > /dev/cpuset/woofer/cpuset.cpus
 /bin/echo 1 > /dev/cpuset/woofer/cpuset.cpu_exclusive
 /bin/echo 0-1 > /dev/cpuset/woofer/cpuset.mems
 
 #Tweeter
-mkdir /dev/cpuset/dm01comb
+mkdir -p /dev/cpuset/dm01comb
 /bin/echo 21 > /dev/cpuset/dm01comb/cpuset.cpus
 /bin/echo 1 > /dev/cpuset/dm01comb/cpuset.cpu_exclusive
 /bin/echo 0-1 > /dev/cpuset/dm01comb/cpuset.mems
 
-mkdir /dev/cpuset/tweeter
+mkdir -p /dev/cpuset/tweeter
 /bin/echo 22 > /dev/cpuset/tweeter/cpuset.cpus
 /bin/echo 1 > /dev/cpuset/tweeter/cpuset.cpu_exclusive
 /bin/echo 0-1 > /dev/cpuset/tweeter/cpuset.mems
 
 #t2w offload process
-mkdir /dev/cpuset/t2w
+mkdir -p /dev/cpuset/t2w
 /bin/echo 23 > /dev/cpuset/t2w/cpuset.cpus
 /bin/echo 1 > /dev/cpuset/t2w/cpuset.cpu_exclusive
 /bin/echo 0-1 > /dev/cpuset/t2w/cpuset.mems
 
-#aolrun
-mkdir /dev/cpuset/aol1RT
+#aolrun 24-30
+mkdir -p /dev/cpuset/aol1RT
 /bin/echo 24-30 > /dev/cpuset/aol1RT/cpuset.cpus
 /bin/echo 1 > /dev/cpuset/aol1RT/cpuset.cpu_exclusive
 /bin/echo 0-1 > /dev/cpuset/aol1RT/cpuset.mems
 /bin/echo 0 > /dev/cpuset/aol1RT/cpuset.sched_load_balance
 
-mkdir /dev/cpuset/aol1RT/aol1RT_0
+mkdir -p /dev/cpuset/aol1RT/aol1RT_0
 /bin/echo 24 > /dev/cpuset/aol1RT/aol1RT_0/cpuset.cpus
 /bin/echo 1 > /dev/cpuset/aol1RT/aol1RT_0/cpuset.cpu_exclusive
 /bin/echo 0-1 > /dev/cpuset/aol1RT/aol1RT_0/cpuset.mems
 
-mkdir /dev/cpuset/aol1RT/aol1RT_1
+mkdir -p /dev/cpuset/aol1RT/aol1RT_1
 /bin/echo 25 > /dev/cpuset/aol1RT/aol1RT_1/cpuset.cpus
 /bin/echo 1 > /dev/cpuset/aol1RT/aol1RT_1/cpuset.cpu_exclusive
 /bin/echo 0-1 > /dev/cpuset/aol1RT/aol1RT_1/cpuset.mems
 
-mkdir /dev/cpuset/aol1RT/aol1RT_2
+mkdir -p /dev/cpuset/aol1RT/aol1RT_2
 /bin/echo 26 > /dev/cpuset/aol1RT/aol1RT_2/cpuset.cpus
 /bin/echo 1 > /dev/cpuset/aol1RT/aol1RT_2/cpuset.cpu_exclusive
 /bin/echo 0-1 > /dev/cpuset/aol1RT/aol1RT_2/cpuset.mems
 
-mkdir /dev/cpuset/aol1RT/aol1RT_3
+mkdir -p /dev/cpuset/aol1RT/aol1RT_3
 /bin/echo 27 > /dev/cpuset/aol1RT/aol1RT_3/cpuset.cpus
 /bin/echo 1 > /dev/cpuset/aol1RT/aol1RT_3/cpuset.cpu_exclusive
 /bin/echo 0-1 > /dev/cpuset/aol1RT/aol1RT_3/cpuset.mems
 
-mkdir /dev/cpuset/aol1RT/aol1RT_4
+mkdir -p /dev/cpuset/aol1RT/aol1RT_4
 /bin/echo 28 > /dev/cpuset/aol1RT/aol1RT_4/cpuset.cpus
 /bin/echo 1 > /dev/cpuset/aol1RT/aol1RT_4/cpuset.cpu_exclusive
 /bin/echo 0-1 > /dev/cpuset/aol1RT/aol1RT_4/cpuset.mems
 
-mkdir /dev/cpuset/aol1RT/aol1RT_5
+mkdir -p /dev/cpuset/aol1RT/aol1RT_5
 /bin/echo 29 > /dev/cpuset/aol1RT/aol1RT_5/cpuset.cpus
 /bin/echo 1 > /dev/cpuset/aol1RT/aol1RT_5/cpuset.cpu_exclusive
 /bin/echo 0-1 > /dev/cpuset/aol1RT/aol1RT_5/cpuset.mems
 
-mkdir /dev/cpuset/aol1RT/aol1RT_6
+mkdir -p /dev/cpuset/aol1RT/aol1RT_6
 /bin/echo 30 > /dev/cpuset/aol1RT/aol1RT_6/cpuset.cpus
 /bin/echo 1 > /dev/cpuset/aol1RT/aol1RT_6/cpuset.cpu_exclusive
 /bin/echo 0-1 > /dev/cpuset/aol1RT/aol1RT_6/cpuset.mems
 
 #aol1RT1 -- mvm extrct
-mkdir /dev/cpuset/aol1RT1
+mkdir -p /dev/cpuset/aol1RT1
 /bin/echo 31 > /dev/cpuset/aol1RT1/cpuset.cpus
 /bin/echo 1 > /dev/cpuset/aol1RT1/cpuset.cpu_exclusive
 /bin/echo 0-1 > /dev/cpuset/aol1RT1/cpuset.mems
 
 #aol1RT2 -- gpumode2dm
-mkdir /dev/cpuset/aol1RT2
+mkdir -p /dev/cpuset/aol1RT2
 /bin/echo 32,33 > /dev/cpuset/aol1RT2/cpuset.cpus
 /bin/echo 1 > /dev/cpuset/aol1RT2/cpuset.cpu_exclusive
 /bin/echo 0-1 > /dev/cpuset/aol1RT2/cpuset.mems
 
 #aol1RT3 -- aol1-ProcessModeCo
-mkdir /dev/cpuset/aol1RT3
+mkdir -p /dev/cpuset/aol1RT3
 /bin/echo 34 > /dev/cpuset/aol1RT3/cpuset.cpus
 /bin/echo 1 > /dev/cpuset/aol1RT3/cpuset.cpu_exclusive
 /bin/echo 0-1 > /dev/cpuset/aol1RT3/cpuset.mems
 
+#tweeterSpeck 35
+mkdir -p /dev/cpuset/tweeterSpeck
+/bin/echo 35 > /dev/cpuset/tweeterSpeck/cpuset.cpus
+/bin/echo 1 > /dev/cpuset/tweeterSpeck/cpuset.cpu_exclusive
+/bin/echo 0-1 > /dev/cpuset/tweeterSpeck/cpuset.mems
