@@ -35,6 +35,14 @@ public:
    {
    }
 };
+
+template<class qT>
+void setXwFont( qT * widg, float scale = 1.0)
+{
+   QFont qf = widg->font();
+   qf.setPixelSize(XW_FONT_SIZE * scale + 0.5);
+   widg->setFont(qf);
+}
    
 } //namespace xqt
 
