@@ -828,9 +828,8 @@ void streamWriter::fgThreadExec()
            
             if( image.cntarray[curr_image] == last_cnt0 )
             {
-               log<text_log>("semaphore raised but cnt0 has not changed -- trying to re-start", logPrio::LOG_WARNING);
-               m_restart = true;
-               break;
+               log<text_log>("semaphore raised but cnt0 has not changed -- we're probably getting behind", logPrio::LOG_WARNING);
+               continue;
             }
             last_cnt0 = image.cntarray[curr_image];
             

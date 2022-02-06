@@ -1115,7 +1115,7 @@ int ocam2KCtrl::acquireAndCheckValid()
          if(m_currImageNumber - m_lastImageNumber > 1 && m_currImageNumber - m_lastImageNumber < 100)
          { 
             //This we handle as a non-timeout -- report how many frames were skipped
-            long framesSkipped = m_currImageNumber - m_lastImageNumber;
+            long framesSkipped = m_currImageNumber - m_lastImageNumber - 1;
             
             log<text_log>("frames skipped: " + std::to_string(framesSkipped), logPrio::LOG_ERROR);
             
