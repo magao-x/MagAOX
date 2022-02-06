@@ -44,11 +44,12 @@ namespace app
 /** 
   * \ingroup dmSpeckle
   */
-class dmSpeckle : public MagAOXApp<true>
+class dmSpeckle : public MagAOXApp<true>, public dev::telemeter<dmSpeckle>
 {
 
    typedef float realT;
    
+   friend class dev::telemeter<dmSpeckle>;
    friend class dmSpeckle_test;
 
 protected:
@@ -182,6 +183,18 @@ public:
    INDI_NEWCALLBACK_DECL(dmSpeckle, m_indiP_modulating);
    INDI_NEWCALLBACK_DECL(dmSpeckle, m_indiP_zero);
    
+
+   /** \name Telemeter Interface
+     * 
+     * @{
+     */ 
+   int checkRecordTimes();
+   
+   int recordTelem( const telem_dmspeck * );
+   
+   int recordDmSpeck(bool force = false);
+   
+   ///@}
 };
 
 dmSpeckle::dmSpeckle() : MagAOXApp(MAGAOX_CURRENT_SHA1, MAGAOX_REPO_MODIFIED)
@@ -222,6 +235,7 @@ int dmSpeckle::loadConfigImpl( mx::app::appConfigurator & _config )
    if(_config.isSet("dm.cross")) _config(m_cross, "dm.cross");
    _config(m_frequency, "dm.frequency");
    
+   dev::telemeter<dmSpeckle>::loadConfig(_config);
    return 0;
 }
 
@@ -294,6 +308,10 @@ int dmSpeckle::appStartup()
       return -1;
    }
    
+   if(dev::telemeter<dmSpeckle>::appStartup() < 0)
+   {
+      return log<software_error,-1>({__FILE__,__LINE__});
+   }
    
    state(stateCodes::NOTCONNECTED);
    
@@ -360,6 +378,12 @@ int dmSpeckle::appLogic()
       state(stateCodes::READY);
    }
    
+   if(telemeter<dmSpeckle>::appLogic() < 0)
+   {
+      log<software_error>({__FILE__, __LINE__});
+      return 0;
+   }
+
    return 0;
 }
 
@@ -375,6 +399,8 @@ int dmSpeckle::appShutdown()
       {
       }
    }
+
+   dev::telemeter<dmSpeckle>::appShutdown();
 
    return 0;
 }
@@ -475,6 +501,14 @@ void dmSpeckle::modThreadExec()
             sem = m_triggerStream.semptr[m_triggerSemaphore]; ///< The semaphore to monitor for new image data
          }
 
+         
+         log<text_log>("started modulating",logPrio::LOG_NOTICE);
+         //To send a message
+         log<telem_dmspeck>({m_modulating, m_trigger, m_frequency, std::vector<float>({m_separation}), 
+                               std::vector<float>({m_angle}), std::vector<float>({m_amp}), std::vector<bool>({m_cross})}, logPrio::LOG_INFO);
+         //The official record:
+         recordDmSpeck(true);
+
          dnsec = freqNsec;
          clock_gettime(CLOCK_REALTIME, &modstart);
 
@@ -552,7 +586,8 @@ void dmSpeckle::modThreadExec()
                }
             }
          }
-
+         recordDmSpeck(true);
+         log<text_log>("stopped modulating", logPrio::LOG_NOTICE);
          //Always zero when done
          clock_gettime(CLOCK_REALTIME, &currtime);
          m_imageStream.md->write = 1;
@@ -566,6 +601,7 @@ void dmSpeckle::modThreadExec()
    
          m_imageStream.md->write=0;
          ImageStreamIO_sempost(&m_imageStream,-1);
+         log<text_log>("zeroed");
 
       }
    }
@@ -785,11 +821,59 @@ INDI_NEWCALLBACK_DEFN(dmSpeckle, m_indiP_zero)(const pcf::IndiProperty &ipRecv)
    
       m_imageStream.md->write=0;
       ImageStreamIO_sempost(&m_imageStream,-1);      
+      log<text_log>("zeroed");
    }
    
    
    return 0;
 }
+
+inline
+int dmSpeckle::checkRecordTimes()
+{
+   return telemeter<dmSpeckle>::checkRecordTimes(telem_dmspeck());
+}
+   
+inline
+int dmSpeckle::recordTelem( const telem_dmspeck * )
+{
+   return recordDmSpeck(true);
+}
+ 
+inline
+int dmSpeckle::recordDmSpeck( bool force )
+{
+   static bool lastModulating = m_modulating;
+   static bool lastTrigger = m_trigger;
+   static float lastFrequency = m_frequency;
+   static float lastSeparation = m_separation;
+   static float lastAngle = m_angle;
+   static float lastAmp = m_amp;
+   static bool lastCross = m_cross;
+   
+   if( !(lastModulating == m_modulating) ||
+       !(lastTrigger == m_trigger) || 
+       !(lastFrequency == m_frequency) ||
+       !(lastSeparation == m_separation) ||
+       !(lastAngle == m_angle) ||
+       !(lastAmp == m_amp) ||
+       !(lastCross == m_cross) ||
+       force )
+   {
+      telem<telem_dmspeck>({m_modulating, m_trigger, m_frequency, std::vector<float>({m_separation}), 
+                               std::vector<float>({m_angle}), std::vector<float>({m_amp}), std::vector<bool>({m_cross})});
+
+      lastModulating = m_modulating;
+      lastTrigger = m_trigger;
+      lastFrequency = m_frequency;
+      lastSeparation = m_separation;
+      lastAngle = m_angle;
+      lastAmp = m_amp;
+      lastCross = m_cross;
+   }
+   
+   return 0;
+} 
 
 } //namespace app
 } //namespace MagAOX

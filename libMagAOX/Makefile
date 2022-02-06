@@ -53,6 +53,7 @@ INCLUDEDEPS= app/MagAOXApp.hpp \
 	     logger/types/saving_start.hpp \
 	     logger/types/saving_stop.hpp \
 	     logger/types/saving_stats.hpp \
+		  logger/types/telem_dmspeck.hpp \
 	     logger/types/telem_chrony_status.hpp \
 	     logger/types/telem_chrony_stats.hpp \
 	     logger/types/telem_cooler.hpp \
@@ -112,6 +113,9 @@ OBJS = app/MagAOXApp.o \
 all: libMagAOX.hpp.gch libMagAOX.a  
 
 libMagAOX.hpp.gch: libMagAOX.hpp $(INCLUDEDEPS) logger/generated/logTypes.hpp
+
+flatlogs:
+	cd logger; ../../flatlogs/bin/flatlogcodes
 
 logger/generated/logTypes.hpp: logger/logCodes.dat
 	cd logger; ../../flatlogs/bin/flatlogcodes
