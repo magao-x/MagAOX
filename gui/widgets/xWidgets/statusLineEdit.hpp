@@ -210,6 +210,11 @@ statusLineEdit::statusLineEdit( QWidget *parent ) : QLineEdit(parent)
 
    m_staleTimer = new QTimer(this);
    connect(m_staleTimer, SIGNAL(timeout()), this, SLOT(staleTimerOut()));
+
+   QFont qf = font();
+   qf.setPixelSize(XW_FONT_SIZE);
+   setFont(qf);
+
 }
 
 QString statusLineEdit::currText()

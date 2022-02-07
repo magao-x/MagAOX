@@ -179,6 +179,8 @@ private:
    Ui::pupilGuide ui;
 };
 
+
+
 pupilGuide::pupilGuide( QWidget * Parent, Qt::WindowFlags f) : xWidget(Parent, f)
 {
    ui.setupUi(this);
@@ -203,7 +205,86 @@ pupilGuide::pupilGuide( QWidget * Parent, Qt::WindowFlags f) : xWidget(Parent, f
    snprintf(ss, 5, "%0.2f", m_camlensStepSize);
    ui.button_camlens_scale->setText(ss);
    
-   onDisconnect();
+   //QFont qf = ui.labelModAndCenter->font();
+   //qf.setPixelSize(XW_FONT_SIZE*1.2+0.5);
+   //ui.labelMode
+   setXwFont(ui.labelModAndCenter, 1.2);
+   setXwFont(ui.modState);
+   setXwFont(ui.labelFreqCurrent);
+   setXwFont(ui.labelFreqTarget);
+   setXwFont(ui.labelFreq);
+   setXwFont(ui.labelRadius);
+   setXwFont(ui.modFreq_current);
+   setXwFont(ui.modFreq_target);
+   setXwFont(ui.modRad_current);
+   setXwFont(ui.modRad_target);
+   setXwFont(ui.buttonMod_rest);
+   setXwFont(ui.buttonMod_set);
+   setXwFont(ui.buttonMod_mod);
+   setXwFont(ui.labelCh1);
+   setXwFont(ui.labelCh2);
+   setXwFont(ui.modCh1);
+   setXwFont(ui.modCh2);
+   setXwFont(ui.labelMedianFluxes);
+   setXwFont(ui.med1);
+   setXwFont(ui.med2);
+   setXwFont(ui.med3);
+   setXwFont(ui.med4);
+   setXwFont(ui.setDelta);
+
+
+   setXwFont(ui.labelPupilSteering,1.2);
+   setXwFont(ui.pupState);
+   setXwFont(ui.buttonPup_rest);
+   setXwFont(ui.buttonPup_set);
+   setXwFont(ui.labelPupCh1);
+   setXwFont(ui.labelPupCh2);
+   setXwFont(ui.pupCh1);
+   setXwFont(ui.pupCh2);
+
+   setXwFont(ui.camlens_label);
+   setXwFont(ui.camlens_fsm);
+   setXwFont(ui.camlens_x_label);
+   setXwFont(ui.camlens_x_pos);
+   setXwFont(ui.camlens_y_label);
+   setXwFont(ui.camlens_y_pos);
+
+   setXwFont(ui.labelPupilFitting,1.2);
+   setXwFont(ui.labelThreshCurrent);
+   setXwFont(ui.labelThreshTarget);
+   setXwFont(ui.labelThreshold);
+   setXwFont(ui.nAverage_current);
+   setXwFont(ui.labelNoAvg);
+   setXwFont(ui.nAverage_current);
+   setXwFont(ui.fitThreshold_current);
+   setXwFont(ui.fitThreshold_target);
+
+   setXwFont(ui.labelx);
+   setXwFont(ui.labely);
+   setXwFont(ui.labelD);
+   setXwFont(ui.labelUR);
+   setXwFont(ui.labelUL);
+   setXwFont(ui.labelLR);
+   setXwFont(ui.labelLL);
+   setXwFont(ui.labelAvg);
+   setXwFont(ui.coordUR_x);
+   setXwFont(ui.coordUR_y);
+   setXwFont(ui.coordUR_D);
+   setXwFont(ui.coordUL_x);
+   setXwFont(ui.coordUL_y);
+   setXwFont(ui.coordUL_D);
+   setXwFont(ui.coordLR_x);
+   setXwFont(ui.coordLR_y);
+   setXwFont(ui.coordLR_D);
+   setXwFont(ui.coordLL_x);
+   setXwFont(ui.coordLL_y);
+   setXwFont(ui.coordLL_D);
+   setXwFont(ui.coordAvg_x);
+   setXwFont(ui.coordAvg_y);
+   setXwFont(ui.coordAvg_D);
+
+   setXwFont(ui.setDelta_pup);
+
 }
    
 pupilGuide::~pupilGuide()
@@ -1353,7 +1434,7 @@ void pupilGuide::on_button_tip_scale_pressed()
    char ss[5];
    snprintf(ss, 5, "%0.2f", m_stepSize);
    ui.button_tip_scale->setText(ss);
-
+   
 
 }
 

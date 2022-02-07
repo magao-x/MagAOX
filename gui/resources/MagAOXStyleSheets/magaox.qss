@@ -671,7 +671,7 @@ QPushButton:pressed
 
 QPushButton[isScaleButton="true"]
 {
-   font-size: 10pt;
+   font-size: 15px;
 }
 
 QComboBox

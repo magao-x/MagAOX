@@ -70,13 +70,14 @@ protected:
    
    std::string m_shmimName; ///< The name of the shared memory buffer.
    
+   int m_semaphoreNumber {7}; ///< The image structure semaphore index.
+   
    unsigned m_semWait {500000000}; //The time in nsec to wait on the semaphore.  Max is 999999999. Default is 5e8 nsec.
    
    int m_lz4accel {1};
    
    ///@}
    
-   int m_semaphoreNumber {0}; ///< The image structure semaphore index.
    
    size_t m_width {0}; ///< The width of the image
    size_t m_height {0}; ///< The height of the image
@@ -309,6 +310,8 @@ void streamWriter::setupConfig()
    
    config.add("framegrabber.shmimName", "", "framegrabber.shmimName", argType::Required, "framegrabber", "shmimName", false, "int", "The name of the stream to monitor. From /tmp/shmimName.im.shm.");
    
+   config.add("framegrabber.semaphoreNumber", "", "framegrabber.semaphoreNumber", argType::Required, "framegrabber", "semaphoreNumber", false, "int", "The semaphore to wait on. Default is 7.");
+
    config.add("framegrabber.semWait", "", "framegrabber.semWait", argType::Required, "framegrabber", "semWait", false, "int", "The time in nsec to wait on the semaphore.  Max is 999999999. Default is 5e8 nsec.");
    
    config.add("framegrabber.threadPrio", "", "framegrabber.threadPrio", argType::Required, "framegrabber", "threadPrio", false, "int", "The real-time priority of the framegrabber thread.");
@@ -329,6 +332,7 @@ void streamWriter::loadConfig()
    if(m_lz4accel > XRIF_LZ4_ACCEL_MAX) m_lz4accel = XRIF_LZ4_ACCEL_MAX;
    
    config(m_shmimName, "framegrabber.shmimName");
+   config(m_semaphoreNumber, "framegrabber.semaphoreNumber");
    config(m_semWait, "framegrabber.semWait");
    
    
@@ -749,6 +753,7 @@ void streamWriter::fgThreadExec()
       
       if(m_shutdown || !opened) return;
     
+     /* --We are just using hard config-ed semaphores, no dynamic finding because it doesn't work in our version of CACAO
       m_semaphoreNumber = 5; //get past the CACAO hard code.
       int actSem = 1;
       while(actSem == 1) //because it won't work.
@@ -763,6 +768,8 @@ void streamWriter::fgThreadExec()
       }
       
       log<software_info>({__FILE__,__LINE__, "got semaphore index " + std::to_string(m_semaphoreNumber) + " for " + m_shmimName });
+      */
+
       ImageStreamIO_semflush(&image, m_semaphoreNumber);
       
       sem = image.semptr[m_semaphoreNumber];
@@ -773,10 +780,8 @@ void streamWriter::fgThreadExec()
       m_height = image.md[0].size[1];
       size_t length = image.md[0].size[2];
 
-      
       //Now allocate the circBuffs 
       if(allocate_circbufs() < 0) return; //will cause shutdown!
-      
       
       // And allocate the xrifs
       if(allocate_xrif() < 0) return; //Will cause shutdown!
@@ -828,9 +833,8 @@ void streamWriter::fgThreadExec()
            
             if( image.cntarray[curr_image] == last_cnt0 )
             {
-               log<text_log>("semaphore raised but cnt0 has not changed -- trying to re-start", logPrio::LOG_WARNING);
-               m_restart = true;
-               break;
+               log<text_log>("semaphore raised but cnt0 has not changed -- we're probably getting behind", logPrio::LOG_WARNING);
+               continue;
             }
             last_cnt0 = image.cntarray[curr_image];
             

@@ -101,6 +101,14 @@ statusDisplay::statusDisplay( const std::string & device,
    if(m_units != "") lab += " [" + m_units + "]";
    ui.label->setText(lab.c_str());
 
+   QFont qf = ui.label->font();
+   qf.setPixelSize(XW_FONT_SIZE);
+   ui.label->setFont(qf);
+
+   qf = ui.status->font();
+   qf.setPixelSize(XW_FONT_SIZE);
+   ui.status->setFont(qf);
+
    onDisconnect();
 }
    

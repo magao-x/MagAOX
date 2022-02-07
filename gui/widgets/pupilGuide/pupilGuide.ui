@@ -7,7 +7,7 @@
     <x>0</x>
     <y>0</y>
     <width>1297</width>
-    <height>659</height>
+    <height>662</height>
    </rect>
   </property>
   <property name="windowTitle">
@@ -307,7 +307,7 @@
             <string>delta from mean</string>
            </property>
            <property name="checked">
-            <bool>false</bool>
+            <bool>true</bool>
            </property>
           </widget>
          </item>
@@ -391,7 +391,7 @@
            <item row="1" column="1">
             <widget class="QPushButton" name="button_tip_scale">
              <property name="sizePolicy">
-              <sizepolicy hsizetype="MinimumExpanding" vsizetype="MinimumExpanding">
+              <sizepolicy hsizetype="Fixed" vsizetype="Fixed">
                <horstretch>1</horstretch>
                <verstretch>1</verstretch>
               </sizepolicy>
@@ -410,7 +410,7 @@
              </property>
              <property name="font">
               <font>
-               <pointsize>11</pointsize>
+               <pointsize>10</pointsize>
               </font>
              </property>
              <property name="focusPolicy">
@@ -1593,7 +1593,7 @@
               <string>delta from set pt</string>
              </property>
              <property name="checked">
-              <bool>false</bool>
+              <bool>true</bool>
              </property>
             </widget>
            </item>
