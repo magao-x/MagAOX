@@ -496,18 +496,6 @@ int pwfsSlopeCalc::configureAcquisition()
       return -1;
    }
    
-   /*if(m_fitter != "")
-   {
-      if(m_numPupils == 3)
-      {
-         m_pupil_D = (1./3.)*(m_pupil_D_1 + m_pupil_D_2 + m_pupil_D_3);
-      }
-      else
-      {
-         m_pupil_D = (1./4.)*(m_pupil_D_1 + m_pupil_D_2 + m_pupil_D_3 + m_pupil_D_4);
-      }
-   }*/
-   
    m_quadSize = m_pupil_D + 2*m_pupil_buffer;
    
    m_pupil_sx_1 = m_pupil_cx_1 - 0.5*m_quadSize;
@@ -682,16 +670,31 @@ INDI_SETCALLBACK_DEFN(pwfsSlopeCalc, m_indiP_quad2)(const pcf::IndiProperty &ipR
    
    if(ipRecv.find("set-x"))
    {
-      m_pupil_cx_2 = ipRecv["set-x"].get<float>();
+      float newval = ipRecv["set-x"].get<float>();
+      if(newval != m_pupil_cx_2)
+      {
+         m_pupil_cx_2 = newval;
+         m_reconfig = true;
+      }      
    }
    
    if(ipRecv.find("set-y"))
    {
-      m_pupil_cy_2 = ipRecv["set-y"].get<float>();
+     float newval = ipRecv["set-y"].get<float>();
+      if(newval != m_pupil_cy_2)
+      {
+         m_pupil_cy_2 = newval;
+         m_reconfig = true;
+      }
    }
    if(ipRecv.find("set-D"))
    {
-      m_pupil_D_2 = ipRecv["set-D"].get<float>();
+      float newval = ipRecv["set-D"].get<float>();
+      if(newval != m_pupil_D_2)
+      {
+         m_pupil_D_2 = newval;
+         m_reconfig = true;
+      }
    }
    
    
@@ -709,16 +712,30 @@ INDI_SETCALLBACK_DEFN(pwfsSlopeCalc, m_indiP_quad3)(const pcf::IndiProperty &ipR
    
    if(ipRecv.find("set-x"))
    {
-      m_pupil_cx_3 = ipRecv["set-x"].get<float>();
+      float newval = ipRecv["set-x"].get<float>();
+      if(newval != m_pupil_cx_3)
+      {
+         m_pupil_cx_3 = newval;
+         m_reconfig = true;
+      }
    }
-   
    if(ipRecv.find("set-y"))
    {
-      m_pupil_cy_3 = ipRecv["set-y"].get<float>();
+      float newval = ipRecv["set-y"].get<float>();
+      if(newval != m_pupil_cy_3)
+      {
+         m_pupil_cy_3 = newval;
+         m_reconfig = true;
+      }
    }
    if(ipRecv.find("set-D"))
    {
-      m_pupil_D_3 = ipRecv["set-D"].get<float>();
+      float newval = ipRecv["set-D"].get<float>();
+      if(newval != m_pupil_D_3)
+      {
+         m_pupil_D_3 = newval;
+         m_reconfig = true;
+      }
    }
    
    
@@ -736,16 +753,30 @@ INDI_SETCALLBACK_DEFN(pwfsSlopeCalc, m_indiP_quad4)(const pcf::IndiProperty &ipR
    
    if(ipRecv.find("set-x"))
    {
-      m_pupil_cx_4 = ipRecv["set-x"].get<float>();
+      float newval = ipRecv["set-x"].get<float>();
+      if(newval != m_pupil_cx_4)
+      {
+         m_pupil_cx_4 = newval;
+         m_reconfig = true;
+      }
    }
-   
    if(ipRecv.find("set-y"))
    {
-      m_pupil_cy_4 = ipRecv["set-y"].get<float>();
+      float newval = ipRecv["set-y"].get<float>();
+      if(newval != m_pupil_cy_4)
+      {
+         m_pupil_cy_4 = newval;
+         m_reconfig = true;
+      }
    }
    if(ipRecv.find("set-D"))
    {
-      m_pupil_D_4 = ipRecv["set-D"].get<float>();
+      float newval = ipRecv["set-D"].get<float>();
+      if(newval != m_pupil_D_4)
+      {
+         m_pupil_D_4 = newval;
+         m_reconfig = true;
+      }
    }
    
    
