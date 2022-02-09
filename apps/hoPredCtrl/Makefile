@@ -1,6 +1,8 @@
 
 allall: all 
 
-OTHER_HEADERS=
-TARGET=hoPredCtrl
+NEED_CUDA = yes
+OTHER_HEADERS =
+OTHER_OBJS =
+TARGET = hoPredCtrl 
 include ../../Make/magAOXApp.mk

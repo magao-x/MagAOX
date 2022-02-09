@@ -4,7 +4,7 @@
   * \ingroup hoPredCtrl_files
   */
 
-#include "hoPredCtrl.hpp"
+#include "hoPredCtrl.cuh"
 
 
 int main(int argc, char **argv)

@@ -16,6 +16,18 @@ using namespace mx::improc;
 #include "../../libMagAOX/libMagAOX.hpp" //Note this is included on command line to trigger pch
 #include "../../magaox_git_version.h"
 
+#include <stdio.h>
+#include <iostream>
+
+#include "cuda_runtime.h"
+#include "device_launch_parameters.h"
+#include "cublas_v2.h"
+
+#include "utility_functions.cuh"
+#include "matrix.cuh"
+#include "recursive_least_squares.cuh"
+#include "distributed_ar_controller.cuh"
+
 namespace MagAOX
 {
 namespace app
@@ -97,14 +109,30 @@ protected:
 	size_t m_pwfsTypeSize {0}; ///< The size of the type, in bytes.  
 
 	size_t m_illuminatedPixels;
+	size_t m_measurement_size;
 	eigenImage<realT> m_pupilMask;
 	eigenImage<realT> m_measurementVector;
-
 	realT (*pwfs_pixget)(void *, size_t) {nullptr}; ///< Pointer to a function to extract the image data as our desired type realT.
 
 	eigenImage<realT> m_darkImage;
 	realT (*dark_pixget)(void *, size_t) {nullptr}; ///< Pointer to a function to extract the image data as our desired type realT.
 	bool m_darkSet {false};
+
+	// CUDA variables
+	cublasHandle_t* handle;
+
+	// Predictive control parameters
+	int m_numHist;			///< The number of past states to use for the prediction
+	int m_numFut;			///< The number of future states to predict
+	realT m_gamma;			///< The forgetting factore (0, 1]
+	realT m_inv_covariance; ///< The starting point of the inverse covariance matrix
+	realT* m_lambda;		///< The regularization parameter
+
+	DDSPC::DistributedAutoRegressiveController<realT>* m_arc;	///< The controller
+	DDSPC::Matrix<realT>* m_wfs_measurement;
+	DDSPC::Matrix<realT>* m_dm_command;
+	DDSPC::Matrix<realT>* interaction_matrix;
+	DDSPC::Matrix<realT>* expsig; // = new Matrix<realT>(0.5, 1, 1, num_modes);
 
 	// bool m_dmOpened {false};
 	// bool m_dmRestart {false};
