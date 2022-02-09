@@ -7,6 +7,8 @@
 #include <QTimer>
 #include <QStyle>
 
+#include "xWidget.hpp"
+
 namespace xqt
 {
 
