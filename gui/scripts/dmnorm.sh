@@ -9,25 +9,28 @@ fi
 DMNAME=$1
 shift #removes the name from args
 
+#Change dy0 to 0+ to move dmdisps to top of screen
+#dy0 = 1275 + puts them at the bottom of the screen
+
 #for bottom row att 2165 to all y
 case ${DMNAME} in
    woofer )
       dmctrl=dmwoofer
       dmindex=00
       dx0=0
-      dy0=0
+      dy0=1275
       ;;
    tweeter )
       dmctrl=dmtweeter
       dmindex=01
       dx0=0
-      dy0=0+298
+      dy0=1275+298
       ;;
    ncpc )
       dmctrl=dmncpc
       dmindex=02
       dx0=0
-      dy0=0+596
+      dy0=1275+596
       ;;
    * )
       echo 'must provide DM name: woofer, tweeter, or ncpc'
