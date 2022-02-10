@@ -69,7 +69,7 @@ EXTRA_LDLIBS ?=  -lmxlib \
 #endif
 
 ifeq ($(NEED_CUDA),yes)
-   CXXFLAGS += -DEIGEN_NO_CUDA
+   CXXFLAGS += -DEIGEN_NO_CUDA -DHAVE_CUDA
 
    HOST_ARCH   := $(shell uname -m)
    CUDA_TARGET_ARCH = $(HOST_ARCH)
@@ -111,29 +111,35 @@ ifeq ($(NEED_CUDA),yes)
          BUILD_TYPE := release
    endif
 
+	INCLUDES += -I/usr/local/cuda/include
+
    ALL_CCFLAGS :=
    ALL_CCFLAGS += $(NVCCFLAGS)
    ALL_CCFLAGS += $(EXTRA_NVCCFLAGS)
    ALL_CCFLAGS += $(addprefix -Xcompiler ,$(CXXFLAGS))
    ALL_CCFLAGS += $(addprefix -Xcompiler ,$(EXTRA_CCFLAGS))
-   ALL_CCFLAGS += -I/usr/local/cuda-11.1/include
+   ALL_CCFLAGS += -I/usr/local/cuda/include
 
    ALL_LDFLAGS :=
    ALL_LDFLAGS += $(ALL_CCFLAGS)
    ALL_LDFLAGS += $(addprefix -Xlinker ,$(LDFLAGS))
    ALL_LDFLAGS += $(addprefix -Xlinker ,$(LDLIBS))
 
-
    #build any cu and cpp files through NVCC as needed
-   %.o : %.cu
-	$(EXEC) $(NVCC) $(ALL_CCFLAGS) $< -c -o $@
+%.o : %.cu
+	$(NVCC) $(ALL_CCFLAGS) $< -c -o $@
 
    #Finally we define the cuda libs for linking
-   CUDA_LIBS ?= -L/usr/local/cuda/lib64/ -lcudart -lcublas -lcufft -lcurand
-
+   CUDA_LIBS ?= $(CUDA_LIBPATH) -L/usr/local/cuda/lib64/ -lcudart -lcublas -lcufft -lcurand
+   #EXTRA_LDLIBS+= $(CUDA_LIBPATH) -L/usr/local/cuda/lib64/ -lcudart -lcublas -lcufft -lcurand 
 else
    CUDA_LIBS ?=
+   #EXTRA_LDLIBS+= $(CUDA_LIBPATH) -L/usr/local/cuda/lib64/ -lcudart -lcublas -lcufft -lcurand 
 endif
+
+EXTRA_LDLIBS+= $(CUDA_LIBS)
+
+
 
 #2021-01-07: added xpa to levmar
 
