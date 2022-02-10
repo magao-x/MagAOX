@@ -35,7 +35,7 @@ LIB_PATH ?= $(PREFIX)/lib
 INCLUDE_PATH ?= $(PREFIX)/include
 LIB_SOFA ?= $(LIB_PATH)/libsofa_c.a
 
-INCLUDES += -I$(INCLUDE_PATH) -I$(abspath $(SELF_DIR)/../flatlogs/include)
+INCLUDES += -I$(INCLUDE_PATH) -I$(abspath $(SELF_DIR)/../flatlogs/include) 
 
 
 ########################################
@@ -64,9 +64,6 @@ EXTRA_LDLIBS ?=  -lmxlib \
   $(SELF_DIR)/../INDI/libcommon/libcommon.a) \
   $(abspath $(SELF_DIR)/../INDI/liblilxml/liblilxml.a) 
   
-#ifneq ($(NEED_CUDA),no)
-#   EXTRA_LDLIBS+= $(CUDA_LIBPATH) -lcudart -lcublas -lcufft -lcurand 
-#endif
 
 ifeq ($(NEED_CUDA),yes)
    CXXFLAGS += -DEIGEN_NO_CUDA -DHAVE_CUDA
@@ -131,21 +128,20 @@ ifeq ($(NEED_CUDA),yes)
 
    #Finally we define the cuda libs for linking
    CUDA_LIBS ?= $(CUDA_LIBPATH) -L/usr/local/cuda/lib64/ -lcudart -lcublas -lcufft -lcurand
-   #EXTRA_LDLIBS+= $(CUDA_LIBPATH) -L/usr/local/cuda/lib64/ -lcudart -lcublas -lcufft -lcurand 
+  
 else
    CUDA_LIBS ?=
-   #EXTRA_LDLIBS+= $(CUDA_LIBPATH) -L/usr/local/cuda/lib64/ -lcudart -lcublas -lcufft -lcurand 
+  
 endif
 
 EXTRA_LDLIBS+= $(CUDA_LIBS)
-
-
 
 #2021-01-07: added xpa to levmar
 
 CACAO ?= true
 ifneq ($(CACAO),false)
-  EXTRA_LDLIBS +=  -lImageStreamIO
+  EXTRA_LDLIBS +=  -L/usr/local/milk/lib -lImageStreamIO
+  INCLUDES += -I/usr/local/milk/include
 endif
 
 ### MKL BLAS
