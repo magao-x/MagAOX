@@ -823,9 +823,17 @@ INDI_NEWCALLBACK_DEFN(shmimIntegrator, m_indiP_nAverage)(const pcf::IndiProperty
    }
    
    m_nAverage = target;
+
+   if(m_avgTime > 0 && m_fps > 0)
+   {
+      m_avgTime = m_nAverage/m_fps;
+   }
    
    updateIfChanged(m_indiP_nAverage, "current", m_nAverage, INDI_IDLE);
    updateIfChanged(m_indiP_nAverage, "target", m_nAverage, INDI_IDLE);
+
+   updateIfChanged(m_indiP_avgTime, "current", m_avgTime, INDI_IDLE);
+   updateIfChanged(m_indiP_avgTime, "target", m_avgTime, INDI_IDLE);
    
    shmimMonitorT::m_restart = true;
    

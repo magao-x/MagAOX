@@ -77,25 +77,63 @@ protected:
    IMAGE m_edgeShmim;
    bool m_edgeShmimConnected {false};
    
+   ///\todo this needs to be a config-able group of params
+   double m_defSetx1 {29.7946};
+   double m_defSety1 {29.4367};
+   double m_defSetD1 {55.7986};
+   
+   double m_defSetx2 {89.9962};
+   double m_defSety2 {29.2417};
+   double m_defSetD2 {55.6178};
+   
+   double m_defSetx3 {29.7723};
+   double m_defSety3 {89.8813};
+   double m_defSetD3 {55.9552};
+   
+   double m_defSetx4 {90.1045};
+   double m_defSety4 {89.9785};
+   double m_defSetD4 {56.1881};
+
    bool m_useRefIm {false};
    
    bool m_refUpdated {false}; ///< Flag set if the online reference update is used.
    
-   double m_setx1 {29.5};
-   double m_sety1 {29.5};
-   double m_setD1 {56.0};
+/*
+Averaged: 50                                                                                                                                                               
+Average x1: 29.7946 +/- -nan                                                                                                                                               
+Average y1: 29.4367 +/- 0.00314231                                                                                                                                         
+Average D1: 55.7986 +/- 0.00823452                                                                                                                                         
+                                                                                                                                                                           
+Average x2: 89.9962 +/- 0.0109293                                                                                                                                          
+Average y2: 29.2417 +/- 0.0544957                                                                                                                                          
+Average D2: 55.6178 +/- 0.0103563                                                                                                                                          
+                                                                                                                                                                           
+Average x3: 29.7723 +/- 0.00837334                                                                                                                                         
+Average y3: 89.8813 +/- 0.0081282                                                                                                                                          
+Average D3: 55.9552 +/- 0.0891944                                                                                                                                          
+                                                                                                                                                                           
+Average x4: 90.1045 +/- 0.0254011                                                                                                                                          
+Average y4: 89.9785 +/- 0.0188096                                                                                                                                          
+Average D4: 56.1881 +/- 0.155264                                                                                                                                           
+                                        
+*/
    
-   double m_setx2 {89.5};
-   double m_sety2 {29.5};
-   double m_setD2 {56.0};
+
+   double m_setx1 {29.7946};
+   double m_sety1 {29.4367};
+   double m_setD1 {55.7986};
    
-   double m_setx3 {29.5};
-   double m_sety3 {89.5};
-   double m_setD3 {56.0};
+   double m_setx2 {89.9962};
+   double m_sety2 {29.2417};
+   double m_setD2 {55.6178};
    
-   double m_setx4 {89.5};
-   double m_sety4 {89.5};
-   double m_setD4 {56.0};
+   double m_setx3 {29.7723};
+   double m_sety3 {89.8813};
+   double m_setD3 {55.9552};
+   
+   double m_setx4 {90.1045};
+   double m_sety4 {89.9785};
+   double m_setD4 {56.1881};
    
    bool m_averaging {false};
    size_t m_navg {0};
@@ -328,6 +366,23 @@ void pupilFit::setupConfig()
    config.add("fit.numPupils", "", "fit.numPupils", argType::Required, "fit", "numPupils", false, "int", "The number of pupils.  Default is 4.  3 is also supported.");
    config.add("fit.pupMedIndex", "", "fit.pupMedIndex", argType::Required, "fit", "pupMedIndex", false, "float", "The index of the pupil median in a sorted quadrant.");
    
+   config.add("cal.setx1", "", "cal.setx1", argType::Required, "cal", "setx1", false, "float", "The x set point for quad 1 (LL).");
+   config.add("cal.sety1", "", "cal.sety1", argType::Required, "cal", "sety1", false, "float", "The y set point for quad 1 (LL).");
+   config.add("cal.setD1", "", "cal.setD1", argType::Required, "cal", "setD1", false, "float", "The D set point for quad 1 (LL).");
+
+   config.add("cal.setx2", "", "cal.setx2", argType::Required, "cal", "setx2", false, "float", "The x set point for quad 2 (LL).");
+   config.add("cal.sety2", "", "cal.sety2", argType::Required, "cal", "sety2", false, "float", "The y set point for quad 2 (LL).");
+   config.add("cal.setD2", "", "cal.setD2", argType::Required, "cal", "setD2", false, "float", "The D set point for quad 2 (LL).");
+
+   config.add("cal.setx3", "", "cal.setx3", argType::Required, "cal", "setx3", false, "float", "The x set point for quad 3 (LL).");
+   config.add("cal.sety3", "", "cal.sety3", argType::Required, "cal", "sety3", false, "float", "The y set point for quad 3 (LL).");
+   config.add("cal.setD3", "", "cal.setD3", argType::Required, "cal", "setD3", false, "float", "The D set point for quad 3 (LL).");
+
+   config.add("cal.setx4", "", "cal.setx4", argType::Required, "cal", "setx4", false, "float", "The x set point for quad 4 (LL).");
+   config.add("cal.sety4", "", "cal.sety4", argType::Required, "cal", "sety4", false, "float", "The y set point for quad 4 (LL).");
+   config.add("cal.setD4", "", "cal.setD4", argType::Required, "cal", "setD4", false, "float", "The D set point for quad 4 (LL).");
+
+
    config.add("wfsref.path", "" , "wfsref.path", argType::Required, "wfsref", "path", false, "float", "The path to the WFS reference image.  Default is /opt/MagAOX/cacao/tweeter");
    config.add("wfsref.name", "" , "wfsref.name", argType::Required, "wfsref", "name", false, "float", "The name the WFS reference image. Default is wfsref0.fits");
 }
@@ -345,6 +400,22 @@ int pupilFit::loadConfigImpl( mx::app::appConfigurator & _config )
    _config(m_numPupils, "fit.numPupils");
    _config(m_fitter.m_pupMedIndex, "fit.pupMedIndex");
    
+   _config(m_defSetx1, "cal.setx1");
+   _config(m_defSety1, "cal.sety1");
+   _config(m_defSetD1, "cal.setD1");
+
+   _config(m_defSetx2, "cal.setx2");
+   _config(m_defSety2, "cal.sety2");
+   _config(m_defSetD2, "cal.setD2");
+
+   _config(m_defSetx3, "cal.setx3");
+   _config(m_defSety3, "cal.sety3");
+   _config(m_defSetD3, "cal.setD3");
+
+   _config(m_defSetx4, "cal.setx4");
+   _config(m_defSety4, "cal.sety4");
+   _config(m_defSetD4, "cal.setD4");
+
    _config(m_wfsrefPath, "wfsref.path");
    _config(m_wfsrefName, "wfsref.name");
    
@@ -567,21 +638,21 @@ int pupilFit::allocate(const dev::shmimT & dummy)
    {
       if(m_numPupils == 4 && !m_refUpdated)
       {
-         m_setx1 = 29.5;
-         m_sety1 = 29.5;
-         m_setD1 = 56.0;
+         m_setx1 = m_defSetx1;
+         m_sety1 = m_defSety1;
+         m_setD1 = m_defSetD1;
          
-         m_setx2 = 89.5;
-         m_sety2 = 29.5;
-         m_setD2 = 56.0;
+         m_setx2 = m_defSetx2;
+         m_sety2 = m_defSety2;
+         m_setD2 = m_defSetD2;
          
-         m_setx3 = 29.5;
-         m_sety3 = 89.5;
-         m_setD3 = 56.0;
+         m_setx3 = m_defSetx3;
+         m_sety3 = m_defSety3;
+         m_setD3 = m_defSetD3;
          
-         m_setx4 = 89.5;
-         m_sety4 = 89.5;
-         m_setD4 = 56.0;
+         m_setx4 = m_defSetx4;
+         m_sety4 = m_defSety4;
+         m_setD4 = m_defSetD4;
       }
       else if(!m_refUpdated)
       {
@@ -640,9 +711,6 @@ int pupilFit::processImage( void* curr_src,
    {
       m_fitIm.data()[nn] += ((float*)curr_src) [nn];
    }
-   
-   ///\todo need a more robust corner averaging system here.
-   m_fitIm -= 0.25*( m_fitIm(0,0) + m_fitIm(0,m_height-1) + m_fitIm(m_width-1,m_height-1) + m_fitIm(m_width-1,0));
    
    m_fitter.m_thresh = m_threshold;
    
@@ -727,7 +795,6 @@ int pupilFit::processImage( void* curr_src,
       }
       
    }
-   
    
    if(m_averaging)
    {
@@ -999,8 +1066,6 @@ INDI_NEWCALLBACK_DEFN(pupilFit, m_indiP_averaging)(const pcf::IndiProperty & ipR
    
    if( ipRecv["toggle"].getSwitchState() == pcf::IndiElement::On)
    {
-      m_navg = 0;
-      m_averaging = true;   
       
       m_avgx1_accum = 0;
       m_avgx1sq_accum = 0;
@@ -1047,6 +1112,9 @@ INDI_NEWCALLBACK_DEFN(pupilFit, m_indiP_averaging)(const pcf::IndiProperty & ipR
       m_avgmedAll_accum = 0;
       m_avgmedAllsq_accum = 0;
       
+      m_navg = 0;
+      m_averaging = true;   
+
       updateSwitchIfChanged(m_indiP_averaging, "toggle", pcf::IndiElement::On, INDI_BUSY);
 
       log<text_log>("began averaging");
