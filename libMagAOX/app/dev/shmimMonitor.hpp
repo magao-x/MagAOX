@@ -462,7 +462,7 @@ void shmimMonitor<derivedT, specificT>::smThreadExec()
    
    bool opened = false;
    
-   bool semgot = false;
+   //bool semgot = false;
 
    while(derived().shutdown() == 0)
    {
@@ -519,7 +519,7 @@ void shmimMonitor<derivedT, specificT>::smThreadExec()
       
       if(derived().m_shutdown || !opened) return;
     
-#if 1
+#if 0
       ///\todo once we upgrade to the mythical new CACAO, nuke this entire dumpster fire from orbit.  Just to be sure.
       if(!semgot) //this is a gross hack to prevent running up the semaphore number and exhausting it.
       {
