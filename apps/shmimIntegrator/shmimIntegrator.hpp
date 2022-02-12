@@ -105,15 +105,23 @@ protected:
      *@{
      */
    
-   unsigned m_nAverage {10}; ///< The number of frames to average.
-   
-   unsigned m_nUpdate {0}; ///< The rate at which to update the average.  If m_nUpdate < m_nAverage then this is a moving averager.
+   unsigned m_nAverageDefault {10}; ///< The number of frames to average.  Default 10.
+
+   std::string m_fpsSource; ///< Device name for getting fps if time-based averaging is used.  This device should have *.fps.current.
+
+   float m_avgTime {0}; ///< If non zero, then m_nAverage adjusts automatically to keep a constant averaging time [sec].  Default 0.
+
+   unsigned m_nUpdate {0}; ///< The rate at which to update the average.  If 0 < m_nUpdate < m_nAverage then this is a moving averager. Default 0.
    
    ///@}
 
    mx::improc::eigenCube<realT> m_accumImages; ///< Cube used to accumulate images
    
    mx::improc::eigenImage<realT> m_avgImage; ///< The average image.
+
+   unsigned m_nAverage {10};
+
+   float m_fps {0}; ///< Current FPS from the FPS source.
 
    unsigned m_nprocessed {0};
    size_t m_currImage {0};
@@ -243,13 +251,19 @@ protected:
    
    pcf::IndiProperty m_indiP_nAverage;
    
+   pcf::IndiProperty m_indiP_avgTime;
+
    pcf::IndiProperty m_indiP_nUpdate;
    
    pcf::IndiProperty m_indiP_startAveraging;
    
    INDI_NEWCALLBACK_DECL(shmimIntegrator, m_indiP_nAverage);
+   INDI_NEWCALLBACK_DECL(shmimIntegrator, m_indiP_avgTime);
    INDI_NEWCALLBACK_DECL(shmimIntegrator, m_indiP_nUpdate);
    INDI_NEWCALLBACK_DECL(shmimIntegrator, m_indiP_startAveraging);
+
+   pcf::IndiProperty m_indiP_fpsSource;
+   INDI_SETCALLBACK_DECL(shmimIntegrator, m_indiP_fpsSource);
 };
 
 inline
@@ -268,9 +282,12 @@ void shmimIntegrator::setupConfig()
    
    frameGrabberT::setupConfig(config);
    
-   config.add("integrator.nAverage", "", "integrator.nAverage", argType::Required, "integrator", "nAverage", false, "string", "The default number of frames to average.  Can be changed via INDI.");
-   
-   config.add("integrator.nUpdate", "", "integrator.nUpdate", argType::Required, "integrator", "nUpdate", false, "string", "The rate at which to update the average.  If m_nUpdate < m_nAverage then this is a moving averager.  If 0, then it is a simple average.");
+   config.add("integrator.nAverage", "", "integrator.nAverage", argType::Required, "integrator", "nAverage", false, "unsigned", "The default number of frames to average.  Default 10. Can be changed via INDI.");
+   config.add("integrator.fpsSource", "", "integrator.fpsSource", argType::Required, "integrator", "fpsSource", false, "string", "///< Device name for getting fps if time-based averaging is used.  This device should have *.fps.current.");
+
+   config.add("integrator.avgTime", "", "integrator.avgTime", argType::Required, "integrator", "avgTime", false, "float", "///< If non zero, then m_nAverage adjusts automatically to keep a constant averaging time [sec].  Default 0. Can be changed via INDI.");
+
+   config.add("integrator.nUpdate", "", "integrator.nUpdate", argType::Required, "integrator", "nUpdate", false, "unsigned", "The rate at which to update the average.  If 0 < m_nUpdate < m_nAverage then this is a moving averager. Default 0.  If 0, then it is a simple average.");
    
    config.add("integrator.continuous", "", "integrator.continuous", argType::Required, "integrator", "continuous", false, "bool", "Flag controlling whether averaging is continuous or only when triggered.  Default true.");
    config.add("integrator.running", "", "integrator.running", argType::Required, "integrator", "running", false, "bool", "Flag controlling whether averaging is running at startup.  Default true.");
@@ -286,8 +303,10 @@ int shmimIntegrator::loadConfigImpl( mx::app::appConfigurator & _config )
    
    frameGrabberT::loadConfig(config);
    
-   _config(m_nAverage, "integrator.nAverage");
-   
+   _config(m_nAverageDefault, "integrator.nAverage");
+   m_nAverage=m_nAverageDefault;
+   _config(m_fpsSource, "integrator.fpsSource");
+   _config(m_avgTime, "integrator.avgTime");
    _config(m_nUpdate, "integrator.nUpdate");
    
    _config(m_continuous, "integrator.continuous");
@@ -317,6 +336,16 @@ int shmimIntegrator::appStartup()
       return -1;
    }
    
+   createStandardIndiNumber<float>( m_indiP_avgTime, "avgTime", 0, std::numeric_limits<float>::max(),0 , "%0.1f");
+   m_indiP_avgTime["current"].set(m_avgTime);
+   m_indiP_avgTime["target"].set(m_avgTime);
+   
+   if( registerIndiPropertyNew( m_indiP_avgTime, INDI_NEWCALLBACK(m_indiP_avgTime)) < 0)
+   {
+      log<software_error>({__FILE__,__LINE__});
+      return -1;
+   }
+
    createStandardIndiNumber<unsigned>( m_indiP_nUpdate, "nUpdate", 1, std::numeric_limits<unsigned>::max(), 1, "%u");
    m_indiP_nUpdate["current"].set(m_nUpdate);
    m_indiP_nUpdate["target"].set(m_nUpdate);
@@ -334,6 +363,11 @@ int shmimIntegrator::appStartup()
       return -1;
    }
    
+   if(m_fpsSource != "")
+   {
+      REG_INDI_SETPROP(m_indiP_fpsSource, m_fpsSource, std::string("fps"));
+   }
+
    if(sem_init(&m_smSemaphore, 0,0) < 0)
    {
       log<software_critical>({__FILE__, __LINE__, errno,0, "Initializing S.M. semaphore"});
@@ -424,6 +458,9 @@ int shmimIntegrator::appLogic()
    updateIfChanged(m_indiP_nAverage, "current", m_nAverage, INDI_IDLE);
    updateIfChanged(m_indiP_nAverage, "target", m_nAverage, INDI_IDLE);
    
+   updateIfChanged(m_indiP_avgTime, "current", m_avgTime, INDI_IDLE);
+   updateIfChanged(m_indiP_avgTime, "target", m_avgTime, INDI_IDLE);
+
    updateIfChanged(m_indiP_nUpdate, "current", m_nUpdate, INDI_IDLE);
    updateIfChanged(m_indiP_nUpdate, "target", m_nUpdate, INDI_IDLE);
    
@@ -451,6 +488,20 @@ int shmimIntegrator::allocate(const dev::shmimT & dummy)
    
    std::unique_lock<std::mutex> lock(m_indiMutex);
    
+   if(m_avgTime > 0 && m_fps > 0)
+   {
+      m_nAverage = m_avgTime * m_fps;
+      log<text_log>("set nAverage to " + std::to_string(m_nAverage) + " based on FPS", logPrio::LOG_NOTICE);
+   }
+   else if(m_fps == 0) //Haven't gotten the update yet so we keep going for now
+   {
+      if(m_nAverage != m_nAverageDefault)
+      {
+         m_nAverage = m_nAverageDefault;
+         log<text_log>("set nAverage to default " + std::to_string(m_nAverage), logPrio::LOG_NOTICE);
+      }
+   }
+
    if(m_nUpdate > 0)
    {
       m_accumImages.resize(shmimMonitorT::m_width, shmimMonitorT::m_height, m_nAverage);
@@ -479,6 +530,9 @@ int shmimIntegrator::allocate(const dev::shmimT & dummy)
    updateIfChanged(m_indiP_nAverage, "current", m_nAverage, INDI_IDLE);
    updateIfChanged(m_indiP_nAverage, "target", m_nAverage, INDI_IDLE);
    
+   updateIfChanged(m_indiP_avgTime, "current", m_avgTime, INDI_IDLE);
+   updateIfChanged(m_indiP_avgTime, "target", m_avgTime, INDI_IDLE);
+
    updateIfChanged(m_indiP_nUpdate, "current", m_nUpdate, INDI_IDLE);
    updateIfChanged(m_indiP_nUpdate, "target", m_nUpdate, INDI_IDLE);
    
@@ -780,6 +834,34 @@ INDI_NEWCALLBACK_DEFN(shmimIntegrator, m_indiP_nAverage)(const pcf::IndiProperty
    return 0;
 }
 
+INDI_NEWCALLBACK_DEFN(shmimIntegrator, m_indiP_avgTime)(const pcf::IndiProperty &ipRecv)
+{
+   if(ipRecv.getName() != m_indiP_avgTime.getName())
+   {
+      log<software_error>({__FILE__, __LINE__, "invalid indi property received"});
+      return -1;
+   }
+   
+   unsigned target;
+   
+   if( indiTargetUpdate( m_indiP_avgTime, target, ipRecv, true) < 0)
+   {
+      log<software_error>({__FILE__,__LINE__});
+      return -1;
+   }
+   
+   m_avgTime = target;
+   
+   updateIfChanged(m_indiP_avgTime, "current", m_avgTime, INDI_IDLE);
+   updateIfChanged(m_indiP_avgTime, "target", m_avgTime, INDI_IDLE);
+   
+   shmimMonitorT::m_restart = true;
+   
+   log<text_log>("set avgTime to " + std::to_string(m_avgTime), logPrio::LOG_NOTICE);
+   
+   return 0;
+}
+
 INDI_NEWCALLBACK_DEFN(shmimIntegrator, m_indiP_nUpdate)(const pcf::IndiProperty &ipRecv)
 {
    if(ipRecv.getName() != m_indiP_nUpdate.getName())
@@ -834,6 +916,33 @@ INDI_NEWCALLBACK_DEFN(shmimIntegrator, m_indiP_startAveraging)(const pcf::IndiPr
       std::unique_lock<std::mutex> lock(m_indiMutex);
       updateSwitchIfChanged(m_indiP_startAveraging, "toggle", pcf::IndiElement::On, INDI_BUSY);
    }
+   return 0;
+}
+
+INDI_SETCALLBACK_DEFN( shmimIntegrator, m_indiP_fpsSource )(const pcf::IndiProperty &ipRecv)
+{
+   if( ipRecv.getName() != m_indiP_fpsSource.getName())
+   {
+      log<software_error>({__FILE__, __LINE__, "Invalid INDI property."});
+      return -1;
+   }
+   
+   if( ipRecv.find("current") != true ) //this isn't valie
+   {
+      return 0;
+   }
+   
+   std::lock_guard<std::mutex> guard(m_indiMutex);
+   
+   realT fps = ipRecv["current"].get<float>();
+   
+   if(fps != m_fps)
+   {
+      m_fps = fps;
+      std::cout << "Got fps: " << m_fps << "\n";   
+      shmimMonitorT::m_restart = true;
+   }
+
    return 0;
 }
 

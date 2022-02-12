@@ -519,10 +519,11 @@ void shmimMonitor<derivedT, specificT>::smThreadExec()
       
       if(derived().m_shutdown || !opened) return;
     
+#if 1
       ///\todo once we upgrade to the mythical new CACAO, nuke this entire dumpster fire from orbit.  Just to be sure.
       if(!semgot) //this is a gross hack to prevent running up the semaphore number and exhausting it.
       {
-         if(m_semaphoreNumber == 0) m_semaphoreNumber = 6; ///Move past CACAO hard coded things -- \todo need to return to this being a config/
+         if(m_semaphoreNumber == 0) m_semaphoreNumber = 0; ///Move past CACAO hard coded things -- \todo need to return to this being a config/
          int actSem = 1;
          while(actSem == 1)//Don't accept semaphore 1 cuz it don't work.
          {
@@ -536,7 +537,9 @@ void shmimMonitor<derivedT, specificT>::smThreadExec()
          }
       }
       semgot = true;
-
+#else
+      m_semaphoreNumber = ImageStreamIO_getsemwaitindex(&m_imageStream, m_semaphoreNumber); //ask for semaphore we had before
+#endif
       derivedT::template log<software_info>({__FILE__,__LINE__, "got semaphore index " + std::to_string(m_semaphoreNumber) + " for " + m_shmimName });
       
       ImageStreamIO_semflush(&m_imageStream, m_semaphoreNumber);
