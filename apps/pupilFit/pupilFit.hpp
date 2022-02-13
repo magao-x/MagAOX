@@ -30,21 +30,40 @@ namespace MagAOX
 namespace app
 {
 
+struct refShmimT 
+{
+   static std::string configSection()
+   {
+      return "refShmim";
+   };
+   
+   static std::string indiPrefix()
+   {
+      return "ref";
+   };
+};
+
+#define USEDEFSET (0)
+#define USEREFIM (1)
+#define USEUSERSET (2)
+
 /// The MagAO-X Pyramid Pupil Fitter
 /** 
   * \ingroup pupilFit
   */
-class pupilFit : public MagAOXApp<true>, public dev::shmimMonitor<pupilFit>
+class pupilFit : public MagAOXApp<true>, public dev::shmimMonitor<pupilFit>, public dev::shmimMonitor<pupilFit,refShmimT>
 {
-
    //Give the test harness access.
    friend class pupilFit_test;
 
    friend class dev::shmimMonitor<pupilFit>;
-   
+   friend class dev::shmimMonitor<pupilFit,refShmimT>;
+
    //The base shmimMonitor type
    typedef dev::shmimMonitor<pupilFit> shmimMonitorT;
    
+   typedef dev::shmimMonitor<pupilFit,refShmimT> refShmimMonitorT;
+
    ///Floating point type in which to do all calculations.
    typedef float realT;
    
@@ -58,9 +77,6 @@ protected:
    std::string m_edgeShmimName {"camwfs_edge"}; ///<The name of the image stream for the edge images.  Default is camwfs_edge.
    
    float m_threshold {0.5};
-   
-   std::string m_wfsrefPath {"/opt/MagAOX/cacao/tweeter/conf"};
-   std::string m_wfsrefName {"wfsref0.fits"};
    
    int m_numPupils {4}; ///< The number of pupils.  Default is 4.  3 is also supported.
    ///@}
@@ -77,63 +93,57 @@ protected:
    IMAGE m_edgeShmim;
    bool m_edgeShmimConnected {false};
    
-   ///\todo this needs to be a config-able group of params
-   double m_defSetx1 {29.7946};
-   double m_defSety1 {29.4367};
-   double m_defSetD1 {55.7986};
+   double m_defSetx1 {29.5};
+   double m_defSety1 {29.5};
+   double m_defSetD1 {56.0};
    
-   double m_defSetx2 {89.9962};
-   double m_defSety2 {29.2417};
-   double m_defSetD2 {55.6178};
+   double m_defSetx2 {89.5};
+   double m_defSety2 {29.5};
+   double m_defSetD2 {56.0};
    
-   double m_defSetx3 {29.7723};
-   double m_defSety3 {89.8813};
-   double m_defSetD3 {55.9552};
+   double m_defSetx3 {29.5};
+   double m_defSety3 {89.5};
+   double m_defSetD3 {56.0};
    
-   double m_defSetx4 {90.1045};
-   double m_defSety4 {89.9785};
-   double m_defSetD4 {56.1881};
+   double m_defSetx4 {89.5};
+   double m_defSety4 {89.5};
+   double m_defSetD4 {56.0};
 
-   bool m_useRefIm {false};
+   double m_userSetx1 {29.5};
+   double m_userSety1 {29.5};
+   double m_userSetD1 {56.0};
+   
+   double m_userSetx2 {89.5};
+   double m_userSety2 {29.5};
+   double m_userSetD2 {56.0};
+   
+   double m_userSetx3 {29.5};
+   double m_userSety3 {89.5};
+   double m_userSetD3 {56.0};
+   
+   double m_userSetx4 {89.5};
+   double m_userSety4 {89.5};
+   double m_userSetD4 {56.0};
+
+   int m_setPointSource {USEDEFSET};
    
    bool m_refUpdated {false}; ///< Flag set if the online reference update is used.
    
-/*
-Averaged: 50                                                                                                                                                               
-Average x1: 29.7946 +/- -nan                                                                                                                                               
-Average y1: 29.4367 +/- 0.00314231                                                                                                                                         
-Average D1: 55.7986 +/- 0.00823452                                                                                                                                         
-                                                                                                                                                                           
-Average x2: 89.9962 +/- 0.0109293                                                                                                                                          
-Average y2: 29.2417 +/- 0.0544957                                                                                                                                          
-Average D2: 55.6178 +/- 0.0103563                                                                                                                                          
-                                                                                                                                                                           
-Average x3: 29.7723 +/- 0.00837334                                                                                                                                         
-Average y3: 89.8813 +/- 0.0081282                                                                                                                                          
-Average D3: 55.9552 +/- 0.0891944                                                                                                                                          
-                                                                                                                                                                           
-Average x4: 90.1045 +/- 0.0254011                                                                                                                                          
-Average y4: 89.9785 +/- 0.0188096                                                                                                                                          
-Average D4: 56.1881 +/- 0.155264                                                                                                                                           
-                                        
-*/
+   double m_setx1 {29.5};
+   double m_sety1 {29.5};
+   double m_setD1 {56.0};
    
-
-   double m_setx1 {29.7946};
-   double m_sety1 {29.4367};
-   double m_setD1 {55.7986};
+   double m_setx2 {89.5};
+   double m_sety2 {29.5};
+   double m_setD2 {56.0};
    
-   double m_setx2 {89.9962};
-   double m_sety2 {29.2417};
-   double m_setD2 {55.6178};
+   double m_setx3 {29.5};
+   double m_sety3 {89.5};
+   double m_setD3 {56.0};
    
-   double m_setx3 {29.7723};
-   double m_sety3 {89.8813};
-   double m_setD3 {55.9552};
-   
-   double m_setx4 {90.1045};
-   double m_sety4 {89.9785};
-   double m_setD4 {56.1881};
+   double m_setx4 {89.5};
+   double m_sety4 {89.5};
+   double m_setD4 {56.0};
    
    bool m_averaging {false};
    size_t m_navg {0};
@@ -185,7 +195,6 @@ Average D4: 56.1881 +/- 0.155264
       
    double m_avgmed2 {0};
    double m_varmed2 {0};
-   
    
    double m_avgx3_accum {0};
    double m_avgx3sq_accum {0};
@@ -294,12 +303,20 @@ public:
      */
    virtual int appShutdown();
 
+   // shmimMonitor interface:
    int allocate( const dev::shmimT &);
    
    int processImage( void* curr_src,
                      const dev::shmimT &
                     );
    
+   // shmimMonitor interface for referenc:
+   int allocate( const refShmimT &);
+   
+   int processImage( void* curr_src,
+                     const refShmimT &
+                   );
+
 protected:
 
     
@@ -329,12 +346,16 @@ protected:
    pcf::IndiProperty m_indiP_update;
    INDI_NEWCALLBACK_DECL(pupilFit, m_indiP_update);
    
+   pcf::IndiProperty m_indiP_refmode;
+   INDI_NEWCALLBACK_DECL(pupilFit, m_indiP_refmode);
+
    ///@}
 };
 
 inline
 pupilFit::pupilFit() : MagAOXApp(MAGAOX_CURRENT_SHA1, MAGAOX_REPO_MODIFIED)
 {
+   refShmimMonitorT::m_getExistingFirst = true;
    return;
 }
 
@@ -356,7 +377,8 @@ inline
 void pupilFit::setupConfig()
 {
    shmimMonitorT::setupConfig(config);
-   
+   refShmimMonitorT::setupConfig(config);
+
    config.add("shmimMonitor.shmimName", "", "shmimMonitor.shmimName", argType::Required, "shmimMonitor", "shmimName", false, "string", "The name of the ImageStreamIO shared memory image. Will be used as /tmp/<shmimName>.im.shm. Default is camwfs_avg");
    
    config.add("fit.threshold", "", "fit.threshold", argType::Required, "fit", "threshold", false, "float", "The pupil finding threshold. 0 < threshold < 1");
@@ -381,19 +403,18 @@ void pupilFit::setupConfig()
    config.add("cal.setx4", "", "cal.setx4", argType::Required, "cal", "setx4", false, "float", "The x set point for quad 4 (LL).");
    config.add("cal.sety4", "", "cal.sety4", argType::Required, "cal", "sety4", false, "float", "The y set point for quad 4 (LL).");
    config.add("cal.setD4", "", "cal.setD4", argType::Required, "cal", "setD4", false, "float", "The D set point for quad 4 (LL).");
-
-
-   config.add("wfsref.path", "" , "wfsref.path", argType::Required, "wfsref", "path", false, "float", "The path to the WFS reference image.  Default is /opt/MagAOX/cacao/tweeter");
-   config.add("wfsref.name", "" , "wfsref.name", argType::Required, "wfsref", "name", false, "float", "The name the WFS reference image. Default is wfsref0.fits");
 }
 
 
 inline
 int pupilFit::loadConfigImpl( mx::app::appConfigurator & _config )
 {
-   m_shmimName = "camwfs_avg";
+   shmimMonitorT::m_shmimName = "camwfs_avg";
    shmimMonitorT::loadConfig(_config);
-      
+   
+   refShmimMonitorT::loadConfig(_config);
+   if(refShmimMonitorT::m_shmimName != "") m_setPointSource = USEREFIM;
+
    _config(m_threshold, "fit.threshold");
    _config(m_threshShmimName, "fit.threshShmimName");
    _config(m_edgeShmimName, "fit.edgeShmimName");
@@ -416,8 +437,6 @@ int pupilFit::loadConfigImpl( mx::app::appConfigurator & _config )
    _config(m_defSety4, "cal.sety4");
    _config(m_defSetD4, "cal.setD4");
 
-   _config(m_wfsrefPath, "wfsref.path");
-   _config(m_wfsrefName, "wfsref.name");
    
    return 0;
 }
@@ -436,6 +455,11 @@ int pupilFit::appStartup()
       return log<software_error,-1>({__FILE__, __LINE__});
    }
    
+   if(refShmimMonitorT::appStartup() < 0)
+   {
+      return log<software_error,-1>({__FILE__, __LINE__});
+   }
+
    createStandardIndiNumber<float>( m_indiP_thresh, "threshold", 0, 1 ,0, "%0.2f", "Threshold");
    m_indiP_thresh["current"].set(m_threshold);
    m_indiP_thresh["target"].set(m_threshold);
@@ -531,7 +555,7 @@ int pupilFit::appStartup()
    indi::addNumberElement<float>( m_indiP_avg, "dD", 0, 59, 0, "%0.2f", "delta-D");
    registerIndiPropertyReadOnly(m_indiP_avg);
    
-   createStandardIndiRequestSw( m_indiP_reload, "reload", "Reload Calibration");
+   createStandardIndiRequestSw( m_indiP_reload, "setpt_reload", "Reload Calibration");
    m_indiP_reload["request"].set(pcf::IndiElement::Off);
    if( registerIndiPropertyNew( m_indiP_reload, INDI_NEWCALLBACK(m_indiP_reload)) < 0)
    {
@@ -539,13 +563,40 @@ int pupilFit::appStartup()
       return -1;
    }
    
-   createStandardIndiRequestSw( m_indiP_update, "update_ref", "Update Reference");
+   createStandardIndiRequestSw( m_indiP_update, "setpt_current", "Set Reference");
    m_indiP_update["request"].set(pcf::IndiElement::Off);
    if( registerIndiPropertyNew( m_indiP_update, INDI_NEWCALLBACK(m_indiP_update)) < 0)
    {
       log<software_error>({__FILE__,__LINE__});
       return -1;
    }
+
+   createStandardIndiSelectionSw( m_indiP_refmode, "setpt_mode", {"default", "refim", "user"}, "Reference Mode");
+   if(m_setPointSource == USEREFIM)
+   {
+      m_indiP_refmode["default"].set(pcf::IndiElement::Off);
+      m_indiP_refmode["refim"].set(pcf::IndiElement::On);
+      m_indiP_refmode["user"].set(pcf::IndiElement::Off);
+   }
+   if(m_setPointSource == USEUSERSET)
+   {
+      m_indiP_refmode["default"].set(pcf::IndiElement::Off);
+      m_indiP_refmode["refim"].set(pcf::IndiElement::Off);
+      m_indiP_refmode["user"].set(pcf::IndiElement::On);
+   }
+   else
+   {
+      m_indiP_refmode["default"].set(pcf::IndiElement::On);
+      m_indiP_refmode["refim"].set(pcf::IndiElement::Off);
+      m_indiP_refmode["user"].set(pcf::IndiElement::Off);
+   }
+
+   if( registerIndiPropertyNew( m_indiP_refmode, INDI_NEWCALLBACK(m_indiP_refmode)) < 0)
+   {
+      log<software_error>({__FILE__,__LINE__});
+      return -1;
+   }
+
    state(stateCodes::OPERATING);
    
    return 0;
@@ -559,12 +610,37 @@ int pupilFit::appLogic()
       return log<software_error,-1>({__FILE__,__LINE__});
    }
    
+   if( refShmimMonitorT::appLogic() < 0)
+   {
+      return log<software_error,-1>({__FILE__,__LINE__});
+   }
+
    std::lock_guard<std::mutex> guard(m_indiMutex);
    updateIfChanged(m_indiP_thresh, "current", m_threshold, INDI_IDLE);
    updateIfChanged(m_indiP_thresh, "target", m_threshold, INDI_IDLE);
-   
+
+   if(m_setPointSource == USEREFIM)
+   {
+      updateSwitchIfChanged(m_indiP_refmode, "default", pcf::IndiElement::Off);
+      updateSwitchIfChanged(m_indiP_refmode, "refim", pcf::IndiElement::On);
+      updateSwitchIfChanged(m_indiP_refmode, "user", pcf::IndiElement::Off);
+   }
+   else if(m_setPointSource == USEUSERSET)
+   {
+      updateSwitchIfChanged(m_indiP_refmode, "default", pcf::IndiElement::Off);
+      updateSwitchIfChanged(m_indiP_refmode, "refim", pcf::IndiElement::Off);
+      updateSwitchIfChanged(m_indiP_refmode, "user", pcf::IndiElement::On);
+   }
+   else
+   {
+      updateSwitchIfChanged(m_indiP_refmode, "default", pcf::IndiElement::On);
+      updateSwitchIfChanged(m_indiP_refmode, "refim", pcf::IndiElement::Off);
+      updateSwitchIfChanged(m_indiP_refmode, "user", pcf::IndiElement::Off);
+   }
+
    shmimMonitorT::updateINDI();
-   
+   refShmimMonitorT::updateINDI();
+
    return 0;
 }
 
@@ -572,7 +648,8 @@ inline
 int pupilFit::appShutdown()
 {
    shmimMonitorT::appShutdown();
-   
+   refShmimMonitorT::appShutdown();
+
    return 0;
 }
 
@@ -581,63 +658,81 @@ int pupilFit::allocate(const dev::shmimT & dummy)
 {
    static_cast<void>(dummy);
    
-   m_fitIm.resize(m_width, m_height);
-   m_edgeIm.resize(m_width, m_height);
+   std::lock_guard<std::mutex> guard(m_indiMutex);
+
+   m_fitIm.resize(shmimMonitorT::m_width, shmimMonitorT::m_height);
+   m_edgeIm.resize(shmimMonitorT::m_width, shmimMonitorT::m_height);
    
    m_fitter.m_numPupils = m_numPupils;
-   m_fitter.setSize(0.5*m_width, 0.5*m_height);
+   m_fitter.setSize(0.5*shmimMonitorT::m_width, 0.5*shmimMonitorT::m_height);
    m_fitter.m_thresh = m_threshold;
    
-   //Load and fit the reference image
-   std::string reffits = m_wfsrefPath + "/" + m_wfsrefName;
-  
-   mx::fits::fitsFile<float> ff;
-   mx::improc::eigenImage<float> refedge;
-   
-   ff.read(m_refIm, reffits);
-   
-   if(m_useRefIm)
+   if(m_setPointSource == USEREFIM && m_refIm.rows() == shmimMonitorT::m_width && m_refIm.cols() == shmimMonitorT::m_height)
    {
-      if(m_refIm.rows() == m_width && m_refIm.cols() == m_height)
+      mx::improc::eigenImage<float> refim, refedge;
+      refim = m_refIm; //cuz it's modified by fitter.
+      if(m_fitter.fit(refim, refedge) < 0)
       {
-         if(m_fitter.fit(m_refIm, refedge) < 0)
-         {
-            log<software_error>({__FILE__, __LINE__, "error from fitter"});
-         }
-         else
-         {
-            m_setx1 = m_fitter.m_avgx[0];
-            m_sety1 = m_fitter.m_avgy[0];
-            m_setD1 = 2*m_fitter.m_avgr[0];
-            
-            m_setx2 = m_fitter.m_avgx[1];
-            m_sety2 = m_fitter.m_avgy[1];
-            m_setD2 = 2*m_fitter.m_avgr[1];
-            
-            m_setx3 = m_fitter.m_avgx[2];
-            m_sety3 = m_fitter.m_avgy[2];
-            m_setD3 = 2*m_fitter.m_avgr[2];
-            
-            m_setx4 = m_fitter.m_avgx[3];
-            m_sety4 = m_fitter.m_avgy[3];
-            m_setD4 = 2*m_fitter.m_avgr[3];
-            
-            log<text_log>("Read reference image: " + reffits);
-            log<text_log>("Quad 1 set points: " + std::to_string(m_setx1) + " " +  std::to_string(m_sety1) + " " + std::to_string(m_setD1));
-            log<text_log>("Quad 2 set points: " + std::to_string(m_setx2) + " " +  std::to_string(m_sety2) + " " + std::to_string(m_setD2));
-            log<text_log>("Quad 3 set points: " + std::to_string(m_setx3) + " " +  std::to_string(m_sety3) + " " + std::to_string(m_setD3));
-            log<text_log>("Quad 4 set points: " + std::to_string(m_setx4) + " " +  std::to_string(m_sety4) + " " + std::to_string(m_setD4));
-         }
+         return log<software_error, -1>({__FILE__, __LINE__, "error from fitter for reference"});
       }
-      else
-      {
-         log<text_log>("Reference image " + reffits + " size does not match shmim stream.", logPrio::LOG_ERROR);
-      }
+
+      m_setx1 = m_fitter.m_avgx[0];
+      m_sety1 = m_fitter.m_avgy[0];
+      m_setD1 = 2*m_fitter.m_avgr[0];
+      
+      m_setx2 = m_fitter.m_avgx[1];
+      m_sety2 = m_fitter.m_avgy[1];
+      m_setD2 = 2*m_fitter.m_avgr[1];
+      
+      m_setx3 = m_fitter.m_avgx[2];
+      m_sety3 = m_fitter.m_avgy[2];
+      m_setD3 = 2*m_fitter.m_avgr[2];
+      
+      m_setx4 = m_fitter.m_avgx[3];
+      m_sety4 = m_fitter.m_avgy[3];
+      m_setD4 = 2*m_fitter.m_avgr[3];
+      
+      log<text_log>("Fit to reference image: ");
+      log<text_log>("Quad 1 set points: " + std::to_string(m_setx1) + " " +  std::to_string(m_sety1) + " " + std::to_string(m_setD1));
+      log<text_log>("Quad 2 set points: " + std::to_string(m_setx2) + " " +  std::to_string(m_sety2) + " " + std::to_string(m_setD2));
+      log<text_log>("Quad 3 set points: " + std::to_string(m_setx3) + " " +  std::to_string(m_sety3) + " " + std::to_string(m_setD3));
+      log<text_log>("Quad 4 set points: " + std::to_string(m_setx4) + " " +  std::to_string(m_sety4) + " " + std::to_string(m_setD4));
    }
    else
    {
-      if(m_numPupils == 4 && !m_refUpdated)
+      if(m_setPointSource == USEREFIM && (m_refIm.rows() != shmimMonitorT::m_width || m_refIm.cols() != shmimMonitorT::m_height))
       {
+         if(m_refIm.rows()!=0 || m_refIm.cols() != 0) //only complain if the ref image has been loaded
+         {
+            log<text_log>("Reference image size does not match", logPrio::LOG_ERROR);
+         }
+      }
+
+      if(m_setPointSource == USEUSERSET) 
+      {
+         m_setx1 = m_userSetx1;
+         m_sety1 = m_userSety1;
+         m_setD1 = m_userSetD1;
+         
+         m_setx2 = m_userSetx2;
+         m_sety2 = m_userSety2;
+         m_setD2 = m_userSetD2;
+         
+         m_setx3 = m_userSetx3;
+         m_sety3 = m_userSety3;
+         m_setD3 = m_userSetD3;
+         
+         if(m_numPupils == 4)
+         {
+            m_setx4 = m_userSetx4;
+            m_sety4 = m_userSety4;
+            m_setD4 = m_userSetD4;
+         }
+         log<text_log>("Using user set-points");
+
+      }
+      else
+      { 
          m_setx1 = m_defSetx1;
          m_sety1 = m_defSety1;
          m_setD1 = m_defSetD1;
@@ -650,29 +745,19 @@ int pupilFit::allocate(const dev::shmimT & dummy)
          m_sety3 = m_defSety3;
          m_setD3 = m_defSetD3;
          
-         m_setx4 = m_defSetx4;
-         m_sety4 = m_defSety4;
-         m_setD4 = m_defSetD4;
-      }
-      else if(!m_refUpdated)
-      {
-         m_setx1 = 30.0;
-         m_sety1 = 38.0;
-         m_setD1 = 14.0;
-         
-         m_setx2 = 96.0;
-         m_sety2 = 38.0;
-         m_setD2 = 14.0;
-         
-         m_setx3 = 65.0;
-         m_sety3 = 95.0;
-         m_setD3 = 14.0;
+         if(m_numPupils == 4)
+         {
+            m_setx4 = m_defSetx4;
+            m_sety4 = m_defSety4;
+            m_setD4 = m_defSetD4;
+         }
+         log<text_log>("Set default set-points");
       }
    }
    
    uint32_t imsize[3];
-   imsize[0] = m_width;
-   imsize[1] = m_height;
+   imsize[0] = shmimMonitorT::m_width;
+   imsize[1] = shmimMonitorT::m_height;
    imsize[2] = 1;
    
    if(m_threshShmimConnected)
@@ -687,10 +772,10 @@ int pupilFit::allocate(const dev::shmimT & dummy)
       m_edgeShmimConnected = false;
    }
    
-   ImageStreamIO_createIm_gpu(&m_threshShmim , m_threshShmimName .c_str(), 3, imsize, m_dataType, -1, 1, IMAGE_NB_SEMAPHORE, 0, CIRCULAR_BUFFER | ZAXIS_TEMPORAL);
+   ImageStreamIO_createIm_gpu(&m_threshShmim , m_threshShmimName .c_str(), 3, imsize, shmimMonitorT::m_dataType, -1, 1, IMAGE_NB_SEMAPHORE, 0, CIRCULAR_BUFFER | ZAXIS_TEMPORAL);
    m_threshShmimConnected = true;
    
-   ImageStreamIO_createIm_gpu(&m_edgeShmim , m_edgeShmimName .c_str(), 3, imsize, m_dataType, -1, 1, IMAGE_NB_SEMAPHORE, 0, CIRCULAR_BUFFER | ZAXIS_TEMPORAL);
+   ImageStreamIO_createIm_gpu(&m_edgeShmim , m_edgeShmimName .c_str(), 3, imsize, shmimMonitorT::m_dataType, -1, 1, IMAGE_NB_SEMAPHORE, 0, CIRCULAR_BUFFER | ZAXIS_TEMPORAL);
    m_edgeShmimConnected = true;
    
    if(m_edgeShmimConnected)
@@ -707,7 +792,7 @@ int pupilFit::processImage( void* curr_src,
 {
    static_cast<void>(dummy);
    
-   for(unsigned nn=0; nn < m_width*m_height; ++nn)
+   for(unsigned nn=0; nn < shmimMonitorT::m_width*shmimMonitorT::m_height; ++nn)
    {
       m_fitIm.data()[nn] += ((float*)curr_src) [nn];
    }
@@ -1029,7 +1114,42 @@ int pupilFit::processImage( void* curr_src,
    return 0;
 }
    
+inline
+int pupilFit::allocate(const refShmimT & dummy)
+{
+   static_cast<void>(dummy);
    
+   std::lock_guard<std::mutex> guard(m_indiMutex);
+   
+   if(refShmimMonitorT::m_dataType != IMAGESTRUCT_FLOAT)
+   {
+      return log<software_error,-1>({__FILE__, __LINE__, "reference is not float"});
+   }
+
+   m_refIm.resize( refShmimMonitorT::m_width, refShmimMonitorT::m_height );
+
+   return 0;
+}   
+   
+inline
+int pupilFit::processImage( void* curr_src,
+                            const refShmimT & dummy
+                          )
+{
+   static_cast<void>(dummy);
+   
+   for(unsigned nn=0; nn < refShmimMonitorT::m_width*refShmimMonitorT::m_height; ++nn)
+   {
+      m_refIm.data()[nn] += ((float*)curr_src) [nn];
+   }
+
+   log<text_log>("reference updated", logPrio::LOG_NOTICE);
+
+   shmimMonitorT::m_restart = true;
+
+   return 0;
+}
+
 INDI_NEWCALLBACK_DEFN(pupilFit, m_indiP_thresh)(const pcf::IndiProperty & ipRecv)
 {
    if(ipRecv.getName() != m_indiP_thresh.getName())
@@ -1048,7 +1168,7 @@ INDI_NEWCALLBACK_DEFN(pupilFit, m_indiP_thresh)(const pcf::IndiProperty & ipRecv
    
    m_threshold = target;
    
-   m_restart = true; //need to re-process the reference
+   if(m_setPointSource == USEREFIM) shmimMonitorT::m_restart = true; //need to re-process the reference
    
    log<text_log>("set threshold = " + std::to_string(m_threshold), logPrio::LOG_NOTICE);
    return 0;
@@ -1061,9 +1181,7 @@ INDI_NEWCALLBACK_DEFN(pupilFit, m_indiP_averaging)(const pcf::IndiProperty & ipR
       log<software_error>({__FILE__,__LINE__, "wrong INDI property received."});
       return -1;
    }
-   
-   
-   
+
    if( ipRecv["toggle"].getSwitchState() == pcf::IndiElement::On)
    {
       
@@ -1139,12 +1257,10 @@ INDI_NEWCALLBACK_DEFN(pupilFit, m_indiP_reload)(const pcf::IndiProperty & ipRecv
       return -1;
    }
    
-   
-   
    if( ipRecv["request"].getSwitchState() == pcf::IndiElement::On)
    {
       log<text_log>("reloading");
-      m_restart = 1;
+      shmimMonitorT::m_restart = 1;
    }
    
    return 0;
@@ -1158,13 +1274,10 @@ INDI_NEWCALLBACK_DEFN(pupilFit, m_indiP_update)(const pcf::IndiProperty & ipRecv
       return -1;
    }
    
-   
-   
    if( ipRecv["request"].getSwitchState() == pcf::IndiElement::On)
    {
       std::lock_guard<std::mutex> guard(m_indiMutex);
       
-      log<text_log>("updating cal");
       m_setx1 =  m_indiP_quad1["x"].get<float>();
       m_sety1 =  m_indiP_quad1["y"].get<float>();
       m_setD1 =  m_indiP_quad1["D"].get<float>();
@@ -1177,14 +1290,71 @@ INDI_NEWCALLBACK_DEFN(pupilFit, m_indiP_update)(const pcf::IndiProperty & ipRecv
       m_sety3 =  m_indiP_quad3["y"].get<float>();
       m_setD3 =  m_indiP_quad3["D"].get<float>();
       
+      log<text_log>("Recorded current set-points: ");
+      log<text_log>("Quad 1 set points: " + std::to_string(m_setx1) + " " +  std::to_string(m_sety1) + " " + std::to_string(m_setD1));
+      log<text_log>("Quad 2 set points: " + std::to_string(m_setx2) + " " +  std::to_string(m_sety2) + " " + std::to_string(m_setD2));
+      log<text_log>("Quad 3 set points: " + std::to_string(m_setx3) + " " +  std::to_string(m_sety3) + " " + std::to_string(m_setD3));
+
       if(m_numPupils == 4)
       {
          m_setx4 =  m_indiP_quad4["x"].get<float>();
          m_sety4 =  m_indiP_quad4["y"].get<float>();
          m_setD4 =  m_indiP_quad4["D"].get<float>();
+         log<text_log>("Quad 4 set points: " + std::to_string(m_setx4) + " " +  std::to_string(m_sety4) + " " + std::to_string(m_setD4));
+      } 
+
+      if(m_setPointSource == USEUSERSET) shmimMonitorT::m_restart = true;
+   }
+   
+   return 0;
+}
+
+INDI_NEWCALLBACK_DEFN(pupilFit, m_indiP_refmode)(const pcf::IndiProperty & ipRecv)
+{
+   if(ipRecv.getName() != m_indiP_refmode.getName())
+   {
+      log<software_error>({__FILE__,__LINE__, "wrong INDI property received."});
+      return -1;
+   }
+
+   if(ipRecv.find("default"))
+   {
+      if( ipRecv["default"].getSwitchState() == pcf::IndiElement::On)
+      {
+         if( m_setPointSource != USEDEFSET)
+         {
+            log<text_log>("using default reference.", logPrio::LOG_NOTICE);
+            m_setPointSource = USEDEFSET;
+            shmimMonitorT::m_restart = true;
+            return 0;
+         }
       }
-      
-      m_refUpdated = true;
+   }
+   if(ipRecv.find("refim"))
+   {
+      if( ipRecv["refim"].getSwitchState() == pcf::IndiElement::On)
+      {
+         if( m_setPointSource != USEREFIM)
+         {
+            log<text_log>("using reference image.", logPrio::LOG_NOTICE);
+            m_setPointSource = USEREFIM;
+            shmimMonitorT::m_restart = true;
+            return 0;
+         }
+      }
+   }
+   if(ipRecv.find("user"))
+   {
+      if( ipRecv["user"].getSwitchState() == pcf::IndiElement::On)
+      {
+         if( m_setPointSource != USEUSERSET)
+         {
+            log<text_log>("using user image.", logPrio::LOG_NOTICE);
+            m_setPointSource = USEUSERSET;
+            shmimMonitorT::m_restart = true;
+            return 0;
+         }
+      }
    }
    
    return 0;

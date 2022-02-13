@@ -850,7 +850,7 @@ INDI_NEWCALLBACK_DEFN(shmimIntegrator, m_indiP_avgTime)(const pcf::IndiProperty 
       return -1;
    }
    
-   unsigned target;
+   float target;
    
    if( indiTargetUpdate( m_indiP_avgTime, target, ipRecv, true) < 0)
    {
