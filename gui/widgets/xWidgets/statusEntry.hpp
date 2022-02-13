@@ -111,6 +111,15 @@ public:
    
    void handleSetProperty( const pcf::IndiProperty & ipRecv /**< [in] the property which has changed*/);
    
+   /// Set the stretch of the horizontal layout
+   void setStretch( int s0, ///< Stretch of the spacer.  If 0, the spacer is removed.
+                    int s1, ///< Stretch of the label
+                    int s2  ///< Stretch of the value
+                  );
+
+   /// Set the format string
+   void format( const std::string & f /**< [in] the new format string */);
+
 protected:
    virtual void clearFocus();
 
@@ -252,7 +261,15 @@ QString statusEntry::formattedValue()
       case FLOAT:
          if(m_format == "auto") return floatAutoFormat(m_current);
 
-         snprintf(str, sizeof(str), m_format.c_str(), std::stof(m_current));
+         try 
+         {
+            snprintf(str, sizeof(str), m_format.c_str(), std::stof(m_current));
+         }
+         catch(...)
+         {  
+            snprintf(str, sizeof(str), " ");
+         }
+
          return QString(str);
       default:
          return QString(m_current.c_str());
@@ -328,6 +345,31 @@ void statusEntry::handleSetProperty( const pcf::IndiProperty & ipRecv)
    }
 
    updateGUI();
+}
+
+void statusEntry::setStretch( int s0, 
+                              int s1, 
+                              int s2
+                            )
+{
+   //Have to do this b/c hlayout is not exposed for whatever reason.
+   QHBoxLayout * qhbl = findChild<QHBoxLayout*>("hlayout");
+   if(qhbl)
+   {
+      qhbl->setStretch(0,s0);
+      qhbl->setStretch(1,s1);
+      qhbl->setStretch(2,s2);
+      if(s0 == 0) //remove the spacer
+      {
+         QLayoutItem * qli = qhbl->itemAt(0);
+         if(qli) qhbl->removeItem(qli);
+      }
+   }
+}
+
+void statusEntry::format( const std::string & f) 
+{
+   m_format = f;
 }
 
 void statusEntry::clearFocus()

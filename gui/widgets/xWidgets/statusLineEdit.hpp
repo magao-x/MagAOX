@@ -8,6 +8,8 @@
 #include <QStyle>
 #include <QKeyEvent>
 
+#include "xWidget.hpp"
+
 namespace xqt
 {
 
