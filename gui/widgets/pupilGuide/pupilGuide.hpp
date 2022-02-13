@@ -324,6 +324,8 @@ void pupilGuide::subscribe()
 
    m_parent->addSubscriberProperty(this, "stagecamlensx", "fsm");   
    m_parent->addSubscriberProperty(this, "stagecamlensy", "fsm");
+   m_parent->addSubscriberProperty(this, "stagecamlensx", "position"); //we need these too   
+   m_parent->addSubscriberProperty(this, "stagecamlensy", "position");
    m_parent->addSubscriber(ui.camlens_x_pos);
    m_parent->addSubscriber(ui.camlens_y_pos);
 
@@ -1626,6 +1628,7 @@ void pupilGuide::on_button_camlens_d_pressed()
    ip.add(pcf::IndiElement("target"));
    ip["target"] = m_camlensy_pos + m_camlensStepSize;
    
+   
    sendNewProperty(ip);
 }
 
@@ -1639,7 +1642,6 @@ void pupilGuide::on_button_camlens_r_pressed()
    ip.setName("position");
    ip.add(pcf::IndiElement("target"));
    ip["target"] = m_camlensx_pos + m_camlensStepSize;
-   
    sendNewProperty(ip);
 }
 
