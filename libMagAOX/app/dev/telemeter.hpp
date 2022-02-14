@@ -235,15 +235,17 @@ int telemeter<derivedT>::appStartup()
    for(int w=0;w<4;++w)
    {
       //Sleep for 500 msec
-      std::this_thread::sleep_for( std::chrono::duration<unsigned long, std::nano>(500000));
-
+      //std::this_thread::sleep_for( std::chrono::duration<unsigned long, std::nano>(500000000));
+      //mx::sys::milliSleep(500);
+      sleep(1);
+      
       //Verify that log thread is still running.
       if(m_tel.logThreadRunning() == true) break;
    }
 
    if(m_tel.logThreadRunning() == false)
    {
-      derivedT::template log<text_log>("telemetry thread not running.  exiting.", logPrio::LOG_CRITICAL);
+      derivedT::template log<software_critical>({__FILE__, __LINE__, "telemetry thread not running.  exiting."});
       return -1;
    }
    

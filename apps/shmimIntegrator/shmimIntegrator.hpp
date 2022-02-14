@@ -113,6 +113,14 @@ protected:
 
    unsigned m_nUpdate {0}; ///< The rate at which to update the average.  If 0 < m_nUpdate < m_nAverage then this is a moving averager. Default 0.
    
+   bool m_continuous {true}; ///< Set to false in configuration to have this run once then stop until triggered.
+
+   bool m_running {true}; ///< Set to false in configuration to have it not start averaging until triggered.   
+   
+   std::string m_stateSource; ///< The source of the state string used for file management
+
+   bool m_fileSaver {false}; ///< Set to true in configuration to have this save and reload files automatically.
+
    ///@}
 
    mx::improc::eigenCube<realT> m_accumImages; ///< Cube used to accumulate images
@@ -128,7 +136,15 @@ protected:
    size_t m_sinceUpdate {0};
    bool m_updated {false};
    
-   sem_t m_smSemaphore; ///< Semaphore used to synchronize the fg thread and the sm thread.
+   bool m_imageValid {false};
+   std::string m_stateString;
+   bool m_stateStringValid {false};
+   bool m_stateStringValidOnStart {false};
+   bool m_stateStringChanged {false};
+   std::string m_fileSaveDir;
+
+
+   sem_t m_smSemaphore {0}; ///< Semaphore used to synchronize the fg thread and the sm thread.
    
    realT (*pixget)(void *, size_t) {nullptr}; ///< Pointer to a function to extract the image data as our desired type realT.
    
@@ -140,8 +156,6 @@ protected:
    bool m_dark2Set {false};
    realT (*dark2_pixget)(void *, size_t) {nullptr}; ///< Pointer to a function to extract the image data as our desired type realT.
    
-   bool m_continuous {true}; ///< Set to false in configuration to have this run once then stop until triggered.
-   bool m_running {true}; ///< Set to false in configuration to have it not start averaging until triggered.
    
 public:
    /// Default c'tor.
@@ -179,6 +193,8 @@ public:
      */
    virtual int appShutdown();
 
+protected:
+
    int allocate( const dev::shmimT & dummy /**< [in] tag to differentiate shmimMonitor parents.*/);
    
    int processImage( void * curr_src,          ///< [in] pointer to start of current frame.
@@ -196,7 +212,9 @@ public:
    int processImage( void * curr_src,          ///< [in] pointer to start of current frame.
                      const dark2ShmimT & dummy ///< [in] tag to differentiate shmimMonitor parents.
                    );
-protected:
+
+   int findMatchingDark();
+
 
    /** \name dev::frameGrabber interface
      *
@@ -264,6 +282,12 @@ protected:
 
    pcf::IndiProperty m_indiP_fpsSource;
    INDI_SETCALLBACK_DECL(shmimIntegrator, m_indiP_fpsSource);
+
+   pcf::IndiProperty m_indiP_stateSource;
+   INDI_SETCALLBACK_DECL(shmimIntegrator, m_indiP_stateSource);
+
+   pcf::IndiProperty m_indiP_imageValid;
+   
 };
 
 inline
@@ -291,6 +315,9 @@ void shmimIntegrator::setupConfig()
    
    config.add("integrator.continuous", "", "integrator.continuous", argType::Required, "integrator", "continuous", false, "bool", "Flag controlling whether averaging is continuous or only when triggered.  Default true.");
    config.add("integrator.running", "", "integrator.running", argType::Required, "integrator", "running", false, "bool", "Flag controlling whether averaging is running at startup.  Default true.");
+
+   config.add("integrator.stateSource", "", "integrator.stateSource", argType::Required, "integrator", "stateSource", false, "string", "///< Device name for getting the state string for file management.  This device should have *.state_string.current.");
+   config.add("integrator.fileSaver", "", "integrator.fileSaver", argType::Required, "integrator", "fileSaver", false, "bool", "Flag controlling whether this saves and reloads files automatically.  Default false.");
 }
 
 inline
@@ -313,6 +340,9 @@ int shmimIntegrator::loadConfigImpl( mx::app::appConfigurator & _config )
    
    _config(m_running, "integrator.running");
    
+   _config(m_stateSource, "integrator.stateSource");
+   _config(m_fileSaver, "integrator.fileSaver");
+
    return 0;
 }
 
@@ -367,6 +397,45 @@ int shmimIntegrator::appStartup()
    {
       REG_INDI_SETPROP(m_indiP_fpsSource, m_fpsSource, std::string("fps"));
    }
+
+   if(m_fileSaver == true && m_stateSource != "")
+   {
+      REG_INDI_SETPROP(m_indiP_stateSource, m_stateSource, std::string("state_string"));
+      
+      createROIndiText( m_indiP_imageValid, "image_valid", "flag", "Image Valid", "Image", "Valid");
+      if(!m_imageValid) //making sure we stay up with default
+      {
+         m_indiP_imageValid["flag"] = "no";
+      }
+      else
+      {
+         m_indiP_imageValid["flag"] = "yes";
+      }
+
+      if( registerIndiPropertyReadOnly( m_indiP_imageValid ) < 0)
+      {
+         log<software_error>({__FILE__,__LINE__});
+         return -1;
+      }
+
+
+      m_fileSaveDir = m_calibDir + "/" + m_configName;
+
+      //Create save directory.
+      errno = 0;
+      if( mkdir(m_fileSaveDir.c_str(), S_IRWXU | S_IRWXG | S_IROTH | S_IXOTH) < 0 )
+      {
+         if( errno != EEXIST)
+         {
+            std::stringstream logss;
+            logss << "Failed to create image directory (" << m_fileSaveDir << ").  Errno says: " << strerror(errno);
+            log<software_critical>({__FILE__, __LINE__, errno, 0, logss.str()});
+
+            return -1;
+         }
+      }
+   }
+
 
    if(sem_init(&m_smSemaphore, 0,0) < 0)
    {
@@ -423,7 +492,7 @@ int shmimIntegrator::appLogic()
    }
 
    std::unique_lock<std::mutex> lock(m_indiMutex);
-   
+
    if(shmimMonitorT::updateINDI() < 0)
    {
       log<software_error>({__FILE__, __LINE__});
@@ -448,6 +517,26 @@ int shmimIntegrator::appLogic()
    {
       state(stateCodes::READY);
       updateSwitchIfChanged(m_indiP_startAveraging, "toggle", pcf::IndiElement::Off, INDI_IDLE);
+
+      if(m_fileSaver)
+      {
+         if(m_stateStringChanged) //So if not running and the state has changed, we check
+         {
+            if(findMatchingDark() < 0)
+            {
+               log<software_error>({__FILE__, __LINE__});
+            }
+         }
+
+         if(!m_imageValid)
+         {
+            updateIfChanged(m_indiP_imageValid, "flag", "no");
+         }
+         else
+         {
+            updateIfChanged(m_indiP_imageValid, "flag", "yes");
+         }
+      }
    }
    else
    {
@@ -485,9 +574,9 @@ inline
 int shmimIntegrator::allocate(const dev::shmimT & dummy)
 {
    static_cast<void>(dummy); //be unused
-   
+  
    std::unique_lock<std::mutex> lock(m_indiMutex);
-   
+  
    if(m_avgTime > 0 && m_fps > 0)
    {
       m_nAverage = m_avgTime * m_fps;
@@ -517,7 +606,7 @@ int shmimIntegrator::allocate(const dev::shmimT & dummy)
    m_sinceUpdate = 0;
    
    m_avgImage.resize(shmimMonitorT::m_width, shmimMonitorT::m_height);
-   m_avgImage.setZero();
+   //m_avgImage.setZero();
    
    pixget = getPixPointer<realT>(shmimMonitorT::m_dataType);
    
@@ -580,7 +669,53 @@ int shmimIntegrator::processImage( void * curr_src,
          }
          
          m_sinceUpdate = 0;
-         if(!m_continuous) m_running = false;
+         if(!m_continuous) 
+         {
+            m_running = false;
+            if(m_fileSaver) 
+            {
+               if(m_stateStringChanged || !m_stateStringValid || !m_stateStringValidOnStart)
+               {
+                  m_imageValid = false;
+                  log<text_log>("state changed during acquisition, not saving", logPrio::LOG_NOTICE);
+               }
+               else
+               {
+                  m_imageValid = true;
+                  m_stateStringChanged=false;
+
+                  ///\todo this should happen in a different less-real-time thread.
+                  //Otherwise we save:
+                  timespec fts;
+                  clock_gettime(CLOCK_REALTIME, &fts);
+         
+                  tm uttime;//The broken down time.   
+        
+                  if(gmtime_r(&fts.tv_sec, &uttime) == 0)
+                  {
+                     //Yell at operator but keep going
+                     log<software_alert>({__FILE__,__LINE__,errno,0,"gmtime_r error.  possible loss of timing information."}); 
+                  }
+   
+                  char cts[] = "YYYYMMDDHHMMSSNNNNNNNNN";
+                  int rv = snprintf(cts, sizeof(cts), "%04i%02i%02i%02i%02i%02i%09i", uttime.tm_year+1900, 
+                               uttime.tm_mon+1, uttime.tm_mday, uttime.tm_hour, uttime.tm_min, uttime.tm_sec, static_cast<int>(fts.tv_nsec));
+      
+                  if(rv != sizeof(cts)-1) 
+                  {
+                     //Something is very wrong.  Keep going to try to get it on disk.
+                     log<software_alert>({__FILE__,__LINE__, errno, rv, "did not write enough chars to timestamp"}); 
+                  }
+   
+                  std::string fname = m_fileSaveDir + "/" + m_configName + "_" + m_stateString + "__T" + cts + ".fits";  
+                  
+                  mx::fits::fitsFile<float> ff;
+                  ff.write(fname, m_avgImage);
+                  log<text_log>("Wrote " + fname);
+
+               }   
+            }
+         }
       }
    }
    else
@@ -645,7 +780,7 @@ int shmimIntegrator::allocate(const darkShmimT & dummy)
    static_cast<void>(dummy); //be unused
    
    std::unique_lock<std::mutex> lock(m_indiMutex);
-   
+
    if(darkMonitorT::m_width != shmimMonitorT::m_width || darkMonitorT::m_height != shmimMonitorT::m_height)
    {
       m_darkSet = false;
@@ -691,7 +826,7 @@ int shmimIntegrator::allocate(const dark2ShmimT & dummy)
    static_cast<void>(dummy); //be unused
    
    std::unique_lock<std::mutex> lock(m_indiMutex);
-   
+
    if(dark2MonitorT::m_width != shmimMonitorT::m_width || dark2MonitorT::m_height != shmimMonitorT::m_height)
    {
       m_dark2Set = false;
@@ -731,15 +866,81 @@ int shmimIntegrator::processImage( void * curr_src,
    return 0;
 }
 
+inline
+int shmimIntegrator::findMatchingDark()
+{
+   std::vector<std::string> fnames = mx::ioutils::getFileNames(m_fileSaveDir, m_configName, "", ".fits");
+
+   //getFileNames sorts, so these will be in oldest to newest order by lexical timestamp sort
+   //So we search in reverse to always pick newest
+   long N = fnames.size();
+   for(long n = N-1; n >= 0; --n)
+   {
+      std::string fn = mx::ioutils::pathStem(fnames[n]);
+
+      if(fn.size() < m_configName.size()+1) continue;
+
+      size_t st = m_configName.size()+1;
+      size_t ed = fn.find("__T");
+      if(ed == std::string::npos || ed - st < 2) continue;
+      std::string stateStr = fn.substr(st,ed-st);
+
+      if(stateStr == m_stateString)
+      {
+         mx::fits::fitsFile<float> ff;
+         ff.read(m_avgImage, fnames[n]);
+
+         if(m_avgImage.rows() != shmimMonitorT::m_width || m_avgImage.cols() != shmimMonitorT::m_height)
+         {
+            //Means the camera has changed but stream hasn't caught up
+            //(This happens on startup before stream connection completes.)  
+
+            // And possibly that we haven't turned the shmimMonitor on yet by switching to OPERATING
+            if( shmimMonitorT::m_width == 0 && shmimMonitorT::m_height == 0)
+            {
+               m_updated = true;
+               shmimMonitorT::m_width = m_avgImage.rows();
+               shmimMonitorT::m_height = m_avgImage.cols();
+               m_reconfig = true;
+               
+            }
+            else
+            {
+               m_imageValid = false;
+               m_stateStringChanged = true; //So we let appLogic try again next time around.
+               continue;
+            }
+         }
+
+         //Now tell the f.g. to get going
+         if(sem_post(&m_smSemaphore) < 0)
+         {
+            log<software_critical>({__FILE__, __LINE__, errno, 0, "Error posting to semaphore"});
+            return -1;
+         }
+         m_imageValid = true;
+         m_stateStringChanged = false;
+         log<text_log>("loaded last matching dark from disk", logPrio::LOG_NOTICE);
+         return 0;
+      }
+   }
+
+   m_imageValid = false;
+   m_stateStringChanged = false; //stop trying b/c who else is going to add a dark?
+   log<text_log>("dark is not valid", logPrio::LOG_WARNING);
+
+   return 0;
+}
 
 inline
 int shmimIntegrator::configureAcquisition()
 {
    std::unique_lock<std::mutex> lock(m_indiMutex);
-   
-   if(shmimMonitorT::m_width==0 || shmimMonitorT::m_height==0 || shmimMonitorT::m_dataType == 0)
+
+   if(shmimMonitorT::m_width==0 || shmimMonitorT::m_height==0)
    {
       //This means we haven't connected to the stream to average. so wait.
+      lock.unlock(); //don't hold the lock for a whole second.
       sleep(1);
       return -1;
    }
@@ -748,16 +949,12 @@ int shmimIntegrator::configureAcquisition()
    frameGrabberT::m_height = shmimMonitorT::m_height;
    frameGrabberT::m_dataType = _DATATYPE_FLOAT;
    
-   std::cerr << "shmimMonitorT::m_dataType: " << (int) shmimMonitorT::m_dataType << "\n";
-   std::cerr << "frameGrabberT::m_dataType: " << (int) frameGrabberT::m_dataType << "\n";
-   
    return 0;
 }
 
 inline
 int shmimIntegrator::startAcquisition()
 {
-   state(stateCodes::OPERATING);
    return 0;
 }
 
@@ -911,17 +1108,26 @@ INDI_NEWCALLBACK_DEFN(shmimIntegrator, m_indiP_startAveraging)(const pcf::IndiPr
    
    if( ipRecv["toggle"].getSwitchState() == pcf::IndiElement::Off)
    {
-      m_running = false;
-      state(stateCodes::READY);
       std::unique_lock<std::mutex> lock(m_indiMutex);
+
+      m_running = false;
+      
+      state(stateCodes::READY);
+      
       updateSwitchIfChanged(m_indiP_startAveraging, "toggle", pcf::IndiElement::Off, INDI_IDLE);
    }
    
    if( ipRecv["toggle"].getSwitchState() == pcf::IndiElement::On)
    {
-      m_running = true;
-      state(stateCodes::OPERATING);
       std::unique_lock<std::mutex> lock(m_indiMutex);
+
+      if(m_fileSaver && !m_continuous) m_stateStringChanged = false; //We reset this here so we can detect a change at the end of the integration
+      
+      m_stateStringValidOnStart = m_stateStringValid;
+      m_running = true;      
+      
+      state(stateCodes::OPERATING);
+      
       updateSwitchIfChanged(m_indiP_startAveraging, "toggle", pcf::IndiElement::On, INDI_BUSY);
    }
    return 0;
@@ -941,7 +1147,7 @@ INDI_SETCALLBACK_DEFN( shmimIntegrator, m_indiP_fpsSource )(const pcf::IndiPrope
    }
    
    std::lock_guard<std::mutex> guard(m_indiMutex);
-   
+
    realT fps = ipRecv["current"].get<float>();
    
    if(fps != m_fps)
@@ -949,6 +1155,49 @@ INDI_SETCALLBACK_DEFN( shmimIntegrator, m_indiP_fpsSource )(const pcf::IndiPrope
       m_fps = fps;
       std::cout << "Got fps: " << m_fps << "\n";   
       shmimMonitorT::m_restart = true;
+   }
+
+   return 0;
+}
+
+INDI_SETCALLBACK_DEFN( shmimIntegrator, m_indiP_stateSource )(const pcf::IndiProperty &ipRecv)
+{
+   if( ipRecv.getName() != m_indiP_stateSource.getName())
+   {
+      log<software_error>({__FILE__, __LINE__, "Invalid INDI property."});
+      return -1;
+   }
+   
+   if( ipRecv.find("valid") == true ) 
+   {
+      bool stateStringValid;
+      if(ipRecv["valid"].get<std::string>() == "yes") stateStringValid = true;
+      else stateStringValid = false;
+
+      if(stateStringValid != m_stateStringValid) m_stateStringChanged = true;
+
+      m_stateStringValid = stateStringValid;      
+   }
+
+   if( ipRecv.find("current") != true )
+   {
+      return 0;
+   }
+
+
+   
+   std::lock_guard<std::mutex> guard(m_indiMutex);
+   
+   std::string ss = ipRecv["current"].get<std::string>();
+   
+   if(ss != m_stateString)
+   {
+      m_stateString = ss;
+      m_imageValid = false; //This will mark the current dark invalid
+      updateIfChanged(m_indiP_imageValid, "flag", "no");   
+      m_stateStringChanged = true; //We declare it changed.  This can have two effects:
+                                   // 1) if we are not currently integrating, it will start a lookup in appLogic
+                                   // 2) if we are integrating, after it finishes it will not be declared valid and then we'll lookup in appLogic
    }
 
    return 0;

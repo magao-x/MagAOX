@@ -84,6 +84,8 @@ public:
    
    static constexpr bool c_stdCamera_hasShutter = true; ///< app:dev config to tell stdCamera to expose shutter controls
 
+   static constexpr bool c_stdCamera_usesStateString = true; ///< app::dev confg to tell stdCamera to expose the state string property
+
    static constexpr bool c_edtCamera_relativeConfigPath = true; ///< app::dev config to tell edtCamera to use relative path to camera config file
    
    static constexpr bool c_frameGrabber_flippable = false; ///< app:dev config to tell framegrabber these images can not be flipped
@@ -218,6 +220,10 @@ public:
      */
    int setShutter(int sh);
    
+   std::string stateString();
+   
+   bool stateStringValid();
+
    ///@}
    
    /// Reset the EM Protection 
@@ -901,6 +907,29 @@ inline
 int ocam2KCtrl::setShutter(int sh)
 {
    return dssShutter<ocam2KCtrl>::setShutter(sh);
+}
+
+inline
+std::string ocam2KCtrl::stateString()
+{
+   std::string ss;
+
+   ss += m_modeName + "_";
+   ss += std::to_string(m_fps) + "_";
+   ss += std::to_string(m_emGain) + "_";
+   ss += std::to_string(m_ccdTempSetpt);
+
+   return ss;
+}
+
+inline
+bool ocam2KCtrl::stateStringValid()
+{
+   if(state() == stateCodes::OPERATING && m_tempControlOnTarget)
+   {
+      return true;
+   }
+   else return false;
 }
 
 inline 
