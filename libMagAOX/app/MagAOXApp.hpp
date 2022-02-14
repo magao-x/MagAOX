@@ -11,9 +11,6 @@
 #ifndef app_MagAOXApp_hpp
 #define app_MagAOXApp_hpp
 
-//#define DEBUG_TRACE std::cerr << __FILE__ << " " << __LINE__ << "\n"
-#define DEBUG_TRACE
-
 #include <signal.h>
 #include <sys/stat.h>
 #include <sys/syscall.h>
@@ -1346,21 +1343,15 @@ int MagAOXApp<_useINDI>::execute() //virtual
    //----------------------------------------//
    m_log.logThreadStart();
 
-   DEBUG_TRACE;
-
    //Give up to 2 secs to make sure log thread has time to get started and try to open a file.
-   for(int w=0 ; w<4; ++w)
+   int w = 0;
+   while(m_log.logThreadRunning() == false && w < 20)
    {
-      //Sleep for 500 msec
-      //std::this_thread::sleep_for( std::chrono::duration<unsigned long, std::nano>(500000000));
-      //mx::sys::milliSleep(500);
-      sleep(1);
-      DEBUG_TRACE;
-      //Verify that log thread is still running.
-      if(m_log.logThreadRunning() == true) break;
+      //Sleep for 100 msec
+      std::this_thread::sleep_for( std::chrono::duration<unsigned long, std::nano>(100000000));
+      ++w;
    }
-
-   DEBUG_TRACE;
+   
    if(m_log.logThreadRunning() == false)
    {
       //We don't log this, because it won't be logged anyway.
@@ -1368,7 +1359,6 @@ int MagAOXApp<_useINDI>::execute() //virtual
       m_shutdown = 1;
    }
 
-   DEBUG_TRACE;
    //----------------------------------------//
 
    //Install signal handling
@@ -1377,8 +1367,6 @@ int MagAOXApp<_useINDI>::execute() //virtual
       setSigTermHandler();
    }
    
-   DEBUG_TRACE;
-
    //We are not initialized, begin application startup.
    if( m_shutdown == 0 )
    {
@@ -1386,12 +1374,9 @@ int MagAOXApp<_useINDI>::execute() //virtual
       if(appStartup() < 0) m_shutdown = 1;
    }
 
-   DEBUG_TRACE;
-
    //====Begin INDI Communications
    if(m_useINDI && m_shutdown == 0) //if we're using INDI and not already dead, that is
    {
-      DEBUG_TRACE;
       if(startINDI() < 0)
       {
          state(stateCodes::FAILURE);
@@ -1399,12 +1384,9 @@ int MagAOXApp<_useINDI>::execute() //virtual
       }
    }
 
-   DEBUG_TRACE;
-
    //We have to wait for power status to become available
    if(m_powerMgtEnabled && m_shutdown == 0)
    {
-      DEBUG_TRACE;
       int nwaits = 0;
       while(m_powerState < 0 && !m_shutdown)
       {
@@ -1436,8 +1418,6 @@ int MagAOXApp<_useINDI>::execute() //virtual
          }
       }
    }
-
-   DEBUG_TRACE;
 
    //This is the main event loop.
    /* Conditions on entry:

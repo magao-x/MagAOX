@@ -653,7 +653,7 @@ int shmimIntegrator::processImage( void * curr_src,
       ++m_sinceUpdate;
       if(m_sinceUpdate >= m_nAverage)
       {
-         m_avgImage /= m_nAverage;
+         m_avgImage /= m_nAverage; ///\todo should this be /= m_sinceUpdate?
          
          if(m_darkSet && !m_dark2Set) m_avgImage -= m_darkImage;
          else if(!m_darkSet && m_dark2Set) m_avgImage -= m_dark2Image;
@@ -898,20 +898,23 @@ int shmimIntegrator::findMatchingDark()
             // And possibly that we haven't turned the shmimMonitor on yet by switching to OPERATING
             if( shmimMonitorT::m_width == 0 && shmimMonitorT::m_height == 0)
             {
-               m_updated = true;
+               sleep(1); //wait for everything else to get initialized
                shmimMonitorT::m_width = m_avgImage.rows();
                shmimMonitorT::m_height = m_avgImage.cols();
                m_reconfig = true;
-               
             }
             else
             {
+               if(m_running) return 0;
                m_imageValid = false;
                m_stateStringChanged = true; //So we let appLogic try again next time around.
-               continue;
+               return 0;
             }
          }
 
+         if(m_running) return 0;
+
+         m_updated = true;
          //Now tell the f.g. to get going
          if(sem_post(&m_smSemaphore) < 0)
          {
@@ -924,6 +927,8 @@ int shmimIntegrator::findMatchingDark()
          return 0;
       }
    }
+
+   if(m_running) return 0;
 
    m_imageValid = false;
    m_stateStringChanged = false; //stop trying b/c who else is going to add a dark?
