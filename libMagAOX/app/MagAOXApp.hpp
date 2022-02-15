@@ -11,7 +11,6 @@
 #ifndef app_MagAOXApp_hpp
 #define app_MagAOXApp_hpp
 
-
 #include <signal.h>
 #include <sys/stat.h>
 #include <sys/syscall.h>
@@ -1345,20 +1344,19 @@ int MagAOXApp<_useINDI>::execute() //virtual
    m_log.logThreadStart();
 
    //Give up to 2 secs to make sure log thread has time to get started and try to open a file.
-   for(int w=0;w<4;++w)
+   int w = 0;
+   while(m_log.logThreadRunning() == false && w < 20)
    {
-      //Sleep for 500 msec
-      std::this_thread::sleep_for( std::chrono::duration<unsigned long, std::nano>(500000));
-
-      //Verify that log thread is still running.
-      if(m_log.logThreadRunning() == true) break;
+      //Sleep for 100 msec
+      std::this_thread::sleep_for( std::chrono::duration<unsigned long, std::nano>(100000000));
+      ++w;
    }
-
+   
    if(m_log.logThreadRunning() == false)
    {
       //We don't log this, because it won't be logged anyway.
       std::cerr << "\nCRITICAL: log thread not running.  Exiting.\n\n";
-        m_shutdown = 1;
+      m_shutdown = 1;
    }
 
    //----------------------------------------//

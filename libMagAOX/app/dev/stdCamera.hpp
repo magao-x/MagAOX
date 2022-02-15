@@ -169,6 +169,19 @@ int loadCameraConfig( cameraConfigMap & ccmap, ///< [out] the map in which to pl
   * int setShutter(int); 
   * \endcode
   *
+  * State:
+  * A static configuration variable must be defined in derivedT as
+  * \code
+  * static constexpr bool c_stdCamera_usesStateString = true; //or: false
+  * \endcode
+  * which determines whether the class provides a state string for dark management.
+  * If true, the following functions must be defined in derivedT:
+  * \code
+  * std::string stateString(); //String capturing the current state.  Must not include "__T".
+  * bool stateStringValid(); //Whether or not the current state string is valid, i.e. not changing.
+  * \endcode
+  * 
+  * 
   * The derived class must implement:
   * \code
   * int powerOnDefaults(); // called on power-on after powerOnWaitElapsed has occurred.
@@ -376,6 +389,13 @@ protected:
  
    ///@}
    
+   /** \name State String
+     * The State string is exposed if derivedT::c_stdCamera_usesStateString is true.
+     * @{
+     */  
+   pcf::IndiProperty m_indiP_stateString;
+   ///@}
+
 public:
 
    ///Destructor, destroys the PdvDev structure
@@ -509,11 +529,6 @@ protected:
    pcf::IndiProperty m_indiP_mode; ///< Property used to report the current mode
    
    pcf::IndiProperty m_indiP_reconfig; ///< Request switch which forces the framegrabber to go through the reconfigure process.
-   
-  
-   
-   
-   
    
 public:
 
@@ -831,6 +846,30 @@ public:
      */
    int newCallBack_shutter( const pcf::IndiProperty &ipRecv /**< [in] the INDI property sent with the the new property request.*/);
    
+   /// Interface to stateString when the derivedT provides it
+   /** Tag-dispatch resolution of c_stdCamera_usesStateString==true will call this function.
+     * Calls derivedT::stateString. 
+     */
+   std::string stateString( const mx::meta::trueFalseT<true> & t);
+   
+   /// Interface to stateString when the derivedT does not provide it
+   /** Tag-dispatch resolution of c_stdCamera_usesStateString==false will call this function.
+     * returns "". 
+     */
+   std::string stateString( const mx::meta::trueFalseT<false> & f);
+
+   /// Interface to stateStringValid when the derivedT provides it
+   /** Tag-dispatch resolution of c_stdCamera_usesStateString==true will call this function.
+     * Calls derivedT::stateStringValid. 
+     */
+   bool stateStringValid( const mx::meta::trueFalseT<true> & t);
+   
+   /// Interface to stateStringValid when the derivedT does not provide it
+   /** Tag-dispatch resolution of c_stdCamera_usesStateString==false will call this function.
+     * returns false. 
+     */
+   bool stateStringValid( const mx::meta::trueFalseT<false> & f);
+
    /// Update the INDI properties for this device controller
    /** You should call this once per main loop.
      * It is not called automatically.
@@ -1041,7 +1080,6 @@ int stdCamera<derivedT>::appStartup()
          #endif
          return -1;
       }
-      
    }
    else if(derivedT::c_stdCamera_temp)
    {
@@ -1341,8 +1379,22 @@ int stdCamera<derivedT>::appStartup()
       
    }
    
+   if(derivedT::c_stdCamera_usesStateString)
+   {
+      derived().createROIndiText( m_indiP_stateString, "state_string", "current", "State String", "State", "String");
+      m_indiP_stateString.add(pcf::IndiElement("valid"));
+      m_indiP_stateString["valid"] = "no";
+      if( derived().registerIndiPropertyReadOnly( m_indiP_stateString ) < 0)
+      {
+         #ifndef STDCAMERA_TEST_NOLOG
+         derivedT::template log<software_error>({__FILE__,__LINE__});
+         #endif
+         return -1;
+      }
+   }
+
    return 0;
-}
+}//int stdCamera<derivedT>::appStartup()
 
 template<class derivedT>
 int stdCamera<derivedT>::appLogic()
@@ -2478,6 +2530,34 @@ int stdCamera<derivedT>::newCallBack_shutter( const pcf::IndiProperty &ipRecv )
 }
 
 template<class derivedT>
+std::string stdCamera<derivedT>::stateString( const mx::meta::trueFalseT<true> & t)
+{
+   static_cast<void>(t);
+   return derived().stateString();
+}
+
+template<class derivedT>
+std::string stdCamera<derivedT>::stateString( const mx::meta::trueFalseT<false> & f)
+{
+   static_cast<void>(f);
+   return "";
+}
+
+template<class derivedT>
+bool stdCamera<derivedT>::stateStringValid( const mx::meta::trueFalseT<true> & t)
+{
+   static_cast<void>(t);
+   return derived().stateStringValid();
+}
+
+template<class derivedT>
+bool stdCamera<derivedT>::stateStringValid( const mx::meta::trueFalseT<false> & f)
+{
+   static_cast<void>(f);
+   return false;
+}
+
+template<class derivedT>
 int stdCamera<derivedT>::updateINDI()
 {
    if( !derived().m_indiDriver ) return 0;
@@ -2608,6 +2688,19 @@ int stdCamera<derivedT>::updateINDI()
       }
    }
    
+   if(derivedT::c_stdCamera_usesStateString)
+   {
+      mx::meta::trueFalseT<derivedT::c_stdCamera_usesStateString> tf;
+      derived().updateIfChanged(m_indiP_stateString, "current", stateString(tf), INDI_IDLE);
+      if(stateStringValid(tf))
+      {
+         derived().updateIfChanged(m_indiP_stateString, "valid", "yes", INDI_IDLE);
+      }
+      else
+      {
+         derived().updateIfChanged(m_indiP_stateString, "valid", "no", INDI_IDLE);
+      }
+   }
    return 0;
 }
 

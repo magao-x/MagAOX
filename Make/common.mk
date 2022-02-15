@@ -31,6 +31,11 @@ endif
 CFLAGS += -D_XOPEN_SOURCE=700
 CXXFLAGS += -D_XOPEN_SOURCE=700
 
+#Need this on COS-7, doesn't hurt elsewhere.
+CXXFLAGS += -DMX_OLD_GSL
+
+
+
 LIB_PATH ?= $(PREFIX)/lib
 INCLUDE_PATH ?= $(PREFIX)/include
 LIB_SOFA ?= $(LIB_PATH)/libsofa_c.a

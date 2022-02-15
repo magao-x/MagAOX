@@ -236,6 +236,9 @@
             <layout class="QVBoxLayout" name="vl_gainText" stretch="1,1,2">
              <item>
               <widget class="QLCDNumber" name="lcd_gain">
+               <property name="smallDecimalPoint">
+                <bool>false</bool>
+               </property>
                <property name="digitCount">
                 <number>5</number>
                </property>

@@ -114,9 +114,15 @@ void updateIfChanged( pcf::IndiProperty & p,   ///< [in/out] The property contai
          indiDriver->sendSetProperty (p);
       }
    }
+   catch(std::exception & e)
+   {
+      std::cerr << "Exception caught at " << __FILE__ << " " << __LINE__ << " ";
+      std::cerr << "from " << p.getName() << "." << el << ": ";
+      std::cerr << e.what() << "\n";
+   }
    catch(...)
    {
-      std::cerr << "INDI Exception at " << __FILE__ << " " << __LINE__ << "\n";
+      std::cerr << "Exception caught at " << __FILE__ << " " << __LINE__ << " ";
       std::cerr << "from " << p.getName() << "." << el << "\n";
    }
    
@@ -166,12 +172,17 @@ void updateIfChanged( pcf::IndiProperty & p,   ///< [in/out] The property contai
          indiDriver->sendSetProperty (p);
       }
    }
+   catch(std::exception & e)
+   {
+      std::cerr << "Exception caught at " << __FILE__ << " " << __LINE__ << " ";
+      std::cerr << "from " << p.getName() << "." << els[n] << ": ";
+      std::cerr << e.what() << "\n";
+   }
    catch(...)
    {
-      std::cerr << "INDI Exception at " << __FILE__ << " " << __LINE__ << "\n";
+      std::cerr << "Exception caught at " << __FILE__ << " " << __LINE__ << " ";
       std::cerr << "from " << p.getName() << "." << els[n] << "\n";
-   }
-   
+   }   
 }
 
 /// Update the value of the INDI element, but only if it has changed.
