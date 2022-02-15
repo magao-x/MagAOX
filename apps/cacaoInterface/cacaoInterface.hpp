@@ -223,6 +223,13 @@ public:
      */ 
    int loopOff();
    
+   /// Zero the loop control channel
+   /**
+     * \returns 0 on success
+     * \returns -1 on an error
+     */ 
+   int loopZero();
+
    /// @}
    
    /** \name File Monitoring Thread
@@ -255,6 +262,7 @@ public:
    pcf::IndiProperty m_indiP_modes;
 
    pcf::IndiProperty m_indiP_loopState;
+   pcf::IndiProperty m_indiP_loopZero;
    pcf::IndiProperty m_indiP_loopGain;
    pcf::IndiProperty m_indiP_multCoeff;
    pcf::IndiProperty m_indiP_maxLim;
@@ -264,6 +272,7 @@ public:
    std::vector<pcf::IndiProperty> m_indiP_blockLimits;
    
    INDI_NEWCALLBACK_DECL(cacaoInterface, m_indiP_loopState);
+   INDI_NEWCALLBACK_DECL(cacaoInterface, m_indiP_loopZero);
    INDI_NEWCALLBACK_DECL(cacaoInterface, m_indiP_loopGain);
    INDI_NEWCALLBACK_DECL(cacaoInterface, m_indiP_multCoeff);
    INDI_NEWCALLBACK_DECL(cacaoInterface, m_indiP_maxLim);
@@ -368,11 +377,14 @@ int cacaoInterface::appStartup()
    indi::addNumberElement(m_indiP_modes, "blocks", 0, 1, 99, "Mode Blocks");
    registerIndiPropertyReadOnly(m_indiP_modes);
 
+   createStandardIndiToggleSw( m_indiP_loopProcesses, "loop_processes", "Loop Processes", "Loop Controls");
+   registerIndiPropertyReadOnly( m_indiP_loopProcesses);  
+
    createStandardIndiToggleSw( m_indiP_loopState, "loop_state", "Loop State", "Loop Controls");
    registerIndiPropertyNew( m_indiP_loopState, INDI_NEWCALLBACK(m_indiP_loopState) );  
    
-   createStandardIndiToggleSw( m_indiP_loopProcesses, "loop_processes", "Loop Processes", "Loop Controls");
-   registerIndiPropertyReadOnly( m_indiP_loopProcesses);  
+   createStandardIndiRequestSw( m_indiP_loopZero, "loop_zero", "Loop Zero", "Loop Controls");
+   registerIndiPropertyNew( m_indiP_loopZero,INDI_NEWCALLBACK(m_indiP_loopZero) );  
    
    createStandardIndiNumber<float>( m_indiP_loopGain, "loop_gain", 0.0, 10.0, 0.01, "%0.3f", "Loop Gain", "Loop Controls");
    registerIndiPropertyNew( m_indiP_loopGain, INDI_NEWCALLBACK(m_indiP_loopGain) );  
@@ -809,7 +821,7 @@ int cacaoInterface::setGain()
       return log<software_error, -1>({__FILE__, __LINE__, errno, "cacaoInterface::setGain error updating gain status"});
    }
    
-   //tmux send-keys -t aol${LOOPNUMBER}-ctr "aolsetgain ${loopgain}" C-m
+   //tmux send-keys -t " + loop + "-ctr "aolsetgain ${loopgain}" C-m
    if(tmuxSendKeys( "aol" + m_loopNumber + "-ctr", "aolsetgain " + std::to_string(m_gain_target)) < 0)
    {
       return log<software_error, -1>({__FILE__, __LINE__, errno, "cacaoInterface::setGain error from tmuxSendKeys"});
@@ -837,7 +849,7 @@ int cacaoInterface::setBlockGain( int n,
       return log<software_error, -1>({__FILE__, __LINE__, errno, "cacaoInterface::setBlockGain error updating gain status"});
    }
 
-   //tmux send-keys -t aol${LOOPNUMBER}-ctr "aolsetmbgain ${gi} ${gainb[10#${gi}]} 1" C-m
+   //tmux send-keys -t " + loop + "-ctr "aolsetmbgain ${gi} ${gainb[10#${gi}]} 1" C-m
    if(tmuxSendKeys( "aol" + m_loopNumber + "-ctr", std::string("aolsetmbgain ") + gi + " " + std::to_string(g) + " 1") < 0)
    {
       return log<software_error, -1>({__FILE__, __LINE__, errno, "cacaoInterface::setBlockGain error from tmuxSendKeys"});
@@ -858,7 +870,7 @@ int cacaoInterface::setMultCoeff()
       return log<software_error, -1>({__FILE__, __LINE__, errno, "cacaoInterface::setMultCoeff error updating mult coeff status"});
    }
    
-   //tmux send-keys -t aol${LOOPNUMBER}-ctr "aolsetmult ${loopmultcoeff}" C-m
+   //tmux send-keys -t " + loop + "-ctr "aolsetmult ${loopmultcoeff}" C-m
    if(tmuxSendKeys( "aol" + m_loopNumber + "-ctr", "aolsetmult " + std::to_string(m_multCoeff_target)) < 0)
    {
       return log<software_error, -1>({__FILE__, __LINE__, errno, "cacaoInterface::setMultCoeff error from tmuxSendKeys"});
@@ -886,7 +898,7 @@ int cacaoInterface::setBlockMC( int n,
       return log<software_error, -1>({__FILE__, __LINE__, errno, "cacaoInterface::setBlockMC error updating gain status"});
    }
 
-   //tmux send-keys -t aol${LOOPNUMBER}-ctr "aolsetmultfb ${gi} ${multfb[10#${gi}]}" C-m
+   //tmux send-keys -t " + loop + "-ctr "aolsetmultfb ${gi} ${multfb[10#${gi}]}" C-m
    if(tmuxSendKeys( "aol" + m_loopNumber + "-ctr", std::string("aolsetmultfb ") + gi + " " + std::to_string(mc)) < 0)
    {
       return log<software_error, -1>({__FILE__, __LINE__, errno, "cacaoInterface::setBlockMC error from tmuxSendKeys"});
@@ -906,7 +918,7 @@ int cacaoInterface::setMaxLim()
       return log<software_error, -1>({__FILE__, __LINE__, errno, "cacaoInterface::setMaxLim error updating max lim status"});
    }
    
-   //tmux send-keys -t aol${LOOPNUMBER}-ctr "aolsetmaxlim ${loopmaxlim}" C-m
+   //tmux send-keys -t " + loop + "-ctr "aolsetmaxlim ${loopmaxlim}" C-m
    if(tmuxSendKeys( "aol" + m_loopNumber + "-ctr", "aolsetmaxlim " + std::to_string(m_maxLim_target)) < 0)
    {
       return log<software_error, -1>({__FILE__, __LINE__, errno, "cacaoInterface::setMaxLim error from tmuxSendKeys"});
@@ -933,7 +945,7 @@ int cacaoInterface::setBlockLimit( int n,
       return log<software_error, -1>({__FILE__, __LINE__, errno, "cacaoInterface::setBlockLim error updating gain status"});
    }
 
-   //tmux send-keys -t aol${LOOPNUMBER}-ctr "aolsetlimitb ${gi} ${limitb[10#${gi}]}" C-m
+   //tmux send-keys -t " + loop + "-ctr "aolsetlimitb ${gi} ${limitb[10#${gi}]}" C-m
    if(tmuxSendKeys( "aol" + m_loopNumber + "-ctr", std::string("aolsetlimitb ") + gi + " " + std::to_string(l)) < 0)
    {
       return log<software_error, -1>({__FILE__, __LINE__, errno, "cacaoInterface::setBlockLim error from tmuxSendKeys"});
@@ -961,7 +973,7 @@ int cacaoInterface::loopOn()
    
    //echo "./aolconfscripts/aollog -e \"$LOOPNAME\" \"LOOP ON [gain = ${loopgain}   maxlim = ${loopmaxlim}   multcoeff = ${loopmultcoeff}]\"" >> $scriptfile
    
-   //echo "tmux send-keys -t aol${LOOPNUMBER}-ctr \"aolon\" C-m" >> $scriptfile
+   //echo "tmux send-keys -t " + loop + "-ctr \"aolon\" C-m" >> $scriptfile
    if(tmuxSendKeys( "aol" + m_loopNumber + "-ctr", "aolon") < 0)
    {
       return log<software_error, -1>({__FILE__, __LINE__, errno, "cacaoInterface::loopOn error from tmuxSendKeys"});
@@ -999,7 +1011,7 @@ int cacaoInterface::loopOff()
    
    //echo "./aolconfscripts/aollog -e \"$LOOPNAME\" \"LOOP OFF\"" >> $scriptfile
    
-   //echo "tmux send-keys -t aol${LOOPNUMBER}-ctr \"aoloff\" C-m" >> $scriptfile
+   //echo "tmux send-keys -t " + loop + "-ctr \"aoloff\" C-m" >> $scriptfile
    if(tmuxSendKeys( "aol" + m_loopNumber + "-ctr", "aoloff") < 0)
    {
       return log<software_error, -1>({__FILE__, __LINE__, errno, "cacaoInterface::loopOff error from tmuxSendKeys"});
@@ -1021,6 +1033,48 @@ int cacaoInterface::loopOff()
    }*/
    
    return 0;
+   
+}
+
+int cacaoInterface::loopZero()
+{
+   //This implements Z) in aolconfscripts/aolconf_menucontrolloop
+   std::string loop = "aol" + m_loopNumber;
+
+   std::string cmd = m_loopDir + "AOloopControl << EOF\n";
+   cmd += "readshmim " + loop + "_DMmode_cmd\n";
+   cmd += "imzero " + loop + "_DMmode_cmd\n";
+   
+   cmd += "readshmim " + loop + "_modeval\n";
+   cmd += "imzero " + loop + "_modeval\n";
+
+   cmd += "readshmim " + loop + "_modeval_dm\n";
+   cmd += "imzero " + loop + "_modeval_dm\n";
+
+   cmd += "readshmim " + loop + "_modeval_dm_C\n";
+   cmd += "imzero " + loop + "_modeval_dm_C\n";
+
+   cmd += "readshmim " + loop + "_modeval_ol\n";
+   cmd += "imzero " + loop + "_modeval_ol\n";
+
+   cmd += "readshmim " + loop + "_modeval_dm_now\n";
+   cmd += "imzero " + loop + "_modeval_dm_now\n";
+
+   cmd += "readshmim " + loop + "_modeval_dm_now_filt\n";
+   cmd += "imzero " + loop + "_modeval_dm_now_filt\n";
+
+   cmd += "readshmim " + loop + "_dmC\n";
+   cmd += "imzero " + loop + "_dmC\n";
+   cmd += "readshmim " + loop + "_dmC\n";
+   cmd += "imzero " + loop + "_dmC\n";
+
+   cmd += "exit\n";
+   cmd += "EOF\n";
+   
+   int rv = system(cmd.c_str());
+
+   if(rv == 0) return log<text_log,0>("loop zeroed", logPrio::LOG_NOTICE);
+   else return log<software_error,-1>({__FILE__, __LINE__, "error zeroing loop"});
    
 }
 
@@ -1204,6 +1258,27 @@ INDI_NEWCALLBACK_DEFN(cacaoInterface, m_indiP_loopGain )(const pcf::IndiProperty
    return setGain();
 }
 
+INDI_NEWCALLBACK_DEFN(cacaoInterface, m_indiP_loopZero )(const pcf::IndiProperty &ipRecv)
+{
+   if(ipRecv.getName() != m_indiP_loopZero.getName())
+   {
+      log<software_error>({__FILE__,__LINE__, "wrong INDI property received."});
+      return -1;
+   }
+      
+   if(!ipRecv.find("request")) return 0;
+           
+   std::unique_lock<std::mutex> lock(m_indiMutex);
+      
+   if( ipRecv["request"].getSwitchState() == pcf::IndiElement::On)
+   {
+      return loopZero();
+   }   
+   std::cerr << "off?\n";
+   
+   return 0;
+}
+
 INDI_NEWCALLBACK_DEFN(cacaoInterface, m_indiP_multCoeff )(const pcf::IndiProperty &ipRecv)
 {
    if(ipRecv.getName() != m_indiP_multCoeff.getName())
@@ -1289,8 +1364,6 @@ int cacaoInterface::newCallBack_blockGains( const pcf::IndiProperty &ipRecv )
 
    int n = std::stoi(ipRecv.getName().substr(5,2));
 
-   std::cout << "got: " << ipRecv.getName() << " " << n << "\n";
-
    float current = -1;
    float target = -1;
 
@@ -1310,8 +1383,6 @@ int cacaoInterface::newCallBack_blockGains( const pcf::IndiProperty &ipRecv )
    {
       return 0;
    }
-
-   std::cerr << "wants: " << target << "\n";
 
    updateIfChanged(m_indiP_blockGains[n], "target", target);
 
@@ -1333,8 +1404,6 @@ int cacaoInterface::newCallBack_blockMCs( const pcf::IndiProperty &ipRecv )
 
    int n = std::stoi(ipRecv.getName().substr(5,2));
 
-   std::cout << "got: " << ipRecv.getName() << " " << n << "\n";
-
    float current = -1;
    float target = -1;
 
@@ -1354,8 +1423,6 @@ int cacaoInterface::newCallBack_blockMCs( const pcf::IndiProperty &ipRecv )
    {
       return 0;
    }
-
-   std::cerr << "wants: " << target << "\n";
 
    updateIfChanged(m_indiP_blockMCs[n], "target", target);
 
@@ -1377,8 +1444,6 @@ int cacaoInterface::newCallBack_blockLimits( const pcf::IndiProperty &ipRecv )
 
    int n = std::stoi(ipRecv.getName().substr(5,2));
 
-   std::cout << "got: " << ipRecv.getName() << " " << n << "\n";
-
    float current = -1;
    float target = -1;
 
@@ -1398,8 +1463,6 @@ int cacaoInterface::newCallBack_blockLimits( const pcf::IndiProperty &ipRecv )
    {
       return 0;
    }
-
-   std::cerr << "wants: " << target << "\n";
 
    updateIfChanged(m_indiP_blockLimits[n], "target", target);
 
