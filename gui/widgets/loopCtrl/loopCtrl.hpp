@@ -87,6 +87,25 @@ loopCtrl::loopCtrl( std::string & procName,
    ui.lcd_gain->setProperty("isStatus", true);
    ui.lcd_multcoeff->setProperty("isStatus", true);
 
+   setXwFont(ui.label_LoopName);
+   setXwFont(ui.label_loop);
+   setXwFont(ui.label_loop_state);
+   setXwFont(ui.button_LoopZero);
+   setXwFont(ui.label_gain);
+   setXwFont(ui.lcd_gain);
+   setXwFont(ui.lineEdit_gain);
+   setXwFont(ui.button_zeroGain);
+   setXwFont(ui.button_gainUp);
+   setXwFont(ui.button_gainDown);
+   setXwFont(ui.button_gainScale);
+   setXwFont(ui.label_multcoeff);
+   setXwFont(ui.lcd_multcoeff);
+   setXwFont(ui.lineEdit_multcoeff);
+   setXwFont(ui.button_oneMultCoeff);
+   setXwFont(ui.button_multcoeffUp);
+   setXwFont(ui.button_multcoeffDown);
+   setXwFont(ui.button_multcoeffScale);
+
    onDisconnect();
 }
    
