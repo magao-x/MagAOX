@@ -474,7 +474,15 @@ void loopCtrl::on_slider_loop_sliderReleased()
 
 void loopCtrl::on_button_LoopZero_pressed()
 {
-   std::cerr << "loop zero\n";
+   pcf::IndiProperty ipFreq(pcf::IndiProperty::Switch);
+   
+   ipFreq.setDevice(m_procName);
+   ipFreq.setName("loop_zero");
+   ipFreq.add(pcf::IndiElement("request"));
+   
+   ipFreq["request"] = pcf::IndiElement::On;
+   
+   sendNewProperty(ipFreq);
 }
 
 } //namespace xqt
