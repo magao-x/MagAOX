@@ -32,6 +32,7 @@ int main(int argc, char *argv[])
 
    xqt::loopCtrl loop(procName);
    mgr.addSubscriber(&loop);
+   //exit(0);
    mgr.activate();
 
    loop.show();
