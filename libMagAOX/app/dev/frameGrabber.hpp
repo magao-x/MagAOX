@@ -398,7 +398,7 @@ int frameGrabber<derivedT>::appLogic()
          
          double a0 = m_atimes.at(refEntry, 0).tv_sec + ((double) m_atimes.at(refEntry, 0).tv_nsec)/1e9;
          double w0 = m_wtimes.at(refEntry, 0).tv_sec + ((double) m_wtimes.at(refEntry, 0).tv_nsec)/1e9;
-         for(size_t n=1; n < m_atimesD.size(); ++n)
+         for(size_t n=1; n <= m_atimesD.size(); ++n)
          {
             double a = m_atimes.at(refEntry, n).tv_sec + ((double) m_atimes.at(refEntry, n).tv_nsec)/1e9;
             double w = m_wtimes.at(refEntry, n).tv_sec + ((double) m_wtimes.at(refEntry, n).tv_nsec)/1e9;

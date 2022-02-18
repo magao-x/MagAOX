@@ -120,6 +120,9 @@ mkdir -p /dev/cpuset/camwfs
 /bin/echo 1 > /dev/cpuset/camwfs/cpuset.cpu_exclusive
 /bin/echo 0-1 > /dev/cpuset/camwfs/cpuset.mems
 
+#and we move the EDT irq to camwfs
+/bin/echo 18 > /proc/irq/208/smp_affinity_list
+
 #Woofer
 mkdir -p /dev/cpuset/dm00comb
 /bin/echo 19 > /dev/cpuset/dm00comb/cpuset.cpus

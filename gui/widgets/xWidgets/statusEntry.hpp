@@ -101,10 +101,10 @@ public:
      */
    bool highlightChanges();
 
-
    virtual void subscribe();
              
    virtual void onConnect();
+   
    virtual void onDisconnect();
    
    void handleDefProperty( const pcf::IndiProperty & ipRecv /**< [in] the property which has changed*/);
