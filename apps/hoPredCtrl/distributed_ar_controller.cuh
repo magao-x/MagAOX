@@ -19,7 +19,8 @@ class DistributedAutoRegressiveController{
 		Matrix *command_buffer;
 		Matrix *phi;
 		Matrix *xf;
-
+		
+		Matrix* newest_measurement;
 		Matrix *command;
 		Matrix *delta_command;
 		Matrix *H, *H11, *H12, *invH11, *invH11sub, *controller, *full_controller;

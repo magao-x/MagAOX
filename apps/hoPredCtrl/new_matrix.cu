@@ -152,6 +152,11 @@ void Matrix::set_to_zero(){
 void Matrix::add(Matrix* other, float value){
 	cublasXaxpy(*handle, total_size_, value, other->gpu_data[0], gpu_data[0]);
 }
+
+void Matrix::scale(float scale_param){
+	cublasXscal(*handle, total_size_, scale_param, gpu_data[0]);
+}
+
 void Matrix::subtract(Matrix* other, float value){
 	add(other, value);
 }
@@ -404,13 +409,12 @@ Matrix* make_random_binary_matrix(float standard_deviation, int nrows, int ncols
 		for(size_t i=0; i<nrows; i++){
 			for(size_t j=0; j<ncols; j++){
 				float new_val = distribution(generator);
-				
 				if(new_val > 0){
 					new_matrix->set(standard_deviation, i, j, k);
 				}else{
 					new_matrix->set(-standard_deviation, i, j, k);
 				}
-				
+			
 			}
 		}
 	}

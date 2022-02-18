@@ -30,7 +30,7 @@ class PredictiveController{
 		unsigned long long int m_exploration_index;
 
 		Matrix* m_wfs_measurement;	// contains the new wavefront sensor measurement
-		Matrix* m_measurement; 		// contains the new wfs measurement in modal space
+		 		// contains the new wfs measurement in modal space
 		Matrix* m_exploration_signal;
 		Matrix* m_command;	
 		Matrix* m_interaction_matrix;
@@ -39,7 +39,8 @@ class PredictiveController{
 	protected:
 
 	public:
-
+		Matrix* m_measurement;
+		
 		PredictiveController(int num_history, int num_future, int num_modes, int num_measurements, float gamma, float lambda, float P0);
 		~PredictiveController();
 

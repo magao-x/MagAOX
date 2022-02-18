@@ -142,6 +142,15 @@ static inline cublasStatus_t cublasXmatinvBatched(cublasHandle_t handle,
 
 /*
 */
+static inline cublasStatus_t cublasXscal(cublasHandle_t handle, int n, float alpha, float *x)
+{
+	return cublasSscal(handle, n, &alpha, x, 1);
+}
+static inline cublasStatus_t cublasXscal(cublasHandle_t handle, int n, double alpha, double *x)
+{
+	return cublasDscal(handle, n, &alpha, x, 1);
+}
+
 static inline cublasStatus_t cublasXaxpy(cublasHandle_t handle, int n, float alpha, float *x, float *y)
 {
 	return cublasSaxpy(handle, n, &alpha, x, 1, y, 1);

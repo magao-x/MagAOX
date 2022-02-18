@@ -49,7 +49,8 @@ class Matrix{
 		void inverse(Matrix* output);
 		void add(Matrix* other, float value=1);
 		void subtract(Matrix* other, float value=-1);
-
+		void scale(float scale_param);
+		
 		void print(bool print_gpu);
 		
 		long int num_elements(){
