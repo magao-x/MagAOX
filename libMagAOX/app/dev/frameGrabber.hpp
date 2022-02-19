@@ -129,12 +129,21 @@ protected:
    uint64_t m_dummy_cnt {0};
    char m_dummy_c {0};
    
+   double m_mna;
+   double m_vara;  
+         
+   double m_mnw;   
+   double m_varw;  
+         
+   double m_mnwa;  
+   double m_varwa; 
+   
    
    
    
 public:
 
-   /// Setup the configuration system520-485-9699
+   /// Setup the configuration system
    /**
      * This should be called in `derivedT::setupConfig` as
      * \code
@@ -247,6 +256,7 @@ protected:
    
    pcf::IndiProperty m_indiP_frameSize; ///< Property used to report the current frame size
 
+   pcf::IndiProperty m_indiP_timing;
 public:
 
    /// Update the INDI properties for this device controller
@@ -365,6 +375,24 @@ int frameGrabber<derivedT>::appStartup()
       return -1;
    }
    
+   //Register the timing INDI property
+   derived().createROIndiNumber( m_indiP_timing, "timing");
+   m_indiP_timing.add(pcf::IndiElement("acq_fps"));
+   m_indiP_timing.add(pcf::IndiElement("acq_jitter"));
+   m_indiP_timing.add(pcf::IndiElement("write_fps"));
+   m_indiP_timing.add(pcf::IndiElement("write_jitter"));
+   m_indiP_timing.add(pcf::IndiElement("delta_aw"));
+   m_indiP_timing.add(pcf::IndiElement("delta_aw_jitter"));
+
+   if( derived().registerIndiPropertyReadOnly( m_indiP_timing ) < 0)
+   {
+      #ifndef STDCAMERA_TEST_NOLOG
+      derivedT::template log<software_error>({__FILE__,__LINE__});
+      #endif
+      return -1;
+   }
+
+   //Start the f.g. thread
    if(derived().threadStart( m_fgThread, m_fgThreadInit, m_fgThreadID, m_fgThreadProp, m_fgThreadPrio, "framegrabber", this, fgThreadStart) < 0)
    {
       derivedT::template log<software_error, -1>({__FILE__, __LINE__});
@@ -409,22 +437,36 @@ int frameGrabber<derivedT>::appLogic()
             w0 = w;
          }
          
-         double mna = mx::math::vectorMean(m_atimesD);
-         double vara = mx::math::vectorVariance(m_atimesD, mna);
+         m_mna = mx::math::vectorMean(m_atimesD);
+         m_vara = mx::math::vectorVariance(m_atimesD, m_mna);
          
-         double mnw = mx::math::vectorMean(m_wtimesD);
-         double varw = mx::math::vectorVariance(m_wtimesD, mnw);
+         m_mnw = mx::math::vectorMean(m_wtimesD);
+         m_varw = mx::math::vectorVariance(m_wtimesD, m_mnw);
          
-         double mnwa = mx::math::vectorMean(m_watimesD);
-         double varwa = mx::math::vectorVariance(m_watimesD, mnwa);
-         
-         std::cout << mna << " +/- " << sqrt(vara) << " | ";
-         std::cout << mnw << " +/- " << sqrt(varw) << " | ";
-         std::cout << mnwa << " +/- " << sqrt(varwa) << "\n";
+         m_mnwa = mx::math::vectorMean(m_watimesD);
+         m_varwa = mx::math::vectorVariance(m_watimesD, m_mnwa);
          
       }
+      else
+      {
+         m_mna = 0;
+         m_vara = 0;
+         m_mnw = 0;
+         m_varw = 0;
+         m_mnwa = 0;
+         m_varwa = 0;
+      }
    }
-   
+   else
+   {
+      m_mna = 0;
+      m_vara = 0;
+      m_mnw = 0;
+      m_varw = 0;
+      m_mnwa = 0;
+      m_varwa = 0;
+   }
+
    return 0;
 
 }
@@ -432,7 +474,20 @@ int frameGrabber<derivedT>::appLogic()
 template<class derivedT>
 int frameGrabber<derivedT>::onPowerOff()
 { 
+   m_mna = 0;
+   m_vara = 0;
+   m_mnw = 0;  
+   m_varw = 0;
+   m_mnwa = 0;
+   m_varwa = 0;
+
+   m_width = 0;
+   m_height = 0;
+
+   updateINDI();
+   
    m_reconfig = true;
+
 
    return 0;
 }
@@ -676,7 +731,14 @@ int frameGrabber<derivedT>::updateINDI()
    indi::updateIfChanged(m_indiP_shmimName, "name", m_shmimName, derived().m_indiDriver);                     
    indi::updateIfChanged(m_indiP_frameSize, "width", m_width, derived().m_indiDriver);
    indi::updateIfChanged(m_indiP_frameSize, "height", m_height, derived().m_indiDriver);
-   
+
+   double fpsa = 0;
+   double fpsw = 0;
+   if(m_mna != 0 ) fpsa = 1.0/m_mna;
+   if(m_mnw != 0 ) fpsw = 1.0/m_mnw;
+
+   indi::updateIfChanged<double>(m_indiP_timing, {"acq_fps","acq_jitter","write_fps","write_jitter","delta_aw","delta_aw_jitter"}, 
+                        {fpsa, sqrt(m_vara), fpsw, sqrt(m_varw), m_mnwa, sqrt(m_varwa)},derived().m_indiDriver);
    
    return 0;
 }
