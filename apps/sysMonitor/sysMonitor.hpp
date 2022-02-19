@@ -1240,7 +1240,7 @@ void sysMonitor::setlatThreadExec()
             fd = 0;
             log<text_log>("restored CPU latency to default", logPrio::LOG_NOTICE);
          
-            setEuidCalled();
+            elevatedPrivileges ep(this);
             for(size_t cpu =0; cpu < m_coreLoads.size(); ++cpu)
             {
                std::string cpuFile = "/sys/devices/system/cpu/cpu";
