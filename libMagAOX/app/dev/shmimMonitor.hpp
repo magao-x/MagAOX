@@ -522,7 +522,18 @@ void shmimMonitor<derivedT, specificT>::smThreadExec()
          }
       }
       
-      if(derived().m_shutdown || !opened) return;
+      if(m_restart) continue; //this is kinda dumb.  we just go around on restart, so why test in the while loop at all?
+
+      if(derived().state() != stateCodes::OPERATING) continue;
+
+      if(derived().m_shutdown)
+      {
+         if(!opened) return; 
+       
+         ImageStreamIO_closeIm(&m_imageStream);
+         return;
+      }
+
     
 #if 0
       ///\todo once we upgrade to the mythical new CACAO, nuke this entire dumpster fire from orbit.  Just to be sure.
