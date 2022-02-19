@@ -405,7 +405,7 @@ int cacaoInterface::appStartup()
       return log<text_log, -1>("Could not get mode blocks", logPrio::LOG_CRITICAL);
    }
 
-   if(threadStart( m_fmThread, m_fmThreadInit, m_fmThreadID, m_fmThreadProp, m_fmThreadPrio, "loopmon", this, fmThreadStart) < 0)
+   if(threadStart( m_fmThread, m_fmThreadInit, m_fmThreadID, m_fmThreadProp, m_fmThreadPrio, "", "loopmon", this, fmThreadStart) < 0)
    {
       log<software_error>({__FILE__, __LINE__});
       return -1;

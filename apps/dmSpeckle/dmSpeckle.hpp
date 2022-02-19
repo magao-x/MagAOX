@@ -143,7 +143,9 @@ protected:
      *
      * @{
      */ 
-   int m_modThreadPrio {60}; ///< Priority of the framegrabber thread, should normally be > 00.
+   int m_modThreadPrio {60}; ///< Priority of the modulator thread, should normally be > 00.
+
+   std::string m_modThreadCpuset; ///< The cpuset for the modulator thread.
 
    std::thread m_modThread; ///< A separate thread for the modulation
 
@@ -216,6 +218,11 @@ void dmSpeckle::setupConfig()
    config.add("dm.cross", "", "dm.cross", argType::True, "dm", "cross", false, "bool", "If true, also apply the cross speckles rotated by 90 degrees.");
 
    config.add("dm.frequency", "", "dm.frequency", argType::Required, "dm", "frequency", false, "float", "The frequency to modulate at if not triggering (default 2000 Hz).");
+
+   config.add("modulator.threadPrio", "", "modulator.threadPrio", argType::Required, "modulator", "threadPrio", false, "int", "The real-time priority of the modulator thread.");
+
+   config.add("modulator.cpuset", "", "modulator.cpuset", argType::Required, "modulator", "cpuset", false, "string", "The cpuset to assign the modulator thread to.");
+
 }
 
 int dmSpeckle::loadConfigImpl( mx::app::appConfigurator & _config )
@@ -234,6 +241,9 @@ int dmSpeckle::loadConfigImpl( mx::app::appConfigurator & _config )
    _config(m_amp, "dm.amp");
    if(_config.isSet("dm.cross")) _config(m_cross, "dm.cross");
    _config(m_frequency, "dm.frequency");
+   
+   _config(m_modThreadPrio, "modulator.threadPrio");
+   _config(m_modThreadCpuset, "modulator.cpuset");
    
    dev::telemeter<dmSpeckle>::loadConfig(_config);
    return 0;
@@ -302,7 +312,7 @@ int dmSpeckle::appStartup()
       return -1;
    }
    
-   if(threadStart( m_modThread, m_modThreadInit, m_modThreadID, m_modThreadProp, m_modThreadPrio, "modulator", this, modThreadStart)  < 0)
+   if(threadStart( m_modThread, m_modThreadInit, m_modThreadID, m_modThreadProp, m_modThreadPrio, m_modThreadCpuset,"modulator", this, modThreadStart)  < 0)
    {
       log<software_critical>({__FILE__, __LINE__});
       return -1;

@@ -418,8 +418,10 @@ public:
    /// Start a thread, using this class's privileges to set priority, etc.
    /** 
      * The thread initialization synchronizer `bool` is set to true at the beginning
-     * of this function, then is set to false once all initialization is complete.  
-     *
+     * of this function, then is set to false once all initialization is complete.  The
+     * thread exec function should wait until this is false before doing _anything_ except
+     * setting the pid.  This is to avoid privilege escalation bugs.
+     * 
      * The interface of the thread start function is:
      \code
      static void impl::myThreadStart( impl * o )
@@ -439,6 +441,7 @@ public:
                     pid_t & tpid,                 ///< [in/out] The thread pid to be filled in by thrdStart immediately upon call
                     pcf::IndiProperty & thProp,   ///< [in/out] The INDI property to publish the thread details
                     int thrdPrio,                 ///< [in] The r/t priority to set for this thread
+                    const std::string & cpuset,   ///< [in] the cpuset to place this thread on.  Ignored if "".
                     const std::string & thrdName, ///< [in] The name of the thread (just for logging)
                     thisPtr * thrdThis,           ///< [in] The `this` pointer to pass to the thread starter function
                     Function&& thrdStart          ///< [in] The thread starting function, a static function taking a `this` pointer as argument.
@@ -1879,6 +1882,7 @@ int MagAOXApp<_useINDI>::threadStart( std::thread & thrd,
                                       pid_t & tpid,
                                       pcf::IndiProperty & thProp,
                                       int thrdPrio,
+                                      const std::string & cpuset,
                                       const std::string & thrdName,
                                       thisPtr * thrdThis,
                                       Function&& thrdStart
@@ -1938,9 +1942,7 @@ int MagAOXApp<_useINDI>::threadStart( std::thread & thrd,
    {
       log<text_log>(thrdName + " thread scheduler priority set to " + std::to_string(thrdPrio));
    }
-   
-   thrdInit = false;
-   
+      
    // Wait for tpid to be filled in, but only for one total second.
    if(tpid == 0) 
    {
@@ -1972,8 +1974,36 @@ int MagAOXApp<_useINDI>::threadStart( std::thread & thrd,
          thProp["prio"] = thrdPrio;
          registerIndiPropertyReadOnly(thProp);
       }
+
+      if(cpuset != "")
+      {
+         elevatedPrivileges ep(this);
+         std::string cpuFile = "/dev/cpuset/";
+         cpuFile += cpuset;
+         cpuFile += "/tasks";
+         int wfd = open( cpuFile.c_str(), O_WRONLY);
+         if(wfd < 0)
+         {
+            return log<software_error,-1>({__FILE__, __LINE__, errno, "error from open"});
+         }
+
+         char pids[16];
+         snprintf(pids, sizeof(pids), "%d", tpid);
+
+         int w = write(wfd, pids,strlen(pids));
+         if(w != (int) strlen(pids))
+         {
+            return log<software_error,-1>({__FILE__, __LINE__, errno, "error on write"});
+         }
+
+         close(wfd);  
+      
+         log<text_log>("moved " + thrdName + " to cpuset " + cpuset, logPrio::LOG_NOTICE);
+      }
    }
    
+   thrdInit = false;
+
    return 0; 
    
 }
