@@ -85,6 +85,8 @@ protected:
    std::string m_shmimName {""}; ///< The name of the shared memory image, is used in `/tmp/<shmimName>.im.shm`. Derived classes should set a default.
       
    int m_smThreadPrio {2}; ///< Priority of the shmimMonitor thread, should normally be > 00.
+
+   std::string m_smCpuset; ///< The cpuset to assign the shmimMonitor thread to.  Ignored if empty (the default).
    
    ///@}
    
@@ -255,6 +257,8 @@ void shmimMonitor<derivedT, specificT>::setupConfig(mx::app::appConfigurator & c
 {
    config.add(specificT::configSection()+".threadPrio", "", specificT::configSection()+".threadPrio", argType::Required, specificT::configSection(), "threadPrio", false, "int", "The real-time priority of the shmimMonitor thread.");
    
+   config.add(specificT::configSection()+".cpuset", "", specificT::configSection()+".cpuset", argType::Required, specificT::configSection(), "cpuset", false, "string", "The cpuset for the shmimMonitor thread.");
+   
    config.add(specificT::configSection()+".shmimName", "", specificT::configSection()+".shmimName", argType::Required, specificT::configSection(), "shmimName", false, "string", "The name of the ImageStreamIO shared memory image. Will be used as /tmp/<shmimName>.im.shm.");
    
    //Set this here to allow derived classes to set their own default before calling loadConfig
@@ -266,6 +270,7 @@ template<class derivedT, class specificT>
 void shmimMonitor<derivedT, specificT>::loadConfig(mx::app::appConfigurator & config)
 {
    config(m_smThreadPrio, specificT::configSection() + ".threadPrio");
+   config(m_smCpuset, specificT::configSection() + ".cpuset");
    config(m_shmimName, specificT::configSection() + ".shmimName");
   
 }
@@ -337,7 +342,7 @@ int shmimMonitor<derivedT, specificT>::appStartup()
       return -1;
    }
    
-   if(derived().threadStart( m_smThread, m_smThreadInit, m_smThreadID, m_smThreadProp, m_smThreadPrio, specificT::configSection(), this, smThreadStart) < 0)
+   if(derived().threadStart( m_smThread, m_smThreadInit, m_smThreadID, m_smThreadProp, m_smThreadPrio, m_smCpuset, specificT::configSection(), this, smThreadStart) < 0)
    {
       derivedT::template log<software_error>({__FILE__, __LINE__});
       return -1;
@@ -353,7 +358,7 @@ int shmimMonitor<derivedT, specificT>::appLogic()
    //do a join check to see if other threads have exited.
    if(pthread_tryjoin_np(m_smThread.native_handle(),0) == 0)
    {
-      derivedT::template log<software_error>({__FILE__, __LINE__, "shmimMonitor thread has exited"});
+      derivedT::template log<software_error>({__FILE__, __LINE__, "shmimMonitor thread " + std::to_string(m_smThreadID) + " has exited"});
       
       return -1;
    }

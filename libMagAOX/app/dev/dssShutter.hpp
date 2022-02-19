@@ -363,13 +363,13 @@ int dssShutter<derivedT>::appStartup()
    
 
    
-   if(derived().threadStart( m_openThread, m_openThreadInit, m_openThreadID, m_openThreadProp, 0, "open", this, openThreadStart) < 0)
+   if(derived().threadStart( m_openThread, m_openThreadInit, m_openThreadID, m_openThreadProp, 0, "", "open", this, openThreadStart) < 0)
    {
       derivedT::template log<software_error>({__FILE__, __LINE__});
       return -1;
    }
       
-   if(derived().threadStart( m_shutThread, m_shutThreadInit, m_shutThreadID, m_shutThreadProp, 0, "shut", this, shutThreadStart) < 0)
+   if(derived().threadStart( m_shutThread, m_shutThreadInit, m_shutThreadID, m_shutThreadProp, 0, "", "shut", this, shutThreadStart) < 0)
    {
       derivedT::template log<software_error>({__FILE__, __LINE__});
       return -1;

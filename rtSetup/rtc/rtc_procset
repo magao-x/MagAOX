@@ -12,32 +12,11 @@
 # note: these are in the same order as the cpuset creation in rtc_cpuset
 
 ######################
-## camwfs-sw framegrabber
-######################
-pidlist=$( getINDI camwfs-sw.th-framegrabber.pid | xargs echo | sed 's/.*=//g')
-echo "camwfs-sw f.g. : $pidlist"
-/bin/echo $pidlist > /dev/cpuset/camwfs-sw/tasks
-
-######################
-## camwfs framegrabber
-######################
-pidlist=$( getINDI camwfs.th-framegrabber.pid | xargs echo | sed 's/.*=//g')
-echo "camwfs f.g.  : $pidlist"
-/bin/echo $pidlist > /dev/cpuset/camwfs/tasks
-
-######################
 ## Woofer dmcomb
 ######################
 pidlist=$( pgrep DMcomb-000000.r | xargs echo | sed 's/ /,/g' )
 echo "DMcomb 0  : $pidlist"
 /bin/echo $pidlist > /dev/cpuset/dm00comb/tasks
-
-######################
-## Woofer shmimMonitor
-######################
-pidlist=$( getINDI dmwoofer.th-shmimMonitor.pid | xargs echo | sed 's/.*=//g')
-echo "woofer s.m. : $pidlist"
-/bin/echo $pidlist > /dev/cpuset/woofer/tasks
 
 ######################
 ## Tweeter dmcomb
@@ -46,19 +25,7 @@ pidlist=$( pgrep DMcomb-000001.r | xargs echo | sed 's/ /,/g' )
 echo "DMcomb 1 : $pidlist"
 /bin/echo $pidlist > /dev/cpuset/dm01comb/tasks
 
-######################
-## Tweeter shmimMonitor
-######################
-pidlist=$( getINDI dmtweeter.th-shmimMonitor.pid | xargs echo | sed 's/.*=//g')
-echo "tweeter s.m. : $pidlist"
-/bin/echo $pidlist > /dev/cpuset/woofer/tasks
 
-######################
-## T2W offloader shmimMonitor
-######################
-pidlist=$( getINDI t2wOffloader.th-shmimMonitor.pid | xargs echo | sed 's/.*=//g')
-echo "t2w offloader s.m. : $pidlist"
-/bin/echo $pidlist > /dev/cpuset/woofer/tasks
 
 pidlist=$( pgrep aol1run | xargs echo | sed 's/ /,/g' )
 echo "aol1 (master) : $pidlist"
@@ -94,9 +61,3 @@ pidlist=$( pgrep aol1meol | xargs echo | sed 's/ /,/g' )
 echo "aol1meol : $pidlist"
 /bin/echo $pidlist > /dev/cpuset/aol1RT3/tasks
 
-######################
-## tweeterSpeck modulator - 35
-######################
-pidlist=$( getINDI tweeterSpeck.th-modulator.pid | xargs echo | sed 's/.*=//g')
-echo "tweeterSpeck f.g. : $pidlist"
-/bin/echo $pidlist > /dev/cpuset/tweeterSpeck/tasks

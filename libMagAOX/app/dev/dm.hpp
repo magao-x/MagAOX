@@ -539,8 +539,10 @@ void dm<derivedT,realT>::setupConfig(mx::app::appConfigurator & config)
    
    //Overriding the shmimMonitor setup so that these all go in the dm section
    //Otherwise, would call shmimMonitor<dm<derivedT,realT>>::setupConfig();
+   ///\todo we shmimMonitor now has configSection so this isn't necessary.
    config.add("dm.threadPrio", "", "dm.threadPrio", argType::Required, "dm", "threadPrio", false, "int", "The real-time priority of the dm control thread.");
-   
+   config.add("dm.cpuset", "", "dm.cpuset", argType::Required, "dm", "cpuset", false, "int", "The cpuset for the dm control thread.");
+
    config.add("dm.shmimName", "", "dm.shmimName", argType::Required, "dm", "shmimName", false, "string", "The name of the ImageStreamIO shared memory image to monitor for DM comands. Will be used as /tmp/<shmimName>.im.shm.");
    
    config.add("dm.shmimFlat", "", "dm.shmimFlat", argType::Required, "dm", "shmimFlat", false, "string", "The name of the ImageStreamIO shared memory image to write the flat command to.  Default is shmimName with 00 apended (i.e. dm00disp -> dm00disp00). ");
@@ -589,6 +591,8 @@ void dm<derivedT,realT>::loadConfig(mx::app::appConfigurator & config)
    //Overriding the shmimMonitor setup so that these all go in the dm section
    //Otherwise, would call shmimMonitor<dm<derivedT,realT>>::loadConfig(config);
    config(derived().m_smThreadPrio, "dm.threadPrio");
+   config(derived().m_smCpuset, "dm.cpuset");
+
    config(derived().m_shmimName, "dm.shmimName");
 
    if(derived().m_shmimName != "")
@@ -744,7 +748,7 @@ int dm<derivedT,realT>::appStartup()
    
    if(sem_init(&m_satSemaphore, 0,0) < 0) return derivedT::template log<software_critical, -1>({__FILE__, __LINE__, errno,0, "Initializing sat semaphore"});
    
-   if(derived().threadStart( m_satThread, m_satThreadInit, m_satThreadID, m_satThreadProp, m_satThreadPrio, "saturation", this, satThreadStart) < 0)
+   if(derived().threadStart( m_satThread, m_satThreadInit, m_satThreadID, m_satThreadProp, m_satThreadPrio, "", "saturation", this, satThreadStart) < 0)
    {
       derivedT::template log<software_error, -1>({__FILE__, __LINE__});
       return -1;

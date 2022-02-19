@@ -413,7 +413,7 @@ int sysMonitor::appStartup()
       return log<software_error,-1>({__FILE__,__LINE__});
    }
    
-   if(threadStart( m_setlatThread, m_setlatThreadInit, m_setlatThreadID, m_setlatThreadProp, m_setlatThreadPrio, "set latency", this, setlatThreadStart)  < 0)
+   if(threadStart( m_setlatThread, m_setlatThreadInit, m_setlatThreadID, m_setlatThreadProp, m_setlatThreadPrio, "", "set latency", this, setlatThreadStart)  < 0)
    {
       log<software_critical>({__FILE__, __LINE__});
       return -1;
@@ -1202,7 +1202,7 @@ void sysMonitor::setlatThreadExec()
          {
             elevatedPrivileges ep(this);
           
-            for(size_t cpu =0; cpu < m_coreLoads.size(); ++cpu)
+            for(size_t cpu =0; cpu < m_coreLoads.size(); ++cpu) ///\todo this needs error checks
             {
                std::string cpuFile = "/sys/devices/system/cpu/cpu";
                cpuFile += std::to_string(cpu);
@@ -1241,7 +1241,7 @@ void sysMonitor::setlatThreadExec()
             log<text_log>("restored CPU latency to default", logPrio::LOG_NOTICE);
          
             elevatedPrivileges ep(this);
-            for(size_t cpu =0; cpu < m_coreLoads.size(); ++cpu)
+            for(size_t cpu =0; cpu < m_coreLoads.size(); ++cpu) ///\todo this needs error checks
             {
                std::string cpuFile = "/sys/devices/system/cpu/cpu";
                cpuFile += std::to_string(cpu);

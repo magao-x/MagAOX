@@ -187,6 +187,8 @@ protected:
      */ 
    int m_fgThreadPrio {1}; ///< Priority of the framegrabber thread, should normally be > 00.
 
+   std::string m_fgCpuset; ///< The cpuset for the framegrabber thread.  Ignored if empty (the default).
+
    std::thread m_fgThread; ///< A separate thread for the actual framegrabbings
 
    bool m_fgThreadInit {true}; ///< Synchronizer to ensure f.g. thread initializes before doing dangerous things.
@@ -226,6 +228,8 @@ protected:
      * @{
      */ 
    int m_swThreadPrio {1}; ///< Priority of the stream writer thread, should normally be > 0, and <= m_fgThreadPrio.
+
+   std::string m_swCpuset; ///< The cpuset for the framegrabber thread.  Ignored if empty (the default).
 
    sem_t m_swSemaphore; ///< Semaphore used to synchronize the fg thread and the sw thread.
    
@@ -306,6 +310,8 @@ void streamWriter::setupConfig()
    
    config.add("writer.threadPrio", "", "writer.threadPrio", argType::Required, "writer", "threadPrio", false, "int", "The real-time priority of the stream writer thread.");
    
+   config.add("writer.cpuset", "", "writer.cpuset", argType::Required, "writer", "cpuset", false, "int", "The cpuset for the writer thread.");
+   
    config.add("writer.lz4accel", "", "writer.lz4accel", argType::Required, "writer", "lz4accel", false, "int", "The LZ4 acceleration parameter.  Larger is faster, but lower compression.");
    
    config.add("framegrabber.shmimName", "", "framegrabber.shmimName", argType::Required, "framegrabber", "shmimName", false, "int", "The name of the stream to monitor. From /tmp/shmimName.im.shm.");
@@ -315,6 +321,8 @@ void streamWriter::setupConfig()
    config.add("framegrabber.semWait", "", "framegrabber.semWait", argType::Required, "framegrabber", "semWait", false, "int", "The time in nsec to wait on the semaphore.  Max is 999999999. Default is 5e8 nsec.");
    
    config.add("framegrabber.threadPrio", "", "framegrabber.threadPrio", argType::Required, "framegrabber", "threadPrio", false, "int", "The real-time priority of the framegrabber thread.");
+
+   config.add("framegrabber.cpuset", "", "framegrabber.cpuset", argType::Required, "framegrabber", "cpuset", false, "string", "The cpuset for the framegrabber thread.");
 }
 
 
@@ -327,6 +335,7 @@ void streamWriter::loadConfig()
    config(m_circBuffLength, "writer.circBuffLength");
    config(m_writeChunkLength, "writer.writeChunkLength");
    config(m_swThreadPrio, "writer.threadPrio");
+   config(m_swCpuset, "writer.cpuset");
    config(m_lz4accel, "writer.lz4accel");
    if(m_lz4accel < XRIF_LZ4_ACCEL_MIN) m_lz4accel = XRIF_LZ4_ACCEL_MIN;
    if(m_lz4accel > XRIF_LZ4_ACCEL_MAX) m_lz4accel = XRIF_LZ4_ACCEL_MAX;
@@ -337,7 +346,8 @@ void streamWriter::loadConfig()
    
    
    config(m_fgThreadPrio, "framegrabber.threadPrio");
-   
+   config(m_fgCpuset, "framegrabber.cpuset");
+
    //Set some defaults
    //Setup default log path
    m_rawimageDir = MagAOXPath + "/" + MAGAOX_rawimageRelPath + "/" + m_shmimName;
@@ -409,12 +419,12 @@ int streamWriter::appStartup()
    
    if(initialize_xrif() < 0) log<software_critical,-1>({__FILE__, __LINE__});
    
-   if(threadStart( m_fgThread, m_fgThreadInit, m_fgThreadID, m_fgThreadProp, m_fgThreadPrio, "framegrabber", this, fgThreadStart)  < 0)
+   if(threadStart( m_fgThread, m_fgThreadInit, m_fgThreadID, m_fgThreadProp, m_fgThreadPrio, m_fgCpuset, "framegrabber", this, fgThreadStart)  < 0)
    {
       return log<software_critical,-1>({__FILE__, __LINE__});
    }
 
-   if(threadStart( m_swThread, m_swThreadInit, m_swThreadID, m_swThreadProp, m_swThreadPrio, "streamwriter", this, swThreadStart) < 0)
+   if(threadStart( m_swThread, m_swThreadInit, m_swThreadID, m_swThreadProp, m_swThreadPrio, m_swCpuset, "streamwriter", this, swThreadStart) < 0)
    {
       log<software_critical,-1>({__FILE__, __LINE__});
    }

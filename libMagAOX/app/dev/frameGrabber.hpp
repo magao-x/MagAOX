@@ -88,7 +88,8 @@ protected:
    std::string m_shmimName {""}; ///< The name of the shared memory image, is used in `/tmp/<shmimName>.im.shm`. Derived classes should set a default.
       
    int m_fgThreadPrio {2}; ///< Priority of the framegrabber thread, should normally be > 00.
-    
+   std::string m_fgCpuset; ///< The cpuset to assign the framegrabber thread to.  Not used if empty, the default.
+
    uint32_t m_circBuffLength {1}; ///< Length of the circular buffer, in frames
        
    uint16_t m_latencyCircBuffMaxLength {3600}; ///< Maximum length of the latency measurement circular buffers
@@ -281,7 +282,9 @@ template<class derivedT>
 void frameGrabber<derivedT>::setupConfig(mx::app::appConfigurator & config)
 {
    config.add("framegrabber.threadPrio", "", "framegrabber.threadPrio", argType::Required, "framegrabber", "threadPrio", false, "int", "The real-time priority of the framegrabber thread.");
-   
+
+   config.add("framegrabber.cpuset", "", "framegrabber.cpuset", argType::Required, "framegrabber", "cpuset", false, "string", "The cpuset to assign the framegrabber thread to.");
+
    config.add("framegrabber.shmimName", "", "framegrabber.shmimName", argType::Required, "framegrabber", "shmimName", false, "string", "The name of the ImageStreamIO shared memory image. Will be used as /milk/shm/<shmimName>.im.shm.");
    
    config.add("framegrabber.circBuffLength", "", "framegrabber.circBuffLength", argType::Required, "framegrabber", "circBuffLength", false, "size_t", "The length of the circular buffer. Sets m_circBuffLength, default is 1.");
@@ -296,6 +299,7 @@ template<class derivedT>
 void frameGrabber<derivedT>::loadConfig(mx::app::appConfigurator & config)
 {
    config(m_fgThreadPrio, "framegrabber.threadPrio");
+   config(m_fgCpuset, "framegrabber.cpuset");
    m_shmimName = derived().configName();
    config(m_shmimName, "framegrabber.shmimName");
   
@@ -376,7 +380,7 @@ int frameGrabber<derivedT>::appStartup()
    }
    
    //Register the timing INDI property
-   derived().createROIndiNumber( m_indiP_timing, "timing");
+   derived().createROIndiNumber( m_indiP_timing, "fg_timing");
    m_indiP_timing.add(pcf::IndiElement("acq_fps"));
    m_indiP_timing.add(pcf::IndiElement("acq_jitter"));
    m_indiP_timing.add(pcf::IndiElement("write_fps"));
@@ -393,7 +397,7 @@ int frameGrabber<derivedT>::appStartup()
    }
 
    //Start the f.g. thread
-   if(derived().threadStart( m_fgThread, m_fgThreadInit, m_fgThreadID, m_fgThreadProp, m_fgThreadPrio, "framegrabber", this, fgThreadStart) < 0)
+   if(derived().threadStart( m_fgThread, m_fgThreadInit, m_fgThreadID, m_fgThreadProp, m_fgThreadPrio, m_fgCpuset, "framegrabber", this, fgThreadStart) < 0)
    {
       derivedT::template log<software_error, -1>({__FILE__, __LINE__});
       return -1;
