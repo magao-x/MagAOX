@@ -4,6 +4,7 @@
 #include <QWidget>
 #include <QTimer>
 
+#include <cmath>
 #include "statusLineEdit.hpp"
 
 #include "ui_statusEntry.h"
@@ -215,26 +216,36 @@ void statusEntry::defaultFormat()
 
 QString floatAutoFormat(const std::string & value)
 {
-   double v = std::stod(value);
+   double v;
+   try
+   {
+      v = std::stod(value);
+   }
+   catch(...)
+   {
+      return QString("");
+   }
+    
    std::string format = "%f";
 
-   if(v >= 10000)
+   double av = fabs(v);
+   if(av >= 10000)
    {
       format = "%0.3g";
    }
-   else if(v >= 100)
+   else if(av >= 100)
    {
       format = "%0.1f";
    }
-   else if(v >= 0.1)
+   else if(av >= 0.1)
    {
       format = "%0.2f";
    }
-   else if(v >= 0.01)
+   else if(av >= 0.01)
    {
       format = "%0.3f";
    }
-   else if(v >= 0.001)
+   else if(av >= 0.001)
    {
       format = "%0.4f";
    }
@@ -256,21 +267,30 @@ QString statusEntry::formattedValue()
       case STRING:
          return QString(m_current.c_str());
       case INT:
-         snprintf(str, sizeof(str), m_format.c_str(), std::stoi(m_current));
-         return QString(str);
+         try
+         {
+            snprintf(str, sizeof(str), m_format.c_str(), std::stoi(m_current));
+            return QString(str);
+         }
+         catch(...)
+         {
+            return QString("");
+         }
+         
       case FLOAT:
          if(m_format == "auto") return floatAutoFormat(m_current);
 
          try 
          {
             snprintf(str, sizeof(str), m_format.c_str(), std::stof(m_current));
+            return QString(str);
          }
          catch(...)
          {  
-            snprintf(str, sizeof(str), " ");
+            return QString("");
          }
 
-         return QString(str);
+         
       default:
          return QString(m_current.c_str());
    }
