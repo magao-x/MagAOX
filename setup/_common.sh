@@ -126,22 +126,33 @@ function creategroup() {
 }
 
 function createuser() {
-  if getent passwd $1 > /dev/null 2>&1; then
-    log_info "User account $1 exists"
+  username=$1
+  if getent passwd $username > /dev/null 2>&1; then
+    log_info "User account $username exists"
   else
-    sudo useradd -U $1
-    echo -e "$DEFAULT_PASSWORD\n$DEFAULT_PASSWORD" | sudo passwd $1
-    log_success "Created user account $1 with default password $DEFAULT_PASSWORD"
+    sudo useradd -U $username
+    echo -e "$DEFAULT_PASSWORD\n$DEFAULT_PASSWORD" | sudo passwd $username
+    log_success "Created user account $username with default password $DEFAULT_PASSWORD"
   fi
-  sudo usermod -a -G magaox $1
-  log_info "Added user $1 to group magaox"
-  sudo mkdir -p /home/$1/.ssh
-  sudo touch /home/$1/.ssh/authorized_keys
-  sudo chmod -R u=rwx,g=,o= /home/$1/.ssh
-  sudo chmod u=rw,g=,o= /home/$1/.ssh/authorized_keys
-  sudo chown -R $1:magaox /home/$1
-  sudo chsh $1 -s $(which bash)
-  log_info "Append an ecdsa or ed25519 key to /home/$1/.ssh/authorized_keys to enable SSH login"
+  sudo usermod -a -G magaox $username
+  log_info "Added user $username to group magaox"
+  sudo mkdir -p /home/$username/.ssh
+  sudo touch /home/$username/.ssh/authorized_keys
+  sudo chmod -R u=rwx,g=,o= /home/$username/.ssh
+  sudo chmod u=rw,g=,o= /home/$username/.ssh/authorized_keys
+  sudo chown -R $username:magaox /home/$username
+  sudo chsh $username -s $(which bash)
+  log_info "Append an ecdsa or ed25519 key to /home/$username/.ssh/authorized_keys to enable SSH login"
+
+  data_path="/data/users/$username"
+  mkdir -p "$data_path"
+  chown "$username:magaox" "$data_path"
+  chmod g+rxs "$data_path"
+  log_success "Created $data_path"
+
+  link_name="/home/$username/data"
+  ln -s "$data_path" "$link_name"
+  log_success "Linked $link_name -> $data_path"
 }
 # We work around the buggy devtoolset /bin/sudo wrapper in provision.sh, but
 # that means we have to explicitly enable it ourselves.
