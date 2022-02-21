@@ -942,6 +942,7 @@ int shmimIntegrator::configureAcquisition()
 {
    std::unique_lock<std::mutex> lock(m_indiMutex);
 
+   ///\todo potential but verrrrry unlikely bug: shmimMonitorT could change these before allocate sets the lock above.  Should use a local set of w/h instead.
    if(shmimMonitorT::m_width==0 || shmimMonitorT::m_height==0)
    {
       //This means we haven't connected to the stream to average. so wait.
