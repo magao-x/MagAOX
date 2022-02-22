@@ -112,9 +112,10 @@ else
 endif
 
 utils_to_build = logdump \
-				 logstream \
+				     logstream \
                  cursesINDI \
-				 xrif2shmim
+				     xrif2shmim \
+				     xrif2fits
 
 scripts_to_install = magaox query_seeing sync_cacao xctrl netconsole_logger creaimshm dmdispbridge shmimTCPreceive shmimTCPtransmit
 

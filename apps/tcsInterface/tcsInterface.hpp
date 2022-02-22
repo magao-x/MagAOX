@@ -784,7 +784,7 @@ int tcsInterface::appStartup()
    for(size_t n=0; n < m_offloadRequests.size();++n) m_offloadRequests[n].resize(10,0);
    
    
-   if(threadStart( m_offloadThread, m_offloadThreadInit, m_offloadThreadID, m_offloadThreadProp, 0, "offload", this, offloadThreadStart) < 0)
+   if(threadStart( m_offloadThread, m_offloadThreadInit, m_offloadThreadID, m_offloadThreadProp, 0, "", "offload", this, offloadThreadStart) < 0)
    {
       log<software_error>({__FILE__, __LINE__});
       return -1;
