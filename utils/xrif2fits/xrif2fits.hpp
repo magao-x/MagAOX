@@ -78,9 +78,9 @@ protected:
 
    std::vector<std::string> m_files; ///< List of files to use.  If dir is not empty, it will be pre-pended to each name.
 
-   std::string m_logDir = "";//home/jrmales/Data/MagAOX/Tel/2019B/logs/";
-   
-   std::string m_telDir = "";//home/jrmales/Data/MagAOX/Tel/2019B/telem/";
+   std::vector<std::string> m_logDir;
+
+   std::vector<std::string> m_telDir;
    
    std::string m_outDir = "fits/";   
    
@@ -128,8 +128,8 @@ void xrif2fits::setupConfig()
 {
    config.add("dir","d", "dir" , argType::Required, "", "dir", false,  "string", "The directory to search for files.  Can be empty if full path given in files.");
    config.add("files","f", "files" , argType::Required, "", "files", false,  "vector<string>", "List of files to use.  If dir is not empty, it will be pre-pended to each name.");
-   config.add("logdir","l", "logdir" , argType::Required, "", "logdir", false,  "string", "Directory for log files.");
-   config.add("teldir","t", "teldir" , argType::Required, "", "teldir", false,  "string", "Directory for telemetry files.");
+   config.add("logdir","l", "logdir" , argType::Required, "", "logdir", false,  "vector<string>", "Directory(ies) for log files.");
+   config.add("teldir","t", "teldir" , argType::Required, "", "teldir", false,  "vector<string>", "Directory(ies) for telemetry files.");
 
    config.add("outDir","D", "outDir" , argType::Required, "", "outDir", false,  "string", "The directory in which to write output files.  Default is ./fits/.");
    
@@ -274,10 +274,17 @@ int xrif2fits::execute()
    logMap tels;
    
    std::cerr << "loading log file names . . .\n";
-   logs.loadAppToFileMap( m_logDir, ".binlog");
-   std::cerr << "loading telemetry file names . . .\n";
-   tels.loadAppToFileMap( m_telDir, ".bintel");
+   for(size_t n=0; n < m_logDir.size(); ++n)
+   {
+      logs.loadAppToFileMap( m_logDir[n], ".binlog");
+   }
    
+   std::cerr << "loading telemetry file names . . .\n";
+   for(size_t n=0; n < m_telDir.size(); ++n)
+   {
+      tels.loadAppToFileMap( m_telDir[n], ".bintel");
+   }
+
    std::ofstream metaOut;
    //Print the meta-file header
    if(!m_noMeta)
