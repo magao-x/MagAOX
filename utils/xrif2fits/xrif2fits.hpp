@@ -317,6 +317,13 @@ int xrif2fits::execute()
       std::cout << "******************************************************\n";
       
       FILE * fp_xrif = fopen(m_files[n].c_str(), "rb");
+      if(fp_xrif == nullptr)
+      {
+         std::cerr << " (" << invokedName << "): Error opening " << m_files[n] << "\n";
+         std::cerr << " (" << invokedName << "): " << strerror(errno) << "\n";
+         return -1;
+      }
+
       size_t nr = fread(header, 1, XRIF_HEADER_SIZE, fp_xrif);
       if(nr != XRIF_HEADER_SIZE)
       {
