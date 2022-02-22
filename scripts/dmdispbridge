@@ -2,7 +2,7 @@
 set -eo pipefail
 
 #######################################################
-# creaimshm: create a MILK shared memory stream
+# dmdispbridge: create a TCP bridge for a dmdisp
 #
 #
 #######################################################
@@ -22,11 +22,13 @@ echo ""
 echo ""
 echo " $(tput bold)INPUT:$(tput sgr0)"
 echo "  <dmnum>      : the dm number, XX in dmXXdispYY"
-echo "  <name>       : the resolvable name of the machine controlling the dm"
+echo "  <name>       : ip address of the machine controlling the dm"
 echo "  <start-port> : the starting port number, for dmXXdisp00"
 echo ""
+echo " This should be run on the machine that will send the commands"
+echo ""
 echo " $(tput bold)EXAMPLE:$(tput sgr0)"
-echo "     $0 01 rtc"
+echo "     $0 01 192.168.2.2 8800 #will create bridge for dm01disp "
 echo ""
 echo "------------------------------------------------------------------------"
 }
@@ -56,7 +58,7 @@ while getopts :hckp: FLAG; do
 done
 
 
-ip=$(dig $2 +short)
+ip=$2
 me=$(hostname)
 
 for i in {0..11}
@@ -80,12 +82,13 @@ do
    ssh -t rtc $com
 
    #create shmim locally
-   bash creaimshm "dm"$1"disp"$chnum 50 50
+   creaimshm "dm"$1"disp"$chnum 50 50
 
    #start transmitting
    #echo "starting detached session"
    #tmux new -d -s "sTCPtx-"$me"-dm"$1"disp"$chnum
-   echo "starting shmimTCPtransmit"
-   bash shmimTCPtransmit "dm"$1"disp"$chnum $ip $port
+   echo "starting shmimTCPtransmit: " "dm"$1"disp"$chnum $ip $port
+
+   shmimTCPtransmit "dm"$1"disp"$chnum $ip $port
 done
 

@@ -140,6 +140,7 @@ dependencies:
   - pthread-stubs=0.4=h14c3975_1001
   - ptyprocess=0.6.0=py_1001
   - py=1.9.0=pyh9f0ad1d_0
+  - pybind11=2.6.1=py38h82cb98a_0 
   - pycosat=0.6.3=py38h7b6447c_1
   - pycparser=2.20=py_0
   - pyee=8.1.0=pyh9f0ad1d_0

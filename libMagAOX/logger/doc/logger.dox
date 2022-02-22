@@ -108,7 +108,7 @@ named "log_type" in what follows.
    \endcode
    For more information about how to write flatbuffer schemas and pack and access data, see the <a href="https://google.github.io/flatbuffers/">flatbuffer documentation</a>.
  
--# For completeness you should add the new types/log_type.hpp file to the libMagAOX Makefile INCLUDEDEPS list.
+-# Next add the new types/log_type.hpp file to the libMagAOX Makefile INCLUDEDEPS list.
 
 -# Now add the log to \p "logger/logCodes.dat"
   - Place it in an appropriate section of the file, and in numerical order by the code so future additions can be easily managed.
@@ -117,6 +117,6 @@ named "log_type" in what follows.
   
 -# Re-compile the logging system by, in the libMagAOX directory (above logger), typing make.    This will generate a number of files based on the logCodes.dat entry you have made.  Correct any errors from the \p flatc compiler or the flatlogs code gerator.
 
--# Now recompile (at least) the app using the log type and the logdump utility.
+-# Now recompile the app using the log type and the logdump utility.
 
 */

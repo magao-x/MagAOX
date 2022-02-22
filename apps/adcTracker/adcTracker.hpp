@@ -11,7 +11,7 @@
 #include "../../libMagAOX/libMagAOX.hpp" //Note this is included on command line to trigger pch
 #include "../../magaox_git_version.h"
 
-#include <mx/math/gslInterpolation.hpp>
+#include <mx/math/gslInterpolator.hpp>
 #include <mx/ioutils/readColumns.hpp>
 
 /** \defgroup adcTracker
@@ -83,8 +83,8 @@ protected:
    std::vector<double> m_lupADC1;
    std::vector<double> m_lupADC2;
 
-   mx::math::gslInterpolator<double> m_terpADC1;
-   mx::math::gslInterpolator<double> m_terpADC2;
+   mx::math::gslInterpolator<mx::math::gsl_interp_linear<double>> m_terpADC1;
+   mx::math::gslInterpolator<mx::math::gsl_interp_linear<double>> m_terpADC2;
    
    bool m_tracking {false};
    
@@ -246,8 +246,8 @@ int adcTracker::appStartup()
    
    log<text_log>("Read " + std::to_string(m_lupZD.size()) + " points from " + m_lookupFile);
    
-   m_terpADC1.setup(gsl_interp_linear, m_lupZD, m_lupADC1);
-   m_terpADC2.setup(gsl_interp_linear, m_lupZD, m_lupADC2);
+   m_terpADC1.setup(m_lupZD, m_lupADC1);
+   m_terpADC2.setup(m_lupZD, m_lupADC2);
    
    createStandardIndiToggleSw( m_indiP_tracking, "tracking");
    registerIndiPropertyNew( m_indiP_tracking, INDI_NEWCALLBACK(m_indiP_tracking));

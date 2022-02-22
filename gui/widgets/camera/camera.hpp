@@ -144,13 +144,17 @@ camera::camera( std::string & camName,
    connect(this, SIGNAL(add_fps(bool)), this, SLOT(setup_fps(bool)));
    connect(this, SIGNAL(add_emGain(bool)), this, SLOT(setup_emGain(bool)));
    
-   QSpacerItem *holder = new QSpacerItem(10,15, QSizePolicy::Expanding, QSizePolicy::MinimumExpanding);
+   QSpacerItem *holder = new QSpacerItem(10,0, QSizePolicy::Expanding, QSizePolicy::Expanding);
    ui.grid->addItem(holder, 2,1,1,1);
 
    ui_fsmState = new xqt::fsmDisplay(this);
    ui_fsmState->setObjectName(QString::fromUtf8("fsmState"));
    ui.grid->addWidget(ui_fsmState, 1, 0, 1, 1);
    ui_fsmState->device(m_camName);
+
+   QFont qf = ui.lab_camName->font();
+   qf.setPixelSize(XW_FONT_SIZE+3);
+   ui.lab_camName->setFont(qf);
 
    ui.lab_camName->setText(m_camName.c_str());
 

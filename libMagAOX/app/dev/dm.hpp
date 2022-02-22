@@ -539,8 +539,10 @@ void dm<derivedT,realT>::setupConfig(mx::app::appConfigurator & config)
    
    //Overriding the shmimMonitor setup so that these all go in the dm section
    //Otherwise, would call shmimMonitor<dm<derivedT,realT>>::setupConfig();
+   ///\todo we shmimMonitor now has configSection so this isn't necessary.
    config.add("dm.threadPrio", "", "dm.threadPrio", argType::Required, "dm", "threadPrio", false, "int", "The real-time priority of the dm control thread.");
-   
+   config.add("dm.cpuset", "", "dm.cpuset", argType::Required, "dm", "cpuset", false, "int", "The cpuset for the dm control thread.");
+
    config.add("dm.shmimName", "", "dm.shmimName", argType::Required, "dm", "shmimName", false, "string", "The name of the ImageStreamIO shared memory image to monitor for DM comands. Will be used as /tmp/<shmimName>.im.shm.");
    
    config.add("dm.shmimFlat", "", "dm.shmimFlat", argType::Required, "dm", "shmimFlat", false, "string", "The name of the ImageStreamIO shared memory image to write the flat command to.  Default is shmimName with 00 apended (i.e. dm00disp -> dm00disp00). ");
@@ -589,22 +591,36 @@ void dm<derivedT,realT>::loadConfig(mx::app::appConfigurator & config)
    //Overriding the shmimMonitor setup so that these all go in the dm section
    //Otherwise, would call shmimMonitor<dm<derivedT,realT>>::loadConfig(config);
    config(derived().m_smThreadPrio, "dm.threadPrio");
+   config(derived().m_smCpuset, "dm.cpuset");
+
    config(derived().m_shmimName, "dm.shmimName");
+
+   if(derived().m_shmimName != "")
+   {  
+      m_shmimFlat = derived().m_shmimName + "00";
+      config(m_shmimFlat, "dm.shmimFlat");
   
-   m_shmimFlat = derived().m_shmimName + "00";
-   config(m_shmimFlat, "dm.shmimFlat");
-  
-   m_shmimTest = derived().m_shmimName + "02";
-   config(m_shmimTest, "dm.shmimTest");
+      m_shmimTest = derived().m_shmimName + "02";
+      config(m_shmimTest, "dm.shmimTest");
    
-   m_shmimSat = derived().m_shmimName + "ST";
-   config(m_shmimSat, "dm.shmimSat");
+
+      m_shmimSat = derived().m_shmimName + "ST";
+      config(m_shmimSat, "dm.shmimSat");
    
-   m_shmimSatPerc = derived().m_shmimName + "SP";
-   config(m_shmimSatPerc, "dm.shmimSatPerc");
+      m_shmimSatPerc = derived().m_shmimName + "SP";
+      config(m_shmimSatPerc, "dm.shmimSatPerc");
    
-   config(m_satAvgInt, "dm.satAvgInt");
-   
+      config(m_satAvgInt, "dm.satAvgInt");
+   }
+   else
+   {
+      config.isSet("dm.shmimFlat");
+      config.isSet("dm.shmimTest");
+      config.isSet("dm.shmimSat");
+      config.isSet("dm.shmimSatPerc");
+      config.isSet("dm.satAvgInt");
+   }
+
    config(m_dmWidth, "dm.width");
    config(m_dmHeight, "dm.height");
 }
@@ -732,7 +748,7 @@ int dm<derivedT,realT>::appStartup()
    
    if(sem_init(&m_satSemaphore, 0,0) < 0) return derivedT::template log<software_critical, -1>({__FILE__, __LINE__, errno,0, "Initializing sat semaphore"});
    
-   if(derived().threadStart( m_satThread, m_satThreadInit, m_satThreadID, m_satThreadProp, m_satThreadPrio, "saturation", this, satThreadStart) < 0)
+   if(derived().threadStart( m_satThread, m_satThreadInit, m_satThreadID, m_satThreadProp, m_satThreadPrio, "", "saturation", this, satThreadStart) < 0)
    {
       derivedT::template log<software_error, -1>({__FILE__, __LINE__});
       return -1;
@@ -1078,6 +1094,8 @@ int dm<derivedT,realT>::loadFlat(const std::string & intarget)
 template<class derivedT, typename realT>
 int dm<derivedT,realT>::setFlat()
 {
+   if(m_shmimFlat == "") return 0;
+
    if( ImageStreamIO_openIm(&m_flatImageStream, m_shmimFlat.c_str()) != 0)
    {
       derivedT::template log<text_log>("could not connect to flat channel " + m_shmimFlat, logPrio::LOG_WARNING);
@@ -1150,6 +1168,8 @@ int dm<derivedT,realT>::setFlat()
 template<class derivedT, typename realT>  
 int dm<derivedT,realT>::zeroFlat()
 {
+   if(m_shmimFlat == "") return 0;
+
    if( ImageStreamIO_openIm(&m_flatImageStream, m_shmimFlat.c_str()) != 0)
    {
       derivedT::template log<text_log>("could not connect to flat channel " + m_shmimFlat, logPrio::LOG_WARNING);
@@ -1355,6 +1375,8 @@ int dm<derivedT,realT>::loadTest(const std::string & intarget)
 template<class derivedT, typename realT>  
 int dm<derivedT,realT>::setTest()
 {
+   if(m_shmimTest == "") return 0;
+
    if( ImageStreamIO_openIm(&m_testImageStream, m_shmimTest.c_str()) != 0)
    {
       derivedT::template log<text_log>("could not connect to test channel " + m_shmimTest, logPrio::LOG_WARNING);
@@ -1435,6 +1457,8 @@ int dm<derivedT,realT>::setTest()
 template<class derivedT, typename realT>
 int dm<derivedT,realT>::zeroTest()
 {
+   if(m_shmimTest == "") return 0;
+
    if( ImageStreamIO_openIm(&m_testImageStream, m_shmimTest.c_str()) != 0)
    {
       derivedT::template log<text_log>("could not connect to test channel " + m_shmimTest, logPrio::LOG_WARNING);
@@ -1558,6 +1582,8 @@ int dm<derivedT,realT>::zeroAll(bool nosem)
 template<class derivedT, typename realT>
 int dm<derivedT,realT>::clearSat()
 {
+   if(m_shmimSat == "") return 0;
+
    IMAGE imageStream;
 
    std::vector<std::string> sats = {m_shmimSat, m_shmimSatPerc};
@@ -1569,6 +1595,7 @@ int dm<derivedT,realT>::clearSat()
       if( ImageStreamIO_openIm(&imageStream, shmimN.c_str()) != 0)
       {
          derivedT::template log<text_log>("could not connect to sat map " + shmimN, logPrio::LOG_WARNING);
+         return 0;
       }
    
       if( imageStream.md->size[0] != m_dmWidth)
@@ -1630,7 +1657,7 @@ void dm<derivedT,realT>::satThreadExec()
    uint32_t imsize[3] = {0,0,0};
    
    //Check for allocation to have happened.
-   while((m_accumSatMap.rows() == 0 || m_accumSatMap.cols() == 0) && !derived().shutdown())
+   while((m_shmimSat == "" || m_accumSatMap.rows() == 0 || m_accumSatMap.cols() == 0) && !derived().shutdown())
    {
       sleep(1);
    }

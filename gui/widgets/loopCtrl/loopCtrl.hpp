@@ -3,9 +3,11 @@
 #define loopCtrl_hpp
 
 
+#include <mutex>
 #include "ui_loopCtrl.h"
 
 #include "../xWidgets/xWidget.hpp"
+#include "../xWidgets/gainCtrl.hpp"
 
 namespace xqt 
 {
@@ -34,6 +36,9 @@ protected:
    
    bool m_procState {false};
    
+   std::vector<gainCtrl *> m_blockCtrls {nullptr};
+   std::mutex m_blockMutex;
+
 public:
    loopCtrl( std::string & procName,
              QWidget * Parent = 0, 
@@ -43,6 +48,10 @@ public:
    ~loopCtrl();
    
    void subscribe();
+
+   void onConnect();
+
+   void onDisconnect();
                                    
    void handleDefProperty( const pcf::IndiProperty & ipRecv /**< [in] the property which has changed*/);
    
@@ -51,25 +60,22 @@ public:
    void sendNewGain(double ng);
    void sendNewMultCoeff(double nm);
    
+   void setEnableDisable( bool tf, 
+                          bool all = true
+                        );
+
 public slots:
    void updateGUI();
-   
-   void on_button_gainScale_pressed();
-   void on_button_gainUp_pressed();
-   void on_button_gainDown_pressed();
-   void on_lineEdit_gain_returnPressed();
-   void on_button_zeroGain_pressed();
-   
-   void on_button_multcoeffScale_pressed();
-   void on_button_multcoeffUp_pressed();
-   void on_button_multcoeffDown_pressed();
-   void on_lineEdit_multcoeff_returnPressed();
-   void on_button_oneMultCoeff_pressed();
-   
+      
    void on_slider_loop_sliderReleased();
    
    void on_button_LoopZero_pressed();
    
+   void setupBlocks(int nB);
+
+signals:
+   void blocksChanged(int nB);
+
 private:
      
    Ui::loopCtrl ui;
@@ -81,11 +87,21 @@ loopCtrl::loopCtrl( std::string & procName,
 {
    ui.setupUi(this);
    
+   connect(this, SIGNAL(blocksChanged(int)), this, SLOT(setupBlocks(int)));
+
    setWindowTitle(QString(m_procName.c_str()));
-   ui.button_gainScale->setText(QString::number(m_gainScale));
    ui.label_loop_state->setProperty("isStatus", true);
-   ui.lcd_gain->setProperty("isStatus", true);
-   ui.lcd_multcoeff->setProperty("isStatus", true);
+
+   ui.gainCtrl->setup(m_procName, "loop_gain", "Global Gain");
+   ui.mcCtrl->setup(m_procName, "loop_multcoeff", "Global Mult. Coef.");
+   ui.mcCtrl->makeMultCoeffCtrl();
+   
+   
+
+   setXwFont(ui.label_LoopName);
+   setXwFont(ui.label_loop);
+   setXwFont(ui.label_loop_state);
+   setXwFont(ui.button_LoopZero);
 
    onDisconnect();
 }
@@ -97,17 +113,60 @@ loopCtrl::~loopCtrl()
 void loopCtrl::subscribe()
 {
    if(!m_parent) return;
-   
+
    m_parent->addSubscriberProperty(this, m_procName, "fsm");
    m_parent->addSubscriberProperty(this, m_procName, "loop");
    m_parent->addSubscriberProperty(this, m_procName, "loop_gain");
    m_parent->addSubscriberProperty(this, m_procName, "loop_multcoeff");
    m_parent->addSubscriberProperty(this, m_procName, "loop_processes");
    m_parent->addSubscriberProperty(this, m_procName, "loop_state");
+   m_parent->addSubscriberProperty(this, m_procName, "modes");
    
+   m_parent->addSubscriber(ui.gainCtrl);
+   m_parent->addSubscriber(ui.mcCtrl);
+
+   std::lock_guard<std::mutex> lock(m_blockMutex);
+   for(size_t n = 0; n < m_blockCtrls.size(); ++n)
+   {
+      if(m_blockCtrls[n]) m_parent->addSubscriber(m_blockCtrls[n]);
+   }
+
    return;
 }
    
+void loopCtrl::onConnect()
+{
+   setWindowTitle(QString(m_procName.c_str()));
+
+   xWidget::onConnect();
+   ui.gainCtrl->onConnect();
+   ui.mcCtrl->onConnect();
+   
+   std::lock_guard<std::mutex> lock(m_blockMutex);
+   for(size_t n = 0; n < m_blockCtrls.size(); ++n)
+   {
+      if(m_blockCtrls[n]) m_blockCtrls[n]->onConnect();
+   }
+}
+
+void loopCtrl::onDisconnect()
+{
+   std::string tit = m_procName + " (disconnected)";
+   setWindowTitle(QString(tit.c_str()));
+
+   setEnableDisable(false);
+
+   xWidget::onDisconnect();
+   ui.gainCtrl->onDisconnect();
+   ui.mcCtrl->onDisconnect();
+
+   std::lock_guard<std::mutex> lock(m_blockMutex);
+   for(size_t n = 0; n < m_blockCtrls.size(); ++n)
+   {
+      if(m_blockCtrls[n]) m_blockCtrls[n]->onDisconnect();
+   }
+}
+
 void loopCtrl::handleDefProperty( const pcf::IndiProperty & ipRecv)
 {  
    return handleSetProperty(ipRecv);
@@ -184,77 +243,41 @@ void loopCtrl::handleSetProperty( const pcf::IndiProperty & ipRecv)
       }
    }
    
+   else if(ipRecv.getName() == "modes")
+   {
+      if(ipRecv.find("blocks"))
+      {
+         size_t nB = ipRecv["blocks"].get<int>();
+
+         if(nB != m_blockCtrls.size()) emit blocksChanged(nB);
+      }
+   }
+
    updateGUI();
 }
 
-void loopCtrl::sendNewGain(double ng)
+void loopCtrl::setEnableDisable( bool tf,
+                                 bool all
+                               )
 {
-   if(ng < 0)
+   if(all)
    {
-      std::cerr << "loopCtrl: requested gain out of range, can't be < 0";
-      
-      return;
+      ui.slider_loop->setEnabled(tf);
+      ui.label_loop_state->setEnabled(tf);
    }
-   
-   try
-   {
-      pcf::IndiProperty ipFreq(pcf::IndiProperty::Number);
 
-      ipFreq.setDevice(m_procName);
-      ipFreq.setName("loop_gain");
-      ipFreq.add(pcf::IndiElement("current"));
-      ipFreq.add(pcf::IndiElement("target"));
-      ipFreq["current"] = ng;
-      ipFreq["target"] = ng;
-   
-      sendNewProperty(ipFreq);   
-   }
-   catch(...)
-   {
-      std::cerr << "libcommon INDI exception.  going on. (" << __FILE__ << " " << __LINE__ << "\n";
-   }
-}
-
-void loopCtrl::sendNewMultCoeff(double nm)
-{
-   if(nm < 0)
-   {
-      std::cerr << "loopCtrl: requested mult. coeff. out of range, can't be < 0";
+   ui.gainCtrl->setEnabled(tf);
+   ui.mcCtrl->setEnabled(tf);
       
-      nm = 0;
-   }
-   
-   if(nm > 1)
+   std::lock_guard<std::mutex> lock(m_blockMutex);
+   for(size_t n = 0; n < m_blockCtrls.size(); ++n)
    {
-      std::cerr << "loopCtrl: requested mult. coeff. out of range, can't be > 1";
-      
-      nm = 1;
-   }
-   
-   try
-   {
-      pcf::IndiProperty ipFreq(pcf::IndiProperty::Number);
-
-      ipFreq.setDevice(m_procName);
-      ipFreq.setName("loop_multcoeff");
-      ipFreq.add(pcf::IndiElement("current"));
-      ipFreq.add(pcf::IndiElement("target"));
-      ipFreq["current"] = nm;
-      ipFreq["target"] = nm;
-   
-      sendNewProperty(ipFreq);   
-   }
-   catch(...)
-   {
-      std::cerr << "libcommon INDI exception.  going on. (" << __FILE__ << " " << __LINE__ << "\n";
+      if(m_blockCtrls[n]) m_blockCtrls[n]->setEnabled(tf);
    }
 }
 
 void loopCtrl::updateGUI()
-{
-   ui.lcd_gain->display(m_gain);
-   ui.lcd_multcoeff->display(m_multcoeff);
-   
+{   
    if(!m_loopWaiting)
    {
       if(m_loopState)
@@ -271,22 +294,16 @@ void loopCtrl::updateGUI()
    {
       /// \todo Disable & zero all
       
-      return;
    }
-   
-   if(!m_procState)
+   else if(!m_procState)
    {
-      ui.slider_loop->setEnabled(false);
+      setEnableDisable(false);
       ui.label_loop_state->setText("processes off");
-      ui.label_loop_state->setEnabled(false);
-      ui.lcd_gain->setEnabled(false);
-      ui.lcd_multcoeff->setEnabled(false);
    }
    else
    {
-      ui.lcd_gain->setEnabled(true);
-      ui.lcd_multcoeff->setEnabled(true);
-      
+      setEnableDisable(true, false);
+
       if(!m_loopWaiting) 
       {
          ui.label_loop_state->setEnabled(true);
@@ -305,113 +322,6 @@ void loopCtrl::updateGUI()
    
 } //updateGUI()
 
-
-
-void loopCtrl::on_button_gainScale_pressed()
-{
-   //Can only be 0.01, 0.05, or 0.1, but we make sure floating point doesn't scew us up.  
-   //the progresion is:
-   // 0.01->0.1->0.05->0.01
-   if(m_gainScale < 0.05) //0.01
-   {
-      m_gainScale = 0.1;
-   }
-   else if(m_gainScale < 0.1) //0.05
-   {
-      m_gainScale = 0.01;
-   }
-   else //0.1
-   {
-      m_gainScale = 0.05;
-   }
-   
-   ui.button_gainScale->setText(QString::number(m_gainScale));
-}
-
-void loopCtrl::on_button_gainUp_pressed()
-{
-   double ng = m_gain + m_gainScale;
-   sendNewGain(ng);
-}
-
-void loopCtrl::on_button_gainDown_pressed()
-{
-   double ng = m_gain - m_gainScale;
-   if(ng < 0.00001) ng = 0; //Stop floating point nonsense
-   sendNewGain(ng);
-}
-
-void loopCtrl::on_lineEdit_gain_returnPressed()
-{
-   double ng = ui.lineEdit_gain->text().toDouble();
-   
-   if(ng < 0) ng = 0;
-
-   sendNewGain(ng);
-   
-   ui.lineEdit_gain->setText("");
-}
-
-void loopCtrl::on_button_zeroGain_pressed()
-{
-   sendNewGain(0.0);
-}
-
-void loopCtrl::on_button_multcoeffScale_pressed()
-{
-   //Can only be 0.001, 0.002, 0.005, or 0.01 but we make sure floating point doesn't scew us up.  
-   //the progresion is:
-   // 0.001->0.01->0.005->0.002->0.001
-   if(m_multcoeffScale < 0.002) //0.001
-   {
-      m_multcoeffScale = 0.01;
-   }
-   else if(m_multcoeffScale < 0.005) //0.002
-   {
-      m_multcoeffScale = 0.001;
-   }
-   else if(m_multcoeffScale < 0.01) //0.005
-   {
-      m_multcoeffScale = 0.002;
-   }
-   else //0.01
-   {
-      m_multcoeffScale = 0.005;
-   }
-   
-   ui.button_multcoeffScale->setText(QString::number(m_multcoeffScale));
-}
-
-void loopCtrl::on_button_multcoeffUp_pressed()
-{
-   double nm = m_multcoeff + m_multcoeffScale;
-   if(nm > 1) nm = 1;
-   sendNewMultCoeff(nm);
-}
-
-void loopCtrl::on_button_multcoeffDown_pressed()
-{
-   double nm = m_multcoeff - m_multcoeffScale;
-   if(nm < 0.00001) nm = 0; //Stop floating point nonsense
-   sendNewMultCoeff(nm);
-}
-
-void loopCtrl::on_lineEdit_multcoeff_returnPressed()
-{
-   double nm = ui.lineEdit_multcoeff->text().toDouble();
-   
-   if(nm < 0) nm = 0;
-   if(nm > 1) nm = 1;
-   
-   sendNewMultCoeff(nm);
-   
-   ui.lineEdit_multcoeff->setText("");
-}
-
-void loopCtrl::on_button_oneMultCoeff_pressed()
-{
-   sendNewMultCoeff(1.0);
-}
 
 void loopCtrl::on_slider_loop_sliderReleased()
 {
@@ -455,7 +365,31 @@ void loopCtrl::on_slider_loop_sliderReleased()
 
 void loopCtrl::on_button_LoopZero_pressed()
 {
-   std::cerr << "loop zero\n";
+   pcf::IndiProperty ipFreq(pcf::IndiProperty::Switch);
+   
+   ipFreq.setDevice(m_procName);
+   ipFreq.setName("loop_zero");
+   ipFreq.add(pcf::IndiElement("request"));
+   
+   ipFreq["request"] = pcf::IndiElement::On;
+   
+   sendNewProperty(ipFreq);
+}
+
+void loopCtrl::setupBlocks(int nB)
+{
+   std::lock_guard<std::mutex> lock(m_blockMutex);
+   
+   m_blockCtrls.resize(nB, nullptr); //I think this will call the destructor
+
+   for(int n = 0; n < nB; ++n)
+   {
+      char str[16];
+      snprintf(str, sizeof(str), "%02d", n);
+      m_blockCtrls[n] = new gainCtrl(m_procName, std::string("block") + str + "_gain", std::string("Block") + str + " Gain");
+      ui.horizontalLayout_2->addWidget(m_blockCtrls[n]);
+      if(m_parent) m_parent->addSubscriber(m_blockCtrls[n]);
+   }
 }
 
 } //namespace xqt

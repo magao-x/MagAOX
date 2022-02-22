@@ -84,6 +84,8 @@ public:
    
    static constexpr bool c_stdCamera_hasShutter = true; ///< app:dev config to tell stdCamera to expose shutter controls
 
+   static constexpr bool c_stdCamera_usesStateString = true; ///< app::dev confg to tell stdCamera to expose the state string property
+
    static constexpr bool c_edtCamera_relativeConfigPath = true; ///< app::dev config to tell edtCamera to use relative path to camera config file
    
    static constexpr bool c_frameGrabber_flippable = false; ///< app:dev config to tell framegrabber these images can not be flipped
@@ -218,6 +220,10 @@ public:
      */
    int setShutter(int sh);
    
+   std::string stateString();
+   
+   bool stateStringValid();
+
    ///@}
    
    /// Reset the EM Protection 
@@ -903,6 +909,29 @@ int ocam2KCtrl::setShutter(int sh)
    return dssShutter<ocam2KCtrl>::setShutter(sh);
 }
 
+inline
+std::string ocam2KCtrl::stateString()
+{
+   std::string ss;
+
+   ss += m_modeName + "_";
+   ss += std::to_string(m_fps) + "_";
+   ss += std::to_string(m_emGain) + "_";
+   ss += std::to_string(m_ccdTempSetpt);
+
+   return ss;
+}
+
+inline
+bool ocam2KCtrl::stateStringValid()
+{
+   if(state() == stateCodes::OPERATING && m_tempControlOnTarget)
+   {
+      return true;
+   }
+   else return false;
+}
+
 inline 
 int ocam2KCtrl::resetEMProtection()
 {
@@ -1115,15 +1144,16 @@ int ocam2KCtrl::acquireAndCheckValid()
          if(m_currImageNumber - m_lastImageNumber > 1 && m_currImageNumber - m_lastImageNumber < 100)
          { 
             //This we handle as a non-timeout -- report how many frames were skipped
-            long framesSkipped = m_currImageNumber - m_lastImageNumber;
-            //and don't `continue` to top of loop
+            long framesSkipped = m_currImageNumber - m_lastImageNumber - 1;
             
             log<text_log>("frames skipped: " + std::to_string(framesSkipped), logPrio::LOG_ERROR);
             
-            m_nextMode = m_modeName;
-            m_reconfig = 1;
+	    // and go on and try to use it.
+	    //
+            //m_nextMode = m_modeName;
+            //m_reconfig = 1;
            
-            return 1;
+            //return 1;
             
          }
          else //but if it's any bigger or < 0, it's probably garbage

@@ -413,7 +413,7 @@ int sysMonitor::appStartup()
       return log<software_error,-1>({__FILE__,__LINE__});
    }
    
-   if(threadStart( m_setlatThread, m_setlatThreadInit, m_setlatThreadID, m_setlatThreadProp, m_setlatThreadPrio, "set latency", this, setlatThreadStart)  < 0)
+   if(threadStart( m_setlatThread, m_setlatThreadInit, m_setlatThreadID, m_setlatThreadProp, m_setlatThreadPrio, "", "set_latency", this, setlatThreadStart)  < 0)
    {
       log<software_critical>({__FILE__, __LINE__});
       return -1;
@@ -1201,6 +1201,18 @@ void sysMonitor::setlatThreadExec()
          if(fd <= 0)
          {
             elevatedPrivileges ep(this);
+          
+            for(size_t cpu =0; cpu < m_coreLoads.size(); ++cpu) ///\todo this needs error checks
+            {
+               std::string cpuFile = "/sys/devices/system/cpu/cpu";
+               cpuFile += std::to_string(cpu);
+               cpuFile += "/cpufreq/scaling_governor";
+               int wfd = open( cpuFile.c_str(), O_WRONLY);
+               write(wfd,"performance",sizeof("performance"));
+               close(wfd);     
+            }
+            log<text_log>("set governor to performance", logPrio::LOG_NOTICE);
+
             fd = open("/dev/cpu_dma_latency", O_WRONLY);
             
             if(fd <=0) log<software_error>({__FILE__,__LINE__,"error opening cpu_dma_latency"});
@@ -1216,6 +1228,8 @@ void sysMonitor::setlatThreadExec()
                   log<text_log>("set latency to 0", logPrio::LOG_NOTICE);
                }
             }
+
+
          }
       }
       else
@@ -1225,6 +1239,18 @@ void sysMonitor::setlatThreadExec()
             close(fd);
             fd = 0;
             log<text_log>("restored CPU latency to default", logPrio::LOG_NOTICE);
+         
+            elevatedPrivileges ep(this);
+            for(size_t cpu =0; cpu < m_coreLoads.size(); ++cpu) ///\todo this needs error checks
+            {
+               std::string cpuFile = "/sys/devices/system/cpu/cpu";
+               cpuFile += std::to_string(cpu);
+               cpuFile += "/cpufreq/scaling_governor";
+               int wfd = open( cpuFile.c_str(), O_WRONLY);
+               write(wfd,"powersave",sizeof("powersave"));
+               close(wfd);  
+            }
+            log<text_log>("set governor to powersave", logPrio::LOG_NOTICE);
          }
       }
       

@@ -46,6 +46,8 @@ dependencies:
   - pyyaml
   - imageio
   - xxhash
+  # for cacao
+  - pybind11 
 
   - pip:
       - hcipy

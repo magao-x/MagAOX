@@ -53,7 +53,7 @@ apps/cacaoInterface/cacaoInterface
 #d
 apps/dmMode/dmMode
 apps/dmModulator/dmModulator
-
+apps/dmSpeckle/
 
 #f
 apps/filterWheelCtrl/filterWheelCtrl
