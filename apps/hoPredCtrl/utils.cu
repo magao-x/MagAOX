@@ -30,11 +30,11 @@ __global__ void gpu_print_buffer(float* data, int batch_count, int nrow, int nco
 	// int index = blockIdx.x * blockDim.x + threadIdx.x;
 	// int stride = blockDim.x * gridDim.x;
 
-	if(row_max == -1){
+	if(row_max == -1 || row_max > nrow){
 		row_max = nrow;
 	}
 
-	if(col_max == -1){
+	if(col_max == -1 || col_max > ncol){
 		col_max = ncol;
 	}
 
