@@ -36,7 +36,6 @@ namespace DDSPC
 		//	m_exploration_signal->cpu_data[0][kk] = 0.01 * kk;
 		// }
 		m_exploration_signal->to_gpu();
-		
 		m_exploration_buffer = nullptr;
 		
 		m_command = make_col_vector(0.0, num_modes, 1);

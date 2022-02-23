@@ -7,6 +7,8 @@
 namespace DDSPC
 {
 
+unsigned long long rdtsc();
+
 /*
 	The following two defines are used to get the correct index for StridedBatched CUDA functions.
 */

@@ -15,8 +15,6 @@ class PredictiveController{
 	private:
 		cublasHandle_t handle;
 
-		DistributedAutoRegressiveController* controller;
-
 		int m_num_history;
 		int m_num_future;
 		int m_num_modes;
@@ -39,6 +37,9 @@ class PredictiveController{
 	protected:
 
 	public:
+
+		DistributedAutoRegressiveController* controller;
+		
 		Matrix* m_measurement;
 		
 		PredictiveController(int num_history, int num_future, int num_modes, int num_measurements, float gamma, float lambda, float P0);
