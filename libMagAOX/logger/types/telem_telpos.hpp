@@ -12,6 +12,7 @@
 
 #include "generated/telem_telpos_generated.h"
 #include "flatbuffer_log.hpp"
+#include "../logMeta.hpp"
 
 #include <cmath>
 
@@ -92,32 +93,69 @@ struct telem_telpos : public flatbuffer_log
    
    }
    
-   static double getDouble( flatlogs::bufferPtrT & buffer,
-                            member m 
-                          )
+   static double epoch( void * msgBuffer )
    {
-      switch(m)
-      {
-         case em_epoch:
-            return GetTelem_telpos_fb(flatlogs::logHeader::messageBuffer(buffer))->epoch();
-         case em_ra:
-            return GetTelem_telpos_fb(flatlogs::logHeader::messageBuffer(buffer))->ra();
-         case em_dec:
-            return GetTelem_telpos_fb(flatlogs::logHeader::messageBuffer(buffer))->dec();
-         case em_el:
-            return GetTelem_telpos_fb(flatlogs::logHeader::messageBuffer(buffer))->el();
-         case em_ha:
-            return GetTelem_telpos_fb(flatlogs::logHeader::messageBuffer(buffer))->ha();
-         case em_am:
-            return GetTelem_telpos_fb(flatlogs::logHeader::messageBuffer(buffer))->am();
-         case em_rotoff:
-            return GetTelem_telpos_fb(flatlogs::logHeader::messageBuffer(buffer))->rotoff();
-         default:
-            return nan("");
-      }
+      auto fbs = GetTelem_telpos_fb(msgBuffer);
+      return fbs->epoch();
+   }
+
+   static double ra( void * msgBuffer )
+   {
+      auto fbs = GetTelem_telpos_fb(msgBuffer);
+      return fbs->ra();
+   }
+
+   static double dec( void * msgBuffer )
+   {
+      auto fbs = GetTelem_telpos_fb(msgBuffer);
+      return fbs->dec();
+   }
+
+   static double el( void * msgBuffer )
+   {
+      auto fbs = GetTelem_telpos_fb(msgBuffer);
+      return fbs->el();
+   }
+
+   static double ha( void * msgBuffer )
+   {
+      auto fbs = GetTelem_telpos_fb(msgBuffer);
+      return fbs->ha();
+   }
+
+   static double am( void * msgBuffer )
+   {
+      auto fbs = GetTelem_telpos_fb(msgBuffer);
+      return fbs->am();
+   }
+
+   static double ro( void * msgBuffer )
+   {
+      auto fbs = GetTelem_telpos_fb(msgBuffer);
+      return fbs->rotoff();
    }
    
-   
+   /// Get the logMetaDetail for a member by name
+   /**
+     * \returns the a logMetaDetail filled in with the appropriate details
+     * \returns an empty logmegaDetail if member not recognized
+     */ 
+   static logMetaDetail getAccessor( const std::string & member /**< [in] the name of the member */ )
+   {
+      if(     member == "epoch") return logMetaDetail({"EPOCH", logMeta::valTypes::Double, logMeta::metaTypes::Continuous, (void *) &epoch});
+      else if(member == "ra") return logMetaDetail({"RA", logMeta::valTypes::Double, logMeta::metaTypes::Continuous, (void *) &ra}); 
+      else if(member == "dec") return logMetaDetail({"DEC", logMeta::valTypes::Double, logMeta::metaTypes::Continuous, (void *) &dec}); 
+      else if(member == "el") return logMetaDetail({"EL", logMeta::valTypes::Double, logMeta::metaTypes::Continuous, (void *) &el}); 
+      else if(member == "ha") return logMetaDetail({"HA", logMeta::valTypes::Double, logMeta::metaTypes::Continuous, (void *) &ha}); 
+      else if(member == "am") return logMetaDetail({"AM", logMeta::valTypes::Double, logMeta::metaTypes::Continuous, (void *) &am});
+      else if(member == "ro") return logMetaDetail({"RO", logMeta::valTypes::Double, logMeta::metaTypes::Continuous, (void *) &ro});  
+      else
+      {
+         std::cerr << "No string member " << member << " in telem_telpos\n";
+         return logMetaDetail();
+      }
+   }
+
 }; //telem_telpos
 
 

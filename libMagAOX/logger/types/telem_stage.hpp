@@ -12,6 +12,7 @@
 
 #include "generated/telem_stage_generated.h"
 #include "flatbuffer_log.hpp"
+#include "../logMeta.hpp"
 
 namespace MagAOX
 {
@@ -36,9 +37,9 @@ struct telem_stage : public flatbuffer_log
    struct messageT : public fbMessage
    {
       ///Construct from components
-      messageT( const int8_t & moving,           ///<[in] whether or not stage is in motion
+      messageT( const int8_t & moving,         ///<[in] whether or not stage is in motion
                 const double & preset,         ///<[in] current position of stage in preset units
-                const std::string & presetName ///<[in] current prest name
+                const std::string & presetName ///<[in] current preset name
               )
       {
          auto _name = builder.CreateString(presetName);
@@ -81,7 +82,7 @@ struct telem_stage : public flatbuffer_log
    
    }
    
-   static int8_t moving( void * msgBuffer )
+   static int moving( void * msgBuffer )
    {
       auto fbs = GetTelem_stage_fb(msgBuffer);
       return fbs->moving();
@@ -103,20 +104,20 @@ struct telem_stage : public flatbuffer_log
       else return std::string();
    }
    
-   /// Get pointer to the accessor for a member by name 
+   /// Get the logMetaDetail for a member by name
    /**
      * \returns the function pointer cast to void*
      * \returns -1 for an unknown member
      */ 
-   static void * getAccessor( const std::string & member /**< [in] the name of the member */ )
+   static logMetaDetail getAccessor( const std::string & member /**< [in] the name of the member */ )
    {
-      if(member == "moving") return (void *) &moving;
-      else if(member == "preset") return (void *) &preset;
-      else if(member == "presetName") return (void *) &presetName;
+      if(     member == "moving") return logMetaDetail({"MOVING", logMeta::valTypes::Int, logMeta::metaTypes::State, (void *) &moving}); 
+      else if(member == "preset") return logMetaDetail({"PRESET NUMBER", logMeta::valTypes::Double, logMeta::metaTypes::State, (void *) &preset}); 
+      else if(member == "presetName") return logMetaDetail({"PRESET NAME", logMeta::valTypes::String, logMeta::metaTypes::State, (void *) &presetName}); 
       else
       {
-         std::cerr << "No string member " << member << " in telem_telcat\n";
-         return 0;
+         std::cerr << "No string member " << member << " in telem_stage\n";
+         return logMetaDetail();
       }
    }
    
