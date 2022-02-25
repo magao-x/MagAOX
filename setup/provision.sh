@@ -157,6 +157,7 @@ fi
 
 if [[ $MAGAOX_ROLE == AOC || $MAGAOX_ROLE == ICC || $MAGAOX_ROLE == RTC || $MAGAOX_ROLE == TOC || $MAGAOX_ROLE == TIC ]]; then
     sudo bash -l "$DIR/steps/configure_chrony.sh"
+    sudo bash -l "$DIR/steps/configure_podman.sh"
 fi
 
 # Configure executable search path

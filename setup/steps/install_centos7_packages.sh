@@ -56,6 +56,9 @@ yum install -y \
     sysstat \
     fuse \
     psmisc \
+    podman \
+    nethogs \
+    shadow-utils \
 ;
 
 alternatives --install /usr/local/bin/cmake cmake /usr/bin/cmake3 20 \
