@@ -71,15 +71,7 @@ namespace DDSPC
 	void PredictiveController::create_exploration_buffer(float rms, int exploration_buffer_size){
 		std::cout << " Create buffer with size: " << exploration_buffer_size << std::endl;
 		m_exploration_index = 0;
-		// Create the buffer size
-		// We do this by finding the next power of two!
-		// With the bit shifts we also make a bit mask which will make it easier to cycle through the buffer.
-		auto num_bits = find_next_power_of_2(exploration_buffer_size + 1);
-		m_exploration_buffer_size = exploration_buffer_size;
-		// for(unsigned long long int i =0; i < num_bits ; i++){
-		// 	m_exploration_buffer_size |= 1 << i;
-		// }
-		
+
 		// First clean the current_buffer and only if it exists
 		if(m_exploration_buffer){
 			delete m_exploration_buffer;
@@ -93,12 +85,7 @@ namespace DDSPC
 		if(m_exploration_index < m_exploration_buffer_size){
 			// Copy the data from the data buffer to the new vector
 			cudaMemcpy(m_exploration_signal->gpu_data[0], m_exploration_buffer->gpu_data[m_exploration_index], m_num_modes * sizeof(float), cudaMemcpyDeviceToDevice);
-			
-			//gpu_col_copy(m_exploration_signal, 0, 0, m_exploration_buffer, 0, m_exploration_index & m_exploration_buffer_size);
 			m_exploration_index += 1;
-			// if(m_exploration_index == m_exploration_buffer_size){
-			// 	m_exploration_index -= m_exploration_buffer_size;
-			// }
 		}else{
 			cudaMemset(m_exploration_signal->gpu_data[0], 0, m_num_modes * sizeof(float));
 		}
@@ -126,6 +113,10 @@ namespace DDSPC
 
 		// Add data to controller
 		controller->add_measurement(m_measurement);
+	};
+
+	void PredictiveController::set_zero(){
+		m_command->set_to_zero();
 	};
 
 	float* PredictiveController::get_command(float clip_val){

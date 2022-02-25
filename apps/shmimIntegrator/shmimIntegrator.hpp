@@ -307,9 +307,9 @@ void shmimIntegrator::setupConfig()
    frameGrabberT::setupConfig(config);
    
    config.add("integrator.nAverage", "", "integrator.nAverage", argType::Required, "integrator", "nAverage", false, "unsigned", "The default number of frames to average.  Default 10. Can be changed via INDI.");
-   config.add("integrator.fpsSource", "", "integrator.fpsSource", argType::Required, "integrator", "fpsSource", false, "string", "///< Device name for getting fps if time-based averaging is used.  This device should have *.fps.current.");
+   config.add("integrator.fpsSource", "", "integrator.fpsSource", argType::Required, "integrator", "fpsSource", false, "string", "Device name for getting fps if time-based averaging is used.  This device should have *.fps.current.");
 
-   config.add("integrator.avgTime", "", "integrator.avgTime", argType::Required, "integrator", "avgTime", false, "float", "///< If non zero, then m_nAverage adjusts automatically to keep a constant averaging time [sec].  Default 0. Can be changed via INDI.");
+   config.add("integrator.avgTime", "", "integrator.avgTime", argType::Required, "integrator", "avgTime", false, "float", "If non zero, then m_nAverage adjusts automatically to keep a constant averaging time [sec].  Default 0. Can be changed via INDI.");
 
    config.add("integrator.nUpdate", "", "integrator.nUpdate", argType::Required, "integrator", "nUpdate", false, "unsigned", "The rate at which to update the average.  If 0 < m_nUpdate < m_nAverage then this is a moving averager. Default 0.  If 0, then it is a simple average.");
    
@@ -582,7 +582,7 @@ int shmimIntegrator::allocate(const dev::shmimT & dummy)
       m_nAverage = m_avgTime * m_fps;
       log<text_log>("set nAverage to " + std::to_string(m_nAverage) + " based on FPS", logPrio::LOG_NOTICE);
    }
-   else if(m_avgTime > 0 && m_fps > 0) //Haven't gotten the update yet so we keep going for now
+   else if(m_avgTime > 0 && m_fps == 0) //Haven't gotten the update yet so we keep going for now
    {
       if(m_nAverage != m_nAverageDefault)
       {

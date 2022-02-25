@@ -180,13 +180,12 @@ protected:
 
 	// The control parameters
 	pcf::IndiProperty m_indiP_lambda;
+	pcf::IndiProperty m_indiP_clipval;
 	// pcf::IndiProperty m_indiP_gamma;
 	// pcf::IndiProperty m_indiP_inv_cov;
 
 	/*
 		TODO:
-			2) Add a check for closed-loop operation in model/buffer reset.
-			3) Make clip value accesible through INDI.
 			4) Set gamma and inverse covariance.
 			5) Create a Double variant? Use a typedef for the variables.
 			6) Create a GUI.
@@ -207,6 +206,7 @@ protected:
 	INDI_NEWCALLBACK_DECL(hoPredCtrl, m_indiP_learningSteps);
 	INDI_NEWCALLBACK_DECL(hoPredCtrl, m_indiP_explorationRms);
 	INDI_NEWCALLBACK_DECL(hoPredCtrl, m_indiP_lambda);
+	INDI_NEWCALLBACK_DECL(hoPredCtrl, m_indiP_clipval);
 
 public:
    /// Default c'tor.
@@ -291,10 +291,16 @@ void hoPredCtrl::setupConfig()
 	config.add("parameters.clip_val", "", "parameters.clip_val", argType::Required, "parameters", "clip_val", false, "float", "The update clip value.");
 	
 	//
-	config.add("parameters.exploration_steps", "", "parameters.exploration_steps", argType::Required, "parameters", "exploration_steps", false, "int", "The update clip value.");
 	config.add("parameters.learning_steps", "", "parameters.learning_steps", argType::Required, "parameters", "learning_steps", false, "int", "The update clip value.");
+	config.add("parameters.exploration_steps", "", "parameters.exploration_steps", argType::Required, "parameters", "exploration_steps", false, "int", "The update clip value.");
 	config.add("parameters.exploration_rms", "", "parameters.exploration_rms", argType::Required, "parameters", "exploration_rms", false, "float", "The update clip value.");
-  
+
+	// Read in the learning parameters as a vector.
+	// config.add("parameters.exploration_steps", "", "parameters.exploration_steps",  argType::Required, "parameters", "exploration_steps", false, "vector<int>", "The number of steps for each training iteration.");
+	// config.add("parameters.exploration_rms", "", "parameters.exploration_rms",  argType::Required, "parameters", "exploration_rms", false, "vector<double>", "The rms for each training iteration.");
+	// config.add("parameters.exploration_lambda", "", "parameters.exploration_lambda",  argType::Required, "parameters", "exploration_lambda", false, "vector<double>", "The regularization for each training iteration.");
+
+	//
 	config.add("parameters.channel", "", "parameters.channel", argType::Required, "parameters", "channel", false, "string", "The DM channel to control.");
 }
 
@@ -381,6 +387,8 @@ int hoPredCtrl::appStartup()
 
 	createStandardIndiNumber<float>( m_indiP_lambda, "lambda", 0, 1000.0, 0.0001, "%0.3f", "Regularization", "Learning control");
 	registerIndiPropertyNew( m_indiP_lambda, INDI_NEWCALLBACK(m_indiP_lambda) );  
+	createStandardIndiNumber<float>( m_indiP_clipval, "clipval", 0, 1000.0, 0.0001, "%0.3f", "Regularization", "Learning control");
+	registerIndiPropertyNew( m_indiP_clipval, INDI_NEWCALLBACK(m_indiP_clipval) );  
 
 	// createStandardIndiNumber<int>( m_indiP_inv_cov, "lambda", 0, 1e8, 0.1, "%0.3f", "Inverse Covariance", "Learning control");
 	// registerIndiPropertyNew( m_indiP_inv_cov, INDI_NEWCALLBACK(m_indiP_inv_cov) );  
@@ -424,6 +432,7 @@ int hoPredCtrl::appLogic()
 	updateIfChanged(m_indiP_explorationRms, "current", m_exploration_rms);
 	// updateIfChanged(m_indiP_gamma, "current", m_gamma);
 	updateIfChanged(m_indiP_lambda, "current", m_lambda);
+	updateIfChanged(m_indiP_clipval, "current", m_clip_val);
 	// updateIfChanged(m_indiP_inv_cov, "current", m_inv_covariance);
 
 	if(m_is_closed_loop){
@@ -551,7 +560,7 @@ int hoPredCtrl::allocate(const dev::shmimT & dummy)
 
 	duration = 0;
 	iterations = 0;
-	m_is_closed_loop = true;
+	m_is_closed_loop = false;
 
 	return 0;
 }
@@ -713,11 +722,9 @@ int hoPredCtrl::processImage( void * curr_src,
 inline
 int hoPredCtrl::zero()
 {
-	// m_shaped_command.setZero();
-	// Reset buffer and controller too?
-
+	m_shaped_command.setZero();
+	send_dm_command();
 	return 0;
-      
 }
 
 inline
@@ -828,6 +835,7 @@ INDI_NEWCALLBACK_DEFN(hoPredCtrl, m_indiP_explorationRms )(const pcf::IndiProper
 	std::lock_guard<std::mutex> guard(m_indiMutex);
 
 	m_exploration_rms = target;
+	std::cout << "New expl. rms: " << m_exploration_rms << "\n";
 
 	updateIfChanged(m_indiP_explorationRms, "target", m_exploration_rms);
 
@@ -866,6 +874,40 @@ INDI_NEWCALLBACK_DEFN(hoPredCtrl, m_indiP_lambda )(const pcf::IndiProperty &ipRe
 
 	return 0;
 }
+
+INDI_NEWCALLBACK_DEFN(hoPredCtrl, m_indiP_clipval )(const pcf::IndiProperty &ipRecv)
+{
+	if(ipRecv.getName() != m_indiP_clipval.getName()){
+		log<software_error>({__FILE__,__LINE__, "wrong INDI property received."});
+		return -1;
+	}
+
+	float current = -1;
+	float target = -1;
+
+	if(ipRecv.find("current"))
+		current = ipRecv["current"].get<float>();
+
+	if(ipRecv.find("target"))
+		target = ipRecv["target"].get<float>();
+
+	if(target == -1) target = current;
+
+	if(target == -1)
+		return 0;
+
+	std::lock_guard<std::mutex> guard(m_indiMutex);
+	if(!m_is_closed_loop){
+		m_clip_val = target;
+		// controller->set_new_regularization(m_lambda);
+		updateIfChanged(m_indiP_clipval, "target", m_clip_val);
+	}else{
+		 log<text_log>("Clip valua not changed. Loop is still running.", logPrio::LOG_NOTICE);
+	}
+
+	return 0;
+}
+
 /*
 INDI_NEWCALLBACK_DEFN(hoPredCtrl, m_indiP_inv_cov )(const pcf::IndiProperty &ipRecv)
 {
@@ -1043,8 +1085,14 @@ INDI_NEWCALLBACK_DEFN(hoPredCtrl, m_indiP_zeroRequest )(const pcf::IndiProperty 
 
 	if( ipRecv["request"].getSwitchState() == pcf::IndiElement::On)
 	{
-		std::lock_guard<std::mutex> guard(m_indiMutex);
-		m_shaped_command.setZero();
+		
+		if(!m_is_closed_loop){
+			zero();
+			controller->set_zero();
+		}else{
+			m_shaped_command.setZero();
+		}
+
 		updateSwitchIfChanged(m_indiP_zeroRequest, "toggle", pcf::IndiElement::Off, INDI_IDLE);
 	}
    

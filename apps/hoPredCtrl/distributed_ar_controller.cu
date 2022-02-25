@@ -321,7 +321,6 @@ Matrix* DistributedAutoRegressiveController::get_command(float clip_val, Matrix*
 	
 	// Copy the new measurement into our data buffer
 	gpu_col_copy(command_buffer, 0, buffer_index & buffer_size, delta_command);
-	
 	command->add(delta_command);
 
 	// Integrate on the delta_command into command
