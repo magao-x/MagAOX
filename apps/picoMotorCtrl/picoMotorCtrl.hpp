@@ -382,7 +382,7 @@ int picoMotorCtrl::appStartup()
       }
       
       //Here we start each channel thread, with 0 R/T prio.
-      threadStart( *it->second.m_thread, it->second.m_threadInit, it->second.m_threadID, it->second.m_threadProp, 0, it->second.m_name, &it->second, channelThreadStart);
+      threadStart( *it->second.m_thread, it->second.m_threadInit, it->second.m_threadID, it->second.m_threadProp, 0, "", it->second.m_name, &it->second, channelThreadStart);
    }
    
    //Install empty signal handler for USR1, which is used to interrupt sleeps in the channel threads.
