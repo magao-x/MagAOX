@@ -325,7 +325,7 @@ main (int ac, char *av[])
 static void
 logDrivers (int ac, char *av[])
 {
-	char buf[2048];
+	char buf[32768]; //Just make huge.  2048 was too small.
 	int i, l;
 
 	l = snprintf (buf,sizeof(buf), "startup: ");

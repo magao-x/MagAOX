@@ -12,6 +12,7 @@
 
 #include "generated/telem_zaber_generated.h"
 #include "flatbuffer_log.hpp"
+#include "../logMeta.hpp"
 
 namespace MagAOX
 {
@@ -36,9 +37,9 @@ struct telem_zaber : public flatbuffer_log
    struct messageT : public fbMessage
    {
       ///Construct from components
-      messageT( const double & pos,     ///<[in] stage position in mm
-                const double & rawPos,  ///<[in] stage raw position, in counts
-                const double & temp     ///<[in] stage temperature
+      messageT( const float & pos,     ///<[in] stage position in mm
+                const float & rawPos,  ///<[in] stage raw position, in counts
+                const float & temp     ///<[in] stage temperature
               )
       {         
          auto fp = CreateTelem_zaber_fb(builder, pos, rawPos, temp);
@@ -72,9 +73,44 @@ struct telem_zaber : public flatbuffer_log
    
    }
    
+   static float pos( void * msgBuffer )
+   {
+      auto fbs = GetTelem_zaber_fb(msgBuffer);
+      return fbs->pos();
+   }
+
+   static float rawPos( void * msgBuffer )
+   {
+      auto fbs = GetTelem_zaber_fb(msgBuffer);
+      return fbs->rawPos();
+   }
+
+   static float temp( void * msgBuffer )
+   {
+      auto fbs = GetTelem_zaber_fb(msgBuffer);
+      return fbs->temp();
+   }
+
+   /// Get the logMetaDetail for a member by name
+   /**
+     * \returns the a logMetaDetail filled in with the appropriate details
+     * \returns an empty logmegaDetail if member not recognized
+     */ 
+   static logMetaDetail getAccessor( const std::string & member /**< [in] the name of the member */ )
+   {
+      if(     member == "pos") return logMetaDetail({"POS", logMeta::valTypes::Float, logMeta::metaTypes::Continuous, (void *) &pos});
+      else if(member == "rawPos") return logMetaDetail({"COUNTS", logMeta::valTypes::Float, logMeta::metaTypes::Continuous, (void *) &rawPos}); 
+      else if(member == "temp") return logMetaDetail({"TEMP", logMeta::valTypes::Float, logMeta::metaTypes::Continuous, (void *) &temp}); 
+      else
+      {
+         std::cerr << "No string member " << member << " in telem_zaber\n";
+         return logMetaDetail();
+      }
+   }
+
 }; //telem_zaber
 
-timespec telem_zaber::lastRecord = {0,0};
+
 
 } //namespace logger
 } //namespace MagAOX

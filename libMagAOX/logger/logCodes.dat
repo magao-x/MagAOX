@@ -47,6 +47,8 @@ telem_pico               20060    telem_pico
 
 telem_observer           20070    telem_observer
 
+telem_rhusb              20100    telem_rhusb
+
 telem_temps              20250    telem_temps
 
 telem_stdcam             20260    telem_stdcam
@@ -60,3 +62,5 @@ telem_cooler             20850    telem_cooler
 
 telem_chrony_status      20860    telem_chrony_status
 telem_chrony_stats       20861    telem_chrony_stats
+
+telem_dmspeck            20890    telem_dmspeck

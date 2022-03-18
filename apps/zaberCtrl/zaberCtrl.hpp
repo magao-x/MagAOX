@@ -68,6 +68,8 @@ protected:
    double m_pos {0}; ///< Current position in mm
    double m_tgtPos {0}; ///< Target position in mm.
 
+   int m_homingState{0}; ///< The homing state, tracks the stages of homing.
+   
 public:
    /// Default c'tor.
    zaberCtrl();
@@ -307,6 +309,27 @@ int zaberCtrl::appLogic()
       return 0;
    }
    
+   if(state() == stateCodes::NOTHOMED)
+   {
+      if(m_powerOnHome) startHoming();
+   }
+   
+   if(state() == stateCodes::HOMING)
+   {
+      if(m_homingState == 2)
+      {
+         if(m_homePreset >= 0)
+         {
+            m_preset_target = m_presetPositions[m_homePreset];
+            std::cerr << m_preset_target << "\n";
+            
+            updateIfChanged(m_indiP_preset, "target",  m_preset_target, INDI_BUSY);
+            moveTo(m_preset_target);
+         }
+         
+         m_homingState = 0;
+      }
+   }
    //Otherwise we don't do anything differently
    std::lock_guard<std::mutex> guard(m_indiMutex);
    
@@ -391,6 +414,7 @@ int zaberCtrl::startHoming()
    indiP_stageHome.add(pcf::IndiElement(m_stageName));
    
    m_moving = 2;
+   m_homingState = 1;
    if( sendNewProperty(indiP_stageHome, m_stageName, "1") < 0 ) return log<software_error,-1>({__FILE__,__LINE__});
    
    return 0;
@@ -585,11 +609,19 @@ INDI_SETCALLBACK_DEFN( zaberCtrl, m_indiP_stageState)(const pcf::IndiProperty &i
    else if(sstr == "HOMING") 
    {
       state(stateCodes::HOMING);
+      m_homingState = 1;
       m_moving = 2;
    }
    else if(sstr == "READY") 
    {
-      state(stateCodes::READY);
+      if(m_homingState == 0)
+      {
+         state(stateCodes::READY);
+      }
+      else
+      {
+         m_homingState = 2;
+      }
       m_moving = 0;
    }
    else if(sstr == "OPERATING") 

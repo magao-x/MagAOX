@@ -30,6 +30,28 @@ namespace indi
 #define INDI_ALERT (pcf::IndiProperty::Alert)
   
 
+/// Add a standard INDI Text element
+/**
+  * \returns 0 on success 
+  * \returns -1 on error
+  */ 
+inline
+int addTextElement( pcf::IndiProperty & prop, ///< [out] the property to which to add the elemtn
+                    const std::string & name,  ///< [in] the name of the element
+                    const std::string & label = "" ///< [in] [optional] the GUI label suggestion for this property
+                  )                                                
+{
+   prop.add(pcf::IndiElement(name, 0));
+      
+   //Don't set "" just in case libcommon does something with defaults
+   if(label != "")
+   {
+      prop[name].setLabel(label);
+   }
+   
+   return 0;
+}
+
 
 /// Add a standard INDI Number element
 /**
@@ -92,9 +114,15 @@ void updateIfChanged( pcf::IndiProperty & p,   ///< [in/out] The property contai
          indiDriver->sendSetProperty (p);
       }
    }
+   catch(std::exception & e)
+   {
+      std::cerr << "Exception caught at " << __FILE__ << " " << __LINE__ << " ";
+      std::cerr << "from " << p.getName() << "." << el << ": ";
+      std::cerr << e.what() << "\n";
+   }
    catch(...)
    {
-      std::cerr << "INDI Exception at " << __FILE__ << " " << __LINE__ << "\n";
+      std::cerr << "Exception caught at " << __FILE__ << " " << __LINE__ << " ";
       std::cerr << "from " << p.getName() << "." << el << "\n";
    }
    
@@ -144,12 +172,17 @@ void updateIfChanged( pcf::IndiProperty & p,   ///< [in/out] The property contai
          indiDriver->sendSetProperty (p);
       }
    }
+   catch(std::exception & e)
+   {
+      std::cerr << "Exception caught at " << __FILE__ << " " << __LINE__ << " ";
+      std::cerr << "from " << p.getName() << "." << els[n] << ": ";
+      std::cerr << e.what() << "\n";
+   }
    catch(...)
    {
-      std::cerr << "INDI Exception at " << __FILE__ << " " << __LINE__ << "\n";
+      std::cerr << "Exception caught at " << __FILE__ << " " << __LINE__ << " ";
       std::cerr << "from " << p.getName() << "." << els[n] << "\n";
-   }
-   
+   }   
 }
 
 /// Update the value of the INDI element, but only if it has changed.

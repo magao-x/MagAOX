@@ -83,6 +83,28 @@ iosT & stdShortFormat( iosT & ios, ///< [out] the iostream to output the log to
    return ios;
 }
 
+/// Worker function that formats a log into the standard text representation.
+/** 
+  *
+  * \ingroup logformat
+  */
+template<typename logT, typename iosT>
+iosT & minFormat( iosT & ios, ///< [out] the iostream to output the log too
+                  bufferPtrT & logBuffer ///< [in] the binary log buffer to output
+                )
+{
+   logPrioT prio;
+   eventCodeT ec;
+   timespecX ts;
+   msgLenT len;
+
+   logHeader::extractBasicLog( prio, ec, ts, len, logBuffer);
+
+   ios << priorityString(prio) << " " << logT::msgString(logHeader::messageBuffer(logBuffer) , len);
+   
+   return ios;
+}
+
 } //namespace flatlogs
 
 #endif //flatlogs_logStdFormat_hpp

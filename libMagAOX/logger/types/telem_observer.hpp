@@ -85,12 +85,53 @@ struct telem_observer : public flatbuffer_log
    
    }
    
+   static std::string email( void * msgBuffer )
+   {
+      auto fbs = GetTelem_observer_fb(msgBuffer);
+      if(fbs->email() != nullptr)
+      {
+         return std::string(fbs->email()->c_str());
+      }
+      else return "";
+   }
 
+   static std::string obsName( void * msgBuffer )
+   {
+      auto fbs = GetTelem_observer_fb(msgBuffer);
+      if(fbs->email() != nullptr)
+      {
+         return std::string(fbs->obsName()->c_str());
+      }
+      else return "";
+   }
+
+   static bool observing( void * msgBuffer )
+   {
+      auto fbs = GetTelem_observer_fb(msgBuffer);
+      return fbs->observing();
+   }
+
+   /// Get the logMetaDetail for a member by name
+   /**
+     * \returns the a logMetaDetail filled in with the appropriate details
+     * \returns an empty logmegaDetail if member not recognized
+     */ 
+   static logMetaDetail getAccessor( const std::string & member /**< [in] the name of the member */ )
+   {
+      if(     member == "email")     return logMetaDetail({"EMAIL", logMeta::valTypes::String, logMeta::metaTypes::State, (void *) &email});
+      else if(member == "obsName")   return logMetaDetail({"NAME", logMeta::valTypes::String, logMeta::metaTypes::State, (void *) &obsName}); 
+      else if(member == "observing") return logMetaDetail({"OBSERVING", logMeta::valTypes::Bool, logMeta::metaTypes::State, (void *) &observing}); 
+      else
+      {
+         std::cerr << "No string member " << member << " in telem_observer\n";
+         return logMetaDetail();
+      }
+   }
    
    
 }; //telem_observer
 
-timespec telem_observer::lastRecord = {0,0};
+
 
 } //namespace logger
 } //namespace MagAOX

@@ -100,9 +100,13 @@ def _read_processes(filepath):
     processes = {}
     with open(filepath) as procfile:
         for line in procfile:
-            if line[0] == '#':
+            if line[0] == '#' or len(line.strip()) == 0:
                 continue
-            process_name, executable = line.strip().split()
+            try:
+                process_name, executable = line.strip().split()
+            except ValueError:
+                failure(f"Could not parse line {repr(line)} from {filepath}")
+                raise
             processes[process_name] = executable
     return processes
 
@@ -232,13 +236,14 @@ def _indiserver_startup(process_name, executable_name):
     for proc in psutil.process_iter():
         with proc.oneshot():
             try:
+                cmdline = proc.cmdline()
                 exe = proc.exe()
             except (psutil.NoSuchProcess, psutil.AccessDenied):
                 continue
-            if exe == '/opt/MagAOX/bin/xindidriver' and proc.ppid() == 1:
+            if '/opt/MagAOX/drivers' in exe and proc.ppid() == 1:
                 # this proc is a zombie (reparented to PID 1)
                 _run_as_xsup(f'kill -9 {proc.pid}')
-                warning(f"Killing zombie: {' '.join(proc.cmdline())}")
+                warning(f"Killing zombie: {' '.join(cmdline)}")
     return _startup_helper(process_name, executable_name)
 
 def _startup_helper(process_name, executable_name):
@@ -284,18 +289,16 @@ def validate_targets(processes, targets):
 
 def startup(processes, targets):
     indi_server_name = None
+
     for process_name in targets:
         if process_name.startswith('is'):
             indi_server_name = process_name
+
     if len(targets) > 1 and indi_server_name in targets:
-        # special case for INDI server: needs to be first to start,
-        # have a chance to kill orphaned xindidriver processes,
-        # and have time to flush FIFOs
+        # special case for INDI server: needs to be last to start,
+        # so that restarts don't overwhelm it
         targets.remove(indi_server_name)
-        did_anything = _indiserver_startup(indi_server_name, processes[indi_server_name])
-        if did_anything:
-            info(f"Waiting 5 seconds for {indi_server_name} to start...")
-            time.sleep(5)
+            
     helpers = []
     for process_name in targets:
         th = threading.Thread(
@@ -304,8 +307,17 @@ def startup(processes, targets):
         )
         th.start()
         helpers.append(th)
+
     for th in helpers:
         th.join()
+
+    if indi_server_name != None:     
+        # Now start indiserver
+        info(f"Waiting 5 seconds before starting {indi_server_name}...")
+        time.sleep(5)
+            
+        _indiserver_startup(indi_server_name, processes[indi_server_name])    
+        
     return 0
 
 

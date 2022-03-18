@@ -42,6 +42,76 @@ namespace MagAOX
 namespace app
 {
 
+int readoutParams( piint & adcQual,
+                   piflt & adcSpeed,
+                   const std::string & rosn
+                 )
+{
+   if(rosn == "ccd_00_1MHz")
+   {
+      adcQual = PicamAdcQuality_LowNoise;
+      adcSpeed = 0.1;
+   }
+   else if(rosn == "ccd_01MHz")
+   {
+      adcQual = PicamAdcQuality_LowNoise;
+      adcSpeed = 1;
+   }
+   else if(rosn == "emccd_05MHz")
+   {
+      adcQual = PicamAdcQuality_ElectronMultiplied;
+      adcSpeed = 5;
+   }
+   else if(rosn == "emccd_10MHz")
+   {
+      adcQual = PicamAdcQuality_ElectronMultiplied;
+      adcSpeed = 10;
+   }
+   else if(rosn == "emccd_20MHz")
+   {
+      adcQual = PicamAdcQuality_ElectronMultiplied;
+      adcSpeed = 20;
+   }
+   else if(rosn == "emccd_30MHz")
+   {
+      adcQual = PicamAdcQuality_ElectronMultiplied;
+      adcSpeed = 30;
+   }
+   else
+   {
+      return -1;
+   }
+   
+   return 0;
+}
+
+int vshiftParams( piflt & vss,
+                  const std::string & vsn
+                )
+{
+   if(vsn == "0_7us")
+   {
+      vss = 0.7;
+   }
+   else if(vsn == "1_2us")
+   {
+      vss = 1.2;
+   }
+   else if(vsn == "2_0us")
+   {
+      vss = 2.0;
+   }
+   else if(vsn == "5_0us")
+   {
+      vss = 5.0;
+   }
+   else
+   {
+      return -1;
+   }
+   
+   return 0;
+}
 
 
 /** \defgroup picamCtrl Princeton Instruments EMCCD Camera
@@ -74,6 +144,40 @@ class picamCtrl : public MagAOXApp<>, public dev::stdCamera<picamCtrl>, public d
 
    typedef MagAOXApp<> MagAOXAppT;
 
+public:
+   /** \name app::dev Configurations
+     *@{
+     */
+   static constexpr bool c_stdCamera_tempControl = true; ///< app::dev config to tell stdCamera to expose temperature controls
+   
+   static constexpr bool c_stdCamera_temp = true; ///< app::dev config to tell stdCamera to expose temperature
+   
+   static constexpr bool c_stdCamera_readoutSpeed = true; ///< app::dev config to tell stdCamera to expose readout speed controls
+   
+   static constexpr bool c_stdCamera_vShiftSpeed = true; ///< app:dev config to tell stdCamera to expose vertical shift speed control
+
+   static constexpr bool c_stdCamera_emGain = true; ///< app::dev config to tell stdCamera to expose EM gain controls 
+
+   static constexpr bool c_stdCamera_exptimeCtrl = true; ///< app::dev config to tell stdCamera to expose exposure time controls
+   
+   static constexpr bool c_stdCamera_fpsCtrl = false; ///< app::dev config to tell stdCamera not to expose FPS controls
+
+   static constexpr bool c_stdCamera_fps = true; ///< app::dev config to tell stdCamera not to expose FPS status
+   
+   static constexpr bool c_stdCamera_usesModes = false; ///< app:dev config to tell stdCamera not to expose mode controls
+   
+   static constexpr bool c_stdCamera_usesROI = true; ///< app:dev config to tell stdCamera to expose ROI controls
+
+   static constexpr bool c_stdCamera_cropMode = false; ///< app:dev config to tell stdCamera to expose Crop Mode controls
+   
+   static constexpr bool c_stdCamera_hasShutter = true; ///< app:dev config to tell stdCamera to expose shutter controls
+      
+   static constexpr bool c_stdCamera_usesStateString = false; ///< app::dev confg to tell stdCamera to expose the state string property
+   
+   static constexpr bool c_frameGrabber_flippable = true; ///< app:dev config to tell framegrabber this camera can be flipped
+   
+   ///@}
+   
 protected:
 
    /** \name configurable parameters
@@ -84,12 +188,8 @@ protected:
 
    ///@}
 
-   // DELETE ME
-   //FILE * m_outfile;
-
    int m_depth {0};
-   piint m_adcQuality {PicamAdcQuality_ElectronMultiplied}; // should this go in stdCamera?
-   piflt m_verticalShiftRate {1.2};
+   
    piint m_timeStampMask {PicamTimeStampsMask_ExposureStarted}; // time stamp at end of exposure
    pi64s m_tsRes; // time stamp resolution
    piint m_frameSize;
@@ -97,20 +197,11 @@ protected:
    piflt m_FrameRateCalculation;
    piflt m_ReadOutTimeCalculation;
    
-   std::vector<std::string> m_adcSpeeds = {"00100_kHz", "01_MHz", "05_MHz", "10_MHz", "20_MHz", "30_MHz"};
-   std::vector<std::string> m_adcSpeedLabels = {"100 kHz", "1 MHz", "5 MHz", "10 MHz", "20 MHz", "30 MHz"};
    
-   std::vector<float> m_adcSpeedValues = {0.1, 1, 5,10,20,30};
    
-   //< The ADC speed, 5, 10, 20, or 30.
+   
 
-   // EM and low noise ADC qualities allowed, but current error out if you try to set them
-   std::vector<std::string> m_adcQualities = {"Electron Multiplied", "Low Noise"};
-   std::vector<piint> m_adcQualityValues = {PicamAdcQuality_ElectronMultiplied, PicamAdcQuality_LowNoise};
-
-   // allowed  vertical shift rates (that I know of)
-   std::vector<std::string> m_verticalShiftRates = {"0.7us", "1.2us", "2.0us", "5.0us"};
-   std::vector<piflt> m_verticalShiftRateValues = {0.7, 1.2, 2, 5}; //microseconds
+   
 
    PicamHandle m_cameraHandle {0};
    PicamHandle m_modelHandle {0};
@@ -163,26 +254,31 @@ protected:
                         );
 
    int setPicamParameter( PicamParameter parameter,
-                          pi64s value
+                          pi64s value,
+                          bool commit = true
                         );
 
    int setPicamParameter( PicamParameter parameter,
-                          piint value
+                          piint value,
+                          bool commit = true
                         );
 
    int setPicamParameter( PicamHandle handle,
                           PicamParameter parameter,
-                          piflt value
+                          piflt value,
+                          bool commit = true
                         );
 
    int setPicamParameter( PicamHandle handle,
                           PicamParameter parameter,
-                          piint value
+                          piint value,
+                          bool commit = true
                         );
 
 
    int setPicamParameter( PicamParameter parameter,
-                          piflt value
+                          piflt value,
+                          bool commit = true
                         );
 
    int setPicamParameterOnline( PicamHandle handle,
@@ -194,22 +290,20 @@ protected:
                                 piflt value
                               );
 
+   int setPicamParameterOnline( PicamHandle handle,
+                                PicamParameter parameter,
+                                piint value
+                              );
+
+   int setPicamParameterOnline( PicamParameter parameter,
+                                piint value
+                              );
+   
    int connect();
 
    int getAcquisitionState();
 
    int getTemps();
-
-   int adcSpeed();
-
-   int adcQuality();
-
-   int setAdcSpeed(int newspd);
-
-   int setVerticalShiftRate(piflt newvsr);
-
-   int setAdcQuality(int newquality);
-
 
    // stdCamera interface:
    
@@ -221,14 +315,27 @@ protected:
    
    int setTempControl();
    int setTempSetPt();
+   int setReadoutSpeed();
+   int setVShiftSpeed();
+   int setEMGain();
    int setExpTime();
    int capExpTime(piflt& exptime);
    int setFPS();
+
+   /// Check the next ROI
+   /** Checks if the target values are valid and adjusts them to the closest valid values if needed.
+     *
+     * \returns 0 if successful
+     * \returns -1 otherwise
+     */
+   int checkNextROI();
+
    int setNextROI();
    int setShutter(int sh);
    
    //Framegrabber interface:
    int configureAcquisition();
+   float fps();
    int startAcquisition();
    int acquireAndCheckValid();
    int loadImageIntoStream(void * dest);
@@ -238,14 +345,9 @@ protected:
    //INDI:
 protected:
 
-   pcf::IndiProperty m_indiP_adcspeed;
-   pcf::IndiProperty m_indiP_verticalshiftrate;
-   pcf::IndiProperty m_indiP_adcquality;
    pcf::IndiProperty m_indiP_readouttime;
 
 public:
-   INDI_NEWCALLBACK_DECL(picamCtrl, m_indiP_adcspeed);
-   INDI_NEWCALLBACK_DECL(picamCtrl, m_indiP_verticalshiftrate);
    INDI_NEWCALLBACK_DECL(picamCtrl, m_indiP_adcquality);
 
    /** \name Telemeter Interface
@@ -268,24 +370,26 @@ picamCtrl::picamCtrl() : MagAOXApp(MAGAOX_CURRENT_SHA1, MAGAOX_REPO_MODIFIED)
    m_acqBuff.memory_size = 0;
    m_acqBuff.memory = 0;
 
-   m_usesFPS = false;
-   m_usesModes = false;
+   m_defaultReadoutSpeed  = "emccd_05MHz";
+   m_readoutSpeedNames = {"ccd_00_1MHz", "ccd_01MHz", "emccd_05MHz", "emccd_10MHz", "emccd_20MHz", "emccd_30MHz"};
+   m_readoutSpeedNameLabels = {"CCD 0.1 MHz", "CCD 1 MHz", "EMCCD 5 MHz", "EMCCD 10 MHz", "EMCCD 20 MHz", "EMCCD 30 MHz"};
    
-   m_adcSpeed = 10;
-   m_verticalShiftRate = 1.2;
-   m_adcQuality = PicamAdcQuality_ElectronMultiplied;
+   m_defaultVShiftSpeed = "1_2us";
+   m_vShiftSpeedNames = {"0_7us", "1_2us", "2_0us", "5_0us"};
+   m_vShiftSpeedNameLabels = {"0.7 us", "1.2 us", "2.0 us", "5.0 us"};
    
    
-   m_startup_x = 511.5; 
-   m_startup_y = 511.5; 
-   m_startup_w = 1024;  
-   m_startup_h = 1024;  
+   m_default_x = 511.5; 
+   m_default_y = 511.5; 
+   m_default_w = 1024;  
+   m_default_h = 1024;  
       
    m_full_x = 511.5; 
    m_full_y = 511.5; 
    m_full_w = 1024; 
    m_full_h = 1024; 
    
+   m_maxEMGain = 100;
    
    return;
 }
@@ -304,8 +408,6 @@ picamCtrl::~picamCtrl() noexcept
 inline
 void picamCtrl::setupConfig()
 {
-
-
    config.add("camera.serialNumber", "", "camera.serialNumber", argType::Required, "camera", "serialNumber", false, "int", "The identifying serial number of the camera.");
 
    dev::stdCamera<picamCtrl>::setupConfig(config);
@@ -334,18 +436,6 @@ int picamCtrl::appStartup()
 
    // DELETE ME
    //m_outfile = fopen("/home/xsup/test2.txt", "w");
-
-   createStandardIndiSelectionSw(m_indiP_adcspeed, "adcspeed", m_adcSpeeds, "ADC Speed");
-   for(size_t n=0; n< m_adcSpeeds.size(); ++n) m_indiP_adcspeed[m_adcSpeeds[n]].setLabel(m_adcSpeedLabels[n]);
-   registerIndiPropertyNew(m_indiP_adcspeed, INDI_NEWCALLBACK(m_indiP_adcspeed));
-
-   createStandardIndiSelectionSw(m_indiP_verticalshiftrate, "verticalshiftrate", m_verticalShiftRates, "Vertical Shift Rate");
-   for(size_t n=0; n< m_verticalShiftRates.size(); ++n) m_indiP_verticalshiftrate[m_verticalShiftRates[n]].setLabel(m_verticalShiftRates[n]);
-   registerIndiPropertyNew(m_indiP_verticalshiftrate, INDI_NEWCALLBACK(m_indiP_verticalshiftrate));
-
-   createStandardIndiSelectionSw(m_indiP_adcquality, "adcquality", m_adcQualities, "ADC Quality");
-   for(size_t n=0; n< m_adcQualities.size(); ++n) m_indiP_adcquality[m_adcQualities[n]].setLabel(m_adcQualities[n]);
-   registerIndiPropertyNew(m_indiP_adcquality, INDI_NEWCALLBACK(m_indiP_adcquality));
 
    createROIndiNumber( m_indiP_readouttime, "readout_time", "Readout Time (s)");
    indi::addNumberElement<float>( m_indiP_readouttime, "value", 0.0, std::numeric_limits<float>::max(), 0.0,  "%0.1f", "readout time");
@@ -615,7 +705,8 @@ int picamCtrl::getPicamParameter( piflt & value,
 
 inline
 int picamCtrl::setPicamParameter( PicamParameter parameter,
-                                  pi64s value
+                                  pi64s value,
+                                  bool commit
                                 )
 {
    PicamError error = Picam_SetParameterLargeIntegerValue( m_cameraHandle, parameter, value );
@@ -625,6 +716,8 @@ int picamCtrl::setPicamParameter( PicamParameter parameter,
       return -1;
    }
 
+   if(!commit) return 0;
+   
    const PicamParameter* failed_parameters;
    piint failed_parameters_count;
 
@@ -634,7 +727,7 @@ int picamCtrl::setPicamParameter( PicamParameter parameter,
       log<software_error>({__FILE__, __LINE__, 0, error, PicamEnum2String(PicamEnumeratedType_Error, error)});
       return -1;
    }
-
+   
    for( int i=0; i< failed_parameters_count; ++i)
    {
       if( failed_parameters[i] ==  parameter)
@@ -643,7 +736,7 @@ int picamCtrl::setPicamParameter( PicamParameter parameter,
          return log<text_log,-1>( "Parameter not committed");
       }
    }
-
+   
    Picam_DestroyParameters( failed_parameters );
 
    return 0;
@@ -652,7 +745,8 @@ int picamCtrl::setPicamParameter( PicamParameter parameter,
 inline
 int picamCtrl::setPicamParameter( PicamHandle handle,
                                   PicamParameter parameter,
-                                  piflt value
+                                  piflt value,
+                                  bool commit
                                 )
 {
    PicamError error = Picam_SetParameterFloatingPointValue( handle, parameter, value );
@@ -662,6 +756,8 @@ int picamCtrl::setPicamParameter( PicamHandle handle,
       return -1;
    }
 
+   if(!commit) return 0;
+   
    const PicamParameter* failed_parameters;
    piint failed_parameters_count;
 
@@ -689,7 +785,8 @@ int picamCtrl::setPicamParameter( PicamHandle handle,
 inline
 int picamCtrl::setPicamParameter( PicamHandle handle,
                                   PicamParameter parameter,
-                                  piint value
+                                  piint value,
+                                  bool commit
                                 )
 {
    PicamError error = Picam_SetParameterIntegerValue( handle, parameter, value );
@@ -699,6 +796,8 @@ int picamCtrl::setPicamParameter( PicamHandle handle,
       return -1;
    }
 
+   if(!commit) return 0;
+   
    const PicamParameter* failed_parameters;
    piint failed_parameters_count;
 
@@ -725,18 +824,20 @@ int picamCtrl::setPicamParameter( PicamHandle handle,
 
 inline
 int picamCtrl::setPicamParameter( PicamParameter parameter,
-                                  piflt value
+                                  piflt value,
+                                  bool commit
                                 )
 {
-   return setPicamParameter( m_cameraHandle, parameter, value);
+   return setPicamParameter( m_cameraHandle, parameter, value, commit);
 }
 
 inline
 int picamCtrl::setPicamParameter( PicamParameter parameter,
-                                  piint value
+                                  piint value,
+                                  bool commit
                                 )
 {
-   return setPicamParameter( m_cameraHandle, parameter, value);
+   return setPicamParameter( m_cameraHandle, parameter, value, commit);
 }
 
 inline
@@ -762,6 +863,31 @@ int picamCtrl::setPicamParameterOnline( PicamParameter parameter,
 {
    return setPicamParameterOnline(m_cameraHandle, parameter, value);
 }
+
+inline
+int picamCtrl::setPicamParameterOnline( PicamHandle handle,
+                                        PicamParameter parameter,
+                                        piint value
+                                       )
+{
+   PicamError error = Picam_SetParameterIntegerValueOnline( handle, parameter, value );
+   if(error != PicamError_None)
+   {
+      log<software_error>({__FILE__, __LINE__, 0, error, PicamEnum2String(PicamEnumeratedType_Error, error)});
+      return -1;
+   }
+
+   return 0;
+}
+
+inline
+int picamCtrl::setPicamParameterOnline( PicamParameter parameter,
+                                        piint value
+                                       )
+{
+   return setPicamParameterOnline(m_cameraHandle, parameter, value);
+}
+
 inline
 int picamCtrl::connect()
 {
@@ -856,6 +982,9 @@ int picamCtrl::connect()
 
             BREADCRUMB
 
+            m_readoutSpeedNameSet = m_defaultReadoutSpeed;
+            m_vShiftSpeedNameSet = m_defaultVShiftSpeed;
+            
             return 0;
          }
          else
@@ -982,51 +1111,6 @@ int picamCtrl::getTemps()
 }
 
 inline
-int picamCtrl::setAdcSpeed(int newspd)
-{
-   if(newspd != 5 && newspd != 10 && newspd != 20 && newspd != 30)
-   {
-      log<text_log>("Invalid ADC speed requested.", logPrio::LOG_ERROR);
-      return -1;
-   }
-
-   m_adcSpeed = newspd;
-
-   m_reconfig = true;
-
-   return 0;
-}
-
-inline
-int picamCtrl::setVerticalShiftRate(piflt newvsr)
-{
-   m_verticalShiftRate = newvsr;
-   m_reconfig = true;
-   return 0;
-}
-
-inline
-int picamCtrl::setAdcQuality(int newquality)
-{
-   // what should m_adcQuality be?
-   // add checks here
-
-   if(newquality < 0 || (size_t) newquality > m_adcQualities.size())
-   {
-      log<text_log>("Invalid ADC quality requested.", logPrio::LOG_ERROR);
-      return -1;
-   }
-
-   m_adcQuality = newquality;
-
-   m_reconfig = true;
-
-   return 0;
-}
-
-
-
-inline
 int picamCtrl::setFPS()
 {
    return 0;
@@ -1065,6 +1149,70 @@ int picamCtrl::setTempSetPt()
    m_reconfig = true;
 
    recordCamera();
+   return 0;
+}
+
+inline 
+int picamCtrl::setReadoutSpeed()
+{
+   m_reconfig = true;
+   recordCamera();
+   return 0;
+}
+
+inline 
+int picamCtrl::setVShiftSpeed()
+{
+   m_reconfig = true;
+   recordCamera();
+   return 0;
+}
+
+inline
+int picamCtrl::setEMGain()
+{
+   piint adcQual;
+   piflt adcSpeed;
+   
+   if(readoutParams(adcQual, adcSpeed, m_readoutSpeedName) < 0)
+   {
+      log<software_error>({__FILE__, __LINE__, "Invalid readout speed: " + m_readoutSpeedNameSet});
+      state(stateCodes::ERROR);
+      return -1;
+   }
+   
+   if(adcQual != PicamAdcQuality_ElectronMultiplied)
+   {
+      log<text_log>("Attempt to set EM gain while in conventional amplifier.", logPrio::LOG_NOTICE);
+      return 0;
+   }
+   
+   piint emg = m_emGainSet;
+   if(emg < 0)
+   {
+      emg = 0;
+      log<text_log>("EM gain limited to 0", logPrio::LOG_WARNING);
+   }
+   
+   if(emg > m_maxEMGain)
+   {
+      emg = m_maxEMGain;
+      log<text_log>("EM gain limited to maxEMGain = " + std::to_string(emg), logPrio::LOG_WARNING);
+   }
+   
+   if(setPicamParameterOnline(m_modelHandle, PicamParameter_AdcEMGain, emg) < 0)
+   {
+      log<software_error>({__FILE__, __LINE__, "Error setting EM gain"});
+      return -1;
+   }
+   
+   piint AdcEMGain;
+   if(getPicamParameter(AdcEMGain, PicamParameter_AdcEMGain) < 0)
+   {
+      std::cerr << "could not get AdcEMGain\n";
+   }
+   m_emGain = AdcEMGain;
+   
    return 0;
 }
 
@@ -1109,7 +1257,8 @@ int picamCtrl::setExpTime()
       std::cerr << "could not get FrameRateCalculation\n";
    }
    std::cerr << "FrameRate is: " <<  m_FrameRateCalculation << "\n";
-
+   m_fps = m_FrameRateCalculation;
+   
    return 0;
 }
 
@@ -1127,19 +1276,26 @@ int picamCtrl::capExpTime(piflt& exptime)
    return 0;
 }
 
+inline
+int picamCtrl::checkNextROI()
+{
+   return 0;
+}
+
 //Set ROI property to busy if accepted, set toggle to Off and Idlw either way.
 //Set ROI actual 
 //Update current values (including struct and indiP) and set to OK when done
 inline 
 int picamCtrl::setNextROI()
 {
-   std::cerr << "setNextROI:\n";
-   std::cerr << "  m_nextROI.x = " << m_nextROI.x << "\n";
-   std::cerr << "  m_nextROI.y = " << m_nextROI.y << "\n";
-   std::cerr << "  m_nextROI.w = " << m_nextROI.w << "\n";
-   std::cerr << "  m_nextROI.h = " << m_nextROI.h << "\n";
-   std::cerr << "  m_nextROI.bin_x = " << m_nextROI.bin_x << "\n";
-   std::cerr << "  m_nextROI.bin_y = " << m_nextROI.bin_y << "\n";
+   //debug:
+//    std::cerr << "setNextROI:\n";
+//    std::cerr << "  m_nextROI.x = " << m_nextROI.x << "\n";
+//    std::cerr << "  m_nextROI.y = " << m_nextROI.y << "\n";
+//    std::cerr << "  m_nextROI.w = " << m_nextROI.w << "\n";
+//    std::cerr << "  m_nextROI.h = " << m_nextROI.h << "\n";
+//    std::cerr << "  m_nextROI.bin_x = " << m_nextROI.bin_x << "\n";
+//    std::cerr << "  m_nextROI.bin_y = " << m_nextROI.bin_y << "\n";
    
    m_reconfig = true;
 
@@ -1218,50 +1374,32 @@ int picamCtrl::configureAcquisition()
    //=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*
    //=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*
 
-   if( setPicamParameter(m_modelHandle, PicamParameter_AdcSpeed, m_adcSpeed) < 0)
+   piint adcQual;
+   piflt adcSpeed;
+   
+   if(readoutParams(adcQual, adcSpeed, m_readoutSpeedNameSet) < 0)
    {
-      log<software_error>({__FILE__, __LINE__, "Error setting ADC Speed"});
+      log<software_error>({__FILE__, __LINE__, "Invalid readout speed: " + m_readoutSpeedNameSet});
       state(stateCodes::ERROR);
       return -1;
    }
-
-   std::string adcstr;
-   for(size_t n=0; n<m_adcSpeeds.size(); ++n)
-   {
-      if(m_adcSpeedValues[n] == m_adcSpeed)
-      {
-         adcstr = m_adcSpeeds[n];
-         break;
-      }
-   }
-   indi::updateSelectionSwitchIfChanged( m_indiP_adcspeed, adcstr, m_indiDriver, INDI_OK);
    
-//    updateIfChanged(m_indiP_adcspeed, "current", m_adcSpeed);
-//    updateIfChanged(m_indiP_adcspeed, "target", std::string(""));
-
-   log<text_log>( "ADC Speed: " + std::to_string(m_adcSpeed) + " MHz");
-
-   /*
-   if( setPicamParameter(m_modelHandle, PicamParameter_AdcQuality, m_adcQuality) < 0)
+   if( setPicamParameter(m_modelHandle, PicamParameter_AdcSpeed, adcSpeed, false) < 0) //don't commit b/c it will error if quality mismatched
+   {
+      log<software_error>({__FILE__, __LINE__, "Error setting ADC Speed"});
+      //state(stateCodes::ERROR);
+      //return -1;
+   }
+   
+   if( setPicamParameter(m_modelHandle, PicamParameter_AdcQuality, adcQual) < 0)
    {
       log<software_error>({__FILE__, __LINE__, "Error setting ADC Quality"});
       state(stateCodes::ERROR);
       return -1;
    }
-
-   std::string adcqstr;
-   for(size_t n=0; n<m_adcQualities.size(); ++n)
-   {
-      if(m_adcQualityValues[n] == m_adcQuality)
-      {
-         adcqstr = m_adcQualities[n];
-         break;
-      }
-   }
-   indi::updateSelectionSwitchIfChanged( m_indiP_adcquality, adcqstr, m_indiDriver, INDI_OK);
-
-   log<text_log>( "ADC Quality: " + m_adcQuality);
-   */
+   
+   m_readoutSpeedName = m_readoutSpeedNameSet;
+   log<text_log>( "Readout speed set to: " + m_readoutSpeedNameSet);
 
    //=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*
    //=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*
@@ -1269,25 +1407,23 @@ int picamCtrl::configureAcquisition()
    //=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*
    //=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*
    
-   if( setPicamParameter(m_modelHandle, PicamParameter_VerticalShiftRate, m_verticalShiftRate) < 0)
+   piflt vss;
+   if(vshiftParams(vss, m_vShiftSpeedNameSet) < 0)
+   {
+      log<software_error>({__FILE__, __LINE__, "Invalid vertical shift speed: " + m_vShiftSpeedNameSet});
+      state(stateCodes::ERROR);
+      return -1;
+   }
+   
+   if( setPicamParameter(m_modelHandle, PicamParameter_VerticalShiftRate, vss) < 0)
    {
       log<software_error>({__FILE__, __LINE__, "Error setting Vertical Shift Rate"});
       state(stateCodes::ERROR);
       return -1;
    }
 
-   std::string adcqstr;
-   for(size_t n=0; n<m_verticalShiftRates.size(); ++n)
-   {
-      if(m_verticalShiftRateValues[n] == m_verticalShiftRate)
-      {
-         adcqstr = m_verticalShiftRates[n];
-         break;
-      }
-   }
-   indi::updateSelectionSwitchIfChanged( m_indiP_verticalshiftrate, adcqstr, m_indiDriver, INDI_OK);
-
-   log<text_log>( "Vertical Shift Rate: " + std::to_string(m_verticalShiftRate) + " us");
+   m_vShiftSpeedName = m_vShiftSpeedNameSet;
+   log<text_log>( "Vertical Shift Rate set to: " + m_vShiftSpeedName);
 
    //=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*
    //=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*
@@ -1301,8 +1437,25 @@ int picamCtrl::configureAcquisition()
    nextrois.roi_array = &nextroi;
    nextrois.roi_count = 1;
    
-   nextroi.x = (m_nextROI.x - 0.5*( (float) m_nextROI.w - 1.0));
-   nextroi.y = (m_nextROI.y - 0.5*( (float) m_nextROI.h - 1.0));
+   if(m_currentFlip == fgFlipLR || m_currentFlip == fgFlipUDLR)
+   {
+      nextroi.x = ((1023-m_nextROI.x) - 0.5*( (float) m_nextROI.w - 1.0));
+   }
+   else
+   {
+      nextroi.x = (m_nextROI.x - 0.5*( (float) m_nextROI.w - 1.0));
+   }
+   
+   if(m_currentFlip == fgFlipUD || m_currentFlip == fgFlipUDLR)
+   {
+      nextroi.y = ((1023 - m_nextROI.y) - 0.5*( (float) m_nextROI.h - 1.0));
+   }
+   else
+   {
+      nextroi.y = (m_nextROI.y - 0.5*( (float) m_nextROI.h - 1.0));
+   }
+   
+   
    nextroi.width = m_nextROI.w;
    nextroi.height = m_nextROI.h;
    nextroi.x_binning = m_nextROI.bin_x;
@@ -1485,7 +1638,23 @@ int picamCtrl::configureAcquisition()
 
 
    std::cerr << "************************************************************\n";
+   
+   
+   piint AdcAnalogGain;
+   if(getPicamParameter(AdcAnalogGain, PicamParameter_AdcAnalogGain) < 0)
+   {
+      std::cerr << "could not get AdcAnalogGain\n";
+   }
+   std::string adcgStr = PicamEnum2String( PicamEnumeratedType_AdcAnalogGain, AdcAnalogGain );
+   std::cerr << "AdcAnalogGain is: " << adcgStr << "\n";
 
+   piint AdcEMGain;
+   if(getPicamParameter(AdcEMGain, PicamParameter_AdcEMGain) < 0)
+   {
+      std::cerr << "could not get AdcEMGain\n";
+   }
+   m_emGain = AdcEMGain;
+   
 /*
    std::cerr << "Onlineable:\n";
    pibln onlineable;
@@ -1565,6 +1734,12 @@ int picamCtrl::configureAcquisition()
 }
 
 inline
+float picamCtrl::fps()
+{
+   return m_fps;
+}
+
+inline
 int picamCtrl::startAcquisition()
 {
    return 0;
@@ -1636,7 +1811,7 @@ int picamCtrl::acquireAndCheckValid()
 inline
 int picamCtrl::loadImageIntoStream(void * dest)
 {
-   memcpy(dest, m_available.initial_readout, m_width*m_height*m_typeSize);
+   if( frameGrabber<picamCtrl>::loadImageIntoStreamCopy(dest, m_available.initial_readout, m_width, m_height, m_typeSize) == nullptr) return -1;
 
    return 0;
 }
@@ -1708,120 +1883,7 @@ int picamCtrl::reconfig()
    return 0;
 }
 
-INDI_NEWCALLBACK_DEFN(picamCtrl, m_indiP_adcspeed)(const pcf::IndiProperty &ipRecv)
-{
-   if(ipRecv.getName() != m_indiP_adcspeed.getName())
-   {
-      log<software_error>({__FILE__, __LINE__, "invalid indi property received"});
-      return -1;
-   }
-   
-   std::string newspeed;
-   int newn = -1;
-   for(size_t i=0; i< m_adcSpeeds.size(); ++i) 
-   {
-      if(!ipRecv.find(m_adcSpeeds[i])) continue;
-      
-      if(ipRecv[m_adcSpeeds[i]].getSwitchState() == pcf::IndiElement::On)
-      {
-         if(newspeed != "")
-         {
-            log<text_log>("More than one ADC speed selected", logPrio::LOG_ERROR);
-            return -1;
-         }
-         
-         newspeed = m_adcSpeeds[i];
-         newn = i;         
-      }
-   }
-   
-   if(newspeed == "" || newn < 0)
-   {
-      return 0; //This is just a reset of current probably
-   }
-   
-   if(newspeed == "00100_kHz" || newspeed == "01_MHz") return 0; //just silently ignore
-   
-   std::lock_guard<std::mutex> guard(m_indiMutex);
-   return setAdcSpeed(m_adcSpeedValues[newn]);
-   
-}
 
-INDI_NEWCALLBACK_DEFN(picamCtrl, m_indiP_verticalshiftrate)(const pcf::IndiProperty &ipRecv)
-{
-   if(ipRecv.getName() != m_indiP_verticalshiftrate.getName())
-   {
-      log<software_error>({__FILE__, __LINE__, "invalid indi property received"});
-      return -1;
-   }
-   
-   std::string newvsr;
-   int newn = -1;
-   
-   for(size_t i=0; i< m_verticalShiftRates.size(); ++i) 
-   {
-      if(!ipRecv.find(m_verticalShiftRates[i])) continue;
-      
-      if(ipRecv[m_verticalShiftRates[i]].getSwitchState() == pcf::IndiElement::On)
-      {
-         if(newvsr != "")
-         {
-            log<text_log>("More than one vertical shift rate selected", logPrio::LOG_ERROR);
-            return -1;
-         }
-         
-         newvsr = m_verticalShiftRates[i];
-         newn = i;         
-      }
-   }
-   
-   if(newvsr == "" || newn < 0)
-   {
-      return 0; //This is just a reset of current probably
-   }
-      
-   std::lock_guard<std::mutex> guard(m_indiMutex);
-   return setVerticalShiftRate(m_verticalShiftRateValues[newn]);
-   
-}
-
-INDI_NEWCALLBACK_DEFN(picamCtrl, m_indiP_adcquality)(const pcf::IndiProperty &ipRecv)
-{
-   if(ipRecv.getName() != m_indiP_adcquality.getName())
-   {
-      log<software_error>({__FILE__, __LINE__, "invalid indi property received"});
-      return -1;
-   }
-   
-   std::string newquality;
-   int newn = -1;
-   size_t i;
-   for(i=0; i< m_adcQualities.size(); ++i) 
-   {
-      if(!ipRecv.find(m_adcQualities[i])) continue;
-      
-      if(ipRecv[m_adcQualities[i]].getSwitchState() == pcf::IndiElement::On)
-      {
-         if(newquality != "")
-         {
-            log<text_log>("More than one ADC quality selected", logPrio::LOG_ERROR);
-            return -1;
-         }
-         
-         newquality = m_adcQualities[i];
-         newn = i;         
-      }
-   }
-   
-   if(newquality == "" || newn < 0)
-   {
-      return 0; //This is just a reset of current probably
-   }
-      
-   std::lock_guard<std::mutex> guard(m_indiMutex);
-   return setAdcQuality(m_adcQualityValues[newn]);
-   
-}
 
 int picamCtrl::checkRecordTimes()
 {

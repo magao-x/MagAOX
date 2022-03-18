@@ -32,15 +32,20 @@ namespace dev
 /// MagAO-X EDT framegrabber interface
 /** Implements an interface to the EDT PDV SDK
   * 
-  * The derived class `derivedT` must be a MagAOXApp\<true\>, and should declare this class a friend like so: 
-   \code
-    friend class dev::dssShutter<derivedT>;
-   \endcode
+  * The derived class `derivedT` must be a MagAOXApp\<true\>, and must declare this class a friend like so: 
+  * \code
+  * friend class dev::dssShutter<derivedT>;
+  * \endcode
+  *
+  * A static configuration variable must be defined in derivedT as
+  * \code
+  * static constexpr bool c_edtCamera_relativeConfigPath = true; //or: false
+  * \endcode
+  * which determines whether or not the EDT config path is relative to the MagAO-X config path (true) or absolute (false).
   *
   * In addition, `derivedT` should be `dev::frameGrabber` or equivalent, with an `m_reconfig` member, and calls
   * to this class's `pdvStartAcquisition`, `pdvAcquire`, and `pdvReconfig` in the relevant `dev::frameGrabber`
   * implementation functions.
-  *
   *
   * Calls to this class's `setupConfig`, `loadConfig`, `appStartup`, `appLogic`, `appShutdown`
   * `onPowerOff`, and `whilePowerOff`,  must be placed in the derived class's functions of the same name.
@@ -202,9 +207,6 @@ protected:
 protected:
    //declare our properties
    
-   //pcf::IndiProperty m_indiP_mode; ///< Property used to report the current mode
-   
-
 public:
 
    /// The static callback function to be registered for the channel properties.
@@ -244,7 +246,6 @@ private:
 template<class derivedT>
 edtCamera<derivedT>::edtCamera()
 {
-   derived().m_usesModes = true;
 }
 
    
@@ -329,10 +330,6 @@ int edtCamera<derivedT>::pdvConfig(std::string & modeName)
    }
       
    derived().m_modeName = modeName;
-   if( derived().m_indiDriver )
-   {
-      indi::updateIfChanged(derived().m_indiP_mode, "target", derived().m_modeName, derived().m_indiDriver);
-   }
    
    if(modeName == "")
    {
@@ -344,7 +341,16 @@ int edtCamera<derivedT>::pdvConfig(std::string & modeName)
       return derivedT::template log<text_log, -1>("No mode named " + modeName + " found.", logPrio::LOG_ERROR);
    }
    
-   std::string configFile = derived().configDir() + "/" +derived().m_cameraModes[modeName].m_configFile;
+   //Construct config file, adding relative path if configured that way
+   std::string configFile;
+   
+   if(derivedT::c_edtCamera_relativeConfigPath)
+   {
+      configFile = derived().configDir() + "/";
+   }
+   
+   configFile += derived().m_cameraModes[modeName].m_configFile;
+   
    
    derivedT::template log<text_log>("Loading EDT PDV config file: " + configFile);
       
@@ -471,11 +477,6 @@ int edtCamera<derivedT>::appLogic()
 template<class derivedT>
 int edtCamera<derivedT>::onPowerOff()
 {
-//    if( !derived().m_indiDriver ) return 0;
-//    
-//    indi::updateIfChanged(m_indiP_mode, "current", std::string(""), derived().m_indiDriver);
-//    indi::updateIfChanged(m_indiP_mode, "target", std::string(""), derived().m_indiDriver);
-//    
    return 0;
 }
 

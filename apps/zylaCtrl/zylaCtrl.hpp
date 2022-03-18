@@ -52,6 +52,40 @@ class zylaCtrl : public MagAOXApp<>, public dev::stdCamera<zylaCtrl>, public dev
    friend class dev::frameGrabber<zylaCtrl>;
    friend class dev::telemeter<zylaCtrl>;
 
+public:
+   /** \name app::dev Configurations
+     *@{
+     */
+   static constexpr bool c_stdCamera_tempControl = true; ///< app::dev config to tell stdCamera to expose temperature controls
+   
+   static constexpr bool c_stdCamera_temp = true; ///< app::dev config to tell stdCamera to expose temperature
+   
+   static constexpr bool c_stdCamera_readoutSpeed = false; ///< app::dev config to tell stdCamera to expose readout speed controls
+   
+   static constexpr bool c_stdCamera_vShiftSpeed = false; ///< app:dev config to tell stdCamera to expose vertical shift speed control
+   
+   static constexpr bool c_stdCamera_emGain = false; ///< app::dev config to tell stdCamera to expose EM gain controls 
+
+   static constexpr bool c_stdCamera_exptimeCtrl = true; ///< app::dev config to tell stdCamera to expose exposure time controls
+   
+   static constexpr bool c_stdCamera_fpsCtrl = true; ///< app::dev config to tell stdCamera to expose FPS controls
+
+   static constexpr bool c_stdCamera_fps = true; ///< app::dev config to tell stdCamera not to expose FPS status
+   
+   static constexpr bool c_stdCamera_usesModes = false; ///< app:dev config to tell stdCamera not to expose mode controls
+   
+   static constexpr bool c_stdCamera_usesROI = true; ///< app:dev config to tell stdCamera to expose ROI controls
+
+   static constexpr bool c_stdCamera_cropMode = false; ///< app:dev config to tell stdCamera to expose Crop Mode controls
+   
+   static constexpr bool c_stdCamera_hasShutter = false; ///< app:dev config to tell stdCamera to expose shutter controls
+   
+   static constexpr bool c_stdCamera_usesStateString = false; ///< app::dev confg to tell stdCamera to expose the state string property
+   
+   static constexpr bool c_frameGrabber_flippable = false; ///< app:dev config to tell framegrabber this camera can not be flipped
+   
+   ///@}
+   
 protected:
 
    /** \name configurable parameters
@@ -165,6 +199,14 @@ public:
      */ 
    int setExpTime();
    
+   /// Required by stdCamera, checks the next ROI [stdCamera interface]
+   /** Checks if the target values are valid and adjusts them to the closest valid values if needed.
+     *
+     * \returns 0 if successful
+     * \returns -1 on error
+     */
+   int checkNextROI();
+
    /// Required by stdCamera, but this does not do anything for this camera [stdCamera interface]
    /**
      * \returns 0 always
@@ -187,6 +229,11 @@ public:
      */
    
    int configureAcquisition();
+   float fps()
+   {
+      return m_fps;
+   }
+   
    int startAcquisition();
    int acquireAndCheckValid();
    int loadImageIntoStream(void * dest);
@@ -213,9 +260,6 @@ zylaCtrl::zylaCtrl() : MagAOXApp(MAGAOX_CURRENT_SHA1, MAGAOX_REPO_MODIFIED)
    m_powerMgtEnabled = true;
    m_powerOnWait = 10;
    
-
-   m_usesFPS = true;
-   m_usesModes = false;
 
    m_startupTemp = 20;
    
@@ -787,7 +831,12 @@ int zylaCtrl::setFPS()
    return 0;
 }
 
-   
+inline 
+int zylaCtrl::checkNextROI()
+{
+   return 0;
+}
+
 inline 
 int zylaCtrl::setNextROI()
 {

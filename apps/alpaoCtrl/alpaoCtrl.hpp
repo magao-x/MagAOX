@@ -101,6 +101,16 @@ public:
      */
    virtual int appShutdown();
 
+   /// Cleanup after a power off.
+   /**
+     */ 
+   virtual int onPowerOff();
+   
+   /// Maintenace while powered off.
+   /**
+     */
+   virtual int whilePowerOff();
+   
    /** \name DM Base Class Interface
      *
      *@{
@@ -275,6 +285,16 @@ int alpaoCtrl::appShutdown()
    return 0;
 }
 
+int alpaoCtrl::onPowerOff()
+{
+   return dm<alpaoCtrl,float>::onPowerOff();;
+}
+
+int alpaoCtrl::whilePowerOff()
+{
+   return dm<alpaoCtrl,float>::whilePowerOff();;
+}
+
 int alpaoCtrl::initDM()
 {
    if(m_dm != nullptr)
@@ -419,10 +439,22 @@ int alpaoCtrl::commandDM(void * curr_src)
       }
    }
     
-
    /* Finally, send the command to the DM */
    ret = asdkSend(m_dm, m_dminputs);
 
+   /* Now update the instantaneous sat map */
+   for (UInt idx = 0; idx < m_nbAct; ++idx)
+   {
+      if(m_dminputs[idx] >= 1 || m_dminputs[idx] <= -1)
+      {
+         m_instSatMap.data()[m_actuator_mapping[idx]] = 1;
+      }
+      else
+      {
+         m_instSatMap.data()[m_actuator_mapping[idx]] = 0;
+      }
+   }
+   
    return ret;
     
 }

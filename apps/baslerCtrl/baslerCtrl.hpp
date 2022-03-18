@@ -61,6 +61,40 @@ class baslerCtrl : public MagAOXApp<>, public dev::stdCamera<baslerCtrl>, public
    friend class dev::frameGrabber<baslerCtrl>;
    friend class dev::telemeter<baslerCtrl>;
    
+public:
+   /** \name app::dev Configurations
+     *@{
+     */
+   static constexpr bool c_stdCamera_tempControl = false; ///< app::dev config to tell stdCamera to not expose temperature controls
+   
+   static constexpr bool c_stdCamera_temp = true; ///< app::dev config to tell stdCamera to expose temperature
+   
+   static constexpr bool c_stdCamera_readoutSpeed = false; ///< app::dev config to tell stdCamera not to  expose readout speed controls
+   
+   static constexpr bool c_stdCamera_vShiftSpeed = false; ///< app:dev config to tell stdCamera not to expose vertical shift speed control
+
+   static constexpr bool c_stdCamera_emGain = false; ///< app::dev config to tell stdCamera to not expose EM gain controls 
+   
+   static constexpr bool c_stdCamera_exptimeCtrl = true; ///< app::dev config to tell stdCamera to expose exposure time controls
+   
+   static constexpr bool c_stdCamera_fpsCtrl = true; ///< app::dev config to tell stdCamera to expose FPS controls
+   
+   static constexpr bool c_stdCamera_fps = true; ///< app::dev config to tell stdCamera not to expose FPS status (ignored since fpsCtrl=true)
+   
+   static constexpr bool c_stdCamera_usesModes = false; ///< app:dev config to tell stdCamera not to expose mode controls
+   
+   static constexpr bool c_stdCamera_usesROI = true; ///< app:dev config to tell stdCamera to expose ROI controls
+
+   static constexpr bool c_stdCamera_cropMode = false; ///< app:dev config to tell stdCamera not to expose Crop Mode controls
+   
+   static constexpr bool c_stdCamera_hasShutter = false; ///< app:dev config to tell stdCamera to expose shutter controls
+
+   static constexpr bool c_stdCamera_usesStateString = false; ///< app::dev confg to tell stdCamera to expose the state string property
+   
+   static constexpr bool c_frameGrabber_flippable = true; ///< app:dev config to tell framegrabber that this camera can be flipped
+   
+   ///@}
+   
 protected:
 
    /** \name configurable parameters 
@@ -72,15 +106,28 @@ protected:
    
    ///@}
 
-   int m_incX {1};
-   int m_incY {1};
-   int m_maxW {0};
-   int m_incW {1};
-   int m_maxH {0};
-   int m_incH {1};
-   
-   CBaslerUsbInstantCamera * m_camera {nullptr};
-   CGrabResultPtr ptrGrabResult;
+   /** \name binning allowed values 
+     * @{
+     */   
+   std::vector<int> m_binXs; ///< The allowed values of binning in X (horizontal)
+   std::vector<int> m_binYs; ///< The allowed values of binning in Y (vertical)
+
+   std::vector<int> m_incXs; ///< The allowed increment in X for each X-binning
+
+   std::vector<int> m_minWs; ///< The minimum value of the width for each X-binning
+   std::vector<int> m_incWs; ///< The minimum value of the width for each X-binning
+   std::vector<int> m_maxWs; ///< The minimum value of the width for each X-binning
+
+   std::vector<int> m_incYs; ///< The allowed increment in Y for each Y-binning
+
+   std::vector<int> m_minHs; ///< The minimum value of the height for each Y-binning
+   std::vector<int> m_incHs; ///< The minimum value of the height for each Y-binning
+   std::vector<int> m_maxHs; ///< The minimum value of the height for each Y-binning
+
+   ///@}
+
+   CBaslerUsbInstantCamera * m_camera {nullptr}; ///< The library camera handle
+   CGrabResultPtr ptrGrabResult; ///< The result of an attempt to grab an image
    
 public:
 
@@ -139,6 +186,8 @@ protected:
      */
    int getFPS();
    
+   float fps();
+   
    /** \name stdCamera Interface 
      * 
      * @{
@@ -151,18 +200,6 @@ protected:
      */ 
    int powerOnDefaults();
    
-   /// Required by stdCamera, but this does not do anything for this camera [stdCamera interface]
-   /** 
-     * \returns 0 always
-     */ 
-   int setTempControl();
-   
-   /// Required by stdCamera, but this does not do anything for this camera [stdCamera interface]
-   /** 
-     * \returns 0 always
-     */
-   int setTempSetPt();
-   
    /// Set the framerate.
    /** This uses the acquistion framerate feature.  If m_fpsSet is 0, acuisition framerate is disabled
      * and the resultant framerate is based solely on exposure time and ROI.  If non-zero, then the 
@@ -173,26 +210,27 @@ protected:
      */ 
    int setFPS();
    
-   /// Set the frame rate. [stdCamera interface]
-   /** Sets the frame rate to m_fpsSet.
+   /// Set the Exposure Time. [stdCamera interface]
+   /** Sets the frame rate to m_expTimeSet.
      * 
      * \returns 0 on success
      * \returns -1 on error
      */
    int setExpTime();
    
+   /// Check the next ROI
+   /** Checks if the target values are valid and adjusts them to the closest valid values if needed.
+     *
+     * \returns 0 always
+     */
+   int checkNextROI();
+
    /// Set the next ROI
    /**
      * \returns 0 always
      */
    int setNextROI();
       
-   /// Required by stdCamera, does not currently do anything. [stdCamera interface]
-   /**
-     * \returns 0 always
-     */ 
-   int setShutter(int sh);
- 
    ///@}
    
    /** \name Telemeter Interface
@@ -212,13 +250,6 @@ inline
 baslerCtrl::baslerCtrl() : MagAOXApp(MAGAOX_CURRENT_SHA1, MAGAOX_REPO_MODIFIED)
 {
    m_powerMgtEnabled = false;
-   
-   //--- stdCamera ---
-   m_hasTempControl = false;
-   m_usesExpTime = true;
-   m_usesFPS = true;
-   m_usesModes = false;
-   m_usesROI = true;
    
    return;
 }
@@ -522,37 +553,95 @@ int baslerCtrl::connect()
       log<text_log>("Found camera of type " + (std::string)m_camera->GetDeviceInfo().GetModelName() + " with serial number " + m_serialNumber + ".");
       log<text_log>("Using shared memory name " + m_shmimName + ".");
    }
-   
-   //set offsets to 0 so full field will be registered.
+
+   m_camera->BinningHorizontalMode.SetValue(BinningHorizontalMode_Sum);
+	m_camera->BinningVerticalMode.SetValue(BinningVerticalMode_Sum);
+
+   // -- Here we interrogate the camera to find valid ROI settings -- //
+
+   // Stop the camera and cycle through settings to get limits for each binning   
    m_camera->StopGrabbing();
-   m_camera->OffsetX.SetValue(0);
+   m_camera->OffsetX.SetValue(0); //ensure that all values are valid
    m_camera->OffsetY.SetValue(0);
       
-   if(m_startup_w == 0) m_startup_w = m_camera->Width.GetMax();
-   if(m_startup_h == 0) m_startup_h = m_camera->Height.GetMax();
-   if(m_startup_x == 0) m_startup_x = 0.5*(m_camera->Width.GetMax()-1);
-   if(m_startup_y == 0) m_startup_y = 0.5*(m_camera->Height.GetMax()-1);
-   if(m_startup_bin_x == 0) m_startup_bin_x = 1;
-   if(m_startup_bin_y == 0) m_startup_bin_y = 1;
+   int minb = m_camera->BinningHorizontal.GetMin();
+   int incb = m_camera->BinningHorizontal.GetInc();
+   int maxb = m_camera->BinningHorizontal.GetMax();
+
+   m_binXs.clear();
+   for(int b = minb; b<=maxb; b+=incb) m_binXs.push_back(b);
+
+   minb = m_camera->BinningVertical.GetMin();
+   incb = m_camera->BinningVertical.GetInc();
+   maxb = m_camera->BinningVertical.GetMax();
+
+   m_binYs.clear();
+   for(int b = minb; b<=maxb; b+=incb) m_binYs.push_back(b);
+
+   m_incXs.clear();
+   m_minWs.clear();
+   m_incWs.clear();
+   m_maxWs.clear();
+   for(size_t b=0; b < m_binXs.size(); ++b)
+   {
+      m_camera->BinningHorizontal.SetValue(m_binXs[b]);
+	   m_camera->BinningVertical.SetValue(m_binYs[0]);
+
+      m_incXs.push_back(m_camera->OffsetX.GetInc());
+      m_minWs.push_back(m_camera->Width.GetMin());
+      m_incWs.push_back(m_camera->Width.GetInc());
+      m_maxWs.push_back(m_camera->Width.GetMax());
+
+      /*//Leave for troubleshooting:
+      std::cerr << "--------------------\nH-binning: " << m_binXs[b] << "\n";
+      std::cerr << "OffsetX: " << 1 << " " << m_camera->OffsetX.GetInc() << " " << m_camera->Width.GetMax() - m_camera->Width.GetMin() << "\n";
+      std::cerr << "Width: " << m_camera->Width.GetMin() << " " << m_camera->Width.GetInc() << " " << m_camera->Width.GetMax() << "\n";
+      std::cerr << "OffsetY: " << 1 << " " << m_camera->OffsetY.GetInc() << " " << m_camera->Height.GetMax() - m_camera->Height.GetMin() << "\n";
+      std::cerr << "Height: " << m_camera->Height.GetMin() << " " << m_camera->Height.GetInc() << " " << m_camera->Height.GetMax() << "\n";      
+      */
+   }
+
+   m_incYs.clear();
+   m_minHs.clear();
+   m_incHs.clear();
+   m_maxHs.clear();
+   for(size_t b=0; b < m_binYs.size(); ++b)
+   {
+      m_camera->BinningHorizontal.SetValue(m_binXs[0]);
+	   m_camera->BinningVertical.SetValue(m_binYs[b]);
+
+      m_incYs.push_back(m_camera->OffsetX.GetInc());
+      m_minHs.push_back(m_camera->Height.GetMin());
+      m_incHs.push_back(m_camera->Height.GetInc());
+      m_maxHs.push_back(m_camera->Height.GetMax());
+
+      /*//Leave for troubleshooting:
+      std::cerr << "--------------------\nV-binning: " << m_binYs[b] << "\n";
+      std::cerr << "OffsetX: " << 1 << " " << m_camera->OffsetX.GetInc() << " " << m_camera->Width.GetMax() - m_camera->Width.GetMin() << "\n";
+      std::cerr << "Width: " << m_camera->Width.GetMin() << " " << m_camera->Width.GetInc() << " " << m_camera->Width.GetMax() << "\n";
+      std::cerr << "OffsetY: " << 1 << " " << m_camera->OffsetY.GetInc() << " " << m_camera->Height.GetMax() - m_camera->Height.GetMin() << "\n";
+      std::cerr << "Height: " << m_camera->Height.GetMin() << " " << m_camera->Height.GetInc() << " " << m_camera->Height.GetMax() << "\n";
+      */
+   }
       
-   m_full_w = m_camera->Width.GetMax();
-   m_full_h = m_camera->Height.GetMax();
-   m_full_x = 0.5*(m_camera->Width.GetMax()-1);
-   m_full_y = 0.5*(m_camera->Height.GetMax()-1);
-   
-   m_incX = m_camera->OffsetX.GetInc();
-   m_incY = m_camera->OffsetY.GetInc();
-   m_maxW = m_camera->Width.GetMax();
-   m_incW = m_camera->Width.GetInc();
-   m_maxH = m_camera->Height.GetMax();
-   m_incH = m_camera->Height.GetInc();
-   
-   m_nextROI.x = m_startup_x;
-   m_nextROI.y = m_startup_y;
-   m_nextROI.w = m_startup_w;
-   m_nextROI.h = m_startup_h;
-   m_nextROI.bin_x = m_startup_bin_x;
-   m_nextROI.bin_y = m_startup_bin_y;
+   m_full_w = m_camera->SensorWidth.GetValue();
+   m_full_h = m_camera->SensorHeight.GetValue();
+   m_full_x = 0.5*((float) m_full_w-1.0);
+   m_full_y = 0.5*((float) m_full_h-1.0);
+
+   if(m_default_w == 0) m_default_w = m_full_w;
+   if(m_default_h == 0) m_default_h = m_full_h;
+   if(m_default_x == 0) m_default_x = m_full_x;
+   if(m_default_y == 0) m_default_y = m_full_y;
+   if(m_default_bin_x == 0) m_binXs[0];
+   if(m_default_bin_y == 0) m_binYs[0];
+
+   m_nextROI.x = m_default_x;
+   m_nextROI.y = m_default_y;
+   m_nextROI.w = m_default_w;
+   m_nextROI.h = m_default_h;
+   m_nextROI.bin_x = m_default_bin_x;
+   m_nextROI.bin_y = m_default_bin_y;
    
    return 0;
 }
@@ -566,23 +655,71 @@ int baslerCtrl::configureAcquisition()
    {
       recordCamera(true); 
       m_camera->StopGrabbing();
-      
+      /*
+	  	The CenterX/Y has to be set to false otherwise the software tries to auto-center the frames.
+		See: https://docs.baslerweb.com/image-roi
+	   */
+	   m_camera->CenterX.SetValue(false);
+	   m_camera->CenterY.SetValue(false);
+
       //set offsets to 0 so any valid w/h will work.
       m_camera->OffsetX.SetValue(0);
       m_camera->OffsetY.SetValue(0);
+
+      if(checkNextROI() < 0)
+      {
+         log<software_error>({__FILE__, __LINE__, "error from checkNextROI()"});
+         return -1;
+      }
+
+      //Note: assuming checkNextROI has adjusted m_nextROI to valid values, so not doing any checks
+      //First find binning indices
+      size_t bx = 0;
+      for(size_t b =0; b < m_binXs.size(); ++b)
+      {
+         if(m_nextROI.bin_x == m_binXs[b])
+         {
+            bx = b;
+            break;
+         }
+      }
+
+      size_t by = 0;
+      for(size_t b =0; b < m_binYs.size(); ++b)
+      {
+         if(m_nextROI.bin_y == m_binYs[b])
+         {
+            by = b;
+            break;
+         }
+      }
+
+      //Set ROI.      
+      int xoff;
+      int yoff;
+      if(m_currentFlip == fgFlipLR || m_currentFlip == fgFlipUDLR)
+      {
+         xoff = (m_maxWs[bx] - 1 - m_nextROI.x) - 0.5*((float) m_nextROI.w - 1);
+      }
+      else
+      {
+         xoff = m_nextROI.x - 0.5*((float) m_nextROI.w - 1);
+      }
       
-      if(m_nextROI.w > m_maxW) m_nextROI.w = m_maxW;
-      m_nextROI.w -= m_nextROI.w % m_incW;
-      
-      if(m_nextROI.h > m_maxH) m_nextROI.h = m_maxH;
-      m_nextROI.h -= m_nextROI.h % m_incH;
-      
-      //Set ROI.
-      int xoff = m_nextROI.x - 0.5*((float) m_nextROI.w - 1);
-      int yoff = m_nextROI.y - 0.5*((float) m_nextROI.h - 1);
-      
-      xoff -= xoff % m_incX;
-      yoff -= yoff % m_incY;
+      if(m_currentFlip == fgFlipUD || m_currentFlip == fgFlipUDLR)
+      {
+         yoff = (m_maxHs[by] - 1 - m_nextROI.y) - 0.5*((float) m_nextROI.h - 1);
+      }
+      else
+      {
+         yoff = m_nextROI.y - 0.5*((float) m_nextROI.h - 1);
+      }
+
+	   m_camera->BinningHorizontal.SetValue(m_nextROI.bin_x);
+	   m_camera->BinningVertical.SetValue(m_nextROI.bin_y);
+	   //Probably not necessary to do it every time, but just in case:
+      m_camera->BinningHorizontalMode.SetValue(BinningHorizontalMode_Sum);
+	   m_camera->BinningVerticalMode.SetValue(BinningVerticalMode_Sum);
 
       m_camera->Width.SetValue(m_nextROI.w);
       m_camera->Height.SetValue(m_nextROI.h);
@@ -590,13 +727,58 @@ int baslerCtrl::configureAcquisition()
       m_camera->OffsetX.SetValue(xoff);
       m_camera->OffsetY.SetValue(yoff);
 
-      
-      
+	  // Read the parameter from the camera to check if parameter change is successful
+  	   m_currentROI.bin_x = m_camera->BinningHorizontal.GetValue();
+	   m_currentROI.bin_y = m_camera->BinningVertical.GetValue();
+
+      bx = 0;
+      for(size_t b =0; b < m_binXs.size(); ++b)
+      {
+         if(m_nextROI.bin_x == m_binXs[b])
+         {
+            bx = b;
+            break;
+         }
+      }
+
+      by = 0;
+      for(size_t b =0; b < m_binYs.size(); ++b)
+      {
+         if(m_nextROI.bin_y == m_binYs[b])
+         {
+            by = b;
+            break;
+         }
+      }
+
       m_currentROI.w = m_camera->Width.GetValue();
       m_currentROI.h = m_camera->Height.GetValue();
-      m_currentROI.x = m_camera->OffsetX.GetValue() + 0.5*((float) m_currentROI.w - 1);
-      m_currentROI.y = m_camera->OffsetY.GetValue() + 0.5*((float) m_currentROI.h - 1);
+
+      if(m_currentFlip == fgFlipLR || m_currentFlip == fgFlipUDLR)
+      {
+         m_currentROI.x = m_maxWs[bx] - 1 - (m_camera->OffsetX.GetValue() + 0.5*((float) m_currentROI.w - 1));
+      }
+      else
+      {
+         m_currentROI.x = m_camera->OffsetX.GetValue() + 0.5*((float) m_currentROI.w - 1);
+      }
       
+      if(m_currentFlip == fgFlipUD || m_currentFlip == fgFlipUDLR)
+      {
+         m_currentROI.y = m_maxHs[by] - 1 - (m_camera->OffsetY.GetValue() + 0.5*((float) m_currentROI.h - 1));
+      }
+      else
+      {
+         m_currentROI.y = m_camera->OffsetY.GetValue() + 0.5*((float) m_currentROI.h - 1);
+      }
+
+      //Set the full window for this binning
+      m_full_currbin_w = m_maxWs[bx];
+      m_full_currbin_x = 0.5*((float) m_full_currbin_w - 1.0);
+      m_full_currbin_h = m_maxHs[by];
+      m_full_currbin_y = 0.5*((float) m_full_currbin_h - 1.0);
+
+      //Update binning
       updateIfChanged( m_indiP_roi_x, "current", m_currentROI.x, INDI_OK);
       updateIfChanged( m_indiP_roi_y, "current", m_currentROI.y, INDI_OK);
       updateIfChanged( m_indiP_roi_w, "current", m_currentROI.w, INDI_OK);
@@ -615,16 +797,13 @@ int baslerCtrl::configureAcquisition()
       m_height = m_currentROI.h;
       m_dataType = _DATATYPE_INT16;
       
+      getFPS();
+      
       recordCamera(true); 
    }
    catch(...)
    {
       log<software_error>({__FILE__, __LINE__, "invalid ROI specifications"});
-      m_camera->OffsetX.SetValue(0);
-      m_camera->OffsetY.SetValue(0);
-      m_camera->Width.SetValue(m_maxW);
-      m_camera->Height.SetValue(m_maxH);
-      
       state(stateCodes::NOTCONNECTED);
       return -1;
    }
@@ -644,6 +823,8 @@ int baslerCtrl::startAcquisition()
       return -1;
    }
    
+   state(stateCodes::OPERATING);
+    
    return 0;
 }
 
@@ -671,17 +852,23 @@ int baslerCtrl::acquireAndCheckValid()
    }
 }
 
+
 int baslerCtrl::loadImageIntoStream(void * dest)
 {
+   pixelT * src = nullptr;
    try 
    {
-      memcpy( dest, (pixelT *) ptrGrabResult->GetBuffer(), m_width*m_height*sizeof(pixelT));
+      src = (pixelT *) ptrGrabResult->GetBuffer();
    }
    catch(...)
    {
       state(stateCodes::NOTCONNECTED);
       return -1;
    }
+
+   if(src == nullptr) return -1;
+             
+   if( frameGrabber<baslerCtrl>::loadImageIntoStreamCopy(dest, src, m_width, m_height, sizeof(pixelT)) == nullptr) return -1;
    
    return 0;
 }
@@ -761,27 +948,22 @@ int baslerCtrl::getFPS()
 }
 
 inline
+float baslerCtrl::fps()
+{
+   return m_fps;
+
+}
+
+inline
 int baslerCtrl::powerOnDefaults()
 {
-   m_nextROI.x = m_startup_x;
-   m_nextROI.y = m_startup_y;
-   m_nextROI.w = m_startup_w;
-   m_nextROI.h = m_startup_h;
-   m_nextROI.bin_x = m_startup_bin_x;
-   m_nextROI.bin_y = m_startup_bin_y;
+   m_nextROI.x = m_default_x;
+   m_nextROI.y = m_default_y;
+   m_nextROI.w = m_default_w;
+   m_nextROI.h = m_default_h;
+   m_nextROI.bin_x = m_default_bin_x;
+   m_nextROI.bin_y = m_default_bin_y;
    
-   return 0;
-}
-
-inline
-int baslerCtrl::setTempControl()
-{
-   return 0;
-}
-
-inline
-int baslerCtrl::setTempSetPt()
-{
    return 0;
 }
 
@@ -841,6 +1023,138 @@ int baslerCtrl::setExpTime()
 }
 
 inline
+int baslerCtrl::checkNextROI()
+{
+   std::cerr << "checkNextROI!\n";
+   
+   //First find binning indices
+   size_t bx = 0;
+   for(size_t b =0; b < m_binXs.size(); ++b)
+   {
+      if(m_nextROI.bin_x == m_binXs[b])
+      {
+         bx = b;
+         break;
+      }
+   }
+   std::cerr << "req bin_x: " << m_nextROI.bin_x << " " << "adj bin_x: " << m_binXs[bx] << "\n";
+   m_nextROI.bin_x = m_binXs[bx]; //In case no valid value was found.
+
+   size_t by = 0;
+   for(size_t b =0; b < m_binYs.size(); ++b)
+   {
+      if(m_nextROI.bin_y == m_binYs[b])
+      {
+         by = b;
+         break;
+      }
+   }
+   std::cerr << "req bin_y: " << m_nextROI.bin_y << " " << "adj bin_y: " << m_binYs[by] << "\n";
+   m_nextROI.bin_y = m_binYs[by]; //In case no valid value was found.
+
+   //Next check width
+   //-- round to nearest increment
+   //-- check limits
+   int w = m_nextROI.w;
+   int rw = w % m_incWs[bx];
+   if(rw < 0.5*m_incWs[bx]) w -= rw;
+   else w += m_incWs[bx] - rw;
+
+   if(w < m_minWs[bx]) w = m_minWs[bx];
+   else if(w > m_maxWs[bx]) w = m_maxWs[bx];
+
+   std::cerr << "req w: " << m_nextROI.w << " " << "adj w: " << w << "\n";
+   m_nextROI.w = w;
+
+   //Now check x 
+   //-- calculate offset from center 
+   //-- round to nearest increment 
+   //-- recalculate center 
+   int x;
+   if(m_currentFlip == fgFlipLR || m_currentFlip == fgFlipUDLR)
+   {
+      x = (m_maxWs[bx] - 1 - m_nextROI.x) - 0.5*((float) w - 1);
+   }
+   else
+   {
+      x = m_nextROI.x - 0.5*((float) w - 1);
+   }
+   
+   int rx = x % m_incXs[bx];
+   if(rx < 0.5*m_incXs[bx]) x -= rx;
+   else x += m_incXs[bx] - rx;
+
+   if(x < 0) x=0;
+   else if(x > m_maxWs[bx] - w) x = m_maxWs[bx] - w;
+
+   std::cerr << "req x: " << m_nextROI.x;
+   if(m_currentFlip == fgFlipLR || m_currentFlip == fgFlipUDLR)
+   {
+      m_nextROI.x = m_maxWs[bx] - 1 - (x + 0.5*((float) w - 1.0));
+   }
+   else
+   {
+      m_nextROI.x = x + 0.5*((float) w - 1.0);
+   }
+   std::cerr << " adj x: " << m_nextROI.x << "\n";
+
+   //Next check height
+   //-- round to nearest increment
+   //-- check limits
+   int h = m_nextROI.h;
+   int rh = h % m_incHs[by];
+   if(rh < 0.5*m_incHs[by]) h -= rh;
+   else h += m_incHs[by] - rh;
+
+   if(h < m_minHs[by]) h = m_minHs[by];
+   else if(h > m_maxHs[by]) h = m_maxHs[by];
+
+   std::cerr << "req h: " << m_nextROI.h << " " << "adj h: " << h << "\n";
+   m_nextROI.h = h;
+
+   //Now check y
+   //-- calculate offset from center 
+   //-- round to nearest increment 
+   //-- recalculate center 
+   int y;
+   if(m_currentFlip == fgFlipUD || m_currentFlip == fgFlipUDLR)
+   {
+      y = (m_maxHs[by] - 1 - m_nextROI.y) - 0.5*((float) h - 1);
+   }
+   else
+   {
+      y = m_nextROI.y - 0.5*((float) h - 1);
+   }
+   
+   int ry = y % m_incYs[by];
+   if(ry < 0.5*m_incYs[by]) y -= ry;
+   else y += m_incYs[by] - ry;
+
+   if(y < 0) y=0;
+   else if(y > m_maxHs[by] - h) y = m_maxHs[by] - h;
+
+   std::cerr << "req y: " << m_nextROI.y;
+   if(m_currentFlip == fgFlipUD || m_currentFlip == fgFlipUDLR)
+   {
+      m_nextROI.y = m_maxHs[by] - 1 - (y + 0.5*((float) h - 1));
+   }
+   else
+   {
+      m_nextROI.y = y + 0.5*((float) h - 1);
+   }
+   std::cerr << " adj y: " << m_nextROI.y << "\n";
+
+   updateIfChanged( m_indiP_roi_x, "target", m_nextROI.x, INDI_OK);
+   updateIfChanged( m_indiP_roi_y, "target", m_nextROI.y, INDI_OK);
+   updateIfChanged( m_indiP_roi_w, "target", m_nextROI.w, INDI_OK);
+   updateIfChanged( m_indiP_roi_h, "target", m_nextROI.h, INDI_OK);
+   updateIfChanged( m_indiP_roi_bin_x, "target", m_nextROI.bin_x, INDI_OK);
+   updateIfChanged( m_indiP_roi_bin_y, "target", m_nextROI.bin_y, INDI_OK);
+
+   return 0;
+}
+
+inline
 int baslerCtrl::setNextROI()
 {
    std::cerr << "setNextROI:\n";
@@ -856,16 +1170,7 @@ int baslerCtrl::setNextROI()
    updateSwitchIfChanged(m_indiP_roi_set, "request", pcf::IndiElement::Off, INDI_IDLE);
    updateSwitchIfChanged(m_indiP_roi_full, "request", pcf::IndiElement::Off, INDI_IDLE);
    updateSwitchIfChanged(m_indiP_roi_last, "request", pcf::IndiElement::Off, INDI_IDLE);
-   updateSwitchIfChanged(m_indiP_roi_startup, "request", pcf::IndiElement::Off, INDI_IDLE);
-   return 0;
-}
-
-
-
-inline
-int baslerCtrl::setShutter(int sh)
-{
-   static_cast<void>(sh);
+   updateSwitchIfChanged(m_indiP_roi_default, "request", pcf::IndiElement::Off, INDI_IDLE);
    return 0;
 }
 

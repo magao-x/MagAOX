@@ -103,7 +103,7 @@ public:
 inline 
 logstream::logstream()
 {
-   m_startTime = mx::get_curr_time();
+   m_startTime = mx::sys::get_curr_time();
 }
 
 inline

@@ -9,6 +9,11 @@
 #ifndef frameGrabber_hpp
 #define frameGrabber_hpp
 
+#include <sys/syscall.h>
+       
+#include <mx/sigproc/circularBuffer.hpp>
+#include <mx/math/vectorUtils.hpp>
+#include <mx/improc/imageUtils.hpp>
 
 #include <ImageStruct.h>
 #include <ImageStreamIO.h>
@@ -32,9 +37,13 @@ namespace dev
   * The derived class `derivedT` must expose the following interface
   * \code 
     //Configures the camera for acquistion, must also set m_width, m_height, and m_dataType
-    //so that the share memory can be allocated
+    //so that the shared memory can be allocated
     int derivedT::configureAcquisition();
 
+    //Gets the frames-per-second readout rate 
+    //used for the latency statistics
+    float derivedT::fps();
+    
     //Start acquisition.
     int derivedT::startAcquisition();
     
@@ -50,10 +59,15 @@ namespace dev
     //Take any actions needed to reconfigure the system.  Called if m_reconfig is set to true.
     int derivedT::reconfig()
   * \endcode  
-  * Each of the above functions should return 0 on success, and -1 on an error. 
+  * Each of the above functions should return 0 on success, and -1 on an error (except fps). 
   * For `acquireAndCheckValid` >0 will indicate no data but not an error.  In most cases, 
   * an appropriate state code, such as NOTCONNECTED, should be set as well.
   *
+  * A static configuration variable must be defined in derivedT as
+  * \code
+  * static constexpr bool c_frameGrabber_flippable =true; //or: false
+  * \endcode
+  * which determines whether or not the images can be flipped programatically.
   *
   * Calls to this class's `setupConfig`, `loadConfig`, `appStartup`, `appLogic` and `appShutdown`
   * functions must be placed in the derived class's functions of the same name.
@@ -63,6 +77,9 @@ namespace dev
 template<class derivedT>
 class frameGrabber 
 {
+public:
+   enum fgFlip { fgFlipNone, fgFlipUD, fgFlipLR, fgFlipUDLR };
+   
 protected:
 
    /** \name Configurable Parameters
@@ -71,10 +88,18 @@ protected:
    std::string m_shmimName {""}; ///< The name of the shared memory image, is used in `/tmp/<shmimName>.im.shm`. Derived classes should set a default.
       
    int m_fgThreadPrio {2}; ///< Priority of the framegrabber thread, should normally be > 00.
-    
+   std::string m_fgCpuset; ///< The cpuset to assign the framegrabber thread to.  Not used if empty, the default.
+
    uint32_t m_circBuffLength {1}; ///< Length of the circular buffer, in frames
        
+   uint16_t m_latencyCircBuffMaxLength {3600}; ///< Maximum length of the latency measurement circular buffers
+   float m_latencyCircBuffMaxTime {5}; ///< Maximum time of the latency meaurement circular buffers
+   
+   int m_defaultFlip {fgFlipNone};
+   
    ///@}
+   
+   int m_currentFlip {fgFlipNone};
    
    uint32_t m_width {0}; ///< The width of the image, once deinterlaced etc.
    uint32_t m_height {0}; ///< The height of the image, once deinterlaced etc.
@@ -90,11 +115,29 @@ protected:
    
    bool m_reconfig {false}; ///< Flag to set if a camera reconfiguration requires a framegrabber reset.
    
-   IMAGE * m_imageStream {nullptr}; ///< The ImageStreamIO shared memory buffer. \todo why isn't this m_imageStream?
+   IMAGE * m_imageStream {nullptr}; ///< The ImageStreamIO shared memory buffer.
+   
+   typedef uint16_t cbIndexT;
+   
+   mx::sigproc::circularBufferIndex<timespec, cbIndexT> m_atimes;
+   mx::sigproc::circularBufferIndex<timespec, cbIndexT> m_wtimes;
+   
+   std::vector<double> m_atimesD;
+   std::vector<double> m_wtimesD;
+   std::vector<double> m_watimesD;
    
    timespec m_dummy_ts {0,0};
    uint64_t m_dummy_cnt {0};
    char m_dummy_c {0};
+   
+   double m_mna;
+   double m_vara;  
+         
+   double m_mnw;   
+   double m_varw;  
+         
+   double m_mnwa;  
+   double m_varwa; 
    
    
    
@@ -180,6 +223,10 @@ protected:
    
    bool m_fgThreadInit {true}; ///< Synchronizer for thread startup, to allow priority setting to finish.
    
+   pid_t m_fgThreadID {0}; ///< The ID of the framegrabber thread.
+   
+   pcf::IndiProperty m_fgThreadProp; ///< The property to hold the f.g. thread details.
+   
    std::thread m_fgThread; ///< A separate thread for the actual framegrabbings
 
    ///Thread starter, called by MagAOXApp::threadStart on thread construction.  Calls fgThreadExec.
@@ -191,7 +238,12 @@ protected:
    
    ///@}
   
-   
+   void * loadImageIntoStreamCopy( void * dest,
+                                   void * src,
+                                   size_t width,
+                                   size_t height,
+                                   size_t szof
+                                 );
     
    
     /** \name INDI 
@@ -205,6 +257,7 @@ protected:
    
    pcf::IndiProperty m_indiP_frameSize; ///< Property used to report the current frame size
 
+   pcf::IndiProperty m_indiP_timing;
 public:
 
    /// Update the INDI properties for this device controller
@@ -229,18 +282,25 @@ template<class derivedT>
 void frameGrabber<derivedT>::setupConfig(mx::app::appConfigurator & config)
 {
    config.add("framegrabber.threadPrio", "", "framegrabber.threadPrio", argType::Required, "framegrabber", "threadPrio", false, "int", "The real-time priority of the framegrabber thread.");
-   
+
+   config.add("framegrabber.cpuset", "", "framegrabber.cpuset", argType::Required, "framegrabber", "cpuset", false, "string", "The cpuset to assign the framegrabber thread to.");
+
    config.add("framegrabber.shmimName", "", "framegrabber.shmimName", argType::Required, "framegrabber", "shmimName", false, "string", "The name of the ImageStreamIO shared memory image. Will be used as /milk/shm/<shmimName>.im.shm.");
    
    config.add("framegrabber.circBuffLength", "", "framegrabber.circBuffLength", argType::Required, "framegrabber", "circBuffLength", false, "size_t", "The length of the circular buffer. Sets m_circBuffLength, default is 1.");
 
+   if(derivedT::c_frameGrabber_flippable)
+   {
+      config.add("framegrabber.defaultFlip", "", "framegrabber.defaultFlip", argType::Required, "framegrabber", "defaultFlip", false, "string", "The default flip of the image.  Options are flipNone, flipUD, flipLR, flipUDLR.  The default is flipNone.");
+   }
 }
 
 template<class derivedT>
 void frameGrabber<derivedT>::loadConfig(mx::app::appConfigurator & config)
 {
    config(m_fgThreadPrio, "framegrabber.threadPrio");
-   m_shmimName = derived().configName();
+   config(m_fgCpuset, "framegrabber.cpuset");
+   if(m_shmimName == "") m_shmimName = derived().configName();
    config(m_shmimName, "framegrabber.shmimName");
   
    config(m_circBuffLength, "framegrabber.circBuffLength");
@@ -249,6 +309,33 @@ void frameGrabber<derivedT>::loadConfig(mx::app::appConfigurator & config)
    {
       m_circBuffLength = 1;
       derivedT::template log<text_log>("circBuffLength set to 1");
+   }
+   
+   if(derivedT::c_frameGrabber_flippable)
+   {
+      std::string flip = "flipNone";
+      config(flip, "framegrabber.defaultFlip");
+      if(flip == "flipNone")
+      {
+         m_defaultFlip = fgFlipNone;
+      }
+      else if(flip == "flipUD")
+      {
+         m_defaultFlip = fgFlipUD;
+      }
+      else if(flip == "flipLR")
+      {
+         m_defaultFlip = fgFlipLR;
+      }
+      else if(flip == "flipUDLR")
+      {
+         m_defaultFlip = fgFlipUDLR;
+      }
+      else
+      {
+         derivedT::template log<text_log>({std::string("invalid framegrabber flip specification (") + flip + "), setting flipNone"}, logPrio::LOG_ERROR);
+         m_defaultFlip = fgFlipNone;
+      }
    }
 }
    
@@ -292,7 +379,25 @@ int frameGrabber<derivedT>::appStartup()
       return -1;
    }
    
-   if(derived().threadStart( m_fgThread, m_fgThreadInit, m_fgThreadPrio, "framegrabber", this, fgThreadStart) < 0)
+   //Register the timing INDI property
+   derived().createROIndiNumber( m_indiP_timing, "fg_timing");
+   m_indiP_timing.add(pcf::IndiElement("acq_fps"));
+   m_indiP_timing.add(pcf::IndiElement("acq_jitter"));
+   m_indiP_timing.add(pcf::IndiElement("write_fps"));
+   m_indiP_timing.add(pcf::IndiElement("write_jitter"));
+   m_indiP_timing.add(pcf::IndiElement("delta_aw"));
+   m_indiP_timing.add(pcf::IndiElement("delta_aw_jitter"));
+
+   if( derived().registerIndiPropertyReadOnly( m_indiP_timing ) < 0)
+   {
+      #ifndef STDCAMERA_TEST_NOLOG
+      derivedT::template log<software_error>({__FILE__,__LINE__});
+      #endif
+      return -1;
+   }
+
+   //Start the f.g. thread
+   if(derived().threadStart( m_fgThread, m_fgThreadInit, m_fgThreadID, m_fgThreadProp, m_fgThreadPrio, m_fgCpuset, "framegrabber", this, fgThreadStart) < 0)
    {
       derivedT::template log<software_error, -1>({__FILE__, __LINE__});
       return -1;
@@ -313,6 +418,59 @@ int frameGrabber<derivedT>::appLogic()
       return -1;
    }
    
+   if( derived().state() == stateCodes::OPERATING && m_atimes.size() > 0 )
+   {
+      if(m_atimes.size() >= m_atimes.maxEntries())
+      {
+         cbIndexT refEntry = m_atimes.nextEntry();
+         
+         m_atimesD.resize(m_atimes.maxEntries()-1);
+         m_wtimesD.resize(m_wtimes.maxEntries()-1);
+         m_watimesD.resize(m_wtimes.maxEntries()-1);
+         
+         double a0 = m_atimes.at(refEntry, 0).tv_sec + ((double) m_atimes.at(refEntry, 0).tv_nsec)/1e9;
+         double w0 = m_wtimes.at(refEntry, 0).tv_sec + ((double) m_wtimes.at(refEntry, 0).tv_nsec)/1e9;
+         for(size_t n=1; n <= m_atimesD.size(); ++n)
+         {
+            double a = m_atimes.at(refEntry, n).tv_sec + ((double) m_atimes.at(refEntry, n).tv_nsec)/1e9;
+            double w = m_wtimes.at(refEntry, n).tv_sec + ((double) m_wtimes.at(refEntry, n).tv_nsec)/1e9;
+            m_atimesD[n-1] = a - a0;
+            m_wtimesD[n-1] = w - w0;
+            m_watimesD[n-1] = w - a;
+            a0 = a;
+            w0 = w;
+         }
+         
+         m_mna = mx::math::vectorMean(m_atimesD);
+         m_vara = mx::math::vectorVariance(m_atimesD, m_mna);
+         
+         m_mnw = mx::math::vectorMean(m_wtimesD);
+         m_varw = mx::math::vectorVariance(m_wtimesD, m_mnw);
+         
+         m_mnwa = mx::math::vectorMean(m_watimesD);
+         m_varwa = mx::math::vectorVariance(m_watimesD, m_mnwa);
+         
+      }
+      else
+      {
+         m_mna = 0;
+         m_vara = 0;
+         m_mnw = 0;
+         m_varw = 0;
+         m_mnwa = 0;
+         m_varwa = 0;
+      }
+   }
+   else
+   {
+      m_mna = 0;
+      m_vara = 0;
+      m_mnw = 0;
+      m_varw = 0;
+      m_mnwa = 0;
+      m_varwa = 0;
+   }
+
    return 0;
 
 }
@@ -320,7 +478,20 @@ int frameGrabber<derivedT>::appLogic()
 template<class derivedT>
 int frameGrabber<derivedT>::onPowerOff()
 { 
+   m_mna = 0;
+   m_vara = 0;
+   m_mnw = 0;  
+   m_varw = 0;
+   m_mnwa = 0;
+   m_varwa = 0;
+
+   m_width = 0;
+   m_height = 0;
+
+   updateINDI();
+   
    m_reconfig = true;
+
 
    return 0;
 }
@@ -357,6 +528,9 @@ void frameGrabber<derivedT>::fgThreadStart( frameGrabber * o)
 template<class derivedT>
 void frameGrabber<derivedT>::fgThreadExec()
 {
+   //Get the thread PID immediately so the caller can return.
+   m_fgThreadID = syscall(SYS_gettid);
+   
    timespec writestart;
    
    //Wait fpr the thread starter to finish initializing this thread.
@@ -379,10 +553,20 @@ void frameGrabber<derivedT>::fgThreadExec()
       if(derived().shutdown()) continue;
       else 
       {
-         //At the end of this, must have m_width, m_height, m_dataType set.
+         //At the end of this, must have m_width, m_height, m_dataType set, and derived()->fps must be valid.
          if(derived().configureAcquisition() < 0) continue;        
          
+         //Set up the latency circ. buffs
+         cbIndexT cbSz = m_latencyCircBuffMaxTime * derived().fps();
+         if(cbSz > m_latencyCircBuffMaxLength) cbSz = m_latencyCircBuffMaxLength;
+         if(cbSz < 3) cbSz = 3; //Make variance meaningful
+         m_atimes.maxEntries(cbSz);
+         m_wtimes.maxEntries(cbSz);
+         
          m_typeSize = ImageStreamIO_typesize(m_dataType);
+         
+         //Here we resolve currentFlip somehow.
+         m_currentFlip = m_defaultFlip;
       }
 
       /* Initialize ImageStreamIO
@@ -477,14 +661,9 @@ void frameGrabber<derivedT>::fgThreadExec()
          m_imageStream->md->write=0;
          ImageStreamIO_sempost(m_imageStream,-1);
  
-         
-         //This is a diagnostic of latency:
-         /**/if(m_imageStream->md[0].cnt0 % 2000 == 0)
-         {
-            std::cerr << ( (double) m_imageStream->md->writetime.tv_sec + ((double) m_imageStream->md->writetime.tv_nsec)/1e9) - ( (double) m_imageStream->md->atime.tv_sec + ((double) m_imageStream->md->atime.tv_nsec)/1e9) << " ";
-            std::cerr << ( (double) m_imageStream->md->writetime.tv_sec + ((double) m_imageStream->md->writetime.tv_nsec)/1e9) - ( (double) writestart.tv_sec + ((double) writestart.tv_nsec)/1e9) << "\n";
-
-         }/**/
+         //Update the latency circ. buffs
+         m_atimes.nextEntry(m_imageStream->md->atime);
+         m_wtimes.nextEntry(m_imageStream->md->writetime);
          
          //Now we increment pointers outside the time-critical part of the loop.
          next_cnt1 = m_imageStream->md->cnt1+1;
@@ -516,7 +695,35 @@ void frameGrabber<derivedT>::fgThreadExec()
    }
 }
 
-
+template<class derivedT>
+void * frameGrabber<derivedT>::loadImageIntoStreamCopy( void * dest,
+                                                        void * src,
+                                                        size_t width,
+                                                        size_t height,
+                                                        size_t szof
+                                                      )
+{
+   if(!derivedT::c_frameGrabber_flippable)
+   {
+      return memcpy(dest, src, width*height*szof);
+   }
+   else
+   {
+      switch(m_currentFlip)
+      {
+         case fgFlipNone:
+            return mx::improc::imcpy(dest, src, width, height, szof);
+         case fgFlipUD:
+            return mx::improc::imcpy_flipUD(dest, src, width, height, szof);
+         case fgFlipLR:
+            return mx::improc::imcpy_flipLR(dest, src, width, height, szof);  
+         case fgFlipUDLR:
+            return mx::improc::imcpy_flipUDLR(dest, src, width, height, szof);
+         default:
+            return nullptr;
+      }
+   }
+}
 
 
 
@@ -528,7 +735,14 @@ int frameGrabber<derivedT>::updateINDI()
    indi::updateIfChanged(m_indiP_shmimName, "name", m_shmimName, derived().m_indiDriver);                     
    indi::updateIfChanged(m_indiP_frameSize, "width", m_width, derived().m_indiDriver);
    indi::updateIfChanged(m_indiP_frameSize, "height", m_height, derived().m_indiDriver);
-   
+
+   double fpsa = 0;
+   double fpsw = 0;
+   if(m_mna != 0 ) fpsa = 1.0/m_mna;
+   if(m_mnw != 0 ) fpsw = 1.0/m_mnw;
+
+   indi::updateIfChanged<double>(m_indiP_timing, {"acq_fps","acq_jitter","write_fps","write_jitter","delta_aw","delta_aw_jitter"}, 
+                        {fpsa, sqrt(m_vara), fpsw, sqrt(m_varw), m_mnwa, sqrt(m_varwa)},derived().m_indiDriver);
    
    return 0;
 }

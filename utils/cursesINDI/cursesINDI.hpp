@@ -68,6 +68,9 @@ public:
    int m_cursStat {1};
 
    WINDOW * w_interactWin {nullptr};
+   WINDOW * w_curvalWin {nullptr};
+   WINDOW * w_attentionWin {nullptr};
+   
    WINDOW * w_countWin {nullptr};
 
    bool m_shutdown {false};
@@ -76,6 +79,11 @@ public:
    std::thread m_drawThread;
    std::mutex m_drawMutex;
 
+   std::string m_msgFile {"/tmp/cursesINDI_logs.txt"};
+   std::ofstream m_msgout;
+   int m_msgsPrinted {0};
+   int m_msgsMax {10000};
+   
    cursesINDI( const std::string &szName,
                const std::string &szVersion,
                const std::string &szProtocolVersion
@@ -139,13 +147,16 @@ public:
 
    void updateTable();
 
+   /// Update the current-value window.
+   void updateCurVal();
+   
    void moveCurrent( int nextY,
                      int nextX
                    );
 
    void _moveCurrent( int nextY,
-                     int nextX
-                   );
+                      int nextX
+                    );
 
    void keyPressed( int ch );
 
@@ -186,18 +197,24 @@ public:
 cursesINDI::cursesINDI( const std::string &szName,
                         const std::string &szVersion,
                         const std::string &szProtocolVersion
-                     ) : pcf::IndiClient(szName, szVersion, szProtocolVersion, "127.0.0.1", 7624)
+                      ) : pcf::IndiClient(szName, szVersion, szProtocolVersion, "127.0.0.1", 7624)
 {
    m_yTop = 6;
-   colWidth({4, 19, 39, 18, 18});
+   colWidth({4, 19, 18, 18, 18});
    
    m_yBot = 1;
+   
+
+   m_msgout.open(m_msgFile);
 
 }
 
 cursesINDI::~cursesINDI()
 {
    if( w_interactWin ) delwin(w_interactWin);
+   if( w_curvalWin ) delwin(w_curvalWin);
+   if( w_attentionWin ) delwin(w_attentionWin);
+   if( w_countWin) delwin(w_countWin);
 }
 
 void cursesINDI::handleDefProperty( const pcf::IndiProperty &ipRecv )
@@ -268,14 +285,24 @@ void cursesINDI::handleDelProperty( const pcf::IndiProperty &ipRecv )
             else ++elIt;
          }
          
-         
-         knownProps.erase(ipRecv.getDevice());
-         
+         for(propMapIteratorT pIt = knownProps.begin(); pIt != knownProps.end();)
+         {
+            if( pIt->first == ipRecv.createUniqueKey() ) pIt = knownProps.erase(pIt);
+            else ++pIt;
+         }
       }
       else
       {
          if(fpout) *fpout << "will delete: " << ipRecv.createUniqueKey() << "\n";
-         knownElements.erase(ipRecv.createUniqueKey());
+         
+         for(elementMapIteratorT elIt = knownElements.begin(); elIt != knownElements.end();)
+         {
+            if( elIt->second.propKey == ipRecv.createUniqueKey()) elIt = knownElements.erase(elIt);
+            else ++elIt;
+         }
+         
+         knownProps.erase(ipRecv.createUniqueKey());
+         
       }
    }
    
@@ -285,13 +312,66 @@ void cursesINDI::handleDelProperty( const pcf::IndiProperty &ipRecv )
 
 void cursesINDI::handleMessage( const pcf::IndiProperty &ipRecv )
 {
-   static_cast<void>(ipRecv);
+   tm bdt; //broken down time
+   time_t tt = ipRecv.getTimeStamp().getTimeVal().tv_sec; 
+   gmtime_r( &tt, &bdt);
+   
+   char tstr1[25];
+   strftime(tstr1, sizeof(tstr1), "%H:%M:%S", &bdt);
+   char tstr2[11];
+   snprintf(tstr2, sizeof(tstr2), ".%06i", static_cast<int>(ipRecv.getTimeStamp().getTimeVal().tv_usec)); //casting in case we switch to int64_t
+         
+   
+   std::string msg = ipRecv.getMessage();
+   
+   if(msg.size() > 4)
+   {
+      std::string prio = msg.substr(0,4);
+      if(prio == "NOTE")
+      {
+         m_msgout << "\033[1m";
+      }
+      else if(prio == "WARN")
+      {
+         m_msgout << "\033[93m\033[1m";
+      }
+      else if(prio == "ERR ")
+      {
+         m_msgout << "\033[91m\033[1m";
+      }
+      else if(prio == "CRIT")
+      {
+         m_msgout << "\033[41m\033[1m";
+      }
+      else if(prio == "ALRT")
+      {
+         m_msgout << "\033[41m\033[1m";
+      }
+      else if(prio == "EMER")
+      {
+         m_msgout << "\033[41m\033[1m";
+      }
+   }   
+   m_msgout << std::string(tstr1) << std::string(tstr2) << " [" << ipRecv.getDevice() << "] " << msg;
+   
+   m_msgout << "\033[0m";
+   m_msgout << std::endl;
+   
+   
+   ++m_msgsPrinted;
+   if(m_msgsPrinted > m_msgsMax)
+   {
+      m_msgout.close();
+      m_msgout.open(m_msgFile);
+      m_msgsPrinted = 0;
+   }
 }
 
 void cursesINDI::handleSetProperty( const pcf::IndiProperty &ipRecv )
 {
    handleDefProperty(ipRecv);
 }
+
 
 void cursesINDI::execute()
 {
@@ -314,9 +394,19 @@ void cursesINDI::startUp()
 {
    if(w_interactWin == nullptr)
    {
-      w_interactWin = newwin( 1, m_minWidth, m_yTop-2, m_xLeft);
+      w_interactWin = newwin( 1, m_minWidth, m_yTop-3, m_xLeft);
    }
 
+   if(w_curvalWin == nullptr)
+   {
+      w_curvalWin = newwin( 1, m_minWidth, m_yTop-2, m_xLeft);
+   }
+   
+   if(w_attentionWin == nullptr)
+   {
+      w_attentionWin = newwin( 1, m_minWidth, m_yTop-4, m_xLeft);
+   }
+   
    keypad(w_interactWin, TRUE);
 
 
@@ -415,10 +505,20 @@ void cursesINDI::redrawTable()
    
    m_cellContents.clear();
 
+   bool fsmAlerts = false;
+   
+   std::set<std::string> alertDev;
+   
    for( elementMapIteratorT es = knownElements.begin(); es != knownElements.end(); ++es)
    {
+      if(fpout) *fpout << knownProps[es->second.propKey].getName() << " " << knownProps[es->second.propKey].getState() << "\n";
       
-
+      if(knownProps[es->second.propKey].getName() == "fsm" &&
+            knownProps[es->second.propKey].getState() == pcf::IndiProperty::Alert) 
+      {
+         fsmAlerts = true;
+         alertDev.insert(knownProps[es->second.propKey].getDevice());
+      }
       std::vector<std::string> s;
 
       s.resize( m_colFraction.size() );
@@ -437,12 +537,30 @@ void cursesINDI::redrawTable()
 
    draw();
    
+   if(fpout) *fpout << "fsmAlerts: " << fsmAlerts << "\n";
+   
+   int cx, cy;
+   getyx(w_interactWin, cy, cx);
+   int cs = cursStat();
+   cursStat(0);
+   
+   wclear(w_attentionWin);
+   if(fsmAlerts)
+   {
+      std::string alrt = "!! FSM alert: " + *alertDev.begin();
+      if(alertDev.size() > 1) alrt += " (+" + std::to_string(alertDev.size()-1) + ")";
+      
+      wprintw(w_attentionWin, alrt.c_str());
+   }
+   wrefresh(w_attentionWin);
+   
+   wmove(w_interactWin,cy,cx);
+   cursStat(cs);
+   wrefresh(w_interactWin);
+   
    m_redraw -= start_redraw;
    if(m_redraw <0) m_redraw = 0;
-
    
-   
-
    _moveCurrent(m_currY, m_currX);
 }
 
@@ -462,9 +580,22 @@ void cursesINDI::updateTable()
    getyx(w_interactWin, cy, cx);
    int cs = cursStat();
    
-
+   updateCurVal();
+   
+   bool fsmAlerts {false};
+   std::set<std::string> alertDev;
+   
    for(auto it = knownElements.begin(); it != knownElements.end(); ++it)
    {
+      if(fpout) *fpout << knownProps[it->second.propKey].getName() << " " << knownProps[it->second.propKey].getState() << "\n";
+      
+      if(knownProps[it->second.propKey].getName() == "fsm" &&
+            knownProps[it->second.propKey].getState() == pcf::IndiProperty::Alert) 
+      {
+         fsmAlerts = true;
+         alertDev.insert(knownProps[it->second.propKey].getDevice());
+      }
+      
       if(it->second.tableRow == -1) continue;
       
       if(m_cellContents[it->second.tableRow][2] != displayProperty(knownProps[it->second.propKey]) )
@@ -502,6 +633,24 @@ void cursesINDI::updateTable()
       //updateContents( it->second.tableRow, 4,  knownProps[it->second.propKey][it->second.name].getValue());
    }
 
+   if(fpout) *fpout << "fsmAlerts: " << fsmAlerts << "\n";
+   
+   getyx(w_interactWin, cy, cx);
+   cs = cursStat();
+   cursStat(0);
+   wclear(w_attentionWin);
+   if(fsmAlerts)
+   {
+      std::string alrt = "!! FSM alert: " + *alertDev.begin();
+      if(alertDev.size() > 1) alrt += " (+" + std::to_string(alertDev.size()-1) + ")";
+      
+      wprintw(w_attentionWin, alrt.c_str());
+   }
+   wrefresh(w_attentionWin);
+   wmove(w_interactWin,cy,cx);
+   cursStat(cs);
+   wrefresh(w_interactWin);
+            
    //print();
    
 //    wmove(w_interactWin,cy,cx);
@@ -510,6 +659,42 @@ void cursesINDI::updateTable()
 
    m_update -= start_update;
    if(m_update <0) m_update = 0;
+}
+
+void cursesINDI::updateCurVal( )
+{
+   int cx, cy;
+   getyx(w_interactWin, cy, cx);
+   int cs = cursStat();
+   
+   cursStat(0);
+   wclear(w_curvalWin);
+      
+   auto it = knownElements.begin();
+   while(it != knownElements.end())
+   {
+      if( (size_t) it->second.tableRow == m_currY+m_startRow) break;
+      ++it;
+   }
+
+   if(it == knownElements.end())
+   {
+      wrefresh(w_interactWin);
+      return;
+   }
+
+   std::string cval = "> " + it->second.propKey + "." + it->second.name + " = ";
+   
+   cval += displayValue( knownProps[it->second.propKey], it->second.name);
+
+   wprintw(w_curvalWin, cval.c_str());
+   wrefresh(w_curvalWin);
+
+   wmove(w_interactWin,cy,cx);
+   cursStat(cs);
+   wrefresh(w_interactWin);
+   
+   return;
 }
 
 void cursesINDI::moveCurrent( int nextY,
@@ -538,7 +723,9 @@ void cursesINDI::_moveCurrent( int nextY,
       wrefresh(w_interactWin);
       m_deviceSearching = false;
    }
-   
+      
+   updateCurVal();
+
    if(nextX == 1)
    {
       if( currX != nextX)
@@ -556,6 +743,7 @@ void cursesINDI::_moveCurrent( int nextY,
          wrefresh(w_interactWin);
          return;
       }
+      
       auto it = knownElements.begin();
       while(it != knownElements.end())
       {
@@ -568,7 +756,7 @@ void cursesINDI::_moveCurrent( int nextY,
          wrefresh(w_interactWin);
          return;
       }
-
+      
       if( knownProps[it->second.propKey].getPerm() != pcf::IndiProperty::ReadWrite)
       {
          wrefresh(w_interactWin);

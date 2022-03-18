@@ -85,6 +85,8 @@ protected:
    std::string m_shmimName {""}; ///< The name of the shared memory image, is used in `/tmp/<shmimName>.im.shm`. Derived classes should set a default.
       
    int m_smThreadPrio {2}; ///< Priority of the shmimMonitor thread, should normally be > 00.
+
+   std::string m_smCpuset; ///< The cpuset to assign the shmimMonitor thread to.  Ignored if empty (the default).
    
    ///@}
    
@@ -196,6 +198,10 @@ protected:
    
    bool m_smThreadInit {true}; ///< Synchronizer for thread startup, to allow priority setting to finish.
    
+   pid_t m_smThreadID {0}; ///< The s.m. thread PID.
+   
+   pcf::IndiProperty m_smThreadProp; ///< The property to hold the s.m. thread details.
+   
    std::thread m_smThread; ///< A separate thread for the actual monitoring
 
    ///Thread starter, called by MagAOXApp::threadStart on thread construction.  Calls smThreadExec.
@@ -251,6 +257,8 @@ void shmimMonitor<derivedT, specificT>::setupConfig(mx::app::appConfigurator & c
 {
    config.add(specificT::configSection()+".threadPrio", "", specificT::configSection()+".threadPrio", argType::Required, specificT::configSection(), "threadPrio", false, "int", "The real-time priority of the shmimMonitor thread.");
    
+   config.add(specificT::configSection()+".cpuset", "", specificT::configSection()+".cpuset", argType::Required, specificT::configSection(), "cpuset", false, "string", "The cpuset for the shmimMonitor thread.");
+   
    config.add(specificT::configSection()+".shmimName", "", specificT::configSection()+".shmimName", argType::Required, specificT::configSection(), "shmimName", false, "string", "The name of the ImageStreamIO shared memory image. Will be used as /tmp/<shmimName>.im.shm.");
    
    //Set this here to allow derived classes to set their own default before calling loadConfig
@@ -262,6 +270,7 @@ template<class derivedT, class specificT>
 void shmimMonitor<derivedT, specificT>::loadConfig(mx::app::appConfigurator & config)
 {
    config(m_smThreadPrio, specificT::configSection() + ".threadPrio");
+   config(m_smCpuset, specificT::configSection() + ".cpuset");
    config(m_shmimName, specificT::configSection() + ".shmimName");
   
 }
@@ -333,7 +342,7 @@ int shmimMonitor<derivedT, specificT>::appStartup()
       return -1;
    }
    
-   if(derived().threadStart( m_smThread, m_smThreadInit, m_smThreadPrio, "shmimMonitor", this, smThreadStart) < 0)
+   if(derived().threadStart( m_smThread, m_smThreadInit, m_smThreadID, m_smThreadProp, m_smThreadPrio, m_smCpuset, specificT::configSection(), this, smThreadStart) < 0)
    {
       derivedT::template log<software_error>({__FILE__, __LINE__});
       return -1;
@@ -349,7 +358,7 @@ int shmimMonitor<derivedT, specificT>::appLogic()
    //do a join check to see if other threads have exited.
    if(pthread_tryjoin_np(m_smThread.native_handle(),0) == 0)
    {
-      derivedT::template log<software_error>({__FILE__, __LINE__, "shmimMonitor thread has exited"});
+      derivedT::template log<software_error>({__FILE__, __LINE__, "shmimMonitor thread " + std::to_string(m_smThreadID) + " has exited"});
       
       return -1;
    }
@@ -448,6 +457,8 @@ void shmimMonitor<derivedT, specificT>::smThreadStart( shmimMonitor * s)
 template<class derivedT, class specificT>
 void shmimMonitor<derivedT, specificT>::smThreadExec()
 {
+   m_smThreadID = syscall(SYS_gettid);
+   
    //Wait for the thread starter to finish initializing this thread.
    while( m_smThreadInit == true && derived().shutdown() == 0)
    {
@@ -456,6 +467,8 @@ void shmimMonitor<derivedT, specificT>::smThreadExec()
    
    bool opened = false;
    
+   bool semgot = false;
+
    while(derived().shutdown() == 0)
    {
       while((derived().state() != stateCodes::OPERATING || m_shmimName == "" ) && !derived().shutdown() && !m_restart )
@@ -496,7 +509,7 @@ void shmimMonitor<derivedT, specificT>::smThreadExec()
             if(m_imageStream.md[0].sem <= m_semaphoreNumber) ///<\todo this isn't right--> isn't there a define in cacao to use? 
             {
                ImageStreamIO_closeIm(&m_imageStream);
-               mx::sleep(1); //We just need to wait for the server process to finish startup.
+               mx::sys::sleep(1); //We just need to wait for the server process to finish startup.
             }
             else
             {
@@ -505,25 +518,44 @@ void shmimMonitor<derivedT, specificT>::smThreadExec()
          }
          else
          {
-            mx::sleep(1); //be patient
+            mx::sys::sleep(1); //be patient
          }
       }
       
-      if(derived().m_shutdown || !opened) return;
-    
-      if(m_semaphoreNumber == 0) m_semaphoreNumber = 6; ///Move past CACAO hard coded things -- \todo need to return to this being a config/
-      int actSem = 1;
-      while(actSem == 1)//Don't accept semaphore 1 cuz it don't work.
+      if(m_restart) continue; //this is kinda dumb.  we just go around on restart, so why test in the while loop at all?
+
+      if(derived().state() != stateCodes::OPERATING) continue;
+
+      if(derived().m_shutdown)
       {
-         m_semaphoreNumber = ImageStreamIO_getsemwaitindex(&m_imageStream, m_semaphoreNumber); //ask for semaphore we had before
-         if(m_semaphoreNumber == -1)
-         {
-            derivedT::template log<software_critical>({__FILE__,__LINE__, "could not get semaphore index"});
-            return;
-         }
-         actSem = m_semaphoreNumber;
+         if(!opened) return; 
+       
+         ImageStreamIO_closeIm(&m_imageStream);
+         return;
       }
-      
+
+    
+#if 1
+      ///\todo once we upgrade to the mythical new CACAO, nuke this entire dumpster fire from orbit.  Just to be sure.
+      if(!semgot) //this is a gross hack to prevent running up the semaphore number and exhausting it.
+      {
+         if(m_semaphoreNumber == 0) m_semaphoreNumber = 0; ///Move past CACAO hard coded things -- \todo need to return to this being a config/
+         int actSem = 1;
+         while(actSem == 1)//Don't accept semaphore 1 cuz it don't work.
+         {
+            m_semaphoreNumber = ImageStreamIO_getsemwaitindex(&m_imageStream, m_semaphoreNumber); //ask for semaphore we had before
+            if(m_semaphoreNumber == -1)
+            {
+               derivedT::template log<software_critical>({__FILE__,__LINE__, "could not get semaphore index"});
+               return;
+            }
+            actSem = m_semaphoreNumber;
+         }
+      }
+      semgot = true;
+#else
+      m_semaphoreNumber = ImageStreamIO_getsemwaitindex(&m_imageStream, m_semaphoreNumber); //ask for semaphore we had before
+#endif
       derivedT::template log<software_info>({__FILE__,__LINE__, "got semaphore index " + std::to_string(m_semaphoreNumber) + " for " + m_shmimName });
       
       ImageStreamIO_semflush(&m_imageStream, m_semaphoreNumber);

@@ -7,7 +7,8 @@ set -euo pipefail
 #
 if [[ $MAGAOX_ROLE == vm ]]; then
   mkdir -p /vagrant/vm/ssh
-  cat <<'HERE' | sudo tee /vagrant/vm/ssh/config
+  if [[ ! -e /vagrant/vm/ssh/config ]]; then
+    cat <<'HERE' | sudo tee /vagrant/vm/ssh/config
 IdentityFile /vagrant/vm/ssh/magaox_ssh_key
 Host aoc
   HostName exao1.magao-x.org
@@ -17,9 +18,12 @@ Host rtc
 Host icc
   HostName icc
   ProxyJump aoc
+Host tic
+  HostName exao0.as.arizona.edu
 Host *
   User YOURUSERNAME
 HERE
+  fi
   mkdir -p /home/vagrant/.ssh
   if [[ ! -e /home/vagrant/.ssh/known_hosts ]]; then
       cat <<'HERE' | sudo tee /home/vagrant/.ssh/known_hosts

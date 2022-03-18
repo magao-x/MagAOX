@@ -83,7 +83,7 @@ struct telem_drivetemps : public flatbuffer_log
 
 }; //telem_drivetemps
 
-timespec telem_drivetemps::lastRecord = {0,0};
+
 
 } //namespace logger
 } //namespace MagAOX

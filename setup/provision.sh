@@ -151,8 +151,13 @@ if [[ $MAGAOX_ROLE == AOC || $MAGAOX_ROLE == ICC || $MAGAOX_ROLE == RTC ]]; then
     sudo bash -l "$DIR/steps/configure_etc_hosts.sh"
 fi
 
+if [[ $MAGAOX_ROLE == AOC || $MAGAOX_ROLE == ICC || $MAGAOX_ROLE == RTC ]]; then
+    sudo bash -l "$DIR/steps/configure_nfs.sh"
+fi
+
 if [[ $MAGAOX_ROLE == AOC || $MAGAOX_ROLE == ICC || $MAGAOX_ROLE == RTC || $MAGAOX_ROLE == TOC || $MAGAOX_ROLE == TIC ]]; then
     sudo bash -l "$DIR/steps/configure_chrony.sh"
+    sudo bash -l "$DIR/steps/configure_podman.sh"
 fi
 
 # Configure executable search path
@@ -212,11 +217,8 @@ if [[ $MAGAOX_ROLE == RTC || $MAGAOX_ROLE == ICC || $MAGAOX_ROLE == AOC || $MAGA
 fi
 sudo bash -l "$DIR/steps/install_fftw.sh"
 sudo bash -l "$DIR/steps/install_cfitsio.sh"
-sudo bash -l "$DIR/steps/install_sofa.sh"
-sudo bash -l "$DIR/steps/install_xpa.sh"
 sudo bash -l "$DIR/steps/install_eigen.sh"
 sudo bash -l "$DIR/steps/install_cppzmq.sh"
-sudo bash -l "$DIR/steps/install_levmar.sh"
 sudo bash -l "$DIR/steps/install_flatbuffers.sh"
 if [[ $MAGAOX_ROLE == RTC || $MAGAOX_ROLE == ICC || $MAGAOX_ROLE == AOC || $MAGAOX_ROLE == TIC || $MAGAOX_ROLE == ci || $MAGAOX_ROLE == vm ]]; then
     sudo bash -l "$DIR/steps/install_basler_pylon.sh"
@@ -316,6 +318,11 @@ else
     $MAYBE_SUDO bash -l "$DIR/steps/install_magao-x_config.sh"
     $MAYBE_SUDO bash -l "$DIR/steps/install_magao-x_calib.sh"
 fi
+
+if [[ $MAGAOX_ROLE == AOC || $MAGAOX_ROLE == TOC || $MAGAOX_ROLE == vm ]]; then
+    echo "export RTIMV_CONFIG_PATH=/opt/MagAOX/config" | tee /etc/profile.d/rtimv_config_path.sh
+fi
+
 # Install first-party deps
 $MAYBE_SUDO bash -l "$DIR/steps/install_cacao.sh"
 $MAYBE_SUDO bash -l "$DIR/steps/install_milkzmq.sh"

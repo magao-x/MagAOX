@@ -115,6 +115,16 @@ public:
      */
    virtual int appShutdown();
 
+   /// Cleanup after a power off.
+   /**
+     */ 
+   virtual int onPowerOff();
+   
+   /// Maintenace while powered off.
+   /**
+     */
+   virtual int whilePowerOff();
+   
    /** \name DM Base Class Interface
      *
      *@{
@@ -155,7 +165,6 @@ public:
    ///@}
    
    /** \name BMC Interface
-     * \todo document these members
      *@{
      */
    
@@ -169,6 +178,7 @@ protected:
    double * m_dminputs {nullptr}; ///< Pre-allocated command vector, used only in commandDM
    
    DM m_dm = {}; ///< BMC SDK handle for the DM.
+   
    bool m_dmopen {false}; ///< Track whether the DM connection has been opened
    
 public:
@@ -282,6 +292,15 @@ int bmcCtrl::appShutdown()
    return 0;
 }
 
+int bmcCtrl::onPowerOff()
+{
+   return dm<bmcCtrl,float>::onPowerOff();;
+}
+
+int bmcCtrl::whilePowerOff()
+{
+   return dm<bmcCtrl,float>::whilePowerOff();;
+}
 
 int bmcCtrl::initDM()
 {
@@ -441,7 +460,6 @@ int bmcCtrl::commandDM(void * curr_src)
       2) clip to fractional values between 0 and 1.
       3) take the square root to approximate the voltage-displacement curve
    */
-   int nsat = 0;
    for (uint32_t idx = 0 ; idx < m_nbAct ; ++idx)
    {
       //m_dminputs[idx] -= mean - 0.5;
@@ -457,16 +475,10 @@ int bmcCtrl::commandDM(void * curr_src)
       m_dminputs[idx] = sqrt(m_dminputs[idx]);
    }
 
-   
-   //for (uint32_t idx = 0 ; idx < m_nbAct ; ++idx){
-   // printf("Acuator %d: %f\n", idx+1, m_dminputs[idx]);
-   //}
-   //printf("Mean %f\n", mean);
-    
    /* Finally, send the command to the DM */
    BMCRC ret = BMCSetArray(&m_dm, m_dminputs, NULL);
 
-   /* Return immediately upon success. Otherwise, log the error
+   /* Return immediately upon error, logging the error
    message first and then return the failure code. */
    if(ret != NO_ERR)
    {
@@ -476,8 +488,23 @@ int bmcCtrl::commandDM(void * curr_src)
       return -1;
    }
 
+   /* Now update the instantaneous sat map */
+   for (uint32_t idx = 0; idx < m_nbAct; ++idx)
+   {
+      int address = m_actuator_mapping[idx];
+      if(address == -1) continue;
+     
+      if(m_dminputs[idx] >= 1 || m_dminputs[idx] <= 0)
+      {
+         m_instSatMap.data()[address] = 1;
+      }
+      else
+      {
+         m_instSatMap.data()[address] = 0;
+      }
+   }
+   
    return ret;
-    
 }
 
 int bmcCtrl::releaseDM()

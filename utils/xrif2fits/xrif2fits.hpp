@@ -18,11 +18,12 @@
 #include <mx/ioutils/fileUtils.hpp>
 #include <mx/improc/eigenCube.hpp>
 #include <mx/improc/eigenImage.hpp>
-#include <mx/improc/fitsFile.hpp>
 
-#include <mx/timeUtils.hpp>
-using namespace mx::tscomp;
-using namespace mx::tsop;
+#include <mx/ioutils/fits/fitsFile.hpp>
+
+#include <mx/sys/timeUtils.hpp>
+using namespace mx::sys::tscomp;
+using namespace mx::sys::tsop;
 
 
 #include "../../libMagAOX/libMagAOX.hpp"
@@ -77,9 +78,9 @@ protected:
 
    std::vector<std::string> m_files; ///< List of files to use.  If dir is not empty, it will be pre-pended to each name.
 
-   std::string m_logDir = "/home/jrmales/Data/MagAOX/Tel/2019B/logs/";
-   
-   std::string m_telDir = "/home/jrmales/Data/MagAOX/Tel/2019B/telem/";
+   std::vector<std::string> m_logDir;
+
+   std::vector<std::string> m_telDir;
    
    std::string m_outDir = "fits/";   
    
@@ -87,6 +88,8 @@ protected:
    
    bool m_metaOnly {false};
    
+   bool m_cubeMode {false};
+
 protected:
    ///@}
 
@@ -125,13 +128,15 @@ void xrif2fits::setupConfig()
 {
    config.add("dir","d", "dir" , argType::Required, "", "dir", false,  "string", "The directory to search for files.  Can be empty if full path given in files.");
    config.add("files","f", "files" , argType::Required, "", "files", false,  "vector<string>", "List of files to use.  If dir is not empty, it will be pre-pended to each name.");
-   
+   config.add("logdir","l", "logdir" , argType::Required, "", "logdir", false,  "vector<string>", "Directory(ies) for log files.");
+   config.add("teldir","t", "teldir" , argType::Required, "", "teldir", false,  "vector<string>", "Directory(ies) for telemetry files.");
+
    config.add("outDir","D", "outDir" , argType::Required, "", "outDir", false,  "string", "The directory in which to write output files.  Default is ./fits/.");
    
    config.add("metaOnly","", "metaOnly" , argType::True, "", "metaOnly", false,  "bool", "If true, output only meta data, without decoding images.  Default is false.");
    
    config.add("noMeta","", "noMeta" , argType::True, "", "noMeta", false,  "bool", "If true, the meta data file is not written (FITS headers will still be).  Default is false.");
-   
+   config.add("cubeMode","C", "cubeMode" , argType::True, "", "cubeMode", false,  "bool", "If true, the archive is written as a FITS cube with minimal header.  Default is false.");
 }
 
 inline
@@ -140,9 +145,11 @@ void xrif2fits::loadConfig()
    config(m_dir, "dir");
    config(m_files, "files");
    config(m_outDir, "outDir");
-   
+   config(m_logDir, "logdir");
+   config(m_telDir, "teldir");
    config(m_metaOnly, "metaOnly");
    config(m_noMeta, "noMeta");
+   config(m_cubeMode, "cubeMode");
 }
 
 inline
@@ -239,29 +246,45 @@ int xrif2fits::execute()
    char header[XRIF_HEADER_SIZE];
 
    
+      
    std::vector<logMeta> logMetas;
-   logMetas.push_back({"CATOBJ", "catalog name of object", "tcsi", telem_telcat::eventCode, "catObj", "", 0, 0});
-   logMetas.push_back({"PARANG", "parallactic angle at time of observation", "tcsi", telem_teldata::eventCode, "pa", "%0.4f", 1, 1});
-   logMetas.push_back({"FWPPFILT", "filter name of fwpupil", "fwpupil", telem_stage::eventCode, "presetName", "", 0, 0});
-   logMetas.push_back({"FWPPPOS", "filter position of fwpupil", "fwpupil", telem_stage::eventCode, "preset", "%0.2f", 1, 1});
+   logMetas.push_back(logMetaSpec({"tcsi", telem_telcat::eventCode, "catObj"}));
+   logMetas.push_back(logMetaSpec({"tcsi", telem_teldata::eventCode, "pa"}));
    
-   logMetas.push_back({"SCIBS", "science beamsplitter name", "stagescibs", telem_stage::eventCode, "presetName", "", 0, 0});
-   logMetas.push_back({"SCIBSPOS", "preset index of science beamsplitter", "stagescibs", telem_stage::eventCode, "preset", "%0.2f", 1, 1});
-   logMetas.push_back({"FWS1FILT", "filter name of fwsci1", "fwsci1", telem_stage::eventCode, "presetName", "", 0, 0});
-   logMetas.push_back({"FWS1FPOS", "filter position of fwsci1", "fwsci1", telem_stage::eventCode, "preset", "%0.2f",1, 1});
+   logMetas.push_back(logMetaSpec({"fwpupil", telem_stage::eventCode, "presetName"}));
+   logMetas.push_back(logMetaSpec({"fwpupil", telem_stage::eventCode, "preset"}));
    
-   logMetas.push_back({"FWS2FILT", "filter name of fwsci2", "fwsci2", telem_stage::eventCode, "presetName", "", 0, 0});
-   logMetas.push_back({"FWS2FPOS", "filter position of fwsci2", "fwsci2", telem_stage::eventCode, "preset", "%0.2f", 1, 1});
+   logMetas.push_back(logMetaSpec({"fwpfpm", telem_stage::eventCode, "presetName"}));
+   logMetas.push_back(logMetaSpec({"fwfpm", telem_stage::eventCode, "preset"}));
+
+   logMetas.push_back(logMetaSpec({"fwlyot", telem_stage::eventCode, "presetName"}));
+   logMetas.push_back(logMetaSpec({"fwlyot", telem_stage::eventCode, "preset"}));
+
+   logMetas.push_back(logMetaSpec({"stagescibs", telem_stage::eventCode, "presetName"}));
+   logMetas.push_back(logMetaSpec({"stagescibs", telem_stage::eventCode, "preset"}));
+   
+   logMetas.push_back(logMetaSpec({"fwsci1", telem_stage::eventCode, "presetName"}));
+   logMetas.push_back(logMetaSpec({"fwsci1", telem_stage::eventCode, "preset"}));
+   
+   logMetas.push_back(logMetaSpec({"fwsci2", telem_stage::eventCode, "presetName"}));
+   logMetas.push_back(logMetaSpec({"fwsci2", telem_stage::eventCode, "preset"}));
    
          
    logMap logs;
    logMap tels;
    
    std::cerr << "loading log file names . . .\n";
-   logs.loadAppToFileMap( m_logDir, ".binlog");
-   std::cerr << "loading telemetry file names . . .\n";
-   tels.loadAppToFileMap( m_telDir, ".bintel");
+   for(size_t n=0; n < m_logDir.size(); ++n)
+   {
+      logs.loadAppToFileMap( m_logDir[n], ".binlog");
+   }
    
+   std::cerr << "loading telemetry file names . . .\n";
+   for(size_t n=0; n < m_telDir.size(); ++n)
+   {
+      tels.loadAppToFileMap( m_telDir[n], ".bintel");
+   }
+
    std::ofstream metaOut;
    //Print the meta-file header
    if(!m_noMeta)
@@ -286,13 +309,21 @@ int xrif2fits::execute()
       
       tels.loadFiles(lfn.appName(), lfn.timestamp());
       
-      logMeta exptimeMeta({"EXPTIME", "exposure time in seconds", lfn.appName(), telem_stdcam::eventCode, "exptime", "%f", 0, 1});
-         
+      logMeta exptimeMeta(logMetaSpec(lfn.appName(), telem_stdcam::eventCode, "exptime"));
+      std::cerr << exptimeMeta.keyword() << "\n";
+
       std::cout << "******************************************************\n";
       std::cout << "* xrif2fits: decoding for " << lfn.appName() << " (" + m_files[n] << ")\n";
       std::cout << "******************************************************\n";
       
       FILE * fp_xrif = fopen(m_files[n].c_str(), "rb");
+      if(fp_xrif == nullptr)
+      {
+         std::cerr << " (" << invokedName << "): Error opening " << m_files[n] << "\n";
+         std::cerr << " (" << invokedName << "): " << strerror(errno) << "\n";
+         return -1;
+      }
+
       size_t nr = fread(header, 1, XRIF_HEADER_SIZE, fp_xrif);
       if(nr != XRIF_HEADER_SIZE)
       {
@@ -417,11 +448,17 @@ int xrif2fits::execute()
 
       mx::improc::eigenCube<unsigned short> tmpc( (unsigned short*) m_xrif->raw_buffer, m_xrif->width, m_xrif->height, m_xrif->frames);
 
-      mx::improc::fitsFile<unsigned short> ff;
-      mx::improc::fitsHeader fh;
+      mx::fits::fitsFile<unsigned short> ff;
+      mx::fits::fitsHeader fh;
       
+      if(m_cubeMode)
+      {
+         std::string outfname = m_outDir + mx::ioutils::pathStem(m_files[n]) + ".fits";
+         ff.write(outfname, tmpc);
+      }
+      else
+      {
 
-      
       for( int q=0; q < tmpc.planes(); ++q)
       {
          uint64_t cnt0;
@@ -448,24 +485,28 @@ int xrif2fits::execute()
          
             stime = atime-exptime;
             tels.getPriorLog(priorprior, lfn.appName(), eventCodes::TELEM_STDCAM, stime);
-      
+
+            //std::cerr << "Exptime: " << telem_stdcam::exptime(logHeader::messageBuffer(priorprior)) << "\n";
+
             if(telem_stdcam::exptime(logHeader::messageBuffer(priorprior)) != exptime) ///\todo this needs to check for any log entries between end and start
             {
                std::cerr << "Change in exposure time mid-exposure\n";
             }
          }
-         //std::cerr << "Exptime: " << telem_stdcam::exptime(logHeader::messageBuffer(priorprior)) << "\n";
-         
+         else
+         {
+            std::cerr << "no prior\n";
+         }
+
          //timespecX midexp = mx::meanTimespec( atime, stime);
          
-         
          std::string timestamp;
-         mx::timeStamp(timestamp, atime);
+         mx::sys::timeStamp(timestamp, atime);
          std::string outfname = m_outDir + lfn.appName() + "_" + timestamp + ".fits";
 
          fh.clear();
          
-         std::string dateobs = mx::ISO8601DateTimeStr(atime, 1);
+         std::string dateobs = mx::sys::ISO8601DateTimeStr(atime, 1);
          
          fh.append("DATE-OBS", dateobs, "Date of obs. YYYY-mm-ddTHH:MM:SS");
          fh.append("FRAMENO", cnt0);
@@ -481,9 +522,11 @@ int xrif2fits::execute()
          
          if(exptime > -1)
          {
+            //First output exposure time
             fh.append(exptimeMeta.card(tels,stime,atime));
-      
             if(!m_noMeta) metaOut << exptimeMeta.value(tels, stime, atime);
+
+            //Then output each value in turn
             for(size_t u=0;u<logMetas.size();++u)
             {
                fh.append(logMetas[u].card(tels, stime, atime));
@@ -491,13 +534,16 @@ int xrif2fits::execute()
             }
          }
          
+
          if(!m_noMeta) metaOut << "\n";
-            
+
+
          if(!m_metaOnly)
          {
             mx::improc::eigenImage<unsigned short> im = tmpc.image(q);
             ff.write(outfname, tmpc.image(q), fh);
          }
+
       }
       
       //Below is for cubes
@@ -517,6 +563,7 @@ int xrif2fits::execute()
       }*/
    }
 
+   }
    if(!m_noMeta) metaOut.close();
    
    std::cerr << " (" << invokedName << "): exited normally.\n";

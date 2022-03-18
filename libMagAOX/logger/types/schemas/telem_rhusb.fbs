@@ -1,0 +1,12 @@
+namespace MagAOX.logger;
+
+
+
+table Telem_rhusb_fb
+{
+   temp:float;
+   rh:float;
+}
+
+root_type Telem_rhusb_fb;
+

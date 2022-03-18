@@ -51,7 +51,7 @@ template<class derivedT>
 struct telemeter
 {
    ///The log manager type.
-   typedef logger::logManager<logFileRaw> logManagerT;
+   typedef logger::logManager<derivedT, logFileRaw> logManagerT;
    
    logManagerT m_tel;
    
@@ -170,7 +170,7 @@ template<typename telT>
 int telemeter<derivedT>::telem( const typename telT::messageT & msg)
 {
    
-   m_tel.log<telT>(msg, logPrio::LOG_TELEM);
+   m_tel.template log<telT>(msg, logPrio::LOG_TELEM);
 
    //Set timestamp   
    clock_gettime(CLOCK_REALTIME, &telT::lastRecord);
@@ -183,7 +183,7 @@ template<typename telT>
 int telemeter<derivedT>::telem( )
 {
    
-   m_tel.log<telT>(logPrio::LOG_TELEM);
+   m_tel.template log<telT>(logPrio::LOG_TELEM);
 
    //Set timestamp   
    clock_gettime(CLOCK_REALTIME, &telT::lastRecord);
@@ -232,18 +232,17 @@ int telemeter<derivedT>::appStartup()
    m_tel.logThreadStart();
 
    //Give up to 2 secs to make sure log thread has time to get started and try to open a file.
-   for(int w=0;w<4;++w)
+   int w = 0;
+   while(m_tel.logThreadRunning() == false && w < 20)
    {
-      //Sleep for 500 msec
-      std::this_thread::sleep_for( std::chrono::duration<unsigned long, std::nano>(500000));
-
-      //Verify that log thread is still running.
-      if(m_tel.logThreadRunning() == true) break;
+      //Sleep for 100 msec
+      std::this_thread::sleep_for( std::chrono::duration<unsigned long, std::nano>(100000000));
+      ++w;
    }
 
    if(m_tel.logThreadRunning() == false)
    {
-      derivedT::template log<text_log>("telemetry thread not running.  exiting.", logPrio::LOG_CRITICAL);
+      derivedT::template log<software_critical>({__FILE__, __LINE__, "telemetry thread not running.  exiting."});
       return -1;
    }
    

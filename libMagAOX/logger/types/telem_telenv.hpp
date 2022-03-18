@@ -103,7 +103,6 @@ struct telem_telenv : public flatbuffer_log
    
 }; //telem_telenv
 
-timespec telem_telenv::lastRecord = {0,0};
 
 } //namespace logger
 } //namespace MagAOX

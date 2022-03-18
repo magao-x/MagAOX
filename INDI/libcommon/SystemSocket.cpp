@@ -877,9 +877,8 @@ void SystemSocket::connect()
 
     // we need a timeval struct to hold our timeout value.
     timeval tvTimeout;
-    tvTimeout.tv_sec = m_nConnectTimeout / 1000;
+    tvTimeout.tv_sec = 3;//m_nConnectTimeout / 1000;
     tvTimeout.tv_usec = m_nConnectTimeout % 1000;
-
     // set the socket descriptor to non-blocking BEFORE we call 'connect'.
     setNonBlocking( true );
 
@@ -910,6 +909,7 @@ void SystemSocket::connect()
       // Wait for the connection to complete.
       int nNum = ::select( m_nSocket + 1,
                            &setRead, &setWrite, NULL, &tvTimeout );
+
       m_nLastError = errno;
 
       // Did select have an error?
@@ -923,9 +923,11 @@ void SystemSocket::connect()
       {
         m_nLastError = 0;
         socklen_t nSizeErr = sizeof( m_nLastError );
-        //getOption( SOL_SOCKET, SO_ERROR, &m_nLastError, nSizeErr );
+        getOption( SOL_SOCKET, SO_ERROR, &m_nLastError, nSizeErr );
         if ( m_nLastError != 0 )
+        {
           throw ( Error( string( ": " ) + strerror( m_nLastError ) ) );
+        }
       }
     }
   }
@@ -1005,16 +1007,14 @@ void SystemSocket::getOption( const int &nLevel,
 {
   try
   {
-    std::cerr << "0.3.8.1\n";
     if ( isValid() == false )
     {
       m_nLastError = EBADF;
       throw ( Error( string( ": " ) + strerror( m_nLastError ) ) );
     }
 
-    std::cerr << "0.3.8.2\n";
-    if ( ::setsockopt( m_nSocket, nLevel, nOption,
-                       (char *)( pvOptionValue ), nOptionLength ) == -1 )
+    if ( ::getsockopt( m_nSocket, nLevel, nOption,
+                       (char *)( pvOptionValue ), &nOptionLength ) == -1 )
     {
       m_nLastError = errno;
       throw ( Error( string( ": " ) + strerror( m_nLastError ) ) );

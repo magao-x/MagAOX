@@ -4,7 +4,7 @@
 include ../Make/common.mk
 
 
-TARGET=libMagAOX.hpp
+TARGET=
 
 #Dependencies to trigger recompile
 INCLUDEDEPS= app/MagAOXApp.hpp \
@@ -53,6 +53,7 @@ INCLUDEDEPS= app/MagAOXApp.hpp \
 	     logger/types/saving_start.hpp \
 	     logger/types/saving_stop.hpp \
 	     logger/types/saving_stats.hpp \
+		  logger/types/telem_dmspeck.hpp \
 	     logger/types/telem_chrony_status.hpp \
 	     logger/types/telem_chrony_stats.hpp \
 	     logger/types/telem_cooler.hpp \
@@ -62,6 +63,7 @@ INCLUDEDEPS= app/MagAOXApp.hpp \
 	     logger/types/telem_fxngen.hpp \
 	     logger/types/telem_observer.hpp \
 	     logger/types/telem_pico.hpp \
+            logger/types/telem_rhusb.hpp \
 	     logger/types/telem_stage.hpp \
 	     logger/types/telem_stdcam.hpp \
 	     logger/types/telem_telcat.hpp \
@@ -85,16 +87,48 @@ INCLUDEDEPS= app/MagAOXApp.hpp \
              modbus/modbus.hpp \
              modbus/modbus_exception.hpp
 
+OBJS = app/MagAOXApp.o \
+       app/stateCodes.o \
+       app/dev/ioDevice.o \
+       app/dev/outletController.o \
+       app/dev/stdCamera.o \
+       logger/types/telem.o \
+       logger/logFileName.o \
+       logger/logFileRaw.o \
+       logger/logMap.o \
+       logger/logMeta.o \
+       modbus/modbus.o \
+       sys/runCommand.o \
+       sys/thSetuid.o \
+       tty/netSerial.o \
+       tty/telnetConn.o \
+       tty/ttyIOUtils.o \
+       tty/ttyErrors.o \
+       tty/ttyUSB.o \
+       tty/usbDevice.o
 
+#logger/logManager.o \
 
-$(TARGET).gch: $(TARGET) $(INCLUDEDEPS) logger/generated/logTypes.hpp
+              
+all: libMagAOX.hpp.gch libMagAOX.a  
+
+libMagAOX.hpp.gch: libMagAOX.hpp $(INCLUDEDEPS) logger/generated/logTypes.hpp
+
+flatlogs:
+	cd logger; ../../flatlogs/bin/flatlogcodes
 
 logger/generated/logTypes.hpp: logger/logCodes.dat
 	cd logger; ../../flatlogs/bin/flatlogcodes
 
+libMagAOX.a: libMagAOX.hpp.gch $(OBJS)
+	ar rvs libMagAOX.a $(OBJS)
+
+
 .PHONY: clean
 clean:
-	rm -f $(TARGET).gch
+	rm -f libMagAOX.hpp.gch
+	rm -f libMagAOX.a
+	rm -f $(OBJS)
 	rm -f *~
 	rm -rf logger/generated
 	rm -rf logger/types/generated

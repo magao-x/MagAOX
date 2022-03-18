@@ -10,13 +10,14 @@
 
 #include "ui_pupilGuide.h"
 
-#include "../../lib/multiIndi.hpp"
-
+#include "../xWidgets/xWidget.hpp"
+#include "../xWidgets/statusEntry.hpp"
+#include "../xWidgets/xWidget.hpp"
 
 namespace xqt 
 {
    
-class pupilGuide : public QDialog, public multiIndiSubscriber
+class pupilGuide : public xWidget
 {
    Q_OBJECT
    
@@ -112,13 +113,22 @@ public:
    
    ~pupilGuide();
    
-   int subscribe( multiIndiPublisher * publisher );
-                                   
+   void subscribe();
+                               
+   virtual void onConnect();
    virtual void onDisconnect();
    
-   int handleDefProperty( const pcf::IndiProperty & ipRecv /**< [in] the property which has changed*/);
-   int handleSetProperty( const pcf::IndiProperty & ipRecv /**< [in] the property which has changed*/);
+   void handleDefProperty( const pcf::IndiProperty & ipRecv /**< [in] the property which has changed*/);
+   void handleSetProperty( const pcf::IndiProperty & ipRecv /**< [in] the property which has changed*/);
    
+   
+   void modGUISetEnable( bool enableModGUI,
+                         bool enableModArrows
+                       );
+   
+   void camwfsfitSetEnabled(bool enabled);
+   
+   void camlensSetEnabled(bool enabled);
    
 public slots:
    void updateGUI();
@@ -153,24 +163,19 @@ public slots:
    void on_buttonPup_rest_pressed();
    void on_buttonPup_set_pressed();
    
-   void on_fitThreshold_target_returnPressed();
-   void on_nAverage_target_returnPressed();
-   
    void on_button_camlens_u_pressed();
-   void on_button_camlens_ul_pressed();
    void on_button_camlens_l_pressed();
-   void on_button_camlens_dl_pressed();
    void on_button_camlens_d_pressed();
-   void on_button_camlens_dr_pressed();
    void on_button_camlens_r_pressed();
-   void on_button_camlens_ur_pressed();
    void on_button_camlens_scale_pressed();
 private:
      
    Ui::pupilGuide ui;
 };
 
-pupilGuide::pupilGuide( QWidget * Parent, Qt::WindowFlags f) : QDialog(Parent, f)
+
+
+pupilGuide::pupilGuide( QWidget * Parent, Qt::WindowFlags f) : xWidget(Parent, f)
 {
    ui.setupUi(this);
    ui.modState->setProperty("isStatus", true);
@@ -191,48 +196,157 @@ pupilGuide::pupilGuide( QWidget * Parent, Qt::WindowFlags f) : QDialog(Parent, f
    snprintf(ss, 5, "%0.2f", m_pupStepSize);
    ui.button_pup_scale->setText(ss);
    
-   snprintf(ss, 5, "%0.2f", m_camlensStepSize);
+   snprintf(ss, 5, "%0.2f", m_camlensStepSize*10);
    ui.button_camlens_scale->setText(ss);
    
+   //QFont qf = ui.labelModAndCenter->font();
+   //qf.setPixelSize(XW_FONT_SIZE*1.2+0.5);
+   //ui.labelMode
+   setXwFont(ui.labelModAndCenter, 1.2);
+   setXwFont(ui.modState);
+   setXwFont(ui.labelFreqCurrent);
+   setXwFont(ui.labelFreqTarget);
+   setXwFont(ui.labelFreq);
+   setXwFont(ui.labelRadius);
+   setXwFont(ui.modFreq_current);
+   setXwFont(ui.modFreq_target);
+   setXwFont(ui.modRad_current);
+   setXwFont(ui.modRad_target);
+   setXwFont(ui.buttonMod_rest);
+   setXwFont(ui.buttonMod_set);
+   setXwFont(ui.buttonMod_mod);
+   setXwFont(ui.labelCh1);
+   setXwFont(ui.labelCh2);
+   setXwFont(ui.modCh1);
+   setXwFont(ui.modCh2);
+   setXwFont(ui.labelMedianFluxes);
+   setXwFont(ui.med1);
+   setXwFont(ui.med2);
+   setXwFont(ui.med3);
+   setXwFont(ui.med4);
+   setXwFont(ui.setDelta);
+
+
+   setXwFont(ui.labelPupilSteering,1.2);
+   setXwFont(ui.pupState);
+   setXwFont(ui.buttonPup_rest);
+   setXwFont(ui.buttonPup_set);
+   setXwFont(ui.labelPupCh1);
+   setXwFont(ui.labelPupCh2);
+   setXwFont(ui.pupCh1);
+   setXwFont(ui.pupCh2);
+
+   setXwFont(ui.camlens_label);
+   setXwFont(ui.camlens_fsm);
+
+   setXwFont(ui.labelPupilFitting,1.2);
+
+   setXwFont(ui.labelx);
+   setXwFont(ui.labely);
+   setXwFont(ui.labelD);
+   setXwFont(ui.labelUR);
+   setXwFont(ui.labelUL);
+   setXwFont(ui.labelLR);
+   setXwFont(ui.labelLL);
+   setXwFont(ui.labelAvg);
+   setXwFont(ui.coordUR_x);
+   setXwFont(ui.coordUR_y);
+   setXwFont(ui.coordUR_D);
+   setXwFont(ui.coordUL_x);
+   setXwFont(ui.coordUL_y);
+   setXwFont(ui.coordUL_D);
+   setXwFont(ui.coordLR_x);
+   setXwFont(ui.coordLR_y);
+   setXwFont(ui.coordLR_D);
+   setXwFont(ui.coordLL_x);
+   setXwFont(ui.coordLL_y);
+   setXwFont(ui.coordLL_D);
+   setXwFont(ui.coordAvg_x);
+   setXwFont(ui.coordAvg_y);
+   setXwFont(ui.coordAvg_D);
+
+   setXwFont(ui.setDelta_pup);
+
+   ui.fitThreshold->setup("camwfs-fit", "threshold", statusEntry::FLOAT, "Thresh", "");
+   ui.fitThreshold->setStretch(0,1,6);//removes spacer and maximizes text field
+   ui.fitThreshold->format("%0.3f");
+   ui.fitThreshold->onDisconnect();
+
+   ui.fitAvgTime->setup("camwfs-avg", "avgTime", statusEntry::FLOAT, "Avg. T.", "s");
+   ui.fitAvgTime->setStretch(0,1,6);//removes spacer and maximizes text field
+   ui.fitAvgTime->format("%0.3f");
+   ui.fitAvgTime->onDisconnect();
+
+   ui.camlens_x_pos->setup("stagecamlensx", "position", statusEntry::FLOAT, "X", "mm");
+   ui.camlens_x_pos->setStretch(0,1,6);//removes spacer and maximizes text field
+   ui.camlens_x_pos->format("%0.4f");
+   ui.camlens_x_pos->onDisconnect();
+
+   ui.camlens_y_pos->setup("stagecamlensy", "position", statusEntry::FLOAT, "Y", "mm");
+   ui.camlens_y_pos->setStretch(0,1,6);//removes spacer and maximizes text field
+   ui.camlens_y_pos->format("%0.4f");
+   ui.camlens_y_pos->onDisconnect();
+
 }
    
 pupilGuide::~pupilGuide()
 {
 }
 
-int pupilGuide::subscribe( multiIndiPublisher * publisher )
+void pupilGuide::subscribe()
 {
-   publisher->subscribeProperty(this, "modwfs", "modFrequency");
-   publisher->subscribeProperty(this, "modwfs", "modRadius");
-   publisher->subscribeProperty(this, "modwfs", "modState");
-   publisher->subscribeProperty(this, "modwfs", "fsm");
+   if(m_parent == nullptr) return;
 
-   publisher->subscribeProperty(this, "camwfs-fit", "fsm");
-   publisher->subscribeProperty(this, "camwfs-fit", "quadrant1");
-   publisher->subscribeProperty(this, "camwfs-fit", "quadrant2");
-   publisher->subscribeProperty(this, "camwfs-fit", "quadrant3");
-   publisher->subscribeProperty(this, "camwfs-fit", "quadrant4");
-   publisher->subscribeProperty(this, "camwfs-fit", "threshold");
-   
-   publisher->subscribeProperty(this, "camwfs-avg", "fsm");
-   publisher->subscribeProperty(this, "camwfs-avg", "nAverage");
+   m_parent->addSubscriberProperty(this, "modwfs", "modFrequency");
+   m_parent->addSubscriberProperty(this, "modwfs", "modRadius");
+   m_parent->addSubscriberProperty(this, "modwfs", "modState");
+   m_parent->addSubscriberProperty(this, "modwfs", "fsm");
 
-   publisher->subscribeProperty(this, "fxngenmodwfs", "C1ofst");
-   publisher->subscribeProperty(this, "fxngenmodwfs", "C2ofst");
+   m_parent->addSubscriberProperty(this, "camwfs-fit", "fsm");
+   m_parent->addSubscriberProperty(this, "camwfs-fit", "quadrant1");
+   m_parent->addSubscriberProperty(this, "camwfs-fit", "quadrant2");
+   m_parent->addSubscriberProperty(this, "camwfs-fit", "quadrant3");
+   m_parent->addSubscriberProperty(this, "camwfs-fit", "quadrant4");
+   m_parent->addSubscriberProperty(this, "camwfs-fit", "threshold");
    
-   publisher->subscribeProperty(this, "ttmpupil", "fsm");
-   publisher->subscribeProperty(this, "ttmpupil", "pos_1");
-   publisher->subscribeProperty(this, "ttmpupil", "pos_2");
+   m_parent->addSubscriberProperty(this, "camwfs-avg", "fsm");
+   m_parent->addSubscriberProperty(this, "camwfs-avg", "nAverage");
+
+   m_parent->addSubscriberProperty(this, "fxngenmodwfs", "C1ofst");
+   m_parent->addSubscriberProperty(this, "fxngenmodwfs", "C2ofst");
    
-   publisher->subscribeProperty(this, "stagecamlensx", "fsm");
-   publisher->subscribeProperty(this, "stagecamlensx", "position");
+   m_parent->addSubscriberProperty(this, "ttmpupil", "fsm");
+   m_parent->addSubscriberProperty(this, "ttmpupil", "pos_1");
+   m_parent->addSubscriberProperty(this, "ttmpupil", "pos_2");
    
-   publisher->subscribeProperty(this, "stagecamlensy", "fsm");
-   publisher->subscribeProperty(this, "stagecamlensy", "position");
-   
-   return 0;
+   m_parent->addSubscriber(ui.fitThreshold);
+   m_parent->addSubscriber(ui.fitAvgTime);
+
+   m_parent->addSubscriberProperty(this, "stagecamlensx", "fsm");   
+   m_parent->addSubscriberProperty(this, "stagecamlensy", "fsm");
+   m_parent->addSubscriberProperty(this, "stagecamlensx", "position"); //we need these too   
+   m_parent->addSubscriberProperty(this, "stagecamlensy", "position");
+   m_parent->addSubscriber(ui.camlens_x_pos);
+   m_parent->addSubscriber(ui.camlens_y_pos);
+
+   return;
 }
    
+void pupilGuide::onConnect()
+{
+   ui.labelModAndCenter->setEnabled(true);
+   ui.labelPupilFitting->setEnabled(true);
+   ui.labelPupilSteering->setEnabled(true);
+   ui.camlens_label->setEnabled(true);
+   
+   ui.fitThreshold->onConnect();
+   ui.fitAvgTime->onConnect();
+   ui.camlens_x_pos->onConnect();
+   ui.camlens_y_pos->onConnect();
+
+   setWindowTitle("Pupil Alignment");
+}
+
 void pupilGuide::onDisconnect()
 {
    m_modFsmState = "";
@@ -241,9 +355,22 @@ void pupilGuide::onDisconnect()
    m_camlensyFsmState = "";
    m_camwfsavgState = "";
    m_camwfsfitState = "";
+
+   ui.labelModAndCenter->setEnabled(false);
+   ui.labelPupilFitting->setEnabled(false);
+   ui.labelPupilSteering->setEnabled(false);
+   ui.camlens_label->setEnabled(false);
+   
+   ui.fitThreshold->onDisconnect();
+   ui.fitAvgTime->onDisconnect();
+   ui.camlens_x_pos->onDisconnect();
+   ui.camlens_y_pos->onDisconnect();
+
+   setWindowTitle("Pupil Alignment (disconnected)");
+   
 }
    
-int pupilGuide::handleDefProperty( const pcf::IndiProperty & ipRecv)
+void pupilGuide::handleDefProperty( const pcf::IndiProperty & ipRecv)
 {  
    std::string dev = ipRecv.getDevice();
    if( dev == "camwfs-avg" || 
@@ -257,10 +384,10 @@ int pupilGuide::handleDefProperty( const pcf::IndiProperty & ipRecv)
       return handleSetProperty(ipRecv);
    }
    
-   return 0;
+   return;
 }
 
-int pupilGuide::handleSetProperty( const pcf::IndiProperty & ipRecv)
+void pupilGuide::handleSetProperty( const pcf::IndiProperty & ipRecv)
 {
    std::string dev = ipRecv.getDevice();
    
@@ -463,8 +590,7 @@ int pupilGuide::handleSetProperty( const pcf::IndiProperty & ipRecv)
             m_modFreq_tgt = ipRecv["requested"].get<double>();
          }
       }
-      
-      if(ipRecv.getName() == "modRadius")
+      else if(ipRecv.getName() == "modRadius")
       {
          if(ipRecv.find("current"))
          {
@@ -475,16 +601,14 @@ int pupilGuide::handleSetProperty( const pcf::IndiProperty & ipRecv)
             m_modRad_tgt = ipRecv["requested"].get<double>();
          }
       }
-      
-      if(ipRecv.getName() == "modState")
+      else if(ipRecv.getName() == "modState")
       {
          if(ipRecv.find("current"))
          {
             m_modState = ipRecv["current"].get<int>();
          }
       }
-      
-      if(ipRecv.getName() == "fsm")
+      else if(ipRecv.getName() == "fsm")
       {
          if(ipRecv.find("state"))
          {
@@ -501,7 +625,7 @@ int pupilGuide::handleSetProperty( const pcf::IndiProperty & ipRecv)
             m_modCh1 = ipRecv["value"].get<double>();
          }
       }
-      if(ipRecv.getName() == "C2ofst")
+      else if(ipRecv.getName() == "C2ofst")
       {
          if(ipRecv.find("value"))
          {
@@ -518,16 +642,14 @@ int pupilGuide::handleSetProperty( const pcf::IndiProperty & ipRecv)
             m_pupFsmState = ipRecv["state"].get<std::string>();
          }
       }
-      
-      if(ipRecv.getName() == "pos_1")
+      else if(ipRecv.getName() == "pos_1")
       {
          if(ipRecv.find("current"))
          {
             m_pupCh1 = ipRecv["current"].get<double>();
          }
       }
-      
-      if(ipRecv.getName() == "pos_2")
+      else if(ipRecv.getName() == "pos_2")
       {
          if(ipRecv.find("current"))
          {
@@ -570,50 +692,14 @@ int pupilGuide::handleSetProperty( const pcf::IndiProperty & ipRecv)
       }
    }
    
-   return 0;
+   return;
    
 }
 
-void pupilGuide::updateGUI()
+void pupilGuide::modGUISetEnable( bool enableModGUI,
+                                  bool enableModArrows
+                                )
 {
-   
-   //--------- Modulation 
-   
-   bool enableModGUI = true;
-   bool enableModArrows = true;
-   
-   char str[16];
-   if(m_modFsmState == "READY")
-   {
-      if(m_modState == 1)
-      {
-         ui.modState->setText("RIP");
-         enableModArrows = false;
-      }
-      else
-      {
-         ui.modState->setText("SET");
-      }
-   }
-   else if(m_modFsmState == "OPERATING")
-   {
-      ui.modState->setText("MODULATING");
-   }
-   else
-   {
-      enableModGUI = false;
-      if(m_modFsmState == "")
-      {
-         ui.modState->setText("STATE UNKNOWN");
-         ui.modState->setEnabled(false);
-      }
-      else
-      {
-         ui.modState->setText(m_modFsmState.c_str());
-         ui.modState->setEnabled(true);
-      }
-   }
-   
    if(enableModGUI)
    {
       ui.modState->setEnabled(true);
@@ -686,6 +772,105 @@ void pupilGuide::updateGUI()
       ui.button_tip_d->setEnabled(false);
       ui.button_tip_dr->setEnabled(false);
    }
+}
+
+void pupilGuide::camwfsfitSetEnabled(bool enabled)
+{
+   ui.labelMedianFluxes->setEnabled(enabled);
+   ui.med1->setEnabled(enabled);
+   ui.med2->setEnabled(enabled);
+   ui.med3->setEnabled(enabled);
+   ui.med4->setEnabled(enabled);
+   ui.setDelta->setEnabled(enabled);
+   ui.fitThreshold->setEnabled(enabled);
+   
+   if(enabled == false)
+   {
+      ui.med1->setText("");
+      ui.med2->setText("");
+      ui.med3->setText("");
+      ui.med4->setText("");
+   }
+   
+   ui.coordLL_D->setEnabled(enabled);
+   ui.coordLR_D->setEnabled(enabled);
+   ui.coordUL_D->setEnabled(enabled);
+   ui.coordUR_D->setEnabled(enabled);
+   ui.coordLL_x->setEnabled(enabled);
+   ui.coordLR_x->setEnabled(enabled);
+   ui.coordUL_x->setEnabled(enabled);
+   ui.coordUR_x->setEnabled(enabled);
+   ui.coordLL_y->setEnabled(enabled);
+   ui.coordLR_y->setEnabled(enabled);
+   ui.coordUL_y->setEnabled(enabled);
+   ui.coordUR_y->setEnabled(enabled);
+   ui.coordAvg_D->setEnabled(enabled);
+   ui.coordAvg_x->setEnabled(enabled);
+   ui.coordAvg_y->setEnabled(enabled);
+   ui.setDelta_pup->setEnabled(enabled);
+   ui.labelx->setEnabled(enabled);
+   ui.labely->setEnabled(enabled);
+   ui.labelD->setEnabled(enabled);
+   ui.labelUR->setEnabled(enabled);
+   ui.labelUL->setEnabled(enabled);
+   ui.labelLR->setEnabled(enabled);
+   ui.labelLL->setEnabled(enabled);
+   ui.labelAvg->setEnabled(enabled);
+}
+
+void pupilGuide::camlensSetEnabled(bool enabled)
+{
+   ui.camlens_fsm->setEnabled(enabled);
+   ui.camlens_x_pos->setEnabled(enabled);
+   ui.camlens_y_pos->setEnabled(enabled);
+   ui.button_camlens_u->setEnabled(enabled);
+   ui.button_camlens_l->setEnabled(enabled);
+   ui.button_camlens_r->setEnabled(enabled);
+   ui.button_camlens_d->setEnabled(enabled);
+   ui.button_camlens_scale->setEnabled(enabled);
+}
+
+void pupilGuide::updateGUI()
+{
+   
+   //--------- Modulation 
+   
+   bool enableModGUI = true;
+   bool enableModArrows = true;
+   
+   char str[16];
+   if(m_modFsmState == "READY")
+   {
+      if(m_modState == 1)
+      {
+         ui.modState->setText("RIP");
+         enableModArrows = false;
+      }
+      else
+      {
+         ui.modState->setText("SET");
+      }
+   }
+   else if(m_modFsmState == "OPERATING")
+   {
+      ui.modState->setText("MODULATING");
+   }
+   else
+   {
+      enableModGUI = false;
+      if(m_modFsmState == "")
+      {
+         ui.modState->setText("STATE UNKNOWN");
+         ui.modState->setEnabled(false);
+      }
+      else
+      {
+         ui.modState->setText(m_modFsmState.c_str());
+         ui.modState->setEnabled(true);
+      }
+   }
+   
+   modGUISetEnable(enableModGUI, enableModArrows);
    
    snprintf(str,sizeof(str), "%0.2f", m_modCh1);
    ui.modCh1->setText(str);
@@ -792,87 +977,11 @@ void pupilGuide::updateGUI()
    
    if( !(m_camwfsfitState == "READY" || m_camwfsfitState == "OPERATING"))
    {
-      ui.labelMedianFluxes->setEnabled(false);
-      ui.med1->setEnabled(false);
-      ui.med2->setEnabled(false);
-      ui.med3->setEnabled(false);
-      ui.med4->setEnabled(false);
-      ui.setDelta->setEnabled(false);
-      ui.labelThreshCurrent->setEnabled(false);
-      ui.labelThreshTarget->setEnabled(false);
-      ui.labelThreshold->setEnabled(false);
-      ui.fitThreshold_current->setEnabled(false);
-      ui.fitThreshold_target->setEnabled(false);
-      
-      ui.med1->setText("");
-      ui.med2->setText("");
-      ui.med3->setText("");
-      ui.med4->setText("");
-      ui.fitThreshold_current->setText("");
-      
-      ui.coordLL_D->setEnabled(false);
-      ui.coordLR_D->setEnabled(false);
-      ui.coordUL_D->setEnabled(false);
-      ui.coordUR_D->setEnabled(false);
-      ui.coordLL_x->setEnabled(false);
-      ui.coordLR_x->setEnabled(false);
-      ui.coordUL_x->setEnabled(false);
-      ui.coordUR_x->setEnabled(false);
-      ui.coordLL_y->setEnabled(false);
-      ui.coordLR_y->setEnabled(false);
-      ui.coordUL_y->setEnabled(false);
-      ui.coordUR_y->setEnabled(false);
-      ui.coordAvg_D->setEnabled(false);
-      ui.coordAvg_x->setEnabled(false);
-      ui.coordAvg_y->setEnabled(false);
-      ui.setDelta_pup->setEnabled(false);
-      ui.labelx->setEnabled(false);
-      ui.labely->setEnabled(false);
-      ui.labelD->setEnabled(false);
-      ui.labelUR->setEnabled(false);
-      ui.labelUL->setEnabled(false);
-      ui.labelLR->setEnabled(false);
-      ui.labelLL->setEnabled(false);
-      ui.labelAvg->setEnabled(false);
+      camwfsfitSetEnabled(false);
    }
    else
    {
-      ui.labelMedianFluxes->setEnabled(true);
-      ui.med1->setEnabled(true);
-      ui.med2->setEnabled(true);
-      ui.med3->setEnabled(true);
-      ui.med4->setEnabled(true);
-      ui.setDelta->setEnabled(true);
-      ui.labelThreshCurrent->setEnabled(true);
-      ui.labelThreshTarget->setEnabled(true);
-      ui.labelThreshold->setEnabled(true);
-      ui.fitThreshold_current->setEnabled(true);
-      ui.fitThreshold_target->setEnabled(true);
-   
-      ui.coordLL_D->setEnabled(true);
-      ui.coordLR_D->setEnabled(true);
-      ui.coordUL_D->setEnabled(true);
-      ui.coordUR_D->setEnabled(true);
-      ui.coordLL_x->setEnabled(true);
-      ui.coordLR_x->setEnabled(true);
-      ui.coordUL_x->setEnabled(true);
-      ui.coordUR_x->setEnabled(true);
-      ui.coordLL_y->setEnabled(true);
-      ui.coordLR_y->setEnabled(true);
-      ui.coordUL_y->setEnabled(true);
-      ui.coordUR_y->setEnabled(true);
-      ui.coordAvg_D->setEnabled(true);
-      ui.coordAvg_x->setEnabled(true);
-      ui.coordAvg_y->setEnabled(true);
-      ui.setDelta_pup->setEnabled(true);
-      ui.labelx->setEnabled(true);
-      ui.labely->setEnabled(true);
-      ui.labelD->setEnabled(true);
-      ui.labelUR->setEnabled(true);
-      ui.labelUL->setEnabled(true);
-      ui.labelLR->setEnabled(true);
-      ui.labelLL->setEnabled(true);
-      ui.labelAvg->setEnabled(true);
+      camwfsfitSetEnabled(true);
 
       double m1, m2, m3,m4;
       
@@ -903,9 +1012,6 @@ void pupilGuide::updateGUI()
       
       snprintf(str, 16, "%0.1f", m4);
       ui.med4->setText(str);
-      
-      snprintf(str, 16, "%0.4f", m_threshold_current);
-      ui.fitThreshold_current->setText(str);
       
       double x1 = m_x1;
       double y1 = m_y1;
@@ -991,24 +1097,11 @@ void pupilGuide::updateGUI()
    // ------ camwfs averaging 
    if( !(m_camwfsavgState == "READY" || m_camwfsavgState == "OPERATING"))
    {
-      //ui.labelThreshCurrent->setEnabled(false); //these may or may not be enabled by camwfs-fit above
-      //ui.labelThreshTarget->setEnabled(false);
-      ui.labelNoAvg->setEnabled(false);
-      ui.nAverage_current->setEnabled(false);
-      ui.nAverage_target->setEnabled(false);
-      
-      ui.nAverage_current->setText("");
+      ui.fitAvgTime->setEnabled(false);
    }
    else
    {
-      ui.labelThreshCurrent->setEnabled(true); //always enable if we need them here
-      ui.labelThreshTarget->setEnabled(true);
-      ui.labelNoAvg->setEnabled(true);
-      ui.nAverage_current->setEnabled(true);
-      ui.nAverage_target->setEnabled(true);
-      snprintf(str, 16, "%u", m_nAverage_current);
-      ui.nAverage_current->setText(str);
-   
+      ui.fitAvgTime->setEnabled(true);
    }
    
    // ------ Pupil Steering
@@ -1117,32 +1210,14 @@ void pupilGuide::updateGUI()
    
    
    
-   
-   
-   
-   
-   
-   
    // --- camera lens
    
    
    if( (m_camlensxFsmState == "READY" || m_camlensxFsmState == "OPERATING") &&
           (m_camlensyFsmState == "READY" || m_camlensyFsmState == "OPERATING") )
    {
-      ui.camlens_fsm->setEnabled(true);
-      ui.camlens_x_label->setEnabled(true);
-      ui.camlens_x_pos->setEnabled(true);
-      ui.camlens_y_label->setEnabled(true);
-      ui.camlens_y_pos->setEnabled(true);
-      ui.button_camlens_ul->setEnabled(true);
-      ui.button_camlens_u->setEnabled(true);
-      ui.button_camlens_ur->setEnabled(true);
-      ui.button_camlens_l->setEnabled(true);
-      ui.button_camlens_r->setEnabled(true);
-      ui.button_camlens_dl->setEnabled(true);
-      ui.button_camlens_d->setEnabled(true);
-      ui.button_camlens_dr->setEnabled(true);
-      ui.button_camlens_scale->setEnabled(true);
+      
+      camlensSetEnabled(true);
       
       if(m_camlensxFsmState == "OPERATING" || m_camlensyFsmState == "OPERATING")
       {
@@ -1152,27 +1227,10 @@ void pupilGuide::updateGUI()
       {
          ui.camlens_fsm->setText("READY");
       }
-      
-      snprintf(str, 16, "%0.4f", m_camlensx_pos);
-      ui.camlens_x_pos->setText(str);
-      snprintf(str, 16, "%0.4f", m_camlensy_pos);
-      ui.camlens_y_pos->setText(str);
    }
    else
    {
-      ui.camlens_x_label->setEnabled(false);
-      ui.camlens_x_pos->setEnabled(false);
-      ui.camlens_y_label->setEnabled(false);
-      ui.camlens_y_pos->setEnabled(false);
-      ui.button_camlens_ul->setEnabled(false);
-      ui.button_camlens_u->setEnabled(false);
-      ui.button_camlens_ur->setEnabled(false);
-      ui.button_camlens_l->setEnabled(false);
-      ui.button_camlens_r->setEnabled(false);
-      ui.button_camlens_dl->setEnabled(false);
-      ui.button_camlens_d->setEnabled(false);
-      ui.button_camlens_dr->setEnabled(false);
-      ui.button_camlens_scale->setEnabled(false);
+      camlensSetEnabled(false);
       
       if(m_camlensxFsmState == "HOMING" || m_camlensyFsmState == "HOMING")
       {
@@ -1202,11 +1260,13 @@ void pupilGuide::updateGUI()
             ui.camlens_fsm->setText(m_camlensxFsmState.c_str());
          }
       }
-      
-      ui.camlens_x_pos->setText("---");
-      ui.camlens_y_pos->setText("---");
    }
       
+   ui.fitThreshold->updateGUI();
+   ui.fitAvgTime->updateGUI();
+   ui.camlens_x_pos->updateGUI();
+   ui.camlens_y_pos->updateGUI();
+
 } //updateGUI()
 
 void pupilGuide::on_button_tip_u_pressed()
@@ -1360,12 +1420,12 @@ void pupilGuide::on_button_tip_scale_pressed()
    char ss[5];
    snprintf(ss, 5, "%0.2f", m_stepSize);
    ui.button_tip_scale->setText(ss);
-
+   
 
 }
 
 
-void pupilGuide::on_button_pup_u_pressed()
+void pupilGuide::on_button_pup_l_pressed()
 {
    pcf::IndiProperty ip(pcf::IndiProperty::Number);
    
@@ -1394,12 +1454,12 @@ void pupilGuide::on_button_pup_ul_pressed()
    ip2.setDevice("ttmpupil");
    ip2.setName("pos_2");
    ip2.add(pcf::IndiElement("target"));
-   ip2["target"] = m_pupCh2 - m_pupStepSize/sqrt(2);
+   ip2["target"] = m_pupCh2 + m_pupStepSize/sqrt(2);
    
    sendNewProperty(ip2);
 }
 
-void pupilGuide::on_button_pup_l_pressed()
+void pupilGuide::on_button_pup_d_pressed()
 {
    pcf::IndiProperty ip(pcf::IndiProperty::Number);
    
@@ -1418,7 +1478,7 @@ void pupilGuide::on_button_pup_dl_pressed()
    ip.setDevice("ttmpupil");
    ip.setName("pos_1");
    ip.add(pcf::IndiElement("target"));
-   ip["target"] = m_pupCh1 - m_pupStepSize/sqrt(2);
+   ip["target"] = m_pupCh1 + m_pupStepSize/sqrt(2);
    
    sendNewProperty(ip);
    
@@ -1432,7 +1492,7 @@ void pupilGuide::on_button_pup_dl_pressed()
    sendNewProperty(ip2);
 }
 
-void pupilGuide::on_button_pup_d_pressed()
+void pupilGuide::on_button_pup_r_pressed()
 {
    pcf::IndiProperty ip(pcf::IndiProperty::Number);
    
@@ -1461,12 +1521,12 @@ void pupilGuide::on_button_pup_dr_pressed()
    ip2.setDevice("ttmpupil");
    ip2.setName("pos_2");
    ip2.add(pcf::IndiElement("target"));
-   ip2["target"] = m_pupCh2 + m_pupStepSize/sqrt(2);
+   ip2["target"] = m_pupCh2 - m_pupStepSize/sqrt(2);
    
    sendNewProperty(ip2);
 }
 
-void pupilGuide::on_button_pup_r_pressed()
+void pupilGuide::on_button_pup_u_pressed()
 {
    pcf::IndiProperty ip(pcf::IndiProperty::Number);
    
@@ -1485,7 +1545,7 @@ void pupilGuide::on_button_pup_ur_pressed()
    ip.setDevice("ttmpupil");
    ip.setName("pos_1");
    ip.add(pcf::IndiElement("target"));
-   ip["target"] = m_pupCh1 + m_pupStepSize/sqrt(2);
+   ip["target"] = m_pupCh1 - m_pupStepSize/sqrt(2);
    
    sendNewProperty(ip);
    
@@ -1499,6 +1559,7 @@ void pupilGuide::on_button_pup_ur_pressed()
    sendNewProperty(ip2);
    
 }
+
 void pupilGuide::on_button_pup_scale_pressed()
 {
    if(((int) (100*m_pupStepSize)) == 100)
@@ -1525,8 +1586,6 @@ void pupilGuide::on_button_pup_scale_pressed()
    char ss[5];
    snprintf(ss, 5, "%0.2f", m_pupStepSize);
    ui.button_pup_scale->setText(ss);
-
-
 }
 
 
@@ -1539,32 +1598,9 @@ void pupilGuide::on_button_camlens_u_pressed()
    ip.setDevice("stagecamlensy");
    ip.setName("position");
    ip.add(pcf::IndiElement("target"));
-   ip["target"] = m_camlensy_pos + m_camlensStepSize;
+   ip["target"] = m_camlensy_pos - m_camlensStepSize;
    
    sendNewProperty(ip);
-}
-
-void pupilGuide::on_button_camlens_ul_pressed()
-{
-   if(m_camlensyFsmState != "READY" || m_camlensxFsmState != "READY") return;
-   
-   pcf::IndiProperty ip(pcf::IndiProperty::Number);
-   
-   ip.setDevice("stagecamlensy");
-   ip.setName("position");
-   ip.add(pcf::IndiElement("target"));
-   ip["target"] = m_camlensy_pos + sqrt(2)*m_camlensStepSize;
-   
-   sendNewProperty(ip);
-   
-   pcf::IndiProperty ip2(pcf::IndiProperty::Number);
-   
-   ip2.setDevice("stagecamlensx");
-   ip2.setName("position");
-   ip2.add(pcf::IndiElement("target"));
-   ip2["target"] = m_camlensx_pos - sqrt(2)*m_camlensStepSize;
-   
-   sendNewProperty(ip2);
 }
 
 void pupilGuide::on_button_camlens_l_pressed()
@@ -1581,29 +1617,6 @@ void pupilGuide::on_button_camlens_l_pressed()
    sendNewProperty(ip);
 }
 
-void pupilGuide::on_button_camlens_dl_pressed()
-{
-   if(m_camlensyFsmState != "READY" || m_camlensxFsmState != "READY") return;
-   
-   pcf::IndiProperty ip(pcf::IndiProperty::Number);
-   
-   ip.setDevice("stagecamlensy");
-   ip.setName("position");
-   ip.add(pcf::IndiElement("target"));
-   ip["target"] = m_camlensy_pos - sqrt(2)*m_camlensStepSize;
-   
-   sendNewProperty(ip);
-   
-   pcf::IndiProperty ip2(pcf::IndiProperty::Number);
-   
-   ip2.setDevice("stagecamlensx");
-   ip2.setName("position");
-   ip2.add(pcf::IndiElement("target"));
-   ip2["target"] = m_camlensx_pos - sqrt(2)*m_camlensStepSize;
-   
-   sendNewProperty(ip2);
-}
-
 void pupilGuide::on_button_camlens_d_pressed()
 {
    if(m_camlensyFsmState != "READY") return;
@@ -1613,32 +1626,10 @@ void pupilGuide::on_button_camlens_d_pressed()
    ip.setDevice("stagecamlensy");
    ip.setName("position");
    ip.add(pcf::IndiElement("target"));
-   ip["target"] = m_camlensy_pos - m_camlensStepSize;
+   ip["target"] = m_camlensy_pos + m_camlensStepSize;
+   
    
    sendNewProperty(ip);
-}
-
-void pupilGuide::on_button_camlens_dr_pressed()
-{
-   if(m_camlensyFsmState != "READY" || m_camlensxFsmState != "READY") return;
-   
-   pcf::IndiProperty ip(pcf::IndiProperty::Number);
-   
-   ip.setDevice("stagecamlensy");
-   ip.setName("position");
-   ip.add(pcf::IndiElement("target"));
-   ip["target"] = m_camlensy_pos + sqrt(2)*m_camlensStepSize;
-   
-   sendNewProperty(ip);
-   
-   pcf::IndiProperty ip2(pcf::IndiProperty::Number);
-   
-   ip2.setDevice("stagecamlensx");
-   ip2.setName("position");
-   ip2.add(pcf::IndiElement("target"));
-   ip2["target"] = m_camlensx_pos + sqrt(2)*m_camlensStepSize;
-   
-   sendNewProperty(ip2);
 }
 
 void pupilGuide::on_button_camlens_r_pressed()
@@ -1651,58 +1642,30 @@ void pupilGuide::on_button_camlens_r_pressed()
    ip.setName("position");
    ip.add(pcf::IndiElement("target"));
    ip["target"] = m_camlensx_pos + m_camlensStepSize;
-   
    sendNewProperty(ip);
 }
 
-void pupilGuide::on_button_camlens_ur_pressed()
-{
-   if(m_camlensyFsmState != "READY" || m_camlensxFsmState != "READY") return;
-   
-   pcf::IndiProperty ip(pcf::IndiProperty::Number);
-   
-   ip.setDevice("stagecamlensy");
-   ip.setName("position");
-   ip.add(pcf::IndiElement("target"));
-   ip["target"] = m_camlensy_pos + sqrt(2)*m_camlensStepSize;
-   
-   sendNewProperty(ip);
-   
-   pcf::IndiProperty ip2(pcf::IndiProperty::Number);
-   
-   ip2.setDevice("stagecamlensx");
-   ip2.setName("position");
-   ip2.add(pcf::IndiElement("target"));
-   ip2["target"] = m_camlensx_pos + sqrt(2)*m_camlensStepSize;
-   
-   sendNewProperty(ip2);
-}
 void pupilGuide::on_button_camlens_scale_pressed()
 {
-   /*if(((int) (100*m_camlensStepSize)) == 100)
-   {
-      m_camlensStepSize = 0.5;
-   }
-   else if(((int) (100*m_camlensStepSize)) == 50)
+   if(((int) (1000*m_camlensStepSize+0.5)) == 1)
    {
       m_camlensStepSize = 0.1;
    }
-   else*/ 
-   if(((int) (100*m_camlensStepSize)) == 10)
+   else if(((int) (1000*m_camlensStepSize+0.5)) == 100)
    {
       m_camlensStepSize = 0.05;
    }
-   else if(((int) (100*m_camlensStepSize)) == 5)
+   else if(((int) (1000*m_camlensStepSize+0.5)) == 50)
    {
       m_camlensStepSize = 0.01;
    }
-   else if(((int) (100*m_camlensStepSize)) == 1)
+   else if(((int) (1000*m_camlensStepSize+0.5)) == 10)
    {
-      m_camlensStepSize = 0.1;
+      m_camlensStepSize = 0.001;
    }
    
    char ss[5];
-   snprintf(ss, 5, "%0.2f", m_camlensStepSize);
+   snprintf(ss, 5, "%0.2f", m_camlensStepSize*10);
    ui.button_camlens_scale->setText(ss);
 
 
@@ -1770,12 +1733,12 @@ void pupilGuide::on_buttonMod_rest_pressed()
    
 void pupilGuide::on_buttonPup_rest_pressed()
 {
-   pcf::IndiProperty ip(pcf::IndiProperty::Number);
+   pcf::IndiProperty ip(pcf::IndiProperty::Switch);
    
    ip.setDevice("ttmpupil");
    ip.setName("releaseDM");
    ip.add(pcf::IndiElement("request"));
-   ip["request"] = 1;
+   ip["request"].setSwitchState(pcf::IndiElement::On);
    
    sendNewProperty(ip);
    
@@ -1783,36 +1746,12 @@ void pupilGuide::on_buttonPup_rest_pressed()
 
 void pupilGuide::on_buttonPup_set_pressed()
 {
-   pcf::IndiProperty ip(pcf::IndiProperty::Number);
+   pcf::IndiProperty ip(pcf::IndiProperty::Switch);
    
    ip.setDevice("ttmpupil");
    ip.setName("initDM");
    ip.add(pcf::IndiElement("request"));
-   ip["request"] = 1;
-   
-   sendNewProperty(ip);
-}
-
-void pupilGuide::on_fitThreshold_target_returnPressed()
-{
-    pcf::IndiProperty ip(pcf::IndiProperty::Number);
-   
-   ip.setDevice("camwfs-fit");
-   ip.setName("threshold");
-   ip.add(pcf::IndiElement("target"));
-   ip["target"] = ui.fitThreshold_target->text().toDouble();
-   
-   sendNewProperty(ip);
-}
-
-void pupilGuide::on_nAverage_target_returnPressed()
-{
-    pcf::IndiProperty ip(pcf::IndiProperty::Number);
-   
-   ip.setDevice("camwfs-avg");
-   ip.setName("nAverage");
-   ip.add(pcf::IndiElement("target"));
-   ip["target"] = ui.nAverage_target->text().toDouble();
+   ip["request"].setSwitchState(pcf::IndiElement::On);
    
    sendNewProperty(ip);
 }

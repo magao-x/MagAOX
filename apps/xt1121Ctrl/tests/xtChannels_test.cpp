@@ -11,6 +11,7 @@
 
 #include "../xtChannels.hpp"
 
+#include <cstring>
 
 namespace xtChannels_test 
 {

@@ -95,17 +95,17 @@ struct telem_cooler : public flatbuffer_log
       switch(m)
       {
          case em_liquidTemp:
-            return GetTelem_cooler_fb(logHeader::messageBuffer(buffer))->liquidTemp();
+            return GetTelem_cooler_fb(flatlogs::logHeader::messageBuffer(buffer))->liquidTemp();
          case em_flowRate:
-            return GetTelem_cooler_fb(logHeader::messageBuffer(buffer))->flowRate();
+            return GetTelem_cooler_fb(flatlogs::logHeader::messageBuffer(buffer))->flowRate();
          case em_pumpLevel:
-            return GetTelem_cooler_fb(logHeader::messageBuffer(buffer))->pumpLevel();
+            return GetTelem_cooler_fb(flatlogs::logHeader::messageBuffer(buffer))->pumpLevel();
          case em_pumpSpeed:
-            return GetTelem_cooler_fb(logHeader::messageBuffer(buffer))->pumpSpeed();
+            return GetTelem_cooler_fb(flatlogs::logHeader::messageBuffer(buffer))->pumpSpeed();
          case em_fanLevel:
-            return GetTelem_cooler_fb(logHeader::messageBuffer(buffer))->fanLevel();
+            return GetTelem_cooler_fb(flatlogs::logHeader::messageBuffer(buffer))->fanLevel();
          case em_fanSpeed:
-            return GetTelem_cooler_fb(logHeader::messageBuffer(buffer))->fanSpeed();
+            return GetTelem_cooler_fb(flatlogs::logHeader::messageBuffer(buffer))->fanSpeed();
          default:
             return nan("");
       }
@@ -114,7 +114,7 @@ struct telem_cooler : public flatbuffer_log
    
 }; //telem_cooler
 
-timespec telem_cooler::lastRecord = {0,0};
+
 
 } //namespace logger
 } //namespace MagAOX

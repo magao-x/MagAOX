@@ -56,6 +56,41 @@ class ocam2KCtrl : public MagAOXApp<>, public dev::stdCamera<ocam2KCtrl>, public
    
    typedef MagAOXApp<> MagAOXAppT;
    
+public:
+   /** \name app::dev Configurations
+     *@{
+     */
+   static constexpr bool c_stdCamera_tempControl = true; ///< app::dev config to tell stdCamera to expose temperature controls
+   
+   static constexpr bool c_stdCamera_temp = true; ///< app::dev config to tell stdCamera to expose temperature (ignored since tempControl==true)
+
+   static constexpr bool c_stdCamera_readoutSpeed = false; ///< app::dev config to tell stdCamera not to expose readout speed controls
+   
+   static constexpr bool c_stdCamera_vShiftSpeed = false; ///< app:dev config to tell stdCamera not to expose vertical shift speed control
+
+   static constexpr bool c_stdCamera_emGain = true; ///< app::dev config to tell stdCamera to expose EM gain controls 
+   
+   static constexpr bool c_stdCamera_exptimeCtrl = false; ///< app::dev config to tell stdCamera not to expose exposure time controls
+   
+   static constexpr bool c_stdCamera_fpsCtrl = true; ///< app::dev config to tell stdCamera to expose FPS controls
+
+   static constexpr bool c_stdCamera_fps = true; ///< app::dev config to tell stdCamera not to expose FPS status (ignored since fpsCtrl==true)
+   
+   static constexpr bool c_stdCamera_usesModes = true; ///< app:dev config to tell stdCamera not to expose mode controls
+   
+   static constexpr bool c_stdCamera_usesROI = false; ///< app:dev config to tell stdCamera to expose ROI controls
+
+   static constexpr bool c_stdCamera_cropMode = false; ///< app:dev config to tell stdCamera to expose Crop Mode controls
+   
+   static constexpr bool c_stdCamera_hasShutter = true; ///< app:dev config to tell stdCamera to expose shutter controls
+
+   static constexpr bool c_stdCamera_usesStateString = true; ///< app::dev confg to tell stdCamera to expose the state string property
+
+   static constexpr bool c_edtCamera_relativeConfigPath = true; ///< app::dev config to tell edtCamera to use relative path to camera config file
+   
+   static constexpr bool c_frameGrabber_flippable = false; ///< app:dev config to tell framegrabber these images can not be flipped
+   
+   ///@}
 protected:
 
    /** \name configurable parameters 
@@ -66,7 +101,7 @@ protected:
 
    std::string m_ocamDescrambleFile; ///< Path the OCAM 2K pixel descrambling file, relative to MagAO-X config directory.
 
-   unsigned m_maxEMGain {600}; ///< The maximum allowable EM gain settable by the user.
+   
    
    ///@}
    
@@ -75,6 +110,8 @@ protected:
    long m_currImageNumber {-1}; ///< The current image number, retrieved from the image itself.
        
    long m_lastImageNumber {-1};  ///< The last image number, saved from the last loop through.
+
+   bool m_protectionReset {false}; ///< Flag indicating that protection has been reset at least once.
    
    unsigned m_protectionResetConfirmed {0}; ///< Counter indicating the number of times that the protection reset has been requested within 10 seconds, for confirmation.
 
@@ -183,6 +220,10 @@ public:
      */
    int setShutter(int sh);
    
+   std::string stateString();
+   
+   bool stateStringValid();
+
    ///@}
    
    /// Reset the EM Protection 
@@ -200,11 +241,12 @@ public:
    int getEMGain();
    
    /// Set the EM gain.
-   /**
+   /** Sets it to the value of stdCamera::m_emGainSet
+     * 
      * \returns 0 on success
      * \returns -1 on error
      */
-   int setEMGain( unsigned emg  /**< [in] the new value of EM gain */ );
+   int setEMGain();
    
    /// Implementation of the framegrabber configureAcquisition interface
    /** Sends the mode command over serial, sets the FPS, and initializes the OCAM SDK.
@@ -213,6 +255,11 @@ public:
      * \returns -1 on error
      */
    int configureAcquisition();
+   
+   /// Implementation of the frameGrabber fps interface
+   /** Just returns the value of m_fps
+     */
+   float fps();
    
    /// Implementation of the framegrabber startAcquisition interface
    /** Initializes m_lastImageNumber, and calls edtCamera::pdvStartAcquisition
@@ -252,12 +299,9 @@ protected:
    pcf::IndiProperty m_indiP_temps;
    pcf::IndiProperty m_indiP_emProt;
    pcf::IndiProperty m_indiP_emProtReset;
-   
-   pcf::IndiProperty m_indiP_emGain;
 
 public:
    INDI_NEWCALLBACK_DECL(ocam2KCtrl, m_indiP_emProtReset);
-   INDI_NEWCALLBACK_DECL(ocam2KCtrl, m_indiP_emGain);
 
    /** \name Telemeter Interface
      * 
@@ -282,10 +326,9 @@ ocam2KCtrl::ocam2KCtrl() : MagAOXApp(MAGAOX_CURRENT_SHA1, MAGAOX_REPO_MODIFIED)
    m_powerOnWait = 10;
    
    //--- stdCamera ---
-   m_usesExpTime = false;
-   m_usesROI = false;
-   //note: m_usesModes is set to true by edtCamera
    m_startupTemp = 20;
+   
+   m_maxEMGain = 600;
    
    return;
 }
@@ -305,8 +348,6 @@ void ocam2KCtrl::setupConfig()
       
    config.add("camera.ocamDescrambleFile", "", "camera.ocamDescrambleFile", argType::Required, "camera", "ocamDescrambleFile", false, "string", "The path of the OCAM descramble file, relative to MagAOX/config.");
    
-   config.add("camera.maxEMGain", "", "camera.maxEMGain", argType::Required, "camera", "maxEMGain", false, "unsigned", "The maximum EM gain which can be set by  user. Default is 600.  Min is 1, max is 600.");
- 
    dev::frameGrabber<ocam2KCtrl>::setupConfig(config);
    
    dev::dssShutter<ocam2KCtrl>::setupConfig(config);
@@ -322,7 +363,7 @@ void ocam2KCtrl::loadConfig()
    dev::edtCamera<ocam2KCtrl>::loadConfig(config);
    
    config(m_ocamDescrambleFile, "camera.ocamDescrambleFile");
-   config(m_maxEMGain, "camera.maxEMGain");
+   
    if(m_maxEMGain < 1)
    {
       m_maxEMGain = 1;
@@ -366,11 +407,6 @@ int ocam2KCtrl::appStartup()
    
    createStandardIndiRequestSw( m_indiP_emProtReset, "emProtectionReset", "Reset", "EM Protection"); 
    registerIndiPropertyNew( m_indiP_emProtReset, INDI_NEWCALLBACK(m_indiP_emProtReset));
-   
-   REG_INDI_NEWPROP(m_indiP_emGain, "emgain", pcf::IndiProperty::Number);
-   m_indiP_emGain.add (pcf::IndiElement("current"));
-   m_indiP_emGain["current"].set(m_emGain);
-   m_indiP_emGain.add (pcf::IndiElement("target"));
    
    if(dev::stdCamera<ocam2KCtrl>::appStartup() < 0)
    {
@@ -507,7 +543,7 @@ int ocam2KCtrl::appLogic()
       
       if(m_protectionResetConfirmed > 0 )
       {
-         if( mx::get_curr_time() - m_protectionResetReqTime > 10.0)
+         if( mx::sys::get_curr_time() - m_protectionResetReqTime > 10.0)
          {
             m_protectionResetConfirmed = 0;
             updateIfChanged(m_indiP_emProt, "status", std::string("UNCONFIRMED"));
@@ -577,10 +613,6 @@ int ocam2KCtrl::onPowerOff()
    updateIfChanged(m_indiP_temps, "right", m_temps.RIGHT);
    updateIfChanged(m_indiP_temps, "cooling", m_temps.COOLING_POWER);
       
-   updateIfChanged(m_indiP_emGain, "current", std::string(""));
-   updateIfChanged(m_indiP_emGain, "target", std::string(""));
-   
-   
    if(stdCamera<ocam2KCtrl>::onPowerOff() < 0)
    {
       log<software_error>({__FILE__, __LINE__});
@@ -848,6 +880,11 @@ int ocam2KCtrl::setFPS()
       ///\todo check response
       log<text_log>({"set fps: " + fpsStr});
       
+      //We always want to reset the latency circular buffers
+      ///\todo verify that this works!! 
+      m_nextMode = m_modeName;
+      m_reconfig = true;
+      
       return 0;
    }
    else return log<software_error,-1>({__FILE__, __LINE__});
@@ -872,6 +909,29 @@ int ocam2KCtrl::setShutter(int sh)
    return dssShutter<ocam2KCtrl>::setShutter(sh);
 }
 
+inline
+std::string ocam2KCtrl::stateString()
+{
+   std::string ss;
+
+   ss += m_modeName + "_";
+   ss += std::to_string(m_fps) + "_";
+   ss += std::to_string(m_emGain) + "_";
+   ss += std::to_string(m_ccdTempSetpt);
+
+   return ss;
+}
+
+inline
+bool ocam2KCtrl::stateStringValid()
+{
+   if(state() == stateCodes::OPERATING && m_tempControlOnTarget)
+   {
+      return true;
+   }
+   else return false;
+}
+
 inline 
 int ocam2KCtrl::resetEMProtection()
 {
@@ -890,6 +950,9 @@ int ocam2KCtrl::resetEMProtection()
       log<text_log>("overillumination protection has been reset", logPrio::LOG_NOTICE);
       
       m_protectionResetConfirmed = 0;
+      
+      m_protectionReset = true;
+         
       return 0;
 
    }
@@ -912,8 +975,6 @@ int ocam2KCtrl::getEMGain()
       }
       m_emGain = emGain;
 
-      updateIfChanged(m_indiP_emGain, "current", m_emGain);
-      
       return 0;
 
    }
@@ -921,10 +982,18 @@ int ocam2KCtrl::getEMGain()
 }
    
 inline
-int ocam2KCtrl::setEMGain( unsigned emg )
+int ocam2KCtrl::setEMGain( )
 {
    std::string response;
 
+   if(m_protectionReset == false)
+   {
+      log<text_log>("Attempt to set EM gain before protection reset", logPrio::LOG_NOTICE);
+      return 0;
+   }
+   
+   unsigned emg  = m_emGainSet; //a float
+   
    if(emg < 1 || emg > m_maxEMGain)
    {
       log<text_log>("Attempt to set EM gain to " + std::to_string(emg) + " outside limits refused", logPrio::LOG_WARNING);
@@ -1021,9 +1090,17 @@ int ocam2KCtrl::configureAcquisition()
    m_height = OCAM_SZ;
    m_dataType = _DATATYPE_INT16;
    
+   state(stateCodes::OPERATING);
+   
    return 0;
 }
-   
+ 
+inline
+float ocam2KCtrl::fps()
+{
+   return m_fps;
+}
+
 inline
 int ocam2KCtrl::startAcquisition()
 {
@@ -1067,15 +1144,16 @@ int ocam2KCtrl::acquireAndCheckValid()
          if(m_currImageNumber - m_lastImageNumber > 1 && m_currImageNumber - m_lastImageNumber < 100)
          { 
             //This we handle as a non-timeout -- report how many frames were skipped
-            long framesSkipped = m_currImageNumber - m_lastImageNumber;
-            //and don't `continue` to top of loop
+            long framesSkipped = m_currImageNumber - m_lastImageNumber - 1;
             
             log<text_log>("frames skipped: " + std::to_string(framesSkipped), logPrio::LOG_ERROR);
             
-            m_nextMode = m_modeName;
-            m_reconfig = 1;
+	    // and go on and try to use it.
+	    //
+            //m_nextMode = m_modeName;
+            //m_reconfig = 1;
            
-            return 1;
+            //return 1;
             
          }
          else //but if it's any bigger or < 0, it's probably garbage
@@ -1114,7 +1192,10 @@ int ocam2KCtrl::reconfig()
    //lock mutex
    std::unique_lock<std::mutex> lock(m_indiMutex);
    
-   return edtCamera<ocam2KCtrl>::pdvReconfig();
+   int rv = edtCamera<ocam2KCtrl>::pdvReconfig();
+   if(rv < 0) return rv;
+   state(stateCodes::READY);
+   return 0;
 }
    
 INDI_NEWCALLBACK_DEFN(ocam2KCtrl, m_indiP_emProtReset)(const pcf::IndiProperty &ipRecv)
@@ -1145,54 +1226,17 @@ INDI_NEWCALLBACK_DEFN(ocam2KCtrl, m_indiP_emProtReset)(const pcf::IndiProperty &
        
       m_protectionResetConfirmed = 1;
          
-      m_protectionResetReqTime = mx::get_curr_time();
+      m_protectionResetReqTime = mx::sys::get_curr_time();
          
       log<text_log>("protection reset requested", logPrio::LOG_NOTICE);
         
       return 0;
    }
       
+
    //If here, this is a confirmation.      
    return resetEMProtection();
-
-      
-
 }
-
-
-INDI_NEWCALLBACK_DEFN(ocam2KCtrl, m_indiP_emGain)(const pcf::IndiProperty &ipRecv)
-{
-   if(MagAOXAppT::m_powerState == 0) return 0;
-   
-   if (ipRecv.getName() == m_indiP_emGain.getName())
-   {
-      unsigned current = 0, target = 0;
-
-      if(ipRecv.find("current"))
-      {
-         current = ipRecv["current"].get<unsigned>();
-      }
-
-      if(ipRecv.find("target"))
-      {
-         target = ipRecv["target"].get<unsigned>();
-      }
-      
-      if(target == 0) target = current;
-      
-      if(target == 0) return 0;
-      
-      //Lock the mutex, waiting if necessary
-      std::unique_lock<std::mutex> lock(m_indiMutex);
-
-      updateIfChanged(m_indiP_emGain, "target", target);
-      
-      return setEMGain(target);
-      
-   }
-   return -1;
-}
-
 
 inline
 int ocam2KCtrl::checkRecordTimes()

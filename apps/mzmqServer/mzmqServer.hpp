@@ -15,7 +15,7 @@
 
 #include <milkzmqServer.hpp>
 
-#include <mx/timeUtils.hpp>
+//#include <mx/timeUtils.hpp>
 
 #include "../../libMagAOX/libMagAOX.hpp" //Note this is included on command line to trigger pch
 #include "../../magaox_git_version.h"
@@ -79,6 +79,7 @@ public:
    
 protected:
    
+   bool m_compress {false};
    std::vector<std::string> m_shMemImNames;
    
    /** \name SIGSEGV & SIGBUS signal handling
@@ -161,6 +162,8 @@ void mzmqServer::setupConfig()
    config.add("server.fpsTgt", "", "server.fpsTgt", argType::Required, "server", "fpsTgt", false, "float", "");
    
    config.add("server.fpsGain", "", "server.fpsGain", argType::Required, "server", "fpsGain", false, "float", "");
+   
+   config.add("server.compress", "", "server.compress", argType::Required, "server", "compress", false, "bool", "Flag to turn on compression for INT16 and UINT16.");
  
 }
 
@@ -179,6 +182,7 @@ void mzmqServer::loadConfig()
    
    config(m_fpsGain, "server.fpsGain");
    
+   config(m_compress, "server.compress");
    
    
 }
@@ -201,6 +205,7 @@ int mzmqServer::appStartup()
       return -1;
    }
 
+   if(m_compress) defaultCompression();
    
    for(size_t n=0; n < m_shMemImNames.size(); ++n)
    {
@@ -223,7 +228,8 @@ int mzmqServer::appStartup()
    }
    
 
-   std::cerr << "Main Thread: " << syscall(SYS_gettid) << "\n";   
+   std::cerr << "Main Thread: " << syscall(SYS_gettid) << "\n";
+
    return 0;
 
 }

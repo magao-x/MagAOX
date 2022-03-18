@@ -23,7 +23,7 @@
 /** \defgroup xindiserver INDI Server wrapper.
   * \brief Manages INDI server in the MagAO-X context.
   *
-  * <a href="../handbook/operating/software/apps/xindiserver.html">Application Documentation</a>
+  * <a href="../handbook/operating/software/apps/network.html#xindiserver">Application Documentation</a>
   *
   * \ingroup apps
   *
@@ -86,11 +86,13 @@ int loadSSHTunnelConfigs( tunnelMapT & tmap, ///< [out] the tunnel map which wil
          int localPort = 0;
          int remotePort = 0;
          int monitorPort = 0;
-      
+         bool compress = false;
+         
          config.configUnused( remoteHost, mx::app::iniFile::makeKey(sections[i], "remoteHost" ) );
          config.configUnused( localPort, mx::app::iniFile::makeKey(sections[i], "localPort" ) );
          config.configUnused( remotePort, mx::app::iniFile::makeKey(sections[i], "remotePort" ) );
          config.configUnused( monitorPort, mx::app::iniFile::makeKey(sections[i], "monitorPort" ) );
+         config.configUnused( compress, mx::app::iniFile::makeKey(sections[i], "compress" ) );
          
          tmap[sections[i]] = sshTunnel({remoteHost, localPort, remotePort, monitorPort});
       
@@ -629,7 +631,7 @@ void xindiserver::isLogThreadExec()
    while(m_shutdown == 0)
    {
       ssize_t count = read(m_isSTDERR, buffer, sizeof(buffer));
-      if (count <= 0) 
+      if (count <= 0 || m_shutdown == 1) 
       {
          continue;
       }
@@ -680,7 +682,7 @@ int xindiserver::processISLog( std::string logs )
    double dsec;
 
    tm bdt;   
-   mx::ISO8601dateBreakdown(bdt.tm_year, bdt.tm_mon, bdt.tm_mday, bdt.tm_hour, bdt.tm_min, dsec, ts);
+   mx::sys::ISO8601dateBreakdown(bdt.tm_year, bdt.tm_mon, bdt.tm_mday, bdt.tm_hour, bdt.tm_min, dsec, ts);
    
    bdt.tm_year -= 1900;
    bdt.tm_mon -= 1;
@@ -763,28 +765,16 @@ int xindiserver::appStartup()
    std::string path1 = "/opt/MagAOX/bin/xindidriver";
    for(size_t i=0; i<m_local.size(); ++i)
    {
-      int rv = euidCalled();
-      
-      if(rv < 0)
-      {
-         log<software_error>({__FILE__, __LINE__, "Failed to create symlink for driver: " + m_local[i] + ". Continuing."});
-      }
+      elevatedPrivileges elPriv(this);
       
       std::cerr << "creating symlink " << path1 << " " << m_driverPath + m_local[i] << "\n";
       
-      rv = symlink(path1.c_str(), (m_driverPath + m_local[i]).c_str());
+      int rv = symlink(path1.c_str(), (m_driverPath + m_local[i]).c_str());
       
       if(rv < 0 && errno != EEXIST)
       {
          log<software_error>({__FILE__, __LINE__, errno});
          log<software_error>({__FILE__, __LINE__, "Failed to create symlink for driver: " + m_local[i] + ". Continuing."});
-      }
-      
-      rv = euidReal();
-      if(rv < 0)
-      {
-         log<software_critical>({__FILE__, __LINE__, "Failed to reset privileges."});
-         return -1;
       }
    }
 

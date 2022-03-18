@@ -102,7 +102,7 @@ struct telem_telvane : public flatbuffer_log
    
 }; //telem_telvane
 
-timespec telem_telvane::lastRecord = {0,0};
+
 
 } //namespace logger
 } //namespace MagAOX

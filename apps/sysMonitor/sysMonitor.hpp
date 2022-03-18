@@ -278,7 +278,11 @@ public:
    std::thread m_setlatThread; ///< A separate thread for the actual setting of low latency
 
    bool m_setlatThreadInit {true}; ///< Synchronizer to ensure set lat thread initializes before doing dangerous things.
-   
+  
+   pid_t m_setlatThreadID {0}; ///< Set latency thread ID.
+
+   pcf::IndiProperty m_setlatThreadProp; ///< The property to hold the setlat thread details.
+ 
    ///Thread starter, called by threadStart on thread construction.  Calls setlatThreadExec.
    static void setlatThreadStart( sysMonitor * s /**< [in] a pointer to a sysMonitor instance (normally this) */);
 
@@ -409,7 +413,7 @@ int sysMonitor::appStartup()
       return log<software_error,-1>({__FILE__,__LINE__});
    }
    
-   if(threadStart( m_setlatThread, m_setlatThreadInit, m_setlatThreadPrio, "set latency", this, setlatThreadStart)  < 0)
+   if(threadStart( m_setlatThread, m_setlatThreadInit, m_setlatThreadID, m_setlatThreadProp, m_setlatThreadPrio, "", "set_latency", this, setlatThreadStart)  < 0)
    {
       log<software_critical>({__FILE__, __LINE__});
       return -1;
@@ -542,12 +546,20 @@ int sysMonitor::findCPUTemperatures(std::vector<float>& temps)
 {
    std::vector<std::string> commandList{"sensors"};
    
-   std::vector<std::string> commandOutput;
+   std::vector<std::string> commandOutput, commandError;
    
-   if(sys::runCommand(commandOutput, commandList) < 0)
+   if(sys::runCommand(commandOutput, commandError, commandList) < 0)
    {
       if(commandOutput.size() < 1) return log<software_error,-1>({__FILE__, __LINE__});
       else return log<software_error,-1>({__FILE__, __LINE__, commandOutput[0]});
+   }
+   
+   if(commandError.size() > 0)
+   {
+      for(size_t n=0; n< commandError.size(); ++n)
+      {
+         log<software_error>({__FILE__, __LINE__, "sensors stderr: " + commandError[n]});
+      }
    }
    
    int rv = -1;
@@ -567,6 +579,7 @@ int sysMonitor::parseCPUTemperatures(std::string line, float& temps)
 {
    if (line.length() <= 1)
    {
+      temps = -999;
       return -1;
    }
 
@@ -574,8 +587,23 @@ int sysMonitor::parseCPUTemperatures(std::string line, float& temps)
    if (str.compare("Core ") == 0) 
    {
       size_t st = line.find(':',0);
+      if(st == std::string::npos)
+      {
+         log<software_error>({__FILE__, __LINE__,"Invalid read occured when parsing CPU temperatures."});
+         temps = -999;
+         return -1;
+      }
+      
       ++st;
+      
       size_t ed = line.find('C', st);
+      if(ed == std::string::npos)
+      {
+         log<software_error>({__FILE__, __LINE__,"Invalid read occured when parsing CPU temperatures."});
+         temps = -999;
+         return -1;
+      }
+      
       --ed;
       
       std::string temp_str = line.substr(st, ed-st);
@@ -590,6 +618,7 @@ int sysMonitor::parseCPUTemperatures(std::string line, float& temps)
       catch (const std::invalid_argument& e) 
       {
          log<software_error>({__FILE__, __LINE__,"Invalid read occured when parsing CPU temperatures."});
+         temps = -999;
          return -1;
       }
 
@@ -630,6 +659,7 @@ int sysMonitor::parseCPUTemperatures(std::string line, float& temps)
          catch (const std::invalid_argument& e) 
          {
             log<software_error>({__FILE__, __LINE__,"Invalid read occured when parsing critical CPU temperatures."});
+            temps = -999;
             return -1;
          }
       }                           
@@ -637,6 +667,7 @@ int sysMonitor::parseCPUTemperatures(std::string line, float& temps)
    }
    else 
    {
+      temps = -999;
       return -1;
    }
 
@@ -669,12 +700,20 @@ int sysMonitor::criticalCoreTemperature(std::vector<float>& v)
 int sysMonitor::findCPULoads(std::vector<float>& loads) 
 {
    std::vector<std::string> commandList{"mpstat", "-P", "ALL", "1", "1"};
-   std::vector<std::string> commandOutput;
+   std::vector<std::string> commandOutput, commandError;
    
-   if(sys::runCommand(commandOutput, commandList) < 0)
+   if(sys::runCommand(commandOutput, commandError, commandList) < 0)
    {
       if(commandOutput.size() < 1) return log<software_error,-1>({__FILE__, __LINE__});
       else return log<software_error,-1>({__FILE__, __LINE__, commandOutput[0]});
+   }
+   
+   if(commandError.size() > 0)
+   {
+      for(size_t n=0; n< commandError.size(); ++n)
+      {
+         log<software_error>({__FILE__, __LINE__, "mpstat stderr: " + commandError[n]});
+      }
    }
    
    int rv = -1;
@@ -732,12 +771,20 @@ int sysMonitor::findDiskTemperature( std::vector<std::string> & hdd_names,
       commandList.push_back(m_diskNameList[n]);
    }
    
-   std::vector<std::string> commandOutput;
+   std::vector<std::string> commandOutput, commandError;
    
-   if(sys::runCommand(commandOutput, commandList) < 0)
+   if(sys::runCommand(commandOutput, commandError, commandList) < 0)
    {
       if(commandOutput.size() < 1) return log<software_error,-1>({__FILE__, __LINE__});
       else return log<software_error,-1>({__FILE__, __LINE__, commandOutput[0]});
+   }
+   
+   if(commandError.size() > 0)
+   {
+      for(size_t n=0; n< commandError.size(); ++n)
+      {
+         log<software_error>({__FILE__, __LINE__, "hddtemp stderr: " + commandError[n]});
+      }
    }
    
    int rv = -1;
@@ -763,6 +810,8 @@ int sysMonitor::parseDiskTemperature( std::string & driveName,
    float tempValue;
    if (line.length() <= 6) 
    {
+      driveName = "";
+      hdd_temp = -999;
       return -1;
    }
    
@@ -787,6 +836,8 @@ int sysMonitor::parseDiskTemperature( std::string & driveName,
             catch (const std::invalid_argument& e) 
             {
                log<software_error>({__FILE__, __LINE__,"Invalid read occured when parsing drive temperatures."});
+               hdd_temp = -999;
+               driveName = "";
                return -1;
             }
             hdd_temp = tempValue;
@@ -803,9 +854,14 @@ int sysMonitor::parseDiskTemperature( std::string & driveName,
       }
       catch (const std::out_of_range& e) 
       {
+         hdd_temp = -999;
+         driveName = "";
          return -1;
       }
    }
+   
+   hdd_temp = -999;
+   driveName = "";
    return -1;
 }
 
@@ -836,12 +892,20 @@ int sysMonitor::findDiskUsage(float &rootUsage, float &dataUsage, float &bootUsa
 {
    std::vector<std::string> commandList{"df"};
    
-   std::vector<std::string> commandOutput;
+   std::vector<std::string> commandOutput, commandError;
    
-   if(sys::runCommand(commandOutput, commandList) < 0)
+   if(sys::runCommand(commandOutput, commandError, commandList) < 0)
    {
       if(commandOutput.size() < 1) return log<software_error,-1>({__FILE__, __LINE__});
       else return log<software_error,-1>({__FILE__, __LINE__, commandOutput[0]});
+   }
+   
+   if(commandError.size() > 0)
+   {
+      for(size_t n=0; n< commandError.size(); ++n)
+      {
+         log<software_error>({__FILE__, __LINE__, "df stderr: " + commandError[n]});
+      }
    }
    
    int rv = -1;
@@ -920,12 +984,20 @@ int sysMonitor::findRamUsage(float& ramUsage)
 {
    std::vector<std::string> commandList{"free", "-m"};
    
-   std::vector<std::string> commandOutput;
+   std::vector<std::string> commandOutput, commandError;
    
-   if(sys::runCommand(commandOutput, commandList) < 0)
+   if(sys::runCommand(commandOutput, commandError, commandList) < 0)
    {
       if(commandOutput.size() < 1) return log<software_error,-1>({__FILE__, __LINE__});
       else return log<software_error,-1>({__FILE__, __LINE__, commandOutput[0]});
+   }
+   
+   if(commandError.size() > 0)
+   {
+      for(size_t n=0; n< commandError.size(); ++n)
+      {
+         log<software_error>({__FILE__, __LINE__, "free stderr: " + commandError[n]});
+      }
    }
    
    for (auto line: commandOutput) 
@@ -974,12 +1046,20 @@ int sysMonitor::findChronyStatus()
 {
    std::vector<std::string> commandList{"chronyc", "-c", "tracking"};
    
-   std::vector<std::string> commandOutput;
+   std::vector<std::string> commandOutput, commandError;
    
-   if(sys::runCommand(commandOutput, commandList) < 0)
+   if(sys::runCommand(commandOutput, commandError, commandList) < 0)
    {
       if(commandOutput.size() < 1) return log<software_error,-1>({__FILE__, __LINE__});
       else return log<software_error,-1>({__FILE__, __LINE__, commandOutput[0]});
+   }
+   
+   if(commandError.size() > 0)
+   {
+      for(size_t n=0; n< commandError.size(); ++n)
+      {
+         log<software_error>({__FILE__, __LINE__, "chronyc stderr: " + commandError[n]});
+      }
    }
    
    if(commandOutput.size() < 1)
@@ -1105,6 +1185,8 @@ void sysMonitor::setlatThreadStart( sysMonitor * s)
 inline
 void sysMonitor::setlatThreadExec()
 {
+   m_setlatThreadID = syscall(SYS_gettid);
+
    //Wait fpr the thread starter to finish initializing this thread.
    while(m_setlatThreadInit == true && m_shutdown == 0)
    {
@@ -1119,6 +1201,18 @@ void sysMonitor::setlatThreadExec()
          if(fd <= 0)
          {
             elevatedPrivileges ep(this);
+          
+            for(size_t cpu =0; cpu < m_coreLoads.size(); ++cpu) ///\todo this needs error checks
+            {
+               std::string cpuFile = "/sys/devices/system/cpu/cpu";
+               cpuFile += std::to_string(cpu);
+               cpuFile += "/cpufreq/scaling_governor";
+               int wfd = open( cpuFile.c_str(), O_WRONLY);
+               write(wfd,"performance",sizeof("performance"));
+               close(wfd);     
+            }
+            log<text_log>("set governor to performance", logPrio::LOG_NOTICE);
+
             fd = open("/dev/cpu_dma_latency", O_WRONLY);
             
             if(fd <=0) log<software_error>({__FILE__,__LINE__,"error opening cpu_dma_latency"});
@@ -1134,6 +1228,8 @@ void sysMonitor::setlatThreadExec()
                   log<text_log>("set latency to 0", logPrio::LOG_NOTICE);
                }
             }
+
+
          }
       }
       else
@@ -1143,6 +1239,18 @@ void sysMonitor::setlatThreadExec()
             close(fd);
             fd = 0;
             log<text_log>("restored CPU latency to default", logPrio::LOG_NOTICE);
+         
+            elevatedPrivileges ep(this);
+            for(size_t cpu =0; cpu < m_coreLoads.size(); ++cpu) ///\todo this needs error checks
+            {
+               std::string cpuFile = "/sys/devices/system/cpu/cpu";
+               cpuFile += std::to_string(cpu);
+               cpuFile += "/cpufreq/scaling_governor";
+               int wfd = open( cpuFile.c_str(), O_WRONLY);
+               write(wfd,"powersave",sizeof("powersave"));
+               close(wfd);  
+            }
+            log<text_log>("set governor to powersave", logPrio::LOG_NOTICE);
          }
       }
       

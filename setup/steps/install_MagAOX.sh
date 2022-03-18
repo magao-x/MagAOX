@@ -11,6 +11,12 @@ make install
 log_info "Building MagAOX"
 cd /opt/MagAOX/source/MagAOX
 make setup
+if [[ $MAGAOX_ROLE == vm || $MAGAOX_ROLE == ci || $MAGAOX_ROLE == TOC ]]; then
+    if ! grep 'NEED_CUDA = no' local/common.mk; then
+        echo 'NEED_CUDA = no' >> local/common.mk
+    fi
+fi
+
 make all
 make install
 

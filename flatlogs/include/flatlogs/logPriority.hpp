@@ -68,6 +68,7 @@ namespace logPrio
 ///Get the string representation of a log priority
 /** \ingroup logPrio
   */
+inline
 std::string priorityString( logPrioT & prio /**< [in] the log priority */)
 {
    switch( prio )
@@ -122,6 +123,7 @@ std::string priorityString( logPrioT & prio /**< [in] the log priority */)
   *
   * \ingroup loglevels
   */
+inline
 logPrioT logLevelFromString( const std::string & str )
 {
    std::string s = str;

@@ -54,15 +54,20 @@ yum install -y \
     which \
     sudo \
     sysstat \
+    fuse \
+    psmisc \
+    podman \
+    nethogs \
+    shadow-utils \
 ;
 
-sudo alternatives --install /usr/local/bin/cmake cmake /usr/bin/cmake3 20 \
+alternatives --install /usr/local/bin/cmake cmake /usr/bin/cmake3 20 \
     --slave /usr/local/bin/ctest ctest /usr/bin/ctest3 \
     --slave /usr/local/bin/cpack cpack /usr/bin/cpack3 \
     --slave /usr/local/bin/ccmake ccmake /usr/bin/ccmake3 \
     --family cmake
 
-sudo alternatives --install /usr/local/bin/qmake qmake /usr/bin/qmake-qt5 20
+alternatives --install /usr/local/bin/qmake qmake /usr/bin/qmake-qt5 20
 
 # Undo installing stable ZeroMQ without draft APIs
 yum remove -y zeromq-devel libzmq5 || true

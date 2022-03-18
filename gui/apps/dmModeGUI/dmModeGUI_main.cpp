@@ -3,9 +3,10 @@
 #include <QFile>
 #include <QTextStream>
 
-#include "dmModeGUI.hpp"
-#include <iostream>
-   
+#include "dmMode.hpp"
+
+#include "multiIndiManager.hpp"
+
 int main(int argc, char *argv[])
 {
    if(argc!=2)
@@ -13,30 +14,26 @@ int main(int argc, char *argv[])
       std::cerr << "Must provide exactly one argument containing the INDI device name.\n";
       return -1;
    }
-   
-   
+      
    std::string deviceName = argv[1];
    
    QApplication app(argc, argv);
 
    // set stylesheet
-   QFile file(":/dark.qss");
+   QFile file(":/magaox.qss");
    file.open(QFile::ReadOnly | QFile::Text);
    QTextStream stream(&file);
    app.setStyleSheet(stream.readAll());
    
-   multiIndiPublisher client(deviceName+"GUI", "127.0.0.1", 7624);
-
-   xqt::dmModeGUI dmm(deviceName);
-    
-   dmm.m_deviceName = deviceName;
-    
-   dmm.subscribe(&client);
+   multiIndiManager mgr(deviceName, "127.0.0.1", 7624);
+   
+   xqt::dmMode dmm(deviceName);
+   mgr.addSubscriber(&dmm); 
+   mgr.activate();
+   
    dmm.show();
-   client.activate();
+
    int rv = app.exec();
-   client.quitProcess();
-   client.deactivate();
    
    return rv;
 }

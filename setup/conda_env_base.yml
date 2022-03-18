@@ -19,9 +19,10 @@ dependencies:
   - pytest
   - psutil
   - cupy
-  - cudatoolkit=10.1
+  - cudatoolkit=11.1
   - line_profiler
   - pyfftw
+  - pyserial
   # GUIs
   - qt=5
   - qwt
@@ -45,6 +46,8 @@ dependencies:
   - pyyaml
   - imageio
   - xxhash
+  # for cacao
+  - pybind11 
 
   - pip:
       - hcipy

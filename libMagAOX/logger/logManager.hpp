@@ -19,10 +19,13 @@
 #include <mutex>
 #include <ratio>
 
+#include <mx/app/appConfigurator.hpp>
 
 #include <flatlogs/flatlogs.hpp>
 
 using namespace flatlogs;
+
+#include "../common/defaults.hpp"
 
 #include "generated/logTypes.hpp"
 #include "generated/logStdFormat.hpp"
@@ -66,13 +69,21 @@ namespace logger
   *
   * \ingroup logger
   */
-template<class logFileT>
-struct logManager : public logFileT
+template<class _parentT, class _logFileT>
+struct logManager : public _logFileT
 {
+   typedef _parentT parentT;
+   typedef _logFileT logFileT;
+   
+protected:
+   parentT * m_parent {nullptr};
+   
    ///\todo Make these protected members, with appropriate access methods
    //-->
+public:
    std::string m_configSection {"logger"}; ///<The configuration files section name.  Default is `logger`.
    
+protected:
    std::list<bufferPtrT> m_logQueue; ///< Log entries are stored here, and writen to the file by the log thread.
 
    std::thread m_logThread; ///< A separate thread for actually writing to the file.
@@ -82,19 +93,33 @@ struct logManager : public logFileT
 
    unsigned long m_writePause {MAGAOX_default_writePause}; ///< Time, in nanoseconds, to pause between successive batch writes to the file. Default is 1e9. Configure with logger.writePause.
 
+public:
    logPrioT m_logLevel {logPrio::LOG_INFO}; ///< The minimum log level to actually record.  Logs with level below this are rejected. Default is INFO. Configure with logger.logLevel.
 
+protected:
    int m_logThreadPrio {0};
 
    bool m_logThreadRunning {false};
    //<--end of todo
 
+public:
    /// Default c'tor.
    logManager();
 
    /// Destructor.
    ~logManager();
 
+   /// Set the logger parent 
+   /** The parent is used for interactive presentation of log messages
+     */
+   void parent( parentT * p /**< [in] pointer to the parent object*/);
+   
+   /// Get the logger parent
+   /**
+     * Returns a point to the parent object.
+     */ 
+   parentT * parent();
+   
    /// Set a new value of writePause
    /** Updates m_writePause with new value.
      *
@@ -225,13 +250,13 @@ struct logManager : public logFileT
 
 };
 
-template<class logFileT>
-logManager<logFileT>::logManager()
+template<class parentT, class logFileT>
+logManager<parentT, logFileT>::logManager()
 {
 }
 
-template<class logFileT>
-logManager<logFileT>::~logManager()
+template<class parentT, class logFileT>
+logManager<parentT, logFileT>::~logManager()
 {
    m_logShutdown = true;
 
@@ -242,8 +267,20 @@ logManager<logFileT>::~logManager()
 
 }
 
-template<class logFileT>
-int logManager<logFileT>::writePause( const unsigned long & wp )
+template<class parentT, class logFileT>
+void logManager<parentT, logFileT>::parent( parentT * p )
+{
+   m_parent = p;
+}
+
+template<class parentT, class logFileT>
+parentT * logManager<parentT, logFileT>::parent()
+{
+   return m_parent;
+}
+
+template<class parentT, class logFileT>
+int logManager<parentT, logFileT>::writePause( const unsigned long & wp )
 {
    if(wp == 0) return -1;
 
@@ -252,14 +289,14 @@ int logManager<logFileT>::writePause( const unsigned long & wp )
    return 0;
 }
 
-template<class logFileT>
-unsigned long logManager<logFileT>::writePause()
+template<class parentT, class logFileT>
+unsigned long logManager<parentT, logFileT>::writePause()
 {
    return m_writePause;
 }
 
-template<class logFileT>
-int logManager<logFileT>::logLevel( logPrioT newLev )
+template<class parentT, class logFileT>
+int logManager<parentT, logFileT>::logLevel( logPrioT newLev )
 {
    
 
@@ -268,14 +305,14 @@ int logManager<logFileT>::logLevel( logPrioT newLev )
    return 0;
 }
 
-template<class logFileT>
-logPrioT logManager<logFileT>::logLevel()
+template<class parentT, class logFileT>
+logPrioT logManager<parentT, logFileT>::logLevel()
 {
    return m_logLevel;
 }
 
-template<class logFileT>
-int logManager<logFileT>::logThreadPrio( int newPrio )
+template<class parentT, class logFileT>
+int logManager<parentT, logFileT>::logThreadPrio( int newPrio )
 {
    if(newPrio > 98) return -1; //clamped at 98 for safety.
    if(newPrio < 0) newPrio = 0;
@@ -284,20 +321,20 @@ int logManager<logFileT>::logThreadPrio( int newPrio )
    return 0;
 }
 
-template<class logFileT>
-int logManager<logFileT>::logThreadPrio()
+template<class parentT, class logFileT>
+int logManager<parentT, logFileT>::logThreadPrio()
 {
    return m_logThreadPrio;
 }
 
-template<class logFileT>
-bool logManager<logFileT>::logThreadRunning()
+template<class parentT, class logFileT>
+bool logManager<parentT, logFileT>::logThreadRunning()
 {
    return m_logThreadRunning;
 }
 
-template<class logFileT>
-int logManager<logFileT>::setupConfig( mx::app::appConfigurator & config )
+template<class parentT, class logFileT>
+int logManager<parentT, logFileT>::setupConfig( mx::app::appConfigurator & config )
 {
    config.add(m_configSection+".logDir","L", "logDir",mx::app::argType::Required, m_configSection, "logDir", false, "string", "The directory for log files");
    config.add(m_configSection+".logExt","", "logExt",mx::app::argType::Required, m_configSection, "logExt", false, "string", "The extension for log files");
@@ -309,8 +346,8 @@ int logManager<logFileT>::setupConfig( mx::app::appConfigurator & config )
    return 0;
 }
 
-template<class logFileT>
-int logManager<logFileT>::loadConfig( mx::app::appConfigurator & config )
+template<class parentT, class logFileT>
+int logManager<parentT, logFileT>::loadConfig( mx::app::appConfigurator & config )
 {
    //-- logDir
    std::string tmp;
@@ -351,14 +388,14 @@ int logManager<logFileT>::loadConfig( mx::app::appConfigurator & config )
    return 0;
 }
 
-template<class logFileT>
-void logManager<logFileT>::_logThreadStart( logManager * l)
+template<class parentT, class logFileT>
+void logManager<parentT, logFileT>::_logThreadStart( logManager * l)
 {
    l->logThreadExec();
 }
 
-template<class logFileT>
-int logManager<logFileT>::logThreadStart()
+template<class parentT, class logFileT>
+int logManager<parentT, logFileT>::logThreadStart()
 {
    try
    {
@@ -397,8 +434,8 @@ int logManager<logFileT>::logThreadStart()
 
 }
 
-template<class logFileT>
-void logManager<logFileT>::logThreadExec()
+template<class parentT, class logFileT>
+void logManager<parentT, logFileT>::logThreadExec()
 {
 
    m_logThreadRunning = true;
@@ -428,11 +465,15 @@ void logManager<logFileT>::logThreadExec()
                m_logThreadRunning = false;
                return;
             }
-                       
-            if( logHeader::logLevel( *it ) <= logPrio::LOG_NOTICE )
+            
+            if(m_parent)
+            {
+               m_parent->logMessage( *it );
+            }
+            else if( logHeader::logLevel( *it ) <= logPrio::LOG_NOTICE )
             {
                logStdFormat(std::cerr, *it);
-               std::cout << "\n";
+               std::cerr << "\n";
             }
             
             er = it;
@@ -456,9 +497,9 @@ void logManager<logFileT>::logThreadExec()
    m_logThreadRunning = false;
 }
 
-template<class logFileT>
+template<class parentT, class logFileT>
 template<typename logT>
-int logManager<logFileT>::createLog( bufferPtrT & logBuffer,
+int logManager<parentT, logFileT>::createLog( bufferPtrT & logBuffer,
                                      const typename logT::messageT & msg,
                                      const logPrioT & level
                                    )
@@ -470,9 +511,9 @@ int logManager<logFileT>::createLog( bufferPtrT & logBuffer,
    return logHeader::createLog<logT>(logBuffer, ts, msg, level);
 }
 
-template<class logFileT>
+template<class parentT, class logFileT>
 template<typename logT>
-int logManager<logFileT>::createLog( bufferPtrT & logBuffer,
+int logManager<parentT, logFileT>::createLog( bufferPtrT & logBuffer,
                                      const timespecX & ts,
                                      const typename logT::messageT & msg,
                                      const logPrioT & level
@@ -481,9 +522,9 @@ int logManager<logFileT>::createLog( bufferPtrT & logBuffer,
    return logHeader::createLog<logT>(logBuffer, ts, msg, level);
 }
 
-template<class logFileT>
+template<class parentT, class logFileT>
 template<typename logT>
-void logManager<logFileT>::log( const typename logT::messageT & msg,
+void logManager<parentT, logFileT>::log( const typename logT::messageT & msg,
                                 logPrioT level
                               )
 {
@@ -503,9 +544,9 @@ void logManager<logFileT>::log( const typename logT::messageT & msg,
 
 }
 
-template<class logFileT>
+template<class parentT, class logFileT>
 template<typename logT>
-void logManager<logFileT>::log( timespecX & ts,
+void logManager<parentT, logFileT>::log( timespecX & ts,
                                 const typename logT::messageT & msg,
                                 logPrioT level
                               )
@@ -525,22 +566,25 @@ void logManager<logFileT>::log( timespecX & ts,
 
 }
 
-template<class logFileT>
+template<class parentT, class logFileT>
 template<typename logT>
-void logManager<logFileT>::log( logPrioT level )
+void logManager<parentT, logFileT>::log( logPrioT level )
 {
    log<logT>( emptyMessage(), level );
 }
 
-template<class logFileT>
+template<class parentT, class logFileT>
 template<typename logT>
-void logManager<logFileT>::log( timespecX & ts,
+void logManager<parentT, logFileT>::log( timespecX & ts,
                                 logPrioT level 
                               )
 {
    log<logT>( ts, emptyMessage(), level );
 }
 
+//class logFileRaw;
+
+//extern template struct logManager<logFileRaw>;
 
 } //namespace logger
 } //namespace MagAOX

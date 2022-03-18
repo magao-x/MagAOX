@@ -11,7 +11,7 @@
 
 #include <iostream>
 
-#include <mx/timeUtils.hpp>
+#include <mx/sys/timeUtils.hpp>
 
 #include "../../libMagAOX/libMagAOX.hpp" //Note this is included on command line to trigger pch
 #include "../../magaox_git_version.h"
@@ -66,7 +66,7 @@ protected:
    int m_localPort {0}; ///< The local port to forward from
    int m_remotePort {0}; ///< The remote port to forward to
    int m_monitorPort {0}; ///< The monitor port
-   
+   bool m_compress {false}; ///< Control compression on this tunnel.  True is on, false is off.
    ///@}
 
    int m_tunnelPID; ///< The PID of the autossh process
@@ -254,8 +254,9 @@ int sshDigger::loadConfigImpl( mx::app::appConfigurator & _config )
 
    _config.configUnused( m_monitorPort, mx::app::iniFile::makeKey(m_configName, "monitorPort" ) );
    
+   _config.configUnused( m_compress, mx::app::iniFile::makeKey(m_configName, "compress" ) );
    
-   //Here we go through and check access each unused config just to avoid the critical error for unrecognized configs.
+   //Here we go through and access each unused config just to avoid the critical error for unrecognized configs.
    for(size_t i=0;i<sections.size(); ++i)
    {
       if( sections[i] == "") continue; //this is an error
@@ -280,6 +281,8 @@ int sshDigger::loadConfigImpl( mx::app::appConfigurator & _config )
       }
       int mp = 0;
       _config.configUnused( mp, mx::app::iniFile::makeKey(sections[i], "monitorPort" ) );
+      bool cmp = false;
+      _config.configUnused( cmp, mx::app::iniFile::makeKey(sections[i], "compress" ) );
    }
    
    return 0;
@@ -299,7 +302,9 @@ std::string sshDigger::tunnelSpec()
 
 void sshDigger::genArgsV( std::vector<std::string> & argsV )
 {
-   argsV = {"autossh", "-M" + std::to_string(m_monitorPort), "-nNTL", tunnelSpec(), m_remoteHost};
+   std::string comp = "";
+   if(m_compress) comp = "-C";
+   argsV = {"autossh", "-M" + std::to_string(m_monitorPort), comp, "-nNTL", tunnelSpec(), m_remoteHost};
 }
 
 void sshDigger::genEnvp( std::vector<std::string> & envp )
@@ -361,6 +366,7 @@ int sshDigger::execTunnel()
 
       execvpe("autossh", (char * const*) args, (char * const*) envp);
 
+      std::cerr << "returned\n";
       log<software_error>({__FILE__, __LINE__, errno, std::string("execvp returned: ") + strerror(errno)});
 
       delete[] args;
@@ -560,7 +566,7 @@ void sshDigger::autosshLogThreadExec()
       {
          log<software_error>({__FILE__, __LINE__, errno});
          log<software_error>({__FILE__, __LINE__, "unable to open auto ssh log fifo"});
-         mx::sleep(1);
+         mx::sys::sleep(1);
       }
    }
 

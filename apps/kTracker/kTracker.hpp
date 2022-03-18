@@ -11,7 +11,7 @@
 #include "../../libMagAOX/libMagAOX.hpp" //Note this is included on command line to trigger pch
 #include "../../magaox_git_version.h"
 
-#include <mx/gslInterpolation.hpp>
+#include <mx/math/gslInterpolation.hpp>
 #include <mx/ioutils/readColumns.hpp>
 
 /** \defgroup kTracker
@@ -189,7 +189,7 @@ int kTracker::appLogic()
    
    static double lastupdate = 0;
    
-   if(m_tracking && mx::get_curr_time() - lastupdate > m_updateInterval)
+   if(m_tracking && mx::sys::get_curr_time() - lastupdate > m_updateInterval)
    {
       float k = m_zero + m_sign*0.5*m_zd;
       
@@ -198,7 +198,7 @@ int kTracker::appLogic()
       m_indiP_kpos["target"] = k;
       sendNewProperty (m_indiP_kpos); 
       
-      lastupdate = mx::get_curr_time();
+      lastupdate = mx::sys::get_curr_time();
       
       
    }

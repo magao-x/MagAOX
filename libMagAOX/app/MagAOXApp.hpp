@@ -11,21 +11,23 @@
 #ifndef app_MagAOXApp_hpp
 #define app_MagAOXApp_hpp
 
-
 #include <signal.h>
 #include <sys/stat.h>
+#include <sys/syscall.h>
 
 #include <cstdlib>
 #include <fstream>
+#include <sstream>
+#include <thread>
+#include <mutex>
 
 #include <unordered_map>
 
-#include <boost/filesystem.hpp>
-
 #include <mx/mxlib.hpp>
 #include <mx/app/application.hpp>
-#include <mx/environment.hpp>
-
+#include <mx/sys/environment.hpp>
+#include <mx/sys/timeUtils.hpp>
+#include <mx/ioutils/fileUtils.hpp>
 
 
 #include "../common/environment.hpp"
@@ -75,7 +77,7 @@ class MagAOXApp : public application
 public:
 
    ///The log manager type.
-   typedef logger::logManager<logFileRaw> logManagerT;
+   typedef logger::logManager<MagAOXApp<_useINDI>, logFileRaw> logManagerT;
 
 protected:
 
@@ -171,6 +173,7 @@ public:
    
    /// The execute method implementing the standard main loop.  Should not normally be overridden.
    /** Performs final startup steps.  That is:
+     * - Verifies correct effective user-id by comparison to logs directory.
      * - PID locking lockPID()
      * - log thread startup by logThreadStart()
      * - signal handling installation by setSigTermHandler()
@@ -258,16 +261,23 @@ public:
    template<typename logT, int retval=0>
    static int log( logPrioT level = logPrio::LOG_DEFAULT /**< [in] [optional] the log level.  The default is used if not specified.*/);
 
+   /// Handle a log message from the logging system
+   /** This is a callback from the logManager, and is called when the log thread is processing log entries.
+     * 
+     * Decides whether to display to stderr and whether to send via INDI.
+     */
+   void logMessage( bufferPtrT & b );
+   
 private:
    /// Callback for config system logging.
    /** Called by appConfigurator each time a value is set using the config() operator.
      * You never need to call this directly.
      */
    static void configLog( const std::string & name,  ///< [in] The name of the config value
-                          const int & code,          ///< [in] numeric code specifying the type
-                          const std::string & value, ///< [in] the value read by the config system
-                          const std::string & source ///< [in] the source of the value.
-                        );
+                   const int & code,          ///< [in] numeric code specifying the type
+                   const std::string & value, ///< [in] the value read by the config system
+                   const std::string & source ///< [in] the source of the value.
+                 );
 
    ///@} -- logging
 
@@ -326,7 +336,7 @@ protected:
          {
             if(m_elevated) return;
           
-            m_app->euidCalled();
+            m_app->setEuidCalled();
             m_elevated = true;
          }
          
@@ -334,7 +344,7 @@ protected:
          {
             if(!m_elevated) return;
             
-            m_app->euidReal();
+            m_app->setEuidReal();
             m_elevated = false;
          }
          
@@ -344,52 +354,29 @@ protected:
          }
    };
    
+private:
    /// Set the effective user ID to the called value, i.e. the highest possible.
    /** If setuid is set on the file, this will be super-user privileges.
      *
      * Reference: http://pubs.opengroup.org/onlinepubs/009695399/functions/seteuid.html
      *
-     * \todo make this private, and change name to enforce use of the above class.
-     * 
      * \returns 0 on success
      * \returns -1 on error from setuid().
      */
-   int euidCalled();
+   int setEuidCalled();
 
    /// Set the effective user ID to the real value, i.e. the file owner.
    /**
      * Reference: http://pubs.opengroup.org/onlinepubs/009695399/functions/seteuid.html
      *
-     * \todo make this private, and change name to enforce use of the above class.
-     * 
      * \returns 0 on success
      * \returns -1 on error from setuid().
      */
-   int euidReal();
-
+   int setEuidReal();
 
    ///@} -- Privilege Management
 
-   /** \name RT Priority
-     * @{
-     */
-private:
-   int m_RTPriority {0}; ///< The real-time scheduling priority.  Default is 0.
-
 protected:
-   /// Set the real-time priority of this process.
-   /** This method attempts to set euid to 'called' with \ref euidCalled.  It then sets the priority
-     * but will fail if it does not have sufficient privileges.  Regardless, it will then restore
-     * privileges with \ref euidReal.
-     *
-     * If prio < 0, it is changed to 0.  If prio is > 99, then it is changed to 99.
-     *
-     * \returns 0 on success.
-     * \returns -1 on an error.  In this case priority will not have been changed.
-     */
-   int RTPriority( int prio /**< [in] the desired new RT priority */ );
-
-   ///@} -- RT Priority
 
    /** \name PID Locking
      *
@@ -431,13 +418,15 @@ public:
    /// Start a thread, using this class's privileges to set priority, etc.
    /** 
      * The thread initialization synchronizer `bool` is set to true at the beginning
-     * of this function, then is set to false once all initialization is complete.  
-     *
+     * of this function, then is set to false once all initialization is complete.  The
+     * thread exec function should wait until this is false before doing _anything_ except
+     * setting the pid.  This is to avoid privilege escalation bugs.
+     * 
      * The interface of the thread start function is:
      \code
      static void impl::myThreadStart( impl * o )
      {
-        o->myThreadExec(); //A member function which actually exectues the thread
+        o->myThreadExec(); //A member function which actually executes the thread
      }
      \endcode
      * where `impl` is the derived class, and `mThreadStart` and `myThreadExec` are members
@@ -449,7 +438,10 @@ public:
    template<class thisPtr, class Function>
    int threadStart( std::thread & thrd,           ///< [out] The thread object to start executing
                     bool & thrdInit,              ///< [in/out] The thread initilization synchronizer.  
+                    pid_t & tpid,                 ///< [in/out] The thread pid to be filled in by thrdStart immediately upon call
+                    pcf::IndiProperty & thProp,   ///< [in/out] The INDI property to publish the thread details
                     int thrdPrio,                 ///< [in] The r/t priority to set for this thread
+                    const std::string & cpuset,   ///< [in] the cpuset to place this thread on.  Ignored if "".
                     const std::string & thrdName, ///< [in] The name of the thread (just for logging)
                     thisPtr * thrdThis,           ///< [in] The `this` pointer to pass to the thread starter function
                     Function&& thrdStart          ///< [in] The thread starting function, a static function taking a `this` pointer as argument.
@@ -464,6 +456,10 @@ public:
 private:
    stateCodes::stateCodeT m_state {stateCodes::UNINITIALIZED}; ///< The application's state.  Never ever set this directly, use state(const stateCodeT & s).
 
+   bool m_stateAlert {false}; //Flag to control whether the FSM is in an alert state.  Once set, only user acknowledgement can change this.
+   
+   bool m_gitAlert {false}; //Flag set if there is a git modified warning to alert on.
+   
    int m_stateLogged {0} ;///< Counter and flag for use to log errors just once.  Never ever access directly, use stateLogged().
 
 public:
@@ -473,11 +469,14 @@ public:
    stateCodes::stateCodeT state();
 
    /// Set the current state code
-   /** If no change, returns immediately with no actions.
-     *
+    /*
      * If it is a change, the state change is logged.  Also resets m_stateLogged to 0.
+     * 
+     * Will also update INDI if there is a change.
      */
-   void state(const stateCodes::stateCodeT & s /**< [in] The new application state */);
+   void state( const stateCodes::stateCodeT & s, ///< [in] The new application state 
+               bool stateAlert = false ///< [in] [optional] flag to set the alert state of the FSM property.
+             );
 
    /// Updates and returns the value of m_stateLogged.  Will be 0 on first call after a state change, \>0 afterwards.
    /** This method exists to facilitate logging the reason for a state change once, but not
@@ -500,6 +499,14 @@ public:
 
    ///@} --Application State
 
+private:
+   
+   /// Clear the FSM alert state.
+   /** This can only be done from within this class, and this
+     * should only be possible via user action via INDI.
+     */ 
+   int clearFSMAlert();
+   
    /** \name INDI Interface
      *
      * For reference: "Get" and "New" refer to properties we own. "Set" refers to properties owned by others.
@@ -901,6 +908,25 @@ protected:
    ///indi Property to report the application state.
    pcf::IndiProperty m_indiP_state;
 
+   ///indi Property to clear an FSM alert.
+   pcf::IndiProperty m_indiP_clearFSMAlert;
+   
+   /// The static callback function to be registered for requesting to clear the FSM alert
+   /**
+     * \returns 0 on success.
+     * \returns -1 on error.
+     */
+   static int st_newCallBack_clearFSMAlert( void * app, ///< [in] a pointer to this, will be static_cast-ed to MagAOXApp.
+                                            const pcf::IndiProperty &ipRecv ///< [in] the INDI property sent with the the new property request.
+                                          );
+
+   /// The callback called by the static version, to actually process the FSM Alert Clear request.
+   /**
+     * \returns 0 on success.
+     * \returns -1 on error.
+     */
+   int newCallBack_clearFSMAlert( const pcf::IndiProperty &ipRecv /**< [in] the INDI property sent with the the new property request.*/);
+   
    ///@} --INDI Interface
 
    /** \name Power Management
@@ -1038,25 +1064,36 @@ MagAOXApp<_useINDI>::MagAOXApp( const std::string & git_sha1,
       std::cerr << "Attempt to instantiate 2nd MagAOXApp.  Exiting immediately.\n";
       exit(-1);
    }
-
+   
    m_self = this;
 
+   //Get the uids of this process.
+   getresuid(&m_euidReal, &m_euidCalled, &m_suid);
+   setEuidReal(); //immediately step down to unpriveleged uid.
+
+   m_log.parent(this);
+   
    //Set up config logging
    config.m_sources = true;
    config.configLog = configLog;
 
    //We log the current GIT status.
    logPrioT gl = logPrio::LOG_INFO;
-   if(git_modified) gl = logPrio::LOG_WARNING;
+   if(git_modified) 
+   {
+      gl = logPrio::LOG_WARNING;
+      m_gitAlert = true;
+   }
    log<git_state>(git_state::messageT("MagAOX", git_sha1, git_modified), gl);
 
    gl = logPrio::LOG_INFO;
-   if(MXLIB_UNCOMP_REPO_MODIFIED) gl = logPrio::LOG_WARNING;
+   if(MXLIB_UNCOMP_REPO_MODIFIED) 
+   {
+      gl = logPrio::LOG_WARNING;
+      m_gitAlert = true;
+   }
+   
    log<git_state>(git_state::messageT("mxlib", MXLIB_UNCOMP_CURRENT_SHA1, MXLIB_UNCOMP_REPO_MODIFIED), gl);
-
-   //Get the uids of this process.
-   getresuid(&m_euidReal, &m_euidCalled, &m_suid);
-   euidReal(); //immediately step down to unpriveleged uid.
 
 }
 
@@ -1064,6 +1101,7 @@ template<bool _useINDI>
 MagAOXApp<_useINDI>::~MagAOXApp() noexcept(true)
 {
    if(m_indiDriver) delete m_indiDriver;
+   m_log.parent(nullptr);
 
    MagAOXApp<_useINDI>::m_self = nullptr;
 }
@@ -1081,7 +1119,7 @@ void MagAOXApp<_useINDI>::setDefaults( int argc,
 {
    std::string tmpstr;
 
-   tmpstr = mx::getEnv(MAGAOX_env_path);
+   tmpstr = mx::sys::getEnv(MAGAOX_env_path);
    if(tmpstr != "")
    {
       MagAOXPath = tmpstr;
@@ -1092,16 +1130,16 @@ void MagAOXApp<_useINDI>::setDefaults( int argc,
    }
 
    //Set the config path relative to MagAOXPath
-   tmpstr = mx::getEnv(MAGAOX_env_config);
+   tmpstr = mx::sys::getEnv(MAGAOX_env_config);
    if(tmpstr == "")
    {
       tmpstr = MAGAOX_configRelPath;
    }
    m_configDir = MagAOXPath + "/" + tmpstr;
-   configPathGlobal = m_configDir + "/magaox.conf";
+   m_configPathGlobal = m_configDir + "/magaox.conf";
 
    //Set the calib path relative to MagAOXPath
-   tmpstr = mx::getEnv(MAGAOX_env_calib);
+   tmpstr = mx::sys::getEnv(MAGAOX_env_calib);
    if(tmpstr == "")
    {
       tmpstr = MAGAOX_calibRelPath;
@@ -1138,19 +1176,20 @@ void MagAOXApp<_useINDI>::setDefaults( int argc,
 
    if(m_configName == "")
    {
-      boost::filesystem::path p(invokedName);
-      m_configName = p.stem().string();
+      m_configName = mx::ioutils::pathStem(invokedName);
       log<text_log>("Application name (-n --name) not set.  Using argv[0].");
    }
 
    //We use mx::application's configPathLocal for this component's config file
-   configPathLocal = m_configDir + "/" + m_configName + ".conf";
+   m_configPathLocal = m_configDir + "/" + m_configName + ".conf";
 
    //Now we can setup common INDI properties
    REG_INDI_NEWPROP_NOCB(m_indiP_state, "fsm", pcf::IndiProperty::Text);
    m_indiP_state.add (pcf::IndiElement("state"));
 
-
+   createStandardIndiRequestSw( m_indiP_clearFSMAlert, "fsm_clear_alert", "Clear FSM Alert", "FSM");                                                     
+   registerIndiPropertyNew(m_indiP_clearFSMAlert, st_newCallBack_clearFSMAlert);
+   
    return;
 
 }
@@ -1160,8 +1199,9 @@ void MagAOXApp<_useINDI>::setupBasicConfig() //virtual
 {
    //App stuff
    config.add("loopPause", "p", "loopPause", argType::Required, "", "loopPause", false, "unsigned long", "The main loop pause time in ns");
-   config.add("RTPriority", "P", "RTPriority", argType::Required, "", "RTPriority", false, "unsigned", "The real-time priority (0-99)");
 
+   config.add("ignore_git", "", "ignore-git", argType::True, "", "", false, "bool", "set to true to ignore git status");
+   
    //Logger Stuff
    m_log.setupConfig(config);
 
@@ -1186,20 +1226,20 @@ void MagAOXApp<_useINDI>::setupBasicConfig() //virtual
 template<bool _useINDI>
 void MagAOXApp<_useINDI>::loadBasicConfig() //virtual
 {
+   bool ig {false};
+   config(ig, "ignore_git");
+   
+   if(!ig && m_gitAlert)
+   {
+      m_stateAlert = true;
+   }
+   
    //---------- Setup the logger ----------//
    m_log.logName(m_configName);
    m_log.loadConfig(config);
 
    //--------- Loop Pause Time --------//
    config(m_loopPause, "loopPause");
-
-   //--------- RT Priority ------------//
-   int prio = m_RTPriority;
-   config(prio, "RTPriority");
-   if(prio != m_RTPriority)
-   {
-      RTPriority(prio);
-   }
 
    //--------Power Management --------//
    if( m_powerMgtEnabled)
@@ -1275,6 +1315,22 @@ template<bool _useINDI>
 int MagAOXApp<_useINDI>::execute() //virtual
 {
    //----------------------------------------//
+   //        Check user
+   //----------------------------------------//
+   struct stat logstat;
+
+   if( stat(m_log.logPath().c_str(), &logstat) < 0)
+   {
+      return log<text_log,-1>({"Can not stat the log path."}, logPrio::LOG_CRITICAL);
+   }
+   
+   if( logstat.st_uid != geteuid() )
+   {
+      return log<text_log,-1>({"You are running this app as the wrong user."}, logPrio::LOG_CRITICAL);
+   }
+   
+   
+   //----------------------------------------//
    //        Get the PID Lock
    //----------------------------------------//
    if( lockPID() < 0 )
@@ -1291,20 +1347,19 @@ int MagAOXApp<_useINDI>::execute() //virtual
    m_log.logThreadStart();
 
    //Give up to 2 secs to make sure log thread has time to get started and try to open a file.
-   for(int w=0;w<4;++w)
+   int w = 0;
+   while(m_log.logThreadRunning() == false && w < 20)
    {
-      //Sleep for 500 msec
-      std::this_thread::sleep_for( std::chrono::duration<unsigned long, std::nano>(500000));
-
-      //Verify that log thread is still running.
-      if(m_log.logThreadRunning() == true) break;
+      //Sleep for 100 msec
+      std::this_thread::sleep_for( std::chrono::duration<unsigned long, std::nano>(100000000));
+      ++w;
    }
-
+   
    if(m_log.logThreadRunning() == false)
    {
       //We don't log this, because it won't be logged anyway.
       std::cerr << "\nCRITICAL: log thread not running.  Exiting.\n\n";
-        m_shutdown = 1;
+      m_shutdown = 1;
    }
 
    //----------------------------------------//
@@ -1330,12 +1385,12 @@ int MagAOXApp<_useINDI>::execute() //virtual
          state(stateCodes::FAILURE);
          m_shutdown = 1;
       }
-      
    }
 
    //We have to wait for power status to become available
    if(m_powerMgtEnabled && m_shutdown == 0)
    {
+      int nwaits = 0;
       while(m_powerState < 0 && !m_shutdown)
       {
          sleep(1);
@@ -1343,7 +1398,15 @@ int MagAOXApp<_useINDI>::execute() //virtual
          {
             if(!stateLogged()) log<text_log>("waiting for power state");
          }
+         
+         ++nwaits;
+         if(nwaits == 30)
+         {
+            log<text_log>("stalled waiting for power state", logPrio::LOG_ERROR);
+            state(stateCodes::ERROR);
+         }
       }
+      
       if(m_powerState > 0) 
       {
          state(stateCodes::POWERON);
@@ -1465,7 +1528,7 @@ int MagAOXApp<_useINDI>::log( const typename logT::messageT & msg,
                               logPrioT level
                             )
 {
-   m_log.log<logT>(msg, level);
+   m_log.template log<logT>(msg, level);
    return retval;
 }
 
@@ -1473,8 +1536,44 @@ template<bool _useINDI>
 template<typename logT, int retval>
 int MagAOXApp<_useINDI>::log( logPrioT level)
 {
-   m_log.log<logT>(level);
+   m_log.template log<logT>(level);
    return retval;
+}
+
+template<bool _useINDI>
+void MagAOXApp<_useINDI>::logMessage( bufferPtrT & b )
+{
+   if( logHeader::logLevel( b ) <= logPrio::LOG_NOTICE )
+   {
+      logStdFormat(std::cerr, b);
+      std::cerr << "\n";
+   }
+   
+   if( logHeader::logLevel( b ) < logPrio::LOG_ERROR )
+   {
+      state(m_state, true); //For anything worse than error, we set the FSM state to alert
+   }
+   
+   if(_useINDI && m_indiDriver)
+   {
+      pcf::IndiProperty msg;
+      msg.setDevice(m_configName);
+      
+      std::stringstream logstdf;
+      logMinStdFormat(logstdf, b);
+      
+      msg.setMessage(logstdf.str());
+      
+      //Set the INDI prop timespec to match the log entry
+      timespecX ts = logHeader::timespec(b);
+      timeval tv;
+      tv.tv_sec = ts.time_s;
+      tv.tv_usec = (long int) ( ((double) ts.time_ns)/1e3 );
+      
+      msg.setTimeStamp(pcf::TimeStamp(tv));
+      
+      m_indiDriver->sendMessage(msg);
+   }
 }
 
 template<bool _useINDI>
@@ -1484,7 +1583,7 @@ void MagAOXApp<_useINDI>::configLog( const std::string & name,
                                      const std::string & source
                                    )
 {
-   m_log.log<config_log>({name, code, value, source});
+   m_log.template log<config_log>({name, code, value, source});
 }
 
 template<bool _useINDI>
@@ -1581,17 +1680,11 @@ void MagAOXApp<_useINDI>::handlerSigTerm( int signum,
 void sigUsr1Handler( int signum,
                      siginfo_t * siginf,
                      void *ucont 
-                   )
-{
-   static_cast<void>(signum);
-   static_cast<void>(siginf);
-   static_cast<void>(ucont);
-   
-   return;
-}
+                   );
+
 
 template<bool _useINDI>
-int MagAOXApp<_useINDI>::euidCalled()
+int MagAOXApp<_useINDI>::setEuidCalled()
 {
    errno = 0;
    if(sys::th_seteuid(m_euidCalled) < 0)
@@ -1610,7 +1703,7 @@ int MagAOXApp<_useINDI>::euidCalled()
 }
 
 template<bool _useINDI>
-int MagAOXApp<_useINDI>::euidReal()
+int MagAOXApp<_useINDI>::setEuidReal()
 {
    errno = 0;
    if(sys::th_seteuid(m_euidReal) < 0)
@@ -1630,55 +1723,6 @@ int MagAOXApp<_useINDI>::euidReal()
 }
 
 template<bool _useINDI>
-int MagAOXApp<_useINDI>::RTPriority( int prio)
-{
-   struct sched_param schedpar;
-
-   if(prio < 0) prio = 0;
-   if(prio > 99) prio = 99;
-   schedpar.sched_priority = prio;
-
-   //Get the maximum privileges available
-   if( euidCalled() < 0 )
-   {
-      log<software_error>({__FILE__, __LINE__, 0, 0,"Seeting euid to called failed."});
-      return -1;
-   }
-
-
-   //We set return value based on result from sched_setscheduler
-   //But we make sure to restore privileges no matter what happens.
-   errno = 0;
-   int rv = 0;
-   if(prio > 0) rv = sched_setscheduler(0, MAGAOX_RT_SCHED_POLICY, &schedpar);
-   else rv = sched_setscheduler(0, SCHED_OTHER, &schedpar);
-
-   if(rv < 0)
-   {
-      std::stringstream logss;
-      logss << "Setting scheduler priority to " << prio <<" failed.  Errno says: " << strerror(errno) << ".  ";
-      log<software_error>({__FILE__, __LINE__, errno, 0, logss.str()});
-   }
-   else
-   {
-      m_RTPriority = prio;
-
-      std::stringstream logss;
-      logss << "Scheduler priority (RT_priority) set to " << m_RTPriority << ".";
-      log<text_log>(logss.str());
-   }
-
-   //Go back to regular privileges
-   if( euidReal() < 0 )
-   {
-      log<software_error>({__FILE__, __LINE__, 0, 0, "Setting euid to real failed."});
-      return -1;
-   }
-
-   return rv;
-}
-
-template<bool _useINDI>
 int MagAOXApp<_useINDI>::lockPID()
 {
    m_pid = getpid();
@@ -1686,11 +1730,7 @@ int MagAOXApp<_useINDI>::lockPID()
    std::string statusDir = sysPath;
 
    //Get the maximum privileges available
-   if( euidCalled() < 0 )
-   {
-      log<software_error>({__FILE__, __LINE__, 0, 0, "Seeting euid to called failed."});
-      return -1;
-   }
+   elevatedPrivileges elPriv(this);
 
    // Create statusDir root with read/write/search permissions for owner and group, and with read/search permissions for others.
    errno = 0;
@@ -1701,10 +1741,6 @@ int MagAOXApp<_useINDI>::lockPID()
          std::stringstream logss;
          logss << "Failed to create root of statusDir (" << statusDir << ").  Errno says: " << strerror(errno);
          log<software_critical>({__FILE__, __LINE__, errno, 0, logss.str()});
-
-         //Go back to regular privileges
-         euidReal();
-
          return -1;
       }
 
@@ -1724,10 +1760,6 @@ int MagAOXApp<_useINDI>::lockPID()
          std::stringstream logss;
          logss << "Failed to create statusDir (" << statusDir << ").  Errno says: " << strerror(errno);
          log<software_critical>({__FILE__, __LINE__, errno, 0, logss.str()});
-
-         //Go back to regular privileges
-         euidReal();
-
          return -1;
       }
 
@@ -1759,7 +1791,6 @@ int MagAOXApp<_useINDI>::lockPID()
          catch( ... )
          {
             log<software_critical>({__FILE__, __LINE__, 0, 0, "exception caught testing /proc/pid"});
-            euidReal();
             return -1;
          }
 
@@ -1783,9 +1814,6 @@ int MagAOXApp<_useINDI>::lockPID()
 
             log<text_log>(logss.str(), logPrio::LOG_CRITICAL);
 
-            //Go back to regular privileges
-            euidReal();
-
             return -1;
          }
       }
@@ -1803,7 +1831,7 @@ int MagAOXApp<_useINDI>::lockPID()
    if(!pidOut.good())
    {
       log<software_critical>({__FILE__, __LINE__, errno, 0, "could not open pid file for writing."});
-      euidReal();
+      //euidReal();
       return -1;
    }
 
@@ -1816,11 +1844,11 @@ int MagAOXApp<_useINDI>::lockPID()
    log<text_log>(logss.str());
 
    //Go back to regular privileges
-   if( euidReal() < 0 )
+   /*if( euidReal() < 0 )
    {
       log<software_error>({__FILE__, __LINE__, 0, 0, "Seeting euid to real failed."});
       return -1;
-   }
+   }*/
 
    return 0;
 }
@@ -1828,24 +1856,16 @@ int MagAOXApp<_useINDI>::lockPID()
 template<bool _useINDI>
 int MagAOXApp<_useINDI>::unlockPID()
 {
-   //Get the maximum privileges available
-   if( euidCalled() < 0 )
-   {
-      log<software_error>({__FILE__, __LINE__, 0, 0, "Seeting euid to called failed."});
-      return -1;
-   }
-   
-   if( ::remove(pidFileName.c_str()) < 0)
-   {
-      log<software_error>({__FILE__, __LINE__, errno, 0, std::string("Failed to remove PID file: ") + strerror(errno)});
-      return -1;
-   }
+   {//scope for elPriv
 
-   //Go back to regular privileges
-   if( euidReal() < 0 )
-   {
-      log<software_error>({__FILE__, __LINE__, 0, 0, "Seeting euid to real failed."});
-      return -1;
+      //Get the maximum privileges available
+      elevatedPrivileges elPriv(this);
+   
+      if( ::remove(pidFileName.c_str()) < 0)
+      {
+         log<software_error>({__FILE__, __LINE__, errno, 0, std::string("Failed to remove PID file: ") + strerror(errno)});
+         return -1;
+      }
    }
    
    std::stringstream logss;
@@ -1859,13 +1879,18 @@ template<bool _useINDI>
 template<class thisPtr, class Function>
 int MagAOXApp<_useINDI>::threadStart( std::thread & thrd,
                                       bool & thrdInit,
+                                      pid_t & tpid,
+                                      pcf::IndiProperty & thProp,
                                       int thrdPrio,
+                                      const std::string & cpuset,
                                       const std::string & thrdName,
                                       thisPtr * thrdThis,
                                       Function&& thrdStart
                                     )
 {
    thrdInit = true;
+   
+   tpid = 0;
    
    try
    {
@@ -1896,35 +1921,91 @@ int MagAOXApp<_useINDI>::threadStart( std::thread & thrd,
    sched_param sp;
    sp.sched_priority = thrdPrio;
 
-   //Get the maximum privileges available
-   if( euidCalled() < 0 )
-   {
-      log<software_error>({__FILE__, __LINE__, "Setting euid to called failed for " + thrdName});
-      return -1;
-   }
-   
-   //We set return value based on result from sched_setscheduler
-   //But we make sure to restore privileges no matter what happens.
-   errno = 0;
    int rv = 0;
-   if(thrdPrio > 0) rv = pthread_setschedparam(thrd.native_handle(), MAGAOX_RT_SCHED_POLICY, &sp);
-   else rv = pthread_setschedparam(thrd.native_handle(), SCHED_OTHER, &sp);
+
+   {//scope for elPriv
+      //Get the maximum privileges available
+      elevatedPrivileges elPriv(this);
    
-   //Go back to regular privileges
-   if( euidReal() < 0 )
-   {
-      log<software_error>({__FILE__, __LINE__, "Setting euid to real failed for " + thrdName});
+      //We set return value based on result from sched_setscheduler
+      //But we make sure to restore privileges no matter what happens.
+      errno = 0;
+      if(thrdPrio > 0) rv = pthread_setschedparam(thrd.native_handle(), MAGAOX_RT_SCHED_POLICY, &sp);
+      else rv = pthread_setschedparam(thrd.native_handle(), SCHED_OTHER, &sp);
    }
    
    if(rv < 0)
    {
-      return log<software_error,-1>({__FILE__, __LINE__, errno, "Setting " + thrdName + " thread scheduler priority to " + std::to_string(thrdPrio) + " failed."});
+      log<software_error>({__FILE__, __LINE__, errno, "Setting " + thrdName + " thread scheduler priority to " + std::to_string(thrdPrio) + " failed."});
    }
    else
    {
-      thrdInit = false;
-      return log<text_log,0>(thrdName + " thread scheduler priority set to " + std::to_string(thrdPrio));
+      log<text_log>(thrdName + " thread scheduler priority set to " + std::to_string(thrdPrio));
    }
+      
+   // Wait for tpid to be filled in, but only for one total second.
+   if(tpid == 0) 
+   {
+      for(int i=0;i<10;++i)
+      {
+         mx::sys::milliSleep(100);
+         if(tpid!=0) break;
+      }
+   }
+   
+   if(tpid == 0)
+   {
+      return log<software_error,-1>({__FILE__, __LINE__, errno, "tpid for " + thrdName + " not set."});
+   }
+   else
+   {
+      log<text_log>(thrdName + " thread pid is " + std::to_string(tpid));
+      
+      if(_useINDI)
+      {
+         thProp = pcf::IndiProperty(pcf::IndiProperty::Number);
+         thProp.setDevice(configName());
+         thProp.setName(std::string("th-") + thrdName);
+         thProp.setPerm(pcf::IndiProperty::ReadOnly); 
+         thProp.setState(pcf::IndiProperty::Idle);
+         thProp.add(pcf::IndiElement("pid"));
+         thProp["pid"] = tpid;
+         thProp.add(pcf::IndiElement("prio"));
+         thProp["prio"] = thrdPrio;
+         registerIndiPropertyReadOnly(thProp);
+      }
+
+      if(cpuset != "")
+      {
+         elevatedPrivileges ep(this);
+         std::string cpuFile = "/dev/cpuset/";
+         cpuFile += cpuset;
+         cpuFile += "/tasks";
+         int wfd = open( cpuFile.c_str(), O_WRONLY);
+         if(wfd < 0)
+         {
+            return log<software_error,-1>({__FILE__, __LINE__, errno, "error from open"});
+         }
+
+         char pids[16];
+         snprintf(pids, sizeof(pids), "%d", tpid);
+
+         int w = write(wfd, pids,strlen(pids));
+         if(w != (int) strlen(pids))
+         {
+            return log<software_error,-1>({__FILE__, __LINE__, errno, "error on write"});
+         }
+
+         close(wfd);  
+      
+         log<text_log>("moved " + thrdName + " to cpuset " + cpuset, logPrio::LOG_NOTICE);
+      }
+   }
+   
+   thrdInit = false;
+
+   return 0; 
+   
 }
 
 template<bool _useINDI>
@@ -1934,9 +2015,11 @@ stateCodes::stateCodeT MagAOXApp<_useINDI>::state()
 }
 
 template<bool _useINDI>
-void MagAOXApp<_useINDI>::state(const stateCodes::stateCodeT & s)
+void MagAOXApp<_useINDI>::state( const stateCodes::stateCodeT & s,
+                                 bool stateAlert
+                               )
 {
-   //Only do anything if it's a change
+   //Only log anything if it's a change
    if(m_state != s)
    {
       logPrioT lvl = logPrio::LOG_INFO;
@@ -1948,6 +2031,13 @@ void MagAOXApp<_useINDI>::state(const stateCodes::stateCodeT & s)
       m_state = s;
       m_stateLogged = 0;
    }
+
+   if(m_stateAlert != stateAlert && stateAlert == true)
+   {
+      m_stateAlert = stateAlert;
+      log<text_log>("FSM alert set", logPrio::LOG_WARNING );
+      
+   }
    
    //Check to make sure INDI is up to date
    std::unique_lock<std::mutex> lock(m_indiMutex, std::try_to_lock);  //Lock the mutex before conducting INDI communications.
@@ -1957,11 +2047,20 @@ void MagAOXApp<_useINDI>::state(const stateCodes::stateCodeT & s)
    {  
       ///\todo move this to a function in stateCodes
       pcf::IndiProperty::PropertyStateType stst = INDI_IDLE;
-      if(m_state == stateCodes::READY) stst = INDI_OK;
-      if(m_state == stateCodes::OPERATING || m_state == stateCodes::HOMING || m_state == stateCodes::CONFIGURING) stst = INDI_BUSY;
-      if( m_state < stateCodes::NODEVICE ) stst = INDI_ALERT;
-      else if (m_state <= stateCodes::LOGGEDIN ) stst = INDI_IDLE;
-      else if (m_state == stateCodes::NOTHOMED || m_state == stateCodes::SHUTDOWN) stst = INDI_IDLE;
+      
+      //If it's already in the "ALERT" state, then this can't take it out of it.
+      if(m_stateAlert == true) 
+      {
+         stst = INDI_ALERT;
+      }
+      else
+      {
+         if(m_state == stateCodes::READY) stst = INDI_OK;
+         else if(m_state == stateCodes::OPERATING || m_state == stateCodes::HOMING || m_state == stateCodes::CONFIGURING) stst = INDI_BUSY;
+         else if( m_state < stateCodes::NODEVICE ) stst = INDI_ALERT;
+         else if (m_state <= stateCodes::LOGGEDIN ) stst = INDI_IDLE;
+         else if (m_state == stateCodes::NOTHOMED || m_state == stateCodes::SHUTDOWN) stst = INDI_IDLE;
+      }
       
       updateIfChanged(m_indiP_state, "state", stateCodes::codeText(m_state), stst);
    }
@@ -1980,6 +2079,27 @@ int MagAOXApp<_useINDI>::stateLogged()
       m_stateLogged = 1;
       return 0;
    }
+}
+
+template<bool _useINDI>
+int MagAOXApp<_useINDI>::clearFSMAlert()
+{
+   if(m_stateAlert == false) return 0;
+   m_stateAlert = false;
+   log<text_log>("FSM alert cleared", logPrio::LOG_WARNING );
+   
+   pcf::IndiProperty::PropertyStateType stst = INDI_IDLE;
+   
+   if(m_state == stateCodes::READY) stst = INDI_OK;
+   else if(m_state == stateCodes::OPERATING || m_state == stateCodes::HOMING || m_state == stateCodes::CONFIGURING) stst = INDI_BUSY;
+   else if( m_state < stateCodes::NODEVICE ) stst = INDI_ALERT;
+   else if (m_state <= stateCodes::LOGGEDIN ) stst = INDI_IDLE;
+   else if (m_state == stateCodes::NOTHOMED || m_state == stateCodes::SHUTDOWN) stst = INDI_IDLE;
+         
+   updateIfChanged(m_indiP_state, "state", stateCodes::codeText(m_state), stst);
+   
+   return 0;
+      
 }
 
 /*-------------------------------------------------------------------------------------*/
@@ -2404,7 +2524,7 @@ int MagAOXApp<_useINDI>::createINDIFIFOS()
    m_driverCtrlName = driverFIFOPath + "/" + configName() + ".ctrl";
 
    //Get max permissions
-   euidCalled();
+   elevatedPrivileges elPriv(this);
 
    //Clear the file mode creation mask so mkfifo does what we want. Don't forget to restore it.
    mode_t prev = umask(0);
@@ -2415,7 +2535,6 @@ int MagAOXApp<_useINDI>::createINDIFIFOS()
       if(errno != EEXIST)
       {
          umask(prev);
-         euidReal();
          log<software_critical>({__FILE__, __LINE__, errno, 0, "mkfifo failed"});
          log<text_log>("Failed to create input FIFO.", logPrio::LOG_CRITICAL);
          return -1;
@@ -2428,7 +2547,7 @@ int MagAOXApp<_useINDI>::createINDIFIFOS()
       if(errno != EEXIST)
       {
          umask(prev);
-         euidReal();
+         //euidReal();
          log<software_critical>({__FILE__, __LINE__, errno, 0, "mkfifo failed"});
          log<text_log>("Failed to create ouput FIFO.", logPrio::LOG_CRITICAL);
          return -1;
@@ -2441,7 +2560,7 @@ int MagAOXApp<_useINDI>::createINDIFIFOS()
       if(errno != EEXIST)
       {
          umask(prev);
-         euidReal();
+         //euidReal();
          log<software_critical>({__FILE__, __LINE__, errno, 0, "mkfifo failed"});
          log<text_log>("Failed to create ouput FIFO.", logPrio::LOG_CRITICAL);
          return -1;
@@ -2449,7 +2568,7 @@ int MagAOXApp<_useINDI>::createINDIFIFOS()
    }
 
    umask(prev);
-   euidReal();
+   //euidReal();
    return 0;
 }
 
@@ -2468,6 +2587,15 @@ int MagAOXApp<_useINDI>::startINDI()
    //======= Instantiate the indiDriver
    try
    {
+      if(m_indiDriver != nullptr) 
+      {
+         m_indiDriver->quitProcess();
+         m_indiDriver->deactivate();
+         log<indidriver_stop>();
+         delete m_indiDriver;
+         m_indiDriver = nullptr;
+      }
+
       m_indiDriver = new indiDriver<MagAOXApp>(this, m_configName, "0", "0");
    }
    catch(...)
@@ -2496,7 +2624,7 @@ int MagAOXApp<_useINDI>::startINDI()
    m_indiDriver->activate();
    log<indidriver_start>();
 
-   sendGetPropertySetList();
+   sendGetPropertySetList(true);
 
    return 0;
 }
@@ -2772,34 +2900,17 @@ pcf::IndiProperty::Type propType()
    return pcf::IndiProperty::Unknown;
 }
 
+template<>
+pcf::IndiProperty::Type propType<char *>();
 
 template<>
-inline
-pcf::IndiProperty::Type propType<char *>()
-{
-   return pcf::IndiProperty::Text;
-}
+pcf::IndiProperty::Type propType<std::string>();
 
 template<>
-inline
-pcf::IndiProperty::Type propType<std::string>()
-{
-   return pcf::IndiProperty::Text;
-}
+pcf::IndiProperty::Type propType<int>();
 
 template<>
-inline
-pcf::IndiProperty::Type propType<int>()
-{
-   return pcf::IndiProperty::Number;
-}
-
-template<>
-inline
-pcf::IndiProperty::Type propType<double>()
-{
-   return pcf::IndiProperty::Number;
-}
+pcf::IndiProperty::Type propType<double>();
 
 template<bool _useINDI>
 template<typename T>
@@ -2855,6 +2966,35 @@ int MagAOXApp<_useINDI>::sendNewProperty( const pcf::IndiProperty & ipSend )
       return -1;
    }
 
+   return 0;
+}
+
+template<bool _useINDI>
+int MagAOXApp<_useINDI>::st_newCallBack_clearFSMAlert( void * app,
+                                                       const pcf::IndiProperty &ipRecv
+                                                     )
+{
+   return static_cast<MagAOXApp<_useINDI> *>(app)->newCallBack_clearFSMAlert(ipRecv);
+}
+
+template<bool _useINDI>
+int MagAOXApp<_useINDI>::newCallBack_clearFSMAlert( const pcf::IndiProperty &ipRecv )
+{
+
+   if(ipRecv.getName() != m_indiP_clearFSMAlert.getName()) 
+   {
+      return log<software_error, -1>({__FILE__, __LINE__, "wrong indi property received"});      
+   }
+   
+   if(!ipRecv.find("request")) return 0;
+   
+   if(ipRecv["request"].getSwitchState() == pcf::IndiElement::On )
+   {
+      clearFSMAlert();
+      updateSwitchIfChanged(m_indiP_clearFSMAlert, "request", pcf::IndiElement::Off, INDI_IDLE); 
+   }
+
+   
    return 0;
 }
 
@@ -2977,6 +3117,9 @@ std::string MagAOXApp<_useINDI>::driverCtrlName()
 {
    return m_driverCtrlName;
 }
+
+extern template class MagAOXApp<true>;
+extern template class MagAOXApp<false>;
 
 } //namespace app
 } //namespace MagAOX

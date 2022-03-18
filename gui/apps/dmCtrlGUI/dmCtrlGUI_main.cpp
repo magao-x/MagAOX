@@ -3,12 +3,9 @@
 #include <QFile>
 #include <QTextStream>
 
-
 #include "dmCtrl.hpp"
-
    
 #include "multiIndiManager.hpp"
-   
    
 int main(int argc, char *argv[])
 {
@@ -32,11 +29,11 @@ int main(int argc, char *argv[])
 
    xqt::dmCtrl dm(dmName);
    mgr.addSubscriber(&dm);
+   mgr.activate();
    
    dm.show();
    
    int rv = app.exec();
-   
    
    return rv;
 }

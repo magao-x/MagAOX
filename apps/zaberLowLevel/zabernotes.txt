@@ -35,3 +35,6 @@ Results of limit.max:
 @01 0 OK IDLE -- 771029
 @02 0 OK IDLE -- 1526940
 @03 0 OK IDLE -- 380000
+
+On 2021-03-15 changed:
+@03 0 OK IDLE WR 352750

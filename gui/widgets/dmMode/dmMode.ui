@@ -1,121 +1,91 @@
 <?xml version="1.0" encoding="UTF-8"?>
 <ui version="4.0">
  <class>dmMode</class>
- <widget class="QDialog" name="dmMode">
+ <widget class="QWidget" name="dmMode">
   <property name="geometry">
    <rect>
     <x>0</x>
     <y>0</y>
-    <width>801</width>
-    <height>918</height>
+    <width>849</width>
+    <height>1016</height>
    </rect>
   </property>
-  <property name="palette">
-   <palette>
-    <active>
-     <colorrole role="Base">
-      <brush brushstyle="SolidPattern">
-       <color alpha="255">
-        <red>32</red>
-        <green>31</green>
-        <blue>31</blue>
-       </color>
-      </brush>
-     </colorrole>
-     <colorrole role="Window">
-      <brush brushstyle="SolidPattern">
-       <color alpha="255">
-        <red>0</red>
-        <green>0</green>
-        <blue>0</blue>
-       </color>
-      </brush>
-     </colorrole>
-    </active>
-    <inactive>
-     <colorrole role="Base">
-      <brush brushstyle="SolidPattern">
-       <color alpha="255">
-        <red>32</red>
-        <green>31</green>
-        <blue>31</blue>
-       </color>
-      </brush>
-     </colorrole>
-     <colorrole role="Window">
-      <brush brushstyle="SolidPattern">
-       <color alpha="255">
-        <red>0</red>
-        <green>0</green>
-        <blue>0</blue>
-       </color>
-      </brush>
-     </colorrole>
-    </inactive>
-    <disabled>
-     <colorrole role="Base">
-      <brush brushstyle="SolidPattern">
-       <color alpha="255">
-        <red>0</red>
-        <green>0</green>
-        <blue>0</blue>
-       </color>
-      </brush>
-     </colorrole>
-     <colorrole role="Window">
-      <brush brushstyle="SolidPattern">
-       <color alpha="255">
-        <red>0</red>
-        <green>0</green>
-        <blue>0</blue>
-       </color>
-      </brush>
-     </colorrole>
-    </disabled>
-   </palette>
-  </property>
   <property name="windowTitle">
-   <string>Dialog</string>
+   <string>Form</string>
   </property>
   <layout class="QGridLayout" name="gridLayout">
    <item row="0" column="0">
-    <widget class="QLabel" name="title">
-     <property name="font">
-      <font>
-       <pointsize>16</pointsize>
-       <weight>75</weight>
-       <bold>true</bold>
-      </font>
-     </property>
-     <property name="text">
-      <string>DM Modes</string>
-     </property>
-     <property name="alignment">
-      <set>Qt::AlignCenter</set>
-     </property>
-    </widget>
+    <layout class="QHBoxLayout" name="horizontalLayout_12" stretch="12,1">
+     <item>
+      <widget class="QLabel" name="title">
+       <property name="font">
+        <font>
+         <pointsize>16</pointsize>
+         <weight>75</weight>
+         <bold>true</bold>
+        </font>
+       </property>
+       <property name="text">
+        <string>DM Modes</string>
+       </property>
+       <property name="alignment">
+        <set>Qt::AlignCenter</set>
+       </property>
+      </widget>
+     </item>
+     <item>
+      <spacer name="horizontalSpacer_21">
+       <property name="orientation">
+        <enum>Qt::Horizontal</enum>
+       </property>
+       <property name="sizeHint" stdset="0">
+        <size>
+         <width>40</width>
+         <height>20</height>
+        </size>
+       </property>
+      </spacer>
+     </item>
+    </layout>
    </item>
    <item row="1" column="0">
-    <widget class="QLabel" name="channel">
-     <property name="text">
-      <string>dmXXdispYY</string>
-     </property>
-     <property name="alignment">
-      <set>Qt::AlignCenter</set>
-     </property>
-    </widget>
+    <layout class="QHBoxLayout" name="horizontalLayout_13" stretch="12,1">
+     <item>
+      <widget class="QLabel" name="channel">
+       <property name="text">
+        <string>dmXXdispYY</string>
+       </property>
+       <property name="alignment">
+        <set>Qt::AlignCenter</set>
+       </property>
+      </widget>
+     </item>
+     <item>
+      <spacer name="horizontalSpacer_22">
+       <property name="orientation">
+        <enum>Qt::Horizontal</enum>
+       </property>
+       <property name="sizeHint" stdset="0">
+        <size>
+         <width>40</width>
+         <height>20</height>
+        </size>
+       </property>
+      </spacer>
+     </item>
+    </layout>
    </item>
    <item row="2" column="0">
     <layout class="QVBoxLayout" name="verticalLayout">
      <item>
-      <layout class="QGridLayout" name="grid_0" rowstretch="3,1" columnstretch="2,10,1,1" columnminimumwidth="0,0,0,0">
+      <layout class="QGridLayout" name="grid_0" rowstretch="3,1" columnstretch="4,20,3,3" columnminimumwidth="0,0,0,0">
        <property name="sizeConstraint">
         <enum>QLayout::SetNoConstraint</enum>
        </property>
        <item row="0" column="3">
         <widget class="QLabel" name="modeCurrent_0">
          <property name="frameShape">
-          <enum>QFrame::Panel</enum>
+          <enum>QFrame::StyledPanel</enum>
          </property>
          <property name="frameShadow">
           <enum>QFrame::Sunken</enum>
@@ -126,20 +96,30 @@
          <property name="textFormat">
           <enum>Qt::PlainText</enum>
          </property>
+         <property name="alignment">
+          <set>Qt::AlignCenter</set>
+         </property>
         </widget>
        </item>
        <item row="0" column="2">
-        <widget class="QLineEdit" name="modeTarget_0"/>
+        <widget class="QLineEdit" name="modeTarget_0">
+         <property name="focusPolicy">
+          <enum>Qt::ClickFocus</enum>
+         </property>
+        </widget>
        </item>
        <item row="0" column="0">
         <widget class="QLabel" name="modeName_0">
          <property name="text">
-          <string>Mode 00</string>
+          <string>Tip</string>
          </property>
         </widget>
        </item>
        <item row="0" column="1">
         <widget class="QwtSlider" name="modeSlider_0">
+         <property name="focusPolicy">
+          <enum>Qt::ClickFocus</enum>
+         </property>
          <property name="lowerBound">
           <double>-1.000000000000000</double>
          </property>
@@ -161,7 +141,7 @@
          <property name="handleSize">
           <size>
            <width>15</width>
-           <height>25</height>
+           <height>20</height>
           </size>
          </property>
         </widget>
@@ -195,6 +175,14 @@
              <height>5</height>
             </size>
            </property>
+           <property name="font">
+            <font>
+             <pointsize>8</pointsize>
+            </font>
+           </property>
+           <property name="focusPolicy">
+            <enum>Qt::NoFocus</enum>
+           </property>
            <property name="text">
             <string>0</string>
            </property>
@@ -218,11 +206,11 @@
       </layout>
      </item>
      <item>
-      <layout class="QGridLayout" name="grid_1" rowstretch="3,1" columnstretch="2,10,1,1" columnminimumwidth="0,0,0,0">
+      <layout class="QGridLayout" name="grid_1" rowstretch="3,1" columnstretch="4,20,3,3" columnminimumwidth="0,0,0,0">
        <item row="0" column="3">
         <widget class="QLabel" name="modeCurrent_1">
          <property name="frameShape">
-          <enum>QFrame::Panel</enum>
+          <enum>QFrame::Box</enum>
          </property>
          <property name="frameShadow">
           <enum>QFrame::Sunken</enum>
@@ -233,20 +221,30 @@
          <property name="textFormat">
           <enum>Qt::PlainText</enum>
          </property>
+         <property name="alignment">
+          <set>Qt::AlignCenter</set>
+         </property>
         </widget>
        </item>
        <item row="0" column="2">
-        <widget class="QLineEdit" name="modeTarget_1"/>
+        <widget class="QLineEdit" name="modeTarget_1">
+         <property name="focusPolicy">
+          <enum>Qt::ClickFocus</enum>
+         </property>
+        </widget>
        </item>
        <item row="0" column="0">
         <widget class="QLabel" name="modeName_1">
          <property name="text">
-          <string>Mode 01</string>
+          <string>Tilt</string>
          </property>
         </widget>
        </item>
        <item row="0" column="1">
         <widget class="QwtSlider" name="modeSlider_1">
+         <property name="focusPolicy">
+          <enum>Qt::ClickFocus</enum>
+         </property>
          <property name="lowerBound">
           <double>-1.000000000000000</double>
          </property>
@@ -268,7 +266,7 @@
          <property name="handleSize">
           <size>
            <width>15</width>
-           <height>25</height>
+           <height>20</height>
           </size>
          </property>
         </widget>
@@ -302,6 +300,14 @@
              <height>5</height>
             </size>
            </property>
+           <property name="font">
+            <font>
+             <pointsize>8</pointsize>
+            </font>
+           </property>
+           <property name="focusPolicy">
+            <enum>Qt::NoFocus</enum>
+           </property>
            <property name="text">
             <string>0</string>
            </property>
@@ -325,35 +331,12 @@
       </layout>
      </item>
      <item>
-      <layout class="QGridLayout" name="grid_2" rowstretch="3,1" columnstretch="2,10,1,1" columnminimumwidth="0,0,0,0">
-       <item row="0" column="3">
-        <widget class="QLabel" name="modeCurrent_2">
-         <property name="frameShape">
-          <enum>QFrame::Panel</enum>
-         </property>
-         <property name="frameShadow">
-          <enum>QFrame::Sunken</enum>
-         </property>
-         <property name="text">
-          <string>0.0</string>
-         </property>
-         <property name="textFormat">
-          <enum>Qt::PlainText</enum>
-         </property>
-        </widget>
-       </item>
-       <item row="0" column="2">
-        <widget class="QLineEdit" name="modeTarget_2"/>
-       </item>
-       <item row="0" column="0">
-        <widget class="QLabel" name="modeName_2">
-         <property name="text">
-          <string>Mode 02</string>
-         </property>
-        </widget>
-       </item>
+      <layout class="QGridLayout" name="grid_2" rowstretch="3,0" columnstretch="4,20,3,3">
        <item row="0" column="1">
         <widget class="QwtSlider" name="modeSlider_2">
+         <property name="focusPolicy">
+          <enum>Qt::ClickFocus</enum>
+         </property>
          <property name="lowerBound">
           <double>-1.000000000000000</double>
          </property>
@@ -375,8 +358,27 @@
          <property name="handleSize">
           <size>
            <width>15</width>
-           <height>25</height>
+           <height>20</height>
           </size>
+         </property>
+        </widget>
+       </item>
+       <item row="0" column="3">
+        <widget class="QLabel" name="modeCurrent_2">
+         <property name="frameShape">
+          <enum>QFrame::Box</enum>
+         </property>
+         <property name="frameShadow">
+          <enum>QFrame::Sunken</enum>
+         </property>
+         <property name="text">
+          <string>0.0</string>
+         </property>
+         <property name="textFormat">
+          <enum>Qt::PlainText</enum>
+         </property>
+         <property name="alignment">
+          <set>Qt::AlignCenter</set>
          </property>
         </widget>
        </item>
@@ -409,6 +411,14 @@
              <height>5</height>
             </size>
            </property>
+           <property name="font">
+            <font>
+             <pointsize>8</pointsize>
+            </font>
+           </property>
+           <property name="focusPolicy">
+            <enum>Qt::NoFocus</enum>
+           </property>
            <property name="text">
             <string>0</string>
            </property>
@@ -429,14 +439,28 @@
          </item>
         </layout>
        </item>
+       <item row="0" column="2">
+        <widget class="QLineEdit" name="modeTarget_2">
+         <property name="focusPolicy">
+          <enum>Qt::ClickFocus</enum>
+         </property>
+        </widget>
+       </item>
+       <item row="0" column="0">
+        <widget class="QLabel" name="modeName_2">
+         <property name="text">
+          <string>Defocus</string>
+         </property>
+        </widget>
+       </item>
       </layout>
      </item>
      <item>
-      <layout class="QGridLayout" name="grid_3" rowstretch="3,1" columnstretch="2,10,1,1" columnminimumwidth="0,0,0,0">
+      <layout class="QGridLayout" name="grid_3" rowstretch="3,1" columnstretch="4,20,3,3" columnminimumwidth="0,0,0,0">
        <item row="0" column="3">
         <widget class="QLabel" name="modeCurrent_3">
          <property name="frameShape">
-          <enum>QFrame::Panel</enum>
+          <enum>QFrame::Box</enum>
          </property>
          <property name="frameShadow">
           <enum>QFrame::Sunken</enum>
@@ -447,20 +471,30 @@
          <property name="textFormat">
           <enum>Qt::PlainText</enum>
          </property>
+         <property name="alignment">
+          <set>Qt::AlignCenter</set>
+         </property>
         </widget>
        </item>
        <item row="0" column="2">
-        <widget class="QLineEdit" name="modeTarget_3"/>
+        <widget class="QLineEdit" name="modeTarget_3">
+         <property name="focusPolicy">
+          <enum>Qt::ClickFocus</enum>
+         </property>
+        </widget>
        </item>
        <item row="0" column="0">
         <widget class="QLabel" name="modeName_3">
          <property name="text">
-          <string>Mode 03</string>
+          <string>Astig.-V</string>
          </property>
         </widget>
        </item>
        <item row="0" column="1">
         <widget class="QwtSlider" name="modeSlider_3">
+         <property name="focusPolicy">
+          <enum>Qt::ClickFocus</enum>
+         </property>
          <property name="lowerBound">
           <double>-1.000000000000000</double>
          </property>
@@ -482,7 +516,7 @@
          <property name="handleSize">
           <size>
            <width>15</width>
-           <height>25</height>
+           <height>20</height>
           </size>
          </property>
         </widget>
@@ -516,6 +550,14 @@
              <height>5</height>
             </size>
            </property>
+           <property name="font">
+            <font>
+             <pointsize>8</pointsize>
+            </font>
+           </property>
+           <property name="focusPolicy">
+            <enum>Qt::NoFocus</enum>
+           </property>
            <property name="text">
             <string>0</string>
            </property>
@@ -539,11 +581,11 @@
       </layout>
      </item>
      <item>
-      <layout class="QGridLayout" name="grid_4" rowstretch="3,1" columnstretch="2,10,1,1" columnminimumwidth="0,0,0,0">
+      <layout class="QGridLayout" name="grid_4" rowstretch="3,1" columnstretch="4,20,3,3" columnminimumwidth="0,0,0,0">
        <item row="0" column="3">
         <widget class="QLabel" name="modeCurrent_4">
          <property name="frameShape">
-          <enum>QFrame::Panel</enum>
+          <enum>QFrame::Box</enum>
          </property>
          <property name="frameShadow">
           <enum>QFrame::Sunken</enum>
@@ -554,20 +596,30 @@
          <property name="textFormat">
           <enum>Qt::PlainText</enum>
          </property>
+         <property name="alignment">
+          <set>Qt::AlignCenter</set>
+         </property>
         </widget>
        </item>
        <item row="0" column="2">
-        <widget class="QLineEdit" name="modeTarget_4"/>
+        <widget class="QLineEdit" name="modeTarget_4">
+         <property name="focusPolicy">
+          <enum>Qt::ClickFocus</enum>
+         </property>
+        </widget>
        </item>
        <item row="0" column="0">
         <widget class="QLabel" name="modeName_4">
          <property name="text">
-          <string>Mode 04</string>
+          <string>Astig.-O</string>
          </property>
         </widget>
        </item>
        <item row="0" column="1">
         <widget class="QwtSlider" name="modeSlider_4">
+         <property name="focusPolicy">
+          <enum>Qt::ClickFocus</enum>
+         </property>
          <property name="lowerBound">
           <double>-1.000000000000000</double>
          </property>
@@ -589,7 +641,7 @@
          <property name="handleSize">
           <size>
            <width>15</width>
-           <height>25</height>
+           <height>20</height>
           </size>
          </property>
         </widget>
@@ -623,6 +675,14 @@
              <height>5</height>
             </size>
            </property>
+           <property name="font">
+            <font>
+             <pointsize>8</pointsize>
+            </font>
+           </property>
+           <property name="focusPolicy">
+            <enum>Qt::NoFocus</enum>
+           </property>
            <property name="text">
             <string>0</string>
            </property>
@@ -646,11 +706,11 @@
       </layout>
      </item>
      <item>
-      <layout class="QGridLayout" name="grid_5" rowstretch="3,1" columnstretch="2,10,1,1" columnminimumwidth="0,0,0,0">
+      <layout class="QGridLayout" name="grid_5" rowstretch="3,1" columnstretch="4,20,3,3" columnminimumwidth="0,0,0,0">
        <item row="0" column="3">
         <widget class="QLabel" name="modeCurrent_5">
          <property name="frameShape">
-          <enum>QFrame::Panel</enum>
+          <enum>QFrame::Box</enum>
          </property>
          <property name="frameShadow">
           <enum>QFrame::Sunken</enum>
@@ -661,20 +721,30 @@
          <property name="textFormat">
           <enum>Qt::PlainText</enum>
          </property>
+         <property name="alignment">
+          <set>Qt::AlignCenter</set>
+         </property>
         </widget>
        </item>
        <item row="0" column="2">
-        <widget class="QLineEdit" name="modeTarget_5"/>
+        <widget class="QLineEdit" name="modeTarget_5">
+         <property name="focusPolicy">
+          <enum>Qt::ClickFocus</enum>
+         </property>
+        </widget>
        </item>
        <item row="0" column="0">
         <widget class="QLabel" name="modeName_5">
          <property name="text">
-          <string>Mode 05</string>
+          <string>Coma-V</string>
          </property>
         </widget>
        </item>
        <item row="0" column="1">
         <widget class="QwtSlider" name="modeSlider_5">
+         <property name="focusPolicy">
+          <enum>Qt::ClickFocus</enum>
+         </property>
          <property name="lowerBound">
           <double>-1.000000000000000</double>
          </property>
@@ -696,7 +766,7 @@
          <property name="handleSize">
           <size>
            <width>15</width>
-           <height>25</height>
+           <height>20</height>
           </size>
          </property>
         </widget>
@@ -730,6 +800,14 @@
              <height>5</height>
             </size>
            </property>
+           <property name="font">
+            <font>
+             <pointsize>8</pointsize>
+            </font>
+           </property>
+           <property name="focusPolicy">
+            <enum>Qt::NoFocus</enum>
+           </property>
            <property name="text">
             <string>0</string>
            </property>
@@ -753,11 +831,11 @@
       </layout>
      </item>
      <item>
-      <layout class="QGridLayout" name="grid_6" rowstretch="3,1" columnstretch="2,10,1,1" columnminimumwidth="0,0,0,0">
+      <layout class="QGridLayout" name="grid_6" rowstretch="3,1" columnstretch="4,20,3,3" columnminimumwidth="0,0,0,0">
        <item row="0" column="3">
         <widget class="QLabel" name="modeCurrent_6">
          <property name="frameShape">
-          <enum>QFrame::Panel</enum>
+          <enum>QFrame::Box</enum>
          </property>
          <property name="frameShadow">
           <enum>QFrame::Sunken</enum>
@@ -768,15 +846,22 @@
          <property name="textFormat">
           <enum>Qt::PlainText</enum>
          </property>
+         <property name="alignment">
+          <set>Qt::AlignCenter</set>
+         </property>
         </widget>
        </item>
        <item row="0" column="2">
-        <widget class="QLineEdit" name="modeTarget_6"/>
+        <widget class="QLineEdit" name="modeTarget_6">
+         <property name="focusPolicy">
+          <enum>Qt::ClickFocus</enum>
+         </property>
+        </widget>
        </item>
        <item row="0" column="0">
         <widget class="QLabel" name="modeName_6">
          <property name="text">
-          <string>Mode 06</string>
+          <string>Coma-H</string>
          </property>
         </widget>
        </item>
@@ -809,6 +894,14 @@
              <height>5</height>
             </size>
            </property>
+           <property name="font">
+            <font>
+             <pointsize>8</pointsize>
+            </font>
+           </property>
+           <property name="focusPolicy">
+            <enum>Qt::NoFocus</enum>
+           </property>
            <property name="text">
             <string>0</string>
            </property>
@@ -831,6 +924,9 @@
        </item>
        <item row="0" column="1">
         <widget class="QwtSlider" name="modeSlider_6">
+         <property name="focusPolicy">
+          <enum>Qt::ClickFocus</enum>
+         </property>
          <property name="lowerBound">
           <double>-1.000000000000000</double>
          </property>
@@ -852,7 +948,7 @@
          <property name="handleSize">
           <size>
            <width>15</width>
-           <height>25</height>
+           <height>20</height>
           </size>
          </property>
         </widget>
@@ -860,11 +956,11 @@
       </layout>
      </item>
      <item>
-      <layout class="QGridLayout" name="grid_7" rowstretch="3,0" columnstretch="2,10,1,1">
+      <layout class="QGridLayout" name="grid_7" rowstretch="3,0" columnstretch="4,20,3,3">
        <item row="0" column="3">
         <widget class="QLabel" name="modeCurrent_7">
          <property name="frameShape">
-          <enum>QFrame::Panel</enum>
+          <enum>QFrame::Box</enum>
          </property>
          <property name="frameShadow">
           <enum>QFrame::Sunken</enum>
@@ -875,10 +971,17 @@
          <property name="textFormat">
           <enum>Qt::PlainText</enum>
          </property>
+         <property name="alignment">
+          <set>Qt::AlignCenter</set>
+         </property>
         </widget>
        </item>
        <item row="0" column="2">
-        <widget class="QLineEdit" name="modeTarget_7"/>
+        <widget class="QLineEdit" name="modeTarget_7">
+         <property name="focusPolicy">
+          <enum>Qt::ClickFocus</enum>
+         </property>
+        </widget>
        </item>
        <item row="1" column="1">
         <layout class="QHBoxLayout" name="horizontalLayout_8">
@@ -909,6 +1012,14 @@
              <height>5</height>
             </size>
            </property>
+           <property name="font">
+            <font>
+             <pointsize>8</pointsize>
+            </font>
+           </property>
+           <property name="focusPolicy">
+            <enum>Qt::NoFocus</enum>
+           </property>
            <property name="text">
             <string>0</string>
            </property>
@@ -932,12 +1043,15 @@
        <item row="0" column="0">
         <widget class="QLabel" name="modeName_7">
          <property name="text">
-          <string>Mode 07</string>
+          <string>Trefoil-V</string>
          </property>
         </widget>
        </item>
        <item row="0" column="1">
         <widget class="QwtSlider" name="modeSlider_7">
+         <property name="focusPolicy">
+          <enum>Qt::ClickFocus</enum>
+         </property>
          <property name="lowerBound">
           <double>-1.000000000000000</double>
          </property>
@@ -959,7 +1073,7 @@
          <property name="handleSize">
           <size>
            <width>15</width>
-           <height>25</height>
+           <height>20</height>
           </size>
          </property>
         </widget>
@@ -967,11 +1081,11 @@
       </layout>
      </item>
      <item>
-      <layout class="QGridLayout" name="grid_8" rowstretch="3,1" columnstretch="2,10,1,1" columnminimumwidth="0,0,0,0">
+      <layout class="QGridLayout" name="grid_8" rowstretch="3,1" columnstretch="4,20,3,3" columnminimumwidth="0,0,0,0">
        <item row="0" column="3">
         <widget class="QLabel" name="modeCurrent_8">
          <property name="frameShape">
-          <enum>QFrame::Panel</enum>
+          <enum>QFrame::Box</enum>
          </property>
          <property name="frameShadow">
           <enum>QFrame::Sunken</enum>
@@ -982,20 +1096,30 @@
          <property name="textFormat">
           <enum>Qt::PlainText</enum>
          </property>
+         <property name="alignment">
+          <set>Qt::AlignCenter</set>
+         </property>
         </widget>
        </item>
        <item row="0" column="2">
-        <widget class="QLineEdit" name="modeTarget_8"/>
+        <widget class="QLineEdit" name="modeTarget_8">
+         <property name="focusPolicy">
+          <enum>Qt::ClickFocus</enum>
+         </property>
+        </widget>
        </item>
        <item row="0" column="0">
         <widget class="QLabel" name="modeName_8">
          <property name="text">
-          <string>Mode 08</string>
+          <string>Trefoil-H</string>
          </property>
         </widget>
        </item>
        <item row="0" column="1">
         <widget class="QwtSlider" name="modeSlider_8">
+         <property name="focusPolicy">
+          <enum>Qt::ClickFocus</enum>
+         </property>
          <property name="lowerBound">
           <double>-1.000000000000000</double>
          </property>
@@ -1017,7 +1141,7 @@
          <property name="handleSize">
           <size>
            <width>15</width>
-           <height>25</height>
+           <height>20</height>
           </size>
          </property>
         </widget>
@@ -1051,6 +1175,14 @@
              <height>5</height>
             </size>
            </property>
+           <property name="font">
+            <font>
+             <pointsize>8</pointsize>
+            </font>
+           </property>
+           <property name="focusPolicy">
+            <enum>Qt::NoFocus</enum>
+           </property>
            <property name="text">
             <string>0</string>
            </property>
@@ -1074,11 +1206,11 @@
       </layout>
      </item>
      <item>
-      <layout class="QGridLayout" name="grid_9" rowstretch="3,1" columnstretch="2,10,1,1" columnminimumwidth="0,0,0,0">
+      <layout class="QGridLayout" name="grid_9" rowstretch="3,1" columnstretch="4,20,3,3" columnminimumwidth="0,0,0,0">
        <item row="0" column="3">
         <widget class="QLabel" name="modeCurrent_9">
          <property name="frameShape">
-          <enum>QFrame::Panel</enum>
+          <enum>QFrame::Box</enum>
          </property>
          <property name="frameShadow">
           <enum>QFrame::Sunken</enum>
@@ -1089,20 +1221,30 @@
          <property name="textFormat">
           <enum>Qt::PlainText</enum>
          </property>
+         <property name="alignment">
+          <set>Qt::AlignCenter</set>
+         </property>
         </widget>
        </item>
        <item row="0" column="2">
-        <widget class="QLineEdit" name="modeTarget_9"/>
+        <widget class="QLineEdit" name="modeTarget_9">
+         <property name="focusPolicy">
+          <enum>Qt::ClickFocus</enum>
+         </property>
+        </widget>
        </item>
        <item row="0" column="0">
         <widget class="QLabel" name="modeName_9">
          <property name="text">
-          <string>Mode 09</string>
+          <string>Spherical</string>
          </property>
         </widget>
        </item>
        <item row="0" column="1">
         <widget class="QwtSlider" name="modeSlider_9">
+         <property name="focusPolicy">
+          <enum>Qt::ClickFocus</enum>
+         </property>
          <property name="lowerBound">
           <double>-1.000000000000000</double>
          </property>
@@ -1124,7 +1266,7 @@
          <property name="handleSize">
           <size>
            <width>15</width>
-           <height>25</height>
+           <height>20</height>
           </size>
          </property>
         </widget>
@@ -1158,6 +1300,14 @@
              <height>5</height>
             </size>
            </property>
+           <property name="font">
+            <font>
+             <pointsize>8</pointsize>
+            </font>
+           </property>
+           <property name="focusPolicy">
+            <enum>Qt::NoFocus</enum>
+           </property>
            <property name="text">
             <string>0</string>
            </property>
@@ -1180,117 +1330,10 @@
        </item>
       </layout>
      </item>
-     <item>
-      <layout class="QGridLayout" name="grid_10" rowstretch="3,1" columnstretch="2,10,1,1" columnminimumwidth="0,0,0,0">
-       <item row="0" column="3">
-        <widget class="QLabel" name="modeCurrent_10">
-         <property name="frameShape">
-          <enum>QFrame::Panel</enum>
-         </property>
-         <property name="frameShadow">
-          <enum>QFrame::Sunken</enum>
-         </property>
-         <property name="text">
-          <string>0.0</string>
-         </property>
-         <property name="textFormat">
-          <enum>Qt::PlainText</enum>
-         </property>
-        </widget>
-       </item>
-       <item row="0" column="2">
-        <widget class="QLineEdit" name="modeTarget_10"/>
-       </item>
-       <item row="0" column="0">
-        <widget class="QLabel" name="modeName_10">
-         <property name="text">
-          <string>Mode 10</string>
-         </property>
-        </widget>
-       </item>
-       <item row="0" column="1">
-        <widget class="QwtSlider" name="modeSlider_10">
-         <property name="lowerBound">
-          <double>-1.000000000000000</double>
-         </property>
-         <property name="upperBound">
-          <double>1.000000000000000</double>
-         </property>
-         <property name="orientation">
-          <enum>Qt::Horizontal</enum>
-         </property>
-         <property name="scalePosition">
-          <enum>QwtSlider::NoScale</enum>
-         </property>
-         <property name="trough">
-          <bool>false</bool>
-         </property>
-         <property name="groove">
-          <bool>true</bool>
-         </property>
-         <property name="handleSize">
-          <size>
-           <width>15</width>
-           <height>25</height>
-          </size>
-         </property>
-        </widget>
-       </item>
-       <item row="1" column="1">
-        <layout class="QHBoxLayout" name="horizontalLayout_11">
-         <item>
-          <spacer name="horizontalSpacer_21">
-           <property name="orientation">
-            <enum>Qt::Horizontal</enum>
-           </property>
-           <property name="sizeHint" stdset="0">
-            <size>
-             <width>40</width>
-             <height>20</height>
-            </size>
-           </property>
-          </spacer>
-         </item>
-         <item>
-          <widget class="QPushButton" name="modeZero_10">
-           <property name="sizePolicy">
-            <sizepolicy hsizetype="Minimum" vsizetype="Minimum">
-             <horstretch>0</horstretch>
-             <verstretch>0</verstretch>
-            </sizepolicy>
-           </property>
-           <property name="minimumSize">
-            <size>
-             <width>0</width>
-             <height>5</height>
-            </size>
-           </property>
-           <property name="text">
-            <string>0</string>
-           </property>
-          </widget>
-         </item>
-         <item>
-          <spacer name="horizontalSpacer_22">
-           <property name="orientation">
-            <enum>Qt::Horizontal</enum>
-           </property>
-           <property name="sizeHint" stdset="0">
-            <size>
-             <width>40</width>
-             <height>20</height>
-            </size>
-           </property>
-          </spacer>
-         </item>
-        </layout>
-       </item>
-      </layout>
-     </item>
     </layout>
    </item>
    <item row="3" column="0">
-    <layout class="QHBoxLayout" name="horizontalLayout_12">
+    <layout class="QHBoxLayout" name="horizontalLayout_11" stretch="20,0,4,24">
      <item>
       <spacer name="horizontalSpacer_23">
        <property name="orientation">
@@ -1305,6 +1348,33 @@
       </spacer>
      </item>
      <item>
+      <widget class="QPushButton" name="modeZero_these">
+       <property name="sizePolicy">
+        <sizepolicy hsizetype="Minimum" vsizetype="Minimum">
+         <horstretch>0</horstretch>
+         <verstretch>0</verstretch>
+        </sizepolicy>
+       </property>
+       <property name="minimumSize">
+        <size>
+         <width>0</width>
+         <height>5</height>
+        </size>
+       </property>
+       <property name="font">
+        <font>
+         <pointsize>8</pointsize>
+        </font>
+       </property>
+       <property name="focusPolicy">
+        <enum>Qt::NoFocus</enum>
+       </property>
+       <property name="text">
+        <string>zero these</string>
+       </property>
+      </widget>
+     </item>
+     <item>
       <widget class="QPushButton" name="modeZero_all">
        <property name="sizePolicy">
         <sizepolicy hsizetype="Minimum" vsizetype="Minimum">
@@ -1317,6 +1387,14 @@
          <width>0</width>
          <height>5</height>
         </size>
+       </property>
+       <property name="font">
+        <font>
+         <pointsize>8</pointsize>
+        </font>
+       </property>
+       <property name="focusPolicy">
+        <enum>Qt::NoFocus</enum>
        </property>
        <property name="text">
         <string>zero all</string>

@@ -2,16 +2,14 @@
 #ifndef dmCtrl_hpp
 #define dmCtrl_hpp
 
-#include <QDialog>
-
 #include "ui_dmCtrl.h"
 
-#include "../../lib/multiIndi.hpp"
+#include "../xWidgets/xWidget.hpp"
 
 namespace xqt 
 {
    
-class dmCtrl : public QDialog, public multiIndiSubscriber
+class dmCtrl : public xWidget
 {
    Q_OBJECT
    
@@ -23,12 +21,13 @@ protected:
    std::string m_shmimName;
    
    std::string m_flatShmim;
+   bool m_flatSet {false};
    std::string m_flatName;
-   std::string m_flatTarget;
    
    std::string m_testShmim;
+   bool m_testSet {false};
    std::string m_testName;
-   std::string m_testTarget;
+
    
 public:
    dmCtrl( std::string & dmName,
@@ -38,25 +37,29 @@ public:
    
    ~dmCtrl();
    
-   int subscribe( multiIndiPublisher * publisher );
-                                   
-   int handleDefProperty( const pcf::IndiProperty & ipRecv /**< [in] the property which has changed*/);
+   void subscribe();
+             
+   virtual void onConnect();
+   virtual void onDisconnect();
    
-   int handleSetProperty( const pcf::IndiProperty & ipRecv /**< [in] the property which has changed*/);
+   void handleDefProperty( const pcf::IndiProperty & ipRecv /**< [in] the property which has changed*/);
+   
+   void handleSetProperty( const pcf::IndiProperty & ipRecv /**< [in] the property which has changed*/);
    
    
 public slots:
    void updateGUI();
    
    void on_buttonInit_pressed();
+   void on_buttonZeroAll_pressed();
    void on_buttonZero_pressed();
    void on_buttonRelease_pressed();
    
-   void on_buttonLoadFlat_pressed();
+   void on_comboSelectFlat_activated(int);
    void on_buttonSetFlat_pressed();
    void on_buttonZeroFlat_pressed();
-   
-   void on_buttonLoadTest_pressed();
+
+   void on_comboSelectTest_activated(int);
    void on_buttonSetTest_pressed();
    void on_buttonZeroTest_pressed();
    
@@ -67,99 +70,174 @@ private:
    
 dmCtrl::dmCtrl( std::string & dmName,
                 QWidget * Parent, 
-                Qt::WindowFlags f) : QDialog(Parent, f), m_dmName{dmName}
+                Qt::WindowFlags f) : xWidget(Parent, f), m_dmName{dmName}
 {
    ui.setupUi(this);
-   ui.labelDMName->setText(m_dmName.c_str());
+   //ui.labelDMName->setText(m_dmName.c_str());
    
    setWindowTitle(QString(m_dmName.c_str()));
+
+   onDisconnect();
 }
    
 dmCtrl::~dmCtrl()
 {
+   if(m_parent) m_parent->unsubscribe(this);
 }
 
-int dmCtrl::subscribe( multiIndiPublisher * publisher )
+void dmCtrl::subscribe()
 {
-   if(!publisher) return -1;
+   if(!m_parent) return;
    
-   publisher->subscribeProperty(this, m_dmName, "fsm");
-   publisher->subscribeProperty(this, m_dmName, "sm_shmimName");
-   publisher->subscribeProperty(this, m_dmName, "flat");
-   publisher->subscribeProperty(this, m_dmName, "test");
-//   publisher->subscribeProperty(this, m_dmName, "");
-//   publisher->subscribeProperty(this, m_dmName, "");
+   m_parent->addSubscriberProperty(this, m_dmName, "fsm");
+   m_parent->addSubscriberProperty(this, m_dmName, "sm_shmimName");
+   m_parent->addSubscriberProperty(this, m_dmName, "flat");
+   m_parent->addSubscriberProperty(this, m_dmName, "flat_shmim");
+   m_parent->addSubscriberProperty(this, m_dmName, "flat_set");
+   m_parent->addSubscriberProperty(this, m_dmName, "test");
+   m_parent->addSubscriberProperty(this, m_dmName, "test_shmim");
+   m_parent->addSubscriberProperty(this, m_dmName, "test_set");
    
-   return 0;
+   return;
 }
+  
+void dmCtrl::onConnect()
+{
+   //ui.labelDMName->setEnabled(true);
+   ui.dmStatus->setEnabled(true);
+   ui.labelShmimName->setEnabled(true);
+   ui.labelShmimName_value->setEnabled(true);
+   ui.labelFlatShmim->setEnabled(true);
+   ui.labelFlatShmim_value->setEnabled(true);
+   ui.labelTestShmim->setEnabled(true);
+   ui.labelTestShmim_value->setEnabled(true);
+
+   ui.buttonZeroAll->setEnabled(true);
+      
+   ui.comboSelectFlat->setEnabled(true);
+   ui.comboSelectTest->setEnabled(true);
    
-int dmCtrl::handleDefProperty( const pcf::IndiProperty & ipRecv)
+   setWindowTitle(QString(m_dmName.c_str()));
+}
+
+void dmCtrl::onDisconnect()
+{
+   //ui.labelDMName->setEnabled(false);
+   ui.dmStatus->setEnabled(false);
+   ui.labelShmimName->setEnabled(false);
+   ui.labelShmimName_value->setEnabled(false);
+   ui.labelFlatShmim->setEnabled(false);
+   ui.labelFlatShmim_value->setEnabled(false);
+   ui.labelTestShmim->setEnabled(false);
+   ui.labelTestShmim_value->setEnabled(false);
+   
+   ui.buttonInit->setEnabled(false);
+   ui.buttonZero->setEnabled(false);
+   ui.buttonZeroAll->setEnabled(false);
+   ui.buttonRelease->setEnabled(false);
+
+   ui.buttonSetFlat->setEnabled(false);
+   ui.buttonZeroFlat->setEnabled(false);
+   
+   ui.buttonSetTest->setEnabled(false);
+   ui.buttonZeroTest->setEnabled(false);
+      
+   ui.comboSelectFlat->setEnabled(false);
+   ui.comboSelectTest->setEnabled(false);
+   
+   setWindowTitle(QString(m_dmName.c_str()) + QString(" (disconnected)"));
+
+   multiIndiSubscriber::onDisconnect();
+}
+
+void dmCtrl::handleDefProperty( const pcf::IndiProperty & ipRecv)
 {  
    return handleSetProperty(ipRecv);
-   
-   return 0;
 }
 
-int dmCtrl::handleSetProperty( const pcf::IndiProperty & ipRecv)
+void dmCtrl::handleSetProperty( const pcf::IndiProperty & ipRecv)
 {  
-   if(ipRecv.getDevice() != m_dmName) return 0;
-   
-   if(ipRecv.getName() == "fsm")
+   if(ipRecv.getDevice() != m_dmName) 
+   {  
+      return;
+   }
+   else if(ipRecv.getName() == "fsm")
    {
       if(ipRecv.find("state"))
       {
          m_appState = ipRecv["state"].get<std::string>();
       }
    }
-   
-   if(ipRecv.getName() == "sm_shmimName")
+   else if(ipRecv.getName() == "sm_shmimName")
    {
       if(ipRecv.find("name"))
       {
          m_shmimName = ipRecv["name"].get<std::string>();
       }
    }
-   
-   if(ipRecv.getName() == "flat")
+   else if(ipRecv.getName() == "flat")
    {
-      if(ipRecv.find("current"))
-      {
-         m_flatName = ipRecv["current"].get<std::string>();
-      }
+      ui.comboSelectFlat->clear();
       
-      if(ipRecv.find("target"))
+      for(auto it=ipRecv.getElements().begin(); it != ipRecv.getElements().end(); ++it)
       {
-         m_flatTarget = ipRecv["target"].get<std::string>();
+         if(ui.comboSelectFlat->findText(it->first.c_str(), Qt::MatchExactly | Qt::MatchCaseSensitive) == -1)
+         {
+            ui.comboSelectFlat->addItem(it->first.c_str());
+         }
+         
+         if(ipRecv[it->first] == pcf::IndiElement::On) ui.comboSelectFlat->setCurrentText(it->first.c_str()); 
       }
-      
-      if(ipRecv.find("shmimName"))
+   }
+   else if(ipRecv.getName() == "flat_shmim")
+   {
+      if(ipRecv.find("channel"))
       {
-         m_flatShmim = ipRecv["shmimName"].get<std::string>();
+         m_flatShmim = ipRecv["channel"].get<std::string>();
+      }
+   }
+   else if(ipRecv.getName() == "flat_set")
+   {
+      if(ipRecv.find("toggle"))
+      {
+         if(ipRecv["toggle"] == pcf::IndiElement::On) m_flatSet = true;
+         else m_flatSet = false;
+      }
+   }
+   else if(ipRecv.getName() == "test")
+   {
+      ui.comboSelectTest->clear();
+      
+      for(auto it=ipRecv.getElements().begin(); it != ipRecv.getElements().end(); ++it)
+      {
+         if(ui.comboSelectTest->findText(it->first.c_str(), Qt::MatchExactly | Qt::MatchCaseSensitive) == -1)
+         {
+            ui.comboSelectTest->addItem(it->first.c_str());
+         }
+         
+         if(ipRecv[it->first] == pcf::IndiElement::On) ui.comboSelectTest->setCurrentText(it->first.c_str());
+         
+      }
+   }
+   else if(ipRecv.getName() == "test_shmim")
+   {
+      if(ipRecv.find("channel"))
+      {
+         m_testShmim = ipRecv["channel"].get<std::string>();
+      }
+   }
+   else if(ipRecv.getName() == "test_set")
+   {
+      if(ipRecv.find("toggle"))
+      {
+         if(ipRecv["toggle"] == pcf::IndiElement::On) m_testSet = true;
+         else m_testSet = false;
       }
    }
    
-   if(ipRecv.getName() == "test")
-   {
-      if(ipRecv.find("current"))
-      {
-         m_testName = ipRecv["current"].get<std::string>();
-      }
-      
-      if(ipRecv.find("target"))
-      {
-         m_testTarget = ipRecv["target"].get<std::string>();
-      }
-      
-      if(ipRecv.find("shmimName"))
-      {
-         m_testShmim = ipRecv["shmimName"].get<std::string>();
-      }
-   }
+   
    
    updateGUI();
-   
-   //If we get here then we need to add this device
-   return 0;
    
 }
 
@@ -170,7 +248,12 @@ void dmCtrl::updateGUI()
    ui.labelFlatShmim_value->setText(m_flatShmim.c_str());
    ui.labelTestShmim_value->setText(m_testShmim.c_str());
 
-   
+//    ui.buttonSetFlat->setEnabled(true);
+//    ui.buttonZeroFlat->setEnabled(true);
+//    
+//    ui.buttonSetTest->setEnabled(true);
+//    ui.buttonZeroTest->setEnabled(true);
+//       
    if( m_appState != "READY" && m_appState != "OPERATING" )
    {
       //Disable & zero all
@@ -178,11 +261,10 @@ void dmCtrl::updateGUI()
       ui.buttonInit->setEnabled(false);
       ui.buttonZero->setEnabled(false);
       ui.buttonRelease->setEnabled(false);
-      ui.buttonLoadFlat->setEnabled(true);
+
       ui.buttonSetFlat->setEnabled(false);
       ui.buttonZeroFlat->setEnabled(false);
       
-      ui.buttonLoadTest->setEnabled(true);
       ui.buttonSetTest->setEnabled(false);
       ui.buttonZeroTest->setEnabled(false);
       
@@ -195,11 +277,10 @@ void dmCtrl::updateGUI()
       ui.buttonInit->setEnabled(true);
       ui.buttonZero->setEnabled(false);
       ui.buttonRelease->setEnabled(false);
-      ui.buttonLoadFlat->setEnabled(true);
+
       ui.buttonSetFlat->setEnabled(false);
       ui.buttonZeroFlat->setEnabled(false);
       
-      ui.buttonLoadTest->setEnabled(true);
       ui.buttonSetTest->setEnabled(false);
       ui.buttonZeroTest->setEnabled(false);
       
@@ -209,135 +290,165 @@ void dmCtrl::updateGUI()
    ui.buttonInit->setEnabled(false);
    ui.buttonZero->setEnabled(true);
    ui.buttonRelease->setEnabled(true);
-   ui.buttonLoadFlat->setEnabled(true);
    
 
-   if(m_flatName == m_flatTarget && m_flatName != "")
+   if(m_flatSet == false)
    {
       ui.buttonSetFlat->setEnabled(true);   
+      ui.buttonZeroFlat->setEnabled(false);
    }
    else
    {
       ui.buttonSetFlat->setEnabled(false);
-   }   
-   ui.buttonZeroFlat->setEnabled(true);
+      ui.buttonZeroFlat->setEnabled(true);
+   }
 
-   if(m_testName == m_testTarget && m_testName != "")
+   if(m_testSet == false)
    {
       ui.buttonSetTest->setEnabled(true);   
+      ui.buttonZeroTest->setEnabled(false);
    }
    else
    {
       ui.buttonSetTest->setEnabled(false);
+      ui.buttonZeroTest->setEnabled(true);
    }
-   ui.buttonZeroTest->setEnabled(true);
-      
+
 } //updateGUI()
 
 void dmCtrl::on_buttonInit_pressed()
 {
-   pcf::IndiProperty ipFreq(pcf::IndiProperty::Text);
+   pcf::IndiProperty ipFreq(pcf::IndiProperty::Switch);
    
    ipFreq.setDevice(m_dmName);
    ipFreq.setName("initDM");
    ipFreq.add(pcf::IndiElement("request"));
-   ipFreq["request"] = 1;
+   ipFreq["request"].setSwitchState(pcf::IndiElement::On);
     
    sendNewProperty(ipFreq);   
 }
 
+void dmCtrl::on_buttonZeroAll_pressed()
+{
+   
+   pcf::IndiProperty ip(pcf::IndiProperty::Switch);
+   
+   ip.setDevice(m_dmName);
+   ip.setName("zeroAll");
+   ip.add(pcf::IndiElement("request"));
+   
+   ip["request"].setSwitchState(pcf::IndiElement::On);
+   
+   sendNewProperty(ip);   
+}
+
 void dmCtrl::on_buttonZero_pressed()
 {
-   pcf::IndiProperty ipFreq(pcf::IndiProperty::Text);
+   pcf::IndiProperty ipFreq(pcf::IndiProperty::Switch);
    
    ipFreq.setDevice(m_dmName);
    ipFreq.setName("zeroDM");
    ipFreq.add(pcf::IndiElement("request"));
-   ipFreq["request"] = 1;
+   ipFreq["request"].setSwitchState(pcf::IndiElement::On);
     
    sendNewProperty(ipFreq);
 }
 
 void dmCtrl::on_buttonRelease_pressed()
 {
-   pcf::IndiProperty ipFreq(pcf::IndiProperty::Text);
+   pcf::IndiProperty ipFreq(pcf::IndiProperty::Switch);
    
    ipFreq.setDevice(m_dmName);
    ipFreq.setName("releaseDM");
    ipFreq.add(pcf::IndiElement("request"));
-   ipFreq["request"] = 1;
+   ipFreq["request"].setSwitchState(pcf::IndiElement::On);
     
    sendNewProperty(ipFreq);
 }
 
-void dmCtrl::on_buttonLoadFlat_pressed()
+
+
+void dmCtrl::on_comboSelectFlat_activated(int index)
 {
-   pcf::IndiProperty ipFreq(pcf::IndiProperty::Text);
-   
+   std::string choice = ui.comboSelectFlat->itemText(index).toStdString();
+   pcf::IndiProperty ipFreq(pcf::IndiProperty::Switch);
    ipFreq.setDevice(m_dmName);
    ipFreq.setName("flat");
-   ipFreq.add(pcf::IndiElement("target"));
-   ipFreq["target"] = "flat.fits";
-    
+   
+   for(int i=0; i < ui.comboSelectFlat->count(); ++i)
+   {
+      std::string eln = ui.comboSelectFlat->itemText(i).toStdString();
+      std::cerr << eln << "\n";
+      ipFreq.add(pcf::IndiElement(eln));
+      if(eln == choice) ipFreq[eln] = pcf::IndiElement::On;
+      else ipFreq[eln] = pcf::IndiElement::Off;
+   }
    sendNewProperty(ipFreq);
 }
 
 void dmCtrl::on_buttonSetFlat_pressed()
 {
-   pcf::IndiProperty ipFreq(pcf::IndiProperty::Text);
+   pcf::IndiProperty ipFreq(pcf::IndiProperty::Switch);
    
    ipFreq.setDevice(m_dmName);
-   ipFreq.setName("setFlat");
-   ipFreq.add(pcf::IndiElement("request"));
-   ipFreq["request"] = 1;
+   ipFreq.setName("flat_set");
+   ipFreq.add(pcf::IndiElement("toggle"));
+   ipFreq["toggle"] = pcf::IndiElement::On;
     
    sendNewProperty(ipFreq);
 }
 
 void dmCtrl::on_buttonZeroFlat_pressed()
 {
-   pcf::IndiProperty ipFreq(pcf::IndiProperty::Text);
+   pcf::IndiProperty ipFreq(pcf::IndiProperty::Switch);
    
    ipFreq.setDevice(m_dmName);
-   ipFreq.setName("zeroFlat");
-   ipFreq.add(pcf::IndiElement("request"));
-   ipFreq["request"] = 1;
+   ipFreq.setName("flat_set");
+   ipFreq.add(pcf::IndiElement("toggle"));
+   ipFreq["toggle"] = pcf::IndiElement::Off;
     
    sendNewProperty(ipFreq);
 }
 
-void dmCtrl::on_buttonLoadTest_pressed()
+
+
+void dmCtrl::on_comboSelectTest_activated(int index)
 {
-   pcf::IndiProperty ipFreq(pcf::IndiProperty::Text);
-   
+   std::string choice = ui.comboSelectTest->itemText(index).toStdString();
+   pcf::IndiProperty ipFreq(pcf::IndiProperty::Switch);
    ipFreq.setDevice(m_dmName);
    ipFreq.setName("test");
-   ipFreq.add(pcf::IndiElement("target"));
-   ipFreq["target"] = "test.fits";
-    
+   
+   for(int i=0; i < ui.comboSelectTest->count(); ++i)
+   {
+      std::string eln = ui.comboSelectTest->itemText(i).toStdString();
+      ipFreq.add(pcf::IndiElement(eln));
+      if(eln == choice) ipFreq[eln] = pcf::IndiElement::On;
+      else ipFreq[eln] = pcf::IndiElement::Off;
+   }
    sendNewProperty(ipFreq);
 }
 
 void dmCtrl::on_buttonSetTest_pressed()
 {
-   pcf::IndiProperty ipFreq(pcf::IndiProperty::Text);
+   pcf::IndiProperty ipFreq(pcf::IndiProperty::Switch);
    
    ipFreq.setDevice(m_dmName);
-   ipFreq.setName("setTest");
-   ipFreq.add(pcf::IndiElement("request"));
-   ipFreq["request"] = 1;
+   ipFreq.setName("test_set");
+   ipFreq.add(pcf::IndiElement("toggle"));
+   ipFreq["toggle"] = pcf::IndiElement::On;
     
    sendNewProperty(ipFreq);
 }
 
 void dmCtrl::on_buttonZeroTest_pressed()
 {
-   pcf::IndiProperty ipFreq(pcf::IndiProperty::Text);
+   pcf::IndiProperty ipFreq(pcf::IndiProperty::Switch);
    
    ipFreq.setDevice(m_dmName);
-   ipFreq.setName("zeroTest");
-   ipFreq.add(pcf::IndiElement("request"));
-   ipFreq["request"] = 1;
+   ipFreq.setName("test_set");
+   ipFreq.add(pcf::IndiElement("toggle"));
+   ipFreq["toggle"] = pcf::IndiElement::Off;
     
    sendNewProperty(ipFreq);
 }

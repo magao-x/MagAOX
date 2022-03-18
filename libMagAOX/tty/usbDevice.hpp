@@ -10,10 +10,15 @@
 #define tty_usbDevice_hpp
 
 
-#include "../../libMagAOX/tty/ttyIOUtils.hpp"
-#include "../../libMagAOX/tty/ttyUSB.hpp"
+#include <string>
 
-using namespace mx::app;
+
+#include <unistd.h>
+//#include <fcntl.h>
+//#include <poll.h>
+#include <termios.h>
+
+#include <mx/app/appConfigurator.hpp>
 
 namespace MagAOX
 {
@@ -41,7 +46,7 @@ struct usbDevice
      * \returns 0 on success.
      * \returns -1 on error (nothing implemented yet)
      */ 
-   int setupConfig( appConfigurator & config /**< [in] an application configuration to setup */);
+   int setupConfig( mx::app::appConfigurator & config /**< [in] an application configuration to setup */);
 
    ///Load the USB section from an application configurator
    /**
@@ -51,109 +56,23 @@ struct usbDevice
      * \returns 0 on success
      * \returns -1 on error (nothing implemented yet)
      */
-   int loadConfig( appConfigurator & config /**< [in] an application configuration from which to load values */);
+   int loadConfig( mx::app::appConfigurator & config /**< [in] an application configuration from which to load values */);
 
    ///Get the device name from udev using the vendor, product, and serial number.
    int getDeviceName();
 
    ///Connect to the device.
+   /** Closes the device file descriptor if open, then calls ttyOpenRaw.
+     * 
+     * \returns TTY_E_NOERROR on success.
+     * \returns TTY_E_TCGETATTR on a error from tcgetattr.
+     * \returns TTY_E_TCSETATTR on an error from tcsetattr.
+     * \returns TTY_E_SETISPEED on a cfsetispeed error.
+     * \returns TTY_E_SETOSPEED on a cfsetospeed error.
+     */
    int connect();
 };
 
-int usbDevice::setupConfig( mx::app::appConfigurator & config )
-{
-   config.add("usb.idVendor", "", "usb.idVendor", argType::Required, "usb", "idVendor", false, "string", "USB vendor id, 4 digits");
-   config.add("usb.idProduct", "", "usb.idProduct", argType::Required, "usb", "idProduct", false, "string", "USB product id, 4 digits");
-   config.add("usb.serial", "", "usb.serial", argType::Required, "usb", "serial", false, "string", "USB serial number");
-   config.add("usb.baud", "", "usb.baud", argType::Required, "usb", "baud", false, "real", "USB tty baud rate (i.e. 9600)");
-
-   return 0;
-}
-
-int usbDevice::loadConfig( mx::app::appConfigurator & config )
-{
-   config(m_idVendor, "usb.idVendor");
-   config(m_idProduct, "usb.idProduct");
-   config(m_serial, "usb.serial");
-
-   //We read the config as a float to allow 134.5
-   //Then multiply by 10 for the switch statement.
-   float baud = 0;
-   config(baud, "usb.baud");
-   
-   switch((int)(baud*10))
-   {
-      case 0:
-         break; //Don't change default.
-      case 500:
-         m_baudRate = B50;
-         break;
-      case 750:
-         m_baudRate = B75;
-         break;
-      case 1100:
-         m_baudRate = B110;
-         break;
-      case 1345:
-         m_baudRate = B134;
-         break;
-      case 1500:
-         m_baudRate = B150;
-         break;
-      case 2000:
-         m_baudRate = B200;
-         break;
-      case 3000:
-         m_baudRate = B300;
-         break;
-      case 6000:
-         m_baudRate = B600;
-         break;
-      case 18000:
-         m_baudRate = B1800;
-         break;
-      case 24000:
-         m_baudRate = B2400;
-         break;
-      case 48000:
-         m_baudRate = B4800;
-         break;
-      case 96000:
-         m_baudRate = B9600;
-         break;
-      case 192000:
-         m_baudRate = B19200;
-         break;
-      case 576000:
-         m_baudRate = B57600;
-         break;
-      case 384000:
-         m_baudRate = B38400;
-         break;
-      default:
-         break;
-   }
-
-   if(m_baudRate == 0) return TTY_E_BADBAUDRATE;
-
-   return getDeviceName();
-}
-
-int usbDevice::getDeviceName()
-{
-   return ttyUSBDevName( m_deviceName, m_idVendor, m_idProduct, m_serial );
-}
-
-int usbDevice::connect()
-{
-   if(m_fileDescrip)
-   {
-      ::close(m_fileDescrip);
-      m_fileDescrip = 0;
-   }
-   
-   return ttyOpenRaw( m_fileDescrip, m_deviceName, m_baudRate );
-}
 
 } //namespace tty
 } //namespace MagAOX

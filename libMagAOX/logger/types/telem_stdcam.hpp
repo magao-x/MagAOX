@@ -12,6 +12,7 @@
 
 #include "generated/telem_stdcam_generated.h"
 #include "flatbuffer_log.hpp"
+#include "../logMeta.hpp"
 
 namespace MagAOX
 {
@@ -99,6 +100,8 @@ struct telem_stdcam : public flatbuffer_log
          msg += std::to_string(fbs->roi()->ycen());
          msg += " w: ";
          msg += std::to_string(fbs->roi()->w());
+         msg += " h: ";
+         msg += std::to_string(fbs->roi()->h());
          msg += " xbin: ";
          msg += std::to_string(fbs->roi()->xbin());
          msg += " ybin: ";
@@ -131,7 +134,10 @@ struct telem_stdcam : public flatbuffer_log
             msg += " tempctr-statstr: ";
             msg += fbs->tempCtrl()->statusStr()->c_str();
          }
+      }
          
+      if(fbs->shutter() != nullptr)
+      {
          if(fbs->shutter()->statusStr())
          {
             msg += " shutter-statstr: ";
@@ -150,44 +156,186 @@ struct telem_stdcam : public flatbuffer_log
          {
             msg += "OPEN";
          }
-         
       }
-      
+
       return msg;
    
    }
    
-   static double exptime( void * msgBuffer )
+   static std::string mode( void * msgBuffer )
+   {
+      auto fbs = GetTelem_stdcam_fb(msgBuffer);
+      if(fbs->mode() != nullptr)
+      {
+         return std::string(fbs->mode()->c_str());
+      }
+      else return "";
+   }
+
+   static float xcen( void * msgBuffer )
+   {
+      auto fbs = GetTelem_stdcam_fb(msgBuffer);
+      if(fbs->roi() != nullptr) return fbs->roi()->xcen();
+      else return -1;
+   }
+
+   static float ycen( void * msgBuffer )
+   {
+      auto fbs = GetTelem_stdcam_fb(msgBuffer);
+      if(fbs->roi() != nullptr) return fbs->roi()->ycen();
+      else return -1;
+   }
+
+   static int width( void * msgBuffer )
+   {
+      auto fbs = GetTelem_stdcam_fb(msgBuffer);
+      if(fbs->roi() != nullptr) return fbs->roi()->w();
+      else return -1;
+   }
+
+   static int height( void * msgBuffer )
+   {
+      auto fbs = GetTelem_stdcam_fb(msgBuffer);
+      if(fbs->roi() != nullptr) return fbs->roi()->h();
+      else return -1;
+   }
+
+   static int xbin( void * msgBuffer )
+   {
+      auto fbs = GetTelem_stdcam_fb(msgBuffer);
+      if(fbs->roi() != nullptr) return fbs->roi()->xbin();
+      else return -1;
+   }
+
+   static int ybin( void * msgBuffer )
+   {
+      auto fbs = GetTelem_stdcam_fb(msgBuffer);
+      if(fbs->roi() != nullptr) return fbs->roi()->ybin();
+      else return -1;
+   }
+
+   static float exptime( void * msgBuffer )
    {
       auto fbs = GetTelem_stdcam_fb(msgBuffer);
       return fbs->exptime();
    }
    
-   static int shutter( void * msgBuffer )
+   static float fps( void * msgBuffer )
    {
       auto fbs = GetTelem_stdcam_fb(msgBuffer);
-      return fbs->shutter()->state();
+      return fbs->fps();
+   }
+
+   static float emGain( void * msgBuffer )
+   {
+      auto fbs = GetTelem_stdcam_fb(msgBuffer);
+      return fbs->emGain();
+   }
+
+   static float adcSpeed( void * msgBuffer )
+   {
+      auto fbs = GetTelem_stdcam_fb(msgBuffer);
+      return fbs->adcSpeed();
    }
    
-   /// Get pointer to the accessor for a member by name 
+   static float temp( void * msgBuffer )
+   {
+      auto fbs = GetTelem_stdcam_fb(msgBuffer);
+      if(fbs->tempCtrl() != nullptr) return fbs->tempCtrl()->temp();
+      else return -9999;
+   }
+
+   static float tempSetpt( void * msgBuffer )
+   {
+      auto fbs = GetTelem_stdcam_fb(msgBuffer);
+      if(fbs->tempCtrl() != nullptr) return fbs->tempCtrl()->setpt();
+      else return -9999;
+   }
+
+   static int tempStatus( void * msgBuffer )
+   {
+      auto fbs = GetTelem_stdcam_fb(msgBuffer);
+      if(fbs->tempCtrl() != nullptr) return fbs->tempCtrl()->status();
+      else return -9999;
+   }
+
+   static int tempOnTarget( void * msgBuffer )
+   {
+      auto fbs = GetTelem_stdcam_fb(msgBuffer);
+      if(fbs->tempCtrl() != nullptr) return fbs->tempCtrl()->ontarget();
+      else return -9999;
+   }
+
+   static std::string tempStatusStr( void * msgBuffer )
+   {
+      auto fbs = GetTelem_stdcam_fb(msgBuffer);
+      if(fbs->tempCtrl() != nullptr)
+      { 
+         if(fbs->tempCtrl()->statusStr()) return fbs->tempCtrl()->statusStr()->c_str();
+         else return "";
+      }
+      else return "";
+   }
+
+   static std::string shutterStatusStr( void * msgBuffer)
+   {
+      auto fbs = GetTelem_stdcam_fb(msgBuffer);
+      if(fbs->shutter() != nullptr)
+      {
+         if(fbs->shutter()->statusStr()) return fbs->shutter()->statusStr()->c_str();
+         else return "";
+      }
+      else return "";
+   }
+
+   static std::string shutterState( void * msgBuffer )
+   {
+      auto fbs = GetTelem_stdcam_fb(msgBuffer);
+      if(fbs->shutter() != nullptr)
+      {
+         if( fbs->shutter()->state() == -1) return "UNKNOWN";
+         else if( fbs->shutter()->state() == 0) return "SHUT";
+         else if( fbs->shutter()->state() == 1) return "OPEN";
+         else return "INVALID";
+      }
+      else return "INVALID";
+   }
+
+   /// Get the logMetaDetail for a member by name
    /**
      * \returns the function pointer cast to void*
      * \returns -1 for an unknown member
      */ 
-   static void * getAccessor( const std::string & member /**< [in] the name of the member */ )
+   static logMetaDetail getAccessor( const std::string & member /**< [in] the name of the member */ )
    {
-      if(member == "exptime") return (void *) &exptime;
-      if(member == "shutter") return (void *) &shutter;
+      if(member == "mode") return logMetaDetail({"MODE", logMeta::valTypes::String, logMeta::metaTypes::State, (void *) &mode});
+      else if(member == "xcen") return logMetaDetail({"ROI XCEN", logMeta::valTypes::Float, logMeta::metaTypes::State, (void *) &xcen});
+      else if(member == "ycen") return logMetaDetail({"ROI YCEN", logMeta::valTypes::Float, logMeta::metaTypes::State, (void *) &ycen});
+      else if(member == "width") return logMetaDetail({"ROI WIDTH", logMeta::valTypes::Float, logMeta::metaTypes::State, (void *) &width});
+      else if(member == "height") return logMetaDetail({"ROI HEIGHT", logMeta::valTypes::Float, logMeta::metaTypes::State, (void *) &height});
+      else if(member == "xbin") return logMetaDetail({"ROI XBIN", logMeta::valTypes::Float, logMeta::metaTypes::State, (void *) &xbin});
+      else if(member == "ybin") return logMetaDetail({"ROI YBIN", logMeta::valTypes::Float, logMeta::metaTypes::State, (void *) &ybin});
+      else if(member == "exptime") return logMetaDetail({"EXPTIME", logMeta::valTypes::Float, logMeta::metaTypes::State, (void *) &exptime});
+      else if(member == "fps") return logMetaDetail({"FPS", logMeta::valTypes::Float, logMeta::metaTypes::State, (void *) &fps});
+      else if(member == "emGain") return logMetaDetail({"EMGAIN", logMeta::valTypes::Float, logMeta::metaTypes::State, (void *) &emGain});
+      else if(member == "adcSpeed") return logMetaDetail({"ADC SPEED", logMeta::valTypes::Float, logMeta::metaTypes::State, (void *) &adcSpeed});
+      else if(member == "temp") return logMetaDetail({"TEMP", logMeta::valTypes::Float, logMeta::metaTypes::Continuous, (void *) &temp});
+      else if(member == "tempSetpt") return logMetaDetail({"TEMP SETPT", logMeta::valTypes::Float, logMeta::metaTypes::State, (void *) &tempSetpt});
+      else if(member == "tempStatus") return logMetaDetail({"TEMP STATUS", logMeta::valTypes::Int, logMeta::metaTypes::Continuous, (void *) &tempStatus});
+      else if(member == "tempOnTarget") return logMetaDetail({"TEMP ONTGT", logMeta::valTypes::Int, logMeta::metaTypes::Continuous, (void *) &tempOnTarget});
+      else if(member == "tempStatusStr") return logMetaDetail({"TEMP STATUSSTR", logMeta::valTypes::String, logMeta::metaTypes::State, (void *) &tempStatusStr});
+      else if(member == "shutterStatusStr") return logMetaDetail({"SHUTTER STATUS", logMeta::valTypes::String, logMeta::metaTypes::State, (void *) &shutterStatusStr});
+      else if(member == "shutterState") return logMetaDetail({"SHUTTER", logMeta::valTypes::String, logMeta::metaTypes::State, (void *) &shutterState});
       else
       {
          std::cerr << "No string member " << member << " in telem_stdcam\n";
-         return 0;
+         return logMetaDetail();
       }
    }
       
 }; //telem_stdcam
 
-timespec telem_stdcam::lastRecord = {0,0};
+
 
 } //namespace logger
 } //namespace MagAOX

@@ -80,30 +80,36 @@ protected:
    
    pcf::IndiProperty m_indiP_telpos;
    
-   //Telescope Data:
-   int m_telROI {0};
-   int m_telTracking {0};
-   int m_telGuiding {0};
-   int m_telSlewing {0};
-   int m_telGuiderMoving {0};
-   double m_telAz {0};
-   double m_telZd {0};
-   double m_telPA {0};
-   double m_telDomeAz {0};
-   int m_telDomeStat {0};
+   /// \name Telescope Data
+   /**@{
+    */
+   int m_telROI {0};          ///< The rotator of interest
+   int m_telTracking {0};     ///< tracking state
+   int m_telGuiding {0};      ///< guider moving state
+   int m_telSlewing {0};      ///< slewing state
+   int m_telGuiderMoving {0}; ///< guider moving state
+   double m_telAz {0};        ///< azimuth
+   double m_telZd {0};        ///< zenith distance
+   double m_telPA {0};        ///< parallactic angle
+   double m_telDomeAz {0};    ///< dome azimuth
+   int m_telDomeStat {0};     ///< dome status
    
    pcf::IndiProperty m_indiP_teldata;
-   
-   //Telescope Catalog Information
-   double m_catRA {0};
-   double m_catDec {0};
-   double m_catEp {0};
-   double m_catRo {0};
-   std::string m_catRm;
-   std::string m_catObj;
+   ///@}
+
+   /// \name Telescope Catalog Information
+   /**@{
+     */
+   double m_catRA {0};   ///< Catalog right ascension [degrees]
+   double m_catDec {0};  ///< Catalog declination [degrees]
+   double m_catEp {0};   ///< Catalog epoch
+   double m_catRo {0};   ///< Catalog rotator offset
+   std::string m_catRm;  ///< Catalog rotator mode
+   std::string m_catObj; ///< Catalog object name
    
    pcf::IndiProperty m_indiP_catalog; ///< INDI Property for the catalog text information
    pcf::IndiProperty m_indiP_catdata; ///< INDI Property for the catalog data
+   ///@}
 
    //Telescope Vane-End positions
    double m_telSecZ {0};
@@ -292,6 +298,10 @@ public:
      */
    
    bool m_offloadThreadInit {true}; ///< Initialization flag for the offload thread.
+   
+   pid_t m_offloadThreadID {0}; ///< Offload thread pid.
+   
+   pcf::IndiProperty m_offloadThreadProp; ///< Offload thread INDI property.
    
    std::thread m_offloadThread; ///< The offloading thread.
 
@@ -774,7 +784,7 @@ int tcsInterface::appStartup()
    for(size_t n=0; n < m_offloadRequests.size();++n) m_offloadRequests[n].resize(10,0);
    
    
-   if(threadStart( m_offloadThread, m_offloadThreadInit, 0, "offload", this, offloadThreadStart) < 0)
+   if(threadStart( m_offloadThread, m_offloadThreadInit, m_offloadThreadID, m_offloadThreadProp, 0, "", "offload", this, offloadThreadStart) < 0)
    {
       log<software_error>({__FILE__, __LINE__});
       return -1;
@@ -2253,6 +2263,9 @@ void tcsInterface::offloadThreadStart( tcsInterface * t )
 
 void tcsInterface::offloadThreadExec( )
 {
+   //Get the thread PID immediately so the caller can return.
+   m_offloadThreadID = syscall(SYS_gettid);
+
    static int last_loopState = -1;
    
    while( (m_offloadThreadInit == true || state() != stateCodes::CONNECTED) && shutdown() == 0)

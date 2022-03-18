@@ -236,7 +236,8 @@ void Thread::resume()
   m_oIsPaused = false;
 
   // Write a char to the pipe to kick the thread out of the 'select' call.
-  ::write( m_pfdPipe[1], "A", 1 );
+  int rv = ::write( m_pfdPipe[1], "A", 1 );
+  if(rv < 0) std::cerr << __FILE__ << " " << __LINE__ << " " << strerror(errno) << "\n";
 }
 
 ////////////////////////////////////////////////////////////////////////////////
@@ -246,7 +247,8 @@ void Thread::resume()
 void Thread::resumeOnce()
 {
   // Write a char to the pipe to kick the thread out of the 'select' call.
-  ::write( m_pfdPipe[1], "A", 1 );
+  int rv = ::write( m_pfdPipe[1], "A", 1 );
+  if(rv < 0) std::cerr << __FILE__ << " " << __LINE__ << " " << strerror(errno) << "\n";
 }
 
 ////////////////////////////////////////////////////////////////////////////////
@@ -492,7 +494,8 @@ void Thread::runLoop()
       {
         // Read the single char sent.
         char ch;
-        ::read( m_pfdPipe[0], &ch, 1 );
+        int rv = ::read( m_pfdPipe[0], &ch, 1 );
+        if(rv < 0) std::cerr << __FILE__ << " " << __LINE__ << " " << strerror(errno) << "\n";
       }
     }
 
@@ -704,6 +707,7 @@ void *Thread::pthreadFunc( void *pUnknown )
 
 void Thread::processSignalHandler( int nSignal )
 {
+  static_cast<void>(nSignal);
   // The signal handler is not re-installed, so it will not work again.
 }
 

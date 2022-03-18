@@ -12,8 +12,6 @@
 
 #include <unistd.h>
 
-#include <sys/syscall.h>
-
 namespace MagAOX 
 {
 namespace sys 
@@ -29,16 +27,7 @@ namespace sys
  * 
  * \ingroup sys
  */
-inline
-int th_seteuid(uid_t euid /**< [in] the desired new effective user id */)
-{
-   int rv = syscall(SYS_setreuid, -1, euid);
-   
-   return rv;
-}
-
-  
-
+int th_seteuid(uid_t euid /**< [in] the desired new effective user id */);
 
 } //namespace sys 
 } //namespace MagAOX 

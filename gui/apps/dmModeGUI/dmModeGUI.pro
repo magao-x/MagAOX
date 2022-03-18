@@ -1,3 +1,6 @@
+######################################################################
+# project file for dmModeGUI
+######################################################################
 
 TEMPLATE = app
 TARGET = dmModeGUI
@@ -21,10 +24,13 @@ exists( $$(CONDA_PREFIX)/include ) {
 MAKEFILE = makefile.dmModeGUI
 
 # Input
-HEADERS += ../../widgets/dmMode/dmModeGUI.hpp
+INCLUDEPATH += ../../lib ../../widgets/dmMode
+
+HEADERS += ../../widgets/dmMode/dmMode.hpp \
+           ../../widgets/xWidgets/xWidget.hpp \
+           ../../lib/multiIndiManager.hpp
            
-SOURCES += ../../widgets/dmMode/dmModeGUI.cpp \
-           dmModeGUI_main.cpp
+SOURCES += dmModeGUI_main.cpp
            
 FORMS += ../../widgets/dmMode/dmMode.ui
      

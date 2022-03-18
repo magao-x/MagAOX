@@ -377,9 +377,11 @@ int filterWheelCtrl::appLogic()
 
    if( state() == stateCodes::NOTCONNECTED )
    {
-      euidCalled();
-      int rv = connect();
-      euidReal();
+      int rv;
+      {
+         elevatedPrivileges elPriv(this);
+         rv = connect();
+      }
 
       if(rv < 0)
       {
@@ -579,6 +581,17 @@ int filterWheelCtrl::appLogic()
                   return log<software_error,0>({__FILE__,__LINE__});
                }
                m_homingState=4;
+            }
+            else if(m_homingState == 4)
+            {
+               if(m_homePreset >= 0)
+               {
+                  m_preset_target = m_presetPositions[m_homePreset];
+                  updateIfChanged(m_indiP_preset, "target",  m_preset_target, INDI_BUSY);
+   
+                  moveTo(m_preset_target);
+               }
+               m_homingState = 5;
             }
             else
             {

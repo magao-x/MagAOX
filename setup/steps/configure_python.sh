@@ -49,8 +49,8 @@ if [[ $MAGAOX_ROLE != ci ]]; then
 	cp $DIR/../systemd_units/jupyternotebook.service $UNIT_PATH/jupyternotebook.service
 	log_success "Installed jupyternotebook.service to $UNIT_PATH"
 	if [[ $MAGAOX_ROLE == vm ]]; then
-		sed -iE "s_WorkingDirectory=/home/xsup_WorkingDirectory=/vagrant_g" $UNIT_PATH/jupyternotebook.service
-	        sed -iE "s/xsup/vagrant/g" $UNIT_PATH/jupyternotebook.service
+		sed -iE "s_WorkingDirectory=/home/xsup/data_WorkingDirectory=/vagrant_g" $UNIT_PATH/jupyternotebook.service
+	    sed -iE "s/xsup/vagrant/g" $UNIT_PATH/jupyternotebook.service
 		log_info "Rewrote service for vagrant"
 	fi
 	systemctl daemon-reload
