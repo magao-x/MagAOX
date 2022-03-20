@@ -67,7 +67,7 @@ function _cached_fetch() {
 }
 
 VM_WINDOWS_HOST=0
-if [[ ! -z $WSL_DISTRO_NAME ]]; then
+if [[ ${WSL_DISTRO_NAME:-none} != "none" ]]; then
   VM_KIND=wsl
   VM_SHARED_FOLDER="$SETUPDIR/../vm"
   VM_WINDOWS_HOST=1
