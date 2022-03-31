@@ -271,7 +271,16 @@ void xindiserver::loadConfig()
    config(indiserver_n, "indiserver.N");
    config(indiserver_p, "indiserver.p");
    
+   //From command-line:
    indiserver_v = config.verbosity("indiserver.v");
+
+   if (!indiserver_v) {
+      //If there were no -v options on the command line, then
+      //check if v=1[,2[,3[...]]] was in the config file
+      std::vector<std::string> is_vs;
+      config(is_vs,"indiserver.v");
+      indiserver_v = is_vs.size();
+   }
    
    config(indiserver_x, "indiserver.x");
    
@@ -510,11 +519,11 @@ int xindiserver::forkIndiserver()
    
    if(m_log.logLevel() >= logPrio::LOG_INFO)
    {
-      std::string coml = "Starting indiserver with command: ";
+      std::string coml = "Starting indiserver with command:";
       for(size_t i=0;i<m_indiserverCommand.size();++i)
       {
-         coml += m_indiserverCommand[i];
          coml += " ";
+         coml += m_indiserverCommand[i];
       }
    
       log<text_log>(coml);

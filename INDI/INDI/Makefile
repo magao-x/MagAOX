@@ -5,8 +5,8 @@ include $(SELF_DIR)/../../Make/common.mk
 
 all: indiserver getINDI setINDI evalINDI
 
-indiserver: indiapi.h fq.h fq.c indiserver.c
-	$(CC) $(CFLAGS) -g -o indiserver -I../liblilxml  indiserver.c fq.c ../liblilxml/liblilxml.a -lpthread
+indiserver: strcat_varargs.h strcat_varargs.c pipe_wrapper.h pipe_wrapper.c indiapi.h fq.h fq.c indiserver.c
+	$(CC) $(CFLAGS) -g -o indiserver -I../liblilxml  indiserver.c pipe_wrapper.c strcat_varargs.c fq.c ../liblilxml/liblilxml.a -lpthread
 
 
 getINDI: connect_to.h connect_to.c indiapi.h getINDI.c
