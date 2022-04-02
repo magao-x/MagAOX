@@ -234,7 +234,6 @@ if [[ $MAGAOX_ROLE == RTC || $MAGAOX_ROLE == ICC || $MAGAOX_ROLE == AOC || $MAGA
 fi
 if [[ $MAGAOX_ROLE == RTC || $MAGAOX_ROLE == ICC || $MAGAOX_ROLE == AOC || $MAGAOX_ROLE == ci || ( $MAGAOX_ROLE == vm && $VM_KIND == vagrant ) ]]; then
     sudo bash -l "$DIR/steps/install_edt.sh"
-    sudo bash -l "$DIR/steps/install_picam.sh"
 fi
 
 ## Install proprietary / non-public software
@@ -263,6 +262,7 @@ if [[ -e $VENDOR_SOFTWARE_BUNDLE ]]; then
     fi
     if [[ $MAGAOX_ROLE == ICC ]]; then
         sudo bash -l "$DIR/steps/install_libhsfw.sh"
+        # TODO add to bundle: sudo bash -l "$DIR/steps/install_picam.sh"
     fi
     sudo rm -rf $BUNDLE_TMPDIR
 fi
