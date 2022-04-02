@@ -372,6 +372,10 @@ if [[ $MAGAOX_ROLE != ci ]]; then
     $MAYBE_SUDO bash -l "$DIR/steps/install_MagAOX.sh"
 fi
 
+if [[ $MAGAOX_ROLE == "RTC" ]]; then
+    sudo bash -l "$DIR/steps/configure_rtc_cpuset_service.sh"
+fi
+
 # To try and debug hardware issues, ICC and RTC replicate their
 # kernel console log over UDP to AOC over the instrument LAN.
 # The script that collects these messages is in ../scripts/netconsole_logger
