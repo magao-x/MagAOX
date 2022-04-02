@@ -54,7 +54,7 @@ def debug(msg):
 
 WHO_AM_I = getpass.getuser()
 if os.environ.get('MAGAOX_ROLE') == 'vm':
-    INSTRUMENT_USER = 'vagrant'
+    INSTRUMENT_USER = 'vagrant' if os.path.exists('/vagrant') else 'xsup'
 else:
     INSTRUMENT_USER = 'xsup'
 

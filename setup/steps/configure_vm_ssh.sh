@@ -40,9 +40,7 @@ HERE
       log_info "/home/$username/.ssh/known_hosts exists, not overwriting"
   fi
   if [[ ! -e /home/$username/.ssh/config ]]; then
-    cat << "HERE" | sudo tee /home/$username/.ssh/config
-Include $VM_SHARED_FOLDER/ssh/config
-HERE
+    echo "Include $VM_SHARED_FOLDER/ssh/config" | sudo tee /home/$username/.ssh/config
   else
       log_info "/home/$username/.ssh/config exists, not overwriting"
   fi
