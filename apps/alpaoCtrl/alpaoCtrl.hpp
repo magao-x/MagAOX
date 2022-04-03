@@ -312,7 +312,7 @@ int alpaoCtrl::initDM()
    {
       char err[1024];
       asdkGetLastError(&aerr, err, sizeof(err));
-      log<text_log>(std::string("DM initialization failed: ") + err, logPrio::LOG_ERROR);
+      log<software_error>({__FILE__, __LINE__, std::string("DM initialization failed: ") + err});
       
       m_dm = nullptr;
       return -1;
@@ -320,8 +320,9 @@ int alpaoCtrl::initDM()
    
    if (m_dm == NULL)
    {
-      log<text_log>("DM initialization failed.  NULL pointer.", logPrio::LOG_ERROR);
-      return -1;
+      char err[1024];
+      asdkGetLastError(&aerr, err, sizeof(err));
+      return log<software_error, -1>({__FILE__, __LINE__, std::string("DM initialization failed.  NULL pointer: ") + err});
    }
    
    log<text_log>("ALPAO " + m_serialNumber + " initialized", logPrio::LOG_NOTICE);
@@ -332,8 +333,7 @@ int alpaoCtrl::initDM()
    {
       char err[1024];
       asdkGetLastError(&aerr, err, sizeof(err));
-      log<text_log>(std::string("Getting number of actuators failed: ") + err, logPrio::LOG_ERROR);
-      return -1;
+      return log<software_error, -1>({__FILE__, __LINE__, std::string("Getting number of actuators failed: ") + err});
    }
    m_nbAct = tmp;
    
@@ -342,8 +342,7 @@ int alpaoCtrl::initDM()
    
    if(zeroDM() < 0)
    {
-      log<text_log>("DM initialization failed.  Error zeroing DM.", logPrio::LOG_ERROR);
-      return -1;
+      return log<software_error, -1>({__FILE__, __LINE__, "DM initialization failed.  Error zeroing DM."});
    }
    
    /* get actuator mapping from 2D cacao image to 1D vector for ALPAO input */
@@ -352,14 +351,12 @@ int alpaoCtrl::initDM()
    
    if(get_actuator_mapping() < 0)
    {
-      log<text_log>("DM initialization failed.  Failed to get actuator mapping.", logPrio::LOG_ERROR);
-      return -1;
+      return log<software_error, -1>({__FILE__, __LINE__, "DM initialization failed.  Failed to get actuator mapping."});
    }
 
    if( m_actuator_mapping == nullptr)
    {
-      log<text_log>("DM initialization failed.  null pointer.", logPrio::LOG_ERROR);
-      return -1;
+      return log<software_error, -1>({__FILE__, __LINE__, "DM initialization failed.  null pointer."});
    }
    
    state(stateCodes::OPERATING);
@@ -371,14 +368,12 @@ int alpaoCtrl::zeroDM()
 {
    if(m_dm == nullptr)
    {
-      log<text_log>("DM not initialized (NULL pointer)", logPrio::LOG_ERROR);
-      return -1;
+      return log<software_error, -1>({__FILE__, __LINE__, "DM not initialized (NULL pointer)"});
    }
    
    if(m_nbAct == 0)
    {
-      log<text_log>("DM not initialized (number of actuators)", logPrio::LOG_ERROR);
-      return -1;
+      return log<software_error, -1>({__FILE__, __LINE__, "DM not initialized (number of actuators)"});
    }
 
    Scalar * dminputs = (Scalar*) calloc( m_nbAct, sizeof( Scalar ) );
@@ -391,8 +386,11 @@ int alpaoCtrl::zeroDM()
 
    if(ret < 0)
    {
-      log<text_log>("Error zeroing DM", logPrio::LOG_ERROR);
-      return -1;
+      UInt aerr = 0;
+      char err[1024];
+      asdkGetLastError(&aerr, err, sizeof(err));
+
+      return log<software_error,-1>({__FILE__, __LINE__, std::string("Error zeroing DM: ") + err});
    }
    
    log<text_log>("DM zeroed");
@@ -465,8 +463,7 @@ int alpaoCtrl::releaseDM()
 
    if(m_dm == nullptr)
    {
-      log<text_log>("dm is not initialized", logPrio::LOG_ERROR);
-      return -1;
+      return log<software_error, -1>({__FILE__, __LINE__, "dm is not initialized"});
    }
    
    state(stateCodes::READY);
@@ -480,8 +477,7 @@ int alpaoCtrl::releaseDM()
    
    if(zeroDM() < 0)
    {
-      log<text_log>("DM release failed.  Error zeroing DM.", logPrio::LOG_ERROR);
-      return -1;
+      return log<software_error,-1>({__FILE__, __LINE__, "DM release failed.  Error zeroing DM."});
    }
    
    // Reset and release ALPAO
@@ -493,8 +489,7 @@ int alpaoCtrl::releaseDM()
    {
       char err[1024];
       asdkGetLastError(&aerr, err, sizeof(err));
-      log<text_log>(std::string("DM reset failed: ") + err, logPrio::LOG_ERROR);
-      return -1;
+      return log<software_error,-1>({__FILE__, __LINE__, std::string("DM reset failed: ") + err}); 
    }
    
    asdkRelease(m_dm); ///\todo error check
@@ -505,8 +500,7 @@ int alpaoCtrl::releaseDM()
    {
       char err[1024];
       asdkGetLastError(&aerr, err, sizeof(err));
-      log<text_log>(std::string("DM release failed: ") + err, logPrio::LOG_ERROR);
-      return -1;
+      return log<software_error, -1>({__FILE__, __LINE__, std::string("DM release failed: ") + err});
    }
 
    m_dm = nullptr;
@@ -536,8 +530,7 @@ int alpaoCtrl::parse_calibration_file() //const char * serial, Scalar *max_strok
     fp = fopen(calibpath.c_str(), "r");
     if (fp == NULL)
     {
-       log<text_log>("Could not read configuration file at " + calibpath, logPrio::LOG_ERROR);
-        return -1;
+       return log<software_error,-1>({__FILE__, __LINE__, "Could not read configuration file at " + calibpath});
     }
 
     calibvals = (Scalar*) malloc(2*sizeof(Scalar));
