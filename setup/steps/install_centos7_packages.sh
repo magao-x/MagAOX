@@ -14,6 +14,7 @@ yum -y install centos-release-scl
 
 # Install build tools and utilities
 yum install -y \
+    which \
     openssh \
     cmake3 \
     vim \

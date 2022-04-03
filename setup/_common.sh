@@ -1,4 +1,5 @@
 #!/bin/bash
+SETUPDIR="$( cd "$( dirname "${BASH_SOURCE[0]}" )" && pwd )"
 if [[ "$SHELLOPTS" =~ "nounset" ]]; then
   _WAS_NOUNSET=1
 else
@@ -65,11 +66,16 @@ function _cached_fetch() {
   fi
 }
 
-if [[ -e /vagrant/windows_host.txt ]]; then
+VM_WINDOWS_HOST=0
+if [[ ${WSL_DISTRO_NAME:-none} != "none" ]]; then
+  VM_KIND=wsl
+  VM_SHARED_FOLDER="$SETUPDIR/../vm"
   VM_WINDOWS_HOST=1
-else
-  VM_WINDOWS_HOST=0
+elif [[ -d /vagrant ]]; then
+  VM_KIND=vagrant
+  VM_SHARED_FOLDER="/vagrant/vm"
 fi
+
 
 function clone_or_update_and_cd() {
     orgname=$1
@@ -86,8 +92,8 @@ function clone_or_update_and_cd() {
     # and re-enable.
 
     if [[ $MAGAOX_ROLE == vm && $VM_WINDOWS_HOST == 0 ]]; then
-        mkdir -p /vagrant/vm/$reponame
-        link_if_necessary /vagrant/vm/$reponame $destdir
+      mkdir -p "$VM_SHARED_FOLDER/$reponame"
+      link_if_necessary "$VM_SHARED_FOLDER/$reponame" $destdir
     fi
     if [[ ! -d $parentdir/$reponame/.git ]]; then
       echo "Cloning new copy of $orgname/$reponame"
@@ -105,7 +111,7 @@ function clone_or_update_and_cd() {
     fi
     git config core.sharedRepository group
     if [[ $MAGAOX_ROLE != vm ]]; then
-      sudo chown -R :magaox-dev $destdir
+      sudo chown -Rv :magaox-dev $destdir
       sudo chmod -R g=rwX $destdir
       # n.b. can't be recursive because g+s on files means something else
       # so we find all directories and individually chmod them:
