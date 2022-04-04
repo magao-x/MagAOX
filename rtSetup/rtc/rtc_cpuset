@@ -52,8 +52,8 @@
 #    34           1            26          70            1            26 
 #    35           1            27          71            1            27 
             
-# we will use processors 0-13 and 36-49 as the hyperthread system cpus,
-# so we disable processors 50-71. This leaves us 14-35 as single thread processors.
+# we will use processors 0-13 and 36-49 as the hyperthread system cpus (28),
+# so we disable processors 50-71. This leaves us 14-35 (22) as single thread processors.
 
 # Disable processors 50-71
 for cpu in {50..71}
@@ -85,7 +85,7 @@ echo 0 > cpuset.sched_load_balance
 echo 1 > system/cpuset.sched_load_balance
 
 ###############
-# Now setup cpusets for the RTC processes
+# Now setup cpusets for the RTC R/T processes
 # We have cores 14-35 (22 cores) to use.
 # Curently unused: 14-16 (3)  These are created as "spareN"
 ###############
