@@ -117,7 +117,16 @@ utils_to_build = logdump \
 				     xrif2shmim \
 				     xrif2fits
 
-scripts_to_install = magaox query_seeing sync_cacao xctrl netconsole_logger creaimshm dmdispbridge shmimTCPreceive shmimTCPtransmit
+scripts_to_install = magaox \
+	query_seeing \
+	sync_cacao \
+	xctrl \
+	netconsole_logger \
+	creaimshm \
+	dmdispbridge \
+	shmimTCPreceive \
+	shmimTCPtransmit \
+	lookyloo
 
 all: indi_all libs_all flatlogs apps_all guis_all utils_all
 
