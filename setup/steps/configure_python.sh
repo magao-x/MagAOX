@@ -46,6 +46,11 @@ if [[ -e $UNIT_PATH/jupyterlab.service ]]; then
 fi
 
 if [[ $MAGAOX_ROLE != ci && $VM_KIND != wsl ]]; then
+	if [[ $MAGAOX_ROLE == AOC ]]; then
+		cp $DIR/../systemd_units/lookyloo.service $UNIT_PATH/lookyloo.service
+		log_success "Installed lookyloo.service to $UNIT_PATH"
+	fi
+	
 	cp $DIR/../systemd_units/jupyternotebook.service $UNIT_PATH/jupyternotebook.service
 	log_success "Installed jupyternotebook.service to $UNIT_PATH"
 	if [[ $MAGAOX_ROLE == vm ]]; then
@@ -53,9 +58,17 @@ if [[ $MAGAOX_ROLE != ci && $VM_KIND != wsl ]]; then
 	    sed -iE "s/xsup/vagrant/g" $UNIT_PATH/jupyternotebook.service
 		log_info "Rewrote service for vagrant"
 	fi
+	
 	systemctl daemon-reload
+	
 	systemctl enable jupyternotebook
 	log_success "Enabled jupyternotebook service"
 	systemctl start jupyternotebook
 	log_success "Started jupyternotebook service"
+	if [[ $MAGAOX_ROLE == AOC ]]; then
+		systemctl enable lookyloo
+		log_success "Enabled lookyloo service"
+		systemctl start lookyloo
+		log_success "Started lookyloo service"
+	fi
 fi

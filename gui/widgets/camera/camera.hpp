@@ -27,6 +27,7 @@ protected:
    std::string m_appState;
    
    std::string m_camName;
+   std::string m_darkName;
 
    fsmDisplay * ui_fsmState {nullptr};
 
@@ -46,7 +47,10 @@ protected:
    statusEntry * ui_fps {nullptr};
    statusEntry * ui_emGain {nullptr};
 
+   QPushButton * ui_takeDarks {nullptr};
    float m_temp {-99};
+
+   bool m_takingDark {false};
 
    bool m_inUpdate {false};
 
@@ -93,6 +97,10 @@ public slots:
    void setup_fps(bool ro);
    void setup_emGain(bool ro);
 
+   void setup_takeDarks();
+
+   void takeDark();
+
 signals:
    void updateTimerStop();
    void updateTimerStart(int);
@@ -112,6 +120,7 @@ signals:
    void add_fps(bool ro);
    void add_emGain(bool ro);
 
+   void add_takeDarks();
 private:
      
    Ui::camera ui;
@@ -121,6 +130,7 @@ camera::camera( std::string & camName,
                 QWidget * Parent, 
                 Qt::WindowFlags f) : xWidget(Parent, f), m_camName{camName}
 {
+   m_darkName = m_camName + "-dark";
    ui.setupUi(this);
 
    m_updateTimer = new QTimer(this);
@@ -144,6 +154,8 @@ camera::camera( std::string & camName,
    connect(this, SIGNAL(add_fps(bool)), this, SLOT(setup_fps(bool)));
    connect(this, SIGNAL(add_emGain(bool)), this, SLOT(setup_emGain(bool)));
    
+   connect(this, SIGNAL(add_takeDarks()), this, SLOT(setup_takeDarks()));
+
    QSpacerItem *holder = new QSpacerItem(10,0, QSizePolicy::Expanding, QSizePolicy::Expanding);
    ui.grid->addItem(holder, 2,1,1,1);
 
@@ -171,6 +183,7 @@ void camera::subscribe()
    if(!m_parent) return;
    
    m_parent->addSubscriberProperty((multiIndiSubscriber *) this, m_camName, "fsm");
+   m_parent->addSubscriberProperty((multiIndiSubscriber *) this, m_darkName, "start");
 
    m_parent->addSubscriber(ui_fsmState);
 
@@ -246,105 +259,124 @@ void camera::handleDefProperty( const pcf::IndiProperty & ipRecv)
 
 void camera::handleSetProperty( const pcf::IndiProperty & ipRecv)
 {  
-   if(ipRecv.getDevice() != m_camName) return;
+   if(ipRecv.getDevice() != m_camName && ipRecv.getDevice() != m_darkName) return;
    
-   if(ipRecv.getName() == "fsm")
+   if(ipRecv.getDevice() == m_camName)
    {
-      if(ipRecv.find("state"))
+      if(ipRecv.getName() == "fsm")
       {
-         m_appState = ipRecv["state"].get<std::string>();
+         if(ipRecv.find("state"))
+         {
+            m_appState = ipRecv["state"].get<std::string>();
+         }
       }
-   }
+      
+      if(ipRecv.getName() == "temp_ccd")
+      {
+         if(!ui_tempCCD)
+         {
+            bool ro = true;
+            if(ipRecv.find("target")) ro = false;
    
-   if(ipRecv.getName() == "temp_ccd")
-   {
-      if(!ui_tempCCD)
+            emit add_temp_ccd(ro);
+         }
+      }
+   
+      if(ipRecv.getName() == "temp_control")
       {
-         bool ro = true;
-         if(ipRecv.find("target")) ro = false;
-
-         emit add_temp_ccd(ro);
+         if(!ui_tempStatus)
+         {
+            emit add_tempStatus();
+         }
+      }
+   
+      if(ipRecv.getName() == "shutter")
+      {
+         if(!ui_shutterStatus)
+         {
+            emit add_shutter();
+         }
+      }
+   
+      if(ipRecv.getName() == "roi_set")
+      {
+         if(!ui_roiStatus)
+         {
+            emit add_roiStatus();
+         }
+      }
+   
+      if(ipRecv.getName() == "mode")
+      {
+         if(!ui_modes)
+         {
+            emit add_modes();
+         }
+      }
+   
+      if(ipRecv.getName() == "readout_speed")
+      {
+         if(!ui_readoutSpd)
+         {
+            emit add_readoutSpd();
+         }
+      }
+   
+      if(ipRecv.getName() == "vshift_speed")
+      {
+         if(!ui_vshiftSpd)
+         {
+            emit add_vshiftSpd();
+         }
+      }
+   
+      if(ipRecv.getName() == "exptime")
+      {
+         if(!ui_expTime)
+         {
+            bool ro = true;
+            if(ipRecv.find("target")) ro = false;
+   
+            emit add_expTime(ro);
+         }
+      }
+   
+      if(ipRecv.getName() == "fps")
+      {
+         if(!ui_fps)
+         {
+            bool ro = true;
+            if(ipRecv.find("target")) ro = false;
+   
+            emit add_fps(ro);
+         }
+      }
+   
+      if(ipRecv.getName() == "emgain")
+      {
+         if(!ui_emGain)
+         {
+            bool ro = true;
+            if(ipRecv.find("target")) ro = false;
+   
+            emit add_emGain(ro);
+         }
       }
    }
-
-   if(ipRecv.getName() == "temp_control")
+   else if(ipRecv.getDevice() == m_darkName)
    {
-      if(!ui_tempStatus)
+      if(!ui_takeDarks) emit add_takeDarks();
+
+      if(ipRecv.getName() == "start" && ipRecv.find("toggle"))
       {
-         emit add_tempStatus();
-      }
-   }
-
-   if(ipRecv.getName() == "shutter")
-   {
-      if(!ui_shutterStatus)
-      {
-         emit add_shutter();
-      }
-   }
-
-   if(ipRecv.getName() == "roi_set")
-   {
-      if(!ui_roiStatus)
-      {
-         emit add_roiStatus();
-      }
-   }
-
-   if(ipRecv.getName() == "mode")
-   {
-      if(!ui_modes)
-      {
-         emit add_modes();
-      }
-   }
-
-   if(ipRecv.getName() == "readout_speed")
-   {
-      if(!ui_readoutSpd)
-      {
-         emit add_readoutSpd();
-      }
-   }
-
-   if(ipRecv.getName() == "vshift_speed")
-   {
-      if(!ui_vshiftSpd)
-      {
-         emit add_vshiftSpd();
-      }
-   }
-
-   if(ipRecv.getName() == "exptime")
-   {
-      if(!ui_expTime)
-      {
-         bool ro = true;
-         if(ipRecv.find("target")) ro = false;
-
-         emit add_expTime(ro);
-      }
-   }
-
-   if(ipRecv.getName() == "fps")
-   {
-      if(!ui_fps)
-      {
-         bool ro = true;
-         if(ipRecv.find("target")) ro = false;
-
-         emit add_fps(ro);
-      }
-   }
-
-   if(ipRecv.getName() == "emgain")
-   {
-      if(!ui_emGain)
-      {
-         bool ro = true;
-         if(ipRecv.find("target")) ro = false;
-
-         emit add_emGain(ro);
+         if(ipRecv["toggle"].getSwitchState() == pcf::IndiElement::On)
+         {
+            m_takingDark = true;
+         }
+         else 
+         {
+            m_takingDark = false;
+         }
       }
    }
 
@@ -385,6 +417,18 @@ void camera::updateGUI()
    if(ui_expTime) ui_expTime->updateGUI();
    if(ui_fps) ui_fps->updateGUI();
    if(ui_emGain) ui_emGain->updateGUI();
+
+   if( (m_appState == "READY" || m_appState == "OPERATING") && ui_takeDarks )
+   {
+      if(m_takingDark)
+      {
+         ui_takeDarks->setEnabled(false);
+      }
+      else
+      {
+         ui_takeDarks->setEnabled(true);
+      }
+   }
 
    emit updateTimerStart(1000);
    m_inUpdate = false;
@@ -523,6 +567,28 @@ void camera::setup_emGain(bool ro)
    m_parent->addSubscriber(ui_emGain);
 }
 
+void camera::setup_takeDarks()
+{
+   ui_takeDarks = new QPushButton(this);
+   ui_takeDarks->setObjectName(QString::fromUtf8("takeDarks"));
+   ui_takeDarks->setText("take dark");
+   connect(ui_takeDarks, SIGNAL(pressed()), this, SLOT(takeDark()));
+   ui.grid->addWidget(ui_takeDarks, 8, 0, 1, 1);   
+
+}
+
+void camera::takeDark()
+{
+   pcf::IndiProperty ipFreq(pcf::IndiProperty::Switch);
+   
+   ipFreq.setDevice(m_darkName);
+   ipFreq.setName("start");
+   ipFreq.add(pcf::IndiElement("toggle"));
+   ipFreq["toggle"].setSwitchState(pcf::IndiElement::On);
+    
+   sendNewProperty(ipFreq);   
+}
+
 void camera::hideAll()
 {
    if(ui_roiStatus) ui_roiStatus->hide();
@@ -547,6 +613,7 @@ void camera::setEnableDisable(bool tf, bool all)
    if(ui_expTime) ui_expTime->setEnabled(tf);
    if(ui_fps) ui_fps->setEnabled(tf);
    if(ui_emGain) ui_emGain->setEnabled(tf);
+   if(ui_takeDarks) ui_takeDarks->setEnabled(tf);
    
 }
 

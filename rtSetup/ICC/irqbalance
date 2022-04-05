@@ -1,5 +1,5 @@
 #######################################
-# MagAO-X irqbalanc configuration
+# MagAO-X irqbalance configuration
 #
 # Edit the IRQBALANCE_BANNED_CPUS bitmask to match the r/t cpusets created in rtc_cpuset
 #
@@ -10,11 +10,6 @@
 # If first time after new installation: $ cp /etc/sysconfig/irqbalance /etc/sysconfig/irqbalance.bup
 #
 # $ systemctl stop irqbalance
-# $ cp /opt/MagAOX/source/MagAOX/rtSetup/rtc/irqbalance /etc/sysconfig/irqbalance
-#
-# Now install magaorx_irqpolscript in /usr/local/bin and set selinux to allow
-# irqbalance to run it:
-# $ semanage permissive -a irqbalance_t
 #
 # Then start irqbalance:
 # $ systemctl start irqbalance
@@ -47,6 +42,11 @@ IRQBALANCE_BANNED_CPUS=00,fffc000f,ffffc000
 # IRQBALANCE_ARGS
 # append any args here to the irqbalance daemon as documented in the man page
 #
-IRQBALANCE_ARGS=--policyscript=/usr/local/bin/magaox_irqpolscript
+# Banning IDs from /proc/interrupts (first column is ID)
+#
+#   40 : enx503eaa0ceeff
+#   41 : enx503eaa0cf4cd
+#   64 : edt
+IRQBALANCE_ARGS=--banirq=40 --banirq=41 --banirq=64
 
 

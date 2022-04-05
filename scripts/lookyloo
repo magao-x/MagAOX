@@ -1,0 +1,275 @@
+#!/usr/bin/env python
+import re
+import subprocess
+import pathlib
+import typing
+import dataclasses
+import sys
+import time
+import datetime
+from datetime import timezone
+import threading
+import queue
+import logging
+
+log = logging.getLogger(__name__)
+
+TELEM_ROOT = pathlib.Path('/opt/MagAOX/telem')
+ICC_DATA = pathlib.Path('/data/icc')
+RTC_DATA = pathlib.Path('/data/rtc')
+AOC_DATA = pathlib.Path('/data')
+QUICKLOOK_PATH = pathlib.Path('/data/users/xsup/quicklook')
+SCIENCE_CAMERAS = ['camsci1', 'camsci2']
+SLEEP_FOR_TELEMS = 30
+CHECK_INTERVAL_SEC = 30
+LINE_BUFFERED = 1
+
+_time_to_exit = False
+
+# note: we must truncate to microsecond precision due to limitations in
+# `datetime`, so this pattern works only after chopping off the last
+# three characters
+MODIFIED_TIME_FORMAT = "%Y%m%d%H%M%S%f"
+PRETTY_MODIFIED_TIME_FORMAT = "%Y-%m-%dT%H-%M-%S.%f"
+OBSERVERS_DEVICE = "observers"
+LINE_FORMAT_REGEX = re.compile(
+    r"(\d{4})-(\d{2})-(\d{2})T(\d{2}):(\d{2}):(\d{2})\.(\d{6})(?:\d{3}) "
+    r"TELM \[observer\] email: (.*) obs: (.*) (\d)"
+)
+
+@dataclasses.dataclass
+class TimestampedFile:
+    path : pathlib.Path
+    timestamp : datetime.datetime
+
+@dataclasses.dataclass
+class ObserverTelem:
+    ts : datetime.datetime
+    email : str
+    obs : str
+    on : bool
+
+def parse_observers_line(line):
+    groups = LINE_FORMAT_REGEX.match(line).groups()
+    ts = datetime.datetime(
+        year=int(groups[0]),
+        month=int(groups[1]),
+        day=int(groups[2]),
+        hour=int(groups[3]),
+        minute=int(groups[4]),
+        second=int(groups[5]),
+        microsecond=int(groups[6]),
+        tzinfo=timezone.utc,
+    )
+    email = groups[7]
+    obs = groups[8]
+    on = groups[9] == '1'
+    return ObserverTelem(ts, email, obs, on)
+
+def parse_logdump_for_observers(telem_path : pathlib.Path):
+    p1 = subprocess.Popen(
+        ['logdump', f'--dir={TELEM_ROOT}', '--ext=.bintel', telem_path.name],
+        stdout=subprocess.PIPE,
+        stderr=subprocess.DEVNULL,
+        bufsize=LINE_BUFFERED,
+        text=True
+    )
+    outiter = iter(p1.stdout.readline, '')
+    # skip line 1: 0
+    next(outiter)
+    # skip line 2: path
+    next(outiter)
+    last_telem = None
+    for line in outiter:
+        line = line.strip()
+        if not line:
+            continue
+        this_telem = parse_observers_line(line)
+        if last_telem is None:
+            last_telem = this_telem
+        # convert to "edge-triggered" events only by yielding
+        # a line only when something is changed
+        if (
+            this_telem.email != last_telem.email or
+            this_telem.obs != last_telem.obs or
+            this_telem.on != last_telem.on
+        ):
+            last_telem = this_telem
+            yield this_telem
+
+@dataclasses.dataclass(frozen=True, eq=True)
+class ObservationSpan:
+    email : str
+    title : str
+    begin : datetime.datetime
+    end : typing.Optional[datetime.datetime]
+
+    def __str__(self, ):
+        endpart = f" to {self.end.isoformat()}" if self.end is not None else ""
+        return f"<ObservationSpan: {self.email} '{self.title}' from {self.begin.isoformat()}{endpart}>"
+
+def get_matching_paths(
+    base_path : pathlib.Path,
+    device : str,
+    extension : str,
+    newer_than_dt: datetime.datetime,
+    older_than_dt: datetime.datetime=None
+):
+    newer_than_dt_fn = f"{device}_{newer_than_dt.strftime(MODIFIED_TIME_FORMAT)}000.{extension}"
+    if older_than_dt is not None:
+        older_than_dt_fn = f"{device}_{older_than_dt.strftime(MODIFIED_TIME_FORMAT)}000.{extension}"
+    else:
+        older_than_dt_fn = None
+    all_matching_files = list(sorted(base_path.glob(f'{device}_*.{extension}')))
+    n_files = len(all_matching_files)
+    filtered_files = []
+    for idx, telem_path in enumerate(all_matching_files):
+        # it's possible for a file to start before `newer_than_dt`
+        # but record an observation starting after `newer_than_dt`, so
+        # we grab the last file *before* the first that was started after
+        # our `newer_than_dt` too
+        if (
+            telem_path.name > newer_than_dt_fn or 
+            (idx + 1 < n_files and all_matching_files[idx+1].name > newer_than_dt_fn) or
+            idx == n_files - 1
+        ):
+            if older_than_dt is not None and telem_path.name > older_than_dt_fn:
+                # can't find in-range entries from files opened after `older_than_dt`
+                # so skip
+                continue
+            chopped_name = telem_path.name.replace('.' + extension, '')[:-3]
+            chopped_ts_str = chopped_name.split('_')[1]
+            ts = datetime.datetime.strptime(chopped_ts_str, MODIFIED_TIME_FORMAT).replace(tzinfo=timezone.utc)
+            filtered_files.append(TimestampedFile(telem_path, ts))
+    return filtered_files
+    
+
+def get_observation_telems(newer_than_dt : datetime.datetime):
+    events = []
+    for telem_path in get_matching_paths(TELEM_ROOT, OBSERVERS_DEVICE, 'bintel', newer_than_dt):
+        events.extend(parse_logdump_for_observers(telem_path.path))
+    return events
+
+def transform_telems_to_spans(events : typing.List[ObserverTelem], ending_after_dt : datetime.datetime):
+    spans = []
+    current_observer_email : str = None
+    current_observation : str = None
+    current_observation_start : datetime.datetime = None
+    
+    def _add_span(email, title, begin, end):
+        if end is not None and end < ending_after_dt:
+            log.debug(f"Discarding span {email} '{title}' {begin.isoformat()}-{end.isoformat()} because end after {ending_after_dt.isoformat()}")
+            return
+        end_str = end.isoformat() if end is not None else 'ongoing'
+        log.debug(f"Keeping span {email} '{title}' {begin.isoformat()}-{end_str}")
+        spans.append(ObservationSpan(
+            email,
+            title,
+            begin,
+            end
+        ))
+    
+    for event in events:
+        if event.on:
+            if current_observation_start is not None:
+                # something other than 'on' must have changed, or else
+                # edge-triggering must be borked
+                if event.email != current_observer_email or event.obs != current_observation:
+                    log.debug(f"Transitioned to observing but observation span already active: {event} {current_observer_email} {current_observation}")
+                # so we end this current span before starting the next one, guessing the timestamp
+                log.debug(f"Abnormally ended span {current_observer_email} {current_observation} {current_observation_start}")
+                _add_span(
+                    current_observer_email,
+                    current_observation,
+                    current_observation_start,
+                    event.ts
+                )
+            current_observer_email = event.email
+            current_observation = event.obs
+            current_observation_start = event.ts
+            log.debug(f"Began span {current_observer_email} {current_observation} {event.ts}")
+        elif not event.on and current_observation is not None:
+            _add_span(
+                current_observer_email,
+                current_observation,
+                current_observation_start,
+                event.ts
+            )
+            current_observation = current_observation_start = current_observer_email = None
+    
+    # new starting point for next iteration, ignore anything that we already processed
+    if len(spans):
+        ending_after_dt = spans[-1].end
+    
+    if current_observation_start is not None:
+        _add_span(
+            current_observer_email,
+            current_observation,
+            current_observation_start,
+            None
+        )
+    return spans, ending_after_dt
+
+def get_new_observation_spans(existing_observation_spans : typing.Set[ObservationSpan], ending_after_dt : datetime.datetime):
+    events = get_observation_telems(ending_after_dt)
+    spans, ending_after_dt = transform_telems_to_spans(events, ending_after_dt)
+    if len(spans):
+        new_observation_spans = set(spans) - existing_observation_spans
+        return new_observation_spans, ending_after_dt
+    else:
+        return set(), ending_after_dt
+
+def do_quicklook_for_camera(span, device):
+    image_path = ICC_DATA / 'rawimages' / device
+    log.debug(f"Checking {image_path} ...")
+    matching_files = get_matching_paths(image_path, device, 'xrif', newer_than_dt=span.begin, older_than_dt=span.end)
+    if len(matching_files):
+        destination = QUICKLOOK_PATH / span.email / span.title
+        destination.mkdir(parents=True, exist_ok=True)
+        convert_xrif(image_path, matching_files, destination)
+        log.info(f"Wrote to {destination}")
+
+def convert_xrif(base_dir, paths : typing.List[TimestampedFile], destination_path):
+    for data_file in paths:
+        delta = datetime.datetime.utcnow().replace(tzinfo=timezone.utc) - data_file.timestamp
+        if delta.seconds < SLEEP_FOR_TELEMS:
+            time.sleep(SLEEP_FOR_TELEMS - delta.seconds)
+    args = [
+        'xrif2fits',
+        '-d', str(base_dir),
+        '-f', ','.join(p.path.name for p in paths),
+        '-t', '/data/icc/telem,/data/rtc/telem,/data/telem', 
+        '-l', '/data/icc/logs,/data/rtc/logs,/data/logs', 
+        '-D', str(destination_path)
+    ]
+    log.debug(" ".join(args))
+    subprocess.check_call(args)
+
+def main():
+    logging.basicConfig(level='INFO')
+    if not QUICKLOOK_PATH.is_dir():
+        QUICKLOOK_PATH.mkdir(parents=True, exist_ok=True)
+    ending_after_dt = datetime.datetime.utcnow() - datetime.timedelta(minutes=120)
+    ending_after_dt = ending_after_dt.replace(tzinfo=timezone.utc)
+    existing_observation_spans = set()
+
+    while True:
+        start_time = time.time()
+        try:
+            result = get_new_observation_spans(existing_observation_spans, ending_after_dt)
+            new_observation_spans : typing.List[ObservationSpan] = result[0]
+            ending_after_dt : datetime.datetime = result[1]
+            for span in new_observation_spans:
+                log.info(f"Observation interval to process: {span}")
+                for device in SCIENCE_CAMERAS:
+                    do_quicklook_for_camera(span, device)
+
+            existing_observation_spans = existing_observation_spans.union(new_observation_spans)
+            duration = time.time() - start_time
+            log.info(f"Took {duration} sec")
+            if duration < CHECK_INTERVAL_SEC:
+                time.sleep(CHECK_INTERVAL_SEC - duration)
+        except KeyboardInterrupt:
+            raise
+        except Exception:
+            log.exception(f"Poll for new images failed with exception")

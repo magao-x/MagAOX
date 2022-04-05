@@ -94,8 +94,9 @@ protected:
    
 	std::string m_pupilMaskFilename;
 	std::string m_interaction_matrix_filename;
+	std::string m_mapping_matrix_filename;
 	std::string m_actuator_mask_filename;
-	std::string m_refslope_filename;
+	// std::string m_refslope_filename;
 
 	// IMAGE m_dmStream; 
 	size_t m_pwfsWidth {0}; ///< The width of the image
@@ -115,8 +116,9 @@ protected:
 	size_t m_measurement_size;
 	eigenImage<realT> m_pupilMask;
 	eigenImage<realT> m_interaction_matrix;
+	eigenImage<realT> m_mapping_matrix;
 	eigenImage<realT> m_measurementVector;
-	eigenImage<realT> m_refSlope;
+	// eigenImage<realT> m_refSlope;
 	
 	eigenImage<realT> m_slopeX;
 	eigenImage<realT> m_slopeY;
@@ -280,8 +282,10 @@ void hoPredCtrl::setupConfig()
 
 	config.add("parameters.pupil_mask", "", "parameters.pupil_mask", argType::Required, "parameters", "pupil_mask", false, "string", "The path to the PyWFS pupil mask.");
 	config.add("parameters.interaction_matrix", "", "parameters.interaction_matrix", argType::Required, "parameters", "interaction_matrix", false, "string", "The path to the PyWFS interaction matrix.");
+	config.add("parameters.mapping_matrix", "", "parameters.mapping_matrix", argType::Required, "parameters", "mapping_matrix", false, "string", "The path to the DM mapping matrix.");
+
 	config.add("parameters.act_mask", "", "parameters.act_mask", argType::Required, "parameters", "act_mask", false, "string", "The path to the PyWFS interaction matrix.");
-	config.add("parameters.ref_slope", "", "parameters.ref_slope", argType::Required, "parameters", "ref_slope", false, "string", "The path to the PyWFS interaction matrix.");
+	// config.add("parameters.ref_slope", "", "parameters.ref_slope", argType::Required, "parameters", "ref_slope", false, "string", "The path to the PyWFS interaction matrix.");
 
 	config.add("parameters.Nhist", "", "parameters.Nhist", argType::Required, "parameters", "Nhist", false, "int", "The history length.");
 	config.add("parameters.Nfut", "", "parameters.Nfut", argType::Required, "parameters", "Nfut", false, "int", "The prediction horizon.");
@@ -313,13 +317,16 @@ int hoPredCtrl::loadConfigImpl( mx::app::appConfigurator & _config )
 
 	_config(m_pupilMaskFilename, "parameters.pupil_mask");
 	std::cout << m_pupilMaskFilename << std::endl;
-	_config(m_interaction_matrix_filename, "parameters.interaction_matrix");
-	std::cout << m_interaction_matrix_filename << std::endl;
 	_config(m_actuator_mask_filename, "parameters.act_mask");
 	std::cout << m_actuator_mask_filename << std::endl;
 
-	_config(m_refslope_filename, "parameters.ref_slope");
-	std::cout << m_refslope_filename << std::endl;
+	_config(m_interaction_matrix_filename, "parameters.interaction_matrix");
+	std::cout << m_interaction_matrix_filename << std::endl;
+	_config(m_mapping_matrix_filename, "parameters.mapping_matrix");
+	std::cout << m_mapping_matrix_filename << std::endl;
+
+	// _config(m_refslope_filename, "parameters.ref_slope");
+	// std::cout << m_refslope_filename << std::endl;
 	
 	_config(m_numHist, "parameters.Nhist");
 	std::cout << "Nhist:: "<< m_numHist << std::endl;
@@ -483,44 +490,15 @@ int hoPredCtrl::allocate(const dev::shmimT & dummy)
 	std::cerr << "Read a " << m_interaction_matrix.rows() << " x " << m_interaction_matrix.cols() << " interaction matrix.\n";
 	m_numModes = m_interaction_matrix.rows();
 
-	std::cout << "[ " << m_interaction_matrix(0, 0) << ", " <<m_interaction_matrix(0, 1) << '\n';
-	std::cout << "[ " << m_interaction_matrix(1, 0) << ", " <<m_interaction_matrix(1, 1) << '\n';
-
-	// Read in the reference slope
-	ff.read(m_refSlope, m_refslope_filename);
-	std::cerr << "Read a " << m_refSlope.rows() << " x " << m_refSlope.cols() << " reference slope.\n";
-
-	// Controller setup
-	controller = new DDSPC::PredictiveController(m_numHist, m_numFut, m_numModes, m_measurement_size, m_gamma, m_lambda, m_inv_covariance);
-	controller->set_interaction_matrix(m_interaction_matrix.data());
-
-	mx::fits::fitsFile<realT> ff2;
-	ff2.read(m_illuminated_actuators_mask, m_actuator_mask_filename);
-	std::cerr << "Read a " << m_illuminated_actuators_mask.rows() << " x " << m_illuminated_actuators_mask.cols() << " actuator mask.\n";
-
-	m_command = nullptr;
+	// Read in the pupil mask
+	ff.read(m_mapping_matrix, m_mapping_matrix_filename);
+	std::cerr << "Read a " << m_mapping_matrix.rows() << " x " << m_mapping_matrix.cols() << " mapping matrix.\n";
 
 	m_temp_command = new float[m_numModes];
 	for(int i = 0; i < m_numModes; ++i)
-		m_temp_command[i] = 0.001;
-
-	controller->create_exploration_buffer(m_exploration_rms, m_exploration_steps);
-
-	//Initialize dark image if not correct size.
-	if(darkMonitorT::m_width != shmimMonitorT::m_width || darkMonitorT::m_height != shmimMonitorT::m_height){
-		m_darkImage.resize(shmimMonitorT::m_width,shmimMonitorT::m_height);
-		m_darkImage.setZero();
-		m_darkSet = false;
-	}
-
-	m_slopeX.resize(60,60);
-	m_slopeX.setZero();
-
-	m_slopeY.resize(60,60);
-	m_slopeY.setZero();
-
-	m_slopeZ.resize(60,60);
-	m_slopeZ.setZero();
+		m_temp_command[i] = 0.0;
+	m_command = m_temp_command;
+	std::cerr << "Initialized temp command.\n";
 
 	// Allocate the DM
 	if(m_dmOpened){
@@ -558,6 +536,40 @@ int hoPredCtrl::allocate(const dev::shmimT & dummy)
 		send_dm_command();
 	}
 
+	// Read in the reference slope
+	// ff.read(m_refSlope, m_refslope_filename);
+	// std::cerr << "Read a " << m_refSlope.rows() << " x " << m_refSlope.cols() << " reference slope.\n";
+
+	// Controller setup
+	controller = new DDSPC::PredictiveController(m_numHist, m_numFut, m_numModes, m_measurement_size, m_gamma, m_lambda, m_inv_covariance, m_dmWidth * m_dmHeight);
+	controller->set_interaction_matrix(m_interaction_matrix.data());
+	controller->set_mapping_matrix(m_mapping_matrix.data());
+	std::cerr << "Finished intializing the controller.\n";
+
+	mx::fits::fitsFile<realT> ff2;
+	ff2.read(m_illuminated_actuators_mask, m_actuator_mask_filename);
+	std::cerr << "Read a " << m_illuminated_actuators_mask.rows() << " x " << m_illuminated_actuators_mask.cols() << " actuator mask.\n";
+
+	controller->create_exploration_buffer(m_exploration_rms, m_exploration_steps);
+	std::cerr << "Initialized exploration buffer.\n";
+
+	//Initialize dark image if not correct size.
+	if(darkMonitorT::m_width != shmimMonitorT::m_width || darkMonitorT::m_height != shmimMonitorT::m_height){
+		m_darkImage.resize(shmimMonitorT::m_width,shmimMonitorT::m_height);
+		m_darkImage.setZero();
+		m_darkSet = false;
+	}
+
+	m_slopeX.resize(60,60);
+	m_slopeX.setZero();
+
+	m_slopeY.resize(60,60);
+	m_slopeY.setZero();
+
+	m_slopeZ.resize(60,60);
+	m_slopeZ.setZero();
+
+
 	duration = 0;
 	iterations = 0;
 	m_is_closed_loop = false;
@@ -572,7 +584,7 @@ int hoPredCtrl::processImage( void * curr_src, const dev::shmimT & dummy )
 	auto start = std::chrono::steady_clock::now();
 
 	Eigen::Map<eigenImage<unsigned short>> pwfsIm( static_cast<unsigned short *>(curr_src), m_pwfsHeight, m_pwfsWidth);
-	realT mean_value = 0;
+	// realT mean_value = 0;
 	realT Ia = 0, Ib = 0, Ic = 0, Id = 0;
 
 	size_t ki = 0;
@@ -585,6 +597,7 @@ int hoPredCtrl::processImage( void * curr_src, const dev::shmimT & dummy )
 			Ib = (realT)pwfsIm(row_i + m_quadWidth, col_i + m_quadHeight) - m_darkImage(row_i + m_quadWidth, col_i + m_quadHeight);
 
 			// Calculate the norm
+			// TODO: Add an exponential learning to the PWFS norm?
 			realT pwfsNorm = Ia + Ib + Ic + Id;
 
 			// Take all linear combinations of the measurements and concatenate in vector
@@ -600,8 +613,16 @@ int hoPredCtrl::processImage( void * curr_src, const dev::shmimT & dummy )
 	// Okay reconstruction matrix is used correctly!
 	// The error is now in the slope measurement.
 	if( m_is_closed_loop ){
-
+		
+		
 		controller->add_measurement(m_measurementVector.data());
+		m_command = controller->get_command(m_clip_val);	
+		
+		// This works!
+		if(use_actuators){
+			map_command_vector_to_dmshmim();
+		}
+		send_dm_command();
 				 
 		// If -1 always learn, otherwise learn for N steps
 		if(m_learning_counter == -1){
@@ -612,27 +633,20 @@ int hoPredCtrl::processImage( void * curr_src, const dev::shmimT & dummy )
 			controller->update_controller();
 			m_learning_counter -= 1;
 		}
-		
-		m_command = controller->get_command(m_clip_val);	
-		// This works!
-		if(use_actuators){
-			map_command_vector_to_dmshmim();
-		}
-		send_dm_command();
 
 	}
 	auto end = std::chrono::steady_clock::now();
-	duration = std::chrono::duration_cast<std::chrono::microseconds>(end - start).count();
+	
 
-	//if(iterations == 0){
-	//		
-	//}else{
-	//	duration = 0.1 * duration + 0.9 * std::chrono::duration_cast<std::chrono::microseconds>(end - start).count();
-	//}
+	if(iterations == 0){
+		duration = std::chrono::duration_cast<std::chrono::microseconds>(end - start).count();
+	}else{
+		duration = 0.1 * duration + 0.9 * std::chrono::duration_cast<std::chrono::microseconds>(end - start).count();
+	}
 	iterations += 1;
 	
 	if(iterations % 400 == 0){
-		std::cout << "elapsed " << (double)duration / (double)iterations << " us." << std::endl;
+		std::cout << "elapsed " << (double)duration << " us." << std::endl;
 		std::cout << '\n';
 	}
 
@@ -729,10 +743,15 @@ int hoPredCtrl::zero()
 
 inline
 int hoPredCtrl::map_command_vector_to_dmshmim(){
+
 	// Convert the actuators modes into a 50x50 image.
 	/*
 		This function maps the command vector to a masked 2D image. A mapping is implicitely assumed due to the way the array is accessed.
 	*/
+
+	
+	// The new output of the controller is a nact length vector. So this can be replaced by a single copy statement.
+	// For now let's keep the dumb copy.
 	int ki = 0;
 	for(uint32_t col_i=0; col_i < m_dmHeight; ++col_i){
 		for(uint32_t row_i=0; row_i < m_dmHeight; ++row_i){
@@ -745,6 +764,8 @@ int hoPredCtrl::map_command_vector_to_dmshmim(){
 			}
 		}
 	}
+
+	return 0;
 }
 
 inline
@@ -812,17 +833,17 @@ INDI_NEWCALLBACK_DEFN(hoPredCtrl, m_indiP_explorationRms )(const pcf::IndiProper
 		return -1;
 	}
 
-	int current = -1;
-	int target = -1;
+	float current = -1;
+	float target = -1;
 
 	if(ipRecv.find("current"))
 	{
-		current = ipRecv["current"].get<int>();
+		current = ipRecv["current"].get<float>();
 	}
 
 	if(ipRecv.find("target"))
 	{
-		target = ipRecv["target"].get<int>();
+		target = ipRecv["target"].get<float>();
 	}
 
 	if(target == -1) target = current;

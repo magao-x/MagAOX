@@ -315,18 +315,22 @@ __global__ void clip_array(float* x, float clip_value, int n){
 Matrix* DistributedAutoRegressiveController::get_command(float clip_val, Matrix* exploration_signal){
 	
 	// Calculate the dot product
-	controller->dot(wp, delta_command, 1.0, 0.0, CUBLAS_OP_N, CUBLAS_OP_N);
-	delta_command->add(exploration_signal);
-	clip_array <<<8*32, 64 >>>(delta_command->gpu_data[0], clip_val, delta_command->total_size_);
-	
-	// Copy the new measurement into our data buffer
-	gpu_col_copy(command_buffer, 0, buffer_index & buffer_size, delta_command);
-	command->add(delta_command);
+	bool use_predictor = true;
 
-	// Integrate on the delta_command into command
-	// gpu_col_copy(measurement_buffer, 0, buffer_index & buffer_size, new_measurement);
-	// command->scale(0.98);
-	// command->add(newest_measurement, -0.6);
+	if(use_predictor){
+		controller->dot(wp, delta_command, 1.0, 0.0, CUBLAS_OP_N, CUBLAS_OP_N);
+		delta_command->add(exploration_signal);
+		clip_array <<<8*32, 64 >>>(delta_command->gpu_data[0], clip_val, delta_command->total_size_);
+		
+		// Copy the new measurement into our data buffer
+		gpu_col_copy(command_buffer, 0, buffer_index & buffer_size, delta_command);
+		command->add(delta_command);
+	}else{
+		// Integrate on the delta_command into command
+		gpu_col_copy(measurement_buffer, 0, buffer_index & buffer_size, newest_measurement);
+		command->scale(0.98);
+		command->add(newest_measurement, -0.6);
+	}
 	// Transfer the data back to the cpu
 	command->to_cpu();
 

@@ -51,7 +51,9 @@
 #    33           1            25          69            1            25            
 #    34           1            26          70            1            26 
 #    35           1            27          71            1            27 
-            
+
+set -xeuo pipefail
+
 # we will use processors 0-13 and 36-49 as the hyperthread system cpus (28),
 # so we disable processors 50-71. This leaves us 14-35 (22) as single thread processors.
 
@@ -62,8 +64,10 @@ do
 done
 
 #Create and mount the root cpuset
-mkdir -p /dev/cpuset
-mount -t cpuset cpuset /dev/cpuset
+if ! mount | grep -q cpuset; then
+   mkdir -p /dev/cpuset
+   mount -t cpuset cpuset /dev/cpuset
+fi
 cd /dev/cpuset
 
 #############################
@@ -76,9 +80,12 @@ mkdir -p /dev/cpuset/system
 
 # Now move all current tasks to system cpuset
 # Note that this moves pid=1 (init) so all new process created should live here.
-# we suppress the errors from echo b/c they are for dead pids still in tasks
+# We use || true to ignore failures, which are caused by stale PIDs
+# or attempting to move unmovable kernel threads.
 #
-while read i; do /bin/echo -n $i; done < tasks > system/tasks 2> /dev/null
+while read i; do
+   /bin/echo -n $i 2>/dev/null || true
+done < tasks > system/tasks
 
 #A guess at how to setup load balancing 
 echo 0 > cpuset.sched_load_balance
@@ -119,9 +126,6 @@ mkdir -p /dev/cpuset/camwfs
 /bin/echo 18 > /dev/cpuset/camwfs/cpuset.cpus
 /bin/echo 1 > /dev/cpuset/camwfs/cpuset.cpu_exclusive
 /bin/echo 0-1 > /dev/cpuset/camwfs/cpuset.mems
-
-#and we move the EDT irq to camwfs
-/bin/echo 18 > /proc/irq/208/smp_affinity_list
 
 #Woofer
 mkdir -p /dev/cpuset/dm00comb
@@ -216,3 +220,5 @@ mkdir -p /dev/cpuset/tweeterSpeck
 /bin/echo 35 > /dev/cpuset/tweeterSpeck/cpuset.cpus
 /bin/echo 1 > /dev/cpuset/tweeterSpeck/cpuset.cpu_exclusive
 /bin/echo 0-1 > /dev/cpuset/tweeterSpeck/cpuset.mems
+
+echo "cpusets configured successfully"
