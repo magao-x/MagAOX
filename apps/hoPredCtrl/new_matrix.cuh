@@ -71,7 +71,7 @@ class Matrix{
 		}
 
 		void print_shape(){
-			std::cout << "(" << nrows_ << "," << ncols_ << "," << batch_size_ << ")";
+			std::cout << "(" << nrows_ << "," << ncols_ << "," << batch_size_ << ")\n";
 		}
 
 		float* get_data_ptr(){
