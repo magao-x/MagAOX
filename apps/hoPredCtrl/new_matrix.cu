@@ -1,6 +1,7 @@
 #include "new_matrix.cuh"
 #include <random>
 #include <iostream>
+#include <fstream>
 
 namespace DDSPC
 {
@@ -163,11 +164,15 @@ void Matrix::subtract(Matrix* other, float value){
 
 
 void Matrix::dot(Matrix* other, Matrix* output, float alpha, float beta, cublasOperation_t opA, cublasOperation_t opB, bool use_strided){
+	/*
+		Calculates
+			output = alpha * self * other + beta * output
+	*/
 	int nrows_A = (opA == CUBLAS_OP_N) ? nrows_ : ncols_;
 	int ncols_A = (opA == CUBLAS_OP_N) ? ncols_ : nrows_;
 	int ncols_B = (opB == CUBLAS_OP_N) ? other->ncols_ : other->nrows_;
 	// std::cout << nrows_A << " " << ncols_A << " " << ncols_B << std::endl;
-
+	// y=αop(A)x+βy
 	if( use_strided ){
 		cublasXgemmStridedBatched(*handle,
 			opA, 
@@ -205,6 +210,23 @@ void Matrix::inverse(Matrix* other){
 		so this does :: inv(A.T)
 	*/
 	cublasXmatinvBatched(*handle, nrows_, dev_gpu_data, other->dev_gpu_data, batch_size_, info);
+}
+
+void Matrix::to_file(std::string filename){
+	// Transfer to cpu
+	to_cpu();
+
+	std::fstream f;
+	f.open(filename, std::ios::out);
+
+	for(int i=0; i < total_size_; ++i){
+		f << cpu_data[0][i];
+		if(i < (total_size_-1)){
+			f << ',';
+		}
+	}
+
+	f.close();
 }
 
 
@@ -360,7 +382,7 @@ Matrix* make_col_vector(float* value, int size, int batch_size){
 
 Matrix* make_random_col_vector(float standard_deviation, int size, int batch_size){
 	// Hmmm this should be defined somewhere else because it is initialized with the same seed.
-	std::default_random_engine generator;
+	std::default_random_engine generator{rdtsc()};
 	std::normal_distribution<float> distribution(0.0, standard_deviation);
 
 	Matrix* new_matrix = new Matrix(0.0, 1, size, batch_size);
@@ -378,7 +400,7 @@ Matrix* make_random_col_vector(float standard_deviation, int size, int batch_siz
 Matrix* make_random_matrix(float standard_deviation, int nrows, int ncols, int batch_size){
 	
 	// Hmmm this should be defined somewhere else because it is initialized with the same seed.
-	std::default_random_engine generator;
+	std::default_random_engine generator{rdtsc()};
 	std::normal_distribution<float> distribution(0.0, standard_deviation);
 
 	Matrix* new_matrix = new Matrix(0, nrows, ncols, batch_size);
@@ -400,7 +422,7 @@ Matrix* make_random_matrix(float standard_deviation, int nrows, int ncols, int b
 Matrix* make_random_binary_matrix(float standard_deviation, int nrows, int ncols, int batch_size){
 	
 	// Hmmm this should be defined somewhere else because it is initialized with the same seed.
-	std::default_random_engine generator;
+	std::default_random_engine generator{rdtsc()};
 	std::normal_distribution<float> distribution(0.0, standard_deviation);
 
 	Matrix* new_matrix = new Matrix(0, nrows, ncols, batch_size);

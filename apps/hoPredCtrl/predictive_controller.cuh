@@ -15,8 +15,6 @@ class PredictiveController{
 	private:
 		cublasHandle_t handle;
 
-		DistributedAutoRegressiveController* controller;
-
 		int m_num_history;
 		int m_num_future;
 		int m_num_modes;
@@ -39,6 +37,9 @@ class PredictiveController{
 	protected:
 
 	public:
+
+		DistributedAutoRegressiveController* controller;
+		
 		Matrix* m_measurement;
 		
 		PredictiveController(int num_history, int num_future, int num_modes, int num_measurements, float gamma, float lambda, float P0);
@@ -49,7 +50,10 @@ class PredictiveController{
 		void reset_controller(){controller->reset_controller();};
 		void update_predictor(){controller->update_predictor();};
 		void update_controller(){controller->update_controller();};
-
+		
+		// This function should reset the buffers and set the current control command to zero.
+		void set_zero();
+		
 		// Training signal
 		void get_next_exploration_signal();
 		void create_exploration_buffer(float rms, int exploration_buffer_size);

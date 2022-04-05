@@ -9,7 +9,7 @@
   */
 
 #ifndef logger_logMeta_hpp
-#define logger_logMega_hpp
+#define logger_logMeta_hpp
 
 #include <mx/ioutils/fits/fitsHeaderCard.hpp>
 
@@ -20,10 +20,85 @@ namespace MagAOX
 namespace logger
 {
 
-///\todo this needs to be auto-generated.
-void * logMemberAccessor( flatlogs::eventCodeT ec,
-                          const std::string & memberName
-                        );
+//This is how the user specifies an item of log meta data (i.e. via a config file)
+struct logMetaSpec
+{
+   std::string device;
+   flatlogs::eventCodeT eventCode;
+   std::string member;
+   std::string keyword; //overrides the default
+   std::string format; //overrides the default
+   std::string comment; //overrides the default
+
+   logMetaSpec()
+   {
+   }
+
+   logMetaSpec( const std::string & dev,
+                const flatlogs::eventCodeT ec,
+                const std::string & memb,
+                const std::string & k,
+                const std::string & f,
+                const std::string & c
+              ) : device(dev), eventCode(ec), member(memb), keyword(k), format(f), comment(c)
+   {
+   }
+
+   logMetaSpec( const std::string & dev,
+                const flatlogs::eventCodeT ec,
+                const std::string & memb
+              ) : device(dev), eventCode(ec), member(memb)
+   {
+   }
+
+};
+
+//This is the data returned by the member accessor.
+struct logMetaDetail
+{
+   std::string keyword;
+   std::string comment;
+   std::string format;
+   int valType {-1};
+   int metaType {-1};
+   void * accessor {nullptr};
+
+   logMetaDetail()
+   {
+   }
+
+   logMetaDetail( const std::string & k,
+                  const std::string & c,
+                  const std::string & f,
+                  int vt,
+                  int mt,
+                  void *acc
+                ) : keyword(k), comment(c), format(f), valType(vt), metaType(mt), accessor(acc)
+   {
+   }
+
+   logMetaDetail( const std::string & k,
+                  const std::string & c,
+                  int vt,
+                  int mt,
+                  void *acc
+                ) : keyword(k), comment(c), valType(vt), metaType(mt), accessor(acc)
+   {
+   }
+
+   logMetaDetail( const std::string & k,
+                  int vt,
+                  int mt,
+                  void *acc
+                ) : keyword(k), valType(vt), metaType(mt), accessor(acc)
+   {
+   }
+
+};  
+
+logMetaDetail logMemberAccessor( flatlogs::eventCodeT ec,
+                                 const std::string & memberName
+                               );
 
 template<typename valT>
 int getLogStateVal( valT & val,
@@ -44,12 +119,13 @@ int getLogStateVal( valT & val,
    if(hint) _hint = *hint;
    else _hint = 0;
 
-   lm.getPriorLog(stprior, appName, ev, stime, _hint);
+   if(lm.getPriorLog(stprior, appName, ev, stime, _hint) != 0) return -1;
+
    valT stprV = getter(flatlogs::logHeader::messageBuffer(stprior));
    
-   
    valT atprV;
-   lm.getNextLog(atprior, stprior, appName);
+   
+   if(lm.getNextLog(atprior, stprior, appName) != 0) return -1;
    
    while( flatlogs::logHeader::timespec(atprior) < atime )
    {
@@ -115,9 +191,6 @@ int getLogContVal( valT & val,
    return 0;
 }
 
-//-- setLogCode [set the function pointers]
-//-- setMemberName [get the index]
-//--> above two should be same function.
 
 /// Manage meta data for a log entry
 /** Handles cases where log is a state, i.e. has one of a finite number of values, or is a
@@ -127,22 +200,36 @@ int getLogContVal( valT & val,
   */ 
 struct logMeta
 {
+public:
+   enum valTypes
+   {
+      String = mx::fits::fitsType<std::string>(),
+      Bool = mx::fits::fitsType<bool>(),
+      Char = mx::fits::fitsType<char>(),
+      UChar = mx::fits::fitsType<unsigned char>(),
+      Short = mx::fits::fitsType<short>(),
+      UShort = mx::fits::fitsType<unsigned short>(),
+      Int = mx::fits::fitsType<int>(),
+      UInt = mx::fits::fitsType<unsigned int>(),
+      Long = mx::fits::fitsType<long>(),
+      ULong = mx::fits::fitsType<unsigned long>(),
+      LongLong = mx::fits::fitsType<long long>(),
+      ULongLong = mx::fits::fitsType<unsigned long long>(),
+      Float = mx::fits::fitsType<float>(),
+      Double = mx::fits::fitsType<double>()
+   };
+
+   enum metaTypes
+   {
+      State,
+      Continuous
+   };
+
 protected:
-   std::string m_keyword;
-   std::string m_comment;
    
-   std::string m_appName;
-   
-   flatlogs::eventCodeT m_logCode; //When this is set, set functions pointers 
+   logMetaSpec m_spec;
+   logMetaDetail m_detail;
 
-   std::string m_memberName; //When this is set, m_memberIndex gets set
-
-   void * accessor {nullptr};
-   
-   std::string m_format;
-   
-   int m_metaType {0}; //0 for a state, 1 for a continuous variable to interpolate to midpoint
-   int m_valType {0};
    bool m_isValid {false};
    std::string m_invalidValue {"invalid"};
    
@@ -150,23 +237,13 @@ protected:
    
 public:
    
-   logMeta( const std::string & keyword,
-            const std::string & comment,
-            const std::string & appName,
-            const flatlogs::eventCodeT logCode,
-            const std::string & memberName,
-            const std::string & format,
-            const int metaType,
-            const int valType 
-          );
+   logMeta( const logMetaSpec & lms /**< [in] the specification of this meta data entry */ );
           
    std::string keyword();
    
    std::string comment();
    
-   int setLog( flatlogs::eventCodeT ec,
-               const std::string & mn
-             );
+   int setLog( const logMetaSpec &);
    
    std::string value( logMap & lm,
                       const flatlogs::timespecX & stime,
@@ -200,4 +277,4 @@ public:
 
 
 
-#endif //logger_logMega_hpp
+#endif //logger_logMeta_hpp

@@ -50,6 +50,7 @@ class Matrix{
 		void add(Matrix* other, float value=1);
 		void subtract(Matrix* other, float value=-1);
 		void scale(float scale_param);
+		void to_file(std::string filename);
 		
 		void print(bool print_gpu);
 		

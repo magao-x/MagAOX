@@ -178,7 +178,7 @@ int logMap::getPriorLog( char * &logBefore,
          
          if(buffer ==lim.m_memory.data() +lim.m_memory.size()) 
          {
-            std::cerr << __FILE__ << " " << __LINE__ << " did not find following log -- need to load more data.\n";
+            std::cerr << __FILE__ << " " << __LINE__ << " did not find following log for " << appName << " -- need to load more data.\n";
             //Proper action here is to load the next file if possible...
             return 1;
          }
@@ -199,7 +199,7 @@ int logMap::getPriorLog( char * &logBefore,
             
             if(buffer ==lim.m_memory.data() + lim.m_memory.size()) 
             {
-               std::cerr << __FILE__ << " " << __LINE__ << " did not find following log -- need to load more data.\n";
+               std::cerr << __FILE__ << " " << __LINE__ << " did not find following log for " << appName << " -- need to load more data.\n";
                //Proper action here is to load the next file if possible...
                return 1;
             }
@@ -332,7 +332,7 @@ int logMap::loadFiles( const std::string & appName,
          }
          
          //Now open each of these files
-         std::cerr << "open later file!\n";
+         std::cerr << "open later file for " << appName << "!\n";
          for(auto it=first; it != last; ++it)
          {
             m_appToBufferMap[appName].loadFile(*it);

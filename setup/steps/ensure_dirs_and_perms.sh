@@ -5,7 +5,11 @@ set -euo pipefail
 
 instrument_user=xsup
 if [[ $MAGAOX_ROLE == vm ]]; then
-  instrument_user=vagrant
+  if [[ $VM_KIND == "vagrant" ]]; then
+    instrument_user=vagrant
+  else
+    instrument_user=$USER
+  fi
 fi
 
 function make_on_data_array() {
@@ -47,8 +51,8 @@ chown root:root /opt/MagAOX/bin
 chmod u+rwX,g+rX,o+rX /opt/MagAOX/bin
 
 if [[ "$MAGAOX_ROLE" == "vm" && "$VM_WINDOWS_HOST" == 0 ]]; then
-  mkdir -pv /vagrant/vm/calib
-  link_if_necessary /vagrant/vm/calib /opt/MagAOX/calib
+  mkdir -pv "$VM_SHARED_FOLDER/calib"
+  link_if_necessary "$VM_SHARED_FOLDER/calib" /opt/MagAOX/calib
 else
   mkdir -pv /opt/MagAOX/calib
   chown -R root:magaox /opt/MagAOX/calib
@@ -57,8 +61,8 @@ else
 fi
 
 if [[ "$MAGAOX_ROLE" == "vm" && "$VM_WINDOWS_HOST" == 0 ]]; then
-  mkdir -pv /vagrant/vm/config
-  link_if_necessary /vagrant/vm/config /opt/MagAOX/config
+  mkdir -pv "$VM_SHARED_FOLDER/config"
+  link_if_necessary "$VM_SHARED_FOLDER/config" /opt/MagAOX/config
 else
   mkdir -pv /opt/MagAOX/config
   chown -R root:magaox-dev /opt/MagAOX/config
@@ -100,9 +104,9 @@ if [[ "$MAGAOX_ROLE" == "AOC" ]]; then
   make_on_data_array icc /opt/MagAOX
 fi
 
-if [[ "$MAGAOX_ROLE" == "vm" && "$VM_WINDOWS_HOST" == 0 ]]; then
-  mkdir -pv /vagrant/vm/cache
-  link_if_necessary /vagrant/vm/cache /opt/MagAOX/.cache
+if [[ "$MAGAOX_ROLE" == "vm" ]]; then
+  mkdir -pv "$VM_SHARED_FOLDER/cache"
+  link_if_necessary "$VM_SHARED_FOLDER/cache" /opt/MagAOX/.cache
 else
   mkdir -pv /opt/MagAOX/.cache
   chown -R root:magaox-dev /opt/MagAOX/.cache

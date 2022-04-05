@@ -68,6 +68,7 @@ gui/rtimv/plugins/pwfsAlignment/makefile.pwfsAlignment
 gui/rtimv/plugins/dmStatus/makefile.dmStatus
 
 #h
+apps/hoPredCtrl/hoPredCtrl
 apps/hsfwCtrl/hsfwCtrl
 
 #i
@@ -96,12 +97,13 @@ apps/ocam2KCtrl/ocam2KCtrl
 apps/pi335Ctrl/pi335Ctrl
 apps/picamCtrl/picamCtrl
 apps/picoMotorCtrl/picoMotorCtrl
-
+apps/pupilAlign/pupilAlign
 apps/pupilFit/pupilFit
 apps/pwfsSlopeCalc/pwfsSlopeCalc
 
 #r
 apps/rhusbMon/rhusbMon
+apps/refRMS/refRMS
 
 #s
 apps/shmimIntegrator/shmimIntegrator
@@ -125,6 +127,7 @@ apps/ttmModulator/ttmModulator
 
 #u
 apps/usbtempMon/usbtempMon
+apps/userGainCtrl/userGainCtrl
 
 #w
 apps/w2tcsOffloader/w2tcsOffloader
@@ -175,3 +178,4 @@ vm/cache/
 vm/calib/
 vm/config/
 vm/
+setup/qhyccd_container/sdk_linux64_22.02.17.tgz

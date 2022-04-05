@@ -21,10 +21,17 @@ if [[ $ID == ubuntu ]]; then
     # https://superuser.com/questions/1160025/how-to-solve-ttyname-failed-inappropriate-ioctl-for-device-in-vagrant
     sudo sed -i -e 's/mesg n .*true/tty -s \&\& mesg n/g' ~/.profile
 fi
+VM_WINDOWS_HOST=0
 # Detect whether we're running in some kind of VM or container
-if [[ -d /vagrant || $CI == true ]]; then
-    if [[ -d /vagrant ]]; then
-        DIR="/vagrant/setup"
+if [[ -d /vagrant || -e /etc/wsl.conf || $CI == true ]]; then
+    if [[ -d /vagrant || -e /etc/wsl.conf ]]; then
+        if [[ -d /vagrant ]]; then
+            DIR="/vagrant/setup"
+            VM_KIND=vagrant
+        else
+            VM_KIND=wsl
+            VM_WINDOWS_HOST=1
+        fi
         # If set already (i.e. not the first time we ran this),
         # don't override what's in the environment
         if [[ -z $MAGAOX_ROLE ]]; then
@@ -157,6 +164,7 @@ fi
 
 if [[ $MAGAOX_ROLE == AOC || $MAGAOX_ROLE == ICC || $MAGAOX_ROLE == RTC || $MAGAOX_ROLE == TOC || $MAGAOX_ROLE == TIC ]]; then
     sudo bash -l "$DIR/steps/configure_chrony.sh"
+    sudo bash -l "$DIR/steps/configure_podman.sh"
 fi
 
 # Configure executable search path
@@ -187,11 +195,13 @@ sudo bash -l "$DIR/steps/ensure_dirs_and_perms.sh" $MAGAOX_ROLE
 
 
 if [[ $MAGAOX_ROLE == vm ]]; then
-    # Enable forwarding MagAO-X GUIs to the host for VMs
-    sudo bash -l "$DIR/steps/enable_vm_x11_forwarding.sh"
-    # Install a config in ~/.ssh/config for the Vagrant user
-    # to it easier to make tunnels work
-    sudo bash -l "$DIR/steps/configure_vm_ssh.sh"
+    if [[ $VM_KIND == "vagrant" ]]; then
+        # Enable forwarding MagAO-X GUIs to the host for VMs
+        sudo bash -l "$DIR/steps/enable_vm_x11_forwarding.sh"
+    fi
+    # Install a config in ~/.ssh/config for the vm user
+    # to make it easier to make tunnels work
+    bash -l "$DIR/steps/configure_vm_ssh.sh"
 fi
 
 # Install dependencies for the GUIs
@@ -204,7 +214,7 @@ if [[ $MAGAOX_ROLE == ci || $MAGAOX_ROLE == vm || $MAGAOX_ROLE == workstation ||
     if [[ $ID == ubuntu ]]; then
         sudo apt install -y linux-headers-generic
     elif [[ $ID == centos ]]; then
-        sudo yum install -y kernel-devel-$(uname -r) || yum install -y kernel-devel
+        sudo yum install -y kernel-devel-$(uname -r) || sudo yum install -y kernel-devel
     fi
 fi
 ## Build third-party dependencies under /opt/MagAOX/vendor
@@ -219,12 +229,11 @@ sudo bash -l "$DIR/steps/install_cfitsio.sh"
 sudo bash -l "$DIR/steps/install_eigen.sh"
 sudo bash -l "$DIR/steps/install_cppzmq.sh"
 sudo bash -l "$DIR/steps/install_flatbuffers.sh"
-if [[ $MAGAOX_ROLE == RTC || $MAGAOX_ROLE == ICC || $MAGAOX_ROLE == AOC || $MAGAOX_ROLE == TIC || $MAGAOX_ROLE == ci || $MAGAOX_ROLE == vm ]]; then
+if [[ $MAGAOX_ROLE == RTC || $MAGAOX_ROLE == ICC || $MAGAOX_ROLE == AOC || $MAGAOX_ROLE == TIC || $MAGAOX_ROLE == ci || ( $MAGAOX_ROLE == vm && $VM_KIND == vagrant ) ]]; then
     sudo bash -l "$DIR/steps/install_basler_pylon.sh"
 fi
-if [[ $MAGAOX_ROLE == RTC || $MAGAOX_ROLE == ICC || $MAGAOX_ROLE == AOC || $MAGAOX_ROLE == ci || $MAGAOX_ROLE == vm ]]; then
+if [[ $MAGAOX_ROLE == RTC || $MAGAOX_ROLE == ICC || $MAGAOX_ROLE == AOC || $MAGAOX_ROLE == ci || ( $MAGAOX_ROLE == vm && $VM_KIND == vagrant ) ]]; then
     sudo bash -l "$DIR/steps/install_edt.sh"
-    sudo bash -l "$DIR/steps/install_picam.sh"
 fi
 
 ## Install proprietary / non-public software
@@ -253,6 +262,7 @@ if [[ -e $VENDOR_SOFTWARE_BUNDLE ]]; then
     fi
     if [[ $MAGAOX_ROLE == ICC ]]; then
         sudo bash -l "$DIR/steps/install_libhsfw.sh"
+        # TODO add to bundle: sudo bash -l "$DIR/steps/install_picam.sh"
     fi
     sudo rm -rf $BUNDLE_TMPDIR
 fi
@@ -265,7 +275,7 @@ source /etc/profile.d/mxmakefile.sh
 
 ## Build MagAO-X and install sources to /opt/MagAOX/source/MagAOX
 MAYBE_SUDO=
-if [[ $MAGAOX_ROLE == vm ]]; then
+if [[ $MAGAOX_ROLE == vm && $VM_KIND == vagrant ]]; then
     MAYBE_SUDO="$_REAL_SUDO -u vagrant"
     # Create or replace symlink to sources so we develop on the host machine's copy
     # (unlike prod, where we install a new clone of the repo to this location)
@@ -277,6 +287,7 @@ if [[ $MAGAOX_ROLE == vm ]]; then
 elif [[ $MAGAOX_ROLE == ci ]]; then
     ln -sfv ~/project/ /opt/MagAOX/source/MagAOX
 else
+    log_info "Running as $USER"
     if [[ $DIR != /opt/MagAOX/source/MagAOX/setup ]]; then
         if [[ ! -e /opt/MagAOX/source/MagAOX ]]; then
             echo "Cloning new copy of MagAOX codebase"
@@ -286,10 +297,11 @@ else
             clone_or_update_and_cd $orgname $reponame $parentdir
             # ensure upstream is set somewhere that isn't on the fs to avoid possibly pushing
             # things and not having them go where we expect
+            stat /opt/MagAOX/source/MagAOX/.git
             git remote remove origin
             git remote add origin https://github.com/magao-x/MagAOX.git
             git fetch origin
-            git branch -u origin/master master
+            git branch -u origin/dev dev
             log_success "In the future, you can re-run this script from /opt/MagAOX/source/MagAOX/setup"
             log_info "(In fact, maybe delete $(dirname $DIR)?)"
         else
@@ -319,7 +331,7 @@ else
 fi
 
 if [[ $MAGAOX_ROLE == AOC || $MAGAOX_ROLE == TOC || $MAGAOX_ROLE == vm ]]; then
-    echo "export RTIMV_CONFIG_PATH=/opt/MagAOX/config" | tee /etc/profile.d/rtimv_config_path.sh
+    echo "export RTIMV_CONFIG_PATH=/opt/MagAOX/config" | sudo tee /etc/profile.d/rtimv_config_path.sh
 fi
 
 # Install first-party deps
@@ -359,6 +371,10 @@ sudo bash -l "$DIR/steps/install_aliases.sh"
 # and reuse them on subsequent runs.
 if [[ $MAGAOX_ROLE != ci ]]; then
     $MAYBE_SUDO bash -l "$DIR/steps/install_MagAOX.sh"
+fi
+
+if [[ $MAGAOX_ROLE == "RTC" ]]; then
+    sudo bash -l "$DIR/steps/configure_rtc_cpuset_service.sh"
 fi
 
 # To try and debug hardware issues, ICC and RTC replicate their
