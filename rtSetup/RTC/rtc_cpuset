@@ -52,7 +52,7 @@
 #    34           1            26          70            1            26 
 #    35           1            27          71            1            27 
 
-set -euo pipefail
+set -xeuo pipefail
 
 # we will use processors 0-13 and 36-49 as the hyperthread system cpus (28),
 # so we disable processors 50-71. This leaves us 14-35 (22) as single thread processors.
@@ -126,9 +126,6 @@ mkdir -p /dev/cpuset/camwfs
 /bin/echo 18 > /dev/cpuset/camwfs/cpuset.cpus
 /bin/echo 1 > /dev/cpuset/camwfs/cpuset.cpu_exclusive
 /bin/echo 0-1 > /dev/cpuset/camwfs/cpuset.mems
-
-#and we move the EDT irq to camwfs
-/bin/echo 18 > /proc/irq/208/smp_affinity_list
 
 #Woofer
 mkdir -p /dev/cpuset/dm00comb

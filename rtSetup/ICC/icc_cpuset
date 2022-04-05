@@ -48,7 +48,7 @@
 #    30           1            14          61            1            14 
 #    31           1            15          63            1            15     
 
-set -euo pipefail
+set -xeuo pipefail
 
 # we will use processors 0-7 and 32-39 as the hyperthread system cpus,
 # so we disable processors 40-63. This leaves us 8-31 as single thread processors.
