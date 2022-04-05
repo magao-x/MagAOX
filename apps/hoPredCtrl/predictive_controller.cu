@@ -3,7 +3,7 @@
 
 namespace DDSPC
 {	
-	PredictiveController::PredictiveController(int num_history, int num_future, int num_modes, int num_measurements, float gamma, float lambda, float P0){
+	PredictiveController::PredictiveController(int num_history, int num_future, int num_modes, int num_measurements, float gamma, float lambda, float P0, int num_actuators){
 		cudaError_t cudaerr = cudaSetDevice(0);
 		check_cuda_error(cudaerr);
 
@@ -15,6 +15,8 @@ namespace DDSPC
 		m_num_future = num_future;
 		m_num_modes = num_modes;
 		m_num_measurements = num_measurements;
+		m_num_actuators = num_actuators;
+		m_exploration_buffer_size = 20;
 
 		m_gamma = gamma;
 		m_P0 = P0;
@@ -27,7 +29,7 @@ namespace DDSPC
 		m_wfs_measurement->set_handle(&handle);
 
 		//m_measurement = make_col_vector(0.0, num_modes, 1);		
-		m_measurement = new Matrix(1.0, num_modes, 1);
+		m_measurement = new Matrix(0.0, num_modes, 1);
 		m_measurement->set_handle(&handle);
 
 		m_exploration_signal = make_col_vector(0.0, num_modes, 1);
@@ -38,12 +40,22 @@ namespace DDSPC
 		m_exploration_signal->to_gpu();
 		m_exploration_buffer = nullptr;
 		
-		m_command = make_col_vector(0.0, num_modes, 1);
+		// m_command = make_col_vector(0.0, num_modes, 1);
+		m_command = new Matrix(0.0, num_modes, 1);
 		m_command->set_handle(&handle);
+
+		//
+		// m_voltages = make_col_vector(0.0, num_actuators, 1);
+		m_voltages = new Matrix(0.0, num_actuators, 1);
+		m_voltages->set_handle(&handle);
 
 		m_interaction_matrix = new Matrix((float) 1.0, num_modes, num_measurements, 1);
 		m_interaction_matrix->set_handle(&handle);
 		m_interaction_matrix->to_gpu();
+
+		m_mode_mapping_matrix = new Matrix((float) 1.0, num_actuators, num_modes, 1);
+		m_mode_mapping_matrix->set_handle(&handle);
+		m_mode_mapping_matrix->to_gpu();
 
 		controller = new DistributedAutoRegressiveController(&handle, m_num_history, m_num_future, m_num_modes, m_gamma, m_lambda, m_P0);
 		controller->set_handle(&handle);
@@ -60,7 +72,10 @@ namespace DDSPC
 		delete m_measurement;
 		delete m_exploration_signal;
 		delete m_command;
+		delete m_voltages;
+
 		delete m_interaction_matrix;
+		delete m_mode_mapping_matrix;
 		
 		if (m_exploration_buffer){
 			delete m_exploration_buffer;
@@ -71,6 +86,7 @@ namespace DDSPC
 	void PredictiveController::create_exploration_buffer(float rms, int exploration_buffer_size){
 		std::cout << " Create buffer with size: " << exploration_buffer_size << std::endl;
 		m_exploration_index = 0;
+		m_exploration_buffer_size = exploration_buffer_size;
 
 		// First clean the current_buffer and only if it exists
 		if(m_exploration_buffer){
@@ -104,6 +120,28 @@ namespace DDSPC
 		m_interaction_matrix->to_gpu();
 	};
 
+	void PredictiveController::set_mapping_matrix(float* mapping_matrix){
+		cpu_full_copy(m_mode_mapping_matrix, mapping_matrix);
+		m_mode_mapping_matrix->to_gpu();
+		std::cout << "shape of mode mapping matrix: ";
+		m_mode_mapping_matrix->print_shape();
+		
+		std::cout << "shape of command: ";
+		m_command->print_shape();
+		
+		std::cout << "shape of voltages: ";
+		m_voltages->print_shape();
+
+		std::cout << "shape of interaction matrix: ";
+		m_interaction_matrix->print_shape();
+
+		std::cout << "shape of wfs output: ";
+		m_wfs_measurement->print_shape();
+
+		std::cout << "shape of measurement output: ";
+		m_measurement->print_shape();
+	};
+
 	void PredictiveController::add_measurement(float* new_wfs_measurement){
 		// Copy measurement to GPU
 		cpu_full_copy(m_wfs_measurement, new_wfs_measurement);
@@ -125,7 +163,11 @@ namespace DDSPC
 		// Determine the command vector
 		m_command = controller->get_command(clip_val, m_exploration_signal);
 		
+		// We need to add a modal coefficients to actuators mapping here.
+		m_mode_mapping_matrix->dot(m_command, m_voltages);
+		
 		// Copy into shmimstream
+		//return m_voltages->cpu_data[0];
 		return m_command->cpu_data[0];
 	};
 	
