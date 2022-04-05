@@ -9,6 +9,10 @@ yum groupinstall -y 'Development Tools'
 # use || true so it's not an error if already installed:
 yum install -y http://dl.fedoraproject.org/pub/epel/epel-release-latest-7.noarch.rpm || true
 
+# Install repo with recent tmux
+# recommended by https://github.com/tmux/tmux/wiki/Installing#red-hat-enterprise-linux--centos-rpms
+yum install -y http://galaxy4.net/repo/galaxy4-release-7-current.noarch.rpm || true
+
 # changes the set of available packages, making devtoolset-7 available
 yum -y install centos-release-scl
 
