@@ -14,11 +14,11 @@ fi
 if [[ ! -e /etc/sysconfig/irqbalance.bup ]]; then
     cp /etc/sysconfig/irqbalance /etc/sysconfig/irqbalance.bup
 fi
-# Install role-specific settings
-cp $DIR/../../rtSetup/$irqbalance /etc/sysconfig/irqbalance
-# Install 
+# Install irqbalance config to use policyscript
+cp $DIR/../../rtSetup/irqbalance /etc/sysconfig/irqbalance
+# Install policyscript
 if [[ ! -e /usr/local/bin/irqbalance_policyscript ]]; then
-    install --owner root --mode r-xr-xr-x \
+    install --owner root --mode u=r-x,g=r-x,o=r-x \
         $DIR/../../rtSetup/irqbalance_policyscript \
         /usr/local/bin/irqbalance_policyscript
 fi
