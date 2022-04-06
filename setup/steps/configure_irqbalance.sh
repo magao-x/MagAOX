@@ -15,7 +15,7 @@ if [[ ! -e /etc/sysconfig/irqbalance.bup ]]; then
     cp /etc/sysconfig/irqbalance /etc/sysconfig/irqbalance.bup
 fi
 # Install role-specific settings
-cp $DIR/../../rtSetup/$MAGAOX_ROLE/irqbalance /etc/sysconfig/irqbalance
+cp $DIR/../../rtSetup/$irqbalance /etc/sysconfig/irqbalance
 # Install 
 if [[ ! -e /usr/local/bin/irqbalance_policyscript ]]; then
     install --owner root --mode r-xr-xr-x \
