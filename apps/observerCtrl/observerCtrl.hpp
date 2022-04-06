@@ -57,6 +57,7 @@ protected:
       std::string m_fullName;
       std::string m_pfoa;
       std::string m_email;
+      std::string m_sanitizedEmail;
       std::string m_institution;
    };
 
@@ -114,6 +115,7 @@ protected:
    
    pcf::IndiProperty m_indiP_obsName;
    pcf::IndiProperty m_indiP_observing;
+   pcf::IndiProperty m_indiP_obslog;
    
 public:
    INDI_NEWCALLBACK_DECL(observerCtrl, m_indiP_observers);
@@ -163,13 +165,13 @@ int observerCtrl::loadConfigImpl( mx::app::appConfigurator & _config )
    
    for(size_t i=0; i< sections.size(); ++i)
    {
-      bool emailSet = _config.isSetUnused(mx::app::iniFile::makeKey(sections[i], "email" ));
-      if( !emailSet ) continue;
+      bool pfoaSet = _config.isSetUnused(mx::app::iniFile::makeKey(sections[i], "pfoa" ));
+      if( !pfoaSet ) continue;
       
-      std::string pfoa = sections[i];
+      std::string email = sections[i];
       
-      std::string email;
-      _config.configUnused(email, mx::app::iniFile::makeKey(sections[i], "email" ));
+      std::string pfoa;
+      _config.configUnused(pfoa, mx::app::iniFile::makeKey(sections[i], "pfoa" ));
       
       std::string fullName;
       _config.configUnused(fullName, mx::app::iniFile::makeKey(sections[i], "full_name" ));
@@ -177,7 +179,18 @@ int observerCtrl::loadConfigImpl( mx::app::appConfigurator & _config )
       std::string institution;
       _config.configUnused(institution, mx::app::iniFile::makeKey(sections[i], "institution" ));
       
-      m_observers[email] = observer({fullName, pfoa, email, institution});
+      std::string sanitizedEmail = "";
+      for(size_t n = 0; n < email.size(); ++n)
+      {
+         if(email[n] == '@') {
+            sanitizedEmail = sanitizedEmail + "-at-";
+         } else if(email[n] == '.') {
+            sanitizedEmail = sanitizedEmail + "-dot-";
+         } else {
+            sanitizedEmail.push_back(email[n]);
+         }
+      }
+      m_observers[email] = observer({fullName, pfoa, email, sanitizedEmail, institution});
    }
    
    return 0;
@@ -203,13 +216,13 @@ void observerCtrl::loadConfig()
 
 int observerCtrl::appStartup()
 {
-   std::vector<std::string> emails;
+   std::vector<std::string> sanitizedEmails;
    for(auto it = m_observers.begin(); it!=m_observers.end(); ++it)
    {
-      emails.push_back(it->second.m_pfoa + "-" + it->first);
+      sanitizedEmails.push_back(it->second.m_sanitizedEmail);
    }
       
-   if(createStandardIndiSelectionSw( m_indiP_observers, "observers", emails) < 0)
+   if(createStandardIndiSelectionSw( m_indiP_observers, "observers", sanitizedEmails) < 0)
    {
       log<software_critical>({__FILE__, __LINE__});
       return -1;
@@ -262,8 +275,8 @@ int observerCtrl::appLogic()
       
       for(auto it = m_observers.begin();it!=m_observers.end();++it)
       {
-         if(it->first == m_currentObserver.m_email) updateSwitchIfChanged(m_indiP_observers, it->second.m_pfoa + "-" + it->first, pcf::IndiElement::On, INDI_IDLE);
-         else updateSwitchIfChanged(m_indiP_observers, it->second.m_pfoa + "-" + it->first, pcf::IndiElement::Off, INDI_IDLE);
+         if(it->first == m_currentObserver.m_sanitizedEmail) updateSwitchIfChanged(m_indiP_observers, it->second.m_sanitizedEmail, pcf::IndiElement::On, INDI_IDLE);
+         else updateSwitchIfChanged(m_indiP_observers, it->second.m_sanitizedEmail, pcf::IndiElement::Off, INDI_IDLE);
       }
          
       updateIfChanged(m_indiP_obsName, "current", m_obsName);
@@ -300,9 +313,9 @@ INDI_NEWCALLBACK_DEFN(observerCtrl, m_indiP_observers)(const pcf::IndiProperty &
    std::string newEmail = "";
    for(auto it=m_observers.begin(); it != m_observers.end(); ++it) 
    {
-      if(!ipRecv.find(it->second.m_pfoa + "-" + it->first)) continue;
+      if(!ipRecv.find(it->second.m_sanitizedEmail)) continue;
       
-      if(ipRecv[it->second.m_pfoa + "-" + it->first].getSwitchState() == pcf::IndiElement::On)
+      if(ipRecv[it->second.m_sanitizedEmail].getSwitchState() == pcf::IndiElement::On)
       {
          if(newEmail != "")
          {
@@ -326,8 +339,8 @@ INDI_NEWCALLBACK_DEFN(observerCtrl, m_indiP_observers)(const pcf::IndiProperty &
    
    for(auto it = m_observers.begin();it!=m_observers.end();++it)
    {
-      if(it->first == m_currentObserver.m_email) updateSwitchIfChanged(m_indiP_observers, it->second.m_pfoa + "-" + it->first, pcf::IndiElement::On, INDI_IDLE);
-      else updateSwitchIfChanged(m_indiP_observers, it->second.m_pfoa + "-" + it->first, pcf::IndiElement::Off, INDI_IDLE);
+      if(it->first == m_currentObserver.m_sanitizedEmail) updateSwitchIfChanged(m_indiP_observers, it->second.m_sanitizedEmail, pcf::IndiElement::On, INDI_IDLE);
+      else updateSwitchIfChanged(m_indiP_observers, it->second.m_sanitizedEmail, pcf::IndiElement::Off, INDI_IDLE);
    }
    
    log<logger::observer>({m_currentObserver.m_fullName,m_currentObserver.m_pfoa, m_currentObserver.m_email, m_currentObserver.m_institution});
