@@ -18,7 +18,7 @@ fi
 cp $DIR/../../rtSetup/irqbalance /etc/sysconfig/irqbalance
 # Install policyscript
 if [[ ! -e /usr/local/bin/irqbalance_policyscript ]]; then
-    install --owner root --mode u=r-x,g=r-x,o=r-x \
+    install --owner root --mode 0555 \
         $DIR/../../rtSetup/irqbalance_policyscript \
         /usr/local/bin/irqbalance_policyscript
 fi
