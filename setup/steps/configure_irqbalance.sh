@@ -14,6 +14,16 @@ fi
 if [[ ! -e /etc/sysconfig/irqbalance.bup ]]; then
     cp /etc/sysconfig/irqbalance /etc/sysconfig/irqbalance.bup
 fi
+# Install role-specific settings
 cp $DIR/../../rtSetup/$MAGAOX_ROLE/irqbalance /etc/sysconfig/irqbalance
+# Install 
+if [[ ! -e /usr/local/bin/irqbalance_policyscript ]]; then
+    install --owner root --mode r-xr-xr-x \
+        $DIR/../../rtSetup/irqbalance_policyscript \
+        /usr/local/bin/irqbalance_policyscript
+fi
+# Note that SELinux audit events are still logged, but permissive is required
+# to get the policyscript to run from the irqbalance service's context.
+semanage permissive -a irqbalance_t
 systemctl restart irqbalance
 log_success "Installed /etc/sysconfig/irqbalance"
