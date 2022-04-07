@@ -217,12 +217,14 @@ void observerCtrl::loadConfig()
 int observerCtrl::appStartup()
 {
    std::vector<std::string> sanitizedEmails;
+   std::vector<std::string> emails;
    for(auto it = m_observers.begin(); it!=m_observers.end(); ++it)
    {
       sanitizedEmails.push_back(it->second.m_sanitizedEmail);
+      emails.push_back(it->second.m_email);
    }
       
-   if(createStandardIndiSelectionSw( m_indiP_observers, "observers", sanitizedEmails) < 0)
+   if(createStandardIndiSelectionSw( m_indiP_observers, "observers", sanitizedEmails, emails) < 0)
    {
       log<software_critical>({__FILE__, __LINE__});
       return -1;
@@ -275,7 +277,7 @@ int observerCtrl::appLogic()
       
       for(auto it = m_observers.begin();it!=m_observers.end();++it)
       {
-         if(it->first == m_currentObserver.m_sanitizedEmail) updateSwitchIfChanged(m_indiP_observers, it->second.m_sanitizedEmail, pcf::IndiElement::On, INDI_IDLE);
+         if(it->first == m_currentObserver.m_email) updateSwitchIfChanged(m_indiP_observers, it->second.m_sanitizedEmail, pcf::IndiElement::On, INDI_IDLE);
          else updateSwitchIfChanged(m_indiP_observers, it->second.m_sanitizedEmail, pcf::IndiElement::Off, INDI_IDLE);
       }
          
@@ -382,7 +384,7 @@ INDI_NEWCALLBACK_DEFN(observerCtrl, m_indiP_observing)(const pcf::IndiProperty &
    {
       m_observing = true;
       recordObserver();
-      updateSwitchIfChanged(m_indiP_observing, "toggle", pcf::IndiElement::On, INDI_BUSY);
+      updateSwitchIfChanged(m_indiP_observing, "toggle", pcf::IndiElement::On, INDI_OK);
    }   
    else if( ipRecv["toggle"].getSwitchState() == pcf::IndiElement::Off)
    {
