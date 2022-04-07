@@ -47,6 +47,4 @@ IRQBALANCE_BANNED_CPUS=00,fffc000f,ffffc000
 #   40 : enx503eaa0ceeff
 #   41 : enx503eaa0cf4cd
 #   64 : edt
-IRQBALANCE_ARGS=--banirq=40 --banirq=41 --banirq=64
-
-
+IRQBALANCE_ARGS=--policyscript=/usr/local/bin/irqbalance_policyscript

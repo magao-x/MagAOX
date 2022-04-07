@@ -36,7 +36,7 @@ class DistributedAutoRegressiveController{
 		Matrix* lambda;
 		float gamma;
 
-		DistributedAutoRegressiveController(cublasHandle_t* new_handle, int num_history, int num_future, int num_modes, float gamma, float* new_lambda, float P0);
+		DistributedAutoRegressiveController(cublasHandle_t* new_handle, int num_history, int num_future, int num_modes, float new_gamma, float* new_lambda, float P0);
 		~DistributedAutoRegressiveController();
 
 		void set_handle(cublasHandle_t* new_handle);

@@ -7,7 +7,7 @@
 namespace DDSPC
 {
 
-DistributedAutoRegressiveController::DistributedAutoRegressiveController(cublasHandle_t* new_handle, int num_history, int num_future, int num_modes, float gamma, float* new_lambda, float P0){
+DistributedAutoRegressiveController::DistributedAutoRegressiveController(cublasHandle_t* new_handle, int num_history, int num_future, int num_modes, float new_gamma, float* new_lambda, float P0){
 	nhistory = num_history;
 	nfuture = num_future;
 	nmodes = num_modes;
@@ -21,7 +21,7 @@ DistributedAutoRegressiveController::DistributedAutoRegressiveController(cublasH
 	std::cout << "Nfeatures :: " << nfeatures << std::endl;
 
 
-	gamma = gamma;
+	gamma = new_gamma;
 	buffer_size = 0;
 
 	// Create the buffer size
@@ -315,7 +315,7 @@ __global__ void clip_array(float* x, float clip_value, int n){
 Matrix* DistributedAutoRegressiveController::get_command(float clip_val, Matrix* exploration_signal){
 	
 	// Calculate the dot product
-	bool use_predictor = true;
+	bool use_predictor = false;
 
 	if(use_predictor){
 		controller->dot(wp, delta_command, 1.0, 0.0, CUBLAS_OP_N, CUBLAS_OP_N);
@@ -329,7 +329,7 @@ Matrix* DistributedAutoRegressiveController::get_command(float clip_val, Matrix*
 		// Integrate on the delta_command into command
 		gpu_col_copy(measurement_buffer, 0, buffer_index & buffer_size, newest_measurement);
 		command->scale(0.98);
-		command->add(newest_measurement, -0.6);
+		command->add(newest_measurement, -gamma);
 	}
 	// Transfer the data back to the cpu
 	command->to_cpu();
