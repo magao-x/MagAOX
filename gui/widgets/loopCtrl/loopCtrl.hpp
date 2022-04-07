@@ -22,7 +22,8 @@ protected:
    
    std::string m_loopName;
    std::string m_loopNumber;
-   
+   std::string m_gainCtrl;
+
    std::string m_appState;
    
    double m_gain {0.0};;
@@ -92,7 +93,7 @@ loopCtrl::loopCtrl( std::string & procName,
    setWindowTitle(QString(m_procName.c_str()));
    ui.label_loop_state->setProperty("isStatus", true);
 
-   ui.gainCtrl->setup("hogainctrl", "loop_gain", "Global Gain");
+   ui.gainCtrl->setup(m_procName, "loop_gain", "Global Gain");
    ui.mcCtrl->setup(m_procName, "loop_multcoeff", "Global Mult. Coef.");
    ui.mcCtrl->makeMultCoeffCtrl();
    
@@ -120,7 +121,11 @@ void loopCtrl::subscribe()
    m_parent->addSubscriberProperty(this, m_procName, "loop_multcoeff");
    m_parent->addSubscriberProperty(this, m_procName, "loop_processes");
    m_parent->addSubscriberProperty(this, m_procName, "loop_state");
-   m_parent->addSubscriberProperty(this, "hogainctrl", "modes");
+
+   if(m_procName == "loloop") m_gainCtrl = "logainctrl";
+   else m_gainCtrl = "hogainctrl";
+
+   m_parent->addSubscriberProperty(this, m_gainCtrl, "modes");
    
    m_parent->addSubscriber(ui.gainCtrl);
    m_parent->addSubscriber(ui.mcCtrl);
@@ -174,7 +179,7 @@ void loopCtrl::handleDefProperty( const pcf::IndiProperty & ipRecv)
 
 void loopCtrl::handleSetProperty( const pcf::IndiProperty & ipRecv)
 {  
-   if(ipRecv.getDevice() != m_procName && ipRecv.getDevice() != "hogainctrl") return;
+   if(ipRecv.getDevice() != m_procName && ipRecv.getDevice() != m_gainCtrl) return;
    
    if(ipRecv.getDevice() == m_procName)
    {
@@ -245,17 +250,17 @@ void loopCtrl::handleSetProperty( const pcf::IndiProperty & ipRecv)
       }
    }
    }
-   if(ipRecv.getDevice() == "hogainctrl")
+   if(ipRecv.getDevice() == m_gainCtrl)
    {
-   if(ipRecv.getName() == "modes")
-   {
-      if(ipRecv.find("blocks"))
+      if(ipRecv.getName() == "modes")
       {
-         size_t nB = ipRecv["blocks"].get<int>();
+         if(ipRecv.find("blocks"))
+         {
+            size_t nB = ipRecv["blocks"].get<int>();
 
-         if(nB != m_blockCtrls.size()) emit blocksChanged(nB);
+            if(nB != m_blockCtrls.size()) emit blocksChanged(nB);
+         }
       }
-   }
    }
 
    updateGUI();
@@ -391,7 +396,7 @@ void loopCtrl::setupBlocks(int nB)
    {
       char str[16];
       snprintf(str, sizeof(str), "%02d", n);
-      m_blockCtrls[n] = new gainCtrl("hogainctrl", std::string("block") + str + "_gain", std::string("Block") + str + " Gain");
+      m_blockCtrls[n] = new gainCtrl(m_gainCtrl, std::string("block") + str + "_gain", std::string("Block") + str + " Gain");
       ui.horizontalLayout_2->addWidget(m_blockCtrls[n]);
       if(m_parent) m_parent->addSubscriber(m_blockCtrls[n]);
    }
