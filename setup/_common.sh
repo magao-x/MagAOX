@@ -150,15 +150,17 @@ function createuser() {
   sudo chsh $username -s $(which bash)
   log_info "Append an ecdsa or ed25519 key to /home/$username/.ssh/authorized_keys to enable SSH login"
 
-  data_path="/data/users/$username"
-  mkdir -p "$data_path"
-  chown "$username:magaox" "$data_path"
-  chmod g+rxs "$data_path"
+  data_path="/data/users/$username/"
+  sudo mkdir -p "$data_path"
+  sudo chown "$username:magaox" "$data_path"
+  sudo chmod g+rxs "$data_path"
   log_success "Created $data_path"
 
   link_name="/home/$username/data"
-  ln -s "$data_path" "$link_name"
-  log_success "Linked $link_name -> $data_path"
+  if sudo test ! -L "$link_name"; then
+    sudo ln -sv "$data_path" "$link_name"
+    log_success "Linked $link_name -> $data_path"
+  fi
 }
 # We work around the buggy devtoolset /bin/sudo wrapper in provision.sh, but
 # that means we have to explicitly enable it ourselves.

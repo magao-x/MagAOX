@@ -19,6 +19,17 @@ creategroup magaox-dev
 
 if [[ $MAGAOX_ROLE != vm ]]; then
   createuser xsup
+  createuser guestobs
+  sudo passwd --lock guestobs  # SSH login still possible
+  creategroup guestobs
+  sudo gpasswd -d guestobs magaox || true  # prevent access for shenanigans
+  sudo gpasswd -a guestobs guestobs || true
+  sudo chown guestobs:guestobs /data/users/guestobs
+  sudo chmod g+rwX /data/users/guestobs
+  if [[ -z $(groups | tr ' ' '\n' | grep 'guestobs$') ]]; then
+    sudo gpasswd -a xsup guestobs
+    log_success "Added xsup to group guestobs"
+  fi
 
   if sudo test ! -e /home/xsup/.ssh/id_ed25519; then
     $_REAL_SUDO -u xsup ssh-keygen -t ed25519 -N "" -f /home/xsup/.ssh/id_ed25519 -q

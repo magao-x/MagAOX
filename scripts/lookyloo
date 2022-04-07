@@ -4,6 +4,7 @@ import subprocess
 import pathlib
 import typing
 import dataclasses
+import os
 import sys
 import time
 import datetime
@@ -18,13 +19,11 @@ TELEM_ROOT = pathlib.Path('/opt/MagAOX/telem')
 ICC_DATA = pathlib.Path('/data/icc')
 RTC_DATA = pathlib.Path('/data/rtc')
 AOC_DATA = pathlib.Path('/data')
-QUICKLOOK_PATH = pathlib.Path('/data/users/xsup/quicklook')
+QUICKLOOK_PATH = pathlib.Path('/data/users/guestobs/quicklook')
 SCIENCE_CAMERAS = ['camsci1', 'camsci2']
 SLEEP_FOR_TELEMS = 30
 CHECK_INTERVAL_SEC = 30
 LINE_BUFFERED = 1
-
-_time_to_exit = False
 
 # note: we must truncate to microsecond precision due to limitations in
 # `datetime`, so this pattern works only after chopping off the last
@@ -246,13 +245,13 @@ def convert_xrif(base_dir, paths : typing.List[TimestampedFile], destination_pat
     subprocess.check_call(args)
 
 def main():
-    logging.basicConfig(level='INFO')
+    logging.basicConfig(level='DEBUG' if os.environ.get('LOOKYLOO_DEBUG') is not None else 'INFO')
     if not QUICKLOOK_PATH.is_dir():
         QUICKLOOK_PATH.mkdir(parents=True, exist_ok=True)
     ending_after_dt = datetime.datetime.utcnow() - datetime.timedelta(minutes=120)
     ending_after_dt = ending_after_dt.replace(tzinfo=timezone.utc)
     existing_observation_spans = set()
-
+    log.info(f"Started at {datetime.datetime.now().isoformat()}, waiting for observations...")
     while True:
         start_time = time.time()
         try:
@@ -273,3 +272,6 @@ def main():
             raise
         except Exception:
             log.exception(f"Poll for new images failed with exception")
+
+if __name__ == "__main__":
+    main()
