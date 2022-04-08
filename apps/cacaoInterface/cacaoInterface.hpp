@@ -900,26 +900,46 @@ void cacaoInterface::fmThreadExec( )
 
       if(ans[1] == 'F')
       {
-         if(m_gain == 0)
+         m_loopState = 0;
+        /* if(m_gain == 0)
          {
             m_loopState = 0; //open
          }
          else 
          {
             m_loopState = 1; //paused -- gains set, but loop not updating so leak not in effect
-         }
+         }*/
       }
       else m_loopState = 2; //closed
 
       ans = getFPSValNum("mfilt", "loopgain");
-      m_gain = std::stof(ans);
-
+      try
+      {
+         m_gain = std::stof(ans);
+      }   
+      catch(const std::exception& e)
+      {
+         m_gain = 0;
+      }
+      
       ans = getFPSValNum("mfilt", "loopmult");
-      m_multCoeff = std::stof(ans);
-
+      try
+      {
+         m_multCoeff = std::stof(ans);
+      }
+      catch(...)
+      {
+         m_multCoeff = 0;
+      }
       ans = getFPSValNum("mfilt", "looplimit");
-      m_maxLim = std::stof(ans);
-
+      try
+      {
+         m_maxLim = std::stof(ans);
+      }
+      catch(...)
+      {
+         m_maxLim = 0;
+      }
       /*
       fin.open( m_loopDir +  "/status/stat_procON.txt");
       
