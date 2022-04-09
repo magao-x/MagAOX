@@ -229,6 +229,9 @@ sudo bash -l "$DIR/steps/install_cfitsio.sh"
 sudo bash -l "$DIR/steps/install_eigen.sh"
 sudo bash -l "$DIR/steps/install_cppzmq.sh"
 sudo bash -l "$DIR/steps/install_flatbuffers.sh"
+if [[ $MAGAOX_ROLE == AOC ]]; then
+    sudo bash -l "$DIR/steps/install_lego.sh"
+fi
 if [[ $MAGAOX_ROLE == RTC || $MAGAOX_ROLE == ICC || $MAGAOX_ROLE == AOC || $MAGAOX_ROLE == TIC || $MAGAOX_ROLE == ci || ( $MAGAOX_ROLE == vm && $VM_KIND == vagrant ) ]]; then
     sudo bash -l "$DIR/steps/install_basler_pylon.sh"
 fi
