@@ -361,7 +361,6 @@ int xrif2fits::execute()
          return -1;
       }
 
-<<<<<<< Updated upstream
       
       //Now get timing data
       nr = fread(header, 1, XRIF_HEADER_SIZE, fp_xrif);
@@ -553,7 +552,6 @@ int xrif2fits::execute()
          
          fout << curr_timing[0] << " " << curr_timing[1] << " " << curr_timing[2] << "  " << curr_timing[3] << " " << curr_timing[4] << "\n";
       }*/
-=======
       mx::improc::fitsFile<unsigned short> ff;
    
       std::string outname = m_files[n];
@@ -561,7 +559,6 @@ int xrif2fits::execute()
       outname.replace( ext, 5, ".fits");
    
       ff.write(outname, tmpc);
->>>>>>> Stashed changes
    }
 
    }
