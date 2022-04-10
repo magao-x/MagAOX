@@ -72,8 +72,11 @@ protected:
    mx::improc::eigenImage<float> m_measurements;
    mx::improc::eigenImage<float> m_commands;
 
+   float m_ggain {0};
+
    std::vector<float> m_gains;
 
+   bool m_ctrlEnabled {false};
 
 public:
    /// Default c'tor.
@@ -117,8 +120,16 @@ public:
    int processImage( void* curr_src,
                      const dev::shmimT &
                     );
+
+   int sendCommands(std::vector<float> & commands);
    
    //INDI 
+
+   pcf::IndiProperty m_indiP_ggain;
+   pcf::IndiProperty m_indiP_ctrlEnabled;
+
+   INDI_NEWCALLBACK_DECL(alignLoop, m_indiP_ggain);
+   INDI_NEWCALLBACK_DECL(alignLoop, m_indiP_ctrlEnabled);
 
    static int st_setCallBack_ctrl( void * app, const pcf::IndiProperty &ipRecv)
    {
@@ -203,6 +214,25 @@ int alignLoop::appStartup()
       }
    }
 
+   m_gains.resize(m_defaultGains.size());
+   for(size_t n=0; n < m_defaultGains.size(); ++n) m_gains[n] = m_defaultGains[n];
+
+   createStandardIndiNumber<unsigned>( m_indiP_ggain, "loop_gain", 0, 1, 0, "%0.2f");
+   m_indiP_ggain["current"] = m_ggain;
+   m_indiP_ggain["target"] = m_ggain;  
+   if( registerIndiPropertyNew( m_indiP_ggain, INDI_NEWCALLBACK(m_indiP_ggain)) < 0)
+   {
+      log<software_error>({__FILE__,__LINE__});
+      return -1;
+   }
+
+   createStandardIndiToggleSw( m_indiP_ctrlEnabled, "loop_state");  
+   if( registerIndiPropertyNew( m_indiP_ctrlEnabled, INDI_NEWCALLBACK(m_indiP_ctrlEnabled)) < 0)
+   {
+      log<software_error>({__FILE__,__LINE__});
+      return -1;
+   }
+
    m_currents.resize(m_ctrlDevices.size(), -1e15);
 
    m_indiP_ctrl.resize(m_ctrlDevices.size());
@@ -218,10 +248,10 @@ int alignLoop::appStartup()
 
    m_intMat.resize(m_ctrlTargets.size(), m_ctrlTargets.size()) ;
    m_intMat.setZero();
-   m_intMat(0,0) = 0;
-   m_intMat(0,1) = 1;
-   m_intMat(1,0) = 1;
-   m_intMat(1,1) = 0;
+   m_intMat(1,0) = 0.926;
+   m_intMat(1,1) = -0.370;
+   m_intMat(0,0) = 0.185;
+   m_intMat(0,1) = 0.926;
 
 /*
    mx::fits::fitsFile<float> ff;
@@ -311,14 +341,104 @@ int alignLoop::processImage( void* curr_src,
    }
    std::cout << "\n";
 
+   std::vector<float> commands;
+   commands.resize(m_measurements.rows());
+
    std::cout << "commands:    ";
    for(int cc = 0; cc < m_measurements.rows(); ++cc)
    {
-      std::cout << m_currents[cc] - m_commands(cc,0) << " ";
+      commands[cc] = m_currents[cc] - m_ggain*m_gains[cc]*m_commands(cc,0);
+      std::cout << commands[cc] << " ";
    }
    std::cout << "\n";
   
    //And send commands.
+   if(m_ctrlEnabled)
+   {
+      return sendCommands(commands);
+   }
+   else 
+   {
+      return 0;
+   }
+}
+
+inline
+int alignLoop::sendCommands(std::vector<float> & commands)
+{
+   for(size_t n=0; n < m_ctrlDevices.size(); ++n)
+   {
+      pcf::IndiProperty ip(pcf::IndiProperty::Number);
+   
+      ip.setDevice(m_ctrlDevices[n]);
+      ip.setName(m_ctrlProperties[n]);
+      ip.add(pcf::IndiElement(m_ctrlTargets[n]));
+      ip[m_ctrlTargets[n]] = commands[n];
+   
+      sendNewProperty(ip);
+   }
+
+   return 0;
+}
+
+INDI_NEWCALLBACK_DEFN(alignLoop, m_indiP_ggain)(const pcf::IndiProperty &ipRecv)
+{
+   if(ipRecv.getName() != m_indiP_ggain.getName())
+   {
+      log<software_error>({__FILE__, __LINE__, "invalid indi property received"});
+      return -1;
+   }
+   
+   float target;
+   
+   if( indiTargetUpdate( m_indiP_ggain, target, ipRecv, true) < 0)
+   {
+      log<software_error>({__FILE__,__LINE__});
+      return -1;
+   }
+   
+   m_ggain = target;
+   
+   updateIfChanged(m_indiP_ggain, "current", m_ggain);
+   updateIfChanged(m_indiP_ggain, "target", m_ggain);
+   
+   log<text_log>("set global gain to " + std::to_string(m_ggain), logPrio::LOG_NOTICE);
+   
+   return 0;
+}
+
+INDI_NEWCALLBACK_DEFN(alignLoop, m_indiP_ctrlEnabled)(const pcf::IndiProperty &ipRecv)
+{
+   if(ipRecv.getName() != m_indiP_ctrlEnabled.getName())
+   {
+      log<software_error>({__FILE__, __LINE__, "invalid indi property received"});
+      return -1;
+   }
+
+   //switch is toggled to on
+   if( ipRecv["toggle"].getSwitchState() == pcf::IndiElement::On)
+   {
+      if(!m_ctrlEnabled) //not enabled so change
+      {      
+         m_ctrlEnabled = true;
+         log<loop_closed>();
+         updateSwitchIfChanged(m_indiP_ctrlEnabled, "toggle", pcf::IndiElement::On, INDI_BUSY);
+      }
+      return 0;
+   }
+
+   //switch is toggle to off
+   if( ipRecv["toggle"].getSwitchState() == pcf::IndiElement::Off)
+   {
+      if(m_ctrlEnabled)
+      {
+         m_ctrlEnabled = false;
+         log<loop_open>();
+         updateSwitchIfChanged(m_indiP_ctrlEnabled, "toggle", pcf::IndiElement::Off, INDI_IDLE);
+      }
+      return 0;
+   }
+   
    return 0;
 }
 

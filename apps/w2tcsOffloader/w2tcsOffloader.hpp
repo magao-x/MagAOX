@@ -172,7 +172,7 @@ void w2tcsOffloader::loadConfig()
 inline
 int w2tcsOffloader::appStartup(){
 
-   mx::improc::fitsFile<float> ff;
+   mx::fits::fitsFile<float> ff;
    if(ff.read(m_wZModes, m_wZModesPath) < 0) 
    {
       return log<text_log,-1>("Could not open mode cube file", logPrio::LOG_ERROR);
