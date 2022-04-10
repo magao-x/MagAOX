@@ -69,6 +69,12 @@ protected:
    ///Mutex for locking INDI communications.
    std::mutex m_tcsMutex;
    
+   //Telescope time:
+   double m_telST {0};
+
+   pcf::IndiProperty m_indiP_teltime;
+
+
    //Telescope position:
    double m_telEpoch {0};
    double m_telRA {0};
@@ -213,6 +219,7 @@ public:
    
    //The "dump" commands:
    
+   int getTelTime();
    int getTelPos();
    int getTelData();
    int getCatData();
@@ -528,6 +535,11 @@ void tcsInterface::loadConfig()
 inline
 int tcsInterface::appStartup()
 {
+   createROIndiNumber( m_indiP_teltime, "teltime", "Telscope Time", "TCS");
+   indi::addNumberElement<double>( m_indiP_teltime, "sidereal_time", 0, std::numeric_limits<double>::max(), 0, "%0.6f");
+   m_indiP_teltime["sidereal_time"] = m_telST;
+   registerIndiPropertyReadOnly(m_indiP_teltime);
+
    createROIndiNumber( m_indiP_telpos, "telpos", "Telscope Position", "TCS");
    indi::addNumberElement<double>( m_indiP_telpos, "epoch", 0, std::numeric_limits<double>::max(), 0, "%0.6f");
    m_indiP_telpos["epoch"] = m_telEpoch;
@@ -777,7 +789,7 @@ int tcsInterface::appStartup()
    }
    
    //Get the loop state for managing offloading
-   REG_INDI_SETPROP(m_indiP_loopState, "aoloop", "loopState");
+   REG_INDI_SETPROP(m_indiP_loopState, "holoop", "loop_state");
    
    
    m_offloadRequests.resize(5);
@@ -863,6 +875,12 @@ int tcsInterface::appLogic()
    {
       std::string response;
       
+      if(getTelTime() < 0)
+      {
+         log<text_log>("Error from getTelTime", logPrio::LOG_ERROR);
+         return 0; //app state will be set based on what the error was
+      }
+
       if(getTelPos() < 0)
       {
          log<text_log>("Error from getTelPos", logPrio::LOG_ERROR);
@@ -893,11 +911,12 @@ int tcsInterface::appLogic()
          return 0;
       }
       
-      if(getSeeing() < 0)
+
+      /*if(getSeeing() < 0)
       {
          log<text_log>("Error from getSeeing", logPrio::LOG_ERROR);
          return 0;
-      }
+      }*/
       
       telemeter<tcsInterface>::appLogic();
       
@@ -1106,6 +1125,48 @@ int tcsInterface::parse_xms( double &x,
    
    return 0;
 }
+
+inline
+int tcsInterface::getTelTime()
+{
+   double  h,m,s;
+
+   std::vector<std::string> pdat;
+   std::string posstr;
+   
+   if(getMagTelStatus( posstr, "datetime") < 0)
+   {
+      state(stateCodes::NOTCONNECTED);
+      log<text_log>("Error getting telescope position (telpos)", logPrio::LOG_ERROR);
+      return -1;
+   }
+
+   pdat = parse_teldata(posstr);
+
+   if(pdat[0] == "-1")
+   {
+      state(stateCodes::ERROR);
+      log<text_log>("Error getting telescope time (datetime): TCS returned -1", logPrio::LOG_ERROR);
+      return -1;
+   }
+
+   if(pdat.size() != 3)
+   {
+      state(stateCodes::ERROR);
+      log<text_log>("Error getting telescope position (datetime): TCS response wrong size", logPrio::LOG_ERROR);
+      return -1;
+   }
+
+   if(parse_xms(h,m,s,pdat[2]) != 0)
+   {
+      log<text_log>("Error parsing telescope RA", logPrio::LOG_ERROR);
+      return -1;
+   }
+
+   m_telST = (h + m/60. + s/3600.);
+
+   return 0;
+}//int tcsInterface::getTelTime()
 
 inline
 int tcsInterface::getTelPos()
@@ -1563,7 +1624,16 @@ int tcsInterface::getSeeing()
 inline
 int tcsInterface::updateINDI()
 {
-   
+   try
+   {
+      m_indiP_teltime["sidereal_time"] = m_telST;
+   }
+   catch(...)
+   {
+      log<software_error>({__FILE__,__LINE__,"INDI library exception"});
+      return -1;
+   }
+
    try
    {
       m_indiP_telpos["epoch"] = m_telEpoch;
@@ -2560,12 +2630,22 @@ INDI_NEWCALLBACK_DEFN(tcsInterface, m_indiP_acqFromGuider)(const pcf::IndiProper
 
 INDI_SETCALLBACK_DEFN(tcsInterface, m_indiP_loopState)(const pcf::IndiProperty &ipRecv)
 {
-   std::string state = ipRecv["state"].get();
-   
-   if(state == "open") m_loopState = 0;
-   else if(state == "paused") m_loopState = 1;
-   else m_loopState = 2;
-   
+   if(ipRecv.getName() != m_indiP_loopState.getName())
+   {
+      return log<software_error>({__FILE__,__LINE__, "wrong INDI property received"});
+   }
+
+   if(!ipRecv.find("loop_state")) return 0;
+
+   if(ipRecv["loop_state"].getSwitchState() == pcf::IndiElement::On)
+   {
+      m_loopState = 2;
+   }
+   else
+   {
+      m_loopState = 0;
+   }
+
    return 0;
 }
 
