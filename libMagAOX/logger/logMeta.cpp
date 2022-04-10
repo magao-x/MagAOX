@@ -29,10 +29,14 @@ logMetaDetail logMemberAccessor( flatlogs::eventCodeT ec,
          return telem_telcat::getAccessor(memberName);
       case telem_teldata::eventCode:
          return telem_teldata::getAccessor(memberName);
+      case telem_telpos::eventCode:
+         return telem_telpos::getAccessor(memberName);
       case telem_stage::eventCode:
          return telem_stage::getAccessor(memberName);
-         
+      case telem_zaber::eventCode:
+         return telem_zaber::getAccessor(memberName);   
       default:
+         std::cerr << "Missing logMemberAccessor case entry for " << ec << ":" << memberName << "\n";
          return logMetaDetail();
    }
 }
@@ -369,12 +373,37 @@ mx::fits::fitsHeaderCard logMeta::card( logMap &lm,
 {
    if(m_detail.valType == valTypes::String)
    {
-      return mx::fits::fitsHeaderCard( m_spec.device + " " + m_spec.keyword, value(lm, stime, atime), m_spec.comment);
+      if(m_detail.hierarch == false)
+      {
+         return mx::fits::fitsHeaderCard( m_spec.keyword, value(lm, stime, atime), m_spec.comment);
+      }
+      else
+      { 
+         //Add spaces to make sure hierarch is invoked
+         std::string keyw = m_spec.device + " " + m_spec.keyword;
+         if(keyw.size() < 9) 
+         {
+            keyw += std::string(9-keyw.size(), ' ');
+         }
+         return mx::fits::fitsHeaderCard( keyw, value(lm, stime, atime), m_spec.comment);
+      }
    }
    else 
    {
-      //std::cerr <<  value(lm, stime, atime) << "\n";
-      return mx::fits::fitsHeaderCard( m_spec.device + " " + m_spec.keyword, value(lm, stime, atime).c_str(),  m_detail.valType, m_spec.comment);
+      if(m_detail.hierarch == false)
+      {
+         return mx::fits::fitsHeaderCard( m_spec.keyword, value(lm, stime, atime).c_str(),  m_detail.valType, m_spec.comment);
+      }
+      else
+      {
+         //Add spaces to make sure hierarch is invoked
+         std::string keyw = m_spec.device + " " + m_spec.keyword;
+         if(keyw.size() < 9) 
+         {
+            keyw += std::string(9-keyw.size(), ' ');
+         }
+         return mx::fits::fitsHeaderCard( keyw, value(lm, stime, atime).c_str(),  m_detail.valType, m_spec.comment);
+      }
    }
 }
 

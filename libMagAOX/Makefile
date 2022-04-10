@@ -123,6 +123,8 @@ logger/generated/logTypes.hpp: logger/logCodes.dat
 libMagAOX.a: libMagAOX.hpp.gch $(OBJS)
 	ar rvs libMagAOX.a $(OBJS)
 
+logger/logMeta.o: logger/logMap.hpp logger/logMap.cpp logger/logMeta.hpp logger/logMeta.cpp logger/generated/logTypes.hpp
+logger/logMap.o: logger/logMap.hpp logger/logMap.cpp logger/logFileName.hpp 
 
 .PHONY: clean
 clean:

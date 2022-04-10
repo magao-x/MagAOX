@@ -29,6 +29,7 @@ struct logMetaSpec
    std::string keyword; //overrides the default
    std::string format; //overrides the default
    std::string comment; //overrides the default
+   
 
    logMetaSpec()
    {
@@ -62,6 +63,7 @@ struct logMetaDetail
    int valType {-1};
    int metaType {-1};
    void * accessor {nullptr};
+   bool hierarch {true}; // if false the device name is not included.
 
    logMetaDetail()
    {
@@ -79,10 +81,22 @@ struct logMetaDetail
 
    logMetaDetail( const std::string & k,
                   const std::string & c,
+                  const std::string & f,
                   int vt,
                   int mt,
-                  void *acc
-                ) : keyword(k), comment(c), valType(vt), metaType(mt), accessor(acc)
+                  void *acc,
+                  bool h
+                ) : keyword(k), comment(c), format(f), valType(vt), metaType(mt), accessor(acc), hierarch(h)
+   {
+   }
+
+   logMetaDetail( const std::string & k,
+                  const std::string & c,
+                  int vt,
+                  int mt,
+                  void *acc,
+                  bool h
+                ) : keyword(k), comment(c), valType(vt), metaType(mt), accessor(acc), hierarch(h)
    {
    }
 
@@ -91,6 +105,15 @@ struct logMetaDetail
                   int mt,
                   void *acc
                 ) : keyword(k), valType(vt), metaType(mt), accessor(acc)
+   {
+   }
+
+   logMetaDetail( const std::string & k,
+                  int vt,
+                  int mt,
+                  void *acc, 
+                  bool h
+                ) : keyword(k), valType(vt), metaType(mt), accessor(acc), hierarch(h)
    {
    }
 

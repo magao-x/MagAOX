@@ -22,7 +22,7 @@ namespace logger
 int logInMemory::loadFile( logFileName const& lfn)
 {
    int fd = open(lfn.fullName().c_str(), O_RDONLY );
-   
+
    off_t fsz = mx::ioutils::fileSize(fd);
    
    std::vector<char> memory(fsz);
@@ -234,7 +234,7 @@ int logMap::getNextLog( char * &logAfter,
    buffer += logHeader::totalSize(buffer);
    if(buffer >= lim.m_memory.data() + lim.m_memory.size())
    {
-      std::cerr << "Reached end of data -- need to load more data\n";
+      std::cerr << "Reached end of data for " << appName << " -- need to load more data " << __LINE__ << "\n";
       //propoer action is to load the next file if possible.
       return 1;
    }
@@ -246,7 +246,7 @@ int logMap::getNextLog( char * &logAfter,
       buffer += logHeader::totalSize(buffer);
       if(buffer >= lim.m_memory.data() + lim.m_memory.size())
       {
-         std::cerr << "Reached end of data -- need to load more data\n";
+         std::cerr << "Reached end of data for " << appName << "-- need to load more data " << __LINE__ << "\n";
          //propoer action is to load the next file if possible.
          return 1;
       }
