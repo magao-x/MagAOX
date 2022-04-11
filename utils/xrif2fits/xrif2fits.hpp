@@ -302,6 +302,8 @@ int xrif2fits::execute()
       logMetas.push_back(logMetaSpec({"stagebs", telem_stage::eventCode, "preset"}));
       logMetas.push_back(logMetaSpec({"stagebs", telem_zaber::eventCode, "pos"}));
 
+      logMetas.push_back(logMetaSpec({"fwscind", telem_stage::eventCode, "presetName"}));
+      logMetas.push_back(logMetaSpec({"fwscind", telem_stage::eventCode, "preset"}));
 
       logMetas.push_back(logMetaSpec({"fwpupil", telem_stage::eventCode, "presetName"}));
       logMetas.push_back(logMetaSpec({"fwpupil", telem_stage::eventCode, "preset"}));
@@ -309,6 +311,9 @@ int xrif2fits::execute()
       logMetas.push_back(logMetaSpec({"fwfpm", telem_stage::eventCode, "presetName"}));
       logMetas.push_back(logMetaSpec({"fwfpm", telem_stage::eventCode, "preset"}));
    
+      logMetas.push_back(logMetaSpec({"fwlowfs", telem_stage::eventCode, "presetName"}));
+      logMetas.push_back(logMetaSpec({"fwlowfs", telem_stage::eventCode, "preset"}));
+
       logMetas.push_back(logMetaSpec({"fwlyot", telem_stage::eventCode, "presetName"}));
       logMetas.push_back(logMetaSpec({"fwlyot", telem_stage::eventCode, "preset"}));
    

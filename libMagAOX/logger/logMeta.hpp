@@ -12,7 +12,7 @@
 #define logger_logMeta_hpp
 
 #include <mx/ioutils/fits/fitsHeaderCard.hpp>
-
+#define HARD_EXIT
 #include "logMap.hpp"
 
 namespace MagAOX
@@ -208,6 +208,9 @@ int getLogContVal( valT & val,
    if(lm.getNextLog(atafter, stprior, appName)!=0)
    {
       std::cerr << __FILE__ << " " << __LINE__ << " getNextLog returned error for " << appName << ":" << ev << "\n";
+      #ifdef HARD_EXIT 
+      exit(-1);
+      #endif
       return 1;
    }
    valT atprV = getter(flatlogs::logHeader::messageBuffer(atafter));

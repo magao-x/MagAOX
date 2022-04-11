@@ -33,7 +33,7 @@ int logInMemory::loadFile( logFileName const& lfn)
    
    if(nrd != fsz)
    {
-      std::cerr << "logInMemory::loadFile(" << lfn.fullName() << ") did not read all bytes\n";
+      std::cerr << __FILE__ << " " << __LINE__ << " logInMemory::loadFile(" << lfn.fullName() << ") did not read all bytes\n";
       return -1;
    }
    
@@ -51,7 +51,7 @@ int logInMemory::loadFile( logFileName const& lfn)
    
    if(st != memory.size())
    {
-      std::cerr << "Possibly corrupt logfile.\n";
+      std::cerr <<  __FILE__ << " " << __LINE__ << " Possibly corrupt logfile.\n";
       return -1;
    }
    
@@ -72,26 +72,26 @@ int logInMemory::loadFile( logFileName const& lfn)
       
       if(endTime >= m_startTime)
       {
-         std::cerr << "overlapping log files!\n";
+         std::cerr <<  __FILE__ << " " << __LINE__ << " overlapping log files!\n";
          return -1;
       }
       
       m_memory.insert(m_memory.begin(), memory.begin(), memory.end());
       m_startTime = startTime;
-      std::cerr << "added before!\n";
+      std::cerr <<  __FILE__ << " " << __LINE__ << " added before!\n";
       return 0;
    }
    
    if(startTime > m_endTime)
    {
-      std::cerr << "gonna append\n";
+      std::cerr <<  __FILE__ << " " << __LINE__ << " gonna append\n";
       m_memory.insert(m_memory.end(), memory.begin(), memory.end());
       m_endTime = endTime;
-      std::cerr << "added after!\n";
+      std::cerr <<  __FILE__ << " " << __LINE__ << " added after!\n";
       return 0;
    }
    
-   std::cerr << "Need to implement insert in the middle!\n";
+   std::cerr <<  __FILE__ << " " << __LINE__ << " Need to implement insert in the middle!\n";
    std::cerr << m_startTime.time_s << " " << m_startTime.time_ns << "\n";
    std::cerr << startTime.time_s << " " << startTime.time_ns << "\n";
    
@@ -125,6 +125,7 @@ int logMap::getPriorLog( char * &logBefore,
    
    if(m_appToFileMap[appName].size() == 0)
    {
+      std::cerr << __FILE__ << " " << __LINE__ << " getPriorLog empty map\n";
       return -1;
    }
    
@@ -162,7 +163,7 @@ int logMap::getPriorLog( char * &logBefore,
    
    if(evL != ev)
    {
-      std::cerr << "Event code not found.\n";
+      std::cerr <<  __FILE__ << " " << __LINE__ << " Event code not found.\n";
       return -1;
    }
    
@@ -214,7 +215,7 @@ int logMap::getPriorLog( char * &logBefore,
    logBefore = priorBuffer;
    
    return 0;
-}
+}//getPriorLog
 
 int logMap::getNextLog( char * &logAfter,            
                         char * logCurrent,           
@@ -234,7 +235,7 @@ int logMap::getNextLog( char * &logAfter,
    buffer += logHeader::totalSize(buffer);
    if(buffer >= lim.m_memory.data() + lim.m_memory.size())
    {
-      std::cerr << "Reached end of data for " << appName << " -- need to load more data " << __LINE__ << "\n";
+      std::cerr << __FILE__ << " " << __LINE__ << " Reached end of data for " << appName << " -- need to load more data\n";
       //propoer action is to load the next file if possible.
       return 1;
    }
@@ -246,7 +247,7 @@ int logMap::getNextLog( char * &logAfter,
       buffer += logHeader::totalSize(buffer);
       if(buffer >= lim.m_memory.data() + lim.m_memory.size())
       {
-         std::cerr << "Reached end of data for " << appName << "-- need to load more data " << __LINE__ << "\n";
+         std::cerr << __FILE__ << " " << __LINE__ << " Reached end of data for " << appName << "-- need to load more data\n";
          //propoer action is to load the next file if possible.
          return 1;
       }

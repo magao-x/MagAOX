@@ -128,11 +128,26 @@ std::string logMeta::value( logMap & lm,
          
    if(m_detail.valType == valTypes::String)
    {
-      return valueString( lm, stime, atime);
+      std::string vs = valueString( lm, stime, atime); 
+      #ifdef HARD_EXIT 
+      if(vs == m_invalidValue)
+      {
+         std::cerr << __FILE__ << " " << __LINE__ << " valueString returned invalid value\n";
+         exit(-1);
+      } 
+      #endif
+      return vs;
    }
    else
    {
-      return valueNumber( lm, stime, atime);
+      std::string vn = valueNumber( lm, stime, atime);
+      #ifdef HARD_EXIT 
+      if(vn == m_invalidValue)
+      {
+         std::cerr << __FILE__ << " " << __LINE__ << " valueNumber returned invalid value\n";
+      } 
+      #endif
+      return vn;
    }
 }
 
@@ -356,6 +371,10 @@ std::string logMeta::valueString( logMap & lm,
    {
       if( getLogStateVal(val,lm, m_spec.device,m_spec.eventCode,stime,atime,(std::string(*)(void*))m_detail.accessor, &m_hint) != 0)
       {
+         #ifdef HARD_EXIT 
+         std::cerr << __FILE__ << " " << __LINE__ << "\n";
+         //exit(-1);
+         #endif
          val = m_invalidValue;
       }
    }
