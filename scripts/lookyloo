@@ -233,16 +233,22 @@ def convert_xrif(base_dir, paths : typing.List[TimestampedFile], destination_pat
         delta = datetime.datetime.utcnow().replace(tzinfo=timezone.utc) - data_file.timestamp
         if delta.seconds < SLEEP_FOR_TELEMS:
             time.sleep(SLEEP_FOR_TELEMS - delta.seconds)
-    args = [
-        'xrif2fits',
-        '-d', str(base_dir),
-        '-f', ','.join(p.path.name for p in paths),
-        '-t', '/data/icc/telem,/data/rtc/telem,/data/telem', 
-        '-l', '/data/icc/logs,/data/rtc/logs,/data/logs', 
-        '-D', str(destination_path)
-    ]
-    log.debug(" ".join(args))
-    subprocess.check_call(args)
+    for ts_path in paths:
+        args = [
+            'xrif2fits',
+            '-d', str(base_dir),
+            '-f', ts_path.path.name,
+            '-t', '/data/icc/telem,/data/rtc/telem,/data/telem',
+            '-l', '/data/icc/logs,/data/rtc/logs,/data/logs',
+            '-D', str(destination_path)
+        ]
+        log.debug(" ".join(args))
+        try:
+            subprocess.check_call(args, timeout=60)
+        except subprocess.CalledProcessError as e:
+            log.exception("xrif2fits exited with nonzero exit code")
+        except subprocess.TimeoutExpired as e:
+            log.exception("xrif2fits canceled after timeout")
 
 def main():
     logging.basicConfig(level='DEBUG' if os.environ.get('LOOKYLOO_DEBUG') is not None else 'INFO')
