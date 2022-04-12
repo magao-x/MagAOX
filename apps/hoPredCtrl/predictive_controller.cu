@@ -40,9 +40,6 @@ namespace DDSPC
 		m_exploration_signal->to_gpu();
 		m_exploration_buffer = nullptr;
 		
-		// m_command = make_col_vector(0.0, num_modes, 1);
-		m_command = new Matrix(0.0, num_modes, 1);
-		m_command->set_handle(&handle);
 
 		//
 		// m_voltages = make_col_vector(0.0, num_actuators, 1);
@@ -59,6 +56,13 @@ namespace DDSPC
 
 		controller = new DistributedAutoRegressiveController(&handle, m_num_history, m_num_future, m_num_modes, m_gamma, m_lambda, m_P0);
 		controller->set_handle(&handle);
+		
+		// m_command = new Matrix(0.0, num_modes, 1);
+		// m_command->set_handle(&handle);
+
+		// This was okay!
+		m_command = controller->get_command();
+
 	};
 
 	PredictiveController::~PredictiveController(){
@@ -114,7 +118,11 @@ namespace DDSPC
 		}
 		controller->set_new_regularization(m_lambda);
 	};
-	
+
+	void PredictiveController::set_new_gamma(float new_gamma){
+		controller->set_new_regularization(m_lambda);
+	};
+
 	void PredictiveController::set_interaction_matrix(float* interaction_matrix){
 		cpu_full_copy(m_interaction_matrix, interaction_matrix);
 		m_interaction_matrix->to_gpu();
@@ -161,14 +169,14 @@ namespace DDSPC
 		get_next_exploration_signal();
 		
 		// Determine the command vector
-		m_command = controller->get_command(clip_val, m_exploration_signal);
-		
+		m_command = controller->get_new_control_command(clip_val, m_exploration_signal);
+
 		// We need to add a modal coefficients to actuators mapping here.
 		m_mode_mapping_matrix->dot(m_command, m_voltages);
-		
+		m_voltages->to_cpu();
+
 		// Copy into shmimstream
-		//return m_voltages->cpu_data[0];
-		return m_command->cpu_data[0];
+		return m_voltages->cpu_data[0];
 	};
 	
 }

@@ -9,11 +9,24 @@ MXLIBROOT=/opt/MagAOX/source/mxlib
 #
 # mxLib
 #
+
 MXLIB_COMMIT_ISH=magaox
 orgname=jaredmales
 reponame=mxlib
 parentdir=/opt/MagAOX/source
 clone_or_update_and_cd $orgname $reponame $parentdir
+
+
+if [[ -d "$MXLIBROOT" ]]; then
+    cd "$MXLIBROOT"
+    git pull
+    echo "Updated mxlib"
+else
+    # TODO: use _common checkout function
+    git clone https://github.com/jaredmales/mxlib.git "$MXLIBROOT"
+    echo "Cloned a new copy of mxlib"
+    cd "$MXLIBROOT"
+fi
 
 git config core.sharedRepository group
 git checkout $MXLIB_COMMIT_ISH

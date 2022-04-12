@@ -499,12 +499,22 @@ int userGainCtrl::getModeBlocks()
       log<text_log>("no mode blocks found", logPrio::LOG_WARNING);
    }
 
-   size_t Nb = blocks.size();
+   std::ifstream fin;
+
+   fin.open(m_aoCalDir + "/aol" + std::to_string(m_loopNumber) + "_NBmodeblocks.txt");
+   if( !fin )
+   {
+      return log<software_error, -1>({__FILE__, __LINE__, errno, "userGainCtrl::getModeBlocks failed to open: NBmodeblocks.txt"});
+   }
+
+   size_t Nb;
+   fin >> Nb;
+
+   fin.close();
 
    std::vector<int> modeBlockStart(Nb);
    std::vector<int> modeBlockN(Nb);
 
-   std::ifstream fin;
    
    for(size_t n =0; n < Nb; ++n)
    {

@@ -1088,7 +1088,7 @@ int ocam2KCtrl::configureAcquisition()
    
    m_width = OCAM_SZ;
    m_height = OCAM_SZ;
-   m_dataType = _DATATYPE_INT16;
+   m_dataType = _DATATYPE_UINT16;
    
    state(stateCodes::OPERATING);
    
