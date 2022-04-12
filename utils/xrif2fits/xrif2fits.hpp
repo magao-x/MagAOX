@@ -7,8 +7,7 @@
 #ifndef xrif2fits_hpp
 #define xrif2fits_hpp
 
-#include <ImageStruct.h>
-#include <ImageStreamIO.h>
+#include <ImageStreamIO/ImageStreamIO.h>
 
 #include <xrif/xrif.h>
 
