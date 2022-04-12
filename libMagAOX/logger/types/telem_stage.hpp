@@ -112,7 +112,7 @@ struct telem_stage : public flatbuffer_log
    static logMetaDetail getAccessor( const std::string & member /**< [in] the name of the member */ )
    {
       if(     member == "moving") return logMetaDetail({"MOVING", logMeta::valTypes::Int, logMeta::metaTypes::State, (void *) &moving}); 
-      else if(member == "preset") return logMetaDetail({"PRESET NUMBER", logMeta::valTypes::Double, logMeta::metaTypes::State, (void *) &preset}); 
+      else if(member == "preset") return logMetaDetail({"PRESET POSITION", logMeta::valTypes::Double, logMeta::metaTypes::State, (void *) &preset}); 
       else if(member == "presetName") return logMetaDetail({"PRESET NAME", logMeta::valTypes::String, logMeta::metaTypes::State, (void *) &presetName}); 
       else
       {

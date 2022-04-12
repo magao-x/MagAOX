@@ -229,6 +229,9 @@ sudo bash -l "$DIR/steps/install_cfitsio.sh"
 sudo bash -l "$DIR/steps/install_eigen.sh"
 sudo bash -l "$DIR/steps/install_cppzmq.sh"
 sudo bash -l "$DIR/steps/install_flatbuffers.sh"
+if [[ $MAGAOX_ROLE == AOC ]]; then
+    sudo bash -l "$DIR/steps/install_lego.sh"
+fi
 if [[ $MAGAOX_ROLE == RTC || $MAGAOX_ROLE == ICC || $MAGAOX_ROLE == AOC || $MAGAOX_ROLE == TIC || $MAGAOX_ROLE == ci || ( $MAGAOX_ROLE == vm && $VM_KIND == vagrant ) ]]; then
     sudo bash -l "$DIR/steps/install_basler_pylon.sh"
 fi
@@ -345,6 +348,7 @@ sudo bash -l "$DIR/steps/configure_python.sh"
 $MAYBE_SUDO bash -l "$DIR/steps/install_purepyindi.sh"
 $MAYBE_SUDO bash -l "$DIR/steps/install_magpyx.sh"
 $MAYBE_SUDO bash -l "$DIR/steps/install_imagestreamio_python.sh"
+
 
 # TODO:jlong: uncomment when it's back in working order
 # if [[ $MAGAOX_ROLE == AOC || $MAGAOX_ROLE == vm ||  $MAGAOX_ROLE == workstation ]]; then

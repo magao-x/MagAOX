@@ -154,12 +154,12 @@ struct telem_telcat : public flatbuffer_log
      */ 
    static logMetaDetail getAccessor( const std::string & member /**< [in] the name of the member */ )
    {
-      if(     member == "catObj") return logMetaDetail({"CAT OBJ", logMeta::valTypes::String, logMeta::metaTypes::State, (void *) &catObj});
-      else if(member == "catRm")  return logMetaDetail({"CAT ROTMODE", logMeta::valTypes::String, logMeta::metaTypes::State, (void *) &catRm});
-      else if(member == "catRA")  return logMetaDetail({"CAT RA", logMeta::valTypes::Double, logMeta::metaTypes::State, (void *) &catRA});
-      else if(member == "catDec") return logMetaDetail({"CAT DEC", logMeta::valTypes::Double, logMeta::metaTypes::State, (void *) &catDec});
-      else if(member == "catEp")  return logMetaDetail({"CAT EPOCH", logMeta::valTypes::Double, logMeta::metaTypes::State, (void *) &catEp});
-      else if(member == "catRo")  return logMetaDetail({"CAT ROTOFF", logMeta::valTypes::Double, logMeta::metaTypes::State, (void *) &catRo});
+      if(     member == "catObj") return logMetaDetail({"CATOBJ", logMeta::valTypes::String, logMeta::metaTypes::State, (void *) &catObj, false});
+      else if(member == "catRm")  return logMetaDetail({"CATRM", logMeta::valTypes::String, logMeta::metaTypes::State, (void *) &catRm, false});
+      else if(member == "catRA")  return logMetaDetail({"CATRA", logMeta::valTypes::Double, logMeta::metaTypes::State, (void *) &catRA, false});
+      else if(member == "catDec") return logMetaDetail({"CATDEC", logMeta::valTypes::Double, logMeta::metaTypes::State, (void *) &catDec, false});
+      else if(member == "catEp")  return logMetaDetail({"CATEP", logMeta::valTypes::Double, logMeta::metaTypes::State, (void *) &catEp, false});
+      else if(member == "catRo")  return logMetaDetail({"CATRO", logMeta::valTypes::Double, logMeta::metaTypes::State, (void *) &catRo, false});
       else
       {
          std::cerr << "No string member " << member << " in telem_telcat\n";

@@ -25,8 +25,8 @@ using namespace Basler_UsbCameraParams;
 
 using namespace Pylon;
 
-#include <ImageStruct.h>
-#include <ImageStreamIO.h>
+//#include <ImageStruct.h>
+#include <ImageStreamIO/ImageStreamIO.h>
 
 #include "../../libMagAOX/libMagAOX.hpp" //Note this is included on command line to trigger pch
 #include "../../magaox_git_version.h"

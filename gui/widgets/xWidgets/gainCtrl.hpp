@@ -26,6 +26,7 @@ protected:
    float m_target {0};
 
    bool m_valChanged {false};
+   bool m_newSent {false};
 
    float m_scale {0.05};
 
@@ -189,22 +190,32 @@ void gainCtrl::handleSetProperty( const pcf::IndiProperty & ipRecv)
    
    if(ipRecv.getName() == m_property)
    {
-      if(ipRecv.find("current"))
+      if(m_newSent)
       {
-         float current = ipRecv["current"].get<float>();
-         if(current != m_current)
-         {
-            m_valChanged = true;
-            m_current = current;
-         }
+         m_newSent=false;
       }
-      else if(ipRecv.find("target"))
+      else
       {
-         m_target = ipRecv["target"].get<float>();
+         if(ipRecv.find("current"))
+         {
+            float current = ipRecv["current"].get<float>();
+            if(current != m_current)
+            {
+               m_valChanged = true;
+               m_current = current;
+            }
+         }
+   
+         if(ipRecv.find("target"))
+         {
+            m_target = ipRecv["target"].get<float>();
+         }
       }
    }
 
    updateGUI();
+
+   ui.status->handleSetProperty(ipRecv);
 }
 
 void gainCtrl::updateGUI()
@@ -216,6 +227,7 @@ void gainCtrl::updateGUI()
       else if(slv > 150) slv = 150;
 
       ui.slider->setValue(slv);
+
    }
 
 } //updateGUI()
@@ -233,6 +245,10 @@ void gainCtrl::setGain( float g )
    ip["target"] = g;
    
    sendNewProperty(ip);
+   m_newSent = true;
+
+   m_current = g; //do this so multiple pushes update fast
+
 }
 
 void gainCtrl::on_button_plus_pressed()

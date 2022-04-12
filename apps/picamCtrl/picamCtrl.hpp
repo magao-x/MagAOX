@@ -10,8 +10,8 @@
 #define picamCtrl_hpp
 
 
-#include <ImageStruct.h>
-#include <ImageStreamIO.h>
+//#include <ImageStruct.h>
+#include <ImageStreamIO/ImageStreamIO.h>
 
 #include <picam_advanced.h>
 

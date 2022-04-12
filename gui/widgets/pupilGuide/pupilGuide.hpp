@@ -38,8 +38,10 @@ protected:
    
    double m_modRad {0};
    double m_modRad_tgt{0};
-   
+  
+   float m_stepSize {0.1};
 
+   bool m_usetel {false};
 
    // --- camwfs-fit
    std::string m_camwfsfitState;
@@ -96,7 +98,6 @@ protected:
    
    
    
-   float m_stepSize {0.1};
    
    
    float m_pupStepSize {0.1};
@@ -133,6 +134,8 @@ public:
 public slots:
    void updateGUI();
    
+   //void on_button_ttmtel_pressed();
+
    void on_button_tip_u_pressed();
    void on_button_tip_ul_pressed();
    void on_button_tip_l_pressed();
@@ -1269,6 +1272,15 @@ void pupilGuide::updateGUI()
 
 } //updateGUI()
 
+/*void pupilGuide::on_button_ttmtel_pressed()
+{
+   if(m_usetel == false) 
+   {
+      m_usetel = true;
+      ui.button_ttmtel->setText("move telescope");
+   }
+}*/
+
 void pupilGuide::on_button_tip_u_pressed()
 {
    pcf::IndiProperty ip(pcf::IndiProperty::Number);
@@ -1660,6 +1672,10 @@ void pupilGuide::on_button_camlens_scale_pressed()
       m_camlensStepSize = 0.01;
    }
    else if(((int) (1000*m_camlensStepSize+0.5)) == 10)
+   {
+      m_camlensStepSize = 0.005;
+   }
+   else if(((int) (1000*m_camlensStepSize+0.5)) == 5)
    {
       m_camlensStepSize = 0.001;
    }

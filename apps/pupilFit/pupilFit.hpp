@@ -51,22 +51,35 @@ struct refShmimT
 /** 
   * \ingroup pupilFit
   */
-class pupilFit : public MagAOXApp<true>, public dev::shmimMonitor<pupilFit>, public dev::shmimMonitor<pupilFit,refShmimT>
+class pupilFit : public MagAOXApp<true>, public dev::shmimMonitor<pupilFit>, public dev::shmimMonitor<pupilFit,refShmimT>, public dev::frameGrabber<pupilFit>
 {
    //Give the test harness access.
    friend class pupilFit_test;
 
    friend class dev::shmimMonitor<pupilFit>;
    friend class dev::shmimMonitor<pupilFit,refShmimT>;
+   friend class dev::frameGrabber<pupilFit>;
 
+public:
    //The base shmimMonitor type
    typedef dev::shmimMonitor<pupilFit> shmimMonitorT;
    
    typedef dev::shmimMonitor<pupilFit,refShmimT> refShmimMonitorT;
 
+   //The base frameGrabber type
+   typedef dev::frameGrabber<pupilFit> frameGrabberT;
+
    ///Floating point type in which to do all calculations.
    typedef float realT;
    
+   /** \name app::dev Configurations
+     *@{
+     */
+   
+   static constexpr bool c_frameGrabber_flippable = false; ///< app:dev config to tell framegrabber these images can not be flipped
+   
+   ///@}
+
 protected:
 
    /** \name Configurable Parameters
@@ -145,6 +158,9 @@ protected:
    double m_sety4 {89.5};
    double m_setD4 {56.0};
    
+   double m_avg_dx; 
+   double m_avg_dy;
+
    bool m_averaging {false};
    size_t m_navg {0};
    
@@ -319,7 +335,65 @@ public:
 
 protected:
 
-    
+   bool m_updated {false}; //tells the f.g. that there is an actual image, not just a sem timeout
+
+   sem_t m_smSemaphore {0}; ///< Semaphore used to synchronize the fg thread and the sm thread.
+
+public:
+
+   /** \name dev::frameGrabber interface
+     *
+     * @{
+     */
+   
+   /// Implementation of the framegrabber configureAcquisition interface
+   /** 
+     * \returns 0 on success
+     * \returns -1 on error
+     */
+   int configureAcquisition();
+   
+   /// Implementation of the framegrabber fps interface
+   /**
+     * \todo this needs to infer the stream fps and return it
+     */  
+   float fps()
+   {
+      return 1.0;
+   }
+   
+   /// Implementation of the framegrabber startAcquisition interface
+   /** 
+     * \returns 0 on success
+     * \returns -1 on error
+     */
+   int startAcquisition();
+   
+   /// Implementation of the framegrabber acquireAndCheckValid interface
+   /** 
+     * \returns 0 on success
+     * \returns -1 on error
+     */
+   int acquireAndCheckValid();
+   
+   /// Implementation of the framegrabber loadImageIntoStream interface
+   /** 
+     * \returns 0 on success
+     * \returns -1 on error
+     */
+   int loadImageIntoStream( void * dest  /**< [in] */);
+   
+   /// Implementation of the framegrabber reconfig interface
+   /** 
+     * \returns 0 on success
+     * \returns -1 on error
+     */
+   int reconfig();
+   
+   ///@}
+
+protected:
+
    /** \name INDI
      * @{
      */ 
@@ -378,6 +452,7 @@ void pupilFit::setupConfig()
 {
    shmimMonitorT::setupConfig(config);
    refShmimMonitorT::setupConfig(config);
+   frameGrabberT::setupConfig(config);
 
    config.add("shmimMonitor.shmimName", "", "shmimMonitor.shmimName", argType::Required, "shmimMonitor", "shmimName", false, "string", "The name of the ImageStreamIO shared memory image. Will be used as /tmp/<shmimName>.im.shm. Default is camwfs_avg");
    
@@ -411,9 +486,10 @@ int pupilFit::loadConfigImpl( mx::app::appConfigurator & _config )
 {
    shmimMonitorT::m_shmimName = "camwfs_avg";
    shmimMonitorT::loadConfig(_config);
-   
    refShmimMonitorT::loadConfig(_config);
    if(refShmimMonitorT::m_shmimName != "") m_setPointSource = USEREFIM;
+
+   frameGrabberT::loadConfig(_config);
 
    _config(m_threshold, "fit.threshold");
    _config(m_threshShmimName, "fit.threshShmimName");
@@ -456,6 +532,17 @@ int pupilFit::appStartup()
    }
    
    if(refShmimMonitorT::appStartup() < 0)
+   {
+      return log<software_error,-1>({__FILE__, __LINE__});
+   }
+
+   if(sem_init(&m_smSemaphore, 0,0) < 0)
+   {
+      log<software_critical>({__FILE__, __LINE__, errno,0, "Initializing S.M. semaphore"});
+      return -1;
+   }
+
+   if(frameGrabberT::appStartup() < 0)
    {
       return log<software_error,-1>({__FILE__, __LINE__});
    }
@@ -615,6 +702,11 @@ int pupilFit::appLogic()
       return log<software_error,-1>({__FILE__,__LINE__});
    }
 
+   if( frameGrabberT::appLogic() < 0)
+   {
+      return log<software_error,-1>({__FILE__,__LINE__});
+   }
+
    std::lock_guard<std::mutex> guard(m_indiMutex);
    updateIfChanged(m_indiP_thresh, "current", m_threshold, INDI_IDLE);
    updateIfChanged(m_indiP_thresh, "target", m_threshold, INDI_IDLE);
@@ -640,6 +732,11 @@ int pupilFit::appLogic()
 
    shmimMonitorT::updateINDI();
    refShmimMonitorT::updateINDI();
+   
+   if(frameGrabberT::updateINDI() < 0)
+   {
+      log<software_error>({__FILE__, __LINE__});
+   }
 
    return 0;
 }
@@ -649,6 +746,7 @@ int pupilFit::appShutdown()
 {
    shmimMonitorT::appShutdown();
    refShmimMonitorT::appShutdown();
+   frameGrabberT::appShutdown();
 
    return 0;
 }
@@ -772,10 +870,10 @@ int pupilFit::allocate(const dev::shmimT & dummy)
       m_edgeShmimConnected = false;
    }
    
-   ImageStreamIO_createIm_gpu(&m_threshShmim , m_threshShmimName .c_str(), 3, imsize, shmimMonitorT::m_dataType, -1, 1, IMAGE_NB_SEMAPHORE, 0, CIRCULAR_BUFFER | ZAXIS_TEMPORAL);
+   ImageStreamIO_createIm_gpu(&m_threshShmim , m_threshShmimName.c_str(), 3, imsize, shmimMonitorT::m_dataType, -1, 1, IMAGE_NB_SEMAPHORE, 0, CIRCULAR_BUFFER | ZAXIS_TEMPORAL,0);
    m_threshShmimConnected = true;
    
-   ImageStreamIO_createIm_gpu(&m_edgeShmim , m_edgeShmimName .c_str(), 3, imsize, shmimMonitorT::m_dataType, -1, 1, IMAGE_NB_SEMAPHORE, 0, CIRCULAR_BUFFER | ZAXIS_TEMPORAL);
+   ImageStreamIO_createIm_gpu(&m_edgeShmim , m_edgeShmimName.c_str(), 3, imsize, shmimMonitorT::m_dataType, -1, 1, IMAGE_NB_SEMAPHORE, 0, CIRCULAR_BUFFER | ZAXIS_TEMPORAL,0);
    m_edgeShmimConnected = true;
    
    if(m_edgeShmimConnected)
@@ -801,6 +899,7 @@ int pupilFit::processImage( void* curr_src,
    
    m_fitter.fit(m_fitIm, m_edgeIm);
    
+    
    {//mutex scope
       
       std::lock_guard<std::mutex> guard(m_indiMutex);
@@ -849,6 +948,10 @@ int pupilFit::processImage( void* curr_src,
          m_indiP_avg["y"].set(.333*(m_fitter.m_avgy[0] + m_fitter.m_avgy[1] + m_fitter.m_avgy[2]));
          m_indiP_avg["D"].set(.667*(m_fitter.m_avgr[0] + m_fitter.m_avgr[1] + m_fitter.m_avgr[2]));
          
+         m_avg_dx = .333*(m_fitter.m_avgx[0] + m_fitter.m_avgx[1] + m_fitter.m_avgx[2] + m_fitter.m_avgx[3]) - 0.25*(m_setx1 + m_setx2 + m_setx3 + m_setx4);
+         m_avg_dy = .333*(m_fitter.m_avgy[0] + m_fitter.m_avgy[1] + m_fitter.m_avgy[2] + m_fitter.m_avgy[3]) - 0.25*(m_sety1 + m_sety2 + m_sety3 + m_sety4);
+         
+
          m_indiP_avg["dx"].set(.333*(m_fitter.m_avgx[0] + m_fitter.m_avgx[1] + m_fitter.m_avgx[2]) - 0.333*(m_setx1 + m_setx2 + m_setx3));
          m_indiP_avg["dy"].set(.333*(m_fitter.m_avgy[0] + m_fitter.m_avgy[1] + m_fitter.m_avgy[2]) - 0.333*(m_sety1 + m_sety2 + m_sety3));
          m_indiP_avg["dD"].set(.667*(m_fitter.m_avgr[0] + m_fitter.m_avgr[1] + m_fitter.m_avgr[2]) - 0.333*(m_setD1 + m_setD2 + m_setD3));
@@ -872,6 +975,9 @@ int pupilFit::processImage( void* curr_src,
          m_indiP_avg["y"].set(.25*(m_fitter.m_avgy[0] + m_fitter.m_avgy[1] + m_fitter.m_avgy[2] + m_fitter.m_avgy[3]));
          m_indiP_avg["D"].set(.5*(m_fitter.m_avgr[0] + m_fitter.m_avgr[1] + m_fitter.m_avgr[2] + m_fitter.m_avgr[3]));
          
+         m_avg_dx = .25*(m_fitter.m_avgx[0] + m_fitter.m_avgx[1] + m_fitter.m_avgx[2] + m_fitter.m_avgx[3]) - 0.25*(m_setx1 + m_setx2 + m_setx3 + m_setx4);
+         m_avg_dy = .25*(m_fitter.m_avgy[0] + m_fitter.m_avgy[1] + m_fitter.m_avgy[2] + m_fitter.m_avgy[3]) - 0.25*(m_sety1 + m_sety2 + m_sety3 + m_sety4);
+
          m_indiP_avg["dx"].set(.25*(m_fitter.m_avgx[0] + m_fitter.m_avgx[1] + m_fitter.m_avgx[2] + m_fitter.m_avgx[3]) - 0.25*(m_setx1 + m_setx2 + m_setx3 + m_setx4));
          m_indiP_avg["dy"].set(.25*(m_fitter.m_avgy[0] + m_fitter.m_avgy[1] + m_fitter.m_avgy[2] + m_fitter.m_avgy[3]) - 0.25*(m_sety1 + m_sety2 + m_sety3 + m_sety4));
          m_indiP_avg["dD"].set(.5*(m_fitter.m_avgr[0] + m_fitter.m_avgr[1] + m_fitter.m_avgr[2] + m_fitter.m_avgr[3]) - 0.25*(m_setD1 + m_setD2 + m_setD3 + m_setD4));
@@ -881,6 +987,16 @@ int pupilFit::processImage( void* curr_src,
       
    }
    
+   //signal framegrabber
+//Now tell the f.g. to get going
+   m_updated = true;
+   if(sem_post(&m_smSemaphore) < 0)
+   {
+      log<software_critical>({__FILE__, __LINE__, errno, 0, "Error posting to semaphore"});
+      return -1;
+   }
+         
+
    if(m_averaging)
    {
       ++m_navg;
@@ -1147,6 +1263,71 @@ int pupilFit::processImage( void* curr_src,
 
    shmimMonitorT::m_restart = true;
 
+   return 0;
+}
+
+inline
+int pupilFit::configureAcquisition()
+{
+   std::unique_lock<std::mutex> lock(m_indiMutex);
+
+   frameGrabberT::m_width = 2;
+   frameGrabberT::m_height = 1;
+   frameGrabberT::m_dataType = _DATATYPE_FLOAT;
+   
+   return 0;
+}
+
+inline
+int pupilFit::startAcquisition()
+{
+   return 0;
+}
+
+inline
+int pupilFit::acquireAndCheckValid()
+{
+   timespec ts;
+         
+   if(clock_gettime(CLOCK_REALTIME, &ts) < 0)
+   {
+      log<software_critical>({__FILE__,__LINE__,errno,0,"clock_gettime"}); 
+      return -1;
+   }
+         
+   ts.tv_sec += 1;
+        
+   if(sem_timedwait(&m_smSemaphore, &ts) == 0)
+   {
+      if( m_updated )
+      {
+         clock_gettime(CLOCK_REALTIME, &m_currImageTimestamp);
+         return 0;
+      }
+      else
+      {
+         return 1;
+      }
+   }
+   else
+   {
+      return 1;
+   }
+}
+
+inline
+int pupilFit::loadImageIntoStream(void * dest)
+{
+   ((float *) dest)[0] = m_avg_dx;
+   ((float *) dest)[1] = m_avg_dy;
+
+   m_updated = false;
+   return 0;
+}
+
+inline
+int pupilFit::reconfig()
+{
    return 0;
 }
 

@@ -22,7 +22,8 @@ protected:
    
    std::string m_loopName;
    std::string m_loopNumber;
-   
+   std::string m_gainCtrl;
+
    std::string m_appState;
    
    double m_gain {0.0};;
@@ -120,7 +121,11 @@ void loopCtrl::subscribe()
    m_parent->addSubscriberProperty(this, m_procName, "loop_multcoeff");
    m_parent->addSubscriberProperty(this, m_procName, "loop_processes");
    m_parent->addSubscriberProperty(this, m_procName, "loop_state");
-   m_parent->addSubscriberProperty(this, m_procName, "modes");
+
+   if(m_procName == "loloop") m_gainCtrl = "logainctrl";
+   else m_gainCtrl = "hogainctrl";
+
+   m_parent->addSubscriberProperty(this, m_gainCtrl, "modes");
    
    m_parent->addSubscriber(ui.gainCtrl);
    m_parent->addSubscriber(ui.mcCtrl);
@@ -174,8 +179,10 @@ void loopCtrl::handleDefProperty( const pcf::IndiProperty & ipRecv)
 
 void loopCtrl::handleSetProperty( const pcf::IndiProperty & ipRecv)
 {  
-   if(ipRecv.getDevice() != m_procName) return;
+   if(ipRecv.getDevice() != m_procName && ipRecv.getDevice() != m_gainCtrl) return;
    
+   if(ipRecv.getDevice() == m_procName)
+   {
    if(ipRecv.getName() == "fsm")
    {
       if(ipRecv.find("state"))
@@ -242,14 +249,17 @@ void loopCtrl::handleSetProperty( const pcf::IndiProperty & ipRecv)
          }
       }
    }
-   
-   else if(ipRecv.getName() == "modes")
+   }
+   if(ipRecv.getDevice() == m_gainCtrl)
    {
-      if(ipRecv.find("blocks"))
+      if(ipRecv.getName() == "modes")
       {
-         size_t nB = ipRecv["blocks"].get<int>();
+         if(ipRecv.find("blocks"))
+         {
+            size_t nB = ipRecv["blocks"].get<int>();
 
-         if(nB != m_blockCtrls.size()) emit blocksChanged(nB);
+            if(nB != m_blockCtrls.size()) emit blocksChanged(nB);
+         }
       }
    }
 
@@ -290,7 +300,7 @@ void loopCtrl::updateGUI()
       }
    }
    
-   if( m_appState != "READY" && m_appState != "OPERATING" )
+   /*if( m_appState != "READY" && m_appState != "OPERATING" )
    {
       /// \todo Disable & zero all
       
@@ -300,7 +310,7 @@ void loopCtrl::updateGUI()
       setEnableDisable(false);
       ui.label_loop_state->setText("processes off");
    }
-   else
+   else*/
    {
       setEnableDisable(true, false);
 
@@ -386,7 +396,7 @@ void loopCtrl::setupBlocks(int nB)
    {
       char str[16];
       snprintf(str, sizeof(str), "%02d", n);
-      m_blockCtrls[n] = new gainCtrl(m_procName, std::string("block") + str + "_gain", std::string("Block") + str + " Gain");
+      m_blockCtrls[n] = new gainCtrl(m_gainCtrl, std::string("block") + str + "_gain", std::string("Block") + str + " Gain");
       ui.horizontalLayout_2->addWidget(m_blockCtrls[n]);
       if(m_parent) m_parent->addSubscriber(m_blockCtrls[n]);
    }

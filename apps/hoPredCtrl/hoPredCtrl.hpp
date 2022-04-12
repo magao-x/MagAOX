@@ -134,12 +134,19 @@ protected:
 	// Predictive control parameters
 	float m_clip_val;
 	int m_numModes;
+	int m_numVoltages;
 	int m_numHist;			///< The number of past states to use for the prediction
 	int m_numFut;			///< The number of future states to predict
-	realT m_gamma;			///< The forgetting factore (0, 1]
+	realT m_gamma;			///< The forgetting factore (0, 1)
+	
 	realT m_inv_covariance; ///< The starting point of the inverse covariance matrix
 	realT m_lambda;		///< The regularization parameter
 	
+	// Integrator commands
+	bool m_use_predictive_control;
+	realT m_intgain;
+	realT m_intleak;
+
 	DDSPC::PredictiveController* controller;
 
 	// Learning time
@@ -172,6 +179,7 @@ protected:
 
 
 	pcf::IndiProperty m_indiP_controlToggle;
+	pcf::IndiProperty m_indiP_predictorToggle;
 	pcf::IndiProperty m_indiP_reset_bufferRequest;
 	pcf::IndiProperty m_indiP_reset_modelRequest;
 
@@ -183,7 +191,12 @@ protected:
 	// The control parameters
 	pcf::IndiProperty m_indiP_lambda;
 	pcf::IndiProperty m_indiP_clipval;
-	// pcf::IndiProperty m_indiP_gamma;
+	pcf::IndiProperty m_indiP_gamma;
+
+	// Integrator parameters
+	pcf::IndiProperty m_indiP_intgain;
+	pcf::IndiProperty m_indiP_intleak;
+
 	// pcf::IndiProperty m_indiP_inv_cov;
 
 	/*
@@ -209,6 +222,11 @@ protected:
 	INDI_NEWCALLBACK_DECL(hoPredCtrl, m_indiP_explorationRms);
 	INDI_NEWCALLBACK_DECL(hoPredCtrl, m_indiP_lambda);
 	INDI_NEWCALLBACK_DECL(hoPredCtrl, m_indiP_clipval);
+	INDI_NEWCALLBACK_DECL(hoPredCtrl, m_indiP_gamma);
+
+	INDI_NEWCALLBACK_DECL(hoPredCtrl, m_indiP_predictorToggle);
+	INDI_NEWCALLBACK_DECL(hoPredCtrl, m_indiP_intgain);
+	INDI_NEWCALLBACK_DECL(hoPredCtrl, m_indiP_intleak);
 
 public:
    /// Default c'tor.
@@ -306,6 +324,10 @@ void hoPredCtrl::setupConfig()
 
 	//
 	config.add("parameters.channel", "", "parameters.channel", argType::Required, "parameters", "channel", false, "string", "The DM channel to control.");
+
+	// The integrator parameters
+	config.add("integrator.gain", "", "integrator.gain", argType::Required, "integrator", "gain", false, "float", "The integrator gain value.");
+	config.add("integrator.leakage", "", "integrator.leakage", argType::Required, "integrator", "leakage", false, "float", "The integrator leakage.");
 }
 
 inline
@@ -314,6 +336,9 @@ int hoPredCtrl::loadConfigImpl( mx::app::appConfigurator & _config )
    
 	shmimMonitorT::loadConfig(_config);
 	darkMonitorT::loadConfig(_config);
+
+	_config(m_intgain, "integrator.gain");
+	_config(m_intleak, "integrator.leakage");
 
 	_config(m_pupilMaskFilename, "parameters.pupil_mask");
 	std::cout << m_pupilMaskFilename << std::endl;
@@ -329,14 +354,18 @@ int hoPredCtrl::loadConfigImpl( mx::app::appConfigurator & _config )
 	// std::cout << m_refslope_filename << std::endl;
 	
 	_config(m_numHist, "parameters.Nhist");
-	std::cout << "Nhist:: "<< m_numHist << std::endl;
+	std::cout << "Nhist="<< m_numHist << std::endl;
 	_config(m_numFut, "parameters.Nfut");
-	std::cout << "Nfut:: "<< m_numFut << std::endl;
+	std::cout << "Nfut="<< m_numFut << std::endl;
 
 	_config(m_gamma, "parameters.gamma");
+	std::cout << "gamma="<< m_gamma << std::endl;
 	_config(m_inv_covariance, "parameters.inv_covariance");
+	std::cout << "inv_covariance="<< m_inv_covariance << std::endl;
 	_config(m_lambda, "parameters.lambda");
+	std::cout << "lambda="<< m_lambda << std::endl;
 	_config(m_clip_val, "parameters.clip_val");
+	std::cout << "clip_val="<< m_clip_val << std::endl;
 
 	_config(m_exploration_steps, "parameters.exploration_steps");
 	_config(m_learning_counter, "parameters.learning_steps");
@@ -389,11 +418,12 @@ int hoPredCtrl::appStartup()
 	createStandardIndiNumber<float>( m_indiP_explorationRms, "exploration_rms", 0.0, 1.0, 0.00001, "%0.4f", "Learning Steps", "Learning control");
 	registerIndiPropertyNew( m_indiP_explorationRms, INDI_NEWCALLBACK(m_indiP_explorationRms) );  
 
-	// createStandardIndiNumber<int>( m_indiP_gamma, "gamma", 0, 1.0, 0.0001, "%0.3f", "Forgetting parameter", "Learning control");
-	// registerIndiPropertyNew( m_indiP_gamma, INDI_NEWCALLBACK(m_indiP_gamma) );  
+	createStandardIndiNumber<float>( m_indiP_gamma, "gamma", 0, 1.0, 0.0001, "%0.3f", "Forgetting parameter", "Learning control");
+	registerIndiPropertyNew( m_indiP_gamma, INDI_NEWCALLBACK(m_indiP_gamma) );  
 
 	createStandardIndiNumber<float>( m_indiP_lambda, "lambda", 0, 1000.0, 0.0001, "%0.3f", "Regularization", "Learning control");
-	registerIndiPropertyNew( m_indiP_lambda, INDI_NEWCALLBACK(m_indiP_lambda) );  
+	registerIndiPropertyNew( m_indiP_lambda, INDI_NEWCALLBACK(m_indiP_lambda) );
+
 	createStandardIndiNumber<float>( m_indiP_clipval, "clipval", 0, 1000.0, 0.0001, "%0.3f", "Regularization", "Learning control");
 	registerIndiPropertyNew( m_indiP_clipval, INDI_NEWCALLBACK(m_indiP_clipval) );  
 
@@ -401,6 +431,14 @@ int hoPredCtrl::appStartup()
 	// registerIndiPropertyNew( m_indiP_inv_cov, INDI_NEWCALLBACK(m_indiP_inv_cov) );  
 
 
+	createStandardIndiToggleSw( m_indiP_predictorToggle, "use_predictor", "Choose controller", "Loop Controls");
+	registerIndiPropertyNew( m_indiP_predictorToggle, INDI_NEWCALLBACK(m_indiP_predictorToggle) ); 
+	
+	createStandardIndiNumber<float>( m_indiP_intgain, "intgain", 0, 1.0, 0.0001, "%0.3f", "Integrator gain", "Learning control");
+	registerIndiPropertyNew( m_indiP_intgain, INDI_NEWCALLBACK(m_indiP_intgain) );  
+	
+	createStandardIndiNumber<float>( m_indiP_intleak, "intleak", 0, 1.0, 0.0001, "%0.3f", "Integrator gain", "Learning control");
+	registerIndiPropertyNew( m_indiP_intleak, INDI_NEWCALLBACK(m_indiP_intleak) );  
 
 	state(stateCodes::OPERATING);
 
@@ -437,15 +475,24 @@ int hoPredCtrl::appLogic()
 
 	updateIfChanged(m_indiP_learningSteps, "current", m_learning_counter);
 	updateIfChanged(m_indiP_explorationRms, "current", m_exploration_rms);
-	// updateIfChanged(m_indiP_gamma, "current", m_gamma);
+	updateIfChanged(m_indiP_gamma, "current", m_gamma);
 	updateIfChanged(m_indiP_lambda, "current", m_lambda);
 	updateIfChanged(m_indiP_clipval, "current", m_clip_val);
+
+	updateIfChanged(m_indiP_intgain, "current", m_intgain);
+	updateIfChanged(m_indiP_intleak, "current", m_intleak);
 	// updateIfChanged(m_indiP_inv_cov, "current", m_inv_covariance);
 
 	if(m_is_closed_loop){
 		updateSwitchIfChanged(m_indiP_controlToggle, "toggle", pcf::IndiElement::On, INDI_OK);
 	}else{
 		updateSwitchIfChanged(m_indiP_controlToggle, "toggle", pcf::IndiElement::Off, INDI_IDLE);
+	}
+
+	if(m_use_predictive_control){
+		updateSwitchIfChanged(m_indiP_predictorToggle, "toggle", pcf::IndiElement::On, INDI_OK);
+	}else{
+		updateSwitchIfChanged(m_indiP_predictorToggle, "toggle", pcf::IndiElement::Off, INDI_IDLE);
 	}
 
 
@@ -463,6 +510,10 @@ int hoPredCtrl::appShutdown()
 	send_dm_command();
 
 	delete controller;
+
+	if(m_temp_command){
+		delete m_temp_command;
+	}
 
 	return 0;
 }
@@ -493,10 +544,11 @@ int hoPredCtrl::allocate(const dev::shmimT & dummy)
 	// Read in the pupil mask
 	ff.read(m_mapping_matrix, m_mapping_matrix_filename);
 	std::cerr << "Read a " << m_mapping_matrix.rows() << " x " << m_mapping_matrix.cols() << " mapping matrix.\n";
+	m_numVoltages = m_mapping_matrix.rows();
 
-	m_temp_command = new float[m_numModes];
-	for(int i = 0; i < m_numModes; ++i)
-		m_temp_command[i] = 0.0;
+	m_temp_command = new float[m_numVoltages];
+	for(int i = 0; i < m_numVoltages; ++i)
+		m_temp_command[i] = 0.001;
 	m_command = m_temp_command;
 	std::cerr << "Initialized temp command.\n";
 
@@ -574,6 +626,9 @@ int hoPredCtrl::allocate(const dev::shmimT & dummy)
 	iterations = 0;
 	m_is_closed_loop = false;
 
+	m_use_predictive_control = false;
+	controller->controller->set_integrator(m_use_predictive_control, m_intgain, m_intleak);
+
 	return 0;
 }
 
@@ -586,6 +641,7 @@ int hoPredCtrl::processImage( void * curr_src, const dev::shmimT & dummy )
 	Eigen::Map<eigenImage<unsigned short>> pwfsIm( static_cast<unsigned short *>(curr_src), m_pwfsHeight, m_pwfsWidth);
 	// realT mean_value = 0;
 	realT Ia = 0, Ib = 0, Ic = 0, Id = 0;
+	realT pwfsNorm = 0;
 
 	size_t ki = 0;
 	for(uint32_t col_i=0; col_i < m_quadWidth; ++col_i){
@@ -598,7 +654,7 @@ int hoPredCtrl::processImage( void * curr_src, const dev::shmimT & dummy )
 
 			// Calculate the norm
 			// TODO: Add an exponential learning to the PWFS norm?
-			realT pwfsNorm = Ia + Ib + Ic + Id;
+			pwfsNorm = Ia + Ib + Ic + Id;
 
 			// Take all linear combinations of the measurements and concatenate in vector
 			if(m_pupilMask(row_i, col_i) > 0.5){
@@ -613,18 +669,28 @@ int hoPredCtrl::processImage( void * curr_src, const dev::shmimT & dummy )
 	// Okay reconstruction matrix is used correctly!
 	// The error is now in the slope measurement.
 	if( m_is_closed_loop ){
+		// 550 to 590 us with everything included
+		// 525 with DM control excluded
+		// 495 with extra attention from RTC
+		// 495 without learning ?
+		// 228 us with everything but to_cpu() ???
 		
-		
+		// 120 us only WFS reconstruction
 		controller->add_measurement(m_measurementVector.data());
-		m_command = controller->get_command(m_clip_val);	
 		
+		// 491 us with get command included
+		// 160 us without to_cpu()
+		// 465 us with to_cpu() without mode_mapping
+		m_command = controller->get_command(m_clip_val);
+
 		// This works!
 		if(use_actuators){
-			map_command_vector_to_dmshmim();
+		 	map_command_vector_to_dmshmim();
 		}
 		send_dm_command();
 				 
 		// If -1 always learn, otherwise learn for N steps
+		
 		if(m_learning_counter == -1){
 			controller->update_predictor();
 			controller->update_controller();
@@ -641,11 +707,11 @@ int hoPredCtrl::processImage( void * curr_src, const dev::shmimT & dummy )
 	if(iterations == 0){
 		duration = std::chrono::duration_cast<std::chrono::microseconds>(end - start).count();
 	}else{
-		duration = 0.1 * duration + 0.9 * std::chrono::duration_cast<std::chrono::microseconds>(end - start).count();
+		duration = 0.95 * duration + 0.05 * std::chrono::duration_cast<std::chrono::microseconds>(end - start).count();
 	}
 	iterations += 1;
 	
-	if(iterations % 400 == 0){
+	if(iterations % 1000 == 0){
 		std::cout << "elapsed " << (double)duration << " us." << std::endl;
 		std::cout << '\n';
 	}
@@ -749,18 +815,14 @@ int hoPredCtrl::map_command_vector_to_dmshmim(){
 		This function maps the command vector to a masked 2D image. A mapping is implicitely assumed due to the way the array is accessed.
 	*/
 
-	
 	// The new output of the controller is a nact length vector. So this can be replaced by a single copy statement.
 	// For now let's keep the dumb copy.
 	int ki = 0;
 	for(uint32_t col_i=0; col_i < m_dmHeight; ++col_i){
 		for(uint32_t row_i=0; row_i < m_dmHeight; ++row_i){
-			if(m_illuminated_actuators_mask(row_i, col_i) > 0.5){
-				// This check should not be necessary, but let's just add it.
-				if(ki < m_numModes){
-					m_shaped_command(row_i, col_i) = m_command[ki];
-					ki += 1;
-				}
+			if(ki < m_numVoltages){
+				m_shaped_command(row_i, col_i) = m_command[ki];
+				ki += 1;
 			}
 		}
 	}
@@ -920,10 +982,9 @@ INDI_NEWCALLBACK_DEFN(hoPredCtrl, m_indiP_clipval )(const pcf::IndiProperty &ipR
 	std::lock_guard<std::mutex> guard(m_indiMutex);
 	if(!m_is_closed_loop){
 		m_clip_val = target;
-		// controller->set_new_regularization(m_lambda);
 		updateIfChanged(m_indiP_clipval, "target", m_clip_val);
 	}else{
-		 log<text_log>("Clip valua not changed. Loop is still running.", logPrio::LOG_NOTICE);
+		 log<text_log>("Clip value not changed. Loop is still running.", logPrio::LOG_NOTICE);
 	}
 
 	return 0;
@@ -959,7 +1020,7 @@ INDI_NEWCALLBACK_DEFN(hoPredCtrl, m_indiP_inv_cov )(const pcf::IndiProperty &ipR
 
 	return 0;
 }
-
+*/
 
 INDI_NEWCALLBACK_DEFN(hoPredCtrl, m_indiP_gamma )(const pcf::IndiProperty &ipRecv)
 {
@@ -984,13 +1045,89 @@ INDI_NEWCALLBACK_DEFN(hoPredCtrl, m_indiP_gamma )(const pcf::IndiProperty &ipRec
 
 	std::lock_guard<std::mutex> guard(m_indiMutex);
 
-	m_gamma = target;
-	
-	updateIfChanged(m_indiP_gamma, "target", m_gamma);
+	if(!m_is_closed_loop){
+		m_gamma = target;
+		
+		controller->set_new_gamma(m_gamma);
+		updateIfChanged(m_indiP_gamma, "target", m_gamma);
+	}else{
+		 log<text_log>("Gamma value not changed. Loop is still running.", logPrio::LOG_NOTICE);
+	}
 
 	return 0;
 }
-*/
+
+INDI_NEWCALLBACK_DEFN(hoPredCtrl, m_indiP_intgain )(const pcf::IndiProperty &ipRecv)
+{
+	if(ipRecv.getName() != m_indiP_intgain.getName()){
+		log<software_error>({__FILE__,__LINE__, "wrong INDI property received."});
+		return -1;
+	}
+
+	float current = -1;
+	float target = -1;
+
+	if(ipRecv.find("current"))
+		current = ipRecv["current"].get<float>();
+
+	if(ipRecv.find("target"))
+		target = ipRecv["target"].get<float>();
+
+	if(target == -1) target = current;
+
+	if(target == -1)
+		return 0;
+
+	std::lock_guard<std::mutex> guard(m_indiMutex);
+
+	if(!m_is_closed_loop){
+		m_intgain = target;
+		
+		// controller->set_new_gamma(m_gamma);
+		controller->controller->set_integrator(m_use_predictive_control, m_intgain, m_intleak);
+		updateIfChanged(m_indiP_intgain, "target", m_intgain);
+	}else{
+		 log<text_log>("Integrator gain value not changed. Loop is still running.", logPrio::LOG_NOTICE);
+	}
+
+	return 0;
+}
+
+INDI_NEWCALLBACK_DEFN(hoPredCtrl, m_indiP_intleak )(const pcf::IndiProperty &ipRecv)
+{
+	if(ipRecv.getName() != m_indiP_intleak.getName()){
+		log<software_error>({__FILE__,__LINE__, "wrong INDI property received."});
+		return -1;
+	}
+
+	float current = -1;
+	float target = -1;
+
+	if(ipRecv.find("current"))
+		current = ipRecv["current"].get<float>();
+
+	if(ipRecv.find("target"))
+		target = ipRecv["target"].get<float>();
+
+	if(target == -1) target = current;
+
+	if(target == -1)
+		return 0;
+
+	std::lock_guard<std::mutex> guard(m_indiMutex);
+
+	if(!m_is_closed_loop){
+		m_intleak = target;
+		
+		// controller->set_new_gamma(m_gamma);
+		controller->controller->set_integrator(m_use_predictive_control, m_intgain, m_intleak);
+		updateIfChanged(m_indiP_intleak, "target", m_intleak);
+	}else{
+		 log<text_log>("Integrator leakage value not changed. Loop is still running.", logPrio::LOG_NOTICE);
+	}
+
+	return 0;
+}
 
 INDI_NEWCALLBACK_DEFN(hoPredCtrl, m_indiP_controlToggle )(const pcf::IndiProperty &ipRecv)
 {
@@ -1024,6 +1161,44 @@ INDI_NEWCALLBACK_DEFN(hoPredCtrl, m_indiP_controlToggle )(const pcf::IndiPropert
          m_is_closed_loop = false;
          log<text_log>("stopped closed-loop operation", logPrio::LOG_NOTICE);
          updateSwitchIfChanged(m_indiP_controlToggle, "toggle", pcf::IndiElement::Off, INDI_IDLE);
+      }
+      return 0;
+   }
+   
+   return 0;
+}
+
+INDI_NEWCALLBACK_DEFN(hoPredCtrl, m_indiP_predictorToggle )(const pcf::IndiProperty &ipRecv)
+{
+   if(ipRecv.getName() != m_indiP_predictorToggle.getName())
+   {
+      log<software_error>({__FILE__, __LINE__, "invalid indi property received"});
+      return -1;
+   }
+   
+   //switch is toggled to on
+   if( ipRecv["toggle"].getSwitchState() == pcf::IndiElement::On)
+   {
+      if(!m_is_closed_loop) //not offloading so change
+      {
+		m_use_predictive_control = true;
+		controller->controller->set_integrator(m_use_predictive_control, m_intgain, m_intleak);
+		log<text_log>("Switched to predictive control.", logPrio::LOG_NOTICE);
+		updateSwitchIfChanged(m_indiP_predictorToggle, "toggle", pcf::IndiElement::On, INDI_BUSY);
+
+      }
+      return 0;
+   }
+
+   //switch is toggled to off
+   if( ipRecv["toggle"].getSwitchState() == pcf::IndiElement::Off)
+   {
+      if(!m_is_closed_loop)
+      {
+         m_use_predictive_control = false;
+		 controller->controller->set_integrator(m_use_predictive_control, m_intgain, m_intleak);
+         log<text_log>("Switched to integrator.", logPrio::LOG_NOTICE);
+         updateSwitchIfChanged(m_indiP_predictorToggle, "toggle", pcf::IndiElement::Off, INDI_IDLE);
       }
       return 0;
    }

@@ -7,8 +7,8 @@
 #ifndef xrif2fits_hpp
 #define xrif2fits_hpp
 
-#include <ImageStruct.h>
-#include <ImageStreamIO.h>
+//#include <ImageStruct.h>
+#include <ImageStreamIO/ImageStreamIO.h>
 
 #include <xrif/xrif.h>
 
@@ -95,7 +95,6 @@ protected:
 
 
    xrif_t m_xrif {nullptr};
-   xrif_t m_xrif_timing {nullptr};
 
 
 public:
@@ -115,11 +114,6 @@ xrif2fits::~xrif2fits()
    if(m_xrif)
    {
       xrif_delete(m_xrif);
-   }
-   
-   if(m_xrif_timing)
-   {
-      xrif_delete(m_xrif_timing);
    }
 }
 
@@ -235,41 +229,12 @@ int xrif2fits::execute()
       return -1;
    }
 
-   rv = xrif_new(&m_xrif_timing);
-
-   if(rv < 0)
-   {
-      std::cerr << " (" << invokedName << "): Error allocating xrif_timing.\n";
-      return -1;
-   }
-   
    char header[XRIF_HEADER_SIZE];
 
    
       
-   std::vector<logMeta> logMetas;
-   logMetas.push_back(logMetaSpec({"tcsi", telem_telcat::eventCode, "catObj"}));
-   logMetas.push_back(logMetaSpec({"tcsi", telem_teldata::eventCode, "pa"}));
    
-   logMetas.push_back(logMetaSpec({"fwpupil", telem_stage::eventCode, "presetName"}));
-   logMetas.push_back(logMetaSpec({"fwpupil", telem_stage::eventCode, "preset"}));
-   
-   logMetas.push_back(logMetaSpec({"fwpfpm", telem_stage::eventCode, "presetName"}));
-   logMetas.push_back(logMetaSpec({"fwfpm", telem_stage::eventCode, "preset"}));
 
-   logMetas.push_back(logMetaSpec({"fwlyot", telem_stage::eventCode, "presetName"}));
-   logMetas.push_back(logMetaSpec({"fwlyot", telem_stage::eventCode, "preset"}));
-
-   logMetas.push_back(logMetaSpec({"stagescibs", telem_stage::eventCode, "presetName"}));
-   logMetas.push_back(logMetaSpec({"stagescibs", telem_stage::eventCode, "preset"}));
-   
-   logMetas.push_back(logMetaSpec({"fwsci1", telem_stage::eventCode, "presetName"}));
-   logMetas.push_back(logMetaSpec({"fwsci1", telem_stage::eventCode, "preset"}));
-   
-   logMetas.push_back(logMetaSpec({"fwsci2", telem_stage::eventCode, "presetName"}));
-   logMetas.push_back(logMetaSpec({"fwsci2", telem_stage::eventCode, "preset"}));
-   
-         
    logMap logs;
    logMap tels;
    
@@ -290,28 +255,85 @@ int xrif2fits::execute()
    if(!m_noMeta)
    {
       metaOut.open(m_outDir + "meta_data.txt");
-      metaOut << "#DATE-OBS FRAMENO ACQSEC ACQNSEC WRTSEC WRTNSEC";
+      /*metaOut << "#DATE-OBS FRAMENO ACQSEC ACQNSEC WRTSEC WRTNSEC";
       metaOut << " EXPTIME";
       for(size_t u=0;u<logMetas.size();++u)
       {
          metaOut << " " << logMetas[u].keyword() ;
       }
-      metaOut << "\n";
+      metaOut << "\n";*/
    }
       
    //Now de-compress and load the frames
    //Only decompressing the number of files needed, and only copying the number of frames needed
    for(size_t n=0; n < m_files.size(); ++n)
    {
+      logFileName lfn(m_files[n]);
+
+      std::vector<logMeta> logMetas;
+      logMetas.push_back(logMetaSpec({"tcsi", telem_telcat::eventCode, "catObj"}));
+      logMetas.push_back(logMetaSpec({"tcsi", telem_telcat::eventCode, "catRA"}));
+      logMetas.push_back(logMetaSpec({"tcsi", telem_telcat::eventCode, "catDec"}));
+      logMetas.push_back(logMetaSpec({"tcsi", telem_telcat::eventCode, "catEp"}));
+   
+      logMetas.push_back(logMetaSpec({"tcsi", telem_telpos::eventCode, "ra"}));
+      logMetas.push_back(logMetaSpec({"tcsi", telem_telpos::eventCode, "dec"}));
+      logMetas.push_back(logMetaSpec({"tcsi", telem_telpos::eventCode, "epoch"}));
+      logMetas.push_back(logMetaSpec({"tcsi", telem_telpos::eventCode, "el"}));
+      logMetas.push_back(logMetaSpec({"tcsi", telem_telpos::eventCode, "am"}));
+      logMetas.push_back(logMetaSpec({"tcsi", telem_telpos::eventCode, "ha"}));
+      logMetas.push_back(logMetaSpec({"tcsi", telem_teldata::eventCode, "pa"}));
+   
+      logMetas.push_back(logMetaSpec({"stagebs", telem_stage::eventCode, "presetName"}));
+      logMetas.push_back(logMetaSpec({"stagebs", telem_stage::eventCode, "preset"}));
+      logMetas.push_back(logMetaSpec({"stagebs", telem_zaber::eventCode, "pos"}));
+
+      logMetas.push_back(logMetaSpec({"fwscind", telem_stage::eventCode, "presetName"}));
+      logMetas.push_back(logMetaSpec({"fwscind", telem_stage::eventCode, "preset"}));
+
+      logMetas.push_back(logMetaSpec({"fwpupil", telem_stage::eventCode, "presetName"}));
+      logMetas.push_back(logMetaSpec({"fwpupil", telem_stage::eventCode, "preset"}));
+      
+      logMetas.push_back(logMetaSpec({"fwfpm", telem_stage::eventCode, "presetName"}));
+      logMetas.push_back(logMetaSpec({"fwfpm", telem_stage::eventCode, "preset"}));
+   
+      logMetas.push_back(logMetaSpec({"fwlowfs", telem_stage::eventCode, "presetName"}));
+      logMetas.push_back(logMetaSpec({"fwlowfs", telem_stage::eventCode, "preset"}));
+
+      logMetas.push_back(logMetaSpec({"fwlyot", telem_stage::eventCode, "presetName"}));
+      logMetas.push_back(logMetaSpec({"fwlyot", telem_stage::eventCode, "preset"}));
+   
+      logMetas.push_back(logMetaSpec({"stagescibs", telem_stage::eventCode, "presetName"}));
+      logMetas.push_back(logMetaSpec({"stagescibs", telem_stage::eventCode, "preset"}));
+      logMetas.push_back(logMetaSpec({"stagescibs", telem_zaber::eventCode, "pos"}));
+
+      logMetas.push_back(logMetaSpec({"fwsci1", telem_stage::eventCode, "presetName"}));
+      logMetas.push_back(logMetaSpec({"fwsci1", telem_stage::eventCode, "preset"}));
+      
+      logMetas.push_back(logMetaSpec({"fwsci2", telem_stage::eventCode, "presetName"}));
+      logMetas.push_back(logMetaSpec({"fwsci2", telem_stage::eventCode, "preset"}));
+      
+      logMetas.push_back( logMetaSpec(lfn.appName(), telem_stdcam::eventCode, "exptime"));
+      logMetas.push_back( logMetaSpec(lfn.appName(), telem_stdcam::eventCode, "fps"));
+      logMetas.push_back( logMetaSpec(lfn.appName(), telem_stdcam::eventCode, "mode"));
+      logMetas.push_back( logMetaSpec(lfn.appName(), telem_stdcam::eventCode, "xcen"));
+      logMetas.push_back( logMetaSpec(lfn.appName(), telem_stdcam::eventCode, "ycen"));
+      logMetas.push_back( logMetaSpec(lfn.appName(), telem_stdcam::eventCode, "width"));
+      logMetas.push_back( logMetaSpec(lfn.appName(), telem_stdcam::eventCode, "xbin"));
+      logMetas.push_back( logMetaSpec(lfn.appName(), telem_stdcam::eventCode, "ybin"));
+      logMetas.push_back( logMetaSpec(lfn.appName(), telem_stdcam::eventCode, "emGain"));
+      logMetas.push_back( logMetaSpec(lfn.appName(), telem_stdcam::eventCode, "adcSpeed"));
+      logMetas.push_back( logMetaSpec(lfn.appName(), telem_stdcam::eventCode, "temp"));
+      logMetas.push_back( logMetaSpec(lfn.appName(), telem_stdcam::eventCode, "shutterState"));
+
       if(g_timeToDie == true) break; //check before going on
 
-      logFileName lfn(m_files[n]);
+      
       
       tels.loadFiles(lfn.appName(), lfn.timestamp());
       
       logMeta exptimeMeta(logMetaSpec(lfn.appName(), telem_stdcam::eventCode, "exptime"));
-      std::cerr << exptimeMeta.keyword() << "\n";
-
+      
       std::cout << "******************************************************\n";
       std::cout << "* xrif2fits: decoding for " << lfn.appName() << " (" + m_files[n] << ")\n";
       std::cout << "******************************************************\n";
@@ -365,7 +387,10 @@ int xrif2fits::execute()
       }
 
       nr = fread(m_xrif->raw_buffer, 1, m_xrif->compressed_size, fp_xrif);
-      
+      fclose(fp_xrif);
+
+      if(g_timeToDie == true) break; //check after the long read.
+
       if(nr != m_xrif->compressed_size)
       {
          std::cerr << " (" << invokedName << "): Error reading data from " << m_files[n] << "\n";
@@ -444,7 +469,9 @@ int xrif2fits::execute()
          return -1;
       }
                
-      if(g_timeToDie == true) break; //check after the decompress.
+      xrif_decode(m_xrif);
+      
+     if(g_timeToDie == true) break; //check after the decompress.
 
       mx::improc::eigenCube<unsigned short> tmpc( (unsigned short*) m_xrif->raw_buffer, m_xrif->width, m_xrif->height, m_xrif->frames);
 
@@ -509,12 +536,7 @@ int xrif2fits::execute()
          std::string dateobs = mx::sys::ISO8601DateTimeStr(atime, 1);
          
          fh.append("DATE-OBS", dateobs, "Date of obs. YYYY-mm-ddTHH:MM:SS");
-         fh.append("FRAMENO", cnt0);
-         fh.append("ACQSEC", atime.tv_sec);
-         fh.append("ACQNSEC", atime.tv_nsec);
-         fh.append("WRTSEC", wtime.tv_sec);
-         fh.append("WRTNSEC", wtime.tv_nsec);
-
+         
          if(!m_noMeta)
          {
             metaOut << dateobs << " " << cnt0 << " " << atime.tv_sec << " " << atime.tv_nsec << " " << wtime.tv_sec << " " << wtime.tv_nsec << " ";
@@ -523,17 +545,24 @@ int xrif2fits::execute()
          if(exptime > -1)
          {
             //First output exposure time
-            fh.append(exptimeMeta.card(tels,stime,atime));
+            //fh.append(exptimeMeta.card(tels,stime,atime));
             if(!m_noMeta) metaOut << exptimeMeta.value(tels, stime, atime);
 
             //Then output each value in turn
             for(size_t u=0;u<logMetas.size();++u)
             {
-               fh.append(logMetas[u].card(tels, stime, atime));
+               mx::fits::fitsHeaderCard fc = logMetas[u].card(tels, stime, atime);
+               fh.append(fc);
                if(!m_noMeta) metaOut << " " << logMetas[u].value(tels, stime, atime) ;
-            }
+            }         
          }
          
+         fh.append("FRAMENO", cnt0);
+         fh.append("ACQSEC", atime.tv_sec);
+         fh.append("ACQNSEC", atime.tv_nsec);
+         fh.append("WRTSEC", wtime.tv_sec);
+         fh.append("WRTNSEC", wtime.tv_nsec);
+
 
          if(!m_noMeta) metaOut << "\n";
 
@@ -561,6 +590,13 @@ int xrif2fits::execute()
          
          fout << curr_timing[0] << " " << curr_timing[1] << " " << curr_timing[2] << "  " << curr_timing[3] << " " << curr_timing[4] << "\n";
       }*/
+      mx::improc::fitsFile<unsigned short> ff;
+   
+      std::string outname = m_files[n];
+      size_t ext = outname.find(".xrif");
+      outname.replace( ext, 5, ".fits");
+   
+      ff.write(outname, tmpc);
    }
 
    }
