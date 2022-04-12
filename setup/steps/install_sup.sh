@@ -25,7 +25,7 @@ if [[ $MAGAOX_ROLE == AOC || $MAGAOX_ROLE == vm || $MAGAOX_ROLE == ci ]]; then
         echo "Environment=\"UVICORN_PORT=4433\"" | sudo tee -a $OVERRIDE_PATH/override.conf
         echo "Environment=\"MAGAOX_ROLE=$MAGAOX_ROLE\"" | sudo tee -a $OVERRIDE_PATH/override.conf
         forwardPort="port=443:proto=tcp:toport=4433"
-        if ! firewall-cmd --permanent --query-forward-port=$forwardPort; then
+        if ! sudo firewall-cmd --permanent --query-forward-port=$forwardPort; then
             sudo firewall-cmd --permanent --add-forward-port=$forwardPort
         fi
         echo "Environment=\"UVICORN_SSL_KEYFILE=/opt/sup/keys/exao1.magao-x.org.key\"" | sudo tee -a $OVERRIDE_PATH/override.conf
