@@ -554,10 +554,19 @@ void shmimMonitor<derivedT, specificT>::smThreadExec()
       }
       semgot = true;
 #else
+      std::cerr << "asking for semaphore, starting with: " << m_semaphoreNumber << std::endl;
       m_semaphoreNumber = ImageStreamIO_getsemwaitindex(&m_imageStream, m_semaphoreNumber); //ask for semaphore we had before
+      std::cerr << "and got: " << m_semaphoreNumber << std::endl;
 #endif
+      if(m_semaphoreNumber < 0)
+      {
+         derivedT::template log<software_critical>({__FILE__,__LINE__, "No valid semaphore found for " + m_shmimName + ". Source process will need to be restarted."});
+         return;
+      }
+
       derivedT::template log<software_info>({__FILE__,__LINE__, "got semaphore index " + std::to_string(m_semaphoreNumber) + " for " + m_shmimName });
       
+
       ImageStreamIO_semflush(&m_imageStream, m_semaphoreNumber);
       
       sem_t * sem = m_imageStream.semptr[m_semaphoreNumber]; ///< The semaphore to monitor for new image data
@@ -668,6 +677,7 @@ void shmimMonitor<derivedT, specificT>::smThreadExec()
       //*******
       
       //opened == true if we can get to this 
+      if(m_semaphoreNumber >= 0) m_imageStream.semReadPID[m_semaphoreNumber] = 0; //release semaphore
       ImageStreamIO_closeIm(&m_imageStream);
       opened = false;
       

@@ -260,7 +260,7 @@ public:
    
    ///@}
    
-   int m_loopState = 0;
+   int m_loopState {0};
    pcf::IndiProperty m_indiP_loopState; ///< Property used to report the loop state
    
    INDI_SETCALLBACK_DECL(tcsInterface, m_indiP_loopState);
@@ -820,14 +820,16 @@ int tcsInterface::appLogic()
    {
       int rv = m_sock.serialInit(m_deviceAddr.c_str(), m_devicePort);
 
-      if(rv == 0)
+      if(rv != 0)
       {
-         log<text_log>("In state ERROR, not due to loss of connection.  Can not go on.", logPrio::LOG_CRITICAL);
-         return -1;
+         state(stateCodes::NOTCONNECTED);
+         log<text_log>("In state ERROR, connection lost, will retry.", logPrio::LOG_ERROR);
+         return 0;
       }
       
-      state(stateCodes::NOTCONNECTED);
-      return 0;
+      log<text_log>("In state ERROR, but connected.  Trying to continue.", logPrio::LOG_ERROR);
+
+      state(stateCodes::CONNECTED);
    }
    
    if( state() == stateCodes::NOTCONNECTED )
@@ -1153,13 +1155,13 @@ int tcsInterface::getTelTime()
    if(pdat.size() != 3)
    {
       state(stateCodes::ERROR);
-      log<text_log>("Error getting telescope position (datetime): TCS response wrong size", logPrio::LOG_ERROR);
+      log<text_log>("Error getting telescope position (datetime): TCS response wrong size, returned " + std::to_string(pdat.size()) + " values", logPrio::LOG_ERROR);
       return -1;
    }
 
    if(parse_xms(h,m,s,pdat[2]) != 0)
    {
-      log<text_log>("Error parsing telescope RA", logPrio::LOG_ERROR);
+      log<text_log>("Error parsing telescope ST", logPrio::LOG_ERROR);
       return -1;
    }
 
@@ -1195,7 +1197,7 @@ int tcsInterface::getTelPos()
    if(pdat.size() != 6)
    {
       state(stateCodes::ERROR);
-      log<text_log>("Error getting telescope position (telpos): TCS response wrong size", logPrio::LOG_ERROR);
+      log<text_log>("Error getting telescope position (telpos): TCS response wrong size, returned " + std::to_string(pdat.size()) +  " values", logPrio::LOG_ERROR);
       return -1;
    }
 
@@ -1266,7 +1268,7 @@ int tcsInterface::getTelData()
    if(tdat.size() != 10)
    {
       state(stateCodes::ERROR);
-      log<text_log>("[TCS] Error getting telescope data (teldata): TCS response wrong size", logPrio::LOG_ERROR);
+      log<text_log>("[TCS] Error getting telescope data (teldata): TCS response wrong size, returned " + std::to_string(tdat.size()) +  " values", logPrio::LOG_ERROR);
       return -1;
    }
 
@@ -1336,7 +1338,7 @@ int tcsInterface::getCatData()
    if(cdat.size() != 6)
    {
       //This can occur if no target selected by operator
-      log<text_log>("Catalog data (catdata): TCS response wrong size", logPrio::LOG_WARNING);
+      log<text_log>("Catalog data (catdata): TCS response wrong size, returned " + std::to_string(cdat.size()) +  " values", logPrio::LOG_WARNING);
       m_catRA = 0;
    
       m_catDec = 0;
@@ -1404,7 +1406,7 @@ int tcsInterface::getVaneData()
    if(vedat.size() != 10)
    {
       state(stateCodes::ERROR);
-      log<text_log>("Error getting telescope secondary positions (vedata): TCS response wrong size",logPrio::LOG_ERROR);
+      log<text_log>("Error getting telescope secondary positions (vedata): TCS response wrong size, returned " + std::to_string(vedat.size()) +  " values",logPrio::LOG_ERROR);
       return -1;
    }
 
@@ -1453,7 +1455,7 @@ int tcsInterface::getEnvData()
    if(edat.size() != 10)
    {
       state(stateCodes::NOTCONNECTED);
-      log<text_log>("Error getting telescope environment data (telenv): TCS response wrong size",logPrio::LOG_ERROR);
+      log<text_log>("Error getting telescope environment data (telenv): TCS response wrong size, returned " + std::to_string(edat.size()) +  "values",logPrio::LOG_ERROR);
       return -1;      
    }
 
@@ -1906,7 +1908,7 @@ int tcsInterface::updateINDI()
    {
       if(m_offlTT_dump)
       {
-         updateSwitchIfChanged(m_indiP_offlTTdump, "request", pcf::IndiElement::On, INDI_BUSY);
+         updateSwitchIfChanged(m_indiP_offlTTdump, "request", pcf::IndiElement::On, INDI_OK);
       }
       else
       {
@@ -1915,7 +1917,7 @@ int tcsInterface::updateINDI()
       
       if(m_offlTT_enabled)
       {
-         updateSwitchIfChanged(m_indiP_offlTTenable, "toggle", pcf::IndiElement::On, INDI_BUSY);
+         updateSwitchIfChanged(m_indiP_offlTTenable, "toggle", pcf::IndiElement::On, INDI_OK);
       }
       else
       {
@@ -1937,7 +1939,7 @@ int tcsInterface::updateINDI()
    {
       if(m_offlF_dump)
       {
-         updateSwitchIfChanged(m_indiP_offlFdump, "request", pcf::IndiElement::On, INDI_BUSY);
+         updateSwitchIfChanged(m_indiP_offlFdump, "request", pcf::IndiElement::On, INDI_OK);
       }
       else
       {
@@ -1946,7 +1948,7 @@ int tcsInterface::updateINDI()
       
       if(m_offlF_enabled)
       {
-         updateSwitchIfChanged(m_indiP_offlFenable, "toggle", pcf::IndiElement::On, INDI_BUSY);
+         updateSwitchIfChanged(m_indiP_offlFenable, "toggle", pcf::IndiElement::On, INDI_OK);
       }
       else
       {
@@ -2635,14 +2637,16 @@ INDI_SETCALLBACK_DEFN(tcsInterface, m_indiP_loopState)(const pcf::IndiProperty &
       return log<software_error>({__FILE__,__LINE__, "wrong INDI property received"});
    }
 
-   if(!ipRecv.find("loop_state")) return 0;
+   if(!ipRecv.find("toggle")) return 0;
 
    if(ipRecv["loop_state"].getSwitchState() == pcf::IndiElement::On)
    {
+      std::cerr << "on\n";
       m_loopState = 2;
    }
    else
    {
+      std::cerr << "off\n";
       m_loopState = 0;
    }
 
@@ -2706,7 +2710,7 @@ INDI_NEWCALLBACK_DEFN(tcsInterface, m_indiP_offlTTenable)(const pcf::IndiPropert
    
    if( ipRecv["toggle"].getSwitchState() == pcf::IndiElement::On && m_offlTT_enabled == false)
    {
-      updateSwitchIfChanged(m_indiP_offlTTenable, "toggle", pcf::IndiElement::On, INDI_BUSY);
+      updateSwitchIfChanged(m_indiP_offlTTenable, "toggle", pcf::IndiElement::On, INDI_OK);
     
       m_offlTT_enabled = true;
    }
@@ -2733,7 +2737,7 @@ INDI_NEWCALLBACK_DEFN(tcsInterface, m_indiP_offlTTdump)(const pcf::IndiProperty 
    
    if( ipRecv["request"].getSwitchState() == pcf::IndiElement::On)
    {
-      updateSwitchIfChanged(m_indiP_offlTTdump, "request", pcf::IndiElement::On, INDI_BUSY);
+      updateSwitchIfChanged(m_indiP_offlTTdump, "request", pcf::IndiElement::On, INDI_OK);
     
       m_offlTT_dump = true;
    }
@@ -2800,7 +2804,7 @@ INDI_NEWCALLBACK_DEFN(tcsInterface, m_indiP_offlFenable)(const pcf::IndiProperty
    
    if( ipRecv["toggle"].getSwitchState() == pcf::IndiElement::On && m_offlF_enabled == false)
    {
-      updateSwitchIfChanged(m_indiP_offlFenable, "toggle", pcf::IndiElement::On, INDI_BUSY);
+      updateSwitchIfChanged(m_indiP_offlFenable, "toggle", pcf::IndiElement::On, INDI_OK);
     
       m_offlF_enabled = true;
    }
@@ -2827,7 +2831,7 @@ INDI_NEWCALLBACK_DEFN(tcsInterface, m_indiP_offlFdump)(const pcf::IndiProperty &
    
    if( ipRecv["request"].getSwitchState() == pcf::IndiElement::On)
    {
-      updateSwitchIfChanged(m_indiP_offlFdump, "request", pcf::IndiElement::On, INDI_BUSY);
+      updateSwitchIfChanged(m_indiP_offlFdump, "request", pcf::IndiElement::On, INDI_OK);
     
       m_offlF_dump = true;
    }
