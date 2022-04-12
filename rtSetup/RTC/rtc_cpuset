@@ -64,7 +64,7 @@ do
 done
 
 #Create and mount the root cpuset
-if ! mount | grep -q cpuset; then
+if ! mount | grep -qe '^cpuset'; then
    mkdir -p /dev/cpuset
    mount -t cpuset cpuset /dev/cpuset
 fi

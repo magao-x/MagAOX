@@ -15,8 +15,8 @@
 #include <mx/math/vectorUtils.hpp>
 #include <mx/improc/imageUtils.hpp>
 
-#include <ImageStruct.h>
-#include <ImageStreamIO.h>
+#include <ImageStreamIO/ImageStruct.h>
+#include <ImageStreamIO/ImageStreamIO.h>
 
 #include "../../common/paths.hpp"
 
@@ -590,8 +590,8 @@ void frameGrabber<derivedT>::fgThreadExec()
       
          std::cerr << "Creating: " << m_shmimName << " " << m_width << " " << m_height << " " << m_circBuffLength << "\n";
       
-         ImageStreamIO_createIm_gpu(m_imageStream, m_shmimName.c_str(), 3, imsize, m_dataType, -1, 1, IMAGE_NB_SEMAPHORE, 0, CIRCULAR_BUFFER | ZAXIS_TEMPORAL);
-       
+         ImageStreamIO_createIm_gpu(m_imageStream, m_shmimName.c_str(), 3, imsize, m_dataType, -1, 1, IMAGE_NB_SEMAPHORE, 0, CIRCULAR_BUFFER | ZAXIS_TEMPORAL, 0);
+
          m_imageStream->md->cnt1 = m_circBuffLength - 1;
       }
       else
@@ -599,7 +599,6 @@ void frameGrabber<derivedT>::fgThreadExec()
          std::cerr << "Not creating . . .\n";
       }
      
-       
       //This completes the reconfiguration.
       m_reconfig = false;
                   
@@ -629,7 +628,7 @@ void frameGrabber<derivedT>::fgThreadExec()
                continue;
             }
          }
-         
+
          //Ok, no timeout, so we process the image and publish it.
          m_imageStream->md->write=1;
          
@@ -640,7 +639,7 @@ void frameGrabber<derivedT>::fgThreadExec()
          {
             break;
          }
-         
+
          //Set the time of last write
          clock_gettime(CLOCK_REALTIME, &m_imageStream->md->writetime);
 

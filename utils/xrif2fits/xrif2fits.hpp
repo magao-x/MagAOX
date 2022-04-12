@@ -7,8 +7,8 @@
 #ifndef xrif2fits_hpp
 #define xrif2fits_hpp
 
-#include <ImageStruct.h>
-#include <ImageStreamIO.h>
+//#include <ImageStruct.h>
+#include <ImageStreamIO/ImageStreamIO.h>
 
 #include <xrif/xrif.h>
 
@@ -95,7 +95,6 @@ protected:
 
 
    xrif_t m_xrif {nullptr};
-   xrif_t m_xrif_timing {nullptr};
 
 
 public:
@@ -115,11 +114,6 @@ xrif2fits::~xrif2fits()
    if(m_xrif)
    {
       xrif_delete(m_xrif);
-   }
-   
-   if(m_xrif_timing)
-   {
-      xrif_delete(m_xrif_timing);
    }
 }
 
@@ -235,14 +229,6 @@ int xrif2fits::execute()
       return -1;
    }
 
-   rv = xrif_new(&m_xrif_timing);
-
-   if(rv < 0)
-   {
-      std::cerr << " (" << invokedName << "): Error allocating xrif_timing.\n";
-      return -1;
-   }
-   
    char header[XRIF_HEADER_SIZE];
 
    
@@ -401,7 +387,10 @@ int xrif2fits::execute()
       }
 
       nr = fread(m_xrif->raw_buffer, 1, m_xrif->compressed_size, fp_xrif);
-      
+      fclose(fp_xrif);
+
+      if(g_timeToDie == true) break; //check after the long read.
+
       if(nr != m_xrif->compressed_size)
       {
          std::cerr << " (" << invokedName << "): Error reading data from " << m_files[n] << "\n";
@@ -480,7 +469,9 @@ int xrif2fits::execute()
          return -1;
       }
                
-      if(g_timeToDie == true) break; //check after the decompress.
+      xrif_decode(m_xrif);
+      
+     if(g_timeToDie == true) break; //check after the decompress.
 
       mx::improc::eigenCube<unsigned short> tmpc( (unsigned short*) m_xrif->raw_buffer, m_xrif->width, m_xrif->height, m_xrif->frames);
 
@@ -599,6 +590,13 @@ int xrif2fits::execute()
          
          fout << curr_timing[0] << " " << curr_timing[1] << " " << curr_timing[2] << "  " << curr_timing[3] << " " << curr_timing[4] << "\n";
       }*/
+      mx::improc::fitsFile<unsigned short> ff;
+   
+      std::string outname = m_files[n];
+      size_t ext = outname.find(".xrif");
+      outname.replace( ext, 5, ".fits");
+   
+      ff.write(outname, tmpc);
    }
 
    }
