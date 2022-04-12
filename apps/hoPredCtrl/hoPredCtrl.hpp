@@ -430,7 +430,6 @@ int hoPredCtrl::appStartup()
 	// createStandardIndiNumber<int>( m_indiP_inv_cov, "lambda", 0, 1e8, 0.1, "%0.3f", "Inverse Covariance", "Learning control");
 	// registerIndiPropertyNew( m_indiP_inv_cov, INDI_NEWCALLBACK(m_indiP_inv_cov) );  
 
-
 	createStandardIndiToggleSw( m_indiP_predictorToggle, "use_predictor", "Choose controller", "Loop Controls");
 	registerIndiPropertyNew( m_indiP_predictorToggle, INDI_NEWCALLBACK(m_indiP_predictorToggle) ); 
 	
@@ -508,7 +507,6 @@ int hoPredCtrl::appShutdown()
 
 	m_shaped_command.setZero();
 	send_dm_command();
-
 	delete controller;
 
 	if(m_temp_command){
@@ -521,7 +519,6 @@ int hoPredCtrl::appShutdown()
 inline
 int hoPredCtrl::allocate(const dev::shmimT & dummy)
 {
-
 	static_cast<void>(dummy); //be unused
 
 	// Wavefront sensor setup
@@ -602,7 +599,7 @@ int hoPredCtrl::allocate(const dev::shmimT & dummy)
 	ff2.read(m_illuminated_actuators_mask, m_actuator_mask_filename);
 	std::cerr << "Read a " << m_illuminated_actuators_mask.rows() << " x " << m_illuminated_actuators_mask.cols() << " actuator mask.\n";
 
-	controller->create_exploration_buffer(m_exploration_rms, m_exploration_steps);
+	// controller->create_exploration_buffer(m_exploration_rms, m_exploration_steps);
 	std::cerr << "Initialized exploration buffer.\n";
 
 	//Initialize dark image if not correct size.
@@ -628,6 +625,7 @@ int hoPredCtrl::allocate(const dev::shmimT & dummy)
 
 	m_use_predictive_control = false;
 	controller->controller->set_integrator(m_use_predictive_control, m_intgain, m_intleak);
+	std::cerr << "Finished setup.\n";
 
 	return 0;
 }
@@ -635,6 +633,7 @@ int hoPredCtrl::allocate(const dev::shmimT & dummy)
 inline
 int hoPredCtrl::processImage( void * curr_src, const dev::shmimT & dummy )
 {
+		
 	static_cast<void>(dummy); //be unused
 	auto start = std::chrono::steady_clock::now();
 
@@ -727,6 +726,7 @@ int hoPredCtrl::set_pupil_mask(std::string pupil_mask_filename){
 /*
 	This function reads in the filename to create a pupil mask and to initialize the measurement vector.
 */
+	
 	// Read in the pupil mask
 	mx::fits::fitsFile<realT> ff;
 	ff.read(m_pupilMask, pupil_mask_filename);
@@ -749,6 +749,7 @@ int hoPredCtrl::set_pupil_mask(std::string pupil_mask_filename){
 	// Create the measurement vector
 	m_measurementVector.resize(m_measurement_size, 1);
     m_measurementVector.setZero();
+	
 
 	return 0;
 }
@@ -757,16 +758,13 @@ int hoPredCtrl::set_pupil_mask(std::string pupil_mask_filename){
 inline
 int hoPredCtrl::allocate(const darkShmimT & dummy)
 {
+	
    static_cast<void>(dummy); //be unused
    
    m_darkSet = false;
    
-//    if(darkMonitorT::m_width != shmimMonitorT::m_width || darkMonitorT::m_height != shmimMonitorT::m_height)
-//    {
-//       darkMonitorT::m_restart = true;
-//    }
-   
    m_darkImage.resize(darkMonitorT::m_width, darkMonitorT::m_height);
+   
    dark_pixget = getPixPointer<realT>(darkMonitorT::m_dataType);
    
    if(dark_pixget == nullptr)
@@ -774,7 +772,9 @@ int hoPredCtrl::allocate(const darkShmimT & dummy)
       log<software_error>({__FILE__, __LINE__, "bad data type"});
       return -1;
    }
-   
+   std::cout << "Allocated dark frames stuff. \n";
+	
+
    return 0;
 }
 
@@ -783,6 +783,7 @@ int hoPredCtrl::processImage( void * curr_src,
                                        const darkShmimT & dummy 
                                      )
 {
+	
    static_cast<void>(dummy); //be unused
    
    realT * data = m_darkImage.data();
@@ -794,7 +795,8 @@ int hoPredCtrl::processImage( void * curr_src,
    }
    
    m_darkSet = true;
-   
+	
+
    return 0;
 }
 
@@ -802,19 +804,22 @@ int hoPredCtrl::processImage( void * curr_src,
 inline
 int hoPredCtrl::zero()
 {
+	
 	m_shaped_command.setZero();
 	send_dm_command();
 	return 0;
+	
 }
 
 inline
 int hoPredCtrl::map_command_vector_to_dmshmim(){
-
+	
 	// Convert the actuators modes into a 50x50 image.
 	/*
 		This function maps the command vector to a masked 2D image. A mapping is implicitely assumed due to the way the array is accessed.
 	*/
 
+	
 	// The new output of the controller is a nact length vector. So this can be replaced by a single copy statement.
 	// For now let's keep the dumb copy.
 	int ki = 0;
@@ -826,13 +831,14 @@ int hoPredCtrl::map_command_vector_to_dmshmim(){
 			}
 		}
 	}
+	
 
 	return 0;
 }
 
 inline
 int hoPredCtrl::send_dm_command(){
-
+	
 	// Check if processImage is running
 	// while(m_dmStream.md[0].write == 1);
 
@@ -845,6 +851,7 @@ int hoPredCtrl::send_dm_command(){
 
 
 	// log<text_log>("zeroed", logPrio::LOG_NOTICE);
+	
 
 	return 0;
 
@@ -989,38 +996,6 @@ INDI_NEWCALLBACK_DEFN(hoPredCtrl, m_indiP_clipval )(const pcf::IndiProperty &ipR
 
 	return 0;
 }
-
-/*
-INDI_NEWCALLBACK_DEFN(hoPredCtrl, m_indiP_inv_cov )(const pcf::IndiProperty &ipRecv)
-{
-	if(ipRecv.getName() != m_indiP_inv_cov.getName()){
-		log<software_error>({__FILE__,__LINE__, "wrong INDI property received."});
-		return -1;
-	}
-
-	float current = -1;
-	float target = -1;
-
-	if(ipRecv.find("current"))
-		current = ipRecv["current"].get<float>();
-
-	if(ipRecv.find("target"))
-		target = ipRecv["target"].get<float>();
-
-	if(target == -1) target = current;
-
-	if(target == -1)
-		return 0;
-
-	std::lock_guard<std::mutex> guard(m_indiMutex);
-
-	m_inv_covariance = target;
-
-	updateIfChanged(m_indiP_inv_cov, "target", m_inv_covariance);
-
-	return 0;
-}
-*/
 
 INDI_NEWCALLBACK_DEFN(hoPredCtrl, m_indiP_gamma )(const pcf::IndiProperty &ipRecv)
 {
