@@ -209,7 +209,8 @@ int dmModulator::loadConfigImpl( mx::app::appConfigurator & _config )
    if(_config.isSet("dm.trigger")) _config(m_trigger, "dm.trigger");
    _config(m_amp, "dm.amp");
    _config(m_frequency, "dm.frequency");
-   
+   _config(m_frequency, "dm.frequency");
+   _config(m_shapeCube,"dm.shapeCube" );
    _config(m_modThreadPrio, "modulator.threadPrio");
    _config(m_modThreadCpuset, "modulator.cpuset");
    
@@ -378,6 +379,8 @@ void dmModulator::modThreadExec()
 {
    m_modThreadID = syscall(SYS_gettid);
 
+   mx::improc::eigenCube<realT> ampShapes;
+
    //Wait fpr the thread starter to finish initializing this thread.
    while( (m_modThreadInit == true || state() != stateCodes::READY) && m_shutdown == 0)
    {
@@ -416,7 +419,13 @@ void dmModulator::modThreadExec()
             sem = m_triggerStream.semptr[m_triggerSemaphore]; ///< The semaphore to monitor for new image data
          }
 
-         
+         ampShapes.resize(m_shapes.rows(), m_shapes.cols(), m_shapes.planes());
+         for(int p =0; p < ampShapes.planes(); ++p)
+         {
+            ampShapes.image(p) = m_shapes.image(p) * m_amp;
+         }
+         updateIfChanged(m_indiP_amp, "current", m_amp);
+
          log<text_log>("started modulating",logPrio::LOG_NOTICE);
          
          dnsec = freqNsec;
@@ -471,7 +480,7 @@ void dmModulator::modThreadExec()
                
                m_imageStream.md->write = 1;
    
-               memcpy(m_imageStream.array.raw, m_shapes.image(idx).data(), m_width*m_height*m_typeSize);
+               memcpy(m_imageStream.array.raw, ampShapes.image(idx).data(), m_width*m_height*m_typeSize);
       
                m_imageStream.md->atime = currtime;
                m_imageStream.md->writetime = currtime;
