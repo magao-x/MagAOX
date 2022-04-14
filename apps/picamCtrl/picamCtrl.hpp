@@ -1212,7 +1212,7 @@ int picamCtrl::setEMGain()
       std::cerr << "could not get AdcEMGain\n";
    }
    m_emGain = AdcEMGain;
-   
+   m_adcSpeed = adcSpeed;
    return 0;
 }
 
@@ -1397,7 +1397,7 @@ int picamCtrl::configureAcquisition()
       state(stateCodes::ERROR);
       return -1;
    }
-   
+   m_adcSpeed = adcSpeed;
    m_readoutSpeedName = m_readoutSpeedNameSet;
    log<text_log>( "Readout speed set to: " + m_readoutSpeedNameSet);
 
