@@ -78,7 +78,8 @@ protected:
 
    bool m_wasHoming {0};
    
-   
+   bool m_powerOnHomed{false};
+
 public:
 
    INDI_NEWCALLBACK_DECL(smc100ccCtrl, m_indiP_position);
@@ -105,6 +106,13 @@ public:
 
    /// Do any needed shutdown tasks.  Currently nothing in this app.
    virtual int appShutdown();
+
+   virtual int onPowerOff()
+   {
+      std::cerr << "On power off\n";
+      m_powerOnHomed=false;
+      return 0;
+   }
 
    int makeCom( std::string &str, 
                 const std::string & com
@@ -512,10 +520,11 @@ int smc100ccCtrl::appLogic()
       
    if( state() == stateCodes::NOTHOMED)
    {
-      if(m_powerOnHome)
+      if(m_powerOnHome && !m_powerOnHomed)
       {
          std::unique_lock<std::mutex> lock(m_indiMutex);
          startHoming(); 
+         m_powerOnHomed = true;
       }
       return 0;
    }
