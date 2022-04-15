@@ -37,6 +37,7 @@ protected:
    
    bool m_procState {false};
    
+   std::vector<int> m_modes;
    std::vector<gainCtrl *> m_blockCtrls {nullptr};
    std::mutex m_blockMutex;
 
@@ -72,6 +73,8 @@ public slots:
    
    void on_button_LoopZero_pressed();
    
+   void on_button_zeroall_pressed();
+
    void setupBlocks(int nB);
 
 signals:
@@ -93,8 +96,8 @@ loopCtrl::loopCtrl( std::string & procName,
    setWindowTitle(QString(m_procName.c_str()));
    ui.label_loop_state->setProperty("isStatus", true);
 
-   ui.gainCtrl->setup(m_procName, "loop_gain", "Global Gain");
-   ui.mcCtrl->setup(m_procName, "loop_multcoeff", "Global Mult. Coef.");
+   ui.gainCtrl->setup(m_procName, "loop_gain", "Global Gain", -1, -1);
+   ui.mcCtrl->setup(m_procName, "loop_multcoeff", "Global Mult. Coef.", -1, -1);
    ui.mcCtrl->makeMultCoeffCtrl();
    
    
@@ -103,6 +106,8 @@ loopCtrl::loopCtrl( std::string & procName,
    setXwFont(ui.label_loop);
    setXwFont(ui.label_loop_state);
    setXwFont(ui.button_LoopZero);
+   setXwFont(ui.button_zeroall);
+   setXwFont(ui.label_block_gains);
 
    onDisconnect();
 }
@@ -258,7 +263,23 @@ void loopCtrl::handleSetProperty( const pcf::IndiProperty & ipRecv)
          {
             size_t nB = ipRecv["blocks"].get<int>();
 
+            m_modes.resize(nB,0);
+            
+            std::cerr << nB << "\n";
+
+            for(size_t n = 0; n<nB; ++n)
+            {
+               char mstr[16];
+               snprintf(mstr, sizeof(mstr), "%02d", n);
+               std::string blockstr = std::string("block")+mstr;
+               int nM = ipRecv[std::string("block")+mstr].get<int>();
+               m_modes[n] = nM;
+
+            }
+
             if(nB != m_blockCtrls.size()) emit blocksChanged(nB);
+
+            
          }
       }
    }
@@ -386,17 +407,32 @@ void loopCtrl::on_button_LoopZero_pressed()
    sendNewProperty(ipFreq);
 }
 
+void loopCtrl::on_button_zeroall_pressed()
+{
+   pcf::IndiProperty ipFreq(pcf::IndiProperty::Switch);
+   
+   ipFreq.setDevice(m_gainCtrl);
+   ipFreq.setName("zero_all");
+   ipFreq.add(pcf::IndiElement("request"));
+   
+   ipFreq["request"] = pcf::IndiElement::On;
+   
+   sendNewProperty(ipFreq);
+}
+
 void loopCtrl::setupBlocks(int nB)
 {
    std::lock_guard<std::mutex> lock(m_blockMutex);
    
    m_blockCtrls.resize(nB, nullptr); //I think this will call the destructor
 
+   int modeTot = 0;
    for(int n = 0; n < nB; ++n)
    {
       char str[16];
       snprintf(str, sizeof(str), "%02d", n);
-      m_blockCtrls[n] = new gainCtrl(m_gainCtrl, std::string("block") + str + "_gain", std::string("Block") + str + " Gain");
+      modeTot += m_modes[n];
+      m_blockCtrls[n] = new gainCtrl(m_gainCtrl, std::string("block") + str + "_gain", std::string("Block") + str + " Gain", m_modes[n], modeTot);
       ui.horizontalLayout_2->addWidget(m_blockCtrls[n]);
       if(m_parent) m_parent->addSubscriber(m_blockCtrls[n]);
    }

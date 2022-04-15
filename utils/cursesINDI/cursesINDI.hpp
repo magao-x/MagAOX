@@ -954,6 +954,8 @@ void cursesINDI::keyPressed( int ch )
             ipSend.setDevice(knownProps[it->second.propKey].getDevice());
             ipSend.setName(knownProps[it->second.propKey].getName());
             ipSend.add(pcf::IndiElement(it->second.name));
+            if(fpout) *fpout << "newStr: " << newStr << std::endl; 
+   
             ipSend[it->second.name].setValue(newStr);
             sendNewProperty(ipSend);
          }

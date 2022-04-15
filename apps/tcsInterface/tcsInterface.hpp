@@ -2639,7 +2639,7 @@ INDI_SETCALLBACK_DEFN(tcsInterface, m_indiP_loopState)(const pcf::IndiProperty &
 
    if(!ipRecv.find("toggle")) return 0;
 
-   if(ipRecv["loop_state"].getSwitchState() == pcf::IndiElement::On)
+   if(ipRecv["toggle"].getSwitchState() == pcf::IndiElement::On)
    {
       std::cerr << "on\n";
       m_loopState = 2;

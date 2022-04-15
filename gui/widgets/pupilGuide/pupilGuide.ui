@@ -340,6 +340,13 @@
         </spacer>
        </item>
        <item>
+        <widget class="QPushButton" name="button_ttmtel">
+         <property name="text">
+          <string>move TTM</string>
+         </property>
+        </widget>
+       </item>
+       <item>
         <layout class="QHBoxLayout" name="horizontalLayout_10">
          <item>
           <spacer name="horizontalSpacer_4">

@@ -22,6 +22,9 @@ protected:
    std::string m_property;
    std::string m_label;
 
+   int m_modes {0};
+   int m_modesTotal {0};
+
    float m_current {0};
    float m_target {0};
 
@@ -42,6 +45,8 @@ public:
    gainCtrl( const std::string & device,
              const std::string & property,
              const std::string & label,
+             int modes,
+             int modesTotal,
              QWidget * Parent = 0, 
              Qt::WindowFlags f = 0
            );
@@ -50,7 +55,9 @@ public:
 
    void setup( const std::string & device,
                const std::string & property,
-               const std::string & label
+               const std::string & label,
+               int modes,
+               int modesTotal
              );
 
    void makeGainCtrl();
@@ -92,12 +99,14 @@ gainCtrl::gainCtrl( QWidget * Parent,
 gainCtrl::gainCtrl( const std::string & device,
                     const std::string & property,
                     const std::string & label,
+                    int modes,
+                    int modesTotal,
                     QWidget * Parent, 
                     Qt::WindowFlags f) : xWidget(Parent, f)
 {
    ui.setupUi(this);
    
-   setup(device, property, label);
+   setup(device, property, label, modes, modesTotal);
 }
    
 gainCtrl::~gainCtrl()
@@ -106,12 +115,16 @@ gainCtrl::~gainCtrl()
 
 void gainCtrl::setup( const std::string & device,
                       const std::string & property,
-                      const std::string & label
+                      const std::string & label,
+                      int modes,
+                      int modesTotal
                     )
 {
    m_device = device;
    m_property = property;
    m_label = label;
+   m_modes = modes;
+   m_modesTotal = modesTotal;
 
    ui.status->setup(m_device, m_property, statusEntry::FLOAT, "", "");
    ui.status->setStretch(0,0,1);
@@ -124,6 +137,15 @@ void gainCtrl::setup( const std::string & device,
    setXwFont(ui.label);
    
    ui.label->setText(m_label.c_str());
+
+   if(m_modes == -1 || m_modesTotal == -1) ui.label_nummodes->setText("");
+   else
+   {
+      std::string nnn = std::to_string(m_modes);
+      nnn += " / ";
+      nnn += std::to_string(m_modesTotal);
+      ui.label_nummodes->setText(nnn.c_str());
+   }
 
    makeGainCtrl();
    

@@ -1,5 +1,5 @@
 
-//#define DEBUG_TMPOUT
+#define DEBUG_TMPOUT
 
 
 #include "cursesINDI.hpp"

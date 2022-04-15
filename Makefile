@@ -20,12 +20,13 @@ apps_rtc = \
 	siglentSDG \
 	ttmModulator \
 	bmcCtrl \
-   rhusbMon \
+        rhusbMon \
 	pi335Ctrl \
 	pupilFit \
 	t2wOffloader \
-   cacaoInterface \
-	dmSpeckle
+        cacaoInterface \
+	dmSpeckle \
+        w2tcsOffloader
 
 apps_icc = \
         cacaoInterface \
@@ -40,7 +41,8 @@ apps_icc = \
 	usbtempMon \
 	xt1121Ctrl \
 	xt1121DCDU \
-        picoMotorCtrl
+        picoMotorCtrl \
+        cacaoInterface
 
 apps_aoc = \
 	trippLitePDU \

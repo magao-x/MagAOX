@@ -249,6 +249,7 @@ protected:
    std::string m_vShiftSpeedName; ///< The current vshift speed name
    std::string m_vShiftSpeedNameSet; ///< The user requested vshift speed name, to be set by derived()
       
+   float m_adcSpeed {0};
    
    float m_emGain {1}; ///< The camera's current EM gain (if available).
    float m_emGainSet {1}; ///< The camera's EM gain, as set by the user.
@@ -2731,7 +2732,7 @@ int stdCamera<derivedT>::recordCamera( bool force )
                m_expTime != last_expTime ||
                m_fps != last_fps ||
                m_emGain != last_emGain ||
-               0 != last_adcSpeed ||
+               m_adcSpeed != last_adcSpeed ||
                m_ccdTemp != last_ccdTemp ||
                m_ccdTempSetpt != last_ccdTempSetpt ||
                m_tempControlStatus != last_tempControlStatus ||
@@ -2742,7 +2743,7 @@ int stdCamera<derivedT>::recordCamera( bool force )
    {
       derived().template telem<telem_stdcam>({m_modeName, m_currentROI.x, m_currentROI.y, 
                                                     m_currentROI.w, m_currentROI.h, m_currentROI.bin_x, m_currentROI.bin_y,
-                                                       m_expTime, m_fps, m_emGain, 0, m_ccdTemp, m_ccdTempSetpt, (uint8_t) m_tempControlStatus, 
+                                                       m_expTime, m_fps, m_emGain, m_adcSpeed, m_ccdTemp, m_ccdTempSetpt, (uint8_t) m_tempControlStatus, 
                                                              (uint8_t) m_tempControlOnTarget, m_tempControlStatusStr, m_shutterStatus, (int8_t) m_shutterState});
       
       last_mode = m_modeName;
@@ -2750,7 +2751,7 @@ int stdCamera<derivedT>::recordCamera( bool force )
       last_expTime = m_expTime;
       last_fps = m_fps;
       last_emGain = m_emGain;
-      last_adcSpeed = 0;//m_adcSpeed;
+      last_adcSpeed = m_adcSpeed;
       last_ccdTemp = m_ccdTemp;
       last_ccdTempSetpt = m_ccdTempSetpt;
       last_tempControlStatus = m_tempControlStatus;
