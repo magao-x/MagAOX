@@ -37,7 +37,7 @@ LINE_FORMAT_REGEX = re.compile(
     r"TELM \[observer\] email: (.*) obs: (.*) (\d)"
 )
 
-@dataclasses.dataclass
+@dataclasses.dataclass(frozen=True, eq=True)
 class TimestampedFile:
     path : pathlib.Path
     timestamp : datetime.datetime
@@ -45,7 +45,7 @@ class TimestampedFile:
     def __str__(self):
         return f"<TimestampedFile: {self.path} at {self.timestamp.strftime(PRETTY_MODIFIED_TIME_FORMAT)}>"
 
-@dataclasses.dataclass
+@dataclasses.dataclass(frozen=True, eq=True)
 class ObserverTelem:
     ts : datetime.datetime
     email : str
@@ -234,18 +234,25 @@ def get_new_observation_spans(existing_observation_spans : typing.Set[Observatio
     else:
         return set(), ending_after_dt
 
-def do_quicklook_for_camera(span, data_root, device, omit_telemetry, output_dir, dry_run):
+def do_quicklook_for_camera(span, data_root, device, omit_telemetry, output_dir, dry_run, all_visited_files=None):
+    if all_visited_files is None:
+        all_visited_files = set()
     image_path = data_root / 'rawimages' / device
     log.debug(f"Checking {image_path} ...")
-    matching_files = get_matching_paths(image_path, device, 'xrif', newer_than_dt=span.begin, older_than_dt=span.end)
-    if len(matching_files):
+    matching_files = set(get_matching_paths(image_path, device, 'xrif', newer_than_dt=span.begin, older_than_dt=span.end))
+    new_matching_files = matching_files - all_visited_files
+    if len(new_matching_files):
         log.debug(f"Matching files:")
         for fn in matching_files:
-            log.debug(f"\tmatched: {fn}")
+            if fn in new_matching_files:
+                log.debug(f"\tmatched: {fn} (new)")
+            else:
+                log.debug(f"\tmatched: {fn}")
         destination = output_dir / span.email / (span.title if len(span.title) else '_no_name_') / device
         destination.mkdir(parents=True, exist_ok=True)
-        convert_xrif(image_path, matching_files, destination, omit_telemetry, dry_run)
+        convert_xrif(image_path, new_matching_files, destination, omit_telemetry, dry_run)
         log.info(f"Wrote to {destination}")
+    return new_matching_files
 
 def convert_xrif(base_dir, paths : typing.List[TimestampedFile], destination_path, omit_telemetry, dry_run):
     for data_file in paths:
@@ -272,8 +279,8 @@ def convert_xrif(base_dir, paths : typing.List[TimestampedFile], destination_pat
             try:
                 subprocess.check_call(
                     args,
-                    # stdout=subprocess.DEVNULL,
-                    # stderr=subprocess.DEVNULL,
+                    stdout=subprocess.DEVNULL,
+                    stderr=subprocess.DEVNULL,
                     timeout=60
                 )
             except subprocess.CalledProcessError as e:
@@ -295,6 +302,8 @@ def daemon_mode(output_dir, cameras, data_root, omit_telemetry):
     ending_after_dt = ending_after_dt.replace(tzinfo=timezone.utc)
     existing_observation_spans = set()
     log.info(f"Started at {datetime.datetime.now().isoformat()}, waiting for observations...")
+    dry_run = False
+    all_visited_files = set()
     while True:
         start_time = time.time()
         try:
@@ -304,7 +313,8 @@ def daemon_mode(output_dir, cameras, data_root, omit_telemetry):
             for span in new_observation_spans:
                 log.info(f"Observation interval to process: {span}")
                 for device in cameras:
-                    do_quicklook_for_camera(span, data_root, device, omit_telemetry, output_dir, dry_run=False)
+                    visited_files = do_quicklook_for_camera(span, data_root, device, omit_telemetry, output_dir, dry_run, all_visited_files)
+                    all_visited_files = all_visited_files.union(visited_files)
             new_closed_spans = set(x for x in new_observation_spans if x.end is not None)
             existing_observation_spans = existing_observation_spans.union(new_closed_spans)
             duration = time.time() - start_time
