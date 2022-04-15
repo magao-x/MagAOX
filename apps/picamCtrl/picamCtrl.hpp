@@ -1437,6 +1437,7 @@ int picamCtrl::configureAcquisition()
    nextrois.roi_array = &nextroi;
    nextrois.roi_count = 1;
    
+   int roi_err = false;
    if(m_currentFlip == fgFlipLR || m_currentFlip == fgFlipUDLR)
    {
       nextroi.x = ((1023-m_nextROI.x) - 0.5*( (float) m_nextROI.w - 1.0));
@@ -1446,6 +1447,19 @@ int picamCtrl::configureAcquisition()
       nextroi.x = (m_nextROI.x - 0.5*( (float) m_nextROI.w - 1.0));
    }
    
+   if(nextroi.x < 0)
+   {
+      log<software_error>({__FILE__, __LINE__, "can't set ROI to x center < 0"});
+      roi_err = true;
+   }
+
+   if(nextroi.x > 1023) 
+   {
+      log<software_error>({__FILE__, __LINE__, "can't set ROI to x center > 1023"});
+      roi_err = true;
+   }
+   
+
    if(m_currentFlip == fgFlipUD || m_currentFlip == fgFlipUDLR)
    {
       nextroi.y = ((1023 - m_nextROI.y) - 0.5*( (float) m_nextROI.h - 1.0));
@@ -1455,19 +1469,77 @@ int picamCtrl::configureAcquisition()
       nextroi.y = (m_nextROI.y - 0.5*( (float) m_nextROI.h - 1.0));
    }
    
-   
+   if(nextroi.y < 0)
+   {
+      log<software_error>({__FILE__, __LINE__, "can't set ROI to y center < 0"});
+      roi_err = true;
+   }
+
+   if(nextroi.y > 1023) 
+   {
+      log<software_error>({__FILE__, __LINE__, "can't set ROI to y center > 1023"});
+      roi_err = true;
+   }
+
+
    nextroi.width = m_nextROI.w;
+
+   if(nextroi.width < 0)
+   {
+      log<software_error>({__FILE__, __LINE__, "can't set ROI to width to be < 0"});
+      roi_err = true;
+   }
+
+ 
+
+   if(nextroi.x + nextroi.width  > 1024) 
+   {
+      log<software_error>({__FILE__, __LINE__, "can't set ROI to width such that edge is > 1023"});
+      roi_err = true;
+   }
+
    nextroi.height = m_nextROI.h;
+
+   if(nextroi.y + nextroi.height > 1024) 
+   {
+      log<software_error>({__FILE__, __LINE__, "can't set ROI to height such that edge is > 1023"});
+      roi_err = true;
+   }
+
+   if(nextroi.height < 0)
+   {
+      log<software_error>({__FILE__, __LINE__, "can't set ROI to height to be < 0"});
+      roi_err = true;
+   }
+
    nextroi.x_binning = m_nextROI.bin_x;
+   
+   if(nextroi.x_binning < 0)
+   {
+      log<software_error>({__FILE__, __LINE__, "can't set ROI x binning < 0"});
+      roi_err = true;
+   }
+
    nextroi.y_binning = m_nextROI.bin_y;
    
-   PicamError error = Picam_SetParameterRoisValue( m_cameraHandle, PicamParameter_Rois, &nextrois);   
-   if( error != PicamError_None )
+   if(nextroi.y_binning < 0)
    {
-      std::cerr << PicamEnum2String(PicamEnumeratedType_Error, error) << "\n";
-      log<software_error>({__FILE__, __LINE__, 0, error, PicamEnum2String(PicamEnumeratedType_Error, error)});
-      state(stateCodes::ERROR);
-      return -1;
+      log<software_error>({__FILE__, __LINE__, "can't set ROI y binning < 0"});
+      roi_err = true;
+   }
+
+   PicamError error;
+
+   if(!roi_err)
+   {
+      error = Picam_SetParameterRoisValue( m_cameraHandle, PicamParameter_Rois, &nextrois);   
+      if( error != PicamError_None )
+      {
+         std::cerr << PicamEnum2String(PicamEnumeratedType_Error, error) << "\n";
+         log<software_error>({__FILE__, __LINE__, 0, error, PicamEnum2String(PicamEnumeratedType_Error, error)});
+         state(stateCodes::ERROR);
+         return -1;
+      }
    }
    
    if(getPicamParameter(readoutStride, PicamParameter_ReadoutStride) < 0)
@@ -1648,12 +1720,19 @@ int picamCtrl::configureAcquisition()
    std::string adcgStr = PicamEnum2String( PicamEnumeratedType_AdcAnalogGain, AdcAnalogGain );
    std::cerr << "AdcAnalogGain is: " << adcgStr << "\n";
 
-   piint AdcEMGain;
-   if(getPicamParameter(AdcEMGain, PicamParameter_AdcEMGain) < 0)
+   if(m_readoutSpeedName == "ccd_00_1MHz" || m_readoutSpeedName == "ccd_01MHz")
    {
-      std::cerr << "could not get AdcEMGain\n";
+      m_emGain = 1;
    }
-   m_emGain = AdcEMGain;
+   else
+   {
+      piint AdcEMGain;
+      if(getPicamParameter(AdcEMGain, PicamParameter_AdcEMGain) < 0)
+      {
+         std::cerr << "could not get AdcEMGain\n";
+      }
+      m_emGain = AdcEMGain;
+   }
    
 /*
    std::cerr << "Onlineable:\n";
