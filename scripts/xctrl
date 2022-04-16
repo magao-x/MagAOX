@@ -175,6 +175,8 @@ def _session_exists(process_name):
     sessions = out.decode('utf8').split('\n')
     return process_name in sessions
 
+def stop(processes, targets):
+    return shutdown(processes, targets)
 
 def _shutdown_helper(process_name):
     attempts = 0
@@ -245,6 +247,7 @@ def _indiserver_startup(process_name, executable_name):
                 _run_as_xsup(f'kill -9 {proc.pid}')
                 warning(f"Killing zombie: {' '.join(cmdline)}")
     return _startup_helper(process_name, executable_name)
+
 
 def _startup_helper(process_name, executable_name):
     '''Start a new tmux session as the parent for a MagAO-X process
@@ -332,19 +335,28 @@ VERBS = {
     'inspect': inspect_session,
     'peek': peek,
     'shutdown': shutdown,
+    'stop': stop,
     'restart': restart,
     'startup': startup,
+    'start': startup,
 }
+
+VERBS_REQUIRING_ALL = ('shutdown', 'restart')
+VERBS_REQUIRING_TARGET = ('stop', 'start')
 
 
 def main():
-    parser = argparse.ArgumentParser(prog='xctrl', description=__doc__)
+    parser = argparse.ArgumentParser(prog='xctrl')
     parser.add_argument('-r', '--role', help='Specify role to read proclist for (default: $MAGAOX_ROLE)')
     subparsers = parser.add_subparsers(help='verb for action to take', dest='verb')
     for verb in VERBS:
         sp = subparsers.add_parser(verb)
+        if verb in VERBS_REQUIRING_ALL:  # special case for confirmation
+            sp.add_argument('--all', action='store_true', help="With no names provided, restarts all")
         if verb == 'inspect': # special case, can only inspect one thing at a time
             sp.add_argument('target', nargs=1, help='Process name to target')
+        elif verb in VERBS_REQUIRING_TARGET:
+            sp.add_argument('target', nargs='+', help='Process names to target')
         else:
             sp.add_argument('target', nargs='*', help='Process names to target')
     args = parser.parse_args()
@@ -359,6 +371,7 @@ def main():
         role = args.role
 
     if args.verb is None:
+        print(__doc__)
         parser.print_help()
         sys.exit(1)
 
@@ -369,6 +382,14 @@ def main():
     debug(f'Read processes from {processes_filepath}: {processes}')
 
     verb = args.verb
+    if verb in VERBS_REQUIRING_ALL:
+        if len(args.target) == 0 and not args.all:
+            failure(f"Specify --all to apply this verb to all processes")
+            return 1
+    elif verb in VERBS_REQUIRING_TARGET:
+        if len(args.target) == 0:
+            failure(f"No targets provided for {verb}")
+            return 1
     targets = validate_targets(processes, args.target)
     debug(f'Got verb = {verb}, targets = {targets}')
     if verb not in VERBS:
