@@ -148,12 +148,17 @@ protected:
    
    realT (*pixget)(void *, size_t) {nullptr}; ///< Pointer to a function to extract the image data as our desired type realT.
    
+   ///Mutex for locking dark operations.
+   std::mutex m_darkMutex;
+
    mx::improc::eigenImage<realT> m_darkImage;
    bool m_darkSet {false};
+   bool m_darkValid {false};
    realT (*dark_pixget)(void *, size_t) {nullptr}; ///< Pointer to a function to extract the image data as our desired type realT.
    
    mx::improc::eigenImage<realT> m_dark2Image;
    bool m_dark2Set {false};
+   bool m_dark2Valid {false};
    realT (*dark2_pixget)(void *, size_t) {nullptr}; ///< Pointer to a function to extract the image data as our desired type realT.
    
    
@@ -575,8 +580,10 @@ int shmimIntegrator::allocate(const dev::shmimT & dummy)
 {
    static_cast<void>(dummy); //be unused
   
-   std::unique_lock<std::mutex> lock(m_indiMutex);
-  
+   //This whole thing could invalidate the dark.
+   std::unique_lock<std::mutex> lock(m_darkMutex);  //Lock the mutex before messing with the dark.
+
+
    if(m_avgTime > 0 && m_fps > 0)
    {
       m_nAverage = m_avgTime * m_fps;
@@ -625,6 +632,26 @@ int shmimIntegrator::allocate(const dev::shmimT & dummy)
    updateIfChanged(m_indiP_nUpdate, "current", m_nUpdate, INDI_IDLE);
    updateIfChanged(m_indiP_nUpdate, "target", m_nUpdate, INDI_IDLE);
    
+
+   if(darkMonitorT::m_width == shmimMonitorT::m_width || darkMonitorT::m_height == shmimMonitorT::m_height)
+   {
+      m_darkValid = true;
+   }
+   else
+   {
+      m_darkValid = false;
+   }
+
+   if(dark2MonitorT::m_width == shmimMonitorT::m_width || dark2MonitorT::m_height == shmimMonitorT::m_height)
+   {
+      m_dark2Valid = true;
+   }
+   else
+   {
+      m_dark2Valid = false;
+   }
+
+
    m_reconfig = true;
    
    return 0;
@@ -655,10 +682,22 @@ int shmimIntegrator::processImage( void * curr_src,
       {
          m_avgImage /= m_nAverage; ///\todo should this be /= m_sinceUpdate?
          
-         if(m_darkSet && !m_dark2Set) m_avgImage -= m_darkImage;
-         else if(!m_darkSet && m_dark2Set) m_avgImage -= m_dark2Image;
-         else if(m_darkSet && m_dark2Set) m_avgImage -= m_darkImage + m_dark2Image;
-         
+         if((m_darkSet && m_darkValid) && !(m_dark2Set && m_dark2Valid))
+         {
+            std::unique_lock<std::mutex> lock(m_darkMutex);  //Lock the mutex before messing with the dark.
+            m_avgImage -= m_darkImage;
+         }
+         else if(!(m_darkSet && m_darkValid) && (m_dark2Set && m_dark2Valid)) 
+         {
+            std::unique_lock<std::mutex> lock(m_darkMutex);  //Lock the mutex before messing with the dark.
+            m_avgImage -= m_dark2Image;
+         }
+         else if((m_darkSet && m_darkValid) && (m_dark2Set && m_dark2Valid)) 
+         {
+            std::unique_lock<std::mutex> lock(m_darkMutex);  //Lock the mutex before messing with the dark.
+            m_avgImage -= m_darkImage + m_dark2Image;
+         }
+
          m_updated = true;
          
          //Now tell the f.g. to get going
@@ -757,8 +796,12 @@ int shmimIntegrator::processImage( void * curr_src,
          }
          m_avgImage /= m_nAverage;
          
-         if(m_darkSet) m_avgImage -= m_darkImage;
-         
+         if(m_darkValid && m_darkSet)
+         {
+            std::unique_lock<std::mutex> lock(m_darkMutex);  //Lock the mutex before messing with the dark.
+            m_avgImage -= m_darkImage;
+         }
+
          m_updated = true;
          
          //Now tell the f.g. to get going
@@ -779,24 +822,31 @@ int shmimIntegrator::allocate(const darkShmimT & dummy)
 {
    static_cast<void>(dummy); //be unused
    
-   std::unique_lock<std::mutex> lock(m_indiMutex);
-
-   if(darkMonitorT::m_width != shmimMonitorT::m_width || darkMonitorT::m_height != shmimMonitorT::m_height)
-   {
-      m_darkSet = false;
-      darkMonitorT::m_restart = true;
-   }
+   std::unique_lock<std::mutex> lock(m_darkMutex);  //Lock the mutex before messing with the dark.
    
    m_darkImage.resize(darkMonitorT::m_width, darkMonitorT::m_height);
-   
+   m_darkImage.setZero();
+
    dark_pixget = getPixPointer<realT>(darkMonitorT::m_dataType);
    
    if(dark_pixget == nullptr)
    {
       log<software_error>({__FILE__, __LINE__, "bad data type"});
+      m_darkSet = false;
+      m_darkValid = false;
       return -1;
    }
    
+
+   if(darkMonitorT::m_width == shmimMonitorT::m_width || darkMonitorT::m_height == shmimMonitorT::m_height)
+   {
+      m_darkValid = true;
+   }
+   else
+   {
+      m_darkValid = false;
+   }
+
    return 0;
 }
 
@@ -815,7 +865,7 @@ int shmimIntegrator::processImage( void * curr_src,
       data[nn] = dark_pixget(curr_src, nn);
    }
    
-   m_darkSet = true;
+    m_darkSet = true; //There is a dark set and ready to use, but it may or may not be valid.
    
    return 0;
 }
@@ -825,24 +875,31 @@ int shmimIntegrator::allocate(const dark2ShmimT & dummy)
 {
    static_cast<void>(dummy); //be unused
    
-   std::unique_lock<std::mutex> lock(m_indiMutex);
-
-   if(dark2MonitorT::m_width != shmimMonitorT::m_width || dark2MonitorT::m_height != shmimMonitorT::m_height)
-   {
-      m_dark2Set = false;
-      dark2MonitorT::m_restart = true;
-   }
+   std::unique_lock<std::mutex> lock(m_darkMutex);  //Lock the mutex before messing with the dark.
    
    m_dark2Image.resize(dark2MonitorT::m_width, dark2MonitorT::m_height);
-   
+   m_dark2Image.setZero();
+
    dark2_pixget = getPixPointer<realT>(dark2MonitorT::m_dataType);
    
    if(dark2_pixget == nullptr)
    {
       log<software_error>({__FILE__, __LINE__, "bad data type"});
+      m_dark2Set = false;
+      m_dark2Valid = false;
       return -1;
    }
    
+   if(dark2MonitorT::m_width == shmimMonitorT::m_width || dark2MonitorT::m_height == shmimMonitorT::m_height)
+   {
+      m_dark2Valid = true;
+   }
+   else
+   {
+      m_dark2Valid = false;
+   }
+
+
    return 0;
 }
 
@@ -861,7 +918,7 @@ int shmimIntegrator::processImage( void * curr_src,
       data[nn] = dark2_pixget(curr_src, nn);
    }
    
-   m_dark2Set = true;
+   m_dark2Set = true; //There is a dark set and ready to use, but it may or may not be valid.
    
    return 0;
 }
