@@ -63,7 +63,10 @@ protected:
 
    std::vector<float> m_defaultGains;
 
-   //here add parameters which will be config-able at runtime
+   std::string m_upstreamDevice;
+   std::string m_upstreamProperty {"loop_state"};
+   bool m_upstreamFollowClosed {false};
+
    
    ///@}
 
@@ -114,6 +117,8 @@ public:
      */
    virtual int appShutdown();
 
+   int toggleLoop( bool onoff );
+
    // shmimMonitor interface:
    int allocate( const dev::shmimT &);
    
@@ -137,6 +142,11 @@ public:
    }
 
    int setCallBack_ctrl(const pcf::IndiProperty &ipRecv);
+
+   int m_upstreamState {0};
+   pcf::IndiProperty m_indiP_upstream; ///< Property used to report the loop state
+   
+   INDI_SETCALLBACK_DECL(alignLoop, m_indiP_upstream);
 };
 
 alignLoop::alignLoop() : MagAOXApp(MAGAOX_CURRENT_SHA1, MAGAOX_REPO_MODIFIED)
@@ -156,6 +166,8 @@ void alignLoop::setupConfig()
 
    config.add("loop.intMat", "", "loop.intMat", argType::Required, "loop", "intMat", false, "string", "file name of the interaction matrix.");
    config.add("loop.gains", "", "loop.gains", argType::Required, "loop", "gains", false, "vector<float>", "default loop gains.  If single number, it is applied to all axes.");
+   config.add("loop.upstream", "", "loop.upstream", argType::Required, "loop", "upstream", false, "string", "Upstream loop device name.  This loop will open, and optionally close, with the upstream loop.  Default none.");
+   config.add("loop.upstreamProperty", "", "loop.upstreamProperty", argType::Required, "loop", "upstreamProperty", false, "string", "Property of upstream loop device to follow.  Must be a toggle.  Default is loop_state.");
 
 }
 
@@ -169,7 +181,8 @@ int alignLoop::loadConfigImpl( mx::app::appConfigurator & _config )
    _config(m_ctrlTargets, "ctrl.targets");
    _config(m_intMatFile, "loop.intMat");
    _config(m_defaultGains, "loop.gains");
-   
+   _config(m_upstreamDevice, "loop.upstream");
+   _config(m_upstreamProperty, "loop.upstreamProperty");
    return 0;
 }
 
@@ -274,6 +287,13 @@ int alignLoop::appStartup()
       return log<software_error, -1>({__FILE__, __LINE__, "interaction matrix wrong size: cols do not match corrector Targets"});
    }
 */
+
+   //Get the loop state for managing offloading
+   if(m_upstreamDevice != "")
+   {
+      REG_INDI_SETPROP(m_indiP_upstream, m_upstreamDevice, m_upstreamProperty);
+   }
+
    return 0;
 }
 
@@ -292,6 +312,28 @@ int alignLoop::appLogic()
 int alignLoop::appShutdown()
 {
    shmimMonitorT::appShutdown();
+
+   return 0;
+}
+
+int alignLoop::toggleLoop(bool onoff)
+{
+   if(!m_ctrlEnabled && onoff) //not enabled so change
+   {      
+      m_ctrlEnabled = true;
+      log<loop_closed>();
+      updateSwitchIfChanged(m_indiP_ctrlEnabled, "toggle", pcf::IndiElement::On, INDI_OK);
+      return 0;
+   }
+
+   if(m_ctrlEnabled && !onoff)
+   {
+      m_ctrlEnabled = false;
+      log<loop_open>();
+      updateSwitchIfChanged(m_indiP_ctrlEnabled, "toggle", pcf::IndiElement::Off, INDI_IDLE);
+   
+      return 0;
+   }
 
    return 0;
 }
@@ -418,25 +460,13 @@ INDI_NEWCALLBACK_DEFN(alignLoop, m_indiP_ctrlEnabled)(const pcf::IndiProperty &i
    //switch is toggled to on
    if( ipRecv["toggle"].getSwitchState() == pcf::IndiElement::On)
    {
-      if(!m_ctrlEnabled) //not enabled so change
-      {      
-         m_ctrlEnabled = true;
-         log<loop_closed>();
-         updateSwitchIfChanged(m_indiP_ctrlEnabled, "toggle", pcf::IndiElement::On, INDI_BUSY);
-      }
-      return 0;
+      return toggleLoop(true);
    }
 
    //switch is toggle to off
    if( ipRecv["toggle"].getSwitchState() == pcf::IndiElement::Off)
    {
-      if(m_ctrlEnabled)
-      {
-         m_ctrlEnabled = false;
-         log<loop_open>();
-         updateSwitchIfChanged(m_indiP_ctrlEnabled, "toggle", pcf::IndiElement::Off, INDI_IDLE);
-      }
-      return 0;
+      return toggleLoop(false);
    }
    
    return 0;
@@ -458,6 +488,30 @@ int alignLoop::setCallBack_ctrl(const pcf::IndiProperty &ipRecv)
 
    return 0;
 }
+
+INDI_SETCALLBACK_DEFN(alignLoop, m_indiP_upstream)(const pcf::IndiProperty &ipRecv)
+{
+   if(ipRecv.getName() != m_indiP_upstream.getName())
+   {
+      return log<software_error>({__FILE__,__LINE__, "wrong INDI property received"});
+   }
+
+   if(!ipRecv.find("toggle")) return 0;
+
+   if(ipRecv["toggle"].getSwitchState() == pcf::IndiElement::On && m_upstreamFollowClosed)
+   {
+      std::cerr << "upstream on\n";
+      return toggleLoop(true);
+   }
+   else if(ipRecv["toggle"].getSwitchState() == pcf::IndiElement::Off)
+   {
+      std::cerr << "upstream off\n";
+      return toggleLoop(false);
+   }
+
+   return 0;
+}
+
 
 } //namespace app
 } //namespace MagAOX
