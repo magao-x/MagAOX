@@ -35,6 +35,8 @@ protected:
 
    statusDisplay * ui_tempStatus {nullptr};
 
+   QPushButton * ui_reconfigure {nullptr};
+
    shutterStatus * ui_shutterStatus {nullptr};
 
    roiStatus * ui_roiStatus {nullptr};
@@ -48,6 +50,8 @@ protected:
    statusEntry * ui_emGain {nullptr};
 
    QPushButton * ui_takeDarks {nullptr};
+
+
    float m_temp {-99};
 
    bool m_takingDark {false};
@@ -85,6 +89,8 @@ public slots:
    void setup_temp_ccd(bool ro);
    void setup_tempStatus();
 
+   void setup_reconfigure();
+   void reconfigure();
    void setup_shutter();
 
    void setup_roiStatus();
@@ -107,6 +113,8 @@ signals:
 
    void add_temp_ccd(bool ro);
    void add_tempStatus();
+
+   void add_reconfigure();
 
    void add_shutter();
 
@@ -141,6 +149,8 @@ camera::camera( std::string & camName,
 
    connect(this, SIGNAL(add_temp_ccd(bool)), this, SLOT(setup_temp_ccd(bool)));
    connect(this, SIGNAL(add_tempStatus()), this, SLOT(setup_tempStatus()));
+
+   connect(this, SIGNAL(add_reconfigure()), this, SLOT(setup_reconfigure()));
 
    connect(this, SIGNAL(add_shutter()), this, SLOT(setup_shutter()));
 
@@ -183,6 +193,7 @@ void camera::subscribe()
    if(!m_parent) return;
    
    m_parent->addSubscriberProperty((multiIndiSubscriber *) this, m_camName, "fsm");
+   m_parent->addSubscriberProperty((multiIndiSubscriber *) this, m_camName, "reconfigure");
    m_parent->addSubscriberProperty((multiIndiSubscriber *) this, m_darkName, "start");
 
    m_parent->addSubscriber(ui_fsmState);
@@ -290,6 +301,14 @@ void camera::handleSetProperty( const pcf::IndiProperty & ipRecv)
          }
       }
    
+      if(ipRecv.getName() == "reconfigure")
+      {
+         if(!ui_shutterStatus)
+         {
+            emit add_reconfigure();
+         }
+      }
+
       if(ipRecv.getName() == "shutter")
       {
          if(!ui_shutterStatus)
@@ -462,6 +481,29 @@ void camera::setup_tempStatus()
    m_parent->addSubscriber(ui_tempStatus);
 }
 
+void camera::setup_reconfigure()
+{
+   ui_reconfigure = new QPushButton(this);
+   ui_reconfigure->setObjectName(QString::fromUtf8("reconfigure"));
+   ui_reconfigure->setText("reconfigure");
+   ui_reconfigure->setMaximumWidth(200);
+   connect(ui_reconfigure, SIGNAL(pressed()), this, SLOT(reconfigure()));
+   ui.grid->addWidget(ui_reconfigure, 3, 0, 1, 1, Qt::AlignHCenter);   
+
+}
+
+void camera::reconfigure()
+{
+   pcf::IndiProperty ipFreq(pcf::IndiProperty::Switch);
+   
+   ipFreq.setDevice(m_camName);
+   ipFreq.setName("reconfigure");
+   ipFreq.add(pcf::IndiElement("request"));
+   ipFreq["request"].setSwitchState(pcf::IndiElement::On);
+    
+   sendNewProperty(ipFreq);   
+}
+
 void camera::setup_shutter()
 {
    ui_shutterStatus = new shutterStatus(m_camName, this);
@@ -571,9 +613,10 @@ void camera::setup_takeDarks()
 {
    ui_takeDarks = new QPushButton(this);
    ui_takeDarks->setObjectName(QString::fromUtf8("takeDarks"));
-   ui_takeDarks->setText("take dark");
+   ui_takeDarks->setText("take darks");
+   ui_takeDarks->setMaximumWidth(200);
    connect(ui_takeDarks, SIGNAL(pressed()), this, SLOT(takeDark()));
-   ui.grid->addWidget(ui_takeDarks, 8, 0, 1, 1);   
+   ui.grid->addWidget(ui_takeDarks, 8, 0, 1, 1,Qt::AlignHCenter);   
 
 }
 
