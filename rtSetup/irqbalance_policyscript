@@ -8,7 +8,7 @@
 # Driver names are actually patterns, i.e. enx matches enx2cfda1c6db1a.
 
 declare -a drivers=(
-    edt enx nvidia cp2x72c
+    edt enx cp2x72c
 )
 
 for driverPattern in edt enx nvidia cp2x72c; do
