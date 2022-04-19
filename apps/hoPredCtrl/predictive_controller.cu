@@ -156,7 +156,7 @@ namespace DDSPC
 		m_wfs_measurement->to_gpu();
 		
 		m_interaction_matrix->dot(m_wfs_measurement, m_measurement);
-
+		
 		// Add data to controller
 		controller->add_measurement(m_measurement);
 	};
@@ -171,7 +171,6 @@ namespace DDSPC
 		// Determine the command vector
 		m_command = controller->get_new_control_command(clip_val, m_exploration_signal);
 
-		// We need to add a modal coefficients to actuators mapping here.
 		m_mode_mapping_matrix->dot(m_command, m_voltages);
 		m_voltages->to_cpu();
 
