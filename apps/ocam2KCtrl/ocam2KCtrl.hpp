@@ -111,6 +111,8 @@ protected:
        
    long m_lastImageNumber {-1};  ///< The last image number, saved from the last loop through.
 
+   int m_framesSkipped {0};
+
    bool m_protectionReset {false}; ///< Flag indicating that protection has been reset at least once.
    
    unsigned m_protectionResetConfirmed {0}; ///< Counter indicating the number of times that the protection reset has been requested within 10 seconds, for confirmation.
@@ -519,6 +521,12 @@ int ocam2KCtrl::appLogic()
 
    if( state() == stateCodes::READY || state() == stateCodes::OPERATING )
    {
+
+      if(m_framesSkipped)
+      {
+         log<text_log>("FRAMES SKIPPED -- RECONFIGURE", logPrio::LOG_ERROR);
+      }
+
       //Get a lock if we can
       std::unique_lock<std::mutex> lock(m_indiMutex, std::try_to_lock);
 
@@ -1090,6 +1098,9 @@ int ocam2KCtrl::configureAcquisition()
    m_height = OCAM_SZ;
    m_dataType = _DATATYPE_UINT16;
    
+   if(m_framesSkipped == 1) m_framesSkipped = 2; //This means frame skip detected
+   else if(m_framesSkipped == 2) m_framesSkipped = 0; //This means user requested reconfig after frame skip detected.
+
    state(stateCodes::OPERATING);
    
    return 0;
@@ -1150,10 +1161,10 @@ int ocam2KCtrl::acquireAndCheckValid()
             
 	    // and go on and try to use it.
 	    //
-            //m_nextMode = m_modeName;
-            //m_reconfig = 1;
-           
-            //return 1;
+            m_nextMode = m_modeName;
+            m_reconfig = 1;
+            m_framesSkipped = 1;
+            return 1;
             
          }
          else //but if it's any bigger or < 0, it's probably garbage
@@ -1166,7 +1177,7 @@ int ocam2KCtrl::acquireAndCheckValid()
       
             //Reset the counters.
             m_lastImageNumber = -1;
-            
+            m_framesSkipped = 1;
             return 1;
          
          }

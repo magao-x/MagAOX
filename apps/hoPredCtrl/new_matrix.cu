@@ -230,6 +230,7 @@ void Matrix::to_file(std::string filename){
 }
 
 
+
 Matrix* make_identity_matrix(float value, int size, int batch_size){
 	
 	Matrix* new_matrix = new Matrix(0.0, size, size, batch_size);

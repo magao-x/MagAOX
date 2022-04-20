@@ -36,6 +36,7 @@ class Matrix{
 		void set_to_zero();
 		void divide_by_scalar(Matrix* scalar, Matrix* out=nullptr);
 		
+		void transpose();
 		/*
 		// Data manipulations functions
 		// I/O functions
@@ -50,7 +51,6 @@ class Matrix{
 		void add(Matrix* other, float value=1);
 		void subtract(Matrix* other, float value=-1);
 		void scale(float scale_param);
-		void to_file(std::string filename);
 		
 		void print(bool print_gpu);
 		
@@ -81,6 +81,10 @@ class Matrix{
 		// Data transfer commands
 		void to_gpu();
 		void to_cpu();
+
+		//
+		void to_file(std::string filename);
+		void from_file(std::string filename);
 
 };
 
