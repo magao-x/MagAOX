@@ -282,6 +282,11 @@ int usbtempMon::appLogic()
       checkConnections();
    }
    
+   if(state() == stateCodes::CONNECTED)
+   {
+      state(stateCodes::OPERATING);
+   }
+   
    if(telemeter<usbtempMon>::appLogic() < 0)
    {
       log<software_error>({__FILE__, __LINE__});
@@ -374,7 +379,7 @@ int usbtempMon::checkConnections()
       }
    }
    
-   if(nconn) state(stateCodes::CONNECTED);
+   if(nconn && state()!=stateCodes::OPERATING) state(stateCodes::CONNECTED);
    else state(stateCodes::NOTCONNECTED);
    
    return 0;
