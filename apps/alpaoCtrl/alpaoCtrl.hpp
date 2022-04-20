@@ -58,10 +58,12 @@ protected:
    
    std::string m_serialNumber; ///< The ALPAO serial number used to find the default config directory.
    
+   long m_satThresh {100} ;///< Threshold above which to log saturation.
+
    ///@}
 
 
-   size_t m_nsat {0};
+   unsigned m_nsat {0};
 
 
 public:
@@ -202,6 +204,8 @@ alpaoCtrl::~alpaoCtrl() noexcept
 void alpaoCtrl::setupConfig()
 {
    config.add("dm.serialNumber", "", "dm.serialNumber", argType::Required, "dm", "serialNumber", false, "string", "The ALPAO serial number used to find the default config directory.");
+   config.add("dm.satThresh", "", "dm.satThresh", argType::Required, "dm", "satThresh", false, "string", "Threshold above which to log saturation.");
+
    dev::dm<alpaoCtrl,float>::setupConfig(config);
    
 }
@@ -209,7 +213,8 @@ void alpaoCtrl::setupConfig()
 int alpaoCtrl::loadConfigImpl( mx::app::appConfigurator & _config )
 {
    config(m_serialNumber, "dm.serialNumber");
-   
+   config(m_satThresh, "dm.satThresh");
+
    m_calibRelDir = "dm/alpao_";
    
    std::string ser = mx::ioutils::toLower(m_serialNumber);
@@ -264,7 +269,7 @@ int alpaoCtrl::appLogic()
       return initDM();
    }
    
-   if(m_nsat > 0)
+   if(m_nsat > m_satThresh)
    {
       log<text_log>("Saturated actuators in last second: " + std::to_string(m_nsat), logPrio::LOG_WARNING);
    }
