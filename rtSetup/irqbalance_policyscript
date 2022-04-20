@@ -7,11 +7,7 @@
 #
 # Driver names are actually patterns, i.e. enx matches enx2cfda1c6db1a.
 
-declare -a drivers=(
-    edt enx nvidia cp2x72c
-)
-
-for driverPattern in edt enx nvidia cp2x72c; do
+for driverPattern in edt enx cp2x72c; do
     if [[ $(grep -e "^\s*$2" /proc/interrupts) == *"$driverPattern"* ]]; then
         echo "ban=true"
         # echo "banned rebalancing of $2 because driver matches $driverPattern" >> /tmp/irqbalance.log

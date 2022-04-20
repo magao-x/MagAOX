@@ -62,8 +62,10 @@ protected:
    
    std::string m_twRespMPath;
    
-   std::string m_dmChannel;
+   std::string m_dmChannel ;
    
+   std::string m_fpsSource {"camwfs"};
+   std::string m_navgSource {"dmtweeter-avg"};
    float m_gain {0.1};
    float m_leak {0.0};
    
@@ -71,12 +73,16 @@ protected:
    
    ///@}
 
-   
-   
    mx::improc::eigenImage<realT> m_twRespM;
    mx::improc::eigenImage<realT> m_tweeter;
    mx::improc::eigenImage<realT> m_woofer, m_wooferDelta;
    
+
+   float m_fps {0}; ///< Current FPS from the FPS source.
+   int m_navg {0}; ///< Current navg from the averager
+
+   float m_effFPS {0};
+
    IMAGE m_dmStream; 
    uint32_t m_dmWidth {0}; ///< The width of the image
    uint32_t m_dmHeight {0}; ///< The height of the image.
@@ -125,7 +131,7 @@ public:
      */
    virtual int appShutdown();
 
-   
+   int updateFPS();
    
    
    int allocate( const dev::shmimT & dummy /**< [in] tag to differentiate shmimMonitor parents.*/);
@@ -155,6 +161,14 @@ protected:
    
    INDI_NEWCALLBACK_DECL(t2wOffloader, m_indiP_zero);
    INDI_NEWCALLBACK_DECL(t2wOffloader, m_indiP_offloadToggle);
+
+   pcf::IndiProperty m_indiP_fpsSource;
+   INDI_SETCALLBACK_DECL(t2wOffloader, m_indiP_fpsSource);
+
+   pcf::IndiProperty m_indiP_navgSource;
+   INDI_SETCALLBACK_DECL(t2wOffloader, m_indiP_navgSource);
+
+   pcf::IndiProperty m_indiP_fps;
 };
 
 inline
@@ -168,7 +182,9 @@ void t2wOffloader::setupConfig()
 {
    shmimMonitorT::setupConfig(config);
    
-   
+   config.add("integrator.fpsSource", "", "integrator.fpsSource", argType::Required, "integrator", "fpsSource", false, "string", "Device name for getting fps of the loop.  This device should have *.fps.current.  Default is camwfs");
+   config.add("integrator.navgSource", "", "integrator.navgSource", argType::Required, "integrator", "navgSource", false, "string", "Device name for getting navg of tweeter-ave.  This device should have *.fps.current. Default is dmtweeter-avg.");
+
    config.add("offload.respMPath", "", "offload.respMPath", argType::Required, "offload", "respMPath", false, "string", "The path to the response matrix.");
    config.add("offload.channel", "", "offload.channel", argType::Required, "offload", "channel", false, "string", "The DM channel to offload to.");
    
@@ -184,6 +200,9 @@ int t2wOffloader::loadConfigImpl( mx::app::appConfigurator & _config )
    
    shmimMonitorT::loadConfig(_config);
    
+   _config(m_fpsSource, "integrator.fpsSource");
+   _config(m_navgSource, "integrator.navgSource");
+
    _config(m_twRespMPath, "offload.respMPath");
    _config(m_dmChannel, "offload.channel");
    _config(m_gain, "offload.gain");
@@ -211,6 +230,7 @@ inline
 int t2wOffloader::appStartup()
 {
    
+
    createStandardIndiNumber<float>( m_indiP_gain, "gain", 0, 1, 0, "%0.2f");
    m_indiP_gain["current"] = m_gain;
    m_indiP_gain["target"] = m_gain;
@@ -261,6 +281,17 @@ int t2wOffloader::appStartup()
       return -1;
    }
    
+   REG_INDI_SETPROP(m_indiP_fpsSource, m_fpsSource, std::string("fps"));
+   REG_INDI_SETPROP(m_indiP_navgSource, m_navgSource, std::string("nAverage"));
+
+   createROIndiNumber(m_indiP_fps, "fps");
+   m_indiP_fps.add(pcf::IndiElement("current"));
+   if( registerIndiPropertyReadOnly( m_indiP_fps ) < 0)
+   {
+      log<software_error>({__FILE__,__LINE__});
+      return -1;
+   }
+
    state(stateCodes::OPERATING);
     
    return 0;
@@ -293,6 +324,19 @@ int t2wOffloader::appShutdown()
    
    
    return 0;
+}
+
+inline
+int t2wOffloader::updateFPS()
+{
+   if(m_navg < 1)
+   {
+      m_effFPS = 0;
+   }
+   else m_effFPS = m_fps/m_navg;
+   updateIfChanged(m_indiP_fps, "current", m_effFPS);
+
+   std::cerr << "Effective FPS: " << m_effFPS << "\n";
 }
 
 inline
@@ -548,6 +592,60 @@ INDI_NEWCALLBACK_DEFN(t2wOffloader, m_indiP_offloadToggle )(const pcf::IndiPrope
       return 0;
    }
    
+   return 0;
+}
+
+INDI_SETCALLBACK_DEFN( t2wOffloader, m_indiP_fpsSource )(const pcf::IndiProperty &ipRecv)
+{
+   if( ipRecv.getName() != m_indiP_fpsSource.getName())
+   {
+      log<software_error>({__FILE__, __LINE__, "Invalid INDI property."});
+      return -1;
+   }
+   
+   if( ipRecv.find("current") != true ) //this isn't valie
+   {
+      return 0;
+   }
+   
+   std::lock_guard<std::mutex> guard(m_indiMutex);
+
+   realT fps = ipRecv["current"].get<float>();
+   
+   if(fps != m_fps)
+   {
+      m_fps = fps;
+      std::cout << "Got fps: " << m_fps << "\n";   
+      updateFPS();
+   }
+
+   return 0;
+}
+
+INDI_SETCALLBACK_DEFN( t2wOffloader, m_indiP_navgSource )(const pcf::IndiProperty &ipRecv)
+{
+   if( ipRecv.getName() != m_indiP_navgSource.getName())
+   {
+      log<software_error>({__FILE__, __LINE__, "Invalid INDI property."});
+      return -1;
+   }
+   
+   if( ipRecv.find("current") != true ) //this isn't valie
+   {
+      return 0;
+   }
+   
+   std::lock_guard<std::mutex> guard(m_indiMutex);
+
+   realT navg = ipRecv["current"].get<float>();
+   
+   if(navg != m_navg)
+   {
+      m_navg = navg;
+      std::cout << "Got navg: " << m_navg << "\n";   
+      updateFPS();
+   }
+
    return 0;
 }
 

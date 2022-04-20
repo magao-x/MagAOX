@@ -445,7 +445,8 @@ int userGainCtrl::getAOCalib()
    fin.open(calsrc);
    if(!fin)
    {
-      return log<software_error, -1>({__FILE__, __LINE__, errno, "userGainCtrl::getAOCalib failed to open: " + calsrc});
+      return 0; //this can hapapend if cacao not started up, etc.
+//      return log<software_error, -1>({__FILE__, __LINE__, errno, "userGainCtrl::getAOCalib failed to open: " + calsrc});
    }
    fin >> calsrc;
    fin.close();

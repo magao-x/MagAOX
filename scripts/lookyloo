@@ -243,7 +243,7 @@ def do_quicklook_for_camera(span, data_root, device, omit_telemetry, output_dir,
     new_matching_files = matching_files - all_visited_files
     if len(new_matching_files):
         log.debug(f"Matching files:")
-        for fn in matching_files:
+        for fn in sorted(matching_files, key=lambda x: x.timestamp):
             if fn in new_matching_files:
                 log.debug(f"\tmatched: {fn} (new)")
             else:
@@ -262,7 +262,7 @@ def convert_xrif(base_dir, paths : typing.List[TimestampedFile], destination_pat
     failed_commands = []
     for ts_path in paths:
         args = [
-            'xrif2fits',
+            os.environ.get('XRIF2FITS_EXE', 'xrif2fits'),
             '-d', str(base_dir),
             '-f', ts_path.path.name,
         ]
@@ -276,19 +276,21 @@ def convert_xrif(base_dir, paths : typing.List[TimestampedFile], destination_pat
         ])
         command_line = " ".join(args)
         if not dry_run:
+            log.debug(f"Launching: {command_line}")
             try:
-                subprocess.check_call(
+                proc = subprocess.Popen(
                     args,
                     stdout=subprocess.DEVNULL,
-                    stderr=subprocess.DEVNULL,
-                    timeout=60
+                    stderr=subprocess.DEVNULL
                 )
+                proc.wait(timeout=60)
             except subprocess.CalledProcessError as e:
                 log.exception("xrif2fits exited with nonzero exit code")
                 failed_commands.append(command_line)
             except subprocess.TimeoutExpired as e:
                 log.exception("xrif2fits canceled after timeout")
                 failed_commands.append(command_line)
+                proc.kill()
         else:
             log.debug(f"dry run: {command_line}")
     if len(failed_commands):
@@ -343,7 +345,6 @@ def main():
     parser.add_argument('-D', '--output-dir', help=f"output directory, defaults to {QUICKLOOK_PATH.as_posix()}", action='store', default=QUICKLOOK_PATH.as_posix())
     args = parser.parse_args()
     logging.basicConfig(level='DEBUG' if args.verbose or args.dry_run else 'INFO')
-    print(args)
     if args.camera is not None:
         cameras = args.camera
     else:

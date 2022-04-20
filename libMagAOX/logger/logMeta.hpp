@@ -12,7 +12,7 @@
 #define logger_logMeta_hpp
 
 #include <mx/ioutils/fits/fitsHeaderCard.hpp>
-#define HARD_EXIT
+//#define HARD_EXIT
 #include "logMap.hpp"
 
 namespace MagAOX

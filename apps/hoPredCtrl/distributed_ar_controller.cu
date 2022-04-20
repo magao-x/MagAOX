@@ -71,6 +71,12 @@ DistributedAutoRegressiveController::DistributedAutoRegressiveController(cublasH
 	std::cout << "invH11, controller and full controller" << std::endl;
 	invH11sub = new Matrix(0.0, 1, 1, nmodes);
 	controller = new Matrix(0.0, 1, nfeatures - nfuture, nmodes);
+	
+	// Initialize controller with an integrator
+	for(int i=0; i <nmodes; i++)
+		controller->set(-0.15, 0, nhistory-1, i);
+	controller->to_gpu();
+
 	full_controller = new Matrix(0.0, nfuture, nfeatures - nfuture, nmodes);
 
 	newest_measurement = nullptr;
@@ -282,6 +288,10 @@ void DistributedAutoRegressiveController::set_new_regularization(float* new_lamb
 	// Setup the condition matrix	
 	cpu_full_copy(lambda, new_lambda);
 	copy_to_identity_matrix(condition_matrix, lambda, nfuture, nmodes);
+	
+	// We used a new regularization parameter, so update the controller!
+	// This can then be used to adapt to noisy measurements.
+	update_controller();
 }
 
 __global__ void clip_array(float* x, float clip_value, int n){
