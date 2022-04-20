@@ -827,7 +827,7 @@ int tcsInterface::appLogic()
          return 0;
       }
       
-      log<text_log>("In state ERROR, but connected.  Trying to continue.", logPrio::LOG_ERROR);
+      log<text_log>("In state ERROR, but connected.  Trying to continue.", logPrio::LOG_WARNING);
 
       state(stateCodes::CONNECTED);
    }
@@ -877,46 +877,40 @@ int tcsInterface::appLogic()
    {
       std::string response;
       
+      //If any of these are unsuccesful we go around without recording data.
       if(getTelTime() < 0)
       {
-         log<text_log>("Error from getTelTime", logPrio::LOG_ERROR);
          return 0; //app state will be set based on what the error was
       }
 
       if(getTelPos() < 0)
       {
-         log<text_log>("Error from getTelPos", logPrio::LOG_ERROR);
          return 0; //app state will be set based on what the error was
       }
       
       if(getTelData() < 0)
       {
-         log<text_log>("Error from getTelData", logPrio::LOG_ERROR);
          return 0;
       }
       
       if(getCatData() < 0)
       {
-         log<text_log>("Error from getCatData", logPrio::LOG_ERROR);
          return 0;
       }
       
       if(getVaneData() < 0)
       {
-         log<text_log>("Error from getVaneData", logPrio::LOG_ERROR);
          return 0;
       }
       
       if(getEnvData() < 0)
       {
-         log<text_log>("Error from getEnvData", logPrio::LOG_ERROR);
          return 0;
       }
       
 
       /*if(getSeeing() < 0)
       {
-         log<text_log>("Error from getSeeing", logPrio::LOG_ERROR);
          return 0;
       }*/
       
@@ -1148,20 +1142,20 @@ int tcsInterface::getTelTime()
    if(pdat[0] == "-1")
    {
       state(stateCodes::ERROR);
-      log<text_log>("Error getting telescope time (datetime): TCS returned -1", logPrio::LOG_ERROR);
+      log<text_log>("Error getting telescope time (datetime): TCS returned -1", logPrio::LOG_WARNING);
       return -1;
    }
 
    if(pdat.size() != 3)
    {
       state(stateCodes::ERROR);
-      log<text_log>("Error getting telescope position (datetime): TCS response wrong size, returned " + std::to_string(pdat.size()) + " values", logPrio::LOG_ERROR);
+      log<text_log>("Error getting telescope position (datetime): TCS response wrong size, returned " + std::to_string(pdat.size()) + " values", logPrio::LOG_WARNING);
       return -1;
    }
 
    if(parse_xms(h,m,s,pdat[2]) != 0)
    {
-      log<text_log>("Error parsing telescope ST", logPrio::LOG_ERROR);
+      log<text_log>("Error parsing telescope ST", logPrio::LOG_WARNING);
       return -1;
    }
 
@@ -1190,20 +1184,20 @@ int tcsInterface::getTelPos()
    if(pdat[0] == "-1")
    {
       state(stateCodes::ERROR);
-      log<text_log>("Error getting telescope position (telpos): TCS returned -1", logPrio::LOG_ERROR);
+      log<text_log>("Error getting telescope position (telpos): TCS returned -1", logPrio::LOG_WARNING);
       return -1;
    }
 
    if(pdat.size() != 6)
    {
       state(stateCodes::ERROR);
-      log<text_log>("Error getting telescope position (telpos): TCS response wrong size, returned " + std::to_string(pdat.size()) +  " values", logPrio::LOG_ERROR);
+      log<text_log>("Error getting telescope position (telpos): TCS response wrong size, returned " + std::to_string(pdat.size()) +  " values", logPrio::LOG_WARNING);
       return -1;
    }
 
    if(parse_xms(h,m,s,pdat[0]) != 0)
    {
-      log<text_log>("Error parsing telescope RA", logPrio::LOG_ERROR);
+      log<text_log>("Error parsing telescope RA", logPrio::LOG_WARNING);
       return -1;
    }
 
@@ -1211,7 +1205,7 @@ int tcsInterface::getTelPos()
 
    if(parse_xms(h,m,s,pdat[1]) != 0)
    {
-      log<text_log>("Error parsing telescope Dec", logPrio::LOG_ERROR);
+      log<text_log>("Error parsing telescope Dec", logPrio::LOG_WARNING);
       return -1;
    }
    
@@ -1223,7 +1217,7 @@ int tcsInterface::getTelPos()
 
    if(parse_xms( h, m, s, pdat[3]) != 0)
    {
-      log<text_log>("Error parsing telescope HA", logPrio::LOG_ERROR);
+      log<text_log>("Error parsing telescope HA", logPrio::LOG_WARNING);
       return -1;
    }
 
@@ -1261,14 +1255,14 @@ int tcsInterface::getTelData()
    if(tdat[0] == "-1")
    {
       state(stateCodes::ERROR);
-      log<text_log>("Error getting telescope data (teldata): TCS returned -1", logPrio::LOG_ERROR);
+      log<text_log>("Error getting telescope data (teldata): TCS returned -1", logPrio::LOG_WARNING);
       return -1;
    }
 
    if(tdat.size() != 10)
    {
       state(stateCodes::ERROR);
-      log<text_log>("[TCS] Error getting telescope data (teldata): TCS response wrong size, returned " + std::to_string(tdat.size()) +  " values", logPrio::LOG_ERROR);
+      log<text_log>("[TCS] Error getting telescope data (teldata): TCS response wrong size, returned " + std::to_string(tdat.size()) +  " values", logPrio::LOG_WARNING);
       return -1;
    }
 
@@ -1331,7 +1325,7 @@ int tcsInterface::getCatData()
    if(cdat[0] == "-1")
    {
       state(stateCodes::ERROR);
-      log<text_log>("Error getting catalog data (catdata): TCS returned -1", logPrio::LOG_ERROR);
+      log<text_log>("Error getting catalog data (catdata): TCS returned -1", logPrio::LOG_WARNING);
       return -1;
    }
 
@@ -1356,7 +1350,7 @@ int tcsInterface::getCatData()
 
    if(parse_xms(h,m,s,cdat[0]) != 0)
    {
-      log<text_log>("Error parsing catalog RA", logPrio::LOG_ERROR);
+      log<text_log>("Error parsing catalog RA", logPrio::LOG_WARNING);
       return -1;
    }
 
@@ -1364,7 +1358,7 @@ int tcsInterface::getCatData()
    
    if(parse_xms(h,m,s,  cdat[1] ) != 0)
    {
-      log<text_log>("Error parsing catalog Dec", logPrio::LOG_ERROR);
+      log<text_log>("Error parsing catalog Dec", logPrio::LOG_WARNING);
       return -1;
    }
    
@@ -1399,14 +1393,14 @@ int tcsInterface::getVaneData()
    if(vedat[0] == "-1")
    {
       state(stateCodes::ERROR);
-      log<text_log>("Error getting telescope secondary positions (vedata): TCS returned -1",logPrio::LOG_ERROR);
+      log<text_log>("Error getting telescope secondary positions (vedata): TCS returned -1",logPrio::LOG_WARNING);
       return -1;
    }
 
    if(vedat.size() != 10)
    {
       state(stateCodes::ERROR);
-      log<text_log>("Error getting telescope secondary positions (vedata): TCS response wrong size, returned " + std::to_string(vedat.size()) +  " values",logPrio::LOG_ERROR);
+      log<text_log>("Error getting telescope secondary positions (vedata): TCS response wrong size, returned " + std::to_string(vedat.size()) +  " values",logPrio::LOG_WARNING);
       return -1;
    }
 
@@ -1448,14 +1442,14 @@ int tcsInterface::getEnvData()
    if(edat[0] == "-1")
    {
       state(stateCodes::NOTCONNECTED);
-      log<text_log>("Error getting telescope environment data (telenv): TCS returned -1",logPrio::LOG_ERROR);
+      log<text_log>("Error getting telescope environment data (telenv): TCS returned -1",logPrio::LOG_WARNING);
       return -1;
    }
    
    if(edat.size() != 10)
    {
       state(stateCodes::NOTCONNECTED);
-      log<text_log>("Error getting telescope environment data (telenv): TCS response wrong size, returned " + std::to_string(edat.size()) +  "values",logPrio::LOG_ERROR);
+      log<text_log>("Error getting telescope environment data (telenv): TCS response wrong size, returned " + std::to_string(edat.size()) +  "values",logPrio::LOG_WARNING);
       return -1;      
    }
 
@@ -1629,6 +1623,26 @@ int tcsInterface::updateINDI()
    try
    {
       m_indiP_teltime["sidereal_time"] = m_telST;
+   }
+   catch(...)
+   {
+      log<software_error>({__FILE__,__LINE__,"INDI library exception"});
+      return -1;
+   }
+
+   try
+   {
+      m_indiP_teltime.setState(INDI_OK);
+   }
+   catch(...)
+   {
+      log<software_error>({__FILE__,__LINE__,"INDI library exception"});
+      return -1;
+   }
+
+   try
+   {
+      m_indiDriver->sendSetProperty(m_indiP_teltime);
    }
    catch(...)
    {
