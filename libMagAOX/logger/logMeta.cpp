@@ -133,7 +133,6 @@ std::string logMeta::value( logMap & lm,
       if(vs == m_invalidValue)
       {
          std::cerr << __FILE__ << " " << __LINE__ << " valueString returned invalid value\n";
-         exit(-1);
       } 
       #endif
       return vs;
@@ -373,7 +372,8 @@ std::string logMeta::valueString( logMap & lm,
       {
          #ifdef HARD_EXIT 
          std::cerr << __FILE__ << " " << __LINE__ << "\n";
-         //exit(-1);
+         
+         exit(-1);
          #endif
          val = m_invalidValue;
       }
