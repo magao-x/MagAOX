@@ -19,8 +19,7 @@ unsigned long long rdtsc();
 
 __global__ void divide_scalar_gpu(float* x, float* y, float* z, int element_size, int batch_size);
 __global__ void gpu_print_buffer(float* data, int batch_count, int nrow, int ncol, int row_max=-1, int col_max=-1);
-void print_batch_buffer(float* data, int batch_count, int nrow, int ncol);
-
+void print_batch_buffer(float** data, int batch_count, int nrow, int ncol);
 void check_cuda_error(cudaError_t cudaerr);
 
 /*

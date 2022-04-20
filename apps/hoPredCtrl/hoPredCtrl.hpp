@@ -96,6 +96,8 @@ protected:
 	std::string m_interaction_matrix_filename; 	// aol1_modesWFS.fits in cacao
 	std::string m_mapping_matrix_filename; 		// aol1_DMmodes.fits
 	std::string m_refWavefront_filename;		// aol1_wfsref.fits 
+	uint64_t loading_timestamp;
+
 	// std::string m_actuator_mask_filename;		// 
 	
 	// IMAGE m_dmStream; 
@@ -181,11 +183,15 @@ protected:
 	bool m_dmOpened {false};
 	bool m_dmRestart {false};
 
+	std::string savepath;
 
 	pcf::IndiProperty m_indiP_controlToggle;
 	pcf::IndiProperty m_indiP_predictorToggle;
 	pcf::IndiProperty m_indiP_reset_bufferRequest;
 	pcf::IndiProperty m_indiP_reset_modelRequest;
+	pcf::IndiProperty m_indiP_reset_cleanRequest;
+
+	pcf::IndiProperty m_indiP_updateControllerRequest;
 
 	pcf::IndiProperty m_indiP_learningSteps;
 	pcf::IndiProperty m_indiP_learningIterations;
@@ -193,6 +199,10 @@ protected:
 	pcf::IndiProperty m_indiP_explorationSteps;
 	pcf::IndiProperty m_indiP_reset_exploreRequest;
 	pcf::IndiProperty m_indiP_zeroRequest;
+	
+	pcf::IndiProperty m_indiP_saveRequest;
+	pcf::IndiProperty m_indiP_loadRequest;
+	pcf::IndiProperty m_indiP_timestamp;
 
 	// The control parameters
 	pcf::IndiProperty m_indiP_lambda;
@@ -220,8 +230,13 @@ protected:
 	INDI_NEWCALLBACK_DECL(hoPredCtrl, m_indiP_controlToggle);
 	INDI_NEWCALLBACK_DECL(hoPredCtrl, m_indiP_reset_bufferRequest);
     INDI_NEWCALLBACK_DECL(hoPredCtrl, m_indiP_reset_modelRequest);
+	INDI_NEWCALLBACK_DECL(hoPredCtrl, m_indiP_reset_cleanRequest);
+	INDI_NEWCALLBACK_DECL(hoPredCtrl, m_indiP_updateControllerRequest);
 	INDI_NEWCALLBACK_DECL(hoPredCtrl, m_indiP_reset_exploreRequest);
 	INDI_NEWCALLBACK_DECL(hoPredCtrl, m_indiP_zeroRequest);
+	INDI_NEWCALLBACK_DECL(hoPredCtrl, m_indiP_saveRequest);
+	INDI_NEWCALLBACK_DECL(hoPredCtrl, m_indiP_loadRequest);
+	INDI_NEWCALLBACK_DECL(hoPredCtrl, m_indiP_timestamp);
 	
 
 	// Control parameters
@@ -432,12 +447,30 @@ int hoPredCtrl::appStartup()
 
 	createStandardIndiRequestSw( m_indiP_reset_modelRequest, "reset_model", "Reset the RLS model", "Loop Controls");
 	registerIndiPropertyNew( m_indiP_reset_modelRequest, INDI_NEWCALLBACK(m_indiP_reset_modelRequest) ); 
+	
+	createStandardIndiRequestSw( m_indiP_reset_cleanRequest, "clean", "Clean the complete model.", "Loop Controls");
+	registerIndiPropertyNew( m_indiP_reset_cleanRequest, INDI_NEWCALLBACK(m_indiP_reset_cleanRequest) ); 
+
+	createStandardIndiRequestSw( m_indiP_updateControllerRequest, "calc_controller", "Update the controller.", "Loop Controls");
+	registerIndiPropertyNew( m_indiP_updateControllerRequest, INDI_NEWCALLBACK(m_indiP_updateControllerRequest) ); 
 
 	createStandardIndiRequestSw( m_indiP_reset_exploreRequest, "reset_exploration", "Reset the exploration model", "Loop Controls");
 	registerIndiPropertyNew( m_indiP_reset_exploreRequest, INDI_NEWCALLBACK(m_indiP_reset_exploreRequest) ); 
 
 	createStandardIndiRequestSw( m_indiP_zeroRequest, "zero", "Zero the dm", "Loop Controls");
 	registerIndiPropertyNew( m_indiP_zeroRequest, INDI_NEWCALLBACK(m_indiP_zeroRequest) ); 
+
+	createStandardIndiRequestSw( m_indiP_saveRequest, "save", "Save the controller", "Loop Controls");
+	registerIndiPropertyNew( m_indiP_saveRequest, INDI_NEWCALLBACK(m_indiP_saveRequest) ); 
+
+	createStandardIndiRequestSw( m_indiP_loadRequest, "load", "Load the controller", "Loop Controls");
+	registerIndiPropertyNew( m_indiP_loadRequest, INDI_NEWCALLBACK(m_indiP_loadRequest) ); 
+	
+	createStandardIndiNumber<uint64_t>( m_indiP_timestamp, "timestamp", -1, 20000000000000000, 1, "%d", "Timestamp", "Loading the controller");
+	registerIndiPropertyNew( m_indiP_timestamp, INDI_NEWCALLBACK(m_indiP_timestamp) );  
+
+	createStandardIndiNumber<int>( m_indiP_learningSteps, "learning_steps", -1, 200000, 1, "%d", "Learning Steps", "Learning control");
+	registerIndiPropertyNew( m_indiP_learningSteps, INDI_NEWCALLBACK(m_indiP_learningSteps) );  
 
 	createStandardIndiNumber<int>( m_indiP_learningSteps, "learning_steps", -1, 200000, 1, "%d", "Learning Steps", "Learning control");
 	registerIndiPropertyNew( m_indiP_learningSteps, INDI_NEWCALLBACK(m_indiP_learningSteps) );  
@@ -702,6 +735,7 @@ int hoPredCtrl::allocate(const dev::shmimT & dummy)
 
 	average_pupil_intensity = -100000.0;
 
+	savepath = "/data/users/xsup/PredCtrlData/"; 
 	return 0;
 }
 
@@ -799,32 +833,22 @@ int hoPredCtrl::processImage( void * curr_src, const dev::shmimT & dummy )
 			}
 
 			if(m_learning_counter == 0 && m_learning_iterations > 0){
-				// We need to overshoot the control?
-				// If we are done with this round of learning switch off the control loop.
-				m_is_closed_loop = false;
 				m_learning_iterations--;
+				m_learning_counter = m_learning_steps;
+
+				m_lambda /= 10.0;
+		
+				controller->set_zero(); 														// set current control to zero
+				zero();																			// set the DM shape to zero
+				controller->create_exploration_buffer(m_exploration_rms, m_exploration_steps);  // Make a new buffer
+				controller->set_new_regularization(m_lambda); 									// set a new regularization
+				controller->reset_data_buffer();												// remove the history
+
 			}
+			
 
 		}
 
-	}
-	
-	// If we are done learning for this iteration restart the learning but with a 10 times smaller lambda
-	// Okay this is not a great way yet to do this.... this needs to move up.
-	if(m_learning_counter == 0 && m_learning_iterations > 0){
-		m_learning_counter = m_learning_steps;
-		m_lambda /= 10.0;
-		
-		controller->set_zero(); 														// set current control to zero
-		zero();																			// set the DM shape to zero
-		controller->create_exploration_buffer(m_exploration_rms, m_exploration_steps);  // Make a new buffer
-		controller->set_new_regularization(m_lambda); 									// set a new regularization
-		controller->reset_data_buffer();												// remove the history
-		m_is_closed_loop = true;
-	}
-	
-	if(m_learning_iterations > 0){
-		m_is_closed_loop = true;
 	}
 
 	auto end = std::chrono::steady_clock::now();
@@ -1301,6 +1325,37 @@ INDI_NEWCALLBACK_DEFN(hoPredCtrl, m_indiP_intleak )(const pcf::IndiProperty &ipR
 	return 0;
 }
 
+
+INDI_NEWCALLBACK_DEFN(hoPredCtrl, m_indiP_timestamp )(const pcf::IndiProperty &ipRecv)
+{
+	if(ipRecv.getName() != m_indiP_timestamp.getName()){
+		log<software_error>({__FILE__,__LINE__, "wrong INDI property received."});
+		return -1;
+	}
+
+	uint64_t current = -1;
+	uint64_t target = -1;
+
+	if(ipRecv.find("current"))
+		current = ipRecv["current"].get<uint64_t>();
+
+	if(ipRecv.find("target"))
+		target = ipRecv["target"].get<uint64_t>();
+
+	if(target == -1) target = current;
+
+	if(target == -1)
+		return 0;
+
+	std::lock_guard<std::mutex> guard(m_indiMutex);
+
+	loading_timestamp = target;
+	updateIfChanged(m_indiP_timestamp, "target", loading_timestamp);
+
+	return 0;
+}
+
+
 INDI_NEWCALLBACK_DEFN(hoPredCtrl, m_indiP_controlToggle )(const pcf::IndiProperty &ipRecv)
 {
    if(ipRecv.getName() != m_indiP_controlToggle.getName())
@@ -1441,6 +1496,62 @@ INDI_NEWCALLBACK_DEFN(hoPredCtrl, m_indiP_reset_modelRequest )(const pcf::IndiPr
 }
 
 
+
+INDI_NEWCALLBACK_DEFN(hoPredCtrl, m_indiP_reset_cleanRequest )(const pcf::IndiProperty &ipRecv)
+{
+	if(ipRecv.getName() != m_indiP_reset_cleanRequest.getName())
+	{
+		log<software_error>({__FILE__, __LINE__, "invalid indi property received"});
+		return -1;
+	}
+
+	if(!ipRecv.find("request")) return 0;
+
+	if( ipRecv["request"].getSwitchState() == pcf::IndiElement::On)
+	{
+		std::lock_guard<std::mutex> guard(m_indiMutex);
+
+		// Regenerate the exploration buffer
+		controller->create_exploration_buffer(m_exploration_rms, m_exploration_steps);
+
+		// Reset the controller
+		controller->reset_controller();
+		controller->reset_data_buffer();	// Clear the data buffer
+
+		// Set the current DM shape and command to zero
+		zero();
+		controller->set_zero();
+
+		updateSwitchIfChanged(m_indiP_reset_cleanRequest, "request", pcf::IndiElement::Off, INDI_IDLE);
+	}
+   
+   return 0;
+}
+
+
+INDI_NEWCALLBACK_DEFN(hoPredCtrl, m_indiP_updateControllerRequest )(const pcf::IndiProperty &ipRecv)
+{
+	if(ipRecv.getName() != m_indiP_updateControllerRequest.getName())
+	{
+		log<software_error>({__FILE__, __LINE__, "invalid indi property received"});
+		return -1;
+	}
+
+	if(!ipRecv.find("request")) return 0;
+
+	if( ipRecv["request"].getSwitchState() == pcf::IndiElement::On)
+	{
+		std::lock_guard<std::mutex> guard(m_indiMutex);
+
+		// Regenerate the exploration buffer
+		controller->update_controller();
+		updateSwitchIfChanged(m_indiP_updateControllerRequest, "request", pcf::IndiElement::Off, INDI_IDLE);
+	}
+   
+   return 0;
+}
+
+
 INDI_NEWCALLBACK_DEFN(hoPredCtrl, m_indiP_zeroRequest )(const pcf::IndiProperty &ipRecv)
 {
 	if(ipRecv.getName() != m_indiP_zeroRequest.getName())
@@ -1462,6 +1573,45 @@ INDI_NEWCALLBACK_DEFN(hoPredCtrl, m_indiP_zeroRequest )(const pcf::IndiProperty 
 		}
 
 		updateSwitchIfChanged(m_indiP_zeroRequest, "request", pcf::IndiElement::Off, INDI_IDLE);
+	}
+   
+   return 0;
+}
+
+INDI_NEWCALLBACK_DEFN(hoPredCtrl, m_indiP_saveRequest )(const pcf::IndiProperty &ipRecv)
+{
+	if(ipRecv.getName() != m_indiP_saveRequest.getName())
+	{
+		log<software_error>({__FILE__, __LINE__, "invalid indi property received"});
+		return -1;
+	}
+
+	if(!ipRecv.find("request")) return 0;
+
+	if( ipRecv["request"].getSwitchState() == pcf::IndiElement::On)
+	{
+		controller->save_state(savepath);
+		updateSwitchIfChanged(m_indiP_saveRequest, "request", pcf::IndiElement::Off, INDI_IDLE);
+	}
+   
+   return 0;
+}
+
+
+INDI_NEWCALLBACK_DEFN(hoPredCtrl, m_indiP_loadRequest )(const pcf::IndiProperty &ipRecv)
+{
+	if(ipRecv.getName() != m_indiP_loadRequest.getName())
+	{
+		log<software_error>({__FILE__, __LINE__, "invalid indi property received"});
+		return -1;
+	}
+
+	if(!ipRecv.find("request")) return 0;
+
+	if( ipRecv["request"].getSwitchState() == pcf::IndiElement::On)
+	{
+		controller->load_state(savepath, std::to_string(loading_timestamp));
+		updateSwitchIfChanged(m_indiP_loadRequest, "request", pcf::IndiElement::Off, INDI_IDLE);
 	}
    
    return 0;
