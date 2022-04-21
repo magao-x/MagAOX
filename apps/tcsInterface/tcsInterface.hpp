@@ -2342,7 +2342,7 @@ int tcsInterface::acquireFromGuider()
       return -1;
    }
       
-   float z = 1400;
+   float z = m_acqFocus;
    snprintf(ttstr, sizeof(ttstr) , "zimr %f", z*m_pyrNudge_F_sign);
 
    log<text_log>(std::string("[ACQUIRE] ") + ttstr, logPrio::LOG_NOTICE);
