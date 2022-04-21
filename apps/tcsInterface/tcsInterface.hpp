@@ -292,6 +292,8 @@ public:
    int m_acqZdSign {-1};
    float m_acqAz0 {18.5};
    float m_acqEl0 {10};
+   float m_acqFocus{1400};
+
    int acquireFromGuider();
    
    pcf::IndiProperty m_indiP_acqFromGuider; ///< Property used to request a pyramid nudge
@@ -490,7 +492,8 @@ int tcsInterface::loadConfigImpl( mx::app::appConfigurator & _config )
    _config(m_acqZdSign, "acqFromGuider.zdSign");
    _config(m_acqAz0, "acqFromGuider.az0");
    _config(m_acqEl0, "acqFromGuider.el0");
-   
+   _config(m_acqFocus, "acqFromGuider.focus");
+
    _config(m_offlTT_avgInt, "offload.TT_avgInt");
    _config(m_offlTT_gain, "offload.TT_gain");
    _config(m_offlTT_thresh, "offload.TT_thresh");
@@ -2339,6 +2342,16 @@ int tcsInterface::acquireFromGuider()
       return -1;
    }
       
+   float z = 1400;
+   snprintf(ttstr, sizeof(ttstr) , "zimr %f", z*m_pyrNudge_F_sign);
+
+   log<text_log>(std::string("[ACQUIRE] ") + ttstr, logPrio::LOG_NOTICE);
+   if(sendMagTelCommand(ttstr, 1000) < 0)
+   {
+      log<software_error>({__FILE__,__LINE__, std::string("error sending command: ") + ttstr});
+      return -1;
+   }
+
    return 0;
 }
 
