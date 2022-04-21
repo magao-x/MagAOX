@@ -660,10 +660,6 @@ void camera::setEnableDisable(bool tf, bool all)
    
 }
 
-
-
-
-
 } //namespace xqt
    
 #include "moc_camera.cpp"
