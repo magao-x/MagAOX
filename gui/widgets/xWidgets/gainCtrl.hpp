@@ -84,6 +84,7 @@ public slots:
    void on_button_scale_pressed();
    void on_button_minus_pressed();
    void on_button_zero_pressed();
+   void on_slider_sliderReleased();
 
 protected:
      
@@ -331,6 +332,12 @@ void gainCtrl::on_button_zero_pressed()
 {
    if(m_ctrlType == GAIN) setGain(0.0);
    if(m_ctrlType == MULTCOEFF) setGain(1.0);
+}
+
+void gainCtrl::on_slider_sliderReleased()
+{
+   float newg = 1.0*ui.slider->value() / (1.0*ui.slider->maximum())*m_maxVal;
+   setGain(newg);
 }
 
 } //namespace xqt
