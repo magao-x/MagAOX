@@ -76,6 +76,7 @@ protected:
    
    int m_lz4accel {1};
    
+   bool m_compress {true};
    ///@}
    
    
@@ -312,6 +313,8 @@ void streamWriter::setupConfig()
    
    config.add("writer.cpuset", "", "writer.cpuset", argType::Required, "writer", "cpuset", false, "int", "The cpuset for the writer thread.");
    
+   config.add("writer.compress", "", "writer.compress", argType::Required, "writer", "compress", false, "bool", "Flag to set whether compression is used.  Default true.");
+
    config.add("writer.lz4accel", "", "writer.lz4accel", argType::Required, "writer", "lz4accel", false, "int", "The LZ4 acceleration parameter.  Larger is faster, but lower compression.");
    
    config.add("framegrabber.shmimName", "", "framegrabber.shmimName", argType::Required, "framegrabber", "shmimName", false, "int", "The name of the stream to monitor. From /tmp/shmimName.im.shm.");
@@ -336,6 +339,7 @@ void streamWriter::loadConfig()
    config(m_writeChunkLength, "writer.writeChunkLength");
    config(m_swThreadPrio, "writer.threadPrio");
    config(m_swCpuset, "writer.cpuset");
+   config(m_compress, "writer.compress");
    config(m_lz4accel, "writer.lz4accel");
    if(m_lz4accel < XRIF_LZ4_ACCEL_MIN) m_lz4accel = XRIF_LZ4_ACCEL_MIN;
    if(m_lz4accel > XRIF_LZ4_ACCEL_MAX) m_lz4accel = XRIF_LZ4_ACCEL_MAX;
@@ -417,8 +421,10 @@ int streamWriter::appStartup()
       return log<software_critical, -1>({__FILE__,__LINE__, "Write chunk length is not a divisor of circular buffer length."});
    }
    
+   
    if(initialize_xrif() < 0) log<software_critical,-1>({__FILE__, __LINE__});
    
+
    if(threadStart( m_fgThread, m_fgThreadInit, m_fgThreadID, m_fgThreadProp, m_fgThreadPrio, m_fgCpuset, "framegrabber", this, fgThreadStart)  < 0)
    {
       return log<software_critical,-1>({__FILE__, __LINE__});
@@ -428,7 +434,8 @@ int streamWriter::appStartup()
    {
       log<software_critical,-1>({__FILE__, __LINE__});
    }
-   
+  
+
    return 0;
 
 }
@@ -436,6 +443,7 @@ int streamWriter::appStartup()
 inline
 int streamWriter::appLogic()
 {
+
    //first do a join check to see if other threads have exited.
    //these will throw if the threads are really gone
    try
@@ -476,7 +484,7 @@ int streamWriter::appLogic()
    }
    
    updateINDI();
-   
+ 
    return 0;
 
 }
@@ -525,11 +533,24 @@ int streamWriter::initialize_xrif()
    {
       return log<software_critical, -1>({__FILE__,__LINE__, 0, rv, "xrif handle allocation or initialization error."});
    }
-  
-   rv = xrif_configure(m_xrif, XRIF_DIFFERENCE_PREVIOUS, XRIF_REORDER_BYTEPACK, XRIF_COMPRESS_LZ4);
-   if( rv != XRIF_NOERROR )
+
+   if(m_compress)
    {
-      return log<software_critical, -1>({__FILE__,__LINE__, 0, rv, "xrif handle configuration error."});
+      rv = xrif_configure(m_xrif, XRIF_DIFFERENCE_PREVIOUS, XRIF_REORDER_BYTEPACK, XRIF_COMPRESS_LZ4);
+      if( rv != XRIF_NOERROR )
+      {
+         return log<software_critical, -1>({__FILE__,__LINE__, 0, rv, "xrif handle configuration error."});
+      }
+   }
+   else
+   {
+      std::cerr << "not compressing . . . \n";
+      rv = xrif_configure(m_xrif, XRIF_DIFFERENCE_NONE, XRIF_REORDER_NONE, XRIF_COMPRESS_NONE);
+      if( rv != XRIF_NOERROR )
+      {
+         return log<software_critical, -1>({__FILE__,__LINE__, 0, rv, "xrif handle configuration error."});
+      }
+      
    }
  
    errno = 0;
@@ -659,10 +680,24 @@ inline
 int streamWriter::allocate_xrif()
 {   
    //Set up the image data xrif handle
-   xrif_error_t rv = xrif_configure(m_xrif, XRIF_DIFFERENCE_PREVIOUS, XRIF_REORDER_BYTEPACK, XRIF_COMPRESS_LZ4);
-   if( rv != XRIF_NOERROR )
+   xrif_error_t rv;
+   
+   if(m_compress)
    {
-      return log<software_critical,-1>({__FILE__,__LINE__, 0, rv, "xrif handle configuration error."});
+      rv = xrif_configure(m_xrif, XRIF_DIFFERENCE_PREVIOUS, XRIF_REORDER_BYTEPACK, XRIF_COMPRESS_LZ4);
+      if( rv != XRIF_NOERROR )
+      {
+         return log<software_critical,-1>({__FILE__,__LINE__, 0, rv, "xrif handle configuration error."});
+      }
+   }
+   else
+   {
+      std::cerr << "not compressing . . . \n";
+      rv = xrif_configure(m_xrif, XRIF_DIFFERENCE_NONE, XRIF_REORDER_NONE, XRIF_COMPRESS_NONE);
+      if( rv != XRIF_NOERROR )
+      {
+         return log<software_critical,-1>({__FILE__,__LINE__, 0, rv, "xrif handle configuration error."});
+      }
    }
    
    rv = xrif_set_size(m_xrif, m_width, m_height, 1, m_writeChunkLength, m_dataType);
@@ -729,6 +764,8 @@ void streamWriter::fgThreadExec()
        sleep(1);
    }
    
+   timespec missing_ts;
+
    IMAGE image;
    bool opened = false;
    
@@ -763,23 +800,16 @@ void streamWriter::fgThreadExec()
       
       if(m_shutdown || !opened) return;
     
-     /* --We are just using hard config-ed semaphores, no dynamic finding because it doesn't work in our version of CACAO
-      m_semaphoreNumber = 5; //get past the CACAO hard code.
-      int actSem = 1;
-      while(actSem == 1) //because it won't work.
-      {
-         m_semaphoreNumber = ImageStreamIO_getsemwaitindex(&image, m_semaphoreNumber); //ask for semaphore we had before
-         if(m_semaphoreNumber == -1)
-         {
-            log<software_critical>({__FILE__,__LINE__, "could not get semaphore index"});
-            return;
-         }
-         actSem = m_semaphoreNumber;
-      }
-      
-      log<software_info>({__FILE__,__LINE__, "got semaphore index " + std::to_string(m_semaphoreNumber) + " for " + m_shmimName });
-      */
+      m_semaphoreNumber = ImageStreamIO_getsemwaitindex(&image, m_semaphoreNumber); //ask for semaphore we had before
 
+      if(m_semaphoreNumber < 0)
+      {
+         log<software_critical>({__FILE__,__LINE__, "No valid semaphore found for " + m_shmimName + ". Source process will need to be restarted."});
+         return;
+      }
+
+      log<software_info>({__FILE__,__LINE__, "got semaphore index " + std::to_string(m_semaphoreNumber) + " for " + m_shmimName });
+      
       ImageStreamIO_semflush(&image, m_semaphoreNumber);
       
       sem = image.semptr[m_semaphoreNumber];
@@ -788,11 +818,20 @@ void streamWriter::fgThreadExec()
       m_typeSize = ImageStreamIO_typesize(m_dataType);
       m_width = image.md[0].size[0];
       m_height = image.md[0].size[1];
-      size_t length = image.md[0].size[2];
-
+      size_t length;
+      if(image.md[0].naxis == 3)
+      {
+         length = image.md[0].size[2];
+      }
+      else 
+      {
+         length = 1;
+      }
+      std::cerr << "connected" << " " << m_width << "x" << m_height << "x" << (int) m_dataType << " (" << m_typeSize << ")" <<  std::endl;
+   
       //Now allocate the circBuffs 
       if(allocate_circbufs() < 0) return; //will cause shutdown!
-      
+
       // And allocate the xrifs
       if(allocate_xrif() < 0) return; //Will cause shutdown!
 
@@ -822,7 +861,7 @@ void streamWriter::fgThreadExec()
          
          if(sem_timedwait(sem, &ts) == 0)
          {
-            if(image.md[0].size[2] > 0) ///\todo change to naxis?
+            if(image.md[0].naxis > 2) ///\todo change to naxis?
             {
                curr_image = image.md[0].cnt1;
             }
@@ -831,8 +870,15 @@ void streamWriter::fgThreadExec()
             atype = image.md[0].datatype;
             snx = image.md[0].size[0];
             sny = image.md[0].size[1];
-            snz = image.md[0].size[2];
-         
+            if(image.md[0].naxis == 3)
+            {
+               snz = image.md[0].size[2];
+            }
+            else
+            {
+               snz = 1;
+            }
+
             if( atype!= m_dataType || snx != m_width || sny != m_height || snz != length )
             {
                break; //exit the nearest while loop and get the new image setup.
@@ -840,13 +886,24 @@ void streamWriter::fgThreadExec()
          
             if(m_shutdown || m_restart) break; //Check for exit signals
          
-           
-            if( image.cntarray[curr_image] == last_cnt0 )
+            uint64_t new_cnt0;
+            if(image.cntarray)
+            {
+               new_cnt0 = image.cntarray[curr_image];
+            }
+            else
+            {
+               new_cnt0 = image.md[0].cnt0;
+            }
+
+            if(new_cnt0  == last_cnt0 )
             {
                log<text_log>("semaphore raised but cnt0 has not changed -- we're probably getting behind", logPrio::LOG_WARNING);
                continue;
             }
-            last_cnt0 = image.cntarray[curr_image];
+            
+            last_cnt0 = new_cnt0;
+                        
             
             char * curr_dest = m_rawImageCircBuff + m_currImage*m_width*m_height*m_typeSize;
             char * curr_src = (char *) image.array.raw + curr_image*m_width*m_height*m_typeSize;
@@ -854,12 +911,46 @@ void streamWriter::fgThreadExec()
             memcpy( curr_dest, curr_src , m_width*m_height*m_typeSize);
             
             uint64_t * curr_timing = m_timingCircBuff + 5*m_currImage;
-            curr_timing[0] = image.cntarray[curr_image];
-            curr_timing[1] = image.atimearray[curr_image].tv_sec;
-            curr_timing[2] = image.atimearray[curr_image].tv_nsec;
-            curr_timing[3] = image.writetimearray[curr_image].tv_sec;
-            curr_timing[4] = image.writetimearray[curr_image].tv_nsec;
-            
+
+            if(image.cntarray)
+            {
+               curr_timing[0] = image.cntarray[curr_image];
+               curr_timing[1] = image.atimearray[curr_image].tv_sec;
+               curr_timing[2] = image.atimearray[curr_image].tv_nsec;
+               curr_timing[3] = image.writetimearray[curr_image].tv_sec;
+               curr_timing[4] = image.writetimearray[curr_image].tv_nsec;
+            }
+            else
+            {
+               curr_timing[0] = image.md[0].cnt0;
+               curr_timing[1] = image.md[0].atime.tv_sec;
+               curr_timing[2] = image.md[0].atime.tv_nsec;
+               curr_timing[3] = image.md[0].writetime.tv_sec;
+               curr_timing[4] = image.md[0].writetime.tv_nsec;
+            }
+
+
+            //Check if we need to time-stamp ourselves -- for old cacao streams
+            if(curr_timing[1] == 0)
+            {
+         
+               if(clock_gettime(CLOCK_REALTIME, &missing_ts) < 0)
+               {
+                  log<software_critical>({__FILE__,__LINE__,errno,0,"clock_gettime"}); 
+                  return;
+               }
+
+               curr_timing[1] = missing_ts.tv_sec;
+               curr_timing[2] = missing_ts.tv_nsec;
+            }
+
+            //just set w-time to a-time if it's missing
+            if(curr_timing[3] == 0)
+            {
+               curr_timing[3] = curr_timing[1];
+               curr_timing[4] = curr_timing[2];
+            }
+
             if(m_shutdown && m_writing == WRITING) m_writing = STOP_WRITING;
             switch(m_writing)
             {
@@ -867,7 +958,7 @@ void streamWriter::fgThreadExec()
                   m_currChunkStart = m_currImage;
                   m_nextChunkStart = (m_currImage / m_writeChunkLength)*m_writeChunkLength;
                   m_writing = WRITING;
-                  m_currSaveStartFrameNo = image.cntarray[curr_image];
+                  m_currSaveStartFrameNo = new_cnt0;
                   m_logSaveStart = true;
                   // fall through
                case WRITING:
@@ -875,7 +966,7 @@ void streamWriter::fgThreadExec()
                   {  
                      m_currSaveStart = m_currChunkStart;
                      m_currSaveStop = m_nextChunkStart + m_writeChunkLength;
-                     m_currSaveStopFrameNo = image.cntarray[curr_image];
+                     m_currSaveStopFrameNo = new_cnt0;
                   
                      //Now tell the writer to get going
                      if(sem_post(&m_swSemaphore) < 0)
@@ -895,7 +986,7 @@ void streamWriter::fgThreadExec()
                case STOP_WRITING:
                   m_currSaveStart = m_currChunkStart;
                   m_currSaveStop = m_currImage + 1;
-                  m_currSaveStopFrameNo = image.cntarray[curr_image];
+                  m_currSaveStopFrameNo = new_cnt0;
                   
                   //Now tell the writer to get going
                   if(sem_post(&m_swSemaphore) < 0)
@@ -911,6 +1002,7 @@ void streamWriter::fgThreadExec()
             
             ++m_currImage;
             if(m_currImage >= m_circBuffLength) m_currImage = 0;
+            
             
          }
          else
@@ -945,6 +1037,7 @@ void streamWriter::fgThreadExec()
       
       if(opened) 
       {
+         if(m_semaphoreNumber >= 0) image.semReadPID[m_semaphoreNumber] = 0; //release semaphore
          ImageStreamIO_closeIm(&image);
          opened = false;
       }
@@ -965,8 +1058,11 @@ void streamWriter::fgThreadExec()
       m_timingCircBuff = 0;
    }
       
-   if(opened) ImageStreamIO_closeIm(&image);
-   
+   if(opened) 
+   {
+      if(m_semaphoreNumber >= 0) image.semReadPID[m_semaphoreNumber] = 0; //release semaphore
+      ImageStreamIO_closeIm(&image);
+   }
 }
 
 
