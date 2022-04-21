@@ -1214,7 +1214,7 @@ int tcsInterface::getTelPos()
    
    m_telDec = h + m/60. + s/3600.;
 
-   m_telEl = strtod(pdat[1].c_str(),0);// * 3600.;
+   //m_telEl = strtod(pdat[1].c_str(),0);// * 3600.;
 
    m_telEpoch = strtod(pdat[2].c_str(),0);
 
