@@ -1276,15 +1276,15 @@ INDI_NEWCALLBACK_DEFN(hoPredCtrl, m_indiP_intgain )(const pcf::IndiProperty &ipR
 
 	std::lock_guard<std::mutex> guard(m_indiMutex);
 
-	if(!m_is_closed_loop){
-		m_intgain = target;
-		
-		// controller->set_new_gamma(m_gamma);
-		controller->controller->set_integrator(m_use_predictive_control, m_intgain, m_intleak);
-		updateIfChanged(m_indiP_intgain, "target", m_intgain);
-	}else{
-		 log<text_log>("Integrator gain value not changed. Loop is still running.", logPrio::LOG_NOTICE);
-	}
+
+	m_intgain = target;
+	controller->controller->set_integrator(m_use_predictive_control, m_intgain, m_intleak);
+	updateIfChanged(m_indiP_intgain, "target", m_intgain);
+	
+	// if(!m_is_closed_loop){
+	// }else{
+	// 	 log<text_log>("Integrator gain value not changed. Loop is still running.", logPrio::LOG_NOTICE);
+	// }
 
 	return 0;
 }
@@ -1312,15 +1312,15 @@ INDI_NEWCALLBACK_DEFN(hoPredCtrl, m_indiP_intleak )(const pcf::IndiProperty &ipR
 
 	std::lock_guard<std::mutex> guard(m_indiMutex);
 
-	if(!m_is_closed_loop){
-		m_intleak = target;
-		
-		// controller->set_new_gamma(m_gamma);
-		controller->controller->set_integrator(m_use_predictive_control, m_intgain, m_intleak);
-		updateIfChanged(m_indiP_intleak, "target", m_intleak);
-	}else{
-		 log<text_log>("Integrator leakage value not changed. Loop is still running.", logPrio::LOG_NOTICE);
-	}
+	
+	m_intleak = target;
+	controller->controller->set_integrator(m_use_predictive_control, m_intgain, m_intleak);
+	updateIfChanged(m_indiP_intleak, "target", m_intleak);
+	
+	// if(!m_is_closed_loop){
+	// }else{
+	// 	 log<text_log>("Integrator leakage value not changed. Loop is still running.", logPrio::LOG_NOTICE);
+	// }
 
 	return 0;
 }
@@ -1406,15 +1406,11 @@ INDI_NEWCALLBACK_DEFN(hoPredCtrl, m_indiP_predictorToggle )(const pcf::IndiPrope
    //switch is toggled to on
    if( ipRecv["toggle"].getSwitchState() == pcf::IndiElement::On)
    {
-      if(!m_is_closed_loop) //not offloading so change
-      {
 		m_use_predictive_control = true;
 		controller->controller->set_integrator(m_use_predictive_control, m_intgain, m_intleak);
 		log<text_log>("Switched to predictive control.", logPrio::LOG_NOTICE);
 		updateSwitchIfChanged(m_indiP_predictorToggle, "toggle", pcf::IndiElement::On, INDI_BUSY);
-
-      }
-      return 0;
+		return 0;
    }
 
    //switch is toggled to off
