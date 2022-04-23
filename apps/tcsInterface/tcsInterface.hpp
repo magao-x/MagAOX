@@ -56,7 +56,6 @@ protected:
    
    std::string m_deviceAddr {"localhost"}; ///< The IP address or resolvable name of the TCS.
    int m_devicePort {5811}; ///< The IP port for TCS communications. Should be the command port.  Default is 5811
-   
    int m_seeingInterval {2};
    
    bool m_labMode {true};
@@ -976,7 +975,7 @@ int tcsInterface::getMagTelStatus( std::string & response,
       return 0;
    }
    
-   stat = m_sock.serialInString(answer, 512, 1000, '\n');
+   stat = m_sock.serialInString(answer, 512, m_readTimeout, '\n');
    
    if(stat <= 0)
    {
@@ -2299,7 +2298,7 @@ int tcsInterface::sendPyrNudge( float x,
 
       ///\todo need logtypes for nudges and offloads
       log<text_log>(std::string("[PYRNUDGE] ")  + ttstr, logPrio::LOG_NOTICE);
-      if(sendMagTelCommand(ttstr, 1000) < 0)
+      if(sendMagTelCommand(ttstr, m_readTimeout) < 0)
       {
          log<software_error>({__FILE__,__LINE__, std::string("error sending command: ") + ttstr});
          return -1;
@@ -2312,7 +2311,7 @@ int tcsInterface::sendPyrNudge( float x,
       snprintf(ttstr, sizeof(ttstr) , "zimr %f", z*m_pyrNudge_F_sign);
 
       log<text_log>(std::string("[PYRNUDGE] ") + ttstr, logPrio::LOG_NOTICE);
-      if(sendMagTelCommand(ttstr, 1000) < 0)
+      if(sendMagTelCommand(ttstr, m_readTimeout) < 0)
       {
          log<software_error>({__FILE__,__LINE__, std::string("error sending command: ") + ttstr});
          return -1;
@@ -2336,7 +2335,7 @@ int tcsInterface::acquireFromGuider()
 
    ///\todo need logtypes for nudges and offloads
    log<text_log>(std::string("[ACQUIRE] ")  + ttstr, logPrio::LOG_NOTICE);
-   if(sendMagTelCommand(ttstr, 1000) < 0)
+   if(sendMagTelCommand(ttstr, m_readTimeout) < 0)
    {
       log<software_error>({__FILE__,__LINE__, std::string("error sending command: ") + ttstr});
       return -1;
@@ -2346,7 +2345,7 @@ int tcsInterface::acquireFromGuider()
    snprintf(ttstr, sizeof(ttstr) , "zimr %f", z*m_pyrNudge_F_sign);
 
    log<text_log>(std::string("[ACQUIRE] ") + ttstr, logPrio::LOG_NOTICE);
-   if(sendMagTelCommand(ttstr, 1000) < 0)
+   if(sendMagTelCommand(ttstr, m_readTimeout) < 0)
    {
       log<software_error>({__FILE__,__LINE__, std::string("error sending command: ") + ttstr});
       return -1;
@@ -2557,7 +2556,7 @@ int tcsInterface::sendTToffload( float tt_0,
 
    log<text_log>(std::string("[OFFL] sending: ") + ttstr);
    
-   return sendMagTelCommand(ttstr, 1000);
+   return sendMagTelCommand(ttstr, m_readTimeout);
 }
 
 int tcsInterface::doFoffload( float F_0 )
@@ -2601,7 +2600,7 @@ int tcsInterface::sendFoffload( float F_0 )
    
    log<text_log>(std::string("[OFFL] sending: ") + fstr);
    
-   return sendMagTelCommand(fstr, 1000);
+   return sendMagTelCommand(fstr, m_readTimeout);
 }
 
 INDI_NEWCALLBACK_DEFN(tcsInterface, m_indiP_pyrNudge)(const pcf::IndiProperty &ipRecv)
