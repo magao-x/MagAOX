@@ -63,6 +63,8 @@ class DistributedAutoRegressiveController{
 		void add_measurement(Matrix* new_measurement);
 		void update_predictor();
 		void update_controller();
+
+		void save_controller_state(std::string filename);
 		
 		inline Matrix* get_command(){
 			return command;

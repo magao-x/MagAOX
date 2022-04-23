@@ -2,6 +2,8 @@
 #include <random>
 #include <iostream>
 #include <fstream>
+#include <sstream>
+
 
 namespace DDSPC
 {
@@ -110,14 +112,12 @@ void Matrix::to_cpu(){
 }
 
 void Matrix::print(bool print_gpu){
-	//if(print_gpu){
-	
-	gpu_print_buffer <<<1, 1 >>>(gpu_data[0], batch_size_, nrows_, ncols_, 5, 5);
-	cudaDeviceSynchronize();
-
-	//}else{
-	// print_batch_buffer(cpu_data, batch_size_, nrows_, ncols_);
-	//}
+	if(print_gpu){
+		gpu_print_buffer <<<1, 1 >>>(gpu_data[0], batch_size_, nrows_, ncols_, 5, 5);
+		cudaDeviceSynchronize();
+	}else{
+		print_batch_buffer(cpu_data, batch_size_, nrows_, ncols_);
+	}
 }	
 
 void Matrix::shift_columns_cpu(){
@@ -219,17 +219,57 @@ void Matrix::to_file(std::string filename){
 	std::fstream f;
 	f.open(filename, std::ios::out);
 
+	f << "Shape: (" << ncols_ << " , " << nrows_ << " , " << batch_size_ << ")" << "\n\r";
 	for(int i=0; i < total_size_; ++i){
 		f << cpu_data[0][i];
 		if(i < (total_size_-1)){
-			f << ',';
+			f << ",";
 		}
 	}
 
 	f.close();
 }
 
+void Matrix::from_file(std::string filename){
+	
+	std::string line;
+  	std::ifstream myfile (filename);
+	
+	if (myfile.is_open())
+	{	
+		std::string shape("");
+		std::getline(myfile, shape); // Get the line with the shape
+		
+		std::string line("");
+		std::getline(myfile, line);	// empty line
 
+		std::string data("");
+		std::getline(myfile, data);	// Get the data line
+		
+		// Parse the data line.
+		int i = 0;
+		std::stringstream ss (data);
+		std::string segment;
+
+		while(std::getline(ss, segment, ',')){
+			if(i < 5){
+				std::cout << segment << std::endl;
+			}
+
+			cpu_data[0][i] = std::stof(segment);
+
+			if(i < 5){
+				std::cout << cpu_data[0][i] << std::endl;
+			}
+
+			i++;
+		}
+
+		myfile.close();
+	}
+
+	to_gpu();
+}
 
 Matrix* make_identity_matrix(float value, int size, int batch_size){
 	

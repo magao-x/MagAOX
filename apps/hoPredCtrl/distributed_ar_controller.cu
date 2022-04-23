@@ -333,4 +333,8 @@ Matrix* DistributedAutoRegressiveController::get_new_control_command(float clip_
 }
 
 
+void DistributedAutoRegressiveController::save_controller_state(std::string filename){
+	
+}
+
 }

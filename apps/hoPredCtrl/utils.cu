@@ -67,8 +67,7 @@ __global__ void gpu_print_buffer(float* data, int batch_count, int nrow, int nco
 	//printf("]\n");
 };
 
-/*
-void print_batch_buffer(float* data, int batch_count, int nrow, int ncol) {
+void print_batch_buffer(float** data, int batch_count, int nrow, int ncol) {
 	for (int k = 0; k < batch_count; k++) {
 
 		for (int i = 0; i < nrow; i++) {
@@ -88,6 +87,5 @@ void print_batch_buffer(float* data, int batch_count, int nrow, int ncol) {
 		std::cout << std::endl;
 	}
 };
-*/
 
 }
