@@ -11,6 +11,8 @@
 
 #include <mx/improc/eigenCube.hpp>
 #include <mx/improc/eigenImage.hpp>
+#include <mx/sigproc/gramSchmidt.hpp>
+#include <mx/math/templateBLAS.hpp>
 
 #include "../../libMagAOX/libMagAOX.hpp" //Note this is included on command line to trigger pch
 #include "../../magaox_git_version.h"
@@ -71,12 +73,26 @@ protected:
    
    float m_actLim {7.0}; ///< the upper limit on woofer actuator commands.  default is 7.0.
    
+   std::string m_tweeterModeFile; ///< File containing the tweeter modes to use for offloading
+   std::string m_tweeterMaskFile;
+
+   int m_maxModes {50};
+
+   int m_numModes {0};
    ///@}
 
    mx::improc::eigenImage<realT> m_twRespM;
    mx::improc::eigenImage<realT> m_tweeter;
-   mx::improc::eigenImage<realT> m_woofer, m_wooferDelta;
-   
+   mx::improc::eigenImage<realT> m_woofer;
+   mx::improc::eigenImage<realT> m_wooferDelta;
+   mx::improc::eigenImage<realT> m_modeAmps;
+
+
+   mx::improc::eigenImage<realT> m_tweeterMask;
+
+   mx::improc::eigenCube<float> m_tModesOrtho;
+
+   mx::improc::eigenCube<float> m_wModes;
 
    float m_fps {0}; ///< Current FPS from the FPS source.
    int m_navg {0}; ///< Current navg from the averager
@@ -133,7 +149,6 @@ public:
 
    int updateFPS();
    
-   
    int allocate( const dev::shmimT & dummy /**< [in] tag to differentiate shmimMonitor parents.*/);
    
    int processImage( void * curr_src,          ///< [in] pointer to start of current frame.
@@ -143,6 +158,8 @@ public:
 
    int zero();
    
+   int prepareModes();
+
 protected:
 
   
@@ -153,6 +170,8 @@ protected:
    
    pcf::IndiProperty m_indiP_zero;
    
+   pcf::IndiProperty m_indiP_numModes;
+
    pcf::IndiProperty m_indiP_offloadToggle;
    
    INDI_NEWCALLBACK_DECL(t2wOffloader, m_indiP_gain);
@@ -160,6 +179,9 @@ protected:
    INDI_NEWCALLBACK_DECL(t2wOffloader, m_indiP_actLim);
    
    INDI_NEWCALLBACK_DECL(t2wOffloader, m_indiP_zero);
+   
+   INDI_NEWCALLBACK_DECL(t2wOffloader, m_indiP_numModes);
+
    INDI_NEWCALLBACK_DECL(t2wOffloader, m_indiP_offloadToggle);
 
    pcf::IndiProperty m_indiP_fpsSource;
@@ -192,6 +214,11 @@ void t2wOffloader::setupConfig()
    config.add("offload.leak", "", "offload.leak", argType::Required, "offload", "leak", false, "float", "The starting offload leak.  Default is 0.0.");
    config.add("offload.startupOffloading", "", "offload.startupOffloading", argType::Required, "offload", "startupOffloading", false, "bool", "Flag controlling whether offloading is on at startup.  Default is false.");
    config.add("offload.actLim", "", "offload.actLim", argType::Required, "offload", "actLim", false, "float", "The woofer actuator command limit.  Default is 7.0.");
+
+   config.add("offload.tweeterModes", "", "offload.tweeterModes", argType::Required, "offload", "tweeterModes", false, "string", "File containing the tweeter modes to use for offloading");
+   config.add("offload.tweeterMask", "", "offload.tweeterMask", argType::Required, "offload", "tweeterMask", false, "string", "File containing the tweeter mask.");
+   config.add("offload.maxModes", "", "offload.maxModes", argType::Required, "offload", "maxModes", false, "string", "Maximum number of modes for modal offloading.");
+   config.add("offload.numModes", "", "offload.numModes", argType::Required, "offload", "numModes", false, "string", "Number of modes to offload. 0 means use actuator offloading.");
 }
 
 inline
@@ -208,7 +235,11 @@ int t2wOffloader::loadConfigImpl( mx::app::appConfigurator & _config )
    _config(m_gain, "offload.gain");
    _config(m_leak, "offload.leak");
    _config(m_actLim, "offload.actLim");
-   
+   _config(m_tweeterModeFile, "offload.tweeterModes");
+   _config(m_tweeterMaskFile, "offload.tweeterMask");
+   _config(m_maxModes, "offload.maxModes");
+   _config(m_numModes, "offload.numModes");
+
    bool startupOffloading = false;
    
    if(_config.isSet("offload.startupOffloading"))
@@ -262,6 +293,12 @@ int t2wOffloader::appStartup()
       return -1;
    }
    
+   if(prepareModes() < 0 )
+   {
+      log<software_error>({__FILE__,__LINE__});
+      return -1;
+   }
+
    if(shmimMonitorT::appStartup() < 0)
    {
       return log<software_error,-1>({__FILE__, __LINE__});
@@ -274,6 +311,16 @@ int t2wOffloader::appStartup()
       return -1;
    }
    
+   createStandardIndiNumber<int>( m_indiP_numModes, "numModes", 0, 97, 0, "%d");
+   m_indiP_numModes["current"] = m_numModes;
+   m_indiP_numModes["target"] = m_numModes;
+   
+   if( registerIndiPropertyNew( m_indiP_numModes, INDI_NEWCALLBACK(m_indiP_numModes)) < 0)
+   {
+      log<software_error>({__FILE__,__LINE__});
+      return -1;
+   }
+
    createStandardIndiToggleSw( m_indiP_offloadToggle, "offload");  
    if( registerIndiPropertyNew( m_indiP_offloadToggle, INDI_NEWCALLBACK(m_indiP_offloadToggle)) < 0)
    {
@@ -337,6 +384,8 @@ int t2wOffloader::updateFPS()
    updateIfChanged(m_indiP_fps, "current", m_effFPS);
 
    std::cerr << "Effective FPS: " << m_effFPS << "\n";
+
+   return 0;
 }
 
 inline
@@ -348,10 +397,11 @@ int t2wOffloader::allocate(const dev::shmimT & dummy)
       
    m_tweeter.resize(shmimMonitorT::m_width, shmimMonitorT::m_height);
 
-   mx::fits::fitsFile<float> ff;
+   /*mx::fits::fitsFile<float> ff;
    ff.read(m_twRespM, m_twRespMPath);
    
    std::cerr << "Read a " << m_twRespM.rows() << " x " << m_twRespM.cols() << " matrix.\n";
+   */
    
    if(m_dmOpened)
    {
@@ -392,6 +442,8 @@ int t2wOffloader::allocate(const dev::shmimT & dummy)
       m_woofer.setZero();
    }
    
+   m_modeAmps.resize(1,  m_tModesOrtho.planes());
+
    ///\todo size checks here.
    
    //state(stateCodes::OPERATING);
@@ -408,8 +460,23 @@ int t2wOffloader::processImage( void * curr_src,
    
    if(!m_offloading) return 0;
    
-   m_wooferDelta = m_twRespM.matrix() * Eigen::Map<Eigen::Matrix<float,-1,-1>>((float *)curr_src,  m_width*m_height,1);
+   if(m_numModes == 0)
+   {
+      m_wooferDelta = m_twRespM.matrix() * Eigen::Map<Eigen::Matrix<float,-1,-1>>((float *)curr_src,  m_width*m_height,1);
+   }
+   else
+   {
+      m_modeAmps = Eigen::Map<Eigen::Matrix<float,-1,-1>>((float *) curr_src, 1, m_width*m_height) * Eigen::Map<Eigen::Matrix<float,-1,-1>>(m_tModesOrtho.data(), m_tModesOrtho.rows()*m_tModesOrtho.cols(), m_tModesOrtho.planes()); 
 
+      m_wooferDelta = m_modeAmps(0,0) * m_wModes.image(0);
+      for(int p=1; p < m_numModes && p < m_maxModes; ++p)
+      {
+         m_wooferDelta += m_modeAmps(0,p)*m_wModes.image(p);
+      }
+
+      
+   }
+   
    while(m_dmStream.md[0].write == 1); //Check if zero() is running
    
    
@@ -461,6 +528,58 @@ int t2wOffloader::zero()
    
    return 0;
       
+}
+
+int t2wOffloader::prepareModes()
+{
+   mx::improc::eigenCube<float> tmodes;
+
+   mx::fits::fitsFile<float> ff;
+
+   ff.read(tmodes, m_tweeterModeFile);
+   std::cerr << "Tweeter modes: " << tmodes.rows() << " x " << tmodes.cols() << " x " << tmodes.planes() << "\n";
+
+   ff.read(m_tweeterMask, m_tweeterMaskFile);
+   std::cerr << "Tweeter mask: " << m_tweeterMask.rows() << " x " << m_tweeterMask.cols() << "\n";
+
+   ff.read(m_twRespM, m_twRespMPath);
+   
+   std::cerr << "t2w Response matrix: " << m_twRespM.rows() << " x " << m_twRespM.cols() << " matrix.\n";
+   
+
+   for(int p=0; p < tmodes.planes(); ++p)
+   {
+      tmodes.image(p) *= m_tweeterMask;
+      float norm = (tmodes.image(p)).square().sum();
+      tmodes.image(p) /= sqrt(norm);
+   }
+
+   m_tModesOrtho.resize(tmodes.rows(), tmodes.cols(), m_maxModes);
+
+   for(int p=0;p<m_tModesOrtho.planes();++p)
+   {
+      m_tModesOrtho.image(p) = tmodes.image(p);
+   }
+
+   ff.write("/tmp/tModesOrtho.fits", m_tModesOrtho);
+
+   m_wModes.resize(11,11,m_tModesOrtho.planes());  
+   mx::improc::eigenImage<realT> win, wout;
+
+   win.resize(11,11); 
+   wout.resize(11,11);
+
+   for(int p=0; p < m_tModesOrtho.planes(); ++p)
+   {
+      win = m_tModesOrtho.image(p);
+      Eigen::Map<Eigen::Matrix<float,-1,-1>>(wout.data(), wout.rows()*wout.cols(),1) = m_twRespM.matrix() * Eigen::Map<Eigen::Matrix<float,-1,-1>>(win.data(), win.rows()*win.cols(),1);
+      m_wModes.image(p) = wout;
+   }
+
+   ff.write("/tmp/wModes.fits", m_wModes);
+
+   return 0;
+
 }
 
 INDI_NEWCALLBACK_DEFN(t2wOffloader, m_indiP_gain)(const pcf::IndiProperty &ipRecv)
@@ -554,6 +673,32 @@ INDI_NEWCALLBACK_DEFN(t2wOffloader, m_indiP_zero)(const pcf::IndiProperty &ipRec
       return zero();
    
    }
+   return 0;
+}
+
+INDI_NEWCALLBACK_DEFN(t2wOffloader, m_indiP_numModes)(const pcf::IndiProperty &ipRecv)
+{
+   if(ipRecv.getName() != m_indiP_numModes.getName())
+   {
+      log<software_error>({__FILE__, __LINE__, "invalid indi property received"});
+      return -1;
+   }
+   
+   float target;
+   
+   if( indiTargetUpdate( m_indiP_numModes, target, ipRecv, true) < 0)
+   {
+      log<software_error>({__FILE__,__LINE__});
+      return -1;
+   }
+   
+   m_numModes = target;
+   
+   updateIfChanged(m_indiP_numModes, "current", m_numModes);
+   updateIfChanged(m_indiP_numModes, "target", m_numModes);
+   
+   log<text_log>("set number of modes to " + std::to_string(m_numModes), logPrio::LOG_NOTICE);
+   
    return 0;
 }
 
