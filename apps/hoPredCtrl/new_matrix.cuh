@@ -2,7 +2,6 @@
 #define PCMATRIX_CUH
 
 #include <iostream>
-
 #include <cuda_runtime.h>
 #include "cublas_v2.h"
 #include "utils.cuh"

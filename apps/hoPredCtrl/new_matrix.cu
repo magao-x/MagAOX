@@ -28,10 +28,10 @@ Matrix::Matrix(float initialization_value, int num_rows, int num_columns, int nu
 	float* contigous_memory = new float[size_ * batch_size_];
 
 	// Initialize the CPU data
-	for(size_t n = 0; n < batch_size_; n++){
+	for(int n = 0; n < batch_size_; n++){
 		cpu_data[n] = &contigous_memory[size_ * n];
 
-		for(size_t i = 0; i < size_; i++){
+		for(int i = 0; i < size_; i++){
 			contigous_memory[size_ * n + i] = initialization_value;
 		}
 	}
@@ -44,7 +44,7 @@ Matrix::Matrix(float initialization_value, int num_rows, int num_columns, int nu
 	check_cuda_error(err);
 	
 	// Now set all subsequent pointers
-	for(size_t n = 0; n < batch_size_; n++){
+	for(int n = 0; n < batch_size_; n++){
 		gpu_data[n] = gpu_data[0] + size_ * n;
 	}
 	
@@ -219,7 +219,7 @@ void Matrix::to_file(std::string filename){
 	std::fstream f;
 	f.open(filename, std::ios::out);
 
-	f << "Shape: (" << ncols_ << " , " << nrows_ << " , " << batch_size_ << ")" << "\n\r";
+	f << "Shape: (" << nrows_ << " , " << ncols_  << " , " << batch_size_ << ")\n";
 	for(int i=0; i < total_size_; ++i){
 		f << cpu_data[0][i];
 		if(i < (total_size_-1)){
@@ -239,30 +239,15 @@ void Matrix::from_file(std::string filename){
 	{	
 		std::string shape("");
 		std::getline(myfile, shape); // Get the line with the shape
-		
-		std::string line("");
-		std::getline(myfile, line);	// empty line
 
 		std::string data("");
-		std::getline(myfile, data);	// Get the data line
+		std::getline(myfile, data);	// empty line
+
+		std::vector<std::string> split_result = split(data, ',');
 		
 		// Parse the data line.
-		int i = 0;
-		std::stringstream ss (data);
-		std::string segment;
-
-		while(std::getline(ss, segment, ',')){
-			if(i < 5){
-				std::cout << segment << std::endl;
-			}
-
-			cpu_data[0][i] = std::stof(segment);
-
-			if(i < 5){
-				std::cout << cpu_data[0][i] << std::endl;
-			}
-
-			i++;
+		for(int i=0; i < split_result.size(); i++){
+			cpu_data[0][i] = std::stof(split_result[i]);
 		}
 
 		myfile.close();
@@ -276,8 +261,8 @@ Matrix* make_identity_matrix(float value, int size, int batch_size){
 	Matrix* new_matrix = new Matrix(0.0, size, size, batch_size);
 	
 	
-	for(size_t k=0; k<batch_size; k++){
-		for(size_t i=0; i<size; i++){
+	for(int k=0; k<batch_size; k++){
+		for(int i=0; i<size; i++){
 			// set(T value, int row_index, int column_index, int batch_index=1
 			new_matrix->set(value, i, i, k);
 		}
@@ -293,8 +278,8 @@ Matrix* make_identity_matrix(float* value, int size, int batch_size){
 	Matrix* new_matrix = new Matrix(0.0, size, size, batch_size);
 	
 	
-	for(size_t k=0; k<batch_size; k++){
-		for(size_t i=0; i<size; i++){
+	for(int k=0; k<batch_size; k++){
+		for(int i=0; i<size; i++){
 			// set(T value, int row_index, int column_index, int batch_index=1
 			new_matrix->set(value[k], i, i, k);
 		}
@@ -314,8 +299,8 @@ Matrix* make_identity_matrix(Matrix* value, int size, int batch_size){
 	Matrix* new_matrix = new Matrix(0.0, size, size, batch_size);
 	
 	
-	for(size_t k=0; k<batch_size; k++){
-		for(size_t i=0; i<size; i++){
+	for(int k=0; k<batch_size; k++){
+		for(int i=0; i<size; i++){
 			// set(T value, int row_index, int column_index, int batch_index=1
 			new_matrix->set(value->cpu_data[0][k], i, i, k);
 		}
@@ -335,8 +320,8 @@ Matrix* make_identity_matrix_from_scalar(float value, int size, int batch_size){
 	Matrix* new_matrix = new Matrix(0.0, size, size, batch_size);
 	
 	
-	for(size_t k=0; k<batch_size; k++){
-		for(size_t i=0; i<size; i++){
+	for(int k=0; k<batch_size; k++){
+		for(int i=0; i<size; i++){
 			// set(T value, int row_index, int column_index, int batch_index=1
 			new_matrix->set(value, i, i, k);
 		}
@@ -352,8 +337,8 @@ void set_identity_matrix(Matrix* destination, float value, int size, int batch_s
 		This functions set a batch of identity matrices with the same value on the diagonal.
 	*/
 
-	for(size_t k=0; k<batch_size; k++){
-		for(size_t i=0; i<size; i++){
+	for(int k=0; k<batch_size; k++){
+		for(int i=0; i<size; i++){
 			// set(T value, int row_index, int column_index, int batch_index=1
 			destination->set(value, i, i, k);
 		}
@@ -367,8 +352,8 @@ void copy_to_identity_matrix(Matrix* destination, Matrix* source, int size, int 
 		Each element of <source> is the value of a new diagonal matrix.
 	*/
 
-	for(size_t k=0; k<batch_size; k++){
-		for(size_t i=0; i<size; i++){
+	for(int k=0; k<batch_size; k++){
+		for(int i=0; i<size; i++){
 			// set(T value, int row_index, int column_index, int batch_index=1
 			destination->set(source->cpu_data[0][k], i, i, k);
 		}
@@ -393,17 +378,8 @@ void gpu_col_copy(Matrix* destination, int dcol_index, int dbatch_index, Matrix*
 }
 
 
-Matrix* make_col_vector(float value, int size, int batch_size){
-	
+Matrix* make_col_vector(float value, int size, int batch_size){	
 	Matrix* new_matrix = new Matrix(value, 1, size, batch_size);
-	
-	// for(size_t k=0; k<batch_size; k++){
-	//	for(size_t i=0; i<size; i++){
-	//		new_matrix->set(value, 0, i, k);
-	//	}
-	// }	
-	// new_matrix->to_gpu();
-
 	return new_matrix;
 }
 
@@ -411,8 +387,8 @@ Matrix* make_col_vector(float* value, int size, int batch_size){
 	
 	Matrix* new_matrix = new Matrix(0.0, 1, size, batch_size);
 	
-	for(size_t k=0; k<batch_size; k++){
-		for(size_t i=0; i<size; i++){
+	for(int k=0; k<batch_size; k++){
+		for(int i=0; i<size; i++){
 			new_matrix->set(value[i], 0, i, k);
 		}
 	}	
@@ -423,13 +399,13 @@ Matrix* make_col_vector(float* value, int size, int batch_size){
 
 Matrix* make_random_col_vector(float standard_deviation, int size, int batch_size){
 	// Hmmm this should be defined somewhere else because it is initialized with the same seed.
-	std::default_random_engine generator{rdtsc()};
+	std::default_random_engine generator{(unsigned int)rdtsc()};
 	std::normal_distribution<float> distribution(0.0, standard_deviation);
 
 	Matrix* new_matrix = new Matrix(0.0, 1, size, batch_size);
 	
-	for(size_t k=0; k<batch_size; k++){
-		for(size_t i=0; i<size; i++){
+	for(int k=0; k<batch_size; k++){
+		for(int i=0; i<size; i++){
 			new_matrix->set(distribution(generator), 0, i, k);
 		}
 	}	
@@ -441,14 +417,14 @@ Matrix* make_random_col_vector(float standard_deviation, int size, int batch_siz
 Matrix* make_random_matrix(float standard_deviation, int nrows, int ncols, int batch_size){
 	
 	// Hmmm this should be defined somewhere else because it is initialized with the same seed.
-	std::default_random_engine generator{rdtsc()};
+	std::default_random_engine generator{(unsigned int)rdtsc()};
 	std::normal_distribution<float> distribution(0.0, standard_deviation);
 
 	Matrix* new_matrix = new Matrix(0, nrows, ncols, batch_size);
 
-	for(size_t k=0; k<batch_size; k++){
-		for(size_t i=0; i<nrows; i++){
-			for(size_t j=0; j<ncols; j++){
+	for(int k=0; k<batch_size; k++){
+		for(int i=0; i<nrows; i++){
+			for(int j=0; j<ncols; j++){
 				new_matrix->set(distribution(generator), i, j, k);
 			}
 		}
@@ -463,14 +439,14 @@ Matrix* make_random_matrix(float standard_deviation, int nrows, int ncols, int b
 Matrix* make_random_binary_matrix(float standard_deviation, int nrows, int ncols, int batch_size){
 	
 	// Hmmm this should be defined somewhere else because it is initialized with the same seed.
-	std::default_random_engine generator{rdtsc()};
+	std::default_random_engine generator{(unsigned int) rdtsc()};
 	std::normal_distribution<float> distribution(0.0, standard_deviation);
 
 	Matrix* new_matrix = new Matrix(0, nrows, ncols, batch_size);
 
-	for(size_t k=0; k<batch_size; k++){
-		for(size_t i=0; i<nrows; i++){
-			for(size_t j=0; j<ncols; j++){
+	for(int k=0; k<batch_size; k++){
+		for(int i=0; i<nrows; i++){
+			for(int j=0; j<ncols; j++){
 				float new_val = distribution(generator);
 				if(new_val > 0){
 					new_matrix->set(standard_deviation, i, j, k);
