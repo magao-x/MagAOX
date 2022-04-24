@@ -37,6 +37,9 @@ LINE_FORMAT_REGEX = re.compile(
     r"TELM \[observer\] email: (.*) obs: (.*) (\d)"
 )
 
+def utcnow():
+    return datetime.datetime.utcnow().replace(tzinfo=timezone.utc)
+
 @dataclasses.dataclass(frozen=True, eq=True)
 class TimestampedFile:
     path : pathlib.Path
@@ -312,13 +315,16 @@ def daemon_mode(output_dir, cameras, data_root, omit_telemetry):
             result = get_new_observation_spans(existing_observation_spans, ending_after_dt)
             new_observation_spans : typing.List[ObservationSpan] = result[0]
             ending_after_dt : datetime.datetime = result[1]
+            spans_with_data = set()
             for span in new_observation_spans:
                 log.info(f"Observation interval to process: {span}")
                 for device in cameras:
                     visited_files = do_quicklook_for_camera(span, data_root, device, omit_telemetry, output_dir, dry_run, all_visited_files)
+                    if len(visited_files) and (span.end is not None and (utcnow() - span.end).seconds > 5 * 60):
+                        log.info(f"Completed span {span}")
+                        spans_with_data.add(span)
                     all_visited_files = all_visited_files.union(visited_files)
-            new_closed_spans = set(x for x in new_observation_spans if x.end is not None)
-            existing_observation_spans = existing_observation_spans.union(new_closed_spans)
+            existing_observation_spans = existing_observation_spans.union(spans_with_data)
             duration = time.time() - start_time
             log.info(f"Took {duration} sec")
             if duration < CHECK_INTERVAL_SEC:

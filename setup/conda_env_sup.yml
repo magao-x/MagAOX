@@ -1,0 +1,17 @@
+name: sup
+channels:
+  - conda-forge
+  - defaults
+dependencies:
+  - numpy
+  - matplotlib
+  - astropy
+  - pip
+  # web ui
+  - nodejs
+  - yarn
+  - websockets
+  - orjson
+  - uvloop
+  # for cacao
+  - pybind11
