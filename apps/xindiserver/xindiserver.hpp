@@ -630,7 +630,7 @@ void xindiserver::isLogThreadExec()
    std::string logs;
    while(m_shutdown == 0)
    {
-      ssize_t count = read(m_isSTDERR, buffer, sizeof(buffer));
+      ssize_t count = read(m_isSTDERR, buffer, sizeof(buffer)-1); //Make wure we always have room for \0
       if (count <= 0 || m_shutdown == 1) 
       {
          continue;
