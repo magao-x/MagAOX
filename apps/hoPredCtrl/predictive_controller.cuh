@@ -70,6 +70,9 @@ class PredictiveController{
 		void set_mapping_matrix(float* mapping_matrix);
 		void add_measurement(float* new_wfs_measurement);
 		float* get_command(float clip_val);
+
+		void save_state(std::string path);
+		void load_state(std::string path, std::string timestamp);
 		
 };
 

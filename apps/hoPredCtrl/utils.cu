@@ -1,15 +1,40 @@
 #include <iostream>
 #include "device_launch_parameters.h"
 #include "utils.cuh"
+#include <sstream>
+
+#ifdef _WIN32
+#include <intrin.h>
+#else
+#include <x86intrin.h>
+#endif
+
 
 namespace DDSPC
 {
 
 unsigned long long rdtsc(){
+	return __rdtsc();
+}
+/*
 	unsigned int lo,hi;
 	__asm__ __volatile__ ("rdtsc" : "=a" (lo), "=d" (hi));
 	return ((unsigned long long)hi << 32) | lo;
+}*/
+
+
+std::vector<std::string> split (const std::string &s, char delim) {
+    std::vector<std::string> result;
+    std::stringstream ss (s);
+    std::string item;
+
+    while (std::getline (ss, item, delim)) {
+        result.push_back (item);
+    }
+
+    return result;
 }
+
 
 //	cudaError_t cudaerr = cudaDeviceSynchronize();
 void check_cuda_error(cudaError_t cudaerr ){
@@ -67,8 +92,7 @@ __global__ void gpu_print_buffer(float* data, int batch_count, int nrow, int nco
 	//printf("]\n");
 };
 
-/*
-void print_batch_buffer(float* data, int batch_count, int nrow, int ncol) {
+void print_batch_buffer(float** data, int batch_count, int nrow, int ncol) {
 	for (int k = 0; k < batch_count; k++) {
 
 		for (int i = 0; i < nrow; i++) {
@@ -88,6 +112,5 @@ void print_batch_buffer(float* data, int batch_count, int nrow, int ncol) {
 		std::cout << std::endl;
 	}
 };
-*/
 
 }

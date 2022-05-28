@@ -1,5 +1,9 @@
 #include "predictive_controller.cuh"
 #include <iostream>
+#include <fstream>
+#include <chrono>
+#include <string>
+#include <sstream>
 
 namespace DDSPC
 {	
@@ -131,23 +135,23 @@ namespace DDSPC
 	void PredictiveController::set_mapping_matrix(float* mapping_matrix){
 		cpu_full_copy(m_mode_mapping_matrix, mapping_matrix);
 		m_mode_mapping_matrix->to_gpu();
-		std::cout << "shape of mode mapping matrix: ";
-		m_mode_mapping_matrix->print_shape();
+		// std::cout << "shape of mode mapping matrix: ";
+		// m_mode_mapping_matrix->print_shape();
 		
-		std::cout << "shape of command: ";
-		m_command->print_shape();
+		// std::cout << "shape of command: ";
+		// m_command->print_shape();
 		
-		std::cout << "shape of voltages: ";
-		m_voltages->print_shape();
+		// std::cout << "shape of voltages: ";
+		// m_voltages->print_shape();
 
-		std::cout << "shape of interaction matrix: ";
-		m_interaction_matrix->print_shape();
+		// std::cout << "shape of interaction matrix: ";
+		// m_interaction_matrix->print_shape();
 
-		std::cout << "shape of wfs output: ";
-		m_wfs_measurement->print_shape();
+		// std::cout << "shape of wfs output: ";
+		// m_wfs_measurement->print_shape();
 
-		std::cout << "shape of measurement output: ";
-		m_measurement->print_shape();
+		// std::cout << "shape of measurement output: ";
+		// m_measurement->print_shape();
 	};
 
 	void PredictiveController::add_measurement(float* new_wfs_measurement){
@@ -177,5 +181,52 @@ namespace DDSPC
 		// Copy into shmimstream
 		return m_voltages->cpu_data[0];
 	};
-	
+
+
+	void PredictiveController::save_state(std::string path){
+		// const auto p1 = std::chrono::system_clock::now();
+		// auto elapsed_time = std::chrono::duration_cast<std::chrono::seconds>(p1.time_since_epoch()).count();
+		using namespace std::chrono;
+		uint64_t elapsed_time = duration_cast<milliseconds>(system_clock::now().time_since_epoch()).count();
+		
+		std::ostringstream oss;
+		oss << elapsed_time;
+		std::string timestamp(oss.str());
+		std::cout << timestamp << std::endl;
+		oss.str("");
+
+		// Make the header file with all the parameters
+		std::fstream f;
+		f.open(path + "header_" + timestamp + ".txt", std::ios::out);
+		f << "Header file for the Predictive controller. \n\r";
+		
+		f << "Time: " << timestamp << "\n\r";
+		f << "History: " << m_num_history << "\n\r";
+		f << "Future: " << m_num_future << "\n\r";
+		f << "Gamma: " << m_gamma << "\n\r";
+		f << "Num modes: " << m_num_modes << "\n\r";
+		f << "Num measurements: " << m_num_measurements << "\n\r";
+		f.close();
+
+		// Save the current controller
+		controller->controller->to_file(path + "controller_" + timestamp + ".csv");
+		controller->condition_matrix->to_file(path + "condition_matrix_" + timestamp + ".csv");
+		controller->rls->A->to_file(path + "prediction_matrix_" + timestamp + ".csv");
+		controller->rls->P->to_file(path + "covariance_matrix_" + timestamp + ".csv");
+
+		// The modal reconstructor
+		m_mode_mapping_matrix->to_file(path + "mode_mapping_matrix_" + timestamp + ".csv");
+		m_interaction_matrix->to_file(path + "interaction_matrix_" + timestamp + ".csv");
+		
+
+	}
+
+	void PredictiveController::load_state(std::string path, std::string timestamp){
+		// Save the current controller
+		controller->rls->A->from_file(path + "prediction_matrix_" + timestamp + ".csv"); // These are learned
+		controller->rls->P->from_file(path + "covariance_matrix_" + timestamp + ".csv"); // These are learned
+		
+		// Create the controller
+		update_controller();
+	}
 }

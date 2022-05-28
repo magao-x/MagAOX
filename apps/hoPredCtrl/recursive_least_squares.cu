@@ -94,4 +94,10 @@ void RecursiveLeastSquares::update(Matrix *x, Matrix *y){
 	xtP->dot(K, P, -1.0 / gamma, 1.0 / gamma, CUBLAS_OP_T, CUBLAS_OP_N);
 }
 
+void RecursiveLeastSquares::save_state(std::string filename){
+	// Filename
+	A->to_file(filename + "_prediction_matrix.csv");
+	P->to_file(filename + "_covariance_matrix.csv");
+}
+
 }

@@ -44,6 +44,7 @@ class RecursiveLeastSquares{
 
 		void update(Matrix *x, Matrix *y);
 		void reset();
+		void save_state(std::string filaname);
 };
 
 }
