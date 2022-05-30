@@ -634,12 +634,12 @@ int xindiserver::isLogThreadStart()
 inline
 void xindiserver::isLogThreadExec()
 {
-   char buffer[4096];
+   char buffer[4097];
 
    std::string logs;
    while(m_shutdown == 0)
    {
-      ssize_t count = read(m_isSTDERR, buffer, sizeof(buffer));
+      ssize_t count = read(m_isSTDERR, buffer, sizeof(buffer)-1);
       if (count <= 0 || m_shutdown == 1) 
       {
          continue;
