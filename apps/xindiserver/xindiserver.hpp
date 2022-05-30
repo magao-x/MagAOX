@@ -635,6 +635,11 @@ void xindiserver::isLogThreadExec()
       {
          continue;
       }
+      else if(count > (ssize_t) sizeof(buffer)-1)
+      {
+         log<software_error>({__FILE__, __LINE__, "read returned too many bytes."});
+	 continue;
+      }
       else 
       {
          buffer[count] = '\0';
