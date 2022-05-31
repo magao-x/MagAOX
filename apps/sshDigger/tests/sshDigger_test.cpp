@@ -426,9 +426,10 @@ SCENARIO( "sshDigger tunnel exec preparation", "[sshDigger]" )
          
          REQUIRE( argsV[0] == "autossh");
          REQUIRE( argsV[1] == "-M0");
-         REQUIRE( argsV[2] == "-nNTL");
-         REQUIRE( argsV[3] == "80:localhost:81");
-         REQUIRE( argsV[4] == "exao2");
+         REQUIRE( argsV[2] == "");
+         REQUIRE( argsV[3] == "-nNTL");
+         REQUIRE( argsV[4] == "80:localhost:81");
+         REQUIRE( argsV[5] == "exao2");
       }
    }
 }
