@@ -438,12 +438,42 @@ static int sendClientMsg(ClInfo *cp)
     /* trace */
     if (verbose > 2)
     {
-        fprintf(stderr, "%s: Client %d: sending msg copy %d nq %d:\n%.*s\n", indi_tstamp(NULL), cp->s, mp->count,
-                nFQ(cp->msgq), (int)nw, &mp->cp[cp->nsent]);
+        char* ts = indi_tstamp(NULL);
+        char* ptr = mp->cp + cp->nsent;
+        char* ptrend = ptr + nw;
+        char* ptrnl;
+
+        fprintf(stderr, "%s: Client %d: sending msg copy %d nq %d:\n"
+               , ts, cp->s, mp->count, nFQ(cp->msgq));
+
+        /* Break message string at newlines, so xindiserver does not
+         * read a line of logged data from STDERR without a timestamp
+         */
+        while (ptr < ptrend)
+        {
+            /* Find first newline in remaining characters
+             * N.B. strnchr(...) does not exist
+             */
+            for (ptrnl=ptr; ptrnl<ptrend && '\n'!=*ptrnl; ++ptrnl) ;
+            if (ptr < ptrnl)
+            {
+              fprintf(stderr, "%s: Client %d: %.*s\n", ts, cp->s, (int)(ptrnl-ptr), ptr);
+            }
+            ptr = ptrnl + 1;
+        }
     }
     else if (verbose > 1)
     {
-        fprintf(stderr, "%s: Client %d: sending %.50s\n", indi_tstamp(NULL), cp->s, &mp->cp[cp->nsent]);
+        /* Ensure no newline is written with logged data, so xindiserver
+         * does not read a line of logged data from STDERR without a
+         * timestamp
+         */
+        char* ptr = mp->cp + cp->nsent;
+        char* ptr50 = ptr + 50;
+        char* ptrnl;
+        for (ptrnl=ptr; ptrnl<ptr50 && *ptrnl!='\n'; ++ptrnl) ;
+        fprintf(stderr, "%s: Client %d: sending %.*s\n" , indi_tstamp(NULL), cp->s, (int)(ptrnl-ptr), ptr               );
+     /* fprintf(stderr, "%s: Client %d: sending %.50s\n", indi_tstamp(NULL), cp->s                  , &mp->cp[cp->nsent]); */
     }
 
     /* update amount sent. when complete: free message if we are the last
@@ -868,12 +898,42 @@ static int sendDriverMsg(DvrInfo *dp)
     /* trace */
     if (verbose > 2)
     {
-        fprintf(stderr, "%s: Driver %s: sending msg copy %d nq %d:\n%.*s\n", indi_tstamp(NULL), dp->name, mp->count,
-                nFQ(dp->msgq), (int)nw, &mp->cp[dp->nsent]);
+        char* ts = indi_tstamp(NULL);
+        char* ptr = mp->cp + dp->nsent;
+        char* ptrend = ptr + nw;
+        char* ptrnl;
+
+        fprintf(stderr, "%s: Driver %s: sending msg copy %d nq %d:\n"
+               , ts, dp->name, mp->count, nFQ(dp->msgq));
+
+        /* Break message string at newlines, so xindiserver does not
+         * read a line of logged data from STDERR without a timestamp
+         */
+        while (ptr < ptrend)
+        {
+            /* Find first newline in remaining characters
+             * N.B. strnchr(...) does not exist
+             */
+            for (ptrnl=ptr; ptrnl<ptrend && '\n'!=*ptrnl; ++ptrnl) ;
+            if (ptr < ptrnl)
+            {
+              fprintf(stderr, "%s: Driver %s: %.*s\n", ts, dp->name, (int)(ptrnl-ptr), ptr);
+            }
+            ptr = ptrnl + 1;
+        }
     }
     else if (verbose > 1)
     {
-        fprintf(stderr, "%s: Driver %s: sending %.50s\n", indi_tstamp(NULL), dp->name, &mp->cp[dp->nsent]);
+        /* Ensure no newline is written with logged data, so xindiserver
+         * does not read a line of logged data from STDERR without a
+         * timestamp
+         */
+        char* ptr = mp->cp + dp->nsent;
+        char* ptr50 = ptr + 50;
+        char* ptrnl;
+        for (ptrnl=ptr; ptrnl<ptr50 && *ptrnl!='\n'; ++ptrnl) ;
+        fprintf(stderr, "%s: Driver %s: sending %.*s\n" , indi_tstamp(NULL), dp->name, (int)(ptrnl-ptr), ptr);
+     /* fprintf(stderr, "%s: Driver %s: sending %.50s\n", indi_tstamp(NULL), dp->name                  , &mp->cp[dp->nsent]); */
     }
 
     /* update amount sent. when complete: free message if we are the last
@@ -1226,7 +1286,7 @@ static void newClient()
 
 /* print key attributes and values of the given xml to stderr.
  */
-static void traceMsg(XMLEle *root)
+static void traceMsg(XMLEle *root, char* ts)
 {
     static const char *prtags[] =
     {
@@ -1253,7 +1313,7 @@ static void traceMsg(XMLEle *root)
     for (e = nextXMLEle(root, 1); e; e = nextXMLEle(root, 0))
         for (i = 0; i < sizeof(prtags) / sizeof(prtags[0]); i++)
             if (strcmp(prtags[i], tagXMLEle(e)) == 0)
-                fprintf(stderr, "\n %10s='%s'", findXMLAttValu(e, "name"), pcdataXMLEle(e));
+                fprintf(stderr, "\n%s: ...: %10s='%s'", ts, findXMLAttValu(e, "name"), pcdataXMLEle(e));
 
     fprintf(stderr, "\n");
 }
@@ -1478,8 +1538,9 @@ static int readFromClient(ClInfo *cp)
 
             if (verbose > 2)
             {
-                fprintf(stderr, "%s: Client %d: read ", indi_tstamp(NULL), cp->s);
-                traceMsg(root);
+                char *ts = indi_tstamp(NULL);
+                fprintf(stderr, "%s: Client %d: read ", ts, cp->s);
+                traceMsg(root,ts);
             }
             else if (verbose > 1)
             {
@@ -1775,8 +1836,9 @@ static int readFromDriver(DvrInfo *dp)
 
         if (verbose > 2)
         {
-            fprintf(stderr, "%s: Driver %s: read ", indi_tstamp(0), dp->name);
-            traceMsg(root);
+            char *ts = indi_tstamp(NULL);
+            fprintf(stderr, "%s: Driver %s: read ", ts, dp->name);
+            traceMsg(root,ts);
         }
         else if (verbose > 1)
         {
