@@ -799,6 +799,8 @@ static void shutdownDvr(DvrInfo *dp, int restart)
         XMLEle *root = addXMLEle(NULL, "delProperty");
         addXMLAtt(root, "device", dp->dev[i]);
 
+        /* Ensure timestamp is prefixed to line sent to STDERR */
+        fprintf(stderr, "%s: Driver shutdown: ", indi_tstamp(NULL));
         prXMLEle(stderr, root, 0);
         Msg *mp = newMsg();
 
@@ -1038,6 +1040,7 @@ static void newFIFO(void)
     char line[MAXRBUF];
     DvrInfo *dp  = NULL;
     int startCmd = 0, i = 0, remoteDriver = 0;
+    char* ts = indi_tstamp(NULL);
 
     while (i < MAXRBUF)
     {
@@ -1060,7 +1063,7 @@ static void newFIFO(void)
         }
 
         if (verbose)
-            fprintf(stderr, "FIFO: %s\n", line);
+            fprintf(stderr, "%s: FIFO: %s\n", ts, line);
 
         char cmd[MAXSBUF], arg[4][1], var[4][MAXSBUF], tDriver[MAXSBUF], tName[MAXSBUF], envConfig[MAXSBUF],
              envSkel[MAXSBUF], envPrefix[MAXSBUF];
@@ -1112,7 +1115,7 @@ static void newFIFO(void)
                 tName[MAXSBUF - 1] = '\0';
 
                 if (verbose)
-                    fprintf(stderr, "With name: %s\n", tName);
+                    fprintf(stderr, "%s: With name: %s\n", ts, tName);
             }
             else if (arg[j][0] == 'c')
             {
@@ -1120,7 +1123,7 @@ static void newFIFO(void)
                 envConfig[MAXSBUF - 1] = '\0';
 
                 if (verbose)
-                    fprintf(stderr, "With config: %s\n", envConfig);
+                    fprintf(stderr, "%s: With config: %s\n", ts, envConfig);
             }
             else if (arg[j][0] == 's')
             {
@@ -1128,7 +1131,7 @@ static void newFIFO(void)
                 envSkel[MAXSBUF - 1] = '\0';
 
                 if (verbose)
-                    fprintf(stderr, "With skeketon: %s\n", envSkel);
+                    fprintf(stderr, "%s: With skeketon: %s\n", ts, envSkel);
             }
             else if (arg[j][0] == 'p')
             {
@@ -1136,7 +1139,7 @@ static void newFIFO(void)
                 envPrefix[MAXSBUF - 1] = '\0';
 
                 if (verbose)
-                    fprintf(stderr, "With prefix: %s\n", envPrefix);
+                    fprintf(stderr, "%s: With prefix: %s\n", ts, envPrefix);
             }
         }
 
@@ -1148,7 +1151,7 @@ static void newFIFO(void)
         if (startCmd)
         {
             if (verbose)
-                fprintf(stderr, "FIFO: Starting driver %s\n", tDriver);
+                fprintf(stderr, "%s: FIFO: Starting driver %s\n", ts, tDriver);
             dp = allocDvr();
             strncpy(dp->name, tDriver, MAXINDIDEVICE);
 
@@ -1168,17 +1171,17 @@ static void newFIFO(void)
         {
             for (dp = dvrinfo; dp < &dvrinfo[ndvrinfo]; dp++)
             {
-                fprintf(stderr, "dp->name: %s - tDriver: %s\n", dp->name, tDriver);
+                fprintf(stderr, "%s: dp->name: %s - tDriver: %s\n", ts, dp->name, tDriver);
                 if (!strcmp(dp->name, tDriver) && dp->active == 1)
                 {
-                    fprintf(stderr, "name: %s - dp->dev[0]: %s\n", tName, dp->dev[0]);
+                    fprintf(stderr, "%s: name: %s - dp->dev[0]: %s\n", ts, tName, dp->dev[0]);
 
                     /* If device name is given, check against it before shutting down */
                     //if (tName[0] && strcmp(dp->dev[0], tName))
                     if (tName[0] && isDeviceInDriver(tName, dp) == 0)
                         continue;
                     if (verbose)
-                        fprintf(stderr, "FIFO: Shutting down driver: %s\n", tDriver);
+                        fprintf(stderr, "%s: FIFO: Shutting down driver: %s\n", ts, tDriver);
 
                     //                    for (i = 0; i < dp->ndev; i++)
                     //                    {
