@@ -721,7 +721,7 @@ static void startLocalDvr(DvrInfo *dp)
     char buf[64];
     int fdstdin;
     int fdstdout;
-    int fdctrl;
+    /*int fdctrl; */
 
 #ifdef OSX_EMBEDED_MODE
     fprintf(stderr, "STARTING \"%s\"\n", dp->name);
@@ -739,11 +739,13 @@ static void startLocalDvr(DvrInfo *dp)
         fprintf(stderr, "%s: stdout pipe: %s\n", indi_tstamp(NULL), strerror(errno));
         Bye();
     }
+#   if 0
     if ((fdctrl=open_named_fifo(O_RDONLY, dp->name, ".ctrl", NULL)) < 0)
     {
         fprintf(stderr, "%s: stderr pipe: %s\n", indi_tstamp(NULL), strerror(errno));
         Bye();
     }
+#   endif/*0*/
 
     /* record pid, io channels, init lp and snoop list */
     dp->pid = LOCALDVR;
@@ -751,7 +753,9 @@ static void startLocalDvr(DvrInfo *dp)
     dp->port    = -1;
     dp->wfd     = fdstdin;
     dp->rfd     = fdstdout;
+#   if 0
     dp->efd     = fdctrl;
+#   endif/*0*/
     dp->lp      = newLilXML();
     dp->msgq    = newFQ(1);
     dp->sprops  = (Property *)malloc(1); /* seed for realloc */
@@ -771,8 +775,8 @@ static void startLocalDvr(DvrInfo *dp)
     mp->count++;
 
     if (verbose > 0)
-        fprintf(stderr, "%s: Driver %s: pid=%d rfd=%d wfd=%d efd=%d\n", indi_tstamp(NULL), dp->name, dp->pid, dp->rfd,
-                dp->wfd, dp->efd);
+        fprintf(stderr, "%s: Driver %s: pid=%d rfd=%d wfd=%d\n", indi_tstamp(NULL), dp->name, dp->pid, dp->rfd,
+                dp->wfd);
 }
 
 /* start the given INDI driver process or connection.
@@ -824,7 +828,9 @@ static void shutdownDvr(DvrInfo *dp, int restart)
         /* close local named FIFOs */
         close(dp->wfd);
         close(dp->rfd);
+#       if 0
         close(dp->efd);
+#       endif/*0*/
     }
 
 #ifdef OSX_EMBEDED_MODE
@@ -1611,6 +1617,7 @@ static int readFromClient(ClInfo *cp)
     return (shutany ? -1 : 0);
 }
 
+#if 0
 /* read more from the given driver stderr, add prefix and send to our stderr.
  * return 0 if ok else -1 if had to restart.
  */
@@ -1648,6 +1655,7 @@ static int stderrFromDriver(DvrInfo *dp)
 
     return (0);
 }
+#endif/*0*/
 
 /* add dev/name to dp's snooping list.
  * init with blob mode set to B_NEVER.
@@ -1975,12 +1983,14 @@ static void indiRun(void)
             FD_SET(dp->rfd, &rs);
             if (dp->rfd > maxfd)
                 maxfd = dp->rfd;
+#           if 0
             if (dp->pid != REMOTEDVR)
             {
                 FD_SET(dp->efd, &rs);
                 if (dp->efd > maxfd)
                     maxfd = dp->efd;
             }
+#           endif/*0*/
             if (nFQ(dp->msgq) > 0)
             {
                 FD_SET(dp->wfd, &ws);
@@ -2041,12 +2051,14 @@ static void indiRun(void)
         DvrInfo *dp = &dvrinfo[i];
         if (dp->active)
         {
+#           if 0
             if (dp->pid != REMOTEDVR && FD_ISSET(dp->efd, &rs))
             {
                 if (stderrFromDriver(dp) < 0)
                     return; /* fds effected */
                 s--;
             }
+#           endif/*0*/
             if (s > 0 && FD_ISSET(dp->rfd, &rs))
             {
                 if (readFromDriver(dp) < 0)
