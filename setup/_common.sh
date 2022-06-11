@@ -111,7 +111,7 @@ function clone_or_update_and_cd() {
     fi
     git config core.sharedRepository group
     if [[ $MAGAOX_ROLE != vm ]]; then
-      sudo chown -Rv :magaox-dev $destdir
+      sudo chown -R :magaox-dev $destdir
       sudo chmod -R g=rwX $destdir
       # n.b. can't be recursive because g+s on files means something else
       # so we find all directories and individually chmod them:
