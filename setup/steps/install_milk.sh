@@ -14,17 +14,29 @@ bash -x ./fetch_cacao_dev.sh
 
 mkdir -p _build
 cd _build
-cmake ..
+
+pythonExe=/opt/miniconda3/bin/python
+$pythonExe -m pip install pybind11
+
+milkCmakeArgs="-Dbuild_python_module=ON -DPYTHON_EXECUTABLE=${pythonExe}"
+
+if [[ $MAGAOX_ROLE == TIC || $MAGAOX_ROLE == ICC || $MAGAOX_ROLE == RTC || $MAGAOX_ROLE == AOC ]]; then
+    milkCmakeArgs="-DUSE_CUDA=ON ${milkCmakeArgs}"
+fi
+
+cmake .. $milkCmakeArgs
 make
 sudo make install
 
 milkSuffix=bin/milk
 milkBinary=$(grep -e "${milkSuffix}$" ./install_manifest.txt)
-milkBinPath=${milkBinary/${milkSuffix}/bin}
+milkPath=${milkBinary/${milkSuffix}/}
 
-if [[ $(which milk) != $milkBinary ]]; then
-    existingMilk=$(which milk)
-    log_warn "Found existing milk binary at $existingMilk"
+if command -v milk; then
+    log_warn "Found existing milk binary at $(command -v milk)"
 fi
-
-echo "export PATH=\"\$PATH:${milkBinPath}\"" | sudo tee /etc/profile.d/milk-bin-path.sh
+sudo ln -sf $milkPath /usr/local/milk
+echo "/usr/local/milk/lib" | sudo tee /etc/ld.so.conf.d/milk.conf
+sudo ldconfig
+echo "export PATH=\"\$PATH:/usr/local/milk/bin\"" | sudo tee /etc/profile.d/milk.sh
+echo "export PKG_CONFIG_PATH=\$PKG_CONFIG_PATH:/usr/local/milk/lib/pkgconfig" | sudo tee -a /etc/profile.d/milk.sh
