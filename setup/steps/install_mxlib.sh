@@ -39,6 +39,7 @@ PREFIX = /usr/local
 CXXFLAGS += -DMX_OLD_GSL
 INCLUDES += -I/usr/local/cuda-11.1/targets/x86_64-linux/include/
 NEED_CUDA = no
+EIGEN_CFLAGS = 
 HERE
 
 # Ensure mxlib installs to /usr/local (not $HOME)
@@ -51,8 +52,8 @@ else
   exit 1
 fi
 make
-make install
+sudo make install
 # Sanity check: make sure gengithead.sh is available systemwide in /usr/local/bin
 gengithead.sh ./ ./include/mxlib_uncomp_version.h MXLIB_UNCOMP
 # Ensure all users get $MXMAKEFILE pointing to this install by default
-echo "export MXMAKEFILE=\"$MXLIBROOT/mk/MxApp.mk\"" | tee /etc/profile.d/mxmakefile.sh
+echo "export MXMAKEFILE=\"$MXLIBROOT/mk/MxApp.mk\"" | sudo tee /etc/profile.d/mxmakefile.sh
