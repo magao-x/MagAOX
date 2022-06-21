@@ -640,7 +640,7 @@ private: // Internal attributes and interfaces
             char c10[10];
             errno = 0;
             // read(2) will throw an EAGAIN/EWOULDBLOCK errno eventually
-            // \todo is that correct, or could this loop forever?
+            // \todo convince myself this cannot loop forever?
             lenc10 = ::read(m_fd,c10,10);
             if (lenc10 > 0) {
                 // Append read input data to buffer
