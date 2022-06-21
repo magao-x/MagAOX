@@ -36,7 +36,7 @@ static inline std::string time_to_hb(int offset)
 {
     char c20[20];
     sprintf(c20,"%9.9lx\n",time(0) + offset);
-    return c20;
+    return std::string{c20};
 }
 
 class HexbeatMonitor {
@@ -69,6 +69,7 @@ class HexbeatMonitor {
   *
   *  open_hexbeater - Open FIFO, initialize HexbeatMonitor instance
   * start_hexbeater - Start a hexbeater driver by forking a process
+  *  late_hexbeat   - Check if latest value of hexbeat has expired
   *  read_hexbeater - Read data from FD, parse possible hexbeat
   *  stop_hexbeater - Stop a driver process
   *
@@ -188,12 +189,12 @@ public: // interfaces
       * \arg \c nfds is the ordinal of highest set bit in *fd_set_ptr
       */
     int
-    start_hexbeater(fd_set* fd_set_ptr, int& nfds)
+    start_hexbeater(fd_set* fd_set_ptr, int& nfds, int offset)
     {
         if (m_fd < 0) { errno = 0; return -1; }
 
         // Fork driver, return on error
-        int pid = fork_hexbeater();
+        int pid = fork_hexbeater(offset);
         if (pid < 0) { return pid; }
 
         // Update, select monitoring flag, [fd_set] bit, and nfds
@@ -224,7 +225,7 @@ public: // interfaces
             errno = 0;
             return 0;
         }
-        int istatus = kill(pid, SIGTERM);
+        int istatus = kill(pid, SIGUSR2);
         if (istatus < 0) { return -1; }
         update_status(m_fd, false, fd_set_ptr, nfds);
         return pid;
@@ -247,12 +248,23 @@ public: // interfaces
         if (m_fd < 0 || !m_sel || !fd_set_ptr) { return 0; }
         if (!FD_ISSET(m_fd, fd_set_ptr)) { return 0; }
 
-        // Read data
-        char c10[11];
-        ssize_t lenc10 = ::read(m_fd,c10,10);
-
         // Append data to buffer, parse buffer, clear buffer
-        return append_and_parse(c10, lenc10);
+        return append_and_parse();
+    }
+
+    ////////////////////////////////////////////////////////////////////
+    /// Check if latest value of hexbeat has expired
+    /** \returns false if either not started, or hexbeat is not expired
+      * \returns ture if hexbeater is started and hexbeat is expired
+      * \arg \c hbnow is the current time as a hexbeat string
+      */
+    bool
+    late_hexbeat(std::string hbnow)
+    {
+        // If process is active, AND select is enabled, AND current
+        // hexbeat argument exceeds last hexbeat received, then hexbeat
+        // has expired
+        return m_fd > -1 && m_sel && (hbnow > m_last_hb);
     }
 
     /// Find driver PID by executable and driver name
@@ -265,6 +277,19 @@ public: // interfaces
       * \arg \c argv0 is the argv[0] of the process
       * \arg \c driver_name is the argv[2] of the process,
       * following the -n in argv[3]
+      *
+      * $ echo Sanford | od -a -b -tx1 -tx4
+      * 0000000   S   a   n   f   o   r   d  nl
+      *         123 141 156 146 157 162 144 012
+      *          53  61  6e  66  6f  72  64  0a
+      *                666e6153        0a64726f
+      * 0000010
+      * $
+      * $
+      * $ od -aw32 /proc/12645/cmdline
+      * 0000000   .   /   s   o   m   e   t   h   i   n   g nul   -   n nul   a   a   a   a nul
+      * 0000024
+      * $
       */
     static int
     find_hexbeater_pid(std::string argv0, std::string driver_name)
@@ -313,7 +338,6 @@ public: // interfaces
             // Step through null-terminated command-line tokens
             p = buf;
             char* pend = p + nchars;
-            int wordnum = 0;
             std::vector<std::string> driver_args;
             driver_args.clear();
             while (p<pend)
@@ -325,7 +349,7 @@ public: // interfaces
                 p += driver_args.back().size() + 1;
                 // If argv[1] is not -n, then it's not a driver
                 if (driver_args.size()==2 && driver_args[1]!="-n") { break; }
-                // If argv[0] is some form of "indiserver" then break after 3 argumentss 
+                // If argv[0] is some form of "indiserver" then break after 3 arguments
                 if (driver_args.size()==3 && HexbeatMonitor::is_is(argv0)) { break; }
             }
 
@@ -368,7 +392,7 @@ private: // Internal attributes and interfaces
 
     std::string m_fifo_name; ///< Name of the heartbeat FIFO
 
-    std::string m_buffer{""};  // Accumulated heartbeat data
+    std::string m_buffer{""};  ///< Accumulated heartbeat data
 
     ////////////////////////////////////////////////////////////////////
     /// Update FD and/or select monitor flag, as well as fd_set
@@ -486,11 +510,11 @@ private: // Internal attributes and interfaces
     static std::string
     build_fifo_path(std::string hbname, va_list ap)
     {
-    
+
         // Join varargs to combine the FIFO directory paths, with slashes
         char* cptr;
         std::string fifo_name("");
-        while(cptr=va_arg(ap,char*))
+        while((cptr=va_arg(ap,char*)))
         {
             fifo_name += cptr;
             // Append trailing slash if not already present
@@ -507,12 +531,8 @@ private: // Internal attributes and interfaces
     static int
     open_hexbeater_fifo(std::string fifo_name, HexbeatMonitor* phexbeaters)
     {
-        // Open FIFO read-write and blocking; create FIFO if needed
-        int fd = open(fifo_name.c_str(),O_RDWR|O_CLOEXEC);
-
-        //Old code:
-        //// Open FIFO read-write and non-blocking; create FIFO if needed
-        //int fd = open(fifo_name.c_str(),O_RDWR|O_NONBLOCK|O_CLOEXEC);
+        // Open FIFO read-write and non-blocking; create FIFO if needed
+        int fd = open(fifo_name.c_str(),O_RDWR|O_NONBLOCK|O_CLOEXEC);
 
         int istat{0};
 
@@ -556,7 +576,7 @@ private: // Internal attributes and interfaces
 
     /// Fork the driver if it is not already running
     int
-    fork_hexbeater()
+    fork_hexbeater(int offset)
     {
         // If a running driver was found via m_argv0 and m_hbname,
         // then return its PID ...
@@ -565,7 +585,14 @@ private: // Internal attributes and interfaces
 
         // ... Otherwise fork, ...
         pid = fork();
-        if (pid != 0) { return pid; } // fork failed (<0) or parent (>0)
+        if (pid != 0) {
+            // Parent:  fork error (pid < 0) or success (pid < 0) ...
+            // Add offset (delay) to current time to init last hexbeat
+            if (pid > 0) { m_last_hb = time_to_hb(offset); }
+            return pid;
+        } // fork failed (<0) or parent (>0)
+
+        // Child:  pid == 0
 
         // ... And then exec, the driver
         // Child:  <argv0> -n <name>
@@ -573,7 +600,8 @@ private: // Internal attributes and interfaces
         const char *name = m_hbname.c_str();
         int e = execlp(argv0, argv0, "-n", name, (char*) NULL);
         // \todo pass any error back to the parent (pipe?)
-        exit(1);
+        if (e) exit(-11);
+        return -1;   // Execution should never get here
     }
 
     /// Flush and discard data from this instance's open FIFO
@@ -586,7 +614,6 @@ private: // Internal attributes and interfaces
 
         struct timeval tv;
         char c1024[1024];
-        int iselect;
         fd_set fdset;
         FD_ZERO(&fdset);
         while (1)
@@ -602,17 +629,31 @@ private: // Internal attributes and interfaces
     /** Called by public interface read_hexbeater(...) above
       * \returns -1 on error (e.g. if lenc10 is negative)
       * \returns 0 for either successful, or insufficient data to, parse
-      * \arg \c cptr is a pointer to the data frome ::read(2)
-      * \arg \c lencptr is the data count read by read(2), or -1 (error)
       */
     int
-    append_and_parse(char* cptr, ssize_t lencptr)
+    append_and_parse()
     {
-        // Read error
-        if (lencptr < 0) { return -1; }
+        // Read data repeatedly and append onto buffer until read error
+        ssize_t lenc10;
+        do
+        {
+            char c10[10];
+            errno = 0;
+            // read(2) will throw an EAGAIN/EWOULDBLOCK errno eventually
+            // \todo is that correct, or could this loop forever?
+            lenc10 = ::read(m_fd,c10,10);
+            if (lenc10 > 0) {
+                // Append read input data to buffer
+                m_buffer.append(c10, lenc10);
+                int L = m_buffer.size();
+                // Erase any data too old to be of use; 20 allows for
+                // full 9-char hexbeat + NL, plus 10 more chars w/o NL
+                if (L > 20) { m_buffer.erase(0, L-20); }
+            }
+        } while ( lenc10 > -1);
 
-        // Append read input data to buffer
-        if (lencptr) { m_buffer.append(cptr, lencptr); }
+        // Read error
+        if (errno != EWOULDBLOCK && errno != EAGAIN) { return -1; }
 
         // Find locations in buffer of start of heartbeat and/or of '\n'
         std::size_t inl;

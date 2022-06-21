@@ -9,67 +9,74 @@ template <int HBR_FD_SETSIZE = MACRO_FD_SETSIZE>
 class resurrectorT
 {
 private:
-    fd_set m_fdset_copy; //< ***COPY*** of active set of hexbeat file descriptors;
-                     //  N.B. DO NOT PASS THIS fd_set to select(2)!
+    int m_nfds{0}; ///< ordinal of highest set bit in m_fdset_cpy
 
-    int m_nfds{0}; //< 1 + highest value of hexbeat file descriptors in m_fdset_copy
+    fd_set m_fdset_cpy; ///< ***COPY*** of active set bits of hexbeat file descriptors;
+                        ///  N.B. DO NOT PASS THIS fd_set to select(2)!
 
-    HexbeatMonitor m_hbmarr[HBR_FD_SETSIZE]; //< array of hexbeat monitors, active or not
+    int m_delay{10}; ///< Initial offset of hexbeat value when starting hexbeaters
 
-    //std::set<int> m_fds[HBR_FD_SETSIZE]; //< FDs of all hexbeaters in m_hbmarr
-    std::set<int> m_fds; //< FDs of all hexbeaters in m_hbmarr
+    HexbeatMonitor m_hbmarr[HBR_FD_SETSIZE]; ///< array of hexbeat monitors, active or not
+
+    std::set<int> m_fds; ///< FDs of all opened hexbeaters in m_hbmarr
 
 public:
     /// Constructor
-    /** Ensures FD set copy is empty
+    /** Ensures FD set copy is all zeros, and set<int> of FD is empty
       */
-    resurrectorT(void) : m_nfds(0) { FD_ZERO(&m_fdset_copy); }
-
-    std::vector<int>
-    one_cycle()
+    resurrectorT(void) : m_nfds(0), m_fds({})
     {
-        std::vector<int> rtn;
-        fd_set lcl_fdset{m_fdset_copy};
-        struct timeval tv{1,0};
-        int iselect = select(m_nfds, m_nfds > 0 ? &lcl_fdset : (fd_set*)0,0,0, &tv);
+        FD_ZERO(&m_fdset_cpy);
+    }
+
+    /// Run one select/read/check/restart cycle
+    /** \returns std::vector<int> of FDs with expired hexbeat timestamps
+      * \arg \c ptv - pointer to struct timeval of select(2) timeout
+      * \todo ensure buffer is empty after read_hexbeater
+      */
+    void
+    srcr_cycle(struct timeval *ptv)
+    {
+        errno = 0;
+        fd_set lcl_fdset{m_fdset_cpy};
+        int iselect = select(m_nfds, &lcl_fdset,0,0, ptv);
+
         if (iselect < 0)
         {
-            tv.tv_sec = 1;
+            // On select error, pause for 0.999999s
+            struct timeval tv{0,999999};
             select(0, 0,0,0, &tv);
-            FD_ZERO(&lcl_fdset);
+            return;
         }
 
-        std::string current_hb = time_to_hb(0);
+        std::string hbnow = time_to_hb(0);
 
-        rtn.clear();
+        std::vector<int> expired_fds{};
 
-        for (auto ifd : m_fds)
+        for (auto fd : m_fds)
         {
-            m_hbmarr[ifd].read_fifo(&lcl_fdset);
-            if (current_hb > m_hbmarr[ifd].last_hb()) { rtn.push_back(ifd); }
+            HexbeatMonitor* phb = m_hbmarr + fd;
+            phb->read_hexbeater(&lcl_fdset);
+            if (!phb->late_hexbeat(hbnow)) { continue; }
+            // \todo ensure read buffer is empty
+            phb->stop_hexbeater(&m_fdset_cpy, m_nfds);
+            struct timeval tv{0,99999};
+            select(0, 0,0,0, &tv);
+            phb->start_hexbeater(&m_fdset_cpy, m_nfds,m_delay);
         }
-        return rtn;
     }
 
     /// Add one hexbeat monitor
     int
-    add_hexbeat(std::string argv0, std::string hbname, ...)
+    open_hexbeater(std::string argv0, std::string hbname, ...)
     {
         // Exit with error if hbname is already present in m_hbmarr
         if (find_hbm_by_name(hbname) > -1) { errno = EEXIST; return -1; }
 
-        // Initialize varargs
-        va_list ap;
-        va_start(ap, hbname);
-
-        // Open new FIFO
-        int newfd = HexbeatMonitor::open_hexbeater(argv0, hbname
-                                                  , &m_fdset_copy
-                                                  , m_nfds
-                                                  , m_hbmarr, ap
-                                                  );
-
-        // Clean up varargs 
+        // Initialize varargs; open new FIFO; clean up varargs 
+        va_list ap; va_start(ap, hbname);
+        int newfd = HexbeatMonitor::open_hexbeater
+                    (argv0, hbname, &m_fdset_cpy, m_nfds, m_hbmarr, ap);
         va_end(ap);
 
         if (newfd < 0) { return -1; }
@@ -79,28 +86,42 @@ public:
         return newfd;
     }
 
-    /// Return FIFO name of element ihbm of m_hbmarr array
-    /** Value will be either "" if HexbeatMonitor does not have an
-      * associated hexbeat channel (e.g. FIFO /.../<hbname>.hb),
-      * or it will be m_fifo_name from that HexbeatMonitor  instance
-      */
-    std::string
-    fifo_name_hbm(int ihbm)
+    /// Start one hexbeat monitor
+    int
+    start_hexbeater(int fd)
     {
-        if (FDhbm(ihbm) < 0) { return std::string(""); }
-        return m_hbmarr[ihbm].fifo_name();
+        if (m_fds.find(fd) == m_fds.end()) { return -1; }
+        return
+            m_hbmarr[fd].start_hexbeater(&m_fdset_cpy, m_nfds, m_delay);
     }
 
-    /// Return FD of element ihbm of m_hbmarr array
-    /** Value will be either -1 if HexbeatMonitor does not have an
+    /// Return FIFO name of HexbeatMonitor element fd of m_hbmarr array
+    /** \returns "" if HexbeatMonitor state is inactive
+      * \returns HexbeatMonitor FIFO name if state is opened or started
+      * \arg -c fd - offset into m_hbmarr
+      * Value will be either "" if HexbeatMonitor does not have an
       * associated hexbeat channel (e.g. FIFO /.../<hbname>.hb),
-      * or it will be ihbm
+      * or it will be m_fifo_name from that HexbeatMonitor instance
+      */
+    std::string
+    fifo_name_hbm(int fd)
+    {
+        if (FDhbm(fd) < 0) { return std::string(""); }
+        return m_hbmarr[fd].fifo_name();
+    }
+
+    /// Return FD of HexbeatMonitor element fd of m_hbmarr array
+    /** \returns -999999 if fd is invalid
+      * \returns -1 if HexbeatMonitor state is inactive
+      * \returns fd if HexbeatMonitor state is opened or started
+      * \arg -c fd - offset into m_hbmarr
+      * Value will be either negative or fd
       */
     int
-    FDhbm(int ihbm)
+    FDhbm(int fd)
     {
-        if (ihbm < 0 || ihbm >= HBR_FD_SETSIZE) { return -999999; }
-        return m_hbmarr[ihbm].FD();
+        if (fd < 0 || fd >= HBR_FD_SETSIZE) { return -999999; }
+        return m_hbmarr[fd].FD();
     }
 
     /// Find FD from set m_fds of item in m_hbmarray with name hbmname
@@ -110,24 +131,20 @@ public:
     int
     find_hbm_by_name(const std::string hbmname)
     {
-        for (auto it : m_fds)
+        for (auto fd : m_fds)
         {
-            if (FDhbm(it) < 0) { continue; }
-            if (hbmname == m_hbmarr[it].hbname()) { return it; }
+            if (FDhbm(fd) < 0) { continue; }
+            if (hbmname == m_hbmarr[fd].hbname()) { return fd; }
         }
-        //for (auto it = m_fds.begin(); it != m_fds.end(); ++it)
-        //{
-        //    if (FDhbm(*it) < 0) { continue; }
-        //    if (hbmname == m_hbmarr[*it].hbname()) { return *it; }
-        //}
         return -1;
     }
 
+    /// Find PID of process of element fd of m_hbmarr array
     int
-    find_pid(int ihbm)
+    find_pid(int fd)
     {
-        if (ihbm < 0 || ihbm >= HBR_FD_SETSIZE) { return -999999; }
-        return m_hbmarr[ihbm].find_hexbeater_pid();
+        if (fd < 0 || fd >= HBR_FD_SETSIZE) { return -999999; }
+        return m_hbmarr[fd].find_hexbeater_pid();
     }
 
     /// Debugging
