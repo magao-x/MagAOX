@@ -30,35 +30,57 @@ public:
     }
 
     /// Run one select/read/check/restart cycle
-    /** \returns std::vector<int> of FDs with expired hexbeat timestamps
-      * \arg \c ptv - pointer to struct timeval of select(2) timeout
+    /** \arg \c ptv - pointer to struct timeval of select(2) timeout
       * \todo ensure buffer is empty after read_hexbeater
       */
     void
     srcr_cycle(struct timeval *ptv)
     {
+        // Copy current class member of [fd_set] bits to local [fd_set],
+        // then call select(2) to determine if any hexbeat FDs have data
         errno = 0;
         fd_set lcl_fdset{m_fdset_cpy};
         int iselect = select(m_nfds, &lcl_fdset,0,0, ptv);
 
+        // Handle select(2) error
         if (iselect < 0)
         {
-            // On select error, pause for 0.999999s
+            // Pause for 0.999999s
             struct timeval tv{0,999999};
             select(0, 0,0,0, &tv);
             return;
         }
 
+        // Make current time a hexbeat to compare with incoming hexbeats
+        // - The 0 is the offset from the current time
+        // - Incoming hexbeats will have a positive offset relative to
+        //   the time they are created; that offset will be in effect a
+        //   timeout for the hexbeater process that sends it.  By using
+        //   this approach, the timeout can be specific to the hexbeater
+        //   process, and this resurrector process does not need to keep
+        //   track of the individual hexbeaters' timeouts.
         std::string hbnow = time_to_hb(0);
 
-        std::vector<int> expired_fds{};
-
+        // Loop on the active FDs, each representing an active hexbeater
         for (auto fd : m_fds)
         {
+            // Get a pointer to the HexbeatMonitor instance in the array
             HexbeatMonitor* phb = m_hbmarr + fd;
+
+            // Read any hexbeat data from the hexbeater FIFO, compare
+            // the local hexbeat (hbnow, above) to the latest received
+            // hexbeat, and if that received hexbeat has not timed out,
+            // then continue to the the next hexbeater
             phb->read_hexbeater(&lcl_fdset);
             if (!phb->late_hexbeat(hbnow)) { continue; }
-            // \todo ensure read buffer is empty
+
+            // To here, the current hexbeater, represented by the fd
+            // from m_fds and *phb, has timed out.  Attempt to Stop the
+            // hexbeater process, in case it is locked up, then wait
+            // for a second, then re-start a new hexbeater process.
+            // Pass the the [fd_set] bits (m_fdset_cpy) and the range of
+            // bits (m_nfds) for the active hexbeaters to be updated
+            // with each call
             phb->stop_hexbeater(&m_fdset_cpy, m_nfds);
             struct timeval tv{0,99999};
             select(0, 0,0,0, &tv);
