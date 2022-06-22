@@ -90,7 +90,7 @@ public:
 
     /// Add one hexbeat monitor
     int
-    open_hexbeater(std::string argv0, std::string hbname, ...)
+    open_hexbeater(const std::string& argv0, const std::string& hbname, ...)
     {
         // Exit with error if hbname is already present in m_hbmarr
         if (find_hbm_by_name(hbname) > -1) { errno = EEXIST; return -1; }
@@ -151,7 +151,7 @@ public:
       * or it will be the FD of the HexbeatMonitor with that name
       */
     int
-    find_hbm_by_name(const std::string hbmname)
+    find_hbm_by_name(const std::string& hbmname)
     {
         for (auto fd : m_fds)
         {

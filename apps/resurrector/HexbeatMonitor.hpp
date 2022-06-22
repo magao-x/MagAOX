@@ -152,7 +152,7 @@ public: // interfaces
       * \todo make errors throw exceptions
       */
     static int
-    open_hexbeater(std::string argv0, std::string hbname
+    open_hexbeater(const std::string& argv0, const std::string& hbname
                   , fd_set* fd_set_ptr, int& nfds
                   , HexbeatMonitor* phexbeaters
                   , va_list ap
@@ -259,7 +259,7 @@ public: // interfaces
       * \arg \c hbnow is the current time as a hexbeat string
       */
     bool
-    late_hexbeat(std::string hbnow)
+    late_hexbeat(const std::string& hbnow)
     {
         // If process is active, AND select is enabled, AND current
         // hexbeat argument exceeds last hexbeat received, then hexbeat
@@ -292,7 +292,7 @@ public: // interfaces
       * $
       */
     static int
-    find_hexbeater_pid(std::string argv0, std::string driver_name)
+    find_hexbeater_pid(const std::string& argv0, const std::string& driver_name)
     {
         // Open the /proc/ directory
         DIR *pdir;
@@ -491,7 +491,7 @@ private: // Internal attributes and interfaces
       *   - or 9 hexadecimal digits did not precede the last newline
       */
     static std::size_t
-    hex9_nlterminated(std::string buffer, std::size_t& inl)
+    hex9_nlterminated(const std::string& buffer, std::size_t& inl)
     {
         // Look for last newline delimiter with at least 9 preceding
         // characters
@@ -508,7 +508,7 @@ private: // Internal attributes and interfaces
 
     /// Build FIFO pathname
     static std::string
-    build_fifo_path(std::string hbname, va_list ap)
+    build_fifo_path(const std::string& hbname, va_list ap)
     {
 
         // Join varargs to combine the FIFO directory paths, with slashes
@@ -529,7 +529,7 @@ private: // Internal attributes and interfaces
     }
 
     static int
-    open_hexbeater_fifo(std::string fifo_name, HexbeatMonitor* phexbeaters)
+    open_hexbeater_fifo(const std::string& fifo_name, HexbeatMonitor* phexbeaters)
     {
         // Open FIFO read-write and non-blocking; create FIFO if needed
         int fd = open(fifo_name.c_str(),O_RDWR|O_NONBLOCK|O_CLOEXEC);
@@ -691,7 +691,7 @@ private: // Internal attributes and interfaces
 
     /// \returns true if argv0 is some form of indiserver, else false
     static bool
-    is_is(std::string argv0)
+    is_is(const std::string& argv0)
     {
     const std::string is ("indiserver");
     const std::string slashis ("/indiserver");
