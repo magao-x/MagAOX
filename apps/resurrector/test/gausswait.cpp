@@ -54,7 +54,7 @@ extern "C" {
 // Random Number Generator:  Gaussian distribution; mean=0; stddev=0.8
 static std::random_device rd{};
 static std::mt19937 gen{rd()};
-static std::normal_distribution<> gaussian{0,0.8};
+static std::normal_distribution<> gaussian{0,0.7};
 
 // Save some static information e.g. to be written to std::cerr on exit
 const char unknown[] = { "<unknown>" };  // Process name until -n parsed
@@ -198,7 +198,7 @@ main(int argc, char** argv)
         static_timeout = timeout;
 
         // Send hexbeat with a timestamp 2s in the future
-        send_hexbeat(fdhb, 2);
+        send_hexbeat(fdhb, 3);
 
         // Use select to wait for the random timeout
         select(0, 0,0,0, &timeout);
