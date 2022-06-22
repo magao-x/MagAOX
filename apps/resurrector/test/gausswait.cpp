@@ -197,7 +197,7 @@ main(int argc, char** argv)
         gauss_timeval(1.0, &timeout);
         static_timeout = timeout;
 
-        // Send hexbeat with a timestamp 2s in the future
+        // Send hexbeat with a timestamp 3s in the future
         send_hexbeat(fdhb, 3);
 
         // Use select to wait for the random timeout
