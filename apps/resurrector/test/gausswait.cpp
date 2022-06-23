@@ -51,10 +51,10 @@ extern "C" {
 #define TICKMASK (TICKDIVISOR - 1)
 #define TICKUSPERTICK (1000000/TICKDIVISOR)
 
-// Random Number Generator:  Gaussian distribution; mean=0; stddev=0.8
+// Random Number Generator:  Gaussian distribution; mean=0; stddev=1.0
 static std::random_device rd{};
 static std::mt19937 gen{rd()};
-static std::normal_distribution<> gaussian{0,0.7};
+static std::normal_distribution<> gaussian{0,1.0};
 
 // Save some static information e.g. to be written to std::cerr on exit
 const char unknown[] = { "<unknown>" };  // Process name until -n parsed
@@ -192,7 +192,7 @@ main(int argc, char** argv)
     // Loop; exit via signal, typically SIGUSR2; N.B. SIGINT is ignored
     do
     {
-        // Generate random timeout, save to static memory
+        // Generate random timeout with stddev=1s, save to static memory
         struct timeval timeout;
         gauss_timeval(1.0, &timeout);
         static_timeout = timeout;
