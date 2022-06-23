@@ -294,15 +294,6 @@ public: // interfaces
         // If process is active, AND select is enabled, AND current
         // hexbeat argument exceeds last hexbeat received, then hexbeat
         // has expired
-if (m_fd > -1 && m_sel)
-{
-std::cerr
-<<m_hbname<<":  ["
-<<m_last_hb.substr(0,9)<<"]=m_last_hb;["
-<<hbnow.substr(0,9)<<"]=hbnow;["
-<<m_buffer.substr(0,m_buffer.size()-1)<<"]=m_buffer//HexbeatMonitor::late_hexbeat\n"
-;
-}
         return m_fd > -1 && m_sel && (hbnow > m_last_hb);
     }
 
@@ -470,19 +461,12 @@ private: // Internal attributes and interfaces
             return;
             // \todo perhaps throw an exception if new_fd is not -1
         }
-std::cerr
-<<m_hbname<<":  ["
-<<m_last_hb.substr(0,9)<<"]=m_last_hb(before);["
-;
 
         if (dosel) { m_last_hb = time_to_hb(10); }
         m_fd = new_fd;
         m_sel = dosel;
         // Keep fd_set in synchrony with FD and select monitoring status
         update_fd_set(fd_set_cpy, nfds);
-std::cerr
-<<m_last_hb.substr(0,9)<<"]=m_last_hb(after)//HexbeatMonitor::update_status\n"
-;
     }
 
     ///////////////////////////////////////////////////////////////////
@@ -717,18 +701,9 @@ std::cerr
                 if (L > 20) { m_buffer.erase(0, L-20); }
             }
         } while ( lenc10 > -1);
-std::cerr
-<<m_hbname<<":  ["
-<<m_last_hb.substr(0,9)<<"]=m_last_hb(before);["
-<<m_buffer.substr(0,m_buffer.size()-1)<<"]=m_buffer(before);["
-;
 
         // Read error
         if (errno != EWOULDBLOCK && errno != EAGAIN) {
-std::cerr
-<<m_buffer.substr(0,m_buffer.size()-1)<<"]=m_buffer(after);["
-<<m_last_hb.substr(0,9)<<"]=m_last_hb(after)//HexbeatMonitor::append_and_parse/i\n"
-;
             return -1;
         }
 
@@ -741,10 +716,6 @@ std::cerr
         {
             m_last_hb = m_buffer.substr(hex9, 10);
             m_buffer.erase(0,inl+1);
-std::cerr
-<<m_buffer.substr(0,m_buffer.size()-1)<<"]=m_buffer(after);["
-<<m_last_hb.substr(0,9)<<"]=m_last_hb(after)//HexbeatMonitor::append_and_parse/ii\n"
-;
             return 0;
         }
 
@@ -754,10 +725,6 @@ std::cerr
         if (inl==std::string::npos)
         {
             if (L > 9) { m_buffer.erase(0,L-9); }
-std::cerr
-<<m_buffer.substr(0,m_buffer.size()-1)<<"]=m_buffer(after);["
-<<m_last_hb.substr(0,9)<<"]=m_last_hb(after)//HexbeatMonitor::append_and_parse/iii\n"
-;
             return 0;
         }
 
@@ -771,10 +738,6 @@ std::cerr
             m_buffer.erase(0,inl+1);
         }
 
-std::cerr
-<<m_buffer.substr(0,m_buffer.size()-1)<<"]=m_buffer(after);["
-<<m_last_hb.substr(0,9)<<"]=m_last_hb(after)//HexbeatMonitor::append_and_parse/iv\n"
-;
         return -1;
     }
 
