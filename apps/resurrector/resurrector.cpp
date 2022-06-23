@@ -61,7 +61,7 @@ main(int argc, char** argv)
     do
     {
         struct timeval tv{1,0};
-        resurr.srcr_cycle(&tv);
+        resurr.srcr_cycle(tv);
     } while (1);
 
     return 0;

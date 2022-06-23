@@ -12,7 +12,6 @@
   * \todo add error handling
   * \todo add response to lost heartbeat
   */
-//#include <time.h>
 #include <ctype.h>
 #include <fcntl.h>
 #include <stdio.h>
@@ -22,13 +21,11 @@
 #include <sys/stat.h>
 #include <sys/wait.h>
 #include <sys/types.h>
-//#include <sys/time.h>
 
 #include <string>
 #include <vector>
 #include <sstream>
-//#include <iomanip>
-//#include <iostream>
+#include <iostream>
 
 #include <dirent.h>
 
@@ -111,18 +108,18 @@ class HexbeatMonitor {
   *
   * \todo describe other attributes
   *
-  * fd_set* fd_set_ptr
+  * fd_set& fd_set_cpy
   *
-  * - Input to select(2):  which FDs are tested, and which have data
-  *   This is not an attribute of this class per se, but the bits it
-  *   points to will be declared by the outer process that contains
-  *   instances of this class, and modified by the routines in this
-  *   class.
+  * - COPY of [fd_set] that will be input to select(2):  which FDs are
+  *   tested, and which have data.  This is not an attribute of this
+  *   class per se, but it will be declared by the outer process that
+  *   contains instances of this class, and modified by the routines in
+  *   this class.
   *
   * The update_status(...) and update_fds_set(...) are private functions
   * of this class, and are only called from the public interaces of this
   * class, to ensure a consistent set of values between m_fd, m_sel, and
-  * the contents of the caller's [fd_set] pointed to by fd_set_ptr.
+  * the contents of the caller's [fd_set] referred to by fd_set_cpy.
   *
   * \todo describe process ID convention (<executable> -n <hbmname>)
   */
@@ -149,16 +146,16 @@ public: // interfaces
       *         references from an array of such instances, is also not
       *         known
       *      3) Once the FIFO is opened and its valid (non-negative) FD
-      *         is known, the FD is used as an offset from the phexbeats
-      *         pointer argument to locate the target HexbeatMonitor
+      *         is known, the FD is used as an index into the vhexbeats
+      *         vector argument to locate the target HexbeatMonitor
       *         instance
       * \returns FD (file descriptor) of file opened
       * \arg \c argv0 is the path to the hexbeater executable
       * \arg \c hbname is the hexbeater name (command-line option -n)
-      * \arg \c fd_set_ptr is a pointer to [fd_set] object that contains
-      *                    bit of started hexbeater FDs
-      * \arg \c nfds is the ordinal of highest set bit in *fd_set_ptr
-      * \arg \c phexbeats is a pointer to an array of HexbeatMonitor's
+      * \arg \c fd_set_cpy is an [fd_set] object that contains bits of
+      *                    non-inactive hexbeater FDs
+      * \arg \c nfds is the ordinal of highest set bit in fd_set_cpy
+      * \arg \c vhexbeats is a vector of HexbeatMonitor's
       * \arg ... => varargs are (char*) directory components of the FIFO
       *             path, ending with a NULL
       * N.B. there is no corresponding close_fifo; the FIFO FD (md_fd)
@@ -168,28 +165,25 @@ public: // interfaces
       */
     static int
     open_hexbeater(const std::string& argv0, const std::string& hbname
-                  , fd_set* fd_set_ptr, int& nfds
-                  , HexbeatMonitor* phexbeats
+                  , fd_set& fd_set_cpy, int& nfds
+                  , std::vector<HexbeatMonitor>& vhexbeats
                   , va_list ap
                   )
     {
         // Build the FIFO path, open the FIFO, return on failure
         std::string fifo_name = HexbeatMonitor::build_fifo_path(hbname, ap);
-        int fd = HexbeatMonitor::open_hexbeater_fifo(fifo_name, phexbeats);
+        int fd = HexbeatMonitor::open_hexbeater_fifo(fifo_name, vhexbeats);
         if (fd < 0) { return -1; }
 
-        // On success, make pointer to HeaxbeatMonitor instance
-        HexbeatMonitor* phb = phexbeats + fd;
-
-        // Initialize instance data to opened state, not started ...
-        phb->m_sel = false;  // ... by leaving select monitoring off
-        phb->m_fd = fd;
-        if (fd_set_ptr) { phb->update_fd_set(fd_set_ptr, nfds); }
-        phb->m_argv0 = argv0;
-        phb->m_hbname = hbname;
-        phb->m_last_hb = "000000000";
-        phb->m_fifo_name = fifo_name;
-        phb->m_buffer.clear();
+        // On success, initialize instance data to opened state, not started ...
+        vhexbeats[fd].m_sel = false;  // ... by leaving select monitoring off
+        vhexbeats[fd].m_fd = fd;
+        vhexbeats[fd].update_fd_set(fd_set_cpy, nfds);
+        vhexbeats[fd].m_argv0 = argv0;
+        vhexbeats[fd].m_hbname = hbname;
+        vhexbeats[fd].m_last_hb = "000000000";
+        vhexbeats[fd].m_fifo_name = fifo_name;
+        vhexbeats[fd].m_buffer.clear();
 
         return fd;
     }
@@ -199,15 +193,15 @@ public: // interfaces
       * \returns 0 if that process was already running
       * \returns -1 with errno=0 if this HexbeatMonitor is inactive
       * \returns a value < 0 if fork() fails
-      * \arg \c fd_set_ptr is a pointer to [fd_set] object that contains
-      *                    bit of started hexbeater FDs
-      * \arg \c nfds is the ordinal of highest set bit in *fd_set_ptr
+      * \arg \c fd_set_cpy is an [fd_set] object that contains bits of
+      *                    non-inactive hexbeater FDs
+      * \arg \c nfds is the ordinal of highest set bit in fd_set_cpy
       * \arg \c delay is a time offset used to initialize m_last_hb
       * - so the new heartbeater process has time to startup before
       *   sending its first hexbeat
       */
     int
-    start_hexbeater(fd_set* fd_set_ptr, int& nfds, int delay)
+    start_hexbeater(fd_set& fd_set_cpy, int& nfds, int delay)
     {
         if (m_fd < 0) { errno = 0; return -1; }
 
@@ -216,7 +210,7 @@ public: // interfaces
         if (pid < 0) { return pid; }
 
         // Update, select monitoring flag, [fd_set] bit, and nfds
-        update_status(m_fd, true, fd_set_ptr, nfds);
+        update_status(m_fd, true, fd_set_cpy, nfds);
 
         // Flush the FIFO and return the positive PID
         flushFIFO();
@@ -228,42 +222,42 @@ public: // interfaces
       * \returns 0 if that process was not found
       * \returns -1 with errno=0 if this HexbeatMonitor is inactive
       * \returns -1 with errno!=0 if kill(...) throws an error
-      * \arg \c fd_set_ptr - pointer to [fd_set] object that contains
-      *                      bit of started hexbeater FDs
-      * \arg \c nfds is the ordinal of highest set bit in *fd_set_ptr
+      * \arg \c fd_set_cpy is an [fd_set] object that contains bits of
+      *                    non-inactive hexbeater FDs
+      * \arg \c nfds is the ordinal of highest set bit in fd_set_cpy
       */
     int
-    stop_hexbeater(fd_set* fd_set_ptr, int& nfds)
+    stop_hexbeater(fd_set& fd_set_cpy, int& nfds)
     {
         if (m_fd < 0) { errno = 0; return -1; }
         int pid = find_hexbeater_pid();
         if (pid < 1)
         {
-            update_status(m_fd, false, fd_set_ptr, nfds);
+            update_status(m_fd, false, fd_set_cpy, nfds);
             errno = 0;
             return 0;
         }
         int istatus = kill(pid, SIGUSR2);
         if (istatus < 0) { return -1; }
-        update_status(m_fd, false, fd_set_ptr, nfds);
+        update_status(m_fd, false, fd_set_cpy, nfds);
         return pid;
     }
 
     /// Close this HexbeatMonitor instance
     /** \returns 0 if instance is closed here
       * \returns -1 if instance was already closed
-      * \arg \c fd_set_ptr - pointer to [fd_set] object that contains
-      *                      bit of started hexbeater FDs
-      * \arg \c nfds is the ordinal of highest set bit in *fd_set_ptr
+      * \arg \c fd_set_cpy is an [fd_set] object that contains bits of
+      *                    non-inactive hexbeater FDs
+      * \arg \c nfds is the ordinal of highest set bit in fd_set_cpy
       */
     int
-    close_hexbeater(fd_set* fd_set_ptr, int& nfds)
+    close_hexbeater(fd_set& fd_set_cpy, int& nfds)
     {
         if (m_fd < 0) { return -1; }
         // Stop hexbeater process, if one is running
-        stop_hexbeater(fd_set_ptr, nfds);
+        stop_hexbeater(fd_set_cpy, nfds);
         // Reset FD to -1, update caller's [fd_set], close FD
-        update_status(-1, false, fd_set_ptr, nfds);
+        update_status(-1, false, fd_set_cpy, nfds);
         return 0;
     }
 
@@ -273,16 +267,16 @@ public: // interfaces
       * \returns 0 if no newline is found
       * \returns -1 with errno!=0 if read(...) throws an error
       * \returns -1 if newline found but no hexbeat is parsed
-      * \arg \c fd_set_ptr - pointer to [fd_set] object that was
-      *                      ***modified and output*** by select(2)
+      * \arg \c fd_set_post_select is an [fd_set] object that was
+      *                            ***modified & output*** via select(2)
       */
     int
-    read_hexbeater(fd_set* fd_set_ptr)
+    read_hexbeater(fd_set& fd_set_post_select)
     {
         // If process is inactive, or select disabled, or null [fd_set],
         // or bit is clear in [fd_set], then do nothing
-        if (m_fd < 0 || !m_sel || !fd_set_ptr) { return 0; }
-        if (!FD_ISSET(m_fd, fd_set_ptr)) { return 0; }
+        if (m_fd < 0 || !m_sel) { return 0; }
+        if (!FD_ISSET(m_fd, &fd_set_post_select)) { return 0; }
 
         // Append data to buffer, parse buffer, clear buffer
         return append_and_parse();
@@ -300,6 +294,15 @@ public: // interfaces
         // If process is active, AND select is enabled, AND current
         // hexbeat argument exceeds last hexbeat received, then hexbeat
         // has expired
+if (m_fd > -1 && m_sel)
+{
+std::cerr
+<<m_hbname<<":  ["
+<<m_last_hb.substr(0,9)<<"]=m_last_hb;["
+<<hbnow.substr(0,9)<<"]=hbnow;["
+<<m_buffer.substr(0,m_buffer.size()-1)<<"]=m_buffer//HexbeatMonitor::late_hexbeat\n"
+;
+}
         return m_fd > -1 && m_sel && (hbnow > m_last_hb);
     }
 
@@ -336,7 +339,6 @@ public: // interfaces
 
         pdir = opendir("/proc");
         if (pdir == NULL) {
-            //std::cerr << "Couldn't open [/proc/]\n";
             exit(1);
         }
 
@@ -434,9 +436,9 @@ private: // Internal attributes and interfaces
     /// Update FD and/or select monitor flag, as well as caller's fd_set
     /** \arg \c new_fd is the desired new FD for this instance (Note 1)
       * \arg \c dosel is the new select monitoring flag (m_sel)
-      * \arg \c fd_set_ptr is a pointer to [fd_set] object that contains
-      *                    bits of started hexbeater FDs
-      * \arg \c nfds is the ordinal of highest set bit in *fd_set_ptr
+      * \arg \c fd_set_cpy is an [fd_set] object that contains bits of
+      *                    non-inactive hexbeater FDs
+      * \arg \c nfds is the ordinal of highest set bit in fd_set_cpy
       * Note 1) the value of new_fd will be assigned to instance
       *         attribute m_fd, with the following caveat:  new_fd must
       *         be EITHER the offset of this instance into the caller's
@@ -444,7 +446,7 @@ private: // Internal attributes and interfaces
       *         inactive i.e. m_fd > -1, then new_fd will be 
       */
     void
-    update_status(int new_fd, bool dosel, fd_set* fd_set_ptr, int& nfds)
+    update_status(int new_fd, bool dosel, fd_set& fd_set_cpy, int& nfds)
     {
         // Do nothing if the FD and select monitoring flag do not change
         if (new_fd==m_fd && dosel==m_sel) { return; }
@@ -461,45 +463,54 @@ private: // Internal attributes and interfaces
             // - Close FIFO
             // - Assign m_fd = -1, completing the transition to inactive
             m_sel = false;
-            update_fd_set(fd_set_ptr, nfds);
+            update_fd_set(fd_set_cpy, nfds);
             // ensure FIFO is closed!
             close(m_fd);
             m_fd = -1;
             return;
             // \todo perhaps throw an exception if new_fd is not -1
         }
+std::cerr
+<<m_hbname<<":  ["
+<<m_last_hb.substr(0,9)<<"]=m_last_hb(before);["
+;
 
-        if (dosel) { m_last_hb = time_to_hb(30); }
+        if (dosel) { m_last_hb = time_to_hb(10); }
         m_fd = new_fd;
         m_sel = dosel;
         // Keep fd_set in synchrony with FD and select monitoring status
-        update_fd_set(fd_set_ptr, nfds);
+        update_fd_set(fd_set_cpy, nfds);
+std::cerr
+<<m_last_hb.substr(0,9)<<"]=m_last_hb(after)//HexbeatMonitor::update_status\n"
+;
     }
 
     ///////////////////////////////////////////////////////////////////
     /// Turn select(2) monitoring on or off for this FD
+    /** \arg \c fd_set_cpy is an [fd_set] object that contains bits of
+      *                    non-inactive hexbeater FDs
+      * \arg \c nfds is the ordinal of highest set bit in fd_set_cpy
+      */
     void
-    update_fd_set(fd_set* fd_set_ptr, int& nfds)
+    update_fd_set(fd_set& fd_set_cpy, int& nfds)
     {
         // Process is inactive, ensure its select monitoring is disabled
         if (m_fd < 0) { m_sel = false; return; }
 
-        if (!fd_set_ptr) { return; }
-
         if (m_sel)
         {
             // Turn select monitoring on and return
-            FD_SET(m_fd, fd_set_ptr);
+            FD_SET(m_fd, &fd_set_cpy);
             if (nfds<=m_fd) { nfds = m_fd + 1; }
             return;
         }
 
         // Turn select monitoring off:
-        FD_CLR(m_fd, fd_set_ptr);
+        FD_CLR(m_fd, &fd_set_cpy);
         if (nfds == (m_fd+1))
         {
             // This was last monitored FD:  get next lower monitored FD
-            while ((nfds>0) && !FD_ISSET(nfds-1,fd_set_ptr)) { nfds--; }
+            while ((nfds>0) && !FD_ISSET(nfds-1,&fd_set_cpy)) { nfds--;}
         }
     }
 
@@ -582,7 +593,9 @@ private: // Internal attributes and interfaces
     }
 
     static int
-    open_hexbeater_fifo(const std::string& fifo_name, HexbeatMonitor* phexbeats)
+    open_hexbeater_fifo(const std::string& fifo_name
+                       , std::vector<HexbeatMonitor>& vhexbeats
+                       )
     {
         // Open FIFO read-write and non-blocking; create FIFO if needed
         int fd = open(fifo_name.c_str(),O_RDWR|O_NONBLOCK|O_CLOEXEC);
@@ -607,7 +620,7 @@ private: // Internal attributes and interfaces
         bool not_FIFO = (istat < 0) || !S_ISFIFO(st.st_mode);
 
         // Error if either file is not a FIFO, or FD is already in use
-        if (not_FIFO || (phexbeats[fd].m_fd > -1))
+        if (not_FIFO || (vhexbeats[fd].m_fd > -1))
         {
             close(fd);
             errno = EEXIST;
@@ -704,9 +717,20 @@ private: // Internal attributes and interfaces
                 if (L > 20) { m_buffer.erase(0, L-20); }
             }
         } while ( lenc10 > -1);
+std::cerr
+<<m_hbname<<":  ["
+<<m_last_hb.substr(0,9)<<"]=m_last_hb(before);["
+<<m_buffer.substr(0,m_buffer.size()-1)<<"]=m_buffer(before);["
+;
 
         // Read error
-        if (errno != EWOULDBLOCK && errno != EAGAIN) { return -1; }
+        if (errno != EWOULDBLOCK && errno != EAGAIN) {
+std::cerr
+<<m_buffer.substr(0,m_buffer.size()-1)<<"]=m_buffer(after);["
+<<m_last_hb.substr(0,9)<<"]=m_last_hb(after)//HexbeatMonitor::append_and_parse/i\n"
+;
+            return -1;
+        }
 
         // Find locations in buffer of start of heartbeat and/or of '\n'
         std::size_t inl;
@@ -715,8 +739,12 @@ private: // Internal attributes and interfaces
         // Valid hexbeat found:  store it; erase data through newline
         if (hex9!=std::string::npos)
         {
-            m_last_hb = m_buffer.substr(hex9, 9);
+            m_last_hb = m_buffer.substr(hex9, 10);
             m_buffer.erase(0,inl+1);
+std::cerr
+<<m_buffer.substr(0,m_buffer.size()-1)<<"]=m_buffer(after);["
+<<m_last_hb.substr(0,9)<<"]=m_last_hb(after)//HexbeatMonitor::append_and_parse/ii\n"
+;
             return 0;
         }
 
@@ -726,11 +754,15 @@ private: // Internal attributes and interfaces
         if (inl==std::string::npos)
         {
             if (L > 9) { m_buffer.erase(0,L-9); }
+std::cerr
+<<m_buffer.substr(0,m_buffer.size()-1)<<"]=m_buffer(after);["
+<<m_last_hb.substr(0,9)<<"]=m_last_hb(after)//HexbeatMonitor::append_and_parse/iii\n"
+;
             return 0;
         }
 
         // Newline but no hexbeat:  erase obsolete data or thru newline
-        if ((L-9) > inl)      // TODO:  is this off by 1?
+        if ((L-9) > inl)
         {
             m_buffer.erase(0,L-9);
         }
@@ -739,6 +771,10 @@ private: // Internal attributes and interfaces
             m_buffer.erase(0,inl+1);
         }
 
+std::cerr
+<<m_buffer.substr(0,m_buffer.size()-1)<<"]=m_buffer(after);["
+<<m_last_hb.substr(0,9)<<"]=m_last_hb(after)//HexbeatMonitor::append_and_parse/iv\n"
+;
         return -1;
     }
 
