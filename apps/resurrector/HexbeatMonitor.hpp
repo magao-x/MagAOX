@@ -32,10 +32,10 @@
 
 #include <dirent.h>
 
-static inline std::string time_to_hb(int offset)
+static inline std::string time_to_hb(int delay)
 {
     char c20[20];
-    sprintf(c20,"%9.9lx\n",time(0) + offset);
+    sprintf(c20,"%9.9lx\n",time(0) + delay);
     return std::string{c20};
 }
 
@@ -67,11 +67,16 @@ class HexbeatMonitor {
   * Public Interfaces
   * =================
   *
-  *  open_hexbeater - Open FIFO, initialize HexbeatMonitor instance
-  * start_hexbeater - Start a hexbeater driver by forking a process
-  *  late_hexbeat   - Check if latest value of hexbeat has expired
+  *  open_hexbeater - +Open FIFO, initialize HexbeatMonitor instance
+  * start_hexbeater - Find a hexbeater or start one by forking a process
+  *    late_hexbeat - Check if latest value of hexbeat has expired
   *  read_hexbeater - Read data from FD, parse possible hexbeat
-  *  stop_hexbeater - Stop a driver process
+  *  stop_hexbeater - Stop a hexbeater process
+  * close_hexbeater - Stop a running hexbeater process, close FIFO
+  * find_hexbeater_pid - +Find a hexbeater PID by executable and name
+  * find_hexber_pid - +Find a hexbeater PID by executable and name
+  *
+  * - Interface description+ marked with a plus sign (+) are static
   *
   * Internals
   * =========
@@ -117,7 +122,7 @@ class HexbeatMonitor {
   * The update_status(...) and update_fds_set(...) are private functions
   * of this class, and are only called from the public interaces of this
   * class, to ensure a consistent set of values between m_fd, m_sel, and
-  * the contents pointed to by fd_set_ptr.
+  * the contents of the caller's [fd_set] pointed to by fd_set_ptr.
   *
   * \todo describe process ID convention (<executable> -n <hbmname>)
   */
@@ -137,13 +142,23 @@ public: // interfaces
 
     ////////////////////////////////////////////////////////////////////
     /// Open a named FIFO, load results into HexbeatMonitor instance
-    /** \returns FD (file descriptor) of file opened
+    /** N.B. this is a static interface of the HexbeatMonitor class:
+      *      1) The FIFO's FD is not known when this function is called
+      *      2) Therefore the HexbeatMonitor instance that will contain
+      *         the state of that FIFO, which instance the caller
+      *         references from an array of such instances, is also not
+      *         known
+      *      3) Once the FIFO is opened and its valid (non-negative) FD
+      *         is known, the FD is used as an offset from the phexbeats
+      *         pointer argument to locate the target HexbeatMonitor
+      *         instance
+      * \returns FD (file descriptor) of file opened
       * \arg \c argv0 is the path to the hexbeater executable
-      * \arg \c hbname is the name of the hexbeater (command-line option -n)
+      * \arg \c hbname is the hexbeater name (command-line option -n)
       * \arg \c fd_set_ptr is a pointer to [fd_set] object that contains
       *                    bit of started hexbeater FDs
       * \arg \c nfds is the ordinal of highest set bit in *fd_set_ptr
-      * \arg \c phexbeaters is a pointer to an array of HexbeatMonitor's
+      * \arg \c phexbeats is a pointer to an array of HexbeatMonitor's
       * \arg ... => varargs are (char*) directory components of the FIFO
       *             path, ending with a NULL
       * N.B. there is no corresponding close_fifo; the FIFO FD (md_fd)
@@ -154,17 +169,17 @@ public: // interfaces
     static int
     open_hexbeater(const std::string& argv0, const std::string& hbname
                   , fd_set* fd_set_ptr, int& nfds
-                  , HexbeatMonitor* phexbeaters
+                  , HexbeatMonitor* phexbeats
                   , va_list ap
                   )
     {
         // Build the FIFO path, open the FIFO, return on failure
         std::string fifo_name = HexbeatMonitor::build_fifo_path(hbname, ap);
-        int fd = HexbeatMonitor::open_hexbeater_fifo(fifo_name, phexbeaters);
+        int fd = HexbeatMonitor::open_hexbeater_fifo(fifo_name, phexbeats);
         if (fd < 0) { return -1; }
 
         // On success, make pointer to HeaxbeatMonitor instance
-        HexbeatMonitor* phb = phexbeaters + fd;
+        HexbeatMonitor* phb = phexbeats + fd;
 
         // Initialize instance data to opened state, not started ...
         phb->m_sel = false;  // ... by leaving select monitoring off
@@ -179,22 +194,25 @@ public: // interfaces
         return fd;
     }
 
-    /// Start a hexbeater driver by forking a process
-    /** \returns pid > 0 of started process, and updates FD set
+    /// Find a hexbeater process, or start one via fork(2)
+    /** \returns pid > 0 of found/started process, and updates FD set
       * \returns 0 if that process was already running
       * \returns -1 with errno=0 if this HexbeatMonitor is inactive
       * \returns a value < 0 if fork() fails
       * \arg \c fd_set_ptr is a pointer to [fd_set] object that contains
       *                    bit of started hexbeater FDs
       * \arg \c nfds is the ordinal of highest set bit in *fd_set_ptr
+      * \arg \c delay is a time offset used to initialize m_last_hb
+      * - so the new heartbeater process has time to startup before
+      *   sending its first hexbeat
       */
     int
-    start_hexbeater(fd_set* fd_set_ptr, int& nfds, int offset)
+    start_hexbeater(fd_set* fd_set_ptr, int& nfds, int delay)
     {
         if (m_fd < 0) { errno = 0; return -1; }
 
-        // Fork driver, return on error
-        int pid = fork_hexbeater(offset);
+        // Find running hexbeater or fork new hexbeater; return on error
+        int pid = fork_hexbeater(delay);
         if (pid < 0) { return pid; }
 
         // Update, select monitoring flag, [fd_set] bit, and nfds
@@ -205,7 +223,7 @@ public: // interfaces
         return pid;
     }
 
-    /// Stop a driver process, found by m_argv0 and m_hbname
+    /// Stop a hexbeater process, found by m_argv0 and m_hbname
     /** \returns pid > 0 of stopped process, and updates FD set
       * \returns 0 if that process was not found
       * \returns -1 with errno=0 if this HexbeatMonitor is inactive
@@ -229,6 +247,24 @@ public: // interfaces
         if (istatus < 0) { return -1; }
         update_status(m_fd, false, fd_set_ptr, nfds);
         return pid;
+    }
+
+    /// Close this HexbeatMonitor instance
+    /** \returns 0 if instance is closed here
+      * \returns -1 if instance was already closed
+      * \arg \c fd_set_ptr - pointer to [fd_set] object that contains
+      *                      bit of started hexbeater FDs
+      * \arg \c nfds is the ordinal of highest set bit in *fd_set_ptr
+      */
+    int
+    close_hexbeater(fd_set* fd_set_ptr, int& nfds)
+    {
+        if (m_fd < 0) { return -1; }
+        // Stop hexbeater process, if one is running
+        stop_hexbeater(fd_set_ptr, nfds);
+        // Reset FD to -1, update caller's [fd_set], close FD
+        update_status(-1, false, fd_set_ptr, nfds);
+        return 0;
     }
 
     ////////////////////////////////////////////////////////////////////
@@ -267,15 +303,15 @@ public: // interfaces
         return m_fd > -1 && m_sel && (hbnow > m_last_hb);
     }
 
-    /// Find driver PID by executable and driver name
+    /// Find hexbeater PID by executable and hexbeater name
     /** \returns PID of matching process from /proc/ filesystem
       * N.B. this is a class-static function
       *      - Per-instance function, below, calls this function
-      * The driver must have been started with the command
-      *   argv0 -n driver_name
+      * The hexbeater must have been started with the command
+      *   argv0 -n hexbeater_name
       * or equivalent (e.g. execvp)
       * \arg \c argv0 is the argv[0] of the process
-      * \arg \c driver_name is the argv[2] of the process,
+      * \arg \c hexbeater_name is the argv[2] of the process,
       * following the -n in argv[3]
       *
       * $ echo Sanford | od -a -b -tx1 -tx4
@@ -292,7 +328,7 @@ public: // interfaces
       * $
       */
     static int
-    find_hexbeater_pid(const std::string& argv0, const std::string& driver_name)
+    find_hexbeater_pid(const std::string& argv0, const std::string& hexbeater_name)
     {
         // Open the /proc/ directory
         DIR *pdir;
@@ -330,35 +366,35 @@ public: // interfaces
 
             // cmdline contents contain null terminated command-line
             // tokens, and must contain at least 7 characters:  at least
-            // two for -n; at least one each for argv0 and driver_name;
-            // one for each null terminator
+            // two for -n; at least one each for argv0 and
+            // hexbeater_name; one for each null terminator
             if (nchars < 7) { errno = 0; continue; }
             buf[nchars] = '\0';
 
             // Step through null-terminated command-line tokens
             p = buf;
             char* pend = p + nchars;
-            std::vector<std::string> driver_args;
-            driver_args.clear();
+            std::vector<std::string> hexbeater_args;
+            hexbeater_args.clear();
             while (p<pend)
             {
-                driver_args.push_back(p);
-                // If more than four arguments, then it's not a driver
-                if (driver_args.size()>3) { break; }
+                hexbeater_args.push_back(p);
+                // If more than 3 arguments then it's not a hexbeater
+                if (hexbeater_args.size()>3) { break; }
                 // Advance pointer to next command-line token
-                p += driver_args.back().size() + 1;
-                // If argv[1] is not -n, then it's not a driver
-                if (driver_args.size()==2 && driver_args[1]!="-n") { break; }
+                p += hexbeater_args.back().size() + 1;
+                // If argv[1] is not -n, then it's not a hexbeater
+                if (hexbeater_args.size()==2 && hexbeater_args[1]!="-n") { break; }
                 // If argv[0] is some form of "indiserver" then break after 3 arguments
-                if (driver_args.size()==3 && HexbeatMonitor::is_is(argv0)) { break; }
+                if (hexbeater_args.size()==3 && HexbeatMonitor::is_is(argv0)) { break; }
             }
 
-            // Eliminate non-drivers
-            if ( driver_args.size() != 3) { continue; }
-            if ( driver_args[0] != argv0) { continue; }
-            if ( driver_args[2] != driver_name) { continue; }
+            // Eliminate non-hexbeaters
+            if ( hexbeater_args.size() != 3) { continue; }
+            if ( hexbeater_args[0] != argv0) { continue; }
+            if ( hexbeater_args[2] != hexbeater_name) { continue; }
 
-            // Found a driver:  close dir, read PID, return PID
+            // Found a hexbeater:  close dir, read PID, return PID
             closedir(pdir);
             std::istringstream iss(de->d_name);
             int pid = 0;
@@ -368,7 +404,7 @@ public: // interfaces
 
         save_errno = errno;
 
-        // No matching driver found:  close dir; return bogus PID of 0
+        // No matching hexbeater found:  close dir; return 0 or -1
         closedir(pdir);
         errno = save_errno;
         return save_errno ? -1 : 0;
@@ -394,26 +430,43 @@ private: // Internal attributes and interfaces
 
     std::string m_buffer{""};  ///< Accumulated heartbeat data
 
-    ////////////////////////////////////////////////////////////////////
-    /// Update FD and/or select monitor flag, as well as fd_set
+    // /////////////////////////////////////////////////////////////////
+    /// Update FD and/or select monitor flag, as well as caller's fd_set
+    /** \arg \c new_fd is the desired new FD for this instance (Note 1)
+      * \arg \c dosel is the new select monitoring flag (m_sel)
+      * \arg \c fd_set_ptr is a pointer to [fd_set] object that contains
+      *                    bits of started hexbeater FDs
+      * \arg \c nfds is the ordinal of highest set bit in *fd_set_ptr
+      * Note 1) the value of new_fd will be assigned to instance
+      *         attribute m_fd, with the following caveat:  new_fd must
+      *         be EITHER the offset of this instance into the caller's
+      *         array of instances, OR -1; if the instance is not
+      *         inactive i.e. m_fd > -1, then new_fd will be 
+      */
     void
     update_status(int new_fd, bool dosel, fd_set* fd_set_ptr, int& nfds)
     {
+        // Do nothing if the FD and select monitoring flag do not change
         if (new_fd==m_fd && dosel==m_sel) { return; }
 
-        if (new_fd!=m_fd && m_fd>-1)
+        if (m_fd>-1 && new_fd!=m_fd)
         {
-            // If FD was open:
+            // N.B. the instance has been opened (m_fd>-1), but new_fd
+            //      is a new FD value, so the instance MUST transition
+            //      to the inactive state, and the ONLY VALID new FD
+            //      value is -1
             // - Clear select monitoring flag
             // - Clear existing [fd_set] bit and update nfds
+            //   - N.B. ***before*** changing m_fd to -1
             // - Close FIFO
-            // N.B. the only valid new FD value is -1
+            // - Assign m_fd = -1, completing the transition to inactive
             m_sel = false;
             update_fd_set(fd_set_ptr, nfds);
-            close(m_fd);                      // ensure FIFO is closed!
+            // ensure FIFO is closed!
+            close(m_fd);
             m_fd = -1;
             return;
-            // \todo throw an exception if new_fd is not -1
+            // \todo perhaps throw an exception if new_fd is not -1
         }
 
         if (dosel) { m_last_hb = time_to_hb(30); }
@@ -529,7 +582,7 @@ private: // Internal attributes and interfaces
     }
 
     static int
-    open_hexbeater_fifo(const std::string& fifo_name, HexbeatMonitor* phexbeaters)
+    open_hexbeater_fifo(const std::string& fifo_name, HexbeatMonitor* phexbeats)
     {
         // Open FIFO read-write and non-blocking; create FIFO if needed
         int fd = open(fifo_name.c_str(),O_RDWR|O_NONBLOCK|O_CLOEXEC);
@@ -554,7 +607,7 @@ private: // Internal attributes and interfaces
         bool not_FIFO = (istat < 0) || !S_ISFIFO(st.st_mode);
 
         // Error if either file is not a FIFO, or FD is already in use
-        if (not_FIFO || (phexbeaters[fd].m_fd > -1))
+        if (not_FIFO || (phexbeats[fd].m_fd > -1))
         {
             close(fd);
             errno = EEXIST;
@@ -563,7 +616,7 @@ private: // Internal attributes and interfaces
         return fd;
     }
 
-    /// Find this instance's driver PID by executable and driver name
+    /// Find this instance's hexbeater PID by argv[0] and hexbeater name
     /** Use the static HexbeatMonitor::find_hexbeater_pid below
       * \returns PID of matching process from /proc/ filesystem
       */
@@ -574,11 +627,11 @@ private: // Internal attributes and interfaces
          return HexbeatMonitor::find_hexbeater_pid(m_argv0, m_hbname);
     }
 
-    /// Fork the driver if it is not already running
+    /// Fork the hexbeater if it is not already running
     int
-    fork_hexbeater(int offset)
+    fork_hexbeater(int delay)
     {
-        // If a running driver was found via m_argv0 and m_hbname,
+        // If a running hexbeater was found via m_argv0 and m_hbname,
         // then return its PID ...
         int pid = find_hexbeater_pid();
         if (pid > 0) { return pid; };
@@ -587,14 +640,14 @@ private: // Internal attributes and interfaces
         pid = fork();
         if (pid != 0) {
             // Parent:  fork error (pid < 0) or success (pid < 0) ...
-            // Add offset (delay) to current time to init last hexbeat
-            if (pid > 0) { m_last_hb = time_to_hb(offset); }
+            // Add delay to current time to initialize last hexbeat
+            if (pid > 0) { m_last_hb = time_to_hb(delay); }
             return pid;
         } // fork failed (<0) or parent (>0)
 
         // Child:  pid == 0
 
-        // ... And then exec, the driver
+        // ... And then exec, the hexbeater
         // Child:  <argv0> -n <name>
         const char *argv0 = m_argv0.c_str();
         const char *name = m_hbname.c_str();
