@@ -128,7 +128,8 @@ scripts_to_install = magaox \
 	dmdispbridge \
 	shmimTCPreceive \
 	shmimTCPtransmit \
-	lookyloo
+	lookyloo \
+	obs_to_movie
 
 all: indi_all libs_all flatlogs apps_all guis_all utils_all
 
