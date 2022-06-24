@@ -58,6 +58,7 @@ def frames_to_movie(
     bin,
     pct_min,
     pct_max,
+    rough_bg_subtract,
     log_scale,
     every_nth_frame,
     preview,
@@ -85,6 +86,8 @@ def frames_to_movie(
                 img = accumulator / (idx + 1)
             if bin > 1:
                 img = fast_integer_bin(img, bin)
+            if rough_bg_subtract:
+                img = img - np.median(img, axis=1)[:, np.newaxis]
             if log_scale:
                 img = np.log10(img)
                 scale_kwargs['vmin'] = max(np.log10(vmin), 0.1)
@@ -124,7 +127,7 @@ def main(args):
     datestamp = ''.join(filter(str.isdigit, now.isoformat()))
     
     if os.path.isdir(args.OBS_NAME_OR_DIR):
-        frames = glob.glob(f"{args.OBS_NAME_OR_DIR}/*.fits")
+        frames = list(sorted(glob.glob(f"{args.OBS_NAME_OR_DIR}/*.fits")))
         log.info(f"Found {len(frames)} in directory {args.OBS_NAME_OR_DIR}")
         frames_to_movie(
             frames,
@@ -136,6 +139,7 @@ def main(args):
             args.bin,
             args.percentile_min,
             args.percentile_max,
+            args.rough_bg_subtract,
             args.log_scale,
             args.every_nth_frame,
             args.preview,
@@ -146,7 +150,7 @@ def main(args):
         obs_name = args.OBS_NAME_OR_DIR
         cameras = args.cameras if args.cameras is not None else SCIENCE_CAMERAS
         for cam in cameras:
-            frames = glob.glob(f"{args.quicklook_root}/*/{obs_name}/{cam}/*.fits")
+            frames = list(sorted(glob.glob(f"{args.quicklook_root}/*/{obs_name}/{cam}/*.fits")))
             log.info(f"Found {len(frames)} for {obs_name}")
             frames_to_movie(
                 frames,
@@ -158,6 +162,7 @@ def main(args):
                 args.bin,
                 args.percentile_min,
                 args.percentile_max,
+                args.rough_bg_subtract,
                 args.log_scale,
                 args.every_nth_frame,
                 args.preview,
@@ -178,6 +183,7 @@ if __name__ == "__main__":
     parser.add_argument('--percentile-min', type=float, default=5, help="Percentile setting minimum of color bar scale")
     parser.add_argument('--percentile-max', type=float, default=99, help="Percentile setting maximum of color bar scale")
     parser.add_argument('--log-scale', action='store_true', help="Whether to logarithmically scale the images")
+    parser.add_argument('--rough-bg-subtract', action='store_true', help="Whether to subtract the median column from each frame")
     parser.add_argument('--preview', action='store_true', help="Write preview frame with colormap and scaling and exit")
     parser.add_argument('--accumulate', action='store_true', help="")
     parser.add_argument('--crf', type=int, default=24, help="H.264 constant rate factor for compression (higher is smaller with worse quality)")
