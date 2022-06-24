@@ -1,17 +1,4 @@
-/// Hexadecimal nine-digit heartbeat prototype
-/**
-  * Build:
-  *
-  *    g++ -o hexbeat hexbeat.cpp -Wal;
-  *
-  * Run:
-  *
-  *    ./hexbeat "" "" ; ps l ; sleep 5
-  *
-  * \todo convert to class handling multiple heartbeats on named FIFOs
-  * \todo add error handling
-  * \todo add response to lost heartbeat
-  */
+/// Nine-digit hexadecimal newline-terminated heartbeat class
 #include <ctype.h>
 #include <fcntl.h>
 #include <stdio.h>
@@ -29,16 +16,26 @@
 
 #include <dirent.h>
 
+// /////////////////////////////////////////////////////////////////////
+// /////////////////////////////////////////////////////////////////////
+/// Convert delay to 9dnths relative to current time
+/** 9dnths means "9-digit newline-terminated hexadecimal string"
+  * A delay is added to the current seconds past the Epoch cf. time(2)
+  * and the sum written in hexadecimal, padded with 0s to be nine
+  * digits, with a terminating newline
+  */
 static inline std::string time_to_hb(int delay)
 {
     char c20[20];
     sprintf(c20,"%9.9lx\n",time(0) + delay);
     return std::string{c20};
 }
+// /////////////////////////////////////////////////////////////////////
 
-class HexbeatMonitor {
-/// Descriptive data for monitoring a process that generates a heartbeat
-/** The process generating the heartbeat is the hexbeater
+// /////////////////////////////////////////////////////////////////////
+// /////////////////////////////////////////////////////////////////////
+/// HexbeaterMonitor class for monitoring a process via a heartbeat
+/** A process, called a heartbeater, generates the heartbeat
   * The heartbeat is sent over some channel (FIFO) at regular intervals
   * The heartbeat (hexbeat) itself is a 9-digit newline-terminated
   * hexadecimal string (9dnths), representing a time value (Note 1)
@@ -123,7 +120,10 @@ class HexbeatMonitor {
   *
   * \todo describe process ID convention (<executable> -n <hbmname>)
   */
+// /////////////////////////////////////////////////////////////////////
+// /////////////////////////////////////////////////////////////////////
 
+class HexbeatMonitor {
 public: // interfaces
 
     /// Constructor
@@ -131,13 +131,14 @@ public: // interfaces
       */
     HexbeatMonitor() { HexbeatMonitor::install_sigchld_handler(); }
 
-    // Public access to private class members
+    // Public read-only access to private class members
     int FD() { return m_fd; }
     const std::string hbname() const { return m_hbname; }
     const std::string fifo_name() const { return m_fifo_name; }
     const std::string& last_hb() const { return m_last_hb; }
 
-    ////////////////////////////////////////////////////////////////////
+    // /////////////////////////////////////////////////////////////////
+    // /////////////////////////////////////////////////////////////////
     /// Open a named FIFO, load results into HexbeatMonitor instance
     /** N.B. this is a static interface of the HexbeatMonitor class:
       *      1) The FIFO's FD is not known when this function is called
@@ -180,7 +181,10 @@ public: // interfaces
 
         return fd;
     }
+    // /////////////////////////////////////////////////////////////////
 
+    // /////////////////////////////////////////////////////////////////
+    // /////////////////////////////////////////////////////////////////
     /// Find a hexbeater process, or start one via fork(2)
     /** \returns pid > 0 of found/started process, and updates FD set
       * \returns 0 if that process was already running
@@ -209,7 +213,10 @@ public: // interfaces
         flushFIFO();
         return pid;
     }
+    // /////////////////////////////////////////////////////////////////
 
+    // /////////////////////////////////////////////////////////////////
+    // /////////////////////////////////////////////////////////////////
     /// Stop a hexbeater process, found by m_argv0 and m_hbname
     /** \returns pid > 0 of stopped process, and updates FD set
       * \returns 0 if that process was not found
@@ -235,7 +242,10 @@ public: // interfaces
         update_status(m_fd, false, fd_set_cpy, nfds);
         return pid;
     }
+    // /////////////////////////////////////////////////////////////////
 
+    // /////////////////////////////////////////////////////////////////
+    // /////////////////////////////////////////////////////////////////
     /// Close this HexbeatMonitor instance
     /** \returns 0 if instance is closed here
       * \returns -1 if instance was already closed
@@ -253,8 +263,10 @@ public: // interfaces
         update_status(-1, false, fd_set_cpy, nfds);
         return 0;
     }
+    // /////////////////////////////////////////////////////////////////
 
-    ////////////////////////////////////////////////////////////////////
+    // /////////////////////////////////////////////////////////////////
+    // /////////////////////////////////////////////////////////////////
     /// Check bits in fd_set, read data from FD, parse possible hexbeat
     /** \returns 0 if new hexbeat is parsed
       * \returns 0 if no newline is found
@@ -274,9 +286,11 @@ public: // interfaces
         // Append data to buffer, parse buffer, clear buffer
         return append_and_parse();
     }
+    // /////////////////////////////////////////////////////////////////
 
-    ////////////////////////////////////////////////////////////////////
-    /// Check if latest value of hexbeat has expired
+    // /////////////////////////////////////////////////////////////////
+    // /////////////////////////////////////////////////////////////////
+    /// Check if latest value of hexbeat has expired wrt current time
     /** \returns false if either not started, or hexbeat is not expired
       * \returns ture if hexbeater is started and hexbeat is expired
       * \arg \c hbnow is the current time as a hexbeat string
@@ -289,7 +303,10 @@ public: // interfaces
         // has expired
         return m_fd > -1 && m_sel && (hbnow > m_last_hb);
     }
+    // /////////////////////////////////////////////////////////////////
 
+    // /////////////////////////////////////////////////////////////////
+    // /////////////////////////////////////////////////////////////////
     /// Find hexbeater PID by executable and hexbeater name
     /** \returns PID of matching process from /proc/ filesystem
       * N.B. this is a class-static function
@@ -395,6 +412,7 @@ public: // interfaces
         errno = save_errno;
         return save_errno ? -1 : 0;
     }
+    // /////////////////////////////////////////////////////////////////
 
 private: // Internal attributes and interfaces
 
@@ -416,6 +434,9 @@ private: // Internal attributes and interfaces
 
     std::string m_buffer{""};  ///< Accumulated heartbeat data
 
+    // /////////////////////////////////////////////////////////////////
+    // /////////////////////////////////////////////////////////////////
+    /// Initialization of HexbeatMonitor instance on FIFO open
     void
     init_on_open(const std::string& argv0, const std::string& hbname
                 , fd_set& fd_set_cpy, int& nfds
@@ -431,7 +452,9 @@ private: // Internal attributes and interfaces
         m_fifo_name = fifo_name;
         m_buffer.clear();
     }
+    // /////////////////////////////////////////////////////////////////
 
+    // /////////////////////////////////////////////////////////////////
     // /////////////////////////////////////////////////////////////////
     /// Update FD and/or select monitor flag, as well as caller's fd_set
     /** \arg \c new_fd is the desired new FD for this instance (Note 1)
@@ -477,8 +500,10 @@ private: // Internal attributes and interfaces
         // Keep fd_set in synchrony with FD and select monitoring status
         update_fd_set(fd_set_cpy, nfds);
     }
+    // ////////////////////////////////////////////////////////////////
 
-    ///////////////////////////////////////////////////////////////////
+    // ////////////////////////////////////////////////////////////////
+    // ////////////////////////////////////////////////////////////////
     /// Turn select(2) monitoring on or off for this FD
     /** \arg \c fd_set_cpy is an [fd_set] object that contains bits of
       *                    non-inactive hexbeater FDs
@@ -506,7 +531,10 @@ private: // Internal attributes and interfaces
             while ((nfds>0) && !FD_ISSET(nfds-1,&fd_set_cpy)) { nfds--;}
         }
     }
+    // ////////////////////////////////////////////////////////////////
 
+    // ////////////////////////////////////////////////////////////////
+    // ////////////////////////////////////////////////////////////////
     /// SIGCHLD signal handler
     /** Ignores SIGCHLD signals while preventing zombies
       */
@@ -517,7 +545,10 @@ private: // Internal attributes and interfaces
         while (waitpid((pid_t)(-1), 0, WNOHANG) > 0) {}
         errno = saved_errno;
     }
+    // ////////////////////////////////////////////////////////////////
 
+    // ////////////////////////////////////////////////////////////////
+    // ////////////////////////////////////////////////////////////////
     /// Install SIGCHLD signal handler
     /** Routine is static to ensure this happens only once
       */
@@ -538,7 +569,9 @@ private: // Internal attributes and interfaces
         }
         singleton = 1;
     }
+    // ////////////////////////////////////////////////////////////////
 
+    // ////////////////////////////////////////////////////////////////
     // /////////////////////////////////////////////////////////////////
     /// Find starting position of last 9dnths in buffer
     /** \returns starting position of last 9dnths in buffer
@@ -562,7 +595,10 @@ private: // Internal attributes and interfaces
         }
         return inl-9;
     }
+    // ////////////////////////////////////////////////////////////////
 
+    // ////////////////////////////////////////////////////////////////
+    // ////////////////////////////////////////////////////////////////
     /// Build FIFO pathname
     static std::string
     build_fifo_path(const std::string& hbname, va_list ap)
@@ -584,7 +620,10 @@ private: // Internal attributes and interfaces
 
         return fifo_name;
     }
+    // ////////////////////////////////////////////////////////////////
 
+    // ////////////////////////////////////////////////////////////////
+    // ////////////////////////////////////////////////////////////////
     static int
     open_hexbeater_fifo(const std::string& fifo_name
                        , std::vector<HexbeatMonitor>& vhexbeats
@@ -621,7 +660,10 @@ private: // Internal attributes and interfaces
         }
         return fd;
     }
+    // ////////////////////////////////////////////////////////////////
 
+    // ////////////////////////////////////////////////////////////////
+    // ////////////////////////////////////////////////////////////////
     /// Find this instance's hexbeater PID by argv[0] and hexbeater name
     /** Use the static HexbeatMonitor::find_hexbeater_pid below
       * \returns PID of matching process from /proc/ filesystem
@@ -632,7 +674,10 @@ private: // Internal attributes and interfaces
          if (m_fd < 0) { return 0; }
          return HexbeatMonitor::find_hexbeater_pid(m_argv0, m_hbname);
     }
+    // ////////////////////////////////////////////////////////////////
 
+    // ////////////////////////////////////////////////////////////////
+    // ////////////////////////////////////////////////////////////////
     /// Fork the hexbeater if it is not already running
     int
     fork_hexbeater(int delay)
@@ -662,7 +707,10 @@ private: // Internal attributes and interfaces
         if (e) exit(-11);
         return -1;   // Execution should never get here
     }
+    // ////////////////////////////////////////////////////////////////
 
+    // ////////////////////////////////////////////////////////////////
+    // ////////////////////////////////////////////////////////////////
     /// Flush and discard data from this instance's open FIFO
     /** Called by public interface start_hexbeater(...) above
       */
@@ -683,7 +731,10 @@ private: // Internal attributes and interfaces
             if (read(m_fd, c1024, 1024) < 1) { break; }
         }
     }
+    // ////////////////////////////////////////////////////////////////
 
+    // ////////////////////////////////////////////////////////////////
+    // ////////////////////////////////////////////////////////////////
     /// Append data to instance buffer, parse for hexbeat, clean buffer
     /** Called by public interface read_hexbeater(...) above
       * \returns -1 on error (e.g. if lenc10 is negative)
@@ -749,8 +800,14 @@ private: // Internal attributes and interfaces
 
         return -1;
     }
+    // ////////////////////////////////////////////////////////////////
 
-    /// \returns true if argv0 is some form of indiserver, else false
+    // ////////////////////////////////////////////////////////////////
+    // ////////////////////////////////////////////////////////////////
+    /// Check if argv0 is some form of indiserver, else false
+    /** \returns true if argv0 is some form of indiserver
+      * \returns false otherwise
+      */
     static bool
     is_is(const std::string& argv0)
     {
@@ -761,4 +818,5 @@ private: // Internal attributes and interfaces
         if (L == 10) { return argv0 == is; }
         return argv0.substr(L-11) == slashis;
     }
+    // ////////////////////////////////////////////////////////////////
 };
