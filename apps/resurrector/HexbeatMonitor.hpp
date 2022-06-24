@@ -133,9 +133,9 @@ public: // interfaces
 
     // Public access to private class members
     int FD() { return m_fd; }
-    std::string hbname() { return m_hbname; }
-    std::string fifo_name() { return m_fifo_name; }
-    const std::string& last_hb() { return m_last_hb; }
+    const std::string hbname() const { return m_hbname; }
+    const std::string fifo_name() const { return m_fifo_name; }
+    const std::string& last_hb() const { return m_last_hb; }
 
     ////////////////////////////////////////////////////////////////////
     /// Open a named FIFO, load results into HexbeatMonitor instance
@@ -175,15 +175,8 @@ public: // interfaces
         int fd = HexbeatMonitor::open_hexbeater_fifo(fifo_name, vhexbeats);
         if (fd < 0) { return -1; }
 
-        // On success, initialize instance data to opened state, not started ...
-        vhexbeats[fd].m_sel = false;  // ... by leaving select monitoring off
-        vhexbeats[fd].m_fd = fd;
-        vhexbeats[fd].update_fd_set(fd_set_cpy, nfds);
-        vhexbeats[fd].m_argv0 = argv0;
-        vhexbeats[fd].m_hbname = hbname;
-        vhexbeats[fd].m_last_hb = "000000000";
-        vhexbeats[fd].m_fifo_name = fifo_name;
-        vhexbeats[fd].m_buffer.clear();
+        vhexbeats[fd].init_on_open(argv0, hbname, fd_set_cpy, nfds
+                                  , fd, fifo_name);
 
         return fd;
     }
@@ -325,8 +318,8 @@ public: // interfaces
     find_hexbeater_pid(const std::string& argv0, const std::string& hexbeater_name)
     {
         // Open the /proc/ directory
-        DIR *pdir;
-        struct dirent *de;
+        DIR* pdir;
+        struct dirent* de;
 
         pdir = opendir("/proc");
         if (pdir == NULL) {
@@ -422,6 +415,22 @@ private: // Internal attributes and interfaces
     std::string m_fifo_name; ///< Name of the heartbeat FIFO
 
     std::string m_buffer{""};  ///< Accumulated heartbeat data
+
+    void
+    init_on_open(const std::string& argv0, const std::string& hbname
+                , fd_set& fd_set_cpy, int& nfds
+                , int fd, std::string& fifo_name)
+    {
+        // On success, initialize instance data to opened state, not started ...
+        m_sel = false;  // ... by leaving select monitoring off
+        m_fd = fd;
+        update_fd_set(fd_set_cpy, nfds);
+        m_argv0 = argv0;
+        m_hbname = hbname;
+        m_last_hb = "000000000";
+        m_fifo_name = fifo_name;
+        m_buffer.clear();
+    }
 
     // /////////////////////////////////////////////////////////////////
     /// Update FD and/or select monitor flag, as well as caller's fd_set
@@ -646,8 +655,8 @@ private: // Internal attributes and interfaces
 
         // ... And then exec, the hexbeater
         // Child:  <argv0> -n <name>
-        const char *argv0 = m_argv0.c_str();
-        const char *name = m_hbname.c_str();
+        const char* argv0 = m_argv0.c_str();
+        const char* name = m_hbname.c_str();
         int e = execlp(argv0, argv0, "-n", name, (char*) NULL);
         // \todo pass any error back to the parent (pipe?)
         if (e) exit(-11);
