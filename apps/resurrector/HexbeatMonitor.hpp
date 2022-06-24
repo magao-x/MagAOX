@@ -176,6 +176,7 @@ public: // interfaces
         int fd = HexbeatMonitor::open_hexbeater_fifo(fifo_name, vhexbeats);
         if (fd < 0) { return -1; }
 
+        // Initialize the instance to the [opened] operational state
         vhexbeats[fd].init_on_open(argv0, hbname, fd_set_cpy, nfds
                                   , fd, fifo_name);
 
