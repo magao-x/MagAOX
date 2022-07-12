@@ -68,7 +68,6 @@ static inline std::string time_to_hb(int delay)
   *  stop_hexbeater - Stop a hexbeater process
   * close_hexbeater - Stop a running hexbeater process, close FIFO
   * find_hexbeater_pid - +Find a hexbeater PID by executable and name
-  * find_hexber_pid - +Find a hexbeater PID by executable and name
   *
   * - Interface description+ marked with a plus sign (+) are static
   *
