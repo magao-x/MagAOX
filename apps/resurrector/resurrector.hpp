@@ -85,7 +85,7 @@ public:
                 // and close that hexbeater FIFO, which also stops
                 // further restarts of this hexbeater process
                 std::cerr << "[resurrector giving up on " << *it
-                          << " at " << time_to_hb(0) << "]\n";
+                          << " at " << time_to_hb(0).substr(0,9) << "]\n";
                 it->close_hexbeater(m_fdset_cpy, m_nfds);
                 continue;
             }

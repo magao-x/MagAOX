@@ -846,7 +846,7 @@ std::ostream& operator<<(std::ostream& os, const HexbeatMonitor& hbm)
     << hbm.m_argv0 << " -n " << hbm.hbname() << "\""
     << "; FD=" << hbm.m_fd
     << "; FIFO=" << hbm.fifo_name()
-    << "; lastHB=" << hbm.last_hb()
+    << "; lastHB=" << hbm.last_hb().substr(0,9)
     << "; restart=" << hbm.m_restart
     << ">"
     ;
