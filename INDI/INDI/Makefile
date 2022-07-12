@@ -5,8 +5,11 @@ include $(SELF_DIR)/../../Make/common.mk
 
 all: indiserver getINDI setINDI evalINDI
 
-indiserver: indiapi.h fq.h fq.c indiserver.c
-	$(CC) $(CFLAGS) -g -o indiserver -I../liblilxml  indiserver.c fq.c ../liblilxml/liblilxml.a -lpthread
+indiserver: strcat_varargs.c strcat_varargs.h open_named_fifo.c open_named_fifo.h config.h indiapi.h indidevapi.h fq.c fq.h libs/lilxml.h libs/lilxml.c indiserver.c
+	$(CC) $(CFLAGS) -DGIT_TAG_STRING='"$(shell git describe --tags)"' -g -o indiserver -Ilibs indiserver.c strcat_varargs.c open_named_fifo.c fq.c libs/lilxml.c
+
+old.indiserver: strcat_varargs.h strcat_varargs.c pipe_wrapper.h pipe_wrapper.c indiapi.h fq.h fq.c indiserver.c
+	$(CC) $(CFLAGS) -g -o indiserver -I../liblilxml  indiserver.c pipe_wrapper.c strcat_varargs.c fq.c ../liblilxml/liblilxml.a -lpthread
 
 
 getINDI: connect_to.h connect_to.c indiapi.h getINDI.c
