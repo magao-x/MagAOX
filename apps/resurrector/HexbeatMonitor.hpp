@@ -424,7 +424,7 @@ public: // interfaces
     update_restart_check_expiry()
     {
         // Increment restart parameter, return true after 10th restart
-        return ++m_restart > 10;
+        return ++m_restart > 1; //> 10; leave at 1 for testing
     }
     // /////////////////////////////////////////////////////////////////
 
