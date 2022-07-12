@@ -72,17 +72,34 @@ public:
             if (!it->late_hexbeat(hbnow)) { continue; }
 
             // To here, the current hexbeater, represented by the fd
-            // from m_fds and hbm, has timed out.  Attempt to stop the
-            // hexbeater process, in case it is locked up, then wait
+            // from m_fds and hbm, has timed out; check the restart
+            // parameter and react accordingly.  In all cases, pass the
+            // the [fd_set] bits (m_fdset_cpy) and the range of bits
+            // (m_nfds) for the active hexbeaters to be updated with
+            // each call
+            if (it->update_restart_check_expiry())
+            {
+                // If the restart parameter has expired, issue a message
+                // and close that hexbeater FIFO, which also stops the
+                // hexbeater process, and issue a message
+                std::cerr
+                << "[resurrector giving up on "
+                << *it
+                << " at "
+                << time_to_hb(0)
+                << "]\n"
+                ;
+                it->close_hexbeater(m_fdset_cpy, m_nfds);
+                continue;
+            }
+            // If the restart parameter has not expired, attempt to stop
+            // the hexbeater process, in case it is locked up, then wait
             // for a tenth of a second, then re-start a new hexbeater
             // process.
-            // Pass the the [fd_set] bits (m_fdset_cpy) and the range of
-            // bits (m_nfds) for the active hexbeaters to be updated
-            // with each call
             it->stop_hexbeater(m_fdset_cpy, m_nfds);
             struct timeval tv{0,99999};
             select(0, 0,0,0, &tv);
-            it->start_hexbeater(m_fdset_cpy, m_nfds,m_delay);
+            it->start_hexbeater(m_fdset_cpy, m_nfds, m_delay);
         }
     }
 
