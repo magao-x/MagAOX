@@ -68,6 +68,7 @@ static inline std::string time_to_hb(int delay)
   *  stop_hexbeater - Stop a hexbeater process
   * close_hexbeater - Stop a running hexbeater process, close FIFO
   * find_hexbeater_pid - +Find a hexbeater PID by executable and name
+  * update_restart_check_expiry - Restart logic
   *
   * - Interface description+ marked with a plus sign (+) are static
   *
@@ -217,7 +218,7 @@ public: // interfaces
 
     // /////////////////////////////////////////////////////////////////
     // /////////////////////////////////////////////////////////////////
-    /// Stop a hexbeater process, found by m_argv0 and m_hbname
+    /// Stop (USR2) a hexbeater process, found by m_argv0 and m_hbname
     /** \returns pid > 0 of stopped process, and updates FD set
       * \returns 0 if that process was not found
       * \returns -1 with errno=0 if this HexbeatMonitor is inactive
@@ -239,6 +240,7 @@ public: // interfaces
         }
         int istatus = kill(pid, SIGUSR2);
         if (istatus < 0) { return -1; }
+
         update_status(m_fd, false, fd_set_cpy, nfds);
         return pid;
     }
@@ -414,6 +416,28 @@ public: // interfaces
     }
     // /////////////////////////////////////////////////////////////////
 
+    // /////////////////////////////////////////////////////////////////
+    // /////////////////////////////////////////////////////////////////
+    /// Update restart parameter
+    /** \returns boolean, true if restart parameter has exceeded limit
+      */
+    bool
+    update_restart_check_expiry()
+    {
+        // Do not increment restart parameter if 4k+ valid hexbeats have
+        // been received
+        if (m_hb_count < 4097)
+        {
+            // Naive formula:  the fewer the hexbeats received, the
+            // greater the increase in the restart parameter
+            m_restart += (m_hb_count < 1) ? 1.0 : (1.0 / m_hb_count);
+        }
+        return m_restart > 10.0;
+    }
+    // /////////////////////////////////////////////////////////////////
+
+    friend std::ostream& operator<<(std::ostream&, const HexbeatMonitor&);
+
 private: // Internal attributes and interfaces
 
     int m_fd{-1}; ///< File Descriptor (FD) of named FIFO
@@ -423,6 +447,10 @@ private: // Internal attributes and interfaces
     //   the offset of this HexbeatMonitor instance in an array of same
 
     bool m_sel{false}; ///< Do monitoring of this FD if m_fd > -1
+
+    int m_hb_count{1}; ///< Count of Hexbeats received
+
+    double m_restart{0.0}; ///< Accumulated restart parameter
 
     std::string m_argv0; ///< Executable of the process
 
@@ -448,6 +476,8 @@ private: // Internal attributes and interfaces
         update_fd_set(fd_set_cpy, nfds);
         m_argv0 = argv0;
         m_hbname = hbname;
+        m_hb_count = 1;
+        m_restart = 0.0;
         m_last_hb = "000000000";
         m_fifo_name = fifo_name;
         m_buffer.clear();
@@ -691,8 +721,12 @@ private: // Internal attributes and interfaces
         pid = fork();
         if (pid != 0) {
             // Parent:  fork error (pid < 0) or success (pid < 0) ...
-            // Add delay to current time to initialize last hexbeat
-            if (pid > 0) { m_last_hb = time_to_hb(delay); }
+            // - Add delay to current time to initialize last hexbeat
+            // - Assign 1 to Hexbeat count, to avoid divide by zero
+            if (pid > 0) {
+                m_last_hb = time_to_hb(delay);
+                m_hb_count = 1;
+            }
             return pid;
         } // fork failed (<0) or parent (>0)
 
@@ -771,9 +805,11 @@ private: // Internal attributes and interfaces
         std::size_t inl;
         std::size_t hex9 = HexbeatMonitor::hex9_nlterminated(m_buffer, inl);
 
-        // Valid hexbeat found:  store it; erase data through newline
+        // Valid hexbeat found:  ...
         if (hex9!=std::string::npos)
         {
+            // ... count it up to 4097;  store it; erase data through NL
+            if (m_hb_count <= 4096) { ++m_hb_count; }
             m_last_hb = m_buffer.substr(hex9, 10);
             m_buffer.erase(0,inl+1);
             return 0;
@@ -820,3 +856,17 @@ private: // Internal attributes and interfaces
     }
     // ////////////////////////////////////////////////////////////////
 };
+std::ostream& operator<<(std::ostream& os, const HexbeatMonitor& hbm)
+{
+    os
+    << "<HexbeatMonitor \""
+    << hbm.m_argv0 << " -n " << hbm.hbname() << "\""
+    << "; FD=" << hbm.m_fd
+    << "; FIFO=" << hbm.fifo_name()
+    << "; lastHB=" << hbm.last_hb()
+    << "; countHB=" << hbm.m_hb_count
+    << "; restart=" << hbm.m_restart
+    << ">"
+    ;
+    return os;
+}  
