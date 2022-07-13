@@ -497,7 +497,7 @@ public:
      */
    int stateLogged();
 
-   ///@} --Application State
+   ///@} -- Application State
 
 private:
    
@@ -927,7 +927,7 @@ protected:
      */
    int newCallBack_clearFSMAlert( const pcf::IndiProperty &ipRecv /**< [in] the INDI property sent with the the new property request.*/);
    
-   ///@} --INDI Interface
+   ///@} -- INDI Interface
 
    /** \name Power Management
      * For devices which have remote power management (e.g. from one of the PDUs) we implement
@@ -986,6 +986,11 @@ protected:
 
 public:
 
+   /** \name Power Management
+     *
+     * @{
+     */
+
    /// Returns the current power state.
    /** If power management is not enabled, this always returns 1=On.
      *
@@ -1006,7 +1011,7 @@ public:
    
    INDI_SETCALLBACK_DECL(MagAOXApp, m_indiP_powerChannel);
 
-   ///@} Power Management
+   ///@} -- Power Management
 
 public:
 
@@ -1045,7 +1050,7 @@ public:
      */
    std::string driverCtrlName();
 
-   ///@} --Member Accessors
+   ///@} -- Member Accessors
 };
 
 //Set self pointer to null so app starts up uninitialized.

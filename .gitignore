@@ -179,3 +179,4 @@ vm/calib/
 vm/config/
 vm/
 setup/qhyccd_container/sdk_linux64_22.02.17.tgz
+CGraphFSMHardwareInterface.cpp.lst
