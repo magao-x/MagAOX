@@ -1,0 +1,9 @@
+
+
+/** \addtogroup common
+  * Configuration and environment setup options common to the entire library.
+  *
+  * Macros are protected by #ifndef tests, so the default configuration defined here can 
+  * be changed by simply pre-#define-ing any of these macros before including any libMagAOX headers.
+  * Note that this should be done as a compiler option in order to use the pre-compiled header.
+  */

@@ -1,0 +1,33 @@
+#!/bin/bash
+
+########################################################
+## magaox_irqpolscript
+##
+## policy script for irq balance
+## 
+## tells irqbalance to not balance irqs listed in banirqs.
+## currently only configured for RTC
+##
+## TODO: figure out how to automatically identify irqs from sysfs, etc.
+##
+## TODO: have banirqs get loaded from separate config file, to allow use on ICC.
+########################################################
+
+#space separated list of irqs to ban
+banirqs="208"
+
+#tt=$(date -u --iso-8601=seconds) 
+
+for irq in $banirqs
+do
+   if [ $2 -eq $irq ] 
+   then
+      echo "ban=true"
+      #echo "$2 banned $tt" >> /tmp/rtc_irqpolscript.txt
+      exit 0
+   fi
+done
+
+echo "ban=false"
+#echo "$2 not banned $tt" >> /tmp/rtc_irqpolscript.txt
+

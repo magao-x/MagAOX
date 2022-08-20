@@ -1,0 +1,133 @@
+.TH getINDI 1
+.SH NAME
+getINDI \- get INDI property values
+.SH SYNOPSIS
+\fBgetINDI [options] [device.property.element ...]\fP
+.SH DESCRIPTION
+.na
+.nh
+.PP
+getINDI connects to an indiserver and reports the current value of one or more
+properties. Each property is specified using three components in the form:
+.IP
+device.property.element
+.PP
+Any component may be an asterisk, "*", to serve as a wild card that matches all
+names in that component of the specification. If no property is specified,
+then all properties match, ie, it is as if the specification "*.*.*" were given.
+.PP
+The last component of the property specification is usually the element name,
+but may be a reserved name to indicate an attribute of the property as a whole.
+These reserved names are as follows:
+.TP 12
+_LABEL 
+report the label attribute
+.TP
+_GROUP
+report the group attribute
+.TP
+_STATE
+report the state attribute
+.TP
+_PERM
+report the permission attribute
+.TP
+_TO
+report the timeout attribute
+.TP
+_TS
+report the timestamp attribute
+
+.SH OPTIONS
+.TP 8
+-1
+print just the value if expectiong exactly one matching property
+.TP
+-B
+enable downloading BLOBs
+.TP
+-d <f>
+use file descriptor f already open as a socket to the indiserver. This is
+useful for scripts to make a session connection one time then reuse it for
+each invocation. If the file descriptor seems to be being closed, check that
+the close-on-exec flag is off; for example in perl use something like:
+.nf
+
+#!/usr/bin/perl
+use Socket;
+use Fcntl;
+socket(SOCK, PF_INET, SOCK_STREAM, getprotobyname('tcp'));
+connect(SOCK, sockaddr_in(7624,inet_aton('localhost')));
+fcntl(SOCK,F_SETFD,0);
+$directfd = fileno(SOCK);
+%props = split (/[=\n]/, `getINDI -d $directfd`);
+.fi
+.TP
+-h <h>
+connect to alternate host h; the default is localhost.
+.TP
+-m
+continue to monitor for subsequent changes to each specified property
+until timeout.
+.TP
+-p <p>
+connect using alternate port p; the default is 7624.
+.TP
+-q
+suppress some error message.
+.TP
+-t <t>
+wait no longer than t seconds of no activity to gather the values for all the specified
+properties; the default is 2 seconds. Specify 0 to wait forever.
+.TP
+-v
+generate additional information on stderr. This is cumulative in that specifying
+more -v options will generate more output.
+.TP
+-w
+Usually only readable properties are shown. If this flag is set, then all
+properties, including those that are write-only, are shown.
+
+.SH OUTPUT FORMAT
+For properties that are not BLOBs, the output of getINDI is one line per
+property. Unless the -1 option is given, each line is of the form:
+.IP
+property=value
+.PP
+A property that is a BLOB is saved in a file name
+device.property.element.format. Z compression is handled automatically, other
+formats are left unchanged. Note that BLOBs are not read by default, only when the
+-B option is used.
+
+.SH EXIT STATUS
+The getINDI program exits with a status of 0 if it suceeded in finding the
+value for each specified property. It exits with 1 if there was at least
+one property for which no value was found within the given timeout period.
+It exits with 2 if there was some other error such as not being able to
+connect to the indiserver.
+
+.SH EXAMPLES
+
+.PP
+In a perl script, gather all properties for the default indiserver and save
+them in an associative array %props which can then be used to look up a property
+value by name:
+.IP
+%props = split (/[=\n]/, `getINDI`);
+
+.PP
+Wait up to ten seconds to get the values of all properties from the Mount
+device on the given host and non-standard port:
+.IP
+getINDI -h indihost -p 7655 -t 10 "Mount.*.*"
+
+.PP
+Print just current value of the wind speed element from the weather device:
+.IP
+getINDI -1 Weather.Wind.Speed
+
+.SH SEE ALSO
+.PP
+evalINDI, setINDI, indiserver
+.br
+http://www.clearskyinstitute.com/INDI/INDI.pdf

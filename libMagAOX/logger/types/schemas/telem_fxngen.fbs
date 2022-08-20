@@ -1,0 +1,23 @@
+namespace MagAOX.logger;
+
+
+
+table Telem_fxngen_fb
+{
+   C1outp:uint8;
+   C1freq:double;
+   C1vpp:double;
+   C1ofst:double;
+   C1phse:double;
+   C1wvtp:uint8;
+   
+   C2outp:uint8;
+   C2freq:double;
+   C2vpp:double;
+   C2ofst:double;
+   C2phse:double;
+   C2wvtp:uint8;
+}
+
+root_type Telem_fxngen_fb;
+

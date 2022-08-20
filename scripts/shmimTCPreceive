@@ -1,0 +1,104 @@
+#!/bin/bash
+set -eo pipefail
+
+NBARGS=1
+
+pname="shmimTCPreceive-$1"
+
+
+
+function printHELP {
+echo "------------------------------------------------------------------------"
+echo "$(tput bold) $pname : RECEIVE IMAGE STREAM OVER TCP $(tput sgr0)"
+echo "------------------------------------------------------------------------"
+echo "  receives stream over TCP"
+echo "   "
+echo " $(tput bold)USAGE:$(tput sgr0)"
+echo "     $0 [-h -p <RTprio>] <port>"
+echo ""
+echo " $(tput bold)OPTIONS:$(tput sgr0)"
+echo "     $(tput bold)-h$(tput sgr0)            help"
+echo "     $(tput bold)-p$(tput sgr0) RTprio     RT priority (default = 80)"
+echo ""
+echo " $(tput bold)INPUT:$(tput sgr0)"
+echo "     <port>      Port number"
+echo ""
+echo " $(tput bold)EXAMPLE:$(tput sgr0)"
+echo "     $0 10000"
+echo ""
+echo "------------------------------------------------------------------------"
+}
+
+
+printHELP1 ()
+{
+    printf "%20s       Receive image stream over TCP\n" "$0" 
+}
+
+
+# Transform long options to short ones
+singlelinehelp=0
+for arg in "$@"; do
+  shift
+  case "$arg" in
+    "--help") set -- "$@" "-h" ;;
+    "--help1") 
+set -- "$@" "-h" 
+singlelinehelp=1;
+;;
+    *)        set -- "$@" "$arg"
+  esac
+done
+
+
+
+RTprio="80"
+
+while getopts :hp: FLAG; do
+  case $FLAG in
+    p)  #  set RTprio
+      RTprio=$OPTARG
+      ;;
+
+    h)  #show help
+      if [ "$singlelinehelp" -eq "0" ]; then
+      printHELP
+      else
+      printHELP1
+      fi
+      exit
+      ;;
+
+    \?) #unrecognized option - show help
+      echo -e \\n"Option -${BOLD}$OPTARG${NORM} not allowed."
+      printHELP
+      ;;
+  esac
+done
+
+shift $((OPTIND-1))  
+
+
+
+
+
+
+
+
+if [ "$1" = "help" ] || [ "$#" -ne $NBARGS ]; then
+if [ "$#" -ne $NBARGS ]; then
+    echo "$(tput setaf 1)$(tput bold) Illegal number of parameters ($NBARGS params required, $# entered) $(tput sgr0)"
+fi
+printHELP
+        exit
+fi
+
+
+
+
+
+
+OMP_NUM_THREADS=1 cacao -n $pname << EOF
+imnetwreceive $1 1 ${RTprio}
+exit
+EOF

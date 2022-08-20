@@ -1,0 +1,24 @@
+namespace MagAOX.logger;
+
+
+
+table Telem_telsee_fb
+{
+   dimm_time:int;
+   dimm_el:double;
+   dimm_fwhm:double;
+   dimm_fwhm_corr:double;
+   
+   mag1_time:int;
+   mag1_el:double;
+   mag1_fwhm:double;
+   mag1_fwhm_corr:double;
+
+   mag2_time:int;
+   mag2_el:double;
+   mag2_fwhm:double;
+   mag2_fwhm_corr:double;
+}
+
+root_type Telem_telsee_fb;
+

@@ -1,0 +1,40 @@
+Zaber notes:
+baud is 115200
+/2 home <-- homes the 2nd stage
+/2 stop <-- safely stops the 2nd stage
+/2 estop <-- immediately stops the 2nd stage
+/2 move abs xxx <-- moves stage 2 to abs position
+/2 move rel xxx <-- moves stage 2 rel to current position
+
+
+
+Should set max speed to 50000
+
+LOWFS stage nomral limist is 771029
+LOWFS mechanical stage limit = 440000
+/3 set limit.max 440000
+/3 get limit.max
+==> should return 440000
+
+330000
+
+Current Limit:
+380000
+
+
+# Results of / get system.serial command, corresponding to:
+camsci1 49822
+camsci2 49820
+lowfs: 49821
+
+@01 0 OK IDLE WR 49822
+@02 0 OK IDLE WR 49820
+@03 0 OK IDLE WR 49821
+
+Results of limit.max:
+@01 0 OK IDLE -- 771029
+@02 0 OK IDLE -- 1526940
+@03 0 OK IDLE -- 380000
+
+On 2021-03-15 changed:
+@03 0 OK IDLE WR 352750

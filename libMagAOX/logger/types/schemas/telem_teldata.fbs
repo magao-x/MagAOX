@@ -1,0 +1,40 @@
+namespace MagAOX.logger;
+
+
+
+table Telem_teldata_fb
+{
+   /// rotator of interest
+   roi:int;
+
+   /// tracking state
+   tracking:int;
+
+   /// guiding state
+   guiding:int;
+
+   /// slewing state
+   slewing:int;
+
+   /// guider moving state
+   guiderMoving:int;
+
+   /// azimuth
+   az:double;
+
+   /// zenith distance
+   zd:double;
+
+   /// parallactic angle
+   pa:double;
+
+   /// dome azimuth
+   domeAz:double;
+
+   /// dome status
+   domeStat:int;
+   
+}
+
+root_type Telem_teldata_fb;
+

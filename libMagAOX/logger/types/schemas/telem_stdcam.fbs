@@ -1,0 +1,49 @@
+namespace MagAOX.logger;
+
+
+table ROI
+{
+   xcen:float;
+   ycen:float;
+   w:int;
+   h:int;
+   xbin:int;
+   ybin:int;
+}
+
+table TempCtrl
+{
+   temp:float;
+   setpt:float;
+   status:bool;
+   ontarget:bool;
+   statusStr:string;
+}
+
+table Shutter
+{
+   statusStr:string;
+   state:int;
+}
+
+table Telem_stdcam_fb
+{
+   mode:string;
+   
+   roi:ROI;
+   
+   exptime:float;
+   
+   fps:float;
+   
+   emGain:float;
+   
+   adcSpeed:float;
+   
+   tempCtrl:TempCtrl;
+   
+   shutter:Shutter;
+}
+
+root_type Telem_stdcam_fb;
+

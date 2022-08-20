@@ -1,0 +1,64 @@
+Terminal 1 (poll the serial interface to read the answers)
+
+Set the serial settings:
+
+user:~$ stty -F /dev/ttyUSB0 speed 115200 cs8 -cstopb -parenb -crtscts -echo -echoe raw
+
+Read the answers (polling):
+
+user:~$ cat /dev/ttyUSB0
+
+ 
+
+Terminal 2 (send GCS commands e.g. ‘*idn?’)
+
+user:~$ echo -ne "*idn?\n" > /dev/ttyUSB0
+
+ 
+
+Terminal 1 (see the answer in Terminal 1)
+
+(c)2015 Physik Instrumente (PI) GmbH & Co. KG, C-877.1U11, 114014284, 01.300
+
+
+
+
+*idn?\n --> (c)2015-2018 Physik Instrumente (PI) GmbH & Co. KG, E-727.3SDA, 119029437, 14.11.01.05
+START-UP
+SVA? 1\n --> 1=0.000000000e+00    --- get open-loop position of axis 1 (should be zero)
+"SVA? 2" --> 2=0.000000000e+00    --- "" ""
+"SVO 1 0"  --> no response --- make sure axis 1 has servo off
+"SVO 2 0" --> no response  --- make sure axis 2 has servo off 
+
+HOMING 
+"ATZ 1 NaN"   --- zero range found in axis 1 (NOTE this moves mirror full range) TAKES 1min 
+"ATZ 2 NaN"    ---- "" "" axis 2
+
+"SVA 1 0.0"    --- goto openloop pos zero (0 V) axis 1
+"SVA 2 0.0"    ---- goto openloop pos zero (0 V) axis 2
+
+"SVA? 1"  --- get the real position of axis 1 (should be 0mrad st start) 
+"SVA? 2"  --- get the real position of axis 2 (should be 0mrad at start) 
+
+now safe to engage servos 
+"SVO 1 1"     --- turn on servo to axis 1 (green servo LED goes on 727) 
+"SVO 2 1"     --- ""      "" axis 2  (same LED stays on) 
+(IMPORTANT:    NEVER EVER enable servos on axis 3 -- will damage S-335) 
+
+now safe for closed loop moves 
+"MOV 1 17.5"   --- center axis 1 (to 17.5 mrad) 
+"MOV 2 17.5"   --- center axis 2
+the spot should be stable in close servo mode --- but cables are long and can make servo a bit unstable -- make cables tight 
+
+Now free to move as needed.....
+
+***************************************************************
+Power down 
+"SVO 1 0\n"
+"SVO 2 0\n" 
+"MOV 1 0\n"
+"MOV 2 0\n" 
+
+To implement:
+HLT, or #24
+

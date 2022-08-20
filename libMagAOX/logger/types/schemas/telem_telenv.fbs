@@ -1,0 +1,20 @@
+namespace MagAOX.logger;
+
+
+
+table Telem_telenv_fb
+{
+   tempout:double;
+   pressure:double;
+   humidity:double;
+   wind:double;
+   winddir:double;
+   temptruss:double;
+   tempcell:double;
+   tempseccell:double;
+   tempamb:double;
+   dewpoint:double;
+}
+
+root_type Telem_telenv_fb;
+

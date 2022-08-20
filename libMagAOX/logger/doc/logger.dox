@@ -1,0 +1,122 @@
+
+
+/**
+\addtogroup logger
+
+\section record_logs Logging an event or information 
+
+libMagAO-X implements a binary logging system, using the co-developed "flatlogs" format and the "flatbuffers" binary protocol from google.  Any class derived from
+MagAOX::app::MagAOXApp has two log methods defined which can be used as follows.
++ To log an event, such as a control loop closing:
+  \code
+  log<loop_closed>(); //an empty log, just an event
+  \endcode
++ To log information, such as a software error:
+  \code
+  log<software_error>({__FILE__, __LINE__, errno}); //information is logged like this
+  \endcode
+  
+Here we see that the log system constructs a message from a "brace enclosed initializer list". The system is statically typed, and the list of parameters in the "{}" list depends on the type specified as a template parameter to log.  All details, such as the time stamp and log priority, are handled automatically but can be specified/overridden if needed.
+
+\section add_logs Steps to adding a new log type:
+
+To add a log type to the MagAO-X flatlogs logging system, perform the following steps.  We will assume that this log is
+named "log_type" in what follows.
+
+-# If it is an empty log:
+  - Create a new file "log_type.hpp" in the logger/types directory.  This new file has the following form 
+  \code
+  #ifndef logger_types_loop_open_hpp
+  #define logger_types_loop_open_hpp
+
+   #include "empty_log.hpp"
+
+   namespace MagAOX
+   {
+   namespace logger
+   {
+
+   /// <add documentation here>
+   struct log_type : public empty_log<log_type>
+   {
+      ///The event code -- This line should appear verbatim
+      constexpr static flatlogs::eventCodeT eventCode = eventCodes::LOG_TYPE; //DO NOT EDIT
+
+      ///The default level -- edit the default level as desired.
+      constexpr static flatlogs::logPrioT defaultLevel = flatlogs::logPrio::LOG_NOTICE; //EDIT PRIORITY AS NEEDED
+
+      ///The message string -- edit for this case.
+      static const char * msg() {return "specific log_type message";} //EDIT "message" AS NEEDED
+   
+   };
+
+   } //namespace logger
+   } //namespace MagAOX
+
+   #endif
+  \endcode
+
+  
+-# If it is not an empty log:
+  - Create a flatbuffer schema in logger/types/schemas 
+    
+  - Create a new file "log_type.hpp" in the logger/types directory.  This new file has the following form 
+  \code
+   #ifndef logger_types_log_type_hpp
+   #define logger_types_log_type_hpp
+
+   #include "generated/log_type_generated.h"  //EDIT THIS FILENAME
+   #include "flatbuffer_log.hpp" //DO NOT EDIT
+
+   namespace MagAOX
+   {
+   namespace logger
+   {
+   
+   /// <add documentation here>   
+   struct log_type : public flatbuffer_log //Must derive from flatbuffer_log
+   {
+      ///The type of the message.  Each flatbuffer_log has a messageT struct.
+      struct messageT : public fbMessage
+      {
+         /// c'tor, used to initialize the log.
+         messageT( const char * msg ) // EXAMPLE: this log_type takes a string as its contents
+         {
+            auto _msg = builder.CreateString(msg); // EXAMPLE: pack the contents in the flatbuffer
+         
+            auto gs = CreateString_log_fb(builder, _msg); // EXAMPLE: finalizing the buffer
+            builder.Finish(gs);
+         }
+      };
+
+      ///Each flatbuffer_log must implement this function to format the log for human consumption
+      static std::string msgString(void * msgBuffer, flatlogs::msgLenT len)
+      {
+         static_cast<void>(len); // unused by most log types
+      
+         auto rgs = GetString_log_fb(msgBuffer); // EXAMPLE: how to work with a flatbuffer
+      
+         if(rgs->message()) return rgs->message()->c_str(); // EXAMPLE: how to access the message contents.
+         else return "";
+      }
+
+   };
+
+   } //namespace logger
+   } //namespace MagAOX
+   #endif
+   \endcode
+   For more information about how to write flatbuffer schemas and pack and access data, see the <a href="https://google.github.io/flatbuffers/">flatbuffer documentation</a>.
+ 
+-# Next add the new types/log_type.hpp file to the libMagAOX Makefile INCLUDEDEPS list.
+
+-# Now add the log to \p "logger/logCodes.dat"
+  - Place it in an appropriate section of the file, and in numerical order by the code so future additions can be easily managed.
+  - Choose a code <= 65535, that is not already used.
+  - Be sure to make the third column the name of the schema (without .fbs attached), which is not necessarily the log type name.
+  
+-# Re-compile the logging system by, in the libMagAOX directory (above logger), typing make.    This will generate a number of files based on the logCodes.dat entry you have made.  Correct any errors from the \p flatc compiler or the flatlogs code gerator.
+
+-# Now recompile the app using the log type and the logdump utility.
+
+*/

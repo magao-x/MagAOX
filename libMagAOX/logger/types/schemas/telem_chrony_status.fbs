@@ -1,0 +1,12 @@
+namespace MagAOX.logger;
+
+table Telem_chrony_status_fb
+{
+   sourceMAC:string;
+   sourceIP:string;
+   synch:string;
+   leap:string;
+}
+
+root_type Telem_chrony_status_fb;
+

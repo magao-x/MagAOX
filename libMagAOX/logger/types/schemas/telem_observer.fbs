@@ -1,0 +1,14 @@
+namespace MagAOX.logger;
+
+
+
+table Telem_observer_fb
+{
+   email:string;
+   obsName:string;
+   observing:bool;
+
+}
+
+root_type Telem_observer_fb;
+

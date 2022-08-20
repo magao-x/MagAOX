@@ -1,0 +1,27 @@
+namespace MagAOX.logger;
+
+
+
+table Telem_telcat_fb
+{
+   /// Catalog object name
+   catObj:string;
+   
+   /// Catalog rotator mode
+   catRm:string;
+   
+   /// Catalog right ascension [degrees]
+   catRa:double;
+   
+   /// Catalog declination [degrees]
+   catDec:double;
+   
+   /// Catalog epoch
+   catEp:double;
+   
+   /// Catalog rotator offset
+   catRo:double;   
+}
+
+root_type Telem_telcat_fb;
+

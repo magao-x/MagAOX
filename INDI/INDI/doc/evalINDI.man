@@ -1,0 +1,134 @@
+.TH evalINDI 1
+.SH NAME
+evalINDI \- evaluate an expression of INDI property values
+.SH SYNOPSIS
+\fBevalINDI [options] [exp]\fP
+
+.SH DESCRIPTION
+.na
+.nh
+.PP
+evalINDI connects to an indiserver and listens for the values of properties
+to evaluate an arithmetic expression. Each property is specified using three
+components enclosed in double quotes in the following form:
+.IP
+"device.property.element"
+.PP
+The last component of the property specification is usually the element name,
+but may be a reserved name to indicate an attribute of the property as a whole.
+These reserved names are as follows:
+.TP 12
+_STATE
+the state attribute, where for the purposes of evaluation the usual keywords
+.I Idle, Ok, Busy
+and
+.I Alert
+are converted to the numeric values of 0, 1, 2 and 3 respectively.
+.TP
+_TS
+evaluate the timestamp attribute as the number of UNIX seconds from epoch
+
+.PP
+Switch vectors evalute to 0 or 1 based on the state values of Off and On, respectively. Light vectors evaluate to 0-3 similarly to the keywords described above
+for _STATE.
+
+.PP
+The arithmetic expression, 
+.I exp,
+follows the form of that used in the C programming language. The operators
+supported include:
+.IP
+! + - * / && || > >= == != < <=
+.PP
+and the mathematical functions supported include:
+.IP
+sin(rad) cos(rad) tan(rad) asin(x) acos(x) atan(x) atan2(y,x) abs(x)
+degrad(deg) raddeg(rad) floor(x) log(x) log10(x) exp(x) sqrt(x) pow(x,exp)
+.PP
+The value of PI can be specified using a constant named "pi".
+
+
+.SH OPTIONS
+.TP 8
+-b
+Ring the terminal bell when expression evaluates as true.
+.TP
+-d <f>
+use file descriptor f already open as a socket to the indiserver. This is
+useful for scripts to make a session connection one time then reuse it for
+each invocation. If the file descriptor seems to be being closed, check that
+the close-on-exec flag is off; for example in perl use something like:
+.nf
+
+#!/usr/bin/perl
+use Socket;
+use Fcntl;
+socket(SOCK, PF_INET, SOCK_STREAM, getprotobyname('tcp'));
+connect(SOCK, sockaddr_in(7624,inet_aton('localhost')));
+fcntl(SOCK,F_SETFD,0);
+$directfd = fileno(SOCK);
+&runindi ("./evalINDI", "-d", "$directfd", "\\"x.y.z\\"==1");
+sub runindi { if (fork()) { wait(); } else { exec @_; } }
+.fi
+.TP
+-e
+print each updated expression value after each evaluation
+.TP
+-f
+print the final expression value
+.TP
+-h <h>
+connect to alternate host h; the default is localhost.
+.TP
+-i
+read the expression from stdin
+.TP
+-o
+print each operand each time it changes value in the form property=value
+.TP
+-p <p>
+connect using alternate port p; the default is 7624.
+.TP
+-t <t>
+wait no longer than t seconds to gather the initial values for all the
+specified properties; 0 means forever, the default is 2 seconds.
+.TP
+-v
+generate additional information on stderr. This is cumulative in that specifying
+more -v options will generate more output.
+.TP
+-w
+evaluate the expression as many times as necessary until it evaluates to
+a value other than zero.
+
+.SH EXIT STATUS
+The evalINDI program exits with a statis of 0 if the expression evaluates to
+non-0. It exits with 1 if the expression evaluated to 0. It exits with 2
+if there was some other error such as not being able to connect to the
+indiserver.
+
+.SH EXAMPLES
+.PP
+Print 0/1 whether the Front or Rear elements of the Security property are in
+a state of Alert:
+.IP
+evalINDI -f '"Security.Security.Front"==3 || "Security.Security.Rear"==3'
+.PP
+Exit 0 if the Security property as a whole is in a state of Ok:
+.IP
+evalINDI '"Security.Security._STATE"==1'
+.PP
+Wait forever for RA and Dec to be near zero and watch their values as they
+change:
+.IP
+evalINDI -t 0 -wo 'abs("Mount.EqJ2K.RA")<.01 && abs("Mount.EqJ2K.Dec")<.01'
+.PP
+Wait forever for the wind speed to become larger than 50:
+.IP
+evalINDI -t 0 -w '"Weather.Wind.Speed">50'
+
+.SH SEE ALSO
+.PP
+getINDI, setINDI, indiserver
+.br
+http://www.clearskyinstitute.com/INDI/INDI.pdf

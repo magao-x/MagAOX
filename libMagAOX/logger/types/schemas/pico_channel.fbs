@@ -1,0 +1,10 @@
+namespace MagAOX.logger;
+
+table Pico_channel_fb
+{
+   name:string;
+   channel:uint8;
+}
+
+root_type Pico_channel_fb;
+

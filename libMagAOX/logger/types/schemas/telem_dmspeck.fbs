@@ -1,0 +1,28 @@
+namespace MagAOX.logger;
+
+table Telem_dmspeck_fb
+{
+   /// whether or not the speckle is being modulated
+   modulating:bool;
+
+   /// whether or not the speckle is being triggered
+   trigger:bool;
+
+   /// frequency of modulation is not triggered
+   frequency:float;
+
+   /// the separations of the speckle(s)
+   separations:[float];
+
+   /// the angles of the speckle(s)
+   angles:[float];
+
+   /// the amplitudes of the speckle(s)
+   amplitudes:[float];
+
+   /// whether or not the cross speckle(s) are produced
+   crosses:[bool];
+}
+
+root_type Telem_dmspeck_fb;
+

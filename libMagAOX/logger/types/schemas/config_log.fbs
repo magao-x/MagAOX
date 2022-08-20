@@ -1,0 +1,14 @@
+namespace MagAOX.logger;
+
+
+
+table Config_log_fb
+{
+   name:string;
+   code:uint32;
+   value:string;
+   source:string;
+}
+
+root_type Config_log_fb;
+

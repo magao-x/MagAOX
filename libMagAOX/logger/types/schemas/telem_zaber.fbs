@@ -1,0 +1,18 @@
+namespace MagAOX.logger;
+
+
+
+table Telem_zaber_fb
+{
+   /// stage position in mm
+   pos:float;
+
+   /// stage raw position, in counts
+   rawPos:float;
+
+   /// stage temperature
+   temp:float;
+}
+
+root_type Telem_zaber_fb;
+

@@ -1,0 +1,10 @@
+namespace MagAOX.logger;
+
+table State_change_fb
+{
+   from:int16; 
+   to:int16;
+}
+
+root_type State_change_fb;
+
