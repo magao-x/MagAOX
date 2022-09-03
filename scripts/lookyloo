@@ -1,25 +1,39 @@
 #!/usr/bin/env python
+'''lookyloo - convert xrif images + bintel telemetry into FITS
+
+Example: Convert any camsci1 or camlowfs archives written
+during an observation with 'lamVel' in the title recorded this year
+and save the FITS files to folders under /home/jrmales/my_quicklook,
+using a backup drive copy of the AOC/RTC/ICC data partitions.
+
+    lookyloo --camera camsci1 --camera camlowfs \\
+        --data-root /media/magao-x_2022a/aoc \\
+        --data-root /media/magao-x_2022a/rtc \\
+        --data-root /media/magao-x_2022a/icc \\
+        --output-dir /home/jrmales/my_quicklook \\
+        --title lamVel --partial-match-ok
+
+Example: Convert camsci1 and camsci2 (the defaults) archives from any
+observation in 2022 and record verbose output from lookyloo itself
+to a log file in the current directory, saving outputs to folders in
+the current directory as well.
+
+    lookyloo --output-dir . --year 2022 --verbose
+'''
 import re
 import subprocess
 import pathlib
 import typing
-from pprint import pformat
 import dataclasses
 import os
-import sys
 import time
 import datetime
 from datetime import timezone
-import threading
-import queue
 import logging
 
 log = logging.getLogger(__name__)
 
-TELEM_ROOT = pathlib.Path('/opt/MagAOX/telem')
-ICC_DATA = pathlib.Path('/data/icc')
-RTC_DATA = pathlib.Path('/data/rtc')
-AOC_DATA = pathlib.Path('/data')
+LOOKYLOO_DATA_ROOTS = os.environ.get('LOOKYLOO_DATA_PATHS', '/data:/data/icc:/data/rtc')
 QUICKLOOK_PATH = pathlib.Path('/data/users/guestobs/quicklook')
 SCIENCE_CAMERAS = ['camsci1', 'camsci2']
 SLEEP_FOR_TELEMS = 30
@@ -75,8 +89,8 @@ def parse_observers_line(line):
     on = groups[9] == '1'
     return ObserverTelem(ts, email, obs, on)
 
-def parse_logdump_for_observers(telem_path : pathlib.Path):
-    args = ['logdump', f'--dir={TELEM_ROOT}', '--ext=.bintel', telem_path.name]
+def parse_logdump_for_observers(telem_root : pathlib.Path, telem_path : pathlib.Path):
+    args = ['logdump', f'--dir={telem_root.as_posix()}', '--ext=.bintel', telem_path.name]
     p1 = subprocess.Popen(
         args,
         stdout=subprocess.PIPE,
@@ -141,31 +155,39 @@ def get_matching_paths(
     n_files = len(all_matching_files)
     filtered_files = []
     log.debug(f"Interval endpoint filenames: {newer_than_dt_fn=} {older_than_dt_fn=}")
-    for idx, telem_path in enumerate(all_matching_files):
+    for idx, the_path in enumerate(all_matching_files):
         # it's possible for a file to start before `newer_than_dt`
         # but record an observation starting after `newer_than_dt`, so
         # we grab the last file *before* the first that was started after
         # our `newer_than_dt` too
         if (
-            telem_path.name > newer_than_dt_fn or 
+            the_path.name > newer_than_dt_fn or
             (idx + 1 < n_files and all_matching_files[idx+1].name > newer_than_dt_fn) or
             idx == n_files - 1
         ):
-            if older_than_dt is not None and telem_path.name > older_than_dt_fn:
+            if older_than_dt is not None and the_path.name > older_than_dt_fn:
                 # can't find in-range entries from files opened after `older_than_dt`
                 # so skip
                 continue
-            chopped_name = telem_path.name.replace('.' + extension, '')[:-3]
+            chopped_name = the_path.name.replace('.' + extension, '')[:-3]
             chopped_ts_str = chopped_name.split('_')[1]
             ts = datetime.datetime.strptime(chopped_ts_str, MODIFIED_TIME_FORMAT).replace(tzinfo=timezone.utc)
-            filtered_files.append(TimestampedFile(telem_path, ts))
+            filtered_files.append(TimestampedFile(the_path, ts))
     return filtered_files
-    
 
-def get_observation_telems(newer_than_dt : datetime.datetime):
+
+def get_observation_telems(data_roots: typing.List[pathlib.Path], newer_than_dt : datetime.datetime):
     events = []
-    for telem_path in get_matching_paths(TELEM_ROOT, OBSERVERS_DEVICE, 'bintel', newer_than_dt):
-        events.extend(parse_logdump_for_observers(telem_path.path))
+    observers_data_root = None
+    for data_root in data_roots:
+        obs_dev_path = data_root / 'telem'
+        if len(list(obs_dev_path.glob(f'{OBSERVERS_DEVICE}_*.bintel'))):
+            observers_data_root = obs_dev_path
+            break
+    if observers_data_root is None:
+        raise RuntimeError(f"No {OBSERVERS_DEVICE} device telemetry in any of {[(x / 'telem').as_posix() for x in data_roots]}")
+    for telem_path in get_matching_paths(observers_data_root, OBSERVERS_DEVICE, 'bintel', newer_than_dt):
+        events.extend(parse_logdump_for_observers(observers_data_root, telem_path.path))
     return events
 
 def transform_telems_to_spans(events : typing.List[ObserverTelem], ending_after_dt : datetime.datetime):
@@ -173,7 +195,7 @@ def transform_telems_to_spans(events : typing.List[ObserverTelem], ending_after_
     current_observer_email : str = None
     current_observation : str = None
     current_observation_start : datetime.datetime = None
-    
+
     def _add_span(email, title, begin, end):
         if end is not None and end < ending_after_dt:
             # log.debug(f"Discarding span {email} '{title}' {begin.isoformat()}-{end.isoformat()} because end after {ending_after_dt.isoformat()}")
@@ -186,7 +208,7 @@ def transform_telems_to_spans(events : typing.List[ObserverTelem], ending_after_
             begin,
             end
         ))
-    
+
     for event in events:
         if event.on:
             if current_observation_start is not None:
@@ -214,11 +236,11 @@ def transform_telems_to_spans(events : typing.List[ObserverTelem], ending_after_
                 event.ts
             )
             current_observation = current_observation_start = current_observer_email = None
-    
+
     # new starting point for next iteration, ignore anything that we already processed
     if len(spans):
         ending_after_dt = spans[-1].end
-    
+
     if current_observation_start is not None:
         _add_span(
             current_observer_email,
@@ -228,19 +250,25 @@ def transform_telems_to_spans(events : typing.List[ObserverTelem], ending_after_
         )
     return spans, ending_after_dt
 
-def get_new_observation_spans(existing_observation_spans : typing.Set[ObservationSpan], ending_after_dt : datetime.datetime):
-    events = get_observation_telems(ending_after_dt)
+def get_new_observation_spans(data_roots: typing.List[pathlib.Path], existing_observation_spans : typing.Set[ObservationSpan], ending_after_dt : datetime.datetime):
+    events = get_observation_telems(data_roots, ending_after_dt)
     spans, ending_after_dt = transform_telems_to_spans(events, ending_after_dt)
     if len(spans):
         new_observation_spans = set(spans) - existing_observation_spans
+        log.debug(f"New observation_spans: {new_observation_spans}")
         return new_observation_spans, ending_after_dt
     else:
         return set(), ending_after_dt
 
-def do_quicklook_for_camera(span, data_root, device, omit_telemetry, output_dir, dry_run, all_visited_files=None):
+def do_quicklook_for_camera(span, data_roots, device, omit_telemetry, output_dir, dry_run, all_visited_files=None):
     if all_visited_files is None:
         all_visited_files = set()
-    image_path = data_root / 'rawimages' / device
+    for data_root in data_roots:
+        image_path = data_root / 'rawimages' / device
+        if image_path.is_dir():
+            break
+    if not image_path.is_dir():  # no iteration succeeded in the loop preceding
+        raise RuntimeError(f"Unknown device: {device} (checked {data_roots})")
     log.debug(f"Checking {image_path} ...")
     matching_files = set(get_matching_paths(image_path, device, 'xrif', newer_than_dt=span.begin, older_than_dt=span.end))
     new_matching_files = matching_files - all_visited_files
@@ -251,18 +279,20 @@ def do_quicklook_for_camera(span, data_root, device, omit_telemetry, output_dir,
                 log.debug(f"\tmatched: {fn} (new)")
             else:
                 log.debug(f"\tmatched: {fn}")
-        destination = output_dir / span.email / (span.title if len(span.title) else '_no_name_') / device
-        destination.mkdir(parents=True, exist_ok=True)
-        convert_xrif(image_path, new_matching_files, destination, omit_telemetry, dry_run)
+        destination = output_dir / (span.email if len(span.email) else '_no_email_') / (span.title if len(span.title) else '_no_title_') / device
+        if not dry_run:
+            destination.mkdir(parents=True, exist_ok=True)
+        successful_paths, failed_paths = convert_xrif(image_path, data_roots, new_matching_files, destination, omit_telemetry, dry_run)
         log.info(f"Wrote to {destination}")
     return new_matching_files
 
-def convert_xrif(base_dir, paths : typing.List[TimestampedFile], destination_path, omit_telemetry, dry_run):
+def convert_xrif(base_dir, data_roots: typing.List[pathlib.Path], paths : typing.List[TimestampedFile], destination_path, omit_telemetry, dry_run):
     for data_file in paths:
         delta = datetime.datetime.utcnow().replace(tzinfo=timezone.utc) - data_file.timestamp
-        if delta.seconds < SLEEP_FOR_TELEMS:
-            time.sleep(SLEEP_FOR_TELEMS - delta.seconds)
+        if delta.total_seconds() < SLEEP_FOR_TELEMS:
+            time.sleep(SLEEP_FOR_TELEMS - delta.total_seconds())
     failed_commands = []
+    successful_paths, failed_paths = [], []
     for ts_path in paths:
         args = [
             os.environ.get('XRIF2FITS_EXE', 'xrif2fits'),
@@ -270,9 +300,11 @@ def convert_xrif(base_dir, paths : typing.List[TimestampedFile], destination_pat
             '-f', ts_path.path.name,
         ]
         if not omit_telemetry:
+            telem_paths_str = ','.join((x / 'telem').as_posix() for x in data_roots)
+            log_paths_str = ','.join((x / 'logs').as_posix() for x in data_roots)
             args.extend([
-                '-t', '/data/icc/telem,/data/rtc/telem,/data/telem',
-                '-l', '/data/icc/logs,/data/rtc/logs,/data/logs',
+                '-t', telem_paths_str,
+                '-l', log_paths_str,
             ])
         args.extend([
             '-D', str(destination_path)
@@ -287,12 +319,15 @@ def convert_xrif(base_dir, paths : typing.List[TimestampedFile], destination_pat
                     stderr=subprocess.DEVNULL
                 )
                 proc.wait(timeout=60)
+                successful_paths.append(ts_path.path)
             except subprocess.CalledProcessError as e:
                 log.exception("xrif2fits exited with nonzero exit code")
                 failed_commands.append(command_line)
+                failed_paths.append(ts_path.path)
             except subprocess.TimeoutExpired as e:
                 log.exception("xrif2fits canceled after timeout")
                 failed_commands.append(command_line)
+                failed_paths.append(ts_path.path)
                 proc.kill()
         else:
             log.debug(f"dry run: {command_line}")
@@ -301,8 +336,9 @@ def convert_xrif(base_dir, paths : typing.List[TimestampedFile], destination_pat
         for cmd in failed_commands:
             log.debug(f"\tfailed: {cmd}")
     log.debug(f"Extracted {len(paths)} XRIF archives to FITS")
+    return successful_paths, failed_paths
 
-def daemon_mode(output_dir, cameras, data_root, omit_telemetry):
+def daemon_mode(output_dir : pathlib.Path, cameras : typing.List[str], data_roots: typing.List[pathlib.Path], omit_telemetry : bool):
     ending_after_dt = datetime.datetime.utcnow() - datetime.timedelta(minutes=120)
     ending_after_dt = ending_after_dt.replace(tzinfo=timezone.utc)
     existing_observation_spans = set()
@@ -312,15 +348,15 @@ def daemon_mode(output_dir, cameras, data_root, omit_telemetry):
     while True:
         start_time = time.time()
         try:
-            result = get_new_observation_spans(existing_observation_spans, ending_after_dt)
+            result = get_new_observation_spans(data_roots, existing_observation_spans, ending_after_dt)
             new_observation_spans : typing.List[ObservationSpan] = result[0]
             ending_after_dt : datetime.datetime = result[1]
             spans_with_data = set()
             for span in new_observation_spans:
                 log.info(f"Observation interval to process: {span}")
                 for device in cameras:
-                    visited_files = do_quicklook_for_camera(span, data_root, device, omit_telemetry, output_dir, dry_run, all_visited_files)
-                    if len(visited_files) and (span.end is not None and (utcnow() - span.end).seconds > 5 * 60):
+                    visited_files = do_quicklook_for_camera(span, data_roots, device, omit_telemetry, output_dir, dry_run, all_visited_files)
+                    if len(visited_files) and (span.end is not None and (utcnow() - span.end).total_seconds() > 5 * 60):
                         log.info(f"Completed span {span}")
                         spans_with_data.add(span)
                     all_visited_files = all_visited_files.union(visited_files)
@@ -344,30 +380,53 @@ def main():
     parser.add_argument('-r', '--dry-run', help="Commands to run are printed in debug output (implies --verbose)", action='store_true')
     parser.add_argument('-v', '--verbose', help="Turn on debug output", action='store_true')
     parser.add_argument('-t', '--title', help="Title of observation to collect", action='store')
+    parser.add_argument('-p', '--partial-match-ok', help="A partial match (title provided is found anywhere in recorded title) is processed", action='store_true')
     parser.add_argument('-y', '--year', help=f"Year to search in, default: {this_year}", type=int, default=this_year)
-    parser.add_argument('-c', '--camera', help="device name", action='append')
-    parser.add_argument('-X', '--data-root', help="Prefix for camera data", default=ICC_DATA.as_posix())
+    parser.add_argument('-c', '--camera', help=f"Camera name (i.e. rawimages subfolder name), repeat to specify multiple names. (default: {SCIENCE_CAMERAS})", action='append')
+    parser.add_argument('-X', '--data-root', help=f"Search directory for telem and rawimages subdirectories, repeat to specify multiple roots. (default: {LOOKYLOO_DATA_ROOTS.split(':')})", action='append')
     parser.add_argument('-O', '--omit-telemetry', help="Whether to omit references to telemetry files", action='store_true')
     parser.add_argument('-D', '--output-dir', help=f"output directory, defaults to {QUICKLOOK_PATH.as_posix()}", action='store', default=QUICKLOOK_PATH.as_posix())
     args = parser.parse_args()
-    logging.basicConfig(level='DEBUG' if args.verbose or args.dry_run else 'INFO')
+    log_file_path = f"./lookyloo_{time.time()}.log" if args.verbose or args.dry_run else None
+    log_format = '%(asctime)s %(name)s %(filename)s:%(lineno)d: [%(levelname)s] %(message)s'
+    logging.basicConfig(
+        level='DEBUG' if args.verbose or args.dry_run else 'INFO',
+        filename=log_file_path,
+        format=log_format
+    )
+    # Specifying a filename results in no console output, so add it back
+    if args.verbose or args.dry_run:
+        console = logging.StreamHandler()
+        console.setLevel(logging.DEBUG)
+        logging.getLogger('').addHandler(console)
+        formatter = logging.Formatter(log_format)
+        console.setFormatter(formatter)
+        log.debug(f"Logging to {log_file_path}")
+
     if args.camera is not None:
         cameras = args.camera
     else:
         cameras = SCIENCE_CAMERAS
-    data_root = pathlib.Path(args.data_root)
+    if args.data_root:
+        data_roots = [pathlib.Path(x) for x in args.data_root]
+    else:
+        data_roots = [pathlib.Path(x) for x in LOOKYLOO_DATA_ROOTS.split(':')]
     output_dir = pathlib.Path(args.output_dir)
     ending_after_dt = datetime.datetime(args.year, 1, 1)
     ending_after_dt = ending_after_dt.replace(tzinfo=timezone.utc)
     if args.daemon:
-        daemon_mode(output_dir, cameras, data_root, args.omit_telemetry)
+        daemon_mode(output_dir, cameras, data_roots, args.omit_telemetry)
     else:
-        new_observation_spans, _ = get_new_observation_spans(set(), ending_after_dt)
+        new_observation_spans, _ = get_new_observation_spans(data_roots, set(), ending_after_dt)
         for span in new_observation_spans:
-            if args.title is None or span.title.strip().lower() == args.title.strip().lower():
+            if (
+                args.title is None
+                or span.title.strip().lower() == args.title.strip().lower()
+                or (args.partial_match_ok and args.title.strip().lower() in span.title.lower())
+            ):
                 log.info(f"Observation interval to process: {span}")
                 for device in cameras:
-                    do_quicklook_for_camera(span, data_root, device, args.omit_telemetry, output_dir, args.dry_run)
+                    do_quicklook_for_camera(span, data_roots, device, args.omit_telemetry, output_dir, args.dry_run)
 
 if __name__ == "__main__":
     main()
