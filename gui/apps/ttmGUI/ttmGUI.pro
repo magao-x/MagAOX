@@ -29,7 +29,6 @@ INCLUDEPATH += ../../lib ../../lib ../../widgets
 
 HEADERS += ../../widgets/ttm/ttm.hpp \
            ../../widgets/xWidgets/xWidget.hpp \
-           ../../lib/multiIndi.hpp \
            ../../lib/multiIndiManager.hpp
            
 SOURCES += ttmGUI_main.cpp 
