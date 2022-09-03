@@ -220,9 +220,7 @@ void pwrGUI::removeDevice( std::string * devName )
    //Get mutex so we don't get clobbered by the next INDI def
    std::unique_lock<std::mutex> lock(m_addMutex);
 
-   //First erase grid so there are no active widgets pointing to this, and we're going to redraw it anyway.
-   eraseGrid();
-
+   //Figure out if we even have to do this
    size_t n;
    for(n = 0; n < m_devices.size(); ++n)
    {
@@ -234,6 +232,9 @@ void pwrGUI::removeDevice( std::string * devName )
    {
       return;
    }
+
+   //First erase grid so there are no active widgets pointing to this, and we're going to redraw it anyway.
+   eraseGrid();
 
    //disconnect signals
    QObject::disconnect(m_devices[n], SIGNAL(chChange(pcf::IndiProperty &)), this, SLOT(chChange(pcf::IndiProperty &)));
