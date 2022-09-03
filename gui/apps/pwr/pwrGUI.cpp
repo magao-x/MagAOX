@@ -19,11 +19,8 @@
 #include <QPaintEvent>
 #include <QSlider>
 
-
-
 namespace xqt
 {
-   
 
 pwrGUI::pwrGUI( QWidget * Parent, Qt::WindowFlags f) : QWidget(Parent, f)
 {
@@ -33,38 +30,16 @@ pwrGUI::pwrGUI( QWidget * Parent, Qt::WindowFlags f) : QWidget(Parent, f)
    ui.averageVoltage->setProperty("isStatus", true);
    ui.averageFrequency->setProperty("isStatus", true);
    
-   connect(this, SIGNAL(gotNewDevice(std::string *, std::vector<std::string> *)), this, SLOT(addNewDevice(std::string *, std::vector<std::string> *)));
-   
-   n_ACpdus=3;
-   currents.resize(n_ACpdus, -1);
-   voltages.resize(n_ACpdus, -1);
-   frequencies.resize(n_ACpdus, -1);
+   connect(this, SIGNAL(gotNewDevice(std::string *, std::vector<std::string> *)), this, SLOT(addDevice(std::string *, std::vector<std::string> *)));
+   connect(this, SIGNAL(gotDeleteDevice(std::string *)), this, SLOT(removeDevice(std::string *)));
+
+   onDisconnect();
 }
    
 pwrGUI::~pwrGUI() noexcept
 {
    if(m_parent) m_parent->unsubscribe(this);
-   //for(size_t i=0; i< m_devices.size(); ++i) delete m_devices[i];
 }
-
-// int pwrGUI::subscribe( multiIndiParent * parent )
-// {
-//    if(parent == nullptr) return -1;
-
-//    std::cerr << "pwrGUI::subscribe [subscribing to parent]\n";  
-//    parent->subscribe(this);
-      
-//    return 0;
-// }
-
-// void pwrGUI::pwrGUI::onConnect()
-// {
-//    if(m_parent == nullptr) return;
-   
-//    m_parent->onConnect();
-//    //pcf::IndiProperty ipSend;
-//    //m_parent->sendGetProperties( ipSend );
-// }
 
 void pwrGUI::pwrGUI::onDisconnect()
 {
@@ -88,8 +63,7 @@ void pwrGUI::pwrGUI::onDisconnect()
    
 }
 
- 
-void pwrGUI::handleDefProperty( const pcf::IndiProperty & ipRecv /**< [in] the property which has changed*/)
+void pwrGUI::handleDefProperty( const pcf::IndiProperty & ipRecv /* [in] the property which has changed*/)
 {
    bool have = false;
    for(size_t i=0;i<m_devices.size(); ++i)
@@ -116,6 +90,8 @@ void pwrGUI::handleDefProperty( const pcf::IndiProperty & ipRecv /**< [in] the p
                (*elements)[i] = ipRecv[i].getName();
             }
          
+            std::sort(elements->begin(), elements->end());
+
             std::string * devName = new std::string;
             *devName = ipRecv.getDevice();
          
@@ -129,59 +105,27 @@ void pwrGUI::handleDefProperty( const pcf::IndiProperty & ipRecv /**< [in] the p
    
 }
 
-void pwrGUI::addNewDevice( std::string * devName,
-                           std::vector<std::string>  * channels
-                         )
+void pwrGUI::handleDelProperty( const pcf::IndiProperty & ipRecv /* [in] the property which has deleted*/)
 {
-   static int currRow = 0;
-   
+   std::string * devName = new std::string;
+
+   *devName = ipRecv.getDevice();
+
+   bool have = false;
    for(size_t i=0;i<m_devices.size(); ++i)
    {
       if(m_devices[i]->deviceName() == *devName) 
       {
-         delete devName;
-         delete channels;
-         return;
+         have = true;
+         break;
       }
    }
-   
-   //Get mutex so we don't get clobbered by the next INDI def
-   std::unique_lock<std::mutex> lock(m_addMutex);
-   
-   m_devices.push_back( new pwrDevice(this));
-   m_devices.back()->deviceName(*devName);
-   
-   
-   m_devices.back()->setChannels(*channels);
-   
-   QObject::connect(m_devices.back(), SIGNAL(chChange(pcf::IndiProperty &)), this, SLOT(chChange(pcf::IndiProperty &)));
-   QObject::connect(m_devices.back(), SIGNAL(loadChanged()), this, SLOT(updateGauges()));
-      
-   m_parent->addSubscriberProperty(this, m_devices.back()->deviceName(), "load");
-   m_parent->addSubscriberProperty(this, m_devices.back()->deviceName(), "channelOutlets");
-   m_parent->addSubscriberProperty(this, m_devices.back()->deviceName(), "channelOnDelays");
-   m_parent->addSubscriberProperty(this, m_devices.back()->deviceName(), "channelOffDelays");
-   
-   
-   ui.switchGrid->addWidget(m_devices.back()->deviceNameLabel(), currRow, 0, 2, 1);
-   
-   for(size_t i=0;i<m_devices.back()->numChannels();++i)
-   {
-      m_parent->addSubscriberProperty(this, m_devices.back()->deviceName(), m_devices.back()->channel(i)->channelName());
-      
-      ui.switchGrid->addWidget(m_devices.back()->channel(i)->channelNameLabel(), currRow, i+1);
-      ui.switchGrid->addWidget(m_devices.back()->channel(i)->channelSwitch(), currRow+1, i+1);
-   }
-      
-   currRow +=2;
-   
-   delete devName;
-   delete channels;
-   
-   
+
+   if(have) emit gotDeleteDevice(devName);
+   else delete devName;
 }
 
-void pwrGUI::handleSetProperty( const pcf::IndiProperty & ipRecv /**< [in] the property which has changed*/)
+void pwrGUI::handleSetProperty( const pcf::IndiProperty & ipRecv /* [in] the property which has changed*/)
 {
    for(size_t n=0; n<m_devices.size(); ++n)
    {
@@ -193,7 +137,129 @@ void pwrGUI::handleSetProperty( const pcf::IndiProperty & ipRecv /**< [in] the p
       }
    }
 }
+
+void pwrGUI::populateGrid()
+{
+   eraseGrid();
+
+   std::sort(m_devices.begin(), m_devices.end(), compPwrDevice);
+
+   int currRow = 0;
+   for(size_t n =0; n < m_devices.size(); ++n)
+   {
+      ui.switchGrid->addWidget(m_devices[n]->deviceNameLabel(), currRow, 0, 2, 1);
+      m_devices[n]->deviceNameLabel()->show();
+
+      for(size_t i=0;i<m_devices[n]->numChannels();++i)
+      {
+         ui.switchGrid->addWidget(m_devices[n]->channel(i)->channelNameLabel(), currRow, i+1);
+         m_devices[n]->channel(i)->channelNameLabel()->show();
+         ui.switchGrid->addWidget(m_devices[n]->channel(i)->channelSwitch(), currRow+1, i+1);
+         m_devices[n]->channel(i)->channelSwitch()->show();
+      }
+      
+      currRow +=2;
+   }
+
+}
  
+void pwrGUI::eraseGrid()
+{
+   QLayoutItem *child;
+   while ((child = ui.switchGrid->takeAt(0)) != nullptr) 
+   {
+      child->widget()->hide();
+      ui.switchGrid->removeWidget(child->widget()); // remove the widget
+      delete child;   // delete the layout item
+   }
+}
+
+void pwrGUI::addDevice( std::string * devName,
+                        std::vector<std::string>  * channels
+                      )
+{
+   //First look for it in existing devices
+   for(size_t i=0;i<m_devices.size(); ++i)
+   {
+      if(m_devices[i]->deviceName() == *devName) 
+      {
+         delete devName;
+         delete channels;
+         return; //nothing to do
+      }
+   }
+   
+   //Get mutex so we don't get clobbered by the next INDI def
+   std::unique_lock<std::mutex> lock(m_addMutex);
+   
+   m_devices.push_back( new pwrDevice(this));
+   m_devices.back()->deviceName(*devName);
+   m_devices.back()->setChannels(*channels);
+   
+   QObject::connect(m_devices.back(), SIGNAL(chChange(pcf::IndiProperty &)), this, SLOT(chChange(pcf::IndiProperty &)));
+   QObject::connect(m_devices.back(), SIGNAL(loadChanged()), this, SLOT(updateGauges()));
+      
+   m_parent->addSubscriberProperty(this, m_devices.back()->deviceName(), "load");
+   m_parent->addSubscriberProperty(this, m_devices.back()->deviceName(), "channelOutlets");
+   m_parent->addSubscriberProperty(this, m_devices.back()->deviceName(), "channelOnDelays");
+   m_parent->addSubscriberProperty(this, m_devices.back()->deviceName(), "channelOffDelays");
+   
+   for(size_t i=0;i<m_devices.back()->numChannels();++i)
+   {
+      m_parent->addSubscriberProperty(this, m_devices.back()->deviceName(), m_devices.back()->channel(i)->channelName());
+   }
+
+   populateGrid();
+
+   delete devName;
+   delete channels;
+}
+
+void pwrGUI::removeDevice( std::string * devName )
+{
+   //Get mutex so we don't get clobbered by the next INDI def
+   std::unique_lock<std::mutex> lock(m_addMutex);
+
+   //First erase grid so there are no active widgets pointing to this, and we're going to redraw it anyway.
+   eraseGrid();
+
+   size_t n;
+   for(n = 0; n < m_devices.size(); ++n)
+   {
+      if( m_devices[n]->deviceName() == *devName) break;
+   }
+   delete devName;
+   
+   if(n >= m_devices.size())
+   {
+      return;
+   }
+
+   //disconnect signals
+   QObject::disconnect(m_devices[n], SIGNAL(chChange(pcf::IndiProperty &)), this, SLOT(chChange(pcf::IndiProperty &)));
+   QObject::disconnect(m_devices[n], SIGNAL(loadChanged()), this, SLOT(updateGauges()));
+
+   //unsubscribe
+   m_parent->unsubscribe(this, m_devices[n]->deviceName(), "load");
+   m_parent->unsubscribe(this, m_devices[n]->deviceName(), "channelOutlets");
+   m_parent->unsubscribe(this, m_devices[n]->deviceName(), "channelOnDelays");
+   m_parent->unsubscribe(this, m_devices[n]->deviceName(), "channelOffDelays");
+   
+   for(size_t i=0;i<m_devices[n]->numChannels();++i)
+   {
+      m_parent->addSubscriberProperty(this, m_devices[n]->deviceName(), m_devices[n]->channel(i)->channelName());
+   }
+
+   //Then delete pwrDevice, removing it from m_devices
+   pwrDevice * dev = m_devices[n];
+   m_devices.erase(m_devices.begin() + n);
+   dev->deleteLater();
+
+   //Then populate grid
+   populateGrid();
+
+}
+
 void pwrGUI::chChange( pcf::IndiProperty & ip )
 {
    try
@@ -202,7 +268,7 @@ void pwrGUI::chChange( pcf::IndiProperty & ip )
    }
    catch(...)
    {
-      std::cerr << "Exception caught\n";
+      std::cerr << "pwrGUI::chChange Exception caught\n";
    }
 }
 
@@ -269,10 +335,6 @@ void pwrGUI::on_buttonReconnect_pressed()
 {
    if(m_parent == nullptr) return;
    m_parent->setDisconnect();
-
-   //multiIndiPublisher * publisher = m_parent;
-   //onDisconnect();
-   //m_parent->addSubscriber(this);
 }
 
 } //namespace xqt
