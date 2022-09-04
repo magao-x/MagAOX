@@ -44,7 +44,7 @@ protected:
 public:
    loopCtrl( std::string & procName,
              QWidget * Parent = 0, 
-             Qt::WindowFlags f = 0
+             Qt::WindowFlags f = Qt::WindowFlags()
            );
    
    ~loopCtrl();
@@ -268,7 +268,7 @@ void loopCtrl::handleSetProperty( const pcf::IndiProperty & ipRecv)
             for(size_t n = 0; n<nB; ++n)
             {
                char mstr[16];
-               snprintf(mstr, sizeof(mstr), "%02d", n);
+               snprintf(mstr, sizeof(mstr), "%02zu", n);
                std::string blockstr = std::string("block")+mstr;
                int nM = ipRecv[std::string("block")+mstr].get<int>();
                m_modes[n] = nM;

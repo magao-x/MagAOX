@@ -63,7 +63,7 @@ protected:
 public:
    camera( std::string & camName,
            QWidget * Parent = 0, 
-           Qt::WindowFlags f = 0
+           Qt::WindowFlags f = Qt::WindowFlags()
          );
    
    ~camera();
@@ -471,7 +471,7 @@ void camera::setup_temp_ccd(bool ro)
 
 void camera::setup_tempStatus()
 {
-   ui_tempStatus = new statusDisplay(m_camName,"temp_control", "status", "Temp. Ctrl.", "", this, 0);
+   ui_tempStatus = new statusDisplay(m_camName,"temp_control", "status", "Temp. Ctrl.", "", this, Qt::WindowFlags());
    ui_tempStatus->setObjectName(QString::fromUtf8("tempStatus"));
    
    ui.grid->addWidget(ui_tempStatus, 1, 1, 1, 1);

@@ -66,7 +66,9 @@ protected:
    int m_lyotScale {1};
    
 public:
-   coronAlign( QWidget * Parent = 0, Qt::WindowFlags f = 0);
+   coronAlign( QWidget * Parent = 0, 
+               Qt::WindowFlags f = Qt::WindowFlags()
+             );
    
    ~coronAlign();
    
