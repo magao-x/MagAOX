@@ -82,10 +82,12 @@ int loadSSHTunnelConfigs( tunnelMapT & tmap, ///< [out] the tunnel map which wil
          
          std::string remoteHost;
          int localPort = 0;
-         
+         bool compress = false;
+
          config.configUnused( remoteHost, mx::app::iniFile::makeKey(sections[i], "remoteHost" ) );
          config.configUnused( localPort, mx::app::iniFile::makeKey(sections[i], "localPort" ) );
-         
+         config.configUnused( compress, mx::app::iniFile::makeKey(sections[i], "compress" ) );
+
          tmap[sections[i]] = sshTunnel({remoteHost, localPort});
       
          ++matched;
