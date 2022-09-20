@@ -110,7 +110,9 @@ protected:
    float m_camlensStepSize {0.01};
    
 public:
-   pupilGuide( QWidget * Parent = 0, Qt::WindowFlags f = 0);
+   pupilGuide( QWidget * Parent = 0, 
+               Qt::WindowFlags f = Qt::WindowFlags()
+             );
    
    ~pupilGuide();
    

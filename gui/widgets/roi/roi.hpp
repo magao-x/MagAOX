@@ -55,7 +55,7 @@ protected:
 public:
    roi( std::string & camName,
         QWidget * Parent = 0, 
-        Qt::WindowFlags f = 0
+        Qt::WindowFlags f = Qt::WindowFlags()
       );
    
    ~roi();

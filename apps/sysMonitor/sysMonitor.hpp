@@ -720,7 +720,7 @@ int sysMonitor::findCPULoads(std::vector<float>& loads)
    // If output lines are less than 5 (with one CPU, guarenteed output is 5)
    if (commandOutput.size() < 5) 
    {
-      return rv;
+      return log<software_error,-1>({__FILE__, __LINE__, "not enough lines returned by mpstat"});
    }
    //start iterating at fourth line
    for (auto line = commandOutput.begin()+4; line != commandOutput.end(); line++) 
@@ -739,21 +739,25 @@ int sysMonitor::parseCPULoads(std::string line, float& loadVal)
 {
    if (line.length() <= 1)
    {
+      log<software_error>({__FILE__, __LINE__,"zero lenght line in parseCPULoads."});
       return -1;
    }
    std::istringstream iss(line);
    std::vector<std::string> tokens{std::istream_iterator<std::string>{iss},std::istream_iterator<std::string>{}};
+   if(tokens.size() < 8) return 1;
    float cpu_load;
    try
    {
-      cpu_load = 100.0 - std::stof(tokens.at(12));
+      cpu_load = 100.0 - std::stof(tokens.at(tokens.size()-1));
    }
    catch (const std::invalid_argument& e)
    {
       log<software_error>({__FILE__, __LINE__,"Invalid read occured when parsing CPU core usage."});
       return -1;
    }
-   catch (const std::out_of_range& e) {
+   catch (const std::out_of_range& e) 
+   {
+      log<software_error>({__FILE__, __LINE__,"Out of range exception in parseCPULoads."});
       return -1;
    }
    cpu_load /= 100;

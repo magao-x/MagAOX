@@ -28,7 +28,9 @@ protected:
    int m_navg {0};
    
 public:
-   offloadCtrl( QWidget * Parent = 0, Qt::WindowFlags f = 0);
+   offloadCtrl( QWidget * Parent = 0, 
+                Qt::WindowFlags f = Qt::WindowFlags()
+              );
    
    ~offloadCtrl();
    

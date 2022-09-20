@@ -39,7 +39,7 @@ protected:
 public:
 
    gainCtrl( QWidget * Parent = 0, 
-             Qt::WindowFlags f = 0
+             Qt::WindowFlags f = Qt::WindowFlags()
            );
 
    gainCtrl( const std::string & device,
@@ -48,7 +48,7 @@ public:
              int modes,
              int modesTotal,
              QWidget * Parent = 0, 
-             Qt::WindowFlags f = 0
+             Qt::WindowFlags f = Qt::WindowFlags()
            );
    
    ~gainCtrl();

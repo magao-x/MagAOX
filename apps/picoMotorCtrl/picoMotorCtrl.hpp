@@ -482,7 +482,7 @@ int picoMotorCtrl::appLogic()
             state(stateCodes::FAILURE);
             return -1;
          }
-         else if (moType != 2)
+         else if (moType != 3)
          {
             log<text_log>("Wrong motor type connected on channel " + std::to_string(it->second.m_channel) + " [" + it->second.m_name + "]", logPrio::LOG_CRITICAL);
             state(stateCodes::FAILURE);

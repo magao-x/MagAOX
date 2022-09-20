@@ -27,12 +27,12 @@ protected:
 
 public:
    fsmDisplay( QWidget * Parent = 0, 
-               Qt::WindowFlags f = 0
+               Qt::WindowFlags f = Qt::WindowFlags()
              );
 
    fsmDisplay( const std::string & device,
                QWidget * Parent = 0, 
-               Qt::WindowFlags f = 0
+               Qt::WindowFlags f = Qt::WindowFlags()
              );
    
    ~fsmDisplay();

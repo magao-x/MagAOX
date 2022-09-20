@@ -31,7 +31,7 @@ public:
    selectionSw( const std::string & device,
                 const std::string & property,
                 QWidget * Parent = 0, 
-                Qt::WindowFlags f = 0
+                Qt::WindowFlags f = Qt::WindowFlags()
               );
    
    ~selectionSw();
