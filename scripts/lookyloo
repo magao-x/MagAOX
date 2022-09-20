@@ -30,6 +30,10 @@ import time
 import datetime
 from datetime import timezone
 import logging
+import glob
+import tempfile
+from astropy.io import fits
+import shutil
 
 log = logging.getLogger(__name__)
 
@@ -141,11 +145,16 @@ class ObservationSpan:
         endpart = f" to {self.end.strftime(PRETTY_MODIFIED_TIME_FORMAT)}" if self.end is not None else ""
         return f"<ObservationSpan: {self.email} '{self.title}' from {self.begin.strftime(PRETTY_MODIFIED_TIME_FORMAT)}{endpart}>"
 
-def path_to_timestamped_file(the_path : pathlib.Path):
-    basename = the_path.name.rsplit('.', 1)[0]
-    chopped_name = basename[:-3]
-    chopped_ts_str = chopped_name.split('_')[1]
+def xfilename_to_utc_timestamp(filename):
+    _, filename = os.path.split(filename)
+    name, ext = os.path.splitext(filename)
+    chopped_ts_str = name.split('_')[1]
+    chopped_ts_str = chopped_ts_str[:-3]  # nanoseconds are too precise for Python's native datetimes
     ts = datetime.datetime.strptime(chopped_ts_str, MODIFIED_TIME_FORMAT).replace(tzinfo=timezone.utc)
+    return ts
+
+def path_to_timestamped_file(the_path : pathlib.Path):
+    ts = xfilename_to_utc_timestamp(the_path.name)
     return TimestampedFile(the_path, ts)
 
 def load_file_history(history_path: pathlib.Path) -> typing.Set[TimestampedFile]:
@@ -234,10 +243,7 @@ def transform_telems_to_spans(events : typing.List[ObserverTelem], ending_after_
             if current_observation_start is not None:
                 # something other than 'on' must have changed, or else
                 # edge-triggering must be borked
-                if event.email != current_observer_email or event.obs != current_observation:
-                    log.debug(f"Transitioned to observing but observation span already active: {event} {current_observer_email} {current_observation}")
                 # so we end this current span before starting the next one, guessing the timestamp
-                log.debug(f"Abnormally ended span {current_observer_email} {current_observation} {current_observation_start}")
                 _add_span(
                     current_observer_email,
                     current_observation,
@@ -280,7 +286,65 @@ def get_new_observation_spans(data_roots: typing.List[pathlib.Path], existing_ob
     else:
         return set(), ending_after_dt
 
-def do_quicklook_for_camera(span, data_roots, device, omit_telemetry, output_dir, dry_run, cube_mode, all_visited_files=None):
+def prune_outputs(scratch_dir, span):
+    good_outputs = []
+    for fn in scratch_dir.glob("*.fits"):
+        ts = xfilename_to_utc_timestamp(fn)
+        if ts < span.begin or ts > span.end:
+            os.remove(fn)
+        else:
+            good_outputs.append(fn)
+    return good_outputs
+
+def datestamp_strings_from_ts(ts : datetime.datetime):
+    # if the span begins before noon Chile time on the given D, the
+    # stringful timestamp is "YYYY-MM-(D-1)_D" because we observe over
+    # UTC night of one day into morning of the next.
+
+    # note that daylight saving doesn't change the day, so we just use
+    # UTC-4 for CLST
+    # modified: roughly local Chile time for the start of the span
+    modified = ts - datetime.timedelta(hours=4)
+    
+    if modified.hour < 12:
+        # if span started before noon, assume it was the previous night UTC
+        start_date = (modified - datetime.timedelta(days=1)).date()
+    else:
+        # otherwise chile date == utc date
+        start_date = modified.date()
+    if start_date.month > 6:
+        semester = 'B'
+    else:
+        semester = 'A'
+    end_date = start_date + datetime.timedelta(days=1)
+    day_string = start_date.isoformat()
+    end_part = ""
+    if end_date.year != start_date.year:
+        end_part += f"{end_date.year:04}-"
+    if end_date.month != start_date.month:
+        end_part += f"{end_date.month:02}-"
+    end_part += f"{end_date.day:02}"
+    day_string += "_" + end_part
+    return f"{start_date.year}{semester}", day_string
+
+def catalog_name_from_outputs(output_files):
+    catobj = None
+    for fn in output_files:
+        with open(fn, 'rb') as fh:
+            header = fits.getheader(fh)
+            catobj = header.get('CATOBJ')
+            if catobj == 'invalid':
+                catobj = None
+        if catobj is not None:
+            break
+    return catobj if catobj is not None else '_no_target_'
+
+def append_files_to_history(history_path, archive_paths):
+    print("history", history_path)
+    for ar in archive_paths:
+        print(ar)
+
+def do_quicklook_for_camera(span : ObservationSpan, data_roots, device, omit_telemetry, output_dir, dry_run, cube_mode, all_visited_files=None):
     if all_visited_files is None:
         all_visited_files = set()
     history_path = output_dir / HISTORY_FILENAME
@@ -301,18 +365,29 @@ def do_quicklook_for_camera(span, data_roots, device, omit_telemetry, output_dir
                 log.debug(f"\tmatched: {fn} (new)")
             else:
                 log.debug(f"\tmatched: {fn}")
-        destination = output_dir / (span.email if len(span.email) else '_no_email_') / (span.title if len(span.title) else '_no_title_') / device
-        if not dry_run:
-            destination.mkdir(parents=True, exist_ok=True)
-        successful_paths, failed_paths = convert_xrif(image_path, data_roots, new_matching_files, destination, omit_telemetry, dry_run, cube_mode)
-        if not dry_run:
-            for p in successful_paths:
-                append_file_to_history(history_path, p)
-            for p in failed_paths:
-                append_file_to_history(failed_history_path, p)
-            log.debug(f"Wrote {len(successful_paths)} to {history_path}")
-            log.debug(f"{len(failed_paths)} paths failed to convert, saving to {failed_history_path}")
-        log.info(f"Wrote to {destination}")
+
+        with tempfile.TemporaryDirectory() as scratch_dir_path:
+            scratch_dir = pathlib.Path(scratch_dir_path)
+            successful_paths, failed_paths = convert_xrif(image_path, data_roots, new_matching_files, scratch_dir, omit_telemetry, dry_run)
+            if not dry_run:
+                append_files_to_history(history_path, successful_paths)
+                append_files_to_history(failed_history_path, failed_paths)
+                log.debug(f"Wrote {len(successful_paths)} to {history_path}")
+                log.debug(f"{len(failed_paths)} paths failed to convert, saving to {failed_history_path}")
+            good_outputs = prune_outputs(scratch_dir, span)
+            if len(good_outputs):
+                semester, night = datestamp_strings_from_ts(span.begin)
+                if not dry_run:
+                    catalog_name = catalog_name_from_outputs(good_outputs)
+                else:
+                    catalog_name = "_dry_run_"
+                title = span.title if len(span.title) else '_no_title_'
+                destination = output_dir / semester / night / catalog_name / title / device
+                if not dry_run:
+                    destination.mkdir(parents=True, exist_ok=True)
+                    for fn in good_outputs:
+                        shutil.copy(fn, destination)
+            log.info(f"Wrote to {destination}")
     return new_matching_files
 
 def launch_xrif2fits(args, dry_run=False):
