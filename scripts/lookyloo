@@ -269,7 +269,7 @@ def get_new_observation_spans(data_roots: typing.List[pathlib.Path], existing_ob
 
 def prune_outputs(scratch_dir, span):
     good_outputs = []
-    for fn in glob.glob(scratch_dir + "/*.fits"):
+    for fn in scratch_dir.glob("*.fits"):
         ts = xfilename_to_utc_timestamp(fn)
         if ts < span.begin or ts > span.end:
             os.remove(fn)
@@ -320,12 +320,6 @@ def catalog_name_from_outputs(output_files):
             break
     return catobj if catobj is not None else '_no_target_'
 
-def copy_matching_outputs(scratch_dir: pathlib.Path, span: ObservationSpan, destination: pathlib.Path):
-    for fn in scratch_dir.glob("*.fits"):
-        ts = xfilename_to_utc_timestamp(fn.name)
-        if span.begin <= ts <= span.end:
-            shutil.move(fn, destination)
-
 def do_quicklook_for_camera(span : ObservationSpan, data_roots, device, omit_telemetry, output_dir, dry_run, all_visited_files=None):
     if all_visited_files is None:
         all_visited_files = set()
@@ -345,18 +339,22 @@ def do_quicklook_for_camera(span : ObservationSpan, data_roots, device, omit_tel
                 log.debug(f"\tmatched: {fn} (new)")
             else:
                 log.debug(f"\tmatched: {fn}")
-        with tempfile.TemporaryDirectory() as scratch_dir:
-            successful_paths, failed_paths = convert_xrif(image_path, data_roots, new_matching_files, scratch_dir.name, omit_telemetry, dry_run)
-            prune_outputs(scratch_dir, span)
-            semester, night = datestamp_strings_from_ts(span.begin)
-            if not dry_run:
-                catalog_name = catalog_name_from_outputs(scratch_dir)
-            else:
-                catalog_name = "_dry_run_"
-            destination = output_dir / semester / night / catalog_name / (span.title if len(span.title) else '_no_title_') / device
-            if not dry_run:
-                destination.mkdir(parents=True, exist_ok=True)
-                copy_matching_outputs(pathlib.Path(scratch_dir.name), span, destination)
+        with tempfile.TemporaryDirectory() as scratch_dir_path:
+            scratch_dir = pathlib.Path(scratch_dir_path)
+            successful_paths, failed_paths = convert_xrif(image_path, data_roots, new_matching_files, scratch_dir, omit_telemetry, dry_run)
+            good_outputs = prune_outputs(scratch_dir, span)
+            if len(good_outputs):
+                semester, night = datestamp_strings_from_ts(span.begin)
+                if not dry_run:
+                    catalog_name = catalog_name_from_outputs(good_outputs)
+                else:
+                    catalog_name = "_dry_run_"
+                title = span.title if len(span.title) else '_no_title_'
+                destination = output_dir / semester / night / catalog_name / title / device
+                if not dry_run:
+                    destination.mkdir(parents=True, exist_ok=True)
+                    for fn in good_outputs:
+                        shutil.copy(fn, destination)
             log.info(f"Wrote to {destination}")
     return new_matching_files
 
