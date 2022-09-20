@@ -30,6 +30,10 @@ import time
 import datetime
 from datetime import timezone
 import logging
+import glob
+import tempfile
+from astropy.io import fits
+import shutil
 
 log = logging.getLogger(__name__)
 
@@ -139,6 +143,14 @@ class ObservationSpan:
         endpart = f" to {self.end.strftime(PRETTY_MODIFIED_TIME_FORMAT)}" if self.end is not None else ""
         return f"<ObservationSpan: {self.email} '{self.title}' from {self.begin.strftime(PRETTY_MODIFIED_TIME_FORMAT)}{endpart}>"
 
+def xfilename_to_utc_timestamp(filename):
+    _, filename = os.path.split(filename)
+    name, ext = os.path.splitext(filename)
+    chopped_ts_str = name.split('_')[1]
+    chopped_ts_str = chopped_ts_str[:-3]  # nanoseconds are too precise for Python's native datetimes
+    ts = datetime.datetime.strptime(chopped_ts_str, MODIFIED_TIME_FORMAT).replace(tzinfo=timezone.utc)
+    return ts
+
 def get_matching_paths(
     base_path : pathlib.Path,
     device : str,
@@ -169,9 +181,7 @@ def get_matching_paths(
                 # can't find in-range entries from files opened after `older_than_dt`
                 # so skip
                 continue
-            chopped_name = the_path.name.replace('.' + extension, '')[:-3]
-            chopped_ts_str = chopped_name.split('_')[1]
-            ts = datetime.datetime.strptime(chopped_ts_str, MODIFIED_TIME_FORMAT).replace(tzinfo=timezone.utc)
+            ts = xfilename_to_utc_timestamp(the_path.name)
             filtered_files.append(TimestampedFile(the_path, ts))
     return filtered_files
 
@@ -214,10 +224,7 @@ def transform_telems_to_spans(events : typing.List[ObserverTelem], ending_after_
             if current_observation_start is not None:
                 # something other than 'on' must have changed, or else
                 # edge-triggering must be borked
-                if event.email != current_observer_email or event.obs != current_observation:
-                    log.debug(f"Transitioned to observing but observation span already active: {event} {current_observer_email} {current_observation}")
                 # so we end this current span before starting the next one, guessing the timestamp
-                log.debug(f"Abnormally ended span {current_observer_email} {current_observation} {current_observation_start}")
                 _add_span(
                     current_observer_email,
                     current_observation,
@@ -260,7 +267,66 @@ def get_new_observation_spans(data_roots: typing.List[pathlib.Path], existing_ob
     else:
         return set(), ending_after_dt
 
-def do_quicklook_for_camera(span, data_roots, device, omit_telemetry, output_dir, dry_run, all_visited_files=None):
+def prune_outputs(scratch_dir, span):
+    good_outputs = []
+    for fn in glob.glob(scratch_dir + "/*.fits"):
+        ts = xfilename_to_utc_timestamp(fn)
+        if ts < span.begin or ts > span.end:
+            os.remove(fn)
+        else:
+            good_outputs.append(fn)
+    return good_outputs
+
+def datestamp_strings_from_ts(ts : datetime.datetime):
+    # if the span begins before noon Chile time on the given D, the
+    # stringful timestamp is "YYYY-MM-(D-1)_D" because we observe over
+    # UTC night of one day into morning of the next.
+
+    # note that daylight saving doesn't change the day, so we just use
+    # UTC-4 for CLST
+    # modified: roughly local Chile time for the start of the span
+    modified = ts - datetime.timedelta(hours=4)
+    
+    if modified.hour < 12:
+        # if span started before noon, assume it was the previous night UTC
+        start_date = (modified - datetime.timedelta(days=1)).date()
+    else:
+        # otherwise chile date == utc date
+        start_date = modified.date()
+    if start_date.month > 6:
+        semester = 'B'
+    else:
+        semester = 'A'
+    end_date = start_date + datetime.timedelta(days=1)
+    day_string = start_date.isoformat()
+    end_part = ""
+    if end_date.year != start_date.year:
+        end_part += f"{end_date.year:04}-"
+    if end_date.month != start_date.month:
+        end_part += f"{end_date.month:02}-"
+    end_part += f"{end_date.day:02}"
+    day_string += "_" + end_part
+    return f"{start_date.year}{semester}", day_string
+
+def catalog_name_from_outputs(output_files):
+    catobj = None
+    for fn in output_files:
+        with open(fn, 'rb') as fh:
+            header = fits.getheader(fh)
+            catobj = header.get('CATOBJ')
+            if catobj == 'invalid':
+                catobj = None
+        if catobj is not None:
+            break
+    return catobj if catobj is not None else '_no_target_'
+
+def copy_matching_outputs(scratch_dir: pathlib.Path, span: ObservationSpan, destination: pathlib.Path):
+    for fn in scratch_dir.glob("*.fits"):
+        ts = xfilename_to_utc_timestamp(fn.name)
+        if span.begin <= ts <= span.end:
+            shutil.move(fn, destination)
+
+def do_quicklook_for_camera(span : ObservationSpan, data_roots, device, omit_telemetry, output_dir, dry_run, all_visited_files=None):
     if all_visited_files is None:
         all_visited_files = set()
     for data_root in data_roots:
@@ -279,11 +345,19 @@ def do_quicklook_for_camera(span, data_roots, device, omit_telemetry, output_dir
                 log.debug(f"\tmatched: {fn} (new)")
             else:
                 log.debug(f"\tmatched: {fn}")
-        destination = output_dir / (span.email if len(span.email) else '_no_email_') / (span.title if len(span.title) else '_no_title_') / device
-        if not dry_run:
-            destination.mkdir(parents=True, exist_ok=True)
-        successful_paths, failed_paths = convert_xrif(image_path, data_roots, new_matching_files, destination, omit_telemetry, dry_run)
-        log.info(f"Wrote to {destination}")
+        with tempfile.TemporaryDirectory() as scratch_dir:
+            successful_paths, failed_paths = convert_xrif(image_path, data_roots, new_matching_files, scratch_dir.name, omit_telemetry, dry_run)
+            prune_outputs(scratch_dir, span)
+            semester, night = datestamp_strings_from_ts(span.begin)
+            if not dry_run:
+                catalog_name = catalog_name_from_outputs(scratch_dir)
+            else:
+                catalog_name = "_dry_run_"
+            destination = output_dir / semester / night / catalog_name / (span.title if len(span.title) else '_no_title_') / device
+            if not dry_run:
+                destination.mkdir(parents=True, exist_ok=True)
+                copy_matching_outputs(pathlib.Path(scratch_dir.name), span, destination)
+            log.info(f"Wrote to {destination}")
     return new_matching_files
 
 def convert_xrif(base_dir, data_roots: typing.List[pathlib.Path], paths : typing.List[TimestampedFile], destination_path, omit_telemetry, dry_run):
