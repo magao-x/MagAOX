@@ -35,6 +35,8 @@ log = logging.getLogger(__name__)
 
 LOOKYLOO_DATA_ROOTS = os.environ.get('LOOKYLOO_DATA_PATHS', '/data:/data/icc:/data/rtc')
 QUICKLOOK_PATH = pathlib.Path('/data/users/guestobs/quicklook')
+HISTORY_FILENAME = "lookyloo_success.txt"
+FAILURE_HISTORY_FILENAME = "lookyloo_failed.txt"
 SCIENCE_CAMERAS = ['camsci1', 'camsci2']
 SLEEP_FOR_TELEMS = 30
 CHECK_INTERVAL_SEC = 30
@@ -139,6 +141,27 @@ class ObservationSpan:
         endpart = f" to {self.end.strftime(PRETTY_MODIFIED_TIME_FORMAT)}" if self.end is not None else ""
         return f"<ObservationSpan: {self.email} '{self.title}' from {self.begin.strftime(PRETTY_MODIFIED_TIME_FORMAT)}{endpart}>"
 
+def path_to_timestamped_file(the_path : pathlib.Path):
+    basename = the_path.name.rsplit('.', 1)[0]
+    chopped_name = basename[:-3]
+    chopped_ts_str = chopped_name.split('_')[1]
+    ts = datetime.datetime.strptime(chopped_ts_str, MODIFIED_TIME_FORMAT).replace(tzinfo=timezone.utc)
+    return TimestampedFile(the_path, ts)
+
+def load_file_history(history_path: pathlib.Path) -> typing.Set[TimestampedFile]:
+    history : typing.Set[TimestampedFile] = set()
+    try:
+        with history_path.open('r') as fh:
+            for line in fh:
+                history.add(path_to_timestamped_file(pathlib.Path(line)))
+    except FileNotFoundError:
+        pass
+    return history
+
+def append_path_to_history(history_path: pathlib.Path, file_path: pathlib.Path):
+    with history_path.open('a') as fh:
+        fh.write(f"{file_path.as_posix()}\n")
+
 def get_matching_paths(
     base_path : pathlib.Path,
     device : str,
@@ -169,10 +192,7 @@ def get_matching_paths(
                 # can't find in-range entries from files opened after `older_than_dt`
                 # so skip
                 continue
-            chopped_name = the_path.name.replace('.' + extension, '')[:-3]
-            chopped_ts_str = chopped_name.split('_')[1]
-            ts = datetime.datetime.strptime(chopped_ts_str, MODIFIED_TIME_FORMAT).replace(tzinfo=timezone.utc)
-            filtered_files.append(TimestampedFile(the_path, ts))
+            filtered_files.append(path_to_timestamped_file(the_path))
     return filtered_files
 
 
@@ -260,9 +280,11 @@ def get_new_observation_spans(data_roots: typing.List[pathlib.Path], existing_ob
     else:
         return set(), ending_after_dt
 
-def do_quicklook_for_camera(span, data_roots, device, omit_telemetry, output_dir, dry_run, all_visited_files=None):
+def do_quicklook_for_camera(span, data_roots, device, omit_telemetry, output_dir, dry_run, cube_mode, all_visited_files=None):
     if all_visited_files is None:
         all_visited_files = set()
+    history_path = output_dir / HISTORY_FILENAME
+    failed_history_path = output_dir / HISTORY_FILENAME
     for data_root in data_roots:
         image_path = data_root / 'rawimages' / device
         if image_path.is_dir():
@@ -282,11 +304,45 @@ def do_quicklook_for_camera(span, data_roots, device, omit_telemetry, output_dir
         destination = output_dir / (span.email if len(span.email) else '_no_email_') / (span.title if len(span.title) else '_no_title_') / device
         if not dry_run:
             destination.mkdir(parents=True, exist_ok=True)
-        successful_paths, failed_paths = convert_xrif(image_path, data_roots, new_matching_files, destination, omit_telemetry, dry_run)
+        successful_paths, failed_paths = convert_xrif(image_path, data_roots, new_matching_files, destination, omit_telemetry, dry_run, cube_mode)
+        if not dry_run:
+            for p in successful_paths:
+                append_file_to_history(history_path, p)
+            for p in failed_paths:
+                append_file_to_history(failed_history_path, p)
+            log.debug(f"Wrote {len(successful_paths)} to {history_path}")
+            log.debug(f"{len(failed_paths)} paths failed to convert, saving to {failed_history_path}")
         log.info(f"Wrote to {destination}")
     return new_matching_files
 
-def convert_xrif(base_dir, data_roots: typing.List[pathlib.Path], paths : typing.List[TimestampedFile], destination_path, omit_telemetry, dry_run):
+def launch_xrif2fits(args, dry_run=False):
+    command_line = " ".join(args)
+    if not dry_run:
+        log.debug(f"Launching: {command_line}")
+        try:
+            proc = subprocess.Popen(
+                args,
+                stdout=subprocess.DEVNULL,
+                stderr=subprocess.DEVNULL
+            )
+            proc.wait(timeout=60)
+            success = True
+        except subprocess.CalledProcessError as e:
+            log.exception("xrif2fits exited with nonzero exit code")
+            success = False
+        except subprocess.TimeoutExpired as e:
+            log.exception("xrif2fits canceled after timeout")
+            proc.kill()
+            success = False
+    else:
+        log.debug(f"dry run: {command_line}")
+    return success, command_line
+
+def convert_xrif(
+    base_dir, data_roots: typing.List[pathlib.Path],
+    paths : typing.List[TimestampedFile], destination_path : pathlib.Path,
+    omit_telemetry : bool, dry_run : bool, cube_mode : bool,
+):
     for data_file in paths:
         delta = datetime.datetime.utcnow().replace(tzinfo=timezone.utc) - data_file.timestamp
         if delta.total_seconds() < SLEEP_FOR_TELEMS:
@@ -298,39 +354,30 @@ def convert_xrif(base_dir, data_roots: typing.List[pathlib.Path], paths : typing
             os.environ.get('XRIF2FITS_EXE', 'xrif2fits'),
             '-d', str(base_dir),
             '-f', ts_path.path.name,
+            '-D', str(destination_path),
         ]
+        if cube_mode:
+            args.append('--cubeMode')
         if not omit_telemetry:
             telem_paths_str = ','.join((x / 'telem').as_posix() for x in data_roots)
             log_paths_str = ','.join((x / 'logs').as_posix() for x in data_roots)
+            no_telem_args = args.copy()
             args.extend([
                 '-t', telem_paths_str,
                 '-l', log_paths_str,
             ])
-        args.extend([
-            '-D', str(destination_path)
-        ])
-        command_line = " ".join(args)
-        if not dry_run:
-            log.debug(f"Launching: {command_line}")
-            try:
-                proc = subprocess.Popen(
-                    args,
-                    stdout=subprocess.DEVNULL,
-                    stderr=subprocess.DEVNULL
-                )
-                proc.wait(timeout=60)
-                successful_paths.append(ts_path.path)
-            except subprocess.CalledProcessError as e:
-                log.exception("xrif2fits exited with nonzero exit code")
-                failed_commands.append(command_line)
-                failed_paths.append(ts_path.path)
-            except subprocess.TimeoutExpired as e:
-                log.exception("xrif2fits canceled after timeout")
-                failed_commands.append(command_line)
-                failed_paths.append(ts_path.path)
-                proc.kill()
+        success, command_line = launch_xrif2fits(args, dry_run=dry_run)
+        if not success:
+            failed_commands.append(command_line)
+            failed_paths.append(ts_path.path)
+            if not omit_telemetry:
+                # try again without telemetry
+                success, command_line = launch_xrif2fits(no_telem_args, dry_run=dry_run)
+                if not success:
+                    raise RuntimeError(f"Retried {ts_path.path} without telemetry and xrif2fits still errored! Bailing out.\n\tcommand: {command_line}")
         else:
-            log.debug(f"dry run: {command_line}")
+            successful_paths.append(ts_path.path)
+
     if len(failed_commands):
         log.debug(f"failed commands:")
         for cmd in failed_commands:
@@ -378,6 +425,8 @@ def main():
     parser = argparse.ArgumentParser()
     parser.add_argument('-d', '--daemon', help="Whether to start in daemon mode watching for new observations", action='store_true')
     parser.add_argument('-r', '--dry-run', help="Commands to run are printed in debug output (implies --verbose)", action='store_true')
+    parser.add_argument('-i', '--ignore-history', help=f"When a history file ({HISTORY_FILENAME}) is found under the output directory, don't skip files listed in it", action='store_true')
+    parser.add_argument('-C', '--cube-mode', help="Whether to write archives as cubes (implies --omit-telemetry)", action='store_true')
     parser.add_argument('-v', '--verbose', help="Turn on debug output", action='store_true')
     parser.add_argument('-t', '--title', help="Title of observation to collect", action='store')
     parser.add_argument('-p', '--partial-match-ok', help="A partial match (title provided is found anywhere in recorded title) is processed", action='store_true')
@@ -412,10 +461,12 @@ def main():
     else:
         data_roots = [pathlib.Path(x) for x in LOOKYLOO_DATA_ROOTS.split(':')]
     output_dir = pathlib.Path(args.output_dir)
+    all_processed_files = load_file_history(output_dir / HISTORY_FILENAME)
     ending_after_dt = datetime.datetime(args.year, 1, 1)
     ending_after_dt = ending_after_dt.replace(tzinfo=timezone.utc)
+    omit_telemetry = args.omit_telemetry or args.cube_mode
     if args.daemon:
-        daemon_mode(output_dir, cameras, data_roots, args.omit_telemetry)
+        daemon_mode(output_dir, cameras, data_roots, omit_telemetry)
     else:
         new_observation_spans, _ = get_new_observation_spans(data_roots, set(), ending_after_dt)
         for span in new_observation_spans:
@@ -426,7 +477,10 @@ def main():
             ):
                 log.info(f"Observation interval to process: {span}")
                 for device in cameras:
-                    do_quicklook_for_camera(span, data_roots, device, args.omit_telemetry, output_dir, args.dry_run)
+                    do_quicklook_for_camera(
+                        span, data_roots, device, omit_telemetry, output_dir, 
+                        args.dry_run, args.cube_mode, all_visited_files=all_processed_files
+                    )
 
 if __name__ == "__main__":
     main()
