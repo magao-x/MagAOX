@@ -441,7 +441,13 @@ int zaberLowLevel::appLogic()
    if( state() == stateCodes::POWERON)
    {
       state(stateCodes::NODEVICE);
+      for(size_t i=0; i < m_stages.size();++i)
+      {
+         updateIfChanged(m_indiP_curr_state, m_stages[i].name(), std::string("NODEVICE"));
+      }
+         
    }
+      
 
    if( state() == stateCodes::NODEVICE )
    {
@@ -476,6 +482,12 @@ int zaberLowLevel::appLogic()
          
          state(stateCodes::NOTCONNECTED);
          
+         for(size_t i=0; i < m_stages.size();++i)
+         {
+            if(m_stages[i].deviceAddress() < 1) continue;
+            updateIfChanged(m_indiP_curr_state, m_stages[i].name(), std::string("NOTCONNECTED"));
+         }
+
          return 0; //we return to give the stage time to initialize the connection if this is a USB-FTDI power on/plug-in event.
       }
 
@@ -490,6 +502,11 @@ int zaberLowLevel::appLogic()
       if( rv == ZC_CONNECTED) 
       {
          state(stateCodes::CONNECTED);
+         for(size_t i=0; i < m_stages.size();++i)
+         {
+            if(m_stages[i].deviceAddress() < 1) continue;
+            updateIfChanged(m_indiP_curr_state, m_stages[i].name(), std::string("CONNECTED"));
+         }
 
          if(!stateLogged())
          {
