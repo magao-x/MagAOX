@@ -31,7 +31,7 @@ protected:
    
    std::string m_serial; ///< The stage's serial number.
    
-   int m_deviceAddress; ///< The device's address, a.k.a. its order in the chain
+   int m_deviceAddress {-1}; ///< The device's address, a.k.a. its order in the chain
 
    int m_axisNumber{0}; ///< The axis number at the address (normally 0 in MagAO-X)
 
@@ -597,6 +597,11 @@ int zaberStage::sendCommand( std::string & response,
 inline
 int zaberStage::getMaxPos( z_port port )
 {
+   if(m_deviceAddress < 1)
+   {
+      return MagAOXAppT::log<software_error, -1>({__FILE__, __LINE__, "stage " + m_name + " with with s/n " + m_serial + " not found in system."});
+   }
+   
    std::string com = "/" + mx::ioutils::convertToString(m_deviceAddress) + " ";
    com += "get limit.max";
 
@@ -627,6 +632,11 @@ int zaberStage::getMaxPos( z_port port )
 inline
 int zaberStage::updatePos( z_port port )
 {
+   if(m_deviceAddress < 1)
+   {
+      return MagAOXAppT::log<software_error, -1>({__FILE__, __LINE__, "stage " + m_name + " with with s/n " + m_serial + " not found in system."});
+   }
+
    std::string com = "/" + mx::ioutils::convertToString(m_deviceAddress) + " ";
    com += "get pos";
 
@@ -657,6 +667,11 @@ int zaberStage::updatePos( z_port port )
 inline
 int zaberStage::updateTemp( z_port port )
 {
+   if(m_deviceAddress < 1)
+   {
+      return MagAOXAppT::log<software_error, -1>({__FILE__, __LINE__, "stage " + m_name + " with with s/n " + m_serial + " not found in system."});
+   }
+
    std::string com = "/" + mx::ioutils::convertToString(m_deviceAddress) + " ";
    com += "get driver.temperature";
 
@@ -687,6 +702,11 @@ int zaberStage::updateTemp( z_port port )
 inline
 int zaberStage::stop( z_port port )
 {
+   if(m_deviceAddress < 1)
+   {
+      return MagAOXAppT::log<software_error, -1>({__FILE__, __LINE__, "stage " + m_name + " with with s/n " + m_serial + " not found in system."});
+   }
+
    std::string com = "/" + mx::ioutils::convertToString(m_deviceAddress) + " ";
    com += "stop";
 
@@ -716,6 +736,11 @@ int zaberStage::stop( z_port port )
 inline
 int zaberStage::estop( z_port port )
 {
+   if(m_deviceAddress < 1)
+   {
+      return MagAOXAppT::log<software_error, -1>({__FILE__, __LINE__, "stage " + m_name + " with with s/n " + m_serial + " not found in system."});
+   }
+
    std::string com = "/" + mx::ioutils::convertToString(m_deviceAddress) + " ";
    com += "estop";
 
@@ -745,6 +770,11 @@ int zaberStage::estop( z_port port )
 inline
 int zaberStage::home( z_port port )
 {
+   if(m_deviceAddress < 1)
+   {
+      return MagAOXAppT::log<software_error, -1>({__FILE__, __LINE__, "stage " + m_name + " with with s/n " + m_serial + " not found in system."});
+   }
+
    std::string com = "/" + mx::ioutils::convertToString(m_deviceAddress) + " ";
    com += "home";
 
@@ -777,6 +807,11 @@ int zaberStage::moveAbs( z_port port,
                          long rawPos
                        )
 {
+   if(m_deviceAddress < 1)
+   {
+      return MagAOXAppT::log<software_error, -1>({__FILE__, __LINE__, "stage " + m_name + " with with s/n " + m_serial + " not found in system."});
+   }
+
    std::string com = "/" + mx::ioutils::convertToString(m_deviceAddress) + " ";
    com += "move abs " + std::to_string(rawPos);
 
@@ -1016,6 +1051,11 @@ int zaberStage::parseWarnings( std::string & response )
 inline
 int zaberStage::getWarnings( z_port port )
 {
+   if(m_deviceAddress < 1)
+   {
+      return MagAOXAppT::log<software_error, -1>({__FILE__, __LINE__, "stage " + m_name + " with with s/n " + m_serial + " not found in system."});
+   }
+   
    std::string com = "/" + mx::ioutils::convertToString(m_deviceAddress) + " ";
    com += "warnings";
 

@@ -340,6 +340,15 @@ int zaberLowLevel::loadStages( std::string & serialRes )
             log<text_log>("Unkown stage @" + std::to_string(addresses[n]) + " with s/n " + serials[n], logPrio::LOG_WARNING);
          }
       }
+
+      for(size_t n=0; n < m_stages.size(); ++n)
+      {
+         if(m_stages[n].deviceAddress() < 1)
+         {
+            log<text_log>("stage " + m_stages[n].name() + " with with s/n " + serials[n] + " not found in system.", logPrio::LOG_ERROR);
+            state(state(), true);
+         }
+      }
    }
 
    return ZC_CONNECTED;
@@ -501,6 +510,11 @@ int zaberLowLevel::appLogic()
    {
       for(size_t i=0; i < m_stages.size();++i)
       {
+         if(m_stages[i].deviceAddress() < 1) 
+         {
+            updateIfChanged(m_indiP_curr_state, m_stages[i].name(), std::string("NODEVICE"));
+            continue; //Skip configured but not found stage
+         }
          std::lock_guard<std::mutex> guard(m_indiMutex); //Inside loop so INDI requests can steal it
 
          m_stages[i].getMaxPos(m_port);
@@ -517,6 +531,8 @@ int zaberLowLevel::appLogic()
       //Here we check complete stage state.
       for(size_t i=0; i < m_stages.size();++i)
       {
+         if(m_stages[i].deviceAddress() < 1) continue; //Skip configured but not found stage
+
          std::lock_guard<std::mutex> guard(m_indiMutex); //Inside loop so INDI requests can steal it
 
          m_stages[i].updatePos(m_port);
@@ -577,6 +593,10 @@ int zaberLowLevel::appLogic()
       if(rv < 0 && rv != TTY_E_DEVNOTFOUND && rv != TTY_E_NODEVNAMES)
       {
          state(stateCodes::FAILURE);
+         for(size_t i=0; i < m_stages.size();++i)
+         {
+            updateIfChanged(m_indiP_curr_state, m_stages[i].name(), std::string("FAILURE"));
+         }
          if(!stateLogged())
          {
             log<software_critical>({__FILE__, __LINE__, rv, tty::ttyErrorString(rv)});
@@ -587,6 +607,10 @@ int zaberLowLevel::appLogic()
       if(rv == TTY_E_DEVNOTFOUND || rv == TTY_E_NODEVNAMES)
       {
          state(stateCodes::NODEVICE);
+         for(size_t i=0; i < m_stages.size();++i)
+         {
+            updateIfChanged(m_indiP_curr_state, m_stages[i].name(), std::string("NODEVICE"));
+         }
 
          if(!stateLogged())
          {
@@ -598,7 +622,11 @@ int zaberLowLevel::appLogic()
       }
 
       state(stateCodes::FAILURE);
-      
+      for(size_t i=0; i < m_stages.size();++i)
+      {
+         updateIfChanged(m_indiP_curr_state, m_stages[i].name(), std::string("FAILURE"));
+      }
+
       log<software_critical>({__FILE__, __LINE__});
       log<text_log>("Error NOT due to loss of USB connection.  I can't fix it myself.", logPrio::LOG_CRITICAL);
    }
@@ -667,8 +695,12 @@ INDI_NEWCALLBACK_DEFN(zaberLowLevel, m_indiP_tgt_pos)(const pcf::IndiProperty &i
             long tgt = ipRecv[m_stages[n].name()].get<long>();
             if(tgt >= 0)
             {
+               if(m_stages[n].deviceAddress() < 1)
+               {
+                  return log<software_error,-1>({__FILE__, __LINE__, "stage " + m_stages[n].name() + " with with s/n " + m_stages[n].serial() + " not found in system."});
+               }
+
                std::lock_guard<std::mutex> guard(m_indiMutex);
-               std::cerr << "moving " << m_stages[n].name() << " to " << std::to_string(tgt) << "\n";
                updateIfChanged(m_indiP_curr_state, m_stages[n].name(), std::string("OPERATING"));
                return m_stages[n].moveAbs(m_port, tgt);
             }
@@ -690,8 +722,12 @@ INDI_NEWCALLBACK_DEFN(zaberLowLevel, m_indiP_tgt_relpos)(const pcf::IndiProperty
             tgt += m_stages[n].rawPos();
             if(tgt >= 0)
             {
+               if(m_stages[n].deviceAddress() < 1)
+               {
+                  return log<software_error,-1>({__FILE__, __LINE__, "stage " + m_stages[n].name() + " with with s/n " + m_stages[n].serial() + " not found in system."});
+               }
                std::lock_guard<std::mutex> guard(m_indiMutex);
-               std::cerr << "moving " << m_stages[n].name() << " to " << std::to_string(tgt) << "\n";
+      
                updateIfChanged(m_indiP_curr_state, m_stages[n].name(), std::string("OPERATING"));
                return m_stages[n].moveAbs(m_port, tgt);
             }
@@ -712,9 +748,11 @@ INDI_NEWCALLBACK_DEFN(zaberLowLevel, m_indiP_req_home)(const pcf::IndiProperty &
             int tgt = ipRecv[m_stages[n].name()].get<int>();
             if(tgt > 0)
             {
+               if(m_stages[n].deviceAddress() < 1)
+               {
+                  return log<software_error,-1>({__FILE__, __LINE__, "stage " + m_stages[n].name() + " with with s/n " + m_stages[n].serial() + " not found in system."});
+               }
                std::lock_guard<std::mutex> guard(m_indiMutex);
-               std::cerr << "homing " << m_stages[n].name() << "\n";
-               
                return m_stages[n].home(m_port);
             }
          }
@@ -734,9 +772,12 @@ INDI_NEWCALLBACK_DEFN(zaberLowLevel, m_indiP_req_halt)(const pcf::IndiProperty &
             int tgt = ipRecv[m_stages[n].name()].get<int>();
             if(tgt > 0)
             {
+               if(m_stages[n].deviceAddress() < 1)
+               {
+                  return log<software_error,-1>({__FILE__, __LINE__, "stage " + m_stages[n].name() + " with with s/n " + m_stages[n].serial() + " not found in system."});
+               }
+
                std::lock_guard<std::mutex> guard(m_indiMutex);
-               std::cerr << "halting " << m_stages[n].name() << "\n";
-               
                return m_stages[n].stop(m_port);
             }
          }
@@ -756,9 +797,12 @@ INDI_NEWCALLBACK_DEFN(zaberLowLevel, m_indiP_req_ehalt)(const pcf::IndiProperty 
             int tgt = ipRecv[m_stages[n].name()].get<int>();
             if(tgt > 0)
             {
+               if(m_stages[n].deviceAddress() < 1)
+               {
+                  return log<software_error,-1>({__FILE__, __LINE__, "stage " + m_stages[n].name() + " with with s/n " + m_stages[n].serial() + " not found in system."});
+               }
+
                std::lock_guard<std::mutex> guard(m_indiMutex);
-               std::cerr << "e-halting " << m_stages[n].name() << "\n";
-               
                return m_stages[n].estop(m_port);
             }
          }
