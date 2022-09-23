@@ -251,7 +251,21 @@ public:
       LongLong = mx::fits::fitsType<long long>(),
       ULongLong = mx::fits::fitsType<unsigned long long>(),
       Float = mx::fits::fitsType<float>(),
-      Double = mx::fits::fitsType<double>()
+      Double = mx::fits::fitsType<double>(),
+      Vector_String = 10000,
+      Vector_Bool = 10002,
+      Vector_Char = 10004,
+      Vector_UChar = 10006,
+      Vector_Short = 10008,
+      Vector_UShort = 10010,
+      Vector_Int = 10012,
+      Vector_UInt = 10014,
+      Vector_Long = 10016,
+      Vector_ULong = 10018,
+      Vector_LongLOng = 10020,
+      Vector_ULongLong = 10022,
+      Vector_Float = 10024,
+      Vector_Double  = 10026
    };
 
    enum metaTypes
