@@ -554,6 +554,7 @@ int userGainCtrl::getAOCalib()
    m_totalNModes = totalNModes;
 
    static bool mmlog = false; //log once per occurrence.  this could go on for a long time until mfilt is started.
+   ///\todo this can fail if it never compares as equal but shmimMonitors are connected.  shmimMonitor needs a "connected" flag.
    if(m_totalNModes != (int) shmimMonitorT::m_width || m_totalNModes != (int) mcShmimMonitorT::m_width || m_totalNModes != (int) limitShmimMonitorT::m_width)
    {
       if(!mmlog) 
