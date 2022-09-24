@@ -714,19 +714,19 @@ int andorCtrl::appStartup()
 inline
 int andorCtrl::appLogic()
 {
-   //and run stdCamera's appLogic
+   //run stdCamera's appLogic
    if(dev::stdCamera<andorCtrl>::appLogic() < 0)
    {
       return log<software_error, -1>({__FILE__, __LINE__});
    }
    
-   //and run edtCamera's appLogic
+   //run edtCamera's appLogic
    if(dev::edtCamera<andorCtrl>::appLogic() < 0)
    {
       return log<software_error, -1>({__FILE__, __LINE__});
    }
    
-   //first run frameGrabber's appLogic to see if the f.g. thread has exited.
+   //run frameGrabber's appLogic to see if the f.g. thread has exited.
    if(dev::frameGrabber<andorCtrl>::appLogic() < 0)
    {
       return log<software_error, -1>({__FILE__, __LINE__});
@@ -826,7 +826,7 @@ int andorCtrl::onPowerOff()
 {
    if(m_libInit)
    {
-      //ShutDown();
+      ShutDown();
       m_libInit = false;
    }
       
@@ -910,13 +910,16 @@ int andorCtrl::cameraSelect()
          {
             log<text_log>("No Andor USB camera found", logPrio::LOG_WARNING);
          }
-         
+
+         ShutDown();
+
          //Not an error, appLogic should just go on.
          return 0;
       }
       else if(error!=DRV_SUCCESS)
       {
          log<software_critical>({__FILE__, __LINE__, "ANDOR SDK initialization failed: " + andorSDKErrorName(error)});
+         ShutDown();
          return -1;
       }
       
@@ -1808,7 +1811,8 @@ int andorCtrl::configureAcquisition()
    updateIfChanged( m_indiP_roi_h, "target", m_currentROI.h, INDI_OK);
    updateIfChanged( m_indiP_roi_bin_x, "target", m_currentROI.bin_x, INDI_OK);
    updateIfChanged( m_indiP_roi_bin_y, "target", m_currentROI.bin_y, INDI_OK);
-   
+
+
    ///\todo This should check whether we have a match between EDT and the camera right?
    m_width = m_currentROI.w;
    m_height = m_currentROI.h;
@@ -1818,7 +1822,7 @@ int andorCtrl::configureAcquisition()
    // Print Detector Frame Size
    //std::cout << "Detector Frame is: " << width << "x" << height << "\n";
 
-    
+   recordCamera(true);
 
    return 0;
 }
@@ -1873,10 +1877,7 @@ int andorCtrl::loadImageIntoStream(void * dest)
    if( frameGrabber<andorCtrl>::loadImageIntoStreamCopy(dest, m_image_p, m_width, m_height, m_typeSize) == nullptr) return -1;
 
    return 0;
-   
-   //memcpy(dest, m_image_p, m_width*m_height*m_typeSize);
-   //return 0;
-}
+   }
 
 inline
 int andorCtrl::reconfig()
