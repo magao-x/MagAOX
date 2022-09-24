@@ -347,6 +347,14 @@ int xrif2fits::execute()
       logMetas.push_back( logMetaSpec(lfn.appName(), telem_stdcam::eventCode, "temp"));
       logMetas.push_back( logMetaSpec(lfn.appName(), telem_stdcam::eventCode, "shutterState"));
 
+      logMetas.push_back( logMetaSpec({"tweeterSpeck", telem_dmspeck::eventCode, "modulating"}));
+      logMetas.push_back( logMetaSpec({"tweeterSpeck", telem_dmspeck::eventCode, "trigger"}));
+      logMetas.push_back( logMetaSpec({"tweeterSpeck", telem_dmspeck::eventCode, "frequency"}));
+      logMetas.push_back( logMetaSpec({"tweeterSpeck", telem_dmspeck::eventCode, "separations"}));
+      logMetas.push_back( logMetaSpec({"tweeterSpeck", telem_dmspeck::eventCode, "angles"}));
+      logMetas.push_back( logMetaSpec({"tweeterSpeck", telem_dmspeck::eventCode, "amplitudes"}));
+      logMetas.push_back( logMetaSpec({"tweeterSpeck", telem_dmspeck::eventCode, "crosses"}));
+
       if(g_timeToDie == true) break; //check before going on
 
       
