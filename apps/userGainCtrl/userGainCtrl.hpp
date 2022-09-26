@@ -632,9 +632,6 @@ int userGainCtrl::getModeBlocks()
       }
    }
 
-   //std::cerr << m_totalNModes << " " << modeBlockStart.back() + modeBlockN.back() << "\n";
-   m_totalNModes = modeBlockStart.back() + modeBlockN.back();
-
    if(modeBlockStart.back() + modeBlockN.back() > m_totalNModes)
    {
       return log<software_error, -1>({__FILE__, __LINE__, errno, "userGainCtrl::getModeBlocks too many modes in blocks compared to WFSmodes"});
