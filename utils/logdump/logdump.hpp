@@ -236,7 +236,6 @@ int logdump::execute()
             nrd = fread( head.get() + logHeader::minHeadSize, sizeof(char), sizeof(msgLen2T), fin);
          }
 
-
          logPrioT lvl = logHeader::logLevel(head);
          eventCodeT ec = logHeader::eventCode(head);
          msgLenT len = logHeader::msgLen(head);
@@ -248,6 +247,7 @@ int logdump::execute()
             fseek(fin, len, SEEK_CUR);
             continue;
          }
+
 
          if(m_codes.size() > 0)
          {
@@ -274,7 +274,6 @@ int logdump::execute()
          {
             logBuff = bufferPtrT(new char[hSz + len]);
          }
-
          memcpy( logBuff.get(), head.get(), hSz);
 
          ///\todo what do we do if nrd not equal to expected size?
@@ -286,11 +285,19 @@ int logdump::execute()
          
          if(m_follow && firstRun && finSize > 512 && totNrd < finSize-512) 
          {
-//            firstRun = false;
+            //firstRun = false;
             continue;
          }
-         printLogBuff(lvl, ec, len, logBuff);
 
+         auto verifier = flatbuffers::Verifier( (uint8_t*) logHeader::messageBuffer(logBuff), static_cast<size_t>(len));
+         bool ok = VerifyTelem_observer_fbBuffer(verifier);
+         if (!ok) 
+         {
+            std::cerr << "Log " << fname << " failed verification.  File possibly corrupt.  Exiting." << std::endl;
+            return -1;
+         }
+
+         printLogBuff(lvl, ec, len, logBuff);
 
       }
 
