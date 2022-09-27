@@ -138,6 +138,8 @@ protected:
 
    std::mutex m_modeBlockMutex;
 
+   mx::fits::fitsFile<float> m_ff;
+
 public:
    /// Default c'tor.
    userGainCtrl();
@@ -538,14 +540,16 @@ int userGainCtrl::getAOCalib()
    }
    fin.close();
    
-   mx::fits::fitsFile<float> ff;
-   mx::fits::fitsHeader fh;
+   //Now get number of modes from the modesWFS file
    calsrc = m_aoCalDir + "/aol" + std::to_string(m_loopNumber) + "_modesWFS.fits";
-   ff.fileName(calsrc);
-   ff.open();
+   
+   m_ff.open(calsrc);
 
-   int totalNModes = ff.naxes(2);
+   int totalNModes = m_ff.naxes(2);
 
+   m_ff.close();
+
+   //Is this a change?
    if(totalNModes != m_totalNModes)
    {
       log<text_log>("Found " + std::to_string(totalNModes) + " total modes in calib.");
@@ -553,6 +557,7 @@ int userGainCtrl::getAOCalib()
 
    m_totalNModes = totalNModes;
 
+   //Now we check if this matches the shared-memory.  If not, this would mean that the cal changed and the shmims did not
    static bool mmlog = false; //log once per occurrence.  this could go on for a long time until mfilt is started.
    ///\todo this can fail if it never compares as equal but shmimMonitors are connected.  shmimMonitor needs a "connected" flag.
    if(m_totalNModes != (int) shmimMonitorT::m_width || m_totalNModes != (int) mcShmimMonitorT::m_width || m_totalNModes != (int) limitShmimMonitorT::m_width)

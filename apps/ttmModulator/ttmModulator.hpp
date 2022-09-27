@@ -26,7 +26,7 @@ protected:
      * @{
      */
 
-   double m_maxFreq {3622.0}; ///< The maximum modulation frequency settable by this program
+   double m_maxFreq {1900.0}; ///< The maximum modulation frequency settable by this program
    double m_maxVolt {2.1}; ///< The maximum modulation voltage settable by this program
 
    double m_setVoltage_1 {5.0}; ///< the set position voltage of Ch. 1.
@@ -564,8 +564,8 @@ int ttmModulator::restTTM()
    //Now check if values have changed.
    if( waitValue(m_C1freq, 0.0) < 0) return log<software_error,-1>({__FILE__,__LINE__, "fxngen timeout"});
    if( waitValue(m_C2freq, 0.0) < 0) return log<software_error,-1>({__FILE__,__LINE__, "fxngen timeout"});
-   if( waitValue(m_C1volts, 0.002, 1e-10) < 0) return log<software_error,-1>({__FILE__,__LINE__, "fxngen timeout"});
-   if( waitValue(m_C2volts, 0.002,1e-10) < 0) return log<software_error,-1>({__FILE__,__LINE__, "fxngen timeout"});
+   if( waitValue(m_C1volts, 0.002, 1e-6) < 0) return log<software_error,-1>({__FILE__,__LINE__, "fxngen timeout"});
+   if( waitValue(m_C2volts, 0.002,1e-6) < 0) return log<software_error,-1>({__FILE__,__LINE__, "fxngen timeout"});
    if( waitValue(m_C1phse, 0.0) < 0) return log<software_error,-1>({__FILE__,__LINE__, "fxngen timeout"});
    if( waitValue(m_C2phse, 0.0) < 0) return log<software_error,-1>({__FILE__,__LINE__, "fxngen timeout"});
    if( waitValue(m_C1ofst, 0.0) < 0) return log<software_error,-1>({__FILE__,__LINE__, "fxngen timeout"});
@@ -611,8 +611,8 @@ int ttmModulator::setTTM()
       //Now check if values have changed.
       if( waitValue(m_C1freq, 0.0) < 0) return log<software_error,-1>({__FILE__,__LINE__, "fxngen timeout"});
       if( waitValue(m_C2freq, 0.0) < 0) return log<software_error,-1>({__FILE__,__LINE__, "fxngen timeout"});
-      if( waitValue(m_C1volts, 0.002, 1e-10) < 0) return log<software_error,-1>({__FILE__,__LINE__, "fxngen timeout"});
-      if( waitValue(m_C2volts, 0.002,1e-10) < 0) return log<software_error,-1>({__FILE__,__LINE__, "fxngen timeout"});
+      if( waitValue(m_C1volts, 0.002, 1e-6) < 0) return log<software_error,-1>({__FILE__,__LINE__, "fxngen timeout"});
+      if( waitValue(m_C2volts, 0.002,1e-6) < 0) return log<software_error,-1>({__FILE__,__LINE__, "fxngen timeout"});
       if( waitValue(m_C1phse, 0.0) < 0) return log<software_error,-1>({__FILE__,__LINE__, "fxngen timeout"});
       if( waitValue(m_C2phse, 0.0) < 0) return log<software_error,-1>({__FILE__,__LINE__, "fxngen timeout"});
 
@@ -663,7 +663,7 @@ int ttmModulator::setTTM()
 
       if( sendNewProperty(m_indiP_C2ofst, "value", nv) < 0 ) return log<software_error,-1>({__FILE__,__LINE__});
 
-      if( waitValue(m_C2ofst, nv, 1e-10) < 0 ) return log<software_error,-1>({__FILE__,__LINE__, "fxngen timeout"});
+      if( waitValue(m_C2ofst, nv, 1e-6) < 0 ) return log<software_error,-1>({__FILE__,__LINE__, "fxngen timeout"});
 
       sleep(1);
    }
@@ -676,7 +676,7 @@ int ttmModulator::setTTM()
 
       if( sendNewProperty(m_indiP_C1ofst, "value", nv) < 0 ) return log<software_error,-1>({__FILE__,__LINE__});
 
-      if( waitValue(m_C1ofst, nv, 1e-10) < 0 ) return log<software_error, -1>({__FILE__,__LINE__, "fxngen timeout"});
+      if( waitValue(m_C1ofst, nv, 1e-6) < 0 ) return log<software_error, -1>({__FILE__,__LINE__, "fxngen timeout"});
 
       sleep(1);
    }
@@ -689,7 +689,7 @@ int ttmModulator::setTTM()
 
       if( sendNewProperty(m_indiP_C2ofst, "value", nv) < 0 ) return log<software_error,-1>({__FILE__,__LINE__});
 
-      if( waitValue(m_C2ofst, nv, 1e-10) < 0 ) return log<software_error,-1>({__FILE__,__LINE__, "fxngen timeout"});
+      if( waitValue(m_C2ofst, nv, 1e-6) < 0 ) return log<software_error,-1>({__FILE__,__LINE__, "fxngen timeout"});
 
       sleep(1);
    }
@@ -700,7 +700,7 @@ int ttmModulator::setTTM()
 
       if( (sendNewProperty(m_indiP_C1ofst, "value", m_setVoltage_1) < 0 ) ) return log<software_error,-1>({__FILE__,__LINE__});
 
-      if(waitValue(m_C1ofst, m_setVoltage_1, 1e-10) < 0) return log<software_error,-1>({__FILE__,__LINE__, "fxngen timeout"});
+      if(waitValue(m_C1ofst, m_setVoltage_1, 1e-6) < 0) return log<software_error,-1>({__FILE__,__LINE__, "fxngen timeout"});
 
    }
 
@@ -710,7 +710,7 @@ int ttmModulator::setTTM()
 
       if( (sendNewProperty(m_indiP_C2ofst, "value", m_setVoltage_2) < 0 ) ) return log<software_error,-1>({__FILE__,__LINE__});
 
-      if( waitValue(m_C2ofst, m_setVoltage_2, 1e-10) < 0) return log<software_error,-1>({__FILE__,__LINE__, "fxngen timeout"});
+      if( waitValue(m_C2ofst, m_setVoltage_2, 1e-6) < 0) return log<software_error,-1>({__FILE__,__LINE__, "fxngen timeout"});
 
    }
 
@@ -820,7 +820,7 @@ int ttmModulator::modTTM( double newRad,
       /// \todo should we set the offset here just to be sure?
 
       //Now check if values have changed.
-      if( waitValue(m_C2phse, terpC2Phse, 1e-10) < 0  ) return log<software_error, -1>({__FILE__,__LINE__, "fxngen timeout"});
+      if( waitValue(m_C2phse, terpC2Phse, 1e-6) < 0  ) return log<software_error, -1>({__FILE__,__LINE__, "fxngen timeout"});
 
       // 1) set freq to 100 Hz (or requested if < 100 Hz)
       double nextFreq = 100.0;
@@ -831,8 +831,8 @@ int ttmModulator::modTTM( double newRad,
       if( sendNewProperty(m_indiP_C2freq, "value", nextFreq) < 0 ) log<software_error,-1>({__FILE__,__LINE__});
 
       //Now check if values have changed.
-      if( waitValue(m_C1freq, nextFreq, 1e-10) < 0 ) return log<software_error,-1>({__FILE__,__LINE__, "fxngen timeout"});
-      if( waitValue(m_C2freq, nextFreq, 1e-10) < 0 ) return log<software_error,-1>({__FILE__,__LINE__, "fxngen timeout"});
+      if( waitValue(m_C1freq, nextFreq, 1e-6) < 0 ) return log<software_error,-1>({__FILE__,__LINE__, "fxngen timeout"});
+      if( waitValue(m_C2freq, nextFreq, 1e-6) < 0 ) return log<software_error,-1>({__FILE__,__LINE__, "fxngen timeout"});
 
       // 2) set amp to 0.1 V (or requested if < 0.1 V)
       double nextVolts1 = 0.1;
@@ -847,8 +847,8 @@ int ttmModulator::modTTM( double newRad,
 
 
       //Now check if values have changed.
-      if( waitValue(m_C1volts, nextVolts1, 1e-10) < 0 ) log<software_error,-1>({__FILE__,__LINE__, "fxngen timeout"});
-      if( waitValue(m_C2volts, nextVolts2, 1e-10) < 0 ) log<software_error,-1>({__FILE__,__LINE__, "fxngen timeout"});
+      if( waitValue(m_C1volts, nextVolts1, 1e-6) < 0 ) log<software_error,-1>({__FILE__,__LINE__, "fxngen timeout"});
+      if( waitValue(m_C2volts, nextVolts2, 1e-6) < 0 ) log<software_error,-1>({__FILE__,__LINE__, "fxngen timeout"});
 
       // 3) Increase freq to 500 Hz, then in 500 Hz increments
       double currFreq = m_C1freq;
@@ -863,8 +863,8 @@ int ttmModulator::modTTM( double newRad,
          if( sendNewProperty(m_indiP_C2freq, "value", nextFreq) < 0 ) return log<software_error,-1>({__FILE__,__LINE__});
 
          //Now check if values have changed.
-         if( waitValue(m_C1freq, nextFreq, 1e-10) < 0 ) return log<software_error,-1>({__FILE__,__LINE__, "fxngen timeout"});
-         if( waitValue(m_C2freq, nextFreq, 1e-10) < 0 ) return log<software_error,-1>({__FILE__,__LINE__, "fxngen timeout"});
+         if( waitValue(m_C1freq, nextFreq, 1e-6) < 0 ) return log<software_error,-1>({__FILE__,__LINE__, "fxngen timeout"});
+         if( waitValue(m_C2freq, nextFreq, 1e-6) < 0 ) return log<software_error,-1>({__FILE__,__LINE__, "fxngen timeout"});
 
          ///\todo make sleep-time configurable
          sleep(1);
@@ -889,8 +889,15 @@ int ttmModulator::modTTM( double newRad,
          if( sendNewProperty(m_indiP_C2volts, "value", nextVolts2) < 0 ) return log<software_error,-1>({__FILE__,__LINE__});
 
          //Now check if values have changed.
-         if( waitValue(m_C1volts, nextVolts1, 1e-10) < 0 ) return log<software_error,-1>({__FILE__,__LINE__, "fxngen timeout"});
-         if( waitValue(m_C2volts, nextVolts2, 1e-10) < 0 ) return log<software_error,-1>({__FILE__,__LINE__, "fxngen timeout"});
+         if( waitValue(m_C1volts, nextVolts1, 1e-6) < 0 ) 
+         {
+            return log<software_error,-1>({__FILE__,__LINE__, "fxngen timeout C1"});
+         }
+
+         if( waitValue(m_C2volts, nextVolts2, 1e-6) < 0 ) 
+         {
+            return log<software_error,-1>({__FILE__,__LINE__, "fxngen timeout C2"});
+         }
 
          sleep(1);
          currVolts1 = m_C1volts;
