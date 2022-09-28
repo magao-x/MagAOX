@@ -820,7 +820,7 @@ int ttmModulator::modTTM( double newRad,
       /// \todo should we set the offset here just to be sure?
 
       //Now check if values have changed.
-      if( waitValue(m_C2phse, terpC2Phse, 1e-6) < 0  ) return log<software_error, -1>({__FILE__,__LINE__, "fxngen timeout"});
+      if( waitValue(m_C2phse, terpC2Phse, 1e-4) < 0  ) return log<software_error, -1>({__FILE__,__LINE__, "fxngen timeout"});
 
       // 1) set freq to 100 Hz (or requested if < 100 Hz)
       double nextFreq = 100.0;
