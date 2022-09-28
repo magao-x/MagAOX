@@ -88,7 +88,10 @@ class ObserverTelem:
         return f"<ObserverTelem: {repr(self.obs)} {self.email} at {self.ts.strftime(PRETTY_MODIFIED_TIME_FORMAT)} [{'on' if self.on else 'off'}]>"
 
 def parse_observers_line(line):
-    groups = LINE_FORMAT_REGEX.match(line).groups()
+    match = LINE_FORMAT_REGEX.match(line)
+    if match is None:
+        raise RuntimeError(f"Malformed line from observers telem: " + repr(line))
+    groups = match.groups()
     ts = datetime.datetime(
         year=int(groups[0]),
         month=int(groups[1]),
@@ -113,7 +116,6 @@ def parse_logdump_for_observers(telem_root : pathlib.Path, telem_path : pathlib.
         bufsize=LINE_BUFFERED,
         text=True
     )
-    # log.debug(" ".join(args))
     outiter = iter(p1.stdout.readline, '')
     # skip line 1: 0
     try:
@@ -130,7 +132,10 @@ def parse_logdump_for_observers(telem_root : pathlib.Path, telem_path : pathlib.
         line = line.strip()
         if not line:
             continue
-        this_telem = parse_observers_line(line)
+        try:
+            this_telem = parse_observers_line(line)
+        except Exception as e:
+            log.exception("Unparseable line running command " + " ".join(args))
         if last_telem is None:
             last_telem = this_telem
         # convert to "edge-triggered" events only by yielding
@@ -142,6 +147,9 @@ def parse_logdump_for_observers(telem_root : pathlib.Path, telem_path : pathlib.
         ):
             last_telem = this_telem
             yield this_telem
+        returncode = p1.poll()
+        if returncode is not None and returncode != 0:
+            raise RuntimeError(f"Got exit code {returncode} from command " + " ".join(args))
 
 @dataclasses.dataclass(frozen=True, eq=True)
 class ObservationSpan:
@@ -487,7 +495,7 @@ def convert_xrif(
 def daemon_mode(
     output_dir : pathlib.Path, cameras : typing.List[str],
     data_roots: typing.List[pathlib.Path], omit_telemetry : bool, xrif2fits_cmd: str,
-    ending_after_dt: datetime.datetime, all_visited_files: list[TimestampedFile],
+    ending_after_dt: datetime.datetime, all_visited_files: typing.List[TimestampedFile],
 ):
     existing_observation_spans = set()
     log.info(f"Started at {datetime.datetime.now().isoformat()}, looking for unprocessed observations since {ending_after_dt}...")
