@@ -46,8 +46,8 @@ DEFAULT_CUBE = object()
 ALL_CAMERAS = {
     'camsci1': DEFAULT_SEPARATE,
     'camsci2': DEFAULT_SEPARATE,
-    'camlowfs': DEFAULT_CUBE,
-    'camwfs': DEFAULT_CUBE,
+    'camlowfs': DEFAULT_SEPARATE,
+    'camwfs': DEFAULT_SEPARATE,
     'camtip': DEFAULT_SEPARATE,
     'camacq': DEFAULT_SEPARATE,
 }
