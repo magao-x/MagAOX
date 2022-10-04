@@ -1254,7 +1254,7 @@ INDI_NEWCALLBACK_DEFN(ocam2KCtrl, m_indiP_emProtReset)(const pcf::IndiProperty &
 inline
 int ocam2KCtrl::checkRecordTimes()
 {
-   return telemeter<ocam2KCtrl>::checkRecordTimes(ocam_temps(), telem_stdcam());
+   return telemeter<ocam2KCtrl>::checkRecordTimes(ocam_temps(), telem_stdcam(), telem_fgtimings());
 }
    
 inline
