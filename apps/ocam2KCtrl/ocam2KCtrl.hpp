@@ -315,6 +315,8 @@ public:
    
    int recordTelem( const telem_stdcam * );
    
+   int recordTelem( const telem_fgtimings * );
+
    int recordTemps(bool force = false);
    
    ///@}
@@ -1265,6 +1267,12 @@ inline
 int ocam2KCtrl::recordTelem( const telem_stdcam * )
 {
    return recordCamera(true);
+}
+
+inline
+int ocam2KCtrl::recordTelem( const telem_fgtimings * )
+{
+   return recordFGTimings(true);
 }
 
 inline

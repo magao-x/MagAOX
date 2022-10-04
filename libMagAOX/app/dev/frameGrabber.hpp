@@ -271,6 +271,14 @@ public:
 
    ///@}
    
+   /** \name Telemeter Interface 
+     * @{
+     */
+
+   int recordFGTimings( bool force = false );
+
+   /// @}
+
 private:
    derivedT & derived()
    {
@@ -465,6 +473,7 @@ int frameGrabber<derivedT>::appLogic()
          m_mnwa = mx::math::vectorMean(m_watimesD);
          m_varwa = mx::math::vectorVariance(m_watimesD, m_mnwa);
          
+         recordFGTimings();
       }
       else
       {
@@ -773,6 +782,35 @@ int frameGrabber<derivedT>::updateINDI()
    return 0;
 }
 
+template<class derivedT>
+int frameGrabber<derivedT>::recordFGTimings( bool force )
+{
+   static double last_mna = 0;
+   static double last_vara = 0;
+
+   static double last_mnw = 0;
+   static double last_varw = 0;
+   
+   static double last_mnwa = 0;
+   static double last_varwa = 0;
+
+   if(force || m_mna != last_mna || m_vara != last_vara ||
+                 m_mnw != last_mnw || m_varw != last_varw ||
+                   m_mnwa != last_mnwa || m_varwa != last_varwa )
+   {
+      derived().template telem<telem_fgtimings>({m_mna, sqrt(m_vara), m_mnw, sqrt(m_varw), m_mnwa, sqrt(m_varwa)});
+
+      last_mna = m_mna;
+      last_vara = m_vara;
+      last_mnw = m_mnw;
+      last_varw = m_varw;
+      last_mnwa = m_mnwa;
+      last_varwa = m_varwa;
+   }
+
+   return 0;
+
+}
 
 } //namespace dev
 } //namespace app

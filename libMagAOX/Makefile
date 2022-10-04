@@ -60,6 +60,7 @@ INCLUDEDEPS= app/MagAOXApp.hpp \
 	     logger/types/telem_coreloads.hpp \
 	     logger/types/telem_coretemps.hpp \
 	     logger/types/telem_drivetemps.hpp \
+            logger/types/telem_fgtimings.hpp \
 	     logger/types/telem_fxngen.hpp \
 	     logger/types/telem_observer.hpp \
 	     logger/types/telem_pico.hpp \

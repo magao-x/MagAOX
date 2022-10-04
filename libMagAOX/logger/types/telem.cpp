@@ -25,6 +25,7 @@ timespec telem_coreloads::lastRecord = {0,0};
 timespec telem_coretemps::lastRecord = {0,0};
 timespec telem_dmspeck::lastRecord = {0,0};
 timespec telem_drivetemps::lastRecord = {0,0};
+timespec telem_fgtimings::lastRecord = {0,0};
 timespec telem_fxngen::lastRecord = {0,0};
 timespec telem_observer::lastRecord = {0,0};
 timespec telem_pico::lastRecord = {0,0};
