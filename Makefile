@@ -29,7 +29,8 @@ apps_rtc = \
         w2tcsOffloader
 
 apps_icc = \
-        cacaoInterface \
+   acronameUsbHub \
+   cacaoInterface \
 	filterWheelCtrl \
 	hsfwCtrl \
 	baslerCtrl \
@@ -41,8 +42,7 @@ apps_icc = \
 	usbtempMon \
 	xt1121Ctrl \
 	xt1121DCDU \
-        picoMotorCtrl \
-        cacaoInterface
+   picoMotorCtrl 
 
 apps_aoc = \
 	trippLitePDU \
