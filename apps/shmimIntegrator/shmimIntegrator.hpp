@@ -617,6 +617,10 @@ int shmimIntegrator::allocate(const dev::shmimT & dummy)
    if(m_avgTime > 0 && m_fps > 0)
    {
       m_nAverage = m_avgTime * m_fps;
+      if(m_nAverage <= 0)
+      {
+         m_nAverage = 1;
+      }
       log<text_log>("set nAverage to " + std::to_string(m_nAverage) + " based on FPS", logPrio::LOG_NOTICE);
    }
    else if(m_avgTime > 0 && m_fps == 0) //Haven't gotten the update yet so we keep going for now
