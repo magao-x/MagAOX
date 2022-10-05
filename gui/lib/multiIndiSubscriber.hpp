@@ -107,18 +107,28 @@ public:
       return disc;
    }
 
-   virtual void handleDefProperty( const pcf::IndiProperty &ipRecv );
+   /// Callback for a `defProperty` message notifying us that the propery has changed.
+   /** This is called by the publisher which is subscribed to.
+     * 
+     * Derived classes shall implement this.
+     */
+   virtual void handleDefProperty( const pcf::IndiProperty &ipRecv /**< [in] the property which has been defined*/);
    
-   virtual void handleDelProperty( const pcf::IndiProperty &ipRecv );
+   /// Callback for a `delProperty` message notifying us that the propery has changed.
+   /** This is called by the publisher which is subscribed to.
+     * 
+     * Derived classes shall implement this.
+     */
+   virtual void handleDelProperty( const pcf::IndiProperty &ipRecv /**< [in] the property which has been deleted*/);
 
-   /// Callback for a SET PROPERTY message notifying us that the propery has changed.
+   /// Callback for a `setProperty` message notifying us that the propery has changed.
    /** This is called by the publisher which is subscribed to.
      * 
      * Derived classes shall implement this.
      */
    virtual void handleSetProperty( const pcf::IndiProperty & ipRecv /**< [in] the property which has changed*/);
 
-   /// Send an NEW PROPERTY request to a remote device.
+   /// Send an `newProperty` request to a remote device.
    /** This is a request to update a property that the remote device owns.
      */
    virtual void sendNewProperty( const pcf::IndiProperty &ipSend /**< [in] the property to send a change request for*/);
