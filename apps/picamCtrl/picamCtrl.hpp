@@ -1684,6 +1684,12 @@ int picamCtrl::configureAcquisition()
    {
       std::cerr << "could not get FrameRateCalculation\n";
    }
+   else
+   {
+      m_fps = m_FrameRateCalculation;
+      updateIfChanged(m_indiP_fps, "current", m_fps, INDI_IDLE);
+      updateIfChanged(m_indiP_fps, "target", m_fpsSet, INDI_IDLE);
+   }
    std::cerr << "FrameRate is: " <<  m_FrameRateCalculation << "\n";
    
    piint AdcQuality;
