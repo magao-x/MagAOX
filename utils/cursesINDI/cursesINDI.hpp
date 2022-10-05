@@ -165,7 +165,7 @@ public:
    
    virtual int postDraw()
    {
-      if(fpout) *fpout << "post draw" << std::endl;
+      //if(fpout) *fpout << "post draw" << std::endl;
       
       if(w_countWin) 
       {
@@ -185,7 +185,7 @@ public:
       if( m_cellContents.size() - m_startRow <  (size_t) shown ) shown = m_cellContents.size() - m_startRow;
       
       wclear(w_countWin);
-      wprintw(w_countWin, "%i/%i elements shown.", shown, knownElements.size());
+      wprintw(w_countWin, "%i/%zu elements shown.", shown, knownElements.size());
       wrefresh(w_countWin);
       
       return 0;
@@ -271,13 +271,13 @@ void cursesINDI::handleDefProperty( const pcf::IndiProperty &ipRecv )
 
 void cursesINDI::handleDelProperty( const pcf::IndiProperty &ipRecv )
 {
-   if(fpout) *fpout << "got delete property" << std::endl;
+   //if(fpout) *fpout << "got delete property" << std::endl;
    
    if(ipRecv.hasValidDevice())
    {
       if(!ipRecv.hasValidName())
       {
-         if(fpout) *fpout << "will delete: " << ipRecv.getDevice() << "\n";
+         //if(fpout) *fpout << "will delete: " << ipRecv.getDevice() << "\n";
          
          for(elementMapIteratorT elIt = knownElements.begin(); elIt != knownElements.end();)
          {
@@ -293,7 +293,7 @@ void cursesINDI::handleDelProperty( const pcf::IndiProperty &ipRecv )
       }
       else
       {
-         if(fpout) *fpout << "will delete: " << ipRecv.createUniqueKey() << "\n";
+         //if(fpout) *fpout << "will delete: " << ipRecv.createUniqueKey() << "\n";
          
          for(elementMapIteratorT elIt = knownElements.begin(); elIt != knownElements.end();)
          {
@@ -470,7 +470,7 @@ void cursesINDI::drawThreadExec()
 {
    while(!m_shutdown && !getQuitProcess())
    {
-      //if(fpout) *fpout << "draw thread . . ." << std::endl;
+      ////if(fpout) *fpout << "draw thread . . ." << std::endl;
       if(m_redraw > 0)
       {
          redrawTable();
@@ -501,7 +501,7 @@ void cursesINDI::redrawTable()
 
    int start_redraw = m_redraw;
 
-   if(fpout) *fpout << "redrawTable: " << m_redraw << std::endl; 
+   //if(fpout) *fpout << "redrawTable: " << m_redraw << std::endl; 
    
    m_cellContents.clear();
 
@@ -511,7 +511,7 @@ void cursesINDI::redrawTable()
    
    for( elementMapIteratorT es = knownElements.begin(); es != knownElements.end(); ++es)
    {
-      if(fpout) *fpout << knownProps[es->second.propKey].getName() << " " << knownProps[es->second.propKey].getState() << "\n";
+      //if(fpout) *fpout << knownProps[es->second.propKey].getName() << " " << knownProps[es->second.propKey].getState() << "\n";
       
       if(knownProps[es->second.propKey].getName() == "fsm" &&
             knownProps[es->second.propKey].getState() == pcf::IndiProperty::Alert) 
@@ -537,7 +537,7 @@ void cursesINDI::redrawTable()
 
    draw();
    
-   if(fpout) *fpout << "fsmAlerts: " << fsmAlerts << "\n";
+   //if(fpout) *fpout << "fsmAlerts: " << fsmAlerts << "\n";
    
    int cx, cy;
    getyx(w_interactWin, cy, cx);
@@ -550,7 +550,7 @@ void cursesINDI::redrawTable()
       std::string alrt = "!! FSM alert: " + *alertDev.begin();
       if(alertDev.size() > 1) alrt += " (+" + std::to_string(alertDev.size()-1) + ")";
       
-      wprintw(w_attentionWin, alrt.c_str());
+      wprintw(w_attentionWin, "%s", alrt.c_str());
    }
    wrefresh(w_attentionWin);
    
@@ -574,7 +574,7 @@ void cursesINDI::updateTable()
 
    int start_update = m_update;
 
-   if(fpout) *fpout << "updateTable: " << m_update << std::endl; 
+   //if(fpout) *fpout << "updateTable: " << m_update << std::endl; 
    int cx, cy;
 
    getyx(w_interactWin, cy, cx);
@@ -587,7 +587,7 @@ void cursesINDI::updateTable()
    
    for(auto it = knownElements.begin(); it != knownElements.end(); ++it)
    {
-      if(fpout) *fpout << knownProps[it->second.propKey].getName() << " " << knownProps[it->second.propKey].getState() << "\n";
+      //if(fpout) *fpout << knownProps[it->second.propKey].getName() << " " << knownProps[it->second.propKey].getState() << "\n";
       
       if(knownProps[it->second.propKey].getName() == "fsm" &&
             knownProps[it->second.propKey].getState() == pcf::IndiProperty::Alert) 
@@ -606,7 +606,7 @@ void cursesINDI::updateTable()
          {
             cursStat(0);
             wclear(m_gridWin[it->second.tableRow - m_startRow][2]);
-            if(hasContent(it->second.tableRow,2)) wprintw(m_gridWin[it->second.tableRow - m_startRow][2], m_cellContents[it->second.tableRow][2].c_str());
+            if(hasContent(it->second.tableRow,2)) wprintw(m_gridWin[it->second.tableRow - m_startRow][2], "%s", m_cellContents[it->second.tableRow][2].c_str());
             wrefresh(m_gridWin[it->second.tableRow - m_startRow][2]);
             wmove(w_interactWin,cy,cx);
             cursStat(cs);
@@ -622,7 +622,7 @@ void cursesINDI::updateTable()
          {
             cursStat(0);
             wclear(m_gridWin[it->second.tableRow - m_startRow][4]);
-            if(hasContent(it->second.tableRow,4)) wprintw(m_gridWin[it->second.tableRow - m_startRow][4], m_cellContents[it->second.tableRow][4].c_str());
+            if(hasContent(it->second.tableRow,4)) wprintw(m_gridWin[it->second.tableRow - m_startRow][4], "%s", m_cellContents[it->second.tableRow][4].c_str());
             wrefresh(m_gridWin[it->second.tableRow - m_startRow][4]);
             wmove(w_interactWin,cy,cx);
             cursStat(cs);
@@ -633,7 +633,9 @@ void cursesINDI::updateTable()
       //updateContents( it->second.tableRow, 4,  knownProps[it->second.propKey][it->second.name].getValue());
    }
 
-   if(fpout) *fpout << "fsmAlerts: " << fsmAlerts << "\n";
+   wattron(m_gridWin[m_currY][m_currX], A_REVERSE);
+
+   //if(fpout) *fpout << "fsmAlerts: " << fsmAlerts << "\n";
    
    getyx(w_interactWin, cy, cx);
    cs = cursStat();
@@ -644,7 +646,7 @@ void cursesINDI::updateTable()
       std::string alrt = "!! FSM alert: " + *alertDev.begin();
       if(alertDev.size() > 1) alrt += " (+" + std::to_string(alertDev.size()-1) + ")";
       
-      wprintw(w_attentionWin, alrt.c_str());
+      wprintw(w_attentionWin, "%s", alrt.c_str());
    }
    wrefresh(w_attentionWin);
    wmove(w_interactWin,cy,cx);
@@ -680,6 +682,7 @@ void cursesINDI::updateCurVal( )
    if(it == knownElements.end())
    {
       wrefresh(w_interactWin);
+      cursStat(cs);
       return;
    }
 
@@ -687,7 +690,7 @@ void cursesINDI::updateCurVal( )
    
    cval += displayValue( knownProps[it->second.propKey], it->second.name);
 
-   wprintw(w_curvalWin, cval.c_str());
+   wprintw(w_curvalWin, "%s", cval.c_str());
    wrefresh(w_curvalWin);
 
    wmove(w_interactWin,cy,cx);
@@ -715,7 +718,7 @@ void cursesINDI::_moveCurrent( int nextY,
    
    moveSelected(nextY, nextX);
    
-   if(fpout) *fpout << "moved: " << nextX << " " << nextY << " " << currX << "->" << m_currX << " " << currY << "->" << m_currY << std::endl; 
+   //if(fpout) *fpout << "moved: " << nextX << " " << nextY << " " << currX << "->" << m_currX << " " << currY << "->" << m_currY << std::endl; 
    
    if(m_deviceSearching && nextX != 1)
    {
@@ -823,12 +826,12 @@ void cursesINDI::deviceSearch( int ch )
       wrefresh(w_interactWin);
    }
       
-   if(fpout) *fpout << "device searching: " << m_deviceTarget << std::endl; 
+   //if(fpout) *fpout << "device searching: " << m_deviceTarget << std::endl; 
    if(m_deviceTarget.size() == 0) return;
    
    auto it = knownElements.lower_bound(m_deviceTarget);
 
-   if(fpout) *fpout << "new row: " << it->second.tableRow << " " << m_startRow << " " << it->second.tableRow-m_startRow << "\n";
+   //if(fpout) *fpout << "new row: " << it->second.tableRow << " " << m_startRow << " " << it->second.tableRow-m_startRow << "\n";
    
    if(it->second.tableRow == -1) return;
    
@@ -954,7 +957,7 @@ void cursesINDI::keyPressed( int ch )
             ipSend.setDevice(knownProps[it->second.propKey].getDevice());
             ipSend.setName(knownProps[it->second.propKey].getName());
             ipSend.add(pcf::IndiElement(it->second.name));
-            if(fpout) *fpout << "newStr: " << newStr << std::endl; 
+            //if(fpout) *fpout << "newStr: " << newStr << std::endl; 
    
             ipSend[it->second.name].setValue(newStr);
             sendNewProperty(ipSend);

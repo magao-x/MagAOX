@@ -192,7 +192,7 @@ int cursesTableGrid::draw()
          
          if(fpout) *fpout << ": " << x << " (" <<  dispCol_start[x] << "," << dispCol_width[x] << ")";
          
-         if(hasContent(m_startRow+y,x)) wprintw(m_gridWin[y][x], m_cellContents[m_startRow + y][x].c_str());
+         if(hasContent(m_startRow+y,x)) wprintw(m_gridWin[y][x], "%s", m_cellContents[m_startRow + y][x].c_str());
          //else wprintw(m_gridWin[y][x], ".");
          wrefresh(m_gridWin[y][x]);
       }
@@ -205,7 +205,7 @@ int cursesTableGrid::draw()
    
    wattron(m_gridWin[m_currY][m_currX], A_REVERSE);
    wclear(m_gridWin[m_currY][m_currX]);
-   if(hasContent(m_startRow + m_currY, m_currX))  wprintw(m_gridWin[m_currY][m_currX], m_cellContents[m_startRow+m_currY][m_currX].c_str());
+   if(hasContent(m_startRow + m_currY, m_currX))  wprintw(m_gridWin[m_currY][m_currX], "%s", m_cellContents[m_startRow+m_currY][m_currX].c_str());
    wrefresh(m_gridWin[m_currY][m_currX]);
    
    
@@ -222,7 +222,7 @@ int cursesTableGrid::print()
       for(size_t x=0; x< m_gridWin[y].size(); ++x)
       {
          wclear(m_gridWin[y][x]);
-         if(hasContent(m_startRow+y,x)) wprintw(m_gridWin[y][x], m_cellContents[m_startRow + y][x].c_str());
+         if(hasContent(m_startRow+y,x)) wprintw(m_gridWin[y][x], "%s", m_cellContents[m_startRow + y][x].c_str());
          wrefresh(m_gridWin[y][x]);
       }
    }
@@ -274,7 +274,7 @@ int cursesTableGrid::moveSelected( int nextY,
    wattroff(m_gridWin[m_currY][m_currX], A_REVERSE);
    
    wclear(m_gridWin[m_currY][m_currX]);
-   if(hasContent(m_startRow + m_currY, m_currX))  wprintw(m_gridWin[m_currY][m_currX], m_cellContents[m_startRow+m_currY][m_currX].c_str());
+   if(hasContent(m_startRow + m_currY, m_currX))  wprintw(m_gridWin[m_currY][m_currX], "%s", m_cellContents[m_startRow+m_currY][m_currX].c_str());
    wrefresh(m_gridWin[m_currY][m_currX]);
             
    if(fpout) *fpout << "nextY: " << nextY << " m_gridWin.size(): " <<  m_gridWin.size() << std::endl;
@@ -324,7 +324,7 @@ int cursesTableGrid::moveSelected( int nextY,
    wattron(m_gridWin[m_currY][m_currX], A_REVERSE);
    
    wclear(m_gridWin[m_currY][m_currX]);
-   if(hasContent(m_startRow + m_currY, m_currX))  wprintw(m_gridWin[m_currY][m_currX], m_cellContents[m_startRow+m_currY][m_currX].c_str());
+   if(hasContent(m_startRow + m_currY, m_currX))  wprintw(m_gridWin[m_currY][m_currX], "%s", m_cellContents[m_startRow+m_currY][m_currX].c_str());
    else wprintw(m_gridWin[m_currY][m_currX], " ");
    wrefresh(m_gridWin[m_currY][m_currX]);
    
