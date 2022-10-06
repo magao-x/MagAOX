@@ -54,7 +54,7 @@ protected:
 
    z_port m_port {0};
 
-   std::vector<zaberStage> m_stages;
+   std::vector<zaberStage<zaberLowLevel>> m_stages;
    
    std::unordered_map<int, size_t> m_stageAddress;
    std::unordered_map<std::string, size_t> m_stageSerial;
@@ -171,7 +171,7 @@ void zaberLowLevel::loadConfig()
    {
       if(config.isSetUnused(mx::app::iniFile::makeKey(sections[n], "serial" )))
       {
-         m_stages.push_back(zaberStage());
+         m_stages.push_back(zaberStage<zaberLowLevel>(this));
          
          size_t idx = m_stages.size()-1;
          
@@ -204,7 +204,6 @@ int zaberLowLevel::connect()
    
    if(m_port <= 0)
    {
-      
       
       int zrv;
       
@@ -454,6 +453,8 @@ int zaberLowLevel::appLogic()
       int rv = tty::usbDevice::getDeviceName();
       if(rv < 0 && rv != TTY_E_DEVNOTFOUND && rv != TTY_E_NODEVNAMES)
       {
+         if( powerState() != 1 || powerStateTarget() != 1 ) return 0; //means we're powering off
+
          state(stateCodes::FAILURE);
          if(!stateLogged())
          {
@@ -536,9 +537,19 @@ int zaberLowLevel::appLogic()
 
          m_stages[i].getMaxPos(m_port);
          updateIfChanged(m_indiP_max_pos, m_stages[i].name(), m_stages[i].maxPos());
+
+         //Get warnings so first pass through has correct state for home/not-homed
+         if(m_stages[i].getWarnings(m_port) < 0)
+         {
+            if( powerState() != 1 || powerStateTarget() != 1 ) return 0; //means we're powering off
+            log<software_error>({__FILE__, __LINE__});
+            state(stateCodes::ERROR);
+            return 0;
+         }
          
       }
       state(stateCodes::READY);
+
       return 0;
    }
 
@@ -579,6 +590,11 @@ int zaberLowLevel::appLogic()
          }
          else if(m_stages[i].deviceStatus() == 'I') 
          {
+            if(m_stages[i].homing())
+            {
+               std::cerr << __FILE__ << " " << __LINE__ << "\n";
+               return 0;
+            }
             if(m_stages[i].warnWR())
             {
                updateIfChanged(m_indiP_curr_state, m_stages[i].name(), std::string("NOTHOMED"));
@@ -595,7 +611,7 @@ int zaberLowLevel::appLogic()
          
          if(m_stages[i].getWarnings(m_port) < 0)
          {
-            if(m_powerState == 0) return 0;
+            if( powerState() != 1 || powerStateTarget() != 1 ) return 0; //means we're powering off
             log<software_error>({__FILE__, __LINE__});
             state(stateCodes::ERROR);
             return 0;
@@ -609,6 +625,7 @@ int zaberLowLevel::appLogic()
       int rv = tty::usbDevice::getDeviceName();
       if(rv < 0 && rv != TTY_E_DEVNOTFOUND && rv != TTY_E_NODEVNAMES)
       {
+         if( powerState() != 1 || powerStateTarget() != 1 ) return 0; //means we're powering off
          state(stateCodes::FAILURE);
          for(size_t i=0; i < m_stages.size();++i)
          {
@@ -623,6 +640,7 @@ int zaberLowLevel::appLogic()
 
       if(rv == TTY_E_DEVNOTFOUND || rv == TTY_E_NODEVNAMES)
       {
+         if( powerState() != 1 || powerStateTarget() != 1 ) return 0; //means we're powering off
          state(stateCodes::NODEVICE);
          for(size_t i=0; i < m_stages.size();++i)
          {
@@ -638,6 +656,7 @@ int zaberLowLevel::appLogic()
          return 0;
       }
 
+      if( powerState() != 1 || powerStateTarget() != 1 ) return 0; //means we're powering off
       state(stateCodes::FAILURE);
       for(size_t i=0; i < m_stages.size();++i)
       {
@@ -650,6 +669,7 @@ int zaberLowLevel::appLogic()
 
 
 
+   if( powerState() != 1 || powerStateTarget() != 1 ) return 0; //means we're powering off
 
    if( state() == stateCodes::FAILURE )
    {

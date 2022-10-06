@@ -113,6 +113,9 @@ OBJS = app/MagAOXApp.o \
               
 all: libMagAOX.hpp.gch libMagAOX.a  
 
+app/MagAOXApp.o: app/MagAOXApp.hpp app/indiDriver.hpp app/indiMacros.hpp app/indiUtils.hpp app/stateCodes.o 
+app/stateCodes.o: app/stateCodes.hpp
+
 libMagAOX.hpp.gch: libMagAOX.hpp $(INCLUDEDEPS) logger/generated/logTypes.hpp $(OBJS)
 
 flatlogs:

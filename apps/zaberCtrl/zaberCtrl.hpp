@@ -321,9 +321,10 @@ int zaberCtrl::appLogic()
          if(m_homePreset >= 0)
          {
             m_preset_target = m_presetPositions[m_homePreset];
-            std::cerr << m_preset_target << "\n";
-            
             updateIfChanged(m_indiP_preset, "target",  m_preset_target, INDI_BUSY);
+
+            //sleep(2); //pause to give time for controller to update itself and throw a warning
+
             moveTo(m_preset_target);
          }
          
@@ -785,7 +786,7 @@ int zaberCtrl::recordZaber(bool force)
    
    if( m_pos != last_pos || m_rawPos != last_rawPos || m_stageTemp != last_temp || force)
    {
-      telem<telem_zaber>({m_pos, m_rawPos, m_stageTemp});
+      telem<telem_zaber>({(float) m_pos, (float) m_rawPos, (float) m_stageTemp});
       
       last_pos = m_pos;
       last_rawPos = m_rawPos;
