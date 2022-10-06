@@ -97,7 +97,7 @@ int loadCameraConfig( cameraConfigMap & ccmap, ///< [out] the map in which to pl
   * which determines whether or not vertical shift speed controls are exposed. If true, then the implementation should populate
   * m_vShiftSpeedNames and m_vShiftSpeedLabels (vectors of strings) on construction to the allowed values.  This 
   * facility is normally used names like "0_3us" and "1_3us".  
-  * If used (and true) the setVShiftSpeed() function must be define which sets the camera according to m_vShiftSpeedNameSet.
+  * If used (and true) the setVShiftSpeed() function must be defined which sets the camera according to m_vShiftSpeedNameSet.
   * The implementation must also manage m_vShiftSpeedName, keeping it up to date.  The configuration setting camera.defaultVShiftSpeed
   * is also exposed, and the implementation can set this default with m_defaultVShiftSpeed. 
   * 
