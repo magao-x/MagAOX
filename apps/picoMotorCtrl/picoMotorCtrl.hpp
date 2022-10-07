@@ -433,6 +433,8 @@ int picoMotorCtrl::appLogic()
       }
       else
       {
+         if(powerState() != 1 || powerStateTarget() != 1) return 0;
+
          if(!stateLogged())
          {
             log<text_log>("Failed to connect on " + m_deviceAddr + ":" + m_devicePort);
@@ -447,17 +449,31 @@ int picoMotorCtrl::appLogic()
    {
          
       std::unique_lock<std::mutex> lock(m_telnetMutex);
-      m_telnetConn.write("*IDN?\r\n", m_writeTimeout);
-      
-      m_telnetConn.read("\r\n", m_readTimeout, true);
-      
+      int rv = m_telnetConn.write("*IDN?\r\n", m_writeTimeout);
+      if(rv != TTY_E_NOERROR)
+      {
+         if(powerState() != 1 || powerStateTarget() != 1) return 0;
+         log<software_error>({__FILE__, __LINE__, tty::ttyErrorString(rv)});
+         state(stateCodes::ERROR);
+         return 0;
+      }
+
+      rv = m_telnetConn.read("\r\n", m_readTimeout, true);
+      if(rv != TTY_E_NOERROR)
+      {
+         if(powerState() != 1 || powerStateTarget() != 1) return 0;
+         log<software_error>({__FILE__, __LINE__, tty::ttyErrorString(rv)});
+         state(stateCodes::ERROR);
+         return 0;
+      }
+
       if(m_telnetConn.m_strRead == "New_Focus 8742 v3.04 09/09/16 61371\r\n")
       {
          log<text_log>("Connected to New_Focus 8742 v3.04 09/09/16 61371");
       }
       else
       {
-         if(m_powerState == 0) return 0;
+         if(powerState() != 1 || powerStateTarget() != 1) return 0;
          
          log<software_error>({__FILE__, __LINE__, "wrong response to IDN query"});
          state(stateCodes::ERROR);
@@ -465,25 +481,51 @@ int picoMotorCtrl::appLogic()
       }
       
       //Do a motor scan
-      m_telnetConn.write("MC\r\n", m_writeTimeout);
-      sleep(1);
+      rv = m_telnetConn.write("MC\r\n", m_writeTimeout);
+      if(rv != TTY_E_NOERROR)
+      {
+         if(powerState() != 1 || powerStateTarget() != 1) return 0;
+         log<software_error>({__FILE__, __LINE__, tty::ttyErrorString(rv)});
+         state(stateCodes::ERROR);
+         return 0;
+      }
+
+      sleep(1); //wtf is this here?
       
       //Now check for each motor attached
       for(auto it=m_channels.begin(); it!=m_channels.end();++it)
       {
          std::string query = std::to_string(it->second.m_channel) + "QM?";
-         m_telnetConn.write(query + "\r\n", m_writeTimeout);
-         m_telnetConn.read("\r\n", m_readTimeout, true);
-         
+
+         rv = m_telnetConn.write(query + "\r\n", m_writeTimeout); 
+         if(rv != TTY_E_NOERROR)
+         {
+            if(powerState() != 1 || powerStateTarget() != 1) return 0;
+            log<software_error>({__FILE__, __LINE__, tty::ttyErrorString(rv)});
+            state(stateCodes::ERROR);
+            return 0;
+         }
+
+         rv = m_telnetConn.read("\r\n", m_readTimeout, true);
+         if(rv != TTY_E_NOERROR)
+         {
+            if(powerState() != 1 || powerStateTarget() != 1) return 0;
+            log<software_error>({__FILE__, __LINE__, tty::ttyErrorString(rv)});
+            state(stateCodes::ERROR);
+            return 0;
+         }
+
          int moType = std::stoi(m_telnetConn.m_strRead);
          if(moType == 0)
          {
+            if(powerState() != 1 || powerStateTarget() != 1) return 0;
             log<text_log>("No motor connected on channel " + std::to_string(it->second.m_channel) + " [" + it->second.m_name + "]", logPrio::LOG_CRITICAL);
             state(stateCodes::FAILURE);
             return -1;
          }
          else if (moType != 3)
          {
+            if(powerState() != 1 || powerStateTarget() != 1) return 0;
             log<text_log>("Wrong motor type connected on channel " + std::to_string(it->second.m_channel) + " [" + it->second.m_name + "]", logPrio::LOG_CRITICAL);
             state(stateCodes::FAILURE);
             return -1;
@@ -502,12 +544,28 @@ int picoMotorCtrl::appLogic()
       //check connection      
       {
          std::unique_lock<std::mutex> lock(m_telnetMutex);
-         m_telnetConn.write("*IDN?\r\n", m_writeTimeout);
-         m_telnetConn.read("\r\n", m_readTimeout, true);
-      
+
+         int rv = m_telnetConn.write("*IDN?\r\n", m_writeTimeout);
+         if(rv != TTY_E_NOERROR)
+         {
+            if(powerState() != 1 || powerStateTarget() != 1) return 0;
+            log<software_error>({__FILE__, __LINE__, tty::ttyErrorString(rv)});
+            state(stateCodes::ERROR);
+            return 0;
+         }
+
+         rv = m_telnetConn.read("\r\n", m_readTimeout, true);
+         if(rv != TTY_E_NOERROR)
+         {
+            if(powerState() != 1 || powerStateTarget() != 1) return 0;
+            log<software_error>({__FILE__, __LINE__, tty::ttyErrorString(rv)});
+            state(stateCodes::ERROR);
+            return 0;
+         }
+
          if(m_telnetConn.m_strRead != "New_Focus 8742 v3.04 09/09/16 61371\r\n")
          {
-            if(m_powerState == 0) return 0;
+            if(powerState() != 1 || powerStateTarget() != 1) return 0;
          
             log<software_error>({__FILE__, __LINE__, "wrong response to IDN query"});
             state(stateCodes::ERROR);
@@ -525,9 +583,24 @@ int picoMotorCtrl::appLogic()
       
          std::string query = std::to_string(it->second.m_channel) + "MD?";
          
-         m_telnetConn.write(query + "\r\n", m_writeTimeout);
-         m_telnetConn.read("\r\n", m_readTimeout, true);
-         
+         int rv = m_telnetConn.write(query + "\r\n", m_writeTimeout);
+         if(rv != TTY_E_NOERROR)
+         {
+            if(powerState() != 1 || powerStateTarget() != 1) return 0;
+            log<software_error>({__FILE__, __LINE__, tty::ttyErrorString(rv)});
+            state(stateCodes::ERROR);
+            return 0;
+         }
+
+         rv = m_telnetConn.read("\r\n", m_readTimeout, true);
+         if(rv != TTY_E_NOERROR)
+         {
+            if(powerState() != 1 || powerStateTarget() != 1) return 0;
+            log<software_error>({__FILE__, __LINE__, tty::ttyErrorString(rv)});
+            state(stateCodes::ERROR);
+            return 0;
+         }
+
          //The check for moving here. With power off detection
          if(std::stoi(m_telnetConn.m_strRead) == 0) 
          {
@@ -713,9 +786,30 @@ void picoMotorCtrl::channelThreadExec( motorChannel * mc)
 
          std::string comm = std::to_string(mc->m_channel) + "PR" + std::to_string(dr);
                   
-         m_telnetConn.write(comm + "\r\n", m_writeTimeout);
-         m_telnetConn.read("\r\n", m_readTimeout, true);
-         
+         int rv = m_telnetConn.write(comm + "\r\n", m_writeTimeout);
+         if(rv != TTY_E_NOERROR)
+         {
+            if(powerState() != 1 || powerStateTarget() != 1) //about to get POWEROFF
+            {
+               sleep(1);
+               continue;
+            }
+            log<software_error>({__FILE__, __LINE__, tty::ttyErrorString(rv)});
+            state(stateCodes::ERROR);
+         }
+
+         rv = m_telnetConn.read("\r\n", m_readTimeout, true);
+         if(rv != TTY_E_NOERROR)
+         {
+            if(powerState() != 1 || powerStateTarget() != 1)  //about to get POWEROFF
+            {
+               sleep(1);
+               continue;
+            }
+            log<software_error>({__FILE__, __LINE__, tty::ttyErrorString(rv)});
+            state(stateCodes::ERROR);
+         }
+
       }
       else if( !(state() == stateCodes::READY || state() == stateCodes::OPERATING))
       {
