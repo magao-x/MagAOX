@@ -14,7 +14,7 @@ class dmStatus :
                      public rtimvOverlayInterface
 {
    Q_OBJECT
-   Q_PLUGIN_METADATA(IID "rtimv.overlayInterface/1.0")
+   Q_PLUGIN_METADATA(IID "rtimv.overlayInterface/1.1")
    Q_INTERFACES(rtimvOverlayInterface)
     
    protected:
@@ -30,6 +30,8 @@ class dmStatus :
       
       QGraphicsScene * m_qgs {nullptr};
       
+      char m_blob[512]; ///< Memory for copying rtimvDictionary blobs
+
       time_t m_lastrht {0};
       
    public:

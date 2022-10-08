@@ -615,6 +615,7 @@ void camera::setup_takeDarks()
    ui_takeDarks->setObjectName(QString::fromUtf8("takeDarks"));
    ui_takeDarks->setText("take darks");
    ui_takeDarks->setMaximumWidth(200);
+   ui_takeDarks->setFocusPolicy(Qt::NoFocus);
    connect(ui_takeDarks, SIGNAL(pressed()), this, SLOT(takeDark()));
    ui.grid->addWidget(ui_takeDarks, 8, 0, 1, 1,Qt::AlignHCenter);   
 

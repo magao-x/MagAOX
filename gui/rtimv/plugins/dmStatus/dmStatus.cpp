@@ -1,6 +1,8 @@
 
 #include "dmStatus.hpp"
 
+#define errPrint(expl) std::cerr << "cameraStatus: " << __FILE__ << " " << __LINE__ << " " << expl << std::endl;
+
 dmStatus::dmStatus() : rtimvOverlayInterface()
 {
 }
@@ -46,19 +48,20 @@ int dmStatus::updateOverlay()
    if(m_roa.m_graphicsView == nullptr) return 0;
    
    size_t n = 0;
-   char * str;
+   size_t blobSz;
+
    char tstr[128];
    std::string sstr;
    
    if( m_roa.m_dictionary->count(m_rhDeviceName + ".humidity.current") > 0)
    {
+      timespec t0;
 
-      time_t t0 = (*m_roa.m_dictionary)[m_rhDeviceName + ".humidity.current"].m_lastMod.tv_sec;
+      if( (blobSz = (*m_roa.m_dictionary)[m_rhDeviceName + ".humidity.current"].getBlobStr(m_blob, sizeof(m_blob), &t0)) == sizeof(m_blob) ) errPrint("bad string"); //Don't trust this as a string.
 
-      if(time(0) - t0 < 10)
+      if(time(0) - t0.tv_sec < 10)
       {
-         str = (char *)(*m_roa.m_dictionary)[m_rhDeviceName + ".humidity.current"].m_blob;
-         snprintf(tstr, sizeof(tstr), "RH: %0.1f%%", strtod(str,0));
+         snprintf(tstr, sizeof(tstr), "RH: %0.1f%%", strtod(m_blob,0));
          m_roa.m_graphicsView->statusTextText(n, tstr);
       }
       else

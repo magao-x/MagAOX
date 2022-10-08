@@ -2,7 +2,6 @@
 #define statusEntry_hpp
 
 #include <QWidget>
-#include <QTimer>
 
 #include <cmath>
 #include "statusLineEdit.hpp"

@@ -200,18 +200,26 @@ protected slots:
 
    void staleTimerOut();
 
+signals:
+   void changeTimerStart(int);
+   void editTimerStart(int);
+   void staleTimerStart(int);
+
 };
 
 statusLineEdit::statusLineEdit( QWidget *parent ) : QLineEdit(parent)
 {
    m_changeTimer = new QTimer(this);
    connect(m_changeTimer, SIGNAL(timeout()), this, SLOT(changeTimerOut()));
+   connect(this, SIGNAL(changeTimerStart(int)), m_changeTimer, SLOT(start(int)));
 
    m_editTimer = new QTimer(this);
    connect(m_editTimer, SIGNAL(timeout()), this, SLOT(editTimerOut()));
+   connect(this, SIGNAL(editTimerStart(int)), m_editTimer, SLOT(start(int)));
 
    m_staleTimer = new QTimer(this);
    connect(m_staleTimer, SIGNAL(timeout()), this, SLOT(staleTimerOut()));
+   connect(this, SIGNAL(staleTimerStart(int)), m_staleTimer, SLOT(start(int)));
 
    QFont qf = font();
    qf.setPixelSize(XW_FONT_SIZE);
@@ -307,7 +315,7 @@ void statusLineEdit::focusInEvent(QFocusEvent * e)
    if(m_editText.size() > 0) setText(m_editText);
    m_editing = STARTED;
    
-   m_editTimer->start(m_editTimeout);
+   emit editTimerStart(m_editTimeout.count());
    update();
    QLineEdit::focusInEvent(e);
 }
@@ -334,7 +342,7 @@ void statusLineEdit::keyPressEvent(QKeyEvent * e)
       update();
       return;
    }
-   m_editTimer->start(m_editTimeout);
+   emit editTimerStart(m_editTimeout.count());
    QLineEdit::keyPressEvent(e);  
 }
 
@@ -363,7 +371,7 @@ void statusLineEdit::paintEvent(QPaintEvent * e)
          setProperty("isStatusChanged", true);
       }
       style()->unpolish(this);
-      m_changeTimer->start(m_changeTimeout);
+      emit changeTimerStart(m_changeTimeout.count());
       m_editTimer->stop();
       m_staleTimer->stop();
       m_valChanged = 0;
@@ -388,7 +396,7 @@ void statusLineEdit::changeTimerOut()
 void statusLineEdit::editTimerOut()
 {
    m_editTimer->stop();
-   m_staleTimer->start(m_staleTimeout);
+   emit staleTimerStart(m_staleTimeout.count());
    m_editing = STOPPED;
    clearFocus(); //This will call onFocusOutEvent
 }
