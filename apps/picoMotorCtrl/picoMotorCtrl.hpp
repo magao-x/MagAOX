@@ -797,19 +797,6 @@ void picoMotorCtrl::channelThreadExec( motorChannel * mc)
             log<software_error>({__FILE__, __LINE__, tty::ttyErrorString(rv)});
             state(stateCodes::ERROR);
          }
-
-         rv = m_telnetConn.read("\r\n", m_readTimeout, true);
-         if(rv != TTY_E_NOERROR)
-         {
-            if(powerState() != 1 || powerStateTarget() != 1)  //about to get POWEROFF
-            {
-               sleep(1);
-               continue;
-            }
-            log<software_error>({__FILE__, __LINE__, tty::ttyErrorString(rv)});
-            state(stateCodes::ERROR);
-         }
-
       }
       else if( !(state() == stateCodes::READY || state() == stateCodes::OPERATING))
       {
