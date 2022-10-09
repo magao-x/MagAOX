@@ -64,7 +64,12 @@ yum install -y \
     podman \
     nethogs \
     shadow-utils \
+    nfs-utils \
 ;
+
+if [[ $MAGAOX_ROLE == vm ]]; then
+    yum install -y xorg-x11-xauth
+fi
 
 alternatives --install /usr/local/bin/cmake cmake /usr/bin/cmake3 20 \
     --slave /usr/local/bin/ctest ctest /usr/bin/ctest3 \

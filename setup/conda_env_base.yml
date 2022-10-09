@@ -7,7 +7,6 @@ dependencies:
   - ipython
   - ipywidgets
   - notebook
-  - blas=*=mkl
   - numpy
   - scipy
   - matplotlib
@@ -21,14 +20,12 @@ dependencies:
   - cupy
   - cudatoolkit=11.1
   - line_profiler
-  - pyfftw
   - pyserial
   # GUIs
   - qt=5
   - qwt
   # video streaming
   - cffi
-  - crc32c
   - cryptography
   - av
   - pyee
