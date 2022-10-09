@@ -265,19 +265,19 @@ void multiIndiSubscriber::onDisconnect()
 inline
 void multiIndiSubscriber::handleDefProperty( const pcf::IndiProperty & ipRecv)
 {
-   std::cerr << "Received Def: " << ipRecv.createUniqueKey() << "\n";
+   static_cast<void>(ipRecv);
 }
 
 inline
 void multiIndiSubscriber::handleDelProperty( const pcf::IndiProperty & ipRecv)
 {
-   std::cerr << "Received Del: " << ipRecv.createUniqueKey() << "\n";
+   static_cast<void>(ipRecv);
 }
 
 inline
 void multiIndiSubscriber::handleSetProperty( const pcf::IndiProperty & ipRecv)
 {
-   std::cerr << "Received: " << ipRecv.createUniqueKey() << "\n";
+   static_cast<void>(ipRecv);
 }
    
 inline

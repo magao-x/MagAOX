@@ -163,6 +163,9 @@ public:
      */
    std::chrono::milliseconds staleTimeout();
 
+   /// Override setText to avoid clobbering editing.
+   void setText(const QString & text /**< [in] The new text */);
+
    /// Adopt the statusChanged CSS style for the duration of m_changeTimeout
    void setTextChanged(const QString & text /**< [in] The new text */);
 
@@ -297,10 +300,16 @@ std::chrono::milliseconds statusLineEdit::staleTimeout()
    return m_staleTimeout;
 }
 
+void statusLineEdit::setText(const QString & text)
+{
+   m_currText = text;
+   if(!hasFocus()) QLineEdit::setText(m_currText);
+}
+
 void statusLineEdit::setTextChanged(const QString & text)
 {
    m_currText = text;
-   if(!hasFocus()) setText(m_currText);
+   if(!hasFocus()) QLineEdit::setText(m_currText);
 
    m_editText = "";
    m_valChanged = CHANGED;
