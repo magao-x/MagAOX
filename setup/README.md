@@ -20,82 +20,13 @@ Each script has comments throughout. They should all be *idempotent*. (In other 
 
 ```
 multipass launch -n primary 22.04
-multipass mount \
-  -g $(id -g):1000 \
-  -g $(id -g):1001 \
-  -g $(id -g):1002 \
-  -u $()
-  ~/devel/MagAOX/:/opt/MagAOX/source/MagAOX
-```
-
-```
 multipass mount ~/devel/MagAOX/ primary:/opt/MagAOX/source/MagAOX
-multipass set local.primary.disk=10GiB
+multipass set local.primary.disk=20GiB
 multipass set local.primary.cpus=4
 multipass start
+multipass exec primary -- bash -c "echo `cat ~/.ssh/id_ed25519.pub` >> ~/.ssh/authorized_keys"
 multipass shell
 ubuntu@primary:~$ cd /opt/MagAOX/source/MagAOX/setup
 ubuntu@primary:/opt/MagAOX/source/MagAOX/setup$ bash -lx provision.sh
+ssh -Y ubuntu@$(multipass exec primary -- hostname -I | awk '{ print $1 }' ) xeyes
 ```
-
-
-UID/GID translation isn't automatic (and maybe couldn't be made so) but adding `magaox` and `magaox-dev` as the first new groups means there are predictable UIDs and GIDs.
-
-`/etc/group`:
-
-```
-magaox:x:1001:
-magaox-dev:x:1002:
-```
-
-`/etc/passwd`:
-
-```
-ubuntu:x:1000:1000:Ubuntu:/home/ubuntu:/bin/bash
-```
-
-`multipass mount --help`
-
-```
-% multipass mount --help
-Usage: multipass mount [options] <source> <target> [<target> ...]
-Mount a local directory inside the instance. If the instance is
-not currently running, the directory will be mounted
-automatically on next boot.
-
-Options:
-  -h, --help                       Displays help on commandline options
-  -v, --verbose                    Increase logging verbosity. Repeat the 'v'
-                                   in the short option for more detail. Maximum
-                                   verbosity is obtained with 4 (or more) v's,
-                                   i.e. -vvvv.
-  -g, --gid-map <host>:<instance>  A mapping of group IDs for use in the mount.
-                                   File and folder ownership will be mapped from
-                                   <host> to <instance> inside the instance. Can
-                                   be used multiple times.
-  -u, --uid-map <host>:<instance>  A mapping of user IDs for use in the mount.
-                                   File and folder ownership will be mapped from
-                                   <host> to <instance> inside the instance. Can
-                                   be used multiple times.
-
-Arguments:
-  source                           Path of the local directory to mount
-  target                           Target mount points, in <name>[:<path>]
-                                   format, where <name> is an instance name, and
-                                   optional <path> is the mount point. If
-                                   omitted, the mount point will be the same as
-                                   the source's absolute path
-```
-
-## macOS
-
-Example ids:
-
-```
-% id
-uid=501(josephlong) gid=20(staff) groups=20(staff),101(access_bpf),12(everyone),61(localaccounts),79(_appserverusr),80(admin),81(_appserveradm),98(_lpadmin),701(com.apple.sharepoint.group.1),33(_appstore),100(_lpoperator),204(_developer),250(_analyticsusers),395(com.apple.access_ftp),398(com.apple.access_screensharing),399(com.apple.access_ssh),400(com.apple.access_remote_ae)
-18:14:07 kestrel:~/devel/MagAOX josephlong
-```
-
-First user account created is uid=501, admin accounts are all `staff`, so it would make sense to map like this:
-

@@ -11,7 +11,7 @@ MXLIBROOT=/opt/MagAOX/source/mxlib
 #
 
 MXLIB_COMMIT_ISH=magaox
-orgname=joseph-long
+orgname=jaredmales
 reponame=mxlib
 parentdir=/opt/MagAOX/source
 clone_or_update_and_cd $orgname $reponame $parentdir
