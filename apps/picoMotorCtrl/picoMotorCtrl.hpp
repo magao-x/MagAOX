@@ -48,6 +48,8 @@ class picoMotorCtrl : public MagAOXApp<>, public dev::ioDevice, public dev::tele
    
    friend class dev::telemeter<picoMotorCtrl>;
    
+   typedef dev::telemeter<picoMotorCtrl> telemeterT;
+
    typedef long posT;
    
    struct motorChannel
@@ -259,7 +261,7 @@ void picoMotorCtrl::setupConfig()
    
    dev::ioDevice::setupConfig(config);
    
-   dev::telemeter<picoMotorCtrl>::setupConfig(config);
+   telemeterT::setupConfig(config);
 }
 
 #define PICOMOTORCTRL_E_NOMOTORS   (-5)
@@ -338,9 +340,9 @@ void picoMotorCtrl::loadConfig()
       m_shutdown = true;
    }
    
-   if(dev::telemeter<picoMotorCtrl>::loadConfig(config) < 0)
+   if(telemeterT::loadConfig(config) < 0)
    {
-      log<text_log>("Error during ioDevice config", logPrio::LOG_CRITICAL);
+      log<text_log>("Error during telemeter config", logPrio::LOG_CRITICAL);
       m_shutdown = true;
    }
 }
@@ -405,7 +407,7 @@ int picoMotorCtrl::appStartup()
       return -1;
    }
    
-   if(dev::telemeter<picoMotorCtrl>::appStartup() < 0)
+   if(telemeterT::appStartup() < 0)
    {
       return log<software_error,-1>({__FILE__,__LINE__});
    }
@@ -653,7 +655,7 @@ int picoMotorCtrl::appLogic()
          }
       }
       
-      if(telemeter<picoMotorCtrl>::appLogic() < 0)
+      if(telemeterT::appLogic() < 0)
       {
          log<software_error>({__FILE__, __LINE__});
          return 0;
@@ -694,7 +696,7 @@ int picoMotorCtrl::appShutdown()
       }
    }
    
-   dev::telemeter<picoMotorCtrl>::appShutdown();
+   telemeterT::appShutdown();
 
    return 0;
 }
@@ -922,7 +924,7 @@ int picoMotorCtrl::newCallBack_presetName( const pcf::IndiProperty &ipRecv )
 
 int picoMotorCtrl::checkRecordTimes()
 {
-   return telemeter<picoMotorCtrl>::checkRecordTimes(telem_pico());
+   return telemeterT::checkRecordTimes(telem_pico());
 }
    
 int picoMotorCtrl::recordTelem( const telem_pico * )
