@@ -1617,6 +1617,23 @@ int picamCtrl::configureAcquisition()
    updateIfChanged( m_indiP_roi_h, "current", m_currentROI.h, INDI_OK);
    updateIfChanged( m_indiP_roi_bin_x, "current", m_currentROI.bin_x, INDI_OK);
    updateIfChanged( m_indiP_roi_bin_y, "current", m_currentROI.bin_y, INDI_OK);
+
+
+   //We also update target to the settable values
+   m_nextROI.x = m_currentROI.x;
+   m_nextROI.y = m_currentROI.y;
+   m_nextROI.w = m_currentROI.w;
+   m_nextROI.h = m_currentROI.h;
+   m_nextROI.bin_x = m_currentROI.bin_x;
+   m_nextROI.bin_y = m_currentROI.bin_y;
+
+   updateIfChanged( m_indiP_roi_x, "target", m_currentROI.x, INDI_OK);
+   updateIfChanged( m_indiP_roi_y, "target", m_currentROI.y, INDI_OK);
+   updateIfChanged( m_indiP_roi_w, "target", m_currentROI.w, INDI_OK);
+   updateIfChanged( m_indiP_roi_h, "target", m_currentROI.h, INDI_OK);
+   updateIfChanged( m_indiP_roi_bin_x, "target", m_currentROI.bin_x, INDI_OK);
+   updateIfChanged( m_indiP_roi_bin_y, "target", m_currentROI.bin_y, INDI_OK);
+   
    
    //=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*
    //=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*
