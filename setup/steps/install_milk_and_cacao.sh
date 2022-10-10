@@ -15,7 +15,7 @@ bash -x ./fetch_cacao_dev.sh
 mkdir -p _build
 cd _build
 
-pythonExe=/opt/miniconda3/bin/python
+pythonExe=/opt/conda/bin/python
 $pythonExe -m pip install pybind11
 
 milkCmakeArgs="-Dbuild_python_module=ON -DPYTHON_EXECUTABLE=${pythonExe}"

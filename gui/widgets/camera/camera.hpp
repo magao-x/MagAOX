@@ -646,7 +646,7 @@ void camera::setEnableDisable(bool tf, bool all)
       ui_fsmState->setEnabled(tf);
    }
 
-   
+   if(ui_reconfigure) ui_reconfigure->setEnabled(tf);
    if(ui_tempCCD) ui_tempCCD->setEnabled(tf);
    if(ui_tempStatus) ui_tempStatus->setEnabled(tf);
 
@@ -657,6 +657,8 @@ void camera::setEnableDisable(bool tf, bool all)
    if(ui_expTime) ui_expTime->setEnabled(tf);
    if(ui_fps) ui_fps->setEnabled(tf);
    if(ui_emGain) ui_emGain->setEnabled(tf);
+   if(ui_shutterStatus) ui_shutterStatus->setEnabled(tf);
+   
    if(ui_takeDarks) ui_takeDarks->setEnabled(tf);
    
 }

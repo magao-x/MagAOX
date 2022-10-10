@@ -23,6 +23,7 @@ timespec telem_chrony_status::lastRecord = {0,0};
 timespec telem_cooler::lastRecord = {0,0};
 timespec telem_coreloads::lastRecord = {0,0};
 timespec telem_coretemps::lastRecord = {0,0};
+timespec telem_dmmodes::lastRecord = {0,0};
 timespec telem_dmspeck::lastRecord = {0,0};
 timespec telem_drivetemps::lastRecord = {0,0};
 timespec telem_fgtimings::lastRecord = {0,0};

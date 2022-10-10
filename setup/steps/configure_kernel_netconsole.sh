@@ -26,7 +26,7 @@ HERE
 
     fi
     sudo mkdir -p $NETCONSOLE_LOG_DIR
-    sudo chown :magaox $NETCONSOLE_LOG_DIR
+    sudo chown :$instrument_group $NETCONSOLE_LOG_DIR
     sudo chmod g+w $NETCONSOLE_LOG_DIR
     log_info "Set permissions on $NETCONSOLE_LOG_DIR"
     sudo systemctl enable netconsole_logger.service || true
