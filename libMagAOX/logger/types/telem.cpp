@@ -14,7 +14,7 @@ namespace logger
 {
 
 timespec ocam_temps::lastRecord = {0,0};
-   
+
 timespec telem_chrony_stats::lastRecord = {0,0};
 
 timespec telem_telenv::lastRecord = {0,0};
@@ -31,6 +31,8 @@ timespec telem_fxngen::lastRecord = {0,0};
 timespec telem_observer::lastRecord = {0,0};
 timespec telem_pico::lastRecord = {0,0};
 timespec telem_rhusb::lastRecord = {0,0};
+timespec telem_saving::lastRecord = {0,0};
+timespec telem_saving_state::lastRecord = {0,0};
 timespec telem_stage::lastRecord = {0,0};
 timespec telem_stdcam::lastRecord = {0,0};
 timespec telem_telcat::lastRecord = {0,0};

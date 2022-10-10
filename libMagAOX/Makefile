@@ -52,7 +52,9 @@ INCLUDEDEPS= app/MagAOXApp.hpp \
 	     logger/types/saving_state_change.hpp \
 	     logger/types/saving_start.hpp \
 	     logger/types/saving_stop.hpp \
-	     logger/types/saving_stats.hpp \
+	     logger/types/telem_saving.hpp \
+            logger/types/telem_saving_state.hpp \
+            logger/types/telem_dmmodes.hpp \
 	     logger/types/telem_dmspeck.hpp \
 	     logger/types/telem_chrony_status.hpp \
 	     logger/types/telem_chrony_stats.hpp \
