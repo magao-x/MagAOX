@@ -510,12 +510,14 @@ int ocam2KCtrl::appLogic()
             m_poweredOn = false;
             if(setTempSetPt() < 0)
             {
+               if(powerState() != 1 || powerStateTarget() != 1) return 0;
                return log<software_error,0>({__FILE__,__LINE__});
             }
          }
       }
       else
       {
+         if(powerState() != 1 || powerStateTarget() != 1) return 0;
          state(stateCodes::ERROR);
          return log<software_error,0>({__FILE__,__LINE__});
       }
@@ -537,7 +539,7 @@ int ocam2KCtrl::appLogic()
       
       if(getTemps() < 0)
       {
-         if(MagAOXAppT::m_powerState == 0) return 0;
+         if(powerState() != 1 || powerStateTarget() != 1) return 0;
          m_temps.setInvalid();
          state(stateCodes::ERROR);
          return 0;
@@ -545,7 +547,7 @@ int ocam2KCtrl::appLogic()
 
       if(getFPS() < 0)
       {
-         if(MagAOXAppT::m_powerState == 0) return 0;
+         if(powerState() != 1 || powerStateTarget() != 1) return 0;
          
          state(stateCodes::ERROR);
          return 0;
@@ -703,7 +705,8 @@ int ocam2KCtrl::getTemps()
 
       if(parseTemps( temps, response ) < 0) 
       {
-         if(MagAOXAppT::m_powerState == 0) return -1;
+         if(powerState() != 1 || powerStateTarget() != 1) return -1;
+
          m_temps.setInvalid();
          m_ccdTemp = m_temps.CCD;
          m_ccdTempSetpt = m_temps.SET;
@@ -765,8 +768,11 @@ int ocam2KCtrl::getTemps()
       return 0;
 
    }
-   else return log<software_error,-1>({__FILE__, __LINE__});
-
+   else 
+   {
+      if(powerState() != 1 || powerStateTarget() != 1) return -1;
+      return log<software_error,-1>({__FILE__, __LINE__});
+   }
 }
 
 inline
@@ -815,8 +821,12 @@ int ocam2KCtrl::setTempControl()
       ///\todo check response
       log<text_log,0>({"Set temperature control to " + command});
    }
-   else return log<software_error,-1>({__FILE__, __LINE__});
-   
+   else 
+   {
+      if(powerState() != 1 || powerStateTarget() != 1) return -1;
+      return log<software_error,-1>({__FILE__, __LINE__});
+   }
+
    if( m_tempControlStatusSet && m_ccdTempSetpt > -999)
    {
       return setTempSetPt();
@@ -849,7 +859,11 @@ int ocam2KCtrl::setTempSetPt()
       ///\todo check response
       return log<text_log,0>({"set temperature: " + tempStr});
    }
-   else return log<software_error,-1>({__FILE__, __LINE__});
+   else 
+   {
+      if(powerState() != 1 || powerStateTarget() != 1) return -1;
+      return log<software_error,-1>({__FILE__, __LINE__});
+   }
 
 }
 
@@ -863,7 +877,7 @@ int ocam2KCtrl::getFPS()
       float fps;
       if(parseFPS( fps, response ) < 0) 
       {
-         if(MagAOXAppT::m_powerState == 0) return -1;
+         if(powerState() != 1 || powerStateTarget() != 1) return -1;
          return log<software_error, -1>({__FILE__, __LINE__, "fps parse error"});
       }
       m_fps = fps;
@@ -897,8 +911,11 @@ int ocam2KCtrl::setFPS()
       
       return 0;
    }
-   else return log<software_error,-1>({__FILE__, __LINE__});
-
+   else 
+   {
+      if(powerState() != 1 || powerStateTarget() != 1) return -1;
+      return log<software_error,-1>({__FILE__, __LINE__});
+   }
 }
 
 inline 
@@ -966,8 +983,11 @@ int ocam2KCtrl::resetEMProtection()
       return 0;
 
    }
-   else return log<software_error,-1>({__FILE__, __LINE__});
-   
+   else 
+   {
+      if(powerState() != 1 || powerStateTarget() != 1) return -1;
+      return log<software_error,-1>({__FILE__, __LINE__});
+   }
 }
 
 inline
@@ -980,6 +1000,7 @@ int ocam2KCtrl::getEMGain()
       unsigned emGain;
       if(parseEMGain( emGain, response ) < 0) 
       {
+         if(powerState() != 1 || powerStateTarget() != 1) return -1;
          if(MagAOXAppT::m_powerState == 0) return -1;
          return log<software_error, -1>({__FILE__, __LINE__, "EM Gain parse error"});
       }
@@ -988,7 +1009,11 @@ int ocam2KCtrl::getEMGain()
       return 0;
 
    }
-   else return log<software_error,-1>({__FILE__, __LINE__});
+   else 
+   {
+      if(powerState() != 1 || powerStateTarget() != 1) return -1;
+      return log<software_error,-1>({__FILE__, __LINE__});
+   }
 }
    
 inline
@@ -1018,7 +1043,11 @@ int ocam2KCtrl::setEMGain( )
       
       return 0;
    }
-   else return log<software_error,-1>({__FILE__, __LINE__});
+   else 
+   {
+      if(powerState() != 1 || powerStateTarget() != 1) return -1;
+      return log<software_error,-1>({__FILE__, __LINE__});
+   }
    
 }
 
@@ -1032,6 +1061,8 @@ int ocam2KCtrl::configureAcquisition()
    std::string response;
    if( pdvSerialWriteRead( response, m_cameraModes[m_modeName].m_serialCommand) != 0) //m_pdv, m_cameraModes[m_modeName].m_serialCommand, m_readTimeout) != 0)
    {
+      if(powerState() != 1 || powerStateTarget() != 1) return -1;
+
       log<software_error>({__FILE__, __LINE__, "Error sending command to set mode"});
       sleep(1);
       return -1;
@@ -1088,6 +1119,7 @@ int ocam2KCtrl::configureAcquisition()
    rc=ocam2_init(mode, ocamDescrambleFile.c_str(), &m_ocam2_id);
    if (rc != OCAM2_OK)
    {
+      if(powerState() != 1 || powerStateTarget() != 1) return -1;
       log<text_log>("ocam2_init error. Failed to initialize OCAM SDK with descramble file: " + ocamDescrambleFile, logPrio::LOG_ERROR);
       return -1;
    }
@@ -1171,6 +1203,8 @@ int ocam2KCtrl::acquireAndCheckValid()
          }
          else //but if it's any bigger or < 0, it's probably garbage
          {
+            if(powerState() != 1 || powerStateTarget() != 1) return -1;
+
             ///\todo need frame corrupt log type
             log<text_log>("frame number possibly corrupt: " + std::to_string(m_currImageNumber) + " - " + std::to_string(m_lastImageNumber), logPrio::LOG_ERROR);
             
