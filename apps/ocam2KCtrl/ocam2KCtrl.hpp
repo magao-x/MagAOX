@@ -315,6 +315,8 @@ public:
    
    int recordTelem( const telem_stdcam * );
    
+   int recordTelem( const telem_fgtimings * );
+
    int recordTemps(bool force = false);
    
    ///@}
@@ -1252,7 +1254,7 @@ INDI_NEWCALLBACK_DEFN(ocam2KCtrl, m_indiP_emProtReset)(const pcf::IndiProperty &
 inline
 int ocam2KCtrl::checkRecordTimes()
 {
-   return telemeter<ocam2KCtrl>::checkRecordTimes(ocam_temps(), telem_stdcam());
+   return telemeter<ocam2KCtrl>::checkRecordTimes(ocam_temps(), telem_stdcam(), telem_fgtimings());
 }
    
 inline
@@ -1265,6 +1267,12 @@ inline
 int ocam2KCtrl::recordTelem( const telem_stdcam * )
 {
    return recordCamera(true);
+}
+
+inline
+int ocam2KCtrl::recordTelem( const telem_fgtimings * )
+{
+   return recordFGTimings(true);
 }
 
 inline

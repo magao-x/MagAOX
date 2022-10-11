@@ -16,159 +16,44 @@ else
 fi
 # Defines $ID and $VERSION_ID so we can detect which distribution we're on
 source /etc/os-release
-if [[ $ID == ubuntu ]]; then
-    # Stop annoying messages about messages
-    # https://superuser.com/questions/1160025/how-to-solve-ttyname-failed-inappropriate-ioctl-for-device-in-vagrant
-    sudo sed -i -e 's/mesg n .*true/tty -s \&\& mesg n/g' ~/.profile
-fi
-VM_WINDOWS_HOST=0
-# Detect whether we're running in some kind of VM or container
-if [[ -d /vagrant || -e /etc/wsl.conf || $CI == true ]]; then
-    if [[ -d /vagrant || -e /etc/wsl.conf ]]; then
-        if [[ -d /vagrant ]]; then
-            DIR="/vagrant/setup"
-            VM_KIND=vagrant
-        else
-            VM_KIND=wsl
-            VM_WINDOWS_HOST=1
-        fi
-        # If set already (i.e. not the first time we ran this),
-        # don't override what's in the environment
-        if [[ -z $MAGAOX_ROLE ]]; then
-            MAGAOX_ROLE=vm
-        else
-            echo "Would have set MAGAOX_ROLE=vm, but already have MAGAOX_ROLE=$MAGAOX_ROLE"
-        fi
-        CI=false
-    else
-        if [[ -z $MAGAOX_ROLE ]]; then
-            MAGAOX_ROLE=ci
-        else
-            echo "Would have set MAGAOX_ROLE=ci, but already have MAGAOX_ROLE=$MAGAOX_ROLE"
-        fi
-    fi
-else
-    # Only bother prompting if no role was specified as the command line arg to provision.sh
-    if [[ ! -z "$1" ]]; then
-        MAGAOX_ROLE="$1"
-    fi
-    if [[ -z $MAGAOX_ROLE ]]; then
-        MAGAOX_ROLE=""
-        echo "Choose the role for this machine"
-        echo "    AOC - Adaptive optics Operator Computer"
-        echo "    RTC - Real Time control Computer"
-        echo "    ICC - Instrument Control Computer"
-        echo "    TIC - Testbed Instrument Computer"
-        echo "    TOC - Testbed Operator Computer"
-        echo "    workstation - Any other MagAO-X workstation"
-        echo
-        while [[ -z $MAGAOX_ROLE ]]; do
-            read -p "Role:" roleinput
-            case $roleinput in
-                AOC)
-                    MAGAOX_ROLE=AOC
-                    ;;
-                RTC)
-                    MAGAOX_ROLE=RTC
-                    ;;
-                ICC)
-                    MAGAOX_ROLE=ICC
-                    ;;
-                TIC)
-                    MAGAOX_ROLE=TIC
-                    ;;
-                TOC)
-                    MAGAOX_ROLE=TOC
-                    ;;
-                workstation)
-                    MAGAOX_ROLE=workstation
-                    ;;
-                *)
-                    echo "Must be one of AOC, RTC, ICC, TIC, TOC, or workstation."
-                    continue
-            esac
-        done
-    else
-        echo "Already have MAGAOX_ROLE=$MAGAOX_ROLE, not prompting for it. (Edit /etc/profile.d/magaox_role.sh if it's wrong)"
-    fi
-    VAGRANT=false
-    CI=false
-    set +e; groups | grep magaox-dev; set -e
-    not_in_group=$?
-    if [[ "$EUID" == 0 || $not_in_group != 0 ]]; then
-        echo "This script should be run as a normal user"
-        echo "in the magaox-dev group with sudo access, not root."
-        echo "Run $DIR/setup_users_and_groups.sh first."
-        exit 1
-    fi
-    # Prompt for sudo authentication
-    $_REAL_SUDO -v
-    # Keep the sudo timestamp updated until this script exits
-    while true; do $_REAL_SUDO -n true; sleep 60; kill -0 "$$" || exit; done 2>/dev/null &
-fi
 
-if [[ ! -z "$1" ]]; then
-    case $1 in
-        AOC)
-            MAGAOX_ROLE=AOC
-            ;;
-        RTC)
-            MAGAOX_ROLE=RTC
-            ;;
-        ICC)
-            MAGAOX_ROLE=ICC
-            ;;
-        workstation)
-            MAGAOX_ROLE=workstation
-            ;;
-        *)
-            echo "Argument must be one of AOC, RTC, ICC, or workstation."
-            exit 1
-    esac
+roleScript=/etc/profile.d/magaox_role.sh
+VM_KIND=$(systemd-detect-virt)
+if [[ ! $VM_KIND == "none" ]]; then
+    echo "Detected virtualization: $VM_KIND"
+    if [[ ! -z $CI ]]; then
+        echo "MAGAOX_ROLE=ci" | $_REAL_SUDO tee $roleScript
+    elif [[ ! -e $roleScript ]]; then
+        echo "MAGAOX_ROLE=vm" | $_REAL_SUDO tee $roleScript
+    fi
 fi
-echo "Starting '$MAGAOX_ROLE' provisioning"
-echo "export MAGAOX_ROLE=$MAGAOX_ROLE" | sudo tee /etc/profile.d/magaox_role.sh
-export MAGAOX_ROLE
-
-# Shouldn't be any more undefined variables after (maybe) $1,
-# so tell bash to die if it encounters any
-set -u
+if [[ ! -e $roleScript ]]; then
+    echo "Export \$MAGAOX_ROLE in $roleScript first"
+    exit 1
+fi
+source $roleScript
 
 # Get logging functions
 source $DIR/_common.sh
 
 # Install OS packages first
-if [[ $ID == ubuntu ]]; then
-    sudo bash -l "$DIR/steps/install_ubuntu_bionic_packages.sh"
-elif [[ $ID == centos && $VERSION_ID == 7 ]]; then
-    sudo bash -l "$DIR/steps/install_centos7_packages.sh"
-    sudo bash -l "$DIR/steps/install_devtoolset-7.sh"
-else
-    log_error "No special casing for $ID $VERSION_ID yet, abort"
-    exit 1
-fi
+osPackagesScript="$DIR/steps/install_${ID}_${VERSION_ID}_packages.sh"
+$_REAL_SUDO bash -l $osPackagesScript
 
-# Disable firewall on the VM
-if [[ $MAGAOX_ROLE == vm ]]; then
-    sudo systemctl disable firewalld || true
-    sudo systemctl stop firewalld || true
-fi
-# Configure hostname aliases and time synchronization
+distroSpecificScript="$DIR/steps/configure_${ID}_${VERSION_ID}.sh"
+$_REAL_SUDO bash -l $distroSpecificScript
+
 if [[ $MAGAOX_ROLE == AOC || $MAGAOX_ROLE == ICC || $MAGAOX_ROLE == RTC ]]; then
+    # Configure hostname aliases for instrument LAN
     sudo bash -l "$DIR/steps/configure_etc_hosts.sh"
-fi
-
-if [[ $MAGAOX_ROLE == AOC || $MAGAOX_ROLE == ICC || $MAGAOX_ROLE == RTC ]]; then
+    # Configure NFS exports from RTC -> AOC and ICC -> AOC
     sudo bash -l "$DIR/steps/configure_nfs.sh"
 fi
 
 if [[ $MAGAOX_ROLE == AOC || $MAGAOX_ROLE == ICC || $MAGAOX_ROLE == RTC || $MAGAOX_ROLE == TOC || $MAGAOX_ROLE == TIC ]]; then
+    # Configure time syncing
     sudo bash -l "$DIR/steps/configure_chrony.sh"
-    sudo bash -l "$DIR/steps/configure_podman.sh"
 fi
-
-# Configure executable search path
-sudo bash -l "$DIR/steps/put_usr_local_bin_on_path.sh"
 
 if [[ $MAGAOX_ROLE != ci ]]; then
     # Increase inotify watches
@@ -193,9 +78,8 @@ fi
 ## Set up file structure and permissions
 sudo bash -l "$DIR/steps/ensure_dirs_and_perms.sh" $MAGAOX_ROLE
 
-
 if [[ $MAGAOX_ROLE == vm ]]; then
-    if [[ $VM_KIND == "vagrant" ]]; then
+    if [[ $VM_KIND != "wsl" ]]; then
         # Enable forwarding MagAO-X GUIs to the host for VMs
         sudo bash -l "$DIR/steps/enable_vm_x11_forwarding.sh"
     fi
@@ -219,7 +103,12 @@ if [[ $MAGAOX_ROLE == ci || $MAGAOX_ROLE == vm || $MAGAOX_ROLE == workstation ||
 fi
 ## Build third-party dependencies under /opt/MagAOX/vendor
 cd /opt/MagAOX/vendor
-sudo bash -l "$DIR/steps/install_mkl_tarball.sh"
+if grep "Intel" /proc/cpuinfo; then
+    sudo bash -l "$DIR/steps/install_mkl_tarball.sh"
+    export BLAS_VENDOR=intel
+else
+    export BLAS_VENDOR=openblas
+fi
 if [[ $MAGAOX_ROLE == RTC || $MAGAOX_ROLE == ICC || $MAGAOX_ROLE == AOC || $MAGAOX_ROLE == TIC || $MAGAOX_ROLE == ci ]]; then
     sudo bash -l "$DIR/steps/install_cuda.sh"
     sudo bash -l "$DIR/steps/install_magma.sh"
@@ -227,6 +116,7 @@ fi
 sudo bash -l "$DIR/steps/install_fftw.sh"
 sudo bash -l "$DIR/steps/install_cfitsio.sh"
 sudo bash -l "$DIR/steps/install_eigen.sh"
+sudo bash -l "$DIR/steps/install_zeromq.sh"
 sudo bash -l "$DIR/steps/install_cppzmq.sh"
 sudo bash -l "$DIR/steps/install_flatbuffers.sh"
 if [[ $MAGAOX_ROLE == AOC ]]; then
@@ -337,14 +227,15 @@ if [[ $MAGAOX_ROLE == AOC || $MAGAOX_ROLE == TOC || $MAGAOX_ROLE == vm ]]; then
     echo "export RTIMV_CONFIG_PATH=/opt/MagAOX/config" | sudo tee /etc/profile.d/rtimv_config_path.sh
 fi
 
-# Install first-party deps
-$MAYBE_SUDO bash -l "$DIR/steps/install_cacao.sh"
-$MAYBE_SUDO bash -l "$DIR/steps/install_milkzmq.sh"
 # Create Python env and install Python libs that need special treatment
 # Note that subsequent steps will use libs from conda since the base
 # env activates by default.
 sudo bash -l "$DIR/steps/install_python.sh"
 sudo bash -l "$DIR/steps/configure_python.sh"
+source /opt/conda/bin/activate
+# Install first-party deps
+$MAYBE_SUDO bash -l "$DIR/steps/install_milk_and_cacao.sh"  # depends on /opt/miniconda3/bin/python existing for plugin build
+$MAYBE_SUDO bash -l "$DIR/steps/install_milkzmq.sh"
 $MAYBE_SUDO bash -l "$DIR/steps/install_purepyindi.sh"
 $MAYBE_SUDO bash -l "$DIR/steps/install_magpyx.sh"
 $MAYBE_SUDO bash -l "$DIR/steps/install_imagestreamio_python.sh"

@@ -41,11 +41,14 @@ namespace app
 /** 
   * \ingroup dmMode
   */
-class dmMode : public MagAOXApp<true>
+class dmMode : public MagAOXApp<true>, public dev::telemeter<dmMode>
 {
 
    typedef float realT;
    
+   typedef dev::telemeter<dmMode> telemeterT;
+
+   friend class dev::telemeter<dmMode>;
    friend class dmMode_test;
 
 protected:
@@ -55,6 +58,8 @@ protected:
      */
 
    std::string m_modeCube;
+
+   int m_maxModes {50};
    
    std::string m_dmName;
    
@@ -129,6 +134,18 @@ public:
    INDI_NEWCALLBACK_DECL(dmMode, m_indiP_currAmps);
    INDI_NEWCALLBACK_DECL(dmMode, m_indiP_tgtAmps);
 
+   /** \name Telemeter Interface
+     * 
+     * @{
+     */ 
+   int checkRecordTimes();
+   
+   int recordTelem( const telem_dmmodes * );
+   
+   int recordDmModes( bool force = false );
+   ///@}
+
+
 };
 
 dmMode::dmMode() : MagAOXApp(MAGAOX_CURRENT_SHA1, MAGAOX_REPO_MODIFIED)
@@ -140,20 +157,30 @@ dmMode::dmMode() : MagAOXApp(MAGAOX_CURRENT_SHA1, MAGAOX_REPO_MODIFIED)
 void dmMode::setupConfig()
 {
    config.add("dm.modeCube", "", "dm.modeCube", argType::Required, "dm", "modeCube", false, "string", "Full path to the FITS file containing the modes for this DM.");
+   config.add("dm.maxModes", "", "dm.maxModes", argType::Required, "dm", "maxModes", false, "int", "The maximum number of modes to use (truncates the cube).  If <=0 all modes in cube are used.");
    config.add("dm.name", "", "dm.name", argType::Required, "dm", "name", false, "string", "The descriptive name of this dm. Default is the channel name.");
    config.add("dm.channelName", "", "dm.channelName", argType::Required, "dm", "channelName", false, "string", "The name of the DM channel to write to.");
+   config.add("dm.maxModes", "", "dm.maxModes", argType::Required, "dm", "maxModes", false, "int", "The maximum number of modes to use (truncates the cube).");
+
+   telemeterT::setupConfig(config);
 }
 
 int dmMode::loadConfigImpl( mx::app::appConfigurator & _config )
 {
 
    _config(m_modeCube, "dm.modeCube");
+   _config(m_maxModes, "dm.maxModes");
    _config(m_dmChannelName, "dm.channelName");
    
    m_dmName = m_dmChannelName;
    _config(m_dmName, "dm.name");
    
-   
+   if(telemeterT::loadConfig(_config) < 0)
+   {
+      log<text_log>("Error during telemeter config", logPrio::LOG_CRITICAL);
+      m_shutdown = true;
+   }
+
    return 0;
 }
 
@@ -170,6 +197,18 @@ int dmMode::appStartup()
    {
       return log<text_log,-1>("Could not open mode cube file", logPrio::LOG_ERROR);
    }
+
+   if(m_maxModes > 0 && m_maxModes < m_modes.planes())
+   {
+      mx::improc::eigenCube<realT> modes;
+      //This probably just works as a realloc in eigenCube but I haven't looked.
+      modes.resize(m_modes.rows(), m_modes.cols(), m_maxModes);
+      for(int p =0; p < modes.planes(); ++p) modes.image(p) = m_modes.image(p);
+      m_modes.resize(m_modes.rows(), m_modes.cols(), m_maxModes);
+      for(int p =0; p < modes.planes(); ++p) m_modes.image(p) = modes.image(p);
+   }
+
+
    
    m_amps.resize(m_modes.planes(), 0);
    m_shape.resize(m_modes.rows(), m_modes.cols());
@@ -196,6 +235,11 @@ int dmMode::appStartup()
       m_indiP_tgtAmps.add( pcf::IndiElement(m_elNames[n]) );
    }
    
+   if(telemeterT::appStartup() < 0)
+   {
+      return log<software_error,-1>({__FILE__,__LINE__});
+   }
+
    state(stateCodes::NOTCONNECTED);
    
    
@@ -262,12 +306,22 @@ int dmMode::appLogic()
       state(stateCodes::READY);
    }
    
-   
+   if(state() == stateCodes::READY)
+   {
+      if(telemeterT::appLogic() < 0)
+      {
+         log<software_error>({__FILE__, __LINE__});
+         return 0;
+      }
+   }
+
    return 0;
 }
 
 int dmMode::appShutdown()
 {
+   telemeterT::appShutdown();
+
    return 0;
 }
 
@@ -291,6 +345,7 @@ int dmMode::sendCommand()
       while(m_imageStream.md[0].write) mx::sys::microSleep(10);
    }
    
+   recordDmModes(true);
    m_imageStream.md[0].write = 1;
    
    uint32_t curr_image;
@@ -308,6 +363,8 @@ int dmMode::sendCommand()
    
    m_imageStream.md->write=0;
    ImageStreamIO_sempost(&m_imageStream,-1);
+   
+   recordDmModes(true);
    
    for(size_t n = 0; n<m_amps.size(); ++n)
    {
@@ -378,6 +435,39 @@ INDI_NEWCALLBACK_DEFN(dmMode, m_indiP_tgtAmps)(const pcf::IndiProperty &ipRecv)
    }
    
    return log<software_error,-1>({__FILE__,__LINE__, "invalid indi property name"});
+}
+
+int dmMode::checkRecordTimes()
+{
+   return telemeterT::checkRecordTimes(telem_dmmodes());
+}
+   
+int dmMode::recordTelem( const telem_dmmodes * )
+{
+   return recordDmModes(true);
+}
+
+int dmMode::recordDmModes( bool force )
+{
+   static std::vector<float> lastamps(m_amps.size(), std::numeric_limits<float>::max());
+   
+   bool changed = false;
+   for(size_t p=0; p < m_amps.size(); ++p)
+   {
+      if(m_amps[p] != lastamps[p]) changed = true;
+   }
+   
+   if( changed || force )
+   {
+      for(size_t p=0; p < m_amps.size(); ++p)
+      {
+         lastamps[p] = m_amps[p];
+      }
+   
+      telem<telem_dmmodes>(lastamps);
+   }
+
+   return 0;
 }
 
 } //namespace app

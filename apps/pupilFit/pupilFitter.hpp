@@ -19,7 +19,7 @@ namespace app
    
 /// Struct to perform centration and measure diameter of Pyramid pupils
 template<typename realT>
-struct pupilFitter
+struct pupilFitter 
 {
    mx::improc::eigenImage<realT> m_quad;
    mx::improc::eigenImage<realT> m_quadMag;

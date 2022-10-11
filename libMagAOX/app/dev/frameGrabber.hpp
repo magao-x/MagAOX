@@ -271,6 +271,14 @@ public:
 
    ///@}
    
+   /** \name Telemeter Interface 
+     * @{
+     */
+
+   int recordFGTimings( bool force = false );
+
+   /// @}
+
 private:
    derivedT & derived()
    {
@@ -288,6 +296,11 @@ void frameGrabber<derivedT>::setupConfig(mx::app::appConfigurator & config)
    config.add("framegrabber.shmimName", "", "framegrabber.shmimName", argType::Required, "framegrabber", "shmimName", false, "string", "The name of the ImageStreamIO shared memory image. Will be used as /milk/shm/<shmimName>.im.shm.");
    
    config.add("framegrabber.circBuffLength", "", "framegrabber.circBuffLength", argType::Required, "framegrabber", "circBuffLength", false, "size_t", "The length of the circular buffer. Sets m_circBuffLength, default is 1.");
+
+   config.add("framegrabber.latencyTime", "", "framegrabber.latencyTime", argType::Required, "framegrabber", "latencyTime", false, "float", "The maximum length of time to measure latency timings. Sets  m_latencyCircBuffMaxTime, default is 5.");
+
+   config.add("framegrabber.latencySize", "", "framegrabber.latencySize", argType::Required, "framegrabber", "latencySize", false, "float", "The maximum length of the buffer used to measure latency timings. Sets  m_latencyCircBuffMaxLength, default is 3600.");
+
 
    if(derivedT::c_frameGrabber_flippable)
    {
@@ -311,6 +324,16 @@ void frameGrabber<derivedT>::loadConfig(mx::app::appConfigurator & config)
       derivedT::template log<text_log>("circBuffLength set to 1");
    }
    
+   config(m_latencyCircBuffMaxTime, "framegrabber.latencyTime");
+   if(m_latencyCircBuffMaxTime < 0)
+   {
+      m_latencyCircBuffMaxTime = 0;
+      derivedT::template log<text_log>("latencyTime set to 0 (off)");
+   }
+
+   config(m_latencyCircBuffMaxLength, "framegrabber.latencySize");
+   
+
    if(derivedT::c_frameGrabber_flippable)
    {
       std::string flip = "flipNone";
@@ -450,6 +473,7 @@ int frameGrabber<derivedT>::appLogic()
          m_mnwa = mx::math::vectorMean(m_watimesD);
          m_varwa = mx::math::vectorVariance(m_watimesD, m_mnwa);
          
+         recordFGTimings();
       }
       else
       {
@@ -556,15 +580,24 @@ void frameGrabber<derivedT>::fgThreadExec()
          //At the end of this, must have m_width, m_height, m_dataType set, and derived()->fps must be valid.
          if(derived().configureAcquisition() < 0) continue;        
          
-         //Set up the latency circ. buffs
-         cbIndexT cbSz = m_latencyCircBuffMaxTime * derived().fps();
-         if(cbSz > m_latencyCircBuffMaxLength) cbSz = m_latencyCircBuffMaxLength;
-         if(cbSz < 3) cbSz = 3; //Make variance meaningful
-         m_atimes.maxEntries(cbSz);
-         m_wtimes.maxEntries(cbSz);
-         
+         if(m_latencyCircBuffMaxLength == 0 || m_latencyCircBuffMaxTime == 0)
+         {
+            m_atimes.maxEntries(0);
+            m_wtimes.maxEntries(0);
+         }
+         else 
+         {
+            //Set up the latency circ. buffs
+            cbIndexT cbSz = m_latencyCircBuffMaxTime * derived().fps();
+            if(cbSz > m_latencyCircBuffMaxLength) cbSz = m_latencyCircBuffMaxLength;
+            if(cbSz < 3) cbSz = 3; //Make variance meaningful
+            m_atimes.maxEntries(cbSz);
+            m_wtimes.maxEntries(cbSz);
+         }
+            
          m_typeSize = ImageStreamIO_typesize(m_dataType);
          
+
          //Here we resolve currentFlip somehow.
          m_currentFlip = m_defaultFlip;
       }
@@ -661,8 +694,11 @@ void frameGrabber<derivedT>::fgThreadExec()
          ImageStreamIO_sempost(m_imageStream,-1);
  
          //Update the latency circ. buffs
-         m_atimes.nextEntry(m_imageStream->md->atime);
-         m_wtimes.nextEntry(m_imageStream->md->writetime);
+         if(m_atimes.maxEntries()  >  0)
+         {
+            m_atimes.nextEntry(m_imageStream->md->atime);
+            m_wtimes.nextEntry(m_imageStream->md->writetime);
+         }
          
          //Now we increment pointers outside the time-critical part of the loop.
          next_cnt1 = m_imageStream->md->cnt1+1;
@@ -746,6 +782,35 @@ int frameGrabber<derivedT>::updateINDI()
    return 0;
 }
 
+template<class derivedT>
+int frameGrabber<derivedT>::recordFGTimings( bool force )
+{
+   static double last_mna = 0;
+   static double last_vara = 0;
+
+   static double last_mnw = 0;
+   static double last_varw = 0;
+   
+   static double last_mnwa = 0;
+   static double last_varwa = 0;
+
+   if(force || m_mna != last_mna || m_vara != last_vara ||
+                 m_mnw != last_mnw || m_varw != last_varw ||
+                   m_mnwa != last_mnwa || m_varwa != last_varwa )
+   {
+      derived().template telem<telem_fgtimings>({m_mna, sqrt(m_vara), m_mnw, sqrt(m_varw), m_mnwa, sqrt(m_varwa)});
+
+      last_mna = m_mna;
+      last_vara = m_vara;
+      last_mnw = m_mnw;
+      last_varw = m_varw;
+      last_mnwa = m_mnwa;
+      last_varwa = m_varwa;
+   }
+
+   return 0;
+
+}
 
 } //namespace dev
 } //namespace app

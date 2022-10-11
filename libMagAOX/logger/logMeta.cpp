@@ -35,6 +35,8 @@ logMetaDetail logMemberAccessor( flatlogs::eventCodeT ec,
          return telem_stage::getAccessor(memberName);
       case telem_zaber::eventCode:
          return telem_zaber::getAccessor(memberName);   
+      case telem_dmspeck::eventCode:
+         return telem_dmspeck::getAccessor(memberName);
       default:
          std::cerr << "Missing logMemberAccessor case entry for " << ec << ":" << memberName << "\n";
          return logMetaDetail();
@@ -102,6 +104,12 @@ int logMeta::setLog( const logMetaSpec & lms )
             m_spec.format = "%g";
             break;
          case valTypes::Double:
+            m_spec.format = "%g";
+            break;
+         case valTypes::Vector_Bool:
+            m_spec.format = "%d";
+            break;
+         case valTypes::Vector_Float:
             m_spec.format = "%g";
             break;
          default:
@@ -251,6 +259,48 @@ std::string logMeta::valueNumber( logMap & lm,
             if( getLogStateVal(val,lm, m_spec.device,m_spec.eventCode,stime,atime,(double(*)(void*))m_detail.accessor, &m_hint) != 0) return m_invalidValue;
             snprintf(str, sizeof(str), m_spec.format.c_str(), val);
             return std::string(str);
+         }
+         case valTypes::Vector_Bool:
+         {
+            std::vector<bool> val;
+            if( getLogStateVal(val,lm, m_spec.device,m_spec.eventCode,stime,atime,(std::vector<bool>(*)(void*))m_detail.accessor, &m_hint) != 0) return m_invalidValue;
+
+            if(val.size() == 0) return "";
+
+            std::string res;
+
+            for(size_t n = 0; n < val.size()-1; ++n)
+            {
+               snprintf(str, sizeof(str), m_spec.format.c_str(), (int) val[n]);
+               res += str;
+               res += ',';
+            }
+
+            snprintf(str, sizeof(str), m_spec.format.c_str(), (int) val.back());
+            res += str;
+            
+            return res;
+         }
+         case valTypes::Vector_Float:
+         {
+            std::vector<float> val;
+            if( getLogStateVal(val,lm, m_spec.device,m_spec.eventCode,stime,atime,(std::vector<float>(*)(void*))m_detail.accessor, &m_hint) != 0) return m_invalidValue;
+
+            if(val.size() == 0) return "";
+
+            std::string res;
+
+            for(size_t n = 0; n < val.size()-1; ++n)
+            {
+               snprintf(str, sizeof(str), m_spec.format.c_str(), val[n]);
+               res += str;
+               res += ',';
+            }
+
+            snprintf(str, sizeof(str), m_spec.format.c_str(), val.back());
+            res += str;
+            
+            return res;
          }
          default:
             return m_invalidValue;

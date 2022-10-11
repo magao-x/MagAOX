@@ -64,7 +64,8 @@ struct dark2ShmimT
   * \ingroup shmimIntegrator
   * 
   */
-class shmimIntegrator : public MagAOXApp<true>, public dev::shmimMonitor<shmimIntegrator>, public dev::shmimMonitor<shmimIntegrator,darkShmimT>, public dev::shmimMonitor<shmimIntegrator,dark2ShmimT>, public dev::frameGrabber<shmimIntegrator>
+class shmimIntegrator : public MagAOXApp<true>, public dev::shmimMonitor<shmimIntegrator>, public dev::shmimMonitor<shmimIntegrator,darkShmimT>, 
+                             public dev::shmimMonitor<shmimIntegrator,dark2ShmimT>, public dev::frameGrabber<shmimIntegrator>, public dev::telemeter<shmimIntegrator>
 {
 
    //Give the test harness access.
@@ -74,7 +75,8 @@ class shmimIntegrator : public MagAOXApp<true>, public dev::shmimMonitor<shmimIn
    friend class dev::shmimMonitor<shmimIntegrator,darkShmimT>;
    friend class dev::shmimMonitor<shmimIntegrator,dark2ShmimT>;
    friend class dev::frameGrabber<shmimIntegrator>;
-   
+   friend class dev::telemeter<shmimIntegrator>;
+
    //The base shmimMonitor type
    typedef dev::shmimMonitor<shmimIntegrator> shmimMonitorT;
    
@@ -87,6 +89,8 @@ class shmimIntegrator : public MagAOXApp<true>, public dev::shmimMonitor<shmimIn
    //The base frameGrabber type
    typedef dev::frameGrabber<shmimIntegrator> frameGrabberT;
    
+   typedef dev::telemeter<shmimIntegrator> telemeterT;
+
    ///Floating point type in which to do all calculations.
    typedef float realT;
    
@@ -292,6 +296,16 @@ protected:
    INDI_SETCALLBACK_DECL(shmimIntegrator, m_indiP_stateSource);
 
    pcf::IndiProperty m_indiP_imageValid;
+
+   /** \name Telemeter Interface
+     * 
+     * @{
+     */ 
+   int checkRecordTimes();
+   
+   int recordTelem( const telem_fgtimings * );
+
+   ///@}
    
 };
 
@@ -310,7 +324,8 @@ void shmimIntegrator::setupConfig()
    dark2MonitorT::setupConfig(config);
    
    frameGrabberT::setupConfig(config);
-   
+   telemeterT::setupConfig(config);
+
    config.add("integrator.nAverage", "", "integrator.nAverage", argType::Required, "integrator", "nAverage", false, "unsigned", "The default number of frames to average.  Default 10. Can be changed via INDI.");
    config.add("integrator.fpsSource", "", "integrator.fpsSource", argType::Required, "integrator", "fpsSource", false, "string", "Device name for getting fps if time-based averaging is used.  This device should have *.fps.current.");
 
@@ -323,6 +338,8 @@ void shmimIntegrator::setupConfig()
 
    config.add("integrator.stateSource", "", "integrator.stateSource", argType::Required, "integrator", "stateSource", false, "string", "///< Device name for getting the state string for file management.  This device should have *.state_string.current.");
    config.add("integrator.fileSaver", "", "integrator.fileSaver", argType::Required, "integrator", "fileSaver", false, "bool", "Flag controlling whether this saves and reloads files automatically.  Default false.");
+
+   
 }
 
 inline
@@ -334,7 +351,8 @@ int shmimIntegrator::loadConfigImpl( mx::app::appConfigurator & _config )
    dark2MonitorT::loadConfig(config);
    
    frameGrabberT::loadConfig(config);
-   
+   telemeterT::loadConfig(config);
+
    _config(m_nAverageDefault, "integrator.nAverage");
    m_nAverage=m_nAverageDefault;
    _config(m_fpsSource, "integrator.fpsSource");
@@ -468,6 +486,11 @@ int shmimIntegrator::appStartup()
       return log<software_error,-1>({__FILE__, __LINE__});
    }
 
+   if(telemeterT::appStartup() < 0)
+   {
+      return log<software_error,-1>({__FILE__, __LINE__});
+   }
+
    state(stateCodes::READY);
     
    return 0;
@@ -496,6 +519,11 @@ int shmimIntegrator::appLogic()
       return log<software_error,-1>({__FILE__,__LINE__});
    }
 
+   if( telemeterT::appLogic() < 0)
+   {
+      return log<software_error,-1>({__FILE__,__LINE__});
+   }
+
    std::unique_lock<std::mutex> lock(m_indiMutex);
 
    if(shmimMonitorT::updateINDI() < 0)
@@ -517,7 +545,7 @@ int shmimIntegrator::appLogic()
    {
       log<software_error>({__FILE__, __LINE__});
    }
-      
+
    if(m_running == false)
    {
       state(stateCodes::READY);
@@ -572,6 +600,8 @@ int shmimIntegrator::appShutdown()
    
    frameGrabberT::appShutdown();
    
+   telemeterT::appShutdown();
+
    return 0;
 }
 
@@ -587,6 +617,10 @@ int shmimIntegrator::allocate(const dev::shmimT & dummy)
    if(m_avgTime > 0 && m_fps > 0)
    {
       m_nAverage = m_avgTime * m_fps;
+      if(m_nAverage <= 0)
+      {
+         m_nAverage = 1;
+      }
       log<text_log>("set nAverage to " + std::to_string(m_nAverage) + " based on FPS", logPrio::LOG_NOTICE);
    }
    else if(m_avgTime > 0 && m_fps == 0) //Haven't gotten the update yet so we keep going for now
@@ -1264,6 +1298,18 @@ INDI_SETCALLBACK_DEFN( shmimIntegrator, m_indiP_stateSource )(const pcf::IndiPro
    }
 
    return 0;
+}
+
+inline
+int shmimIntegrator::checkRecordTimes()
+{
+   return telemeterT::checkRecordTimes(telem_fgtimings());
+}
+   
+inline
+int shmimIntegrator::recordTelem( const telem_fgtimings * )
+{
+   return recordFGTimings(true);
 }
 
 } //namespace app

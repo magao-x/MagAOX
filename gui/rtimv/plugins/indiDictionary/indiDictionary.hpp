@@ -21,7 +21,7 @@ class rtimvIndiClient;
 class indiDictionary : public QObject, public rtimvDictionaryInterface
 {
    Q_OBJECT
-   Q_PLUGIN_METADATA(IID "rtimv.dictionaryInterface/1.0")
+   Q_PLUGIN_METADATA(IID "rtimv.dictionaryInterface/1.1")
    Q_INTERFACES(rtimvDictionaryInterface)
     
 protected:

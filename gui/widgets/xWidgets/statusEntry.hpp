@@ -2,7 +2,6 @@
 #define statusEntry_hpp
 
 #include <QWidget>
-#include <QTimer>
 
 #include <cmath>
 #include "statusLineEdit.hpp"
@@ -47,7 +46,7 @@ protected:
    
 public:
    statusEntry( QWidget * Parent = 0, 
-                Qt::WindowFlags f = 0
+                Qt::WindowFlags f = Qt::WindowFlags()
               );
 
    statusEntry( const std::string & device,
@@ -56,7 +55,7 @@ public:
                 const std::string & label,
                 const std::string & units,
                 QWidget * Parent = 0, 
-                Qt::WindowFlags f = 0
+                Qt::WindowFlags f = Qt::WindowFlags()
               );
    
    ~statusEntry() noexcept;

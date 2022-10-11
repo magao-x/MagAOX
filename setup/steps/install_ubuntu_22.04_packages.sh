@@ -23,7 +23,6 @@ apt install -y \
     libncurses5-dev \
     netcat \
     lm-sensors \
-    hddtemp \
     libreadline-dev \
     pkg-config \
     bison \
@@ -39,8 +38,15 @@ apt install -y \
     libboost-all-dev \
     libgsl-dev \
     bc \
-    libczmq-dev \
     liblog4cxx-dev \
     chrony \
     gdb \
 ;
+
+if [[ $MAGAOX_ROLE == vm ]]; then
+    apt install -y xauth
+fi
+if [[ $(uname -p) == "aarch64" ]]; then
+    # since we won't install MKL:
+    apt install -y libopenblas-openmp-dev liblapack-dev liblapacke-dev
+fi

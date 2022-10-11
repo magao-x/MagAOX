@@ -13,23 +13,27 @@ apps_common = \
 	shmimIntegrator \
 	timeSeriesSimulator
 
-apps_rtcicc = alpaoCtrl
+apps_rtcicc = alpaoCtrl \
+              cacaoInterface \
+				  userGainCtrl
 
 apps_rtc = \
 	ocam2KCtrl \
 	siglentSDG \
 	ttmModulator \
 	bmcCtrl \
-        rhusbMon \
+   rhusbMon \
 	pi335Ctrl \
 	pupilFit \
 	t2wOffloader \
-        cacaoInterface \
 	dmSpeckle \
-        w2tcsOffloader
+   w2tcsOffloader \
+	pwfsSlopeCalc
 
 apps_icc = \
-        cacaoInterface \
+   acronameUsbHub \
+   cacaoInterface \
+	flipperCtrl \
 	filterWheelCtrl \
 	hsfwCtrl \
 	baslerCtrl \
@@ -41,14 +45,15 @@ apps_icc = \
 	usbtempMon \
 	xt1121Ctrl \
 	xt1121DCDU \
-        picoMotorCtrl \
-        cacaoInterface
+   picoMotorCtrl \
+	koolanceCtrl \
 
 apps_aoc = \
 	trippLitePDU \
    tcsInterface \
    adcTracker \
-   kTracker
+   kTracker \
+	koolanceCtrl
 
 # apps_vm = none yet
 apps_tic = \
@@ -128,7 +133,8 @@ scripts_to_install = magaox \
 	dmdispbridge \
 	shmimTCPreceive \
 	shmimTCPtransmit \
-	lookyloo
+	lookyloo \
+	obs_to_movie
 
 all: indi_all libs_all flatlogs apps_all guis_all utils_all
 

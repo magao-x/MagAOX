@@ -51,7 +51,7 @@ struct refShmimT
 /** 
   * \ingroup pupilFit
   */
-class pupilFit : public MagAOXApp<true>, public dev::shmimMonitor<pupilFit>, public dev::shmimMonitor<pupilFit,refShmimT>, public dev::frameGrabber<pupilFit>
+class pupilFit : public MagAOXApp<true>, public dev::shmimMonitor<pupilFit>, public dev::shmimMonitor<pupilFit,refShmimT>, public dev::frameGrabber<pupilFit>, public dev::telemeter<pupilFit>
 {
    //Give the test harness access.
    friend class pupilFit_test;
@@ -59,6 +59,8 @@ class pupilFit : public MagAOXApp<true>, public dev::shmimMonitor<pupilFit>, pub
    friend class dev::shmimMonitor<pupilFit>;
    friend class dev::shmimMonitor<pupilFit,refShmimT>;
    friend class dev::frameGrabber<pupilFit>;
+
+   friend class dev::telemeter<pupilFit>;
 
 public:
    //The base shmimMonitor type
@@ -68,6 +70,9 @@ public:
 
    //The base frameGrabber type
    typedef dev::frameGrabber<pupilFit> frameGrabberT;
+
+   //The base telemeter type
+   typedef dev::telemeter<pupilFit> telemeterT;
 
    ///Floating point type in which to do all calculations.
    typedef float realT;
@@ -424,6 +429,16 @@ protected:
    INDI_NEWCALLBACK_DECL(pupilFit, m_indiP_refmode);
 
    ///@}
+
+   /** \name Telemeter Interface
+     * 
+     * @{
+     */ 
+   int checkRecordTimes();
+   
+   int recordTelem( const telem_fgtimings * );
+
+   ///@}
 };
 
 inline
@@ -453,6 +468,7 @@ void pupilFit::setupConfig()
    shmimMonitorT::setupConfig(config);
    refShmimMonitorT::setupConfig(config);
    frameGrabberT::setupConfig(config);
+   telemeterT::setupConfig(config);
 
    config.add("shmimMonitor.shmimName", "", "shmimMonitor.shmimName", argType::Required, "shmimMonitor", "shmimName", false, "string", "The name of the ImageStreamIO shared memory image. Will be used as /tmp/<shmimName>.im.shm. Default is camwfs_avg");
    
@@ -490,6 +506,7 @@ int pupilFit::loadConfigImpl( mx::app::appConfigurator & _config )
    if(refShmimMonitorT::m_shmimName != "") m_setPointSource = USEREFIM;
 
    frameGrabberT::loadConfig(_config);
+   telemeterT::loadConfig(_config);
 
    _config(m_threshold, "fit.threshold");
    _config(m_threshShmimName, "fit.threshShmimName");
@@ -543,6 +560,11 @@ int pupilFit::appStartup()
    }
 
    if(frameGrabberT::appStartup() < 0)
+   {
+      return log<software_error,-1>({__FILE__, __LINE__});
+   }
+
+   if(telemeterT::appStartup() < 0)
    {
       return log<software_error,-1>({__FILE__, __LINE__});
    }
@@ -707,6 +729,11 @@ int pupilFit::appLogic()
       return log<software_error,-1>({__FILE__,__LINE__});
    }
 
+   if( telemeterT::appLogic() < 0)
+   {
+      return log<software_error,-1>({__FILE__,__LINE__});
+   }
+
    std::lock_guard<std::mutex> guard(m_indiMutex);
    updateIfChanged(m_indiP_thresh, "current", m_threshold, INDI_IDLE);
    updateIfChanged(m_indiP_thresh, "target", m_threshold, INDI_IDLE);
@@ -747,6 +774,7 @@ int pupilFit::appShutdown()
    shmimMonitorT::appShutdown();
    refShmimMonitorT::appShutdown();
    frameGrabberT::appShutdown();
+   telemeterT::appShutdown();
 
    return 0;
 }
@@ -1541,6 +1569,18 @@ INDI_NEWCALLBACK_DEFN(pupilFit, m_indiP_refmode)(const pcf::IndiProperty & ipRec
    return 0;
 }
       
+inline
+int pupilFit::checkRecordTimes()
+{
+   return telemeterT::checkRecordTimes(telem_fgtimings());
+}
+   
+inline
+int pupilFit::recordTelem( const telem_fgtimings * )
+{
+   return recordFGTimings(true);
+}
+
 } //namespace app
 } //namespace MagAOX
 

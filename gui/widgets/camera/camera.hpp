@@ -63,7 +63,7 @@ protected:
 public:
    camera( std::string & camName,
            QWidget * Parent = 0, 
-           Qt::WindowFlags f = 0
+           Qt::WindowFlags f = Qt::WindowFlags()
          );
    
    ~camera();
@@ -471,7 +471,7 @@ void camera::setup_temp_ccd(bool ro)
 
 void camera::setup_tempStatus()
 {
-   ui_tempStatus = new statusDisplay(m_camName,"temp_control", "status", "Temp. Ctrl.", "", this, 0);
+   ui_tempStatus = new statusDisplay(m_camName,"temp_control", "status", "Temp. Ctrl.", "", this, Qt::WindowFlags());
    ui_tempStatus->setObjectName(QString::fromUtf8("tempStatus"));
    
    ui.grid->addWidget(ui_tempStatus, 1, 1, 1, 1);
@@ -615,6 +615,7 @@ void camera::setup_takeDarks()
    ui_takeDarks->setObjectName(QString::fromUtf8("takeDarks"));
    ui_takeDarks->setText("take darks");
    ui_takeDarks->setMaximumWidth(200);
+   ui_takeDarks->setFocusPolicy(Qt::NoFocus);
    connect(ui_takeDarks, SIGNAL(pressed()), this, SLOT(takeDark()));
    ui.grid->addWidget(ui_takeDarks, 8, 0, 1, 1,Qt::AlignHCenter);   
 
@@ -645,7 +646,7 @@ void camera::setEnableDisable(bool tf, bool all)
       ui_fsmState->setEnabled(tf);
    }
 
-   
+   if(ui_reconfigure) ui_reconfigure->setEnabled(tf);
    if(ui_tempCCD) ui_tempCCD->setEnabled(tf);
    if(ui_tempStatus) ui_tempStatus->setEnabled(tf);
 
@@ -656,13 +657,11 @@ void camera::setEnableDisable(bool tf, bool all)
    if(ui_expTime) ui_expTime->setEnabled(tf);
    if(ui_fps) ui_fps->setEnabled(tf);
    if(ui_emGain) ui_emGain->setEnabled(tf);
+   if(ui_shutterStatus) ui_shutterStatus->setEnabled(tf);
+   
    if(ui_takeDarks) ui_takeDarks->setEnabled(tf);
    
 }
-
-
-
-
 
 } //namespace xqt
    

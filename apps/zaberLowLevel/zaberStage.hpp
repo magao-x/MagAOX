@@ -23,15 +23,18 @@ namespace app
 /// A class to manage the details of one stage in a Zaber system.
 /**
   * \ingroup zaberLowLevel 
-  */  
+  */
+template<class parentT>  
 class zaberStage
 {
 protected:
+   parentT * m_parent {nullptr}; //The parent MagAOXApp
+
    std::string m_name; ///< The stage's name.
    
    std::string m_serial; ///< The stage's serial number.
    
-   int m_deviceAddress; ///< The device's address, a.k.a. its order in the chain
+   int m_deviceAddress {-1}; ///< The device's address, a.k.a. its order in the chain
 
    int m_axisNumber{0}; ///< The axis number at the address (normally 0 in MagAO-X)
 
@@ -93,6 +96,12 @@ protected:
    
 public:
 
+   zaberStage() = delete;
+
+   zaberStage( parentT * parent)
+   {
+      m_parent = parent;
+   }
    /// Get the device name
    /**
      * \returns the current value of m_name
@@ -295,217 +304,228 @@ public:
    int onPowerOff();
 };
 
-std::string zaberStage::name()
+template<class parentT>
+std::string zaberStage<parentT>::name()
 {
    return m_name;
 }
 
-int zaberStage::name( const std::string & n )
+template<class parentT>
+int zaberStage<parentT>::name( const std::string & n )
 {
    m_name = n;
    return 0;
 }
 
-std::string zaberStage::serial()
+template<class parentT>
+std::string zaberStage<parentT>::serial()
 {
    return m_serial;
 }
 
-int zaberStage::serial( const std::string & s )
+template<class parentT>
+int zaberStage<parentT>::serial( const std::string & s )
 {
    m_serial = s;
    return 0;
 }
 
-int zaberStage::deviceAddress()
+template<class parentT>
+int zaberStage<parentT>::deviceAddress()
 {
    return m_deviceAddress;
 }
 
-int zaberStage::deviceAddress( const int & da )
+template<class parentT>
+int zaberStage<parentT>::deviceAddress( const int & da )
 {
    m_deviceAddress = da;
    return 0;
 }
 
-int zaberStage::axisNumber()
+template<class parentT>
+int zaberStage<parentT>::axisNumber()
 {
    return m_axisNumber;
 }
 
-int zaberStage::axisNumber( const int & an )
+template<class parentT>
+int zaberStage<parentT>::axisNumber( const int & an )
 {
    m_axisNumber = an;
    return 0;
 }
 
-bool zaberStage::commandStatus()
+template<class parentT>
+bool zaberStage<parentT>::commandStatus()
 {
    return m_commandStatus;
 }
 
-char zaberStage::deviceStatus()
+template<class parentT>
+char zaberStage<parentT>::deviceStatus()
 {
    return m_deviceStatus;
 }
 
-inline
-bool zaberStage::homing()
+template<class parentT>
+bool zaberStage<parentT>::homing()
 {
    return m_homing;
 }
 
-inline
-long zaberStage::rawPos()
+template<class parentT>
+long zaberStage<parentT>::rawPos()
 {
    return m_rawPos;
 }
 
-inline
-long zaberStage::tgtPos()
+template<class parentT>
+long zaberStage<parentT>::tgtPos()
 {
    return m_tgtPos;
 }
 
-inline
-long zaberStage::maxPos()
+template<class parentT>
+long zaberStage<parentT>::maxPos()
 {
    return m_maxPos;
 }
 
-inline
-float zaberStage::temp()
+template<class parentT>
+float zaberStage<parentT>::temp()
 {
    return m_temp;
 }
 
-bool zaberStage::warningState()
+template<class parentT>
+bool zaberStage<parentT>::warningState()
 {
    return m_warn;
 }
 
-inline
-bool zaberStage::warnFD()
+template<class parentT>
+bool zaberStage<parentT>::warnFD()
 {
    return m_warnFD;
 }
 
-inline
-bool zaberStage::warnFQ()
+template<class parentT>
+bool zaberStage<parentT>::warnFQ()
 {
    return m_warnFQ;
 }
 
-inline
-bool zaberStage::warnFS()
+template<class parentT>
+bool zaberStage<parentT>::warnFS()
 {
    return m_warnFS;
 }
 
-inline
-bool zaberStage::warnFT()
+template<class parentT>
+bool zaberStage<parentT>::warnFT()
 {
    return m_warnFT;
 }
 
-inline
-bool zaberStage::warnFB()
+template<class parentT>
+bool zaberStage<parentT>::warnFB()
 {
    return m_warnFB;
 }
 
-inline
-bool zaberStage::warnFP()
+template<class parentT>
+bool zaberStage<parentT>::warnFP()
 {
    return m_warnFP;
 }
 
-inline
-bool zaberStage::warnFE()
+template<class parentT>
+bool zaberStage<parentT>::warnFE()
 {
    return m_warnFE;
 }
 
-inline
-bool zaberStage::warnWH()
+template<class parentT>
+bool zaberStage<parentT>::warnWH()
 {
    return m_warnWH;
 }
 
-inline
-bool zaberStage::warnWL()
+template<class parentT>
+bool zaberStage<parentT>::warnWL()
 {
    return m_warnWL;
 }
 
-inline
-bool zaberStage::warnWP()
+template<class parentT>
+bool zaberStage<parentT>::warnWP()
 {
    return m_warnWP;
 }
 
-inline
-bool zaberStage::warnWV()
+template<class parentT>
+bool zaberStage<parentT>::warnWV()
 {
    return m_warnWV;
 }
 
-inline
-bool zaberStage::warnWT()
+template<class parentT>
+bool zaberStage<parentT>::warnWT()
 {
    return m_warnWT;
 }
 
-inline 
-bool zaberStage::warnWM()
+template<class parentT> 
+bool zaberStage<parentT>::warnWM()
 {
    return m_warnWM;
 }
 
-inline
-bool zaberStage::warnWR()
+template<class parentT>
+bool zaberStage<parentT>::warnWR()
 {
    return m_warnWR;
 }
 
-inline
-bool zaberStage::warnNC()
+template<class parentT>
+bool zaberStage<parentT>::warnNC()
 {
    return m_warnNC;
 }
 
-inline
-bool zaberStage::warnNI()
+template<class parentT>
+bool zaberStage<parentT>::warnNI()
 {
    return m_warnNI;
 }
 
-inline 
-bool zaberStage::warnND()
+template<class parentT> 
+bool zaberStage<parentT>::warnND()
 {
    return m_warnND;
 }
 
-inline
-bool zaberStage::warnNU()
+template<class parentT>
+bool zaberStage<parentT>::warnNU()
 {
    return m_warnNU;
 }
 
-inline
-bool zaberStage::warnNJ()
+template<class parentT>
+bool zaberStage<parentT>::warnNJ()
 {
    return m_warnNJ;
 }
 
-inline
-bool zaberStage::warnUNK()
+template<class parentT>
+bool zaberStage<parentT>::warnUNK()
 {
    return m_warnUNK;
 }
 
-inline
-int zaberStage::getResponse( std::string & response, 
+template<class parentT>
+int zaberStage<parentT>::getResponse( std::string & response, 
                              const std::string & repBuff
                            )
 {
@@ -513,6 +533,11 @@ int zaberStage::getResponse( std::string & response,
    int rv = za_decode(&rep, repBuff.c_str());
    if(rv != Z_SUCCESS)
    {
+      if(m_parent)
+      {
+         if(m_parent->powerState() != 1 || m_parent->powerStateTarget() != 1) return rv; //don't log, but propagate error
+      }
+
       MagAOXAppT::log<software_error>({__FILE__, __LINE__, rv, "za_decode !=Z_SUCCESS"});      
       return rv;
    }
@@ -520,10 +545,10 @@ int zaberStage::getResponse( std::string & response,
    return getResponse(response, rep);
 }
 
-inline
-int zaberStage::getResponse( std::string & response, 
-                             const za_reply & rep
-                           )
+template<class parentT>
+int zaberStage<parentT>::getResponse( std::string & response, 
+                                      const za_reply & rep
+                                    )
 {
    if(rep.device_address == m_deviceAddress)
    {
@@ -533,8 +558,12 @@ int zaberStage::getResponse( std::string & response,
       
       m_deviceStatus = rep.device_status[0];
 
-      if(m_deviceStatus == 'I' && m_homing) m_homing = false;
-      
+      if(m_deviceStatus == 'I' && m_homing) 
+      {
+         m_warnWR = false; //Clear preemptively
+         m_homing = false;
+      }
+
       if(rep.warning_flags[0] == '-') unsetWarnings();
       else m_warn = true;;
 
@@ -549,8 +578,8 @@ int zaberStage::getResponse( std::string & response,
    }
 }
  
-inline
-int zaberStage::sendCommand( std::string & response, 
+template<class parentT>
+int zaberStage<parentT>::sendCommand( std::string & response, 
                              z_port port, 
                              const std::string & command
                            )
@@ -566,11 +595,21 @@ int zaberStage::sendCommand( std::string & response,
       int rv = za_receive(port, buff, sizeof(buff));
       if(rv == Z_ERROR_TIMEOUT)
       {
+         if(m_parent)
+         {
+            if(m_parent->powerState() != 1 || m_parent->powerStateTarget() != 1) return rv; //don't log, but propagate error
+         }
+
          MagAOXAppT::log<software_error>({__FILE__, __LINE__, 0, "Z_ERROR_TIMEOUT"});
          break; //assume error and just get out.
       }
       else if(rv < 0)
       {
+         if(m_parent)
+         {
+            if(m_parent->powerState() != 1 || m_parent->powerStateTarget() != 1) return rv; //don't log, but propagate error
+         }
+
          MagAOXAppT::log<software_error>({__FILE__, __LINE__, 0, "za_receive !=Z_SUCCESS"});
          break;
       }
@@ -582,6 +621,11 @@ int zaberStage::sendCommand( std::string & response,
       rv = za_decode(&rep, buff);
       if(rv != Z_SUCCESS)
       {
+         if(m_parent)
+         {
+            if(m_parent->powerState() != 1 || m_parent->powerStateTarget() != 1) return rv; //don't log, but propagate error
+         }
+
          MagAOXAppT::log<software_error>({__FILE__, __LINE__, 0, "za_decode !=Z_SUCCESS"});
          break;
       }
@@ -594,9 +638,14 @@ int zaberStage::sendCommand( std::string & response,
    return -1;
 }
 
-inline
-int zaberStage::getMaxPos( z_port port )
+template<class parentT>
+int zaberStage<parentT>::getMaxPos( z_port port )
 {
+   if(m_deviceAddress < 1)
+   {
+      return MagAOXAppT::log<software_error, -1>({__FILE__, __LINE__, "stage " + m_name + " with with s/n " + m_serial + " not found in system."});
+   }
+   
    std::string com = "/" + mx::ioutils::convertToString(m_deviceAddress) + " ";
    com += "get limit.max";
 
@@ -613,6 +662,11 @@ int zaberStage::getMaxPos( z_port port )
       }
       else
       {
+         if(m_parent)
+         {
+            if(m_parent->powerState() != 1 || m_parent->powerStateTarget() != 1) return -1; //don't log, but propagate error
+         }
+
          MagAOXAppT::log<software_error>({__FILE__, __LINE__, rv, "get limit.max Command Rejected"});         
          return -1;
       }
@@ -620,13 +674,23 @@ int zaberStage::getMaxPos( z_port port )
    else
    {
       MagAOXAppT::log<software_error>({__FILE__, __LINE__});
+      if(m_parent)
+      {
+         if(m_parent->powerState() != 1 || m_parent->powerStateTarget() != 1) return -1; //don't log, but propagate error
+      }
+
       return -1;
    }
 }
 
-inline
-int zaberStage::updatePos( z_port port )
+template<class parentT>
+int zaberStage<parentT>::updatePos( z_port port )
 {
+   if(m_deviceAddress < 1)
+   {
+      return MagAOXAppT::log<software_error, -1>({__FILE__, __LINE__, "stage " + m_name + " with with s/n " + m_serial + " not found in system."});
+   }
+
    std::string com = "/" + mx::ioutils::convertToString(m_deviceAddress) + " ";
    com += "get pos";
 
@@ -643,20 +707,35 @@ int zaberStage::updatePos( z_port port )
       }
       else
       {
+         if(m_parent)
+         {
+            if(m_parent->powerState() != 1 || m_parent->powerStateTarget() != 1) return -1; //don't log, but propagate error
+         }
+
          MagAOXAppT::log<software_error>({__FILE__, __LINE__, rv, "get pos Command Rejected"});         
          return -1;
       }
    }
    else
    {
+      if(m_parent)
+      {
+         if(m_parent->powerState() != 1 || m_parent->powerStateTarget() != 1) return -1; //don't log, but propagate error
+      }
+
       MagAOXAppT::log<software_error>({__FILE__, __LINE__});
       return -1;
    }
 }
 
-inline
-int zaberStage::updateTemp( z_port port )
+template<class parentT>
+int zaberStage<parentT>::updateTemp( z_port port )
 {
+   if(m_deviceAddress < 1)
+   {
+      return MagAOXAppT::log<software_error, -1>({__FILE__, __LINE__, "stage " + m_name + " with with s/n " + m_serial + " not found in system."});
+   }
+
    std::string com = "/" + mx::ioutils::convertToString(m_deviceAddress) + " ";
    com += "get driver.temperature";
 
@@ -673,20 +752,35 @@ int zaberStage::updateTemp( z_port port )
       }
       else
       {
+         if(m_parent)
+         {
+            if(m_parent->powerState() != 1 || m_parent->powerStateTarget() != 1) return -1; //don't log, but propagate error
+         }
+
          MagAOXAppT::log<software_error>({__FILE__, __LINE__, rv, "get driver.temperature Command Rejected"});         
          return -1;
       }
    }
    else
    {
+      if(m_parent)
+      {
+         if(m_parent->powerState() != 1 || m_parent->powerStateTarget() != 1) return -1; //don't log, but propagate error
+      }
+
       MagAOXAppT::log<software_error>({__FILE__, __LINE__});
       return -1;
    }
 }
 
-inline
-int zaberStage::stop( z_port port )
+template<class parentT>
+int zaberStage<parentT>::stop( z_port port )
 {
+   if(m_deviceAddress < 1)
+   {
+      return MagAOXAppT::log<software_error, -1>({__FILE__, __LINE__, "stage " + m_name + " with with s/n " + m_serial + " not found in system."});
+   }
+
    std::string com = "/" + mx::ioutils::convertToString(m_deviceAddress) + " ";
    com += "stop";
 
@@ -702,20 +796,35 @@ int zaberStage::stop( z_port port )
       }
       else
       {
+         if(m_parent)
+         {
+            if(m_parent->powerState() != 1 || m_parent->powerStateTarget() != 1) return -1; //don't log, but propagate error
+         }
+
          MagAOXAppT::log<software_error>({__FILE__, __LINE__, rv, m_name + " stop Command Rejected"});         
          return -1;
       }
    }
    else
    {
+      if(m_parent)
+      {
+         if(m_parent->powerState() != 1 || m_parent->powerStateTarget() != 1) return -1; //don't log, but propagate error
+      }
+
       MagAOXAppT::log<software_error>({__FILE__, __LINE__});
       return -1;
    }
 }
 
-inline
-int zaberStage::estop( z_port port )
+template<class parentT>
+int zaberStage<parentT>::estop( z_port port )
 {
+   if(m_deviceAddress < 1)
+   {
+      return MagAOXAppT::log<software_error, -1>({__FILE__, __LINE__, "stage " + m_name + " with with s/n " + m_serial + " not found in system."});
+   }
+
    std::string com = "/" + mx::ioutils::convertToString(m_deviceAddress) + " ";
    com += "estop";
 
@@ -731,20 +840,35 @@ int zaberStage::estop( z_port port )
       }
       else
       {
+         if(m_parent)
+         {
+            if(m_parent->powerState() != 1 || m_parent->powerStateTarget() != 1) return -1; //don't log, but propagate error
+         }
+
          MagAOXAppT::log<software_error>({__FILE__, __LINE__, rv, m_name + " estop Command Rejected"});         
          return -1;
       }
    }
    else
    {
+      if(m_parent)
+      {
+         if(m_parent->powerState() != 1 || m_parent->powerStateTarget() != 1) return -1; //don't log, but propagate error
+      }
+
       MagAOXAppT::log<software_error>({__FILE__, __LINE__});
       return -1;
    }
 }
 
-inline
-int zaberStage::home( z_port port )
+template<class parentT>
+int zaberStage<parentT>::home( z_port port )
 {
+   if(m_deviceAddress < 1)
+   {
+      return MagAOXAppT::log<software_error, -1>({__FILE__, __LINE__, "stage " + m_name + " with with s/n " + m_serial + " not found in system."});
+   }
+
    std::string com = "/" + mx::ioutils::convertToString(m_deviceAddress) + " ";
    com += "home";
 
@@ -761,22 +885,37 @@ int zaberStage::home( z_port port )
       }
       else
       {
+         if(m_parent)
+         {
+            if(m_parent->powerState() != 1 || m_parent->powerStateTarget() != 1) return -1; //don't log, but propagate error
+         }
+
          MagAOXAppT::log<software_error>({__FILE__, __LINE__, rv, m_name + "Home Command Rejected"});         
          return -1;
       }
    }
    else
    {
+      if(m_parent)
+      {
+         if(m_parent->powerState() != 1 || m_parent->powerStateTarget() != 1) return -1; //don't log, but propagate error
+      }
+
       MagAOXAppT::log<software_error>({__FILE__, __LINE__});
       return -1;
    }
 }
 
-inline
-int zaberStage::moveAbs( z_port port,
+template<class parentT>
+int zaberStage<parentT>::moveAbs( z_port port,
                          long rawPos
                        )
 {
+   if(m_deviceAddress < 1)
+   {
+      return MagAOXAppT::log<software_error, -1>({__FILE__, __LINE__, "stage " + m_name + " with with s/n " + m_serial + " not found in system."});
+   }
+
    std::string com = "/" + mx::ioutils::convertToString(m_deviceAddress) + " ";
    com += "move abs " + std::to_string(rawPos);
 
@@ -794,19 +933,29 @@ int zaberStage::moveAbs( z_port port,
       }
       else
       {
+         if(m_parent)
+         {
+            if(m_parent->powerState() != 1 || m_parent->powerStateTarget() != 1) return -1; //don't log, but propagate error
+         }
+
          MagAOXAppT::log<software_error>({__FILE__, __LINE__, rv, m_name + "move abs Command Rejected"});         
          return -1;
       }
    }
    else
    {
+      if(m_parent)
+      {
+         if(m_parent->powerState() != 1 || m_parent->powerStateTarget() != 1) return -1; //don't log, but propagate error
+      }
+
       MagAOXAppT::log<software_error>({__FILE__, __LINE__});
       return -1;
    }
 }
 
-inline
-int zaberStage::unsetWarnings()
+template<class parentT>
+int zaberStage<parentT>::unsetWarnings()
 {
    m_warn = false;
    
@@ -834,8 +983,8 @@ int zaberStage::unsetWarnings()
    return 0;
 }
 
-inline
-int zaberStage::processWarning( std::string & warn )
+template<class parentT>
+int zaberStage<parentT>::processWarning( std::string & warn )
 {
    if(warn == "FD")
    {
@@ -937,6 +1086,10 @@ int zaberStage::processWarning( std::string & warn )
    }
    else if(warn == "NI")
    {
+      if(m_parent)
+      {
+         if(m_homing == true || warnWR()) return 0; //ignore this during homing
+      }
       MagAOXAppT::log<text_log>(m_name + " Command Interrupted (NI): A movement operation (command or manual control) was requested while the axis was executing another movement command." , logPrio::LOG_WARNING);
       m_warnNI = true;
       return 0;
@@ -969,8 +1122,8 @@ int zaberStage::processWarning( std::string & warn )
    return -1;
 }
 
-inline
-int zaberStage::parseWarnings( std::string & response )
+template<class parentT>
+int zaberStage<parentT>::parseWarnings( std::string & response )
 {
    size_t nwarn = std::stoi( response.substr(0, 2));
       
@@ -980,6 +1133,11 @@ int zaberStage::parseWarnings( std::string & response )
    {
       if(response.size() < 3 + n*3)
       {
+         if(m_parent)
+         {
+            if(m_parent->powerState() != 1 || m_parent->powerStateTarget() != 1) return -1; //don't log, but propagate error
+         }
+
          MagAOXAppT::log<software_error>({__FILE__, __LINE__, "parsing incomplete warning response"});         
          return -1;
       }
@@ -989,6 +1147,11 @@ int zaberStage::parseWarnings( std::string & response )
       int rv = processWarning(warn);
       if(rv < 0)
       {
+         if(m_parent)
+         {
+            if(m_parent->powerState() != 1 || m_parent->powerStateTarget() != 1) return -1; //don't log, but propagate error
+         }
+
          MagAOXAppT::log<software_error>({__FILE__, __LINE__});         
          return -1;
       }
@@ -1013,9 +1176,14 @@ int zaberStage::parseWarnings( std::string & response )
    
 }
 
-inline
-int zaberStage::getWarnings( z_port port )
+template<class parentT>
+int zaberStage<parentT>::getWarnings( z_port port )
 {
+   if(m_deviceAddress < 1)
+   {
+      return MagAOXAppT::log<software_error, -1>({__FILE__, __LINE__, "stage " + m_name + " with with s/n " + m_serial + " not found in system."});
+   }
+   
    std::string com = "/" + mx::ioutils::convertToString(m_deviceAddress) + " ";
    com += "warnings";
 
@@ -1033,19 +1201,29 @@ int zaberStage::getWarnings( z_port port )
       }
       else
       {
+         if(m_parent)
+         {
+            if(m_parent->powerState() != 1 || m_parent->powerStateTarget() != 1) return -1; //don't log, but propagate error
+         }
+
          MagAOXAppT::log<software_error>({__FILE__, __LINE__, rv, "warnings Command Rejected"});         
          return -1;
       }
    }
    else
    {
+      if(m_parent)
+      {
+         if(m_parent->powerState() != 1 || m_parent->powerStateTarget() != 1) return -1; //don't log, but propagate error
+      }
+
       MagAOXAppT::log<software_error>({__FILE__, __LINE__});
       return -1;
    }
 }
 
-inline
-int zaberStage::onPowerOff( )
+template<class parentT>
+int zaberStage<parentT>::onPowerOff( )
 {
    m_commandStatus = true; ///< The status of the last command sent. true = OK, false = RJ (rejected)
 

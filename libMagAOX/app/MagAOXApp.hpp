@@ -2056,7 +2056,7 @@ void MagAOXApp<_useINDI>::state( const stateCodes::stateCodeT & s,
    //Check to make sure INDI is up to date
    std::unique_lock<std::mutex> lock(m_indiMutex, std::try_to_lock);  //Lock the mutex before conducting INDI communications.
 
-   //Note this is called very execute loop to make sure we update eventually
+   //Note this is called every execute loop to make sure we update eventually
    if(lock.owns_lock())
    {  
       ///\todo move this to a function in stateCodes

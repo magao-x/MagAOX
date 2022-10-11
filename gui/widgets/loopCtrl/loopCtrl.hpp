@@ -44,7 +44,7 @@ protected:
 public:
    loopCtrl( std::string & procName,
              QWidget * Parent = 0, 
-             Qt::WindowFlags f = 0
+             Qt::WindowFlags f = Qt::WindowFlags()
            );
    
    ~loopCtrl();
@@ -99,8 +99,6 @@ loopCtrl::loopCtrl( std::string & procName,
    ui.gainCtrl->setup(m_procName, "loop_gain", "Global Gain", -1, -1);
    ui.mcCtrl->setup(m_procName, "loop_multcoeff", "Global Mult. Coef.", -1, -1);
    ui.mcCtrl->makeMultCoeffCtrl();
-   
-   
 
    setXwFont(ui.label_LoopName);
    setXwFont(ui.label_loop);
@@ -270,7 +268,7 @@ void loopCtrl::handleSetProperty( const pcf::IndiProperty & ipRecv)
             for(size_t n = 0; n<nB; ++n)
             {
                char mstr[16];
-               snprintf(mstr, sizeof(mstr), "%02d", n);
+               snprintf(mstr, sizeof(mstr), "%02zu", n);
                std::string blockstr = std::string("block")+mstr;
                int nM = ipRecv[std::string("block")+mstr].get<int>();
                m_modes[n] = nM;
@@ -358,19 +356,28 @@ void loopCtrl::on_slider_loop_sliderReleased()
 {
    double relpos = ((double)(ui.slider_loop->sliderPosition() - ui.slider_loop->minimum()))/(ui.slider_loop->maximum() - ui.slider_loop->minimum());
    
-   if(relpos > 0.1 && relpos < 0.9)
+   if(m_loopState)
    {
-      if(m_loopState)
+      if(relpos > 0.1)
       {
          ui.slider_loop->setSliderPosition(ui.slider_loop->maximum());
+         ui.label_loop_state->setEnabled(true);
+         ui.slider_loop->setEnabled(true);
+         return;
       }
-      else
+   }
+   else 
+   {
+      if(relpos < 0.9)
       {
          ui.slider_loop->setSliderPosition(ui.slider_loop->minimum());
+         ui.label_loop_state->setEnabled(true);
+         ui.slider_loop->setEnabled(true);
+         return;
       }
-      return;
    }
    
+
    ui.label_loop_state->setText("-----");
    ui.label_loop_state->setEnabled(false);
    ui.slider_loop->setEnabled(false);
