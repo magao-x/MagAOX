@@ -21,26 +21,38 @@ const double CGraphFSMHardwareInterface::PZTDriverFullScaleOutputTravel = 0.0000
 
 const off_t CGraphFSMProtoHardwareMmapper::FpgaMmapAdress = 0x08000000UL;
 const off_t CGraphFSMProtoHardwareMmapper::FpgaMmapMask = 0x00000FFFUL;
-const char CGraphFSMProtoHardwareMmapper::FpgaBusEmulationPathName[] = "/home/summer/.UACGraph/PZTFpgaBusEmulator.ram";
 
 const std::string s_devmem{"/dev/mem"};
 
-int CGraphFSMProtoHardwareMmapper::open(std::string& the_device
+// Open either memory device (/dev/mem) or file emulating same
+// Map memory or file to an address, put that address in FpgaBus
+// Put any error or success message into msg
+// If successful return 0, else return non-zero errno
+// On input
+// - FpgaHandle must be < 0 (e.g. -1)
+// - FpgaBuf must be == 0
+int CGraphFSMProtoHardwareMmapper::open(const std::string& the_device
                                        , int& FpgaHandle
                                        , CGraphFSMHardwareInterface*& FpgaBus
+                                       , std::string& msg
                                        )
 {
-    if (FpgaHandle > 0) { return(EBADF); } //already open?
-    if (NULL != FpgaBus) { return(EALREADY); } //already mapped?
+    char cbuf[1024];
+    msg.clear();
+
+    // Do not re-open handle or re-mmap bus address
+    if (FpgaHandle > -1) { return errno=EBADF; }     // already open?
+    if (NULL != FpgaBus) { return errno=EALREADY; } // already mapped?
 
     bool is_devmem = (s_devmem == the_device);
     if (is_devmem)
     {
+        // Either open the memory device ...
         FpgaHandle = ::open("/dev/mem", O_RDWR | O_SYNC);
     }
     else
     {
-
+        // or open the file that emulates the memory device
         FpgaHandle = ::open(the_device.c_str()
                            , O_RDWR | O_CREAT, S_IRUSR | S_IWUSR | S_IRGRP | S_IWGRP
                            ); //O_NONBLOCK?
@@ -48,96 +60,114 @@ int CGraphFSMProtoHardwareMmapper::open(std::string& the_device
 
     if (FpgaHandle <= 0)
     {
-        fprintf(stderr, "\nMapFpgaBus(): error in open(/dev/mem): %ld.\n", (long int)errno);
+        // Handle any error in ::open
+        sprintf(cbuf, "CGraph...::open(): error in open(%s): %ld."
+                    , the_device.substr(0,256).c_str(), (long int)errno
+                    );
+        msg = cbuf;
         return errno;
     }
-    else
+
+    if (!is_devmem)
     {
-        if (!is_devmem)
+        // The device isn't /dev/mem, so it is a file emulating /devmem.
+        // => Ensure that file is big enough for any read/writes to mmap
+        if (ftruncate(FpgaHandle, sizeof(CGraphFSMHardwareInterface))<0)
         {
-            int ft = ftruncate(FpgaHandle, sizeof(CGraphFSMHardwareInterface));  //Make sure the file is big enough for all read/writes to mmap
-            if (ft < 0)
-            {
-                    perror("\nMapFpgaBus(): error in ftruncate()\n");
-                    return errno;
-            }
-        }
-
-        // Using the off_t consts seems suspect (like ~ is just gonna turn all the high bits on?)
-        FpgaBus = (CGraphFSMHardwareInterface*)
-                  mmap(0
-                      , sizeof(CGraphFSMHardwareInterface)
-                      , PROT_READ | PROT_WRITE
-                      , MAP_SHARED
-                      , FpgaHandle
-                      , is_devmem ? (FPGA_MEM_ADDR & ~FPGA_MAP_MASK) : 0
-                      );
-
-        if (MAP_FAILED == FpgaBus)
-        {
-            fprintf(stderr, "\nMapFpgaBus(): error in mmap(): %ld.\n", (long int)errno);
+            // Handle error in ftruncate
+            sprintf(cbuf, "%s", "CGraph...::open(): error in ftruncate()");
+            msg = cbuf;
             return errno;
-        }
-        else
-        {
-            fprintf(stderr, "\nMapFpgaBus(): %s Mapped at: %p.\n", the_device.c_str(), FpgaBus);
         }
     }
 
-    return(0);
+    // Map the device or file of FpgaHandle to an address
+    FpgaBus = (CGraphFSMHardwareInterface*)
+              mmap(0
+                  , sizeof(CGraphFSMHardwareInterface)
+                  , PROT_READ | PROT_WRITE
+                  , MAP_SHARED
+                  , FpgaHandle
+                  , is_devmem ? (FPGA_MEM_ADDR & ~FPGA_MAP_MASK) : 0
+                  );
+    if (MAP_FAILED == FpgaBus)
+    {
+        // Handle any error in mmap
+        sprintf(cbuf, "CGraph...::open(): error in mmap(): %ld"
+                    , (long int)errno
+                    );
+        msg = cbuf;
+        return errno;
+    }
+
+    // Load message indicating success and return 0
+    sprintf(cbuf, "CGraph...::open(): %s Mapped at 0x%p"
+                , the_device.substr(0,256).c_str(), FpgaBus
+                );
+    msg = cbuf;
+
+    return 0;
 }
 
-int CGraphFSMProtoHardwareMmapper::close(int& FpgaHandle, CGraphFSMHardwareInterface*& FpgaBus)
+// Disconnect from mmap'ed device (or file emulating same)
+// - Unmap memory
+// - Close device
+int CGraphFSMProtoHardwareMmapper::close(int& FpgaHandle
+                                        , CGraphFSMHardwareInterface*& FpgaBus
+                                        , std::string& msg
+                                        )
 {
-    if (NULL != FpgaBus)
-    {
-        int unmap = munmap(FpgaBus, sizeof(CGraphFSMHardwareInterface));
-        if (unmap < 0)
-        {
-            perror("\nCGraphFSMProtoHardwareMmapper::close(): error in munmap() ");
-                return errno;
-        }
-        FpgaBus = NULL;
-    }
-    else { return(EALREADY); }
+    msg.clear();
+    if (!FpgaBus) { return errno=EALREADY; }
 
-    if (FpgaHandle > 0)
+    int unmap = munmap(FpgaBus, sizeof(CGraphFSMHardwareInterface));
+    if (unmap < 0)
     {
-        int closed = ::close(FpgaHandle);
-        if (closed < 0)
-        {
-            perror("\nCGraphFSMProtoHardwareMmapper::close(): error in close() ");
-            return errno;
-        }
-        FpgaHandle = 0;
+        perror("\nCGraph...::close(): error in munmap() ");
+        msg = "CGraph...::close(): error in munmap()";
+        return errno;
     }
-    else { return(EBADF); }
 
-    return(0);
+    FpgaBus = NULL;
+
+    if (FpgaHandle < 0) { return errno=EBADF; }
+
+    int closed = ::close(FpgaHandle);
+    if (closed < 0)
+    {
+        perror("\nCGraph...::close(): error in close() ");
+        msg = "CGraph...::close(): error in close()";
+        return errno;
+    }
+
+    msg = "CGraph...::close(): successfully closed and unmapped memory";
+    FpgaHandle = -1;
+
+    return 0;
 }
 
+// Read data from fpga
 int CGraphFSMProtoHardwareMmapper::read(const CGraphFSMHardwareInterface* FpgaBus, const size_t Address, void* Buffer, const size_t Len)
 {
-    if ( (NULL == FpgaBus) || (NULL == Buffer) ) { return(EINVAL); }
+    if ( (NULL == FpgaBus) || (NULL == Buffer) ) { return errno=EINVAL; }
 
-    if ( (Address + Len) > sizeof(CGraphFSMHardwareInterface) ) { return(EFAULT); }
+    if ( (Address + Len) > sizeof(CGraphFSMHardwareInterface) ) { return errno=EFAULT; }
 
-    //Read data from fpga:
     memcpy(Buffer, ((uint8_t*)FpgaBus) + Address, Len);
 
-    return(0);
+    return 0;
 }
 
+// Write data to fpga
 int CGraphFSMProtoHardwareMmapper::write(CGraphFSMHardwareInterface* FpgaBus, const size_t Address, const void* Buffer, const size_t Len)
 {
-    if ( (NULL == FpgaBus) || (NULL == Buffer) ) { return(EINVAL); }
+    if ( (NULL == FpgaBus) || (NULL == Buffer) ) { return errno=EINVAL; }
 
-    if ( (Address + Len) > sizeof(CGraphFSMHardwareInterface) ) { return(EFAULT); }
+    if ( (Address + Len) > sizeof(CGraphFSMHardwareInterface) ) { return errno=EFAULT; }
 
-    //Write data to fpga:
     memcpy(((uint8_t*)FpgaBus) + Address, Buffer, Len);
 
-    return(0);
+    return 0;
 }
 
 //EOF

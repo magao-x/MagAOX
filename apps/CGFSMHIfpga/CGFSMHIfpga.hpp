@@ -12,7 +12,7 @@
 
 #include "../../libMagAOX/libMagAOX.hpp" //Note this is included on command line to trigger pch
 #include "../../magaox_git_version.h"
-#include "CGraphFSMHardwareInterface.cpp"
+#include "../CGraphFSMHardwareInterface/CGraphFSMHardwareInterface.hpp"
 
 /** \defgroup CGFSMHIfpga
   * \brief The CGFSMHIfpga application to interface to the FPGA device driver
@@ -160,7 +160,9 @@ protected:
      */
 
    // Parameters which will be configurable at runtime via config file
-   // -       m_linux_dev - FPGA device name e.g. /dev/fpga0
+   // -       m_linux_dev - FPGA memory device name, default ""
+   //                       - Typical will be "/dev/mem"
+   //                       - May also be a file for emulation
    // - m_setpoint_source - Active source of micron input values
    // -     m_Dac_scaling - Setpoint scaling from micron to 24-bit int
    std::string m_linux_dev{""};
@@ -212,6 +214,9 @@ protected:
    uint32_t m_DacC_setpoint{0};
    int m_FPGA_fd{-1};                          // /dev/ FPGA file descr
    CGraphFSMHardwareInterface* m_p_interface;  // FPGA memory map ptr
+
+   int m_CGFSMHI_fd{-1};                       // Pointer to DAC FD
+   CGraphFSMHardwareInterface* m_pCGFSMHI{0};  // Pointer to DAC memory
 
    //TODO:  are some of these obsolete or not needed or redundant?
    //IMAGE m_shmimStream;
@@ -313,7 +318,7 @@ void CGFSMHIfpga::setupConfig()
    //
    shmimMonitorT::setupConfig(config);
 
-   config.add("linux_dev", "", "linux_dev", argType::Required, "", "linux_dev", false, "string", "The full name (e.g. /dev/fsmfpga) of the device this app will drive.");
+   config.add("linux_dev", "", "linux_dev", argType::Optional, "", "linux_dev", false, "string", "The full name (e.g. /dev/fsmfpga) of the device this app will drive.");
    config.add("setpoint_source", "", "setpoint_source", argType::Required, "", "setpoint_source", false, "string", "The source of the setpoint, either [indi] or [shm] or [disabled]");
    config.add("scaling.um_lo", "", "scaling.um_lo", argType::Required, "scaling", "um_lo", false, "real", "The lowest user setpoint, um [0.0]");
    config.add("scaling.um_hi", "", "scaling.um_hi", argType::Required, "scaling", "um_hi", false, "real", "The highest user setpoint, um [10.0]");
@@ -356,7 +361,32 @@ int CGFSMHIfpga::appStartup()
       return log<software_error,-1>({__FILE__, __LINE__});
    }
 
-   // TBD:  open FPGA device, map device memory
+   // Open FPGA device, map device memory
+   int the_errno;
+   std::string the_msg;
+   try
+   {
+      if (m_linux_dev.size())
+      {
+         the_errno = CGraphFSMProtoHardwareMmapper::open(m_linux_dev, m_CGFSMHI_fd, m_pCGFSMHI,the_msg);
+         if (the_errno != 0) { throw std::string("CGraph...::open[" + the_msg + "]"); }
+         log<text_log>("Opened FPGA device{name=[" + m_linux_dev + "]}"
+                      , logPrio::LOG_NOTICE
+                      );
+         log<text_log>(the_msg, logPrio::LOG_NOTICE);
+      }
+      else
+      {
+         log<text_log>("No FPGA device opened");
+         m_pCGFSMHI = 0;
+         m_CGFSMHI_fd = -1;
+      }
+   }
+   catch (std::string s)
+   {
+      log<software_error>({__FILE__,__LINE__, s + "; failed to open device name = [" + m_linux_dev + "]"});
+      return -1;
+   }
 
    // INDI interface to the setpoint source property
    createStandardIndiSelectionSw( m_indiP_setpoint_source, "setpoint_source", {"indi", "shm", "disabled"});
@@ -421,18 +451,37 @@ int CGFSMHIfpga::appLogic()
 int CGFSMHIfpga::appShutdown()
 {
    shmimMonitorT::appShutdown();
-   // TBD:  close FPGA device
+   std::string msg;
+   int the_errno = CGraphFSMProtoHardwareMmapper::close(m_CGFSMHI_fd, m_pCGFSMHI, msg);
+   if (the_errno) { perror(msg.c_str()); }
+   log<text_log>(msg, logPrio::LOG_NOTICE);
    return 0;
 }
 
 // Scale floating point values to FPGA-ranged integers
 int CGFSMHIfpga::updateDacs(bool update_INDI = false)
 {
+   uint32_t dac_setpoints[3];
+
    // Scale to D/A counts, integer, 0-1M
    // N.B. setpoint values in engineering units are assigned elsewhere
-   m_DacA_setpoint = m_Dac_scaling.scale(m_DacA_um);
-   m_DacB_setpoint = m_Dac_scaling.scale(m_DacB_um);
-   m_DacC_setpoint = m_Dac_scaling.scale(m_DacC_um);
+   m_DacA_setpoint = dac_setpoints[0] = m_Dac_scaling.scale(m_DacA_um);
+   m_DacB_setpoint = dac_setpoints[1] = m_Dac_scaling.scale(m_DacB_um);
+   m_DacC_setpoint = dac_setpoints[2] = m_Dac_scaling.scale(m_DacC_um);
+
+   if (m_pCGFSMHI)
+   {
+       size_t spaddr = (size_t)&((CGraphFSMHardwareInterface*)0)->DacASetpoint;
+       int the_errno = CGraphFSMProtoHardwareMmapper::write(m_pCGFSMHI, spaddr, dac_setpoints, 3*sizeof(uint32_t));
+       if (the_errno)
+       {
+           log<text_log>(std::string("FPGA mmapper write failed; closing mmap'ed device ..."));
+           std::string msg;
+           CGraphFSMProtoHardwareMmapper::close(m_CGFSMHI_fd, m_pCGFSMHI, msg);
+           log<text_log>(msg, logPrio::LOG_NOTICE);
+           if (m_pCGFSMHI) { m_pCGFSMHI = NULL; }
+       }
+   }
 
    if (update_INDI || (CGFSMHIfpga::SPSource::indi == m_setpoint_source))
    {
@@ -526,6 +575,7 @@ int CGFSMHIfpga::allocate(const dev::shmimT & placeholder)
 
 } // int CGFSMHIfpga::allocate(const dev::shmimT & placeholder)
 
+// Callback for shmim changes to update DACs
 inline
 int CGFSMHIfpga::processImage( void* curr_src,
                                const dev::shmimT & placeholder
@@ -640,7 +690,7 @@ INDI_NEWCALLBACK_DEFN(CGFSMHIfpga, m_indiP_setpoint_source )(const pcf::IndiProp
    return 0;
 }
 
-// Callback to specify an input um value
+// INDI callback to specify an input um value
 INDI_NEWCALLBACK_DEFN(CGFSMHIfpga, m_indiP_Dac_um)(const pcf::IndiProperty &ipRecv)
 {
 

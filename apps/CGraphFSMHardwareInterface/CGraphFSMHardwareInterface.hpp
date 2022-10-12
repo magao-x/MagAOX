@@ -150,8 +150,15 @@ public:
 
     //~ ~CGraphFSMHardwareMmapper() { close(); }
 
-    static int open(std::string& device_name, int& FpgaHandle, CGraphFSMHardwareInterface*& FpgaBus);
-    static int close(int& FpgaHandle, CGraphFSMHardwareInterface*& FpgaBus);
+    static int open(const std::string& device_name
+                   , int& FpgaHandle
+                   , CGraphFSMHardwareInterface*& FpgaBus
+                   , std::string& errmsg
+                   );
+    static int close(int& FpgaHandle
+                    , CGraphFSMHardwareInterface*& FpgaBus
+                    , std::string& errmsg
+                    );
     static int read(const CGraphFSMHardwareInterface* FpgaBus, const size_t Address, void* Buffer, const size_t Len);
     static int write(CGraphFSMHardwareInterface* FpgaBus, const size_t Address, const void* Buffer, const size_t Len);
 };

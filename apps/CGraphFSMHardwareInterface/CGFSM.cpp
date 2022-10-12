@@ -9,19 +9,23 @@ main(int argc, char** argv)
     bool is_devmem{s_devmem == the_device};
     fprintf(stderr, "[%s]=the_device\n", the_device.c_str());
     int the_errno{0};
+    std::string errmsg;
     try
     {
         int fd{-1};
         CGraphFSMHardwareInterface* pCGFSMHI{0};
 
         sstate = "CGFSMHI::open";
-        the_errno = CGraphFSMProtoHardwareMmapper::open(the_device, fd, pCGFSMHI);
+        the_errno = CGraphFSMProtoHardwareMmapper::open(the_device, fd, pCGFSMHI, errmsg);
 
         fprintf(stderr, "::open{%d=errno(%s);%d=fd;%p=pCGFSMHI;%lx=interface_size}\n"
                       , the_errno, strerror(the_errno), fd, pCGFSMHI
                       , ((long)(pCGFSMHI+1)) - ((long)pCGFSMHI)
                       );
-        if (the_errno != 0) { throw sstate; };
+
+        sstate += "[" + errmsg + "]";
+
+        if (the_errno != 0 && errmsg.size()) { throw sstate; };
 
         if (is_devmem)
         {
@@ -69,13 +73,16 @@ main(int argc, char** argv)
         }
 
         sstate = "Final CGFSMHI::close";
-        the_errno = CGraphFSMProtoHardwareMmapper::close(fd, pCGFSMHI);
+        the_errno = CGraphFSMProtoHardwareMmapper::close(fd, pCGFSMHI, errmsg);
         if (the_errno != 0) { throw sstate; };
+        fprintf(stderr,"%s\n", errmsg.c_str());
     }
     catch (std::string s)
     {
-        fprintf(stderr, "%d=errno(%s) at [%s]\n"
-                      , the_errno, strerror(the_errno), s.c_str());
+        fprintf(stderr, "%d=errno(%s) at [%s]; error message=[%s]\n"
+                      , the_errno, strerror(the_errno), s.c_str()
+                      , errmsg.c_str()
+                      );
         return -1;
     }
     return 0;
