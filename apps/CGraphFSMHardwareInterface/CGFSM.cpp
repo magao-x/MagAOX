@@ -7,7 +7,13 @@ int main(int argc, char** argv)
     static_cast<void>(argv);
     std::string sstate{"Unknown"};
     char* ge = getenv("FPGABUS_EMULATION_PATHNAME");
-    fprintf(stderr, "%s=getenv(\"FPGABUS_EMULATION_PATHNAME\")\n", ge ? ge : "<no value>");
+    const std::string s_devmem{"/dev/mem"};
+    std::string the_device{ge ? ge : s_devmem};
+    bool is_devmem{s_devmem == the_device};
+    fprintf(stderr, "%s=%s=getenv(\"FPGABUS_EMULATION_PATHNAME\")\n"
+                  , ge ? ge : "/dev/mem"
+                  , the_device.c_str()
+                  );
     int the_errno{0};
     try
     {
@@ -15,7 +21,7 @@ int main(int argc, char** argv)
         CGraphFSMHardwareInterface* pCGFSMHI{0};
 
         sstate = "CGFSMHI::open";
-        the_errno = CGraphFSMProtoHardwareMmapper::open(fd, pCGFSMHI);
+        the_errno = CGraphFSMProtoHardwareMmapper::open(the_device, fd, pCGFSMHI);
 
         fprintf(stderr, "::open{%d=errno(%s);%d=fd;%p=pCGFSMHI;%lx=interface_size}\n"
                       , the_errno, strerror(the_errno), fd, pCGFSMHI
@@ -23,9 +29,17 @@ int main(int argc, char** argv)
                       );
         if (the_errno != 0) { throw sstate; };
 
-#       ifdef EMULATE_FSM_HARDWARE
-        sstate = "Writing to emulated FPGA RAM";
+        if (is_devmem)
+        {
+            sstate = "Writing to FPGA RAM";
+        }
+        else
+        {
+            sstate = "Writing to emulated FPGA RAM";
+        }
+
         if (pCGFSMHI
+           && (!is_devmem) // do not write time to FPGA RAM
            && argc>1
            && std::string("--write-time") == std::string(argv[1])
            )
@@ -57,7 +71,6 @@ int main(int argc, char** argv)
                           ,dac_setpoints[0], dac_setpoints[1], dac_setpoints[2]
                           );
         }
-#       endif//EMULATE_FSM_HARDWARE
 
         sstate = "Final CGFSMHI::close";
         the_errno = CGraphFSMProtoHardwareMmapper::close(fd, pCGFSMHI);
