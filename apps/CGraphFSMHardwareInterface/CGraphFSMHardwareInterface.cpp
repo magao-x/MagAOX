@@ -4,8 +4,6 @@
 #include <stdint.h>
 #include <stddef.h>
 #include <stdio.h>
-#include <string>
-#include <cstring>
 #include <errno.h>
 #include <fcntl.h>
 #include <unistd.h>
@@ -50,8 +48,8 @@ int CGraphFSMProtoHardwareMmapper::open(std::string& the_device
 
     if (FpgaHandle <= 0)
     {
-        printf("\nMapFpgaBus(): error in open(/dev/mem): %ld.\n", (long int)errno);
-        return(errno);
+        fprintf(stderr, "\nMapFpgaBus(): error in open(/dev/mem): %ld.\n", (long int)errno);
+        return errno;
     }
     else
     {
@@ -60,8 +58,8 @@ int CGraphFSMProtoHardwareMmapper::open(std::string& the_device
             int ft = ftruncate(FpgaHandle, sizeof(CGraphFSMHardwareInterface));  //Make sure the file is big enough for all read/writes to mmap
             if (ft < 0)
             {
-                    perror("\nMapFpgaBus(): error in ftruncate() ");
-                    return(errno);
+                    perror("\nMapFpgaBus(): error in ftruncate()\n");
+                    return errno;
             }
         }
 
@@ -77,12 +75,12 @@ int CGraphFSMProtoHardwareMmapper::open(std::string& the_device
 
         if (MAP_FAILED == FpgaBus)
         {
-            printf("\nMapFpgaBus(): error in mmap(): %ld.\n", (long int)errno);
-            return(errno);
+            fprintf(stderr, "\nMapFpgaBus(): error in mmap(): %ld.\n", (long int)errno);
+            return errno;
         }
         else
         {
-            printf("\nMapFpgaBus(): %s Mapped at: %p.\n", the_device.c_str(), FpgaBus);
+            fprintf(stderr, "\nMapFpgaBus(): %s Mapped at: %p.\n", the_device.c_str(), FpgaBus);
         }
     }
 
@@ -97,7 +95,7 @@ int CGraphFSMProtoHardwareMmapper::close(int& FpgaHandle, CGraphFSMHardwareInter
         if (unmap < 0)
         {
             perror("\nCGraphFSMProtoHardwareMmapper::close(): error in munmap() ");
-                return(errno);
+                return errno;
         }
         FpgaBus = NULL;
     }
@@ -109,7 +107,7 @@ int CGraphFSMProtoHardwareMmapper::close(int& FpgaHandle, CGraphFSMHardwareInter
         if (closed < 0)
         {
             perror("\nCGraphFSMProtoHardwareMmapper::close(): error in close() ");
-            return(errno);
+            return errno;
         }
         FpgaHandle = 0;
     }

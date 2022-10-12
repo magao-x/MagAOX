@@ -1,19 +1,13 @@
-#include <time.h>
-#include <string>
 #include "CGFSM.hpp"
-int main(int argc, char** argv)
+
+int
+main(int argc, char** argv)
 {
-    static_cast<void>(argc);
-    static_cast<void>(argv);
     std::string sstate{"Unknown"};
-    char* ge = getenv("FPGABUS_EMULATION_PATHNAME");
     const std::string s_devmem{"/dev/mem"};
-    std::string the_device{ge ? ge : s_devmem};
+    std::string the_device{argc > 1 ? argv[1] : s_devmem};
     bool is_devmem{s_devmem == the_device};
-    fprintf(stderr, "%s=%s=getenv(\"FPGABUS_EMULATION_PATHNAME\")\n"
-                  , ge ? ge : "/dev/mem"
-                  , the_device.c_str()
-                  );
+    fprintf(stderr, "[%s]=the_device\n", the_device.c_str());
     int the_errno{0};
     try
     {
@@ -40,15 +34,17 @@ int main(int argc, char** argv)
 
         if (pCGFSMHI
            && (!is_devmem) // do not write time to FPGA RAM
-           && argc>1
-           && std::string("--write-time") == std::string(argv[1])
+           && argc>2
+           && std::string("--write-time") == std::string(argv[2])
            )
         {
             uint32_t dac_setpoints[3];
             size_t spaddr = (size_t)&((CGraphFSMHardwareInterface*)0)->DacASetpoint;
+
             sstate = "Initial CGFSMHI::read of setpoints";
             the_errno = CGraphFSMProtoHardwareMmapper::read(pCGFSMHI, spaddr, dac_setpoints, 3*sizeof(uint32_t));
             if (the_errno != 0) { throw sstate; };
+
             fprintf(stderr,"%u,%u,%u=DAC setpoints before\n"
                           ,dac_setpoints[0], dac_setpoints[1], dac_setpoints[2]
                           );
