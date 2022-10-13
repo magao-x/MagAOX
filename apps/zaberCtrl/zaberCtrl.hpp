@@ -363,6 +363,7 @@ int zaberCtrl::appLogic()
          m_indiP_rawPos.setState(INDI_IDLE);
          m_indiP_rawPos["target"] = m_rawPos;
       }
+
       m_indiDriver->sendSetProperty(m_indiP_pos);
       m_indiDriver->sendSetProperty(m_indiP_rawPos);
    }

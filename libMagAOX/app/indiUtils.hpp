@@ -87,7 +87,6 @@ int addNumberElement( pcf::IndiProperty & prop, ///< [out] the property to which
 /** Only sends the set property message if the new value is different.
   * For properties with more than one element that may have changed, you should use the vector version below.
   * 
-  * \todo investigate how this handles floating point values and string conversions.
   * \todo this needs a const char specialization to std::string
   * 
   */  
@@ -103,11 +102,15 @@ void updateIfChanged( pcf::IndiProperty & p,   ///< [in/out] The property contai
    
    try
    {
-      T oldVal = p[el].get<T>();
-
+      //This is same code in IndiElement
+      std::stringstream ssValue;
+      ssValue.precision( 15 );
+      ssValue << std::boolalpha << newVal;
+      
       pcf::IndiProperty::PropertyStateType oldState = p.getState();
    
-      if(oldVal != newVal || oldState != newState)
+      //Do comparison in string space, not raw value
+      if(p[el].getValue() != ssValue.str()|| oldState != newState)
       {
          p[el].set(newVal);
          p.setState (newState);
@@ -131,7 +134,6 @@ void updateIfChanged( pcf::IndiProperty & p,   ///< [in/out] The property contai
 /// Update the elements of an INDI propery, but only if there has been a change in at least one.
 /** Only sends the set property message if at least one of the new values is different, or if the state has changed.
   *
-  * \todo investigate how this handles floating point values and string conversions.
   * \todo this needs a const char specialization to std::string
   * 
   */  
@@ -156,9 +158,13 @@ void updateIfChanged( pcf::IndiProperty & p,   ///< [in/out] The property contai
       
       for(n=0; n< els.size() && changed != true; ++n)
       {
-         T oldVal = p[els[n]].get<T>();
+         //This is same code in IndiElement
+         std::stringstream ssValue;
+         ssValue.precision( 15 );
+         ssValue << std::boolalpha << newVals[n];
 
-         if(oldVal != newVals[n]) changed = true;
+         //compare in string space
+         if(p[els[n]].getValue() != ssValue.str()) changed = true;
       }
       
       //and if there are changes, we send an update
