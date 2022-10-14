@@ -133,6 +133,7 @@ void stage::subscribe()
    m_parent->addSubscriberProperty(this, m_stageName, "fsm");
    m_parent->addSubscriberProperty(this, m_stageName, "maxpos");
    m_parent->addSubscriberProperty(this, m_stageName, "position");
+   m_parent->addSubscriberProperty(this, m_stageName, "filter");
    m_parent->addSubscriberProperty(this, m_stageName, "presetName");
    m_parent->addSubscriberProperty(this, m_stageName, "filterName");
    m_parent->addSubscriber(ui.fsmState);
@@ -207,8 +208,9 @@ void stage::handleSetProperty( const pcf::IndiProperty & ipRecv)
          m_position = val;
       }
    }
-   else if(ipRecv.getName()== "preset" && m_filterWheel)
+   else if(ipRecv.getName()== "filter")
    {
+      m_filterWheel = true;
       if(ipRecv.find("current"))
       {
          double val = ipRecv["current"].get<double>();
@@ -221,9 +223,11 @@ void stage::handleSetProperty( const pcf::IndiProperty & ipRecv)
    {
       if(ipRecv.getName() == "filterName") m_filterWheel = true;
 
+      int n =0;
       std::string newName;
       for(auto it = ipRecv.getElements().begin(); it != ipRecv.getElements().end(); ++it)
       {
+         ++n;
          if(ui.setPoint->findText(QString(it->second.getName().c_str())) == -1)
          {
             ui.setPoint->addItem(QString(it->second.getName().c_str()));
@@ -243,6 +247,8 @@ void stage::handleSetProperty( const pcf::IndiProperty & ipRecv)
             //m_value = newName; 
          }
       }
+
+      if(m_filterWheel) m_maxPos = n + 0.5;
    }
 
    updateGUI();   
@@ -421,7 +427,14 @@ void stage::on_positionSlider_sliderReleased()
    pcf::IndiProperty ip(pcf::IndiProperty::Number);
    
    ip.setDevice(m_stageName);
-   ip.setName("position");
+   if(m_filterWheel)
+   {
+      ip.setName("filter");
+   }
+   else
+   {
+      ip.setName("position");
+   }
    ip.add(pcf::IndiElement("target"));
    ip["target"] = newPos;
 
@@ -442,7 +455,14 @@ void stage::on_position_returnPressed()
    pcf::IndiProperty ip(pcf::IndiProperty::Number);
    
    ip.setDevice(m_stageName);
-   ip.setName("position");
+   if(m_filterWheel)
+   {
+      ip.setName("filter");
+   }
+   else
+   {
+      ip.setName("position");
+   }
    ip.add(pcf::IndiElement("target"));
    ip["target"] = newPos;
    lastPos = newPos;
@@ -465,7 +485,14 @@ void stage::on_posMinus_pressed()
    pcf::IndiProperty ip(pcf::IndiProperty::Number);
    
    ip.setDevice(m_stageName);
-   ip.setName("position");
+   if(m_filterWheel)
+   {
+      ip.setName("filter");
+   }
+   else
+   {
+      ip.setName("position");
+   }
    ip.add(pcf::IndiElement("target"));
    ip["target"] = newPos;
    
@@ -479,7 +506,14 @@ void stage::on_posPlus_pressed()
    pcf::IndiProperty ip(pcf::IndiProperty::Number);
    
    ip.setDevice(m_stageName);
-   ip.setName("position");
+   if(m_filterWheel)
+   {
+      ip.setName("filter");
+   }
+   else
+   {
+      ip.setName("position");
+   }
    ip.add(pcf::IndiElement("target"));
    ip["target"] = newPos;
    
