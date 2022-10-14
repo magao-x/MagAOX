@@ -137,6 +137,10 @@ public: // interfaces
     const std::string fifo_name() const { return m_fifo_name; }
     const std::string& last_hb() const { return m_last_hb; }
 
+    // Public read/write access to private class members (properties)
+    const int max_restarts() const { return m_restart_max; }
+    void max_restarts(int val) { m_restart_max = val; }
+
     // /////////////////////////////////////////////////////////////////
     // /////////////////////////////////////////////////////////////////
     /// Open a named FIFO, load results into HexbeatMonitor instance
@@ -423,8 +427,8 @@ public: // interfaces
     bool
     update_restart_check_expiry()
     {
-        // Increment restart parameter, return true after 10th restart
-        return ++m_restart > 1; //> 10; leave at 1 for testing
+        // Increment restart parameter, return true after Nth restart
+        return ++m_restart > m_restart_max && m_restart_max != 0;
     }
     // /////////////////////////////////////////////////////////////////
 
@@ -438,7 +442,9 @@ private: // Internal attributes and interfaces
     // - If FD is non-negative, then it can be only one value, which is
     //   the offset of this HexbeatMonitor instance in an array of same
 
-    int m_restart{0}; ///< Accumulated restart parameter
+    int m_restart{0}; ///< Accumulated restart parameter (Arp)
+
+    int m_restart_max{0}; ///< Max Arp; 0 => infinity
 
     bool m_sel{false}; ///< Do monitoring of this FD if m_fd > -1
 
