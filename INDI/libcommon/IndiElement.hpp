@@ -290,7 +290,7 @@ template <class TT> pcf::IndiElement::operator TT() const
 
   TT ttValue;
   std::stringstream ssValue( m_szValue );
-  ssValue.precision( 8 );
+  ssValue.precision( 15 );
 
   // Try to stream the data into the variable.
   ssValue >> std::boolalpha >> ttValue;
@@ -312,7 +312,7 @@ template <class TT> const TT &pcf::IndiElement::operator= ( const TT &ttValue )
   pcf::ReadWriteLock::AutoWLock rwAuto( &m_rwData );
 
   std::stringstream ssValue;
-  ssValue.precision( 8 );
+  ssValue.precision( 15 );
   ssValue << std::boolalpha << ttValue;
   m_szValue = ssValue.str();
   return ttValue;
@@ -326,7 +326,7 @@ template <class TT> void pcf::IndiElement::set( const TT &ttValue )
   pcf::ReadWriteLock::AutoWLock rwAuto( &m_rwData );
 
   std::stringstream ssValue;
-  ssValue.precision( 8 );
+  ssValue.precision( 15 );
   ssValue << std::boolalpha << ttValue;
   m_szValue = ssValue.str();
 }
@@ -339,7 +339,7 @@ template <class TT> void pcf::IndiElement::setValue( const TT &ttValue )
   pcf::ReadWriteLock::AutoWLock rwAuto( &m_rwData );
 
   std::stringstream ssValue;
-  ssValue.precision( 8 );
+  ssValue.precision( 15 );
   ssValue << std::boolalpha << ttValue;
   m_szValue = ssValue.str();
 }
@@ -352,7 +352,7 @@ template <class TT> void pcf::IndiElement::setMax( const TT &ttMax )
   pcf::ReadWriteLock::AutoWLock rwAuto( &m_rwData );
 
   std::stringstream ssValue;
-  ssValue.precision( 8 );
+  ssValue.precision( 15 );
   ssValue << std::boolalpha << ttMax;
   m_szMax = ssValue.str();
 }
@@ -365,7 +365,7 @@ template <class TT> void pcf::IndiElement::setMin( const TT &ttMin )
   pcf::ReadWriteLock::AutoWLock rwAuto( &m_rwData );
 
   std::stringstream ssValue;
-  ssValue.precision( 8 );
+  ssValue.precision( 15 );
   ssValue << std::boolalpha << ttMin;
   m_szMin = ssValue.str();
 }
@@ -378,7 +378,7 @@ template <class TT> void pcf::IndiElement::setSize( const TT &ttSize )
   pcf::ReadWriteLock::AutoWLock rwAuto( &m_rwData );
 
   std::stringstream ssValue;
-  ssValue.precision( 8 );
+  ssValue.precision( 15 );
   ssValue << std::boolalpha << ttSize;
   m_szSize = ssValue.str();
 }
@@ -405,7 +405,7 @@ template <class TT> void pcf::IndiElement::setStep( const TT &ttStep )
   pcf::ReadWriteLock::AutoWLock rwAuto( &m_rwData );
 
   std::stringstream ssValue;
-  ssValue.precision( 8 );
+  ssValue.precision( 15 );
   ssValue << std::boolalpha << ttStep;
   m_szStep = ssValue.str();
 }

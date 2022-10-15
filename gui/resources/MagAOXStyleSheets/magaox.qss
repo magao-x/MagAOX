@@ -869,6 +869,20 @@ QLineEdit[isEditing="true"]
    color: #eff0f1;
 }
 
+QComboBox[isStatus="true"]
+{
+   color: #08ebff;
+}
+QComboBox:disabled[isStatus="true"]
+{
+   color: #047782;
+}
+
+QComboBox[isEditing="true"]
+{
+   color: #eff0f1;
+}
+
 
 QLCDNumber[isStatus="true"]
 {

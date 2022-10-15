@@ -90,7 +90,8 @@ all_guis = \
 	coronAlignGUI \
    loopCtrlGUI \
 	roiGUI \
-	cameraGUI
+	cameraGUI \
+	stageGUI
 
 ifeq ($(MAGAOX_ROLE),RTC)
   guis_to_build =
