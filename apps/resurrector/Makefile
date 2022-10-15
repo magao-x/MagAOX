@@ -1,11 +1,12 @@
 CPPFLAGS = -I. -I../../INDI/INDI -Wall
 
-EXES=test/gausswait test/test_resurrector
+EXES=test/gausswait test/test_resurrector indi_resurrector
 
 SELF_DIR := $(abspath $(dir $(lastword $(MAKEFILE_LIST))))
 
 all: $(EXES)
 
+indi_resurrector :: resurrector.hpp HexbeatMonitor.hpp indi_resurrector.hpp indi_resurrector.cpp
 test/test_resurrector :: resurrector.hpp test/test_resurrector.cpp HexbeatMonitor.hpp
 test/gausswait :: test/gausswait.cpp
 
