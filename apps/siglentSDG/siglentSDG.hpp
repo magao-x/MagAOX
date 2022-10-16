@@ -79,8 +79,8 @@ protected:
    double m_C2frequency_tgt {-1};
    double m_C2vpp_tgt {-1};
 
-   bool m_C1Sync {false};
-   bool m_C2Sync {false};
+   bool m_C1sync {false};
+   bool m_C2sync {false};
 
 private:
 
@@ -755,7 +755,7 @@ int siglentSDG::appLogic()
             cs = 1; //Trigger normalizeSetup
          }
 
-         if(m_C1Sync)
+         if(m_C1sync)
          {
             updateSwitchIfChanged(m_indiP_C1sync, "toggle", pcf::IndiElement::On, INDI_OK);
          }
@@ -781,7 +781,7 @@ int siglentSDG::appLogic()
             cs = 1; //Trigger normalizeSetup
          }
 
-         if(m_C2Sync)
+         if(m_C2sync)
          {
             updateSwitchIfChanged(m_indiP_C2sync, "toggle", pcf::IndiElement::On, INDI_OK);
          }
@@ -1495,7 +1495,7 @@ int siglentSDG::checkSetup()
       return 1;
    }
 
-   rv = querySYNC(m_C1Sync, 1);
+   rv = querySYNC(m_C1sync, 1);
 
    if(rv < 0)
    {
@@ -1503,7 +1503,7 @@ int siglentSDG::checkSetup()
       return rv;
    }
 
-   rv = querySYNC(m_C2Sync, 2);
+   rv = querySYNC(m_C2sync, 2);
 
    if(rv < 0)
    {
@@ -2284,19 +2284,21 @@ int siglentSDG::recordTelem( const telem_fxngen * )
 inline 
 int siglentSDG::recordParams(bool force)
 {
-   static double old_C1outp = m_C1outp; 
+   static double old_C1outp = -1e30; //Ensure first time writes
    static double old_C1frequency = m_C1frequency; 
    static double old_C1vpp = m_C1vpp; 
    static double old_C1ofst = m_C1ofst; 
    static double old_C1phse = m_C1phse; 
    static std::string old_C1wvtp = m_C1wvtp;
+   static bool old_C1sync = m_C1sync;
    static double old_C2outp = m_C2outp; 
    static double old_C2frequency = m_C2frequency; 
    static double old_C2vpp = m_C2vpp; 
    static double old_C2ofst = m_C2ofst; 
    static double old_C2phse = m_C2phse; 
    static std::string old_C2wvtp = m_C2wvtp;
-                  
+   static bool old_C2sync = m_C2sync;
+
    bool write = false;
    
    if(!force)
@@ -2307,18 +2309,20 @@ int siglentSDG::recordParams(bool force)
       else if( old_C1ofst != m_C1ofst ) write = true;
       else if( old_C1phse != m_C1phse ) write = true;
       else if( old_C1wvtp != m_C1wvtp ) write = true;
+      else if( old_C1sync != m_C1sync ) write = true;
       else if( old_C2outp != m_C2outp ) write = true;
       else if( old_C2frequency != m_C2frequency ) write = true;
       else if( old_C2vpp != m_C2vpp ) write = true;
       else if( old_C2ofst != m_C2ofst ) write = true;
       else if( old_C2phse != m_C2phse ) write = true;
       else if( old_C2wvtp != m_C2wvtp ) write = true;
+      else if( old_C2sync != m_C2sync ) write = true;
    }
    
    if(force || write)
    {
       telem<telem_fxngen>({m_C1outp, m_C1frequency, m_C1vpp, m_C1ofst, m_C1phse, m_C1wvtp,
-                             m_C2outp, m_C2frequency, m_C2vpp, m_C2ofst, m_C2phse, m_C2wvtp});
+                             m_C2outp, m_C2frequency, m_C2vpp, m_C2ofst, m_C2phse, m_C2wvtp, m_C1sync, m_C2sync});
       
       old_C1outp = m_C1outp;
       old_C1frequency = m_C1frequency;
@@ -2326,6 +2330,7 @@ int siglentSDG::recordParams(bool force)
       old_C1ofst = m_C1ofst;
       old_C1phse = m_C1phse;
       old_C1wvtp = m_C1wvtp;
+      old_C1sync = m_C1sync;
       
       old_C2outp = m_C2outp;
       old_C2frequency = m_C2frequency;
@@ -2333,6 +2338,7 @@ int siglentSDG::recordParams(bool force)
       old_C2ofst = m_C2ofst;
       old_C2phse = m_C2phse;
       old_C2wvtp = m_C2wvtp;
+      old_C2sync = m_C2sync;
    }
    
    return 0;

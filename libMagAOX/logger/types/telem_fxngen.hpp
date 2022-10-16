@@ -47,7 +47,9 @@ struct telem_fxngen : public flatbuffer_log
                 const double & C2vpp,       ///< [in] Channel 2 P2P voltage [V]
                 const double & C2ofst,      ///< [in] Channel 2 offset [V]
                 const double & C2phse,      ///< [in] Channel 2 phase [deg]
-                const std::string & C2wvtp  ///< [in] Channel 2 wavetype  (SINE or DC) 
+                const std::string & C2wvtp, ///< [in] Channel 2 wavetype  (SINE or DC) 
+                const uint8_t & C1sync,     ///< [in] Channel 1 sync status
+                const uint8_t & C2sync      ///< [in] Channel 2 sync status
               )
       {
          uint8_t  _C1wvtp = 3,  _C2wvtp = 3;
@@ -60,7 +62,7 @@ struct telem_fxngen : public flatbuffer_log
          else if(C2wvtp == "SINE") _C2wvtp = 1;
          
          
-         auto fp = CreateTelem_fxngen_fb(builder, C1outp, C1freq, C1vpp, C1ofst, C1phse, _C1wvtp, C2outp, C2freq, C2vpp, C2ofst, C2phse, _C2wvtp);
+         auto fp = CreateTelem_fxngen_fb(builder, C1outp, C1freq, C1vpp, C1ofst, C1phse, _C1wvtp, C2outp, C2freq, C2vpp, C2ofst, C2phse, _C2wvtp, C1sync, C2sync);
          builder.Finish(fp);
 
       }
@@ -90,7 +92,10 @@ struct telem_fxngen : public flatbuffer_log
       msg += std::to_string(fbs->C1vpp()) + " Vp2p ";
       msg += std::to_string(fbs->C1ofst()) + " V ";
       msg += std::to_string(fbs->C1phse()) + " deg ";
-      
+      msg += "SYNC ";
+      if(fbs->C1sync()) msg += "ON ";
+      else msg += "OFF ";
+
       msg += " | Ch 2: ";
 
       if(fbs->C2wvtp() == 0) msg += "DC ";
@@ -105,6 +110,9 @@ struct telem_fxngen : public flatbuffer_log
       msg += std::to_string(fbs->C2vpp()) + " Vp2p ";
       msg += std::to_string(fbs->C2ofst()) + " V ";
       msg += std::to_string(fbs->C2phse()) + " deg ";
+      msg += "SYNC ";
+      if(fbs->C2sync()) msg += "ON ";
+      else msg += "OFF ";
 
       return msg;
    

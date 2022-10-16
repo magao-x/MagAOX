@@ -2821,7 +2821,7 @@ int stdCamera<derivedT>::recordCamera( bool force )
 {
    static std::string last_mode;
    static roi last_roi;
-   static float last_expTime = 0;
+   static float last_expTime = -1e30; //ensure first one goes
    static float last_fps = 0;
    static float last_adcSpeed = -1;
    static float last_emGain = -1;
@@ -2832,7 +2832,8 @@ int stdCamera<derivedT>::recordCamera( bool force )
    static std::string last_tempControlStatusStr;
    static std::string last_shutterStatus;
    static int last_shutterState;
-   
+   static bool last_synchro;
+
    if(force || m_modeName != last_mode ||
                m_currentROI.x != last_roi.x ||
                m_currentROI.y != last_roi.y ||
@@ -2850,12 +2851,13 @@ int stdCamera<derivedT>::recordCamera( bool force )
                m_tempControlOnTarget != last_tempControlOnTarget ||
                m_tempControlStatusStr != last_tempControlStatusStr ||
                m_shutterStatus != last_shutterStatus ||
-               m_shutterState != last_shutterState )
+               m_shutterState != last_shutterState ||
+               m_synchro != last_synchro )
    {
       derived().template telem<telem_stdcam>({m_modeName, m_currentROI.x, m_currentROI.y, 
                                                     m_currentROI.w, m_currentROI.h, m_currentROI.bin_x, m_currentROI.bin_y,
                                                        m_expTime, m_fps, m_emGain, m_adcSpeed, m_ccdTemp, m_ccdTempSetpt, (uint8_t) m_tempControlStatus, 
-                                                             (uint8_t) m_tempControlOnTarget, m_tempControlStatusStr, m_shutterStatus, (int8_t) m_shutterState});
+                                                             (uint8_t) m_tempControlOnTarget, m_tempControlStatusStr, m_shutterStatus, (int8_t) m_shutterState, (uint8_t) m_synchro});
       
       last_mode = m_modeName;
       last_roi = m_currentROI;
@@ -2870,6 +2872,7 @@ int stdCamera<derivedT>::recordCamera( bool force )
       last_tempControlStatusStr = m_tempControlStatusStr;
       last_shutterStatus = m_shutterStatus;
       last_shutterState = m_shutterState;
+      last_synchro = m_synchro;
    }
    
    
