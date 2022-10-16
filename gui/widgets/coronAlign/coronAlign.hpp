@@ -20,9 +20,13 @@ class coronAlign : public xWidget
 {
    Q_OBJECT
    
+   enum camera {FLOWFS, LLOWFS, CAMSCIS};
+
 protected:
    QMutex m_mutex;
    
+   int m_camera {FLOWFS};
+
    //Pico Motors
    std::string m_picoState;
    
@@ -86,6 +90,27 @@ public:
 public slots:
    void updateGUI();
    
+   void on_checkCamflowfs_clicked()
+   {
+      ui.checkCamflowfs->setCheckState(Qt::Checked);
+      ui.checkCamllowfs->setCheckState(Qt::Unchecked);
+      ui.checkCamsci12->setCheckState(Qt::Unchecked);
+      m_camera = FLOWFS;
+   }
+
+   void on_checkCamllowfs_clicked()
+   {
+      ui.checkCamllowfs->setCheckState(Qt::Unchecked);
+   }
+
+   void on_checkCamsci12_clicked()
+   {
+      ui.checkCamflowfs->setCheckState(Qt::Unchecked);
+      ui.checkCamllowfs->setCheckState(Qt::Unchecked);
+      ui.checkCamsci12->setCheckState(Qt::Checked);
+      m_camera = CAMSCIS;
+   }
+
    void on_button_pupil_u_pressed();
    void on_button_pupil_d_pressed();
    void on_button_pupil_l_pressed();
@@ -130,6 +155,8 @@ coronAlign::coronAlign( QWidget * Parent, Qt::WindowFlags f) : xWidget(Parent, f
    snprintf(ss, 5, "%d", m_lyotScale);
    ui.button_lyot_scale->setText(ss);
    
+   ui.checkCamllowfs->setEnabled(false);
+
    onDisconnect();
 }
    
@@ -160,7 +187,6 @@ void coronAlign::subscribe()
  
 void coronAlign::onConnect()
 {
-   ui.labelTitle->setEnabled(true);
    ui.labelPupil->setEnabled(true);
    ui.labelFocal->setEnabled(true);
    ui.labelLyot->setEnabled(true);
@@ -193,7 +219,6 @@ void coronAlign::onDisconnect()
    m_fwFocalState = "";
    m_fwLyotState = "";
    
-   ui.labelTitle->setEnabled(false);
    ui.labelPupil->setEnabled(false);
    ui.labelFocal->setEnabled(false);
    ui.labelLyot->setEnabled(false);
@@ -392,39 +417,95 @@ void coronAlign::updateGUI()
    }
    
 
+   if(m_camera == FLOWFS)
+   {
+      ui.checkCamflowfs->setCheckState(Qt::Checked);
+      ui.checkCamllowfs->setCheckState(Qt::Unchecked);
+      ui.checkCamsci12->setCheckState(Qt::Unchecked);
+   }
+   else if(m_camera == LLOWFS)
+   {
+      ui.checkCamflowfs->setCheckState(Qt::Unchecked);
+      ui.checkCamllowfs->setCheckState(Qt::Checked);
+      ui.checkCamsci12->setCheckState(Qt::Unchecked);
+   }
+   else
+   {
+      ui.checkCamflowfs->setCheckState(Qt::Unchecked);
+      ui.checkCamllowfs->setCheckState(Qt::Unchecked);
+      ui.checkCamsci12->setCheckState(Qt::Checked);
+   }
+
 } //updateGUI()
 
 void coronAlign::enablePicoButtons()
 {   
-   ui.button_pupil_u->setEnabled(true);
-   ui.button_pupil_d->setEnabled(true);
-   ui.button_focal_u->setEnabled(true);
-   ui.button_focal_d->setEnabled(true);
-   ui.button_lyot_l->setEnabled(true);
-   ui.button_lyot_r->setEnabled(true);
+   if(m_camera == FLOWFS)
+   {
+      ui.button_pupil_u->setEnabled(true);
+      ui.button_pupil_d->setEnabled(true);
+      ui.button_focal_u->setEnabled(true);
+      ui.button_focal_d->setEnabled(true);
+      ui.button_lyot_l->setEnabled(true);
+      ui.button_lyot_r->setEnabled(true);
+   }
+   else
+   {
+      ui.button_pupil_l->setEnabled(true);
+      ui.button_pupil_r->setEnabled(true);
+      ui.button_focal_l->setEnabled(true);
+      ui.button_focal_r->setEnabled(true);
+      ui.button_lyot_u->setEnabled(true);
+      ui.button_lyot_d->setEnabled(true);
+   }
 }
 
 void coronAlign::disablePicoButtons()
 {
-   ui.button_pupil_u->setEnabled(false);
-   ui.button_pupil_d->setEnabled(false);
-   ui.button_focal_u->setEnabled(false);
-   ui.button_focal_d->setEnabled(false);
-   ui.button_lyot_l->setEnabled(false);
-   ui.button_lyot_r->setEnabled(false);
+   if(m_camera == FLOWFS)
+   {
+      ui.button_pupil_u->setEnabled(false);
+      ui.button_pupil_d->setEnabled(false);
+      ui.button_focal_u->setEnabled(false);
+      ui.button_focal_d->setEnabled(false);
+      ui.button_lyot_l->setEnabled(false);
+      ui.button_lyot_r->setEnabled(false);
+   }
+   else
+   {
+      ui.button_pupil_l->setEnabled(false);
+      ui.button_pupil_r->setEnabled(false);
+      ui.button_focal_l->setEnabled(false);
+      ui.button_focal_r->setEnabled(false);
+      ui.button_lyot_u->setEnabled(false);
+      ui.button_lyot_d->setEnabled(false);
+   }
 }
 
 void coronAlign::on_button_pupil_u_pressed()
 {
    pcf::IndiProperty ip(pcf::IndiProperty::Number);
    
-   ip.setDevice("picomotors");
-   ip.setName("picopupil_pos");
-   ip.add(pcf::IndiElement("target"));
-   ip["target"] = m_picoPupilPos + m_pupilScale*m_picoPupilStepSize;
+   if(m_camera == FLOWFS)
+   {
+      ip.setDevice("picomotors");
+      ip.setName("picopupil_pos");
+      ip.add(pcf::IndiElement("target"));
+      ip["target"] = m_picoPupilPos + m_pupilScale*m_picoPupilStepSize;
 
-   disablePicoButtons();
+      disablePicoButtons();
+   }
+   else 
+   {
+      ip.setDevice("fwpupil");
+      ip.setName("filter");
+      ip.add(pcf::IndiElement("target"));
+      ip["target"] = m_fwPupilPos + m_pupilScale*m_fwPupilStepSize;
    
+      ui.button_pupil_l->setEnabled(false);
+      ui.button_pupil_r->setEnabled(false);
+   }
+
    sendNewProperty(ip);
 }
 
@@ -432,12 +513,25 @@ void coronAlign::on_button_pupil_d_pressed()
 {
    pcf::IndiProperty ip(pcf::IndiProperty::Number);
    
-   ip.setDevice("picomotors");
-   ip.setName("picopupil_pos");
-   ip.add(pcf::IndiElement("target"));
-   ip["target"] = m_picoPupilPos - m_pupilScale*m_picoPupilStepSize;
+   if(m_camera == FLOWFS)
+   {
+      ip.setDevice("picomotors");
+      ip.setName("picopupil_pos");
+      ip.add(pcf::IndiElement("target"));
+      ip["target"] = m_picoPupilPos - m_pupilScale*m_picoPupilStepSize;
    
-   disablePicoButtons();
+      disablePicoButtons();
+   }
+   else
+   {
+      ip.setDevice("fwpupil");
+      ip.setName("filter");
+      ip.add(pcf::IndiElement("target"));
+      ip["target"] = m_fwPupilPos - m_pupilScale*m_fwPupilStepSize;
+   
+      ui.button_pupil_l->setEnabled(false);
+      ui.button_pupil_r->setEnabled(false);
+   }
    sendNewProperty(ip);
 }
 
@@ -445,13 +539,26 @@ void coronAlign::on_button_pupil_l_pressed()
 {
    pcf::IndiProperty ip(pcf::IndiProperty::Number);
    
-   ip.setDevice("fwpupil");
-   ip.setName("filter");
-   ip.add(pcf::IndiElement("target"));
-   ip["target"] = m_fwPupilPos + m_pupilScale*m_fwPupilStepSize;
+   if(m_camera == FLOWFS)
+   {
+      ip.setDevice("fwpupil");
+      ip.setName("filter");
+      ip.add(pcf::IndiElement("target"));
+      ip["target"] = m_fwPupilPos + m_pupilScale*m_fwPupilStepSize;
    
-   ui.button_pupil_l->setEnabled(false);
-   ui.button_pupil_r->setEnabled(false);
+      ui.button_pupil_l->setEnabled(false);
+      ui.button_pupil_r->setEnabled(false);
+   }
+   else
+   {
+      ip.setDevice("picomotors");
+      ip.setName("picopupil_pos");
+      ip.add(pcf::IndiElement("target"));
+      ip["target"] = m_picoPupilPos + m_pupilScale*m_picoPupilStepSize;
+
+      disablePicoButtons();
+   }
+
    sendNewProperty(ip);
 }
 
@@ -459,13 +566,26 @@ void coronAlign::on_button_pupil_r_pressed()
 {
    pcf::IndiProperty ip(pcf::IndiProperty::Number);
    
-   ip.setDevice("fwpupil");
-   ip.setName("filter");
-   ip.add(pcf::IndiElement("target"));
-   ip["target"] = m_fwPupilPos - m_pupilScale*m_fwPupilStepSize;
+   if(m_camera == FLOWFS)
+   {
+      ip.setDevice("fwpupil");
+      ip.setName("filter");
+      ip.add(pcf::IndiElement("target"));
+      ip["target"] = m_fwPupilPos - m_pupilScale*m_fwPupilStepSize;
    
-   ui.button_pupil_l->setEnabled(false);
-   ui.button_pupil_r->setEnabled(false);
+      ui.button_pupil_l->setEnabled(false);
+      ui.button_pupil_r->setEnabled(false);
+   }
+   else
+   {
+      ip.setDevice("picomotors");
+      ip.setName("picopupil_pos");
+      ip.add(pcf::IndiElement("target"));
+      ip["target"] = m_picoPupilPos - m_pupilScale*m_picoPupilStepSize;
+   
+      disablePicoButtons();
+   }
+   
    sendNewProperty(ip);
    
 }
@@ -502,11 +622,22 @@ void coronAlign::on_button_focal_u_pressed()
 {
    pcf::IndiProperty ip(pcf::IndiProperty::Number);
    
-   ip.setDevice("picomotors");
-   ip.setName("picofpm_pos");
-   ip.add(pcf::IndiElement("target"));
-   ip["target"] = m_picoFocalPos + m_focalScale*m_picoFocalStepSize;
-
+   if(m_camera == FLOWFS)
+   {
+      ip.setDevice("picomotors");
+      ip.setName("picofpm_pos");
+      ip.add(pcf::IndiElement("target"));
+      ip["target"] = m_picoFocalPos + m_focalScale*m_picoFocalStepSize;
+   }
+   else
+   {
+      ip.setDevice("fwfpm");
+      ip.setName("filter");
+      ip.add(pcf::IndiElement("target"));
+      ip["target"] = m_fwFocalPos - m_focalScale*m_fwFocalStepSize;
+      ui.button_focal_l->setEnabled(false);
+      ui.button_focal_r->setEnabled(false);
+   }
    disablePicoButtons();
    
    sendNewProperty(ip);
@@ -517,11 +648,22 @@ void coronAlign::on_button_focal_d_pressed()
 {
    pcf::IndiProperty ip(pcf::IndiProperty::Number);
    
-   ip.setDevice("picomotors");
-   ip.setName("picofpm_pos");
-   ip.add(pcf::IndiElement("target"));
-   ip["target"] = m_picoFocalPos - m_focalScale*m_picoFocalStepSize;
-
+   if(m_camera == FLOWFS)
+   {
+      ip.setDevice("picomotors");
+      ip.setName("picofpm_pos");
+      ip.add(pcf::IndiElement("target"));
+      ip["target"] = m_picoFocalPos - m_focalScale*m_picoFocalStepSize;
+   }
+   else
+   {
+      ip.setDevice("fwfpm");
+      ip.setName("filter");
+      ip.add(pcf::IndiElement("target"));
+      ip["target"] = m_fwFocalPos + m_focalScale*m_fwFocalStepSize;
+      ui.button_focal_l->setEnabled(false);
+      ui.button_focal_r->setEnabled(false);
+   }
    disablePicoButtons();
    
    sendNewProperty(ip);
@@ -532,13 +674,23 @@ void coronAlign::on_button_focal_l_pressed()
 {
    pcf::IndiProperty ip(pcf::IndiProperty::Number);
    
-   ip.setDevice("fwfpm");
-   ip.setName("filter");
-   ip.add(pcf::IndiElement("target"));
-   ip["target"] = m_fwFocalPos + m_focalScale*m_fwFocalStepSize;
+   if(m_camera == FLOWFS)
+   {
+      ip.setDevice("fwfpm");
+      ip.setName("filter");
+      ip.add(pcf::IndiElement("target"));
+      ip["target"] = m_fwFocalPos + m_focalScale*m_fwFocalStepSize;
+      ui.button_focal_l->setEnabled(false);
+      ui.button_focal_r->setEnabled(false);
+   }
+   else
+   {
+      ip.setDevice("picomotors");
+      ip.setName("picofpm_pos");
+      ip.add(pcf::IndiElement("target"));
+      ip["target"] = m_picoFocalPos - m_focalScale*m_picoFocalStepSize;
+   }
    
-   ui.button_focal_l->setEnabled(false);
-   ui.button_focal_r->setEnabled(false);
    sendNewProperty(ip);
 }
 
@@ -546,13 +698,22 @@ void coronAlign::on_button_focal_r_pressed()
 {
    pcf::IndiProperty ip(pcf::IndiProperty::Number);
    
-   ip.setDevice("fwfpm");
-   ip.setName("filter");
-   ip.add(pcf::IndiElement("target"));
-   ip["target"] = m_fwFocalPos - m_focalScale*m_fwFocalStepSize;
-   
-   ui.button_focal_l->setEnabled(false);
-   ui.button_focal_r->setEnabled(false);
+   if(m_camera == FLOWFS)
+   {
+      ip.setDevice("fwfpm");
+      ip.setName("filter");
+      ip.add(pcf::IndiElement("target"));
+      ip["target"] = m_fwFocalPos + m_focalScale*m_fwFocalStepSize;
+      ui.button_focal_l->setEnabled(false);
+      ui.button_focal_r->setEnabled(false);
+   }
+   else
+   {
+      ip.setDevice("picomotors");
+      ip.setName("picofpm_pos");
+      ip.add(pcf::IndiElement("target"));
+      ip["target"] = m_picoFocalPos - m_focalScale*m_picoFocalStepSize;
+   }
    sendNewProperty(ip);
 }
 
@@ -588,13 +749,26 @@ void coronAlign::on_button_lyot_u_pressed()
    
    pcf::IndiProperty ip(pcf::IndiProperty::Number);
    
-   ip.setDevice("fwlyot");
-   ip.setName("filter");
-   ip.add(pcf::IndiElement("target"));
-   ip["target"] = m_fwLyotPos - m_lyotScale*m_fwLyotStepSize;
+   if(m_camera == FLOWFS || m_camera == CAMSCIS)
+   {
+      ip.setDevice("fwlyot");
+      ip.setName("filter");
+      ip.add(pcf::IndiElement("target"));
+      ip["target"] = m_fwLyotPos - m_lyotScale*m_fwLyotStepSize;
+      
+      ui.button_lyot_u->setEnabled(false);
+      ui.button_lyot_d->setEnabled(false);
+   }
+   else
+   {
+      ip.setDevice("picomotors");
+      ip.setName("picolyot_pos");
+      ip.add(pcf::IndiElement("target"));
+      ip["target"] = m_picoLyotPos - m_lyotScale*m_picoLyotStepSize;
    
-   ui.button_lyot_u->setEnabled(false);
-   ui.button_lyot_d->setEnabled(false);
+      disablePicoButtons();
+   }
+
    sendNewProperty(ip);
 
 }
@@ -603,27 +777,54 @@ void coronAlign::on_button_lyot_d_pressed()
 {
    pcf::IndiProperty ip(pcf::IndiProperty::Number);
    
-   ip.setDevice("fwlyot");
-   ip.setName("filter");
-   ip.add(pcf::IndiElement("target"));
-   ip["target"] = m_fwLyotPos + m_lyotScale*m_fwLyotStepSize;
+   if(m_camera == FLOWFS || m_camera == CAMSCIS)
+   {
+      ip.setDevice("fwlyot");
+      ip.setName("filter");
+      ip.add(pcf::IndiElement("target"));
+      ip["target"] = m_fwLyotPos + m_lyotScale*m_fwLyotStepSize;
+      
+      ui.button_lyot_u->setEnabled(false);
+      ui.button_lyot_d->setEnabled(false);
+   }
+   else
+   {
+      ip.setDevice("picomotors");
+      ip.setName("picolyot_pos");
+      ip.add(pcf::IndiElement("target"));
+      ip["target"] = m_picoLyotPos + m_lyotScale*m_picoLyotStepSize;
    
-   ui.button_lyot_u->setEnabled(false);
-   ui.button_lyot_d->setEnabled(false);
+      disablePicoButtons();
+   }
+
    sendNewProperty(ip);
+   
 }
 
 void coronAlign::on_button_lyot_l_pressed()
 {
    pcf::IndiProperty ip(pcf::IndiProperty::Number);
    
-   ip.setDevice("picomotors");
-   ip.setName("picolyot_pos");
-   ip.add(pcf::IndiElement("target"));
-   ip["target"] = m_picoLyotPos - m_lyotScale*m_picoLyotStepSize;
-
-   disablePicoButtons();
+   if(m_camera == FLOWFS || m_camera == CAMSCIS)
+   {
+      ip.setDevice("picomotors");
+      ip.setName("picolyot_pos");
+      ip.add(pcf::IndiElement("target"));
+      ip["target"] = m_picoLyotPos + m_lyotScale*m_picoLyotStepSize;
    
+      disablePicoButtons();
+   }
+   else
+   {
+      ip.setDevice("fwlyot");
+      ip.setName("filter");
+      ip.add(pcf::IndiElement("target"));
+      ip["target"] = m_fwLyotPos - m_lyotScale*m_fwLyotStepSize;
+      
+      ui.button_lyot_u->setEnabled(false);
+      ui.button_lyot_d->setEnabled(false);
+   }
+
    sendNewProperty(ip);
    
   
@@ -633,13 +834,26 @@ void coronAlign::on_button_lyot_r_pressed()
 {
    pcf::IndiProperty ip(pcf::IndiProperty::Number);
    
-   ip.setDevice("picomotors");
-   ip.setName("picolyot_pos");
-   ip.add(pcf::IndiElement("target"));
-   ip["target"] = m_picoLyotPos + m_lyotScale*m_picoLyotStepSize;
-
-   disablePicoButtons();
+   if(m_camera == FLOWFS || m_camera == CAMSCIS)
+   {
+      ip.setDevice("picomotors");
+      ip.setName("picolyot_pos");
+      ip.add(pcf::IndiElement("target"));
+      ip["target"] = m_picoLyotPos - m_lyotScale*m_picoLyotStepSize;
    
+      disablePicoButtons();
+   }
+   else
+   {
+      ip.setDevice("fwlyot");
+      ip.setName("filter");
+      ip.add(pcf::IndiElement("target"));
+      ip["target"] = m_fwLyotPos + m_lyotScale*m_fwLyotStepSize;
+      
+      ui.button_lyot_u->setEnabled(false);
+      ui.button_lyot_d->setEnabled(false);
+   }
+
    sendNewProperty(ip);
    
 }
