@@ -21,4 +21,19 @@ if [[ ! -e /etc/apt/sources.list.d/oneAPI.list ]]; then
     echo "deb [signed-by=/usr/share/keyrings/oneapi-archive-keyring.gpg] https://apt.repos.intel.com/oneapi all main" | sudo tee /etc/apt/sources.list.d/oneAPI.list || exit
 fi
 sudo apt update
+
+log_info 'Making /etc/bash.bashrc source /etc/profile.d/*.sh'
+if ! grep -q bashrc.d /etc/bash.bashrc; then
+cat <<'HERE' | sudo tee -a /etc/bash.bashrc
+if [ -d /etc/profile.d ]; then
+  for i in /etc/profile.d/*.sh; do
+    if [ -r $i ]; then
+      . $i
+    fi
+  done
+  unset i
+fi
+HERE
+fi
+
 log_info "Done with custom configuration for Ubuntu 22.04"
