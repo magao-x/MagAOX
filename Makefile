@@ -239,7 +239,7 @@ scripts_install:
 
 MAGAOX_ROLE_LOWER := $(shell echo "$(MAGAOX_ROLE)" | tr '[:upper:]' '[:lower:]')
 rtscripts_install:
-	if [[ $(MAGAOX_ROLE) == "ICC" || $(MAGAOX_ROLE) == "RTC" ]]; then for scriptname in cpuset procset; do \
+	if [ $(MAGAOX_ROLE) = ICC ] || [ $(MAGAOX_ROLE) = RTC ]; then for scriptname in cpuset procset; do \
 		sudo install -d /opt/MagAOX/bin && \
 			sudo install rtSetup/$(MAGAOX_ROLE)/$(MAGAOX_ROLE_LOWER)_$$scriptname /opt/MagAOX/bin && \
 			sudo ln -fs /opt/MagAOX/bin/$(MAGAOX_ROLE_LOWER)_$$scriptname /usr/local/bin/$(MAGAOX_ROLE_LOWER)_$$scriptname; \
