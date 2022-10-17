@@ -4,9 +4,13 @@ source $DIR/../_common.sh
 set -o pipefail
 
 cat <<'HERE' > /tmp/sudoers_xsup
+# keep MAGAOX_ROLE set for any sudo'd command
+Defaults env_keep += "MAGAOX_ROLE"
+# keep entire environment when becoming xsup
 Defaults>xsup !env_reset
 Defaults>xsup !secure_path
-%magaox-dev ALL = (xsup) NOPASSWD: ALL
+# disable password authentication to become xsup
+%magaox ALL = (xsup) NOPASSWD: ALL
 HERE
 visudo -cf /tmp/sudoers_xsup || exit_error "visudo syntax check failed on /tmp/sudoers_xsup"
 sudo mv /tmp/sudoers_xsup /etc/sudoers.d/xsup
