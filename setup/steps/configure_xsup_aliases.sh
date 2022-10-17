@@ -17,6 +17,6 @@ sudo mv /tmp/sudoers_xsup /etc/sudoers.d/xsup
 
 cat <<'HERE' | sudo tee /etc/profile.d/xsupify.sh || exit 1
 #!/usr/bin/env bash
-alias xsupify="sudo -u xsup -i"
-alias xsupdo="sudo -u xsup"
+alias xsupify="/usr/bin/sudo -u xsup -i"
+alias xsupdo="/usr/bin/sudo -u xsup"
 HERE
