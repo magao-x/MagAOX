@@ -255,7 +255,7 @@ $MAYBE_SUDO bash -l "$DIR/steps/install_imagestreamio_python.sh"
 
 if [[ $MAGAOX_ROLE == AOC || $MAGAOX_ROLE == TOC || $MAGAOX_ROLE == vm || $MAGAOX_ROLE == workstation || $MAGAOX_ROLE == ci ]]; then
     # realtime image viewer
-    $MAYBE_SUDO bash -l "$DIR/steps/install_rtimv.sh"
+    $MAYBE_SUDO bash -l "$DIR/steps/install_rtimv.sh" || exit 1
 fi
 
 if [[ $MAGAOX_ROLE == AOC || $MAGAOX_ROLE == TOC || $MAGAOX_ROLE == vm ||  $MAGAOX_ROLE == workstation ]]; then
