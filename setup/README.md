@@ -20,13 +20,16 @@ Each script has comments throughout. They should all be *idempotent*. (In other 
 
 ```
 multipass launch -n primary 22.04
+multipass set local.privileged-mounts=Yes  # windows only
 multipass mount ~/devel/MagAOX/ primary:/opt/MagAOX/source/MagAOX
+multipass stop
 multipass set local.primary.disk=20GiB
 multipass set local.primary.cpus=4
-multipass start
-multipass exec primary -- bash -c "echo `cat ~/.ssh/id_ed25519.pub` >> ~/.ssh/authorized_keys"
+multipass shell
 multipass shell
 ubuntu@primary:~$ cd /opt/MagAOX/source/MagAOX/setup
 ubuntu@primary:/opt/MagAOX/source/MagAOX/setup$ bash -lx provision.sh
+ubuntu@primary$ exit
+multipass exec primary -- bash -c "echo `cat ~/.ssh/id_ed25519.pub` >> ~/.ssh/authorized_keys"
 ssh -Y ubuntu@$(multipass exec primary -- hostname -I | awk '{ print $1 }' ) xeyes
 ```
