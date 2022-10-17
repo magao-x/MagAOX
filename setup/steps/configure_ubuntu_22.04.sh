@@ -36,7 +36,11 @@ fi
 HERE
 fi
 
+log_info "Ensure UFW firewall is enabled"
 yes | sudo ufw enable || exit 1
 sudo ufw allow 22 || exit 1
+
+log_info "Hush login banners"
+sudo touch /etc/skel/.hushlogin
 
 log_info "Done with custom configuration for Ubuntu 22.04"
