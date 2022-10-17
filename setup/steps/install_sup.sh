@@ -10,6 +10,13 @@ if [[ $MAGAOX_ROLE == AOC || $MAGAOX_ROLE == vm || $MAGAOX_ROLE == ci ]]; then
     parentdir=/opt/MagAOX/source
     clone_or_update_and_cd $orgname $reponame $parentdir
     git checkout $SUP_COMMIT_ISH
+
+    if [[ ! -d /opt/conda/envs/sup ]]; then
+        mamba create -n sup
+    fi
+    conda activate sup
+    mamba env update -qf $DIR/../conda_env_sup.yml
+
     make  # installs Python module in editable mode, builds all js (needs node/yarn)
     cd
     python -c 'import sup'  # verify sup is on PYTHONPATH
