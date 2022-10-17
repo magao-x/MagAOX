@@ -2,6 +2,7 @@
 DIR="$( cd "$( dirname "${BASH_SOURCE[0]}" )" && pwd )"
 source $DIR/../_common.sh
 set -euo pipefail
+source /etc/os-release
 if [[ -e /etc/chrony/chrony.conf ]]; then
     CHRONYCONF_PATH=/etc/chrony/chrony.conf
 elif [[ -e /etc/chrony.conf ]]; then
@@ -61,10 +62,19 @@ else
     log_info "Skipping chronyd setup because this isn't an instrument computer"
     exit 0
 fi
-sudo systemctl enable chronyd
+if [[ $ID == "ubuntu" ]]; then
+	sudo systemctl enable chrony || exit 1
+else
+	sudo systemctl enable chronyd
+fi
 log_info "chronyd enabled"
-systemctl status chronyd || true
-sudo systemctl start chronyd
+if [[ $ID == "ubuntu" ]]; then
+	sudo systemctl start chrony || exit 1
+	systemctl status chrony | cat || exit 1
+else
+	sudo systemctl start chronyd || exit 1
+	systemctl status chronyd | cat || exit 1
+fi
 log_info "chronyd started"
 chronyc sources
 # see https://chrony.tuxfamily.org/faq.html#_i_keep_getting_the_error_code_501_not_authorised_code
