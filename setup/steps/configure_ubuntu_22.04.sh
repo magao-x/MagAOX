@@ -22,7 +22,7 @@ if [[ ! -e /etc/apt/sources.list.d/oneAPI.list ]]; then
 fi
 sudo apt update
 
-log_info 'Making /etc/bash.bashrc source /etc/profile.d/*.sh'
+log_info 'Making /etc/bash.bashrc source /etc/profile.d/*.sh, since graphical sessions appear not to for new Konsoles'
 if ! grep -q bashrc.d /etc/bash.bashrc; then
 cat <<'HERE' | sudo tee -a /etc/bash.bashrc
 if [ -d /etc/profile.d ]; then
@@ -35,5 +35,8 @@ if [ -d /etc/profile.d ]; then
 fi
 HERE
 fi
+
+yes | sudo ufw enable || exit 1
+sudo ufw allow 22 || exit 1
 
 log_info "Done with custom configuration for Ubuntu 22.04"
