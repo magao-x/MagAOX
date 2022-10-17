@@ -1,7 +1,7 @@
 #!/bin/bash
 DIR="$( cd "$( dirname "${BASH_SOURCE[0]}" )" && pwd )"
 source $DIR/../_common.sh
-set -euo pipefail
+set -uo pipefail
 
 
 MXLIBROOT=/opt/MagAOX/source/mxlib
@@ -44,7 +44,7 @@ EIGEN_CFLAGS =
 HERE
 
 if [[ $MAGAOX_ROLE == RTC || $MAGAOX_ROLE == ICC || $MAGAOX_ROLE == AOC || $MAGAOX_ROLE == TIC || $MAGAOX_ROLE == ci ]]; then
-  echo "INCLUDES += -I/usr/local/cuda-11.1/targets/x86_64-linux/include/" >> $mxlibCommonOverrides
+  echo "INCLUDES += -I/usr/local/cuda/targets/x86_64-linux/include/" >> $mxlibCommonOverrides
 fi
 
 if [[ $(uname -p) != "x86_64" ]]; then
@@ -60,9 +60,9 @@ else
   echo "Unexpected modifications in $MXLIBROOT/local/Common.mk! Aborting. See $mxlibCommonOverrides for suggested Common.mk" >&2
   exit 1
 fi
-make
-sudo make install
+make || exit 1
+sudo -E make install || exit 1
 # Sanity check: make sure gengithead.sh is available systemwide in /usr/local/bin
-gengithead.sh ./ ./include/mxlib_uncomp_version.h MXLIB_UNCOMP
+gengithead.sh ./ ./include/mxlib_uncomp_version.h MXLIB_UNCOMP || exit 1
 # Ensure all users get $MXMAKEFILE pointing to this install by default
-echo "export MXMAKEFILE=\"$MXLIBROOT/mk/MxApp.mk\"" | sudo tee /etc/profile.d/mxmakefile.sh
+echo "export MXMAKEFILE=\"$MXLIBROOT/mk/MxApp.mk\"" | sudo tee /etc/profile.d/mxmakefile.sh || exit 1
