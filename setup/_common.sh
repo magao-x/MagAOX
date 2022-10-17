@@ -116,6 +116,7 @@ function clone_or_update_and_cd() {
       git clone https://github.com/$orgname/$reponame.git $CLONE_DEST
       sudo rsync -av $CLONE_DEST/ $destdir/
       cd $destdir/
+      git config --global safe.directory $(realpath $destdir)
       log_success "Cloned new $destdir"
       rm -rf $CLONE_DEST
       log_success "Removed temporary clone at $CLONE_DEST"
