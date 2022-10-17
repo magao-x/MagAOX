@@ -156,29 +156,29 @@ function createuser() {
   if getent passwd $username > /dev/null 2>&1; then
     log_info "User account $username exists"
   else
-    sudo useradd -U $username
-    echo -e "$DEFAULT_PASSWORD\n$DEFAULT_PASSWORD" | sudo passwd $username
+    sudo useradd -U $username || exit 1
+    echo -e "$DEFAULT_PASSWORD\n$DEFAULT_PASSWORD" | sudo passwd $username || exit 1
     log_success "Created user account $username with default password $DEFAULT_PASSWORD"
   fi
-  sudo usermod -a -G magaox $username
+  sudo usermod -a -G magaox $username || exit 1
   log_info "Added user $username to group magaox"
-  sudo mkdir -p /home/$username/.ssh
-  sudo touch /home/$username/.ssh/authorized_keys
-  sudo chmod -R u=rwx,g=,o= /home/$username/.ssh
-  sudo chmod u=rw,g=,o= /home/$username/.ssh/authorized_keys
-  sudo chown -R $username:$instrument_group /home/$username
-  sudo chsh $username -s $(which bash)
+  sudo mkdir -p /home/$username/.ssh || exit 1
+  sudo touch /home/$username/.ssh/authorized_keys || exit 1
+  sudo chmod -R u=rwx,g=,o= /home/$username/.ssh || exit 1
+  sudo chmod u=rw,g=,o= /home/$username/.ssh/authorized_keys || exit 1
+  sudo chown -R $username:$instrument_group /home/$username || exit 1
+  sudo chsh $username -s $(which bash) || exit 1
   log_info "Append an ecdsa or ed25519 key to /home/$username/.ssh/authorized_keys to enable SSH login"
 
   data_path="/data/users/$username/"
-  sudo mkdir -p "$data_path"
-  sudo chown "$username:$instrument_group" "$data_path"
-  sudo chmod g+rxs "$data_path"
+  sudo mkdir -p "$data_path" || exit 1
+  sudo chown "$username:$instrument_group" "$data_path" || exit 1
+  sudo chmod g+rxs "$data_path" || exit 1
   log_success "Created $data_path"
 
   link_name="/home/$username/data"
   if sudo test ! -L "$link_name"; then
-    sudo ln -sv "$data_path" "$link_name"
+    sudo ln -sv "$data_path" "$link_name" || exit 1
     log_success "Linked $link_name -> $data_path"
   fi
 }
