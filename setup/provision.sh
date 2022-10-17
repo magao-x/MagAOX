@@ -43,6 +43,8 @@ $_REAL_SUDO bash -l $osPackagesScript
 distroSpecificScript="$DIR/steps/configure_${ID}_${VERSION_ID}.sh"
 $_REAL_SUDO bash -l $distroSpecificScript
 
+sudo bash -l "$DIR/steps/configure_xsup_aliases.sh"
+
 if [[ $MAGAOX_ROLE == AOC || $MAGAOX_ROLE == ICC || $MAGAOX_ROLE == RTC ]]; then
     # Configure hostname aliases for instrument LAN
     sudo bash -l "$DIR/steps/configure_etc_hosts.sh"

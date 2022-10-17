@@ -22,6 +22,10 @@ fi
 function log_error() {
     echo -e "$(tput setaf 1 2>/dev/null)$1$(tput sgr0 2>/dev/null)"
 }
+function exit_error() {
+  log_error "$1"
+  exit 1
+}
 function log_success() {
     echo -e "$(tput setaf 2 2>/dev/null)$1$(tput sgr0 2>/dev/null)"
 }
