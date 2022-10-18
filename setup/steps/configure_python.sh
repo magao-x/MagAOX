@@ -12,6 +12,10 @@ set -euo pipefail
 # Install the standard MagAOX user python environment
 #
 mamba env update -qf $DIR/../conda_env_base.yml
+source /etc/os-release
+if [[ $ID == "centos" ]]; then
+	mamba install -y qt=5 qwt
+fi
 
 #
 # Set up auto-starting xsup Jupyter Notebook instance

@@ -6,7 +6,7 @@ After=network.target
 [Service]
 User=xsup
 WorkingDirectory=/home/xsup
-ExecStart=/opt/miniconda3/bin/uvicorn sup:app
+ExecStart=/opt/conda/envs/sup/bin/uvicorn sup:wrapped_app
 
 [Install]
 WantedBy=default.target

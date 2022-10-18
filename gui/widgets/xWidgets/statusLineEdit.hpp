@@ -453,7 +453,7 @@ void statusLineEdit::editTimerOut()
 {
    m_editTimer->stop();
    m_editText = text();
-   setText(m_currText);
+   QLineEdit::setText(m_currText);
 
    emit staleTimerStart(m_staleTimeout.count());
    
