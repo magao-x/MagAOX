@@ -345,6 +345,7 @@ void gainCtrl::on_slider_sliderMoved(int s)
 void gainCtrl::on_slider_sliderReleased()
 {
    ui.status->stopEditing();
+
    float newg = 1.0*ui.slider->value() / (1.0*ui.slider->maximum())*m_maxVal;
    setGain(newg);
 }
