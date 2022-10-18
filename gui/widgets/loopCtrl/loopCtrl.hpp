@@ -263,11 +263,9 @@ void loopCtrl::handleSetProperty( const pcf::IndiProperty & ipRecv)
 
             m_modes.resize(nB,0);
             
-            std::cerr << nB << "\n";
-
             for(size_t n = 0; n<nB; ++n)
             {
-               char mstr[16];
+               char mstr[24];
                snprintf(mstr, sizeof(mstr), "%02zu", n);
                std::string blockstr = std::string("block")+mstr;
                int nM = ipRecv[std::string("block")+mstr].get<int>();

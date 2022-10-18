@@ -15,3 +15,10 @@ dependencies:
   - uvloop
   # for cacao
   - pybind11
+  - pip:
+      # web ui
+      - aiortc
+      - python-engineio
+      - python-socketio
+      - starlette
+      - uvicorn

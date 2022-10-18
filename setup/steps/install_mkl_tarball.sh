@@ -4,6 +4,8 @@ source $DIR/../_common.sh
 set -euo pipefail
 cd /opt/MagAOX/vendor
 log_info "Began MKL offline package install"
+log_error "MKL download link broken again..."
+exit 1
 INTEL_MKL_VERSION=l_onemkl_p_2022.2.0.8748
 INTEL_MKL_DOWNLOAD=${INTEL_MKL_VERSION}_offline.sh
 INTEL_MKL_URL=https://registrationcenter-download.intel.com/akdlm/irc_nas/18721/$INTEL_MKL_DOWNLOAD

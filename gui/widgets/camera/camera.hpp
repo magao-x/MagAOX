@@ -9,6 +9,7 @@
 #include "xWidgets/statusEntry.hpp"
 #include "xWidgets/statusDisplay.hpp"
 #include "xWidgets/selectionSwStatus.hpp"
+#include "xWidgets/toggleSlider.hpp"
 
 #include "roi/roi.hpp"
 
@@ -45,9 +46,13 @@ protected:
    selectionSwStatus * ui_readoutSpd {nullptr};
    selectionSwStatus * ui_vshiftSpd {nullptr};
 
+   toggleSlider * ui_cropMode {nullptr};
+
    statusEntry * ui_expTime {nullptr};
    statusEntry * ui_fps {nullptr};
    statusEntry * ui_emGain {nullptr};
+
+   toggleSlider * ui_synchro {nullptr};
 
    QPushButton * ui_takeDarks {nullptr};
 
@@ -99,9 +104,13 @@ public slots:
    void setup_readoutSpd();
    void setup_vshiftSpd();
 
+   void setup_cropMode();
+
    void setup_expTime(bool ro);
    void setup_fps(bool ro);
    void setup_emGain(bool ro);
+
+   void setup_synchro();
 
    void setup_takeDarks();
 
@@ -124,9 +133,13 @@ signals:
    void add_readoutSpd();
    void add_vshiftSpd();
 
+   void add_cropMode();
+
    void add_expTime(bool ro);   
    void add_fps(bool ro);
    void add_emGain(bool ro);
+
+   void add_synchro();
 
    void add_takeDarks();
 private:
@@ -159,11 +172,13 @@ camera::camera( std::string & camName,
 
    connect(this, SIGNAL(add_readoutSpd()), this, SLOT(setup_readoutSpd()));
    connect(this, SIGNAL(add_vshiftSpd()), this, SLOT(setup_vshiftSpd()));
+   connect(this, SIGNAL(add_cropMode()), this, SLOT(setup_cropMode()));
 
    connect(this, SIGNAL(add_expTime(bool)), this, SLOT(setup_expTime(bool)));
    connect(this, SIGNAL(add_fps(bool)), this, SLOT(setup_fps(bool)));
    connect(this, SIGNAL(add_emGain(bool)), this, SLOT(setup_emGain(bool)));
-   
+   connect(this, SIGNAL(add_synchro()), this, SLOT(setup_synchro()));
+
    connect(this, SIGNAL(add_takeDarks()), this, SLOT(setup_takeDarks()));
 
    QSpacerItem *holder = new QSpacerItem(10,0, QSizePolicy::Expanding, QSizePolicy::Expanding);
@@ -205,9 +220,11 @@ void camera::subscribe()
    if(ui_modes) m_parent->addSubscriber(ui_modes);
    if(ui_readoutSpd) m_parent->addSubscriber(ui_readoutSpd);
    if(ui_vshiftSpd) m_parent->addSubscriber(ui_vshiftSpd);
+   if(ui_cropMode) m_parent->addSubscriber(ui_cropMode);
    if(ui_expTime) m_parent->addSubscriber(ui_expTime);
    if(ui_fps) m_parent->addSubscriber(ui_fps);
    if(ui_emGain) m_parent->addSubscriber(ui_emGain);
+   if(ui_synchro) m_parent->addSubscriber(ui_synchro);
 
    return;
 }
@@ -228,11 +245,14 @@ void camera::onConnect()
    if(ui_modes) ui_modes->onConnect();
    if(ui_readoutSpd) ui_readoutSpd->onConnect();
    if(ui_vshiftSpd) ui_readoutSpd->onConnect();
+   if(ui_cropMode) ui_cropMode->onConnect();
 
    if(ui_expTime) ui_expTime->onConnect();
    if(ui_fps) ui_fps->onConnect();
    if(ui_emGain) ui_emGain->onConnect();
    
+   if(ui_synchro) ui_synchro->onConnect();
+
    clearFocus();
 
    //updateGUI();
@@ -253,10 +273,13 @@ void camera::onDisconnect()
    if(ui_modes) ui_modes->onDisconnect();
    if(ui_readoutSpd) ui_readoutSpd->onDisconnect();
    if(ui_vshiftSpd) ui_readoutSpd->onDisconnect();
+   if(ui_cropMode) ui_cropMode->onDisconnect();
 
    if(ui_expTime) ui_expTime->onDisconnect();
    if(ui_fps) ui_fps->onDisconnect();
    if(ui_emGain) ui_emGain->onDisconnect();
+
+   if(ui_synchro) ui_synchro->onDisconnect();
 
    clearFocus();   
 
@@ -349,6 +372,14 @@ void camera::handleSetProperty( const pcf::IndiProperty & ipRecv)
          }
       }
    
+      if(ipRecv.getName() == "roi_crop_mode")
+      {
+         if(!ui_cropMode)
+         {
+            emit add_cropMode();
+         }
+      }
+
       if(ipRecv.getName() == "exptime")
       {
          if(!ui_expTime)
@@ -381,6 +412,15 @@ void camera::handleSetProperty( const pcf::IndiProperty & ipRecv)
             emit add_emGain(ro);
          }
       }
+
+      if(ipRecv.getName() == "synchro")
+      {
+         if(!ui_synchro)
+         {   
+            emit add_synchro();
+         }
+      }
+      
    }
    else if(ipRecv.getDevice() == m_darkName)
    {
@@ -433,9 +473,12 @@ void camera::updateGUI()
    if(ui_shutterStatus) ui_shutterStatus->updateGUI();
    if(ui_modes) ui_modes->updateGUI();
    if(ui_readoutSpd) ui_readoutSpd->updateGUI();
+   if(ui_vshiftSpd) ui_vshiftSpd->updateGUI();
+   if(ui_cropMode) ui_cropMode->updateGUI();
    if(ui_expTime) ui_expTime->updateGUI();
    if(ui_fps) ui_fps->updateGUI();
    if(ui_emGain) ui_emGain->updateGUI();
+   if(ui_synchro) ui_synchro->updateGUI();
 
    if( (m_appState == "READY" || m_appState == "OPERATING") && ui_takeDarks )
    {
@@ -509,7 +552,7 @@ void camera::setup_shutter()
    ui_shutterStatus = new shutterStatus(m_camName, this);
    ui_shutterStatus->setObjectName(QString::fromUtf8("shutter"));
    
-   ui.grid->addWidget(ui_shutterStatus, 6, 0, 2, 1);
+   ui.grid->addWidget(ui_shutterStatus, 7, 0, 2, 1);
    
    ui_shutterStatus->onDisconnect();
 
@@ -564,6 +607,18 @@ void camera::setup_vshiftSpd()
    m_parent->addSubscriber(ui_vshiftSpd);
 }
 
+void camera::setup_cropMode()
+{
+   ui_cropMode = new toggleSlider(m_camName, "roi_crop_mode", "Crop Mode", this);
+   ui_cropMode->setObjectName(QString::fromUtf8("cropMode"));
+
+   ui.grid->addWidget(ui_cropMode, 6, 1, 1, 1);
+   
+   ui_cropMode->onDisconnect();
+
+   m_parent->addSubscriber(ui_cropMode);
+}
+
 void camera::setup_expTime(bool ro)
 {
    ui_expTime = new statusEntry(this);
@@ -572,7 +627,7 @@ void camera::setup_expTime(bool ro)
    ui_expTime->highlightChanges(true);
    ui_expTime->readOnly(ro);
 
-   ui.grid->addWidget(ui_expTime, 6, 1, 1, 1);
+   ui.grid->addWidget(ui_expTime, 7, 1, 1, 1);
    
    ui_expTime->onDisconnect();
 
@@ -587,7 +642,7 @@ void camera::setup_fps(bool ro)
    ui_fps->highlightChanges(true);
    ui_fps->readOnly(ro);
 
-   ui.grid->addWidget(ui_fps, 7, 1, 1, 1);
+   ui.grid->addWidget(ui_fps, 8, 1, 1, 1);
    
    ui_fps->onDisconnect();
 
@@ -602,11 +657,23 @@ void camera::setup_emGain(bool ro)
    ui_emGain->highlightChanges(true);
    ui_emGain->readOnly(ro);
 
-   ui.grid->addWidget(ui_emGain, 8, 1, 1, 1);
+   ui.grid->addWidget(ui_emGain, 9, 1, 1, 1);
    
    ui_emGain->onDisconnect();
 
    m_parent->addSubscriber(ui_emGain);
+}
+
+void camera::setup_synchro()
+{
+   ui_synchro = new toggleSlider(m_camName, "synchro", "Synchro", this);
+   ui_synchro->setObjectName(QString::fromUtf8("synchro"));
+
+   ui.grid->addWidget(ui_synchro, 10, 1, 1, 1);
+   
+   ui_synchro->onDisconnect();
+
+   m_parent->addSubscriber(ui_synchro);
 }
 
 void camera::setup_takeDarks()
@@ -617,7 +684,7 @@ void camera::setup_takeDarks()
    ui_takeDarks->setMaximumWidth(200);
    ui_takeDarks->setFocusPolicy(Qt::NoFocus);
    connect(ui_takeDarks, SIGNAL(pressed()), this, SLOT(takeDark()));
-   ui.grid->addWidget(ui_takeDarks, 8, 0, 1, 1,Qt::AlignHCenter);   
+   ui.grid->addWidget(ui_takeDarks, 9, 0, 1, 1,Qt::AlignHCenter);   
 
 }
 

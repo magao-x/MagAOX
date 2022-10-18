@@ -43,6 +43,8 @@ table Telem_stdcam_fb
    tempCtrl:TempCtrl;
    
    shutter:Shutter;
+
+   synchro:uint8;
 }
 
 root_type Telem_stdcam_fb;

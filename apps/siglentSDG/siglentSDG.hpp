@@ -53,6 +53,8 @@ protected:
    double m_C1setVoltage {5.0}; ///< the set position voltage of Ch. 1.
    double m_C2setVoltage {5.0}; ///< the set position voltage of Ch. 2.
 
+   bool m_C1syncOn {false};
+
    ///@}
 
    tty::telnetConn m_telnetConn; ///< The telnet connection manager
@@ -71,13 +73,15 @@ protected:
    double m_C2phse {0}; ///< The phase of channel 2
    std::string m_C2wvtp; ///< The wave type of channel 2
 
-   
    double m_C1frequency_tgt {-1};
    double m_C1vpp_tgt {-1};
    
    double m_C2frequency_tgt {-1};
    double m_C2vpp_tgt {-1};
-   
+
+   bool m_C1sync {false};
+   bool m_C2sync {false};
+
 private:
 
    bool m_poweredOn {false};
@@ -182,6 +186,15 @@ public:
      */
    int queryBSWV( int channel  /** < [in] the channel to query */ );
 
+   /// Send the SYNC? query for a channel.
+   /** This updates member variables and INDI.
+     *
+     * \returns 0 on success
+     * \returns -1 on an error.
+     */
+   int querySYNC( bool & sync, /// < [in] the sync state for this channel 
+                  int channel  /// < [in] the channel to query  
+                );
 
    /// Check the setup is correct and safe for PI TTM control.
    /**
@@ -309,6 +322,24 @@ public:
                    const pcf::IndiProperty &ipRecv ///< [in] INDI property containing the requested new wavetype
                  );
 
+   /// Send a change sync command to the device.
+   /**
+     * \returns 0 on success
+     * \returns -1 on error
+     */
+   int changeSync( int channel,  ///< [in] the channel to send the command to.
+                   bool newSync ///< [in] The requested new sync state
+                 );
+
+   /// Send a change sync command to the device in response to an INDI property.
+   /**
+     * \returns 0 on success
+     * \returns -1 on error
+     */
+   int changeSync( int channel,                    ///< [in] the channel to send the command to.
+                   const pcf::IndiProperty &ipRecv ///< [in] INDI property containing the requested new sync state
+                 );
+
    /** \name INDI
      * @{
      */ 
@@ -327,6 +358,7 @@ protected:
    pcf::IndiProperty m_indiP_C1hlev;
    pcf::IndiProperty m_indiP_C1llev;
    pcf::IndiProperty m_indiP_C1phse;
+   pcf::IndiProperty m_indiP_C1sync;
 
    pcf::IndiProperty m_indiP_C2outp;
    pcf::IndiProperty m_indiP_C2wvtp;
@@ -338,9 +370,8 @@ protected:
    pcf::IndiProperty m_indiP_C2hlev;
    pcf::IndiProperty m_indiP_C2llev;
    pcf::IndiProperty m_indiP_C2phse;
-
-
-
+   pcf::IndiProperty m_indiP_C2sync;
+   
 public:
    INDI_NEWCALLBACK_DECL(siglentSDG, m_indiP_C1outp);
    INDI_NEWCALLBACK_DECL(siglentSDG, m_indiP_C1freq);
@@ -348,6 +379,7 @@ public:
    INDI_NEWCALLBACK_DECL(siglentSDG, m_indiP_C1ofst);
    INDI_NEWCALLBACK_DECL(siglentSDG, m_indiP_C1phse);
    INDI_NEWCALLBACK_DECL(siglentSDG, m_indiP_C1wvtp);
+   INDI_NEWCALLBACK_DECL(siglentSDG, m_indiP_C1sync);
 
    INDI_NEWCALLBACK_DECL(siglentSDG, m_indiP_C2outp);
    INDI_NEWCALLBACK_DECL(siglentSDG, m_indiP_C2freq);
@@ -355,7 +387,7 @@ public:
    INDI_NEWCALLBACK_DECL(siglentSDG, m_indiP_C2ofst);
    INDI_NEWCALLBACK_DECL(siglentSDG, m_indiP_C2phse);
    INDI_NEWCALLBACK_DECL(siglentSDG, m_indiP_C2wvtp);
-   
+   INDI_NEWCALLBACK_DECL(siglentSDG, m_indiP_C2sync);
    ///@}
    
    
@@ -392,6 +424,8 @@ void siglentSDG::setupConfig()
    config.add("timeouts.write", "", "timeouts.write", argType::Required, "timeouts", "write", false, "int", "The timeout for writing to the device [msec]. Default = 1000");
    config.add("timeouts.read", "", "timeouts.read", argType::Required, "timeouts", "read", false, "int", "The timeout for reading the device [msec]. Default = 2000");
    
+   config.add("fxngen.C1syncOn", "", "fxngen.C1syncOn", argType::Required, "fxngen", "C1syncOn", false, "bool", "Whether (true) or not (false) C1 synchro output is enabled at startup.  Default is false");
+
    dev::telemeter<siglentSDG>::setupConfig(config);
 }
 
@@ -404,6 +438,8 @@ void siglentSDG::loadConfig()
    config(m_writeTimeOut, "timeouts.write");
    config(m_readTimeOut, "timeouts.read");
    
+   config(m_C1syncOn, "fxngen.C1syncOn");
+
    dev::telemeter<siglentSDG>::loadConfig(config);
 }
 
@@ -455,6 +491,13 @@ int siglentSDG::appStartup()
    m_indiP_C1llev.add (pcf::IndiElement("value"));
    m_indiP_C1llev["value"].set(0);
 
+   createStandardIndiToggleSw( m_indiP_C1sync, "C1synchro", "C1 Sync Output", "C1 Sync Output");  
+   if(registerIndiPropertyNew( m_indiP_C1sync, st_newCallBack_m_indiP_C1sync) < 0)
+   {
+      log<software_error>({__FILE__,__LINE__});
+      return -1;
+   }
+
    REG_INDI_NEWPROP(m_indiP_C2outp, "C2outp", pcf::IndiProperty::Text);
    m_indiP_C2outp.add (pcf::IndiElement("value"));
    m_indiP_C2outp["value"].set("");
@@ -495,6 +538,13 @@ int siglentSDG::appStartup()
    m_indiP_C2llev.add (pcf::IndiElement("value"));
    m_indiP_C2llev["value"].set(0);
 
+   createStandardIndiToggleSw( m_indiP_C2sync, "C2synchro", "C2 Sync Output", "C2 Sync Output");  
+   if(registerIndiPropertyNew( m_indiP_C2sync, st_newCallBack_m_indiP_C2sync) < 0)
+   {
+      log<software_error>({__FILE__,__LINE__});
+      return -1;
+   }
+
    if(dev::telemeter<siglentSDG>::appStartup() < 0)
    {
       return log<software_error,-1>({__FILE__,__LINE__});
@@ -523,7 +573,7 @@ int siglentSDG::appLogic()
       //This allows for the case where the device powers off causing a comm error
       //But we haven't gotten the update from the power controller before going through
       //the main loop after the error.
-      if(m_powerState < 1)
+      if((m_powerState != 1 || m_powerTargetState != 1) < 1)
       {
          return 0;
       }
@@ -678,7 +728,7 @@ int siglentSDG::appLogic()
 
          if(cs < 0)
          {
-            if(m_powerState > 0 && !m_shutdown)
+            if((m_powerState != 1 || m_powerTargetState != 1) > 0 && !m_shutdown)
             {
                log<software_error>({__FILE__, __LINE__});
                state(stateCodes::ERROR);
@@ -694,7 +744,7 @@ int siglentSDG::appLogic()
          {
             if(rv != SDG_PARSEERR_WVTP )
             {
-               if(m_powerState > 0 && !m_shutdown)
+               if((m_powerState != 1 || m_powerTargetState != 1) > 0 && !m_shutdown)
                {
                   log<software_error>({__FILE__, __LINE__});
                   state(stateCodes::ERROR);
@@ -703,6 +753,15 @@ int siglentSDG::appLogic()
             }
 
             cs = 1; //Trigger normalizeSetup
+         }
+
+         if(m_C1sync)
+         {
+            updateSwitchIfChanged(m_indiP_C1sync, "toggle", pcf::IndiElement::On, INDI_OK);
+         }
+         else
+         {
+            updateSwitchIfChanged(m_indiP_C1sync, "toggle", pcf::IndiElement::Off, INDI_IDLE);
          }
 
          rv = queryBSWV(2);
@@ -711,7 +770,7 @@ int siglentSDG::appLogic()
          {
             if(rv != SDG_PARSEERR_WVTP )
             {
-               if(m_powerState > 0 && !m_shutdown)
+               if((m_powerState != 1 || m_powerTargetState != 1) > 0 && !m_shutdown)
                {
                   log<software_error>({__FILE__, __LINE__});
                   state(stateCodes::ERROR);
@@ -722,6 +781,14 @@ int siglentSDG::appLogic()
             cs = 1; //Trigger normalizeSetup
          }
 
+         if(m_C2sync)
+         {
+            updateSwitchIfChanged(m_indiP_C2sync, "toggle", pcf::IndiElement::On, INDI_OK);
+         }
+         else
+         {
+            updateSwitchIfChanged(m_indiP_C2sync, "toggle", pcf::IndiElement::Off, INDI_IDLE);
+         }
 
          if(cs > 0)
          {
@@ -734,7 +801,7 @@ int siglentSDG::appLogic()
 
          if( queryOUTP(1) < 0 )
          {
-            if(m_powerState > 0 && !m_shutdown)
+            if((m_powerState != 1 || m_powerTargetState != 1) > 0 && !m_shutdown)
             {
                log<software_error>({__FILE__, __LINE__});
                state(stateCodes::ERROR);
@@ -744,7 +811,7 @@ int siglentSDG::appLogic()
 
          if( queryOUTP(2) < 0 )
          {
-            if(m_powerState > 0 && !m_shutdown)
+            if((m_powerState != 1 || m_powerTargetState != 1) > 0 && !m_shutdown)
             {
                log<software_error>({__FILE__, __LINE__});
                state(stateCodes::ERROR);
@@ -816,6 +883,8 @@ int siglentSDG::onPowerOff()
    updateIfChanged(m_indiP_C1llev, "value", 0.0);
    updateIfChanged(m_indiP_C1phse, "value", 0.0);
    updateIfChanged(m_indiP_C1outp, "value", std::string("Off"));
+   updateSwitchIfChanged(m_indiP_C1sync, "toggle", pcf::IndiElement::Off, INDI_IDLE);
+   
 
    m_C2wvtp = "NONE";
    m_C2frequency = 0.0;
@@ -836,7 +905,8 @@ int siglentSDG::onPowerOff()
    updateIfChanged(m_indiP_C2llev, "value", 0.0);
    updateIfChanged(m_indiP_C2phse, "value", 0.0);
    updateIfChanged(m_indiP_C1outp, "value", std::string("Off"));
-
+   updateSwitchIfChanged(m_indiP_C2sync, "toggle", pcf::IndiElement::Off, INDI_IDLE);
+   
    return 0;
 }
 
@@ -866,7 +936,7 @@ int siglentSDG::writeRead( std::string & strRead,
 
    if(rv < 0)
    {
-      if(m_powerState && !m_shutdown) log<software_error>({__FILE__, __LINE__, 0, rv, tty::ttyErrorString(rv)});
+      if((m_powerState != 1 || m_powerTargetState != 1) && !m_shutdown) log<software_error>({__FILE__, __LINE__, 0, rv, tty::ttyErrorString(rv)});
       state(stateCodes::NOTCONNECTED);
       return -1;
    }
@@ -875,14 +945,14 @@ int siglentSDG::writeRead( std::string & strRead,
    rv = m_telnetConn.write("\n", m_writeTimeOut);
    if(rv < 0)
    {
-      if(m_powerState && !m_shutdown) log<software_error>({__FILE__, __LINE__, 0, rv, tty::ttyErrorString(rv)});
+      if((m_powerState != 1 || m_powerTargetState != 1) && !m_shutdown) log<software_error>({__FILE__, __LINE__, 0, rv, tty::ttyErrorString(rv)});
       return -1;
    }
 
    rv = m_telnetConn.read(">>", m_readTimeOut);
    if(rv < 0)
    {
-      if(m_powerState && !m_shutdown) log<software_error>({__FILE__, __LINE__, 0, rv, tty::ttyErrorString(rv)});
+      if((m_powerState != 1 || m_powerTargetState != 1) && !m_shutdown) log<software_error>({__FILE__, __LINE__, 0, rv, tty::ttyErrorString(rv)});
       return -1;
    }
    return 0;
@@ -896,7 +966,7 @@ int siglentSDG::writeCommand( const std::string & command )
    int rv = m_telnetConn.write(command, m_writeTimeOut);
    if(rv < 0)
    {
-      if(m_powerState && !m_shutdown) log<software_error>({__FILE__, __LINE__, 0, rv, tty::ttyErrorString(rv)});
+      if((m_powerState != 1 || m_powerTargetState != 1) && !m_shutdown) log<software_error>({__FILE__, __LINE__, 0, rv, tty::ttyErrorString(rv)});
       return -1;
    }
 
@@ -904,14 +974,14 @@ int siglentSDG::writeCommand( const std::string & command )
    rv = m_telnetConn.write("\n", m_writeTimeOut);
    if(rv < 0)
    {
-      if(m_powerState && !m_shutdown) log<software_error>({__FILE__, __LINE__, 0, rv, tty::ttyErrorString(rv)});
+      if((m_powerState != 1 || m_powerTargetState != 1) && !m_shutdown) log<software_error>({__FILE__, __LINE__, 0, rv, tty::ttyErrorString(rv)});
       return -1;
    }
 
    rv = m_telnetConn.read(">>", m_readTimeOut);
    if(rv < 0)
    {
-      if(m_powerState && !m_shutdown) log<software_error>({__FILE__, __LINE__, 0, rv, tty::ttyErrorString(rv)});
+      if((m_powerState != 1 || m_powerTargetState != 1) && !m_shutdown) log<software_error>({__FILE__, __LINE__, 0, rv, tty::ttyErrorString(rv)});
       return -1;
    }
 
@@ -949,7 +1019,7 @@ int siglentSDG::queryMDWV( std::string & state,
 
    if(rv < 0)
    {
-      if(m_powerState && !m_shutdown) log<text_log>("Error on MDWV? for channel " + mx::ioutils::convertToString<int>(channel), logPrio::LOG_ERROR);
+      if((m_powerState != 1 || m_powerTargetState != 1) && !m_shutdown) log<text_log>("Error on MDWV? for channel " + mx::ioutils::convertToString<int>(channel), logPrio::LOG_ERROR);
       return -1;
    }
 
@@ -962,7 +1032,7 @@ int siglentSDG::queryMDWV( std::string & state,
    {
       if(resp_channel != channel)
       {
-         if(m_powerState && !m_shutdown) log<software_error>({__FILE__,__LINE__, "wrong channel returned"});
+         if((m_powerState != 1 || m_powerTargetState != 1) && !m_shutdown) log<software_error>({__FILE__,__LINE__, "wrong channel returned"});
          return -1;
       }
 
@@ -970,7 +1040,7 @@ int siglentSDG::queryMDWV( std::string & state,
    }
    else
    {
-      if(m_powerState && !m_shutdown) log<software_error>({__FILE__,__LINE__, 0, rv, "parse error"});
+      if((m_powerState != 1 || m_powerTargetState != 1) && !m_shutdown) log<software_error>({__FILE__,__LINE__, 0, rv, "parse error"});
       return -1;
    }
 
@@ -994,7 +1064,7 @@ int siglentSDG::querySWWV( std::string & state,
 
    if(rv < 0)
    {
-      if(m_powerState && !m_shutdown) log<text_log>("Error on SWWV? for channel " + mx::ioutils::convertToString<int>(channel), logPrio::LOG_ERROR);
+      if((m_powerState != 1 || m_powerTargetState != 1) && !m_shutdown) log<text_log>("Error on SWWV? for channel " + mx::ioutils::convertToString<int>(channel), logPrio::LOG_ERROR);
       return -1;
    }
 
@@ -1007,7 +1077,7 @@ int siglentSDG::querySWWV( std::string & state,
    {
       if(resp_channel != channel)
       {
-         if(m_powerState && !m_shutdown) log<software_error>({__FILE__,__LINE__, "wrong channel returned"});
+         if((m_powerState != 1 || m_powerTargetState != 1) && !m_shutdown) log<software_error>({__FILE__,__LINE__, "wrong channel returned"});
          return -1;
       }
 
@@ -1015,7 +1085,7 @@ int siglentSDG::querySWWV( std::string & state,
    }
    else
    {
-      if(m_powerState && !m_shutdown) log<software_error>({__FILE__,__LINE__, 0, rv, "parse error"});
+      if((m_powerState != 1 || m_powerTargetState != 1) && !m_shutdown) log<software_error>({__FILE__,__LINE__, 0, rv, "parse error"});
       return -1;
    }
 
@@ -1039,7 +1109,7 @@ int siglentSDG::queryBTWV( std::string & state,
 
    if(rv < 0)
    {
-      if(m_powerState && !m_shutdown) log<text_log>("Error on BTWV? for channel " + mx::ioutils::convertToString<int>(channel), logPrio::LOG_ERROR);
+      if((m_powerState != 1 || m_powerTargetState != 1) && !m_shutdown) log<text_log>("Error on BTWV? for channel " + mx::ioutils::convertToString<int>(channel), logPrio::LOG_ERROR);
       return -1;
    }
 
@@ -1052,7 +1122,7 @@ int siglentSDG::queryBTWV( std::string & state,
    {
       if(resp_channel != channel)
       {
-         if(m_powerState && !m_shutdown) log<software_error>({__FILE__,__LINE__, "wrong channel returned"});
+         if((m_powerState != 1 || m_powerTargetState != 1) && !m_shutdown) log<software_error>({__FILE__,__LINE__, "wrong channel returned"});
          return -1;
       }
 
@@ -1060,7 +1130,7 @@ int siglentSDG::queryBTWV( std::string & state,
    }
    else
    {
-      if(m_powerState && !m_shutdown) log<software_error>({__FILE__,__LINE__, 0, rv, "parse error"});
+      if((m_powerState != 1 || m_powerTargetState != 1) && !m_shutdown) log<software_error>({__FILE__,__LINE__, 0, rv, "parse error"});
       return -1;
    }
 
@@ -1084,7 +1154,7 @@ int siglentSDG::queryARWV( int & index,
 
    if(rv < 0)
    {
-      if(m_powerState && !m_shutdown) log<text_log>("Error on ARWV? for channel " + mx::ioutils::convertToString<int>(channel), logPrio::LOG_ERROR);
+      if((m_powerState != 1 || m_powerTargetState != 1) && !m_shutdown) log<text_log>("Error on ARWV? for channel " + mx::ioutils::convertToString<int>(channel), logPrio::LOG_ERROR);
       return -1;
    }
 
@@ -1097,7 +1167,7 @@ int siglentSDG::queryARWV( int & index,
    {
       if(resp_channel != channel)
       {
-         if(m_powerState && !m_shutdown) log<software_error>({__FILE__,__LINE__, "wrong channel returned"});
+         if((m_powerState != 1 || m_powerTargetState != 1) && !m_shutdown) log<software_error>({__FILE__,__LINE__, "wrong channel returned"});
          return -1;
       }
 
@@ -1105,7 +1175,7 @@ int siglentSDG::queryARWV( int & index,
    }
    else
    {
-      if(m_powerState && !m_shutdown) log<software_error>({__FILE__,__LINE__, 0, rv, "parse error"});
+      if((m_powerState != 1 || m_powerTargetState != 1) && !m_shutdown) log<software_error>({__FILE__,__LINE__, 0, rv, "parse error"});
       return -1;
    }
 
@@ -1127,7 +1197,7 @@ int siglentSDG::queryBSWV( int channel)
 
    if(rv < 0)
    {
-      if(m_powerState && !m_shutdown) log<text_log>("Error on BSWV? for channel " + mx::ioutils::convertToString<int>(channel), logPrio::LOG_ERROR);
+      if((m_powerState != 1 || m_powerTargetState != 1) && !m_shutdown) log<text_log>("Error on BSWV? for channel " + mx::ioutils::convertToString<int>(channel), logPrio::LOG_ERROR);
       return -1;
    }
 
@@ -1141,7 +1211,7 @@ int siglentSDG::queryBSWV( int channel)
    {
       if(resp_channel != channel)
       {
-         if(m_powerState && !m_shutdown) log<software_error>({__FILE__,__LINE__, "wrong channel returned"});
+         if((m_powerState != 1 || m_powerTargetState != 1) && !m_shutdown) log<software_error>({__FILE__,__LINE__, "wrong channel returned"});
          return -1;
       }
 
@@ -1202,6 +1272,51 @@ int siglentSDG::queryBSWV( int channel)
 }
 
 inline
+int siglentSDG::querySYNC( bool & sync,
+                           int channel 
+                         )
+{
+   int rv;
+
+   if(channel < 1 || channel > 2) return -1;
+
+   std::string strRead;
+
+   std::string com = makeCommand(channel, "SYNC?");
+
+   rv = writeRead( strRead, com);
+
+   if(rv < 0)
+   {
+      if((m_powerState != 1 || m_powerTargetState != 1) && !m_shutdown) log<text_log>("Error on SYNC? for channel " + mx::ioutils::convertToString<int>(channel), logPrio::LOG_ERROR);
+      return -1;
+   }
+
+   int resp_channel;
+   bool resp_sync;
+
+   rv = parseSYNC(resp_channel, resp_sync, strRead );
+
+   if(rv == 0)
+   {
+      if(resp_channel != channel)
+      {
+         if((m_powerState != 1 || m_powerTargetState != 1) && !m_shutdown) log<software_error>({__FILE__,__LINE__, "wrong channel returned"});
+         return -1;
+      }
+
+      sync = resp_sync;
+   }
+   else
+   {
+      if((m_powerState != 1 || m_powerTargetState != 1) && !m_shutdown) log<software_error>({__FILE__,__LINE__, 0, rv, "parse error"});
+      return -1;
+   }
+
+   return 0;
+}
+
+inline
 int siglentSDG::queryOUTP( int channel )
 {
    int rv;
@@ -1216,7 +1331,7 @@ int siglentSDG::queryOUTP( int channel )
 
    if(rv < 0)
    {
-      if(m_powerState && !m_shutdown) log<text_log>("Error on OUTP? for channel " + mx::ioutils::convertToString<int>(channel), logPrio::LOG_ERROR);
+      if((m_powerState != 1 || m_powerTargetState != 1) && !m_shutdown) log<text_log>("Error on OUTP? for channel " + mx::ioutils::convertToString<int>(channel), logPrio::LOG_ERROR);
       return -1;
    }
 
@@ -1229,7 +1344,7 @@ int siglentSDG::queryOUTP( int channel )
    {
       if(resp_channel != channel)
       {
-         if(m_powerState && !m_shutdown) log<software_error>({__FILE__,__LINE__, "wrong channel returned"});
+         if((m_powerState != 1 || m_powerTargetState != 1) && !m_shutdown) log<software_error>({__FILE__,__LINE__, "wrong channel returned"});
          return -1;
       }
 
@@ -1254,7 +1369,7 @@ int siglentSDG::queryOUTP( int channel )
    }
    else
    {
-      if(m_powerState && !m_shutdown) log<software_error>({__FILE__,__LINE__, 0, rv, "parse error"});
+      if((m_powerState != 1 || m_powerTargetState != 1) && !m_shutdown) log<software_error>({__FILE__,__LINE__, 0, rv, "parse error"});
       return -1;
    }
 
@@ -1272,13 +1387,13 @@ int siglentSDG::checkSetup()
 
    if(rv < 0)
    {
-      if(m_powerState > 0 && !m_shutdown) log<software_error>({__FILE__,__LINE__});
+      if((m_powerState != 1 || m_powerTargetState != 1) > 0 && !m_shutdown) log<software_error>({__FILE__,__LINE__});
       return rv;
    }
 
    if(state != "OFF")
    {
-      if(m_powerState > 0 && !m_shutdown) log<text_log>("Channel 1 MDWV not OFF");
+      if((m_powerState != 1 || m_powerTargetState != 1) > 0 && !m_shutdown) log<text_log>("Channel 1 MDWV not OFF");
       return 1;
    }
 
@@ -1286,13 +1401,13 @@ int siglentSDG::checkSetup()
 
    if(rv < 0)
    {
-      if(m_powerState > 0 && !m_shutdown) log<software_error>({__FILE__,__LINE__});
+      if((m_powerState != 1 || m_powerTargetState != 1) > 0 && !m_shutdown) log<software_error>({__FILE__,__LINE__});
       return rv;
    }
 
    if(state != "OFF")
    {
-      if(m_powerState > 0 && !m_shutdown) log<text_log>("Channel 2 MDWV not OFF");
+      if((m_powerState != 1 || m_powerTargetState != 1) > 0 && !m_shutdown) log<text_log>("Channel 2 MDWV not OFF");
       return 1;
    }
 
@@ -1300,13 +1415,13 @@ int siglentSDG::checkSetup()
 
    if(rv < 0)
    {
-      if(m_powerState > 0 && !m_shutdown) log<software_error>({__FILE__,__LINE__});
+      if((m_powerState != 1 || m_powerTargetState != 1) > 0 && !m_shutdown) log<software_error>({__FILE__,__LINE__});
       return rv;
    }
 
    if(state != "OFF")
    {
-      if(m_powerState > 0 && !m_shutdown) log<text_log>("Channel 1 SWWV not OFF");
+      if((m_powerState != 1 || m_powerTargetState != 1) > 0 && !m_shutdown) log<text_log>("Channel 1 SWWV not OFF");
       return 1;
    }
 
@@ -1314,13 +1429,13 @@ int siglentSDG::checkSetup()
 
    if(rv < 0)
    {
-      if(m_powerState > 0 && !m_shutdown) log<software_error>({__FILE__,__LINE__});
+      if((m_powerState != 1 || m_powerTargetState != 1) > 0 && !m_shutdown) log<software_error>({__FILE__,__LINE__});
       return rv;
    }
 
    if(state != "OFF")
    {
-      if(m_powerState > 0 && !m_shutdown) log<text_log>("Channel 2 SWWV no OFF");
+      if((m_powerState != 1 || m_powerTargetState != 1) > 0 && !m_shutdown) log<text_log>("Channel 2 SWWV no OFF");
       return 1;
    }
 
@@ -1328,13 +1443,13 @@ int siglentSDG::checkSetup()
 
    if(rv < 0)
    {
-      if(m_powerState > 0 && !m_shutdown) log<software_error>({__FILE__,__LINE__});
+      if((m_powerState != 1 || m_powerTargetState != 1) > 0 && !m_shutdown) log<software_error>({__FILE__,__LINE__});
       return rv;
    }
 
    if(state != "OFF")
    {
-      if(m_powerState > 0 && !m_shutdown) log<text_log>("Channel 1 BTWV not OFF");
+      if((m_powerState != 1 || m_powerTargetState != 1) > 0 && !m_shutdown) log<text_log>("Channel 1 BTWV not OFF");
       return 1;
    }
 
@@ -1342,13 +1457,13 @@ int siglentSDG::checkSetup()
 
    if(rv < 0)
    {
-      if(m_powerState > 0 && !m_shutdown) log<software_error>({__FILE__,__LINE__});
+      if((m_powerState != 1 || m_powerTargetState != 1) > 0 && !m_shutdown) log<software_error>({__FILE__,__LINE__});
       return rv;
    }
 
    if(state != "OFF")
    {
-      if(m_powerState > 0 && !m_shutdown) log<text_log>("Channel 2 BTWV not OFF");
+      if((m_powerState != 1 || m_powerTargetState != 1) > 0 && !m_shutdown) log<text_log>("Channel 2 BTWV not OFF");
       return 1;
    }
 
@@ -1356,13 +1471,13 @@ int siglentSDG::checkSetup()
 
    if(rv < 0)
    {
-      if(m_powerState > 0 && !m_shutdown) log<software_error>({__FILE__,__LINE__});
+      if((m_powerState != 1 || m_powerTargetState != 1) > 0 && !m_shutdown) log<software_error>({__FILE__,__LINE__});
       return rv;
    }
 
    if(index != 0)
    {
-      if(m_powerState > 0 && !m_shutdown) log<text_log>("Channel 1 ARWV not 1");
+      if((m_powerState != 1 || m_powerTargetState != 1) > 0 && !m_shutdown) log<text_log>("Channel 1 ARWV not 1");
       return 1;
    }
 
@@ -1370,16 +1485,31 @@ int siglentSDG::checkSetup()
 
    if(rv < 0)
    {
-      if(m_powerState > 0 && !m_shutdown) log<software_error>({__FILE__,__LINE__});
+      if((m_powerState != 1 || m_powerTargetState != 1) > 0 && !m_shutdown) log<software_error>({__FILE__,__LINE__});
       return rv;
    }
 
    if(index != 0)
    {
-      if(m_powerState > 0 && !m_shutdown) log<text_log>("Channel 2 ARWV not 1");
+      if((m_powerState != 1 || m_powerTargetState != 1) > 0 && !m_shutdown) log<text_log>("Channel 2 ARWV not 1");
       return 1;
    }
 
+   rv = querySYNC(m_C1sync, 1);
+
+   if(rv < 0)
+   {
+      if((m_powerState != 1 || m_powerTargetState != 1) > 0 && !m_shutdown) log<software_error>({__FILE__,__LINE__});
+      return rv;
+   }
+
+   rv = querySYNC(m_C2sync, 2);
+
+   if(rv < 0)
+   {
+      if((m_powerState != 1 || m_powerTargetState != 1) > 0 && !m_shutdown) log<software_error>({__FILE__,__LINE__});
+      return rv;
+   }
 
 
    return 0;
@@ -1390,10 +1520,13 @@ int siglentSDG::normalizeSetup()
 {
 
    std::cerr << "Normalizing . . .";
+
+   recordParams(true);
+
    changeOutp(1, "OFF");
    changeOutp(2, "OFF");
 
-
+   
 
    std::string afterColon;
    std::string command;
@@ -1453,6 +1586,8 @@ int siglentSDG::normalizeSetup()
    changeWvtp(1, "SINE");
    changeWvtp(2, "SINE");
 
+   recordParams(true);
+
    std::cerr << "Done\n";
    return 0;
 }
@@ -1479,14 +1614,24 @@ int siglentSDG::changeOutp( int channel,
 
    log<text_log>("Ch. " + std::to_string(channel) + " OUTP to " + newOutp, logPrio::LOG_NOTICE);
 
+   recordParams(true);
    int rv = writeCommand(command);
+   recordParams(true);
 
    if(rv < 0)
    {
-      if(m_powerState) log<software_error>({__FILE__, __LINE__});
+      if((m_powerState != 1 || m_powerTargetState != 1)) log<software_error>({__FILE__, __LINE__});
       return -1;
    }
 
+
+   if(channel == 1 && no == "ON")
+   {
+      if(changeSync(1, true) < 0)
+      {
+         return log<software_error,-1>({__FILE__, __LINE__});
+      }
+   }
    return 0;
 }
 
@@ -1575,11 +1720,13 @@ int siglentSDG::changeFreq( int channel,
 
    log<text_log>("Ch. " + std::to_string(channel) + " FREQ to " + std::to_string(newFreq), logPrio::LOG_NOTICE);
 
+   recordParams(true);
    int rv = writeCommand(command);
+   recordParams(true);
 
    if(rv < 0)
    {
-      if(m_powerState) log<software_error>({__FILE__, __LINE__});
+      if((m_powerState != 1 || m_powerTargetState != 1)) log<software_error>({__FILE__, __LINE__});
       return -1;
    }
 
@@ -1685,11 +1832,13 @@ int siglentSDG::changeAmp( int channel,
 
    log<text_log>("Ch. " + std::to_string(channel) + " AMP set to " + std::to_string(newAmp), logPrio::LOG_NOTICE);
 
+   recordParams(true);
    int rv = writeCommand(command);
+   recordParams(true);
 
    if(rv < 0)
    {
-      if(m_powerState) log<software_error>({__FILE__, __LINE__});
+      if((m_powerState != 1 || m_powerTargetState != 1)) log<software_error>({__FILE__, __LINE__});
       return -1;
    }
 
@@ -1773,7 +1922,7 @@ int siglentSDG::changeOfst( int channel,
 
    if(rv < 0)
    {
-      if(m_powerState) log<software_error>({__FILE__, __LINE__});
+      if((m_powerState != 1 || m_powerTargetState != 1)) log<software_error>({__FILE__, __LINE__});
       return -1;
    }
 
@@ -1830,7 +1979,7 @@ int siglentSDG::changePhse( int channel,
 
    if(rv < 0)
    {
-      if(m_powerState) log<software_error>({__FILE__, __LINE__});
+      if((m_powerState != 1 || m_powerTargetState != 1)) log<software_error>({__FILE__, __LINE__});
       return -1;
    }
 
@@ -1887,7 +2036,7 @@ int siglentSDG::changeWvtp( int channel,
 
    if(rv < 0)
    {
-      if(m_powerState) log<software_error>({__FILE__, __LINE__});
+      if((m_powerState != 1 || m_powerTargetState != 1)) log<software_error>({__FILE__, __LINE__});
       return -1;
    }
 
@@ -1921,6 +2070,72 @@ int siglentSDG::changeWvtp( int channel,
    state(stateCodes::CONFIGURING);
 
    int rv = changeWvtp(channel, newWvtp);
+   if(rv < 0) log<software_error>({__FILE__, __LINE__});
+
+   state(enterState);
+
+   return rv;
+}
+
+inline
+int siglentSDG::changeSync( int channel,
+                            const bool newSync
+                          )
+{
+   if(channel < 1 || channel > 2) return -1;
+
+   std::string afterColon = "SYNC ";
+   if(newSync) afterColon += "ON";
+   else afterColon += "OFF";
+
+   std::string command = makeCommand(channel, afterColon);
+
+   if(newSync) log<text_log>("Ch. " + std::to_string(channel) + " SYNC to ON", logPrio::LOG_NOTICE);
+   else log<text_log>("Ch. " + std::to_string(channel) + " SYNC to OFF", logPrio::LOG_NOTICE);
+
+   recordParams(true);
+   int rv = writeCommand(command);
+   recordParams(true);
+
+   if(rv < 0)
+   {
+      if((m_powerState != 1 || m_powerTargetState != 1)) log<software_error>({__FILE__, __LINE__});
+      return -1;
+   }
+
+   return 0;
+}
+
+inline
+int siglentSDG::changeSync( int channel,
+                            const pcf::IndiProperty &ipRecv
+                          )
+{
+   if(channel < 1 || channel > 2) return -1;
+
+   if(state() != stateCodes::READY && state() != stateCodes::OPERATING) return 0;
+
+   bool newSync;
+
+   if(!ipRecv.find("toggle")) return 0;
+   
+   if( ipRecv["toggle"].getSwitchState() == pcf::IndiElement::Off )
+   {
+      newSync = false;
+   }
+   
+   if( ipRecv["toggle"].getSwitchState() == pcf::IndiElement::On )
+   {
+      newSync = true;
+   }
+
+   //Make sure we don't change things while other things are being updated.
+   std::lock_guard<std::mutex> guard(m_indiMutex);  //Lock the mutex before conducting any communications.
+
+   stateCodes::stateCodeT enterState = state();
+   state(stateCodes::CONFIGURING);
+
+   int rv = changeSync(channel, newSync);
    if(rv < 0) log<software_error>({__FILE__, __LINE__});
 
    state(enterState);
@@ -1982,6 +2197,15 @@ INDI_NEWCALLBACK_DEFN(siglentSDG, m_indiP_C1wvtp)(const pcf::IndiProperty &ipRec
    return -1;
 }
 
+INDI_NEWCALLBACK_DEFN(siglentSDG, m_indiP_C1sync)(const pcf::IndiProperty &ipRecv)
+{
+   if (ipRecv.getName() == m_indiP_C1sync.getName())
+   {
+      return changeSync(1, ipRecv);
+   }
+   return -1;
+}
+
 INDI_NEWCALLBACK_DEFN(siglentSDG, m_indiP_C2outp)(const pcf::IndiProperty &ipRecv)
 {
    if (ipRecv.getName() == m_indiP_C2outp.getName())
@@ -2036,6 +2260,15 @@ INDI_NEWCALLBACK_DEFN(siglentSDG, m_indiP_C2wvtp)(const pcf::IndiProperty &ipRec
    return -1;
 }
 
+INDI_NEWCALLBACK_DEFN(siglentSDG, m_indiP_C2sync)(const pcf::IndiProperty &ipRecv)
+{
+   if (ipRecv.getName() == m_indiP_C2sync.getName())
+   {
+      return changeSync(2, ipRecv);
+   }
+   return -1;
+}
+
 inline
 int siglentSDG::checkRecordTimes()
 {
@@ -2051,19 +2284,21 @@ int siglentSDG::recordTelem( const telem_fxngen * )
 inline 
 int siglentSDG::recordParams(bool force)
 {
-   static double old_C1outp = m_C1outp; 
+   static double old_C1outp = -1e30; //Ensure first time writes
    static double old_C1frequency = m_C1frequency; 
    static double old_C1vpp = m_C1vpp; 
    static double old_C1ofst = m_C1ofst; 
    static double old_C1phse = m_C1phse; 
    static std::string old_C1wvtp = m_C1wvtp;
+   static bool old_C1sync = m_C1sync;
    static double old_C2outp = m_C2outp; 
    static double old_C2frequency = m_C2frequency; 
    static double old_C2vpp = m_C2vpp; 
    static double old_C2ofst = m_C2ofst; 
    static double old_C2phse = m_C2phse; 
    static std::string old_C2wvtp = m_C2wvtp;
-                  
+   static bool old_C2sync = m_C2sync;
+
    bool write = false;
    
    if(!force)
@@ -2074,18 +2309,20 @@ int siglentSDG::recordParams(bool force)
       else if( old_C1ofst != m_C1ofst ) write = true;
       else if( old_C1phse != m_C1phse ) write = true;
       else if( old_C1wvtp != m_C1wvtp ) write = true;
+      else if( old_C1sync != m_C1sync ) write = true;
       else if( old_C2outp != m_C2outp ) write = true;
       else if( old_C2frequency != m_C2frequency ) write = true;
       else if( old_C2vpp != m_C2vpp ) write = true;
       else if( old_C2ofst != m_C2ofst ) write = true;
       else if( old_C2phse != m_C2phse ) write = true;
       else if( old_C2wvtp != m_C2wvtp ) write = true;
+      else if( old_C2sync != m_C2sync ) write = true;
    }
    
    if(force || write)
    {
       telem<telem_fxngen>({m_C1outp, m_C1frequency, m_C1vpp, m_C1ofst, m_C1phse, m_C1wvtp,
-                             m_C2outp, m_C2frequency, m_C2vpp, m_C2ofst, m_C2phse, m_C2wvtp});
+                             m_C2outp, m_C2frequency, m_C2vpp, m_C2ofst, m_C2phse, m_C2wvtp, m_C1sync, m_C2sync});
       
       old_C1outp = m_C1outp;
       old_C1frequency = m_C1frequency;
@@ -2093,6 +2330,7 @@ int siglentSDG::recordParams(bool force)
       old_C1ofst = m_C1ofst;
       old_C1phse = m_C1phse;
       old_C1wvtp = m_C1wvtp;
+      old_C1sync = m_C1sync;
       
       old_C2outp = m_C2outp;
       old_C2frequency = m_C2frequency;
@@ -2100,6 +2338,7 @@ int siglentSDG::recordParams(bool force)
       old_C2ofst = m_C2ofst;
       old_C2phse = m_C2phse;
       old_C2wvtp = m_C2wvtp;
+      old_C2sync = m_C2sync;
    }
    
    return 0;

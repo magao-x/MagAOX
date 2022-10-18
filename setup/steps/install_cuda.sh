@@ -35,12 +35,13 @@ mkdir -p $CUDA_PACKAGE_DIR
 cd $CUDA_PACKAGE_DIR
 # We use the local CUDA installer (2.5 GB download) to ensure
 # we can reinstall without a high-bandwidth connection in a pinch
-CUDA_VERSION=11.1
-CUDA_RUNFILE=cuda_11.1.1_455.32.00_linux.run
-CUDA_URL=https://developer.download.nvidia.com/compute/cuda/11.1.1/local_installers/$CUDA_RUNFILE
+CUDA_VERSION=11.8
+CUDA_RUNFILE=cuda_11.8.0_520.61.05_linux.run
+CUDA_URL=https://developer.download.nvidia.com/compute/cuda/11.8.0/local_installers/$CUDA_RUNFILE
 _cached_fetch $CUDA_URL $CUDA_RUNFILE
 if [[ ! -e /usr/local/cuda-$CUDA_VERSION ]]; then
-    bash $CUDA_RUNFILE $CUDA_FLAGS || log_error "Installation failed, next try bash $CUDA_PACKAGE_DIR/$CUDA_RUNFILE --extract=/tmp/cuda and poke around in there"
+    log_info "Starting installation: $CUDA_PACKAGE_DIR/$CUDA_RUNFILE $CUDA_FLAGS"
+    bash $CUDA_RUNFILE $CUDA_FLAGS || exit 1
 else
     log_info "Existing CUDA install found in /usr/local/cuda-$CUDA_VERSION"
     log_info "sudo /usr/local/cuda-$CUDA_VERSION/bin/cuda-uninstaller to uninstall"
