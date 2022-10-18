@@ -781,11 +781,30 @@ void streamWriter::fgThreadExec()
       
       sem_t * sem {nullptr}; ///< The semaphore to monitor for new image data
       
+      int logged = 0;
       while(!opened && !m_shutdown && !m_restart)
       {
+         //b/c ImageStreamIO prints every single time, and latest version don't support stopping it yet, and that isn't thread-safe-able anyway
+         //we do our own checks.  This is the same code in ImageStreamIO_openIm...
+         int SM_fd;
+         char SM_fname[200];
+         ImageStreamIO_filename(SM_fname, sizeof(SM_fname), m_shmimName.c_str());
+         SM_fd = open(SM_fname, O_RDWR);
+         if(SM_fd == -1)
+         {
+            if(!logged) log<text_log>("ImageStream " + m_shmimName + " not found (yet).  Retrying . . .", logPrio::LOG_NOTICE);
+            logged = 1;
+            sleep(1); //be patient
+            continue;
+         }
+
+         //Found and opened,  close it and then use ImageStreamIO
+         logged = 0;
+         close(SM_fd);
+         
          if( ImageStreamIO_openIm(&image, m_shmimName.c_str()) == 0)
          {
-            if(image.md[0].sem <= m_semaphoreNumber) 
+            if(image.md[0].sem <= m_semaphoreNumber) ///<\todo this isn't right--> isn't there a define in cacao to use? 
             {
                ImageStreamIO_closeIm(&image);
                mx::sys::sleep(1); //We just need to wait for the server process to finish startup.
@@ -801,29 +820,31 @@ void streamWriter::fgThreadExec()
          }
       }
       
-      if(m_shutdown || !opened) return;
-    
-     /* --We are just using hard config-ed semaphores, no dynamic finding because it doesn't work in our version of CACAO
-      m_semaphoreNumber = 5; //get past the CACAO hard code.
-      int actSem = 1;
-      while(actSem == 1) //because it won't work.
-      {
-         m_semaphoreNumber = ImageStreamIO_getsemwaitindex(&image, m_semaphoreNumber); //ask for semaphore we had before
-         if(m_semaphoreNumber == -1)
-         {
-            log<software_critical>({__FILE__,__LINE__, "could not get semaphore index"});
-            return;
-         }
-         actSem = m_semaphoreNumber;
-      }
-      
-      log<software_info>({__FILE__,__LINE__, "got semaphore index " + std::to_string(m_semaphoreNumber) + " for " + m_shmimName });
-      */
+      if(m_restart) continue; //this is kinda dumb.  we just go around on restart, so why test in the while loop at all?
 
+      if(m_shutdown || !opened)
+      {
+         if(!opened) return; 
+       
+         ImageStreamIO_closeIm(&image);
+         return;
+      }
+    
+      //now get a good semaphore
+      m_semaphoreNumber = ImageStreamIO_getsemwaitindex(&image, m_semaphoreNumber); //ask for semaphore we had before
+
+      if(m_semaphoreNumber < 0)
+      {
+         log<software_critical>({__FILE__,__LINE__, "No valid semaphore found for " + m_shmimName + ". Source process will need to be restarted."});
+         return;
+      }
+
+      log<software_info>({__FILE__,__LINE__, "got semaphore index " + std::to_string(m_semaphoreNumber) + " for " + m_shmimName });
+      
       ImageStreamIO_semflush(&image, m_semaphoreNumber);
       
-      sem = image.semptr[m_semaphoreNumber];
-      
+      sem = image.semptr[m_semaphoreNumber]; ///< The semaphore to monitor for new image data
+
       m_dataType = image.md[0].datatype;
       m_typeSize = ImageStreamIO_typesize(m_dataType);
       m_width = image.md[0].size[0];
