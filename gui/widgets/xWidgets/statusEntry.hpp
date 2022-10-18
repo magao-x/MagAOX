@@ -128,6 +128,10 @@ public slots:
 
    void on_value_returnPressed();
 
+   void setEditText(const QString & qs);
+
+   void stopEditing();
+
 private:
      
    Ui::statusEntry ui;
@@ -425,6 +429,15 @@ void statusEntry::updateGUI()
 
 } //updateGUI()
 
+void statusEntry::setEditText(const QString & qs)
+{
+   ui.value->setEditText(qs);
+}
+
+void statusEntry::stopEditing()
+{
+   ui.value->stopEditing();
+}
 
 } //namespace xqt
    
