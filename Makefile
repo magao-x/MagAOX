@@ -50,10 +50,11 @@ apps_icc = \
 
 apps_aoc = \
 	trippLitePDU \
-   tcsInterface \
-   adcTracker \
-   kTracker \
-	koolanceCtrl
+	tcsInterface \
+	adcTracker \
+	kTracker \
+	koolanceCtrl \
+	observerCtrl
 
 # apps_vm = none yet
 apps_tic = \
