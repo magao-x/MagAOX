@@ -60,7 +60,7 @@ protected:
    float m_windSpeed {10};
    bool m_forward {true};
 
-   int m_lspd {150};
+   int m_lspd {150}; //This sets a lower limit of 0.9 m/s.
    int m_hspd {300};
 
 public:
@@ -120,6 +120,17 @@ public:
 
    int abort();
 
+   pcf::IndiProperty m_indiP_windspeed;
+
+   pcf::IndiProperty m_indiP_start;
+   pcf::IndiProperty m_indiP_stop;
+   pcf::IndiProperty m_indiP_abort;
+
+   INDI_NEWCALLBACK_DECL(acesxeCtrl, m_indiP_windspeed);
+   INDI_NEWCALLBACK_DECL(acesxeCtrl, m_indiP_start);
+   INDI_NEWCALLBACK_DECL(acesxeCtrl, m_indiP_stop);
+   INDI_NEWCALLBACK_DECL(acesxeCtrl, m_indiP_abort);
+
 };
 
 acesxeCtrl::acesxeCtrl() : MagAOXApp(MAGAOX_CURRENT_SHA1, MAGAOX_REPO_MODIFIED)
@@ -154,6 +165,20 @@ int acesxeCtrl::appStartup()
 		return -1;
 	}
 
+   createStandardIndiNumber<float>( m_indiP_windspeed, "windspeed", -60, 60, 0.0, "%f");
+   registerIndiPropertyNew( m_indiP_windspeed, INDI_NEWCALLBACK(m_indiP_windspeed)) ;
+   m_indiP_windspeed["target"].set<float>(0);
+   m_indiP_windspeed["current"].set<float>(0);
+
+   createStandardIndiRequestSw( m_indiP_start, "start", "Start", "Turb Sim Controls");
+   registerIndiPropertyNew( m_indiP_start, INDI_NEWCALLBACK(m_indiP_start) );
+
+   createStandardIndiRequestSw( m_indiP_stop, "stop", "Stop", "Turb Sim Controls");
+   registerIndiPropertyNew( m_indiP_stop, INDI_NEWCALLBACK(m_indiP_stop) );
+
+   createStandardIndiRequestSw( m_indiP_abort, "abort", "Abort", "Turb Sim Controls");
+   registerIndiPropertyNew( m_indiP_abort, INDI_NEWCALLBACK(m_indiP_abort) );
+
    m_powerState = 1; 
    m_powerTargetState = 1;
 
@@ -172,6 +197,8 @@ int acesxeCtrl::appLogic()
    if(state() == stateCodes::NODEVICE)
    {
       AR_DWORD num;
+
+      std::lock_guard<std::mutex> guard(m_indiMutex);
 
       if(!fnPerformaxComGetNumDevices(&num))
 	   {
@@ -228,6 +255,8 @@ int acesxeCtrl::appLogic()
    {
       //setup the connection
 	
+      std::lock_guard<std::mutex> guard(m_indiMutex);
+
       if(m_handle)
       {
          if(!fnPerformaxComClose(m_handle))
@@ -293,6 +322,8 @@ int acesxeCtrl::appLogic()
    if(state() == stateCodes::CONNECTED)
    {
       std::string resp;
+
+      std::lock_guard<std::mutex> guard(m_indiMutex);
 
       //Check the parameters
       if(sendRecv(resp, "EDIO") != 0)
@@ -394,27 +425,15 @@ int acesxeCtrl::appLogic()
       if(mst & 1 || mst & 2 || mst & 4) state(stateCodes::OPERATING);
       else state(stateCodes::READY);
 
-      static int once = 0;
-      if(state() == stateCodes::READY)
-      {
-         if(!once)
-         {
-            start();
-         }
-      }
-      else if(state() == stateCodes::OPERATING)
-      {
-         ++once;
+      std::lock_guard<std::mutex> guard(m_indiMutex);
 
-         if(once > 30)
-         {
-            stop();
-         }
-      }
+      updateIfChanged(m_indiP_windspeed, "current", windSpeed(), INDI_OK);
    }
-
-   
-
+   else
+   {
+      if(state() == stateCodes::POWEROFF || state() == stateCodes::POWERON) return 0;
+      log<software_error>({__FILE__,__LINE__, "bad state"});
+   }
 
    return 0;
 }
@@ -496,6 +515,29 @@ int acesxeCtrl::windSpeed(float ws)
    if(ws < 0) m_forward = false;
    else m_forward = true;
 
+   if(ws < -60) 
+   {
+      ws = -60;
+      log<text_log>("wind speed limited to -60 m/s", logPrio::LOG_NOTICE);
+   }
+   if(ws > 60) 
+   {
+      ws = 60;
+      log<text_log>("wind speed limited to 60 m/s", logPrio::LOG_NOTICE);
+   }
+
+   float ll = m_lspd/9600.*60. * (12.7/12.0); 
+   if(ws <= 0 && ws > -ll)
+   {
+      log<text_log>("wind speed below minimum of 0.9 m/s", logPrio::LOG_NOTICE);
+   }
+
+   if(ws >= 0 && ws < ll)
+   {
+      log<text_log>("wind speed below minimum of 0.9 m/s", logPrio::LOG_NOTICE);
+   }
+
+
    int h = (12.0/12.7) / 60. * 9600 * fabs(ws);
 
    if(hspd(h) != 0)
@@ -507,6 +549,9 @@ int acesxeCtrl::windSpeed(float ws)
    }
 
    log<text_log>("set wind speed to " + std::to_string(windSpeed()));
+
+   updateIfChanged(m_indiP_windspeed, "target", windSpeed(), INDI_OK);
+   updateIfChanged(m_indiP_windspeed, "current", windSpeed(), INDI_OK);
 
    return 0;
 
@@ -520,7 +565,6 @@ int acesxeCtrl::start()
    if(m_forward) com += "+";
    else com += "-";
 
-   //Check the parameters
    if(sendRecv(resp, com) != 0)
    {
       if(m_powerState != 1 || m_powerTargetState != 1) return 0;
@@ -585,6 +629,94 @@ int acesxeCtrl::abort()
    }
 
    log<text_log>("aborted spinning turbulence simulator", logPrio::LOG_NOTICE);
+   return 0;
+}
+
+INDI_NEWCALLBACK_DEFN(acesxeCtrl, m_indiP_windspeed)(const pcf::IndiProperty &ipRecv)
+{
+   if (ipRecv.getName() == m_indiP_windspeed.getName())
+   {
+      float ws = 0;
+
+      if(ipRecv.find("current"))
+      {
+         ws = ipRecv["current"].get<double>();
+      }
+
+      if(ipRecv.find("target"))
+      {
+         ws = ipRecv["target"].get<double>();
+      }
+
+      if(ws == 0) return 0;
+      
+      std::lock_guard<std::mutex> guard(m_indiMutex);
+
+      updateIfChanged(m_indiP_windspeed, "target", ws, INDI_OK);
+
+      return windSpeed(ws);
+   }
+
+   return -1;
+}
+
+INDI_NEWCALLBACK_DEFN(acesxeCtrl, m_indiP_start )(const pcf::IndiProperty &ipRecv)
+{
+   if(ipRecv.getName() != m_indiP_start.getName())
+   {
+      log<software_error>({__FILE__,__LINE__, "wrong INDI property received."});
+      return -1;
+   }
+      
+   if(!ipRecv.find("request")) return 0;
+           
+   std::unique_lock<std::mutex> lock(m_indiMutex);
+      
+   if( ipRecv["request"].getSwitchState() == pcf::IndiElement::On)
+   {
+      return start();
+   }   
+   
+   return 0;
+}
+
+INDI_NEWCALLBACK_DEFN(acesxeCtrl, m_indiP_stop )(const pcf::IndiProperty &ipRecv)
+{
+   if(ipRecv.getName() != m_indiP_stop.getName())
+   {
+      log<software_error>({__FILE__,__LINE__, "wrong INDI property received."});
+      return -1;
+   }
+      
+   if(!ipRecv.find("request")) return 0;
+           
+   std::unique_lock<std::mutex> lock(m_indiMutex);
+      
+   if( ipRecv["request"].getSwitchState() == pcf::IndiElement::On)
+   {
+      return stop();
+   }   
+   
+   return 0;
+}
+
+INDI_NEWCALLBACK_DEFN(acesxeCtrl, m_indiP_abort )(const pcf::IndiProperty &ipRecv)
+{
+   if(ipRecv.getName() != m_indiP_abort.getName())
+   {
+      log<software_error>({__FILE__,__LINE__, "wrong INDI property received."});
+      return -1;
+   }
+      
+   if(!ipRecv.find("request")) return 0;
+           
+   std::unique_lock<std::mutex> lock(m_indiMutex);
+      
+   if( ipRecv["request"].getSwitchState() == pcf::IndiElement::On)
+   {
+      return abort();
+   }   
+   
    return 0;
 }
 
