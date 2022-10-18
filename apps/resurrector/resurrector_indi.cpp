@@ -39,7 +39,8 @@ main(int argc, char** argv)
     std::string exec;
     std::string argv0;
 
-    int isfd = -1;
+    int isfd{-1};
+    std::vector<int> fd_indidrivers(0);
 
     // Parse command-line tokens, open FIFOs, start hexbeater processes.
     // N.B. each token should be of the form name=executable
@@ -54,25 +55,39 @@ main(int argc, char** argv)
         // The FIFO path will be /.../fifos/<name>.hb
         int newfd = resurr.open_hexbeater(argv0, driver_name, IRMAGAOX_fifos, NULL);
 
+        // Write the hexbeater info to STDERR
+        resurr.fd_to_stream(std::cerr, newfd);
 
-        // Start (fork) the hexbeater process
-        resurr.fd_to_stream(std::cout, newfd);
-
-        if (isfd==-1 && driver_name.substr(0,2)=="is")
+        if (newfd<0 || driver_name.substr(0,2)!="is")
         {
-            isfd = newfd;
-            std::cout << " [delayed start]";
+            // Non-indiservers are delayed
+            std::cerr << " [delayed start]" << std::endl;;
+            if (newfd > -1) { fd_indidrivers.push_back(newfd); }
+            continue;
         }
 
-        std::cout << std::endl;
+        // Duplicate indiservers are ignored
+        if (isfd != -1)
+        {
+            std::cerr << " [ignored duplicate indiserver]" << std::endl;
+            resurr.close_hexbeater(newfd);
+            continue;
+        }
 
-        resurr.start_hexbeater(newfd,3);
+        std::cerr << std::endl;
+
+        // Start (fork) the first x/indiserver hexbeater process
+        resurr.start_hexbeater(newfd,10);
+        isfd = newfd;
     }
-    if (isfd > -1) {
-        std::cout << "Delaying 5s to start indiserver" << std::endl;
-        timeval tv = {5,0};
-        select(1,0,0,0,&tv);
-        resurr.start_hexbeater(isfd,3);
+
+    std::cerr << "Delaying 5s to start INDI drivers" << std::endl;
+    timeval tv = {5,0};
+    select(1,0,0,0,&tv);
+
+    for ( auto fd : fd_indidrivers)
+    {
+        resurr.start_hexbeater(fd,10);
     }
 
     // Run the select/read/check/restart cycle

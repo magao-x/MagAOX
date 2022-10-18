@@ -116,6 +116,15 @@ public:
         return newfd;
     }
 
+    /// Close a hexbeat monitor
+    int
+    close_hexbeater(int fd)
+    {
+        if (m_fds.find(fd) == m_fds.end()) { return -1; }
+        m_hbmarr[fd].close_hexbeater(m_fdset_cpy, m_nfds);
+        return 0;
+    }
+
     /// Start one hexbeat monitor
     int
     start_hexbeater(int fd, int max_restarts=0)
