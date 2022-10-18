@@ -13,4 +13,4 @@ git checkout $IMAGESTREAMIO_COMMIT_ISH
 cd $parentdir/$reponame
 pip uninstall -y imagestreamiowrap
 pip install -e .
-python -c 'import ImageStreamIOWrap'
+python -c 'import ImageStreamIOWrap' || exit 1
