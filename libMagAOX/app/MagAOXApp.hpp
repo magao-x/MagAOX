@@ -524,10 +524,9 @@ protected:
    ///Flag controlling whether INDI is used.  If false, then no INDI code ipRecv.getName()executes.
    constexpr static bool m_useINDI = _useINDI;
 
-   const std::string& indiserver_ctrl_fifo() const { return m_indiserver_ctrl_fifo; }
-
 ///\todo instead of making this public, provide an accessor.
 public:
+
    ///The INDI driver wrapper.  Constructed and initialized by execute, which starts and stops communications.
    indiDriver<MagAOXApp> * m_indiDriver {nullptr};
 
@@ -536,6 +535,9 @@ public:
 
    ///Mutex for locking INDI communications.
    std::mutex m_indiMutex;
+
+   ///A wrapper for the INDI server ctrl FIFO name; used by m_indiDriver
+   const std::string& indiserver_ctrl_fifo() const { return m_indiserver_ctrl_fifo; }
    
 protected:
    ///Structure to hold the call-back details for handling INDI communications.
