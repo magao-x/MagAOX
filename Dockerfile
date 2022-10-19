@@ -1,7 +1,7 @@
-FROM centos:7
+FROM ubuntu:jammy-20220130
 RUN yum update -y && yum install -y which passwd sudo
-RUN adduser -G wheel xsup
-RUN echo -e "[user]\ndefault=$myUsername\n[interop]appendWindowsPath=false" > /etc/wsl.conf
-RUN echo -e "extremeAO!\nextremeAO!\n" | passwd xsup
-RUN env
+ADD . /opt/MagAOX/source/MagAOX
+WORKDIR /opt/MagAOX/source/MagAOX/setup
+RUN bash setup_users_and_groups.sh
+RUN bash provision.sh
 USER xsup
