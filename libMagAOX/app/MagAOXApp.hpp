@@ -290,6 +290,8 @@ private:
 
    static MagAOXApp * m_self; ///< Static pointer to this (set in constructor).  Used to test whether a a MagAOXApp is already instatiated (a fatal error) and used for getting out of static signal handlers.
 
+   bool m_use_indiserver_ctrl_fifo; ///< whether local INDI drivers' existence are initially specified on the command line (false) or via INDI server control FIFO (true)
+
    ///Sets the handler for SIGTERM, SIGQUIT, and SIGINT.
    int setSigTermHandler();
 
@@ -1221,7 +1223,9 @@ void MagAOXApp<_useINDI>::setupBasicConfig() //virtual
    //App stuff
    config.add("loopPause", "p", "loopPause", argType::Required, "", "loopPause", false, "unsigned long", "The main loop pause time in ns");
 
-   config.add("ignore_git", "", "ignore-git", argType::True, "", "", false, "bool", "set to true to ignore git status");
+   config.add("use_indiserver_ctrl_fifo", "", "use-indiserver-ctrl-fifo", argType::Required, "", "use_indiserver_ctrl_fifo", false, "bool", "INDI drivers should send [start /opt/MagAOX/drivers/fifos/name] messages to FIFO [/opt/MagAOX/drivers/fifos/indiserver.ctrl] on startup; Xindidriver will not provide arguments to indiserver other than -f /opt/.../indiserver.ctrl");
+
+   config.add("ignore_git", "", "ignore-git", argType::Required, "", "ignore_git", false, "bool", "set to true to ignore git status");
    
    //Logger Stuff
    m_log.setupConfig(config);
@@ -1250,6 +1254,8 @@ void MagAOXApp<_useINDI>::loadBasicConfig() //virtual
    bool ig {false};
    config(ig, "ignore_git");
    
+   config(m_use_indiserver_ctrl_fifo, "use_indiserver_ctrl_fifo");
+
    if(!ig && m_gitAlert)
    {
       m_stateAlert = true;
