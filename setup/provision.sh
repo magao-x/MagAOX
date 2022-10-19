@@ -244,7 +244,6 @@ $MAYBE_SUDO bash -l "$DIR/steps/install_milk_and_cacao.sh"  # depends on /opt/mi
 $MAYBE_SUDO bash -l "$DIR/steps/install_milkzmq.sh" || exit 1
 $MAYBE_SUDO bash -l "$DIR/steps/install_purepyindi.sh"
 $MAYBE_SUDO bash -l "$DIR/steps/install_magpyx.sh"
-$MAYBE_SUDO bash -l "$DIR/steps/install_imagestreamio_python.sh"
 
 
 # TODO:jlong: uncomment when it's back in working order

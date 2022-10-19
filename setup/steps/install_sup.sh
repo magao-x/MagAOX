@@ -19,6 +19,8 @@ if [[ $MAGAOX_ROLE == AOC || $MAGAOX_ROLE == vm || $MAGAOX_ROLE == ci ]]; then
     source /opt/conda/bin/activate
     conda activate sup
     sudo /opt/conda/bin/mamba env update -qf $DIR/../conda_env_sup.yml
+    sudo /opt/conda/envs/sup/bin/pip install -e ../src/ImageStreamIO/
+    /opt/conda/envs/sup/bin/python -c 'import ImageStreamIOWrap' || exit 1
 
     make  # installs Python module in editable mode, builds all js (needs node/yarn)
     sudo /opt/conda/envs/sup/bin/pip install -e /opt/MagAOX/source/sup   # because only root can write to site-packages

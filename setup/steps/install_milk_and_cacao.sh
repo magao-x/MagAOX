@@ -28,6 +28,9 @@ cmake .. $milkCmakeArgs
 make
 sudo make install
 
+$pythonExe -m pip install -e ../src/ImageStreamIO/
+$pythonExe -c 'import ImageStreamIOWrap' || exit 1
+
 milkSuffix=bin/milk
 milkBinary=$(grep -e "${milkSuffix}$" ./install_manifest.txt)
 milkPath=${milkBinary/${milkSuffix}/}
