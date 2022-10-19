@@ -9,8 +9,9 @@
 #include <sys/wait.h>
 #include <sys/types.h>
 
-#include <string>
 #include <vector>
+#include <string>
+#include <cstring>
 #include <sstream>
 #include <iostream>
 
@@ -722,6 +723,20 @@ private: // Internal attributes and interfaces
         } // fork failed (<0) or parent (>0)
 
         // Child:  pid == 0
+
+        int save_errno{errno}; 
+        int ipgstat = setpgid(0,0);
+        if (ipgstat)
+        {
+            std::cerr
+            << ipgstat << "=setpgid(0["
+            << m_argv0 << " -n " << m_hbname
+            << "],0)"
+            << "; " << errno << "(" << strerror(errno) << ")=errno"
+            << "; continuing ..."
+            << std::endl;
+            errno = save_errno;
+        }
 
         // ... And then exec, the hexbeater
         // Child:  <argv0> -n <name>
