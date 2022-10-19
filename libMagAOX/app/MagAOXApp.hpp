@@ -44,6 +44,7 @@
 #include "indiDriver.hpp"
 #include "indiMacros.hpp"
 #include "indiUtils.hpp"
+#include "resurrectee.hpp"
 
 //#include "../../INDI/libcommon/System.hpp"
 using namespace mx::app;
@@ -179,6 +180,7 @@ public:
      * - signal handling installation by setSigTermHandler()
      * - appStartup() is called
      * - INDI communications started by startINDI()
+     * - Resurrectee started by startResurrectee()
      * - power state is checked, pausing if unknown (if being managed)
      *
      * Errors in the above steps will cause a process exit.
@@ -525,6 +527,9 @@ public:
    ///The INDI driver wrapper.  Constructed and initialized by execute, which starts and stops communications.
    indiDriver<MagAOXApp> * m_indiDriver {nullptr};
 
+   ///The resurrectee wrapper. //TBD: Constructed and initialized by execute
+   resurrectee<MagAOXApp> * m_resurrectee {nullptr};
+
    ///Mutex for locking INDI communications.
    std::mutex m_indiMutex;
    
@@ -574,6 +579,9 @@ protected:
    /** This is currently only used to signal restarts.
      */
    std::string m_driverCtrlName;
+
+   ///Full path name of the resurrector/resurrectee FIFO.
+   std::string m_resurrecteeFifoName;
 
 public:
 
@@ -744,11 +752,12 @@ public:
                               );
 
 protected:
-   /// Create the INDI FIFOs
+   /// Create the INDI and resurectee FIFOs
    /** Changes permissions to max available and creates the
      * FIFOs at the configured path.
      */
    int createINDIFIFOS();
+   int createResurrecteeFIFO();
 
    /// Start INDI Communications
    /**
@@ -756,6 +765,7 @@ protected:
      * \returns -1 on error.  This is fatal.
      */
    int startINDI();
+   int startResurrectee();
    
 public:
 
@@ -1049,6 +1059,12 @@ public:
      * \returns the current value of m_driverCtrlName
      */
    std::string driverCtrlName();
+
+   ///Get the resurrectee FIFO file name
+   /**
+     * \returns the current value of m_resurrecteeFifoName
+     */
+   std::string resurrecteeFifoName();
 
    ///@} -- Member Accessors
 };
@@ -1392,6 +1408,16 @@ int MagAOXApp<_useINDI>::execute() //virtual
       }
    }
 
+   //====Begin Resurrectee
+   if(m_shutdown == 0) //if we're not already dead, that is
+   {
+      if(startResurrectee() < 0)
+      {
+         state(stateCodes::FAILURE);
+         m_shutdown = 1;
+      }
+   }
+
    //We have to wait for power status to become available
    if(m_powerMgtEnabled && m_shutdown == 0)
    {
@@ -1484,6 +1510,7 @@ int MagAOXApp<_useINDI>::execute() //virtual
 
       /** \todo Need a heartbeat update here.
         */
+      m_resurrectee->execute();
 
       if(m_useINDI)
       {
@@ -2578,6 +2605,37 @@ int MagAOXApp<_useINDI>::createINDIFIFOS()
 }
 
 template<bool _useINDI>
+int MagAOXApp<_useINDI>::createResurrecteeFIFO()
+{
+
+   ///\todo make driver FIFO path full configurable.
+   std::string driverFIFOPath = MAGAOX_path;
+   driverFIFOPath += "/";
+   driverFIFOPath += MAGAOX_driverFIFORelPath;
+
+   m_resurrecteeFifoName = driverFIFOPath + "/" + configName() + ".hb";
+
+   mode_t prev = umask(0);
+
+   errno = 0;
+   if(mkfifo(m_resurrecteeFifoName.c_str(), S_IRUSR | S_IWUSR | S_IRGRP | S_IWGRP) !=0 )
+   {
+      if(errno != EEXIST)
+      {
+         umask(prev);
+         //euidReal();
+         log<software_critical>({__FILE__, __LINE__, errno, 0, "mkfifo failed"});
+         log<text_log>("Failed to create resurrector/resurrectee FIFO.", logPrio::LOG_CRITICAL);
+         return -1;
+      }
+   }
+
+   umask(prev);
+   //euidReal();
+   return 0;
+}
+
+template<bool _useINDI>
 int MagAOXApp<_useINDI>::startINDI()
 {
    if(!m_useINDI) return 0;
@@ -2630,6 +2688,52 @@ int MagAOXApp<_useINDI>::startINDI()
    log<indidriver_start>();
 
    sendGetPropertySetList(true);
+
+   return 0;
+}
+
+template<bool _useINDI>
+int MagAOXApp<_useINDI>::startResurrectee()
+{
+
+   //===== Create the FIFOs for INDI communications ====
+   if(createResurrecteeFIFO() < 0)
+   {
+      return -1;
+   }
+
+   //======= Instantiate the resurrectee
+   try
+   {
+      if(m_resurrectee != nullptr) 
+      {
+         delete m_resurrectee;
+         m_resurrectee = nullptr;
+      }
+
+      m_resurrectee = new resurrectee<MagAOXApp>(this);
+   }
+   catch(...)
+   {
+      log<software_critical>({__FILE__, __LINE__, 0, 0, "Resurrectee construction exception."});
+      return -1;
+   }
+
+   //Check for resurrectee failure
+   if(m_resurrectee == nullptr)
+   {
+      log<software_critical>({__FILE__, __LINE__, 0, 0, "Resurrectee construction failed."});
+      return -1;
+   }
+
+   //Check for resurrectee to open the FIFOs
+   if(m_resurrectee->good() == false)
+   {
+      log<software_critical>({__FILE__, __LINE__, 0, 0, "Resurrectee failed to open FIFOs."});
+      delete m_resurrectee;
+      m_resurrectee = nullptr;
+      return -1;
+   }
 
    return 0;
 }
@@ -3121,6 +3225,12 @@ template<bool _useINDI>
 std::string MagAOXApp<_useINDI>::driverCtrlName()
 {
    return m_driverCtrlName;
+}
+
+template<bool _useINDI>
+std::string MagAOXApp<_useINDI>::resurrecteeFifoName()
+{
+   return m_resurrecteeFifoName;
 }
 
 extern template class MagAOXApp<true>;

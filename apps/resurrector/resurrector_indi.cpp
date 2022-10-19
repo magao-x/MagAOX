@@ -11,7 +11,7 @@
   *
   * N.B. Refer to HexbeatMonitor.hpp for more definitions of terms
   *
-  * Build:  g++ -I../../../INDI/INDI indi_resurrector.cpp -o indi_resurrector
+  * Build:  g++ -I../../../INDI/INDI resurrector_indi.cpp -o resurrector_indi
   * Usage:  ./test_resurrector name=executable[ name=executable[ ...]]
   *
   * Each name=executable command-line argument will fork a hexbeater
@@ -27,7 +27,7 @@
 #include <iostream>
 #include <assert.h>
 
-#include "indi_resurrector.hpp"
+#include "resurrector_indi.hpp"
 
 int
 main(int argc, char** argv)
@@ -38,6 +38,8 @@ main(int argc, char** argv)
     std::string driver_name;
     std::string exec;
     std::string argv0;
+
+    int isfd = -1;
 
     // Parse command-line tokens, open FIFOs, start hexbeater processes.
     // N.B. each token should be of the form name=executable
@@ -52,10 +54,25 @@ main(int argc, char** argv)
         // The FIFO path will be /.../fifos/<name>.hb
         int newfd = resurr.open_hexbeater(argv0, driver_name, IRMAGAOX_fifos, NULL);
 
+
         // Start (fork) the hexbeater process
         resurr.fd_to_stream(std::cout, newfd);
+
+        if (isfd==-1 && driver_name.substr(0,2)=="is")
+        {
+            isfd = newfd;
+            std::cout << " [delayed start]";
+        }
+
         std::cout << std::endl;
+
         resurr.start_hexbeater(newfd,3);
+    }
+    if (isfd > -1) {
+        std::cout << "Delaying 5s to start indiserver" << std::endl;
+        timeval tv = {5,0};
+        select(1,0,0,0,&tv);
+        resurr.start_hexbeater(isfd,3);
     }
 
     // Run the select/read/check/restart cycle
