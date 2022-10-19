@@ -116,11 +116,21 @@ public:
         return newfd;
     }
 
-    /// Start one hexbeat monitor
+    /// Close a hexbeat monitor
     int
-    start_hexbeater(int fd)
+    close_hexbeater(int fd)
     {
         if (m_fds.find(fd) == m_fds.end()) { return -1; }
+        m_hbmarr[fd].close_hexbeater(m_fdset_cpy, m_nfds);
+        return 0;
+    }
+
+    /// Start one hexbeat monitor
+    int
+    start_hexbeater(int fd, int max_restarts=0)
+    {
+        if (m_fds.find(fd) == m_fds.end()) { return -1; }
+        m_hbmarr[fd].max_restarts(max_restarts);
         return
             m_hbmarr[fd].start_hexbeater(m_fdset_cpy, m_nfds, m_delay);
     }
@@ -180,4 +190,9 @@ public:
     /// Debugging
     int get_fd_setsize() { return HBR_FD_SETSIZE; }
     int calcsize() { return (sizeof m_hbmarr) / (sizeof m_hbmarr[0]); }
+
+    void fd_to_stream(std::ostream& os, int fd)
+    {
+        if (fd > -1 && fd < HBR_FD_SETSIZE) { os << m_hbmarr[fd]; }
+    }
 };

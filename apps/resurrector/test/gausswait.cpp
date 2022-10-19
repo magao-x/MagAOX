@@ -2,14 +2,16 @@
 
 /** Build:
   *
-  *     g++  -I../../INDI/INDI gausswait.cpp -o gausswait
+  *     #PWD=.../apps/resurecttor/test/
+  *     g++  -I../../../INDI/INDI gausswait.cpp -o gausswait
   *
   * Usage:
   *
+  *     cd ../
   *     mkfifo fifos/aaaa
   *     mkfifo fifos/bbbb
   *     mkfifo fifos/cccc
-  *     ./resurrector aaaa=./gausswait bbbb=./gausswait cccc=./gasswait
+  *     ./test_resurrector aaaa=./gausswait bbbb=./gausswait cccc=./gausswait
   *
   * This program will be forked by INDI resurrector,
   * and will perform several primary tasks:

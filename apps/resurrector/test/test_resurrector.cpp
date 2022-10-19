@@ -11,8 +11,8 @@
   *
   * N.B. Refer to HexbeatMonitor.hpp for more definitions of terms
   *
-  * Build:  g++ resurrector.cpp -o resurrector
-  * Usage:  ./resurrector name=executable[ name=executable[ ...]]
+  * Build:  g++ -I.. -I../../../INDI/INDI test_resurrector.cpp -o test_resurrector
+  * Usage:  ./test_resurrector name=executable[ name=executable[ ...]]
   *
   * Each name=executable command-line argument will fork a hexbeater
   * process via the command [executable -n name] i.e. the executable is
@@ -53,7 +53,7 @@ main(int argc, char** argv)
         int newfd = resurr.open_hexbeater(argv0, driver_name, "./fifos", NULL);
 
         // Start (fork) the hexbeater process
-        resurr.start_hexbeater(newfd);
+        resurr.start_hexbeater(newfd,1);
     }
 
     // Run the select/read/check/restart cycle

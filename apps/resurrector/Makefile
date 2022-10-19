@@ -1,12 +1,13 @@
-CPPFLAGS = -I../../INDI/INDI -Wall
+CPPFLAGS = -I. -I../../INDI/INDI -Wall
 
-EXES=test/gausswait resurrector
+EXES=test/gausswait test/test_resurrector resurrector_indi
 
 SELF_DIR := $(abspath $(dir $(lastword $(MAKEFILE_LIST))))
 
 all: $(EXES)
 
-resurrector :: resurrector.hpp resurrector.cpp HexbeatMonitor.hpp
+resurrector_indi :: resurrector.hpp HexbeatMonitor.hpp resurrector_indi.hpp resurrector_indi.cpp
+test/test_resurrector :: resurrector.hpp test/test_resurrector.cpp HexbeatMonitor.hpp
 test/gausswait :: test/gausswait.cpp
 
 test: all
@@ -17,7 +18,7 @@ test: all
 	  ; echo $$ii=test/gausswait \
 	  ; done \
 	; done \
-	| xargs ./resurrector
+	| xargs test/test_resurrector
 
 clean:
 	$(RM) $(EXES)
