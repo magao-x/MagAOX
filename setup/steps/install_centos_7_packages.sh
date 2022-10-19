@@ -43,6 +43,7 @@ yum install -y \
     subunit-devel \
     pciutils \
     libusb-devel \
+    libusbx-devel \
     usbutils \
     tmux \
     boost-devel \
