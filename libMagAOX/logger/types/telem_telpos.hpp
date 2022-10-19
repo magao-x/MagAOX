@@ -1,0 +1,167 @@
+/** \file telem_telpos.hpp
+  * \brief The MagAO-X logger telem_telpos log type.
+  * \author Jared R. Males (jaredmales@gmail.com)
+  *
+  * \ingroup logger_types_files
+  * 
+  * History:
+  * - 2018-09-06 created by JRM
+  */
+#ifndef logger_types_telem_telpos_hpp
+#define logger_types_telem_telpos_hpp
+
+#include "generated/telem_telpos_generated.h"
+#include "flatbuffer_log.hpp"
+#include "../logMeta.hpp"
+
+#include <cmath>
+
+namespace MagAOX
+{
+namespace logger
+{
+
+
+/// Log entry recording the build-time git state.
+/** \ingroup logger_types
+  */
+struct telem_telpos : public flatbuffer_log
+{
+   ///The event code
+   static const flatlogs::eventCodeT eventCode = eventCodes::TELEM_TELPOS;
+
+   ///The default level
+   static const flatlogs::logPrioT defaultLevel = flatlogs::logPrio::LOG_TELEM;
+
+   static timespec lastRecord; ///< The time of the last time this log was recorded.  Used by the telemetry system.
+
+   enum member{ em_epoch, em_ra, em_dec, em_el, em_ha, em_am, em_rotoff};
+   
+   ///The type of the input message
+   struct messageT : public fbMessage
+   {
+      ///Construct from components
+      messageT( const double & epoch, ///<[in] epoch
+                const double & ra,    ///<[in] right ascension
+                const double & dec,   ///<[in] declination
+                const double & el,    ///<[in] elevation
+                const double & ha,    ///<[in] hour angle
+                const double & am,    ///<[in] air mass
+                const double & rotoff ///<[in] rotoff
+              )
+      {
+         auto fp = CreateTelem_telpos_fb(builder, epoch, ra, dec, el, ha, am, rotoff);
+         builder.Finish(fp);
+      }
+
+   };
+                 
+ 
+   ///Get the message formatte for human consumption.
+   static std::string msgString( void * msgBuffer,  /**< [in] Buffer containing the flatbuffer serialized message.*/
+                                 flatlogs::msgLenT len  /**< [in] [unused] length of msgBuffer.*/
+                               )
+   {
+      static_cast<void>(len);
+
+      auto fbs = GetTelem_telpos_fb(msgBuffer);
+
+      std::string msg = "[telpos] ";
+      
+      msg += "ep: ";
+      msg += std::to_string(fbs->epoch()) + " ";
+      
+      msg += "ra: ";
+      msg += std::to_string(fbs->ra()) + " ";
+      
+      msg += "dec: ";
+      msg += std::to_string(fbs->dec()) + " ";
+      
+      msg += "el: ";
+      msg += std::to_string(fbs->el()) + " ";
+      
+      msg += "ha: ";
+      msg += std::to_string(fbs->ha()) + " ";
+      
+      msg += "am: ";
+      msg += std::to_string(fbs->am()) + " ";
+      
+      msg += "ro: ";
+      msg += std::to_string(fbs->rotoff());
+      
+      return msg;
+   
+   }
+   
+   static double epoch( void * msgBuffer )
+   {
+      auto fbs = GetTelem_telpos_fb(msgBuffer);
+      return fbs->epoch();
+   }
+
+   static double ra( void * msgBuffer )
+   {
+      auto fbs = GetTelem_telpos_fb(msgBuffer);
+      return fbs->ra();
+   }
+
+   static double dec( void * msgBuffer )
+   {
+      auto fbs = GetTelem_telpos_fb(msgBuffer);
+      return fbs->dec();
+   }
+
+   static double el( void * msgBuffer )
+   {
+      auto fbs = GetTelem_telpos_fb(msgBuffer);
+      return fbs->el();
+   }
+
+   static double ha( void * msgBuffer )
+   {
+      auto fbs = GetTelem_telpos_fb(msgBuffer);
+      return fbs->ha();
+   }
+
+   static double am( void * msgBuffer )
+   {
+      auto fbs = GetTelem_telpos_fb(msgBuffer);
+      return fbs->am();
+   }
+
+   static double ro( void * msgBuffer )
+   {
+      auto fbs = GetTelem_telpos_fb(msgBuffer);
+      return fbs->rotoff();
+   }
+   
+   /// Get the logMetaDetail for a member by name
+   /**
+     * \returns the a logMetaDetail filled in with the appropriate details
+     * \returns an empty logmegaDetail if member not recognized
+     */ 
+   static logMetaDetail getAccessor( const std::string & member /**< [in] the name of the member */ )
+   {
+      if(     member == "epoch") return logMetaDetail({"EPOCH", logMeta::valTypes::Double, logMeta::metaTypes::Continuous, (void *) &epoch});
+      else if(member == "ra") return logMetaDetail({"RA", logMeta::valTypes::Double, logMeta::metaTypes::Continuous, (void *) &ra}); 
+      else if(member == "dec") return logMetaDetail({"DEC", logMeta::valTypes::Double, logMeta::metaTypes::Continuous, (void *) &dec}); 
+      else if(member == "el") return logMetaDetail({"EL", logMeta::valTypes::Double, logMeta::metaTypes::Continuous, (void *) &el}); 
+      else if(member == "ha") return logMetaDetail({"HA", logMeta::valTypes::Double, logMeta::metaTypes::Continuous, (void *) &ha}); 
+      else if(member == "am") return logMetaDetail({"AM", logMeta::valTypes::Double, logMeta::metaTypes::Continuous, (void *) &am});
+      else if(member == "ro") return logMetaDetail({"RO", logMeta::valTypes::Double, logMeta::metaTypes::Continuous, (void *) &ro});  
+      else
+      {
+         std::cerr << "No string member " << member << " in telem_telpos\n";
+         return logMetaDetail();
+      }
+   }
+
+}; //telem_telpos
+
+
+
+} //namespace logger
+} //namespace MagAOX
+
+#endif //logger_types_telem_telpos_hpp
+

@@ -1,0 +1,66 @@
+#these are the log codes
+git_state                0        git_state
+text_log                 10       string_log
+user_log                 11       string_log
+state_change             20       state_change
+software_log             50       software_log
+config_log               60       config_log
+indidriver_start         140      empty_log
+indidriver_stop          141      empty_log
+
+
+loop_closed              1001     empty_log
+loop_paused              1002     empty_log
+loop_open                1003     empty_log
+
+observer                 1050     observer
+
+pico_channel             11025    pico_channel
+
+outlet_state             12001    outlet_state
+outlet_channel_state     12002    outlet_channel_state
+
+
+
+#Telemetry
+
+telem_fxngen             12100    telem_fxngen
+ttmmod_params            12110    ttmmod_params
+
+#this is a telemetry entry:
+ocam_temps               12120    ocam_temps
+
+saving_start             12500    saving_state_change
+saving_stop              12501    saving_state_change
+saving_stats             12502    saving_stats
+
+telem_telpos             20000    telem_telpos
+telem_teldata            20001    telem_teldata
+telem_telvane            20002    telem_telvane
+telem_telenv             20003    telem_telenv
+telem_telcat             20004    telem_telcat
+telem_telsee             20005    telem_telsee
+
+telem_stage              20050    telem_stage
+telem_zaber              20055    telem_zaber
+telem_pico               20060    telem_pico
+
+telem_observer           20070    telem_observer
+
+telem_rhusb              20100    telem_rhusb
+
+telem_temps              20250    telem_temps
+
+telem_stdcam             20260    telem_stdcam
+
+telem_coretemps          20825    telem_coretemps
+telem_coreloads          20826    telem_coreloads
+telem_drivetemps         20827    telem_drivetemps
+telem_usage              20828    telem_usage
+
+telem_cooler             20850    telem_cooler
+
+telem_chrony_status      20860    telem_chrony_status
+telem_chrony_stats       20861    telem_chrony_stats
+
+telem_dmspeck            20890    telem_dmspeck

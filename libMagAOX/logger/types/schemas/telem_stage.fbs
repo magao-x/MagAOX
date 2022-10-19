@@ -1,0 +1,18 @@
+namespace MagAOX.logger;
+
+
+
+table Telem_stage_fb
+{
+   /// whether or not stage is in motion
+   moving:int8;
+
+   /// current position of stage in preset units
+   preset:float;
+
+   /// current preset name
+   presetName:string;
+}
+
+root_type Telem_stage_fb;
+

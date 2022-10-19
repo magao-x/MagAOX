@@ -1,0 +1,17 @@
+namespace MagAOX.logger;
+
+
+
+table Telem_telpos_fb
+{
+   epoch:double;
+   ra:double;
+   dec:double;
+   el:double;
+   ha:double;
+   am:double;
+   rotoff:double;
+}
+
+root_type Telem_telpos_fb;
+

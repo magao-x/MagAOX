@@ -1,0 +1,18 @@
+namespace MagAOX.logger;
+
+
+
+table Ocam_temps_fb
+{
+   ccd:float;
+   cpu:float;
+   power:float;
+   bias:float;
+   water:float;
+   left:float;
+   right:float;
+   cooling:float;
+}
+
+root_type Ocam_temps_fb;
+

@@ -1,0 +1,11 @@
+namespace MagAOX.logger;
+
+table Telem_drivetemps_fb
+{
+   diskName:[string];
+   diskTemp:[float];
+   
+}
+
+root_type Telem_drivetemps_fb;
+

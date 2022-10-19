@@ -1,0 +1,103 @@
+
+/// \defgroup lib libMagAOX: the MagAO-X software library 
+
+/** \defgroup common Library Configuration
+  * \ingroup lib 
+  */
+  
+/** \defgroup logger The Logging System
+  *
+  * \ingroup lib 
+  */
+  
+/** \defgroup flatlogs The flatlogs log protocol
+  * flatlogs consist of a simple header, followed by a flatbuffers encoded message payload.
+  * \ingroup logger
+  */
+
+/** \defgroup logDefs Type definitions for flatlogs.
+  * \ingroup flatlogs
+  */
+  
+/** \defgroup logbuff The flatlogs binary header definition
+  * \ingroup flatlogs
+  */
+  
+/** \defgroup logPrio The log priorities
+  * \ingroup logbuff
+  */
+  
+/** \defgroup flatlogs_time The flatlogs timestamp
+  * \ingroup logbuff
+  */
+
+/** \defgroup logformat Standard text formatting of logs for biological purposes
+  * \ingroup flatlogs
+  */
+  
+/** \defgroup flatlogs_files
+  * \ingroup flatlogs
+  */
+  
+/** \defgroup logger_types Log Entry Types
+  * \ingroup logger
+  */
+
+/** \defgroup logger_types_basic Basic Entry Types
+  * \ingroup logger_types
+  */
+
+/** \defgroup logger_types_files Files specifying log types
+  * \ingroup logger_types
+  */
+
+/** \defgroup magaoxapp The Base MagAOX Application
+  * \ingroup lib 
+  */
+
+/** \defgroup indi INDI Support in MagAOX Apps
+  * \ingroup magaoxapp
+  */
+
+/** \defgroup appdev Device Modules for MagAOX Applications
+  *
+  * These provide base classes implementing device-specific functionality, including configuration.  Many
+  * employ the CRTP -- so have fun.
+  *.
+  * \ingroup magaoxapp 
+  */
+  
+/** \defgroup app_files MagAOX Application Files 
+  * \ingroup magaoxapp 
+  */
+  
+/** \defgroup tty TTY device interfaces 
+  * \ingroup lib 
+  */
+  
+/** \defgroup tty_files TTY files 
+  * \ingroup tty 
+  */
+  
+/** \defgroup sys System utilities
+  * \ingroup lib
+  */
+  
+/** \defgroup sys_files System utility files 
+  * \ingroup sys
+  */
+  
+/** \defgroup apps Application Programs
+  * \brief MagAO-X application programs
+  *
+  * These are the programs which control the MagAO-X system.
+  *
+  */
+  
+/** \defgroup utils Utility Programs
+  * \brief MagAO-X utility programs
+  *
+  * These programs assist with operating MagAO-X and analyzing its various outputs.
+  */
+  
+

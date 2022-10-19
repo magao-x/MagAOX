@@ -1,0 +1,16 @@
+namespace MagAOX.logger;
+
+
+
+table Telem_cooler_fb
+{
+   liquidTemp:float;
+   flowRate:float;
+   pumpLevel:uint8;
+   pumpSpeed:uint16;
+   fanLevel:uint8;
+   fanSpeed:uint16;
+}
+
+root_type Telem_cooler_fb;
+

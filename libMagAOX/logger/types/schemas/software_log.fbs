@@ -1,0 +1,15 @@
+namespace MagAOX.logger;
+
+
+
+table Software_log_fb
+{
+   file:string;
+   line:uint32;
+   errnoCode:int32;
+   otherCode:int32;
+   explanation:string;
+}
+
+root_type Software_log_fb;
+
