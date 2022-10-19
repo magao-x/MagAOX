@@ -19,7 +19,6 @@ read_next_process(FILE* f, std::string& name, std::string& exec)
     char* p = fgets(oneline, 1025, f);
     if (!p) { return EOF; }
     int narg = sscanf(oneline,"%s %s %s",argname,argexec,argxtra);
-    // There may be three arguments on whole line, but we want the lines with 2.
     if (narg != 2) { return 0; }
     if (!*argname || !*argexec) { return 0; }
     if ('#' == *argname || '#' == *argexec) { return 1; }
