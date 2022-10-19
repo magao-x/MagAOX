@@ -34,16 +34,29 @@ main(int argc, char** argv)
 {
     resurrectorT<> resurr;
 
-    FILE* f = fopen("/opt/MagAOX/config/proclist_vm.txt","r");
-    std::string driver_name;
-    std::string exec;
-    std::string argv0;
+    std::string proclist_role = get_magaox_proclist_role(argc, argv);
+
+    FILE* f = fopen(proclist_role.c_str(),"r");
+
+    if (!f)
+    {
+        std::cerr << "ERROR:  failed to open MagAOX proclist role file"
+                  << "[" << proclist_role
+                  << "]; " << errno << "(" << strerror(errno)
+                  <<  ")=errno; exiting ..."
+                  << std::endl;
+        return 1;
+    }
 
     int isfd{-1};
     std::vector<int> fd_indidrivers(0);
 
-    // Parse command-line tokens, open FIFOs, start hexbeater processes.
-    // N.B. each token should be of the form name=executable
+    // Parse proclist_<role>.txt file, open FIFOs, start resurrectee
+    // (hexbeater) processes.
+
+    std::string driver_name;
+    std::string exec;
+    std::string argv0;
     int rnp;
     while (EOF != (rnp=read_next_process(f,driver_name,exec)))
     {

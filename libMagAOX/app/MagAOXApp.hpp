@@ -1227,10 +1227,10 @@ void MagAOXApp<_useINDI>::setupBasicConfig() //virtual
    //App stuff
    config.add("loopPause", "p", "loopPause", argType::Required, "", "loopPause", false, "unsigned long", "The main loop pause time in ns");
 
-   config.add("indiserver_ctrl_fifo", "", "indiserver-ctrl-fifo", argType::Required, "", "indiserver_ctrl_fifo", false, "string", "INDI drivers should send [start /opt/MagAOX/drivers/fifos/name] messages to FIFO [/opt/MagAOX/drivers/fifos/indiserver.ctrl] on startup; the value should match that of [indiserver.f] in /.../is*.conf");
-
    config.add("ignore_git", "", "ignore-git", argType::Required, "", "ignore_git", false, "bool", "set to true to ignore git status");
-   
+
+   config.add("indiserver_ctrl_fifo", "", "indiserver-ctrl-fifo", argType::Required, "", "indiserver_ctrl_fifo", false, "string", "INDI drivers can send [start /opt/MagAOX/drivers/fifos/indi-driver-name] messages to this INDI server ctrl FIFO (typically [/opt/MagAOX/drivers/fifos/indiserver.ctrl]) on startup; the value should match that of [indiserver.f] in /.../is*.conf");
+
    //Logger Stuff
    m_log.setupConfig(config);
 
