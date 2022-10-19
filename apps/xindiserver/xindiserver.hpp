@@ -287,7 +287,7 @@ void xindiserver::loadConfig()
    
    config(indiserver_x, "indiserver.x");
    
-   config(m_local, "local.drivers");
+   config(m_local, "local.drivers");// May be empty if [indiserver_ctrl_fifo] is configured to match [indiserver.f]
    config(m_remote, "remote.drivers");
    config(m_remoteServers, "remote.servers");
    
@@ -344,6 +344,11 @@ int xindiserver::constructIndiserverCommand( std::vector<std::string> & indiserv
    return 0;
 }
  
+/** If config keyword [indiserver_ctrl_fifo] is defined and matches
+  * config keyword [indiserver.f], then there do not need to be local
+  * INDI drivers specified via config keyword [local.drivers] that end
+  * up in vector m_local
+  */
 inline
 int xindiserver::addLocalDrivers( std::vector<std::string> & driverArgs )
 {
