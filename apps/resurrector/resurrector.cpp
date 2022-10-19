@@ -53,7 +53,7 @@ main(int argc, char** argv)
         int newfd = resurr.open_hexbeater(argv0, driver_name, "./fifos", NULL);
 
         // Start (fork) the hexbeater process
-        resurr.start_hexbeater(newfd);
+        resurr.start_hexbeater(newfd,1);
     }
 
     // Run the select/read/check/restart cycle

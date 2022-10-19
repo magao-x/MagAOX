@@ -118,9 +118,10 @@ public:
 
     /// Start one hexbeat monitor
     int
-    start_hexbeater(int fd)
+    start_hexbeater(int fd, int max_restarts=0)
     {
         if (m_fds.find(fd) == m_fds.end()) { return -1; }
+        m_hbmarr[fd].max_restarts(max_restarts);
         return
             m_hbmarr[fd].start_hexbeater(m_fdset_cpy, m_nfds, m_delay);
     }
