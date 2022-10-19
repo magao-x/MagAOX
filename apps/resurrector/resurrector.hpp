@@ -181,4 +181,9 @@ public:
     /// Debugging
     int get_fd_setsize() { return HBR_FD_SETSIZE; }
     int calcsize() { return (sizeof m_hbmarr) / (sizeof m_hbmarr[0]); }
+
+    void fd_to_stream(std::ostream& os, int fd)
+    {
+        if (fd > -1 && fd < HBR_FD_SETSIZE) { os << m_hbmarr[fd]; }
+    }
 };
