@@ -26,9 +26,11 @@ if [[ $MAGAOX_ROLE == RTC || $MAGAOX_ROLE == ICC || $MAGAOX_ROLE == AOC ]]; then
     fi
 
     for host in aoc rtc icc; do
-        sudo mkdir -p /srv/$host
-        if ! grep -q "/srv/$host" /etc/fstab; then
-            echo "$host:/ /srv/$host	nfs	noauto,x-systemd.automount,nofail,x-systemd.device-timeout=10s	0 0" | sudo tee -a /etc/fstab
+        if [[ ${host,,} != ${MAGAOX_ROLE,,} ]]; then
+            sudo mkdir -p /srv/$host
+            if ! grep -q "/srv/$host" /etc/fstab; then
+                echo "$host:/ /srv/$host	nfs	noauto,x-systemd.automount,nofail,x-systemd.device-timeout=10s	0 0" | sudo tee -a /etc/fstab
+            fi
         fi
     done
 fi
