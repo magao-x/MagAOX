@@ -94,7 +94,7 @@ main(int argc, char** argv)
         ////////////////////////////////////////////////////////////////
 
         // => (1) Assume all HexbeatMonitors (HBMs) are to be closed
-        resurr.pending_close(true);
+        resurr.pending_close_all_set(true);
 
         // => (2) Parse proclist_<role>.txt file, reverse that
         //        assumption (1 above) for each HBM in the proclist
@@ -103,11 +103,11 @@ main(int argc, char** argv)
         {
             if (2 != rnp) { continue; }
             argv0 = IRMAGAOX_bin + std::string("/") + exec;
-            resurr.pending_close(false, argv0, driver_name);
+            resurr.pending_close_all_set_on_match(false, argv0, driver_name);
         }
 
         // => (3) Close any HBM that was not in the proclist
-        resurr.pending_close();
+        resurr.pending_close_all_close();
 
         ////////////////////////////////////////////////////////////////
         // Rewind proclist file, then parse proclist file again, for

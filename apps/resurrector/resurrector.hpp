@@ -31,34 +31,34 @@ public:
 
     /// Assign all HexbeatMonitors' pending_close states true or false
     void
-    pending_close(const bool tf)
+    pending_close_all_set(const bool tf)
     {
         for (std::vector<HexbeatMonitor>::iterator it = m_hbmarr.begin(); it != m_hbmarr.end(); ++it)
         {
-            it->pending_close(tf);
+            it->pending_close_set(tf);
         }
     }
 
     /// Assign specific HexbeatMonitors' pending_close states
     void
-    pending_close(const bool tf, std::string& argv0, std::string& hbname)
+    pending_close_all_set_on_match(const bool tf, std::string& argv0, std::string& hbname)
     {
         for (std::vector<HexbeatMonitor>::iterator it = m_hbmarr.begin(); it != m_hbmarr.end(); ++it)
         {
-            if (it->match(argv0, hbname)) { it->pending_close(tf); }
+            if (it->match(argv0, hbname)) { it->pending_close_set(tf); }
         }
     }
 
     /// Close any HexbeatMonitors that remain pending to be closed
     void
-    pending_close()
+    pending_close_all_close()
     {
         for (std::vector<HexbeatMonitor>::iterator it = m_hbmarr.begin(); it != m_hbmarr.end(); ++it)
         {
-            if (it->pending_close())
+            if (it->pending_close_get())
             {
                 it->close_hexbeater(m_fdset_cpy, m_nfds);
-                it->pending_close(false); // Probably not necessary
+                it->pending_close_set(false); // Probably not necessary
             }
         }
     }
@@ -164,7 +164,7 @@ public:
     start_hexbeater(int fd, int max_restarts=0)
     {
         if (m_fds.find(fd) == m_fds.end()) { return -1; }
-        m_hbmarr[fd].max_restarts(max_restarts);
+        m_hbmarr[fd].max_restarts_set(max_restarts);
         return
             m_hbmarr[fd].start_hexbeater(m_fdset_cpy, m_nfds, m_delay);
     }
