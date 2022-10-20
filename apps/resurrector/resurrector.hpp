@@ -137,7 +137,7 @@ public:
         // Exit with error if hbname is already present in m_hbmarr
         if (find_hbm_by_name(hbname) > -1) { errno = EEXIST; return -1; }
 
-        // Initialize varargs; open new FIFO; clean up varargs 
+        // Initialize varargs; open new FIFO; clean up varargs
         va_list ap; va_start(ap, hbname);
         int newfd = HexbeatMonitor::open_hexbeater
                     (argv0, hbname, m_fdset_cpy, m_nfds, m_hbmarr, ap);

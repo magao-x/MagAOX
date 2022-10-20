@@ -177,6 +177,7 @@ main(int argc, char** argv)
         timeval tv = {5,0};
         select(1,0,0,0,&tv);
 
+        // Start the selected INDI drivers
         for ( auto fd : fd_indidrivers)
         {
             resurr.start_hexbeater(fd,10);

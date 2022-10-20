@@ -508,7 +508,7 @@ private: // Internal attributes and interfaces
       *         attribute m_fd, with the following caveat:  new_fd must
       *         be EITHER the offset of this instance into the caller's
       *         array of instances, OR -1; if the instance is not
-      *         inactive i.e. m_fd > -1, then new_fd will be 
+      *         inactive i.e. m_fd > -1, then new_fd will be
       */
     void
     update_status(int new_fd, bool dosel, fd_set& fd_set_cpy, int& nfds)
@@ -742,7 +742,7 @@ private: // Internal attributes and interfaces
 
         // Child:  pid == 0
 
-        int save_errno{errno}; 
+        int save_errno{errno};
         int ipgstat = setpgid(0,0);
         if (ipgstat)
         {
@@ -890,4 +890,4 @@ std::ostream& operator<<(std::ostream& os, const HexbeatMonitor& hbm)
     << ">"
     ;
     return os;
-}  
+}
