@@ -135,6 +135,7 @@ public:
 
 acesxeCtrl::acesxeCtrl() : MagAOXApp(MAGAOX_CURRENT_SHA1, MAGAOX_REPO_MODIFIED)
 {
+   m_powerMgtEnabled = true;
    return;
 }
 
@@ -561,7 +562,24 @@ int acesxeCtrl::start()
 {
    std::string resp;
 
-   std::string com = "J";
+   std::string com = "EO=1";
+
+   if(sendRecv(resp, com) != 0)
+   {
+      if(m_powerState != 1 || m_powerTargetState != 1) return 0;
+      log<software_error>({__FILE__,__LINE__});
+      state(stateCodes::ERROR);
+      return -1;
+   }
+   if(resp != "OK")
+   {
+      if(m_powerState != 1 || m_powerTargetState != 1) return 0;
+      log<software_error>({__FILE__, __LINE__, "not OK from " + com});
+      state(stateCodes::ERROR);
+      return -1;
+   }
+
+   com = "J";
    if(m_forward) com += "+";
    else com += "-";
 
@@ -588,7 +606,7 @@ int acesxeCtrl::stop()
 {
    std::string resp;
 
-   //Check the parameters
+
    if(sendRecv(resp, "STOP") != 0)
    {
       if(m_powerState != 1 || m_powerTargetState != 1) return 0;
@@ -604,6 +622,23 @@ int acesxeCtrl::stop()
       return -1;
    }
 
+   std::string com = "EO=0";
+
+   if(sendRecv(resp, com) != 0)
+   {
+      if(m_powerState != 1 || m_powerTargetState != 1) return 0;
+      log<software_error>({__FILE__,__LINE__});
+      state(stateCodes::ERROR);
+      return -1;
+   }
+   if(resp != "OK")
+   {
+      if(m_powerState != 1 || m_powerTargetState != 1) return 0;
+      log<software_error>({__FILE__, __LINE__, "not OK from " + com});
+      state(stateCodes::ERROR);
+      return -1;
+   }
+
    log<text_log>("stopped spinning turbulence simulator", logPrio::LOG_NOTICE);
    return 0;
 }
@@ -612,7 +647,7 @@ int acesxeCtrl::abort()
 {
    std::string resp;
 
-   //Check the parameters
+   
    if(sendRecv(resp, "ABORT") != 0)
    {
       if(m_powerState != 1 || m_powerTargetState != 1) return 0;
@@ -624,6 +659,23 @@ int acesxeCtrl::abort()
    {
       if(m_powerState != 1 || m_powerTargetState != 1) return 0;
       log<software_error>({__FILE__, __LINE__, "not OK from ABORT"});
+      state(stateCodes::ERROR);
+      return -1;
+   }
+
+   std::string com = "EO=0";
+
+   if(sendRecv(resp, com) != 0)
+   {
+      if(m_powerState != 1 || m_powerTargetState != 1) return 0;
+      log<software_error>({__FILE__,__LINE__});
+      state(stateCodes::ERROR);
+      return -1;
+   }
+   if(resp != "OK")
+   {
+      if(m_powerState != 1 || m_powerTargetState != 1) return 0;
+      log<software_error>({__FILE__, __LINE__, "not OK from " + com});
       state(stateCodes::ERROR);
       return -1;
    }
