@@ -115,3 +115,16 @@ As of 2022-10-14:
 @07 0 OK IDLE WR 1679790
 @08 0 OK IDLE WR 2257638
 
+
+************************
+turbsim rotator
+************************
+
+serial = 105115
+4266.6667 steps/deg
+
+set min pos = 0
+set max pos = 384000
+
+set point for out should be 85 degrees
+

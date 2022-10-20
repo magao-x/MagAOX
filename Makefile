@@ -15,7 +15,9 @@ apps_common = \
 
 apps_rtcicc = alpaoCtrl \
               cacaoInterface \
-				  userGainCtrl
+				  userGainCtrl \
+				  zaberCtrl \
+	           zaberLowLevel
 
 apps_rtc = \
 	ocam2KCtrl \
@@ -32,13 +34,10 @@ apps_rtc = \
 
 apps_icc = \
    acronameUsbHub \
-   cacaoInterface \
 	flipperCtrl \
 	filterWheelCtrl \
 	hsfwCtrl \
 	baslerCtrl \
-	zaberCtrl \
-	zaberLowLevel \
 	picamCtrl \
 	smc100ccCtrl \
 	andorCtrl \
