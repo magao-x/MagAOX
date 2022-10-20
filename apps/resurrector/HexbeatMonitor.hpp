@@ -132,6 +132,13 @@ public: // interfaces
       */
     HexbeatMonitor() { HexbeatMonitor::install_sigchld_handler(); }
 
+    /// Check for opened or active HexbeatMonitor that matches both
+    //  a given command and a given HexbeatMonitor name
+    bool match(const std::string& argv0, const std::string& hbname)
+    {
+        return m_fd > -1 && argv0 == m_argv0 && hbname == m_hbname;
+    }
+
     // Public read-only access to private class members
     int FD() { return m_fd; }
     const std::string hbname() const { return m_hbname; }
@@ -141,6 +148,12 @@ public: // interfaces
     // Public read/write access to private class members (properties)
     const int max_restarts() const { return m_restart_max; }
     void max_restarts(int val) { m_restart_max = val; }
+
+    const bool pending_close() const { return m_pending_close; }
+    void pending_close(bool tf)
+    {
+        m_pending_close = tf && (m_fd > -1);
+    }
 
     // /////////////////////////////////////////////////////////////////
     // /////////////////////////////////////////////////////////////////
@@ -459,6 +472,8 @@ private: // Internal attributes and interfaces
 
     std::string m_buffer{""};  ///< Accumulated heartbeat data
 
+    bool m_pending_close{false}; ///< Mark for possible closure
+
     // /////////////////////////////////////////////////////////////////
     // /////////////////////////////////////////////////////////////////
     /// Initialization of HexbeatMonitor instance on FIFO open
@@ -470,6 +485,7 @@ private: // Internal attributes and interfaces
         // On success, initialize instance data to opened state, not started ...
         m_sel = false;  // ... by leaving select monitoring off
         m_fd = fd;
+        pending_close(false);
         update_fd_set(fd_set_cpy, nfds);
         m_argv0 = argv0;
         m_hbname = hbname;
@@ -492,7 +508,7 @@ private: // Internal attributes and interfaces
       *         attribute m_fd, with the following caveat:  new_fd must
       *         be EITHER the offset of this instance into the caller's
       *         array of instances, OR -1; if the instance is not
-      *         inactive i.e. m_fd > -1, then new_fd will be 
+      *         inactive i.e. m_fd > -1, then new_fd will be
       */
     void
     update_status(int new_fd, bool dosel, fd_set& fd_set_cpy, int& nfds)
@@ -516,12 +532,14 @@ private: // Internal attributes and interfaces
             // ensure FIFO is closed!
             close(m_fd);
             m_fd = -1;
+            pending_close(false);
             return;
             // \todo perhaps throw an exception if new_fd is not -1
         }
 
         if (dosel) { m_last_hb = time_to_hb(10); }
         m_fd = new_fd;
+        pending_close(false);
         m_sel = dosel;
         // Keep fd_set in synchrony with FD and select monitoring status
         update_fd_set(fd_set_cpy, nfds);
@@ -539,7 +557,7 @@ private: // Internal attributes and interfaces
     update_fd_set(fd_set& fd_set_cpy, int& nfds)
     {
         // Process is inactive, ensure its select monitoring is disabled
-        if (m_fd < 0) { m_sel = false; return; }
+        if (m_fd < 0) { m_sel = false; pending_close(false); return; }
 
         if (m_sel)
         {
@@ -724,7 +742,7 @@ private: // Internal attributes and interfaces
 
         // Child:  pid == 0
 
-        int save_errno{errno}; 
+        int save_errno{errno};
         int ipgstat = setpgid(0,0);
         if (ipgstat)
         {
@@ -872,4 +890,4 @@ std::ostream& operator<<(std::ostream& os, const HexbeatMonitor& hbm)
     << ">"
     ;
     return os;
-}  
+}

@@ -29,6 +29,40 @@ public:
         FD_ZERO(&m_fdset_cpy);
     }
 
+    /// Assign all HexbeatMonitors' pending_close states true or false
+    void
+    pending_close(const bool tf)
+    {
+        for (std::vector<HexbeatMonitor>::iterator it = m_hbmarr.begin(); it != m_hbmarr.end(); ++it)
+        {
+            it->pending_close(tf);
+        }
+    }
+
+    /// Assign specific HexbeatMonitors' pending_close states
+    void
+    pending_close(const bool tf, std::string& argv0, std::string& hbname)
+    {
+        for (std::vector<HexbeatMonitor>::iterator it = m_hbmarr.begin(); it != m_hbmarr.end(); ++it)
+        {
+            if (it->match(argv0, hbname)) { it->pending_close(tf); }
+        }
+    }
+
+    /// Close any HexbeatMonitors that remain pending to be closed
+    void
+    pending_close()
+    {
+        for (std::vector<HexbeatMonitor>::iterator it = m_hbmarr.begin(); it != m_hbmarr.end(); ++it)
+        {
+            if (it->pending_close())
+            {
+                it->close_hexbeater(m_fdset_cpy, m_nfds);
+                it->pending_close(false); // Probably not necessary
+            }
+        }
+    }
+
     /// Run one select/read/check/restart cycle
     /** \arg \c tv - struct timeval of select(2) timeout
       * \todo ensure buffer is empty after read_hexbeater
@@ -103,7 +137,7 @@ public:
         // Exit with error if hbname is already present in m_hbmarr
         if (find_hbm_by_name(hbname) > -1) { errno = EEXIST; return -1; }
 
-        // Initialize varargs; open new FIFO; clean up varargs 
+        // Initialize varargs; open new FIFO; clean up varargs
         va_list ap; va_start(ap, hbname);
         int newfd = HexbeatMonitor::open_hexbeater
                     (argv0, hbname, m_fdset_cpy, m_nfds, m_hbmarr, ap);
