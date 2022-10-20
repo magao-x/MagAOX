@@ -42,6 +42,7 @@ apt install -y \
     chrony \
     gdb \
     unzip \
+    cpuset \
 ;
 
 if [[ $MAGAOX_ROLE == vm ]]; then

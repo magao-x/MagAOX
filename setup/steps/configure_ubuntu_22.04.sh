@@ -28,13 +28,23 @@ fi
 HERE
 fi
 
+if [[ $MAGAOX_ROLE == AOC ]]; then
+  sudo mkdir -p /etc/systemd/logind.conf.d/
+  cat <<'HERE' | sudo tee /etc/systemd/logind.conf.d/disable_power_keys.conf
+HandlePowerKey=ignore
+HandleSuspendKey=ignore
+HandleHibernateKey=ignore
+HandleRebootKey=ignore
+HERE
+fi
+
 if [[ $MAGAOX_ROLE == AOC || $MAGAOX_ROLE == ICC || $MAGAOX_ROLE == RTC || $MAGAOX_ROLE == TIC || $MAGAOX_ROLE == TOC ]]; then
     log_info "Purging cloud-init"
     sudo apt-get purge -y cloud-init || exit 1
     sudo apt autoremove -y || true
 
     log_info "Disable waiting for LAN config during boot"
-    systemctl mask systemd-networkd-wait-online.service || true
+    sudo systemctl mask systemd-networkd-wait-online.service || true
     
     log_info "Ensure UFW firewall is enabled"
     yes | sudo ufw enable || exit 1
