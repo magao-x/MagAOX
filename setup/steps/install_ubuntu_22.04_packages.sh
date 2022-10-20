@@ -43,6 +43,7 @@ apt install -y \
     gdb \
     unzip \
     cpuset \
+    nfs-common \
 ;
 
 if [[ $MAGAOX_ROLE == vm ]]; then
