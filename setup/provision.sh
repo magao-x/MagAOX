@@ -240,7 +240,7 @@ sudo bash -l "$DIR/steps/install_python.sh"
 sudo bash -l "$DIR/steps/configure_python.sh"
 source /opt/conda/bin/activate
 # Install first-party deps
-$MAYBE_SUDO bash -l "$DIR/steps/install_milk_and_cacao.sh"  # depends on /opt/miniconda3/bin/python existing for plugin build
+$MAYBE_SUDO bash -l "$DIR/steps/install_milk_and_cacao.sh"  # depends on /opt/conda/bin/python existing for plugin build
 $MAYBE_SUDO bash -l "$DIR/steps/install_milkzmq.sh" || exit 1
 $MAYBE_SUDO bash -l "$DIR/steps/install_purepyindi.sh"
 $MAYBE_SUDO bash -l "$DIR/steps/install_magpyx.sh"
