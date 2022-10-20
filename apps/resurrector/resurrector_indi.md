@@ -40,22 +40,23 @@ This diagram shows how it works, although with a single INDI driver:
    .        |                                              |                       |
    v        |                                              | bin/run -n drivername |
 +------------------+                                       +------------+          |
-|                  | <-- /path/to/fifos/drivername.ctrl -- |            |          |
+|                  | <-- /path/to/fifos/drivername.out --- |            |          |
 |                  |                                       |    INDI    |          |
 |    indiserver    | --- /path/to/fifos/drivername.in ---> |   DRIVER   |          |
 |                  |                                       |            |          |
-|                  | <-- /path/to/fifos/indidriver.out --- |            |          |
+|                  | <-- /path/to/fifos/indidriver.ctrl -- |            |          |
 +------------------+                                       +------------+----------+
 ```
 
 ## Legend
 
 * fork(2) - the fork system call for starting children processes
-** indiserver - The INDI server, a child process of the resurrector
+* indiserver - The INDI server, a child process of the resurrector
 * resurrector_indi - The resurrector process
-** Device Controller - The INDI driver process, a child process of the resurrector
-    * INDI DRIVER - An indiDriver class instance
-    * resurrectee - An resurrectee class instance
+* INDI driver - A child process of the resurrector
+    * INDI DRIVER or indiDriver- An indiDriver class instance
+    * resurrectee - A resurrectee class instance
+    * Device Controller - The MagAO-X business logic
 * /path/to/fifos/isXXX.hb - A named FIFO for transmitting INDI server heartbeats (Hexbeats) to the resurrector_indi process
 * /path/to/config/magaox.conf - A file with host-wide global configuration parameters, specifically "indiserver_ctrl_fifo" here
 * /path/to/fifos/drivername.hb - A named FIFO for transmitting INDI driver heartbeats (Hexbeats) to the resurrector_indi process
@@ -65,6 +66,13 @@ This diagram shows how it works, although with a single INDI driver:
 * /path/to/config/proclist_role.txt - A configuration file with list of Device Controller names and executable binaries
 
 ## resurrector_indi, fork(2)
+
+The primary purpose of the resurrector_indi process is to keep all of the pieces, INDI server and INDI drivers, of the MagAO-X system running:
+
+* Starts and stops all processes; 
+* Monitors Hexbeats (heartbeats) from all processes;
+* Detects if any have crashed or have otherwise failed;
+* Restarts any that have failed
 
 The resurrector_indi process parses the names and executables of the INDI server and INDI drivers from the "/opt/MagAOX/config/proclist_role.txt" process list configuration file.
 The resurrector_indi process forks a single INDI server, and multiple INDI driver, childen processes as parsed from the process list.
@@ -76,7 +84,34 @@ If the resurrector_indi process receives a SIGUSR2 signal, it then re-parses the
 The process list is the same configuration file that was formerly used by the Python script "xctrl" to manually start the INDI server and drivers.
 See "EXAMPLES" below for a sample process list configuration file.
 
+The MagAO-X process list file is where the generic INDI framework becomes a MagAO-X system.  INDI server itself is a general-purpose application that facilitates INDI protocol messaging among INDI clients (drivers), but it cares not a whit about the application-specific content of said messaging.
+
 The INDI server must be the only process name in that process list that starts with an "is" prefix, e.g. isRTC, isVM; the suffix after the "is" prefix is usually the uppercase version of role, but can be anything.
+
+## INDI server and drivers
+
+The indiserver app is the hub of all inter- and intra-host INDI protocol communication over the named FIFOs "drivername.in" and "drivername.out" connected to the indiDriver class instance in each INDI driver.
+The named FIFO "indiserver.ctrl" is also monitored by the indiserver app to detect when a new INDI driver starts up.
+The INDI server actually comprises two running processes:  xindiserver, which is a C++ application that reads the isXXX.conf file and forks the INDI server itself; indiserver, a C application which know
+
+An INDI driver is a child process forked by the resurrector, running an app comprising (at least) three pieces:  Device Controller; indiDriver  class instance; resurrectee class instance.
+
+### Device Controller
+
+The Device Controller executes the MagAO-X business logic of the INDI driver, such as communicating with a Fast Steerable Mirror or a device that measures the wavefront.
+
+### indiDRIVER class instance
+
+The indiDriver class instance handles the inter-process INDI protocol communication between the Device Controller and other Device Controllers.
+The indiDriver class instance manages the INDI driver (app) communication with the INDI server and other INDI drivers.
+Note the similarity of the phrases "INDI driver" and "indiDriver" here:
+the former refers to the complete application;
+the latter refers to a class instance that handles INDI protocol messages, and like the INDI server it is agnostic toward the content of those messages.
+
+### resurrectee class instance
+
+The resurrectee class instance handles one-way communication with the resurrector, sending a Hexbeat (heartbeat; updated future time) at about 1Hz.
+The resurrectee class is also refer to as a Hexbeater.
 
 ## Named FIFOs
 
@@ -88,9 +123,9 @@ The INDI driver heartbeat FIFO must be named "drivername.hb" for INDI drivers; t
 The ".hb" extension means HexBeat (heartbeat).
 The INDI driver heartbeat FIFO must be named "drivername.hb" with the ".hb" extension meaning HexBeat (heartbeat).
 
-### indiserver.ctrl, indiserver, magaox.conf
+### indiserver.ctrl, magaox.conf
 
-The INDI server FIFO is named "indiserver.ctrl" and it must be configured both as the INDI server parameter "indiserver.f" in isXXX.conf, and as the global parameter "indiserver_ctrl_fifo" in magaox.conf.
+The INDI server control FIFO is named "indiserver.ctrl" and it must be configured both as the INDI server parameter "indiserver.f" in isXXX.conf, and as the global parameter "indiserver_ctrl_fifo" in magaox.conf.
 This is a named FIFO used by any INDI driver process for transmitting a "start /path/to/fifos/drivername<LF>" message to the INDI server process, which message notifies the INDI server that a new driver is joining the INDI protocol network.
 
 The file "magaox.conf" is a global configuration TOML file that is read by all INDI processes, both server and drivers.  See "EXAMPLES" below for a sample magaox.conf file.
