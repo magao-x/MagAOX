@@ -269,11 +269,11 @@ sudo bash -l "$DIR/steps/install_aliases.sh"
 # By separating the real build into another step, we can cache the slow provisioning steps
 # and reuse them on subsequent runs.
 if [[ $MAGAOX_ROLE != ci ]]; then
-    $MAYBE_SUDO bash -l "$DIR/steps/install_MagAOX.sh"
+    $MAYBE_SUDO bash -l "$DIR/steps/install_MagAOX.sh" || exit 1
 fi
 
-if [[ $MAGAOX_ROLE == "RTC" ]]; then
-    sudo bash -l "$DIR/steps/configure_rtc_cpuset_service.sh"
+if [[ $MAGAOX_ROLE == RTC || $MAGAOX_ROLE == ICC ]]; then
+    sudo bash -l "$DIR/steps/configure_cpuset_service.sh"
 fi
 
 # To try and debug hardware issues, ICC and RTC replicate their
@@ -284,7 +284,7 @@ fi
 sudo bash -l "$DIR/steps/configure_kernel_netconsole.sh"
 
 log_success "Provisioning complete"
-if [[ $MAGAOX_ROLE != vm ]]; then
+if [[ $MAGAOX_ROLE != vm && $MAGAOX_ROLE != ci && $MAGAOX_ROLE != container ]]; then
     log_info "You'll probably want to run"
     log_info "    source /etc/profile.d/*.sh"
     log_info "to get all the new environment variables set."
