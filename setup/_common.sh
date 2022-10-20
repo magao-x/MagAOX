@@ -14,8 +14,6 @@ if [[ $MAGAOX_ROLE == vm ]]; then
     instrument_user=ubuntu
     instrument_group=ubuntu
     instrument_dev_group=ubuntu
-  else
-    instrument_user=$USER
   fi
 fi
 

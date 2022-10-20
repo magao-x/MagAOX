@@ -41,6 +41,7 @@ apt install -y \
     liblog4cxx-dev \
     chrony \
     gdb \
+    unzip \
 ;
 
 if [[ $MAGAOX_ROLE == vm ]]; then

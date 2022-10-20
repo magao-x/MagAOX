@@ -541,11 +541,11 @@ int userGainCtrl::getAOCalib()
    fin.close();
    
    //Now get number of modes from the modesWFS file
-   calsrc = m_aoCalDir + "/aol" + std::to_string(m_loopNumber) + "_modesWFS.fits";
+   //calsrc = m_aoCalDir + "/aol" + std::to_string(m_loopNumber) + "_modesWFS.fits";
    
-   m_ff.open(calsrc);
+   //m_ff.open(calsrc);
 
-   int totalNModes = m_ff.naxes(2);
+   int totalNModes = m_gainsCurrent.rows(); //m_ff.naxes(2);
 
    m_ff.close();
 
@@ -632,11 +632,11 @@ int userGainCtrl::getModeBlocks()
       }
    }
 
-   if(modeBlockStart.back() + modeBlockN.back() > m_totalNModes)
+   /*if(modeBlockStart.back() + modeBlockN.back() > m_totalNModes)
    {
       return log<software_error, -1>({__FILE__, __LINE__, errno, "userGainCtrl::getModeBlocks too many modes in blocks compared to WFSmodes"});
    }
-   else if(modeBlockStart.back() + modeBlockN.back() < m_totalNModes)
+   else*/ if(modeBlockStart.back() + modeBlockN.back() < m_totalNModes)
    {
       int st0 = modeBlockStart.back();
       int N0 = modeBlockN.back();
@@ -792,7 +792,9 @@ int userGainCtrl::processImage( void * curr_src,
                               )
 {
    static_cast<void>(dummy); //be unused
-  
+
+   std::unique_lock<std::mutex> lock(m_modeBlockMutex);
+
    realT * data = m_gainsCurrent.data();
       
    for(unsigned nn=0; nn < shmimMonitorT::m_width*shmimMonitorT::m_height; ++nn)
@@ -808,18 +810,20 @@ int userGainCtrl::processImage( void * curr_src,
          std::cout << m_gainsCurrent(rr,cc) << " ";
    std::cout << "\n";
 
-   std::unique_lock<std::mutex> lock(m_modeBlockMutex);
-
    for(size_t n =0; n < m_modeBlockStart.size(); ++n)
    {
       double mng = 0;
 
+      int NN = 0;
       for(int m =0; m < m_modeBlockN[n]; ++m)
       {
+         if(m_modeBlockStart[n] + m >= m_gainsCurrent.rows()) break;
          mng += m_gainsCurrent(m_modeBlockStart[n] + m,0);
+
+         ++NN;
       }
 
-      m_modeBlockGains[n] = mng / m_modeBlockN[n]; 
+      m_modeBlockGains[n] = mng / NN; 
    }
 
    return 0;
@@ -864,6 +868,7 @@ int userGainCtrl::setBlockGain( int n,
    //to preserve intra-block differences
    for(int m =0; m < m_modeBlockN[n]; ++m)
    {
+      if(m_modeBlockStart[n] + m > m_gainsTarget.rows() -1) break;
       m_gainsTarget(m_modeBlockStart[n] + m,0) = m_gainsCurrent(m_modeBlockStart[n] + m,0) + (g - m_modeBlockGains[n]);
    }
    lock.unlock();
@@ -892,7 +897,9 @@ int userGainCtrl::processImage( void * curr_src,
                               )
 {
    static_cast<void>(dummy); //be unused
-  
+
+   std::unique_lock<std::mutex> lock(m_modeBlockMutex);
+
    realT * data = m_mcsCurrent.data();
       
    for(unsigned nn=0; nn < mcShmimMonitorT::m_width*mcShmimMonitorT::m_height; ++nn)
@@ -908,18 +915,21 @@ int userGainCtrl::processImage( void * curr_src,
          std::cout << m_mcsCurrent(rr,cc) << " ";
    std::cout << "\n";
 
-   std::unique_lock<std::mutex> lock(m_modeBlockMutex);
 
    for(size_t n =0; n < m_modeBlockStart.size(); ++n)
    {
       double mng = 0;
 
+      int NN = 0;
       for(int m =0; m < m_modeBlockN[n]; ++m)
       {
+         if(m_modeBlockStart[n] + m >= m_mcsCurrent.rows()) break;
          mng += m_mcsCurrent(m_modeBlockStart[n] + m,0);
+         ++NN;
       }
 
-      m_modeBlockMCs[n] = mng / m_modeBlockN[n]; 
+
+      m_modeBlockMCs[n] = mng / NN; 
    }
 
    return 0;
@@ -964,6 +974,7 @@ int userGainCtrl::setBlockMC( int n,
    //to preserve intra-block differences
    for(int m =0; m < m_modeBlockN[n]; ++m)
    {
+      if(m_modeBlockStart[n] + m > m_mcsTarget.rows() -1) break;
       m_mcsTarget(m_modeBlockStart[n] + m,0) = m_mcsCurrent(m_modeBlockStart[n] + m,0) + (mc- m_modeBlockMCs[n]);
    }
    lock.unlock();
@@ -992,7 +1003,9 @@ int userGainCtrl::processImage( void * curr_src,
                               )
 {
    static_cast<void>(dummy); //be unused
-  
+
+   std::unique_lock<std::mutex> lock(m_modeBlockMutex);
+
    realT * data = m_limitsCurrent.data();
       
    for(unsigned nn=0; nn < limitShmimMonitorT::m_width*limitShmimMonitorT::m_height; ++nn)
@@ -1008,18 +1021,20 @@ int userGainCtrl::processImage( void * curr_src,
          std::cout << m_limitsCurrent(rr,cc) << " ";
    std::cout << "\n";
 
-   std::unique_lock<std::mutex> lock(m_modeBlockMutex);
 
    for(size_t n =0; n < m_modeBlockStart.size(); ++n)
    {
       double mng = 0;
 
+      int NN = 0;
       for(int m =0; m < m_modeBlockN[n]; ++m)
       {
+         if(m_modeBlockStart[n] + m >= m_limitsCurrent.rows()) break;
          mng += m_limitsCurrent(m_modeBlockStart[n] + m,0);
+         ++NN;
       }
 
-      m_modeBlockLims[n] = mng / m_modeBlockN[n]; 
+      m_modeBlockLims[n] = mng / NN; 
    }
 
    return 0;
@@ -1064,6 +1079,7 @@ int userGainCtrl::setBlockLimit( int n,
    //to preserve intra-block differences
    for(int m =0; m < m_modeBlockN[n]; ++m)
    {
+      if(m_modeBlockStart[n] + m > m_limitsTarget.rows() -1) break;
       m_limitsTarget(m_modeBlockStart[n] + m,0) = m_limitsCurrent(m_modeBlockStart[n] + m,0) + (l- m_modeBlockLims[n]);
    }
    lock.unlock();

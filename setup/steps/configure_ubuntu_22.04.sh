@@ -3,14 +3,6 @@ DIR="$( cd "$( dirname "${BASH_SOURCE[0]}" )" && pwd )"
 source $DIR/../_common.sh
 set -euo pipefail
 
-if [[ $MAGAOX_ROLE == AOC || $MAGAOX_ROLE == ICC || $MAGAOX_ROLE == RTC || $MAGAOX_ROLE == TIC || $MAGAOX_ROLE == TOC ]]; then
-    log_info "Purging cloud-init"
-    sudo apt-get purge -y cloud-init || exit 1
-    sudo apt autoremove -y || true
-fi
-
-log_info "Disable waiting for LAN config during boot"
-systemctl mask systemd-networkd-wait-online.service || true
 
 
 log_info "Configuring package source list with Intel oneAPI repositories"
@@ -36,11 +28,20 @@ fi
 HERE
 fi
 
-log_info "Ensure UFW firewall is enabled"
-yes | sudo ufw enable || exit 1
-sudo ufw allow ssh || exit 1
-sudo ufw allow http || exit 1
-sudo ufw allow https || exit 1
+if [[ $MAGAOX_ROLE == AOC || $MAGAOX_ROLE == ICC || $MAGAOX_ROLE == RTC || $MAGAOX_ROLE == TIC || $MAGAOX_ROLE == TOC ]]; then
+    log_info "Purging cloud-init"
+    sudo apt-get purge -y cloud-init || exit 1
+    sudo apt autoremove -y || true
+
+    log_info "Disable waiting for LAN config during boot"
+    systemctl mask systemd-networkd-wait-online.service || true
+    
+    log_info "Ensure UFW firewall is enabled"
+    yes | sudo ufw enable || exit 1
+    sudo ufw allow ssh || exit 1
+    sudo ufw deny http || exit 1
+    sudo ufw deny https || exit 1
+fi
 
 log_info "Hush login banners"
 sudo touch /etc/skel/.hushlogin
