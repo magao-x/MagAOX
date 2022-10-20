@@ -51,6 +51,12 @@ if [[ $MAGAOX_ROLE == AOC || $MAGAOX_ROLE == ICC || $MAGAOX_ROLE == RTC || $MAGA
     sudo ufw allow ssh || exit 1
     sudo ufw deny http || exit 1
     sudo ufw deny https || exit 1
+
+    log_info "Use CentOS mountpoint for cpusets"
+    sudo mkdir -p /sys/fs/cgroup/cpuset
+    cat <<'HERE' | sudo tee /etc/cset.conf || exit 1
+mountpoint = /sys/fs/cgroup/cpuset
+HERE
 fi
 
 log_info "Hush login banners"
