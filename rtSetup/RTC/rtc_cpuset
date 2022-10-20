@@ -10,6 +10,8 @@
 ##
 ####################################################
 
+cpusetMount=/sys/fs/cgroup/cpuset
+
 # On RTC we have 2x18 = 36 real cores, which maps to 72 cpus
 # To see the list: cat /proc/cpuinfo | egrep 'processor|physical id|core id'
 # Each row in this table corresponds to a real core, and two logical processors.
@@ -65,18 +67,18 @@ done
 
 #Create and mount the root cpuset
 if ! mount | grep -qe '^cpuset'; then
-   mkdir -p /dev/cpuset
-   mount -t cpuset cpuset /dev/cpuset
+   mkdir -p $cpusetMount
+   mount -t cpuset cpuset $cpusetMount
 fi
-cd /dev/cpuset
+cd $cpusetMount
 
 #############################
 # The system cpuset
 #
 ############################
-mkdir -p /dev/cpuset/system
-/bin/echo 0-13,36-49 > /dev/cpuset/system/cpuset.cpus
-/bin/echo 0-1 > /dev/cpuset/system/cpuset.mems
+mkdir -p $cpusetMount/system
+/bin/echo 0-13,36-49 > $cpusetMount/system/cpuset.cpus
+/bin/echo 0-1 > $cpusetMount/system/cpuset.mems
 
 # Now move all current tasks to system cpuset
 # Note that this moves pid=1 (init) so all new process created should live here.
@@ -98,127 +100,127 @@ echo 1 > system/cpuset.sched_load_balance
 ###############
 
 #spare14
-mkdir -p /dev/cpuset/spare14
-/bin/echo 14 > /dev/cpuset/spare14/cpuset.cpus
-/bin/echo 1 > /dev/cpuset/spare14/cpuset.cpu_exclusive
-/bin/echo 0-1 > /dev/cpuset/spare14/cpuset.mems
+mkdir -p $cpusetMount/spare14
+/bin/echo 14 > $cpusetMount/spare14/cpuset.cpus
+/bin/echo 1 > $cpusetMount/spare14/cpuset.cpu_exclusive
+/bin/echo 0-1 > $cpusetMount/spare14/cpuset.mems
 
 #spare15
-mkdir -p /dev/cpuset/spare15
-/bin/echo 15 > /dev/cpuset/spare15/cpuset.cpus
-/bin/echo 1 > /dev/cpuset/spare15/cpuset.cpu_exclusive
-/bin/echo 0-1 > /dev/cpuset/spare15/cpuset.mems
+mkdir -p $cpusetMount/spare15
+/bin/echo 15 > $cpusetMount/spare15/cpuset.cpus
+/bin/echo 1 > $cpusetMount/spare15/cpuset.cpu_exclusive
+/bin/echo 0-1 > $cpusetMount/spare15/cpuset.mems
 
 #spare16
-mkdir -p /dev/cpuset/spare16
-/bin/echo 16 > /dev/cpuset/spare16/cpuset.cpus
-/bin/echo 1 > /dev/cpuset/spare16/cpuset.cpu_exclusive
-/bin/echo 0-1 > /dev/cpuset/spare16/cpuset.mems
+mkdir -p $cpusetMount/spare16
+/bin/echo 16 > $cpusetMount/spare16/cpuset.cpus
+/bin/echo 1 > $cpusetMount/spare16/cpuset.cpu_exclusive
+/bin/echo 0-1 > $cpusetMount/spare16/cpuset.mems
 
 #camwfs-sw - 17
-mkdir -p /dev/cpuset/camwfs-sw
-/bin/echo 17 > /dev/cpuset/camwfs-sw/cpuset.cpus
-/bin/echo 1 > /dev/cpuset/camwfs-sw/cpuset.cpu_exclusive
-/bin/echo 0-1 > /dev/cpuset/camwfs-sw/cpuset.mems
+mkdir -p $cpusetMount/camwfs-sw
+/bin/echo 17 > $cpusetMount/camwfs-sw/cpuset.cpus
+/bin/echo 1 > $cpusetMount/camwfs-sw/cpuset.cpu_exclusive
+/bin/echo 0-1 > $cpusetMount/camwfs-sw/cpuset.mems
 
 #camwfs - 18
-mkdir -p /dev/cpuset/camwfs
-/bin/echo 18 > /dev/cpuset/camwfs/cpuset.cpus
-/bin/echo 1 > /dev/cpuset/camwfs/cpuset.cpu_exclusive
-/bin/echo 0-1 > /dev/cpuset/camwfs/cpuset.mems
+mkdir -p $cpusetMount/camwfs
+/bin/echo 18 > $cpusetMount/camwfs/cpuset.cpus
+/bin/echo 1 > $cpusetMount/camwfs/cpuset.cpu_exclusive
+/bin/echo 0-1 > $cpusetMount/camwfs/cpuset.mems
 
 #Woofer
-mkdir -p /dev/cpuset/dm00comb
-/bin/echo 19 > /dev/cpuset/dm00comb/cpuset.cpus
-/bin/echo 1 > /dev/cpuset/dm00comb/cpuset.cpu_exclusive
-/bin/echo 0-1 > /dev/cpuset/dm00comb/cpuset.mems
+mkdir -p $cpusetMount/dm00comb
+/bin/echo 19 > $cpusetMount/dm00comb/cpuset.cpus
+/bin/echo 1 > $cpusetMount/dm00comb/cpuset.cpu_exclusive
+/bin/echo 0-1 > $cpusetMount/dm00comb/cpuset.mems
 
-mkdir -p /dev/cpuset/woofer
-/bin/echo 20 > /dev/cpuset/woofer/cpuset.cpus
-/bin/echo 1 > /dev/cpuset/woofer/cpuset.cpu_exclusive
-/bin/echo 0-1 > /dev/cpuset/woofer/cpuset.mems
+mkdir -p $cpusetMount/woofer
+/bin/echo 20 > $cpusetMount/woofer/cpuset.cpus
+/bin/echo 1 > $cpusetMount/woofer/cpuset.cpu_exclusive
+/bin/echo 0-1 > $cpusetMount/woofer/cpuset.mems
 
 #Tweeter
-mkdir -p /dev/cpuset/dm01comb
-/bin/echo 21 > /dev/cpuset/dm01comb/cpuset.cpus
-/bin/echo 1 > /dev/cpuset/dm01comb/cpuset.cpu_exclusive
-/bin/echo 0-1 > /dev/cpuset/dm01comb/cpuset.mems
+mkdir -p $cpusetMount/dm01comb
+/bin/echo 21 > $cpusetMount/dm01comb/cpuset.cpus
+/bin/echo 1 > $cpusetMount/dm01comb/cpuset.cpu_exclusive
+/bin/echo 0-1 > $cpusetMount/dm01comb/cpuset.mems
 
-mkdir -p /dev/cpuset/tweeter
-/bin/echo 22 > /dev/cpuset/tweeter/cpuset.cpus
-/bin/echo 1 > /dev/cpuset/tweeter/cpuset.cpu_exclusive
-/bin/echo 0-1 > /dev/cpuset/tweeter/cpuset.mems
+mkdir -p $cpusetMount/tweeter
+/bin/echo 22 > $cpusetMount/tweeter/cpuset.cpus
+/bin/echo 1 > $cpusetMount/tweeter/cpuset.cpu_exclusive
+/bin/echo 0-1 > $cpusetMount/tweeter/cpuset.mems
 
 #t2w offload process
-mkdir -p /dev/cpuset/t2w
-/bin/echo 23 > /dev/cpuset/t2w/cpuset.cpus
-/bin/echo 1 > /dev/cpuset/t2w/cpuset.cpu_exclusive
-/bin/echo 0-1 > /dev/cpuset/t2w/cpuset.mems
+mkdir -p $cpusetMount/t2w
+/bin/echo 23 > $cpusetMount/t2w/cpuset.cpus
+/bin/echo 1 > $cpusetMount/t2w/cpuset.cpu_exclusive
+/bin/echo 0-1 > $cpusetMount/t2w/cpuset.mems
 
 #aolrun 24-30
-mkdir -p /dev/cpuset/aol1RT
-/bin/echo 24-30 > /dev/cpuset/aol1RT/cpuset.cpus
-/bin/echo 1 > /dev/cpuset/aol1RT/cpuset.cpu_exclusive
-/bin/echo 0-1 > /dev/cpuset/aol1RT/cpuset.mems
-/bin/echo 0 > /dev/cpuset/aol1RT/cpuset.sched_load_balance
+mkdir -p $cpusetMount/aol1RT
+/bin/echo 24-30 > $cpusetMount/aol1RT/cpuset.cpus
+/bin/echo 1 > $cpusetMount/aol1RT/cpuset.cpu_exclusive
+/bin/echo 0-1 > $cpusetMount/aol1RT/cpuset.mems
+/bin/echo 0 > $cpusetMount/aol1RT/cpuset.sched_load_balance
 
-mkdir -p /dev/cpuset/aol1RT/aol1RT_0
-/bin/echo 24 > /dev/cpuset/aol1RT/aol1RT_0/cpuset.cpus
-/bin/echo 1 > /dev/cpuset/aol1RT/aol1RT_0/cpuset.cpu_exclusive
-/bin/echo 0-1 > /dev/cpuset/aol1RT/aol1RT_0/cpuset.mems
+mkdir -p $cpusetMount/aol1RT/aol1RT_0
+/bin/echo 24 > $cpusetMount/aol1RT/aol1RT_0/cpuset.cpus
+/bin/echo 1 > $cpusetMount/aol1RT/aol1RT_0/cpuset.cpu_exclusive
+/bin/echo 0-1 > $cpusetMount/aol1RT/aol1RT_0/cpuset.mems
 
-mkdir -p /dev/cpuset/aol1RT/aol1RT_1
-/bin/echo 25 > /dev/cpuset/aol1RT/aol1RT_1/cpuset.cpus
-/bin/echo 1 > /dev/cpuset/aol1RT/aol1RT_1/cpuset.cpu_exclusive
-/bin/echo 0-1 > /dev/cpuset/aol1RT/aol1RT_1/cpuset.mems
+mkdir -p $cpusetMount/aol1RT/aol1RT_1
+/bin/echo 25 > $cpusetMount/aol1RT/aol1RT_1/cpuset.cpus
+/bin/echo 1 > $cpusetMount/aol1RT/aol1RT_1/cpuset.cpu_exclusive
+/bin/echo 0-1 > $cpusetMount/aol1RT/aol1RT_1/cpuset.mems
 
-mkdir -p /dev/cpuset/aol1RT/aol1RT_2
-/bin/echo 26 > /dev/cpuset/aol1RT/aol1RT_2/cpuset.cpus
-/bin/echo 1 > /dev/cpuset/aol1RT/aol1RT_2/cpuset.cpu_exclusive
-/bin/echo 0-1 > /dev/cpuset/aol1RT/aol1RT_2/cpuset.mems
+mkdir -p $cpusetMount/aol1RT/aol1RT_2
+/bin/echo 26 > $cpusetMount/aol1RT/aol1RT_2/cpuset.cpus
+/bin/echo 1 > $cpusetMount/aol1RT/aol1RT_2/cpuset.cpu_exclusive
+/bin/echo 0-1 > $cpusetMount/aol1RT/aol1RT_2/cpuset.mems
 
-mkdir -p /dev/cpuset/aol1RT/aol1RT_3
-/bin/echo 27 > /dev/cpuset/aol1RT/aol1RT_3/cpuset.cpus
-/bin/echo 1 > /dev/cpuset/aol1RT/aol1RT_3/cpuset.cpu_exclusive
-/bin/echo 0-1 > /dev/cpuset/aol1RT/aol1RT_3/cpuset.mems
+mkdir -p $cpusetMount/aol1RT/aol1RT_3
+/bin/echo 27 > $cpusetMount/aol1RT/aol1RT_3/cpuset.cpus
+/bin/echo 1 > $cpusetMount/aol1RT/aol1RT_3/cpuset.cpu_exclusive
+/bin/echo 0-1 > $cpusetMount/aol1RT/aol1RT_3/cpuset.mems
 
-mkdir -p /dev/cpuset/aol1RT/aol1RT_4
-/bin/echo 28 > /dev/cpuset/aol1RT/aol1RT_4/cpuset.cpus
-/bin/echo 1 > /dev/cpuset/aol1RT/aol1RT_4/cpuset.cpu_exclusive
-/bin/echo 0-1 > /dev/cpuset/aol1RT/aol1RT_4/cpuset.mems
+mkdir -p $cpusetMount/aol1RT/aol1RT_4
+/bin/echo 28 > $cpusetMount/aol1RT/aol1RT_4/cpuset.cpus
+/bin/echo 1 > $cpusetMount/aol1RT/aol1RT_4/cpuset.cpu_exclusive
+/bin/echo 0-1 > $cpusetMount/aol1RT/aol1RT_4/cpuset.mems
 
-mkdir -p /dev/cpuset/aol1RT/aol1RT_5
-/bin/echo 29 > /dev/cpuset/aol1RT/aol1RT_5/cpuset.cpus
-/bin/echo 1 > /dev/cpuset/aol1RT/aol1RT_5/cpuset.cpu_exclusive
-/bin/echo 0-1 > /dev/cpuset/aol1RT/aol1RT_5/cpuset.mems
+mkdir -p $cpusetMount/aol1RT/aol1RT_5
+/bin/echo 29 > $cpusetMount/aol1RT/aol1RT_5/cpuset.cpus
+/bin/echo 1 > $cpusetMount/aol1RT/aol1RT_5/cpuset.cpu_exclusive
+/bin/echo 0-1 > $cpusetMount/aol1RT/aol1RT_5/cpuset.mems
 
-mkdir -p /dev/cpuset/aol1RT/aol1RT_6
-/bin/echo 30 > /dev/cpuset/aol1RT/aol1RT_6/cpuset.cpus
-/bin/echo 1 > /dev/cpuset/aol1RT/aol1RT_6/cpuset.cpu_exclusive
-/bin/echo 0-1 > /dev/cpuset/aol1RT/aol1RT_6/cpuset.mems
+mkdir -p $cpusetMount/aol1RT/aol1RT_6
+/bin/echo 30 > $cpusetMount/aol1RT/aol1RT_6/cpuset.cpus
+/bin/echo 1 > $cpusetMount/aol1RT/aol1RT_6/cpuset.cpu_exclusive
+/bin/echo 0-1 > $cpusetMount/aol1RT/aol1RT_6/cpuset.mems
 
 #aol1RT1 -- mvm extrct
-mkdir -p /dev/cpuset/aol1RT1
-/bin/echo 31 > /dev/cpuset/aol1RT1/cpuset.cpus
-/bin/echo 1 > /dev/cpuset/aol1RT1/cpuset.cpu_exclusive
-/bin/echo 0-1 > /dev/cpuset/aol1RT1/cpuset.mems
+mkdir -p $cpusetMount/aol1RT1
+/bin/echo 31 > $cpusetMount/aol1RT1/cpuset.cpus
+/bin/echo 1 > $cpusetMount/aol1RT1/cpuset.cpu_exclusive
+/bin/echo 0-1 > $cpusetMount/aol1RT1/cpuset.mems
 
 #aol1RT2 -- gpumode2dm
-mkdir -p /dev/cpuset/aol1RT2
-/bin/echo 32,33 > /dev/cpuset/aol1RT2/cpuset.cpus
-/bin/echo 1 > /dev/cpuset/aol1RT2/cpuset.cpu_exclusive
-/bin/echo 0-1 > /dev/cpuset/aol1RT2/cpuset.mems
+mkdir -p $cpusetMount/aol1RT2
+/bin/echo 32,33 > $cpusetMount/aol1RT2/cpuset.cpus
+/bin/echo 1 > $cpusetMount/aol1RT2/cpuset.cpu_exclusive
+/bin/echo 0-1 > $cpusetMount/aol1RT2/cpuset.mems
 
 #aol1RT3 -- aol1-ProcessModeCo
-mkdir -p /dev/cpuset/aol1RT3
-/bin/echo 34 > /dev/cpuset/aol1RT3/cpuset.cpus
-/bin/echo 1 > /dev/cpuset/aol1RT3/cpuset.cpu_exclusive
-/bin/echo 0-1 > /dev/cpuset/aol1RT3/cpuset.mems
+mkdir -p $cpusetMount/aol1RT3
+/bin/echo 34 > $cpusetMount/aol1RT3/cpuset.cpus
+/bin/echo 1 > $cpusetMount/aol1RT3/cpuset.cpu_exclusive
+/bin/echo 0-1 > $cpusetMount/aol1RT3/cpuset.mems
 
 #tweeterSpeck 35
-mkdir -p /dev/cpuset/tweeterSpeck
-/bin/echo 35 > /dev/cpuset/tweeterSpeck/cpuset.cpus
-/bin/echo 1 > /dev/cpuset/tweeterSpeck/cpuset.cpu_exclusive
-/bin/echo 0-1 > /dev/cpuset/tweeterSpeck/cpuset.mems
+mkdir -p $cpusetMount/tweeterSpeck
+/bin/echo 35 > $cpusetMount/tweeterSpeck/cpuset.cpus
+/bin/echo 1 > $cpusetMount/tweeterSpeck/cpuset.cpu_exclusive
+/bin/echo 0-1 > $cpusetMount/tweeterSpeck/cpuset.mems
 
 echo "cpusets configured successfully"
