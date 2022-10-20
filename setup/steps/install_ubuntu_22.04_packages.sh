@@ -44,6 +44,7 @@ apt install -y \
     unzip \
     cpuset \
     nfs-common \
+    nfs-kernel-server \
 ;
 
 if [[ $MAGAOX_ROLE == vm ]]; then
