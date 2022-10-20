@@ -85,6 +85,7 @@ if [[ $MAGAOX_ROLE != "vm" ]]; then
   make_on_data_array logs /opt/MagAOX
   make_on_data_array rawimages /opt/MagAOX
   make_on_data_array telem /opt/MagAOX
+  make_on_data_array cacao /opt/MagAOX
 
 
   chown -R root:root /opt/MagAOX/secrets

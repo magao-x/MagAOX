@@ -3,25 +3,22 @@ DIR="$( cd "$( dirname "${BASH_SOURCE[0]}" )" && pwd )"
 source $DIR/../_common.sh
 set -euo pipefail
 
-if [[ $MAGAOX_ROLE == RTC || $MAGAOX_ROLE == ICC ]]; then
+if [[ $MAGAOX_ROLE == RTC || $MAGAOX_ROLE == ICC || $MAGAOX_ROLE == AOC ]]; then
     sudo systemctl enable nfs-server.service
     sudo systemctl start nfs-server.service
-    cat <<'HERE' | sudo tee /etc/exports
-/data/logs      aoc(ro,sync,all_squash)
-/data/rawimages aoc(ro,sync,all_squash)
-/data/telem     aoc(ro,sync,all_squash)
-HERE
+    exportHosts=""
+    for host in aoc rtc icc; do
+        if [[ ${host,,} != ${MAGAOX_ROLE,,} ]]; then
+            exportHosts="$host(ro,sync,all_squash) $exportHosts"
+        fi
+    done
+    echo "/      $exportHosts" | sudo tee -a /etc/exports
     sudo exportfs -a
-fi
-if [[ $MAGAOX_ROLE == AOC ]]; then
-    for remote in rtc icc; do
-        for path in /data/logs /data/rawimages /data/telem; do
-            if ! grep -q "$remote:$path" /etc/fstab; then
-                mountpoint="/data/$remote${path/\/data\///}"
-                sudo mkdir -p $mountpoint
-                echo "$remote:$path $mountpoint	nfs	defaults	0 0" | sudo tee -a /etc/fstab
-                sudo mount $mountpoint || true
-            fi
-        done
+
+    for host in aoc rtc icc; do
+        mkdir -p /srv/$host
+        if ! grep -q "/srv/$host" /etc/fstab; then
+            echo "$host:/ /srv/$host	nfs	noauto,x-systemd.automount,nofail,x-systemd.device-timeout=10s	0 0" | sudo tee -a /etc/fstab
+        fi
     done
 fi
