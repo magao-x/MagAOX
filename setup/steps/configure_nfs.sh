@@ -13,6 +13,9 @@ fi
 if [[ $MAGAOX_ROLE == RTC || $MAGAOX_ROLE == ICC || $MAGAOX_ROLE == AOC ]]; then
     sudo systemctl enable $nfsServiceUnit
     sudo systemctl start $nfsServiceUnit
+    if command -v ufw; then
+        sudo ufw allow from 192.168.0.0/24 to any port nfs
+    fi
     exportHosts=""
     for host in aoc rtc icc; do
         if [[ ${host,,} != ${MAGAOX_ROLE,,} ]]; then
@@ -20,16 +23,17 @@ if [[ $MAGAOX_ROLE == RTC || $MAGAOX_ROLE == ICC || $MAGAOX_ROLE == AOC ]]; then
         fi
     done
     if ! grep -q "$exportHosts" /etc/exports; then
-        echo "/      $exportHosts" | sudo tee -a /etc/exports
+        echo "/data      $exportHosts" | sudo tee -a /etc/exports
         sudo exportfs -a
-        sudo systemctl restart $nfsServiceUnit
+        sudo systemctl reload $nfsServiceUnit
     fi
 
     for host in aoc rtc icc; do
         if [[ ${host,,} != ${MAGAOX_ROLE,,} ]]; then
-            sudo mkdir -p /srv/$host
-            if ! grep -q "/srv/$host" /etc/fstab; then
-                echo "$host:/ /srv/$host	nfs	noauto,x-systemd.automount,nofail,x-systemd.device-timeout=10s	0 0" | sudo tee -a /etc/fstab
+            mountPath=/srv/$host/data
+            sudo mkdir -p $mountPath
+            if ! grep -q $mountPath /etc/fstab; then
+                echo "$host:/data $mountPath	nfs	noauto,x-systemd.automount,nofail,x-systemd.device-timeout=10s	0 0" | sudo tee -a /etc/fstab
             fi
         fi
     done

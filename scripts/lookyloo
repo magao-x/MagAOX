@@ -37,7 +37,7 @@ import shutil
 
 log = logging.getLogger(__name__)
 
-LOOKYLOO_DATA_ROOTS = os.environ.get('LOOKYLOO_DATA_PATHS', '/data:/data/icc:/data/rtc')
+LOOKYLOO_DATA_ROOTS = os.environ.get('LOOKYLOO_DATA_PATHS', '/opt/MagAOX:/srv/icc/data:/srv/rtc/data')
 QUICKLOOK_PATH = pathlib.Path('/data/users/guestobs/quicklook')
 HISTORY_FILENAME = "lookyloo_success.txt"
 FAILED_HISTORY_FILENAME = "lookyloo_failed.txt"
