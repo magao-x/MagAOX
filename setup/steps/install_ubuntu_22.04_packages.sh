@@ -45,6 +45,7 @@ apt install -y \
     cpuset \
     nfs-common \
     nfs-kernel-server \
+    tree \
 ;
 
 if [[ $MAGAOX_ROLE == vm ]]; then

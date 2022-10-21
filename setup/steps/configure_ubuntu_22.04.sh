@@ -51,6 +51,7 @@ if [[ $MAGAOX_ROLE == AOC || $MAGAOX_ROLE == ICC || $MAGAOX_ROLE == RTC || $MAGA
     sudo ufw allow ssh || exit 1
     sudo ufw deny http || exit 1
     sudo ufw deny https || exit 1
+    sudo ufw allow in from 192.168.0.0/24 || exit 1
 
     log_info "Use CentOS mountpoint for cpusets"
     sudo mkdir -p /sys/fs/cgroup/cpuset
