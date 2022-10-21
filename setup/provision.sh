@@ -105,6 +105,7 @@ if [[ $MAGAOX_ROLE == ci || $MAGAOX_ROLE == vm || $MAGAOX_ROLE == workstation ||
 fi
 ## Build third-party dependencies under /opt/MagAOX/vendor
 cd /opt/MagAOX/vendor
+sudo bash -l "$DIR/steps/install_rclone.sh" || exit 1
 if grep -q "GenuineIntel" /proc/cpuinfo; then
     if [[ $ID == "ubuntu" ]]; then
         sudo bash -l "$DIR/steps/install_mkl_package.sh" || exit 1

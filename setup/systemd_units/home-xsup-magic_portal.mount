@@ -2,7 +2,6 @@
 After=network-online.target
 [Mount]
 Type=rclone
-What=team_box:magic_portal
+What=team_box:MagAO-X/magic_portal
 Where=/home/xsup/magic_portal
 Options=rw,allow_other,args2env,vfs-cache-mode=writes,config=/etc/rclone.conf,cache-dir=/var/rclone
-
