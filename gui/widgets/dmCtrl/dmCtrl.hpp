@@ -77,6 +77,27 @@ dmCtrl::dmCtrl( std::string & dmName,
    
    setWindowTitle(QString(m_dmName.c_str()));
 
+   setXwFont(ui.buttonInit);
+   setXwFont(ui.buttonZeroAll);
+   setXwFont(ui.buttonZero);
+   setXwFont(ui.buttonInit);  
+   setXwFont(ui.buttonRelease);
+   setXwFont(ui.buttonSetFlat);
+   setXwFont(ui.buttonZeroFlat);
+   setXwFont(ui.buttonSetTest);
+   setXwFont(ui.buttonZeroTest);
+   setXwFont(ui.comboSelectFlat);
+   setXwFont(ui.comboSelectTest);
+   
+   setXwFont(ui.dmStatus);
+   
+   setXwFont(ui.labelShmimName);
+   setXwFont(ui.labelShmimName_value);
+   setXwFont(ui.labelFlatShmim);
+   setXwFont(ui.labelFlatShmim_value);
+   setXwFont(ui.labelTestShmim);
+   setXwFont(ui.labelTestShmim_value);
+   
    onDisconnect();
 }
    

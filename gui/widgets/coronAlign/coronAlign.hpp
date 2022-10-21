@@ -703,7 +703,7 @@ void coronAlign::on_button_focal_r_pressed()
       ip.setDevice("fwfpm");
       ip.setName("filter");
       ip.add(pcf::IndiElement("target"));
-      ip["target"] = m_fwFocalPos + m_focalScale*m_fwFocalStepSize;
+      ip["target"] = m_fwFocalPos - m_focalScale*m_fwFocalStepSize;
       ui.button_focal_l->setEnabled(false);
       ui.button_focal_r->setEnabled(false);
    }
