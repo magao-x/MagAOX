@@ -57,6 +57,8 @@ public:
                                    
    void handleDefProperty( const pcf::IndiProperty & ipRecv /**< [in] the property which has changed*/);
    
+   void handleDelProperty( const pcf::IndiProperty & ipRecv /**< [in] the property which has changed*/);
+
    void handleSetProperty( const pcf::IndiProperty & ipRecv /**< [in] the property which has changed*/);
    
    void sendNewGain(double ng);
@@ -283,6 +285,23 @@ void loopCtrl::handleSetProperty( const pcf::IndiProperty & ipRecv)
    updateGUI();
 }
 
+void loopCtrl::handleDelProperty( const pcf::IndiProperty & ipRecv)
+{  
+   std::lock_guard<std::mutex> lock(m_blockMutex);
+   
+   if(ipRecv.getDevice() == m_gainCtrl)
+   {
+      for(size_t n =0; n < m_blockCtrls.size(); ++n)
+      {
+         ui.horizontalLayout_2->removeWidget(m_blockCtrls[n]);
+         m_blockCtrls[n]->deleteLater();
+      }
+         
+      m_blockCtrls.clear();
+   }
+
+}
+
 void loopCtrl::setEnableDisable( bool tf,
                                  bool all
                                )
@@ -428,7 +447,7 @@ void loopCtrl::on_button_zeroall_pressed()
 void loopCtrl::setupBlocks(int nB)
 {
    std::lock_guard<std::mutex> lock(m_blockMutex);
-   
+
    m_blockCtrls.resize(nB, nullptr); //I think this will call the destructor
 
    int modeTot = 0;
