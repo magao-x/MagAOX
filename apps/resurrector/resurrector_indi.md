@@ -74,6 +74,8 @@ The primary purpose of the resurrector_indi process is to keep all of the pieces
 * Detects if any have crashed or have otherwise failed;
 * Restarts any that have failed
 
+The resurrector_indi process is designed to replace the xctrl Python script for controlling processes in the MagAO-X system.
+
 The resurrector_indi process parses the names and executables of the INDI server and INDI drivers from the "/opt/MagAOX/config/proclist_role.txt" process list configuration file.
 The resurrector_indi process forks a single INDI server, and multiple INDI driver, childen processes as parsed from the process list.
 The resurrector_indi process then listens, at ~1Hz, on the "*.hb" named FIFOs for Hexbeats from its children processes; those children processes are also known as resurrectees.
