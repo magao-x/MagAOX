@@ -39,11 +39,11 @@ This diagram shows how it works, although with a single INDI driver:
    .      /path/to/fifos/isXXX.hb                          |     Controller        |
    .        |                                              |                       |
    v        |                                              | bin/app -n drivername |
-+------------------+                                       +------------+          |
-|                  | <-- /path/to/fifos/drivername.out --- |            |          |
-|                  |                                       |    INDI    |          |
-|    indiserver    | --- /path/to/fifos/drivername.in ---> |   DRIVER   |          |
-|                  |                                       |            |          |
++----+-------------+                                       +------------+          |
+|    | resurrectee | <-- /path/to/fifos/drivername.out --- |            |          |
+|    +-------------+                                       |    INDI    |          |
+|                  | --- /path/to/fifos/drivername.in ---> |   DRIVER   |          |
+|    indiserver    |                                       |            |          |
 |                  | <-- /path/to/fifos/indidriver.ctrl -- |            |          |
 +------------------+                                       +------------+----------+
 ```
@@ -76,8 +76,14 @@ The primary purpose of the resurrector_indi process is to keep all of the pieces
 
 The resurrector_indi process parses the names and executables of the INDI server and INDI drivers from the "/opt/MagAOX/config/proclist_role.txt" process list configuration file.
 The resurrector_indi process forks a single INDI server, and multiple INDI driver, childen processes as parsed from the process list.
-The resurrector_indi process then listens, at ~1Hz, on the "*.hb" named FIFOs for hexbeats (heartbeats) from its children processes; those children processes are also known as resurrectees.
-If the resurrector_indi process receives a SIGUSR2 signal, it then re-parses the process list configuration file, kills any children processes that were previously started but are no longer in the process list, and starts any new children processes.
+The resurrector_indi process then listens, at ~1Hz, on the "*.hb" named FIFOs for Hexbeats from its children processes; those children processes are also known as resurrectees.
+If the resurrector_indi process receives a SIGUSR2 signal, it then re-parses the process list configuration file, kills any children processes that were previously started but are no longer in the configuration process list, and starts any new children processes.
+
+A Hexbeat is a representation of a time at some point in the future.
+The resurrector continually checks the current time against the most recent Hexbeat time received from the resurrectee class instance (Hexbeater) of an INDI server or driver process.
+Normally the Hexbeat from each process will be updated at about 1Hz, so the latest Hexbeat (future) time obtained by the resurrector will always exceed the current time. 
+However, if the process containing the Hexbeater fails, then the latest Hexbeat will stop changing, and eventually the current time will exceed the Hexbeat time;
+at that point the resurrector will have detected a failure of the Hexbeater (resurrected), will stop that resurrectee's procees, and start a new process with the same command-line parameters.
 
 ## proclist_role.txt
 
@@ -110,7 +116,7 @@ the latter refers to a class instance that handles INDI protocol messages, and l
 
 ### resurrectee class instance
 
-The resurrectee class instance handles one-way communication with the resurrector, sending a Hexbeat (heartbeat; updated future time) at about 1Hz.
+The resurrectee class instance handles one-way communication with the resurrector, sending a Hexbeat (heartbeat; future time) at about 1Hz.
 The resurrectee class is also refer to as a Hexbeater.
 
 ## Named FIFOs
@@ -121,7 +127,8 @@ The named FIFOs must be located in the directory pointed to by the default macro
 
 The INDI driver heartbeat FIFO must be named "drivername.hb" for INDI drivers; the single heartbeat FIFO that starts with "is" is for the INDI server. 
 The ".hb" extension means HexBeat (heartbeat).
-The INDI driver heartbeat FIFO must be named "drivername.hb" with the ".hb" extension meaning HexBeat (heartbeat).
+These named FIFOs are used by the INDI processes to send Hexbeats to the resurrector.
+A Hexbeat is a representation of a time at some point in the future.
 
 ### indiserver.ctrl, magaox.conf
 
