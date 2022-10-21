@@ -146,11 +146,11 @@ public: // interfaces
     const std::string& last_hb() const { return m_last_hb; }
 
     // Public read/write access to private class members (properties)
-    const int max_restarts() const { return m_restart_max; }
-    void max_restarts(int val) { m_restart_max = val; }
+    const int max_restarts_get() const { return m_restart_max; }
+    void max_restarts_set(int val) { m_restart_max = val; }
 
-    const bool pending_close() const { return m_pending_close; }
-    void pending_close(bool tf)
+    const bool pending_close_get() const { return m_pending_close; }
+    void pending_close_set(bool tf)
     {
         m_pending_close = tf && (m_fd > -1);
     }
@@ -485,7 +485,7 @@ private: // Internal attributes and interfaces
         // On success, initialize instance data to opened state, not started ...
         m_sel = false;  // ... by leaving select monitoring off
         m_fd = fd;
-        pending_close(false);
+        pending_close_set(false);
         update_fd_set(fd_set_cpy, nfds);
         m_argv0 = argv0;
         m_hbname = hbname;
@@ -532,14 +532,14 @@ private: // Internal attributes and interfaces
             // ensure FIFO is closed!
             close(m_fd);
             m_fd = -1;
-            pending_close(false);
+            pending_close_set(false);
             return;
             // \todo perhaps throw an exception if new_fd is not -1
         }
 
         if (dosel) { m_last_hb = time_to_hb(10); }
         m_fd = new_fd;
-        pending_close(false);
+        pending_close_set(false);
         m_sel = dosel;
         // Keep fd_set in synchrony with FD and select monitoring status
         update_fd_set(fd_set_cpy, nfds);
@@ -557,7 +557,12 @@ private: // Internal attributes and interfaces
     update_fd_set(fd_set& fd_set_cpy, int& nfds)
     {
         // Process is inactive, ensure its select monitoring is disabled
-        if (m_fd < 0) { m_sel = false; pending_close(false); return; }
+        if (m_fd < 0)
+        {
+            m_sel = false;
+            pending_close_set(false);
+            return;
+        }
 
         if (m_sel)
         {
