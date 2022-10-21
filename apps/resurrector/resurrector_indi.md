@@ -174,7 +174,7 @@ or
 
 ## Configuration files (/opt/MagAOX/config/)
 
-### Process list configuration file
+### Process list configuration file, /ope/MagAOX/config/proclist_vm.txt
 
 * Here is an example of a minimal process list configuration file;
 "isVM" is the INDI server.
@@ -182,29 +182,31 @@ or
 Only lines with two whitespace-separated tokens are used.
 
 ```
-####################################################################
+########################################################################
 ### proclist_vm.txt
-####################################################################
+########################################################################
 # Processes for configuration to exercise magaoxMaths
 # Process-ID            Executable
 # ==========            ==========
 isVM                    xindiserver
 fpga0_um_sm             CGFSMHIfpga
 fpga0_um_fg             CGFSMUIfpga
-####################################################################
+########################################################################
 ```
 
-### Global configuration file magaox.conf
+### Global configuration file /opt/MagAOX/config/magaox.conf
 
-    #loopPause = 1000000000
-    #ignore_git = 1
+```
+########################################################################
+### The presence of keyword [indiserver_ctrl_fifo] here directs the INDI
+### drivers to alert the host's INDI server to their presence by writing
+### [start /opt/.../{drvrname}\n] to this named INDI server control FIFO
 
-    ### The presence of keyword [indiserver_ctrl_fifo] here directs the INDI
-    ### drivers to alert the host's INDI server to their presence by writing
-    ### [start /opt/.../{drvrname}\n] to this named INDI server control FIFO
-    indiserver_ctrl_fifo = /opt/MagAOX/drivers/fifos/indiserver.ctrl
-    ### N.B. this *must* match the [indiserver.f] value in is{THISHOST}.conf
-    ###      and it might be better to move the local [indiserver] TOML here
+indiserver_ctrl_fifo = /opt/MagAOX/drivers/fifos/indiserver.ctrl
+
+### N.B. this *must* match the [indiserver.f] value in is{THISHOST}.conf
+###      and it might be better to move the local [indiserver] TOML here
+```
 
 # TESTING
 
