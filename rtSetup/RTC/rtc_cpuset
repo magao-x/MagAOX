@@ -65,11 +65,6 @@ do
    /bin/echo 0 > /sys/devices/system/cpu/cpu$cpu/online 
 done
 
-#Create and mount the root cpuset
-if ! mount | grep -qe '^cpuset'; then
-   mkdir -p $cpusetMount
-   mount -t cpuset cpuset $cpusetMount
-fi
 cd $cpusetMount
 
 #############################
