@@ -15,8 +15,8 @@ resurrector_indi - manage processes in an INDI framework.
 ```
 # DESCRIPTION
 
-A program ensure all processes in an INDI framework,
-comprising one INDI server process and multiple INDI driver processes
+The resurrector program ensures all processes in a MagAO-X INDI framework,
+comprising one INDI server process and multiple INDI driver processes,
 will start up and continue both to communicate and to run even if some
 of them fail by either exiting, crashing, or locking up.
 
@@ -36,9 +36,9 @@ This diagram shows how it works, although with a single INDI driver:
 +------------------+                \                      +-------------+         |
    .        ^                        \                     |                       |
  fork(2)    |                         \..................> |      Device           |
-   .      /path/to/fifos/isXXX.hb                         |     Controller        |
+   .      /path/to/fifos/isXXX.hb                          |     Controller        |
    .        |                                              |                       |
-   v        |                                              | bin/run -n drivername |
+   v        |                                              | bin/app -n drivername |
 +------------------+                                       +------------+          |
 |                  | <-- /path/to/fifos/drivername.out --- |            |          |
 |                  |                                       |    INDI    |          |
