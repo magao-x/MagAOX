@@ -178,19 +178,21 @@ or
 
 * Here is an example of a minimal process list configuration file;
 "isVM" is the INDI server.
-Lines beginning with a "#" are comments and/or ignored by any parsers.
+* Lines beginning with a "#" are comments and/or ignored by any parsers.
 Only lines with two whitespace-separated tokens are used.
 
-    ####################################################################
-    ### proclist_vm.txt
-    ####################################################################
-    # Processes for configuration to exercise magaoxMaths
-    # Process-ID            Executable
-    # ==========            ==========
-    isVM                    xindiserver
-    fpga0_um_sm             CGFSMHIfpga
-    fpga0_um_fg             CGFSMUIfpga
-    ####################################################################
+```
+####################################################################
+### proclist_vm.txt
+####################################################################
+# Processes for configuration to exercise magaoxMaths
+# Process-ID            Executable
+# ==========            ==========
+isVM                    xindiserver
+fpga0_um_sm             CGFSMHIfpga
+fpga0_um_fg             CGFSMUIfpga
+####################################################################
+```
 
 ### Global configuration file magaox.conf
 
