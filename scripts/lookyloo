@@ -412,10 +412,15 @@ def do_quicklook_for_camera(span : ObservationSpan, data_roots, device, omit_tel
                     catalog_name = catalog_name_from_outputs(good_outputs)
                 else:
                     catalog_name = "_dry_run_"
-                title = span.title if len(span.title) else '_no_title_'
-                destination = output_dir / span.email / semester / night / f"{catalog_name}_{span.start.strftime('%Y-%m-%d_%H%M%S')}" / device
+                title = span.title if len(span.title) else '_none_'
+                catalog_name_dir = output_dir / span.email / semester / night / catalog_name
+                destination = catalog_name_dir / title / span.start.strftime('%Y-%m-%d_%H%M%S') / device
+                symlinks_dir_path = output_dir / semester / night
                 if not dry_run:
                     destination.mkdir(parents=True, exist_ok=True)
+                    symlinks_dir_path.mkdir(parents=True, exist_ok=True)
+                    symlink_path = (symlinks_dir_path / catalog_name)
+                    symlink_path.symlink_to(catalog_name_dir)
                     for fn in good_outputs:
                         shutil.copy(fn, destination)
                 log.info(f"Wrote to {destination}")
