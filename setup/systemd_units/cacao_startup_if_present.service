@@ -7,7 +7,7 @@ Before=multi-user.target
 Type=oneshot
 RemainAfterExit=yes
 User=xsup
-ExecStart=bash -l /opt/MagAOX/bin/cacao_startup_if_present
+ExecStart=/usr/bin/bash -l /opt/MagAOX/bin/cacao_startup_if_present
 
 [Install]
 WantedBy=default.target

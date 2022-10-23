@@ -18,7 +18,6 @@ dependencies:
   - pytest
   - psutil
   - cupy
-  - cudatoolkit=11.8
   - line_profiler
   - pyserial
   # video streaming

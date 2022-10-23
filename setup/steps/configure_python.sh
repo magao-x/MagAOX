@@ -13,7 +13,7 @@ set -euo pipefail
 #
 mamba env update -qf $DIR/../conda_env_base.yml
 source /etc/os-release
-if [[ $ID == "centos" ]]; then
+if [[ ( $MAGAOX_ROLE == AOC || $MAGAOX_ROLE == ci ) && ( $ID == "centos" ) ]]; then
 	mamba install -y qt=5 qwt
 fi
 

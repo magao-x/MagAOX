@@ -273,9 +273,7 @@ if [[ $MAGAOX_ROLE != ci ]]; then
     $MAYBE_SUDO bash -l "$DIR/steps/install_MagAOX.sh" || exit 1
 fi
 
-if [[ $MAGAOX_ROLE == RTC || $MAGAOX_ROLE == ICC ]]; then
-    sudo bash -l "$DIR/steps/configure_cpuset_service.sh"
-fi
+sudo bash -l "$DIR/steps/configure_startup_services.sh"
 
 # To try and debug hardware issues, ICC and RTC replicate their
 # kernel console log over UDP to AOC over the instrument LAN.
