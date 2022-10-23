@@ -18,5 +18,9 @@ OVERRIDE_PATH=$UNIT_PATH/xctrl_startup.service.d
 mkdir -p $OVERRIDE_PATH
 echo "[Service]" > $OVERRIDE_PATH/override.conf
 echo "Environment=\"MAGAOX_ROLE=$MAGAOX_ROLE\"" >> $OVERRIDE_PATH/override.conf
+if [[ $MAGAOX_ROLE == ICC || $MAGAOX_ROLE == RTC ]]; then
+echo "[Unit]" >> $OVERRIDE_PATH/override.conf
+echo "After=edtinit.service" >> $OVERRIDE_PATH/override.conf
+fi
 systemctl daemon-reload
 log_success "Added MAGAOX_ROLE to $OVERRIDE_PATH/override.conf"
