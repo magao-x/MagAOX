@@ -63,6 +63,10 @@ public slots:
    void on_buttonSetTest_pressed();
    void on_buttonZeroTest_pressed();
    
+signals: 
+
+   void doUpdateGUI();
+
 private:
      
    Ui::dmCtrl ui;
@@ -100,6 +104,8 @@ dmCtrl::dmCtrl( std::string & dmName,
    setXwFont(ui.labelTestShmim);
    setXwFont(ui.labelTestShmim_value);
    
+   connect(this, SIGNAL(doUpdateGUI()), this, SLOT(updateGUI()));
+
    onDisconnect();
 }
    
@@ -263,9 +269,7 @@ void dmCtrl::handleSetProperty( const pcf::IndiProperty & ipRecv)
       }
    }
    
-   
-   
-   updateGUI();
+   emit doUpdateGUI();
    
 }
 
