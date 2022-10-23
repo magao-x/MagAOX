@@ -13,7 +13,7 @@ if [[ $MAGAOX_ROLE != "ICC" && $MAGAOX_ROLE != "RTC" ]]; then
 fi
 
 UNIT_PATH=/etc/systemd/system/
-service_unit=${MAGAOX_ROLE}_cpuset.service
+service_unit=make_cpusets.service
 
 cp $DIR/../systemd_units/$service_unit $UNIT_PATH/$service_unit
 log_success "Installed $service_unit to $UNIT_PATH"
