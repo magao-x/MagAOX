@@ -413,7 +413,7 @@ def do_quicklook_for_camera(span : ObservationSpan, data_roots, device, omit_tel
                 else:
                     catalog_name = "_dry_run_"
                 title = span.title if len(span.title) else '_no_title_'
-                destination = output_dir / semester / night / catalog_name / title / device
+                destination = output_dir / span.email / semester / night / f"{catalog_name}_{span.start.strftime('%Y-%m-%d_%H%M%S')}" / device
                 if not dry_run:
                     destination.mkdir(parents=True, exist_ok=True)
                     for fn in good_outputs:
