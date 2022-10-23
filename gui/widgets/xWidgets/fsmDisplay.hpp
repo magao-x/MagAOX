@@ -79,6 +79,7 @@ fsmDisplay::fsmDisplay( const std::string & device,
                         Qt::WindowFlags f) : xWidget(Parent, f), m_device{device}
 {
    ui.setupUi(this);
+   connect(this, SIGNAL(doUpdateGUI()), this, SLOT(updateGUI()));
    onDisconnect();
 }
    
