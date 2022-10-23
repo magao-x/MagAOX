@@ -48,7 +48,7 @@ protected:
      *@{
      */
    
-   //here add parameters which will be config-able at runtime
+   std::vector<std::string> m_streamWriters; ///< The stream writers to stop and start
    
    ///@}
 
@@ -70,6 +70,8 @@ protected:
    std::string m_obsName;
    bool m_observing {false};
    
+   
+
 public:
    /// Default c'tor.
    observerCtrl();
@@ -106,6 +108,10 @@ public:
      */
    virtual int appShutdown();
 
+   void startObserving();
+
+   void stopObserving();
+
    ///\name INDI
    /** @{
      */ 
@@ -117,12 +123,17 @@ protected:
    pcf::IndiProperty m_indiP_observing;
    pcf::IndiProperty m_indiP_obslog;
    
+   pcf::IndiProperty m_indiP_sws;
+   
+
 public:
    INDI_NEWCALLBACK_DECL(observerCtrl, m_indiP_observers);
    
    INDI_NEWCALLBACK_DECL(observerCtrl, m_indiP_obsName);
    INDI_NEWCALLBACK_DECL(observerCtrl, m_indiP_observing);
    
+   INDI_NEWCALLBACK_DECL(observerCtrl, m_indiP_sws);
+
    ///@}
    
     /** \name Telemeter Interface
@@ -148,11 +159,15 @@ observerCtrl::observerCtrl() : MagAOXApp(MAGAOX_CURRENT_SHA1, MAGAOX_REPO_MODIFI
 
 void observerCtrl::setupConfig()
 {
+   config.add("stream.writers", "", "stream.writers", argType::Required, "stream", "writers", false, "string", "The device names of the stream writers to control.");
+
    dev::telemeter<observerCtrl>::setupConfig(config);
 }
 
 int observerCtrl::loadConfigImpl( mx::app::appConfigurator & _config )
 {
+   _config(m_streamWriters, "stream.writers");
+
    std::vector<std::string> sections;
 
    _config.unusedSections(sections);
@@ -256,6 +271,24 @@ int observerCtrl::appStartup()
    m_indiP_observer.add(pcf::IndiElement("pfoa"));
    m_indiP_observer.add(pcf::IndiElement("institution"));
    
+   m_indiP_sws = pcf::IndiProperty(pcf::IndiProperty::Switch);
+   m_indiP_sws.setDevice(configName());
+   m_indiP_sws.setName("writers");
+   m_indiP_sws.setPerm(pcf::IndiProperty::ReadWrite); 
+   m_indiP_sws.setState(pcf::IndiProperty::Idle);
+   m_indiP_sws.setRule(pcf::IndiProperty::AnyOfMany);
+
+   for(size_t n =0; n < m_streamWriters.size(); ++n)
+   {
+      m_indiP_sws.add(pcf::IndiElement(m_streamWriters[n], pcf::IndiElement::Off));
+   }
+
+   if(registerIndiPropertyNew( m_indiP_sws, INDI_NEWCALLBACK(m_indiP_sws)) < 0)
+   {
+      log<software_critical>({__FILE__, __LINE__});
+      return -1;
+   }
+
    if(dev::telemeter<observerCtrl>::appStartup() < 0)
    {
       return log<software_error,-1>({__FILE__,__LINE__});
@@ -300,6 +333,52 @@ int observerCtrl::appShutdown()
    dev::telemeter<observerCtrl>::appShutdown();
    
    return 0;
+}
+
+void observerCtrl::startObserving()
+{
+   for(size_t n=0; n < m_streamWriters.size(); ++n)
+   {
+      if(m_indiP_sws[m_streamWriters[n]].getSwitchState() == pcf::IndiElement::On)
+      {
+         pcf::IndiProperty ip(pcf::IndiProperty::Switch);
+   
+         ip.setDevice(m_streamWriters[n] + "-sw");
+         ip.setName("writing");
+         ip.add(pcf::IndiElement("toggle"));
+         ip["toggle"].setSwitchState(pcf::IndiElement::On);
+
+         sendNewProperty(ip); 
+      }
+   }
+
+   mx::sys::sleep(1);
+
+   m_observing = true;
+   recordObserver();
+}
+
+void observerCtrl::stopObserving()
+{
+   m_observing = false;
+   recordObserver();
+
+   for(size_t n=0; n < m_streamWriters.size(); ++n)
+   {
+      if(m_indiP_sws[m_streamWriters[n]].getSwitchState() == pcf::IndiElement::On)
+      {
+         pcf::IndiProperty ip(pcf::IndiProperty::Switch);
+   
+         ip.setDevice(m_streamWriters[n] + "-sw");
+         ip.setName("writing");
+         ip.add(pcf::IndiElement("toggle"));
+         ip["toggle"].setSwitchState(pcf::IndiElement::Off);
+
+         sendNewProperty(ip); 
+      }
+   }
+
+
 }
 
 INDI_NEWCALLBACK_DEFN(observerCtrl, m_indiP_observers)(const pcf::IndiProperty &ipRecv)
@@ -382,17 +461,39 @@ INDI_NEWCALLBACK_DEFN(observerCtrl, m_indiP_observing)(const pcf::IndiProperty &
    recordObserver(true);
    if( ipRecv["toggle"].getSwitchState() == pcf::IndiElement::On)
    {
-      m_observing = true;
-      recordObserver();
+      startObserving();
       updateSwitchIfChanged(m_indiP_observing, "toggle", pcf::IndiElement::On, INDI_OK);
    }   
    else if( ipRecv["toggle"].getSwitchState() == pcf::IndiElement::Off)
    {
-      m_observing = false;
-      recordObserver();
+      stopObserving();
       updateSwitchIfChanged(m_indiP_observing, "toggle", pcf::IndiElement::Off, INDI_IDLE);
    }
    
+   return 0;
+}
+
+INDI_NEWCALLBACK_DEFN(observerCtrl, m_indiP_sws)(const pcf::IndiProperty &ipRecv)
+{
+   if (ipRecv.getName() != m_indiP_sws.getName())
+   {
+      log<software_error>({__FILE__, __LINE__, "invalid indi property received"});
+      return -1;
+   }
+   
+   if(m_observing == true)
+   {
+      log<text_log>({"Can't change stream writers while observing"}, logPrio::LOG_WARNING);
+      return 0;
+   }
+
+   for(size_t n =0; n < m_streamWriters.size(); ++n) 
+   {
+      if(!ipRecv.find(m_streamWriters[n])) continue;
+      
+     updateSwitchIfChanged(m_indiP_sws, m_streamWriters[n], ipRecv[m_streamWriters[n]].getSwitchState());
+   }
+      
    return 0;
 }
 

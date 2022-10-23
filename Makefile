@@ -135,7 +135,8 @@ scripts_to_install = magaox \
 	shmimTCPreceive \
 	shmimTCPtransmit \
 	lookyloo \
-	obs_to_movie
+	obs_to_movie \
+	instrument_backup_sync
 
 all: indi_all libs_all flatlogs apps_all guis_all utils_all
 

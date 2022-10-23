@@ -1,11 +1,11 @@
 #!/usr/bin/env bash
-set -exuo pipefail
+set -x
 if (( $# < 1 )); then
   prefixes=( "/media/backup" "/media/backup2" "/media/backup3" )
 else
   prefixes="$@"
 fi
-rsyncWithOptions=rsync --checksum -a -P
+rsyncWithOptions="rsync --checksum -a -P"
 for mountpoint in "${prefixes[@]}"; do
     if mount | grep -q "on $mountpoint"; then
         for remote in icc rtc; do
