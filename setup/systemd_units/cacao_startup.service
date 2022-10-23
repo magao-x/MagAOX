@@ -1,0 +1,13 @@
+[Unit]
+Description=CACAO
+Requires=make_cpusets.service
+Before=multi-user.target
+
+[Service]
+Type=oneshot
+RemainAfterExit=yes
+User=xsup
+ExecStart=bash -l /opt/MagAOX/cacao/startup.bash
+
+[Install]
+WantedBy=default.target

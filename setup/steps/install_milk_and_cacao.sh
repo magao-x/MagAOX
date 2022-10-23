@@ -12,6 +12,7 @@ git checkout $COMMIT_ISH
 
 bash -x ./fetch_cacao_dev.sh
 
+sudo rm -rf _build
 mkdir -p _build
 cd _build
 
@@ -28,7 +29,7 @@ cmake .. $milkCmakeArgs
 make
 sudo make install
 
-$pythonExe -m pip install -e ../src/ImageStreamIO/
+sudo $pythonExe -m pip install -e ../src/ImageStreamIO/
 $pythonExe -c 'import ImageStreamIOWrap' || exit 1
 
 milkSuffix=bin/milk
@@ -55,4 +56,11 @@ if [[ $MAGAOX_ROLE != ci ]]; then
   else
     log_info "Skipping /milk/shm mount setup"
   fi
+fi
+if [[ $MAGAOX_ROLE == ICC || $MAGAOX_ROLE == RTC ]]; then
+  clone_or_update_and_cd magao-x "cacao-${MAGAOX_ROLE,,}" /opt/MagAOX
+  sudo ln -s "/opt/MagAOX/cacao-${MAGAOX_ROLE,,}" /opt/MagAOX/cacao
+  sudo install $DIR/../systemd_units/cacao_startup.service /etc/systemd/system/
+  sudo systemctl daemon-reload || true
+  sudo systemctl enable cacao_startup.service || true
 fi

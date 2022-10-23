@@ -238,13 +238,18 @@ scripts_install:
 	done
 
 
-MAGAOX_ROLE_LOWER := $(shell echo "$(MAGAOX_ROLE)" | tr '[:upper:]' '[:lower:]')
 rtscripts_install:
-	if [ $(MAGAOX_ROLE) = ICC ] || [ $(MAGAOX_ROLE) = RTC ]; then for scriptname in cpuset procset; do \
+	for scriptname in make_cpusets procs_to_cpusets; do \
 		sudo install -d /opt/MagAOX/bin && \
-			sudo install rtSetup/$(MAGAOX_ROLE)/$(MAGAOX_ROLE_LOWER)_$$scriptname /opt/MagAOX/bin && \
-			sudo ln -fs /opt/MagAOX/bin/$(MAGAOX_ROLE_LOWER)_$$scriptname /usr/local/bin/$(MAGAOX_ROLE_LOWER)_$$scriptname; \
-	done; fi
+		if [ -e rtSetup/$(MAGAOX_ROLE)/$$scriptname ]; then \
+			sudo install rtSetup/$(MAGAOX_ROLE)/$$scriptname /opt/MagAOX/bin/$$scriptname && \
+			sudo ln -fs /opt/MagAOX/bin/$$scriptname /usr/local/bin/$$scriptname; \
+		else \
+			echo "echo 'No $$scriptname for $$MAGAOX_ROLE'\nexit 0" | sudo tee /opt/MagAOX/bin/$$scriptname && \
+			sudo chmod +x /opt/MagAOX/bin/$$scriptname && \
+			sudo ln -fs /opt/MagAOX/bin/$$scriptname /usr/local/bin/$$scriptname; \
+		fi \
+	; done
 
 utils_all: flatlogs_all
 		for app in ${utils_to_build}; do \
