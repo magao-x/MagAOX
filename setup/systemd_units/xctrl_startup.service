@@ -1,6 +1,7 @@
 [Unit]
 Description=xctrl startup
-Requires=cacao_startup_if_present.service
+Requires=cacao_startup_if_present.service make_cpusets.service
+After=make_cpusets.service
 Before=multi-user.target
 
 [Service]

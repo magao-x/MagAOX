@@ -1,6 +1,7 @@
 [Unit]
 Description=CACAO
 Requires=make_cpusets.service
+After=make_cpusets.service
 Before=multi-user.target
 
 [Service]
