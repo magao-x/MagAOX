@@ -69,6 +69,8 @@ fsmDisplay::fsmDisplay( QWidget * Parent,
 {
    ui.setupUi(this);
    
+   connect(this, SIGNAL(doUpdateGUI()), this, SLOT(updateGUI()));
+
    onDisconnect();
 }
 
@@ -127,7 +129,7 @@ void fsmDisplay::handleSetProperty( const pcf::IndiProperty & ipRecv)
       }
    }
 
-   updateGUI();
+   emit doUpdateGUI();
 }
 
 void fsmDisplay::updateGUI()
