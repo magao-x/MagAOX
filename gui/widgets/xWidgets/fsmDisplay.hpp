@@ -51,7 +51,13 @@ public:
    
    virtual void handleSetProperty( const pcf::IndiProperty & ipRecv /**< [in] the property which has changed*/);
    
-   virtual void updateGUI();
+public slots:
+
+   void updateGUI();
+
+signals:
+   
+   void doUpdateGUI();
 
 private:
      
