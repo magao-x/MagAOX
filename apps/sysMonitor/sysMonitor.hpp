@@ -769,7 +769,7 @@ int sysMonitor::findDiskTemperature( std::vector<std::string> & hdd_names,
                                      std::vector<float>& hdd_temps
                                    ) 
 {
-   std::vector<std::string> commandList{"hddtemp"};//, "/dev/sda",  "/dev/sdb", "/dev/sdc", "/dev/sdd", "/dev/sde", "/dev/sdf"};
+   /*std::vector<std::string> commandList{"hddtemp"};//, "/dev/sda",  "/dev/sdb", "/dev/sdc", "/dev/sdd", "/dev/sde", "/dev/sdf"};
    for(size_t n=0;n<m_diskNameList.size();++n)
    {
       commandList.push_back(m_diskNameList[n]);
@@ -803,7 +803,9 @@ int sysMonitor::findDiskTemperature( std::vector<std::string> & hdd_names,
          rv = 0;
       }
    }
-   return rv;
+   return rv;*/
+
+   return 0;
 }
 
 int sysMonitor::parseDiskTemperature( std::string & driveName,
