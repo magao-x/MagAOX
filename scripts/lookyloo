@@ -412,18 +412,25 @@ def do_quicklook_for_camera(span : ObservationSpan, data_roots, device, omit_tel
                     catalog_name = catalog_name_from_outputs(good_outputs)
                 else:
                     catalog_name = "_dry_run_"
-                title = span.title if len(span.title) else '_none_'
-                catalog_name_dir = output_dir / span.email / semester / night / catalog_name
-                destination = catalog_name_dir / title / span.start.strftime('%Y-%m-%d_%H%M%S') / device
-                symlinks_dir_path = output_dir / semester / night
+                time_format = '%Y%m%dT%H%M%S'
+                if len(span.title):
+                    title = f"{span.title}_{span.begin.strftime(time_format)}"
+                else:
+                    title = f"{span.begin.strftime(time_format)}"
+                # a@b.com / 2022B / 20_21 / sirius / (cal_20220202T235959 / camsci1)
+                observer_semester_prefix = output_dir / span.email / semester / night / catalog_name
+                # 2022B / 20_21 / sirius / a@b.com / (cal_20220202T235959 / camsci1)
+                semester_observer_prefix = output_dir / semester / night / catalog_name / span.email
+
+                destination = semester_observer_prefix / title / device
                 if not dry_run:
                     destination.mkdir(parents=True, exist_ok=True)
-                    symlinks_dir_path.mkdir(parents=True, exist_ok=True)
-                    symlink_path = (symlinks_dir_path / catalog_name)
-                    symlink_path.symlink_to(catalog_name_dir)
+                    observer_semester_prefix.parent.mkdir(parents=True, exist_ok=True)
+                    if not observer_semester_prefix.is_symlink():
+                        observer_semester_prefix.symlink_to(semester_observer_prefix)
                     for fn in good_outputs:
                         shutil.copy(fn, destination)
-                log.info(f"Wrote to {destination}")
+                log.info(f"Wrote {len(good_outputs)} output file{'s' if len(good_outputs) != 1 else ''} to {destination}")
     return new_matching_files
 
 def launch_xrif2fits(args, dry_run=False):
@@ -514,6 +521,7 @@ def daemon_mode(
             spans_with_data = set()
             for span in new_observation_spans:
                 log.info(f"Observation interval to process: {span}")
+                had_data = False
                 for device in cameras:
                     cube_mode = ALL_CAMERAS.get(device, DEFAULT_SEPARATE) is DEFAULT_CUBE
                     visited_files = do_quicklook_for_camera(
@@ -527,13 +535,16 @@ def daemon_mode(
                         all_visited_files,
                         xrif2fits_cmd=xrif2fits_cmd,
                     )
-                    if len(visited_files) and (span.end is not None and (utcnow() - span.end).total_seconds() > 5 * 60):
-                        log.info(f"Completed span {span}")
-                        spans_with_data.add(span)
                     all_visited_files = all_visited_files.union(visited_files)
+                    if len(visited_files) and (span.end is not None and (utcnow() - span.end).total_seconds() > 5 * 60):
+                        had_data = True
+                        log.info(f"Exported {len(visited_files)} archive{'s' if len(visited_files) != 1 else ''} for {device}")
+
+                log.info(f"Completed span {span}")
+                spans_with_data.add(span)
             existing_observation_spans = existing_observation_spans.union(spans_with_data)
             duration = time.time() - start_time
-            log.info(f"Took {duration} sec")
+            log.debug(f"Took {duration} sec")
             if duration < CHECK_INTERVAL_SEC:
                 time.sleep(CHECK_INTERVAL_SEC - duration)
         except KeyboardInterrupt:
@@ -565,7 +576,7 @@ def main():
     parser.add_argument('--xrif2fits-cmd', default='xrif2fits', help="Specify a path to an alternative version of xrif2fits here if desired", action='store')
     args = parser.parse_args()
     log_file_path = f"./lookyloo_{time.time()}.log" if args.verbose or args.dry_run else None
-    log_format = '%(asctime)s %(name)s %(filename)s:%(lineno)d: [%(levelname)s] %(message)s'
+    log_format = '%(filename)s:%(lineno)d: [%(levelname)s] %(message)s'
     logging.basicConfig(
         level='DEBUG' if args.verbose or args.dry_run else 'INFO',
         filename=log_file_path,
