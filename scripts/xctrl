@@ -284,18 +284,35 @@ def _startup_helper(process_name, executable_name):
     success(f"Executed in {process_name} session: '{cmd}'")
     return True
 
+def _identify_indiserver_name(names):
+    for process_name in names:
+        if process_name.startswith('is'):
+            return process_name
+    return None
+
 def validate_targets(processes, targets):
+    indiserver_name = _identify_indiserver_name(processes)
+    extra_targets = set()
     if not len(targets):
-        targets = list(processes.keys())
+        targets = set(processes.keys())
     else:
-        if not set(targets).issubset(processes.keys()):
-            difference = set(targets) - set(processes.keys())
+        targets = set(targets)
+        if not targets.issubset(processes.keys()):
+            difference = targets - set(processes.keys())
             failure(f'Unknown process names: {difference}')
             sys.exit(1)
-    return targets
+        if indiserver_name not in targets:
+            targets.add(indiserver_name)
+        
+        for target_name in targets:
+            for process_name in processes:
+                # restart downstream helper processes (foo-sw, foo-dark, foo-avg, etc.)
+                if process_name.startswith(target_name):
+                    extra_targets.add(process_name)
+    return list(targets | extra_targets)
 
 def startup(processes, targets):
-    indi_server_name = None
+    indi_server_name = _identify_indiserver_name(processes)
 
     for process_name in targets:
         if process_name.startswith('is'):
