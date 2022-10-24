@@ -137,7 +137,8 @@ scripts_to_install = magaox \
 	lookyloo \
 	obs_to_movie \
 	instrument_backup_sync \
-	cacao_startup_if_present
+	cacao_startup_if_present \
+	git_check_all
 
 all: indi_all libs_all flatlogs apps_all guis_all utils_all
 

@@ -1,0 +1,30 @@
+#!/usr/bin/env bash
+if [[ $USER != xsup ]]; then
+  /usr/bin/sudo -H -u xsup $0
+  exit
+fi
+for host in AOC ICC RTC; do
+  if [[ $host == $MAGAOX_ROLE ]]; then
+	  if [[ $host == AOC ]]; then
+		  color=5
+	elif [[ $host == ICC ]]; then
+		color=6
+	elif [ $host == RTC ]]; then
+		color=2
+	else
+		color=3
+	fi
+    echo "$(tput bold)$(tput setab $color)$(tput setaf 7)     [$MAGAOX_ROLE]     $(tput sgr0)"
+    for repo in /opt/MagAOX/source/*; do
+    cd $repo
+    if ! git diff --quiet --exit-code; then
+	    echo "$(tput bold)$(tput setab 1)$(tput setaf 7)   outstanding changes in $repo   $(tput sgr0)"
+      git status --porcelain
+    else
+	    echo "$(tput bold)$(tput setab 2)$(tput setaf 7)   nothing to commit in $repo   $(tput sgr0)"
+    fi
+done
+  else
+    ssh ${host,,} /usr/local/bin/git_check_all
+  fi
+done

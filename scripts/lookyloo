@@ -319,7 +319,7 @@ def prune_outputs(scratch_dir, span):
     good_outputs = []
     for fn in scratch_dir.glob("*.fits"):
         ts = xfilename_to_utc_timestamp(fn)
-        if ts < span.begin or ts > span.end:
+        if ts < span.begin or (span.end is not None and ts > span.end):
             os.remove(fn)
             log.debug(f"Filtered: {fn}")
         else:
