@@ -1,20 +1,25 @@
 #!/usr/bin/env bash
 source /etc/profile.d/magaox_role.sh  
 if [[ $USER != xsup ]]; then
-  /usr/bin/sudo -H -u xsup $0
+  /usr/bin/sudo -H -u xsup $0 "$@"
   exit
 fi
+if (( $# > 0 )); then
+  hosts="$@"
+else
+  hosts="AOC ICC RTC"
+fi
 export TERM=xterm-256color
-for host in AOC ICC RTC; do
+for host in $hosts; do
   if [[ $host == $MAGAOX_ROLE ]]; then
     if [[ $host == AOC ]]; then
       color=5
     elif [[ $host == ICC ]]; then
       color=6
     elif [[ $host == RTC ]]; then
-      color=2
-    else
       color=3
+    else
+      color=4
     fi
     echo "$(tput bold)$(tput setab $color)$(tput setaf 7)     [$MAGAOX_ROLE]     $(tput sgr0)"
     for repo in /opt/MagAOX/source/*; do
@@ -30,8 +35,6 @@ for host in AOC ICC RTC; do
       fi
     done
   else
-    if [[ $MAGAOX_ROLE == AOC ]]; then
-      ssh ${host,,} /usr/local/bin/git_check_all
-    fi
+    ssh ${host,,} /usr/local/bin/git_check_all $host
   fi
 done
