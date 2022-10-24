@@ -5,10 +5,10 @@ After=make_cpusets.service
 Before=multi-user.target
 
 [Service]
-Type=oneshot
-RemainAfterExit=yes
+Type=forking
 User=xsup
 ExecStart=/usr/bin/bash -l /opt/MagAOX/bin/cacao_startup_if_present
+Environment=TERM=xterm
 
 [Install]
 WantedBy=default.target
