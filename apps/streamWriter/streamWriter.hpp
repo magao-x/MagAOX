@@ -74,6 +74,8 @@ protected:
    
    std::string m_shmimName; ///< The name of the shared memory buffer.
    
+   std::string m_outName; ///< The name to use for outputting files,  Default is m_shmimName.
+
    int m_semaphoreNumber {7}; ///< The image structure semaphore index.
    
    unsigned m_semWait {500000000}; //The time in nsec to wait on the semaphore.  Max is 999999999. Default is 5e8 nsec.
@@ -334,7 +336,10 @@ void streamWriter::setupConfig()
 
    config.add("writer.lz4accel", "", "writer.lz4accel", argType::Required, "writer", "lz4accel", false, "int", "The LZ4 acceleration parameter.  Larger is faster, but lower compression.");
    
+   config.add("writer.outName", "", "writer.outName", argType::Required, "writer", "outName", false, "int", "The name to use for output files.  Default is the shmimName.");
+
    config.add("framegrabber.shmimName", "", "framegrabber.shmimName", argType::Required, "framegrabber", "shmimName", false, "int", "The name of the stream to monitor. From /tmp/shmimName.im.shm.");
+   
    
    config.add("framegrabber.semaphoreNumber", "", "framegrabber.semaphoreNumber", argType::Required, "framegrabber", "semaphoreNumber", false, "int", "The semaphore to wait on. Default is 7.");
 
@@ -364,6 +369,10 @@ void streamWriter::loadConfig()
    if(m_lz4accel > XRIF_LZ4_ACCEL_MAX) m_lz4accel = XRIF_LZ4_ACCEL_MAX;
    
    config(m_shmimName, "framegrabber.shmimName");
+
+   m_outName = m_shmimName;
+   config(m_outName, "writer.outName");
+
    config(m_semaphoreNumber, "framegrabber.semaphoreNumber");
    config(m_semWait, "framegrabber.semWait");
    
@@ -373,7 +382,7 @@ void streamWriter::loadConfig()
 
    //Set some defaults
    //Setup default log path
-   m_rawimageDir = MagAOXPath + "/" + MAGAOX_rawimageRelPath + "/" + m_shmimName;
+   m_rawimageDir = MagAOXPath + "/" + MAGAOX_rawimageRelPath + "/" + m_outName;
    config(m_rawimageDir, "writer.savePath");
 
    if(telemeterT::loadConfig(config) < 0)
@@ -1172,7 +1181,7 @@ void streamWriter::swThreadExec()
       //This will happen after a reconnection, and could update m_shmimName, etc.
       if(m_fname == nullptr)
       {
-         m_fnameBase = m_rawimageDir + "/" + m_shmimName + "_";
+         m_fnameBase = m_rawimageDir + "/" + m_outName + "_";
       
          m_fnameSz = m_fnameBase.size() + sizeof("YYYYMMDDHHMMSSNNNNNNNNN.xrif"); //the sizeof includes the \0
          m_fname = (char*) malloc(m_fnameSz);
