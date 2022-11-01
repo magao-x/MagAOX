@@ -370,7 +370,10 @@ def catalog_name_from_outputs(output_files):
             break
     return catobj if catobj is not None else '_no_target_'
 
-def do_quicklook_for_camera(span : ObservationSpan, data_roots, device, omit_telemetry, output_dir, dry_run, cube_mode, all_visited_files=None, xrif2fits_cmd='xrif2fits'):
+def do_quicklook_for_camera(
+    span : ObservationSpan, data_roots, device, omit_telemetry, output_dir, dry_run, cube_mode,
+    construct_symlink_tree, all_visited_files=None, xrif2fits_cmd='xrif2fits'
+):
     if all_visited_files is None:
         all_visited_files = set()
     history_path = output_dir / HISTORY_FILENAME
@@ -425,9 +428,10 @@ def do_quicklook_for_camera(span : ObservationSpan, data_roots, device, omit_tel
                 destination = semester_observer_prefix / title / device
                 if not dry_run:
                     destination.mkdir(parents=True, exist_ok=True)
-                    observer_semester_prefix.parent.mkdir(parents=True, exist_ok=True)
-                    if not observer_semester_prefix.is_symlink():
-                        observer_semester_prefix.symlink_to(semester_observer_prefix)
+                    if construct_symlink_tree:
+                        observer_semester_prefix.parent.mkdir(parents=True, exist_ok=True)
+                        if not observer_semester_prefix.is_symlink():
+                            observer_semester_prefix.symlink_to(semester_observer_prefix)
                     for fn in good_outputs:
                         shutil.copy(fn, destination)
                 log.info(f"Wrote {len(good_outputs)} output file{'s' if len(good_outputs) != 1 else ''} to {destination}")
@@ -506,7 +510,9 @@ def convert_xrif(
 
 def daemon_mode(
     output_dir : pathlib.Path, cameras : typing.List[str],
-    data_roots: typing.List[pathlib.Path], omit_telemetry : bool, xrif2fits_cmd: str,
+    data_roots: typing.List[pathlib.Path], omit_telemetry : bool,
+    construct_symlink_tree: bool,
+    xrif2fits_cmd: str,
     ending_after_dt: datetime.datetime, all_visited_files: typing.List[TimestampedFile],
 ):
     existing_observation_spans = set()
@@ -532,6 +538,7 @@ def daemon_mode(
                         output_dir,
                         dry_run,
                         cube_mode,
+                        construct_symlink_tree,
                         all_visited_files,
                         xrif2fits_cmd=xrif2fits_cmd,
                     )
@@ -552,6 +559,21 @@ def daemon_mode(
         except Exception:
             log.exception(f"Poll for new images failed with exception")
 
+def decide_to_process(args, span):
+    if args.title is not None:
+        title_match = span.title.strip().lower() == args.title.strip().lower()
+        if args.partial_match_ok:
+            title_match = title_match or args.title.strip().lower() in span.title.lower()
+    else:
+        title_match = True
+
+    if args.observer_email is not None:
+        observer_match = args.observer_email.strip().lower() in span.email.lower()
+    else:
+        observer_match = True
+
+    return title_match and observer_match
+
 def main():
     now = datetime.datetime.now()
     this_year = now.year
@@ -567,11 +589,13 @@ def main():
     parser.add_argument('-S', '--separate-mode-all', help="(ignored in daemon mode) Whether to write all archives as separate FITS files regardless of the default for the device", action='store_true')
     parser.add_argument('-v', '--verbose', help="Turn on debug output", action='store_true')
     parser.add_argument('-t', '--title', help="(ignored in daemon mode) Title of observation to collect", action='store')
+    parser.add_argument('-e', '--observer-email', help="(ignored in daemon mode) Skip observations that are not by this observer (matches substrings, case-independent)", action='store')
     parser.add_argument('-p', '--partial-match-ok', help="(ignored in daemon mode) A partial match (title provided is found anywhere in recorded title) is processed", action='store_true')
     parser.add_argument('-s', '--semester', help=f"Semester to search in, default: {this_semester}", default=this_semester)
     parser.add_argument('-c', '--camera', help=f"Camera name (i.e. rawimages subfolder name), repeat to specify multiple names. (default: {list(ALL_CAMERAS.keys())})", action='append')
     parser.add_argument('-X', '--data-root', help=f"Search directory for telem and rawimages subdirectories, repeat to specify multiple roots. (default: {LOOKYLOO_DATA_ROOTS.split(':')})", action='append')
     parser.add_argument('-O', '--omit-telemetry', help="Whether to omit references to telemetry files", action='store_true')
+    parser.add_argument('-T', '--omit-symlink-tree', help="Whether to skip constructing the parallel structure of symlinks organizing observations by observer", action='store_true')
     parser.add_argument('-D', '--output-dir', help=f"output directory, defaults to {QUICKLOOK_PATH.as_posix()}", action='store', default=QUICKLOOK_PATH.as_posix())
     parser.add_argument('--xrif2fits-cmd', default='xrif2fits', help="Specify a path to an alternative version of xrif2fits here if desired", action='store')
     args = parser.parse_args()
@@ -619,6 +643,7 @@ def main():
             cameras,
             data_roots,
             args.omit_telemetry,
+            not args.omit_symlink_tree,
             args.xrif2fits_cmd,
             ending_after_dt,
             all_processed_files
@@ -626,11 +651,7 @@ def main():
     else:
         new_observation_spans, _ = get_new_observation_spans(data_roots, set(), ending_after_dt)
         for span in new_observation_spans:
-            if (
-                args.title is None
-                or span.title.strip().lower() == args.title.strip().lower()
-                or (args.partial_match_ok and args.title.strip().lower() in span.title.lower())
-            ):
+            if decide_to_process(args, span):
                 log.info(f"Observation interval to process: {span}")
                 for device in cameras:
                     cube_mode = ALL_CAMERAS.get(device, DEFAULT_SEPARATE) is DEFAULT_CUBE
@@ -647,6 +668,7 @@ def main():
                         output_dir,
                         args.dry_run,
                         cube_mode,
+                        not args.omit_symlink_tree,
                         all_visited_files=all_processed_files,
                         xrif2fits_cmd=args.xrif2fits_cmd,
                     )
