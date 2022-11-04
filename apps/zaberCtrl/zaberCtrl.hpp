@@ -139,15 +139,16 @@ protected:
 
    //INDI properties for user interaction:   
    pcf::IndiProperty m_indiP_pos;
-   pcf::IndiProperty m_indiP_rawpos;
+   pcf::IndiProperty m_indiP_rawPos;
+   pcf::IndiProperty m_indiP_maxPos;
    pcf::IndiProperty m_indiP_temp;
    
    INDI_NEWCALLBACK_DECL(zaberCtrl, m_indiP_pos);
-   INDI_NEWCALLBACK_DECL(zaberCtrl, m_indiP_rawpos);
+   INDI_NEWCALLBACK_DECL(zaberCtrl, m_indiP_rawPos);
    
    //INDI properties for interacting with Low-Level
    pcf::IndiProperty m_indiP_stageState;
-   pcf::IndiProperty m_indiP_stageMaxRawPos;
+   pcf::IndiProperty m_indiP_stageMaxRawPos;   
    pcf::IndiProperty m_indiP_stageRawPos;
    pcf::IndiProperty m_indiP_stageTgtPos;
    pcf::IndiProperty m_indiP_stageTemp;
@@ -236,17 +237,22 @@ int zaberCtrl::appStartup()
       return -1;
    }
       
-   createStandardIndiNumber<unsigned long>( m_indiP_rawpos, "rawpos", 0.0, m_maxRawPos, 1, "%lu");
-   m_indiP_rawpos["current"].set(0);
-   m_indiP_rawpos["target"].set(0);
-   if( registerIndiPropertyNew( m_indiP_rawpos, INDI_NEWCALLBACK(m_indiP_rawpos)) < 0)
+   createStandardIndiNumber<unsigned long>( m_indiP_rawPos, "rawpos", 0.0, m_maxRawPos, 1, "%lu");
+   m_indiP_rawPos["current"].set(0);
+   m_indiP_rawPos["target"].set(0);
+   if( registerIndiPropertyNew( m_indiP_rawPos, INDI_NEWCALLBACK(m_indiP_rawPos)) < 0)
    {
       #ifndef ZABERCTRL_TEST_NOLOG
       log<software_error>({__FILE__,__LINE__});
       #endif
       return -1;
    }
-      
+
+   createROIndiNumber( m_indiP_maxPos, "maxpos", "Maximum Position");    
+   indi::addNumberElement( m_indiP_maxPos, "value", m_maxPos, m_maxPos, 0.0, "%0.4f");
+   m_indiP_maxPos["value"].set<double>(m_maxPos);
+   registerIndiPropertyReadOnly(m_indiP_maxPos);
+
    createROIndiNumber( m_indiP_temp, "temp", "Stage Temperature [C]");    
    indi::addNumberElement( m_indiP_temp, "current", -50,100, 0, "%0.1f");
    registerIndiPropertyReadOnly(m_indiP_temp);
@@ -321,9 +327,10 @@ int zaberCtrl::appLogic()
          if(m_homePreset >= 0)
          {
             m_preset_target = m_presetPositions[m_homePreset];
-            std::cerr << m_preset_target << "\n";
-            
             updateIfChanged(m_indiP_preset, "target",  m_preset_target, INDI_BUSY);
+
+            //sleep(2); //pause to give time for controller to update itself and throw a warning
+
             moveTo(m_preset_target);
          }
          
@@ -347,28 +354,29 @@ int zaberCtrl::appLogic()
       if(m_moving)
       {
          m_indiP_pos.setState(INDI_BUSY);
-         m_indiP_rawpos.setState(INDI_BUSY);
+         m_indiP_rawPos.setState(INDI_BUSY);
       }
       else
       {
          m_indiP_pos.setState(INDI_IDLE);
          m_indiP_pos["target"] = m_pos;
-         m_indiP_rawpos.setState(INDI_IDLE);
-         m_indiP_rawpos["target"] = m_rawPos;
+         m_indiP_rawPos.setState(INDI_IDLE);
+         m_indiP_rawPos["target"] = m_rawPos;
       }
+
       m_indiDriver->sendSetProperty(m_indiP_pos);
-      m_indiDriver->sendSetProperty(m_indiP_rawpos);
+      m_indiDriver->sendSetProperty(m_indiP_rawPos);
    }
    
    if(m_moving && m_movingState < 1)
    {
       updateIfChanged(m_indiP_pos, "current", m_pos, INDI_BUSY);
-      updateIfChanged(m_indiP_rawpos, "current", m_rawPos, INDI_BUSY);
+      updateIfChanged(m_indiP_rawPos, "current", m_rawPos, INDI_BUSY);
    }
    else
    {
       updateIfChanged(m_indiP_pos, "current", m_pos,INDI_IDLE);
-      updateIfChanged(m_indiP_rawpos, "current", m_rawPos,INDI_IDLE);
+      updateIfChanged(m_indiP_rawPos, "current", m_rawPos,INDI_IDLE);
    }
    
    int n = presetNumber();
@@ -510,13 +518,13 @@ INDI_NEWCALLBACK_DEFN( zaberCtrl, m_indiP_pos)(const pcf::IndiProperty &ipRecv)
    
    moveTo(m_tgtPos);
    updateIfChanged(m_indiP_pos, "target", m_tgtPos, INDI_BUSY);
-   updateIfChanged(m_indiP_rawpos, "target", m_tgtRawPos, INDI_BUSY);
+   updateIfChanged(m_indiP_rawPos, "target", m_tgtRawPos, INDI_BUSY);
    return 0;
 }
 
-INDI_NEWCALLBACK_DEFN( zaberCtrl, m_indiP_rawpos)(const pcf::IndiProperty &ipRecv)
+INDI_NEWCALLBACK_DEFN( zaberCtrl, m_indiP_rawPos)(const pcf::IndiProperty &ipRecv)
 {
-   if( ipRecv.getName() != m_indiP_rawpos.getName())
+   if( ipRecv.getName() != m_indiP_rawPos.getName())
    {
       log<software_error>({__FILE__, __LINE__, "Invalid INDI property."});
       return -1;
@@ -566,7 +574,7 @@ INDI_NEWCALLBACK_DEFN( zaberCtrl, m_indiP_rawpos)(const pcf::IndiProperty &ipRec
    m_tgtRawPos = target;
    m_tgtPos = m_tgtRawPos / m_countsPerMillimeter;
    updateIfChanged(m_indiP_pos, "target", m_tgtPos, INDI_BUSY);
-   updateIfChanged(m_indiP_rawpos, "target", m_tgtRawPos, INDI_BUSY);
+   updateIfChanged(m_indiP_rawPos, "target", m_tgtRawPos, INDI_BUSY);
    return 0;
 }
 
@@ -684,12 +692,12 @@ INDI_SETCALLBACK_DEFN( zaberCtrl, m_indiP_stageRawPos )(const pcf::IndiProperty 
 
    if(m_moving)
    {
-      updateIfChanged(m_indiP_rawpos, "current", m_rawPos, INDI_BUSY);   
+      updateIfChanged(m_indiP_rawPos, "current", m_rawPos, INDI_BUSY);   
       updateIfChanged(m_indiP_pos, "current", m_pos, INDI_BUSY);
    }
    else
    {
-      updateIfChanged(m_indiP_rawpos, "current", m_rawPos, INDI_IDLE);   
+      updateIfChanged(m_indiP_rawPos, "current", m_rawPos, INDI_IDLE);   
       updateIfChanged(m_indiP_pos, "current", m_pos, INDI_IDLE);
    }
    
@@ -726,12 +734,12 @@ INDI_SETCALLBACK_DEFN( zaberCtrl, m_indiP_stageTgtPos )(const pcf::IndiProperty 
    
    if(m_moving)
    {
-      updateIfChanged(m_indiP_rawpos, "target", m_tgtRawPos, INDI_BUSY);   
+      updateIfChanged(m_indiP_rawPos, "target", m_tgtRawPos, INDI_BUSY);   
       updateIfChanged(m_indiP_pos, "target", m_tgtPos, INDI_BUSY);
    }
    else
    {
-      updateIfChanged(m_indiP_rawpos, "target", m_tgtRawPos, INDI_IDLE);   
+      updateIfChanged(m_indiP_rawPos, "target", m_tgtRawPos, INDI_IDLE);   
       updateIfChanged(m_indiP_pos, "target", m_tgtPos, INDI_IDLE);
    }
    
@@ -785,7 +793,7 @@ int zaberCtrl::recordZaber(bool force)
    
    if( m_pos != last_pos || m_rawPos != last_rawPos || m_stageTemp != last_temp || force)
    {
-      telem<telem_zaber>({m_pos, m_rawPos, m_stageTemp});
+      telem<telem_zaber>({(float) m_pos, (float) m_rawPos, (float) m_stageTemp});
       
       last_pos = m_pos;
       last_rawPos = m_rawPos;
