@@ -32,11 +32,11 @@ pwrDevice::~pwrDevice()
    
    if(m_channels) delete[] m_channels;
    
-   //This is taken care of by parent destruct
+   //This is taken care of by parent destruct:
    //delete m_deviceNameLabel;
 }
    
-std::string pwrDevice::deviceName()
+std::string pwrDevice::deviceName() const
 {
    return m_deviceName;
 }

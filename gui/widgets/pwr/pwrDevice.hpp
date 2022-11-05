@@ -10,6 +10,7 @@
 
 #include "pwrChannel.hpp"
 
+
 inline
 double tsDiff( const timespec & ts2,
                const timespec & ts1 
@@ -206,12 +207,12 @@ protected:
 public:
 
    pwrDevice( QWidget * parent = nullptr, 
-               Qt::WindowFlags flags = 0
-             );
+              Qt::WindowFlags flags = Qt::WindowFlags()
+            );
 
    virtual ~pwrDevice();
    
-   std::string deviceName();
+   std::string deviceName() const;
    
    void deviceName( const std::string & dname);
    
@@ -241,6 +242,13 @@ signals:
    void loadChanged();
    
 };
+
+inline
+bool compPwrDevice(const pwrDevice * one, const pwrDevice * two)
+{
+    return (one->deviceName() < two->deviceName());
+}
+
 
 } //namespace xqt 
 

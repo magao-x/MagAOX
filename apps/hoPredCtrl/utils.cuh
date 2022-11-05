@@ -1,5 +1,7 @@
 #ifndef PCUTIL_CUH
 #define PCUTIL_CUH
+#include <string>
+#include <vector>
 
 #include "cuda_runtime.h"
 #include "cublas_v2.h"
@@ -8,6 +10,7 @@ namespace DDSPC
 {
 
 unsigned long long rdtsc();
+std::vector<std::string> split (const std::string &s, char delim);
 
 /*
 	The following two defines are used to get the correct index for StridedBatched CUDA functions.
@@ -19,8 +22,7 @@ unsigned long long rdtsc();
 
 __global__ void divide_scalar_gpu(float* x, float* y, float* z, int element_size, int batch_size);
 __global__ void gpu_print_buffer(float* data, int batch_count, int nrow, int ncol, int row_max=-1, int col_max=-1);
-void print_batch_buffer(float* data, int batch_count, int nrow, int ncol);
-
+void print_batch_buffer(float** data, int batch_count, int nrow, int ncol);
 void check_cuda_error(cudaError_t cudaerr);
 
 /*
@@ -174,8 +176,8 @@ static inline cublasStatus_t cublasXcopy(cublasHandle_t handle, int n, double *x
 	return cublasDcopy(handle, n, x, incx, y, incy);
 }
 
-static inline uint find_next_power_of_2(int sample){
-    uint num_bits = 0;
+static inline uint64_t find_next_power_of_2(int sample){
+    uint64_t num_bits = 0;
     
     do{
         sample >>= 1;

@@ -173,9 +173,9 @@ struct telem_teldata : public flatbuffer_log
       else if(member == "guiding") return logMetaDetail({"GUIDING", logMeta::valTypes::Int, logMeta::metaTypes::State, (void *) &guiding}); 
       else if(member == "slewing") return logMetaDetail({"SLEWING", logMeta::valTypes::Int, logMeta::metaTypes::State, (void *) &slewing}); 
       else if(member == "guiderMoving") return logMetaDetail({"GUIDER MOVING", logMeta::valTypes::Int, logMeta::metaTypes::State, (void *) &guiderMoving}); 
-      else if(member == "az") return logMetaDetail({"AZ", logMeta::valTypes::Double, logMeta::metaTypes::Continuous, (void *) &az});
-      else if(member == "zd") return logMetaDetail({"ZD", logMeta::valTypes::Double, logMeta::metaTypes::Continuous, (void *) &zd});
-      else if(member == "pa") return logMetaDetail({"PARANG", logMeta::valTypes::Double, logMeta::metaTypes::Continuous, (void *) &pa});
+      else if(member == "az") return logMetaDetail({"AZ", logMeta::valTypes::Double, logMeta::metaTypes::Continuous, (void *) &az, false});
+      else if(member == "zd") return logMetaDetail({"ZD", logMeta::valTypes::Double, logMeta::metaTypes::Continuous, (void *) &zd, false});
+      else if(member == "pa") return logMetaDetail({"PARANG", logMeta::valTypes::Double, logMeta::metaTypes::Continuous, (void *) &pa, false});
       else if(member == "domeAz") return logMetaDetail({"DOME AZ", logMeta::valTypes::Double, logMeta::metaTypes::Continuous, (void *) &domeAz}); 
       else if(member == "domeStat") return logMetaDetail({"DOME STATUS", logMeta::valTypes::Int, logMeta::metaTypes::State, (void *) &domeStat});
       else

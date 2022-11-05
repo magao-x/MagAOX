@@ -9,11 +9,16 @@ yum groupinstall -y 'Development Tools'
 # use || true so it's not an error if already installed:
 yum install -y http://dl.fedoraproject.org/pub/epel/epel-release-latest-7.noarch.rpm || true
 
+# Install repo with recent tmux
+# recommended by https://github.com/tmux/tmux/wiki/Installing#red-hat-enterprise-linux--centos-rpms
+yum install -y http://galaxy4.net/repo/galaxy4-release-7-current.noarch.rpm || true
+
 # changes the set of available packages, making devtoolset-7 available
 yum -y install centos-release-scl
 
 # Install build tools and utilities
 yum install -y \
+    which \
     openssh \
     cmake3 \
     vim \
@@ -59,7 +64,12 @@ yum install -y \
     podman \
     nethogs \
     shadow-utils \
+    nfs-utils \
 ;
+
+if [[ $MAGAOX_ROLE == vm ]]; then
+    yum install -y xorg-x11-xauth
+fi
 
 alternatives --install /usr/local/bin/cmake cmake /usr/bin/cmake3 20 \
     --slave /usr/local/bin/ctest ctest /usr/bin/ctest3 \

@@ -26,6 +26,8 @@ namespace logger
   */
 struct saving_state_change : public flatbuffer_log
 {
+  
+
    ///The type of the message
    struct messageT : public fbMessage
    {
@@ -60,6 +62,9 @@ struct saving_state_change : public flatbuffer_log
       
       return s.str();
    }
+
+   
+
 };
 
 } //namespace logger

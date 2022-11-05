@@ -66,7 +66,7 @@ class bmcCtrl : public MagAOXApp<true>, public dev::dm<bmcCtrl,float>, public de
    
    typedef float realT;  ///< This defines the datatype used to signal the DM using the ImageStreamIO library.
    
-   size_t m_nsat {0};
+   
    
 protected:
 
@@ -76,8 +76,11 @@ protected:
    
    std::string m_serialNumber; ///< The BMC serial number used to open the correct DM profile
    
+   long m_satThresh {100000} ;///< Threshold above which to log saturation.
+
    ///@}
 
+   long m_nsat {0};
 public:
    /// Default c'tor.
    bmcCtrl();
@@ -218,6 +221,8 @@ void bmcCtrl::setupConfig()
 {
    config.add("dm.serialNumber", "", "dm.serialNumber", argType::Required, "dm", "serialNumber", false, "string", "The BMC serial number used to find correct DM Profile.");
    config.add("dm.calibRelDir", "", "dm.calibRelDir", argType::Required, "dm", "calibRelDir", false, "string", "Used to find the default config directory.");
+   config.add("dm.satThresh", "", "dm.satThresh", argType::Required, "dm", "satThresh", false, "string", "Threshold above which to log saturation.");
+
    dev::dm<bmcCtrl,float>::setupConfig(config);
    
 }
@@ -226,7 +231,8 @@ int bmcCtrl::loadConfigImpl( mx::app::appConfigurator & _config )
 {
    config(m_calibRelDir, "dm.calibRelDir");
    config(m_serialNumber, "dm.serialNumber");
-      
+   config(m_satThresh, "dm.satThresh");
+
    //m_calibRelDir = "dm/bmc_2k";
    
    dev::dm<bmcCtrl,float>::loadConfig(_config);
@@ -273,7 +279,7 @@ int bmcCtrl::appLogic()
       return initDM();
    }
    
-   if(m_nsat > 0)
+   if(m_nsat > m_satThresh)
    {
       log<text_log>("Saturated actuators in last second: " + std::to_string(m_nsat), logPrio::LOG_WARNING);
    }

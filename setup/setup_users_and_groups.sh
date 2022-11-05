@@ -1,17 +1,6 @@
 #!/bin/bash
 set -euo pipefail
 DIR="$( cd "$( dirname "${BASH_SOURCE[0]}" )" && pwd )"
-if [[ -e /usr/bin/sudo ]]; then
-  _REAL_SUDO=/usr/bin/sudo
-elif [[ -e /bin/sudo ]]; then
-  _REAL_SUDO=/bin/sudo
-else
-  if [[ -z $(command -v sudo) ]]; then
-    echo "Install sudo before provisioning"
-  else
-    _REAL_SUDO=$(which sudo)
-  fi
-fi
 source $DIR/_common.sh
 
 creategroup magaox
@@ -19,9 +8,20 @@ creategroup magaox-dev
 
 if [[ $MAGAOX_ROLE != vm ]]; then
   createuser xsup
+  createuser guestobs
+  sudo passwd --lock guestobs  # SSH login still possible
+  creategroup guestobs
+  sudo gpasswd -d guestobs magaox || true  # prevent access for shenanigans
+  sudo gpasswd -a guestobs guestobs || true
+  sudo chown guestobs:guestobs /data/users/guestobs
+  sudo chmod g+rwX /data/users/guestobs
+  if [[ -z $(groups | tr ' ' '\n' | grep 'guestobs$') ]]; then
+    sudo gpasswd -a xsup guestobs
+    log_success "Added xsup to group guestobs"
+  fi
 
   if sudo test ! -e /home/xsup/.ssh/id_ed25519; then
-    $_REAL_SUDO -u xsup ssh-keygen -t ed25519 -N "" -f /home/xsup/.ssh/id_ed25519 -q
+    $REAL_SUDO -u xsup ssh-keygen -t ed25519 -N "" -f /home/xsup/.ssh/id_ed25519 -q
   fi
   if ! grep -q magaox-dev /etc/pam.d/su; then
     cat <<'HERE' | sudo sed -i '/pam_rootok.so$/r /dev/stdin' /etc/pam.d/su

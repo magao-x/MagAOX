@@ -1,6 +1,6 @@
 namespace MagAOX.logger;
 
-table Saving_stats_fb
+table telem_saving_fb
 {
    rawSize:uint32;
    compressedSize:uint32; 
@@ -11,5 +11,5 @@ table Saving_stats_fb
    
 }
 
-root_type Saving_stats_fb;
+root_type telem_saving_fb;
 

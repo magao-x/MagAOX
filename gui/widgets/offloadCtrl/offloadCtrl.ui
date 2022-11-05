@@ -62,12 +62,9 @@
         </spacer>
        </item>
        <item>
-        <widget class="QPushButton" name="t2w_enable">
-         <property name="focusPolicy">
-          <enum>Qt::NoFocus</enum>
-         </property>
-         <property name="text">
-          <string>Enable</string>
+        <widget class="QSlider" name="slider_t2wEnable">
+         <property name="orientation">
+          <enum>Qt::Horizontal</enum>
          </property>
         </widget>
        </item>

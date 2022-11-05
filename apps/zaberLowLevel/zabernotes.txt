@@ -38,3 +38,13 @@ Results of limit.max:
 
 On 2021-03-15 changed:
 @03 0 OK IDLE WR 352750
+
+
+stagebs: s/n 64040
+max pos is 2257638 = 224 mm
+/4 set limit.max 2257638
+/4 get limit.max
+
+stagepiaa1 has s/n 104971
+0.047625 um/step
+mx limit: 1679790

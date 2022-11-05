@@ -32,7 +32,7 @@ protected:
 public:
    dmCtrl( std::string & dmName,
            QWidget * Parent = 0, 
-           Qt::WindowFlags f = 0
+           Qt::WindowFlags f = Qt::WindowFlags()
          );
    
    ~dmCtrl();

@@ -42,6 +42,7 @@ apps/alpaoCtrl/alpaoCtrl
 apps/andorCtrl/andorCtrl
 apps/acronameUsbHub/acronameUsbHub
 apps/acronameUsbHub/utils/configusbhub
+apps/alignLoop/alignLoop
 
 #b
 apps/baslerCtrl/baslerCtrl
@@ -100,6 +101,7 @@ apps/picoMotorCtrl/picoMotorCtrl
 apps/pupilAlign/pupilAlign
 apps/pupilFit/pupilFit
 apps/pwfsSlopeCalc/pwfsSlopeCalc
+apps/photonCounter
 
 #r
 apps/rhusbMon/rhusbMon

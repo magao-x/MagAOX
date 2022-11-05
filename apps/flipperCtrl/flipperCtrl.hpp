@@ -40,6 +40,9 @@ class flipperCtrl : public MagAOXApp<true>, public tty::usbDevice, public dev::i
    friend class flipperCtrl_test;
 
    friend class dev::telemeter<flipperCtrl>;
+
+   typedef dev::telemeter<flipperCtrl> telemeterT;
+
 protected:
 
    /** \name Configurable Parameters
@@ -124,7 +127,7 @@ void flipperCtrl::setupConfig()
    
    config.add("flipper.reverse", "", "flipper.reverse", argType::Required, "flipper", "reverse", false, "bool", "If true, reverse the positions for in and out.");
    
-   dev::telemeter<flipperCtrl>::setupConfig(config);
+   telemeterT::setupConfig(config);
 }
 
 int flipperCtrl::loadConfigImpl( mx::app::appConfigurator & _config )
@@ -149,7 +152,7 @@ int flipperCtrl::loadConfigImpl( mx::app::appConfigurator & _config )
       m_outPos = 1;
    }
    
-   dev::telemeter<flipperCtrl>::loadConfig(_config);
+   telemeterT::loadConfig(_config);
    
    return 0;
 }
@@ -184,8 +187,7 @@ int flipperCtrl::appStartup()
       return -1;
    }
       
-   
-   if(dev::telemeter<flipperCtrl>::appStartup() < 0)
+   if(telemeterT::appStartup() < 0)
    {
       return log<software_error,-1>({__FILE__,__LINE__});
    }
@@ -318,7 +320,7 @@ int flipperCtrl::appLogic()
       
       recordStage();
       
-      if(telemeter<flipperCtrl>::appLogic() < 0)
+      if(telemeterT::appLogic() < 0)
       {
          log<software_error>({__FILE__, __LINE__});
          return 0;
@@ -435,6 +437,7 @@ INDI_NEWCALLBACK_DEFN(flipperCtrl, m_indiP_position )(const pcf::IndiProperty &i
       m_indiP_position.setState (INDI_BUSY);
       m_indiDriver->sendSetProperty (m_indiP_position);
       
+      recordStage(true);
       state(stateCodes::OPERATING);
       
       if(moveTo(m_tgt) < 0)
@@ -442,7 +445,7 @@ INDI_NEWCALLBACK_DEFN(flipperCtrl, m_indiP_position )(const pcf::IndiProperty &i
          return log<software_error,-1>({__FILE__, __LINE__});
       }
       
-      recordStage();
+      recordStage(true);
          
       return 0;
    }
@@ -455,7 +458,7 @@ INDI_NEWCALLBACK_DEFN(flipperCtrl, m_indiP_position )(const pcf::IndiProperty &i
 
 int flipperCtrl::checkRecordTimes()
 {
-   return telemeter<flipperCtrl>::checkRecordTimes(telem_stage());
+   return telemeterT::checkRecordTimes(telem_stage());
 }
    
 int flipperCtrl::recordTelem( const telem_stage * )
@@ -476,7 +479,7 @@ int flipperCtrl::recordStage( bool force )
       std::string ps = "in";
       if(m_pos == m_outPos) ps = "out";
       
-      telem<telem_stage>({moving, (double) m_pos, ps});
+      telem<telem_stage>({ (int8_t) moving, (double) m_pos, ps});
       
       last_pos = m_pos;
       last_moving = moving;

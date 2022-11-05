@@ -12,7 +12,7 @@
 #define logger_logMeta_hpp
 
 #include <mx/ioutils/fits/fitsHeaderCard.hpp>
-
+//#define HARD_EXIT
 #include "logMap.hpp"
 
 namespace MagAOX
@@ -29,6 +29,7 @@ struct logMetaSpec
    std::string keyword; //overrides the default
    std::string format; //overrides the default
    std::string comment; //overrides the default
+   
 
    logMetaSpec()
    {
@@ -62,6 +63,7 @@ struct logMetaDetail
    int valType {-1};
    int metaType {-1};
    void * accessor {nullptr};
+   bool hierarch {true}; // if false the device name is not included.
 
    logMetaDetail()
    {
@@ -79,10 +81,22 @@ struct logMetaDetail
 
    logMetaDetail( const std::string & k,
                   const std::string & c,
+                  const std::string & f,
                   int vt,
                   int mt,
-                  void *acc
-                ) : keyword(k), comment(c), valType(vt), metaType(mt), accessor(acc)
+                  void *acc,
+                  bool h
+                ) : keyword(k), comment(c), format(f), valType(vt), metaType(mt), accessor(acc), hierarch(h)
+   {
+   }
+
+   logMetaDetail( const std::string & k,
+                  const std::string & c,
+                  int vt,
+                  int mt,
+                  void *acc,
+                  bool h
+                ) : keyword(k), comment(c), valType(vt), metaType(mt), accessor(acc), hierarch(h)
    {
    }
 
@@ -91,6 +105,15 @@ struct logMetaDetail
                   int mt,
                   void *acc
                 ) : keyword(k), valType(vt), metaType(mt), accessor(acc)
+   {
+   }
+
+   logMetaDetail( const std::string & k,
+                  int vt,
+                  int mt,
+                  void *acc, 
+                  bool h
+                ) : keyword(k), valType(vt), metaType(mt), accessor(acc), hierarch(h)
    {
    }
 
@@ -119,14 +142,21 @@ int getLogStateVal( valT & val,
    if(hint) _hint = *hint;
    else _hint = 0;
 
-   if(lm.getPriorLog(stprior, appName, ev, stime, _hint) != 0) return -1;
-
+   if(lm.getPriorLog(stprior, appName, ev, stime, _hint) != 0) 
+   {
+      std::cerr << __FILE__ << " " << __LINE__ << " getPriorLog returned error for " << appName << ":" << ev << "\n";
+      return -1;
+   }
    valT stprV = getter(flatlogs::logHeader::messageBuffer(stprior));
    
    valT atprV;
    
-   if(lm.getNextLog(atprior, stprior, appName) != 0) return -1;
-   
+   if(lm.getNextLog(atprior, stprior, appName) != 0) 
+   {
+      std::cerr << __FILE__ << " " << __LINE__ << " getNextLog returned error for " << appName << ":" << ev << "\n";
+      return -1;
+   }
+
    while( flatlogs::logHeader::timespec(atprior) < atime )
    {
       atprV = getter(flatlogs::logHeader::messageBuffer(atprior));
@@ -169,6 +199,7 @@ int getLogContVal( valT & val,
    //Get log entry before midexp
    if(lm.getPriorLog(stprior, appName, ev, midexp, _hint)!=0)
    {
+      std::cerr << __FILE__ << " " << __LINE__ << " getPriorLog returned error for " << appName << ":" << ev << "\n";
       return 1;
    }
    valT stprV = getter(flatlogs::logHeader::messageBuffer(stprior));
@@ -176,6 +207,10 @@ int getLogContVal( valT & val,
    //Get log entry after.
    if(lm.getNextLog(atafter, stprior, appName)!=0)
    {
+      std::cerr << __FILE__ << " " << __LINE__ << " getNextLog returned error for " << appName << ":" << ev << "\n";
+      #ifdef HARD_EXIT 
+      exit(-1);
+      #endif
       return 1;
    }
    valT atprV = getter(flatlogs::logHeader::messageBuffer(atafter));
@@ -216,7 +251,21 @@ public:
       LongLong = mx::fits::fitsType<long long>(),
       ULongLong = mx::fits::fitsType<unsigned long long>(),
       Float = mx::fits::fitsType<float>(),
-      Double = mx::fits::fitsType<double>()
+      Double = mx::fits::fitsType<double>(),
+      Vector_String = 10000,
+      Vector_Bool = 10002,
+      Vector_Char = 10004,
+      Vector_UChar = 10006,
+      Vector_Short = 10008,
+      Vector_UShort = 10010,
+      Vector_Int = 10012,
+      Vector_UInt = 10014,
+      Vector_Long = 10016,
+      Vector_ULong = 10018,
+      Vector_LongLOng = 10020,
+      Vector_ULongLong = 10022,
+      Vector_Float = 10024,
+      Vector_Double  = 10026
    };
 
    enum metaTypes

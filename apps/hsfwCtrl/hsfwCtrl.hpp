@@ -287,7 +287,7 @@ int hsfwCtrl::appLogic()
    if( state() == stateCodes::NOTCONNECTED )
    {
       //Make sure we don't try anything while off.
-      if( state() == stateCodes::POWEROFF ) return 0;
+      if(powerState() != 1 || powerStateTarget() != 1) return 0;
 
       hsfw_wheel_info *devs, *cur_dev;
       devs = enumerate_wheels();
@@ -318,7 +318,7 @@ int hsfwCtrl::appLogic()
       }
      
       //Make sure we don't try anything while off.
-      if( state() == stateCodes::POWEROFF ) return 0;
+      if(powerState() != 1 || powerStateTarget() != 1) return 0;
 
       if(m_wheel) close_hsfw(m_wheel);
       
@@ -344,18 +344,18 @@ int hsfwCtrl::appLogic()
    std::lock_guard<std::mutex> guard(m_indiMutex);
    
    //Make sure we don't try anything while off.
-   if( state() == stateCodes::POWEROFF ) return 0;
+   if(powerState() != 1 || powerStateTarget() != 1) return 0;
    
    wheel_status status;
    if (get_hsfw_status(m_wheel, &status) < 0) 
    {
-      printf("ERROR");
+      if(powerState() != 1 || powerStateTarget() != 1) return 0;
+      log<software_error>({__FILE__, __LINE__, "error from get_hsfw_status"});
       return 0;
    }
    
    if (status.error_state != 0) 
    {
-      printf("Clearing Error\n");
       clear_error_hsfw(m_wheel);
    }
    
@@ -469,6 +469,7 @@ int hsfwCtrl::startHoming()
 
    if(home_hsfw(m_wheel)) 
    {
+      if(powerState() != 1 || powerStateTarget() != 1) return -1; //about to get POWEROFF
       log<software_error>({__FILE__,__LINE__, "libhswf error"});
       return -1;
    }
@@ -512,7 +513,7 @@ int hsfwCtrl::moveTo( const double & filters )
    
    if( move_hsfw(m_wheel, (unsigned short) (ffilters + 0.5)) < 0)
    {
-      
+      if(powerState() != 1 || powerStateTarget() != 1) return -1; //about to get POWEROFF
       return log<software_error,-1>({__FILE__,__LINE__, "libhsfw error"});
    }
    

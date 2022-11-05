@@ -63,9 +63,9 @@ offloadCtrl::offloadCtrl( QWidget * Parent,
    //synchActiveInactive(&p);
    //ui.buttonRest->setPalette(p);
    
-    QTimer *timer = new QTimer(this);
-    connect(timer, SIGNAL(timeout()), this, SLOT(updateGUI()));
-    timer->start(250);
+    //QTimer *timer = new QTimer(this);
+    //connect(timer, SIGNAL(timeout()), this, SLOT(updateGUI()));
+    //timer->start(250);
 
     onDisconnect();
       
@@ -140,7 +140,7 @@ void offloadCtrl::handleSetProperty( const pcf::IndiProperty & ipRecv)
          }
       }
    }
-   return;   
+   return updateGUI();   
 }
 
 void offloadCtrl::updateGUI()
@@ -148,11 +148,11 @@ void offloadCtrl::updateGUI()
 
    if(m_t2wOffloadingEnabled)
    {
-      ui.t2w_enable->setText("disable");
+      ui.slider_t2wEnable->setSliderPosition(ui.slider_t2wEnable->maximum());
    }
    else
    {
-      ui.t2w_enable->setText("enable");
+      ui.slider_t2wEnable->setSliderPosition(ui.slider_t2wEnable->minimum());
    }
 
    char t[8];
@@ -170,6 +170,44 @@ void offloadCtrl::updateGUI()
    
 } //updateGUI()
 
+
+void offloadCtrl::on_slider_t2wEnable_sliderReleased()
+{
+   double relpos = ((double)(ui.slider_t2wEnable->sliderPosition() - ui.slider_t2wEnable->minimum()))/(ui.slider_t2wEnable->maximum() - ui.slider_t2wEnable->minimum());
+   
+   if(relpos > 0.1 && relpos < 0.9)
+   {
+      if(m_t2wOffloadingEnabled)
+      {
+         ui.slider_t2wEnable->setSliderPosition(ui.slider_t2wEnable->maximum());
+      }
+      else
+      {
+         ui.slider_t2wEnable->setSliderPosition(ui.slider_t2wEnable->minimum());
+      }
+      return;
+   }
+   
+   
+   pcf::IndiProperty ipFreq(pcf::IndiProperty::Switch);
+   
+   ipFreq.setDevice("t2wOffloader");
+   ipFreq.setName("offload");
+   ipFreq.add(pcf::IndiElement("toggle"));
+   
+   if(relpos >= 0.9)
+   {
+      ipFreq["toggle"] = pcf::IndiElement::On;
+   }
+   else
+   {
+      ipFreq["toggle"] = pcf::IndiElement::Off;
+   }
+   
+   sendNewProperty(ipFreq);
+}
+
+/*
 void offloadCtrl::on_t2w_enable_pressed()
 {
    pcf::IndiProperty ip(pcf::IndiProperty::Switch);
@@ -188,7 +226,7 @@ void offloadCtrl::on_t2w_enable_pressed()
    }
    
    sendNewProperty(ip);
-}
+}*/
 
 void offloadCtrl::on_t2w_zero_pressed()
 {

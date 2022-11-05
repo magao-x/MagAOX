@@ -22,10 +22,14 @@ protected:
    std::string m_property;
    std::string m_label;
 
+   int m_modes {0};
+   int m_modesTotal {0};
+
    float m_current {0};
    float m_target {0};
 
    bool m_valChanged {false};
+   bool m_newSent {false};
 
    float m_scale {0.05};
 
@@ -35,21 +39,25 @@ protected:
 public:
 
    gainCtrl( QWidget * Parent = 0, 
-             Qt::WindowFlags f = 0
+             Qt::WindowFlags f = Qt::WindowFlags()
            );
 
    gainCtrl( const std::string & device,
              const std::string & property,
              const std::string & label,
+             int modes,
+             int modesTotal,
              QWidget * Parent = 0, 
-             Qt::WindowFlags f = 0
+             Qt::WindowFlags f = Qt::WindowFlags()
            );
    
    ~gainCtrl();
 
    void setup( const std::string & device,
                const std::string & property,
-               const std::string & label
+               const std::string & label,
+               int modes,
+               int modesTotal
              );
 
    void makeGainCtrl();
@@ -76,6 +84,7 @@ public slots:
    void on_button_scale_pressed();
    void on_button_minus_pressed();
    void on_button_zero_pressed();
+   void on_slider_sliderReleased();
 
 protected:
      
@@ -91,12 +100,14 @@ gainCtrl::gainCtrl( QWidget * Parent,
 gainCtrl::gainCtrl( const std::string & device,
                     const std::string & property,
                     const std::string & label,
+                    int modes,
+                    int modesTotal,
                     QWidget * Parent, 
                     Qt::WindowFlags f) : xWidget(Parent, f)
 {
    ui.setupUi(this);
    
-   setup(device, property, label);
+   setup(device, property, label, modes, modesTotal);
 }
    
 gainCtrl::~gainCtrl()
@@ -105,12 +116,16 @@ gainCtrl::~gainCtrl()
 
 void gainCtrl::setup( const std::string & device,
                       const std::string & property,
-                      const std::string & label
+                      const std::string & label,
+                      int modes,
+                      int modesTotal
                     )
 {
    m_device = device;
    m_property = property;
    m_label = label;
+   m_modes = modes;
+   m_modesTotal = modesTotal;
 
    ui.status->setup(m_device, m_property, statusEntry::FLOAT, "", "");
    ui.status->setStretch(0,0,1);
@@ -123,6 +138,15 @@ void gainCtrl::setup( const std::string & device,
    setXwFont(ui.label);
    
    ui.label->setText(m_label.c_str());
+
+   if(m_modes == -1 || m_modesTotal == -1) ui.label_nummodes->setText("");
+   else
+   {
+      std::string nnn = std::to_string(m_modes);
+      nnn += " / ";
+      nnn += std::to_string(m_modesTotal);
+      ui.label_nummodes->setText(nnn.c_str());
+   }
 
    makeGainCtrl();
    
@@ -189,22 +213,32 @@ void gainCtrl::handleSetProperty( const pcf::IndiProperty & ipRecv)
    
    if(ipRecv.getName() == m_property)
    {
-      if(ipRecv.find("current"))
+      if(m_newSent)
       {
-         float current = ipRecv["current"].get<float>();
-         if(current != m_current)
-         {
-            m_valChanged = true;
-            m_current = current;
-         }
+         m_newSent=false;
       }
-      else if(ipRecv.find("target"))
+      else
       {
-         m_target = ipRecv["target"].get<float>();
+         if(ipRecv.find("current"))
+         {
+            float current = ipRecv["current"].get<float>();
+            if(current != m_current)
+            {
+               m_valChanged = true;
+               m_current = current;
+            }
+         }
+   
+         if(ipRecv.find("target"))
+         {
+            m_target = ipRecv["target"].get<float>();
+         }
       }
    }
 
    updateGUI();
+
+   ui.status->handleSetProperty(ipRecv);
 }
 
 void gainCtrl::updateGUI()
@@ -216,6 +250,7 @@ void gainCtrl::updateGUI()
       else if(slv > 150) slv = 150;
 
       ui.slider->setValue(slv);
+
    }
 
 } //updateGUI()
@@ -233,6 +268,10 @@ void gainCtrl::setGain( float g )
    ip["target"] = g;
    
    sendNewProperty(ip);
+   m_newSent = true;
+
+   m_current = g; //do this so multiple pushes update fast
+
 }
 
 void gainCtrl::on_button_plus_pressed()
@@ -293,6 +332,12 @@ void gainCtrl::on_button_zero_pressed()
 {
    if(m_ctrlType == GAIN) setGain(0.0);
    if(m_ctrlType == MULTCOEFF) setGain(1.0);
+}
+
+void gainCtrl::on_slider_sliderReleased()
+{
+   float newg = 1.0*ui.slider->value() / (1.0*ui.slider->maximum())*m_maxVal;
+   setGain(newg);
 }
 
 } //namespace xqt

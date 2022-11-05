@@ -97,7 +97,7 @@ int loadCameraConfig( cameraConfigMap & ccmap, ///< [out] the map in which to pl
   * which determines whether or not vertical shift speed controls are exposed. If true, then the implementation should populate
   * m_vShiftSpeedNames and m_vShiftSpeedLabels (vectors of strings) on construction to the allowed values.  This 
   * facility is normally used names like "0_3us" and "1_3us".  
-  * If used (and true) the setVShiftSpeed() function must be define which sets the camera according to m_vShiftSpeedNameSet.
+  * If used (and true) the setVShiftSpeed() function must be defined which sets the camera according to m_vShiftSpeedNameSet.
   * The implementation must also manage m_vShiftSpeedName, keeping it up to date.  The configuration setting camera.defaultVShiftSpeed
   * is also exposed, and the implementation can set this default with m_defaultVShiftSpeed. 
   * 
@@ -249,6 +249,7 @@ protected:
    std::string m_vShiftSpeedName; ///< The current vshift speed name
    std::string m_vShiftSpeedNameSet; ///< The user requested vshift speed name, to be set by derived()
       
+   float m_adcSpeed {0};
    
    float m_emGain {1}; ///< The camera's current EM gain (if available).
    float m_emGainSet {1}; ///< The camera's EM gain, as set by the user.
@@ -1461,7 +1462,7 @@ int stdCamera<derivedT>::appLogic()
             
             if(m_shutterState == 1)
             {
-               derived().updateSwitchIfChanged(m_indiP_shutter, "toggle", pcf::IndiElement::On, INDI_BUSY);
+               derived().updateSwitchIfChanged(m_indiP_shutter, "toggle", pcf::IndiElement::On, INDI_OK);
             }
             else
             {
@@ -1556,7 +1557,7 @@ int stdCamera<derivedT>::onPowerOff()
           
       if(m_shutterState == 0)
       {
-         derived().updateSwitchIfChanged(m_indiP_shutter, "toggle", pcf::IndiElement::On, INDI_BUSY);
+         derived().updateSwitchIfChanged(m_indiP_shutter, "toggle", pcf::IndiElement::On, INDI_OK);
       }
       else
       {
@@ -1588,7 +1589,7 @@ int stdCamera<derivedT>::whilePowerOff()
       
       if(m_shutterState == 0)
       {
-         derived().updateSwitchIfChanged(m_indiP_shutter, "toggle", pcf::IndiElement::On, INDI_BUSY);
+         derived().updateSwitchIfChanged(m_indiP_shutter, "toggle", pcf::IndiElement::On, INDI_OK);
       }
       else
       {
@@ -2680,7 +2681,7 @@ int stdCamera<derivedT>::updateINDI()
           
       if(m_shutterState == 0) //0 shut, 1 open
       {
-         derived().updateSwitchIfChanged(m_indiP_shutter, "toggle", pcf::IndiElement::On, INDI_BUSY);
+         derived().updateSwitchIfChanged(m_indiP_shutter, "toggle", pcf::IndiElement::On, INDI_OK);
       }
       else
       {
@@ -2731,7 +2732,7 @@ int stdCamera<derivedT>::recordCamera( bool force )
                m_expTime != last_expTime ||
                m_fps != last_fps ||
                m_emGain != last_emGain ||
-               0 != last_adcSpeed ||
+               m_adcSpeed != last_adcSpeed ||
                m_ccdTemp != last_ccdTemp ||
                m_ccdTempSetpt != last_ccdTempSetpt ||
                m_tempControlStatus != last_tempControlStatus ||
@@ -2742,7 +2743,7 @@ int stdCamera<derivedT>::recordCamera( bool force )
    {
       derived().template telem<telem_stdcam>({m_modeName, m_currentROI.x, m_currentROI.y, 
                                                     m_currentROI.w, m_currentROI.h, m_currentROI.bin_x, m_currentROI.bin_y,
-                                                       m_expTime, m_fps, m_emGain, 0, m_ccdTemp, m_ccdTempSetpt, (uint8_t) m_tempControlStatus, 
+                                                       m_expTime, m_fps, m_emGain, m_adcSpeed, m_ccdTemp, m_ccdTempSetpt, (uint8_t) m_tempControlStatus, 
                                                              (uint8_t) m_tempControlOnTarget, m_tempControlStatusStr, m_shutterStatus, (int8_t) m_shutterState});
       
       last_mode = m_modeName;
@@ -2750,7 +2751,7 @@ int stdCamera<derivedT>::recordCamera( bool force )
       last_expTime = m_expTime;
       last_fps = m_fps;
       last_emGain = m_emGain;
-      last_adcSpeed = 0;//m_adcSpeed;
+      last_adcSpeed = m_adcSpeed;
       last_ccdTemp = m_ccdTemp;
       last_ccdTempSetpt = m_ccdTempSetpt;
       last_tempControlStatus = m_tempControlStatus;

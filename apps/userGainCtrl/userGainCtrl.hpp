@@ -11,6 +11,7 @@
 
 #include <mx/improc/eigenCube.hpp>
 #include <mx/improc/eigenImage.hpp>
+#include <mx/ioutils/fits/fitsFile.hpp>
 
 #include "../../libMagAOX/libMagAOX.hpp" //Note this is included on command line to trigger pch
 #include "../../magaox_git_version.h"
@@ -128,12 +129,16 @@ protected:
 
    std::vector<int> m_modeBlockStart;
    std::vector<int> m_modeBlockN;
+   
+   int m_totalNModes {0}; ///< The total number of WFS modes in the calib.
 
    std::vector<float> m_modeBlockGains;
    std::vector<float> m_modeBlockMCs;
    std::vector<float> m_modeBlockLims;
 
    std::mutex m_modeBlockMutex;
+
+   mx::fits::fitsFile<float> m_ff;
 
 public:
    /// Default c'tor.
@@ -172,6 +177,8 @@ public:
    virtual int appShutdown();
 
 protected:
+
+   int checkAOCalib(); ///< Test if the AO calib is accessible.
 
    int getAOCalib();
 
@@ -351,7 +358,7 @@ int userGainCtrl::appStartup()
       return log<software_error,-1>({__FILE__, __LINE__});
    }
   
-   state(stateCodes::OPERATING);
+   state(stateCodes::NODEVICE);
     
    return 0;
 }
@@ -374,20 +381,41 @@ int userGainCtrl::appLogic()
       return log<software_error,-1>({__FILE__,__LINE__});
    }
 
-   //These could change if a new calibration is loaded
-   if(getAOCalib() < 0 )
+   if(checkAOCalib() < 0)
    {
-      state(stateCodes::ERROR, true);
-      if(!stateLogged()) log<text_log>("Could not get AO calib", logPrio::LOG_ERROR);
-      return 0;
+      state(stateCodes::NODEVICE);
+      if(!stateLogged()) log<text_log>("Could not find AO calib");
+   }
+   else 
+   {
+      if(!(state() == stateCodes::READY || state() == stateCodes::OPERATING)) state(stateCodes::NOTCONNECTED);
    }
 
-   //These could change if a new calibration is loaded
-   if(getModeBlocks() < 0 )
+   if( state() == stateCodes::READY || state() == stateCodes::OPERATING || state() == stateCodes::CONNECTED || state() == stateCodes::NOTCONNECTED  )
    {
-      state(stateCodes::ERROR, true);
-      if(!stateLogged()) log<text_log>("Could not get mode blocks", logPrio::LOG_ERROR);
-      return 0;
+
+      //Now we go on:
+
+      //These could change if a new calibration is loaded
+      if(getAOCalib() < 0 )
+      {
+         state(stateCodes::NOTCONNECTED);
+         if(!stateLogged()) log<text_log>("Error getting AO calib", logPrio::LOG_ERROR);
+         return 0;
+      }
+
+      //These could change if a new calibration is loaded
+      if(getModeBlocks() < 0 )
+      {
+         state(stateCodes::NOTCONNECTED);
+         if(!stateLogged()) log<text_log>("Could not get mode blocks", logPrio::LOG_ERROR);
+         return 0;
+      }
+
+      if(state() == stateCodes::NOTCONNECTED) state(stateCodes::CONNECTED);
+      if(state() == stateCodes::CONNECTED) state(stateCodes::READY);
+      if(state() == stateCodes::READY) state(stateCodes::OPERATING); //we just progress all the way through to operating so shmimMonitor will go.
+
    }
 
    std::unique_lock<std::mutex> lock(m_indiMutex);
@@ -436,6 +464,34 @@ int userGainCtrl::appShutdown()
 }
 
 inline
+int userGainCtrl::checkAOCalib()
+{
+   std::string calsrc = "/milk/shm/aol" + std::to_string(m_loopNumber) + "_calib_source.txt";
+
+   std::ifstream fin;
+   //First read in the milk/shm directory name, which could be to a symlinked directory
+   fin.open(calsrc);
+   if(!fin)
+   {
+      return -1;
+   }
+   fin >> calsrc;
+   fin.close();
+
+   //Now read in the actual directory
+   calsrc += "/aol" +  std::to_string(m_loopNumber) + "_calib_dir.txt";
+   fin.open(calsrc);
+   if(!fin)
+   {
+      return -1;
+   }
+   fin >> m_aoCalDir;
+   fin.close();
+
+   return 0;
+}
+
+inline
 int userGainCtrl::getAOCalib()
 {
    std::string calsrc = "/milk/shm/aol" + std::to_string(m_loopNumber) + "_calib_source.txt";
@@ -445,7 +501,7 @@ int userGainCtrl::getAOCalib()
    fin.open(calsrc);
    if(!fin)
    {
-      return log<software_error, -1>({__FILE__, __LINE__, errno, "userGainCtrl::getAOCalib failed to open: " + calsrc});
+      return 0; //this can happen if cacao not started up, etc.
    }
    fin >> calsrc;
    fin.close();
@@ -484,6 +540,39 @@ int userGainCtrl::getAOCalib()
    }
    fin.close();
    
+   //Now get number of modes from the modesWFS file
+   calsrc = m_aoCalDir + "/aol" + std::to_string(m_loopNumber) + "_modesWFS.fits";
+   
+   m_ff.open(calsrc);
+
+   int totalNModes = m_ff.naxes(2);
+
+   m_ff.close();
+
+   //Is this a change?
+   if(totalNModes != m_totalNModes)
+   {
+      log<text_log>("Found " + std::to_string(totalNModes) + " total modes in calib.");
+   }
+
+   m_totalNModes = totalNModes;
+
+   //Now we check if this matches the shared-memory.  If not, this would mean that the cal changed and the shmims did not
+   static bool mmlog = false; //log once per occurrence.  this could go on for a long time until mfilt is started.
+   ///\todo this can fail if it never compares as equal but shmimMonitors are connected.  shmimMonitor needs a "connected" flag.
+   if(m_totalNModes != (int) shmimMonitorT::m_width || m_totalNModes != (int) mcShmimMonitorT::m_width || m_totalNModes != (int) limitShmimMonitorT::m_width)
+   {
+      if(!mmlog) 
+      {
+         log<text_log>("Detected calib and gain shmim mismatch, reconnecting shmim.");
+      
+         shmimMonitorT::m_restart = true;
+         mcShmimMonitorT::m_restart = true;
+         limitShmimMonitorT::m_restart = true;
+      }
+      mmlog = true;
+   }   
+   else mmlog = false; //reset for next time
 
    return 0;
 }
@@ -499,12 +588,22 @@ int userGainCtrl::getModeBlocks()
       log<text_log>("no mode blocks found", logPrio::LOG_WARNING);
    }
 
-   size_t Nb = blocks.size();
+   std::ifstream fin;
+
+   fin.open(m_aoCalDir + "/aol" + std::to_string(m_loopNumber) + "_NBmodeblocks.txt");
+   if( !fin )
+   {
+      return log<software_error, -1>({__FILE__, __LINE__, errno, "userGainCtrl::getModeBlocks failed to open: NBmodeblocks.txt"});
+   }
+
+   size_t Nb;
+   fin >> Nb;
+
+   fin.close();
 
    std::vector<int> modeBlockStart(Nb);
    std::vector<int> modeBlockN(Nb);
 
-   std::ifstream fin;
    
    for(size_t n =0; n < Nb; ++n)
    {
@@ -533,6 +632,21 @@ int userGainCtrl::getModeBlocks()
       }
    }
 
+   if(modeBlockStart.back() + modeBlockN.back() > m_totalNModes)
+   {
+      return log<software_error, -1>({__FILE__, __LINE__, errno, "userGainCtrl::getModeBlocks too many modes in blocks compared to WFSmodes"});
+   }
+   else if(modeBlockStart.back() + modeBlockN.back() < m_totalNModes)
+   {
+      int st0 = modeBlockStart.back();
+      int N0 = modeBlockN.back();
+
+      modeBlockStart.push_back(st0 + N0);
+      modeBlockN.push_back(m_totalNModes - (st0+N0));
+      ++Nb;
+
+   }
+
    //now detect changes.
    bool changed = false;
    if(m_modeBlockStart.size() != Nb || m_modeBlockN.size() != Nb || m_modeBlockGains.size() != Nb || m_modeBlockMCs.size() != Nb || m_modeBlockLims.size() != Nb)
@@ -553,6 +667,13 @@ int userGainCtrl::getModeBlocks()
 
    if(changed)
    {
+      state(stateCodes::READY);
+      log<text_log>("loading new gain block structure");
+
+      shmimMonitorT::m_restart = true;
+      mcShmimMonitorT::m_restart = true;
+      limitShmimMonitorT::m_restart = true;
+
       std::unique_lock<std::mutex> lock(m_modeBlockMutex);
       m_modeBlockStart.resize(Nb);
       m_modeBlockN.resize(Nb);

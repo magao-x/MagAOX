@@ -1,0 +1,16 @@
+namespace MagAOX.logger;
+
+table Telem_fgtimings_fb
+{
+   atime:double;
+   atime_jitter:double;
+
+   wtime:double;
+   wtime_jitter:double;
+   
+   wmatime:double;
+   wmatime_jitter:double;
+}
+
+root_type Telem_fgtimings_fb;
+

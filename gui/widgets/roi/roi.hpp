@@ -55,7 +55,7 @@ protected:
 public:
    roi( std::string & camName,
         QWidget * Parent = 0, 
-        Qt::WindowFlags f = 0
+        Qt::WindowFlags f = Qt::WindowFlags()
       );
    
    ~roi();
@@ -364,7 +364,7 @@ void roi::handleSetProperty( const pcf::IndiProperty & ipRecv)
 
 void roi::updateGUI()
 {
-   if( m_appState != "READY" && m_appState != "OPERATING" )
+   if( m_appState != "READY" && m_appState != "OPERATING" && m_appState != "CONFIGURING" )
    {
       //Disable & zero all
       ui.lab_bin_x_title->setEnabled(false);
@@ -428,10 +428,8 @@ void roi::updateGUI()
    }
    
    
-   if( m_appState == "READY" || m_appState == "OPERATING" )
+   if( m_appState == "READY" || m_appState == "OPERATING" || m_appState == "CONFIGURING" )
    {
-      //Enable values, but not buttons   
-      //Update values  
       ui.lab_bin_x_title->setEnabled(true);
       ui.lab_bin_x_curr->setEnabled(true);
       ui.lab_bin_x_tgt->setEnabled(true);
@@ -473,10 +471,19 @@ void roi::updateGUI()
          ui.val_bin_x->setTextChanged(QString::number(m_bin_x_curr));
          m_bin_x_curr_changed = false;
       }
+      else
+      {
+         ui.val_bin_x->setText(QString::number(m_bin_x_curr));
+      }
+
       if(m_bin_x_tgt_changed)
       {
          ui.le_bin_x->setTextChanged(QString::number(m_bin_x_tgt));
          m_bin_x_tgt_changed = false;
+      }
+      else 
+      {
+         ui.le_bin_x->setText(QString::number(m_bin_x_tgt));
       }
 
       if(m_bin_y_curr_changed)
@@ -484,10 +491,19 @@ void roi::updateGUI()
          ui.val_bin_y->setTextChanged(QString::number(m_bin_y_curr));
          m_bin_y_curr_changed = false;
       }
+      else
+      {
+         ui.val_bin_y->setText(QString::number(m_bin_y_curr));
+      }
+
       if(m_bin_y_tgt_changed)
       {
          ui.le_bin_y->setTextChanged(QString::number(m_bin_y_tgt));
          m_bin_y_tgt_changed = false;
+      }
+      else
+      {
+         ui.le_bin_y->setText(QString::number(m_bin_y_tgt));
       }
 
       if(m_cen_x_curr_changed)
@@ -495,10 +511,19 @@ void roi::updateGUI()
          ui.val_center_x->setTextChanged(QString::number(m_cen_x_curr));
          m_cen_x_curr_changed = false;
       }
+      else
+      {
+         ui.val_center_x->setText(QString::number(m_cen_x_curr));
+      }
+
       if(m_cen_x_tgt_changed)
       {
          ui.le_center_x->setTextChanged(QString::number(m_cen_x_tgt));
          m_cen_x_tgt_changed = false;
+      }
+      else
+      {
+         ui.le_center_x->setText(QString::number(m_cen_x_tgt));
       }
 
       if(m_cen_y_curr_changed)
@@ -506,10 +531,19 @@ void roi::updateGUI()
          ui.val_center_y->setTextChanged(QString::number(m_cen_y_curr));
          m_cen_y_curr_changed = false;
       }
+      else
+      {
+         ui.val_center_y->setText(QString::number(m_cen_y_curr));
+      }
+
       if(m_cen_y_tgt_changed)
       {
          ui.le_center_y->setTextChanged(QString::number(m_cen_y_tgt));
          m_cen_y_tgt_changed = false;
+      }
+      else
+      {
+         ui.le_center_y->setText(QString::number(m_cen_y_tgt));
       }
 
       if(m_wid_curr_changed)
@@ -517,10 +551,19 @@ void roi::updateGUI()
          ui.val_width->setTextChanged(QString::number(m_wid_curr));
          m_wid_curr_changed = false;
       }
+      else
+      {
+         ui.val_width->setText(QString::number(m_wid_curr));
+      }
+
       if(m_wid_tgt_changed)
       {
          ui.le_width->setTextChanged(QString::number(m_wid_tgt));
          m_wid_tgt_changed = false;
+      }
+      else
+      {
+         ui.le_width->setText(QString::number(m_wid_tgt));
       }
 
       if(m_hgt_curr_changed)
@@ -528,14 +571,23 @@ void roi::updateGUI()
          ui.val_height->setTextChanged(QString::number(m_hgt_curr));
          m_hgt_curr_changed = false;
       }
+      else
+      {
+         ui.val_height->setText(QString::number(m_hgt_curr));
+      }
+
       if(m_hgt_tgt_changed)
       {
          ui.le_height->setTextChanged(QString::number(m_hgt_tgt));
          m_hgt_tgt_changed = false;
       }
+      else
+      {
+         ui.le_height->setText(QString::number(m_hgt_tgt));
+      }
    }
    
-   if( m_appState == "OPERATING" )
+   if( m_appState == "OPERATING" ||  m_appState == "READY")
    {
       //Enable buttons too   
       ui.button_reset->setEnabled(true);
@@ -548,6 +600,18 @@ void roi::updateGUI()
       ui.button_default->setEnabled(true);
 
       return;
+   }
+   else  //configuring
+   {
+      //Disable buttons while configuring
+      ui.button_reset->setEnabled(false);
+      ui.button_loadlast->setEnabled(false);
+      ui.button_check->setEnabled(false);
+      ui.button_set->setEnabled(false);
+      ui.button_last->setEnabled(false);
+      ui.button_fullbin->setEnabled(false);
+      ui.button_full->setEnabled(false);
+      ui.button_default->setEnabled(false);
    }
 
 } //updateGUI()

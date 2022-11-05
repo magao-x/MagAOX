@@ -63,7 +63,7 @@ int parseSystemSerial( std::vector<int> & address,
       size_t ed = response.find_first_of("\n@", sp);
       if(ed == std::string::npos) ed = response.size();
       
-      if(ed-sp-1 != 5)
+      if(ed-sp-1 > 6)
       {
          return ZUTILS_E_SERIALSIZE;
       }
