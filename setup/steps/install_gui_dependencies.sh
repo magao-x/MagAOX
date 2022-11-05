@@ -7,6 +7,7 @@ source /etc/os-release
 if [[ $ID == ubuntu ]]; then
     sudo apt install -y \
         x11-apps \
+        libgl-dev \
     ;
 elif [[ $ID == centos && $VERSION_ID == 7 ]]; then
     sudo yum install -y \

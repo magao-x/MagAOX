@@ -56,7 +56,6 @@ protected:
    
    std::string m_deviceAddr {"localhost"}; ///< The IP address or resolvable name of the TCS.
    int m_devicePort {5811}; ///< The IP port for TCS communications. Should be the command port.  Default is 5811
-   
    int m_seeingInterval {2};
    
    bool m_labMode {true};
@@ -69,6 +68,12 @@ protected:
    ///Mutex for locking INDI communications.
    std::mutex m_tcsMutex;
    
+   //Telescope time:
+   double m_telST {0};
+
+   pcf::IndiProperty m_indiP_teltime;
+
+
    //Telescope position:
    double m_telEpoch {0};
    double m_telRA {0};
@@ -213,6 +218,7 @@ public:
    
    //The "dump" commands:
    
+   int getTelTime();
    int getTelPos();
    int getTelData();
    int getCatData();
@@ -253,7 +259,7 @@ public:
    
    ///@}
    
-   int m_loopState = 0;
+   int m_loopState {0};
    pcf::IndiProperty m_indiP_loopState; ///< Property used to report the loop state
    
    INDI_SETCALLBACK_DECL(tcsInterface, m_indiP_loopState);
@@ -285,6 +291,8 @@ public:
    int m_acqZdSign {-1};
    float m_acqAz0 {18.5};
    float m_acqEl0 {10};
+   float m_acqFocus{1400};
+
    int acquireFromGuider();
    
    pcf::IndiProperty m_indiP_acqFromGuider; ///< Property used to request a pyramid nudge
@@ -483,7 +491,8 @@ int tcsInterface::loadConfigImpl( mx::app::appConfigurator & _config )
    _config(m_acqZdSign, "acqFromGuider.zdSign");
    _config(m_acqAz0, "acqFromGuider.az0");
    _config(m_acqEl0, "acqFromGuider.el0");
-   
+   _config(m_acqFocus, "acqFromGuider.focus");
+
    _config(m_offlTT_avgInt, "offload.TT_avgInt");
    _config(m_offlTT_gain, "offload.TT_gain");
    _config(m_offlTT_thresh, "offload.TT_thresh");
@@ -528,6 +537,11 @@ void tcsInterface::loadConfig()
 inline
 int tcsInterface::appStartup()
 {
+   createROIndiNumber( m_indiP_teltime, "teltime", "Telscope Time", "TCS");
+   indi::addNumberElement<double>( m_indiP_teltime, "sidereal_time", 0, std::numeric_limits<double>::max(), 0, "%0.6f");
+   m_indiP_teltime["sidereal_time"] = m_telST;
+   registerIndiPropertyReadOnly(m_indiP_teltime);
+
    createROIndiNumber( m_indiP_telpos, "telpos", "Telscope Position", "TCS");
    indi::addNumberElement<double>( m_indiP_telpos, "epoch", 0, std::numeric_limits<double>::max(), 0, "%0.6f");
    m_indiP_telpos["epoch"] = m_telEpoch;
@@ -777,7 +791,7 @@ int tcsInterface::appStartup()
    }
    
    //Get the loop state for managing offloading
-   REG_INDI_SETPROP(m_indiP_loopState, "aoloop", "loopState");
+   REG_INDI_SETPROP(m_indiP_loopState, "holoop", "loop_state");
    
    
    m_offloadRequests.resize(5);
@@ -808,14 +822,16 @@ int tcsInterface::appLogic()
    {
       int rv = m_sock.serialInit(m_deviceAddr.c_str(), m_devicePort);
 
-      if(rv == 0)
+      if(rv != 0)
       {
-         log<text_log>("In state ERROR, not due to loss of connection.  Can not go on.", logPrio::LOG_CRITICAL);
-         return -1;
+         state(stateCodes::NOTCONNECTED);
+         log<text_log>("In state ERROR, connection lost, will retry.", logPrio::LOG_ERROR);
+         return 0;
       }
       
-      state(stateCodes::NOTCONNECTED);
-      return 0;
+      log<text_log>("In state ERROR, but connected.  Trying to continue.", logPrio::LOG_WARNING);
+
+      state(stateCodes::CONNECTED);
    }
    
    if( state() == stateCodes::NOTCONNECTED )
@@ -863,41 +879,42 @@ int tcsInterface::appLogic()
    {
       std::string response;
       
+      //If any of these are unsuccesful we go around without recording data.
+      if(getTelTime() < 0)
+      {
+         return 0; //app state will be set based on what the error was
+      }
+
       if(getTelPos() < 0)
       {
-         log<text_log>("Error from getTelPos", logPrio::LOG_ERROR);
          return 0; //app state will be set based on what the error was
       }
       
       if(getTelData() < 0)
       {
-         log<text_log>("Error from getTelData", logPrio::LOG_ERROR);
          return 0;
       }
       
       if(getCatData() < 0)
       {
-         log<text_log>("Error from getCatData", logPrio::LOG_ERROR);
          return 0;
       }
       
       if(getVaneData() < 0)
       {
-         log<text_log>("Error from getVaneData", logPrio::LOG_ERROR);
          return 0;
       }
       
       if(getEnvData() < 0)
       {
-         log<text_log>("Error from getEnvData", logPrio::LOG_ERROR);
          return 0;
       }
       
-      if(getSeeing() < 0)
+
+      /*if(getSeeing() < 0)
       {
-         log<text_log>("Error from getSeeing", logPrio::LOG_ERROR);
          return 0;
-      }
+      }*/
       
       telemeter<tcsInterface>::appLogic();
       
@@ -958,7 +975,7 @@ int tcsInterface::getMagTelStatus( std::string & response,
       return 0;
    }
    
-   stat = m_sock.serialInString(answer, 512, 1000, '\n');
+   stat = m_sock.serialInString(answer, 512, m_readTimeout, '\n');
    
    if(stat <= 0)
    {
@@ -1108,6 +1125,48 @@ int tcsInterface::parse_xms( double &x,
 }
 
 inline
+int tcsInterface::getTelTime()
+{
+   double  h,m,s;
+
+   std::vector<std::string> pdat;
+   std::string posstr;
+   
+   if(getMagTelStatus( posstr, "datetime") < 0)
+   {
+      state(stateCodes::NOTCONNECTED);
+      log<text_log>("Error getting telescope position (telpos)", logPrio::LOG_ERROR);
+      return -1;
+   }
+
+   pdat = parse_teldata(posstr);
+
+   if(pdat[0] == "-1")
+   {
+      state(stateCodes::ERROR);
+      log<text_log>("Error getting telescope time (datetime): TCS returned -1", logPrio::LOG_WARNING);
+      return -1;
+   }
+
+   if(pdat.size() != 3)
+   {
+      state(stateCodes::ERROR);
+      log<text_log>("Error getting telescope position (datetime): TCS response wrong size, returned " + std::to_string(pdat.size()) + " values", logPrio::LOG_WARNING);
+      return -1;
+   }
+
+   if(parse_xms(h,m,s,pdat[2]) != 0)
+   {
+      log<text_log>("Error parsing telescope ST", logPrio::LOG_WARNING);
+      return -1;
+   }
+
+   m_telST = (h + m/60. + s/3600.);
+
+   return 0;
+}//int tcsInterface::getTelTime()
+
+inline
 int tcsInterface::getTelPos()
 {
    double  h,m,s;
@@ -1127,20 +1186,20 @@ int tcsInterface::getTelPos()
    if(pdat[0] == "-1")
    {
       state(stateCodes::ERROR);
-      log<text_log>("Error getting telescope position (telpos): TCS returned -1", logPrio::LOG_ERROR);
+      log<text_log>("Error getting telescope position (telpos): TCS returned -1", logPrio::LOG_WARNING);
       return -1;
    }
 
    if(pdat.size() != 6)
    {
       state(stateCodes::ERROR);
-      log<text_log>("Error getting telescope position (telpos): TCS response wrong size", logPrio::LOG_ERROR);
+      log<text_log>("Error getting telescope position (telpos): TCS response wrong size, returned " + std::to_string(pdat.size()) +  " values", logPrio::LOG_WARNING);
       return -1;
    }
 
    if(parse_xms(h,m,s,pdat[0]) != 0)
    {
-      log<text_log>("Error parsing telescope RA", logPrio::LOG_ERROR);
+      log<text_log>("Error parsing telescope RA", logPrio::LOG_WARNING);
       return -1;
    }
 
@@ -1148,19 +1207,19 @@ int tcsInterface::getTelPos()
 
    if(parse_xms(h,m,s,pdat[1]) != 0)
    {
-      log<text_log>("Error parsing telescope Dec", logPrio::LOG_ERROR);
+      log<text_log>("Error parsing telescope Dec", logPrio::LOG_WARNING);
       return -1;
    }
    
    m_telDec = h + m/60. + s/3600.;
 
-   m_telEl = strtod(pdat[1].c_str(),0);// * 3600.;
+   //m_telEl = strtod(pdat[1].c_str(),0);// * 3600.;
 
    m_telEpoch = strtod(pdat[2].c_str(),0);
 
    if(parse_xms( h, m, s, pdat[3]) != 0)
    {
-      log<text_log>("Error parsing telescope HA", logPrio::LOG_ERROR);
+      log<text_log>("Error parsing telescope HA", logPrio::LOG_WARNING);
       return -1;
    }
 
@@ -1198,14 +1257,14 @@ int tcsInterface::getTelData()
    if(tdat[0] == "-1")
    {
       state(stateCodes::ERROR);
-      log<text_log>("Error getting telescope data (teldata): TCS returned -1", logPrio::LOG_ERROR);
+      log<text_log>("Error getting telescope data (teldata): TCS returned -1", logPrio::LOG_WARNING);
       return -1;
    }
 
    if(tdat.size() != 10)
    {
       state(stateCodes::ERROR);
-      log<text_log>("[TCS] Error getting telescope data (teldata): TCS response wrong size", logPrio::LOG_ERROR);
+      log<text_log>("[TCS] Error getting telescope data (teldata): TCS response wrong size, returned " + std::to_string(tdat.size()) +  " values", logPrio::LOG_WARNING);
       return -1;
    }
 
@@ -1268,14 +1327,14 @@ int tcsInterface::getCatData()
    if(cdat[0] == "-1")
    {
       state(stateCodes::ERROR);
-      log<text_log>("Error getting catalog data (catdata): TCS returned -1", logPrio::LOG_ERROR);
+      log<text_log>("Error getting catalog data (catdata): TCS returned -1", logPrio::LOG_WARNING);
       return -1;
    }
 
    if(cdat.size() != 6)
    {
       //This can occur if no target selected by operator
-      log<text_log>("Catalog data (catdata): TCS response wrong size", logPrio::LOG_WARNING);
+      log<text_log>("Catalog data (catdata): TCS response wrong size, returned " + std::to_string(cdat.size()) +  " values", logPrio::LOG_WARNING);
       m_catRA = 0;
    
       m_catDec = 0;
@@ -1293,7 +1352,7 @@ int tcsInterface::getCatData()
 
    if(parse_xms(h,m,s,cdat[0]) != 0)
    {
-      log<text_log>("Error parsing catalog RA", logPrio::LOG_ERROR);
+      log<text_log>("Error parsing catalog RA", logPrio::LOG_WARNING);
       return -1;
    }
 
@@ -1301,7 +1360,7 @@ int tcsInterface::getCatData()
    
    if(parse_xms(h,m,s,  cdat[1] ) != 0)
    {
-      log<text_log>("Error parsing catalog Dec", logPrio::LOG_ERROR);
+      log<text_log>("Error parsing catalog Dec", logPrio::LOG_WARNING);
       return -1;
    }
    
@@ -1336,14 +1395,14 @@ int tcsInterface::getVaneData()
    if(vedat[0] == "-1")
    {
       state(stateCodes::ERROR);
-      log<text_log>("Error getting telescope secondary positions (vedata): TCS returned -1",logPrio::LOG_ERROR);
+      log<text_log>("Error getting telescope secondary positions (vedata): TCS returned -1",logPrio::LOG_WARNING);
       return -1;
    }
 
    if(vedat.size() != 10)
    {
       state(stateCodes::ERROR);
-      log<text_log>("Error getting telescope secondary positions (vedata): TCS response wrong size",logPrio::LOG_ERROR);
+      log<text_log>("Error getting telescope secondary positions (vedata): TCS response wrong size, returned " + std::to_string(vedat.size()) +  " values",logPrio::LOG_WARNING);
       return -1;
    }
 
@@ -1385,14 +1444,14 @@ int tcsInterface::getEnvData()
    if(edat[0] == "-1")
    {
       state(stateCodes::NOTCONNECTED);
-      log<text_log>("Error getting telescope environment data (telenv): TCS returned -1",logPrio::LOG_ERROR);
+      log<text_log>("Error getting telescope environment data (telenv): TCS returned -1",logPrio::LOG_WARNING);
       return -1;
    }
    
    if(edat.size() != 10)
    {
       state(stateCodes::NOTCONNECTED);
-      log<text_log>("Error getting telescope environment data (telenv): TCS response wrong size",logPrio::LOG_ERROR);
+      log<text_log>("Error getting telescope environment data (telenv): TCS response wrong size, returned " + std::to_string(edat.size()) +  "values",logPrio::LOG_WARNING);
       return -1;      
    }
 
@@ -1563,7 +1622,36 @@ int tcsInterface::getSeeing()
 inline
 int tcsInterface::updateINDI()
 {
-   
+   try
+   {
+      m_indiP_teltime["sidereal_time"] = m_telST;
+   }
+   catch(...)
+   {
+      log<software_error>({__FILE__,__LINE__,"INDI library exception"});
+      return -1;
+   }
+
+   try
+   {
+      m_indiP_teltime.setState(INDI_OK);
+   }
+   catch(...)
+   {
+      log<software_error>({__FILE__,__LINE__,"INDI library exception"});
+      return -1;
+   }
+
+   try
+   {
+      m_indiDriver->sendSetProperty(m_indiP_teltime);
+   }
+   catch(...)
+   {
+      log<software_error>({__FILE__,__LINE__,"INDI library exception"});
+      return -1;
+   }
+
    try
    {
       m_indiP_telpos["epoch"] = m_telEpoch;
@@ -1836,7 +1924,7 @@ int tcsInterface::updateINDI()
    {
       if(m_offlTT_dump)
       {
-         updateSwitchIfChanged(m_indiP_offlTTdump, "request", pcf::IndiElement::On, INDI_BUSY);
+         updateSwitchIfChanged(m_indiP_offlTTdump, "request", pcf::IndiElement::On, INDI_OK);
       }
       else
       {
@@ -1845,7 +1933,7 @@ int tcsInterface::updateINDI()
       
       if(m_offlTT_enabled)
       {
-         updateSwitchIfChanged(m_indiP_offlTTenable, "toggle", pcf::IndiElement::On, INDI_BUSY);
+         updateSwitchIfChanged(m_indiP_offlTTenable, "toggle", pcf::IndiElement::On, INDI_OK);
       }
       else
       {
@@ -1867,7 +1955,7 @@ int tcsInterface::updateINDI()
    {
       if(m_offlF_dump)
       {
-         updateSwitchIfChanged(m_indiP_offlFdump, "request", pcf::IndiElement::On, INDI_BUSY);
+         updateSwitchIfChanged(m_indiP_offlFdump, "request", pcf::IndiElement::On, INDI_OK);
       }
       else
       {
@@ -1876,7 +1964,7 @@ int tcsInterface::updateINDI()
       
       if(m_offlF_enabled)
       {
-         updateSwitchIfChanged(m_indiP_offlFenable, "toggle", pcf::IndiElement::On, INDI_BUSY);
+         updateSwitchIfChanged(m_indiP_offlFenable, "toggle", pcf::IndiElement::On, INDI_OK);
       }
       else
       {
@@ -2210,7 +2298,7 @@ int tcsInterface::sendPyrNudge( float x,
 
       ///\todo need logtypes for nudges and offloads
       log<text_log>(std::string("[PYRNUDGE] ")  + ttstr, logPrio::LOG_NOTICE);
-      if(sendMagTelCommand(ttstr, 1000) < 0)
+      if(sendMagTelCommand(ttstr, m_readTimeout) < 0)
       {
          log<software_error>({__FILE__,__LINE__, std::string("error sending command: ") + ttstr});
          return -1;
@@ -2223,7 +2311,7 @@ int tcsInterface::sendPyrNudge( float x,
       snprintf(ttstr, sizeof(ttstr) , "zimr %f", z*m_pyrNudge_F_sign);
 
       log<text_log>(std::string("[PYRNUDGE] ") + ttstr, logPrio::LOG_NOTICE);
-      if(sendMagTelCommand(ttstr, 1000) < 0)
+      if(sendMagTelCommand(ttstr, m_readTimeout) < 0)
       {
          log<software_error>({__FILE__,__LINE__, std::string("error sending command: ") + ttstr});
          return -1;
@@ -2247,12 +2335,22 @@ int tcsInterface::acquireFromGuider()
 
    ///\todo need logtypes for nudges and offloads
    log<text_log>(std::string("[ACQUIRE] ")  + ttstr, logPrio::LOG_NOTICE);
-   if(sendMagTelCommand(ttstr, 1000) < 0)
+   if(sendMagTelCommand(ttstr, m_readTimeout) < 0)
    {
       log<software_error>({__FILE__,__LINE__, std::string("error sending command: ") + ttstr});
       return -1;
    }
       
+   float z = m_acqFocus;
+   snprintf(ttstr, sizeof(ttstr) , "zimr %f", z*m_pyrNudge_F_sign);
+
+   log<text_log>(std::string("[ACQUIRE] ") + ttstr, logPrio::LOG_NOTICE);
+   if(sendMagTelCommand(ttstr, m_readTimeout) < 0)
+   {
+      log<software_error>({__FILE__,__LINE__, std::string("error sending command: ") + ttstr});
+      return -1;
+   }
+
    return 0;
 }
 
@@ -2458,7 +2556,7 @@ int tcsInterface::sendTToffload( float tt_0,
 
    log<text_log>(std::string("[OFFL] sending: ") + ttstr);
    
-   return sendMagTelCommand(ttstr, 1000);
+   return sendMagTelCommand(ttstr, m_readTimeout);
 }
 
 int tcsInterface::doFoffload( float F_0 )
@@ -2502,7 +2600,7 @@ int tcsInterface::sendFoffload( float F_0 )
    
    log<text_log>(std::string("[OFFL] sending: ") + fstr);
    
-   return sendMagTelCommand(fstr, 1000);
+   return sendMagTelCommand(fstr, m_readTimeout);
 }
 
 INDI_NEWCALLBACK_DEFN(tcsInterface, m_indiP_pyrNudge)(const pcf::IndiProperty &ipRecv)
@@ -2560,12 +2658,24 @@ INDI_NEWCALLBACK_DEFN(tcsInterface, m_indiP_acqFromGuider)(const pcf::IndiProper
 
 INDI_SETCALLBACK_DEFN(tcsInterface, m_indiP_loopState)(const pcf::IndiProperty &ipRecv)
 {
-   std::string state = ipRecv["state"].get();
-   
-   if(state == "open") m_loopState = 0;
-   else if(state == "paused") m_loopState = 1;
-   else m_loopState = 2;
-   
+   if(ipRecv.getName() != m_indiP_loopState.getName())
+   {
+      return log<software_error>({__FILE__,__LINE__, "wrong INDI property received"});
+   }
+
+   if(!ipRecv.find("toggle")) return 0;
+
+   if(ipRecv["toggle"].getSwitchState() == pcf::IndiElement::On)
+   {
+      std::cerr << "on\n";
+      m_loopState = 2;
+   }
+   else
+   {
+      std::cerr << "off\n";
+      m_loopState = 0;
+   }
+
    return 0;
 }
 
@@ -2626,7 +2736,7 @@ INDI_NEWCALLBACK_DEFN(tcsInterface, m_indiP_offlTTenable)(const pcf::IndiPropert
    
    if( ipRecv["toggle"].getSwitchState() == pcf::IndiElement::On && m_offlTT_enabled == false)
    {
-      updateSwitchIfChanged(m_indiP_offlTTenable, "toggle", pcf::IndiElement::On, INDI_BUSY);
+      updateSwitchIfChanged(m_indiP_offlTTenable, "toggle", pcf::IndiElement::On, INDI_OK);
     
       m_offlTT_enabled = true;
    }
@@ -2653,7 +2763,7 @@ INDI_NEWCALLBACK_DEFN(tcsInterface, m_indiP_offlTTdump)(const pcf::IndiProperty 
    
    if( ipRecv["request"].getSwitchState() == pcf::IndiElement::On)
    {
-      updateSwitchIfChanged(m_indiP_offlTTdump, "request", pcf::IndiElement::On, INDI_BUSY);
+      updateSwitchIfChanged(m_indiP_offlTTdump, "request", pcf::IndiElement::On, INDI_OK);
     
       m_offlTT_dump = true;
    }
@@ -2720,7 +2830,7 @@ INDI_NEWCALLBACK_DEFN(tcsInterface, m_indiP_offlFenable)(const pcf::IndiProperty
    
    if( ipRecv["toggle"].getSwitchState() == pcf::IndiElement::On && m_offlF_enabled == false)
    {
-      updateSwitchIfChanged(m_indiP_offlFenable, "toggle", pcf::IndiElement::On, INDI_BUSY);
+      updateSwitchIfChanged(m_indiP_offlFenable, "toggle", pcf::IndiElement::On, INDI_OK);
     
       m_offlF_enabled = true;
    }
@@ -2747,7 +2857,7 @@ INDI_NEWCALLBACK_DEFN(tcsInterface, m_indiP_offlFdump)(const pcf::IndiProperty &
    
    if( ipRecv["request"].getSwitchState() == pcf::IndiElement::On)
    {
-      updateSwitchIfChanged(m_indiP_offlFdump, "request", pcf::IndiElement::On, INDI_BUSY);
+      updateSwitchIfChanged(m_indiP_offlFdump, "request", pcf::IndiElement::On, INDI_OK);
     
       m_offlF_dump = true;
    }

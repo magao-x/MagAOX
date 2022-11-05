@@ -28,6 +28,8 @@ struct saving_start : public saving_state_change
    ///The default level
    static const flatlogs::logPrioT defaultLevel = flatlogs::logPrio::LOG_NOTICE;
 
+   
+
 };
 
 

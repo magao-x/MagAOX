@@ -19,6 +19,7 @@ class PredictiveController{
 		int m_num_future;
 		int m_num_modes;
 		int m_num_measurements;
+		int m_num_actuators;
 
 		float m_gamma;
 		float* m_lambda;
@@ -30,8 +31,11 @@ class PredictiveController{
 		Matrix* m_wfs_measurement;	// contains the new wavefront sensor measurement
 		 		// contains the new wfs measurement in modal space
 		Matrix* m_exploration_signal;
-		Matrix* m_command;	
+		Matrix* m_command;
+		Matrix* m_voltages;	
 		Matrix* m_interaction_matrix;
+		Matrix* m_mode_mapping_matrix;
+
 		Matrix* m_exploration_buffer;
 
 	protected:
@@ -42,7 +46,7 @@ class PredictiveController{
 		
 		Matrix* m_measurement;
 		
-		PredictiveController(int num_history, int num_future, int num_modes, int num_measurements, float gamma, float lambda, float P0);
+		PredictiveController(int num_history, int num_future, int num_modes, int num_measurements, float gamma, float lambda, float P0, int num_actuators);
 		~PredictiveController();
 
 		// Just direct function wrappers
@@ -60,9 +64,15 @@ class PredictiveController{
 
 		// New wrapper functions
 		void set_new_regularization(float new_lambda);
+		void set_new_gamma(float new_gamma);
+		
 		void set_interaction_matrix(float* interaction_matrix);
+		void set_mapping_matrix(float* mapping_matrix);
 		void add_measurement(float* new_wfs_measurement);
 		float* get_command(float clip_val);
+
+		void save_state(std::string path);
+		void load_state(std::string path, std::string timestamp);
 		
 };
 

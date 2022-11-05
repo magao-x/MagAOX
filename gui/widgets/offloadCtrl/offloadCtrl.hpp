@@ -28,7 +28,9 @@ protected:
    int m_navg {0};
    
 public:
-   offloadCtrl( QWidget * Parent = 0, Qt::WindowFlags f = 0);
+   offloadCtrl( QWidget * Parent = 0, 
+                Qt::WindowFlags f = Qt::WindowFlags()
+              );
    
    ~offloadCtrl();
    
@@ -40,7 +42,10 @@ public:
 public slots:
    void updateGUI();
    
-   void on_t2w_enable_pressed();
+   //void on_t2w_enable_pressed();
+
+   void on_slider_t2wEnable_sliderReleased();
+
    void on_t2w_zero_pressed();
    
    void on_t2w_gain_minus_pressed();

@@ -10,8 +10,8 @@
 #define mzmqServer_hpp
 
 
-#include <ImageStruct.h>
-#include <ImageStreamIO.h>
+//#include <ImageStruct.h>
+//#include <ImageStreamIO.h>
 
 #include <milkzmqServer.hpp>
 

@@ -656,8 +656,8 @@ public:
    
    /// Create a standard R/W INDI switch with a single request element.
    /** This switch is intended to function like a momentary switch.
-     * 
-     * \returns 0 on success 
+     *
+     * \returns 0 on success
      * \returns -1 on error
      */ 
    int createStandardIndiRequestSw( pcf::IndiProperty & prop,       ///< [out] the property to create and setup
@@ -666,7 +666,21 @@ public:
                                     const std::string & group = ""  ///< [in] [optional] the group for this property
                                   );
    
-   /// Create a standard R/W INDI selection (one of many) switch with vector of elements
+   /// Create a standard R/W INDI selection (one of many) switch with vector of elements and element labels
+   /** This switch is intended to function like drop down menu.
+     *
+     * \returns 0 on success
+     * \returns -1 on error
+     */
+   int createStandardIndiSelectionSw( pcf::IndiProperty & prop,                  ///< [out] the property to create and setup
+                                      const std::string & name,                  ///< [in] the name of the property,
+                                      const std::vector<std::string> & elements, ///< [in] the element names to give to the switches
+                                      const std::vector<std::string> & elementLabels, ///< [in] the element labels to give to the switches
+                                      const std::string & label = "",            ///< [in] [optional] the GUI label suggestion for this property
+                                      const std::string & group = ""             ///< [in] [optional] the group for this property
+                                    );
+
+/// Create a standard R/W INDI selection (one of many) switch with vector of elements using the element strings as their own labels
    /** This switch is intended to function like drop down menu.
      * 
      * \returns 0 on success 
@@ -2084,7 +2098,7 @@ void MagAOXApp<_useINDI>::state( const stateCodes::stateCodeT & s,
    //Check to make sure INDI is up to date
    std::unique_lock<std::mutex> lock(m_indiMutex, std::try_to_lock);  //Lock the mutex before conducting INDI communications.
 
-   //Note this is called very execute loop to make sure we update eventually
+   //Note this is called every execute loop to make sure we update eventually
    if(lock.owns_lock())
    {  
       ///\todo move this to a function in stateCodes
@@ -2348,7 +2362,8 @@ int MagAOXApp<_useINDI>::createStandardIndiRequestSw( pcf::IndiProperty & prop,
 template<bool _useINDI>
 int MagAOXApp<_useINDI>::createStandardIndiSelectionSw( pcf::IndiProperty & prop,                  
                                                         const std::string & name,                  
-                                                        const std::vector<std::string> & elements, 
+                                                        const std::vector<std::string> & elements,
+                                                        const std::vector<std::string> & elementLabels,
                                                         const std::string & label,            
                                                         const std::string & group             
                                                       )
@@ -2368,7 +2383,9 @@ int MagAOXApp<_useINDI>::createStandardIndiSelectionSw( pcf::IndiProperty & prop
    //Add the toggle element initialized to Off
    for(size_t n=0; n < elements.size(); ++n)
    {
-      prop.add(pcf::IndiElement(elements[n], pcf::IndiElement::Off));
+      pcf::IndiElement elem = pcf::IndiElement(elements[n], pcf::IndiElement::Off);
+      elem.setLabel(elementLabels[n]);
+      prop.add(elem);
    }
    
    //Don't set "" just in case libcommon does something with defaults
@@ -2383,6 +2400,17 @@ int MagAOXApp<_useINDI>::createStandardIndiSelectionSw( pcf::IndiProperty & prop
    }
    
    return 0;
+}
+
+template<bool _useINDI>
+int MagAOXApp<_useINDI>::createStandardIndiSelectionSw( pcf::IndiProperty & prop,
+                                                        const std::string & name,
+                                                        const std::vector<std::string> & elements,
+                                                        const std::string & label,
+                                                        const std::string & group
+                                                      )
+{
+   return createStandardIndiSelectionSw(prop, name, elements, elements, label, group);
 }
 
 template<bool _useINDI>

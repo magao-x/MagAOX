@@ -341,7 +341,7 @@ INDI_NEWCALLBACK_DEFN(adcTracker, m_indiP_tracking)(const pcf::IndiProperty &ipR
    
    if( ipRecv["toggle"].getSwitchState() == pcf::IndiElement::On)
    {
-      updateSwitchIfChanged(m_indiP_tracking, "toggle", pcf::IndiElement::On, INDI_BUSY);
+      updateSwitchIfChanged(m_indiP_tracking, "toggle", pcf::IndiElement::On, INDI_IDLE);
       
       m_tracking = true;
       

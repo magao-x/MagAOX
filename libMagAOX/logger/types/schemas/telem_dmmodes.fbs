@@ -1,0 +1,9 @@
+namespace MagAOX.logger;
+
+table Telem_dmmodes_fb
+{
+   amps:[float];
+}
+
+root_type Telem_dmmodes_fb;
+

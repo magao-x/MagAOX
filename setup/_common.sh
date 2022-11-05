@@ -1,9 +1,24 @@
 #!/bin/bash
-if [[ "$SHELLOPTS" =~ "nounset" ]]; then
-  _WAS_NOUNSET=1
-else
-  _WAS_NOUNSET=0
+SETUPDIR="$( cd "$( dirname "${BASH_SOURCE[0]}" )" && pwd )"
+
+
+instrument_user=xsup
+instrument_group=magaox
+instrument_dev_group=magaox-dev
+if [[ $MAGAOX_ROLE == vm ]]; then
+  # Heuristic detection of which automatically created user account to use
+  # based on home directory existing.
+  if [[ -d /home/vagrant ]]; then
+    instrument_user=vagrant
+  elif [[ -d /home/ubuntu ]]; then
+    instrument_user=ubuntu
+    instrument_group=ubuntu
+    instrument_dev_group=ubuntu
+  else
+    instrument_user=$USER
+  fi
 fi
+
 function log_error() {
     echo -e "$(tput setaf 1 2>/dev/null)$1$(tput sgr0 2>/dev/null)"
 }
@@ -65,11 +80,17 @@ function _cached_fetch() {
   fi
 }
 
-if [[ -e /vagrant/windows_host.txt ]]; then
+VM_WINDOWS_HOST=0
+VM_SHARED_FOLDER="$SETUPDIR/../vm"
+VM_KIND=$(systemd-detect-virt)
+if [[ ${WSL_DISTRO_NAME:-none} != "none" ]]; then
+  VM_KIND=wsl
   VM_WINDOWS_HOST=1
-else
-  VM_WINDOWS_HOST=0
+elif [[ -d /vagrant ]]; then
+  VM_KIND=vagrant
+  VM_SHARED_FOLDER="/vagrant/vm"
 fi
+
 
 function clone_or_update_and_cd() {
     orgname=$1
@@ -86,8 +107,8 @@ function clone_or_update_and_cd() {
     # and re-enable.
 
     if [[ $MAGAOX_ROLE == vm && $VM_WINDOWS_HOST == 0 ]]; then
-        mkdir -p /vagrant/vm/$reponame
-        link_if_necessary /vagrant/vm/$reponame $destdir
+      mkdir -p "$VM_SHARED_FOLDER/$reponame"
+      link_if_necessary "$VM_SHARED_FOLDER/$reponame" $destdir
     fi
     if [[ ! -d $parentdir/$reponame/.git ]]; then
       echo "Cloning new copy of $orgname/$reponame"
@@ -100,12 +121,12 @@ function clone_or_update_and_cd() {
       log_success "Removed temporary clone at $CLONE_DEST"
     else
       cd $destdir
-      git pull
+      git pull --ff-only
       log_success "Updated $destdir"
     fi
     git config core.sharedRepository group
     if [[ $MAGAOX_ROLE != vm ]]; then
-      sudo chown -R :magaox-dev $destdir
+      sudo chown -R :$instrument_dev_group $destdir
       sudo chmod -R g=rwX $destdir
       # n.b. can't be recursive because g+s on files means something else
       # so we find all directories and individually chmod them:
@@ -140,19 +161,21 @@ function createuser() {
   sudo touch /home/$username/.ssh/authorized_keys
   sudo chmod -R u=rwx,g=,o= /home/$username/.ssh
   sudo chmod u=rw,g=,o= /home/$username/.ssh/authorized_keys
-  sudo chown -R $username:magaox /home/$username
+  sudo chown -R $username:$instrument_group /home/$username
   sudo chsh $username -s $(which bash)
   log_info "Append an ecdsa or ed25519 key to /home/$username/.ssh/authorized_keys to enable SSH login"
 
-  data_path="/data/users/$username"
-  mkdir -p "$data_path"
-  chown "$username:magaox" "$data_path"
-  chmod g+rxs "$data_path"
+  data_path="/data/users/$username/"
+  sudo mkdir -p "$data_path"
+  sudo chown "$username:$instrument_group" "$data_path"
+  sudo chmod g+rxs "$data_path"
   log_success "Created $data_path"
 
   link_name="/home/$username/data"
-  ln -s "$data_path" "$link_name"
-  log_success "Linked $link_name -> $data_path"
+  if sudo test ! -L "$link_name"; then
+    sudo ln -sv "$data_path" "$link_name"
+    log_success "Linked $link_name -> $data_path"
+  fi
 }
 # We work around the buggy devtoolset /bin/sudo wrapper in provision.sh, but
 # that means we have to explicitly enable it ourselves.

@@ -10,8 +10,8 @@
 #define streamWriter_hpp
 
 
-#include <ImageStruct.h>
-#include <ImageStreamIO.h>
+#include <ImageStreamIO/ImageStruct.h>
+#include <ImageStreamIO/ImageStreamIO.h>
 
 #include <xrif/xrif.h>
 
@@ -51,8 +51,12 @@ namespace app
   * \ingroup streamWriter
   * 
   */
-class streamWriter : public MagAOXApp<>
+class streamWriter : public MagAOXApp<>, public dev::telemeter<streamWriter>
 {
+   typedef dev::telemeter<streamWriter> telemeterT;
+
+   friend class dev::telemeter<streamWriter>;
+
    //Give the test harness access.
    friend class streamWriter_test;
    
@@ -269,6 +273,19 @@ public:
 
    void updateINDI();
    
+   /** \name Telemeter Interface
+     * 
+     * @{
+     */ 
+   int checkRecordTimes();
+   
+   int recordTelem( const telem_saving_state * );
+
+   int recordSavingState( bool force = false );
+   int recordSavingStats( bool force = false );
+
+   ///@}
+
 };
 
 //Set self pointer to null so app starts up uninitialized.
@@ -323,6 +340,8 @@ void streamWriter::setupConfig()
    config.add("framegrabber.threadPrio", "", "framegrabber.threadPrio", argType::Required, "framegrabber", "threadPrio", false, "int", "The real-time priority of the framegrabber thread.");
 
    config.add("framegrabber.cpuset", "", "framegrabber.cpuset", argType::Required, "framegrabber", "cpuset", false, "string", "The cpuset for the framegrabber thread.");
+
+   telemeterT::setupConfig(config);
 }
 
 
@@ -352,6 +371,12 @@ void streamWriter::loadConfig()
    //Setup default log path
    m_rawimageDir = MagAOXPath + "/" + MAGAOX_rawimageRelPath + "/" + m_shmimName;
    config(m_rawimageDir, "writer.savePath");
+
+   if(telemeterT::loadConfig(config) < 0)
+   {
+      log<text_log>("Error during telemeter config", logPrio::LOG_CRITICAL);
+      m_shutdown = true;
+   }
 }
 
 
@@ -428,6 +453,11 @@ int streamWriter::appStartup()
    {
       log<software_critical,-1>({__FILE__, __LINE__});
    }
+
+   if(telemeterT::appStartup() < 0)
+   {
+      return log<software_error,-1>({__FILE__,__LINE__});
+   }
    
    return 0;
 
@@ -475,6 +505,15 @@ int streamWriter::appLogic()
          state(stateCodes::OPERATING);
    }
    
+   if(state() == stateCodes::OPERATING)
+   {
+      if(telemeterT::appLogic() < 0)
+      {
+         log<software_error>({__FILE__, __LINE__});
+         return 0;
+      }
+   }
+
    updateINDI();
    
    return 0;
@@ -514,6 +553,7 @@ int streamWriter::appShutdown()
       m_xrif_timing=nullptr;
    }
 
+   telemeterT::appShutdown();
    
    return 0;
 }
@@ -835,11 +875,17 @@ void streamWriter::fgThreadExec()
          
             if( atype!= m_dataType || snx != m_width || sny != m_height || snz != length )
             {
+               //**** close out here
+
                break; //exit the nearest while loop and get the new image setup.
             }
          
-            if(m_shutdown || m_restart) break; //Check for exit signals
-         
+            if(m_shutdown || m_restart) 
+            {
+               //**** close out here
+
+               break; //Check for exit signals
+            }
            
             if( image.cntarray[curr_image] == last_cnt0 )
             {
@@ -915,6 +961,8 @@ void streamWriter::fgThreadExec()
          }
          else
          {
+            //*****  IF here, should check if "STOP_WRITING" set, and trigger the cleanup and close out of the current writing
+            
             if(image.md[0].sem <= 0) break; //Indicates that the server has cleaned up.
             
             //Check for why we timed out
@@ -1069,6 +1117,8 @@ int streamWriter::doEncode()
       m_logSaveStart = false;
    }
    
+   recordSavingState(true);
+
    timespec tw0, tw1, tw2;
    
    clock_gettime(CLOCK_REALTIME, &tw0);
@@ -1210,12 +1260,16 @@ int streamWriter::doEncode()
    
    std::cerr << wt << "\n";
    
+   recordSavingStats(true);
+
    if(m_writing == STOP_WRITING) 
    {
       m_writing = NOT_WRITING;
       log<saving_stop>({0,m_currSaveStopFrameNo});
    }
    
+   recordSavingState(true);
+
    return 0;
 }
 
@@ -1250,25 +1304,19 @@ void streamWriter::updateINDI()
       if(m_xrif && m_writing == WRITING)
       {
          indi::updateSwitchIfChanged(m_indiP_writing, "toggle", pcf::IndiElement::On, m_indiDriver, INDI_OK);
-         
          indi::updateIfChanged(m_indiP_xrifStats, "ratio", m_xrif->compression_ratio, m_indiDriver, INDI_BUSY);
-         
          indi::updateIfChanged(m_indiP_xrifStats, "encodeMBsec", m_xrif->encode_rate/1048576.0, m_indiDriver, INDI_BUSY);
          indi::updateIfChanged(m_indiP_xrifStats, "encodeFPS", m_xrif->encode_rate/(m_width*m_height*m_typeSize), m_indiDriver, INDI_BUSY);
-         
          indi::updateIfChanged(m_indiP_xrifStats, "differenceMBsec", m_xrif->difference_rate/1048576.0, m_indiDriver, INDI_BUSY);
          indi::updateIfChanged(m_indiP_xrifStats, "differenceFPS", m_xrif->difference_rate/(m_width*m_height*m_typeSize), m_indiDriver, INDI_BUSY);
-         
          indi::updateIfChanged(m_indiP_xrifStats, "reorderMBsec", m_xrif->reorder_rate/1048576.0, m_indiDriver, INDI_BUSY);
          indi::updateIfChanged(m_indiP_xrifStats, "reorderFPS", m_xrif->reorder_rate/(m_width*m_height*m_typeSize), m_indiDriver, INDI_BUSY);
-
          indi::updateIfChanged(m_indiP_xrifStats, "compressMBsec", m_xrif->compress_rate/1048576.0, m_indiDriver, INDI_BUSY);
          indi::updateIfChanged(m_indiP_xrifStats, "compressFPS", m_xrif->compress_rate/(m_width*m_height*m_typeSize), m_indiDriver, INDI_BUSY);
       }
       else
       {
          indi::updateSwitchIfChanged(m_indiP_writing, "toggle", pcf::IndiElement::Off, m_indiDriver, INDI_OK);
-         
          indi::updateIfChanged(m_indiP_xrifStats, "ratio", 0.0, m_indiDriver, INDI_IDLE);
          indi::updateIfChanged(m_indiP_xrifStats, "encodeMBsec", 0.0, m_indiDriver, INDI_IDLE);
          indi::updateIfChanged(m_indiP_xrifStats, "encodeFPS", 0.0, m_indiDriver, INDI_IDLE);
@@ -1280,6 +1328,65 @@ void streamWriter::updateINDI()
          indi::updateIfChanged(m_indiP_xrifStats, "compressFPS", 0.0, m_indiDriver, INDI_IDLE);
       }
    }
+}
+
+inline
+int streamWriter::checkRecordTimes()
+{
+   return telemeterT::checkRecordTimes(telem_saving_state());
+}
+
+inline
+int streamWriter::recordTelem( const telem_saving_state * )
+{
+   return recordSavingState(true);
+}
+
+inline
+int streamWriter::recordSavingState( bool force )
+{
+   static int16_t lastState = -1;
+   static uint64_t currSaveStart = -1;
+
+   int16_t state;
+   if(m_writing == WRITING) state = 1;
+   else state = 0;
+
+   if(state != lastState || m_currSaveStart != currSaveStart || force)
+   {
+      telem<telem_saving_state>({state, m_currSaveStart});
+
+      lastState = state;
+      currSaveStart = m_currSaveStart;
+   }
+
+   return 0;
+}
+
+inline
+int streamWriter::recordSavingStats( bool force )
+{
+   static uint32_t last_rawSize = -1;
+   static uint32_t last_compressedSize = -1;
+   static float last_encodeRate = -1;
+   static float last_differenceRate = -1;
+   static float last_reorderRate = -1;
+   static float last_compressRate = -1;
+
+   if(m_xrif->raw_size != last_rawSize || m_xrif->compressed_size != last_compressedSize || m_xrif->encode_rate != last_encodeRate || m_xrif->difference_rate != last_differenceRate ||
+             m_xrif->reorder_rate != last_reorderRate || m_xrif->compress_rate != last_compressRate || force)
+   {
+      telem<telem_saving>({(uint32_t) m_xrif->raw_size, (uint32_t) m_xrif->compressed_size, (float) m_xrif->encode_rate, (float) m_xrif->difference_rate, (float) m_xrif->reorder_rate, (float) m_xrif->compress_rate});
+
+      last_rawSize = m_xrif->raw_size;
+      last_compressedSize = m_xrif->compressed_size;
+      last_encodeRate = m_xrif->encode_rate;
+      last_differenceRate = m_xrif->difference_rate;
+      last_reorderRate = m_xrif->reorder_rate;
+      last_compressRate = m_xrif->compress_rate;
+   }
+
+   return 0;
 }
 
 }//namespace app

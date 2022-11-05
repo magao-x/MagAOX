@@ -20,6 +20,8 @@ class pwfsAlignment : public rtimvOverlayInterface
       
       rtimvOverlayAccess m_roa;
       
+      char m_blob[512]; ///< Memory for copying rtimvDictionary blobs
+      
       double m_1x {0};
       double m_1y {0};
       double m_1D {0};

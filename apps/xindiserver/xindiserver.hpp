@@ -45,8 +45,6 @@ struct sshTunnel
 {
    std::string m_remoteHost;
    int m_localPort {0};
-   int m_remotePort {0};
-   int m_monitorPort {0};
 };
 
 ///The map used to hold tunnel specifications.
@@ -84,17 +82,13 @@ int loadSSHTunnelConfigs( tunnelMapT & tmap, ///< [out] the tunnel map which wil
          
          std::string remoteHost;
          int localPort = 0;
-         int remotePort = 0;
-         int monitorPort = 0;
          bool compress = false;
-         
+
          config.configUnused( remoteHost, mx::app::iniFile::makeKey(sections[i], "remoteHost" ) );
          config.configUnused( localPort, mx::app::iniFile::makeKey(sections[i], "localPort" ) );
-         config.configUnused( remotePort, mx::app::iniFile::makeKey(sections[i], "remotePort" ) );
-         config.configUnused( monitorPort, mx::app::iniFile::makeKey(sections[i], "monitorPort" ) );
          config.configUnused( compress, mx::app::iniFile::makeKey(sections[i], "compress" ) );
-         
-         tmap[sections[i]] = sshTunnel({remoteHost, localPort, remotePort, monitorPort});
+
+         tmap[sections[i]] = sshTunnel({remoteHost, localPort});
       
          ++matched;
       }
@@ -659,10 +653,15 @@ void xindiserver::isLogThreadExec()
    std::string logs;
    while(m_shutdown == 0)
    {
-      ssize_t count = read(m_isSTDERR, buffer, sizeof(buffer)-1);
+      ssize_t count = read(m_isSTDERR, buffer, sizeof(buffer)-1); //Make sure we always have room for \0
       if (count <= 0 || m_shutdown == 1) 
       {
          continue;
+      }
+      else if(count > (ssize_t) sizeof(buffer)-1)
+      {
+         log<software_error>({__FILE__, __LINE__, "read returned too many bytes."});
+	 continue;
       }
       else 
       {

@@ -1,0 +1,207 @@
+#!/usr/bin/env python
+import pprint
+import sys
+import time
+import math
+import os
+import os.path
+import numpy as np
+import matplotlib
+matplotlib.use('Agg')
+from matplotlib.colors import LogNorm
+import matplotlib.pyplot as plt
+from astropy.io import fits
+import datetime
+import glob
+import tqdm
+import tempfile
+import subprocess
+import shutil
+import logging
+
+log = logging.getLogger(__name__)
+
+SCIENCE_CAMERAS = ['camsci1', 'camsci2']
+QUICKLOOK_ROOT = "/data/users/guestobs/quicklook"
+
+def fast_integer_bin(img, bin):
+    height, width = img.shape
+    if height % bin != 0 or width % bin != 0:
+        raise ValueError("Doesn't divide evenly")
+    binner = img.reshape((height // bin, bin, width // bin, bin))
+    binned = binner.sum(axis=3).sum(axis=1)
+    return binned
+
+def sample_frames_to_limits(frames_paths, sample_n_files, pct_min, pct_max, bin):
+    if len(frames_paths) > sample_n_files:
+        step = math.floor(len(frames_paths) / sample_n_files)
+        sample_frames = frames_paths[::step][:sample_n_files]
+    else:
+        sample_frames = frames_paths
+    pmins, pmaxes = [], []
+    for fn in sample_frames:
+        with open(fn, 'rb') as fh:
+            data = fits.getdata(fh)
+            if bin > 1:
+                data = fast_integer_bin(data, bin)
+            pmins.append(np.nanpercentile(data, pct_min))
+            pmaxes.append(np.nanpercentile(data, pct_max))
+    return min(pmins), max(pmaxes)
+
+def frames_to_movie(
+    frames_paths,
+    movie_name,
+    output_dir,
+    cmap,
+    sample_n_files,
+    fps,
+    bin,
+    pct_min,
+    pct_max,
+    rough_bg_subtract,
+    log_scale,
+    every_nth_frame,
+    preview,
+    constant_rate_factor,
+    accumulate,
+):
+    frames_paths = frames_paths[::every_nth_frame]
+    vmin, vmax = sample_frames_to_limits(frames_paths, sample_n_files, pct_min, pct_max, bin)
+    scale_kwargs = {'vmin': vmin, 'vmax': vmax}
+
+    img = fits.getdata(frames_paths[0])
+    temp_dir = tempfile.TemporaryDirectory()
+    temp_dir_path = temp_dir.name
+    os.makedirs(temp_dir_path, exist_ok=True)
+    assert os.path.isdir(temp_dir_path)
+    print(temp_dir_path)
+    accumulator = None
+    for idx, fn in enumerate(tqdm.tqdm(frames_paths)):
+        with open(fn, 'rb') as fh:
+            img = fits.getdata(fh)
+            if accumulate:
+                if accumulator is None:
+                    accumulator = np.zeros(img.shape)
+                accumulator += img
+                img = accumulator / (idx + 1)
+            if bin > 1:
+                img = fast_integer_bin(img, bin)
+            if rough_bg_subtract:
+                img = img - np.median(img, axis=1)[:, np.newaxis]
+            if log_scale:
+                img = np.log10(img)
+                scale_kwargs['vmin'] = max(np.log10(vmin), 0.1)
+                scale_kwargs['vmax'] = max(np.log10(vmax), 0.1)
+            if preview:
+                plt.imsave(f"{output_dir}/{movie_name}_preview.png", img, cmap=cmap, **scale_kwargs)
+                return
+            plt.imsave(
+                temp_dir_path + f'/frame_{idx:08}.png',
+                img,
+                cmap=cmap,
+                **scale_kwargs
+            )
+
+    height_px, width_px = img.shape
+    ffmpeg_args = [
+        "ffmpeg",
+        "-framerate", str(fps),
+        "-i", "frame_%8d.png",
+        "-s:v", f"{width_px}x{height_px}",
+        "-c:v", "libx264",
+        "-crf", str(constant_rate_factor),
+        "-pix_fmt", "yuv420p",
+        "movie.mp4"
+    ]
+    print(" ".join(ffmpeg_args))
+    subprocess.check_call(
+        ffmpeg_args,
+        cwd=temp_dir_path
+    )
+    shutil.copy(temp_dir_path + "/movie.mp4", f"{output_dir}/{movie_name}.mp4")
+    print(f"Saved to {output_dir}/{movie_name}.mp4")
+    temp_dir.cleanup()
+
+def main(args):
+    now = datetime.datetime.utcnow()
+    datestamp = ''.join(filter(str.isdigit, now.isoformat()))
+    
+    if os.path.isdir(args.OBS_NAME_OR_DIR):
+        frames = list(sorted(glob.glob(f"{args.OBS_NAME_OR_DIR}/*.fits")))
+        log.info(f"Found {len(frames)} in directory {args.OBS_NAME_OR_DIR}")
+        frames_to_movie(
+            frames,
+            f"movie_{datestamp}",
+            args.output_dir,
+            args.colormap,
+            args.sample_n_files,
+            args.fps,
+            args.bin,
+            args.percentile_min,
+            args.percentile_max,
+            args.rough_bg_subtract,
+            args.log_scale,
+            args.every_nth_frame,
+            args.preview,
+            args.crf,
+            args.accumulate,
+        )
+    else:
+        obs_name = args.OBS_NAME_OR_DIR
+        cameras = args.cameras if args.cameras is not None else SCIENCE_CAMERAS
+        for cam in cameras:
+            frames = list(sorted(glob.glob(f"{args.quicklook_root}/*/{obs_name}/{cam}/*.fits")))
+            log.info(f"Found {len(frames)} for {obs_name}")
+            frames_to_movie(
+                frames,
+                f"{cam}_{datestamp}",
+                args.output_dir,
+                args.colormap,
+                args.sample_n_files,
+                args.fps,
+                args.bin,
+                args.percentile_min,
+                args.percentile_max,
+                args.rough_bg_subtract,
+                args.log_scale,
+                args.every_nth_frame,
+                args.preview,
+                args.crf,
+                args.accumulate,
+            )
+
+if __name__ == "__main__":
+    this_year = datetime.datetime.now().year
+    import argparse
+    parser = argparse.ArgumentParser()
+    parser.add_argument('OBS_NAME_OR_DIR', help="Observation name or a directory full of FITS files of identical dimensions (the latter ignores -c and -q)")
+    parser.add_argument('-v', '--verbose', help="Turn on debug output", action='store_true')
+    parser.add_argument('--colormap', help="Matplotlib color map to use", default='inferno')
+    parser.add_argument('--sample-n-files', type=int, default=100, help="How many files to sample to determine percentile-based min/max")
+    parser.add_argument('--every-nth-frame', type=int, default=1, help="How much to downsample the time-series of images")
+    parser.add_argument('--bin', type=int, default=1, help="How much to spatially downsample the images as an integer binning factor")
+    parser.add_argument('--percentile-min', type=float, default=5, help="Percentile setting minimum of color bar scale")
+    parser.add_argument('--percentile-max', type=float, default=99, help="Percentile setting maximum of color bar scale")
+    parser.add_argument('--log-scale', action='store_true', help="Whether to logarithmically scale the images")
+    parser.add_argument('--rough-bg-subtract', action='store_true', help="Whether to subtract the median column from each frame")
+    parser.add_argument('--preview', action='store_true', help="Write preview frame with colormap and scaling and exit")
+    parser.add_argument('--accumulate', action='store_true', help="")
+    parser.add_argument('--crf', type=int, default=24, help="H.264 constant rate factor for compression (higher is smaller with worse quality)")
+    parser.add_argument('--fps', type=int, default=24, help="Frames per second")
+    parser.add_argument('-c', '--cameras', help=f"Cameras to check, default: {SCIENCE_CAMERAS}", action='append', default=None)
+    parser.add_argument('-q', '--quicklook-root', default=QUICKLOOK_ROOT)
+    parser.add_argument('-D', '--output-dir', default='.')
+    args = parser.parse_args()
+
+    ch = logging.StreamHandler()
+    ch.setLevel(logging.DEBUG if args.verbose else logging.INFO)
+    formatter = logging.Formatter('%(asctime)s %(levelname)s - %(message)s')
+    ch.setFormatter(formatter)
+    log.addHandler(ch)
+    log.setLevel(logging.DEBUG)
+    now = datetime.datetime.utcnow()
+    datestamp = ''.join(filter(str.isdigit, now.isoformat()))
+    logfile = f'obs_to_movie_{datestamp}.log'
+    log.addHandler(logging.FileHandler(logfile))
+    log.info(f'Complete logs in {logfile}')
+    main(args)

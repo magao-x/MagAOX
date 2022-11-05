@@ -26,7 +26,7 @@ class xWidget : public QWidget, public multiIndiSubscriber
    
 public:
    xWidget( QWidget * Parent = 0, 
-            Qt::WindowFlags f = 0
+            Qt::WindowFlags f = Qt::WindowFlags()
           ) : QWidget(Parent, f)
    {
    }

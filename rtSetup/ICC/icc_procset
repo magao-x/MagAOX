@@ -1,0 +1,55 @@
+#!/bin/bash
+#####################################################
+## MagAO-X ICC process to cpuset  
+## 
+## See https://linux.die.net/man/7/cpuset
+##
+## Run this as sudo after starting all loop processes.
+## Must first have run rtc_cpuset at system startup.
+##
+####################################################
+
+# note: these are in the same order as the cpuset creation in rtc_cpuset
+
+######################
+## NCPC dmcomb
+######################
+pidlist=$( pgrep DMcomb-000002.r | xargs echo | sed 's/ /,/g' )
+echo "DMcomb 2  : $pidlist"
+/bin/echo $pidlist > /dev/cpuset/dm02comb/tasks
+
+
+pidlist=$( pgrep aol2run | xargs echo | sed 's/ /,/g' )
+echo "aol2 (master) : $pidlist"
+aolPID="$pidlist"
+
+pidlist=$( ls /proc/$aolPID/task/ )
+echo "aol2 (full) :"
+let i=0
+for pid in $pidlist
+do
+   echo "       " "$pid"
+   /bin/echo $pid > /dev/cpuset/aol2RT/aol2RT_${i}/tasks
+   let i=i+1
+done
+
+pidlist=$( pgrep aol2mexwfs | xargs echo | sed 's/ /,/g' )
+echo "cudaMVMextract aol2 : $pidlist"
+aolPID="$pidlist"
+/bin/echo $pidlist > /dev/cpuset/aol2RT1/tasks
+
+pidlist=$( pgrep aol2dmfw | xargs echo | sed 's/ /,/g' )
+echo "aol2 GPUmodes2dm : $pidlist"
+aolPID="$pidlist"
+pidlist=$( ls /proc/$aolPID/task/ )
+echo "aol2 GPUmodes2dm (full) :"
+for pid in $pidlist
+do
+   echo "        " "$pid"
+   /bin/echo $pid > /dev/cpuset/aol2RT2/tasks
+done
+
+pidlist=$( pgrep aol2meol | xargs echo | sed 's/ /,/g' )
+echo "aol2meol : $pidlist"
+/bin/echo $pidlist > /dev/cpuset/aol2RT3/tasks
+

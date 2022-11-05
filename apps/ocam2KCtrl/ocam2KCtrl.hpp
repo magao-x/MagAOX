@@ -111,6 +111,8 @@ protected:
        
    long m_lastImageNumber {-1};  ///< The last image number, saved from the last loop through.
 
+   int m_framesSkipped {0};
+
    bool m_protectionReset {false}; ///< Flag indicating that protection has been reset at least once.
    
    unsigned m_protectionResetConfirmed {0}; ///< Counter indicating the number of times that the protection reset has been requested within 10 seconds, for confirmation.
@@ -313,6 +315,8 @@ public:
    
    int recordTelem( const telem_stdcam * );
    
+   int recordTelem( const telem_fgtimings * );
+
    int recordTemps(bool force = false);
    
    ///@}
@@ -506,12 +510,14 @@ int ocam2KCtrl::appLogic()
             m_poweredOn = false;
             if(setTempSetPt() < 0)
             {
+               if(powerState() != 1 || powerStateTarget() != 1) return 0;
                return log<software_error,0>({__FILE__,__LINE__});
             }
          }
       }
       else
       {
+         if(powerState() != 1 || powerStateTarget() != 1) return 0;
          state(stateCodes::ERROR);
          return log<software_error,0>({__FILE__,__LINE__});
       }
@@ -519,6 +525,12 @@ int ocam2KCtrl::appLogic()
 
    if( state() == stateCodes::READY || state() == stateCodes::OPERATING )
    {
+
+      if(m_framesSkipped)
+      {
+         log<text_log>("FRAMES SKIPPED -- RECONFIGURE", logPrio::LOG_ERROR);
+      }
+
       //Get a lock if we can
       std::unique_lock<std::mutex> lock(m_indiMutex, std::try_to_lock);
 
@@ -527,7 +539,7 @@ int ocam2KCtrl::appLogic()
       
       if(getTemps() < 0)
       {
-         if(MagAOXAppT::m_powerState == 0) return 0;
+         if(powerState() != 1 || powerStateTarget() != 1) return 0;
          m_temps.setInvalid();
          state(stateCodes::ERROR);
          return 0;
@@ -535,7 +547,7 @@ int ocam2KCtrl::appLogic()
 
       if(getFPS() < 0)
       {
-         if(MagAOXAppT::m_powerState == 0) return 0;
+         if(powerState() != 1 || powerStateTarget() != 1) return 0;
          
          state(stateCodes::ERROR);
          return 0;
@@ -693,7 +705,8 @@ int ocam2KCtrl::getTemps()
 
       if(parseTemps( temps, response ) < 0) 
       {
-         if(MagAOXAppT::m_powerState == 0) return -1;
+         if(powerState() != 1 || powerStateTarget() != 1) return -1;
+
          m_temps.setInvalid();
          m_ccdTemp = m_temps.CCD;
          m_ccdTempSetpt = m_temps.SET;
@@ -755,8 +768,11 @@ int ocam2KCtrl::getTemps()
       return 0;
 
    }
-   else return log<software_error,-1>({__FILE__, __LINE__});
-
+   else 
+   {
+      if(powerState() != 1 || powerStateTarget() != 1) return -1;
+      return log<software_error,-1>({__FILE__, __LINE__});
+   }
 }
 
 inline
@@ -805,8 +821,12 @@ int ocam2KCtrl::setTempControl()
       ///\todo check response
       log<text_log,0>({"Set temperature control to " + command});
    }
-   else return log<software_error,-1>({__FILE__, __LINE__});
-   
+   else 
+   {
+      if(powerState() != 1 || powerStateTarget() != 1) return -1;
+      return log<software_error,-1>({__FILE__, __LINE__});
+   }
+
    if( m_tempControlStatusSet && m_ccdTempSetpt > -999)
    {
       return setTempSetPt();
@@ -839,7 +859,11 @@ int ocam2KCtrl::setTempSetPt()
       ///\todo check response
       return log<text_log,0>({"set temperature: " + tempStr});
    }
-   else return log<software_error,-1>({__FILE__, __LINE__});
+   else 
+   {
+      if(powerState() != 1 || powerStateTarget() != 1) return -1;
+      return log<software_error,-1>({__FILE__, __LINE__});
+   }
 
 }
 
@@ -853,7 +877,7 @@ int ocam2KCtrl::getFPS()
       float fps;
       if(parseFPS( fps, response ) < 0) 
       {
-         if(MagAOXAppT::m_powerState == 0) return -1;
+         if(powerState() != 1 || powerStateTarget() != 1) return -1;
          return log<software_error, -1>({__FILE__, __LINE__, "fps parse error"});
       }
       m_fps = fps;
@@ -887,8 +911,11 @@ int ocam2KCtrl::setFPS()
       
       return 0;
    }
-   else return log<software_error,-1>({__FILE__, __LINE__});
-
+   else 
+   {
+      if(powerState() != 1 || powerStateTarget() != 1) return -1;
+      return log<software_error,-1>({__FILE__, __LINE__});
+   }
 }
 
 inline 
@@ -956,8 +983,11 @@ int ocam2KCtrl::resetEMProtection()
       return 0;
 
    }
-   else return log<software_error,-1>({__FILE__, __LINE__});
-   
+   else 
+   {
+      if(powerState() != 1 || powerStateTarget() != 1) return -1;
+      return log<software_error,-1>({__FILE__, __LINE__});
+   }
 }
 
 inline
@@ -970,6 +1000,7 @@ int ocam2KCtrl::getEMGain()
       unsigned emGain;
       if(parseEMGain( emGain, response ) < 0) 
       {
+         if(powerState() != 1 || powerStateTarget() != 1) return -1;
          if(MagAOXAppT::m_powerState == 0) return -1;
          return log<software_error, -1>({__FILE__, __LINE__, "EM Gain parse error"});
       }
@@ -978,7 +1009,11 @@ int ocam2KCtrl::getEMGain()
       return 0;
 
    }
-   else return log<software_error,-1>({__FILE__, __LINE__});
+   else 
+   {
+      if(powerState() != 1 || powerStateTarget() != 1) return -1;
+      return log<software_error,-1>({__FILE__, __LINE__});
+   }
 }
    
 inline
@@ -1008,7 +1043,11 @@ int ocam2KCtrl::setEMGain( )
       
       return 0;
    }
-   else return log<software_error,-1>({__FILE__, __LINE__});
+   else 
+   {
+      if(powerState() != 1 || powerStateTarget() != 1) return -1;
+      return log<software_error,-1>({__FILE__, __LINE__});
+   }
    
 }
 
@@ -1022,6 +1061,8 @@ int ocam2KCtrl::configureAcquisition()
    std::string response;
    if( pdvSerialWriteRead( response, m_cameraModes[m_modeName].m_serialCommand) != 0) //m_pdv, m_cameraModes[m_modeName].m_serialCommand, m_readTimeout) != 0)
    {
+      if(powerState() != 1 || powerStateTarget() != 1) return -1;
+
       log<software_error>({__FILE__, __LINE__, "Error sending command to set mode"});
       sleep(1);
       return -1;
@@ -1078,6 +1119,7 @@ int ocam2KCtrl::configureAcquisition()
    rc=ocam2_init(mode, ocamDescrambleFile.c_str(), &m_ocam2_id);
    if (rc != OCAM2_OK)
    {
+      if(powerState() != 1 || powerStateTarget() != 1) return -1;
       log<text_log>("ocam2_init error. Failed to initialize OCAM SDK with descramble file: " + ocamDescrambleFile, logPrio::LOG_ERROR);
       return -1;
    }
@@ -1088,8 +1130,11 @@ int ocam2KCtrl::configureAcquisition()
    
    m_width = OCAM_SZ;
    m_height = OCAM_SZ;
-   m_dataType = _DATATYPE_INT16;
+   m_dataType = _DATATYPE_UINT16;
    
+   if(m_framesSkipped == 1) m_framesSkipped = 2; //This means frame skip detected
+   else if(m_framesSkipped == 2) m_framesSkipped = 0; //This means user requested reconfig after frame skip detected.
+
    state(stateCodes::OPERATING);
    
    return 0;
@@ -1150,14 +1195,16 @@ int ocam2KCtrl::acquireAndCheckValid()
             
 	    // and go on and try to use it.
 	    //
-            //m_nextMode = m_modeName;
-            //m_reconfig = 1;
-           
-            //return 1;
+            m_nextMode = m_modeName;
+            m_reconfig = 1;
+            m_framesSkipped = 1;
+            return 1;
             
          }
          else //but if it's any bigger or < 0, it's probably garbage
          {
+            if(powerState() != 1 || powerStateTarget() != 1) return -1;
+
             ///\todo need frame corrupt log type
             log<text_log>("frame number possibly corrupt: " + std::to_string(m_currImageNumber) + " - " + std::to_string(m_lastImageNumber), logPrio::LOG_ERROR);
             
@@ -1166,7 +1213,7 @@ int ocam2KCtrl::acquireAndCheckValid()
       
             //Reset the counters.
             m_lastImageNumber = -1;
-            
+            m_framesSkipped = 1;
             return 1;
          
          }
@@ -1241,7 +1288,7 @@ INDI_NEWCALLBACK_DEFN(ocam2KCtrl, m_indiP_emProtReset)(const pcf::IndiProperty &
 inline
 int ocam2KCtrl::checkRecordTimes()
 {
-   return telemeter<ocam2KCtrl>::checkRecordTimes(ocam_temps(), telem_stdcam());
+   return telemeter<ocam2KCtrl>::checkRecordTimes(ocam_temps(), telem_stdcam(), telem_fgtimings());
 }
    
 inline
@@ -1254,6 +1301,12 @@ inline
 int ocam2KCtrl::recordTelem( const telem_stdcam * )
 {
    return recordCamera(true);
+}
+
+inline
+int ocam2KCtrl::recordTelem( const telem_fgtimings * )
+{
+   return recordFGTimings(true);
 }
 
 inline
