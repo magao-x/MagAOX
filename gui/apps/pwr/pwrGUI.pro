@@ -8,6 +8,9 @@ DESTDIR = bin/
 DEPENDPATH += ./ ../../lib 
 INCLUDEPATH += ../../widgets/multiDial
 INCLUDEPATH += ../../lib
+exists( $$(CONDA_PREFIX)/include ) {
+    INCLUDEPATH += $$(CONDA_PREFIX)/include
+}
 
 MOC_DIR = moc/
 OBJECTS_DIR = obj/
