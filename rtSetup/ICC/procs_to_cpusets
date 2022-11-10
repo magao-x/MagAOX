@@ -9,6 +9,8 @@
 ##
 ####################################################
 
+cpusetMount=/sys/fs/cgroup/cpuset
+
 # note: these are in the same order as the cpuset creation in rtc_cpuset
 
 ######################
@@ -16,7 +18,7 @@
 ######################
 pidlist=$( pgrep DMcomb-000002.r | xargs echo | sed 's/ /,/g' )
 echo "DMcomb 2  : $pidlist"
-/bin/echo $pidlist > /dev/cpuset/dm02comb/tasks
+/bin/echo $pidlist > $cpusetMount/dm02comb/tasks
 
 
 pidlist=$( pgrep aol2run | xargs echo | sed 's/ /,/g' )
@@ -29,14 +31,14 @@ let i=0
 for pid in $pidlist
 do
    echo "       " "$pid"
-   /bin/echo $pid > /dev/cpuset/aol2RT/aol2RT_${i}/tasks
+   /bin/echo $pid > $cpusetMount/aol2RT/aol2RT_${i}/tasks
    let i=i+1
 done
 
 pidlist=$( pgrep aol2mexwfs | xargs echo | sed 's/ /,/g' )
 echo "cudaMVMextract aol2 : $pidlist"
 aolPID="$pidlist"
-/bin/echo $pidlist > /dev/cpuset/aol2RT1/tasks
+/bin/echo $pidlist > $cpusetMount/aol2RT1/tasks
 
 pidlist=$( pgrep aol2dmfw | xargs echo | sed 's/ /,/g' )
 echo "aol2 GPUmodes2dm : $pidlist"
@@ -46,10 +48,10 @@ echo "aol2 GPUmodes2dm (full) :"
 for pid in $pidlist
 do
    echo "        " "$pid"
-   /bin/echo $pid > /dev/cpuset/aol2RT2/tasks
+   /bin/echo $pid > $cpusetMount/aol2RT2/tasks
 done
 
 pidlist=$( pgrep aol2meol | xargs echo | sed 's/ /,/g' )
 echo "aol2meol : $pidlist"
-/bin/echo $pidlist > /dev/cpuset/aol2RT3/tasks
+/bin/echo $pidlist > $cpusetMount/aol2RT3/tasks
 

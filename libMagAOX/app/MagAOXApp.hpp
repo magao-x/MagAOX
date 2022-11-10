@@ -2034,7 +2034,7 @@ int MagAOXApp<_useINDI>::threadStart( std::thread & thrd,
       if(cpuset != "")
       {
          elevatedPrivileges ep(this);
-         std::string cpuFile = "/dev/cpuset/";
+         std::string cpuFile = "/sys/fs/cgroup/cpuset/";
          cpuFile += cpuset;
          cpuFile += "/tasks";
          int wfd = open( cpuFile.c_str(), O_WRONLY);

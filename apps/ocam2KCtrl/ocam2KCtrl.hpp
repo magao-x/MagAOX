@@ -76,6 +76,8 @@ public:
 
    static constexpr bool c_stdCamera_fps = true; ///< app::dev config to tell stdCamera not to expose FPS status (ignored since fpsCtrl==true)
    
+   static constexpr bool c_stdCamera_synchro = true; ///< app::dev config to tell stdCamera to expose synchro mode controls
+
    static constexpr bool c_stdCamera_usesModes = true; ///< app:dev config to tell stdCamera not to expose mode controls
    
    static constexpr bool c_stdCamera_usesROI = false; ///< app:dev config to tell stdCamera to expose ROI controls
@@ -168,8 +170,7 @@ public:
      * \returns -1 on error
      */
    int getFPS();
-   
-   
+
    /** \name stdCamera Interface 
      * 
      * @{
@@ -204,6 +205,14 @@ public:
      */
    int setFPS();
    
+   /// Set the synchro state. [stdCamera interface]
+   /** Sets the synchro state to m_synchroSet.
+     * 
+     * \returns 0 on success
+     * \returns -1 on error
+     */
+   int setSynchro();
+
    /// Required by stdCamera, but this does not do anything for this camera [stdCamera interface]
    /**
      * \returns 0 always
@@ -513,6 +522,13 @@ int ocam2KCtrl::appLogic()
                if(powerState() != 1 || powerStateTarget() != 1) return 0;
                return log<software_error,0>({__FILE__,__LINE__});
             }
+         }
+
+         //We always have to set synchro on connecting, b/c otherwise we don't know the state.
+         m_synchroSet = false;
+         if( setSynchro() != 0 )
+         {
+            log<software_error>({__FILE__, __LINE__, "error from setSynchro on CONNECT"});
          }
       }
       else
@@ -857,6 +873,8 @@ int ocam2KCtrl::setTempSetPt()
       recordCamera();
       
       ///\todo check response
+      std::cerr << "temp " <<  tempStr << " response: " << response << "\n";
+
       return log<text_log,0>({"set temperature: " + tempStr});
    }
    else 
@@ -902,6 +920,7 @@ int ocam2KCtrl::setFPS()
    if( pdvSerialWriteRead( response, "fps " + fpsStr ) == 0)
    {
       ///\todo check response
+      std::cerr << "fps " << fpsStr << " response: " << response << "\n";
       log<text_log>({"set fps: " + fpsStr});
       
       //We always want to reset the latency circular buffers
@@ -909,6 +928,41 @@ int ocam2KCtrl::setFPS()
       m_nextMode = m_modeName;
       m_reconfig = true;
       
+      return 0;
+   }
+   else 
+   {
+      if(powerState() != 1 || powerStateTarget() != 1) return -1;
+      return log<software_error,-1>({__FILE__, __LINE__});
+   }
+}
+
+inline
+int ocam2KCtrl::setSynchro()
+{
+   std::string response;
+   
+   std::string sStr;
+   if(m_synchroSet) sStr = "on";
+   else sStr = "off";
+
+   if( pdvSerialWriteRead( response, "synchro " + sStr ) == 0)
+   {
+      ///\todo check response
+      std::cerr << "synchro " << sStr << " resonse: " << response << "\n";
+      log<text_log>({"set synchro: " + sStr});
+      
+      m_synchro = m_synchroSet;
+
+      if(m_synchro == false) 
+      {
+         updateSwitchIfChanged(m_indiP_synchro, "toggle", pcf::IndiElement::Off, INDI_IDLE);
+      }
+      else
+      {
+         updateSwitchIfChanged(m_indiP_synchro, "toggle", pcf::IndiElement::On, INDI_OK);
+      }
+
       return 0;
    }
    else 
@@ -1001,7 +1055,8 @@ int ocam2KCtrl::getEMGain()
       if(parseEMGain( emGain, response ) < 0) 
       {
          if(powerState() != 1 || powerStateTarget() != 1) return -1;
-         if(MagAOXAppT::m_powerState == 0) return -1;
+         
+         std::cerr << "EM Gain parse error, response: " << response << "\n";
          return log<software_error, -1>({__FILE__, __LINE__, "EM Gain parse error"});
       }
       m_emGain = emGain;
@@ -1039,6 +1094,8 @@ int ocam2KCtrl::setEMGain( )
    if( pdvSerialWriteRead( response, "gain " + emgStr ) == 0) //m_pdv, "gain " + emgStr, m_readTimeout) == 0)
    {
       ///\todo check response
+      std::cerr << "gain " << emgStr << " response: " << emgStr << "\n";
+
       log<text_log>({"set EM Gain: " + emgStr});
       
       return 0;

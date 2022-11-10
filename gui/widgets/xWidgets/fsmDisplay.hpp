@@ -51,7 +51,13 @@ public:
    
    virtual void handleSetProperty( const pcf::IndiProperty & ipRecv /**< [in] the property which has changed*/);
    
-   virtual void updateGUI();
+public slots:
+
+   void updateGUI();
+
+signals:
+   
+   void doUpdateGUI();
 
 private:
      
@@ -63,6 +69,8 @@ fsmDisplay::fsmDisplay( QWidget * Parent,
 {
    ui.setupUi(this);
    
+   connect(this, SIGNAL(doUpdateGUI()), this, SLOT(updateGUI()));
+
    onDisconnect();
 }
 
@@ -71,6 +79,7 @@ fsmDisplay::fsmDisplay( const std::string & device,
                         Qt::WindowFlags f) : xWidget(Parent, f), m_device{device}
 {
    ui.setupUi(this);
+   connect(this, SIGNAL(doUpdateGUI()), this, SLOT(updateGUI()));
    onDisconnect();
 }
    
@@ -121,7 +130,7 @@ void fsmDisplay::handleSetProperty( const pcf::IndiProperty & ipRecv)
       }
    }
 
-   updateGUI();
+   emit doUpdateGUI();
 }
 
 void fsmDisplay::updateGUI()

@@ -15,7 +15,9 @@ apps_common = \
 
 apps_rtcicc = alpaoCtrl \
               cacaoInterface \
-				  userGainCtrl
+				  userGainCtrl \
+				  zaberCtrl \
+	           zaberLowLevel
 
 apps_rtc = \
 	ocam2KCtrl \
@@ -32,13 +34,10 @@ apps_rtc = \
 
 apps_icc = \
    acronameUsbHub \
-   cacaoInterface \
 	flipperCtrl \
 	filterWheelCtrl \
 	hsfwCtrl \
 	baslerCtrl \
-	zaberCtrl \
-	zaberLowLevel \
 	picamCtrl \
 	smc100ccCtrl \
 	andorCtrl \
@@ -50,10 +49,11 @@ apps_icc = \
 
 apps_aoc = \
 	trippLitePDU \
-   tcsInterface \
-   adcTracker \
-   kTracker \
-	koolanceCtrl
+	tcsInterface \
+	adcTracker \
+	kTracker \
+	koolanceCtrl \
+	observerCtrl
 
 # apps_vm = none yet
 apps_tic = \
@@ -90,7 +90,8 @@ all_guis = \
 	coronAlignGUI \
    loopCtrlGUI \
 	roiGUI \
-	cameraGUI
+	cameraGUI \
+	stageGUI
 
 ifeq ($(MAGAOX_ROLE),RTC)
   guis_to_build =
@@ -134,7 +135,10 @@ scripts_to_install = magaox \
 	shmimTCPreceive \
 	shmimTCPtransmit \
 	lookyloo \
-	obs_to_movie
+	obs_to_movie \
+	instrument_backup_sync \
+	cacao_startup_if_present \
+	git_check_all
 
 all: indi_all libs_all flatlogs apps_all guis_all utils_all
 
@@ -236,13 +240,18 @@ scripts_install:
 	done
 
 
-MAGAOX_ROLE_LOWER := $(shell echo "$(MAGAOX_ROLE)" | tr '[:upper:]' '[:lower:]')
 rtscripts_install:
-	if [[ $(MAGAOX_ROLE) == "ICC" || $(MAGAOX_ROLE) == "RTC" ]]; then for scriptname in cpuset procset; do \
+	for scriptname in make_cpusets procs_to_cpusets; do \
 		sudo install -d /opt/MagAOX/bin && \
-			sudo install rtSetup/$(MAGAOX_ROLE)/$(MAGAOX_ROLE_LOWER)_$$scriptname /opt/MagAOX/bin && \
-			sudo ln -fs /opt/MagAOX/bin/$(MAGAOX_ROLE_LOWER)_$$scriptname /usr/local/bin/$(MAGAOX_ROLE_LOWER)_$$scriptname; \
-	done; fi
+		if [ -e rtSetup/$(MAGAOX_ROLE)/$$scriptname ]; then \
+			sudo install rtSetup/$(MAGAOX_ROLE)/$$scriptname /opt/MagAOX/bin/$$scriptname && \
+			sudo ln -fs /opt/MagAOX/bin/$$scriptname /usr/local/bin/$$scriptname; \
+		else \
+			echo "echo 'No $$scriptname for $$MAGAOX_ROLE'\nexit 0" | sudo tee /opt/MagAOX/bin/$$scriptname && \
+			sudo chmod +x /opt/MagAOX/bin/$$scriptname && \
+			sudo ln -fs /opt/MagAOX/bin/$$scriptname /usr/local/bin/$$scriptname; \
+		fi \
+	; done
 
 utils_all: flatlogs_all
 		for app in ${utils_to_build}; do \

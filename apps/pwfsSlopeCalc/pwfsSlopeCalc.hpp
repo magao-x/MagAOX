@@ -53,7 +53,7 @@ struct darkShmimT
   * \ingroup pwfsSlopeCalc
   * 
   */
-class pwfsSlopeCalc : public MagAOXApp<true>, public dev::shmimMonitor<pwfsSlopeCalc>, public dev::shmimMonitor<pwfsSlopeCalc,darkShmimT>, public dev::frameGrabber<pwfsSlopeCalc>
+class pwfsSlopeCalc : public MagAOXApp<true>, public dev::shmimMonitor<pwfsSlopeCalc>, public dev::shmimMonitor<pwfsSlopeCalc,darkShmimT>, public dev::frameGrabber<pwfsSlopeCalc>, public dev::telemeter<pwfsSlopeCalc>
 {
 
    //Give the test harness access.
@@ -62,6 +62,7 @@ class pwfsSlopeCalc : public MagAOXApp<true>, public dev::shmimMonitor<pwfsSlope
    friend class dev::shmimMonitor<pwfsSlopeCalc>;
    friend class dev::shmimMonitor<pwfsSlopeCalc,darkShmimT>;
    friend class dev::frameGrabber<pwfsSlopeCalc>;
+   friend class dev::telemeter<pwfsSlopeCalc>;
    
    //The base shmimMonitor type
    typedef dev::shmimMonitor<pwfsSlopeCalc> shmimMonitorT;
@@ -72,6 +73,9 @@ class pwfsSlopeCalc : public MagAOXApp<true>, public dev::shmimMonitor<pwfsSlope
    //The base frameGrabber type
    typedef dev::frameGrabber<pwfsSlopeCalc> frameGrabberT;
    
+   //The base telemeter type
+   typedef dev::telemeter<pwfsSlopeCalc> telemeterT;
+
    ///Floating point type in which to do all calculations.
    typedef float realT;
    
@@ -239,6 +243,16 @@ public:
    INDI_SETCALLBACK_DECL(pwfsSlopeCalc, m_indiP_quad2);
    INDI_SETCALLBACK_DECL(pwfsSlopeCalc, m_indiP_quad3);
    INDI_SETCALLBACK_DECL(pwfsSlopeCalc, m_indiP_quad4);
+
+   /** \name Telemeter Interface
+     * 
+     * @{
+     */ 
+   int checkRecordTimes();
+   
+   int recordTelem( const telem_fgtimings * );
+
+   ///@}
 };
 
 
@@ -256,7 +270,8 @@ void pwfsSlopeCalc::setupConfig()
    darkMonitorT::setupConfig(config);
    
    frameGrabberT::setupConfig(config);
-   
+   telemeterT::setupConfig(config);
+
    config.add("pupil.fitter", "", "pupil.fitter", argType::Required, "pupil", "fitter", false, "int", "The device name of the pupil fitter.  If set, then pupil position is set by the fitter reference.");
 
    config.add("pupil.D", "", "pupil.D", argType::Required, "pupil", "D", false, "int", "The diameter of the pupils, fixed. Default is 56.");
@@ -287,7 +302,8 @@ int pwfsSlopeCalc::loadConfigImpl( mx::app::appConfigurator & _config )
    shmimMonitorT::loadConfig(_config);
    darkMonitorT::loadConfig(_config);
    frameGrabberT::loadConfig(_config);
-   
+   telemeterT::loadConfig(_config);
+
    config(m_fitter, "pupil.fitter");
    config(m_numPupils, "pupil.numPupils");
    config(m_pupil_D, "pupil.D");
@@ -333,6 +349,11 @@ int pwfsSlopeCalc::appStartup()
       return log<software_error,-1>({__FILE__, __LINE__});
    }
    
+   if(telemeterT::appStartup() < 0)
+   {
+      return log<software_error,-1>({__FILE__, __LINE__});
+   }
+
    if(m_fitter != "")
    {
       REG_INDI_SETPROP(m_indiP_quad1, m_fitter, "quadrant1");
@@ -368,6 +389,11 @@ int pwfsSlopeCalc::appLogic()
       return log<software_error,-1>({__FILE__,__LINE__});
    }
    
+   if( telemeterT::appLogic() < 0)
+   {
+      return log<software_error,-1>({__FILE__,__LINE__});
+   }
+
    std::unique_lock<std::mutex> lock(m_indiMutex);
    
    if(shmimMonitorT::updateINDI() < 0)
@@ -400,6 +426,8 @@ int pwfsSlopeCalc::appShutdown()
    
    frameGrabberT::appShutdown();
    
+   telemeterT::appShutdown();
+
    return 0;
 }
 
@@ -781,6 +809,18 @@ INDI_SETCALLBACK_DEFN(pwfsSlopeCalc, m_indiP_quad4)(const pcf::IndiProperty &ipR
    
    
    return 0;
+}
+
+inline
+int pwfsSlopeCalc::checkRecordTimes()
+{
+   return telemeterT::checkRecordTimes(telem_fgtimings());
+}
+   
+inline
+int pwfsSlopeCalc::recordTelem( const telem_fgtimings * )
+{
+   return recordFGTimings(true);
 }
 
 } //namespace app

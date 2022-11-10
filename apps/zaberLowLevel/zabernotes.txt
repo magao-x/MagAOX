@@ -1,5 +1,10 @@
+
 Zaber notes:
 baud is 115200
+
+screen /dev/ttyUSB1 115200
+to exit screen ctrl-a \
+
 /2 home <-- homes the 2nd stage
 /2 stop <-- safely stops the 2nd stage
 /2 estop <-- immediately stops the 2nd stage
@@ -48,3 +53,78 @@ max pos is 2257638 = 224 mm
 stagepiaa1 has s/n 104971
 0.047625 um/step
 mx limit: 1679790
+
+As of 2022-10-12:
+/ get system.serial
+@01 0 OK IDLE -- 49822
+@02 0 OK IDLE -- 49820
+@03 0 OK IDLE -- 49821
+@04 0 OK IDLE -- 49850
+@05 0 OK IDLE -- 49849
+@06 0 OK IDLE -- 104971
+@07 0 OK IDLE -- 64040
+
+/ get limit.max
+@01 0 OK IDLE -- 771029
+@02 0 OK IDLE -- 1526940
+@03 0 OK IDLE -- 352750
+@06 0 OK IDLE -- 1679790
+@04 0 OK IDLE -- 2624672
+@05 0 OK IDLE -- 2624672
+@07 0 OK IDLE -- 2257638
+
+stagepiaa2 is 104970
+
+As of 2022-10-12:
+/ get system.serial
+@01 0 OK IDLE -- 49822
+@02 0 OK IDLE -- 49820
+@03 0 OK IDLE -- 49821
+@04 0 OK IDLE -- 49850
+@05 0 OK IDLE -- 49849
+@06 0 OK IDLE -- 104971
+@07 0 OK IDLE -- 64040
+
+/ get limit.max
+@01 0 OK IDLE -- 771029
+@02 0 OK IDLE -- 1526940
+@03 0 OK IDLE -- 352750
+@06 0 OK IDLE -- 1679790
+@04 0 OK IDLE -- 2624672
+@05 0 OK IDLE -- 2624672
+@07 0 OK IDLE -- 2257638
+
+As of 2022-10-14:
+/ get system.serial
+@01 0 OK IDLE WR 49822
+@02 0 OK IDLE WR 49820
+@03 0 OK IDLE WR 49821
+@04 0 OK IDLE WR 49850
+@05 0 OK IDLE WR 49849
+@06 0 OK IDLE WR 104970
+@07 0 OK IDLE WR 104971
+@08 0 OK IDLE WR 64040
+
+/ get limit.max
+@01 0 OK IDLE WR 771029
+@02 0 OK IDLE WR 1526940
+@03 0 OK IDLE WR 352750
+@04 0 OK IDLE WR 2624672
+@06 0 OK IDLE WR 2133334
+@05 0 OK IDLE WR 2624672
+@07 0 OK IDLE WR 1679790
+@08 0 OK IDLE WR 2257638
+
+
+************************
+turbsim rotator
+************************
+
+serial = 105115
+4266.6667 steps/deg
+
+set min pos = 0
+set max pos = 384000
+
+set point for out should be 85 degrees
+

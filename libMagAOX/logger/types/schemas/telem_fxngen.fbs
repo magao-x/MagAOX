@@ -17,7 +17,11 @@ table Telem_fxngen_fb
    C2ofst:double;
    C2phse:double;
    C2wvtp:uint8;
+
+   C1sync:uint8;
+   C2sync:uint8;
 }
 
 root_type Telem_fxngen_fb;
 
+//updated 2022-10-15 adding C1/C2 sync

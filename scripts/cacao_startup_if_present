@@ -1,0 +1,4 @@
+#!/bin/sh
+if [ -e /opt/MagAOX/cacao/startup.bash ]; then
+    bash -l /opt/MagAOX/cacao/startup.bash
+fi

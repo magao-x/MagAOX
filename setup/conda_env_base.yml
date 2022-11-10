@@ -18,12 +18,8 @@ dependencies:
   - pytest
   - psutil
   - cupy
-  - cudatoolkit=11.1
   - line_profiler
   - pyserial
-  # GUIs
-  - qt=5
-  - qwt
   # video streaming
   - cffi
   - cryptography

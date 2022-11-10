@@ -269,6 +269,51 @@ int parseARWV( int & channel, ///< [out] the channel indicated by this response.
    
    return 0;
 }
+
+/// Parse the SDG response to the SYNC query
+/** 
+  * 
+  * Example: C1:SYNC ON
+  *
+  * \returns 0 on success
+  * \returns \<0 on error, with value indicating location of error.
+  */
+int parseSYNC( int & channel, ///< [out] the channel indicated by this response.
+               bool & sync, ///< [out] the ARWV index of the channel.  Should be 0.
+               const std::string & strRead ///< [in] string containing the device response
+             )
+{
+   channel = 0;
+   
+   sync = false;
+   
+   std::vector<std::string> v;
+
+   mx::ioutils::parseStringVector(v, strRead, ":, \n");
+
+
+   if(v.size() < 3) return -1;
+
+   if(v[1] != "SYNC") return -2;
+
+   if(v[0][0] != 'C') return -3;
+   channel = mx::ioutils::convertFromString<int>(v[0].substr(1, v[0].size()-1));
+
+   if(v[2] == "ON")
+   {
+      sync = true;
+      return 0;   
+   }
+   else if(v[2] == "OFF")
+   {
+      sync = false;
+      return 0;
+   }
+   else return -4;
+   
+   return 0;
+}
+
 } //namespace app
 } //namespace MagAOX
 

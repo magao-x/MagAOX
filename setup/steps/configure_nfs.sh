@@ -2,26 +2,39 @@
 DIR="$( cd "$( dirname "${BASH_SOURCE[0]}" )" && pwd )"
 source $DIR/../_common.sh
 set -euo pipefail
+source /etc/os-release
 
-if [[ $MAGAOX_ROLE == RTC || $MAGAOX_ROLE == ICC ]]; then
-    sudo systemctl enable nfs-server.service
-    sudo systemctl start nfs-server.service
-    cat <<'HERE' | sudo tee /etc/exports
-/data/logs      aoc(ro,sync,all_squash)
-/data/rawimages aoc(ro,sync,all_squash)
-/data/telem     aoc(ro,sync,all_squash)
-HERE
-    sudo exportfs -a
+if [[ $ID == centos ]]; then
+    nfsServiceUnit=nfs-server.service
+else
+    nfsServiceUnit=nfs-kernel-server.service
 fi
-if [[ $MAGAOX_ROLE == AOC ]]; then
-    for remote in rtc icc; do
-        for path in /data/logs /data/rawimages /data/telem; do
-            if ! grep -q "$remote:$path" /etc/fstab; then
-                mountpoint="/data/$remote${path/\/data\///}"
-                sudo mkdir -p $mountpoint
-                echo "$remote:$path $mountpoint	nfs	defaults	0 0" | sudo tee -a /etc/fstab
-                sudo mount $mountpoint || true
+
+if [[ $MAGAOX_ROLE == RTC || $MAGAOX_ROLE == ICC || $MAGAOX_ROLE == AOC ]]; then
+    sudo systemctl enable $nfsServiceUnit
+    sudo systemctl start $nfsServiceUnit
+    if command -v ufw; then
+        sudo ufw allow from 192.168.0.0/24 to any port nfs
+    fi
+    exportHosts=""
+    for host in aoc rtc icc; do
+        if [[ ${host,,} != ${MAGAOX_ROLE,,} ]]; then
+            exportHosts="$host(ro,sync,all_squash) $exportHosts"
+        fi
+    done
+    if ! grep -q "$exportHosts" /etc/exports; then
+        echo "/data      $exportHosts" | sudo tee -a /etc/exports
+        sudo exportfs -a
+        sudo systemctl reload $nfsServiceUnit
+    fi
+
+    for host in aoc rtc icc; do
+        if [[ ${host,,} != ${MAGAOX_ROLE,,} ]]; then
+            mountPath=/srv/$host/data
+            sudo mkdir -p $mountPath
+            if ! grep -q $mountPath /etc/fstab; then
+                echo "$host:/data $mountPath	nfs	noauto,x-systemd.automount,nofail,x-systemd.device-timeout=10s	0 0" | sudo tee -a /etc/fstab
             fi
-        done
+        fi
     done
 fi

@@ -41,6 +41,11 @@ apt install -y \
     liblog4cxx-dev \
     chrony \
     gdb \
+    unzip \
+    cpuset \
+    nfs-common \
+    nfs-kernel-server \
+    tree \
 ;
 
 if [[ $MAGAOX_ROLE == vm ]]; then

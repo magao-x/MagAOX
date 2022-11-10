@@ -25,11 +25,15 @@ import time
 import shlex
 
 stdout_b = os.fdopen(sys.stdout.fileno(), 'wb')
-RED_SEQ = subprocess.check_output('tput setaf 1', shell=True)
-GREEN_SEQ = subprocess.check_output('tput setaf 2', shell=True)
-YELLOW_SEQ = subprocess.check_output('tput setaf 3', shell=True)
-BLUE_SEQ = subprocess.check_output('tput setaf 4', shell=True)
-RESET_SEQ = subprocess.check_output('tput sgr0', shell=True)
+try:
+    RED_SEQ = subprocess.check_output('tput setaf 1', shell=True)
+    GREEN_SEQ = subprocess.check_output('tput setaf 2', shell=True)
+    YELLOW_SEQ = subprocess.check_output('tput setaf 3', shell=True)
+    BLUE_SEQ = subprocess.check_output('tput setaf 4', shell=True)
+    RESET_SEQ = subprocess.check_output('tput sgr0', shell=True)
+except subprocess.CalledProcessError:
+    RED_SEQ = GREEN_SEQ = YELLOW_SEQ = BLUE_SEQ = RESET_SEQ = b''
+
 
 def _make_output_funcs(color):
     def output_func(msg):
@@ -280,18 +284,36 @@ def _startup_helper(process_name, executable_name):
     success(f"Executed in {process_name} session: '{cmd}'")
     return True
 
-def validate_targets(processes, targets):
+def _identify_indiserver_name(names):
+    for process_name in names:
+        if process_name.startswith('is'):
+            return process_name
+    return None
+
+def validate_targets(processes, targets, for_restart=False):
+    extra_targets = set()
     if not len(targets):
-        targets = list(processes.keys())
+        targets = set(processes.keys())
     else:
-        if not set(targets).issubset(processes.keys()):
-            difference = set(targets) - set(processes.keys())
+        targets = set(targets)
+        if for_restart:
+            indiserver_name = _identify_indiserver_name(processes)
+            if indiserver_name not in targets:
+                targets.add(indiserver_name)
+            for target_name in targets:
+                for process_name in processes:
+                    # restart downstream helper processes (foo-sw, foo-dark, foo-avg, etc.)
+                    if process_name.startswith(target_name):
+                        extra_targets.add(process_name)
+        if not targets.issubset(processes.keys()):
+            difference = targets - set(processes.keys())
             failure(f'Unknown process names: {difference}')
             sys.exit(1)
-    return targets
+
+    return list(targets | extra_targets)
 
 def startup(processes, targets):
-    indi_server_name = None
+    indi_server_name = _identify_indiserver_name(processes)
 
     for process_name in targets:
         if process_name.startswith('is'):
@@ -301,7 +323,7 @@ def startup(processes, targets):
         # special case for INDI server: needs to be last to start,
         # so that restarts don't overwhelm it
         targets.remove(indi_server_name)
-            
+
     helpers = []
     for process_name in targets:
         th = threading.Thread(
@@ -314,17 +336,17 @@ def startup(processes, targets):
     for th in helpers:
         th.join()
 
-    if indi_server_name != None:     
+    if indi_server_name != None and not _session_exists(indi_server_name):
         # Now start indiserver
         info(f"Waiting 5 seconds before starting {indi_server_name}...")
         time.sleep(5)
-            
-        _indiserver_startup(indi_server_name, processes[indi_server_name])    
-        
+        _indiserver_startup(indi_server_name, processes[indi_server_name])
+
     return 0
 
 
 def restart(processes, targets):
+    targets = validate_targets(processes, targets, for_restart=True)
     exit_code_1 = shutdown(processes, targets)
     if exit_code_1 != 0:
         return exit_code_1

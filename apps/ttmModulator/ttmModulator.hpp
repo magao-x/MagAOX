@@ -565,11 +565,11 @@ int ttmModulator::restTTM()
    if( waitValue(m_C1freq, 0.0) < 0) return log<software_error,-1>({__FILE__,__LINE__, "fxngen timeout"});
    if( waitValue(m_C2freq, 0.0) < 0) return log<software_error,-1>({__FILE__,__LINE__, "fxngen timeout"});
    if( waitValue(m_C1volts, 0.002, 1e-6) < 0) return log<software_error,-1>({__FILE__,__LINE__, "fxngen timeout"});
-   if( waitValue(m_C2volts, 0.002,1e-6) < 0) return log<software_error,-1>({__FILE__,__LINE__, "fxngen timeout"});
+   if( waitValue(m_C2volts, 0.002, 1e-6) < 0) return log<software_error,-1>({__FILE__,__LINE__, "fxngen timeout"});
    if( waitValue(m_C1phse, 0.0) < 0) return log<software_error,-1>({__FILE__,__LINE__, "fxngen timeout"});
    if( waitValue(m_C2phse, 0.0) < 0) return log<software_error,-1>({__FILE__,__LINE__, "fxngen timeout"});
-   if( waitValue(m_C1ofst, 0.0) < 0) return log<software_error,-1>({__FILE__,__LINE__, "fxngen timeout"});
-   if( waitValue(m_C2ofst, 0.0) < 0) return log<software_error,-1>({__FILE__,__LINE__, "fxngen timeout"});
+   if( waitValue(m_C1ofst, 0.001, 1e-6) < 0) return log<software_error,-1>({__FILE__,__LINE__, "fxngen timeout"});
+   if( waitValue(m_C2ofst, 0.001, 1e-6) < 0) return log<software_error,-1>({__FILE__,__LINE__, "fxngen timeout"});
    if( waitValue(m_C1outp, 0) < 0) return log<software_error,-1>({__FILE__,__LINE__, "fxngen timeout"});
    if( waitValue(m_C2outp, 0) < 0) return log<software_error,-1>({__FILE__,__LINE__, "fxngen timeout"});
 

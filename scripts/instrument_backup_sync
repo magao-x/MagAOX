@@ -1,30 +1,31 @@
 #!/usr/bin/env bash
-set -exuo pipefail
+set -x
 if (( $# < 1 )); then
   prefixes=( "/media/backup" "/media/backup2" "/media/backup3" )
 else
   prefixes="$@"
 fi
+rsyncWithOptions="rsync --checksum -a -P"
 for mountpoint in "${prefixes[@]}"; do
     if mount | grep -q "on $mountpoint"; then
         for remote in icc rtc; do
-            if ! mount | grep -q "$remote:/data/rawimages on /data/$remote/rawimages"; then
+            if ! mount | grep -q "$remote:/data on /srv/$remote/data"; then
                 echo "NFS mount appears not to be active for $remote"
                 exit 1
             fi
             
             mkdir -p $mountpoint/$remote
             for dir in rawimages logs telem; do
-                rsync -a /data/$remote/$dir/ $mountpoint/$remote/$dir/
+                $rsyncWithOptions /srv/$remote/data/$dir/ $mountpoint/$remote/$dir/
             done
-            if [[ $remote == "rtc" ]]; then
+            if [[ -e /srv/$remote/data/cacao/ ]]; then
                 # special case to back up cacao data
-                rsync -a /data/$remote/cacao/ $mountpoint/$remote/cacao/
+                $rsyncWithOptions /srv/$remote/data/cacao/ $mountpoint/$remote/cacao/
             fi
         done
         mkdir -p $mountpoint/aoc
         for dir in rawimages logs telem; do
-            rsync -a /data/$dir/ $mountpoint/aoc/$dir/
+            $rsyncWithOptions /data/$dir/ $mountpoint/aoc/$dir/
         done
     fi
 done

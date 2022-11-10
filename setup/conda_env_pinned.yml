@@ -223,4 +223,3 @@ dependencies:
     - uvicorn==0.12.2
     - xxhash==2.0.0
     - yarl==1.6.2
-prefix: /opt/miniconda3
