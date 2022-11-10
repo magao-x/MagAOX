@@ -150,7 +150,7 @@ main(int argc, char** argv)
                 continue;
             }
 
-            // To here, FD is for an INDI server ("is" prefix)
+            // To here, this is INDI server ("is" prefix on driver name)
 
             // Duplicate indiservers are ignored
             if (isfd != -1)
@@ -170,14 +170,16 @@ main(int argc, char** argv)
 
         fclose(f);
 
-        if (fd_indidrivers.size())
+        // Delay if there are drivers to start and the INDI server was
+        // just now started above
+        if (fd_indidrivers.size() && isfd > -1)
         {
             std::cerr << "Delay 5s to start INDI drivers" << std::endl;
+            timeval tv = {5,0};
+            select(1,0,0,0,&tv);
         }
-        timeval tv = {5,0};
-        select(1,0,0,0,&tv);
 
-        // Start the selected INDI drivers
+        // Start any selected INDI drivers
         for ( auto fd : fd_indidrivers)
         {
             resurr.start_hexbeater(fd,10);

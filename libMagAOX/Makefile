@@ -53,14 +53,17 @@ INCLUDEDEPS= app/MagAOXApp.hpp \
 	     logger/types/saving_state_change.hpp \
 	     logger/types/saving_start.hpp \
 	     logger/types/saving_stop.hpp \
-	     logger/types/saving_stats.hpp \
-		  logger/types/telem_dmspeck.hpp \
+	     logger/types/telem_saving.hpp \
+            logger/types/telem_saving_state.hpp \
+            logger/types/telem_dmmodes.hpp \
+	     logger/types/telem_dmspeck.hpp \
 	     logger/types/telem_chrony_status.hpp \
 	     logger/types/telem_chrony_stats.hpp \
 	     logger/types/telem_cooler.hpp \
 	     logger/types/telem_coreloads.hpp \
 	     logger/types/telem_coretemps.hpp \
 	     logger/types/telem_drivetemps.hpp \
+            logger/types/telem_fgtimings.hpp \
 	     logger/types/telem_fxngen.hpp \
 	     logger/types/telem_observer.hpp \
 	     logger/types/telem_pico.hpp \
@@ -113,7 +116,10 @@ OBJS = app/MagAOXApp.o \
               
 all: libMagAOX.hpp.gch libMagAOX.a  
 
-libMagAOX.hpp.gch: libMagAOX.hpp $(INCLUDEDEPS) logger/generated/logTypes.hpp
+app/MagAOXApp.o: app/MagAOXApp.hpp app/indiDriver.hpp app/indiMacros.hpp app/indiUtils.hpp app/stateCodes.o 
+app/stateCodes.o: app/stateCodes.hpp
+
+libMagAOX.hpp.gch: libMagAOX.hpp $(INCLUDEDEPS) logger/generated/logTypes.hpp $(OBJS)
 
 flatlogs:
 	cd logger; ../../flatlogs/bin/flatlogcodes
@@ -124,6 +130,8 @@ logger/generated/logTypes.hpp: logger/logCodes.dat
 libMagAOX.a: libMagAOX.hpp.gch $(OBJS)
 	ar rvs libMagAOX.a $(OBJS)
 
+logger/logMeta.o: logger/logMap.hpp logger/logMap.cpp logger/logMeta.hpp logger/logMeta.cpp logger/generated/logTypes.hpp
+logger/logMap.o: logger/logMap.hpp logger/logMap.cpp logger/logFileName.hpp 
 
 .PHONY: clean
 clean:

@@ -1,0 +1,12 @@
+[Unit]
+Description=Create MagAO-X ICC cpusets
+Requires=multi-user.target
+After=multi-user.target
+
+[Service]
+Type=oneshot
+RemainAfterExit=yes
+ExecStart=/usr/local/bin/icc_cpuset
+
+[Install]
+WantedBy=default.target

@@ -5,7 +5,7 @@
 #ifndef ImageStruct_hpp
 #define ImageStruct_hpp
 
-#include <ImageStruct.h>
+#include <ImageStreamIO/ImageStruct.h>
 
 #ifndef ULONGLONG_IMG
 #define ULONGLONG_IMG (80)

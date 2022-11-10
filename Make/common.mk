@@ -157,7 +157,7 @@ BLAS_LDLIBS ?= -lmkl_intel_lp64 -lmkl_gnu_thread -lmkl_core -lgomp -lpthread -lm
 
 #2nd step in case we need to modify above for other architectures/systems
 INCLUDES += $(BLAS_INCLUDES)
-EXTRA_LDFLAGS += $(BLAS_INCLUDES)
+EXTRA_LDFLAGS += $(BLAS_INCLUDES) $(BLAS_LDFLAGS)
 EXTRA_LDLIBS += $(BLAS_LDLIBS)
 
 ### EDT

@@ -13,7 +13,9 @@ apps_common = \
 	shmimIntegrator \
 	timeSeriesSimulator
 
-apps_rtcicc = alpaoCtrl
+apps_rtcicc = alpaoCtrl \
+              cacaoInterface \
+				  userGainCtrl
 
 apps_rtc = \
 	ocam2KCtrl \
@@ -24,11 +26,14 @@ apps_rtc = \
 	pi335Ctrl \
 	pupilFit \
 	t2wOffloader \
-   cacaoInterface \
-	dmSpeckle
+	dmSpeckle \
+   w2tcsOffloader \
+	pwfsSlopeCalc
 
 apps_icc = \
-        cacaoInterface \
+   acronameUsbHub \
+   cacaoInterface \
+	flipperCtrl \
 	filterWheelCtrl \
 	hsfwCtrl \
 	baslerCtrl \
@@ -40,13 +45,15 @@ apps_icc = \
 	usbtempMon \
 	xt1121Ctrl \
 	xt1121DCDU \
-        picoMotorCtrl
+   picoMotorCtrl \
+	koolanceCtrl \
 
 apps_aoc = \
 	trippLitePDU \
    tcsInterface \
    adcTracker \
-   kTracker
+   kTracker \
+	koolanceCtrl
 
 # apps_vm = none yet
 apps_tic = \
@@ -117,11 +124,21 @@ utils_to_build = logdump \
 				     xrif2shmim \
 				     xrif2fits
 
-scripts_to_install = magaox query_seeing sync_cacao xctrl netconsole_logger creaimshm dmdispbridge shmimTCPreceive shmimTCPtransmit
+scripts_to_install = magaox \
+	query_seeing \
+	sync_cacao \
+	xctrl \
+	netconsole_logger \
+	creaimshm \
+	dmdispbridge \
+	shmimTCPreceive \
+	shmimTCPtransmit \
+	lookyloo \
+	obs_to_movie
 
 all: indi_all libs_all flatlogs apps_all guis_all utils_all
 
-install: indi_install libs_install flatlogs_all apps_install guis_install utils_install scripts_install
+install: indi_install libs_install flatlogs_all apps_install guis_install utils_install scripts_install rtscripts_install
 
 #We clean just libMagAOX, and the apps, guis, and utils for normal devel work.
 clean: lib_clean apps_clean guis_clean utils_clean
@@ -217,6 +234,15 @@ scripts_install:
 		sudo install scripts/$$script /opt/MagAOX/bin  && \
 		sudo ln -fs /opt/MagAOX/bin/$$script /usr/local/bin/$$script; \
 	done
+
+
+MAGAOX_ROLE_LOWER := $(shell echo "$(MAGAOX_ROLE)" | tr '[:upper:]' '[:lower:]')
+rtscripts_install:
+	if [[ $(MAGAOX_ROLE) == "ICC" || $(MAGAOX_ROLE) == "RTC" ]]; then for scriptname in cpuset procset; do \
+		sudo install -d /opt/MagAOX/bin && \
+			sudo install rtSetup/$(MAGAOX_ROLE)/$(MAGAOX_ROLE_LOWER)_$$scriptname /opt/MagAOX/bin && \
+			sudo ln -fs /opt/MagAOX/bin/$(MAGAOX_ROLE_LOWER)_$$scriptname /usr/local/bin/$(MAGAOX_ROLE_LOWER)_$$scriptname; \
+	done; fi
 
 utils_all: flatlogs_all
 		for app in ${utils_to_build}; do \

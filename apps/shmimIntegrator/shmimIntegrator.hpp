@@ -64,7 +64,8 @@ struct dark2ShmimT
   * \ingroup shmimIntegrator
   * 
   */
-class shmimIntegrator : public MagAOXApp<true>, public dev::shmimMonitor<shmimIntegrator>, public dev::shmimMonitor<shmimIntegrator,darkShmimT>, public dev::shmimMonitor<shmimIntegrator,dark2ShmimT>, public dev::frameGrabber<shmimIntegrator>
+class shmimIntegrator : public MagAOXApp<true>, public dev::shmimMonitor<shmimIntegrator>, public dev::shmimMonitor<shmimIntegrator,darkShmimT>, 
+                             public dev::shmimMonitor<shmimIntegrator,dark2ShmimT>, public dev::frameGrabber<shmimIntegrator>, public dev::telemeter<shmimIntegrator>
 {
 
    //Give the test harness access.
@@ -74,7 +75,8 @@ class shmimIntegrator : public MagAOXApp<true>, public dev::shmimMonitor<shmimIn
    friend class dev::shmimMonitor<shmimIntegrator,darkShmimT>;
    friend class dev::shmimMonitor<shmimIntegrator,dark2ShmimT>;
    friend class dev::frameGrabber<shmimIntegrator>;
-   
+   friend class dev::telemeter<shmimIntegrator>;
+
    //The base shmimMonitor type
    typedef dev::shmimMonitor<shmimIntegrator> shmimMonitorT;
    
@@ -87,6 +89,8 @@ class shmimIntegrator : public MagAOXApp<true>, public dev::shmimMonitor<shmimIn
    //The base frameGrabber type
    typedef dev::frameGrabber<shmimIntegrator> frameGrabberT;
    
+   typedef dev::telemeter<shmimIntegrator> telemeterT;
+
    ///Floating point type in which to do all calculations.
    typedef float realT;
    
@@ -148,12 +152,17 @@ protected:
    
    realT (*pixget)(void *, size_t) {nullptr}; ///< Pointer to a function to extract the image data as our desired type realT.
    
+   ///Mutex for locking dark operations.
+   std::mutex m_darkMutex;
+
    mx::improc::eigenImage<realT> m_darkImage;
    bool m_darkSet {false};
+   bool m_darkValid {false};
    realT (*dark_pixget)(void *, size_t) {nullptr}; ///< Pointer to a function to extract the image data as our desired type realT.
    
    mx::improc::eigenImage<realT> m_dark2Image;
    bool m_dark2Set {false};
+   bool m_dark2Valid {false};
    realT (*dark2_pixget)(void *, size_t) {nullptr}; ///< Pointer to a function to extract the image data as our desired type realT.
    
    
@@ -287,6 +296,16 @@ protected:
    INDI_SETCALLBACK_DECL(shmimIntegrator, m_indiP_stateSource);
 
    pcf::IndiProperty m_indiP_imageValid;
+
+   /** \name Telemeter Interface
+     * 
+     * @{
+     */ 
+   int checkRecordTimes();
+   
+   int recordTelem( const telem_fgtimings * );
+
+   ///@}
    
 };
 
@@ -305,7 +324,8 @@ void shmimIntegrator::setupConfig()
    dark2MonitorT::setupConfig(config);
    
    frameGrabberT::setupConfig(config);
-   
+   telemeterT::setupConfig(config);
+
    config.add("integrator.nAverage", "", "integrator.nAverage", argType::Required, "integrator", "nAverage", false, "unsigned", "The default number of frames to average.  Default 10. Can be changed via INDI.");
    config.add("integrator.fpsSource", "", "integrator.fpsSource", argType::Required, "integrator", "fpsSource", false, "string", "Device name for getting fps if time-based averaging is used.  This device should have *.fps.current.");
 
@@ -318,6 +338,8 @@ void shmimIntegrator::setupConfig()
 
    config.add("integrator.stateSource", "", "integrator.stateSource", argType::Required, "integrator", "stateSource", false, "string", "///< Device name for getting the state string for file management.  This device should have *.state_string.current.");
    config.add("integrator.fileSaver", "", "integrator.fileSaver", argType::Required, "integrator", "fileSaver", false, "bool", "Flag controlling whether this saves and reloads files automatically.  Default false.");
+
+   
 }
 
 inline
@@ -329,7 +351,8 @@ int shmimIntegrator::loadConfigImpl( mx::app::appConfigurator & _config )
    dark2MonitorT::loadConfig(config);
    
    frameGrabberT::loadConfig(config);
-   
+   telemeterT::loadConfig(config);
+
    _config(m_nAverageDefault, "integrator.nAverage");
    m_nAverage=m_nAverageDefault;
    _config(m_fpsSource, "integrator.fpsSource");
@@ -463,6 +486,11 @@ int shmimIntegrator::appStartup()
       return log<software_error,-1>({__FILE__, __LINE__});
    }
 
+   if(telemeterT::appStartup() < 0)
+   {
+      return log<software_error,-1>({__FILE__, __LINE__});
+   }
+
    state(stateCodes::READY);
     
    return 0;
@@ -491,6 +519,11 @@ int shmimIntegrator::appLogic()
       return log<software_error,-1>({__FILE__,__LINE__});
    }
 
+   if( telemeterT::appLogic() < 0)
+   {
+      return log<software_error,-1>({__FILE__,__LINE__});
+   }
+
    std::unique_lock<std::mutex> lock(m_indiMutex);
 
    if(shmimMonitorT::updateINDI() < 0)
@@ -512,7 +545,7 @@ int shmimIntegrator::appLogic()
    {
       log<software_error>({__FILE__, __LINE__});
    }
-      
+
    if(m_running == false)
    {
       state(stateCodes::READY);
@@ -567,6 +600,8 @@ int shmimIntegrator::appShutdown()
    
    frameGrabberT::appShutdown();
    
+   telemeterT::appShutdown();
+
    return 0;
 }
 
@@ -575,11 +610,17 @@ int shmimIntegrator::allocate(const dev::shmimT & dummy)
 {
    static_cast<void>(dummy); //be unused
   
-   std::unique_lock<std::mutex> lock(m_indiMutex);
-  
+   //This whole thing could invalidate the dark.
+   std::unique_lock<std::mutex> lock(m_darkMutex);  //Lock the mutex before messing with the dark.
+
+
    if(m_avgTime > 0 && m_fps > 0)
    {
       m_nAverage = m_avgTime * m_fps;
+      if(m_nAverage <= 0)
+      {
+         m_nAverage = 1;
+      }
       log<text_log>("set nAverage to " + std::to_string(m_nAverage) + " based on FPS", logPrio::LOG_NOTICE);
    }
    else if(m_avgTime > 0 && m_fps == 0) //Haven't gotten the update yet so we keep going for now
@@ -625,6 +666,26 @@ int shmimIntegrator::allocate(const dev::shmimT & dummy)
    updateIfChanged(m_indiP_nUpdate, "current", m_nUpdate, INDI_IDLE);
    updateIfChanged(m_indiP_nUpdate, "target", m_nUpdate, INDI_IDLE);
    
+
+   if(darkMonitorT::m_width == shmimMonitorT::m_width || darkMonitorT::m_height == shmimMonitorT::m_height)
+   {
+      m_darkValid = true;
+   }
+   else
+   {
+      m_darkValid = false;
+   }
+
+   if(dark2MonitorT::m_width == shmimMonitorT::m_width || dark2MonitorT::m_height == shmimMonitorT::m_height)
+   {
+      m_dark2Valid = true;
+   }
+   else
+   {
+      m_dark2Valid = false;
+   }
+
+
    m_reconfig = true;
    
    return 0;
@@ -655,10 +716,22 @@ int shmimIntegrator::processImage( void * curr_src,
       {
          m_avgImage /= m_nAverage; ///\todo should this be /= m_sinceUpdate?
          
-         if(m_darkSet && !m_dark2Set) m_avgImage -= m_darkImage;
-         else if(!m_darkSet && m_dark2Set) m_avgImage -= m_dark2Image;
-         else if(m_darkSet && m_dark2Set) m_avgImage -= m_darkImage + m_dark2Image;
-         
+         if((m_darkSet && m_darkValid) && !(m_dark2Set && m_dark2Valid))
+         {
+            std::unique_lock<std::mutex> lock(m_darkMutex);  //Lock the mutex before messing with the dark.
+            m_avgImage -= m_darkImage;
+         }
+         else if(!(m_darkSet && m_darkValid) && (m_dark2Set && m_dark2Valid)) 
+         {
+            std::unique_lock<std::mutex> lock(m_darkMutex);  //Lock the mutex before messing with the dark.
+            m_avgImage -= m_dark2Image;
+         }
+         else if((m_darkSet && m_darkValid) && (m_dark2Set && m_dark2Valid)) 
+         {
+            std::unique_lock<std::mutex> lock(m_darkMutex);  //Lock the mutex before messing with the dark.
+            m_avgImage -= m_darkImage + m_dark2Image;
+         }
+
          m_updated = true;
          
          //Now tell the f.g. to get going
@@ -757,8 +830,12 @@ int shmimIntegrator::processImage( void * curr_src,
          }
          m_avgImage /= m_nAverage;
          
-         if(m_darkSet) m_avgImage -= m_darkImage;
-         
+         if(m_darkValid && m_darkSet)
+         {
+            std::unique_lock<std::mutex> lock(m_darkMutex);  //Lock the mutex before messing with the dark.
+            m_avgImage -= m_darkImage;
+         }
+
          m_updated = true;
          
          //Now tell the f.g. to get going
@@ -779,24 +856,31 @@ int shmimIntegrator::allocate(const darkShmimT & dummy)
 {
    static_cast<void>(dummy); //be unused
    
-   std::unique_lock<std::mutex> lock(m_indiMutex);
-
-   if(darkMonitorT::m_width != shmimMonitorT::m_width || darkMonitorT::m_height != shmimMonitorT::m_height)
-   {
-      m_darkSet = false;
-      darkMonitorT::m_restart = true;
-   }
+   std::unique_lock<std::mutex> lock(m_darkMutex);  //Lock the mutex before messing with the dark.
    
    m_darkImage.resize(darkMonitorT::m_width, darkMonitorT::m_height);
-   
+   m_darkImage.setZero();
+
    dark_pixget = getPixPointer<realT>(darkMonitorT::m_dataType);
    
    if(dark_pixget == nullptr)
    {
       log<software_error>({__FILE__, __LINE__, "bad data type"});
+      m_darkSet = false;
+      m_darkValid = false;
       return -1;
    }
    
+
+   if(darkMonitorT::m_width == shmimMonitorT::m_width || darkMonitorT::m_height == shmimMonitorT::m_height)
+   {
+      m_darkValid = true;
+   }
+   else
+   {
+      m_darkValid = false;
+   }
+
    return 0;
 }
 
@@ -815,7 +899,7 @@ int shmimIntegrator::processImage( void * curr_src,
       data[nn] = dark_pixget(curr_src, nn);
    }
    
-   m_darkSet = true;
+    m_darkSet = true; //There is a dark set and ready to use, but it may or may not be valid.
    
    return 0;
 }
@@ -825,24 +909,31 @@ int shmimIntegrator::allocate(const dark2ShmimT & dummy)
 {
    static_cast<void>(dummy); //be unused
    
-   std::unique_lock<std::mutex> lock(m_indiMutex);
-
-   if(dark2MonitorT::m_width != shmimMonitorT::m_width || dark2MonitorT::m_height != shmimMonitorT::m_height)
-   {
-      m_dark2Set = false;
-      dark2MonitorT::m_restart = true;
-   }
+   std::unique_lock<std::mutex> lock(m_darkMutex);  //Lock the mutex before messing with the dark.
    
    m_dark2Image.resize(dark2MonitorT::m_width, dark2MonitorT::m_height);
-   
+   m_dark2Image.setZero();
+
    dark2_pixget = getPixPointer<realT>(dark2MonitorT::m_dataType);
    
    if(dark2_pixget == nullptr)
    {
       log<software_error>({__FILE__, __LINE__, "bad data type"});
+      m_dark2Set = false;
+      m_dark2Valid = false;
       return -1;
    }
    
+   if(dark2MonitorT::m_width == shmimMonitorT::m_width || dark2MonitorT::m_height == shmimMonitorT::m_height)
+   {
+      m_dark2Valid = true;
+   }
+   else
+   {
+      m_dark2Valid = false;
+   }
+
+
    return 0;
 }
 
@@ -861,7 +952,7 @@ int shmimIntegrator::processImage( void * curr_src,
       data[nn] = dark2_pixget(curr_src, nn);
    }
    
-   m_dark2Set = true;
+   m_dark2Set = true; //There is a dark set and ready to use, but it may or may not be valid.
    
    return 0;
 }
@@ -1207,6 +1298,18 @@ INDI_SETCALLBACK_DEFN( shmimIntegrator, m_indiP_stateSource )(const pcf::IndiPro
    }
 
    return 0;
+}
+
+inline
+int shmimIntegrator::checkRecordTimes()
+{
+   return telemeterT::checkRecordTimes(telem_fgtimings());
+}
+   
+inline
+int shmimIntegrator::recordTelem( const telem_fgtimings * )
+{
+   return recordFGTimings(true);
 }
 
 } //namespace app

@@ -14,6 +14,16 @@ rtimv -c rtimv_camlowfs.conf &
 rtimv -c rtimv_camsci1.conf &
 rtimv -c rtimv_camsci2.conf &
 
+cameraGUI camwfs &
+cameraGUI camtip &
+cameraGUI camlowfs &
+cameraGUI camacq &
+cameraGUI camsci1 &
+cameraGUI camsci2 &
+
+loopCtrlGUI holoop &
+offloadCtrlGUI &
+
 pupilGuideGUI &
 sleep 3
 ./dmnorm.sh woofer

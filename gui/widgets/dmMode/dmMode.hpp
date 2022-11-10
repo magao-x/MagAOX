@@ -31,7 +31,8 @@ public:
    
    dmMode( std::string & deviceName,
            QWidget * Parent = 0, 
-           Qt::WindowFlags f = 0);
+           Qt::WindowFlags f = Qt::WindowFlags()
+         );
    
    ~dmMode();
    

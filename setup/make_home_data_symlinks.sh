@@ -12,7 +12,7 @@ for username in *; do
     data_path="/data/users/$username"
     if [[ ! -d "$data_path" ]]; then
         mkdir -p "$data_path"
-        chown "$username:magaox" "$data_path"
+        chown "$username:$instrument_group" "$data_path"
         chmod g+rxs "$data_path"
         log_success "Created $data_path"
     else

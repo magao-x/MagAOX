@@ -269,9 +269,11 @@ int koolanceCtrl::appLogic()
    
    if( state() == stateCodes::NOTCONNECTED )
    {
-      euidCalled();
-      int rv = connect();
-      euidReal();
+      int rv = 0;
+      {
+         elevatedPrivileges ep(this);
+         rv = connect();
+      }
 
       if(rv < 0)
       {
@@ -388,7 +390,7 @@ int koolanceCtrl::initialConnect()
    std::vector<unsigned char> resp;
    resp.resize(51);
    
-   mx::milliSleep(1000); //Sleep for a long time to make sure device responds
+   mx::sys::milliSleep(1000); //Sleep for a long time to make sure device responds
    int readBytes;
    rv = tty::ttyReadRaw(resp, readBytes, m_fileDescrip, 1000); ///\todo needs to be iodevice
    

@@ -41,7 +41,6 @@ HEADERS += ../../widgets/camera/camera.hpp \
            ../../widgets/camera/roiStatus.hpp \
            ../../widgets/roi/roi.hpp \
            ../../widgets/camera/shutterStatus.hpp \
-           ../../lib/multiIndi.hpp \
            ../../lib/multiIndiManager.hpp
            
 SOURCES += cameraGUI_main.cpp 

@@ -1,11 +1,11 @@
 #!/bin/bash
 # If not started as root, sudo yourself
 if [[ "$EUID" != 0 ]]; then
-    sudo bash -l $0 "$@"
+    export BUILDING_KERNEL_STUFF=1  # disable loading devtoolset-7 for agreement w/ kernel gcc
+    /usr/bin/sudo --preserve-env=BUILDING_KERNEL_STUFF bash -l $0 "$@"
     exit $?
 fi
 DIR="$( cd "$( dirname "${BASH_SOURCE[0]}" )" && pwd )"
-export BUILDING_KERNEL_STUFF=1  # disable loading devtoolset-7 for agreement w/ kernel gcc
 source $DIR/../_common.sh
 set -euo pipefail
 
@@ -21,6 +21,15 @@ elif [[ $MAGAOX_ROLE == RTC || $MAGAOX_ROLE == ICC || $MAGAOX_ROLE == AOC || $MA
 else
   CUDA_FLAGS="--driver --toolkit --samples"
 fi
+if [[ $CUDA_FLAGS == *driver* ]]; then
+  systemGcc=$(/usr/bin/gcc --version | head -n 1)
+  currentGcc=$(gcc --version | head -n 1)
+
+  if [[ $currentGcc != $systemGcc ]]; then
+    log_error "You need to use the system GCC ($systemGcc) to build kernel drivers but gcc is $currentGcc"
+    exit 1
+  fi
+fi
 CUDA_PACKAGE_DIR=/opt/MagAOX/vendor/cuda
 mkdir -p $CUDA_PACKAGE_DIR
 cd $CUDA_PACKAGE_DIR
@@ -31,7 +40,7 @@ CUDA_RUNFILE=cuda_11.1.1_455.32.00_linux.run
 CUDA_URL=https://developer.download.nvidia.com/compute/cuda/11.1.1/local_installers/$CUDA_RUNFILE
 _cached_fetch $CUDA_URL $CUDA_RUNFILE
 if [[ ! -e /usr/local/cuda-$CUDA_VERSION ]]; then
-    bash $CUDA_RUNFILE $CUDA_FLAGS
+    bash $CUDA_RUNFILE $CUDA_FLAGS || log_error "Installation failed, next try bash $CUDA_PACKAGE_DIR/$CUDA_RUNFILE --extract=/tmp/cuda and poke around in there"
 else
     log_info "Existing CUDA install found in /usr/local/cuda-$CUDA_VERSION"
     log_info "sudo /usr/local/cuda-$CUDA_VERSION/bin/cuda-uninstaller to uninstall"

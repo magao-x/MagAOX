@@ -9,11 +9,24 @@ MXLIBROOT=/opt/MagAOX/source/mxlib
 #
 # mxLib
 #
+
 MXLIB_COMMIT_ISH=magaox
 orgname=jaredmales
 reponame=mxlib
 parentdir=/opt/MagAOX/source
 clone_or_update_and_cd $orgname $reponame $parentdir
+
+
+if [[ -d "$MXLIBROOT" ]]; then
+    cd "$MXLIBROOT"
+    git pull
+    echo "Updated mxlib"
+else
+    # TODO: use _common checkout function
+    git clone https://github.com/jaredmales/mxlib.git "$MXLIBROOT"
+    echo "Cloned a new copy of mxlib"
+    cd "$MXLIBROOT"
+fi
 
 git config core.sharedRepository group
 git checkout $MXLIB_COMMIT_ISH
@@ -21,25 +34,35 @@ export MXMAKEFILE="$MXLIBROOT/mk/MxApp.mk"
 # Populate $MXLIBROOT/local/ with example makefiles:
 make setup
 
-cat <<'HERE' > /tmp/mxlibCommon.mk
+mxlibCommonOverrides="/tmp/$(date +"%s")-mxlibCommon.mk"
+
+cat <<'HERE' > $mxlibCommonOverrides
 PREFIX = /usr/local
 CXXFLAGS += -DMX_OLD_GSL
-INCLUDES += -I/usr/local/cuda-11.1/targets/x86_64-linux/include/
 NEED_CUDA = no
+EIGEN_CFLAGS = 
 HERE
+
+if [[ $MAGAOX_ROLE == RTC || $MAGAOX_ROLE == ICC || $MAGAOX_ROLE == AOC || $MAGAOX_ROLE == TIC || $MAGAOX_ROLE == ci ]]; then
+  echo "INCLUDES += -I/usr/local/cuda-11.1/targets/x86_64-linux/include/" >> $mxlibCommonOverrides
+fi
+
+if [[ $(uname -p) != "x86_64" ]]; then
+  echo "USE_BLAS_FROM = openblas" >> $mxlibCommonOverrides
+fi
 
 # Ensure mxlib installs to /usr/local (not $HOME)
 if diff local/Common.mk local/Common.example.mk; then
-  mv /tmp/mxlibCommon.mk local/Common.mk
-elif diff /tmp/mxlibCommon.mk local/Common.mk ; then
+  mv $mxlibCommonOverrides local/Common.mk
+elif diff $mxlibCommonOverrides local/Common.mk ; then
   echo "mxlib options configured"
 else
-  echo "Unexpected modifications in $MXLIBROOT/local/Common.mk! Aborting." >&2
+  echo "Unexpected modifications in $MXLIBROOT/local/Common.mk! Aborting. See $mxlibCommonOverrides for suggested Common.mk" >&2
   exit 1
 fi
 make
-make install
+sudo make install
 # Sanity check: make sure gengithead.sh is available systemwide in /usr/local/bin
 gengithead.sh ./ ./include/mxlib_uncomp_version.h MXLIB_UNCOMP
 # Ensure all users get $MXMAKEFILE pointing to this install by default
-echo "export MXMAKEFILE=\"$MXLIBROOT/mk/MxApp.mk\"" | tee /etc/profile.d/mxmakefile.sh
+echo "export MXMAKEFILE=\"$MXLIBROOT/mk/MxApp.mk\"" | sudo tee /etc/profile.d/mxmakefile.sh

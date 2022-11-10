@@ -135,6 +135,7 @@ struct telem_telpos : public flatbuffer_log
       return fbs->rotoff();
    }
    
+
    /// Get the logMetaDetail for a member by name
    /**
      * \returns the a logMetaDetail filled in with the appropriate details
@@ -142,13 +143,13 @@ struct telem_telpos : public flatbuffer_log
      */ 
    static logMetaDetail getAccessor( const std::string & member /**< [in] the name of the member */ )
    {
-      if(     member == "epoch") return logMetaDetail({"EPOCH", logMeta::valTypes::Double, logMeta::metaTypes::Continuous, (void *) &epoch});
-      else if(member == "ra") return logMetaDetail({"RA", logMeta::valTypes::Double, logMeta::metaTypes::Continuous, (void *) &ra}); 
-      else if(member == "dec") return logMetaDetail({"DEC", logMeta::valTypes::Double, logMeta::metaTypes::Continuous, (void *) &dec}); 
-      else if(member == "el") return logMetaDetail({"EL", logMeta::valTypes::Double, logMeta::metaTypes::Continuous, (void *) &el}); 
-      else if(member == "ha") return logMetaDetail({"HA", logMeta::valTypes::Double, logMeta::metaTypes::Continuous, (void *) &ha}); 
-      else if(member == "am") return logMetaDetail({"AM", logMeta::valTypes::Double, logMeta::metaTypes::Continuous, (void *) &am});
-      else if(member == "ro") return logMetaDetail({"RO", logMeta::valTypes::Double, logMeta::metaTypes::Continuous, (void *) &ro});  
+      if(     member == "epoch") return logMetaDetail({"EPOCH", logMeta::valTypes::Double, logMeta::metaTypes::Continuous, (void *) &epoch, false});
+      else if(member == "ra") return logMetaDetail({"RA", "right ascension [degrees]", "%0.8f", logMeta::valTypes::Double, logMeta::metaTypes::Continuous, (void *) &ra, false}); 
+      else if(member == "dec") return logMetaDetail({"DEC", "declination [degrees]", "%0.8f", logMeta::valTypes::Double, logMeta::metaTypes::Continuous, (void *) &dec, false}); 
+      else if(member == "el") return logMetaDetail({"EL", "elevation [degrees]", "%0.8f", logMeta::valTypes::Double, logMeta::metaTypes::Continuous, (void *) &el, false}); 
+      else if(member == "ha") return logMetaDetail({"HA", "hour angle [degrees]", "%0.8f", logMeta::valTypes::Double, logMeta::metaTypes::Continuous, (void *) &ha, false}); 
+      else if(member == "am") return logMetaDetail({"AIRMASS", "airmass", "%0.2f", logMeta::valTypes::Double, logMeta::metaTypes::Continuous, (void *) &am, false});
+      else if(member == "ro") return logMetaDetail({"RO", "rotator offset [degrees]", "%0.8f", logMeta::valTypes::Double, logMeta::metaTypes::Continuous, (void *) &ro, false});  
       else
       {
          std::cerr << "No string member " << member << " in telem_telpos\n";

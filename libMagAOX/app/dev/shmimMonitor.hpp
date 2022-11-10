@@ -10,8 +10,8 @@
 #define shmimMonitor_hpp
 
 
-#include <ImageStruct.h>
-#include <ImageStreamIO.h>
+#include <ImageStreamIO/ImageStruct.h>
+#include <ImageStreamIO/ImageStreamIO.h>
 
 #include "../../libMagAOX/common/paths.hpp"
 
@@ -467,7 +467,7 @@ void shmimMonitor<derivedT, specificT>::smThreadExec()
    
    bool opened = false;
    
-   bool semgot = false;
+   //bool semgot = false;
 
    while(derived().shutdown() == 0)
    {
@@ -534,28 +534,14 @@ void shmimMonitor<derivedT, specificT>::smThreadExec()
          return;
       }
 
-    
-#if 1
-      ///\todo once we upgrade to the mythical new CACAO, nuke this entire dumpster fire from orbit.  Just to be sure.
-      if(!semgot) //this is a gross hack to prevent running up the semaphore number and exhausting it.
-      {
-         if(m_semaphoreNumber == 0) m_semaphoreNumber = 0; ///Move past CACAO hard coded things -- \todo need to return to this being a config/
-         int actSem = 1;
-         while(actSem == 1)//Don't accept semaphore 1 cuz it don't work.
-         {
-            m_semaphoreNumber = ImageStreamIO_getsemwaitindex(&m_imageStream, m_semaphoreNumber); //ask for semaphore we had before
-            if(m_semaphoreNumber == -1)
-            {
-               derivedT::template log<software_critical>({__FILE__,__LINE__, "could not get semaphore index"});
-               return;
-            }
-            actSem = m_semaphoreNumber;
-         }
-      }
-      semgot = true;
-#else
       m_semaphoreNumber = ImageStreamIO_getsemwaitindex(&m_imageStream, m_semaphoreNumber); //ask for semaphore we had before
-#endif
+
+      if(m_semaphoreNumber < 0)
+      {
+         derivedT::template log<software_critical>({__FILE__,__LINE__, "No valid semaphore found for " + m_shmimName + ". Source process will need to be restarted."});
+         return;
+      }
+
       derivedT::template log<software_info>({__FILE__,__LINE__, "got semaphore index " + std::to_string(m_semaphoreNumber) + " for " + m_shmimName });
       
       ImageStreamIO_semflush(&m_imageStream, m_semaphoreNumber);
@@ -568,7 +554,6 @@ void shmimMonitor<derivedT, specificT>::smThreadExec()
       m_height = m_imageStream.md[0].size[1];
       size_t length = m_imageStream.md[0].size[2];
 
-      
       if( derived().allocate( specificT()) < 0)
       {
          derivedT::template log<software_error>({__FILE__,__LINE__, "allocation failed"});
@@ -660,7 +645,9 @@ void shmimMonitor<derivedT, specificT>::smThreadExec()
                derivedT::template log<software_error>({__FILE__, __LINE__,errno, "sem_timedwait"});
                break;
             }
+
          }
+
       }
        
       //*******
@@ -668,6 +655,7 @@ void shmimMonitor<derivedT, specificT>::smThreadExec()
       //*******
       
       //opened == true if we can get to this 
+      if(m_semaphoreNumber >= 0) m_imageStream.semReadPID[m_semaphoreNumber] = 0; //release semaphore
       ImageStreamIO_closeIm(&m_imageStream);
       opened = false;
       

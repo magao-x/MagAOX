@@ -1,6 +1,8 @@
 
 #include "pwfsAlignment.hpp"
 
+#define errPrint(expl) std::cerr << "cameraStatus: " << __FILE__ << " " << __LINE__ << " " << expl << std::endl;
+
 pwfsAlignment::pwfsAlignment() : rtimvOverlayInterface()
 {
 }
@@ -34,171 +36,169 @@ int pwfsAlignment::updateOverlay()
    
    static int initialized = false;
    
-   
-   char * str;
+   size_t blobSz;
+
    if( m_roa.m_dictionary->count(m_deviceName + ".numPupils.value") > 0)
    {
-      str = (char *)(*m_roa.m_dictionary)[m_deviceName + ".numPupils.value"].m_blob;
-      m_numPupils = atoi(str);
+      if( (blobSz = (*m_roa.m_dictionary)[m_deviceName + ".numPupils.value"].getBlobStr(m_blob, sizeof(m_blob))) == sizeof(m_blob) ) return -1; //Don't trust this as a string.
+      m_numPupils = atoi(m_blob);
    }
    
    if( m_roa.m_dictionary->count(m_deviceName + ".sm_frameSize.width") > 0)
    {
-      str = (char *)(*m_roa.m_dictionary)[m_deviceName + ".sm_frameSize.width"].m_blob;
-      m_width = atoi(str);
+      if( (blobSz = (*m_roa.m_dictionary)[m_deviceName + ".sm_frameSize.width"].getBlobStr(m_blob, sizeof(m_blob))) == sizeof(m_blob) ) return -1; //Don't trust this as a string.
+      m_width = atoi(m_blob);
    }
    
    if( m_roa.m_dictionary->count(m_deviceName + ".sm_frameSize.height") > 0)
    {
-      str = (char *)(*m_roa.m_dictionary)[m_deviceName + ".sm_frameSize.height"].m_blob;
-      m_height = atoi(str);
+      if( (blobSz = (*m_roa.m_dictionary)[m_deviceName + ".sm_frameSize.height"].getBlobStr(m_blob, sizeof(m_blob))) == sizeof(m_blob) ) return -1; //Don't trust this as a string.
+      m_height = atoi(m_blob);
    }
    
    if( m_roa.m_dictionary->count(m_deviceName + ".quadrant1.x") > 0)
    {
-      str = (char *)(*m_roa.m_dictionary)[m_deviceName + ".quadrant1.x"].m_blob;
-      m_1x = strtod(str,0);
+      if( (blobSz = (*m_roa.m_dictionary)[m_deviceName + ".quadrant1.x"].getBlobStr(m_blob, sizeof(m_blob))) == sizeof(m_blob) ) return -1; //Don't trust this as a string.
+      m_1x = strtod(m_blob,0);
    }
    
    if( m_roa.m_dictionary->count(m_deviceName + ".quadrant1.y") > 0)
    {
-      str = (char *)(*m_roa.m_dictionary)[m_deviceName + ".quadrant1.y"].m_blob;
-      m_1y = strtod(str,0);
+      if( (blobSz = (*m_roa.m_dictionary)[m_deviceName + ".quadrant1.y"].getBlobStr(m_blob, sizeof(m_blob))) == sizeof(m_blob) ) return -1; //Don't trust this as a string.
+      m_1y = strtod(m_blob,0);
    }
    
    if( m_roa.m_dictionary->count(m_deviceName + ".quadrant1.D") > 0)
    {
-      str = (char *)(*m_roa.m_dictionary)[m_deviceName + ".quadrant1.D"].m_blob;
-      m_1D = strtod(str,0);
+      if( (blobSz = (*m_roa.m_dictionary)[m_deviceName + ".quadrant1.D"].getBlobStr(m_blob, sizeof(m_blob))) == sizeof(m_blob) ) return -1; //Don't trust this as a string.
+      m_1D = strtod(m_blob,0);
    }
    //std::cerr << "1: " << m_1x << " " << m_1y << " " << m_1D << "\n";
    
    if( m_roa.m_dictionary->count(m_deviceName + ".quadrant1.set-x") > 0)
    {
-      str = (char *)(*m_roa.m_dictionary)[m_deviceName + ".quadrant1.set-x"].m_blob;
-      m_set1x = strtod(str,0);
+      if( (blobSz = (*m_roa.m_dictionary)[m_deviceName + ".quadrant1.set-x"].getBlobStr(m_blob, sizeof(m_blob))) == sizeof(m_blob) ) return -1; //Don't trust this as a string.
+      m_set1x = strtod(m_blob,0);
    }
    
    if( m_roa.m_dictionary->count(m_deviceName + ".quadrant1.set-y") > 0)
    {
-      str = (char *)(*m_roa.m_dictionary)[m_deviceName + ".quadrant1.set-y"].m_blob;
-      m_set1y = strtod(str,0);
+      if( (blobSz = (*m_roa.m_dictionary)[m_deviceName + ".quadrant1.set-y"].getBlobStr(m_blob, sizeof(m_blob))) == sizeof(m_blob) ) return -1; //Don't trust this as a string.
+      m_set1y = strtod(m_blob,0);
    }
    
    if( m_roa.m_dictionary->count(m_deviceName + ".quadrant1.set-D") > 0)
    {
-      str = (char *)(*m_roa.m_dictionary)[m_deviceName + ".quadrant1.set-D"].m_blob;
-      m_set1D = strtod(str,0);
+      if( (blobSz = (*m_roa.m_dictionary)[m_deviceName + ".quadrant1.set-D"].getBlobStr(m_blob, sizeof(m_blob))) == sizeof(m_blob) ) return -1; //Don't trust this as a string.
+      m_set1D = strtod(m_blob,0);
    }
    
    if( m_roa.m_dictionary->count(m_deviceName + ".quadrant2.x") > 0)
    {
-      str = (char *)(*m_roa.m_dictionary)[m_deviceName + ".quadrant2.x"].m_blob;
-      m_2x = strtod(str,0);
+      if( (blobSz = (*m_roa.m_dictionary)[m_deviceName + ".quadrant2.x"].getBlobStr(m_blob, sizeof(m_blob))) == sizeof(m_blob) ) return -1; //Don't trust this as a string.
+      m_2x = strtod(m_blob,0);
    }
    
    if( m_roa.m_dictionary->count(m_deviceName + ".quadrant2.y") > 0)
    {
-      str = (char *)(*m_roa.m_dictionary)[m_deviceName + ".quadrant2.y"].m_blob;
-      m_2y = strtod(str,0);
+      if( (blobSz = (*m_roa.m_dictionary)[m_deviceName + ".quadrant2.y"].getBlobStr(m_blob, sizeof(m_blob))) == sizeof(m_blob) ) return -1; //Don't trust this as a string.
+      m_2y = strtod(m_blob,0);
    }
    
    if( m_roa.m_dictionary->count(m_deviceName + ".quadrant2.D") > 0)
    {
-      str = (char *)(*m_roa.m_dictionary)[m_deviceName + ".quadrant2.D"].m_blob;
-      m_2D = strtod(str,0);
+      if( (blobSz = (*m_roa.m_dictionary)[m_deviceName + ".quadrant2.D"].getBlobStr(m_blob, sizeof(m_blob))) == sizeof(m_blob) ) return -1; //Don't trust this as a string.
+      m_2D = strtod(m_blob,0);
    }
-   //std::cerr << "2: " <<  m_2x << " " << m_2y << " " << m_2D << "\n";
    
    if( m_roa.m_dictionary->count(m_deviceName + ".quadrant2.set-x") > 0)
    {
-      str = (char *)(*m_roa.m_dictionary)[m_deviceName + ".quadrant2.set-x"].m_blob;
-      m_set2x = strtod(str,0);
+      if( (blobSz = (*m_roa.m_dictionary)[m_deviceName + ".quadrant2.set-x"].getBlobStr(m_blob, sizeof(m_blob))) == sizeof(m_blob) ) return -1; //Don't trust this as a string.
+      m_set2x = strtod(m_blob,0);
    }
    
    if( m_roa.m_dictionary->count(m_deviceName + ".quadrant2.set-y") > 0)
    {
-      str = (char *)(*m_roa.m_dictionary)[m_deviceName + ".quadrant2.set-y"].m_blob;
-      m_set2y = strtod(str,0);
+      if( (blobSz = (*m_roa.m_dictionary)[m_deviceName + ".quadrant2.set-y"].getBlobStr(m_blob, sizeof(m_blob))) == sizeof(m_blob) ) return -1; //Don't trust this as a string.
+      m_set2y = strtod(m_blob,0);
    }
    
    if( m_roa.m_dictionary->count(m_deviceName + ".quadrant2.set-D") > 0)
    {
-      str = (char *)(*m_roa.m_dictionary)[m_deviceName + ".quadrant2.set-D"].m_blob;
-      m_set2D = strtod(str,0);
+      if( (blobSz = (*m_roa.m_dictionary)[m_deviceName + ".quadrant2.set-D"].getBlobStr(m_blob, sizeof(m_blob))) == sizeof(m_blob) ) return -1; //Don't trust this as a string.
+      m_set2D = strtod(m_blob,0);
    }
    
    if( m_roa.m_dictionary->count(m_deviceName + ".quadrant3.x") > 0)
    {
-      str = (char *)(*m_roa.m_dictionary)[m_deviceName + ".quadrant3.x"].m_blob;
-      m_3x = strtod(str,0);
+      if( (blobSz = (*m_roa.m_dictionary)[m_deviceName + ".quadrant3.x"].getBlobStr(m_blob, sizeof(m_blob))) == sizeof(m_blob) ) return -1; //Don't trust this as a string.
+      m_3x = strtod(m_blob,0);
    }
    
    if( m_roa.m_dictionary->count(m_deviceName + ".quadrant3.y") > 0)
    {
-      str = (char *)(*m_roa.m_dictionary)[m_deviceName + ".quadrant3.y"].m_blob;
-      m_3y = strtod(str,0);
+      if( (blobSz = (*m_roa.m_dictionary)[m_deviceName + ".quadrant3.y"].getBlobStr(m_blob, sizeof(m_blob))) == sizeof(m_blob) ) return -1; //Don't trust this as a string.
+      m_3y = strtod(m_blob,0);
    }
    
    if( m_roa.m_dictionary->count(m_deviceName + ".quadrant3.D") > 0)
    {
-      str = (char *)(*m_roa.m_dictionary)[m_deviceName + ".quadrant3.D"].m_blob;
-      m_3D = strtod(str,0);
+      if( (blobSz = (*m_roa.m_dictionary)[m_deviceName + ".quadrant3.D"].getBlobStr(m_blob, sizeof(m_blob))) == sizeof(m_blob) ) return -1; //Don't trust this as a string.
+      m_3D = strtod(m_blob,0);
    }
-   //std::cerr << "3: " <<  m_3x << " " << m_3y << " " << m_3D << "\n";
    
    if( m_roa.m_dictionary->count(m_deviceName + ".quadrant3.set-x") > 0)
    {
-      str = (char *)(*m_roa.m_dictionary)[m_deviceName + ".quadrant3.set-x"].m_blob;
-      m_set3x = strtod(str,0);
+      if( (blobSz = (*m_roa.m_dictionary)[m_deviceName + ".quadrant3.set-x"].getBlobStr(m_blob, sizeof(m_blob))) == sizeof(m_blob) ) return -1; //Don't trust this as a string.
+      m_set3x = strtod(m_blob,0);
    }
    
    if( m_roa.m_dictionary->count(m_deviceName + ".quadrant3.set-y") > 0)
    {
-      str = (char *)(*m_roa.m_dictionary)[m_deviceName + ".quadrant3.set-y"].m_blob;
-      m_set3y = strtod(str,0);
+      if( (blobSz = (*m_roa.m_dictionary)[m_deviceName + ".quadrant3.set-y"].getBlobStr(m_blob, sizeof(m_blob))) == sizeof(m_blob) ) return -1; //Don't trust this as a string.
+      m_set3y = strtod(m_blob,0);
    }
    
    if( m_roa.m_dictionary->count(m_deviceName + ".quadrant3.set-D") > 0)
    {
-      str = (char *)(*m_roa.m_dictionary)[m_deviceName + ".quadrant3.set-D"].m_blob;
-      m_set3D = strtod(str,0);
+      if( (blobSz = (*m_roa.m_dictionary)[m_deviceName + ".quadrant3.set-D"].getBlobStr(m_blob, sizeof(m_blob))) == sizeof(m_blob) ) return -1; //Don't trust this as a string.
+      m_set3D = strtod(m_blob,0);
    }
    
    if( m_roa.m_dictionary->count(m_deviceName + ".quadrant4.x") > 0)
    {
-      str = (char *)(*m_roa.m_dictionary)[m_deviceName + ".quadrant4.x"].m_blob;
-      m_4x = strtod(str,0);
+      if( (blobSz = (*m_roa.m_dictionary)[m_deviceName + ".quadrant4.x"].getBlobStr(m_blob, sizeof(m_blob))) == sizeof(m_blob) ) return -1; //Don't trust this as a string.
+      m_4x = strtod(m_blob,0);
    }
    
    if( m_roa.m_dictionary->count(m_deviceName + ".quadrant4.y") > 0)
    {
-      str = (char *)(*m_roa.m_dictionary)[m_deviceName + ".quadrant4.y"].m_blob;
-      m_4y = strtod(str,0);
+      if( (blobSz = (*m_roa.m_dictionary)[m_deviceName + ".quadrant4.y"].getBlobStr(m_blob, sizeof(m_blob))) == sizeof(m_blob) ) return -1; //Don't trust this as a string.
+      m_4y = strtod(m_blob,0);
    }
    
    if( m_roa.m_dictionary->count(m_deviceName + ".quadrant4.D") > 0)
    {
-      str = (char *)(*m_roa.m_dictionary)[m_deviceName + ".quadrant4.D"].m_blob;
-      m_4D = strtod(str,0);
+      if( (blobSz = (*m_roa.m_dictionary)[m_deviceName + ".quadrant4.D"].getBlobStr(m_blob, sizeof(m_blob))) == sizeof(m_blob) ) return -1; //Don't trust this as a string.
+      m_4D = strtod(m_blob,0);
    }
    
    if( m_roa.m_dictionary->count(m_deviceName + ".quadrant4.set-x") > 0)
    {
-      str = (char *)(*m_roa.m_dictionary)[m_deviceName + ".quadrant4.set-x"].m_blob;
-      m_set4x = strtod(str,0);
+      if( (blobSz = (*m_roa.m_dictionary)[m_deviceName + ".quadrant4.set-x"].getBlobStr(m_blob, sizeof(m_blob))) == sizeof(m_blob) ) return -1; //Don't trust this as a string.
+      m_set4x = strtod(m_blob,0);
    }
    
    if( m_roa.m_dictionary->count(m_deviceName + ".quadrant4.set-y") > 0)
    {
-      str = (char *)(*m_roa.m_dictionary)[m_deviceName + ".quadrant4.set-y"].m_blob;
-      m_set4y = strtod(str,0);
+      if( (blobSz = (*m_roa.m_dictionary)[m_deviceName + ".quadrant4.set-y"].getBlobStr(m_blob, sizeof(m_blob))) == sizeof(m_blob) ) return -1; //Don't trust this as a string.
+      m_set4y = strtod(m_blob,0);
    }
    
    if( m_roa.m_dictionary->count(m_deviceName + ".quadrant4.set-D") > 0)
    {
-      str = (char *)(*m_roa.m_dictionary)[m_deviceName + ".quadrant4.set-D"].m_blob;
-      m_set4D = strtod(str,0);
+      if( (blobSz = (*m_roa.m_dictionary)[m_deviceName + ".quadrant4.set-D"].getBlobStr(m_blob, sizeof(m_blob))) == sizeof(m_blob) ) return -1; //Don't trust this as a string.
+      m_set4D = strtod(m_blob,0);
    }
    
    if(!initialized)
