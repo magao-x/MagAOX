@@ -1248,6 +1248,9 @@ void MagAOXApp<_useINDI>::setupBasicConfig() //virtual
    //Logger Stuff
    m_log.setupConfig(config);
 
+   //Resurrectee configuration setup - static
+   resurrectee<MagAOXApp>::_setupConfig(config);
+
    if( m_powerMgtEnabled)
    {
       if(_useINDI == false)
@@ -1282,6 +1285,9 @@ void MagAOXApp<_useINDI>::loadBasicConfig() //virtual
    //---------- Setup the logger ----------//
    m_log.logName(m_configName);
    m_log.loadConfig(config);
+
+   //-- Configure the resurrectee - static --//
+   resurrectee<MagAOXApp>::_loadConfig(config);
 
    //--------- Loop Pause Time --------//
    config(m_loopPause, "loopPause");
