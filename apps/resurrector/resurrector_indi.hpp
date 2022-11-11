@@ -39,6 +39,17 @@ Usage(int rtn, const char* msg)
     exit(rtn);
 }
 
+bool
+get_verbose_arg(int argc, char** argv)
+{
+    for (char** av=argv+argc-1; av > argv; --av)
+    {
+        if (strcmp(*av, "-v")) { continue; }
+        return true;
+    }
+    return false;
+}
+
 std::string
 get_magaox_proclist_role(int argc, char** argv)
 {

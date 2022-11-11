@@ -29,11 +29,13 @@
 #include "resurrector_indi.hpp"
 
 static bool no_SIGUSR2_yet{true};
+static bool verbose{false};
 
 /// Signal handler:  exit on any signal caught
 void
 sigusr2_handler(int sig, siginfo_t *si, void *unused)
 {
+    if (verbose) { std::cerr << "Received SIGUSR2" << std::endl; }
     no_SIGUSR2_yet = false;
 }
 
@@ -70,6 +72,9 @@ main(int argc, char** argv)
     // Get MagAOX role and build process list file pathname e.g.
     // export MAGAOX_ROLE=vm; path=/opt/MagAOX/config/proclist_vm.txt
     std::string proclist_role = get_magaox_proclist_role(argc, argv);
+
+    if (get_verbose_arg(argc, argv)) { resurr.set_resurr_logging(); }
+    else { resurr.clr_resurr_logging(); }
 
     do {
         // Open the process list file
@@ -193,6 +198,8 @@ main(int argc, char** argv)
             struct timeval tv{1,0};
             resurr.srcr_cycle(tv);
         } while (no_SIGUSR2_yet);
+
+        if (verbose) { std::cerr << "Acting on SIGUSR2" << std::endl; }
 
         no_SIGUSR2_yet = true;
 

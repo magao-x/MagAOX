@@ -16,6 +16,8 @@ private:
     fd_set m_fdset_cpy; ///< ***COPY*** of active set bits of hexbeat file descriptors;
                         ///  N.B. DO NOT PASS THIS fd_set to select(2)!
 
+    bool m_resurr_logging{false};
+
     std::set<int> m_fds; ///< FDs of all opened hexbeaters in m_hbmarr
 
     std::vector<HexbeatMonitor> m_hbmarr{std::vector<HexbeatMonitor>(HBR_FD_SETSIZE)}; ///< vector of hexbeat monitors, active or not
@@ -80,6 +82,8 @@ public:
         //   track of the individual hexbeaters' timeouts.
         std::string hbnow{time_to_hb(0)};
 
+        if (m_resurr_logging) { std::cerr << hbnow; } 
+
         // Copy current class member of [fd_set] bits to local [fd_set],
         // then call select(2) to determine if any hexbeat FDs have data
         errno = 0;
@@ -89,6 +93,9 @@ public:
         // Handle select(2) error
         if (iselect < 0)
         {
+#           define ISELSTR(x) #x
+#           define ISELSTRMACRO(x) ISELSTR(x)
+            perror("select(2) error:  " __FILE__ "; " ISELSTRMACRO(__LINE__));
             // Pause for 0.999999s
             struct timeval tv{0,999999};
             select(0, 0,0,0, &tv);
@@ -103,7 +110,14 @@ public:
             // hexbeat, and if that received hexbeat has not timed out,
             // then continue to the the next hexbeater
             it->read_hexbeater(lcl_fdset);
-            if (!it->late_hexbeat(hbnow)) { continue; }
+            bool islate = it->late_hexbeat(hbnow);
+            if (m_resurr_logging
+             && it->FD() > -1 && it->FD() < HBR_FD_SETSIZE)
+            {
+                fd_to_stream(std::cerr, it->FD());
+                std::cerr << (islate ? ":late" : ":okay") << std::endl;
+            }
+            if (!islate) { continue; }
 
             // To here, the current hexbeater, represented by the fd
             // from m_fds and hbm, has timed out.  Attempt to stop the
@@ -229,4 +243,8 @@ public:
     {
         if (fd > -1 && fd < HBR_FD_SETSIZE) { os << m_hbmarr[fd]; }
     }
+
+    /// Logging
+    void set_resurr_logging() { m_resurr_logging = true; }
+    void clr_resurr_logging() { m_resurr_logging = false; }
 };
