@@ -1,5 +1,5 @@
 #!/bin/bash
-set -eo pipefail
+set -o pipefail
 DIR="$( cd "$( dirname "${BASH_SOURCE[0]}" )" && pwd )"
 # CentOS + devtoolset-7 aliases sudo, but breaks command line arguments for it,
 # so if we need those, we must use $_REAL_SUDO.
@@ -42,6 +42,8 @@ $_REAL_SUDO bash -l $osPackagesScript
 
 distroSpecificScript="$DIR/steps/configure_${ID}_${VERSION_ID}.sh"
 $_REAL_SUDO bash -l $distroSpecificScript
+
+sudo bash -l "$DIR/steps/configure_xsup_aliases.sh"
 
 if [[ $MAGAOX_ROLE == AOC || $MAGAOX_ROLE == ICC || $MAGAOX_ROLE == RTC ]]; then
     # Configure hostname aliases for instrument LAN
@@ -103,8 +105,13 @@ if [[ $MAGAOX_ROLE == ci || $MAGAOX_ROLE == vm || $MAGAOX_ROLE == workstation ||
 fi
 ## Build third-party dependencies under /opt/MagAOX/vendor
 cd /opt/MagAOX/vendor
-if grep "Intel" /proc/cpuinfo; then
-    sudo bash -l "$DIR/steps/install_mkl_tarball.sh"
+sudo bash -l "$DIR/steps/install_rclone.sh" || exit 1
+if grep -q "GenuineIntel" /proc/cpuinfo; then
+    if [[ $ID == "ubuntu" ]]; then
+        sudo bash -l "$DIR/steps/install_mkl_package.sh" || exit 1
+    else
+        sudo bash -l "$DIR/steps/install_mkl_tarball.sh" || exit 1
+    fi
     export BLAS_VENDOR=intel
 else
     export BLAS_VENDOR=openblas
@@ -113,19 +120,19 @@ if [[ $MAGAOX_ROLE == RTC || $MAGAOX_ROLE == ICC || $MAGAOX_ROLE == AOC || $MAGA
     sudo bash -l "$DIR/steps/install_cuda.sh"
     sudo bash -l "$DIR/steps/install_magma.sh"
 fi
-sudo bash -l "$DIR/steps/install_fftw.sh"
-sudo bash -l "$DIR/steps/install_cfitsio.sh"
-sudo bash -l "$DIR/steps/install_eigen.sh"
-sudo bash -l "$DIR/steps/install_zeromq.sh"
-sudo bash -l "$DIR/steps/install_cppzmq.sh"
-sudo bash -l "$DIR/steps/install_flatbuffers.sh"
+sudo bash -l "$DIR/steps/install_fftw.sh" || exit 1
+sudo bash -l "$DIR/steps/install_cfitsio.sh" || exit 1
+sudo bash -l "$DIR/steps/install_eigen.sh" || exit 1
+sudo bash -l "$DIR/steps/install_zeromq.sh" || exit 1
+sudo bash -l "$DIR/steps/install_cppzmq.sh" || exit 1
+sudo bash -l "$DIR/steps/install_flatbuffers.sh" || exit 1
 if [[ $MAGAOX_ROLE == AOC ]]; then
     sudo bash -l "$DIR/steps/install_lego.sh"
 fi
-if [[ $MAGAOX_ROLE == RTC || $MAGAOX_ROLE == ICC || $MAGAOX_ROLE == AOC || $MAGAOX_ROLE == TIC || $MAGAOX_ROLE == ci || ( $MAGAOX_ROLE == vm && $VM_KIND == vagrant ) ]]; then
+if [[ $MAGAOX_ROLE == RTC || $MAGAOX_ROLE == ICC || $MAGAOX_ROLE == TIC || $MAGAOX_ROLE == ci || ( $MAGAOX_ROLE == vm && $VM_KIND == vagrant ) ]]; then
     sudo bash -l "$DIR/steps/install_basler_pylon.sh"
 fi
-if [[ $MAGAOX_ROLE == RTC || $MAGAOX_ROLE == ICC || $MAGAOX_ROLE == AOC || $MAGAOX_ROLE == ci || ( $MAGAOX_ROLE == vm && $VM_KIND == vagrant ) ]]; then
+if [[ $MAGAOX_ROLE == RTC || $MAGAOX_ROLE == ICC || $MAGAOX_ROLE == ci || ( $MAGAOX_ROLE == vm && $VM_KIND == vagrant ) ]]; then
     sudo bash -l "$DIR/steps/install_edt.sh"
 fi
 
@@ -234,11 +241,10 @@ sudo bash -l "$DIR/steps/install_python.sh"
 sudo bash -l "$DIR/steps/configure_python.sh"
 source /opt/conda/bin/activate
 # Install first-party deps
-$MAYBE_SUDO bash -l "$DIR/steps/install_milk_and_cacao.sh"  # depends on /opt/miniconda3/bin/python existing for plugin build
-$MAYBE_SUDO bash -l "$DIR/steps/install_milkzmq.sh"
+$MAYBE_SUDO bash -l "$DIR/steps/install_milk_and_cacao.sh"  # depends on /opt/conda/bin/python existing for plugin build
+$MAYBE_SUDO bash -l "$DIR/steps/install_milkzmq.sh" || exit 1
 $MAYBE_SUDO bash -l "$DIR/steps/install_purepyindi.sh"
 $MAYBE_SUDO bash -l "$DIR/steps/install_magpyx.sh"
-$MAYBE_SUDO bash -l "$DIR/steps/install_imagestreamio_python.sh"
 
 
 # TODO:jlong: uncomment when it's back in working order
@@ -249,7 +255,7 @@ $MAYBE_SUDO bash -l "$DIR/steps/install_imagestreamio_python.sh"
 
 if [[ $MAGAOX_ROLE == AOC || $MAGAOX_ROLE == TOC || $MAGAOX_ROLE == vm || $MAGAOX_ROLE == workstation || $MAGAOX_ROLE == ci ]]; then
     # realtime image viewer
-    $MAYBE_SUDO bash -l "$DIR/steps/install_rtimv.sh"
+    $MAYBE_SUDO bash -l "$DIR/steps/install_rtimv.sh" || exit 1
 fi
 
 if [[ $MAGAOX_ROLE == AOC || $MAGAOX_ROLE == TOC || $MAGAOX_ROLE == vm ||  $MAGAOX_ROLE == workstation ]]; then
@@ -264,12 +270,10 @@ sudo bash -l "$DIR/steps/install_aliases.sh"
 # By separating the real build into another step, we can cache the slow provisioning steps
 # and reuse them on subsequent runs.
 if [[ $MAGAOX_ROLE != ci ]]; then
-    $MAYBE_SUDO bash -l "$DIR/steps/install_MagAOX.sh"
+    $MAYBE_SUDO bash -l "$DIR/steps/install_MagAOX.sh" || exit 1
 fi
 
-if [[ $MAGAOX_ROLE == "RTC" ]]; then
-    sudo bash -l "$DIR/steps/configure_rtc_cpuset_service.sh"
-fi
+sudo bash -l "$DIR/steps/configure_startup_services.sh"
 
 # To try and debug hardware issues, ICC and RTC replicate their
 # kernel console log over UDP to AOC over the instrument LAN.
@@ -279,7 +283,7 @@ fi
 sudo bash -l "$DIR/steps/configure_kernel_netconsole.sh"
 
 log_success "Provisioning complete"
-if [[ $MAGAOX_ROLE != vm ]]; then
+if [[ $MAGAOX_ROLE != vm && $MAGAOX_ROLE != ci && $MAGAOX_ROLE != container ]]; then
     log_info "You'll probably want to run"
     log_info "    source /etc/profile.d/*.sh"
     log_info "to get all the new environment variables set."

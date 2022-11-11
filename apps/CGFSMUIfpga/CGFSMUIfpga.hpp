@@ -65,6 +65,7 @@ namespace app
   * \ingroup CGFSMUIfpga
   */
 class CGFSMUIfpga : public MagAOXApp<true>, public dev::frameGrabber<CGFSMUIfpga>
+                  , public dev::telemeter<CGFSMUIfpga>
 {
    //Give the test harness access.
    friend class CGFSMUIfpga_test;

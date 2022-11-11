@@ -63,6 +63,10 @@ public slots:
    void on_buttonSetTest_pressed();
    void on_buttonZeroTest_pressed();
    
+signals: 
+
+   void doUpdateGUI();
+
 private:
      
    Ui::dmCtrl ui;
@@ -76,6 +80,31 @@ dmCtrl::dmCtrl( std::string & dmName,
    //ui.labelDMName->setText(m_dmName.c_str());
    
    setWindowTitle(QString(m_dmName.c_str()));
+
+   ui.fsmState->device(m_dmName);
+
+   setXwFont(ui.buttonInit);
+   setXwFont(ui.buttonZeroAll);
+   setXwFont(ui.buttonZero);
+   setXwFont(ui.buttonInit);  
+   setXwFont(ui.buttonRelease);
+   setXwFont(ui.buttonSetFlat);
+   setXwFont(ui.buttonZeroFlat);
+   setXwFont(ui.buttonSetTest);
+   setXwFont(ui.buttonZeroTest);
+   setXwFont(ui.comboSelectFlat);
+   setXwFont(ui.comboSelectTest);
+   
+   //setXwFont(ui.fsmState);
+   
+   setXwFont(ui.labelShmimName);
+   setXwFont(ui.labelShmimName_value);
+   setXwFont(ui.labelFlatShmim);
+   setXwFont(ui.labelFlatShmim_value);
+   setXwFont(ui.labelTestShmim);
+   setXwFont(ui.labelTestShmim_value);
+   
+   connect(this, SIGNAL(doUpdateGUI()), this, SLOT(updateGUI()));
 
    onDisconnect();
 }
@@ -97,14 +126,15 @@ void dmCtrl::subscribe()
    m_parent->addSubscriberProperty(this, m_dmName, "test");
    m_parent->addSubscriberProperty(this, m_dmName, "test_shmim");
    m_parent->addSubscriberProperty(this, m_dmName, "test_set");
-   
+   m_parent->addSubscriber(ui.fsmState);
+
    return;
 }
   
 void dmCtrl::onConnect()
 {
    //ui.labelDMName->setEnabled(true);
-   ui.dmStatus->setEnabled(true);
+   ui.fsmState->setEnabled(true);
    ui.labelShmimName->setEnabled(true);
    ui.labelShmimName_value->setEnabled(true);
    ui.labelFlatShmim->setEnabled(true);
@@ -117,13 +147,15 @@ void dmCtrl::onConnect()
    ui.comboSelectFlat->setEnabled(true);
    ui.comboSelectTest->setEnabled(true);
    
+   ui.fsmState->onConnect();
+
    setWindowTitle(QString(m_dmName.c_str()));
 }
 
 void dmCtrl::onDisconnect()
 {
    //ui.labelDMName->setEnabled(false);
-   ui.dmStatus->setEnabled(false);
+   ui.fsmState->setEnabled(false);
    ui.labelShmimName->setEnabled(false);
    ui.labelShmimName_value->setEnabled(false);
    ui.labelFlatShmim->setEnabled(false);
@@ -147,6 +179,8 @@ void dmCtrl::onDisconnect()
    
    setWindowTitle(QString(m_dmName.c_str()) + QString(" (disconnected)"));
 
+   ui.fsmState->onDisconnect();
+   
    multiIndiSubscriber::onDisconnect();
 }
 
@@ -235,15 +269,12 @@ void dmCtrl::handleSetProperty( const pcf::IndiProperty & ipRecv)
       }
    }
    
-   
-   
-   updateGUI();
+   emit doUpdateGUI();
    
 }
 
 void dmCtrl::updateGUI()
 {
-   ui.dmStatus->setText(m_appState.c_str());
    ui.labelShmimName_value->setText(m_shmimName.c_str());
    ui.labelFlatShmim_value->setText(m_flatShmim.c_str());
    ui.labelTestShmim_value->setText(m_testShmim.c_str());

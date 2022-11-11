@@ -6,7 +6,7 @@ After=network.target
 [Service]
 User=xsup
 WorkingDirectory=/var/log/netconsole_logger
-ExecStart=/opt/miniconda3/bin/python /usr/local/bin/netconsole_logger
+ExecStart=/opt/conda/bin/python /usr/local/bin/netconsole_logger
 Environment="NETCONSOLE_LOG_DIR=/var/log/netconsole_logger"
 
 [Install]

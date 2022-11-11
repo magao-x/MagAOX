@@ -43,6 +43,7 @@ yum install -y \
     subunit-devel \
     pciutils \
     libusb-devel \
+    libusbx-devel \
     usbutils \
     tmux \
     boost-devel \
@@ -88,3 +89,11 @@ yum install -y zeromq-devel libzmq5
 
 # For some reason, pkg-config doesn't automatically look here?
 echo "export PKG_CONFIG_PATH=\$PKG_CONFIG_PATH:/usr/local/lib/pkgconfig" > /etc/profile.d/pkg-config-path.sh
+
+cd /opt/MagAOX/vendor
+rpmFile=cpuset-1.6-lp154.59.1.noarch.rpm
+_cached_fetch https://download.opensuse.org/repositories/hardware/15.4/noarch/$rpmFile $rpmFile
+sudo yum install -y $rpmFile
+cat <<'HERE' | sudo tee /etc/cset.conf || exit 1
+mountpoint = /sys/fs/cgroup/cpuset
+HERE

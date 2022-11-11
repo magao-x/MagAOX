@@ -76,6 +76,12 @@ public:
 
    virtual void execute(void);
 
+   /// Configuration
+   static void
+   _setupConfig(mx::app::appConfigurator & _config);
+   static void
+   _loadConfig(mx::app::appConfigurator & _config);
+
 private:
 
    static resurrectee * m_self; ///< Static pointer to this (set in constructor).  Used to test whether a a MagAOXApp is already instatiated (a fatal error) and used for getting out of static signal handlers.
@@ -90,7 +96,7 @@ private:
    int m_broken_pipes_limit{2};          // Last SIGPIPE to log an error
    int m_mypid{-1};                      // PID of this process
    int m_fdhb{-1};                       // File Descriptor of named FIFO
-   size_t m_time_offset{600};            // Resurrectee timeout
+   static size_t m_time_offset;          // Resurrectee timeout
 
    /// Signal handler:  exit on any signal caught
    static void
@@ -164,6 +170,10 @@ private:
 template<class parentT>
 resurrectee<parentT> * resurrectee<parentT>::m_self = nullptr;
 
+//Set default timeout to 600
+template<class parentT>
+size_t resurrectee<parentT>::m_time_offset = 600;
+
 /// Write hexbeat timestamp to FIFO
 template<class parentT>
 void resurrectee<parentT>::execute()
@@ -216,6 +226,8 @@ resurrectee<parentT>::resurrectee(parentT * parent)
    }
    
    m_self = this;
+
+   if (m_time_offset < 1) { m_time_offset = 600; }
 
    // Save parent, name and PID to member attributes
    m_parent = parent;
@@ -293,6 +305,18 @@ void resurrectee<parentT>::_sigusr2_handler( int signum
                                            )
 {
    m_self->sigusr2_handler(signum,siginf,ucont);
+}
+
+template<class parentT>
+void resurrectee<parentT>::_setupConfig( mx::app::appConfigurator & _config )
+{
+   _config.add("resurrectee.timeout", "", "resurrectee.timeout", mx::app::argType::Required, "resurrectee", "timeout", false, "int", "Resurrectee timeout, s");
+}
+
+template<class parentT>
+void resurrectee<parentT>::_loadConfig( mx::app::appConfigurator & _config )
+{
+   _config(m_time_offset, "resurrectee.timeout");
 }
 
 } //namespace app

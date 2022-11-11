@@ -54,7 +54,8 @@ struct telem_stdcam : public flatbuffer_log
                 const uint8_t & ontarget,            ///<[in]
                 const std::string & statusStr,       ///<[in]
                 const std::string & shutterStatusSr, ///<[in]
-                const int8_t & shutterState          ///<[in]
+                const int8_t & shutterState,         ///<[in]
+                const uint8_t & synchro              ///<[in]
               )
       {         
          auto _mode = builder.CreateString(mode);
@@ -67,7 +68,7 @@ struct telem_stdcam : public flatbuffer_log
          auto _shutter = CreateShutter(builder, _shutterStatusStr, shutterState);
          
          
-         auto fp = CreateTelem_stdcam_fb(builder, _mode, _roi, exptime, fps, emGain, adcSpeed, _tempCtrl, _shutter);
+         auto fp = CreateTelem_stdcam_fb(builder, _mode, _roi, exptime, fps, emGain, adcSpeed, _tempCtrl, _shutter, synchro);
          builder.Finish(fp);
       }
 
@@ -157,6 +158,10 @@ struct telem_stdcam : public flatbuffer_log
             msg += "OPEN";
          }
       }
+
+      msg += " SYNC ";
+      if(fbs->synchro()) msg += "ON";
+      else msg += "OFF";
 
       return msg;
    
