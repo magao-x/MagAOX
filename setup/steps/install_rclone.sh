@@ -13,13 +13,14 @@ elif [[ $arch == "aarch64" ]]; then
 else
     exit_error "Unknown arch: $arch"
 fi
-PACKAGE_ARCHIVE=$PACKAGE_DIR.tar.gz
+###PACKAGE_ARCHIVE=$PACKAGE_DIR.tar.gz
+PACKAGE_ARCHIVE=$PACKAGE_DIR.zip
 if [[ ! -d $PACKAGE_DIR ]]; then
-    _cached_fetch https://downloads.rclone.org/v${PACKAGE_VERSION}/$PACKAGE_ARCHIVE
- $PACKAGE_ARCHIVE
-    tar xzf $PACKAGE_ARCHIVE
+    _cached_fetch https://downloads.rclone.org/v${PACKAGE_VERSION}/$PACKAGE_ARCHIVE $PACKAGE_ARCHIVE
+    ###tar xzf $PACKAGE_ARCHIVE
+    unzip $PACKAGE_ARCHIVE
 fi
 cd $PACKAGE_DIR
 sudo install ./rclone /usr/local/bin
 sudo install ./rclone.1 /usr/local/share/man/man1/
-sudo ln -s /usr/local/bin/rclone /sbin/mount.rclone
+sudo ln -sf /usr/local/bin/rclone /sbin/mount.rclone

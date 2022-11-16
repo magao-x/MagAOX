@@ -63,6 +63,9 @@ function setgid_all() {
 
 function _cached_fetch() {
   url=$1
+( [ "$DEBUG" ] && cat ) << EoF
+,{"_cached_fetch":{"url":"$1:}}
+EoF
   filename=$2
   dest=$PWD
   if [[ $filename == *levmar* ]]; then

@@ -110,7 +110,8 @@ if grep -q "GenuineIntel" /proc/cpuinfo; then
     if [[ $ID == "ubuntu" ]]; then
         sudo bash -l "$DIR/steps/install_mkl_package.sh" || exit 1
     else
-        sudo bash -l "$DIR/steps/install_mkl_tarball.sh" || exit 1
+        ###sudo bash -l "$DIR/steps/install_mkl_tarball.sh" || exit 1
+        sudo bash -l "$DIR/steps/install_mkl_tarball.sh" || ( echo "Failed MKL install; continuing" 1>&2 || exit 0 )
     fi
     export BLAS_VENDOR=intel
 else
