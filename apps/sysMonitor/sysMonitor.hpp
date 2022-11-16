@@ -804,6 +804,8 @@ int sysMonitor::findDiskTemperature( std::vector<std::string> & hdd_names,
       }
    }
    return rv;*/
+   static_cast<void>(hdd_temps); //be unused
+   static_cast<void>(hdd_names); //be unused
 
    return 0;
 }
