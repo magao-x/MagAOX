@@ -9,6 +9,7 @@ protected:
 
    dictionaryT * m_dict {nullptr};
    
+   float m_northAngle {0};
    
 public:
    rtimvIndiClient( const std::string &szName,
@@ -55,9 +56,11 @@ public:
          
          (*m_dict)[elKey].setBlob(val.c_str(), val.size()+1);
          
-         //val = (char *) (*m_dict)[elKey].m_blob;
-         
-         //std::cout << "elKey: " << elKey << " " <<  val << "\n";
+         if(elKey == "tcsi.teldata.pa")
+         {
+            m_northAngle = ipRecv[elIt->second.getName()].get<float>();
+            (*m_dict)["rtimv.north.angle"].setBlob(&m_northAngle, sizeof(float));
+         }
          
          ++elIt;
       }

@@ -124,6 +124,7 @@ int cameraStatus::updateOverlay()
 
       snprintf(tstr, sizeof(tstr), "%dx%d [%dx%d]", w, h, ibx, iby );
 
+      //**************** 
       m_roa.m_graphicsView->statusTextText(n, tstr);
       ++n;
       
@@ -192,6 +193,7 @@ int cameraStatus::updateOverlay()
             m_roiFullBox->setVisible(true);
             m_roiFullBox->setStretchable(false);
             m_roiFullBox->setRemovable(false);
+            //****************
             m_roa.m_userBoxes->insert(m_roiFullBox);
             emit newStretchBox(m_roiFullBox);
          }
@@ -209,6 +211,8 @@ int cameraStatus::updateOverlay()
       }
       
    }
+
+   //***********************
    if(n > m_roa.m_graphicsView->statusTextNo()-1) return 0;
    
    if( m_roa.m_dictionary->count(m_deviceName + ".exptime.current") > 0)
@@ -238,18 +242,22 @@ int cameraStatus::updateOverlay()
             snprintf(tstr, sizeof(tstr), "%0.2f us", et*1000000.0);
          }
       }
+      //**********************
       m_roa.m_graphicsView->statusTextText(n, tstr);
       ++n;
    }
+   //************************
    if(n > m_roa.m_graphicsView->statusTextNo()-1) return 0;
    
    if( m_roa.m_dictionary->count(m_deviceName + ".fps.current") > 0)
    {
       if( (blobSz = (*m_roa.m_dictionary)[m_deviceName + ".fps.current"].getBlobStr(m_blob, sizeof(m_blob))) == sizeof(m_blob) ) errPrint("bad string"); //Don't trust this as a string.
       snprintf(tstr, sizeof(tstr), "%0.1f FPS", strtod(m_blob,0));
+      //*********************
       m_roa.m_graphicsView->statusTextText(n, tstr);
       ++n;
    }
+   //*******************
    if(n > m_roa.m_graphicsView->statusTextNo()-1) return 0;
    
    if( m_roa.m_dictionary->count(m_deviceName + ".emgain.current") > 0)
