@@ -52,13 +52,13 @@ int main()
       FILE *fptr = fopen("magMask.dat", "rb");
       if(!fptr)
       {
-         delete pupil;
+         delete[] pupil;
          return;
       }
       int stat = fread(pupil, sizeof(double), MSKELEMENTS, fptr);
       if (stat <= 0)
       {
-         delete pupil; //just for codacy.
+         delete[] pupil; //just for codacy.
          fclose(fptr);
          return 1;
       }

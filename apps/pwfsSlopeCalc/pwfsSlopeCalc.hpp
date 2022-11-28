@@ -626,14 +626,14 @@ int pwfsSlopeCalc::loadImageIntoStream(void * dest)
       }
    }
     
-   norm /= N;/*
+   norm /= N;
    for(size_t ii=0; ii< frameGrabberT::m_height; ++ii)
    {
       for(size_t jj=0; jj < frameGrabberT::m_width; ++jj)
       {
          slopesIm(jj,ii)/=norm;
       }
-   }*/
+   }
    
    return 0;
 }

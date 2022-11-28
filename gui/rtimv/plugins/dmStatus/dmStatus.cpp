@@ -48,7 +48,6 @@ int dmStatus::updateOverlay()
    if(m_roa.m_graphicsView == nullptr) return 0;
    
    size_t n = 0;
-   size_t blobSz;
 
    char tstr[128];
    std::string sstr;
@@ -57,7 +56,7 @@ int dmStatus::updateOverlay()
    {
       timespec t0;
 
-      if( (blobSz = (*m_roa.m_dictionary)[m_rhDeviceName + ".humidity.current"].getBlobStr(m_blob, sizeof(m_blob), &t0)) == sizeof(m_blob) ) errPrint("bad string"); //Don't trust this as a string.
+      if( ((*m_roa.m_dictionary)[m_rhDeviceName + ".humidity.current"].getBlobStr(m_blob, sizeof(m_blob), &t0)) == sizeof(m_blob) ) errPrint("bad string"); //Don't trust this as a string.
 
       if(time(0) - t0.tv_sec < 10)
       {

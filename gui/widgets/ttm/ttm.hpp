@@ -39,10 +39,10 @@ protected:
    bool m_testSet;
    
 public:
-   ttm( std::string & procName,
-             QWidget * Parent = 0, 
-             Qt::WindowFlags f = 0
-           );
+   explicit ttm( std::string & procName,
+                 QWidget * Parent = 0, 
+                 Qt::WindowFlags f = 0
+               );
    
    ~ttm();
    

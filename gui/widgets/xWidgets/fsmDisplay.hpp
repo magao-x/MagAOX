@@ -30,10 +30,10 @@ public:
                Qt::WindowFlags f = Qt::WindowFlags()
              );
 
-   fsmDisplay( const std::string & device,
-               QWidget * Parent = 0, 
-               Qt::WindowFlags f = Qt::WindowFlags()
-             );
+   explicit fsmDisplay( const std::string & device,
+                        QWidget * Parent = 0, 
+                        Qt::WindowFlags f = Qt::WindowFlags()
+                      );
    
    ~fsmDisplay();
    
