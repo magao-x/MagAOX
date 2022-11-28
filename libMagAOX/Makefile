@@ -56,6 +56,7 @@ INCLUDEDEPS= app/MagAOXApp.hpp \
             logger/types/telem_saving_state.hpp \
             logger/types/telem_dmmodes.hpp \
 	     logger/types/telem_dmspeck.hpp \
+		  logger/types/telem_blockgains.hpp \
 	     logger/types/telem_chrony_status.hpp \
 	     logger/types/telem_chrony_stats.hpp \
 	     logger/types/telem_cooler.hpp \

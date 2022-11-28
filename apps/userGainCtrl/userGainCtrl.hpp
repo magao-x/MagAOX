@@ -79,7 +79,8 @@ struct limitShmimT
   * 
   */
 class userGainCtrl : public MagAOXApp<true>, public dev::shmimMonitor<userGainCtrl,gainShmimT>, 
-                     public dev::shmimMonitor<userGainCtrl,multcoeffShmimT>,  public dev::shmimMonitor<userGainCtrl,limitShmimT>
+                     public dev::shmimMonitor<userGainCtrl,multcoeffShmimT>,  public dev::shmimMonitor<userGainCtrl,limitShmimT>,
+                     public dev::telemeter<userGainCtrl>
 {
 
    //Give the test harness access.
@@ -88,6 +89,10 @@ class userGainCtrl : public MagAOXApp<true>, public dev::shmimMonitor<userGainCt
    friend class dev::shmimMonitor<userGainCtrl,gainShmimT>;
    friend class dev::shmimMonitor<userGainCtrl,multcoeffShmimT>;
    friend class dev::shmimMonitor<userGainCtrl,limitShmimT>;
+
+   typedef dev::telemeter<userGainCtrl> telemeterT;
+
+   friend class dev::telemeter<userGainCtrl>;
 
 public:
 
@@ -105,7 +110,8 @@ protected:
      *@{
      */
    int m_loopNumber;
-   
+   bool m_splitTT {false};
+
    ///@}
  
    std::string m_aoCalDir;
@@ -133,8 +139,13 @@ protected:
    int m_totalNModes {0}; ///< The total number of WFS modes in the calib.
 
    std::vector<float> m_modeBlockGains;
+   std::vector<uint8_t> m_modeBlockGainsConstant;
+
    std::vector<float> m_modeBlockMCs;
+   std::vector<uint8_t> m_modeBlockMCsConstant;
+
    std::vector<float> m_modeBlockLims;
+   std::vector<uint8_t> m_modeBlockLimsConstant;
 
    std::mutex m_modeBlockMutex;
 
@@ -281,6 +292,18 @@ protected:
      * \returns -1 on error.
      */
    int newCallBack_blockLimits( const pcf::IndiProperty &ipRecv /**< [in] the INDI property sent with the the new property request.*/);
+
+   /** \name Telemeter Interface
+     * 
+     * @{
+     */ 
+   int checkRecordTimes();
+   
+   int recordTelem( const telem_blockgains * );
+
+   int recordBlockGains( bool force = false );
+   
+   ///@}
 };
 
 inline
@@ -301,7 +324,9 @@ void userGainCtrl::setupConfig()
    limitShmimMonitorT::setupConfig(config);
 
    config.add("loop.number", "", "loop.number", argType::Required, "loop", "number", false, "int", "The loop number");
-   
+   config.add("blocks.splitTT", "", "blocks.splitTT", argType::Required, "blocks", "splitTT", false, "bool", "If true, the first block is split into two modes.");
+
+   telemeterT::setupConfig(config);
 }
 
 inline
@@ -318,6 +343,11 @@ int userGainCtrl::loadConfigImpl( mx::app::appConfigurator & _config )
    limitShmimMonitorT::m_shmimName = "aol" + std::to_string(m_loopNumber) + "_mlimitfact";
    limitShmimMonitorT::loadConfig(config);
 
+   if(telemeterT::loadConfig(_config) < 0)
+   {
+      log<text_log>("Error during telemeter config", logPrio::LOG_CRITICAL);
+      m_shutdown = true;
+   }
 
    return 0;
 }
@@ -358,6 +388,11 @@ int userGainCtrl::appStartup()
       return log<software_error,-1>({__FILE__, __LINE__});
    }
   
+   if(telemeterT::appStartup() < 0)
+   {
+      return log<software_error,-1>({__FILE__,__LINE__});
+   }
+   
    state(stateCodes::NODEVICE);
     
    return 0;
@@ -418,6 +453,15 @@ int userGainCtrl::appLogic()
 
    }
 
+   if(state() == stateCodes::OPERATING)
+   {
+      if(telemeterT::appLogic() < 0)
+      {
+         log<software_error>({__FILE__, __LINE__});
+         return 0;
+      }
+   }
+
    std::unique_lock<std::mutex> lock(m_indiMutex);
 
    if(shmimMonitorT::updateINDI() < 0)
@@ -459,6 +503,8 @@ int userGainCtrl::appShutdown()
    shmimMonitorT::appShutdown();
    mcShmimMonitorT::appShutdown();
    limitShmimMonitorT::appShutdown();
+
+   telemeterT::appShutdown();
 
    return 0;
 }
@@ -632,11 +678,7 @@ int userGainCtrl::getModeBlocks()
       }
    }
 
-   /*if(modeBlockStart.back() + modeBlockN.back() > m_totalNModes)
-   {
-      return log<software_error, -1>({__FILE__, __LINE__, errno, "userGainCtrl::getModeBlocks too many modes in blocks compared to WFSmodes"});
-   }
-   else*/ if(modeBlockStart.back() + modeBlockN.back() < m_totalNModes)
+   if(modeBlockStart.back() + modeBlockN.back() < m_totalNModes)
    {
       int st0 = modeBlockStart.back();
       int N0 = modeBlockN.back();
@@ -647,13 +689,35 @@ int userGainCtrl::getModeBlocks()
 
    }
 
+   //split tt here
+   if(m_splitTT)
+   {
+      if(modeBlockN[0] !=2 )
+      {
+         log<software_warning>({__FILE__, __LINE__, errno, "userGainCtrl::getModeBlocks splitTT is set but block00 does not have 2 modes"});
+      }
+      else if(modeBlockStart[0] != 0)
+      {
+         log<software_warning>({__FILE__, __LINE__, errno, "userGainCtrl::getModeBlocks splitTT is set but block00 does not start at mode 0"});
+      }
+      else
+      {
+         modeBlockStart.insert(modeBlockStart.begin(), 0);
+         modeBlockStart[1] = 1;
+
+         modeBlockN.insert(modeBlockN.begin(), 1);
+         modeBlockN[1] = 1;
+         ++Nb;
+      }
+   }
+
    //now detect changes.
    bool changed = false;
    if(m_modeBlockStart.size() != Nb || m_modeBlockN.size() != Nb || m_modeBlockGains.size() != Nb || m_modeBlockMCs.size() != Nb || m_modeBlockLims.size() != Nb)
    {
       changed = true;
    }
-   else
+   else //All are correct size, look for differences within:
    {
       for(size_t n=0; n < Nb; ++n)
       {
@@ -678,8 +742,11 @@ int userGainCtrl::getModeBlocks()
       m_modeBlockStart.resize(Nb);
       m_modeBlockN.resize(Nb);
       m_modeBlockGains.resize(Nb);
+      m_modeBlockGainsConstant.resize(Nb);
       m_modeBlockMCs.resize(Nb);
+      m_modeBlockMCsConstant.resize(Nb);
       m_modeBlockLims.resize(Nb);
+      m_modeBlockLimsConstant.resize(Nb);
 
       for(size_t n=0; n < Nb; ++n)
       {
@@ -793,6 +860,8 @@ int userGainCtrl::processImage( void * curr_src,
 {
    static_cast<void>(dummy); //be unused
 
+   recordBlockGains();
+
    std::unique_lock<std::mutex> lock(m_modeBlockMutex);
 
    realT * data = m_gainsCurrent.data();
@@ -815,17 +884,36 @@ int userGainCtrl::processImage( void * curr_src,
       double mng = 0;
 
       int NN = 0;
+      
       for(int m =0; m < m_modeBlockN[n]; ++m)
       {
          if(m_modeBlockStart[n] + m >= m_gainsCurrent.rows()) break;
          mng += m_gainsCurrent(m_modeBlockStart[n] + m,0);
-
          ++NN;
       }
 
       m_modeBlockGains[n] = mng / NN; 
+
+      bool constant = true;
+      
+      for(int m =0; m < m_modeBlockN[n]; ++m)
+      {
+         if(m_modeBlockStart[n] + m >= m_gainsCurrent.rows()) break;
+         if(m_gainsCurrent(m_modeBlockStart[n] + m,0) != m_modeBlockGains[n])
+         {
+            constant = false;
+            break;
+         }
+      }
+
+      m_modeBlockGainsConstant[n] = constant;
+
    }
 
+   lock.unlock();
+
+   recordBlockGains();
+   
    return 0;
 }
 
@@ -898,6 +986,8 @@ int userGainCtrl::processImage( void * curr_src,
 {
    static_cast<void>(dummy); //be unused
 
+   recordBlockGains();
+
    std::unique_lock<std::mutex> lock(m_modeBlockMutex);
 
    realT * data = m_mcsCurrent.data();
@@ -928,9 +1018,27 @@ int userGainCtrl::processImage( void * curr_src,
          ++NN;
       }
 
-
       m_modeBlockMCs[n] = mng / NN; 
+   
+
+      bool constant = true;
+      
+      for(int m =0; m < m_modeBlockN[n]; ++m)
+      {
+         if(m_modeBlockStart[n] + m >= m_mcsCurrent.rows()) break;
+         if(m_mcsCurrent(m_modeBlockStart[n] + m,0) != m_modeBlockMCs[n])
+         {
+            constant = false;
+            break;
+         }
+      }
+
+      m_modeBlockMCsConstant[n] = constant;
    }
+
+   lock.unlock();
+
+   recordBlockGains();
 
    return 0;
 }
@@ -1004,6 +1112,8 @@ int userGainCtrl::processImage( void * curr_src,
 {
    static_cast<void>(dummy); //be unused
 
+   recordBlockGains();
+
    std::unique_lock<std::mutex> lock(m_modeBlockMutex);
 
    realT * data = m_limitsCurrent.data();
@@ -1035,7 +1145,25 @@ int userGainCtrl::processImage( void * curr_src,
       }
 
       m_modeBlockLims[n] = mng / NN; 
+
+      bool constant = true;
+      
+      for(int m =0; m < m_modeBlockN[n]; ++m)
+      {
+         if(m_modeBlockStart[n] + m >= m_limitsCurrent.rows()) break;
+         if(m_limitsCurrent(m_modeBlockStart[n] + m,0) != m_modeBlockLims[n])
+         {
+            constant = false;
+            break;
+         }
+      }
+
+      m_modeBlockLimsConstant[n] = constant;
    }
+
+   lock.unlock();
+
+   recordBlockGains();
 
    return 0;
 }
@@ -1084,6 +1212,7 @@ int userGainCtrl::setBlockLimit( int n,
    }
    lock.unlock();
    writeLimits();
+
    return 0;
 }
 
@@ -1228,6 +1357,74 @@ int userGainCtrl::newCallBack_blockLimits( const pcf::IndiProperty &ipRecv )
 
    return setBlockLimit(n, target);
 
+}
+
+inline
+int userGainCtrl::checkRecordTimes()
+{
+   return telemeterT::checkRecordTimes(telem_blockgains());
+}
+
+inline
+int userGainCtrl::recordTelem( const telem_blockgains * )
+{
+   return recordBlockGains(true);
+}
+
+inline
+int userGainCtrl::recordBlockGains( bool force )
+{
+   static std::vector<float> modeBlockGains;
+   static std::vector<uint8_t> modeBlockGainsConstant;
+
+   static std::vector<float> modeBlockMCs;
+   static std::vector<uint8_t> modeBlockMCsConstant;
+
+   static std::vector<float> modeBlockLims;
+   static std::vector<uint8_t> modeBlockLimsConstant;
+
+   if(!force)
+   {
+      if(!(m_modeBlockGains == modeBlockGains)) force = true;
+   }
+
+   if(!force)
+   {
+      if(!(m_modeBlockGainsConstant == modeBlockGainsConstant)) force = true;
+   }
+
+   if(!force)
+   {
+      if(!(m_modeBlockMCs == modeBlockMCs)) force = true;
+   }
+
+   if(!force)
+   {
+      if(!(m_modeBlockMCsConstant == modeBlockMCsConstant)) force = true;
+   }
+
+   if(!force)
+   {
+      if(!(m_modeBlockLims == modeBlockLims)) force = true;
+   }
+
+   if(!force)
+   {
+      if(!(m_modeBlockLimsConstant == modeBlockLimsConstant)) force = true;
+   }
+
+   if(force)
+   {
+      telem<telem_blockgains>({m_modeBlockGains, m_modeBlockGainsConstant, m_modeBlockMCs, m_modeBlockMCsConstant, m_modeBlockLims, m_modeBlockLimsConstant});
+      modeBlockGains = m_modeBlockGains;
+      modeBlockGainsConstant = m_modeBlockGainsConstant;
+      modeBlockMCs = m_modeBlockMCs;
+      modeBlockMCsConstant = m_modeBlockMCsConstant;
+      modeBlockLims = m_modeBlockLims;
+      modeBlockLimsConstant = m_modeBlockLimsConstant;
+   }
+
+   return 0;
 }
 
 } //namespace app

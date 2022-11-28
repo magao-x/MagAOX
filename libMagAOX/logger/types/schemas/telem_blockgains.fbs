@@ -1,0 +1,16 @@
+namespace MagAOX.logger;
+
+
+
+table Telem_blockgains_fb
+{
+   gains:[float];
+   gains_constant:[uint8];
+   mcs:[float];
+   mcs_constant:[uint8];
+   lims:[float];
+   lims_constant:[uint8];
+}
+
+root_type Telem_blockgains_fb;
+
