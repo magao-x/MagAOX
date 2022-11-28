@@ -344,7 +344,7 @@ addSearchDef (char *dev, char *prop, char *ele)
 
    if(tmp_srchs == NULL)
    {
-      free(srchs);
+      //free(srchs);
       srchs = NULL;
 
       return;

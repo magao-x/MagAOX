@@ -36,12 +36,12 @@ struct telem_blockgains : public flatbuffer_log
    struct messageT : public fbMessage
    {
       ///Construct from components
-      messageT( const std::vector<float> gains,            ///<[in] vector of gains
-                const std::vector<uint8_t> gains_constant, ///<[in] vector of gains constant flags
-                const std::vector<float> multcs,              ///<[in] vector of mult. coeffs.
-                const std::vector<uint8_t> multcs_constant,   ///<[in] vector of mult. coeff constant flags
-                const std::vector<float> lims,             ///<[in] vector of limits
-                const std::vector<uint8_t> lims_constant   ///<[in] vector of limits constant flags
+      messageT( const std::vector<float> & gains,            ///<[in] vector of gains
+                const std::vector<uint8_t> & gains_constant, ///<[in] vector of gains constant flags
+                const std::vector<float> & multcs,              ///<[in] vector of mult. coeffs.
+                const std::vector<uint8_t> & multcs_constant,   ///<[in] vector of mult. coeff constant flags
+                const std::vector<float> & lims,             ///<[in] vector of limits
+                const std::vector<uint8_t> & lims_constant   ///<[in] vector of limits constant flags
               )
       {
          auto _gains = builder.CreateVector(gains);

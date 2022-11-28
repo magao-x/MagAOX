@@ -59,7 +59,7 @@ protected:
 
       IMAGE * m_imageStream {nullptr};
 
-      element(const std::string & el) : m_name{el}
+      explicit element(const std::string & el) : m_name{el}
       {}
    };
 
@@ -169,7 +169,7 @@ int indiTSAccumulator::loadConfigImpl( mx::app::appConfigurator & _config )
 
          m_properties[key].m_property.setDevice(devName);
          m_properties[key].m_property.setName(propName);
-         m_properties[key].m_elements.push_back(elName);
+         m_properties[key].m_elements.push_back(element(elName));
       }
       catch(const std::exception& e)
       {

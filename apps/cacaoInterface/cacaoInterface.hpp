@@ -169,16 +169,6 @@ public:
      */ 
    int setGain();
    
-   /// Set the block gain the specified value 
-   /**
-     * 
-     * \returns 0 on success
-     * \returns -1 on an error
-     */
-   int setBlockGain( int n,  ///< [in] the block number
-                     float g ///< [in] the desired gain
-                   );
-
    /// Set loop multiplication coefficient to the value of m_multCoeff_target;
    /** 
      * 
@@ -187,16 +177,6 @@ public:
      */ 
    int setMultCoeff();
    
-   /// Set the block mult coeff to the specified value 
-   /**
-     * 
-     * \returns 0 on success
-     * \returns -1 on an error
-     */
-   int setBlockMC( int n,  ///< [in] the block number
-                   float mc ///< [in] the desired mult. coeff
-                 );
-
    /// Set loop max lim to the value of m_maxLim_target;
    /** 
      * 
@@ -205,16 +185,6 @@ public:
      */ 
    int setMaxLim();
    
-   /// Set the block limit to the specified value 
-   /**
-     * 
-     * \returns 0 on success
-     * \returns -1 on an error
-     */
-   int setBlockLimit( int n,  ///< [in] the block number
-                      float l ///< [in] the desired limit
-                    );
-
    /// Turn the loop on
    /**
      * \returns 0 on success
@@ -273,68 +243,14 @@ public:
    pcf::IndiProperty m_indiP_loopGain;
    pcf::IndiProperty m_indiP_multCoeff;
    pcf::IndiProperty m_indiP_maxLim;
-      
-   std::vector<pcf::IndiProperty> m_indiP_blockGains;
-   std::vector<pcf::IndiProperty> m_indiP_blockMCs;
-   std::vector<pcf::IndiProperty> m_indiP_blockLimits;
-   
+         
    INDI_NEWCALLBACK_DECL(cacaoInterface, m_indiP_loopState);
    INDI_NEWCALLBACK_DECL(cacaoInterface, m_indiP_loopZero);
    INDI_NEWCALLBACK_DECL(cacaoInterface, m_indiP_loopGain);
    INDI_NEWCALLBACK_DECL(cacaoInterface, m_indiP_multCoeff);
    INDI_NEWCALLBACK_DECL(cacaoInterface, m_indiP_maxLim);
 
-   /// The static callback function to be registered for block gains
-   /** Dispatches to the relevant handler
-     * 
-     * \returns 0 on success.
-     * \returns -1 on error.
-     */
-   static int st_newCallBack_blockGains( void * app, ///< [in] a pointer to this, will be static_cast-ed to derivedT.
-                                         const pcf::IndiProperty &ipRecv ///< [in] the INDI property sent with the the new property request.
-                                       );
-
-   /// Callback to process a NEW block gain request
-   /**
-     * \returns 0 on success.
-     * \returns -1 on error.
-     */
-   int newCallBack_blockGains( const pcf::IndiProperty &ipRecv /**< [in] the INDI property sent with the the new property request.*/);
-
-   /// The static callback function to be registered for block mult. coeff.s
-   /** Dispatches to the relevant handler
-     * 
-     * \returns 0 on success.
-     * \returns -1 on error.
-     */
-   static int st_newCallBack_blockMCs( void * app, ///< [in] a pointer to this, will be static_cast-ed to derivedT.
-                                       const pcf::IndiProperty &ipRecv ///< [in] the INDI property sent with the the new property request.
-                                     );
-
-   /// Callback to process a NEW block mult. coeff.s
-   /**
-     * \returns 0 on success.
-     * \returns -1 on error.
-     */
-   int newCallBack_blockMCs( const pcf::IndiProperty &ipRecv /**< [in] the INDI property sent with the the new property request.*/);
-
-   /// The static callback function to be registered for block limits
-   /** Dispatches to the relevant handler
-     * 
-     * \returns 0 on success.
-     * \returns -1 on error.
-     */
-   static int st_newCallBack_blockLimits( void * app, ///< [in] a pointer to this, will be static_cast-ed to derivedT.
-                                        const pcf::IndiProperty &ipRecv ///< [in] the INDI property sent with the the new property request.
-                                      );
-
-   /// Callback to process a NEW block limits
-   /**
-     * \returns 0 on success.
-     * \returns -1 on error.
-     */
-   int newCallBack_blockLimits( const pcf::IndiProperty &ipRecv /**< [in] the INDI property sent with the the new property request.*/);
-
+   
 };
 
 cacaoInterface::cacaoInterface() : MagAOXApp(MAGAOX_CURRENT_SHA1, MAGAOX_REPO_MODIFIED)
@@ -396,12 +312,6 @@ int cacaoInterface::appStartup()
    createStandardIndiNumber<float>( m_indiP_maxLim, "loop_max_limit", 0.0, 10.0, 0.001, "%0.3f", "Max. Limit", "Loop Controls");
    registerIndiPropertyNew( m_indiP_maxLim, INDI_NEWCALLBACK(m_indiP_maxLim) );  
    
-
-   /*if(getModeBlocks() < 0)
-   {
-      return log<text_log, -1>("Could not get mode blocks", logPrio::LOG_CRITICAL);
-   }*/
-
    if(threadStart( m_fmThread, m_fmThreadInit, m_fmThreadID, m_fmThreadProp, m_fmThreadPrio, "", "loopmon", this, fmThreadStart) < 0)
    {
       log<software_error>({__FILE__, __LINE__});
@@ -429,15 +339,7 @@ int cacaoInterface::appLogic()
       return 0;
    }
 
-   //These could change if a new calibration is loaded
-   /*if(getModeBlocks() < 0 )
-   {
-      state(stateCodes::ERROR, true);
-      if(!stateLogged()) log<text_log>("Could not get mode blocks", logPrio::LOG_ERROR);
-      return 0;
-   }
-
-   if(checkLoopProcesses() < 0)
+   /*if(checkLoopProcesses() < 0)
    {
       state(stateCodes::ERROR, true);
       if(!stateLogged()) log<text_log>("Could not get loop name and/or number", logPrio::LOG_ERROR);
@@ -480,21 +382,6 @@ int cacaoInterface::appLogic()
    updateIfChanged(m_indiP_loopGain, "current", m_gain);
    updateIfChanged(m_indiP_multCoeff, "current", m_multCoeff);
    updateIfChanged(m_indiP_maxLim, "current", m_maxLim);
-
-   for(size_t n=0; n < m_indiP_blockGains.size(); ++n)
-   {
-      updateIfChanged(m_indiP_blockGains[n], "current", m_modeBlockGains[n]);
-   }
-
-   for(size_t n=0; n < m_indiP_blockMCs.size(); ++n)
-   {
-      updateIfChanged(m_indiP_blockMCs[n], "current", m_modeBlockMCs[n]);
-   }
-
-   for(size_t n=0; n < m_indiP_blockLimits.size(); ++n)
-   {
-      updateIfChanged(m_indiP_blockLimits[n], "current", m_modeBlockLims[n]);
-   }
 
    return 0;
 }
@@ -771,14 +658,6 @@ int cacaoInterface::getAOCalib()
    return 0;
 }
 
-
-int cacaoInterface::getModeBlocks()
-{
-
-   return 0;
-}
-
-
 int cacaoInterface::checkLoopProcesses()
 {
    ///\todo look for actual evidence of processes, such as interrogating ps.
@@ -793,39 +672,14 @@ int cacaoInterface::setGain()
    return setFPSVal("mfilt", "loopgain", m_gain_target);
 }
 
-int cacaoInterface::setBlockGain( int n,
-                                  float g
-                                )
-{
-
-   return 0;
-}
-
 int cacaoInterface::setMultCoeff()
 {
    return setFPSVal("mfilt", "loopmult", m_multCoeff_target);
 }
 
-int cacaoInterface::setBlockMC( int n,
-                                float mc
-                              )
-{
-
-
-   return 0;
-}
-
 int cacaoInterface::setMaxLim()
 {
    return setFPSVal("mfilt", "looplimit", m_maxLim_target);
-}
-
-int cacaoInterface::setBlockLimit( int n,
-                                   float l
-                                 )
-{
-
-   return 0;
 }
 
 int cacaoInterface::loopOn()
@@ -1113,125 +967,7 @@ INDI_NEWCALLBACK_DEFN(cacaoInterface, m_indiP_maxLim )(const pcf::IndiProperty &
    return setMaxLim();
 }
 
-int cacaoInterface::st_newCallBack_blockGains( void * app,
-                                               const pcf::IndiProperty &ipRecv
-                                             )
-{
-   cacaoInterface * _app = static_cast<cacaoInterface *>(app);
-   return _app->newCallBack_blockGains(ipRecv);
-}
 
-int cacaoInterface::newCallBack_blockGains( const pcf::IndiProperty &ipRecv )
-{
-   if(ipRecv.getName().size() < 8) return -1;
-
-   int n = std::stoi(ipRecv.getName().substr(5,2));
-
-   float current = -1;
-   float target = -1;
-
-   if(ipRecv.find("current"))
-   {
-      current = ipRecv["current"].get<double>();
-   }
-
-   if(ipRecv.find("target"))
-   {
-      target = ipRecv["target"].get<double>();
-   }
-
-   if(target == -1) target = current;
-   
-   if(target == -1)
-   {
-      return 0;
-   }
-
-   updateIfChanged(m_indiP_blockGains[n], "target", target);
-
-   return setBlockGain(n, target);
-
-}
-
-int cacaoInterface::st_newCallBack_blockMCs( void * app,
-                                             const pcf::IndiProperty &ipRecv
-                                           )
-{
-   cacaoInterface * _app = static_cast<cacaoInterface *>(app);
-   return _app->newCallBack_blockMCs(ipRecv);
-}
-
-int cacaoInterface::newCallBack_blockMCs( const pcf::IndiProperty &ipRecv )
-{
-   if(ipRecv.getName().size() < 8) return -1;
-
-   int n = std::stoi(ipRecv.getName().substr(5,2));
-
-   float current = -1;
-   float target = -1;
-
-   if(ipRecv.find("current"))
-   {
-      current = ipRecv["current"].get<double>();
-   }
-
-   if(ipRecv.find("target"))
-   {
-      target = ipRecv["target"].get<double>();
-   }
-
-   if(target == -1) target = current;
-   
-   if(target == -1)
-   {
-      return 0;
-   }
-
-   updateIfChanged(m_indiP_blockMCs[n], "target", target);
-
-   return setBlockMC(n, target);
-
-}
-
-int cacaoInterface::st_newCallBack_blockLimits( void * app,
-                                              const pcf::IndiProperty &ipRecv
-                                           )
-{
-   cacaoInterface * _app = static_cast<cacaoInterface *>(app);
-   return _app->newCallBack_blockLimits(ipRecv);
-}
-
-int cacaoInterface::newCallBack_blockLimits( const pcf::IndiProperty &ipRecv )
-{
-   if(ipRecv.getName().size() < 8) return -1;
-
-   int n = std::stoi(ipRecv.getName().substr(5,2));
-
-   float current = -1;
-   float target = -1;
-
-   if(ipRecv.find("current"))
-   {
-      current = ipRecv["current"].get<double>();
-   }
-
-   if(ipRecv.find("target"))
-   {
-      target = ipRecv["target"].get<double>();
-   }
-
-   if(target == -1) target = current;
-   
-   if(target == -1)
-   {
-      return 0;
-   }
-
-   updateIfChanged(m_indiP_blockLimits[n], "target", target);
-
-   return setBlockLimit(n, target);
-
-}
 
 
 } //namespace app

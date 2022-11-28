@@ -50,9 +50,18 @@ int main()
       /* Read in the pupil mask. */ 
       double * pupil = new double[MSKELEMENTS];
       FILE *fptr = fopen("magMask.dat", "rb");
+      if(!fptr)
+      {
+         delete pupil;
+         return;
+      }
       int stat = fread(pupil, sizeof(double), MSKELEMENTS, fptr);
       if (stat <= 0)
-          return 1;
+      {
+         delete pupil; //just for codacy.
+         fclose(fptr);
+         return 1;
+      }
       fclose(fptr);
 
       

@@ -12,8 +12,8 @@
 #include <cmath>
 #include "reg_functions.hpp"
 #include <x86intrin.h>
-#include <ImageStruct.h>
-#include <ImageStreamIO.h>
+//#include <ImageStruct.h>
+//#include <ImageStreamIO.h>
 
 /**
  *  Fits a cross-correlation map to Gaussian function
