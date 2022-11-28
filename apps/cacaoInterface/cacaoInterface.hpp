@@ -8,6 +8,7 @@
 #define cacaoInterface_hpp
 
 
+
 #include "../../libMagAOX/libMagAOX.hpp" //Note this is included on command line to trigger pch
 #include "../../magaox_git_version.h"
 
@@ -590,17 +591,17 @@ std::string cacaoInterface::getFPSValStr( const std::string & fps,
 
       int r = read(rfd, inbuff, sizeof(inbuff));
 
-      close(rfd);
-
       if(r < 0)
       {
          log<software_error>({__FILE__, __LINE__, errno, "error on read from " + m_fpsFifo});
          return "";
       }
 
+      close(rfd);
+
       remove(outfile.c_str());
       
-      int n = strlen(inbuff);
+      int n = strnlen(inbuff, sizeof(inbuff));
 
       char * s = inbuff + n;
 
