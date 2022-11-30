@@ -34,11 +34,15 @@ namespace app
 /** 
   * \ingroup cacaoInterface
   */
-class cacaoInterface : public MagAOXApp<true>
+class cacaoInterface : public MagAOXApp<true>, public dev::telemeter<cacaoInterface>
 {
 
    //Give the test harness access.
    friend class cacaoInterface_test;
+
+   typedef dev::telemeter<cacaoInterface> telemeterT;
+
+   friend class dev::telemeter<cacaoInterface>;
 
 protected:
 
@@ -250,6 +254,18 @@ public:
    INDI_NEWCALLBACK_DECL(cacaoInterface, m_indiP_multCoeff);
    INDI_NEWCALLBACK_DECL(cacaoInterface, m_indiP_maxLim);
 
+   /** \name Telemeter Interface
+     * 
+     * @{
+     */ 
+   int checkRecordTimes();
+   
+   int recordTelem( const telem_loopgain * );
+
+   int recordLoopGain( bool force = false );
+   
+   ///@}
+
    
 };
 
@@ -262,12 +278,20 @@ cacaoInterface::cacaoInterface() : MagAOXApp(MAGAOX_CURRENT_SHA1, MAGAOX_REPO_MO
 void cacaoInterface::setupConfig()
 {
    config.add("loop.number", "", "loop.number", argType::Required, "loop", "number", false, "string", "the loop number");
+
+   telemeterT::setupConfig(config);
 }
 
 int cacaoInterface::loadConfigImpl( mx::app::appConfigurator & _config )
 {
    _config(m_loopNumber, "loop.number");
    
+   if(telemeterT::loadConfig(_config) < 0)
+   {
+      log<text_log>("Error during telemeter config", logPrio::LOG_CRITICAL);
+      m_shutdown = true;
+   }
+
    return 0;
 }
 
@@ -318,6 +342,11 @@ int cacaoInterface::appStartup()
       return -1;
    }
    
+   if(telemeterT::appStartup() < 0)
+   {
+      return log<software_error,-1>({__FILE__,__LINE__});
+   }
+
    return 0;
 }
 
@@ -349,6 +378,12 @@ int cacaoInterface::appLogic()
 
    if(m_loopProcesses == 0 || m_loopState == 0) state(stateCodes::READY);
    else state(stateCodes::OPERATING);
+
+   if(telemeterT::appLogic() < 0)
+   {
+      log<software_error>({__FILE__, __LINE__});
+      return 0;
+   }
 
    std::unique_lock<std::mutex> lock(m_indiMutex);
 
@@ -400,6 +435,8 @@ int cacaoInterface::appShutdown()
       }
    }
    
+   telemeterT::appShutdown();
+
    return 0;
 }
 
@@ -669,21 +706,25 @@ int cacaoInterface::checkLoopProcesses()
 
 int cacaoInterface::setGain()
 {   
+   recordLoopGain(true);
    return setFPSVal("mfilt", "loopgain", m_gain_target);
 }
 
 int cacaoInterface::setMultCoeff()
 {
+   recordLoopGain(true);
    return setFPSVal("mfilt", "loopmult", m_multCoeff_target);
 }
 
 int cacaoInterface::setMaxLim()
 {
+   recordLoopGain(true);
    return setFPSVal("mfilt", "looplimit", m_maxLim_target);
 }
 
 int cacaoInterface::loopOn()
 {
+   recordLoopGain(true);
    if( setFPSVal("mfilt", "loopON", std::string("ON")) != 0)
    {
       return log<software_error,-1>({__FILE__, __LINE__, "error setting FPS val"});
@@ -697,6 +738,7 @@ int cacaoInterface::loopOn()
 
 int cacaoInterface::loopOff()
 {
+   recordLoopGain(true);
    if( setFPSVal("mfilt", "loopON", std::string("OFF")) != 0)
    {
       return log<software_error,-1>({__FILE__, __LINE__, "error setting FPS val"});
@@ -795,6 +837,8 @@ void cacaoInterface::fmThreadExec( )
       {
          m_maxLim = 0;
       }
+
+      recordLoopGain();
       /*
       fin.open( m_loopDir +  "/status/stat_procON.txt");
       
@@ -967,8 +1011,38 @@ INDI_NEWCALLBACK_DEFN(cacaoInterface, m_indiP_maxLim )(const pcf::IndiProperty &
    return setMaxLim();
 }
 
+inline
+int cacaoInterface::checkRecordTimes()
+{
+   return telemeterT::checkRecordTimes(telem_loopgain());
+}
 
+inline
+int cacaoInterface::recordTelem( const telem_loopgain * )
+{
+   return recordLoopGain(true);
+}
 
+inline
+int cacaoInterface::recordLoopGain( bool force )
+{
+   static uint8_t state {0};
+   static float gain {-1000};
+   static float multcoef {0};
+   static float limit {0};
+
+   if(state != m_loopState || gain != m_gain || multcoef != m_multCoeff || limit != m_maxLim || force)
+   {
+      state = m_loopState;
+      gain = m_gain;
+      multcoef = m_multCoeff;
+      limit = m_maxLim;
+
+      telem<telem_loopgain>({state, m_gain, m_multCoeff, m_maxLim});
+   }
+
+   return 0;
+}
 
 } //namespace app
 } //namespace MagAOX

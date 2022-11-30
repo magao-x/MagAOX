@@ -70,5 +70,6 @@ telem_fgtimings          20905    telem_fgtimings
 
 telem_dmmodes            20910    telem_dmmodes
 
-telem_blockgains         20915    telem_blockgains 
+telem_loopgain           20915    telem_loopgain
+telem_blockgains         20920    telem_blockgains 
 

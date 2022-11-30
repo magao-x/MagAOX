@@ -78,6 +78,7 @@ INDI/INDI/getINDI
 INDI/INDI/indiserver
 INDI/INDI/setINDI
 INDI/xindidriver/xindidriver
+apps/indiTSAccumulator/indiTSAccumulator
 
 #k
 apps/kTracker/kTracker

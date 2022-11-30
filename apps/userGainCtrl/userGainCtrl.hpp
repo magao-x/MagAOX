@@ -960,6 +960,7 @@ int userGainCtrl::setBlockGain( int n,
       m_gainsTarget(m_modeBlockStart[n] + m,0) = m_gainsCurrent(m_modeBlockStart[n] + m,0) + (g - m_modeBlockGains[n]);
    }
    lock.unlock();
+   recordBlockGains(true);
    writeGains();
    return 0;
 }
@@ -1086,6 +1087,7 @@ int userGainCtrl::setBlockMC( int n,
       m_mcsTarget(m_modeBlockStart[n] + m,0) = m_mcsCurrent(m_modeBlockStart[n] + m,0) + (mc- m_modeBlockMCs[n]);
    }
    lock.unlock();
+   recordBlockGains(true);
    writeMCs();
    return 0;
 }
@@ -1211,6 +1213,7 @@ int userGainCtrl::setBlockLimit( int n,
       m_limitsTarget(m_modeBlockStart[n] + m,0) = m_limitsCurrent(m_modeBlockStart[n] + m,0) + (l- m_modeBlockLims[n]);
    }
    lock.unlock();
+   recordBlockGains(true);
    writeLimits();
 
    return 0;

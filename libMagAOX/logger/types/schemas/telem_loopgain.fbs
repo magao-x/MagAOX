@@ -1,0 +1,14 @@
+namespace MagAOX.logger;
+
+
+
+table Telem_loopgain_fb
+{
+   state:uint8;
+   gain:float;
+   multcoef:float;
+   limit:float;
+}
+
+root_type Telem_loopgain_fb;
+

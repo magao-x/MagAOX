@@ -66,6 +66,7 @@ INCLUDEDEPS= app/MagAOXApp.hpp \
             logger/types/telem_fgtimings.hpp \
 	     logger/types/telem_fxngen.hpp \
 	     logger/types/telem_observer.hpp \
+		  logger/types/telem_loopgain.hpp \
 	     logger/types/telem_pico.hpp \
             logger/types/telem_rhusb.hpp \
 	     logger/types/telem_stage.hpp \
