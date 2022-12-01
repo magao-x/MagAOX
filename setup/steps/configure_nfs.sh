@@ -16,6 +16,10 @@ if [[ $MAGAOX_ROLE == RTC || $MAGAOX_ROLE == ICC || $MAGAOX_ROLE == AOC ]]; then
     if command -v ufw; then
         sudo ufw allow from 192.168.0.0/24 to any port nfs
     fi
+    # /etc/systemd/system/nfs-server.service.d/override.conf
+    overridePath="/etc/systemd/system/${nfsServiceUnit}.d/override.conf"
+    sudo mkdir -p "/etc/systemd/system/${nfsServiceUnit}.d/"
+    echo -e "[Service]\nTimeoutStopSec=5s" | sudo tee $overridePath
     exportHosts=""
     for host in aoc rtc icc; do
         if [[ ${host,,} != ${MAGAOX_ROLE,,} ]]; then
