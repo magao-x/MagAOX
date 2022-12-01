@@ -15,8 +15,7 @@ else
 fi
 PACKAGE_ARCHIVE=$PACKAGE_DIR.tar.gz
 if [[ ! -d $PACKAGE_DIR ]]; then
-    _cached_fetch https://downloads.rclone.org/v${PACKAGE_VERSION}/$PACKAGE_ARCHIVE
- $PACKAGE_ARCHIVE
+    _cached_fetch https://downloads.rclone.org/v${PACKAGE_VERSION}/$PACKAGE_ARCHIVE $PACKAGE_ARCHIVE
     tar xzf $PACKAGE_ARCHIVE
 fi
 cd $PACKAGE_DIR
