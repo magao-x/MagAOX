@@ -2,7 +2,7 @@
 #define xqt_pwrDevice_hpp
 
 #include <QWidget>
-#include <qwt_text_label.h>
+#include <qwt/qwt_text_label.h>
 
 #include <mx/ioutils/stringUtils.hpp>
 

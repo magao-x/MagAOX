@@ -40,7 +40,8 @@ SOURCES += pwrGUI.cpp \
 FORMS += ../../widgets/pwr/pwr.ui
      
 LIBS += ../../../INDI/libcommon/libcommon.a \
-        ../../../INDI/liblilxml/liblilxml.a
+        ../../../INDI/liblilxml/liblilxml.a \
+        -lqwt-qt5
 
 LIBS += -lmxlib  
 
