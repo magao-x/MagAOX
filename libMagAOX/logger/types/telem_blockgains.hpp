@@ -81,7 +81,7 @@ struct telem_blockgains : public flatbuffer_log
                msg += std::to_string(fbs->gains()->Get(i));
                msg += " (";
                msg += std::to_string(fbs->gains_constant()->Get(i));
-               msg += "(";
+               msg += ")";
             }
          }
          else
