@@ -1,50 +1,39 @@
-#!/bin/bash
-set -e
-# Query for seeing measurements from DIMM and Magellans
-# Joseph Long - 2019B
-# Database assistance (and access for exao1) by Gabriel Prieto
+#!/usr/bin/env python
+import sys
+from urllib.request import urlopen
+import datetime
+from datetime import datetime, timezone
+import json
+import math
 
-# Don't run except at LCO
-if ! nmcli con show --active | grep www-lco &> /dev/null; then
-    exit
-fi
+endpoints = ['Dimm', 'Mag1', 'Mag2']
+endpoint_template = "http://weather.lco.cl/clima/weather/Magellan/PHP/grab{name}.php"
 
-# DIMM columns
-# tm - timestamp
-# se - FWHM
-# el - elevation
-export dimm=$(mysql \
-    --raw \
-    --batch \
-    --connect-timeout=1 \
-    --host clima.lco.cl \
-    --user read_data_ao \
-    --execute "select tm as datetime, se as fwhm, el as elevation from dimm_data where un = 0 order by tm desc limit 1" \
-    weather)
-echo -e "dimm\n$dimm"
-echo "$dimm" > /tmp/dimm.tsv
+def retrieve_one(name):
+    try:
+        fh = urlopen(endpoint_template.format(name=name))
+        points = json.load(fh)
+        new_points = []
+        for pt in points:
+            new_points.append({
+                'tm': pt['tm'],
+                'dt': datetime.fromisoformat(pt['tm']).replace(tzinfo=timezone.utc),
+                'el': float(pt['el']),
+                'fw': float(pt['fw']),
+            })
+    except Exception as e:
+        print(e, file=sys.stderr)
+        pass
+    new_points.sort(key=lambda x: x['tm'], reverse=True)
+    return new_points[0]
+    
+def main():
+    for ep in endpoints:
+        point = retrieve_one(ep)
+        with open(f"/tmp/{ep.lower()}.tsv", 'w') as fh:
+            fh.write(f"datetime,fwhm,elevation\n")
+            fh.write(f"{point['tm']},{point['fw']},{point['el']}\n")
+    return 0
 
-# Magellan Baade and Clay columns
-# tm - timestamp
-# fw - fwhm
-# el - elevation
-export mag1=$(mysql \
-    --raw \
-    --batch \
-    --connect-timeout=1 \
-    --host clima.lco.cl \
-    --user read_data_ao \
-    --execute "select tm as datetime, fw as fwhm, el as elevation from magellan_data where un = 0 order by tm desc limit 1" \
-    weather)
-echo -e "mag1\n$mag1"
-echo "$mag1" > /tmp/mag1.tsv
-export mag2=$(mysql \
-    --raw \
-    --batch \
-    --connect-timeout=1 \
-    --host clima.lco.cl \
-    --user read_data_ao \
-    --execute "select tm as datetime, fw as fwhm, el as elevation from magellan_data where un = 1 order by tm desc limit 1" \
-    weather)
-echo -e "mag2\n$mag2"
-echo "$mag2" > /tmp/mag2.tsv
+if __name__ == "__main__":
+    sys.exit(main())
