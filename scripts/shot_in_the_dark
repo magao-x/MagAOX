@@ -16,16 +16,18 @@ log = logging.getLogger(__name__)
 SCIENCE_CAMERAS = ['camsci1', 'camsci2']
 IGNORED_KEYS = ['TEMP', 'WIDTH', 'HEIGHT', 'XCEN', 'YCEN', 'FPS', 'MODE',]
 
-def collect_camera_settings(observer, obs_name, camname, check_only_n=None, progress=False):
-    open_shutter_settings = defaultdict(list)
-    shut_shutter_settings = defaultdict(list)
-    glob_pattern = f"/data/users/guestobs/quicklook/{observer}/{obs_name}/{camname}/*.fits"
+def collect_camera_settings(semester, night, camname, check_only_n=None, progress=False):
+    open_shutter_settings = defaultdict(lambda: 0)
+    shut_shutter_settings = defaultdict(lambda: 0)
+    glob_pattern = f"/data/users/guestobs/quicklook/{semester}/{night}/*/*/*/{camname}/*.fits"
+    print(list(glob.glob(glob_pattern)))
     iterable = glob.glob(glob_pattern)[:check_only_n]
     if progress:
         iterable = tqdm.tqdm(iterable)
     for fn in iterable:
         head_part, _ = os.path.split(fn)
-        fn_observer, fn_obs_name, _ = head_part.replace('/data/users/guestobs/quicklook/', '').split('/')
+        parts = head_part.replace('/data/users/guestobs/quicklook/', '').split('/')
+        _, day_span, target_name, fn_observer, fn_obs_name, _ = parts
         was_shut = None
         with open(fn, 'rb') as fh:
             try:
@@ -58,14 +60,16 @@ def collect_camera_settings(observer, obs_name, camname, check_only_n=None, prog
                     # special case for invalid bin values
                     if cleaned_key in ("ROI XBIN", "ROI YBIN"):
                         value = max(value, 1)
+                        if value > 4:
+                            value = 1
                     camera_settings.append((cleaned_key, value))
             camera_settings.sort()
         
         camera_settings = tuple(camera_settings)
         if was_shut:
-            shut_shutter_settings[camera_settings].append((fn_observer, fn_obs_name))
+            shut_shutter_settings[camera_settings] += 1
         else:
-            open_shutter_settings[camera_settings].append((fn_observer, fn_obs_name))
+            open_shutter_settings[camera_settings] += 1
     return open_shutter_settings, shut_shutter_settings
 
 def make_settings_jsonable(config_kind):
@@ -86,7 +90,7 @@ def main(args):
     have_darks = defaultdict(list)
     cameras = args.cameras if args.cameras is not None else SCIENCE_CAMERAS
     for camname in cameras:
-        all_open_settings, all_shut_settings = collect_camera_settings("*", "*", camname, args.check_only_n, progress=True)
+        all_open_settings, all_shut_settings = collect_camera_settings(args.semester, args.night, camname, args.check_only_n, progress=True)
         for setup, datasets in all_open_settings.items():
             log.info("=" * 72)
             log.info(f"{camname} setup:")
@@ -126,11 +130,14 @@ def main(args):
     return
 
 if __name__ == "__main__":
-    this_year = datetime.datetime.now().year
+    now = datetime.datetime.now()
+    this_year = now.year
+    this_semester = str(this_year) + "B" if now.month > 6 else "A"
     import argparse
     parser = argparse.ArgumentParser()
     parser.add_argument('-v', '--verbose', help="Turn on debug output", action='store_true')
-    # parser.add_argument('-y', '--year', help=f"Year to search in, default: {this_year}", type=int, default=this_year)
+    parser.add_argument('-s', '--semester', help=f"Semester to search in, default: {this_semester}", default=this_semester)
+    parser.add_argument('-n', '--night', help=f"Night to search in, e.g. 2022-12-02_03", default='*')
     # parser.add_argument('-p', '--prefix', help=f"Quicklook files root, default: {QUICKLOOK_PATH.as_posix()}", type=pathlib.Path, default=QUICKLOOK_PATH)
     parser.add_argument('-c', '--cameras', help=f"Cameras to check, default: {SCIENCE_CAMERAS}", action='append', default=None)
     # parser.add_argument('-a', '--show-all', help=f"Whether to show camera configurations for which darks are already present", action='store_true')
