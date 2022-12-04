@@ -53,7 +53,8 @@ apps_aoc = \
 	adcTracker \
 	kTracker \
 	koolanceCtrl \
-	observerCtrl
+	observerCtrl \
+	siglentSDG
 
 # apps_vm = none yet
 apps_tic = \
