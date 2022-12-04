@@ -38,7 +38,7 @@ import shutil
 log = logging.getLogger(__name__)
 
 LOOKYLOO_DATA_ROOTS = os.environ.get('LOOKYLOO_DATA_PATHS', '/opt/MagAOX:/srv/icc/data:/srv/rtc/data')
-QUICKLOOK_PATH = pathlib.Path('/data/users/guestobs/quicklook')
+QUICKLOOK_PATH = pathlib.Path('/data/obs')
 HISTORY_FILENAME = "lookyloo_success.txt"
 FAILED_HISTORY_FILENAME = "lookyloo_failed.txt"
 DEFAULT_SEPARATE = object()
@@ -46,12 +46,8 @@ DEFAULT_CUBE = object()
 ALL_CAMERAS = {
     'camsci1': DEFAULT_SEPARATE,
     'camsci2': DEFAULT_SEPARATE,
-    'camlowfs': DEFAULT_SEPARATE,
-    'camwfs': DEFAULT_SEPARATE,
-    'camtip': DEFAULT_SEPARATE,
-    'camacq': DEFAULT_SEPARATE,
 }
-SLEEP_FOR_TELEMS = 30
+SLEEP_FOR_TELEMS = 90
 CHECK_INTERVAL_SEC = 30
 LINE_BUFFERED = 1
 
@@ -495,9 +491,10 @@ def convert_xrif(
             failed_paths.append(ts_path.path)
             if not omit_telemetry:
                 # try again without telemetry
-                success, command_line = launch_xrif2fits(no_telem_args, dry_run=dry_run)
+                success, revised_command_line = launch_xrif2fits(no_telem_args, dry_run=dry_run)
                 if not success:
-                    raise RuntimeError(f"Retried {ts_path.path} without telemetry and xrif2fits still errored! Bailing out.\n\tcommand: {command_line}")
+                    raise RuntimeError(f"Retried {ts_path.path} without telemetry and xrif2fits still errored! Bailing out.\n\tcommand: {revised_command_line}")
+                log.warn(f"Converting {ts_path} succeeded after omitting telemetry. Command line was: {revised_command_line} (originally: {command_line})")
         else:
             successful_paths.append(ts_path.path)
 
