@@ -548,7 +548,8 @@ def daemon_mode(
                         log.info(f"Exported {len(visited_files)} archive{'s' if len(visited_files) != 1 else ''} for {device}")
 
                 log.info(f"Completed span {span}")
-                spans_with_data.add(span)
+                if span.end is not None:
+                    spans_with_data.add(span)
             existing_observation_spans = existing_observation_spans.union(spans_with_data)
             duration = time.time() - start_time
             log.debug(f"Took {duration} sec")
