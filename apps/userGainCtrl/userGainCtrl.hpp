@@ -333,7 +333,8 @@ inline
 int userGainCtrl::loadConfigImpl( mx::app::appConfigurator & _config )
 {
    _config(m_loopNumber, "loop.number");
-
+   _config(m_splitTT, "blocks.splitTT");
+   
    shmimMonitorT::m_shmimName = "aol" + std::to_string(m_loopNumber) + "_mgainfact";   
    shmimMonitorT::loadConfig(config);
 
