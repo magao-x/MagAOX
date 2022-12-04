@@ -911,10 +911,10 @@ int tcsInterface::appLogic()
       }
       
 
-      /*if(getSeeing() < 0)
+      if(getSeeing() < 0)
       {
          return 0;
-      }*/
+      }
       
       telemeter<tcsInterface>::appLogic();
       
