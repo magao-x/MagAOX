@@ -65,6 +65,8 @@ class cameraStatus :
    signals:
          
       void newStretchBox(StretchBox *);
+
+      void savingState(bool);
 };
 
 #endif //cameraStatus_hpp

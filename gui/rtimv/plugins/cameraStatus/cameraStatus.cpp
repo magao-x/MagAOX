@@ -34,7 +34,8 @@ int cameraStatus::attachOverlay( rtimvOverlayAccess & roa,
    config.configUnused(m_filterDeviceName, mx::app::iniFile::makeKey("camera", "filterDevice"));
    
    connect(this, SIGNAL(newStretchBox(StretchBox *)), m_roa.m_mainWindowObject, SLOT(addStretchBox(StretchBox *)));
-   
+   connect(this, SIGNAL(savingState(bool)), m_roa.m_mainWindowObject, SLOT(savingState(bool)));
+
    if(m_enabled) enableOverlay();
    else disableOverlay();
    
@@ -339,6 +340,14 @@ int cameraStatus::updateOverlay()
       if(n > m_roa.m_graphicsView->statusTextNo()-1) return 0;   
    }
    
+   if( m_roa.m_dictionary->count(m_deviceName + "-sw.writing.toggle") > 0)
+   {
+      if( ((*m_roa.m_dictionary)[m_deviceName + "-sw.writing.toggle"].getBlobStr(m_blob, sizeof(m_blob))) == sizeof(m_blob) ) return -1; //Don't trust this as a string.
+      sstr = std::string(m_blob);
+      if(sstr == "on") emit savingState(true);
+      else emit savingState(false);
+   }
+
    return 0;
 }
 
