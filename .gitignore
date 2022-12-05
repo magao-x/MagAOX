@@ -33,8 +33,22 @@ doc/www/
 #ignore test executables
 **/tests/*_test
 
+#Carcich temporary files
+x.x
+
 ##########################################
 #Executables and app specifics to ignore:
+On branch fix/20221202-provisioning-working
+Your branch is up to date with 'origin/fix/20221202-provisioning-working'.
+
+Untracked files:
+  (use "git add <file>..." to include in what will be committed)
+#C
+apps/CGFSMHIfpga/CGFSMHIfpga
+apps/CGFSMUIfpga/CGFSMUIfpga
+apps/CGraphFSMHardwareInterface/CGFSM
+
+nothing added to commit but untracked files present (use "git add" to track)
 
 #a
 apps/adcTracker/adcTracker
@@ -106,6 +120,8 @@ apps/photonCounter
 #r
 apps/rhusbMon/rhusbMon
 apps/refRMS/refRMS
+apps/resurrector/resurrector_indi
+apps/resurrector/test/test_resurrector
 
 #s
 apps/shmimIntegrator/shmimIntegrator
