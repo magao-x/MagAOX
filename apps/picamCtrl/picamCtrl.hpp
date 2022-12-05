@@ -1602,8 +1602,31 @@ int picamCtrl::configureAcquisition()
    std::cerr << rois->roi_array[0].width << "\n";
    std::cerr << 0.5*( (float) (rois->roi_array[0].width - 1.0)) << "\n";
    
-   m_currentROI.x = (rois->roi_array[0].x) + 0.5*( (float) (rois->roi_array[0].width - 1.0)) ;
-   m_currentROI.y = (rois->roi_array[0].y) + 0.5*( (float) (rois->roi_array[0].height - 1.0)) ;
+
+   if(m_currentFlip == fgFlipLR || m_currentFlip == fgFlipUDLR)
+   {
+      m_currentROI.x = (1023.0-rois->roi_array[0].x) - 0.5*( (float) (rois->roi_array[0].width - 1.0)) ;
+      //nextroi.x = ((1023-m_nextROI.x) - 0.5*( (float) m_nextROI.w - 1.0));
+   }
+   else
+   {
+      m_currentROI.x = (rois->roi_array[0].x) + 0.5*( (float) (rois->roi_array[0].width - 1.0)) ;
+   }
+
+   
+   if(m_currentFlip == fgFlipUD || m_currentFlip == fgFlipUDLR)
+   {
+      m_currentROI.y = (1023.0-rois->roi_array[0].y) - 0.5*( (float) (rois->roi_array[0].height - 1.0)) ;
+      //nextroi.y = ((1023 - m_nextROI.y) - 0.5*( (float) m_nextROI.h - 1.0));
+   }
+   else
+   {
+      m_currentROI.y = (rois->roi_array[0].y) + 0.5*( (float) (rois->roi_array[0].height - 1.0)) ;
+   }
+
+
+
+   
    
    m_currentROI.w = rois->roi_array[0].width;
    m_currentROI.h = rois->roi_array[0].height;
