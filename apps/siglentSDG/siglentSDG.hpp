@@ -48,8 +48,8 @@ protected:
 
    double m_bootDelay {10}; ///< Time in seconds it takes the device to boot.
 
-   int m_writeTimeOut {1000};  ///< The timeout for writing to the device [msec].
-   int m_readTimeOut {1000}; ///< The timeout for reading from the device [msec].
+   int m_writeTimeOut {10000};  ///< The timeout for writing to the device [msec].
+   int m_readTimeOut {10000}; ///< The timeout for reading from the device [msec].
 
    double m_C1setVoltage {5.0}; ///< the set position voltage of Ch. 1.
    double m_C2setVoltage {5.0}; ///< the set position voltage of Ch. 2.
@@ -61,6 +61,7 @@ protected:
    tty::telnetConn m_telnetConn; ///< The telnet connection manager
 
    std::string m_waveform; ///< The chosen funciton to generate
+   /// std::string m_clock; ///<INTernal or EXTernal 
 
    uint8_t m_C1outp {0}; ///< The output status channel 1
    double m_C1frequency {0}; ///< The output frequency of channel 1
@@ -453,6 +454,7 @@ void siglentSDG::setupConfig()
    
    config.add("fxngen.C1syncOn", "", "fxngen.C1syncOn", argType::Required, "fxngen", "C1syncOn", false, "bool", "Whether (true) or not (false) C1 synchro output is enabled at startup.  Default is false");
    config.add("fxngen.waveform", "w", "fxngen.waveform", argType::Required, "fxngen", "waveform", false, "string", "The waveform to populate function.");
+   /// config.add("fxngen.clock", "c", "fxngen.clock", argType::Required, "fxngen", "clock", false, "string", "Internal (INT) or external (EXT) clock.");
 
    dev::telemeter<siglentSDG>::setupConfig(config);
 }
@@ -468,6 +470,7 @@ void siglentSDG::loadConfig()
    
    config(m_C1syncOn, "fxngen.C1syncOn");
    config(m_waveform, "fxngen.waveform"); // todo: check if this is a valid waveform?
+   /// config(m_clock, "fxngen.clock");
 
    dev::telemeter<siglentSDG>::loadConfig(config);
 }
@@ -618,7 +621,7 @@ int siglentSDG::appLogic()
       //This allows for the case where the device powers off causing a comm error
       //But we haven't gotten the update from the power controller before going through
       //the main loop after the error.
-      if((m_powerState != 1 || m_powerTargetState != 1) < 1)
+      if( (m_powerState != 1 || m_powerTargetState != 1) == true)
       {
          return 0;
       }
@@ -977,12 +980,13 @@ int siglentSDG::writeRead( std::string & strRead,
                          )
 {
    int rv;
-
    rv = m_telnetConn.writeRead(command, false, m_writeTimeOut, m_readTimeOut);
    strRead = m_telnetConn.m_strRead;
 
    if(rv < 0)
    {
+      std::cout << command << "\n";
+      std::cout << "writeRead return val was " << rv << "\n";
       if((m_powerState != 1 || m_powerTargetState != 1) && !m_shutdown) log<software_error>({__FILE__, __LINE__, 0, rv, tty::ttyErrorString(rv)});
       state(stateCodes::NOTCONNECTED);
       return -1;
@@ -1617,11 +1621,15 @@ int siglentSDG::normalizeSetup()
    changeAmp(1, 0);
    changeAmp(2, 0);
 
-   changePhse(1, 0);
-   changePhse(2, 0);
+   if(m_waveform == "SINE"){
+      changePhse(1, 0);
+      changePhse(2, 0);
+   }
 
-   changeWdth(1, 0);
-   changeWdth(2, 0);
+   if(m_waveform == "PULSE"){
+      changeWdth(1, 0);
+      changeWdth(2, 0);
+   }
 
    changeOfst(1, 0.0);
    changeOfst(2, 0.0);
@@ -1785,6 +1793,24 @@ int siglentSDG::changeFreq( int channel,
    {
       if((m_powerState != 1 || m_powerTargetState != 1)) log<software_error>({__FILE__, __LINE__});
       return -1;
+   }
+
+   // we want to automatically set the pulse width when setting a new frequency
+   if(m_waveform == "PULSE"){
+      // we want to auto change the pulse duration, want either 0.000250 or 0.5%
+      double wdthLim = 0.5 / newFreq ;         // this is the limit if we don't have long enough frequencies
+      double wdth250 = 1 / newFreq - 0.000250;  // this is the ideal length of low dip
+      double newWdth = wdth250;
+
+      if(wdthLim > wdth250){
+         newWdth = wdthLim;
+         log<text_log>("Ch. " + std::to_string(channel) + " WDTH auto-changing to duty cycle limit: " + std::to_string(newWdth), logPrio::LOG_NOTICE);
+      }else{
+         log<text_log>("Ch. " + std::to_string(channel) + " WDTH auto-changing to 250us ideal case: " + std::to_string(newWdth), logPrio::LOG_NOTICE);
+      }
+
+      //changing pulse width
+      changeWdth(channel, newWdth);
    }
 
    return 0;
@@ -2033,7 +2059,7 @@ int siglentSDG::changePhse( int channel,
 
    if(m_waveform == "PULSE"){
       log<text_log>("Ch. " + std::to_string(channel) + " PHSE not set for PULSE waveform.", logPrio::LOG_WARNING);
-      return -1;
+      return 0;
    }
 
    std::string afterColon = "BSWV PHSE," + mx::ioutils::convertToString<double>(newPhse);
@@ -2095,13 +2121,13 @@ int siglentSDG::changeWdth( int channel,
 
    if(m_waveform != "PULSE"){
       log<text_log>("Ch. " + std::to_string(channel) + " WDTH can not be set, waveforem not PULSE.", logPrio::LOG_WARNING);
-      return -1;
+      return 0;
    }
 
    std::string afterColon = "BSWV WIDTH," + mx::ioutils::convertToString<double>(newWdth);
    std::string command = makeCommand(channel, afterColon);
 
-   log<text_log>("Ch. " + std::to_string(channel) + " WIDTH to " + std::to_string(newWdth), logPrio::LOG_NOTICE);
+   log<text_log>("Ch. " + std::to_string(channel) + " WDTH to " + std::to_string(newWdth), logPrio::LOG_NOTICE);
 
    int rv = writeCommand(command);
 
