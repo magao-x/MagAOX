@@ -140,8 +140,18 @@ main(int argc, char** argv)
             int newfd = resurr.open_hexbeater
                             (argv0, driver_name, IRMAGAOX_fifos, NULL);
 
-            // Skip HBMs that are already opened
-            if (newfd<0) { continue; }
+            if (newfd<0) {
+                if (errno!=EEXIST) 
+                {
+                    // Failing for HBMs that fail but not already opened
+                    perror(("Failed to open Hexbeater FIFO["
+                           + argv0 +"]").c_str()
+                          );
+                    return 1;
+                }
+                // Skip HBMs that are already opened
+                continue;
+            }
 
             // Write the HBM info to STDERR
             resurr.fd_to_stream(std::cerr, newfd);
