@@ -712,7 +712,7 @@ void coronAlign::on_button_focal_r_pressed()
       ip.setDevice("picomotors");
       ip.setName("picofpm_pos");
       ip.add(pcf::IndiElement("target"));
-      ip["target"] = m_picoFocalPos - m_focalScale*m_picoFocalStepSize;
+      ip["target"] = m_picoFocalPos + m_focalScale*m_picoFocalStepSize;
    }
    sendNewProperty(ip);
 }
