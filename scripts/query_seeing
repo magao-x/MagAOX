@@ -20,7 +20,7 @@ def retrieve_one(name):
             'el': float(pt['el']),
             'fw': float(pt['fw']),
         })
-    new_points.sort(key=lambda x: x['tm'], reverse=True)
+    new_points.sort(key=lambda x: x['dt'], reverse=True)
     return new_points[0]
     
 def main(debug):

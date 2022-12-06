@@ -218,7 +218,6 @@ int flipperCtrl::appLogic()
       if(rv == TTY_E_DEVNOTFOUND || rv == TTY_E_NODEVNAMES)
       {
          state(stateCodes::NODEVICE);
-
          if(!stateLogged())
          {
             std::stringstream logs;
