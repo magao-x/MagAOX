@@ -1263,6 +1263,8 @@ int andorCtrl::getEMGain()
       return -1;
    }
 
+   if(gain == 0) gain = 1;
+
    m_emGain = gain;
    
    return 0;
@@ -1367,6 +1369,9 @@ int andorCtrl::setEMGain()
    }
    
    int emg = m_emGainSet;
+
+   if(emg == 1) emg = 0;
+
    if(emg < 0)
    {
       emg = 0;
