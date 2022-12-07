@@ -161,8 +161,8 @@ function createuser() {
     echo -e "$DEFAULT_PASSWORD\n$DEFAULT_PASSWORD" | sudo passwd $username || exit 1
     log_success "Created user account $username with default password $DEFAULT_PASSWORD"
   fi
-  sudo usermod -a -G magaox $username || exit 1
-  log_info "Added user $username to group magaox"
+  sudo usermod -a -G $instrument_group $username || exit 1
+  log_info "Added user $username to group $instrument_group"
   sudo mkdir -p /home/$username/.ssh || exit 1
   sudo touch /home/$username/.ssh/authorized_keys || exit 1
   sudo chmod -R u=rwx,g=,o= /home/$username/.ssh || exit 1
