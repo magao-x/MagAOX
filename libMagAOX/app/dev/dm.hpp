@@ -94,6 +94,13 @@ protected:
    
    static constexpr uint8_t m_dmDataType = ImageStreamTypeCode<realT>(); ///< The ImageStreamIO type code.
    
+   float m_percThreshold {0.98}; //percentage of frames saturated over interval
+   float m_intervalSatThreshold {0.50}; //
+   int m_intervalSatCountThreshold {10}; //
+
+   std::vector<std::string> m_satTriggerDevice;
+   std::vector<std::string> m_satTriggerProperty;
+
    ///@}
    
    
@@ -120,6 +127,10 @@ protected:
    IMAGE m_testImageStream; ///< The ImageStreamIO shared memory buffer for the test.
    bool m_testSet {false}; ///< Flag indicating whether the test command has been set.
    
+   int m_overSatAct {0}; //counter
+   int m_intervalSatExceeds {0}; //counter
+   bool m_intervalSatTrip {0}; //flag to trip the loop opening
+
 public:
 
    /// Setup the configuration system
@@ -338,7 +349,29 @@ protected:
    /// Execute saturation processing
    void satThreadExec();
 
+   void intervalSatTrip()
+   {
+      if(m_satTriggerDevice.size() > 0 && m_satTriggerProperty.size() == m_satTriggerDevice.size())
+      {
+         for(size_t n=0; n < m_satTriggerDevice.size(); ++n)
+         {
+            //We just silently fail
+            try
+            {
+            pcf::IndiProperty ipFreq(pcf::IndiProperty::Switch);
    
+            ipFreq.setDevice(m_satTriggerDevice[n]);
+            ipFreq.setName(m_satTriggerProperty[n]);
+            ipFreq.add(pcf::IndiElement("toggle"));
+            ipFreq["toggle"] = pcf::IndiElement::Off;
+            derived().sendNewProperty(ipFreq);
+            }
+            catch(...)
+            {}
+         }
+      }
+   }
+
    ///@}
    
 protected:
@@ -557,6 +590,14 @@ void dm<derivedT,realT>::setupConfig(mx::app::appConfigurator & config)
    
    config.add("dm.width", "", "dm.width", argType::Required, "dm", "width", false, "string", "The width of the DM in actuators.");
    config.add("dm.height", "", "dm.height", argType::Required, "dm", "height", false, "string", "The height of the DM in actuators.");
+
+   config.add("dm.percThreshold", "", "dm.percThreshold", argType::Required, "dm", "percThreshold", false, "float", "Threshold on percentage of frames an actuator is saturated over an interval.  Default is 0.98.");
+   config.add("dm.intervalSatThreshold", "", "dm.intervalSatThreshold", argType::Required, "dm", "intervalSatThreshold", false, "float", "Threshold on percentage of actuators which exceed percThreshold in an interval.  Default is 0.5.");
+   config.add("dm.intervalSatCountThreshold", "", "dm.intervalSatCountThreshold", argType::Required, "dm", "intervalSatCountThreshold", false, "float", "Threshold one number of consecutive intervals the intervalSatThreshold is exceeded.  Default is 10.");
+
+   config.add("dm.satTriggerDevice", "", "dm.satTriggerDevice", argType::Required, "dm", "satTriggerDevice", false, "vector<string>", "Device(s) with a toggle switch to toggle on saturation trigger.");
+   config.add("dm.satTriggerProperty", "", "dm.satTriggerProperty", argType::Required, "dm", "satTriggerProperty", false, "vector<string>", "Property with a toggle switch to toggle on saturation trigger, one per entry in satTriggerDevice.");
+
 }
 
 template<class derivedT, typename realT>
@@ -623,6 +664,12 @@ void dm<derivedT,realT>::loadConfig(mx::app::appConfigurator & config)
 
    config(m_dmWidth, "dm.width");
    config(m_dmHeight, "dm.height");
+
+   config(m_percThreshold, "dm.percThreshold");
+   config(m_intervalSatThreshold, "dm.intervalSatThreshold");
+   config(m_intervalSatCountThreshold, "dm.intervalSatCountThreshold"); 
+   config(m_satTriggerDevice, "dm.satTriggerDevice");
+   config(m_satTriggerProperty, "dm.satTriggerProperty");
 }
    
 
@@ -771,6 +818,12 @@ int dm<derivedT,realT>::appLogic()
    
    checkFlats();
    checkTests();
+
+   if(m_intervalSatTrip)
+   {
+      intervalSatTrip();
+      m_intervalSatTrip = false;
+   }
    
    return 0;
 
@@ -1709,16 +1762,29 @@ void dm<derivedT,realT>::satThreadExec()
          // If less than avg int --> go back and wait again
          if(mx::sys::get_curr_time(ts) - t_accumst < m_satAvgInt/1000.0) continue;
          
+         
+         
+
          // If greater than avg int --> calc stats, write to streams.
+         m_overSatAct = 0;
          for(int rr=0; rr < m_instSatMap.rows(); ++rr)
          {
             for(int cc=0; cc< m_instSatMap.cols(); ++cc)
             {
-               m_satPercMap(rr,cc) = m_accumSatMap(rr,cc)/naccum;           
+               m_satPercMap(rr,cc) = m_accumSatMap(rr,cc)/naccum;  
+               if(m_satPercMap(rr,cc) >= m_percThreshold) ++m_overSatAct;         
                satmap(rr,cc) = (m_accumSatMap(rr,cc) > 0); //it's  1/0 map
             }
          }
-      
+
+         //Check of the number of actuators saturated above the percent threshold is greater than the number threshold
+         //if it is, increment the counter
+         if(m_overSatAct/(m_satPercMap.rows()*m_satPercMap.cols()*0.75) > m_intervalSatThreshold ) ++m_intervalSatExceeds;
+         else m_intervalSatExceeds = 0;
+
+         //If enough consecutive intervals exceed the count threshold, we trigger 
+         if(m_intervalSatExceeds >= m_intervalSatCountThreshold) m_intervalSatTrip = true;
+
          m_satImageStream.md->write=1;
          m_satPercImageStream.md->write=1;
          

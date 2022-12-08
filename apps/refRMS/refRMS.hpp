@@ -105,6 +105,11 @@ protected:
    
    mx::sigproc::circularBufferIndex<float, cbIndexT> m_mean;
 
+   double m_rms_1sec;
+   double m_rms_2sec;
+   double m_rms_5sec;
+   double m_rms_10sec;
+
    float m_fps {0}; ///< Current FPS from the FPS source.
 
 public:
@@ -212,7 +217,7 @@ int refRMS::appStartup()
    indi::addNumberElement(m_indiP_refrms, "one_sec", 0, 1, 1000, "One Second rms");
    indi::addNumberElement(m_indiP_refrms, "two_sec", 0, 1, 1000, "Two Second rms");
    indi::addNumberElement(m_indiP_refrms, "five_sec", 0, 1, 1000, "Five Second rms");
-   indi::addNumberElement(m_indiP_refrms, "ten_sec", 0, 1, 1000, "Ten Second rms");
+   indi::addNumberElement(m_indiP_refrms, "ten_sec", 0, 1, 1000, "Five Second rms");
    registerIndiPropertyReadOnly(m_indiP_refrms);
 
    if(m_fpsSource != "")
@@ -220,7 +225,17 @@ int refRMS::appStartup()
       REG_INDI_SETPROP(m_indiP_fpsSource, m_fpsSource, std::string("fps"));
    }
 
-   state(stateCodes::READY);
+   if(refShmimMonitorT::appStartup() < 0)
+   {
+      return log<software_error,-1>({__FILE__, __LINE__});
+   }
+
+   if(maskShmimMonitorT::appStartup() < 0)
+   {
+      return log<software_error,-1>({__FILE__, __LINE__});
+   }
+
+   state(stateCodes::OPERATING);
     
    return 0;
 }
@@ -228,6 +243,7 @@ int refRMS::appStartup()
 inline
 int refRMS::appLogic()
 {
+   
    if( refShmimMonitorT::appLogic() < 0)
    {
       return log<software_error,-1>({__FILE__,__LINE__});
@@ -244,10 +260,70 @@ int refRMS::appLogic()
       {
          cbIndexT refEntry = m_rms.nextEntry();
 
-         //Calculate shit
-         //need some way to detect that we shouldn't bother when not updating
+         m_rms_1sec = 0;
+         if(m_rms.size() > 1.0*m_fps)
+         {
+            int N = 0;
+            for(size_t n=0; n < 1.0*m_fps; ++n)
+            {
+               m_rms_1sec += m_rms[n];
+               ++N;
+            }
+            m_rms_1sec /= N;
+
+            std::cerr << m_rms_1sec << " ";
+
+         }
+
+         m_rms_2sec = 0;
+         if(m_rms.size() > 2.0*m_fps)
+         {
+            int N = 0;
+            for(size_t n=0; n < 2.0*m_fps; ++n)
+            {
+               m_rms_2sec += m_rms[n];
+               ++N;
+            }
+            m_rms_2sec /= N;
+
+            std::cerr << m_rms_2sec << " ";
+         }
+
+         m_rms_5sec = 0;
+         if(m_rms.size() > 5.0*m_fps)
+         {
+            int N = 0;
+            for(size_t n=0; n < 5.0*m_fps; ++n)
+            {
+               m_rms_5sec += m_rms[n];
+               ++N;
+            }
+            m_rms_5sec /= N;
+
+            std::cerr << m_rms_5sec << " ";
+         }
+
+         m_rms_10sec = 0;
+         if(m_rms.size() > 10.0*m_fps)
+         {
+            int N = 0;
+            for(size_t n=0; n < 10.0*m_fps; ++n)
+            {
+               m_rms_10sec += m_rms[n];
+               ++N;
+            }
+            m_rms_10sec /= N;
+
+            std::cerr << m_rms_10sec << " ";
+         }
+
+         std::cerr << "\n";
+
+         updateIfChanged(m_indiP_refrms, std::vector<std::string>({"one_sec","two_sec","five_sec","ten_sec"}), std::vector<double>({m_rms_1sec, m_rms_2sec, m_rms_5sec, m_rms_10sec}));
+
+
       }
-   }         
+   }     
 
 
    std::unique_lock<std::mutex> lock(m_indiMutex);
@@ -261,7 +337,6 @@ int refRMS::appLogic()
    {
       log<software_error>({__FILE__, __LINE__});
    }
-
 
    return 0;
 }
@@ -285,6 +360,8 @@ int refRMS::allocate(const refShmimT & dummy)
      
    m_currRef.resize(refShmimMonitorT::m_width, refShmimMonitorT::m_height);
 
+   std::cerr << "got ref: " << refShmimMonitorT::m_width << " " << refShmimMonitorT::m_height << "\n";
+
    if(m_mask.rows() != m_currRef.rows() || m_mask.cols() != m_currRef.cols())
    {
       m_maskValid = false;
@@ -292,18 +369,21 @@ int refRMS::allocate(const refShmimT & dummy)
       m_mask.setConstant(1);
    }
 
-   if(m_fps == 0)
+   while(m_fps == 0)
    {
       sleep(5);
-      if(m_fps == 0)
+      /*if(m_fps == 0)
       {
          return log<text_log,-1>("fps not updated", logPrio::LOG_ERROR);
-      }
+      }*/
    }
 
-   cbIndexT cbSz = 10 * m_fps;
+   cbIndexT cbSz = 11 * m_fps;
    m_mean.maxEntries(cbSz);
    m_rms.maxEntries(cbSz);
+
+   std::cerr << "allocated\n";
+
    return 0;
 }
 
@@ -315,10 +395,18 @@ int refRMS::processImage( void * curr_src,
    static_cast<void>(dummy); //be unused
   
    //Copy it out first so we can afford to be slow and skipping frames 
-   m_currRef = Eigen::Map<Eigen::Matrix<float,-1,-1>>((float *)curr_src,  refShmimMonitorT::m_width*refShmimMonitorT::m_height,1);
+   m_currRef = Eigen::Map<Eigen::Matrix<float,-1,-1>>((float *)curr_src,  refShmimMonitorT::m_width, refShmimMonitorT::m_height);//,1);
+
+   //std::cerr << "pi\n";
 
    //If mask has changed we skip
-   if(m_mask.rows() != m_currRef.rows() || m_mask.cols() != m_currRef.cols()) return 0;
+   if(m_mask.rows() != m_currRef.rows() || m_mask.cols() != m_currRef.cols())
+   {
+      std::cerr << m_mask.rows() << " " << m_mask.cols() << "\n";
+      std::cerr << m_currRef.rows() << " " << m_currRef.cols() << "\n";
+
+      return 0;
+   }
 
    //mult by mask, etc.      
    float mean = (m_currRef * m_mask).sum()/m_maskSum;
@@ -338,6 +426,8 @@ int refRMS::allocate(const maskShmimT & dummy)
   
    std::unique_lock<std::mutex> lock(m_indiMutex);
      
+   std::cerr << "got mask: " << maskShmimMonitorT::m_width << " " << maskShmimMonitorT::m_height << "\n";
+
    m_mask.resize(maskShmimMonitorT::m_width, maskShmimMonitorT::m_height);
 
    return 0;
@@ -351,7 +441,7 @@ int refRMS::processImage( void * curr_src,
    static_cast<void>(dummy); //be unused
   
    //copy curr_src to mask
-   m_mask = Eigen::Map<Eigen::Matrix<float,-1,-1>>((float *)curr_src,  maskShmimMonitorT::m_width*maskShmimMonitorT::m_height,1);
+   m_mask = Eigen::Map<Eigen::Matrix<float,-1,-1>>((float *)curr_src,  maskShmimMonitorT::m_width,maskShmimMonitorT::m_height);
 
    m_maskSum = m_mask.sum();
 
@@ -376,10 +466,11 @@ INDI_SETCALLBACK_DEFN( refRMS, m_indiP_fpsSource )(const pcf::IndiProperty &ipRe
       return 0;
    }
    
-   std::lock_guard<std::mutex> guard(m_indiMutex);
+   //std::lock<std::mutex> mut(m_indiMutex);
 
    realT fps = ipRecv["current"].get<float>();
-   
+   //mut.unlock();
+
    if(fps != m_fps)
    {
       m_fps = fps;
