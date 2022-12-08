@@ -40,7 +40,6 @@
     chown :ubuntu /opt/MagAOX
     chmod u+sX,g+wsX /opt/MagAOX
     echo export MAGAOX_ROLE=vm | tee    /etc/profile.d/magaox_role.sh
-    echo export DEBUG=         | tee -a /etc/profile.d/magaox_role.sh
     exit
 
 ### End SUDO actions
