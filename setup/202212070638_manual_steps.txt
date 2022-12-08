@@ -8,21 +8,22 @@
    multipass.exe purge
 
 ### Create new primary multipass.exe VM
-   multipass.exe launch -n primary 22.04
+   multipass.exe launch -n primary 22.04                 ### Medium wait
    multipass.exe stop primary
    multipass.exe set local.primary.disk=20GiB
    multipass.exe set local.primary.cpus=4
-   multipass.exe start primary
+   multipass.exe start primary                             ### Long wait
 
 ####################################
 ### START some Carcich-specific actions, along with others
 
-### Copy github SSH key and MagAOX config files from WSL to primary,
+### Copy github_id_rsa (SSH key) and MagAOX config files to primary,
 ### Then Shell to primary VM
 
    cd ~
    multipass.exe transfer confs.tar primary:                 ### Carcich
    multipass.exe exec primary -- tar xvf confs.tar           ### Carcich
+   multipass.exe exec primary -- touch .hushlogin
    multipass.exe shell primary
 
 ########################################################################
@@ -33,23 +34,24 @@
 ### Some SUDO actions:  update; man dirs; /opt/MagAOX; MAGAOX_ROLE
 
   sudo su -
-    apt-get update
+    apt-get update                                        ### Short wait
     mkdir -p /usr/local/share/man/man{1,2,3,4,5,6,7,8,9}
     mkdir -p /opt/MagAOX
     chown :ubuntu /opt/MagAOX
     chmod u+sX,g+wsX /opt/MagAOX
-    echo export MAGAOX_ROLE=vmQexport DEBUG= | tr Q \\n | tee /etc/profile.d/magaox_role.sh
+    echo export MAGAOX_ROLE=vm | tee /etc/profile.d/magaox_role.sh
+    echo export DEBUG= | tee /etc/profile.d/magaox_role.sh
     exit
 
 ### End SUDO actions
 ####################################
 
-  cd /opt/MagAOX/
   source /etc/profile.d/magaox_role.sh
 
   eval $(ssh-agent)
   ssh-add /home/ubuntu/.ssh/github_id_rsa
-  ### - Enter password when requested
+  ### < Enter password when requested
+  ### > Identity added: /home/...
 
   mkdir /opt/MagAOX/source/
   cd /opt/MagAOX/source/
