@@ -2,7 +2,7 @@
 
 #include <QWidget>
 #include <QPainter>
-#include <qwt_dial_needle.h>
+#include <qwt/qwt_dial_needle.h>
 
 #include <xqwt_multi_dial.h>
 

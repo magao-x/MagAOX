@@ -110,7 +110,8 @@ if grep -q "GenuineIntel" /proc/cpuinfo; then
     if [[ $ID == "ubuntu" ]]; then
         sudo bash -l "$DIR/steps/install_mkl_package.sh" || exit 1
     else
-        sudo bash -l "$DIR/steps/install_mkl_tarball.sh" || exit 1
+        ###sudo bash -l "$DIR/steps/install_mkl_tarball.sh" || exit 1
+        sudo bash -l "$DIR/steps/install_mkl_tarball.sh" || ( echo "Failed MKL install; continuing" 1>&2 || exit 0 )
     fi
     export BLAS_VENDOR=intel
 else
@@ -182,8 +183,8 @@ if [[ $MAGAOX_ROLE == vm && $VM_KIND == vagrant ]]; then
     sudo ln -nfs /vagrant /opt/MagAOX/source/MagAOX
     cd /opt/MagAOX/source/MagAOX
     log_success "Symlinked /opt/MagAOX/source/MagAOX to /vagrant (host folder)"
-    sudo usermod -G magaox,magaox-dev vagrant
-    log_success "Added vagrant user to magaox,magaox-dev"
+    sudo usermod -G $instrument_group,$instrument_dev_group vagrant
+    log_success "Added vagrant user to $instrument_group,$instrument_dev_group"
 elif [[ $MAGAOX_ROLE == ci ]]; then
     ln -sfv ~/project/ /opt/MagAOX/source/MagAOX
 else
@@ -213,7 +214,7 @@ else
     fi
 fi
 # These steps should work as whatever user is installing, provided
-# they are a member of magaox-dev and they have sudo access to install to
+# they are a member of $instrument_dev_group and they have sudo access to install to
 # /usr/local. Building as root would leave intermediate build products
 # owned by root, which we probably don't want.
 #

@@ -18,18 +18,18 @@ cd /opt/MagAOX/vendor
 if [[ ! -d /opt/conda ]]; then
     _cached_fetch "$MAMBAFORGE_URL" $MAMBAFORGE_INSTALLER
     bash $MAMBAFORGE_INSTALLER -b -p /opt/conda
-	# Ensure magaox-dev can write to /opt/conda or env creation will fail
-	chown -R :$instrument_dev_group /opt/conda
-    # set group and permissions such that only magaox-dev has write access
+    # Ensure instrument dev group (e.g. magaox-dev) can write to /opt/conda or env creation will fail
+    chown -R :$instrument_dev_group /opt/conda
+    # Set directory group permissions such that only instrument dev group has write access
     chmod -R g=rwX /opt/conda
     find /opt/conda -type d -exec sudo chmod g+rwxs {} \;
-    # Set environment variables for conda
+    # Set BASH environment variables for conda
     cat << 'EOF' | tee /etc/profile.d/conda.sh
 if [ -f "/opt/conda/etc/profile.d/conda.sh" ]; then
     . "/opt/conda/etc/profile.d/conda.sh"
     CONDA_CHANGEPS1=false conda activate base
 else
-    \export PATH="/opt/conda/bin:$PATH"
+    \export PATH="/opt/conda/bin:\$PATH"
 fi
 EOF
     cat << 'EOF' | tee /opt/conda/.condarc

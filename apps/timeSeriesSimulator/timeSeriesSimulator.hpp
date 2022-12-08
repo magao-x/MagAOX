@@ -151,6 +151,7 @@ void timeSeriesSimulator::setupConfig()
 
 int timeSeriesSimulator::loadConfigImpl(mx::app::appConfigurator &_config)
 {
+  static_cast<void>(_config);
 
   return 0;
 }

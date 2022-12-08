@@ -157,8 +157,19 @@ public:
                     (argv0, hbname, m_fdset_cpy, m_nfds, m_hbmarr, ap);
         va_end(ap);
 
-        if (newfd < 0) { return -1; }
-
+        if (newfd < 0)
+        {
+            if (m_resurr_logging)
+            {
+                perror(("Hexbeater::open_hexbeater"
+                         "(" + argv0
+                       + "," + hbname
+                       + ") failed to open FIFO"
+                       ).c_str()
+                       );
+            }
+            return -1;
+        }
         // Add FD to set
         m_fds.insert(newfd);
         return newfd;
