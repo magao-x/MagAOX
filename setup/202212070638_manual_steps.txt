@@ -53,7 +53,7 @@
   ### < Enter password when requested
   ### > Identity added: /home/...
 
-  mkdir /opt/MagAOX/source/
+  mkdir -p /opt/MagAOX/source/
   cd /opt/MagAOX/source/
   git clone git@github.com:magao-x/scfsw.git MagAOX
   ### > Are you sure you want to continue connecting (yes/no/[fingerprint])?
