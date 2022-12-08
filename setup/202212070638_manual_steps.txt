@@ -82,4 +82,5 @@
   cd /opt/MagAOX/source/MagAOX/apps/CGFSMUIfpga/
   make clean all install
   cd /opt/MagAOX/source/MagAOX/apps/resurrector/
+  make clean all
   ./resurrector_indi 
