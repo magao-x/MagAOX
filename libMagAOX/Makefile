@@ -11,6 +11,7 @@ INCLUDEDEPS= app/MagAOXApp.hpp \
 	     app/indiDriver.hpp \
 	     app/indiMacros.hpp \
 	     app/indiUtils.hpp \
+	     app/resurrectee.hpp \
              app/stateCodes.hpp \
              app/dev/outletController.hpp \
              app/dev/ioDevice.hpp \

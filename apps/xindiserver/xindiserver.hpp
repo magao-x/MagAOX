@@ -121,13 +121,14 @@ class xindiserver : public MagAOXApp<false>
 
 protected:
 
+   std::string indiserver_f {""};  ///< FIFO for dynamic control of indiserver communications
    int indiserver_m {-1};  ///< The indiserver MB behind setting (passed to indiserver)
    bool indiserver_n {false}; ///< The indiserver ignore /tmp/noindi flag (passed to indiserver)
    int indiserver_p {-1}; ///< The indiserver port (passed to indiserver)
    int indiserver_v {-1}; ///< The indiserver verbosity (passed to indiserver)
    bool indiserver_x {false}; ///< The indiserver terminate after last exit flag (passed to indiserver)
    
-   std::string m_driverPath; ///< The path to the local drivers
+   std::string m_driverFIFOPath; ///< The path to the local drivers' FIFOs directory
    std::vector<std::string> m_local; ///< List of local drivers passed in by config
    std::vector<std::string> m_remote; ///< List of remote drivers passed in by config
    std::unordered_set<std::string> m_driverNames; ///< List of driver names processed for command line, used to prevent duplication.
@@ -242,6 +243,7 @@ xindiserver::xindiserver() : MagAOXApp(MAGAOX_CURRENT_SHA1, MAGAOX_REPO_MODIFIED
 inline
 void xindiserver::setupConfig()
 {
+   config.add("indiserver.f", "f", "", argType::Required, "indiserver", "f", false,  "string", "Path to fifo for dynamic startup and shutdown of drivers.");
    config.add("indiserver.m", "m", "", argType::Required, "indiserver", "m", false,  "int", "indiserver kills client if it gets more than this many MB behind, default 50");
    config.add("indiserver.N", "N", "", argType::True, "indiserver", "N", false,  "bool", "indiserver: ignore /tmp/noindi.  Capitalized to avoid conflict with --name");
    config.add("indiserver.p", "p", "", argType::Required, "indiserver", "p", false,  "int", "indiserver: alternate IP port, default 7624");
@@ -261,15 +263,25 @@ inline
 void xindiserver::loadConfig()
 {
    //indiserver config:
+   config(indiserver_f, "indiserver.f");
    config(indiserver_m, "indiserver.m");
    config(indiserver_n, "indiserver.N");
    config(indiserver_p, "indiserver.p");
    
+   //From command-line:
    indiserver_v = config.verbosity("indiserver.v");
+
+   if (!indiserver_v) {
+      //If there were no -v options on the command line, then
+      //check if v=1[,2[,3[...]]] was in the config file
+      std::vector<std::string> is_vs;
+      config(is_vs,"indiserver.v");
+      indiserver_v = is_vs.size();
+   }
    
    config(indiserver_x, "indiserver.x");
    
-   config(m_local, "local.drivers");
+   config(m_local, "local.drivers");// May be empty if [indiserver_ctrl_fifo] is configured to match [indiserver.f]
    config(m_remote, "remote.drivers");
    config(m_remoteServers, "remote.servers");
    
@@ -283,26 +295,38 @@ int xindiserver::constructIndiserverCommand( std::vector<std::string> & indiserv
    {
       indiserverCommand.push_back("indiserver");
         
+      // FIFO for dynamic control of indiserver communications
+      if(indiserver_f.size() > 0) 
+      {
+         indiserverCommand.push_back("-f");
+         indiserverCommand.push_back(mx::ioutils::convertToString(indiserver_f));
+      }
+        
+      // The indiserver MB behind setting (passed to indiserver)
       if(indiserver_m > 0) 
       {
          indiserverCommand.push_back("-m");
          indiserverCommand.push_back(mx::ioutils::convertToString(indiserver_m));
       }
       
+      // The indiserver ignore /tmp/noindi flag
       if(indiserver_n == true) indiserverCommand.push_back("-n");
       
+      //< The indiserver port
       if(indiserver_p > 0) 
       {
          indiserverCommand.push_back("-p");
          indiserverCommand.push_back(mx::ioutils::convertToString(indiserver_p));
       }
       
+      // The indiserver verbosity
       if(indiserver_v == 1) indiserverCommand.push_back("-v");
       
       if(indiserver_v == 2) indiserverCommand.push_back("-vv");
       
       if(indiserver_v >= 3) indiserverCommand.push_back("-vvv");
       
+      // The indiserver terminate after last exit flag
       if(indiserver_x == true) indiserverCommand.push_back("-x");
    }
    catch(...)
@@ -314,13 +338,18 @@ int xindiserver::constructIndiserverCommand( std::vector<std::string> & indiserv
    return 0;
 }
  
+/** If config keyword [indiserver_ctrl_fifo] is defined and matches
+  * config keyword [indiserver.f], then there do not need to be local
+  * INDI drivers specified via config keyword [local.drivers] that end
+  * up in vector m_local
+  */
 inline
 int xindiserver::addLocalDrivers( std::vector<std::string> & driverArgs )
 {
-   m_driverPath = MAGAOX_path;
-   m_driverPath += "/";
-   m_driverPath += MAGAOX_driverRelPath;
-   m_driverPath += "/";
+   m_driverFIFOPath = MAGAOX_path;
+   m_driverFIFOPath += "/";
+   m_driverFIFOPath += MAGAOX_driverFIFORelPath;
+   m_driverFIFOPath += "/";
    
    for(size_t i=0; i< m_local.size(); ++i)
    {
@@ -341,7 +370,7 @@ int xindiserver::addLocalDrivers( std::vector<std::string> & driverArgs )
       
       m_driverNames.insert(m_local[i]);
       
-      std::string dname = m_driverPath + m_local[i];
+      std::string dname = m_driverFIFOPath + m_local[i];
       
       try
       {
@@ -504,11 +533,11 @@ int xindiserver::forkIndiserver()
    
    if(m_log.logLevel() >= logPrio::LOG_INFO)
    {
-      std::string coml = "Starting indiserver with command: ";
+      std::string coml = "Starting indiserver with command:";
       for(size_t i=0;i<m_indiserverCommand.size();++i)
       {
-         coml += m_indiserverCommand[i];
          coml += " ";
+         coml += m_indiserverCommand[i];
       }
    
       log<text_log>(coml);
@@ -619,12 +648,12 @@ int xindiserver::isLogThreadStart()
 inline
 void xindiserver::isLogThreadExec()
 {
-   char buffer[4096];
+   char buffer[4097];
 
    std::string logs;
    while(m_shutdown == 0)
    {
-      ssize_t count = read(m_isSTDERR, buffer, sizeof(buffer)-1); //Make wure we always have room for \0
+      ssize_t count = read(m_isSTDERR, buffer, sizeof(buffer)-1); //Make sure we always have room for \0
       if (count <= 0 || m_shutdown == 1) 
       {
          continue;
@@ -758,6 +787,7 @@ int xindiserver::appStartup()
       log<software_critical>({__FILE__, __LINE__});
       return -1;
    }
+#  if 0
    //--------------------
    //Make symlinks
    //--------------------
@@ -776,6 +806,7 @@ int xindiserver::appStartup()
          log<software_error>({__FILE__, __LINE__, "Failed to create symlink for driver: " + m_local[i] + ". Continuing."});
       }
    }
+#  endif//0
 
    m_local.clear();
    m_remote.clear();

@@ -14,6 +14,7 @@ if [[ $ID == ubuntu ]]; then
         qtbase5-dev-tools \
         libqt5svg5-dev \
         wmctrl \
+        libqwt-qt5-dev \
     ;
 elif [[ $ID == centos && $VERSION_ID == 7 ]]; then
     sudo yum install -y \

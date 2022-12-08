@@ -65,6 +65,11 @@ fi
 if [[ "$MAGAOX_ROLE" == "vm" ]]; then
   mkdir -pv "$VM_SHARED_FOLDER/cache"
   link_if_necessary "$VM_SHARED_FOLDER/cache" /opt/MagAOX/.cache
+
+  make_on_data_array logs /opt/MagAOX
+  chown -R $instrument_user:$instrument_group /opt/MagAOX/drivers/fifos
+  chmod u=rwX,g=rwX,o=rX /opt/MagAOX/drivers/fifos
+
 else
   mkdir -pv /opt/MagAOX/.cache
   chown -R root:$instrument_dev_group /opt/MagAOX/.cache

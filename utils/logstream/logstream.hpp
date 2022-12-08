@@ -154,10 +154,6 @@ int logstream::getAppsWithLogs( std::set<std::string> & appNames )
       
          if(ts.minute() != last_min)
          {
-            char tstr1[25];
-      
-            //strftime(tstr1, 25, "%FT%H:%M:", &bdt);
-            
             std::cout << ts.ISO8601DateTimeStr2MinX() << ":\n";
             
             last_min = ts.minute();
@@ -375,7 +371,7 @@ void logstream::logThreadExec( const std::string & appName )
 
 
          logPrioT lvl = logHeader::logLevel(head);
-         eventCodeT ec = logHeader::eventCode(head);
+         logHeader::eventCode(head);
          msgLenT len = logHeader::msgLen(head);
 
          //Here: check if lvl, eventCode, etc, match what we want.

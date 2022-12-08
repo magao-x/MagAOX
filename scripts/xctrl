@@ -368,7 +368,7 @@ VERBS_REQUIRING_TARGET = ('stop', 'start')
 
 
 def main():
-    parser = argparse.ArgumentParser(prog='xctrl')
+    parser = argparse.ArgumentParser(prog='xctrl', description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     parser.add_argument('-r', '--role', help='Specify role to read proclist for (default: $MAGAOX_ROLE)')
     subparsers = parser.add_subparsers(help='verb for action to take', dest='verb')
     for verb in VERBS:

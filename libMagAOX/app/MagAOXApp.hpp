@@ -44,6 +44,7 @@
 #include "indiDriver.hpp"
 #include "indiMacros.hpp"
 #include "indiUtils.hpp"
+#include "resurrectee.hpp"
 
 //#include "../../INDI/libcommon/System.hpp"
 using namespace mx::app;
@@ -179,6 +180,7 @@ public:
      * - signal handling installation by setSigTermHandler()
      * - appStartup() is called
      * - INDI communications started by startINDI()
+     * - Resurrectee started by startResurrectee()
      * - power state is checked, pausing if unknown (if being managed)
      *
      * Errors in the above steps will cause a process exit.
@@ -287,6 +289,8 @@ private:
 private:
 
    static MagAOXApp * m_self; ///< Static pointer to this (set in constructor).  Used to test whether a a MagAOXApp is already instatiated (a fatal error) and used for getting out of static signal handlers.
+
+   std::string m_indiserver_ctrl_fifo{""}; ///< INDI server control FIFO for starting and stopping comms with INDI drivers
 
    ///Sets the handler for SIGTERM, SIGQUIT, and SIGINT.
    int setSigTermHandler();
@@ -497,7 +501,7 @@ public:
      */
    int stateLogged();
 
-   ///@} --Application State
+   ///@} -- Application State
 
 private:
    
@@ -522,11 +526,18 @@ protected:
 
 ///\todo instead of making this public, provide an accessor.
 public:
+
    ///The INDI driver wrapper.  Constructed and initialized by execute, which starts and stops communications.
    indiDriver<MagAOXApp> * m_indiDriver {nullptr};
 
+   ///The resurrectee wrapper. //TBD: Constructed and initialized by execute
+   resurrectee<MagAOXApp> * m_resurrectee {nullptr};
+
    ///Mutex for locking INDI communications.
    std::mutex m_indiMutex;
+
+   ///A wrapper for the INDI server ctrl FIFO name; used by m_indiDriver
+   const std::string& indiserver_ctrl_fifo() const { return m_indiserver_ctrl_fifo; }
    
 protected:
    ///Structure to hold the call-back details for handling INDI communications.
@@ -574,6 +585,9 @@ protected:
    /** This is currently only used to signal restarts.
      */
    std::string m_driverCtrlName;
+
+   ///Full path name of the resurrector/resurrectee FIFO.
+   std::string m_resurrecteeFifoName;
 
 public:
 
@@ -758,11 +772,12 @@ public:
                               );
 
 protected:
-   /// Create the INDI FIFOs
+   /// Create the INDI and resurectee FIFOs
    /** Changes permissions to max available and creates the
      * FIFOs at the configured path.
      */
    int createINDIFIFOS();
+   int createResurrecteeFIFO();
 
    /// Start INDI Communications
    /**
@@ -770,6 +785,7 @@ protected:
      * \returns -1 on error.  This is fatal.
      */
    int startINDI();
+   int startResurrectee();
    
 public:
 
@@ -941,7 +957,7 @@ protected:
      */
    int newCallBack_clearFSMAlert( const pcf::IndiProperty &ipRecv /**< [in] the INDI property sent with the the new property request.*/);
    
-   ///@} --INDI Interface
+   ///@} -- INDI Interface
 
    /** \name Power Management
      * For devices which have remote power management (e.g. from one of the PDUs) we implement
@@ -1000,6 +1016,11 @@ protected:
 
 public:
 
+   /** \name Power Management
+     *
+     * @{
+     */
+
    /// Returns the current power state.
    /** If power management is not enabled, this always returns 1=On.
      *
@@ -1020,7 +1041,7 @@ public:
    
    INDI_SETCALLBACK_DECL(MagAOXApp, m_indiP_powerChannel);
 
-   ///@} Power Management
+   ///@} -- Power Management
 
 public:
 
@@ -1059,7 +1080,13 @@ public:
      */
    std::string driverCtrlName();
 
-   ///@} --Member Accessors
+   ///Get the resurrectee FIFO file name
+   /**
+     * \returns the current value of m_resurrecteeFifoName
+     */
+   std::string resurrecteeFifoName();
+
+   ///@} -- Member Accessors
 };
 
 //Set self pointer to null so app starts up uninitialized.
@@ -1214,10 +1241,15 @@ void MagAOXApp<_useINDI>::setupBasicConfig() //virtual
    //App stuff
    config.add("loopPause", "p", "loopPause", argType::Required, "", "loopPause", false, "unsigned long", "The main loop pause time in ns");
 
-   config.add("ignore_git", "", "ignore-git", argType::True, "", "", false, "bool", "set to true to ignore git status");
-   
+   config.add("ignore_git", "", "ignore-git", argType::Required, "", "ignore_git", false, "bool", "set to true to ignore git status");
+
+   config.add("indiserver_ctrl_fifo", "", "indiserver-ctrl-fifo", argType::Required, "", "indiserver_ctrl_fifo", false, "string", "INDI drivers can send [start /opt/MagAOX/drivers/fifos/indi-driver-name] messages to this INDI server ctrl FIFO (typically [/opt/MagAOX/drivers/fifos/indiserver.ctrl]) on startup; the value should match that of [indiserver.f] in /.../is*.conf");
+
    //Logger Stuff
    m_log.setupConfig(config);
+
+   //Resurrectee configuration setup - static
+   resurrectee<MagAOXApp>::_setupConfig(config);
 
    if( m_powerMgtEnabled)
    {
@@ -1243,6 +1275,8 @@ void MagAOXApp<_useINDI>::loadBasicConfig() //virtual
    bool ig {false};
    config(ig, "ignore_git");
    
+   config(m_indiserver_ctrl_fifo, "indiserver_ctrl_fifo");
+
    if(!ig && m_gitAlert)
    {
       m_stateAlert = true;
@@ -1251,6 +1285,9 @@ void MagAOXApp<_useINDI>::loadBasicConfig() //virtual
    //---------- Setup the logger ----------//
    m_log.logName(m_configName);
    m_log.loadConfig(config);
+
+   //-- Configure the resurrectee - static --//
+   resurrectee<MagAOXApp>::_loadConfig(config);
 
    //--------- Loop Pause Time --------//
    config(m_loopPause, "loopPause");
@@ -1401,6 +1438,16 @@ int MagAOXApp<_useINDI>::execute() //virtual
       }
    }
 
+   //====Begin Resurrectee
+   if(m_shutdown == 0) //if we're not already dead, that is
+   {
+      if(startResurrectee() < 0)
+      {
+         state(stateCodes::FAILURE);
+         m_shutdown = 1;
+      }
+   }
+
    //We have to wait for power status to become available
    if(m_powerMgtEnabled && m_shutdown == 0)
    {
@@ -1493,6 +1540,7 @@ int MagAOXApp<_useINDI>::execute() //virtual
 
       /** \todo Need a heartbeat update here.
         */
+      m_resurrectee->execute();
 
       if(m_useINDI)
       {
@@ -2601,6 +2649,37 @@ int MagAOXApp<_useINDI>::createINDIFIFOS()
 }
 
 template<bool _useINDI>
+int MagAOXApp<_useINDI>::createResurrecteeFIFO()
+{
+
+   ///\todo make driver FIFO path full configurable.
+   std::string driverFIFOPath = MAGAOX_path;
+   driverFIFOPath += "/";
+   driverFIFOPath += MAGAOX_driverFIFORelPath;
+
+   m_resurrecteeFifoName = driverFIFOPath + "/" + configName() + ".hb";
+
+   mode_t prev = umask(0);
+
+   errno = 0;
+   if(mkfifo(m_resurrecteeFifoName.c_str(), S_IRUSR | S_IWUSR | S_IRGRP | S_IWGRP) !=0 )
+   {
+      if(errno != EEXIST)
+      {
+         umask(prev);
+         //euidReal();
+         log<software_critical>({__FILE__, __LINE__, errno, 0, "mkfifo failed"});
+         log<text_log>("Failed to create resurrector/resurrectee FIFO.", logPrio::LOG_CRITICAL);
+         return -1;
+      }
+   }
+
+   umask(prev);
+   //euidReal();
+   return 0;
+}
+
+template<bool _useINDI>
 int MagAOXApp<_useINDI>::startINDI()
 {
    if(!m_useINDI) return 0;
@@ -2653,6 +2732,52 @@ int MagAOXApp<_useINDI>::startINDI()
    log<indidriver_start>();
 
    sendGetPropertySetList(true);
+
+   return 0;
+}
+
+template<bool _useINDI>
+int MagAOXApp<_useINDI>::startResurrectee()
+{
+
+   //===== Create the FIFOs for INDI communications ====
+   if(createResurrecteeFIFO() < 0)
+   {
+      return -1;
+   }
+
+   //======= Instantiate the resurrectee
+   try
+   {
+      if(m_resurrectee != nullptr) 
+      {
+         delete m_resurrectee;
+         m_resurrectee = nullptr;
+      }
+
+      m_resurrectee = new resurrectee<MagAOXApp>(this);
+   }
+   catch(...)
+   {
+      log<software_critical>({__FILE__, __LINE__, 0, 0, "Resurrectee construction exception."});
+      return -1;
+   }
+
+   //Check for resurrectee failure
+   if(m_resurrectee == nullptr)
+   {
+      log<software_critical>({__FILE__, __LINE__, 0, 0, "Resurrectee construction failed."});
+      return -1;
+   }
+
+   //Check for resurrectee to open the FIFOs
+   if(m_resurrectee->good() == false)
+   {
+      log<software_critical>({__FILE__, __LINE__, 0, 0, "Resurrectee failed to open FIFOs."});
+      delete m_resurrectee;
+      m_resurrectee = nullptr;
+      return -1;
+   }
 
    return 0;
 }
@@ -3144,6 +3269,12 @@ template<bool _useINDI>
 std::string MagAOXApp<_useINDI>::driverCtrlName()
 {
    return m_driverCtrlName;
+}
+
+template<bool _useINDI>
+std::string MagAOXApp<_useINDI>::resurrecteeFifoName()
+{
+   return m_resurrecteeFifoName;
 }
 
 extern template class MagAOXApp<true>;
