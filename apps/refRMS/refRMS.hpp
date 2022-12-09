@@ -321,7 +321,6 @@ int refRMS::appLogic()
 
          updateIfChanged(m_indiP_refrms, std::vector<std::string>({"one_sec","two_sec","five_sec","ten_sec"}), std::vector<double>({m_rms_1sec, m_rms_2sec, m_rms_5sec, m_rms_10sec}));
 
-
       }
    }     
 
