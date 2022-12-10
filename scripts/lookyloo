@@ -180,10 +180,6 @@ def load_file_history(history_path: pathlib.Path) -> typing.Set[TimestampedFile]
         log.debug(f"Could not find lookyloo history at {history_path}")
     return history
 
-def append_path_to_history(history_path: pathlib.Path, file_path: pathlib.Path):
-    with history_path.open('a') as fh:
-        fh.write(f"{file_path.as_posix()}\n")
-
 def append_files_to_history(history_path, archive_paths, dry_run):
     if not len(archive_paths):
         return
@@ -230,7 +226,7 @@ def get_matching_paths(
     return filtered_files
 
 
-def get_observation_telems(data_roots: typing.List[pathlib.Path], newer_than_dt : datetime.datetime):
+def get_observation_telems(data_roots: typing.List[pathlib.Path], start_dt : datetime.datetime, end_dt : datetime.datetime):
     events = []
     observers_data_root = None
     for data_root in data_roots:
@@ -240,7 +236,7 @@ def get_observation_telems(data_roots: typing.List[pathlib.Path], newer_than_dt 
             break
     if observers_data_root is None:
         raise RuntimeError(f"No {OBSERVERS_DEVICE} device telemetry in any of {[(x / 'telem').as_posix() for x in data_roots]}")
-    for telem_path in get_matching_paths(observers_data_root, OBSERVERS_DEVICE, 'bintel', newer_than_dt):
+    for telem_path in get_matching_paths(observers_data_root, OBSERVERS_DEVICE, 'bintel', start_dt, end_dt):
         events.extend(parse_logdump_for_observers(observers_data_root, telem_path.path))
     return events
 
@@ -368,7 +364,7 @@ def catalog_name_from_outputs(output_files):
 
 def do_quicklook_for_camera(
     span : ObservationSpan, data_roots, device, omit_telemetry, output_dir, dry_run, cube_mode,
-    construct_symlink_tree, all_visited_files=None, xrif2fits_cmd='xrif2fits'
+    construct_symlink_tree, all_visited_files=None, xrif2fits_cmd='xrif2fits', ignore_history=False
 ):
     if all_visited_files is None:
         all_visited_files = set()
@@ -396,10 +392,10 @@ def do_quicklook_for_camera(
                 image_path, data_roots, new_matching_files, scratch_dir, omit_telemetry, dry_run, cube_mode,
                 xrif2fits_cmd
             )
-            if len(successful_paths):
+            if len(successful_paths) and not ignore_history:
                 append_files_to_history(history_path, successful_paths, dry_run)
                 log.debug(f"Wrote {len(successful_paths)} to {history_path}")
-            if len(failed_paths):
+            if len(failed_paths) and not ignore_history:
                 append_files_to_history(failed_history_path, failed_paths, dry_run)
                 log.debug(f"{len(failed_paths)} paths failed to convert, saving to {failed_history_path}")
             good_outputs = prune_outputs(scratch_dir, span)
@@ -431,7 +427,7 @@ def do_quicklook_for_camera(
                     if construct_symlink_tree:
                         observer_semester_prefix.parent.mkdir(parents=True, exist_ok=True)
                         if not observer_semester_prefix.is_symlink():
-                            log.debug(f"Linking {observer_semester_prefix} to {semester_observer_prefix} because {observer_semester_prefix.is_symlink()=}")
+                            log.debug(f"Making link at {observer_semester_prefix} pointing to {semester_observer_prefix}")
                             observer_semester_prefix.symlink_to(semester_observer_prefix)
                     for fn in good_outputs:
                         shutil.copy(fn, destination)
@@ -517,6 +513,7 @@ def daemon_mode(
     xrif2fits_cmd: str,
     start_dt: datetime.datetime,
     all_visited_files: typing.List[TimestampedFile],
+    ignore_history: bool,
 ):
     existing_observation_spans = set()
     log.info(f"Started at {datetime.datetime.now().isoformat()}, looking for unprocessed observations since {start_dt}...")
@@ -544,6 +541,7 @@ def daemon_mode(
                         construct_symlink_tree,
                         all_visited_files,
                         xrif2fits_cmd=xrif2fits_cmd,
+                        ignore_history=ignore_history,
                     )
                     all_visited_files = all_visited_files.union(visited_files)
                     if len(visited_files) and (span.end is not None and (utcnow() - span.end).total_seconds() > 5 * 60):
@@ -641,9 +639,9 @@ def main():
     else:
         data_roots = [pathlib.Path(x) for x in LOOKYLOO_DATA_ROOTS.split(':')]
     output_dir = pathlib.Path(args.output_dir)
-    all_processed_files = load_file_history(output_dir / HISTORY_FILENAME)
-    if args.utc_begin is not None:
-        start_dt = args.utc_begin
+    all_processed_files = load_file_history(output_dir / HISTORY_FILENAME) if not args.ignore_history else set()
+    if args.utc_start is not None:
+        start_dt = args.utc_start
         year = start_dt.year
         month = 1 if start_dt.month < 6 else 6
         semester_start_dt = datetime.datetime(year, month, 1)
@@ -668,7 +666,8 @@ def main():
             not args.omit_symlink_tree,
             args.xrif2fits_cmd,
             start_dt,
-            all_processed_files
+            all_processed_files,
+            ignore_history=args.ignore_history,
         )
     else:
         if args.utc_end is not None:
@@ -697,6 +696,7 @@ def main():
                         not args.omit_symlink_tree,
                         all_visited_files=all_processed_files,
                         xrif2fits_cmd=args.xrif2fits_cmd,
+                        ignore_history=args.ignore_history,
                     )
 
 if __name__ == "__main__":
