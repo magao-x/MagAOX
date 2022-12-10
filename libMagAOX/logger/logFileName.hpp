@@ -30,7 +30,8 @@ class logFileName
    
 protected:
    std::string m_fullName; ///< The full name of the file, including path
-   
+   std::string m_baseName; ///< The base name of the file, not including path
+
    std::string m_appName; ///< The name of the application which wrote the file
    int m_year {0}; ///< The year of the timestamp
    int m_month {0}; ///< The month of the timestamp
@@ -88,6 +89,12 @@ public:
      */ 
    std::string fullName() const;
    
+   /// Get the current value of m_baseName
+   /**
+     * \returns the current value of m_baseName
+     */ 
+   std::string baseName() const;
+
    /// Get the current value of m_appName
    /**
      * \returns the current value of m_appName
@@ -181,7 +188,7 @@ struct compLogFileName
                     const logFileName & b
                   )
    {
-      return (a.fullName() < b.fullName());
+      return (a.baseName() < b.baseName());
    }
 };
 

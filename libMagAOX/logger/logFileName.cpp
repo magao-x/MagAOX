@@ -41,6 +41,11 @@ std::string logFileName::fullName() const
    return m_fullName;
 }
       
+std::string logFileName::baseName() const
+{
+   return m_baseName;
+}
+
 std::string logFileName::appName() const
 {
    return m_appName;
@@ -98,6 +103,8 @@ bool logFileName::valid() const
 
 int logFileName::parseName()
 {
+   m_baseName = mx::ioutils::pathFilename(m_fullName);
+
    size_t ext = m_fullName.rfind('.');
    
    if(ext == std::string::npos)
