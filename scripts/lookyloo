@@ -416,10 +416,14 @@ def do_quicklook_for_camera(
                     title = f"{span.title}_{span.begin.strftime(time_format)}"
                 else:
                     title = f"{span.begin.strftime(time_format)}"
+                if not span.email:
+                    email = "_no_email_"
+                else:
+                    email = span.email
                 # a@b.com / 2022B / 20_21 / sirius / (cal_20220202T235959 / camsci1)
-                observer_semester_prefix = output_dir / span.email / semester / night / catalog_name
+                observer_semester_prefix = output_dir / email / semester / night / catalog_name
                 # 2022B / 20_21 / sirius / a@b.com / (cal_20220202T235959 / camsci1)
-                semester_observer_prefix = output_dir / semester / night / catalog_name / span.email
+                semester_observer_prefix = output_dir / semester / night / catalog_name / email
 
                 destination = semester_observer_prefix / title / device
                 if not dry_run:
@@ -427,6 +431,7 @@ def do_quicklook_for_camera(
                     if construct_symlink_tree:
                         observer_semester_prefix.parent.mkdir(parents=True, exist_ok=True)
                         if not observer_semester_prefix.is_symlink():
+                            log.debug(f"Linking {observer_semester_prefix} to {semester_observer_prefix} because {observer_semester_prefix.is_symlink()=}")
                             observer_semester_prefix.symlink_to(semester_observer_prefix)
                     for fn in good_outputs:
                         shutil.copy(fn, destination)
