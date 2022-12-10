@@ -244,18 +244,17 @@ def get_observation_telems(data_roots: typing.List[pathlib.Path], newer_than_dt 
         events.extend(parse_logdump_for_observers(observers_data_root, telem_path.path))
     return events
 
-def transform_telems_to_spans(events : typing.List[ObserverTelem], ending_after_dt : datetime.datetime):
+def transform_telems_to_spans(events : typing.List[ObserverTelem], start_dt : datetime.datetime, end_dt : typing.Optional[datetime.datetime]=None):
     spans = []
     current_observer_email : str = None
     current_observation : str = None
     current_observation_start : datetime.datetime = None
 
     def _add_span(email, title, begin, end):
-        if end is not None and end < ending_after_dt:
-            # log.debug(f"Discarding span {email} '{title}' {begin.isoformat()}-{end.isoformat()} because end after {ending_after_dt.isoformat()}")
+        if end is not None and end_dt is not None and end > end_dt:
             return
-        end_str = end.isoformat() if end is not None else 'ongoing'
-        # log.debug(f"Keeping span {email} '{title}' {begin.isoformat()}-{end_str}")
+        if begin < start_dt:
+            return
         spans.append(ObservationSpan(
             email,
             title,
@@ -290,7 +289,7 @@ def transform_telems_to_spans(events : typing.List[ObserverTelem], ending_after_
 
     # new starting point for next iteration, ignore anything that we already processed
     if len(spans):
-        ending_after_dt = spans[-1].end
+        start_dt = spans[-1].end
 
     if current_observation_start is not None:
         _add_span(
@@ -299,17 +298,17 @@ def transform_telems_to_spans(events : typing.List[ObserverTelem], ending_after_
             current_observation_start,
             None
         )
-    return spans, ending_after_dt
+    return spans, start_dt
 
-def get_new_observation_spans(data_roots: typing.List[pathlib.Path], existing_observation_spans : typing.Set[ObservationSpan], ending_after_dt : datetime.datetime):
-    events = get_observation_telems(data_roots, ending_after_dt)
-    spans, ending_after_dt = transform_telems_to_spans(events, ending_after_dt)
+def get_new_observation_spans(data_roots: typing.List[pathlib.Path], existing_observation_spans : typing.Set[ObservationSpan], start_dt : datetime.datetime, end_dt : typing.Optional[datetime.datetime]=None):
+    events = get_observation_telems(data_roots, start_dt, end_dt)
+    spans, start_dt = transform_telems_to_spans(events, start_dt, end_dt)
     if len(spans):
         new_observation_spans = set(spans) - existing_observation_spans
         log.debug(f"New observation_spans: {new_observation_spans}")
-        return new_observation_spans, ending_after_dt
+        return new_observation_spans, start_dt
     else:
-        return set(), ending_after_dt
+        return set(), start_dt
 
 def prune_outputs(scratch_dir, span):
     good_outputs = []
@@ -516,17 +515,18 @@ def daemon_mode(
     data_roots: typing.List[pathlib.Path], omit_telemetry : bool,
     construct_symlink_tree: bool,
     xrif2fits_cmd: str,
-    ending_after_dt: datetime.datetime, all_visited_files: typing.List[TimestampedFile],
+    start_dt: datetime.datetime,
+    all_visited_files: typing.List[TimestampedFile],
 ):
     existing_observation_spans = set()
-    log.info(f"Started at {datetime.datetime.now().isoformat()}, looking for unprocessed observations since {ending_after_dt}...")
+    log.info(f"Started at {datetime.datetime.now().isoformat()}, looking for unprocessed observations since {start_dt}...")
     dry_run = False
     while True:
         start_time = time.time()
         try:
-            result = get_new_observation_spans(data_roots, existing_observation_spans, ending_after_dt)
+            result = get_new_observation_spans(data_roots, existing_observation_spans, start_dt)
             new_observation_spans : typing.List[ObservationSpan] = result[0]
-            ending_after_dt : datetime.datetime = result[1]
+            start_dt : datetime.datetime = result[1]
             spans_with_data = set()
             for span in new_observation_spans:
                 log.info(f"Observation interval to process: {span}")
@@ -578,6 +578,12 @@ def decide_to_process(args, span):
 
     return title_match and observer_match
 
+def parse_iso_datetime(input_str):
+    dt = datetime.datetime.fromisoformat(input_str)
+    if dt.tzinfo is None:
+        dt = dt.replace(tzinfo=datetime.timezone.utc)
+    return dt
+
 def main():
     now = datetime.datetime.now()
     this_year = now.year
@@ -595,7 +601,11 @@ def main():
     parser.add_argument('-t', '--title', help="(ignored in daemon mode) Title of observation to collect", action='store')
     parser.add_argument('-e', '--observer-email', help="(ignored in daemon mode) Skip observations that are not by this observer (matches substrings, case-independent)", action='store')
     parser.add_argument('-p', '--partial-match-ok', help="(ignored in daemon mode) A partial match (title provided is found anywhere in recorded title) is processed", action='store_true')
+
     parser.add_argument('-s', '--semester', help=f"Semester to search in, default: {this_semester}", default=this_semester)
+    parser.add_argument('--utc-start', help=f"ISO UTC datetime stamp of earliest observation start time to process (supersedes --semester)", type=parse_iso_datetime)
+    parser.add_argument('--utc-end', help=f"ISO UTC datetime stamp of latest observation end time to process (ignored in daemon mode)", type=parse_iso_datetime)
+
     parser.add_argument('-c', '--camera', help=f"Camera name (i.e. rawimages subfolder name), repeat to specify multiple names. (default: {list(ALL_CAMERAS.keys())})", action='append')
     parser.add_argument('-X', '--data-root', help=f"Search directory for telem and rawimages subdirectories, repeat to specify multiple roots. (default: {LOOKYLOO_DATA_ROOTS.split(':')})", action='append')
     parser.add_argument('-O', '--omit-telemetry', help="Whether to omit references to telemetry files", action='store_true')
@@ -632,15 +642,23 @@ def main():
         data_roots = [pathlib.Path(x) for x in LOOKYLOO_DATA_ROOTS.split(':')]
     output_dir = pathlib.Path(args.output_dir)
     all_processed_files = load_file_history(output_dir / HISTORY_FILENAME)
-    try:
-        if len(args.semester) != 5 or args.semester[-1].upper() not in ['A', 'B']:
-            raise ValueError()
-        year = int(args.semester[:-1])
-        month = 1 if args.semester[-1].upper() == 'A' else 6
-    except ValueError:
-        raise RuntimeError(f"Got {args.semester=} but need a 4 digit year + A or B (e.g. 2022A)")
-    ending_after_dt = datetime.datetime(year, month, 1)
-    ending_after_dt = ending_after_dt.replace(tzinfo=timezone.utc)
+    if args.utc_begin is not None:
+        start_dt = args.utc_begin
+        year = start_dt.year
+        month = 1 if start_dt.month < 6 else 6
+        semester_start_dt = datetime.datetime(year, month, 1)
+        semester_start_dt = semester_start_dt.replace(tzinfo=timezone.utc)
+    else:
+        try:
+            if len(args.semester) != 5 or args.semester[-1].upper() not in ['A', 'B']:
+                raise ValueError()
+            year = int(args.semester[:-1])
+            month = 1 if args.semester[-1].upper() == 'A' else 6
+        except ValueError:
+            raise RuntimeError(f"Got {args.semester=} but need a 4 digit year + A or B (e.g. 2022A)")
+        semester_start_dt = datetime.datetime(year, month, 1)
+        semester_start_dt = semester_start_dt.replace(tzinfo=timezone.utc)
+        start_dt = semester_start_dt
     if args.daemon:
         daemon_mode(
             output_dir,
@@ -649,11 +667,15 @@ def main():
             args.omit_telemetry,
             not args.omit_symlink_tree,
             args.xrif2fits_cmd,
-            ending_after_dt,
+            start_dt,
             all_processed_files
         )
     else:
-        new_observation_spans, _ = get_new_observation_spans(data_roots, set(), ending_after_dt)
+        if args.utc_end is not None:
+            end_dt = args.utc_end
+        else:
+            end_dt = semester_start_dt + datetime.timedelta(days=6 * 30)
+        new_observation_spans, _ = get_new_observation_spans(data_roots, set(), start_dt, end_dt)
         for span in new_observation_spans:
             if decide_to_process(args, span):
                 log.info(f"Observation interval to process: {span}")
