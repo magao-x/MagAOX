@@ -313,7 +313,8 @@ def get_new_observation_spans(data_roots: typing.List[pathlib.Path], existing_ob
 
 def prune_outputs(scratch_dir, span):
     good_outputs = []
-    for fn in scratch_dir.glob("*.fits"):
+    sorted_matches = list(sorted(scratch_dir.glob("*.fits")))
+    for fn in sorted_matches:
         ts = xfilename_to_utc_timestamp(fn)
         if ts < span.begin or (span.end is not None and ts > span.end):
             os.remove(fn)
@@ -410,7 +411,7 @@ def do_quicklook_for_camera(
                 elif not dry_run:
                     catalog_name = catalog_name_from_outputs(good_outputs)
                 else:
-                    catalog_name = "_dry_run_"
+                    catalog_name = "_no_catobj_"
                 time_format = '%Y%m%dT%H%M%S'
                 if len(span.title):
                     title = f"{span.title}_{span.begin.strftime(time_format)}"
