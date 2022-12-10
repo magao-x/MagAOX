@@ -151,6 +151,8 @@ protected:
 
    mx::fits::fitsFile<float> m_ff;
 
+   int m_singleModeNo {0};
+   
 public:
    /// Default c'tor.
    userGainCtrl();
@@ -231,6 +233,13 @@ protected:
                       float l
                     );
 
+   int setSingleModeNo (int m);
+   int setSingleGain( float g );
+
+   int setSingleMC( float mc );
+   
+   void updateSingles();
+
    pcf::IndiProperty m_indiP_modes;
 
    pcf::IndiProperty m_indiP_zeroAll;
@@ -239,7 +248,17 @@ protected:
    std::vector<pcf::IndiProperty> m_indiP_blockMCs;
    std::vector<pcf::IndiProperty> m_indiP_blockLimits;
 
+   pcf::IndiProperty m_indiP_singleModeNo;
+   pcf::IndiProperty m_indiP_singleGain;
+   pcf::IndiProperty m_indiP_singleMC;
+
    INDI_NEWCALLBACK_DECL(userGainCtrl, m_indiP_zeroAll);
+
+   INDI_NEWCALLBACK_DECL(userGainCtrl, m_indiP_singleModeNo);
+
+   INDI_NEWCALLBACK_DECL(userGainCtrl, m_indiP_singleGain);
+   
+   INDI_NEWCALLBACK_DECL(userGainCtrl, m_indiP_singleMC);
 
    
    /// The static callback function to be registered for block gains
@@ -333,7 +352,8 @@ inline
 int userGainCtrl::loadConfigImpl( mx::app::appConfigurator & _config )
 {
    _config(m_loopNumber, "loop.number");
-
+   _config(m_splitTT, "blocks.splitTT");
+   
    shmimMonitorT::m_shmimName = "aol" + std::to_string(m_loopNumber) + "_mgainfact";   
    shmimMonitorT::loadConfig(config);
 
@@ -366,6 +386,7 @@ int userGainCtrl::appStartup()
    indi::addNumberElement(m_indiP_modes, "blocks", 0, 1, 99, "Mode Blocks");
    registerIndiPropertyReadOnly(m_indiP_modes);
 
+
    createStandardIndiRequestSw( m_indiP_zeroAll, "zero_all");
    if( registerIndiPropertyNew( m_indiP_zeroAll, INDI_NEWCALLBACK(m_indiP_zeroAll)) < 0)
    {
@@ -373,6 +394,21 @@ int userGainCtrl::appStartup()
       return -1;
    }
    
+   createStandardIndiNumber<int>( m_indiP_singleModeNo, "singleModeNo", 0, 2400 ,0, "%0d", "");
+   m_indiP_singleModeNo["current"].set(m_singleModeNo);
+   m_indiP_singleModeNo["target"].set(m_singleModeNo);
+   registerIndiPropertyNew(m_indiP_singleModeNo, INDI_NEWCALLBACK(m_indiP_singleModeNo));
+   
+   createStandardIndiNumber<int>( m_indiP_singleGain, "singleGain", 0, 1.5 ,0, "%0.2f", "");
+   m_indiP_singleGain["current"].set(1);
+   m_indiP_singleGain["target"].set(1);
+   registerIndiPropertyNew(m_indiP_singleGain, INDI_NEWCALLBACK(m_indiP_singleGain));
+
+   createStandardIndiNumber<int>( m_indiP_singleMC, "singleMC", 0, 1.0 ,0, "%0.2f", "");
+   m_indiP_singleMC["current"].set(1);
+   m_indiP_singleMC["target"].set(1);
+   registerIndiPropertyNew(m_indiP_singleMC, INDI_NEWCALLBACK(m_indiP_singleMC));
+
    if(shmimMonitorT::appStartup() < 0)
    {
       return log<software_error,-1>({__FILE__, __LINE__});
@@ -493,6 +529,8 @@ int userGainCtrl::appLogic()
    {
       updateIfChanged(m_indiP_blockLimits[n], "current", m_modeBlockLims[n]);
    }
+
+   updateSingles();
 
    return 0;
 }
@@ -1219,6 +1257,63 @@ int userGainCtrl::setBlockLimit( int n,
    return 0;
 }
 
+int userGainCtrl::setSingleModeNo ( int m )
+{
+   m_singleModeNo = m;
+
+   updateIfChanged(m_indiP_singleModeNo, "current", m);
+
+   if(m_singleModeNo < 0 || m_singleModeNo >= m_gainsCurrent.rows()) return -1;
+   float g =  m_gainsCurrent (m_singleModeNo,0);
+
+   updateIfChanged(m_indiP_singleGain, std::vector<std::string>({"current", "target"}), std::vector<float>({g,g}));
+
+   if(m_singleModeNo < 0 || m_singleModeNo >= m_mcsCurrent.rows()) return -1;
+   float mc =  m_mcsCurrent(m_singleModeNo,0);
+
+   updateIfChanged(m_indiP_singleMC, std::vector<std::string>({"current", "target"}), std::vector<float>({mc,mc}));
+
+   return 0;
+}
+
+int userGainCtrl::setSingleGain( float g )
+{
+   if(m_singleModeNo < 0 || m_singleModeNo >= m_gainsCurrent.rows()) return -1;
+   recordBlockGains();
+   std::unique_lock<std::mutex> lock(m_modeBlockMutex);
+   m_gainsTarget(m_singleModeNo,0) = g;
+   lock.unlock();
+   recordBlockGains(true);
+   writeGains();
+   return 0;
+}
+
+int userGainCtrl::setSingleMC( float mc )
+{
+   if(m_singleModeNo < 0 || m_singleModeNo >= m_mcsCurrent.rows()) return -1;
+   recordBlockGains();
+   std::unique_lock<std::mutex> lock(m_modeBlockMutex);
+   m_mcsTarget(m_singleModeNo,0) = mc;
+   lock.unlock();
+   recordBlockGains(true);
+   writeMCs();
+   return 0;
+}
+
+void userGainCtrl::updateSingles()
+{
+   if(m_singleModeNo < 0 || m_singleModeNo >= m_gainsCurrent.rows()) return;
+   float g =  m_gainsCurrent (m_singleModeNo,0);
+
+   updateIfChanged(m_indiP_singleGain, std::vector<std::string>({"current", "target"}), std::vector<float>({g,g}));
+
+   if(m_singleModeNo < 0 || m_singleModeNo >= m_mcsCurrent.rows()) return;
+   float mc =  m_mcsCurrent(m_singleModeNo,0);
+
+   updateIfChanged(m_indiP_singleMC, std::vector<std::string>({"current", "target"}), std::vector<float>({mc,mc}));
+
+}
+
 INDI_NEWCALLBACK_DEFN(userGainCtrl, m_indiP_zeroAll)(const pcf::IndiProperty &ipRecv)
 {
    if(ipRecv.getName() != m_indiP_zeroAll.getName())
@@ -1242,6 +1337,71 @@ INDI_NEWCALLBACK_DEFN(userGainCtrl, m_indiP_zeroAll)(const pcf::IndiProperty &ip
    
    return 0;
 }
+
+INDI_NEWCALLBACK_DEFN(userGainCtrl, m_indiP_singleModeNo)(const pcf::IndiProperty &ipRecv)
+{
+   if(ipRecv.getName() != m_indiP_singleModeNo.getName())
+   {
+      log<software_error>({__FILE__, __LINE__, "invalid indi property received"});
+      return -1;
+   }
+   
+   int target;
+   
+   if( indiTargetUpdate( m_indiP_singleModeNo, target, ipRecv, true) < 0)
+   {
+      log<software_error>({__FILE__,__LINE__});
+      return -1;
+   }
+   
+   setSingleModeNo(target);
+   
+   return 0;
+}
+
+INDI_NEWCALLBACK_DEFN(userGainCtrl, m_indiP_singleGain)(const pcf::IndiProperty &ipRecv)
+{
+   if(ipRecv.getName() != m_indiP_singleGain.getName())
+   {
+      log<software_error>({__FILE__, __LINE__, "invalid indi property received"});
+      return -1;
+   }
+   
+   float target;
+   
+   if( indiTargetUpdate( m_indiP_singleGain, target, ipRecv, true) < 0)
+   {
+      log<software_error>({__FILE__,__LINE__});
+      return -1;
+   }
+   
+   setSingleGain(target);
+   
+   return 0;
+}
+
+INDI_NEWCALLBACK_DEFN(userGainCtrl, m_indiP_singleMC)(const pcf::IndiProperty &ipRecv)
+{
+   if(ipRecv.getName() != m_indiP_singleMC.getName())
+   {
+      log<software_error>({__FILE__, __LINE__, "invalid indi property received"});
+      return -1;
+   }
+   
+   float target;
+   
+   if( indiTargetUpdate( m_indiP_singleMC, target, ipRecv, true) < 0)
+   {
+      log<software_error>({__FILE__,__LINE__});
+      return -1;
+   }
+   
+   setSingleMC(target);
+   
+   return 0;
+}
+
+
 int userGainCtrl::st_newCallBack_blockGains( void * app,
                                                const pcf::IndiProperty &ipRecv
                                              )
