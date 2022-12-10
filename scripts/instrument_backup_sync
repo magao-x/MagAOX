@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 set -x
 if (( $# < 1 )); then
-  prefixes=( "/media/backup" "/media/backup2" "/media/backup3" )
+  prefixes=( "/mnt/backup" "/mnt/backup2" )
 else
   prefixes="$@"
 fi
@@ -27,6 +27,8 @@ for mountpoint in "${prefixes[@]}"; do
         for dir in rawimages logs telem; do
             $rsyncWithOptions /data/$dir/ $mountpoint/aoc/$dir/
         done
+    else
+        echo "No backup drive mounted on $mountpoint"
     fi
 done
 
