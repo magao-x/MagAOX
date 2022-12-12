@@ -76,11 +76,12 @@ def make_settings_jsonable(config_kind):
     darks_dict = {k: [] for k in cameras}
     for camname in cameras:
         darks_dict[camname] = []
-        for setup in config_kind[camname]:
+        for setup_meta in config_kind[camname]:
             setup_dict = {}
+            setup = setup_meta['setup']
             for key, value in setup:
                 setup_dict[key] = value
-            darks_dict[camname].append(setup_dict)
+            darks_dict[camname].append({'frames_count': setup_meta['frames_count'], 'setup': setup_dict})
     return darks_dict
 
 def main(args):
@@ -101,9 +102,9 @@ def main(args):
             if invalid:
                 invalid_config[camname].append({'setup': setup, 'frames_count': frames_count})
             elif setup not in all_shut_settings:
-                needed_darks[camname].append(setup)
+                needed_darks[camname].append({'setup': setup, 'frames_count': frames_count})
             else:
-                have_darks[camname].append(setup)
+                have_darks[camname].append({'setup': setup, 'frames_count': frames_count})
             log.info(f"open shutter count:\t{frames_count}")
             if setup in all_shut_settings:
                 log.info(f"closed shutter count:\t{all_shut_settings[setup]}")

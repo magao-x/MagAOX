@@ -1,4 +1,5 @@
 #!/usr/bin/env python
+import threading
 import pprint
 import sys
 import time
@@ -95,13 +96,13 @@ def take_darks(indi, camname, configuration, dry_run):
     indi[f"{camname}.exptime.target"] = exptime
     
     if not dry_run:
-        log.debug(f"Toggling on recording, waiting for streamwriter to start...")
+        log.debug(f"Waiting for the streamwriter {camname}-sw to be writing...")
         indi.wait_for_state({
             f"{camname}-sw.writing.toggle": SwitchState.ON,
         }, timeout=max(2 * exptime, 10))
         overhead_fudge_factor = 1.1
         wait_for_frames = overhead_fudge_factor * N_DARK_FRAMES * exptime
-        log.debug(f"Waiting {wait_for_frames} sec while approx. {int(wait_for_frames / exptime)} frames are recorded...")
+        log.debug(f"Done. Now, waiting {wait_for_frames} sec while approx. {int(wait_for_frames / exptime)} frames are recorded...")
         time.sleep(wait_for_frames)
         indi.wait_for_state({
             f"{camname}-sw.writing.toggle": SwitchState.OFF,
@@ -120,8 +121,19 @@ def generate_needed_properties(cameras):
         props.append(f"{camname}.readout_speed")
         props.append(f"{camname}.roi_region_bin_x")
         props.append(f"{camname}.roi_region_bin_y")
-        props.append(f"{camname}-sw.writing")
     return props
+
+def dark_taker_task(c, camname, configs, dry_run):
+    log.info(f"{camname} task started!")
+    n_configs = len(configs)
+    log.info(f"Taking darks in {n_configs} {camname} configs...")
+    for i, config_meta in enumerate(configs):
+        config = config_meta['setup']
+        frames_count = config_meta['frames_count']
+        log.info(f"[{camname}] Starting config {i+1} / {n_configs} (corresponding to {frames_count} open-shutter frames)")
+        take_darks(c, camname, config, dry_run)
+        log.info(f"[{camname}] Finished {i+1} / {n_configs}.")
+    log.info(f"{camname} task finished!")
 
 def main(args):
     cameras = args.cameras if args.cameras is not None else SCIENCE_CAMERAS
@@ -131,31 +143,52 @@ def main(args):
     c.start()
     
     try:
+        log.debug("Waiting for properties...")
         c.wait_for_properties(generate_needed_properties(cameras), timeout=WAIT_FOR_CAMERAS_TIMEOUT)
     except TimeoutError as e:
         log.exception("Timed out waiting for properties")
         sys.exit(1)
+    log.debug("Connected to INDI")
     with open(darks_to_take_path) as fh:
         darks_to_take = orjson.loads(fh.read())
-        today = datetime.date.today()
-        darks_folder_name = f"darks_backfill_{today.isoformat()}"
-        log.debug(f"Setting up observation {darks_folder_name}")
-        c[f"observers.observers.vizzy-at-xwcl-dot-science"] = SwitchState.ON
-        c[f"observers.obs_name.target"] = darks_folder_name
-        c.wait_for_state({
-            "observers.obs_on.toggle": SwitchState.ON
-        })
+    today = datetime.date.today()
+    darks_folder_name = f"darks_backfill_run_{today.isoformat()}"
+    log.debug(f"Setting up observation {darks_folder_name}")
+    c[f"observers.observers.vizzy-at-xwcl-dot-science"] = SwitchState.ON
+    c[f"observers.obs_name.target"] = darks_folder_name
+    c.wait_for_state({
+        f"observers.writers.{camname}": SwitchState.ON
+        for camname in cameras
+    })
+    # Make sure it's dark
+    c.wait_for_state({
+        f"{camname}.shutter.toggle": SwitchState.ON
+        for camname in cameras
+    })
+    try:
+        if not dry_run:
+            c.wait_for_state({
+                "observers.obs_on.toggle": SwitchState.ON
+            })
+        tasks = []
         for camname in cameras:
-            n_configs = len(darks_to_take[camname])
-            log.info(f"Taking darks in {n_configs} {camname} configs...")
-            print(len(darks_to_take[camname]))
-            for i, config in enumerate(darks_to_take[camname]):
-                log.info(f"Starting {i+1} / {n_configs}...")
-                try:
-                    take_darks(c, camname, config, dry_run)
-                finally:
-                    c[f"{camname}-sw.writing.toggle"] = SwitchState.OFF
-                log.info(f"Finished {i+1} / {n_configs}.")
+            th = threading.Thread(target=dark_taker_task, args=(c, camname, darks_to_take[camname], dry_run))
+            th.start()
+            tasks.append(th)
+        log.info("Waiting for tasks to complete...")
+        for th in tasks:
+            th.join()
+    finally:
+        c.wait_for_state({
+            "observers.obs_on.toggle": SwitchState.OFF
+        })
+        log.debug("Switched off observing toggle")
+        c.wait_for_state({
+            f"{camname}-sw.writing.toggle": SwitchState.OFF
+            for camname in cameras
+        })
+        log.debug("Ensured relevant streamwriters are off")
+        
     
 
 if __name__ == "__main__":
@@ -167,7 +200,7 @@ if __name__ == "__main__":
     parser.add_argument('-c', '--cameras', help=f"Cameras to check, default: {SCIENCE_CAMERAS}", action='append', default=None)
     parser.add_argument('--dry-run', help=f"Don't actually record data", action='store_true')
     args = parser.parse_args()
-    # logging.basicConfig(level='DEBUG')
+
     ch = logging.StreamHandler()
     ch.setLevel(logging.DEBUG if args.verbose else logging.INFO)
     formatter = logging.Formatter('%(asctime)s %(levelname)s - %(message)s')
