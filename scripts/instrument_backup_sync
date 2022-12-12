@@ -1,11 +1,11 @@
 #!/usr/bin/env bash
-set -x
+set -ex
 if (( $# < 1 )); then
   prefixes=( "/mnt/backup" "/mnt/backup2" )
 else
   prefixes="$@"
 fi
-rsyncWithOptions="rsync --checksum -a -P"
+rsyncWithOptions="rsync --exclude='**/*_202204*' --exclude='**/*_202203*' -a --info=progress2"
 for mountpoint in "${prefixes[@]}"; do
     if mount | grep -q "on $mountpoint"; then
         for remote in icc rtc; do
