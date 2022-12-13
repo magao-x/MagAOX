@@ -647,15 +647,23 @@ def main():
         semester_start_dt = datetime.datetime(year, month, 1)
         semester_start_dt = semester_start_dt.replace(tzinfo=timezone.utc)
     else:
+        letter = args.semester[-1].upper()
         try:
+
             if len(args.semester) != 5 or args.semester[-1].upper() not in ['A', 'B']:
                 raise ValueError()
             year = int(args.semester[:-1])
-            month = 1 if args.semester[-1].upper() == 'A' else 6
+            month = 1 if letter == 'A' else 6
+            day = 15 if month == 6 else 1
         except ValueError:
             raise RuntimeError(f"Got {args.semester=} but need a 4 digit year + A or B (e.g. 2022A)")
         semester_start_dt = datetime.datetime(year, month, 1)
         semester_start_dt = semester_start_dt.replace(tzinfo=timezone.utc)
+        semester_end_dt = datetime.datetime(
+            year=year + 1 if letter == 'B' else year,
+            month=1 if letter == 'B' else 6,
+            day = 15 if letter == 'A' else 1,
+        ).replace(tzinfo=timezone.utc)
         start_dt = semester_start_dt
     if args.daemon:
         daemon_mode(
@@ -673,7 +681,7 @@ def main():
         if args.utc_end is not None:
             end_dt = args.utc_end
         else:
-            end_dt = semester_start_dt + datetime.timedelta(days=6 * 30)
+            end_dt = semester_end_dt
         new_observation_spans, _ = get_new_observation_spans(data_roots, set(), start_dt, end_dt)
         for span in new_observation_spans:
             if decide_to_process(args, span):
