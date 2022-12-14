@@ -360,7 +360,9 @@ def catalog_name_from_outputs(output_files):
                 catobj = None
         if catobj is not None:
             break
-    return catobj if catobj is not None else '_no_target_'
+    if catobj is None or len(catobj.replace('*', '')) == 0:
+        return '_no_target_'
+    return catobj
 
 def do_quicklook_for_camera(
     span : ObservationSpan, data_roots, device, omit_telemetry, output_dir, dry_run, cube_mode,
