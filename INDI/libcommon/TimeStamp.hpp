@@ -119,9 +119,15 @@ class TimeStamp
     /// Generates the millisecond of the second (0-999) from the current time.
     unsigned int getSecondMillisecond() const;
     /// Returns the microsecond part of the time val struct.
-    inline int getTimeValMicros() const;
+    inline int getTimeValMicros() const
+    {
+      return m_tvCurr.tv_usec;
+    }
     /// Returns the seconds part of the time val struct.
-    inline int getTimeValSecs() const;
+    inline int getTimeValSecs() const
+    {
+      return m_tvCurr.tv_sec;
+    }
     /// Returns the underlying timeval struct.
     const timeval &getTimeVal() const;
     /// Increment the time stamp one day.

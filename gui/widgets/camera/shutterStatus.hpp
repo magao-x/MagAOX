@@ -25,10 +25,10 @@ protected:
    QTimer * m_tgtTimer {nullptr}; ///< Timer to normalize target if shutter stalls (5 seconds).
 
 public:
-   shutterStatus( const std::string & camName,
-                  QWidget * Parent = 0, 
-                  Qt::WindowFlags f = Qt::WindowFlags()
-                );
+   explicit shutterStatus( const std::string & camName,
+                           QWidget * Parent = 0, 
+                           Qt::WindowFlags f = Qt::WindowFlags()
+                         );
    
    ~shutterStatus();
 

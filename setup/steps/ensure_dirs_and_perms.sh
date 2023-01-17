@@ -105,8 +105,3 @@ if [[ $MAGAOX_ROLE != "vm" ]]; then
   chmod u=rwX,g=rwX,o=rX /opt/MagAOX/vendor
   setgid_all /opt/MagAOX/vendor
 fi
-
-if [[ "$MAGAOX_ROLE" == "AOC" ]]; then
-  make_on_data_array rtc /opt/MagAOX
-  make_on_data_array icc /opt/MagAOX
-fi

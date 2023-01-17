@@ -316,10 +316,10 @@ struct telem_stdcam : public flatbuffer_log
       if(member == "mode") return logMetaDetail({"MODE", logMeta::valTypes::String, logMeta::metaTypes::State, (void *) &mode});
       else if(member == "xcen") return logMetaDetail({"ROI XCEN", logMeta::valTypes::Float, logMeta::metaTypes::State, (void *) &xcen});
       else if(member == "ycen") return logMetaDetail({"ROI YCEN", logMeta::valTypes::Float, logMeta::metaTypes::State, (void *) &ycen});
-      else if(member == "width") return logMetaDetail({"ROI WIDTH", logMeta::valTypes::Float, logMeta::metaTypes::State, (void *) &width});
-      else if(member == "height") return logMetaDetail({"ROI HEIGHT", logMeta::valTypes::Float, logMeta::metaTypes::State, (void *) &height});
-      else if(member == "xbin") return logMetaDetail({"ROI XBIN", logMeta::valTypes::Float, logMeta::metaTypes::State, (void *) &xbin});
-      else if(member == "ybin") return logMetaDetail({"ROI YBIN", logMeta::valTypes::Float, logMeta::metaTypes::State, (void *) &ybin});
+      else if(member == "width") return logMetaDetail({"ROI WIDTH", logMeta::valTypes::Int, logMeta::metaTypes::State, (void *) &width});
+      else if(member == "height") return logMetaDetail({"ROI HEIGHT", logMeta::valTypes::Int, logMeta::metaTypes::State, (void *) &height});
+      else if(member == "xbin") return logMetaDetail({"ROI XBIN", logMeta::valTypes::Int, logMeta::metaTypes::State, (void *) &xbin});
+      else if(member == "ybin") return logMetaDetail({"ROI YBIN", logMeta::valTypes::Int, logMeta::metaTypes::State, (void *) &ybin});
       else if(member == "exptime") return logMetaDetail({"EXPTIME", logMeta::valTypes::Float, logMeta::metaTypes::State, (void *) &exptime});
       else if(member == "fps") return logMetaDetail({"FPS", logMeta::valTypes::Float, logMeta::metaTypes::State, (void *) &fps});
       else if(member == "emGain") return logMetaDetail({"EMGAIN", logMeta::valTypes::Float, logMeta::metaTypes::State, (void *) &emGain});

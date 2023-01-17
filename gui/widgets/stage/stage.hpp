@@ -40,10 +40,10 @@ protected:
    QTimer * m_setPointEditTimer {nullptr};
 
 public:
-   stage( std::string & stageName,
-          QWidget * Parent = 0, 
-          Qt::WindowFlags f = Qt::WindowFlags()
-        );
+   explicit stage( std::string & stageName,
+                   QWidget * Parent = 0, 
+                   Qt::WindowFlags f = Qt::WindowFlags()
+                 );
    
    ~stage();
    

@@ -64,6 +64,7 @@ int parseBSWV( int & channel, ///< [out] the channel indicated by this response.
                double & hlev,
                double & llev,
                double & phse,
+               double & wdth,
                const std::string & strRead ///< [in] string containing the device response
              )
 {
@@ -76,10 +77,12 @@ int parseBSWV( int & channel, ///< [out] the channel indicated by this response.
    hlev = 0;
    llev = 0;
    phse = 0;
+   wdth = 0;
    
    std::vector<std::string> v;
 
    mx::ioutils::parseStringVector(v, strRead, ":, \n");
+   //std::cout << strRead << "\n";
 
    if(v.size() < 4) return -1; //We need to get to at least the WVTP parameter.
 
@@ -92,7 +95,7 @@ int parseBSWV( int & channel, ///< [out] the channel indicated by this response.
    if(v[2] != "WVTP") return -5;
    wvtp = v[3];
 
-   if(wvtp != "SINE" && wvtp != "DC") return SDG_PARSEERR_WVTP; //We don't actually know how to handle anything else.
+   if(wvtp != "SINE" && wvtp != "PULSE" && wvtp != "DC") return SDG_PARSEERR_WVTP; //We don't actually know how to handle anything else.
    
    if(wvtp == "DC")
    {
@@ -128,8 +131,17 @@ int parseBSWV( int & channel, ///< [out] the channel indicated by this response.
    if(v[16] != "LLEV") return -16;
    llev = mx::ioutils::convertFromString<double>(v[17]);
 
-   if(v[18] != "PHSE") return -17;
-   phse = mx::ioutils::convertFromString<double>(v[19]);
+   if(wvtp == "SINE")
+   {
+      if(v[18] != "PHSE") return -17;
+      phse = mx::ioutils::convertFromString<double>(v[19]);
+   }
+
+   if(wvtp == "PULSE")
+   {
+      if(v[20] != "WIDTH") return -18;
+      wdth = mx::ioutils::convertFromString<double>(v[21]);
+   }
 
    return 0;
 }

@@ -34,7 +34,8 @@ int cameraStatus::attachOverlay( rtimvOverlayAccess & roa,
    config.configUnused(m_filterDeviceName, mx::app::iniFile::makeKey("camera", "filterDevice"));
    
    connect(this, SIGNAL(newStretchBox(StretchBox *)), m_roa.m_mainWindowObject, SLOT(addStretchBox(StretchBox *)));
-   
+   connect(this, SIGNAL(savingState(bool)), m_roa.m_mainWindowObject, SLOT(savingState(bool)));
+
    if(m_enabled) enableOverlay();
    else disableOverlay();
    
@@ -48,8 +49,6 @@ int cameraStatus::updateOverlay()
    if(m_roa.m_dictionary == nullptr) return 0;
    
    if(m_roa.m_graphicsView == nullptr) return 0;
-   
-   size_t blobSz;
 
    size_t n = 0;
    //char * str;
@@ -58,7 +57,7 @@ int cameraStatus::updateOverlay()
    
    if( m_roa.m_dictionary->count(m_deviceName + ".temp_ccd.current") > 0)
    {
-      if( (blobSz = (*m_roa.m_dictionary)[m_deviceName + ".temp_ccd.current"].getBlobStr(m_blob, sizeof(m_blob))) == sizeof(m_blob) ) return -1; //Don't trust this as a string.
+      if( ((*m_roa.m_dictionary)[m_deviceName + ".temp_ccd.current"].getBlobStr(m_blob, sizeof(m_blob))) == sizeof(m_blob) ) return -1; //Don't trust this as a string.
 
       snprintf(tstr, sizeof(tstr), "%0.1f C", strtod(m_blob,0));
       m_roa.m_graphicsView->statusTextText(n, tstr);
@@ -69,14 +68,14 @@ int cameraStatus::updateOverlay()
    //Get curr size
    if( m_roa.m_dictionary->count(m_deviceName + ".fg_frameSize.width") > 0)
    {
-      if( (blobSz = (*m_roa.m_dictionary)[m_deviceName + ".fg_frameSize.width"].getBlobStr(m_blob, sizeof(m_blob))) == sizeof(m_blob) ) return -1; //Don't trust this as a string.
+      if( ((*m_roa.m_dictionary)[m_deviceName + ".fg_frameSize.width"].getBlobStr(m_blob, sizeof(m_blob))) == sizeof(m_blob) ) return -1; //Don't trust this as a string.
       m_width = atoi(m_blob);
    }
    else m_width = -1;
 
    if( m_roa.m_dictionary->count(m_deviceName + ".fg_frameSize.height") > 0)
    {
-      if( (blobSz = (*m_roa.m_dictionary)[m_deviceName + ".fg_frameSize.height"].getBlobStr(m_blob, sizeof(m_blob))) == sizeof(m_blob) ) return -1; //Don't trust this as a string.
+      if( ((*m_roa.m_dictionary)[m_deviceName + ".fg_frameSize.height"].getBlobStr(m_blob, sizeof(m_blob))) == sizeof(m_blob) ) return -1; //Don't trust this as a string.
       m_height = atoi(m_blob);
    }
    else m_height = -1;
@@ -85,16 +84,16 @@ int cameraStatus::updateOverlay()
    if( m_roa.m_dictionary->count(m_deviceName + ".roi_full_region.x") > 0 && m_roa.m_dictionary->count(m_deviceName + ".roi_full_region.y") > 0 && 
          m_roa.m_dictionary->count(m_deviceName + ".roi_full_region.w") > 0 && m_roa.m_dictionary->count(m_deviceName + ".roi_full_region.h") > 0 )
    {
-      if( (blobSz = (*m_roa.m_dictionary)[m_deviceName + ".roi_full_region.x"].getBlobStr(m_blob, sizeof(m_blob))) == sizeof(m_blob) ) return -1; //Don't trust this as a string.
+      if( ((*m_roa.m_dictionary)[m_deviceName + ".roi_full_region.x"].getBlobStr(m_blob, sizeof(m_blob))) == sizeof(m_blob) ) return -1; //Don't trust this as a string.
       m_fullROI_x = strtod(m_blob,NULL);
 
-      if( (blobSz = (*m_roa.m_dictionary)[m_deviceName + ".roi_full_region.y"].getBlobStr(m_blob, sizeof(m_blob))) == sizeof(m_blob) ) return -1; //Don't trust this as a string.
+      if( ((*m_roa.m_dictionary)[m_deviceName + ".roi_full_region.y"].getBlobStr(m_blob, sizeof(m_blob))) == sizeof(m_blob) ) return -1; //Don't trust this as a string.
       m_fullROI_y = strtod(m_blob,NULL);
       
-      if( (blobSz = (*m_roa.m_dictionary)[m_deviceName + ".roi_full_region.w"].getBlobStr(m_blob, sizeof(m_blob))) == sizeof(m_blob) ) return -1; //Don't trust this as a string.
+      if( ((*m_roa.m_dictionary)[m_deviceName + ".roi_full_region.w"].getBlobStr(m_blob, sizeof(m_blob))) == sizeof(m_blob) ) return -1; //Don't trust this as a string.
       m_fullROI_w = atoi(m_blob);
       
-      if( (blobSz = (*m_roa.m_dictionary)[m_deviceName + ".roi_full_region.h"].getBlobStr(m_blob, sizeof(m_blob))) == sizeof(m_blob) ) return -1; //Don't trust this as a string.
+      if( ((*m_roa.m_dictionary)[m_deviceName + ".roi_full_region.h"].getBlobStr(m_blob, sizeof(m_blob))) == sizeof(m_blob) ) return -1; //Don't trust this as a string.
       m_fullROI_h = atoi(m_blob);
    }
    
@@ -102,28 +101,29 @@ int cameraStatus::updateOverlay()
         && m_roa.m_dictionary->count(m_deviceName + ".roi_region_x.current") > 0 && m_roa.m_dictionary->count(m_deviceName + ".roi_region_y.current") > 0 
           && m_roa.m_dictionary->count(m_deviceName + ".roi_region_bin_x.current") > 0 && m_roa.m_dictionary->count(m_deviceName + ".roi_region_bin_y.current") > 0 )
    {
-      if( (blobSz = (*m_roa.m_dictionary)[m_deviceName + ".roi_region_w.current"].getBlobStr(m_blob, sizeof(m_blob))) == sizeof(m_blob) ) errPrint("bad string"); //Don't trust this as a string.
+      if( ((*m_roa.m_dictionary)[m_deviceName + ".roi_region_w.current"].getBlobStr(m_blob, sizeof(m_blob))) == sizeof(m_blob) ) errPrint("bad string"); //Don't trust this as a string.
       int w = atoi(m_blob);
 
-      if( (blobSz = (*m_roa.m_dictionary)[m_deviceName + ".roi_region_h.current"].getBlobStr(m_blob, sizeof(m_blob))) == sizeof(m_blob) ) errPrint("bad string"); //Don't trust this as a string.
+      if( ((*m_roa.m_dictionary)[m_deviceName + ".roi_region_h.current"].getBlobStr(m_blob, sizeof(m_blob))) == sizeof(m_blob) ) errPrint("bad string"); //Don't trust this as a string.
       int h = atoi(m_blob);
 
-      if( (blobSz = (*m_roa.m_dictionary)[m_deviceName + ".roi_region_bin_x.current"].getBlobStr(m_blob, sizeof(m_blob))) == sizeof(m_blob) ) errPrint("bad string"); //Don't trust this as a string.
+      if( ((*m_roa.m_dictionary)[m_deviceName + ".roi_region_bin_x.current"].getBlobStr(m_blob, sizeof(m_blob))) == sizeof(m_blob) ) errPrint("bad string"); //Don't trust this as a string.
       int ibx = atoi(m_blob);
 
-      if( (blobSz = (*m_roa.m_dictionary)[m_deviceName + ".roi_region_bin_y.current"].getBlobStr(m_blob, sizeof(m_blob))) == sizeof(m_blob) ) errPrint("bad string"); //Don't trust this as a string.
+      if( ((*m_roa.m_dictionary)[m_deviceName + ".roi_region_bin_y.current"].getBlobStr(m_blob, sizeof(m_blob))) == sizeof(m_blob) ) errPrint("bad string"); //Don't trust this as a string.
       int iby = atoi(m_blob);
 
-      if( (blobSz = (*m_roa.m_dictionary)[m_deviceName + ".roi_region_x.current"].getBlobStr(m_blob, sizeof(m_blob))) == sizeof(m_blob) ) errPrint("bad string"); //Don't trust this as a string.
+      if( ((*m_roa.m_dictionary)[m_deviceName + ".roi_region_x.current"].getBlobStr(m_blob, sizeof(m_blob))) == sizeof(m_blob) ) errPrint("bad string"); //Don't trust this as a string.
       float x = strtod(m_blob, NULL);
 
-      if( (blobSz = (*m_roa.m_dictionary)[m_deviceName + ".roi_region_y.current"].getBlobStr(m_blob, sizeof(m_blob))) == sizeof(m_blob) ) errPrint("bad string"); //Don't trust this as a string.
+      if( ((*m_roa.m_dictionary)[m_deviceName + ".roi_region_y.current"].getBlobStr(m_blob, sizeof(m_blob))) == sizeof(m_blob) ) errPrint("bad string"); //Don't trust this as a string.
       float y = strtod(m_blob, NULL);
 
 
 
       snprintf(tstr, sizeof(tstr), "%dx%d [%dx%d]", w, h, ibx, iby );
 
+      //**************** 
       m_roa.m_graphicsView->statusTextText(n, tstr);
       ++n;
       
@@ -134,23 +134,23 @@ int cameraStatus::updateOverlay()
             && m_roa.m_dictionary->count(m_deviceName + ".roi_region_x.target") > 0 && m_roa.m_dictionary->count(m_deviceName + ".roi_region_y.target") > 0
               && m_roa.m_dictionary->count(m_deviceName + ".roi_region_bin_x.target") > 0 && m_roa.m_dictionary->count(m_deviceName + ".roi_region_bin_y.target") > 0 )
       {
-         if( (blobSz = (*m_roa.m_dictionary)[m_deviceName + ".roi_region_w.target"].getBlobStr(m_blob, sizeof(m_blob))) == sizeof(m_blob) ) errPrint("bad string"); //Don't trust this as a string.
+         if( ((*m_roa.m_dictionary)[m_deviceName + ".roi_region_w.target"].getBlobStr(m_blob, sizeof(m_blob))) == sizeof(m_blob) ) errPrint("bad string"); //Don't trust this as a string.
          int wt = atoi(m_blob);
 
-         if( (blobSz = (*m_roa.m_dictionary)[m_deviceName + ".roi_region_h.target"].getBlobStr(m_blob, sizeof(m_blob))) == sizeof(m_blob) ) errPrint("bad string"); //Don't trust this as a string.
+         if( ((*m_roa.m_dictionary)[m_deviceName + ".roi_region_h.target"].getBlobStr(m_blob, sizeof(m_blob))) == sizeof(m_blob) ) errPrint("bad string"); //Don't trust this as a string.
          int ht = atoi(m_blob);
 
-         if( (blobSz = (*m_roa.m_dictionary)[m_deviceName + ".roi_region_x.target"].getBlobStr(m_blob, sizeof(m_blob))) == sizeof(m_blob) ) errPrint("bad string"); //Don't trust this as a string.
+         if( ((*m_roa.m_dictionary)[m_deviceName + ".roi_region_x.target"].getBlobStr(m_blob, sizeof(m_blob))) == sizeof(m_blob) ) errPrint("bad string"); //Don't trust this as a string.
          float xt = strtod(m_blob, NULL);
 
-         if( (blobSz = (*m_roa.m_dictionary)[m_deviceName + ".roi_region_y.target"].getBlobStr(m_blob, sizeof(m_blob))) == sizeof(m_blob) ) errPrint("bad string"); //Don't trust this as a string.
+         if( ((*m_roa.m_dictionary)[m_deviceName + ".roi_region_y.target"].getBlobStr(m_blob, sizeof(m_blob))) == sizeof(m_blob) ) errPrint("bad string"); //Don't trust this as a string.
          float yt = strtod(m_blob, NULL);
 
          //bin is float for doing math
-         if( (blobSz = (*m_roa.m_dictionary)[m_deviceName + ".roi_region_bin_x.target"].getBlobStr(m_blob, sizeof(m_blob))) == sizeof(m_blob) ) errPrint("bad string"); //Don't trust this as a string.
+         if( ((*m_roa.m_dictionary)[m_deviceName + ".roi_region_bin_x.target"].getBlobStr(m_blob, sizeof(m_blob))) == sizeof(m_blob) ) errPrint("bad string"); //Don't trust this as a string.
          float bxt = atoi(m_blob);
 
-         if( (blobSz = (*m_roa.m_dictionary)[m_deviceName + ".roi_region_bin_y.target"].getBlobStr(m_blob, sizeof(m_blob))) == sizeof(m_blob) ) errPrint("bad string"); //Don't trust this as a string.
+         if( ((*m_roa.m_dictionary)[m_deviceName + ".roi_region_bin_y.target"].getBlobStr(m_blob, sizeof(m_blob))) == sizeof(m_blob) ) errPrint("bad string"); //Don't trust this as a string.
          float byt = atoi(m_blob);
 
          if(wt != w || ht != h || xt != x || yt != y)
@@ -192,6 +192,7 @@ int cameraStatus::updateOverlay()
             m_roiFullBox->setVisible(true);
             m_roiFullBox->setStretchable(false);
             m_roiFullBox->setRemovable(false);
+            //****************
             m_roa.m_userBoxes->insert(m_roiFullBox);
             emit newStretchBox(m_roiFullBox);
          }
@@ -209,11 +210,13 @@ int cameraStatus::updateOverlay()
       }
       
    }
+
+   //***********************
    if(n > m_roa.m_graphicsView->statusTextNo()-1) return 0;
    
    if( m_roa.m_dictionary->count(m_deviceName + ".exptime.current") > 0)
    {
-      if( (blobSz = (*m_roa.m_dictionary)[m_deviceName + ".exptime.current"].getBlobStr(m_blob, sizeof(m_blob))) == sizeof(m_blob) ) errPrint("bad string"); //Don't trust this as a string.
+      if( ((*m_roa.m_dictionary)[m_deviceName + ".exptime.current"].getBlobStr(m_blob, sizeof(m_blob))) == sizeof(m_blob) ) errPrint("bad string"); //Don't trust this as a string.
       double et = strtod(m_blob,0);
       if(et >= 100)
       {
@@ -238,23 +241,27 @@ int cameraStatus::updateOverlay()
             snprintf(tstr, sizeof(tstr), "%0.2f us", et*1000000.0);
          }
       }
+      //**********************
       m_roa.m_graphicsView->statusTextText(n, tstr);
       ++n;
    }
+   //************************
    if(n > m_roa.m_graphicsView->statusTextNo()-1) return 0;
    
    if( m_roa.m_dictionary->count(m_deviceName + ".fps.current") > 0)
    {
-      if( (blobSz = (*m_roa.m_dictionary)[m_deviceName + ".fps.current"].getBlobStr(m_blob, sizeof(m_blob))) == sizeof(m_blob) ) errPrint("bad string"); //Don't trust this as a string.
+      if( ((*m_roa.m_dictionary)[m_deviceName + ".fps.current"].getBlobStr(m_blob, sizeof(m_blob))) == sizeof(m_blob) ) errPrint("bad string"); //Don't trust this as a string.
       snprintf(tstr, sizeof(tstr), "%0.1f FPS", strtod(m_blob,0));
+      //*********************
       m_roa.m_graphicsView->statusTextText(n, tstr);
       ++n;
    }
+   //*******************
    if(n > m_roa.m_graphicsView->statusTextNo()-1) return 0;
    
    if( m_roa.m_dictionary->count(m_deviceName + ".emgain.current") > 0)
    {
-      if( (blobSz = (*m_roa.m_dictionary)[m_deviceName + ".emgain.current"].getBlobStr(m_blob, sizeof(m_blob))) == sizeof(m_blob) ) errPrint("bad string"); //Don't trust this as a string.
+      if( ((*m_roa.m_dictionary)[m_deviceName + ".emgain.current"].getBlobStr(m_blob, sizeof(m_blob))) == sizeof(m_blob) ) errPrint("bad string"); //Don't trust this as a string.
       snprintf(tstr, sizeof(tstr), "EMG: %d", atoi(m_blob));
       m_roa.m_graphicsView->statusTextText(n, tstr);
       ++n;
@@ -263,14 +270,14 @@ int cameraStatus::updateOverlay()
    
    if( m_roa.m_dictionary->count(m_deviceName + ".shutter_status.status") > 0)
    {
-      if( (blobSz = (*m_roa.m_dictionary)[m_deviceName + ".shutter_status.status"].getBlobStr(m_blob, sizeof(m_blob))) == sizeof(m_blob) ) errPrint("bad string"); //Don't trust this as a string.
+      if( ((*m_roa.m_dictionary)[m_deviceName + ".shutter_status.status"].getBlobStr(m_blob, sizeof(m_blob))) == sizeof(m_blob) ) errPrint("bad string"); //Don't trust this as a string.
       sstr = std::string(m_blob);
       
       if(sstr == "READY")
       {
          if( m_roa.m_dictionary->count(m_deviceName + ".shutter.toggle") > 0)
          {
-            if( (blobSz = (*m_roa.m_dictionary)[m_deviceName + ".shutter.toggle"].getBlobStr(m_blob, sizeof(m_blob))) == sizeof(m_blob) ) errPrint("bad string"); //Don't trust this as a string.
+            if( ((*m_roa.m_dictionary)[m_deviceName + ".shutter.toggle"].getBlobStr(m_blob, sizeof(m_blob))) == sizeof(m_blob) ) errPrint("bad string"); //Don't trust this as a string.
             sstr = std::string(m_blob);
             if(sstr == "on") sstr = "SHUT";
             else sstr = "OPEN";
@@ -292,7 +299,7 @@ int cameraStatus::updateOverlay()
    {
       if( m_roa.m_dictionary->count(m_filterDeviceName + ".fsm.state") > 0)
       {
-         if( (blobSz = (*m_roa.m_dictionary)[m_filterDeviceName + ".fsm.state"].getBlobStr(m_blob, sizeof(m_blob))) == sizeof(m_blob) ) errPrint("bad string"); //Don't trust this as a string.
+         if( ((*m_roa.m_dictionary)[m_filterDeviceName + ".fsm.state"].getBlobStr(m_blob, sizeof(m_blob))) == sizeof(m_blob) ) errPrint("bad string"); //Don't trust this as a string.
          std::string fwstate = std::string(m_blob);
          
          if(fwstate == "READY" || fwstate == "OPERATING")
@@ -303,7 +310,7 @@ int cameraStatus::updateOverlay()
             std::string fkey;
             while(start != end)
             {
-               if( (blobSz = start->second.getBlobStr(m_blob, sizeof(m_blob))) == sizeof(m_blob) ) errPrint("bad string"); //Don't trust this as a string
+               if( (start->second.getBlobStr(m_blob, sizeof(m_blob))) == sizeof(m_blob) ) errPrint("bad string"); //Don't trust this as a string
 
                if(std::string(m_blob) == "on")
                {
@@ -333,6 +340,14 @@ int cameraStatus::updateOverlay()
       if(n > m_roa.m_graphicsView->statusTextNo()-1) return 0;   
    }
    
+   if( m_roa.m_dictionary->count(m_deviceName + "-sw.writing.toggle") > 0)
+   {
+      if( ((*m_roa.m_dictionary)[m_deviceName + "-sw.writing.toggle"].getBlobStr(m_blob, sizeof(m_blob))) == sizeof(m_blob) ) return -1; //Don't trust this as a string.
+      sstr = std::string(m_blob);
+      if(sstr == "on") emit savingState(true);
+      else emit savingState(false);
+   }
+
    return 0;
 }
 

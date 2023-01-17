@@ -64,7 +64,7 @@ iosT & stdShortFormat( iosT & ios, ///< [out] the iostream to output the log to
    {
       outApp.resize(17, ' ');
       outApp[16] = ':';
-      for(size_t n=15; n >= 0; --n)
+      for(int n=15; n >= 0; --n)
       {
          if( 15-n + 1 > appName.size()) break;
          outApp[n] = appName[appName.size()-1 - (15-n)];

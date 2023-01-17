@@ -464,7 +464,7 @@ int dmMode::recordDmModes( bool force )
          lastamps[p] = m_amps[p];
       }
    
-      telem<telem_dmmodes>(lastamps);
+      telem<telem_dmmodes>(telem_dmmodes::messageT(lastamps));
    }
 
    return 0;

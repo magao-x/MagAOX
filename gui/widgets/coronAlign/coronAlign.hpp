@@ -41,7 +41,7 @@ protected:
    double m_fwPupilStepSize {0.0001};
    double m_picoPupilStepSize {100};
    
-   int m_pupilScale {1};
+   int m_pupilScale {100};
 
    //Focal Plane
    
@@ -54,7 +54,7 @@ protected:
    double m_fwFocalStepSize {0.0001};
    double m_picoFocalStepSize {100};
    
-   int m_focalScale {1};
+   int m_focalScale {100};
    
    //Lyot Plane
    
@@ -67,7 +67,7 @@ protected:
    double m_fwLyotStepSize {0.0001};
    double m_picoLyotStepSize {100};
    
-   int m_lyotScale {1};
+   int m_lyotScale {100};
    
 public:
    coronAlign( QWidget * Parent = 0, 
@@ -364,47 +364,107 @@ void coronAlign::updateGUI()
    
    if(m_fwPupilState != "READY")
    {
-      ui.button_pupil_l->setEnabled(false);
-      ui.button_pupil_r->setEnabled(false);
-      ui.button_pupil_scale->setEnabled(false);
-      ui.labelPupil->setEnabled(false);
+      if(m_camera == FLOWFS)
+      {
+         ui.button_pupil_l->setEnabled(false);
+         ui.button_pupil_r->setEnabled(false);
+         ui.button_pupil_scale->setEnabled(false);
+         ui.labelPupil->setEnabled(false);
+      }
+      else
+      {
+         ui.button_pupil_u->setEnabled(false);
+         ui.button_pupil_d->setEnabled(false);
+         ui.button_pupil_scale->setEnabled(false);
+         ui.labelPupil->setEnabled(false);
+      }
    }
    else
    {
-      ui.button_pupil_l->setEnabled(true);
-      ui.button_pupil_r->setEnabled(true);
-      ui.button_pupil_scale->setEnabled(true);
-      ui.labelPupil->setEnabled(true);
+      if(m_camera == FLOWFS)
+      {
+         ui.button_pupil_l->setEnabled(true);
+         ui.button_pupil_r->setEnabled(true);
+         ui.button_pupil_scale->setEnabled(true);
+         ui.labelPupil->setEnabled(true);
+      }
+      else
+      {
+         ui.button_pupil_u->setEnabled(true);
+         ui.button_pupil_d->setEnabled(true);
+         ui.button_pupil_scale->setEnabled(true);
+         ui.labelPupil->setEnabled(true);
+      }
    }
    
    if(m_fwFocalState != "READY")
    {
-      ui.button_focal_l->setEnabled(false);
-      ui.button_focal_r->setEnabled(false);
-      ui.button_focal_scale->setEnabled(false);
-      ui.labelFocal->setEnabled(false);
+      if(m_camera == FLOWFS)
+      {
+         ui.button_focal_l->setEnabled(false);
+         ui.button_focal_r->setEnabled(false);
+         ui.button_focal_scale->setEnabled(false);
+         ui.labelFocal->setEnabled(false);
+      }
+      else
+      {
+         ui.button_focal_u->setEnabled(false);
+         ui.button_focal_d->setEnabled(false);
+         ui.button_focal_scale->setEnabled(false);
+         ui.labelFocal->setEnabled(false);
+      }
    }
    else
    {
-      ui.button_focal_l->setEnabled(true);
-      ui.button_focal_r->setEnabled(true);
-      ui.button_focal_scale->setEnabled(true);
-      ui.labelFocal->setEnabled(true);
+      if(m_camera == FLOWFS)
+      {
+         ui.button_focal_l->setEnabled(true);
+         ui.button_focal_r->setEnabled(true);
+         ui.button_focal_scale->setEnabled(true);
+         ui.labelFocal->setEnabled(true);
+      }
+      else
+      {
+         ui.button_focal_u->setEnabled(true);
+         ui.button_focal_d->setEnabled(true);
+         ui.button_focal_scale->setEnabled(true);
+         ui.labelFocal->setEnabled(true);
+      }
    }
    
    if(m_fwLyotState != "READY")
    {
-      ui.button_lyot_u->setEnabled(false);
-      ui.button_lyot_d->setEnabled(false);
-      ui.button_lyot_scale->setEnabled(false);
-      ui.labelLyot->setEnabled(false);
+      if(m_camera == FLOWFS)
+      {
+         ui.button_lyot_u->setEnabled(false);
+         ui.button_lyot_d->setEnabled(false);
+         ui.button_lyot_scale->setEnabled(false);
+         ui.labelLyot->setEnabled(false);
+      }
+      else
+      {
+         ui.button_lyot_l->setEnabled(false);
+         ui.button_lyot_r->setEnabled(false);
+         ui.button_lyot_scale->setEnabled(false);
+         ui.labelLyot->setEnabled(false);
+      }
    }
    else
    {
-      ui.button_lyot_u->setEnabled(true);
-      ui.button_lyot_d->setEnabled(true);
-      ui.button_lyot_scale->setEnabled(true);
-      ui.labelLyot->setEnabled(true);
+      if(m_camera == FLOWFS)
+      {
+         ui.button_lyot_u->setEnabled(true);
+         ui.button_lyot_d->setEnabled(true);
+         ui.button_lyot_scale->setEnabled(true);
+         ui.labelLyot->setEnabled(true);
+      }
+      else
+      {
+         ui.button_lyot_l->setEnabled(true);
+         ui.button_lyot_r->setEnabled(true);
+         ui.button_lyot_scale->setEnabled(true);
+         ui.labelLyot->setEnabled(true);
+      }
    }
    
    if(m_picoState != "READY")
@@ -594,15 +654,19 @@ void coronAlign::on_button_pupil_scale_pressed()
 {
    if( m_pupilScale == 100)
    {
-      m_pupilScale = 1;
+      m_pupilScale = 10;
    }
    else if(m_pupilScale == 10)
    {
-      m_pupilScale = 100;
+      m_pupilScale = 5;
+   }
+   else if(m_pupilScale == 5)
+   {
+      m_pupilScale = 1;
    }
    else if(m_pupilScale == 1)
    {
-      m_pupilScale = 10;
+      m_pupilScale = 100;
    }
    else
    {
@@ -712,7 +776,7 @@ void coronAlign::on_button_focal_r_pressed()
       ip.setDevice("picomotors");
       ip.setName("picofpm_pos");
       ip.add(pcf::IndiElement("target"));
-      ip["target"] = m_picoFocalPos - m_focalScale*m_picoFocalStepSize;
+      ip["target"] = m_picoFocalPos + m_focalScale*m_picoFocalStepSize;
    }
    sendNewProperty(ip);
 }
@@ -721,15 +785,19 @@ void coronAlign::on_button_focal_scale_pressed()
 {
    if( m_focalScale == 100)
    {
-      m_focalScale = 1;
+      m_focalScale = 10;
    }
    else if(m_focalScale == 10)
    {
-      m_focalScale = 100;
+      m_focalScale = 5;
+   }
+   else if(m_focalScale == 5)
+   {
+      m_focalScale = 1;
    }
    else if(m_focalScale == 1)
    {
-      m_focalScale = 10;
+      m_focalScale = 100;
    }
    else
    {
@@ -862,15 +930,19 @@ void coronAlign::on_button_lyot_scale_pressed()
 {
    if( m_lyotScale == 100)
    {
-      m_lyotScale = 1;
+      m_lyotScale = 10;
    }
    else if(m_lyotScale == 10)
    {
-      m_lyotScale = 100;
+      m_lyotScale = 5;
+   }
+   else if(m_lyotScale == 5)
+   {
+      m_lyotScale = 1;
    }
    else if(m_lyotScale == 1)
    {
-      m_lyotScale = 10;
+      m_lyotScale = 100;
    }
    else
    {

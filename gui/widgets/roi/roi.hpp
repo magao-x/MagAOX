@@ -53,10 +53,10 @@ protected:
    bool m_onDisconnected {false};
 
 public:
-   roi( std::string & camName,
-        QWidget * Parent = 0, 
-        Qt::WindowFlags f = Qt::WindowFlags()
-      );
+   explicit roi( std::string & camName,
+                 QWidget * Parent = 0, 
+                 Qt::WindowFlags f = Qt::WindowFlags()
+               );
    
    ~roi();
    

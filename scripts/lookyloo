@@ -38,7 +38,7 @@ import shutil
 log = logging.getLogger(__name__)
 
 LOOKYLOO_DATA_ROOTS = os.environ.get('LOOKYLOO_DATA_PATHS', '/opt/MagAOX:/srv/icc/data:/srv/rtc/data')
-QUICKLOOK_PATH = pathlib.Path('/data/users/guestobs/quicklook')
+QUICKLOOK_PATH = pathlib.Path('/data/obs')
 HISTORY_FILENAME = "lookyloo_success.txt"
 FAILED_HISTORY_FILENAME = "lookyloo_failed.txt"
 DEFAULT_SEPARATE = object()
@@ -46,12 +46,8 @@ DEFAULT_CUBE = object()
 ALL_CAMERAS = {
     'camsci1': DEFAULT_SEPARATE,
     'camsci2': DEFAULT_SEPARATE,
-    'camlowfs': DEFAULT_SEPARATE,
-    'camwfs': DEFAULT_SEPARATE,
-    'camtip': DEFAULT_SEPARATE,
-    'camacq': DEFAULT_SEPARATE,
 }
-SLEEP_FOR_TELEMS = 30
+SLEEP_FOR_TELEMS = 60 * 5
 CHECK_INTERVAL_SEC = 30
 LINE_BUFFERED = 1
 
@@ -184,10 +180,6 @@ def load_file_history(history_path: pathlib.Path) -> typing.Set[TimestampedFile]
         log.debug(f"Could not find lookyloo history at {history_path}")
     return history
 
-def append_path_to_history(history_path: pathlib.Path, file_path: pathlib.Path):
-    with history_path.open('a') as fh:
-        fh.write(f"{file_path.as_posix()}\n")
-
 def append_files_to_history(history_path, archive_paths, dry_run):
     if not len(archive_paths):
         return
@@ -234,7 +226,7 @@ def get_matching_paths(
     return filtered_files
 
 
-def get_observation_telems(data_roots: typing.List[pathlib.Path], newer_than_dt : datetime.datetime):
+def get_observation_telems(data_roots: typing.List[pathlib.Path], start_dt : datetime.datetime, end_dt : datetime.datetime):
     events = []
     observers_data_root = None
     for data_root in data_roots:
@@ -244,22 +236,21 @@ def get_observation_telems(data_roots: typing.List[pathlib.Path], newer_than_dt 
             break
     if observers_data_root is None:
         raise RuntimeError(f"No {OBSERVERS_DEVICE} device telemetry in any of {[(x / 'telem').as_posix() for x in data_roots]}")
-    for telem_path in get_matching_paths(observers_data_root, OBSERVERS_DEVICE, 'bintel', newer_than_dt):
+    for telem_path in get_matching_paths(observers_data_root, OBSERVERS_DEVICE, 'bintel', start_dt, end_dt):
         events.extend(parse_logdump_for_observers(observers_data_root, telem_path.path))
     return events
 
-def transform_telems_to_spans(events : typing.List[ObserverTelem], ending_after_dt : datetime.datetime):
+def transform_telems_to_spans(events : typing.List[ObserverTelem], start_dt : datetime.datetime, end_dt : typing.Optional[datetime.datetime]=None):
     spans = []
     current_observer_email : str = None
     current_observation : str = None
     current_observation_start : datetime.datetime = None
 
     def _add_span(email, title, begin, end):
-        if end is not None and end < ending_after_dt:
-            # log.debug(f"Discarding span {email} '{title}' {begin.isoformat()}-{end.isoformat()} because end after {ending_after_dt.isoformat()}")
+        if end is not None and end_dt is not None and end > end_dt:
             return
-        end_str = end.isoformat() if end is not None else 'ongoing'
-        # log.debug(f"Keeping span {email} '{title}' {begin.isoformat()}-{end_str}")
+        if begin < start_dt:
+            return
         spans.append(ObservationSpan(
             email,
             title,
@@ -294,7 +285,7 @@ def transform_telems_to_spans(events : typing.List[ObserverTelem], ending_after_
 
     # new starting point for next iteration, ignore anything that we already processed
     if len(spans):
-        ending_after_dt = spans[-1].end
+        start_dt = spans[-1].end
 
     if current_observation_start is not None:
         _add_span(
@@ -303,21 +294,22 @@ def transform_telems_to_spans(events : typing.List[ObserverTelem], ending_after_
             current_observation_start,
             None
         )
-    return spans, ending_after_dt
+    return spans, start_dt
 
-def get_new_observation_spans(data_roots: typing.List[pathlib.Path], existing_observation_spans : typing.Set[ObservationSpan], ending_after_dt : datetime.datetime):
-    events = get_observation_telems(data_roots, ending_after_dt)
-    spans, ending_after_dt = transform_telems_to_spans(events, ending_after_dt)
+def get_new_observation_spans(data_roots: typing.List[pathlib.Path], existing_observation_spans : typing.Set[ObservationSpan], start_dt : datetime.datetime, end_dt : typing.Optional[datetime.datetime]=None):
+    events = get_observation_telems(data_roots, start_dt, end_dt)
+    spans, start_dt = transform_telems_to_spans(events, start_dt, end_dt)
     if len(spans):
         new_observation_spans = set(spans) - existing_observation_spans
         log.debug(f"New observation_spans: {new_observation_spans}")
-        return new_observation_spans, ending_after_dt
+        return new_observation_spans, start_dt
     else:
-        return set(), ending_after_dt
+        return set(), start_dt
 
 def prune_outputs(scratch_dir, span):
     good_outputs = []
-    for fn in scratch_dir.glob("*.fits"):
+    sorted_matches = list(sorted(scratch_dir.glob("*.fits")))
+    for fn in sorted_matches:
         ts = xfilename_to_utc_timestamp(fn)
         if ts < span.begin or (span.end is not None and ts > span.end):
             os.remove(fn)
@@ -368,11 +360,13 @@ def catalog_name_from_outputs(output_files):
                 catobj = None
         if catobj is not None:
             break
-    return catobj if catobj is not None else '_no_target_'
+    if catobj is None or len(catobj.replace('*', '')) == 0:
+        return '_no_target_'
+    return catobj
 
 def do_quicklook_for_camera(
     span : ObservationSpan, data_roots, device, omit_telemetry, output_dir, dry_run, cube_mode,
-    construct_symlink_tree, all_visited_files=None, xrif2fits_cmd='xrif2fits'
+    construct_symlink_tree, all_visited_files=None, xrif2fits_cmd='xrif2fits', ignore_history=False
 ):
     if all_visited_files is None:
         all_visited_files = set()
@@ -400,10 +394,10 @@ def do_quicklook_for_camera(
                 image_path, data_roots, new_matching_files, scratch_dir, omit_telemetry, dry_run, cube_mode,
                 xrif2fits_cmd
             )
-            if len(successful_paths):
+            if len(successful_paths) and not ignore_history:
                 append_files_to_history(history_path, successful_paths, dry_run)
                 log.debug(f"Wrote {len(successful_paths)} to {history_path}")
-            if len(failed_paths):
+            if len(failed_paths) and not ignore_history:
                 append_files_to_history(failed_history_path, failed_paths, dry_run)
                 log.debug(f"{len(failed_paths)} paths failed to convert, saving to {failed_history_path}")
             good_outputs = prune_outputs(scratch_dir, span)
@@ -414,16 +408,20 @@ def do_quicklook_for_camera(
                 elif not dry_run:
                     catalog_name = catalog_name_from_outputs(good_outputs)
                 else:
-                    catalog_name = "_dry_run_"
+                    catalog_name = "_no_catobj_"
                 time_format = '%Y%m%dT%H%M%S'
                 if len(span.title):
                     title = f"{span.title}_{span.begin.strftime(time_format)}"
                 else:
                     title = f"{span.begin.strftime(time_format)}"
+                if not span.email:
+                    email = "_no_email_"
+                else:
+                    email = span.email
                 # a@b.com / 2022B / 20_21 / sirius / (cal_20220202T235959 / camsci1)
-                observer_semester_prefix = output_dir / span.email / semester / night / catalog_name
+                observer_semester_prefix = output_dir / email / semester / night / catalog_name
                 # 2022B / 20_21 / sirius / a@b.com / (cal_20220202T235959 / camsci1)
-                semester_observer_prefix = output_dir / semester / night / catalog_name / span.email
+                semester_observer_prefix = output_dir / semester / night / catalog_name / email
 
                 destination = semester_observer_prefix / title / device
                 if not dry_run:
@@ -431,6 +429,7 @@ def do_quicklook_for_camera(
                     if construct_symlink_tree:
                         observer_semester_prefix.parent.mkdir(parents=True, exist_ok=True)
                         if not observer_semester_prefix.is_symlink():
+                            log.debug(f"Making link at {observer_semester_prefix} pointing to {semester_observer_prefix}")
                             observer_semester_prefix.symlink_to(semester_observer_prefix)
                     for fn in good_outputs:
                         shutil.copy(fn, destination)
@@ -495,9 +494,10 @@ def convert_xrif(
             failed_paths.append(ts_path.path)
             if not omit_telemetry:
                 # try again without telemetry
-                success, command_line = launch_xrif2fits(no_telem_args, dry_run=dry_run)
+                success, revised_command_line = launch_xrif2fits(no_telem_args, dry_run=dry_run)
                 if not success:
-                    raise RuntimeError(f"Retried {ts_path.path} without telemetry and xrif2fits still errored! Bailing out.\n\tcommand: {command_line}")
+                    raise RuntimeError(f"Retried {ts_path.path} without telemetry and xrif2fits still errored! Bailing out.\n\tcommand: {revised_command_line}")
+                log.warn(f"Converting {ts_path} succeeded after omitting telemetry. Command line was: {revised_command_line} (originally: {command_line})")
         else:
             successful_paths.append(ts_path.path)
 
@@ -513,17 +513,19 @@ def daemon_mode(
     data_roots: typing.List[pathlib.Path], omit_telemetry : bool,
     construct_symlink_tree: bool,
     xrif2fits_cmd: str,
-    ending_after_dt: datetime.datetime, all_visited_files: typing.List[TimestampedFile],
+    start_dt: datetime.datetime,
+    all_visited_files: typing.List[TimestampedFile],
+    ignore_history: bool,
 ):
     existing_observation_spans = set()
-    log.info(f"Started at {datetime.datetime.now().isoformat()}, looking for unprocessed observations since {ending_after_dt}...")
+    log.info(f"Started at {datetime.datetime.now().isoformat()}, looking for unprocessed observations since {start_dt}...")
     dry_run = False
     while True:
         start_time = time.time()
         try:
-            result = get_new_observation_spans(data_roots, existing_observation_spans, ending_after_dt)
+            result = get_new_observation_spans(data_roots, existing_observation_spans, start_dt)
             new_observation_spans : typing.List[ObservationSpan] = result[0]
-            ending_after_dt : datetime.datetime = result[1]
+            start_dt : datetime.datetime = result[1]
             spans_with_data = set()
             for span in new_observation_spans:
                 log.info(f"Observation interval to process: {span}")
@@ -541,6 +543,7 @@ def daemon_mode(
                         construct_symlink_tree,
                         all_visited_files,
                         xrif2fits_cmd=xrif2fits_cmd,
+                        ignore_history=ignore_history,
                     )
                     all_visited_files = all_visited_files.union(visited_files)
                     if len(visited_files) and (span.end is not None and (utcnow() - span.end).total_seconds() > 5 * 60):
@@ -548,7 +551,8 @@ def daemon_mode(
                         log.info(f"Exported {len(visited_files)} archive{'s' if len(visited_files) != 1 else ''} for {device}")
 
                 log.info(f"Completed span {span}")
-                spans_with_data.add(span)
+                if span.end is not None:
+                    spans_with_data.add(span)
             existing_observation_spans = existing_observation_spans.union(spans_with_data)
             duration = time.time() - start_time
             log.debug(f"Took {duration} sec")
@@ -574,6 +578,12 @@ def decide_to_process(args, span):
 
     return title_match and observer_match
 
+def parse_iso_datetime(input_str):
+    dt = datetime.datetime.fromisoformat(input_str)
+    if dt.tzinfo is None:
+        dt = dt.replace(tzinfo=datetime.timezone.utc)
+    return dt
+
 def main():
     now = datetime.datetime.now()
     this_year = now.year
@@ -589,7 +599,11 @@ def main():
     parser.add_argument('-t', '--title', help="(ignored in daemon mode) Title of observation to collect", action='store')
     parser.add_argument('-e', '--observer-email', help="(ignored in daemon mode) Skip observations that are not by this observer (matches substrings, case-independent)", action='store')
     parser.add_argument('-p', '--partial-match-ok', help="(ignored in daemon mode) A partial match (title provided is found anywhere in recorded title) is processed", action='store_true')
+
     parser.add_argument('-s', '--semester', help=f"Semester to search in, default: {this_semester}", default=this_semester)
+    parser.add_argument('--utc-start', help=f"ISO UTC datetime stamp of earliest observation start time to process (supersedes --semester)", type=parse_iso_datetime)
+    parser.add_argument('--utc-end', help=f"ISO UTC datetime stamp of latest observation end time to process (ignored in daemon mode)", type=parse_iso_datetime)
+
     parser.add_argument('-c', '--camera', help=f"Camera name (i.e. rawimages subfolder name), repeat to specify multiple names. (default: {list(ALL_CAMERAS.keys())})", action='append')
     parser.add_argument('-X', '--data-root', help=f"Search directory for telem and rawimages subdirectories, repeat to specify multiple roots. (default: {LOOKYLOO_DATA_ROOTS.split(':')})", action='append')
     parser.add_argument('-O', '--omit-telemetry', help="Whether to omit references to telemetry files", action='store_true')
@@ -628,16 +642,32 @@ def main():
     else:
         data_roots = [pathlib.Path(x) for x in LOOKYLOO_DATA_ROOTS.split(':')]
     output_dir = pathlib.Path(args.output_dir)
-    all_processed_files = load_file_history(output_dir / HISTORY_FILENAME)
-    try:
-        if len(args.semester) != 5 or args.semester[-1].upper() not in ['A', 'B']:
-            raise ValueError()
-        year = int(args.semester[:-1])
-        month = 1 if args.semester[-1].upper() == 'A' else 6
-    except ValueError:
-        raise RuntimeError(f"Got {args.semester=} but need a 4 digit year + A or B (e.g. 2022A)")
-    ending_after_dt = datetime.datetime(year, month, 1)
-    ending_after_dt = ending_after_dt.replace(tzinfo=timezone.utc)
+    all_processed_files = load_file_history(output_dir / HISTORY_FILENAME) if not args.ignore_history else set()
+    if args.utc_start is not None:
+        start_dt = args.utc_start
+        year = start_dt.year
+        month = 1 if start_dt.month < 6 else 6
+        semester_start_dt = datetime.datetime(year, month, 1)
+        semester_start_dt = semester_start_dt.replace(tzinfo=timezone.utc)
+    else:
+        letter = args.semester[-1].upper()
+        try:
+
+            if len(args.semester) != 5 or args.semester[-1].upper() not in ['A', 'B']:
+                raise ValueError()
+            year = int(args.semester[:-1])
+            month = 1 if letter == 'A' else 6
+            day = 15 if month == 6 else 1
+        except ValueError:
+            raise RuntimeError(f"Got {args.semester=} but need a 4 digit year + A or B (e.g. 2022A)")
+        semester_start_dt = datetime.datetime(year, month, 1)
+        semester_start_dt = semester_start_dt.replace(tzinfo=timezone.utc)
+        semester_end_dt = datetime.datetime(
+            year=year + 1 if letter == 'B' else year,
+            month=1 if letter == 'B' else 6,
+            day = 15 if letter == 'A' else 1,
+        ).replace(tzinfo=timezone.utc)
+        start_dt = semester_start_dt
     if args.daemon:
         daemon_mode(
             output_dir,
@@ -646,11 +676,16 @@ def main():
             args.omit_telemetry,
             not args.omit_symlink_tree,
             args.xrif2fits_cmd,
-            ending_after_dt,
-            all_processed_files
+            start_dt,
+            all_processed_files,
+            ignore_history=args.ignore_history,
         )
     else:
-        new_observation_spans, _ = get_new_observation_spans(data_roots, set(), ending_after_dt)
+        if args.utc_end is not None:
+            end_dt = args.utc_end
+        else:
+            end_dt = semester_end_dt
+        new_observation_spans, _ = get_new_observation_spans(data_roots, set(), start_dt, end_dt)
         for span in new_observation_spans:
             if decide_to_process(args, span):
                 log.info(f"Observation interval to process: {span}")
@@ -672,6 +707,7 @@ def main():
                         not args.omit_symlink_tree,
                         all_visited_files=all_processed_files,
                         xrif2fits_cmd=args.xrif2fits_cmd,
+                        ignore_history=args.ignore_history,
                     )
 
 if __name__ == "__main__":

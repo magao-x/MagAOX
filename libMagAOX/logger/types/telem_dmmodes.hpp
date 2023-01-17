@@ -34,7 +34,7 @@ struct telem_dmmodes : public flatbuffer_log
    struct messageT : public fbMessage
    {
       ///Construct from components
-      messageT( std::vector<float> & amps )
+      explicit messageT( std::vector<float> & amps )
       {
          auto _ampsVec = builder.CreateVector(amps);
          

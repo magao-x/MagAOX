@@ -66,10 +66,10 @@ protected:
    QTimer * m_updateTimer {nullptr}; ///< Timer for periodic updates
 
 public:
-   camera( std::string & camName,
-           QWidget * Parent = 0, 
-           Qt::WindowFlags f = Qt::WindowFlags()
-         );
+   explicit camera( std::string & camName,
+                    QWidget * Parent = 0, 
+                    Qt::WindowFlags f = Qt::WindowFlags()
+                  );
    
    ~camera();
    

@@ -69,3 +69,7 @@ telem_dmspeck            20890    telem_dmspeck
 telem_fgtimings          20905    telem_fgtimings
 
 telem_dmmodes            20910    telem_dmmodes
+
+telem_loopgain           20915    telem_loopgain
+telem_blockgains         20920    telem_blockgains 
+

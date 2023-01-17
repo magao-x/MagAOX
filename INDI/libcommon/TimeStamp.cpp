@@ -109,18 +109,18 @@ const timeval &TimeStamp::getTimeVal() const
 ////////////////////////////////////////////////////////////////////////////////
 /// Returns the microsecond part of the time val struct.
 
-int TimeStamp::getTimeValMicros() const
+/*int TimeStamp::getTimeValMicros() const
 {
   return m_tvCurr.tv_usec;
-}
+}*/
 
 ////////////////////////////////////////////////////////////////////////////////
 /// Returns the seconds part of the time val struct.
 
-int TimeStamp::getTimeValSecs() const
+/*int TimeStamp::getTimeValSecs() const
 {
   return m_tvCurr.tv_sec;
-}
+}*/
 
 ////////////////////////////////////////////////////////////////////////////////
 /// Assignment operator. Assigns this object from another TimeStamp object.

@@ -142,12 +142,12 @@ void * xoverThread( void * vdf /**< [in] pointer to a driverFIFO struct */)
             //Consume any waiting input on stdin
             if(df->stdfd == STDIN_FILENO)
             {
-               int rd = read(STDIN_FILENO, rdbuff, XINDID_BUFFSIZE);
+               int rd = read(STDIN_FILENO, rdbuff, sizeof(rdbuff));
 
                while(rd > 0 && !timeToDie)
                {
                   //std::cerr << " (" << XINDID_COMPILEDNAME << "): consumed " << rd << " bytes.\n";
-                  rd = read(STDIN_FILENO, rdbuff, XINDID_BUFFSIZE);
+                  rd = read(STDIN_FILENO, rdbuff, sizeof(rdbuff));
                }
 
                if(timeToDie) break; //Woke up from a blocking read due to a signal
@@ -236,7 +236,7 @@ void * xoverThread( void * vdf /**< [in] pointer to a driverFIFO struct */)
 
          while(rd > 0 && !timeToDie)
          {
-            rd = read(fdRead, rdbuff, XINDID_BUFFSIZE);
+            rd = read(fdRead, rdbuff, sizeof(rdbuff));
 
             if(timeToDie) break; //Woke up from a blocking read due to a signal
 
@@ -306,7 +306,7 @@ void * ctrlThread( void * vdf /**< [in] pointer to a driverFIFO struct */)
    char rdbuff[XINDID_BUFFSIZE];
    
    //Now we try to read from it.  Anything at all will cause us to set timeToDie and thus this program will exit.
-   int rd = read(df->fd, rdbuff, XINDID_BUFFSIZE);
+   int rd = read(df->fd, rdbuff, sizeof(rdbuff));
    
    std::cerr << " (" << XINDID_COMPILEDNAME << "): control signaled -- time to die" << std::endl;
    

@@ -25,7 +25,7 @@ multipass mount ~/devel/MagAOX/ primary:/opt/MagAOX/source/MagAOX
 multipass stop
 multipass set local.primary.disk=20GiB
 multipass set local.primary.cpus=4
-multipass shell
+multipass start
 multipass shell
 ubuntu@primary:~$ cd /opt/MagAOX/source/MagAOX/setup
 ubuntu@primary:/opt/MagAOX/source/MagAOX/setup$ bash -lx provision.sh

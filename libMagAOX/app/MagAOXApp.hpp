@@ -2004,7 +2004,7 @@ int MagAOXApp<_useINDI>::threadStart( std::thread & thrd,
          char pids[16];
          snprintf(pids, sizeof(pids), "%d", tpid);
 
-         int w = write(wfd, pids,strlen(pids));
+         int w = write(wfd, pids,strnlen(pids, sizeof(pids)));
          if(w != (int) strlen(pids))
          {
             return log<software_error,-1>({__FILE__, __LINE__, errno, "error on write"});

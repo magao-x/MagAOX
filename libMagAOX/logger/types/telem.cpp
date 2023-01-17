@@ -14,11 +14,8 @@ namespace logger
 {
 
 timespec ocam_temps::lastRecord = {0,0};
-
+timespec telem_blockgains::lastRecord = {0,0};
 timespec telem_chrony_stats::lastRecord = {0,0};
-
-timespec telem_telenv::lastRecord = {0,0};
-
 timespec telem_chrony_status::lastRecord = {0,0};
 timespec telem_cooler::lastRecord = {0,0};
 timespec telem_coreloads::lastRecord = {0,0};
@@ -28,6 +25,7 @@ timespec telem_dmspeck::lastRecord = {0,0};
 timespec telem_drivetemps::lastRecord = {0,0};
 timespec telem_fgtimings::lastRecord = {0,0};
 timespec telem_fxngen::lastRecord = {0,0};
+timespec telem_loopgain::lastRecord = {0,0};
 timespec telem_observer::lastRecord = {0,0};
 timespec telem_pico::lastRecord = {0,0};
 timespec telem_rhusb::lastRecord = {0,0};
@@ -37,6 +35,7 @@ timespec telem_stage::lastRecord = {0,0};
 timespec telem_stdcam::lastRecord = {0,0};
 timespec telem_telcat::lastRecord = {0,0};
 timespec telem_teldata::lastRecord = {0,0};
+timespec telem_telenv::lastRecord = {0,0};
 timespec telem_telpos::lastRecord = {0,0};
 timespec telem_telsee::lastRecord = {0,0};
 timespec telem_telvane::lastRecord = {0,0};

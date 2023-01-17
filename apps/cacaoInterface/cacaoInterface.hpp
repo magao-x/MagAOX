@@ -8,6 +8,7 @@
 #define cacaoInterface_hpp
 
 
+
 #include "../../libMagAOX/libMagAOX.hpp" //Note this is included on command line to trigger pch
 #include "../../magaox_git_version.h"
 
@@ -33,11 +34,15 @@ namespace app
 /** 
   * \ingroup cacaoInterface
   */
-class cacaoInterface : public MagAOXApp<true>
+class cacaoInterface : public MagAOXApp<true>, public dev::telemeter<cacaoInterface>
 {
 
    //Give the test harness access.
    friend class cacaoInterface_test;
+
+   typedef dev::telemeter<cacaoInterface> telemeterT;
+
+   friend class dev::telemeter<cacaoInterface>;
 
 protected:
 
@@ -168,16 +173,6 @@ public:
      */ 
    int setGain();
    
-   /// Set the block gain the specified value 
-   /**
-     * 
-     * \returns 0 on success
-     * \returns -1 on an error
-     */
-   int setBlockGain( int n,  ///< [in] the block number
-                     float g ///< [in] the desired gain
-                   );
-
    /// Set loop multiplication coefficient to the value of m_multCoeff_target;
    /** 
      * 
@@ -186,16 +181,6 @@ public:
      */ 
    int setMultCoeff();
    
-   /// Set the block mult coeff to the specified value 
-   /**
-     * 
-     * \returns 0 on success
-     * \returns -1 on an error
-     */
-   int setBlockMC( int n,  ///< [in] the block number
-                   float mc ///< [in] the desired mult. coeff
-                 );
-
    /// Set loop max lim to the value of m_maxLim_target;
    /** 
      * 
@@ -204,16 +189,6 @@ public:
      */ 
    int setMaxLim();
    
-   /// Set the block limit to the specified value 
-   /**
-     * 
-     * \returns 0 on success
-     * \returns -1 on an error
-     */
-   int setBlockLimit( int n,  ///< [in] the block number
-                      float l ///< [in] the desired limit
-                    );
-
    /// Turn the loop on
    /**
      * \returns 0 on success
@@ -272,68 +247,26 @@ public:
    pcf::IndiProperty m_indiP_loopGain;
    pcf::IndiProperty m_indiP_multCoeff;
    pcf::IndiProperty m_indiP_maxLim;
-      
-   std::vector<pcf::IndiProperty> m_indiP_blockGains;
-   std::vector<pcf::IndiProperty> m_indiP_blockMCs;
-   std::vector<pcf::IndiProperty> m_indiP_blockLimits;
-   
+         
    INDI_NEWCALLBACK_DECL(cacaoInterface, m_indiP_loopState);
    INDI_NEWCALLBACK_DECL(cacaoInterface, m_indiP_loopZero);
    INDI_NEWCALLBACK_DECL(cacaoInterface, m_indiP_loopGain);
    INDI_NEWCALLBACK_DECL(cacaoInterface, m_indiP_multCoeff);
    INDI_NEWCALLBACK_DECL(cacaoInterface, m_indiP_maxLim);
 
-   /// The static callback function to be registered for block gains
-   /** Dispatches to the relevant handler
+   /** \name Telemeter Interface
      * 
-     * \returns 0 on success.
-     * \returns -1 on error.
-     */
-   static int st_newCallBack_blockGains( void * app, ///< [in] a pointer to this, will be static_cast-ed to derivedT.
-                                         const pcf::IndiProperty &ipRecv ///< [in] the INDI property sent with the the new property request.
-                                       );
+     * @{
+     */ 
+   int checkRecordTimes();
+   
+   int recordTelem( const telem_loopgain * );
 
-   /// Callback to process a NEW block gain request
-   /**
-     * \returns 0 on success.
-     * \returns -1 on error.
-     */
-   int newCallBack_blockGains( const pcf::IndiProperty &ipRecv /**< [in] the INDI property sent with the the new property request.*/);
+   int recordLoopGain( bool force = false );
+   
+   ///@}
 
-   /// The static callback function to be registered for block mult. coeff.s
-   /** Dispatches to the relevant handler
-     * 
-     * \returns 0 on success.
-     * \returns -1 on error.
-     */
-   static int st_newCallBack_blockMCs( void * app, ///< [in] a pointer to this, will be static_cast-ed to derivedT.
-                                       const pcf::IndiProperty &ipRecv ///< [in] the INDI property sent with the the new property request.
-                                     );
-
-   /// Callback to process a NEW block mult. coeff.s
-   /**
-     * \returns 0 on success.
-     * \returns -1 on error.
-     */
-   int newCallBack_blockMCs( const pcf::IndiProperty &ipRecv /**< [in] the INDI property sent with the the new property request.*/);
-
-   /// The static callback function to be registered for block limits
-   /** Dispatches to the relevant handler
-     * 
-     * \returns 0 on success.
-     * \returns -1 on error.
-     */
-   static int st_newCallBack_blockLimits( void * app, ///< [in] a pointer to this, will be static_cast-ed to derivedT.
-                                        const pcf::IndiProperty &ipRecv ///< [in] the INDI property sent with the the new property request.
-                                      );
-
-   /// Callback to process a NEW block limits
-   /**
-     * \returns 0 on success.
-     * \returns -1 on error.
-     */
-   int newCallBack_blockLimits( const pcf::IndiProperty &ipRecv /**< [in] the INDI property sent with the the new property request.*/);
-
+   
 };
 
 cacaoInterface::cacaoInterface() : MagAOXApp(MAGAOX_CURRENT_SHA1, MAGAOX_REPO_MODIFIED)
@@ -345,12 +278,20 @@ cacaoInterface::cacaoInterface() : MagAOXApp(MAGAOX_CURRENT_SHA1, MAGAOX_REPO_MO
 void cacaoInterface::setupConfig()
 {
    config.add("loop.number", "", "loop.number", argType::Required, "loop", "number", false, "string", "the loop number");
+
+   telemeterT::setupConfig(config);
 }
 
 int cacaoInterface::loadConfigImpl( mx::app::appConfigurator & _config )
 {
    _config(m_loopNumber, "loop.number");
    
+   if(telemeterT::loadConfig(_config) < 0)
+   {
+      log<text_log>("Error during telemeter config", logPrio::LOG_CRITICAL);
+      m_shutdown = true;
+   }
+
    return 0;
 }
 
@@ -395,18 +336,17 @@ int cacaoInterface::appStartup()
    createStandardIndiNumber<float>( m_indiP_maxLim, "loop_max_limit", 0.0, 10.0, 0.001, "%0.3f", "Max. Limit", "Loop Controls");
    registerIndiPropertyNew( m_indiP_maxLim, INDI_NEWCALLBACK(m_indiP_maxLim) );  
    
-
-   /*if(getModeBlocks() < 0)
-   {
-      return log<text_log, -1>("Could not get mode blocks", logPrio::LOG_CRITICAL);
-   }*/
-
    if(threadStart( m_fmThread, m_fmThreadInit, m_fmThreadID, m_fmThreadProp, m_fmThreadPrio, "", "loopmon", this, fmThreadStart) < 0)
    {
       log<software_error>({__FILE__, __LINE__});
       return -1;
    }
    
+   if(telemeterT::appStartup() < 0)
+   {
+      return log<software_error,-1>({__FILE__,__LINE__});
+   }
+
    return 0;
 }
 
@@ -428,15 +368,7 @@ int cacaoInterface::appLogic()
       return 0;
    }
 
-   //These could change if a new calibration is loaded
-   /*if(getModeBlocks() < 0 )
-   {
-      state(stateCodes::ERROR, true);
-      if(!stateLogged()) log<text_log>("Could not get mode blocks", logPrio::LOG_ERROR);
-      return 0;
-   }
-
-   if(checkLoopProcesses() < 0)
+   /*if(checkLoopProcesses() < 0)
    {
       state(stateCodes::ERROR, true);
       if(!stateLogged()) log<text_log>("Could not get loop name and/or number", logPrio::LOG_ERROR);
@@ -446,6 +378,12 @@ int cacaoInterface::appLogic()
 
    if(m_loopProcesses == 0 || m_loopState == 0) state(stateCodes::READY);
    else state(stateCodes::OPERATING);
+
+   if(telemeterT::appLogic() < 0)
+   {
+      log<software_error>({__FILE__, __LINE__});
+      return 0;
+   }
 
    std::unique_lock<std::mutex> lock(m_indiMutex);
 
@@ -480,21 +418,6 @@ int cacaoInterface::appLogic()
    updateIfChanged(m_indiP_multCoeff, "current", m_multCoeff);
    updateIfChanged(m_indiP_maxLim, "current", m_maxLim);
 
-   for(size_t n=0; n < m_indiP_blockGains.size(); ++n)
-   {
-      updateIfChanged(m_indiP_blockGains[n], "current", m_modeBlockGains[n]);
-   }
-
-   for(size_t n=0; n < m_indiP_blockMCs.size(); ++n)
-   {
-      updateIfChanged(m_indiP_blockMCs[n], "current", m_modeBlockMCs[n]);
-   }
-
-   for(size_t n=0; n < m_indiP_blockLimits.size(); ++n)
-   {
-      updateIfChanged(m_indiP_blockLimits[n], "current", m_modeBlockLims[n]);
-   }
-
    return 0;
 }
 
@@ -512,6 +435,8 @@ int cacaoInterface::appShutdown()
       }
    }
    
+   telemeterT::appShutdown();
+
    return 0;
 }
 
@@ -590,17 +515,17 @@ std::string cacaoInterface::getFPSValStr( const std::string & fps,
 
       int r = read(rfd, inbuff, sizeof(inbuff));
 
-      close(rfd);
-
       if(r < 0)
       {
          log<software_error>({__FILE__, __LINE__, errno, "error on read from " + m_fpsFifo});
          return "";
       }
 
+      close(rfd);
+
       remove(outfile.c_str());
       
-      int n = strlen(inbuff);
+      int n = strnlen(inbuff, sizeof(inbuff));
 
       char * s = inbuff + n;
 
@@ -770,14 +695,6 @@ int cacaoInterface::getAOCalib()
    return 0;
 }
 
-
-int cacaoInterface::getModeBlocks()
-{
-
-   return 0;
-}
-
-
 int cacaoInterface::checkLoopProcesses()
 {
    ///\todo look for actual evidence of processes, such as interrogating ps.
@@ -789,46 +706,25 @@ int cacaoInterface::checkLoopProcesses()
 
 int cacaoInterface::setGain()
 {   
+   recordLoopGain(true);
    return setFPSVal("mfilt", "loopgain", m_gain_target);
-}
-
-int cacaoInterface::setBlockGain( int n,
-                                  float g
-                                )
-{
-
-   return 0;
 }
 
 int cacaoInterface::setMultCoeff()
 {
+   recordLoopGain(true);
    return setFPSVal("mfilt", "loopmult", m_multCoeff_target);
-}
-
-int cacaoInterface::setBlockMC( int n,
-                                float mc
-                              )
-{
-
-
-   return 0;
 }
 
 int cacaoInterface::setMaxLim()
 {
+   recordLoopGain(true);
    return setFPSVal("mfilt", "looplimit", m_maxLim_target);
-}
-
-int cacaoInterface::setBlockLimit( int n,
-                                   float l
-                                 )
-{
-
-   return 0;
 }
 
 int cacaoInterface::loopOn()
 {
+   recordLoopGain(true);
    if( setFPSVal("mfilt", "loopON", std::string("ON")) != 0)
    {
       return log<software_error,-1>({__FILE__, __LINE__, "error setting FPS val"});
@@ -842,6 +738,7 @@ int cacaoInterface::loopOn()
 
 int cacaoInterface::loopOff()
 {
+   recordLoopGain(true);
    if( setFPSVal("mfilt", "loopON", std::string("OFF")) != 0)
    {
       return log<software_error,-1>({__FILE__, __LINE__, "error setting FPS val"});
@@ -940,6 +837,8 @@ void cacaoInterface::fmThreadExec( )
       {
          m_maxLim = 0;
       }
+
+      recordLoopGain();
       /*
       fin.open( m_loopDir +  "/status/stat_procON.txt");
       
@@ -1112,126 +1011,38 @@ INDI_NEWCALLBACK_DEFN(cacaoInterface, m_indiP_maxLim )(const pcf::IndiProperty &
    return setMaxLim();
 }
 
-int cacaoInterface::st_newCallBack_blockGains( void * app,
-                                               const pcf::IndiProperty &ipRecv
-                                             )
+inline
+int cacaoInterface::checkRecordTimes()
 {
-   cacaoInterface * _app = static_cast<cacaoInterface *>(app);
-   return _app->newCallBack_blockGains(ipRecv);
+   return telemeterT::checkRecordTimes(telem_loopgain());
 }
 
-int cacaoInterface::newCallBack_blockGains( const pcf::IndiProperty &ipRecv )
+inline
+int cacaoInterface::recordTelem( const telem_loopgain * )
 {
-   if(ipRecv.getName().size() < 8) return -1;
-
-   int n = std::stoi(ipRecv.getName().substr(5,2));
-
-   float current = -1;
-   float target = -1;
-
-   if(ipRecv.find("current"))
-   {
-      current = ipRecv["current"].get<double>();
-   }
-
-   if(ipRecv.find("target"))
-   {
-      target = ipRecv["target"].get<double>();
-   }
-
-   if(target == -1) target = current;
-   
-   if(target == -1)
-   {
-      return 0;
-   }
-
-   updateIfChanged(m_indiP_blockGains[n], "target", target);
-
-   return setBlockGain(n, target);
-
+   return recordLoopGain(true);
 }
 
-int cacaoInterface::st_newCallBack_blockMCs( void * app,
-                                             const pcf::IndiProperty &ipRecv
-                                           )
+inline
+int cacaoInterface::recordLoopGain( bool force )
 {
-   cacaoInterface * _app = static_cast<cacaoInterface *>(app);
-   return _app->newCallBack_blockMCs(ipRecv);
+   static uint8_t state {0};
+   static float gain {-1000};
+   static float multcoef {0};
+   static float limit {0};
+
+   if(state != m_loopState || gain != m_gain || multcoef != m_multCoeff || limit != m_maxLim || force)
+   {
+      state = m_loopState;
+      gain = m_gain;
+      multcoef = m_multCoeff;
+      limit = m_maxLim;
+
+      telem<telem_loopgain>({state, m_gain, m_multCoeff, m_maxLim});
+   }
+
+   return 0;
 }
-
-int cacaoInterface::newCallBack_blockMCs( const pcf::IndiProperty &ipRecv )
-{
-   if(ipRecv.getName().size() < 8) return -1;
-
-   int n = std::stoi(ipRecv.getName().substr(5,2));
-
-   float current = -1;
-   float target = -1;
-
-   if(ipRecv.find("current"))
-   {
-      current = ipRecv["current"].get<double>();
-   }
-
-   if(ipRecv.find("target"))
-   {
-      target = ipRecv["target"].get<double>();
-   }
-
-   if(target == -1) target = current;
-   
-   if(target == -1)
-   {
-      return 0;
-   }
-
-   updateIfChanged(m_indiP_blockMCs[n], "target", target);
-
-   return setBlockMC(n, target);
-
-}
-
-int cacaoInterface::st_newCallBack_blockLimits( void * app,
-                                              const pcf::IndiProperty &ipRecv
-                                           )
-{
-   cacaoInterface * _app = static_cast<cacaoInterface *>(app);
-   return _app->newCallBack_blockLimits(ipRecv);
-}
-
-int cacaoInterface::newCallBack_blockLimits( const pcf::IndiProperty &ipRecv )
-{
-   if(ipRecv.getName().size() < 8) return -1;
-
-   int n = std::stoi(ipRecv.getName().substr(5,2));
-
-   float current = -1;
-   float target = -1;
-
-   if(ipRecv.find("current"))
-   {
-      current = ipRecv["current"].get<double>();
-   }
-
-   if(ipRecv.find("target"))
-   {
-      target = ipRecv["target"].get<double>();
-   }
-
-   if(target == -1) target = current;
-   
-   if(target == -1)
-   {
-      return 0;
-   }
-
-   updateIfChanged(m_indiP_blockLimits[n], "target", target);
-
-   return setBlockLimit(n, target);
-
-}
-
 
 } //namespace app
 } //namespace MagAOX

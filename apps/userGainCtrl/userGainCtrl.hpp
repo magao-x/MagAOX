@@ -79,7 +79,8 @@ struct limitShmimT
   * 
   */
 class userGainCtrl : public MagAOXApp<true>, public dev::shmimMonitor<userGainCtrl,gainShmimT>, 
-                     public dev::shmimMonitor<userGainCtrl,multcoeffShmimT>,  public dev::shmimMonitor<userGainCtrl,limitShmimT>
+                     public dev::shmimMonitor<userGainCtrl,multcoeffShmimT>,  public dev::shmimMonitor<userGainCtrl,limitShmimT>,
+                     public dev::telemeter<userGainCtrl>
 {
 
    //Give the test harness access.
@@ -88,6 +89,10 @@ class userGainCtrl : public MagAOXApp<true>, public dev::shmimMonitor<userGainCt
    friend class dev::shmimMonitor<userGainCtrl,gainShmimT>;
    friend class dev::shmimMonitor<userGainCtrl,multcoeffShmimT>;
    friend class dev::shmimMonitor<userGainCtrl,limitShmimT>;
+
+   typedef dev::telemeter<userGainCtrl> telemeterT;
+
+   friend class dev::telemeter<userGainCtrl>;
 
 public:
 
@@ -105,7 +110,8 @@ protected:
      *@{
      */
    int m_loopNumber;
-   
+   bool m_splitTT {false};
+
    ///@}
  
    std::string m_aoCalDir;
@@ -133,13 +139,20 @@ protected:
    int m_totalNModes {0}; ///< The total number of WFS modes in the calib.
 
    std::vector<float> m_modeBlockGains;
+   std::vector<uint8_t> m_modeBlockGainsConstant;
+
    std::vector<float> m_modeBlockMCs;
+   std::vector<uint8_t> m_modeBlockMCsConstant;
+
    std::vector<float> m_modeBlockLims;
+   std::vector<uint8_t> m_modeBlockLimsConstant;
 
    std::mutex m_modeBlockMutex;
 
    mx::fits::fitsFile<float> m_ff;
 
+   int m_singleModeNo {0};
+   
 public:
    /// Default c'tor.
    userGainCtrl();
@@ -220,6 +233,13 @@ protected:
                       float l
                     );
 
+   int setSingleModeNo (int m);
+   int setSingleGain( float g );
+
+   int setSingleMC( float mc );
+   
+   void updateSingles();
+
    pcf::IndiProperty m_indiP_modes;
 
    pcf::IndiProperty m_indiP_zeroAll;
@@ -228,7 +248,17 @@ protected:
    std::vector<pcf::IndiProperty> m_indiP_blockMCs;
    std::vector<pcf::IndiProperty> m_indiP_blockLimits;
 
+   pcf::IndiProperty m_indiP_singleModeNo;
+   pcf::IndiProperty m_indiP_singleGain;
+   pcf::IndiProperty m_indiP_singleMC;
+
    INDI_NEWCALLBACK_DECL(userGainCtrl, m_indiP_zeroAll);
+
+   INDI_NEWCALLBACK_DECL(userGainCtrl, m_indiP_singleModeNo);
+
+   INDI_NEWCALLBACK_DECL(userGainCtrl, m_indiP_singleGain);
+   
+   INDI_NEWCALLBACK_DECL(userGainCtrl, m_indiP_singleMC);
 
    
    /// The static callback function to be registered for block gains
@@ -281,6 +311,18 @@ protected:
      * \returns -1 on error.
      */
    int newCallBack_blockLimits( const pcf::IndiProperty &ipRecv /**< [in] the INDI property sent with the the new property request.*/);
+
+   /** \name Telemeter Interface
+     * 
+     * @{
+     */ 
+   int checkRecordTimes();
+   
+   int recordTelem( const telem_blockgains * );
+
+   int recordBlockGains( bool force = false );
+   
+   ///@}
 };
 
 inline
@@ -301,14 +343,17 @@ void userGainCtrl::setupConfig()
    limitShmimMonitorT::setupConfig(config);
 
    config.add("loop.number", "", "loop.number", argType::Required, "loop", "number", false, "int", "The loop number");
-   
+   config.add("blocks.splitTT", "", "blocks.splitTT", argType::Required, "blocks", "splitTT", false, "bool", "If true, the first block is split into two modes.");
+
+   telemeterT::setupConfig(config);
 }
 
 inline
 int userGainCtrl::loadConfigImpl( mx::app::appConfigurator & _config )
 {
    _config(m_loopNumber, "loop.number");
-
+   _config(m_splitTT, "blocks.splitTT");
+   
    shmimMonitorT::m_shmimName = "aol" + std::to_string(m_loopNumber) + "_mgainfact";   
    shmimMonitorT::loadConfig(config);
 
@@ -318,6 +363,11 @@ int userGainCtrl::loadConfigImpl( mx::app::appConfigurator & _config )
    limitShmimMonitorT::m_shmimName = "aol" + std::to_string(m_loopNumber) + "_mlimitfact";
    limitShmimMonitorT::loadConfig(config);
 
+   if(telemeterT::loadConfig(_config) < 0)
+   {
+      log<text_log>("Error during telemeter config", logPrio::LOG_CRITICAL);
+      m_shutdown = true;
+   }
 
    return 0;
 }
@@ -336,6 +386,7 @@ int userGainCtrl::appStartup()
    indi::addNumberElement(m_indiP_modes, "blocks", 0, 1, 99, "Mode Blocks");
    registerIndiPropertyReadOnly(m_indiP_modes);
 
+
    createStandardIndiRequestSw( m_indiP_zeroAll, "zero_all");
    if( registerIndiPropertyNew( m_indiP_zeroAll, INDI_NEWCALLBACK(m_indiP_zeroAll)) < 0)
    {
@@ -343,6 +394,21 @@ int userGainCtrl::appStartup()
       return -1;
    }
    
+   createStandardIndiNumber<int>( m_indiP_singleModeNo, "singleModeNo", 0, 2400 ,0, "%0d", "");
+   m_indiP_singleModeNo["current"].set(m_singleModeNo);
+   m_indiP_singleModeNo["target"].set(m_singleModeNo);
+   registerIndiPropertyNew(m_indiP_singleModeNo, INDI_NEWCALLBACK(m_indiP_singleModeNo));
+   
+   createStandardIndiNumber<int>( m_indiP_singleGain, "singleGain", 0, 1.5 ,0, "%0.2f", "");
+   m_indiP_singleGain["current"].set(1);
+   m_indiP_singleGain["target"].set(1);
+   registerIndiPropertyNew(m_indiP_singleGain, INDI_NEWCALLBACK(m_indiP_singleGain));
+
+   createStandardIndiNumber<int>( m_indiP_singleMC, "singleMC", 0, 1.0 ,0, "%0.2f", "");
+   m_indiP_singleMC["current"].set(1);
+   m_indiP_singleMC["target"].set(1);
+   registerIndiPropertyNew(m_indiP_singleMC, INDI_NEWCALLBACK(m_indiP_singleMC));
+
    if(shmimMonitorT::appStartup() < 0)
    {
       return log<software_error,-1>({__FILE__, __LINE__});
@@ -358,6 +424,11 @@ int userGainCtrl::appStartup()
       return log<software_error,-1>({__FILE__, __LINE__});
    }
   
+   if(telemeterT::appStartup() < 0)
+   {
+      return log<software_error,-1>({__FILE__,__LINE__});
+   }
+   
    state(stateCodes::NODEVICE);
     
    return 0;
@@ -418,6 +489,15 @@ int userGainCtrl::appLogic()
 
    }
 
+   if(state() == stateCodes::OPERATING)
+   {
+      if(telemeterT::appLogic() < 0)
+      {
+         log<software_error>({__FILE__, __LINE__});
+         return 0;
+      }
+   }
+
    std::unique_lock<std::mutex> lock(m_indiMutex);
 
    if(shmimMonitorT::updateINDI() < 0)
@@ -450,6 +530,8 @@ int userGainCtrl::appLogic()
       updateIfChanged(m_indiP_blockLimits[n], "current", m_modeBlockLims[n]);
    }
 
+   updateSingles();
+
    return 0;
 }
 
@@ -459,6 +541,8 @@ int userGainCtrl::appShutdown()
    shmimMonitorT::appShutdown();
    mcShmimMonitorT::appShutdown();
    limitShmimMonitorT::appShutdown();
+
+   telemeterT::appShutdown();
 
    return 0;
 }
@@ -632,11 +716,7 @@ int userGainCtrl::getModeBlocks()
       }
    }
 
-   /*if(modeBlockStart.back() + modeBlockN.back() > m_totalNModes)
-   {
-      return log<software_error, -1>({__FILE__, __LINE__, errno, "userGainCtrl::getModeBlocks too many modes in blocks compared to WFSmodes"});
-   }
-   else*/ if(modeBlockStart.back() + modeBlockN.back() < m_totalNModes)
+   if(modeBlockStart.back() + modeBlockN.back() < m_totalNModes)
    {
       int st0 = modeBlockStart.back();
       int N0 = modeBlockN.back();
@@ -647,13 +727,35 @@ int userGainCtrl::getModeBlocks()
 
    }
 
+   //split tt here
+   if(m_splitTT)
+   {
+      if(modeBlockN[0] !=2 )
+      {
+         log<software_warning>({__FILE__, __LINE__, errno, "userGainCtrl::getModeBlocks splitTT is set but block00 does not have 2 modes"});
+      }
+      else if(modeBlockStart[0] != 0)
+      {
+         log<software_warning>({__FILE__, __LINE__, errno, "userGainCtrl::getModeBlocks splitTT is set but block00 does not start at mode 0"});
+      }
+      else
+      {
+         modeBlockStart.insert(modeBlockStart.begin(), 0);
+         modeBlockStart[1] = 1;
+
+         modeBlockN.insert(modeBlockN.begin(), 1);
+         modeBlockN[1] = 1;
+         ++Nb;
+      }
+   }
+
    //now detect changes.
    bool changed = false;
    if(m_modeBlockStart.size() != Nb || m_modeBlockN.size() != Nb || m_modeBlockGains.size() != Nb || m_modeBlockMCs.size() != Nb || m_modeBlockLims.size() != Nb)
    {
       changed = true;
    }
-   else
+   else //All are correct size, look for differences within:
    {
       for(size_t n=0; n < Nb; ++n)
       {
@@ -678,8 +780,11 @@ int userGainCtrl::getModeBlocks()
       m_modeBlockStart.resize(Nb);
       m_modeBlockN.resize(Nb);
       m_modeBlockGains.resize(Nb);
+      m_modeBlockGainsConstant.resize(Nb);
       m_modeBlockMCs.resize(Nb);
+      m_modeBlockMCsConstant.resize(Nb);
       m_modeBlockLims.resize(Nb);
+      m_modeBlockLimsConstant.resize(Nb);
 
       for(size_t n=0; n < Nb; ++n)
       {
@@ -793,6 +898,8 @@ int userGainCtrl::processImage( void * curr_src,
 {
    static_cast<void>(dummy); //be unused
 
+   recordBlockGains();
+
    std::unique_lock<std::mutex> lock(m_modeBlockMutex);
 
    realT * data = m_gainsCurrent.data();
@@ -815,17 +922,36 @@ int userGainCtrl::processImage( void * curr_src,
       double mng = 0;
 
       int NN = 0;
+      
       for(int m =0; m < m_modeBlockN[n]; ++m)
       {
          if(m_modeBlockStart[n] + m >= m_gainsCurrent.rows()) break;
          mng += m_gainsCurrent(m_modeBlockStart[n] + m,0);
-
          ++NN;
       }
 
       m_modeBlockGains[n] = mng / NN; 
+
+      bool constant = true;
+      
+      for(int m =0; m < m_modeBlockN[n]; ++m)
+      {
+         if(m_modeBlockStart[n] + m >= m_gainsCurrent.rows()) break;
+         if(m_gainsCurrent(m_modeBlockStart[n] + m,0) != m_modeBlockGains[n])
+         {
+            constant = false;
+            break;
+         }
+      }
+
+      m_modeBlockGainsConstant[n] = constant;
+
    }
 
+   lock.unlock();
+
+   recordBlockGains();
+   
    return 0;
 }
 
@@ -872,6 +998,7 @@ int userGainCtrl::setBlockGain( int n,
       m_gainsTarget(m_modeBlockStart[n] + m,0) = m_gainsCurrent(m_modeBlockStart[n] + m,0) + (g - m_modeBlockGains[n]);
    }
    lock.unlock();
+   recordBlockGains(true);
    writeGains();
    return 0;
 }
@@ -897,6 +1024,8 @@ int userGainCtrl::processImage( void * curr_src,
                               )
 {
    static_cast<void>(dummy); //be unused
+
+   recordBlockGains();
 
    std::unique_lock<std::mutex> lock(m_modeBlockMutex);
 
@@ -928,9 +1057,27 @@ int userGainCtrl::processImage( void * curr_src,
          ++NN;
       }
 
-
       m_modeBlockMCs[n] = mng / NN; 
+   
+
+      bool constant = true;
+      
+      for(int m =0; m < m_modeBlockN[n]; ++m)
+      {
+         if(m_modeBlockStart[n] + m >= m_mcsCurrent.rows()) break;
+         if(m_mcsCurrent(m_modeBlockStart[n] + m,0) != m_modeBlockMCs[n])
+         {
+            constant = false;
+            break;
+         }
+      }
+
+      m_modeBlockMCsConstant[n] = constant;
    }
+
+   lock.unlock();
+
+   recordBlockGains();
 
    return 0;
 }
@@ -978,6 +1125,7 @@ int userGainCtrl::setBlockMC( int n,
       m_mcsTarget(m_modeBlockStart[n] + m,0) = m_mcsCurrent(m_modeBlockStart[n] + m,0) + (mc- m_modeBlockMCs[n]);
    }
    lock.unlock();
+   recordBlockGains(true);
    writeMCs();
    return 0;
 }
@@ -1003,6 +1151,8 @@ int userGainCtrl::processImage( void * curr_src,
                               )
 {
    static_cast<void>(dummy); //be unused
+
+   recordBlockGains();
 
    std::unique_lock<std::mutex> lock(m_modeBlockMutex);
 
@@ -1035,7 +1185,25 @@ int userGainCtrl::processImage( void * curr_src,
       }
 
       m_modeBlockLims[n] = mng / NN; 
+
+      bool constant = true;
+      
+      for(int m =0; m < m_modeBlockN[n]; ++m)
+      {
+         if(m_modeBlockStart[n] + m >= m_limitsCurrent.rows()) break;
+         if(m_limitsCurrent(m_modeBlockStart[n] + m,0) != m_modeBlockLims[n])
+         {
+            constant = false;
+            break;
+         }
+      }
+
+      m_modeBlockLimsConstant[n] = constant;
    }
+
+   lock.unlock();
+
+   recordBlockGains();
 
    return 0;
 }
@@ -1083,8 +1251,67 @@ int userGainCtrl::setBlockLimit( int n,
       m_limitsTarget(m_modeBlockStart[n] + m,0) = m_limitsCurrent(m_modeBlockStart[n] + m,0) + (l- m_modeBlockLims[n]);
    }
    lock.unlock();
+   recordBlockGains(true);
    writeLimits();
+
    return 0;
+}
+
+int userGainCtrl::setSingleModeNo ( int m )
+{
+   m_singleModeNo = m;
+
+   updateIfChanged(m_indiP_singleModeNo, "current", m);
+
+   if(m_singleModeNo < 0 || m_singleModeNo >= m_gainsCurrent.rows()) return -1;
+   float g =  m_gainsCurrent (m_singleModeNo,0);
+
+   updateIfChanged(m_indiP_singleGain, std::vector<std::string>({"current", "target"}), std::vector<float>({g,g}));
+
+   if(m_singleModeNo < 0 || m_singleModeNo >= m_mcsCurrent.rows()) return -1;
+   float mc =  m_mcsCurrent(m_singleModeNo,0);
+
+   updateIfChanged(m_indiP_singleMC, std::vector<std::string>({"current", "target"}), std::vector<float>({mc,mc}));
+
+   return 0;
+}
+
+int userGainCtrl::setSingleGain( float g )
+{
+   if(m_singleModeNo < 0 || m_singleModeNo >= m_gainsCurrent.rows()) return -1;
+   recordBlockGains();
+   std::unique_lock<std::mutex> lock(m_modeBlockMutex);
+   m_gainsTarget(m_singleModeNo,0) = g;
+   lock.unlock();
+   recordBlockGains(true);
+   writeGains();
+   return 0;
+}
+
+int userGainCtrl::setSingleMC( float mc )
+{
+   if(m_singleModeNo < 0 || m_singleModeNo >= m_mcsCurrent.rows()) return -1;
+   recordBlockGains();
+   std::unique_lock<std::mutex> lock(m_modeBlockMutex);
+   m_mcsTarget(m_singleModeNo,0) = mc;
+   lock.unlock();
+   recordBlockGains(true);
+   writeMCs();
+   return 0;
+}
+
+void userGainCtrl::updateSingles()
+{
+   if(m_singleModeNo < 0 || m_singleModeNo >= m_gainsCurrent.rows()) return;
+   float g =  m_gainsCurrent (m_singleModeNo,0);
+
+   updateIfChanged(m_indiP_singleGain, std::vector<std::string>({"current", "target"}), std::vector<float>({g,g}));
+
+   if(m_singleModeNo < 0 || m_singleModeNo >= m_mcsCurrent.rows()) return;
+   float mc =  m_mcsCurrent(m_singleModeNo,0);
+
+   updateIfChanged(m_indiP_singleMC, std::vector<std::string>({"current", "target"}), std::vector<float>({mc,mc}));
+
 }
 
 INDI_NEWCALLBACK_DEFN(userGainCtrl, m_indiP_zeroAll)(const pcf::IndiProperty &ipRecv)
@@ -1110,6 +1337,71 @@ INDI_NEWCALLBACK_DEFN(userGainCtrl, m_indiP_zeroAll)(const pcf::IndiProperty &ip
    
    return 0;
 }
+
+INDI_NEWCALLBACK_DEFN(userGainCtrl, m_indiP_singleModeNo)(const pcf::IndiProperty &ipRecv)
+{
+   if(ipRecv.getName() != m_indiP_singleModeNo.getName())
+   {
+      log<software_error>({__FILE__, __LINE__, "invalid indi property received"});
+      return -1;
+   }
+   
+   int target;
+   
+   if( indiTargetUpdate( m_indiP_singleModeNo, target, ipRecv, true) < 0)
+   {
+      log<software_error>({__FILE__,__LINE__});
+      return -1;
+   }
+   
+   setSingleModeNo(target);
+   
+   return 0;
+}
+
+INDI_NEWCALLBACK_DEFN(userGainCtrl, m_indiP_singleGain)(const pcf::IndiProperty &ipRecv)
+{
+   if(ipRecv.getName() != m_indiP_singleGain.getName())
+   {
+      log<software_error>({__FILE__, __LINE__, "invalid indi property received"});
+      return -1;
+   }
+   
+   float target;
+   
+   if( indiTargetUpdate( m_indiP_singleGain, target, ipRecv, true) < 0)
+   {
+      log<software_error>({__FILE__,__LINE__});
+      return -1;
+   }
+   
+   setSingleGain(target);
+   
+   return 0;
+}
+
+INDI_NEWCALLBACK_DEFN(userGainCtrl, m_indiP_singleMC)(const pcf::IndiProperty &ipRecv)
+{
+   if(ipRecv.getName() != m_indiP_singleMC.getName())
+   {
+      log<software_error>({__FILE__, __LINE__, "invalid indi property received"});
+      return -1;
+   }
+   
+   float target;
+   
+   if( indiTargetUpdate( m_indiP_singleMC, target, ipRecv, true) < 0)
+   {
+      log<software_error>({__FILE__,__LINE__});
+      return -1;
+   }
+   
+   setSingleMC(target);
+   
+   return 0;
+}
+
+
 int userGainCtrl::st_newCallBack_blockGains( void * app,
                                                const pcf::IndiProperty &ipRecv
                                              )
@@ -1228,6 +1520,74 @@ int userGainCtrl::newCallBack_blockLimits( const pcf::IndiProperty &ipRecv )
 
    return setBlockLimit(n, target);
 
+}
+
+inline
+int userGainCtrl::checkRecordTimes()
+{
+   return telemeterT::checkRecordTimes(telem_blockgains());
+}
+
+inline
+int userGainCtrl::recordTelem( const telem_blockgains * )
+{
+   return recordBlockGains(true);
+}
+
+inline
+int userGainCtrl::recordBlockGains( bool force )
+{
+   static std::vector<float> modeBlockGains;
+   static std::vector<uint8_t> modeBlockGainsConstant;
+
+   static std::vector<float> modeBlockMCs;
+   static std::vector<uint8_t> modeBlockMCsConstant;
+
+   static std::vector<float> modeBlockLims;
+   static std::vector<uint8_t> modeBlockLimsConstant;
+
+   if(!force)
+   {
+      if(!(m_modeBlockGains == modeBlockGains)) force = true;
+   }
+
+   if(!force)
+   {
+      if(!(m_modeBlockGainsConstant == modeBlockGainsConstant)) force = true;
+   }
+
+   if(!force)
+   {
+      if(!(m_modeBlockMCs == modeBlockMCs)) force = true;
+   }
+
+   if(!force)
+   {
+      if(!(m_modeBlockMCsConstant == modeBlockMCsConstant)) force = true;
+   }
+
+   if(!force)
+   {
+      if(!(m_modeBlockLims == modeBlockLims)) force = true;
+   }
+
+   if(!force)
+   {
+      if(!(m_modeBlockLimsConstant == modeBlockLimsConstant)) force = true;
+   }
+
+   if(force)
+   {
+      telem<telem_blockgains>({m_modeBlockGains, m_modeBlockGainsConstant, m_modeBlockMCs, m_modeBlockMCsConstant, m_modeBlockLims, m_modeBlockLimsConstant});
+      modeBlockGains = m_modeBlockGains;
+      modeBlockGainsConstant = m_modeBlockGainsConstant;
+      modeBlockMCs = m_modeBlockMCs;
+      modeBlockMCsConstant = m_modeBlockMCsConstant;
+      modeBlockLims = m_modeBlockLims;
+      modeBlockLimsConstant = m_modeBlockLimsConstant;
+   }
+
+   return 0;
 }
 
 } //namespace app

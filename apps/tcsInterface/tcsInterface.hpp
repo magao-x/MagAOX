@@ -290,7 +290,9 @@ public:
    
    int m_acqZdSign {-1};
    float m_acqAz0 {18.5};
+   float m_acqAzOff {0};
    float m_acqEl0 {10};
+   float m_acqElOff {0};
    float m_acqFocus{1400};
 
    int acquireFromGuider();
@@ -437,7 +439,9 @@ void tcsInterface::setupConfig()
    
    config.add("acqFromGuider.zdSign", "", "acqFromGuider.zdSign", argType::Required, "acqFromGuider", "zdSign", false, "int", "Sign of the Zd to rotation angle, +1 or -1, -1 default");
    config.add("acqFromGuider.az0", "", "acqFromGuider.az0", argType::Required, "acqFromGuider", "az0", false, "float", "az component of acquisition vector a 0 zd.");
+   config.add("acqFromGuider.azoff", "", "acqFromGuider.azoff", argType::Required, "acqFromGuider", "azoff", false, "float", "static offset to az component of acquisition vector");
    config.add("acqFromGuider.el0", "", "acqFromGuider.el0", argType::Required, "acqFromGuider", "el0", false, "float", "el component of acquisition vector a 0 zd.");
+   config.add("acqFromGuider.eloff", "", "acqFromGuider.eloff", argType::Required, "acqFromGuider", "eloff", false, "float", "static offset to el component of acquisition vector");
    
    config.add("offload.TT_avgInt", "", "offload.TT_avgInt", argType::Required, "offload", "TT_avgInt", false, "float", "Woofer to Telescope T/T offload averaging interval [sec] ");
    config.add("offload.TT_gain", "", "offload.TT_gain", argType::Required, "offload", "TT_gain", false, "float", "Woofer to Telescope T/T offload gain");
@@ -490,7 +494,9 @@ int tcsInterface::loadConfigImpl( mx::app::appConfigurator & _config )
    
    _config(m_acqZdSign, "acqFromGuider.zdSign");
    _config(m_acqAz0, "acqFromGuider.az0");
+   _config(m_acqAzOff, "acqFromGuider.azoff");
    _config(m_acqEl0, "acqFromGuider.el0");
+   _config(m_acqElOff, "acqFromGuider.eloff");
    _config(m_acqFocus, "acqFromGuider.focus");
 
    _config(m_offlTT_avgInt, "offload.TT_avgInt");
@@ -911,10 +917,10 @@ int tcsInterface::appLogic()
       }
       
 
-      /*if(getSeeing() < 0)
+      if(getSeeing() < 0)
       {
          return 0;
-      }*/
+      }
       
       telemeter<tcsInterface>::appLogic();
       
@@ -2327,8 +2333,8 @@ int tcsInterface::acquireFromGuider()
    float q = (m_acqZdSign*m_telZd)*3.14159/180.;
 
    //The rotation matrix
-   float az = m_acqAz0*cos(q) - m_acqEl0*sin(q);
-   float el = m_acqAz0*sin(q) + m_acqEl0*cos(q);
+   float az = m_acqAz0*cos(q) - m_acqEl0*sin(q) + m_acqAzOff;
+   float el = m_acqAz0*sin(q) + m_acqEl0*cos(q) + m_acqElOff;
    
    char ttstr[64];
    snprintf(ttstr, sizeof(ttstr) , "aeg %f %f", az, el);

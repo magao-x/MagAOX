@@ -106,6 +106,8 @@ int logMap::loadAppToFileMap( const std::string & dir,
 
    for(size_t n=0;n<flist.size(); ++n)
    {
+      //std::cerr << "loading: " << flist[n] << "\n";
+
       logFileName lfn(flist[n]);
    
       m_appToFileMap[lfn.appName()].insert(lfn);

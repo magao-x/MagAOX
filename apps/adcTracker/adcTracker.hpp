@@ -78,6 +78,7 @@ protected:
    
    ///@}
 
+   float m_maxZD {60};
 
    std::vector<double> m_lupZD;
    std::vector<double> m_lupADC1;
@@ -299,12 +300,22 @@ int adcTracker::appLogic()
       float dadc1 = 0.0;
       float dadc2 = 0.0;
       
-      if(m_zd >= m_minZD)
+      if(m_zd > m_lupZD.back())
+      {
+         std::cerr << "end of lup\n";
+         dadc1 = m_lupADC1.back();
+         dadc2 = m_lupADC2.back();
+      }
+      else if(m_zd >= m_minZD)
       {
          dadc1 = fabs(m_terpADC1(m_zd)); 
          dadc2 = fabs(m_terpADC2(m_zd));
       }
-      
+      else
+      {
+         std::cerr << "zenith limit\n";  
+      }
+
       float adc1 = m_adc1zero + m_adc1lupsign*(dadc1 + m_adc1delta + m_deltaAngle);
       float adc2 = m_adc2zero + m_adc2lupsign*(dadc2 + m_adc2delta + m_deltaAngle);
       
