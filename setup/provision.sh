@@ -118,8 +118,8 @@ else
 fi
 if [[ $MAGAOX_ROLE == RTC || $MAGAOX_ROLE == ICC || $MAGAOX_ROLE == AOC || $MAGAOX_ROLE == TIC || $MAGAOX_ROLE == ci ]]; then
     sudo bash -l "$DIR/steps/install_cuda.sh"
-    sudo bash -l "$DIR/steps/install_magma.sh"
 fi
+sudo bash -l "$DIR/steps/install_magma.sh"
 sudo bash -l "$DIR/steps/install_fftw.sh" || exit 1
 sudo bash -l "$DIR/steps/install_cfitsio.sh" || exit 1
 sudo bash -l "$DIR/steps/install_eigen.sh" || exit 1
