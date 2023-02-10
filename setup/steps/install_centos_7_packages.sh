@@ -92,6 +92,10 @@ echo "export PKG_CONFIG_PATH=\$PKG_CONFIG_PATH:/usr/local/lib/pkgconfig" > /etc/
 
 cd /opt/MagAOX/vendor
 rpmFile=cpuset-1.6-lp154.59.1.noarch.rpm
+
+# get _cached_fetch
+source $DIR/../_common.sh
+
 _cached_fetch https://download.opensuse.org/repositories/hardware/15.4/noarch/$rpmFile $rpmFile
 sudo yum install -y $rpmFile
 cat <<'HERE' | sudo tee /etc/cset.conf || exit 1

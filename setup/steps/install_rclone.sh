@@ -21,4 +21,4 @@ fi
 cd $PACKAGE_DIR
 sudo install ./rclone /usr/local/bin
 sudo install ./rclone.1 /usr/local/share/man/man1/
-sudo ln -s /usr/local/bin/rclone /sbin/mount.rclone
+sudo ln -sf /usr/local/bin/rclone /sbin/mount.rclone

@@ -39,6 +39,9 @@ milkPath=${milkBinary/${milkSuffix}/}
 if command -v milk; then
     log_warn "Found existing milk binary at $(command -v milk)"
 fi
+if [[ -d /usr/local/milk ]]; fi
+  exit_error "old milk detected, remove /usr/local/milk directory"
+fi
 sudo ln -sf $milkPath /usr/local/milk
 echo "/usr/local/milk/lib" | sudo tee /etc/ld.so.conf.d/milk.conf
 sudo ldconfig
