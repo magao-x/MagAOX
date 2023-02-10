@@ -73,8 +73,8 @@ function _cached_fetch() {
   mkdir -p /opt/MagAOX/.cache
   if [[ ! -e $dest/$filename ]]; then
     if [[ ! -e /opt/MagAOX/.cache/$filename ]]; then
-      curl $EXTRA_CURL_OPTS -L $url > /tmp/magaoxcache-$filename && \
-        mv /tmp/magaoxcache-$filename /opt/MagAOX/.cache/$filename
+      curl $EXTRA_CURL_OPTS --fail -L $url > /tmp/magaoxcache-$filename
+      mv /tmp/magaoxcache-$filename /opt/MagAOX/.cache/$filename
       log_info "Downloaded to /opt/MagAOX/.cache/$filename"
     fi
     cp /opt/MagAOX/.cache/$filename $dest/$filename

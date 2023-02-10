@@ -240,6 +240,12 @@ fi
 sudo bash -l "$DIR/steps/install_python.sh"
 sudo bash -l "$DIR/steps/configure_python.sh"
 source /opt/conda/bin/activate
+
+if [[ $ID == centos && ( $MAGAOX_ROLE == AOC || $MAGAOX_ROLE == TOC || $MAGAOX_ROLE == vm ) ]]; then
+    sudo mamba install -y qwt qt=5.9.7 || exit 1
+    log_info "Installed qwt from conda for widgeting purposes on old CentOS"
+fi
+
 # Install first-party deps
 $MAYBE_SUDO bash -l "$DIR/steps/install_milk_and_cacao.sh"  # depends on /opt/conda/bin/python existing for plugin build
 $MAYBE_SUDO bash -l "$DIR/steps/install_milkzmq.sh" || exit 1
