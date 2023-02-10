@@ -14,5 +14,6 @@ if [[ ! -d /opt/intel ]]; then
 else
     log_warn "/opt/intel already exists"
 fi
-ldconfig
+echo "/opt/intel/oneapi/mkl/latest/lib/intel64" | sudo tee /etc/ld.so.conf.d/mkl.conf || exit 1
+sudo ldconfig
 log_info "Finished MKL tarball install"

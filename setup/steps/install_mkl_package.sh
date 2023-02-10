@@ -8,3 +8,5 @@ if [[ ! $ID == "ubuntu" ]]; then
 fi
 sudo apt install -y intel-oneapi-mkl-devel-2022.2.0
 echo "source /opt/intel/oneapi/mkl/latest/env/vars.sh intel64" | sudo tee /etc/profile.d/mklvars.sh &>/dev/null || exit 1
+echo "/opt/intel/oneapi/mkl/latest/lib/intel64" | sudo tee /etc/ld.so.conf.d/mkl.conf || exit 1
+sudo ldconfig
