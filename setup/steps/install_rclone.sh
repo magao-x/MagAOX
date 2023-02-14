@@ -20,5 +20,6 @@ if [[ ! -d $PACKAGE_DIR ]]; then
 fi
 cd $PACKAGE_DIR
 sudo install ./rclone /usr/local/bin
+sudo mkdir -p /usr/local/share/man/man1/
 sudo install ./rclone.1 /usr/local/share/man/man1/
 sudo ln -sf /usr/local/bin/rclone /sbin/mount.rclone
