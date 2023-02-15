@@ -21,6 +21,7 @@ apt install -y \
     zlib1g-dev \
     libudev-dev \
     libncurses5-dev \
+    libncursesw5-dev \
     netcat \
     lm-sensors \
     libreadline-dev \

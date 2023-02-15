@@ -46,7 +46,7 @@ function link_if_necessary() {
     elif [[ -e $thelinkname ]]; then
       echo "$thelinkname exists, but is not a symlink and we want the destination to be $thedir."
     else
-        ln -sv "$thedir" "$thelinkname"
+        sudo ln -sv "$thedir" "$thelinkname"
     fi
   fi
 }
@@ -83,14 +83,10 @@ function _cached_fetch() {
 }
 
 VM_WINDOWS_HOST=0
-VM_SHARED_FOLDER="$SETUPDIR/../vm"
 VM_KIND=$(systemd-detect-virt)
 if [[ ${WSL_DISTRO_NAME:-none} != "none" ]]; then
   VM_KIND=wsl
   VM_WINDOWS_HOST=1
-elif [[ -d /vagrant ]]; then
-  VM_KIND=vagrant
-  VM_SHARED_FOLDER="/vagrant/vm"
 fi
 
 
@@ -108,34 +104,32 @@ function clone_or_update_and_cd() {
     if [[ $_WAS_NOUNSET == 1 ]]; then set -u; fi
     # and re-enable.
 
-    if [[ $MAGAOX_ROLE == vm && $VM_WINDOWS_HOST == 0 ]]; then
-      mkdir -p "$VM_SHARED_FOLDER/$reponame"
-      link_if_necessary "$VM_SHARED_FOLDER/$reponame" $destdir
-    fi
     if [[ ! -d $parentdir/$reponame/.git ]]; then
       echo "Cloning new copy of $orgname/$reponame"
       CLONE_DEST=/tmp/${reponame}_$(date +"%s")
       git clone https://github.com/$orgname/$reponame.git $CLONE_DEST
-      sudo rsync -av $CLONE_DEST/ $destdir/
+      sudo rsync -a $CLONE_DEST/ $destdir/
       cd $destdir/
-      git config --global safe.directory $(realpath $destdir)
       log_success "Cloned new $destdir"
       rm -rf $CLONE_DEST
       log_success "Removed temporary clone at $CLONE_DEST"
     else
       cd $destdir
-      git pull --ff-only
+      if [[ "$(git rev-parse --abbrev-ref --symbolic-full-name HEAD)" != HEAD ]]; then
+        git pull --ff-only
+      else
+        git fetch
+        log_info "Not pulling because a specific commit is checked out"
+      fi
       log_success "Updated $destdir"
     fi
     git config core.sharedRepository group
-    if [[ $MAGAOX_ROLE != vm ]]; then
-      sudo chown -R :$instrument_dev_group $destdir
-      sudo chmod -R g=rwX $destdir
-      # n.b. can't be recursive because g+s on files means something else
-      # so we find all directories and individually chmod them:
-      sudo find $destdir -type d -exec chmod g+s {} \;
-      log_success "Normalized permissions on $destdir"
-    fi
+    sudo chown -R :$instrument_dev_group $destdir
+    sudo chmod -R g=rwX $destdir
+    # n.b. can't be recursive because g+s on files means something else
+    # so we find all directories and individually chmod them:
+    sudo find $destdir -type d -exec chmod g+s {} \;
+    log_success "Normalized permissions on $destdir"
 }
 
 DEFAULT_PASSWORD="extremeAO!"

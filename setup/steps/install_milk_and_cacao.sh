@@ -12,7 +12,7 @@ git checkout $COMMIT_ISH
 
 bash -x ./fetch_cacao_dev.sh
 
-sudo rm -rf _build
+sudo rm -rf _build src/config.h src/milk_config.h
 mkdir -p _build
 cd _build
 
@@ -39,10 +39,7 @@ milkPath=${milkBinary/${milkSuffix}/}
 if command -v milk; then
     log_warn "Found existing milk binary at $(command -v milk)"
 fi
-if [[ -d /usr/local/milk ]]; fi
-  exit_error "old milk detected, remove /usr/local/milk directory"
-fi
-sudo ln -sf $milkPath /usr/local/milk
+link_if_necessary $milkPath /usr/local/milk
 echo "/usr/local/milk/lib" | sudo tee /etc/ld.so.conf.d/milk.conf
 sudo ldconfig
 echo "export PATH=\"\$PATH:/usr/local/milk/bin\"" | sudo tee /etc/profile.d/milk.sh

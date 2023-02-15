@@ -9,7 +9,6 @@ reponame=milkzmq
 parentdir=/opt/MagAOX/source
 clone_or_update_and_cd $orgname $reponame $parentdir
 
-git config core.sharedRepository group
 git checkout $MILKZMQ_COMMIT_ISH
 make || exit 1
 sudo make install || exit 1

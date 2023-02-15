@@ -15,7 +15,7 @@ fi
 sudo apt update
 
 log_info 'Making /etc/bash.bashrc source /etc/profile.d/*.sh, since graphical sessions appear not to for new Konsoles'
-if ! grep -q bashrc.d /etc/bash.bashrc; then
+if ! grep -q profile.d /etc/bash.bashrc; then
 cat <<'HERE' | sudo tee -a /etc/bash.bashrc
 if [ -d /etc/profile.d ]; then
   for i in /etc/profile.d/*.sh; do
