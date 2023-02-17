@@ -34,6 +34,8 @@ main(int argc, char** argv)
 {
     resurrectorT<> resurr;
 
+    resurr.set_resurr_logging();
+
     // Parse command-line tokens, open FIFOs, start hexbeater processes.
     // N.B. each token should be of the form name=executable
     for (int iargc=1; iargc < argc; ++iargc)
