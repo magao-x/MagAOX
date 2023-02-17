@@ -78,8 +78,8 @@ The resurrector_indi process is designed to replace the xctrl Python script for 
 
 The resurrector_indi process parses the names and executables of the INDI server and INDI drivers from the "/opt/MagAOX/config/proclist_role.txt" process list configuration file.
 The resurrector_indi process forks a single INDI server, and multiple INDI driver, childen processes as parsed from the process list.
-The resurrector_indi process then listens, at ~1Hz, on the "*.hb" named FIFOs for Hexbeats from its children processes; those children processes are also known as resurrectees.
-If the resurrector_indi process receives a SIGUSR2 signal, it then re-parses the process list configuration file, kills any children processes that were previously started but are no longer in the configuration process list, and starts any new children processes.
+The resurrector_indi process then listens, at ~1Hz, on the "*.hb" named FIFOs for Hexbeats (cf. below) from its children processes; those children processes are also known as resurrectees.
+If the resurrector_indi process receives a SIGUSR2 signal, it then re-parses the process list configuration file, kills any children processes that were previously started but are no longer in the configuration process list, starts any new children processes, and restarts any old children processes **that are not currently running**.  N.B. this means that this signal to the resurrector_indi process will **_not_** kill a locked up process; that will happen when the current time passes the last Hexbeat of the locked process.
 
 A Hexbeat is a representation of a time at some point in the future.
 The resurrector continually checks the current time against the most recent Hexbeat time received from the resurrectee class instance (Hexbeater) of an INDI server or driver process.
@@ -123,7 +123,7 @@ The resurrectee class is also refer to as a Hexbeater.
 
 ## Named FIFOs
 
-The named FIFOs must be located in the directory pointed to by the default macros at compile time, which is "/opt/MagAOX/config/" currently.
+The named FIFOs must be located in the directory pointed to by the default macros at compile time, which is "/opt/MagAOX/drivers/fifos//" currently.
 
 ### drivername.hb, isXXX.hb
 
@@ -209,6 +209,20 @@ indiserver_ctrl_fifo = /opt/MagAOX/drivers/fifos/indiserver.ctrl
 ### N.B. this *must* match the [indiserver.f] value in is{THISHOST}.conf
 ###      and it might be better to move the local [indiserver] TOML here
 ```
+
+## Techniques
+
+### Triggering resurrector_indi to restart a driver or server process
+
+A Hexbeat is a nine-digit hexadecimal representation of the time*, terminated by a newline**.
+Since each process's Hexbeat FIFO is available in the file system, it is possible to send an expired Hexbeat to resurrector_indi to trigger a synthetic Hexbeat expiration:
+
+    % echo 000000000 >> /opt/MagAOX/drivers/fifos/drivername.hb
+
+After receive such a Hexbeat telling it that the corresponding driver/server expired several decades ago, resurrector_indi should stop and restart that process.
+
+\* seconds since the Unix(tm) epoch of 1970-01-01T00:00:00
+\*\* ASCII 10 = 0x0A
 
 # TESTING
 
