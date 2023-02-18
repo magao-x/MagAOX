@@ -220,7 +220,7 @@ Since each process's Hexbeat FIFO is available in the file system, it is possibl
     % echo 000000000 >> /opt/MagAOX/drivers/fifos/drivername.hb
 
 After receive such a Hexbeat telling it that the corresponding driver/server expired several decades ago, resurrector_indi should stop and restart that process.
-<!-- the next line must end in two space -->
+<!-- the next line must end in two spaces -->
 \* seconds since the Unix(tm) epoch of 1970-01-01T00:00:00  
 \*\* ASCII 10 = 0x0A
 
