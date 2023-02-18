@@ -11,8 +11,12 @@ resurrector_indi - manage processes in an INDI framework.
 
 # SYNOPSIS 
 ```
-[MAGAOX_ROLE=magaox-role ./resurrector_indi [-r magaox-role] [--role=magaox-role]
+[export MAGAOX_ROLE=magaox-role]
+[MAGAOX_ROLE=magaox-role] ./resurrector_indi [-r magaox-role] [--role=magaox-role]
+
 ```
+- I.e. four ways to specify the role:  two using environment variable; two using command-line arguments.
+
 # DESCRIPTION
 
 The resurrector program ensures all processes in a MagAO-X INDI framework,
