@@ -1,4 +1,4 @@
-CPPFLAGS = -I. -I../../INDI/INDI -Wall
+CPPFLAGS = -I. -I../../INDI/INDI -I../../libMagAOX/common -Wall $(EXTRACPPFLAGS)
 
 EXES=test/gausswait test/test_resurrector resurrector_indi
 
