@@ -264,7 +264,7 @@ TEST_forked_child()
   while (1)
   {
     std::string s;
-    std::cin >> s;                  // Read string
+    getline(std::cin,s);            // Read line into string
     if (std::cin.eof()) { break; }  // Exit loop on EOF (Control-D?)
 
     // Write data either to cerr/STDERR or to cout/STDOUT
