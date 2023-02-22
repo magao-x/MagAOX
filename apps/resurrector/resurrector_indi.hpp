@@ -34,7 +34,10 @@ Usage(int rtn, const char* msg)
                  "Usage:\n"
                  "\n"
                  "    [MAGAOX_ROLE=role] resurrector_indi"
-                 " [-r role] [--role=role] [-h|--help]\n"
+                 " [-r role] [--role=role]"
+                 " [-nor|--no-output-redirect]"
+                 " [-v|--verbose]"
+                 " [-h|--help]\n"
                  "\n" << std::endl;
     exit(rtn);
 }
