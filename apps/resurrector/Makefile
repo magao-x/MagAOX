@@ -18,7 +18,7 @@ test: all
 	  ; echo $$ii=test/gausswait \
 	  ; done \
 	; done \
-	| xargs test/test_resurrector -v
+	| xargs test/test_resurrector
 
 clean:
 	$(RM) $(EXES)
