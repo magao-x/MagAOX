@@ -1,23 +1,6 @@
 resurrector_indi
 ====
 
-## Ca. 2023-02-21 Temporary documentation for output-redirection prototype
-
-### Build
-
-    make EXTRACPPFLAGS=-DTEST_MAIN=main redirect_prototype
-
-### Run/test
-
-    while true ; do tail -fc+1 /opt/MagAOX/sys/devicename/outputs || sleep 5 ; done &
-
-    ./redirect_prototype devicename
-    <type some data, then hit return>
-    <type some data again, then hit return again>
-    <type some data again, then hit return again>
-    ...
-    ^D (Control-D, i.e. End-Of-File)
-
 [TOC]
 
 ----
@@ -254,6 +237,23 @@ After receive such a Hexbeat telling it that the corresponding driver/server exp
 <!-- the next line must end in two spaces -->
 \* seconds since the Unix(tm) epoch of 1970-01-01T00:00:00  
 \*\* ASCII 10 = 0x0A
+
+## Ca. 2023-02-21 Temporary documentation for output-redirection prototype
+
+### Build
+
+    make EXTRACPPFLAGS=-DTEST_MAIN=main redirect_prototype
+
+### Run/test
+
+    while true ; do tail -fc+1 /opt/MagAOX/sys/devicename/outputs || sleep 5 ; done &
+
+    ./redirect_prototype devicename
+    <type some data, then hit return>
+    <type some data again, then hit return again>
+    <type some data again, then hit return again>
+    ...
+    ^D (Control-D, i.e. End-Of-File)
 
 # TESTING
 
