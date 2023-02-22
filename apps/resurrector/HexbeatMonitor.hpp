@@ -155,6 +155,11 @@ public: // interfaces
         m_pending_close = tf && (m_fd > -1);
     }
 
+    void output_redirect_set(void (*output_redirect)(std::string))
+    {
+        m_output_redirect = output_redirect;
+    }
+
     // /////////////////////////////////////////////////////////////////
     // /////////////////////////////////////////////////////////////////
     /// Open a named FIFO, load results into HexbeatMonitor instance
@@ -474,6 +479,8 @@ private: // Internal attributes and interfaces
 
     bool m_pending_close{false}; ///< Mark for possible closure
 
+    void (*m_output_redirect)(std::string){nullptr}; ///< forked outputs
+
     // /////////////////////////////////////////////////////////////////
     // /////////////////////////////////////////////////////////////////
     /// Initialization of HexbeatMonitor instance on FIFO open
@@ -760,6 +767,8 @@ private: // Internal attributes and interfaces
             << std::endl;
             errno = save_errno;
         }
+
+        if (m_output_redirect) { m_output_redirect(m_hbname); }
 
         // ... And then exec, the hexbeater
         // Child:  <argv0> -n <name>

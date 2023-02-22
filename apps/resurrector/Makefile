@@ -6,7 +6,7 @@ SELF_DIR := $(abspath $(dir $(lastword $(MAKEFILE_LIST))))
 
 all: $(EXES)
 
-resurrector_indi :: resurrector.hpp HexbeatMonitor.hpp resurrector_indi.hpp resurrector_indi.cpp
+resurrector_indi :: resurrector.hpp HexbeatMonitor.hpp redirect_prototype.cpp resurrector_indi.hpp resurrector_indi.cpp
 test/test_resurrector :: resurrector.hpp test/test_resurrector.cpp HexbeatMonitor.hpp
 test/gausswait :: test/gausswait.cpp
 
@@ -18,7 +18,7 @@ test: all
 	  ; echo $$ii=test/gausswait \
 	  ; done \
 	; done \
-	| xargs test/test_resurrector
+	| xargs test/test_resurrector -v
 
 clean:
 	$(RM) $(EXES)

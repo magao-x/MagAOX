@@ -65,7 +65,8 @@ void setup_SIGUSR2_handler()
 int
 main(int argc, char** argv)
 {
-    resurrectorT<> resurr;
+    extern void stdout_stderr_redirect(std::string);
+    resurrectorT<> resurr(&stdout_stderr_redirect);
 
     setup_SIGUSR2_handler();
 
