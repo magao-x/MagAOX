@@ -66,7 +66,8 @@ int
 main(int argc, char** argv)
 {
     extern void stdout_stderr_redirect(std::string);
-    resurrectorT<> resurr(&stdout_stderr_redirect);
+    bool nor{get_no_output_redirect_arg(argc,argv)};
+    resurrectorT<> resurr(nor ? nullptr : &stdout_stderr_redirect);
 
     setup_SIGUSR2_handler();
 
