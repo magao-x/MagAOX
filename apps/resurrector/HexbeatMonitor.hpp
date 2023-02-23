@@ -377,7 +377,8 @@ public: // interfaces
             // comprising digit characters
             if (de->d_type != DT_DIR) { continue; }
             char* p = de->d_name;
-            while (isdigit(*p)) { ++p; }
+            int pid = 0;
+            while (isdigit(*p)) { pid = (10 * pid) + *p - '0'; ++p; }
             if (p==de->d_name || *p) { continue; }
 
             // Open /proc/<pid>/cmdline file, read contents into
@@ -423,9 +424,6 @@ public: // interfaces
 
             // Found a hexbeater:  close dir, read PID, return PID
             closedir(pdir);
-            std::istringstream iss(de->d_name);
-            int pid = 0;
-            iss >> pid;
             return pid;
         }
 
