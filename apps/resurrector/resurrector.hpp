@@ -148,7 +148,7 @@ public:
                       << " at " << time_to_hb(0).substr(0,9) << "]\n";
             }
             it->stop_hexbeater(m_fdset_cpy, m_nfds);
-            struct timeval tv{2,499999};
+            struct timeval tv{0,99999};
             select(0, 0,0,0, &tv);
             if (m_resurr_logging)
             {
