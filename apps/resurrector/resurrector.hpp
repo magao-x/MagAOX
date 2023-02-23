@@ -141,9 +141,19 @@ public:
                 it->close_hexbeater(m_fdset_cpy, m_nfds);
                 continue;
             }
+            if (m_resurr_logging)
+            {
+                std::cerr << "[resurrector stopping " << *it
+                      << " at " << time_to_hb(0).substr(0,9) << "]\n";
+            }
             it->stop_hexbeater(m_fdset_cpy, m_nfds);
-            struct timeval tv{0,99999};
+            struct timeval tv{2,499999};
             select(0, 0,0,0, &tv);
+            if (m_resurr_logging)
+            {
+                std::cerr << "[resurrector re-starting " << *it
+                          << " at " << time_to_hb(0).substr(0,9) << "]\n";
+            }
             it->start_hexbeater(m_fdset_cpy, m_nfds,m_delay);
         }
     }
