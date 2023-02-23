@@ -24,7 +24,8 @@ private:
 
 public:
     /// Constructor
-    /** Ensures FD set copy is all zeros, and set<int> of FD is empty
+    /** Ensure FD set copy is all zeros, and set<int> of FD is empty
+      * Assign output redirect in all Hexbeater instances
       */
     resurrectorT(void (*output_redirect)(std::string)=nullptr) : m_nfds(0), m_fds({})
     {
@@ -154,7 +155,7 @@ public:
                 std::cerr << "[resurrector re-starting " << *it
                           << " at " << time_to_hb(0).substr(0,9) << "]\n";
             }
-            it->start_hexbeater(m_fdset_cpy, m_nfds,m_delay);
+            it->start_hexbeater(m_fdset_cpy, m_nfds,m_delay,false);
         }
     }
 

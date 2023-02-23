@@ -86,7 +86,8 @@ arg_value(int argc, char** argv, const char* pshrt, const char* plngpfx)
     for (char** av=argv+argc-1; av > argv; --av)
     {
         // Parse [<short> lastarg] over two consecutive args in argv
-        if (pshrt && !strcmp(*av, pshrt)) {
+        if (pshrt && !strcmp(*av, pshrt))
+        {
             if (!lastarg)
             {
                 Usage(1, (std::string("ERROR:  >>>")

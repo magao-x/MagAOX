@@ -226,6 +226,8 @@ stdout_stderr_redirect(std::string devicename)
     , S_LAST              // End of loop
     };
 
+    errno = 0;            // Ensure there is no current error
+
     // Loop over those steps, exit loop early if errno becomes non-zero
     for (int step = S_BUILD_SUBDIR
         ; !errno && step < S_LAST
