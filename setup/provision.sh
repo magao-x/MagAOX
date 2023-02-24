@@ -38,10 +38,10 @@ source $DIR/_common.sh
 
 # Install OS packages first
 osPackagesScript="$DIR/steps/install_${ID}_${VERSION_ID}_packages.sh"
-$_REAL_SUDO bash -l $osPackagesScript
+$_REAL_SUDO bash -l $osPackagesScript || error_exit "Failed to install packages from $osPackagesScript"
 
 distroSpecificScript="$DIR/steps/configure_${ID}_${VERSION_ID}.sh"
-$_REAL_SUDO bash -l $distroSpecificScript
+$_REAL_SUDO bash -l $distroSpecificScript || error_exit "Failed to configure ${ID} from $distroSpecificScript"
 
 if [[ $VM_KIND != "none" ]]; then
     git config --global --replace-all safe.directory '*'

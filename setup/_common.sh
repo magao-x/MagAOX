@@ -82,14 +82,6 @@ function _cached_fetch() {
   fi
 }
 
-VM_WINDOWS_HOST=0
-VM_KIND=$(systemd-detect-virt)
-if [[ ${WSL_DISTRO_NAME:-none} != "none" ]]; then
-  VM_KIND=wsl
-  VM_WINDOWS_HOST=1
-fi
-
-
 function clone_or_update_and_cd() {
     orgname=$1
     reponame=$2
