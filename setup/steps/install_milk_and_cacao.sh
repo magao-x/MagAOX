@@ -7,17 +7,19 @@ COMMIT_ISH=dev
 orgname=milk-org
 reponame=milk
 parentdir=/opt/MagAOX/source
-clone_or_update_and_cd $orgname $reponame $parentdir
-git checkout $COMMIT_ISH
-
-bash -x ./fetch_cacao_dev.sh
-
+if [[ -e $parentdir/$reponame/NO_UPDATES_THANKS ]]; then
+  log_info "Lock file at $parentdir/$reponame/NO_UPDATES_THANKS indicates it's all good, no updates thanks"
+  cd $parentdir/$reponame
+else
+  clone_or_update_and_cd $orgname $reponame $parentdir
+  git checkout $COMMIT_ISH
+  bash -x ./fetch_cacao_dev.sh
+fi
 sudo rm -rf _build src/config.h src/milk_config.h
 mkdir -p _build
 cd _build
 
 pythonExe=/opt/conda/bin/python
-$pythonExe -m pip install pybind11
 
 milkCmakeArgs="-Dbuild_python_module=ON -DPYTHON_EXECUTABLE=${pythonExe}"
 
@@ -26,7 +28,8 @@ if [[ $MAGAOX_ROLE == TIC || $MAGAOX_ROLE == ICC || $MAGAOX_ROLE == RTC || $MAGA
 fi
 
 cmake .. $milkCmakeArgs
-make
+numCpus=$(nproc)
+make -j $((numCpus / 2))
 sudo make install
 
 sudo $pythonExe -m pip install -e ../src/ImageStreamIO/
@@ -58,9 +61,9 @@ if [[ $MAGAOX_ROLE != ci ]]; then
   fi
 fi
 if [[ $MAGAOX_ROLE == ICC || $MAGAOX_ROLE == RTC ]]; then
-  clone_or_update_and_cd magao-x "cacao-${MAGAOX_ROLE,,}" /opt/MagAOX
-  sudo ln -s "/opt/MagAOX/cacao-${MAGAOX_ROLE,,}" /opt/MagAOX/cacao
-  sudo install $DIR/../systemd_units/cacao_startup.service /etc/systemd/system/
+  clone_or_update_and_cd magao-x "cacao-${MAGAOX_ROLE,,}" /data
+  link_if_necessary "/data/cacao-${MAGAOX_ROLE,,}" /opt/MagAOX/cacao
+  sudo install $DIR/../systemd_units/cacao_startup_if_present.service /etc/systemd/system/
   sudo systemctl daemon-reload || true
-  sudo systemctl enable cacao_startup.service || true
+  sudo systemctl enable cacao_startup_if_present.service || true
 fi
