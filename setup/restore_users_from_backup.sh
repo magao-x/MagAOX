@@ -1,12 +1,12 @@
 #!/usr/bin/env bash
 DIR="$( cd "$( dirname "${BASH_SOURCE[0]}" )" && pwd )"
 source $DIR/_common.sh
-[ "$#" -eq 1 ] || error_exit "Usage: ${BASH_SOURCE[0]} /path/to/folder/of/homes/"
+[ "$#" -eq 1 ] || exit_error "Usage: ${BASH_SOURCE[0]} /path/to/folder/of/homes/"
 if [[ ! -d $1 ]]; then
-    error_exit "Specify the path to a folder of backed-up home directories"
+    exit_error "Specify the path to a folder of backed-up home directories"
 fi
 allUserFolders=($1/*)
-log_warn "Matched these user folders: $allUserFolders"
+log_warn "Matched these user folders: ${allUserFolders[@]}"
 read -p "Ctrl-C to exit, return to continue"
 
 for userFolder in "${allUserFolders[@]}"; do
@@ -19,6 +19,6 @@ for userFolder in "${allUserFolders[@]}"; do
     fi
     uid=$(id -u $userName)
     gid=$(id -g $userName)
-    echo sudo rsync -av $userFolder/ /home/$userName/ || error_exit "Failed to sync files from $userFolder to /home/$userName/"
-    echo sudo chown -vR $uid:$gid /home/$userName/ || error_exit "Failed to normalize ownership to $userName ($(id $userName))"
+    echo sudo rsync -av $userFolder/ /home/$userName/ || exit_error "Failed to sync files from $userFolder to /home/$userName/"
+    echo sudo chown -vR $uid:$gid /home/$userName/ || exit_error "Failed to normalize ownership to $userName ($(id $userName))"
 done
