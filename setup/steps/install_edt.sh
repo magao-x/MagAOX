@@ -14,3 +14,5 @@ if [[ ! -d /opt/EDTpdv ]]; then
 else
     log_info "EDTpdv SDK already installed"
 fi
+
+sudo mv /opt/EDTpdv/version /opt/EDTpdv/version.txt 2>/dev/null || true
