@@ -55,7 +55,7 @@ if [[ $MAGAOX_ROLE != vm && $MAGAOX_ROLE != ci && ! -e /usr/lib/systemd/system/n
   workdir=/tmp/persistenced_setup_$(date +%s)
   mkdir $workdir
   cd $workdir
-  cp /usr/share/doc/NVIDIA_GLX-1.0/sample/nvidia-persistenced-init.tar.bz2 .
+  cp /usr/share/doc/NVIDIA_GLX-1.0/samples/nvidia-persistenced-init.tar.bz2 .
   tar xjf nvidia-persistenced-init.tar.bz2
   cd nvidia-persistenced-init
   # NVIDIA's install script adds the user, adds a systemd unit
