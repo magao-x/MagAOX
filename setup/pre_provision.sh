@@ -67,9 +67,17 @@ NVIDIA_DRIVER_FIX="rd.driver.blacklist=nouveau nouveau.modeset=0"
 # Put it all together
 DESIRED_CMDLINE="nosplash $NVIDIA_DRIVER_FIX $ALPAO_CMDLINE_FIX $PCIEXPANSION_CMDLINE_FIX $SPECTRE_CMDLINE_FIX"
 
+if [[ -d /boot/grub2 ]]; then
+    grubNum=grub2
+elif [[ -d /boot/grub ]]; then
+    grubNum=grub
+else
+    exit_error "Where's grub gotten to?"
+fi
+
 if ! grep "$DESIRED_CMDLINE" /etc/default/grub; then
     echo GRUB_CMDLINE_LINUX_DEFAULT=\""$DESIRED_CMDLINE"\" | sudo tee -a /etc/default/grub
-    sudo grub2-mkconfig -o /boot/grub2/grub.cfg
+    sudo $grubNum-mkconfig -o /boot/$grubNum/grub.cfg
     log_success "Applied kernel command line tweaks"
 fi
 
