@@ -1,0 +1,191 @@
+#!/usr/bin/env bash
+
+function resuctl_main {
+
+  parse_commands $* || exit 1
+  [ "$Helped" ] && exit 0
+
+  verb_${verb}
+}
+
+########################################################################
+function verb_startup {
+
+  hide << "    EoFstartup"
+    echo "$verb:"
+    echo "- verb{$verb}"
+    echo "- ROLE{$ROLE}"
+    echo "- targets{$targets}"
+    EoFstartup
+
+  ripid=$(resurrector_indi_pid) \
+  && ( echo "resurrector_indi already running PID{$ripid}; exiting ..." 1>&2 || true ) \
+  && return 1
+
+  echo "./resurrector_indi -r $ROLE &"
+
+}
+
+########################################################################
+function verb_start {
+  verb_startup
+}
+
+########################################################################
+function verb_stop {
+
+  hide << "    EoFstop"
+    echo "$verb:"
+    echo "- verb{$verb}"
+    echo "- ROLE{$ROLE}"
+    echo "- targets{$targets}"
+    EoFstop
+
+  ripid=$(resurrector_indi_pid) \
+  || ( echo "resurrector_indi already running PID{$ripid}; exiting ..." 1>&2 && false ) \
+  || return 1
+
+  echo "kill -USR1 $ripid"
+
+}
+
+########################################################################
+function verb_inspect {
+  echo "$verb:"
+  echo "- verb{$verb}"
+  echo "- ROLE{$ROLE}"
+  echo "- targets{$targets}"
+}
+
+########################################################################
+function verb_peek {
+  echo "$verb:"
+  echo "- verb{$verb}"
+  echo "- ROLE{$ROLE}"
+  echo "- targets{$targets}"
+}
+
+########################################################################
+function verb_shutdown {
+  echo "$verb:"
+  echo "- verb{$verb}"
+  echo "- ROLE{$ROLE}"
+  echo "- targets{$targets}"
+}
+
+########################################################################
+function verb_restart {
+  echo "$verb:"
+  echo "- verb{$verb}"
+  echo "- ROLE{$ROLE}"
+  echo "- targets{$targets}"
+}
+
+########################################################################
+function parse_commands {
+
+  ### If -r was last command-line arguments, ROLEisnext will be non-empty
+  unset ROLEisnext
+  unset Helped
+
+  ### Loop over command-line arguments
+  for arg in $* ; do
+
+    ### Ignore empty arguments
+    ### -r or --role was previous argument; use current argument as ROLE
+    [ "$arg" ] || continue
+    [ "$ROLEisnext" ] && ROLE="$arg" && unset ROLEisnext && continue
+
+    ### Parse arguments using case-esac statments
+    case "$arg" in
+
+    ### Verbs
+    status|inspect|peek|shutdown|stop|restart|startup|start)
+      [ "$verb" ] && targets="${targets# } $arg"
+      [ "x" == "x$verb" ] && verb="$arg"
+      ;;
+
+    ### -r ROLE or --role ROLE
+    -r|--role)
+      [ "$ROLE" ] && ( Usage "Duplicate role; exiting..." || true ) && return 1
+      ROLEisnext=$arg
+      ;;
+
+    ### Help
+    -h|--help)
+      Helped=yes
+      Usage || return 0
+      ;;
+
+    ### Device name
+    *)
+      targets="${targets# }$([ "$targets" ] && echo -n ' ')$arg"
+      ;;
+    esac
+  done
+
+  [ "$ROLEisnext" ] && ( Usage "ERROR:  missing role argument after [$ROLEisnext]" || true ) && return 1
+  [ "$ROLE" ] || ROLE="$(printenv MAGAOX_ROLE)"
+  [ "$ROLE" ] || Usage "ERROR:  missing role (/opt/MagAOX/config/proclist_{MAGAOX_ROLE}.txt))" || return 1
+
+  [ "$verb" ] || Usage "ERROR:  missing verb (status, peek, etc.)" || return 1
+} ### function parse_commands
+
+########################################################################
+function resurrector_indi_pid {
+
+( lsof +c 0 | grep txt.*resurrector_indi || echo xxx ) \
+| while read ri pid u txt reg device off node exe balance ; do
+    [ "$txt" == "txt" ] \
+    && [ "$(basename "$exe")" == "resurrector_indi" ] \
+    && [ "$pid" ] \
+    && echo $pid | grep '^[1-9][0-9]*$' \
+    && exit 0
+
+    exit 1
+
+  done
+}
+
+########################################################################
+function Usage {
+cat << EoF
+usage: [MAGAOX_ROLE=ROLE] xctrl [-h|--help] [-r ROLE|--role ROLE]
+             {status,inspect,peek,shutdown,stop,restart,startup,start} ...
+
+MagAO-X Process Control
+
+Usage:
+    xctrl status [PROCNAME ...]
+        - show status and last few log lines for each process (or just PROCNAME)
+    xctrl inspect PROCNAME
+        - connect to the tmux session for PROCNAME
+    xctrl startup [PROCNAME ...]
+        - start all processes in /opt/MagAOX/config/proclist_${MAGAOX_ROLE}.txt (or just PROCNAME)
+    xctrl shutdown [PROCNAME ...]
+        - show status and last few log lines for each process (or just PROCNAME)
+    xctrl restart [PROCNAME ...]
+        - shutdown then startup each process (or just PROCNAME)
+
+positional arguments:
+  {status,inspect,peek,shutdown,stop,restart,startup,start}
+                        verb for action to take
+
+optional arguments:
+  -h, --help            show this help message and exit
+  -r ROLE, --role ROLE  Specify role to read proclist for (default:$MAGAOX_ROLE)
+
+$*
+EoF
+
+return 1
+}
+
+########################################################################
+function hide {
+  cat > /dev/null
+}
+
+########################################################################
+### All functions are read in; start executing by running main above
+resuctl_main $*
