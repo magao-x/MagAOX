@@ -18,6 +18,6 @@ for userFolder in $homePrefix/*; do
     fi
     uid=$(id -u $userName)
     gid=$(id -g $userName)
-    sudo rsync -av $userFolder/ /home/$userName/
-    sudo chown -vR $uid:$gid /home/$userName/
+    sudo rsync -av $userFolder/ /home/$userName/ || error_exit "Failed to sync files from $userFolder to /home/$userName/"
+    sudo chown -vR $uid:$gid /home/$userName/ || error_exit "Failed to normalize ownership to $userName ($(id $userName))"
 done
