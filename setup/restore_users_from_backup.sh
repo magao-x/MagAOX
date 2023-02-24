@@ -18,6 +18,6 @@ for userFolder in $homePrefix/*; do
     fi
     uid=$(id -u $userName)
     gid=$(id -g $userName)
-    rsync -av $userFolder/ /home/$userName/
-    chown -vR $uid:$gid /home/$userName/
+    sudo rsync -av $userFolder/ /home/$userName/
+    sudo chown -vR $uid:$gid /home/$userName/
 done
