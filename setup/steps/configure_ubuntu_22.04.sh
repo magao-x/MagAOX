@@ -46,15 +46,15 @@ if [[ $MAGAOX_ROLE == AOC || $MAGAOX_ROLE == ICC || $MAGAOX_ROLE == RTC || $MAGA
     sudo systemctl mask systemd-networkd-wait-online.service || true
     
     log_info "Ensure UFW firewall is enabled"
-    yes | sudo ufw enable || exit 1
-    sudo ufw allow ssh || exit 1
-    sudo ufw deny http || exit 1
-    sudo ufw deny https || exit 1
-    sudo ufw allow in from 192.168.0.0/24 || exit 1
+    yes | sudo ufw enable || true
+    sudo ufw allow ssh || true
+    sudo ufw deny http || true
+    sudo ufw deny https || true
+    sudo ufw allow in from 192.168.0.0/24 || true
 
     log_info "Use CentOS mountpoint for cpusets"
     sudo mkdir -p /sys/fs/cgroup/cpuset
-    cat <<'HERE' | sudo tee /etc/cset.conf || exit 1
+    cat <<'HERE' | sudo tee /etc/cset.conf || true
 mountpoint = /sys/fs/cgroup/cpuset
 HERE
 fi

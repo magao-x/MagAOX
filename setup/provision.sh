@@ -38,10 +38,10 @@ source $DIR/_common.sh
 
 # Install OS packages first
 osPackagesScript="$DIR/steps/install_${ID}_${VERSION_ID}_packages.sh"
-$_REAL_SUDO bash -l $osPackagesScript || error_exit "Failed to install packages from $osPackagesScript"
+$_REAL_SUDO bash -l $osPackagesScript || exit_error "Failed to install packages from $osPackagesScript"
 
 distroSpecificScript="$DIR/steps/configure_${ID}_${VERSION_ID}.sh"
-$_REAL_SUDO bash -l $distroSpecificScript || error_exit "Failed to configure ${ID} from $distroSpecificScript"
+$_REAL_SUDO bash -l $distroSpecificScript || exit_error "Failed to configure ${ID} from $distroSpecificScript"
 
 if [[ $VM_KIND != "none" ]]; then
     git config --global --replace-all safe.directory '*'
@@ -92,7 +92,7 @@ if [[ $MAGAOX_ROLE == vm ]]; then
     fi
     # Install a config in ~/.ssh/config for the vm user
     # to make it easier to make tunnels work
-    bash -l "$DIR/steps/configure_vm_ssh.sh" || error_exit "Failed to set up VM SSH"
+    bash -l "$DIR/steps/configure_vm_ssh.sh" || exit_error "Failed to set up VM SSH"
 fi
 
 # Install dependencies for the GUIs
@@ -122,8 +122,8 @@ else
     export BLAS_VENDOR=openblas
 fi
 if [[ $MAGAOX_ROLE == RTC || $MAGAOX_ROLE == ICC || $MAGAOX_ROLE == AOC || $MAGAOX_ROLE == TIC || $MAGAOX_ROLE == ci ]]; then
-    sudo bash -l "$DIR/steps/install_cuda.sh" || error_exit "CUDA install failed"
-    sudo bash -l "$DIR/steps/install_magma.sh" || error_exit "MAGMA install failed"
+    sudo bash -l "$DIR/steps/install_cuda.sh" || exit_error "CUDA install failed"
+    sudo bash -l "$DIR/steps/install_magma.sh" || exit_error "MAGMA install failed"
 fi
 sudo bash -l "$DIR/steps/install_fftw.sh" || exit 1
 sudo bash -l "$DIR/steps/install_cfitsio.sh" || exit 1
