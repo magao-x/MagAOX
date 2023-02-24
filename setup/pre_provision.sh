@@ -67,23 +67,28 @@ NVIDIA_DRIVER_FIX="rd.driver.blacklist=nouveau nouveau.modeset=0"
 # Put it all together
 DESIRED_CMDLINE="nosplash $NVIDIA_DRIVER_FIX $ALPAO_CMDLINE_FIX $PCIEXPANSION_CMDLINE_FIX $SPECTRE_CMDLINE_FIX"
 
-if [[ -d /boot/grub2 ]]; then
-    grubNum=grub2
-elif [[ -d /boot/grub ]]; then
-    grubNum=grub
-else
-    exit_error "Where's grub gotten to?"
-fi
-
 if ! grep "$DESIRED_CMDLINE" /etc/default/grub; then
     echo GRUB_CMDLINE_LINUX_DEFAULT=\""$DESIRED_CMDLINE"\" | sudo tee -a /etc/default/grub
-    sudo $grubNum-mkconfig -o /boot/$grubNum/grub.cfg
+    if [[ -d /boot/grub2 ]]; then
+        sudo grub2-mkconfig -o /boot/grub2/grub.cfg
+    elif [[ -d /boot/grub ]]; then
+        sudo update-grub
+    else
+        exit_error "Where's grub gotten to?"
+    fi
     log_success "Applied kernel command line tweaks"
+fi
+
+log_info "Disabling hibernate/resume support in initramfs"
+if ! grep 'RESUME=none' /etc/initramfs-tools/conf.d/resume; then
+    echo "RESUME=none" | sudo tee /etc/initramfs-tools/conf.d/resume
+    sudo update-initramfs -u -k all
 fi
 
 if [[ ! -e /etc/modprobe.d/blacklist-nouveau.conf ]]; then
     echo "blacklist nouveau" | sudo tee /etc/modprobe.d/blacklist-nouveau.conf > /dev/null
     echo "options nouveau modeset=0" | sudo tee -a /etc/modprobe.d/blacklist-nouveau.conf > /dev/null
+    sudo update-initramfs -u
     log_success "Blacklisted nouveau nvidia driver"
 else
     log_info "nouveau nvidia driver blacklist entry exists"
