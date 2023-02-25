@@ -118,6 +118,30 @@ function verb_stop {
 }
 
 ########################################################################
+function verb_defib {
+
+  [ "$procnames" ] \
+  || Usage "ERROR:  command [defib] requires PROCNAME(s)" \
+  || return 1
+
+  ripid=$(resurrector_indi_pid) \
+  || ( echo "${RED_SEQ}resurrector_indi is not running; exiting ...${RESET_SEQ}" 1>&2 && false ) \
+  || return 1
+
+  for procname in $procnames ; do
+    hbpath="$(find_live_hexbeat_pipe $procname)" \
+    || ( echo "${RED_SEQ}resurrector_indi is not reading $procname's pipe; skipping this Hexbeater ...${RESET_SEQ}" 1>&2 && false ) \
+    || continue
+
+    echo 000000000 >> "$hbpath"
+    echo "${GREEN_SEQ}Defibrillated $procname${RESET_SEQ}"
+    true
+
+  done
+  
+}
+
+########################################################################
 function verb_peek {
   hide
 }
@@ -147,7 +171,7 @@ function parse_commands {
     case "$arg" in
 
     ### Verbs
-    status|peek|shutdown|stop|restart|startup|start)
+    startup|shutdown|restart|start|stop|defib|peek|status)
       [ "$verb" ] && procnames="${procnames# }$(procname_pad)$arg"
       [ "$verb" ] || verb="$arg"
       ;;
@@ -262,21 +286,21 @@ function find_live_hexbeat_pipe {
 function Usage {
 cat << EoF
 usage: [MAGAOX_ROLE=ROLE] resuctrl [-h|--help] [-r ROLE|--role ROLE] \\
-             status|peek|shutdown|stop|restart|startup|start \\
+             startup|shutdown|restart|start|stop|defib|peek|status \\
              [PROCNAME[ PROCNAME[ ...]]]
 
 MagAO-X Process Control
 
 Usage:
 
-    resuctrl status [PROCNAME ...]
-        - show status and last few log lines for each process (or just PROCNAME)
-
-    resuctrl startup --all
+    resuctrl startup [--all]
         - startup resurrector_indi and all processes in proclist
 
-    resuctrl shutdown --all
+    resuctrl shutdown [--all]
         - shutdown all processes including resurrector_indi
+
+    resuctrl restart
+        - have resurrector_indi shutdown then startup each running process
 
     resuctrl start PROCNAME[ PROCNAME[ ...]]
         - enable and start PROCNAME processes in proclist
@@ -284,8 +308,14 @@ Usage:
     resuctrl stop PROCNAME[ PROCNAME[ ...]]
         - disable and stop PROCNAME processes in proclist
 
-    resuctrl restart
-        - have resurrector_indi shutdown then startup each running process
+    resuctrl defib PROCNAME[ [PROCNAME ...]]
+        - show status and last few log lines for each process
+
+    resuctrl peek PROCNAME [PROCNAME ...]
+        - show status and last few log lines for each process
+
+    resuctrl status PROCNAME [PROCNAME ...]
+        - show status and last few log lines for each process
 
 positional arguments:
   {status,peek,shutdown,stop,restart,startup,start}
