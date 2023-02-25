@@ -90,6 +90,7 @@ yum install -y zeromq-devel libzmq5
 # For some reason, pkg-config doesn't automatically look here?
 echo "export PKG_CONFIG_PATH=\$PKG_CONFIG_PATH:/usr/local/lib/pkgconfig" > /etc/profile.d/pkg-config-path.sh
 
+mkdir -p /opt/MagAOX/vendor
 cd /opt/MagAOX/vendor
 rpmFile=cpuset-1.6-lp154.59.1.noarch.rpm
 
