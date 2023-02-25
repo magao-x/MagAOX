@@ -218,10 +218,14 @@ lsof +c 0 | grep --color=never 'txt.*resurrector_indi$' \
 
 ########################################################################
 ### Find a Hexbeater pipe that is being read by the resurrector_indi app
-### N.B. this function only returnf success code if such a pipe is found
+### N.B. this only returns success code zero if such a pipe is detected,
+###      and in every other situation it returns a non-zero failure code
+###
 ### Usage:
 ###
 ###   find_live_hexbeat_pipe xy  ### for /opt/MagAOX/drivers/fifos/xy.hb
+###
+###   hbpath=$(find_live_hexbeat_pipe xy) || echo "Pipe xy is not alive"
 ###
 function find_live_hexbeat_pipe {
 
@@ -235,14 +239,14 @@ function find_live_hexbeat_pipe {
 
   ### List all processes that have that file open; find resurrector_indi
   lsof +c 0  "$hbpath" \
-  | while read cmd pid user fd type dev sizeoff mode path ; do
+  | while read cmd pid user fd type dev sizeoff mode path the_cruft ; do
 
-      ### ripid=... => fails if resurrector_indi is not running
+      ### ripid=... => fails if resurrector_indi is not currently active
       ### ${ri#${cmd}} => fails if cmd is not subset of resurrector_indi
-      ### $pid => fails if pid is not that of resurrector_indi
-      ### ${fd%w} => fails if process has pipe open for write only
-      ### echo "$path" => output path to pipe read by resurrector_indi
-      ### break out of loop when path read by resurrector_indi is found
+      ### $pid => fails if pid with pipe open is not of resurrector_indi
+      ### ${fd%w} => fails if [pid] process has pipe open for write only
+      ### echo "$path" - write path of pipe accessed by resurrector_indi
+      ### break out of loop when pipe accessed by resurrector_indi found
 
       ripid=$(resurrector_indi_pid) \
       && [ "${ri#${cmd}}" != "$ri" ] \
