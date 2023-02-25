@@ -15,6 +15,5 @@ jobs:
         name: Install OS dependencies
       - run: 'bash -lx setup/provision.sh'
         name: Auto-provision
-      - run:
-          name: Install MagAO-X
-          command: 'bash -l setup/steps/install_MagAOX.sh ci'
+      - run: 'bash -l setup/steps/install_MagAOX.sh ci'
+        name: Install MagAO-X
