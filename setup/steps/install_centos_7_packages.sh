@@ -98,7 +98,7 @@ rpmFile=cpuset-1.6-lp154.59.1.noarch.rpm
 source $DIR/../_common.sh
 
 _cached_fetch https://download.opensuse.org/repositories/hardware/15.4/noarch/$rpmFile $rpmFile
-sudo yum install -y $rpmFile
+sudo yum install -y $rpmFile || true
 cat <<'HERE' | sudo tee /etc/cset.conf || exit 1
 mountpoint = /sys/fs/cgroup/cpuset
 HERE
