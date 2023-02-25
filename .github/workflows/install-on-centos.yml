@@ -1,0 +1,18 @@
+jobs:
+  install-on-centos:
+    runs-on: centos:7.9.2009
+    steps:
+      - name: Check out repository code
+        uses: actions/checkout@v2
+      - name: Cache dependencies 
+        uses: actions/cache@v3
+        with:
+          path: /opt/MagAOX/
+          key: ${{ runner.os }}-dependencies-cache-v1-${{ hashFiles('setup/*', 'setup/**/*') }}
+      - run: 'bash -x setup/steps/install_centos7_packages.sh'
+        name: Install OS dependencies
+      - run: 'bash -lx setup/provision.sh'
+        name: Auto-provision
+      - run:
+          name: Install MagAO-X
+          command: 'bash -l setup/steps/install_MagAOX.sh ci'
