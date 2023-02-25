@@ -1,4 +1,9 @@
 #!/bin/bash
+# If not started as root, sudo yourself
+if [[ "$EUID" != 0 ]]; then
+    sudo bash -l $0 "$@"
+    exit $?
+fi
 DIR="$( cd "$( dirname "${BASH_SOURCE[0]}" )" && pwd )"
 export BUILDING_KERNEL_STUFF=1  # disable loading devtoolset-7 for agreement w/ kernel gcc
 source $DIR/../_common.sh
@@ -10,8 +15,8 @@ sudo patch -Np1 < alpao_build_fix.patch || true
 echo 2 | sudo bash Linux/InstallASDK.sh
 # The Alpao installer (and PEX sub-installer) doesn't explicitly set permissions on its libs
 for libFilename in libgpg2x72c.so.2.2.5 libgpgconf.so.1.5.6 libait_pex292144.so libasdk.so; do
-    sudo chmod -v u=rwx,g=rx,o=rx /usr/lib/$libFilename
-    sudo chmod -v u=rwx,g=rx,o=rx /usr/lib64/$libFilename
+    sudo chmod -v u=rwx,g=rx,o=rx /usr/lib/$libFilename || true
+    sudo chmod -v u=rwx,g=rx,o=rx /usr/lib64/$libFilename || true
 done
 
 echo "export ACECFG=/opt/MagAOX/config/alpao" | sudo tee /etc/profile.d/alpao.sh
