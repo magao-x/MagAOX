@@ -1,84 +1,130 @@
 #!/usr/bin/env bash
 
+########################################################################
+### Main routine:  parse commands; print Usage; call the verb's function
 function resuctl_main {
 
-  parse_commands $* || exit 1
-  [ "$Helped" ] && exit 0
+  misc_setup
+
+  parse_commands $* || return 1
+
+  [ "$Helped" ] && return 0
 
   verb_${verb}
 }
 
 ########################################################################
+### Startup:  if resurrector_indi is not running, and configuration file
+###           is readable, then start resurrectee_indi with stated $ROLE
 function verb_startup {
 
-  hide << "    EoFstartup"
-    echo "$verb:"
-    echo "- verb{$verb}"
-    echo "- ROLE{$ROLE}"
-    echo "- targets{$targets}"
-    EoFstartup
+  hide
 
   ripid=$(resurrector_indi_pid) \
-  && ( echo "resurrector_indi already running PID{$ripid}; exiting ..." 1>&2 || true ) \
+  && ( [ "$verb" == "restart" ] \
+     || echo "${RED_SEQ}resurrector_indi already running PID{$ripid}; exiting ...${RESET_SEQ}" 1>&2 \
+     || true
+     ) \
   && return 1
 
-  echo "./resurrector_indi -r $ROLE &"
+  proclist_txt="$(proclist_path) readonly" \
+  || ( echo "${RED_SEQ}Readable process list file not found; exiting ...${RESET_SEQ}" 1>&2 && false) \
+  || return 1
 
+  command="./resurrector_indi -r $ROLE"
+  echo "${GREEN_SEQ}$command &${RESET_SEQ}"
+  $command &
 }
 
 ########################################################################
-function verb_start {
+### Shutdown:  if resurrector_indi is active, then signal it via SIGUSR1
+###            to trigger killing its INDI driver devices before exiting
+function verb_shutdown {
+
+  hide
+
+  ripid=$(resurrector_indi_pid) \
+  || ( echo "${RED_SEQ}resurrector_indi is not running; exiting ...${RESET_SEQ}" 1>&2 && false ) \
+  || return 1
+
+  command="kill -USR1 $ripid"
+  echo "${GREEN_SEQ}$command${RESET_SEQ}"
+  $command
+}
+
+########################################################################
+### Restart:  first shutdown, then startup, the resurrector_indi process
+function verb_restart {
+  hide
+  verb_shutdown
+  sleep 5
   verb_startup
 }
 
 ########################################################################
-function verb_stop {
+### Start:  edit process list file to enable selected devices, then send
+###         signal SIGUSR2 to resurrector_indi to re-start those devices
+function verb_start {
 
-  hide << "    EoFstop"
-    echo "$verb:"
-    echo "- verb{$verb}"
-    echo "- ROLE{$ROLE}"
-    echo "- targets{$targets}"
-    EoFstop
+  hide
 
-  ripid=$(resurrector_indi_pid) \
-  || ( echo "resurrector_indi already running PID{$ripid}; exiting ..." 1>&2 && false ) \
+  [ "$procnames" ] \
+  || Usage "ERROR:  command [start] requires PROCNAME(s)" \
   || return 1
 
-  echo "kill -USR1 $ripid"
+  proclist_txt="$(proclist_path)" \
+  || ( echo "${RED_SEQ}Writable process list file not found; exiting ...${RESET_SEQ}" 1>&2 && false) \
+  || return 1
 
+  for procname in $procnames ; do
+    sed -i -e "/^[ 	]*#[ 	#]*${procname}[ 	][ 	]*[^ 	][^ 	]*[ 	]*\$/s/^[ 	#]*//" "$proclist_txt"
+  done
+
+  ripid=$(resurrector_indi_pid) \
+  || ( echo "${RED_SEQ}resurrector_indi is not running; exiting ...${RESET_SEQ}" 1>&2 && false ) \
+  || return 1
+
+  command="kill -USR2 $ripid"
+  echo "${GREEN_SEQ}$command${RESET_SEQ}"
+  $command
 }
 
 ########################################################################
-function verb_inspect {
-  echo "$verb:"
-  echo "- verb{$verb}"
-  echo "- ROLE{$ROLE}"
-  echo "- targets{$targets}"
+### Stop:  edit process list file to disable selected devices, then send
+###        signal SIGUSR2 to resurrector_indi to terminate those devices
+function verb_stop {
+
+  hide
+
+  [ "$procnames" ] \
+  || Usage "ERROR:  command [stop] requires PROCNAME(s)" \
+  || return 1
+
+  proclist_txt="$(proclist_path)" \
+  || ( echo "${RED_SEQ}Writable process list file not found; exiting ...${RESET_SEQ}" 1>&2 && false) \
+  || return 1
+
+  for procname in $procnames ; do
+    sed -i -e "/^[ 	]*${procname}[ 	][ 	]*[^ 	][^ 	]*[ 	]*\$/s/^[ 	]*/#/" "$proclist_txt"
+  done
+
+  ripid=$(resurrector_indi_pid) \
+  || ( echo "${RED_SEQ}resurrector_indi is not running; exiting ...${RESET_SEQ}" 1>&2 && false ) \
+  || return 1
+
+  command="kill -USR2 $ripid"
+  echo "${GREEN_SEQ}$command${RESET_SEQ}"
+  $command
 }
 
 ########################################################################
 function verb_peek {
-  echo "$verb:"
-  echo "- verb{$verb}"
-  echo "- ROLE{$ROLE}"
-  echo "- targets{$targets}"
+  hide
 }
 
 ########################################################################
-function verb_shutdown {
-  echo "$verb:"
-  echo "- verb{$verb}"
-  echo "- ROLE{$ROLE}"
-  echo "- targets{$targets}"
-}
-
-########################################################################
-function verb_restart {
-  echo "$verb:"
-  echo "- verb{$verb}"
-  echo "- ROLE{$ROLE}"
-  echo "- targets{$targets}"
+function verb_status {
+  hide
 }
 
 ########################################################################
@@ -87,6 +133,7 @@ function parse_commands {
   ### If -r was last command-line arguments, ROLEisnext will be non-empty
   unset ROLEisnext
   unset Helped
+  unset All
 
   ### Loop over command-line arguments
   for arg in $* ; do
@@ -100,15 +147,20 @@ function parse_commands {
     case "$arg" in
 
     ### Verbs
-    status|inspect|peek|shutdown|stop|restart|startup|start)
-      [ "$verb" ] && targets="${targets# } $arg"
-      [ "x" == "x$verb" ] && verb="$arg"
+    status|peek|shutdown|stop|restart|startup|start)
+      [ "$verb" ] && procnames="${procnames# }$(procname_pad)$arg"
+      [ "$verb" ] || verb="$arg"
       ;;
 
     ### -r ROLE or --role ROLE
     -r|--role)
       [ "$ROLE" ] && ( Usage "Duplicate role; exiting..." || true ) && return 1
       ROLEisnext=$arg
+      ;;
+
+    ### -all
+    --all)
+      All=yes
       ;;
 
     ### Help
@@ -119,73 +171,163 @@ function parse_commands {
 
     ### Device name
     *)
-      targets="${targets# }$([ "$targets" ] && echo -n ' ')$arg"
+      procnames="${procnames# }$(procname_pad)$arg"
       ;;
     esac
   done
 
   [ "$ROLEisnext" ] && ( Usage "ERROR:  missing role argument after [$ROLEisnext]" || true ) && return 1
   [ "$ROLE" ] || ROLE="$(printenv MAGAOX_ROLE)"
-  [ "$ROLE" ] || Usage "ERROR:  missing role (/opt/MagAOX/config/proclist_{MAGAOX_ROLE}.txt))" || return 1
+  [ "$ROLE" ] || Usage "ERROR:  missing role (${opt_magaox}/config/proclist_{MAGAOX_ROLE}.txt))" || return 1
 
   [ "$verb" ] || Usage "ERROR:  missing verb (status, peek, etc.)" || return 1
+
+  [ "$All" ] && [ "$verb" != "startup" ] && [ "$verb" != "shutdown" ] \
+  && ( Usage "Error:  --all option only valid for commands startup and shutdown" || true ) && return 1
+
+  [ "$All" ] && [ "$procnames" ] \
+  && ( Usage "Error:  --all option mutually exclusive with PROCNAME options [$procnames]" || true ) && return 1
+
+  true
 } ### function parse_commands
 
+function procname_pad { [ "$procnames" ] && echo -n ' '; }
+
 ########################################################################
+### Find PID of running resurrector_indi
+function proclist_path {
+  the_proclist="${opt_magaox}/config/proclist_${ROLE}.txt"
+  [ -r "$the_proclist" ] \
+  && ( [ "$1" == "readonly" ] || [ -w "$the_proclist" ] ) \
+  && ls -d "$the_proclist"
+}
+
+########################################################################
+### Find the PID of the first running resurrector_indi that can be found
 function resurrector_indi_pid {
 
-( lsof +c 0 | grep txt.*resurrector_indi || echo xxx ) \
-| while read ri pid u txt reg device off node exe balance ; do
+lsof +c 0 | grep --color=never 'txt.*resurrector_indi$' \
+| while read ri pid user txt reg device size_off node exe cruft ; do
     [ "$txt" == "txt" ] \
     && [ "$(basename "$exe")" == "resurrector_indi" ] \
     && [ "$pid" ] \
     && echo $pid | grep '^[1-9][0-9]*$' \
-    && exit 0
+    && break
+  done | grep --color=never .    ### Return failure if nothing was found
+}
 
-    exit 1
+########################################################################
+### Find a Hexbeater pipe that is being read by the resurrector_indi app
+### N.B. this function only returnf success code if such a pipe is found
+### Usage:
+###
+###   find_live_hexbeat_pipe xy  ### for /opt/MagAOX/drivers/fifos/xy.hb
+###
+function find_live_hexbeat_pipe {
 
-  done
+  ### The first column of the lsof output will be a subset of this name:
+  ri="resurrector_indi"
+
+  fdir="${opt_magaox}/drivers/fifos/"     ### Named FIFOs are under here
+
+  hbpath="$(find "$fdir" -type p -name "${1}.hb" | head -1 | grep . )" \
+  || return 1
+
+  ### List all processes that have that file open; find resurrector_indi
+  lsof +c 0  "$hbpath" \
+  | while read cmd pid user fd type dev sizeoff mode path ; do
+
+      ### ripid=... => fails if resurrector_indi is not running
+      ### ${ri#${cmd}} => fails if cmd is not subset of resurrector_indi
+      ### $pid => fails if pid is not that of resurrector_indi
+      ### ${fd%w} => fails if process has pipe open for write only
+      ### echo "$path" => output path to pipe read by resurrector_indi
+      ### break out of loop when path read by resurrector_indi is found
+
+      ripid=$(resurrector_indi_pid) \
+      && [ "${ri#${cmd}}" != "$ri" ] \
+      && [ "$pid" == "$ripid" ] \
+      && [ "${fd%w}" == "$fd" ] \
+      && echo "$path" \
+      && break
+
+    done | grep --color=never .  ### Return failure if nothing was found
 }
 
 ########################################################################
 function Usage {
 cat << EoF
-usage: [MAGAOX_ROLE=ROLE] xctrl [-h|--help] [-r ROLE|--role ROLE]
-             {status,inspect,peek,shutdown,stop,restart,startup,start} ...
+usage: [MAGAOX_ROLE=ROLE] resuctrl [-h|--help] [-r ROLE|--role ROLE] \\
+             status|peek|shutdown|stop|restart|startup|start \\
+             [PROCNAME[ PROCNAME[ ...]]]
 
 MagAO-X Process Control
 
 Usage:
-    xctrl status [PROCNAME ...]
+
+    resuctrl status [PROCNAME ...]
         - show status and last few log lines for each process (or just PROCNAME)
-    xctrl inspect PROCNAME
-        - connect to the tmux session for PROCNAME
-    xctrl startup [PROCNAME ...]
-        - start all processes in /opt/MagAOX/config/proclist_${MAGAOX_ROLE}.txt (or just PROCNAME)
-    xctrl shutdown [PROCNAME ...]
-        - show status and last few log lines for each process (or just PROCNAME)
-    xctrl restart [PROCNAME ...]
-        - shutdown then startup each process (or just PROCNAME)
+
+    resuctrl startup --all
+        - startup resurrector_indi and all processes in proclist
+
+    resuctrl shutdown --all
+        - shutdown all processes including resurrector_indi
+
+    resuctrl start PROCNAME[ PROCNAME[ ...]]
+        - enable and start PROCNAME processes in proclist
+
+    resuctrl stop PROCNAME[ PROCNAME[ ...]]
+        - disable and stop PROCNAME processes in proclist
+
+    resuctrl restart
+        - have resurrector_indi shutdown then startup each running process
 
 positional arguments:
-  {status,inspect,peek,shutdown,stop,restart,startup,start}
+  {status,peek,shutdown,stop,restart,startup,start}
                         verb for action to take
+
+proclist is contents of file::
+  ${opt_magaox}/config/proclist_${MAGAOX_ROLE}.txt
 
 optional arguments:
   -h, --help            show this help message and exit
   -r ROLE, --role ROLE  Specify role to read proclist for (default:$MAGAOX_ROLE)
 
-$*
+$RED_SEQ$*$RESET_SEQ
 EoF
 
 return 1
+
+####################################
+### Obsolete:
+###    resuctrl inspect PROCNAME
+###        - connect to the tmux session for PROCNAME
+####################################
 }
 
 ########################################################################
 function hide {
-  cat > /dev/null
+  ( [ "$VERBOSE" ] && cat || cat > /dev/null ) << EoFhide
+verb{$verb}:
+- ROLE{$ROLE}
+- procnames{$procnames}
+- All{$All}
+EoFhide
 }
 
 ########################################################################
-### All functions are read in; start executing by running main above
+function misc_setup {
+
+  opt_magaox="/opt/MagAOX"
+
+  RED_SEQ="$(tput setaf 1)"
+  GREEN_SEQ="$(tput setaf 2)"
+  YELLOW_SEQ="$(tput setaf 3)"
+  BLUE_SEQ="$(tput setaf 4)"
+  RESET_SEQ="$(tput sgr0)"
+}
+
+########################################################################
+### All functions have been read in; start by calling resuctl_main above
 resuctl_main $*
