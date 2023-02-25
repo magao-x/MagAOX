@@ -3,6 +3,7 @@ jobs:
   build_centos:
     environment:
       MAGAOX_ROLE: ci
+      MKLROOT: /opt/intel/oneapi/mkl/latest
     docker:
       - image: centos:7.6.1810
     steps:
@@ -27,6 +28,7 @@ jobs:
       - run:
           name: Install MagAO-X
           command: 'bash -l ~/project/setup/steps/install_MagAOX.sh ci'
+    resource_class: large
 workflows:
   version: 2
   centos:
