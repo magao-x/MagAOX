@@ -47,6 +47,11 @@ if [[ $MAGAOX_ROLE == RTC || $MAGAOX_ROLE == ICC || $MAGAOX_ROLE == AOC || $MAGA
   echo "INCLUDES += -I/usr/local/cuda/targets/x86_64-linux/include/" >> $mxlibCommonOverrides
 fi
 
+source /etc/os-release
+if [[ $ID == centos ]]; then
+  echo "CXXVERSION = -std=c++14" >> $mxlibCommonOverrides
+fi
+
 if [[ $(uname -p) != "x86_64" ]]; then
   echo "USE_BLAS_FROM = openblas" >> $mxlibCommonOverrides
 fi

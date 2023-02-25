@@ -14,7 +14,26 @@ yum install -y http://dl.fedoraproject.org/pub/epel/epel-release-latest-7.noarch
 yum install -y http://galaxy4.net/repo/galaxy4-release-7-current.noarch.rpm || true
 
 # changes the set of available packages, making devtoolset-7 available
-yum -y install centos-release-scl
+yum -y install centos-release-scl  || exit_error "Failed to enable devtoolsets"
+# install and enable devtoolset-7 for all users
+# Note: this only works on interactive shells! There is a bug in SCL
+# that breaks sudo argument parsing when SCL is enabled
+# (https://bugzilla.redhat.com/show_bug.cgi?id=1319936)
+# so we don't want it enabled when, e.g., Vagrant
+# sshes in to change things. (Complete sudo functionality
+# is available to interactive shells by specifying /bin/sudo.)
+yum -y install devtoolset-7
+cat << 'EOF' | tee /etc/profile.d/devtoolset-7.sh
+if tty -s; then
+  if [[ $USER != root ]]; then source /opt/rh/devtoolset-7/enable; fi
+fi
+EOF
+set +u
+source /opt/rh/devtoolset-7/enable
+set -u
+# Search /usr/local/lib by default for dynamic library loading
+echo "/usr/local/lib" | tee /etc/ld.so.conf.d/local.conf
+ldconfig -v
 
 # Install build tools and utilities
 yum install -y \
