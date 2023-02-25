@@ -66,7 +66,7 @@ else
   exit 1
 fi
 make || exit 1
-sudo -E make install || exit 1
+sudo make install || exit 1
 # Sanity check: make sure gengithead.sh is available systemwide in /usr/local/bin
 gengithead.sh ./ ./include/mxlib_uncomp_version.h MXLIB_UNCOMP || exit 1
 # Ensure all users get $MXMAKEFILE pointing to this install by default
