@@ -1,7 +1,8 @@
 #!/bin/bash
 # If not started as root, sudo yourself
+export BUILDING_KERNEL_STUFF=1  # disable loading devtoolset-7 for agreement w/ kernel gcc
 if [[ "$EUID" != 0 ]]; then
-    export BUILDING_KERNEL_STUFF=1  # disable loading devtoolset-7 for agreement w/ kernel gcc
+    echo "Becoming root, disabling loading devtoolset-7 for agreement w/ kernel gcc..."
     /usr/bin/sudo --preserve-env=BUILDING_KERNEL_STUFF bash -l $0 "$@"
     exit $?
 fi
