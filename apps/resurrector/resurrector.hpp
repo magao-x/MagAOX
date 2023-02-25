@@ -98,12 +98,16 @@ public:
         // Handle select(2) error
         if (iselect < 0)
         {
-#           define ISELSTR(x) #x
-#           define ISELSTRMACRO(x) ISELSTR(x)
-            perror("select(2) error:  " __FILE__ "; " ISELSTRMACRO(__LINE__));
-            // Pause for 0.999999s
-            struct timeval tv{0,999999};
-            select(0, 0,0,0, &tv);
+            // Log and pause for errors; respond to signals immediately
+            if (errno != EINTR)
+            {
+#               define ISELSTR(x) #x
+#               define ISELSTRMACRO(x) ISELSTR(x)
+                perror("select(2) error:  " __FILE__ "; " ISELSTRMACRO(__LINE__));
+                // Pause for about a second
+                struct timeval tv{0,999999};
+                select(0, 0,0,0, &tv);
+            }
             return;
         }
 
