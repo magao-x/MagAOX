@@ -22,6 +22,13 @@ CONFIG(release, debug|release) {
 }
 CONFIG += c++14
 CONFIG += qwt
+exists( $$(CONDA_PREFIX)/include ) {
+    INCLUDEPATH += $$(CONDA_PREFIX)/include
+}
+exists( $$(CONDA_PREFIX)/lib ) {
+    INCLUDEPATH += $$(CONDA_PREFIX)/lib
+}
+
 MAKEFILE = makefile.pwrGUI
 
 # Input

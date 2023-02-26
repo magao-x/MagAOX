@@ -1,0 +1,157 @@
+#!/usr/bin/env python
+import pickle
+import os.path
+from astropy.io import fits
+import datetime
+from pprint import pprint, pformat
+import glob
+import pathlib
+import tqdm
+import orjson
+import logging
+from collections import defaultdict
+
+log = logging.getLogger(__name__)
+
+SCIENCE_CAMERAS = ['camsci1', 'camsci2']
+IGNORED_KEYS = ['TEMP', 'WIDTH', 'HEIGHT', 'XCEN', 'YCEN', 'FPS', 'MODE',]
+
+def collect_camera_settings(semester, night, camname, check_only_n=None, progress=False):
+    open_shutter_settings = defaultdict(lambda: 0)
+    shut_shutter_settings = defaultdict(lambda: 0)
+    glob_pattern = f"/data/obs/{semester}/{night}/*/*/*/{camname}/*.fits"
+    iterable = glob.glob(glob_pattern)[:check_only_n]
+    if progress:
+        iterable = tqdm.tqdm(iterable)
+    for fn in iterable:
+        head_part, _ = os.path.split(fn)
+        parts = head_part.replace('/data/obs/', '').split('/')
+        _, day_span, target_name, fn_observer, fn_obs_name, _ = parts
+        was_shut = None
+        with open(fn, 'rb') as fh:
+            try:
+                hdr = fits.getheader(fh)
+            except OSError:
+                log.exception(f"Couldn't open FITS file {fn}")
+                continue
+
+            camera_settings = [
+                ('WIDTH', hdr['NAXIS1']),
+                ('HEIGHT', hdr['NAXIS2']),
+            ]
+
+            for card in hdr.cards:
+                try:
+                    card.verify('fix')
+                    key = card.keyword
+                    value = card.value
+                except fits.verify.VerifyError:
+                    log.info("Couldn't parse", fn)
+                    raise
+                if camname.upper() in key:
+                    if 'SHUTTER' in key:
+                        if 'SHUT' in value:
+                            was_shut = True
+                        continue
+                    if any(key.endswith(ignored) for ignored in IGNORED_KEYS):
+                        continue
+                    cleaned_key = key.replace(f"{camname.upper()} ", "")
+                    # special case for invalid bin values
+                    if cleaned_key in ("ROI XBIN", "ROI YBIN"):
+                        value = max(value, 1)
+                        if value > 4:
+                            value = 1
+                    camera_settings.append((cleaned_key, value))
+            camera_settings.sort()
+        
+        camera_settings = tuple(camera_settings)
+        if was_shut:
+            shut_shutter_settings[camera_settings] += 1
+        else:
+            open_shutter_settings[camera_settings] += 1
+    return open_shutter_settings, shut_shutter_settings
+
+def make_settings_jsonable(config_kind):
+    cameras = list(config_kind.keys())
+    darks_dict = {k: [] for k in cameras}
+    for camname in cameras:
+        darks_dict[camname] = []
+        for setup_meta in config_kind[camname]:
+            setup_dict = {}
+            setup = setup_meta['setup']
+            for key, value in setup:
+                setup_dict[key] = value
+            darks_dict[camname].append({'frames_count': setup_meta['frames_count'], 'setup': setup_dict})
+    return darks_dict
+
+def main(args):
+    invalid_config = defaultdict(list)
+    needed_darks = defaultdict(list)
+    have_darks = defaultdict(list)
+    cameras = args.cameras if args.cameras is not None else SCIENCE_CAMERAS
+    for camname in cameras:
+        all_open_settings, all_shut_settings = collect_camera_settings(args.semester, args.night, camname, args.check_only_n, progress=True)
+        for setup, frames_count in all_open_settings.items():
+            log.info("=" * 72)
+            log.info(f"{camname} setup:")
+            invalid = False
+            for key, value in setup:
+                log.info(f"\t{key}: {value}")
+                if (key == 'ADC SPEED' and value == 0) or (isinstance(value, str) and 'invalid' in value):
+                    invalid = True
+            if invalid:
+                invalid_config[camname].append({'setup': setup, 'frames_count': frames_count})
+            elif setup not in all_shut_settings:
+                needed_darks[camname].append({'setup': setup, 'frames_count': frames_count})
+            else:
+                have_darks[camname].append({'setup': setup, 'frames_count': frames_count})
+            log.info(f"open shutter count:\t{frames_count}")
+            if setup in all_shut_settings:
+                log.info(f"closed shutter count:\t{all_shut_settings[setup]}")
+            else:
+                log.info("closed shutter count:\tNo darks found")
+            log.info("=" * 72)
+            log.info("\n\n")
+        log.info(f"Distinct {camname} configurations to do: {len(needed_darks[camname])}")
+        log.info(f"Distinct {camname} configurations with darks: {len(have_darks[camname])}")
+    log.info(f"Total distinct camera configurations to do: {sum(len(needed_darks[camname]) for camname in cameras)}")
+    log.info(f"Total distinct camera configurations with darks: {sum(len(have_darks[camname]) for camname in cameras)}")
+    log.info(f"Total distinct camera configurations with invalid info: {sum(len(invalid_config[camname]) for camname in cameras)}")
+    log.info(pformat(invalid_config))
+    for config_kind, outfile_path in ((needed_darks, 'needed_darks.json'), (have_darks, 'have_darks.json')):
+        with open(outfile_path, 'wb') as fh:
+            darks_dict = make_settings_jsonable(config_kind)    
+            darks_out = orjson.dumps(darks_dict, option=orjson.OPT_INDENT_2)
+            fh.write(darks_out)
+        log.info(f"Wrote configurations to {outfile_path}")
+    with open('./invalid_config.pkl', 'wb') as fh:
+        pickle.dump(invalid_config, fh)
+        log.info("Wrote pickled invalid configs to ./invalid_config.pkl")
+    return
+
+if __name__ == "__main__":
+    now = datetime.datetime.now()
+    this_year = now.year
+    this_semester = str(this_year) + "B" if now.month > 6 else "A"
+    import argparse
+    parser = argparse.ArgumentParser()
+    parser.add_argument('-v', '--verbose', help="Turn on debug output", action='store_true')
+    parser.add_argument('-s', '--semester', help=f"Semester to search in, default: {this_semester}", default=this_semester)
+    parser.add_argument('-n', '--night', help=f"Night to search in, e.g. 2022-12-02_03", default='*')
+    # parser.add_argument('-p', '--prefix', help=f"Quicklook files root, default: {QUICKLOOK_PATH.as_posix()}", type=pathlib.Path, default=QUICKLOOK_PATH)
+    parser.add_argument('-c', '--cameras', help=f"Cameras to check, default: {SCIENCE_CAMERAS}", action='append', default=None)
+    # parser.add_argument('-a', '--show-all', help=f"Whether to show camera configurations for which darks are already present", action='store_true')
+    parser.add_argument('--check-only-n', help=f"Number to check per camera, default all", type=int, default=None)
+    args = parser.parse_args()
+    ch = logging.StreamHandler()
+    ch.setLevel(logging.DEBUG if args.verbose else logging.INFO)
+    formatter = logging.Formatter('%(asctime)s %(levelname)s - %(message)s')
+    ch.setFormatter(formatter)
+    log.addHandler(ch)
+    log.setLevel(logging.DEBUG)
+    now = datetime.datetime.utcnow()
+    datestamp = ''.join(filter(str.isdigit, now.isoformat()))
+    logfile = f'collect_camera_configs_for_darks_{datestamp}.log'
+    log.addHandler(logging.FileHandler(logfile))
+    log.info(f'Complete logs in {logfile}')
+    main(args)

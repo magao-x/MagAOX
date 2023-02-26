@@ -358,16 +358,20 @@ protected:
             //We just silently fail
             try
             {
-            pcf::IndiProperty ipFreq(pcf::IndiProperty::Switch);
+               pcf::IndiProperty ipFreq(pcf::IndiProperty::Switch);
    
-            ipFreq.setDevice(m_satTriggerDevice[n]);
-            ipFreq.setName(m_satTriggerProperty[n]);
-            ipFreq.add(pcf::IndiElement("toggle"));
-            ipFreq["toggle"] = pcf::IndiElement::Off;
-            derived().sendNewProperty(ipFreq);
+               ipFreq.setDevice(m_satTriggerDevice[n]);
+               ipFreq.setName(m_satTriggerProperty[n]);
+               ipFreq.add(pcf::IndiElement("toggle"));
+               ipFreq["toggle"] = pcf::IndiElement::Off;
+               derived().sendNewProperty(ipFreq);
+
+               derivedT::template log<text_log>("DM saturation threshold exceeded.  Loop opened.", logPrio::LOG_WARNING);
             }
             catch(...)
-            {}
+            {
+
+            }
          }
       }
    }

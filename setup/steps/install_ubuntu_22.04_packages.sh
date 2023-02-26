@@ -21,6 +21,7 @@ apt install -y \
     zlib1g-dev \
     libudev-dev \
     libncurses5-dev \
+    libncursesw5-dev \
     netcat \
     lm-sensors \
     libreadline-dev \
@@ -46,6 +47,7 @@ apt install -y \
     nfs-common \
     nfs-kernel-server \
     tree \
+    linux-headers-generic \
 ;
 
 if [[ $MAGAOX_ROLE == vm ]]; then

@@ -15,7 +15,12 @@ if [[ ! -d $MAGMA_FOLDER ]]; then
   tar xzf magma-$MAGMA_VERSION.tar.gz
 fi
 cd $MAGMA_FOLDER
-cp -n make.inc-examples/make.inc.mkl-gcc ./make.inc
+if [[ $(uname -i) == "x86_64" ]]; then
+  cp -n make.inc-examples/make.inc.mkl-gcc ./make.inc
+else
+  cp -n make.inc-examples/make.inc.openblas ./make.inc
+  sed -iE 's_#OPENBLASDIR ?= /usr/local/openblas_OPENBLASDIR ?= $(shell pkg-config --variable=libdir openblas)/../_g' ./make.inc
+fi
 # Limit target architecture to Pascal (1080Ti) and Volta (2080Ti) to save some compilation time
 if [[ $MAGAOX_ROLE == RTC || $MAGAOX_ROLE == ICC ]]; then
   if ! grep "GPU_TARGET = Pascal Volta" make.inc; then

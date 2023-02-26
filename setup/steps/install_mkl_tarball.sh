@@ -4,11 +4,8 @@ source $DIR/../_common.sh
 set -euo pipefail
 cd /opt/MagAOX/vendor
 log_info "Began MKL offline package install"
-log_error "MKL download link broken again..."
-exit 1
-INTEL_MKL_VERSION=l_onemkl_p_2022.2.0.8748
-INTEL_MKL_DOWNLOAD=${INTEL_MKL_VERSION}_offline.sh
-INTEL_MKL_URL=https://registrationcenter-download.intel.com/akdlm/irc_nas/18721/$INTEL_MKL_DOWNLOAD
+INTEL_MKL_DOWNLOAD=l_onemkl_p_2023.0.0.25398_offline.sh
+INTEL_MKL_URL=https://registrationcenter-download.intel.com/akdlm/irc_nas/19138/${INTEL_MKL_DOWNLOAD}
 if [[ ! -e $INTEL_MKL_DOWNLOAD ]]; then
     _cached_fetch $INTEL_MKL_URL $INTEL_MKL_DOWNLOAD
 fi
@@ -17,7 +14,7 @@ if [[ ! -d /opt/intel ]]; then
 else
     log_warn "/opt/intel already exists"
 fi
-# echo "source /opt/intel/compilers_and_libraries/linux/bin/compilervars.sh intel64" > /etc/profile.d/mklvars.sh
-# echo "/opt/intel/compilers_and_libraries_2019.4.243/linux/mkl/lib/intel64_lin" | sudo tee /etc/ld.so.conf.d/mkl.conf
-ldconfig
+echo "/opt/intel/oneapi/mkl/latest/lib/intel64" | sudo tee /etc/ld.so.conf.d/mkl.conf || exit 1
+echo "source /opt/intel/oneapi/mkl/latest/env/vars.sh intel64" | sudo tee /etc/profile.d/mklvars.sh &>/dev/null || exit 1
+sudo ldconfig
 log_info "Finished MKL tarball install"

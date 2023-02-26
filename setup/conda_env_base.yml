@@ -40,7 +40,7 @@ dependencies:
   - imageio
   - xxhash
   # for cacao
-  - pybind11 
+  - pybind11
 
   - pip:
       - hcipy

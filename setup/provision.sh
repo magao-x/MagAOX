@@ -22,9 +22,9 @@ VM_KIND=$(systemd-detect-virt)
 if [[ ! $VM_KIND == "none" ]]; then
     echo "Detected virtualization: $VM_KIND"
     if [[ ! -z $CI ]]; then
-        echo "MAGAOX_ROLE=ci" | $_REAL_SUDO tee $roleScript
+        echo "export MAGAOX_ROLE=ci" | $_REAL_SUDO tee $roleScript
     elif [[ ! -e $roleScript ]]; then
-        echo "MAGAOX_ROLE=vm" | $_REAL_SUDO tee $roleScript
+        echo "export MAGAOX_ROLE=vm" | $_REAL_SUDO tee $roleScript
     fi
 fi
 if [[ ! -e $roleScript ]]; then
@@ -38,10 +38,15 @@ source $DIR/_common.sh
 
 # Install OS packages first
 osPackagesScript="$DIR/steps/install_${ID}_${VERSION_ID}_packages.sh"
-$_REAL_SUDO bash -l $osPackagesScript
+$_REAL_SUDO bash -l $osPackagesScript || exit_error "Failed to install packages from $osPackagesScript"
 
 distroSpecificScript="$DIR/steps/configure_${ID}_${VERSION_ID}.sh"
-$_REAL_SUDO bash -l $distroSpecificScript
+$_REAL_SUDO bash -l $distroSpecificScript || exit_error "Failed to configure ${ID} from $distroSpecificScript"
+
+if [[ $VM_KIND != "none" ]]; then
+    git config --global --replace-all safe.directory '*'
+    sudo git config --global --replace-all safe.directory '*'
+fi
 
 sudo bash -l "$DIR/steps/configure_xsup_aliases.sh"
 
@@ -65,7 +70,7 @@ fi
 # The VM and CI provisioning doesn't run setup_users_and_groups.sh
 # separately as in the instrument instructions; we have to run it
 if [[ $MAGAOX_ROLE == vm || $MAGAOX_ROLE == ci ]]; then
-    sudo bash -l "$DIR/setup_users_and_groups.sh"
+    bash -l "$DIR/setup_users_and_groups.sh"
 fi
 
 VENDOR_SOFTWARE_BUNDLE=$DIR/bundle.zip
@@ -87,7 +92,7 @@ if [[ $MAGAOX_ROLE == vm ]]; then
     fi
     # Install a config in ~/.ssh/config for the vm user
     # to make it easier to make tunnels work
-    bash -l "$DIR/steps/configure_vm_ssh.sh"
+    bash -l "$DIR/steps/configure_vm_ssh.sh" || exit_error "Failed to set up VM SSH"
 fi
 
 # Install dependencies for the GUIs
@@ -118,8 +123,8 @@ else
     export BLAS_VENDOR=openblas
 fi
 if [[ $MAGAOX_ROLE == RTC || $MAGAOX_ROLE == ICC || $MAGAOX_ROLE == AOC || $MAGAOX_ROLE == TIC || $MAGAOX_ROLE == ci ]]; then
-    sudo bash -l "$DIR/steps/install_cuda.sh"
-    sudo bash -l "$DIR/steps/install_magma.sh"
+    bash -l "$DIR/steps/install_cuda.sh" || exit_error "CUDA install failed"
+    sudo bash -l "$DIR/steps/install_magma.sh" || exit_error "MAGMA install failed"
 fi
 sudo bash -l "$DIR/steps/install_fftw.sh" || exit 1
 sudo bash -l "$DIR/steps/install_cfitsio.sh" || exit 1
@@ -170,22 +175,12 @@ fi
 
 ## Build first-party dependencies
 cd /opt/MagAOX/source
-sudo bash -l "$DIR/steps/install_xrif.sh"
-sudo bash -l "$DIR/steps/install_mxlib.sh"
+bash -l "$DIR/steps/install_xrif.sh" || exit_error "Failed to build and install xrif"
+bash -l "$DIR/steps/install_mxlib.sh" || exit_error "Failed to build and install mxlib"
 source /etc/profile.d/mxmakefile.sh
 
 ## Build MagAO-X and install sources to /opt/MagAOX/source/MagAOX
-MAYBE_SUDO=
-if [[ $MAGAOX_ROLE == vm && $VM_KIND == vagrant ]]; then
-    MAYBE_SUDO="$_REAL_SUDO -u vagrant"
-    # Create or replace symlink to sources so we develop on the host machine's copy
-    # (unlike prod, where we install a new clone of the repo to this location)
-    sudo ln -nfs /vagrant /opt/MagAOX/source/MagAOX
-    cd /opt/MagAOX/source/MagAOX
-    log_success "Symlinked /opt/MagAOX/source/MagAOX to /vagrant (host folder)"
-    sudo usermod -G $instrument_group,$instrument_dev_group vagrant
-    log_success "Added vagrant user to $instrument_group,$instrument_dev_group"
-elif [[ $MAGAOX_ROLE == ci ]]; then
+if [[ $MAGAOX_ROLE == ci ]]; then
     ln -sfv ~/project/ /opt/MagAOX/source/MagAOX
 else
     log_info "Running as $USER"
@@ -223,12 +218,12 @@ fi
 cd /opt/MagAOX/source
 if [[ $MAGAOX_ROLE == TIC || $MAGAOX_ROLE == TOC ]]; then
     # Initialize the config and calib repos as normal user
-    $MAYBE_SUDO bash -l "$DIR/steps/install_testbed_config.sh"
-    $MAYBE_SUDO bash -l "$DIR/steps/install_testbed_calib.sh"
+    bash -l "$DIR/steps/install_testbed_config.sh"
+    bash -l "$DIR/steps/install_testbed_calib.sh"
 else
     # Initialize the config and calib repos as normal user
-    $MAYBE_SUDO bash -l "$DIR/steps/install_magao-x_config.sh"
-    $MAYBE_SUDO bash -l "$DIR/steps/install_magao-x_calib.sh"
+    bash -l "$DIR/steps/install_magao-x_config.sh"
+    bash -l "$DIR/steps/install_magao-x_calib.sh"
 fi
 
 if [[ $MAGAOX_ROLE == AOC || $MAGAOX_ROLE == TOC || $MAGAOX_ROLE == vm ]]; then
@@ -241,22 +236,28 @@ fi
 sudo bash -l "$DIR/steps/install_python.sh"
 sudo bash -l "$DIR/steps/configure_python.sh"
 source /opt/conda/bin/activate
+
+if [[ $ID == centos && ( $MAGAOX_ROLE == AOC || $MAGAOX_ROLE == TOC || $MAGAOX_ROLE == vm ) ]]; then
+    sudo mamba install -y qwt qt=5.9.7 || exit 1
+    log_info "Installed qwt from conda for widgeting purposes on old CentOS"
+fi
+
 # Install first-party deps
-$MAYBE_SUDO bash -l "$DIR/steps/install_milk_and_cacao.sh"  # depends on /opt/conda/bin/python existing for plugin build
-$MAYBE_SUDO bash -l "$DIR/steps/install_milkzmq.sh" || exit 1
-$MAYBE_SUDO bash -l "$DIR/steps/install_purepyindi.sh"
-$MAYBE_SUDO bash -l "$DIR/steps/install_magpyx.sh"
+bash -l "$DIR/steps/install_milk_and_cacao.sh" || exit_error "milk/cacao install failed" # depends on /opt/conda/bin/python existing for plugin build
+bash -l "$DIR/steps/install_milkzmq.sh" || exit_error "milkzmq install failed"
+bash -l "$DIR/steps/install_purepyindi.sh" || exit_error "purepyindi install failed"
+bash -l "$DIR/steps/install_magpyx.sh" || exit_error "magpyx install failed"
 
 
 # TODO:jlong: uncomment when it's back in working order
 # if [[ $MAGAOX_ROLE == AOC || $MAGAOX_ROLE == vm ||  $MAGAOX_ROLE == workstation ]]; then
 #     # sup web interface
-#     $MAYBE_SUDO bash -l "$DIR/steps/install_sup.sh"
+#     bash -l "$DIR/steps/install_sup.sh"
 # fi
 
 if [[ $MAGAOX_ROLE == AOC || $MAGAOX_ROLE == TOC || $MAGAOX_ROLE == vm || $MAGAOX_ROLE == workstation || $MAGAOX_ROLE == ci ]]; then
     # realtime image viewer
-    $MAYBE_SUDO bash -l "$DIR/steps/install_rtimv.sh" || exit 1
+    bash -l "$DIR/steps/install_rtimv.sh" || exit 1
 fi
 
 if [[ $MAGAOX_ROLE == AOC || $MAGAOX_ROLE == TOC || $MAGAOX_ROLE == vm ||  $MAGAOX_ROLE == workstation ]]; then
@@ -271,7 +272,7 @@ sudo bash -l "$DIR/steps/install_aliases.sh"
 # By separating the real build into another step, we can cache the slow provisioning steps
 # and reuse them on subsequent runs.
 if [[ $MAGAOX_ROLE != ci ]]; then
-    $MAYBE_SUDO bash -l "$DIR/steps/install_MagAOX.sh" || exit 1
+    bash -l "$DIR/steps/install_MagAOX.sh" || exit 1
 fi
 
 sudo bash -l "$DIR/steps/configure_startup_services.sh"

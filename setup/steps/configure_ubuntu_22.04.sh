@@ -3,19 +3,18 @@ DIR="$( cd "$( dirname "${BASH_SOURCE[0]}" )" && pwd )"
 source $DIR/../_common.sh
 set -euo pipefail
 
-
-
 log_info "Configuring package source list with Intel oneAPI repositories"
 if [[ ! -e /usr/share/keyrings/oneapi-archive-keyring.gpg ]]; then
-    wget -O- https://apt.repos.intel.com/intel-gpg-keys/GPG-PUB-KEY-INTEL-SW-PRODUCTS.PUB | gpg --dearmor | sudo tee /usr/share/keyrings/oneapi-archive-keyring.gpg > /dev/null || exit
+    mkdir -p /usr/share/keyrings
+    wget -O- https://apt.repos.intel.com/intel-gpg-keys/GPG-PUB-KEY-INTEL-SW-PRODUCTS.PUB | gpg --dearmor | sudo tee /usr/share/keyrings/oneapi-archive-keyring.gpg > /dev/null || error_exit "Could not install Intel APT GPG key"
 fi
 if [[ ! -e /etc/apt/sources.list.d/oneAPI.list ]]; then
-    echo "deb [signed-by=/usr/share/keyrings/oneapi-archive-keyring.gpg] https://apt.repos.intel.com/oneapi all main" | sudo tee /etc/apt/sources.list.d/oneAPI.list || exit
+    echo "deb [signed-by=/usr/share/keyrings/oneapi-archive-keyring.gpg] https://apt.repos.intel.com/oneapi all main" | sudo tee /etc/apt/sources.list.d/oneAPI.list || error_exit "Could not add Intel APT repository to sources.list.d"
 fi
 sudo apt update
 
 log_info 'Making /etc/bash.bashrc source /etc/profile.d/*.sh, since graphical sessions appear not to for new Konsoles'
-if ! grep -q bashrc.d /etc/bash.bashrc; then
+if ! grep -q profile.d /etc/bash.bashrc; then
 cat <<'HERE' | sudo tee -a /etc/bash.bashrc
 if [ -d /etc/profile.d ]; then
   for i in /etc/profile.d/*.sh; do
@@ -47,15 +46,15 @@ if [[ $MAGAOX_ROLE == AOC || $MAGAOX_ROLE == ICC || $MAGAOX_ROLE == RTC || $MAGA
     sudo systemctl mask systemd-networkd-wait-online.service || true
     
     log_info "Ensure UFW firewall is enabled"
-    yes | sudo ufw enable || exit 1
-    sudo ufw allow ssh || exit 1
-    sudo ufw deny http || exit 1
-    sudo ufw deny https || exit 1
-    sudo ufw allow in from 192.168.0.0/24 || exit 1
+    yes | sudo ufw enable || true
+    sudo ufw allow ssh || true
+    sudo ufw deny http || true
+    sudo ufw deny https || true
+    sudo ufw allow in from 192.168.0.0/24 || true
 
     log_info "Use CentOS mountpoint for cpusets"
     sudo mkdir -p /sys/fs/cgroup/cpuset
-    cat <<'HERE' | sudo tee /etc/cset.conf || exit 1
+    cat <<'HERE' | sudo tee /etc/cset.conf || true
 mountpoint = /sys/fs/cgroup/cpuset
 HERE
 fi

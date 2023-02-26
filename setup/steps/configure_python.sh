@@ -11,7 +11,7 @@ set -euo pipefail
 #
 # Install the standard MagAOX user python environment
 #
-mamba env update -qf $DIR/../conda_env_base.yml
+mamba env update -qf $DIR/../conda_env_pinned_$(uname -i).yml || exit_error "Failed to install or update packages using pinned versions. Update the env manually with the base specification and update the pinned versions if possible."
 source /etc/os-release
 if [[ ( $MAGAOX_ROLE == AOC || $MAGAOX_ROLE == ci ) && ( $ID == "centos" ) ]]; then
 	mamba install -y qt=5 qwt
@@ -27,13 +27,6 @@ else
 fi
 NOTEBOOK_CONFIG_PATH=$DIR/../jupyter_notebook_config.py
 
-# Note that there's a race condition where /vagrant isn't available yet
-# when jupyter tries to start, so we make a copy within the VM's local
-# storage.
-if [[ $MAGAOX_ROLE == vm ]]; then
-	cp $NOTEBOOK_CONFIG_PATH /opt/conda/etc/jupyter_notebook_config.py
-	NOTEBOOK_CONFIG_PATH=/opt/conda/etc/jupyter_notebook_config.py
-fi
 JUPYTER_SCRIPT=/opt/conda/bin/start_notebook.sh
 sudo tee $JUPYTER_SCRIPT >/dev/null <<HERE
 #!/bin/bash
@@ -49,7 +42,7 @@ if [[ -e $UNIT_PATH/jupyterlab.service ]]; then
 	rm $UNIT_PATH/jupyterlab.service
 fi
 
-if [[ $MAGAOX_ROLE != ci && $VM_KIND != wsl ]]; then
+if [[ $MAGAOX_ROLE != ci ]]; then
 	if [[ $MAGAOX_ROLE == AOC ]]; then
 		cp $DIR/../systemd_units/lookyloo.service $UNIT_PATH/lookyloo.service
 		log_success "Installed lookyloo.service to $UNIT_PATH"
@@ -58,8 +51,8 @@ if [[ $MAGAOX_ROLE != ci && $VM_KIND != wsl ]]; then
 	cp $DIR/../systemd_units/jupyternotebook.service $UNIT_PATH/jupyternotebook.service
 	log_success "Installed jupyternotebook.service to $UNIT_PATH"
 	if [[ $MAGAOX_ROLE == vm ]]; then
-		sed -iE "s_WorkingDirectory=/home/xsup/data_WorkingDirectory=/vagrant_g" $UNIT_PATH/jupyternotebook.service
-	    sed -iE "s/xsup/vagrant/g" $UNIT_PATH/jupyternotebook.service
+		sed -iE "s_WorkingDirectory=/home/xsup/data_WorkingDirectory=/_g" $UNIT_PATH/jupyternotebook.service
+	    sed -iE "s/xsup/$instrument_user/g" $UNIT_PATH/jupyternotebook.service
 		log_info "Rewrote service for vagrant"
 	fi
 	

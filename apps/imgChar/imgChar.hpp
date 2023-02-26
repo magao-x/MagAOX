@@ -51,7 +51,7 @@ namespace MagAOX::app
   */
 class imgChar : public MagAOXApp<true>, 
                 public dev::shmimMonitor<imgChar>,
-                public dev::frameGrabber<imgChar>
+                public dev::frameGrabber<imgChar>, public dev::telemeter<imgChar>
 {
 
    friend class dev::shmimMonitor<imgChar>;
@@ -63,6 +63,10 @@ class imgChar : public MagAOXApp<true>,
 
    //The base frameGrabber type
    typedef dev::frameGrabber<imgChar> frameGrabberT;
+
+   typedef dev::telemeter<imgChar> telemeterT;
+
+   friend class dev::telemeter<imgChar>;
 
    //Datatypes 
    typedef double realT;
@@ -214,6 +218,16 @@ class imgChar : public MagAOXApp<true>,
       double * spatialModMask;
       fftw_complex * freqModMask;
       fftw_plan planGetModMask;
+
+   /** \name Telemeter Interface
+     * 
+     * @{
+     */ 
+   int checkRecordTimes();
+      
+   int recordTelem( const telem_fgtimings * );
+   
+   ///@}
 };
 
 
@@ -234,6 +248,7 @@ void imgChar::setupConfig()
 {
    shmimMonitorT::setupConfig(config);
    frameGrabberT::setupConfig(config);
+   telemeterT::setupConfig(config);
 }
 
 
@@ -243,6 +258,12 @@ int imgChar::loadConfigImpl( mx::app::appConfigurator & _config )
 {
    
    shmimMonitorT::loadConfig(_config);
+   if(telemeterT::loadConfig(_config) < 0)
+   {
+      log<text_log>("Error during telemeter config", logPrio::LOG_CRITICAL);
+      m_shutdown = true;
+   }
+
    return 0;
 }
 
@@ -297,6 +318,11 @@ int imgChar::appStartup()
    REG_INDI_SETPROP( m_indiP_fps, "camtip", "fps");
    REG_INDI_SETPROP( m_indiP_modRadius, "modwfs", "modRadius");
  
+   if(telemeterT::appStartup() < 0)
+   {
+      return log<software_error,-1>({__FILE__,__LINE__});
+   }
+
    state(stateCodes::OPERATING);  
 
    return 0;
@@ -332,6 +358,15 @@ int imgChar::appLogic()
       state(stateCodes::ERROR);
 
       return 0;
+   }
+
+   if(state() == stateCodes::OPERATING)
+   {
+      if(telemeterT::appLogic() < 0)
+      {
+         log<software_error>({__FILE__, __LINE__});
+         return 0;
+      }
    }
 
    // Calculate RMS shift averages and publish to INDI
@@ -485,6 +520,8 @@ int imgChar::appShutdown()
    shmimMonitorT::appShutdown(); 
    frameGrabberT::appShutdown();
  
+   telemeterT::appShutdown();
+
    return 0;
 }
 
@@ -830,7 +867,20 @@ int imgChar::loadImageIntoStream(void * dest)
 inline
 int imgChar::reconfig()
 {
+   m_template = true;
    return 0;
+}
+
+inline
+int imgChar::checkRecordTimes()
+{
+   return telemeterT::checkRecordTimes(telem_fgtimings());
+}
+   
+inline
+int imgChar::recordTelem( const telem_fgtimings * )
+{
+   return recordFGTimings(true);
 }
 
 } // namespace magAOX::app 

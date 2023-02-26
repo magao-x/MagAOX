@@ -1,8 +1,15 @@
 #!/bin/bash
 # If not started as root, sudo yourself
+export BUILDING_KERNEL_STUFF=1  # disable loading devtoolset-7 for agreement w/ kernel gcc
+if [[ $(which sudo) == *devtoolset* ]]; then
+  REAL_SUDO=/usr/bin/sudo
+else
+  REAL_SUDO=$(which sudo)
+fi
+
 if [[ "$EUID" != 0 ]]; then
-    export BUILDING_KERNEL_STUFF=1  # disable loading devtoolset-7 for agreement w/ kernel gcc
-    /usr/bin/sudo --preserve-env=BUILDING_KERNEL_STUFF bash -l $0 "$@"
+    echo "Becoming root..."
+    $REAL_SUDO --preserve-env=BUILDING_KERNEL_STUFF bash -l $0 "$@"
     exit $?
 fi
 DIR="$( cd "$( dirname "${BASH_SOURCE[0]}" )" && pwd )"
@@ -55,7 +62,7 @@ if [[ $MAGAOX_ROLE != vm && $MAGAOX_ROLE != ci && ! -e /usr/lib/systemd/system/n
   workdir=/tmp/persistenced_setup_$(date +%s)
   mkdir $workdir
   cd $workdir
-  cp /usr/share/doc/NVIDIA_GLX-1.0/sample/nvidia-persistenced-init.tar.bz2 .
+  cp /usr/share/doc/NVIDIA_GLX-1.0/samples/nvidia-persistenced-init.tar.bz2 .
   tar xjf nvidia-persistenced-init.tar.bz2
   cd nvidia-persistenced-init
   # NVIDIA's install script adds the user, adds a systemd unit

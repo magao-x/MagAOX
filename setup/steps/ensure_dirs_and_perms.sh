@@ -42,71 +42,47 @@ mkdir -pv /opt/MagAOX/sys
 mkdir -pv /opt/MagAOX/vendor
 mkdir -pv /opt/MagAOX/source
 
-if [[ "$MAGAOX_ROLE" == "vm" && "$VM_WINDOWS_HOST" == 0 ]]; then
-  mkdir -pv "$VM_SHARED_FOLDER/calib"
-  link_if_necessary "$VM_SHARED_FOLDER/calib" /opt/MagAOX/calib
-else
-  mkdir -pv /opt/MagAOX/calib
-  chown -R root:$instrument_group /opt/MagAOX/calib
-  chmod -R u=rwX,g=rwX,o=rX /opt/MagAOX/calib
-  setgid_all /opt/MagAOX/calib
-fi
+mkdir -pv /opt/MagAOX/calib
+chown -R root:$instrument_group /opt/MagAOX/calib
+chmod -R u=rwX,g=rwX,o=rX /opt/MagAOX/calib
+setgid_all /opt/MagAOX/calib
 
-if [[ "$MAGAOX_ROLE" == "vm" && "$VM_WINDOWS_HOST" == 0 ]]; then
-  mkdir -pv "$VM_SHARED_FOLDER/config"
-  link_if_necessary "$VM_SHARED_FOLDER/config" /opt/MagAOX/config
-else
-  mkdir -pv /opt/MagAOX/config
-  chown -R root:$instrument_dev_group /opt/MagAOX/config
-  chmod -R u=rwX,g=rwX,o=rX /opt/MagAOX/config
-  setgid_all /opt/MagAOX/config
-fi
+mkdir -pv /opt/MagAOX/config
+chown -R root:$instrument_dev_group /opt/MagAOX/config
+chmod -R u=rwX,g=rwX,o=rX /opt/MagAOX/config
+setgid_all /opt/MagAOX/config
+mkdir -pv /opt/MagAOX/.cache
+chown -R root:$instrument_dev_group /opt/MagAOX/.cache
+chmod -R u=rwX,g=rwsX,o=rX /opt/MagAOX/.cache
 
-if [[ "$MAGAOX_ROLE" == "vm" ]]; then
-  mkdir -pv "$VM_SHARED_FOLDER/cache"
-  link_if_necessary "$VM_SHARED_FOLDER/cache" /opt/MagAOX/.cache
+chown root:root /opt/MagAOX
+# n.b. not using -R on *either* chown *or* chmod so we don't clobber setuid binaries
+chown root:root /opt/MagAOX/bin
+chmod u+rwX,g+rX,o+rX /opt/MagAOX/bin
 
-  make_on_data_array logs /opt/MagAOX
-  chown -R $instrument_user:$instrument_group /opt/MagAOX/drivers/fifos
-  chmod u=rwX,g=rwX,o=rX /opt/MagAOX/drivers/fifos
+chown -R root:root /opt/MagAOX/drivers
+chmod -R u=rwX,g=rwX,o=rX /opt/MagAOX/drivers
+chown -R root:$instrument_group /opt/MagAOX/drivers/fifos
 
-else
-  mkdir -pv /opt/MagAOX/.cache
-  chown -R root:$instrument_dev_group /opt/MagAOX/.cache
-  chmod -R u=rwX,g=rwsX,o=rX /opt/MagAOX/.cache
-fi
-
-if [[ $MAGAOX_ROLE != "vm" ]]; then
-
-  chown root:root /opt/MagAOX
-  # n.b. not using -R on *either* chown *or* chmod so we don't clobber setuid binaries
-  chown root:root /opt/MagAOX/bin
-  chmod u+rwX,g+rX,o+rX /opt/MagAOX/bin
-
-  chown -R root:root /opt/MagAOX/drivers
-  chmod -R u=rwX,g=rwX,o=rX /opt/MagAOX/drivers
-  chown -R root:$instrument_group /opt/MagAOX/drivers/fifos
-
-  make_on_data_array logs /opt/MagAOX
-  make_on_data_array rawimages /opt/MagAOX
-  make_on_data_array telem /opt/MagAOX
-  make_on_data_array cacao /opt/MagAOX
+make_on_data_array logs /opt/MagAOX
+make_on_data_array rawimages /opt/MagAOX
+make_on_data_array telem /opt/MagAOX
 
 
-  chown -R root:root /opt/MagAOX/secrets
-  chmod -R u=rwX,g=,o= /opt/MagAOX/secrets
+
+chown -R root:root /opt/MagAOX/secrets
+chmod -R u=rwX,g=,o= /opt/MagAOX/secrets
 
 
-  chown -R root:$instrument_dev_group /opt/MagAOX/source
-  # n.b. using + instead of = so we don't clobber setuid binaries
-  chmod -R u+rwX,g+rwX,o+rX /opt/MagAOX/source
-  setgid_all /opt/MagAOX/source
+chown -R root:$instrument_dev_group /opt/MagAOX/source
+# n.b. using + instead of = so we don't clobber setuid binaries
+chmod -R u+rwX,g+rwX,o+rX /opt/MagAOX/source
+setgid_all /opt/MagAOX/source
 
 
-  chown -R root:root /opt/MagAOX/sys
-  chmod -R u=rwX,g=rX,o=rX /opt/MagAOX/sys
+chown -R root:root /opt/MagAOX/sys
+chmod -R u=rwX,g=rX,o=rX /opt/MagAOX/sys
 
-  chown root:$instrument_dev_group /opt/MagAOX/vendor
-  chmod u=rwX,g=rwX,o=rX /opt/MagAOX/vendor
-  setgid_all /opt/MagAOX/vendor
-fi
+chown root:$instrument_dev_group /opt/MagAOX/vendor
+chmod u=rwX,g=rwX,o=rX /opt/MagAOX/vendor
+setgid_all /opt/MagAOX/vendor

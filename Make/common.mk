@@ -61,7 +61,7 @@ EXTRA_LDLIBS ?=  -lmxlib \
   -ltelnet \
   -lcfitsio \
   -lxrif \
-  -lfftw3 -lfftw3f -lfftw3l -lfftw3q \
+  -lfftw3 -lfftw3f -lfftw3l \
   -lgsl \
   -lboost_system \
   -lboost_filesystem \
@@ -69,11 +69,15 @@ EXTRA_LDLIBS ?=  -lmxlib \
   $(SELF_DIR)/../INDI/libcommon/libcommon.a) \
   $(abspath $(SELF_DIR)/../INDI/liblilxml/liblilxml.a) 
   
+HOST_ARCH   := $(shell uname -m)
+ifeq ($(HOST_ARCH),x86_64)
+  # only enable on x86 because ARM doesn't have quad precision by default
+  EXTRA_LDLIBS += -lfftw3q
+endif
 
 ifeq ($(NEED_CUDA),yes)
    CXXFLAGS += -DEIGEN_NO_CUDA -DHAVE_CUDA
 
-   HOST_ARCH   := $(shell uname -m)
    CUDA_TARGET_ARCH = $(HOST_ARCH)
    ifneq (,$(filter $(CUDA_TARGET_ARCH),x86_64 aarch64 ppc64le armv7l))
        ifneq ($(CUDA_TARGET_ARCH),$(HOST_ARCH))
