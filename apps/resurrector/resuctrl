@@ -73,7 +73,7 @@ function verb_start {
   || return 1
 
   proclist_txt="$(proclist_path)" \
-  || ( echo "${RED_SEQ}Writable process list file not found; exiting ...${RESET_SEQ}" 1>&2 && false) \
+  || ( echo "${RED_SEQ}Writable process list file not found; exiting ...${RESET_SEQ}" 1>&2 && false ) \
   || return 1
 
   for procname in $procnames ; do
@@ -229,7 +229,7 @@ function procname_pad { [ "$procnames" ] && echo -n ' '; }
 function proclist_path {
   the_proclist="${opt_magaox}/config/proclist_${ROLE}.txt"
   [ -r "$the_proclist" ] \
-  && ( [ "$1" == "readonly" ] || [ -w "$the_proclist" ] ) \
+  && [ "$1" == "readonly" -o -w "$the_proclist" ] \
   && ls -d "$the_proclist"
 }
 
