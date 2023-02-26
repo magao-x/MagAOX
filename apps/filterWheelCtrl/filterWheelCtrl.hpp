@@ -64,8 +64,9 @@ protected:
    int m_writeTimeOut {1000};  ///< The timeout for writing to the device [msec].
    int m_readTimeOut {1000}; ///< The timeout for reading from the device [msec].
 
-   double m_acceleration {1000};
-   double m_motorSpeed {1000};
+   double m_acceleration {100};
+   double m_deceleration {50};
+   double m_motorSpeed {3000};
 
    long m_circleSteps {0}; ///< The number of position counts in 1 360-degree revolution.
    long m_homeOffset {0}; ///< The number of position counts to offset from the home position
@@ -251,14 +252,14 @@ filterWheelCtrl::filterWheelCtrl() : MagAOXApp(MAGAOX_CURRENT_SHA1, MAGAOX_REPO_
 inline
 void filterWheelCtrl::setupConfig()
 {
-
    tty::usbDevice::setupConfig(config);
 
    config.add("timeouts.write", "", "timeouts.write", argType::Required, "timeouts", "write", false, "int", "The timeout for writing to the device [msec]. Default = 1000");
    config.add("timeouts.read", "", "timeouts.read", argType::Required, "timeouts", "read", false, "int", "The timeout for reading the device [msec]. Default = 1000");
 
-   config.add("motor.acceleration", "", "motor.acceleration", argType::Required, "motor", "acceleration", false, "real", "The motor acceleration parameter. Default=1000.");
-   config.add("motor.speed", "", "motor.speed", argType::Required, "motor", "speeed", false, "real", "The motor speed parameter.  Default=1000.");
+   config.add("motor.acceleration", "", "motor.acceleration", argType::Required, "motor", "acceleration", false, "real", "The motor acceleration parameter. Default=100.");
+   config.add("motor.deceleration", "", "motor.deceleration", argType::Required, "motor", "deceleration", false, "real", "The motor deceleration parameter. Default=50.");
+   config.add("motor.speed", "", "motor.speed", argType::Required, "motor", "speed", false, "real", "The motor speed parameter.  Default=3000.");
    config.add("motor.circleSteps", "", "motor.circleSteps", argType::Required, "motor", "circleSteps", false, "long", "The number of steps in 1 revolution.");
    config.add("stage.homeOffset", "", "stage.homeOffset", argType::Required, "stage", "homeOffset", false, "long", "The homing offset in motor counts.");
    
@@ -729,6 +730,11 @@ int filterWheelCtrl::onPowerOnConnect()
 
    //Set up acceleration and speed.
    com = "AC" + std::to_string(m_acceleration) + "\r";
+   rv = tty::ttyWrite( com, m_fileDescrip, m_writeTimeOut);
+   if(rv < 0) return log<software_error,-1>({__FILE__,__LINE__,rv, tty::ttyErrorString(rv)});
+
+   //Set up acceleration and speed.
+   com = "DEC" + std::to_string(m_deceleration) + "\r";
    rv = tty::ttyWrite( com, m_fileDescrip, m_writeTimeOut);
    if(rv < 0) return log<software_error,-1>({__FILE__,__LINE__,rv, tty::ttyErrorString(rv)});
 
