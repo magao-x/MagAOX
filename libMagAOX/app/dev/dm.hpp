@@ -16,6 +16,8 @@
 #include <mx/improc/eigenImage.hpp>
 #include <mx/ioutils/fits/fitsFile.hpp>
 
+#include <boost/filesystem/operations.hpp>
+
 #include "../../ImageStreamIO/ImageStruct.hpp"
 
 namespace MagAOX
@@ -996,7 +998,45 @@ template<class derivedT, typename realT>
 int dm<derivedT,realT>::checkFlats()
 {
    std::vector<std::string> tfs = mx::ioutils::getFileNames(m_flatPath, "", "", ".fits");
-   
+
+   //First remove default, b/c we always add it and don't want to include it in timestamp selected ones
+   for(size_t n=0; n < tfs.size(); ++n)
+   {
+      if(mx::ioutils::pathStem(tfs[n]) == "default")
+      {
+         tfs.erase(tfs.begin()+n);
+         --n;
+      }
+   }
+
+   unsigned m_nFlatFiles = 5;
+
+   //Here we keep only the m_nFlatFiles most recent files
+   if(tfs.size() >= m_nFlatFiles)
+   {    
+      std::vector<std::time_t> wtimes (tfs.size());
+
+      for(size_t n=0; n < wtimes.size(); ++n)
+      {
+         wtimes[n] = boost::filesystem::last_write_time(tfs[n]);
+      }
+
+      std::sort(wtimes.begin(), wtimes.end());
+
+      std::time_t tn = wtimes[wtimes.size() - m_nFlatFiles];
+
+      for(size_t n=0; n < tfs.size(); ++n)
+      {
+         std::time_t lmt = boost::filesystem::last_write_time(tfs[n]);
+         if(lmt < tn) 
+         {
+            tfs.erase(tfs.begin() + n);
+            --n;
+         }
+      }
+   }
+
+
    for(auto it = m_flatCommands.begin(); it != m_flatCommands.end(); ++it)
    {
       it->second = "";
@@ -1086,10 +1126,15 @@ int dm<derivedT,realT>::loadFlat(const std::string & intarget)
 {
    std::string target = intarget;
    
-   if(target == "default") target = m_flatDefault;
-   
    std::string targetPath;
    
+   if(target == "default") 
+   {
+      target = m_flatDefault;
+      targetPath = m_flatPath + "/" + m_flatDefault + ".fits";
+   }
+   else
+   {
    try 
    {
       targetPath = m_flatCommands.at(target);
@@ -1099,7 +1144,8 @@ int dm<derivedT,realT>::loadFlat(const std::string & intarget)
       derivedT::template log<text_log>("flat file " + target + " not found", logPrio::LOG_ERROR);
       return -1;
    }
-   
+   }
+
    m_flatLoaded = false;
    //load into memory.
    mx::fits::fitsFile<realT> ff;
