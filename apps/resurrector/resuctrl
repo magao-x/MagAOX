@@ -77,7 +77,8 @@ function verb_start {
   || return 1
 
   for procname in $procnames ; do
-    sed -i -e "/^[ 	]*#[ 	#]*${procname}[ 	][ 	]*[^ 	][^ 	]*[ 	]*\$/s/^[ 	#]*//" "$proclist_txt"
+    ### Remove any leading whitespace+# for proclist file procname entry
+    sed -i -e "/^$ws*#$wsh*${procname}$ws$ws*$notws$notws*$ws*\$/s/^$wsh*//" "$proclist_txt"
   done
 
   ripid=$(resurrector_indi_pid) \
@@ -105,7 +106,8 @@ function verb_stop {
   || return 1
 
   for procname in $procnames ; do
-    sed -i -e "/^[ 	]*${procname}[ 	][ 	]*[^ 	][^ 	]*[ 	]*\$/s/^[ 	]*/#/" "$proclist_txt"
+    ### Replace leading whitespace with # in proclist file procname line
+    sed -i -e "/^$ws*${procname}$ws$ws*$notws$notws*$ws*\$/s/^$ws*/#/" "$proclist_txt"
   done
 
   ripid=$(resurrector_indi_pid) \
@@ -118,6 +120,7 @@ function verb_stop {
 }
 
 ########################################################################
+### Trigger resurrector to stop and start Heaxbeaters before they expire
 function verb_defib {
 
   [ "$procnames" ] \
@@ -129,16 +132,17 @@ function verb_defib {
   || return 1
 
   for procname in $procnames ; do
+
+    ### Find Hexbeater pipe path For each INDI driver device in the loop
     hbpath="$(find_live_hexbeat_pipe $procname)" \
     || ( echo "${RED_SEQ}resurrector_indi is not reading $procname's pipe; skipping this Hexbeater ...${RESET_SEQ}" 1>&2 && false ) \
-    || continue
+    || continue   ### Skip devices to which resurrector is not listening
 
+    ### Inject an expired Hexbeat into pipe; resurrector sees it as hung
     echo 000000000 >> "$hbpath"
     echo "${GREEN_SEQ}Defibrillated $procname${RESET_SEQ}"
-    true
 
-  done
-  
+  done || true
 }
 
 ########################################################################
@@ -152,9 +156,10 @@ function verb_status {
 }
 
 ########################################################################
+### Parse command line; store the results in the various shell variables
 function parse_commands {
 
-  ### If -r was last command-line arguments, ROLEisnext will be non-empty
+  ### If -r was last command-line argument, ROLEisnext will be non-empty
   unset ROLEisnext
   unset Helped
   unset All
@@ -215,6 +220,8 @@ function parse_commands {
   true
 } ### function parse_commands
 
+########################################################################
+### Logic to optionally insert padding between INDI driver process names
 function procname_pad { [ "$procnames" ] && echo -n ' '; }
 
 ########################################################################
@@ -230,7 +237,7 @@ function proclist_path {
 ### Find the PID of the first running resurrector_indi that can be found
 function resurrector_indi_pid {
 
-lsof +c 0 | grep --color=never 'txt.*resurrector_indi$' \
+lsof +c 0 | grep --color=never 'txt.*/resurrector_indi$' \
 | while read ri pid user txt reg device size_off node exe cruft ; do
     [ "$txt" == "txt" ] \
     && [ "$(basename "$exe")" == "resurrector_indi" ] \
@@ -351,6 +358,7 @@ EoFhide
 }
 
 ########################################################################
+### MagAOX root directory; sequences for color highlighting; grep regexp
 function misc_setup {
 
   opt_magaox="/opt/MagAOX"
@@ -360,6 +368,13 @@ function misc_setup {
   YELLOW_SEQ="$(tput setaf 3)"
   BLUE_SEQ="$(tput setaf 4)"
   RESET_SEQ="$(tput sgr0)"
+
+  ### whitespace:  ws=>tab+space; wsh=>#+tab+space; notws=>not-tab+space
+  ws="[ 	]"
+  wsh="[# 	]"
+  notws="[^ 	]"
+
+  true
 }
 
 ########################################################################
