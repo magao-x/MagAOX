@@ -78,7 +78,7 @@ function verb_start {
 
   for procname in $procnames ; do
     ### Remove any leading whitespace+# for proclist file procname entry
-    sed -i -e "/^$ws*#$wsh*${procname}$ws$ws*$notws$notws*$ws*\$/s/^$wsh*//" "$proclist_txt"
+    sed -E -i -e "/^$ws0#$wsh0${procname}$ws1$notws1$ws0\$/s/^$wsh0//" "$proclist_txt"
   done
 
   ripid=$(resurrector_indi_pid) \
@@ -107,7 +107,7 @@ function verb_stop {
 
   for procname in $procnames ; do
     ### Replace leading whitespace with # in proclist file procname line
-    sed -i -e "/^$ws*${procname}$ws$ws*$notws$notws*$ws*\$/s/^$ws*/#/" "$proclist_txt"
+    sed -E -i -e "/^$ws0${procname}$ws1$notws1$ws0\$/s/^$ws0/#/" "$proclist_txt"
   done
 
   ripid=$(resurrector_indi_pid) \
@@ -237,14 +237,14 @@ function proclist_path {
 ### Find the PID of the first running resurrector_indi that can be found
 function resurrector_indi_pid {
 
-lsof +c 0 | grep --color=never 'txt.*/resurrector_indi$' \
+lsof +c 0 | \grep 'txt.*/resurrector_indi$' \
 | while read ri pid user txt reg device size_off node exe cruft ; do
     [ "$txt" == "txt" ] \
     && [ "$(basename "$exe")" == "resurrector_indi" ] \
     && [ "$pid" ] \
     && echo $pid | grep '^[1-9][0-9]*$' \
     && break
-  done | grep --color=never .    ### Return failure if nothing was found
+  done | \grep .                 ### Return failure if nothing was found
 }
 
 ########################################################################
@@ -265,7 +265,7 @@ function find_live_hexbeat_pipe {
 
   fdir="${opt_magaox}/drivers/fifos/"     ### Named FIFOs are under here
 
-  hbpath="$(find "$fdir" -type p -name "${1}.hb" | head -1 | grep . )" \
+  hbpath="$(find "$fdir" -type p -name "${1}.hb" | head -1 | \grep .)" \
   || return 1
 
   ### List all processes that have that file open; find resurrector_indi
@@ -286,7 +286,7 @@ function find_live_hexbeat_pipe {
       && echo "$path" \
       && break
 
-    done | grep --color=never .  ### Return failure if nothing was found
+    done | \grep .  ### Return failure if nothing was found
 }
 
 ########################################################################
@@ -373,6 +373,12 @@ function misc_setup {
   ws="[ 	]"
   wsh="[# 	]"
   notws="[^ 	]"
+
+  ws0="${ws}*"
+  ws1="${ws}+"
+  wsh0="${wsh}*"
+  wsh1="${wsh}+"
+  notws1="${notws}+"
 
   true
 }
