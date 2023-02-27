@@ -79,16 +79,20 @@ if ! grep "$DESIRED_CMDLINE" /etc/default/grub; then
     log_success "Applied kernel command line tweaks"
 fi
 
-log_info "Disabling hibernate/resume support in initramfs"
-if ! grep 'RESUME=none' /etc/initramfs-tools/conf.d/resume; then
-    echo "RESUME=none" | sudo tee /etc/initramfs-tools/conf.d/resume
-    sudo update-initramfs -u -k all
+if [[ -d /etc/initramfs-tools ]]; then
+    log_info "Disabling hibernate/resume support in initramfs"
+    if ! grep 'RESUME=none' /etc/initramfs-tools/conf.d/resume; then
+        echo "RESUME=none" | sudo tee /etc/initramfs-tools/conf.d/resume
+        sudo update-initramfs -u -k all
+    fi
 fi
 
 if [[ ! -e /etc/modprobe.d/blacklist-nouveau.conf ]]; then
     echo "blacklist nouveau" | sudo tee /etc/modprobe.d/blacklist-nouveau.conf > /dev/null
     echo "options nouveau modeset=0" | sudo tee -a /etc/modprobe.d/blacklist-nouveau.conf > /dev/null
-    sudo update-initramfs -u
+    if [[ $ID == ubuntu ]]; then
+        sudo update-initramfs -u
+    fi
     log_success "Blacklisted nouveau nvidia driver"
 else
     log_info "nouveau nvidia driver blacklist entry exists"

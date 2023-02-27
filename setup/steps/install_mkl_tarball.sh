@@ -15,5 +15,6 @@ else
     log_warn "/opt/intel already exists"
 fi
 echo "/opt/intel/oneapi/mkl/latest/lib/intel64" | sudo tee /etc/ld.so.conf.d/mkl.conf || exit 1
+echo "source /opt/intel/oneapi/mkl/latest/env/vars.sh intel64" | sudo tee /etc/profile.d/mklvars.sh &>/dev/null || exit 1
 sudo ldconfig
 log_info "Finished MKL tarball install"

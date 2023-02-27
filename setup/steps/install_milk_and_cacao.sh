@@ -66,4 +66,8 @@ if [[ $MAGAOX_ROLE == ICC || $MAGAOX_ROLE == RTC ]]; then
   sudo install $DIR/../systemd_units/cacao_startup_if_present.service /etc/systemd/system/
   sudo systemctl daemon-reload || true
   sudo systemctl enable cacao_startup_if_present.service || true
+else
+  make_on_data_array "cacao-${MAGAOX_ROLE,,}" /opt/MagAOX
 fi
+log_info "Making /opt/MagAOX/cacao/ owned by xsup:magaox"
+chown -R xsup:magaox /opt/MagAOX/cacao/
