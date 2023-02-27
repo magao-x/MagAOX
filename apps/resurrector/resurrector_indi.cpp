@@ -51,7 +51,8 @@ void setup_SIGUSR2_handler()
     sa.sa_sigaction = sigusr2_handler;
     errno = 0;
     istat = sigaction(SIGUSR2, &sa, 0);
-    if (istat < 0) {
+    if (istat < 0)
+    {
         std::cerr
         << "resurrector_indi:  "
         << "sigaction(" << strsignal(SIGUSR2) << ")=" << istat
@@ -65,7 +66,9 @@ void setup_SIGUSR2_handler()
 int
 main(int argc, char** argv)
 {
-    resurrectorT<> resurr;
+    extern void stdout_stderr_redirect(std::string);
+    bool nor{get_no_output_redirect_arg(argc,argv)};
+    resurrectorT<> resurr(nor ? nullptr : &stdout_stderr_redirect);
 
     setup_SIGUSR2_handler();
 
@@ -76,7 +79,8 @@ main(int argc, char** argv)
     if (get_verbose_arg(argc, argv)) { resurr.set_resurr_logging(); }
     else { resurr.clr_resurr_logging(); }
 
-    do {
+    do
+    {
         // Open the process list file
         FILE* f = fopen(proclist_role.c_str(),"r");
 
@@ -157,7 +161,8 @@ main(int argc, char** argv)
             //      should have been stopped manually by issuing a
             //      "kill -USR2 {pid}" command
 
-            if (newfd<0) {
+            if (newfd<0)
+            {
                 // If a FIFO with the driver name is not in the list,
                 // then open a FIFO for this hexbeater in the FIFOs
                 // directory; FIFO path will be /.../fifos/<name>.hb
@@ -168,7 +173,8 @@ main(int argc, char** argv)
                 newfd = resurr.open_hexbeater
                             (argv0, driver_name, IRMAGAOX_fifos, NULL);
 
-                if (newfd<0) {
+                if (newfd<0)
+                {
                     // If neither an existing FIFO is found nor a new
                     // FIFO is opened, then resurrector logs the erro
                     // and does nothing

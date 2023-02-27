@@ -12,7 +12,7 @@ resurrector_indi - manage processes in an INDI framework.
 # SYNOPSIS 
 ```
 [export MAGAOX_ROLE=magaox-role]
-[MAGAOX_ROLE=magaox-role] ./resurrector_indi [-r magaox-role] [--role=magaox-role]
+[MAGAOX_ROLE=magaox-role] ./resurrector_indi [-r magaox-role] [--role=magaox-role] [-nor|--no-output-redirect] [-v|--verbose] [-h|--help]
 
 ```
 - I.e. four ways to specify the role:  two using environment variable; two using command-line arguments.
@@ -157,6 +157,16 @@ The INDI driver FIFOs must be named "drivername.in" and "drivername.out" and are
     * Command-line syntax can be used overrides default
       * -r role
       * --role=role
+* Output redirect
+    * Default action redirect each INDI driver device's STDERR and STDOUT outputs to a file
+        * Target file is /opt/MagAOX/sys/<devicename>/outputs
+        * N.B. "/opt/MagAOX" prefix can be overridden with envvar MagAOX_PATH
+    * To not redirect devices' outputs:
+        * --no-output-redirect
+        * -nor
+* Verbosity
+    * -v
+    * --verbose
 * Help
     * Prints Usage to STDOUT
     * Command-line syntax
@@ -227,6 +237,23 @@ After receive such a Hexbeat telling it that the corresponding driver/server exp
 <!-- the next line must end in two spaces -->
 \* seconds since the Unix(tm) epoch of 1970-01-01T00:00:00  
 \*\* ASCII 10 = 0x0A
+
+## Ca. 2023-02-21 Temporary documentation for output-redirection prototype
+
+### Build
+
+    make EXTRACPPFLAGS=-DTEST_MAIN=main redirect_prototype
+
+### Run/test
+
+    while true ; do tail -fc+1 /opt/MagAOX/sys/devicename/outputs || sleep 5 ; done &
+
+    ./redirect_prototype devicename
+    <type some data, then hit return>
+    <type some data again, then hit return again>
+    <type some data again, then hit return again>
+    ...
+    ^D (Control-D, i.e. End-Of-File)
 
 # TESTING
 
