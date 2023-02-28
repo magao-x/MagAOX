@@ -452,20 +452,20 @@ Usage:
     resuctrl start PROCNAME[ PROCNAME[ ...]]
         - enable and start PROCNAME processes in proclist
 
-    resuctrl stop PROCNAME[ PROCNAME[ ...]]
+    resuctrl stop --all|PROCNAME[ PROCNAME[ ...]]
         - disable and stop PROCNAME processes in proclist
 
-    resuctrl defib PROCNAME[ [PROCNAME ...]]
+    resuctrl defib --all|PROCNAME[ [PROCNAME ...]]
         - show status and last few log lines for each process
 
-    resuctrl peek PROCNAME [PROCNAME ...]
+    resuctrl peek --all|PROCNAME [PROCNAME ...]
         - show status and last few log lines for each process
 
-    resuctrl status PROCNAME [PROCNAME ...]
+    resuctrl status --all|PROCNAME [PROCNAME ...]
         - show status and last few log lines for each process
 
 positional arguments:
-  {status,peek,shutdown,stop,restart,startup,start}
+  {startup,shutdown,restart,start,stop,defib,peek,status}
                         verb for action to take
 
 proclist is contents of file::
