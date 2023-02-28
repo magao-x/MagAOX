@@ -459,7 +459,7 @@ Usage:
 
     resuctrl defib --all|PROCNAME[ [PROCNAME ...]]
         - declare to resurrector that PROCNAME processes have expired,
-          so they will be restarted by resurrector_indo
+          so they will be restarted by resurrector_indi
 
     resuctrl peek --all|PROCNAME [PROCNAME ...]
         - show status and last few log lines (via logdump) for each process
