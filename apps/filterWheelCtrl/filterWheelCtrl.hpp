@@ -284,6 +284,7 @@ void filterWheelCtrl::loadConfig()
    config(m_readTimeOut, "timeouts.read");
 
    config(m_acceleration, "motor.acceleration");
+   config(m_deceleration, "motor.deceleration");
    config(m_motorSpeed, "motor.speed");
    config(m_circleSteps, "motor.circleSteps");
    config(m_homeOffset, "stage.homeOffset");
