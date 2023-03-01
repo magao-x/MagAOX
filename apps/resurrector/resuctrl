@@ -260,7 +260,7 @@ function _brief_status {
 }
 
 ########################################################################
-### Write last 10 line of single Hexbeater process's flatbuffer log file
+### Write last 10 lines of single Hexbeater process' flatbuffer log file
 function _peek_logs {
 
   [ "$1" ] || return 1
