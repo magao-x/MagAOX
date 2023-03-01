@@ -587,7 +587,7 @@ def parse_iso_datetime(input_str):
 def main():
     now = datetime.datetime.now()
     this_year = now.year
-    this_semester = str(this_year) + "B" if now.month > 6 else "A"
+    this_semester = str(this_year) + ("B" if now.month > 6 else "A")
     import argparse
     parser = argparse.ArgumentParser()
     parser.add_argument('-d', '--daemon', help="Whether to start in daemon mode watching for new observations", action='store_true')
