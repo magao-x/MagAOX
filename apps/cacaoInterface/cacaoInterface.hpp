@@ -213,7 +213,7 @@ public:
    /// @}
    
    /** \name File Monitoring Thread
-     * Monitors CACAO files for changes
+     * Handling of offloads from the average woofer shape
      * @{
      */
    int m_fmThreadPrio {0}; ///< Priority of the filemonitoring thread.

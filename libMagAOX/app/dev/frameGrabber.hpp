@@ -445,7 +445,7 @@ int frameGrabber<derivedT>::appLogic()
    {
       if(m_atimes.size() >= m_atimes.maxEntries())
       {
-         cbIndexT refEntry = m_atimes.earliest();
+         cbIndexT refEntry = m_atimes.nextEntry();
          
          m_atimesD.resize(m_atimes.maxEntries()-1);
          m_wtimesD.resize(m_wtimes.maxEntries()-1);

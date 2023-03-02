@@ -165,7 +165,7 @@ protected:
    
    /** \name SIGSEGV & SIGBUS signal handling
      * These signals occur as a result of a ImageStreamIO source server resetting (e.g. changing frame sizes).
-     * When they occur a restart of the shmim monitor thread main loops is triggered.
+     * When they occur a restart of the framegrabber and framewriter thread main loops is triggered.
      * 
      * @{
      */ 
@@ -434,9 +434,9 @@ void shmimMonitor<derivedT, specificT>::_handlerSigSegv( int signum,
 
 template<class derivedT, class specificT>
 void shmimMonitor<derivedT, specificT>::handlerSigSegv( int signum,
-                                                        siginfo_t *siginf,
-                                                        void *ucont
-                                                      )
+                                             siginfo_t *siginf,
+                                             void *ucont
+                                           )
 {
    static_cast<void>(signum);
    static_cast<void>(siginf);
@@ -564,7 +564,7 @@ void shmimMonitor<derivedT, specificT>::smThreadExec()
       size_t snx, sny, snz;
       uint64_t curr_image; //The current cnt1 index
       
-      if(m_getExistingFirst && !m_restart && derived().shutdown() == 0) //If true, we always get the existing image without waiting on the semaphore.
+      if(m_getExistingFirst && !m_restart) //If true, we always get the existing image without waiting on the semaphore.
       {
          if(m_imageStream.md[0].size[2] > 0) ///\todo change to naxis?
          {
