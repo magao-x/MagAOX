@@ -609,6 +609,21 @@ INDI_SETCALLBACK_DEFN( zaberCtrl, m_indiP_stageState)(const pcf::IndiProperty &i
       state(stateCodes::POWERON);
       m_moving = -1;
    }
+   else if(sstr == "NODEVICE") 
+   {
+      state(stateCodes::NODEVICE);
+      m_moving = -2;
+   }
+   else if(sstr == "NOTCONNECTED") 
+   {
+      state(stateCodes::NOTCONNECTED);
+      m_moving = -2;
+   }
+   else if(sstr == "CONNECTED") 
+   {
+      state(stateCodes::CONNECTED);
+      m_moving = -2;
+   }
    else if(sstr == "NOTHOMED") 
    {
       state(stateCodes::NOTHOMED);
@@ -642,7 +657,22 @@ INDI_SETCALLBACK_DEFN( zaberCtrl, m_indiP_stageState)(const pcf::IndiProperty &i
       state(stateCodes::NOTCONNECTED);
       m_moving = -2;
    }
-
+   else if(sstr == "FAILURE") 
+   {
+      state(stateCodes::FAILURE);
+      m_moving = -2;
+   }
+   else if(sstr == "ERROR") 
+   {
+      state(stateCodes::ERROR);
+      m_moving = -2;
+   }
+   else
+   {
+      std::cerr << "else: " << sstr << "\n";
+      state(stateCodes::UNINITIALIZED);
+      m_moving = -2;
+   }
    return 0;
 }
 
@@ -661,9 +691,11 @@ INDI_SETCALLBACK_DEFN( zaberCtrl, m_indiP_stageMaxRawPos )(const pcf::IndiProper
    
    std::lock_guard<std::mutex> guard(m_indiMutex);
    
-   unsigned long maxRawPos = ipRecv[m_stageName].get<unsigned long>();
+   long maxRawPos = ipRecv[m_stageName].get<long>();
    
-   if(maxRawPos != m_maxRawPos && !(state() == stateCodes::POWERON || state() == stateCodes::POWEROFF || state() == stateCodes::NOTCONNECTED))
+   if(maxRawPos > 10000000000000 || maxRawPos < 0) return 0; //Indicates a bad value
+
+   if((unsigned long) maxRawPos != m_maxRawPos && (state() == stateCodes::CONNECTED|| state() == stateCodes::HOMING || state() == stateCodes::READY || state() == stateCodes::OPERATING))
    {
       log<text_log>("max position mismatch between config-ed value (" + std::to_string(m_maxRawPos) + ") and stage value (" + std::to_string(maxRawPos) + ")", logPrio::LOG_WARNING);
    }

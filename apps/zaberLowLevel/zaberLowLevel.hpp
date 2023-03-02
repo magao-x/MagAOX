@@ -378,6 +378,7 @@ int zaberLowLevel::appStartup()
    for(size_t n=0; n< m_stages.size(); ++n)
    {
       m_indiP_max_pos.add (pcf::IndiElement(m_stages[n].name()));
+      m_indiP_max_pos[m_stages[n].name()] = -1;
    }
    
    REG_INDI_NEWPROP_NOCB(m_indiP_curr_pos, "curr_pos", pcf::IndiProperty::Number);
@@ -443,10 +444,8 @@ int zaberLowLevel::appLogic()
       for(size_t i=0; i < m_stages.size();++i)
       {
          updateIfChanged(m_indiP_curr_state, m_stages[i].name(), std::string("NODEVICE"));
-      }
-         
-   }
-      
+      }         
+   }  
 
    if( state() == stateCodes::NODEVICE )
    {
@@ -536,6 +535,7 @@ int zaberLowLevel::appLogic()
          std::lock_guard<std::mutex> guard(m_indiMutex); //Inside loop so INDI requests can steal it
 
          m_stages[i].getMaxPos(m_port);
+         std::cerr << i << " " << m_stages[i].name() << " " <<  m_stages[i].maxPos() << "\n";
          updateIfChanged(m_indiP_max_pos, m_stages[i].name(), m_stages[i].maxPos());
 
          //Get warnings so first pass through has correct state for home/not-homed
@@ -711,13 +711,18 @@ int zaberLowLevel::onPowerOff()
 inline
 int zaberLowLevel::whilePowerOff()
 {
-
    return 0;
 }
 
 inline
 int zaberLowLevel::appShutdown()
 {
+   for(size_t i=0; i < m_stages.size();++i)
+   {
+      if(m_stages[i].deviceAddress() < 1) continue;
+      updateIfChanged(m_indiP_curr_state, m_stages[i].name(), std::string("NODEVICE"));
+   }
+
    return 0;
 }
 
