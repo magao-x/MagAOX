@@ -391,7 +391,7 @@ picamCtrl::picamCtrl() : MagAOXApp(MAGAOX_CURRENT_SHA1, MAGAOX_REPO_MODIFIED)
    m_full_w = 1024; 
    m_full_h = 1024; 
    
-   m_maxEMGain = 100;
+   m_maxEMGain = 1000;
    
    return;
 }
