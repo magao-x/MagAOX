@@ -34,7 +34,8 @@ protected:
    
    bool m_loopState {false};
    bool m_loopWaiting {false}; //indicates slider is waiting on loop_state update to be re-enabled 
-   
+   QTimer * m_loopWaitTimer {nullptr};
+
    bool m_procState {false};
    
    std::vector<int> m_modes;
@@ -73,6 +74,8 @@ public slots:
       
    void on_slider_loop_sliderReleased();
    
+   void waitTimerOut();
+
    void on_button_LoopZero_pressed();
    
    void on_button_zeroall_pressed();
@@ -93,6 +96,9 @@ loopCtrl::loopCtrl( std::string & procName,
 {
    ui.setupUi(this);
    
+   m_loopWaitTimer = new QTimer;
+
+   connect(m_loopWaitTimer, SIGNAL(timeout()), this, SLOT(waitTimerOut()));
    connect(this, SIGNAL(blocksChanged(int)), this, SLOT(setupBlocks(int)));
 
    setWindowTitle(QString(m_procName.c_str()));
@@ -230,14 +236,14 @@ void loopCtrl::handleSetProperty( const pcf::IndiProperty & ipRecv)
       {
          if(ipRecv["toggle"].getSwitchState() == pcf::IndiElement::On)
          {
+            if(m_loopState == false) m_loopWaiting = false;
             m_loopState = true;
          }
          else
          {
+            if(m_loopState == true) m_loopWaiting = false;
             m_loopState = false;
          }
-         
-         m_loopWaiting = false;
       }
    }
    else if(ipRecv.getName() == "loop_processes")
@@ -399,6 +405,7 @@ void loopCtrl::on_slider_loop_sliderReleased()
    ui.label_loop_state->setEnabled(false);
    ui.slider_loop->setEnabled(false);
    m_loopWaiting = true;
+   m_loopWaitTimer->start(2000);
    
    pcf::IndiProperty ipFreq(pcf::IndiProperty::Switch);
    
@@ -418,6 +425,11 @@ void loopCtrl::on_slider_loop_sliderReleased()
    sendNewProperty(ipFreq);
 }
 
+void loopCtrl::waitTimerOut()
+{
+   m_loopWaiting = false;
+
+}
 void loopCtrl::on_button_LoopZero_pressed()
 {
    pcf::IndiProperty ipFreq(pcf::IndiProperty::Switch);
