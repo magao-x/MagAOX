@@ -39,7 +39,7 @@
       </widget>
      </item>
      <item>
-      <layout class="QHBoxLayout" name="horizontalLayout">
+      <layout class="QHBoxLayout" name="horizontalLayout" stretch="1,1,1">
        <item>
         <spacer name="horizontalSpacer">
          <property name="orientation">
@@ -54,15 +54,12 @@
         </spacer>
        </item>
        <item>
-        <widget class="QSlider" name="shutter">
+        <widget class="xqt::toggleSlider" name="shutter">
          <property name="sizePolicy">
           <sizepolicy hsizetype="Expanding" vsizetype="Expanding">
            <horstretch>0</horstretch>
            <verstretch>0</verstretch>
           </sizepolicy>
-         </property>
-         <property name="orientation">
-          <enum>Qt::Horizontal</enum>
          </property>
         </widget>
        </item>
@@ -85,6 +82,13 @@
    </item>
   </layout>
  </widget>
+ <customwidgets>
+  <customwidget>
+   <class>xqt::toggleSlider</class>
+   <extends>QSlider</extends>
+   <header>../xWidgets/toggleSlider.hpp</header>
+  </customwidget>
+ </customwidgets>
  <resources/>
  <connections/>
 </ui>

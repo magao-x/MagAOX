@@ -141,7 +141,10 @@ scripts_to_install = magaox \
 	cacao_startup_if_present \
 	git_check_all \
 	collect_camera_configs_for_darks \
-	shot_in_the_dark
+	shot_in_the_dark \
+	lowfs_switch \
+	lowfs_apply \
+	lowfs_switch_apply
 
 all: indi_all libs_all flatlogs apps_all guis_all utils_all
 

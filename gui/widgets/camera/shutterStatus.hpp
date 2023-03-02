@@ -22,7 +22,6 @@ protected:
    int m_state {0}; ///< Current state of the shutter, 0 is open, 1 is shut.
    int m_tgt_state {-1}; ///< Target state of the shutter in this widget.  Used to avoid bouncing gui.
    
-   QTimer * m_tgtTimer {nullptr}; ///< Timer to normalize target if shutter stalls (5 seconds).
 
 public:
    explicit shutterStatus( const std::string & camName,
@@ -44,15 +43,6 @@ public:
 
    virtual void updateGUI();
 
-public slots:
-   
-   void on_shutter_sliderReleased();
-
-   void timeout();
-
-signals:
-
-   void tgtTimerStart(int);
 
 protected:
      
@@ -65,10 +55,8 @@ shutterStatus::shutterStatus( const std::string & camName,
 {
    ui.setupUi(this);
 
-   m_tgtTimer = new QTimer(this);
-   
-   connect(m_tgtTimer, SIGNAL(timeout()), this, SLOT(timeout()));
-   connect(this, SIGNAL(tgtTimerStart(int)), m_tgtTimer, SLOT(start(int)));
+   ui.shutter->setup(camName, "shutter", "toggle", "");
+   ui.shutter->setStretch(0,0,3, true, true);
 
    onDisconnect();
 }
@@ -81,7 +69,7 @@ void shutterStatus::subscribe()
 {
    if(!m_parent) return;
    
-   m_parent->addSubscriberProperty(this, m_camName, "shutter");
+   m_parent->addSubscriber(ui.shutter);
    m_parent->addSubscriberProperty(this, m_camName, "shutter_status");
 
    return;
@@ -135,9 +123,6 @@ void shutterStatus::updateGUI()
       ui.shutter->setEnabled(true);
 
       ui.label->setText("shutter");
-
-      if(m_state == 1 && m_tgt_state == 1) ui.shutter->setSliderPosition(ui.shutter->maximum());
-      else if(m_state == 0 && m_tgt_state == 0) ui.shutter->setSliderPosition(ui.shutter->minimum());
    }
    else if (m_status == "POWEROFF")
    {
@@ -156,56 +141,6 @@ void shutterStatus::updateGUI()
 
 } //updateGUI()
 
-void shutterStatus::on_shutter_sliderReleased()
-{
-   int state = -1;
-
-   if( ui.shutter->sliderPosition() > ui.shutter->minimum()+0.8*(ui.shutter->maximum()-ui.shutter->minimum()))
-   {
-      state = 1;   
-   }
-   else if( ui.shutter->sliderPosition() < ui.shutter->minimum()+0.2*(ui.shutter->maximum()-ui.shutter->minimum())) 
-   {
-      state = 0;
-   }
-
-   if(state == 1)
-   {
-      pcf::IndiProperty ipFreq(pcf::IndiProperty::Switch);
-   
-      ipFreq.setDevice(m_camName);
-      ipFreq.setName("shutter");
-      ipFreq.add(pcf::IndiElement("toggle"));
-      ipFreq["toggle"].setSwitchState(pcf::IndiElement::On);
-    
-      sendNewProperty(ipFreq);  
-      m_tgt_state = 1;
-      emit tgtTimerStart(5000);
-   }
-   else if(state == 0)
-   {
-      pcf::IndiProperty ipFreq(pcf::IndiProperty::Switch);
-   
-      ipFreq.setDevice(m_camName);
-      ipFreq.setName("shutter");
-      ipFreq.add(pcf::IndiElement("toggle"));
-      ipFreq["toggle"].setSwitchState(pcf::IndiElement::Off);
-    
-      sendNewProperty(ipFreq); 
-      m_tgt_state = 0;
-      emit tgtTimerStart(5000);
-   }
-   else
-   {
-      if(m_state == 1) ui.shutter->setSliderPosition(ui.shutter->maximum());
-      else ui.shutter->setSliderPosition(ui.shutter->minimum());
-   }
-}
-
-void shutterStatus::timeout()
-{
-   m_tgt_state = m_state;
-}
 
 
 } //namespace xqt

@@ -69,6 +69,16 @@ public:
                const std::string & units
              );
 
+   void currEl(const std::string & cel)
+   {
+      m_currEl = cel;
+   }
+
+   void targEl(const std::string & tel)
+   {
+      m_targEl = tel;
+   }
+
    void defaultFormat();
 
    QString formattedValue();

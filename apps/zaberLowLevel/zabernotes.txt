@@ -115,6 +115,17 @@ As of 2022-10-14:
 @07 0 OK IDLE WR 1679790
 @08 0 OK IDLE WR 2257638
 
+2023-03-01:
+set stagepiaa2 max
+@01 0 OK IDLE -- 771029
+@02 0 OK IDLE -- 1526940
+@03 0 OK IDLE -- 352750
+@05 0 OK IDLE -- 2133334
+@04 0 OK IDLE -- 2624672
+@07 0 OK IDLE -- 1679790
+@06 0 OK IDLE -- 1574803
+@08 0 OK IDLE -- 2257638
+
 
 ************************
 turbsim rotator

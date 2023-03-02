@@ -14,19 +14,41 @@
 #include "../xWidgets/statusEntry.hpp"
 #include "../xWidgets/xWidget.hpp"
 
+#define MOVE_TTM (0)
+#define MOVE_TEL (1)
+#define MOVE_WOOF (2)
+
 namespace xqt 
 {
    
+void wooferTipTilt( double & tip,
+                    double & tilt,
+                    double x,
+                    double y
+                  )
+{
+   double rot = (180.+29.0)*3.14159/180.;
+   double scale = -1.0;
+
+   tip = scale*(x * cos(rot) - y * sin(rot));
+   tilt = scale*(x * sin(rot) + y * cos(rot));
+
+}
+
+
 class pupilGuide : public xWidget
 {
    Q_OBJECT
    
+   enum camera {FLOWFS, LLOWFS, CAMSCIS};
+
 protected:
    
    std::string m_appState;
    
    QMutex m_mutex;
    
+   // --- modttm
    std::string m_modFsmState;
    int m_modState {0};
    
@@ -35,13 +57,27 @@ protected:
    
    double m_modFreq {0};
    double m_modFreq_tgt{0};
-   
+   double m_camwfsFreq {0};
+
    double m_modRad {0};
    double m_modRad_tgt{0};
   
    float m_stepSize {0.1};
 
-   bool m_usetel {false};
+   int m_tipmovewhat {MOVE_TTM};
+
+   // --- woofer
+
+   double m_tilt {0}; ///< current value of tilt mode from wooferModes
+   double m_tip {0}; ///< current value of tip mode from wooferModes
+   double m_focus {0}; ///< current value of focus mode from wooferModes
+
+   float m_focusStepSize {0.1};
+
+   // --- camwfs-align
+   bool m_camwfsAlignLoopState {false};
+   bool m_camwfsAlignLoopWaiting {false};
+   QTimer * m_camwfsAlignLoopWaitTimer {nullptr};
 
    // --- camwfs-fit
    std::string m_camwfsfitState;
@@ -90,18 +126,19 @@ protected:
    unsigned m_nAverage_current {0};
    unsigned m_nAverage_target {0};
 
-   
-   
+   // -- dmtweeter
+   std::string m_dmtweeterState;
+   bool m_dmtweeterTestSet;
+
+   // -- ttmpupl
    std::string m_pupFsmState;
    double m_pupCh1 {0};
    double m_pupCh2 {0};
    
-   
-   
-   
-   
    float m_pupStepSize {0.1};
-    
+
+   int m_pupCam {FLOWFS};
+
    std::string m_camlensxFsmState;
    std::string m_camlensyFsmState;
    float m_camlensx_pos {0};
@@ -136,7 +173,17 @@ public:
 public slots:
    void updateGUI();
    
-   //void on_button_ttmtel_pressed();
+   //----------- modttm
+
+   void on_modFreq_target_returnPressed();
+   void on_modRad_target_returnPressed();
+   void on_buttonMod_mod_pressed();
+   void on_buttonMod_set_pressed();
+   void on_buttonMod_rest_pressed();
+
+   void on_button_scalemodcamwfs_pressed();
+         
+   void on_button_ttmtel_pressed();
 
    void on_button_tip_u_pressed();
    void on_button_tip_ul_pressed();
@@ -147,8 +194,21 @@ public slots:
    void on_button_tip_r_pressed();
    void on_button_tip_ur_pressed();
    void on_button_tip_scale_pressed();
-   
-   
+
+   //------------- focus
+   void on_button_focus_p_pressed();
+   void on_button_focus_m_pressed();
+   void on_button_focus_scale_pressed();
+
+   //----------- dmtweeter
+   void on_buttonTweeterTest_set_pressed();
+
+   //----------- ttmpupil
+   void on_buttonPup_rest_pressed();
+   void on_buttonPup_set_pressed();
+
+   void on_button_camera_pressed();
+
    void on_button_pup_u_pressed();
    void on_button_pup_ul_pressed();
    void on_button_pup_l_pressed();
@@ -159,15 +219,16 @@ public slots:
    void on_button_pup_ur_pressed();
    void on_button_pup_scale_pressed();
    
-   void on_modFreq_target_returnPressed();
-   void on_modRad_target_returnPressed();
-   void on_buttonMod_mod_pressed();
-   void on_buttonMod_set_pressed();
-   void on_buttonMod_rest_pressed();
    
-   void on_buttonPup_rest_pressed();
-   void on_buttonPup_set_pressed();
    
+   void toggleExpFit(bool visible);
+   void on_buttonExpFit_pressed();
+
+   void on_pupilAlign_loopSlider_sliderReleased();
+   void on_pupilAlign_loopSlider_sliderPressed();
+   void on_pupilAlign_loopSlider_sliderMoved(int);
+   void camwfsAlignLoopWaitTimerOut();
+
    void on_button_camlens_u_pressed();
    void on_button_camlens_l_pressed();
    void on_button_camlens_d_pressed();
@@ -183,21 +244,43 @@ private:
 pupilGuide::pupilGuide( QWidget * Parent, Qt::WindowFlags f) : xWidget(Parent, f)
 {
    ui.setupUi(this);
+
    ui.modState->setProperty("isStatus", true);
    ui.pupState->setProperty("isStatus", true);
+
+   ui.tweeterState->device("dmtweeter");
+
    ui.camlens_fsm->setProperty("isStatus", true);
    ui.button_camlens_scale->setProperty("isScaleButton", true);
    ui.button_tip_scale->setProperty("isScaleButton", true);
+   ui.button_focus_scale->setProperty("isScaleButton", true);
    ui.button_pup_scale->setProperty("isScaleButton", true);
    
    QTimer *timer = new QTimer(this);
    connect(timer, SIGNAL(timeout()), this, SLOT(updateGUI()));
    timer->start(250);
       
+   ui.modCh1->setup("fxngenmodwfs", "C1ofst", statusEntry::FLOAT, "Ch1", "V");
+   ui.modCh1->currEl("value");
+   ui.modCh1->targEl("value");
+   ui.modCh1->setStretch(0,1,6);//removes spacer and maximizes text field
+   ui.modCh1->format("%0.2f");
+   ui.modCh1->onDisconnect();
+
+   ui.modCh2->setup("fxngenmodwfs", "C2ofst", statusEntry::FLOAT, "Ch2", "V");
+   ui.modCh2->currEl("value");
+   ui.modCh2->targEl("value");
+   ui.modCh2->setStretch(0,1,6);//removes spacer and maximizes text field
+   ui.modCh2->format("%0.2f");
+   ui.modCh2->onDisconnect();
+
    char ss[5];
    snprintf(ss, 5, "%0.2f", m_stepSize);
    ui.button_tip_scale->setText(ss);
    
+   snprintf(ss, 5, "%0.2f", m_focusStepSize);
+   ui.button_focus_scale->setText(ss);
+
    snprintf(ss, 5, "%0.2f", m_pupStepSize);
    ui.button_pup_scale->setText(ss);
    
@@ -207,7 +290,7 @@ pupilGuide::pupilGuide( QWidget * Parent, Qt::WindowFlags f) : xWidget(Parent, f
    //QFont qf = ui.labelModAndCenter->font();
    //qf.setPixelSize(XW_FONT_SIZE*1.2+0.5);
    //ui.labelMode
-   setXwFont(ui.labelModAndCenter, 1.2);
+   setXwFont(ui.labelModAndCenter);
    setXwFont(ui.modState);
    setXwFont(ui.labelFreqCurrent);
    setXwFont(ui.labelFreqTarget);
@@ -220,10 +303,10 @@ pupilGuide::pupilGuide( QWidget * Parent, Qt::WindowFlags f) : xWidget(Parent, f
    setXwFont(ui.buttonMod_rest);
    setXwFont(ui.buttonMod_set);
    setXwFont(ui.buttonMod_mod);
-   setXwFont(ui.labelCh1);
-   setXwFont(ui.labelCh2);
-   setXwFont(ui.modCh1);
-   setXwFont(ui.modCh2);
+   //setXwFont(ui.labelCh1);
+   //setXwFont(ui.labelCh2);
+   //setXwFont(ui.modCh1);
+   //setXwFont(ui.modCh2);
    setXwFont(ui.labelMedianFluxes);
    setXwFont(ui.med1);
    setXwFont(ui.med2);
@@ -231,8 +314,16 @@ pupilGuide::pupilGuide( QWidget * Parent, Qt::WindowFlags f) : xWidget(Parent, f
    setXwFont(ui.med4);
    setXwFont(ui.setDelta);
 
+   m_tipmovewhat = MOVE_TTM;
+   on_button_ttmtel_pressed();
 
-   setXwFont(ui.labelPupilSteering,1.2);
+   //tweeter controls
+   setXwFont(ui.labelTweeter);
+   setXwFont(ui.tweeterState);
+   setXwFont(ui.buttonTweeterTest_set);
+
+   //ttmpupil controls
+   setXwFont(ui.labelPupilSteering);
    setXwFont(ui.pupState);
    setXwFont(ui.buttonPup_rest);
    setXwFont(ui.buttonPup_set);
@@ -241,10 +332,20 @@ pupilGuide::pupilGuide( QWidget * Parent, Qt::WindowFlags f) : xWidget(Parent, f
    setXwFont(ui.pupCh1);
    setXwFont(ui.pupCh2);
 
+   setXwFont(ui.labelPupilAlignment);
+   m_camwfsAlignLoopWaitTimer = new QTimer;
+   connect(m_camwfsAlignLoopWaitTimer, SIGNAL(timeout()), this, SLOT(camwfsAlignLoopWaitTimerOut()));
+
+   ui.pupilAlign_gain->setup("camwfs-align", "loop_gain", statusEntry::FLOAT, "loop gain", "");
+   ui.pupilAlign_gain->setStretch(0,1,6);//removes spacer and maximizes text field
+   ui.pupilAlign_gain->format("%0.2f");
+   ui.pupilAlign_gain->onDisconnect();
+
+
    setXwFont(ui.camlens_label);
    setXwFont(ui.camlens_fsm);
 
-   setXwFont(ui.labelPupilFitting,1.2);
+   setXwFont(ui.labelPupilFitting);//,1.2);
 
    setXwFont(ui.labelx);
    setXwFont(ui.labely);
@@ -292,6 +393,8 @@ pupilGuide::pupilGuide( QWidget * Parent, Qt::WindowFlags f) : xWidget(Parent, f
    ui.camlens_y_pos->format("%0.4f");
    ui.camlens_y_pos->onDisconnect();
 
+   //Set the pupil fit boxes to invisible at startup   
+   toggleExpFit(false);
 }
    
 pupilGuide::~pupilGuide()
@@ -307,6 +410,13 @@ void pupilGuide::subscribe()
    m_parent->addSubscriberProperty(this, "modwfs", "modState");
    m_parent->addSubscriberProperty(this, "modwfs", "fsm");
 
+   m_parent->addSubscriber(ui.modCh1);
+   m_parent->addSubscriber(ui.modCh2);
+   
+   m_parent->addSubscriberProperty(this, "camwfs", "fps");
+
+   m_parent->addSubscriberProperty(this, "wooferModes", "current_amps");
+
    m_parent->addSubscriberProperty(this, "camwfs-fit", "fsm");
    m_parent->addSubscriberProperty(this, "camwfs-fit", "quadrant1");
    m_parent->addSubscriberProperty(this, "camwfs-fit", "quadrant2");
@@ -317,13 +427,20 @@ void pupilGuide::subscribe()
    m_parent->addSubscriberProperty(this, "camwfs-avg", "fsm");
    m_parent->addSubscriberProperty(this, "camwfs-avg", "nAverage");
 
-   m_parent->addSubscriberProperty(this, "fxngenmodwfs", "C1ofst");
-   m_parent->addSubscriberProperty(this, "fxngenmodwfs", "C2ofst");
    
    m_parent->addSubscriberProperty(this, "ttmpupil", "fsm");
    m_parent->addSubscriberProperty(this, "ttmpupil", "pos_1");
    m_parent->addSubscriberProperty(this, "ttmpupil", "pos_2");
-   
+
+   m_parent->addSubscriber(ui.tweeterState);
+   m_parent->addSubscriberProperty(this, "dmtweeter", "fsm");
+   m_parent->addSubscriberProperty(this, "dmtweeter", "test_set");
+   m_parent->addSubscriberProperty(this, "dmtweeter", "test");
+
+   m_parent->addSubscriberProperty(this, "camwfs-align", "fsm");
+   m_parent->addSubscriberProperty(this, "camwfs-align", "loop_state");
+   m_parent->addSubscriber(ui.pupilAlign_gain);
+
    m_parent->addSubscriber(ui.fitThreshold);
    m_parent->addSubscriber(ui.fitAvgTime);
 
@@ -341,7 +458,16 @@ void pupilGuide::onConnect()
 {
    ui.labelModAndCenter->setEnabled(true);
    ui.labelPupilFitting->setEnabled(true);
+
+   ui.modCh1->onConnect();
+   ui.modCh2->onConnect();
+
+   ui.tweeterState->onConnect();
+
    ui.labelPupilSteering->setEnabled(true);
+   
+   ui.pupilAlign_gain->onConnect();
+   
    ui.camlens_label->setEnabled(true);
    
    ui.fitThreshold->onConnect();
@@ -356,6 +482,12 @@ void pupilGuide::onDisconnect()
 {
    m_modFsmState = "";
    m_pupFsmState = "";
+
+   ui.modCh1->onDisconnect();
+   ui.modCh2->onDisconnect();
+
+   ui.tweeterState->onDisconnect();
+
    m_camlensxFsmState = "";
    m_camlensyFsmState = "";
    m_camwfsavgState = "";
@@ -364,6 +496,10 @@ void pupilGuide::onDisconnect()
    ui.labelModAndCenter->setEnabled(false);
    ui.labelPupilFitting->setEnabled(false);
    ui.labelPupilSteering->setEnabled(false);
+
+
+   ui.pupilAlign_gain->onDisconnect();
+
    ui.camlens_label->setEnabled(false);
    
    ui.fitThreshold->onDisconnect();
@@ -378,13 +514,17 @@ void pupilGuide::onDisconnect()
 void pupilGuide::handleDefProperty( const pcf::IndiProperty & ipRecv)
 {  
    std::string dev = ipRecv.getDevice();
-   if( dev == "camwfs-avg" || 
+   if( dev == "modwfs" || 
+       dev == "camwfs" ||
+       dev == "wooferModes" ||
+       dev == "camwfs-avg" || 
        dev == "camwfs-fit" || 
-       dev == "modwfs" || 
-       dev == "fxngenmodwfs" || 
+       /*dev == "fxngenmodwfs" || */
        dev == "ttmpupil" || 
+       dev == "camwfs-align" ||
        dev == "stagecamlensx" || 
-       dev == "stagecamlensy") 
+       dev == "stagecamlensy" ||
+       dev == "dmtweeter") 
    {
       return handleSetProperty(ipRecv);
    }
@@ -396,8 +536,74 @@ void pupilGuide::handleSetProperty( const pcf::IndiProperty & ipRecv)
 {
    std::string dev = ipRecv.getDevice();
    
-   //m_mutex.lock();
-   if(dev == "camwfs-avg")
+   if(dev == "modwfs")
+   {
+      if(ipRecv.getName() == "modFrequency")
+      {
+         if(ipRecv.find("current"))
+         {
+            m_modFreq = ipRecv["current"].get<double>();
+         }
+         if(ipRecv.find("requested"))
+         {
+            m_modFreq_tgt = ipRecv["requested"].get<double>();
+         }
+      }
+      else if(ipRecv.getName() == "modRadius")
+      {
+         if(ipRecv.find("current"))
+         {
+            m_modRad = ipRecv["current"].get<double>();
+         }
+         if(ipRecv.find("requested"))
+         {
+            m_modRad_tgt = ipRecv["requested"].get<double>();
+         }
+      }
+      else if(ipRecv.getName() == "modState")
+      {
+         if(ipRecv.find("current"))
+         {
+            m_modState = ipRecv["current"].get<int>();
+         }
+      }
+      else if(ipRecv.getName() == "fsm")
+      {
+         if(ipRecv.find("state"))
+         {
+            m_modFsmState = ipRecv["state"].get<std::string>();
+         }
+      }
+   }
+   else if(dev == "camwfs")
+   {
+      if(ipRecv.getName() == "fps")
+      {
+         if(ipRecv.find("current"))
+         {
+            m_camwfsFreq = ipRecv["current"].get<double>();
+         }
+      }
+   }
+   else if(dev == "wooferModes")
+   {
+      if(ipRecv.getName() == "current_amps")
+      {
+         if(ipRecv.find("0000"))
+         {
+            m_tip = ipRecv["0000"].get<double>();
+         }
+         if(ipRecv.find("0001"))
+         {
+            m_tilt = ipRecv["0001"].get<double>();
+         }
+         if(ipRecv.find("0002"))
+         {
+            m_focus = ipRecv["0002"].get<double>();
+         }
+      }
+   }
+   else if(dev == "camwfs-avg")
    {
       if(ipRecv.getName() == "nAverage")
       {
@@ -582,46 +788,7 @@ void pupilGuide::handleSetProperty( const pcf::IndiProperty & ipRecv)
       
       
    }
-   else if(dev == "modwfs")
-   {
-      if(ipRecv.getName() == "modFrequency")
-      {
-         if(ipRecv.find("current"))
-         {
-            m_modFreq = ipRecv["current"].get<double>();
-         }
-         if(ipRecv.find("requested"))
-         {
-            m_modFreq_tgt = ipRecv["requested"].get<double>();
-         }
-      }
-      else if(ipRecv.getName() == "modRadius")
-      {
-         if(ipRecv.find("current"))
-         {
-            m_modRad = ipRecv["current"].get<double>();
-         }
-         if(ipRecv.find("requested"))
-         {
-            m_modRad_tgt = ipRecv["requested"].get<double>();
-         }
-      }
-      else if(ipRecv.getName() == "modState")
-      {
-         if(ipRecv.find("current"))
-         {
-            m_modState = ipRecv["current"].get<int>();
-         }
-      }
-      else if(ipRecv.getName() == "fsm")
-      {
-         if(ipRecv.find("state"))
-         {
-            m_modFsmState = ipRecv["state"].get<std::string>();
-         }
-      }
-   }
-   else if(dev == "fxngenmodwfs")
+   /*else if(dev == "fxngenmodwfs")
    {
       if(ipRecv.getName() == "C1ofst")
       {
@@ -637,7 +804,7 @@ void pupilGuide::handleSetProperty( const pcf::IndiProperty & ipRecv)
             m_modCh2 = ipRecv["value"].get<double>();
          }
       }
-   }
+   }*/
    else if(dev == "ttmpupil")
    {
       if(ipRecv.getName() == "fsm")
@@ -659,6 +826,27 @@ void pupilGuide::handleSetProperty( const pcf::IndiProperty & ipRecv)
          if(ipRecv.find("current"))
          {
             m_pupCh2 = ipRecv["current"].get<double>();
+         }
+      }
+   }
+   else if(dev == "camwfs-align")
+   {
+      if(ipRecv.getName() == "loop_state")
+      {
+         if(ipRecv.find("toggle"))
+         {
+            if(ipRecv["toggle"].getSwitchState() == pcf::IndiElement::On)
+            {
+               if(m_camwfsAlignLoopState == false) m_camwfsAlignLoopWaiting = false;
+               m_camwfsAlignLoopState = true;
+            }
+            else
+            {
+               if(m_camwfsAlignLoopState == true) m_camwfsAlignLoopWaiting = false;
+               m_camwfsAlignLoopState = false;
+            }
+         
+            
          }
       }
    }
@@ -696,7 +884,25 @@ void pupilGuide::handleSetProperty( const pcf::IndiProperty & ipRecv)
          }
       }
    }
-   
+   else if(dev == "dmtweeter")
+   {
+      if(ipRecv.getName() == "fsm")
+      {
+         if(ipRecv.find("state"))
+         {
+            m_dmtweeterState = ipRecv["state"].get<std::string>();
+         }
+      }
+      else if(ipRecv.getName() == "test_set")
+      {
+         if(ipRecv.find("toggle"))
+         {
+            if(ipRecv["toggle"] == pcf::IndiElement::On) m_dmtweeterTestSet = true;
+            else m_dmtweeterTestSet=false;
+         }
+      }
+   }
+
    return;
    
 }
@@ -719,9 +925,9 @@ void pupilGuide::modGUISetEnable( bool enableModGUI,
       //ui.buttonMod_rest->setEnabled(true);
       //ui.buttonMod_set->setEnabled(true);
       //ui.buttonMod_mod->setEnabled(true);
-      ui.labelCh1->setEnabled(true);
+      //ui.labelCh1->setEnabled(true);
       ui.modCh1->setEnabled(true);
-      ui.labelCh2->setEnabled(true);
+      //ui.labelCh2->setEnabled(true);
       ui.modCh2->setEnabled(true);
       
       if(enableModArrows)
@@ -735,6 +941,19 @@ void pupilGuide::modGUISetEnable( bool enableModGUI,
          ui.button_tip_dl->setEnabled(true);
          ui.button_tip_d->setEnabled(true);
          ui.button_tip_dr->setEnabled(true);
+
+         if(m_tipmovewhat == MOVE_TEL || m_tipmovewhat == MOVE_WOOF)
+         {
+            ui.button_focus_p->setEnabled(true);
+            ui.button_focus_scale->setEnabled(true);
+            ui.button_focus_m->setEnabled(true);
+         }
+         else
+         {
+            ui.button_focus_p->setEnabled(false);
+            ui.button_focus_scale->setEnabled(false);
+            ui.button_focus_m->setEnabled(false);
+         }
       }
       else
       {
@@ -747,6 +966,10 @@ void pupilGuide::modGUISetEnable( bool enableModGUI,
          ui.button_tip_dl->setEnabled(false);
          ui.button_tip_d->setEnabled(false);
          ui.button_tip_dr->setEnabled(false);
+
+         ui.button_focus_p->setEnabled(false);
+         ui.button_focus_scale->setEnabled(false);
+         ui.button_focus_m->setEnabled(false);
       }
    }
    else
@@ -762,9 +985,9 @@ void pupilGuide::modGUISetEnable( bool enableModGUI,
       ui.buttonMod_rest->setEnabled(false);
       ui.buttonMod_set->setEnabled(false);
       ui.buttonMod_mod->setEnabled(false);
-      ui.labelCh1->setEnabled(false);
+      //ui.labelCh1->setEnabled(false);
       ui.modCh1->setEnabled(false);
-      ui.labelCh2->setEnabled(false);
+      //ui.labelCh2->setEnabled(false);
       ui.modCh2->setEnabled(false);
       
       ui.button_tip_ul->setEnabled(false); 
@@ -776,6 +999,10 @@ void pupilGuide::modGUISetEnable( bool enableModGUI,
       ui.button_tip_dl->setEnabled(false);
       ui.button_tip_d->setEnabled(false);
       ui.button_tip_dr->setEnabled(false);
+
+      ui.button_focus_p->setEnabled(false);
+      ui.button_focus_scale->setEnabled(false);
+      ui.button_focus_m->setEnabled(false);
    }
 }
 
@@ -877,10 +1104,10 @@ void pupilGuide::updateGUI()
    
    modGUISetEnable(enableModGUI, enableModArrows);
    
-   snprintf(str,sizeof(str), "%0.2f", m_modCh1);
+   /*snprintf(str,sizeof(str), "%0.2f", m_modCh1);
    ui.modCh1->setText(str);
    snprintf(str,sizeof(str), "%0.2f", m_modCh2);
-   ui.modCh2->setText(str);
+   ui.modCh2->setText(str);*/
    
    if(m_modState == 3 && enableModGUI)
    {
@@ -895,7 +1122,7 @@ void pupilGuide::updateGUI()
          }
          else
          {
-            snprintf(str, sizeof(str),"%0.1f", m_modFreq_tgt);
+            snprintf(str, sizeof(str),"%0.3f", m_modFreq_tgt);
             ui.modFreq_target->setText(str);
          }
       }
@@ -921,9 +1148,9 @@ void pupilGuide::updateGUI()
    }
    else if(m_modState == 4 && enableModGUI)
    {
-      snprintf(str, sizeof(str),"%0.1f Hz", m_modFreq);
+      snprintf(str, sizeof(str),"%0.3f", m_modFreq);
       ui.modFreq_current->setText(str);
-      snprintf(str, sizeof(str),"%0.1f l/D", m_modRad);
+      snprintf(str, sizeof(str),"%0.1f", m_modRad);
       ui.modRad_current->setText(str);
       
       if(!ui.modFreq_target->hasFocus())
@@ -934,7 +1161,7 @@ void pupilGuide::updateGUI()
          }
          else
          {
-            snprintf(str, sizeof(str),"%0.1f", m_modFreq_tgt);
+            snprintf(str, sizeof(str),"%0.3f", m_modFreq_tgt);
             ui.modFreq_target->setText(str);
          }
       }
@@ -976,7 +1203,19 @@ void pupilGuide::updateGUI()
       }
    }
    
-   
+   // ------- camwfs-align loop
+   if(!m_camwfsAlignLoopWaiting)
+   {
+      ui.pupilAlign_loopSlider->setEnabled(true);
+      if(m_camwfsAlignLoopState)
+      {
+         ui.pupilAlign_loopSlider->setSliderPosition(ui.pupilAlign_loopSlider->maximum());
+      }
+      else
+      {
+         ui.pupilAlign_loopSlider->setSliderPosition(ui.pupilAlign_loopSlider->minimum());
+      }
+   }
    
    // ------Pupil Fitting
    
@@ -1100,15 +1339,47 @@ void pupilGuide::updateGUI()
    }
    
    // ------ camwfs averaging 
-   if( !(m_camwfsavgState == "READY" || m_camwfsavgState == "OPERATING"))
+   if( m_camwfsavgState == "READY" || m_camwfsavgState == "OPERATING")
    {
-      ui.fitAvgTime->setEnabled(false);
+      ui.fitAvgTime->setEnabled(true);
+
+      if(m_camwfsavgState == "OPERATING")
+      {
+         ui.buttonTweeterTest_set->setEnabled(true);
+         if(m_dmtweeterTestSet)
+         {
+            ui.buttonTweeterTest_set->setText("zero test");
+         }
+         else
+         {
+            ui.buttonTweeterTest_set->setText("set test");
+         }
+      }
+      else
+      {
+         ui.buttonTweeterTest_set->setEnabled(false);
+         ui.buttonTweeterTest_set->setText("set test");
+      }
+
    }
    else
    {
-      ui.fitAvgTime->setEnabled(true);
+      ui.fitAvgTime->setEnabled(false);
+      ui.buttonTweeterTest_set->setEnabled(false);
+      ui.buttonTweeterTest_set->setText("set test");
    }
    
+   // ------ dmtweeter
+   
+   if(m_dmtweeterState == "READY" || m_dmtweeterState == "OPERATING")
+   {
+      ui.tweeterState->setEnabled(true);
+   }
+   else
+   {
+      ui.tweeterState->setEnabled(false);
+   }
+
    // ------ Pupil Steering
    bool enablePupFSM = true;
    bool enablePupFSMArrows = true;
@@ -1266,7 +1537,9 @@ void pupilGuide::updateGUI()
          }
       }
    }
-      
+   
+   ui.pupilAlign_gain->updateGUI();
+
    ui.fitThreshold->updateGUI();
    ui.fitAvgTime->updateGUI();
    ui.camlens_x_pos->updateGUI();
@@ -1274,26 +1547,138 @@ void pupilGuide::updateGUI()
 
 } //updateGUI()
 
-/*void pupilGuide::on_button_ttmtel_pressed()
+// ------------- modttm
+
+void pupilGuide::on_modFreq_target_returnPressed()
 {
-   if(m_usetel == false) 
+   pcf::IndiProperty ip(pcf::IndiProperty::Number);
+   
+   ip.setDevice("modwfs");
+   ip.setName("modFrequency");
+   ip.add(pcf::IndiElement("requested"));
+   ip["requested"] = ui.modFreq_target->text().toDouble();
+   
+   sendNewProperty(ip);
+   
+}
+   
+void pupilGuide::on_modRad_target_returnPressed()
+{
+   pcf::IndiProperty ip(pcf::IndiProperty::Number);
+   
+   ip.setDevice("modwfs");
+   ip.setName("modRadius");
+   ip.add(pcf::IndiElement("requested"));
+   ip["requested"] = ui.modRad_target->text().toDouble();
+   
+   sendNewProperty(ip);
+}
+   
+void pupilGuide::on_buttonMod_mod_pressed()
+{
+   pcf::IndiProperty ip(pcf::IndiProperty::Number);
+   
+   ip.setDevice("modwfs");
+   ip.setName("modState");
+   ip.add(pcf::IndiElement("requested"));
+   ip["requested"] = 4;
+   
+   sendNewProperty(ip);
+}
+   
+void pupilGuide::on_buttonMod_set_pressed()
+{
+   pcf::IndiProperty ip(pcf::IndiProperty::Number);
+   
+   ip.setDevice("modwfs");
+   ip.setName("modState");
+   ip.add(pcf::IndiElement("requested"));
+   ip["requested"] = 3;
+   sendNewProperty(ip);
+}
+   
+void pupilGuide::on_buttonMod_rest_pressed()
+{
+   pcf::IndiProperty ip(pcf::IndiProperty::Number);
+   
+   ip.setDevice("modwfs");
+   ip.setName("modState");
+   ip.add(pcf::IndiElement("requested"));
+   ip["requested"] = 1;
+   
+   sendNewProperty(ip);
+}
+   
+void pupilGuide::on_button_scalemodcamwfs_pressed()
+{
+   double scaletarg = 0.99990082103502819777 * m_camwfsFreq;
+
+   pcf::IndiProperty ip(pcf::IndiProperty::Number);
+   
+   ip.setDevice("modwfs");
+   ip.setName("modFrequency");
+   ip.add(pcf::IndiElement("requested"));
+   ip["requested"] = scaletarg;
+   
+   sendNewProperty(ip);
+}
+
+void pupilGuide::on_button_ttmtel_pressed()
+{
+   if(m_tipmovewhat == MOVE_TTM) 
    {
-      m_usetel = true;
+      m_tipmovewhat = MOVE_WOOF;
+      ui.button_ttmtel->setText("move woofer");
+   }
+   else if(m_tipmovewhat == MOVE_WOOF) 
+   {
+      m_tipmovewhat = MOVE_TEL;
       ui.button_ttmtel->setText("move telescope");
    }
-}*/
+   else
+   {
+      m_tipmovewhat = MOVE_TTM;
+      ui.button_ttmtel->setText("move ttm");
+   }
+}
 
 void pupilGuide::on_button_tip_u_pressed()
 {
    pcf::IndiProperty ip(pcf::IndiProperty::Number);
    
-   ip.setDevice("modwfs");
-   ip.setName("offset");
-   ip.add(pcf::IndiElement("y"));
-   ip["y"] = m_stepSize;
-   ip.add(pcf::IndiElement("x"));
-   ip["x"] = 0;
-   
+   if(m_tipmovewhat == MOVE_TTM)
+   {
+      ip.setDevice("modwfs");
+      ip.setName("offset");
+      ip.add(pcf::IndiElement("y"));
+      ip["y"] = m_stepSize;
+      ip.add(pcf::IndiElement("x"));
+      ip["x"] = 0;
+   }
+   else if(m_tipmovewhat == MOVE_WOOF)
+   {
+      double tip, tilt;
+      wooferTipTilt(tip, tilt, 0, m_stepSize);
+      
+      ip.setDevice("wooferModes");
+      ip.setName("target_amps");
+      ip.add(pcf::IndiElement("0000"));
+      ip.add(pcf::IndiElement("0001"));
+      ip["0000"] = m_tip + tip;
+      ip["0001"] = m_tilt + tilt;
+      
+   }
+   else if(m_tipmovewhat == MOVE_TEL)
+   {
+      ip.setDevice("tcsi");
+      ip.setName("pyrNudge");
+      ip.add(pcf::IndiElement("y"));
+      ip["y"] = m_stepSize*5.;
+      ip.add(pcf::IndiElement("x"));
+      ip["x"] = 0;
+   }
+   else return;
+
    sendNewProperty(ip);
    
 }
@@ -1302,13 +1687,37 @@ void pupilGuide::on_button_tip_ul_pressed()
 {
    pcf::IndiProperty ip(pcf::IndiProperty::Number);
    
-   ip.setDevice("modwfs");
-   ip.setName("offset");
-   ip.add(pcf::IndiElement("y"));
-   ip["y"] = m_stepSize/sqrt(2.);
-   ip.add(pcf::IndiElement("x"));
-   ip["x"] = -m_stepSize/sqrt(2.);
-   
+   if(m_tipmovewhat == MOVE_TTM)
+   {
+      ip.setDevice("modwfs");
+      ip.setName("offset");
+      ip.add(pcf::IndiElement("y"));
+      ip["y"] = m_stepSize/sqrt(2.);
+      ip.add(pcf::IndiElement("x"));
+      ip["x"] = -m_stepSize/sqrt(2.);
+   }
+   else if(m_tipmovewhat == MOVE_WOOF)
+   {
+      double tip, tilt;
+      wooferTipTilt(tip, tilt, m_stepSize/sqrt(2.), m_stepSize/sqrt(2.));
+      
+      ip.setDevice("wooferModes");
+      ip.setName("target_amps");
+      ip.add(pcf::IndiElement("0000"));
+      ip.add(pcf::IndiElement("0001"));
+      ip["0000"] = m_tip + tip;
+      ip["0001"] = m_tilt + tilt;
+   }
+   else if(m_tipmovewhat == MOVE_TEL)
+   {
+      ip.setDevice("tcsi");
+      ip.setName("pyrNudge");
+      ip.add(pcf::IndiElement("y"));
+      ip["y"] = m_stepSize*5./sqrt(2.);
+      ip.add(pcf::IndiElement("x"));
+      ip["x"] = m_stepSize*5./sqrt(2.);
+   }
+
    sendNewProperty(ip);
    
    
@@ -1318,30 +1727,76 @@ void pupilGuide::on_button_tip_l_pressed()
 {
    pcf::IndiProperty ip(pcf::IndiProperty::Number);
    
-   ip.setDevice("modwfs");
-   ip.setName("offset");
-   ip.add(pcf::IndiElement("y"));
-   ip["y"] = 0;
-   ip.add(pcf::IndiElement("x"));
-   ip["x"] = -m_stepSize;
-   
+   if(m_tipmovewhat == MOVE_TTM)
+   {
+      ip.setDevice("modwfs");
+      ip.setName("offset");
+      ip.add(pcf::IndiElement("y"));
+      ip["y"] = 0;
+      ip.add(pcf::IndiElement("x"));
+      ip["x"] = -m_stepSize;
+   }
+   else if(m_tipmovewhat == MOVE_WOOF)
+   {
+      double tip, tilt;
+      wooferTipTilt(tip, tilt, m_stepSize, 0);
+      
+      ip.setDevice("wooferModes");
+      ip.setName("target_amps");
+      ip.add(pcf::IndiElement("0000"));
+      ip.add(pcf::IndiElement("0001"));
+      ip["0000"] = m_tip + tip;
+      ip["0001"] = m_tilt + tilt;
+   }
+   else if(m_tipmovewhat == MOVE_TEL)
+   {
+      ip.setDevice("tcsi");
+      ip.setName("pyrNudge");
+      ip.add(pcf::IndiElement("y"));
+      ip["y"] = 0;
+      ip.add(pcf::IndiElement("x"));
+      ip["x"] = -m_stepSize*5.;
+   }
+
    sendNewProperty(ip);
    
 }
 
 void pupilGuide::on_button_tip_dl_pressed()
 {
-   
-   
    pcf::IndiProperty ip(pcf::IndiProperty::Number);
    
-   ip.setDevice("modwfs");
-   ip.setName("offset");
-   ip.add(pcf::IndiElement("y"));
-   ip["y"] = -m_stepSize/sqrt(2.);
-   ip.add(pcf::IndiElement("x"));
-   ip["x"] = -m_stepSize/sqrt(2.);
-   
+   if(m_tipmovewhat == MOVE_TTM)
+  {
+      ip.setDevice("modwfs");
+      ip.setName("offset");
+      ip.add(pcf::IndiElement("y"));
+      ip["y"] = -m_stepSize/sqrt(2.);
+      ip.add(pcf::IndiElement("x"));
+      ip["x"] = -m_stepSize/sqrt(2.);
+   }
+   else if(m_tipmovewhat == MOVE_WOOF)
+   {
+      double tip, tilt;
+      wooferTipTilt(tip, tilt, m_stepSize/sqrt(2.), -m_stepSize/sqrt(2.));
+      
+      ip.setDevice("wooferModes");
+      ip.setName("target_amps");
+      ip.add(pcf::IndiElement("0000"));
+      ip.add(pcf::IndiElement("0001"));
+      ip["0000"] = m_tip + tip;
+      ip["0001"] = m_tilt + tilt;
+   }
+   else if(m_tipmovewhat == MOVE_TEL)
+   {
+      ip.setDevice("tcsi");
+      ip.setName("pyrNudge");
+      ip.add(pcf::IndiElement("y"));
+      ip["y"] = -m_stepSize*5./sqrt(2.);
+      ip.add(pcf::IndiElement("x"));
+      ip["x"] = -m_stepSize*5./sqrt(2.);
+   }
+
    sendNewProperty(ip);
    
    
@@ -1351,13 +1806,37 @@ void pupilGuide::on_button_tip_d_pressed()
 {
    pcf::IndiProperty ip(pcf::IndiProperty::Number);
    
-   ip.setDevice("modwfs");
-   ip.setName("offset");
-   ip.add(pcf::IndiElement("y"));
-   ip["y"] = -m_stepSize;
-   ip.add(pcf::IndiElement("x"));
-   ip["x"] = 0;
-   
+   if(m_tipmovewhat == MOVE_TTM)
+   {
+      ip.setDevice("modwfs");
+      ip.setName("offset");
+      ip.add(pcf::IndiElement("y"));
+      ip["y"] = -m_stepSize;
+      ip.add(pcf::IndiElement("x"));
+      ip["x"] = 0;
+   }
+   else if(m_tipmovewhat == MOVE_WOOF)
+   {
+      double tip, tilt;
+      wooferTipTilt(tip, tilt, 0, -m_stepSize);
+      
+      ip.setDevice("wooferModes");
+      ip.setName("target_amps");
+      ip.add(pcf::IndiElement("0000"));
+      ip.add(pcf::IndiElement("0001"));
+      ip["0000"] = m_tip + tip;
+      ip["0001"] = m_tilt + tilt;
+   }
+   else if(m_tipmovewhat == MOVE_TEL)
+   {
+      ip.setDevice("tcsi");
+      ip.setName("pyrNudge");
+      ip.add(pcf::IndiElement("y"));
+      ip["y"] = -m_stepSize*5.;
+      ip.add(pcf::IndiElement("x"));
+      ip["x"] = 0;
+   }
+
    sendNewProperty(ip);
 }
 
@@ -1365,13 +1844,38 @@ void pupilGuide::on_button_tip_dr_pressed()
 {
    pcf::IndiProperty ip(pcf::IndiProperty::Number);
    
-   ip.setDevice("modwfs");
-   ip.setName("offset");
-   ip.add(pcf::IndiElement("y"));
-   ip["y"] = -m_stepSize/sqrt(2.);
-   ip.add(pcf::IndiElement("x"));
-   ip["x"] = m_stepSize/sqrt(2.);
-   
+   if(m_tipmovewhat == MOVE_TTM)
+   {
+      ip.setDevice("modwfs");
+      ip.setName("offset");
+      ip.add(pcf::IndiElement("y"));
+      ip["y"] = -m_stepSize/sqrt(2.);
+      ip.add(pcf::IndiElement("x"));
+      ip["x"] = m_stepSize/sqrt(2.);
+   }
+   else if(m_tipmovewhat == MOVE_WOOF)
+   {
+      double tip, tilt;
+      wooferTipTilt(tip, tilt, -m_stepSize/sqrt(2.), -m_stepSize/sqrt(2.));
+      
+      ip.setDevice("wooferModes");
+      ip.setName("target_amps");
+      ip.add(pcf::IndiElement("0000"));
+      ip.add(pcf::IndiElement("0001"));
+      ip["0000"] = m_tip + tip;
+      ip["0001"] = m_tilt + tilt;
+   }
+   else if(m_tipmovewhat == MOVE_TEL)
+   {
+      ip.setDevice("tcsi");
+      ip.setName("pyrNudge");
+      ip.add(pcf::IndiElement("y"));
+      ip["y"] = -m_stepSize*5./sqrt(2.);
+      ip.add(pcf::IndiElement("x"));
+      ip["x"] = m_stepSize*5./sqrt(2.);
+   }
+   else return;
+
    sendNewProperty(ip);
    
    
@@ -1381,13 +1885,38 @@ void pupilGuide::on_button_tip_r_pressed()
 {
    pcf::IndiProperty ip(pcf::IndiProperty::Number);
    
-   ip.setDevice("modwfs");
-   ip.setName("offset");
-   ip.add(pcf::IndiElement("y"));
-   ip["y"] = 0;
-   ip.add(pcf::IndiElement("x"));
-   ip["x"] = m_stepSize;
-   
+   if(m_tipmovewhat == MOVE_TTM)
+   {
+      ip.setDevice("modwfs");
+      ip.setName("offset");
+      ip.add(pcf::IndiElement("y"));
+      ip["y"] = 0;
+      ip.add(pcf::IndiElement("x"));
+      ip["x"] = m_stepSize;
+   }
+   else if(m_tipmovewhat == MOVE_WOOF)
+   {
+      double tip, tilt;
+      wooferTipTilt(tip, tilt, -m_stepSize, 0);
+      
+      ip.setDevice("wooferModes");
+      ip.setName("target_amps");
+      ip.add(pcf::IndiElement("0000"));
+      ip.add(pcf::IndiElement("0001"));
+      ip["0000"] = m_tip + tip;
+      ip["0001"] = m_tilt + tilt;
+   }
+   else if(m_tipmovewhat == MOVE_TEL)
+   {
+      ip.setDevice("tcsi");
+      ip.setName("pyrNudge");
+      ip.add(pcf::IndiElement("y"));
+      ip["y"] = 0;
+      ip.add(pcf::IndiElement("x"));
+      ip["x"] = m_stepSize*5.;
+   }
+   else return;
+
    sendNewProperty(ip);
    
 }
@@ -1396,13 +1925,38 @@ void pupilGuide::on_button_tip_ur_pressed()
 {
    pcf::IndiProperty ip(pcf::IndiProperty::Number);
    
-   ip.setDevice("modwfs");
-   ip.setName("offset");
-   ip.add(pcf::IndiElement("y"));
-   ip["y"] = m_stepSize/sqrt(2.);
-   ip.add(pcf::IndiElement("x"));
-   ip["x"] = m_stepSize/sqrt(2.);
-   
+   if(m_tipmovewhat == MOVE_TTM)
+   {
+      ip.setDevice("modwfs");
+      ip.setName("offset");
+      ip.add(pcf::IndiElement("y"));
+      ip["y"] = m_stepSize/sqrt(2.);
+      ip.add(pcf::IndiElement("x"));
+      ip["x"] = m_stepSize/sqrt(2.);
+   }
+   else if(m_tipmovewhat == MOVE_WOOF)
+   {
+      double tip, tilt;
+      wooferTipTilt(tip, tilt, -m_stepSize/sqrt(2.), m_stepSize/sqrt(2.));
+      
+      ip.setDevice("wooferModes");
+      ip.setName("target_amps");
+      ip.add(pcf::IndiElement("0000"));
+      ip.add(pcf::IndiElement("0001"));
+      ip["0000"] = m_tip + tip;
+      ip["0001"] = m_tilt + tilt;
+   }
+   else if(m_tipmovewhat == MOVE_TEL)
+   {
+      ip.setDevice("tcsi");
+      ip.setName("pyrNudge");
+      ip.add(pcf::IndiElement("y"));
+      ip["y"] = m_stepSize*5./sqrt(2.);
+      ip.add(pcf::IndiElement("x"));
+      ip["x"] = m_stepSize*5./sqrt(2.);
+   }
+   else return;
+
    sendNewProperty(ip);
    
    
@@ -1438,16 +1992,173 @@ void pupilGuide::on_button_tip_scale_pressed()
 
 }
 
+void pupilGuide::on_button_focus_p_pressed()
+{
+   pcf::IndiProperty ip(pcf::IndiProperty::Number);
+   
 
-void pupilGuide::on_button_pup_l_pressed()
+   if(m_tipmovewhat == MOVE_WOOF)
+   {
+      
+      ip.setDevice("wooferModes");
+      ip.setName("target_amps");
+      ip.add(pcf::IndiElement("0002"));
+      ip["0002"] = m_focus + m_focusStepSize*0.2;
+      
+   }
+   else if(m_tipmovewhat == MOVE_TEL)
+   {
+      ip.setDevice("tcsi");
+      ip.setName("pyrNudge");
+      ip.add(pcf::IndiElement("z"));
+      ip["z"] = m_stepSize*5.;
+   }
+   else return;
+
+   sendNewProperty(ip);
+   
+}
+
+void pupilGuide::on_button_focus_m_pressed()
+{
+   pcf::IndiProperty ip(pcf::IndiProperty::Number);
+   
+   if(m_tipmovewhat == MOVE_WOOF)
+   {
+      
+      ip.setDevice("wooferModes");
+      ip.setName("target_amps");
+      ip.add(pcf::IndiElement("0002"));
+      ip["0002"] = m_focus - m_focusStepSize*0.2;
+      
+   }
+   else if(m_tipmovewhat == MOVE_TEL)
+   {
+      ip.setDevice("tcsi");
+      ip.setName("pyrNudge");
+      ip.add(pcf::IndiElement("z"));
+      ip["z"] = -m_stepSize*5.;
+   }
+   else return;
+
+   sendNewProperty(ip);
+}
+
+void pupilGuide::on_button_focus_scale_pressed()
+{
+   if(((int) (100*m_focusStepSize)) == 100)
+   {
+      m_focusStepSize = 0.5;
+   }
+   else if(((int) (100*m_focusStepSize)) == 50)
+   {
+      m_focusStepSize = 0.1;
+   }
+   else if(((int) (100*m_focusStepSize)) == 10)
+   {
+      m_focusStepSize = 0.05;
+   }
+   else if(((int) (100*m_focusStepSize)) == 5)
+   {
+      m_focusStepSize = 0.01;
+   }
+   else if(((int) (100*m_focusStepSize)) == 1)
+   {
+      m_focusStepSize = 1.0;
+   }
+   
+   char ss[5];
+   snprintf(ss, 5, "%0.2f", m_focusStepSize);
+   ui.button_focus_scale->setText(ss);
+}
+
+//----------- dmtweeter
+
+void pupilGuide::on_buttonTweeterTest_set_pressed()
+{
+   pcf::IndiProperty ip(pcf::IndiProperty::Switch);
+   
+   ip.setDevice("dmtweeter");
+   ip.setName("test_set");
+   ip.add(pcf::IndiElement("toggle"));
+
+   if(m_dmtweeterTestSet)
+   {
+      ip["toggle"].setSwitchState(pcf::IndiElement::Off);
+   }
+   else
+   {
+      ip["toggle"].setSwitchState(pcf::IndiElement::On);
+   }
+
+   sendNewProperty(ip);
+}
+
+//----------- ttmpupil
+
+void pupilGuide::on_buttonPup_rest_pressed()
+{
+   pcf::IndiProperty ip(pcf::IndiProperty::Switch);
+   
+   ip.setDevice("ttmpupil");
+   ip.setName("releaseDM");
+   ip.add(pcf::IndiElement("request"));
+   ip["request"].setSwitchState(pcf::IndiElement::On);
+   
+   sendNewProperty(ip);
+   
+}
+
+void pupilGuide::on_buttonPup_set_pressed()
+{
+   pcf::IndiProperty ip(pcf::IndiProperty::Switch);
+   
+   ip.setDevice("ttmpupil");
+   ip.setName("initDM");
+   ip.add(pcf::IndiElement("request"));
+   ip["request"].setSwitchState(pcf::IndiElement::On);
+   
+   sendNewProperty(ip);
+}
+
+void pupilGuide::on_button_camera_pressed()
+{
+   if(m_pupCam == FLOWFS)
+   {
+      m_pupCam = CAMSCIS;
+      ui.button_camera->setText("camsci1/2");
+   }
+   else
+   {
+      m_pupCam = FLOWFS;
+      ui.button_camera->setText("flowfs");
+   }
+}
+
+void pupilGuide::on_button_pup_u_pressed()
 {
    pcf::IndiProperty ip(pcf::IndiProperty::Number);
    
    ip.setDevice("ttmpupil");
-   ip.setName("pos_1");
-   ip.add(pcf::IndiElement("target"));
-   ip["target"] = m_pupCh1 + m_pupStepSize;
    
+
+   if(m_pupCam == FLOWFS)
+   {
+      ip.setName("pos_2");
+      ip.add(pcf::IndiElement("target"));
+      ip["target"] = m_pupCh2 + m_pupStepSize;
+   }
+   else if(m_pupCam == LLOWFS)
+   {
+
+   }
+   else if(m_pupCam == CAMSCIS)
+   {
+      ip.setName("pos_1");
+      ip.add(pcf::IndiElement("target"));
+      ip["target"] = m_pupCh1 + m_pupStepSize;
+   }
+
    sendNewProperty(ip);
 }
 
@@ -1458,8 +2169,20 @@ void pupilGuide::on_button_pup_ul_pressed()
    ip.setDevice("ttmpupil");
    ip.setName("pos_1");
    ip.add(pcf::IndiElement("target"));
-   ip["target"] = m_pupCh1 + m_pupStepSize/sqrt(2);
-   
+
+   if(m_pupCam == FLOWFS)
+   {
+      ip["target"] = m_pupCh1 + m_pupStepSize/sqrt(2);
+   }
+   else if(m_pupCam == LLOWFS)
+   {
+
+   }
+   else if(m_pupCam == CAMSCIS)
+   {
+      ip["target"] = m_pupCh1 + m_pupStepSize/sqrt(2);
+   }
+
    sendNewProperty(ip);
    
    
@@ -1468,20 +2191,46 @@ void pupilGuide::on_button_pup_ul_pressed()
    ip2.setDevice("ttmpupil");
    ip2.setName("pos_2");
    ip2.add(pcf::IndiElement("target"));
-   ip2["target"] = m_pupCh2 + m_pupStepSize/sqrt(2);
    
+   if(m_pupCam == FLOWFS)
+   {
+      ip2["target"] = m_pupCh2 + m_pupStepSize/sqrt(2);
+   }
+   else if(m_pupCam == LLOWFS)
+   {
+
+   }
+   else if(m_pupCam == CAMSCIS)
+   {
+      ip2["target"] = m_pupCh2 + m_pupStepSize/sqrt(2);
+   }
+
    sendNewProperty(ip2);
 }
 
-void pupilGuide::on_button_pup_d_pressed()
+void pupilGuide::on_button_pup_l_pressed()
 {
    pcf::IndiProperty ip(pcf::IndiProperty::Number);
    
    ip.setDevice("ttmpupil");
-   ip.setName("pos_2");
-   ip.add(pcf::IndiElement("target"));
-   ip["target"] = m_pupCh2 - m_pupStepSize;
    
+   if(m_pupCam == FLOWFS)
+   {
+      ip.setName("pos_1");
+      ip.add(pcf::IndiElement("target"));
+      ip["target"] = m_pupCh1 + m_pupStepSize;
+   }
+   else if(m_pupCam == LLOWFS)
+   {
+
+   }
+   else if(m_pupCam == CAMSCIS)
+   {
+      ip.setName("pos_2");
+      ip.add(pcf::IndiElement("target"));
+      ip["target"] = m_pupCh1 + m_pupStepSize;
+   }
+
    sendNewProperty(ip);
 }
 
@@ -1492,8 +2241,20 @@ void pupilGuide::on_button_pup_dl_pressed()
    ip.setDevice("ttmpupil");
    ip.setName("pos_1");
    ip.add(pcf::IndiElement("target"));
-   ip["target"] = m_pupCh1 + m_pupStepSize/sqrt(2);
    
+   if(m_pupCam == FLOWFS)
+   {
+      ip["target"] = m_pupCh1 + m_pupStepSize/sqrt(2);
+   }
+   else if(m_pupCam == LLOWFS)
+   {
+
+   }
+   else if(m_pupCam == CAMSCIS)
+   {
+      ip["target"] = m_pupCh1 - m_pupStepSize/sqrt(2);
+   }
+
    sendNewProperty(ip);
    
    pcf::IndiProperty ip2(pcf::IndiProperty::Number);
@@ -1501,20 +2262,47 @@ void pupilGuide::on_button_pup_dl_pressed()
    ip2.setDevice("ttmpupil");
    ip2.setName("pos_2");
    ip2.add(pcf::IndiElement("target"));
-   ip2["target"] = m_pupCh2 - m_pupStepSize/sqrt(2);
    
+   if(m_pupCam == FLOWFS)
+   {
+      ip2["target"] = m_pupCh2 - m_pupStepSize/sqrt(2);
+   }
+   else if(m_pupCam == LLOWFS)
+   {
+
+   }
+   else if(m_pupCam == CAMSCIS)
+   {
+      ip2["target"] = m_pupCh2 + m_pupStepSize/sqrt(2);
+   }
+
    sendNewProperty(ip2);
 }
 
-void pupilGuide::on_button_pup_r_pressed()
+void pupilGuide::on_button_pup_d_pressed()
 {
    pcf::IndiProperty ip(pcf::IndiProperty::Number);
    
    ip.setDevice("ttmpupil");
-   ip.setName("pos_1");
-   ip.add(pcf::IndiElement("target"));
-   ip["target"] = m_pupCh1 - m_pupStepSize;
    
+   
+   if(m_pupCam == FLOWFS)
+   {
+      ip.setName("pos_2");
+      ip.add(pcf::IndiElement("target"));
+      ip["target"] = m_pupCh2 - m_pupStepSize;
+   }
+   else if(m_pupCam == LLOWFS)
+   {
+
+   }
+   else if(m_pupCam == CAMSCIS)
+   {
+      ip.setName("pos_1");
+      ip.add(pcf::IndiElement("target"));
+      ip["target"] = m_pupCh1 - m_pupStepSize;
+   }
+
    sendNewProperty(ip);
 }
 
@@ -1525,30 +2313,67 @@ void pupilGuide::on_button_pup_dr_pressed()
    ip.setDevice("ttmpupil");
    ip.setName("pos_1");
    ip.add(pcf::IndiElement("target"));
-   ip["target"] = m_pupCh1 - m_pupStepSize/sqrt(2);
    
+   if(m_pupCam == FLOWFS)
+   {
+      ip["target"] = m_pupCh1 - m_pupStepSize/sqrt(2);
+   }
+   else if(m_pupCam == LLOWFS)
+   {
+
+   }
+   else if(m_pupCam == CAMSCIS)
+   {
+      ip["target"] = m_pupCh1 - m_pupStepSize/sqrt(2);
+   }
+
    sendNewProperty(ip);
-   
    
    pcf::IndiProperty ip2(pcf::IndiProperty::Number);
    
    ip2.setDevice("ttmpupil");
    ip2.setName("pos_2");
    ip2.add(pcf::IndiElement("target"));
-   ip2["target"] = m_pupCh2 - m_pupStepSize/sqrt(2);
    
+   if(m_pupCam == FLOWFS)
+   {
+      ip2["target"] = m_pupCh2 - m_pupStepSize/sqrt(2);
+   }
+   else if(m_pupCam == LLOWFS)
+   {
+
+   }
+   else if(m_pupCam == CAMSCIS)
+   {
+      ip2["target"] = m_pupCh2 - m_pupStepSize/sqrt(2);
+   }
+
    sendNewProperty(ip2);
 }
 
-void pupilGuide::on_button_pup_u_pressed()
+void pupilGuide::on_button_pup_r_pressed()
 {
    pcf::IndiProperty ip(pcf::IndiProperty::Number);
    
    ip.setDevice("ttmpupil");
-   ip.setName("pos_2");
-   ip.add(pcf::IndiElement("target"));
-   ip["target"] = m_pupCh2 + m_pupStepSize;
    
+   if(m_pupCam == FLOWFS)
+   {
+      ip.setName("pos_1");
+      ip.add(pcf::IndiElement("target"));
+      ip["target"] = m_pupCh1 - m_pupStepSize;
+   }
+   else if(m_pupCam == LLOWFS)
+   {
+
+   }
+   else if(m_pupCam == CAMSCIS)
+   {
+      ip.setName("pos_2");
+      ip.add(pcf::IndiElement("target"));
+      ip["target"] = m_pupCh2 - m_pupStepSize;
+   }
+
    sendNewProperty(ip);
 }
 
@@ -1559,8 +2384,19 @@ void pupilGuide::on_button_pup_ur_pressed()
    ip.setDevice("ttmpupil");
    ip.setName("pos_1");
    ip.add(pcf::IndiElement("target"));
-   ip["target"] = m_pupCh1 - m_pupStepSize/sqrt(2);
-   
+   if(m_pupCam == FLOWFS)
+   {
+      ip["target"] = m_pupCh1 - m_pupStepSize/sqrt(2);
+   }
+   else if(m_pupCam == LLOWFS)
+   {
+
+   }
+   else if(m_pupCam == CAMSCIS)
+   {
+      ip["target"] = m_pupCh1 + m_pupStepSize/sqrt(2);
+   }
+
    sendNewProperty(ip);
    
    pcf::IndiProperty ip2(pcf::IndiProperty::Number);
@@ -1568,8 +2404,20 @@ void pupilGuide::on_button_pup_ur_pressed()
    ip2.setDevice("ttmpupil");
    ip2.setName("pos_2");
    ip2.add(pcf::IndiElement("target"));
-   ip2["target"] = m_pupCh2 + m_pupStepSize/sqrt(2);
    
+   if(m_pupCam == FLOWFS)
+   {
+      ip2["target"] = m_pupCh2 + m_pupStepSize/sqrt(2);
+   }
+   else if(m_pupCam == LLOWFS)
+   {
+
+   }
+   else if(m_pupCam == CAMSCIS)
+   {
+      ip2["target"] = m_pupCh2 - m_pupStepSize/sqrt(2);
+   }
+
    sendNewProperty(ip2);
    
 }
@@ -1600,6 +2448,116 @@ void pupilGuide::on_button_pup_scale_pressed()
    char ss[5];
    snprintf(ss, 5, "%0.2f", m_pupStepSize);
    ui.button_pup_scale->setText(ss);
+}
+
+void pupilGuide::on_pupilAlign_loopSlider_sliderReleased()
+{
+   double relpos = ((double)(ui.pupilAlign_loopSlider->sliderPosition() - ui.pupilAlign_loopSlider->minimum()))/(ui.pupilAlign_loopSlider->maximum() - ui.pupilAlign_loopSlider->minimum());
+   
+   if(m_camwfsAlignLoopState)
+   {
+      if(relpos > 0.1)
+      {
+         ui.pupilAlign_loopSlider->setSliderPosition(ui.pupilAlign_loopSlider->maximum());
+         ui.pupilAlign_loopSlider->setEnabled(true);
+         m_camwfsAlignLoopWaiting = false;
+         return;
+      }
+   }
+   else 
+   {
+      if(relpos < 0.9)
+      {
+         ui.pupilAlign_loopSlider->setSliderPosition(ui.pupilAlign_loopSlider->minimum());
+         ui.pupilAlign_loopSlider->setEnabled(true);
+         m_camwfsAlignLoopWaiting = false;
+         return;
+      }
+   }
+
+   ui.pupilAlign_loopSlider->setEnabled(false);
+   m_camwfsAlignLoopWaiting = true;
+   m_camwfsAlignLoopWaitTimer->start(2000);
+   
+   pcf::IndiProperty ipFreq(pcf::IndiProperty::Switch);
+   
+   ipFreq.setDevice("camwfs-align");
+   ipFreq.setName("loop_state");
+   ipFreq.add(pcf::IndiElement("toggle"));
+   
+   if(relpos >= 0.9)
+   {
+      ipFreq["toggle"] = pcf::IndiElement::On;
+   }
+   else
+   {
+      ipFreq["toggle"] = pcf::IndiElement::Off;
+   }
+   
+   sendNewProperty(ipFreq);
+}
+
+void pupilGuide::on_pupilAlign_loopSlider_sliderPressed()
+{
+   m_camwfsAlignLoopWaiting = true;
+   m_camwfsAlignLoopWaitTimer->start(2000);
+}
+
+void pupilGuide::on_pupilAlign_loopSlider_sliderMoved(int p)
+{
+   static_cast<void>(p);
+
+   m_camwfsAlignLoopWaiting = true;
+   m_camwfsAlignLoopWaitTimer->start(2000);
+}
+
+void pupilGuide::camwfsAlignLoopWaitTimerOut()
+{
+   m_camwfsAlignLoopWaiting = false;
+}
+
+void pupilGuide::toggleExpFit(bool st)
+{
+
+   ui.labelD->setVisible(st);
+
+   ui.labelUR->setVisible(st);
+   ui.coordUR_x->setVisible(st);
+   ui.coordUR_y->setVisible(st);
+   ui.coordUR_D->setVisible(st);
+
+   ui.labelUL->setVisible(st);
+   ui.coordUL_x->setVisible(st);
+   ui.coordUL_y->setVisible(st);
+   ui.coordUL_D->setVisible(st);
+
+   ui.labelLR->setVisible(st);
+   ui.coordLR_x->setVisible(st);
+   ui.coordLR_y->setVisible(st);
+   ui.coordLR_D->setVisible(st);
+
+   ui.labelLL->setVisible(st);
+   ui.coordLL_x->setVisible(st);
+   ui.coordLL_y->setVisible(st);
+   ui.coordLL_D->setVisible(st);
+
+   ui.coordAvg_D->setVisible(st);
+
+   if(st)
+   {
+      ui.buttonExpFit->setText("--");
+   }
+   else
+   {
+      ui.buttonExpFit->setText("|");
+   }
+}
+
+
+void pupilGuide::on_buttonExpFit_pressed()
+{
+   bool st = !ui.labelD->isVisible();
+   toggleExpFit(st);
 }
 
 
@@ -1689,90 +2647,6 @@ void pupilGuide::on_button_camlens_scale_pressed()
 
 }
 
-void pupilGuide::on_modFreq_target_returnPressed()
-{
-   pcf::IndiProperty ip(pcf::IndiProperty::Number);
-   
-   ip.setDevice("modwfs");
-   ip.setName("modFrequency");
-   ip.add(pcf::IndiElement("requested"));
-   ip["requested"] = ui.modFreq_target->text().toDouble();
-   
-   sendNewProperty(ip);
-   
-}
-   
-void pupilGuide::on_modRad_target_returnPressed()
-{
-   pcf::IndiProperty ip(pcf::IndiProperty::Number);
-   
-   ip.setDevice("modwfs");
-   ip.setName("modRadius");
-   ip.add(pcf::IndiElement("requested"));
-   ip["requested"] = ui.modRad_target->text().toDouble();
-   
-   sendNewProperty(ip);
-}
-   
-void pupilGuide::on_buttonMod_mod_pressed()
-{
-   pcf::IndiProperty ip(pcf::IndiProperty::Number);
-   
-   ip.setDevice("modwfs");
-   ip.setName("modState");
-   ip.add(pcf::IndiElement("requested"));
-   ip["requested"] = 4;
-   
-   sendNewProperty(ip);
-}
-   
-void pupilGuide::on_buttonMod_set_pressed()
-{
-   pcf::IndiProperty ip(pcf::IndiProperty::Number);
-   
-   ip.setDevice("modwfs");
-   ip.setName("modState");
-   ip.add(pcf::IndiElement("requested"));
-   ip["requested"] = 3;
-   sendNewProperty(ip);
-}
-   
-void pupilGuide::on_buttonMod_rest_pressed()
-{
-   pcf::IndiProperty ip(pcf::IndiProperty::Number);
-   
-   ip.setDevice("modwfs");
-   ip.setName("modState");
-   ip.add(pcf::IndiElement("requested"));
-   ip["requested"] = 1;
-   
-   sendNewProperty(ip);
-}
-   
-void pupilGuide::on_buttonPup_rest_pressed()
-{
-   pcf::IndiProperty ip(pcf::IndiProperty::Switch);
-   
-   ip.setDevice("ttmpupil");
-   ip.setName("releaseDM");
-   ip.add(pcf::IndiElement("request"));
-   ip["request"].setSwitchState(pcf::IndiElement::On);
-   
-   sendNewProperty(ip);
-   
-}
-
-void pupilGuide::on_buttonPup_set_pressed()
-{
-   pcf::IndiProperty ip(pcf::IndiProperty::Switch);
-   
-   ip.setDevice("ttmpupil");
-   ip.setName("initDM");
-   ip.add(pcf::IndiElement("request"));
-   ip["request"].setSwitchState(pcf::IndiElement::On);
-   
-   sendNewProperty(ip);
-}
 
 } //namespace xqt
    

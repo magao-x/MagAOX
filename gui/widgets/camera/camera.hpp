@@ -39,6 +39,7 @@ protected:
    QPushButton * ui_reconfigure {nullptr};
 
    shutterStatus * ui_shutterStatus {nullptr};
+   //toggleSlider * ui_shutterStatus {nullptr};
 
    roiStatus * ui_roiStatus {nullptr};
    selectionSwStatus * ui_modes {nullptr};
@@ -326,7 +327,7 @@ void camera::handleSetProperty( const pcf::IndiProperty & ipRecv)
    
       if(ipRecv.getName() == "reconfigure")
       {
-         if(!ui_shutterStatus)
+         if(!ui_reconfigure)
          {
             emit add_reconfigure();
          }
@@ -550,6 +551,8 @@ void camera::reconfigure()
 void camera::setup_shutter()
 {
    ui_shutterStatus = new shutterStatus(m_camName, this);
+
+   //ui_shutterStatus = new toggleSlider(m_camName, "shutter", "toggle", "Shutter");
    ui_shutterStatus->setObjectName(QString::fromUtf8("shutter"));
    
    ui.grid->addWidget(ui_shutterStatus, 7, 0, 2, 1);

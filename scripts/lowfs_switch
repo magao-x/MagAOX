@@ -1,0 +1,42 @@
+#!/bin/bash
+
+#########################################################
+# switch LOWFS cameras and reload CACAO
+#
+# usage: lowfs_switch camsci1
+#########################################################
+
+
+echo 'Switching LOWFS to' $1
+
+echo "runstop mvalC2dm-2" >> /milk/shm/ncpc_fpsCTRL.fifo
+echo "confstop mvalC2dm-2" >> /milk/shm/ncpc_fpsCTRL.fifo
+echo "runstop mfilt-2" >> /milk/shm/ncpc_fpsCTRL.fifo
+echo "confstop mfilt-2" >> /milk/shm/ncpc_fpsCTRL.fifo
+echo "runstop wfs2cmodeval-2" >> /milk/shm/ncpc_fpsCTRL.fifo
+echo "confstop wfs2cmodeval-2" >> /milk/shm/ncpc_fpsCTRL.fifo
+echo "runstop acquWFS-2" >> /milk/shm/ncpc_fpsCTRL.fifo
+echo "confstop acquWFS-2" >> /milk/shm/ncpc_fpsCTRL.fifo
+
+cmd='ln -sf /milk/shm/'$1'.im.shm /milk/shm/aol2_wfsim.im.shm'
+$cmd
+
+cmd='ln -sf /milk/shm/'$1'_dark.im.shm /milk/shm/aol2_wfsdark.im.shm'
+$cmd
+
+sleep 1
+echo "confstart acquWFS-2" >> /milk/shm/ncpc_fpsCTRL.fifo
+sleep 1
+echo "runstart acquWFS-2" >> /milk/shm/ncpc_fpsCTRL.fifo
+sleep 1
+echo "confstart wfs2cmodeval-2" >> /milk/shm/ncpc_fpsCTRL.fifo
+sleep 1
+echo "runstart wfs2cmodeval-2" >> /milk/shm/ncpc_fpsCTRL.fifo
+sleep 1
+echo "confstart mfilt-2" >> /milk/shm/ncpc_fpsCTRL.fifo
+sleep 1
+echo "runstart mfilt-2" >> /milk/shm/ncpc_fpsCTRL.fifo
+sleep 1
+echo "confstart mvalC2dm-2" >> /milk/shm/ncpc_fpsCTRL.fifo
+sleep 1
+echo "runstart mvalC2dm-2" >> /milk/shm/ncpc_fpsCTRL.fifo
