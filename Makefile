@@ -46,6 +46,7 @@ apps_icc = \
 	xt1121DCDU \
    picoMotorCtrl \
 	koolanceCtrl \
+	tcsInterface
 
 apps_aoc = \
 	trippLitePDU \
