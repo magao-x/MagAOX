@@ -284,11 +284,9 @@ def _startup_helper(process_name, executable_name):
     success(f"Executed in {process_name} session: '{cmd}'")
     return True
 
-def _identify_indiserver_name(names):
-    for process_name in names:
-        if process_name.startswith('is'):
-            return process_name
-    return None
+def _identify_indiserver_name(names, role):
+    if "is" + role.upper() in names:
+        return "is" + role.upper()
 
 def validate_targets(processes, targets, for_restart=False):
     extra_targets = set()
@@ -314,10 +312,6 @@ def validate_targets(processes, targets, for_restart=False):
 
 def startup(processes, targets):
     indi_server_name = _identify_indiserver_name(processes)
-
-    for process_name in targets:
-        if process_name.startswith('is'):
-            indi_server_name = process_name
 
     if len(targets) > 1 and indi_server_name in targets:
         # special case for INDI server: needs to be last to start,
