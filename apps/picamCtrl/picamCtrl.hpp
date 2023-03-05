@@ -1424,6 +1424,7 @@ int picamCtrl::configureAcquisition()
    }
 
    m_vShiftSpeedName = m_vShiftSpeedNameSet;
+   m_vshiftSpeed = vss;
    log<text_log>( "Vertical Shift Rate set to: " + m_vShiftSpeedName);
 
    //=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*

@@ -265,7 +265,8 @@ protected:
    std::string m_vShiftSpeedNameSet; ///< The user requested vshift speed name, to be set by derived()
       
    float m_adcSpeed {0};
-   
+   float m_vshiftSpeed {0};
+
    float m_emGain {1}; ///< The camera's current EM gain (if available).
    float m_emGainSet {1}; ///< The camera's EM gain, as set by the user.
    float m_maxEMGain {1}; ///< The configurable maximum EM gain.  To be enforced in derivedT.
@@ -2831,8 +2832,11 @@ int stdCamera<derivedT>::recordCamera( bool force )
    static bool last_tempControlOnTarget = 0;
    static std::string last_tempControlStatusStr;
    static std::string last_shutterStatus;
-   static int last_shutterState;
-   static bool last_synchro;
+   static int last_shutterState = false;
+   static bool last_synchro = false;
+   static float last_vshiftSpeed = -1;
+   static bool last_cropMode = false;
+
 
    if(force || m_modeName != last_mode ||
                m_currentROI.x != last_roi.x ||
@@ -2852,12 +2856,15 @@ int stdCamera<derivedT>::recordCamera( bool force )
                m_tempControlStatusStr != last_tempControlStatusStr ||
                m_shutterStatus != last_shutterStatus ||
                m_shutterState != last_shutterState ||
-               m_synchro != last_synchro )
+               m_synchro != last_synchro ||
+               m_vshiftSpeed != last_vshiftSpeed ||
+               m_cropMode != last_cropMode) 
    {
       derived().template telem<telem_stdcam>({m_modeName, m_currentROI.x, m_currentROI.y, 
                                                     m_currentROI.w, m_currentROI.h, m_currentROI.bin_x, m_currentROI.bin_y,
                                                        m_expTime, m_fps, m_emGain, m_adcSpeed, m_ccdTemp, m_ccdTempSetpt, (uint8_t) m_tempControlStatus, 
-                                                             (uint8_t) m_tempControlOnTarget, m_tempControlStatusStr, m_shutterStatus, (int8_t) m_shutterState, (uint8_t) m_synchro});
+                                                             (uint8_t) m_tempControlOnTarget, m_tempControlStatusStr, m_shutterStatus, (int8_t) m_shutterState, 
+                                                                   (uint8_t) m_synchro, m_vshiftSpeed, (uint8_t) m_cropMode});
       
       last_mode = m_modeName;
       last_roi = m_currentROI;
@@ -2873,6 +2880,8 @@ int stdCamera<derivedT>::recordCamera( bool force )
       last_shutterStatus = m_shutterStatus;
       last_shutterState = m_shutterState;
       last_synchro = m_synchro;
+      last_vshiftSpeed = m_vshiftSpeed;
+      last_cropMode = m_cropMode;
    }
    
    
