@@ -132,7 +132,7 @@ def _brief_status(process_name):
         else:
             failure(f'{process_name}: dead (stale pid)')
 
-def status(processes, targets):
+def status(processes, targets, role):
     if not len(targets):
         targets = processes.keys()
     debug(f"Querying status for: {list(targets)}")
@@ -145,7 +145,7 @@ def _peek_logs(process_name, n_lines):
     info(f"End {process_name} logs")
     print()
 
-def peek(processes, targets):
+def peek(processes, targets, role):
     if not len(targets):
         targets = processes.keys()
     debug(f"Querying status for: {list(targets)}")
@@ -154,23 +154,6 @@ def peek(processes, targets):
         _peek_logs(process_name, n_lines=10)
     return 0
 
-def inspect_session(_, targets):
-    if len(targets) != 1:
-        failure(f"Can only specify a single process "
-                f"name to inspect, got: {targets}")
-        return 1
-    target = targets[0]
-    if _session_exists(targets[0]):
-        exitcode, out, err = _run_as_xsup(f"tmux attach-session -t {target}")
-        info_bytes(out)
-        if len(err):
-            failure_bytes(err)
-    else:
-        failure(f'No tmux session exists named {target}')
-        exitcode = 1
-    return exitcode
-
-
 def _session_exists(process_name):
     _, out, __ = _run_as_xsup(
         "tmux ls -F \"#{session_name}\"",
@@ -178,9 +161,6 @@ def _session_exists(process_name):
     )
     sessions = out.decode('utf8').split('\n')
     return process_name in sessions
-
-def stop(processes, targets):
-    return shutdown(processes, targets)
 
 def _shutdown_helper(process_name):
     attempts = 0
@@ -208,7 +188,7 @@ def _shutdown_helper(process_name):
     return 0
 
 
-def shutdown(processes, targets):
+def shutdown(processes, targets, role):
     handle_indi_server = False
     if not len(targets):
         targets = list(processes.keys())
@@ -284,20 +264,18 @@ def _startup_helper(process_name, executable_name):
     success(f"Executed in {process_name} session: '{cmd}'")
     return True
 
-def _identify_indiserver_name(names):
-    for process_name in names:
-        if process_name.startswith('is'):
-            return process_name
-    return None
+def _identify_indiserver_name(names, role):
+    if "is" + role.upper() in names:
+        return "is" + role.upper()
 
-def validate_targets(processes, targets, for_restart=False):
+def validate_targets(processes, targets, role, for_restart=False):
     extra_targets = set()
     if not len(targets):
         targets = set(processes.keys())
     else:
         targets = set(targets)
         if for_restart:
-            indiserver_name = _identify_indiserver_name(processes)
+            indiserver_name = _identify_indiserver_name(processes, role)
             if indiserver_name not in targets:
                 targets.add(indiserver_name)
             for target_name in targets:
@@ -312,12 +290,8 @@ def validate_targets(processes, targets, for_restart=False):
 
     return list(targets | extra_targets)
 
-def startup(processes, targets):
-    indi_server_name = _identify_indiserver_name(processes)
-
-    for process_name in targets:
-        if process_name.startswith('is'):
-            indi_server_name = process_name
+def startup(processes, targets, role):
+    indi_server_name = _identify_indiserver_name(processes, role)
 
     if len(targets) > 1 and indi_server_name in targets:
         # special case for INDI server: needs to be last to start,
@@ -345,19 +319,19 @@ def startup(processes, targets):
     return 0
 
 
-def restart(processes, targets):
-    targets = validate_targets(processes, targets, for_restart=True)
-    exit_code_1 = shutdown(processes, targets)
+def restart(processes, targets, role):
+    targets = validate_targets(processes, targets, role, for_restart=True)
+    print(targets)
+    exit_code_1 = shutdown(processes, targets, role)
     if exit_code_1 != 0:
         return exit_code_1
-    return startup(processes, targets)
+    return startup(processes, targets, role)
 
 VERBS = {
     'status': status,
-    'inspect': inspect_session,
     'peek': peek,
     'shutdown': shutdown,
-    'stop': stop,
+    'stop': shutdown,
     'restart': restart,
     'startup': startup,
     'start': startup,
@@ -412,14 +386,14 @@ def main():
         if len(args.target) == 0:
             failure(f"No targets provided for {verb}")
             return 1
-    targets = validate_targets(processes, args.target)
+    targets = validate_targets(processes, args.target, role)
     debug(f'Got verb = {verb}, targets = {targets}')
     if verb not in VERBS:
         failure(f"Valid verbs: {', '.join(VERBS.keys())}")
         failure(f"Got: {verb}")
         return 1
 
-    return VERBS[verb](processes, targets)
+    return VERBS[verb](processes, targets, role)
 
 if __name__ == "__main__":
     sys.exit(main())
