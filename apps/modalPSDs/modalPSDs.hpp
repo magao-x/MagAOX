@@ -72,7 +72,7 @@ protected:
 
    unsigned m_tsCircBuffLength {4000}; ///< Length of the time-series circular buffers.  This is updated by m_fpsSource and m_psdTime. 
 
-   unsigned m_psdSize {2000}; ///< The length of the time series sampel over which the PSD is calculated
+   unsigned m_psdSize {2000}; ///< The length of the time series sample over which the PSD is calculated
    unsigned m_psdOverlapSize {1000}; ///< The number of samples in the overlap
 
    /** \name PSD Calculation Thread
