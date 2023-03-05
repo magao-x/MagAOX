@@ -313,7 +313,7 @@ def prune_outputs(scratch_dir, span):
         ts = xfilename_to_utc_timestamp(fn)
         if ts < span.begin or (span.end is not None and ts > span.end):
             os.remove(fn)
-            log.debug(f"Filtered: {fn}")
+            log.debug(f"Filtered: {fn} (\n\tts =\t{ts.isoformat()},\nspan.begin =\t{span.begin.isoformat()},\nspan.end =\t{span.end.isoformat() if span.end is not None else span.end})")
         else:
             good_outputs.append(fn)
             log.debug(f"Kept: {fn}")
@@ -394,6 +394,10 @@ def do_quicklook_for_camera(
                 image_path, data_roots, new_matching_files, scratch_dir, omit_telemetry, dry_run, cube_mode,
                 xrif2fits_cmd
             )
+            for archive_path in successful_paths:
+                log.info(f"Converted {archive_path}")
+            for archive_path in failed_paths:
+                log.info(f"Failed    {archive_path}")
             if len(successful_paths) and not ignore_history:
                 append_files_to_history(history_path, successful_paths, dry_run)
                 log.debug(f"Wrote {len(successful_paths)} to {history_path}")
