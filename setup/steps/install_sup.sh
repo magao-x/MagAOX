@@ -37,9 +37,11 @@ if [[ $MAGAOX_ROLE == AOC || $MAGAOX_ROLE == vm || $MAGAOX_ROLE == ci ]]; then
         echo "Environment=\"UVICORN_HOST=0.0.0.0\"" | sudo tee -a $OVERRIDE_PATH/override.conf
         echo "Environment=\"UVICORN_PORT=4433\"" | sudo tee -a $OVERRIDE_PATH/override.conf
         echo "Environment=\"MAGAOX_ROLE=$MAGAOX_ROLE\"" | sudo tee -a $OVERRIDE_PATH/override.conf
-        echo "Environment=\"UVICORN_SSL_KEYFILE=/opt/lego/certificates/exao1.magao-x.org.key\"" | sudo tee -a $OVERRIDE_PATH/override.conf
-        echo "Environment=\"UVICORN_SSL_CERTFILE=/opt/lego/certificates/exao1.magao-x.org.crt\"" | sudo tee -a $OVERRIDE_PATH/override.conf
-        echo "Environment=\"UVICORN_CA_CERTS=/opt/lego/certificates/exao1.magao-x.org.issuer.crt\"" | sudo tee -a $OVERRIDE_PATH/override.conf
+        echo "Environment=\"UVICORN_SSL_KEYFILE=/home/xsup/.lego/certificates/exao1.magao-x.org.key\"" | sudo tee -a $OVERRIDE_PATH/override.conf
+        echo "Environment=\"UVICORN_SSL_CERTFILE=/home/xsup/.lego/certificates/exao1.magao-x.org.crt\"" | sudo tee -a $OVERRIDE_PATH/override.conf
+        echo "Environment=\"UVICORN_CA_CERTS=/home/xsup/.lego/certificates/exao1.magao-x.org.issuer.crt\"" | sudo tee -a $OVERRIDE_PATH/override.conf
+        sudo firewall-cmd --add-forward-port=port=443:proto=tcp:toport=4433 --permanent
+        sudo firewall-cmd --permanent --zone=public --add-service=https
         sudo systemctl enable sup.service || true
         sudo systemctl restart sup.service || true
     fi
