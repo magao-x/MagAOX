@@ -1,0 +1,41 @@
+#!/bin/bash
+
+#########################################################
+# apply a HOWFS calibration and reload CACAO
+#########################################################
+
+echo 'Applying Calibration' $1
+
+echo "runstop mvalC2dm-1" >> /milk/shm/tweeter_fpsCTRL.fifo
+echo "confstop mvalC2dm-1" >> /milk/shm/tweeter_fpsCTRL.fifo
+echo "runstop mfilt-1" >> /milk/shm/tweeter_fpsCTRL.fifo
+echo "confstop mfilt-1" >> /milk/shm/tweeter_fpsCTRL.fifo
+echo "runstop wfs2cmodeval-1" >> /milk/shm/tweeter_fpsCTRL.fifo
+echo "confstop wfs2cmodeval-1" >> /milk/shm/tweeter_fpsCTRL.fifo
+
+cd /opt/MagAOX/cacao/tweeter/tweeter001
+
+cmd='cacao-calib-apply '$1
+$cmd
+
+sleep 1
+echo "confstart wfs2cmodeval-1" >> /milk/shm/tweeter_fpsCTRL.fifo
+sleep 1
+echo "runstart wfs2cmodeval-1" >> /milk/shm/tweeter_fpsCTRL.fifo
+sleep 1
+echo "confstart mfilt-1" >> /milk/shm/tweeter_fpsCTRL.fifo
+sleep 1
+echo "runstart mfilt-1" >> /milk/shm/tweeter_fpsCTRL.fifo
+sleep 1
+echo "confstart mvalC2dm-1" >> /milk/shm/tweeter_fpsCTRL.fifo
+sleep 1
+echo "runstart mvalC2dm-1" >> /milk/shm/tweeter_fpsCTRL.fifo
+
+milk <<EOF
+readshmim aol1_wfsref
+cpsh aol1_wfsrefc
+exitCLI
+EOF
+
+sleep 5
+setINDI camwfs.reconfigure.request=On

@@ -579,6 +579,8 @@ int picamCtrl::appLogic()
          return 0;
       }
 
+      
+
       if(getTemps() < 0)
       {
          if(powerState() != 1 || powerStateTarget() != 1) return 0;
@@ -1029,6 +1031,12 @@ int picamCtrl::getAcquisitionState()
    if(running) state(stateCodes::OPERATING);
    else state(stateCodes::READY);
 
+   if(!running)
+   {
+      log<text_log>("acqusition stopped. restarting", logPrio::LOG_ERROR);
+      m_reconfig = true;
+   }
+
    return 0;
 
 }
@@ -1260,7 +1268,7 @@ int picamCtrl::capExpTime(piflt& exptime)
    if(exptime < m_ReadOutTimeCalculation)
    {
       if(powerState() != 1 || powerStateTarget() != 1) return -1;
-      log<text_log>("Got exposure time " + std::to_string(exptime) + " ms but capped at " + std::to_string(m_ReadOutTimeCalculation) + " ms");
+      log<text_log>("Got exposure time " + std::to_string(exptime) + " ms but min value is " + std::to_string(m_ReadOutTimeCalculation) + " ms");
       long intexptime = m_ReadOutTimeCalculation * 10000 + 0.5;
       exptime = ((double)intexptime)/10000;
    }
@@ -1424,6 +1432,7 @@ int picamCtrl::configureAcquisition()
    }
 
    m_vShiftSpeedName = m_vShiftSpeedNameSet;
+   m_vshiftSpeed = vss;
    log<text_log>( "Vertical Shift Rate set to: " + m_vShiftSpeedName);
 
    //=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*

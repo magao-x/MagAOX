@@ -323,37 +323,44 @@ int readoutParams( int & newa,
 }
 
 int vshiftParams( int & newvs,
-                  const std::string & vssn
+                  const std::string & vssn,
+                  float & vs
                 )
 {
    if(vssn == "0_3us")
    {
       newvs = 0;
+      vs = 0.3;
       return 0;
    }
    else if(vssn == "0_5us")
    {
       newvs = 1;
+      vs = 0.5;
       return 0;
    }
    else if(vssn == "0_9us")
    {
       newvs = 2;
+      vs = 0.9;
       return 0;
    }
    else if(vssn == "1_7us")
    {
       newvs = 3;
+      vs = 1.7;
       return 0;
    }
    else if(vssn == "3_3us")
    {
       newvs = 4;
+      vs = 3.3;
       return 0;
    }
    else
    {
       newvs = 0;
+      vs = 0.3;
       return -1;
    }
 }
@@ -1145,7 +1152,8 @@ int andorCtrl::cameraSelect()
    m_vShiftSpeedNameSet = m_vShiftSpeedName;
    
    int newvs;
-   if(vshiftParams(newvs,m_vShiftSpeedNameSet) < 0)
+   float vs;
+   if(vshiftParams(newvs,m_vShiftSpeedNameSet, vs) < 0)
    {
       return log<text_log,-1>("invalid default vert. shift speed: " + m_vShiftSpeedNameSet, logPrio::LOG_ERROR);
    }
@@ -1156,6 +1164,8 @@ int andorCtrl::cameraSelect()
    {
       return log<software_error,-1>({__FILE__, __LINE__, std::string("Andor SDK Error from SetVSSpeed: ") + andorSDKErrorName(error)});
    }
+
+   m_vshiftSpeed = vs;
    // Set the amplifier
    /* See page 298
     */
@@ -1329,8 +1339,8 @@ int andorCtrl::setVShiftSpeed()
    state(stateCodes::CONFIGURING);
 
    int newvs;
-   
-   if( vshiftParams(newvs, m_vShiftSpeedNameSet) < 0)
+   float vs;
+   if( vshiftParams(newvs, m_vShiftSpeedNameSet, vs) < 0)
    {
       return log<text_log,-1>("invalid vertical shift speed: " + m_vShiftSpeedNameSet);
    }
@@ -1347,7 +1357,8 @@ int andorCtrl::setVShiftSpeed()
 
       
    m_vShiftSpeedName = m_vShiftSpeedNameSet;
-   
+   m_vshiftSpeed = vs;
+
    m_nextMode = m_modeName;
    m_reconfig = true;
 
