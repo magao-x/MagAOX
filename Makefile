@@ -46,6 +46,7 @@ apps_icc = \
 	xt1121DCDU \
    picoMotorCtrl \
 	koolanceCtrl \
+	tcsInterface
 
 apps_aoc = \
 	trippLitePDU \
@@ -142,6 +143,7 @@ scripts_to_install = magaox \
 	git_check_all \
 	collect_camera_configs_for_darks \
 	shot_in_the_dark \
+        howfs_apply \
 	lowfs_switch \
 	lowfs_apply \
 	lowfs_switch_apply
