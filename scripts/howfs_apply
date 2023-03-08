@@ -33,7 +33,7 @@ echo "runstart mvalC2dm-1" >> /milk/shm/tweeter_fpsCTRL.fifo
 
 milk <<EOF
 readshmim aol1_wfsref
-cpsh aol1_wfsrefc
+cpsh aol1_wfsref aol1_wfsrefc
 exitCLI
 EOF
 
