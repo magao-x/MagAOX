@@ -67,7 +67,7 @@ chown -R root:$instrument_group /opt/MagAOX/drivers/fifos
 make_on_data_array logs /opt/MagAOX
 make_on_data_array rawimages /opt/MagAOX
 make_on_data_array telem /opt/MagAOX
-
+chmod u=rwX,g=rwX,o=rwXt /opt/MagAOX/scratch/
 
 
 chown -R root:root /opt/MagAOX/secrets
