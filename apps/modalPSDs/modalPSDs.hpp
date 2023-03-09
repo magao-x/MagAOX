@@ -41,7 +41,6 @@ namespace app
   */
 class modalPSDs : public MagAOXApp<true>, public dev::shmimMonitor<modalPSDs>
 {
-
    friend class dev::shmimMonitor<modalPSDs>;
 
 public:
@@ -596,6 +595,7 @@ void modalPSDs::psdThreadExec( )
                m_psd[m] *= (var/nm);
             }
 
+
             //add this psd to its circbuff
 
             //then average
@@ -627,19 +627,22 @@ void modalPSDs::psdThreadExec( )
          clock_gettime(CLOCK_REALTIME, &m_rawpsdStream->md->writetime);
          m_rawpsdStream->md->atime = m_rawpsdStream->md->writetime;
 
-         memcpy(m_rawpsdStream->array.F, m_rawBuffer.data(), m_psdBuffer.rows()*m_psdBuffer.cols()*sizeof(float));
+         uint64_t cnt1 = m_rawpsdStream->md->cnt1 + 1;
+         if(cnt1 >= m_rawpsdStream->md->size[2]) cnt1 = 0;
+
+         //Move to next pointer
+         float * F = m_rawpsdStream->array.F + m_psdBuffer.rows()*m_psdBuffer.cols()*cnt1;
+
+         memcpy(F, m_psdBuffer.data(), m_psdBuffer.rows()*m_psdBuffer.cols()*sizeof(float));
 
          //Update cnt1
-         ++m_rawpsdStream->md->cnt1;
-         if(m_rawpsdStream->md->cnt1 >= m_rawpsdStream->md.size[2]) m_rawpsdStream->md->cnt1 = 0;
+         m_rawpsdStream->md->cnt1 = cnt1;
 
          //Update cnt0
          ++m_rawpsdStream->md->cnt0;
 
          m_rawpsdStream->md->write=0;
          ImageStreamIO_sempost(m_rawpsdStream,-1);
-
-
 
          double t1 = mx::sys::get_curr_time();
          std::cerr << "done " << t1-t0 << "\n";
