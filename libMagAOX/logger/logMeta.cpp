@@ -137,23 +137,19 @@ std::string logMeta::value( logMap & lm,
    if(m_detail.valType == valTypes::String)
    {
       std::string vs = valueString( lm, stime, atime); 
-      #ifdef HARD_EXIT 
       if(vs == m_invalidValue)
       {
          std::cerr << __FILE__ << " " << __LINE__ << " valueString returned invalid value\n";
       } 
-      #endif
       return vs;
    }
    else
    {
       std::string vn = valueNumber( lm, stime, atime);
-      #ifdef HARD_EXIT 
       if(vn == m_invalidValue)
       {
          std::cerr << __FILE__ << " " << __LINE__ << " valueNumber returned invalid value\n";
       } 
-      #endif
       return vn;
    }
 }
@@ -179,7 +175,11 @@ std::string logMeta::valueNumber( logMap & lm,
          case valTypes::Char:
          {
             char val;
-            if( getLogStateVal(val,lm, m_spec.device,m_spec.eventCode,stime,atime,(char(*)(void*))m_detail.accessor, &m_hint) != 0) return m_invalidValue;
+            if( getLogStateVal(val,lm, m_spec.device,m_spec.eventCode,stime,atime,(char(*)(void*))m_detail.accessor, &m_hint) != 0) 
+            {
+               std::cerr << "getLogStateVal returned error: " << __FILE__ << " " << __LINE__ << "\n";
+               return m_invalidValue;
+            }
             snprintf(str, sizeof(str), m_spec.format.c_str(), val);
             return std::string(str);
          }
@@ -420,6 +420,8 @@ std::string logMeta::valueString( logMap & lm,
    {
       if( getLogStateVal(val,lm, m_spec.device,m_spec.eventCode,stime,atime,(std::string(*)(void*))m_detail.accessor, &m_hint) != 0)
       {
+         std::cerr << "getLogStateVal returned error " << __FILE__ << " " << __LINE__ << "\n";
+
          #ifdef HARD_EXIT 
          std::cerr << __FILE__ << " " << __LINE__ << "\n";
          
@@ -440,11 +442,26 @@ mx::fits::fitsHeaderCard logMeta::card( logMap &lm,
                                           const flatlogs::timespecX & atime 
                                         )
 {
+   #ifdef DEBUG
+   std::cerr << __FILE__ << " " << __LINE__ << "\n";
+   #endif
+   
+   std::string vstr = value(lm, stime, atime);
+   
+   #ifdef DEBUG
+   std::cerr << __FILE__ << " " << __LINE__ << "\n";
+   #endif
+
+   if(vstr == m_invalidValue)
+   {
+      std::cerr << "got invalid value: " << __FILE__ << " " << __LINE__ << "\n";
+   }
+
    if(m_detail.valType == valTypes::String)
    {
       if(m_detail.hierarch == false)
       {
-         return mx::fits::fitsHeaderCard( m_spec.keyword, value(lm, stime, atime), m_spec.comment);
+         return mx::fits::fitsHeaderCard( m_spec.keyword, vstr, m_spec.comment);
       }
       else
       { 
@@ -454,14 +471,14 @@ mx::fits::fitsHeaderCard logMeta::card( logMap &lm,
          {
             keyw += std::string(9-keyw.size(), ' ');
          }
-         return mx::fits::fitsHeaderCard( keyw, value(lm, stime, atime), m_spec.comment);
+         return mx::fits::fitsHeaderCard( keyw, vstr, m_spec.comment);
       }
    }
    else 
    {
       if(m_detail.hierarch == false)
       {
-         return mx::fits::fitsHeaderCard( m_spec.keyword, value(lm, stime, atime).c_str(),  m_detail.valType, m_spec.comment);
+         return mx::fits::fitsHeaderCard( m_spec.keyword, vstr.c_str(),  m_detail.valType, m_spec.comment);
       }
       else
       {
@@ -471,7 +488,7 @@ mx::fits::fitsHeaderCard logMeta::card( logMap &lm,
          {
             keyw += std::string(9-keyw.size(), ' ');
          }
-         return mx::fits::fitsHeaderCard( keyw, value(lm, stime, atime).c_str(),  m_detail.valType, m_spec.comment);
+         return mx::fits::fitsHeaderCard( keyw, vstr.c_str(),  m_detail.valType, m_spec.comment);
       }
    }
 }

@@ -269,6 +269,7 @@ int xrif2fits::execute()
    for(size_t n=0; n < m_telDir.size(); ++n)
    {
       tels.loadAppToFileMap( m_telDir[n], ".bintel");
+      //std::cerr << m_telDir[n] << "\n";
    }
 
    std::ofstream metaOut;
@@ -555,8 +556,6 @@ int xrif2fits::execute()
          {
             std::cerr << "no prior\n";
          }
-
-         //timespecX midexp = mx::meanTimespec( atime, stime);
          
          std::string timestamp;
          mx::sys::timeStamp(timestamp, atime);
@@ -587,7 +586,8 @@ int xrif2fits::execute()
                if(!m_noMeta) metaOut << " " << logMetas[u].value(tels, stime, atime) ;
             }         
          }
-         
+
+
          fh.append("FRAMENO", cnt0);
          fh.append("ACQSEC", atime.tv_sec);
          fh.append("ACQNSEC", atime.tv_nsec);
