@@ -142,6 +142,10 @@ int getLogStateVal( valT & val,
    if(hint) _hint = *hint;
    else _hint = 0;
 
+   #ifdef DEBUG
+   std::cerr << __FILE__ << " " << __LINE__ << "\n";
+   #endif
+
    if(lm.getPriorLog(stprior, appName, ev, stime, _hint) != 0) 
    {
       std::cerr << __FILE__ << " " << __LINE__ << " getPriorLog returned error for " << appName << ":" << ev << "\n";
@@ -151,11 +155,19 @@ int getLogStateVal( valT & val,
    
    valT atprV;
    
+   #ifdef DEBUG
+   std::cerr << __FILE__ << " " << __LINE__ << "\n";
+   #endif
+
    if(lm.getNextLog(atprior, stprior, appName) != 0) 
    {
       std::cerr << __FILE__ << " " << __LINE__ << " getNextLog returned error for " << appName << ":" << ev << "\n";
       return -1;
    }
+
+   #ifdef DEBUG
+   std::cerr << __FILE__ << " " << __LINE__ << "\n";
+   #endif
 
    while( flatlogs::logHeader::timespec(atprior) < atime )
    {
@@ -164,10 +176,14 @@ int getLogStateVal( valT & val,
       {
          val = atprV;
          if(hint) *hint = stprior;
-         return 1;
+         return 0;
       }
       stprior = atprior;
-      lm.getNextLog(atprior, stprior, appName);
+      if(lm.getNextLog(atprior, stprior, appName) != 0)
+      {
+         std::cerr << __FILE__ << " " << __LINE__ << " getNextLog returned error for " << appName << ":" << ev << "\n";
+         return -1;
+      }
    }
    
    val = stprV;
