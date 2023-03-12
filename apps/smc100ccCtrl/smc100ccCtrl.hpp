@@ -404,7 +404,9 @@ int smc100ccCtrl::appLogic()
 
    if(axState[0] == '0') 
    {
-      if(m_powerOnHome && !m_powerOnHomed)
+      state(stateCodes::NOTHOMED); //This always means this.   
+
+      /*if(m_powerOnHome && !m_powerOnHomed)
       {
          state(stateCodes::NOTHOMED); //This always means this.   
       }
@@ -416,7 +418,7 @@ int smc100ccCtrl::appLogic()
       {
          //otherwise ignore this state
          log<text_log>("got state 0, attempting to ignore", logPrio::LOG_WARNING);
-      }
+      }*/
    }
    else if (axState[0] == '1' && axState[1] == '0')
    {
