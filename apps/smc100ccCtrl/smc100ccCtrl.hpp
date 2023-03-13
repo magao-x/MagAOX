@@ -404,21 +404,7 @@ int smc100ccCtrl::appLogic()
 
    if(axState[0] == '0') 
    {
-      state(stateCodes::NOTHOMED); //This always means this.   
-
-      /*if(m_powerOnHome && !m_powerOnHomed)
-      {
-         state(stateCodes::NOTHOMED); //This always means this.   
-      }
-      else if(!m_powerOnHome)
-      {
-         state(stateCodes::NOTHOMED); //This always means this.   
-      }
-      else
-      {
-         //otherwise ignore this state
-         log<text_log>("got state 0, attempting to ignore", logPrio::LOG_WARNING);
-      }*/
+      state(stateCodes::NOTHOMED); //This always means this.
    }
    else if (axState[0] == '1' && axState[1] == '0')
    {
@@ -539,16 +525,8 @@ int smc100ccCtrl::appLogic()
          std::unique_lock<std::mutex> lock(m_indiMutex);
          startHoming(); 
          m_powerOnHomed = true;
-         return 0;
       }
-      else if(m_powerOnHome && m_powerOnHomed)
-      {
-         state(stateCodes::READY);
-      }
-      else
-      {
-         return 0;
-      }
+      return 0;
    }
    
    if( state() == stateCodes::READY || state() == stateCodes::OPERATING)
