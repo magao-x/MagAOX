@@ -1342,31 +1342,10 @@ void pupilGuide::updateGUI()
    if( m_camwfsavgState == "READY" || m_camwfsavgState == "OPERATING")
    {
       ui.fitAvgTime->setEnabled(true);
-
-      if(m_camwfsavgState == "OPERATING")
-      {
-         ui.buttonTweeterTest_set->setEnabled(true);
-         if(m_dmtweeterTestSet)
-         {
-            ui.buttonTweeterTest_set->setText("zero test");
-         }
-         else
-         {
-            ui.buttonTweeterTest_set->setText("set test");
-         }
-      }
-      else
-      {
-         ui.buttonTweeterTest_set->setEnabled(false);
-         ui.buttonTweeterTest_set->setText("set test");
-      }
-
    }
    else
    {
       ui.fitAvgTime->setEnabled(false);
-      ui.buttonTweeterTest_set->setEnabled(false);
-      ui.buttonTweeterTest_set->setText("set test");
    }
    
    // ------ dmtweeter
@@ -1374,10 +1353,24 @@ void pupilGuide::updateGUI()
    if(m_dmtweeterState == "READY" || m_dmtweeterState == "OPERATING")
    {
       ui.tweeterState->setEnabled(true);
+
+      ui.buttonTweeterTest_set->setEnabled(true);
+      if(m_dmtweeterTestSet)
+      {
+         ui.buttonTweeterTest_set->setText("zero test");
+      }
+      else
+      {
+         ui.buttonTweeterTest_set->setText("set test");
+      }
    }
    else
    {
       ui.tweeterState->setEnabled(false);
+
+      ui.buttonTweeterTest_set->setEnabled(false);
+      ui.buttonTweeterTest_set->setText("set test");
+
    }
 
    // ------ Pupil Steering

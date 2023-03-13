@@ -29,6 +29,7 @@ import os
 import time
 import datetime
 from datetime import timezone
+from concurrent import futures
 import logging
 import glob
 import tempfile
@@ -47,9 +48,10 @@ ALL_CAMERAS = {
     'camsci1': DEFAULT_SEPARATE,
     'camsci2': DEFAULT_SEPARATE,
 }
-SLEEP_FOR_TELEMS = 60 * 5
+SLEEP_FOR_TELEMS = 5
 CHECK_INTERVAL_SEC = 30
 LINE_BUFFERED = 1
+XRIF2FITS_TIMEOUT_SEC = 120
 
 # note: we must truncate to microsecond precision due to limitations in
 # `datetime`, so this pattern works only after chopping off the last
@@ -313,7 +315,7 @@ def prune_outputs(scratch_dir, span):
         ts = xfilename_to_utc_timestamp(fn)
         if ts < span.begin or (span.end is not None and ts > span.end):
             os.remove(fn)
-            log.debug(f"Filtered: {fn}")
+            log.debug(f"Filtered: {fn} (\n\tts =\t{ts.isoformat()},\nspan.begin =\t{span.begin.isoformat()},\nspan.end =\t{span.end.isoformat() if span.end is not None else span.end})")
         else:
             good_outputs.append(fn)
             log.debug(f"Kept: {fn}")
@@ -366,7 +368,11 @@ def catalog_name_from_outputs(output_files):
 
 def do_quicklook_for_camera(
     span : ObservationSpan, data_roots, device, omit_telemetry, output_dir, dry_run, cube_mode,
-    construct_symlink_tree, all_visited_files=None, xrif2fits_cmd='xrif2fits', ignore_history=False
+    construct_symlink_tree,
+    executor : futures.ThreadPoolExecutor,
+    all_visited_files=None,
+    xrif2fits_cmd='xrif2fits',
+    ignore_history=False,
 ):
     if all_visited_files is None:
         all_visited_files = set()
@@ -388,12 +394,16 @@ def do_quicklook_for_camera(
         for fn in sorted(new_matching_files, key=lambda x: x.timestamp):
             log.debug(f"\t{fn} (new)")
 
-        with tempfile.TemporaryDirectory() as scratch_dir_path:
+        with tempfile.TemporaryDirectory(dir="/opt/MagAOX/scratch") as scratch_dir_path:
             scratch_dir = pathlib.Path(scratch_dir_path)
             successful_paths, failed_paths = convert_xrif(
                 image_path, data_roots, new_matching_files, scratch_dir, omit_telemetry, dry_run, cube_mode,
-                xrif2fits_cmd
+                xrif2fits_cmd, executor
             )
+            for archive_path in successful_paths:
+                log.info(f"Converted {archive_path}")
+            for archive_path in failed_paths:
+                log.info(f"Failed    {archive_path}")
             if len(successful_paths) and not ignore_history:
                 append_files_to_history(history_path, successful_paths, dry_run)
                 log.debug(f"Wrote {len(successful_paths)} to {history_path}")
@@ -446,7 +456,7 @@ def launch_xrif2fits(args, dry_run=False):
                 stdout=subprocess.DEVNULL,
                 stderr=subprocess.DEVNULL
             )
-            proc.wait(timeout=60)
+            proc.wait(timeout=XRIF2FITS_TIMEOUT_SEC)
             success = True
         except subprocess.CalledProcessError as e:
             log.exception("xrif2fits exited with nonzero exit code")
@@ -464,6 +474,7 @@ def convert_xrif(
     base_dir, data_roots: typing.List[pathlib.Path],
     paths : typing.List[TimestampedFile], destination_path : pathlib.Path,
     omit_telemetry : bool, dry_run : bool, cube_mode : bool, xrif2fits_cmd: str,
+    executor : futures.ThreadPoolExecutor
 ):
     for data_file in paths:
         delta = datetime.datetime.utcnow().replace(tzinfo=timezone.utc) - data_file.timestamp
@@ -471,6 +482,7 @@ def convert_xrif(
             time.sleep(SLEEP_FOR_TELEMS - delta.total_seconds())
     failed_commands = []
     successful_paths, failed_paths = [], []
+    pending_xrif2fits_procs = []
     for ts_path in paths:
         args = [
             xrif2fits_cmd,
@@ -488,7 +500,11 @@ def convert_xrif(
                 '-t', telem_paths_str,
                 '-l', log_paths_str,
             ])
-        success, command_line = launch_xrif2fits(args, dry_run=dry_run)
+        fut = executor.submit(launch_xrif2fits, args, dry_run=dry_run)
+        pending_xrif2fits_procs.append(fut)
+
+    for fut in futures.as_completed(pending_xrif2fits_procs):
+        success, command_line = fut.result()
         if not success:
             failed_commands.append(command_line)
             failed_paths.append(ts_path.path)
@@ -516,6 +532,7 @@ def daemon_mode(
     start_dt: datetime.datetime,
     all_visited_files: typing.List[TimestampedFile],
     ignore_history: bool,
+    executor : futures.ThreadPoolExecutor
 ):
     existing_observation_spans = set()
     log.info(f"Started at {datetime.datetime.now().isoformat()}, looking for unprocessed observations since {start_dt}...")
@@ -541,7 +558,8 @@ def daemon_mode(
                         dry_run,
                         cube_mode,
                         construct_symlink_tree,
-                        all_visited_files,
+                        executor=executor,
+                        all_visited_files=all_visited_files,
                         xrif2fits_cmd=xrif2fits_cmd,
                         ignore_history=ignore_history,
                     )
@@ -610,6 +628,7 @@ def main():
     parser.add_argument('-T', '--omit-symlink-tree', help="Whether to skip constructing the parallel structure of symlinks organizing observations by observer", action='store_true')
     parser.add_argument('-D', '--output-dir', help=f"output directory, defaults to {QUICKLOOK_PATH.as_posix()}", action='store', default=QUICKLOOK_PATH.as_posix())
     parser.add_argument('--xrif2fits-cmd', default='xrif2fits', help="Specify a path to an alternative version of xrif2fits here if desired", action='store')
+    parser.add_argument('-j', '--parallel-jobs', default=8, help="Max number of parallel xrif2fits processes to launch (if the number of archives in an interval is smaller than this, fewer processes will be launched)")
     args = parser.parse_args()
     output_path = pathlib.Path(args.output_dir)
     if not output_path.is_dir():
@@ -668,6 +687,7 @@ def main():
             day = 15 if letter == 'A' else 1,
         ).replace(tzinfo=timezone.utc)
         start_dt = semester_start_dt
+    threadpool = futures.ThreadPoolExecutor(max_workers=args.parallel_jobs)
     if args.daemon:
         daemon_mode(
             output_dir,
@@ -679,6 +699,7 @@ def main():
             start_dt,
             all_processed_files,
             ignore_history=args.ignore_history,
+            executor=threadpool,
         )
     else:
         if args.utc_end is not None:
@@ -705,10 +726,12 @@ def main():
                         args.dry_run,
                         cube_mode,
                         not args.omit_symlink_tree,
+                        threadpool,
                         all_visited_files=all_processed_files,
                         xrif2fits_cmd=args.xrif2fits_cmd,
                         ignore_history=args.ignore_history,
                     )
+    threadpool.shutdown()
 
 if __name__ == "__main__":
     main()

@@ -64,6 +64,15 @@ int logInMemory::loadFile( logFileName const& lfn)
       m_memory.swap(memory);
       m_startTime = startTime;
       m_endTime = endTime;
+
+      std::string timestamp;   
+      timespec ts{ endTime.time_s, endTime.time_ns};
+      mx::sys::timeStamp(timestamp, ts);
+
+      #ifdef DEBUG
+      std::cerr << __FILE__ << " " << __LINE__ << " loading: " << lfn.fullName() << " " << timestamp << "\n";
+      #endif
+
       return 0;
    }
    
@@ -84,10 +93,17 @@ int logInMemory::loadFile( logFileName const& lfn)
    
    if(startTime > m_endTime)
    {
+      #ifdef DEBUG
       std::cerr <<  __FILE__ << " " << __LINE__ << " gonna append\n";
+      #endif
+
       m_memory.insert(m_memory.end(), memory.begin(), memory.end());
       m_endTime = endTime;
+      
+      #ifdef DEBUG
       std::cerr <<  __FILE__ << " " << __LINE__ << " added after!\n";
+      #endif
+      
       return 0;
    }
    
@@ -125,16 +141,30 @@ int logMap::getPriorLog( char * &logBefore,
 {
    flatlogs::eventCodeT evL;
    
+   #ifdef DEBUG
+   std::cerr << __FILE__ << " " << __LINE__ << "\n";
+   #endif
+
    if(m_appToFileMap[appName].size() == 0)
    {
       std::cerr << __FILE__ << " " << __LINE__ << " getPriorLog empty map\n";
       return -1;
    }
    
+   #ifdef DEBUG
+   std::cerr << __FILE__ << " " << __LINE__ << "\n";
+   #endif
+
    logInMemory & lim = m_appToBufferMap[appName];
    
-   if(lim.m_startTime > ts || lim.m_endTime < ts)
+   flatlogs::timespecX et = lim.m_endTime;
+   et.time_s += 30;
+   if(lim.m_startTime > ts || et < ts)
    {
+      #ifdef DEBUG
+      std::cerr << __FILE__ << " " << __LINE__ << "\n";
+      #endif
+
       if(loadFiles(appName, ts) < 0)
       {
          std::cerr << __FILE__ << " " << __LINE__ << " error returned from loadfiles\n";
@@ -279,6 +309,10 @@ int logMap::loadFiles( const std::string & appName,
       return -1;
    }
  
+   #ifdef DEBUG
+   std::cerr << __FILE__ << " " << __LINE__ << "\n";
+   #endif
+
    //First check if already loaded files cover this time
    if(m_appToBufferMap[appName].m_memory.size() > 0)
    {
@@ -288,8 +322,16 @@ int logMap::loadFiles( const std::string & appName,
          return 0;
       }
       
+      #ifdef DEBUG
+      std::cerr << __FILE__ << " " << __LINE__ << "\n";
+      #endif
+
       if( m_appToBufferMap[appName].m_startTime > startTime ) // Files don't go back far enough
       {
+         #ifdef DEBUG
+         std::cerr << __FILE__ << " " << __LINE__ << "\n";
+         #endif
+
          auto last = m_appToFileMap[appName].begin();
          while( last->timestamp() < m_appToBufferMap[appName].m_startTime)
          {
@@ -345,6 +387,10 @@ int logMap::loadFiles( const std::string & appName,
       
    }
  
+   #ifdef DEBUG
+   std::cerr << __FILE__ << " " << __LINE__ << "\n";
+   #endif
+
    auto before = m_appToFileMap[appName].begin();
    
    for(; before != m_appToFileMap[appName].end(); ++before)
@@ -355,15 +401,36 @@ int logMap::loadFiles( const std::string & appName,
       }
    }
 
+   #ifdef debug
+   std::cerr << __FILE__ << " " << __LINE__ << "\n";
+   #endif
+
    if(before == m_appToFileMap[appName].begin())
    {
       std::cerr << "No files in range for " << appName << "\n";
    }
    --before;
    
+   #ifdef DEBUG 
+   std::cerr << __FILE__ << " " << __LINE__ << "\n";
+   #endif
+
    m_appToBufferMap.emplace(std::pair<std::string, logInMemory>(appName, logInMemory()));
-   m_appToBufferMap[appName].loadFile(*before);
    
+   #ifdef DEBUG
+   std::cerr << __FILE__ << " " << __LINE__ << "\n";
+   #endif
+
+   m_appToBufferMap[appName].loadFile(*before);
+   if(++before != m_appToFileMap[appName].end()) 
+   {
+      m_appToBufferMap[appName].loadFile(*before);
+   }
+   
+   #ifdef DEBUG
+   std::cerr << __FILE__ << " " << __LINE__ << "\n";
+   #endif
+
    return 0;
 }
 

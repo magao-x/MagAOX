@@ -276,6 +276,9 @@ fi
 
 sudo bash -l "$DIR/steps/configure_startup_services.sh"
 
+log_info "Generating subuid and subgid files, may need to run podman system migrate"
+sudo python "$DIR/generate_subuid_subgid.py"
+
 # To try and debug hardware issues, ICC and RTC replicate their
 # kernel console log over UDP to AOC over the instrument LAN.
 # The script that collects these messages is in ../scripts/netconsole_logger
