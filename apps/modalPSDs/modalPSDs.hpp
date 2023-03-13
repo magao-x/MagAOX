@@ -63,13 +63,15 @@ protected:
    std::string m_fpsSource; ///< Device name for getting fps to set circular buffer length.  This device should have *.fps.current.
 
    realT m_psdTime {1}; ///< The length of time over which to calculate PSDs.  The default is 1 sec.
+   realT m_psdAvgTime {10}; ///< The time over which to average PSDs.  The default is 10 sec.
+
    realT m_overSize {10}; ///< Multiplicative factor by which to oversize the circular buffer, to give good mean estimates and account for time-to-calculate.
 
    realT m_psdOverlapFraction {0.5}; ///< The fraction of the sample time to overlap by.
 
    int m_nPSDHistory {100};
 
-   int m_nPSDAverage {10};
+   
    ///@}
 
    int m_nModes; ///< the number of modes to calculate PSDs for.
@@ -185,6 +187,9 @@ protected:
    pcf::IndiProperty m_indiP_psdTime;
    INDI_NEWCALLBACK_DECL(modalPSDs, m_indiP_psdTime);
 
+   pcf::IndiProperty m_indiP_psdAvgTime;
+   INDI_NEWCALLBACK_DECL(modalPSDs, m_indiP_psdAvgTime);
+
    pcf::IndiProperty m_indiP_overSize;
    INDI_NEWCALLBACK_DECL(modalPSDs, m_indiP_overSize);
 
@@ -241,6 +246,16 @@ int modalPSDs::appStartup()
       return -1;
    }
 
+   createStandardIndiNumber<unsigned>( m_indiP_psdTime, "psdAvgTime", 0, 60, 0.1, "%0.1f");
+   m_indiP_psdTime["current"].set(m_psdAvgTime);
+   m_indiP_psdTime["target"].set(m_psdAvgTime);
+   
+   if( registerIndiPropertyNew( m_indiP_psdAvgTime, INDI_NEWCALLBACK(m_indiP_psdAvgTime)) < 0)
+   {
+      log<software_error>({__FILE__,__LINE__});
+      return -1;
+   }
+
    createStandardIndiNumber<realT>( m_indiP_overSize, "overSize", 0, 10, 0.1, "%0.1f");
    m_indiP_overSize["current"].set(m_overSize);
    m_indiP_overSize["target"].set(m_overSize);
@@ -249,6 +264,11 @@ int modalPSDs::appStartup()
    {
       log<software_error>({__FILE__,__LINE__});
       return -1;
+   }
+
+   if(m_fpsSource != "")
+   {
+      REG_INDI_SETPROP(m_indiP_fpsSource, m_fpsSource, std::string("fps"));
    }
 
    createROIndiNumber( m_indiP_fps, "fps", "current", "Circular Buffer");
@@ -595,32 +615,12 @@ void modalPSDs::psdThreadExec( )
                m_psd[m] *= (var/nm);
             }
 
-
-            //add this psd to its circbuff
-
-            //then average
-
+            //Put it in the buffer for uploading to shmim
             for(size_t m=0; m < m_psd.size(); ++m) m_psdBuffer(m,n) = m_psd[m];
 
-            /*if(n == 512)
-            {
-               for(size_t m=0; m < m_psd.size(); ++m) m_apsd[m] += m_psd[m];
-               ++N;
-               std::cerr << "N: " << N << "\n";
-               if(N == 20)
-               {
-                  std::ofstream fout;
-
-                  fout.open("psd512.dat");
-
-                  for(size_t m=0; m < m_psd.size(); ++m) fout << m*m_df << " " << m_apsd[m]/N << "\n";
-                  
-                  std::cout << "written\n";
-
-               }
-            }*/
          }
 
+         //------------------------- the raw psds ---------------------------
          m_rawpsdStream->md->write=1;
       
          //Set the time of last write
@@ -643,6 +643,50 @@ void modalPSDs::psdThreadExec( )
 
          m_rawpsdStream->md->write=0;
          ImageStreamIO_sempost(m_rawpsdStream,-1);
+
+         //-------------------------- now average the psds ----------------------------
+
+         int nPSDAverage = (m_psdAvgTime/m_psdTime) / m_psdOverlapFraction;
+
+         if(nPSDAverage <= 0) nPSDAverage = 1;
+         else if((uint64_t) nPSDAverage > m_rawpsdStream->md->size[2]) nPSDAverage = m_rawpsdStream->md->size[2];
+
+         //Move to next pointer
+         F = m_rawpsdStream->array.F + m_psdBuffer.rows()*m_psdBuffer.cols()*cnt1;
+
+         memcpy(m_psdBuffer.data(), F, m_psdBuffer.rows()*m_psdBuffer.cols()*sizeof(float));
+
+         for(int n =1; n < nPSDAverage; ++n)
+         {
+            if(cnt1 == 0) cnt1 = m_rawpsdStream->md->size[2] - 1;
+            else --cnt1;
+
+            F = m_rawpsdStream->array.F + m_psdBuffer.rows()*m_psdBuffer.cols()*cnt1;
+
+            m_psdBuffer += Eigen::Map<Eigen::Array<float,-1,-1>>(F, m_psdBuffer.rows(), m_psdBuffer.cols());
+         }
+
+         m_psdBuffer /= nPSDAverage;
+
+         m_avgpsdStream->md->write=1;
+      
+         //Set the time of last write
+         clock_gettime(CLOCK_REALTIME, &m_avgpsdStream->md->writetime);
+         m_avgpsdStream->md->atime = m_avgpsdStream->md->writetime;
+
+         //Move to next pointer
+         F = m_avgpsdStream->array.F;
+
+         memcpy(F, m_psdBuffer.data(), m_psdBuffer.rows()*m_psdBuffer.cols()*sizeof(float));
+
+         //Update cnt1
+         m_avgpsdStream->md->cnt1 = 0;
+
+         //Update cnt0
+         ++m_avgpsdStream->md->cnt0;
+
+         m_avgpsdStream->md->write=0;
+         ImageStreamIO_sempost(m_avgpsdStream,-1);
 
          double t1 = mx::sys::get_curr_time();
          std::cerr << "done " << t1-t0 << "\n";
@@ -669,7 +713,7 @@ void modalPSDs::psdThreadExec( )
          if( ce >= ne1 ) dn = ce - ne1;
          else dn = ce + (m_ampCircBuffs[0].size() - ne1);
 
-         while(dn < m_tsOverlapSize && !shutdown())
+         while(dn < m_tsOverlapSize && !shutdown() && m_psdRestarting == false)
          {
             double stime = (1.0*dn)/m_fps * 0.5 * 1e9;
             mx::sys::nanoSleep(stime);
@@ -719,6 +763,39 @@ INDI_NEWCALLBACK_DEFN(modalPSDs, m_indiP_psdTime)(const pcf::IndiProperty &ipRec
 
    return 0;
 } //INDI_NEWCALLBACK_DEFN(modalPSDs, m_indiP_psdTime)
+
+
+INDI_NEWCALLBACK_DEFN(modalPSDs, m_indiP_psdAvgTime)(const pcf::IndiProperty &ipRecv)
+{
+   if(ipRecv.getName() != m_indiP_psdAvgTime.getName())
+   {
+      log<software_error>({__FILE__, __LINE__, "invalid indi property received"});
+      return -1;
+   }
+   
+   realT target;
+   
+   if( indiTargetUpdate( m_indiP_psdAvgTime, target, ipRecv, true) < 0)
+   {
+      log<software_error>({__FILE__,__LINE__});
+      return -1;
+   }
+
+   if(m_psdAvgTime != target)
+   {   
+      std::lock_guard<std::mutex> guard(m_indiMutex);
+
+      m_psdAvgTime = target;
+   
+      updateIfChanged(m_indiP_psdTime, "current", m_psdAvgTime, INDI_IDLE);
+      updateIfChanged(m_indiP_psdTime, "target", m_psdAvgTime, INDI_IDLE);
+
+      log<text_log>("set psdAvgTime to " + std::to_string(m_psdAvgTime), logPrio::LOG_NOTICE);
+   }
+
+   return 0;
+} //INDI_NEWCALLBACK_DEFN(modalPSDs, m_indiP_psdTime)
+
 
 INDI_NEWCALLBACK_DEFN(modalPSDs, m_indiP_overSize)(const pcf::IndiProperty &ipRecv)
 {
