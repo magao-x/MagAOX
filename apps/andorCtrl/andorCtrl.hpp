@@ -445,6 +445,7 @@ protected:
    
    bool m_libInit {false}; ///< Whether or not the Andor SDK library is initialized.
 
+   bool m_poweredOn {false};
    
 public:
 
@@ -594,7 +595,7 @@ andorCtrl::andorCtrl() : MagAOXApp(MAGAOX_CURRENT_SHA1, MAGAOX_REPO_MODIFIED)
    m_powerMgtEnabled = true;
    m_powerOnWait = 10;
    
-   m_startupTemp = 20;
+   m_startupTemp = -45;
    
    m_defaultReadoutSpeed  = "emccd_17MHz";
    m_readoutSpeedNames = {"ccd_00_08MHz", "ccd_01MHz", "ccd_03MHz", "emccd_01MHz", "emccd_05MHz", "emccd_10MHz", "emccd_17MHz"};
@@ -761,6 +762,16 @@ int andorCtrl::appLogic()
       m_shutterStatus = "READY";
 
       state(stateCodes::READY);
+
+      if(m_poweredOn && m_ccdTempSetpt > -999)
+      {
+         m_poweredOn = false;
+         if(setTempSetPt() < 0)
+         {
+            if(powerState() != 1 || powerStateTarget() != 1) return 0;
+            return log<software_error,0>({__FILE__,__LINE__});
+         }
+      }
    }
 
    if( state() == stateCodes::READY || state() == stateCodes::OPERATING )
@@ -861,6 +872,9 @@ int andorCtrl::onPowerOff()
       log<software_error>({__FILE__, __LINE__});
    }
    
+   //Setting m_poweredOn
+   m_poweredOn = true;
+
    return 0;
 }
 
