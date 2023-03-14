@@ -922,6 +922,8 @@ void streamWriter::fgThreadExec()
       
       uint64_t last_cnt0 = ((uint64_t) -1);
       
+      int cnt0flag = 0;
+
       //This is the main image grabbing loop.
       while(!m_shutdown && !m_restart)
       {
@@ -977,9 +979,12 @@ void streamWriter::fgThreadExec()
             if(new_cnt0  == last_cnt0 )
             {
                log<text_log>("semaphore raised but cnt0 has not changed -- we're probably getting behind", logPrio::LOG_WARNING);
+               ++cnt0flag;
+               if(cnt0flag > 10) m_restart = true; //if we get here 10 times then something else is wrong.
                continue;
             }
-            
+            cnt0flag = 0;
+
             last_cnt0 = new_cnt0;
                         
             

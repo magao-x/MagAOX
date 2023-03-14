@@ -86,6 +86,8 @@ protected:
    bool m_noMeta {false};
    
    bool m_metaOnly {false};
+
+   bool m_timesOnly {false};
    
    bool m_cubeMode {false};
 
@@ -142,6 +144,7 @@ void xrif2fits::setupConfig()
    config.add("outDir","D", "outDir" , argType::Required, "", "outDir", false,  "string", "The directory in which to write output files.  Default is ./fits/.");
    
    config.add("metaOnly","", "metaOnly" , argType::True, "", "metaOnly", false,  "bool", "If true, output only meta data, without decoding images.  Default is false.");
+   config.add("timesOnly","", "timesOnly" , argType::True, "", "timesOnly", false,  "bool", "If true, output one line per input file in the format [filename] [start time] [end time].  Default is false.");
    
    config.add("noMeta","", "noMeta" , argType::True, "", "noMeta", false,  "bool", "If true, the meta data file is not written (FITS headers will still be).  Default is false.");
    config.add("cubeMode","C", "cubeMode" , argType::True, "", "cubeMode", false,  "bool", "If true, the archive is written as a FITS cube with minimal header.  Default is false.");
@@ -156,6 +159,7 @@ void xrif2fits::loadConfig()
    config(m_logDir, "logdir");
    config(m_telDir, "teldir");
    config(m_metaOnly, "metaOnly");
+   config(m_timesOnly, "timesOnly");
    config(m_noMeta, "noMeta");
    config(m_cubeMode, "cubeMode");
 }
@@ -363,10 +367,13 @@ int xrif2fits::execute()
       tels.loadFiles(lfn.appName(), lfn.timestamp());
       
       logMeta exptimeMeta(logMetaSpec(lfn.appName(), telem_stdcam::eventCode, "exptime"));
-      
-      std::cout << "******************************************************\n";
-      std::cout << "* xrif2fits: decoding for " << lfn.appName() << " (" + m_files[n] << ")\n";
-      std::cout << "******************************************************\n";
+
+      if (!m_timesOnly) {
+
+         std::cout << "******************************************************\n";
+         std::cout << "* xrif2fits: decoding for " << lfn.appName() << " (" + m_files[n] << ")\n";
+         std::cout << "******************************************************\n";
+      }
       
       FILE * fp_xrif = fopen(m_files[n].c_str(), "rb");
       if(fp_xrif == nullptr)
@@ -386,20 +393,20 @@ int xrif2fits::execute()
 
       uint32_t header_size;
       xrif_read_header(m_xrif, &header_size , header);
-
-      std::cout << "xrif compression details:\n";
-      std::cout << "  difference method:  " << xrif_difference_method_string(m_xrif->difference_method) << '\n';
-      std::cout << "  reorder method:     " << xrif_reorder_method_string(m_xrif->reorder_method) << '\n';
-      std::cout << "  compression method: " << xrif_compress_method_string( m_xrif->compress_method) << '\n';
-      if(m_xrif->compress_method == XRIF_COMPRESS_LZ4)
-      {
-         std::cout << "    LZ4 acceleration: " << m_xrif->lz4_acceleration << '\n';
+      if (!m_timesOnly) {
+         std::cout << "xrif compression details:\n";
+         std::cout << "  difference method:  " << xrif_difference_method_string(m_xrif->difference_method) << '\n';
+         std::cout << "  reorder method:     " << xrif_reorder_method_string(m_xrif->reorder_method) << '\n';
+         std::cout << "  compression method: " << xrif_compress_method_string( m_xrif->compress_method) << '\n';
+         if(m_xrif->compress_method == XRIF_COMPRESS_LZ4)
+         {
+            std::cout << "    LZ4 acceleration: " << m_xrif->lz4_acceleration << '\n';
+         }
+         std::cout << "  dimensions:         " << m_xrif->width << " x " << m_xrif->height << " x " << m_xrif->depth << " x " << m_xrif->frames << "\n";
+         std::cout << "  raw size:           " << m_xrif->width*m_xrif->height*m_xrif->depth*m_xrif->frames*m_xrif->data_size << " bytes\n";
+         std::cout << "  encoded size:       " << m_xrif->compressed_size << " bytes\n";
+         std::cout << "  ratio:              " << ((double)m_xrif->compressed_size) / (m_xrif->width*m_xrif->height*m_xrif->depth*m_xrif->frames*m_xrif->data_size) << '\n';
       }
-      std::cout << "  dimensions:         " << m_xrif->width << " x " << m_xrif->height << " x " << m_xrif->depth << " x " << m_xrif->frames << "\n";
-      std::cout << "  raw size:           " << m_xrif->width*m_xrif->height*m_xrif->depth*m_xrif->frames*m_xrif->data_size << " bytes\n";
-      std::cout << "  encoded size:       " << m_xrif->compressed_size << " bytes\n";
-      std::cout << "  ratio:              " << ((double)m_xrif->compressed_size) / (m_xrif->width*m_xrif->height*m_xrif->depth*m_xrif->frames*m_xrif->data_size) << '\n';
-
       rv = xrif_allocate_raw(m_xrif); 
       if( rv != XRIF_NOERROR)
       {
@@ -435,20 +442,21 @@ int xrif2fits::execute()
       }
       
       xrif_read_header(m_xrif_timing, &header_size , header);
-      
-      std::cout << "xrif timing data compression details:\n";
-      std::cout << "  difference method:  " << xrif_difference_method_string(m_xrif_timing->difference_method) << '\n';
-      std::cout << "  reorder method:     " << xrif_reorder_method_string(m_xrif_timing->reorder_method) << '\n';
-      std::cout << "  compression method: " << xrif_compress_method_string( m_xrif_timing->compress_method) << '\n';
-      if(m_xrif_timing->compress_method == XRIF_COMPRESS_LZ4)
-      {
-         std::cout << "    LZ4 acceleration: " << m_xrif_timing->lz4_acceleration << '\n';
+
+      if (!m_timesOnly) {
+         std::cout << "xrif timing data compression details:\n";
+         std::cout << "  difference method:  " << xrif_difference_method_string(m_xrif_timing->difference_method) << '\n';
+         std::cout << "  reorder method:     " << xrif_reorder_method_string(m_xrif_timing->reorder_method) << '\n';
+         std::cout << "  compression method: " << xrif_compress_method_string( m_xrif_timing->compress_method) << '\n';
+         if(m_xrif_timing->compress_method == XRIF_COMPRESS_LZ4)
+         {
+            std::cout << "    LZ4 acceleration: " << m_xrif_timing->lz4_acceleration << '\n';
+         }
+         std::cout << "  dimensions:         " << m_xrif_timing->width << " x " << m_xrif_timing->height << " x " << m_xrif_timing->depth << " x " << m_xrif_timing->frames << "\n";
+         std::cout << "  raw size:           " << m_xrif_timing->width*m_xrif_timing->height*m_xrif_timing->depth*m_xrif_timing->frames*m_xrif_timing->data_size << " bytes\n";
+         std::cout << "  encoded size:       " << m_xrif_timing->compressed_size << " bytes\n";
+         std::cout << "  ratio:              " << ((double)m_xrif_timing->compressed_size) / (m_xrif_timing->width*m_xrif_timing->height*m_xrif_timing->depth*m_xrif_timing->frames*m_xrif_timing->data_size) << '\n';
       }
-      std::cout << "  dimensions:         " << m_xrif_timing->width << " x " << m_xrif_timing->height << " x " << m_xrif_timing->depth << " x " << m_xrif_timing->frames << "\n";
-      std::cout << "  raw size:           " << m_xrif_timing->width*m_xrif_timing->height*m_xrif_timing->depth*m_xrif_timing->frames*m_xrif_timing->data_size << " bytes\n";
-      std::cout << "  encoded size:       " << m_xrif_timing->compressed_size << " bytes\n";
-      std::cout << "  ratio:              " << ((double)m_xrif_timing->compressed_size) / (m_xrif_timing->width*m_xrif_timing->height*m_xrif_timing->depth*m_xrif_timing->frames*m_xrif_timing->data_size) << '\n';
-      
       rv = xrif_allocate_raw(m_xrif_timing);
       if(rv != XRIF_NOERROR)
       {
@@ -499,7 +507,50 @@ int xrif2fits::execute()
       if(g_timeToDie == true) break; //check after the decompress.
 
 
-      if(m_xrif->type_code == XRIF_TYPECODE_FLOAT)
+      if(m_timesOnly) {
+         std::cout << m_files[n] << " ";
+         for(xrif_dimension_t q=0; q < m_xrif->frames; ++q)
+         {
+            timespec atime; //This is the acquisition time of the exposure
+            timespec stime = {0,0}; //This is the start time of the exposure, calculated as atime-exptime.
+
+            uint64_t * curr_timing = (uint64_t*) m_xrif_timing->raw_buffer + 5*q;
+
+            atime.tv_sec = curr_timing[1];
+            atime.tv_nsec = curr_timing[2];
+
+            //We have to bootstrap the exposure time
+            char * prior = nullptr;
+            tels.getPriorLog(prior, lfn.appName(), eventCodes::TELEM_STDCAM, atime);
+            double exptime = -1;
+            if(prior)
+            {
+               char * priorprior = nullptr;
+               exptime = telem_stdcam::exptime(logHeader::messageBuffer(prior));
+               stime = atime-exptime;
+               tels.getPriorLog(priorprior, lfn.appName(), eventCodes::TELEM_STDCAM, stime);
+
+               if(telem_stdcam::exptime(logHeader::messageBuffer(priorprior)) != exptime) ///\todo this needs to check for any log entries between end and start
+               {
+                  std::cerr << "Change in exposure time mid-exposure\n";
+               }
+            }
+            else
+            {
+               std::cerr << "no prior\n";
+            }
+
+            std::string timestamp;
+            mx::sys::timeStamp(timestamp, atime);
+
+            std::string dateobs = mx::sys::ISO8601DateTimeStr(atime, 1);
+            if (q == 0) {
+               std::cout << dateobs << " ";
+            } else if (q == (m_xrif->frames - 1)) {
+               std::cout << dateobs << "\n";
+            }
+         }
+      } else if (m_xrif->type_code == XRIF_TYPECODE_FLOAT)
       {
          writeFloat(n, lfn, logMetas);
       }
