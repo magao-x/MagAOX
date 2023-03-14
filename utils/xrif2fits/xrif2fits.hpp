@@ -144,7 +144,7 @@ void xrif2fits::setupConfig()
    config.add("outDir","D", "outDir" , argType::Required, "", "outDir", false,  "string", "The directory in which to write output files.  Default is ./fits/.");
    
    config.add("metaOnly","", "metaOnly" , argType::True, "", "metaOnly", false,  "bool", "If true, output only meta data, without decoding images.  Default is false.");
-   config.add("timesOnly","", "timesOnly" , argType::True, "", "timesOnly", false,  "bool", "If true, output one line per input file in the format [filename] [start time] [end time].  Default is false.");
+   config.add("time","T", "time" , argType::True, "", "time", false,  "bool", "time span mode: output one line per input file in the format [filename] [start time] [end time] [number of frames], with ISO 8601 timestamps");
    
    config.add("noMeta","", "noMeta" , argType::True, "", "noMeta", false,  "bool", "If true, the meta data file is not written (FITS headers will still be).  Default is false.");
    config.add("cubeMode","C", "cubeMode" , argType::True, "", "cubeMode", false,  "bool", "If true, the archive is written as a FITS cube with minimal header.  Default is false.");
@@ -159,7 +159,7 @@ void xrif2fits::loadConfig()
    config(m_logDir, "logdir");
    config(m_telDir, "teldir");
    config(m_metaOnly, "metaOnly");
-   config(m_timesOnly, "timesOnly");
+   config(m_timesOnly, "time");
    config(m_noMeta, "noMeta");
    config(m_cubeMode, "cubeMode");
 }
@@ -547,7 +547,7 @@ int xrif2fits::execute()
             if (q == 0) {
                std::cout << dateobs << " ";
             } else if (q == (m_xrif->frames - 1)) {
-               std::cout << dateobs << "\n";
+               std::cout << dateobs << " " << m_xrif->frames << "\n";
             }
          }
       } else if (m_xrif->type_code == XRIF_TYPECODE_FLOAT)
