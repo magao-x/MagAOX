@@ -96,6 +96,7 @@ protected:
    
    uint32_t m_width {0}; ///< The width of the images in the stream
    uint32_t m_height {0}; ///< The height of the images in the stream
+   uint32_t m_depth {0}; ///< The depth of the circular buffer in the stream
    
    uint8_t m_dataType{0}; ///< The ImageStreamIO type code.
    size_t m_typeSize {0}; ///< The size of the type, in bytes.  Result of sizeof.
@@ -551,8 +552,24 @@ void shmimMonitor<derivedT, specificT>::smThreadExec()
       m_dataType = m_imageStream.md[0].datatype;
       m_typeSize = ImageStreamIO_typesize(m_dataType);
       m_width = m_imageStream.md[0].size[0];
-      m_height = m_imageStream.md[0].size[1];
-      size_t length = m_imageStream.md[0].size[2];
+      if(m_imageStream.md[0].naxis > 1)
+      {
+         m_height = m_imageStream.md[0].size[1];
+         
+         if(m_imageStream.md[0].naxis > 2)
+         {
+            m_depth = m_imageStream.md[0].size[2];
+         }
+         else
+         {
+            m_depth = 1;
+         }
+      }
+      else
+      {
+         m_height = 1;
+         m_depth = 1;
+      }
 
       if( derived().allocate( specificT()) < 0)
       {
@@ -577,7 +594,7 @@ void shmimMonitor<derivedT, specificT>::smThreadExec()
          sny = m_imageStream.md[0].size[1];
          snz = m_imageStream.md[0].size[2];
          
-         if( atype!= m_dataType || snx != m_width || sny != m_height || snz != length )
+         if( atype!= m_dataType || snx != m_width || sny != m_height || snz != m_depth )
          {
             break; //exit the nearest while loop and get the new image setup.
          }
@@ -617,7 +634,7 @@ void shmimMonitor<derivedT, specificT>::smThreadExec()
             sny = m_imageStream.md[0].size[1];
             snz = m_imageStream.md[0].size[2];
          
-            if( atype!= m_dataType || snx != m_width || sny != m_height || snz != length )
+            if( atype!= m_dataType || snx != m_width || sny != m_height || snz != m_depth )
             {
                break; //exit the nearest while loop and get the new image setup.
             }
