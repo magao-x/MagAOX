@@ -662,31 +662,22 @@ def main():
         data_roots = [pathlib.Path(x) for x in LOOKYLOO_DATA_ROOTS.split(':')]
     output_dir = pathlib.Path(args.output_dir)
     all_processed_files = load_file_history(output_dir / HISTORY_FILENAME) if not args.ignore_history else set()
+
+    letter = args.semester[-1].upper()
+    try:
+        if len(args.semester) != 5 or args.semester[-1].upper() not in ['A', 'B']:
+            raise ValueError()
+        year = int(args.semester[:-1])
+        month = 1 if letter == 'A' else 6
+        day = 15 if month == 6 else 1
+    except ValueError:
+        raise RuntimeError(f"Got {args.semester=} but need a 4 digit year + A or B (e.g. 2022A)")
     if args.utc_start is not None:
         start_dt = args.utc_start
         year = start_dt.year
         month = 1 if start_dt.month < 6 else 6
-        semester_start_dt = datetime.datetime(year, month, 1)
-        semester_start_dt = semester_start_dt.replace(tzinfo=timezone.utc)
-    else:
-        letter = args.semester[-1].upper()
-        try:
 
-            if len(args.semester) != 5 or args.semester[-1].upper() not in ['A', 'B']:
-                raise ValueError()
-            year = int(args.semester[:-1])
-            month = 1 if letter == 'A' else 6
-            day = 15 if month == 6 else 1
-        except ValueError:
-            raise RuntimeError(f"Got {args.semester=} but need a 4 digit year + A or B (e.g. 2022A)")
-        semester_start_dt = datetime.datetime(year, month, 1)
-        semester_start_dt = semester_start_dt.replace(tzinfo=timezone.utc)
-        semester_end_dt = datetime.datetime(
-            year=year + 1 if letter == 'B' else year,
-            month=1 if letter == 'B' else 6,
-            day = 15 if letter == 'A' else 1,
-        ).replace(tzinfo=timezone.utc)
-        start_dt = semester_start_dt
+    start_dt = datetime.datetime(year, month, day).replace(tzinfo=timezone.utc)
     threadpool = futures.ThreadPoolExecutor(max_workers=args.parallel_jobs)
     if args.daemon:
         daemon_mode(
@@ -702,6 +693,12 @@ def main():
             executor=threadpool,
         )
     else:
+        semester_end_dt = datetime.datetime(
+            year=year + 1 if letter == 'B' else year,
+            month=1 if letter == 'B' else 6,
+            day = 15 if letter == 'A' else 1,
+        ).replace(tzinfo=timezone.utc)
+        
         if args.utc_end is not None:
             end_dt = args.utc_end
         else:
