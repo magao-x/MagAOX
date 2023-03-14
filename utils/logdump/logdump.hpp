@@ -88,7 +88,7 @@ void logdump::setupConfig()
    config.add("level","L", "level" , argType::Required, "", "level", false,  "int/string", "Minimum log level to dump, either an integer or a string. -1/TELEMETRY [the default], 0/DEFAULT, 1/D1/DBG1/DEBUG2, 2/D2/DBG2/DEBUG1,3/INFO,4/WARNING,5/ERROR,6/CRITICAL,7/FATAL.  Note that only the mininum unique string is required.");
    config.add("code","C", "code" , argType::Required, "", "code", false,  "int", "The event code, or vector of codes, to dump.  If not specified, all codes are dumped.  See logCodes.hpp for a complete list of codes.");
    config.add("file","F", "file" , argType::Required, "", "file", false,  "string", "A single file to process.  If no / are found in name it will look in the specified directory (or MagAO-X default).");
-   config.add("time","T", "time" , argType::True, "", "time", false,  "bool", "time span mode: prints the time-stamp of the first and last entry and the elapsed time in seconds");
+   config.add("time","T", "time" , argType::True, "", "time", false,  "bool", "time span mode: prints the ISO 8601 UTC timestamps of the first and last entry, the elapsed time in seconds, and the number of records in the file as a space-delimited string");
 
 
 }
@@ -413,7 +413,6 @@ int logdump::gettimes(std::vector<std::string> & logs)
       //off_t finSize = mx::ioutils::fileSize( fileno(fin) );
       
       
-
       off_t totNrd = 0;
       
       //size_t buffSz = 0;
@@ -449,6 +448,7 @@ int logdump::gettimes(std::vector<std::string> & logs)
       timespecX ts0 = logHeader::timespec(head);
       //size_t hSz = logHeader::headerSize(head);
 
+      uint32_t nRecords = 1;
       fseek(fin, len, SEEK_CUR);
 
       timespecX ts;
@@ -463,6 +463,7 @@ int logdump::gettimes(std::vector<std::string> & logs)
          {
             break;
          }
+         nRecords += 1;
 
          //We got here without any data, probably means time to get a new file.
          if(nrd == 0) break;
@@ -496,7 +497,7 @@ int logdump::gettimes(std::vector<std::string> & logs)
       double t0 = ts0.time_s + ts0.time_ns/1e9;
       double t = ts.time_s + ts.time_ns/1e9;
 
-      std::cout << fname << " " << ts0.ISO8601DateTimeStrX() << " " << ts.ISO8601DateTimeStrX() << " " << t-t0 << "\n";
+      std::cout << fname << " " << ts0.ISO8601DateTimeStrX() << "Z " << ts.ISO8601DateTimeStrX() << "Z " << t-t0 << " " << nRecords << "\n";
    }
 
    return 0;
