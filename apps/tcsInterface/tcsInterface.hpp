@@ -1108,7 +1108,6 @@ int tcsInterface::parse_xms( double &x,
 
    int sgn = 1;
 
-
    st = 0;
    en = xmsstr.find(':', st);
    
@@ -1116,6 +1115,7 @@ int tcsInterface::parse_xms( double &x,
 
    //Check for negative
    if(std::signbit(x)) sgn = -1;
+   if(xmsstr[0] == '-') sgn = -1;
 
    st = en + 1;
    
