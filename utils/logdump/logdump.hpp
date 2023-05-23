@@ -319,9 +319,9 @@ int logdump::execute()
             continue;
          }
 
-         if (!telem_observer::verify(logBuff, len))
+         if (!logVerify(ec, logBuff, len))
          {
-            std::cerr << "Log " << fname << " failed verification.  File possibly corrupt.  Exiting." << std::endl;
+            std::cerr << "Log " << fname << " failed verification on " << ec <<  "File possibly corrupt.  Exiting." << std::endl;
             return -1;
          }
 
