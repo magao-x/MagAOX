@@ -321,7 +321,7 @@ int logdump::execute()
 
          if (!logVerify(ec, logBuff, len))
          {
-            std::cerr << "Log " << fname << " failed verification on " << ec <<  "File possibly corrupt.  Exiting." << std::endl;
+            std::cerr << "Log " << fname << " failed verification on code=" << ec <<  " at byte=" << totNrd <<". File possibly corrupt.  Exiting." << std::endl;
             return -1;
          }
 
