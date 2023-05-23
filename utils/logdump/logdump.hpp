@@ -319,14 +319,11 @@ int logdump::execute()
             continue;
          }
 
-        // if(ec == 20070)
-         //{
-            if (!telem_observer::verify(logBuff, len))
-            {
-               std::cerr << "Log " << fname << " failed verification.  File possibly corrupt.  Exiting." << std::endl;
-               return -1;
-            }
-         //}
+         if (!telem_observer::verify(logBuff, len))
+         {
+            std::cerr << "Log " << fname << " failed verification.  File possibly corrupt.  Exiting." << std::endl;
+            return -1;
+         }
 
          printLogBuff(lvl, ec, len, logBuff);
 
