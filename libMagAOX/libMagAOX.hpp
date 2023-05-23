@@ -40,6 +40,7 @@
 #include "logger/logMeta.hpp"
 #include "logger/generated/logCodes.hpp"
 #include "logger/generated/logStdFormat.hpp"
+#include "logger/generated/logVerify.hpp"
 #include "logger/generated/logTypes.hpp"
 
 

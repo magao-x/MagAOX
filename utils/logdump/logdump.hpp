@@ -319,13 +319,14 @@ int logdump::execute()
             continue;
          }
 
-         /*auto verifier = flatbuffers::Verifier( (uint8_t*) logHeader::messageBuffer(logBuff), static_cast<size_t>(len));
-         bool ok = VerifyTelem_observer_fbBuffer(verifier);
-         if (!ok) 
-         {
-            std::cerr << "Log " << fname << " failed verification.  File possibly corrupt.  Exiting." << std::endl;
-            return -1;
-         }*/
+        // if(ec == 20070)
+         //{
+            if (!telem_observer::verify(logBuff, len))
+            {
+               std::cerr << "Log " << fname << " failed verification.  File possibly corrupt.  Exiting." << std::endl;
+               return -1;
+            }
+         //}
 
          printLogBuff(lvl, ec, len, logBuff);
 
