@@ -837,7 +837,7 @@ INDI_NEWCALLBACK_DEFN(dmSpeckle, m_indiP_frequency)(const pcf::IndiProperty &ipR
 
 INDI_NEWCALLBACK_DEFN(dmSpeckle, m_indiP_dwell)(const pcf::IndiProperty &ipRecv)
 {
-   if(ipRecv.createUniqueKey() != m_indiP_frequency.createUniqueKey())
+   if(ipRecv.createUniqueKey() != m_indiP_dwell.createUniqueKey())
    {
       log<software_error>({__FILE__,__LINE__, "wrong INDI property received."});
       return -1;
