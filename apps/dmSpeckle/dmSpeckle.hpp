@@ -484,6 +484,7 @@ int dmSpeckle::generateSpeckles()
    updateIfChanged(m_indiP_angle, "current", m_angle);
    updateIfChanged(m_indiP_amp, "current", m_amp);
    updateIfChanged(m_indiP_frequency, "current", m_frequency);
+   updateIfChanged(m_indiP_dwell, "current", m_dwell);
 
    return 0;
 }
