@@ -235,7 +235,9 @@ int xrif2fits::execute()
       //Make sure the slash exists, then mkdir
       if(m_outDir[m_outDir.size()-1] != '/') m_outDir += '/';
       
-      mkdir(m_outDir.c_str(), S_IRWXU | S_IRWXG | S_IROTH | S_IXOTH);
+      if (!m_timesOnly) {
+         mkdir(m_outDir.c_str(), S_IRWXU | S_IRWXG | S_IROTH | S_IXOTH);
+      }
    }
    
    xrif_error_t rv;
@@ -278,7 +280,7 @@ int xrif2fits::execute()
 
    std::ofstream metaOut;
    //Print the meta-file header
-   if(!m_noMeta)
+   if(!m_noMeta && !m_timesOnly)
    {
       metaOut.open(m_outDir + "meta_data.txt");
       /*metaOut << "#DATE-OBS FRAMENO ACQSEC ACQNSEC WRTSEC WRTNSEC";
@@ -509,6 +511,8 @@ int xrif2fits::execute()
 
       if(m_timesOnly) {
          std::cout << m_files[n] << " ";
+         double totalExposureTime = 0;
+
          for(xrif_dimension_t q=0; q < m_xrif->frames; ++q)
          {
             timespec atime; //This is the acquisition time of the exposure
@@ -539,6 +543,7 @@ int xrif2fits::execute()
             {
                std::cerr << "no prior\n";
             }
+            totalExposureTime += exptime;
 
             std::string timestamp;
             mx::sys::timeStamp(timestamp, atime);
@@ -546,8 +551,9 @@ int xrif2fits::execute()
             std::string dateobs = mx::sys::ISO8601DateTimeStr(atime, 1);
             if (q == 0) {
                std::cout << dateobs << " ";
-            } else if (q == (m_xrif->frames - 1)) {
-               std::cout << dateobs << " " << m_xrif->frames << "\n";
+            }
+            if (q == (m_xrif->frames - 1)) {
+               std::cout << dateobs << " " << totalExposureTime << " " << m_xrif->frames << "\n";
             }
          }
       } else if (m_xrif->type_code == XRIF_TYPECODE_FLOAT)

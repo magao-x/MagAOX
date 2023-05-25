@@ -43,6 +43,14 @@ struct outlet_state : public flatbuffer_log
       }
    };
 
+   static bool verify( flatlogs::bufferPtrT & logBuff,  ///< [in] Buffer containing the flatbuffer serialized message.
+                       flatlogs::msgLenT len            ///< [in] length of msgBuffer.
+                     )
+   {
+      auto verifier = flatbuffers::Verifier( (uint8_t*) flatlogs::logHeader::messageBuffer(logBuff), static_cast<size_t>(len));
+      return VerifyOutlet_state_fbBuffer(verifier);
+   }
+
    /// Format the message for text output, including translation of state codes to text form.
    /**
      * \returns the message formatted as "State changed from UNINITIALIZED to INITIALIZED"

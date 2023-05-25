@@ -17,6 +17,8 @@
 #include "../../libMagAOX/libMagAOX.hpp" //Note this is included on command line to trigger pch
 #include "../../magaox_git_version.h"
 
+#include <mx/math/randomT.hpp>
+
 /** \defgroup dmModulator
   * \brief The DM speckle maker app
   * 
@@ -73,7 +75,11 @@ protected:
 
    realT m_frequency {2000}; ///< The frequency to modulate at if not triggering (default 2000 Hz)
 
+   bool m_noise = true;
    ///@}
+
+
+   mx::math::normDistT<realT> m_normDist;
 
    mx::improc::eigenCube<realT> m_shapes;
       
@@ -237,7 +243,6 @@ int dmModulator::appStartup()
    m_indiP_dm.add(pcf::IndiElement("channel"));
    m_indiP_dm["channel"] = m_dmChannelName;
    
-
    createStandardIndiNumber<float>(m_indiP_amp, "amp", -1, 0,1, "%f");
    m_indiP_amp["current"] = m_amp;
    m_indiP_amp["target"] = m_amp;
@@ -381,6 +386,8 @@ void dmModulator::modThreadExec()
 
    mx::improc::eigenCube<realT> ampShapes;
 
+   mx::improc::eigenImage<realT> noise;
+
    //Wait fpr the thread starter to finish initializing this thread.
    while( (m_modThreadInit == true || state() != stateCodes::READY) && m_shutdown == 0)
    {
@@ -398,6 +405,7 @@ void dmModulator::modThreadExec()
       {
          
          int64_t freqNsec = (1.0/m_frequency)*1e9;
+         updateIfChanged(m_indiP_frequency, "current", m_frequency);
          int64_t dnsec;
    
          int idx = 0;
@@ -420,6 +428,15 @@ void dmModulator::modThreadExec()
          }
 
          ampShapes.resize(m_shapes.rows(), m_shapes.cols(), m_shapes.planes());
+         noise.resize(m_width, m_height);
+         for(int cc=0;cc<noise.cols(); ++cc)
+         {
+            for(int rr=0;rr<noise.rows(); ++rr)
+            {
+               noise(rr,cc) = m_normDist*m_amp;
+            }
+         }
+
          for(int p =0; p < ampShapes.planes(); ++p)
          {
             ampShapes.image(p) = m_shapes.image(p) * m_amp;
@@ -480,8 +497,15 @@ void dmModulator::modThreadExec()
                
                m_imageStream.md->write = 1;
    
-               memcpy(m_imageStream.array.raw, ampShapes.image(idx).data(), m_width*m_height*m_typeSize);
-      
+               if(m_noise)
+               {
+                  memcpy(m_imageStream.array.raw, noise.data(), m_width*m_height*m_typeSize);
+               }
+               else
+               {   
+                  memcpy(m_imageStream.array.raw, ampShapes.image(idx).data(), m_width*m_height*m_typeSize);
+               }
+
                m_imageStream.md->atime = currtime;
                m_imageStream.md->writetime = currtime;
                
@@ -493,6 +517,17 @@ void dmModulator::modThreadExec()
                ++idx;
                if(idx >= m_shapes.planes()) idx=0;
                
+               if(m_noise)
+               {
+                  for(int cc=0;cc<noise.cols(); ++cc)
+                  {
+                     for(int rr=0;rr<noise.rows(); ++rr)
+                     {
+                        noise(rr,cc) = m_normDist*m_amp;
+                     }
+                  }
+               }
+
                if(!m_trigger)
                {
                   modstart.tv_nsec += freqNsec;

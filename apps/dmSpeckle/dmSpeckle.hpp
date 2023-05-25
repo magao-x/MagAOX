@@ -80,6 +80,8 @@ protected:
 
    realT m_frequency {2000}; ///< The frequency to modulate at if not triggering (default 2000 Hz)
 
+   unsigned m_dwell {1}; ///< The dwell time for each speckle, or for how many frames it is held.
+
    ///@}
 
    mx::improc::eigenCube<realT> m_shapes;
@@ -167,21 +169,24 @@ protected:
 protected:
    //declare our properties
    pcf::IndiProperty m_indiP_dm;
+   pcf::IndiProperty m_indiP_trigger;
    pcf::IndiProperty m_indiP_separation;
    pcf::IndiProperty m_indiP_angle;
    pcf::IndiProperty m_indiP_amp;
+   pcf::IndiProperty m_indiP_cross;
    pcf::IndiProperty m_indiP_frequency;
-   pcf::IndiProperty m_indiP_trigger;
+   pcf::IndiProperty m_indiP_dwell;
    pcf::IndiProperty m_indiP_modulating;
    pcf::IndiProperty m_indiP_zero;
 
-   std::vector<std::string> m_elNames;
 public:
+   INDI_NEWCALLBACK_DECL(dmSpeckle, m_indiP_trigger);
    INDI_NEWCALLBACK_DECL(dmSpeckle, m_indiP_separation);
    INDI_NEWCALLBACK_DECL(dmSpeckle, m_indiP_angle);
+   INDI_NEWCALLBACK_DECL(dmSpeckle, m_indiP_cross);
    INDI_NEWCALLBACK_DECL(dmSpeckle, m_indiP_amp);
    INDI_NEWCALLBACK_DECL(dmSpeckle, m_indiP_frequency);
-   INDI_NEWCALLBACK_DECL(dmSpeckle, m_indiP_trigger);
+   INDI_NEWCALLBACK_DECL(dmSpeckle, m_indiP_dwell);
    INDI_NEWCALLBACK_DECL(dmSpeckle, m_indiP_modulating);
    INDI_NEWCALLBACK_DECL(dmSpeckle, m_indiP_zero);
    
@@ -219,6 +224,8 @@ void dmSpeckle::setupConfig()
 
    config.add("dm.frequency", "", "dm.frequency", argType::Required, "dm", "frequency", false, "float", "The frequency to modulate at if not triggering (default 2000 Hz).");
 
+   config.add("dm.dwell", "", "dm.dwell", argType::True, "dm", "dwell", false, "int", "The dwell time for each speckle, or for how many frames it is held. Default=1.");
+
    config.add("modulator.threadPrio", "", "modulator.threadPrio", argType::Required, "modulator", "threadPrio", false, "int", "The real-time priority of the modulator thread.");
 
    config.add("modulator.cpuset", "", "modulator.cpuset", argType::Required, "modulator", "cpuset", false, "string", "The cpuset to assign the modulator thread to.");
@@ -241,7 +248,7 @@ int dmSpeckle::loadConfigImpl( mx::app::appConfigurator & _config )
    _config(m_amp, "dm.amp");
    if(_config.isSet("dm.cross")) _config(m_cross, "dm.cross");
    _config(m_frequency, "dm.frequency");
-   
+   _config(m_dwell, "dm.dwell");
    _config(m_modThreadPrio, "modulator.threadPrio");
    _config(m_modThreadCpuset, "modulator.cpuset");
    
@@ -273,6 +280,21 @@ int dmSpeckle::appStartup()
    m_indiP_angle["target"] = m_angle;
    registerIndiPropertyNew( m_indiP_angle, INDI_NEWCALLBACK(m_indiP_angle));
 
+   createStandardIndiToggleSw( m_indiP_cross, "cross");
+   if( registerIndiPropertyNew( m_indiP_cross, INDI_NEWCALLBACK(m_indiP_cross)) < 0)
+   {
+      log<software_error>({__FILE__,__LINE__});
+      return -1;
+   }
+   if(m_cross)
+   {
+      m_indiP_cross["toggle"] = pcf::IndiElement::On;
+   }
+   else
+   {
+      m_indiP_cross["toggle"] = pcf::IndiElement::Off;
+   }
+
    createStandardIndiNumber<float>(m_indiP_amp, "amp", -1, 0,1, "%f");
    m_indiP_amp["current"] = m_amp;
    m_indiP_amp["target"] = m_amp;
@@ -297,6 +319,11 @@ int dmSpeckle::appStartup()
    {
       m_indiP_trigger["toggle"] = pcf::IndiElement::Off;
    }
+
+   createStandardIndiNumber<float>(m_indiP_dwell, "dwell", 1, 100,1, "%d");
+   m_indiP_dwell["current"] = m_dwell;
+   m_indiP_dwell["target"] = m_dwell;
+   registerIndiPropertyNew( m_indiP_dwell, INDI_NEWCALLBACK(m_indiP_dwell));
 
    createStandardIndiToggleSw( m_indiP_modulating, "modulating");
    if( registerIndiPropertyNew( m_indiP_modulating, INDI_NEWCALLBACK(m_indiP_modulating)) < 0)
@@ -457,6 +484,7 @@ int dmSpeckle::generateSpeckles()
    updateIfChanged(m_indiP_angle, "current", m_angle);
    updateIfChanged(m_indiP_amp, "current", m_amp);
    updateIfChanged(m_indiP_frequency, "current", m_frequency);
+   updateIfChanged(m_indiP_dwell, "current", m_dwell);
 
    return 0;
 }
@@ -519,8 +547,11 @@ void dmSpeckle::modThreadExec()
          //The official record:
          recordDmSpeck(true);
 
-         dnsec = freqNsec;
+         dnsec = 0;
          clock_gettime(CLOCK_REALTIME, &modstart);
+
+         unsigned dwelled = 0;
+         if(m_dwell == 0) m_dwell = 1;
 
          while(m_modulating && !m_shutdown)
          {
@@ -565,10 +596,15 @@ void dmSpeckle::modThreadExec()
                triggered = false;
             }
 
-            if(dnsec >= freqNsec || triggered)
+            if(dwelled < m_dwell - 1)
+            {
+               ++dwelled;
+            }
+            else if(dnsec >= freqNsec || triggered)
             {
                //Do the write
-               
+               dwelled = 0;
+
                m_imageStream.md->write = 1;
    
                memcpy(m_imageStream.array.raw, m_shapes.image(idx).data(), m_width*m_height*m_typeSize);
@@ -616,6 +652,33 @@ void dmSpeckle::modThreadExec()
       }
    }
    
+}
+
+INDI_NEWCALLBACK_DEFN(dmSpeckle, m_indiP_trigger)(const pcf::IndiProperty &ipRecv)
+{
+   if(ipRecv.getName() != m_indiP_trigger.getName())
+   {
+      log<software_error>({__FILE__, __LINE__, "invalid indi property received"});
+      return -1;
+   }
+
+   if(!ipRecv.find("toggle")) return 0;
+
+   std::unique_lock<std::mutex> lock(m_indiMutex);
+
+   if( ipRecv["toggle"].getSwitchState() == pcf::IndiElement::Off)
+   {
+      m_trigger = false;
+      indi::updateSwitchIfChanged(m_indiP_trigger, "toggle", pcf::IndiElement::Off, m_indiDriver, INDI_IDLE);
+   }
+
+   if( ipRecv["toggle"].getSwitchState() == pcf::IndiElement::On)
+   {
+      m_trigger = true;
+      indi::updateSwitchIfChanged(m_indiP_trigger, "toggle", pcf::IndiElement::On, m_indiDriver, INDI_OK);
+   }
+
+   return 0;
 }
 
 INDI_NEWCALLBACK_DEFN(dmSpeckle, m_indiP_separation)(const pcf::IndiProperty &ipRecv)
@@ -714,6 +777,33 @@ INDI_NEWCALLBACK_DEFN(dmSpeckle, m_indiP_amp)(const pcf::IndiProperty &ipRecv)
    return 0;
 }
 
+INDI_NEWCALLBACK_DEFN(dmSpeckle, m_indiP_cross)(const pcf::IndiProperty &ipRecv)
+{
+   if(ipRecv.createUniqueKey() != m_indiP_cross.createUniqueKey())
+   {
+      log<software_error>({__FILE__, __LINE__, "invalid indi property received"});
+      return -1;
+   }
+
+   if(!ipRecv.find("toggle")) return 0;
+
+   std::unique_lock<std::mutex> lock(m_indiMutex);
+
+   if( ipRecv["toggle"].getSwitchState() == pcf::IndiElement::Off)
+   {
+      m_cross = false;
+      indi::updateSwitchIfChanged(m_indiP_cross, "toggle", pcf::IndiElement::Off, m_indiDriver, INDI_IDLE);
+   }
+
+   if( ipRecv["toggle"].getSwitchState() == pcf::IndiElement::On)
+   {
+      m_cross = true;
+      indi::updateSwitchIfChanged(m_indiP_cross, "toggle", pcf::IndiElement::On, m_indiDriver, INDI_OK);
+   }
+
+   return 0;
+}
+
 INDI_NEWCALLBACK_DEFN(dmSpeckle, m_indiP_frequency)(const pcf::IndiProperty &ipRecv)
 {
    if(ipRecv.getName() != m_indiP_frequency.getName())
@@ -746,32 +836,39 @@ INDI_NEWCALLBACK_DEFN(dmSpeckle, m_indiP_frequency)(const pcf::IndiProperty &ipR
    return 0;
 }
 
-INDI_NEWCALLBACK_DEFN(dmSpeckle, m_indiP_trigger)(const pcf::IndiProperty &ipRecv)
+INDI_NEWCALLBACK_DEFN(dmSpeckle, m_indiP_dwell)(const pcf::IndiProperty &ipRecv)
 {
-   if(ipRecv.getName() != m_indiP_trigger.getName())
+   if(ipRecv.createUniqueKey() != m_indiP_dwell.createUniqueKey())
    {
-      log<software_error>({__FILE__, __LINE__, "invalid indi property received"});
+      log<software_error>({__FILE__,__LINE__, "wrong INDI property received."});
       return -1;
    }
-   
-   if(!ipRecv.find("toggle")) return 0;
-   
-   std::unique_lock<std::mutex> lock(m_indiMutex);
-   
-   if( ipRecv["toggle"].getSwitchState() == pcf::IndiElement::Off)
+
+   unsigned dwell = 0;
+
+   if( ipRecv.find("current") )
    {
-      m_trigger = false;
-      indi::updateSwitchIfChanged(m_indiP_trigger, "toggle", pcf::IndiElement::Off, m_indiDriver, INDI_IDLE);
-   }
-   
-   if( ipRecv["toggle"].getSwitchState() == pcf::IndiElement::On)
-   {
-      m_trigger = true;
-      indi::updateSwitchIfChanged(m_indiP_trigger, "toggle", pcf::IndiElement::On, m_indiDriver, INDI_OK);
+      dwell = ipRecv["current"].get<unsigned>();
    }
 
+   if( ipRecv.find("target") )
+   {
+      dwell = ipRecv["target"].get<unsigned>();
+   }
+
+   if(dwell == 0)
+   {
+      log<software_error>({__FILE__,__LINE__, "Invalid requested dwell: " + std::to_string(dwell)});
+      return 0;
+   }
+
+   std::unique_lock<std::mutex> lock(m_indiMutex);
+   m_dwell = dwell;
+   updateIfChanged(m_indiP_dwell, "target", m_dwell);
    return 0;
 }
+
+
 
 INDI_NEWCALLBACK_DEFN(dmSpeckle, m_indiP_modulating)(const pcf::IndiProperty &ipRecv)
 {
