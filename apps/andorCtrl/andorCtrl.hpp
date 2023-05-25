@@ -1493,12 +1493,15 @@ int andorCtrl::writeConfig()
       log<software_error>({__FILE__, __LINE__, "error opening config file for writing"});
       return -1;
    }
+
+   int w = m_nextROI.w / m_nextROI.bin_x;
+   int h = m_nextROI.h / m_nextROI.bin_y;
    
    fout << "camera_class:                  \"Andor\"\n";
    fout << "camera_model:                  \"iXon Ultra 897\"\n";
    fout << "camera_info:                   \"512x512 (1-tap, freerun)\"\n";
-   fout << "width:                         " << m_nextROI.w << "\n";
-   fout << "height:                        " << m_nextROI.h << "\n";
+   fout << "width:                         " << w << "\n";
+   fout << "height:                        " << h << "\n";
    fout << "depth:                         16\n";
    fout << "extdepth:                      16\n";
    fout << "CL_DATA_PATH_NORM:             0f       # single tap\n";
@@ -1845,8 +1848,8 @@ int andorCtrl::configureAcquisition()
 
 
    ///\todo This should check whether we have a match between EDT and the camera right?
-   m_width = m_currentROI.w;
-   m_height = m_currentROI.h;
+   m_width = m_currentROI.w/m_currentROI.bin_x;
+   m_height = m_currentROI.h/m_currentROI.bin_y;
    m_dataType = _DATATYPE_INT16;
 
    
