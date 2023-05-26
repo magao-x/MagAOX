@@ -552,16 +552,19 @@ void shmimMonitor<derivedT, specificT>::smThreadExec()
       m_dataType = m_imageStream.md[0].datatype;
       m_typeSize = ImageStreamIO_typesize(m_dataType);
       m_width = m_imageStream.md[0].size[0];
+      int dim = 1;
       if(m_imageStream.md[0].naxis > 1)
       {
          m_height = m_imageStream.md[0].size[1];
          
          if(m_imageStream.md[0].naxis > 2)
          {
+            dim = 3;
             m_depth = m_imageStream.md[0].size[2];
          }
          else
          {
+            dim = 2;
             m_depth = 1;
          }
       }
@@ -631,9 +634,23 @@ void shmimMonitor<derivedT, specificT>::smThreadExec()
 
             atype = m_imageStream.md[0].datatype;
             snx = m_imageStream.md[0].size[0];
-            sny = m_imageStream.md[0].size[1];
-            snz = m_imageStream.md[0].size[2];
-         
+
+            if(dim == 2)
+            {
+               sny = m_imageStream.md[0].size[1];
+               snz = 1;
+            }
+            else if(dim == 3)
+            {
+               sny = m_imageStream.md[0].size[1];
+               snz = m_imageStream.md[0].size[2];
+            }
+            else
+            {
+               sny = 1;
+               snz = 1;
+            }
+
             if( atype!= m_dataType || snx != m_width || sny != m_height || snz != m_depth )
             {
                break; //exit the nearest while loop and get the new image setup.
@@ -678,7 +695,8 @@ void shmimMonitor<derivedT, specificT>::smThreadExec()
       
    } //outer loop, will exit if m_shutdown==true
       
-      
+   derivedT::template log<software_error>({__FILE__,__LINE__, std::to_string(m_smThreadID) + " " + std::to_string(derived().shutdown() == 0)});
+   
    //*******
    // call derived().cleanup()
    //*******   
