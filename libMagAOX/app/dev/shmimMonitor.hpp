@@ -594,12 +594,26 @@ void shmimMonitor<derivedT, specificT>::smThreadExec()
          
          atype = m_imageStream.md[0].datatype;
          snx = m_imageStream.md[0].size[0];
-         sny = m_imageStream.md[0].size[1];
-         snz = m_imageStream.md[0].size[2];
+
+         if(dim == 2)
+         {
+            sny = m_imageStream.md[0].size[1];
+            snz = 1;
+         }
+         else if(dim == 3)
+         {
+            sny = m_imageStream.md[0].size[1];
+            snz = m_imageStream.md[0].size[2];
+         }
+         else
+         {
+            sny = 1;
+            snz = 1;
+         }
          
          if( atype!= m_dataType || snx != m_width || sny != m_height || snz != m_depth )
          {
-            break; //exit the nearest while loop and get the new image setup.
+            continue; //exit the nearest while loop and get the new image setup.
          }
          
          char * curr_src = (char *)  m_imageStream.array.raw + curr_image*m_width*m_height*m_typeSize;
