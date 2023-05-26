@@ -21,6 +21,7 @@ apps_rtcicc = alpaoCtrl \
 
 apps_rtc = \
 	ocam2KCtrl \
+        andorCtrl \
 	siglentSDG \
 	ttmModulator \
 	bmcCtrl \
