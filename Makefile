@@ -147,9 +147,8 @@ scripts_to_install = magaox \
 	howfs_apply \
 	lowfs_switch \
 	lowfs_apply \
-	lowfs_switch_apply
-
-setuid_scripts_to_install = write_magaox_pidfile
+	lowfs_switch_apply \
+	write_magaox_pidfile
 
 all: indi_all libs_all flatlogs apps_all guis_all utils_all
 
@@ -249,12 +248,6 @@ scripts_install:
 		sudo install scripts/$$script /opt/MagAOX/bin  && \
 		sudo ln -fs /opt/MagAOX/bin/$$script /usr/local/bin/$$script; \
 	done
-	for script in ${setuid_scripts_to_install}; do \
-		sudo install -d /opt/MagAOX/bin && \
-		sudo install -o root -g magaox --mode=u=rs,g=rx,o=rx scripts/$$script /opt/MagAOX/bin  && \
-		sudo ln -fs /opt/MagAOX/bin/$$script /usr/local/bin/$$script; \
-	done
-
 
 rtscripts_install:
 	for scriptname in make_cpusets procs_to_cpusets; do \

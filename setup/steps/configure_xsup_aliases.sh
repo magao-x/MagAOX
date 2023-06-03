@@ -11,6 +11,7 @@ Defaults>xsup !env_reset
 Defaults>xsup !secure_path
 # disable password authentication to become xsup
 %magaox ALL = (xsup) NOPASSWD: ALL
+%magaox ALL = (root) /opt/MagAOX/bin/write_magaox_pidfile
 HERE
 visudo -cf /tmp/sudoers_xsup || exit_error "visudo syntax check failed on /tmp/sudoers_xsup"
 sudo mv /tmp/sudoers_xsup /etc/sudoers.d/xsup
