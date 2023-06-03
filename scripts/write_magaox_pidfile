@@ -1,0 +1,4 @@
+#!/usr/bin/env bash
+if [[ -d "/proc/$1" ]]; then
+    echo "Process $1 exists"
+fi

@@ -144,10 +144,12 @@ scripts_to_install = magaox \
 	git_check_all \
 	collect_camera_configs_for_darks \
 	shot_in_the_dark \
-        howfs_apply \
+	howfs_apply \
 	lowfs_switch \
 	lowfs_apply \
 	lowfs_switch_apply
+
+setuid_scripts_to_install = write_magaox_pidfile
 
 all: indi_all libs_all flatlogs apps_all guis_all utils_all
 
@@ -245,6 +247,11 @@ scripts_install:
 	for script in ${scripts_to_install}; do \
 		sudo install -d /opt/MagAOX/bin && \
 		sudo install scripts/$$script /opt/MagAOX/bin  && \
+		sudo ln -fs /opt/MagAOX/bin/$$script /usr/local/bin/$$script; \
+	done
+	for script in ${setuid_scripts_to_install}; do \
+		sudo install -d /opt/MagAOX/bin && \
+		sudo install -o root -g magaox --mode=u=rs,g=rx,o=rx scripts/$$script /opt/MagAOX/bin  && \
 		sudo ln -fs /opt/MagAOX/bin/$$script /usr/local/bin/$$script; \
 	done
 
