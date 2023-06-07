@@ -108,7 +108,7 @@ protected:
    
    std::string m_calibRelDir; ///< The directory relative to the calibPath.  Set this before calling dm<derivedT,realT>::loadConfig().
    
-   int m_channels; ///< The number of dmcomb channels found as part of allocation.
+   int m_channels {0}; ///< The number of dmcomb channels found as part of allocation.
    
    std::map<std::string, std::string> m_flatCommands; ///< Map of flat file name to full path 
    std::string m_flatCurrent;  ///< The name of the current flat command
@@ -1068,7 +1068,7 @@ int dm<derivedT,realT>::checkFlats()
       if(derived().m_indiDriver)
       {
          derived().m_indiDriver->sendDelProperty(m_indiP_flats);
-         derived().m_indiNewCallBacks.erase(m_indiP_flats.getName());
+         derived().m_indiNewCallBacks.erase(m_indiP_flats.createUniqueKey());
       }
    
       m_indiP_flats = pcf::IndiProperty(pcf::IndiProperty::Switch);
@@ -1357,7 +1357,7 @@ int dm<derivedT,realT>::checkTests()
       if(derived().m_indiDriver)
       {
          derived().m_indiDriver->sendDelProperty(m_indiP_tests);
-         derived().m_indiNewCallBacks.erase(m_indiP_tests.getName());
+         derived().m_indiNewCallBacks.erase(m_indiP_tests.createUniqueKey());
       }
    
       m_indiP_tests = pcf::IndiProperty(pcf::IndiProperty::Switch);
@@ -1614,6 +1614,8 @@ int dm<derivedT,realT>::zeroTest()
 template<class derivedT, typename realT>
 int dm<derivedT,realT>::zeroAll(bool nosem)
 {
+   if(derived().m_shmimName == "") return 0;
+
    IMAGE imageStream;
    
    for(int n=0; n < m_channels; ++n)
@@ -1625,6 +1627,7 @@ int dm<derivedT,realT>::zeroAll(bool nosem)
       if( ImageStreamIO_openIm(&imageStream, shmimN.c_str()) != 0)
       {
          derivedT::template log<text_log>("could not connect to channel " + shmimN, logPrio::LOG_WARNING);
+         continue;
       }
    
       if( imageStream.md->size[0] != m_dmWidth)
@@ -1920,7 +1923,7 @@ int dm<derivedT,realT>::st_newCallBack_init( void * app,
 template<class derivedT, typename realT>
 int dm<derivedT,realT>::newCallBack_init( const pcf::IndiProperty &ipRecv )
 {
-   if ( ipRecv.getName() != m_indiP_init.getName())
+   if ( ipRecv.createUniqueKey() != m_indiP_init.createUniqueKey())
    {
       return derivedT::template log<software_error,-1>({__FILE__, __LINE__, "wrong INDI-P in callback"});
    }
@@ -1945,7 +1948,7 @@ int dm<derivedT,realT>::st_newCallBack_zero( void * app,
 template<class derivedT, typename realT>
 int dm<derivedT,realT>::newCallBack_zero( const pcf::IndiProperty &ipRecv )
 {
-   if ( ipRecv.getName() != m_indiP_zero.getName())
+   if ( ipRecv.createUniqueKey() != m_indiP_zero.createUniqueKey())
    {
       return derivedT::template log<software_error,-1>({__FILE__, __LINE__, "wrong INDI-P in callback"});
    }
@@ -1970,7 +1973,7 @@ int dm<derivedT,realT>::st_newCallBack_release( void * app,
 template<class derivedT, typename realT>
 int dm<derivedT,realT>::newCallBack_release( const pcf::IndiProperty &ipRecv )
 {
-   if ( ipRecv.getName() != m_indiP_release.getName())
+   if ( ipRecv.createUniqueKey() != m_indiP_release.createUniqueKey())
    {
       return derivedT::template log<software_error,-1>({__FILE__, __LINE__, "wrong INDI-P in callback"});
    }
@@ -1995,7 +1998,7 @@ int dm<derivedT,realT>::st_newCallBack_flats( void * app,
 template<class derivedT, typename realT>
 int dm<derivedT,realT>::newCallBack_flats( const pcf::IndiProperty &ipRecv )
 {
-   if(ipRecv.getName() != m_indiP_flats.getName())
+   if(ipRecv.createUniqueKey() != m_indiP_flats.createUniqueKey())
    {
       derivedT::template log<software_error>({__FILE__, __LINE__, "invalid indi property received"});
       return -1;
@@ -2044,7 +2047,7 @@ int dm<derivedT,realT>::st_newCallBack_setFlat( void * app,
 template<class derivedT, typename realT>
 int dm<derivedT,realT>::newCallBack_setFlat( const pcf::IndiProperty &ipRecv )
 {
-   if ( ipRecv.getName() != m_indiP_setFlat.getName())
+   if ( ipRecv.createUniqueKey() != m_indiP_setFlat.createUniqueKey())
    {
       return derivedT::template log<software_error,-1>({__FILE__, __LINE__, "wrong INDI-P in callback"});
    }
@@ -2072,7 +2075,7 @@ int dm<derivedT,realT>::st_newCallBack_tests( void * app,
 template<class derivedT, typename realT>
 int dm<derivedT,realT>::newCallBack_tests( const pcf::IndiProperty &ipRecv )
 {
-   if(ipRecv.getName() != m_indiP_tests.getName())
+   if(ipRecv.createUniqueKey() != m_indiP_tests.createUniqueKey())
    {
       derivedT::template log<software_error>({__FILE__, __LINE__, "invalid indi property received"});
       return -1;
@@ -2121,7 +2124,7 @@ int dm<derivedT,realT>::st_newCallBack_setTest( void * app,
 template<class derivedT, typename realT>
 int dm<derivedT,realT>::newCallBack_setTest( const pcf::IndiProperty &ipRecv )
 {
-   if ( ipRecv.getName() != m_indiP_setTest.getName())
+   if ( ipRecv.createUniqueKey() != m_indiP_setTest.createUniqueKey())
    {
       return derivedT::template log<software_error,-1>({__FILE__, __LINE__, "wrong INDI-P in callback"});
    }
@@ -2150,7 +2153,7 @@ int dm<derivedT,realT>::st_newCallBack_zeroAll( void * app,
 template<class derivedT, typename realT>
 int dm<derivedT,realT>::newCallBack_zeroAll( const pcf::IndiProperty &ipRecv )
 {
-   if ( ipRecv.getName() != m_indiP_zeroAll.getName())
+   if ( ipRecv.createUniqueKey() != m_indiP_zeroAll.createUniqueKey())
    {
       return derivedT::template log<software_error,-1>({__FILE__, __LINE__, "wrong INDI-P in callback"});
    }
