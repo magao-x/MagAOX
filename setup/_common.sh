@@ -80,15 +80,15 @@ function make_on_data_array() {
 
   if [[ $MAGAOX_ROLE == RTC || $MAGAOX_ROLE == ICC || $MAGAOX_ROLE == AOC ]]; then
     REAL_DIR=/data/$TARGET_NAME
-    mkdir -pv $REAL_DIR
+    sudo mkdir -pv $REAL_DIR
     link_if_necessary $REAL_DIR $PARENT_DIR/$TARGET_NAME
   else
     REAL_DIR=$PARENT_DIR/$TARGET_NAME
-    mkdir -pv $REAL_DIR
+    sudo mkdir -pv $REAL_DIR
   fi
 
-  chown -RP $instrument_user:$instrument_group $REAL_DIR
-  chmod -R u=rwX,g=rwX,o=rX $REAL_DIR
+  sudo chown -RP $instrument_user:$instrument_group $REAL_DIR
+  sudo chmod -R u=rwX,g=rwX,o=rX $REAL_DIR
   setgid_all $REAL_DIR
 }
 
