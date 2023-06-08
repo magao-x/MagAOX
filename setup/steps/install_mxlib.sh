@@ -56,6 +56,10 @@ if [[ $(uname -p) != "x86_64" ]]; then
   echo "USE_BLAS_FROM = openblas" >> $mxlibCommonOverrides
 fi
 
+if [[ $ID == rocky ]]; then
+  echo "CXXFLAGS += -I/usr/include/lapacke" >> $mxlibCommonOverrides
+fi
+
 # Ensure mxlib installs to /usr/local (not $HOME)
 if diff local/Common.mk local/Common.example.mk; then
   mv $mxlibCommonOverrides local/Common.mk

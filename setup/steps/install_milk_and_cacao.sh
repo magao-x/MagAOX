@@ -32,7 +32,7 @@ numCpus=$(nproc)
 make -j $((numCpus / 2))
 sudo make install
 
-sudo $pythonExe -m pip install -e ../src/ImageStreamIO/
+sudo $pythonExe -m pip install ../src/ImageStreamIO/
 $pythonExe -c 'import ImageStreamIOWrap' || exit 1
 
 milkSuffix=bin/milk
