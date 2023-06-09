@@ -2,6 +2,10 @@
 DIR="$( cd "$( dirname "${BASH_SOURCE[0]}" )" && pwd )"
 set -euo pipefail
 
+log_info "Make Extra Packages for Enterprise Linux available in /etc/yum.repos.d/"
+dnf config-manager --set-enabled crb
+dnf install -y epel-release
+
 # needed for (at least) git:
 yum groupinstall -y 'Development Tools'
 
@@ -11,6 +15,8 @@ ldconfig -v
 
 # Install build tools and utilities
 yum install -y \
+    kernel-devel \
+    gcc-gfortran \
     which \
     openssh \
     cmake3 \
@@ -95,4 +101,11 @@ export PKG_CONFIG_PATH=/usr/local/lib/pkgconfig
 if [[ $(uname -p) == "aarch64" ]]; then
     # since we won't install MKL:
     yum install -y openblas-devel lapack-devel
+fi
+
+if [[ $MAGAOX_ROLE == TIC || $MAGAOX_ROLE == TOC || $MAGAOX_ROLE == ICC || $MAGAOX_ROLE == RTC || $MAGAOX_ROLE == AOC ]]; then
+    dnf config-manager --add-repo https://pkgs.tailscale.com/stable/rhel/9/tailscale.repo
+    dnf install tailscale
+    systemctl enable --now tailscaled
+    tailscale up
 fi

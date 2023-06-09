@@ -56,7 +56,7 @@ if [[ $(uname -p) != "x86_64" ]]; then
   echo "USE_BLAS_FROM = openblas" >> $mxlibCommonOverrides
 fi
 
-if [[ $ID == rocky ]]; then
+if [[ $ID == rocky && $(uname -p) == "aarch64" ]]; then
   echo "CXXFLAGS += -I/usr/include/lapacke" >> $mxlibCommonOverrides
 fi
 

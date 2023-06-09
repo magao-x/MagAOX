@@ -118,6 +118,7 @@ if grep -q "GenuineIntel" /proc/cpuinfo; then
         sudo bash -l "$DIR/steps/install_mkl_tarball.sh" || exit 1
     fi
     export BLAS_VENDOR=intel
+    source /etc/profile.d/mklvars.sh
 else
     export BLAS_VENDOR=openblas
 fi
