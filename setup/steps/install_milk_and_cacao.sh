@@ -21,7 +21,7 @@ cd _build
 
 pythonExe=/opt/conda/bin/python
 
-milkCmakeArgs="-DCMAKE_INSTALL_PREFIX=/usr/local/milk-next -Dbuild_python_module=ON -DPYTHON_EXECUTABLE=${pythonExe}"
+milkCmakeArgs="-DCMAKE_INSTALL_PREFIX=/usr/local/milk -Dbuild_python_module=ON -DPYTHON_EXECUTABLE=${pythonExe}"
 
 if [[ $MAGAOX_ROLE == TIC || $MAGAOX_ROLE == ICC || $MAGAOX_ROLE == RTC || $MAGAOX_ROLE == AOC ]]; then
     milkCmakeArgs="-DUSE_CUDA=ON ${milkCmakeArgs}"
@@ -68,6 +68,7 @@ if [[ $MAGAOX_ROLE == ICC || $MAGAOX_ROLE == RTC ]]; then
   sudo systemctl enable cacao_startup_if_present.service || true
 else
   make_on_data_array "cacao-${MAGAOX_ROLE,,}" /opt/MagAOX
+  sudo ln -sf "/opt/MagAOX/cacao-${MAGAOX_ROLE,,}" /opt/MagAOX/cacao
 fi
 log_info "Making /opt/MagAOX/cacao/ owned by xsup:magaox"
-chown -R xsup:magaox /opt/MagAOX/cacao/
+sudo chown -R xsup:magaox /opt/MagAOX/cacao/
