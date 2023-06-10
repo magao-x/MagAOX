@@ -314,10 +314,9 @@ int emitVerifyHeader( const std::string & fileName,
    fout << "{\n";
    fout << "namespace logger\n";
    fout << "{\n";
-
-   fout << "bool logVerify( flatlogs::eventCodeT ec,\n";
-   fout << "                flatlogs::bufferPtrT & buffer,\n";
-   fout << "                flatlogs::msgLenT len )\n";
+   fout << "inline bool logVerify( flatlogs::eventCodeT ec,\n";
+   fout << "                       flatlogs::bufferPtrT & buffer,\n";
+   fout << "                       flatlogs::msgLenT len )\n";
    fout << "{\n";
    fout << "   switch(ec)\n";
    fout << "   {\n";

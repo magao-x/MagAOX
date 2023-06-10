@@ -184,9 +184,9 @@ struct compLogFileName
    /** \returns true if a < b
      * \returns false otherwise
      */ 
-   bool operator()( const logFileName & a, 
+   const bool operator()( const logFileName & a, 
                     const logFileName & b
-                  )
+                  ) const
    {
       return (a.baseName() < b.baseName());
    }
