@@ -21,7 +21,7 @@ cd _build
 
 pythonExe=/opt/conda/bin/python
 
-milkCmakeArgs="-DCMAKE_INSTALL_PREFIX=/usr/local/milk -Dbuild_python_module=ON -DPYTHON_EXECUTABLE=${pythonExe}"
+milkCmakeArgs="-DCMAKE_INSTALL_PREFIX=/usr/local -Dbuild_python_module=ON -DPYTHON_EXECUTABLE=${pythonExe}"
 
 if [[ $MAGAOX_ROLE == TIC || $MAGAOX_ROLE == ICC || $MAGAOX_ROLE == RTC || $MAGAOX_ROLE == AOC ]]; then
     milkCmakeArgs="-DUSE_CUDA=ON ${milkCmakeArgs}"
