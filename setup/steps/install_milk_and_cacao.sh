@@ -7,8 +7,10 @@ COMMIT_ISH=dev
 orgname=milk-org
 reponame=milk
 parentdir=/opt/MagAOX/source
-if [[ -e $parentdir/$reponame/NO_UPDATES_THANKS ]]; then
-  log_info "Lock file at $parentdir/$reponame/NO_UPDATES_THANKS indicates it's all good, no updates thanks"
+noUpdatesThanks=$parentdir/$reponame/NO_UPDATES_THANKS
+
+if [[ -e $noUpdatesThanks ]]; then
+  log_info "Lock file at $noUpdatesThanks indicates it's all good, no updates thanks"
   cd $parentdir/$reponame
 else
   clone_or_update_and_cd $orgname $reponame $parentdir
