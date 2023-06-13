@@ -79,7 +79,7 @@ public:
 void logdump::setupConfig()
 {
    config.add("pauseTime","p", "pauseTime" , argType::Required, "", "pauseTime", false,  "int", "When following, time in milliseconds to pause before checking for new entries.");
-   config.add("fileCheckInterval","F", "fileCheckInterval" , argType::Required, "", "fileCheckInterval", false,  "int", "When following, number of pause intervals between checks for new files.");
+   config.add("fileCheckInterval","", "fileCheckInterval" , argType::Required, "", "fileCheckInterval", false,  "int", "When following, number of pause intervals between checks for new files.");
 
    config.add("dir","d", "dir" , argType::Required, "", "dir", false,  "string", "Directory to search for logs. MagAO-X default is normally used.");
    config.add("ext","e", "ext" , argType::Required, "", "ext", false,  "string", "The file extension of log files.  MagAO-X default is normally used.");

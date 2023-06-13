@@ -7,8 +7,10 @@ COMMIT_ISH=dev
 orgname=milk-org
 reponame=milk
 parentdir=/opt/MagAOX/source
-if [[ -e $parentdir/$reponame/NO_UPDATES_THANKS ]]; then
-  log_info "Lock file at $parentdir/$reponame/NO_UPDATES_THANKS indicates it's all good, no updates thanks"
+noUpdatesThanks=$parentdir/$reponame/NO_UPDATES_THANKS
+
+if [[ -e $noUpdatesThanks ]]; then
+  log_info "Lock file at $noUpdatesThanks indicates it's all good, no updates thanks"
   cd $parentdir/$reponame
 else
   clone_or_update_and_cd $orgname $reponame $parentdir
@@ -21,7 +23,7 @@ cd _build
 
 pythonExe=/opt/conda/bin/python
 
-milkCmakeArgs="-DCMAKE_INSTALL_PREFIX=/usr/local/milk -Dbuild_python_module=ON -DPYTHON_EXECUTABLE=${pythonExe}"
+milkCmakeArgs="-DCMAKE_INSTALL_PREFIX=/usr/local -Dbuild_python_module=ON -DPYTHON_EXECUTABLE=${pythonExe}"
 
 if [[ $MAGAOX_ROLE == TIC || $MAGAOX_ROLE == ICC || $MAGAOX_ROLE == RTC || $MAGAOX_ROLE == AOC ]]; then
     milkCmakeArgs="-DUSE_CUDA=ON ${milkCmakeArgs}"

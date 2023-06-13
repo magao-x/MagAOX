@@ -70,34 +70,10 @@ if [[ $MAGAOX_ROLE == vm ]]; then
     yum install -y xorg-x11-xauth
 fi
 
-# alternatives --install /usr/local/bin/cmake cmake /usr/bin/cmake3 20 \
-#     --slave /usr/local/bin/ctest ctest /usr/bin/ctest3 \
-#     --slave /usr/local/bin/cpack cpack /usr/bin/cpack3 \
-#     --slave /usr/local/bin/ccmake ccmake /usr/bin/ccmake3 \
-#     --family cmake
-
-# alternatives --install /usr/local/bin/qmake qmake /usr/bin/qmake-qt5 20
-
-# # Undo installing stable ZeroMQ without draft APIs
-# yum remove -y zeromq-devel libzmq5 || true
-# yum-config-manager --disable network_messaging_zeromq_release-stable || true
-
-# # For some reason, pkg-config doesn't automatically look here?
+# For some reason, pkg-config doesn't automatically look here?
 mkdir -p /etc/profile.d/
 echo "export PKG_CONFIG_PATH=\${PKG_CONFIG_PATH}:/usr/local/lib/pkgconfig" > /etc/profile.d/99-pkg-config.sh
 export PKG_CONFIG_PATH=/usr/local/lib/pkgconfig
-# mkdir -p /opt/MagAOX/vendor
-# cd /opt/MagAOX/vendor
-# rpmFile=cpuset-1.6-lp154.59.1.noarch.rpm
-
-# # get _cached_fetch
-# source $DIR/../_common.sh
-
-# _cached_fetch https://download.opensuse.org/repositories/hardware/15.4/noarch/$rpmFile $rpmFile
-# sudo yum install -y $rpmFile || true
-# cat <<'HERE' | sudo tee /etc/cset.conf || exit 1
-# mountpoint = /sys/fs/cgroup/cpuset
-# HERE
 
 if [[ $(uname -p) == "aarch64" ]]; then
     # since we won't install MKL:
