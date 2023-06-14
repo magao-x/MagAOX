@@ -5,6 +5,7 @@ Before=multi-user.target
 [Service]
 Type=oneshot
 RemainAfterExit=yes
+ExecStartPre=/opt/MagAOX/bin/mount_cgroup_cpuset
 ExecStart=/opt/MagAOX/bin/make_cpusets
 
 [Install]

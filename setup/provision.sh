@@ -239,6 +239,10 @@ if [[ $MAGAOX_ROLE == AOC || $MAGAOX_ROLE == TOC || $MAGAOX_ROLE == vm ]]; then
     echo "export RTIMV_CONFIG_PATH=/opt/MagAOX/config" | sudo tee /etc/profile.d/rtimv_config_path.sh
 fi
 
+if [[ $MAGAOX_ROLE == ICC || $MAGAOX_ROLE == RTC || $MAGAOX_ROLE == AOC ]]; then
+    echo "export CGROUPS1_CPUSET_MOUNTPOINT=/opt/MagAOX/cpuset" | sudo tee /etc/profile.d/cgroups1_cpuset_mountpoint.sh
+fi
+
 # Create Python env and install Python libs that need special treatment
 # Note that subsequent steps will use libs from conda since the base
 # env activates by default.

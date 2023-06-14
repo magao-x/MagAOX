@@ -27,7 +27,8 @@ sudo yum install -y python-devel xmlto
 /bin/python setup.py bdist_rpm
 rpmFile=/opt/MagAOX/vendor/cpuset-1.6/dist/cpuset-1.6-1.noarch.rpm
 sudo yum install -y $rpmFile || true
-cat <<'HERE' | sudo tee /etc/cset.conf || exit 1
-mountpoint = /sys/fs/cgroup/cpuset
+source /etc/profile.d/cgroups1_cpuset_mountpoint.sh
+cat <<"HERE" | sudo tee /etc/cset.conf || exit 1
+mountpoint = $CGROUPS1_CPUSET_MOUNTPOINT
 HERE
 cset --help || exit_error "Could not run cset"
