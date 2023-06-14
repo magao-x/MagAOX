@@ -30,6 +30,12 @@
    #define MAGAOX_env_calib "MagAOX_CALIB"
 #endif
 
+#ifndef MAGAOX_env_cpuset
+   /// Environment variable setting the relative calib path.
+   #define MAGAOX_env_cpuset "CGROUPS1_CPUSET_MOUNTPOINT"
+#endif
+
+
 ///@}
 
 

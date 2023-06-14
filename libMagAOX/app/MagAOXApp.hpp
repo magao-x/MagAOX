@@ -409,6 +409,15 @@ protected:
 
    ///@} -- PID Locking
 
+   /** \name cpusets
+     * The path to the cpusets mount is configured by the environment varialbe defined by MAGOX_env_cpuset
+     * in environment.hpp.  This environment varialbe is normally named "CGROUPS1_CPUSET_MOUNTPOINT".  If
+     * the environment variable is not set, the default defined by MAGAOX_cpusetPath in paths.hpp is used.
+     * This is normally "/opt/MagAOX/cpuset/"
+     */
+   
+   std::string m_cpusetPath {MAGAOX_cpusetPath};
+
    /** \name Threads 
      *
      * @{
@@ -1175,6 +1184,14 @@ void MagAOXApp<_useINDI>::setDefaults( int argc,
    tmpstr = MagAOXPath + "/" + MAGAOX_secretsRelPath;
    secretsPath = tmpstr;
 
+   //Setup default cpuset path
+   tmpstr = mx::sys::getEnv(MAGAOX_env_cpuset);
+   if(tmpstr != "")
+   {
+      m_cpusetPath = tmpstr;
+   }
+   //else we stick with the default
+
 
    if(m_configBase != "")
    {
@@ -1280,6 +1297,7 @@ void MagAOXApp<_useINDI>::loadBasicConfig() //virtual
          log<text_log>("powerOnWait longer than 1 hour.  Setting to 0.", logPrio::LOG_ERROR);
       }
    }
+
 }
 
 template<bool _useINDI>
@@ -1992,8 +2010,8 @@ int MagAOXApp<_useINDI>::threadStart( std::thread & thrd,
       if(cpuset != "")
       {
          elevatedPrivileges ep(this);
-         std::string cpuFile = "/sys/fs/cgroup/cpuset/";
-         cpuFile += cpuset;
+         std::string cpuFile = m_cpusetPath;
+         cpuFile += "/" + cpuset;
          cpuFile += "/tasks";
          int wfd = open( cpuFile.c_str(), O_WRONLY);
          if(wfd < 0)

@@ -184,7 +184,7 @@ struct compLogFileName
    /** \returns true if a < b
      * \returns false otherwise
      */ 
-   const bool operator()( const logFileName & a, 
+   bool operator()( const logFileName & a, 
                     const logFileName & b
                   ) const
    {
