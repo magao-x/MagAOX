@@ -2016,7 +2016,7 @@ int MagAOXApp<_useINDI>::threadStart( std::thread & thrd,
          int wfd = open( cpuFile.c_str(), O_WRONLY);
          if(wfd < 0)
          {
-            return log<software_error,-1>({__FILE__, __LINE__, errno, "error from open"});
+            return log<software_error,-1>({__FILE__, __LINE__, errno, "error from open for " + cpuFile});
          }
 
          char pids[16];
