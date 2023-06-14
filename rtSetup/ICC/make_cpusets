@@ -10,7 +10,8 @@
 ##
 ####################################################
 
-cpusetMount=/sys/fs/cgroup/cpuset
+source /etc/profile.d/cgroups1_cpuset_mountpoint.sh
+cpusetMount=$CGROUPS1_CPUSET_MOUNTPOINT
 
 # On ICC we have 2x16 = 32 real cores, which maps to 64 cpus
 # To see the list: cat /proc/cpuinfo | egrep 'processor|physical id|core id'

@@ -9,7 +9,8 @@
 ##
 ####################################################
 
-cpusetMount=/sys/fs/cgroup/cpuset
+source /etc/profile.d/cgroups1_cpuset_mountpoint.sh
+cpusetMount=$CGROUPS1_CPUSET_MOUNTPOINT
 
 # note: these are in the same order as the cpuset creation in rtc_cpuset
 
