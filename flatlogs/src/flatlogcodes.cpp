@@ -342,6 +342,56 @@ int emitVerifyHeader( const std::string & fileName,
    return 0;
 }
 
+///Write the logVerify.hpp header.
+int emitCodeValidHeader( const std::string & fileName,
+                         std::map<uint16_t, std::string> & logCodes
+                       )
+{
+   typedef std::map<uint16_t, std::string> mapT;
+
+   mapT::iterator it = logCodes.begin();
+
+   std::ofstream fout;
+   fout.open(fileName);
+
+
+   fout << "#ifndef logger_logCodeValid_hpp\n";
+   fout << "#define logger_logCodeValid_hpp\n";
+
+   fout << "#include <flatlogs/flatlogs.hpp>\n";
+
+   fout << "#include \"logTypes.hpp\"\n";
+
+   ///\todo Need to allow specification of the namespaces
+   fout << "namespace MagAOX\n";
+   fout << "{\n";
+   fout << "namespace logger\n";
+   fout << "{\n";
+   fout << "inline bool logCodeValid( flatlogs::eventCodeT ec)\n";
+   fout << "{\n";
+   fout << "   switch(ec)\n";
+   fout << "   {\n";
+   for(; it!=logCodes.end(); ++it)
+   {
+      fout << "      case " << it->first << ":\n";
+      fout << "         return true;\n";
+   }
+      fout << "      default:\n";
+      fout << "         return false;\n";
+   fout << "   }\n";
+   fout << "}\n";
+
+
+   fout << "}\n"; //namespace logger
+   fout << "}\n"; //namespace MagAOX
+
+   fout << "#endif\n"; //logger_logVerify_hpp
+
+   fout.close();
+
+   return 0;
+}
+
 /// Write the logTypes.hpp header
 int emitLogTypes( const std::string & fileName,
                   std::map<uint16_t, std::string> & logCodes 
@@ -386,7 +436,7 @@ int main()
    std::string verifyHeader = generatedDir + "/logVerify.hpp";
    std::string logCodesHeader = generatedDir + "/logCodes.hpp";
    std::string logTypesHeader = generatedDir + "/logTypes.hpp";
-   
+   std::string logCodeValidHeader = generatedDir + "/logCodeValid.hpp";
    mapT logCodes;
    setT schemas;
    
@@ -400,7 +450,8 @@ int main()
    emitVerifyHeader(verifyHeader, logCodes );
    emitLogCodes( logCodesHeader, logCodes );
    emitLogTypes( logTypesHeader, logCodes );
-   
+   emitCodeValidHeader( logCodeValidHeader, logCodes);
+
    std::string flatc = "flatc -o " + schemaGeneratedDir + " --cpp";
    
    setT::iterator it = schemas.begin();
