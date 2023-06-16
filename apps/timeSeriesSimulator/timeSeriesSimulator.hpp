@@ -83,6 +83,8 @@ protected:
   int n_gizmos = 2;
   double gizmoTimeToTarget = 1;
 
+  size_t m_startup_delay{0};
+
 public:
   /// Default c'tor.
   timeSeriesSimulator();
@@ -147,11 +149,13 @@ timeSeriesSimulator::timeSeriesSimulator() : MagAOXApp(MAGAOX_CURRENT_SHA1, MAGA
 
 void timeSeriesSimulator::setupConfig()
 {
+   config.add("startup_delay", "", "startup_delay", mx::app::argType::Required, "", "startup_delay", false, "int", "Delay to spend in appStartup for testing, s");
 }
 
 int timeSeriesSimulator::loadConfigImpl(mx::app::appConfigurator &_config)
 {
   static_cast<void>(_config);
+   _config(m_startup_delay, "startup_delay");
 
   return 0;
 }
@@ -216,6 +220,12 @@ int timeSeriesSimulator::appStartup()
   startTimeSec = mx::sys::get_curr_time();
   updateVals();
   state(stateCodes::READY);
+  unsigned int seconds = m_startup_delay;
+  while (seconds > 0)
+  {
+    std::cerr << "Sleeping for " << seconds << 's' << std::endl;
+    seconds = sleep(seconds);
+  }
   return 0;
 }
 

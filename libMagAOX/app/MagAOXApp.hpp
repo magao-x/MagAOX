@@ -1420,6 +1420,16 @@ int MagAOXApp<_useINDI>::execute() //virtual
    {
       setSigTermHandler();
    }
+
+   //====Begin Resurrectee
+   if(m_shutdown == 0) //if we're not already dead, that is
+   {
+      if(startResurrectee() < 0)
+      {
+         state(stateCodes::FAILURE);
+         m_shutdown = 1;
+      }
+   }
    
    //We are not initialized, begin application startup.
    if( m_shutdown == 0 )
@@ -1432,16 +1442,6 @@ int MagAOXApp<_useINDI>::execute() //virtual
    if(m_useINDI && m_shutdown == 0) //if we're using INDI and not already dead, that is
    {
       if(startINDI() < 0)
-      {
-         state(stateCodes::FAILURE);
-         m_shutdown = 1;
-      }
-   }
-
-   //====Begin Resurrectee
-   if(m_shutdown == 0) //if we're not already dead, that is
-   {
-      if(startResurrectee() < 0)
       {
          state(stateCodes::FAILURE);
          m_shutdown = 1;
@@ -2778,6 +2778,10 @@ int MagAOXApp<_useINDI>::startResurrectee()
       m_resurrectee = nullptr;
       return -1;
    }
+
+   //Send a hexbeat using 2nd* time offset if that offset was configured
+   // * m_resurrectee->m_time_offset[1]
+   m_resurrectee->execute_1();
 
    return 0;
 }
