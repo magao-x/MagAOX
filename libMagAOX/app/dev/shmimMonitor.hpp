@@ -96,6 +96,7 @@ protected:
    
    uint32_t m_width {0}; ///< The width of the images in the stream
    uint32_t m_height {0}; ///< The height of the images in the stream
+   uint32_t m_depth {0}; ///< The depth of the circular buffer in the stream
    
    uint8_t m_dataType{0}; ///< The ImageStreamIO type code.
    size_t m_typeSize {0}; ///< The size of the type, in bytes.  Result of sizeof.
@@ -165,7 +166,7 @@ protected:
    
    /** \name SIGSEGV & SIGBUS signal handling
      * These signals occur as a result of a ImageStreamIO source server resetting (e.g. changing frame sizes).
-     * When they occur a restart of the framegrabber and framewriter thread main loops is triggered.
+     * When they occur a restart of the shmim monitor thread main loops is triggered.
      * 
      * @{
      */ 
@@ -434,9 +435,9 @@ void shmimMonitor<derivedT, specificT>::_handlerSigSegv( int signum,
 
 template<class derivedT, class specificT>
 void shmimMonitor<derivedT, specificT>::handlerSigSegv( int signum,
-                                             siginfo_t *siginf,
-                                             void *ucont
-                                           )
+                                                        siginfo_t *siginf,
+                                                        void *ucont
+                                                      )
 {
    static_cast<void>(signum);
    static_cast<void>(siginf);
@@ -551,8 +552,27 @@ void shmimMonitor<derivedT, specificT>::smThreadExec()
       m_dataType = m_imageStream.md[0].datatype;
       m_typeSize = ImageStreamIO_typesize(m_dataType);
       m_width = m_imageStream.md[0].size[0];
-      m_height = m_imageStream.md[0].size[1];
-      size_t length = m_imageStream.md[0].size[2];
+      int dim = 1;
+      if(m_imageStream.md[0].naxis > 1)
+      {
+         m_height = m_imageStream.md[0].size[1];
+         
+         if(m_imageStream.md[0].naxis > 2)
+         {
+            dim = 3;
+            m_depth = m_imageStream.md[0].size[2];
+         }
+         else
+         {
+            dim = 2;
+            m_depth = 1;
+         }
+      }
+      else
+      {
+         m_height = 1;
+         m_depth = 1;
+      }
 
       if( derived().allocate( specificT()) < 0)
       {
@@ -564,7 +584,7 @@ void shmimMonitor<derivedT, specificT>::smThreadExec()
       size_t snx, sny, snz;
       uint64_t curr_image; //The current cnt1 index
       
-      if(m_getExistingFirst && !m_restart) //If true, we always get the existing image without waiting on the semaphore.
+      if(m_getExistingFirst && !m_restart && derived().shutdown() == 0) //If true, we always get the existing image without waiting on the semaphore.
       {
          if(m_imageStream.md[0].size[2] > 0) ///\todo change to naxis?
          {
@@ -574,12 +594,26 @@ void shmimMonitor<derivedT, specificT>::smThreadExec()
          
          atype = m_imageStream.md[0].datatype;
          snx = m_imageStream.md[0].size[0];
-         sny = m_imageStream.md[0].size[1];
-         snz = m_imageStream.md[0].size[2];
-         
-         if( atype!= m_dataType || snx != m_width || sny != m_height || snz != length )
+
+         if(dim == 2)
          {
-            break; //exit the nearest while loop and get the new image setup.
+            sny = m_imageStream.md[0].size[1];
+            snz = 1;
+         }
+         else if(dim == 3)
+         {
+            sny = m_imageStream.md[0].size[1];
+            snz = m_imageStream.md[0].size[2];
+         }
+         else
+         {
+            sny = 1;
+            snz = 1;
+         }
+         
+         if( atype!= m_dataType || snx != m_width || sny != m_height || snz != m_depth )
+         {
+            continue; //exit the nearest while loop and get the new image setup.
          }
          
          char * curr_src = (char *)  m_imageStream.array.raw + curr_image*m_width*m_height*m_typeSize;
@@ -614,10 +648,24 @@ void shmimMonitor<derivedT, specificT>::smThreadExec()
 
             atype = m_imageStream.md[0].datatype;
             snx = m_imageStream.md[0].size[0];
-            sny = m_imageStream.md[0].size[1];
-            snz = m_imageStream.md[0].size[2];
-         
-            if( atype!= m_dataType || snx != m_width || sny != m_height || snz != length )
+
+            if(dim == 2)
+            {
+               sny = m_imageStream.md[0].size[1];
+               snz = 1;
+            }
+            else if(dim == 3)
+            {
+               sny = m_imageStream.md[0].size[1];
+               snz = m_imageStream.md[0].size[2];
+            }
+            else
+            {
+               sny = 1;
+               snz = 1;
+            }
+
+            if( atype!= m_dataType || snx != m_width || sny != m_height || snz != m_depth )
             {
                break; //exit the nearest while loop and get the new image setup.
             }
@@ -661,7 +709,8 @@ void shmimMonitor<derivedT, specificT>::smThreadExec()
       
    } //outer loop, will exit if m_shutdown==true
       
-      
+   derivedT::template log<software_error>({__FILE__,__LINE__, std::to_string(m_smThreadID) + " " + std::to_string(derived().shutdown() == 0)});
+   
    //*******
    // call derived().cleanup()
    //*******   

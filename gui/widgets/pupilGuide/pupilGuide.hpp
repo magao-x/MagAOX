@@ -990,19 +990,38 @@ void pupilGuide::modGUISetEnable( bool enableModGUI,
       //ui.labelCh2->setEnabled(false);
       ui.modCh2->setEnabled(false);
       
-      ui.button_tip_ul->setEnabled(false); 
-      ui.button_tip_u->setEnabled(false);
-      ui.button_tip_ur->setEnabled(false); 
-      ui.button_tip_l->setEnabled(false); 
-      ui.button_tip_scale->setEnabled(false);
-      ui.button_tip_r->setEnabled(false);
-      ui.button_tip_dl->setEnabled(false);
-      ui.button_tip_d->setEnabled(false);
-      ui.button_tip_dr->setEnabled(false);
+      if(m_tipmovewhat == MOVE_TTM) 
+      {
+         ui.button_tip_ul->setEnabled(false); 
+         ui.button_tip_u->setEnabled(false);
+         ui.button_tip_ur->setEnabled(false); 
+         ui.button_tip_l->setEnabled(false); 
+         ui.button_tip_scale->setEnabled(false);
+         ui.button_tip_r->setEnabled(false);
+         ui.button_tip_dl->setEnabled(false);
+         ui.button_tip_d->setEnabled(false);
+         ui.button_tip_dr->setEnabled(false);
 
-      ui.button_focus_p->setEnabled(false);
-      ui.button_focus_scale->setEnabled(false);
-      ui.button_focus_m->setEnabled(false);
+         ui.button_focus_p->setEnabled(false);
+         ui.button_focus_scale->setEnabled(false);
+         ui.button_focus_m->setEnabled(false);
+      }
+      else
+      {
+         ui.button_tip_ul->setEnabled(true); 
+         ui.button_tip_u->setEnabled(true);
+         ui.button_tip_ur->setEnabled(true); 
+         ui.button_tip_l->setEnabled(true); 
+         ui.button_tip_scale->setEnabled(true);
+         ui.button_tip_r->setEnabled(true);
+         ui.button_tip_dl->setEnabled(true);
+         ui.button_tip_d->setEnabled(true);
+         ui.button_tip_dr->setEnabled(true);
+
+         ui.button_focus_p->setEnabled(true);
+         ui.button_focus_scale->setEnabled(true);
+         ui.button_focus_m->setEnabled(true);
+      }
    }
 }
 
@@ -1076,7 +1095,7 @@ void pupilGuide::updateGUI()
       if(m_modState == 1)
       {
          ui.modState->setText("RIP");
-         enableModArrows = false;
+         if(m_tipmovewhat == MOVE_TTM) enableModArrows = false;
       }
       else
       {
@@ -1342,31 +1361,10 @@ void pupilGuide::updateGUI()
    if( m_camwfsavgState == "READY" || m_camwfsavgState == "OPERATING")
    {
       ui.fitAvgTime->setEnabled(true);
-
-      if(m_camwfsavgState == "OPERATING")
-      {
-         ui.buttonTweeterTest_set->setEnabled(true);
-         if(m_dmtweeterTestSet)
-         {
-            ui.buttonTweeterTest_set->setText("zero test");
-         }
-         else
-         {
-            ui.buttonTweeterTest_set->setText("set test");
-         }
-      }
-      else
-      {
-         ui.buttonTweeterTest_set->setEnabled(false);
-         ui.buttonTweeterTest_set->setText("set test");
-      }
-
    }
    else
    {
       ui.fitAvgTime->setEnabled(false);
-      ui.buttonTweeterTest_set->setEnabled(false);
-      ui.buttonTweeterTest_set->setText("set test");
    }
    
    // ------ dmtweeter
@@ -1374,10 +1372,24 @@ void pupilGuide::updateGUI()
    if(m_dmtweeterState == "READY" || m_dmtweeterState == "OPERATING")
    {
       ui.tweeterState->setEnabled(true);
+
+      ui.buttonTweeterTest_set->setEnabled(true);
+      if(m_dmtweeterTestSet)
+      {
+         ui.buttonTweeterTest_set->setText("zero test");
+      }
+      else
+      {
+         ui.buttonTweeterTest_set->setText("set test");
+      }
    }
    else
    {
       ui.tweeterState->setEnabled(false);
+
+      ui.buttonTweeterTest_set->setEnabled(false);
+      ui.buttonTweeterTest_set->setText("set test");
+
    }
 
    // ------ Pupil Steering

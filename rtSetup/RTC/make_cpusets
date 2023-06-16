@@ -10,7 +10,8 @@
 ##
 ####################################################
 
-cpusetMount=/sys/fs/cgroup/cpuset
+source /etc/profile.d/cgroups1_cpuset_mountpoint.sh
+cpusetMount=$CGROUPS1_CPUSET_MOUNTPOINT
 
 # On RTC we have 2x18 = 36 real cores, which maps to 72 cpus
 # To see the list: cat /proc/cpuinfo | egrep 'processor|physical id|core id'

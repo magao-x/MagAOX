@@ -33,7 +33,7 @@ echo "runstart mvalC2dm-2" >> /milk/shm/ncpc_fpsCTRL.fifo
 
 milk <<EOF
 readshmim aol2_wfsref
-cpsh aol2_wfsrefc
+cpsh aol2_wfsref aol2_wfsrefc
 exitCLI
 EOF
 

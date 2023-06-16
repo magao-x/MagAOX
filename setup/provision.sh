@@ -119,12 +119,15 @@ if grep -q "GenuineIntel" /proc/cpuinfo; then
         sudo bash -l "$DIR/steps/install_mkl_tarball.sh" || ( echo "Failed MKL install; continuing" 1>&2 || exit 0 )
     fi
     export BLAS_VENDOR=intel
+    source /etc/profile.d/mklvars.sh
 else
     export BLAS_VENDOR=openblas
 fi
-if [[ $MAGAOX_ROLE == RTC || $MAGAOX_ROLE == ICC || $MAGAOX_ROLE == AOC || $MAGAOX_ROLE == TIC || $MAGAOX_ROLE == ci ]]; then
-    bash -l "$DIR/steps/install_cuda.sh" || exit_error "CUDA install failed"
-    sudo bash -l "$DIR/steps/install_magma.sh" || exit_error "MAGMA install failed"
+if grep -q "GenuineIntel" /proc/cpuinfo; then
+    if [[ $MAGAOX_ROLE == RTC || $MAGAOX_ROLE == ICC || $MAGAOX_ROLE == AOC || $MAGAOX_ROLE == TIC || $MAGAOX_ROLE == ci ]]; then
+        bash -l "$DIR/steps/install_cuda.sh" || exit_error "CUDA install failed"
+        sudo bash -l "$DIR/steps/install_magma.sh" || exit_error "MAGMA install failed"
+    fi
 fi
 sudo bash -l "$DIR/steps/install_fftw.sh" || exit 1
 sudo bash -l "$DIR/steps/install_cfitsio.sh" || exit 1
@@ -142,13 +145,19 @@ if [[ $MAGAOX_ROLE == RTC || $MAGAOX_ROLE == ICC || $MAGAOX_ROLE == ci || ( $MAG
     sudo bash -l "$DIR/steps/install_edt.sh"
 fi
 
+# SuSE packages need either Python 3.6 or 3.10, but Rocky 9.2 has Python 3.9 as /bin/python, so we build our own RPM:
+if [[ $ID == rocky ]]; then
+  sudo bash -l "$DIR/steps/install_cpuset.sh" || error_exit "Couldn't install cpuset from source"
+fi
+
+
 ## Install proprietary / non-public software
 if [[ -e $VENDOR_SOFTWARE_BUNDLE ]]; then
     # Extract bundle
     BUNDLE_TMPDIR=/tmp/vendor_software_bundle_$(date +"%s")
     sudo mkdir -p $BUNDLE_TMPDIR
     sudo unzip -o $VENDOR_SOFTWARE_BUNDLE -d $BUNDLE_TMPDIR
-    for vendorname in alpao bmc andor libhsfw; do
+    for vendorname in  alpao andor bmc libhsfw qhyccd teledyne; do
         if [[ ! -d /opt/MagAOX/vendor/$vendorname ]]; then
             sudo cp -R $BUNDLE_TMPDIR/bundle/$vendorname /opt/MagAOX/vendor
         else
@@ -168,7 +177,8 @@ if [[ -e $VENDOR_SOFTWARE_BUNDLE ]]; then
     fi
     if [[ $MAGAOX_ROLE == ICC ]]; then
         sudo bash -l "$DIR/steps/install_libhsfw.sh"
-        # TODO add to bundle: sudo bash -l "$DIR/steps/install_picam.sh"
+        sudo bash -l "$DIR/steps/install_picam.sh"
+        sudo bash -l "$DIR/steps/install_kinetix.sh"
     fi
     sudo rm -rf $BUNDLE_TMPDIR
 fi
@@ -230,6 +240,10 @@ if [[ $MAGAOX_ROLE == AOC || $MAGAOX_ROLE == TOC || $MAGAOX_ROLE == vm ]]; then
     echo "export RTIMV_CONFIG_PATH=/opt/MagAOX/config" | sudo tee /etc/profile.d/rtimv_config_path.sh
 fi
 
+if [[ $MAGAOX_ROLE == ICC || $MAGAOX_ROLE == RTC || $MAGAOX_ROLE == AOC ]]; then
+    echo "export CGROUPS1_CPUSET_MOUNTPOINT=/opt/MagAOX/cpuset" | sudo tee /etc/profile.d/cgroups1_cpuset_mountpoint.sh
+fi
+
 # Create Python env and install Python libs that need special treatment
 # Note that subsequent steps will use libs from conda since the base
 # env activates by default.
@@ -276,6 +290,10 @@ if [[ $MAGAOX_ROLE != ci ]]; then
 fi
 
 sudo bash -l "$DIR/steps/configure_startup_services.sh"
+
+log_info "Generating subuid and subgid files, may need to run podman system migrate"
+sudo python "$DIR/generate_subuid_subgid.py" || error_exit "Generating subuid/subgid files for podman failed"
+sudo podman system migrate || error_exit "Could not run podman system migrate"
 
 # To try and debug hardware issues, ICC and RTC replicate their
 # kernel console log over UDP to AOC over the instrument LAN.

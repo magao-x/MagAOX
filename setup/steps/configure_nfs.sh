@@ -4,7 +4,7 @@ source $DIR/../_common.sh
 set -euo pipefail
 source /etc/os-release
 
-if [[ $ID == centos ]]; then
+if [[ $ID == centos || $ID == rocky ]]; then
     nfsServiceUnit=nfs-server.service
 else
     nfsServiceUnit=nfs-kernel-server.service

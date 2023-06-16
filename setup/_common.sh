@@ -61,6 +61,37 @@ function setgid_all() {
     fi
 }
 
+function make_on_data_array() {
+  # If run on instrument computer, make the name provided as an arg a link from $2/$1
+  # to /data/$1.
+  # If not on a real instrument computer, just make a normal folder under /opt/MagAOX/
+  if [[ -z $1 ]]; then
+    log_error "Missing target name argument for make_on_data_array"
+    exit 1
+  else
+    TARGET_NAME=$1
+  fi
+  if [[ -z $2 ]]; then
+    log_error "Missing parent dir argument for make_on_data_array"
+    exit 1
+  else
+    PARENT_DIR=$2
+  fi
+
+  if [[ $MAGAOX_ROLE == RTC || $MAGAOX_ROLE == ICC || $MAGAOX_ROLE == AOC ]]; then
+    REAL_DIR=/data/$TARGET_NAME
+    sudo mkdir -pv $REAL_DIR
+    link_if_necessary $REAL_DIR $PARENT_DIR/$TARGET_NAME
+  else
+    REAL_DIR=$PARENT_DIR/$TARGET_NAME
+    sudo mkdir -pv $REAL_DIR
+  fi
+
+  sudo chown -RP $instrument_user:$instrument_group $REAL_DIR
+  sudo chmod -R u=rwX,g=rwX,o=rX $REAL_DIR
+  setgid_all $REAL_DIR
+}
+
 function _cached_fetch() {
   url=$1
   filename=$2

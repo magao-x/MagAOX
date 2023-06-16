@@ -7,8 +7,10 @@ COMMIT_ISH=dev
 orgname=milk-org
 reponame=milk
 parentdir=/opt/MagAOX/source
-if [[ -e $parentdir/$reponame/NO_UPDATES_THANKS ]]; then
-  log_info "Lock file at $parentdir/$reponame/NO_UPDATES_THANKS indicates it's all good, no updates thanks"
+noUpdatesThanks=$parentdir/$reponame/NO_UPDATES_THANKS
+
+if [[ -e $noUpdatesThanks ]]; then
+  log_info "Lock file at $noUpdatesThanks indicates it's all good, no updates thanks"
   cd $parentdir/$reponame
 else
   clone_or_update_and_cd $orgname $reponame $parentdir
@@ -21,7 +23,7 @@ cd _build
 
 pythonExe=/opt/conda/bin/python
 
-milkCmakeArgs="-DCMAKE_INSTALL_PREFIX=/usr/local/milk-next -Dbuild_python_module=ON -DPYTHON_EXECUTABLE=${pythonExe}"
+milkCmakeArgs="-DCMAKE_INSTALL_PREFIX=/usr/local -Dbuild_python_module=ON -DPYTHON_EXECUTABLE=${pythonExe}"
 
 if [[ $MAGAOX_ROLE == TIC || $MAGAOX_ROLE == ICC || $MAGAOX_ROLE == RTC || $MAGAOX_ROLE == AOC ]]; then
     milkCmakeArgs="-DUSE_CUDA=ON ${milkCmakeArgs}"
@@ -32,7 +34,7 @@ numCpus=$(nproc)
 make -j $((numCpus / 2))
 sudo make install
 
-sudo $pythonExe -m pip install -e ../src/ImageStreamIO/
+sudo $pythonExe -m pip install ../src/ImageStreamIO/
 $pythonExe -c 'import ImageStreamIOWrap' || exit 1
 
 milkSuffix=bin/milk
@@ -68,6 +70,7 @@ if [[ $MAGAOX_ROLE == ICC || $MAGAOX_ROLE == RTC ]]; then
   sudo systemctl enable cacao_startup_if_present.service || true
 else
   make_on_data_array "cacao-${MAGAOX_ROLE,,}" /opt/MagAOX
+  sudo ln -sf "/opt/MagAOX/cacao-${MAGAOX_ROLE,,}" /opt/MagAOX/cacao
 fi
 log_info "Making /opt/MagAOX/cacao/ owned by xsup:magaox"
-chown -R xsup:magaox /opt/MagAOX/cacao/
+sudo chown -R xsup:magaox /opt/MagAOX/cacao/

@@ -21,6 +21,7 @@ apps_rtcicc = alpaoCtrl \
 
 apps_rtc = \
 	ocam2KCtrl \
+        andorCtrl \
 	siglentSDG \
 	ttmModulator \
 	bmcCtrl \
@@ -143,10 +144,12 @@ scripts_to_install = magaox \
 	git_check_all \
 	collect_camera_configs_for_darks \
 	shot_in_the_dark \
-        howfs_apply \
+	howfs_apply \
 	lowfs_switch \
 	lowfs_apply \
-	lowfs_switch_apply
+	lowfs_switch_apply \
+	write_magaox_pidfile \
+	mount_cgroups1_cpuset
 
 all: indi_all libs_all flatlogs apps_all guis_all utils_all
 
@@ -246,7 +249,6 @@ scripts_install:
 		sudo install scripts/$$script /opt/MagAOX/bin  && \
 		sudo ln -fs /opt/MagAOX/bin/$$script /usr/local/bin/$$script; \
 	done
-
 
 rtscripts_install:
 	for scriptname in make_cpusets procs_to_cpusets; do \

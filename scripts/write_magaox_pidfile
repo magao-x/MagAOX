@@ -1,0 +1,19 @@
+#!/usr/bin/env bash
+if [[ -z "$1" || -z "$2" ]]; then
+    echo "usage: pid appname"
+    exit 1
+fi
+pidNumber=$1
+appName=$2
+if [[ ! -d "/proc/$pidNumber" ]]; then
+    echo "Process $pidNumber does not exist"
+    exit 1
+fi
+PID_PREFIX=/opt/MagAOX/sys
+appPidDir=$(realpath "$PID_PREFIX/$appName")
+case $appPidDir/ in
+  $PID_PREFIX/) echo "Directory traversal thwarted. Refusing to write $appPidDir." && exit 1;;
+  $PID_PREFIX/*) mkdir -p $appPidDir;;
+  *) echo "Directory traversal thwarted. Refusing to write $appPidDir." && exit 1;;
+esac
+echo "$pidNumber" > $appPidDir/pid

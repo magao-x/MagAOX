@@ -42,6 +42,9 @@ protected:
 
    std::string m_dir;
    std::string m_ext;
+   std::string m_file;
+
+   bool m_time {false};
 
    unsigned long m_pauseTime {250}; ///When following, pause time to check for new data. msec. Default is 250 msec.
    int m_fileCheckInterval {4}; ///When following, number of loops to wait before checking for a new file.  Default is 4.
@@ -69,12 +72,14 @@ public:
 
    virtual int execute();
 
+   virtual int gettimes(std::vector<std::string> & logs);
+
 };
 
 void logdump::setupConfig()
 {
    config.add("pauseTime","p", "pauseTime" , argType::Required, "", "pauseTime", false,  "int", "When following, time in milliseconds to pause before checking for new entries.");
-   config.add("fileCheckInterval","F", "fileCheckInterval" , argType::Required, "", "fileCheckInterval", false,  "int", "When following, number of pause intervals between checks for new files.");
+   config.add("fileCheckInterval","", "fileCheckInterval" , argType::Required, "", "fileCheckInterval", false,  "int", "When following, number of pause intervals between checks for new files.");
 
    config.add("dir","d", "dir" , argType::Required, "", "dir", false,  "string", "Directory to search for logs. MagAO-X default is normally used.");
    config.add("ext","e", "ext" , argType::Required, "", "ext", false,  "string", "The file extension of log files.  MagAO-X default is normally used.");
@@ -82,6 +87,10 @@ void logdump::setupConfig()
    config.add("follow","f", "follow" , argType::True, "", "follow", false,  "bool", "Follow the log, printing new entries as they appear.");
    config.add("level","L", "level" , argType::Required, "", "level", false,  "int/string", "Minimum log level to dump, either an integer or a string. -1/TELEMETRY [the default], 0/DEFAULT, 1/D1/DBG1/DEBUG2, 2/D2/DBG2/DEBUG1,3/INFO,4/WARNING,5/ERROR,6/CRITICAL,7/FATAL.  Note that only the mininum unique string is required.");
    config.add("code","C", "code" , argType::Required, "", "code", false,  "int", "The event code, or vector of codes, to dump.  If not specified, all codes are dumped.  See logCodes.hpp for a complete list of codes.");
+   config.add("file","F", "file" , argType::Required, "", "file", false,  "string", "A single file to process.  If no / are found in name it will look in the specified directory (or MagAO-X default).");
+   config.add("time","T", "time" , argType::True, "", "time", false,  "bool", "time span mode: prints the ISO 8601 UTC timestamps of the first and last entry, the elapsed time in seconds, and the number of records in the file as a space-delimited string");
+
+
 }
 
 void logdump::loadConfig()
@@ -105,14 +114,14 @@ void logdump::loadConfig()
    config(m_ext, "ext");
    ///\todo need to check for lack of "." and error or fix
 
+   config(m_file, "file");
 
-
-   if(config.nonOptions.size() < 1)
+   if(m_file == "" && config.nonOptions.size() < 1)
    {
       std::cerr << "logdump: need application name. Try logdump -h for help.\n";
    }
 
-   if(config.nonOptions.size() > 1)
+   if(m_file == "" && config.nonOptions.size() > 1)
    {
       std::cerr << "logdump: only one application at a time supported. Try logdump -h for help.\n";
    }
@@ -122,6 +131,8 @@ void logdump::loadConfig()
    {
       m_prefixes[i] = config.nonOptions[i];
    }
+
+   if(config.isSet("time")) m_time = true;
 
    config(m_follow, "follow");
 
@@ -143,10 +154,24 @@ void logdump::loadConfig()
 int logdump::execute()
 {
 
-   if(m_prefixes.size() !=1 ) return -1; //error message will have been printed in loadConfig.
+   if(m_file == "" && m_prefixes.size() !=1 ) return -1; //error message will have been printed in loadConfig.
 
+   std::vector<std::string> logs;
 
-   std::vector<std::string> logs = mx::ioutils::getFileNames( m_dir, m_prefixes[0], "", m_ext);
+   if(m_file != "")
+   {
+      if(m_file.find('/') == std::string::npos)
+      {
+         m_file = m_dir + '/' + m_file;
+      }
+      std::cerr << "m_file: " << m_file << "\n";
+
+      logs.push_back(m_file);
+   }
+   else
+   {
+      logs = mx::ioutils::getFileNames( m_dir, m_prefixes[0], "", m_ext);
+   }
 
    ///\todo if follow is set, then should nfiles default to 1 unless explicitly set?
    if(m_nfiles == 0)
@@ -155,6 +180,11 @@ int logdump::execute()
    }
 
    if(m_nfiles > logs.size()) m_nfiles = logs.size();
+
+   if(m_time)
+   {
+      return gettimes(logs);
+   }
 
    bool firstRun = true; //for only showing latest entries on first run when following.
    
@@ -289,13 +319,11 @@ int logdump::execute()
             continue;
          }
 
-         /*auto verifier = flatbuffers::Verifier( (uint8_t*) logHeader::messageBuffer(logBuff), static_cast<size_t>(len));
-         bool ok = VerifyTelem_observer_fbBuffer(verifier);
-         if (!ok) 
+         if (!logVerify(ec, logBuff, len))
          {
-            std::cerr << "Log " << fname << " failed verification.  File possibly corrupt.  Exiting." << std::endl;
+            std::cerr << "Log " << fname << " failed verification on code=" << ec <<  " at byte=" << totNrd <<". File possibly corrupt.  Exiting." << std::endl;
             return -1;
-         }*/
+         }
 
          printLogBuff(lvl, ec, len, logBuff);
 
@@ -366,6 +394,111 @@ void logdump::printLogBuff( const logPrioT & lvl,
 
    std::cout << "\033[0m";
    std::cout << "\n";
+}
+
+int logdump::gettimes(std::vector<std::string> & logs)
+{
+   for(size_t i=logs.size() - m_nfiles; i < logs.size(); ++i)
+   {
+      std::string fname = logs[i];
+      FILE * fin;
+
+      bufferPtrT head(new char[logHeader::maxHeadSize]);
+
+      fin = fopen(fname.c_str(), "rb");
+
+      //--> get size here!!
+      //off_t finSize = mx::ioutils::fileSize( fileno(fin) );
+      
+      
+      off_t totNrd = 0;
+      
+      //size_t buffSz = 0;
+
+      //Read firs header
+
+      int nrd;
+
+      ///\todo check for errors on all reads . . .
+         
+      //Read next header
+      nrd = fread( head.get(), sizeof(char), logHeader::minHeadSize, fin);
+      if(nrd == 0)
+      {
+         std::cerr << "got no header\n";
+         return 0;
+      }
+
+      if( logHeader::msgLen0(head) == logHeader::MAX_LEN0-1)
+      {
+         //Intermediate size message, read two more bytes
+         nrd = fread( head.get() + logHeader::minHeadSize, sizeof(char), sizeof(msgLen1T), fin);
+      }
+      else if( logHeader::msgLen0(head) == logHeader::MAX_LEN0)
+      {
+         //Large size message: read 8 more bytes
+         nrd = fread( head.get() + logHeader::minHeadSize, sizeof(char), sizeof(msgLen2T), fin);
+      }
+
+      //logPrioT lvl = logHeader::logLevel(head);
+      //eventCodeT ec = logHeader::eventCode(head);
+      msgLenT len = logHeader::msgLen(head);
+      timespecX ts0 = logHeader::timespec(head);
+      //size_t hSz = logHeader::headerSize(head);
+
+      uint32_t nRecords = 1;
+      fseek(fin, len, SEEK_CUR);
+
+      timespecX ts;
+
+      while(!feof(fin)) //<--This should be an exit condition controlled by loop logic, not feof.
+      {
+         int nrd;
+
+         //Read next header
+         nrd = fread( head.get(), sizeof(char), logHeader::minHeadSize, fin);
+         if(nrd == 0)
+         {
+            break;
+         }
+         nRecords += 1;
+
+         //We got here without any data, probably means time to get a new file.
+         if(nrd == 0) break;
+
+         totNrd += nrd;
+         
+         if( logHeader::msgLen0(head) == logHeader::MAX_LEN0-1)
+         {
+            //Intermediate size message, read two more bytes
+            nrd = fread( head.get() + logHeader::minHeadSize, sizeof(char), sizeof(msgLen1T), fin);
+         }
+         else if( logHeader::msgLen0(head) == logHeader::MAX_LEN0)
+         {
+            //Large size message: read 8 more bytes
+            nrd = fread( head.get() + logHeader::minHeadSize, sizeof(char), sizeof(msgLen2T), fin);
+         }
+
+         //lvl = logHeader::logLevel(head);
+         //ec = logHeader::eventCode(head);
+         len = logHeader::msgLen(head);
+         ts = logHeader::timespec(head);
+         //hSz = logHeader::headerSize(head);
+         
+         fseek(fin, len, SEEK_CUR);
+
+
+      }
+
+      fclose(fin);
+
+      double t0 = ts0.time_s + ts0.time_ns/1e9;
+      double t = ts.time_s + ts.time_ns/1e9;
+
+      std::cout << fname << " " << ts0.ISO8601DateTimeStrX() << "Z " << ts.ISO8601DateTimeStrX() << "Z " << t-t0 << " " << nRecords << "\n";
+   }
+
+   return 0;
 }
 
 #endif //logdump_hpp

@@ -1,4 +1,8 @@
 #!/bin/bash
+if [[ "$EUID" != 0 ]]; then
+    sudo bash $0 "$@"
+    exit $?
+fi
 DIR="$( cd "$( dirname "${BASH_SOURCE[0]}" )" && pwd )"
 source $DIR/../_common.sh
 set -o pipefail
@@ -10,7 +14,8 @@ Defaults env_keep += "MAGAOX_ROLE"
 Defaults>xsup !env_reset
 Defaults>xsup !secure_path
 # disable password authentication to become xsup
-%$instrument_group ALL = (xsup) NOPASSWD: ALL
+%magaox ALL = (xsup) NOPASSWD: ALL
+%magaox ALL = (root) NOPASSWD: /opt/MagAOX/bin/write_magaox_pidfile
 HERE
 visudo -cf /tmp/sudoers_xsup || exit_error "visudo syntax check failed on /tmp/sudoers_xsup"
 sudo mv /tmp/sudoers_xsup /etc/sudoers.d/xsup

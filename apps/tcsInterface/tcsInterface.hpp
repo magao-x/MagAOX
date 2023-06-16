@@ -1108,7 +1108,6 @@ int tcsInterface::parse_xms( double &x,
 
    int sgn = 1;
 
-
    st = 0;
    en = xmsstr.find(':', st);
    
@@ -1116,6 +1115,7 @@ int tcsInterface::parse_xms( double &x,
 
    //Check for negative
    if(std::signbit(x)) sgn = -1;
+   if(xmsstr[0] == '-') sgn = -1;
 
    st = en + 1;
    
@@ -1630,7 +1630,8 @@ int tcsInterface::updateINDI()
 {
    try
    {
-      m_indiP_teltime["sidereal_time"] = m_telST;
+      updateIfChanged(m_indiP_teltime, "sidereal_time", m_telST, INDI_OK);
+//      m_indiP_teltime["sidereal_time"] = m_telST;
    }
    catch(...)
    {
@@ -1638,7 +1639,7 @@ int tcsInterface::updateINDI()
       return -1;
    }
 
-   try
+  /* try
    {
       m_indiP_teltime.setState(INDI_OK);
    }
@@ -1656,17 +1657,19 @@ int tcsInterface::updateINDI()
    {
       log<software_error>({__FILE__,__LINE__,"INDI library exception"});
       return -1;
-   }
+   }*/
 
    try
    {
-      m_indiP_telpos["epoch"] = m_telEpoch;
+      indi::updateIfChanged(m_indiP_telpos, std::vector<std::string>({"epoch",     "ra",    "dec",     "el",     "ha",   "am",   "rotoff"}), 
+                                             std::vector<double>({      m_telEpoch, m_telRA, m_telDec, m_telEl, m_telHA, m_telAM,  m_telRotOff}), m_indiDriver, INDI_OK);
+      /*m_indiP_telpos["epoch"] = m_telEpoch;
       m_indiP_telpos["ra"] = m_telRA;
       m_indiP_telpos["dec"] = m_telDec;
       m_indiP_telpos["el"] = m_telEl;
       m_indiP_telpos["ha"] = m_telHA;
       m_indiP_telpos["am"] = m_telAM;
-      m_indiP_telpos["rotoff"] = m_telRotOff;
+      m_indiP_telpos["rotoff"] = m_telRotOff;*/
    }
    catch(...)
    {
@@ -1674,7 +1677,7 @@ int tcsInterface::updateINDI()
       return -1;
    }
    
-   try
+   /*try
    {
       m_indiP_telpos.setState(INDI_OK);
    }
@@ -1692,7 +1695,7 @@ int tcsInterface::updateINDI()
    {
       log<software_error>({__FILE__,__LINE__,"INDI library exception"});
       return -1;
-   }
+   }*/
    
    try
    {
@@ -1735,8 +1738,9 @@ int tcsInterface::updateINDI()
    
    try
    {
-      m_indiP_catalog["object"] = m_catObj;
-      m_indiP_catalog["rotmode"] = m_catRo;
+      indi::updateIfChanged(m_indiP_catalog, std::vector<std::string>({"object", "rotmode"}), std::vector<std::string>({m_catObj, m_catRm}), m_indiDriver, INDI_OK);
+     // m_indiP_catalog["object"] = m_catObj;
+      //m_indiP_catalog["rotmode"] = m_catRo;
    }
    catch(...)
    {
@@ -1744,7 +1748,8 @@ int tcsInterface::updateINDI()
       return -1;
    }
    
-   try
+   
+/*   try
    {
       m_indiP_catalog.setState(INDI_OK);
    }
@@ -1762,14 +1767,16 @@ int tcsInterface::updateINDI()
    {
       log<software_error>({__FILE__,__LINE__,"INDI library exception"});
       return -1;
-   }
+   }*/
    
    try
    {
-      m_indiP_catdata["ra"] = m_catRA;
+      indi::updateIfChanged(m_indiP_catdata, std::vector<std::string>({"ra",   "dec",    "epoch", "rotoff"}), 
+                                             std::vector<double>({     m_catRA, m_catDec, m_catEp, m_catRo}), m_indiDriver, INDI_OK);
+      /*m_indiP_catdata["ra"] = m_catRA;
       m_indiP_catdata["dec"] = m_catDec;
       m_indiP_catdata["epoch"] = m_catEp;
-      m_indiP_catdata["rotoff"] = m_catRo;
+      m_indiP_catdata["rotoff"] = m_catRo;*/
    }
    catch(...)
    {
@@ -1777,7 +1784,7 @@ int tcsInterface::updateINDI()
       return -1;
    }
    
-   try
+/*   try
    {
       m_indiP_catdata.setState(INDI_OK);
    }
@@ -1795,7 +1802,7 @@ int tcsInterface::updateINDI()
    {
       log<software_error>({__FILE__,__LINE__,"INDI library exception"});
       return -1;
-   }
+   }*/
    
    //---- Vane End ----//
    try

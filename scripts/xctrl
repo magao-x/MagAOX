@@ -115,22 +115,32 @@ def _read_processes(filepath):
     return processes
 
 
-def _brief_status(process_name):
+def _check_status(process_name):
     pid_filepath = f'/opt/MagAOX/sys/{process_name}/pid'
-    if not os.path.exists(pid_filepath):
-        if _session_exists(process_name):
-            failure(f'{process_name}: session exists, but process is not running')
-        else:
-            warning(f'{process_name}: not started')
-    else:
+    session_exists = _session_exists(process_name)
+    pid_file_exists = os.path.exists(pid_filepath)
+    pid = None
+    pid_exists = False
+    if pid_file_exists:
         with open(pid_filepath) as pid_file:
             pid = int(pid_file.read().strip())
-        if psutil.pid_exists(pid):
-            proc = psutil.Process(pid)
-            with proc.oneshot():
-                success(f'{process_name}: running (pid: {pid})')
-        else:
-            failure(f'{process_name}: dead (stale pid)')
+        pid_exists = psutil.pid_exists(pid)
+
+    return session_exists, pid_file_exists, pid, pid_exists
+
+def _brief_status(process_name):
+    session_exists, pid_file_exists, pid, pid_exists = _check_status(process_name)
+    message = f"{process_name}: "
+    if session_exists and pid_exists:
+        success(message + f"running (pid: {pid})")
+    elif session_exists and pid_file_exists and not pid_exists:
+        failure(message + "dead (session exists, stale pid file)")
+    elif session_exists and not pid_file_exists:
+        failure(message + "session exists, but process is not running")
+    elif not session_exists and not pid_file_exists:
+        warning(message + "not started")
+    else:
+        warning(f"{session_exists=} {pid_file_exists=} {pid=} {pid_exists=}")
 
 def status(processes, targets, role):
     if not len(targets):
@@ -249,10 +259,15 @@ def _startup_helper(process_name, executable_name):
     did_anything : bool
         Whether a new session was started for `process_name`
     '''
-    if _session_exists(process_name):
-        info(f"Session exists for {process_name}, doing nothing")
-        return False
-    info(f"Session {process_name} does not exist")
+    session_exists, pid_file_exists, pid, pid_exists = _check_status(process_name)
+    if session_exists and not pid_exists:
+        info(f"Session exists for {process_name}, but process is not running. Recreating session...")
+        _shutdown_helper(process_name)
+    elif session_exists and pid_exists:
+        info(f"Session for {process_name} exists, {executable_name} is running as pid {pid}")
+        return
+    else:
+        info(f"Session {process_name} does not exist")
     execpath = f"/opt/MagAOX/bin/{executable_name}"
     if not os.path.exists(execpath):
         raise RuntimeError(

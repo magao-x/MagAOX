@@ -186,7 +186,7 @@ struct compLogFileName
      */ 
    bool operator()( const logFileName & a, 
                     const logFileName & b
-                  )
+                  ) const
    {
       return (a.baseName() < b.baseName());
    }
