@@ -308,7 +308,7 @@ int logdump::execute()
 
          ///\todo what do we do if nrd not equal to expected size?
          nrd = fread( logBuff.get() + hSz, sizeof(char), len, fin);
-         // If not following, exit loop without printing the incomplete log entry (go on to next file).
+         // If not following, exit loop without printing the incomplete log entry (go on to next file).cd
          // If following, wait for it, but also be checking for new log file in case of crash
 
          totNrd += nrd;
@@ -321,7 +321,7 @@ int logdump::execute()
 
          if (!logVerify(ec, logBuff, len))
          {
-            std::cerr << "Log " << fname << " failed verification on code=" << ec <<  " at byte=" << totNrd <<". File possibly corrupt.  Exiting." << std::endl;
+            std::cerr << "Log " << fname << " failed verification on code=" << ec <<  " at byte=" << totNrd-len-hSz <<". File possibly corrupt.  Exiting." << std::endl;
             return -1;
          }
 
