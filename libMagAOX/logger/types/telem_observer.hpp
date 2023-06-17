@@ -58,7 +58,37 @@ struct telem_observer : public flatbuffer_log
                      )
    {
       auto verifier = flatbuffers::Verifier( (uint8_t*) flatlogs::logHeader::messageBuffer(logBuff), static_cast<size_t>(len));
-      return VerifyTelem_observer_fbBuffer(verifier);
+
+      bool ok = VerifyTelem_observer_fbBuffer(verifier); 
+      if(!ok) return ok;
+
+      auto fbs = GetTelem_observer_fb((uint8_t*) flatlogs::logHeader::messageBuffer(logBuff));
+
+      if(fbs->email())
+      {
+         std::string email = fbs->email()->c_str();
+         for(size_t n = 0; n < email.size(); ++n)
+         {
+            if(!isprint(email[n]))
+            {
+               return false;
+            }
+         }
+      }
+
+      if(fbs->obsName())
+      {
+         std::string obsn = fbs->obsName()->c_str();
+         for(size_t n = 0; n < obsn.size(); ++n)
+         {
+            if(!isprint(obsn[n]))
+            {
+               return false;
+            }
+         }
+      }
+
+      return ok;
    }
 
    ///Get the message formattd for human consumption.
