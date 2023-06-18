@@ -192,7 +192,7 @@ void resurrectee<parentT>::execute_1()
 /// - time offsets less than 0 are ignored
 /// - timestamps that are not newer than past timestamps are not sent
 template<class parentT>
-void resurrectee<parentT>::execute(size_t offset_index)
+void resurrectee<parentT>::execute(size_t offset_index /* = 0 */)
 {
     // Ensure the element exists in the vector and its value is positive
     if (offset_index >= m_time_offset.size()) { return; }
