@@ -2780,6 +2780,7 @@ int MagAOXApp<_useINDI>::startResurrectee()
    }
 
    //Send a hexbeat using 2nd* time offset if that offset was configured
+   //*** Hexbeat sent only if 2nd vector element is present and positive
    // * m_resurrectee->m_time_offset[1]
    m_resurrectee->execute_1();
 

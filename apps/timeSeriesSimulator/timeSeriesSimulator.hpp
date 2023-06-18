@@ -85,9 +85,9 @@ protected:
 
   // For testing resurrector and resurrectee.timeout
   // - A positive value here, in seconds, effects a delay at the end of
-  //   m_resurrectee.appStartup().  The delay emulates the delay of a
-  //   slow-starting process e.g. that must wait for a device to start,
-  //   initialize, and/or connect to the process
+  //   MagAOXApp<_useINDI>::startResurectee().  The delay emulates the
+  //   delay of a slow-starting process e.g. that must wait for a device
+  //   to start, initialize, and/or connect to the process
   unsigned int m_startup_delay{0};
 
 public:
