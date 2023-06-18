@@ -178,6 +178,9 @@ template<class parentT>
 std::vector<time_t> resurrectee<parentT>::m_time_offset = { 600 };
 
 /// Write hexbeat timestamp to FIFO with time offset at vector element 1
+/// - This is done to send an initial, i.e. pre-appStartup(), hexbeat,
+///   so resurrector will not cyclically kill and restart such
+//    slow-starting processes
 template<class parentT>
 void resurrectee<parentT>::execute_1()
 {
@@ -185,18 +188,23 @@ void resurrectee<parentT>::execute_1()
 }
 
 /// Write hexbeat timestamp to FIFO
+/// - indices beyond of the m_time_offset's vector range are ignored
+/// - time offsets less than 0 are ignored
+/// - timestamps that are not newer than past timestamps are not sent
 template<class parentT>
 void resurrectee<parentT>::execute(size_t offset_index)
 {
-    // Ensure the element exists in the vector m_time_offset
+    // Ensure the element exists in the vector and its value is positive
     if (offset_index >= m_time_offset.size()) { return; }
+    if (m_time_offset[offset_index] < 0) { return; }
 
-    // Generate hexbeat timestamp
-    char stimestamp[18];
+    // Calculate the future time of timeout; do nothing and return if it
+    // is not newer than any previously sent hexbeat
     time_t new_time = time(0)+m_time_offset[offset_index];
-
     if (new_time <= m_last_time_written) { return; }
 
+    // Generate hexbeat timestamp for the timeout
+    char stimestamp[18];
     sprintf(stimestamp,"%9.9lx\n",new_time);
 
     // Write hexbeat to FIFO
@@ -333,7 +341,14 @@ void resurrectee<parentT>::_sigusr2_handler( int signum
 template<class parentT>
 void resurrectee<parentT>::_setupConfig( mx::app::appConfigurator & _config )
 {
-   _config.add("resurrectee.timeout", "", "resurrectee.timeout", mx::app::argType::Required, "resurrectee", "timeout", false, "int", "Resurrectee timeout, s");
+   _config.add("resurrectee.timeout", "", "resurrectee.timeout", mx::app::argType::Required, "resurrectee", "timeout", false, "int"
+, "Resurrectee hexbeat timeout vector values,  in seconds:  the first"
+  " (default 600s) is the hexbeat timeout once the process is started"
+  " and running; the second, if provided here, is a one-time hexbeat"
+  " timeout for slow-starting processes (e.g. that have to wait for an"
+  " external device to connect) used to send a hexbeat before startup to"
+  " provide a timeout longer than the resurrector's 10s default startup"
+  " timeout");
 }
 
 template<class parentT>
