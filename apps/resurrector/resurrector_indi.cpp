@@ -23,60 +23,86 @@
   */
 #include <map>
 #include <random>
+#include <cstring>
 #include <iomanip>
 #include <iostream>
 
 #include "resurrector_indi.hpp"
 
+static bool no_SIGUSR1_yet{true};
 static bool no_SIGUSR2_yet{true};
 static bool verbose{false};
 
 /// Signal handler:  exit on any signal caught
 void
-sigusr2_handler(int sig, siginfo_t *si, void *unused)
+sigusr12_handler(int sig, siginfo_t *si, void *unused)
 {
-    if (verbose) { std::cerr << "Received SIGUSR2" << std::endl; }
-    no_SIGUSR2_yet = false;
+    if (verbose)
+    {
+        std::cerr << "Received signal[" 
+                  << strerror(sig)
+                  << "]"
+                  << std::endl;
+    }
+    no_SIGUSR1_yet = sig==SIGUSR1 ? false : no_SIGUSR1_yet;
+    no_SIGUSR2_yet = sig==SIGUSR2 ? false : no_SIGUSR2_yet;
 }
 
 /// Ignore some signals, establish handlers for others
-void setup_SIGUSR2_handler()
+void setup_SIGUSR12_handler(int iSIGUSRn)
 {
+    if (iSIGUSRn != SIGUSR1 && iSIGUSRn != SIGUSR2)
+    {
+        std::cerr
+        << "resurrector_indi@setup_SIGUSR12_handler:  "
+        << "Unknown signal argument["
+        << iSIGUSRn << "(" << strerror(iSIGUSRn) << ")]"
+        << "; exiting ..."
+        << std::endl;
+        exit(1);
+    }
+
     int istat = -1;
     struct sigaction sa = { 0 };
 
-    // Catch SIGUSR2 in sigusr2_handler(...) above
+    // Catch SIGUSR1 or SIGUSR2 in sigusr12_handler(...) above
     sigemptyset(&sa.sa_mask);
     sa.sa_flags = SA_SIGINFO;
-    sa.sa_sigaction = sigusr2_handler;
+    sa.sa_sigaction = sigusr12_handler;
     errno = 0;
-    istat = sigaction(SIGUSR2, &sa, 0);
-    if (istat < 0) {
+    istat = sigaction(iSIGUSRn, &sa, 0);
+    if (istat < 0 || verbose)
+    {
         std::cerr
         << "resurrector_indi:  "
-        << "sigaction(" << strsignal(SIGUSR2) << ")=" << istat
+        << "sigaction(" << strsignal(iSIGUSRn) << ")=" << istat
         << "; errno=" << errno << "[" << strerror(errno) << "]"
         << std::endl;
-        perror("sigaction/SIGUSR2");
-        exit(1);
+        perror(iSIGUSRn==SIGUSR1 ? "sigaction/USR1" : "sigaction/USR2");
+        if (istat) { exit(1); }
     }
 }
 
 int
 main(int argc, char** argv)
 {
-    resurrectorT<> resurr;
+    extern void stdout_stderr_redirect(std::string);
+    bool nor{get_no_output_redirect_arg(argc,argv)};
+    verbose = get_verbose_arg(argc, argv);
+    resurrectorT<> resurr(nor ? nullptr : &stdout_stderr_redirect);
 
-    setup_SIGUSR2_handler();
+    if (verbose) { resurr.set_resurr_logging(); }
+    else         { resurr.clr_resurr_logging(); }
 
     // Get MagAOX role and build process list file pathname e.g.
     // export MAGAOX_ROLE=vm; path=/opt/MagAOX/config/proclist_vm.txt
     std::string proclist_role = get_magaox_proclist_role(argc, argv);
 
-    if (get_verbose_arg(argc, argv)) { resurr.set_resurr_logging(); }
-    else { resurr.clr_resurr_logging(); }
+    setup_SIGUSR12_handler(SIGUSR1);
+    setup_SIGUSR12_handler(SIGUSR2);
 
-    do {
+    do
+    {
         // Open the process list file
         FILE* f = fopen(proclist_role.c_str(),"r");
 
@@ -115,8 +141,8 @@ main(int argc, char** argv)
         resurr.pending_close_all_close();
 
         ////////////////////////////////////////////////////////////////
-        // Rewind proclist file, then parse proclist file again, for
-        // each HBM:  open FIFOl start resurrectee (HexBeater) process
+        // Rewind proclist file, then parse proclist file again for each
+        // HBM:  open FIFO; start resurrectee (HexBeater) process
         ////////////////////////////////////////////////////////////////
 
         fseek(f, 0, SEEK_SET);
@@ -133,33 +159,66 @@ main(int argc, char** argv)
 
             argv0 = IRMAGAOX_bin + std::string("/") + exec;
 
-            // Open the FIFO for this hexbeater in the FIFOs directory
-            // The FIFO path will be /.../fifos/<name>.hb
-            // N.B. open_hexbeater() will return -1 if the pair
-            //      [argv0,driver_name] is already in resurr
-            int newfd = resurr.open_hexbeater
+            // Check for a FIFO fd with same driver name is already in
+            // the list; find_hbm_by_name() will return -1 if there is
+            // no matching driver name the list
+            int newfd = resurr.find_hbm_by_name(driver_name);
+            bool logged{false};
+            logged = false;
+
+            // N.B. if this action is the result of a SIGUSR2, and any
+            //      item read from the proclist file has kept the same
+            //      driver name but has had its argv0 updated, then the
+            //      pending_close_all_close() call above should have
+            //      stopped that item and cleared it from the hbm list,
+            //      in which case it should not have been found by the
+            //      find_hbm_by_name() above.
+
+            // N.B. the start_hexbeater() call below will **NOT** fork a
+            //      new process if it finds a running process with the
+            //      same argv0 and driver name in the /proc/ filesystem.
+            //
+            //      So if this action is the result of a SIGUSR2, and
+            //      any such processes were hung, but not yet expired,
+            //      should have been stopped manually by issuing a
+            //      "kill -USR2 {pid}" command
+
+            if (newfd<0)
+            {
+                // If a FIFO with the driver name is not in the list,
+                // then open a FIFO for this hexbeater in the FIFOs
+                // directory; FIFO path will be /.../fifos/<name>.hb
+                // N.B. open_hexbeater() would return -1 if the driver
+                //      name was already in the list, but that will not
+                //      happen here because of the find_hbm_by_name()
+                //      call above
+                newfd = resurr.open_hexbeater
                             (argv0, driver_name, IRMAGAOX_fifos, NULL);
 
-            if (newfd<0) {
-                if (errno!=EEXIST) 
+                if (newfd<0)
                 {
-                    // Failing for HBMs that fail but not already opened
+                    // If neither an existing FIFO is found nor a new
+                    // FIFO is opened, then resurrector logs the erro
+                    // and does nothing
                     perror(("Failed to open Hexbeater FIFO["
-                           + argv0 +"]").c_str()
+                           + driver_name +"," + argv0 +"]").c_str()
                           );
-                    return 1;
+                    continue;
                 }
-                // Skip HBMs that are already opened
-                continue;
+
+                // Write the new HBM's info to STDERR
+                resurr.fd_to_stream(std::cerr, newfd);
+                logged = true;
             }
 
-            // Write the HBM info to STDERR
-            resurr.fd_to_stream(std::cerr, newfd);
-
-            // INDI drivers (non-indiservers) are delayed
+            // The first INDI server is started immediately; all other
+            // processes (INDI drivers, non-indiservers) are delayed
             if (driver_name.substr(0,2)!="is")
             {
-                std::cerr << " [delayed start]" << std::endl;;
+                if (logged)
+                {
+                    std::cerr << " [delayed start]" << std::endl;;
+                }
                 // Append FD to list and move on to next proclist line
                 fd_indidrivers.push_back(newfd);
                 continue;
@@ -202,18 +261,34 @@ main(int argc, char** argv)
 
         // Run the select/read/check/restart cycle
         // Refer to resurrector.hpp and HexbeatMonitor.hpp for details
-        // Exit loop when SIGUSR2 signal received, to re-read proclist
+        // Exit loop when either SIGUSR1 or SIGUSR2 signal received,
+        // EITHER to re-read the proclist for SIGUSR2,
+        // OR to stop all children for sIGUSR1 and then exit
         do
         {
             struct timeval tv{1,0};
             resurr.srcr_cycle(tv);
-        } while (no_SIGUSR2_yet);
+        } while (no_SIGUSR2_yet && no_SIGUSR1_yet);
 
-        if (verbose) { std::cerr << "Acting on SIGUSR2" << std::endl; }
-
+        // Ensure no_SIGUSR2_yet is reset
         no_SIGUSR2_yet = true;
 
-    } while (true);
+        if (verbose) {
+          std::cerr << "Acting on SIGUSR"
+                    << (no_SIGUSR2_yet ? "1 (exit)"
+                                       : "2 (re-read proclist)"
+                       )
+                    << std::endl;
+        }
+
+    } while (no_SIGUSR1_yet);
+
+    if (!no_SIGUSR1_yet)
+    {
+        // Set all HBMs to be closed, then close them
+        resurr.pending_close_all_set(true);
+        resurr.pending_close_all_close();
+    }
 
     return 0;
 }

@@ -10,7 +10,7 @@ Usage:
     xctrl startup [PROCNAME ...]
         - start all processes in /opt/MagAOX/config/processes_${MAGAOX_ROLE}.txt (or just PROCNAME)
     xctrl shutdown [PROCNAME ...]
-        - show status and last few log lines for each process (or just PROCNAME)
+        - stop all processes in /opt/MagAOX/config/processes_${MAGAOX_ROLE}.txt (or just PROCNAME)
     xctrl restart [PROCNAME ...]
         - shutdown then startup each process (or just PROCNAME)
 '''

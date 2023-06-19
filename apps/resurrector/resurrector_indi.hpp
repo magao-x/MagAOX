@@ -34,50 +34,93 @@ Usage(int rtn, const char* msg)
                  "Usage:\n"
                  "\n"
                  "    [MAGAOX_ROLE=role] resurrector_indi"
-                 " [-r role] [--role=role] [-h|--help]\n"
+                 " [-r role] [--role=role]"
+                 " [-nor|--no-output-redirect]"
+                 " [-v|--verbose]"
+                 " [-h|--help]\n"
                  "\n" << std::endl;
     exit(rtn);
 }
 
+/** \brief Detect presence of command line argument
+  *
+  * Detect any command line option in argv that matches either
+  * function argument ps or pl
+  *
+  * \returns true if matching option detected, else false
+  * \arg \c argc - command line token count
+  * \arg \c argv - pointer to array of command line token pointers
+  * \arg \c ps - short form of argument, e.g. "-v", or nullptr
+  * \arg \c pl - long form of argument, e.g. "--verbose", or nullptr
+  */
 bool
-get_verbose_arg(int argc, char** argv)
+arg_is_present(int argc, char** argv, const char* ps, const char* pl)
 {
     for (char** av=argv+argc-1; av > argv; --av)
     {
-        if (strcmp(*av, "-v")) { continue; }
-        return true;
+        if (ps && !strcmp(*av, ps)) return true;
+        if (pl && !strcmp(*av, pl)) return true;
     }
     return false;
 }
 
-std::string
-get_magaox_proclist_role(int argc, char** argv)
+/** \brief Return value of command line argument
+  *
+  * Return specified value of command line option in argv that matches
+  * either function argument pshrt or plngpfx
+  *
+  * N.B. for the long form with an equals sign, e.g. --option=value, the
+  *      prefix must end with an equals sign e.g. plngpfx => "--option="
+  *
+  * \returns pointer to value of last matching argument
+  * \arg \c argc - command line token count
+  * \arg \c argv - pointer to array of command line token pointers
+  * \arg pshrt - short form of 2-token option, e.g. -r vm, or nullptr
+  * \arg plngpfx - long form of option, e.g. --role=vm, or nullptr
+  */
+char*
+arg_value(int argc, char** argv, const char* pshrt, const char* plngpfx)
 {
-    char* role{nullptr};
-    char* rptr{nullptr};
+    char* lastarg{nullptr};
+    size_t L{strlen(plngpfx)};
     for (char** av=argv+argc-1; av > argv; --av)
     {
-        if (!role)
+        // Parse [<short> lastarg] over two consecutive args in argv
+        if (pshrt && !strcmp(*av, pshrt))
         {
-            // Parse [-r the_role]
-            if (!strcmp(*av, "-r")) {
-                if (!rptr)
-                {
-                    Usage(1, "ERROR:  -r cannot be the last token");
-                }
-                role = rptr; 
+            if (!lastarg)
+            {
+                Usage(1, (std::string("ERROR:  >>>")
+                         +std::string(pshrt)
+                         +std::string("<<< cannot be the last token")
+                         ).c_str());
             }
-
-            // Parse [--role=the_role]
-            if (!strncmp(*av, "--role=", 7)) { role = (*av) + 7; }
-
-            rptr = *av;
+            return lastarg;
         }
+
+        // Parse <plngpfx>value
+        if (plngpfx && !strncmp(*av, plngpfx, L)) { return (*av) + L; }
+
+        // Save this arg for short form test on next pass through loop
+        lastarg = *av;
 
         if (!strcmp(*av, "-h")) { Usage(0, ""); }
         if (!strcmp(*av, "--help")) { Usage(0, ""); }
 
     }
+    return nullptr;
+}
+
+/** \brief Return MagAOX process list role (e.g. vm; RTC; etc.)
+  *
+  * \returns std::string with role
+  * \arg \c argc - command line token count
+  * \arg \c argv - pointer to array of command line token pointers
+  */
+std::string
+get_magaox_proclist_role(int argc, char** argv)
+{
+    char* role{arg_value(argc, argv, "-r", "--role=")};
     if (!role) { role = getenv("MAGAOX_ROLE"); }
     if (!role) { Usage(1, "\nERROR:  no role specified; try --help"); }
 
@@ -88,5 +131,30 @@ get_magaox_proclist_role(int argc, char** argv)
 
     return pl_role;
 }
+
+/** \brief Return whether a verbose command-line option is present
+  *
+  * \returns true if -v or --verbose is present, else false
+  * \arg \c argc - command line token count
+  * \arg \c argv - pointer to array of command line token pointers
+  */
+bool
+get_verbose_arg(int argc, char** argv)
+{
+    return arg_is_present(argc, argv, "-v", "--verbose");
+}
+
+/** \brief Return whether output redirect is inhibited
+  *
+  * \returns true if -nor or --no-output-redirect is present, else false
+  * \arg \c argc - command line token count
+  * \arg \c argv - pointer to array of command line token pointers
+  */
+bool
+get_no_output_redirect_arg(int argc, char** argv)
+{
+    return arg_is_present(argc, argv, "-nor", "--no-output-redirect");
+}
+
 
 #endif// __INDI_RESURRECTOR_HPP__
