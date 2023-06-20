@@ -41,6 +41,7 @@ class logsurgeon : public mx::app::application
 protected:
 
    std::string m_fname;
+   bool m_checkOnly;
 
 public:
    virtual void setupConfig();
@@ -53,11 +54,13 @@ public:
 void logsurgeon::setupConfig()
 {
    config.add("file","F", "file" , argType::Required, "", "file", true,  "string", "The single file to process.  If no / are found in name it will look in the specified directory (or MagAO-X default).");
+   config.add("check","c", "check", argType::True, "", "file", false,  "bool", "Check-only mode (no modification to files on disk, exit code 0 indicates successful verification.)");
 }
 
 void logsurgeon::loadConfig()
 {
    config(m_fname, "file");
+   config(m_checkOnly, "check");
 }
 
 int logsurgeon::execute()
@@ -177,6 +180,11 @@ int logsurgeon::execute()
    if(totBad == 0)
    {
       std::cerr << "Taking no action on good file.\n";
+   }
+   else if (m_checkOnly)
+   {
+      std::cerr << "Check-only mode set, exiting with error status to indicate failed verification\n";
+      return EXIT_FAILURE;
    }
    else
    {
