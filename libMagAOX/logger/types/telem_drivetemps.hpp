@@ -73,10 +73,8 @@ struct telem_drivetemps : public flatbuffer_log
       {
          msg+= "[hdd temps] ";
          
-         //flatbuffers::VectorOfStrings<std::string>::iterator nit = rgs->diskName()->begin();
-         
          int i=0;
-         for(flatbuffers::Vector<float>::iterator it = rgs->diskTemp()->begin(); it != rgs->diskTemp()->end(); ++it, ++i) 
+         for(flatbuffers::Vector<float>::const_iterator it = rgs->diskTemp()->begin(); it != rgs->diskTemp()->end(); ++it, ++i)
          {
             msg += rgs->diskName()->GetAsString(i)->c_str();
             msg += ":";
@@ -87,6 +85,13 @@ struct telem_drivetemps : public flatbuffer_log
 
       return msg;
 
+   }
+
+   static std::string msgJSON( void * msgBuffer,  /**< [in] Buffer containing the flatbuffer serialized message.*/
+                               flatlogs::msgLenT len  /**< [in] [unused] length of msgBuffer.*/
+                             )
+   {
+      return makeJSON(msgBuffer, len, Telem_drivetemps_fbTypeTable());
    }
 
 }; //telem_drivetemps

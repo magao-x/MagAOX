@@ -93,6 +93,15 @@ struct empty_log
       
       return derivedT::msg();
    }
+
+   static std::string msgJSON( void * msgBuffer,  /**< [in] Buffer containing the flatbuffer serialized message.*/
+                                              flatlogs::msgLenT len  /**< [in] [unused] length of msgBuffer.*/
+                                            )
+   {
+      static_cast<void>(len);
+      static_cast<void>(msgBuffer);
+      return "{}";
+   }
 };
 
 } //namespace logger

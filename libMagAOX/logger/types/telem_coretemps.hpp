@@ -70,7 +70,7 @@ struct telem_coretemps : public flatbuffer_log
       if (rgs->temps() != nullptr) 
       {
          msg+= "[cpu temps] ";
-         for(flatbuffers::Vector<float>::iterator it = rgs->temps()->begin(); it != rgs->temps()->end(); ++it) 
+         for(flatbuffers::Vector<float>::const_iterator it = rgs->temps()->begin(); it != rgs->temps()->end(); ++it)
          {
             msg+= std::to_string(*it);
             msg+= " ";
@@ -79,6 +79,13 @@ struct telem_coretemps : public flatbuffer_log
 
       return msg;
 
+   }
+
+   static std::string msgJSON( void * msgBuffer,  /**< [in] Buffer containing the flatbuffer serialized message.*/
+                               flatlogs::msgLenT len  /**< [in] [unused] length of msgBuffer.*/
+                             )
+   {
+      return makeJSON(msgBuffer, len, Telem_coretemps_fbTypeTable());
    }
 
 }; //telem_coretemps

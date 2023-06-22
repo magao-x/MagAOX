@@ -69,7 +69,7 @@ struct telem_dmmodes : public flatbuffer_log
 
       if (rgs->amps() != nullptr) 
       {
-         for(flatbuffers::Vector<float>::iterator it = rgs->amps()->begin(); it != rgs->amps()->end(); ++it) 
+         for(flatbuffers::Vector<float>::const_iterator it = rgs->amps()->begin(); it != rgs->amps()->end(); ++it)
          {
             msg+= std::to_string(*it);
             msg+= " ";
@@ -80,6 +80,13 @@ struct telem_dmmodes : public flatbuffer_log
 
    }
 
+   static std::string msgJSON( void * msgBuffer,  /**< [in] Buffer containing the flatbuffer serialized message.*/
+                               flatlogs::msgLenT len  /**< [in] [unused] length of msgBuffer.*/
+                             )
+   {
+      return makeJSON(msgBuffer, len, Telem_dmmodes_fbTypeTable());
+   }
+
    static std::vector<float> amps( void * msgBuffer )
    {
       std::vector<float> amps;
@@ -87,7 +94,7 @@ struct telem_dmmodes : public flatbuffer_log
 
       if (fbs->amps() != nullptr) 
       {
-         for(flatbuffers::Vector<float>::iterator it = fbs->amps()->begin(); it != fbs->amps()->end(); ++it) 
+         for(flatbuffers::Vector<float>::const_iterator it = fbs->amps()->begin(); it != fbs->amps()->end(); ++it)
          {
             amps.push_back(*it);
          }

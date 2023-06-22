@@ -95,6 +95,13 @@ struct telem_cooler : public flatbuffer_log
       return msg;
    
    }
+
+   static std::string msgJSON( void * msgBuffer,  /**< [in] Buffer containing the flatbuffer serialized message.*/
+                               flatlogs::msgLenT len  /**< [in] [unused] length of msgBuffer.*/
+                             )
+   {
+      return makeJSON(msgBuffer, len, Telem_cooler_fbTypeTable());
+   }
    
    static double getDouble( flatlogs::bufferPtrT & buffer,
                             member m 
