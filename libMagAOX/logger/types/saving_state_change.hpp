@@ -71,7 +71,12 @@ struct saving_state_change : public flatbuffer_log
       return s.str();
    }
 
-   
+  static std::string msgJSON( void * msgBuffer,  /**< [in] Buffer containing the flatbuffer serialized message.*/
+                               flatlogs::msgLenT len  /**< [in] [unused] length of msgBuffer.*/
+                             )
+   {
+      return makeJSON(msgBuffer, len, Saving_state_change_fbTypeTable());
+   }
 
 };
 

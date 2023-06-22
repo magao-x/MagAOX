@@ -83,6 +83,13 @@ struct telem_coreloads : public flatbuffer_log
 
    }
 
+   static std::string msgJSON( void * msgBuffer,  /**< [in] Buffer containing the flatbuffer serialized message.*/
+                               flatlogs::msgLenT len  /**< [in] [unused] length of msgBuffer.*/
+                             )
+   {
+      return makeJSON(msgBuffer, len, Telem_coreloads_fbTypeTable());
+   }
+
 }; //telem_coreloads
 
 

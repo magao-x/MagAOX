@@ -10,6 +10,9 @@
 #ifndef logger_types_flatbuffer_log_hpp
 #define logger_types_flatbuffer_log_hpp
 
+#include "flatbuffers/flatbuffers.h"
+#include "flatbuffers/minireflect.h"
+
 namespace MagAOX
 {
 namespace logger
@@ -56,6 +59,18 @@ struct flatbuffer_log
       memcpy(cbuff, msg.builder.GetBufferPointer(), msg.builder.GetSize());
       
       return 0;
+   }
+
+   static std::string makeJSON( void * msgBuffer,  /**< [in] Buffer containing the flatbuffer serialized message.*/
+                               flatlogs::msgLenT len,  /**< [in] [unused] length of msgBuffer.*/
+                               const flatbuffers::TypeTable * typeTable /**< [in] flatbuffers TypeTable for reflection of field names */
+                              )
+   {
+      static_cast<void>(len);
+      flatbuffers::ToStringVisitor tostring_visitor(" ", true, "", true);
+      const uint8_t * msgBufferCast = reinterpret_cast<const uint8_t *>(msgBuffer);
+      IterateFlatBuffer(msgBufferCast, typeTable, &tostring_visitor);
+      return tostring_visitor.s;
    }
 
 };
