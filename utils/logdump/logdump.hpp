@@ -45,6 +45,7 @@ protected:
    std::string m_file;
 
    bool m_time {false};
+   bool m_jsonMode {false};
 
    unsigned long m_pauseTime {250}; ///When following, pause time to check for new data. msec. Default is 250 msec.
    int m_fileCheckInterval {4}; ///When following, number of loops to wait before checking for a new file.  Default is 4.
@@ -62,6 +63,9 @@ protected:
    void printLogBuff( const logPrioT & lvl,
                       const eventCodeT & ec,
                       const msgLenT & len,
+                      bufferPtrT & logBuff
+                    );
+   void printLogJson( const msgLenT & len,
                       bufferPtrT & logBuff
                     );
 
@@ -89,6 +93,7 @@ void logdump::setupConfig()
    config.add("code","C", "code" , argType::Required, "", "code", false,  "int", "The event code, or vector of codes, to dump.  If not specified, all codes are dumped.  See logCodes.hpp for a complete list of codes.");
    config.add("file","F", "file" , argType::Required, "", "file", false,  "string", "A single file to process.  If no / are found in name it will look in the specified directory (or MagAO-X default).");
    config.add("time","T", "time" , argType::True, "", "time", false,  "bool", "time span mode: prints the ISO 8601 UTC timestamps of the first and last entry, the elapsed time in seconds, and the number of records in the file as a space-delimited string");
+   config.add("json","J", "json" , argType::True, "", "json", false,  "bool", "JSON mode: emits one JSON document per line for each record in the log");
 
 
 }
@@ -133,6 +138,7 @@ void logdump::loadConfig()
    }
 
    if(config.isSet("time")) m_time = true;
+   if(config.isSet("json")) m_jsonMode = true;
 
    config(m_follow, "follow");
 
@@ -325,7 +331,11 @@ int logdump::execute()
             return -1;
          }
 
-         printLogBuff(lvl, ec, len, logBuff);
+         if (m_jsonMode) {
+            printLogJson(len, logBuff);
+         } else {
+            printLogBuff(lvl, ec, len, logBuff);
+         }
 
       }
 
@@ -395,6 +405,18 @@ void logdump::printLogBuff( const logPrioT & lvl,
    std::cout << "\033[0m";
    std::cout << "\n";
 }
+
+
+inline
+void logdump::printLogJson( const msgLenT & len,
+                            bufferPtrT & logBuff
+                          )
+{
+   static_cast<void>(len); //be unused
+   logJsonFormat(std::cout, logBuff);
+   std::cout << "\n";
+}
+
 
 int logdump::gettimes(std::vector<std::string> & logs)
 {
