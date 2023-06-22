@@ -277,8 +277,29 @@ int emitStdFormatHeader( const std::string & fileName,
       fout << "         return ios;\n";
    fout << "   }\n";
    fout << "}\n";
+
+   it = logCodes.begin();
+
+   fout << "template<class iosT>\n";
+   fout << "iosT & logJsonFormat( iosT & ios,\n";
+   fout << "                        flatlogs::bufferPtrT & buffer )\n";
+   fout << "{\n";
+   fout << "   flatlogs::eventCodeT ec;\n";
+   fout << "   ec = flatlogs::logHeader::eventCode(buffer);\n";
    
-   
+   fout << "   switch(ec)\n";
+   fout << "   {\n";
+   for(; it!=logCodes.end(); ++it)
+   {
+      fout << "      case " << it->first << ":\n";
+      fout << "         return flatlogs::jsonFormat<" << it->second << ">(ios, buffer, \"" << it->second << "\");\n";
+   }
+      fout << "      default:\n";
+      fout << "         ios << \"Unknown log type: \" << ec << \"\\n\";\n";
+      fout << "         return ios;\n";
+   fout << "   }\n";
+   fout << "}\n";
+
    fout << "}\n"; //namespace logger
    fout << "}\n"; //namespace MagAOX
 
@@ -452,7 +473,7 @@ int main()
    emitLogTypes( logTypesHeader, logCodes );
    emitCodeValidHeader( logCodeValidHeader, logCodes);
 
-   std::string flatc = "flatc -o " + schemaGeneratedDir + " --cpp";
+   std::string flatc = "flatc -o " + schemaGeneratedDir + " --cpp --reflect-types --reflect-names";
    
    setT::iterator it = schemas.begin();
    while(it != schemas.end())
