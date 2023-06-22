@@ -69,7 +69,7 @@ struct telem_dmmodes : public flatbuffer_log
 
       if (rgs->amps() != nullptr) 
       {
-         for(flatbuffers::Vector<float>::iterator it = rgs->amps()->begin(); it != rgs->amps()->end(); ++it) 
+         for(flatbuffers::Vector<float>::const_iterator it = rgs->amps()->begin(); it != rgs->amps()->end(); ++it)
          {
             msg+= std::to_string(*it);
             msg+= " ";
@@ -87,7 +87,7 @@ struct telem_dmmodes : public flatbuffer_log
 
       if (fbs->amps() != nullptr) 
       {
-         for(flatbuffers::Vector<float>::iterator it = fbs->amps()->begin(); it != fbs->amps()->end(); ++it) 
+         for(flatbuffers::Vector<float>::const_iterator it = fbs->amps()->begin(); it != fbs->amps()->end(); ++it)
          {
             amps.push_back(*it);
          }

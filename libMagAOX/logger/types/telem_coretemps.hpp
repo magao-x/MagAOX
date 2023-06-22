@@ -70,7 +70,7 @@ struct telem_coretemps : public flatbuffer_log
       if (rgs->temps() != nullptr) 
       {
          msg+= "[cpu temps] ";
-         for(flatbuffers::Vector<float>::iterator it = rgs->temps()->begin(); it != rgs->temps()->end(); ++it) 
+         for(flatbuffers::Vector<float>::const_iterator it = rgs->temps()->begin(); it != rgs->temps()->end(); ++it)
          {
             msg+= std::to_string(*it);
             msg+= " ";

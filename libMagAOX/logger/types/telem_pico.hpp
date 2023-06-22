@@ -70,7 +70,7 @@ struct telem_pico : public flatbuffer_log
       if (rgs->counts() != nullptr) 
       {
          msg+= "[pico pos] ";
-         for(flatbuffers::Vector<int64_t>::iterator it = rgs->counts()->begin(); it != rgs->counts()->end(); ++it) 
+         for(flatbuffers::Vector<int64_t>::const_iterator it = rgs->counts()->begin(); it != rgs->counts()->end(); ++it)
          {
             msg+= std::to_string(*it);
             msg+= " ";

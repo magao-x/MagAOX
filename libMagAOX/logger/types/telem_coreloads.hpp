@@ -71,7 +71,7 @@ struct telem_coreloads : public flatbuffer_log
       if (rgs->loads() != nullptr) 
       {
          msg+= "[cpu loads] ";
-         for(flatbuffers::Vector<float>::iterator it = rgs->loads()->begin(); it != rgs->loads()->end(); ++it) 
+         for(flatbuffers::Vector<float>::const_iterator it = rgs->loads()->begin(); it != rgs->loads()->end(); ++it)
          {
             msg+= std::to_string(*it);
             msg+= " ";

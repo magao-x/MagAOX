@@ -73,10 +73,8 @@ struct telem_drivetemps : public flatbuffer_log
       {
          msg+= "[hdd temps] ";
          
-         //flatbuffers::VectorOfStrings<std::string>::iterator nit = rgs->diskName()->begin();
-         
          int i=0;
-         for(flatbuffers::Vector<float>::iterator it = rgs->diskTemp()->begin(); it != rgs->diskTemp()->end(); ++it, ++i) 
+         for(flatbuffers::Vector<float>::const_iterator it = rgs->diskTemp()->begin(); it != rgs->diskTemp()->end(); ++it, ++i)
          {
             msg += rgs->diskName()->GetAsString(i)->c_str();
             msg += ":";
