@@ -139,8 +139,9 @@ int logtransmogrifier::execute()
             std::cerr << "heck\n";
             return 1;
          } else {
-            std::cout << MagAOX::logger::old_telem_fxngen::msgString((uint8_t*) flatlogs::logHeader::messageBuffer(buffPtr), totLen) << "\n";
-            // std::cout << MagAOX::logger::telem_fxngen::msgString((uint8_t*) flatlogs::logHeader::messageBuffer(buffPtr), totLen) << "\n";
+            std::string oldMsgString = MagAOX::logger::old_telem_fxngen::msgString((uint8_t*) flatlogs::logHeader::messageBuffer(buffPtr), totLen);
+            std::cout << "old: " << oldMsgString << "\n";
+            std::cout << "old: " << MagAOX::logger::old_telem_fxngen::makeJSON((uint8_t*) flatlogs::logHeader::messageBuffer(buffPtr), totLen, OldTelem_fxngen_fbTypeTable()) << "\n";
 
             double widthMissingSentinel = 0.0;
             uint8_t C1outp = fbs->C1outp();
@@ -178,20 +179,23 @@ int logtransmogrifier::execute()
             uint8_t C1sync = fbs->C1sync();
             uint8_t C2sync = fbs->C2sync();
 
+            double C1wdth = fbs->C1wdth();
+            double C2wdth = fbs->C2wdth();
+
             telem_fxngen::messageT newMessage = telem_fxngen::messageT(
                C1outp,
                C1freq,
                C1vpp,
                C1ofst,
                C1phse,
-               widthMissingSentinel,
+               C1wdth,
                C1wvtp,
                C2outp,
                C2freq,
                C2vpp,
                C2ofst,
                C2phse,
-               widthMissingSentinel,
+               C2wdth,
                C2wvtp,
                C1sync,
                C2sync
@@ -199,8 +203,15 @@ int logtransmogrifier::execute()
 
             bufferPtrT newLogBuffer;
             logHeader::createLog<MagAOX::logger::telem_fxngen>(newLogBuffer, ts, newMessage, lvl);
+            std::string newMsgString = MagAOX::logger::telem_fxngen::msgString((uint8_t*) flatlogs::logHeader::messageBuffer(newLogBuffer), totLen);
 
-            std::cout << MagAOX::logger::telem_fxngen::msgString((uint8_t*) flatlogs::logHeader::messageBuffer(newLogBuffer), totLen) << "\n";
+            std::cout << "new: " << newMsgString << "\n";
+            std::cout << "new: " << MagAOX::logger::telem_fxngen::makeJSON((uint8_t*) flatlogs::logHeader::messageBuffer(newLogBuffer), len, Telem_fxngen_fbTypeTable()) << "\n";
+
+            if(newMsgString != oldMsgString) {
+               std::cerr << "heck\n";
+               return 0;
+            }
 
             size_t N = flatlogs::logHeader::totalSize(newLogBuffer);
 

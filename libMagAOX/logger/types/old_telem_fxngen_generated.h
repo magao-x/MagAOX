@@ -19,23 +19,30 @@ namespace logger {
 struct OldTelem_fxngen_fb;
 struct OldTelem_fxngen_fbBuilder;
 
+inline const ::flatbuffers::TypeTable *OldTelem_fxngen_fbTypeTable();
+
 struct OldTelem_fxngen_fb FLATBUFFERS_FINAL_CLASS : private ::flatbuffers::Table {
   typedef OldTelem_fxngen_fbBuilder Builder;
+  static const ::flatbuffers::TypeTable *MiniReflectTypeTable() {
+    return OldTelem_fxngen_fbTypeTable();
+  }
   enum FlatBuffersVTableOffset FLATBUFFERS_VTABLE_UNDERLYING_TYPE {
     VT_C1OUTP = 4,
     VT_C1FREQ = 6,
     VT_C1VPP = 8,
     VT_C1OFST = 10,
     VT_C1PHSE = 12,
-    VT_C1WVTP = 14,
-    VT_C2OUTP = 16,
-    VT_C2FREQ = 18,
-    VT_C2VPP = 20,
-    VT_C2OFST = 22,
-    VT_C2PHSE = 24,
-    VT_C2WVTP = 26,
-    VT_C1SYNC = 28,
-    VT_C2SYNC = 30
+    VT_C1WDTH = 14,
+    VT_C1WVTP = 16,
+    VT_C2OUTP = 18,
+    VT_C2FREQ = 20,
+    VT_C2VPP = 22,
+    VT_C2OFST = 24,
+    VT_C2PHSE = 26,
+    VT_C2WDTH = 28,
+    VT_C2WVTP = 30,
+    VT_C1SYNC = 32,
+    VT_C2SYNC = 34
   };
   uint8_t C1outp() const {
     return GetField<uint8_t>(VT_C1OUTP, 0);
@@ -51,6 +58,9 @@ struct OldTelem_fxngen_fb FLATBUFFERS_FINAL_CLASS : private ::flatbuffers::Table
   }
   double C1phse() const {
     return GetField<double>(VT_C1PHSE, 0.0);
+  }
+  double C1wdth() const {
+    return GetField<double>(VT_C1WDTH, 0.0);
   }
   uint8_t C1wvtp() const {
     return GetField<uint8_t>(VT_C1WVTP, 0);
@@ -70,6 +80,9 @@ struct OldTelem_fxngen_fb FLATBUFFERS_FINAL_CLASS : private ::flatbuffers::Table
   double C2phse() const {
     return GetField<double>(VT_C2PHSE, 0.0);
   }
+  double C2wdth() const {
+    return GetField<double>(VT_C2WDTH, 0.0);
+  }
   uint8_t C2wvtp() const {
     return GetField<uint8_t>(VT_C2WVTP, 0);
   }
@@ -86,12 +99,14 @@ struct OldTelem_fxngen_fb FLATBUFFERS_FINAL_CLASS : private ::flatbuffers::Table
            VerifyField<double>(verifier, VT_C1VPP, 8) &&
            VerifyField<double>(verifier, VT_C1OFST, 8) &&
            VerifyField<double>(verifier, VT_C1PHSE, 8) &&
+           VerifyField<double>(verifier, VT_C1WDTH, 8) &&
            VerifyField<uint8_t>(verifier, VT_C1WVTP, 1) &&
            VerifyField<uint8_t>(verifier, VT_C2OUTP, 1) &&
            VerifyField<double>(verifier, VT_C2FREQ, 8) &&
            VerifyField<double>(verifier, VT_C2VPP, 8) &&
            VerifyField<double>(verifier, VT_C2OFST, 8) &&
            VerifyField<double>(verifier, VT_C2PHSE, 8) &&
+           VerifyField<double>(verifier, VT_C2WDTH, 8) &&
            VerifyField<uint8_t>(verifier, VT_C2WVTP, 1) &&
            VerifyField<uint8_t>(verifier, VT_C1SYNC, 1) &&
            VerifyField<uint8_t>(verifier, VT_C2SYNC, 1) &&
@@ -118,6 +133,9 @@ struct OldTelem_fxngen_fbBuilder {
   void add_C1phse(double C1phse) {
     fbb_.AddElement<double>(OldTelem_fxngen_fb::VT_C1PHSE, C1phse, 0.0);
   }
+  void add_C1wdth(double C1wdth) {
+    fbb_.AddElement<double>(OldTelem_fxngen_fb::VT_C1WDTH, C1wdth, 0.0);
+  }
   void add_C1wvtp(uint8_t C1wvtp) {
     fbb_.AddElement<uint8_t>(OldTelem_fxngen_fb::VT_C1WVTP, C1wvtp, 0);
   }
@@ -135,6 +153,9 @@ struct OldTelem_fxngen_fbBuilder {
   }
   void add_C2phse(double C2phse) {
     fbb_.AddElement<double>(OldTelem_fxngen_fb::VT_C2PHSE, C2phse, 0.0);
+  }
+  void add_C2wdth(double C2wdth) {
+    fbb_.AddElement<double>(OldTelem_fxngen_fb::VT_C2WDTH, C2wdth, 0.0);
   }
   void add_C2wvtp(uint8_t C2wvtp) {
     fbb_.AddElement<uint8_t>(OldTelem_fxngen_fb::VT_C2WVTP, C2wvtp, 0);
@@ -163,20 +184,24 @@ inline ::flatbuffers::Offset<OldTelem_fxngen_fb> CreateOldTelem_fxngen_fb(
     double C1vpp = 0.0,
     double C1ofst = 0.0,
     double C1phse = 0.0,
+    double C1wdth = 0.0,
     uint8_t C1wvtp = 0,
     uint8_t C2outp = 0,
     double C2freq = 0.0,
     double C2vpp = 0.0,
     double C2ofst = 0.0,
     double C2phse = 0.0,
+    double C2wdth = 0.0,
     uint8_t C2wvtp = 0,
     uint8_t C1sync = 0,
     uint8_t C2sync = 0) {
   OldTelem_fxngen_fbBuilder builder_(_fbb);
+  builder_.add_C2wdth(C2wdth);
   builder_.add_C2phse(C2phse);
   builder_.add_C2ofst(C2ofst);
   builder_.add_C2vpp(C2vpp);
   builder_.add_C2freq(C2freq);
+  builder_.add_C1wdth(C1wdth);
   builder_.add_C1phse(C1phse);
   builder_.add_C1ofst(C1ofst);
   builder_.add_C1vpp(C1vpp);
@@ -188,6 +213,49 @@ inline ::flatbuffers::Offset<OldTelem_fxngen_fb> CreateOldTelem_fxngen_fb(
   builder_.add_C1wvtp(C1wvtp);
   builder_.add_C1outp(C1outp);
   return builder_.Finish();
+}
+
+inline const ::flatbuffers::TypeTable *OldTelem_fxngen_fbTypeTable() {
+  static const ::flatbuffers::TypeCode type_codes[] = {
+    { ::flatbuffers::ET_UCHAR, 0, -1 },
+    { ::flatbuffers::ET_DOUBLE, 0, -1 },
+    { ::flatbuffers::ET_DOUBLE, 0, -1 },
+    { ::flatbuffers::ET_DOUBLE, 0, -1 },
+    { ::flatbuffers::ET_DOUBLE, 0, -1 },
+    { ::flatbuffers::ET_DOUBLE, 0, -1 },
+    { ::flatbuffers::ET_UCHAR, 0, -1 },
+    { ::flatbuffers::ET_UCHAR, 0, -1 },
+    { ::flatbuffers::ET_DOUBLE, 0, -1 },
+    { ::flatbuffers::ET_DOUBLE, 0, -1 },
+    { ::flatbuffers::ET_DOUBLE, 0, -1 },
+    { ::flatbuffers::ET_DOUBLE, 0, -1 },
+    { ::flatbuffers::ET_DOUBLE, 0, -1 },
+    { ::flatbuffers::ET_UCHAR, 0, -1 },
+    { ::flatbuffers::ET_UCHAR, 0, -1 },
+    { ::flatbuffers::ET_UCHAR, 0, -1 }
+  };
+  static const char * const names[] = {
+    "C1outp",
+    "C1freq",
+    "C1vpp",
+    "C1ofst",
+    "C1phse",
+    "C1wdth",
+    "C1wvtp",
+    "C2outp",
+    "C2freq",
+    "C2vpp",
+    "C2ofst",
+    "C2phse",
+    "C2wdth",
+    "C2wvtp",
+    "C1sync",
+    "C2sync"
+  };
+  static const ::flatbuffers::TypeTable tt = {
+    ::flatbuffers::ST_TABLE, 16, type_codes, nullptr, nullptr, nullptr, names
+  };
+  return &tt;
 }
 
 inline const MagAOX::logger::OldTelem_fxngen_fb *GetOldTelem_fxngen_fb(const void *buf) {
@@ -223,4 +291,4 @@ inline void FinishSizePrefixedOldTelem_fxngen_fbBuffer(
 }  // namespace logger
 }  // namespace MagAOX
 
-#endif  // FLATBUFFERS_GENERATED_OLDTELEMFXNGEN_MAGAOX_LOGGER_H_
+#endif  // FLATBUFFERS_GENERATED_TELEMFXNGEN_MAGAOX_LOGGER_H_

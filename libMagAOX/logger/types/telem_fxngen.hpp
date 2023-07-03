@@ -66,7 +66,7 @@ struct telem_fxngen : public flatbuffer_log
          else if(C2wvtp == "PULSE") _C2wvtp = 2;
          
          
-         auto fp = CreateTelem_fxngen_fb(builder, C1outp, C1freq, C1vpp, C1ofst, C1phse, C1wdth, _C1wvtp, C2outp, C2freq, C2vpp, C2ofst, C2phse, C2wdth,  _C2wvtp, C1sync, C2sync);
+         auto fp = CreateTelem_fxngen_fb(builder, C1outp, C1freq, C1vpp, C1ofst, C1phse, _C1wvtp, C2outp, C2freq, C2vpp, C2ofst, C2phse,  _C2wvtp, C1sync, C2sync, C1wdth, C2wdth);
          builder.Finish(fp);
 
       }
