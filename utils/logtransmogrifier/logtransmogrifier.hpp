@@ -76,7 +76,7 @@ int logtransmogrifier::execute()
    fin = fopen(m_fname.c_str(), "rb");
    FILE * fout;
    std::string outfn = m_fname + ".updated";
-   // fout = fopen(outfn.c_str(), "wb");
+   fout = fopen(outfn.c_str(), "wb");
 
    if(!fin)
    {
@@ -85,12 +85,12 @@ int logtransmogrifier::execute()
       return EXIT_FAILURE;
    }
 
-   // if(!fout)
-   // {
-   //    std::cerr << "Error opening file " << outfn << "\n";
-   //    std::cerr << "errno says: " << strerror(errno) << "\n";
-   //    return EXIT_FAILURE;
-   // }
+   if(!fout)
+   {
+      std::cerr << "Error opening file " << outfn << "\n";
+      std::cerr << "errno says: " << strerror(errno) << "\n";
+      return EXIT_FAILURE;
+   }
 
    ssize_t fsz = mx::ioutils::fileSize(fin);
 
@@ -143,7 +143,6 @@ int logtransmogrifier::execute()
             std::cout << "old: " << oldMsgString << "\n";
             std::cout << "old: " << MagAOX::logger::old_telem_fxngen::makeJSON((uint8_t*) flatlogs::logHeader::messageBuffer(buffPtr), totLen, OldTelem_fxngen_fbTypeTable()) << "\n";
 
-            double widthMissingSentinel = 0.0;
             uint8_t C1outp = fbs->C1outp();
             double C1freq = fbs->C1freq();
             double C1vpp = fbs->C1vpp();
@@ -215,17 +214,15 @@ int logtransmogrifier::execute()
 
             size_t N = flatlogs::logHeader::totalSize(newLogBuffer);
 
-            // size_t nwr = fwrite( newLogBuffer.get(), sizeof(char), N, fout);
+            size_t nwr = fwrite( newLogBuffer.get(), sizeof(char), N, fout);
 
-            // if(nwr != N*sizeof(char))
-            // {
-            //    std::cerr << "Error by fwrite.  At: " << __FILE__ << " " << __LINE__ << "\n";
-            //    std::cerr << "errno says: " << strerror(errno) << "\n";
-            //    return -1;
-            // }
+            if(nwr != N*sizeof(char))
+            {
+               std::cerr << "Error by fwrite.  At: " << __FILE__ << " " << __LINE__ << "\n";
+               std::cerr << "errno says: " << strerror(errno) << "\n";
+               return -1;
+            }
          }
-
-         // logHeader::createLog<old_telem_fxngen>(logBuffer, ts, msg, level);
 
          kpt += totLen;
 
@@ -233,85 +230,6 @@ int logtransmogrifier::execute()
       }
 
    }
-
-   // std::cerr << "--------------------------------------------------------\n";
-   // std::cerr << "Found " << totBad << " bad bytes ( " << (100.0*totBad)/fsz << "% bad) \n";
-   // std::cerr << "Found " << gcurr << " good bytes ( " << (100.0*gcurr) / fsz  <<  "% good)\n";
-
-   // if(totBad == 0)
-   // {
-   //    std::cerr << "Taking no action on good file.\n";
-   // }
-   // else if (m_checkOnly)
-   // {
-   //    std::cerr << "Check-only mode set, exiting with error status to indicate failed verification\n";
-   //    return EXIT_FAILURE;
-   // }
-   // else
-   // {
-   //    std::string bupPath = m_fname + ".corrupted";
-
-   //    FILE * fout;
-   //    fout = fopen(bupPath.c_str(), "wb");
-
-   //    if(!fout)
-   //    {
-   //       std::cerr << "Error opening corrupted file for writing (" __FILE__ << " " << __LINE__ << ")\n";
-   //       std::cerr << "No further action taken\n";
-   //       return EXIT_FAILURE;
-   //    }
-
-   //    ssize_t fwr = fwrite(buff, sizeof(char), fsz, fout);
-
-   //    int fcst = fclose(fout);
-
-   //    if(fwr != fsz)
-   //    {
-   //       std::cerr << "Error writing backup corrupted file (" __FILE__ << " " << __LINE__ << ")\n";
-   //       std::cerr << "No further action taken\n";
-   //       return EXIT_FAILURE;
-   //    }
-
-   //    if(fcst != 0)
-   //    {
-   //       std::cerr << "Error closing backup corrupted file (" __FILE__ << " " << __LINE__ << ")\n";
-   //       std::cerr << "No further action taken\n";
-   //       return EXIT_FAILURE;
-   //    }
-
-   //    std::cerr << "Wrote original file to: " << bupPath << "\n";
-
-   //    fout = fopen(m_fname.c_str(), "wb");
-
-   //    if(!fout)
-   //    {
-   //       std::cerr << "Error opening existing file for writing (" __FILE__ << " " << __LINE__ << ")\n";
-   //       std::cerr << "No further action taken\n";
-   //       return EXIT_FAILURE;
-   //    }
-
-   //    fwr = fwrite(gbuff, sizeof(char), gcurr, fout);
-
-   //    fcst = fclose(fout);
-
-   //    if(fwr != gcurr)
-   //    {
-   //       std::cerr << "Error writing corrected file (" __FILE__ << " " << __LINE__ << ")\n";
-   //       return EXIT_FAILURE;
-   //    }
-   
-   //    if(fcst != 0)
-   //    {
-   //       std::cerr << "Error closing corrected file (" __FILE__ << " " << __LINE__ << ")\n";
-   //       return EXIT_FAILURE;
-   //    }
-
-   //    std::cerr << "Wrote corrected file to: " << m_fname << "\n";
-
-   //    std::cerr << "Surgery Complete\n";
-   // }
-   // delete[] buff;
-   // delete[] gbuff;
 
    return 0;
 }
