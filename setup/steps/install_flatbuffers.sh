@@ -6,6 +6,7 @@ FLATBUFFERS_VERSION="23.5.26"
 #
 # Flatbuffers
 #
+cd /opt/MagAOX/vendor
 FLATBUFFERS_DIR="flatbuffers-$FLATBUFFERS_VERSION"
 if [[ ! -d $FLATBUFFERS_DIR ]]; then
     _cached_fetch https://github.com/google/flatbuffers/archive/v$FLATBUFFERS_VERSION.tar.gz $FLATBUFFERS_DIR.tar.gz
@@ -13,5 +14,5 @@ if [[ ! -d $FLATBUFFERS_DIR ]]; then
 fi
 cd $FLATBUFFERS_DIR
 cmake -G "Unix Makefiles" -DCMAKE_BUILD_TYPE=Release
-make
-make install
+make -j
+sudo make install
