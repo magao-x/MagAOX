@@ -579,7 +579,6 @@ void camera::setup_roiStatus()
    
    ui.grid->addWidget(ui_roiStatus, 3, 1, 1, 1);
    
-   std::cerr << "creating onD:\n";
    ui_roiStatus->onDisconnect();
 
    m_parent->addSubscriber(ui_roiStatus);

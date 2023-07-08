@@ -108,17 +108,14 @@ int multiIndiPublisher::addSubscriberProperty( multiIndiSubscriber * sub,
                                                pcf::IndiProperty & ipSub
                                              )
 {
-   size_t already = subscribedProperties.count(ipSub.createUniqueKey());
-
    if(multiIndiSubscriber::addSubscriberProperty(sub, ipSub) != 0)
    {
       return -1;
    }
 
-   if(already == 0)
-   {
-      sendGetProperties(ipSub);
-   }
+   //note: we have to send this every time b/c otherwise late subscribers won't get an update on subscribe
+   sendGetProperties(ipSub);
+
 
    return 0;
 }
