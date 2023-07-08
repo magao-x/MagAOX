@@ -500,6 +500,8 @@ void camera::updateGUI()
 
 void camera::setup_temp_ccd(bool ro)
 {
+   if(ui_tempCCD) return;
+   
    ui_tempCCD = new statusEntry(this);
    ui_tempCCD->setObjectName(QString::fromUtf8("tempCCD"));
    ui_tempCCD->setup(m_camName, "temp_ccd", statusEntry::FLOAT, "Detector Temp.", "C");
@@ -515,6 +517,8 @@ void camera::setup_temp_ccd(bool ro)
 
 void camera::setup_tempStatus()
 {
+   if(ui_tempStatus) return;
+   
    ui_tempStatus = new statusDisplay(m_camName,"temp_control", "status", "Temp. Ctrl.", "", this, Qt::WindowFlags());
    ui_tempStatus->setObjectName(QString::fromUtf8("tempStatus"));
    
@@ -527,6 +531,8 @@ void camera::setup_tempStatus()
 
 void camera::setup_reconfigure()
 {
+   if(ui_reconfigure) return;
+   
    ui_reconfigure = new QPushButton(this);
    ui_reconfigure->setObjectName(QString::fromUtf8("reconfigure"));
    ui_reconfigure->setText("reconfigure");
@@ -550,6 +556,8 @@ void camera::reconfigure()
 
 void camera::setup_shutter()
 {
+   if(ui_shutterStatus) return;
+   
    ui_shutterStatus = new shutterStatus(m_camName, this);
 
    //ui_shutterStatus = new toggleSlider(m_camName, "shutter", "toggle", "Shutter");
@@ -564,11 +572,14 @@ void camera::setup_shutter()
 
 void camera::setup_roiStatus()
 {
+   if(ui_roiStatus) return; //can get called from several threads
+   
    ui_roiStatus = new roiStatus(m_camName, this);
    ui_roiStatus->setObjectName(QString::fromUtf8("roiStatus"));
    
    ui.grid->addWidget(ui_roiStatus, 3, 1, 1, 1);
    
+   std::cerr << "creating onD:\n";
    ui_roiStatus->onDisconnect();
 
    m_parent->addSubscriber(ui_roiStatus);
@@ -576,6 +587,8 @@ void camera::setup_roiStatus()
 
 void camera::setup_modes()
 {
+   if(ui_modes) return;
+   
    ui_modes = new selectionSwStatus(m_camName,"mode", "", "Mode", "", this);
    ui_modes->setObjectName(QString::fromUtf8("modes"));
    
@@ -588,6 +601,8 @@ void camera::setup_modes()
 
 void camera::setup_readoutSpd()
 {
+   if(ui_readoutSpd) return;
+   
    ui_readoutSpd = new selectionSwStatus(m_camName,"readout_speed", "", "Readout Spd", "", this);
    ui_readoutSpd->setObjectName(QString::fromUtf8("readoutSpd"));
    
@@ -600,6 +615,8 @@ void camera::setup_readoutSpd()
 
 void camera::setup_vshiftSpd()
 {
+   if(ui_vshiftSpd) return;
+   
    ui_vshiftSpd = new selectionSwStatus(m_camName,"vshift_speed", "", "Vert. Shift Spd", "", this);
    ui_vshiftSpd->setObjectName(QString::fromUtf8("vshiftSpd"));
    
@@ -612,6 +629,8 @@ void camera::setup_vshiftSpd()
 
 void camera::setup_cropMode()
 {
+   if(ui_cropMode) return;
+   
    ui_cropMode = new toggleSlider(m_camName, "roi_crop_mode", "Crop Mode", this);
    ui_cropMode->setObjectName(QString::fromUtf8("cropMode"));
 
@@ -624,6 +643,8 @@ void camera::setup_cropMode()
 
 void camera::setup_expTime(bool ro)
 {
+   if(ui_expTime) return;
+   
    ui_expTime = new statusEntry(this);
    ui_expTime->setObjectName(QString::fromUtf8("expTime"));
    ui_expTime->setup(m_camName, "exptime", statusEntry::FLOAT, "Exp. Time", "sec");
@@ -639,6 +660,8 @@ void camera::setup_expTime(bool ro)
 
 void camera::setup_fps(bool ro)
 {
+   if(ui_fps) return;
+   
    ui_fps = new statusEntry(this);
    ui_fps->setObjectName(QString::fromUtf8("fps"));
    ui_fps->setup(m_camName, "fps", statusEntry::FLOAT, "Frame Rate", "F.P.S.");
@@ -654,6 +677,8 @@ void camera::setup_fps(bool ro)
 
 void camera::setup_emGain(bool ro)
 {
+   if(ui_emGain) return;
+   
    ui_emGain = new statusEntry(this);
    ui_emGain->setObjectName(QString::fromUtf8("emgain"));
    ui_emGain->setup(m_camName, "emgain", statusEntry::FLOAT, "E.M. Gain", "");
@@ -669,6 +694,8 @@ void camera::setup_emGain(bool ro)
 
 void camera::setup_synchro()
 {
+   if(ui_synchro) return;
+   
    ui_synchro = new toggleSlider(m_camName, "synchro", "Synchro", this);
    ui_synchro->setObjectName(QString::fromUtf8("synchro"));
 
@@ -681,6 +708,8 @@ void camera::setup_synchro()
 
 void camera::setup_takeDarks()
 {
+   if(ui_takeDarks) return;
+   
    ui_takeDarks = new QPushButton(this);
    ui_takeDarks->setObjectName(QString::fromUtf8("takeDarks"));
    ui_takeDarks->setText("take darks");
