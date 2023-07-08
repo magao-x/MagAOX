@@ -354,6 +354,15 @@ int xrif2fits::execute()
       logMetas.push_back( logMetaSpec(lfn.appName(), telem_stdcam::eventCode, "temp"));
       logMetas.push_back( logMetaSpec(lfn.appName(), telem_stdcam::eventCode, "shutterState"));
 
+      std::string channel = lfn.appName().substr(3);
+
+      // For channels with associated focus stages, report those positions as headers
+      if (channel == "sci1" || channel == "sci2" || channel == "lowfs") {
+         logMetas.push_back(logMetaSpec({"stage" + channel, telem_stage::eventCode, "presetName"}));
+         logMetas.push_back(logMetaSpec({"stage" + channel, telem_stage::eventCode, "preset"}));
+         logMetas.push_back(logMetaSpec({"stage" + channel, telem_zaber::eventCode, "pos"}));
+      }
+
       logMetas.push_back( logMetaSpec({"tweeterSpeck", telem_dmspeck::eventCode, "modulating"}));
       logMetas.push_back( logMetaSpec({"tweeterSpeck", telem_dmspeck::eventCode, "trigger"}));
       logMetas.push_back( logMetaSpec({"tweeterSpeck", telem_dmspeck::eventCode, "frequency"}));
