@@ -37,6 +37,12 @@ logMetaDetail logMemberAccessor( flatlogs::eventCodeT ec,
          return telem_zaber::getAccessor(memberName);   
       case telem_dmspeck::eventCode:
          return telem_dmspeck::getAccessor(memberName);
+      case telem_observer::eventCode:
+         return telem_observer::getAccessor(memberName);
+      case telem_fxngen::eventCode:
+         return telem_fxngen::getAccessor(memberName);
+      case telem_loopgain::eventCode:
+         return telem_loopgain::getAccessor(memberName);
       default:
          std::cerr << "Missing logMemberAccessor case entry for " << ec << ":" << memberName << "\n";
          return logMetaDetail();

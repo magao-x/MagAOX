@@ -162,8 +162,8 @@ struct telem_observer : public flatbuffer_log
      */ 
    static logMetaDetail getAccessor( const std::string & member /**< [in] the name of the member */ )
    {
-      if(     member == "email")     return logMetaDetail({"EMAIL", logMeta::valTypes::String, logMeta::metaTypes::State, (void *) &email});
-      else if(member == "obsName")   return logMetaDetail({"NAME", logMeta::valTypes::String, logMeta::metaTypes::State, (void *) &obsName}); 
+      if(     member == "email")     return logMetaDetail({"OBSERVER", logMeta::valTypes::String, logMeta::metaTypes::State, (void *) &email, false});
+      else if(member == "obsName")   return logMetaDetail({"OBS-NAME", logMeta::valTypes::String, logMeta::metaTypes::State, (void *) &obsName, false});
       else if(member == "observing") return logMetaDetail({"OBSERVING", logMeta::valTypes::Bool, logMeta::metaTypes::State, (void *) &observing}); 
       else
       {
