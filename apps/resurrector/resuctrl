@@ -504,7 +504,7 @@ EoFhide
 ### MagAOX root directory; sequences for color highlighting; grep regexp
 function misc_setup {
 
-  opt_magaox="/opt/MagAOX"
+  opt_magaox="$(printenv MagAOX_PATH | grep . || echo "/opt/MagAOX")"
 
   RED_SEQ="$(tput setaf 1 2>/dev/null)"
   GREEN_SEQ="$(tput setaf 2 2>/dev/null)"

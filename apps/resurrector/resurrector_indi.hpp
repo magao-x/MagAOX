@@ -2,11 +2,23 @@
 #define __INDI_RESURRECTOR_HPP__
 #include "resurrector.hpp"
 
-#define IRMAGAOX_top "/opt/MagAOX"
-#define IRMAGAOX_config IRMAGAOX_top "/config"
-#define IRMAGAOX_drivers IRMAGAOX_top "/drivers"
-#define IRMAGAOX_bin IRMAGAOX_top "/bin"
-#define IRMAGAOX_fifos IRMAGAOX_drivers "/fifos"
+//#define IRMAGAOX_top "/opt/MagAOX"
+#define IRMAGAOX_top IRMAGAOX_top_func()+
+#define IRMAGAOX_config (IRMAGAOX_top "/config")
+#define IRMAGAOX_bin (IRMAGAOX_top "/bin")
+#define IRMAGAOX_fifos (IRMAGAOX_top "/drivers/fifos")
+
+const std::string&
+IRMAGAOX_top_func()
+{
+    static std::string top{"/opt/MagAOX"};
+    static bool once{false};
+    if (once) return top;
+    char* ge = getenv("MagAOX_PATH");
+    if (ge) { top = std::string(ge); }
+    once = true;
+    return IRMAGAOX_top_func();
+}
 
 int
 read_next_process(FILE* f, std::string& name, std::string& exec)

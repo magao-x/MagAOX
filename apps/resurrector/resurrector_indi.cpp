@@ -193,7 +193,7 @@ main(int argc, char** argv)
                 //      happen here because of the find_hbm_by_name()
                 //      call above
                 newfd = resurr.open_hexbeater
-                            (argv0, driver_name, IRMAGAOX_fifos, NULL);
+                            (argv0, driver_name, IRMAGAOX_fifos.c_str(), NULL);
 
                 if (newfd<0)
                 {
