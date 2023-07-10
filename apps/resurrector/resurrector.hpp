@@ -24,11 +24,16 @@ private:
 
 public:
     /// Constructor
-    /** Ensures FD set copy is all zeros, and set<int> of FD is empty
+    /** Ensure FD set copy is all zeros, and set<int> of FD is empty
+      * Assign output redirect in all Hexbeater instances
       */
-    resurrectorT(void) : m_nfds(0), m_fds({})
+    resurrectorT(void (*output_redirect)(std::string)=nullptr) : m_nfds(0), m_fds({})
     {
         FD_ZERO(&m_fdset_cpy);
+        for (std::vector<HexbeatMonitor>::iterator it = m_hbmarr.begin(); it != m_hbmarr.end(); ++it)
+        {
+            it->output_redirect_set(output_redirect);
+        }
     }
 
     /// Assign all HexbeatMonitors' pending_close states true or false
@@ -93,12 +98,16 @@ public:
         // Handle select(2) error
         if (iselect < 0)
         {
-#           define ISELSTR(x) #x
-#           define ISELSTRMACRO(x) ISELSTR(x)
-            perror("select(2) error:  " __FILE__ "; " ISELSTRMACRO(__LINE__));
-            // Pause for 0.999999s
-            struct timeval tv{0,999999};
-            select(0, 0,0,0, &tv);
+            // Log and pause for errors; respond to signals immediately
+            if (errno != EINTR)
+            {
+#               define ISELSTR(x) #x
+#               define ISELSTRMACRO(x) ISELSTR(x)
+                perror("select(2) error:  " __FILE__ "; " ISELSTRMACRO(__LINE__));
+                // Pause for about a second
+                struct timeval tv{0,999999};
+                select(0, 0,0,0, &tv);
+            }
             return;
         }
 
@@ -137,10 +146,20 @@ public:
                 it->close_hexbeater(m_fdset_cpy, m_nfds);
                 continue;
             }
+            if (m_resurr_logging)
+            {
+                std::cerr << "[resurrector stopping " << *it
+                      << " at " << time_to_hb(0).substr(0,9) << "]\n";
+            }
             it->stop_hexbeater(m_fdset_cpy, m_nfds);
             struct timeval tv{0,99999};
             select(0, 0,0,0, &tv);
-            it->start_hexbeater(m_fdset_cpy, m_nfds,m_delay);
+            if (m_resurr_logging)
+            {
+                std::cerr << "[resurrector re-starting " << *it
+                          << " at " << time_to_hb(0).substr(0,9) << "]\n";
+            }
+            it->start_hexbeater(m_fdset_cpy, m_nfds,m_delay,false);
         }
     }
 

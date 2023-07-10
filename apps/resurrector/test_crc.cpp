@@ -22,7 +22,8 @@
  *         several bits in a row, that will be XORed
  *         with the bits of two string characters
  */
-class twobytes {
+class twobytes
+{
 public:
     unsigned short I;
     unsigned char *pb2;

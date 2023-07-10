@@ -15,7 +15,8 @@
 #include <ostream>
 #include <sys/types.h>
 
-class CRC {
+class CRC
+{
 private:
     int32_t poly{0xa001};
     int32_t width{16};
