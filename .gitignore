@@ -173,6 +173,7 @@ apps/zylaCtrl/zylaCtrl
 
 
 utils/logdump/logdump
+utils/logsurgeon/logsurgeon
 utils/cursesINDI/cursesINDI
 utils/logstream/logstream
 utils/xrif2shmim/xrif2shmim

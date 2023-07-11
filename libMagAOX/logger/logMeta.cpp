@@ -37,6 +37,12 @@ logMetaDetail logMemberAccessor( flatlogs::eventCodeT ec,
          return telem_zaber::getAccessor(memberName);   
       case telem_dmspeck::eventCode:
          return telem_dmspeck::getAccessor(memberName);
+      case telem_observer::eventCode:
+         return telem_observer::getAccessor(memberName);
+      case telem_fxngen::eventCode:
+         return telem_fxngen::getAccessor(memberName);
+      case telem_loopgain::eventCode:
+         return telem_loopgain::getAccessor(memberName);
       default:
          std::cerr << "Missing logMemberAccessor case entry for " << ec << ":" << memberName << "\n";
          return logMetaDetail();
@@ -452,49 +458,40 @@ mx::fits::fitsHeaderCard logMeta::card( logMap &lm,
    std::cerr << __FILE__ << " " << __LINE__ << "\n";
    #endif
 
+   std::string keyw;
+   if(m_detail.hierarch)
+   {
+      //Add spaces to make sure hierarch is invoked
+      keyw = m_spec.device + " " + m_spec.keyword;
+      if(keyw.size() < 9)
+      {
+         keyw += std::string(9-keyw.size(), ' ');
+      }
+   }
+   else
+   {
+      keyw = m_spec.keyword;
+   }
+
    if(vstr == m_invalidValue)
    {
       std::cerr << "got invalid value: " << __FILE__ << " " << __LINE__ << "\n";
+      // always a string sentinel value, so return here to skip the valType conditional
+      return mx::fits::fitsHeaderCard(keyw, vstr, m_spec.comment);
    }
 
    if(m_detail.valType == valTypes::String)
    {
-      if(m_detail.hierarch == false)
-      {
-         return mx::fits::fitsHeaderCard( m_spec.keyword, vstr, m_spec.comment);
-      }
-      else
-      { 
-         //Add spaces to make sure hierarch is invoked
-         std::string keyw = m_spec.device + " " + m_spec.keyword;
-         if(keyw.size() < 9) 
-         {
-            keyw += std::string(9-keyw.size(), ' ');
-         }
-         return mx::fits::fitsHeaderCard( keyw, vstr, m_spec.comment);
-      }
+      return mx::fits::fitsHeaderCard(keyw, vstr, m_spec.comment);
    }
    else 
    {
-      if(m_detail.hierarch == false)
-      {
-         return mx::fits::fitsHeaderCard( m_spec.keyword, vstr.c_str(),  m_detail.valType, m_spec.comment);
-      }
-      else
-      {
-         //Add spaces to make sure hierarch is invoked
-         std::string keyw = m_spec.device + " " + m_spec.keyword;
-         if(keyw.size() < 9) 
-         {
-            keyw += std::string(9-keyw.size(), ' ');
-         }
-         return mx::fits::fitsHeaderCard( keyw, vstr.c_str(),  m_detail.valType, m_spec.comment);
-      }
+      return mx::fits::fitsHeaderCard(keyw, vstr.c_str(), m_detail.valType, m_spec.comment);
    }
 }
 
-}
-}
+} // logger
+} // MagAOX
 
 
 

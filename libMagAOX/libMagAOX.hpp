@@ -42,6 +42,7 @@
 #include "logger/generated/logStdFormat.hpp"
 #include "logger/generated/logVerify.hpp"
 #include "logger/generated/logTypes.hpp"
+#include "logger/generated/logCodeValid.hpp"
 
 
 //#define TTY_DEBUG

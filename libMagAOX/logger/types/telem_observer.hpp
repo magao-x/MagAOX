@@ -58,7 +58,37 @@ struct telem_observer : public flatbuffer_log
                      )
    {
       auto verifier = flatbuffers::Verifier( (uint8_t*) flatlogs::logHeader::messageBuffer(logBuff), static_cast<size_t>(len));
-      return VerifyTelem_observer_fbBuffer(verifier);
+
+      bool ok = VerifyTelem_observer_fbBuffer(verifier); 
+      if(!ok) return ok;
+
+      auto fbs = GetTelem_observer_fb((uint8_t*) flatlogs::logHeader::messageBuffer(logBuff));
+
+      if(fbs->email())
+      {
+         std::string email = fbs->email()->c_str();
+         for(size_t n = 0; n < email.size(); ++n)
+         {
+            if(!isprint(email[n]))
+            {
+               return false;
+            }
+         }
+      }
+
+      if(fbs->obsName())
+      {
+         std::string obsn = fbs->obsName()->c_str();
+         for(size_t n = 0; n < obsn.size(); ++n)
+         {
+            if(!isprint(obsn[n]))
+            {
+               return false;
+            }
+         }
+      }
+
+      return ok;
    }
 
    ///Get the message formattd for human consumption.
@@ -90,6 +120,13 @@ struct telem_observer : public flatbuffer_log
       
       return msg;
    
+   }
+
+   static std::string msgJSON( void * msgBuffer,  /**< [in] Buffer containing the flatbuffer serialized message.*/
+                                              flatlogs::msgLenT len  /**< [in] [unused] length of msgBuffer.*/
+                                            )
+   {
+      return makeJSON(msgBuffer, len, Telem_observer_fbTypeTable());
    }
    
    static std::string email( void * msgBuffer )
@@ -125,8 +162,8 @@ struct telem_observer : public flatbuffer_log
      */ 
    static logMetaDetail getAccessor( const std::string & member /**< [in] the name of the member */ )
    {
-      if(     member == "email")     return logMetaDetail({"EMAIL", logMeta::valTypes::String, logMeta::metaTypes::State, (void *) &email});
-      else if(member == "obsName")   return logMetaDetail({"NAME", logMeta::valTypes::String, logMeta::metaTypes::State, (void *) &obsName}); 
+      if(     member == "email")     return logMetaDetail({"OBSERVER", logMeta::valTypes::String, logMeta::metaTypes::State, (void *) &email, false});
+      else if(member == "obsName")   return logMetaDetail({"OBS-NAME", logMeta::valTypes::String, logMeta::metaTypes::State, (void *) &obsName, false});
       else if(member == "observing") return logMetaDetail({"OBSERVING", logMeta::valTypes::Bool, logMeta::metaTypes::State, (void *) &observing}); 
       else
       {
@@ -134,6 +171,7 @@ struct telem_observer : public flatbuffer_log
          return logMetaDetail();
       }
    }
+
    
    
 }; //telem_observer

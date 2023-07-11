@@ -94,24 +94,24 @@ struct telem_dmspeck : public flatbuffer_log
       }
       
       msg += "seps: ";
-      for(flatbuffers::Vector<float>::iterator it = fbs->separations()->begin(); it != fbs->separations()->end(); ++it) 
+      for(flatbuffers::Vector<float>::const_iterator it = fbs->separations()->begin(); it != fbs->separations()->end(); ++it)
       {
          msg+= std::to_string(*it);
          msg+= " ";
       }      
       msg += "angs: ";
-      for(flatbuffers::Vector<float>::iterator it = fbs->angles()->begin(); it != fbs->angles()->end(); ++it) 
+      for(flatbuffers::Vector<float>::const_iterator it = fbs->angles()->begin(); it != fbs->angles()->end(); ++it)
       {
          msg+= std::to_string(*it);
          msg+= " ";
       }
       msg += "amps: ";
-      for(flatbuffers::Vector<float>::iterator it = fbs->amplitudes()->begin(); it != fbs->amplitudes()->end(); ++it) 
+      for(flatbuffers::Vector<float>::const_iterator it = fbs->amplitudes()->begin(); it != fbs->amplitudes()->end(); ++it)
       {
          msg+= std::to_string(*it);
          msg+= " ";
       }
-      for(flatbuffers::Vector<unsigned char>::iterator it = fbs->crosses()->begin(); it != fbs->crosses()->end(); ++it) 
+      for(flatbuffers::Vector<unsigned char>::const_iterator it = fbs->crosses()->begin(); it != fbs->crosses()->end(); ++it)
       {
          if(*it) msg += "+";
          else msg += "-";
@@ -120,6 +120,13 @@ struct telem_dmspeck : public flatbuffer_log
       
       return msg;
    
+   }
+
+   static std::string msgJSON( void * msgBuffer,  /**< [in] Buffer containing the flatbuffer serialized message.*/
+                               flatlogs::msgLenT len  /**< [in] [unused] length of msgBuffer.*/
+                             )
+   {
+      return makeJSON(msgBuffer, len, Telem_dmspeck_fbTypeTable());
    }
    
    static bool modulating( void * msgBuffer )
@@ -146,7 +153,7 @@ struct telem_dmspeck : public flatbuffer_log
 
       auto fbs = GetTelem_dmspeck_fb(msgBuffer);
 
-      for(flatbuffers::Vector<float>::iterator it = fbs->separations()->begin(); it != fbs->separations()->end(); ++it) 
+      for(flatbuffers::Vector<float>::const_iterator it = fbs->separations()->begin(); it != fbs->separations()->end(); ++it)
       {
          v.push_back(*it);
       }      
@@ -160,7 +167,7 @@ struct telem_dmspeck : public flatbuffer_log
 
       auto fbs = GetTelem_dmspeck_fb(msgBuffer);
 
-      for(flatbuffers::Vector<float>::iterator it = fbs->angles()->begin(); it != fbs->angles()->end(); ++it) 
+      for(flatbuffers::Vector<float>::const_iterator it = fbs->angles()->begin(); it != fbs->angles()->end(); ++it)
       {
          v.push_back(*it);
       }      
@@ -174,7 +181,7 @@ struct telem_dmspeck : public flatbuffer_log
 
       auto fbs = GetTelem_dmspeck_fb(msgBuffer);
 
-      for(flatbuffers::Vector<float>::iterator it = fbs->amplitudes()->begin(); it != fbs->amplitudes()->end(); ++it) 
+      for(flatbuffers::Vector<float>::const_iterator it = fbs->amplitudes()->begin(); it != fbs->amplitudes()->end(); ++it)
       {
          v.push_back(*it);
       }      
@@ -188,7 +195,7 @@ struct telem_dmspeck : public flatbuffer_log
 
       auto fbs = GetTelem_dmspeck_fb(msgBuffer);
 
-      for(flatbuffers::Vector<unsigned char>::iterator it = fbs->crosses()->begin(); it != fbs->crosses()->end(); ++it) 
+      for(flatbuffers::Vector<unsigned char>::const_iterator it = fbs->crosses()->begin(); it != fbs->crosses()->end(); ++it)
       {
          v.push_back(*it);
       }      

@@ -39,7 +39,6 @@ ldconfig -v
 yum install -y \
     which \
     openssh \
-    cmake3 \
     vim \
     nano \
     wget \
@@ -90,12 +89,6 @@ yum install -y \
 if [[ $MAGAOX_ROLE == vm ]]; then
     yum install -y xorg-x11-xauth
 fi
-
-alternatives --install /usr/local/bin/cmake cmake /usr/bin/cmake3 20 \
-    --slave /usr/local/bin/ctest ctest /usr/bin/ctest3 \
-    --slave /usr/local/bin/cpack cpack /usr/bin/cpack3 \
-    --slave /usr/local/bin/ccmake ccmake /usr/bin/ccmake3 \
-    --family cmake
 
 alternatives --install /usr/local/bin/qmake qmake /usr/bin/qmake-qt5 20
 

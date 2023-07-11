@@ -69,6 +69,13 @@ struct string_log : public flatbuffer_log
       else return rgs->message()->c_str();
    }
 
+   static std::string msgJSON( void * msgBuffer,  /**< [in] Buffer containing the flatbuffer serialized message.*/
+                               flatlogs::msgLenT len  /**< [in] [unused] length of msgBuffer.*/
+                             )
+   {
+      return makeJSON(msgBuffer, len, String_log_fbTypeTable());
+   }
+
 };
 
 

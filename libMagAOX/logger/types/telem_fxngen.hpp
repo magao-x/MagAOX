@@ -12,6 +12,7 @@
 
 #include "generated/telem_fxngen_generated.h"
 #include "flatbuffer_log.hpp"
+#include "../logMeta.hpp"
 
 namespace MagAOX
 {
@@ -66,7 +67,7 @@ struct telem_fxngen : public flatbuffer_log
          else if(C2wvtp == "PULSE") _C2wvtp = 2;
          
          
-         auto fp = CreateTelem_fxngen_fb(builder, C1outp, C1freq, C1vpp, C1ofst, C1phse, C1wdth, _C1wvtp, C2outp, C2freq, C2vpp, C2ofst, C2phse, C2wdth,  _C2wvtp, C1sync, C2sync);
+         auto fp = CreateTelem_fxngen_fb(builder, C1outp, C1freq, C1vpp, C1ofst, C1phse, _C1wvtp, C2outp, C2freq, C2vpp, C2ofst, C2phse,  _C2wvtp, C1sync, C2sync, C1wdth, C2wdth);
          builder.Finish(fp);
 
       }
@@ -133,7 +134,37 @@ struct telem_fxngen : public flatbuffer_log
       return msg;
    
    }
-   
+
+   static std::string msgJSON( void * msgBuffer,  /**< [in] Buffer containing the flatbuffer serialized message.*/
+                               flatlogs::msgLenT len  /**< [in] [unused] length of msgBuffer.*/
+                             )
+   {
+      return makeJSON(msgBuffer, len, Telem_fxngen_fbTypeTable());
+   }
+
+   static double C1freq( void * msgBuffer )
+   {
+      auto fbs = GetTelem_fxngen_fb(msgBuffer);
+      return fbs->C1freq();
+   }
+
+   static double C2freq( void * msgBuffer )
+   {
+      auto fbs = GetTelem_fxngen_fb(msgBuffer);
+      return fbs->C2freq();
+   }
+
+   /// Get the logMetaDetail for a member by name
+   static logMetaDetail getAccessor( const std::string & member /**< [in] the name of the member */ )
+   {
+      if(     member == "C1freq") return logMetaDetail({"C1 FREQ", logMeta::valTypes::Double, logMeta::metaTypes::Continuous, (void *) &C1freq});
+      else if(member == "C2freq") return logMetaDetail({"C2 FREQ", logMeta::valTypes::Double, logMeta::metaTypes::Continuous, (void *) &C2freq});
+      else
+      {
+         std::cerr << "No string member " << member << " in telem_fxngen\n";
+         return logMetaDetail();
+      }
+   }
 }; //telem_fxngen
 
 

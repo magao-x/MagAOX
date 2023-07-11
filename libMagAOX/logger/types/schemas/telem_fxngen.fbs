@@ -1,6 +1,6 @@
 namespace MagAOX.logger;
 
-
+// NOTE: New fields can ONLY be added at the end of the list
 
 table Telem_fxngen_fb
 {
@@ -9,7 +9,6 @@ table Telem_fxngen_fb
    C1vpp:double;
    C1ofst:double;
    C1phse:double;
-   C1wdth:double;
    C1wvtp:uint8;
    
    C2outp:uint8;
@@ -17,13 +16,15 @@ table Telem_fxngen_fb
    C2vpp:double;
    C2ofst:double;
    C2phse:double;
-   C2wdth:double;
    C2wvtp:uint8;
 
+   // updated 2022-10-15 adding C1/C2 sync
    C1sync:uint8;
    C2sync:uint8;
+
+   // updated 2022-12-04 added pulse width fields
+   C1wdth:double;
+   C2wdth:double;
 }
 
 root_type Telem_fxngen_fb;
-
-//updated 2022-10-15 adding C1/C2 sync

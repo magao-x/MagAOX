@@ -299,6 +299,9 @@ int xrif2fits::execute()
       logFileName lfn(m_files[n]);
 
       std::vector<logMeta> logMetas;
+      logMetas.push_back(logMetaSpec({"observers", telem_observer::eventCode, "email"}));
+      logMetas.push_back(logMetaSpec({"observers", telem_observer::eventCode, "obsName"}));
+
       logMetas.push_back(logMetaSpec({"tcsi", telem_telcat::eventCode, "catObj"}));
       logMetas.push_back(logMetaSpec({"tcsi", telem_telcat::eventCode, "catRA"}));
       logMetas.push_back(logMetaSpec({"tcsi", telem_telcat::eventCode, "catDec"}));
@@ -311,6 +314,14 @@ int xrif2fits::execute()
       logMetas.push_back(logMetaSpec({"tcsi", telem_telpos::eventCode, "am"}));
       logMetas.push_back(logMetaSpec({"tcsi", telem_telpos::eventCode, "ha"}));
       logMetas.push_back(logMetaSpec({"tcsi", telem_teldata::eventCode, "pa"}));
+
+      logMetas.push_back(logMetaSpec({"holoop", telem_loopgain::eventCode, "state"}));
+      logMetas.push_back(logMetaSpec({"holoop", telem_loopgain::eventCode, "gain"}));
+      logMetas.push_back(logMetaSpec({"holoop", telem_loopgain::eventCode, "multcoef"}));
+      logMetas.push_back(logMetaSpec({"holoop", telem_loopgain::eventCode, "limit"}));
+
+      logMetas.push_back(logMetaSpec({"fxngenmodwfs", telem_fxngen::eventCode, "C1freq"}));
+      logMetas.push_back(logMetaSpec({"fxngenmodwfs", telem_fxngen::eventCode, "C2freq"}));
    
       logMetas.push_back(logMetaSpec({"stagebs", telem_stage::eventCode, "presetName"}));
       logMetas.push_back(logMetaSpec({"stagebs", telem_stage::eventCode, "preset"}));
@@ -354,6 +365,15 @@ int xrif2fits::execute()
       logMetas.push_back( logMetaSpec(lfn.appName(), telem_stdcam::eventCode, "temp"));
       logMetas.push_back( logMetaSpec(lfn.appName(), telem_stdcam::eventCode, "shutterState"));
 
+      std::string channel = lfn.appName().substr(3);
+
+      // For channels with associated focus stages, report those positions as headers
+      if (channel == "sci1" || channel == "sci2" || channel == "lowfs") {
+         logMetas.push_back(logMetaSpec({"stage" + channel, telem_stage::eventCode, "presetName"}));
+         logMetas.push_back(logMetaSpec({"stage" + channel, telem_stage::eventCode, "preset"}));
+         logMetas.push_back(logMetaSpec({"stage" + channel, telem_zaber::eventCode, "pos"}));
+      }
+
       logMetas.push_back( logMetaSpec({"tweeterSpeck", telem_dmspeck::eventCode, "modulating"}));
       logMetas.push_back( logMetaSpec({"tweeterSpeck", telem_dmspeck::eventCode, "trigger"}));
       logMetas.push_back( logMetaSpec({"tweeterSpeck", telem_dmspeck::eventCode, "frequency"}));
@@ -361,6 +381,11 @@ int xrif2fits::execute()
       logMetas.push_back( logMetaSpec({"tweeterSpeck", telem_dmspeck::eventCode, "angles"}));
       logMetas.push_back( logMetaSpec({"tweeterSpeck", telem_dmspeck::eventCode, "amplitudes"}));
       logMetas.push_back( logMetaSpec({"tweeterSpeck", telem_dmspeck::eventCode, "crosses"}));
+
+      logMetas.push_back(logMetaSpec({"loloop", telem_loopgain::eventCode, "state"}));
+      logMetas.push_back(logMetaSpec({"loloop", telem_loopgain::eventCode, "gain"}));
+      logMetas.push_back(logMetaSpec({"loloop", telem_loopgain::eventCode, "multcoef"}));
+      logMetas.push_back(logMetaSpec({"loloop", telem_loopgain::eventCode, "limit"}));
 
       if(g_timeToDie == true) break; //check before going on
 
@@ -623,6 +648,9 @@ int xrif2fits::execute()
          std::string dateobs = mx::sys::ISO8601DateTimeStr(atime, 1);
          
          fh.append("DATE-OBS", dateobs, "Date of obs. YYYY-mm-ddTHH:MM:SS");
+         fh.append("INSTRUME", "MagAO-X");
+         fh.append("CAMERA", lfn.appName());
+         fh.append("TELESCOP", "Magellan Clay, Las Campanas Obs.");
          
          if(!m_noMeta)
          {
@@ -758,6 +786,8 @@ int xrif2fits::writeFloat( int n,
          std::string dateobs = mx::sys::ISO8601DateTimeStr(atime, 1);
          
          fh.append("DATE-OBS", dateobs, "Date of obs. YYYY-mm-ddTHH:MM:SS");
+         fh.append("INSTRUME", "MagAO-X " + lfn.appName());
+         fh.append("TELESCOP", "Magellan Clay, Las Campanas Obs.");
                   
          if(exptime > -1)
          {

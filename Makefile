@@ -137,7 +137,6 @@ scripts_to_install = magaox \
 	dmdispbridge \
 	shmimTCPreceive \
 	shmimTCPtransmit \
-	lookyloo \
 	obs_to_movie \
 	instrument_backup_sync \
 	cacao_startup_if_present \

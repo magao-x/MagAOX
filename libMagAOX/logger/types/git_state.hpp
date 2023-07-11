@@ -80,6 +80,13 @@ struct git_state : public flatbuffer_log
 
       return str;
    }
+
+   static std::string msgJSON( void * msgBuffer,  /**< [in] Buffer containing the flatbuffer serialized message.*/
+                                              flatlogs::msgLenT len  /**< [in] [unused] length of msgBuffer.*/
+                                            )
+   {
+      return makeJSON(msgBuffer, len, Git_state_fbTypeTable());
+   }
    
    /// Access the repo name field
    static std::string repoName( void * msgBuffer /**< [in] Buffer containing the flatbuffer serialized message.*/ )
