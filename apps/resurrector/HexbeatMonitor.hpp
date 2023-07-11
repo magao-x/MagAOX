@@ -124,7 +124,8 @@ static inline std::string time_to_hb(int delay)
 // /////////////////////////////////////////////////////////////////////
 // /////////////////////////////////////////////////////////////////////
 
-class HexbeatMonitor {
+class HexbeatMonitor
+{
 public: // interfaces
 
     /// Constructor
@@ -153,6 +154,11 @@ public: // interfaces
     void pending_close_set(bool tf)
     {
         m_pending_close = tf && (m_fd > -1);
+    }
+
+    void output_redirect_set(void (*output_redirect)(std::string))
+    {
+        m_output_redirect = output_redirect;
     }
 
     // /////////////////////////////////////////////////////////////////
@@ -215,14 +221,20 @@ public: // interfaces
       * \arg \c delay is a time offset used to initialize m_last_hb
       * - so the new heartbeater process has time to startup before
       *   sending its first hexbeat
+      * \arg \c check_existing tells fork-hexbeater to check for an
+      *         existing process with this instance's argv0 and hbname;
+      *         if such an existing process is found, then return that
+      *         existing process' pid and do not fork a new process
       */
     int
-    start_hexbeater(fd_set& fd_set_cpy, int& nfds, int delay)
+    start_hexbeater(fd_set& fd_set_cpy, int& nfds, int delay
+                   ,bool check_existing=true
+                   )
     {
         if (m_fd < 0) { errno = 0; return -1; }
 
         // Find running hexbeater or fork new hexbeater; return on error
-        int pid = fork_hexbeater(delay);
+        int pid = fork_hexbeater(delay,check_existing);
         if (pid < 0) { return pid; }
 
         // Update, select monitoring flag, [fd_set] bit, and nfds
@@ -358,9 +370,7 @@ public: // interfaces
         struct dirent* de;
 
         pdir = opendir("/proc");
-        if (pdir == NULL) {
-            exit(1);
-        }
+        if (pdir == NULL) { exit(1); }
 
         int save_errno = 0;
         errno = 0;
@@ -372,7 +382,8 @@ public: // interfaces
             // comprising digit characters
             if (de->d_type != DT_DIR) { continue; }
             char* p = de->d_name;
-            while (isdigit(*p)) { ++p; }
+            int pid = 0;
+            while (isdigit(*p)) { pid = (10 * pid) + *p - '0'; ++p; }
             if (p==de->d_name || *p) { continue; }
 
             // Open /proc/<pid>/cmdline file, read contents into
@@ -418,9 +429,6 @@ public: // interfaces
 
             // Found a hexbeater:  close dir, read PID, return PID
             closedir(pdir);
-            std::istringstream iss(de->d_name);
-            int pid = 0;
-            iss >> pid;
             return pid;
         }
 
@@ -473,6 +481,8 @@ private: // Internal attributes and interfaces
     std::string m_buffer{""};  ///< Accumulated heartbeat data
 
     bool m_pending_close{false}; ///< Mark for possible closure
+
+    void (*m_output_redirect)(std::string){nullptr}; ///< forked outputs
 
     // /////////////////////////////////////////////////////////////////
     // /////////////////////////////////////////////////////////////////
@@ -683,7 +693,8 @@ private: // Internal attributes and interfaces
 
         int istat{0};
 
-        if (fd < 0 && errno == ENOENT) {
+        if (fd < 0 && errno == ENOENT)
+        {
             // File does not exist:  create FIFO; re-attempt open
             mode_t prev_mode;
             errno = 0;
@@ -727,25 +738,27 @@ private: // Internal attributes and interfaces
 
     // ////////////////////////////////////////////////////////////////
     // ////////////////////////////////////////////////////////////////
-    /// Fork the hexbeater if it is not already running
+    /// Fork the hexbeater, perhaps only if it is not already running
     int
-    fork_hexbeater(int delay)
+    fork_hexbeater(int delay, bool check_existing)
     {
-        // If a running hexbeater was found via m_argv0 and m_hbname,
-        // then return its PID ...
-        int pid = find_hexbeater_pid();
+        // If directed to check for a hexbeater via m_argv0 and m_hbname
+        // and such a hexbeater is found, then return its PID ...
+        int pid{check_existing ? find_hexbeater_pid() : 0};
         if (pid > 0) { return pid; };
 
         // ... Otherwise fork, ...
         pid = fork();
-        if (pid != 0) {
-            // Parent:  fork error (pid < 0) or success (pid < 0) ...
-            // Add delay to current time to initialize last hexbeat
+        if (pid != 0)
+        {
+            // Parent fork:  on success (pid > 0) add delay to current
+            // time to initialize last hexbeat; on error (pid < 0) do
+            // nothing extra; on either return that pid
             if (pid > 0) { m_last_hb = time_to_hb(delay); }
             return pid;
         } // fork failed (<0) or parent (>0)
 
-        // Child:  pid == 0
+        // Child fork:  pid == 0
 
         int save_errno{errno};
         int ipgstat = setpgid(0,0);
@@ -759,6 +772,12 @@ private: // Internal attributes and interfaces
             << "; continuing ..."
             << std::endl;
             errno = save_errno;
+        }
+
+        if (m_output_redirect)
+        {
+            errno = 0;
+            m_output_redirect(m_hbname);
         }
 
         // ... And then exec, the hexbeater
@@ -815,7 +834,8 @@ private: // Internal attributes and interfaces
             // read(2) will throw an EAGAIN/EWOULDBLOCK errno eventually
             // \todo convince myself this cannot loop forever?
             lenc10 = ::read(m_fd,c10,10);
-            if (lenc10 > 0) {
+            if (lenc10 > 0)
+            {
                 // Append read input data to buffer
                 m_buffer.append(c10, lenc10);
                 int L = m_buffer.size();
@@ -826,9 +846,7 @@ private: // Internal attributes and interfaces
         } while ( lenc10 > -1);
 
         // Read error
-        if (errno != EWOULDBLOCK && errno != EAGAIN) {
-            return -1;
-        }
+        if (errno != EWOULDBLOCK && errno != EAGAIN) { return -1; }
 
         // Find locations in buffer of start of heartbeat and/or of '\n'
         std::size_t inl;

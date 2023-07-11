@@ -70,11 +70,12 @@ public:
      * test this with good().
      */
    resurrectee( parentT * parent);
-   ~resurrectee();
+   virtual ~resurrectee();
 
    bool good(){ return m_good;}
 
-   virtual void execute(void);
+   virtual void execute(size_t offset_index = 0);
+   virtual void execute_1();
 
    /// Configuration
    static void
@@ -96,7 +97,8 @@ private:
    int m_broken_pipes_limit{2};          // Last SIGPIPE to log an error
    int m_mypid{-1};                      // PID of this process
    int m_fdhb{-1};                       // File Descriptor of named FIFO
-   static size_t m_time_offset;          // Resurrectee timeout
+   time_t m_last_time_written{0};        // Last time written to FIFO
+   static std::vector<time_t> m_time_offset;  // Resurrectee timeout
 
    /// Signal handler:  exit on any signal caught
    static void
@@ -170,17 +172,40 @@ private:
 template<class parentT>
 resurrectee<parentT> * resurrectee<parentT>::m_self = nullptr;
 
-//Set default timeout to 600
+//Set default running timeout to 600; a 2nd timeout m_time_offset[1] may
+//be appended to allow for long delays during in MagAOXApp::appStartup()
 template<class parentT>
-size_t resurrectee<parentT>::m_time_offset = 600;
+std::vector<time_t> resurrectee<parentT>::m_time_offset = { 600 };
+
+/// Write hexbeat timestamp to FIFO with time offset at vector element 1
+/// - This is done to send an initial, i.e. pre-appStartup(), hexbeat,
+///   so resurrector will not cyclically kill and restart such
+//    slow-starting processes
+template<class parentT>
+void resurrectee<parentT>::execute_1()
+{
+    execute(1);
+}
 
 /// Write hexbeat timestamp to FIFO
+/// - indices beyond of the m_time_offset's vector range are ignored
+/// - time offsets less than 0 are ignored
+/// - timestamps that are not newer than past timestamps are not sent
 template<class parentT>
-void resurrectee<parentT>::execute()
+void resurrectee<parentT>::execute(size_t offset_index /* = 0 */)
 {
-    // Generate hexbeat timestamp
+    // Ensure the element exists in the vector and its value is positive
+    if (offset_index >= m_time_offset.size()) { return; }
+    if (m_time_offset[offset_index] < 0) { return; }
+
+    // Calculate the future time of timeout; do nothing and return if it
+    // is not newer than any previously sent hexbeat
+    time_t new_time = time(0)+m_time_offset[offset_index];
+    if (new_time <= m_last_time_written) { return; }
+
+    // Generate hexbeat timestamp for the timeout
     char stimestamp[18];
-    sprintf(stimestamp,"%9.9lx\n",time(0)+m_time_offset);
+    sprintf(stimestamp,"%9.9lx\n",new_time);
 
     // Write hexbeat to FIFO
     int irtn = write(m_fdhb,stimestamp,10);
@@ -188,6 +213,9 @@ void resurrectee<parentT>::execute()
     // On success, return
     if (irtn > 0)
     {
+        // Save time+offset of most recent successful write to FIFO
+        m_last_time_written = new_time;
+
         // If previous read(s) had an error, then log recovery and reset
         if(m_broken_pipes)
         {
@@ -198,6 +226,9 @@ void resurrectee<parentT>::execute()
         }
         return;
     }
+
+    // If write failed, then reset last time written
+    m_last_time_written = 0;
 
     // Ignore successive errors after some number of them
     if (m_broken_pipes>m_broken_pipes_limit) { return; }
@@ -227,7 +258,7 @@ resurrectee<parentT>::resurrectee(parentT * parent)
    
    m_self = this;
 
-   if (m_time_offset < 1) { m_time_offset = 600; }
+   if (m_time_offset[0] < 1) { m_time_offset[0] = 600; }
 
    // Save parent, name and PID to member attributes
    m_parent = parent;
@@ -310,7 +341,14 @@ void resurrectee<parentT>::_sigusr2_handler( int signum
 template<class parentT>
 void resurrectee<parentT>::_setupConfig( mx::app::appConfigurator & _config )
 {
-   _config.add("resurrectee.timeout", "", "resurrectee.timeout", mx::app::argType::Required, "resurrectee", "timeout", false, "int", "Resurrectee timeout, s");
+   _config.add("resurrectee.timeout", "", "resurrectee.timeout", mx::app::argType::Required, "resurrectee", "timeout", false, "int"
+, "Resurrectee hexbeat timeout vector values,  in seconds:  the first"
+  " (default 600s) is the hexbeat timeout once the process is started"
+  " and running; the second, if provided here, is a one-time hexbeat"
+  " timeout for slow-starting processes (e.g. that have to wait for an"
+  " external device to connect) used to send a hexbeat before startup to"
+  " provide a timeout longer than the resurrector's 10s default startup"
+  " timeout");
 }
 
 template<class parentT>

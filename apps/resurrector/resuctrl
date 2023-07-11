@@ -1,0 +1,540 @@
+#!/usr/bin/env bash
+
+########################################################################
+### Main routine:  parse commands; print Usage; call the verb's function
+function resuctl_main {
+
+  misc_setup
+
+  parse_commands $* || return 1
+
+  [ "$Helped" ] && return 0
+
+  verb_${verb}
+}
+
+########################################################################
+### Startup:  if resurrector_indi is not running, and configuration file
+###           is readable, then start resurrectee_indi with stated $ROLE
+function verb_startup {
+
+  hide
+
+  ripid=$(resurrector_indi_pid) \
+  && ( [ "$verb" == "restart" ] \
+     || resu_failure "resurrector_indi already running PID{$ripid}; exiting ..." \
+     || true \
+     ) \
+  && return 1
+
+  proclist_txt="$(proclist_path readonly)" \
+  || resu_failure "Readable process list file not found; exiting ..." \
+  || return 1
+
+  command="./resurrector_indi -r $ROLE"
+  resu_success "$command &"
+  $command &
+}
+
+########################################################################
+### Shutdown:  if resurrector_indi is active, then signal it via SIGUSR1
+###            to trigger killing its INDI driver devices before exiting
+function verb_shutdown {
+
+  hide
+
+  ripid=$(resurrector_indi_pid) \
+  || resu_failure "resurrector_indi is not running; exiting ..." \
+  || return 1
+
+  command="kill -USR1 $ripid"
+  resu_success "$command"
+  $command
+}
+
+########################################################################
+### Restart:  first shutdown, then startup, the resurrector_indi process
+function verb_restart {
+  hide
+  verb_shutdown
+  sleep 5
+  verb_startup
+}
+
+########################################################################
+### Start:  edit process list file to enable selected devices, then send
+###         signal SIGUSR2 to resurrector_indi to re-start those devices
+function verb_start {
+
+  hide
+
+  [ "$procnames" ] \
+  || Usage "ERROR:  command [start] requires PROCNAME(s)" \
+  || return 1
+
+  proclist_txt="$(proclist_path)" \
+  || resu_failure "Writable process list file not found; exiting ..." \
+  || return 1
+
+  for procname in ${procnames//${delim}/ } ; do
+    ### Remove any leading whitespace+# for proclist file procname entry
+    sed -E -i -e "/^$ws0#$wsh0${procname}$ws1$notws1$ws0\$/s/^$wsh0//" "$proclist_txt"
+  done
+
+  ripid=$(resurrector_indi_pid) \
+  || resu_failure "resurrector_indi is not running; exiting ..." \
+  || return 1
+
+  command="kill -USR2 $ripid"
+  resu_success "$command"
+  $command
+}
+
+########################################################################
+### Stop:  edit process list file to disable selected devices, then send
+###        signal SIGUSR2 to resurrector_indi to terminate those devices
+function verb_stop {
+
+  hide
+
+  [ "$procnames" ] \
+  || Usage "ERROR:  command [stop] requires PROCNAME(s)" \
+  || return 1
+
+  proclist_txt="$(proclist_path)" \
+  || resu_failure "Writable process list file not found; exiting ..." \
+  || return 1
+
+  for procname in ${procnames//${delim}/ } ; do
+    ### Replace leading whitespace with # in proclist file procname line
+    sed -E -i -e "/^$ws0${procname}$ws1$notws1$ws0\$/s/^$ws0/#/" "$proclist_txt"
+  done
+
+  ripid=$(resurrector_indi_pid) \
+  || resu_failure "resurrector_indi is not running; exiting ..." \
+  || return 1
+
+  command="kill -USR2 $ripid"
+  resu_success "$command"
+  $command
+}
+
+########################################################################
+### Trigger resurrector to stop and start Heaxbeaters before they expire
+function verb_defib {
+
+  [ "$procnames" ] \
+  || Usage "ERROR:  command [defib] requires PROCNAME(s)" \
+  || return 1
+
+  ripid=$(resurrector_indi_pid) \
+  || resu_failure "resurrector_indi is not running; exiting ..." \
+  || return 1
+
+  for procname in ${procnames//${delim}/ } ; do
+
+    ### Find Hexbeater pipe path For each INDI driver device in the loop
+    hbpath="$(find_resu_hexbeat_pipe $procname)" \
+    || resu_failure "resurrector_indi is not reading $procname's pipe; skipping this Hexbeater ..." \
+    || continue   ### Skip devices to which resurrector is not listening
+
+    ### Inject an expired Hexbeat into pipe; resurrector sees it as hung
+    echo 000000000 >> "$hbpath"
+    resu_success Defibrillated $procname
+
+  done || true
+}
+
+########################################################################
+function verb_peek {
+  hide
+
+  for procname in ${procnames//${delim}/ } ; do
+    _brief_status "$procname"
+    _peek_logs "$procname"
+  done
+}
+
+########################################################################
+function verb_status {
+  hide
+
+  for procname in ${procnames//${delim}/ } ; do
+    _brief_status "$procname"
+  done
+}
+
+########################################################################
+### Parse command line; store the results in the various shell variables
+function parse_commands {
+
+  ### If -r was last command-line argument, ROLEisnext will be non-empty
+  unset ROLEisnext
+  unset procnames
+  unset Helped
+  unset All
+
+  ### Loop over command-line arguments
+  for arg in $* ; do
+
+    ### Ignore empty arguments
+    ### -r or --role was previous argument; use current argument as ROLE
+    [ "$arg" ] || continue
+    [ "$ROLEisnext" ] && ROLE="$arg" && unset ROLEisnext && continue
+
+    ### Parse arguments using case-esac statments
+    case "$arg" in
+
+    ### Verbs
+    startup|shutdown|restart|start|stop|defib|peek|status)
+
+      ### If a second verb is found, add it as procname to procnames var
+      [ "$verb" ] \
+      && add_procname "$arg" \
+      && resu_warning "WARNING:  adding duplicate verb{$arg} to device names"
+
+      ### Only assign verb once
+      [ "$verb" ] || verb="$arg"
+      ;;
+
+    ### -r ROLE or --role ROLE
+    -r|--role)
+      [ ! "$ROLE" ] \
+      || Usage "ERROR:  Duplicate role; exiting..." \
+      || return 1
+      ROLEisnext=$arg
+      ;;
+
+    ### -all
+    --all)
+      All=yes
+      ;;
+
+    ### Help
+    -h|--help)
+      Helped=yes
+      Usage || return 0
+      ;;
+
+    ### Device name
+    *)
+      add_procname "$arg"
+      ;;
+    esac
+  done
+
+  [ "$ROLEisnext" ] && ( Usage "ERROR:  missing role argument after [$ROLEisnext]" || true ) && return 1
+  [ "$ROLE" ] || ROLE="$(printenv MAGAOX_ROLE)"
+  [ "$ROLE" ] || Usage "ERROR:  missing role (${opt_magaox}/config/proclist_{MAGAOX_ROLE}.txt))" || return 1
+
+  [ "$verb" ] || Usage "ERROR:  missing verb (status, peek, etc.)" || return 1
+
+  [ ! "$All" ] \
+  || [ "$verb" != "start" ] \
+  || Usage "ERROR:  --all option not valid for start command" \
+  || return 1
+
+  [ "$All" ] && [ "$procnames" ] \
+  && ( Usage "ERROR:  --all option mutually exclusive with PROCNAME options [$procnames]" || true ) && return 1
+
+  [ ! "$All" ] || procnames="$(find_all_procnames)" || return 1
+
+  true
+} ### function parse_commands
+
+########################################################################
+### Write the status of single Hexbeater and resurrector_indi connection
+function _brief_status {
+
+  [ "$1" ] || return 1
+  procname="$1"
+
+  resu_path="$(find_resu_hexbeat_pipe "$procname")" || true
+  hb_pid="$(find_device_hexbeat_pipe "$procname" pid)" || true
+
+  [ ! "$resu_path" ] && [ ! "$hb_pid" ] && resu_warning "$procname: not started"
+  [ ! "$resu_path" ] && [ "$hb_pid" ] && resu_failure "$procname: resurrector_indi not listening, but process running (pid: $hb_pid)"
+  [ "$resu_path" ] && [ ! "$hb_pid" ] && resu_failure "$procname: resurrector_indi listening, but process not running"
+  [ "$resu_path" ] && [ "$hb_pid" ] && resu_success "$procname: running (pid: $hb_pid)"
+  return 0
+}
+
+########################################################################
+### Write last 10 lines of single Hexbeater process' flatbuffer log file
+function _peek_logs {
+
+  [ "$1" ] || return 1
+  procname="$1"
+
+  logdump -n 1 "$procname" 2>&1 | tail -n 10
+  resu_informa "End $procname logs"
+  echo
+
+  return 0
+}
+
+########################################################################
+### Use proclist file for delimited procnames (INDI driver device names)
+function find_all_procnames {
+
+  proclist_txt="$(proclist_path readonly)" \
+  || resu_failure "Readable process list file not found; exiting ..." \
+  || return 1
+
+  cat "$proclist_txt" \
+  | while read procname exe cruft ; do
+      ### Ignore any line with a token count less than or greater than 2
+      [ ! "$exe" ] && continue
+      [ "$cruft" ] && continue
+      ### Ignore any line where the first token starts with a hash ('#')
+      [ "${procname###}" != "$procname" ] && continue
+      ### Send valid procname wrapped with delimiter character to stdout
+      wrap_procname "$procname"
+    done
+}
+
+########################################################################
+### Append delimited procname (INDI driver device name) to procnames var
+function add_procname {
+  [ $# == 1 ] \
+  || Usage "ERROR:  program error, code WSNBATGH0; contact programmer" \
+  || exit 0
+
+  [ "${1###}" == "$1" ] || return 0
+  
+  procnames="${procnames}$(wrap_procname "$1")"
+}
+
+########################################################################
+### Wrap one procname (INDI driver device name) with delimiter character
+function wrap_procname {
+
+  echo -n "${delim}${1}${delim}"
+}
+
+########################################################################
+### Build the path to existing process list file with configuration data
+function proclist_path {
+
+  the_proclist="${opt_magaox}/config/proclist_${ROLE}.txt"
+
+  [ -r "$the_proclist" ] \
+  && [ "$1" == "readonly" -o -w "$the_proclist" ] \
+  && ls -d "$the_proclist"
+}
+
+########################################################################
+### Send the PID of the first process running resurrector_indi to stdout
+function resurrector_indi_pid {
+
+  lsof +c 0 | \grep 'txt.*/resurrector_indi$' \
+  | while read ri pid user txt reg device size_off node exe cruft ; do
+      [ "$txt" == "txt" ] \
+      && [ "$(basename "$exe")" == "resurrector_indi" ] \
+      && [ "$pid" ] \
+      && echo $pid | grep '^[1-9][0-9]*$' \
+      && break
+    done | \grep .               ### Return failure if nothing was found
+}
+
+########################################################################
+### Find a Hexbeater pipe that is being read by the resurrector_indi app
+### N.B. this only returns success code zero if such a pipe is detected,
+###      and in every other situation it returns a non-zero failure code
+###
+### Usage:
+###
+###   find_resu_hexbeat_pipe xy  ### for /opt/MagAOX/drivers/fifos/xy.hb
+###
+###   hbpath=$(find_resu_hexbeat_pipe xy) || echo "Pipe xy is not alive"
+###
+function find_resu_hexbeat_pipe {
+
+  hbpath="$(find_hexbeat_pipe "$1")" || return 1
+
+  ### The first column of the lsof output will be a prefix of this name:
+  ri="resurrector_indi"
+
+  ### List all processes that have that pipe open; find resurrector_indi
+  lsof +c 0  "$hbpath" \
+  | while read cmd pid user fd type dev sizeoff mode path cruft ; do
+
+      ### ripid=... => fails if resurrector_indi is not currently active
+      ### ${ri#${cmd}} => fails if cmd is not prefix of resurrector_indi
+      ### $pid => fails if pid with pipe open is not of resurrector_indi
+      ### ${fd%w} => fails if [pid] process has pipe open for write only
+      ### $type => fails if $hbpath is something other than a named FIFO
+      ### echo "$path" - write path of pipe accessed by resurrector_indi
+      ### break out of loop when pipe accessed by resurrector_indi found
+
+      ripid=$(resurrector_indi_pid) \
+      && [ "${ri#${cmd}}" != "$ri" ] \
+      && [ "$pid" == "$ripid" ] \
+      && [ "${fd%w}" == "$fd" ] \
+      && [ "$type" == "FIFO" ] \
+      && echo -n "$path" \
+      && break
+
+    done | \grep .              ### Returns failure if nothing was found
+}
+
+########################################################################
+### Find a Hexbeater pipe that's being read by its Hexbeater application
+### $1 - name of the pipe i.e. of /opt/MagAOX/drivers/fifo/devicename.hb
+### $2 - empty to write pipe full path; "pid" to write the Hexbeater pid
+function find_device_hexbeat_pipe {
+
+  hbpath="$(find_hexbeat_pipe "$1")" || return 1
+
+  ### The first column of the lsof output won't be a prefix of this name
+  ri="resurrector_indi"
+
+  ### List all processes that have that pipe open; skip resurrector_indi
+  lsof +c 0  "$hbpath" \
+  | while read cmd pid user fd type dev sizeoff mode path cruft ; do
+
+      ### ripid=... => retrieves the PID of the resurrector_indi process
+      ### ${ri#${cmd}} => fails if cmd is any prefix of resurrector_indi
+      ### $pid => fails if the pid is the resurrector_indi program's pid
+      ### ${fd%w} => fails if [pid] process does not pipe open for write
+      ### $type => fails if $hbpath is something other than a named FIFO
+      ### echo "$pid" - write non-resurrector_indi pid process pipe user
+      ### echo "$path" - write pipe path written by non-resurrector_indi
+      ### break out loop when pipe written by non-resurrector_indi found
+
+      ripid=$(resurrector_indi_pid)
+
+      [ "${ri#${cmd}}" == "$ri" ] \
+      && [ "$pid" != "$ripid" -o ! "$ripid" ] \
+      && [ "${fd%w}" != "$fd" ] \
+      && [ "$type" == "FIFO" ] \
+      && ( [ "$2" == "pid" ] && echo "$pid" \
+        || ( [ ! "$2" ] && echo "$path" ) \
+         ) \
+      && break
+
+    done | \grep .              ### Returns failure if nothing was found
+}
+
+########################################################################
+### Build the path for the named pipe of one INDI driver device (arg $1)
+function find_hexbeat_pipe {
+
+  [ "$2" ] && return 1  ### Return error code if more than one input arg
+
+  fdir="${opt_magaox}/drivers/fifos/"     ### Named FIFOs are under here
+
+  pn="$(echo "$1" | grep .)" \
+  && find "$fdir" -type p -name "${pn}.hb" | head -1 | \grep .
+
+}
+
+########################################################################
+function Usage {
+cat << EoF
+usage: [MAGAOX_ROLE=ROLE] resuctrl [-h|--help] [-r ROLE|--role ROLE] \\
+             startup|shutdown|restart|start|stop|defib|peek|status \\
+             [PROCNAME[ PROCNAME[ ...]]]
+
+MagAO-X Process Control
+
+2023-02-28 - BTCarcich - Updated to use resurrector_indi framework
+
+Usage:
+
+    resuctrl startup [--all]
+        - startup resurrector_indi and all processes in proclist
+
+    resuctrl shutdown [--all]
+        - shutdown all processes including resurrector_indi
+
+    resuctrl restart
+        - have resurrector_indi shutdown then startup each running process
+
+    resuctrl start PROCNAME[ PROCNAME[ ...]]
+        - enable and start PROCNAME processes in proclist
+
+    resuctrl stop --all|PROCNAME[ PROCNAME[ ...]]
+        - disable and stop PROCNAME processes in proclist
+
+    resuctrl defib --all|PROCNAME[ [PROCNAME ...]]
+        - declare to resurrector that PROCNAME processes have expired,
+          so they will be restarted by resurrector_indi
+
+    resuctrl peek --all|PROCNAME [PROCNAME ...]
+        - show status and last few log lines (via logdump) for each process
+
+    resuctrl status --all|PROCNAME [PROCNAME ...]
+        - show status for each process
+
+positional arguments:
+  {startup,shutdown,restart,start,stop,defib,peek,status}
+                        verb for action to take
+
+proclist is contents of file::
+  /opt/MagAOX/config/proclist_gauss.txt
+
+optional arguments:
+  -h, --help            show this help message and exit
+  -r ROLE, --role ROLE  Specify role to read proclist for (default:gauss)
+
+$RED_SEQ$*$RESET_SEQ
+EoF
+
+return 1
+
+####################################
+### Obsolete:
+###    resuctrl inspect PROCNAME
+###        - connect to the tmux session for PROCNAME
+####################################
+}
+
+########################################################################
+function hide {
+  ( [ "$VERBOSE" ] && cat || cat > /dev/null ) << EoFhide
+verb{$verb}:
+- ROLE{$ROLE}
+- procnames{$procnames}
+- All{$All}
+EoFhide
+}
+
+########################################################################
+### MagAOX root directory; sequences for color highlighting; grep regexp
+function misc_setup {
+
+  opt_magaox="$(printenv MagAOX_PATH | grep . || echo "/opt/MagAOX")"
+
+  RED_SEQ="$(tput setaf 1 2>/dev/null)"
+  GREEN_SEQ="$(tput setaf 2 2>/dev/null)"
+  YELLOW_SEQ="$(tput setaf 3 2>/dev/null)"
+  BLUE_SEQ="$(tput setaf 4 2>/dev/null)"
+  RESET_SEQ="$(tput sgr0)"
+
+  ### whitespace:  ws=>tab+space; wsh=>#+tab+space; notws=>not-tab+space
+  ws="[ 	]"
+  wsh="[# 	]"
+  notws="[^ 	]"
+
+  ws0="${ws}*"
+  ws1="${ws}+"
+  wsh0="${wsh}*"
+  wsh1="${wsh}+"
+  notws1="${notws}+"
+
+  delim="'"
+
+  true
+}
+
+########################################################################
+### Write messages of success, failure, warning and informational nature
+function resu_success { echo "${GREEN_SEQ}$*${RESET_SEQ}" ; }
+function resu_failure { echo "${RED_SEQ}$*${RESET_SEQ}" 1>&2 && false; }
+function resu_warning { echo "${YELLOW_SEQ}$*${RESET_SEQ}" ; }
+function resu_informa { echo "${BLUE_SEQ}$*${RESET_SEQ}" ; }
+
+########################################################################
+### All functions have been read in; start by calling resuctl_main above
+resuctl_main $*
