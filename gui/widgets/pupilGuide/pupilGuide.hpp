@@ -2240,7 +2240,7 @@ void pupilGuide::on_button_pup_l_pressed()
    {
       ip.setName("pos_2");
       ip.add(pcf::IndiElement("target"));
-      ip["target"] = m_pupCh1 + m_pupStepSize;
+      ip["target"] = m_pupCh2 + m_pupStepSize;
    }
 
    sendNewProperty(ip);
