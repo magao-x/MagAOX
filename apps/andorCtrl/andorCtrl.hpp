@@ -1531,15 +1531,15 @@ int andorCtrl::powerOnDefaults()
    m_currentROI.y = m_default_y;
    m_currentROI.w = m_default_w;
    m_currentROI.h = m_default_h;
-   m_currentROI.bin_x = 1;
-   m_currentROI.bin_y = 1;
+   m_currentROI.bin_x = m_default_bin_x;
+   m_currentROI.bin_y = m_default_bin_y;
    
    m_nextROI.x = m_default_x;
    m_nextROI.y = m_default_y;
    m_nextROI.w = m_default_w;
    m_nextROI.h = m_default_h;
-   m_nextROI.bin_x = 1;
-   m_nextROI.bin_y = 1;
+   m_nextROI.bin_x = m_default_bin_x;
+   m_nextROI.bin_y = m_default_bin_y;
    
    return 0;
 }
