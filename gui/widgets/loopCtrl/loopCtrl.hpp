@@ -128,6 +128,7 @@ void loopCtrl::subscribe()
    m_parent->addSubscriberProperty(this, m_procName, "loop_state");
 
    if(m_procName == "loloop") m_gainCtrl = "logainctrl";
+   else if(m_procName == "wloop") m_gainCtrl = "wgainctrl";
    else m_gainCtrl = "hogainctrl";
 
    m_parent->addSubscriberProperty(this, m_gainCtrl, "modes");
