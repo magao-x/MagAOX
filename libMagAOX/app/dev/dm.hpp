@@ -16,6 +16,8 @@
 #include <mx/improc/eigenImage.hpp>
 #include <mx/ioutils/fits/fitsFile.hpp>
 
+#include <boost/filesystem/operations.hpp>
+
 #include "../../ImageStreamIO/ImageStruct.hpp"
 
 namespace MagAOX
@@ -94,12 +96,19 @@ protected:
    
    static constexpr uint8_t m_dmDataType = ImageStreamTypeCode<realT>(); ///< The ImageStreamIO type code.
    
+   float m_percThreshold {0.98}; //percentage of frames saturated over interval
+   float m_intervalSatThreshold {0.50}; //
+   int m_intervalSatCountThreshold {10}; //
+
+   std::vector<std::string> m_satTriggerDevice;
+   std::vector<std::string> m_satTriggerProperty;
+
    ///@}
    
    
    std::string m_calibRelDir; ///< The directory relative to the calibPath.  Set this before calling dm<derivedT,realT>::loadConfig().
    
-   int m_channels; ///< The number of dmcomb channels found as part of allocation.
+   int m_channels {0}; ///< The number of dmcomb channels found as part of allocation.
    
    std::map<std::string, std::string> m_flatCommands; ///< Map of flat file name to full path 
    std::string m_flatCurrent;  ///< The name of the current flat command
@@ -120,6 +129,10 @@ protected:
    IMAGE m_testImageStream; ///< The ImageStreamIO shared memory buffer for the test.
    bool m_testSet {false}; ///< Flag indicating whether the test command has been set.
    
+   int m_overSatAct {0}; //counter
+   int m_intervalSatExceeds {0}; //counter
+   bool m_intervalSatTrip {0}; //flag to trip the loop opening
+
 public:
 
    /// Setup the configuration system
@@ -221,6 +234,14 @@ public:
                      const dev::shmimT & sp
                    );
    
+   /// Calls derived()->releaseDM() and then 0s all channels and the sat map.
+   /** This is called by the relevant INDI callback
+     *
+     * \returns 0 on success
+     * \returns -1 on error
+     */
+   int releaseDM();
+
    /// Check the flats directory and update the list of flats if anything changes
    /** This is called once per appLogic and whilePowerOff loops.
      *
@@ -291,7 +312,7 @@ public:
      * \returns 0 on sucess
      * \returns \<0 on an error
      */ 
-   int zeroAll();
+   int zeroAll(bool nosem = false /**< [in] [optional] if true then the semaphore is not raised after zeroing all channels*/);
    
 protected:
    
@@ -302,6 +323,13 @@ protected:
    IMAGE m_satImageStream; ///< The ImageStreamIO shared memory buffer for the sat map.
    IMAGE m_satPercImageStream; ///< The ImageStreamIO shared memory buffer for the sat percentage map.
    
+   /// Clear the saturation maps and zero the shared membory.
+   /**
+     * \returns 0 on success
+     * \returns -1 on error
+     */ 
+   int clearSat();
+
    /** \name Saturation Thread
      * This thread processes the saturation maps
      * @{
@@ -323,7 +351,33 @@ protected:
    /// Execute saturation processing
    void satThreadExec();
 
+   void intervalSatTrip()
+   {
+      if(m_satTriggerDevice.size() > 0 && m_satTriggerProperty.size() == m_satTriggerDevice.size())
+      {
+         for(size_t n=0; n < m_satTriggerDevice.size(); ++n)
+         {
+            //We just silently fail
+            try
+            {
+               pcf::IndiProperty ipFreq(pcf::IndiProperty::Switch);
    
+               ipFreq.setDevice(m_satTriggerDevice[n]);
+               ipFreq.setName(m_satTriggerProperty[n]);
+               ipFreq.add(pcf::IndiElement("toggle"));
+               ipFreq["toggle"] = pcf::IndiElement::Off;
+               derived().sendNewProperty(ipFreq);
+
+               derivedT::template log<text_log>("DM saturation threshold exceeded.  Loop opened.", logPrio::LOG_WARNING);
+            }
+            catch(...)
+            {
+
+            }
+         }
+      }
+   }
+
    ///@}
    
 protected:
@@ -524,8 +578,10 @@ void dm<derivedT,realT>::setupConfig(mx::app::appConfigurator & config)
    
    //Overriding the shmimMonitor setup so that these all go in the dm section
    //Otherwise, would call shmimMonitor<dm<derivedT,realT>>::setupConfig();
+   ///\todo we shmimMonitor now has configSection so this isn't necessary.
    config.add("dm.threadPrio", "", "dm.threadPrio", argType::Required, "dm", "threadPrio", false, "int", "The real-time priority of the dm control thread.");
-   
+   config.add("dm.cpuset", "", "dm.cpuset", argType::Required, "dm", "cpuset", false, "int", "The cpuset for the dm control thread.");
+
    config.add("dm.shmimName", "", "dm.shmimName", argType::Required, "dm", "shmimName", false, "string", "The name of the ImageStreamIO shared memory image to monitor for DM comands. Will be used as /tmp/<shmimName>.im.shm.");
    
    config.add("dm.shmimFlat", "", "dm.shmimFlat", argType::Required, "dm", "shmimFlat", false, "string", "The name of the ImageStreamIO shared memory image to write the flat command to.  Default is shmimName with 00 apended (i.e. dm00disp -> dm00disp00). ");
@@ -540,6 +596,14 @@ void dm<derivedT,realT>::setupConfig(mx::app::appConfigurator & config)
    
    config.add("dm.width", "", "dm.width", argType::Required, "dm", "width", false, "string", "The width of the DM in actuators.");
    config.add("dm.height", "", "dm.height", argType::Required, "dm", "height", false, "string", "The height of the DM in actuators.");
+
+   config.add("dm.percThreshold", "", "dm.percThreshold", argType::Required, "dm", "percThreshold", false, "float", "Threshold on percentage of frames an actuator is saturated over an interval.  Default is 0.98.");
+   config.add("dm.intervalSatThreshold", "", "dm.intervalSatThreshold", argType::Required, "dm", "intervalSatThreshold", false, "float", "Threshold on percentage of actuators which exceed percThreshold in an interval.  Default is 0.5.");
+   config.add("dm.intervalSatCountThreshold", "", "dm.intervalSatCountThreshold", argType::Required, "dm", "intervalSatCountThreshold", false, "float", "Threshold one number of consecutive intervals the intervalSatThreshold is exceeded.  Default is 10.");
+
+   config.add("dm.satTriggerDevice", "", "dm.satTriggerDevice", argType::Required, "dm", "satTriggerDevice", false, "vector<string>", "Device(s) with a toggle switch to toggle on saturation trigger.");
+   config.add("dm.satTriggerProperty", "", "dm.satTriggerProperty", argType::Required, "dm", "satTriggerProperty", false, "vector<string>", "Property with a toggle switch to toggle on saturation trigger, one per entry in satTriggerDevice.");
+
 }
 
 template<class derivedT, typename realT>
@@ -574,24 +638,44 @@ void dm<derivedT,realT>::loadConfig(mx::app::appConfigurator & config)
    //Overriding the shmimMonitor setup so that these all go in the dm section
    //Otherwise, would call shmimMonitor<dm<derivedT,realT>>::loadConfig(config);
    config(derived().m_smThreadPrio, "dm.threadPrio");
+   config(derived().m_smCpuset, "dm.cpuset");
+
    config(derived().m_shmimName, "dm.shmimName");
+
+   if(derived().m_shmimName != "")
+   {  
+      m_shmimFlat = derived().m_shmimName + "00";
+      config(m_shmimFlat, "dm.shmimFlat");
   
-   m_shmimFlat = derived().m_shmimName + "00";
-   config(m_shmimFlat, "dm.shmimFlat");
-  
-   m_shmimTest = derived().m_shmimName + "02";
-   config(m_shmimTest, "dm.shmimTest");
+      m_shmimTest = derived().m_shmimName + "02";
+      config(m_shmimTest, "dm.shmimTest");
    
-   m_shmimSat = derived().m_shmimName + "ST";
-   config(m_shmimSat, "dm.shmimSat");
+
+      m_shmimSat = derived().m_shmimName + "ST";
+      config(m_shmimSat, "dm.shmimSat");
    
-   m_shmimSatPerc = derived().m_shmimName + "SP";
-   config(m_shmimSatPerc, "dm.shmimSatPerc");
+      m_shmimSatPerc = derived().m_shmimName + "SP";
+      config(m_shmimSatPerc, "dm.shmimSatPerc");
    
-   config(m_satAvgInt, "dm.satAvgInt");
-   
+      config(m_satAvgInt, "dm.satAvgInt");
+   }
+   else
+   {
+      config.isSet("dm.shmimFlat");
+      config.isSet("dm.shmimTest");
+      config.isSet("dm.shmimSat");
+      config.isSet("dm.shmimSatPerc");
+      config.isSet("dm.satAvgInt");
+   }
+
    config(m_dmWidth, "dm.width");
    config(m_dmHeight, "dm.height");
+
+   config(m_percThreshold, "dm.percThreshold");
+   config(m_intervalSatThreshold, "dm.intervalSatThreshold");
+   config(m_intervalSatCountThreshold, "dm.intervalSatCountThreshold"); 
+   config(m_satTriggerDevice, "dm.satTriggerDevice");
+   config(m_satTriggerProperty, "dm.satTriggerProperty");
 }
    
 
@@ -717,7 +801,7 @@ int dm<derivedT,realT>::appStartup()
    
    if(sem_init(&m_satSemaphore, 0,0) < 0) return derivedT::template log<software_critical, -1>({__FILE__, __LINE__, errno,0, "Initializing sat semaphore"});
    
-   if(derived().threadStart( m_satThread, m_satThreadInit, m_satThreadID, m_satThreadProp, m_satThreadPrio, "saturation", this, satThreadStart) < 0)
+   if(derived().threadStart( m_satThread, m_satThreadInit, m_satThreadID, m_satThreadProp, m_satThreadPrio, "", "saturation", this, satThreadStart) < 0)
    {
       derivedT::template log<software_error, -1>({__FILE__, __LINE__});
       return -1;
@@ -740,6 +824,12 @@ int dm<derivedT,realT>::appLogic()
    
    checkFlats();
    checkTests();
+
+   if(m_intervalSatTrip)
+   {
+      intervalSatTrip();
+      m_intervalSatTrip = false;
+   }
    
    return 0;
 
@@ -886,10 +976,67 @@ int dm<derivedT,realT>::processImage( void * curr_src,
 }
 
 template<class derivedT, typename realT>
+int dm<derivedT,realT>::releaseDM()
+{
+   int rv;
+   if( (rv = derived().releaseDM()) < 0)
+   {
+      derivedT::template log<software_critical>({__FILE__, __LINE__, errno, rv, "Error from releaseDM"});
+      return rv;
+   }
+
+   if( (rv = zeroAll(true)) < 0)
+   {
+      derivedT::template log<software_error>({__FILE__, __LINE__, errno, rv, "Error from zeroAll"});
+      return rv;
+   }
+
+   return 0;
+
+}
+template<class derivedT, typename realT>
 int dm<derivedT,realT>::checkFlats()
 {
    std::vector<std::string> tfs = mx::ioutils::getFileNames(m_flatPath, "", "", ".fits");
-   
+
+   //First remove default, b/c we always add it and don't want to include it in timestamp selected ones
+   for(size_t n=0; n < tfs.size(); ++n)
+   {
+      if(mx::ioutils::pathStem(tfs[n]) == "default")
+      {
+         tfs.erase(tfs.begin()+n);
+         --n;
+      }
+   }
+
+   unsigned m_nFlatFiles = 5;
+
+   //Here we keep only the m_nFlatFiles most recent files
+   if(tfs.size() >= m_nFlatFiles)
+   {    
+      std::vector<std::time_t> wtimes (tfs.size());
+
+      for(size_t n=0; n < wtimes.size(); ++n)
+      {
+         wtimes[n] = boost::filesystem::last_write_time(tfs[n]);
+      }
+
+      std::sort(wtimes.begin(), wtimes.end());
+
+      std::time_t tn = wtimes[wtimes.size() - m_nFlatFiles];
+
+      for(size_t n=0; n < tfs.size(); ++n)
+      {
+         std::time_t lmt = boost::filesystem::last_write_time(tfs[n]);
+         if(lmt < tn) 
+         {
+            tfs.erase(tfs.begin() + n);
+            --n;
+         }
+      }
+   }
+
+
    for(auto it = m_flatCommands.begin(); it != m_flatCommands.end(); ++it)
    {
       it->second = "";
@@ -921,7 +1068,7 @@ int dm<derivedT,realT>::checkFlats()
       if(derived().m_indiDriver)
       {
          derived().m_indiDriver->sendDelProperty(m_indiP_flats);
-         derived().m_indiNewCallBacks.erase(m_indiP_flats.getName());
+         derived().m_indiNewCallBacks.erase(m_indiP_flats.createUniqueKey());
       }
    
       m_indiP_flats = pcf::IndiProperty(pcf::IndiProperty::Switch);
@@ -979,10 +1126,15 @@ int dm<derivedT,realT>::loadFlat(const std::string & intarget)
 {
    std::string target = intarget;
    
-   if(target == "default") target = m_flatDefault;
-   
    std::string targetPath;
    
+   if(target == "default") 
+   {
+      target = m_flatDefault;
+      targetPath = m_flatPath + "/" + m_flatDefault + ".fits";
+   }
+   else
+   {
    try 
    {
       targetPath = m_flatCommands.at(target);
@@ -992,7 +1144,8 @@ int dm<derivedT,realT>::loadFlat(const std::string & intarget)
       derivedT::template log<text_log>("flat file " + target + " not found", logPrio::LOG_ERROR);
       return -1;
    }
-   
+   }
+
    m_flatLoaded = false;
    //load into memory.
    mx::fits::fitsFile<realT> ff;
@@ -1044,6 +1197,8 @@ int dm<derivedT,realT>::loadFlat(const std::string & intarget)
 template<class derivedT, typename realT>
 int dm<derivedT,realT>::setFlat(bool update)
 {
+   if(m_shmimFlat == "") return 0;
+
    if( ImageStreamIO_openIm(&m_flatImageStream, m_shmimFlat.c_str()) != 0)
    {
       derivedT::template log<text_log>("could not connect to flat channel " + m_shmimFlat, logPrio::LOG_WARNING);
@@ -1119,6 +1274,8 @@ int dm<derivedT,realT>::setFlat(bool update)
 template<class derivedT, typename realT>  
 int dm<derivedT,realT>::zeroFlat()
 {
+   if(m_shmimFlat == "") return 0;
+
    if( ImageStreamIO_openIm(&m_flatImageStream, m_shmimFlat.c_str()) != 0)
    {
       derivedT::template log<text_log>("could not connect to flat channel " + m_shmimFlat, logPrio::LOG_WARNING);
@@ -1203,7 +1360,7 @@ int dm<derivedT,realT>::checkTests()
       if(derived().m_indiDriver)
       {
          derived().m_indiDriver->sendDelProperty(m_indiP_tests);
-         derived().m_indiNewCallBacks.erase(m_indiP_tests.getName());
+         derived().m_indiNewCallBacks.erase(m_indiP_tests.createUniqueKey());
       }
    
       m_indiP_tests = pcf::IndiProperty(pcf::IndiProperty::Switch);
@@ -1324,6 +1481,8 @@ int dm<derivedT,realT>::loadTest(const std::string & intarget)
 template<class derivedT, typename realT>  
 int dm<derivedT,realT>::setTest()
 {
+   if(m_shmimTest == "") return 0;
+
    if( ImageStreamIO_openIm(&m_testImageStream, m_shmimTest.c_str()) != 0)
    {
       derivedT::template log<text_log>("could not connect to test channel " + m_shmimTest, logPrio::LOG_WARNING);
@@ -1404,6 +1563,8 @@ int dm<derivedT,realT>::setTest()
 template<class derivedT, typename realT>
 int dm<derivedT,realT>::zeroTest()
 {
+   if(m_shmimTest == "") return 0;
+
    if( ImageStreamIO_openIm(&m_testImageStream, m_shmimTest.c_str()) != 0)
    {
       derivedT::template log<text_log>("could not connect to test channel " + m_shmimTest, logPrio::LOG_WARNING);
@@ -1454,12 +1615,13 @@ int dm<derivedT,realT>::zeroTest()
 }
 
 template<class derivedT, typename realT>
-int dm<derivedT,realT>::zeroAll()
+int dm<derivedT,realT>::zeroAll(bool nosem)
 {
-   
+   if(derived().m_shmimName == "") return 0;
+
    IMAGE imageStream;
    
-   for(int n=0; n <m_channels; ++n)
+   for(int n=0; n < m_channels; ++n)
    {
       char nstr[16];
       snprintf(nstr,sizeof(nstr), "%02d", n);
@@ -1467,7 +1629,8 @@ int dm<derivedT,realT>::zeroAll()
       
       if( ImageStreamIO_openIm(&imageStream, shmimN.c_str()) != 0)
       {
-         derivedT::template log<text_log>("could not connect to flat channel " + shmimN, logPrio::LOG_WARNING);
+         derivedT::template log<text_log>("could not connect to channel " + shmimN, logPrio::LOG_WARNING);
+         continue;
       }
    
       if( imageStream.md->size[0] != m_dmWidth)
@@ -1498,7 +1661,7 @@ int dm<derivedT,realT>::zeroAll()
       imageStream.md->write=0;
    
       //Raise the semaphore on last one.
-      if(n == m_channels-1) ImageStreamIO_sempost(&imageStream,-1);
+      if(n == m_channels-1 && !nosem) ImageStreamIO_sempost(&imageStream,-1);
    
       ImageStreamIO_closeIm(&imageStream);
    }
@@ -1506,11 +1669,81 @@ int dm<derivedT,realT>::zeroAll()
    derivedT::template log<text_log>("all channels zeroed", logPrio::LOG_NOTICE);
 
    derived().updateSwitchIfChanged(m_indiP_zeroAll, "request", pcf::IndiElement::Off, INDI_IDLE);
+
+   //Also cleanup flat and test
+   m_flatSet = false;   
+   derived().updateSwitchIfChanged(m_indiP_setFlat, "toggle", pcf::IndiElement::Off, pcf::IndiProperty::Idle);
    
+   //Also cleanup flat and test
+   m_testSet = false;   
+   derived().updateSwitchIfChanged(m_indiP_setTest, "toggle", pcf::IndiElement::Off, pcf::IndiProperty::Idle);
+
+   int rv;
+   if( (rv = clearSat()) < 0)
+   {
+      derivedT::template log<software_error>({__FILE__, __LINE__, errno, rv, "Error from clearSat"});
+      return rv;
+   }
+
    return 0;
 }
       
+template<class derivedT, typename realT>
+int dm<derivedT,realT>::clearSat()
+{
+   if(m_shmimSat == "") return 0;
+
+   IMAGE imageStream;
+
+   std::vector<std::string> sats = {m_shmimSat, m_shmimSatPerc};
+
+   for(size_t n=0; n < sats.size(); ++n)
+   {
+      std::string shmimN = sats[n];
+      
+      if( ImageStreamIO_openIm(&imageStream, shmimN.c_str()) != 0)
+      {
+         derivedT::template log<text_log>("could not connect to sat map " + shmimN, logPrio::LOG_WARNING);
+         return 0;
+      }
    
+      if( imageStream.md->size[0] != m_dmWidth)
+      {
+         ImageStreamIO_closeIm(&imageStream);
+         derivedT::template log<text_log>("width mismatch between " + shmimN + " and configured DM", logPrio::LOG_ERROR);
+         derived().updateSwitchIfChanged(m_indiP_zeroAll, "request", pcf::IndiElement::Off, INDI_IDLE);
+         return -1;
+      }
+   
+      if( imageStream.md->size[1] != m_dmHeight)
+      {
+         ImageStreamIO_closeIm(&imageStream);
+         derivedT::template log<text_log>("height mismatch between " + shmimN + " and configured DM", logPrio::LOG_ERROR);
+         derived().updateSwitchIfChanged(m_indiP_zeroAll, "request", pcf::IndiElement::Off, INDI_IDLE);
+         return -1;
+      }
+      
+      imageStream.md->write=1;
+      memset( imageStream.array.raw, 0, m_dmWidth*m_dmHeight*sizeof(realT));
+      
+      clock_gettime(CLOCK_REALTIME, &imageStream.md->writetime);
+
+      //Set the image acquisition timestamp
+      imageStream.md->atime = imageStream.md->writetime;
+         
+      imageStream.md->cnt0++;
+      imageStream.md->write=0;
+      
+      ImageStreamIO_closeIm(&imageStream);
+   }
+
+   m_accumSatMap.setZero();
+   m_instSatMap.setZero();
+      
+
+   return 0;
+}
+
 template<class derivedT, typename realT>
 void dm<derivedT,realT>::satThreadStart(dm *d)
 {
@@ -1533,7 +1766,7 @@ void dm<derivedT,realT>::satThreadExec()
    uint32_t imsize[3] = {0,0,0};
    
    //Check for allocation to have happened.
-   while((m_accumSatMap.rows() == 0 || m_accumSatMap.cols() == 0) && !derived().shutdown())
+   while((m_shmimSat == "" || m_accumSatMap.rows() == 0 || m_accumSatMap.cols() == 0) && !derived().shutdown())
    {
       sleep(1);
    }
@@ -1543,8 +1776,8 @@ void dm<derivedT,realT>::satThreadExec()
    imsize[1] = m_dmHeight;
    imsize[2] = 1;
       
-   ImageStreamIO_createIm_gpu(&m_satImageStream, m_shmimSat.c_str(), 3, imsize, IMAGESTRUCT_UINT8, -1, 1, IMAGE_NB_SEMAPHORE, 0, CIRCULAR_BUFFER | ZAXIS_TEMPORAL);
-   ImageStreamIO_createIm_gpu(&m_satPercImageStream, m_shmimSatPerc.c_str(), 3, imsize, IMAGESTRUCT_FLOAT, -1, 1, IMAGE_NB_SEMAPHORE, 0, CIRCULAR_BUFFER | ZAXIS_TEMPORAL);
+   ImageStreamIO_createIm_gpu(&m_satImageStream, m_shmimSat.c_str(), 3, imsize, IMAGESTRUCT_UINT8, -1, 1, IMAGE_NB_SEMAPHORE, 0, CIRCULAR_BUFFER | ZAXIS_TEMPORAL, 0);
+   ImageStreamIO_createIm_gpu(&m_satPercImageStream, m_shmimSatPerc.c_str(), 3, imsize, IMAGESTRUCT_FLOAT, -1, 1, IMAGE_NB_SEMAPHORE, 0, CIRCULAR_BUFFER | ZAXIS_TEMPORAL, 0);
        
    bool opened = true;
    
@@ -1585,16 +1818,29 @@ void dm<derivedT,realT>::satThreadExec()
          // If less than avg int --> go back and wait again
          if(mx::sys::get_curr_time(ts) - t_accumst < m_satAvgInt/1000.0) continue;
          
+         
+         
+
          // If greater than avg int --> calc stats, write to streams.
+         m_overSatAct = 0;
          for(int rr=0; rr < m_instSatMap.rows(); ++rr)
          {
             for(int cc=0; cc< m_instSatMap.cols(); ++cc)
             {
-               m_satPercMap(rr,cc) = m_accumSatMap(rr,cc)/naccum;           
+               m_satPercMap(rr,cc) = m_accumSatMap(rr,cc)/naccum;  
+               if(m_satPercMap(rr,cc) >= m_percThreshold) ++m_overSatAct;         
                satmap(rr,cc) = (m_accumSatMap(rr,cc) > 0); //it's  1/0 map
             }
          }
-      
+
+         //Check of the number of actuators saturated above the percent threshold is greater than the number threshold
+         //if it is, increment the counter
+         if(m_overSatAct/(m_satPercMap.rows()*m_satPercMap.cols()*0.75) > m_intervalSatThreshold ) ++m_intervalSatExceeds;
+         else m_intervalSatExceeds = 0;
+
+         //If enough consecutive intervals exceed the count threshold, we trigger 
+         if(m_intervalSatExceeds >= m_intervalSatCountThreshold) m_intervalSatTrip = true;
+
          m_satImageStream.md->write=1;
          m_satPercImageStream.md->write=1;
          
@@ -1680,7 +1926,7 @@ int dm<derivedT,realT>::st_newCallBack_init( void * app,
 template<class derivedT, typename realT>
 int dm<derivedT,realT>::newCallBack_init( const pcf::IndiProperty &ipRecv )
 {
-   if ( ipRecv.getName() != m_indiP_init.getName())
+   if ( ipRecv.createUniqueKey() != m_indiP_init.createUniqueKey())
    {
       return derivedT::template log<software_error,-1>({__FILE__, __LINE__, "wrong INDI-P in callback"});
    }
@@ -1705,7 +1951,7 @@ int dm<derivedT,realT>::st_newCallBack_zero( void * app,
 template<class derivedT, typename realT>
 int dm<derivedT,realT>::newCallBack_zero( const pcf::IndiProperty &ipRecv )
 {
-   if ( ipRecv.getName() != m_indiP_zero.getName())
+   if ( ipRecv.createUniqueKey() != m_indiP_zero.createUniqueKey())
    {
       return derivedT::template log<software_error,-1>({__FILE__, __LINE__, "wrong INDI-P in callback"});
    }
@@ -1730,7 +1976,7 @@ int dm<derivedT,realT>::st_newCallBack_release( void * app,
 template<class derivedT, typename realT>
 int dm<derivedT,realT>::newCallBack_release( const pcf::IndiProperty &ipRecv )
 {
-   if ( ipRecv.getName() != m_indiP_release.getName())
+   if ( ipRecv.createUniqueKey() != m_indiP_release.createUniqueKey())
    {
       return derivedT::template log<software_error,-1>({__FILE__, __LINE__, "wrong INDI-P in callback"});
    }
@@ -1739,7 +1985,7 @@ int dm<derivedT,realT>::newCallBack_release( const pcf::IndiProperty &ipRecv )
    
    if( ipRecv["request"].getSwitchState() == pcf::IndiElement::On)
    {
-      return derived().releaseDM();
+      return releaseDM();
    }
    return 0;  
 }
@@ -1755,7 +2001,7 @@ int dm<derivedT,realT>::st_newCallBack_flats( void * app,
 template<class derivedT, typename realT>
 int dm<derivedT,realT>::newCallBack_flats( const pcf::IndiProperty &ipRecv )
 {
-   if(ipRecv.getName() != m_indiP_flats.getName())
+   if(ipRecv.createUniqueKey() != m_indiP_flats.createUniqueKey())
    {
       derivedT::template log<software_error>({__FILE__, __LINE__, "invalid indi property received"});
       return -1;
@@ -1804,7 +2050,7 @@ int dm<derivedT,realT>::st_newCallBack_setFlat( void * app,
 template<class derivedT, typename realT>
 int dm<derivedT,realT>::newCallBack_setFlat( const pcf::IndiProperty &ipRecv )
 {
-   if ( ipRecv.getName() != m_indiP_setFlat.getName())
+   if ( ipRecv.createUniqueKey() != m_indiP_setFlat.createUniqueKey())
    {
       return derivedT::template log<software_error,-1>({__FILE__, __LINE__, "wrong INDI-P in callback"});
    }
@@ -1832,7 +2078,7 @@ int dm<derivedT,realT>::st_newCallBack_tests( void * app,
 template<class derivedT, typename realT>
 int dm<derivedT,realT>::newCallBack_tests( const pcf::IndiProperty &ipRecv )
 {
-   if(ipRecv.getName() != m_indiP_tests.getName())
+   if(ipRecv.createUniqueKey() != m_indiP_tests.createUniqueKey())
    {
       derivedT::template log<software_error>({__FILE__, __LINE__, "invalid indi property received"});
       return -1;
@@ -1881,7 +2127,7 @@ int dm<derivedT,realT>::st_newCallBack_setTest( void * app,
 template<class derivedT, typename realT>
 int dm<derivedT,realT>::newCallBack_setTest( const pcf::IndiProperty &ipRecv )
 {
-   if ( ipRecv.getName() != m_indiP_setTest.getName())
+   if ( ipRecv.createUniqueKey() != m_indiP_setTest.createUniqueKey())
    {
       return derivedT::template log<software_error,-1>({__FILE__, __LINE__, "wrong INDI-P in callback"});
    }
@@ -1910,7 +2156,7 @@ int dm<derivedT,realT>::st_newCallBack_zeroAll( void * app,
 template<class derivedT, typename realT>
 int dm<derivedT,realT>::newCallBack_zeroAll( const pcf::IndiProperty &ipRecv )
 {
-   if ( ipRecv.getName() != m_indiP_zeroAll.getName())
+   if ( ipRecv.createUniqueKey() != m_indiP_zeroAll.createUniqueKey())
    {
       return derivedT::template log<software_error,-1>({__FILE__, __LINE__, "wrong INDI-P in callback"});
    }

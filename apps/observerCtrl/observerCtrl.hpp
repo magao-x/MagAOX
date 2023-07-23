@@ -48,7 +48,7 @@ protected:
      *@{
      */
    
-   //here add parameters which will be config-able at runtime
+   std::vector<std::string> m_streamWriters; ///< The stream writers to stop and start
    
    ///@}
 
@@ -57,6 +57,7 @@ protected:
       std::string m_fullName;
       std::string m_pfoa;
       std::string m_email;
+      std::string m_sanitizedEmail;
       std::string m_institution;
    };
 
@@ -69,6 +70,8 @@ protected:
    std::string m_obsName;
    bool m_observing {false};
    
+   
+
 public:
    /// Default c'tor.
    observerCtrl();
@@ -105,6 +108,10 @@ public:
      */
    virtual int appShutdown();
 
+   void startObserving();
+
+   void stopObserving();
+
    ///\name INDI
    /** @{
      */ 
@@ -114,13 +121,19 @@ protected:
    
    pcf::IndiProperty m_indiP_obsName;
    pcf::IndiProperty m_indiP_observing;
+   pcf::IndiProperty m_indiP_obslog;
    
+   pcf::IndiProperty m_indiP_sws;
+   
+
 public:
    INDI_NEWCALLBACK_DECL(observerCtrl, m_indiP_observers);
    
    INDI_NEWCALLBACK_DECL(observerCtrl, m_indiP_obsName);
    INDI_NEWCALLBACK_DECL(observerCtrl, m_indiP_observing);
    
+   INDI_NEWCALLBACK_DECL(observerCtrl, m_indiP_sws);
+
    ///@}
    
     /** \name Telemeter Interface
@@ -146,11 +159,15 @@ observerCtrl::observerCtrl() : MagAOXApp(MAGAOX_CURRENT_SHA1, MAGAOX_REPO_MODIFI
 
 void observerCtrl::setupConfig()
 {
+   config.add("stream.writers", "", "stream.writers", argType::Required, "stream", "writers", false, "string", "The device names of the stream writers to control.");
+
    dev::telemeter<observerCtrl>::setupConfig(config);
 }
 
 int observerCtrl::loadConfigImpl( mx::app::appConfigurator & _config )
 {
+   _config(m_streamWriters, "stream.writers");
+
    std::vector<std::string> sections;
 
    _config.unusedSections(sections);
@@ -163,13 +180,13 @@ int observerCtrl::loadConfigImpl( mx::app::appConfigurator & _config )
    
    for(size_t i=0; i< sections.size(); ++i)
    {
-      bool emailSet = _config.isSetUnused(mx::app::iniFile::makeKey(sections[i], "email" ));
-      if( !emailSet ) continue;
+      bool pfoaSet = _config.isSetUnused(mx::app::iniFile::makeKey(sections[i], "pfoa" ));
+      if( !pfoaSet ) continue;
       
-      std::string pfoa = sections[i];
+      std::string email = sections[i];
       
-      std::string email;
-      _config.configUnused(email, mx::app::iniFile::makeKey(sections[i], "email" ));
+      std::string pfoa;
+      _config.configUnused(pfoa, mx::app::iniFile::makeKey(sections[i], "pfoa" ));
       
       std::string fullName;
       _config.configUnused(fullName, mx::app::iniFile::makeKey(sections[i], "full_name" ));
@@ -177,7 +194,18 @@ int observerCtrl::loadConfigImpl( mx::app::appConfigurator & _config )
       std::string institution;
       _config.configUnused(institution, mx::app::iniFile::makeKey(sections[i], "institution" ));
       
-      m_observers[email] = observer({fullName, pfoa, email, institution});
+      std::string sanitizedEmail = "";
+      for(size_t n = 0; n < email.size(); ++n)
+      {
+         if(email[n] == '@') {
+            sanitizedEmail = sanitizedEmail + "-at-";
+         } else if(email[n] == '.') {
+            sanitizedEmail = sanitizedEmail + "-dot-";
+         } else {
+            sanitizedEmail.push_back(email[n]);
+         }
+      }
+      m_observers[email] = observer({fullName, pfoa, email, sanitizedEmail, institution});
    }
    
    return 0;
@@ -203,13 +231,15 @@ void observerCtrl::loadConfig()
 
 int observerCtrl::appStartup()
 {
+   std::vector<std::string> sanitizedEmails;
    std::vector<std::string> emails;
    for(auto it = m_observers.begin(); it!=m_observers.end(); ++it)
    {
-      emails.push_back(it->second.m_pfoa + "-" + it->first);
+      sanitizedEmails.push_back(it->second.m_sanitizedEmail);
+      emails.push_back(it->second.m_email);
    }
       
-   if(createStandardIndiSelectionSw( m_indiP_observers, "observers", emails) < 0)
+   if(createStandardIndiSelectionSw( m_indiP_observers, "observers", sanitizedEmails, emails) < 0)
    {
       log<software_critical>({__FILE__, __LINE__});
       return -1;
@@ -241,6 +271,24 @@ int observerCtrl::appStartup()
    m_indiP_observer.add(pcf::IndiElement("pfoa"));
    m_indiP_observer.add(pcf::IndiElement("institution"));
    
+   m_indiP_sws = pcf::IndiProperty(pcf::IndiProperty::Switch);
+   m_indiP_sws.setDevice(configName());
+   m_indiP_sws.setName("writers");
+   m_indiP_sws.setPerm(pcf::IndiProperty::ReadWrite); 
+   m_indiP_sws.setState(pcf::IndiProperty::Idle);
+   m_indiP_sws.setRule(pcf::IndiProperty::AnyOfMany);
+
+   for(size_t n =0; n < m_streamWriters.size(); ++n)
+   {
+      m_indiP_sws.add(pcf::IndiElement(m_streamWriters[n], pcf::IndiElement::Off));
+   }
+
+   if(registerIndiPropertyNew( m_indiP_sws, INDI_NEWCALLBACK(m_indiP_sws)) < 0)
+   {
+      log<software_critical>({__FILE__, __LINE__});
+      return -1;
+   }
+
    if(dev::telemeter<observerCtrl>::appStartup() < 0)
    {
       return log<software_error,-1>({__FILE__,__LINE__});
@@ -262,8 +310,8 @@ int observerCtrl::appLogic()
       
       for(auto it = m_observers.begin();it!=m_observers.end();++it)
       {
-         if(it->first == m_currentObserver.m_email) updateSwitchIfChanged(m_indiP_observers, it->second.m_pfoa + "-" + it->first, pcf::IndiElement::On, INDI_IDLE);
-         else updateSwitchIfChanged(m_indiP_observers, it->second.m_pfoa + "-" + it->first, pcf::IndiElement::Off, INDI_IDLE);
+         if(it->first == m_currentObserver.m_email) updateSwitchIfChanged(m_indiP_observers, it->second.m_sanitizedEmail, pcf::IndiElement::On, INDI_IDLE);
+         else updateSwitchIfChanged(m_indiP_observers, it->second.m_sanitizedEmail, pcf::IndiElement::Off, INDI_IDLE);
       }
          
       updateIfChanged(m_indiP_obsName, "current", m_obsName);
@@ -287,6 +335,52 @@ int observerCtrl::appShutdown()
    return 0;
 }
 
+void observerCtrl::startObserving()
+{
+   for(size_t n=0; n < m_streamWriters.size(); ++n)
+   {
+      if(m_indiP_sws[m_streamWriters[n]].getSwitchState() == pcf::IndiElement::On)
+      {
+         pcf::IndiProperty ip(pcf::IndiProperty::Switch);
+   
+         ip.setDevice(m_streamWriters[n] + "-sw");
+         ip.setName("writing");
+         ip.add(pcf::IndiElement("toggle"));
+         ip["toggle"].setSwitchState(pcf::IndiElement::On);
+
+         sendNewProperty(ip); 
+      }
+   }
+
+   mx::sys::sleep(1);
+
+   m_observing = true;
+   recordObserver();
+}
+
+void observerCtrl::stopObserving()
+{
+   m_observing = false;
+   recordObserver();
+
+   for(size_t n=0; n < m_streamWriters.size(); ++n)
+   {
+      if(m_indiP_sws[m_streamWriters[n]].getSwitchState() == pcf::IndiElement::On)
+      {
+         pcf::IndiProperty ip(pcf::IndiProperty::Switch);
+   
+         ip.setDevice(m_streamWriters[n] + "-sw");
+         ip.setName("writing");
+         ip.add(pcf::IndiElement("toggle"));
+         ip["toggle"].setSwitchState(pcf::IndiElement::Off);
+
+         sendNewProperty(ip); 
+      }
+   }
+
+
+}
+
 INDI_NEWCALLBACK_DEFN(observerCtrl, m_indiP_observers)(const pcf::IndiProperty &ipRecv)
 {
 
@@ -300,9 +394,9 @@ INDI_NEWCALLBACK_DEFN(observerCtrl, m_indiP_observers)(const pcf::IndiProperty &
    std::string newEmail = "";
    for(auto it=m_observers.begin(); it != m_observers.end(); ++it) 
    {
-      if(!ipRecv.find(it->second.m_pfoa + "-" + it->first)) continue;
+      if(!ipRecv.find(it->second.m_sanitizedEmail)) continue;
       
-      if(ipRecv[it->second.m_pfoa + "-" + it->first].getSwitchState() == pcf::IndiElement::On)
+      if(ipRecv[it->second.m_sanitizedEmail].getSwitchState() == pcf::IndiElement::On)
       {
          if(newEmail != "")
          {
@@ -326,8 +420,8 @@ INDI_NEWCALLBACK_DEFN(observerCtrl, m_indiP_observers)(const pcf::IndiProperty &
    
    for(auto it = m_observers.begin();it!=m_observers.end();++it)
    {
-      if(it->first == m_currentObserver.m_email) updateSwitchIfChanged(m_indiP_observers, it->second.m_pfoa + "-" + it->first, pcf::IndiElement::On, INDI_IDLE);
-      else updateSwitchIfChanged(m_indiP_observers, it->second.m_pfoa + "-" + it->first, pcf::IndiElement::Off, INDI_IDLE);
+      if(it->first == m_currentObserver.m_sanitizedEmail) updateSwitchIfChanged(m_indiP_observers, it->second.m_sanitizedEmail, pcf::IndiElement::On, INDI_IDLE);
+      else updateSwitchIfChanged(m_indiP_observers, it->second.m_sanitizedEmail, pcf::IndiElement::Off, INDI_IDLE);
    }
    
    log<logger::observer>({m_currentObserver.m_fullName,m_currentObserver.m_pfoa, m_currentObserver.m_email, m_currentObserver.m_institution});
@@ -367,17 +461,39 @@ INDI_NEWCALLBACK_DEFN(observerCtrl, m_indiP_observing)(const pcf::IndiProperty &
    recordObserver(true);
    if( ipRecv["toggle"].getSwitchState() == pcf::IndiElement::On)
    {
-      m_observing = true;
-      recordObserver();
-      updateSwitchIfChanged(m_indiP_observing, "toggle", pcf::IndiElement::On, INDI_BUSY);
+      startObserving();
+      updateSwitchIfChanged(m_indiP_observing, "toggle", pcf::IndiElement::On, INDI_OK);
    }   
    else if( ipRecv["toggle"].getSwitchState() == pcf::IndiElement::Off)
    {
-      m_observing = false;
-      recordObserver();
+      stopObserving();
       updateSwitchIfChanged(m_indiP_observing, "toggle", pcf::IndiElement::Off, INDI_IDLE);
    }
    
+   return 0;
+}
+
+INDI_NEWCALLBACK_DEFN(observerCtrl, m_indiP_sws)(const pcf::IndiProperty &ipRecv)
+{
+   if (ipRecv.getName() != m_indiP_sws.getName())
+   {
+      log<software_error>({__FILE__, __LINE__, "invalid indi property received"});
+      return -1;
+   }
+   
+   if(m_observing == true)
+   {
+      log<text_log>({"Can't change stream writers while observing"}, logPrio::LOG_WARNING);
+      return 0;
+   }
+
+   for(size_t n =0; n < m_streamWriters.size(); ++n) 
+   {
+      if(!ipRecv.find(m_streamWriters[n])) continue;
+      
+     updateSwitchIfChanged(m_indiP_sws, m_streamWriters[n], ipRecv[m_streamWriters[n]].getSwitchState());
+   }
+      
    return 0;
 }
 

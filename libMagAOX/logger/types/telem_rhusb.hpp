@@ -46,7 +46,14 @@ struct telem_rhusb : public flatbuffer_log
 
    };
                  
- 
+   static bool verify( flatlogs::bufferPtrT & logBuff,  ///< [in] Buffer containing the flatbuffer serialized message.
+                       flatlogs::msgLenT len            ///< [in] length of msgBuffer.
+                     )
+   {
+      auto verifier = flatbuffers::Verifier( (uint8_t*) flatlogs::logHeader::messageBuffer(logBuff), static_cast<size_t>(len));
+      return VerifyTelem_rhusb_fbBuffer(verifier);
+   }
+
    ///Get the message formatte for human consumption.
    static std::string msgString( void * msgBuffer,  /**< [in] Buffer containing the flatbuffer serialized message.*/
                                  flatlogs::msgLenT len  /**< [in] [unused] length of msgBuffer.*/
@@ -69,6 +76,13 @@ struct telem_rhusb : public flatbuffer_log
       
       return msg;
    
+   }
+
+   static std::string msgJSON( void * msgBuffer,  /**< [in] Buffer containing the flatbuffer serialized message.*/
+                               flatlogs::msgLenT len  /**< [in] [unused] length of msgBuffer.*/
+                             )
+   {
+      return makeJSON(msgBuffer, len, Telem_rhusb_fbTypeTable());
    }
       
    static float temp(void * msgBuffer)

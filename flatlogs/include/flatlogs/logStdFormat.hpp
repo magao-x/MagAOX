@@ -12,11 +12,42 @@
 #ifndef flatlogs_logStdFormat_hpp
 #define flatlogs_logStdFormat_hpp
 
+#include "flatbuffers/flatbuffers.h"
+#include "flatbuffers/minireflect.h"
+
 #include "logHeader.hpp"
 #include "logPriority.hpp"
 
 namespace flatlogs
 {
+
+/// Function for generate a JSON-formatted text representation of a flatlog record
+/**
+  *
+  * \ingroup logformat
+  */
+template<typename logT, typename iosT>
+iosT & jsonFormat( iosT & ios, ///< [out] the iostream to output the log too
+                  bufferPtrT & logBuffer, ///< [in] the binary log buffer to output
+                  const std::string & eventCodeName
+                )
+{
+   logPrioT prio;
+   eventCodeT ec;
+   timespecX ts;
+   msgLenT len;
+
+   logHeader::extractBasicLog( prio, ec, ts, len, logBuffer);
+
+   ios << "{";
+   ios << "\"ts\": \"" << ts.ISO8601DateTimeStrX() << "\", ";
+   ios << "\"prio\": \"" << priorityString(prio) << "\", ";
+   ios << "\"ec\": \"" << eventCodeName << "\", ";
+   ios << "\"msg\": " << logT::msgJSON(logHeader::messageBuffer(logBuffer) , len);
+   ios << "}";
+   return ios;
+}
+
 
 /// Worker function that formats a log into the standard text representation.
 /** 
@@ -64,7 +95,7 @@ iosT & stdShortFormat( iosT & ios, ///< [out] the iostream to output the log to
    {
       outApp.resize(17, ' ');
       outApp[16] = ':';
-      for(size_t n=15; n >= 0; --n)
+      for(int n=15; n >= 0; --n)
       {
          if( 15-n + 1 > appName.size()) break;
          outApp[n] = appName[appName.size()-1 - (15-n)];

@@ -1,0 +1,14 @@
+#!/usr/bin/env bash
+source /etc/profile.d/cgroups1_cpuset_mountpoint.sh
+if [[ -z $CGROUPS1_CPUSET_MOUNTPOINT ]]; then
+    echo "Unset $CGROUPS1_CPUSET_MOUNTPOINT, bailing out"
+    exit 1
+fi
+sudo mkdir -p $CGROUPS1_CPUSET_MOUNTPOINT || exit 1
+echo "CGroups cpuset mountpoint at $CGROUPS1_CPUSET_MOUNTPOINT"
+if ! mount | grep $CGROUPS1_CPUSET_MOUNTPOINT; then
+    sudo mount -t cgroup cpuset -ocpuset $CGROUPS1_CPUSET_MOUNTPOINT || exit 1
+    echo "Mounted $CGROUPS1_CPUSET_MOUNTPOINT"
+else
+    echo "Already mounted $CGROUPS1_CPUSET_MOUNTPOINT"
+fi

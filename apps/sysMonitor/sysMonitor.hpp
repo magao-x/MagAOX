@@ -413,7 +413,7 @@ int sysMonitor::appStartup()
       return log<software_error,-1>({__FILE__,__LINE__});
    }
    
-   if(threadStart( m_setlatThread, m_setlatThreadInit, m_setlatThreadID, m_setlatThreadProp, m_setlatThreadPrio, "set latency", this, setlatThreadStart)  < 0)
+   if(threadStart( m_setlatThread, m_setlatThreadInit, m_setlatThreadID, m_setlatThreadProp, m_setlatThreadPrio, "", "set_latency", this, setlatThreadStart)  < 0)
    {
       log<software_critical>({__FILE__, __LINE__});
       return -1;
@@ -720,7 +720,7 @@ int sysMonitor::findCPULoads(std::vector<float>& loads)
    // If output lines are less than 5 (with one CPU, guarenteed output is 5)
    if (commandOutput.size() < 5) 
    {
-      return rv;
+      return log<software_error,-1>({__FILE__, __LINE__, "not enough lines returned by mpstat"});
    }
    //start iterating at fourth line
    for (auto line = commandOutput.begin()+4; line != commandOutput.end(); line++) 
@@ -739,21 +739,25 @@ int sysMonitor::parseCPULoads(std::string line, float& loadVal)
 {
    if (line.length() <= 1)
    {
+      log<software_error>({__FILE__, __LINE__,"zero lenght line in parseCPULoads."});
       return -1;
    }
    std::istringstream iss(line);
    std::vector<std::string> tokens{std::istream_iterator<std::string>{iss},std::istream_iterator<std::string>{}};
+   if(tokens.size() < 8) return 1;
    float cpu_load;
    try
    {
-      cpu_load = 100.0 - std::stof(tokens.at(12));
+      cpu_load = 100.0 - std::stof(tokens.at(tokens.size()-1));
    }
    catch (const std::invalid_argument& e)
    {
       log<software_error>({__FILE__, __LINE__,"Invalid read occured when parsing CPU core usage."});
       return -1;
    }
-   catch (const std::out_of_range& e) {
+   catch (const std::out_of_range& e) 
+   {
+      log<software_error>({__FILE__, __LINE__,"Out of range exception in parseCPULoads."});
       return -1;
    }
    cpu_load /= 100;
@@ -765,7 +769,7 @@ int sysMonitor::findDiskTemperature( std::vector<std::string> & hdd_names,
                                      std::vector<float>& hdd_temps
                                    ) 
 {
-   std::vector<std::string> commandList{"hddtemp"};//, "/dev/sda",  "/dev/sdb", "/dev/sdc", "/dev/sdd", "/dev/sde", "/dev/sdf"};
+   /*std::vector<std::string> commandList{"hddtemp"};//, "/dev/sda",  "/dev/sdb", "/dev/sdc", "/dev/sdd", "/dev/sde", "/dev/sdf"};
    for(size_t n=0;n<m_diskNameList.size();++n)
    {
       commandList.push_back(m_diskNameList[n]);
@@ -799,7 +803,9 @@ int sysMonitor::findDiskTemperature( std::vector<std::string> & hdd_names,
          rv = 0;
       }
    }
-   return rv;
+   return rv;*/
+
+   return 0;
 }
 
 int sysMonitor::parseDiskTemperature( std::string & driveName,
@@ -1201,6 +1207,18 @@ void sysMonitor::setlatThreadExec()
          if(fd <= 0)
          {
             elevatedPrivileges ep(this);
+          
+            for(size_t cpu =0; cpu < m_coreLoads.size(); ++cpu) ///\todo this needs error checks
+            {
+               std::string cpuFile = "/sys/devices/system/cpu/cpu";
+               cpuFile += std::to_string(cpu);
+               cpuFile += "/cpufreq/scaling_governor";
+               int wfd = open( cpuFile.c_str(), O_WRONLY);
+               write(wfd,"performance",sizeof("performance"));
+               close(wfd);     
+            }
+            log<text_log>("set governor to performance", logPrio::LOG_NOTICE);
+
             fd = open("/dev/cpu_dma_latency", O_WRONLY);
             
             if(fd <=0) log<software_error>({__FILE__,__LINE__,"error opening cpu_dma_latency"});
@@ -1216,6 +1234,8 @@ void sysMonitor::setlatThreadExec()
                   log<text_log>("set latency to 0", logPrio::LOG_NOTICE);
                }
             }
+
+
          }
       }
       else
@@ -1225,6 +1245,18 @@ void sysMonitor::setlatThreadExec()
             close(fd);
             fd = 0;
             log<text_log>("restored CPU latency to default", logPrio::LOG_NOTICE);
+         
+            elevatedPrivileges ep(this);
+            for(size_t cpu =0; cpu < m_coreLoads.size(); ++cpu) ///\todo this needs error checks
+            {
+               std::string cpuFile = "/sys/devices/system/cpu/cpu";
+               cpuFile += std::to_string(cpu);
+               cpuFile += "/cpufreq/scaling_governor";
+               int wfd = open( cpuFile.c_str(), O_WRONLY);
+               write(wfd,"powersave",sizeof("powersave"));
+               close(wfd);  
+            }
+            log<text_log>("set governor to powersave", logPrio::LOG_NOTICE);
          }
       }
       

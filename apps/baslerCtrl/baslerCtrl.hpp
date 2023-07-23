@@ -25,8 +25,8 @@ using namespace Basler_UsbCameraParams;
 
 using namespace Pylon;
 
-#include <ImageStruct.h>
-#include <ImageStreamIO.h>
+//#include <ImageStruct.h>
+#include <ImageStreamIO/ImageStreamIO.h>
 
 #include "../../libMagAOX/libMagAOX.hpp" //Note this is included on command line to trigger pch
 #include "../../magaox_git_version.h"
@@ -81,6 +81,8 @@ public:
    
    static constexpr bool c_stdCamera_fps = true; ///< app::dev config to tell stdCamera not to expose FPS status (ignored since fpsCtrl=true)
    
+   static constexpr bool c_stdCamera_synchro = false; ///< app::dev config to tell stdCamera to not expose synchro mode controls
+   
    static constexpr bool c_stdCamera_usesModes = false; ///< app:dev config to tell stdCamera not to expose mode controls
    
    static constexpr bool c_stdCamera_usesROI = true; ///< app:dev config to tell stdCamera to expose ROI controls
@@ -89,7 +91,7 @@ public:
    
    static constexpr bool c_stdCamera_hasShutter = false; ///< app:dev config to tell stdCamera to expose shutter controls
 
-
+   static constexpr bool c_stdCamera_usesStateString = false; ///< app::dev confg to tell stdCamera to expose the state string property
    
    static constexpr bool c_frameGrabber_flippable = true; ///< app:dev config to tell framegrabber that this camera can be flipped
    
@@ -786,6 +788,14 @@ int baslerCtrl::configureAcquisition()
       updateIfChanged( m_indiP_roi_bin_x, "current", m_currentROI.bin_x, INDI_OK);
       updateIfChanged( m_indiP_roi_bin_y, "current", m_currentROI.bin_y, INDI_OK);
    
+      //We also update target to the settable values
+      m_nextROI.x = m_currentROI.x;
+      m_nextROI.y = m_currentROI.y;
+      m_nextROI.w = m_currentROI.w;
+      m_nextROI.h = m_currentROI.h;
+      m_nextROI.bin_x = m_currentROI.bin_x;
+      m_nextROI.bin_y = m_currentROI.bin_y;
+
       updateIfChanged( m_indiP_roi_x, "target", m_nextROI.x, INDI_OK);
       updateIfChanged( m_indiP_roi_y, "target", m_nextROI.y, INDI_OK);
       updateIfChanged( m_indiP_roi_w, "target", m_nextROI.w, INDI_OK);

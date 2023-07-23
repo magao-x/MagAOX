@@ -43,6 +43,13 @@ table Telem_stdcam_fb
    tempCtrl:TempCtrl;
    
    shutter:Shutter;
+
+   synchro:uint8;
+
+   vshift:float;
+
+   cropMode:int8 = -1;
+
 }
 
 root_type Telem_stdcam_fb;

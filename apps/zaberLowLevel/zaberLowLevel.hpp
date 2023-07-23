@@ -54,7 +54,7 @@ protected:
 
    z_port m_port {0};
 
-   std::vector<zaberStage> m_stages;
+   std::vector<zaberStage<zaberLowLevel>> m_stages;
    
    std::unordered_map<int, size_t> m_stageAddress;
    std::unordered_map<std::string, size_t> m_stageSerial;
@@ -171,7 +171,7 @@ void zaberLowLevel::loadConfig()
    {
       if(config.isSetUnused(mx::app::iniFile::makeKey(sections[n], "serial" )))
       {
-         m_stages.push_back(zaberStage());
+         m_stages.push_back(zaberStage<zaberLowLevel>(this));
          
          size_t idx = m_stages.size()-1;
          
@@ -204,7 +204,6 @@ int zaberLowLevel::connect()
    
    if(m_port <= 0)
    {
-      
       
       int zrv;
       
@@ -340,6 +339,15 @@ int zaberLowLevel::loadStages( std::string & serialRes )
             log<text_log>("Unkown stage @" + std::to_string(addresses[n]) + " with s/n " + serials[n], logPrio::LOG_WARNING);
          }
       }
+
+      for(size_t n=0; n < m_stages.size(); ++n)
+      {
+         if(m_stages[n].deviceAddress() < 1)
+         {
+            log<text_log>("stage " + m_stages[n].name() + " with with s/n " + serials[n] + " not found in system.", logPrio::LOG_ERROR);
+            state(state(), true);
+         }
+      }
    }
 
    return ZC_CONNECTED;
@@ -370,6 +378,7 @@ int zaberLowLevel::appStartup()
    for(size_t n=0; n< m_stages.size(); ++n)
    {
       m_indiP_max_pos.add (pcf::IndiElement(m_stages[n].name()));
+      m_indiP_max_pos[m_stages[n].name()] = -1;
    }
    
    REG_INDI_NEWPROP_NOCB(m_indiP_curr_pos, "curr_pos", pcf::IndiProperty::Number);
@@ -432,13 +441,19 @@ int zaberLowLevel::appLogic()
    if( state() == stateCodes::POWERON)
    {
       state(stateCodes::NODEVICE);
-   }
+      for(size_t i=0; i < m_stages.size();++i)
+      {
+         updateIfChanged(m_indiP_curr_state, m_stages[i].name(), std::string("NODEVICE"));
+      }         
+   }  
 
    if( state() == stateCodes::NODEVICE )
    {
       int rv = tty::usbDevice::getDeviceName();
       if(rv < 0 && rv != TTY_E_DEVNOTFOUND && rv != TTY_E_NODEVNAMES)
       {
+         if( powerState() != 1 || powerStateTarget() != 1 ) return 0; //means we're powering off
+
          state(stateCodes::FAILURE);
          if(!stateLogged())
          {
@@ -467,6 +482,12 @@ int zaberLowLevel::appLogic()
          
          state(stateCodes::NOTCONNECTED);
          
+         for(size_t i=0; i < m_stages.size();++i)
+         {
+            if(m_stages[i].deviceAddress() < 1) continue;
+            updateIfChanged(m_indiP_curr_state, m_stages[i].name(), std::string("NOTCONNECTED"));
+         }
+
          return 0; //we return to give the stage time to initialize the connection if this is a USB-FTDI power on/plug-in event.
       }
 
@@ -481,6 +502,11 @@ int zaberLowLevel::appLogic()
       if( rv == ZC_CONNECTED) 
       {
          state(stateCodes::CONNECTED);
+         for(size_t i=0; i < m_stages.size();++i)
+         {
+            if(m_stages[i].deviceAddress() < 1) continue;
+            updateIfChanged(m_indiP_curr_state, m_stages[i].name(), std::string("CONNECTED"));
+         }
 
          if(!stateLogged())
          {
@@ -501,13 +527,29 @@ int zaberLowLevel::appLogic()
    {
       for(size_t i=0; i < m_stages.size();++i)
       {
+         if(m_stages[i].deviceAddress() < 1) 
+         {
+            updateIfChanged(m_indiP_curr_state, m_stages[i].name(), std::string("NODEVICE"));
+            continue; //Skip configured but not found stage
+         }
          std::lock_guard<std::mutex> guard(m_indiMutex); //Inside loop so INDI requests can steal it
 
          m_stages[i].getMaxPos(m_port);
+         std::cerr << i << " " << m_stages[i].name() << " " <<  m_stages[i].maxPos() << "\n";
          updateIfChanged(m_indiP_max_pos, m_stages[i].name(), m_stages[i].maxPos());
+
+         //Get warnings so first pass through has correct state for home/not-homed
+         if(m_stages[i].getWarnings(m_port) < 0)
+         {
+            if( powerState() != 1 || powerStateTarget() != 1 ) return 0; //means we're powering off
+            log<software_error>({__FILE__, __LINE__});
+            state(stateCodes::ERROR);
+            return 0;
+         }
          
       }
       state(stateCodes::READY);
+
       return 0;
    }
 
@@ -517,6 +559,8 @@ int zaberLowLevel::appLogic()
       //Here we check complete stage state.
       for(size_t i=0; i < m_stages.size();++i)
       {
+         if(m_stages[i].deviceAddress() < 1) continue; //Skip configured but not found stage
+
          std::lock_guard<std::mutex> guard(m_indiMutex); //Inside loop so INDI requests can steal it
 
          m_stages[i].updatePos(m_port);
@@ -546,6 +590,11 @@ int zaberLowLevel::appLogic()
          }
          else if(m_stages[i].deviceStatus() == 'I') 
          {
+            if(m_stages[i].homing())
+            {
+               std::cerr << __FILE__ << " " << __LINE__ << "\n";
+               return 0;
+            }
             if(m_stages[i].warnWR())
             {
                updateIfChanged(m_indiP_curr_state, m_stages[i].name(), std::string("NOTHOMED"));
@@ -562,7 +611,7 @@ int zaberLowLevel::appLogic()
          
          if(m_stages[i].getWarnings(m_port) < 0)
          {
-            if(m_powerState == 0) return 0;
+            if( powerState() != 1 || powerStateTarget() != 1 ) return 0; //means we're powering off
             log<software_error>({__FILE__, __LINE__});
             state(stateCodes::ERROR);
             return 0;
@@ -576,7 +625,12 @@ int zaberLowLevel::appLogic()
       int rv = tty::usbDevice::getDeviceName();
       if(rv < 0 && rv != TTY_E_DEVNOTFOUND && rv != TTY_E_NODEVNAMES)
       {
+         if( powerState() != 1 || powerStateTarget() != 1 ) return 0; //means we're powering off
          state(stateCodes::FAILURE);
+         for(size_t i=0; i < m_stages.size();++i)
+         {
+            updateIfChanged(m_indiP_curr_state, m_stages[i].name(), std::string("FAILURE"));
+         }
          if(!stateLogged())
          {
             log<software_critical>({__FILE__, __LINE__, rv, tty::ttyErrorString(rv)});
@@ -586,7 +640,12 @@ int zaberLowLevel::appLogic()
 
       if(rv == TTY_E_DEVNOTFOUND || rv == TTY_E_NODEVNAMES)
       {
+         if( powerState() != 1 || powerStateTarget() != 1 ) return 0; //means we're powering off
          state(stateCodes::NODEVICE);
+         for(size_t i=0; i < m_stages.size();++i)
+         {
+            updateIfChanged(m_indiP_curr_state, m_stages[i].name(), std::string("NODEVICE"));
+         }
 
          if(!stateLogged())
          {
@@ -597,14 +656,20 @@ int zaberLowLevel::appLogic()
          return 0;
       }
 
+      if( powerState() != 1 || powerStateTarget() != 1 ) return 0; //means we're powering off
       state(stateCodes::FAILURE);
-      
+      for(size_t i=0; i < m_stages.size();++i)
+      {
+         updateIfChanged(m_indiP_curr_state, m_stages[i].name(), std::string("FAILURE"));
+      }
+
       log<software_critical>({__FILE__, __LINE__});
       log<text_log>("Error NOT due to loss of USB connection.  I can't fix it myself.", logPrio::LOG_CRITICAL);
    }
 
 
 
+   if( powerState() != 1 || powerStateTarget() != 1 ) return 0; //means we're powering off
 
    if( state() == stateCodes::FAILURE )
    {
@@ -646,13 +711,18 @@ int zaberLowLevel::onPowerOff()
 inline
 int zaberLowLevel::whilePowerOff()
 {
-
    return 0;
 }
 
 inline
 int zaberLowLevel::appShutdown()
 {
+   for(size_t i=0; i < m_stages.size();++i)
+   {
+      if(m_stages[i].deviceAddress() < 1) continue;
+      updateIfChanged(m_indiP_curr_state, m_stages[i].name(), std::string("NODEVICE"));
+   }
+
    return 0;
 }
 
@@ -667,8 +737,12 @@ INDI_NEWCALLBACK_DEFN(zaberLowLevel, m_indiP_tgt_pos)(const pcf::IndiProperty &i
             long tgt = ipRecv[m_stages[n].name()].get<long>();
             if(tgt >= 0)
             {
+               if(m_stages[n].deviceAddress() < 1)
+               {
+                  return log<software_error,-1>({__FILE__, __LINE__, "stage " + m_stages[n].name() + " with with s/n " + m_stages[n].serial() + " not found in system."});
+               }
+
                std::lock_guard<std::mutex> guard(m_indiMutex);
-               std::cerr << "moving " << m_stages[n].name() << " to " << std::to_string(tgt) << "\n";
                updateIfChanged(m_indiP_curr_state, m_stages[n].name(), std::string("OPERATING"));
                return m_stages[n].moveAbs(m_port, tgt);
             }
@@ -690,8 +764,12 @@ INDI_NEWCALLBACK_DEFN(zaberLowLevel, m_indiP_tgt_relpos)(const pcf::IndiProperty
             tgt += m_stages[n].rawPos();
             if(tgt >= 0)
             {
+               if(m_stages[n].deviceAddress() < 1)
+               {
+                  return log<software_error,-1>({__FILE__, __LINE__, "stage " + m_stages[n].name() + " with with s/n " + m_stages[n].serial() + " not found in system."});
+               }
                std::lock_guard<std::mutex> guard(m_indiMutex);
-               std::cerr << "moving " << m_stages[n].name() << " to " << std::to_string(tgt) << "\n";
+      
                updateIfChanged(m_indiP_curr_state, m_stages[n].name(), std::string("OPERATING"));
                return m_stages[n].moveAbs(m_port, tgt);
             }
@@ -712,9 +790,11 @@ INDI_NEWCALLBACK_DEFN(zaberLowLevel, m_indiP_req_home)(const pcf::IndiProperty &
             int tgt = ipRecv[m_stages[n].name()].get<int>();
             if(tgt > 0)
             {
+               if(m_stages[n].deviceAddress() < 1)
+               {
+                  return log<software_error,-1>({__FILE__, __LINE__, "stage " + m_stages[n].name() + " with with s/n " + m_stages[n].serial() + " not found in system."});
+               }
                std::lock_guard<std::mutex> guard(m_indiMutex);
-               std::cerr << "homing " << m_stages[n].name() << "\n";
-               
                return m_stages[n].home(m_port);
             }
          }
@@ -734,9 +814,12 @@ INDI_NEWCALLBACK_DEFN(zaberLowLevel, m_indiP_req_halt)(const pcf::IndiProperty &
             int tgt = ipRecv[m_stages[n].name()].get<int>();
             if(tgt > 0)
             {
+               if(m_stages[n].deviceAddress() < 1)
+               {
+                  return log<software_error,-1>({__FILE__, __LINE__, "stage " + m_stages[n].name() + " with with s/n " + m_stages[n].serial() + " not found in system."});
+               }
+
                std::lock_guard<std::mutex> guard(m_indiMutex);
-               std::cerr << "halting " << m_stages[n].name() << "\n";
-               
                return m_stages[n].stop(m_port);
             }
          }
@@ -756,9 +839,12 @@ INDI_NEWCALLBACK_DEFN(zaberLowLevel, m_indiP_req_ehalt)(const pcf::IndiProperty 
             int tgt = ipRecv[m_stages[n].name()].get<int>();
             if(tgt > 0)
             {
+               if(m_stages[n].deviceAddress() < 1)
+               {
+                  return log<software_error,-1>({__FILE__, __LINE__, "stage " + m_stages[n].name() + " with with s/n " + m_stages[n].serial() + " not found in system."});
+               }
+
                std::lock_guard<std::mutex> guard(m_indiMutex);
-               std::cerr << "e-halting " << m_stages[n].name() << "\n";
-               
                return m_stages[n].estop(m_port);
             }
          }

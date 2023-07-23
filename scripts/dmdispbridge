@@ -1,0 +1,94 @@
+#!/bin/bash
+set -eo pipefail
+
+#######################################################
+# dmdispbridge: create a TCP bridge for a dmdisp
+#
+#
+#######################################################
+
+# ======================= PROCESS NAME =================================
+pname=`echo "$0" | sed "s/\.\///g"`
+
+function printHELP {
+echo "------------------------------------------------------------------------"
+echo "$(tput bold) $pname : create dmdisp bridge $(tput sgr0)"
+echo "------------------------------------------------------------------------"
+echo "  Create a dmdisp bridge"
+echo "   "
+echo " $(tput bold)USAGE:$(tput sgr0)"
+echo "     $0 [-h] <dmnum> <ip>"
+echo ""
+echo ""
+echo " $(tput bold)INPUT:$(tput sgr0)"
+echo "  <dmnum>      : the dm number, XX in dmXXdispYY"
+echo "  <name>       : ip address of the machine controlling the dm"
+echo "  <start-port> : the starting port number, for dmXXdisp00"
+echo ""
+echo " This should be run on the machine that will send the commands"
+echo ""
+echo " $(tput bold)EXAMPLE:$(tput sgr0)"
+echo "     $0 01 192.168.2.2 8800 #will create bridge for dm01disp "
+echo ""
+echo "------------------------------------------------------------------------"
+}
+
+# ================= OPTIONS =============================
+
+# Transform long options to short ones
+for arg in "$@"; do
+  shift
+  case "$arg" in
+    "--help") set -- "$@" "-h" ;;
+    *)        set -- "$@" "$arg"
+  esac
+done
+
+while getopts :hckp: FLAG; do
+  case $FLAG in
+    h)  #show help
+      printHELP
+      exit
+      ;;
+    \?) #unrecognized option - show help
+      echo -e \\n"Option -${BOLD}$OPTARG${NORM} not allowed."
+      printHELP
+      ;;
+  esac
+done
+
+
+ip=$2
+me=$(hostname)
+
+for i in {0..11}
+do
+   if (($i < 10 ))
+   then
+      chnum="0$i"
+   else
+      chnum="$i"
+   fi
+
+   let "port=($3 + $i)"
+
+   echo $port
+
+   com="cd shmimTCP && tmux new-session -d -s sTCPrc-"$me"-dm"$1"disp"$chnum" && tmux send-keys -t sTCPrc-"$me"-dm"$1"disp"$chnum" \"bash ./shmimTCPreceive.bash "$port"\" C-m"
+
+   echo $com
+
+   #Create tmux and start listening on RTC
+   ssh -t rtc $com
+
+   #create shmim locally
+   creaimshm "dm"$1"disp"$chnum 50 50
+
+   #start transmitting
+   #echo "starting detached session"
+   #tmux new -d -s "sTCPtx-"$me"-dm"$1"disp"$chnum
+   echo "starting shmimTCPtransmit: " "dm"$1"disp"$chnum $ip $port
+
+   shmimTCPtransmit "dm"$1"disp"$chnum $ip $port
+done
+

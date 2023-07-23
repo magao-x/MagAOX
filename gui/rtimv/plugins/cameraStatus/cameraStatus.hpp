@@ -14,7 +14,7 @@ class cameraStatus :
                      public rtimvOverlayInterface
 {
    Q_OBJECT
-   Q_PLUGIN_METADATA(IID "rtimv.overlayInterface/1.0")
+   Q_PLUGIN_METADATA(IID "rtimv.overlayInterface/1.1")
    Q_INTERFACES(rtimvOverlayInterface)
     
    protected:
@@ -33,6 +33,8 @@ class cameraStatus :
       StretchBox * m_roiBox {nullptr};
       StretchBox * m_roiFullBox {nullptr};
       
+      char m_blob[512]; ///< Memory for copying rtimvDictionary blobs
+
       int m_width {0};
       int m_height {0};
       
@@ -63,6 +65,8 @@ class cameraStatus :
    signals:
          
       void newStretchBox(StretchBox *);
+
+      void savingState(bool);
 };
 
 #endif //cameraStatus_hpp

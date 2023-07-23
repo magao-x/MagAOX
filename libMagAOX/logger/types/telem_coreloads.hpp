@@ -48,6 +48,14 @@ struct telem_coreloads : public flatbuffer_log
 
    };
 
+   static bool verify( flatlogs::bufferPtrT & logBuff,  ///< [in] Buffer containing the flatbuffer serialized message.
+                       flatlogs::msgLenT len            ///< [in] length of msgBuffer.
+                     )
+   {
+      auto verifier = flatbuffers::Verifier( (uint8_t*) flatlogs::logHeader::messageBuffer(logBuff), static_cast<size_t>(len));
+      return VerifyTelem_coreloads_fbBuffer(verifier);
+   }
+
    ///Get the message formatte for human consumption.
    static std::string msgString( void * msgBuffer,  /**< [in] Buffer containing the flatbuffer serialized message.*/
                                  flatlogs::msgLenT len  /**< [in] [unused] length of msgBuffer.*/
@@ -63,7 +71,7 @@ struct telem_coreloads : public flatbuffer_log
       if (rgs->loads() != nullptr) 
       {
          msg+= "[cpu loads] ";
-         for(flatbuffers::Vector<float>::iterator it = rgs->loads()->begin(); it != rgs->loads()->end(); ++it) 
+         for(flatbuffers::Vector<float>::const_iterator it = rgs->loads()->begin(); it != rgs->loads()->end(); ++it)
          {
             msg+= std::to_string(*it);
             msg+= " ";
@@ -73,6 +81,13 @@ struct telem_coreloads : public flatbuffer_log
 
       return msg;
 
+   }
+
+   static std::string msgJSON( void * msgBuffer,  /**< [in] Buffer containing the flatbuffer serialized message.*/
+                               flatlogs::msgLenT len  /**< [in] [unused] length of msgBuffer.*/
+                             )
+   {
+      return makeJSON(msgBuffer, len, Telem_coreloads_fbTypeTable());
    }
 
 }; //telem_coreloads

@@ -97,7 +97,7 @@ int loadCameraConfig( cameraConfigMap & ccmap, ///< [out] the map in which to pl
   * which determines whether or not vertical shift speed controls are exposed. If true, then the implementation should populate
   * m_vShiftSpeedNames and m_vShiftSpeedLabels (vectors of strings) on construction to the allowed values.  This 
   * facility is normally used names like "0_3us" and "1_3us".  
-  * If used (and true) the setVShiftSpeed() function must be define which sets the camera according to m_vShiftSpeedNameSet.
+  * If used (and true) the setVShiftSpeed() function must be defined which sets the camera according to m_vShiftSpeedNameSet.
   * The implementation must also manage m_vShiftSpeedName, keeping it up to date.  The configuration setting camera.defaultVShiftSpeed
   * is also exposed, and the implementation can set this default with m_defaultVShiftSpeed. 
   * 
@@ -115,6 +115,7 @@ int loadCameraConfig( cameraConfigMap & ccmap, ///< [out] the map in which to pl
   * \code
   * static constexpr bool c_stdCamera_fpsCtrl = true; //or: false
   * \endcode
+  * If that is set to true the derivedT must implement
   * \code
   * int setFPS();
   * \endcode
@@ -125,6 +126,16 @@ int loadCameraConfig( cameraConfigMap & ccmap, ///< [out] the map in which to pl
   * static constexpr bool c_stdCamera_fps = true; //or: false
   * \endcode
   * Note that the value of c_stdCamera_fps does not matter if c_stdCamera_fpsCtrl == true.
+  * 
+  * Synchro Control:
+  * A static configuration variable must be defined in derivedT as
+  * \code
+  * static constexpr bool c_stdCamera_synchro = true; //or: false
+  * \endcode
+  * If that is set to true the derivedT must implement
+  * \code
+  * int setSynchro();
+  * \endcode
   * 
   * EM Gain:
   * A static configuration variable must be defined in derivedT as
@@ -169,6 +180,19 @@ int loadCameraConfig( cameraConfigMap & ccmap, ///< [out] the map in which to pl
   * int setShutter(int); 
   * \endcode
   *
+  * State:
+  * A static configuration variable must be defined in derivedT as
+  * \code
+  * static constexpr bool c_stdCamera_usesStateString = true; //or: false
+  * \endcode
+  * which determines whether the class provides a state string for dark management.
+  * If true, the following functions must be defined in derivedT:
+  * \code
+  * std::string stateString(); //String capturing the current state.  Must not include "__T".
+  * bool stateStringValid(); //Whether or not the current state string is valid, i.e. not changing.
+  * \endcode
+  * 
+  * 
   * The derived class must implement:
   * \code
   * int powerOnDefaults(); // called on power-on after powerOnWaitElapsed has occurred.
@@ -218,6 +242,10 @@ protected:
    
    std::string m_tempControlStatusStr; ///< Camera specific description of temperature control status.
    
+   pcf::IndiProperty m_indiP_temp;
+   pcf::IndiProperty m_indiP_tempcont;
+   pcf::IndiProperty m_indiP_tempstat;
+
    ///@}
    
    /** \name Readout Control 
@@ -236,11 +264,18 @@ protected:
    std::string m_vShiftSpeedName; ///< The current vshift speed name
    std::string m_vShiftSpeedNameSet; ///< The user requested vshift speed name, to be set by derived()
       
-   
+   float m_adcSpeed {0};
+   float m_vshiftSpeed {0};
+
    float m_emGain {1}; ///< The camera's current EM gain (if available).
    float m_emGainSet {1}; ///< The camera's EM gain, as set by the user.
    float m_maxEMGain {1}; ///< The configurable maximum EM gain.  To be enforced in derivedT.
-   
+
+   pcf::IndiProperty m_indiP_readoutSpeed;
+   pcf::IndiProperty m_indiP_vShiftSpeed;
+
+   pcf::IndiProperty m_indiP_emGain;
+
    ///@}
    
    /** \name Exposure Control 
@@ -260,8 +295,23 @@ protected:
    float m_fps {0}; ///< The current FPS.
    float m_fpsSet {0}; ///< The commanded fps, as set by user.
    
+   pcf::IndiProperty m_indiP_exptime;
+   
+   pcf::IndiProperty m_indiP_fps;
+
    ///@}
    
+   /** \name External Synchronization 
+     * @{ 
+     */ 
+   bool m_synchroSet {false}; ///< Target status of m_synchro 
+
+   bool m_synchro {false};    ///< Status of synchronization, true is on, false is off.
+
+   pcf::IndiProperty m_indiP_synchro;
+
+   ///@}
+
    /** \name Modes
      *
      * @{
@@ -270,6 +320,10 @@ protected:
    
    std::string m_nextMode; ///< The mode to be set by the next reconfiguration
    
+   pcf::IndiProperty m_indiP_mode; ///< Property used to report the current mode
+   
+   pcf::IndiProperty m_indiP_reconfig; ///< Request switch which forces the framegrabber to go through the reconfigure process.
+
    ///@}
    
    /** \name ROIs 
@@ -376,6 +430,13 @@ protected:
  
    ///@}
    
+   /** \name State String
+     * The State string is exposed if derivedT::c_stdCamera_usesStateString is true.
+     * @{
+     */  
+   pcf::IndiProperty m_indiP_stateString;
+   ///@}
+
 public:
 
    ///Destructor, destroys the PdvDev structure
@@ -490,31 +551,6 @@ protected:
       *
       *@{
       */ 
-protected:
-   //declare our properties
-   
-   pcf::IndiProperty m_indiP_temp;
-   pcf::IndiProperty m_indiP_tempcont;
-   pcf::IndiProperty m_indiP_tempstat;
-   
-   pcf::IndiProperty m_indiP_readoutSpeed;
-   pcf::IndiProperty m_indiP_vShiftSpeed;
-   
-   pcf::IndiProperty m_indiP_emGain;
-   
-   pcf::IndiProperty m_indiP_exptime;
-   
-   pcf::IndiProperty m_indiP_fps;
-   
-   pcf::IndiProperty m_indiP_mode; ///< Property used to report the current mode
-   
-   pcf::IndiProperty m_indiP_reconfig; ///< Request switch which forces the framegrabber to go through the reconfigure process.
-   
-  
-   
-   
-   
-   
 public:
 
    /// The static callback function to be registered for stdCamera properties
@@ -660,6 +696,25 @@ public:
      */
    int newCallBack_fps( const pcf::IndiProperty &ipRecv /**< [in] the INDI property sent with the the new property request.*/);
    
+   /// Interface to setSynchro when the derivedT has synchronization
+   /** Tag-dispatch resolution of c_stdCamera_synchro==true will call this function.
+     * Calls derivedT::setSynchro. 
+     */
+   int setSynchro( const mx::meta::trueFalseT<true> & t );
+   
+   /// Interface to setSynchro when the derivedT does not have synchronization
+   /** Tag-dispatch resolution of c_stdCamera_ynchro==false will call this function.
+     * This prevents requiring derivedT to have its own setSynchro(). 
+     */
+   int setSynchro( const mx::meta::trueFalseT<false> & f );
+   
+   /// Callback to process a NEW synchro request
+   /**
+     * \returns 0 on success.
+     * \returns -1 on error.
+     */
+   int newCallBack_synchro( const pcf::IndiProperty &ipRecv /**< [in] the INDI property sent with the the new property request.*/);
+
    /// Callback to process a NEW mode request
    /**
      * \returns 0 on success.
@@ -831,6 +886,30 @@ public:
      */
    int newCallBack_shutter( const pcf::IndiProperty &ipRecv /**< [in] the INDI property sent with the the new property request.*/);
    
+   /// Interface to stateString when the derivedT provides it
+   /** Tag-dispatch resolution of c_stdCamera_usesStateString==true will call this function.
+     * Calls derivedT::stateString. 
+     */
+   std::string stateString( const mx::meta::trueFalseT<true> & t);
+   
+   /// Interface to stateString when the derivedT does not provide it
+   /** Tag-dispatch resolution of c_stdCamera_usesStateString==false will call this function.
+     * returns "". 
+     */
+   std::string stateString( const mx::meta::trueFalseT<false> & f);
+
+   /// Interface to stateStringValid when the derivedT provides it
+   /** Tag-dispatch resolution of c_stdCamera_usesStateString==true will call this function.
+     * Calls derivedT::stateStringValid. 
+     */
+   bool stateStringValid( const mx::meta::trueFalseT<true> & t);
+   
+   /// Interface to stateStringValid when the derivedT does not provide it
+   /** Tag-dispatch resolution of c_stdCamera_usesStateString==false will call this function.
+     * returns false. 
+     */
+   bool stateStringValid( const mx::meta::trueFalseT<false> & f);
+
    /// Update the INDI properties for this device controller
    /** You should call this once per main loop.
      * It is not called automatically.
@@ -1041,7 +1120,6 @@ int stdCamera<derivedT>::appStartup()
          #endif
          return -1;
       }
-      
    }
    else if(derivedT::c_stdCamera_temp)
    {
@@ -1136,6 +1214,18 @@ int stdCamera<derivedT>::appStartup()
       }
    }
    
+   if(derivedT::c_stdCamera_synchro)
+   {
+      derived().createStandardIndiToggleSw( m_indiP_synchro, "synchro", "Synchronization", "Synchronization");  
+      if( derived().registerIndiPropertyNew( m_indiP_synchro, st_newCallBack_stdCamera) < 0)
+      {
+         #ifndef STDCAMERA_TEST_NOLOG
+         derivedT::template log<software_error>({__FILE__,__LINE__});
+         #endif
+         return -1;
+      }
+   }
+
    if(derivedT::c_stdCamera_usesModes)
    {
       std::vector<std::string> modeNames;
@@ -1341,8 +1431,22 @@ int stdCamera<derivedT>::appStartup()
       
    }
    
+   if(derivedT::c_stdCamera_usesStateString)
+   {
+      derived().createROIndiText( m_indiP_stateString, "state_string", "current", "State String", "State", "String");
+      m_indiP_stateString.add(pcf::IndiElement("valid"));
+      m_indiP_stateString["valid"] = "no";
+      if( derived().registerIndiPropertyReadOnly( m_indiP_stateString ) < 0)
+      {
+         #ifndef STDCAMERA_TEST_NOLOG
+         derivedT::template log<software_error>({__FILE__,__LINE__});
+         #endif
+         return -1;
+      }
+   }
+
    return 0;
-}
+}//int stdCamera<derivedT>::appStartup()
 
 template<class derivedT>
 int stdCamera<derivedT>::appLogic()
@@ -1409,7 +1513,7 @@ int stdCamera<derivedT>::appLogic()
             
             if(m_shutterState == 1)
             {
-               derived().updateSwitchIfChanged(m_indiP_shutter, "toggle", pcf::IndiElement::On, INDI_BUSY);
+               derived().updateSwitchIfChanged(m_indiP_shutter, "toggle", pcf::IndiElement::On, INDI_OK);
             }
             else
             {
@@ -1504,7 +1608,7 @@ int stdCamera<derivedT>::onPowerOff()
           
       if(m_shutterState == 0)
       {
-         derived().updateSwitchIfChanged(m_indiP_shutter, "toggle", pcf::IndiElement::On, INDI_BUSY);
+         derived().updateSwitchIfChanged(m_indiP_shutter, "toggle", pcf::IndiElement::On, INDI_OK);
       }
       else
       {
@@ -1536,7 +1640,7 @@ int stdCamera<derivedT>::whilePowerOff()
       
       if(m_shutterState == 0)
       {
-         derived().updateSwitchIfChanged(m_indiP_shutter, "toggle", pcf::IndiElement::On, INDI_BUSY);
+         derived().updateSwitchIfChanged(m_indiP_shutter, "toggle", pcf::IndiElement::On, INDI_OK);
       }
       else
       {
@@ -1571,6 +1675,7 @@ int stdCamera<derivedT>::st_newCallBack_stdCamera( void * app,
    else if(derivedT::c_stdCamera_emGain &&       name == "emgain") return _app->newCallBack_emgain(ipRecv);
    else if(derivedT::c_stdCamera_exptimeCtrl &&  name == "exptime") return _app->newCallBack_exptime(ipRecv);
    else if(derivedT::c_stdCamera_fpsCtrl &&      name == "fps") return _app->newCallBack_fps(ipRecv);
+   else if(derivedT::c_stdCamera_synchro &&      name == "synchro") return _app->newCallBack_synchro(ipRecv);
    else if(derivedT::c_stdCamera_usesModes &&    name == "mode") return _app->newCallBack_mode(ipRecv);
    else if(derivedT::c_stdCamera_cropMode &&     name == "roi_crop_mode") return _app->newCallBack_cropMode(ipRecv);
    else if(derivedT::c_stdCamera_usesROI &&      name == "roi_region_x") return _app->newCallBack_roi_x(ipRecv);
@@ -1910,6 +2015,52 @@ int stdCamera<derivedT>::newCallBack_fps( const pcf::IndiProperty &ipRecv)
 }
 
 template<class derivedT>
+int stdCamera<derivedT>::setSynchro( const mx::meta::trueFalseT<true> & t)
+{
+   static_cast<void>(t);
+   return derived().setSynchro();
+}
+
+template<class derivedT>
+int stdCamera<derivedT>::setSynchro( const mx::meta::trueFalseT<false> & f)
+{
+   static_cast<void>(f);
+   return 0;
+}
+
+template<class derivedT>
+int stdCamera<derivedT>::newCallBack_synchro( const pcf::IndiProperty &ipRecv)
+{
+   if(derivedT::c_stdCamera_synchro)
+   {
+      if(ipRecv.getName() != m_indiP_synchro.getName())
+      {
+         derivedT::template log<software_error>({__FILE__,__LINE__, "wrong INDI property received."});
+         return -1;
+      }
+   
+      if(!ipRecv.find("toggle")) return 0;
+   
+      if( ipRecv["toggle"].getSwitchState() == pcf::IndiElement::Off )
+      {
+         m_synchroSet = false;
+      }
+   
+      if( ipRecv["toggle"].getSwitchState() == pcf::IndiElement::On )
+      {
+         m_synchroSet = true;
+      }
+   
+      std::unique_lock<std::mutex> lock(derived().m_indiMutex);
+
+      mx::meta::trueFalseT<derivedT::c_stdCamera_synchro> tf;
+      return setSynchro(tf);
+   }
+   
+   return 0;
+}
+
+template<class derivedT>
 int stdCamera<derivedT>::newCallBack_mode( const pcf::IndiProperty &ipRecv )
 {
    if(derivedT::c_stdCamera_usesModes)
@@ -2019,6 +2170,8 @@ int stdCamera<derivedT>::newCallBack_cropMode( const pcf::IndiProperty &ipRecv)
          m_cropModeSet = true;
       }
    
+      std::unique_lock<std::mutex> lock(derived().m_indiMutex);
+
       mx::meta::trueFalseT<derivedT::c_stdCamera_cropMode> tf;
       return setCropMode(tf);
    }
@@ -2478,6 +2631,34 @@ int stdCamera<derivedT>::newCallBack_shutter( const pcf::IndiProperty &ipRecv )
 }
 
 template<class derivedT>
+std::string stdCamera<derivedT>::stateString( const mx::meta::trueFalseT<true> & t)
+{
+   static_cast<void>(t);
+   return derived().stateString();
+}
+
+template<class derivedT>
+std::string stdCamera<derivedT>::stateString( const mx::meta::trueFalseT<false> & f)
+{
+   static_cast<void>(f);
+   return "";
+}
+
+template<class derivedT>
+bool stdCamera<derivedT>::stateStringValid( const mx::meta::trueFalseT<true> & t)
+{
+   static_cast<void>(t);
+   return derived().stateStringValid();
+}
+
+template<class derivedT>
+bool stdCamera<derivedT>::stateStringValid( const mx::meta::trueFalseT<false> & f)
+{
+   static_cast<void>(f);
+   return false;
+}
+
+template<class derivedT>
 int stdCamera<derivedT>::updateINDI()
 {
    if( !derived().m_indiDriver ) return 0;
@@ -2514,6 +2695,18 @@ int stdCamera<derivedT>::updateINDI()
       derived().updateIfChanged(m_indiP_fps, "current", m_fps, INDI_IDLE);
    }
    
+   if(derivedT::c_stdCamera_synchro)
+   {
+      if(m_synchro == false) 
+      {
+         derived().updateSwitchIfChanged(m_indiP_synchro, "toggle", pcf::IndiElement::Off, INDI_IDLE);
+      }
+      else
+      {
+         derived().updateSwitchIfChanged(m_indiP_synchro, "toggle", pcf::IndiElement::On, INDI_OK);
+      }
+   }
+
    if(derivedT::c_stdCamera_usesModes)
    {
       auto st = pcf::IndiProperty::Ok;
@@ -2535,7 +2728,7 @@ int stdCamera<derivedT>::updateINDI()
       }
       else
       {
-         derived().updateSwitchIfChanged(m_indiP_cropMode, "toggle", pcf::IndiElement::On, INDI_BUSY);
+         derived().updateSwitchIfChanged(m_indiP_cropMode, "toggle", pcf::IndiElement::On, INDI_OK);
       }
    }
    
@@ -2591,7 +2784,7 @@ int stdCamera<derivedT>::updateINDI()
       }
       if(m_shutterStatus == "POWERON" || m_shutterStatus == "READY")
       {
-         derived().updateIfChanged(m_indiP_shutterStatus, "status", m_shutterStatus, INDI_OK);
+         derived().updateIfChanged(m_indiP_shutterStatus, "status", m_shutterStatus, INDI_IDLE);
       }
       else
       {
@@ -2600,7 +2793,7 @@ int stdCamera<derivedT>::updateINDI()
           
       if(m_shutterState == 0) //0 shut, 1 open
       {
-         derived().updateSwitchIfChanged(m_indiP_shutter, "toggle", pcf::IndiElement::On, INDI_BUSY);
+         derived().updateSwitchIfChanged(m_indiP_shutter, "toggle", pcf::IndiElement::On, INDI_OK);
       }
       else
       {
@@ -2608,6 +2801,19 @@ int stdCamera<derivedT>::updateINDI()
       }
    }
    
+   if(derivedT::c_stdCamera_usesStateString)
+   {
+      mx::meta::trueFalseT<derivedT::c_stdCamera_usesStateString> tf;
+      derived().updateIfChanged(m_indiP_stateString, "current", stateString(tf), INDI_IDLE);
+      if(stateStringValid(tf))
+      {
+         derived().updateIfChanged(m_indiP_stateString, "valid", "yes", INDI_IDLE);
+      }
+      else
+      {
+         derived().updateIfChanged(m_indiP_stateString, "valid", "no", INDI_IDLE);
+      }
+   }
    return 0;
 }
 
@@ -2616,7 +2822,7 @@ int stdCamera<derivedT>::recordCamera( bool force )
 {
    static std::string last_mode;
    static roi last_roi;
-   static float last_expTime = 0;
+   static float last_expTime = -1e30; //ensure first one goes
    static float last_fps = 0;
    static float last_adcSpeed = -1;
    static float last_emGain = -1;
@@ -2626,8 +2832,12 @@ int stdCamera<derivedT>::recordCamera( bool force )
    static bool last_tempControlOnTarget = 0;
    static std::string last_tempControlStatusStr;
    static std::string last_shutterStatus;
-   static int last_shutterState;
-   
+   static int last_shutterState = false;
+   static bool last_synchro = false;
+   static float last_vshiftSpeed = -1;
+   static bool last_cropMode = false;
+
+
    if(force || m_modeName != last_mode ||
                m_currentROI.x != last_roi.x ||
                m_currentROI.y != last_roi.y ||
@@ -2638,26 +2848,30 @@ int stdCamera<derivedT>::recordCamera( bool force )
                m_expTime != last_expTime ||
                m_fps != last_fps ||
                m_emGain != last_emGain ||
-               0 != last_adcSpeed ||
+               m_adcSpeed != last_adcSpeed ||
                m_ccdTemp != last_ccdTemp ||
                m_ccdTempSetpt != last_ccdTempSetpt ||
                m_tempControlStatus != last_tempControlStatus ||
                m_tempControlOnTarget != last_tempControlOnTarget ||
                m_tempControlStatusStr != last_tempControlStatusStr ||
                m_shutterStatus != last_shutterStatus ||
-               m_shutterState != last_shutterState )
+               m_shutterState != last_shutterState ||
+               m_synchro != last_synchro ||
+               m_vshiftSpeed != last_vshiftSpeed ||
+               m_cropMode != last_cropMode) 
    {
       derived().template telem<telem_stdcam>({m_modeName, m_currentROI.x, m_currentROI.y, 
                                                     m_currentROI.w, m_currentROI.h, m_currentROI.bin_x, m_currentROI.bin_y,
-                                                       m_expTime, m_fps, m_emGain, 0, m_ccdTemp, m_ccdTempSetpt, (uint8_t) m_tempControlStatus, 
-                                                             (uint8_t) m_tempControlOnTarget, m_tempControlStatusStr, m_shutterStatus, (int8_t) m_shutterState});
+                                                       m_expTime, m_fps, m_emGain, m_adcSpeed, m_ccdTemp, m_ccdTempSetpt, (uint8_t) m_tempControlStatus, 
+                                                             (uint8_t) m_tempControlOnTarget, m_tempControlStatusStr, m_shutterStatus, (int8_t) m_shutterState, 
+                                                                   (uint8_t) m_synchro, m_vshiftSpeed, (uint8_t) m_cropMode});
       
       last_mode = m_modeName;
       last_roi = m_currentROI;
       last_expTime = m_expTime;
       last_fps = m_fps;
       last_emGain = m_emGain;
-      last_adcSpeed = 0;//m_adcSpeed;
+      last_adcSpeed = m_adcSpeed;
       last_ccdTemp = m_ccdTemp;
       last_ccdTempSetpt = m_ccdTempSetpt;
       last_tempControlStatus = m_tempControlStatus;
@@ -2665,6 +2879,9 @@ int stdCamera<derivedT>::recordCamera( bool force )
       last_tempControlStatusStr = m_tempControlStatusStr;
       last_shutterStatus = m_shutterStatus;
       last_shutterState = m_shutterState;
+      last_synchro = m_synchro;
+      last_vshiftSpeed = m_vshiftSpeed;
+      last_cropMode = m_cropMode;
    }
    
    

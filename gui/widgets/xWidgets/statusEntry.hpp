@@ -2,8 +2,8 @@
 #define statusEntry_hpp
 
 #include <QWidget>
-#include <QTimer>
 
+#include <cmath>
 #include "statusLineEdit.hpp"
 
 #include "ui_statusEntry.h"
@@ -46,7 +46,7 @@ protected:
    
 public:
    statusEntry( QWidget * Parent = 0, 
-                Qt::WindowFlags f = 0
+                Qt::WindowFlags f = Qt::WindowFlags()
               );
 
    statusEntry( const std::string & device,
@@ -55,7 +55,7 @@ public:
                 const std::string & label,
                 const std::string & units,
                 QWidget * Parent = 0, 
-                Qt::WindowFlags f = 0
+                Qt::WindowFlags f = Qt::WindowFlags()
               );
    
    ~statusEntry() noexcept;
@@ -68,6 +68,16 @@ public:
                const std::string & label,
                const std::string & units
              );
+
+   void currEl(const std::string & cel)
+   {
+      m_currEl = cel;
+   }
+
+   void targEl(const std::string & tel)
+   {
+      m_targEl = tel;
+   }
 
    void defaultFormat();
 
@@ -101,16 +111,25 @@ public:
      */
    bool highlightChanges();
 
-
    virtual void subscribe();
              
    virtual void onConnect();
+   
    virtual void onDisconnect();
    
    void handleDefProperty( const pcf::IndiProperty & ipRecv /**< [in] the property which has changed*/);
    
    void handleSetProperty( const pcf::IndiProperty & ipRecv /**< [in] the property which has changed*/);
    
+   /// Set the stretch of the horizontal layout
+   void setStretch( int s0, ///< Stretch of the spacer.  If 0, the spacer is removed.
+                    int s1, ///< Stretch of the label
+                    int s2  ///< Stretch of the value
+                  );
+
+   /// Set the format string
+   void format( const std::string & f /**< [in] the new format string */);
+
 protected:
    virtual void clearFocus();
 
@@ -118,6 +137,10 @@ public slots:
    void updateGUI();
 
    void on_value_returnPressed();
+
+   void setEditText(const QString & qs);
+
+   void stopEditing();
 
 private:
      
@@ -140,6 +163,8 @@ statusEntry::statusEntry( const std::string & device,
 {
    construct();
    setup(device, property, type, label, units);
+
+   
 }
 
 statusEntry::~statusEntry() noexcept
@@ -150,6 +175,14 @@ void statusEntry::construct()
 {
    ui.setupUi(this);
    ui.value->setProperty("isStatus", true);
+
+   QFont qf = ui.label->font();
+   qf.setPixelSize(XW_FONT_SIZE);
+   ui.label->setFont(qf);
+
+   qf = ui.value->font();
+   qf.setPixelSize(XW_FONT_SIZE);
+   ui.value->setFont(qf);
 }
 
 void statusEntry::setup( const std::string & device,
@@ -196,26 +229,36 @@ void statusEntry::defaultFormat()
 
 QString floatAutoFormat(const std::string & value)
 {
-   double v = std::stod(value);
+   double v;
+   try
+   {
+      v = std::stod(value);
+   }
+   catch(...)
+   {
+      return QString("");
+   }
+    
    std::string format = "%f";
 
-   if(v >= 10000)
+   double av = fabs(v);
+   if(av >= 10000)
    {
       format = "%0.3g";
    }
-   else if(v >= 100)
+   else if(av >= 100)
    {
       format = "%0.1f";
    }
-   else if(v >= 0.1)
+   else if(av >= 0.1)
    {
       format = "%0.2f";
    }
-   else if(v >= 0.01)
+   else if(av >= 0.01)
    {
       format = "%0.3f";
    }
-   else if(v >= 0.001)
+   else if(av >= 0.001)
    {
       format = "%0.4f";
    }
@@ -237,13 +280,30 @@ QString statusEntry::formattedValue()
       case STRING:
          return QString(m_current.c_str());
       case INT:
-         snprintf(str, sizeof(str), m_format.c_str(), std::stoi(m_current));
-         return QString(str);
+         try
+         {
+            snprintf(str, sizeof(str), m_format.c_str(), std::stoi(m_current));
+            return QString(str);
+         }
+         catch(...)
+         {
+            return QString("");
+         }
+         
       case FLOAT:
          if(m_format == "auto") return floatAutoFormat(m_current);
 
-         snprintf(str, sizeof(str), m_format.c_str(), std::stof(m_current));
-         return QString(str);
+         try 
+         {
+            snprintf(str, sizeof(str), m_format.c_str(), std::stof(m_current));
+            return QString(str);
+         }
+         catch(...)
+         {  
+            return QString("");
+         }
+
+         
       default:
          return QString(m_current.c_str());
    }
@@ -320,6 +380,31 @@ void statusEntry::handleSetProperty( const pcf::IndiProperty & ipRecv)
    updateGUI();
 }
 
+void statusEntry::setStretch( int s0, 
+                              int s1, 
+                              int s2
+                            )
+{
+   //Have to do this b/c hlayout is not exposed for whatever reason.
+   QHBoxLayout * qhbl = findChild<QHBoxLayout*>("hlayout");
+   if(qhbl)
+   {
+      qhbl->setStretch(0,s0);
+      qhbl->setStretch(1,s1);
+      qhbl->setStretch(2,s2);
+      if(s0 == 0) //remove the spacer
+      {
+         QLayoutItem * qli = qhbl->itemAt(0);
+         if(qli) qhbl->removeItem(qli);
+      }
+   }
+}
+
+void statusEntry::format( const std::string & f) 
+{
+   m_format = f;
+}
+
 void statusEntry::clearFocus()
 {
    ui.value->clearFocus();
@@ -354,6 +439,15 @@ void statusEntry::updateGUI()
 
 } //updateGUI()
 
+void statusEntry::setEditText(const QString & qs)
+{
+   ui.value->setEditText(qs);
+}
+
+void statusEntry::stopEditing()
+{
+   ui.value->stopEditing();
+}
 
 } //namespace xqt
    

@@ -52,6 +52,14 @@ struct git_state : public flatbuffer_log
 
    };
    
+   static bool verify( flatlogs::bufferPtrT & logBuff,  ///< [in] Buffer containing the flatbuffer serialized message.
+                       flatlogs::msgLenT len            ///< [in] length of msgBuffer.
+                     )
+   {
+      auto verifier = flatbuffers::Verifier( (uint8_t*) flatlogs::logHeader::messageBuffer(logBuff), static_cast<size_t>(len));
+      return VerifyGit_state_fbBuffer(verifier);
+   }
+
    ///Get the message formatte for human consumption.
    static std::string msgString( void * msgBuffer,  /**< [in] Buffer containing the flatbuffer serialized message.*/
                                  flatlogs::msgLenT len  /**< [in] [unused] length of msgBuffer.*/
@@ -71,6 +79,13 @@ struct git_state : public flatbuffer_log
       if(rgs->modified() > 0) str+= " MODIFIED";
 
       return str;
+   }
+
+   static std::string msgJSON( void * msgBuffer,  /**< [in] Buffer containing the flatbuffer serialized message.*/
+                                              flatlogs::msgLenT len  /**< [in] [unused] length of msgBuffer.*/
+                                            )
+   {
+      return makeJSON(msgBuffer, len, Git_state_fbTypeTable());
    }
    
    /// Access the repo name field

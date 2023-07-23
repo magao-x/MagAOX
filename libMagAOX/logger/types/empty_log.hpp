@@ -78,12 +78,29 @@ struct empty_log
       return 0;
    }
    
+   static bool verify( flatlogs::bufferPtrT & logBuff,  ///< [in] Buffer containing the flatbuffer serialized message.
+                       flatlogs::msgLenT len            ///< [in] length of msgBuffer.
+                     )
+   {
+      static_cast<void>(logBuff);
+      return (len == 0);
+   }
+
    static std::string msgString( void * msgBuffer, flatlogs::msgLenT len)//messageT & msg  /**< [in] [unused] the empty message */)
    {
       static_cast<void>(msgBuffer);
       static_cast<void>(len);
       
       return derivedT::msg();
+   }
+
+   static std::string msgJSON( void * msgBuffer,  /**< [in] Buffer containing the flatbuffer serialized message.*/
+                                              flatlogs::msgLenT len  /**< [in] [unused] length of msgBuffer.*/
+                                            )
+   {
+      static_cast<void>(len);
+      static_cast<void>(msgBuffer);
+      return "{}";
    }
 };
 

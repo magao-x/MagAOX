@@ -11,7 +11,6 @@
 #ifndef app_MagAOXApp_hpp
 #define app_MagAOXApp_hpp
 
-
 #include <signal.h>
 #include <sys/stat.h>
 #include <sys/syscall.h>
@@ -410,6 +409,15 @@ protected:
 
    ///@} -- PID Locking
 
+   /** \name cpusets
+     * The path to the cpusets mount is configured by the environment varialbe defined by MAGOX_env_cpuset
+     * in environment.hpp.  This environment varialbe is normally named "CGROUPS1_CPUSET_MOUNTPOINT".  If
+     * the environment variable is not set, the default defined by MAGAOX_cpusetPath in paths.hpp is used.
+     * This is normally "/opt/MagAOX/cpuset/"
+     */
+   
+   std::string m_cpusetPath {MAGAOX_cpusetPath};
+
    /** \name Threads 
      *
      * @{
@@ -419,8 +427,10 @@ public:
    /// Start a thread, using this class's privileges to set priority, etc.
    /** 
      * The thread initialization synchronizer `bool` is set to true at the beginning
-     * of this function, then is set to false once all initialization is complete.  
-     *
+     * of this function, then is set to false once all initialization is complete.  The
+     * thread exec function should wait until this is false before doing _anything_ except
+     * setting the pid.  This is to avoid privilege escalation bugs.
+     * 
      * The interface of the thread start function is:
      \code
      static void impl::myThreadStart( impl * o )
@@ -440,6 +450,7 @@ public:
                     pid_t & tpid,                 ///< [in/out] The thread pid to be filled in by thrdStart immediately upon call
                     pcf::IndiProperty & thProp,   ///< [in/out] The INDI property to publish the thread details
                     int thrdPrio,                 ///< [in] The r/t priority to set for this thread
+                    const std::string & cpuset,   ///< [in] the cpuset to place this thread on.  Ignored if "".
                     const std::string & thrdName, ///< [in] The name of the thread (just for logging)
                     thisPtr * thrdThis,           ///< [in] The `this` pointer to pass to the thread starter function
                     Function&& thrdStart          ///< [in] The thread starting function, a static function taking a `this` pointer as argument.
@@ -640,8 +651,8 @@ public:
    
    /// Create a standard R/W INDI switch with a single request element.
    /** This switch is intended to function like a momentary switch.
-     * 
-     * \returns 0 on success 
+     *
+     * \returns 0 on success
      * \returns -1 on error
      */ 
    int createStandardIndiRequestSw( pcf::IndiProperty & prop,       ///< [out] the property to create and setup
@@ -650,7 +661,21 @@ public:
                                     const std::string & group = ""  ///< [in] [optional] the group for this property
                                   );
    
-   /// Create a standard R/W INDI selection (one of many) switch with vector of elements
+   /// Create a standard R/W INDI selection (one of many) switch with vector of elements and element labels
+   /** This switch is intended to function like drop down menu.
+     *
+     * \returns 0 on success
+     * \returns -1 on error
+     */
+   int createStandardIndiSelectionSw( pcf::IndiProperty & prop,                  ///< [out] the property to create and setup
+                                      const std::string & name,                  ///< [in] the name of the property,
+                                      const std::vector<std::string> & elements, ///< [in] the element names to give to the switches
+                                      const std::vector<std::string> & elementLabels, ///< [in] the element labels to give to the switches
+                                      const std::string & label = "",            ///< [in] [optional] the GUI label suggestion for this property
+                                      const std::string & group = ""             ///< [in] [optional] the group for this property
+                                    );
+
+/// Create a standard R/W INDI selection (one of many) switch with vector of elements using the element strings as their own labels
    /** This switch is intended to function like drop down menu.
      * 
      * \returns 0 on success 
@@ -1159,6 +1184,14 @@ void MagAOXApp<_useINDI>::setDefaults( int argc,
    tmpstr = MagAOXPath + "/" + MAGAOX_secretsRelPath;
    secretsPath = tmpstr;
 
+   //Setup default cpuset path
+   tmpstr = mx::sys::getEnv(MAGAOX_env_cpuset);
+   if(tmpstr != "")
+   {
+      m_cpusetPath = tmpstr;
+   }
+   //else we stick with the default
+
 
    if(m_configBase != "")
    {
@@ -1264,6 +1297,7 @@ void MagAOXApp<_useINDI>::loadBasicConfig() //virtual
          log<text_log>("powerOnWait longer than 1 hour.  Setting to 0.", logPrio::LOG_ERROR);
       }
    }
+
 }
 
 template<bool _useINDI>
@@ -1345,20 +1379,19 @@ int MagAOXApp<_useINDI>::execute() //virtual
    m_log.logThreadStart();
 
    //Give up to 2 secs to make sure log thread has time to get started and try to open a file.
-   for(int w=0;w<4;++w)
+   int w = 0;
+   while(m_log.logThreadRunning() == false && w < 20)
    {
-      //Sleep for 500 msec
-      std::this_thread::sleep_for( std::chrono::duration<unsigned long, std::nano>(500000));
-
-      //Verify that log thread is still running.
-      if(m_log.logThreadRunning() == true) break;
+      //Sleep for 100 msec
+      std::this_thread::sleep_for( std::chrono::duration<unsigned long, std::nano>(100000000));
+      ++w;
    }
-
+   
    if(m_log.logThreadRunning() == false)
    {
       //We don't log this, because it won't be logged anyway.
       std::cerr << "\nCRITICAL: log thread not running.  Exiting.\n\n";
-        m_shutdown = 1;
+      m_shutdown = 1;
    }
 
    //----------------------------------------//
@@ -1384,7 +1417,6 @@ int MagAOXApp<_useINDI>::execute() //virtual
          state(stateCodes::FAILURE);
          m_shutdown = 1;
       }
-      
    }
 
    //We have to wait for power status to become available
@@ -1882,6 +1914,7 @@ int MagAOXApp<_useINDI>::threadStart( std::thread & thrd,
                                       pid_t & tpid,
                                       pcf::IndiProperty & thProp,
                                       int thrdPrio,
+                                      const std::string & cpuset,
                                       const std::string & thrdName,
                                       thisPtr * thrdThis,
                                       Function&& thrdStart
@@ -1941,9 +1974,7 @@ int MagAOXApp<_useINDI>::threadStart( std::thread & thrd,
    {
       log<text_log>(thrdName + " thread scheduler priority set to " + std::to_string(thrdPrio));
    }
-   
-   thrdInit = false;
-   
+      
    // Wait for tpid to be filled in, but only for one total second.
    if(tpid == 0) 
    {
@@ -1975,8 +2006,36 @@ int MagAOXApp<_useINDI>::threadStart( std::thread & thrd,
          thProp["prio"] = thrdPrio;
          registerIndiPropertyReadOnly(thProp);
       }
+
+      if(cpuset != "")
+      {
+         elevatedPrivileges ep(this);
+         std::string cpuFile = m_cpusetPath;
+         cpuFile += "/" + cpuset;
+         cpuFile += "/tasks";
+         int wfd = open( cpuFile.c_str(), O_WRONLY);
+         if(wfd < 0)
+         {
+            return log<software_error,-1>({__FILE__, __LINE__, errno, "error from open for " + cpuFile});
+         }
+
+         char pids[16];
+         snprintf(pids, sizeof(pids), "%d", tpid);
+
+         int w = write(wfd, pids,strnlen(pids, sizeof(pids)));
+         if(w != (int) strlen(pids))
+         {
+            return log<software_error,-1>({__FILE__, __LINE__, errno, "error on write"});
+         }
+
+         close(wfd);  
+      
+         log<text_log>("moved " + thrdName + " to cpuset " + cpuset, logPrio::LOG_NOTICE);
+      }
    }
    
+   thrdInit = false;
+
    return 0; 
    
 }
@@ -2015,7 +2074,7 @@ void MagAOXApp<_useINDI>::state( const stateCodes::stateCodeT & s,
    //Check to make sure INDI is up to date
    std::unique_lock<std::mutex> lock(m_indiMutex, std::try_to_lock);  //Lock the mutex before conducting INDI communications.
 
-   //Note this is called very execute loop to make sure we update eventually
+   //Note this is called every execute loop to make sure we update eventually
    if(lock.owns_lock())
    {  
       ///\todo move this to a function in stateCodes
@@ -2279,7 +2338,8 @@ int MagAOXApp<_useINDI>::createStandardIndiRequestSw( pcf::IndiProperty & prop,
 template<bool _useINDI>
 int MagAOXApp<_useINDI>::createStandardIndiSelectionSw( pcf::IndiProperty & prop,                  
                                                         const std::string & name,                  
-                                                        const std::vector<std::string> & elements, 
+                                                        const std::vector<std::string> & elements,
+                                                        const std::vector<std::string> & elementLabels,
                                                         const std::string & label,            
                                                         const std::string & group             
                                                       )
@@ -2299,7 +2359,9 @@ int MagAOXApp<_useINDI>::createStandardIndiSelectionSw( pcf::IndiProperty & prop
    //Add the toggle element initialized to Off
    for(size_t n=0; n < elements.size(); ++n)
    {
-      prop.add(pcf::IndiElement(elements[n], pcf::IndiElement::Off));
+      pcf::IndiElement elem = pcf::IndiElement(elements[n], pcf::IndiElement::Off);
+      elem.setLabel(elementLabels[n]);
+      prop.add(elem);
    }
    
    //Don't set "" just in case libcommon does something with defaults
@@ -2314,6 +2376,17 @@ int MagAOXApp<_useINDI>::createStandardIndiSelectionSw( pcf::IndiProperty & prop
    }
    
    return 0;
+}
+
+template<bool _useINDI>
+int MagAOXApp<_useINDI>::createStandardIndiSelectionSw( pcf::IndiProperty & prop,
+                                                        const std::string & name,
+                                                        const std::vector<std::string> & elements,
+                                                        const std::string & label,
+                                                        const std::string & group
+                                                      )
+{
+   return createStandardIndiSelectionSw(prop, name, elements, elements, label, group);
 }
 
 template<bool _useINDI>
@@ -2560,6 +2633,15 @@ int MagAOXApp<_useINDI>::startINDI()
    //======= Instantiate the indiDriver
    try
    {
+      if(m_indiDriver != nullptr) 
+      {
+         m_indiDriver->quitProcess();
+         m_indiDriver->deactivate();
+         log<indidriver_stop>();
+         delete m_indiDriver;
+         m_indiDriver = nullptr;
+      }
+
       m_indiDriver = new indiDriver<MagAOXApp>(this, m_configName, "0", "0");
    }
    catch(...)

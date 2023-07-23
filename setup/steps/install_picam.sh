@@ -1,18 +1,16 @@
 #!/bin/bash
+if [[ "$EUID" != 0 ]]; then
+    echo "Becoming root..."
+    sudo bash -l $0 "$@"
+    exit $?
+fi
 DIR="$( cd "$( dirname "${BASH_SOURCE[0]}" )" && pwd )"
 source $DIR/../_common.sh
 set -euo pipefail
 
-PICAM_RUNFILE_CHECKSUM=37bedee6c828e364750e9b5fd7c2a420
 PICAM_RUNFILE=Picam_SDK-v5.7.2.run
-PICAM_URL=ftp://ftp.piacton.com/Public/Software/Official/PICam/Archives/$PICAM_RUNFILE
-_cached_fetch $PICAM_URL $PICAM_RUNFILE
-if [[ $(md5sum ./$PICAM_RUNFILE) != *$PICAM_RUNFILE_CHECKSUM* ]]; then
-    log_error "$PICAM_RUNFILE has md5 checksum $(md5sum ./$PICAM_RUNFILE)"
-    log_error "Expected $PICAM_RUNFILE_CHECKSUM"
-    log_error "(Either revise ${BASH_SOURCE[0]} or get the old runfile somewhere)"
-    exit 1
-fi
+cd /opt/MagAOX/vendor/teledyne
+
 chmod +x ./$PICAM_RUNFILE
 if [[ ! -e /opt/PrincetonInstruments/picam ]]; then
     # This (|| true) isn't great, but sometimes it has a nonzero
@@ -20,6 +18,9 @@ if [[ ! -e /opt/PrincetonInstruments/picam ]]; then
     # by "Picam v5.7.2 Installation complete."
     yes yes | ./$PICAM_RUNFILE || true
     log_success "Ran Picam SDK installer"
+fi
+if [[ ! -e /opt/PrincetonInstruments/picam ]]; then
+    exit_error "Installer failed to create /opt/PrincetonInstruments/picam, aborting"
 fi
 chmod a+rX -R /opt/pleora
 chmod a+rX -R /opt/PrincetonInstruments

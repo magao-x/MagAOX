@@ -53,7 +53,7 @@ struct darkShmimT
   * \ingroup pwfsSlopeCalc
   * 
   */
-class pwfsSlopeCalc : public MagAOXApp<true>, public dev::shmimMonitor<pwfsSlopeCalc>, public dev::shmimMonitor<pwfsSlopeCalc,darkShmimT>, public dev::frameGrabber<pwfsSlopeCalc>
+class pwfsSlopeCalc : public MagAOXApp<true>, public dev::shmimMonitor<pwfsSlopeCalc>, public dev::shmimMonitor<pwfsSlopeCalc,darkShmimT>, public dev::frameGrabber<pwfsSlopeCalc>, public dev::telemeter<pwfsSlopeCalc>
 {
 
    //Give the test harness access.
@@ -62,6 +62,7 @@ class pwfsSlopeCalc : public MagAOXApp<true>, public dev::shmimMonitor<pwfsSlope
    friend class dev::shmimMonitor<pwfsSlopeCalc>;
    friend class dev::shmimMonitor<pwfsSlopeCalc,darkShmimT>;
    friend class dev::frameGrabber<pwfsSlopeCalc>;
+   friend class dev::telemeter<pwfsSlopeCalc>;
    
    //The base shmimMonitor type
    typedef dev::shmimMonitor<pwfsSlopeCalc> shmimMonitorT;
@@ -72,6 +73,9 @@ class pwfsSlopeCalc : public MagAOXApp<true>, public dev::shmimMonitor<pwfsSlope
    //The base frameGrabber type
    typedef dev::frameGrabber<pwfsSlopeCalc> frameGrabberT;
    
+   //The base telemeter type
+   typedef dev::telemeter<pwfsSlopeCalc> telemeterT;
+
    ///Floating point type in which to do all calculations.
    typedef float realT;
    
@@ -239,6 +243,16 @@ public:
    INDI_SETCALLBACK_DECL(pwfsSlopeCalc, m_indiP_quad2);
    INDI_SETCALLBACK_DECL(pwfsSlopeCalc, m_indiP_quad3);
    INDI_SETCALLBACK_DECL(pwfsSlopeCalc, m_indiP_quad4);
+
+   /** \name Telemeter Interface
+     * 
+     * @{
+     */ 
+   int checkRecordTimes();
+   
+   int recordTelem( const telem_fgtimings * );
+
+   ///@}
 };
 
 
@@ -256,7 +270,8 @@ void pwfsSlopeCalc::setupConfig()
    darkMonitorT::setupConfig(config);
    
    frameGrabberT::setupConfig(config);
-   
+   telemeterT::setupConfig(config);
+
    config.add("pupil.fitter", "", "pupil.fitter", argType::Required, "pupil", "fitter", false, "int", "The device name of the pupil fitter.  If set, then pupil position is set by the fitter reference.");
 
    config.add("pupil.D", "", "pupil.D", argType::Required, "pupil", "D", false, "int", "The diameter of the pupils, fixed. Default is 56.");
@@ -287,7 +302,8 @@ int pwfsSlopeCalc::loadConfigImpl( mx::app::appConfigurator & _config )
    shmimMonitorT::loadConfig(_config);
    darkMonitorT::loadConfig(_config);
    frameGrabberT::loadConfig(_config);
-   
+   telemeterT::loadConfig(_config);
+
    config(m_fitter, "pupil.fitter");
    config(m_numPupils, "pupil.numPupils");
    config(m_pupil_D, "pupil.D");
@@ -333,6 +349,11 @@ int pwfsSlopeCalc::appStartup()
       return log<software_error,-1>({__FILE__, __LINE__});
    }
    
+   if(telemeterT::appStartup() < 0)
+   {
+      return log<software_error,-1>({__FILE__, __LINE__});
+   }
+
    if(m_fitter != "")
    {
       REG_INDI_SETPROP(m_indiP_quad1, m_fitter, "quadrant1");
@@ -368,6 +389,11 @@ int pwfsSlopeCalc::appLogic()
       return log<software_error,-1>({__FILE__,__LINE__});
    }
    
+   if( telemeterT::appLogic() < 0)
+   {
+      return log<software_error,-1>({__FILE__,__LINE__});
+   }
+
    std::unique_lock<std::mutex> lock(m_indiMutex);
    
    if(shmimMonitorT::updateINDI() < 0)
@@ -400,6 +426,8 @@ int pwfsSlopeCalc::appShutdown()
    
    frameGrabberT::appShutdown();
    
+   telemeterT::appShutdown();
+
    return 0;
 }
 
@@ -495,18 +523,6 @@ int pwfsSlopeCalc::configureAcquisition()
       sleep(1);
       return -1;
    }
-   
-   /*if(m_fitter != "")
-   {
-      if(m_numPupils == 3)
-      {
-         m_pupil_D = (1./3.)*(m_pupil_D_1 + m_pupil_D_2 + m_pupil_D_3);
-      }
-      else
-      {
-         m_pupil_D = (1./4.)*(m_pupil_D_1 + m_pupil_D_2 + m_pupil_D_3 + m_pupil_D_4);
-      }
-   }*/
    
    m_quadSize = m_pupil_D + 2*m_pupil_buffer;
    
@@ -610,14 +626,14 @@ int pwfsSlopeCalc::loadImageIntoStream(void * dest)
       }
    }
     
-   norm /= N;/*
+   norm /= N;
    for(size_t ii=0; ii< frameGrabberT::m_height; ++ii)
    {
       for(size_t jj=0; jj < frameGrabberT::m_width; ++jj)
       {
          slopesIm(jj,ii)/=norm;
       }
-   }*/
+   }
    
    return 0;
 }
@@ -682,16 +698,31 @@ INDI_SETCALLBACK_DEFN(pwfsSlopeCalc, m_indiP_quad2)(const pcf::IndiProperty &ipR
    
    if(ipRecv.find("set-x"))
    {
-      m_pupil_cx_2 = ipRecv["set-x"].get<float>();
+      float newval = ipRecv["set-x"].get<float>();
+      if(newval != m_pupil_cx_2)
+      {
+         m_pupil_cx_2 = newval;
+         m_reconfig = true;
+      }      
    }
    
    if(ipRecv.find("set-y"))
    {
-      m_pupil_cy_2 = ipRecv["set-y"].get<float>();
+     float newval = ipRecv["set-y"].get<float>();
+      if(newval != m_pupil_cy_2)
+      {
+         m_pupil_cy_2 = newval;
+         m_reconfig = true;
+      }
    }
    if(ipRecv.find("set-D"))
    {
-      m_pupil_D_2 = ipRecv["set-D"].get<float>();
+      float newval = ipRecv["set-D"].get<float>();
+      if(newval != m_pupil_D_2)
+      {
+         m_pupil_D_2 = newval;
+         m_reconfig = true;
+      }
    }
    
    
@@ -709,16 +740,30 @@ INDI_SETCALLBACK_DEFN(pwfsSlopeCalc, m_indiP_quad3)(const pcf::IndiProperty &ipR
    
    if(ipRecv.find("set-x"))
    {
-      m_pupil_cx_3 = ipRecv["set-x"].get<float>();
+      float newval = ipRecv["set-x"].get<float>();
+      if(newval != m_pupil_cx_3)
+      {
+         m_pupil_cx_3 = newval;
+         m_reconfig = true;
+      }
    }
-   
    if(ipRecv.find("set-y"))
    {
-      m_pupil_cy_3 = ipRecv["set-y"].get<float>();
+      float newval = ipRecv["set-y"].get<float>();
+      if(newval != m_pupil_cy_3)
+      {
+         m_pupil_cy_3 = newval;
+         m_reconfig = true;
+      }
    }
    if(ipRecv.find("set-D"))
    {
-      m_pupil_D_3 = ipRecv["set-D"].get<float>();
+      float newval = ipRecv["set-D"].get<float>();
+      if(newval != m_pupil_D_3)
+      {
+         m_pupil_D_3 = newval;
+         m_reconfig = true;
+      }
    }
    
    
@@ -736,20 +781,46 @@ INDI_SETCALLBACK_DEFN(pwfsSlopeCalc, m_indiP_quad4)(const pcf::IndiProperty &ipR
    
    if(ipRecv.find("set-x"))
    {
-      m_pupil_cx_4 = ipRecv["set-x"].get<float>();
+      float newval = ipRecv["set-x"].get<float>();
+      if(newval != m_pupil_cx_4)
+      {
+         m_pupil_cx_4 = newval;
+         m_reconfig = true;
+      }
    }
-   
    if(ipRecv.find("set-y"))
    {
-      m_pupil_cy_4 = ipRecv["set-y"].get<float>();
+      float newval = ipRecv["set-y"].get<float>();
+      if(newval != m_pupil_cy_4)
+      {
+         m_pupil_cy_4 = newval;
+         m_reconfig = true;
+      }
    }
    if(ipRecv.find("set-D"))
    {
-      m_pupil_D_4 = ipRecv["set-D"].get<float>();
+      float newval = ipRecv["set-D"].get<float>();
+      if(newval != m_pupil_D_4)
+      {
+         m_pupil_D_4 = newval;
+         m_reconfig = true;
+      }
    }
    
    
    return 0;
+}
+
+inline
+int pwfsSlopeCalc::checkRecordTimes()
+{
+   return telemeterT::checkRecordTimes(telem_fgtimings());
+}
+   
+inline
+int pwfsSlopeCalc::recordTelem( const telem_fgtimings * )
+{
+   return recordFGTimings(true);
 }
 
 } //namespace app

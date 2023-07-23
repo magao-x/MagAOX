@@ -10,6 +10,8 @@
 
 #include "../../lib/multiIndiSubscriber.hpp"
 
+#define XW_FONT_SIZE (15)
+
 namespace xqt 
 {
 
@@ -24,7 +26,7 @@ class xWidget : public QWidget, public multiIndiSubscriber
    
 public:
    xWidget( QWidget * Parent = 0, 
-            Qt::WindowFlags f = 0
+            Qt::WindowFlags f = Qt::WindowFlags()
           ) : QWidget(Parent, f)
    {
    }
@@ -33,6 +35,14 @@ public:
    {
    }
 };
+
+template<class qT>
+void setXwFont( qT * widg, float scale = 1.0)
+{
+   QFont qf = widg->font();
+   qf.setPixelSize(XW_FONT_SIZE * scale + 0.5);
+   widg->setFont(qf);
+}
    
 } //namespace xqt
 

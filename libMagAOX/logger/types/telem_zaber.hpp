@@ -12,6 +12,7 @@
 
 #include "generated/telem_zaber_generated.h"
 #include "flatbuffer_log.hpp"
+#include "../logMeta.hpp"
 
 namespace MagAOX
 {
@@ -36,9 +37,9 @@ struct telem_zaber : public flatbuffer_log
    struct messageT : public fbMessage
    {
       ///Construct from components
-      messageT( const double & pos,     ///<[in] stage position in mm
-                const double & rawPos,  ///<[in] stage raw position, in counts
-                const double & temp     ///<[in] stage temperature
+      messageT( const float & pos,     ///<[in] stage position in mm
+                const float & rawPos,  ///<[in] stage raw position, in counts
+                const float & temp     ///<[in] stage temperature
               )
       {         
          auto fp = CreateTelem_zaber_fb(builder, pos, rawPos, temp);
@@ -48,6 +49,14 @@ struct telem_zaber : public flatbuffer_log
    };
                  
  
+   static bool verify( flatlogs::bufferPtrT & logBuff,  ///< [in] Buffer containing the flatbuffer serialized message.
+                       flatlogs::msgLenT len            ///< [in] length of msgBuffer.
+                     )
+   {
+      auto verifier = flatbuffers::Verifier( (uint8_t*) flatlogs::logHeader::messageBuffer(logBuff), static_cast<size_t>(len));
+      return VerifyTelem_zaber_fbBuffer(verifier);
+   }
+
    ///Get the message formatte for human consumption.
    static std::string msgString( void * msgBuffer,  /**< [in] Buffer containing the flatbuffer serialized message.*/
                                  flatlogs::msgLenT len  /**< [in] [unused] length of msgBuffer.*/
@@ -71,7 +80,49 @@ struct telem_zaber : public flatbuffer_log
       return msg;
    
    }
+
+   static std::string msgJSON( void * msgBuffer,  /**< [in] Buffer containing the flatbuffer serialized message.*/
+                               flatlogs::msgLenT len  /**< [in] [unused] length of msgBuffer.*/
+                             )
+   {
+      return makeJSON(msgBuffer, len, Telem_zaber_fbTypeTable());
+   }
    
+   static float pos( void * msgBuffer )
+   {
+      auto fbs = GetTelem_zaber_fb(msgBuffer);
+      return fbs->pos();
+   }
+
+   static float rawPos( void * msgBuffer )
+   {
+      auto fbs = GetTelem_zaber_fb(msgBuffer);
+      return fbs->rawPos();
+   }
+
+   static float temp( void * msgBuffer )
+   {
+      auto fbs = GetTelem_zaber_fb(msgBuffer);
+      return fbs->temp();
+   }
+
+   /// Get the logMetaDetail for a member by name
+   /**
+     * \returns the a logMetaDetail filled in with the appropriate details
+     * \returns an empty logmegaDetail if member not recognized
+     */ 
+   static logMetaDetail getAccessor( const std::string & member /**< [in] the name of the member */ )
+   {
+      if(     member == "pos") return logMetaDetail({"POS", logMeta::valTypes::Float, logMeta::metaTypes::Continuous, (void *) &pos});
+      else if(member == "rawPos") return logMetaDetail({"COUNTS", logMeta::valTypes::Float, logMeta::metaTypes::Continuous, (void *) &rawPos}); 
+      else if(member == "temp") return logMetaDetail({"TEMP", logMeta::valTypes::Float, logMeta::metaTypes::Continuous, (void *) &temp}); 
+      else
+      {
+         std::cerr << "No string member " << member << " in telem_zaber\n";
+         return logMetaDetail();
+      }
+   }
+
 }; //telem_zaber
 
 

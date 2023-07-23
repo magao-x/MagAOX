@@ -1,0 +1,15 @@
+namespace MagAOX.logger;
+
+table telem_saving_fb
+{
+   rawSize:uint32;
+   compressedSize:uint32; 
+   encode_rate:float;
+   difference_rate:float;
+   reorder_rate:float;
+   compress_rate:float;
+   
+}
+
+root_type telem_saving_fb;
+

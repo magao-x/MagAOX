@@ -189,18 +189,9 @@ fi
 if [ "$RESTARTCONN" = "1" ]; then
 echo "Measuring DM size"
 
-#cacao << EOF
-#readshmimsize $1 _$1_size.txt
-#quit
-#EOF
-
-#sizestring=$( cat _$1_size.txt )
-#rm _$1_size.txt
-
 tmux new-session -d -s ${tmuxname}
 tmux send-keys -t ${tmuxname} "" C-m
 echo "CREATING SESSION ${tmuxname}"
-
 
 cacao << EOF
 readshmimsize $1 $1_size.txt

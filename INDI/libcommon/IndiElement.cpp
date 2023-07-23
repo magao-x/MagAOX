@@ -399,7 +399,7 @@ const string &IndiElement::getStep() const
 ////////////////////////////////////////////////////////////////////////////////
 /// Returns the size attribute.
 
-const string &IndiElement::getSize() const
+const std::string & IndiElement::getSize() const
 {
   pcf::ReadWriteLock::AutoRLock rwAuto( &m_rwData );
   return m_szSize;

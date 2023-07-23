@@ -31,11 +31,16 @@ endif
 CFLAGS += -D_XOPEN_SOURCE=700
 CXXFLAGS += -D_XOPEN_SOURCE=700
 
+#Need this on COS-7, doesn't hurt elsewhere.
+CXXFLAGS += -DMX_OLD_GSL
+
+
+
 LIB_PATH ?= $(PREFIX)/lib
 INCLUDE_PATH ?= $(PREFIX)/include
 LIB_SOFA ?= $(LIB_PATH)/libsofa_c.a
 
-INCLUDES += -I$(INCLUDE_PATH) -I$(abspath $(SELF_DIR)/../flatlogs/include)
+INCLUDES += -I$(INCLUDE_PATH) -I$(abspath $(SELF_DIR)/../flatlogs/include) 
 
 
 ########################################
@@ -56,7 +61,7 @@ EXTRA_LDLIBS ?=  -lmxlib \
   -ltelnet \
   -lcfitsio \
   -lxrif \
-  -lfftw3 -lfftw3f -lfftw3l -lfftw3q \
+  -lfftw3 -lfftw3f -lfftw3l \
   -lgsl \
   -lboost_system \
   -lboost_filesystem \
@@ -64,15 +69,88 @@ EXTRA_LDLIBS ?=  -lmxlib \
   $(SELF_DIR)/../INDI/libcommon/libcommon.a) \
   $(abspath $(SELF_DIR)/../INDI/liblilxml/liblilxml.a) 
   
-ifneq ($(NEED_CUDA),no)
-   EXTRA_LDLIBS+= -lcudart -lcublas -lcufft -lcurand 
+HOST_ARCH   := $(shell uname -m)
+ifeq ($(HOST_ARCH),x86_64)
+  # only enable on x86 because ARM doesn't have quad precision by default
+  EXTRA_LDLIBS += -lfftw3q
 endif
+
+ifeq ($(NEED_CUDA),yes)
+   CXXFLAGS += -DEIGEN_NO_CUDA -DHAVE_CUDA
+
+   CUDA_TARGET_ARCH = $(HOST_ARCH)
+   ifneq (,$(filter $(CUDA_TARGET_ARCH),x86_64 aarch64 ppc64le armv7l))
+       ifneq ($(CUDA_TARGET_ARCH),$(HOST_ARCH))
+           ifneq (,$(filter $(CUDA_TARGET_ARCH),x86_64 aarch64 ppc64le))
+               TARGET_SIZE := 64
+           else ifneq (,$(filter $(CUDA_TARGET_ARCH),armv7l))
+               TARGET_SIZE := 32
+           endif
+       else
+           TARGET_SIZE := $(shell getconf LONG_BIT)
+       endif
+   else
+       $(error ERROR - unsupported value $(CUDA_TARGET_ARCH) for TARGET_ARCH!)
+   endif
+
+   # operating system
+   HOST_OS   := $(shell uname -s 2>/dev/null | tr "[:upper:]" "[:lower:]")
+   TARGET_OS ?= $(HOST_OS)
+   ifeq (,$(filter $(TARGET_OS),linux darwin qnx android))
+       $(error ERROR - unsupported value $(TARGET_OS) for TARGET_OS!)
+   endif
+
+   HOST_COMPILER ?= g++
+   NVCC          := nvcc -ccbin $(HOST_COMPILER)
+
+   # internal flags
+   NVCCFLAGS   := -m${TARGET_SIZE}
+   NVCCFLAGS   +=  -DEIGEN_NO_CUDA -DMXLIB_MKL
+   NVCCFLAGS   +=  ${NVCCARCH}
+   NVCCFLAGS   +=
+
+   # Debug build flags
+   ifeq ($(dbg),1)
+         NVCCFLAGS += -g
+         BUILD_TYPE := debug
+   else
+         BUILD_TYPE := release
+   endif
+
+	INCLUDES += -I/usr/local/cuda/include
+
+   ALL_CCFLAGS :=
+   ALL_CCFLAGS += $(NVCCFLAGS)
+   ALL_CCFLAGS += $(EXTRA_NVCCFLAGS)
+   ALL_CCFLAGS += $(addprefix -Xcompiler ,$(CXXFLAGS))
+   ALL_CCFLAGS += $(addprefix -Xcompiler ,$(EXTRA_CCFLAGS))
+   ALL_CCFLAGS += -I/usr/local/cuda/include
+
+   ALL_LDFLAGS :=
+   ALL_LDFLAGS += $(ALL_CCFLAGS)
+   ALL_LDFLAGS += $(addprefix -Xlinker ,$(LDFLAGS))
+   ALL_LDFLAGS += $(addprefix -Xlinker ,$(LDLIBS))
+
+   #build any cu and cpp files through NVCC as needed
+%.o : %.cu
+	$(NVCC) $(ALL_CCFLAGS) $< -c -o $@
+
+   #Finally we define the cuda libs for linking
+   CUDA_LIBS ?= $(CUDA_LIBPATH) -L/usr/local/cuda/lib64/ -lcudart -lcublas -lcufft -lcurand
+  
+else
+   CUDA_LIBS ?=
+  
+endif
+
+EXTRA_LDLIBS+= $(CUDA_LIBS)
 
 #2021-01-07: added xpa to levmar
 
 CACAO ?= true
 ifneq ($(CACAO),false)
-  EXTRA_LDLIBS +=  -lImageStreamIO
+  EXTRA_LDLIBS +=  -L/usr/local/milk/lib -lImageStreamIO
+  INCLUDES += -I/usr/local/milk/include
 endif
 
 ### MKL BLAS
@@ -83,7 +161,7 @@ BLAS_LDLIBS ?= -lmkl_intel_lp64 -lmkl_gnu_thread -lmkl_core -lgomp -lpthread -lm
 
 #2nd step in case we need to modify above for other architectures/systems
 INCLUDES += $(BLAS_INCLUDES)
-EXTRA_LDFLAGS += $(BLAS_INCLUDES)
+EXTRA_LDFLAGS += $(BLAS_INCLUDES) $(BLAS_LDFLAGS)
 EXTRA_LDLIBS += $(BLAS_LDLIBS)
 
 ### EDT

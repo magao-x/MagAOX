@@ -5,7 +5,7 @@ source $DIR/../_common.sh
 set -euo pipefail
 cd /opt/MagAOX/vendor
 if [[ ! -d /opt/EDTpdv ]]; then
-    EDT_VERSION="5.5.8.9"
+    EDT_VERSION="5.6.2.0"
     EDT_FILENAME=EDTpdv_lnx_$EDT_VERSION.run
     _cached_fetch https://edt.com/downloads/pdv_${EDT_VERSION//./-}_run/ $EDT_FILENAME
     chmod +x $EDT_FILENAME
@@ -14,3 +14,8 @@ if [[ ! -d /opt/EDTpdv ]]; then
 else
     log_info "EDTpdv SDK already installed"
 fi
+
+sudo mv /opt/EDTpdv/version /opt/EDTpdv/version.txt 2>/dev/null || true
+echo "/opt/EDTpdv" | sudo tee /etc/ld.so.conf.d/EDTpdv-x86_64.conf
+sudo ldconfig || error_exit "Could not run ldconfig"
+log_success "Finished EDTpdv setup"

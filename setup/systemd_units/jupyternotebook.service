@@ -5,8 +5,8 @@ After=network.target
 
 [Service]
 User=xsup
-WorkingDirectory=/home/xsup
-ExecStart=/opt/miniconda3/bin/start_notebook.sh
+WorkingDirectory=/home/xsup/data
+ExecStart=/opt/conda/bin/start_notebook.sh
 
 [Install]
 WantedBy=default.target

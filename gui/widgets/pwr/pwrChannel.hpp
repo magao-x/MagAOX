@@ -53,7 +53,7 @@ public:
      * the m_channelSwitch sliderReleased signal to the sliderRelased slot.
      */ 
    pwrChannel( QWidget * parent = nullptr, 
-               Qt::WindowFlags flags = 0
+               Qt::WindowFlags flags = Qt::WindowFlags()
              );
 
    ///Destructor

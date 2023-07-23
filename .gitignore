@@ -42,6 +42,8 @@ apps/alpaoCtrl/alpaoCtrl
 apps/andorCtrl/andorCtrl
 apps/acronameUsbHub/acronameUsbHub
 apps/acronameUsbHub/utils/configusbhub
+apps/alignLoop/alignLoop
+apps/acesxeCtrl/acesxeCtrl
 
 #b
 apps/baslerCtrl/baslerCtrl
@@ -53,7 +55,7 @@ apps/cacaoInterface/cacaoInterface
 #d
 apps/dmMode/dmMode
 apps/dmModulator/dmModulator
-
+apps/dmSpeckle/
 
 #f
 apps/filterWheelCtrl/filterWheelCtrl
@@ -65,8 +67,10 @@ apps/magAOXMaths/magAOXMaths
 gui/rtimv/plugins/cameraStatus/makefile.cameraStatus
 gui/rtimv/plugins/indiDictionary/makefile.indiDictionary
 gui/rtimv/plugins/pwfsAlignment/makefile.pwfsAlignment
+gui/rtimv/plugins/dmStatus/makefile.dmStatus
 
 #h
+apps/hoPredCtrl/hoPredCtrl
 apps/hsfwCtrl/hsfwCtrl
 
 #i
@@ -75,6 +79,7 @@ INDI/INDI/getINDI
 INDI/INDI/indiserver
 INDI/INDI/setINDI
 INDI/xindidriver/xindidriver
+apps/indiTSAccumulator/indiTSAccumulator
 
 #k
 apps/kTracker/kTracker
@@ -85,22 +90,25 @@ apps/mwfsMonitor/mwfsMonitor
 apps/mzmqServer/mzmqServer
 
 apps/mzmqClient/mzmqClient
-
+apps/modalPSDs/modalPSDs
 
 #o
 apps/observerCtrl/observerCtrl
 apps/ocam2KCtrl/ocam2KCtrl
+apps/openLoopPSDs/openLoopPSDs
 
 #p
 apps/pi335Ctrl/pi335Ctrl
 apps/picamCtrl/picamCtrl
 apps/picoMotorCtrl/picoMotorCtrl
-
+apps/pupilAlign/pupilAlign
 apps/pupilFit/pupilFit
 apps/pwfsSlopeCalc/pwfsSlopeCalc
+apps/photonCounter
 
 #r
 apps/rhusbMon/rhusbMon
+apps/refRMS/refRMS
 
 #s
 apps/shmimIntegrator/shmimIntegrator
@@ -108,7 +116,7 @@ apps/siglentSDG/siglentSDG
 apps/siglentSDG/tests/siglentSDG_test
 apps/smc100ccCtrl/smc100ccCtrl
 apps/sshDigger/sshDigger
-
+apps/streamCircBuff/streamCircBuff
 apps/streamWriter/streamWriter
 
 apps/sysMonitor/sysMonitor
@@ -124,6 +132,7 @@ apps/ttmModulator/ttmModulator
 
 #u
 apps/usbtempMon/usbtempMon
+apps/userGainCtrl/userGainCtrl
 
 #w
 apps/w2tcsOffloader/w2tcsOffloader
@@ -148,6 +157,7 @@ apps/zylaCtrl/zylaCtrl
 
 
 utils/logdump/logdump
+utils/logsurgeon/logsurgeon
 utils/cursesINDI/cursesINDI
 utils/logstream/logstream
 utils/xrif2shmim/xrif2shmim
@@ -174,3 +184,4 @@ vm/cache/
 vm/calib/
 vm/config/
 vm/
+*.swp

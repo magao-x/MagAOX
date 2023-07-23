@@ -7,6 +7,8 @@
 #include <QTimer>
 #include <QStyle>
 
+#include "xWidget.hpp"
+
 namespace xqt
 {
 
@@ -98,6 +100,10 @@ protected slots:
 
    void changeTimerOut();
 
+signals:
+
+   void changeTimerStart(int);
+
 };
 
 statusLabel::statusLabel( QWidget *parent ) : QLabel(parent)
@@ -105,6 +111,11 @@ statusLabel::statusLabel( QWidget *parent ) : QLabel(parent)
    setProperty("isStatus", true);
    m_changeTimer = new QTimer(this);
    connect(m_changeTimer, SIGNAL(timeout()), this, SLOT(changeTimerOut()));
+   connect(this, SIGNAL(changeTimerStart(int)), m_changeTimer, SLOT(start(int)));
+
+   QFont qf = font();
+   qf.setPixelSize(XW_FONT_SIZE);
+   setFont(qf);
 }
 
 void statusLabel::highlightChanges(bool hc)
@@ -147,7 +158,8 @@ void statusLabel::paintEvent(QPaintEvent * e)
          setProperty("isStatusChanged", true);
       }
       style()->unpolish(this);
-      m_changeTimer->start(m_changeTimeout);
+      
+      emit changeTimerStart(m_changeTimeout.count());
       
       m_valChanged = 0;
    }

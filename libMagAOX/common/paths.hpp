@@ -92,6 +92,13 @@
    #define MAGAOX_rawimageRelPath "rawimages"
 #endif
 
+#ifndef MAGAOX_cpusetPath
+   /// The absolute path the the cpuset mount point
+   /**
+     */
+   #define MAGAOX_cpusetPath "/opt/MagAOX/cpuset/"
+#endif
+
 ///@}
 
 #endif //common_paths_hpp

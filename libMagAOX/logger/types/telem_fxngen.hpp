@@ -12,6 +12,7 @@
 
 #include "generated/telem_fxngen_generated.h"
 #include "flatbuffer_log.hpp"
+#include "../logMeta.hpp"
 
 namespace MagAOX
 {
@@ -41,13 +42,17 @@ struct telem_fxngen : public flatbuffer_log
                 const double & C1vpp,       ///< [in] Channel 1 P2P voltage [V]
                 const double & C1ofst,      ///< [in] Channel 1 offset [V]
                 const double & C1phse,      ///< [in] Channel 1 phase [deg]
+                const double & C1wdth,      ///< [in] Channel 1 width [s]
                 const std::string & C1wvtp, ///< [in] Channel 1 wavetype (SINE or DC)
                 const uint8_t & C2outp,     ///< [in] Channel 2 output status
                 const double & C2freq,      ///< [in] Channel 2 frequency [Hz]
                 const double & C2vpp,       ///< [in] Channel 2 P2P voltage [V]
                 const double & C2ofst,      ///< [in] Channel 2 offset [V]
                 const double & C2phse,      ///< [in] Channel 2 phase [deg]
-                const std::string & C2wvtp  ///< [in] Channel 2 wavetype  (SINE or DC) 
+                const double & C2wdth,      ///< [in] Channel 2 width [s]
+                const std::string & C2wvtp, ///< [in] Channel 2 wavetype  (SINE or DC) 
+                const uint8_t & C1sync,     ///< [in] Channel 1 sync status
+                const uint8_t & C2sync      ///< [in] Channel 2 sync status
               )
       {
          uint8_t  _C1wvtp = 3,  _C2wvtp = 3;
@@ -55,18 +60,28 @@ struct telem_fxngen : public flatbuffer_log
          
          if(C1wvtp == "DC") _C1wvtp = 0;
          else if(C1wvtp == "SINE") _C1wvtp = 1;
+         else if(C1wvtp == "PULSE") _C1wvtp = 2;
          
          if(C2wvtp == "DC") _C2wvtp = 0;
          else if(C2wvtp == "SINE") _C2wvtp = 1;
+         else if(C2wvtp == "PULSE") _C2wvtp = 2;
          
          
-         auto fp = CreateTelem_fxngen_fb(builder, C1outp, C1freq, C1vpp, C1ofst, C1phse, _C1wvtp, C2outp, C2freq, C2vpp, C2ofst, C2phse, _C2wvtp);
+         auto fp = CreateTelem_fxngen_fb(builder, C1outp, C1freq, C1vpp, C1ofst, C1phse, _C1wvtp, C2outp, C2freq, C2vpp, C2ofst, C2phse,  _C2wvtp, C1sync, C2sync, C1wdth, C2wdth);
          builder.Finish(fp);
 
       }
 
    };
    
+   static bool verify( flatlogs::bufferPtrT & logBuff,  ///< [in] Buffer containing the flatbuffer serialized message.
+                       flatlogs::msgLenT len            ///< [in] length of msgBuffer.
+                     )
+   {
+      auto verifier = flatbuffers::Verifier( (uint8_t*) flatlogs::logHeader::messageBuffer(logBuff), static_cast<size_t>(len));
+      return VerifyTelem_fxngen_fbBuffer(verifier);
+   }
+
    ///Get the message formatte for human consumption.
    static std::string msgString( void * msgBuffer,  /**< [in] Buffer containing the flatbuffer serialized message.*/
                                  flatlogs::msgLenT len  /**< [in] [unused] length of msgBuffer.*/
@@ -80,6 +95,7 @@ struct telem_fxngen : public flatbuffer_log
       
       if(fbs->C1wvtp() == 0) msg += "DC ";
       else if(fbs->C1wvtp() == 1) msg += "SINE ";
+      else if(fbs->C1wvtp() == 2) msg += "PULSE ";
       else msg += "UNK ";
       
       if(fbs->C1outp() == 0) msg += "OFF ";
@@ -90,11 +106,16 @@ struct telem_fxngen : public flatbuffer_log
       msg += std::to_string(fbs->C1vpp()) + " Vp2p ";
       msg += std::to_string(fbs->C1ofst()) + " V ";
       msg += std::to_string(fbs->C1phse()) + " deg ";
-      
+      msg += std::to_string(fbs->C1wdth()) + " s ";
+      msg += "SYNC ";
+      if(fbs->C1sync()) msg += "ON ";
+      else msg += "OFF ";
+
       msg += " | Ch 2: ";
 
       if(fbs->C2wvtp() == 0) msg += "DC ";
       else if(fbs->C2wvtp() == 1) msg += "SINE ";
+      else if(fbs->C2wvtp() == 2) msg += "PULSE ";
       else msg += "UNK ";
       
       if(fbs->C2outp() == 0) msg += "OFF ";
@@ -105,11 +126,45 @@ struct telem_fxngen : public flatbuffer_log
       msg += std::to_string(fbs->C2vpp()) + " Vp2p ";
       msg += std::to_string(fbs->C2ofst()) + " V ";
       msg += std::to_string(fbs->C2phse()) + " deg ";
+      msg += std::to_string(fbs->C2wdth()) + " s ";
+      msg += "SYNC ";
+      if(fbs->C2sync()) msg += "ON ";
+      else msg += "OFF ";
 
       return msg;
    
    }
-   
+
+   static std::string msgJSON( void * msgBuffer,  /**< [in] Buffer containing the flatbuffer serialized message.*/
+                               flatlogs::msgLenT len  /**< [in] [unused] length of msgBuffer.*/
+                             )
+   {
+      return makeJSON(msgBuffer, len, Telem_fxngen_fbTypeTable());
+   }
+
+   static double C1freq( void * msgBuffer )
+   {
+      auto fbs = GetTelem_fxngen_fb(msgBuffer);
+      return fbs->C1freq();
+   }
+
+   static double C2freq( void * msgBuffer )
+   {
+      auto fbs = GetTelem_fxngen_fb(msgBuffer);
+      return fbs->C2freq();
+   }
+
+   /// Get the logMetaDetail for a member by name
+   static logMetaDetail getAccessor( const std::string & member /**< [in] the name of the member */ )
+   {
+      if(     member == "C1freq") return logMetaDetail({"C1 FREQ", logMeta::valTypes::Double, logMeta::metaTypes::Continuous, (void *) &C1freq});
+      else if(member == "C2freq") return logMetaDetail({"C2 FREQ", logMeta::valTypes::Double, logMeta::metaTypes::Continuous, (void *) &C2freq});
+      else
+      {
+         std::cerr << "No string member " << member << " in telem_fxngen\n";
+         return logMetaDetail();
+      }
+   }
 }; //telem_fxngen
 
 

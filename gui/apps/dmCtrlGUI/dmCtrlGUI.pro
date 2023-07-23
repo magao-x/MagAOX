@@ -21,6 +21,9 @@ CONFIG += qwt
 exists( $$(CONDA_PREFIX)/include ) {
     INCLUDEPATH += $$(CONDA_PREFIX)/include
 }
+exists( $$(CONDA_PREFIX)/lib ) {
+    INCLUDEPATH += $$(CONDA_PREFIX)/lib
+}
 
 MAKEFILE = makefile.dmCtrlGUI
 
@@ -29,13 +32,16 @@ INCLUDEPATH += ../../lib ../../widgets/dmCtrl
 
 HEADERS += ../../widgets/dmCtrl/dmCtrl.hpp \
            ../../widgets/xWidgets/xWidget.hpp \
+           ../../widgets/xWidgets/statusLabel.hpp \
+           ../../widgets/xWidgets/fsmDisplay.hpp \
            ../../lib/multiIndiManager.hpp
            
 SOURCES += dmCtrlGUI_main.cpp 
 #\
 #           ../../widgets/dmCtrl/dmCtrl.cpp \
            
-FORMS += ../../widgets/dmCtrl/dmCtrl.ui
+FORMS += ../../widgets/dmCtrl/dmCtrl.ui \
+         ../../widgets/xWidgets/fsmDisplay.ui
      
 LIBS += ../../../INDI/libcommon/libcommon.a \
         ../../../INDI/liblilxml/liblilxml.a

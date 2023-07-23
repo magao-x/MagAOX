@@ -13,38 +13,50 @@ apps_common = \
 	shmimIntegrator \
 	timeSeriesSimulator
 
-apps_rtcicc = alpaoCtrl
+apps_rtcicc = alpaoCtrl \
+              cacaoInterface \
+				  userGainCtrl \
+				  zaberCtrl \
+	           zaberLowLevel
 
 apps_rtc = \
 	ocam2KCtrl \
+        andorCtrl \
 	siglentSDG \
 	ttmModulator \
 	bmcCtrl \
+   rhusbMon \
 	pi335Ctrl \
 	pupilFit \
-   t2wOffloader \
-   cacaoInterface
+	t2wOffloader \
+	dmSpeckle \
+   w2tcsOffloader \
+	pwfsSlopeCalc
 
 apps_icc = \
-        cacaoInterface \
+   acronameUsbHub \
+	flipperCtrl \
 	filterWheelCtrl \
 	hsfwCtrl \
 	baslerCtrl \
-	zaberCtrl \
-	zaberLowLevel \
 	picamCtrl \
 	smc100ccCtrl \
 	andorCtrl \
 	usbtempMon \
 	xt1121Ctrl \
 	xt1121DCDU \
-        picoMotorCtrl
+   picoMotorCtrl \
+	koolanceCtrl \
+	tcsInterface
 
 apps_aoc = \
 	trippLitePDU \
-   tcsInterface \
-   adcTracker \
-   kTracker
+	tcsInterface \
+	adcTracker \
+	kTracker \
+	koolanceCtrl \
+	observerCtrl \
+	siglentSDG
 
 # apps_vm = none yet
 apps_tic = \
@@ -80,7 +92,9 @@ all_guis = \
 	pwr \
 	coronAlignGUI \
    loopCtrlGUI \
-	roiGUI
+	roiGUI \
+	cameraGUI \
+	stageGUI
 
 ifeq ($(MAGAOX_ROLE),RTC)
   guis_to_build =
@@ -95,7 +109,8 @@ endif
 all_rtimv_plugins = \
 	cameraStatus \
 	indiDictionary \
-	pwfsAlignment
+	pwfsAlignment \
+	dmStatus
 
 ifeq ($(MAGAOX_ROLE),RTC)
   rtimv_plugins_to_build =
@@ -108,15 +123,36 @@ else
 endif
 
 utils_to_build = logdump \
-				 logstream \
+				     logstream \
                  cursesINDI \
-				 xrif2shmim
+				     xrif2shmim \
+				     xrif2fits
 
-scripts_to_install = magaox query_seeing sync_cacao xctrl netconsole_logger
+scripts_to_install = magaox \
+	query_seeing \
+	sync_cacao \
+	xctrl \
+	netconsole_logger \
+	creaimshm \
+	dmdispbridge \
+	shmimTCPreceive \
+	shmimTCPtransmit \
+	obs_to_movie \
+	instrument_backup_sync \
+	cacao_startup_if_present \
+	git_check_all \
+	collect_camera_configs_for_darks \
+	shot_in_the_dark \
+	howfs_apply \
+	lowfs_switch \
+	lowfs_apply \
+	lowfs_switch_apply \
+	write_magaox_pidfile \
+	mount_cgroups1_cpuset
 
 all: indi_all libs_all flatlogs apps_all guis_all utils_all
 
-install: indi_install libs_install flatlogs_all apps_install guis_install utils_install scripts_install
+install: indi_install libs_install flatlogs_all apps_install guis_install utils_install scripts_install rtscripts_install
 
 #We clean just libMagAOX, and the apps, guis, and utils for normal devel work.
 clean: lib_clean apps_clean guis_clean utils_clean
@@ -186,8 +222,8 @@ guis_install: rtimv_plugins_install
 		(cd gui/apps/$$gui; ${MAKE} install) || exit 1; \
 	done
 
-guis_clean: rtimv_plugins_clean
-	for gui in ${guis_to_build}; do \
+guis_clean: rtimv_plugins_clean 
+	for gui in ${all_guis}; do \
 		(cd gui/apps/$$gui; ${MAKE} clean) || exit 1; \
 	done
 
@@ -212,6 +248,19 @@ scripts_install:
 		sudo install scripts/$$script /opt/MagAOX/bin  && \
 		sudo ln -fs /opt/MagAOX/bin/$$script /usr/local/bin/$$script; \
 	done
+
+rtscripts_install:
+	for scriptname in make_cpusets procs_to_cpusets; do \
+		sudo install -d /opt/MagAOX/bin && \
+		if [ -e rtSetup/$(MAGAOX_ROLE)/$$scriptname ]; then \
+			sudo install rtSetup/$(MAGAOX_ROLE)/$$scriptname /opt/MagAOX/bin/$$scriptname && \
+			sudo ln -fs /opt/MagAOX/bin/$$scriptname /usr/local/bin/$$scriptname; \
+		else \
+			echo "echo 'No $$scriptname for $$MAGAOX_ROLE'\nexit 0" | sudo tee /opt/MagAOX/bin/$$scriptname && \
+			sudo chmod +x /opt/MagAOX/bin/$$scriptname && \
+			sudo ln -fs /opt/MagAOX/bin/$$scriptname /usr/local/bin/$$scriptname; \
+		fi \
+	; done
 
 utils_all: flatlogs_all
 		for app in ${utils_to_build}; do \

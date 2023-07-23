@@ -26,6 +26,8 @@ namespace logger
   */
 struct saving_state_change : public flatbuffer_log
 {
+  
+
    ///The type of the message
    struct messageT : public fbMessage
    {
@@ -37,6 +39,14 @@ struct saving_state_change : public flatbuffer_log
          builder.Finish(gs);
       }
    };
+
+   static bool verify( flatlogs::bufferPtrT & logBuff,  ///< [in] Buffer containing the flatbuffer serialized message.
+                       flatlogs::msgLenT len            ///< [in] length of msgBuffer.
+                     )
+   {
+      auto verifier = flatbuffers::Verifier( (uint8_t*) flatlogs::logHeader::messageBuffer(logBuff), static_cast<size_t>(len));
+      return VerifySaving_state_change_fbBuffer(verifier);
+   }
 
    /// Format the message for text output, including translation of state codes to text form.
    /**
@@ -60,6 +70,14 @@ struct saving_state_change : public flatbuffer_log
       
       return s.str();
    }
+
+  static std::string msgJSON( void * msgBuffer,  /**< [in] Buffer containing the flatbuffer serialized message.*/
+                               flatlogs::msgLenT len  /**< [in] [unused] length of msgBuffer.*/
+                             )
+   {
+      return makeJSON(msgBuffer, len, Saving_state_change_fbTypeTable());
+   }
+
 };
 
 } //namespace logger

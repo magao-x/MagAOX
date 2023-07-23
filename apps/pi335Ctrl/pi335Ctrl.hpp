@@ -1524,7 +1524,7 @@ INDI_NEWCALLBACK_DEFN(pi335Ctrl, m_indiP_pos1)(const pcf::IndiProperty &ipRecv)
 {
    //if(MagAOXAppT::m_powerState == 0) return 0;
    
-   if (ipRecv.getName() == m_indiP_pos1.getName())
+   if (ipRecv.createUniqueKey() == m_indiP_pos1.createUniqueKey())
    {
       float current = -999999, target = -999999;
 
@@ -1564,7 +1564,7 @@ INDI_NEWCALLBACK_DEFN(pi335Ctrl, m_indiP_pos2)(const pcf::IndiProperty &ipRecv)
 {
    //if(MagAOXAppT::m_powerState == 0) return 0;
    
-   if (ipRecv.getName() == m_indiP_pos2.getName())
+   if (ipRecv.createUniqueKey() == m_indiP_pos2.createUniqueKey())
    {
       float current = -999999, target = -999999;
 

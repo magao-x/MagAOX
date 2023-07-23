@@ -7,8 +7,8 @@
 #ifndef xrif2shmim_hpp
 #define xrif2shmim_hpp
 
-#include <ImageStruct.h>
-#include <ImageStreamIO.h>
+#include <ImageStreamIO/ImageStruct.h>
+#include <ImageStreamIO/ImageStreamIO.h>
 
 #include <xrif/xrif.h>
 
@@ -99,7 +99,7 @@ protected:
    uint32_t m_width {0}; ///< The width of the image.
    uint32_t m_height {0}; ///< The height of the image.
 
-   mx::improc::eigenCube<short> m_frames;
+   mx::improc::eigenCube<float> m_frames;
 
    uint8_t m_dataType; ///< The ImageStreamIO type code.
 
@@ -368,7 +368,7 @@ int xrif2shmim::execute()
 
       if(g_timeToDie == true) break; //check after the decompress.
 
-      mx::improc::eigenCube<short> tmpc( (short*) m_xrif->raw_buffer, m_xrif->width, m_xrif->height, m_xrif->frames);
+      mx::improc::eigenCube<float> tmpc( (float*) m_xrif->raw_buffer, m_xrif->width, m_xrif->height, m_xrif->frames);
 
       //Determine the order in which frames in tmpc are read
       long pst = 0;
@@ -409,7 +409,7 @@ int xrif2shmim::execute()
 
    std::cerr << " (" << invokedName << "): Creating stream: " << m_shmimName << "  (" << m_width << " x " << m_height << " x " << m_circBuffLength << ")\n";
 
-   ImageStreamIO_createIm_gpu(&m_imageStream, m_shmimName.c_str(), 3, imsize, m_dataType, -1, 1, IMAGE_NB_SEMAPHORE, 0, CIRCULAR_BUFFER | ZAXIS_TEMPORAL);
+   ImageStreamIO_createIm_gpu(&m_imageStream, m_shmimName.c_str(), 3, imsize, m_dataType, -1, 1, IMAGE_NB_SEMAPHORE, 0, CIRCULAR_BUFFER | ZAXIS_TEMPORAL, 0);
 
    m_imageStream.md->cnt1 = m_circBuffLength;
 
@@ -423,11 +423,12 @@ int xrif2shmim::execute()
    findex = 0;
    double lastSend = mx::sys::get_curr_time();
    double delta = 0;
+
    while(g_timeToDie == false)
    {
       m_imageStream.md->write=1;
 
-      memcpy(next_dest, m_frames.image(findex).data(), m_width*m_height*m_typeSize); //This is about 10 usec faster -- but we have to descramble.
+      memcpy(next_dest, m_frames.image(findex).data(), m_width*m_height*m_typeSize); 
 
       //Set the time of last write
       clock_gettime(CLOCK_REALTIME, &m_imageStream.md->writetime);

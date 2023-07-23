@@ -1,0 +1,12 @@
+[Unit]
+Description=Create MagAO-X cpusets
+Before=multi-user.target
+
+[Service]
+Type=oneshot
+RemainAfterExit=yes
+ExecStartPre=/opt/MagAOX/bin/mount_cgroups1_cpuset
+ExecStart=/opt/MagAOX/bin/make_cpusets
+
+[Install]
+WantedBy=default.target

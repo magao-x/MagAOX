@@ -26,7 +26,7 @@ public:
                        const std::string & label,
                        const std::string & units,
                        QWidget * Parent = 0, 
-                       Qt::WindowFlags f = 0
+                       Qt::WindowFlags f = Qt::WindowFlags()
                      );
    
    ~selectionSwStatus();

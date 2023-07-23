@@ -1,0 +1,14 @@
+[Unit]
+Description=xctrl startup
+Requires=cacao_startup_if_present.service make_cpusets.service
+After=make_cpusets.service
+Before=multi-user.target
+
+[Service]
+Type=oneshot
+RemainAfterExit=yes
+User=xsup
+ExecStart=/opt/conda/bin/python /usr/local/bin/xctrl startup
+
+[Install]
+WantedBy=default.target

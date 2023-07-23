@@ -25,11 +25,15 @@ import time
 import shlex
 
 stdout_b = os.fdopen(sys.stdout.fileno(), 'wb')
-RED_SEQ = subprocess.check_output('tput setaf 1', shell=True)
-GREEN_SEQ = subprocess.check_output('tput setaf 2', shell=True)
-YELLOW_SEQ = subprocess.check_output('tput setaf 3', shell=True)
-BLUE_SEQ = subprocess.check_output('tput setaf 4', shell=True)
-RESET_SEQ = subprocess.check_output('tput sgr0', shell=True)
+try:
+    RED_SEQ = subprocess.check_output('tput setaf 1', shell=True)
+    GREEN_SEQ = subprocess.check_output('tput setaf 2', shell=True)
+    YELLOW_SEQ = subprocess.check_output('tput setaf 3', shell=True)
+    BLUE_SEQ = subprocess.check_output('tput setaf 4', shell=True)
+    RESET_SEQ = subprocess.check_output('tput sgr0', shell=True)
+except subprocess.CalledProcessError:
+    RED_SEQ = GREEN_SEQ = YELLOW_SEQ = BLUE_SEQ = RESET_SEQ = b''
+
 
 def _make_output_funcs(color):
     def output_func(msg):
@@ -54,7 +58,7 @@ def debug(msg):
 
 WHO_AM_I = getpass.getuser()
 if os.environ.get('MAGAOX_ROLE') == 'vm':
-    INSTRUMENT_USER = 'vagrant'
+    INSTRUMENT_USER = 'ubuntu' if os.path.exists('/home/ubuntu') else 'xsup'
 else:
     INSTRUMENT_USER = 'xsup'
 
@@ -111,24 +115,34 @@ def _read_processes(filepath):
     return processes
 
 
-def _brief_status(process_name):
+def _check_status(process_name):
     pid_filepath = f'/opt/MagAOX/sys/{process_name}/pid'
-    if not os.path.exists(pid_filepath):
-        if _session_exists(process_name):
-            failure(f'{process_name}: session exists, but process is not running')
-        else:
-            warning(f'{process_name}: not started')
-    else:
+    session_exists = _session_exists(process_name)
+    pid_file_exists = os.path.exists(pid_filepath)
+    pid = None
+    pid_exists = False
+    if pid_file_exists:
         with open(pid_filepath) as pid_file:
             pid = int(pid_file.read().strip())
-        if psutil.pid_exists(pid):
-            proc = psutil.Process(pid)
-            with proc.oneshot():
-                success(f'{process_name}: running (pid: {pid})')
-        else:
-            failure(f'{process_name}: dead (stale pid)')
+        pid_exists = psutil.pid_exists(pid)
 
-def status(processes, targets):
+    return session_exists, pid_file_exists, pid, pid_exists
+
+def _brief_status(process_name):
+    session_exists, pid_file_exists, pid, pid_exists = _check_status(process_name)
+    message = f"{process_name}: "
+    if session_exists and pid_exists:
+        success(message + f"running (pid: {pid})")
+    elif session_exists and pid_file_exists and not pid_exists:
+        failure(message + "dead (session exists, stale pid file)")
+    elif session_exists and not pid_file_exists:
+        failure(message + "session exists, but process is not running")
+    elif not session_exists and not pid_file_exists:
+        warning(message + "not started")
+    else:
+        warning(f"{session_exists=} {pid_file_exists=} {pid=} {pid_exists=}")
+
+def status(processes, targets, role):
     if not len(targets):
         targets = processes.keys()
     debug(f"Querying status for: {list(targets)}")
@@ -141,7 +155,7 @@ def _peek_logs(process_name, n_lines):
     info(f"End {process_name} logs")
     print()
 
-def peek(processes, targets):
+def peek(processes, targets, role):
     if not len(targets):
         targets = processes.keys()
     debug(f"Querying status for: {list(targets)}")
@@ -150,23 +164,6 @@ def peek(processes, targets):
         _peek_logs(process_name, n_lines=10)
     return 0
 
-def inspect_session(_, targets):
-    if len(targets) != 1:
-        failure(f"Can only specify a single process "
-                f"name to inspect, got: {targets}")
-        return 1
-    target = targets[0]
-    if _session_exists(targets[0]):
-        exitcode, out, err = _run_as_xsup(f"tmux attach-session -t {target}")
-        info_bytes(out)
-        if len(err):
-            failure_bytes(err)
-    else:
-        failure(f'No tmux session exists named {target}')
-        exitcode = 1
-    return exitcode
-
-
 def _session_exists(process_name):
     _, out, __ = _run_as_xsup(
         "tmux ls -F \"#{session_name}\"",
@@ -174,7 +171,6 @@ def _session_exists(process_name):
     )
     sessions = out.decode('utf8').split('\n')
     return process_name in sessions
-
 
 def _shutdown_helper(process_name):
     attempts = 0
@@ -202,7 +198,7 @@ def _shutdown_helper(process_name):
     return 0
 
 
-def shutdown(processes, targets):
+def shutdown(processes, targets, role):
     handle_indi_server = False
     if not len(targets):
         targets = list(processes.keys())
@@ -236,14 +232,16 @@ def _indiserver_startup(process_name, executable_name):
     for proc in psutil.process_iter():
         with proc.oneshot():
             try:
+                cmdline = proc.cmdline()
                 exe = proc.exe()
             except (psutil.NoSuchProcess, psutil.AccessDenied):
                 continue
-            if exe == '/opt/MagAOX/bin/xindidriver' and proc.ppid() == 1:
+            if '/opt/MagAOX/drivers' in exe and proc.ppid() == 1:
                 # this proc is a zombie (reparented to PID 1)
                 _run_as_xsup(f'kill -9 {proc.pid}')
-                warning(f"Killing zombie: {' '.join(proc.cmdline())}")
+                warning(f"Killing zombie: {' '.join(cmdline)}")
     return _startup_helper(process_name, executable_name)
+
 
 def _startup_helper(process_name, executable_name):
     '''Start a new tmux session as the parent for a MagAO-X process
@@ -261,10 +259,15 @@ def _startup_helper(process_name, executable_name):
     did_anything : bool
         Whether a new session was started for `process_name`
     '''
-    if _session_exists(process_name):
-        info(f"Session exists for {process_name}, doing nothing")
-        return False
-    info(f"Session {process_name} does not exist")
+    session_exists, pid_file_exists, pid, pid_exists = _check_status(process_name)
+    if session_exists and not pid_exists:
+        info(f"Session exists for {process_name}, but process is not running. Recreating session...")
+        _shutdown_helper(process_name)
+    elif session_exists and pid_exists:
+        info(f"Session for {process_name} exists, {executable_name} is running as pid {pid}")
+        return
+    else:
+        info(f"Session {process_name} does not exist")
     execpath = f"/opt/MagAOX/bin/{executable_name}"
     if not os.path.exists(execpath):
         raise RuntimeError(
@@ -276,30 +279,40 @@ def _startup_helper(process_name, executable_name):
     success(f"Executed in {process_name} session: '{cmd}'")
     return True
 
-def validate_targets(processes, targets):
+def _identify_indiserver_name(names, role):
+    if "is" + role.upper() in names:
+        return "is" + role.upper()
+
+def validate_targets(processes, targets, role, for_restart=False):
+    extra_targets = set()
     if not len(targets):
-        targets = list(processes.keys())
+        targets = set(processes.keys())
     else:
-        if not set(targets).issubset(processes.keys()):
-            difference = set(targets) - set(processes.keys())
+        targets = set(targets)
+        if for_restart:
+            indiserver_name = _identify_indiserver_name(processes, role)
+            if indiserver_name not in targets:
+                targets.add(indiserver_name)
+            for target_name in targets:
+                for process_name in processes:
+                    # restart downstream helper processes (foo-sw, foo-dark, foo-avg, etc.)
+                    if process_name.startswith(target_name):
+                        extra_targets.add(process_name)
+        if not targets.issubset(processes.keys()):
+            difference = targets - set(processes.keys())
             failure(f'Unknown process names: {difference}')
             sys.exit(1)
-    return targets
 
-def startup(processes, targets):
-    indi_server_name = None
-    for process_name in targets:
-        if process_name.startswith('is'):
-            indi_server_name = process_name
+    return list(targets | extra_targets)
+
+def startup(processes, targets, role):
+    indi_server_name = _identify_indiserver_name(processes, role)
+
     if len(targets) > 1 and indi_server_name in targets:
-        # special case for INDI server: needs to be first to start,
-        # have a chance to kill orphaned xindidriver processes,
-        # and have time to flush FIFOs
+        # special case for INDI server: needs to be last to start,
+        # so that restarts don't overwhelm it
         targets.remove(indi_server_name)
-        did_anything = _indiserver_startup(indi_server_name, processes[indi_server_name])
-        if did_anything:
-            info(f"Waiting 5 seconds for {indi_server_name} to start...")
-            time.sleep(5)
+
     helpers = []
     for process_name in targets:
         th = threading.Thread(
@@ -308,35 +321,53 @@ def startup(processes, targets):
         )
         th.start()
         helpers.append(th)
+
     for th in helpers:
         th.join()
+
+    if indi_server_name != None and not _session_exists(indi_server_name):
+        # Now start indiserver
+        info(f"Waiting 5 seconds before starting {indi_server_name}...")
+        time.sleep(5)
+        _indiserver_startup(indi_server_name, processes[indi_server_name])
+
     return 0
 
 
-def restart(processes, targets):
-    exit_code_1 = shutdown(processes, targets)
+def restart(processes, targets, role):
+    targets = validate_targets(processes, targets, role, for_restart=True)
+    print(targets)
+    exit_code_1 = shutdown(processes, targets, role)
     if exit_code_1 != 0:
         return exit_code_1
-    return startup(processes, targets)
+    return startup(processes, targets, role)
 
 VERBS = {
     'status': status,
-    'inspect': inspect_session,
     'peek': peek,
     'shutdown': shutdown,
+    'stop': shutdown,
     'restart': restart,
     'startup': startup,
+    'start': startup,
 }
+
+VERBS_REQUIRING_ALL = ('shutdown', 'restart')
+VERBS_REQUIRING_TARGET = ('stop', 'start')
 
 
 def main():
-    parser = argparse.ArgumentParser(prog='xctrl', description=__doc__)
+    parser = argparse.ArgumentParser(prog='xctrl')
     parser.add_argument('-r', '--role', help='Specify role to read proclist for (default: $MAGAOX_ROLE)')
     subparsers = parser.add_subparsers(help='verb for action to take', dest='verb')
     for verb in VERBS:
         sp = subparsers.add_parser(verb)
+        if verb in VERBS_REQUIRING_ALL:  # special case for confirmation
+            sp.add_argument('--all', action='store_true', help="With no names provided, restarts all")
         if verb == 'inspect': # special case, can only inspect one thing at a time
             sp.add_argument('target', nargs=1, help='Process name to target')
+        elif verb in VERBS_REQUIRING_TARGET:
+            sp.add_argument('target', nargs='+', help='Process names to target')
         else:
             sp.add_argument('target', nargs='*', help='Process names to target')
     args = parser.parse_args()
@@ -351,6 +382,7 @@ def main():
         role = args.role
 
     if args.verb is None:
+        print(__doc__)
         parser.print_help()
         sys.exit(1)
 
@@ -361,14 +393,22 @@ def main():
     debug(f'Read processes from {processes_filepath}: {processes}')
 
     verb = args.verb
-    targets = validate_targets(processes, args.target)
+    if verb in VERBS_REQUIRING_ALL:
+        if len(args.target) == 0 and not args.all:
+            failure(f"Specify --all to apply this verb to all processes")
+            return 1
+    elif verb in VERBS_REQUIRING_TARGET:
+        if len(args.target) == 0:
+            failure(f"No targets provided for {verb}")
+            return 1
+    targets = validate_targets(processes, args.target, role)
     debug(f'Got verb = {verb}, targets = {targets}')
     if verb not in VERBS:
         failure(f"Valid verbs: {', '.join(VERBS.keys())}")
         failure(f"Got: {verb}")
         return 1
 
-    return VERBS[verb](processes, targets)
+    return VERBS[verb](processes, targets, role)
 
 if __name__ == "__main__":
     sys.exit(main())

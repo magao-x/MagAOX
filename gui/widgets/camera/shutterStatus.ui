@@ -10,6 +10,12 @@
     <height>132</height>
    </rect>
   </property>
+  <property name="sizePolicy">
+   <sizepolicy hsizetype="Preferred" vsizetype="Expanding">
+    <horstretch>0</horstretch>
+    <verstretch>0</verstretch>
+   </sizepolicy>
+  </property>
   <property name="windowTitle">
    <string>Form</string>
   </property>
@@ -18,6 +24,12 @@
     <layout class="QVBoxLayout" name="verticalLayout">
      <item>
       <widget class="QLabel" name="label">
+       <property name="sizePolicy">
+        <sizepolicy hsizetype="Preferred" vsizetype="Expanding">
+         <horstretch>0</horstretch>
+         <verstretch>0</verstretch>
+        </sizepolicy>
+       </property>
        <property name="text">
         <string>Shutter</string>
        </property>
@@ -27,7 +39,7 @@
       </widget>
      </item>
      <item>
-      <layout class="QHBoxLayout" name="horizontalLayout">
+      <layout class="QHBoxLayout" name="horizontalLayout" stretch="1,1,1">
        <item>
         <spacer name="horizontalSpacer">
          <property name="orientation">
@@ -36,15 +48,18 @@
          <property name="sizeHint" stdset="0">
           <size>
            <width>40</width>
-           <height>20</height>
+           <height>0</height>
           </size>
          </property>
         </spacer>
        </item>
        <item>
-        <widget class="QSlider" name="shutter">
-         <property name="orientation">
-          <enum>Qt::Horizontal</enum>
+        <widget class="xqt::toggleSlider" name="shutter">
+         <property name="sizePolicy">
+          <sizepolicy hsizetype="Expanding" vsizetype="Expanding">
+           <horstretch>0</horstretch>
+           <verstretch>0</verstretch>
+          </sizepolicy>
          </property>
         </widget>
        </item>
@@ -56,7 +71,7 @@
          <property name="sizeHint" stdset="0">
           <size>
            <width>40</width>
-           <height>20</height>
+           <height>0</height>
           </size>
          </property>
         </spacer>
@@ -67,6 +82,13 @@
    </item>
   </layout>
  </widget>
+ <customwidgets>
+  <customwidget>
+   <class>xqt::toggleSlider</class>
+   <extends>QSlider</extends>
+   <header>../xWidgets/toggleSlider.hpp</header>
+  </customwidget>
+ </customwidgets>
  <resources/>
  <connections/>
 </ui>

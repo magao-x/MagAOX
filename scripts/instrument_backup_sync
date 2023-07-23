@@ -1,0 +1,34 @@
+#!/usr/bin/env bash
+set -ex
+if (( $# < 1 )); then
+  prefixes=( "/mnt/backup" "/mnt/backup2" )
+else
+  prefixes="$@"
+fi
+rsyncWithOptions="rsync --exclude='**/*_2022*' -a --info=progress2"
+for mountpoint in "${prefixes[@]}"; do
+    if mount | grep -q "on $mountpoint"; then
+        for remote in icc rtc; do
+            if ! mount | grep -q "$remote:/data on /srv/$remote/data"; then
+                echo "NFS mount appears not to be active for $remote"
+                exit 1
+            fi
+            
+            mkdir -p $mountpoint/$remote
+            for dir in rawimages logs telem; do
+                $rsyncWithOptions /srv/$remote/data/$dir/ $mountpoint/$remote/$dir/
+            done
+            if [[ -e /srv/$remote/data/cacao/ ]]; then
+                # special case to back up cacao data
+                $rsyncWithOptions /srv/$remote/data/cacao/ $mountpoint/$remote/cacao/
+            fi
+        done
+        mkdir -p $mountpoint/aoc
+        for dir in rawimages logs telem; do
+            $rsyncWithOptions /data/$dir/ $mountpoint/aoc/$dir/
+        done
+    else
+        echo "No backup drive mounted on $mountpoint"
+    fi
+done
+

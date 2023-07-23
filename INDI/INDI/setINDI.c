@@ -349,7 +349,7 @@ crackSpec (int *acp, char **avp[])
 
    if(tmp_sets == NULL)
    {
-      free(sets);
+      //free(sets);
       sets= NULL;
       return 0;
    }

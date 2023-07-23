@@ -1,0 +1,66 @@
+#!/bin/bash
+#####################################################
+## MagAO-X RTC process to cpuset  
+## 
+## See https://linux.die.net/man/7/cpuset
+##
+## Run this as sudo after starting all loop processes.
+## Must first have run rtc_cpuset at system startup.
+##
+####################################################
+
+source /etc/profile.d/cgroups1_cpuset_mountpoint.sh
+cpusetMount=$CGROUPS1_CPUSET_MOUNTPOINT
+
+# note: these are in the same order as the cpuset creation in rtc_cpuset
+
+######################
+## Woofer dmcomb
+######################
+pidlist=$( pgrep DMcomb-000000.r | xargs echo | sed 's/ /,/g' )
+echo "DMcomb 0  : $pidlist"
+/bin/echo $pidlist > $cpusetMount/dm00comb/tasks
+
+######################
+## Tweeter dmcomb
+######################
+pidlist=$( pgrep DMcomb-000001.r | xargs echo | sed 's/ /,/g' )
+echo "DMcomb 1 : $pidlist"
+/bin/echo $pidlist > $cpusetMount/dm01comb/tasks
+
+
+
+pidlist=$( pgrep aol1run | xargs echo | sed 's/ /,/g' )
+echo "aol1 (master) : $pidlist"
+aolPID="$pidlist"
+
+pidlist=$( ls /proc/$aolPID/task/ )
+echo "aol1 (full) :"
+let i=0
+for pid in $pidlist
+do
+   echo "       " "$pid"
+   /bin/echo $pid > $cpusetMount/aol1RT/aol1RT_${i}/tasks
+   let i=i+1
+done
+
+pidlist=$( pgrep aol1mexwfs | xargs echo | sed 's/ /,/g' )
+echo "cudaMVMextract aol1 : $pidlist"
+aolPID="$pidlist"
+/bin/echo $pidlist > $cpusetMount/aol1RT1/tasks
+
+pidlist=$( pgrep aol1dmfw | xargs echo | sed 's/ /,/g' )
+echo "aol1 GPUmodes2dm : $pidlist"
+aolPID="$pidlist"
+pidlist=$( ls /proc/$aolPID/task/ )
+echo "aol1 GPUmodes2dm (full) :"
+for pid in $pidlist
+do
+   echo "        " "$pid"
+   /bin/echo $pid > $cpusetMount/aol1RT2/tasks
+done
+
+pidlist=$( pgrep aol1meol | xargs echo | sed 's/ /,/g' )
+echo "aol1meol : $pidlist"
+/bin/echo $pidlist > $cpusetMount/aol1RT3/tasks
+

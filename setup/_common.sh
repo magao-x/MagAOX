@@ -1,11 +1,28 @@
 #!/bin/bash
-if [[ "$SHELLOPTS" =~ "nounset" ]]; then
-  _WAS_NOUNSET=1
-else
-  _WAS_NOUNSET=0
+SETUPDIR="$( cd "$( dirname "${BASH_SOURCE[0]}" )" && pwd )"
+
+
+instrument_user=xsup
+instrument_group=magaox
+instrument_dev_group=magaox-dev
+if [[ $MAGAOX_ROLE == vm ]]; then
+  # Heuristic detection of which automatically created user account to use
+  # based on home directory existing.
+  if [[ -d /home/vagrant ]]; then
+    instrument_user=vagrant
+  elif [[ -d /home/ubuntu ]]; then
+    instrument_user=ubuntu
+    instrument_group=ubuntu
+    instrument_dev_group=ubuntu
+  fi
 fi
+
 function log_error() {
     echo -e "$(tput setaf 1 2>/dev/null)$1$(tput sgr0 2>/dev/null)"
+}
+function exit_error() {
+  log_error "$1"
+  exit 1
 }
 function log_success() {
     echo -e "$(tput setaf 2 2>/dev/null)$1$(tput sgr0 2>/dev/null)"
@@ -29,7 +46,7 @@ function link_if_necessary() {
     elif [[ -e $thelinkname ]]; then
       echo "$thelinkname exists, but is not a symlink and we want the destination to be $thedir."
     else
-        ln -sv "$thedir" "$thelinkname"
+        sudo ln -sv "$thedir" "$thelinkname"
     fi
   fi
 }
@@ -44,6 +61,37 @@ function setgid_all() {
     fi
 }
 
+function make_on_data_array() {
+  # If run on instrument computer, make the name provided as an arg a link from $2/$1
+  # to /data/$1.
+  # If not on a real instrument computer, just make a normal folder under /opt/MagAOX/
+  if [[ -z $1 ]]; then
+    log_error "Missing target name argument for make_on_data_array"
+    exit 1
+  else
+    TARGET_NAME=$1
+  fi
+  if [[ -z $2 ]]; then
+    log_error "Missing parent dir argument for make_on_data_array"
+    exit 1
+  else
+    PARENT_DIR=$2
+  fi
+
+  if [[ $MAGAOX_ROLE == RTC || $MAGAOX_ROLE == ICC || $MAGAOX_ROLE == AOC ]]; then
+    REAL_DIR=/data/$TARGET_NAME
+    sudo mkdir -pv $REAL_DIR
+    link_if_necessary $REAL_DIR $PARENT_DIR/$TARGET_NAME
+  else
+    REAL_DIR=$PARENT_DIR/$TARGET_NAME
+    sudo mkdir -pv $REAL_DIR
+  fi
+
+  sudo chown -RP $instrument_user:$instrument_group $REAL_DIR
+  sudo chmod -R u=rwX,g=rwX,o=rX $REAL_DIR
+  setgid_all $REAL_DIR
+}
+
 function _cached_fetch() {
   url=$1
   filename=$2
@@ -56,20 +104,14 @@ function _cached_fetch() {
   mkdir -p /opt/MagAOX/.cache
   if [[ ! -e $dest/$filename ]]; then
     if [[ ! -e /opt/MagAOX/.cache/$filename ]]; then
-      curl $EXTRA_CURL_OPTS -L $url > /tmp/magaoxcache-$filename && \
-        mv /tmp/magaoxcache-$filename /opt/MagAOX/.cache/$filename
+      curl $EXTRA_CURL_OPTS --fail -L $url > /tmp/magaoxcache-$filename
+      mv /tmp/magaoxcache-$filename /opt/MagAOX/.cache/$filename
       log_info "Downloaded to /opt/MagAOX/.cache/$filename"
     fi
     cp /opt/MagAOX/.cache/$filename $dest/$filename
     log_info "Copied to $dest/$filename"
   fi
 }
-
-if [[ -e /vagrant/windows_host.txt ]]; then
-  VM_WINDOWS_HOST=1
-else
-  VM_WINDOWS_HOST=0
-fi
 
 function clone_or_update_and_cd() {
     orgname=$1
@@ -85,33 +127,32 @@ function clone_or_update_and_cd() {
     if [[ $_WAS_NOUNSET == 1 ]]; then set -u; fi
     # and re-enable.
 
-    if [[ $MAGAOX_ROLE == vm && $VM_WINDOWS_HOST == 0 ]]; then
-        mkdir -p /vagrant/vm/$reponame
-        link_if_necessary /vagrant/vm/$reponame $destdir
-    fi
     if [[ ! -d $parentdir/$reponame/.git ]]; then
       echo "Cloning new copy of $orgname/$reponame"
       CLONE_DEST=/tmp/${reponame}_$(date +"%s")
       git clone https://github.com/$orgname/$reponame.git $CLONE_DEST
-      sudo rsync -av $CLONE_DEST/ $destdir/
+      sudo rsync -a $CLONE_DEST/ $destdir/
       cd $destdir/
       log_success "Cloned new $destdir"
       rm -rf $CLONE_DEST
       log_success "Removed temporary clone at $CLONE_DEST"
     else
       cd $destdir
-      git pull
+      if [[ "$(git rev-parse --abbrev-ref --symbolic-full-name HEAD)" != HEAD ]]; then
+        git pull --ff-only
+      else
+        git fetch
+        log_info "Not pulling because a specific commit is checked out"
+      fi
       log_success "Updated $destdir"
     fi
     git config core.sharedRepository group
-    if [[ $MAGAOX_ROLE != vm ]]; then
-      sudo chown -R :magaox-dev $destdir
-      sudo chmod -R g=rwX $destdir
-      # n.b. can't be recursive because g+s on files means something else
-      # so we find all directories and individually chmod them:
-      sudo find $destdir -type d -exec chmod g+s {} \;
-      log_success "Normalized permissions on $destdir"
-    fi
+    sudo chown -R :$instrument_dev_group $destdir
+    sudo chmod -R g=rwX $destdir
+    # n.b. can't be recursive because g+s on files means something else
+    # so we find all directories and individually chmod them:
+    sudo find $destdir -type d -exec chmod g+s {} \;
+    log_success "Normalized permissions on $destdir"
 }
 
 DEFAULT_PASSWORD="extremeAO!"
@@ -126,22 +167,35 @@ function creategroup() {
 }
 
 function createuser() {
-  if getent passwd $1 > /dev/null 2>&1; then
-    log_info "User account $1 exists"
+  username=$1
+  if getent passwd $username > /dev/null 2>&1; then
+    log_info "User account $username exists"
   else
-    sudo useradd -U $1
-    echo -e "$DEFAULT_PASSWORD\n$DEFAULT_PASSWORD" | sudo passwd $1
-    log_success "Created user account $1 with default password $DEFAULT_PASSWORD"
+    sudo useradd -U $username || exit 1
+    echo -e "$DEFAULT_PASSWORD\n$DEFAULT_PASSWORD" | sudo passwd $username || exit 1
+    log_success "Created user account $username with default password $DEFAULT_PASSWORD"
   fi
-  sudo usermod -a -G magaox $1
-  log_info "Added user $1 to group magaox"
-  sudo mkdir -p /home/$1/.ssh
-  sudo touch /home/$1/.ssh/authorized_keys
-  sudo chmod -R u=rwx,g=,o= /home/$1/.ssh
-  sudo chmod u=rw,g=,o= /home/$1/.ssh/authorized_keys
-  sudo chown -R $1:magaox /home/$1
-  sudo chsh $1 -s $(which bash)
-  log_info "Append an ecdsa or ed25519 key to /home/$1/.ssh/authorized_keys to enable SSH login"
+  sudo usermod -a -G magaox $username || exit 1
+  log_info "Added user $username to group magaox"
+  sudo mkdir -p /home/$username/.ssh || exit 1
+  sudo touch /home/$username/.ssh/authorized_keys || exit 1
+  sudo chmod -R u=rwx,g=,o= /home/$username/.ssh || exit 1
+  sudo chmod u=rw,g=,o= /home/$username/.ssh/authorized_keys || exit 1
+  sudo chown -R $username:$instrument_group /home/$username || exit 1
+  sudo chsh $username -s $(which bash) || exit 1
+  log_info "Append an ecdsa or ed25519 key to /home/$username/.ssh/authorized_keys to enable SSH login"
+
+  data_path="/data/users/$username/"
+  sudo mkdir -p "$data_path" || exit 1
+  sudo chown "$username:$instrument_group" "$data_path" || exit 1
+  sudo chmod g+rxs "$data_path" || exit 1
+  log_success "Created $data_path"
+
+  link_name="/home/$username/data"
+  if sudo test ! -L "$link_name"; then
+    sudo ln -sv "$data_path" "$link_name" || exit 1
+    log_success "Linked $link_name -> $data_path"
+  fi
 }
 # We work around the buggy devtoolset /bin/sudo wrapper in provision.sh, but
 # that means we have to explicitly enable it ourselves.

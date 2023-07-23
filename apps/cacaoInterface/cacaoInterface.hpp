@@ -8,6 +8,7 @@
 #define cacaoInterface_hpp
 
 
+
 #include "../../libMagAOX/libMagAOX.hpp" //Note this is included on command line to trigger pch
 #include "../../magaox_git_version.h"
 
@@ -33,23 +34,35 @@ namespace app
 /** 
   * \ingroup cacaoInterface
   */
-class cacaoInterface : public MagAOXApp<true>
+class cacaoInterface : public MagAOXApp<true>, public dev::telemeter<cacaoInterface>
 {
 
    //Give the test harness access.
    friend class cacaoInterface_test;
+
+   typedef dev::telemeter<cacaoInterface> telemeterT;
+
+   friend class dev::telemeter<cacaoInterface>;
 
 protected:
 
    /** \name Configurable Parameters
      *@{
      */
-   std::string m_loopDir;
+   std::string m_loopNumber; ///< The loop number, X in aolX.  We keep it a string because that's how it gets used.
    
    ///@}
 
-   std::string m_loopName;   ///< The loop name.
-   std::string m_loopNumber; ///< The loop number, X in aolX.  We keep it a string because that's how it gets used.
+   std::string m_aoCalDir;
+   std::string m_aoCalArchiveTime;
+   std::string m_aoCalLoadTime;
+   
+   std::string m_loopName; ///< the loop name
+   
+
+   std::string m_fpsName;
+   std::string m_fpsFifo;
+
    
    int m_loopState {0}; ///< The loop state.  0 = off, 1 = paused (on, 0 gain), 2 = on
    
@@ -62,6 +75,16 @@ protected:
    float m_multCoeff {0.0}; ///< The current multiplicative coefficient (1-leak)
    float m_multCoeff_target {0.0}; ///< The target multiplicative coefficient (1-leak)
    
+   std::vector<int> m_modeBlockStart;
+   std::vector<int> m_modeBlockN;
+
+   std::vector<float> m_modeBlockGains;
+   std::vector<float> m_modeBlockMCs;
+   std::vector<float> m_modeBlockLims;
+
+   std::mutex m_modeBlockMutex;
+
+
    float m_maxLim {0.0}; ///< The current max limit
    float m_maxLim_target {0.0}; ///< The target max limit
    
@@ -105,35 +128,34 @@ public:
    /** \name CACAO Interface Functions
      * @{
      */
-   
-   /// Get the loop name and number
-   /** This is done once at app startup.
-     * 
-     * \returns 0 on success
-     * \returns -1 on an error
-     */
-   int getLoopNameNumber();
-   
-   /// Update a status variable in CACAO
-   /** In the current version of cacao this means writing to a text file.
-     *
-     * \returns 0 on success
-     * \returns -1 on an error
-     */
+
+   int setFPSVal( const std::string & fps,
+                  const std::string & param,
+                  const std::string & val
+                );
+
+
    template<typename T>
-   int updateStatus( const std::string & path, ///< [in] path the to the status variable
-                     T & val                   ///< [in] the value to set
-                   );
-   
-   /// Send keys to a tmux session 
-   /** Executes "tmux send-keys -t session keys C-m"
+   int setFPSVal( const std::string & fps,
+                  const std::string & param,
+                  const T & val
+                );
+
+   std::string getFPSValStr(const std::string & fps,
+                                          const std::string & param );
+
+   std::string getFPSValNum(const std::string & fps,
+                                          const std::string & param );
+
+   /// Get the calibration details
+   /** This is done each loop
      * 
      * \returns 0 on success
      * \returns -1 on an error
-     */
-   int tmuxSendKeys( const std::string & session,
-                     const std::string & keys
-                   );
+     */   
+   int getAOCalib();
+   
+   int getModeBlocks();
    
    /// Check if the loop processes are running 
    /** sets m_loopProcesses to true or false depending on what it finds out.
@@ -181,6 +203,13 @@ public:
      */ 
    int loopOff();
    
+   /// Zero the loop control channel
+   /**
+     * \returns 0 on success
+     * \returns -1 on an error
+     */ 
+   int loopZero();
+
    /// @}
    
    /** \name File Monitoring Thread
@@ -200,6 +229,7 @@ public:
    /// File monitoring thread starter function
    static void fmThreadStart( cacaoInterface * c /**< [in] pointer to this */);
    
+
    /// File monitoring thread function
    /** Runs until m_shutdown is true.
      */
@@ -210,17 +240,33 @@ public:
    
    pcf::IndiProperty m_indiP_loop;
    pcf::IndiProperty m_indiP_loopProcesses;
-   
+   pcf::IndiProperty m_indiP_modes;
+
    pcf::IndiProperty m_indiP_loopState;
+   pcf::IndiProperty m_indiP_loopZero;
    pcf::IndiProperty m_indiP_loopGain;
    pcf::IndiProperty m_indiP_multCoeff;
    pcf::IndiProperty m_indiP_maxLim;
-      
+         
    INDI_NEWCALLBACK_DECL(cacaoInterface, m_indiP_loopState);
+   INDI_NEWCALLBACK_DECL(cacaoInterface, m_indiP_loopZero);
    INDI_NEWCALLBACK_DECL(cacaoInterface, m_indiP_loopGain);
    INDI_NEWCALLBACK_DECL(cacaoInterface, m_indiP_multCoeff);
    INDI_NEWCALLBACK_DECL(cacaoInterface, m_indiP_maxLim);
 
+   /** \name Telemeter Interface
+     * 
+     * @{
+     */ 
+   int checkRecordTimes();
+   
+   int recordTelem( const telem_loopgain * );
+
+   int recordLoopGain( bool force = false );
+   
+   ///@}
+
+   
 };
 
 cacaoInterface::cacaoInterface() : MagAOXApp(MAGAOX_CURRENT_SHA1, MAGAOX_REPO_MODIFIED)
@@ -231,13 +277,21 @@ cacaoInterface::cacaoInterface() : MagAOXApp(MAGAOX_CURRENT_SHA1, MAGAOX_REPO_MO
 
 void cacaoInterface::setupConfig()
 {
-   config.add("loop.dir", "", "loop.dir", argType::Required, "loop", "dir", false, "string", "The loop working directory.");
+   config.add("loop.number", "", "loop.number", argType::Required, "loop", "number", false, "string", "the loop number");
+
+   telemeterT::setupConfig(config);
 }
 
 int cacaoInterface::loadConfigImpl( mx::app::appConfigurator & _config )
 {
-   _config(m_loopDir, "loop.dir");
+   _config(m_loopNumber, "loop.number");
    
+   if(telemeterT::loadConfig(_config) < 0)
+   {
+      log<text_log>("Error during telemeter config", logPrio::LOG_CRITICAL);
+      m_shutdown = true;
+   }
+
    return 0;
 }
 
@@ -248,28 +302,30 @@ void cacaoInterface::loadConfig()
 
 int cacaoInterface::appStartup()
 {
-   
-   if(m_loopDir == "")
-   {
-      log<text_log, -1>("loop directory not set", logPrio::LOG_CRITICAL);
-   }
-   
-   if(m_loopDir.back() != '/')
-   {
-      m_loopDir += '/';
-   }
 
+   if(m_loopNumber == "")
+   {
+      return log<software_critical, -1>({__FILE__, __LINE__, "loop number not set"});
+   }
+   
    createROIndiText( m_indiP_loop, "loop", "name", "Loop Description", "Loop Controls", "Name");
    indi::addTextElement(m_indiP_loop, "number", "Number");
-   indi::addTextElement(m_indiP_loop, "working_dir", "Working Directory");
-   m_indiP_loop["working_dir"] = m_loopDir;
+   m_indiP_loop["number"] = m_loopName;
    registerIndiPropertyReadOnly(m_indiP_loop);
    
+   createROIndiNumber( m_indiP_modes, "modes", "Loop Modes", "Loop Controls");
+   indi::addNumberElement(m_indiP_modes, "total", 0, 1, 25000, "Total Modes");
+   indi::addNumberElement(m_indiP_modes, "blocks", 0, 1, 99, "Mode Blocks");
+   registerIndiPropertyReadOnly(m_indiP_modes);
+
+   createStandardIndiToggleSw( m_indiP_loopProcesses, "loop_processes", "Loop Processes", "Loop Controls");
+   registerIndiPropertyReadOnly( m_indiP_loopProcesses);  
+
    createStandardIndiToggleSw( m_indiP_loopState, "loop_state", "Loop State", "Loop Controls");
    registerIndiPropertyNew( m_indiP_loopState, INDI_NEWCALLBACK(m_indiP_loopState) );  
    
-   createStandardIndiToggleSw( m_indiP_loopProcesses, "loop_processes", "Loop Processes", "Loop Controls");
-   registerIndiPropertyReadOnly( m_indiP_loopProcesses);  
+   createStandardIndiRequestSw( m_indiP_loopZero, "loop_zero", "Loop Zero", "Loop Controls");
+   registerIndiPropertyNew( m_indiP_loopZero,INDI_NEWCALLBACK(m_indiP_loopZero) );  
    
    createStandardIndiNumber<float>( m_indiP_loopGain, "loop_gain", 0.0, 10.0, 0.01, "%0.3f", "Loop Gain", "Loop Controls");
    registerIndiPropertyNew( m_indiP_loopGain, INDI_NEWCALLBACK(m_indiP_loopGain) );  
@@ -280,23 +336,22 @@ int cacaoInterface::appStartup()
    createStandardIndiNumber<float>( m_indiP_maxLim, "loop_max_limit", 0.0, 10.0, 0.001, "%0.3f", "Max. Limit", "Loop Controls");
    registerIndiPropertyNew( m_indiP_maxLim, INDI_NEWCALLBACK(m_indiP_maxLim) );  
    
-   if(getLoopNameNumber() < 0)
-   {
-      return log<text_log, -1>("Could not get loop name and/or number", logPrio::LOG_CRITICAL);
-   }
-   
-   if(threadStart( m_fmThread, m_fmThreadInit, m_fmThreadID, m_fmThreadProp, m_fmThreadPrio, "loopmon", this, fmThreadStart) < 0)
+   if(threadStart( m_fmThread, m_fmThreadInit, m_fmThreadID, m_fmThreadProp, m_fmThreadPrio, "", "loopmon", this, fmThreadStart) < 0)
    {
       log<software_error>({__FILE__, __LINE__});
       return -1;
    }
    
+   if(telemeterT::appStartup() < 0)
+   {
+      return log<software_error,-1>({__FILE__,__LINE__});
+   }
+
    return 0;
 }
 
 int cacaoInterface::appLogic()
 {
-   
    //do a join check to see if other threads have exited.
    if(pthread_tryjoin_np(m_fmThread.native_handle(),0) == 0)
    {
@@ -305,23 +360,32 @@ int cacaoInterface::appLogic()
       return -1;
    }
    
-   //We check this once per loop as a basic health check, and to catch any changes
-   if(getLoopNameNumber() < 0)
+   //These could change if a new calibration is loaded
+   if(getAOCalib() < 0 )
    {
       state(stateCodes::ERROR, true);
-      if(!stateLogged()) log<text_log>("Could not get loop name and/or number", logPrio::LOG_ERROR);
+      if(!stateLogged()) log<text_log>("Could not get AO calib", logPrio::LOG_ERROR);
       return 0;
    }
 
-   if(checkLoopProcesses() < 0)
+   /*if(checkLoopProcesses() < 0)
    {
       state(stateCodes::ERROR, true);
       if(!stateLogged()) log<text_log>("Could not get loop name and/or number", logPrio::LOG_ERROR);
       return 0;
    }   
-   
+   */
+
    if(m_loopProcesses == 0 || m_loopState == 0) state(stateCodes::READY);
    else state(stateCodes::OPERATING);
+
+   if(telemeterT::appLogic() < 0)
+   {
+      log<software_error>({__FILE__, __LINE__});
+      return 0;
+   }
+
+   std::unique_lock<std::mutex> lock(m_indiMutex);
 
    updateIfChanged(m_indiP_loop, std::vector<std::string>({"name", "number"}), std::vector<std::string>({m_loopName, m_loopNumber}));
    
@@ -347,6 +411,9 @@ int cacaoInterface::appLogic()
       updateSwitchIfChanged(m_indiP_loopState, "toggle", pcf::IndiElement::On, INDI_BUSY);
    }
    
+   updateIfChanged(m_indiP_loop, "name", m_loopName);
+   updateIfChanged(m_indiP_loop, "number", m_loopNumber);
+
    updateIfChanged(m_indiP_loopGain, "current", m_gain);
    updateIfChanged(m_indiP_multCoeff, "current", m_multCoeff);
    updateIfChanged(m_indiP_maxLim, "current", m_maxLim);
@@ -368,128 +435,263 @@ int cacaoInterface::appShutdown()
       }
    }
    
+   telemeterT::appShutdown();
+
    return 0;
 }
 
-int cacaoInterface::getLoopNameNumber()
+int cacaoInterface::setFPSVal( const std::string & fps,
+                               const std::string & param,
+                               const std::string & val
+                             )
 {
-   std::ifstream fin;
-   
-   fin.open(m_loopDir + "LOOPNAME");
-   
-   if( !fin )
+   std::string comout = "setval " + fps + "-" + m_loopNumber + "." + param +  " "  + val + "\n";
+
+   int wfd = open( m_fpsFifo.c_str(), O_WRONLY);
+   if(wfd < 0)
    {
-      return log<software_error, -1>({__FILE__, __LINE__, errno, "cacaoInterface::getLoopNameNumber failed to open LOOPNAME file"});
+      log<software_error>({__FILE__, __LINE__, errno, "error opening " + m_fpsFifo});
+      return -1;
    }
-   
-   if(! (fin >> m_loopName) )
+
+   int w = write(wfd, comout.c_str(), comout.size());
+      
+   if(w != (int) comout.size())
    {
-      return log<software_error, -1>({__FILE__, __LINE__, errno, "cacaoInterface::getLoopNameNumber error reading LOOPNAME"});
+      log<software_error>({__FILE__, __LINE__, errno, "error on write to " + m_fpsFifo});
+      return -1;
    }
-   
-   fin.close();
-   
-   if( !fin )
-   {
-      return log<software_error, -1>({__FILE__, __LINE__, errno, "cacaoInterface::getLoopNameNumber error on LOOPNAME file"});
-   }
-   
-   if(m_loopName.size() == 0 )
-   {
-      return log<software_error, -1>({__FILE__, __LINE__, errno, "cacaoInterface::getLoopNameNumber no LOOPNAME set"});
-   }
-   
-   fin.open(m_loopDir + "LOOPNUMBER");
-   
-   if( !fin )
-   {
-      return log<software_error, -1>({__FILE__, __LINE__, errno, "cacaoInterface::getLoopNameNumber failed to open LOOPNUMBER file"});
-   }
-   
-   if(! (fin >> m_loopNumber) )
-   {
-      return log<software_error, -1>({__FILE__, __LINE__, errno, "cacaoInterface::getLoopNameNumber error reading LOOPNUMBER"});
-   }
-   
-   fin.close();
-   
-   if( !fin )
-   {
-      return log<software_error, -1>({__FILE__, __LINE__, errno, "cacaoInterface::getLoopNameNumber error on LOOPNUMBER file"});
-   }
-   
-   if(m_loopNumber.size() == 0 )
-   {
-      return log<software_error, -1>({__FILE__, __LINE__, errno, "cacaoInterface::getLoopNameNumber no LOOPNUMBER set"});
-   }
-   
-   
+      
+   close(wfd);
+
    return 0;
-   
 }
+
 
 template<typename T>
-int cacaoInterface::updateStatus( const std::string & path,
-                                  T & val                 
-                                )
+int cacaoInterface::setFPSVal( const std::string & fps,
+                               const std::string & param,
+                               const T & val
+                             )
 {
-   std::ofstream fout;
-   
-   fout.open(m_loopDir + path);
-   
-   if( !fout )
-   {
-      return log<software_error, -1>({__FILE__, __LINE__, errno, "cacaoInterface::updateStatus failed to open output file"});
-   }
-   
-   if( !(fout << val << std::endl)) //Flush to get errors.
-   {
-      return log<software_error, -1>({__FILE__, __LINE__, errno, "cacaoInterface::updateStatus failed writing to output file"});
-   }
-   
-   fout.close();
-   
-   if( !fout )
-   {
-      return log<software_error, -1>({__FILE__, __LINE__, errno, "cacaoInterface::updateStatus error in output file"});
-   }
-   
-   return 0;
+   return setFPSVal( fps, param, std::to_string(val));
 }
 
-int cacaoInterface::tmuxSendKeys( const std::string & session,
-                                  const std::string & keys
-                                )
+std::string cacaoInterface::getFPSValStr( const std::string & fps,
+                                          const std::string & param 
+                                        )
 {
-   std::vector<std::string> tmuxcom = {"tmux", "send-keys", "-t", session, keys, "C-m"};
-   std::vector<std::string> errout, output;
-   
-   if(sys::runCommand(output, errout, tmuxcom) < 0)
+   std::string outfile = "/dev/shm/" + m_loopName + "_out_" + fps + "-" + m_loopNumber + "." + param;
+
+      std::string comout = "fwrval " + fps + "-" + m_loopNumber + "." + param + " "  + outfile + "\n";
+
+      int wfd = open( m_fpsFifo.c_str(), O_WRONLY);
+      if(wfd < 0)
+      {
+         log<software_error>({__FILE__, __LINE__, errno, "error opening " + m_fpsFifo});
+         return "";
+      }
+
+      int w = write(wfd, comout.c_str(), comout.size());
+      
+      if(w != (int) comout.size())
+      {
+         log<software_error>({__FILE__, __LINE__, errno, "error on write to " + m_fpsFifo});
+         return "";
+      }
+      
+      close(wfd);
+      
+      char inbuff [4096];
+
+      int rfd = -1;
+      int nr =0;
+      while(rfd < 0 && nr < 20)
+      {
+         rfd = open(outfile.c_str(), O_RDONLY);
+         ++nr;
+         mx::sys::milliSleep(10);
+      }
+
+      int r = read(rfd, inbuff, sizeof(inbuff));
+
+      if(r < 0)
+      {
+         log<software_error>({__FILE__, __LINE__, errno, "error on read from " + m_fpsFifo});
+         return "";
+      }
+
+      close(rfd);
+
+      remove(outfile.c_str());
+      
+      int n = strnlen(inbuff, sizeof(inbuff));
+
+      char * s = inbuff + n;
+
+      while(s != inbuff && *s != ' ') 
+      {
+         if(*s == '\n' || *s == 'r') *s = '\0';
+         --s;
+      }
+      if(s == inbuff)
+      {
+         log<software_error>({__FILE__, __LINE__, errno, "error parsing result from " + m_fpsFifo});
+         return "";
+      }
+
+      ++s;
+
+      return s;
+}
+
+std::string cacaoInterface::getFPSValNum( const std::string & fps,
+                                          const std::string & param 
+                                        )
+{
+   std::string outfile = "/dev/shm/" + m_loopName + "_out_" + fps + "-" + m_loopNumber + "." + param;
+
+      std::string comout = "fwrval " + fps + "-" + m_loopNumber + "." + param + " "  + outfile + "\n";
+
+      int wfd = open( m_fpsFifo.c_str(), O_WRONLY);
+      if(wfd < 0)
+      {
+         log<software_error>({__FILE__, __LINE__, errno, "error opening " + m_fpsFifo});
+         return "";
+      }
+
+      int w = write(wfd, comout.c_str(), comout.size());
+      
+      if(w != (int) comout.size())
+      {
+         log<software_error>({__FILE__, __LINE__, errno, "error on write to " + m_fpsFifo});
+         return "";
+      }
+      
+      close(wfd);
+      
+      char inbuff [4096];
+
+      int rfd = -1;
+      int nr =0;
+      while(rfd < 0 && nr < 20)
+      {
+         rfd = open(outfile.c_str(), O_RDONLY);
+         ++nr;
+         mx::sys::milliSleep(10);
+      }
+
+      int r = read(rfd, inbuff, sizeof(inbuff));
+
+      close(rfd);
+
+      if(r < 0)
+      {
+         log<software_error>({__FILE__, __LINE__, errno, "error on read from " + m_fpsFifo});
+         return "";
+      }
+
+      remove(outfile.c_str());
+      
+      int n = strlen(inbuff);
+
+      char * s = inbuff + n;
+
+      int ns = 0;
+      while(s != inbuff && ns < 4) 
+      {
+         if(*s == ' ') ++ns;
+         if(ns == 4) break;
+         if(*s == '\n' || *s == 'r' || *s == ' ') *s = '\0';
+         --s;
+      }
+      if(s == inbuff)
+      {
+         log<software_error>({__FILE__, __LINE__, errno, "error parsing result from " + m_fpsFifo});
+         return "";
+      }
+      ++s;
+      return s;
+}
+
+inline
+int cacaoInterface::getAOCalib()
+{
+   std::string calsrc = "/milk/shm/aol" + m_loopNumber + "_calib_source.txt";
+
+   std::ifstream fin;
+
+   //First read in the milk/shm directory name, which could be to a symlinked directory
+   fin.open(calsrc);
+   if(!fin)
    {
-      return log<software_error, -1>({__FILE__, __LINE__, errno, "cacaoInterface::tmuxSendKeys error executing command"});
+      return 0;
+   }
+   fin >> calsrc;
+   fin.close();
+
+   //Now read in the actual directory
+   calsrc += "/aol" +  m_loopNumber + "_calib_dir.txt";
+   fin.open(calsrc);
+   if(!fin)
+   {
+      return log<software_error, -1>({__FILE__, __LINE__, errno, "userGainCtrl::getAOCalib failed to open: " + calsrc});
+   }
+   fin >> m_aoCalDir;
+   fin.close();
+
+   std::string name = "";
+   size_t np = m_aoCalDir.rfind('/');
+   int nf = 1;
+   while(np != std::string::npos && np != 0 && nf < 4)
+   {
+      np = m_aoCalDir.rfind('/',np-1);
+      ++nf;
    }
 
-   if(errout.size() > 0)
+   if(np == std::string::npos)
    {
-      //Here we ignore session not found, since it just means AO loop not running
-      if( errout[0].find("session not found") == std::string::npos)
-      {
-         for(size_t n=0; n < errout.size(); ++n)
-         {
-            log<text_log>("tmuxSendKeys stderr: " + errout[n], logPrio::LOG_ERROR);
-         }
-         return -1;
-      }
+      return log<software_error, -1>({__FILE__, __LINE__, errno, "userGainCtrl::getAOCalib failed to find loop name in: " + m_aoCalDir});
    }
+
+   ++np;
+   size_t ne = m_aoCalDir.find('/', np+1);
    
-   //should be empty, but for later investigation if something comes out
-   if(output.size() > 0)
+   if(ne == std::string::npos)
    {
-      std::cout << "send-keys returned: ";
-      for(size_t n=0; n<output.size(); ++n) std::cout << "\n   " << output[n];
-      std::cout << '\n';
+      return log<software_error, -1>({__FILE__, __LINE__, errno, "userGainCtrl::getAOCalib failed to find loop name in: " + m_aoCalDir});
    }
+
    
+   m_loopName = m_aoCalDir.substr(np, ne-np);
+
+   m_fpsFifo = "/milk/shm/" + m_loopName + "_fpsCTRL.fifo";
+
+   calsrc = "/milk/shm/aol" + m_loopNumber + "_calib_loaded.txt";
+   fin.open(calsrc);
+   if(!fin)
+   {
+      return log<software_error, -1>({__FILE__, __LINE__, errno, "userGainCtrl::getAOCalib failed to open: " + calsrc});
+   }
+   fin >> m_aoCalLoadTime;
+   fin.close();
+   
+
+   calsrc = m_aoCalDir + "/aol" + m_loopNumber + "_calib_archived.txt";
+   
+   fin.open(calsrc);
+   if(!fin)
+   {
+      return log<software_error, -1>({__FILE__, __LINE__, errno, "userGainCtrl::getAOCalib failed to open: " + calsrc});
+   }
+
+   while(!fin.eof())
+   {
+      fin >> m_aoCalArchiveTime;
+   }
+   fin.close();
+   
+
    return 0;
 }
 
@@ -503,158 +705,76 @@ int cacaoInterface::checkLoopProcesses()
 }
 
 int cacaoInterface::setGain()
-{
-   //This executes the commands in the file aolconfscripts/aolconf_menucontrolloop for "g)"
-   
-   //echo "$loopgain" > ./conf/param_loopgain.txt
-   if(updateStatus("conf/param_loopgain.txt", m_gain_target) < 0)
-   {
-      return log<software_error, -1>({__FILE__, __LINE__, errno, "cacaoInterface::setGain error updating gain status"});
-   }
-   
-   //tmux send-keys -t aol${LOOPNUMBER}-ctr "aolsetgain ${loopgain}" C-m
-   if(tmuxSendKeys( "aol" + m_loopNumber + "-ctr", "aolsetgain " + std::to_string(m_gain_target)) < 0)
-   {
-      return log<software_error, -1>({__FILE__, __LINE__, errno, "cacaoInterface::setGain error from tmuxSendKeys"});
-   }
-   
-   //aoconfLogStatusUpdate "${SLOOPNAME}_gain ${loopgain}"
-   //aoconflogext "set gain ${loopgain}"
-
-   return 0;
+{   
+   recordLoopGain(true);
+   return setFPSVal("mfilt", "loopgain", m_gain_target);
 }
 
 int cacaoInterface::setMultCoeff()
 {
-   //This executes the commands in the file aolconfscripts/aolconf_menucontrolloop for "e)"
-   
-   //echo "$loopmultcoeff" > ./conf/param_loopmultcoeff.txt
-   if(updateStatus("conf/param_loopmultcoeff.txt", m_multCoeff_target) < 0)
-   {
-      return log<software_error, -1>({__FILE__, __LINE__, errno, "cacaoInterface::setMultCoeff error updating mult coeff status"});
-   }
-   
-   //tmux send-keys -t aol${LOOPNUMBER}-ctr "aolsetmult ${loopmultcoeff}" C-m
-   if(tmuxSendKeys( "aol" + m_loopNumber + "-ctr", "aolsetmult " + std::to_string(m_multCoeff_target)) < 0)
-   {
-      return log<software_error, -1>({__FILE__, __LINE__, errno, "cacaoInterface::setMultCoeff error from tmuxSendKeys"});
-   }
-   
-   //aoconfLogStatusUpdate "${SLOOPNAME}_leak ${loopmultcoeff}"
-   //aoconflogext "set mult coeff ${loopmultcoeff}"
-
-   return 0;
+   recordLoopGain(true);
+   return setFPSVal("mfilt", "loopmult", m_multCoeff_target);
 }
 
 int cacaoInterface::setMaxLim()
 {
-   //This executes the commands in the file aolconfscripts/aolconf_menucontrolloop for "m)"
-   
-   //echo "$loopmaxlim" > ./conf/param_loopmaxlim.txt
-   if(updateStatus("conf/param_loopmaxlim.txt", m_maxLim_target) < 0)
-   {
-      return log<software_error, -1>({__FILE__, __LINE__, errno, "cacaoInterface::setMaxLim error updating max lim status"});
-   }
-   
-   //tmux send-keys -t aol${LOOPNUMBER}-ctr "aolsetmaxlim ${loopmaxlim}" C-m
-   if(tmuxSendKeys( "aol" + m_loopNumber + "-ctr", "aolsetmaxlim " + std::to_string(m_maxLim_target)) < 0)
-   {
-      return log<software_error, -1>({__FILE__, __LINE__, errno, "cacaoInterface::setMaxLim error from tmuxSendKeys"});
-   }
-
-   //aoconflogext "set max limit ${loopmaxlim}"
-
-   
-
-   return 0;
+   recordLoopGain(true);
+   return setFPSVal("mfilt", "looplimit", m_maxLim_target);
 }
 
 int cacaoInterface::loopOn()
 {
-   if(!m_loopProcesses)
+   recordLoopGain(true);
+   if( setFPSVal("mfilt", "loopON", std::string("ON")) != 0)
    {
-      log<text_log>("loop processes are not running.", logPrio::LOG_WARNING);
-      return 0;
-   }
-   
-   //This is equivalent to function_LOOP_ON "NULL" # in aolconf_controlloop_funcs
-   //But we don't write the script, we just execute everything directly.
-   
-   //echo "echo \" ON\" > ./status/stat_loopON.txt" >> $scriptfile
-   if(updateStatus("status/stat_loopON.txt", " ON") < 0)
-   {
-      return log<software_error, -1>({__FILE__, __LINE__, errno, "cacaoInterface::loopOn error updating loop status"});
-   }
-   
-   //echo "./aolconfscripts/aollog -e \"$LOOPNAME\" \"LOOP ON [gain = ${loopgain}   maxlim = ${loopmaxlim}   multcoeff = ${loopmultcoeff}]\"" >> $scriptfile
-   
-   //echo "tmux send-keys -t aol${LOOPNUMBER}-ctr \"aolon\" C-m" >> $scriptfile
-   if(tmuxSendKeys( "aol" + m_loopNumber + "-ctr", "aolon") < 0)
-   {
-      return log<software_error, -1>({__FILE__, __LINE__, errno, "cacaoInterface::loopOn error from tmuxSendKeys"});
+      return log<software_error,-1>({__FILE__, __LINE__, "error setting FPS val"});
    }
    
    log<loop_closed>();
-   
-   ///\todo we don't seem to have setupAOloopON, do we need it?
-   //echo "./setupAOloopON" >> $scriptfile
-   
-   //if [ "$logMode" = "1" ]; then   # log when loop is closed
-   //      start_Telemetrylog_all
-   //fi
       
-   ///\todo implement telemetry logging from cacao
-   /*if(m_logMode == 1)
-   {
-      //start_Telemetrylog_all
-   }*/
-   
    return 0;
    
 }
 
 int cacaoInterface::loopOff()
 {
-   //This is equivalent to function_LOOP_OFF "NULL" # in aolconf_controlloop_funcs
-   //But we don't write the script, we just execute everything directly.
-   
-   //echo "echo \" OFF\" > ./status/stat_loopON.txt" >> $scriptfile
-   if(updateStatus("status/stat_loopON.txt", "OFF") < 0)
+   recordLoopGain(true);
+   if( setFPSVal("mfilt", "loopON", std::string("OFF")) != 0)
    {
-      return log<software_error, -1>({__FILE__, __LINE__, errno, "cacaoInterface::loopOff error updating loop status"});
+      return log<software_error,-1>({__FILE__, __LINE__, "error setting FPS val"});
    }
-   
-   //echo "./aolconfscripts/aollog -e \"$LOOPNAME\" \"LOOP OFF\"" >> $scriptfile
-   
-   //echo "tmux send-keys -t aol${LOOPNUMBER}-ctr \"aoloff\" C-m" >> $scriptfile
-   if(tmuxSendKeys( "aol" + m_loopNumber + "-ctr", "aoloff") < 0)
+
+   if(m_gain == 0)
    {
-      return log<software_error, -1>({__FILE__, __LINE__, errno, "cacaoInterface::loopOff error from tmuxSendKeys"});
+      log<loop_open>();
    }
-   
-   log<loop_open>();
-   
-   ///\todo we don't seem to have setupAOloopOff, do we need it?
-   //echo "./setupAOloopO" >> $scriptfile
-   
-   //if [ "$logMode" = "1" ]; then   # log when loop is closed
-   //      stop_Telemetrylog_all
-   //fi
-      
-   ///\todo implement telemetry logging from cacao
-   /*if(m_logMode == 1)
+   else
    {
-      //stop_Telemetrylog_all
-   }*/
+      log<loop_paused>();
+   }
    
    return 0;
    
+}
+
+int cacaoInterface::loopZero()
+{
+   if( setFPSVal("mfilt", "loopZERO", std::string("ON")) != 0)
+   {
+      return log<software_error,-1>({__FILE__, __LINE__, "error setting FPS val"});
+   }
+
+   log<text_log>("loop zeroed", logPrio::LOG_NOTICE);
+   
+   return 0;
+
 }
 
 void cacaoInterface::fmThreadStart( cacaoInterface * c )
 {
    c->fmThreadExec();
 }
+
 
 void cacaoInterface::fmThreadExec( )
 {
@@ -664,12 +784,62 @@ void cacaoInterface::fmThreadExec( )
    {
       sleep(1);
    }
-   
-   std::ifstream fin;
-   std::string proc, loop;
-   
+      
    while(shutdown() == 0)
    {
+      if(m_fpsFifo == "")
+      {
+         sleep(1);
+         continue;
+      }
+
+      std::string ans = getFPSValStr("mfilt", "loopON");
+
+      if(ans[1] == 'F')
+      {
+         m_loopState = 0;
+        /* if(m_gain == 0)
+         {
+            m_loopState = 0; //open
+         }
+         else 
+         {
+            m_loopState = 1; //paused -- gains set, but loop not updating so leak not in effect
+         }*/
+      }
+      else m_loopState = 2; //closed
+
+      ans = getFPSValNum("mfilt", "loopgain");
+      try
+      {
+         m_gain = std::stof(ans);
+      }   
+      catch(const std::exception& e)
+      {
+         m_gain = 0;
+      }
+      
+      ans = getFPSValNum("mfilt", "loopmult");
+      try
+      {
+         m_multCoeff = std::stof(ans);
+      }
+      catch(...)
+      {
+         m_multCoeff = 0;
+      }
+      ans = getFPSValNum("mfilt", "looplimit");
+      try
+      {
+         m_maxLim = std::stof(ans);
+      }
+      catch(...)
+      {
+         m_maxLim = 0;
+      }
+
+      recordLoopGain();
+      /*
       fin.open( m_loopDir +  "/status/stat_procON.txt");
       
       if(fin.is_open()) 
@@ -678,58 +848,9 @@ void cacaoInterface::fmThreadExec( )
       }
       fin.close();
       
-      fin.open( m_loopDir +  "/status/stat_loopON.txt");
-      
-      if(fin.is_open()) 
-      {
-         fin >> loop;
-      }
-      fin.close();
-      
-      fin.open(m_loopDir +  "/conf/param_loopgain.txt");
-      
-      if(fin.is_open()) 
-      {
-         fin >> m_gain;
-      }
-      fin.close();
-      
-      fin.open(m_loopDir +  "/conf/param_loopmaxlim.txt");
-      
-      if(fin.is_open()) 
-      {
-         fin >> m_maxLim;
-      }
-      fin.close();
-      
-      fin.open(m_loopDir +  "/conf/param_loopmultcoeff.txt");
-      
-      if(fin.is_open()) 
-      {
-         fin >> m_multCoeff;
-      }
-      fin.close();
+      */
 
-      if(proc[1] == 'F')
-      {
-         m_loopProcesses_stat = false;
-      }
-      else
-      {
-         m_loopProcesses_stat = true;
-      }
-      
-      if(loop[1] == 'F')
-      {
-         m_loopState = 0; //open
-      }
-      else if(m_gain == 0)
-      {
-         m_loopState = 1; //paused
-      }
-      else m_loopState = 2; //closed
-            
-      mx::sys::milliSleep(100);
+      mx::sys::milliSleep(1000);
 
    }
    
@@ -796,6 +917,27 @@ INDI_NEWCALLBACK_DEFN(cacaoInterface, m_indiP_loopGain )(const pcf::IndiProperty
    updateIfChanged(m_indiP_loopGain, "target", m_gain_target);
 
    return setGain();
+}
+
+INDI_NEWCALLBACK_DEFN(cacaoInterface, m_indiP_loopZero )(const pcf::IndiProperty &ipRecv)
+{
+   if(ipRecv.getName() != m_indiP_loopZero.getName())
+   {
+      log<software_error>({__FILE__,__LINE__, "wrong INDI property received."});
+      return -1;
+   }
+      
+   if(!ipRecv.find("request")) return 0;
+           
+   std::unique_lock<std::mutex> lock(m_indiMutex);
+      
+   if( ipRecv["request"].getSwitchState() == pcf::IndiElement::On)
+   {
+      return loopZero();
+   }   
+   std::cerr << "off?\n";
+   
+   return 0;
 }
 
 INDI_NEWCALLBACK_DEFN(cacaoInterface, m_indiP_multCoeff )(const pcf::IndiProperty &ipRecv)
@@ -867,6 +1009,39 @@ INDI_NEWCALLBACK_DEFN(cacaoInterface, m_indiP_maxLim )(const pcf::IndiProperty &
    updateIfChanged(m_indiP_maxLim, "target", target);
       
    return setMaxLim();
+}
+
+inline
+int cacaoInterface::checkRecordTimes()
+{
+   return telemeterT::checkRecordTimes(telem_loopgain());
+}
+
+inline
+int cacaoInterface::recordTelem( const telem_loopgain * )
+{
+   return recordLoopGain(true);
+}
+
+inline
+int cacaoInterface::recordLoopGain( bool force )
+{
+   static uint8_t state {0};
+   static float gain {-1000};
+   static float multcoef {0};
+   static float limit {0};
+
+   if(state != m_loopState || gain != m_gain || multcoef != m_multCoeff || limit != m_maxLim || force)
+   {
+      state = m_loopState;
+      gain = m_gain;
+      multcoef = m_multCoeff;
+      limit = m_maxLim;
+
+      telem<telem_loopgain>({state, m_gain, m_multCoeff, m_maxLim});
+   }
+
+   return 0;
 }
 
 } //namespace app

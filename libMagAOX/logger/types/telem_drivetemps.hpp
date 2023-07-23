@@ -49,6 +49,14 @@ struct telem_drivetemps : public flatbuffer_log
 
    };
 
+   static bool verify( flatlogs::bufferPtrT & logBuff,  ///< [in] Buffer containing the flatbuffer serialized message.
+                       flatlogs::msgLenT len            ///< [in] length of msgBuffer.
+                     )
+   {
+      auto verifier = flatbuffers::Verifier( (uint8_t*) flatlogs::logHeader::messageBuffer(logBuff), static_cast<size_t>(len));
+      return VerifyTelem_drivetemps_fbBuffer(verifier);
+   }
+
    ///Get the message formatted for human consumption.
    static std::string msgString( void * msgBuffer,  /**< [in] Buffer containing the flatbuffer serialized message.*/
                                  flatlogs::msgLenT len  /**< [in] [unused] length of msgBuffer.*/
@@ -65,10 +73,8 @@ struct telem_drivetemps : public flatbuffer_log
       {
          msg+= "[hdd temps] ";
          
-         //flatbuffers::VectorOfStrings<std::string>::iterator nit = rgs->diskName()->begin();
-         
          int i=0;
-         for(flatbuffers::Vector<float>::iterator it = rgs->diskTemp()->begin(); it != rgs->diskTemp()->end(); ++it, ++i) 
+         for(flatbuffers::Vector<float>::const_iterator it = rgs->diskTemp()->begin(); it != rgs->diskTemp()->end(); ++it, ++i)
          {
             msg += rgs->diskName()->GetAsString(i)->c_str();
             msg += ":";
@@ -79,6 +85,13 @@ struct telem_drivetemps : public flatbuffer_log
 
       return msg;
 
+   }
+
+   static std::string msgJSON( void * msgBuffer,  /**< [in] Buffer containing the flatbuffer serialized message.*/
+                               flatlogs::msgLenT len  /**< [in] [unused] length of msgBuffer.*/
+                             )
+   {
+      return makeJSON(msgBuffer, len, Telem_drivetemps_fbTypeTable());
    }
 
 }; //telem_drivetemps

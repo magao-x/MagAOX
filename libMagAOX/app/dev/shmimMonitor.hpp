@@ -10,8 +10,8 @@
 #define shmimMonitor_hpp
 
 
-#include <ImageStruct.h>
-#include <ImageStreamIO.h>
+#include <ImageStreamIO/ImageStruct.h>
+#include <ImageStreamIO/ImageStreamIO.h>
 
 #include "../../libMagAOX/common/paths.hpp"
 
@@ -85,6 +85,8 @@ protected:
    std::string m_shmimName {""}; ///< The name of the shared memory image, is used in `/tmp/<shmimName>.im.shm`. Derived classes should set a default.
       
    int m_smThreadPrio {2}; ///< Priority of the shmimMonitor thread, should normally be > 00.
+
+   std::string m_smCpuset; ///< The cpuset to assign the shmimMonitor thread to.  Ignored if empty (the default).
    
    ///@}
    
@@ -94,6 +96,7 @@ protected:
    
    uint32_t m_width {0}; ///< The width of the images in the stream
    uint32_t m_height {0}; ///< The height of the images in the stream
+   uint32_t m_depth {0}; ///< The depth of the circular buffer in the stream
    
    uint8_t m_dataType{0}; ///< The ImageStreamIO type code.
    size_t m_typeSize {0}; ///< The size of the type, in bytes.  Result of sizeof.
@@ -163,7 +166,7 @@ protected:
    
    /** \name SIGSEGV & SIGBUS signal handling
      * These signals occur as a result of a ImageStreamIO source server resetting (e.g. changing frame sizes).
-     * When they occur a restart of the framegrabber and framewriter thread main loops is triggered.
+     * When they occur a restart of the shmim monitor thread main loops is triggered.
      * 
      * @{
      */ 
@@ -255,6 +258,8 @@ void shmimMonitor<derivedT, specificT>::setupConfig(mx::app::appConfigurator & c
 {
    config.add(specificT::configSection()+".threadPrio", "", specificT::configSection()+".threadPrio", argType::Required, specificT::configSection(), "threadPrio", false, "int", "The real-time priority of the shmimMonitor thread.");
    
+   config.add(specificT::configSection()+".cpuset", "", specificT::configSection()+".cpuset", argType::Required, specificT::configSection(), "cpuset", false, "string", "The cpuset for the shmimMonitor thread.");
+   
    config.add(specificT::configSection()+".shmimName", "", specificT::configSection()+".shmimName", argType::Required, specificT::configSection(), "shmimName", false, "string", "The name of the ImageStreamIO shared memory image. Will be used as /tmp/<shmimName>.im.shm.");
    
    //Set this here to allow derived classes to set their own default before calling loadConfig
@@ -266,6 +271,7 @@ template<class derivedT, class specificT>
 void shmimMonitor<derivedT, specificT>::loadConfig(mx::app::appConfigurator & config)
 {
    config(m_smThreadPrio, specificT::configSection() + ".threadPrio");
+   config(m_smCpuset, specificT::configSection() + ".cpuset");
    config(m_shmimName, specificT::configSection() + ".shmimName");
   
 }
@@ -337,7 +343,7 @@ int shmimMonitor<derivedT, specificT>::appStartup()
       return -1;
    }
    
-   if(derived().threadStart( m_smThread, m_smThreadInit, m_smThreadID, m_smThreadProp, m_smThreadPrio, specificT::configSection(), this, smThreadStart) < 0)
+   if(derived().threadStart( m_smThread, m_smThreadInit, m_smThreadID, m_smThreadProp, m_smThreadPrio, m_smCpuset, specificT::configSection(), this, smThreadStart) < 0)
    {
       derivedT::template log<software_error>({__FILE__, __LINE__});
       return -1;
@@ -353,7 +359,7 @@ int shmimMonitor<derivedT, specificT>::appLogic()
    //do a join check to see if other threads have exited.
    if(pthread_tryjoin_np(m_smThread.native_handle(),0) == 0)
    {
-      derivedT::template log<software_error>({__FILE__, __LINE__, "shmimMonitor thread has exited"});
+      derivedT::template log<software_error>({__FILE__, __LINE__, "shmimMonitor thread " + std::to_string(m_smThreadID) + " has exited"});
       
       return -1;
    }
@@ -429,9 +435,9 @@ void shmimMonitor<derivedT, specificT>::_handlerSigSegv( int signum,
 
 template<class derivedT, class specificT>
 void shmimMonitor<derivedT, specificT>::handlerSigSegv( int signum,
-                                             siginfo_t *siginf,
-                                             void *ucont
-                                           )
+                                                        siginfo_t *siginf,
+                                                        void *ucont
+                                                      )
 {
    static_cast<void>(signum);
    static_cast<void>(siginf);
@@ -462,7 +468,7 @@ void shmimMonitor<derivedT, specificT>::smThreadExec()
    
    bool opened = false;
    
-   bool semgot = false;
+   //bool semgot = false;
 
    while(derived().shutdown() == 0)
    {
@@ -517,25 +523,25 @@ void shmimMonitor<derivedT, specificT>::smThreadExec()
          }
       }
       
-      if(derived().m_shutdown || !opened) return;
-    
-      ///\todo once we upgrade to the mythical new CACAO, nuke this entire dumpster fire from orbit.  Just to be sure.
-      if(!semgot) //this is a gross hack to prevent running up the semaphore number and exhausting it.
+      if(m_restart) continue; //this is kinda dumb.  we just go around on restart, so why test in the while loop at all?
+
+      if(derived().state() != stateCodes::OPERATING) continue;
+
+      if(derived().m_shutdown)
       {
-         if(m_semaphoreNumber == 0) m_semaphoreNumber = 6; ///Move past CACAO hard coded things -- \todo need to return to this being a config/
-         int actSem = 1;
-         while(actSem == 1)//Don't accept semaphore 1 cuz it don't work.
-         {
-            m_semaphoreNumber = ImageStreamIO_getsemwaitindex(&m_imageStream, m_semaphoreNumber); //ask for semaphore we had before
-            if(m_semaphoreNumber == -1)
-            {
-               derivedT::template log<software_critical>({__FILE__,__LINE__, "could not get semaphore index"});
-               return;
-            }
-            actSem = m_semaphoreNumber;
-         }
+         if(!opened) return; 
+       
+         ImageStreamIO_closeIm(&m_imageStream);
+         return;
       }
-      semgot = true;
+
+      m_semaphoreNumber = ImageStreamIO_getsemwaitindex(&m_imageStream, m_semaphoreNumber); //ask for semaphore we had before
+
+      if(m_semaphoreNumber < 0)
+      {
+         derivedT::template log<software_critical>({__FILE__,__LINE__, "No valid semaphore found for " + m_shmimName + ". Source process will need to be restarted."});
+         return;
+      }
 
       derivedT::template log<software_info>({__FILE__,__LINE__, "got semaphore index " + std::to_string(m_semaphoreNumber) + " for " + m_shmimName });
       
@@ -546,10 +552,28 @@ void shmimMonitor<derivedT, specificT>::smThreadExec()
       m_dataType = m_imageStream.md[0].datatype;
       m_typeSize = ImageStreamIO_typesize(m_dataType);
       m_width = m_imageStream.md[0].size[0];
-      m_height = m_imageStream.md[0].size[1];
-      size_t length = m_imageStream.md[0].size[2];
+      int dim = 1;
+      if(m_imageStream.md[0].naxis > 1)
+      {
+         m_height = m_imageStream.md[0].size[1];
+         
+         if(m_imageStream.md[0].naxis > 2)
+         {
+            dim = 3;
+            m_depth = m_imageStream.md[0].size[2];
+         }
+         else
+         {
+            dim = 2;
+            m_depth = 1;
+         }
+      }
+      else
+      {
+         m_height = 1;
+         m_depth = 1;
+      }
 
-      
       if( derived().allocate( specificT()) < 0)
       {
          derivedT::template log<software_error>({__FILE__,__LINE__, "allocation failed"});
@@ -560,7 +584,7 @@ void shmimMonitor<derivedT, specificT>::smThreadExec()
       size_t snx, sny, snz;
       uint64_t curr_image; //The current cnt1 index
       
-      if(m_getExistingFirst && !m_restart) //If true, we always get the existing image without waiting on the semaphore.
+      if(m_getExistingFirst && !m_restart && derived().shutdown() == 0) //If true, we always get the existing image without waiting on the semaphore.
       {
          if(m_imageStream.md[0].size[2] > 0) ///\todo change to naxis?
          {
@@ -570,12 +594,26 @@ void shmimMonitor<derivedT, specificT>::smThreadExec()
          
          atype = m_imageStream.md[0].datatype;
          snx = m_imageStream.md[0].size[0];
-         sny = m_imageStream.md[0].size[1];
-         snz = m_imageStream.md[0].size[2];
-         
-         if( atype!= m_dataType || snx != m_width || sny != m_height || snz != length )
+
+         if(dim == 2)
          {
-            break; //exit the nearest while loop and get the new image setup.
+            sny = m_imageStream.md[0].size[1];
+            snz = 1;
+         }
+         else if(dim == 3)
+         {
+            sny = m_imageStream.md[0].size[1];
+            snz = m_imageStream.md[0].size[2];
+         }
+         else
+         {
+            sny = 1;
+            snz = 1;
+         }
+         
+         if( atype!= m_dataType || snx != m_width || sny != m_height || snz != m_depth )
+         {
+            continue; //exit the nearest while loop and get the new image setup.
          }
          
          char * curr_src = (char *)  m_imageStream.array.raw + curr_image*m_width*m_height*m_typeSize;
@@ -610,10 +648,24 @@ void shmimMonitor<derivedT, specificT>::smThreadExec()
 
             atype = m_imageStream.md[0].datatype;
             snx = m_imageStream.md[0].size[0];
-            sny = m_imageStream.md[0].size[1];
-            snz = m_imageStream.md[0].size[2];
-         
-            if( atype!= m_dataType || snx != m_width || sny != m_height || snz != length )
+
+            if(dim == 2)
+            {
+               sny = m_imageStream.md[0].size[1];
+               snz = 1;
+            }
+            else if(dim == 3)
+            {
+               sny = m_imageStream.md[0].size[1];
+               snz = m_imageStream.md[0].size[2];
+            }
+            else
+            {
+               sny = 1;
+               snz = 1;
+            }
+
+            if( atype!= m_dataType || snx != m_width || sny != m_height || snz != m_depth )
             {
                break; //exit the nearest while loop and get the new image setup.
             }
@@ -641,7 +693,9 @@ void shmimMonitor<derivedT, specificT>::smThreadExec()
                derivedT::template log<software_error>({__FILE__, __LINE__,errno, "sem_timedwait"});
                break;
             }
+
          }
+
       }
        
       //*******
@@ -649,12 +703,14 @@ void shmimMonitor<derivedT, specificT>::smThreadExec()
       //*******
       
       //opened == true if we can get to this 
+      if(m_semaphoreNumber >= 0) m_imageStream.semReadPID[m_semaphoreNumber] = 0; //release semaphore
       ImageStreamIO_closeIm(&m_imageStream);
       opened = false;
       
    } //outer loop, will exit if m_shutdown==true
       
-      
+   derivedT::template log<software_error>({__FILE__,__LINE__, std::to_string(m_smThreadID) + " " + std::to_string(derived().shutdown() == 0)});
+   
    //*******
    // call derived().cleanup()
    //*******   

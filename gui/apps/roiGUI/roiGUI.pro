@@ -21,6 +21,9 @@ CONFIG += qwt
 exists( $$(CONDA_PREFIX)/include ) {
     INCLUDEPATH += $$(CONDA_PREFIX)/include
 }
+exists( $$(CONDA_PREFIX)/lib ) {
+    INCLUDEPATH += $$(CONDA_PREFIX)/lib
+}
 
 MAKEFILE = makefile.roiGUI
 

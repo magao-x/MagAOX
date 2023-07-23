@@ -323,37 +323,44 @@ int readoutParams( int & newa,
 }
 
 int vshiftParams( int & newvs,
-                  const std::string & vssn
+                  const std::string & vssn,
+                  float & vs
                 )
 {
    if(vssn == "0_3us")
    {
       newvs = 0;
+      vs = 0.3;
       return 0;
    }
    else if(vssn == "0_5us")
    {
       newvs = 1;
+      vs = 0.5;
       return 0;
    }
    else if(vssn == "0_9us")
    {
       newvs = 2;
+      vs = 0.9;
       return 0;
    }
    else if(vssn == "1_7us")
    {
       newvs = 3;
+      vs = 1.7;
       return 0;
    }
    else if(vssn == "3_3us")
    {
       newvs = 4;
+      vs = 3.3;
       return 0;
    }
    else
    {
       newvs = 0;
+      vs = 0.3;
       return -1;
    }
 }
@@ -405,6 +412,8 @@ public:
 
    static constexpr bool c_stdCamera_fps = true; ///< app::dev config to tell stdCamera not to expose FPS status
    
+   static constexpr bool c_stdCamera_synchro = false; ///< app::dev config to tell stdCamera to not expose synchro mode controls
+
    static constexpr bool c_stdCamera_usesModes = false; ///< app:dev config to tell stdCamera not to expose mode controls
    
    static constexpr bool c_stdCamera_usesROI = true; ///< app:dev config to tell stdCamera to expose ROI controls
@@ -412,6 +421,8 @@ public:
    static constexpr bool c_stdCamera_cropMode = true; ///< app:dev config to tell stdCamera to expose Crop Mode controls
    
    static constexpr bool c_stdCamera_hasShutter = true; ///< app:dev config to tell stdCamera to expose shutter controls
+
+   static constexpr bool c_stdCamera_usesStateString = false; ///< app::dev confg to tell stdCamera to expose the state string property
 
    static constexpr bool c_edtCamera_relativeConfigPath = false; ///< app::dev config to tell edtCamera to use absolute path to camera config file
    
@@ -434,6 +445,7 @@ protected:
    
    bool m_libInit {false}; ///< Whether or not the Andor SDK library is initialized.
 
+   bool m_poweredOn {false};
    
 public:
 
@@ -583,7 +595,7 @@ andorCtrl::andorCtrl() : MagAOXApp(MAGAOX_CURRENT_SHA1, MAGAOX_REPO_MODIFIED)
    m_powerMgtEnabled = true;
    m_powerOnWait = 10;
    
-   m_startupTemp = 20;
+   m_startupTemp = -45;
    
    m_defaultReadoutSpeed  = "emccd_17MHz";
    m_readoutSpeedNames = {"ccd_00_08MHz", "ccd_01MHz", "ccd_03MHz", "emccd_01MHz", "emccd_05MHz", "emccd_10MHz", "emccd_17MHz"};
@@ -712,19 +724,19 @@ int andorCtrl::appStartup()
 inline
 int andorCtrl::appLogic()
 {
-   //and run stdCamera's appLogic
+   //run stdCamera's appLogic
    if(dev::stdCamera<andorCtrl>::appLogic() < 0)
    {
       return log<software_error, -1>({__FILE__, __LINE__});
    }
    
-   //and run edtCamera's appLogic
+   //run edtCamera's appLogic
    if(dev::edtCamera<andorCtrl>::appLogic() < 0)
    {
       return log<software_error, -1>({__FILE__, __LINE__});
    }
    
-   //first run frameGrabber's appLogic to see if the f.g. thread has exited.
+   //run frameGrabber's appLogic to see if the f.g. thread has exited.
    if(dev::frameGrabber<andorCtrl>::appLogic() < 0)
    {
       return log<software_error, -1>({__FILE__, __LINE__});
@@ -750,6 +762,16 @@ int andorCtrl::appLogic()
       m_shutterStatus = "READY";
 
       state(stateCodes::READY);
+
+      if(m_poweredOn && m_ccdTempSetpt > -999)
+      {
+         m_poweredOn = false;
+         if(setTempSetPt() < 0)
+         {
+            if(powerState() != 1 || powerStateTarget() != 1) return 0;
+            return log<software_error,0>({__FILE__,__LINE__});
+         }
+      }
    }
 
    if( state() == stateCodes::READY || state() == stateCodes::OPERATING )
@@ -824,7 +846,7 @@ int andorCtrl::onPowerOff()
 {
    if(m_libInit)
    {
-      //ShutDown();
+      ShutDown();
       m_libInit = false;
    }
       
@@ -850,6 +872,9 @@ int andorCtrl::onPowerOff()
       log<software_error>({__FILE__, __LINE__});
    }
    
+   //Setting m_poweredOn
+   m_poweredOn = true;
+
    return 0;
 }
 
@@ -908,13 +933,16 @@ int andorCtrl::cameraSelect()
          {
             log<text_log>("No Andor USB camera found", logPrio::LOG_WARNING);
          }
-         
+
+         ShutDown();
+
          //Not an error, appLogic should just go on.
          return 0;
       }
       else if(error!=DRV_SUCCESS)
       {
          log<software_critical>({__FILE__, __LINE__, "ANDOR SDK initialization failed: " + andorSDKErrorName(error)});
+         ShutDown();
          return -1;
       }
       
@@ -1138,7 +1166,8 @@ int andorCtrl::cameraSelect()
    m_vShiftSpeedNameSet = m_vShiftSpeedName;
    
    int newvs;
-   if(vshiftParams(newvs,m_vShiftSpeedNameSet) < 0)
+   float vs;
+   if(vshiftParams(newvs,m_vShiftSpeedNameSet, vs) < 0)
    {
       return log<text_log,-1>("invalid default vert. shift speed: " + m_vShiftSpeedNameSet, logPrio::LOG_ERROR);
    }
@@ -1149,6 +1178,8 @@ int andorCtrl::cameraSelect()
    {
       return log<software_error,-1>({__FILE__, __LINE__, std::string("Andor SDK Error from SetVSSpeed: ") + andorSDKErrorName(error)});
    }
+
+   m_vshiftSpeed = vs;
    // Set the amplifier
    /* See page 298
     */
@@ -1256,6 +1287,8 @@ int andorCtrl::getEMGain()
       return -1;
    }
 
+   if(gain == 0) gain = 1;
+
    m_emGain = gain;
    
    return 0;
@@ -1320,8 +1353,8 @@ int andorCtrl::setVShiftSpeed()
    state(stateCodes::CONFIGURING);
 
    int newvs;
-   
-   if( vshiftParams(newvs, m_vShiftSpeedNameSet) < 0)
+   float vs;
+   if( vshiftParams(newvs, m_vShiftSpeedNameSet, vs) < 0)
    {
       return log<text_log,-1>("invalid vertical shift speed: " + m_vShiftSpeedNameSet);
    }
@@ -1338,7 +1371,8 @@ int andorCtrl::setVShiftSpeed()
 
       
    m_vShiftSpeedName = m_vShiftSpeedNameSet;
-   
+   m_vshiftSpeed = vs;
+
    m_nextMode = m_modeName;
    m_reconfig = true;
 
@@ -1360,6 +1394,9 @@ int andorCtrl::setEMGain()
    }
    
    int emg = m_emGainSet;
+
+   if(emg == 1) emg = 0;
+
    if(emg < 0)
    {
       emg = 0;
@@ -1456,12 +1493,15 @@ int andorCtrl::writeConfig()
       log<software_error>({__FILE__, __LINE__, "error opening config file for writing"});
       return -1;
    }
+
+   int w = m_nextROI.w / m_nextROI.bin_x;
+   int h = m_nextROI.h / m_nextROI.bin_y;
    
    fout << "camera_class:                  \"Andor\"\n";
    fout << "camera_model:                  \"iXon Ultra 897\"\n";
    fout << "camera_info:                   \"512x512 (1-tap, freerun)\"\n";
-   fout << "width:                         " << m_nextROI.w << "\n";
-   fout << "height:                        " << m_nextROI.h << "\n";
+   fout << "width:                         " << w << "\n";
+   fout << "height:                        " << h << "\n";
    fout << "depth:                         16\n";
    fout << "extdepth:                      16\n";
    fout << "CL_DATA_PATH_NORM:             0f       # single tap\n";
@@ -1491,15 +1531,15 @@ int andorCtrl::powerOnDefaults()
    m_currentROI.y = m_default_y;
    m_currentROI.w = m_default_w;
    m_currentROI.h = m_default_h;
-   m_currentROI.bin_x = 1;
-   m_currentROI.bin_y = 1;
+   m_currentROI.bin_x = m_default_bin_x;
+   m_currentROI.bin_y = m_default_bin_y;
    
    m_nextROI.x = m_default_x;
    m_nextROI.y = m_default_y;
    m_nextROI.w = m_default_w;
    m_nextROI.h = m_default_h;
-   m_nextROI.bin_x = 1;
-   m_nextROI.bin_y = 1;
+   m_nextROI.bin_x = m_default_bin_x;
+   m_nextROI.bin_y = m_default_bin_y;
    
    return 0;
 }
@@ -1612,15 +1652,7 @@ int andorCtrl::checkNextROI()
 
 inline 
 int andorCtrl::setNextROI()
-{
-   std::cerr << "setNextROI:\n";
-   std::cerr << "  m_nextROI.x = " << m_nextROI.x << "\n";
-   std::cerr << "  m_nextROI.y = " << m_nextROI.y << "\n";
-   std::cerr << "  m_nextROI.w = " << m_nextROI.w << "\n";
-   std::cerr << "  m_nextROI.h = " << m_nextROI.h << "\n";
-   std::cerr << "  m_nextROI.bin_x = " << m_nextROI.bin_x << "\n";
-   std::cerr << "  m_nextROI.bin_y = " << m_nextROI.bin_y << "\n";
- 
+{ 
    recordCamera(true);
    AbortAcquisition();
    state(stateCodes::CONFIGURING);
@@ -1798,25 +1830,33 @@ int andorCtrl::configureAcquisition()
    updateIfChanged( m_indiP_roi_h, "current", m_currentROI.h, INDI_OK);
    updateIfChanged( m_indiP_roi_bin_x, "current", m_currentROI.bin_x, INDI_OK);
    updateIfChanged( m_indiP_roi_bin_y, "current", m_currentROI.bin_y, INDI_OK);
-   
+
    //We also update target to the settable values
+   m_nextROI.x = m_currentROI.x;
+   m_nextROI.y = m_currentROI.y;
+   m_nextROI.w = m_currentROI.w;
+   m_nextROI.h = m_currentROI.h;
+   m_nextROI.bin_x = m_currentROI.bin_x;
+   m_nextROI.bin_y = m_currentROI.bin_y;
+
    updateIfChanged( m_indiP_roi_x, "target", m_currentROI.x, INDI_OK);
    updateIfChanged( m_indiP_roi_y, "target", m_currentROI.y, INDI_OK);
    updateIfChanged( m_indiP_roi_w, "target", m_currentROI.w, INDI_OK);
    updateIfChanged( m_indiP_roi_h, "target", m_currentROI.h, INDI_OK);
    updateIfChanged( m_indiP_roi_bin_x, "target", m_currentROI.bin_x, INDI_OK);
    updateIfChanged( m_indiP_roi_bin_y, "target", m_currentROI.bin_y, INDI_OK);
-   
+
+
    ///\todo This should check whether we have a match between EDT and the camera right?
-   m_width = m_currentROI.w;
-   m_height = m_currentROI.h;
+   m_width = m_currentROI.w/m_currentROI.bin_x;
+   m_height = m_currentROI.h/m_currentROI.bin_y;
    m_dataType = _DATATYPE_INT16;
 
    
    // Print Detector Frame Size
    //std::cout << "Detector Frame is: " << width << "x" << height << "\n";
 
-    
+   recordCamera(true);
 
    return 0;
 }
@@ -1871,10 +1911,7 @@ int andorCtrl::loadImageIntoStream(void * dest)
    if( frameGrabber<andorCtrl>::loadImageIntoStreamCopy(dest, m_image_p, m_width, m_height, m_typeSize) == nullptr) return -1;
 
    return 0;
-   
-   //memcpy(dest, m_image_p, m_width*m_height*m_typeSize);
-   //return 0;
-}
+   }
 
 inline
 int andorCtrl::reconfig()

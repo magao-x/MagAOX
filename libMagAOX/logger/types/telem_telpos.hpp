@@ -12,6 +12,7 @@
 
 #include "generated/telem_telpos_generated.h"
 #include "flatbuffer_log.hpp"
+#include "../logMeta.hpp"
 
 #include <cmath>
 
@@ -56,6 +57,14 @@ struct telem_telpos : public flatbuffer_log
    };
                  
  
+   static bool verify( flatlogs::bufferPtrT & logBuff,  ///< [in] Buffer containing the flatbuffer serialized message.
+                       flatlogs::msgLenT len            ///< [in] length of msgBuffer.
+                     )
+   {
+      auto verifier = flatbuffers::Verifier( (uint8_t*) flatlogs::logHeader::messageBuffer(logBuff), static_cast<size_t>(len));
+      return VerifyTelem_telpos_fbBuffer(verifier);
+   }
+
    ///Get the message formatte for human consumption.
    static std::string msgString( void * msgBuffer,  /**< [in] Buffer containing the flatbuffer serialized message.*/
                                  flatlogs::msgLenT len  /**< [in] [unused] length of msgBuffer.*/
@@ -91,33 +100,78 @@ struct telem_telpos : public flatbuffer_log
       return msg;
    
    }
-   
-   static double getDouble( flatlogs::bufferPtrT & buffer,
-                            member m 
-                          )
+
+   static std::string msgJSON( void * msgBuffer,  /**< [in] Buffer containing the flatbuffer serialized message.*/
+                               flatlogs::msgLenT len  /**< [in] [unused] length of msgBuffer.*/
+                             )
    {
-      switch(m)
-      {
-         case em_epoch:
-            return GetTelem_telpos_fb(flatlogs::logHeader::messageBuffer(buffer))->epoch();
-         case em_ra:
-            return GetTelem_telpos_fb(flatlogs::logHeader::messageBuffer(buffer))->ra();
-         case em_dec:
-            return GetTelem_telpos_fb(flatlogs::logHeader::messageBuffer(buffer))->dec();
-         case em_el:
-            return GetTelem_telpos_fb(flatlogs::logHeader::messageBuffer(buffer))->el();
-         case em_ha:
-            return GetTelem_telpos_fb(flatlogs::logHeader::messageBuffer(buffer))->ha();
-         case em_am:
-            return GetTelem_telpos_fb(flatlogs::logHeader::messageBuffer(buffer))->am();
-         case em_rotoff:
-            return GetTelem_telpos_fb(flatlogs::logHeader::messageBuffer(buffer))->rotoff();
-         default:
-            return nan("");
-      }
+      return makeJSON(msgBuffer, len, Telem_telpos_fbTypeTable());
    }
    
+   static double epoch( void * msgBuffer )
+   {
+      auto fbs = GetTelem_telpos_fb(msgBuffer);
+      return fbs->epoch();
+   }
+
+   static double ra( void * msgBuffer )
+   {
+      auto fbs = GetTelem_telpos_fb(msgBuffer);
+      return fbs->ra();
+   }
+
+   static double dec( void * msgBuffer )
+   {
+      auto fbs = GetTelem_telpos_fb(msgBuffer);
+      return fbs->dec();
+   }
+
+   static double el( void * msgBuffer )
+   {
+      auto fbs = GetTelem_telpos_fb(msgBuffer);
+      return fbs->el();
+   }
+
+   static double ha( void * msgBuffer )
+   {
+      auto fbs = GetTelem_telpos_fb(msgBuffer);
+      return fbs->ha();
+   }
+
+   static double am( void * msgBuffer )
+   {
+      auto fbs = GetTelem_telpos_fb(msgBuffer);
+      return fbs->am();
+   }
+
+   static double ro( void * msgBuffer )
+   {
+      auto fbs = GetTelem_telpos_fb(msgBuffer);
+      return fbs->rotoff();
+   }
    
+
+   /// Get the logMetaDetail for a member by name
+   /**
+     * \returns the a logMetaDetail filled in with the appropriate details
+     * \returns an empty logmegaDetail if member not recognized
+     */ 
+   static logMetaDetail getAccessor( const std::string & member /**< [in] the name of the member */ )
+   {
+      if(     member == "epoch") return logMetaDetail({"EPOCH", logMeta::valTypes::Double, logMeta::metaTypes::Continuous, (void *) &epoch, false});
+      else if(member == "ra") return logMetaDetail({"RA", "right ascension [degrees]", "%0.8f", logMeta::valTypes::Double, logMeta::metaTypes::Continuous, (void *) &ra, false}); 
+      else if(member == "dec") return logMetaDetail({"DEC", "declination [degrees]", "%0.8f", logMeta::valTypes::Double, logMeta::metaTypes::Continuous, (void *) &dec, false}); 
+      else if(member == "el") return logMetaDetail({"EL", "elevation [degrees]", "%0.8f", logMeta::valTypes::Double, logMeta::metaTypes::Continuous, (void *) &el, false}); 
+      else if(member == "ha") return logMetaDetail({"HA", "hour angle [degrees]", "%0.8f", logMeta::valTypes::Double, logMeta::metaTypes::Continuous, (void *) &ha, false}); 
+      else if(member == "am") return logMetaDetail({"AIRMASS", "airmass", "%0.2f", logMeta::valTypes::Double, logMeta::metaTypes::Continuous, (void *) &am, false});
+      else if(member == "ro") return logMetaDetail({"RO", "rotator offset [degrees]", "%0.8f", logMeta::valTypes::Double, logMeta::metaTypes::Continuous, (void *) &ro, false});  
+      else
+      {
+         std::cerr << "No string member " << member << " in telem_telpos\n";
+         return logMetaDetail();
+      }
+   }
+
 }; //telem_telpos
 
 

@@ -283,6 +283,8 @@ int edtCamera<derivedT>::pdvSerialWriteRead( std::string & response,
 
    if(ret == 0)
    {
+      if(derived().powerState() != 1 || derived().powerStateTarget() != 1) return -1;
+
       derivedT::template log<software_error>({__FILE__, __LINE__, "PDV: timeout, no serial response"});
       return -1;
    }
@@ -298,7 +300,7 @@ int edtCamera<derivedT>::pdvSerialWriteRead( std::string & response,
       if(ret > 0) response += buf;
 
       //Check for last char, wait for more otherwise.
-      if (*buf) lastbyte = (u_char)buf[strlen(buf)-1];
+      if (*buf) lastbyte = (u_char)buf[strnlen(buf, sizeof(buf))-1];
 
       if (pdv_get_waitchar(m_pdv, &waitc) && (lastbyte == waitc))
           break;

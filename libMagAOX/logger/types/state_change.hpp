@@ -44,6 +44,14 @@ struct state_change : public flatbuffer_log
       }
    };
 
+   static bool verify( flatlogs::bufferPtrT & logBuff,  ///< [in] Buffer containing the flatbuffer serialized message.
+                       flatlogs::msgLenT len            ///< [in] length of msgBuffer.
+                     )
+   {
+      auto verifier = flatbuffers::Verifier( (uint8_t*) flatlogs::logHeader::messageBuffer(logBuff), static_cast<size_t>(len));
+      return VerifyState_change_fbBuffer(verifier);
+   }
+
    /// Format the message for text output, including translation of state codes to text form.
    /**
      * \returns the message formatted as "State changed from UNINITIALIZED to INITIALIZED"
@@ -58,6 +66,19 @@ struct state_change : public flatbuffer_log
       
       std::stringstream s;
       s << "State changed from " << app::stateCodes::codeText(rgs->from()) << " to " << app::stateCodes::codeText(rgs->to());
+      return s.str();
+   }
+
+   static std::string msgJSON( void * msgBuffer,  /**< [in] Buffer containing the flatbuffer serialized message.*/
+                                              flatlogs::msgLenT len  /**< [in] [unused] length of msgBuffer.*/
+                                            )
+   {
+      // Not using the usual pattern of calling makeJSON from flatbuffer_log because we need to stringify the state code
+      static_cast<void>(len);
+      
+      auto rgs = GetState_change_fb(msgBuffer);
+      std::stringstream s;
+      s << "{\"from\": \"" << app::stateCodes::codeText(rgs->from()) << "\", \"to\": \"" << app::stateCodes::codeText(rgs->to()) << "\"}";
       return s.str();
    }
 };
