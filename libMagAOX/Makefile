@@ -32,6 +32,7 @@ INCLUDEDEPS= app/MagAOXApp.hpp \
              logger/logFileName.hpp \
              logger/logMap.hpp \
              logger/logMeta.hpp \
+             logger/logBinarySchemata.hpp \
              logger/types/empty_log.hpp \
              logger/types/flatbuffer_log.hpp \
              logger/types/git_state.hpp \
@@ -102,6 +103,7 @@ OBJS = app/MagAOXApp.o \
        logger/logFileRaw.o \
        logger/logMap.o \
        logger/logMeta.o \
+       logger/logBinarySchemata.o \
        modbus/modbus.o \
        sys/runCommand.o \
        sys/thSetuid.o \
@@ -122,7 +124,7 @@ app/stateCodes.o: app/stateCodes.hpp
 
 libMagAOX.hpp.gch: libMagAOX.hpp $(INCLUDEDEPS) logger/generated/logTypes.hpp $(OBJS)
 
-logger/generated/logTypes.hpp: logger/logCodes.dat
+logger/generated/logTypes.hpp: logger/logCodes.dat logger/types/schemas/*.fbs
 	cd logger; ../../flatlogs/bin/flatlogcodes
 	cd logger/types/generated; for bfb in *.bfbs; do xxd -i $$bfb > $$(basename $$bfb).h; done
 	cat logger/types/generated/*.bfbs.h > logger/generated/binarySchemata.inc

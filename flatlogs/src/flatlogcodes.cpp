@@ -446,10 +446,28 @@ int emitLogTypes( const std::string & fileName,
    for(; it!=logCodes.end(); ++it)
    {
       fout << "#include \"../types/" << it->second.type << ".hpp\"\n";
-   }   
+   }
    fout << "#endif\n";
    fout.close();
    
+   return 0;
+}
+
+///Write binarySchemataDeclarations.inc
+int emitBinarySchemataDeclarations( const std::string & fileName,
+                                    std::set<std::string> & schemas
+                                  )
+{
+   typedef std::map<uint16_t, typeSchemaPair> mapT;
+   std::ofstream fout;
+   fout.open(fileName);
+
+   std::set<std::string>::iterator it = schemas.begin();
+   while(it != schemas.end()) {
+      fout << "extern unsigned char " << *it << "_bfbs[];\n";
+      fout << "extern unsigned int " << *it << "_bfbs_len;\n";
+      ++it;
+   }
    return 0;
 }
 
@@ -473,6 +491,7 @@ int main()
    std::string logCodesHeader = generatedDir + "/logCodes.hpp";
    std::string logTypesHeader = generatedDir + "/logTypes.hpp";
    std::string logCodeValidHeader = generatedDir + "/logCodeValid.hpp";
+   std::string binarySchemataDeclarations = generatedDir + "/binarySchemataDeclarations.inc";
    mapT logCodes;
    setT schemas;
    
@@ -487,6 +506,7 @@ int main()
    emitLogCodes( logCodesHeader, logCodes );
    emitLogTypes( logTypesHeader, logCodes );
    emitCodeValidHeader( logCodeValidHeader, logCodes);
+   emitBinarySchemataDeclarations( binarySchemataDeclarations, schemas );
 
    std::string flatc = "flatc -o " + schemaGeneratedDir + " --cpp --reflect-types --reflect-names";
    
