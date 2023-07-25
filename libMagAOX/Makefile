@@ -114,8 +114,6 @@ OBJS = app/MagAOXApp.o \
        tty/ttyUSB.o \
        tty/usbDevice.o
 
-#logger/logManager.o \
-
               
 all: libMagAOX.hpp.gch libMagAOX.a  
 

@@ -38,6 +38,7 @@
 #include "logger/logFileName.hpp"
 #include "logger/logMap.hpp"
 #include "logger/logMeta.hpp"
+#include "logger/logBinarySchemata.hpp"
 #include "logger/generated/logCodes.hpp"
 #include "logger/generated/logStdFormat.hpp"
 #include "logger/generated/logVerify.hpp"
