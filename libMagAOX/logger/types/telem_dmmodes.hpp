@@ -80,13 +80,6 @@ struct telem_dmmodes : public flatbuffer_log
 
    }
 
-   static std::string msgJSON( void * msgBuffer,  /**< [in] Buffer containing the flatbuffer serialized message.*/
-                               flatlogs::msgLenT len  /**< [in] [unused] length of msgBuffer.*/
-                             )
-   {
-      return makeJSON(msgBuffer, len, Telem_dmmodes_fbTypeTable());
-   }
-
    static std::vector<float> amps( void * msgBuffer )
    {
       std::vector<float> amps;

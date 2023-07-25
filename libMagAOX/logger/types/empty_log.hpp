@@ -95,11 +95,15 @@ struct empty_log
    }
 
    static std::string msgJSON( void * msgBuffer,  /**< [in] Buffer containing the flatbuffer serialized message.*/
-                                              flatlogs::msgLenT len  /**< [in] [unused] length of msgBuffer.*/
-                                            )
+                               flatlogs::msgLenT len,  /**< [in] [unused] length of msgBuffer.*/
+                               const uint8_t * binarySchema, /**< [in] [unused] */
+                               const unsigned int binarySchemaLength /**< [in] [unused] */
+                              )
    {
       static_cast<void>(len);
       static_cast<void>(msgBuffer);
+      static_cast<void>(binarySchema);
+      static_cast<void>(binarySchemaLength);
       return "{}";
    }
 };

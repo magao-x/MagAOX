@@ -122,11 +122,10 @@ app/stateCodes.o: app/stateCodes.hpp
 
 libMagAOX.hpp.gch: libMagAOX.hpp $(INCLUDEDEPS) logger/generated/logTypes.hpp $(OBJS)
 
-flatlogs:
-	cd logger; ../../flatlogs/bin/flatlogcodes
-
 logger/generated/logTypes.hpp: logger/logCodes.dat
 	cd logger; ../../flatlogs/bin/flatlogcodes
+	cd logger/types/generated; for bfb in *.bfbs; do xxd -i $$bfb > $$(basename $$bfb).h; done
+	cat logger/types/generated/*.bfbs.h > logger/generated/binarySchemata.inc
 
 libMagAOX.a: libMagAOX.hpp.gch $(OBJS)
 	ar rvs libMagAOX.a $(OBJS)
@@ -134,7 +133,6 @@ libMagAOX.a: libMagAOX.hpp.gch $(OBJS)
 logger/logMeta.o: logger/logMap.hpp logger/logMap.cpp logger/logMeta.hpp logger/logMeta.cpp logger/generated/logTypes.hpp
 logger/logMap.o: logger/logMap.hpp logger/logMap.cpp logger/logFileName.hpp 
 
-.PHONY: clean
 clean:
 	rm -f libMagAOX.hpp.gch
 	rm -f libMagAOX.a
@@ -142,3 +140,5 @@ clean:
 	rm -f *~
 	rm -rf logger/generated
 	rm -rf logger/types/generated
+
+.PHONY: all clean

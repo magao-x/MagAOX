@@ -122,13 +122,6 @@ struct telem_dmspeck : public flatbuffer_log
    
    }
 
-   static std::string msgJSON( void * msgBuffer,  /**< [in] Buffer containing the flatbuffer serialized message.*/
-                               flatlogs::msgLenT len  /**< [in] [unused] length of msgBuffer.*/
-                             )
-   {
-      return makeJSON(msgBuffer, len, Telem_dmspeck_fbTypeTable());
-   }
-   
    static bool modulating( void * msgBuffer )
    {
       auto fbs = GetTelem_dmspeck_fb(msgBuffer);

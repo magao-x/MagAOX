@@ -96,13 +96,6 @@ struct ocam_temps : public flatbuffer_log
       return msg;
    
    }
-
-   static std::string msgJSON( void * msgBuffer,  /**< [in] Buffer containing the flatbuffer serialized message.*/
-                               flatlogs::msgLenT len  /**< [in] [unused] length of msgBuffer.*/
-                             )
-   {
-      return makeJSON(msgBuffer, len, Ocam_temps_fbTypeTable());
-   }
    
 }; //ocam_temps
 
