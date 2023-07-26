@@ -72,5 +72,6 @@ else
   make_on_data_array "cacao-${MAGAOX_ROLE,,}" /opt/MagAOX
   sudo ln -sf "/opt/MagAOX/cacao-${MAGAOX_ROLE,,}" /opt/MagAOX/cacao
 fi
+grep -q '^xsup:' /etc/passwd || exit 0
 log_info "Making /opt/MagAOX/cacao/ owned by xsup:magaox"
 sudo chown -R xsup:magaox /opt/MagAOX/cacao/
