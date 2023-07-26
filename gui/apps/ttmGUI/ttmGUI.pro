@@ -35,7 +35,8 @@ HEADERS += ../../widgets/ttm/ttm.hpp \
            ../../widgets/xWidgets/statusEntry.hpp \
            ../../widgets/xWidgets/fsmDisplay.hpp \
            ../../widgets/xWidgets/statusLabel.hpp \
-           ../../lib/multiIndiManager.hpp
+           ../../widgets/xWidgets/statusLineEdit.hpp \
+	   ../../lib/multiIndiManager.hpp
            
 SOURCES += ttmGUI_main.cpp 
 #\
