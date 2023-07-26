@@ -347,8 +347,8 @@ int pi335Ctrl::appStartup()
    m_indiP_pos2["current"] = -99999;
    m_indiP_pos2["target"] = -99999;
    
+   //Note: 3rd axis added in testConnection if it's found
    
-   //std::cerr << "appStartup complete \n";
    return 0;
 }
 
@@ -807,7 +807,7 @@ int pi335Ctrl::testConnection()
    
    std::cerr << "Limits axis-1: " << m_min1 << " " << m_max1 << "\n";
    std::cerr << "Limits axis-2: " << m_min2 << " " << m_max2 << "\n";
-   std::cerr << "Limits axis-3: " << m_min3 << " " << m_max3 << "\n";
+   if(m_naxes == 3) std::cerr << "Limits axis-3: " << m_min3 << " " << m_max3 << "\n";
    
    m_flatCommand.resize(3,1);
    if(m_naxes == 2)
