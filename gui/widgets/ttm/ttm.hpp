@@ -41,12 +41,15 @@ protected:
 public:
    explicit ttm( std::string & procName,
                  QWidget * Parent = 0, 
-                 Qt::WindowFlags f = 0
+                 Qt::WindowFlags f = Qt::WindowFlags()
                );
    
    ~ttm();
    
    void subscribe();
+
+   virtual void onConnect();
+   virtual void onDisconnect();
                                    
    void handleDefProperty( const pcf::IndiProperty & ipRecv /**< [in] the property which has changed*/);
    
@@ -90,17 +93,57 @@ ttm::ttm( std::string & procName,
    
    setWindowTitle(QString(m_procName.c_str()));
    ui.button_scale_1->setText(QString::number(m_scale_1));
-   ui.label_device_status->setProperty("isStatus", true);
-   ui.lcd_1->setProperty("isStatus", true);
-   ui.lcd_2->setProperty("isStatus", true);
-   ui.lcd_3->setProperty("isStatus", true);
    
+   
+   
+   ui.pos_1->setup(m_procName, "pos_1", statusEntry::FLOAT, "", "");
+   ui.pos_1->setStretch(0,1,6);//removes spacer and maximizes text field
+   ui.pos_1->format("%0.2f");
+   ui.pos_1->onDisconnect();
+
+   ui.pos_2->setup(m_procName, "pos_2", statusEntry::FLOAT, "", "");
+   ui.pos_2->setStretch(0,1,6);//removes spacer and maximizes text field
+   ui.pos_2->format("%0.2f");
+   ui.pos_2->onDisconnect();
+
+   ui.pos_3->setup(m_procName, "pos_3", statusEntry::FLOAT, "", "");
+   ui.pos_3->setStretch(0,1,6);//removes spacer and maximizes text field
+   ui.pos_3->format("%0.2f");
+   ui.pos_3->onDisconnect();
+
    ui.label_device->setText(m_procName.c_str());
-   ui.label_device_status->setText("unkown");
+   //ui.label_device_status->setText("unkown");
+   ui.label_device_status->device(m_procName);
+   ui.label_device_status->setProperty("isStatus", true);
+
+   setXwFont(ui.label_device);
+   setXwFont(ui.label_device_status);
+
+   setXwFont(ui.button_home);
+   setXwFont(ui.button_flat);
+   setXwFont(ui.button_release);
+   setXwFont(ui.button_zero);
+
+   setXwFont(ui.label_1);
+   setXwFont(ui.label_2);
+   setXwFont(ui.label_3);
+
    
+   
+   ui.button_scale_1->setProperty("isScaleButton", true);
+   ui.button_scale_2->setProperty("isScaleButton", true);
+   ui.button_scale_3->setProperty("isScaleButton", true);
+
+
+   setXwFont(ui.pos_1);
+   setXwFont(ui.pos_2);
+   setXwFont(ui.pos_3);
+
+
    onDisconnect();
 }
    
+
 ttm::~ttm()
 {
 }
@@ -120,9 +163,33 @@ void ttm::subscribe()
    m_parent->addSubscriberProperty((multiIndiSubscriber *) this, m_procName, "test");
    m_parent->addSubscriberProperty((multiIndiSubscriber *) this, m_procName, "test_shmim");
    m_parent->addSubscriberProperty((multiIndiSubscriber *) this, m_procName, "test_set");
+
+   m_parent->addSubscriber(ui.label_device_status);
+   m_parent->addSubscriber(ui.pos_1);
+   m_parent->addSubscriber(ui.pos_2);
+   m_parent->addSubscriber(ui.pos_3);
+
    return;
 }
    
+void ttm::onConnect()
+{
+   ui.label_device_status->onConnect();
+
+   ui.pos_1->onConnect();
+   ui.pos_2->onConnect();
+   ui.pos_3->onConnect();
+}
+
+void ttm::onDisconnect()
+{
+   ui.label_device_status->onDisconnect();
+
+   ui.pos_1->onDisconnect();
+   ui.pos_2->onDisconnect();
+   ui.pos_3->onDisconnect();
+}
+
 void ttm::handleDefProperty( const pcf::IndiProperty & ipRecv)
 {  
    return handleSetProperty(ipRecv);
@@ -266,32 +333,25 @@ void ttm::updateGUI()
       ui.label_2->setText("Tip");
       ui.label_3->setText("Tilt");
    }
-   
-   ui.lcd_1->display(m_pos_1);
-   ui.lcd_2->display(m_pos_2);
-   ui.lcd_3->display(m_pos_3);
-   
+      
    if(m_appState == "NOTHOMED") 
    {
-      ui.label_device_status->setText("RIP");
+      //ui.label_device_status->setText("RIP");
       
       ui.label_1->setEnabled(false);
-      ui.lcd_1->setEnabled(false);
-      ui.lineEdit_1->setEnabled(false);
+      ui.pos_1->setEnabled(false);
       ui.button_up_1->setEnabled(false);
       ui.button_scale_1->setEnabled(false);
       ui.button_down_1->setEnabled(false);
          
       ui.label_2->setEnabled(false);
-      ui.lcd_2->setEnabled(false);
-      ui.lineEdit_2->setEnabled(false);
+      ui.pos_2->setEnabled(false);
       ui.button_up_2->setEnabled(false);
       ui.button_scale_2->setEnabled(false);
       ui.button_down_2->setEnabled(false);
       
       ui.label_3->setEnabled(false);
-      ui.lcd_3->setEnabled(false);
-      ui.lineEdit_3->setEnabled(false);
+      ui.pos_3->setEnabled(false);
       ui.button_up_3->setEnabled(false);
       ui.button_scale_3->setEnabled(false);
       ui.button_down_3->setEnabled(false);
@@ -303,26 +363,22 @@ void ttm::updateGUI()
    }
    else if(m_appState == "HOMING") 
    {
-      ui.label_device_status->setText("SETTING");
+      //ui.label_device_status->setText("SETTING");
       
       ui.label_1->setEnabled(false);
-      ui.lcd_1->setEnabled(true);
-      ui.lineEdit_1->setEnabled(false);
+      ui.pos_1->setEnabled(false);
       ui.button_up_1->setEnabled(false);
       ui.button_scale_1->setEnabled(false);
       ui.button_down_1->setEnabled(false);
          
       ui.label_2->setEnabled(false);
-      ui.lcd_2->setEnabled(true);
-      ui.lineEdit_2->setEnabled(false);
+      ui.pos_2->setEnabled(false);
       ui.button_up_2->setEnabled(false);
       ui.button_scale_2->setEnabled(false);
       ui.button_down_2->setEnabled(false);
       
       ui.label_3->setEnabled(false);
-      if(m_naxes == 2) ui.lcd_3->setEnabled(false);
-      else ui.lcd_3->setEnabled(true);
-      ui.lineEdit_3->setEnabled(false);
+      ui.pos_3->setEnabled(false);
       ui.button_up_3->setEnabled(false);
       ui.button_scale_3->setEnabled(false);
       ui.button_down_3->setEnabled(false);
@@ -334,18 +390,16 @@ void ttm::updateGUI()
    }
    else if(m_appState == "READY")
    {
-      ui.label_device_status->setText("SET");
+      //ui.label_device_status->setText("SET");
       
       ui.label_1->setEnabled(true);
-      ui.lcd_1->setEnabled(true);
-      ui.lineEdit_1->setEnabled(true);
+      ui.pos_1->setEnabled(true);
       ui.button_up_1->setEnabled(true);
       ui.button_scale_1->setEnabled(true);
       ui.button_down_1->setEnabled(true);
          
       ui.label_2->setEnabled(true);
-      ui.lcd_2->setEnabled(true);
-      ui.lineEdit_2->setEnabled(true);
+      ui.pos_2->setEnabled(true);
       ui.button_up_2->setEnabled(true);
       ui.button_scale_2->setEnabled(true);
       ui.button_down_2->setEnabled(true);
@@ -353,8 +407,7 @@ void ttm::updateGUI()
       if(m_naxes == 2)
       {
          ui.label_3->setEnabled(false);
-         ui.lcd_3->setEnabled(false);
-         ui.lineEdit_3->setEnabled(false);
+         ui.pos_3->setEnabled(false);
          ui.button_up_3->setEnabled(false);
          ui.button_scale_3->setEnabled(false);
          ui.button_down_3->setEnabled(false);
@@ -362,8 +415,7 @@ void ttm::updateGUI()
       else
       {
          ui.label_3->setEnabled(true);
-         ui.lcd_3->setEnabled(true);
-         ui.lineEdit_3->setEnabled(true);
+         ui.pos_3->setEnabled(true);
          ui.button_up_3->setEnabled(true);
          ui.button_scale_3->setEnabled(true);
          ui.button_down_3->setEnabled(true);
@@ -376,18 +428,16 @@ void ttm::updateGUI()
    }
    else if(m_appState == "OPERATING")
    {
-      ui.label_device_status->setText("OPERATING");
+      //ui.label_device_status->setText("OPERATING");
       
       ui.label_1->setEnabled(true);
-      ui.lcd_1->setEnabled(true);
-      ui.lineEdit_1->setEnabled(true);
+      ui.pos_1->setEnabled(true);
       ui.button_up_1->setEnabled(true);
       ui.button_scale_1->setEnabled(true);
       ui.button_down_1->setEnabled(true);
          
       ui.label_2->setEnabled(true);
-      ui.lcd_2->setEnabled(true);
-      ui.lineEdit_2->setEnabled(true);
+      ui.pos_2->setEnabled(true);
       ui.button_up_2->setEnabled(true);
       ui.button_scale_2->setEnabled(true);
       ui.button_down_2->setEnabled(true);
@@ -395,8 +445,7 @@ void ttm::updateGUI()
       if(m_naxes == 2)
       {
          ui.label_3->setEnabled(false);
-         ui.lcd_3->setEnabled(false);
-         ui.lineEdit_3->setEnabled(false);
+         ui.pos_3->setEnabled(false);
          ui.button_up_3->setEnabled(false);
          ui.button_scale_3->setEnabled(false);
          ui.button_down_3->setEnabled(false);
@@ -404,8 +453,7 @@ void ttm::updateGUI()
       else
       {
          ui.label_3->setEnabled(true);
-         ui.lcd_3->setEnabled(true);
-         ui.lineEdit_3->setEnabled(true);
+         ui.pos_3->setEnabled(true);
          ui.button_up_3->setEnabled(true);
          ui.button_scale_3->setEnabled(true);
          ui.button_down_3->setEnabled(true);
@@ -418,26 +466,23 @@ void ttm::updateGUI()
    }
    else
    {
-      ui.label_device_status->setText(m_appState.c_str());
+      //ui.label_device_status->setText(m_appState.c_str());
       
       //Disable & zero all
       ui.label_1->setEnabled(false);
-      ui.lcd_1->setEnabled(false);
-      ui.lineEdit_1->setEnabled(false);
+      ui.pos_1->setEnabled(false);
       ui.button_up_1->setEnabled(false);
       ui.button_scale_1->setEnabled(false);
       ui.button_down_1->setEnabled(false);
          
       ui.label_2->setEnabled(false);
-      ui.lcd_2->setEnabled(false);
-      ui.lineEdit_2->setEnabled(false);
+      ui.pos_2->setEnabled(false);
       ui.button_up_2->setEnabled(false);
       ui.button_scale_2->setEnabled(false);
       ui.button_down_2->setEnabled(false);
       
       ui.label_3->setEnabled(false);
-      ui.lcd_3->setEnabled(false);
-      ui.lineEdit_3->setEnabled(false);
+      ui.pos_3->setEnabled(false);
       ui.button_up_3->setEnabled(false);
       ui.button_scale_3->setEnabled(false);
       ui.button_down_3->setEnabled(false);
@@ -490,7 +535,15 @@ void ttm::on_button_release_pressed()
 
 void ttm::on_button_scale_1_pressed()
 {
-   if(((int) (100*m_scale_1)) == 100)
+   if(((int) (100*m_scale_1)) == 1000)
+   {
+      m_scale_1 = 5.0;
+   }
+   else if(((int) (100*m_scale_1)) == 500)
+   {
+      m_scale_1 = 1.0;
+   }
+   else if(((int) (100*m_scale_1)) == 100)
    {
       m_scale_1 = 0.5;
    }
@@ -508,7 +561,7 @@ void ttm::on_button_scale_1_pressed()
    }
    else if(((int) (100*m_scale_1)) == 1)
    {
-      m_scale_1 = 1.0;
+      m_scale_1 = 10.0;
    }
    
    char ss[5];
@@ -542,7 +595,15 @@ void ttm::on_button_down_1_pressed()
 
 void ttm::on_button_scale_2_pressed()
 {
-   if(((int) (100*m_scale_2)) == 100)
+   if(((int) (100*m_scale_2)) == 1000)
+   {
+      m_scale_2 = 5.0;
+   }
+   else if(((int) (100*m_scale_2)) == 500)
+   {
+      m_scale_2 = 1.0;
+   }
+   else if(((int) (100*m_scale_2)) == 100)
    {
       m_scale_2 = 0.5;
    }
@@ -560,7 +621,7 @@ void ttm::on_button_scale_2_pressed()
    }
    else if(((int) (100*m_scale_2)) == 1)
    {
-      m_scale_2 = 1.0;
+      m_scale_2 = 10.0;
    }
    
    char ss[5];
@@ -594,7 +655,15 @@ void ttm::on_button_down_2_pressed()
 
 void ttm::on_button_scale_3_pressed()
 {
-   if(((int) (100*m_scale_3)) == 100)
+   if(((int) (100*m_scale_3)) == 1000)
+   {
+      m_scale_3 = 5.0;
+   }
+   else if(((int) (100*m_scale_3)) == 500)
+   {
+      m_scale_3 = 1.0;
+   }
+   else if(((int) (100*m_scale_3)) == 100)
    {
       m_scale_3 = 0.5;
    }
@@ -612,7 +681,7 @@ void ttm::on_button_scale_3_pressed()
    }
    else if(((int) (100*m_scale_3)) == 1)
    {
-      m_scale_3 = 1.0;
+      m_scale_3 = 10.0;
    }
    
    char ss[5];
