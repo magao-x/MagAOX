@@ -69,18 +69,6 @@ struct state_change : public flatbuffer_log
       return s.str();
    }
 
-   static std::string msgJSON( void * msgBuffer,  /**< [in] Buffer containing the flatbuffer serialized message.*/
-                                              flatlogs::msgLenT len  /**< [in] [unused] length of msgBuffer.*/
-                                            )
-   {
-      // Not using the usual pattern of calling makeJSON from flatbuffer_log because we need to stringify the state code
-      static_cast<void>(len);
-      
-      auto rgs = GetState_change_fb(msgBuffer);
-      std::stringstream s;
-      s << "{\"from\": \"" << app::stateCodes::codeText(rgs->from()) << "\", \"to\": \"" << app::stateCodes::codeText(rgs->to()) << "\"}";
-      return s.str();
-   }
 };
 
 } //namespace logger

@@ -6,8 +6,8 @@
    <rect>
     <x>0</x>
     <y>0</y>
-    <width>841</width>
-    <height>304</height>
+    <width>845</width>
+    <height>152</height>
    </rect>
   </property>
   <property name="windowTitle">
@@ -15,121 +15,31 @@
   </property>
   <layout class="QVBoxLayout" name="verticalLayout">
    <item>
-    <widget class="QLabel" name="label_device">
-     <property name="font">
-      <font>
-       <pointsize>12</pointsize>
-      </font>
-     </property>
-     <property name="text">
-      <string>device</string>
-     </property>
-     <property name="alignment">
-      <set>Qt::AlignCenter</set>
-     </property>
-    </widget>
-   </item>
-   <item>
-    <widget class="QLabel" name="label_device_status">
-     <property name="font">
-      <font>
-       <pointsize>14</pointsize>
-      </font>
-     </property>
-     <property name="text">
-      <string>deviceStatus</string>
-     </property>
-     <property name="alignment">
-      <set>Qt::AlignCenter</set>
-     </property>
-    </widget>
-   </item>
-   <item>
-    <layout class="QHBoxLayout" name="hl_buttons">
-     <item>
-      <spacer name="horizontalSpacer">
-       <property name="orientation">
-        <enum>Qt::Horizontal</enum>
-       </property>
-       <property name="sizeHint" stdset="0">
-        <size>
-         <width>40</width>
-         <height>20</height>
-        </size>
-       </property>
-      </spacer>
-     </item>
-     <item>
-      <widget class="QPushButton" name="button_home">
-       <property name="focusPolicy">
-        <enum>Qt::NoFocus</enum>
-       </property>
-       <property name="text">
-        <string>set</string>
-       </property>
-      </widget>
-     </item>
-     <item>
-      <widget class="QPushButton" name="button_zero">
-       <property name="focusPolicy">
-        <enum>Qt::NoFocus</enum>
-       </property>
-       <property name="text">
-        <string>zero</string>
-       </property>
-      </widget>
-     </item>
-     <item>
-      <widget class="QPushButton" name="button_flat">
-       <property name="focusPolicy">
-        <enum>Qt::NoFocus</enum>
-       </property>
-       <property name="text">
-        <string>defaults</string>
-       </property>
-      </widget>
-     </item>
-     <item>
-      <widget class="QPushButton" name="button_release">
-       <property name="focusPolicy">
-        <enum>Qt::NoFocus</enum>
-       </property>
-       <property name="text">
-        <string>rest</string>
-       </property>
-      </widget>
-     </item>
-     <item>
-      <spacer name="horizontalSpacer_2">
-       <property name="orientation">
-        <enum>Qt::Horizontal</enum>
-       </property>
-       <property name="sizeHint" stdset="0">
-        <size>
-         <width>40</width>
-         <height>20</height>
-        </size>
-       </property>
-      </spacer>
-     </item>
-    </layout>
-   </item>
-   <item>
     <layout class="QHBoxLayout" name="hl_controls">
      <item>
-      <layout class="QVBoxLayout" name="vl_1">
+      <layout class="QVBoxLayout" name="verticalLayout_2">
        <item>
-        <widget class="QLabel" name="label_1">
+        <spacer name="verticalSpacer_6">
+         <property name="orientation">
+          <enum>Qt::Vertical</enum>
+         </property>
+         <property name="sizeHint" stdset="0">
+          <size>
+           <width>20</width>
+           <height>40</height>
+          </size>
+         </property>
+        </spacer>
+       </item>
+       <item>
+        <widget class="QLabel" name="label_device">
          <property name="font">
           <font>
-           <pointsize>14</pointsize>
+           <pointsize>12</pointsize>
           </font>
          </property>
-         <property name="frameShape">
-          <enum>QFrame::StyledPanel</enum>
-         </property>
          <property name="text">
-          <string>Tip</string>
+          <string>device</string>
          </property>
          <property name="alignment">
           <set>Qt::AlignCenter</set>
@@ -137,29 +47,129 @@
         </widget>
        </item>
        <item>
+        <widget class="xqt::fsmDisplay" name="label_device_status">
+         <property name="font">
+          <font>
+           <pointsize>14</pointsize>
+          </font>
+         </property>
+        </widget>
+       </item>
+       <item>
+        <spacer name="verticalSpacer_7">
+         <property name="orientation">
+          <enum>Qt::Vertical</enum>
+         </property>
+         <property name="sizeHint" stdset="0">
+          <size>
+           <width>20</width>
+           <height>40</height>
+          </size>
+         </property>
+        </spacer>
+       </item>
+      </layout>
+     </item>
+     <item>
+      <layout class="QVBoxLayout" name="vl_buttons">
+       <item>
+        <spacer name="verticalSpacer_4">
+         <property name="orientation">
+          <enum>Qt::Vertical</enum>
+         </property>
+         <property name="sizeHint" stdset="0">
+          <size>
+           <width>20</width>
+           <height>40</height>
+          </size>
+         </property>
+        </spacer>
+       </item>
+       <item>
+        <layout class="QGridLayout" name="grid_buttons">
+         <item row="1" column="0">
+          <widget class="QPushButton" name="button_release">
+           <property name="focusPolicy">
+            <enum>Qt::NoFocus</enum>
+           </property>
+           <property name="text">
+            <string>rest</string>
+           </property>
+          </widget>
+         </item>
+         <item row="1" column="1">
+          <widget class="QPushButton" name="button_zero">
+           <property name="focusPolicy">
+            <enum>Qt::NoFocus</enum>
+           </property>
+           <property name="text">
+            <string>zero</string>
+           </property>
+          </widget>
+         </item>
+         <item row="0" column="1">
+          <widget class="QPushButton" name="button_flat">
+           <property name="focusPolicy">
+            <enum>Qt::NoFocus</enum>
+           </property>
+           <property name="text">
+            <string>defaults</string>
+           </property>
+          </widget>
+         </item>
+         <item row="0" column="0">
+          <widget class="QPushButton" name="button_home">
+           <property name="focusPolicy">
+            <enum>Qt::NoFocus</enum>
+           </property>
+           <property name="text">
+            <string>set</string>
+           </property>
+          </widget>
+         </item>
+        </layout>
+       </item>
+       <item>
+        <spacer name="verticalSpacer_5">
+         <property name="orientation">
+          <enum>Qt::Vertical</enum>
+         </property>
+         <property name="sizeHint" stdset="0">
+          <size>
+           <width>20</width>
+           <height>40</height>
+          </size>
+         </property>
+        </spacer>
+       </item>
+      </layout>
+     </item>
+     <item>
+      <layout class="QVBoxLayout" name="vl_1">
+       <item>
         <layout class="QHBoxLayout" name="hl_1" stretch="3,1">
          <item>
-          <layout class="QVBoxLayout" name="vl_1_text" stretch="1,1,0">
+          <layout class="QVBoxLayout" name="vl_1_text" stretch="0,1,0">
            <item>
-            <widget class="QLCDNumber" name="lcd_1">
+            <widget class="QLabel" name="label_1">
              <property name="font">
               <font>
-               <pointsize>8</pointsize>
+               <pointsize>14</pointsize>
               </font>
              </property>
-             <property name="digitCount">
-              <number>9</number>
+             <property name="frameShape">
+              <enum>QFrame::StyledPanel</enum>
              </property>
-             <property name="segmentStyle">
-              <enum>QLCDNumber::Flat</enum>
+             <property name="text">
+              <string>Tip</string>
              </property>
-             <property name="value" stdset="0">
-              <double>0.010000000000000</double>
+             <property name="alignment">
+              <set>Qt::AlignCenter</set>
              </property>
             </widget>
            </item>
            <item>
-            <widget class="QLineEdit" name="lineEdit_1">
+            <widget class="xqt::statusEntry" name="pos_1">
              <property name="sizePolicy">
               <sizepolicy hsizetype="Expanding" vsizetype="MinimumExpanding">
                <horstretch>0</horstretch>
@@ -173,9 +183,6 @@
              </property>
              <property name="focusPolicy">
               <enum>Qt::ClickFocus</enum>
-             </property>
-             <property name="alignment">
-              <set>Qt::AlignRight|Qt::AlignTrailing|Qt::AlignVCenter</set>
              </property>
             </widget>
            </item>
@@ -268,45 +275,29 @@
      <item>
       <layout class="QVBoxLayout" name="vl_2">
        <item>
-        <widget class="QLabel" name="label_2">
-         <property name="font">
-          <font>
-           <pointsize>14</pointsize>
-          </font>
-         </property>
-         <property name="frameShape">
-          <enum>QFrame::StyledPanel</enum>
-         </property>
-         <property name="text">
-          <string>Tilt</string>
-         </property>
-         <property name="alignment">
-          <set>Qt::AlignCenter</set>
-         </property>
-        </widget>
-       </item>
-       <item>
         <layout class="QHBoxLayout" name="hl_2" stretch="3,1">
          <item>
-          <layout class="QVBoxLayout" name="vl_1_text_2" stretch="1,1,0">
+          <layout class="QVBoxLayout" name="vl_1_text_2" stretch="0,1,0">
            <item>
-            <widget class="QLCDNumber" name="lcd_2">
-             <property name="digitCount">
-              <number>9</number>
+            <widget class="QLabel" name="label_2">
+             <property name="font">
+              <font>
+               <pointsize>14</pointsize>
+              </font>
              </property>
-             <property name="segmentStyle">
-              <enum>QLCDNumber::Flat</enum>
+             <property name="frameShape">
+              <enum>QFrame::StyledPanel</enum>
              </property>
-             <property name="value" stdset="0">
-              <double>2000.009999999999991</double>
+             <property name="text">
+              <string>Tilt</string>
              </property>
-             <property name="intValue" stdset="0">
-              <number>2000</number>
+             <property name="alignment">
+              <set>Qt::AlignCenter</set>
              </property>
             </widget>
            </item>
            <item>
-            <widget class="QLineEdit" name="lineEdit_2">
+            <widget class="xqt::statusEntry" name="pos_2">
              <property name="sizePolicy">
               <sizepolicy hsizetype="Expanding" vsizetype="MinimumExpanding">
                <horstretch>0</horstretch>
@@ -320,9 +311,6 @@
              </property>
              <property name="focusPolicy">
               <enum>Qt::ClickFocus</enum>
-             </property>
-             <property name="alignment">
-              <set>Qt::AlignRight|Qt::AlignTrailing|Qt::AlignVCenter</set>
              </property>
             </widget>
            </item>
@@ -415,42 +403,29 @@
      <item>
       <layout class="QVBoxLayout" name="vl_3">
        <item>
-        <widget class="QLabel" name="label_3">
-         <property name="font">
-          <font>
-           <pointsize>14</pointsize>
-          </font>
-         </property>
-         <property name="frameShape">
-          <enum>QFrame::StyledPanel</enum>
-         </property>
-         <property name="text">
-          <string>Piston</string>
-         </property>
-         <property name="alignment">
-          <set>Qt::AlignCenter</set>
-         </property>
-        </widget>
-       </item>
-       <item>
         <layout class="QHBoxLayout" name="hl_3" stretch="3,1">
          <item>
-          <layout class="QVBoxLayout" name="vl_1_text_3" stretch="1,1,0">
+          <layout class="QVBoxLayout" name="vl_1_text_3" stretch="0,1,0">
            <item>
-            <widget class="QLCDNumber" name="lcd_3">
-             <property name="digitCount">
-              <number>9</number>
+            <widget class="QLabel" name="label_3">
+             <property name="font">
+              <font>
+               <pointsize>14</pointsize>
+              </font>
              </property>
-             <property name="segmentStyle">
-              <enum>QLCDNumber::Flat</enum>
+             <property name="frameShape">
+              <enum>QFrame::StyledPanel</enum>
              </property>
-             <property name="value" stdset="0">
-              <double>0.010000000000000</double>
+             <property name="text">
+              <string>Piston</string>
+             </property>
+             <property name="alignment">
+              <set>Qt::AlignCenter</set>
              </property>
             </widget>
            </item>
            <item>
-            <widget class="QLineEdit" name="lineEdit_3">
+            <widget class="xqt::statusEntry" name="pos_3">
              <property name="sizePolicy">
               <sizepolicy hsizetype="Expanding" vsizetype="MinimumExpanding">
                <horstretch>0</horstretch>
@@ -464,9 +439,6 @@
              </property>
              <property name="focusPolicy">
               <enum>Qt::ClickFocus</enum>
-             </property>
-             <property name="alignment">
-              <set>Qt::AlignRight|Qt::AlignTrailing|Qt::AlignVCenter</set>
              </property>
             </widget>
            </item>
@@ -560,6 +532,18 @@
    </item>
   </layout>
  </widget>
+ <customwidgets>
+  <customwidget>
+   <class>xqt::statusEntry</class>
+   <extends>QLineEdit</extends>
+   <header>../xWidgets/statusEntry.hpp</header>
+  </customwidget>
+  <customwidget>
+   <class>xqt::fsmDisplay</class>
+   <extends>QLabel</extends>
+   <header>../xWidgets/fsmDisplay.hpp</header>
+  </customwidget>
+ </customwidgets>
  <resources/>
  <connections/>
 </ui>

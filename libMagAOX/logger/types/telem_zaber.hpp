@@ -81,13 +81,6 @@ struct telem_zaber : public flatbuffer_log
    
    }
 
-   static std::string msgJSON( void * msgBuffer,  /**< [in] Buffer containing the flatbuffer serialized message.*/
-                               flatlogs::msgLenT len  /**< [in] [unused] length of msgBuffer.*/
-                             )
-   {
-      return makeJSON(msgBuffer, len, Telem_zaber_fbTypeTable());
-   }
-   
    static float pos( void * msgBuffer )
    {
       auto fbs = GetTelem_zaber_fb(msgBuffer);

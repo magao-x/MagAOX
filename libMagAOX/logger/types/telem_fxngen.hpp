@@ -135,13 +135,6 @@ struct telem_fxngen : public flatbuffer_log
    
    }
 
-   static std::string msgJSON( void * msgBuffer,  /**< [in] Buffer containing the flatbuffer serialized message.*/
-                               flatlogs::msgLenT len  /**< [in] [unused] length of msgBuffer.*/
-                             )
-   {
-      return makeJSON(msgBuffer, len, Telem_fxngen_fbTypeTable());
-   }
-
    static double C1freq( void * msgBuffer )
    {
       auto fbs = GetTelem_fxngen_fb(msgBuffer);
