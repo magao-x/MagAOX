@@ -205,13 +205,15 @@ else
             reponame=MagAOX
             parentdir=/opt/MagAOX/source/
             clone_or_update_and_cd $orgname $reponame $parentdir
-            # ensure upstream is set somewhere that isn't on the fs to avoid possibly pushing
-            # things and not having them go where we expect
-            stat /opt/MagAOX/source/MagAOX/.git
-            git remote remove origin
-            git remote add origin https://github.com/magao-x/MagAOX.git
-            git fetch origin
-            git branch -u origin/dev dev
+            if [[ git --git-dir="$parentdir/$reponame/.git" remote -v | grep -q "^origin  *https://.*/$orgname/$reponame" ]]; then
+                # ensure upstream is set somewhere that isn't on the fs to avoid possibly pushing
+                # things and not having them go where we expect
+                stat /opt/MagAOX/source/MagAOX/.git
+                git remote remove origin
+                git remote add origin https://github.com/magao-x/MagAOX.git
+                git fetch origin
+                git branch -u origin/dev dev
+            fi
             log_success "In the future, you can re-run this script from /opt/MagAOX/source/MagAOX/setup"
             log_info "(In fact, maybe delete $(dirname $DIR)?)"
         else

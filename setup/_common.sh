@@ -128,9 +128,16 @@ function clone_or_update_and_cd() {
     # and re-enable.
 
     if [[ ! -d $parentdir/$reponame/.git ]]; then
-      echo "Cloning new copy of $orgname/$reponame"
       CLONE_DEST=/tmp/${reponame}_$(date +"%s")
-      git clone https://github.com/$orgname/$reponame.git $CLONE_DEST
+      thetopdir="$HOME/githubalt/$reponame"
+      theref="$(git --git-dir="$thetopdir/.git"  rev-parse --symbolic-full-name --abbrev-ref --verify HEAD 2>/dev/null)"
+      if [[ "$theref" ]]; then
+        echo "Cloning new copy of $reponame from $thetopdir, reference[$theref]"
+        git clone "file://$thetopdir" $CLONE_DEST
+      else
+        echo "Cloning new copy of $orgname/$reponame"
+        git clone https://github.com/$orgname/$reponame.git $CLONE_DEST
+      fi
       sudo rsync -a $CLONE_DEST/ $destdir/
       cd $destdir/
       log_success "Cloned new $destdir"
