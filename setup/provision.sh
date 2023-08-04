@@ -205,7 +205,7 @@ else
             reponame=MagAOX
             parentdir=/opt/MagAOX/source/
             clone_or_update_and_cd $orgname $reponame $parentdir
-            if [[ git --git-dir="$parentdir/$reponame/.git" remote -v | grep -q "^origin  *https://.*/$orgname/$reponame" ]]; then
+            if git --git-dir="$parentdir/$reponame/.git" remote -v 2>/dev/null | grep -q "^origin  *https://.*/$orgname/$reponame" ; then
                 # ensure upstream is set somewhere that isn't on the fs to avoid possibly pushing
                 # things and not having them go where we expect
                 stat /opt/MagAOX/source/MagAOX/.git
