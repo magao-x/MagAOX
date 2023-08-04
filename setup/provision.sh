@@ -203,7 +203,7 @@ else
             echo "Cloning new copy of MagAOX codebase"
             orgname=magao-x
             reponame=MagAOX
-            parentdir=/opt/MagAOX/source/
+            parentdir=/opt/MagAOX/source
             clone_or_update_and_cd $orgname $reponame $parentdir
             if git --git-dir="$parentdir/$reponame/.git" remote -v 2>/dev/null | grep -q "^origin  *https://.*/$orgname/$reponame" ; then
                 # ensure upstream is set somewhere that isn't on the fs to avoid possibly pushing
