@@ -130,7 +130,7 @@ function clone_or_update_and_cd() {
     if [[ ! -d $parentdir/$reponame/.git ]]; then
       CLONE_DEST=/tmp/${reponame}_$(date +"%s")
       thetopdir="$HOME/githubalt/$reponame"
-      theref="$(git --git-dir="$thetopdir/.git"  rev-parse --symbolic-full-name --abbrev-ref --verify HEAD 2>/dev/null)"
+      theref="$(git --git-dir="$thetopdir/.git"  rev-parse --symbolic-full-name --abbrev-ref --verify HEAD 2>/dev/null) || true"
       if [[ "$theref" ]]; then
         echo "Cloning new copy of $reponame from $thetopdir, reference[$theref]"
         git clone "file://$thetopdir" $CLONE_DEST
