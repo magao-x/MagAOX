@@ -250,9 +250,9 @@ dependencies:
   - ptyprocess=0.7.0=pyhd3deb0d_0
   - pulseaudio=16.1=ha8d29e2_1
   - pure_eval=0.2.2=pyhd8ed1ab_0
-  - pybind11=2.10.3=py310hdf3cbec_0
+  - pybind11=2.11.1=py310hd41b1e2_0
   - pybind11-abi=4=hd8ed1ab_3
-  - pybind11-global=2.10.3=py310hdf3cbec_0
+  - pybind11-global=2.11.1=py310hd41b1e2_0
   - pycosat=0.6.3=py310h5764c6d_1010
   - pycparser=2.21=pyhd8ed1ab_0
   - pyee=9.0.4=pyhd8ed1ab_0

@@ -8,9 +8,15 @@ DIR="$( cd "$( dirname "${BASH_SOURCE[0]}" )" && pwd )"
 source $DIR/../_common.sh
 set -euo pipefail
 
-MAMBAFORGE_VERSION="4.14.0-1"
-MAMBAFORGE_INSTALLER="Mambaforge-$MAMBAFORGE_VERSION-Linux-$(uname -p).sh"
-MAMBAFORGE_URL="https://github.com/conda-forge/miniforge/releases/download/$MAMBAFORGE_VERSION/$MAMBAFORGE_INSTALLER"
+MAMBAFORGE_VERSION="$1"
+[ -z "$MAMBAFORGE_VERSION" ] && MAMBAFORGE_VERSION="4.14.0-1"
+if [ "$MAMBAFORGE_VERSION" == "latest" ] ; then
+    MAMBAFORGE_INSTALLER="Mambaforge-Linux-$(uname -p).sh"
+    MAMBAFORGE_URL="https://github.com/conda-forge/miniforge/releases/latest/download/$MAMBAFORGE_INSTALLER"
+else
+    MAMBAFORGE_INSTALLER="Mambaforge-$MAMBAFORGE_VERSION-Linux-$(uname -p).sh"
+    MAMBAFORGE_URL="https://github.com/conda-forge/miniforge/releases/download/$MAMBAFORGE_VERSION/$MAMBAFORGE_INSTALLER"
+fi
 #
 # conda
 #
