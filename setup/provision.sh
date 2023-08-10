@@ -151,7 +151,7 @@ fi
 
 # SuSE packages need either Python 3.6 or 3.10, but Rocky 9.2 has Python 3.9 as /bin/python, so we build our own RPM:
 if [[ $ID == rocky ]]; then
-  sudo bash -l "$DIR/steps/install_cpuset.sh" || error_exit "Couldn't install cpuset from source"
+  sudo bash -l "$DIR/steps/install_cpuset.sh" || exit_error "Couldn't install cpuset from source"
 fi
 
 
@@ -297,9 +297,11 @@ fi
 
 sudo bash -l "$DIR/steps/configure_startup_services.sh"
 
-log_info "Generating subuid and subgid files, may need to run podman system migrate"
-sudo python "$DIR/generate_subuid_subgid.py" || error_exit "Generating subuid/subgid files for podman failed"
-sudo podman system migrate || error_exit "Could not run podman system migrate"
+if which podman ; then
+  log_info "Generating subuid and subgid files, may need to run podman system migrate"
+  sudo python "$DIR/generate_subuid_subgid.py" || exit_error "Generating subuid/subgid files for podman failed"
+  sudo podman system migrate || exit_error "Could not run podman system migrate"
+fi
 
 # To try and debug hardware issues, ICC and RTC replicate their
 # kernel console log over UDP to AOC over the instrument LAN.
