@@ -8,7 +8,7 @@ DIR="$( cd "$( dirname "${BASH_SOURCE[0]}" )" && pwd )"
 source $DIR/../_common.sh
 set -euo pipefail
 
-MAMBAFORGE_VERSION="$1"
+MAMBAFORGE_VERSION="$@"
 [ -z "$MAMBAFORGE_VERSION" ] && MAMBAFORGE_VERSION="4.14.0-1"
 if [ "$MAMBAFORGE_VERSION" == "latest" ] ; then
     MAMBAFORGE_INSTALLER="Mambaforge-Linux-$(uname -p).sh"
