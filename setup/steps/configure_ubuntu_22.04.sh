@@ -11,7 +11,7 @@ fi
 if [[ ! -e /etc/apt/sources.list.d/oneAPI.list ]]; then
     echo "deb [signed-by=/usr/share/keyrings/oneapi-archive-keyring.gpg] https://apt.repos.intel.com/oneapi all main" | sudo tee /etc/apt/sources.list.d/oneAPI.list || error_exit "Could not add Intel APT repository to sources.list.d"
 fi
-sudo apt update
+sudo NEEDRESTART_SUSPEND=yes apt update
 
 log_info 'Making /etc/bash.bashrc source /etc/profile.d/*.sh, since graphical sessions appear not to for new Konsoles'
 if ! grep -q profile.d /etc/bash.bashrc; then
@@ -39,8 +39,8 @@ fi
 
 if [[ $MAGAOX_ROLE == AOC || $MAGAOX_ROLE == ICC || $MAGAOX_ROLE == RTC || $MAGAOX_ROLE == TIC || $MAGAOX_ROLE == TOC ]]; then
     log_info "Purging cloud-init"
-    sudo apt-get purge -y cloud-init || exit 1
-    sudo apt autoremove -y || true
+    sudo NEEDRESTART_SUSPEND=yes apt-get purge -y cloud-init || exit 1
+    sudo NEEDRESTART_SUSPEND=yes apt autoremove -y || true
 
     log_info "Disable waiting for LAN config during boot"
     sudo systemctl mask systemd-networkd-wait-online.service || true

@@ -5,7 +5,7 @@ set -euo pipefail
 
 source /etc/os-release
 if [[ $ID == ubuntu ]]; then
-    sudo apt install -y \
+    sudo NEEDRESTART_SUSPEND=yes apt install -y \
         x11-apps \
         libgl-dev \
         qtbase5-dev \

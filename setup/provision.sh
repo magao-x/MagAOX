@@ -107,7 +107,7 @@ fi
 # Install Linux headers (instrument computers use the RT kernel / headers)
 if [[ $MAGAOX_ROLE == ci || $MAGAOX_ROLE == vm || $MAGAOX_ROLE == workstation || $MAGAOX_ROLE == AOC || $MAGAOX_ROLE == TOC ]]; then
     if [[ $ID == ubuntu ]]; then
-        sudo apt install -y linux-headers-generic
+        sudo NEEDRESTART_SUSPEND=yes apt install -y linux-headers-generic
     elif [[ $ID == centos ]]; then
         sudo yum install -y kernel-devel-$(uname -r) || sudo yum install -y kernel-devel
     fi
