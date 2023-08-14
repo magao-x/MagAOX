@@ -14,8 +14,6 @@ else
     _REAL_SUDO=$(which sudo)
   fi
 fi
-# Defines $ID and $VERSION_ID so we can detect which distribution we're on
-source /etc/os-release
 
 roleScript=/etc/profile.d/magaox_role.sh
 VM_KIND=$(systemd-detect-virt)
@@ -34,6 +32,7 @@ fi
 source $roleScript
 
 # Get logging functions
+# Also defines $ID and $VERSION_ID, from /etc/os-release, so we can detect which distribution we're on
 source $DIR/_common.sh
 
 # Install OS packages first

@@ -14,7 +14,7 @@ fi
 sudo systemctl restart sshd
 
 # Necessary for forwarding GUIs from the VM to the host
-source /etc/os-release # Defines $ID and $VERSION_ID so we can detect which distribution we're on
+# Defines $ID and $VERSION_ID were defined in _common.sh above, so we can detect which distribution we're on
 if [[ $ID == ubuntu ]]; then
     sudo NEEDRESTART_SUSPEND=yes apt install -y xauth
 elif [[ $ID == centos ]]; then

@@ -11,7 +11,7 @@ fi
 if [[ ! -e /etc/apt/sources.list.d/oneAPI.list ]]; then
     echo "deb [signed-by=/usr/share/keyrings/oneapi-archive-keyring.gpg] https://apt.repos.intel.com/oneapi all main" | sudo tee /etc/apt/sources.list.d/oneAPI.list || error_exit "Could not add Intel APT repository to sources.list.d"
 fi
-sudo NEEDRESTART_SUSPEND=yes apt update
+sudo apt update
 
 log_info 'Making /etc/bash.bashrc source /etc/profile.d/*.sh, since graphical sessions appear not to for new Konsoles'
 if ! grep -q profile.d /etc/bash.bashrc; then

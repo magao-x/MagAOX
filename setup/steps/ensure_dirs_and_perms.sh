@@ -3,6 +3,7 @@ DIR="$( cd "$( dirname "${BASH_SOURCE[0]}" )" && pwd )"
 source $DIR/../_common.sh
 set -euo pipefail
 
+mkdir -pv /usr/local/share/man/man{1,2,3,4,5,6,7,8,9}
 mkdir -pv /opt/MagAOX
 mkdir -pv /opt/MagAOX/bin
 mkdir -pv /opt/MagAOX/drivers/fifos

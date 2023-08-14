@@ -229,3 +229,6 @@ if [[ $(which sudo) == *devtoolset* ]]; then
 else
   REAL_SUDO=$(which sudo)
 fi
+
+# Define $ID and $VERSION_ID so we can detect which distribution we're on
+source /etc/os-release

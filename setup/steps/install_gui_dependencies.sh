@@ -3,7 +3,6 @@ DIR="$( cd "$( dirname "${BASH_SOURCE[0]}" )" && pwd )"
 source $DIR/../_common.sh
 set -euo pipefail
 
-source /etc/os-release
 if [[ $ID == ubuntu ]]; then
     sudo NEEDRESTART_SUSPEND=yes apt install -y \
         x11-apps \

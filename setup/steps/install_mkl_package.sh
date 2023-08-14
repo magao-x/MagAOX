@@ -1,7 +1,6 @@
 #!/usr/bin/env bash
 DIR="$( cd "$( dirname "${BASH_SOURCE[0]}" )" && pwd )"
 source $DIR/../_common.sh
-source /etc/os-release
 if [[ ! $ID == "ubuntu" ]]; then
     log_error "Only installing from package manager on Ubuntu"
     exit 1

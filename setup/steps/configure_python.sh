@@ -12,7 +12,6 @@ set -euo pipefail
 # Install the standard MagAOX user python environment
 #
 mamba env update -qf $DIR/../conda_env_pinned_$(uname -i).yml || exit_error "Failed to install or update packages using pinned versions. Update the env manually with the base specification and update the pinned versions if possible."
-source /etc/os-release
 if [[ ( $MAGAOX_ROLE == AOC || $MAGAOX_ROLE == ci ) && ( $ID == "centos" ) ]]; then
 	mamba install -y qt=5 qwt
 fi
