@@ -69,7 +69,7 @@ public:
      * If this fails, then m_good is set to false.
      * test this with good().
      */
-   resurrectee( parentT * parent);
+   resurrectee( parentT* parent, void (*alt_handler)(int,siginfo_t*,void*) = nullptr);
    virtual ~resurrectee();
 
    bool good(){ return m_good;}
@@ -103,6 +103,7 @@ private:
    /// Signal handler:  exit on any signal caught
    static void
    _sigusr2_handler(int sig, siginfo_t *si, void *unused);
+   void (*m_alt_handler)(int sig, siginfo_t *si, void *unused) = 0;
    void
    sigusr2_handler(int sig
                   , siginfo_t *si __attribute__((unused))
@@ -113,9 +114,11 @@ private:
        << "Driver[" << m_myname << "]:  "
        << "PID=" << m_mypid
        << "; caught and exiting on [" << strsignal(sig) << "]"
+       << "; alternate handler is [" << (m_alt_handler?"not ":"") << "null]"
        << "\n"
        ;
-       exit(0);
+       if (!m_alt_handler) { exit(0); }
+       m_alt_handler(sig, si, unused);
    }
 
    /// Ignore some signals, establish handlers for others
@@ -248,7 +251,7 @@ void resurrectee<parentT>::execute(size_t offset_index /* = 0 */)
 }
 
 template<class parentT>
-resurrectee<parentT>::resurrectee(parentT * parent)
+resurrectee<parentT>::resurrectee(parentT* parent, void (*alt_handler)(int,siginfo_t*,void*) /* = nullptr */)
 {
    if( m_self != nullptr )
    {
@@ -257,6 +260,7 @@ resurrectee<parentT>::resurrectee(parentT * parent)
    }
    
    m_self = this;
+   m_alt_handler = alt_handler;
 
    if (m_time_offset[0] < 1) { m_time_offset[0] = 600; }
 
