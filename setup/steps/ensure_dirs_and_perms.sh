@@ -33,6 +33,9 @@ chmod u+rwX,g+rX,o+rX /opt/MagAOX/bin
 chown -R root:root /opt/MagAOX/drivers
 chmod -R u=rwX,g=rwX,o=rX /opt/MagAOX/drivers
 chown -R root:$instrument_group /opt/MagAOX/drivers/fifos
+mkfifo /opt/MagAOX/drivers/fifos/indiserver.ctrl
+chown $instrument_user:$instrument_group /opt/MagAOX/drivers/fifos/indiserver.ctrl
+chmod 664 /opt/MagAOX/drivers/fifos/indiserver.ctrl
 
 make_on_data_array logs /opt/MagAOX
 make_on_data_array rawimages /opt/MagAOX
