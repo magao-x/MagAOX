@@ -18,18 +18,14 @@ Each script has comments throughout. They should all be *idempotent*. (In other 
 
 # multipass notes
 
-===============
-=== On host ===
-===============
+## On host
 
     mu launch -n primary -c 5 -d 20GiB -m 8.0GiB 22.04
     mu exec primary -- touch .hushlogin
     mu shell primary
 
 
-==========================
-=== On guest (primary) ===
-==========================
+## On guest (primary)
 
     echo export MAGAOX_ROLE=vm | sudo tee /etc/profile.d/magaox_role.sh
     mkdir githubalt && cd githubalt/
