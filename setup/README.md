@@ -18,6 +18,28 @@ Each script has comments throughout. They should all be *idempotent*. (In other 
 
 # multipass notes
 
+===============
+=== On host ===
+===============
+
+    mu launch -n primary -c 5 -d 20GiB -m 8.0GiB 22.04
+    mu exec primary -- touch .hushlogin
+    mu shell primary
+
+
+==========================
+=== On guest (primary) ===
+==========================
+
+    echo export MAGAOX_ROLE=vm | sudo tee /etc/profile.d/magaox_role.sh
+    mkdir githubalt && cd githubalt/
+    git clone -q -b dev-no-lapacke https://github.com/milk-org/milk.git
+    git clone -q -b resurrector https://github.com/drbitboy/MagAOX.git
+    git clone -q -b resurrector https://github.com/cacao-org/cacao.git
+    git clone -q -b resurrector https://github.com/drbitboy/magao-x-config.git config
+    cd MagAOX/setup && bash -lx provision.sh
+    mkfifo /opt/MagAOX/drivers/fifos/indiserver.ctrl
+
 ```
 multipass launch -n primary 22.04
 multipass set local.privileged-mounts=Yes  # windows only
