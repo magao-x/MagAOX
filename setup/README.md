@@ -36,6 +36,7 @@ Each script has comments throughout. They should all be *idempotent*. (In other 
     cd MagAOX/setup && bash -lx provision.sh
     mkfifo /opt/MagAOX/drivers/fifos/indiserver.ctrl
 
+## Old notes
 ```
 multipass launch -n primary 22.04
 multipass set local.privileged-mounts=Yes  # windows only
