@@ -34,7 +34,6 @@ Each script has comments throughout. They should all be *idempotent*. (In other 
     git clone -q -b resurrector https://github.com/cacao-org/cacao.git
     git clone -q -b resurrector https://github.com/drbitboy/magao-x-config.git config
     cd MagAOX/setup && bash -lx provision.sh
-    mkfifo /opt/MagAOX/drivers/fifos/indiserver.ctrl
 
 ## Old notes
 ```
