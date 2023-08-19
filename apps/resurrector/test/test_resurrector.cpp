@@ -52,7 +52,7 @@ main(int argc, char** argv)
 
         // Open the FIFO for this hexbeater in the fifos/ subdirectory
         // The FIFO path will be ./fifos/<name>.hb
-        int newfd = resurr.open_hexbeater(argv0, driver_name, "./fifos", NULL);
+        int newfd = resurr.open_hexbeater(10, argv0, driver_name, "./fifos", NULL);
 
         // Start (fork) the hexbeater process
         resurr.start_hexbeater(newfd,1);

@@ -28,7 +28,18 @@
 static inline std::string time_to_hb(int delay)
 {
     char c20[20];
-    sprintf(c20,"%9.9lx\n",time(0) + delay);
+    if (delay<0)
+    {
+        // If delay is negative, use maximum 9dnths
+        sprintf(c20,"%1.1lx\n",0xfL);
+        for (int i=1; i<9; ++i) { c20[i] = *c20; }
+        c20[9] = '\n';
+    }
+    else
+    {
+        // Build delay string from current time and non-negative delay
+        sprintf(c20,"%9.9lx\n",time(0) + delay);
+    }
     return std::string{c20};
 }
 // /////////////////////////////////////////////////////////////////////
@@ -161,6 +172,8 @@ public: // interfaces
         m_output_redirect = output_redirect;
     }
 
+    const int init_dly() const { return m_init_delay; }
+
     // /////////////////////////////////////////////////////////////////
     // /////////////////////////////////////////////////////////////////
     /// Open a named FIFO, load results into HexbeatMonitor instance
@@ -192,6 +205,7 @@ public: // interfaces
     open_hexbeater(const std::string& argv0, const std::string& hbname
                   , fd_set& fd_set_cpy, int& nfds
                   , std::vector<HexbeatMonitor>& vhexbeats
+                  , int init_delay
                   , va_list ap
                   )
     {
@@ -202,7 +216,7 @@ public: // interfaces
 
         // Initialize the instance to the [opened] operational state
         vhexbeats[fd].init_on_open(argv0, hbname, fd_set_cpy, nfds
-                                  , fd, fifo_name);
+                                  , fd, fifo_name, init_delay);
 
         return fd;
     }
@@ -474,6 +488,8 @@ private: // Internal attributes and interfaces
 
     std::string m_hbname; ///< Name of the hexbeater (-n <hbname>
 
+    int m_init_delay {10}; ///< Initial hexbeat offset
+
     std::string m_last_hb; ///< Most-recent 9-char heartbeat
 
     std::string m_fifo_name; ///< Name of the heartbeat FIFO
@@ -490,9 +506,10 @@ private: // Internal attributes and interfaces
     void
     init_on_open(const std::string& argv0, const std::string& hbname
                 , fd_set& fd_set_cpy, int& nfds
-                , int fd, std::string& fifo_name)
+                , int fd, std::string& fifo_name, int init_delay)
     {
         // On success, initialize instance data to opened state, not started ...
+        m_init_delay = init_delay;
         m_sel = false;  // ... by leaving select monitoring off
         m_fd = fd;
         pending_close_set(false);
@@ -547,7 +564,7 @@ private: // Internal attributes and interfaces
             // \todo perhaps throw an exception if new_fd is not -1
         }
 
-        if (dosel) { m_last_hb = time_to_hb(10); }
+        if (dosel) { m_last_hb = time_to_hb(m_init_delay); }
         m_fd = new_fd;
         pending_close_set(false);
         m_sel = dosel;
@@ -754,7 +771,7 @@ private: // Internal attributes and interfaces
             // Parent fork:  on success (pid > 0) add delay to current
             // time to initialize last hexbeat; on error (pid < 0) do
             // nothing extra; on either return that pid
-            if (pid > 0) { m_last_hb = time_to_hb(delay); }
+            if (pid > 0) { m_last_hb = time_to_hb(m_init_delay); }
             return pid;
         } // fork failed (<0) or parent (>0)
 
