@@ -18,7 +18,7 @@ function resuctl_main {
 ###           is readable, then start resurrectee_indi with stated $ROLE
 function verb_startup {
 
-  hide
+  hide startup
 
   [ "$procnames" ] && verb_start && return 0
   [ "$procnames" ] && return 1
@@ -44,10 +44,10 @@ function verb_startup {
 ###            to trigger killing its INDI driver devices before exiting
 function verb_shutdown {
 
-  hide
+  hide shutdown
 
-  [ ! "$All" ] && verb_stop && exit
-  [ ! "$All" ] && exit 1
+  [ ! "$All" ] && verb_stop && return 0
+  [ ! "$All" ] && return 1
 
   ripid=$(resurrector_indi_pid) \
   || resu_failure "resurrector_indi is not running; exiting ..." \
@@ -61,9 +61,15 @@ function verb_shutdown {
 ########################################################################
 ### Restart:  first shutdown, then startup, the resurrector_indi process
 function verb_restart {
-  hide
-  verb_shutdown
+  hide restart
+
+  verb_shutdown \
+  || Usage "Error calling shutdown from restart" || return 1
+
   sleep 5
+
+  [ "$All" ] && All= procnames=
+
   verb_startup
 }
 
@@ -72,7 +78,7 @@ function verb_restart {
 ###         signal SIGUSR2 to resurrector_indi to re-start those devices
 function verb_start {
 
-  hide
+  hide start
 
   [ "$procnames" ] \
   || Usage "ERROR:  command [start] requires PROCNAME(s)" \
@@ -102,7 +108,7 @@ function verb_start {
 ###        signal SIGUSR2 to resurrector_indi to terminate those devices
 function verb_stop {
 
-  hide
+  hide stop
 
   [ "$All" ] && verb_shutdown && return 0
   [ "$All" ] && return 1
@@ -157,7 +163,7 @@ function verb_defib {
 
 ########################################################################
 function verb_peek {
-  hide
+  hide peek
 
   for procname in ${procnames//${delim}/ } ; do
     _brief_status "$procname"
@@ -167,7 +173,7 @@ function verb_peek {
 
 ########################################################################
 function verb_status {
-  hide
+  hide status
 
   for procname in ${procnames//${delim}/ } ; do
     _brief_status "$procname"
@@ -323,7 +329,7 @@ function find_all_procnames {
 function add_procname {
   [ $# == 1 ] \
   || Usage "ERROR:  program error, code WSNBATGH0; contact programmer" \
-  || exit 0
+  || return 0
 
   [ "${1###}" == "$1" ] || return 0
   
@@ -482,8 +488,11 @@ Usage:
     resuctrl shutdown --all
         - shutdown all processes including resurrector_indi
 
-    resuctrl restart
-        - have resurrector_indi shutdown then startup each running process
+    resuctrl restart PROCNAME [PROCNAME ...]
+        - shutdown specified running processes, then restart them
+
+    resuctrl restart --all
+        - shutdown running processes and resurrector_indi, then restart
 
     resuctrl peek --all|PROCNAME [PROCNAME ...]
         - show status and last few log lines (via logdump) for each process
@@ -521,6 +530,7 @@ return 1
 ########################################################################
 function hide {
   ( [ "$VERBOSE" ] && cat || cat > /dev/null ) << EoFhide
+In verb_{$1}:
 verb{$verb}:
 - ROLE{$ROLE}
 - procnames{$procnames}
