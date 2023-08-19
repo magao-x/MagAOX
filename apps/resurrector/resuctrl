@@ -20,6 +20,9 @@ function verb_startup {
 
   hide
 
+  [ "$procnames" ] && verb_start && return 0
+  [ "$procnames" ] && return 1
+
   ripid=$(resurrector_indi_pid) \
   && ( [ "$verb" == "restart" ] \
      || resu_failure "resurrector_indi already running PID{$ripid}; exiting ..." \
@@ -42,6 +45,9 @@ function verb_startup {
 function verb_shutdown {
 
   hide
+
+  [ ! "$All" ] && verb_stop && exit
+  [ ! "$All" ] && exit 1
 
   ripid=$(resurrector_indi_pid) \
   || resu_failure "resurrector_indi is not running; exiting ..." \
@@ -78,7 +84,8 @@ function verb_start {
 
   for procname in ${procnames//${delim}/ } ; do
     ### Remove any leading whitespace+# for proclist file procname entry
-    sed -E -i -e "/^$ws0#$wsh0${procname}$ws1$notws1$ws0\$/s/^$wsh0//" "$proclist_txt"
+    ### also any prefixes:  "-" or "py:" or "nhb:"
+    sed -E -i -e "/^$ws0#$wsh0(-|[^: 	]*:)?${procname}$ws1$notws1$ws0\$/s/^$wsh1//" "$proclist_txt"
   done
 
   ripid=$(resurrector_indi_pid) \
@@ -97,6 +104,9 @@ function verb_stop {
 
   hide
 
+  [ "$All" ] && verb_shutdown && return 0
+  [ "$All" ] && return 1
+
   [ "$procnames" ] \
   || Usage "ERROR:  command [stop] requires PROCNAME(s)" \
   || return 1
@@ -107,7 +117,7 @@ function verb_stop {
 
   for procname in ${procnames//${delim}/ } ; do
     ### Replace leading whitespace with # in proclist file procname line
-    sed -E -i -e "/^$ws0${procname}$ws1$notws1$ws0\$/s/^$ws0/#/" "$proclist_txt"
+    sed -E -i -e "/^$ws0(-|[^:# 	]*:)?${procname}$ws1$notws1$ws0\$/s/^$ws0/#/" "$proclist_txt"
   done
 
   ripid=$(resurrector_indi_pid) \
@@ -237,6 +247,15 @@ function parse_commands {
   [ "$All" ] && [ "$procnames" ] \
   && ( Usage "ERROR:  --all option mutually exclusive with PROCNAME options [$procnames]" || true ) && return 1
 
+  [ "$All" ] && [ "$verb" == "startup" ] \
+  && ( Usage "ERROR:  option --all not valid for [$verb] command" || true ) \
+  && return 1
+
+  [ "$All" ] || [ "$procnames" ] \
+  || ( [ "$verb" != "stop" ] && [ "$verb" != "shutdown" ] ) \
+  || ( Usage "ERROR:  either --all or PROCNAMEs option is required with [$verb] command" && false ) \
+  || return 1
+
   [ ! "$All" ] || procnames="$(find_all_procnames)" || return 1
 
   true
@@ -247,15 +266,18 @@ function parse_commands {
 function _brief_status {
 
   [ "$1" ] || return 1
-  procname="$1"
+  lclprocname="$1"
+  lclprocname="${lclprocname#-}"
+  lclprocname="${lclprocname#py:}"
+  lclprocname="${lclprocname#nhb:}"
 
-  resu_path="$(find_resu_hexbeat_pipe "$procname")" || true
-  hb_pid="$(find_device_hexbeat_pipe "$procname" pid)" || true
+  resu_path="$(find_resu_hexbeat_pipe "$lclprocname")" || true
+  hb_pid="$(find_device_hexbeat_pipe "$lclprocname" pid)" || true
 
-  [ ! "$resu_path" ] && [ ! "$hb_pid" ] && resu_warning "$procname: not started"
-  [ ! "$resu_path" ] && [ "$hb_pid" ] && resu_failure "$procname: resurrector_indi not listening, but process running (pid: $hb_pid)"
-  [ "$resu_path" ] && [ ! "$hb_pid" ] && resu_failure "$procname: resurrector_indi listening, but process not running"
-  [ "$resu_path" ] && [ "$hb_pid" ] && resu_success "$procname: running (pid: $hb_pid)"
+  [ ! "$resu_path" ] && [ ! "$hb_pid" ] && resu_warning "$lclprocname: not started"
+  [ ! "$resu_path" ] && [ "$hb_pid" ] && resu_failure "$lclprocname: resurrector_indi not listening, but process running (pid: $hb_pid)"
+  [ "$resu_path" ] && [ ! "$hb_pid" ] && resu_failure "$lclprocname: resurrector_indi listening, but process not running"
+  [ "$resu_path" ] && [ "$hb_pid" ] && resu_success "$lclprocname: running (pid: $hb_pid)"
   return 0
 }
 
@@ -264,10 +286,13 @@ function _brief_status {
 function _peek_logs {
 
   [ "$1" ] || return 1
-  procname="$1"
+  lclprocname="$1"
+  lclprocname="${lclprocname#-}"
+  lclprocname="${lclprocname#py:}"
+  lclprocname="${lclprocname#nhb:}"
 
-  logdump -n 1 "$procname" 2>&1 | tail -n 10
-  resu_informa "End $procname logs"
+  logdump -n 1 "$lclprocname" 2>&1 | tail -n 10
+  resu_informa "End $lclprocname logs"
   echo
 
   return 0
@@ -442,24 +467,23 @@ MagAO-X Process Control
 
 Usage:
 
-    resuctrl startup [--all]
-        - startup resurrector_indi and all processes in proclist
+    resuctrl startup
+        - startup resurrector_indi and uncommented processes in proclist
 
-    resuctrl shutdown [--all]
+    resuctrl startup PROCNAME[ PROCNAME[ ...]]
+    resuctrl start PROCNAME[ PROCNAME[ ...]]
+        - enable and start PROCNAME processes in proclist
+
+    resuctrl stop PROCNAME[ PROCNAME[ ...]]
+    resuctrl shutdown PROCNAME[ PROCNAME[ ...]]
+        - disable and stop PROCNAME processes in proclist
+
+    resuctrl stop --all
+    resuctrl shutdown --all
         - shutdown all processes including resurrector_indi
 
     resuctrl restart
         - have resurrector_indi shutdown then startup each running process
-
-    resuctrl start PROCNAME[ PROCNAME[ ...]]
-        - enable and start PROCNAME processes in proclist
-
-    resuctrl stop --all|PROCNAME[ PROCNAME[ ...]]
-        - disable and stop PROCNAME processes in proclist
-
-    resuctrl defib --all|PROCNAME[ [PROCNAME ...]]
-        - declare to resurrector that PROCNAME processes have expired,
-          so they will be restarted by resurrector_indi
 
     resuctrl peek --all|PROCNAME [PROCNAME ...]
         - show status and last few log lines (via logdump) for each process
@@ -467,12 +491,16 @@ Usage:
     resuctrl status --all|PROCNAME [PROCNAME ...]
         - show status for each process
 
+    resuctrl defib --all|PROCNAME[ [PROCNAME ...]]
+        - declare to resurrector that PROCNAME processes have expired,
+          so they will be restarted by resurrector_indi
+
 positional arguments:
   {startup,shutdown,restart,start,stop,defib,peek,status}
                         verb for action to take
 
 proclist is contents of file::
-  /opt/MagAOX/config/proclist_gauss.txt
+  /opt/MagAOX/config/proclist_\${ROLE}.txt
 
 optional arguments:
   -h, --help            show this help message and exit
