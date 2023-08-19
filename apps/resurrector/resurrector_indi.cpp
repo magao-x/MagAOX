@@ -135,6 +135,10 @@ main(int argc, char** argv)
         {
             if (2 != rnp) { continue; }
             argv0 = IRMAGAOX_bin + std::string("/") + exec;
+            if (dpfx!="-" && dpfx!="py:" && dpfx != "nhb:")
+            {
+                driver_name = dpfx + driver_name;
+            }
             resurr.pending_close_all_set_on_match(false, argv0, driver_name);
         }
 
@@ -159,6 +163,10 @@ main(int argc, char** argv)
             if (2 != rnp) { continue; }
 
             argv0 = IRMAGAOX_bin + std::string("/") + exec;
+            if (dpfx!="-" && dpfx!="py:" && dpfx != "nhb:")
+            {
+                driver_name = dpfx + driver_name;
+            }
 
             // Check for a FIFO fd with same driver name is already in
             // the list; find_hbm_by_name() will return -1 if there is
