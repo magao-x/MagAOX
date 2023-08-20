@@ -219,13 +219,6 @@ struct telem_stdcam : public flatbuffer_log
    
    }
 
-   static std::string msgJSON( void * msgBuffer,  /**< [in] Buffer containing the flatbuffer serialized message.*/
-                               flatlogs::msgLenT len  /**< [in] [unused] length of msgBuffer.*/
-                             )
-   {
-      return makeJSON(msgBuffer, len, Telem_stdcam_fbTypeTable());
-   }
-   
    static std::string mode( void * msgBuffer )
    {
       auto fbs = GetTelem_stdcam_fb(msgBuffer);

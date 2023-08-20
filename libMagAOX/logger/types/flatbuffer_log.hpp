@@ -11,7 +11,7 @@
 #define logger_types_flatbuffer_log_hpp
 
 #include "flatbuffers/flatbuffers.h"
-#include "flatbuffers/minireflect.h"
+#include "flatbuffers/idl.h"
 
 namespace MagAOX
 {
@@ -61,16 +61,25 @@ struct flatbuffer_log
       return 0;
    }
 
-   static std::string makeJSON( void * msgBuffer,  /**< [in] Buffer containing the flatbuffer serialized message.*/
+   static std::string msgJSON( void * msgBuffer,  /**< [in] Buffer containing the flatbuffer serialized message.*/
                                flatlogs::msgLenT len,  /**< [in] [unused] length of msgBuffer.*/
-                               const flatbuffers::TypeTable * typeTable /**< [in] flatbuffers TypeTable for reflection of field names */
+                               const uint8_t * binarySchema, /**< [in] flatbuffers binary schema for this log type */
+                               const unsigned int binarySchemaLength /**< [in] flatbuffers binary schema length */
                               )
    {
       static_cast<void>(len);
-      flatbuffers::ToStringVisitor tostring_visitor(" ", true, "", true);
-      const uint8_t * msgBufferCast = reinterpret_cast<const uint8_t *>(msgBuffer);
-      IterateFlatBuffer(msgBufferCast, typeTable, &tostring_visitor);
-      return tostring_visitor.s;
+      flatbuffers::Parser parser;
+      parser.opts.output_default_scalars_in_json = true;
+      parser.opts.output_enum_identifiers = true;
+      parser.opts.strict_json = true;
+      parser.opts.indent_step = -1;  // also disables line breaking within record
+      bool ok = parser.Deserialize(binarySchema, binarySchemaLength);
+      if(!ok) {
+         std::cerr << __FILE__ << ":" << __LINE__ << " Failed to deserialize binary schema\n";
+      }
+      std::string output;
+      flatbuffers::GenText(parser, msgBuffer, &output);
+      return output;
    }
 
 };

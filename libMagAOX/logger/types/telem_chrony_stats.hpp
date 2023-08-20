@@ -115,13 +115,6 @@ struct telem_chrony_stats : public flatbuffer_log
    
    }
 
-   static std::string msgJSON( void * msgBuffer,  /**< [in] Buffer containing the flatbuffer serialized message.*/
-                               flatlogs::msgLenT len  /**< [in] [unused] length of msgBuffer.*/
-                             )
-   {
-      return makeJSON(msgBuffer, len, Telem_chrony_stats_fbTypeTable());
-   }
-   
    static double systemTime(void * msgBuffer )
    {
       auto fbs = GetTelem_chrony_stats_fb(msgBuffer);

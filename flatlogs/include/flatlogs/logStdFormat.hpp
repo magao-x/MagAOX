@@ -29,7 +29,9 @@ namespace flatlogs
 template<typename logT, typename iosT>
 iosT & jsonFormat( iosT & ios, ///< [out] the iostream to output the log too
                   bufferPtrT & logBuffer, ///< [in] the binary log buffer to output
-                  const std::string & eventCodeName
+                  const std::string & eventCodeName,
+                  const uint8_t * binarySchema,
+                  const unsigned int binarySchemaLength
                 )
 {
    logPrioT prio;
@@ -43,7 +45,7 @@ iosT & jsonFormat( iosT & ios, ///< [out] the iostream to output the log too
    ios << "\"ts\": \"" << ts.ISO8601DateTimeStrX() << "\", ";
    ios << "\"prio\": \"" << priorityString(prio) << "\", ";
    ios << "\"ec\": \"" << eventCodeName << "\", ";
-   ios << "\"msg\": " << logT::msgJSON(logHeader::messageBuffer(logBuffer) , len);
+   ios << "\"msg\": " << logT::msgJSON(logHeader::messageBuffer(logBuffer), len, binarySchema, binarySchemaLength);
    ios << "}";
    return ios;
 }

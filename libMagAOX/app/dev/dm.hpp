@@ -266,7 +266,7 @@ public:
      * \returns 0 on success
      * \returns -1 on error
      */
-   int setFlat();
+   int setFlat( bool update=false /**< [in] If true, this is an update rather than a new set*/);
    
    /// Zero the flat command on the DM
    /** Writes a 0 array the designated shmim.
@@ -1195,7 +1195,7 @@ int dm<derivedT,realT>::loadFlat(const std::string & intarget)
 
 
 template<class derivedT, typename realT>
-int dm<derivedT,realT>::setFlat()
+int dm<derivedT,realT>::setFlat(bool update)
 {
    if(m_shmimFlat == "") return 0;
 
@@ -1261,9 +1261,12 @@ int dm<derivedT,realT>::setFlat()
    //Post the semaphore
    ImageStreamIO_closeIm(&m_flatImageStream);
    
-   derived().updateSwitchIfChanged(m_indiP_setFlat, "toggle", pcf::IndiElement::On, pcf::IndiProperty::Busy);
+   if(!update)
+   {
+      derived().updateSwitchIfChanged(m_indiP_setFlat, "toggle", pcf::IndiElement::On, pcf::IndiProperty::Busy);
    
-   derivedT::template log<text_log>("flat set");
+      derivedT::template log<text_log>("flat set");
+   }
    
    return 0;
 }

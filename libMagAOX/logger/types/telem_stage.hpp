@@ -89,13 +89,6 @@ struct telem_stage : public flatbuffer_log
    
    }
 
-   static std::string msgJSON( void * msgBuffer,  /**< [in] Buffer containing the flatbuffer serialized message.*/
-                               flatlogs::msgLenT len  /**< [in] [unused] length of msgBuffer.*/
-                             )
-   {
-      return makeJSON(msgBuffer, len, Telem_stage_fbTypeTable());
-   }
-   
    static int moving( void * msgBuffer )
    {
       auto fbs = GetTelem_stage_fb(msgBuffer);
