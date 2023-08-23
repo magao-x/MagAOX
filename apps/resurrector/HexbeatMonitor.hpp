@@ -425,6 +425,14 @@ public: // interfaces
             hexbeater_args.clear();
             while (p<pend)
             {
+                if (hexbeater_args.size()==0)
+                {
+                    if (HexbeatMonitor::matches(p,"python"))
+                    {
+                        p += strlen(p) + 1;
+                        continue;
+                    }
+                }
                 hexbeater_args.push_back(p);
                 // If more than 3 arguments then it's not a hexbeater
                 if (hexbeater_args.size()>3) { break; }
@@ -909,12 +917,57 @@ private: // Internal attributes and interfaces
     static bool
     is_is(const std::string& argv0)
     {
-    const std::string is ("indiserver");
-    const std::string slashis ("/indiserver");
-        int L = argv0.size();
-        if (L < 10) { return false; }
-        if (L == 10) { return argv0 == is; }
-        return argv0.substr(L-11) == slashis;
+        return HexbeatMonitor::matches(argv0, "indiserver");
+    }
+    // ////////////////////////////////////////////////////////////////
+
+    // ////////////////////////////////////////////////////////////////
+    // ////////////////////////////////////////////////////////////////
+    /// Check if arg ends in [/]<match> or [/]<match>N or [/]<match>N.N
+    /** \returns true if arg is some form of match
+      * \returns false otherwise
+      */
+    static bool
+    matches(const std::string& arg, const char* match)
+    {
+        if (!match) { return false; }   // match is null pointer
+        if (!*match) { return false; }  // match is empty string
+        char* pm = ((char*)match) + strlen(match);  // pointer past end
+
+        // checkseq:  0=>possible NN.NN suffix; 1=>chars in match;
+        //            where Ns are decimal digits
+        // - Do not ignore N.N in arg if match ends in N or .,
+        int checkseq{(pm[-1]=='.' || isdigit(pm[-1])) ? 1 : 0};
+
+        for (std::string::const_reverse_iterator rit=arg.rbegin()
+            ; rit!=arg.rend()
+            ; ++rit
+            )
+        {
+            switch(checkseq)
+            {
+            case 0:
+                // Ignore N/./.N/N./N.N suffix in arg, if present
+                if ('.'==*rit or isdigit(*rit)) { break; }
+                // Char is not a decimal digit or a '.' - drop through
+                checkseq = 1;
+
+            case 1:
+                // If first position in match was reached but there are
+                // more chars in arg, then if current char in arg is a
+                // slash, then arg matches, else arg does not match
+                if (match == pm) { return '/'==*rit; }
+
+                // Check next earlier position in match
+                --pm;
+                if (*rit != *pm) { return false; }
+                break;
+            }
+        }
+        // All characters in arg have been checked and match the
+        // corresponding characters in match, so return true if there
+        // are no more unchecked characters in match
+        return match==pm;
     }
     // ////////////////////////////////////////////////////////////////
 };
