@@ -14,8 +14,6 @@ else
     _REAL_SUDO=$(which sudo)
   fi
 fi
-# Defines $ID and $VERSION_ID so we can detect which distribution we're on
-source /etc/os-release
 
 roleScript=/etc/profile.d/magaox_role.sh
 VM_KIND=$(systemd-detect-virt)
@@ -34,6 +32,7 @@ fi
 source $roleScript
 
 # Get logging functions
+# Also defines $ID and $VERSION_ID, from /etc/os-release, so we can detect which distribution we're on
 source $DIR/_common.sh
 
 # Install OS packages first
@@ -107,7 +106,7 @@ fi
 # Install Linux headers (instrument computers use the RT kernel / headers)
 if [[ $MAGAOX_ROLE == ci || $MAGAOX_ROLE == vm || $MAGAOX_ROLE == workstation || $MAGAOX_ROLE == AOC || $MAGAOX_ROLE == TOC ]]; then
     if [[ $ID == ubuntu ]]; then
-        sudo apt install -y linux-headers-generic
+        sudo NEEDRESTART_SUSPEND=yes apt install -y linux-headers-generic
     elif [[ $ID == centos ]]; then
         sudo yum install -y kernel-devel-$(uname -r) || sudo yum install -y kernel-devel
     fi
@@ -151,7 +150,7 @@ fi
 
 # SuSE packages need either Python 3.6 or 3.10, but Rocky 9.2 has Python 3.9 as /bin/python, so we build our own RPM:
 if [[ $ID == rocky ]]; then
-  sudo bash -l "$DIR/steps/install_cpuset.sh" || error_exit "Couldn't install cpuset from source"
+  sudo bash -l "$DIR/steps/install_cpuset.sh" || exit_error "Couldn't install cpuset from source"
 fi
 
 
@@ -203,15 +202,17 @@ else
             echo "Cloning new copy of MagAOX codebase"
             orgname=magao-x
             reponame=MagAOX
-            parentdir=/opt/MagAOX/source/
+            parentdir=/opt/MagAOX/source
             clone_or_update_and_cd $orgname $reponame $parentdir
-            # ensure upstream is set somewhere that isn't on the fs to avoid possibly pushing
-            # things and not having them go where we expect
-            stat /opt/MagAOX/source/MagAOX/.git
-            git remote remove origin
-            git remote add origin https://github.com/magao-x/MagAOX.git
-            git fetch origin
-            git branch -u origin/dev dev
+            if git --git-dir="$parentdir/$reponame/.git" remote -v 2>/dev/null | grep -q "^origin  *https://.*/$orgname/$reponame" ; then
+                # ensure upstream is set somewhere that isn't on the fs to avoid possibly pushing
+                # things and not having them go where we expect
+                stat /opt/MagAOX/source/MagAOX/.git
+                git remote remove origin
+                git remote add origin https://github.com/magao-x/MagAOX.git
+                git fetch origin
+                git branch -u origin/dev dev
+            fi
             log_success "In the future, you can re-run this script from /opt/MagAOX/source/MagAOX/setup"
             log_info "(In fact, maybe delete $(dirname $DIR)?)"
         else
@@ -295,9 +296,11 @@ fi
 
 sudo bash -l "$DIR/steps/configure_startup_services.sh"
 
-log_info "Generating subuid and subgid files, may need to run podman system migrate"
-sudo python "$DIR/generate_subuid_subgid.py" || error_exit "Generating subuid/subgid files for podman failed"
-sudo podman system migrate || error_exit "Could not run podman system migrate"
+if which podman ; then
+  log_info "Generating subuid and subgid files, may need to run podman system migrate"
+  sudo python "$DIR/generate_subuid_subgid.py" || exit_error "Generating subuid/subgid files for podman failed"
+  sudo podman system migrate || exit_error "Could not run podman system migrate"
+fi
 
 # To try and debug hardware issues, ICC and RTC replicate their
 # kernel console log over UDP to AOC over the instrument LAN.

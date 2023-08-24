@@ -28,7 +28,18 @@
 static inline std::string time_to_hb(int delay)
 {
     char c20[20];
-    sprintf(c20,"%9.9lx\n",time(0) + delay);
+    if (delay<0)
+    {
+        // If delay is negative, use maximum 9dnths
+        sprintf(c20,"%1.1lx\n",0xfL);
+        for (int i=1; i<9; ++i) { c20[i] = *c20; }
+        c20[9] = '\n';
+    }
+    else
+    {
+        // Build delay string from current time and non-negative delay
+        sprintf(c20,"%9.9lx\n",time(0) + delay);
+    }
     return std::string{c20};
 }
 // /////////////////////////////////////////////////////////////////////
@@ -161,6 +172,8 @@ public: // interfaces
         m_output_redirect = output_redirect;
     }
 
+    const int init_dly() const { return m_init_delay; }
+
     // /////////////////////////////////////////////////////////////////
     // /////////////////////////////////////////////////////////////////
     /// Open a named FIFO, load results into HexbeatMonitor instance
@@ -192,6 +205,7 @@ public: // interfaces
     open_hexbeater(const std::string& argv0, const std::string& hbname
                   , fd_set& fd_set_cpy, int& nfds
                   , std::vector<HexbeatMonitor>& vhexbeats
+                  , int init_delay
                   , va_list ap
                   )
     {
@@ -202,7 +216,7 @@ public: // interfaces
 
         // Initialize the instance to the [opened] operational state
         vhexbeats[fd].init_on_open(argv0, hbname, fd_set_cpy, nfds
-                                  , fd, fifo_name);
+                                  , fd, fifo_name, init_delay);
 
         return fd;
     }
@@ -411,6 +425,14 @@ public: // interfaces
             hexbeater_args.clear();
             while (p<pend)
             {
+                if (hexbeater_args.size()==0)
+                {
+                    if (HexbeatMonitor::matches(p,"python"))
+                    {
+                        p += strlen(p) + 1;
+                        continue;
+                    }
+                }
                 hexbeater_args.push_back(p);
                 // If more than 3 arguments then it's not a hexbeater
                 if (hexbeater_args.size()>3) { break; }
@@ -474,6 +496,8 @@ private: // Internal attributes and interfaces
 
     std::string m_hbname; ///< Name of the hexbeater (-n <hbname>
 
+    int m_init_delay {10}; ///< Initial hexbeat offset
+
     std::string m_last_hb; ///< Most-recent 9-char heartbeat
 
     std::string m_fifo_name; ///< Name of the heartbeat FIFO
@@ -490,9 +514,10 @@ private: // Internal attributes and interfaces
     void
     init_on_open(const std::string& argv0, const std::string& hbname
                 , fd_set& fd_set_cpy, int& nfds
-                , int fd, std::string& fifo_name)
+                , int fd, std::string& fifo_name, int init_delay)
     {
         // On success, initialize instance data to opened state, not started ...
+        m_init_delay = init_delay;
         m_sel = false;  // ... by leaving select monitoring off
         m_fd = fd;
         pending_close_set(false);
@@ -547,7 +572,7 @@ private: // Internal attributes and interfaces
             // \todo perhaps throw an exception if new_fd is not -1
         }
 
-        if (dosel) { m_last_hb = time_to_hb(10); }
+        if (dosel) { m_last_hb = time_to_hb(m_init_delay); }
         m_fd = new_fd;
         pending_close_set(false);
         m_sel = dosel;
@@ -754,7 +779,7 @@ private: // Internal attributes and interfaces
             // Parent fork:  on success (pid > 0) add delay to current
             // time to initialize last hexbeat; on error (pid < 0) do
             // nothing extra; on either return that pid
-            if (pid > 0) { m_last_hb = time_to_hb(delay); }
+            if (pid > 0) { m_last_hb = time_to_hb(m_init_delay); }
             return pid;
         } // fork failed (<0) or parent (>0)
 
@@ -892,12 +917,57 @@ private: // Internal attributes and interfaces
     static bool
     is_is(const std::string& argv0)
     {
-    const std::string is ("indiserver");
-    const std::string slashis ("/indiserver");
-        int L = argv0.size();
-        if (L < 10) { return false; }
-        if (L == 10) { return argv0 == is; }
-        return argv0.substr(L-11) == slashis;
+        return HexbeatMonitor::matches(argv0, "indiserver");
+    }
+    // ////////////////////////////////////////////////////////////////
+
+    // ////////////////////////////////////////////////////////////////
+    // ////////////////////////////////////////////////////////////////
+    /// Check if arg ends in [/]<match> or [/]<match>N or [/]<match>N.N
+    /** \returns true if arg is some form of match
+      * \returns false otherwise
+      */
+    static bool
+    matches(const std::string& arg, const char* match)
+    {
+        if (!match) { return false; }   // match is null pointer
+        if (!*match) { return false; }  // match is empty string
+        char* pm = ((char*)match) + strlen(match);  // pointer past end
+
+        // checkseq:  0=>possible NN.NN suffix; 1=>chars in match;
+        //            where Ns are decimal digits
+        // - Do not ignore N.N in arg if match ends in N or .,
+        int checkseq{(pm[-1]=='.' || isdigit(pm[-1])) ? 1 : 0};
+
+        for (std::string::const_reverse_iterator rit=arg.rbegin()
+            ; rit!=arg.rend()
+            ; ++rit
+            )
+        {
+            switch(checkseq)
+            {
+            case 0:
+                // Ignore N/./.N/N./N.N suffix in arg, if present
+                if ('.'==*rit or isdigit(*rit)) { break; }
+                // Char is not a decimal digit or a '.' - drop through
+                checkseq = 1;
+
+            case 1:
+                // If first position in match was reached but there are
+                // more chars in arg, then if current char in arg is a
+                // slash, then arg matches, else arg does not match
+                if (match == pm) { return '/'==*rit; }
+
+                // Check next earlier position in match
+                --pm;
+                if (*rit != *pm) { return false; }
+                break;
+            }
+        }
+        // All characters in arg have been checked and match the
+        // corresponding characters in match, so return true if there
+        // are no more unchecked characters in match
+        return match==pm;
     }
     // ////////////////////////////////////////////////////////////////
 };

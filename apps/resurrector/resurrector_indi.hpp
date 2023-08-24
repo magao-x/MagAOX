@@ -8,6 +8,7 @@
 #define IRMAGAOX_bin (IRMAGAOX_top "/bin")
 #define IRMAGAOX_fifos (IRMAGAOX_top "/drivers/fifos")
 
+// Build path to MagAOX hierarchy
 const std::string&
 IRMAGAOX_top_func()
 {
@@ -20,8 +21,14 @@ IRMAGAOX_top_func()
     return IRMAGAOX_top_func();
 }
 
+// Read next driver name and driver executable from proclist file
+// N.B. Driver name may have - or py: or <anything>: prepended to
+//      it; strip that from the name, including the :, and return
+//      it separately as the prefix argument, otherwise assign an
+//      empty string to the prefix argument
 int
-read_next_process(FILE* f, std::string& name, std::string& exec)
+read_next_process(FILE* f, std::string& name, std::string& exec
+                 , std::string& prefix)
 {
     char oneline[1025] = { "" };
     char argname[1025] = { "" };
@@ -34,7 +41,26 @@ read_next_process(FILE* f, std::string& name, std::string& exec)
     if (narg != 2) { return 0; }
     if (!*argname || !*argexec) { return 0; }
     if ('#' == *argname || '#' == *argexec) { return 1; }
-    name = std::string(argname);
+    if ('-'==*argname)
+    {
+        if (strlen(argname) < 1) { return 0; }
+        // non-zero-length driver name with a prefix of "-"
+        name = std::string(argname+1);
+        prefix = std::string("-");
+    }
+    else if ((p=strchr(argname,':')))
+    {
+        if (!*(++p)) { return 0; }
+        // non-zero-length driver name with a prefix of "...:"
+        name = std::string(p);
+        prefix = std::string(argname, (size_t)(p - argname));
+    }
+    else
+    {
+        // non-zero-length driver name with no prefix
+        name = std::string(argname);
+        prefix = std::string("");
+    }
     exec = std::string(argexec);
     return 2;
 }

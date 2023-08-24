@@ -227,9 +227,10 @@ stdout_stderr_redirect(std::string devicename)
     };
 
     errno = 0;            // Ensure there is no current error
+    int step{0};
 
     // Loop over those steps, exit loop early if errno becomes non-zero
-    for (int step = S_BUILD_SUBDIR
+    for (step = S_BUILD_SUBDIR
         ; !errno && step < S_LAST
         ; ++step
         )
@@ -250,6 +251,14 @@ stdout_stderr_redirect(std::string devicename)
         case S_CLOS_FSTDXXX: close(fstdxxx); break;
         default: break;
         }
+    }
+    if (step!=S_LAST)
+    {
+        fprintf(stderr,"ERROR:  stdout_stderr_redirect('%s')"
+                       "; lasttep=%d"
+                       "; errno=%d[%s]\n"
+               , devicename.c_str(), step, errno, strerror(errno)
+               );
     }
 } // void stdout_stderr_redirect(std::string devicename)
 

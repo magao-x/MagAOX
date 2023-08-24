@@ -14,9 +14,10 @@ fi
 sudo systemctl restart sshd
 
 # Necessary for forwarding GUIs from the VM to the host
-source /etc/os-release # Defines $ID and $VERSION_ID so we can detect which distribution we're on
+# Shell variables $ID and $VERSION_ID were sourced from /etc/os-release
+#   in _common.sh above, so we can detect which distribution we're on
 if [[ $ID == ubuntu ]]; then
-    sudo apt install -y xauth
+    sudo NEEDRESTART_SUSPEND=yes apt install -y xauth
 elif [[ $ID == centos ]]; then
     sudo yum install -y xorg-x11-xauth
 fi

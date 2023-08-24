@@ -16,7 +16,6 @@ if [[ ! $(getent group $1) ]]; then
 else
     echo "Group $1 exists"
 fi
-source /etc/os-release
 if [[ $ID == ubuntu ]]; then
     admins_group=sudo
 else

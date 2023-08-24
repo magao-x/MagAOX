@@ -116,6 +116,7 @@ main(int argc, char** argv)
             return 1;
         }
 
+        std::string dpfx;  // Driver prefix:  "-" or <anything>:
         std::string driver_name;
         std::string exec;
         std::string argv0;
@@ -130,10 +131,14 @@ main(int argc, char** argv)
         // => (2) Parse proclist_<role>.txt file, reverse that
         //        assumption (1 above) for each HBM in the proclist
         int rnp;
-        while (EOF != (rnp=read_next_process(f,driver_name,exec)))
+        while (EOF != (rnp=read_next_process(f,driver_name,exec,dpfx)))
         {
             if (2 != rnp) { continue; }
             argv0 = IRMAGAOX_bin + std::string("/") + exec;
+            if (dpfx!="-" && dpfx!="py:" && dpfx != "nhb:")
+            {
+                driver_name = dpfx + driver_name;
+            }
             resurr.pending_close_all_set_on_match(false, argv0, driver_name);
         }
 
@@ -153,11 +158,15 @@ main(int argc, char** argv)
         isfd = -1;
         fd_indidrivers.clear();
 
-        while (EOF != (rnp=read_next_process(f,driver_name,exec)))
+        while (EOF != (rnp=read_next_process(f,driver_name,exec,dpfx)))
         {
             if (2 != rnp) { continue; }
 
             argv0 = IRMAGAOX_bin + std::string("/") + exec;
+            if (dpfx!="-" && dpfx!="py:" && dpfx != "nhb:")
+            {
+                driver_name = dpfx + driver_name;
+            }
 
             // Check for a FIFO fd with same driver name is already in
             // the list; find_hbm_by_name() will return -1 if there is
@@ -185,6 +194,17 @@ main(int argc, char** argv)
 
             if (newfd<0)
             {
+
+                // Default initial delay is 10s; use prefix to implement
+                // special cases for maximum intial delay i.e. for
+                // Hexbeaters that do not send hexbeats, so resurrector
+                // will never detect their Hexbeats as having expired
+                int init_delay = 10;
+                if      (dpfx=="-")    { init_delay = -1; }
+                else if (dpfx=="nhb:") { init_delay = -1; }
+                else if (dpfx=="py:")  { init_delay = -1; }
+                else                   { init_delay = 10; }
+
                 // If a FIFO with the driver name is not in the list,
                 // then open a FIFO for this hexbeater in the FIFOs
                 // directory; FIFO path will be /.../fifos/<name>.hb
@@ -192,8 +212,9 @@ main(int argc, char** argv)
                 //      name was already in the list, but that will not
                 //      happen here because of the find_hbm_by_name()
                 //      call above
-                newfd = resurr.open_hexbeater
-                            (argv0, driver_name, IRMAGAOX_fifos.c_str(), NULL);
+                newfd = resurr.open_hexbeater(init_delay
+                           , argv0, driver_name, IRMAGAOX_fifos.c_str()
+                           , NULL);
 
                 if (newfd<0)
                 {
@@ -211,8 +232,11 @@ main(int argc, char** argv)
                 logged = true;
             }
 
-            // The first INDI server is started immediately; all other
-            // processes (INDI drivers, non-indiservers) are delayed
+            // The first INDI server will drop through the next two if
+            // clauses and be started immediately;
+            //
+            // All other processes (INDI drivers, non-indiservers) are
+            // delayed
             if (driver_name.substr(0,2)!="is")
             {
                 if (logged)
@@ -238,6 +262,7 @@ main(int argc, char** argv)
             std::cerr << std::endl;
 
             // Start (fork) the first x/indiserver hexbeater process
+            // N.B. 10 is the restart limit
             resurr.start_hexbeater(newfd,10);
             isfd = newfd;
         }

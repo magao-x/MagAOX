@@ -11,8 +11,6 @@ class resurrectorT
 private:
     int m_nfds{0}; ///< ordinal of highest set bit in m_fdset_cpy
 
-    int m_delay{10}; ///< Initial offset of hexbeat value when starting hexbeaters
-
     fd_set m_fdset_cpy; ///< ***COPY*** of active set bits of hexbeat file descriptors;
                         ///  N.B. DO NOT PASS THIS fd_set to select(2)!
 
@@ -157,23 +155,28 @@ public:
             if (m_resurr_logging)
             {
                 std::cerr << "[resurrector re-starting " << *it
-                          << " at " << time_to_hb(0).substr(0,9) << "]\n";
+                          << " at " << time_to_hb(0).substr(0,9)
+                          << "]\n";
             }
-            it->start_hexbeater(m_fdset_cpy, m_nfds,m_delay,false);
+            it->start_hexbeater(m_fdset_cpy, m_nfds,it->init_dly()
+                               ,false);
         }
     }
 
     /// Add one hexbeat monitor
     int
-    open_hexbeater(const std::string& argv0, const std::string& hbname, ...)
+    open_hexbeater(int init_delay, const std::string& argv0, const std::string& hbname
+                  , ...)
     {
         // Exit with error if hbname is already present in m_hbmarr
         if (find_hbm_by_name(hbname) > -1) { errno = EEXIST; return -1; }
 
         // Initialize varargs; open new FIFO; clean up varargs
         va_list ap; va_start(ap, hbname);
-        int newfd = HexbeatMonitor::open_hexbeater
-                    (argv0, hbname, m_fdset_cpy, m_nfds, m_hbmarr, ap);
+        int newfd = HexbeatMonitor::open_hexbeater(
+                    argv0, hbname, m_fdset_cpy, m_nfds, m_hbmarr
+                    , init_delay
+                    , ap);
         va_end(ap);
 
         if (newfd < 0)
@@ -210,7 +213,8 @@ public:
         if (m_fds.find(fd) == m_fds.end()) { return -1; }
         m_hbmarr[fd].max_restarts_set(max_restarts);
         return
-            m_hbmarr[fd].start_hexbeater(m_fdset_cpy, m_nfds, m_delay);
+            m_hbmarr[fd].start_hexbeater(m_fdset_cpy, m_nfds
+            , m_hbmarr[fd].init_dly());
     }
 
     /// Return FIFO name of HexbeatMonitor element fd of m_hbmarr array

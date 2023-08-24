@@ -18,7 +18,10 @@ function resuctl_main {
 ###           is readable, then start resurrectee_indi with stated $ROLE
 function verb_startup {
 
-  hide
+  hide startup
+
+  [ "$procnames" ] && verb_start && return 0
+  [ "$procnames" ] && return 1
 
   ripid=$(resurrector_indi_pid) \
   && ( [ "$verb" == "restart" ] \
@@ -41,7 +44,10 @@ function verb_startup {
 ###            to trigger killing its INDI driver devices before exiting
 function verb_shutdown {
 
-  hide
+  hide shutdown
+
+  [ ! "$All" ] && verb_stop && return 0
+  [ ! "$All" ] && return 1
 
   ripid=$(resurrector_indi_pid) \
   || resu_failure "resurrector_indi is not running; exiting ..." \
@@ -50,14 +56,21 @@ function verb_shutdown {
   command="kill -USR1 $ripid"
   resu_success "$command"
   $command
+  sleep 3  ### To allow any STDERR/STDOUT of resurrector_indi to display
 }
 
 ########################################################################
 ### Restart:  first shutdown, then startup, the resurrector_indi process
 function verb_restart {
-  hide
-  verb_shutdown
+  hide restart
+
+  verb_shutdown \
+  || Usage "Error calling shutdown from restart" || return 1
+
   sleep 5
+
+  [ "$All" ] && All= procnames=
+
   verb_startup
 }
 
@@ -66,7 +79,7 @@ function verb_restart {
 ###         signal SIGUSR2 to resurrector_indi to re-start those devices
 function verb_start {
 
-  hide
+  hide start
 
   [ "$procnames" ] \
   || Usage "ERROR:  command [start] requires PROCNAME(s)" \
@@ -78,7 +91,8 @@ function verb_start {
 
   for procname in ${procnames//${delim}/ } ; do
     ### Remove any leading whitespace+# for proclist file procname entry
-    sed -E -i -e "/^$ws0#$wsh0${procname}$ws1$notws1$ws0\$/s/^$wsh0//" "$proclist_txt"
+    ### also any prefixes:  "-" or "py:" or "nhb:"
+    sed -E -i -e "/^$ws0#$wsh0(-|[^: 	]*:)?${procname}$ws1$notws1$ws0\$/s/^$wsh1//" "$proclist_txt"
   done
 
   ripid=$(resurrector_indi_pid) \
@@ -88,6 +102,7 @@ function verb_start {
   command="kill -USR2 $ripid"
   resu_success "$command"
   $command
+  sleep 3  ### To allow any STDERR/STDOUT of resurrector_indi to display
 }
 
 ########################################################################
@@ -95,7 +110,10 @@ function verb_start {
 ###        signal SIGUSR2 to resurrector_indi to terminate those devices
 function verb_stop {
 
-  hide
+  hide stop
+
+  [ "$All" ] && verb_shutdown && return 0
+  [ "$All" ] && return 1
 
   [ "$procnames" ] \
   || Usage "ERROR:  command [stop] requires PROCNAME(s)" \
@@ -107,7 +125,7 @@ function verb_stop {
 
   for procname in ${procnames//${delim}/ } ; do
     ### Replace leading whitespace with # in proclist file procname line
-    sed -E -i -e "/^$ws0${procname}$ws1$notws1$ws0\$/s/^$ws0/#/" "$proclist_txt"
+    sed -E -i -e "/^$ws0(-|[^:# 	]*:)?${procname}$ws1$notws1$ws0\$/s/^$ws0/#/" "$proclist_txt"
   done
 
   ripid=$(resurrector_indi_pid) \
@@ -117,10 +135,11 @@ function verb_stop {
   command="kill -USR2 $ripid"
   resu_success "$command"
   $command
+  sleep 3  ### To allow any STDERR/STDOUT of resurrector_indi to display
 }
 
 ########################################################################
-### Trigger resurrector to stop and start Heaxbeaters before they expire
+### Trigger resurrector to stop and start Hexbeaters before their expiry
 function verb_defib {
 
   [ "$procnames" ] \
@@ -147,7 +166,7 @@ function verb_defib {
 
 ########################################################################
 function verb_peek {
-  hide
+  hide peek
 
   for procname in ${procnames//${delim}/ } ; do
     _brief_status "$procname"
@@ -157,7 +176,7 @@ function verb_peek {
 
 ########################################################################
 function verb_status {
-  hide
+  hide status
 
   for procname in ${procnames//${delim}/ } ; do
     _brief_status "$procname"
@@ -237,6 +256,15 @@ function parse_commands {
   [ "$All" ] && [ "$procnames" ] \
   && ( Usage "ERROR:  --all option mutually exclusive with PROCNAME options [$procnames]" || true ) && return 1
 
+  [ "$All" ] && [ "$verb" == "startup" ] \
+  && ( Usage "ERROR:  option --all not valid for [$verb] command" || true ) \
+  && return 1
+
+  [ "$All" ] || [ "$procnames" ] \
+  || ( [ "$verb" != "stop" ] && [ "$verb" != "shutdown" ] ) \
+  || ( Usage "ERROR:  either --all or PROCNAMEs option is required with [$verb] command" && false ) \
+  || return 1
+
   [ ! "$All" ] || procnames="$(find_all_procnames)" || return 1
 
   true
@@ -247,15 +275,18 @@ function parse_commands {
 function _brief_status {
 
   [ "$1" ] || return 1
-  procname="$1"
+  lclprocname="$1"
+  lclprocname="${lclprocname#-}"
+  lclprocname="${lclprocname#py:}"
+  lclprocname="${lclprocname#nhb:}"
 
-  resu_path="$(find_resu_hexbeat_pipe "$procname")" || true
-  hb_pid="$(find_device_hexbeat_pipe "$procname" pid)" || true
+  resu_path="$(find_resu_hexbeat_pipe "$lclprocname")" || true
+  hb_pid="$(find_device_hexbeat_pipe "$lclprocname" pid)" || true
 
-  [ ! "$resu_path" ] && [ ! "$hb_pid" ] && resu_warning "$procname: not started"
-  [ ! "$resu_path" ] && [ "$hb_pid" ] && resu_failure "$procname: resurrector_indi not listening, but process running (pid: $hb_pid)"
-  [ "$resu_path" ] && [ ! "$hb_pid" ] && resu_failure "$procname: resurrector_indi listening, but process not running"
-  [ "$resu_path" ] && [ "$hb_pid" ] && resu_success "$procname: running (pid: $hb_pid)"
+  [ ! "$resu_path" ] && [ ! "$hb_pid" ] && resu_warning "$lclprocname: not started"
+  [ ! "$resu_path" ] && [ "$hb_pid" ] && resu_failure "$lclprocname: resurrector_indi not listening, but process running (pid: $hb_pid)"
+  [ "$resu_path" ] && [ ! "$hb_pid" ] && resu_failure "$lclprocname: resurrector_indi listening, but process not running"
+  [ "$resu_path" ] && [ "$hb_pid" ] && resu_success "$lclprocname: running (pid: $hb_pid)"
   return 0
 }
 
@@ -264,10 +295,13 @@ function _brief_status {
 function _peek_logs {
 
   [ "$1" ] || return 1
-  procname="$1"
+  lclprocname="$1"
+  lclprocname="${lclprocname#-}"
+  lclprocname="${lclprocname#py:}"
+  lclprocname="${lclprocname#nhb:}"
 
-  logdump -n 1 "$procname" 2>&1 | tail -n 10
-  resu_informa "End $procname logs"
+  logdump -n 1 "$lclprocname" 2>&1 | tail -n 10
+  resu_informa "End $lclprocname logs"
   echo
 
   return 0
@@ -298,7 +332,7 @@ function find_all_procnames {
 function add_procname {
   [ $# == 1 ] \
   || Usage "ERROR:  program error, code WSNBATGH0; contact programmer" \
-  || exit 0
+  || return 0
 
   [ "${1###}" == "$1" ] || return 0
   
@@ -327,14 +361,47 @@ function proclist_path {
 ### Send the PID of the first process running resurrector_indi to stdout
 function resurrector_indi_pid {
 
-  lsof +c 0 | \grep 'txt.*/resurrector_indi$' \
+  ### Search for resurrector_indi executable via lsof command output in
+  ### several places, taking the first place that yields a match:
+  ### 1) look first in same directory as this script,
+  ### 2) then under MagAOX binaries' directory (/opt/MagAOX/bin/),
+  ### 3) then under MagAOX sources' directory (/opt/MagAOX/source),
+  ### 3) then under /usr/local/bin/
+  ### 4) finally anywhere under root (/), which is slow (~0.5Mfiles+)
+  ###
+  ### Options for lsof (LiSt Open Files):
+  ### -l       Do not convert UIDs to usernames
+  ### -n       Do not convert network numbers to host names
+  ### -w       Turn off warnings (lsof cannot check user filesystems)
+  ### +D DIR   Look for all open files under directory DIR
+
+  for P in "$(dirname "$0")/resurrector_indi" \
+           "${opt_magaox}/bin/" "${opt_magaox}/source/" \
+           "/usr/local/bin/" "/" \
+  ; do
+     [ "$P" == "/" ] && slow_warning
+     [ "$P" ] && [ -d "$P" ] && D="+D" || D=""
+     lsof -lnw $D "$P" | \grep 'txt.*/resurrector_indi$' && break
+  done \
   | while read ri pid user txt reg device size_off node exe cruft ; do
       [ "$txt" == "txt" ] \
       && [ "$(basename "$exe")" == "resurrector_indi" ] \
       && [ "$pid" ] \
       && echo $pid | grep '^[1-9][0-9]*$' \
       && break
-    done | \grep .               ### Return failure if nothing was found
+    done | \grep .              ### Returns failure if nothing was found
+}
+
+########################################################################
+### Warning message for function resurrector_indi_pid above
+function slow_warning {
+  cat 1>&2 << EoFwarning
+$YELLOW_SEQ
+A running resurrector_indi binary was not found where expected; trying
+again in all filesystems, but it may take as much as a minute longer;
+press ^C if there is no resurrector_indi currently active.$RESET_SEQ
+EoFwarning
+  return 0
 }
 
 ########################################################################
@@ -356,7 +423,7 @@ function find_resu_hexbeat_pipe {
   ri="resurrector_indi"
 
   ### List all processes that have that pipe open; find resurrector_indi
-  lsof +c 0  "$hbpath" \
+  lsof -lnw "$hbpath" \
   | while read cmd pid user fd type dev sizeoff mode path cruft ; do
 
       ### ripid=... => fails if resurrector_indi is not currently active
@@ -390,7 +457,7 @@ function find_device_hexbeat_pipe {
   ri="resurrector_indi"
 
   ### List all processes that have that pipe open; skip resurrector_indi
-  lsof +c 0  "$hbpath" \
+  lsof -lnw "$hbpath" \
   | while read cmd pid user fd type dev sizeoff mode path cruft ; do
 
       ### ripid=... => retrieves the PID of the resurrector_indi process
@@ -442,24 +509,26 @@ MagAO-X Process Control
 
 Usage:
 
-    resuctrl startup [--all]
-        - startup resurrector_indi and all processes in proclist
+    resuctrl startup
+        - startup resurrector_indi and uncommented processes in proclist
 
-    resuctrl shutdown [--all]
-        - shutdown all processes including resurrector_indi
-
-    resuctrl restart
-        - have resurrector_indi shutdown then startup each running process
-
+    resuctrl startup PROCNAME[ PROCNAME[ ...]]
     resuctrl start PROCNAME[ PROCNAME[ ...]]
         - enable and start PROCNAME processes in proclist
 
-    resuctrl stop --all|PROCNAME[ PROCNAME[ ...]]
+    resuctrl stop PROCNAME[ PROCNAME[ ...]]
+    resuctrl shutdown PROCNAME[ PROCNAME[ ...]]
         - disable and stop PROCNAME processes in proclist
 
-    resuctrl defib --all|PROCNAME[ [PROCNAME ...]]
-        - declare to resurrector that PROCNAME processes have expired,
-          so they will be restarted by resurrector_indi
+    resuctrl stop --all
+    resuctrl shutdown --all
+        - shutdown all processes including resurrector_indi
+
+    resuctrl restart PROCNAME [PROCNAME ...]
+        - shutdown specified running processes, then restart them
+
+    resuctrl restart --all
+        - shutdown running processes and resurrector_indi, then restart
 
     resuctrl peek --all|PROCNAME [PROCNAME ...]
         - show status and last few log lines (via logdump) for each process
@@ -467,12 +536,16 @@ Usage:
     resuctrl status --all|PROCNAME [PROCNAME ...]
         - show status for each process
 
+    resuctrl defib --all|PROCNAME[ [PROCNAME ...]]
+        - declare to resurrector that PROCNAME processes have expired,
+          so they will be restarted by resurrector_indi
+
 positional arguments:
   {startup,shutdown,restart,start,stop,defib,peek,status}
                         verb for action to take
 
 proclist is contents of file::
-  /opt/MagAOX/config/proclist_gauss.txt
+  /opt/MagAOX/config/proclist_\${ROLE}.txt
 
 optional arguments:
   -h, --help            show this help message and exit
@@ -493,6 +566,7 @@ return 1
 ########################################################################
 function hide {
   ( [ "$VERBOSE" ] && cat || cat > /dev/null ) << EoFhide
+In verb_{$1}:
 verb{$verb}:
 - ROLE{$ROLE}
 - procnames{$procnames}

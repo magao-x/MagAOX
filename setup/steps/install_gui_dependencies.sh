@@ -3,9 +3,8 @@ DIR="$( cd "$( dirname "${BASH_SOURCE[0]}" )" && pwd )"
 source $DIR/../_common.sh
 set -euo pipefail
 
-source /etc/os-release
 if [[ $ID == ubuntu ]]; then
-    sudo apt install -y \
+    sudo NEEDRESTART_SUSPEND=yes apt install -y \
         x11-apps \
         libgl-dev \
         qtbase5-dev \

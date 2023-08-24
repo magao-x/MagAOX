@@ -157,7 +157,7 @@ endif
 
 BLAS_INCLUDES ?= -DMXLIB_MKL -m64 -I${MKLROOT}/include
 BLAS_LDFLAGS ?= -L${MKLROOT}/lib/intel64 -Wl,--no-as-needed
-BLAS_LDLIBS ?= -lmkl_intel_lp64 -lmkl_gnu_thread -lmkl_core -lgomp -lpthread -lm -ldl
+BLAS_LDLIBS ?= -lmkl_rt -lgomp -lpthread -lm -ldl
 
 #2nd step in case we need to modify above for other architectures/systems
 INCLUDES += $(BLAS_INCLUDES)

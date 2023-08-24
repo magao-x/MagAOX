@@ -2773,7 +2773,7 @@ int MagAOXApp<_useINDI>::startResurrectee()
          m_resurrectee = nullptr;
       }
 
-      m_resurrectee = new resurrectee<MagAOXApp>(this);
+      m_resurrectee = new resurrectee<MagAOXApp>(this, _handlerSigTerm);
    }
    catch(...)
    {

@@ -39,8 +39,8 @@ fi
 
 if [[ $MAGAOX_ROLE == AOC || $MAGAOX_ROLE == ICC || $MAGAOX_ROLE == RTC || $MAGAOX_ROLE == TIC || $MAGAOX_ROLE == TOC ]]; then
     log_info "Purging cloud-init"
-    sudo apt-get purge -y cloud-init || exit 1
-    sudo apt autoremove -y || true
+    sudo NEEDRESTART_SUSPEND=yes apt-get purge -y cloud-init || exit 1
+    sudo NEEDRESTART_SUSPEND=yes apt autoremove -y || true
 
     log_info "Disable waiting for LAN config during boot"
     sudo systemctl mask systemd-networkd-wait-online.service || true

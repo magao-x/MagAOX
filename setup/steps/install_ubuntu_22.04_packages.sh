@@ -4,7 +4,7 @@ source $DIR/../_common.sh
 set -euo pipefail
 apt-get update
 
-apt install -y \
+NEEDRESTART_SUSPEND=yes apt install -y \
     ssh \
     build-essential \
     gfortran \
@@ -51,9 +51,9 @@ apt install -y \
 ;
 
 if [[ $MAGAOX_ROLE == vm ]]; then
-    apt install -y xauth
+    NEEDRESTART_SUSPEND=yes apt install -y xauth
 fi
 if [[ $(uname -p) == "aarch64" ]]; then
     # since we won't install MKL:
-    apt install -y libopenblas-openmp-dev liblapack-dev liblapacke-dev
+    NEEDRESTART_SUSPEND=yes apt install -y libopenblas-openmp-dev liblapack-dev liblapacke-dev
 fi

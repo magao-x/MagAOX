@@ -256,7 +256,7 @@ dependencies:
   - pybind11=2.11.1=py310hd41b1e2_0
   - pybind11-abi=4=hd8ed1ab_3
   - pybind11-global=2.11.1=py310hd41b1e2_0
-  - pycosat=0.6.4=py310h5764c6d_1
+  - pycosat=0.6.3=py310h5764c6d_1010
   - pycparser=2.21=pyhd8ed1ab_0
   - pyee=11.0.0=pyhd8ed1ab_0
   - pyerfa=2.0.0.3=py310h0a54255_0
