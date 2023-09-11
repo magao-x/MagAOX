@@ -149,7 +149,8 @@ scripts_to_install = magaox \
 	lowfs_apply \
 	lowfs_switch_apply \
 	write_magaox_pidfile \
-	mount_cgroups1_cpuset
+	mount_cgroups1_cpuset \
+	killIndiZombies
 
 all: indi_all libs_all flatlogs apps_all guis_all utils_all
 
