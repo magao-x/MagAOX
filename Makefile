@@ -15,23 +15,25 @@ apps_common = \
 
 apps_rtcicc = alpaoCtrl \
               cacaoInterface \
-				  userGainCtrl \
-				  zaberCtrl \
-	           zaberLowLevel
+			  userGainCtrl \
+			  zaberCtrl \
+	          zaberLowLevel \
+			  picoMotorCtrl
 
 apps_rtc = \
 	ocam2KCtrl \
-        andorCtrl \
+    andorCtrl \
 	siglentSDG \
 	ttmModulator \
 	bmcCtrl \
-   rhusbMon \
+    rhusbMon \
 	pi335Ctrl \
 	pupilFit \
 	t2wOffloader \
 	dmSpeckle \
-   w2tcsOffloader \
+    w2tcsOffloader \
 	pwfsSlopeCalc
+
 
 apps_icc = \
    acronameUsbHub \
@@ -45,7 +47,6 @@ apps_icc = \
 	usbtempMon \
 	xt1121Ctrl \
 	xt1121DCDU \
-   picoMotorCtrl \
 	koolanceCtrl \
 	tcsInterface
 
