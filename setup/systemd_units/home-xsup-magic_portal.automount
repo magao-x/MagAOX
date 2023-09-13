@@ -1,8 +1,0 @@
-[Unit]
-After=network-online.target
-Before=remote-fs.target
-[Automount]
-Where=/home/xsup/magic_portal
-TimeoutIdleSec=600
-[Install]
-WantedBy=multi-user.target
