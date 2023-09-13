@@ -285,7 +285,6 @@ dependencies:
     - google-crc32c==1.5.0
     - h11==0.14.0
     - hcipy==0.5.1
-    - imagestreamiowrap==1.0.0
     - netifaces==0.11.0
     - poppy==1.0.3
     - pylibsrtp==0.8.0
