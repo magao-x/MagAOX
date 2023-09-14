@@ -10,6 +10,8 @@ jobs:
     runs-on: ubuntu-latest
     container:
       image: rockylinux/rockylinux:9-ubi-init
+      env:
+        MAGAOX_ROLE: ci
     steps:
       - name: Check out repository code
         uses: actions/checkout@v2
@@ -17,12 +19,12 @@ jobs:
         uses: actions/cache@v3
         with:
           path: /opt/MagAOX/
-          key: ${{ job.container.image }}-dependencies-cache-v1-${{ hashFiles('setup/*', 'setup/**/*') }}
+          key: rocky-9-dependencies-cache-v1-${{ hashFiles('setup/*', 'setup/**/*') }}
       - run: 'bash -x setup/steps/install_rocky_9.2_packages.sh'
         name: Install OS dependencies
       - run: 'bash -lx setup/provision.sh'
         name: Auto-provision
-      - run: 'bash -l setup/steps/install_MagAOX.sh ci'
+      - run: 'bash -l setup/steps/install_MagAOX.sh'
         name: Install MagAO-X
       - run: 'make test'
         name: Run tests
