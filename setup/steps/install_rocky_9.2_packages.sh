@@ -67,6 +67,7 @@ yum install -y \
     shadow-utils \
     nfs-utils \
     pybind11-devel \
+    rsync \
 ;
 
 if [[ $MAGAOX_ROLE == vm ]]; then
