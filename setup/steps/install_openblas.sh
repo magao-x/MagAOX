@@ -15,5 +15,5 @@ if [[ ! -d ./OpenBLAS-${VERSION} ]]; then
 fi
 cd ./OpenBLAS-${VERSION}
 make USE_OPENMP=1
-sudo make install
+sudo make install PREFIX=/usr/local
 log_info "Finished OpenBLAS source install"
