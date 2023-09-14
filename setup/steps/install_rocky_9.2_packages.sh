@@ -5,7 +5,7 @@ set -euo pipefail
 
 log_info "Make Extra Packages for Enterprise Linux available in /etc/yum.repos.d/"
 if ! dnf config-manager -h; then
-    dnf install 'dnf-command(config-manager)'
+    dnf install -y 'dnf-command(config-manager)'
 fi
 dnf config-manager --set-enabled crb
 dnf install -y epel-release
