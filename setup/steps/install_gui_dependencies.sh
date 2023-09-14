@@ -23,7 +23,7 @@ elif [[ $ID == centos && $VERSION_ID == 7 ]]; then
         wmctrl \
         mesa-libGL-devel \
     ;
-elif [[ $ID == rocky && $VERSION_ID == 9 ]]; then
+elif [[ $ID == rocky && $VERSION_ID == "9."* ]]; then
     sudo dnf install -y \
         qt5-devel \
     ;
