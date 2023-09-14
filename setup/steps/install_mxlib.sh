@@ -41,6 +41,7 @@ PREFIX = /usr/local
 CXXFLAGS += -DMX_OLD_GSL
 NEED_CUDA = no
 EIGEN_CFLAGS = 
+USE_BLAS_FROM = openblas
 HERE
 
 if [[ $MAGAOX_ROLE == RTC || $MAGAOX_ROLE == ICC || $MAGAOX_ROLE == AOC || $MAGAOX_ROLE == TIC || $MAGAOX_ROLE == ci ]]; then
@@ -50,10 +51,6 @@ fi
 source /etc/os-release
 if [[ $ID == centos ]]; then
   echo "CXXVERSION = -std=c++14" >> $mxlibCommonOverrides
-fi
-
-if [[ $(uname -p) != "x86_64" ]]; then
-  echo "USE_BLAS_FROM = openblas" >> $mxlibCommonOverrides
 fi
 
 if [[ $ID == rocky && $(uname -p) == "aarch64" ]]; then

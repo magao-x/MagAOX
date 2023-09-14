@@ -115,22 +115,9 @@ fi
 ## Build third-party dependencies under /opt/MagAOX/vendor
 cd /opt/MagAOX/vendor
 sudo bash -l "$DIR/steps/install_rclone.sh" || exit 1
-if grep -q "GenuineIntel" /proc/cpuinfo; then
-    if [[ $ID == "ubuntu" ]]; then
-        sudo bash -l "$DIR/steps/install_mkl_package.sh" || exit 1
-    else
-        sudo bash -l "$DIR/steps/install_mkl_tarball.sh" || exit 1
-    fi
-    export BLAS_VENDOR=intel
-    source /etc/profile.d/mklvars.sh
-else
-    export BLAS_VENDOR=openblas
-fi
-if grep -q "GenuineIntel" /proc/cpuinfo; then
-    if [[ $MAGAOX_ROLE == RTC || $MAGAOX_ROLE == ICC || $MAGAOX_ROLE == AOC || $MAGAOX_ROLE == TIC ]]; then
-        bash -l "$DIR/steps/install_cuda.sh" || exit_error "CUDA install failed"
-        sudo bash -l "$DIR/steps/install_magma.sh" || exit_error "MAGMA install failed"
-    fi
+bash -l "$DIR/steps/install_openblas.sh" || exit 1
+if [[ $MAGAOX_ROLE == RTC || $MAGAOX_ROLE == ICC || $MAGAOX_ROLE == AOC || $MAGAOX_ROLE == TIC ]]; then
+    bash -l "$DIR/steps/install_cuda.sh" || exit_error "CUDA install failed"
 fi
 sudo bash -l "$DIR/steps/install_fftw.sh" || exit 1
 sudo bash -l "$DIR/steps/install_cfitsio.sh" || exit 1
