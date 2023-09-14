@@ -1,12 +1,15 @@
 name: Build C++ Doxygen documentation
-on: [push]
+on:
+  push:
+      branches:
+          - 'dev'
 jobs:
   build-and-deploy:
     runs-on: ubuntu-latest
     steps:
       - run: sudo apt-get install -y doxygen graphviz ssh rsync
       - name: Check out repository code
-        uses: actions/checkout@v2
+        uses: actions/checkout@v4
       - run: cd ${{ github.workspace }} && doxygen doc/config/Doxyfile.libMagAOX
       - name: Add SSH key
         env:
