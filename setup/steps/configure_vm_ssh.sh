@@ -13,7 +13,7 @@ if [[ $MAGAOX_ROLE == vm ]]; then
   touch ~/.hushlogin
   mkdir -p $HOME/.ssh
   if [[ ! -e $HOME/.ssh/known_hosts ]]; then
-      cat <<'HERE' | sudo tee $HOME/.ssh/known_hosts
+      cat <<'HERE' | tee $HOME/.ssh/known_hosts
 rtc ecdsa-sha2-nistp256 AAAAE2VjZHNhLXNoYTItbmlzdHAyNTYAAAAIbmlzdHAyNTYAAABBBFmgoTzcAVYXDZjPFNLfpPz/T/0DQvrXSe9XOly9SD7NcjwN/fRTk+DhrWzdPN5aBsDnnmMS8lFGIcRwnlhUN6o=
 icc ecdsa-sha2-nistp256 AAAAE2VjZHNhLXNoYTItbmlzdHAyNTYAAAAIbmlzdHAyNTYAAABBBNpRRN65o8TcP2DnkXHdzIqAJ9CAoiz2guLSXjobx7L4meAtphb30nSx5pQqOeysU+otN9PEJH6TWr8KUXBDw6I=
 exao1.magao-x.org ecdsa-sha2-nistp256 AAAAE2VjZHNhLXNoYTItbmlzdHAyNTYAAAAIbmlzdHAyNTYAAABBBMsOYTn6tlmcatxt1pDfowTtBTsmJ77OMSPl3rNl8+OBKhmpVpX+iBUMKsBDwwVIlqEAa9BfJPbSrpWEWZABv3s=
@@ -22,8 +22,8 @@ HERE
       log_info "$HOME/.ssh/known_hosts exists, not overwriting"
   fi
   if [[ ! -e $HOME/.ssh/config ]]; then
-    cat << "HERE" | sudo tee $HOME/.ssh/config
-IdentityFile $HOME/Home/.ssh/id_ed25519.pub
+    cat << "HERE" | tee $HOME/.ssh/config
+IdentityFile ~/.ssh/id_ed25519
 Host aoc exao1
   HostName exao1.magao-x.org
 Host rtc exao2
@@ -43,5 +43,5 @@ HERE
   else
       log_info "$HOME/.ssh/config exists, not overwriting"
   fi
-  sudo chmod -R u=rwX,g=,o= $HOME/.ssh/
+  chmod -R u=rwX,g=,o= $HOME/.ssh/
 fi
