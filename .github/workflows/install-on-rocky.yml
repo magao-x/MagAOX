@@ -6,8 +6,10 @@ on:
   schedule:
       - cron: '43 5 * * *'
 jobs:
-  install-on-centos:
-    runs-on: rockylinux/rockylinux:9-ubi-init
+  install-rocky:
+    runs-on: ubuntu-latest
+    container:
+      image: rockylinux/rockylinux:9-ubi-init
     steps:
       - name: Check out repository code
         uses: actions/checkout@v2
