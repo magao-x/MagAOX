@@ -59,7 +59,7 @@ apps_aoc = \
 	observerCtrl \
 	siglentSDG
 
-# apps_vm = none yet
+
 apps_tic = \
 	acronameUsbHub \
 	baslerCtrl \
@@ -81,8 +81,6 @@ else ifeq ($(MAGAOX_ROLE),RTC)
   apps_to_build += $(apps_rtc)
 else ifeq ($(MAGAOX_ROLE),TIC)
   apps_to_build += $(apps_tic)
-# else ifeq ($(MAGAOX_ROLE),vm)
-#   apps_to_build += $(apps_vm)
 endif
 
 all_guis = \
@@ -124,10 +122,10 @@ else
 endif
 
 utils_to_build = logdump \
-				     logstream \
+				 logstream \
                  cursesINDI \
-				     xrif2shmim \
-				     xrif2fits
+				 xrif2shmim \
+				 xrif2fits
 
 scripts_to_install = magaox \
 	query_seeing \

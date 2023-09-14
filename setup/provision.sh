@@ -127,7 +127,7 @@ else
     export BLAS_VENDOR=openblas
 fi
 if grep -q "GenuineIntel" /proc/cpuinfo; then
-    if [[ $MAGAOX_ROLE == RTC || $MAGAOX_ROLE == ICC || $MAGAOX_ROLE == AOC || $MAGAOX_ROLE == TIC || $MAGAOX_ROLE == ci ]]; then
+    if [[ $MAGAOX_ROLE == RTC || $MAGAOX_ROLE == ICC || $MAGAOX_ROLE == AOC || $MAGAOX_ROLE == TIC ]]; then
         bash -l "$DIR/steps/install_cuda.sh" || exit_error "CUDA install failed"
         sudo bash -l "$DIR/steps/install_magma.sh" || exit_error "MAGMA install failed"
     fi
