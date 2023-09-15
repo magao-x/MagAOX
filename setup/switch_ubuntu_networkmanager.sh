@@ -12,7 +12,7 @@ sudo systemctl disable systemd-networkd || true
 sudo systemctl mask systemd-networkd || true
 sudo systemctl stop systemd-networkd || true
 
-sudo apt install -y network-manager || true
+sudo -i apt install -y network-manager || true
 
 cat <<'HERE' | sudo tee /etc/netplan/00-installer-config.yaml || exit 1
 network:
