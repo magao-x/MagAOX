@@ -259,7 +259,7 @@ bash -l "$DIR/steps/install_magpyx.sh" || exit_error "magpyx install failed"
 #     bash -l "$DIR/steps/install_sup.sh"
 # fi
 
-if [[ $MAGAOX_ROLE == AOC || $MAGAOX_ROLE == TOC || $MAGAOX_ROLE == vm || $MAGAOX_ROLE == workstation || $MAGAOX_ROLE == ci ]]; then
+if [[ $MAGAOX_ROLE == AOC || $MAGAOX_ROLE == TOC || $MAGAOX_ROLE == vm || $MAGAOX_ROLE == workstation ]]; then
     # realtime image viewer
     bash -l "$DIR/steps/install_rtimv.sh" || exit 1
 fi
