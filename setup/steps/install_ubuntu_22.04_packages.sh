@@ -5,6 +5,7 @@ set -euo pipefail
 apt-get update
 
 apt install -y \
+    sudo \
     ssh \
     build-essential \
     gfortran \
