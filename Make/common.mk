@@ -153,13 +153,13 @@ ifneq ($(CACAO),false)
   INCLUDES += -I/usr/local/milk/include
 endif
 
-### MKL BLAS
-
-BLAS_INCLUDES ?= -DMXLIB_MKL -m64 -I${MKLROOT}/include
-BLAS_LDFLAGS ?= -L${MKLROOT}/lib/intel64 -Wl,--no-as-needed
-BLAS_LDLIBS ?= -lmkl_intel_lp64 -lmkl_gnu_thread -lmkl_core -lgomp -lpthread -lm -ldl
+### OpenBLAS compiler/linker flags
+BLAS_INCLUDES ?= $(shell pkg-config --cflags-only-I openblas)
+BLAS_LDFLAGS ?= $(shell pkg-config --libs-only-L openblas)
+BLAS_LDLIBS ?= $(shell pkg-config --libs-only-l openblas)
 
 #2nd step in case we need to modify above for other architectures/systems
+
 INCLUDES += $(BLAS_INCLUDES)
 EXTRA_LDFLAGS += $(BLAS_INCLUDES) $(BLAS_LDFLAGS)
 EXTRA_LDLIBS += $(BLAS_LDLIBS)
