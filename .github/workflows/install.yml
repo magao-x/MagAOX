@@ -35,6 +35,8 @@ jobs:
       image: ubuntu:22.04
       env:
         MAGAOX_ROLE: ci
+        NEEDRESTART_SUSPEND: 'yes'
+        DEBIAN_FRONTEND: noninteractive
     steps:
       - name: Check out repository code
         uses: actions/checkout@v4
