@@ -40,6 +40,8 @@ jobs:
         NEEDRESTART_SUSPEND: 'yes'
         DEBIAN_FRONTEND: noninteractive
     steps:
+      - name: Fetch package definitions
+        run: 'apt-get update'
       - name: Install git for checkout action
         run: 'apt-get install -y git'
       - name: Check out repository code
