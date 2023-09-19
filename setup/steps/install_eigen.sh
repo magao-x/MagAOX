@@ -7,7 +7,7 @@ EIGEN_VERSION="3.3.4"
 # Eigen
 #
 cd /opt/MagAOX/vendor
-if [[ ! -e /usr/local/include/Eigen ]]; then
+if [[ ! -e /usr/local/share/pkgconfig/eigen3.pc ]]; then
     EIGEN_DIR="/opt/MagAOX/vendor/eigen-$EIGEN_VERSION"
     if [[ ! -d $EIGEN_DIR ]]; then
         eigenArchive=eigen-$EIGEN_VERSION.tar.gz
@@ -17,6 +17,8 @@ if [[ ! -e /usr/local/include/Eigen ]]; then
             mv eigen-*/ $EIGEN_DIR/
         fi
     fi
-    ln -svf "$EIGEN_DIR/Eigen" "/usr/local/include/Eigen"
-    echo "/usr/local/include/Eigen is now a symlink to $EIGEN_DIR/Eigen"
+    mkdir $EIGEN_DIR/_build
+    cd $EIGEN_DIR/_build
+    cmake ..
+    sudo make install
 fi
