@@ -68,7 +68,7 @@ yum install -y \
     nfs-utils \
     pybind11-devel \
     rsync \
-    lapacke-devel \
+    lapack-devel \
 ;
 
 if [[ $MAGAOX_ROLE == vm ]]; then
