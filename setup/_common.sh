@@ -147,6 +147,7 @@ function clone_or_update_and_cd() {
       log_success "Updated $destdir"
     fi
     git config core.sharedRepository group
+    git submodule update --init --recursive || true
     sudo chown -R :$instrument_dev_group $destdir
     sudo chmod -R g=rwX $destdir
     # n.b. can't be recursive because g+s on files means something else
