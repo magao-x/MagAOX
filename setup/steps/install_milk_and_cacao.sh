@@ -22,6 +22,10 @@ mkdir -p _build
 cd _build
 
 pythonExe=/opt/conda/bin/python
+log_info "Building the Python module for $pythonExe"
+sudo $pythonExe -m pip install ../src/ImageStreamIO/ || exit_error "ImageStreamIOWrap did not install"
+$pythonExe -c 'import ImageStreamIOWrap' || exit_error "ImageStreamIOWrap couldn't import, so probably didn't install right"
+
 
 milkCmakeArgs="-DCMAKE_INSTALL_PREFIX=/usr/local -Dbuild_python_module=ON -DPYTHON_EXECUTABLE=${pythonExe}"
 
@@ -33,9 +37,6 @@ cmake .. $milkCmakeArgs
 numCpus=$(nproc)
 make -j $((numCpus / 2))
 sudo make install
-
-sudo $pythonExe -m pip install ../src/ImageStreamIO/
-$pythonExe -c 'import ImageStreamIOWrap' || exit 1
 
 milkSuffix=bin/milk
 milkBinary=$(grep -e "${milkSuffix}$" ./install_manifest.txt)
