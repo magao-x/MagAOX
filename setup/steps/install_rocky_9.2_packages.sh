@@ -66,7 +66,6 @@ yum install -y \
     nethogs \
     shadow-utils \
     nfs-utils \
-    pybind11-devel \
     rsync \
     lapack-devel \
 ;
