@@ -183,8 +183,8 @@ main(int argc, char** argv)
             //      in which case it should not have been found by the
             //      find_hbm_by_name() above.
 
-            // N.B. the start_hexbeater() call below will **NOT** fork a
-            //      new process if it finds a running process with the
+            // N.B. the start_hexbeater() calls below will **NOT** fork
+            //      a new process if it finds a running process with the
             //      same argv0 and driver name in the /proc/ filesystem.
             //
             //      So if this action is the result of a SIGUSR2, and
@@ -219,7 +219,7 @@ main(int argc, char** argv)
                 if (newfd<0)
                 {
                     // If neither an existing FIFO is found nor a new
-                    // FIFO is opened, then resurrector logs the erro
+                    // FIFO is opened, then resurrector logs the error
                     // and does nothing
                     perror(("Failed to open Hexbeater FIFO["
                            + driver_name +"," + argv0 +"]").c_str()
@@ -232,11 +232,19 @@ main(int argc, char** argv)
                 logged = true;
             }
 
+            // Speical case for sshDigger (non-INDI) drivers:
+            // - start them now, so network ports will be available 
+            if (exec=="sshDigger")
+            {
+                resurr.start_hexbeater(newfd,10);
+                continue;
+            }
+
             // The first INDI server will drop through the next two if
             // clauses and be started immediately;
             //
             // All other processes (INDI drivers, non-indiservers) are
-            // delayed
+            // delayed by being
             if (driver_name.substr(0,2)!="is")
             {
                 if (logged)
@@ -261,21 +269,26 @@ main(int argc, char** argv)
 
             std::cerr << std::endl;
 
-            // Start (fork) the first x/indiserver hexbeater process
-            // N.B. 10 is the restart limit
-            resurr.start_hexbeater(newfd,10);
+            // Save the FD of the first x/indiserver hexbeater process
             isfd = newfd;
         }
 
         fclose(f);
 
-        // Delay if there are drivers to start and the INDI server was
-        // just now started above
-        if (fd_indidrivers.size() && isfd > -1)
+        if (isfd > -1)
         {
-            std::cerr << "Delay 5s to start INDI drivers" << std::endl;
-            timeval tv = {5,0};
-            select(1,0,0,0,&tv);
+            // If an x/indiserver should be started (forked), do it now
+            // N.B. 10 is the restart limit
+            resurr.start_hexbeater(isfd,10);
+
+            // Delay if there are also drivers to start
+            if (fd_indidrivers.size())
+            {
+                std::cerr << "Delay 5s after starting INDI server"
+                          << std::endl;
+                timeval tv = {5,0};
+                select(1,0,0,0,&tv);
+            }
         }
 
         // Start any selected INDI drivers
