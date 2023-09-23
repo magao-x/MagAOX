@@ -1,4 +1,4 @@
-
+../libMagAOX/app/tests/MagAOXApp_test
 ../libMagAOX/app/dev/tests/outletController_test
 ../libMagAOX/sys/tests/thSetuid_test
 ../libMagAOX/tty/tests/ttyIOUtils_test 
