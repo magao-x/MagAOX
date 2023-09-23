@@ -742,8 +742,11 @@ int andorCtrl::appLogic()
       return log<software_error, -1>({__FILE__, __LINE__});
    }
 
-   if( state() == stateCodes::POWERON) return 0;
-   
+   if( state() == stateCodes::POWERON) 
+   {
+      return 0;
+   }
+
    if( state() == stateCodes::NOTCONNECTED || state() == stateCodes::NODEVICE || state() == stateCodes::ERROR)
    {
       //Might have gotten here because of a power off.
@@ -759,6 +762,8 @@ int andorCtrl::appLogic()
 
    if( state() == stateCodes::CONNECTED )
    {
+      sleep(30);
+      writeConfig();
       m_shutterStatus = "READY";
 
       state(stateCodes::READY);
@@ -1506,8 +1511,6 @@ int andorCtrl::writeConfig()
    fout << "extdepth:                      16\n";
    fout << "CL_DATA_PATH_NORM:             0f       # single tap\n";
    fout << "CL_CFG_NORM:                   02\n";
-   //fout << "fv_once: 1\n";
-   //fout << "method_framesync: EMULATE_TIMEOUT\n";
    
    fout.close();
    
@@ -1685,15 +1688,17 @@ int andorCtrl::configureAcquisition()
       return log<software_error,-1>({__FILE__, __LINE__, "Andor SDK Error from GetStatus: " + andorSDKErrorName(error)});
    }
    
-   if(status != DRV_IDLE) return 0;
-   
+   if(status != DRV_IDLE) 
+   {
+      return 0;
+   }
+
    int x0 = (m_nextROI.x - 0.5*(m_nextROI.w - 1)) + 1;
    int y0 = (m_nextROI.y - 0.5*(m_nextROI.h - 1)) + 1;
     
    if(m_cropModeSet)
    {
       m_cropMode = m_cropModeSet;
-      std::cerr << "crop mode on\n";
       
       error = SetIsolatedCropModeEx(1, m_nextROI.h, m_nextROI.w, m_nextROI.bin_y, m_nextROI.bin_x, x0, y0);
       
@@ -1757,9 +1762,7 @@ int andorCtrl::configureAcquisition()
       {
          log<software_error>({__FILE__, __LINE__, "SetIsolatedCropModeEx(0,): " + andorSDKErrorName(error)});
       }
-      
-      std::cerr << "crop mode off\n";
-      
+            
       //Setup Image dimensions
       /* SetImage(int hbin, int vbin, int hstart, int hend, int vstart, int vend)
        * hbin: number of pixels to bin horizontally
@@ -1895,6 +1898,8 @@ int andorCtrl::startAcquisition()
    state(stateCodes::OPERATING);
    recordCamera();
    
+   sleep(1); //make sure camera is rully running before we try to synch with it.
+
    return edtCamera<andorCtrl>::pdvStartAcquisition();
 }
 
@@ -1918,6 +1923,9 @@ int andorCtrl::reconfig()
 {
    //lock mutex
    //std::unique_lock<std::mutex> lock(m_indiMutex);
+   recordCamera(true);
+   AbortAcquisition();
+   state(stateCodes::CONFIGURING);
 
    writeConfig();
    
@@ -1925,6 +1933,8 @@ int andorCtrl::reconfig()
    if(rv < 0) return rv;
    
    state(stateCodes::READY);
+
+   m_nextMode = m_modeName;
    return 0;
 }
 
