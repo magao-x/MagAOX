@@ -728,129 +728,130 @@ int zaberLowLevel::appShutdown()
 
 INDI_NEWCALLBACK_DEFN(zaberLowLevel, m_indiP_tgt_pos)(const pcf::IndiProperty &ipRecv)
 {
-   if (ipRecv.getName() == m_indiP_tgt_pos.getName())
-   {  
-      for(size_t n=0; n < m_stages.size(); ++n)
-      {
-         if( ipRecv.find(m_stages[n].name()) )
-         {
-            long tgt = ipRecv[m_stages[n].name()].get<long>();
-            if(tgt >= 0)
-            {
-               if(m_stages[n].deviceAddress() < 1)
-               {
-                  return log<software_error,-1>({__FILE__, __LINE__, "stage " + m_stages[n].name() + " with with s/n " + m_stages[n].serial() + " not found in system."});
-               }
+    INDI_VALIDATE_CALLBACK_PROPS(m_indiP_tgt_pos, ipRecv);
 
-               std::lock_guard<std::mutex> guard(m_indiMutex);
-               updateIfChanged(m_indiP_curr_state, m_stages[n].name(), std::string("OPERATING"));
-               return m_stages[n].moveAbs(m_port, tgt);
-            }
-         }
-      }
-   }
+    for(size_t n=0; n < m_stages.size(); ++n)
+    {
+       if( ipRecv.find(m_stages[n].name()) )
+       {
+          long tgt = ipRecv[m_stages[n].name()].get<long>();
+          if(tgt >= 0)
+          {
+             if(m_stages[n].deviceAddress() < 1)
+             {
+                return log<software_error,-1>({__FILE__, __LINE__, "stage " + m_stages[n].name() + " with with s/n " + m_stages[n].serial() + " not found in system."});
+             }
+
+             std::lock_guard<std::mutex> guard(m_indiMutex);
+             updateIfChanged(m_indiP_curr_state, m_stages[n].name(), std::string("OPERATING"));
+             return m_stages[n].moveAbs(m_port, tgt);
+          }
+       }
+    }
+   
    return 0;
 }
 
 INDI_NEWCALLBACK_DEFN(zaberLowLevel, m_indiP_tgt_relpos)(const pcf::IndiProperty &ipRecv)
 {
-   if (ipRecv.getName() == m_indiP_tgt_relpos.getName())
-   {  
-      for(size_t n=0; n < m_stages.size(); ++n)
-      {
-         if( ipRecv.find(m_stages[n].name()) )
-         {
-            long tgt = ipRecv[m_stages[n].name()].get<long>();
-            tgt += m_stages[n].rawPos();
-            if(tgt >= 0)
-            {
-               if(m_stages[n].deviceAddress() < 1)
-               {
-                  return log<software_error,-1>({__FILE__, __LINE__, "stage " + m_stages[n].name() + " with with s/n " + m_stages[n].serial() + " not found in system."});
-               }
-               std::lock_guard<std::mutex> guard(m_indiMutex);
-      
-               updateIfChanged(m_indiP_curr_state, m_stages[n].name(), std::string("OPERATING"));
-               return m_stages[n].moveAbs(m_port, tgt);
-            }
-         }
-      }
-   }
+    INDI_VALIDATE_CALLBACK_PROPS(m_indiP_tgt_relpos, ipRecv);
+
+    for(size_t n=0; n < m_stages.size(); ++n)
+    {
+       if( ipRecv.find(m_stages[n].name()) )
+       {
+          long tgt = ipRecv[m_stages[n].name()].get<long>();
+          tgt += m_stages[n].rawPos();
+          if(tgt >= 0)
+          {
+             if(m_stages[n].deviceAddress() < 1)
+             {
+                return log<software_error,-1>({__FILE__, __LINE__, "stage " + m_stages[n].name() + " with with s/n " + m_stages[n].serial() + " not found in system."});
+             }
+             std::lock_guard<std::mutex> guard(m_indiMutex);
+    
+             updateIfChanged(m_indiP_curr_state, m_stages[n].name(), std::string("OPERATING"));
+             return m_stages[n].moveAbs(m_port, tgt);
+          }
+       }
+    }
+   
    return 0;
 }
 
 INDI_NEWCALLBACK_DEFN(zaberLowLevel, m_indiP_req_home)(const pcf::IndiProperty &ipRecv)
 {
-   if (ipRecv.getName() == m_indiP_req_home.getName())
-   {  
-      for(size_t n=0; n < m_stages.size(); ++n)
-      {
-         if( ipRecv.find(m_stages[n].name()) )
-         {
-            int tgt = ipRecv[m_stages[n].name()].get<int>();
-            if(tgt > 0)
-            {
-               if(m_stages[n].deviceAddress() < 1)
-               {
-                  return log<software_error,-1>({__FILE__, __LINE__, "stage " + m_stages[n].name() + " with with s/n " + m_stages[n].serial() + " not found in system."});
-               }
-               std::lock_guard<std::mutex> guard(m_indiMutex);
-               return m_stages[n].home(m_port);
-            }
-         }
-      }
-   }
+    INDI_VALIDATE_CALLBACK_PROPS(m_indiP_req_home, ipRecv);
+
+    for(size_t n=0; n < m_stages.size(); ++n)
+    {
+       if( ipRecv.find(m_stages[n].name()) )
+       {
+          int tgt = ipRecv[m_stages[n].name()].get<int>();
+          if(tgt > 0)
+          {
+             if(m_stages[n].deviceAddress() < 1)
+             {
+                return log<software_error,-1>({__FILE__, __LINE__, "stage " + m_stages[n].name() + " with with s/n " + m_stages[n].serial() + " not found in system."});
+             }
+             std::lock_guard<std::mutex> guard(m_indiMutex);
+             return m_stages[n].home(m_port);
+          }
+       }
+    }
+   
    return 0;
 }
 
 INDI_NEWCALLBACK_DEFN(zaberLowLevel, m_indiP_req_halt)(const pcf::IndiProperty &ipRecv)
 {
-   if (ipRecv.getName() == m_indiP_req_halt.getName())
-   {  
-      for(size_t n=0; n < m_stages.size(); ++n)
-      {
-         if( ipRecv.find(m_stages[n].name()) )
-         {
-            int tgt = ipRecv[m_stages[n].name()].get<int>();
-            if(tgt > 0)
-            {
-               if(m_stages[n].deviceAddress() < 1)
-               {
-                  return log<software_error,-1>({__FILE__, __LINE__, "stage " + m_stages[n].name() + " with with s/n " + m_stages[n].serial() + " not found in system."});
-               }
+    INDI_VALIDATE_CALLBACK_PROPS(m_indiP_req_halt, ipRecv);
 
-               std::lock_guard<std::mutex> guard(m_indiMutex);
-               return m_stages[n].stop(m_port);
-            }
-         }
-      }
-   }
+
+    for(size_t n=0; n < m_stages.size(); ++n)
+    {
+        if( ipRecv.find(m_stages[n].name()) )
+        {
+           int tgt = ipRecv[m_stages[n].name()].get<int>();
+           if(tgt > 0)
+           {
+              if(m_stages[n].deviceAddress() < 1)
+              {
+                 return log<software_error,-1>({__FILE__, __LINE__, "stage " + m_stages[n].name() + " with with s/n " + m_stages[n].serial() + " not found in system."});
+              }
+ 
+              std::lock_guard<std::mutex> guard(m_indiMutex);
+              return m_stages[n].stop(m_port);
+           }
+        }
+    }
+   
    return 0;
 }
 
 INDI_NEWCALLBACK_DEFN(zaberLowLevel, m_indiP_req_ehalt)(const pcf::IndiProperty &ipRecv)
 {
-   if (ipRecv.getName() == m_indiP_req_ehalt.getName())
-   {  
-      for(size_t n=0; n < m_stages.size(); ++n)
-      {
-         if( ipRecv.find(m_stages[n].name()) )
-         {
+    INDI_VALIDATE_CALLBACK_PROPS(m_indiP_req_ehalt, ipRecv);
+
+    for(size_t n=0; n < m_stages.size(); ++n)
+    {
+        if( ipRecv.find(m_stages[n].name()) )
+        {
             int tgt = ipRecv[m_stages[n].name()].get<int>();
             if(tgt > 0)
             {
-               if(m_stages[n].deviceAddress() < 1)
-               {
-                  return log<software_error,-1>({__FILE__, __LINE__, "stage " + m_stages[n].name() + " with with s/n " + m_stages[n].serial() + " not found in system."});
-               }
-
-               std::lock_guard<std::mutex> guard(m_indiMutex);
-               return m_stages[n].estop(m_port);
+                if(m_stages[n].deviceAddress() < 1)
+                {
+                    return log<software_error,-1>({__FILE__, __LINE__, "stage " + m_stages[n].name() + " with with s/n " + m_stages[n].serial() + " not found in system."});
+                }
+  
+                std::lock_guard<std::mutex> guard(m_indiMutex);
+                return m_stages[n].estop(m_port);
             }
-         }
-      }
-   }
-   return 0;
+        }
+    }
+    
+    return 0;
 }
 
 } //namespace app
