@@ -41,6 +41,7 @@ INCLUDE_PATH ?= $(PREFIX)/include
 LIB_SOFA ?= $(LIB_PATH)/libsofa_c.a
 
 INCLUDES += -I$(INCLUDE_PATH) -I$(abspath $(SELF_DIR)/../flatlogs/include) 
+INCLUDES += $(shell pkg-config --cflags eigen3)
 
 
 ########################################
