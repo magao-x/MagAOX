@@ -197,10 +197,10 @@ else
     if [[ $DIR != /opt/MagAOX/source/MagAOX/setup ]]; then
         if [[ ! -e /opt/MagAOX/source/MagAOX ]]; then
             echo "Cloning new copy of MagAOX codebase"
-            orgname=magao-x
-            reponame=MagAOX
-            parentdir=/opt/MagAOX/source/
-            clone_or_update_and_cd $orgname $reponame $parentdir
+            destdir=/opt/MagAOX/source/MagAOX
+            git clone $DIR/.. $destdir
+            normalize_git_checkout $destdir
+            cd $destdir
             # ensure upstream is set somewhere that isn't on the fs to avoid possibly pushing
             # things and not having them go where we expect
             stat /opt/MagAOX/source/MagAOX/.git
