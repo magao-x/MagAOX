@@ -286,6 +286,7 @@ sudo bash -l "$DIR/steps/install_aliases.sh"
 # By separating the real build into another step, we can cache the slow provisioning steps
 # and reuse them on subsequent runs.
 if [[ $MAGAOX_ROLE != ci ]]; then
+    cd /opt/MagAOX/source/MagAOX
     bash -l "$DIR/steps/install_MagAOX.sh" || exit 1
 fi
 
