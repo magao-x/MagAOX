@@ -61,6 +61,7 @@ if [[ $VM_KIND != "none" ]]; then
     sudo git config --global --replace-all safe.directory '*'
 fi
 
+bash -l "$DIR/steps/configure_trusted_sudoers.sh"
 sudo bash -l "$DIR/steps/configure_xsup_aliases.sh"
 
 if [[ $MAGAOX_ROLE == AOC || $MAGAOX_ROLE == ICC || $MAGAOX_ROLE == RTC ]]; then
