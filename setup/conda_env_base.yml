@@ -2,14 +2,14 @@ channels:
   - conda-forge
   - defaults
 dependencies:
-  - jupyter
+  - jupyterlab
   - astropy
   - ipython
   - ipywidgets
   - notebook
   - numpy
   - scipy
-  - matplotlib
+  - matplotlib-base
   - numexpr
   - Pillow
   - scikit-image
