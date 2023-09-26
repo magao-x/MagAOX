@@ -1,6 +1,10 @@
 #!/bin/bash
 set -o pipefail
 DIR="$( cd "$( dirname "${BASH_SOURCE[0]}" )" && pwd )"
+id
+env
+pwd
+exit 1
 # CentOS + devtoolset-7 aliases sudo, but breaks command line arguments for it,
 # so if we need those, we must use $_REAL_SUDO.
 if [[ -e /usr/bin/sudo ]]; then
