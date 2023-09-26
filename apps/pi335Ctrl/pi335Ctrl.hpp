@@ -623,8 +623,14 @@ int pi335Ctrl::appLogic()
    else if(state() == stateCodes::OPERATING)
    {
       updateIfChanged(m_indiP_pos1, "current", m_pos1, INDI_BUSY);
+      updateIfChanged(m_indiP_pos1, "target", m_pos1, INDI_BUSY);
       updateIfChanged(m_indiP_pos2, "current", m_pos2, INDI_BUSY);
-      if(m_naxes == 3) updateIfChanged(m_indiP_pos3, "current", m_pos3, INDI_BUSY);
+      updateIfChanged(m_indiP_pos2, "target", m_pos2, INDI_BUSY);
+      if(m_naxes == 3) 
+      {
+        updateIfChanged(m_indiP_pos3, "current", m_pos3, INDI_BUSY);
+        updateIfChanged(m_indiP_pos3, "target", m_pos3, INDI_BUSY);
+      }
    }
    return 0;
 }
@@ -1435,11 +1441,18 @@ int pi335Ctrl::updateFlat( float absPos1,
                            float absPos3
                          )
 {
-   m_flatCommand(0,0) = absPos1;
-   m_flatCommand(1,0) = absPos2;
-   m_flatCommand(2,0) = absPos3;
+    m_flatCommand(0,0) = absPos1;
+    m_flatCommand(1,0) = absPos2;
+    m_flatCommand(2,0) = absPos3;
 
-   return setFlat(true);
+    if(state() == stateCodes::OPERATING)
+    {
+         return setFlat(true);
+    }
+    else
+    {
+        return 0;
+    }
 }
 
 int pi335Ctrl::move_1( float absPos )
@@ -1549,6 +1562,8 @@ INDI_NEWCALLBACK_DEFN(pi335Ctrl, m_indiP_pos1)(const pcf::IndiProperty &ipRecv)
 
          updateIfChanged(m_indiP_pos1, "target", target);
       
+         updateFlat(target, m_pos2, m_pos3); //This just changes the values, but doesn't move
+
          return move_1(target);
       }
       else if(state() == stateCodes::OPERATING)
@@ -1590,7 +1605,7 @@ INDI_NEWCALLBACK_DEFN(pi335Ctrl, m_indiP_pos2)(const pcf::IndiProperty &ipRecv)
          std::unique_lock<std::mutex> lock(m_indiMutex);
 
          updateIfChanged(m_indiP_pos2, "target", target);
-      
+         updateFlat(m_pos1, target, m_pos3); //This just changes the values, but doesn't move
          return move_2(target);
       }
       else if(state() == stateCodes::OPERATING)
@@ -1631,6 +1646,7 @@ INDI_NEWCALLBACK_DEFN(pi335Ctrl, m_indiP_pos3)(const pcf::IndiProperty &ipRecv)
 
          updateIfChanged(m_indiP_pos3, "target", target);
       
+         updateFlat(m_pos1, m_pos2, target); //This just changes the values, but doesn't move
          return move_3(target);
       }
       else if(state() == stateCodes::OPERATING)
