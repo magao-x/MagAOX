@@ -15,6 +15,9 @@ if [[ $MAGAOX_ROLE == vm ]]; then
     instrument_group=ubuntu
     instrument_dev_group=ubuntu
   fi
+else if [[ $MAGAOX_ROLE == ci ]]; then
+  instrument_user=root
+  instrument_group=root
 fi
 
 function log_error() {
