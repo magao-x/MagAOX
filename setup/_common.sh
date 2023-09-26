@@ -18,6 +18,7 @@ if [[ $MAGAOX_ROLE == vm ]]; then
 elif [[ $MAGAOX_ROLE == ci ]]; then
   instrument_user=root
   instrument_group=root
+  instrument_dev_group=root
 fi
 
 function log_error() {
