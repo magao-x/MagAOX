@@ -15,13 +15,6 @@ if [[ $MAGAOX_ROLE == vm || $MAGAOX_ROLE == ci || $MAGAOX_ROLE == TOC ]]; then
     if ! grep 'NEED_CUDA = no' local/common.mk; then
         echo 'NEED_CUDA = no' >> local/common.mk
     fi
-    if [[ $(uname -i) != "x86_64" ]]; then
-        tee -a local/common.mk <<HERE
-BLAS_INCLUDES =
-BLAS_LDFLAGS =
-BLAS_LDLIBS = -lblas -llapack
-HERE
-    fi
 fi
 
 make all
