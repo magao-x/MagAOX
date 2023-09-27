@@ -6,7 +6,7 @@ if [[ "$EUID" != 0 ]]; then
 fi
 DIR="$( cd "$( dirname "${BASH_SOURCE[0]}" )" && pwd )"
 source $DIR/../_common.sh
-set -euo pipefail
+set -exuo pipefail
 
 if [[ -e /usr/bin/python ]]; then
     osPython=/usr/bin/python
