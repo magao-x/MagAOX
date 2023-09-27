@@ -234,6 +234,3 @@ if [[ $(which sudo) == *devtoolset* ]]; then
 else
   REAL_SUDO=$(which sudo)
 fi
-for fn in /etc/profile.d/*.sh; do
-  . "$fn">/dev/null || true
-done
