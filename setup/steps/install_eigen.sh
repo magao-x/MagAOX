@@ -17,8 +17,10 @@ if [[ ! -e /usr/local/share/pkgconfig/eigen3.pc ]]; then
             mv eigen-*/ $EIGEN_DIR/
         fi
     fi
-    mkdir $EIGEN_DIR/_build
+    if [[ ! -d $EIGEN_DIR/_build ]]; then
+        mkdir -p $EIGEN_DIR/_build
+        cmake ..
+    fi
     cd $EIGEN_DIR/_build
-    cmake ..
     sudo make install
 fi
