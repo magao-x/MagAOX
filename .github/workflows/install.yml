@@ -1,4 +1,4 @@
-name: Install the MagAO-X software
+name: Install
 on:
   push:
       branches:

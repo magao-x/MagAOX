@@ -1,6 +1,11 @@
-[![Codacy Badge](https://api.codacy.com/project/badge/Grade/dc3d038ce7074b7bab093699d0806759)](https://www.codacy.com/app/jaredmales/MagAOX?utm_source=github.com&amp;utm_medium=referral&amp;utm_content=magao-x/MagAOX&amp;utm_campaign=Badge_Grade)
 
 # The MagAOX Software System
+
+**Handbook:** https://magao-x.org/docs/handbook/
+
+**Build status:** [![Status of install test build](https://github.com/magao-x/MagAOX/actions/workflows/install.yml/badge.svg)](https://github.com/magao-x/MagAOX/actions/workflows/install.yml) | 
+**C++ docs:** [![Status of Doxygen build](https://github.com/magao-x/MagAOX/actions/workflows/build-doxygen.yml/badge.svg)](https://github.com/magao-x/MagAOX/actions/workflows/build-doxygen.yml) | **Container:** [![Status of container build](https://github.com/magao-x/MagAOX/actions/workflows/container.yml/badge.svg)](https://github.com/magao-x/MagAOX/actions/workflows/container.yml)
+
 
 This is the software which runs the MagAOX ExAO system.
 
