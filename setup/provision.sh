@@ -146,7 +146,7 @@ if [[ $MAGAOX_ROLE == RTC || $MAGAOX_ROLE == ICC || $MAGAOX_ROLE == ci || ( $MAG
 fi
 
 # SuSE packages need either Python 3.6 or 3.10, but Rocky 9.2 has Python 3.9 as /bin/python, so we build our own RPM:
-if [[ $ID == rocky ]]; then
+if [[ $ID == rocky && $MAGAOX_ROLE != container ]]; then
   sudo bash -l "$DIR/steps/install_cpuset.sh" || exit_error "Couldn't install cpuset from source"
 fi
 

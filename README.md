@@ -1,10 +1,10 @@
 
-# The MagAOX Software System
+# The MagAO-X Software System
 
 **Handbook:** https://magao-x.org/docs/handbook/
 
 **Build status:** [![Status of install test build](https://github.com/magao-x/MagAOX/actions/workflows/install.yml/badge.svg)](https://github.com/magao-x/MagAOX/actions/workflows/install.yml) | 
-**C++ docs:** [![Status of Doxygen build](https://github.com/magao-x/MagAOX/actions/workflows/build-doxygen.yml/badge.svg)](https://github.com/magao-x/MagAOX/actions/workflows/build-doxygen.yml) | **Container:** [![Status of container build](https://github.com/magao-x/MagAOX/actions/workflows/container.yml/badge.svg)](https://github.com/magao-x/MagAOX/actions/workflows/container.yml)
+**[C++ docs](https://magao-x.org/docs/api/):** [![Status of Doxygen build](https://github.com/magao-x/MagAOX/actions/workflows/build-doxygen.yml/badge.svg)](https://github.com/magao-x/MagAOX/actions/workflows/build-doxygen.yml) | **Container:** [![Status of container build](https://github.com/magao-x/MagAOX/actions/workflows/container.yml/badge.svg)](https://github.com/magao-x/MagAOX/actions/workflows/container.yml)
 
 
 This is the software which runs the MagAOX ExAO system.

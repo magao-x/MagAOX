@@ -38,7 +38,11 @@ sudo yum install -y python-devel xmlto
 $osPython setup.py bdist_rpm
 rpmFile=/opt/MagAOX/vendor/cpuset-1.6/dist/cpuset-1.6-1.noarch.rpm
 sudo yum install -y $rpmFile || true
-source /etc/profile.d/cgroups1_cpuset_mountpoint.sh
+if [[ -e /etc/profile.d/cgroups1_cpuset_mountpoint.sh ]]; then
+    source /etc/profile.d/cgroups1_cpuset_mountpoint.sh
+else
+    CGROUPS1_CPUSET_MOUNTPOINT=/opt/MagAOX/cpuset
+fi
 cat <<"HERE" | sudo tee /etc/cset.conf || exit 1
 mountpoint = $CGROUPS1_CPUSET_MOUNTPOINT
 HERE
