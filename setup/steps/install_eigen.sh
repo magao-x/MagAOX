@@ -19,8 +19,10 @@ if [[ ! -e /usr/local/share/pkgconfig/eigen3.pc ]]; then
     fi
     if [[ ! -d $EIGEN_DIR/_build ]]; then
         mkdir -p $EIGEN_DIR/_build
+        cd $EIGEN_DIR/_build
         cmake ..
+    else
+        cd $EIGEN_DIR/_build
     fi
-    cd $EIGEN_DIR/_build
     sudo make install
 fi

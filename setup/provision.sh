@@ -183,41 +183,6 @@ if [[ -e $VENDOR_SOFTWARE_BUNDLE ]]; then
     sudo rm -rf $BUNDLE_TMPDIR
 fi
 
-## Build first-party dependencies
-cd /opt/MagAOX/source
-bash -l "$DIR/steps/install_xrif.sh" || exit_error "Failed to build and install xrif"
-bash -l "$DIR/steps/install_mxlib.sh" || exit_error "Failed to build and install mxlib"
-source /etc/profile.d/mxmakefile.sh
-
-## Build MagAO-X and install sources to /opt/MagAOX/source/MagAOX
-if [[ $MAGAOX_ROLE == ci ]]; then
-    ln -sfv ~/project/ /opt/MagAOX/source/MagAOX
-else
-    log_info "Running as $USER"
-    if [[ $DIR != /opt/MagAOX/source/MagAOX/setup ]]; then
-        if [[ ! -e /opt/MagAOX/source/MagAOX ]]; then
-            echo "Cloning new copy of MagAOX codebase"
-            destdir=/opt/MagAOX/source/MagAOX
-            git clone $DIR/.. $destdir
-            normalize_git_checkout $destdir
-            cd $destdir
-            # ensure upstream is set somewhere that isn't on the fs to avoid possibly pushing
-            # things and not having them go where we expect
-            stat /opt/MagAOX/source/MagAOX/.git
-            git remote remove origin
-            git remote add origin https://github.com/magao-x/MagAOX.git
-            git fetch origin
-            git branch -u origin/dev dev
-            log_success "In the future, you can re-run this script from /opt/MagAOX/source/MagAOX/setup"
-            log_info "(In fact, maybe delete $(dirname $DIR)?)"
-        else
-            cd /opt/MagAOX/source/MagAOX
-            git fetch
-        fi
-    else
-        log_info "Running from clone located at $(dirname $DIR), nothing to do for cloning step"
-    fi
-fi
 # These steps should work as whatever user is installing, provided
 # they are a member of magaox-dev and they have sudo access to install to
 # /usr/local. Building as root would leave intermediate build products
@@ -261,7 +226,39 @@ bash -l "$DIR/steps/install_milk_and_cacao.sh" || exit_error "milk/cacao install
 bash -l "$DIR/steps/install_milkzmq.sh" || exit_error "milkzmq install failed"
 bash -l "$DIR/steps/install_purepyindi.sh" || exit_error "purepyindi install failed"
 bash -l "$DIR/steps/install_magpyx.sh" || exit_error "magpyx install failed"
+bash -l "$DIR/steps/install_xrif.sh" || exit_error "Failed to build and install xrif"
+bash -l "$DIR/steps/install_mxlib.sh" || exit_error "Failed to build and install mxlib"
+source /etc/profile.d/mxmakefile.sh
 
+## Clone sources to /opt/MagAOX/source/MagAOX
+if [[ $MAGAOX_ROLE == ci ]]; then
+    ln -sfv ~/project/ /opt/MagAOX/source/MagAOX
+else
+    log_info "Running as $USER"
+    if [[ $DIR != /opt/MagAOX/source/MagAOX/setup ]]; then
+        if [[ ! -e /opt/MagAOX/source/MagAOX ]]; then
+            echo "Cloning new copy of MagAOX codebase"
+            destdir=/opt/MagAOX/source/MagAOX
+            git clone $DIR/.. $destdir
+            normalize_git_checkout $destdir
+            cd $destdir
+            # ensure upstream is set somewhere that isn't on the fs to avoid possibly pushing
+            # things and not having them go where we expect
+            stat /opt/MagAOX/source/MagAOX/.git
+            git remote remove origin
+            git remote add origin https://github.com/magao-x/MagAOX.git
+            git fetch origin
+            git branch -u origin/dev dev
+            log_success "In the future, you can re-run this script from /opt/MagAOX/source/MagAOX/setup"
+            log_info "(In fact, maybe delete $(dirname $DIR)?)"
+        else
+            cd /opt/MagAOX/source/MagAOX
+            git fetch
+        fi
+    else
+        log_info "Running from clone located at $(dirname $DIR), nothing to do for cloning step"
+    fi
+fi
 
 # TODO:jlong: uncomment when it's back in working order
 # if [[ $MAGAOX_ROLE == AOC || $MAGAOX_ROLE == vm ||  $MAGAOX_ROLE == workstation ]]; then
