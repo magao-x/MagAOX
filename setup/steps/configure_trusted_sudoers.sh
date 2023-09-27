@@ -9,14 +9,11 @@ source /etc/os-release
 scratchFile=/tmp/sudoers_trusted
 targetFile=/etc/sudoers.d/trusted
 
-echo '# file automatically created by configure_trusted_sudoers.sh, do not edit' > $scratchFile
-if [[ $? != 0 ]]; then
-    exit_error "Could not create $scratchFile"
-fi
+echo '# file automatically created by configure_trusted_sudoers.sh, do not edit' > $scratchFile || exit_error "Could not create $scratchFile"
 
 if [[ $ID == rocky || $ID == centos ]]; then
     echo "User_Alias TRUSTED = %wheel" > $scratchFile
-else if [[ $ID == ubuntu ]]; then
+elif [[ $ID == ubuntu ]]; then
     echo "User_Alias TRUSTED = %sudo" > $scratchFile
 else
     exit_error "Got ID=$ID, only know rocky, centos, and ubuntu"
