@@ -19,9 +19,10 @@ else
     exit_error "Got ID=$ID, only know rocky, centos, and ubuntu"
 fi
 
-cat <<'HERE' >> $scratchFile
+cat <<'HERE' | tee -a $scratchFile
 Defaults:TRUSTED !env_reset
 Defaults:TRUSTED !secure_path
 HERE
+
 visudo -cf $scratchFile || exit_error "visudo syntax check failed on /tmp/sudoers_xsup"
 sudo mv $scratchFile $targetFile || exit_error "Could not install drop-in file to $targetFile"
