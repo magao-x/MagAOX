@@ -7,12 +7,197 @@
 
 #include "../../../tests/catch2/catch.hpp"
 
+#define MAGAOX_TEST_INDI_CALLBACK_VALIDATION
+
 #include "../siglentSDG.hpp"
 
 using namespace MagAOX::app;
 
-namespace siglentSDG_test 
+namespace SDGTEST
 {
+
+class siglentSDG_test : public siglentSDG 
+{
+
+public:
+    siglentSDG_test(const std::string device)
+    {
+        m_configName = device;
+
+        m_indiP_C1outp.setDevice(m_configName);
+        m_indiP_C1outp.setName("C1outp");
+
+        m_indiP_C1freq.setDevice(m_configName);
+        m_indiP_C1freq.setName("C1freq");
+
+        m_indiP_C1amp.setDevice(m_configName);
+        m_indiP_C1amp.setName("C1amp");
+
+        m_indiP_C1ofst.setDevice(m_configName);
+        m_indiP_C1ofst.setName("C1ofst");
+    }
+};
+
+SCENARIO( "INDI Callbacks", "[siglentSDG]" )
+{
+   GIVEN("A New Callback for C1outp")
+   {
+        WHEN("Wrong Device")
+        {
+            siglentSDG_test sdgt("right");
+
+            pcf::IndiProperty ip;
+            ip.setDevice("wrong");
+            ip.setName("C1outp");
+
+            int rv = sdgt.newCallBack_m_indiP_C1outp(ip);
+
+            REQUIRE(rv == -1);
+        }
+        WHEN("Wrong name")
+        {
+            siglentSDG_test sdgt("right");
+
+            pcf::IndiProperty ip;
+            ip.setDevice("right");
+            ip.setName("wrong");
+
+            int rv = sdgt.newCallBack_m_indiP_C1outp(ip);
+
+            REQUIRE(rv == -1);
+        }
+        WHEN("Right Device.Name")
+        {
+            siglentSDG_test sdgt("right");
+
+            pcf::IndiProperty ip;
+            ip.setDevice("right");
+            ip.setName("C1outp");
+
+            int rv = sdgt.newCallBack_m_indiP_C1outp(ip);
+
+            REQUIRE(rv == 0);
+        }
+   }
+
+   GIVEN("A New Callback for C1freq")
+   {
+        WHEN("Wrong Device")
+        {
+            siglentSDG_test sdgt("right");
+
+            pcf::IndiProperty ip;
+            ip.setDevice("wrong");
+            ip.setName("C1freq");
+
+            int rv = sdgt.newCallBack_m_indiP_C1freq(ip);
+
+            REQUIRE(rv == -1);
+        }
+        WHEN("Wrong Name")
+        {
+            siglentSDG_test sdgt("right");
+
+            pcf::IndiProperty ip;
+            ip.setDevice("right");
+            ip.setName("wrong");
+
+            int rv = sdgt.newCallBack_m_indiP_C1freq(ip);
+
+            REQUIRE(rv == -1);
+        }
+        WHEN("Right Device")
+        {
+            siglentSDG_test sdgt("right");
+
+            pcf::IndiProperty ip;
+            ip.setDevice("right");
+            ip.setName("C1freq");
+
+            int rv = sdgt.newCallBack_m_indiP_C1freq(ip);
+
+            REQUIRE(rv == 0);
+        }
+   }
+   GIVEN("A New Callback for C1amp")
+   {
+        WHEN("Wrong Device")
+        {
+            siglentSDG_test sdgt("right");
+
+            pcf::IndiProperty ip;
+            ip.setDevice("wrong");
+            ip.setName("C1amp");
+
+            int rv = sdgt.newCallBack_m_indiP_C1amp(ip);
+
+            REQUIRE(rv == -1);
+        }
+        WHEN("Wrong Name")
+        {
+            siglentSDG_test sdgt("right");
+
+            pcf::IndiProperty ip;
+            ip.setDevice("right");
+            ip.setName("wrong");
+
+            int rv = sdgt.newCallBack_m_indiP_C1amp(ip);
+
+            REQUIRE(rv == -1);
+        }
+        WHEN("Right Device")
+        {
+            siglentSDG_test sdgt("right");
+
+            pcf::IndiProperty ip;
+            ip.setDevice("right");
+            ip.setName("C1amp");
+
+            int rv = sdgt.newCallBack_m_indiP_C1amp(ip);
+
+            REQUIRE(rv == 0);
+        }
+   }
+   GIVEN("A New Callback for C1ofst")
+   {
+        WHEN("Wrong Device")
+        {
+            siglentSDG_test sdgt("right");
+
+            pcf::IndiProperty ip;
+            ip.setDevice("wrong");
+            ip.setName("C1amp");
+
+            int rv = sdgt.newCallBack_m_indiP_C1ofst(ip);
+
+            REQUIRE(rv == -1);
+        }
+        WHEN("Wrong Name")
+        {
+            siglentSDG_test sdgt("right");
+
+            pcf::IndiProperty ip;
+            ip.setDevice("right");
+            ip.setName("wrong");
+
+            int rv = sdgt.newCallBack_m_indiP_C1ofst(ip);
+
+            REQUIRE(rv == -1);
+        }
+        WHEN("Right Device")
+        {
+            siglentSDG_test sdgt("right");
+
+            pcf::IndiProperty ip;
+            ip.setDevice("right");
+            ip.setName("C1amp");
+
+            int rv = sdgt.newCallBack_m_indiP_C1ofst(ip);
+
+            REQUIRE(rv == 0);
+        }
+   }
+}
 
 SCENARIO( "Parsing the OUTP? response", "[siglentSDG]" )
 {

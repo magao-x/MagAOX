@@ -732,12 +732,6 @@ INDI_NEWCALLBACK_DEFN(acesxeCtrl, m_indiP_stop )(const pcf::IndiProperty &ipRecv
 {
     INDI_VALIDATE_CALLBACK_PROPS(m_indiP_stop, ipRecv);
 
-    if(ipRecv.getName() != m_indiP_stop.getName())
-    {
-        log<software_error>({__FILE__,__LINE__, "wrong INDI property received."});
-        return -1;
-    }
-       
     if(!ipRecv.find("request")) return 0;
             
     std::unique_lock<std::mutex> lock(m_indiMutex);
@@ -753,12 +747,6 @@ INDI_NEWCALLBACK_DEFN(acesxeCtrl, m_indiP_stop )(const pcf::IndiProperty &ipRecv
 INDI_NEWCALLBACK_DEFN(acesxeCtrl, m_indiP_abort )(const pcf::IndiProperty &ipRecv)
 {
     INDI_VALIDATE_CALLBACK_PROPS(m_indiP_abort, ipRecv);
-
-    if(ipRecv.getName() != m_indiP_abort.getName())
-    {
-        log<software_error>({__FILE__,__LINE__, "wrong INDI property received."});
-        return -1;
-    }
        
     if(!ipRecv.find("request")) return 0;
             

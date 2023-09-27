@@ -117,14 +117,35 @@
    */
 #define INDI_SETCALLBACK_DEFN(class, prop) int class::setCallBack_ ## prop
 
-#define INDI_VALIDATE_CALLBACK_PROPS(prop1, prop2)                                                                                \
+#define INDI_VALIDATE_CALLBACK_PROPS_IMPL(prop1, prop2)                                                                                \
         if(prop1.createUniqueKey() != prop2.createUniqueKey())                                                                    \
         {                                                                                                                         \
             log<software_error>({__FILE__,__LINE__, "INDI properties do not match in callback: "                                  \
                                                                   + prop1.createUniqueKey() + " != " + prop2.createUniqueKey()}); \
             return -1;                                                                                                            \
-        }
-        
+        }                                                                                                                         \
+
+#ifdef MAGAOX_TEST_INDI_CALLBACK_VALIDATION
+
+// When testing validation of callback checkes, we add a return 0 to avoid executing the rest of the callback.
+#define INDI_VALIDATE_CALLBACK_PROPS(prop1, prop2)  INDI_VALIDATE_CALLBACK_PROPS_IMPL(prop1, prop2) else {return 0;}
+
+#else
+
+/// Standard check for matching INDI properties in a callback
+/** Uses makeUniqueKey() to check.
+  *
+  * Causes a return -1 on a mismatch.
+  * 
+  * Does nothing on a match.
+  * 
+  * If the test macro  MAGAOX_TEST_INDI_CALLBACK_VALIDATION is defined this will cause return 0 on a match.
+  */
+#define INDI_VALIDATE_CALLBACK_PROPS(prop1, prop2)  INDI_VALIDATE_CALLBACK_PROPS_IMPL( prop1, /**< [in] the first property to compare */\
+                                                                                       prop2  /**< [in] the second property to compare */)  
+
+#endif
+
 /// Get the name of the static callback wrapper for a new property.
 /** Useful for passing the pointer to the callback.
   *

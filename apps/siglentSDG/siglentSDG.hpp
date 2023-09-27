@@ -26,6 +26,8 @@ namespace app
 class siglentSDG : public MagAOXApp<>, public dev::telemeter<siglentSDG>
 {
 
+    friend class siglentSDG_test;
+
    friend class dev::telemeter<siglentSDG>;
    
    //constexpr static double cs_MaxAmp = 0.87;//2.1;//0.87;
@@ -2300,38 +2302,34 @@ int siglentSDG::changeSync( int channel,
 
 INDI_NEWCALLBACK_DEFN(siglentSDG, m_indiP_C1outp)(const pcf::IndiProperty &ipRecv)
 {
-   if (ipRecv.getName() == m_indiP_C1outp.getName())
-   {
-      return changeOutp(1, ipRecv);
-   }
-   return -1;
+    INDI_VALIDATE_CALLBACK_PROPS(m_indiP_C1outp, ipRecv);
+   
+    return changeOutp(1, ipRecv);
+   
 }
 
 INDI_NEWCALLBACK_DEFN(siglentSDG, m_indiP_C1freq)(const pcf::IndiProperty &ipRecv)
 {
-   if (ipRecv.getName() == m_indiP_C1freq.getName())
-   {
-      return changeFreq(1, ipRecv);
-   }
-   return -1;
+    INDI_VALIDATE_CALLBACK_PROPS(m_indiP_C1freq, ipRecv);
+
+    return changeFreq(1, ipRecv);
+
 }
 
 INDI_NEWCALLBACK_DEFN(siglentSDG, m_indiP_C1amp)(const pcf::IndiProperty &ipRecv)
 {
-   if (ipRecv.getName() == m_indiP_C1amp.getName())
-   {
-      return changeAmp(1, ipRecv);
-   }
-   return -1;
+    INDI_VALIDATE_CALLBACK_PROPS(m_indiP_C1amp, ipRecv);
+
+    return changeAmp(1, ipRecv);
+   
 }
 
 INDI_NEWCALLBACK_DEFN(siglentSDG, m_indiP_C1ofst)(const pcf::IndiProperty &ipRecv)
 {
-   if (ipRecv.getName() == m_indiP_C1ofst.getName())
-   {
-      return changeOfst(1, ipRecv);
-   }
-   return -1;
+    INDI_VALIDATE_CALLBACK_PROPS(m_indiP_C1amp, ipRecv);
+
+    return changeOfst(1, ipRecv);
+
 }
 
 INDI_NEWCALLBACK_DEFN(siglentSDG, m_indiP_C1phse)(const pcf::IndiProperty &ipRecv)
