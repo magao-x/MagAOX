@@ -28,6 +28,8 @@ $osPython setup.py bdist_rpm
 rpmFile=/opt/MagAOX/vendor/python-future-0.18.3/dist/future-0.18.3-1.noarch.rpm
 sudo yum install -y $rpmFile || true
 
+cd /opt/MagAOX/vendor
+
 _cached_fetch https://github.com/lpechacek/cpuset/archive/refs/tags/v1.6.zip cpuset-v1.6.zip
 unzip -o cpuset-v1.6.zip
 cd cpuset-1.6/
