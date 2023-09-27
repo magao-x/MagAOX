@@ -69,6 +69,7 @@ yum install -y \
     nfs-utils \
     rsync \
     lapack-devel \
+    python \
 ;
 
 if [[ $MAGAOX_ROLE == vm ]]; then
