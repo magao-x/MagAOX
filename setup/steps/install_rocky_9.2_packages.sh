@@ -19,6 +19,7 @@ ldconfig -v
 
 # Install build tools and utilities
 yum install -y \
+    util-linux-user \
     kernel-devel \
     gcc-gfortran \
     which \
