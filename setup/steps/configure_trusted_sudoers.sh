@@ -9,7 +9,10 @@ source /etc/os-release
 scratchFile=/tmp/sudoers_trusted
 targetFile=/etc/sudoers.d/trusted
 
-echo '# file automatically created by configure_trusted_sudoers.sh, do not edit' > $scratchFile || exit_error "Could not create $scratchFile"
+echo '# file automatically created by configure_trusted_sudoers.sh, do not edit' > $scratchFile
+if [[ $? != 0 ]]; then
+    exit_error "Could not create $scratchFile"
+fi
 
 if [[ $ID == rocky || $ID == centos ]]; then
     echo "User_Alias TRUSTED = %wheel" > $scratchFile
