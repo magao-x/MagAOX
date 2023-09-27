@@ -61,7 +61,7 @@ if [[ $VM_KIND != "none" ]]; then
     sudo git config --global --replace-all safe.directory '*'
 fi
 
-bash -l "$DIR/steps/configure_trusted_sudoers.sh"
+bash -l "$DIR/steps/configure_trusted_sudoers.sh" || exit_error "Could not configure trusted groups for sudoers"
 sudo bash -l "$DIR/steps/configure_xsup_aliases.sh"
 
 if [[ $MAGAOX_ROLE == AOC || $MAGAOX_ROLE == ICC || $MAGAOX_ROLE == RTC ]]; then
@@ -147,7 +147,7 @@ fi
 
 # SuSE packages need either Python 3.6 or 3.10, but Rocky 9.2 has Python 3.9 as /bin/python, so we build our own RPM:
 if [[ $ID == rocky ]]; then
-  sudo bash -l "$DIR/steps/install_cpuset.sh" || error_exit "Couldn't install cpuset from source"
+  sudo bash -l "$DIR/steps/install_cpuset.sh" || exit_error "Couldn't install cpuset from source"
 fi
 
 
@@ -268,7 +268,7 @@ fi
 
 if [[ $MAGAOX_ROLE == AOC || $MAGAOX_ROLE == TOC || $MAGAOX_ROLE == vm || $MAGAOX_ROLE == workstation || $MAGAOX_ROLE == ci ]]; then
     # realtime image viewer
-    bash -l "$DIR/steps/install_rtimv.sh" || exit 1
+    bash -l "$DIR/steps/install_rtimv.sh" || exit_error "Could not install rtimv"
 fi
 
 if [[ $MAGAOX_ROLE == AOC || $MAGAOX_ROLE == TOC || $MAGAOX_ROLE == vm ||  $MAGAOX_ROLE == workstation ]]; then
