@@ -31,13 +31,14 @@
 
 static bool no_SIGUSR1_yet{true};
 static bool no_SIGUSR2_yet{true};
+static bool logging{false};
 static bool verbose{false};
 
 /// Signal handler:  exit on any signal caught
 void
 sigusr12_handler(int sig, siginfo_t *si, void *unused)
 {
-    if (verbose)
+    if (logging)
     {
         std::cerr << "Received signal[" 
                   << strerror(sig)
@@ -71,7 +72,7 @@ void setup_SIGUSR12_handler(int iSIGUSRn)
     sa.sa_sigaction = sigusr12_handler;
     errno = 0;
     istat = sigaction(iSIGUSRn, &sa, 0);
-    if (istat < 0 || verbose)
+    if (istat < 0 || logging)
     {
         std::cerr
         << "resurrector_indi:  "
@@ -88,11 +89,15 @@ main(int argc, char** argv)
 {
     extern void stdout_stderr_redirect(std::string);
     bool nor{get_no_output_redirect_arg(argc,argv)};
+    logging = get_logging_arg(argc, argv);
     verbose = get_verbose_arg(argc, argv);
     resurrectorT<> resurr(nor ? nullptr : &stdout_stderr_redirect);
 
-    if (verbose) { resurr.set_resurr_logging(); }
+    if (logging) { resurr.set_resurr_logging(); }
     else         { resurr.clr_resurr_logging(); }
+
+    if (verbose) { resurr.set_resurr_verbose_logging(); }
+    else         { resurr.clr_resurr_verbose_logging(); }
 
     // Get MagAOX role and build process list file pathname e.g.
     // export MAGAOX_ROLE=vm; path=/opt/MagAOX/config/proclist_vm.txt
@@ -157,6 +162,8 @@ main(int argc, char** argv)
 
         isfd = -1;
         fd_indidrivers.clear();
+
+        bool sshDiggers{false};
 
         while (EOF != (rnp=read_next_process(f,driver_name,exec,dpfx)))
         {
@@ -236,7 +243,12 @@ main(int argc, char** argv)
             // - start them now, so network ports will be available 
             if (exec=="sshDigger")
             {
+                if (logged)
+                {
+                    std::cerr << " [immmediate start]" << std::endl;
+                }
                 resurr.start_hexbeater(newfd,10);
+                sshDiggers = true;
                 continue;
             }
 
@@ -277,6 +289,18 @@ main(int argc, char** argv)
 
         if (isfd > -1)
         {
+            if (sshDiggers)
+            {
+
+                // Delay if there are were sshDiggers started
+                if (fd_indidrivers.size())
+                {
+                    std::cerr << "Delay 5s after starting sshDigger"
+                              << std::endl;
+                    timeval tv = {5,0};
+                    select(1,0,0,0,&tv);
+                }
+            }
             // If an x/indiserver should be started (forked), do it now
             // N.B. 10 is the restart limit
             resurr.start_hexbeater(isfd,10);
@@ -308,16 +332,16 @@ main(int argc, char** argv)
             resurr.srcr_cycle(tv);
         } while (no_SIGUSR2_yet && no_SIGUSR1_yet);
 
-        // Ensure no_SIGUSR2_yet is reset
-        no_SIGUSR2_yet = true;
-
-        if (verbose) {
+        if (logging) {
           std::cerr << "Acting on SIGUSR"
                     << (no_SIGUSR2_yet ? "1 (exit)"
                                        : "2 (re-read proclist)"
                        )
                     << std::endl;
         }
+
+        // Ensure no_SIGUSR2_yet is reset
+        no_SIGUSR2_yet = true;
 
     } while (no_SIGUSR1_yet);
 
