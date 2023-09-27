@@ -11,7 +11,7 @@ make install
 log_info "Building MagAOX"
 cd ../..
 make setup
-if [[ $MAGAOX_ROLE == vm || $MAGAOX_ROLE == ci || $MAGAOX_ROLE == TOC ]]; then
+if [[ $MAGAOX_ROLE == vm || $MAGAOX_ROLE == container || $MAGAOX_ROLE == TOC ]]; then
     if ! grep 'NEED_CUDA = no' local/common.mk; then
         echo 'NEED_CUDA = no' >> local/common.mk
     fi
@@ -20,7 +20,7 @@ fi
 make all
 make install
 
-if [[ $MAGAOX_ROLE == AOC || $MAGAOX_ROLE == vm || $MAGAOX_ROLE == ci ]]; then
+if [[ $MAGAOX_ROLE == AOC || $MAGAOX_ROLE == vm || $MAGAOX_ROLE == ci || $MAGAOX_ROLE == container ]]; then
     make guis_all
     make guis_install
 fi

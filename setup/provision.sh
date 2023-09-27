@@ -110,7 +110,7 @@ if [[ $MAGAOX_ROLE == vm ]]; then
 fi
 
 # Install dependencies for the GUIs
-if [[ $MAGAOX_ROLE == AOC || $MAGAOX_ROLE == TOC || $MAGAOX_ROLE == ci || $MAGAOX_ROLE == vm || $MAGAOX_ROLE == workstation ]]; then
+if [[ $MAGAOX_ROLE == AOC || $MAGAOX_ROLE == TOC || $MAGAOX_ROLE == ci || $MAGAOX_ROLE == container || $MAGAOX_ROLE == vm || $MAGAOX_ROLE == workstation ]]; then
     sudo bash -l "$DIR/steps/install_gui_dependencies.sh"
 fi
 
@@ -126,7 +126,7 @@ fi
 cd /opt/MagAOX/vendor
 sudo bash -l "$DIR/steps/install_rclone.sh" || exit 1
 bash -l "$DIR/steps/install_openblas.sh" || exit 1
-if [[ $MAGAOX_ROLE == RTC || $MAGAOX_ROLE == ICC || $MAGAOX_ROLE == AOC || $MAGAOX_ROLE == TIC ]]; then
+if [[ $MAGAOX_ROLE == RTC || $MAGAOX_ROLE == ICC || $MAGAOX_ROLE == AOC || $MAGAOX_ROLE == TIC || $MAGAOX_ROLE == ci ]]; then
     bash -l "$DIR/steps/install_cuda.sh" || exit_error "CUDA install failed"
 fi
 sudo bash -l "$DIR/steps/install_fftw.sh" || exit 1
@@ -223,10 +223,10 @@ fi
 
 # Install first-party deps
 bash -l "$DIR/steps/install_milk_and_cacao.sh" || exit_error "milk/cacao install failed" # depends on /opt/conda/bin/python existing for plugin build
+bash -l "$DIR/steps/install_xrif.sh" || exit_error "Failed to build and install xrif"
 bash -l "$DIR/steps/install_milkzmq.sh" || exit_error "milkzmq install failed"
 bash -l "$DIR/steps/install_purepyindi.sh" || exit_error "purepyindi install failed"
 bash -l "$DIR/steps/install_magpyx.sh" || exit_error "magpyx install failed"
-bash -l "$DIR/steps/install_xrif.sh" || exit_error "Failed to build and install xrif"
 bash -l "$DIR/steps/install_mxlib.sh" || exit_error "Failed to build and install mxlib"
 source /etc/profile.d/mxmakefile.sh
 

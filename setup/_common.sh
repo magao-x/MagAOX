@@ -15,7 +15,7 @@ if [[ $MAGAOX_ROLE == vm ]]; then
     instrument_group=ubuntu
     instrument_dev_group=ubuntu
   fi
-elif [[ $MAGAOX_ROLE == ci ]]; then
+elif [[ $MAGAOX_ROLE == ci || $MAGAOX_ROLE == container ]]; then
   instrument_user=root
   instrument_group=root
   instrument_dev_group=root
