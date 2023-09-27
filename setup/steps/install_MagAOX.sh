@@ -20,7 +20,7 @@ fi
 make all
 make install
 
-if [[ $MAGAOX_ROLE == AOC || $MAGAOX_ROLE == vm || $MAGAOX_ROLE == ci || $MAGAOX_ROLE == container ]]; then
+if [[ $MAGAOX_ROLE == AOC || $MAGAOX_ROLE == vm || $MAGAOX_ROLE == ci ]]; then
     make guis_all
     make guis_install
 fi
