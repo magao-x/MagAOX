@@ -1,4 +1,3 @@
-
 # The MagAO-X Software System
 
 [![Status of Rocky test build](https://github.com/magao-x/MagAOX/actions/workflows/install-rocky.yml/badge.svg)](https://github.com/magao-x/MagAOX/actions/workflows/install-rocky.yml) [![Status of Ubuntu test build](https://github.com/magao-x/MagAOX/actions/workflows/install-ubuntu.yml/badge.svg)](https://github.com/magao-x/MagAOX/actions/workflows/install-ubuntu.yml) [![Status of container build](https://github.com/magao-x/MagAOX/actions/workflows/container.yml/badge.svg)](https://github.com/magao-x/MagAOX/actions/workflows/container.yml)
@@ -6,8 +5,6 @@
 **Handbook:** https://magao-x.org/docs/handbook/
 
 **[C++ docs](https://magao-x.org/docs/api/):** [![Status of Doxygen build](https://github.com/magao-x/MagAOX/actions/workflows/build-doxygen.yml/badge.svg)](https://github.com/magao-x/MagAOX/actions/workflows/build-doxygen.yml)
-
-
 
 This is the software which runs the MagAO-X ExAO system.
 
@@ -156,7 +153,3 @@ To-do items are listed in the above sections.  Also see the Todo page in the dox
 - [] split base INDI off into separate repo, which will be the minimum someone needs to have INDI utils for interacting with MagAO-X without installing the whole tree.
 - [] create indiserver startup script which takes a list of drivers from a config file, creates symlinks to xindidriver as needed, and then starts indiserver itself.
 - [] start issue tracking
-
-## 7 Develop in a VM with [Vagrant](https://vagrantup.com)
-
-To develop in the most "flight-like" configuration, a Vagrantfile is provided to set up a development VM. A quick-start guide is available [in the handbook](https://magao-x.org/docs/handbook/appendices/development_vm.html).

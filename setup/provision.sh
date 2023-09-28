@@ -110,7 +110,7 @@ if [[ $MAGAOX_ROLE == vm ]]; then
 fi
 
 # Install dependencies for the GUIs
-if [[ $MAGAOX_ROLE == AOC || $MAGAOX_ROLE == TOC || $MAGAOX_ROLE == ci || $MAGAOX_ROLE == container || $MAGAOX_ROLE == vm || $MAGAOX_ROLE == workstation ]]; then
+if [[ $MAGAOX_ROLE == AOC || $MAGAOX_ROLE == TOC || $MAGAOX_ROLE == ci || $MAGAOX_ROLE == vm || $MAGAOX_ROLE == workstation ]]; then
     sudo bash -l "$DIR/steps/install_gui_dependencies.sh"
 fi
 

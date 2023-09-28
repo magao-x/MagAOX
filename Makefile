@@ -101,6 +101,8 @@ else ifeq ($(MAGAOX_ROLE),ICC)
   guis_to_build =
 else ifeq ($(MAGAOX_ROLE),TIC)
   guis_to_build =
+else ifeq ($(MAGAOX_ROLE),container)
+  guis_to_build =
 else
   guis_to_build = $(all_guis)
 endif
@@ -116,6 +118,8 @@ ifeq ($(MAGAOX_ROLE),RTC)
 else ifeq ($(MAGAOX_ROLE),ICC)
   rtimv_plugins_to_build =
 else ifeq ($(MAGAOX_ROLE),TIC)
+  rtimv_plugins_to_build =
+else ifeq ($(MAGAOX_ROLE),container)
   rtimv_plugins_to_build =
 else
   rtimv_plugins_to_build = $(all_rtimv_plugins)
