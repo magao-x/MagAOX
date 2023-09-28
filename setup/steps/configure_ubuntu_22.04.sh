@@ -6,10 +6,10 @@ set -euo pipefail
 log_info "Configuring package source list with Intel oneAPI repositories"
 if [[ ! -e /usr/share/keyrings/oneapi-archive-keyring.gpg ]]; then
     mkdir -p /usr/share/keyrings
-    wget -O- https://apt.repos.intel.com/intel-gpg-keys/GPG-PUB-KEY-INTEL-SW-PRODUCTS.PUB | gpg --dearmor | sudo tee /usr/share/keyrings/oneapi-archive-keyring.gpg > /dev/null || error_exit "Could not install Intel APT GPG key"
+    wget -O- https://apt.repos.intel.com/intel-gpg-keys/GPG-PUB-KEY-INTEL-SW-PRODUCTS.PUB | gpg --dearmor | sudo tee /usr/share/keyrings/oneapi-archive-keyring.gpg > /dev/null || exit_error "Could not install Intel APT GPG key"
 fi
 if [[ ! -e /etc/apt/sources.list.d/oneAPI.list ]]; then
-    echo "deb [signed-by=/usr/share/keyrings/oneapi-archive-keyring.gpg] https://apt.repos.intel.com/oneapi all main" | sudo tee /etc/apt/sources.list.d/oneAPI.list || error_exit "Could not add Intel APT repository to sources.list.d"
+    echo "deb [signed-by=/usr/share/keyrings/oneapi-archive-keyring.gpg] https://apt.repos.intel.com/oneapi all main" | sudo tee /etc/apt/sources.list.d/oneAPI.list || exit_error "Could not add Intel APT repository to sources.list.d"
 fi
 sudo apt update
 
