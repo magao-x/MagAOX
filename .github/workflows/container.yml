@@ -1,5 +1,8 @@
 name: Container build
 on:
+  push:
+    branches:
+        - 'test'
   workflow_run:
     workflows: ["Rocky build"]
     types: [completed]
