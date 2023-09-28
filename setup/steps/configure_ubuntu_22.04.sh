@@ -62,7 +62,9 @@ fi
 log_info "Hush login banners"
 sudo touch /etc/skel/.hushlogin
 
-log_info "Disable automatic upgrades"
-sudo cp -v /usr/share/unattended-upgrades/20auto-upgrades-disabled /etc/apt/apt.conf.d/
+if [[ -d /usr/share/unattended-upgrades ]]; then
+  log_info "Disable automatic upgrades"
+  sudo cp -v /usr/share/unattended-upgrades/20auto-upgrades-disabled /etc/apt/apt.conf.d/
+fi
 
 log_info "Done with custom configuration for Ubuntu 22.04"
