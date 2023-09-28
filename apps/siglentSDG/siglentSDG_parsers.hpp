@@ -51,6 +51,9 @@ int parseOUTP( int & channel, ///< [out] the channel indicated by this response.
 /**
   * Example: C1:BSWV WVTP,SINE,FRQ,10HZ,PERI,0.1S,AMP,2V,AMPVRMS,0.707Vrms,OFST,0V,HLEV,1V,LLEV,-1V,PHSE,0
   *
+  * \todo document tests
+  * \todo update tests for new wdth parameter in PULSE
+  * 
   * \returns 0 on success
   * \returns \<0 on error, with value indicating location of error.
   */

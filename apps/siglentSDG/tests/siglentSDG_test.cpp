@@ -120,8 +120,9 @@ SCENARIO( "Parsing the BSWV? response", "[siglentSDG]" )
          double hlev;
          double llev;
          double phse;
+         double wdth;
          std::string resp="C1:BSWV WVTP,SINE,FRQ,10.123HZ,PERI,0.8345S,AMP,2.567V,AMPVRMS,0.707Vrms,OFST,0.34V,HLEV,1.3V,LLEV,-2.567V,PHSE,4.3567";
-         rv = parseBSWV(channel, wvtp, freq, peri, amp, ampvrms, ofst, hlev, llev, phse, resp);
+         rv = parseBSWV(channel, wvtp, freq, peri, amp, ampvrms, ofst, hlev, llev, phse, wdth,resp);
 
          REQUIRE(rv == 0);
          REQUIRE(channel == 1);
@@ -153,8 +154,9 @@ SCENARIO( "Parsing the BSWV? response", "[siglentSDG]" )
          double hlev;
          double llev;
          double phse;
+         double wdth;
          std::string resp="C1:BSWV WVTP";
-         rv = parseBSWV(channel, wvtp, freq, peri, amp, ampvrms, ofst, hlev, llev, phse, resp);
+         rv = parseBSWV(channel, wvtp, freq, peri, amp, ampvrms, ofst, hlev, llev, phse, wdth, resp);
 
          REQUIRE(rv == -1);
       }
@@ -171,8 +173,9 @@ SCENARIO( "Parsing the BSWV? response", "[siglentSDG]" )
          double hlev;
          double llev;
          double phse;
+         double wdth;
          std::string resp="C1:MDWV WVTP,SINE,FRQ,10.123HZ,PERI,0.8345S,AMP,2.567V,AMPVRMS,0.707Vrms,OFST,0.34V,HLEV,1.3V,LLEV,-2.567V,PHSE,4.3567";
-         rv = parseBSWV(channel, wvtp, freq, peri, amp, ampvrms, ofst, hlev, llev, phse, resp);
+         rv = parseBSWV(channel, wvtp, freq, peri, amp, ampvrms, ofst, hlev, llev, phse, wdth, resp);
 
          REQUIRE(rv == -2);
       }
@@ -189,8 +192,9 @@ SCENARIO( "Parsing the BSWV? response", "[siglentSDG]" )
          double hlev;
          double llev;
          double phse;
+         double wdth;
          std::string resp="X1:BSWV WVTP,SINE,FRQ,10.123HZ,PERI,0.8345S,AMP,2.567V,AMPVRMS,0.707Vrms,OFST,0.34V,HLEV,1.3V,LLEV,-2.567V,PHSE,4.3567";
-         rv = parseBSWV(channel, wvtp, freq, peri, amp, ampvrms, ofst, hlev, llev, phse, resp);
+         rv = parseBSWV(channel, wvtp, freq, peri, amp, ampvrms, ofst, hlev, llev, phse, wdth, resp);
 
          REQUIRE(rv == -3);
       }
@@ -207,8 +211,9 @@ SCENARIO( "Parsing the BSWV? response", "[siglentSDG]" )
          double hlev;
          double llev;
          double phse;
+         double wdth;
          std::string resp="C:BSWV WVTP,SINE,FRQ,10.123HZ,PERI,0.8345S,AMP,2.567V,AMPVRMS,0.707Vrms,OFST,0.34V,HLEV,1.3V,LLEV,-2.567V,PHSE,4.3567";
-         rv = parseBSWV(channel, wvtp, freq, peri, amp, ampvrms, ofst, hlev, llev, phse, resp);
+         rv = parseBSWV(channel, wvtp, freq, peri, amp, ampvrms, ofst, hlev, llev, phse, wdth, resp);
 
          REQUIRE(rv == -4);
       }
@@ -225,8 +230,9 @@ SCENARIO( "Parsing the BSWV? response", "[siglentSDG]" )
          double hlev;
          double llev;
          double phse;
+         double wdth;
          std::string resp="C1:BSWV WVTQ,SINE,FRQ,10.123HZ,PERI,0.8345S,AMP,2.567V,AMPVRMS,0.707Vrms,OFST,0.34V,HLEV,1.3V,LLEV,-2.567V,PHSE,4.3567";
-         rv = parseBSWV(channel, wvtp, freq, peri, amp, ampvrms, ofst, hlev, llev, phse, resp);
+         rv = parseBSWV(channel, wvtp, freq, peri, amp, ampvrms, ofst, hlev, llev, phse, wdth, resp);
 
          REQUIRE(rv == -5);
       }
@@ -243,8 +249,9 @@ SCENARIO( "Parsing the BSWV? response", "[siglentSDG]" )
          double hlev;
          double llev;
          double phse;
+         double wdth;
          std::string resp="C1:BSWV WVTP,UPIY,FRQ,10.123HZ,PERI,0.8345S,AMP,2.567V,AMPVRMS,0.707Vrms,OFST,0.34V,HLEV,1.3V,LLEV,-2.567V,PHSE,4.3567";
-         rv = parseBSWV(channel, wvtp, freq, peri, amp, ampvrms, ofst, hlev, llev, phse, resp);
+         rv = parseBSWV(channel, wvtp, freq, peri, amp, ampvrms, ofst, hlev, llev, phse, wdth, resp);
 
          REQUIRE(rv == -6);
       }
@@ -261,8 +268,9 @@ SCENARIO( "Parsing the BSWV? response", "[siglentSDG]" )
          double hlev;
          double llev;
          double phse;
+         double wdth;
          std::string resp="C1:BSWV WVTP,SINE,FRZ,10.123HZ,PERI,0.8345S,AMP,2.567V,AMPVRMS,0.707Vrms,OFST,0.34V,HLEV,1.3V,LLEV,-2.567V,PHSE,4.3567";
-         rv = parseBSWV(channel, wvtp, freq, peri, amp, ampvrms, ofst, hlev, llev, phse, resp);
+         rv = parseBSWV(channel, wvtp, freq, peri, amp, ampvrms, ofst, hlev, llev, phse, wdth, resp);
 
          REQUIRE(rv == -10);
       }
@@ -279,8 +287,9 @@ SCENARIO( "Parsing the BSWV? response", "[siglentSDG]" )
          double hlev;
          double llev;
          double phse;
+         double wdth;
          std::string resp="C1:BSWV WVTP,SINE,FRQ,10.123HZ,PERZ,0.8345S,AMP,2.567V,AMPVRMS,0.707Vrms,OFST,0.34V,HLEV,1.3V,LLEV,-2.567V,PHSE,4.3567";
-         rv = parseBSWV(channel, wvtp, freq, peri, amp, ampvrms, ofst, hlev, llev, phse, resp);
+         rv = parseBSWV(channel, wvtp, freq, peri, amp, ampvrms, ofst, hlev, llev, phse, wdth, resp);
 
          REQUIRE(rv == -11);
       }
@@ -297,8 +306,9 @@ SCENARIO( "Parsing the BSWV? response", "[siglentSDG]" )
          double hlev;
          double llev;
          double phse;
+         double wdth;
          std::string resp="C1:BSWV WVTP,SINE,FRQ,10.123HZ,PERI,0.8345S,A/P,2.567V,AMPVRMS,0.707Vrms,OFST,0.34V,HLEV,1.3V,LLEV,-2.567V,PHSE,4.3567";
-         rv = parseBSWV(channel, wvtp, freq, peri, amp, ampvrms, ofst, hlev, llev, phse, resp);
+         rv = parseBSWV(channel, wvtp, freq, peri, amp, ampvrms, ofst, hlev, llev, phse, wdth, resp);
 
          REQUIRE(rv == -12);
       }
@@ -315,8 +325,9 @@ SCENARIO( "Parsing the BSWV? response", "[siglentSDG]" )
          double hlev;
          double llev;
          double phse;
+         double wdth;
          std::string resp="C1:BSWV WVTP,SINE,FRQ,10.123HZ,PERI,0.8345S,AMP,2.567V,APVRMS,0.707Vrms,OFST,0.34V,HLEV,1.3V,LLEV,-2.567V,PHSE,4.3567";
-         rv = parseBSWV(channel, wvtp, freq, peri, amp, ampvrms, ofst, hlev, llev, phse, resp);
+         rv = parseBSWV(channel, wvtp, freq, peri, amp, ampvrms, ofst, hlev, llev, phse, wdth, resp);
 
          REQUIRE(rv == -13);
       }
@@ -333,8 +344,9 @@ SCENARIO( "Parsing the BSWV? response", "[siglentSDG]" )
          double hlev;
          double llev;
          double phse;
+         double wdth;
          std::string resp="C1:BSWV WVTP,SINE,FRQ,10.123HZ,PERI,0.8345S,AMP,2.567V,AMPVRMS,0.707Vrms,O,0.34V,HLEV,1.3V,LLEV,-2.567V,PHSE,4.3567";
-         rv = parseBSWV(channel, wvtp, freq, peri, amp, ampvrms, ofst, hlev, llev, phse, resp);
+         rv = parseBSWV(channel, wvtp, freq, peri, amp, ampvrms, ofst, hlev, llev, phse, wdth, resp);
 
          REQUIRE(rv == -14);
       }
@@ -351,8 +363,9 @@ SCENARIO( "Parsing the BSWV? response", "[siglentSDG]" )
          double hlev;
          double llev;
          double phse;
+         double wdth;
          std::string resp="C1:BSWV WVTP,SINE,FRQ,10.123HZ,PERI,0.8345S,AMP,2.567V,AMPVRMS,0.707Vrms,OFST,0.34V,HLV,1.3V,LLEV,-2.567V,PHSE,4.3567";
-         rv = parseBSWV(channel, wvtp, freq, peri, amp, ampvrms, ofst, hlev, llev, phse, resp);
+         rv = parseBSWV(channel, wvtp, freq, peri, amp, ampvrms, ofst, hlev, llev, phse, wdth, resp);
 
          REQUIRE(rv == -15);
       }
@@ -369,8 +382,9 @@ SCENARIO( "Parsing the BSWV? response", "[siglentSDG]" )
          double hlev;
          double llev;
          double phse;
+         double wdth;
          std::string resp="C1:BSWV WVTP,SINE,FRQ,10.123HZ,PERI,0.8345S,AMP,2.567V,AMPVRMS,0.707Vrms,OFST,0.34V,HLEV,1.3V,QLEV,-2.567V,PHSE,4.3567";
-         rv = parseBSWV(channel, wvtp, freq, peri, amp, ampvrms, ofst, hlev, llev, phse, resp);
+         rv = parseBSWV(channel, wvtp, freq, peri, amp, ampvrms, ofst, hlev, llev, phse, wdth, resp);
 
          REQUIRE(rv == -16);
       }
@@ -387,8 +401,9 @@ SCENARIO( "Parsing the BSWV? response", "[siglentSDG]" )
          double hlev;
          double llev;
          double phse;
+         double wdth;
          std::string resp="C1:BSWV WVTP,SINE,FRQ,10.123HZ,PERI,0.8345S,AMP,2.567V,AMPVRMS,0.707Vrms,OFST,0.34V,HLEV,1.3V,LLEV,-2.567V,XXXXX,4.3567";
-         rv = parseBSWV(channel, wvtp, freq, peri, amp, ampvrms, ofst, hlev, llev, phse, resp);
+         rv = parseBSWV(channel, wvtp, freq, peri, amp, ampvrms, ofst, hlev, llev, phse, wdth, resp);
 
          REQUIRE(rv == -17);
       }

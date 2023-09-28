@@ -113,7 +113,7 @@
             <enum>Qt::NoFocus</enum>
            </property>
            <property name="text">
-            <string>defaults</string>
+            <string>set flat</string>
            </property>
           </widget>
          </item>
@@ -123,7 +123,7 @@
             <enum>Qt::NoFocus</enum>
            </property>
            <property name="text">
-            <string>set</string>
+            <string>init</string>
            </property>
           </widget>
          </item>

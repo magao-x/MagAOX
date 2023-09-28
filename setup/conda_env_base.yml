@@ -2,14 +2,15 @@ channels:
   - conda-forge
   - defaults
 dependencies:
-  - jupyterlab
   - astropy
+  # Note: omission of jupyter and use of matplotlib-base prevents dependency on qt
+  - jupyterlab
+  - notebook
   - ipython
   - ipywidgets
-  - notebook
+  - matplotlib-base
   - numpy
   - scipy
-  - matplotlib-base
   - numexpr
   - Pillow
   - scikit-image
