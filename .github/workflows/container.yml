@@ -3,10 +3,10 @@ on:
   push:
     branches:
         - 'test'
-  workflow_run:
-    workflows: ["Rocky build"]
-    types: [completed]
-    branches: [test]
+  # workflow_run:
+  #   workflows: ["Rocky build"]
+  #   types: [completed]
+  #   branches: [test]
 
 env:
   REGISTRY: ghcr.io
@@ -15,7 +15,7 @@ env:
 jobs:
   build-and-push-rocky:
     runs-on: ubuntu-latest
-    if: ${{ github.event.workflow_run.conclusion == 'success' }}
+    # if: ${{ github.event.workflow_run.conclusion == 'success' }}
     # Sets the permissions granted to the `GITHUB_TOKEN` for the actions in this job.
     permissions:
       contents: read
