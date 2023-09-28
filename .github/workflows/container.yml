@@ -1,7 +1,7 @@
 name: Container build
 on:
   workflow_run:
-    workflows: ["Ubuntu 22.04 build"]
+    workflows: ["Rocky build"]
     types: [completed]
     branches: [test]
 
