@@ -1,13 +1,15 @@
 
 # The MagAO-X Software System
 
+[![Status of Rocky test build](https://github.com/magao-x/MagAOX/actions/workflows/install-rocky.yml/badge.svg)](https://github.com/magao-x/MagAOX/actions/workflows/install-rocky.yml) [![Status of Ubuntu test build](https://github.com/magao-x/MagAOX/actions/workflows/install-ubuntu.yml/badge.svg)](https://github.com/magao-x/MagAOX/actions/workflows/install-ubuntu.yml) [![Status of container build](https://github.com/magao-x/MagAOX/actions/workflows/container.yml/badge.svg)](https://github.com/magao-x/MagAOX/actions/workflows/container.yml)
+
 **Handbook:** https://magao-x.org/docs/handbook/
 
-**Build status:** [![Status of install test build](https://github.com/magao-x/MagAOX/actions/workflows/install.yml/badge.svg)](https://github.com/magao-x/MagAOX/actions/workflows/install.yml) | 
-**[C++ docs](https://magao-x.org/docs/api/):** [![Status of Doxygen build](https://github.com/magao-x/MagAOX/actions/workflows/build-doxygen.yml/badge.svg)](https://github.com/magao-x/MagAOX/actions/workflows/build-doxygen.yml) | **Container:** [![Status of container build](https://github.com/magao-x/MagAOX/actions/workflows/container.yml/badge.svg)](https://github.com/magao-x/MagAOX/actions/workflows/container.yml)
+**[C++ docs](https://magao-x.org/docs/api/):** [![Status of Doxygen build](https://github.com/magao-x/MagAOX/actions/workflows/build-doxygen.yml/badge.svg)](https://github.com/magao-x/MagAOX/actions/workflows/build-doxygen.yml)
 
 
-This is the software which runs the MagAOX ExAO system.
+
+This is the software which runs the MagAO-X ExAO system.
 
 ## 1 Dependencies
 
