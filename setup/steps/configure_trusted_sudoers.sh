@@ -25,4 +25,10 @@ Defaults:TRUSTED !secure_path
 HERE
 
 visudo -cf $scratchFile || exit_error "visudo syntax check failed on /tmp/sudoers_xsup"
-sudo mv $scratchFile $targetFile || exit_error "Could not install drop-in file to $targetFile"
+sudo install \
+    --owner=root \
+    --group=root \
+    --mode=u=r--g=r--o=--- \
+    $scratchFile \
+    $targetFile \
+|| exit_error "Could not install drop-in file to $targetFile"
