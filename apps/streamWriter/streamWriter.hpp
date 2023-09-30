@@ -1408,11 +1408,7 @@ int streamWriter::doEncode()
 
 INDI_NEWCALLBACK_DEFN(streamWriter, m_indiP_writing)(const pcf::IndiProperty &ipRecv)
 {
-   if(ipRecv.getName() != m_indiP_writing.getName())
-   {
-      log<software_error>({__FILE__,__LINE__, "wrong INDI property received."});
-      return -1;
-   }
+    INDI_VALIDATE_CALLBACK_PROPS( m_indiP_writing, ipRecv);
    
    if(!ipRecv.find("toggle")) return 0;
    

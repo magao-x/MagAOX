@@ -11,4 +11,6 @@
 ../apps/xt1121Ctrl/tests/xtChannels_test
 ../apps/zaberLowLevel/tests/zaberStage_test
 ../apps/zaberLowLevel/tests/zaberUtils_test
+../apps/zaberLowLevel/tests/zaberLowLevel_test
+../apps/zaberCtrl/tests/zaberCtrl_test
 

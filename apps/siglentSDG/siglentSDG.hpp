@@ -2313,7 +2313,6 @@ INDI_NEWCALLBACK_DEFN(siglentSDG, m_indiP_C1freq)(const pcf::IndiProperty &ipRec
     INDI_VALIDATE_CALLBACK_PROPS(m_indiP_C1freq, ipRecv);
 
     return changeFreq(1, ipRecv);
-
 }
 
 INDI_NEWCALLBACK_DEFN(siglentSDG, m_indiP_C1amp)(const pcf::IndiProperty &ipRecv)
@@ -2321,123 +2320,97 @@ INDI_NEWCALLBACK_DEFN(siglentSDG, m_indiP_C1amp)(const pcf::IndiProperty &ipRecv
     INDI_VALIDATE_CALLBACK_PROPS(m_indiP_C1amp, ipRecv);
 
     return changeAmp(1, ipRecv);
-   
 }
 
 INDI_NEWCALLBACK_DEFN(siglentSDG, m_indiP_C1ofst)(const pcf::IndiProperty &ipRecv)
 {
-    INDI_VALIDATE_CALLBACK_PROPS(m_indiP_C1amp, ipRecv);
+    INDI_VALIDATE_CALLBACK_PROPS(m_indiP_C1ofst, ipRecv);
 
     return changeOfst(1, ipRecv);
-
 }
 
 INDI_NEWCALLBACK_DEFN(siglentSDG, m_indiP_C1phse)(const pcf::IndiProperty &ipRecv)
 {
-   if (ipRecv.getName() == m_indiP_C1phse.getName())
-   {
-      return changePhse(1, ipRecv);
-   }
-   return -1;
+    INDI_VALIDATE_CALLBACK_PROPS(m_indiP_C1phse, ipRecv);
+
+    return changePhse(1, ipRecv);
 }
 
 INDI_NEWCALLBACK_DEFN(siglentSDG, m_indiP_C1wdth)(const pcf::IndiProperty &ipRecv)
 {
-   if (ipRecv.getName() == m_indiP_C1wdth.getName())
-   {
-      return changeWdth(1, ipRecv);
-   }
-   return -1;
+    INDI_VALIDATE_CALLBACK_PROPS(m_indiP_C1wdth, ipRecv);
+
+    return chageWdth(1, ipRecv);
 }
 
 INDI_NEWCALLBACK_DEFN(siglentSDG, m_indiP_C1wvtp)(const pcf::IndiProperty &ipRecv)
 {
-   if (ipRecv.getName() == m_indiP_C1wvtp.getName())
-   {
-      return changeWvtp(1, ipRecv);
-   }
-   return -1;
+    INDI_VALIDATE_CALLBACK_PROPS(m_indiP_C1wvtp, ipRecv);
+
+    return changeWvtp(1, ipRecv);
 }
 
 INDI_NEWCALLBACK_DEFN(siglentSDG, m_indiP_C1sync)(const pcf::IndiProperty &ipRecv)
 {
-   if (ipRecv.getName() == m_indiP_C1sync.getName())
-   {
-      return changeSync(1, ipRecv);
-   }
-   return -1;
+    INDI_VALIDATE_CALLBACK_PROPS(m_indiP_C1sync, ipRecv);
+
+    return changeSync(1, ipRecv);
 }
 
 INDI_NEWCALLBACK_DEFN(siglentSDG, m_indiP_C2outp)(const pcf::IndiProperty &ipRecv)
 {
-   if (ipRecv.getName() == m_indiP_C2outp.getName())
-   {
-      return changeOutp(2, ipRecv);
-   }
-   return -1;
+    INDI_VALIDATE_CALLBACK_PROPS(m_indiP_C2outp, ipRecv);
+ 
+    return changeOutp(2, ipRecv);
 }
 
 INDI_NEWCALLBACK_DEFN(siglentSDG, m_indiP_C2freq)(const pcf::IndiProperty &ipRecv)
 {
-   if (ipRecv.getName() == m_indiP_C2freq.getName())
-   {
-      return changeFreq(2, ipRecv);
-   }
-   return -1;
+    INDI_VALIDATE_CALLBACK_PROPS(m_indiP_C2freq, ipRecv);
+
+    return changeFreq(2, ipRecv);
 }
 
 INDI_NEWCALLBACK_DEFN(siglentSDG, m_indiP_C2amp)(const pcf::IndiProperty &ipRecv)
 {
-   if (ipRecv.getName() == m_indiP_C2amp.getName())
-   {
-      return changeAmp(2, ipRecv);
-   }
-   return -1;
+    INDI_VALIDATE_CALLBACK_PROPS(m_indiP_C2amp, ipRecv);
+
+    return changeAmp(2, ipRecv);
 }
 
 INDI_NEWCALLBACK_DEFN(siglentSDG, m_indiP_C2ofst)(const pcf::IndiProperty &ipRecv)
 {
-   if (ipRecv.getName() == m_indiP_C2ofst.getName())
-   {
-      return changeOfst(2, ipRecv);
-   }
-   return -1;
+    INDI_VALIDATE_CALLBACK_PROPS(m_indiP_C2ofst, ipRecv);
+   
+    return changeOfst(2, ipRecv);
 }
 
 INDI_NEWCALLBACK_DEFN(siglentSDG, m_indiP_C2phse)(const pcf::IndiProperty &ipRecv)
 {
-   if (ipRecv.getName() == m_indiP_C2phse.getName())
-   {
-      return changePhse(2, ipRecv);
-   }
-   return -1;
+    INDI_VALIDATE_CALLBACK_PROPS(m_indiP_C2phse, ipRecv);
+  
+    return changePhse(2, ipRecv);
 }
 
 INDI_NEWCALLBACK_DEFN(siglentSDG, m_indiP_C2wdth)(const pcf::IndiProperty &ipRecv)
 {
-   if (ipRecv.getName() == m_indiP_C2wdth.getName())
-   {
-      return changeWdth(1, ipRecv);
-   }
-   return -1;
+    INDI_VALIDATE_CALLBACK_PROPS(m_indiP_C2wdth, ipRecv);
+
+    return changeWdth(2, ipRecv);
 }
 
 INDI_NEWCALLBACK_DEFN(siglentSDG, m_indiP_C2wvtp)(const pcf::IndiProperty &ipRecv)
 {
-   if (ipRecv.getName() == m_indiP_C2wvtp.getName())
-   {
-      return changeWvtp(2, ipRecv);
-   }
-   return -1;
+    INDI_VALIDATE_CALLBACK_PROPS(m_indiP_C2wvtp, ipRecv);
+
+    return changeWvtp(2, ipRecv);
 }
 
 INDI_NEWCALLBACK_DEFN(siglentSDG, m_indiP_C2sync)(const pcf::IndiProperty &ipRecv)
 {
-   if (ipRecv.getName() == m_indiP_C2sync.getName())
-   {
-      return changeSync(2, ipRecv);
-   }
-   return -1;
+    INDI_VALIDATE_CALLBACK_PROPS(m_indiP_C2sync, ipRecv);
+
+    return changeSync(2, ipRecv);
 }
 
 // todo: add change width INDI
