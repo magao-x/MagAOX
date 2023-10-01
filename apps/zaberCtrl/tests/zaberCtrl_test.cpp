@@ -25,27 +25,36 @@ public:
     {
         m_configName = device;
 
-        XWCTEST_SETUP_INDI_PROP(pos)
-        XWCTEST_SETUP_INDI_PROP(rawPos)
-        XWCTEST_SETUP_INDI_PROP(preset)
-        XWCTEST_SETUP_INDI_PROP(presetName)
-        XWCTEST_SETUP_INDI_PROP(home)
-        XWCTEST_SETUP_INDI_PROP(stop)
+        XWCTEST_SETUP_INDI_NEW_PROP(pos);
+        XWCTEST_SETUP_INDI_NEW_PROP(rawPos);
+        XWCTEST_SETUP_INDI_NEW_PROP(preset);
+        XWCTEST_SETUP_INDI_NEW_PROP(presetName);
+        XWCTEST_SETUP_INDI_NEW_PROP(home);
+        XWCTEST_SETUP_INDI_NEW_PROP(stop);
+
+        XWCTEST_SETUP_INDI_ARB_PROP(m_indiP_stageState, stest, curr_state);
+        XWCTEST_SETUP_INDI_ARB_PROP(m_indiP_stageMaxRawPos, stest, max_pos);
+        XWCTEST_SETUP_INDI_ARB_PROP(m_indiP_stageRawPos, stest, curr_pos);
+        XWCTEST_SETUP_INDI_ARB_PROP(m_indiP_stageTgtPos, stest, tgt_pos);
+        XWCTEST_SETUP_INDI_ARB_PROP(m_indiP_stageTemp, stest, temp);
     }
 };
-
-//#define QUOTE(s) #s
 
 
 SCENARIO( "INDI Callbacks", "[zaberCtrl]" )
 {
-    XWCTEST_INDI_CALLBACK( zaberCtrl, pos);
-    XWCTEST_INDI_CALLBACK( zaberCtrl, rawPos);
-    XWCTEST_INDI_CALLBACK( zaberCtrl, preset);
-    XWCTEST_INDI_CALLBACK( zaberCtrl, presetName);
-    XWCTEST_INDI_CALLBACK( zaberCtrl, home);
-    XWCTEST_INDI_CALLBACK( zaberCtrl, stop);
+    XWCTEST_INDI_NEW_CALLBACK( zaberCtrl, pos);
+    XWCTEST_INDI_NEW_CALLBACK( zaberCtrl, rawPos);
+    XWCTEST_INDI_NEW_CALLBACK( zaberCtrl, preset);
+    XWCTEST_INDI_NEW_CALLBACK( zaberCtrl, presetName);
+    XWCTEST_INDI_NEW_CALLBACK( zaberCtrl, home);
+    XWCTEST_INDI_NEW_CALLBACK( zaberCtrl, stop);
 
+    XWCTEST_INDI_SET_CALLBACK( zaberCtrl, m_indiP_stageState, stest, curr_state);
+    XWCTEST_INDI_SET_CALLBACK( zaberCtrl, m_indiP_stageMaxRawPos, stest, max_pos);
+    XWCTEST_INDI_SET_CALLBACK( zaberCtrl, m_indiP_stageRawPos, stest, curr_pos);
+    XWCTEST_INDI_SET_CALLBACK( zaberCtrl, m_indiP_stageTgtPos, stest, tgt_pos);
+    XWCTEST_INDI_SET_CALLBACK( zaberCtrl, m_indiP_stageTemp, stest, temp);
 
 }
 

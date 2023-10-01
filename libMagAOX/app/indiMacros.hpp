@@ -140,7 +140,7 @@
   * 
   * Does nothing on a match.
   * 
-  * If the test macro  XWCTEST_INDI_CALLBACK_VALIDATION is defined this will cause return 0 on a match.
+  * If the test macro XWCTEST_INDI_CALLBACK_VALIDATION is defined this will cause return 0 on a match.
   */
 #define INDI_VALIDATE_CALLBACK_PROPS(prop1, prop2)  INDI_VALIDATE_CALLBACK_PROPS_IMPL( prop1, /**< [in] the first property to compare */\
                                                                                        prop2  /**< [in] the second property to compare */)  
@@ -171,7 +171,7 @@
   * 
   * Does nothing on a match.
   * 
-  * If the test macro  XWCTEST_INDI_CALLBACK_VALIDATION is defined this will cause return 0 on a match.
+  * If the test macro XWCTEST_INDI_CALLBACK_VALIDATION is defined this will cause return 0 on a match.
   */
 #define INDI_VALIDATE_CALLBACK_PROPS_DERIVED(prop1, prop2)  INDI_VALIDATE_CALLBACK_PROPS_DERIVED_IMPL( prop1, /**< [in] the first property to compare */\
                                                                                        prop2  /**< [in] the second property to compare */)  

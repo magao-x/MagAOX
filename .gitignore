@@ -170,6 +170,8 @@ utils/doc
 tests/singleTest
 tests/testMagAOX
 tests/testMagAOXsetuid
+tests/test_stderr.txt
+
 
 #Devel stuff in flatlogs
 flatlogs/src/flatlogcodes

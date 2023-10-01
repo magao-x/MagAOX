@@ -30,12 +30,11 @@ public:
     {
         m_configName = device;
 
-        XWCTEST_SETUP_INDI_PROP(tgt_pos)
-        XWCTEST_SETUP_INDI_PROP(tgt_relpos)
-        XWCTEST_SETUP_INDI_PROP(req_home)
-        XWCTEST_SETUP_INDI_PROP(req_halt)
-        XWCTEST_SETUP_INDI_PROP(req_ehalt)
-
+        XWCTEST_SETUP_INDI_NEW_PROP(tgt_pos);
+        XWCTEST_SETUP_INDI_NEW_PROP(tgt_relpos);
+        XWCTEST_SETUP_INDI_NEW_PROP(req_home);
+        XWCTEST_SETUP_INDI_NEW_PROP(req_halt);
+        XWCTEST_SETUP_INDI_NEW_PROP(req_ehalt);
     }
 };
 
@@ -44,15 +43,11 @@ public:
 
 SCENARIO( "INDI Callbacks", "[zaberLowLevel]" )
 {
-    XWCTEST_INDI_CALLBACK( zaberLowLevel, tgt_pos);
-    XWCTEST_INDI_CALLBACK( zaberLowLevel, tgt_relpos);
-    XWCTEST_INDI_CALLBACK( zaberLowLevel, req_home);
-    XWCTEST_INDI_CALLBACK( zaberLowLevel, req_halt);
-    XWCTEST_INDI_CALLBACK( zaberLowLevel, req_ehalt);
-
-
-
-
+    XWCTEST_INDI_NEW_CALLBACK( zaberLowLevel, tgt_pos);
+    XWCTEST_INDI_NEW_CALLBACK( zaberLowLevel, tgt_relpos);
+    XWCTEST_INDI_NEW_CALLBACK( zaberLowLevel, req_home);
+    XWCTEST_INDI_NEW_CALLBACK( zaberLowLevel, req_halt);
+    XWCTEST_INDI_NEW_CALLBACK( zaberLowLevel, req_ehalt);
 }
 
 
