@@ -1,7 +1,10 @@
 
 #include "../../../tests/catch2/catch.hpp"
+#include "../../tests/testMacrosINDI.hpp"
 
 #include "../streamWriter.hpp"
+
+using namespace MagAOX::app;
 
 namespace MagAOX
 {

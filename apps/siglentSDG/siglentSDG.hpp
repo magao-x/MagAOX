@@ -2340,7 +2340,7 @@ INDI_NEWCALLBACK_DEFN(siglentSDG, m_indiP_C1wdth)(const pcf::IndiProperty &ipRec
 {
     INDI_VALIDATE_CALLBACK_PROPS(m_indiP_C1wdth, ipRecv);
 
-    return chageWdth(1, ipRecv);
+    return changeWdth(1, ipRecv);
 }
 
 INDI_NEWCALLBACK_DEFN(siglentSDG, m_indiP_C1wvtp)(const pcf::IndiProperty &ipRecv)

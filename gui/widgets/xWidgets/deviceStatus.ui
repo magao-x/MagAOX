@@ -1,0 +1,58 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<ui version="4.0">
+ <class>Form</class>
+ <widget class="QWidget" name="Form">
+  <property name="geometry">
+   <rect>
+    <x>0</x>
+    <y>0</y>
+    <width>250</width>
+    <height>82</height>
+   </rect>
+  </property>
+  <property name="windowTitle">
+   <string>Form</string>
+  </property>
+  <layout class="QFormLayout" name="formLayout">
+   <item row="0" column="0" colspan="2">
+    <layout class="QVBoxLayout" name="verticalLayout">
+     <item>
+      <widget class="QLabel" name="label">
+       <property name="text">
+        <string>Device</string>
+       </property>
+      </widget>
+     </item>
+     <item>
+      <widget class="xqt::fsmDisplay" name="label_2">
+       <property name="text">
+        <string>FSM</string>
+       </property>
+      </widget>
+     </item>
+     <item>
+      <widget class="xqt::statusDisplay" name="label_3">
+       <property name="text">
+        <string>status</string>
+       </property>
+      </widget>
+     </item>
+    </layout>
+   </item>
+  </layout>
+ </widget>
+ <customwidgets>
+  <customwidget>
+   <class>xqt::statusDisplay</class>
+   <extends>QLabel</extends>
+   <header>../xWidgets/statusDisplay.hpp</header>
+  </customwidget>
+  <customwidget>
+   <class>xqt::fsmDisplay</class>
+   <extends>QLabel</extends>
+   <header>../xWidgets/fsmDisplay.hpp</header>
+  </customwidget>
+ </customwidgets>
+ <resources/>
+ <connections/>
+</ui>

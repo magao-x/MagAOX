@@ -17,7 +17,10 @@
 
 #include <mx/sys/timeUtils.hpp>
 
-#include "../../libMagAOX/app/MagAOXApp.hpp"
+#include "../../libMagAOX/libMagAOX.hpp" //Note this is included on command line to trigger pch
+#include "../../magaox_git_version.h"
+
+//#include "../../libMagAOX/app/MagAOXApp.hpp"
 
 #include "../../magaox_git_version.h"
 
