@@ -27,6 +27,8 @@ public:
 
         XWCTEST_SETUP_INDI_NEW_PROP(pos);
         XWCTEST_SETUP_INDI_NEW_PROP(rawPos);
+
+        //stdMotionStage:
         XWCTEST_SETUP_INDI_NEW_PROP(preset);
         XWCTEST_SETUP_INDI_NEW_PROP(presetName);
         XWCTEST_SETUP_INDI_NEW_PROP(home);

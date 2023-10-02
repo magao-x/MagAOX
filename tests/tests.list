@@ -3,10 +3,13 @@
 ../libMagAOX/sys/tests/thSetuid_test
 ../libMagAOX/tty/tests/ttyIOUtils_test 
 ../apps/ocam2KCtrl/tests/ocamUtils_test 
+../apps/adcTracker/tests/adcTracker_test
 ../apps/rhusbMon/tests/rhusbMonParsers_test
 ../apps/siglentSDG/tests/siglentSDG_test
 ../apps/sshDigger/tests/sshDigger_test
-../apps/streamWriter/tests/streamWriter_test 
+../apps/smc100ccCtrl/tests/smc100ccCtrl_test
+../apps/streamWriter/tests/streamWriter_test
+../apps/tcsInterface/tests/tcsInterface_test 
 ../apps/xindiserver/tests/xindiserver_test
 ../apps/xt1121Ctrl/tests/xtChannels_test
 ../apps/zaberLowLevel/tests/zaberStage_test
