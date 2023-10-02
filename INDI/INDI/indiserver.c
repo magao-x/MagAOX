@@ -497,14 +497,24 @@ static int findClDevice(ClInfo *cp, const char *dev, const char *name)
 {
     int i;
 
+#define DP(A) if (verbose>2) { A; }
+DP(fprintf(stderr,"In findClDevice[dev='%s'; name='%s']...",dev,name?name:"<null>"))
     if (cp->allprops >= 1 || !dev[0])
+{
+DP(fprintf(stderr,"return 0[cp->allprops=%d >= 1\n", (int)cp->allprops))
         return (0);
+}
     for (i = 0; i < cp->nprops; i++)
     {
         Property *pp = &cp->props[i];
-        if (!strcmp(pp->dev, dev) && (!pp->name[0] || !strcmp(pp->name, name)))
+DP(fprintf(stderr,"{pp->dev=[%s];pp->name=[%s]}", pp->dev, pp->name));
+        if (!strcmp(pp->dev, dev) && (!pp->name[0] || !name || !strcmp(pp->name, name)))
+{
+DP(fprintf(stderr,"return 0[pp->dev='%s'; pp->name='%s']\n", pp->dev, pp->name))
             return (0);
+}
     }
+DP(fprintf(stderr,"return -1\n"))
     return (-1);
 }
 
