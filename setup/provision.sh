@@ -287,7 +287,7 @@ if [[ $MAGAOX_ROLE != ci ]]; then
     bash -l "$DIR/steps/install_MagAOX.sh" || exit 1
 fi
 
-if [[ $MAGAOX_ROLE != ci && $MAGAOX_ROLE != container ]]; then
+if [[ $MAGAOX_ROLE != ci && $MAGAOX_ROLE != container && $MAGAOX_ROLE != vm ]]; then
     sudo bash -l "$DIR/steps/configure_startup_services.sh"
 
     log_info "Generating subuid and subgid files, may need to run podman system migrate"
@@ -303,7 +303,7 @@ if [[ $MAGAOX_ROLE != ci && $MAGAOX_ROLE != container ]]; then
 fi
 
 log_success "Provisioning complete"
-if [[ $MAGAOX_ROLE != vm && $MAGAOX_ROLE != ci && $MAGAOX_ROLE != container ]]; then
+if [[ $MAGAOX_ROLE != ci && $MAGAOX_ROLE != container ]]; then
     log_info "You'll probably want to run"
     log_info "    source /etc/profile.d/*.sh"
     log_info "to get all the new environment variables set."
