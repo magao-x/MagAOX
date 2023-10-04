@@ -384,12 +384,8 @@ void observerCtrl::stopObserving()
 INDI_NEWCALLBACK_DEFN(observerCtrl, m_indiP_observers)(const pcf::IndiProperty &ipRecv)
 {
 
-   if (ipRecv.getName() != m_indiP_observers.getName())
-   {
-      log<software_error>({__FILE__, __LINE__, "invalid indi property received"});
-      return -1;
-   }
-   
+   INDI_VALIDATE_CALLBACK_PROPS(m_indiP_observers, ipRecv);
+
    //look for selected mode switch which matches a known mode.  Make sure only one is selected.
    std::string newEmail = "";
    for(auto it=m_observers.begin(); it != m_observers.end(); ++it) 
@@ -431,6 +427,8 @@ INDI_NEWCALLBACK_DEFN(observerCtrl, m_indiP_observers)(const pcf::IndiProperty &
 
 INDI_NEWCALLBACK_DEFN(observerCtrl, m_indiP_obsName)(const pcf::IndiProperty &ipRecv)
 {
+   INDI_VALIDATE_CALLBACK_PROPS(m_indiP_obsName, ipRecv);
+
    std::string target;
 
    std::unique_lock<std::mutex> lock(m_indiMutex);
@@ -448,11 +446,7 @@ INDI_NEWCALLBACK_DEFN(observerCtrl, m_indiP_obsName)(const pcf::IndiProperty &ip
 
 INDI_NEWCALLBACK_DEFN(observerCtrl, m_indiP_observing)(const pcf::IndiProperty &ipRecv)
 {
-   if (ipRecv.getName() != m_indiP_observing.getName())
-   {
-      log<software_error>({__FILE__, __LINE__, "invalid indi property received"});
-      return -1;
-   }
+   INDI_VALIDATE_CALLBACK_PROPS(m_indiP_observing, ipRecv);
    
    if(!ipRecv.find("toggle")) return 0;
    
@@ -475,12 +469,8 @@ INDI_NEWCALLBACK_DEFN(observerCtrl, m_indiP_observing)(const pcf::IndiProperty &
 
 INDI_NEWCALLBACK_DEFN(observerCtrl, m_indiP_sws)(const pcf::IndiProperty &ipRecv)
 {
-   if (ipRecv.getName() != m_indiP_sws.getName())
-   {
-      log<software_error>({__FILE__, __LINE__, "invalid indi property received"});
-      return -1;
-   }
-   
+   INDI_VALIDATE_CALLBACK_PROPS(m_indiP_sws, ipRecv);
+      
    if(m_observing == true)
    {
       log<text_log>({"Can't change stream writers while observing"}, logPrio::LOG_WARNING);
