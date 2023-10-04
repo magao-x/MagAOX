@@ -4,7 +4,8 @@ source $DIR/../_common.sh
 set -euo pipefail
 apt-get update
 
-apt install -y \
+apt-get install -y \
+    sudo \
     ssh \
     build-essential \
     gfortran \
@@ -48,12 +49,10 @@ apt install -y \
     nfs-kernel-server \
     tree \
     linux-headers-generic \
+    liblapack-dev \
+    liblapacke-dev \
 ;
 
 if [[ $MAGAOX_ROLE == vm ]]; then
     apt install -y xauth
-fi
-if [[ $(uname -p) == "aarch64" ]]; then
-    # since we won't install MKL:
-    apt install -y libopenblas-openmp-dev liblapack-dev liblapacke-dev
 fi

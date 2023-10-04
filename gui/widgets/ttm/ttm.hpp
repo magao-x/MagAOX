@@ -512,13 +512,26 @@ void ttm::on_button_home_pressed()
 
 void ttm::on_button_zero_pressed()
 {
-   sendNewPos1(0.0);
-   sendNewPos2(0.0);
-   sendNewPos3(0.0);
+   pcf::IndiProperty ipFreq(pcf::IndiProperty::Switch);
+   
+    ipFreq.setDevice(m_procName);
+    ipFreq.setName("flat_set");
+    ipFreq.add(pcf::IndiElement("toggle"));
+    ipFreq["toggle"] = pcf::IndiElement::Off;
+    
+    sendNewProperty(ipFreq);
 }
 
 void ttm::on_button_flat_pressed()
 {
+    pcf::IndiProperty ipFreq(pcf::IndiProperty::Switch);
+   
+    ipFreq.setDevice(m_procName);
+    ipFreq.setName("flat_set");
+    ipFreq.add(pcf::IndiElement("toggle"));
+    ipFreq["toggle"] = pcf::IndiElement::On;
+    
+    sendNewProperty(ipFreq);
 }
 
 void ttm::on_button_release_pressed()

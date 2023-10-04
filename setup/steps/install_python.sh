@@ -38,5 +38,6 @@ channels:
   - defaults
 changeps1: false
 channel_priority: flexible
+disallowed_packages: [ qt ]
 EOF
 fi
