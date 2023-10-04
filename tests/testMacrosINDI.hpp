@@ -118,4 +118,49 @@
             REQUIRE(rv == 0);                                                                    \
         }                                                                                        \
    }
+
+
+/// Catch-2 tests for whether an arbitrary callback properly validates the input property properly.
+/**
+  * \param testclass [in] the class being tested
+  * \param callback  [in] the name of the callback
+  * \param device    [in] the device source of the property
+  * \param propname  [in] the in-INDI name of the property
+  * 
+  * \ingroup test_indi
+  */  
+#define XWCTEST_INDI_ARBNEW_CALLBACK( testclass,                                                 \
+                                   callback,                                                      \
+                                   propname                                                      \
+                                 )                                                               \
+   GIVEN("A Callback for " # propname  )                                                         \
+   {                                                                                             \
+        WHEN("Wrong Device")                                                                     \
+        {                                                                                        \
+            testclass ## _test sdgt("right");                                                    \
+            pcf::IndiProperty ip;                                                                \
+            ip.setDevice("wrong");                                                               \
+            ip.setName( #propname );                                                             \
+            int rv = sdgt. callback (ip);                                                        \
+            REQUIRE(rv == -1);                                                                   \
+        }                                                                                        \
+        WHEN("Wrong name")                                                                       \
+        {                                                                                        \
+            testclass ## _test sdgt("right");                                                    \
+            pcf::IndiProperty ip;                                                                \
+            ip.setDevice("right");                                                               \
+            ip.setName("wrong" #propname );                                                     \
+            int rv = sdgt. callback (ip);                                                        \
+            REQUIRE(rv == -1);                                                                   \
+        }                                                                                        \
+        WHEN("Right Device.Name")                                                                \
+        {                                                                                        \
+            testclass ## _test sdgt("right");                                                    \
+            pcf::IndiProperty ip;                                                                \
+            ip.setDevice("right");                                                               \
+            ip.setName( #propname );                                                             \
+            int rv = sdgt. callback (ip);                  \
+            REQUIRE(rv == 0);                                                                    \
+        }                                                                                        \
+   }
 #endif

@@ -252,6 +252,8 @@ protected:
    pcf::IndiProperty m_indiP_singleGain;
    pcf::IndiProperty m_indiP_singleMC;
 
+public:
+
    INDI_NEWCALLBACK_DECL(userGainCtrl, m_indiP_zeroAll);
 
    INDI_NEWCALLBACK_DECL(userGainCtrl, m_indiP_singleModeNo);
@@ -1353,7 +1355,7 @@ INDI_NEWCALLBACK_DEFN(userGainCtrl, m_indiP_singleModeNo)(const pcf::IndiPropert
 
 INDI_NEWCALLBACK_DEFN(userGainCtrl, m_indiP_singleGain)(const pcf::IndiProperty &ipRecv)
 {
-    INDI_VALIDATE_CALLBACK_PROPS(m_indiP_singleGain, ipRecv);
+   INDI_VALIDATE_CALLBACK_PROPS(m_indiP_singleGain, ipRecv);
 
    float target;
    
@@ -1370,7 +1372,7 @@ INDI_NEWCALLBACK_DEFN(userGainCtrl, m_indiP_singleGain)(const pcf::IndiProperty 
 
 INDI_NEWCALLBACK_DEFN(userGainCtrl, m_indiP_singleMC)(const pcf::IndiProperty &ipRecv)
 {
-    INDI_VALIDATE_CALLBACK_PROPS(m_indiP_singleMC, ipRecv);
+   INDI_VALIDATE_CALLBACK_PROPS(m_indiP_singleMC, ipRecv);
 
    float target;
    
@@ -1396,8 +1398,45 @@ int userGainCtrl::st_newCallBack_blockGains( void * app,
 
 int userGainCtrl::newCallBack_blockGains( const pcf::IndiProperty &ipRecv )
 {
-    ///\todo need to check that name has basics like BLOCK_ at beginning
-   if(ipRecv.getName().size() < 8) return -1;
+   if(ipRecv.getDevice() != m_configName)
+   {
+      #ifndef XWCTEST_INDI_CALLBACK_VALIDATION
+      log<software_error>({__FILE__, __LINE__, "wrong INDI device"});
+      #endif
+
+      return -1;
+   }
+
+   if(ipRecv.getName().find("BLOCK") != 0)
+   {
+      #ifndef XWCTEST_INDI_CALLBACK_VALIDATION
+      log<software_error>({__FILE__, __LINE__, "wrong INDI property"});
+      #endif
+
+      return -1;
+   }
+
+   if(ipRecv.getName().find("_gain") != 7)
+   {
+      #ifndef XWCTEST_INDI_CALLBACK_VALIDATION
+      log<software_error>({__FILE__, __LINE__, "wrong INDI property"});
+      #endif
+
+      return -1;
+   }
+
+   if(ipRecv.getName().size() != 12)
+   {
+      #ifndef XWCTEST_INDI_CALLBACK_VALIDATION
+      log<software_error>({__FILE__, __LINE__, "wrong INDI property"});
+      #endif
+
+      return -1;
+   }
+
+   #ifdef XWCTEST_INDI_CALLBACK_VALIDATION
+   return 0;
+   #endif
 
    int n = std::stoi(ipRecv.getName().substr(5,2));
 
@@ -1437,8 +1476,45 @@ int userGainCtrl::st_newCallBack_blockMCs( void * app,
 
 int userGainCtrl::newCallBack_blockMCs( const pcf::IndiProperty &ipRecv )
 {
-    ///\todo need to check that name has basics like BLOCK_ at beginning
-   if(ipRecv.getName().size() < 8) return -1;
+   if(ipRecv.getDevice() != m_configName)
+   {
+      #ifndef XWCTEST_INDI_CALLBACK_VALIDATION
+      log<software_error>({__FILE__, __LINE__, "wrong INDI device"});
+      #endif
+
+      return -1;
+   }
+
+   if(ipRecv.getName().find("BLOCK") != 0)
+   {
+      #ifndef XWCTEST_INDI_CALLBACK_VALIDATION
+      log<software_error>({__FILE__, __LINE__, "wrong INDI property"});
+      #endif
+
+      return -1;
+   }
+
+   if(ipRecv.getName().find("_multcoeff") != 7)
+   {
+      #ifndef XWCTEST_INDI_CALLBACK_VALIDATION
+      log<software_error>({__FILE__, __LINE__, "wrong INDI property"});
+      #endif
+
+      return -1;
+   }
+
+   if(ipRecv.getName().size() != 17)
+   {
+      #ifndef XWCTEST_INDI_CALLBACK_VALIDATION
+      log<software_error>({__FILE__, __LINE__, "wrong INDI property"});
+      #endif
+
+      return -1;
+   }
+
+   #ifdef XWCTEST_INDI_CALLBACK_VALIDATION
+   return 0;
+   #endif
 
    int n = std::stoi(ipRecv.getName().substr(5,2));
 
@@ -1478,8 +1554,46 @@ int userGainCtrl::st_newCallBack_blockLimits( void * app,
 
 int userGainCtrl::newCallBack_blockLimits( const pcf::IndiProperty &ipRecv )
 {
-    ///\todo need to check that name has basics like BLOCK_ at beginning
-   if(ipRecv.getName().size() < 8) return -1;
+   if(ipRecv.getDevice() != m_configName)
+   {
+      #ifndef XWCTEST_INDI_CALLBACK_VALIDATION
+      log<software_error>({__FILE__, __LINE__, "wrong INDI device"});
+      #endif
+
+      return -1;
+   }
+
+   if(ipRecv.getName().find("BLOCK") != 0)
+   {
+      #ifndef XWCTEST_INDI_CALLBACK_VALIDATION
+      log<software_error>({__FILE__, __LINE__, "wrong INDI property"});
+      #endif
+
+      return -1;
+   }
+
+   if(ipRecv.getName().find("_limit") != 7)
+   {
+      #ifndef XWCTEST_INDI_CALLBACK_VALIDATION
+      log<software_error>({__FILE__, __LINE__, "wrong INDI property"});
+      #endif
+
+      return -1;
+   }
+
+    if(ipRecv.getName().size() != 13)
+   {
+      #ifndef XWCTEST_INDI_CALLBACK_VALIDATION
+      log<software_error>({__FILE__, __LINE__, "wrong INDI property"});
+      #endif
+
+      return -1;
+   }
+
+   #ifdef XWCTEST_INDI_CALLBACK_VALIDATION
+   return 0;
+   #endif
+
 
    int n = std::stoi(ipRecv.getName().substr(5,2));
 

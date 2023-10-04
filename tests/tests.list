@@ -11,6 +11,7 @@
 ../apps/smc100ccCtrl/tests/smc100ccCtrl_test
 ../apps/streamWriter/tests/streamWriter_test
 ../apps/tcsInterface/tests/tcsInterface_test 
+../apps/userGainCtrl/tests/userGainCtrl_test
 ../apps/xindiserver/tests/xindiserver_test
 ../apps/xt1121Ctrl/tests/xtChannels_test
 ../apps/zaberLowLevel/tests/zaberStage_test
