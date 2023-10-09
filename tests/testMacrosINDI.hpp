@@ -25,11 +25,15 @@
 
 #define XWCTEST_SETUP_INDI_NEW_PROP( propname )                        \
    XWCTEST_MAKE_INDI_PROP(m_indiP_, propname).setDevice(m_configName); \
-   XWCTEST_MAKE_INDI_PROP(m_indiP_, propname).setName(#propname);      \
+   XWCTEST_MAKE_INDI_PROP(m_indiP_, propname).setName(#propname);
 
-#define XWCTEST_SETUP_INDI_ARB_PROP( varname, device, propname )                \
-   varname.setDevice(#device);      \
-   varname.setName(#propname);      \
+#define XWCTEST_SETUP_INDI_ARB_NEW_PROP(varname, propname)   \
+    varname.setDevice(m_configName);                         \
+    varname.setName(#propname);
+
+#define XWCTEST_SETUP_INDI_ARB_PROP( varname, device, propname ) \
+   varname.setDevice(#device);                                   \
+   varname.setName(#propname);      
 
 #define XWCTEST_MAKE_INDI_CALLBACK( stub, callback) stub ## callback 
 

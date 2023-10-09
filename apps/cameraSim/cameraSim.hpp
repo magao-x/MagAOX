@@ -52,15 +52,15 @@ public:
    /** \name app::dev Configurations
      *@{
      */
-   static constexpr bool c_stdCamera_tempControl = false; ///< app::dev config to tell stdCamera to not expose temperature controls
+   static constexpr bool c_stdCamera_tempControl = true; ///< app::dev config to tell stdCamera to not expose temperature controls
    
-   static constexpr bool c_stdCamera_temp = false; ///< app::dev config to tell stdCamera to expose temperature
+   static constexpr bool c_stdCamera_temp = true; ///< app::dev config to tell stdCamera to expose temperature
    
-   static constexpr bool c_stdCamera_readoutSpeed = false; ///< app::dev config to tell stdCamera not to  expose readout speed controls
+   static constexpr bool c_stdCamera_readoutSpeed = true; ///< app::dev config to tell stdCamera not to  expose readout speed controls
    
-   static constexpr bool c_stdCamera_vShiftSpeed = false; ///< app:dev config to tell stdCamera not to expose vertical shift speed control
+   static constexpr bool c_stdCamera_vShiftSpeed = true; ///< app:dev config to tell stdCamera not to expose vertical shift speed control
 
-   static constexpr bool c_stdCamera_emGain = false; ///< app::dev config to tell stdCamera to not expose EM gain controls 
+   static constexpr bool c_stdCamera_emGain = true; ///< app::dev config to tell stdCamera to not expose EM gain controls 
    
    static constexpr bool c_stdCamera_exptimeCtrl = true; ///< app::dev config to tell stdCamera to expose exposure time controls
    
@@ -68,17 +68,17 @@ public:
    
    static constexpr bool c_stdCamera_fps = true; ///< app::dev config to tell stdCamera not to expose FPS status (ignored since fpsCtrl=true)
    
-   static constexpr bool c_stdCamera_synchro = false; ///< app::dev config to tell stdCamera to not expose synchro mode controls
+   static constexpr bool c_stdCamera_synchro = true; ///< app::dev config to tell stdCamera to not expose synchro mode controls
    
    static constexpr bool c_stdCamera_usesModes = false; ///< app:dev config to tell stdCamera not to expose mode controls
    
    static constexpr bool c_stdCamera_usesROI = true; ///< app:dev config to tell stdCamera to expose ROI controls
 
-   static constexpr bool c_stdCamera_cropMode = false; ///< app:dev config to tell stdCamera not to expose Crop Mode controls
+   static constexpr bool c_stdCamera_cropMode = true; ///< app:dev config to tell stdCamera not to expose Crop Mode controls
    
-   static constexpr bool c_stdCamera_hasShutter = false; ///< app:dev config to tell stdCamera to expose shutter controls
+   static constexpr bool c_stdCamera_hasShutter = true; ///< app:dev config to tell stdCamera to expose shutter controls
 
-   static constexpr bool c_stdCamera_usesStateString = false; ///< app::dev confg to tell stdCamera to expose the state string property
+   static constexpr bool c_stdCamera_usesStateString = true; ///< app::dev confg to tell stdCamera to expose the state string property
    
    static constexpr bool c_frameGrabber_flippable = true; ///< app:dev config to tell framegrabber that this camera can be flipped
    
@@ -132,6 +132,8 @@ protected:
      * @{
      */
    
+   
+
    /// Set defaults for a power on state.
    /** 
      * \returns 0 on success
@@ -139,12 +141,14 @@ protected:
      */ 
    int powerOnDefaults();
    
-   /// Set the framerate.
-   /** 
-     * \returns 0 always
-     */ 
-   int setFPS();
+   int setTempControl();
    
+   int setTempSetPt();
+
+   int setReadoutSpeed();
+
+   int setVShiftSpeed();
+
    /// Set the Exposure Time. [stdCamera interface]
    /** Sets the frame rate to m_expTimeSet.
      * 
@@ -152,6 +156,16 @@ protected:
      * \returns -1 on error
      */
    int setExpTime();
+
+   /// Set the framerate.
+   /** 
+     * \returns 0 always
+     */ 
+   int setFPS();
+   
+   int setSynchro();
+
+   int setEMGain();
    
    /// Check the next ROI
    /** Checks if the target values are valid and adjusts them to the closest valid values if needed.
@@ -160,12 +174,20 @@ protected:
      */
    int checkNextROI();
 
+   int setCropMode();
+
    /// Set the next ROI
    /**
      * \returns 0 always
      */
    int setNextROI();
       
+   int setShutter(int ss);
+
+   std::string stateString();
+   
+   bool stateStringValid();
+
    ///@}
    
    /** \name Telemeter Interface
@@ -186,6 +208,27 @@ cameraSim::cameraSim() : MagAOXApp(MAGAOX_CURRENT_SHA1, MAGAOX_REPO_MODIFIED)
 {
    m_powerMgtEnabled = false;
    
+   m_defaultReadoutSpeed = "1";
+   m_defaultVShiftSpeed = "1";
+
+
+   m_default_x = 511.5; 
+   m_default_y = 511.5; 
+   m_default_w = 1024;  
+   m_default_h = 1024;  
+      
+   m_nextROI.x = m_default_x;
+   m_nextROI.y = m_default_y;
+   m_nextROI.w = m_default_w;
+   m_nextROI.h = m_default_h;
+   m_nextROI.bin_x = 1;
+   m_nextROI.bin_y = 1;
+   
+   m_full_x = 511.5; 
+   m_full_y = 511.5; 
+   m_full_w = 1024; 
+   m_full_h = 1024; 
+
    return;
 }
 
@@ -223,7 +266,23 @@ int cameraSim::appStartup()
    
    //=================================
    // Do camera configuration here
-   
+
+   m_ccdTemp = -40;
+   m_ccdTempSetpt = -40;
+
+   m_readoutSpeedNames = {"one", "two", "three"};
+   m_readoutSpeedNameLabels = {"One", "Two", "Three"};
+   m_readoutSpeedName = m_readoutSpeedNames[0];
+
+   m_vShiftSpeedNames = {"0.1", "0.2", "0.3"};
+   m_vShiftSpeedNameLabels = {"0.1 Hz", "0.2 kHz", "0.4 MhZ"};
+   m_vShiftSpeedName = m_vShiftSpeedNames[0];
+
+
+   m_shutterStatus = "READY";
+   m_shutterState = 0;
+
+
    if(dev::stdCamera<cameraSim>::appStartup() < 0)
    {
       return log<software_critical,-1>({__FILE__,__LINE__});
@@ -435,6 +494,50 @@ int cameraSim::powerOnDefaults()
 }
 
 inline
+int cameraSim::setTempControl()
+{
+    m_tempControlStatus = m_tempControlStatusSet;
+    return 0;
+}
+
+inline   
+int cameraSim::setTempSetPt()
+{
+    m_ccdTemp = m_ccdTempSetpt;
+    return 0;
+}
+
+inline
+int cameraSim::setReadoutSpeed()
+{
+    m_readoutSpeedName = m_readoutSpeedNameSet;
+    return 0;
+}
+
+inline
+int cameraSim::setVShiftSpeed()
+{
+    m_vShiftSpeedName = m_vShiftSpeedNameSet;
+    return 0;
+}
+
+inline
+int cameraSim::setExpTime()
+{
+
+   m_expTime = m_expTimeSet;
+   m_fps = 1./m_fps;
+   m_fpsSet = m_fps;
+
+   
+   log<text_log>( "Set exposure time: " + std::to_string(m_expTimeSet) + " sec");
+   
+   m_reconfig = true;
+
+   return 0;
+}
+
+inline
 int cameraSim::setFPS()
 {
    recordCamera(true);
@@ -452,19 +555,17 @@ int cameraSim::setFPS()
 }
 
 inline
-int cameraSim::setExpTime()
+int cameraSim::setSynchro()
 {
-
-   m_expTime = m_expTimeSet;
-   m_fps = 1./m_fps;
-   m_fpsSet = m_fps;
-
-   
-   log<text_log>( "Set exposure time: " + std::to_string(m_expTimeSet) + " sec");
-   
-   m_reconfig = true;
-
+   m_synchro = m_synchroSet;
    return 0;
+}
+
+inline
+int cameraSim::setEMGain()
+{
+    m_emGain = m_emGainSet;
+    return 0;
 }
 
 inline
@@ -491,6 +592,33 @@ int cameraSim::setNextROI()
    updateSwitchIfChanged(m_indiP_roi_last, "request", pcf::IndiElement::Off, INDI_IDLE);
    updateSwitchIfChanged(m_indiP_roi_default, "request", pcf::IndiElement::Off, INDI_IDLE);
    return 0;
+}
+
+inline
+int cameraSim::setCropMode()
+{
+    m_cropMode = m_cropModeSet;
+    return 0;
+}
+
+inline
+int cameraSim::setShutter(int ss)
+{
+    m_shutterState=ss;
+
+    return 0;
+}
+
+inline
+std::string cameraSim::stateString()
+{
+    return "stateString";
+}
+
+inline
+bool cameraSim::stateStringValid()
+{
+    return true;
 }
 
 inline
