@@ -101,17 +101,17 @@ public:
 
     static constexpr bool c_stdCamera_emGain = false; ///< app::dev config to tell stdCamera to expose EM gain controls 
 
-    static constexpr bool c_stdCamera_exptimeCtrl =false; ///< app::dev config to tell stdCamera to expose exposure time controls
+    static constexpr bool c_stdCamera_exptimeCtrl = true; ///< app::dev config to tell stdCamera to expose exposure time controls
    
-    static constexpr bool c_stdCamera_fpsCtrl = false; ///< app::dev config to tell stdCamera not to expose FPS controls
+    static constexpr bool c_stdCamera_fpsCtrl = true; ///< app::dev config to tell stdCamera not to expose FPS controls
 
-    static constexpr bool c_stdCamera_fps = false; ///< app::dev config to tell stdCamera not to expose FPS status
+    static constexpr bool c_stdCamera_fps = true; ///< app::dev config to tell stdCamera not to expose FPS status
    
     static constexpr bool c_stdCamera_synchro = false; ///< app::dev config to tell stdCamera to not expose synchro mode controls
    
     static constexpr bool c_stdCamera_usesModes = false; ///< app:dev config to tell stdCamera not to expose mode controls
    
-    static constexpr bool c_stdCamera_usesROI = false; ///< app:dev config to tell stdCamera to expose ROI controls
+    static constexpr bool c_stdCamera_usesROI = true; ///< app:dev config to tell stdCamera to expose ROI controls
 
     static constexpr bool c_stdCamera_cropMode = false; ///< app:dev config to tell stdCamera to expose Crop Mode controls
    
@@ -243,9 +243,10 @@ public:
 
 pvcamCtrl::pvcamCtrl() : MagAOXApp(MAGAOX_CURRENT_SHA1, MAGAOX_REPO_MODIFIED)
 {
+    m_powerMgtEnabled = true;
 
-    m_expTime = 0.1;
-    m_expTimeSet = 0.1;
+    m_expTime = 0.01;
+    m_expTimeSet = 0.01;
 
     m_default_x = 1599.5;
     m_default_y = 1599.5;
@@ -319,7 +320,7 @@ int pvcamCtrl::appStartup()
         return log<software_critical,-1>({__FILE__,__LINE__});
     }
 
-    if (sem_init(&m_frSemaphore, 0, 0) < 0)
+    if(sem_init(&m_frSemaphore, 0, 0) < 0)
     {
         return log<software_critical, -1>({__FILE__, __LINE__, errno, 0, "Initializing frame ready semaphore"});
     }
@@ -344,7 +345,7 @@ int pvcamCtrl::appLogic()
     }
 
     // run frammerGrabbers's appLogic
-    if (frameGrabberT::appLogic() < 0)
+    if(frameGrabberT::appLogic() < 0)
     {
         return log<software_error, -1>({__FILE__, __LINE__});
     }
@@ -403,9 +404,9 @@ int pvcamCtrl::appLogic()
 
 int pvcamCtrl::appShutdown()
 {
-    if (m_handle != -1)
+    if(m_handle != -1)
     {
-        if (!pl_cam_close(m_handle))
+        if(!pl_cam_close(m_handle))
         {
             log_pvcam_software_error("pl_cam_close", "continuing");
         }
@@ -429,8 +430,8 @@ int pvcamCtrl::appShutdown()
 
 int pvcamCtrl::powerOnDefaults()
 {
-    m_expTime = 1;
-    m_expTimeSet = 1;
+    m_expTime = 0.01;
+    m_expTimeSet = 0.01;
 
     m_currentROI.x = m_default_x;
     m_currentROI.y = m_default_y;
@@ -471,18 +472,98 @@ int pvcamCtrl::setEMGain()
 
 int pvcamCtrl::setExpTime()
 {
+    ulong64 minExpTime, maxExpTime;
+
+    if(!pl_get_param(m_handle, PARAM_EXPOSURE_TIME, ATTR_MIN, (void *)&minExpTime))
+    {
+        log_pvcam_software_error("pl_get_param", "PARAM_EXPOSURE_TIME ATTR_MIN");
+        log<software_error>({__FILE__, __LINE__, "could not set exposure time"});
+        return -1;
+    }
+
+    if(!pl_get_param(m_handle, PARAM_EXPOSURE_TIME, ATTR_MAX, (void *)&maxExpTime))
+    {
+        log_pvcam_software_error("pl_get_param", "PARAM_EXPOSURE_TIME ATTR_MAX");
+        log<software_error>({__FILE__, __LINE__, "could not set exposure time"});
+        return -1;
+    }
+
+    std::cerr << "Exposure time min: " << minExpTime << " max: " << maxExpTime << "\n";
+
+    if(m_expTimeSet*1e6 < minExpTime)
+    {
+        m_expTimeSet = (int) (minExpTime/1e6+0.5);
+        std::cerr << "increased m_expTimeSet to: " << m_expTimeSet << "\n";
+    }
+
+    if(m_expTimeSet * 1e6 > maxExpTime)
+    {
+        m_expTimeSet = (int) (maxExpTime / 1e6 - 0.5);
+        std::cerr << "decreased m_expTimeSet to: " << m_expTimeSet << "\n";
+    }
+
+    frameGrabberT::m_reconfig = true;
+    
     return 0;
 }
 
 int pvcamCtrl::setFPS()
 {
+    m_expTimeSet = 1.0/m_fpsSet;
+    return setExpTime();
+}
+
+int pvcamCtrl::checkNextROI()
+{
+    if(m_nextROI.w > 3200)
+    {
+        m_nextROI.w = 3200;
+    }
+
+    int x0 = m_nextROI.x - 0.5*m_nextROI.w;
+
+    if(x0 < 0) 
+    {
+        m_nextROI.w += x0;
+        m_nextROI.x = 0;
+    }
+
+    int x1 = m_nextROI.x + 0.5*m_nextROI.w;
+
+    if(x1 > 3199)
+    {
+        m_nextROI.w = 3199 - x0;
+        m_nextROI.x = x0 + 0.5*m_nextROI.w;
+    }
+
+    if(m_nextROI.h > 3200)
+    {
+        m_nextROI.h = 3200;
+    }
+
+    int y0 = m_nextROI.y - 0.5 * m_nextROI.h;
+
+    if(y0 < 0)
+    {
+        m_nextROI.h += y0;
+        m_nextROI.y = 0;
+    }
+
+    int y1 = m_nextROI.y + 0.5 * m_nextROI.h;
+
+    if(y1 > 3199)
+    {
+        m_nextROI.h = 3199 - y0;
+        m_nextROI.y = y0 + 0.5 * m_nextROI.h;
+    }
+
     return 0;
 }
 
-//int checkNextROI();
-
 int pvcamCtrl::setNextROI()
 {
+    //This is done in setup acq
+    frameGrabberT::m_reconfig = true;
     return 0;
 }
 
@@ -495,12 +576,12 @@ int pvcamCtrl::setShutter(int sh)
 int pvcamCtrl::configureAcquisition()
 {
     //-- 0: register the callback
-    if (pl_cam_deregister_callback(m_handle, PL_CALLBACK_EOF) == false) // Because we registered it last time we configured acq:
+    if(pl_cam_deregister_callback(m_handle, PL_CALLBACK_EOF) == false) // Because we registered it last time we configured acq:
     {
         log_pvcam_software_error("pl_cam_deregister_callback", "PL_CALLBACK_EOF");
     }
 
-    if (pl_cam_register_callback_ex3(m_handle, PL_CALLBACK_EOF, reinterpret_cast<void *>(&st_endOfFrameCallback), static_cast<void *>(this)) != true)
+    if(pl_cam_register_callback_ex3(m_handle, PL_CALLBACK_EOF, reinterpret_cast<void *>(&st_endOfFrameCallback), static_cast<void *>(this)) != true)
     {
         log_pvcam_software_error("pl_cam_register_callback_ex3", "PL_CALLBACK_EOF");
         return -1;
@@ -525,12 +606,42 @@ int pvcamCtrl::configureAcquisition()
     //std::cerr << pvROI.s1 << " " << pvROI.s2 << " " << pvROI.sbin << " " << pvROI.p1 << " " << pvROI.p2 << " " << pvROI.pbin << "\n";
     uns32 fsize;
 
-    if(pl_exp_setup_cont(m_handle, 1, &pvROI, TIMED_MODE, m_expTime, &fsize, CIRC_OVERWRITE) == false)
+    uns32 exptime = m_expTimeSet * 1e6;
+    if(pl_exp_setup_cont(m_handle, 1, &pvROI, TIMED_MODE, exptime, &fsize, CIRC_OVERWRITE) == false)
     {
         log_pvcam_software_error("pl_exp_setup_cont", "");
         m_shutdown = true;
         return -1;
     }
+
+    if (pl_get_param(m_handle, PARAM_EXPOSURE_TIME, ATTR_CURRENT, &exptime) == false)
+    {
+        log_pvcam_software_error("pl_get_param", "PARAM_EXPOSURE_TIME");
+    }
+    m_expTime = (1.0*exptime) / 1e6;
+    m_expTimeSet = m_expTime;
+
+    uns32 readouttime=0;
+    if(pl_get_param(m_handle, PARAM_READOUT_TIME, ATTR_CURRENT, &readouttime) == false)
+    {
+        log_pvcam_software_error("pl_get_param", "PARAM_READOUT_TIME");
+    }
+
+    long64 predelay = 0;
+    if(pl_get_param(m_handle, PARAM_PRE_TRIGGER_DELAY, ATTR_CURRENT, &predelay) == false)
+    {
+        log_pvcam_software_error("pl_get_param", "PARAM_PRE_TRIGGER_DELAY");
+    }
+
+    long64 postdelay = 0;
+    if(pl_get_param(m_handle, PARAM_POST_TRIGGER_DELAY, ATTR_CURRENT, &postdelay) == false)
+    {
+        log_pvcam_software_error("pl_get_param", "PARAM_POST_TRIGGER_DELAY");
+    }
+
+    m_fps = 1.0/(m_expTime + predelay/1e9 + postdelay/1e9);
+    m_fpsSet = m_fps;
+
 
     //-- 2: Allocate the acq circular buffer
     if(m_circBuff != nullptr)
@@ -599,7 +710,7 @@ int pvcamCtrl::acquireAndCheckValid()
     {
         return 0;
     }
-    else if (errno != EAGAIN)
+    else if(errno != EAGAIN && errno != ETIMEDOUT)
     {
         log<software_critical>({__FILE__, __LINE__, errno, 0, "sem_timedwait"});
         return -1;
@@ -612,7 +723,7 @@ int pvcamCtrl::loadImageIntoStream(void *dest)
 {
     // Obtain a pointer to the last acquired frame
     uns8 *frame;
-    if (pl_exp_get_latest_frame(m_handle, (void **)&frame) == false)
+    if(pl_exp_get_latest_frame(m_handle, (void **)&frame) == false)
     {
         log_pvcam_software_error("pl_exp_get_latest_frame", "");
     }
@@ -624,6 +735,10 @@ int pvcamCtrl::loadImageIntoStream(void *dest)
 
 int pvcamCtrl::reconfig()
 {
+    if(pl_exp_stop_cont(m_handle,CCS_HALT) == false)
+    {
+        log_pvcam_software_error("pl_exp_stop_cont", "");
+    }
     return 0;
 }
 
@@ -633,9 +748,9 @@ int pvcamCtrl::connect()
     //In picam, we had to initialize every time.  We'll do that here too.
 
     //So close handle if it's open
-    if (m_handle != -1)
+    if(m_handle != -1)
     {
-        if (!pl_cam_close(m_handle))
+        if(!pl_cam_close(m_handle))
         {
             log_pvcam_software_error("pl_cam_close", "");
             return -1;
@@ -662,7 +777,7 @@ int pvcamCtrl::connect()
 
     // Read the number of cameras in the system.
     // This will return total number of PVCAM cameras regardless of interface.
-    if (pl_cam_get_total(&nrOfCameras) != PV_OK)
+    if(pl_cam_get_total(&nrOfCameras) != PV_OK)
     {
         log_pvcam_software_error("pl_cam_get_total", "");
         return -1;
@@ -686,7 +801,7 @@ int pvcamCtrl::connect()
         char camName[CAM_NAME_LEN] {'\0'};
 
         // Obtain PVCAM-name for this particular camera
-        if (pl_cam_get_name(n, camName) != PV_OK)
+        if(pl_cam_get_name(n, camName) != PV_OK)
         {
             log_pvcam_software_error("pl_cam_get_name", "");
             return -1;
@@ -704,11 +819,11 @@ int pvcamCtrl::connect()
         // Read the version of the Device Driver
 
         rs_bool isAvailable;
-        if (!pl_get_param(handle, PARAM_HEAD_SER_NUM_ALPHA, ATTR_AVAIL, (void*)&isAvailable))
+        if(!pl_get_param(handle, PARAM_HEAD_SER_NUM_ALPHA, ATTR_AVAIL, (void*)&isAvailable))
         {
             log_pvcam_software_error("pl_get_param", "PARAM_HEAD_SER_NUM_ALPHA ATTR_AVAIL");
 
-            if (!pl_cam_close(handle))
+            if(!pl_cam_close(handle))
             {
                 log_pvcam_software_error("pl_cam_close", "");
             }
@@ -720,11 +835,11 @@ int pvcamCtrl::connect()
         {
             char camSerial[MAX_ALPHA_SER_NUM_LEN]{ '\0' };
 
-            if (!pl_get_param(handle, PARAM_HEAD_SER_NUM_ALPHA, ATTR_CURRENT, (void*)camSerial))
+            if(!pl_get_param(handle, PARAM_HEAD_SER_NUM_ALPHA, ATTR_CURRENT, (void*)camSerial))
             {
                 log_pvcam_software_error("pl_get_param", "PARAM_HEAD_SER_NUM_ALPHA ATTR_CURRENT");
 
-                if (!pl_cam_close(handle))
+                if(!pl_cam_close(handle))
                 {
                     log_pvcam_software_error("pl_cam_close", "");
                 }
@@ -742,7 +857,7 @@ int pvcamCtrl::connect()
         }  
 
         //If we're here then either it didn't have a serial number, or it didn't have the right serial number
-        if (!pl_cam_close(handle))
+        if(!pl_cam_close(handle))
         {
             log_pvcam_software_error("pl_cam_close", "");
             return -1;
@@ -755,7 +870,39 @@ int pvcamCtrl::connect()
         log<text_log>("Opened camera " + m_serialNumber + " at " + m_camName, logPrio::LOG_INFO);
         state(stateCodes::CONNECTED);
 
-        dumpEnum(PARAM_EXP_RES, "PARAM_EXP_RES");
+
+        int32 res;
+        uns16 idx;
+
+        if (pl_get_param(m_handle, PARAM_EXP_RES, ATTR_CURRENT, &res) == false)
+        {
+            log_pvcam_software_error("pl_get_param", "PARAM_EXP_RES");
+        }
+
+        if (pl_get_param(m_handle, PARAM_EXP_RES_INDEX, ATTR_CURRENT, &idx) == false)
+        {
+            log_pvcam_software_error("pl_get_param", "PARAM_EXP_RES_INDEX");
+        }
+
+        std::cerr << "PARAM_EXP_RES_INDEX: " << idx << " PARAM_EXP_RES: " << res << "\n";
+
+        idx = 1;
+        if(pl_set_param(m_handle, PARAM_EXP_RES_INDEX, &idx) == false)
+        {
+            log_pvcam_software_error("pl_set_param", "PARAM_EXP_RES_INDEX");
+        }
+
+        if (pl_get_param(m_handle, PARAM_EXP_RES, ATTR_CURRENT, &res) == false)
+        {
+            log_pvcam_software_error("pl_get_param", "PARAM_EXP_RES");
+        }
+
+        if (pl_get_param(m_handle, PARAM_EXP_RES_INDEX, ATTR_CURRENT, &idx) == false)
+        {
+            log_pvcam_software_error("pl_get_param", "PARAM_EXP_RES_INDEX");
+        }
+
+        std::cerr << "PARAM_EXP_RES_INDEX: " << idx << " PARAM_EXP_RES: " << res << "\n";
     }
     else
     {
@@ -767,9 +914,6 @@ int pvcamCtrl::connect()
     }
 
     return 0;
-
-
-
 }
 
 void pvcamCtrl::dumpEnum(uns32 paramID, const std::string & paramMnem)
@@ -779,7 +923,7 @@ void pvcamCtrl::dumpEnum(uns32 paramID, const std::string & paramMnem)
     {
         uns32 count;
 
-        if (PV_OK != pl_get_param(m_handle, paramID, ATTR_COUNT, (void *)&count))
+        if(PV_OK != pl_get_param(m_handle, paramID, ATTR_COUNT, (void *)&count))
         {
             log_pvcam_software_error("pl_get_param", paramMnem);
             // TODO: Handle error
@@ -793,20 +937,20 @@ void pvcamCtrl::dumpEnum(uns32 paramID, const std::string & paramMnem)
         for (uns32 n = 0; n < count; ++n)
         {
             uns32 strLength;
-            if (PV_OK != pl_enum_str_length(m_handle, paramID, n, &strLength))
+            if(PV_OK != pl_enum_str_length(m_handle, paramID, n, &strLength))
             {
                 log_pvcam_software_error("pl_enum_str_length", paramMnem);
                 // TODO: Handle error
                 break;
             }
             char *text = new (std::nothrow) char[strLength];
-            if (!text)
+            if(!text)
             {
                 // TODO: Handle error
                 break;
             }
             int32 value;
-            if (PV_OK != pl_get_enum_param(m_handle, paramID, n, &value, text, strLength))
+            if(PV_OK != pl_get_enum_param(m_handle, paramID, n, &value, text, strLength))
             {
                 log_pvcam_software_error("pl_get_enum_param", paramMnem);
                 // TODO: Handle error
@@ -833,7 +977,7 @@ int pvcamCtrl::getTemp()
     }
 
     rs_bool isAvailable;
-    if (!pl_get_param(m_handle, PARAM_TEMP_SETPOINT, ATTR_AVAIL, (void*)&isAvailable))
+    if(!pl_get_param(m_handle, PARAM_TEMP_SETPOINT, ATTR_AVAIL, (void*)&isAvailable))
     {
         if(powerState() != 1 || powerStateTarget() != 1) return 0;
         log_pvcam_software_error("pl_get_param", "PARAM_TEMP ATTR_AVAIL");
@@ -843,7 +987,7 @@ int pvcamCtrl::getTemp()
     int16 stemp;
     if(isAvailable) //Maybe this is a separate check.  Don't yet know what happens when acquiring
     {
-        if (!pl_get_param(m_handle, PARAM_TEMP_SETPOINT, ATTR_CURRENT, (void*)&stemp))
+        if(!pl_get_param(m_handle, PARAM_TEMP_SETPOINT, ATTR_CURRENT, (void*)&stemp))
         {
             if(powerState() != 1 || powerStateTarget() != 1) return 0;
             log_pvcam_software_error("pl_get_param", "PARAM_TEMP ATTR_AVAIL");
@@ -853,7 +997,7 @@ int pvcamCtrl::getTemp()
         m_ccdTempSetpt = stemp/100.0;
     }
 
-    if (!pl_get_param(m_handle, PARAM_TEMP, ATTR_AVAIL, (void*)&isAvailable))
+    if(!pl_get_param(m_handle, PARAM_TEMP, ATTR_AVAIL, (void*)&isAvailable))
     {
         if(powerState() != 1 || powerStateTarget() != 1) return 0;
         log_pvcam_software_error("pl_get_param", "PARAM_TEMP ATTR_AVAIL");
@@ -863,7 +1007,7 @@ int pvcamCtrl::getTemp()
     int16 ctemp;
     if(isAvailable) //Maybe this is a separate check.  Don't yet know what happens when acquiring
     {
-        if (!pl_get_param(m_handle, PARAM_TEMP, ATTR_CURRENT, (void*)&ctemp))
+        if(!pl_get_param(m_handle, PARAM_TEMP, ATTR_CURRENT, (void*)&ctemp))
         {
             if(powerState() != 1 || powerStateTarget() != 1) return 0;
             log_pvcam_software_error("pl_get_param", "PARAM_TEMP ATTR_AVAIL");
@@ -901,7 +1045,7 @@ void pvcamCtrl::endOfFrameCallback(FRAME_INFO *finfo)
     m_frameInfo = *finfo;
 
     // Now tell the writer to get going
-    if (sem_post(&m_frSemaphore) < 0)
+    if(sem_post(&m_frSemaphore) < 0)
     {
         log<software_critical>({__FILE__, __LINE__, errno, 0, "Error posting to frame ready semaphore"});
         return;
