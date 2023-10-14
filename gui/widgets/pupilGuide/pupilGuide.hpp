@@ -1123,6 +1123,8 @@ void pupilGuide::updateGUI()
    
    modGUISetEnable(enableModGUI, enableModArrows);
    
+   ui.modCh1->updateGUI();
+   ui.modCh2->updateGUI();
    /*snprintf(str,sizeof(str), "%0.2f", m_modCh1);
    ui.modCh1->setText(str);
    snprintf(str,sizeof(str), "%0.2f", m_modCh2);
