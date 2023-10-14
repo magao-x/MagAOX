@@ -33,6 +33,15 @@ if [[ ! -e $roleScript ]]; then
 fi
 source $roleScript
 
+if [[ $MAGAOX_ROLE == ci ]]; then
+    export NEEDRESTART_SUSPEND=yes
+    export DEBIAN_FRONTEND=noninteractive
+    cat <<'HERE' | sudo tee /etc/profile.d/ci.sh || exit 1
+export NEEDRESTART_SUSPEND=yes
+export DEBIAN_FRONTEND=noninteractive
+HERE
+fi
+
 # Get logging functions
 source $DIR/_common.sh
 
@@ -52,6 +61,7 @@ if [[ $VM_KIND != "none" ]]; then
     sudo git config --global --replace-all safe.directory '*'
 fi
 
+bash -l "$DIR/steps/configure_trusted_sudoers.sh" || exit_error "Could not configure trusted groups for sudoers"
 sudo bash -l "$DIR/steps/configure_xsup_aliases.sh"
 
 if [[ $MAGAOX_ROLE == AOC || $MAGAOX_ROLE == ICC || $MAGAOX_ROLE == RTC ]]; then
@@ -107,7 +117,7 @@ fi
 # Install Linux headers (instrument computers use the RT kernel / headers)
 if [[ $MAGAOX_ROLE == ci || $MAGAOX_ROLE == vm || $MAGAOX_ROLE == workstation || $MAGAOX_ROLE == AOC || $MAGAOX_ROLE == TOC ]]; then
     if [[ $ID == ubuntu ]]; then
-        sudo apt install -y linux-headers-generic
+        sudo -i apt install -y linux-headers-generic
     elif [[ $ID == centos ]]; then
         sudo yum install -y kernel-devel-$(uname -r) || sudo yum install -y kernel-devel
     fi
@@ -115,22 +125,9 @@ fi
 ## Build third-party dependencies under /opt/MagAOX/vendor
 cd /opt/MagAOX/vendor
 sudo bash -l "$DIR/steps/install_rclone.sh" || exit 1
-if grep -q "GenuineIntel" /proc/cpuinfo; then
-    if [[ $ID == "ubuntu" ]]; then
-        sudo bash -l "$DIR/steps/install_mkl_package.sh" || exit 1
-    else
-        sudo bash -l "$DIR/steps/install_mkl_tarball.sh" || exit 1
-    fi
-    export BLAS_VENDOR=intel
-    source /etc/profile.d/mklvars.sh
-else
-    export BLAS_VENDOR=openblas
-fi
-if grep -q "GenuineIntel" /proc/cpuinfo; then
-    if [[ $MAGAOX_ROLE == RTC || $MAGAOX_ROLE == ICC || $MAGAOX_ROLE == AOC || $MAGAOX_ROLE == TIC || $MAGAOX_ROLE == ci ]]; then
-        bash -l "$DIR/steps/install_cuda.sh" || exit_error "CUDA install failed"
-        sudo bash -l "$DIR/steps/install_magma.sh" || exit_error "MAGMA install failed"
-    fi
+bash -l "$DIR/steps/install_openblas.sh" || exit 1
+if [[ $MAGAOX_ROLE == RTC || $MAGAOX_ROLE == ICC || $MAGAOX_ROLE == AOC || $MAGAOX_ROLE == TIC ]]; then
+    bash -l "$DIR/steps/install_cuda.sh" || exit_error "CUDA install failed"
 fi
 sudo bash -l "$DIR/steps/install_fftw.sh" || exit 1
 sudo bash -l "$DIR/steps/install_cfitsio.sh" || exit 1
@@ -149,8 +146,8 @@ if [[ $MAGAOX_ROLE == RTC || $MAGAOX_ROLE == ICC || $MAGAOX_ROLE == ci || ( $MAG
 fi
 
 # SuSE packages need either Python 3.6 or 3.10, but Rocky 9.2 has Python 3.9 as /bin/python, so we build our own RPM:
-if [[ $ID == rocky ]]; then
-  sudo bash -l "$DIR/steps/install_cpuset.sh" || error_exit "Couldn't install cpuset from source"
+if [[ $ID == rocky && $MAGAOX_ROLE != container ]]; then
+  sudo bash -l "$DIR/steps/install_cpuset.sh" || exit_error "Couldn't install cpuset from source"
 fi
 
 
@@ -186,41 +183,6 @@ if [[ -e $VENDOR_SOFTWARE_BUNDLE ]]; then
     sudo rm -rf $BUNDLE_TMPDIR
 fi
 
-## Build first-party dependencies
-cd /opt/MagAOX/source
-bash -l "$DIR/steps/install_xrif.sh" || exit_error "Failed to build and install xrif"
-bash -l "$DIR/steps/install_mxlib.sh" || exit_error "Failed to build and install mxlib"
-source /etc/profile.d/mxmakefile.sh
-
-## Build MagAO-X and install sources to /opt/MagAOX/source/MagAOX
-if [[ $MAGAOX_ROLE == ci ]]; then
-    ln -sfv ~/project/ /opt/MagAOX/source/MagAOX
-else
-    log_info "Running as $USER"
-    if [[ $DIR != /opt/MagAOX/source/MagAOX/setup ]]; then
-        if [[ ! -e /opt/MagAOX/source/MagAOX ]]; then
-            echo "Cloning new copy of MagAOX codebase"
-            orgname=magao-x
-            reponame=MagAOX
-            parentdir=/opt/MagAOX/source/
-            clone_or_update_and_cd $orgname $reponame $parentdir
-            # ensure upstream is set somewhere that isn't on the fs to avoid possibly pushing
-            # things and not having them go where we expect
-            stat /opt/MagAOX/source/MagAOX/.git
-            git remote remove origin
-            git remote add origin https://github.com/magao-x/MagAOX.git
-            git fetch origin
-            git branch -u origin/dev dev
-            log_success "In the future, you can re-run this script from /opt/MagAOX/source/MagAOX/setup"
-            log_info "(In fact, maybe delete $(dirname $DIR)?)"
-        else
-            cd /opt/MagAOX/source/MagAOX
-            git fetch
-        fi
-    else
-        log_info "Running from clone located at $(dirname $DIR), nothing to do for cloning step"
-    fi
-fi
 # These steps should work as whatever user is installing, provided
 # they are a member of magaox-dev and they have sudo access to install to
 # /usr/local. Building as root would leave intermediate build products
@@ -261,10 +223,42 @@ fi
 
 # Install first-party deps
 bash -l "$DIR/steps/install_milk_and_cacao.sh" || exit_error "milk/cacao install failed" # depends on /opt/conda/bin/python existing for plugin build
+bash -l "$DIR/steps/install_xrif.sh" || exit_error "Failed to build and install xrif"
 bash -l "$DIR/steps/install_milkzmq.sh" || exit_error "milkzmq install failed"
 bash -l "$DIR/steps/install_purepyindi.sh" || exit_error "purepyindi install failed"
 bash -l "$DIR/steps/install_magpyx.sh" || exit_error "magpyx install failed"
+bash -l "$DIR/steps/install_mxlib.sh" || exit_error "Failed to build and install mxlib"
+source /etc/profile.d/mxmakefile.sh
 
+## Clone sources to /opt/MagAOX/source/MagAOX
+if [[ $MAGAOX_ROLE == ci ]]; then
+    ln -sfv ~/project/ /opt/MagAOX/source/MagAOX
+else
+    log_info "Running as $USER"
+    if [[ $DIR != /opt/MagAOX/source/MagAOX/setup ]]; then
+        if [[ ! -e /opt/MagAOX/source/MagAOX ]]; then
+            echo "Cloning new copy of MagAOX codebase"
+            destdir=/opt/MagAOX/source/MagAOX
+            git clone $DIR/.. $destdir
+            normalize_git_checkout $destdir
+            cd $destdir
+            # ensure upstream is set somewhere that isn't on the fs to avoid possibly pushing
+            # things and not having them go where we expect
+            stat /opt/MagAOX/source/MagAOX/.git
+            git remote remove origin
+            git remote add origin https://github.com/magao-x/MagAOX.git
+            git fetch origin
+            git branch -u origin/dev dev
+            log_success "In the future, you can re-run this script from /opt/MagAOX/source/MagAOX/setup"
+            log_info "(In fact, maybe delete $(dirname $DIR)?)"
+        else
+            cd /opt/MagAOX/source/MagAOX
+            git fetch
+        fi
+    else
+        log_info "Running from clone located at $(dirname $DIR), nothing to do for cloning step"
+    fi
+fi
 
 # TODO:jlong: uncomment when it's back in working order
 # if [[ $MAGAOX_ROLE == AOC || $MAGAOX_ROLE == vm ||  $MAGAOX_ROLE == workstation ]]; then
@@ -274,7 +268,7 @@ bash -l "$DIR/steps/install_magpyx.sh" || exit_error "magpyx install failed"
 
 if [[ $MAGAOX_ROLE == AOC || $MAGAOX_ROLE == TOC || $MAGAOX_ROLE == vm || $MAGAOX_ROLE == workstation || $MAGAOX_ROLE == ci ]]; then
     # realtime image viewer
-    bash -l "$DIR/steps/install_rtimv.sh" || exit 1
+    bash -l "$DIR/steps/install_rtimv.sh" || exit_error "Could not install rtimv"
 fi
 
 if [[ $MAGAOX_ROLE == AOC || $MAGAOX_ROLE == TOC || $MAGAOX_ROLE == vm ||  $MAGAOX_ROLE == workstation ]]; then
@@ -285,28 +279,31 @@ fi
 # aliases to improve ergonomics of MagAO-X ops
 sudo bash -l "$DIR/steps/install_aliases.sh"
 
-# CircleCI invokes install_MagAOX.sh as the next step (see .circleci/config.yml)
+# CI invokes install_MagAOX.sh as the next step (see .circleci/config.yml)
 # By separating the real build into another step, we can cache the slow provisioning steps
 # and reuse them on subsequent runs.
 if [[ $MAGAOX_ROLE != ci ]]; then
+    cd /opt/MagAOX/source/MagAOX
     bash -l "$DIR/steps/install_MagAOX.sh" || exit 1
 fi
 
-sudo bash -l "$DIR/steps/configure_startup_services.sh"
+if [[ $MAGAOX_ROLE != ci && $MAGAOX_ROLE != container && $MAGAOX_ROLE != vm ]]; then
+    sudo bash -l "$DIR/steps/configure_startup_services.sh"
 
-log_info "Generating subuid and subgid files, may need to run podman system migrate"
-sudo python "$DIR/generate_subuid_subgid.py" || error_exit "Generating subuid/subgid files for podman failed"
-sudo podman system migrate || error_exit "Could not run podman system migrate"
+    log_info "Generating subuid and subgid files, may need to run podman system migrate"
+    sudo python "$DIR/generate_subuid_subgid.py" || exit_error "Generating subuid/subgid files for podman failed"
+    sudo podman system migrate || exit_error "Could not run podman system migrate"
 
-# To try and debug hardware issues, ICC and RTC replicate their
-# kernel console log over UDP to AOC over the instrument LAN.
-# The script that collects these messages is in ../scripts/netconsole_logger
-# so we have to install its service unit after 'make scripts_install'
-# runs.
-sudo bash -l "$DIR/steps/configure_kernel_netconsole.sh"
+    # To try and debug hardware issues, ICC and RTC replicate their
+    # kernel console log over UDP to AOC over the instrument LAN.
+    # The script that collects these messages is in ../scripts/netconsole_logger
+    # so we have to install its service unit after 'make scripts_install'
+    # runs.
+    sudo bash -l "$DIR/steps/configure_kernel_netconsole.sh"
+fi
 
 log_success "Provisioning complete"
-if [[ $MAGAOX_ROLE != vm && $MAGAOX_ROLE != ci && $MAGAOX_ROLE != container ]]; then
+if [[ $MAGAOX_ROLE != ci && $MAGAOX_ROLE != container ]]; then
     log_info "You'll probably want to run"
     log_info "    source /etc/profile.d/*.sh"
     log_info "to get all the new environment variables set."

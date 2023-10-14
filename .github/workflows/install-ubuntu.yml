@@ -1,0 +1,34 @@
+name: "Ubuntu build"
+on:
+  push:
+  schedule:
+      - cron: '43 5 * * *'
+jobs:
+  install-ubuntu:
+    runs-on: ubuntu-latest
+    container:
+      image: ubuntu:22.04
+      env:
+        MAGAOX_ROLE: ci
+        NEEDRESTART_SUSPEND: 'yes'
+        DEBIAN_FRONTEND: noninteractive
+    steps:
+      - name: Fetch package definitions
+        run: 'apt-get update'
+      - name: Install git for checkout action
+        run: 'apt-get install -y git'
+      - name: Check out repository code
+        uses: actions/checkout@v4
+      - name: Cache dependencies
+        uses: actions/cache@v3.0.6
+        with:
+          path: /opt/MagAOX/
+          key: ubuntu-22.04-dependencies-cache-v1-${{ hashFiles('setup/*', 'setup/**/*') }}
+      - run: 'bash -x setup/steps/install_ubuntu_22.04_packages.sh'
+        name: Install OS dependencies
+      - run: 'bash -lx setup/provision.sh'
+        name: Auto-provision
+      - run: 'bash -l setup/steps/install_MagAOX.sh'
+        name: Install MagAO-X
+      # - run: 'make test'
+      #   name: Run tests

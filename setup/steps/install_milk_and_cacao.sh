@@ -51,10 +51,10 @@ echo "export PATH=\"\$PATH:/usr/local/milk/bin\"" | sudo tee /etc/profile.d/milk
 echo "export PKG_CONFIG_PATH=\$PKG_CONFIG_PATH:/usr/local/milk/lib/pkgconfig" | sudo tee -a /etc/profile.d/milk.sh
 echo "export MILK_SHM_DIR=/milk/shm" | sudo tee -a /etc/profile.d/milk.sh
 
-if [[ $MAGAOX_ROLE != ci ]]; then
+sudo mkdir -p /milk/shm
+if [[ $MAGAOX_ROLE != ci && $MAGAOX_ROLE != container ]]; then
   if ! grep -q "/milk/shm" /etc/fstab; then
     echo "tmpfs /milk/shm tmpfs rw,nosuid,nodev" | sudo tee -a /etc/fstab
-    sudo mkdir -p /milk/shm
     log_success "Created /milk/shm tmpfs mountpoint"
     sudo mount /milk/shm
     log_success "Mounted /milk/shm"
