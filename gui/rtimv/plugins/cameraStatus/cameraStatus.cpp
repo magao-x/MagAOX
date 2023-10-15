@@ -481,3 +481,11 @@ void cameraStatus::disableOverlay()
    
    m_enabled = false;
 }
+
+std::vector<std::string> cameraStatus::info()
+{
+    std::vector<std::string> vinfo;
+    vinfo.push_back("Camera Status overlay: " + m_deviceName);
+
+    return vinfo;
+}

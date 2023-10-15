@@ -129,6 +129,7 @@ int indiDictionary::attachDictionary( dictionaryT * dict,
    if(m_ipAddress == "" || m_port <= 0)
    {
       m_enabled = false;
+      return 1; 
    }
    else
    {
@@ -200,3 +201,12 @@ void indiDictionary::checkConnection()
    
 }
 
+std::vector<std::string> indiDictionary::info()
+{
+    std::vector<std::string> vinfo;
+    vinfo.push_back("INDI dictionary: " + m_ipAddress + ":" + std::to_string(m_port));
+    if(m_client) vinfo[0] += " [connected]";
+    else vinfo[0] += " [not connected]";
+
+    return vinfo;
+}

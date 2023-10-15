@@ -6,52 +6,53 @@
 
 #include <QObject>
 #include <QtPlugin>
-//#include <QGraphicsLineItem>
+// #include <QGraphicsLineItem>
 
 #include <iostream>
 
 class dmStatus : public rtimvOverlayInterface
 {
-   Q_OBJECT
-   Q_PLUGIN_METADATA(IID "rtimv.overlayInterface/1.1")
-   Q_INTERFACES(rtimvOverlayInterface)
-    
-   protected:
-      rtimvOverlayAccess m_roa;
-      
-      bool m_enabled {false};
-      
-      bool m_enableable {false};
-      
-      std::string m_deviceName;
-      
-      std::string m_rhDeviceName;
-      
-      QGraphicsScene * m_qgs {nullptr};
-      
-      char m_blob[512]; ///< Memory for copying rtimvDictionary blobs
+    Q_OBJECT
+    Q_PLUGIN_METADATA(IID "rtimv.overlayInterface/1.2")
+    Q_INTERFACES(rtimvOverlayInterface)
 
-      time_t m_lastrht {0};
-      
-   public:
-      dmStatus() ;
-      
-      virtual ~dmStatus();
+protected:
+    rtimvOverlayAccess m_roa;
 
-      virtual int attachOverlay( rtimvOverlayAccess &,
-                                 mx::app::appConfigurator & config
-                               ); 
-      
-      virtual int updateOverlay();
+    bool m_enabled{false};
 
-      virtual void keyPressEvent( QKeyEvent * ke);
-      
-      virtual bool overlayEnabled();
-      
-      virtual void enableOverlay();
+    bool m_enableable{false};
 
-      virtual void disableOverlay();
-      
+    std::string m_deviceName;
+
+    std::string m_rhDeviceName;
+
+    QGraphicsScene *m_qgs{nullptr};
+
+    char m_blob[512]; ///< Memory for copying rtimvDictionary blobs
+
+    time_t m_lastrht{0};
+
+public:
+    dmStatus();
+
+    virtual ~dmStatus();
+
+    virtual int attachOverlay(rtimvOverlayAccess &,
+                              mx::app::appConfigurator &config);
+
+    virtual int updateOverlay();
+
+    virtual void keyPressEvent(QKeyEvent *ke);
+
+    virtual bool overlayEnabled();
+
+    virtual void enableOverlay();
+
+    virtual void disableOverlay();
+
+public:
+    virtual std::vector<std::string> info();
 };
 
-#endif //dmStatus_hpp
+#endif // dmStatus_hpp

@@ -18,10 +18,10 @@ class rtimvIndiClient;
 /**
   * 
   */ 
-class indiDictionary : public QObject, public rtimvDictionaryInterface
+class indiDictionary : public rtimvDictionaryInterface
 {
     Q_OBJECT
-    Q_PLUGIN_METADATA(IID "rtimv.dictionaryInterface/1.1")
+    Q_PLUGIN_METADATA(IID "rtimv.dictionaryInterface/1.2")
     Q_INTERFACES(rtimvDictionaryInterface)
     
 protected:
@@ -57,6 +57,9 @@ public slots:
     /// Check the status of the INDI connection.    
     void checkConnection();
    
+public:
+    virtual std::vector<std::string> info();
+
 };
 
 #endif //indiDictionary_hpp
