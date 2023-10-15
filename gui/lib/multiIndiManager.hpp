@@ -219,12 +219,9 @@ void multiIndiManager::connectClient()
 
          m_publisher->activate();
    
-         //sleep(3); //This is to give time for the connection to fail
-
          //Check connection
          if(m_publisher->getQuitProcess()) //not connected
          {
-            std::cerr << __FILE__ << " " << __LINE__ << std::endl;
             m_publisher->deactivate();
             delete m_publisher;
             m_publisher = nullptr;

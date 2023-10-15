@@ -36,6 +36,12 @@ int dmStatus::attachOverlay( rtimvOverlayAccess & roa,
    if(m_enabled) enableOverlay();
    else disableOverlay();
    
+   if(m_roa.m_dictionary != nullptr)
+   {
+      //Register these
+      (*m_roa.m_dictionary)[m_rhDeviceName + ".humidity.current"].setBlob(nullptr, 0);
+   }
+
    return 0;
 }
       

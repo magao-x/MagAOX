@@ -81,14 +81,19 @@ public:
    /// Called once the parent is connected.
    virtual void onConnect()
    {
-      pcf::IndiProperty ipSend;
-      sendGetProperties( ipSend );  
+      //pcf::IndiProperty ipSend;
+      //sendGetProperties( ipSend );  
       multiIndiSubscriber::onConnect(); 
    }
 
    virtual void sendNewProperty( const pcf::IndiProperty &ipSend)
    {
       pcf::IndiClient::sendNewProperty(ipSend);
+   }
+
+   virtual void sendGetProperties(const pcf::IndiProperty &ipSend)
+   {
+       pcf::IndiClient::sendGetProperties(ipSend);
    }
 };
 
@@ -98,8 +103,8 @@ multiIndiPublisher::multiIndiPublisher( const std::string & clientName,
                                         const int hostPort
                                       ) : pcf::IndiClient( clientName, MULTI_INDI_CLIENT_VERSION, MULTI_INDI_PROTO_VERSION, hostAddress, hostPort)
 {
-   pcf::IndiProperty ipSend;
-   sendGetProperties( ipSend );
+   //pcf::IndiProperty ipSend;
+   //sendGetProperties( ipSend );
 }
 
 

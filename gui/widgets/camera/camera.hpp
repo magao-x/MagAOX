@@ -207,10 +207,8 @@ camera::~camera()
 void camera::subscribe()
 {
    if(!m_parent) return;
-   
-   m_parent->addSubscriberProperty((multiIndiSubscriber *) this, m_camName, "fsm");
-   m_parent->addSubscriberProperty((multiIndiSubscriber *) this, m_camName, "reconfigure");
-   m_parent->addSubscriberProperty((multiIndiSubscriber *) this, m_darkName, "start");
+
+   m_parent->addSubscriberProperty((multiIndiSubscriber *) this, m_camName, "");
 
    m_parent->addSubscriber(ui_fsmState);
 
@@ -235,6 +233,7 @@ void camera::onConnect()
    ui.lab_camName->setEnabled(true);
 
    setWindowTitle(QString((m_camName+"Ctrl").c_str()));
+
 
    ui_fsmState->onConnect();
 

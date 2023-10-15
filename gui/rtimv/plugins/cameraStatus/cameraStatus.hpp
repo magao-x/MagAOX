@@ -27,7 +27,8 @@ class cameraStatus :
       std::string m_deviceName;
       
       std::string m_filterDeviceName;
-      
+      std::string m_filterDeviceName2;
+
       QGraphicsScene * m_qgs {nullptr};
       
       StretchBox * m_roiBox {nullptr};
@@ -37,12 +38,7 @@ class cameraStatus :
 
       int m_width {0};
       int m_height {0};
-      
-      float m_fullROI_x {0};
-      float m_fullROI_y {0};
-      int m_fullROI_w {0};
-      int m_fullROI_h {0};
-      
+          
    public:
       cameraStatus() ;
       
@@ -58,6 +54,17 @@ class cameraStatus :
       
       virtual bool overlayEnabled();
       
+      bool blobExists( const std::string propel );
+
+      bool getBlobStr( const std::string & deviceName,
+                       const std::string & propel 
+                     );
+
+      bool getBlobStr( const std::string & propel );
+
+      template<typename realT>
+      realT getBlobVal( const std::string & propel, realT defVal );
+
       virtual void enableOverlay();
 
       virtual void disableOverlay();

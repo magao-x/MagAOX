@@ -10,8 +10,7 @@
 
 #include <iostream>
 
-class dmStatus :
-                     public rtimvOverlayInterface
+class dmStatus : public rtimvOverlayInterface
 {
    Q_OBJECT
    Q_PLUGIN_METADATA(IID "rtimv.overlayInterface/1.1")
