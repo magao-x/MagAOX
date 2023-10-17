@@ -104,6 +104,7 @@ apps/picamCtrl/picamCtrl
 apps/picoMotorCtrl/picoMotorCtrl
 apps/pupilAlign/pupilAlign
 apps/pupilFit/pupilFit
+apps/pvcamCtrl/pvcamCtrl
 apps/pwfsSlopeCalc/pwfsSlopeCalc
 apps/photonCounter
 
