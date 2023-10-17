@@ -209,6 +209,7 @@ void camera::subscribe()
    if(!m_parent) return;
 
    m_parent->addSubscriberProperty((multiIndiSubscriber *) this, m_camName, "");
+   m_parent->addSubscriberProperty((multiIndiSubscriber *) this, m_darkName, "");
 
    m_parent->addSubscriber(ui_fsmState);
 
@@ -253,6 +254,8 @@ void camera::onConnect()
    
    if(ui_synchro) ui_synchro->onConnect();
 
+   subscribe();
+   
    clearFocus();
 
    //updateGUI();
