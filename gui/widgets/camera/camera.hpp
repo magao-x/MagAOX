@@ -16,6 +16,8 @@
 #include "camera/roiStatus.hpp"
 #include "camera/shutterStatus.hpp"
 
+#include <QThread>
+
 namespace xqt 
 {
    
@@ -65,6 +67,8 @@ protected:
    bool m_inUpdate {false};
 
    QTimer * m_updateTimer {nullptr}; ///< Timer for periodic updates
+
+   bool m_connected {false};
 
 public:
    explicit camera( std::string & camName,
@@ -118,6 +122,9 @@ public slots:
    void takeDark();
 
 signals:
+
+   void doUpdateGUI();
+
    void updateTimerStop();
    void updateTimerStart(int);
 
@@ -156,6 +163,8 @@ camera::camera( std::string & camName,
    ui.setupUi(this);
 
    m_updateTimer = new QTimer(this);
+
+    connect(this, SIGNAL(doUpdateGUI()), this, SLOT(updateGUI()));
 
    connect(m_updateTimer, SIGNAL(timeout()), this, SLOT(updateGUI()));
    connect(this, SIGNAL(updateTimerStop()), m_updateTimer, SLOT(stop()));
@@ -209,6 +218,7 @@ void camera::subscribe()
    if(!m_parent) return;
 
    m_parent->addSubscriberProperty((multiIndiSubscriber *) this, m_camName, "");
+   m_parent->addSubscriberProperty((multiIndiSubscriber *) this, m_camName, "fsm");
    m_parent->addSubscriberProperty((multiIndiSubscriber *) this, m_darkName, "");
 
    m_parent->addSubscriber(ui_fsmState);
@@ -235,7 +245,6 @@ void camera::onConnect()
 
    setWindowTitle(QString((m_camName+"Ctrl").c_str()));
 
-
    ui_fsmState->onConnect();
 
    if(ui_tempCCD) ui_tempCCD->onConnect();
@@ -254,11 +263,11 @@ void camera::onConnect()
    
    if(ui_synchro) ui_synchro->onConnect();
 
-   subscribe();
-   
    clearFocus();
 
-   //updateGUI();
+   m_connected = true;
+
+   emit doUpdateGUI();
 }
 
 void camera::onDisconnect()
@@ -285,6 +294,13 @@ void camera::onDisconnect()
    if(ui_synchro) ui_synchro->onDisconnect();
 
    clearFocus();   
+
+   m_connected = false;
+   while(m_inUpdate)
+   {
+      QThread::msleep(10); //Wait to get out of update
+   }
+   emit updateTimerStop();
 
    setEnableDisable(false);
 }
@@ -442,12 +458,12 @@ void camera::handleSetProperty( const pcf::IndiProperty & ipRecv)
       }
    }
 
-   updateGUI();   
+   emit doUpdateGUI();   
 }
 
 void camera::updateGUI()
 {
-   if(m_inUpdate) return;
+   if(m_inUpdate || !m_connected) return;
    emit updateTimerStop();
    m_inUpdate = true;
 

@@ -219,6 +219,8 @@ void multiIndiManager::connectClient()
 
          m_publisher->activate();
    
+         sleep(5);
+
          //Check connection
          if(m_publisher->getQuitProcess()) //not connected
          {

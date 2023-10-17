@@ -81,8 +81,6 @@ public:
    /// Called once the parent is connected.
    virtual void onConnect()
    {
-      //pcf::IndiProperty ipSend;
-      //sendGetProperties( ipSend );  
       multiIndiSubscriber::onConnect(); 
    }
 
@@ -120,7 +118,6 @@ int multiIndiPublisher::addSubscriberProperty( multiIndiSubscriber * sub,
 
    //note: we have to send this every time b/c otherwise late subscribers won't get an update on subscribe
    sendGetProperties(ipSub);
-
 
    return 0;
 }
