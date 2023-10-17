@@ -42,6 +42,7 @@ apps_icc = \
 	hsfwCtrl \
 	baslerCtrl \
 	picamCtrl \
+	pvcamCtrl \
 	smc100ccCtrl \
 	andorCtrl \
 	usbtempMon \
