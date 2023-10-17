@@ -364,7 +364,7 @@ void IndiConnection::sendXml( const string &szXml ) const
   MutexLock::AutoLock autoOut( &m_mutOutput );
   
   //Convert to stream b/c dprintf will kill silently on a bad file descriptor
-  FILE * fdout = fdopen(m_fdOutput, "w");
+  FILE * fdout = fdopen(m_fdOutput, "w+");
 
   if(!fdout)
   {
@@ -372,6 +372,9 @@ void IndiConnection::sendXml( const string &szXml ) const
   }
 
   ::fprintf( fdout, "%s", szXml.c_str() );
+  fflush(fdout);
+
+  //dprintf(m_fdOutput, "%s", szXml.c_str());
 }
 
 ////////////////////////////////////////////////////////////////////////////////
