@@ -175,10 +175,10 @@ private:
 template<class parentT>
 resurrectee<parentT> * resurrectee<parentT>::m_self = nullptr;
 
-//Set default running timeout to 600; a 2nd timeout m_time_offset[1] may
+//Set default running timeout to 10s; a 2nd timeout m_time_offset[1] may
 //be appended to allow for long delays during in MagAOXApp::appStartup()
 template<class parentT>
-std::vector<time_t> resurrectee<parentT>::m_time_offset = { 600 };
+std::vector<time_t> resurrectee<parentT>::m_time_offset = { 10 };
 
 /// Write hexbeat timestamp to FIFO with time offset at vector element 1
 /// - This is done to send an initial, i.e. pre-appStartup(), hexbeat,
@@ -262,7 +262,7 @@ resurrectee<parentT>::resurrectee(parentT* parent, void (*alt_handler)(int,sigin
    m_self = this;
    m_alt_handler = alt_handler;
 
-   if (m_time_offset[0] < 1) { m_time_offset[0] = 600; }
+   if (m_time_offset[0] < 1) { m_time_offset[0] = 10; }
 
    // Save parent, name and PID to member attributes
    m_parent = parent;
@@ -347,7 +347,7 @@ void resurrectee<parentT>::_setupConfig( mx::app::appConfigurator & _config )
 {
    _config.add("resurrectee.timeout", "", "resurrectee.timeout", mx::app::argType::Required, "resurrectee", "timeout", false, "int"
 , "Resurrectee hexbeat timeout vector values,  in seconds:  the first"
-  " (default 600s) is the hexbeat timeout once the process is started"
+  " (default 10s) is the hexbeat timeout once the process is started"
   " and running; the second, if provided here, is a one-time hexbeat"
   " timeout for slow-starting processes (e.g. that have to wait for an"
   " external device to connect) used to send a hexbeat before startup to"
