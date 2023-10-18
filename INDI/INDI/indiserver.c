@@ -83,7 +83,7 @@
 #define SHORTMSGSIZ   2048  /* buf size for most messages */
 #define DEFMAXQSIZ    128   /* default max q behind, MB */
 #define DEFMAXSSIZ    5     /* default max stream behind, MB */
-#define DEFMAXRESTART 10    /* default max restarts */
+#define DEFMAXRESTART 0     /* default max restarts */
 
 #ifdef OSX_EMBEDED_MODE
 #define LOGNAME  "/Users/%s/Library/Logs/indiserver.log"
@@ -138,7 +138,7 @@ static ClInfo *clinfo; /*  malloced pool of clients */
 static int nclinfo;    /* n total (not active) */
 
 /* info for each connected driver */
-typedef struct
+typedef struct strDvrInfo
 {
     char name[MAXINDINAME]; /* persistent name */
     char envDev[MAXSBUF];
@@ -147,7 +147,6 @@ typedef struct
     char envPrefix[MAXSBUF];
     char host[MAXSBUF];
     int port;
-    //char dev[MAXINDIDEVICE];		/* device served by this driver */
     char **dev;         /* device served by this driver */
     int ndev;           /* number of devices served by this driver */
     int active;         /* 1 when this record is in use */
@@ -156,16 +155,21 @@ typedef struct
     int pid;            /* process id or REMOTEDVR if remote */
     int rfd;            /* read pipe fd */
     int wfd;            /* write pipe fd */
-    int efd;            /* stderr from driver, if local */
     int restarts;       /* times process has been restarted */
     LilXML *lp;         /* XML parsing context */
     FQ *msgq;           /* Msg queue */
     unsigned int nsent; /* bytes of current Msg sent so far */
-} DvrInfo;
+    struct strDvrInfo* pNextToRestart; /* next to restart, or NULL */
+    int restartDelayus; /* Microseconds before next restart attempt */
+} DvrInfo, *pDvr, **ppDvr;
 static DvrInfo *dvrinfo; /* malloced array of drivers */
 static int ndvrinfo;     /* n total */
 
 static char *me;                                       /* our name */
+#define Mus 1000000     /* Microseconds per second */
+#define SELECT_WAITs 1  /* Select wait, seconds */
+static pDvr pRestarts;  /* linked list of drivers to restart */
+
 static int port = INDIPORT;                            /* public INDI port */
 static int verbose;                                    /* chattiness */
 static int lsocket;                                    /* listen socket */
@@ -502,7 +506,7 @@ static int findClDevice(ClInfo *cp, const char *dev, const char *name)
     for (i = 0; i < cp->nprops; i++)
     {
         Property *pp = &cp->props[i];
-        if (!strcmp(pp->dev, dev) && (!pp->name[0] || !strcmp(pp->name, name)))
+        if (!strcmp(pp->dev, dev) && (!pp->name[0] || !name || !strcmp(pp->name, name)))
             return (0);
     }
     return (-1);
@@ -645,6 +649,90 @@ static void setMsgStr(Msg *mp, char *str)
     strcpy(mp->cp, str);
 }
 
+static DvrInfo* findActiveDvrInfo(char* name)
+{
+    if (!name) { return NULL; }
+    if (!*name) { return NULL; }
+    for (pDvr pdvr = dvrinfo; pdvr<(dvrinfo + ndvrinfo); ++pdvr)
+    {
+        if (!strcmp(pdvr->name,name) && pdvr->active) { return pdvr; }
+    }
+    return NULL;
+}
+
+ppDvr findDvrInRestartList(pDvr dp)
+{
+    ppDvr ppdvr = &pRestarts;
+    /* Loop over linked list of drivers to restart ... */
+    while (*ppdvr)
+    {
+        /* ... if current driver is in that linked list ... */
+        if (*ppdvr == dp) { break; }
+        ppdvr = &(*ppdvr)->pNextToRestart;
+    }
+    return ppdvr;
+}
+
+/* Remove driver pointer from linked list of drivers to restart
+ */
+void removeDvrFromRestartList(pDvr dp)
+{
+    ppDvr ppdvr = findDvrInRestartList(dp);
+    if (dp == *ppdvr)
+    {
+        *ppdvr = dp->pNextToRestart;
+        fprintf(stderr, "%s: Driver %s: removed from restart list.\n"
+               , indi_tstamp(NULL), dp->name);
+    }
+}
+
+/* Add driver pointer to linked list of drivers to restart
+ */
+void addDvrToRestartList(pDvr dp)
+{
+    /* Ensure driver is not currently in the list */
+    removeDvrFromRestartList(dp);
+
+    /* Add pointer to end of linked list */
+    ppDvr ppdvr = &pRestarts;
+    while (*ppdvr) { ppdvr = &(*ppdvr)->pNextToRestart; }
+    *ppdvr = dp;
+    dp->pNextToRestart = NULL;     /* terminate linked list */
+
+    /* Prevent later reuse, set 10s delay until restart */
+    dp->active = 1;
+    dp->restartDelayus = 10 * Mus;
+
+    fprintf(stderr, "%s: Driver %s: scheduled for restart #%d in %lfs\n"
+           , indi_tstamp(NULL), dp->name, ++dp->restarts
+           , dp->restartDelayus / ((double)Mus));
+}
+
+void handle_restart_list(struct timeval* ptv, void (*startDvr)(pDvr))
+{
+    /* Calculate time spent in select(2) call from remaining time in tv;
+     * ensure time spend is at least 1us
+     */
+    int time_in_select = ((SELECT_WAITs - ptv->tv_sec) * Mus) - ptv->tv_usec;
+    time_in_select = time_in_select > 0 ? time_in_select : 1;
+
+    /* Loop over linked list of drivers to restart */
+    pDvr pdvr;
+    for (pdvr = pRestarts; pdvr; pdvr = pdvr->pNextToRestart)
+    {
+        /* Reduce remaining delay by time spent in select(2) call
+         * Do nothing more with this driver if delay has not expired
+         */
+        pdvr->restartDelayus -= time_in_select;
+        if (pdvr->restartDelayus > 0) continue;
+
+        /* Drop this driver from the to-be-restarted linked list */
+        pRestarts = pdvr->pNextToRestart;
+
+        startDvr(pdvr);
+    }
+}
+
 /* start the given remote INDI driver connection.
  * exit if trouble.
  */
@@ -685,6 +773,7 @@ static void startRemoteDvr(DvrInfo *dp)
     dp->active  = 1;
     dp->ndev    = 1;
     dp->dev     = (char **)malloc(sizeof(char *));
+    dp->restartDelayus = 0;
 
     /* N.B. storing name now is key to limiting outbound traffic to this
      * dev.
@@ -764,6 +853,7 @@ static void startLocalDvr(DvrInfo *dp)
     dp->active  = 1;
     dp->ndev    = 0;
     dp->dev     = (char **)malloc(sizeof(char *));
+    dp->restartDelayus = 0;
 
     /* first message primes driver to report its properties -- dev known
      * if restarting
@@ -838,24 +928,29 @@ static void shutdownDvr(DvrInfo *dp, int restart)
     fflush(stderr);
 #endif
 
-    /* free memory */
-    free(dp->sprops);
-    free(dp->dev);
-    delLilXML(dp->lp);
+    /* free memory; ensure no double-free if stop interrupts restart */
+    if (dp->sprops) { free(dp->sprops); dp->sprops = NULL; }
+    if (dp->dev) { free(dp->dev); dp->dev = NULL; }
+    if (dp->lp) { delLilXML(dp->lp); dp->lp = NULL; }
 
     /* ok now to recycle */
     dp->active = 0;
     dp->ndev   = 0;
 
     /* decrement and possibly free any unsent messages for this client */
-    while ((mp = (Msg *)popFQ(dp->msgq)) != NULL)
-        if (--mp->count == 0)
-            freeMsg(mp);
-    delFQ(dp->msgq);
+    if (dp->msgq)
+    {
+        /* decrement and possibly free any unsent messages for this client */
+        while ((mp = (Msg *)popFQ(dp->msgq)) != NULL)
+            if (--mp->count == 0)
+                freeMsg(mp);
+        delFQ(dp->msgq);
+        dp->msgq = NULL;
+    }
 
     if (restart)
     {
-        if (dp->restarts >= maxrestarts)
+        if (dp->restarts >= maxrestarts && maxrestarts > 0)
         {
             fprintf(stderr, "%s: Driver %s: Terminated after #%d restarts.\n", indi_tstamp(NULL), dp->name,
                     dp->restarts);
@@ -866,8 +961,7 @@ static void shutdownDvr(DvrInfo *dp, int restart)
         }
         else
         {
-            fprintf(stderr, "%s: Driver %s: restart #%d\n", indi_tstamp(NULL), dp->name, ++dp->restarts);
-            startDvr(dp);
+            addDvrToRestartList(dp);
         }
     }
 }
@@ -1158,8 +1252,32 @@ static void newFIFO(void)
         {
             if (verbose)
                 fprintf(stderr, "%s: FIFO: Starting driver %s\n", ts, tDriver);
-            dp = allocDvr();
-            strncpy(dp->name, tDriver, MAXINDIDEVICE);
+
+            /* If driver is active ... */
+            if ((dp=findActiveDvrInfo(tDriver)))
+            {
+                /* ... and driver is running
+		 *     i.e. is not waiting to restart ...
+		 */
+                if (!*findDvrInRestartList(dp))
+                {
+                    if (verbose)
+                    {
+                        fprintf(stderr, "%s: FIFO: Skipping driver %s that is already started\n", ts, tDriver);
+                    }
+                    /* ... then skip to the next FIFO command, ... */
+                    continue;
+                }
+                /* ... else remove this driver from the restart list */
+                removeDvrFromRestartList(dp);
+            }
+
+            if (!dp)
+            {
+                dp = allocDvr();
+                strncpy(dp->name, tDriver, MAXINDINAME);
+                dp->name[MAXINDINAME-1] = '\0';
+            }
 
             if (remoteDriver == 0)
             {
@@ -1206,7 +1324,10 @@ static void newFIFO(void)
                     //                        delXMLEle(root);
                     //                    }
 
+                    if (verbose) { fprintf(stderr, "%s: FIFO: Shutting down driver: %s\n", ts, tDriver); }
+                    removeDvrFromRestartList(dp);
                     shutdownDvr(dp, 0);
+                    if (verbose) { fprintf(stderr, "%s: FIFO: Driver Shut down complete: %s\n", ts, tDriver); }
                     break;
                 }
             }
@@ -1421,7 +1542,7 @@ static void q2RDrivers(const char *dev, Msg *mp, XMLEle *root)
     {
         int isRemote = (dp->pid == REMOTEDVR);
 
-        if (dp->active == 0)
+        if (dp->active == 0 || dp->restartDelayus > 0)
             continue;
 
         /* driver known to not support this dev */
@@ -1481,7 +1602,7 @@ static void q2SDrivers(DvrInfo *me, int isblob, const char *dev, const char *nam
 
     for (dp = dvrinfo; dp < &dvrinfo[ndvrinfo]; dp++)
     {
-        if (dp->active == 0)
+        if (dp->active == 0 || dp->restartDelayus > 0)
             continue;
 
         Property *sp = findSDevice(dp, dev, name);
@@ -1978,7 +2099,7 @@ static void indiRun(void)
     for (i = 0; i < ndvrinfo; i++)
     {
         DvrInfo *dp = &dvrinfo[i];
-        if (dp->active)
+        if (dp->active && dp->restartDelayus < 1)
         {
             FD_SET(dp->rfd, &rs);
             if (dp->rfd > maxfd)
@@ -2000,8 +2121,10 @@ static void indiRun(void)
         }
     }
 
+    struct timeval tv = {SELECT_WAITs, 0}; /* {seconds, microseconds} */
+
     /* wait for action */
-    s = select(maxfd + 1, &rs, &ws, NULL, NULL);
+    s = select(maxfd + 1, &rs, &ws, NULL, &tv);
     if (s < 0)
     {
         if(errno == EINTR)
@@ -2049,7 +2172,7 @@ static void indiRun(void)
     for (i = 0; s > 0 && i < ndvrinfo; i++)
     {
         DvrInfo *dp = &dvrinfo[i];
-        if (dp->active)
+        if (dp->active && dp->restartDelayus < 1)
         {
 #           if 0
             if (dp->pid != REMOTEDVR && FD_ISSET(dp->efd, &rs))
@@ -2062,17 +2185,20 @@ static void indiRun(void)
             if (s > 0 && FD_ISSET(dp->rfd, &rs))
             {
                 if (readFromDriver(dp) < 0)
-                    return; /* fds effected */
+                    break; //return; /* fds effected */
                 s--;
             }
             if (s > 0 && FD_ISSET(dp->wfd, &ws) && nFQ(dp->msgq) > 0)
             {
                 if (sendDriverMsg(dp) < 0)
-                    return; /* fds effected */
+                    break; //return; /* fds effected */
                 s--;
             }
         }
     }
+
+    /* Returns above are now breaks so the restart list is processed */
+    handle_restart_list(&tv, startDvr);
 }
 
 int main(int ac, char *av[])
@@ -2184,6 +2310,9 @@ int main(int ac, char *av[])
     /* create driver info array all at once since size never changes */
     ndvrinfo = ac;
     dvrinfo  = (DvrInfo *)calloc(ndvrinfo, sizeof(DvrInfo));
+
+    /* Ensure link list of drivers to start is empty */
+    pRestarts = NULL;
 
     /* start each driver */
     while (ac-- > 0)
