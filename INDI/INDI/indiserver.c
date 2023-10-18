@@ -349,10 +349,11 @@ static int openINDIServer(char host[], int indi_port)
     }
 
     /* connect */
+    errno = 0; /* ensure errno is 0 on success or non-zero on failure */
     if (connect(sockfd, (struct sockaddr *)&serv_addr, sizeof(serv_addr)) < 0)
     {
         fprintf(stderr, "connect(%s,%d): %s\n", host, indi_port, strerror(errno));
-        Bye();
+        /* Drop thru with valid but unconnected fd, instead of Bye(); */
     }
 
     /* ok */
@@ -732,6 +733,7 @@ void handle_restart_list(struct timeval* ptv, void (*startDvr)(pDvr))
         startDvr(pdvr);
     }
 }
+static void shutdownDvr(DvrInfo*, int); /* Declare for startRemoteDvr */
 
 /* start the given remote INDI driver connection.
  * exit if trouble.
@@ -758,6 +760,7 @@ static void startRemoteDvr(DvrInfo *dp)
 
     /* connect */
     sockfd = openINDIServer(host, indi_port);
+    int save_errno = errno;
 
     /* record flag pid, io channels, init lp and snoop list */
     dp->pid = REMOTEDVR;
@@ -799,6 +802,8 @@ static void startRemoteDvr(DvrInfo *dp)
 
     if (verbose > 0)
         fprintf(stderr, "%s: Driver %s: socket=%d\n", indi_tstamp(NULL), dp->name, sockfd);
+
+    if (save_errno) { shutdownDvr(dp, 1); }  /* oops; try again later */
 }
 
 /* start the given local INDI driver process.
