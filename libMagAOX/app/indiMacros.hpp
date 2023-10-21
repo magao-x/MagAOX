@@ -117,6 +117,14 @@
    */
 #define INDI_SETCALLBACK_DEFN(class, prop) int class::setCallBack_ ## prop
 
+#define INDI_VALIDATE_CALLBACK_PROPS(prop1, prop2)                                                                                \
+        if(prop1.createUniqueKey() != prop2.createUniqueKey())                                                                    \
+        {                                                                                                                         \
+            log<software_error>({__FILE__,__LINE__, "INDI properties do not match in callback: "                                  \
+                                                                  + prop1.createUniqueKey() + " != " + prop2.createUniqueKey()}); \
+            return -1;                                                                                                            \
+        }
+        
 /// Get the name of the static callback wrapper for a new property.
 /** Useful for passing the pointer to the callback.
   *

@@ -39,9 +39,10 @@ mxlibCommonOverrides="/tmp/$(date +"%s")-mxlibCommon.mk"
 
 cat <<'HERE' > $mxlibCommonOverrides
 PREFIX = /usr/local
-CXXFLAGS += -DMX_OLD_GSL
+CXXFLAGS += -DMX_OLD_GSL $(shell pkg-config --cflags lapacke)
 NEED_CUDA = no
-EIGEN_CFLAGS = 
+EIGEN_CFLAGS = $(shell pkg-config --cflags eigen3)
+USE_BLAS_FROM = openblas
 HERE
 
 if [[ $MAGAOX_ROLE == RTC || $MAGAOX_ROLE == ICC || $MAGAOX_ROLE == AOC || $MAGAOX_ROLE == TIC || $MAGAOX_ROLE == ci ]]; then
@@ -50,10 +51,6 @@ fi
 
 if [[ $ID == centos ]]; then
   echo "CXXVERSION = -std=c++14" >> $mxlibCommonOverrides
-fi
-
-if [[ $(uname -p) != "x86_64" ]]; then
-  echo "USE_BLAS_FROM = openblas" >> $mxlibCommonOverrides
 fi
 
 if [[ $ID == rocky && $(uname -p) == "aarch64" ]]; then

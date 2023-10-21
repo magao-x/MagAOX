@@ -5,6 +5,8 @@ set -euo pipefail
 apt-get update
 
 NEEDRESTART_SUSPEND=yes apt install -y \
+apt-get install -y \
+    sudo \
     ssh \
     build-essential \
     gfortran \
@@ -48,12 +50,17 @@ NEEDRESTART_SUSPEND=yes apt install -y \
     nfs-kernel-server \
     tree \
     linux-headers-generic \
+    liblapack-dev \
+    liblapacke-dev \
 ;
 
 if [[ $MAGAOX_ROLE == vm ]]; then
     NEEDRESTART_SUSPEND=yes apt install -y xauth
 fi
+<<<<<<< HEAD
 if [[ $(uname -p) == "aarch64" ]]; then
     # since we won't install MKL:
     NEEDRESTART_SUSPEND=yes apt install -y libopenblas-openmp-dev liblapack-dev liblapacke-dev
 fi
+=======
+>>>>>>> origin/dev

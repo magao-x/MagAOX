@@ -1,19 +1,22 @@
-name: Build C++ Doxygen documentation
-on: [push]
+name: Doxygen
+on:
+  push:
+      branches:
+          - 'dev'
 jobs:
   build-and-deploy:
     runs-on: ubuntu-latest
     steps:
       - run: sudo apt-get install -y doxygen graphviz ssh rsync
       - name: Check out repository code
-        uses: actions/checkout@v2
+        uses: actions/checkout@v4
       - run: cd ${{ github.workspace }} && doxygen doc/config/Doxyfile.libMagAOX
       - name: Add SSH key
         env:
             SSH_AUTH_SOCK: /tmp/ssh_agent.sock
         run: |
             mkdir -p /home/runner/.ssh
-            echo "xwcl.science ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIBjRMNGtwNllMxj3uy5GGD1f/jw/4f/l5PJG9xK2QXUC" >> /home/runner/.ssh/known_hosts
+            echo "xwcl.science ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIAqGanUWS9Wb34oCHCDX2xqhlCstMTN9c0oFoKJkYtZ3" >> /home/runner/.ssh/known_hosts
             echo "${{ secrets.DEPLOY_GARY }}" > /home/runner/.ssh/github_actions
             chmod 600 /home/runner/.ssh/github_actions
             ssh-agent -a $SSH_AUTH_SOCK > /dev/null
