@@ -10,8 +10,7 @@ MXLIBROOT=/opt/MagAOX/source/mxlib
 # mxLib
 #
 
-MXLIB_COMMIT_ISH=resurrector
-###MXLIB_COMMIT_ISH=magaox
+MXLIB_COMMIT_ISH=dev
 orgname=jaredmales
 reponame=mxlib
 parentdir=/opt/MagAOX/source
