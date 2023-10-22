@@ -2618,11 +2618,7 @@ int tcsInterface::sendFoffload( float F_0 )
 
 INDI_NEWCALLBACK_DEFN(tcsInterface, m_indiP_pyrNudge)(const pcf::IndiProperty &ipRecv)
 {
-   if(ipRecv.getName() != m_indiP_pyrNudge.getName())
-   {
-      log<software_error>({__FILE__,__LINE__, "wrong INDI property received."});
-      return -1;
-   }
+   INDI_VALIDATE_CALLBACK_PROPS(m_indiP_pyrNudge, ipRecv);
    
    float x = 0;
    float y = 0;
@@ -2650,11 +2646,7 @@ INDI_NEWCALLBACK_DEFN(tcsInterface, m_indiP_pyrNudge)(const pcf::IndiProperty &i
 
 INDI_NEWCALLBACK_DEFN(tcsInterface, m_indiP_acqFromGuider)(const pcf::IndiProperty &ipRecv)
 {
-   if(ipRecv.getName() != m_indiP_acqFromGuider.getName())
-   {
-      log<software_error>({__FILE__,__LINE__, "wrong INDI property received."});
-      return -1;
-   }
+   INDI_VALIDATE_CALLBACK_PROPS(m_indiP_acqFromGuider, ipRecv);
    
    if(!ipRecv.find("request"))
    {
@@ -2671,10 +2663,7 @@ INDI_NEWCALLBACK_DEFN(tcsInterface, m_indiP_acqFromGuider)(const pcf::IndiProper
 
 INDI_SETCALLBACK_DEFN(tcsInterface, m_indiP_loopState)(const pcf::IndiProperty &ipRecv)
 {
-   if(ipRecv.getName() != m_indiP_loopState.getName())
-   {
-      return log<software_error>({__FILE__,__LINE__, "wrong INDI property received"});
-   }
+   INDI_VALIDATE_CALLBACK_PROPS(m_indiP_loopState, ipRecv);
 
    if(!ipRecv.find("toggle")) return 0;
 
@@ -2694,7 +2683,8 @@ INDI_SETCALLBACK_DEFN(tcsInterface, m_indiP_loopState)(const pcf::IndiProperty &
 
 INDI_SETCALLBACK_DEFN(tcsInterface, m_indiP_offloadCoeffs)(const pcf::IndiProperty &ipRecv)
 {
-   
+   INDI_VALIDATE_CALLBACK_PROPS(m_indiP_offloadCoeffs, ipRecv);
+
    if(m_loopState != 2) return 0;
    
    size_t nextReq = m_lastRequest + 1;
@@ -2739,6 +2729,8 @@ INDI_SETCALLBACK_DEFN(tcsInterface, m_indiP_offloadCoeffs)(const pcf::IndiProper
 
 INDI_NEWCALLBACK_DEFN(tcsInterface, m_indiP_offlTTenable)(const pcf::IndiProperty &ipRecv)
 {
+   INDI_VALIDATE_CALLBACK_PROPS(m_indiP_offlTTenable, ipRecv);
+
    if(ipRecv.getName() != m_indiP_offlTTenable.getName())
    {
       log<software_error>({__FILE__,__LINE__, "wrong INDI property received."});
@@ -2766,11 +2758,7 @@ INDI_NEWCALLBACK_DEFN(tcsInterface, m_indiP_offlTTenable)(const pcf::IndiPropert
 
 INDI_NEWCALLBACK_DEFN(tcsInterface, m_indiP_offlTTdump)(const pcf::IndiProperty &ipRecv)
 {
-   if(ipRecv.getName() != m_indiP_offlTTdump.getName())
-   {
-      log<software_error>({__FILE__,__LINE__, "wrong INDI property received."});
-      return -1;
-   }
+   INDI_VALIDATE_CALLBACK_PROPS(m_indiP_offlTTdump, ipRecv);
    
    if(!ipRecv.find("request")) return 0;
    
@@ -2787,6 +2775,8 @@ INDI_NEWCALLBACK_DEFN(tcsInterface, m_indiP_offlTTdump)(const pcf::IndiProperty 
 
 INDI_NEWCALLBACK_DEFN(tcsInterface, m_indiP_offlTTavgInt)(const pcf::IndiProperty &ipRecv)
 {
+   INDI_VALIDATE_CALLBACK_PROPS(m_indiP_offlTTavgInt, ipRecv);
+
    int target;
    
    if( indiTargetUpdate( m_indiP_offlTTavgInt, target, ipRecv, true) < 0)
@@ -2802,6 +2792,8 @@ INDI_NEWCALLBACK_DEFN(tcsInterface, m_indiP_offlTTavgInt)(const pcf::IndiPropert
 
 INDI_NEWCALLBACK_DEFN(tcsInterface, m_indiP_offlTTgain)(const pcf::IndiProperty &ipRecv)
 {
+   INDI_VALIDATE_CALLBACK_PROPS(m_indiP_offlTTgain, ipRecv);
+
    float target;
    
    if( indiTargetUpdate( m_indiP_offlTTgain, target, ipRecv, true) < 0)
@@ -2817,6 +2809,8 @@ INDI_NEWCALLBACK_DEFN(tcsInterface, m_indiP_offlTTgain)(const pcf::IndiProperty 
 
 INDI_NEWCALLBACK_DEFN(tcsInterface, m_indiP_offlTTthresh)(const pcf::IndiProperty &ipRecv)
 {
+   INDI_VALIDATE_CALLBACK_PROPS(m_indiP_offlTTthresh, ipRecv);
+
    float target;
    
    if( indiTargetUpdate( m_indiP_offlTTthresh, target, ipRecv, true) < 0)
@@ -2833,11 +2827,7 @@ INDI_NEWCALLBACK_DEFN(tcsInterface, m_indiP_offlTTthresh)(const pcf::IndiPropert
 
 INDI_NEWCALLBACK_DEFN(tcsInterface, m_indiP_offlFenable)(const pcf::IndiProperty &ipRecv)
 {
-   if(ipRecv.getName() != m_indiP_offlFenable.getName())
-   {
-      log<software_error>({__FILE__,__LINE__, "wrong INDI property received."});
-      return -1;
-   }
+   INDI_VALIDATE_CALLBACK_PROPS(m_indiP_offlFenable, ipRecv);
    
    if(!ipRecv.find("toggle")) return 0;
    
@@ -2860,11 +2850,7 @@ INDI_NEWCALLBACK_DEFN(tcsInterface, m_indiP_offlFenable)(const pcf::IndiProperty
 
 INDI_NEWCALLBACK_DEFN(tcsInterface, m_indiP_offlFdump)(const pcf::IndiProperty &ipRecv)
 {
-   if(ipRecv.getName() != m_indiP_offlFdump.getName())
-   {
-      log<software_error>({__FILE__,__LINE__, "wrong INDI property received."});
-      return -1;
-   }
+   INDI_VALIDATE_CALLBACK_PROPS(m_indiP_offlFdump, ipRecv);
    
    if(!ipRecv.find("request")) return 0;
    
@@ -2881,6 +2867,8 @@ INDI_NEWCALLBACK_DEFN(tcsInterface, m_indiP_offlFdump)(const pcf::IndiProperty &
 
 INDI_NEWCALLBACK_DEFN(tcsInterface, m_indiP_offlFavgInt)(const pcf::IndiProperty &ipRecv)
 {
+   INDI_VALIDATE_CALLBACK_PROPS(m_indiP_offlFavgInt, ipRecv);
+
    int target;
    
    if( indiTargetUpdate( m_indiP_offlFavgInt, target, ipRecv, true) < 0)
@@ -2896,6 +2884,8 @@ INDI_NEWCALLBACK_DEFN(tcsInterface, m_indiP_offlFavgInt)(const pcf::IndiProperty
 
 INDI_NEWCALLBACK_DEFN(tcsInterface, m_indiP_offlFgain)(const pcf::IndiProperty &ipRecv)
 {
+   INDI_VALIDATE_CALLBACK_PROPS(m_indiP_offlFgain, ipRecv);
+
    float target;
    
    if( indiTargetUpdate( m_indiP_offlFgain, target, ipRecv, true) < 0)
@@ -2911,6 +2901,8 @@ INDI_NEWCALLBACK_DEFN(tcsInterface, m_indiP_offlFgain)(const pcf::IndiProperty &
 
 INDI_NEWCALLBACK_DEFN(tcsInterface, m_indiP_offlFthresh)(const pcf::IndiProperty &ipRecv)
 {
+   INDI_VALIDATE_CALLBACK_PROPS(m_indiP_offlFthresh, ipRecv);
+
    float target;
    
    std::cerr << "Got offl thresh\n";

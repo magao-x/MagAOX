@@ -6,13 +6,67 @@
   */
 
 #include "../../../tests/catch2/catch.hpp"
+#include "../../tests/testMacrosINDI.hpp"
+
 
 #include "../siglentSDG.hpp"
 
 using namespace MagAOX::app;
 
-namespace siglentSDG_test 
+namespace SDGTEST
 {
+
+class siglentSDG_test : public siglentSDG 
+{
+
+public:
+    siglentSDG_test(const std::string device)
+    {
+        m_configName = device;
+
+        XWCTEST_SETUP_INDI_NEW_PROP(C1outp)
+        XWCTEST_SETUP_INDI_NEW_PROP(C1freq)
+        XWCTEST_SETUP_INDI_NEW_PROP(C1amp)
+        XWCTEST_SETUP_INDI_NEW_PROP(C1ofst)
+        XWCTEST_SETUP_INDI_NEW_PROP(C1phse)
+        XWCTEST_SETUP_INDI_NEW_PROP(C1wdth)
+        XWCTEST_SETUP_INDI_NEW_PROP(C1wvtp)
+        XWCTEST_SETUP_INDI_NEW_PROP(C1sync)
+
+        XWCTEST_SETUP_INDI_NEW_PROP(C2outp)
+        XWCTEST_SETUP_INDI_NEW_PROP(C2freq)
+        XWCTEST_SETUP_INDI_NEW_PROP(C2amp)
+        XWCTEST_SETUP_INDI_NEW_PROP(C2ofst)
+        XWCTEST_SETUP_INDI_NEW_PROP(C2phse)
+        XWCTEST_SETUP_INDI_NEW_PROP(C2wdth)
+        XWCTEST_SETUP_INDI_NEW_PROP(C2wvtp)
+        XWCTEST_SETUP_INDI_NEW_PROP(C2sync)
+
+    }
+};
+
+//#define QUOTE(s) #s
+
+
+SCENARIO( "INDI Callbacks", "[siglentSDG]" )
+{
+    XWCTEST_INDI_NEW_CALLBACK( siglentSDG, C1outp);
+    XWCTEST_INDI_NEW_CALLBACK( siglentSDG, C1freq);
+    XWCTEST_INDI_NEW_CALLBACK( siglentSDG, C1amp);
+    XWCTEST_INDI_NEW_CALLBACK( siglentSDG, C1ofst);
+    XWCTEST_INDI_NEW_CALLBACK( siglentSDG, C1phse);
+    XWCTEST_INDI_NEW_CALLBACK( siglentSDG, C1wdth);
+    XWCTEST_INDI_NEW_CALLBACK( siglentSDG, C1wvtp);
+    XWCTEST_INDI_NEW_CALLBACK( siglentSDG, C1sync);
+    XWCTEST_INDI_NEW_CALLBACK( siglentSDG, C2outp);
+    XWCTEST_INDI_NEW_CALLBACK( siglentSDG, C2freq);
+    XWCTEST_INDI_NEW_CALLBACK( siglentSDG, C2amp);
+    XWCTEST_INDI_NEW_CALLBACK( siglentSDG, C2ofst);
+    XWCTEST_INDI_NEW_CALLBACK( siglentSDG, C2phse);
+    XWCTEST_INDI_NEW_CALLBACK( siglentSDG, C2wdth);
+    XWCTEST_INDI_NEW_CALLBACK( siglentSDG, C2wvtp);
+    XWCTEST_INDI_NEW_CALLBACK( siglentSDG, C2sync);
+}
 
 SCENARIO( "Parsing the OUTP? response", "[siglentSDG]" )
 {

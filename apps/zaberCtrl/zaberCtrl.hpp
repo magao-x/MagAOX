@@ -143,6 +143,8 @@ protected:
    pcf::IndiProperty m_indiP_maxPos;
    pcf::IndiProperty m_indiP_temp;
    
+public:
+
    INDI_NEWCALLBACK_DECL(zaberCtrl, m_indiP_pos);
    INDI_NEWCALLBACK_DECL(zaberCtrl, m_indiP_rawPos);
    
@@ -153,7 +155,7 @@ protected:
    pcf::IndiProperty m_indiP_stageTgtPos;
    pcf::IndiProperty m_indiP_stageTemp;
    
-   
+public:
    INDI_SETCALLBACK_DECL(zaberCtrl, m_indiP_stageState);
    INDI_SETCALLBACK_DECL(zaberCtrl, m_indiP_stageMaxRawPos);
    INDI_SETCALLBACK_DECL(zaberCtrl, m_indiP_stageRawPos);
@@ -574,8 +576,8 @@ INDI_NEWCALLBACK_DEFN( zaberCtrl, m_indiP_rawPos)(const pcf::IndiProperty &ipRec
 
 INDI_SETCALLBACK_DEFN( zaberCtrl, m_indiP_stageState)(const pcf::IndiProperty &ipRecv)
 {
-   INDI_VALIDATE_CALLBACK_PROPS(m_indiP_stageState, ipRecv); 
-   
+    INDI_VALIDATE_CALLBACK_PROPS(m_indiP_stageState, ipRecv); 
+
    if( ipRecv.find(m_stageName) != true ) //Just not our stage.
    {
       return 0;
@@ -666,8 +668,8 @@ INDI_SETCALLBACK_DEFN( zaberCtrl, m_indiP_stageState)(const pcf::IndiProperty &i
 
 INDI_SETCALLBACK_DEFN( zaberCtrl, m_indiP_stageMaxRawPos )(const pcf::IndiProperty &ipRecv)
 {
-   INDI_VALIDATE_CALLBACK_PROPS(m_indiP_stageMaxRawPos, ipRecv); 
-   
+    INDI_VALIDATE_CALLBACK_PROPS(m_indiP_stageMaxRawPos, ipRecv);
+
    if( ipRecv.find(m_stageName) != true ) //Just not our stage.
    {
       return 0;
@@ -689,8 +691,8 @@ INDI_SETCALLBACK_DEFN( zaberCtrl, m_indiP_stageMaxRawPos )(const pcf::IndiProper
 
 INDI_SETCALLBACK_DEFN( zaberCtrl, m_indiP_stageRawPos )(const pcf::IndiProperty &ipRecv)
 {
-   INDI_VALIDATE_CALLBACK_PROPS(m_indiP_stageRawPos, ipRecv); 
-   
+    INDI_VALIDATE_CALLBACK_PROPS(m_indiP_stageRawPos, ipRecv);
+
    if( ipRecv.find(m_stageName) != true ) //Just not our stage.
    {
       return 0;
@@ -720,8 +722,8 @@ INDI_SETCALLBACK_DEFN( zaberCtrl, m_indiP_stageRawPos )(const pcf::IndiProperty 
 
 INDI_SETCALLBACK_DEFN( zaberCtrl, m_indiP_stageTgtPos )(const pcf::IndiProperty &ipRecv)
 {
-   INDI_VALIDATE_CALLBACK_PROPS(m_indiP_stageTgtPos, ipRecv); 
-   
+    INDI_VALIDATE_CALLBACK_PROPS(m_indiP_stageTgtPos, ipRecv);
+
    if( ipRecv.find(m_stageName) != true ) //Just not our stage.
    {
       return 0;
@@ -756,8 +758,8 @@ INDI_SETCALLBACK_DEFN( zaberCtrl, m_indiP_stageTgtPos )(const pcf::IndiProperty 
 
 INDI_SETCALLBACK_DEFN( zaberCtrl, m_indiP_stageTemp )(const pcf::IndiProperty &ipRecv)
 {
-   INDI_VALIDATE_CALLBACK_PROPS(m_indiP_stageTemp, ipRecv); 
-   
+    INDI_VALIDATE_CALLBACK_PROPS(m_indiP_stageTemp, ipRecv);
+
    if( ipRecv.find(m_stageName) != true ) //Just not our stage.
    {
       return 0;

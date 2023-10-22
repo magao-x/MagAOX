@@ -357,18 +357,24 @@ void IndiConnection::process()
 
 ////////////////////////////////////////////////////////////////////////////////
 /// \brief IndiConnection::sendXml
-/// Sends an XML string out to a file descriptor. If there is an error,
-/// it will be logged.
+/// Sends an XML string out. 
 /// \param szXml The XML to send.
-
 void IndiConnection::sendXml( const string &szXml ) const
 {
   MutexLock::AutoLock autoOut( &m_mutOutput );
-  int nNumPrinted = ::dprintf( m_fdOutput, "%s", szXml.c_str() );
-  //if ( fflush( m_fdOutput ) != 0 || nNumPrinted < (int)( szXml.length() ) )
-  if ( nNumPrinted < ( int )( szXml.length() ) )
+  
+  //Convert to stream b/c dprintf will kill silently on a bad file descriptor
+  FILE * fdout = fdopen(m_fdOutput, "w+");
+
+  if(!fdout)
   {
+    return;
   }
+
+  ::fprintf( fdout, "%s", szXml.c_str() );
+  fflush(fdout);
+
+  //dprintf(m_fdOutput, "%s", szXml.c_str());
 }
 
 ////////////////////////////////////////////////////////////////////////////////

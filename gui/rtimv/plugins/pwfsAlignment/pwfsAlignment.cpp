@@ -1,7 +1,7 @@
 
 #include "pwfsAlignment.hpp"
 
-#define errPrint(expl) std::cerr << "cameraStatus: " << __FILE__ << " " << __LINE__ << " " << expl << std::endl;
+#define errPrint(expl) std::cerr << "pwfsAlignment: " << __FILE__ << " " << __LINE__ << " " << expl << std::endl;
 
 pwfsAlignment::pwfsAlignment() : rtimvOverlayInterface()
 {
@@ -361,4 +361,12 @@ void pwfsAlignment::disableOverlay()
    if(m_c4s) m_c4s->setVisible(false);
    
    m_enabled = false;
+}
+
+std::vector<std::string> pwfsAlignment::info()
+{
+    std::vector<std::string> vinfo;
+    vinfo.push_back("PWFS Alignment overlay");
+    
+    return vinfo;
 }

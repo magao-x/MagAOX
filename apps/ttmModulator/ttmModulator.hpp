@@ -26,8 +26,8 @@ protected:
      * @{
      */
 
-   double m_maxFreq {1900.0}; ///< The maximum modulation frequency settable by this program
-   double m_maxVolt {2.1}; ///< The maximum modulation voltage settable by this program
+   double m_maxFreq {0.0}; ///< The maximum modulation frequency settable by this program
+   double m_maxVolt {0.0}; ///< The maximum modulation voltage settable by this program
 
    double m_setVoltage_1 {5.0}; ///< the set position voltage of Ch. 1.
    double m_setVoltage_2 {5.0}; ///< the set position voltage of Ch. 2.
@@ -952,371 +952,353 @@ int ttmModulator::offsetXY( double dx,
 
 INDI_NEWCALLBACK_DEFN(ttmModulator, m_indiP_modState)(const pcf::IndiProperty &ipRecv)
 {
-   if (ipRecv.getName() == m_indiP_modState.getName())
-   {
+    INDI_VALIDATE_CALLBACK_PROPS(m_indiP_modState, ipRecv);
+    
+    int state = 0;
+    try
+    {
+        state = ipRecv["requested"].get<int>();
+    }
+    catch(...)
+    {
+        log<software_error>({__FILE__, __LINE__, "exception caught"});
+        return -1;
+    }
 
-      int state = 0;
-      try
-      {
-         state = ipRecv["requested"].get<int>();
-      }
-      catch(...)
-      {
-         log<software_error>({__FILE__, __LINE__, "exception caught"});
-         return -1;
-      }
+    m_modStateRequested = state;
 
-      m_modStateRequested = state;
-
-      return 0;
-   }
-   return -1;
+    return 0;
 }
 
 INDI_NEWCALLBACK_DEFN(ttmModulator, m_indiP_modFrequency)(const pcf::IndiProperty &ipRecv)
 {
-   if (ipRecv.getName() == m_indiP_modFrequency.getName())
-   {
+    INDI_VALIDATE_CALLBACK_PROPS(m_indiP_modFrequency, ipRecv);
 
-      double nf = -1;
-      try
-      {
-         nf = ipRecv["requested"].get<double>();
-      }
-      catch(...)
-      {
-         //do nothing, just means no requested in command.
-      }
-      if(nf > 0) m_modFreqRequested = nf;
-
-      return 0;
-   }
-   return -1;
+    ///\todo use find to test
+    try
+    {
+        double nf = -1;
+        nf = ipRecv["requested"].get<double>();
+        if(nf > 0) m_modFreqRequested = nf;
+    }
+    catch(...)
+    {
+        //do nothing, just means no requested in command.
+    }
+    
+    return 0;
+   
 }
 
 INDI_NEWCALLBACK_DEFN(ttmModulator, m_indiP_modRadius)(const pcf::IndiProperty &ipRecv)
 {
-   if (ipRecv.getName() == m_indiP_modRadius.getName())
-   {
+    INDI_VALIDATE_CALLBACK_PROPS(m_indiP_modRadius, ipRecv);
 
-      double nr = -1;
-      try
-      {
-         nr = ipRecv["requested"].get<double>();
-      }
-      catch(...)
-      {
-         //do nothing, just means no requested in command.
-      }
-      if(nr > 0) m_modRadRequested = nr;
-
-      return 0;
-   }
-   return -1;
+    ///\todo use find to test
+    try
+    {
+        double nr = -1;
+        nr = ipRecv["requested"].get<double>();
+        if(nr > 0) m_modRadRequested = nr;
+    }
+    catch(...)
+    {
+        //do nothing, just means no requested in command.
+    }
+      
+    return 0;
+  
 }
 
 INDI_NEWCALLBACK_DEFN(ttmModulator, m_indiP_offset12)(const pcf::IndiProperty &ipRecv)
 {
-   if (ipRecv.getName() == m_indiP_offset12.getName())
-   {
 
-      double dx = 0;
-      if(ipRecv.find("dC1"))
-      {
-         dx = ipRecv["dC1"].get<double>();
-      }
-      std::cerr << "dC1: " << dx << "\n";
-      
-      double dy = 0;
-      if(ipRecv.find("dC2"))
-      {
-         dy = ipRecv["dC2"].get<double>();
-      }
+    INDI_VALIDATE_CALLBACK_PROPS(m_indiP_offset12, ipRecv);
+    
+    double dx = 0;
+    if(ipRecv.find("dC1"))
+    {
+       dx = ipRecv["dC1"].get<double>();
+    }
+    std::cerr << "dC1: " << dx << "\n";
+    
+    double dy = 0;
+    if(ipRecv.find("dC2"))
+    {
+       dy = ipRecv["dC2"].get<double>();
+    }
 
-      std::cerr << "dC2: " << dy << "\n\n";
+    std::cerr << "dC2: " << dy << "\n\n";
 
-      
-      return offset12(dx, dy);
-   }
-   return -1;
+    
+    return offset12(dx, dy);
+
 }
 
 INDI_NEWCALLBACK_DEFN(ttmModulator, m_indiP_offset)(const pcf::IndiProperty &ipRecv)
 {
-   if (ipRecv.getName() == m_indiP_offset.getName())
-   {
+    INDI_VALIDATE_CALLBACK_PROPS(m_indiP_offset, ipRecv);
 
-      double dx = 0;
-      if(ipRecv.find("x"))
-      {
-         dx = ipRecv["x"].get<double>();
-      }
-      std::cerr << "dx: " << dx << "\n";
-      
-      double dy = 0;
-      if(ipRecv.find("y"))
-      {
-         dy = ipRecv["y"].get<double>();
-      }
+    double dx = 0;
+    if(ipRecv.find("x"))
+    {
+       dx = ipRecv["x"].get<double>();
+    }
+    std::cerr << "dx: " << dx << "\n";
+    
+    double dy = 0;
+    if(ipRecv.find("y"))
+    {
+       dy = ipRecv["y"].get<double>();
+    }
 
-      std::cerr << "dy: " << dy << "\n\n";
+    std::cerr << "dy: " << dy << "\n\n";
 
-      
-      return offsetXY(dx, dy);
-   }
-   return -1;
+    
+    return offsetXY(dx, dy);
+
 }
 
 
 INDI_SETCALLBACK_DEFN(ttmModulator, m_indiP_C1outp)(const pcf::IndiProperty &ipRecv)
 {
-   if (ipRecv.getDevice() == m_indiP_C1outp.getDevice() && ipRecv.getName() == m_indiP_C1outp.getName())
-   {
-      try
-      {
-         m_indiP_C1outp = ipRecv;
-         std::string outp = ipRecv["value"].getValue();
+    INDI_VALIDATE_CALLBACK_PROPS(m_indiP_C1outp, ipRecv);
 
-         if( outp == "Off" )
-         {
-            m_C1outp = 0;
-         }
-         else if (outp == "On")
-         {
-            m_C1outp = 1;
-         }
-         else
-         {
-            m_C1outp = -1;
-         }
+    ///\todo use find to test
+    try
+    {
+       m_indiP_C1outp = ipRecv;
+       std::string outp = ipRecv["value"].getValue();
 
-         return 0;
-      }
-      catch(...)
-      {
-         log<software_error>({__FILE__, __LINE__, "exception from libcommon"});
-         return -1;
-      }
-   }
-   log<software_error>({__FILE__, __LINE__, "wrong INDI property"});
-   return -1;
+       if( outp == "Off" )
+       {
+          m_C1outp = 0;
+       }
+       else if (outp == "On")
+       {
+          m_C1outp = 1;
+       }
+       else
+       {
+          m_C1outp = -1;
+       }
+
+       return 0;
+    }
+    catch(...)
+    {
+       log<software_error>({__FILE__, __LINE__, "exception from libcommon"});
+       return -1;
+    }
+  
 }
 
 INDI_SETCALLBACK_DEFN(ttmModulator, m_indiP_C1freq)(const pcf::IndiProperty &ipRecv)
 {
-   if (ipRecv.getDevice() == m_indiP_C1freq.getDevice() && ipRecv.getName() == m_indiP_C1freq.getName())
-   {
-      try
-      {
-         m_indiP_C1freq = ipRecv;
-         double nv = ipRecv["value"].get<double>();
+    INDI_VALIDATE_CALLBACK_PROPS(m_indiP_C1freq, ipRecv);
 
-         m_C1freq = nv;
+    ///\todo use find to test
+    try
+    {
+       m_indiP_C1freq = ipRecv;
+       double nv = ipRecv["value"].get<double>();
 
-         return 0;
-      }
-      catch(...)
-      {
-         log<software_error>({__FILE__, __LINE__, "exception from libcommon"});
-         return -1;
-      }
-   }
-   log<software_error>({__FILE__, __LINE__, "wrong INDI property"});
-   return -1;
+       m_C1freq = nv;
+
+       return 0;
+    }
+    catch(...)
+    {
+       log<software_error>({__FILE__, __LINE__, "exception from libcommon"});
+       return -1;
+    }
+
 }
 
 INDI_SETCALLBACK_DEFN(ttmModulator, m_indiP_C1volts)(const pcf::IndiProperty &ipRecv)
 {
-   if (ipRecv.getDevice() == m_indiP_C1volts.getDevice() && ipRecv.getName() == m_indiP_C1volts.getName())
-   {
-      try
-      {
-         m_indiP_C1volts = ipRecv;
-         double nv = ipRecv["value"].get<double>();
+    INDI_VALIDATE_CALLBACK_PROPS(m_indiP_C1volts, ipRecv);
 
-         m_C1volts = nv;
-         return 0;
-      }
-      catch(...)
-      {
-         log<software_error>({__FILE__, __LINE__, "exception from libcommon"});
-         return -1;
-      }
-   }
-   log<software_error>({__FILE__, __LINE__, "wrong INDI property"});
-   return -1;
+    ///\todo use find to test
+    try
+    {
+       m_indiP_C1volts = ipRecv;
+       double nv = ipRecv["value"].get<double>();
+
+       m_C1volts = nv;
+       return 0;
+    }
+    catch(...)
+    {
+       log<software_error>({__FILE__, __LINE__, "exception from libcommon"});
+       return -1;
+    }
+
 }
 
 INDI_SETCALLBACK_DEFN(ttmModulator, m_indiP_C1ofst)(const pcf::IndiProperty &ipRecv)
 {
-   if (ipRecv.getDevice() == m_indiP_C1ofst.getDevice() && ipRecv.getName() == m_indiP_C1ofst.getName())
-   {
-      try
-      {
-         m_indiP_C1ofst = ipRecv;
-         double nv = ipRecv["value"].get<double>();
+    INDI_VALIDATE_CALLBACK_PROPS(m_indiP_C1ofst, ipRecv);
 
-         m_C1ofst = nv;
+    ///\todo use find to test
+    try
+    {
+       m_indiP_C1ofst = ipRecv;
+       double nv = ipRecv["value"].get<double>();
 
-         return 0;
-      }
-      catch(...)
-      {
-         log<software_error>({__FILE__, __LINE__, "exception from libcommon"});
-         return -1;
-      }
-   }
-   log<software_error>({__FILE__, __LINE__, "wrong INDI property"});
-   return -1;
+       m_C1ofst = nv;
+
+       return 0;
+    }
+    catch(...)
+    {
+       log<software_error>({__FILE__, __LINE__, "exception from libcommon"});
+       return -1;
+    }
+   
 }
 
 INDI_SETCALLBACK_DEFN(ttmModulator, m_indiP_C1phse)(const pcf::IndiProperty &ipRecv)
 {
-   if (ipRecv.getDevice() == m_indiP_C1phse.getDevice() && ipRecv.getName() == m_indiP_C1phse.getName())
-   {
-      try
-      {
-         m_indiP_C1phse = ipRecv;
-         double nv = ipRecv["value"].get<double>();
 
-         m_C1phse = nv;
+    INDI_VALIDATE_CALLBACK_PROPS(m_indiP_C1phse, ipRecv);
 
-         return 0;
-      }
-      catch(...)
-      {
-         log<software_error>({__FILE__, __LINE__, "exception from libcommon"});
-         return -1;
-      }
-   }
-   log<software_error>({__FILE__, __LINE__, "wrong INDI property"});
-   return -1;
+    ///\todo use find to test
+    try
+    {
+       m_indiP_C1phse = ipRecv;
+       double nv = ipRecv["value"].get<double>();
+
+       m_C1phse = nv;
+
+       return 0;
+    }
+    catch(...)
+    {
+       log<software_error>({__FILE__, __LINE__, "exception from libcommon"});
+       return -1;
+    }
+
 }
 
 INDI_SETCALLBACK_DEFN(ttmModulator, m_indiP_C2outp)(const pcf::IndiProperty &ipRecv)
 {
-   if (ipRecv.getDevice() == m_indiP_C2outp.getDevice() && ipRecv.getName() == m_indiP_C2outp.getName())
-   {
-      try
-      {
-         m_indiP_C2outp = ipRecv;
-         std::string outp = ipRecv["value"].getValue();
+    INDI_VALIDATE_CALLBACK_PROPS(m_indiP_C2outp, ipRecv);
+    
+    ///\todo use find to test
+    try
+    {
+       m_indiP_C2outp = ipRecv;
+       std::string outp = ipRecv["value"].getValue();
 
-         if( outp == "Off" )
-         {
-            m_C2outp = 0;
-         }
-         else if (outp == "On")
-         {
-            m_C2outp = 1;
-         }
-         else
-         {
-            m_C2outp = -1;
-         }
+       if( outp == "Off" )
+       {
+          m_C2outp = 0;
+       }
+       else if (outp == "On")
+       {
+          m_C2outp = 1;
+       }
+       else
+       {
+          m_C2outp = -1;
+       }
 
-         return 0;
-      }
-      catch(...)
-      {
-         log<software_error>({__FILE__, __LINE__, "exception from libcommon"});
-         return -1;
-      }
-   }
-   log<software_error>({__FILE__, __LINE__, "wrong INDI property"});
-   return -1;
+       return 0;
+    }
+    catch(...)
+    {
+       log<software_error>({__FILE__, __LINE__, "exception from libcommon"});
+       return -1;
+    }
+   
 }
 
 INDI_SETCALLBACK_DEFN(ttmModulator, m_indiP_C2freq)(const pcf::IndiProperty &ipRecv)
 {
-   if (ipRecv.getDevice() == m_indiP_C2freq.getDevice() && ipRecv.getName() == m_indiP_C2freq.getName())
-   {
-      try
-      {
-         m_indiP_C2freq = ipRecv;
-         double nv = ipRecv["value"].get<double>();
+    INDI_VALIDATE_CALLBACK_PROPS(m_indiP_C2freq, ipRecv);
 
-         m_C2freq = nv;
+    ///\todo use find to test
+    try
+    {
+       m_indiP_C2freq = ipRecv;
+       double nv = ipRecv["value"].get<double>();
 
-         return 0;
-      }
-      catch(...)
-      {
-         log<software_error>({__FILE__, __LINE__, "exception from libcommon"});
-         return -1;
-      }
-   }
-   log<software_error>({__FILE__, __LINE__, "wrong INDI property"});
-   return -1;
+       m_C2freq = nv;
+
+       return 0;
+    }
+    catch(...)
+    {
+       log<software_error>({__FILE__, __LINE__, "exception from libcommon"});
+       return -1;
+    }
+   
 }
 
 INDI_SETCALLBACK_DEFN(ttmModulator, m_indiP_C2volts)(const pcf::IndiProperty &ipRecv)
 {
-   if (ipRecv.getDevice() == m_indiP_C2volts.getDevice() && ipRecv.getName() == m_indiP_C2volts.getName())
-   {
-      try
-      {
-         m_indiP_C2volts = ipRecv;
-         double nv = ipRecv["value"].get<double>();
+    INDI_VALIDATE_CALLBACK_PROPS(m_indiP_C2volts, ipRecv);
 
-         m_C2volts = nv;
-         return 0;
-      }
-      catch(...)
-      {
-         log<software_error>({__FILE__, __LINE__, "exception from libcommon"});
-         return -1;
-      }
-   }
-   log<software_error>({__FILE__, __LINE__, "wrong INDI property"});
-   return -1;
+    ///\todo use find to test
+    try
+    {
+       m_indiP_C2volts = ipRecv;
+       double nv = ipRecv["value"].get<double>();
+
+       m_C2volts = nv;
+       return 0;
+    }
+    catch(...)
+    {
+       log<software_error>({__FILE__, __LINE__, "exception from libcommon"});
+       return -1;
+    }
+   
 }
 
 INDI_SETCALLBACK_DEFN(ttmModulator, m_indiP_C2ofst)(const pcf::IndiProperty &ipRecv)
 {
-   if (ipRecv.getDevice() == m_indiP_C2ofst.getDevice() && ipRecv.getName() == m_indiP_C2ofst.getName())
-   {
-      try
-      {
-         m_indiP_C2ofst = ipRecv;
+    INDI_VALIDATE_CALLBACK_PROPS(m_indiP_C2ofst, ipRecv);
+   
+    ///\todo use find to test
+    try
+    {
+       m_indiP_C2ofst = ipRecv;
 
-         double nv = ipRecv["value"].get<double>();
+       double nv = ipRecv["value"].get<double>();
 
-         m_C2ofst = nv;
+       m_C2ofst = nv;
 
-         return 0;
-      }
-      catch(...)
-      {
-         log<software_error>({__FILE__, __LINE__, "exception from libcommon"});
-         return -1;
-      }
-   }
-   log<software_error>({__FILE__, __LINE__, "wrong INDI property"});
-   return -1;
+       return 0;
+    }
+    catch(...)
+    {
+       log<software_error>({__FILE__, __LINE__, "exception from libcommon"});
+       return -1;
+    }
+   
 }
 
 INDI_SETCALLBACK_DEFN(ttmModulator, m_indiP_C2phse)(const pcf::IndiProperty &ipRecv)
 {
-   if (ipRecv.getDevice() == m_indiP_C2phse.getDevice() && ipRecv.getName() == m_indiP_C2phse.getName())
-   {
-      try
-      {
-         m_indiP_C2phse = ipRecv;
-         double nv = ipRecv["value"].get<double>();
+    INDI_VALIDATE_CALLBACK_PROPS(m_indiP_C2phse, ipRecv);
+   
+    ///\todo use find to test
+    try
+    {
+       m_indiP_C2phse = ipRecv;
+       double nv = ipRecv["value"].get<double>();
 
-         m_C2phse = nv;
+       m_C2phse = nv;
 
-         return 0;
-      }
-      catch(...)
-      {
-         log<software_error>({__FILE__, __LINE__, "exception from libcommon"});
-         return -1;
-      }
-   }
-   log<software_error>({__FILE__, __LINE__, "wrong INDI property"});
-   return -1;
+       return 0;
+    }
+    catch(...)
+    {
+       log<software_error>({__FILE__, __LINE__, "exception from libcommon"});
+       return -1;
+    }   
 }
 
 } //namespace app

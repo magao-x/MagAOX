@@ -42,6 +42,7 @@ apps_icc = \
 	hsfwCtrl \
 	baslerCtrl \
 	picamCtrl \
+	pvcamCtrl \
 	smc100ccCtrl \
 	andorCtrl \
 	usbtempMon \
@@ -159,10 +160,10 @@ all: indi_all libs_all flatlogs apps_all guis_all utils_all
 install: indi_install libs_install flatlogs_all apps_install guis_install utils_install scripts_install rtscripts_install
 
 #We clean just libMagAOX, and the apps, guis, and utils for normal devel work.
-clean: lib_clean apps_clean guis_clean utils_clean
+clean: lib_clean apps_clean guis_clean utils_clean tests_clean
 
 #Clean everything.
-all_clean: indi_clean libs_clean flatlogs_clean lib_clean apps_clean guis_clean utils_clean doc_clean
+all_clean: indi_clean libs_clean flatlogs_clean lib_clean apps_clean guis_clean utils_clean doc_clean tests_clean
 
 flatlogs_all:
 	cd flatlogs/src/; ${MAKE} install
@@ -281,7 +282,9 @@ utils_clean:
 			(cd utils/$$app; ${MAKE} clean) || exit 1; \
 		done
 
-
+tests_clean:
+	cd tests; ${MAKE} clean || exit1;
+	
 .PHONY: doc
 doc:
 	doxygen doc/config/Doxyfile.libMagAOX

@@ -8,7 +8,10 @@
 
 #include "../zaberLowLevel.hpp"
 
-#include "../za_serial.c" //to allow test to compile
+extern "C"
+{
+    #include "../za_serial.c" //to allow test to compile
+}
 
 using namespace MagAOX::app;
 
@@ -23,7 +26,9 @@ SCENARIO( "Parsing the warnings response", "[zaberStage]" )
 
       WHEN("Valid response, no warnings")
       {
-         zaberStage zstg;
+         zaberLowLevel zll;
+
+         zaberStage<zaberLowLevel> zstg(&zll);
          
          std::string tstr = "00";
  
@@ -55,8 +60,10 @@ SCENARIO( "Parsing the warnings response", "[zaberStage]" )
    
       WHEN("Valid response, one warning")
       {
-         zaberStage zstg;
-         
+         zaberLowLevel zll;
+
+         zaberStage<zaberLowLevel> zstg(&zll);
+
          std::string tstr = "01 WR";
  
          rv = zstg.parseWarnings(tstr);
@@ -87,8 +94,10 @@ SCENARIO( "Parsing the warnings response", "[zaberStage]" )
       
       WHEN("Valid response, five warnings")
       {
-         zaberStage zstg;
-         
+         zaberLowLevel zll;
+
+         zaberStage<zaberLowLevel> zstg(&zll);
+
          std::string tstr = "05 FD FQ FS FT FB";
  
          rv = zstg.parseWarnings(tstr);
@@ -119,8 +128,10 @@ SCENARIO( "Parsing the warnings response", "[zaberStage]" )
       
       WHEN("Valid response, ten warnings")
       {
-         zaberStage zstg;
-         
+         zaberLowLevel zll;
+
+         zaberStage<zaberLowLevel> zstg(&zll);
+
          std::string tstr = "10 FP FE WH WL WP WV WT WM WR NC";
  
          rv = zstg.parseWarnings(tstr);
@@ -150,7 +161,9 @@ SCENARIO( "Parsing the warnings response", "[zaberStage]" )
       }
       WHEN("Valid response, 2 warnings")
       {
-         zaberStage zstg;
+         zaberLowLevel zll;
+
+         zaberStage<zaberLowLevel> zstg(&zll);
          
          std::string tstr = "02 NI ND";
       
@@ -181,7 +194,10 @@ SCENARIO( "Parsing the warnings response", "[zaberStage]" )
       }
       WHEN("Valid response, 3 warnings")
       {
-         zaberStage zstg;
+         zaberLowLevel zll;
+
+         zaberStage<zaberLowLevel> zstg(&zll);
+
          
          std::string tstr = "03 NU NJ UN";
       

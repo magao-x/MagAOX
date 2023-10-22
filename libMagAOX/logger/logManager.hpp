@@ -465,7 +465,7 @@ void logManager<parentT, logFileT>::logThreadExec()
                m_logThreadRunning = false;
                return;
             }
-            
+        
             if(m_parent)
             {
                m_parent->logMessage( *it );

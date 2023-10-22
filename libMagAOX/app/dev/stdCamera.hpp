@@ -58,6 +58,8 @@ int loadCameraConfig( cameraConfigMap & ccmap, ///< [out] the map in which to pl
   *  friend class dev::stdCamera<derivedT>;
   * \endcode
   *
+  * int powerOnDefaults()
+  * 
   * Temperature:
   * 
   * A static configuration variable must be defined in derivedT as
@@ -85,7 +87,11 @@ int loadCameraConfig( cameraConfigMap & ccmap, ///< [out] the map in which to pl
   * which determines whether or not readout speed controls are exposed.  If true, then the implementation should populate
   * m_readoutSpeedNames and m_readoutSpeedNameLabels (vectors of strings) on construction to the allowed values.  This 
   * facility is normally used to control both amplifier and readout/adc speed with names like "ccd_1MHz" and "emccd_17MHz".  
-  * If used (and true) the setReadoutSpeed() function must be define which sets the camera according to m_readoutSpeedNameSet.
+  * If used (and true) the 
+  * \code
+  * int setReadoutSpeed();
+  * \endcode
+  * function must be define which sets the camera according to m_readoutSpeedNameSet.
   * The implementation must also manage m_readoutSpeedName, keeping it up to date.  The configuration setting camera.defaultReadoutSpeed
   * is also exposed, and the implementation can set this default with m_defaultReadoutSpeed. 
   * 
@@ -97,7 +103,11 @@ int loadCameraConfig( cameraConfigMap & ccmap, ///< [out] the map in which to pl
   * which determines whether or not vertical shift speed controls are exposed. If true, then the implementation should populate
   * m_vShiftSpeedNames and m_vShiftSpeedLabels (vectors of strings) on construction to the allowed values.  This 
   * facility is normally used names like "0_3us" and "1_3us".  
-  * If used (and true) the setVShiftSpeed() function must be defined which sets the camera according to m_vShiftSpeedNameSet.
+  * If used (and true) the 
+  * \code 
+  * int setVShiftSpeed();
+  * \endcode
+  * function must be defined which sets the camera according to m_vShiftSpeedNameSet.
   * The implementation must also manage m_vShiftSpeedName, keeping it up to date.  The configuration setting camera.defaultVShiftSpeed
   * is also exposed, and the implementation can set this default with m_defaultVShiftSpeed. 
   * 
@@ -143,8 +153,12 @@ int loadCameraConfig( cameraConfigMap & ccmap, ///< [out] the map in which to pl
   * static constexpr bool c_stdCamera_emGain = true; //or: false
   * \endcode
   * which determines whether or not EM gain controls are exposed.  If the camera uses EM Gain, then 
-  * a function setEMGain() must be defined which sets the camera EM Gain to m_emGainSet.  The implementation
-  * must also keep m_emGain up to date.  The value of m_maxEMGain should be set by the implementation and managed
+  * a function 
+  * \code
+  * int setEMGain();
+  * \endcode
+  * must be defined which sets the camera EM Gain to \ref m_emGainSet.  The implementation
+  * must also keep m_emGain up to date.  The value of \ref m_maxEMGain should be set by the implementation and managed
   * as needed.
   * 
   * Camera Modes:
@@ -170,16 +184,23 @@ int loadCameraConfig( cameraConfigMap & ccmap, ///< [out] the map in which to pl
   * \code
   * static constexpr bool c_stdCamera_cropMode = true; //or: false
   * \endcode
+  * and the derived class must implement 
+  * \code
+  * int setCropMode();
+  * \endcode
+  * which changes the crop mode according to \ref m_cropModeSet.
   * 
   * Shutters:
   * A static configuration variable must be defined in derivedT as
   * \code
   * static constexpr bool c_stdCamera_hasShutter = true; //or: false
   * \endcode
+  * and a funciton must defined
   * \code
   * int setShutter(int); 
   * \endcode
-  *
+  * which shuts the shutter if the argument is 0, opens it otherwise.
+  * 
   * State:
   * A static configuration variable must be defined in derivedT as
   * \code
@@ -554,7 +575,7 @@ protected:
 public:
 
    /// The static callback function to be registered for stdCamera properties
-   /** Dispatches to the relevant handler
+   /** Calls newCallback_stdCamera
      * 
      * \returns 0 on success.
      * \returns -1 on error.
@@ -563,6 +584,14 @@ public:
                                         const pcf::IndiProperty &ipRecv ///< [in] the INDI property sent with the the new property request.
                                       );
    
+   /// The callback function for stdCamera properties
+   /** Dispatches to the relevant handler
+     * 
+     * \returns 0 on success.
+     * \returns -1 on error.
+     */
+   int newCallBack_stdCamera( const pcf::IndiProperty &ipRecv /**< [in] the INDI property sent with the the new property request.*/);
+
    /// Interface to setTempSetPt when the derivedT has temperature control
    /** Tag-dispatch resolution of c_stdCamera_tempControl==true will call this function.
      * Calls derivedT::setTempSetPt. 
@@ -1663,37 +1692,56 @@ int stdCamera<derivedT>::st_newCallBack_stdCamera( void * app,
                                                    const pcf::IndiProperty &ipRecv
                                                  )
 {
-   std::string name = ipRecv.getName();
    derivedT * _app = static_cast<derivedT *>(app);
+   return _app->newCallBack_stdCamera(ipRecv);
+}
+
+template<class derivedT>
+int stdCamera<derivedT>::newCallBack_stdCamera( const pcf::IndiProperty &ipRecv )
+{
    
-   if(name == "reconfigure") return _app->newCallBack_reconfigure(ipRecv);
-   else if(derivedT::c_stdCamera_temp &&         name == "temp_ccd") return _app->newCallBack_temp(ipRecv);
-   else if(derivedT::c_stdCamera_tempControl &&  name == "temp_ccd") return _app->newCallBack_temp(ipRecv);
-   else if(derivedT::c_stdCamera_tempControl &&  name == "temp_controller") return _app->newCallBack_temp_controller(ipRecv);
-   else if(derivedT::c_stdCamera_readoutSpeed && name == "readout_speed") return _app->newCallBack_readoutSpeed(ipRecv);
-   else if(derivedT::c_stdCamera_vShiftSpeed &&  name == "vshift_speed") return _app->newCallBack_vShiftSpeed(ipRecv);
-   else if(derivedT::c_stdCamera_emGain &&       name == "emgain") return _app->newCallBack_emgain(ipRecv);
-   else if(derivedT::c_stdCamera_exptimeCtrl &&  name == "exptime") return _app->newCallBack_exptime(ipRecv);
-   else if(derivedT::c_stdCamera_fpsCtrl &&      name == "fps") return _app->newCallBack_fps(ipRecv);
-   else if(derivedT::c_stdCamera_synchro &&      name == "synchro") return _app->newCallBack_synchro(ipRecv);
-   else if(derivedT::c_stdCamera_usesModes &&    name == "mode") return _app->newCallBack_mode(ipRecv);
-   else if(derivedT::c_stdCamera_cropMode &&     name == "roi_crop_mode") return _app->newCallBack_cropMode(ipRecv);
-   else if(derivedT::c_stdCamera_usesROI &&      name == "roi_region_x") return _app->newCallBack_roi_x(ipRecv);
-   else if(derivedT::c_stdCamera_usesROI &&      name == "roi_region_y") return _app->newCallBack_roi_y(ipRecv);
-   else if(derivedT::c_stdCamera_usesROI &&      name == "roi_region_w") return _app->newCallBack_roi_w(ipRecv);
-   else if(derivedT::c_stdCamera_usesROI &&      name == "roi_region_h") return _app->newCallBack_roi_h(ipRecv);
-   else if(derivedT::c_stdCamera_usesROI &&      name == "roi_region_bin_x") return _app->newCallBack_roi_bin_x(ipRecv);
-   else if(derivedT::c_stdCamera_usesROI &&      name == "roi_region_bin_y") return _app->newCallBack_roi_bin_y(ipRecv);
-   else if(derivedT::c_stdCamera_usesROI &&      name == "roi_region_check") return _app->newCallBack_roi_check(ipRecv);
-   else if(derivedT::c_stdCamera_usesROI &&      name == "roi_set") return _app->newCallBack_roi_set(ipRecv);
-   else if(derivedT::c_stdCamera_usesROI &&      name == "roi_set_full") return _app->newCallBack_roi_full(ipRecv);
-   else if(derivedT::c_stdCamera_usesROI &&      name == "roi_set_full_bin") return _app->newCallBack_roi_fullbin(ipRecv);
-   else if(derivedT::c_stdCamera_usesROI &&      name == "roi_load_last") return _app->newCallBack_roi_loadlast(ipRecv);
-   else if(derivedT::c_stdCamera_usesROI &&      name == "roi_set_last") return _app->newCallBack_roi_last(ipRecv);
-   else if(derivedT::c_stdCamera_usesROI &&      name == "roi_set_default") return _app->newCallBack_roi_default(ipRecv);
-   else if(derivedT::c_stdCamera_hasShutter &&   name == "shutter") return _app->newCallBack_shutter(ipRecv);
-   
+   if(ipRecv.getDevice() != derived().configName())
+   {
+       #ifndef XWCTEST_INDI_CALLBACK_VALIDATION
+       derivedT::template log<software_error>({__FILE__, __LINE__, "unknown INDI property"});
+       #endif
+
+       return -1;
+   }
+
+   std::string name = ipRecv.getName();
+
+   if(                                           name == "reconfigure") return newCallBack_reconfigure(ipRecv);
+   else if(derivedT::c_stdCamera_temp &&         name == "temp_ccd") return newCallBack_temp(ipRecv);
+   else if(derivedT::c_stdCamera_tempControl &&  name == "temp_ccd") return newCallBack_temp(ipRecv);
+   else if(derivedT::c_stdCamera_tempControl &&  name == "temp_controller") return newCallBack_temp_controller(ipRecv);
+   else if(derivedT::c_stdCamera_readoutSpeed && name == "readout_speed") return newCallBack_readoutSpeed(ipRecv);
+   else if(derivedT::c_stdCamera_vShiftSpeed &&  name == "vshift_speed") return newCallBack_vShiftSpeed(ipRecv);
+   else if(derivedT::c_stdCamera_emGain &&       name == "emgain") return newCallBack_emgain(ipRecv);
+   else if(derivedT::c_stdCamera_exptimeCtrl &&  name == "exptime") return newCallBack_exptime(ipRecv);
+   else if(derivedT::c_stdCamera_fpsCtrl &&      name == "fps") return newCallBack_fps(ipRecv);
+   else if(derivedT::c_stdCamera_synchro &&      name == "synchro") return newCallBack_synchro(ipRecv);
+   else if(derivedT::c_stdCamera_usesModes &&    name == "mode") return newCallBack_mode(ipRecv);
+   else if(derivedT::c_stdCamera_cropMode &&     name == "roi_crop_mode") return newCallBack_cropMode(ipRecv);
+   else if(derivedT::c_stdCamera_usesROI &&      name == "roi_region_x") return newCallBack_roi_x(ipRecv);
+   else if(derivedT::c_stdCamera_usesROI &&      name == "roi_region_y") return newCallBack_roi_y(ipRecv);
+   else if(derivedT::c_stdCamera_usesROI &&      name == "roi_region_w") return newCallBack_roi_w(ipRecv);
+   else if(derivedT::c_stdCamera_usesROI &&      name == "roi_region_h") return newCallBack_roi_h(ipRecv);
+   else if(derivedT::c_stdCamera_usesROI &&      name == "roi_region_bin_x") return newCallBack_roi_bin_x(ipRecv);
+   else if(derivedT::c_stdCamera_usesROI &&      name == "roi_region_bin_y") return newCallBack_roi_bin_y(ipRecv);
+   else if(derivedT::c_stdCamera_usesROI &&      name == "roi_region_check") return newCallBack_roi_check(ipRecv);
+   else if(derivedT::c_stdCamera_usesROI &&      name == "roi_set") return newCallBack_roi_set(ipRecv);
+   else if(derivedT::c_stdCamera_usesROI &&      name == "roi_set_full") return newCallBack_roi_full(ipRecv);
+   else if(derivedT::c_stdCamera_usesROI &&      name == "roi_set_full_bin") return newCallBack_roi_fullbin(ipRecv);
+   else if(derivedT::c_stdCamera_usesROI &&      name == "roi_load_last") return newCallBack_roi_loadlast(ipRecv);
+   else if(derivedT::c_stdCamera_usesROI &&      name == "roi_set_last") return newCallBack_roi_last(ipRecv);
+   else if(derivedT::c_stdCamera_usesROI &&      name == "roi_set_default") return newCallBack_roi_default(ipRecv);
+   else if(derivedT::c_stdCamera_hasShutter &&   name == "shutter") return newCallBack_shutter(ipRecv);
+
+   #ifndef XWCTEST_INDI_CALLBACK_VALIDATION
    derivedT::template log<software_error>({__FILE__,__LINE__, "unknown INDI property"});
+   #endif
+
    return -1;
 }
 
@@ -1716,20 +1764,24 @@ int stdCamera<derivedT>::newCallBack_temp( const pcf::IndiProperty &ipRecv )
 {
    if(derivedT::c_stdCamera_tempControl)
    {
-      float target;
-      
-      std::unique_lock<std::mutex> lock(derived().m_indiMutex);
-      
-      if( derived().indiTargetUpdate( m_indiP_temp, target, ipRecv, true) < 0)
-      {
-         derivedT::template log<software_error>({__FILE__,__LINE__});
-         return -1;
-      }
-      
-      m_ccdTempSetpt = target;
-      
-      mx::meta::trueFalseT<derivedT::c_stdCamera_tempControl> tf;
-      return setTempSetPt(tf);
+       #ifdef XWCTEST_INDI_CALLBACK_VALIDATION
+          return 0;
+       #endif
+
+       float target;
+
+       std::unique_lock<std::mutex> lock(derived().m_indiMutex);
+
+       if (derived().indiTargetUpdate(m_indiP_temp, target, ipRecv, true) < 0)
+       {
+           derivedT::template log<software_error>({__FILE__, __LINE__});
+           return -1;
+       }
+
+       m_ccdTempSetpt = target;
+
+       mx::meta::trueFalseT<derivedT::c_stdCamera_tempControl> tf;
+       return setTempSetPt(tf);
    }
    else
    {
@@ -1756,12 +1808,10 @@ int stdCamera<derivedT>::newCallBack_temp_controller( const pcf::IndiProperty &i
 {
    if(derivedT::c_stdCamera_tempControl)
    {
-      if(ipRecv.getName() != m_indiP_tempcont.getName())
-      {
-         derivedT::template log<software_error>({__FILE__,__LINE__, "wrong INDI property received."});
-         return -1;
-      }
-      
+      #ifdef XWCTEST_INDI_CALLBACK_VALIDATION
+          return 0;
+      #endif
+            
       if(!ipRecv.find("toggle")) return 0;
       
       m_tempControlStatusSet = false;
@@ -1807,6 +1857,10 @@ int stdCamera<derivedT>::newCallBack_readoutSpeed( const pcf::IndiProperty &ipRe
 {
    if(derivedT::c_stdCamera_readoutSpeed)
    {
+      #ifdef XWCTEST_INDI_CALLBACK_VALIDATION
+          return 0;
+      #endif
+
       std::unique_lock<std::mutex> lock(derived().m_indiMutex);
 
       std::string newspeed;
@@ -1863,6 +1917,10 @@ int stdCamera<derivedT>::newCallBack_vShiftSpeed( const pcf::IndiProperty &ipRec
 {
    if(derivedT::c_stdCamera_vShiftSpeed)
    {
+      #ifdef XWCTEST_INDI_CALLBACK_VALIDATION
+          return 0;
+      #endif
+
       std::unique_lock<std::mutex> lock(derived().m_indiMutex);
 
       std::string newspeed;
@@ -1919,6 +1977,10 @@ int stdCamera<derivedT>::newCallBack_emgain( const pcf::IndiProperty &ipRecv)
 {
    if(derivedT::c_stdCamera_emGain)
    {
+      #ifdef XWCTEST_INDI_CALLBACK_VALIDATION
+          return 0;
+      #endif
+
       float target;
 
       std::unique_lock<std::mutex> lock(derived().m_indiMutex);
@@ -1957,6 +2019,10 @@ int stdCamera<derivedT>::newCallBack_exptime( const pcf::IndiProperty &ipRecv)
 {
    if(derivedT::c_stdCamera_exptimeCtrl)
    {
+      #ifdef XWCTEST_INDI_CALLBACK_VALIDATION
+          return 0;
+      #endif
+
       float target;
 
       std::unique_lock<std::mutex> lock(derived().m_indiMutex);
@@ -1995,6 +2061,10 @@ int stdCamera<derivedT>::newCallBack_fps( const pcf::IndiProperty &ipRecv)
 {
    if(derivedT::c_stdCamera_fpsCtrl)
    {
+      #ifdef XWCTEST_INDI_CALLBACK_VALIDATION
+          return 0;
+      #endif
+
       float target;
 
       std::unique_lock<std::mutex> lock(derived().m_indiMutex);
@@ -2033,11 +2103,9 @@ int stdCamera<derivedT>::newCallBack_synchro( const pcf::IndiProperty &ipRecv)
 {
    if(derivedT::c_stdCamera_synchro)
    {
-      if(ipRecv.getName() != m_indiP_synchro.getName())
-      {
-         derivedT::template log<software_error>({__FILE__,__LINE__, "wrong INDI property received."});
-         return -1;
-      }
+      #ifdef XWCTEST_INDI_CALLBACK_VALIDATION
+          return 0;
+      #endif
    
       if(!ipRecv.find("toggle")) return 0;
    
@@ -2065,6 +2133,10 @@ int stdCamera<derivedT>::newCallBack_mode( const pcf::IndiProperty &ipRecv )
 {
    if(derivedT::c_stdCamera_usesModes)
    {
+      #ifdef XWCTEST_INDI_CALLBACK_VALIDATION
+          return 0;
+      #endif
+
       std::unique_lock<std::mutex> lock(derived().m_indiMutex);
       
       if(ipRecv.getName() != m_indiP_mode.getName())
@@ -2102,22 +2174,20 @@ int stdCamera<derivedT>::newCallBack_mode( const pcf::IndiProperty &ipRecv )
       
       return 0;
    }
-   
-   return 0;
-  
+   else
+   {
+      return 0;
+   }
 }
    
 template<class derivedT>
 int stdCamera<derivedT>::newCallBack_reconfigure( const pcf::IndiProperty &ipRecv )
 {
-   if(ipRecv.getName() != m_indiP_reconfig.getName())
-   {
-      derivedT::template log<software_error>({__FILE__,__LINE__, "wrong INDI property received."});
-      return -1;
-   }
+   #ifdef XWCTEST_INDI_CALLBACK_VALIDATION
+      return 0;
+   #endif
    
    if(!ipRecv.find("request")) return 0;
-   
    
    if( ipRecv["request"].getSwitchState() == pcf::IndiElement::On)
    {
@@ -2152,12 +2222,10 @@ int stdCamera<derivedT>::newCallBack_cropMode( const pcf::IndiProperty &ipRecv)
 {
    if(derivedT::c_stdCamera_cropMode)
    {
-      if(ipRecv.getName() != m_indiP_cropMode.getName())
-      {
-         derivedT::template log<software_error>({__FILE__,__LINE__, "wrong INDI property received."});
-         return -1;
-      }
-   
+      #ifdef XWCTEST_INDI_CALLBACK_VALIDATION
+          return 0;
+      #endif
+
       if(!ipRecv.find("toggle")) return 0;
    
       if( ipRecv["toggle"].getSwitchState() == pcf::IndiElement::Off )
@@ -2179,9 +2247,14 @@ int stdCamera<derivedT>::newCallBack_cropMode( const pcf::IndiProperty &ipRecv)
    return 0;
 }
 
+///\todo why don't these check if usesROI is true?
 template<class derivedT>
 int stdCamera<derivedT>::newCallBack_roi_x( const pcf::IndiProperty &ipRecv )
 {
+   #ifdef XWCTEST_INDI_CALLBACK_VALIDATION
+        return 0;
+   #endif
+
    float target;
    
    std::unique_lock<std::mutex> lock(derived().m_indiMutex);
@@ -2201,6 +2274,10 @@ int stdCamera<derivedT>::newCallBack_roi_x( const pcf::IndiProperty &ipRecv )
 template<class derivedT>
 int stdCamera<derivedT>::newCallBack_roi_y( const pcf::IndiProperty &ipRecv )
 {
+   #ifdef XWCTEST_INDI_CALLBACK_VALIDATION
+          return 0;
+   #endif
+
    float target;
    
    std::unique_lock<std::mutex> lock(derived().m_indiMutex);
@@ -2220,6 +2297,10 @@ int stdCamera<derivedT>::newCallBack_roi_y( const pcf::IndiProperty &ipRecv )
 template<class derivedT>
 int stdCamera<derivedT>::newCallBack_roi_w( const pcf::IndiProperty &ipRecv )
 {
+   #ifdef XWCTEST_INDI_CALLBACK_VALIDATION
+          return 0;
+   #endif
+
    int target;
    
    std::unique_lock<std::mutex> lock(derived().m_indiMutex);
@@ -2239,6 +2320,10 @@ int stdCamera<derivedT>::newCallBack_roi_w( const pcf::IndiProperty &ipRecv )
 template<class derivedT>
 int stdCamera<derivedT>::newCallBack_roi_h( const pcf::IndiProperty &ipRecv )
 {
+   #ifdef XWCTEST_INDI_CALLBACK_VALIDATION
+          return 0;
+   #endif
+
    int target;
    
    std::unique_lock<std::mutex> lock(derived().m_indiMutex);
@@ -2258,6 +2343,10 @@ int stdCamera<derivedT>::newCallBack_roi_h( const pcf::IndiProperty &ipRecv )
 template<class derivedT>
 int stdCamera<derivedT>::newCallBack_roi_bin_x ( const pcf::IndiProperty &ipRecv )
 {
+   #ifdef XWCTEST_INDI_CALLBACK_VALIDATION
+      return 0;
+   #endif
+
    int target;
    
    std::unique_lock<std::mutex> lock(derived().m_indiMutex);
@@ -2277,6 +2366,10 @@ int stdCamera<derivedT>::newCallBack_roi_bin_x ( const pcf::IndiProperty &ipRecv
 template<class derivedT>
 int stdCamera<derivedT>::newCallBack_roi_bin_y( const pcf::IndiProperty &ipRecv )
 {
+   #ifdef XWCTEST_INDI_CALLBACK_VALIDATION
+          return 0;
+   #endif
+ 
    int target;
    
    std::unique_lock<std::mutex> lock(derived().m_indiMutex);
@@ -2312,11 +2405,9 @@ int stdCamera<derivedT>::newCallBack_roi_check( const pcf::IndiProperty &ipRecv 
 {
    if(derivedT::c_stdCamera_usesROI)
    {
-      if(ipRecv.getName() != m_indiP_roi_check.getName())
-      {
-         derivedT::template log<software_error>({__FILE__,__LINE__, "wrong INDI property received."});
-         return -1;
-      }
+      #ifdef XWCTEST_INDI_CALLBACK_VALIDATION
+          return 0;
+      #endif
       
       if(!ipRecv.find("request")) return 0;
       
@@ -2355,12 +2446,10 @@ int stdCamera<derivedT>::newCallBack_roi_set( const pcf::IndiProperty &ipRecv )
 {
    if(derivedT::c_stdCamera_usesROI)
    {
-      if(ipRecv.getName() != m_indiP_roi_set.getName())
-      {
-         derivedT::template log<software_error>({__FILE__,__LINE__, "wrong INDI property received."});
-         return -1;
-      }
-      
+      #ifdef XWCTEST_INDI_CALLBACK_VALIDATION
+          return 0;
+      #endif
+
       if(!ipRecv.find("request")) return 0;
       
       if( ipRecv["request"].getSwitchState() == pcf::IndiElement::On)
@@ -2386,12 +2475,10 @@ int stdCamera<derivedT>::newCallBack_roi_full( const pcf::IndiProperty &ipRecv )
 {
    if(derivedT::c_stdCamera_usesROI)
    {
-      if(ipRecv.getName() != m_indiP_roi_full.getName())
-      {
-         derivedT::template log<software_error>({__FILE__,__LINE__, "wrong INDI property received."});
-         return -1;
-      }
-      
+      #ifdef XWCTEST_INDI_CALLBACK_VALIDATION
+          return 0;
+      #endif
+
       if(!ipRecv.find("request")) return 0;
       
       if( ipRecv["request"].getSwitchState() == pcf::IndiElement::On)
@@ -2422,12 +2509,10 @@ int stdCamera<derivedT>::newCallBack_roi_fullbin( const pcf::IndiProperty &ipRec
 {
    if(derivedT::c_stdCamera_usesROI)
    {
-      if(ipRecv.getName() != m_indiP_roi_fullbin.getName())
-      {
-         derivedT::template log<software_error>({__FILE__,__LINE__, "wrong INDI property received."});
-         return -1;
-      }
-      
+      #ifdef XWCTEST_INDI_CALLBACK_VALIDATION
+          return 0;
+      #endif
+
       if(!ipRecv.find("request")) return 0;
       
       if( ipRecv["request"].getSwitchState() == pcf::IndiElement::On)
@@ -2488,12 +2573,10 @@ int stdCamera<derivedT>::newCallBack_roi_loadlast( const pcf::IndiProperty &ipRe
 {
    if(derivedT::c_stdCamera_usesROI)
    {
-      if(ipRecv.getName() != m_indiP_roi_loadlast.getName())
-      {
-         derivedT::template log<software_error>({__FILE__,__LINE__, "wrong INDI property received."});
-         return -1;
-      }
-      
+      #ifdef XWCTEST_INDI_CALLBACK_VALIDATION
+          return 0;
+      #endif
+
       if(!ipRecv.find("request")) return 0;      
 
       if( ipRecv["request"].getSwitchState() == pcf::IndiElement::On)
@@ -2517,12 +2600,9 @@ int stdCamera<derivedT>::newCallBack_roi_last( const pcf::IndiProperty &ipRecv )
 {
    if(derivedT::c_stdCamera_usesROI)
    {
-      if(ipRecv.getName() != m_indiP_roi_last.getName())
-      {
-         derivedT::template log<software_error>({__FILE__,__LINE__, "wrong INDI property received."});
-         return -1;
-      }
-      
+      #ifdef XWCTEST_INDI_CALLBACK_VALIDATION
+          return 0;
+      #endif
       if(!ipRecv.find("request")) return 0;      
 
       if( ipRecv["request"].getSwitchState() == pcf::IndiElement::On)
@@ -2548,15 +2628,11 @@ int stdCamera<derivedT>::newCallBack_roi_default( const pcf::IndiProperty &ipRec
 {
    if(derivedT::c_stdCamera_usesROI)
    {
-      
-      if(ipRecv.getName() != m_indiP_roi_default.getName())
-      {
-         derivedT::template log<software_error>({__FILE__,__LINE__, "wrong INDI property received."});
-         return -1;
-      }
-      
+      #ifdef XWCTEST_INDI_CALLBACK_VALIDATION
+          return 0;
+      #endif
+
       if(!ipRecv.find("request")) return 0;
-      
       
       if( ipRecv["request"].getSwitchState() == pcf::IndiElement::On)
       {
@@ -2605,11 +2681,9 @@ int stdCamera<derivedT>::newCallBack_shutter( const pcf::IndiProperty &ipRecv )
 {
    if(derivedT::c_stdCamera_hasShutter)
    {
-      if(ipRecv.getName() != m_indiP_shutter.getName())
-      {
-         derivedT::template log<software_error>({__FILE__,__LINE__, "wrong INDI property received."});
-         return -1;
-      }
+      #ifdef XWCTEST_INDI_CALLBACK_VALIDATION
+          return 0;
+      #endif
       
       if(!ipRecv.find("toggle")) return 0;
       
