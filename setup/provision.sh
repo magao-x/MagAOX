@@ -117,7 +117,6 @@ fi
 if [[ $MAGAOX_ROLE == ci || $MAGAOX_ROLE == vm || $MAGAOX_ROLE == workstation || $MAGAOX_ROLE == AOC || $MAGAOX_ROLE == TOC ]]; then
     if [[ $ID == ubuntu ]]; then
         sudo NEEDRESTART_SUSPEND=yes apt install -y linux-headers-generic
-        sudo -i apt install -y linux-headers-generic
     elif [[ $ID == centos ]]; then
         sudo yum install -y kernel-devel-$(uname -r) || sudo yum install -y kernel-devel
     fi
@@ -265,7 +264,7 @@ bash -l "$DIR/steps/install_milkzmq.sh" || exit_error "milkzmq install failed"
 bash -l "$DIR/steps/install_purepyindi.sh" || exit_error "purepyindi install failed"
 bash -l "$DIR/steps/install_magpyx.sh" || exit_error "magpyx install failed"
 #bash -l "$DIR/steps/install_mxlib.sh" || exit_error "Failed to build and install mxlib"
-source /etc/profile.d/mxmakefile.sh
+#source /etc/profile.d/mxmakefile.sh
 
 ## Clone sources to /opt/MagAOX/source/MagAOX
 if [[ $MAGAOX_ROLE == ci ]]; then
