@@ -26,8 +26,8 @@ protected:
      * @{
      */
 
-   double m_maxFreq {0.0}; ///< The maximum modulation frequency settable by this program
-   double m_maxVolt {0.0}; ///< The maximum modulation voltage settable by this program
+   double m_maxFreq {300.0}; ///< The maximum modulation frequency settable by this program
+   double m_maxVolt {1.15}; ///< The maximum modulation voltage settable by this program
 
    double m_setVoltage_1 {5.0}; ///< the set position voltage of Ch. 1.
    double m_setVoltage_2 {5.0}; ///< the set position voltage of Ch. 2.
@@ -70,12 +70,18 @@ protected:
    std::vector<double> m_calC2Amps = {0.6,0.6,0.6,0.57,0.55,0.53,0.51,0.49,0.49,0.49,0.49,0.5,0.52,0.54,0.59,0.64,0.70,0.77};
    std::vector<double> m_calC2Phse = { 75, 75, 75,  75,  75,  75,  75,  75,  75,  75,  75,  75,  75,  72,  72,  70,  70,  70} ;*/
    
-   /* Cal on 2022-09-18:*/
+   /* Cal on 2022-09-18:
    std::vector<double> m_calFreqs = { 250,  500,   750,  1000,  1250,  1500,  1750,  2000,  2250,  2500,  2750,  3000,  3250,  3500};
    std::vector<double> m_calC1Amps = {0.66, 0.62, 0.58,  0.49,  0.44,  0.41,  0.43,  0.41,  0.35,  0.75,  1.0,   1.03,  1.08,  1.58 };
    std::vector<double> m_calC2Amps = {0.64, 0.61, 0.56, 0.54,   0.55,  0.57,  0.65,  0.78,  0.95,  1.15,   1.15,   2.25,  2.15,  1.97};
-   std::vector<double> m_calC2Phse = {  75, 75,    75,   75,    75,    75,    72,    67,    63,     35,    5,    18,    10,    -40} ;
+   std::vector<double> m_calC2Phse = {  75, 75,    75,   75,    75,    75,    72,    67,    63,     35,    5,    18,    10,    -40} ; */
    
+   /* Cal on 2023-10-22:*/
+   std::vector<double> m_calFreqs = {  100,  150,  200,  250,  300};
+   std::vector<double> m_calC1Amps = {0.71, 0.76, 0.85,  0.9,  1.0}; 
+   std::vector<double> m_calC2Amps = {0.71, 0.83, 0.88, 1.05, 1.15}; 
+   std::vector<double> m_calC2Phse = {  75,   80,   80,   80,   80}; 
+
 public:
 
    /// Default c'tor.
