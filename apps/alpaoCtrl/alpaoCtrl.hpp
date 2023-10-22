@@ -468,7 +468,7 @@ int alpaoCtrl::releaseDM()
 
    if(m_dm == nullptr)
    {
-      return log<software_error, -1>({__FILE__, __LINE__, "dm is not initialized"});
+      return 0;
    }
    
    state(stateCodes::READY);
@@ -478,7 +478,7 @@ int alpaoCtrl::releaseDM()
       pthread_kill(m_smThread.native_handle(), SIGUSR1);
    }
    
-   sleep(1); ///\todo need to trigger shmimMonitor loop to pause it.
+   sleep(1);
    
    if(zeroDM() < 0)
    {

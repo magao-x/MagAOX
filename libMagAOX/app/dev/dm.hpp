@@ -857,6 +857,7 @@ int dm<derivedT,realT>::appShutdown()
 template<class derivedT, typename realT>
 int dm<derivedT,realT>::onPowerOff()
 {
+   releaseDM();
    return 0;
 }
 

@@ -519,8 +519,7 @@ int bmcCtrl::releaseDM()
 
    if(!m_dmopen)
    {
-      log<text_log>("dm is not initialized", logPrio::LOG_ERROR);
-      return -1;
+      return 0;
    }
    
    state(stateCodes::READY);
@@ -530,7 +529,7 @@ int bmcCtrl::releaseDM()
       pthread_kill(m_smThread.native_handle(), SIGUSR1);
    }
    
-   sleep(1); ///\todo need to trigger shmimMonitor loop to pause it.
+   sleep(1);
    
    if(zeroDM() < 0)
    {
