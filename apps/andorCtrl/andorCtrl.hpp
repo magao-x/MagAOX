@@ -663,7 +663,6 @@ void andorCtrl::loadConfig()
    
    if(writeConfig() < 0)
    {
-      std::cerr << "m_configFile: " << m_configFile << "\n";
       log<software_critical>({__FILE__,__LINE__});
       m_shutdown = true;
       return;
@@ -1050,7 +1049,7 @@ int andorCtrl::cameraSelect()
    log<text_log>(std::string("Decode: ") + std::to_string(Decode));
    log<text_log>(std::string("f/w: ") + std::to_string(CameraFirmwareVersion) + "." + std::to_string(CameraFirmwareBuild));
    
-#if 0
+#if 0 //We don't normally need to do this, but keep here in case we want to check in the future
    int em_speeds;
    error=GetNumberHSSpeeds(0,0, &em_speeds);
    if(error != DRV_SUCCESS)
@@ -1081,7 +1080,7 @@ int andorCtrl::cameraSelect()
       std::cerr << i << " " << speed << "\n";
    }
 #endif
-#if 0
+#if 0 //We don't normally need to do this, but keep here in case we want to check in the future
    int v_speeds;
    error=GetNumberVSSpeeds(&v_speeds);
    if(error != DRV_SUCCESS)
@@ -1103,7 +1102,7 @@ int andorCtrl::cameraSelect()
    int ss = 2;
    if(m_shutterState == 1) ss = 1;
    else m_shutterState = 0; //handles startup case
-   error = SetShutter(1,ss,50,50);
+   error = SetShutter(1,ss,500,500);
    if(error != DRV_SUCCESS)
    {
       log<software_critical>({__FILE__, __LINE__, "ANDOR SDK SetShutter failed: " + andorSDKErrorName(error)});
@@ -1460,15 +1459,25 @@ int andorCtrl::setShutter( unsigned os )
    recordCamera(true);
    AbortAcquisition();
    state(stateCodes::CONFIGURING);
-
+    
    if(os == 0) //Shut
    {
-      SetShutter(1,2,50,50);
+      int error = SetShutter(1,2,500,500);
+      if(error != DRV_SUCCESS)
+      {
+         return log<software_error, -1>({__FILE__, __LINE__, "ANDOR SDK SetShutter failed: " + andorSDKErrorName(error)});
+      }
+
       m_shutterState = 0;
    }
    else //Open
    {
-      SetShutter(1,1,50,50);
+      int error = SetShutter(1,1,500,500);
+      if(error != DRV_SUCCESS)
+      {
+         return log<software_error, -1>({__FILE__, __LINE__, "ANDOR SDK SetShutter failed: " + andorSDKErrorName(error)});
+      }
+
       m_shutterState = 1;
    }
 
@@ -1612,8 +1621,6 @@ int andorCtrl::getFPS()
 
    m_expTime = exptime;
    
-   //std::cerr << accumCycletime << " " << kinCycletime << "\n";
-   
    float readoutTime;
    error = GetReadOutTime(&readoutTime);
    if(error != DRV_SUCCESS)
@@ -1621,8 +1628,6 @@ int andorCtrl::getFPS()
       return log<software_error,-1>({__FILE__, __LINE__, "ANDOR SDK error from GetReadOutTime: " + andorSDKErrorName(error)});
    }
    
-   //if(readoutTime < exptime) m_fps = 1./m_expTime;
-   //else m_fps = 1.0/readoutTime;
    m_fps = 1.0/accumCycletime;
    
    return 0;
@@ -1916,7 +1921,7 @@ int andorCtrl::loadImageIntoStream(void * dest)
    if( frameGrabber<andorCtrl>::loadImageIntoStreamCopy(dest, m_image_p, m_width, m_height, m_typeSize) == nullptr) return -1;
 
    return 0;
-   }
+ }
 
 inline
 int andorCtrl::reconfig()
