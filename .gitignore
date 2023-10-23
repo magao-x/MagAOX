@@ -65,6 +65,7 @@ apps/bmcCtrl/bmcCtrl
 
 #c
 apps/cacaoInterface/cacaoInterface
+apps/cameraSim/cameraSim
 
 #d
 apps/dmMode/dmMode
@@ -117,6 +118,7 @@ apps/picamCtrl/picamCtrl
 apps/picoMotorCtrl/picoMotorCtrl
 apps/pupilAlign/pupilAlign
 apps/pupilFit/pupilFit
+apps/pvcamCtrl/pvcamCtrl
 apps/pwfsSlopeCalc/pwfsSlopeCalc
 apps/photonCounter
 
@@ -186,6 +188,8 @@ utils/doc
 tests/singleTest
 tests/testMagAOX
 tests/testMagAOXsetuid
+tests/test_stderr.txt
+
 
 #Devel stuff in flatlogs
 flatlogs/src/flatlogcodes

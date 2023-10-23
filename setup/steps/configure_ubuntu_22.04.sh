@@ -3,16 +3,6 @@ DIR="$( cd "$( dirname "${BASH_SOURCE[0]}" )" && pwd )"
 source $DIR/../_common.sh
 set -euo pipefail
 
-log_info "Configuring package source list with Intel oneAPI repositories"
-if [[ ! -e /usr/share/keyrings/oneapi-archive-keyring.gpg ]]; then
-    mkdir -p /usr/share/keyrings
-    wget -O- https://apt.repos.intel.com/intel-gpg-keys/GPG-PUB-KEY-INTEL-SW-PRODUCTS.PUB | gpg --dearmor | sudo tee /usr/share/keyrings/oneapi-archive-keyring.gpg > /dev/null || error_exit "Could not install Intel APT GPG key"
-fi
-if [[ ! -e /etc/apt/sources.list.d/oneAPI.list ]]; then
-    echo "deb [signed-by=/usr/share/keyrings/oneapi-archive-keyring.gpg] https://apt.repos.intel.com/oneapi all main" | sudo tee /etc/apt/sources.list.d/oneAPI.list || error_exit "Could not add Intel APT repository to sources.list.d"
-fi
-sudo apt update
-
 log_info 'Making /etc/bash.bashrc source /etc/profile.d/*.sh, since graphical sessions appear not to for new Konsoles'
 if ! grep -q profile.d /etc/bash.bashrc; then
 cat <<'HERE' | sudo tee -a /etc/bash.bashrc
@@ -62,7 +52,9 @@ fi
 log_info "Hush login banners"
 sudo touch /etc/skel/.hushlogin
 
-log_info "Disable automatic upgrades"
-sudo cp -v /usr/share/unattended-upgrades/20auto-upgrades-disabled /etc/apt/apt.conf.d/
+if [[ -d /usr/share/unattended-upgrades ]]; then
+  log_info "Disable automatic upgrades"
+  sudo cp -v /usr/share/unattended-upgrades/20auto-upgrades-disabled /etc/apt/apt.conf.d/
+fi
 
 log_info "Done with custom configuration for Ubuntu 22.04"

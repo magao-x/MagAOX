@@ -1,0 +1,36 @@
+
+/// \defgroup testing Testing the MagAO-X software
+
+/** \defgroup test_build_run Building and Running Tests 
+  * \ingroup testing 
+  
+To build a single test, from inside the `tests` subfolder, run 
+\verbatim
+$ make -B -f Makefile.one t=../apps/zaberCtrl/tests/zaberCtrl_test.cpp
+$ ../apps/zaberCtrl/tests/zaberCtrl_test
+\endverbatim
+which shows how to build the test suited defined in \ref zaberCtrl_test.cpp.  Note that the `.cpp` is not required.  The `-B` switch
+for make is not always necessary, but is a good idea to make sure the right things get built.  If you have only edited the `*_test.cpp`
+file you can leave `-B` out.
+
+To build all the tests:
+\verbatim
+$ make
+\endverbatim
+possibly with the `-B` flag.
+
+Then to run all tests:
+\verbatim
+$ bash ./testMagAOX.bash
+\endverbatim
+
+*/
+
+/** \defgroup test_indi Tests of INDI Communications
+  * \ingroup testing 
+  */
+  
+
+
+
+

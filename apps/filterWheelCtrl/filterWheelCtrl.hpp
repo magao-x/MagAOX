@@ -682,32 +682,25 @@ int filterWheelCtrl::whilePowerOff()
    
 INDI_NEWCALLBACK_DEFN(filterWheelCtrl, m_indiP_counts)(const pcf::IndiProperty &ipRecv)
 {
-   if (ipRecv.getName() == m_indiP_counts.getName())
-   {
-      
-      
-      double counts = -1;
-      double target_abs = -1;
-
-      if(ipRecv.find("current"))
-      {
-         counts = ipRecv["current"].get<double>();
-      }
-
-      if(ipRecv.find("target"))
-      {
-         target_abs = ipRecv["target"].get<double>();
-      }
-
-      if(target_abs == -1) target_abs = counts;
-      
-      
-      m_preset_target = ((double) target_abs - m_homeOffset)/m_circleSteps*m_presetNames.size() + 1.0;
-
-      std::lock_guard<std::mutex> guard(m_indiMutex);
-      return moveToRaw(target_abs);
-   }
-   return -1;
+    INDI_VALIDATE_CALLBACK_PROPS(m_indiP_counts, ipRecv); 
+   
+    double counts = -1;
+    double target_abs = -1;
+    if(ipRecv.find("current"))
+    {
+       counts = ipRecv["current"].get<double>();
+    }
+    if(ipRecv.find("target"))
+    {
+       target_abs = ipRecv["target"].get<double>();
+    }
+    if(target_abs == -1) target_abs = counts;
+    
+    
+    m_preset_target = ((double) target_abs - m_homeOffset)/m_circleSteps*m_presetNames.size() + 1.0;
+    std::lock_guard<std::mutex> guard(m_indiMutex);
+    return moveToRaw(target_abs);
+   
 }
 
 

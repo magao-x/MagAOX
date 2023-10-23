@@ -1,8 +1,10 @@
-[![Codacy Badge](https://api.codacy.com/project/badge/Grade/dc3d038ce7074b7bab093699d0806759)](https://www.codacy.com/app/jaredmales/MagAOX?utm_source=github.com&amp;utm_medium=referral&amp;utm_content=magao-x/MagAOX&amp;utm_campaign=Badge_Grade)
+# The MagAO-X Software System
 
-# The MagAOX Software System
+[![Status of Rocky test build](https://github.com/magao-x/MagAOX/actions/workflows/install-rocky.yml/badge.svg)](https://github.com/magao-x/MagAOX/actions/workflows/install-rocky.yml) [![Status of Ubuntu test build](https://github.com/magao-x/MagAOX/actions/workflows/install-ubuntu.yml/badge.svg)](https://github.com/magao-x/MagAOX/actions/workflows/install-ubuntu.yml) [![Status of container build](https://github.com/magao-x/MagAOX/actions/workflows/container.yml/badge.svg)](https://github.com/magao-x/MagAOX/actions/workflows/container.yml)
 
-This is the software which runs the MagAOX ExAO system.
+**Handbook:** https://magao-x.org/docs/handbook/ | **[C++ docs](https://magao-x.org/docs/api/):** [![Status of Doxygen build](https://github.com/magao-x/MagAOX/actions/workflows/build-doxygen.yml/badge.svg)](https://github.com/magao-x/MagAOX/actions/workflows/build-doxygen.yml)
+
+This is the software which runs the MagAO-X ExAO system.
 
 ## 1 Dependencies
 
@@ -160,3 +162,4 @@ To-do items are listed in the above sections.  Also see the Todo page in the dox
 ## 7 Develop in a VM with [Vagrant](https://vagrantup.com)
 
 To develop in the most "flight-like" configuration, a Vagrantfile is provided to set up a development VM. A quick-start guide is available [in the handbook](https://magao-x.org/docs/handbook/appendices/development_vm.html).
+=======

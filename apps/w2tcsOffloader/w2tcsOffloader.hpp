@@ -324,91 +324,79 @@ int w2tcsOffloader::processImage( void * curr_src,
 
 INDI_NEWCALLBACK_DEFN(w2tcsOffloader, m_indiP_gain)(const pcf::IndiProperty &ipRecv)
 {
-   if(ipRecv.getName() != m_indiP_gain.getName())
-   {
-      log<software_error>({__FILE__, __LINE__, "invalid indi property received"});
-      return -1;
-   }
-   
-   float target;
-   
-   if( indiTargetUpdate( m_indiP_gain, target, ipRecv, true) < 0)
-   {
-      log<software_error>({__FILE__,__LINE__});
-      return -1;
-   }
-   
-   m_gain = target;
-   
-   updateIfChanged(m_indiP_gain, "current", m_gain);
-   updateIfChanged(m_indiP_gain, "target", m_gain);
-   
-   log<text_log>("set gain to " + std::to_string(m_gain), logPrio::LOG_NOTICE);
-   
-   return 0;
+    INDI_VALIDATE_CALLBACK_PROPS(m_indiP_gain, ipRecv);
+  
+    float target;
+    
+    if( indiTargetUpdate( m_indiP_gain, target, ipRecv, true) < 0)
+    {
+        log<software_error>({__FILE__,__LINE__});
+        return -1;
+    }
+    
+    m_gain = target;
+    
+    updateIfChanged(m_indiP_gain, "current", m_gain);
+    updateIfChanged(m_indiP_gain, "target", m_gain);
+    
+    log<text_log>("set gain to " + std::to_string(m_gain), logPrio::LOG_NOTICE);
+    
+    return 0;
 }
 
 INDI_NEWCALLBACK_DEFN(w2tcsOffloader, m_indiP_nModes)(const pcf::IndiProperty &ipRecv)
 {
-   if(ipRecv.getName() != m_indiP_nModes.getName())
-   {
-      log<software_error>({__FILE__, __LINE__, "invalid indi property received"});
-      return -1;
-   }
-   
-   unsigned target;
-   
-   if( indiTargetUpdate( m_indiP_nModes, target, ipRecv, true) < 0)
-   {
-      log<software_error>({__FILE__,__LINE__});
-      return -1;
-   }
-   
-   m_nModes = target;
+    INDI_VALIDATE_CALLBACK_PROPS(m_indiP_nModes, ipRecv);
 
-   updateIfChanged(m_indiP_nModes, "current", m_nModes);
-   updateIfChanged(m_indiP_nModes, "target", m_nModes);
-   
-   log<text_log>("set nModes to " + std::to_string(m_nModes), logPrio::LOG_NOTICE);
-   
-   return 0;
+    unsigned target;
+    
+    if( indiTargetUpdate( m_indiP_nModes, target, ipRecv, true) < 0)
+    {
+        log<software_error>({__FILE__,__LINE__});
+        return -1;
+    }
+    
+    m_nModes = target;
+ 
+    updateIfChanged(m_indiP_nModes, "current", m_nModes);
+    updateIfChanged(m_indiP_nModes, "target", m_nModes);
+    
+    log<text_log>("set nModes to " + std::to_string(m_nModes), logPrio::LOG_NOTICE);
+    
+    return 0;
 }
 
 INDI_NEWCALLBACK_DEFN(w2tcsOffloader, m_indiP_zCoeffs)(const pcf::IndiProperty &ipRecv)
 {
-   if (ipRecv.getName() == m_indiP_zCoeffs.getName())
-   {
-      for(size_t n=0; n < m_zCoeffs.size(); ++n)
-      {
-         if(ipRecv.find(m_elNames[n]))
-         {
+    INDI_VALIDATE_CALLBACK_PROPS(m_indiP_zCoeffs, ipRecv);
+
+
+    for(size_t n=0; n < m_zCoeffs.size(); ++n)
+    {
+        if(ipRecv.find(m_elNames[n]))
+        {
             realT zcoeff = ipRecv[m_elNames[n]].get<realT>();
             m_zCoeffs[n] = zcoeff;
-         }
-      }
-      return 0;
-   }
+        }
+    }
+    return 0;
+   
    
    return log<software_error,-1>({__FILE__,__LINE__, "invalid indi property name"});
 }
 
 INDI_NEWCALLBACK_DEFN(w2tcsOffloader, m_indiP_zero)(const pcf::IndiProperty &ipRecv)
 {
-   if(ipRecv.getName() != m_indiP_zero.getName())
-   {
-      log<software_error>({__FILE__, __LINE__, "invalid indi property received"});
-      return -1;
-   }
+    INDI_VALIDATE_CALLBACK_PROPS(m_indiP_zero, ipRecv);
    
-   float target;
+    float target;
    
-   if( ipRecv["toggle"].getSwitchState() == pcf::IndiElement::On)
-   {
-      m_woofer.setZero();
-      log<text_log>("set zero", logPrio::LOG_NOTICE);
-   
-   }
-   return 0;
+    if( ipRecv["toggle"].getSwitchState() == pcf::IndiElement::On)
+    {
+        m_woofer.setZero();
+        log<text_log>("set zero", logPrio::LOG_NOTICE);
+    }
+    return 0;
 }
 
 } //namespace app

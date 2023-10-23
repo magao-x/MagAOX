@@ -36,6 +36,12 @@ int dmStatus::attachOverlay( rtimvOverlayAccess & roa,
    if(m_enabled) enableOverlay();
    else disableOverlay();
    
+   if(m_roa.m_dictionary != nullptr)
+   {
+      //Register these
+      (*m_roa.m_dictionary)[m_rhDeviceName + ".humidity.current"].setBlob(nullptr, 0);
+   }
+
    return 0;
 }
       
@@ -108,4 +114,16 @@ void dmStatus::disableOverlay()
    }
    
    m_enabled = false;
+}
+
+std::vector<std::string> dmStatus::info()
+{
+    std::vector<std::string> vinfo;
+    vinfo.push_back("DM Status overlay: " + m_deviceName);
+    if(m_rhDeviceName != "")
+    {
+        vinfo.push_back("                   " + m_rhDeviceName);
+    }
+    
+    return vinfo;
 }

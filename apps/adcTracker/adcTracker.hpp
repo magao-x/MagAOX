@@ -342,11 +342,7 @@ int adcTracker::appShutdown()
 
 INDI_NEWCALLBACK_DEFN(adcTracker, m_indiP_tracking)(const pcf::IndiProperty &ipRecv)
 {
-   if(ipRecv.getName() != m_indiP_tracking.getName())
-   {
-      log<software_error>({__FILE__,__LINE__, "wrong INDI property received."});
-      return -1;
-   }
+   INDI_VALIDATE_CALLBACK_PROPS(m_indiP_tracking, ipRecv);
    
    if(!ipRecv.find("toggle")) return 0;
    
@@ -372,6 +368,8 @@ INDI_NEWCALLBACK_DEFN(adcTracker, m_indiP_tracking)(const pcf::IndiProperty &ipR
 
 INDI_NEWCALLBACK_DEFN(adcTracker, m_indiP_deltaAngle)(const pcf::IndiProperty &ipRecv)
 {
+   INDI_VALIDATE_CALLBACK_PROPS(m_indiP_deltaAngle, ipRecv);
+
    float target;
    
    if( indiTargetUpdate( m_indiP_deltaAngle, target, ipRecv) < 0)
@@ -393,6 +391,8 @@ INDI_NEWCALLBACK_DEFN(adcTracker, m_indiP_deltaAngle)(const pcf::IndiProperty &i
 
 INDI_NEWCALLBACK_DEFN(adcTracker, m_indiP_deltaADC1)(const pcf::IndiProperty &ipRecv)
 {
+   INDI_VALIDATE_CALLBACK_PROPS(m_indiP_deltaADC1, ipRecv);
+
    float target;
    
    if( indiTargetUpdate( m_indiP_deltaADC1, target, ipRecv) < 0)
@@ -414,6 +414,8 @@ INDI_NEWCALLBACK_DEFN(adcTracker, m_indiP_deltaADC1)(const pcf::IndiProperty &ip
 
 INDI_NEWCALLBACK_DEFN(adcTracker, m_indiP_deltaADC2)(const pcf::IndiProperty &ipRecv)
 {
+   INDI_VALIDATE_CALLBACK_PROPS(m_indiP_deltaADC2, ipRecv);
+
    float target;
    
    if( indiTargetUpdate( m_indiP_deltaADC2, target, ipRecv) < 0)
@@ -435,6 +437,8 @@ INDI_NEWCALLBACK_DEFN(adcTracker, m_indiP_deltaADC2)(const pcf::IndiProperty &ip
 
 INDI_NEWCALLBACK_DEFN(adcTracker, m_indiP_minZD)(const pcf::IndiProperty &ipRecv)
 {
+   INDI_VALIDATE_CALLBACK_PROPS(m_indiP_minZD, ipRecv);
+
    float target;
    
    if( indiTargetUpdate( m_indiP_minZD, target, ipRecv) < 0)
@@ -456,12 +460,8 @@ INDI_NEWCALLBACK_DEFN(adcTracker, m_indiP_minZD)(const pcf::IndiProperty &ipRecv
 
 INDI_SETCALLBACK_DEFN(adcTracker, m_indiP_teldata)(const pcf::IndiProperty &ipRecv)
 {
-   if(ipRecv.getName() != m_indiP_teldata.getName())
-   {
-      log<software_error>({__FILE__,__LINE__,"wrong INDI property received"});
-      
-      return -1;
-   }
+   INDI_VALIDATE_CALLBACK_PROPS(m_indiP_teldata, ipRecv);
+
    
    if(!ipRecv.find("zd")) return 0;
    

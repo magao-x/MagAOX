@@ -117,6 +117,86 @@
    */
 #define INDI_SETCALLBACK_DEFN(class, prop) int class::setCallBack_ ## prop
 
+#ifndef XWCTEST_INDI_CALLBACK_VALIDATION   
+#define INDI_VALIDATE_LOG_ERROR(prop1, prop2)  log<software_error>({__FILE__,__LINE__, "INDI properties do not match in callback: "             \
+                                                                  + prop1.createUniqueKey() + " != " + prop2.createUniqueKey()}); 
+
+#define INDI_VALIDATE_LOG_ERROR_DERIVED(prop1, prop2) derivedT::template log<software_error>({__FILE__,__LINE__, "INDI properties do not match in callback: "             \
+                                                                  + prop1.createUniqueKey() + " != " + prop2.createUniqueKey()}); 
+#else
+#define INDI_VALIDATE_LOG_ERROR(prop1, prop2)
+#define INDI_VALIDATE_LOG_ERROR_DERIVED(prop1,prop2)
+#endif                                                                                                           
+
+/// Implementation of new callback INDI property validator for main class
+/** \param prop1 [in] the first property to compare
+  * \param prop2 [in] the second property to compare
+  */
+#define INDI_VALIDATE_CALLBACK_PROPS_IMPL(prop1, prop2)                                                                           \
+        if(prop1.createUniqueKey() != prop2.createUniqueKey())                                                                    \
+        {                                                                                                                         \
+            INDI_VALIDATE_LOG_ERROR(prop1, prop2)                                                                                 \
+            return -1;                                                                                                            \
+        }
+
+#ifdef XWCTEST_INDI_CALLBACK_VALIDATION
+
+// When testing validation of callback checks, we add a return 0 to avoid executing the rest of the callback.
+#define INDI_VALIDATE_CALLBACK_PROPS(prop1, prop2)  INDI_VALIDATE_CALLBACK_PROPS_IMPL(prop1, prop2) else {return 0;}
+
+#else
+
+/// Standard check for matching INDI properties in a callback
+/** Uses makeUniqueKey() to check.
+  *
+  * Causes a return -1 on a mismatch.
+  * 
+  * Does nothing on a match.
+  * 
+  * If the test macro XWCTEST_INDI_CALLBACK_VALIDATION is defined this will cause return 0 on a match.
+  * 
+  * \param prop1 [in] the first property to compare
+  * \param prop2 [in] the second property to compare
+  */
+#define INDI_VALIDATE_CALLBACK_PROPS(prop1, prop2)  INDI_VALIDATE_CALLBACK_PROPS_IMPL( prop1, prop2 )  
+
+#endif
+
+
+/// Implementation of new callback INDI property validator for derived class
+/** \param prop1 [in] the first property to compare
+  * \param prop2 [in] the second property to compare
+  */
+#define INDI_VALIDATE_CALLBACK_PROPS_DERIVED_IMPL(prop1, prop2)                                                                   \
+        if(prop1.createUniqueKey() != prop2.createUniqueKey())                                                                    \
+        {                                                                                                                         \
+            INDI_VALIDATE_LOG_ERROR_DERIVED(prop1, prop2)                                                                         \
+            return -1;                                                                                                            \
+        }                                                                                                                         \
+
+#ifdef XWCTEST_INDI_CALLBACK_VALIDATION
+
+// When testing validation of callback checks, we add a return 0 to avoid executing the rest of the callback.
+#define INDI_VALIDATE_CALLBACK_PROPS_DERIVED(prop1, prop2)  INDI_VALIDATE_CALLBACK_PROPS_DERIVED_IMPL(prop1, prop2) else {return 0;}
+
+#else
+
+/// Standard check for matching INDI properties in a callback in a CRTP base class
+/** Uses makeUniqueKey() to check.
+  *
+  * Causes a return -1 on a mismatch.
+  * 
+  * Does nothing on a match.
+  * 
+  * If the test macro XWCTEST_INDI_CALLBACK_VALIDATION is defined this will cause return 0 on a match.
+  * 
+  * \param prop1 [in] the first property to compare
+  * \param prop2 [in] the second property to compare
+  */
+#define INDI_VALIDATE_CALLBACK_PROPS_DERIVED(prop1, prop2)  INDI_VALIDATE_CALLBACK_PROPS_DERIVED_IMPL( prop1, prop2)  
+
+#endif
+
 /// Get the name of the static callback wrapper for a new property.
 /** Useful for passing the pointer to the callback.
   *

@@ -132,7 +132,11 @@ public:
    /** This is a request to update a property that the remote device owns.
      */
    virtual void sendNewProperty( const pcf::IndiProperty &ipSend /**< [in] the property to send a change request for*/);
-   
+
+   /// Send an `getProperties` request to a remote device.
+   /** This is a request to get the value of a property or all properties.
+    */
+   virtual void sendGetProperties(const pcf::IndiProperty &ipSend /**< [in] the property to send a change request for*/);
 };
 
 inline
@@ -283,8 +287,22 @@ void multiIndiSubscriber::handleSetProperty( const pcf::IndiProperty & ipRecv)
 inline
 void multiIndiSubscriber::sendNewProperty( const pcf::IndiProperty &ipSend )
 {
-   if(m_parent == nullptr) return;
+   if(m_parent == nullptr) 
+   {
+      return;
+   }
    m_parent->sendNewProperty(ipSend);
+}
+
+inline 
+void multiIndiSubscriber::sendGetProperties(const pcf::IndiProperty &ipSend)
+{
+    if (m_parent == nullptr) 
+    {
+        return;
+    }
+
+    m_parent->sendGetProperties(ipSend);
 }
 
 #endif //multiIndiSubscriber_hpp

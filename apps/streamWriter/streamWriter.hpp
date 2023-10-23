@@ -17,7 +17,10 @@
 
 #include <mx/sys/timeUtils.hpp>
 
-#include "../../libMagAOX/app/MagAOXApp.hpp"
+#include "../../libMagAOX/libMagAOX.hpp" //Note this is included on command line to trigger pch
+#include "../../magaox_git_version.h"
+
+//#include "../../libMagAOX/app/MagAOXApp.hpp"
 
 #include "../../magaox_git_version.h"
 
@@ -1408,11 +1411,7 @@ int streamWriter::doEncode()
 
 INDI_NEWCALLBACK_DEFN(streamWriter, m_indiP_writing)(const pcf::IndiProperty &ipRecv)
 {
-   if(ipRecv.getName() != m_indiP_writing.getName())
-   {
-      log<software_error>({__FILE__,__LINE__, "wrong INDI property received."});
-      return -1;
-   }
+    INDI_VALIDATE_CALLBACK_PROPS( m_indiP_writing, ipRecv);
    
    if(!ipRecv.find("toggle")) return 0;
    

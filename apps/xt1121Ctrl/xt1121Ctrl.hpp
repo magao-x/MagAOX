@@ -562,146 +562,146 @@ int xt1121Ctrl::channelSetCallback( size_t chNo,
 
 INDI_NEWCALLBACK_DEFN(xt1121Ctrl, m_indiP_ch00)(const pcf::IndiProperty &ipRecv)
 {
-   if (ipRecv.getName() == m_indiP_ch00.getName())
-   {      
-      return channelSetCallback(0, m_indiP_ch00, ipRecv);
-   }
-   return -1;
+    INDI_VALIDATE_CALLBACK_PROPS(m_indiP_ch00, ipRecv);
+
+    return channelSetCallback(0, m_indiP_ch00, ipRecv);
+   
+    return -1;
 }
 
 INDI_NEWCALLBACK_DEFN(xt1121Ctrl, m_indiP_ch01)(const pcf::IndiProperty &ipRecv)
 {
-   if (ipRecv.getName() == m_indiP_ch01.getName())
-   {      
-      return channelSetCallback(1, m_indiP_ch01, ipRecv);
-   }
-   return -1;
+    INDI_VALIDATE_CALLBACK_PROPS(m_indiP_ch01, ipRecv);
+
+    return channelSetCallback(1, m_indiP_ch01, ipRecv);
+
+    return -1;
 }
 
 INDI_NEWCALLBACK_DEFN(xt1121Ctrl, m_indiP_ch02)(const pcf::IndiProperty &ipRecv)
 {
-   if (ipRecv.getName() == m_indiP_ch02.getName())
-   {      
-      return channelSetCallback(2, m_indiP_ch02, ipRecv);
-   }
-   return -1;
+    INDI_VALIDATE_CALLBACK_PROPS(m_indiP_ch02, ipRecv);
+
+    return channelSetCallback(2, m_indiP_ch02, ipRecv);
+   
+    return -1;
 }
 
 INDI_NEWCALLBACK_DEFN(xt1121Ctrl, m_indiP_ch03)(const pcf::IndiProperty &ipRecv)
 {
-   if (ipRecv.getName() == m_indiP_ch03.getName())
-   {      
-      return channelSetCallback(3, m_indiP_ch03, ipRecv);
-   }
-   return -1;
+    INDI_VALIDATE_CALLBACK_PROPS(m_indiP_ch03, ipRecv);
+
+    return channelSetCallback(3, m_indiP_ch03, ipRecv);
+   
+    return -1;
 }
 
 INDI_NEWCALLBACK_DEFN(xt1121Ctrl, m_indiP_ch04)(const pcf::IndiProperty &ipRecv)
 {
-   if (ipRecv.getName() == m_indiP_ch04.getName())
-   {      
-      return channelSetCallback(4, m_indiP_ch04, ipRecv);
-   }
-   return -1;
+    INDI_VALIDATE_CALLBACK_PROPS(m_indiP_ch04, ipRecv);
+
+    return channelSetCallback(4, m_indiP_ch04, ipRecv);
+   
+    return -1;
 }
 
 INDI_NEWCALLBACK_DEFN(xt1121Ctrl, m_indiP_ch05)(const pcf::IndiProperty &ipRecv)
 {
-   if (ipRecv.getName() == m_indiP_ch05.getName())
-   {      
-      return channelSetCallback(5, m_indiP_ch05, ipRecv);
-   }
-   return -1;
+    INDI_VALIDATE_CALLBACK_PROPS(m_indiP_ch05, ipRecv);
+
+    return channelSetCallback(5, m_indiP_ch05, ipRecv);
+   
+    return -1;
 }
 
 INDI_NEWCALLBACK_DEFN(xt1121Ctrl, m_indiP_ch06)(const pcf::IndiProperty &ipRecv)
 {
-   if (ipRecv.getName() == m_indiP_ch06.getName())
-   {      
-      return channelSetCallback(6, m_indiP_ch06, ipRecv);
-   }
-   return -1;
+    INDI_VALIDATE_CALLBACK_PROPS(m_indiP_ch06, ipRecv);
+
+    return channelSetCallback(6, m_indiP_ch06, ipRecv);
+   
+    return -1;
 }
 
 INDI_NEWCALLBACK_DEFN(xt1121Ctrl, m_indiP_ch07)(const pcf::IndiProperty &ipRecv)
 {
-   if (ipRecv.getName() == m_indiP_ch07.getName())
-   {    
-      return channelSetCallback(7, m_indiP_ch07, ipRecv);
-   }
-   return -1;
+    INDI_VALIDATE_CALLBACK_PROPS(m_indiP_ch07, ipRecv);
+      
+    return channelSetCallback(7, m_indiP_ch07, ipRecv);
+   
+    return -1;
 }
 
 INDI_NEWCALLBACK_DEFN(xt1121Ctrl, m_indiP_ch08)(const pcf::IndiProperty &ipRecv)
 {
-   if (ipRecv.getName() == m_indiP_ch08.getName())
-   {      
-      return channelSetCallback(8, m_indiP_ch08, ipRecv);
-   }
-   return -1;
+    INDI_VALIDATE_CALLBACK_PROPS(m_indiP_ch08, ipRecv);
+
+    return channelSetCallback(8, m_indiP_ch08, ipRecv);
+   
+    return -1;
 }
 
 INDI_NEWCALLBACK_DEFN(xt1121Ctrl, m_indiP_ch09)(const pcf::IndiProperty &ipRecv)
 {
-   if (ipRecv.getName() == m_indiP_ch09.getName())
-   {      
-      return channelSetCallback(9, m_indiP_ch09, ipRecv);
-   }
-   return -1;
+    INDI_VALIDATE_CALLBACK_PROPS(m_indiP_ch09, ipRecv);
+    
+    return channelSetCallback(9, m_indiP_ch09, ipRecv);
+
+    return -1;
 }
 
 INDI_NEWCALLBACK_DEFN(xt1121Ctrl, m_indiP_ch10)(const pcf::IndiProperty &ipRecv)
 {
-   if (ipRecv.getName() == m_indiP_ch10.getName())
-   {      
-      return channelSetCallback(10, m_indiP_ch10, ipRecv);
-   }
-   return -1;
+    INDI_VALIDATE_CALLBACK_PROPS(m_indiP_ch10, ipRecv);
+  
+    return channelSetCallback(10, m_indiP_ch10, ipRecv);
+   
+    return -1;
 }
 
 INDI_NEWCALLBACK_DEFN(xt1121Ctrl, m_indiP_ch11)(const pcf::IndiProperty &ipRecv)
 {
-   if (ipRecv.getName() == m_indiP_ch11.getName())
-   {      
-      return channelSetCallback(11, m_indiP_ch11, ipRecv);
-   }
-   return -1;
+    INDI_VALIDATE_CALLBACK_PROPS(m_indiP_ch11, ipRecv);
+
+    return channelSetCallback(11, m_indiP_ch11, ipRecv);
+   
+    return -1;
 }
 
 INDI_NEWCALLBACK_DEFN(xt1121Ctrl, m_indiP_ch12)(const pcf::IndiProperty &ipRecv)
 {
-   if (ipRecv.getName() == m_indiP_ch12.getName())
-   {      
-      return channelSetCallback(12, m_indiP_ch12, ipRecv);
-   }
-   return -1;
+    INDI_VALIDATE_CALLBACK_PROPS(m_indiP_ch12, ipRecv);
+  
+    return channelSetCallback(12, m_indiP_ch12, ipRecv);
+   
+    return -1;
 }
 
 INDI_NEWCALLBACK_DEFN(xt1121Ctrl, m_indiP_ch13)(const pcf::IndiProperty &ipRecv)
 {
-   if (ipRecv.getName() == m_indiP_ch13.getName())
-   {      
-      return channelSetCallback(13, m_indiP_ch13, ipRecv);
-   }
-   return -1;
+    INDI_VALIDATE_CALLBACK_PROPS(m_indiP_ch13, ipRecv);
+
+    return channelSetCallback(13, m_indiP_ch13, ipRecv);
+   
+    return -1;
 }
 
 INDI_NEWCALLBACK_DEFN(xt1121Ctrl, m_indiP_ch14)(const pcf::IndiProperty &ipRecv)
 {
-   if (ipRecv.getName() == m_indiP_ch14.getName())
-   {      
-      return channelSetCallback(14, m_indiP_ch14, ipRecv);
-   }
-   return -1;
+    INDI_VALIDATE_CALLBACK_PROPS(m_indiP_ch14, ipRecv);
+
+    return channelSetCallback(14, m_indiP_ch14, ipRecv);
+
+    return -1;
 }
 
 INDI_NEWCALLBACK_DEFN(xt1121Ctrl, m_indiP_ch15)(const pcf::IndiProperty &ipRecv)
 {
-   if (ipRecv.getName() == m_indiP_ch15.getName())
-   {      
-      return channelSetCallback(15, m_indiP_ch15, ipRecv);
-   }
-   return -1;
+    INDI_VALIDATE_CALLBACK_PROPS(m_indiP_ch15, ipRecv);
+
+    return channelSetCallback(15, m_indiP_ch15, ipRecv);
+
+    return -1;
 }
 
 

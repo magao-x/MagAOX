@@ -469,9 +469,9 @@ int picoMotorCtrl::appLogic()
          return 0;
       }
 
-      if(m_telnetConn.m_strRead == "New_Focus 8742 v3.04 09/09/16 61371\r\n")
+      if(m_telnetConn.m_strRead.find("New_Focus") != std::string::npos)
       {
-         log<text_log>("Connected to New_Focus 8742 v3.04 09/09/16 61371");
+         log<text_log>("Connected to " + m_telnetConn.m_strRead);
       }
       else
       {
@@ -565,7 +565,7 @@ int picoMotorCtrl::appLogic()
             return 0;
          }
 
-         if(m_telnetConn.m_strRead != "New_Focus 8742 v3.04 09/09/16 61371\r\n")
+         if(m_telnetConn.m_strRead.find("New_Focus") == std::string::npos)
          {
             if(powerState() != 1 || powerStateTarget() != 1) return 0;
          

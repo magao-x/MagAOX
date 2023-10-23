@@ -33,6 +33,11 @@ public:
    
    virtual ~pwrGUI() noexcept;
    
+   virtual void onConnect()
+   {
+      pcf::IndiProperty ipSend;
+      m_parent->sendGetProperties(ipSend);
+   }
    /// Called by the parent once the parent is disconnected.
    /** If this is reimplemented, you should call pwrGUI::onDisconnect() to ensure children are notified.
      *

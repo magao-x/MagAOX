@@ -8,16 +8,31 @@ DIR="$( cd "$( dirname "${BASH_SOURCE[0]}" )" && pwd )"
 source $DIR/../_common.sh
 set -euo pipefail
 
-PVCAM_RUNFILE=pvcam_3.9.12.11.run
+PVCAM_RUNFILE=pvcam_3.10.0.3.run
 cd /opt/MagAOX/vendor/teledyne/pvcam
 
 chmod +x ./$PVCAM_RUNFILE
 if [[ ! -e /opt/pvcam/etc/profile.d/pvcam.sh ]]; then
-    echo 'y\nn\n' | bash ./$PVCAM_RUNFILE || error_exit "Couldn't install Teledyne Photometrics PVCam for Kinetix"
+    echo 'y\nn\n' | bash ./$PVCAM_RUNFILE || exit_error "Couldn't install Teledyne Photometrics PVCam for Kinetix"
     log_success "Ran Teledyne Photometrics PVCam installer for Kinetix"
 else
     log_info "Existing PVCam install found, use the originall installer or /opt/pvcam/pvcam.uninstall.sh to remove"
 fi
+
+
+
+PVCAMSDK_RUNFILE=pvcam-sdk_3.10.0.3-1.run
+cd /opt/MagAOX/vendor/teledyne/pvcam-sdk
+
+chmod +x ./$PVCAMSDK_RUNFILE
+if [[ ! -e /opt/pvcam/etc/profile.d/pvcam.sh ]]; then
+    echo 'y\nn\n' | bash ./$PVCAMSDK_RUNFILE || exit_error "Couldn't install Teledyne Photometrics PVCam for Kinetix"
+    log_success "Ran Teledyne Photometrics PVCam installer for Kinetix"
+else
+    log_info "Existing PVCam install found, use the originall installer or /opt/pvcam/pvcam.uninstall.sh to remove"
+fi
+
+
 # if [[ ! -e /opt/PrincetonInstruments/picam ]]; then
 #     # This (|| true) isn't great, but sometimes it has a nonzero
 #     # exit code and sometimes it doesn't. Both states are accompanied

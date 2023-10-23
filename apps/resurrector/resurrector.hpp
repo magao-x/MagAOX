@@ -14,7 +14,8 @@ private:
     fd_set m_fdset_cpy; ///< ***COPY*** of active set bits of hexbeat file descriptors;
                         ///  N.B. DO NOT PASS THIS fd_set to select(2)!
 
-    bool m_resurr_logging{false};
+    bool m_logging{false};
+    bool m_verbose{false};
 
     std::set<int> m_fds; ///< FDs of all opened hexbeaters in m_hbmarr
 
@@ -85,7 +86,7 @@ public:
         //   track of the individual hexbeaters' timeouts.
         std::string hbnow{time_to_hb(0)};
 
-        if (m_resurr_logging) { std::cerr << hbnow; } 
+        if (m_verbose) { std::cerr << hbnow; } 
 
         // Copy current class member of [fd_set] bits to local [fd_set],
         // then call select(2) to determine if any hexbeat FDs have data
@@ -118,7 +119,9 @@ public:
             // then continue to the the next hexbeater
             it->read_hexbeater(lcl_fdset);
             bool islate = it->late_hexbeat(hbnow);
-            if (m_resurr_logging
+            if ((m_verbose
+                || (m_logging && islate)
+                )
              && it->FD() > -1 && it->FD() < HBR_FD_SETSIZE)
             {
                 fd_to_stream(std::cerr, it->FD());
@@ -144,7 +147,7 @@ public:
                 it->close_hexbeater(m_fdset_cpy, m_nfds);
                 continue;
             }
-            if (m_resurr_logging)
+            if (m_logging)
             {
                 std::cerr << "[resurrector stopping " << *it
                       << " at " << time_to_hb(0).substr(0,9) << "]\n";
@@ -152,7 +155,7 @@ public:
             it->stop_hexbeater(m_fdset_cpy, m_nfds);
             struct timeval tv{0,99999};
             select(0, 0,0,0, &tv);
-            if (m_resurr_logging)
+            if (m_logging)
             {
                 std::cerr << "[resurrector re-starting " << *it
                           << " at " << time_to_hb(0).substr(0,9)
@@ -181,7 +184,7 @@ public:
 
         if (newfd < 0)
         {
-            if (m_resurr_logging)
+            if (m_logging)
             {
                 perror(("Hexbeater::open_hexbeater"
                          "(" + argv0
@@ -279,6 +282,8 @@ public:
     }
 
     /// Logging
-    void set_resurr_logging() { m_resurr_logging = true; }
-    void clr_resurr_logging() { m_resurr_logging = false; }
+    void set_resurr_logging() { m_logging = true; }
+    void clr_resurr_logging() { m_logging = false; }
+    void set_resurr_verbose_logging() { m_verbose = m_logging = true; }
+    void clr_resurr_verbose_logging() { m_verbose = false; }
 };

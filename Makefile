@@ -15,23 +15,25 @@ apps_common = \
 
 apps_rtcicc = alpaoCtrl \
               cacaoInterface \
-				  userGainCtrl \
-				  zaberCtrl \
-	           zaberLowLevel
+			  userGainCtrl \
+			  zaberCtrl \
+	          zaberLowLevel \
+			  picoMotorCtrl
 
 apps_rtc = \
 	ocam2KCtrl \
-        andorCtrl \
+    andorCtrl \
 	siglentSDG \
 	ttmModulator \
 	bmcCtrl \
-   rhusbMon \
+    rhusbMon \
 	pi335Ctrl \
 	pupilFit \
 	t2wOffloader \
 	dmSpeckle \
-   w2tcsOffloader \
+    w2tcsOffloader \
 	pwfsSlopeCalc
+
 
 apps_icc = \
    acronameUsbHub \
@@ -40,12 +42,12 @@ apps_icc = \
 	hsfwCtrl \
 	baslerCtrl \
 	picamCtrl \
+	pvcamCtrl \
 	smc100ccCtrl \
 	andorCtrl \
 	usbtempMon \
 	xt1121Ctrl \
 	xt1121DCDU \
-   picoMotorCtrl \
 	koolanceCtrl \
 	tcsInterface
 
@@ -58,7 +60,7 @@ apps_aoc = \
 	observerCtrl \
 	siglentSDG
 
-# apps_vm = none yet
+
 apps_tic = \
 	acronameUsbHub \
 	baslerCtrl \
@@ -80,8 +82,6 @@ else ifeq ($(MAGAOX_ROLE),RTC)
   apps_to_build += $(apps_rtc)
 else ifeq ($(MAGAOX_ROLE),TIC)
   apps_to_build += $(apps_tic)
-# else ifeq ($(MAGAOX_ROLE),vm)
-#   apps_to_build += $(apps_vm)
 endif
 
 all_guis = \
@@ -102,6 +102,8 @@ else ifeq ($(MAGAOX_ROLE),ICC)
   guis_to_build =
 else ifeq ($(MAGAOX_ROLE),TIC)
   guis_to_build =
+else ifeq ($(MAGAOX_ROLE),container)
+  guis_to_build =
 else
   guis_to_build = $(all_guis)
 endif
@@ -118,15 +120,17 @@ else ifeq ($(MAGAOX_ROLE),ICC)
   rtimv_plugins_to_build =
 else ifeq ($(MAGAOX_ROLE),TIC)
   rtimv_plugins_to_build =
+else ifeq ($(MAGAOX_ROLE),container)
+  rtimv_plugins_to_build =
 else
   rtimv_plugins_to_build = $(all_rtimv_plugins)
 endif
 
 utils_to_build = logdump \
-				     logstream \
+				 logstream \
                  cursesINDI \
-				     xrif2shmim \
-				     xrif2fits
+				 xrif2shmim \
+				 xrif2fits
 
 scripts_to_install = magaox \
 	query_seeing \
@@ -148,17 +152,18 @@ scripts_to_install = magaox \
 	lowfs_apply \
 	lowfs_switch_apply \
 	write_magaox_pidfile \
-	mount_cgroups1_cpuset
+	mount_cgroups1_cpuset \
+	killIndiZombies
 
 all: indi_all libs_all flatlogs apps_all guis_all utils_all
 
 install: indi_install libs_install flatlogs_all apps_install guis_install utils_install scripts_install rtscripts_install
 
 #We clean just libMagAOX, and the apps, guis, and utils for normal devel work.
-clean: lib_clean apps_clean guis_clean utils_clean
+clean: lib_clean apps_clean guis_clean utils_clean tests_clean
 
 #Clean everything.
-all_clean: indi_clean libs_clean flatlogs_clean lib_clean apps_clean guis_clean utils_clean doc_clean
+all_clean: indi_clean libs_clean flatlogs_clean lib_clean apps_clean guis_clean utils_clean doc_clean tests_clean
 
 flatlogs_all:
 	cd flatlogs/src/; ${MAKE} install
@@ -277,7 +282,9 @@ utils_clean:
 			(cd utils/$$app; ${MAKE} clean) || exit 1; \
 		done
 
-
+tests_clean:
+	cd tests; ${MAKE} clean || exit1;
+	
 .PHONY: doc
 doc:
 	doxygen doc/config/Doxyfile.libMagAOX
