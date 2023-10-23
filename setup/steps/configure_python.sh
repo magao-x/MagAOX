@@ -45,12 +45,27 @@ fi
 if [[ $MAGAOX_ROLE != ci ]]; then
 	cp $DIR/../systemd_units/jupyternotebook.service $UNIT_PATH/jupyternotebook.service
 	log_success "Installed jupyternotebook.service to $UNIT_PATH"
-	if [[ $MAGAOX_ROLE == vm ]]; then
-		sed -iE "s_WorkingDirectory=/home/xsup/data_WorkingDirectory=/_g" $UNIT_PATH/jupyternotebook.service
-	    sed -iE "s/xsup/$instrument_user/g" $UNIT_PATH/jupyternotebook.service
-		log_info "Rewrote service for vagrant"
+
+	# Due to SystemD nonsense, WorkingDirectory must be a directory and not a symbolic link
+	# and due to MagAO-X nonsense those directories are different if the role has a /data array
+	# ...but at least there is 'override.conf'
+	mkdir -p $UNIT_PATH.d/
+	overrideFileDest=$UNIT_PATH.d/override.conf
+	overrideFile=/tmp/jupyternotebook_$(date +"%s")
+	echo "[Service]" > $overrideFile
+	workingDir=/home/xsup/data
+	if [[ $MAGAOX_ROLE == AOC || $MAGAOX_ROLE == ICC || $MAGAOX_ROLE == RTC || $MAGAOX_ROLE == TOC || $MAGAOX_ROLE == TIC ]]; then
+		workingDir=/data/users/xsup
 	fi
-	
+	echo "WorkingDirectory=$workingDir" >> $overrideFile
+	if [[ -e $overrideFileDest ]]; then
+		if ! diff $overrideFile $overrideFileDest; then
+			exit_error "Existing $overrideFile does not match $overrideFileDest"
+		fi
+	else
+		mv $overrideFile $overrideFileDest
+	fi
+
 	systemctl daemon-reload
 	
 	systemctl enable jupyternotebook
