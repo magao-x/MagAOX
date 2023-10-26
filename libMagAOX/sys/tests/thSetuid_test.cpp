@@ -27,18 +27,22 @@ void logThreadStart(  )
 
 SCENARIO( "Setting per-thread setuid privileges", "[libMagAOX::sys]" ) 
 {
+   uid_t euidReal, er;
+   uid_t euidCalled, ec;
+   uid_t suid;
+
+   getresuid(&euidReal, &euidCalled, &suid);
+
+   if(euidReal == suid) {
+      SUCCEED("Can't test setuid as root, moving on");
+   }
+
    GIVEN("A process with setuid bit set")
    {
-      uid_t euidReal, er;
-      uid_t euidCalled, ec;
-      uid_t suid;
-
       std::thread thrd;
    
       timeToDie = false;
-   
-      getresuid(&euidReal, &euidCalled, &suid);
-   
+
       bool is_setuid = ((euidReal != euidCalled) && (euidReal != suid)); 
       REQUIRE(is_setuid == true); //Must run this test from setuid as unprivileged user
          
