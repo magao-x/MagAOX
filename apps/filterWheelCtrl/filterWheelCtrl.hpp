@@ -81,7 +81,7 @@ protected:
 
    bool m_switch{false}; ///< The home switch status
    
-   long m_rawPos {0}; ///< The position of the wheel in motor coutns.
+   long m_rawPos {0}; ///< The position of the wheel in motor counts.
 
    int m_homingState{0}; ///< The homing state, tracks the stages of homing.
    ///@}
@@ -234,8 +234,12 @@ protected:
    
    int recordTelem( const telem_stage * );
    
+   int recordTelem( const telem_position * );
+
    int recordStage( bool force = false );
    
+   int recordPosition( bool force = false );
+
    ///@}
 };
 
@@ -496,6 +500,8 @@ int filterWheelCtrl::appLogic()
             state(stateCodes::NOTCONNECTED);
             return 0;
          }
+
+         recordPosition();
       }
 
       if(m_moving)
@@ -619,6 +625,7 @@ int filterWheelCtrl::appLogic()
       m_preset = ((double) m_rawPos-m_homeOffset)/m_circleSteps*m_presetNames.size() + 1.0;
       
       stdMotionStage<filterWheelCtrl>::updateINDI();
+      recordStage();
       
       if(telemeter<filterWheelCtrl>::appLogic() < 0)
       {
@@ -658,7 +665,8 @@ int filterWheelCtrl::onPowerOff()
       log<software_error>({__FILE__,__LINE__});
    }
    
-   recordStage();
+   recordStage(true);
+   recordPosition(true);
    
    return 0;
 }
@@ -810,7 +818,8 @@ int filterWheelCtrl::startHoming()
 {
    m_homingState = 1;
    m_moving = 2;
-   recordStage();
+   recordStage(true);
+   recordPosition(true);
    
    updateSwitchIfChanged(m_indiP_home, "request", pcf::IndiElement::Off, INDI_IDLE);
    return home();
@@ -896,7 +905,8 @@ int filterWheelCtrl::moveToRaw( const long & counts )
    int rv;
    
    m_moving = 1;
-   recordStage();
+   recordStage(true);
+   recordPosition(true);
 
    rv = tty::ttyWrite( "EN\r", m_fileDescrip, m_writeTimeOut);
    if(rv < 0) return log<software_error,-1>({__FILE__,__LINE__,rv, tty::ttyErrorString(rv)});
@@ -920,7 +930,8 @@ int filterWheelCtrl::moveToRawRelative( const long & counts_relative )
    int rv;
 
    m_moving = 1;
-   recordStage();
+   recordStage(true);
+   recordPosition(true);
    
    rv = tty::ttyWrite( "EN\r", m_fileDescrip, m_writeTimeOut);
    if(rv < 0) return log<software_error,-1>({__FILE__,__LINE__,rv, tty::ttyErrorString(rv)});
@@ -950,7 +961,7 @@ int filterWheelCtrl::moveTo( const double & filters )
 
 int filterWheelCtrl::checkRecordTimes()
 {
-   return dev::telemeter<filterWheelCtrl>::checkRecordTimes(telem_stage());
+   return dev::telemeter<filterWheelCtrl>::checkRecordTimes(telem_stage(), telem_position());
 }
    
 int filterWheelCtrl::recordTelem( const telem_stage * )
@@ -958,9 +969,30 @@ int filterWheelCtrl::recordTelem( const telem_stage * )
    return recordStage(true);
 }
 
+int filterWheelCtrl::recordTelem( const telem_position * )
+{
+   return recordPosition(true);
+}
+
 int filterWheelCtrl::recordStage(bool force)
 {
    return dev::stdMotionStage<filterWheelCtrl>::recordStage(force);
+}
+
+int filterWheelCtrl::recordPosition(bool force)
+{
+   static long last_pos = 999999999999;
+
+   if( m_rawPos != last_pos || force )
+   {
+      float fpos = m_rawPos;
+
+      telem<telem_position>(fpos);
+
+      last_pos = m_rawPos;
+   }
+
+   return 0;
 }
 
 } //namespace app
