@@ -282,6 +282,9 @@ utils_clean:
 			(cd utils/$$app; ${MAKE} clean) || exit 1; \
 		done
 
+test: tests_clean
+	cd tests; ${MAKE} test || exit 1;
+
 tests_clean:
 	cd tests; ${MAKE} clean || exit 1;
 	
