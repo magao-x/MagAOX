@@ -26,5 +26,5 @@ jobs:
         name: Auto-provision
       - run: 'bash -l setup/steps/install_MagAOX.sh'
         name: Install MagAO-X
-      # - run: 'make test'
-      #   name: Run tests
+      - run: 'make test'
+        name: Run tests
