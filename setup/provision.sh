@@ -87,6 +87,10 @@ if [[ $MAGAOX_ROLE == vm || $MAGAOX_ROLE == ci ]]; then
     bash -l "$DIR/setup_users_and_groups.sh"
 fi
 
+if [[ $MAGAOX_ROLE == AOC ]]; then
+    bash -l "$DIR/configure_certificate_renewal.sh"
+fi
+
 VENDOR_SOFTWARE_BUNDLE=$DIR/bundle.zip
 if [[ ! -e $VENDOR_SOFTWARE_BUNDLE ]]; then
     echo "Couldn't find vendor software bundle at location $VENDOR_SOFTWARE_BUNDLE"
