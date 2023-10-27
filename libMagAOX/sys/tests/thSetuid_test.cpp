@@ -34,9 +34,9 @@ SCENARIO( "Setting per-thread setuid privileges", "[libMagAOX::sys]" )
    getresuid(&euidReal, &euidCalled, &suid);
 
    if(euidReal == suid) {
+      std::cerr << "Can't test setuid as root, moving on\n";
       SUCCEED("Can't test setuid as root, moving on");
-   }
-
+   } else {
    GIVEN("A process with setuid bit set")
    {
       std::thread thrd;
@@ -68,6 +68,7 @@ SCENARIO( "Setting per-thread setuid privileges", "[libMagAOX::sys]" )
       timeToDie = true;
    
       thrd.join();
+   }
    }
 }
 
