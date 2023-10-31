@@ -14,6 +14,8 @@ apps_common = \
 	timeSeriesSimulator
 
 apps_rtcicc = \
+	bmcCtrl \
+	rhusbMon \
 	alpaoCtrl \
 	cacaoInterface \
 	userGainCtrl \
@@ -22,12 +24,11 @@ apps_rtcicc = \
 	picoMotorCtrl
 
 apps_rtc = \
+	alpaoCtrl \
 	ocam2KCtrl \
 	andorCtrl \
 	siglentSDG \
 	ttmModulator \
-	bmcCtrl \
-	rhusbMon \
 	pi335Ctrl \
 	pupilFit \
 	t2wOffloader \
