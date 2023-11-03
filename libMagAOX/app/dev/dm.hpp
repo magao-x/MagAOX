@@ -1123,78 +1123,86 @@ int dm<derivedT,realT>::checkFlats()
    return 0;
 }
 
-template<class derivedT, typename realT>
-int dm<derivedT,realT>::loadFlat(const std::string & intarget)
+template <class derivedT, typename realT>
+int dm<derivedT, realT>::loadFlat(const std::string &intarget)
 {
-   std::string target = intarget;
-   
-   std::string targetPath;
-   
-   if(target == "default") 
-   {
-      target = m_flatDefault;
-      targetPath = m_flatPath + "/" + m_flatDefault + ".fits";
-   }
-   else
-   {
-   try 
-   {
-      targetPath = m_flatCommands.at(target);
-   }
-   catch(...)
-   {
-      derivedT::template log<text_log>("flat file " + target + " not found", logPrio::LOG_ERROR);
-      return -1;
-   }
-   }
+    std::string target = intarget;
 
-   m_flatLoaded = false;
-   //load into memory.
-   mx::fits::fitsFile<realT> ff;
-   if(ff.read(m_flatCommand, targetPath) < 0)
-   {
-      derivedT::template log<text_log>("flat file " + targetPath + " not found", logPrio::LOG_ERROR);
-      return -1;
-   }
-   
-   derivedT::template log<text_log>("loaded flat file " + targetPath);
-   m_flatLoaded = true;
-   
-   m_flatCurrent = intarget;
+    std::string targetPath;
 
-   if(m_flatCurrent == "default")
-   {
-      m_indiP_flats["default"] = pcf::IndiElement::On;
-   }
-   else
-   {
-      m_indiP_flats["default"] = pcf::IndiElement::Off;
-   }
-   
-   for(auto i = m_flatCommands.begin(); i != m_flatCommands.end(); ++i)
-   {
-      if(!m_indiP_flats.find(i->first)) continue;
-      
-      if( i->first == m_flatCurrent )
-      {
-         m_indiP_flats[i->first] = pcf::IndiElement::On;
-      }
-      else
-      {
-         m_indiP_flats[i->first] = pcf::IndiElement::Off;
-      }
-   }
-   
-   
-   if(derived().m_indiDriver) derived().m_indiDriver->sendSetProperty (m_indiP_flats);
+    if(target == "default")
+    {
+        target = m_flatDefault;
+        targetPath = m_flatPath + "/" + m_flatDefault + ".fits";
+    }
+    else
+    {
+        try
+        {
+            targetPath = m_flatCommands.at(target);
+        }
+        catch (...)
+        {
+            derivedT::template log<text_log>("flat file " + target + " not found", logPrio::LOG_ERROR);
+            return -1;
+        }
+    }
 
-   
-   if(m_flatSet) setFlat();
-   
-   return 0;
+    m_flatLoaded = false;
+    // load into memory.
+    mx::fits::fitsFile<realT> ff;
+    if(ff.read(m_flatCommand, targetPath) < 0)
+    {
+        derivedT::template log<text_log>("flat file " + targetPath + " not found", logPrio::LOG_ERROR);
+        return -1;
+    }
+
+    derivedT::template log<text_log>("loaded flat file " + targetPath);
+    m_flatLoaded = true;
+
+    m_flatCurrent = intarget;
+
+    if(m_indiP_flats.find("default"))
+    {
+        if(m_flatCurrent == "default")
+        {
+            m_indiP_flats["default"] = pcf::IndiElement::On;
+        }
+        else
+        {
+            m_indiP_flats["default"] = pcf::IndiElement::Off;
+        }
+    }
+
+    for(auto i = m_flatCommands.begin(); i != m_flatCommands.end(); ++i)
+    {
+        if(!m_indiP_flats.find(i->first))
+        {
+            continue;
+        }
+
+        if(i->first == m_flatCurrent)
+        {
+            m_indiP_flats[i->first] = pcf::IndiElement::On;
+        }
+        else
+        {
+            m_indiP_flats[i->first] = pcf::IndiElement::Off;
+        }
+    }
+
+    if(derived().m_indiDriver)
+    {
+        derived().m_indiDriver->sendSetProperty(m_indiP_flats);
+    }
+
+    if(m_flatSet)
+    {
+        setFlat();
+    }
+
+    return 0;
 }
-
-
 
 template<class derivedT, typename realT>
 int dm<derivedT,realT>::setFlat(bool update)
@@ -1221,6 +1229,18 @@ int dm<derivedT,realT>::setFlat(bool update)
       return -1;
    }
    
+   if(!m_flatLoaded)
+   {
+      bool flatSet = m_flatSet;
+      m_flatSet = false; //make sure we don't loop
+
+      if( loadFlat(m_flatCurrent) < 0 )
+      {
+         derivedT::template log<text_log>("error loading flat " + m_flatCurrent, logPrio::LOG_ERROR);
+      }
+      m_flatSet = flatSet;
+   }
+
    if(!m_flatLoaded)
    {
       ImageStreamIO_closeIm(&m_flatImageStream);
@@ -1416,68 +1436,73 @@ int dm<derivedT,realT>::checkTests()
    return 0;
 }
 
-template<class derivedT, typename realT>
-int dm<derivedT,realT>::loadTest(const std::string & intarget)
+template <class derivedT, typename realT>
+int dm<derivedT, realT>::loadTest(const std::string &intarget)
 {
-   std::string target = intarget; //store this for later to resolve default next:
-   
-   if(target == "default") target = m_testDefault;
-   
-   std::cerr << "target: " << target << "\n";
-   
-   std::string targetPath;
-   
-   try 
-   {
-      targetPath = m_testCommands.at(target);
-   }
-   catch(...)
-   {
-      derivedT::template log<text_log>("test file " + target + " not found", logPrio::LOG_ERROR);
-      return -1;
-   }
-   
-   m_testLoaded = false;
-   //load into memory.
-   mx::fits::fitsFile<realT> ff;
-   if(ff.read(m_testCommand, targetPath) < 0)
-   {
-      derivedT::template log<text_log>("test file " + targetPath + " not found", logPrio::LOG_ERROR);
-      return -1;
-   }
-   
-   derivedT::template log<text_log>("loaded test file " + targetPath);
-   m_testLoaded = true;
-   
-   m_testCurrent = intarget;
+    std::string target = intarget; // store this for later to resolve default next:
 
-   if(m_testCurrent == "default")
-   {
-      m_indiP_tests["default"] = pcf::IndiElement::On;
-   }
-   else
-   {
-      m_indiP_tests["default"] = pcf::IndiElement::Off;
-   }
-   
+    if(target == "default")
+    {
+        target = m_testDefault;
+    }
+
+    std::string targetPath;
+
+    try
+    {
+        targetPath = m_testCommands.at(target);
+    }
+    catch (...)
+    {
+        derivedT::template log<text_log>("test file " + target + " not found", logPrio::LOG_ERROR);
+        return -1;
+    }
+
+    m_testLoaded = false;
+    // load into memory.
+    mx::fits::fitsFile<realT> ff;
+    if(ff.read(m_testCommand, targetPath) < 0)
+    {
+        derivedT::template log<text_log>("test file " + targetPath + " not found", logPrio::LOG_ERROR);
+        return -1;
+    }
+
+    derivedT::template log<text_log>("loaded test file " + targetPath);
+    m_testLoaded = true;
+
+    m_testCurrent = intarget;
+
+    if(m_indiP_tests.find("default"))
+    {
+        if(m_testCurrent == "default")
+        {
+            m_indiP_tests["default"] = pcf::IndiElement::On;
+        }
+        else
+        {
+            m_indiP_tests["default"] = pcf::IndiElement::Off;
+        }
+    }
+
    for(auto i = m_testCommands.begin(); i != m_testCommands.end(); ++i)
    {
-      if(!m_indiP_tests.find(i->first)) continue;
-      
-      if( i->first == m_testCurrent )
-      {
-         m_indiP_tests[i->first] = pcf::IndiElement::On;
-      }
-      else
-      {
-         m_indiP_tests[i->first] = pcf::IndiElement::Off;
-      }
+       if(!m_indiP_tests.find(i->first))
+       {
+           continue;
+       }
+
+       if(i->first == m_testCurrent)
+       {
+           m_indiP_tests[i->first] = pcf::IndiElement::On;
+       }
+       else
+       {
+           m_indiP_tests[i->first] = pcf::IndiElement::Off;
+       }
    }
-   
-   
+
    if(derived().m_indiDriver) derived().m_indiDriver->sendSetProperty (m_indiP_tests);
 
-   
    if(m_testSet) setTest();
    
    return 0;
@@ -1486,6 +1511,7 @@ int dm<derivedT,realT>::loadTest(const std::string & intarget)
 template<class derivedT, typename realT>  
 int dm<derivedT,realT>::setTest()
 {
+
    if(m_shmimTest == "") return 0;
 
    if( ImageStreamIO_openIm(&m_testImageStream, m_shmimTest.c_str()) != 0)
@@ -1507,15 +1533,19 @@ int dm<derivedT,realT>::setTest()
       derivedT::template log<text_log>("height mismatch between " + m_shmimTest + " and configured DM", logPrio::LOG_ERROR);
       return -1;
    }
-   
+
    if(!m_testLoaded)
    {
+      bool testSet = m_testSet;
+      m_testSet = false; //make sure we don't loop
+
       if(loadTest(m_testCurrent)<0)
       {
          derivedT::template log<text_log>("error loading test " + m_testCurrent, logPrio::LOG_ERROR);
       }
+      m_testSet = testSet;
    }
-   
+
    if(!m_testLoaded)
    {
       ImageStreamIO_closeIm(&m_testImageStream);
@@ -1552,7 +1582,7 @@ int dm<derivedT,realT>::setTest()
    m_testImageStream.md->cnt0++;
    m_testImageStream.md->write=0;
    ImageStreamIO_sempost(&m_testImageStream,-1);
-         
+
    m_testSet = true;
    
    //Post the semaphore
@@ -1931,7 +1961,7 @@ int dm<derivedT,realT>::st_newCallBack_init( void * app,
 template<class derivedT, typename realT>
 int dm<derivedT,realT>::newCallBack_init( const pcf::IndiProperty &ipRecv )
 {
-   if ( ipRecv.createUniqueKey() != m_indiP_init.createUniqueKey())
+   if( ipRecv.createUniqueKey() != m_indiP_init.createUniqueKey())
    {
       return derivedT::template log<software_error,-1>({__FILE__, __LINE__, "wrong INDI-P in callback"});
    }
@@ -1956,7 +1986,7 @@ int dm<derivedT,realT>::st_newCallBack_zero( void * app,
 template<class derivedT, typename realT>
 int dm<derivedT,realT>::newCallBack_zero( const pcf::IndiProperty &ipRecv )
 {
-   if ( ipRecv.createUniqueKey() != m_indiP_zero.createUniqueKey())
+   if( ipRecv.createUniqueKey() != m_indiP_zero.createUniqueKey())
    {
       return derivedT::template log<software_error,-1>({__FILE__, __LINE__, "wrong INDI-P in callback"});
    }
@@ -1981,7 +2011,7 @@ int dm<derivedT,realT>::st_newCallBack_release( void * app,
 template<class derivedT, typename realT>
 int dm<derivedT,realT>::newCallBack_release( const pcf::IndiProperty &ipRecv )
 {
-   if ( ipRecv.createUniqueKey() != m_indiP_release.createUniqueKey())
+   if( ipRecv.createUniqueKey() != m_indiP_release.createUniqueKey())
    {
       return derivedT::template log<software_error,-1>({__FILE__, __LINE__, "wrong INDI-P in callback"});
    }
@@ -2055,7 +2085,7 @@ int dm<derivedT,realT>::st_newCallBack_setFlat( void * app,
 template<class derivedT, typename realT>
 int dm<derivedT,realT>::newCallBack_setFlat( const pcf::IndiProperty &ipRecv )
 {
-   if ( ipRecv.createUniqueKey() != m_indiP_setFlat.createUniqueKey())
+   if( ipRecv.createUniqueKey() != m_indiP_setFlat.createUniqueKey())
    {
       return derivedT::template log<software_error,-1>({__FILE__, __LINE__, "wrong INDI-P in callback"});
    }
@@ -2132,7 +2162,7 @@ int dm<derivedT,realT>::st_newCallBack_setTest( void * app,
 template<class derivedT, typename realT>
 int dm<derivedT,realT>::newCallBack_setTest( const pcf::IndiProperty &ipRecv )
 {
-   if ( ipRecv.createUniqueKey() != m_indiP_setTest.createUniqueKey())
+   if( ipRecv.createUniqueKey() != m_indiP_setTest.createUniqueKey())
    {
       return derivedT::template log<software_error,-1>({__FILE__, __LINE__, "wrong INDI-P in callback"});
    }
@@ -2161,7 +2191,7 @@ int dm<derivedT,realT>::st_newCallBack_zeroAll( void * app,
 template<class derivedT, typename realT>
 int dm<derivedT,realT>::newCallBack_zeroAll( const pcf::IndiProperty &ipRecv )
 {
-   if ( ipRecv.createUniqueKey() != m_indiP_zeroAll.createUniqueKey())
+   if( ipRecv.createUniqueKey() != m_indiP_zeroAll.createUniqueKey())
    {
       return derivedT::template log<software_error,-1>({__FILE__, __LINE__, "wrong INDI-P in callback"});
    }
