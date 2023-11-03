@@ -1082,9 +1082,10 @@ int dm<derivedT,realT>::checkFlats()
       //Add the toggle element initialized to Off
       for(auto it = m_flatCommands.begin(); it != m_flatCommands.end(); ++it)
       {
-         if(it->first == m_flatCurrent)
+         if(it->first == m_flatCurrent || m_flatCurrent == "")
          {
             m_indiP_flats.add(pcf::IndiElement(it->first, pcf::IndiElement::On));
+            m_flatCurrent = it->first; //handles the case m_flatCurrent == "" b/c it was not set in config
          }
          else
          {
@@ -1374,9 +1375,10 @@ int dm<derivedT,realT>::checkTests()
       //Add the toggle element initialized to Off
       for(auto it = m_testCommands.begin(); it != m_testCommands.end(); ++it)
       {
-         if(it->first == m_testCurrent)
+         if(it->first == m_testCurrent || m_testCurrent == "")
          {
             m_indiP_tests.add(pcf::IndiElement(it->first, pcf::IndiElement::On));
+            m_testCurrent = it->first; //Handles the case when m_testCurrent=="" b/c it was not set in config
          }
          else
          {
@@ -1420,6 +1422,8 @@ int dm<derivedT,realT>::loadTest(const std::string & intarget)
    std::string target = intarget; //store this for later to resolve default next:
    
    if(target == "default") target = m_testDefault;
+   
+   std::cerr << "target: " << target << "\n";
    
    std::string targetPath;
    
