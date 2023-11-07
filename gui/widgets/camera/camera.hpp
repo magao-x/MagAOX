@@ -220,6 +220,7 @@ void camera::subscribe()
    m_parent->addSubscriberProperty((multiIndiSubscriber *) this, m_camName, "");
    m_parent->addSubscriberProperty((multiIndiSubscriber *) this, m_camName, "fsm");
    m_parent->addSubscriberProperty((multiIndiSubscriber *) this, m_darkName, "");
+   m_parent->addSubscriberProperty((multiIndiSubscriber *) this, m_darkName, "start");
 
    m_parent->addSubscriber(ui_fsmState);
 
