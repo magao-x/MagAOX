@@ -403,7 +403,7 @@ void logdump::printLogBuff( const logPrioT & lvl,
    logStdFormat( std::cout, logBuff);
 
    std::cout << "\033[0m";
-   std::cout << "\n";
+   std::cout << std::endl;
 }
 
 
@@ -414,7 +414,8 @@ void logdump::printLogJson( const msgLenT & len,
 {
    static_cast<void>(len); //be unused
    logJsonFormat(std::cout, logBuff);
-   std::cout << "\n";
+   std::cout << std::endl;
+
 }
 
 
@@ -517,7 +518,7 @@ int logdump::gettimes(std::vector<std::string> & logs)
       double t0 = ts0.time_s + ts0.time_ns/1e9;
       double t = ts.time_s + ts.time_ns/1e9;
 
-      std::cout << fname << " " << ts0.ISO8601DateTimeStrX() << "Z " << ts.ISO8601DateTimeStrX() << "Z " << t-t0 << " " << nRecords << "\n";
+      std::cout << fname << " " << ts0.ISO8601DateTimeStrX() << "Z " << ts.ISO8601DateTimeStrX() << "Z " << t-t0 << " " << nRecords << std::endl;
    }
 
    return 0;
