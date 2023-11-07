@@ -2226,13 +2226,19 @@ int MagAOXApp<_useINDI>::createStandardIndiNumber( pcf::IndiProperty & prop,
    prop["current"].setMin(min);
    prop["current"].setMax(max);
    prop["current"].setStep(step);
-   prop["current"].setFormat(format);
-   
+   if(format != "") //don't override defaults
+   {
+      prop["current"].setFormat(format);
+   }
+
    prop.add(pcf::IndiElement("target"));
    prop["target"].setMin(min);
    prop["target"].setMax(max);
    prop["target"].setStep(step);
-   prop["target"].setFormat(format);
+   if(format != "") //don't override defaults
+   {
+      prop["target"].setFormat(format);
+   }
    
    //Don't set "" just in case libcommon does something with defaults
    if(label != "")

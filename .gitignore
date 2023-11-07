@@ -83,6 +83,7 @@ INDI/xindidriver/xindidriver
 apps/indiTSAccumulator/indiTSAccumulator
 
 #k
+apps/kcubeCtrl/kcubeCtrl
 apps/kTracker/kTracker
 apps/koolanceCtrl/koolanceCtrl
 
