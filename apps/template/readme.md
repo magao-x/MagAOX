@@ -35,20 +35,7 @@ Add the `*_test.cpp` file to the top level `tests/testMagAOX.cpp` file, and to t
 
 Document your code with doxygen.  Be sure that `template` was changed to the application name in all documentation blocks in the source code, including the group definitions and `\ingroup` directives.
 
-# 5. Program Documentation
-
-Rename and edit the file `doc/template.md`, in the above example it should become `doc/hardwareCtrl.md`.  Change all instances of `template` to the application name, update the text appropriately, including the app specific options and INDI section.
-
-# 6. Documentation System Integration
-
-Next, follow all of these steps to integrate the documentation:
-- in the file `libMagAOX/doc/libMagAOX_doxygen.in` add the application folder to the INPUT directive 
-- in the same file, add the application/doc folder to the EXCLUDE directive
-- in the file 'apps/doc/magaox_apps_doxygen.in`  add the application `xxxx/doc/` folder to the `INPUT` directive
-
-Now running `make doc` in the top level should build all documentation with your new application integrated into it like all the others.
-
-# 7. Final Steps
+# 5. Final Steps
 
 Delete this `readme.md` from the new application folder.
 
