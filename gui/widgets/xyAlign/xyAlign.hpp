@@ -23,25 +23,29 @@ class xyAlign : public xWidget
 protected:
    QMutex m_mutex;
    
-   std::string m_title;
+   std::string m_title {"gmtpicos"};
 
    //Device state
    std::string m_device{"gmtpicos"};
-   std::string m_xProperty{"pico2_pos"};
-   std::string m_yProperty{"pico1_pos"};
+   std::string m_axis1Property{"pico1_pos"};
+   std::string m_axis2Property{"pico2_pos"};
    std::string m_fsmState;
    
-   double m_xPos;
-   double m_yPos;
+   double m_axis1Pos;
+   double m_axis2Pos;
 
-   double m_stepSize {100};   
-   int m_scale {100};
+   double m_stepSize {1};   
+   int m_scale {10};
 
+   double m_rot00 {1};
+   double m_rot01 {0};
+   double m_rot10 {0};
+   double m_rot11 {1};
    
 public:
    xyAlign( QWidget * Parent = 0, 
-               Qt::WindowFlags f = Qt::WindowFlags()
-             );
+            Qt::WindowFlags f = Qt::WindowFlags()
+          );
    
    ~xyAlign();
    
@@ -56,6 +60,10 @@ public:
    void enableButtons();
    void disableButtons();
    
+   void move( double dx,
+              double dy
+            );
+
 public slots:
    void updateGUI();
    
@@ -85,11 +93,11 @@ xyAlign::xyAlign( QWidget * Parent, Qt::WindowFlags f) : xWidget(Parent, f)
    
    ui.fsmState->device(m_device);
 
-   ui.xPos->setup(m_device, m_xProperty, statusEntry::INT, "x", "");
+   ui.xPos->setup(m_device, m_axis1Property, statusEntry::INT, "pico1", "");
    ui.xPos->setStretch(0,1,6);//removes spacer and maximizes text field
    ui.xPos->format("%d");
    
-   ui.yPos->setup(m_device, m_yProperty, statusEntry::INT, "y", "");
+   ui.yPos->setup(m_device, m_axis2Property, statusEntry::INT, "pico2", "");
    ui.yPos->setStretch(0,1,6);//removes spacer and maximizes text field
    ui.yPos->format("%d");
 
@@ -109,8 +117,8 @@ void xyAlign::subscribe()
 
    m_parent->addSubscriberProperty(this, m_device, "fsm");
    
-   m_parent->addSubscriberProperty(this, m_device, m_xProperty);
-   m_parent->addSubscriberProperty(this, m_device, m_yProperty);
+   m_parent->addSubscriberProperty(this, m_device, m_axis1Property);
+   m_parent->addSubscriberProperty(this, m_device, m_axis2Property);
    
    m_parent->addSubscriber(ui.fsmState);
    m_parent->addSubscriber(ui.xPos);
@@ -183,25 +191,55 @@ void xyAlign::handleSetProperty( const pcf::IndiProperty & ipRecv)
             return;
          }
       }
-      if(ipRecv.getName() == m_xProperty)
+      if(ipRecv.getName() == m_axis1Property)
       {
          if(ipRecv.find("current"))
          {
-            m_xPos = ipRecv["current"].get<double>();
+            m_axis1Pos = ipRecv["current"].get<double>();
             return;
          }
       }
-      if(ipRecv.getName() == m_yProperty)
+      if(ipRecv.getName() == m_axis2Property)
       {
          if(ipRecv.find("current"))
          {
-            m_xPos = ipRecv["current"].get<double>();
+            m_axis1Pos = ipRecv["current"].get<double>();
             return;
          }
       }
    }
 
    return;
+
+}
+
+void xyAlign::move( double dx,
+                    double dy
+                  )
+{
+    disableButtons();
+
+    double d1 = dx*m_rot00 + dy*m_rot01;
+    double d2 = dx*m_rot10 + dy*m_rot11;
+
+    pcf::IndiProperty ip1(pcf::IndiProperty::Number);
+   
+    ip1.setDevice(m_device);
+    ip1.setName(m_axis1Property);
+    ip1.add(pcf::IndiElement("target"));
+    ip1["target"] = m_axis1Pos + d1;
+
+
+    pcf::IndiProperty ip2(pcf::IndiProperty::Number);
+   
+    ip2.setDevice(m_device);
+    ip2.setName(m_axis2Property);
+    ip2.add(pcf::IndiElement("target"));
+    ip2["target"] = m_axis2Pos + d2;
+
+    
+
+    sendNewProperty(ip2);
 
 }
 
@@ -249,58 +287,66 @@ void xyAlign::disableButtons()
 
 void xyAlign::on_button_u_pressed()
 {
-   pcf::IndiProperty ip(pcf::IndiProperty::Number);
+    return move(0, m_scale*m_stepSize);
+
+   /*pcf::IndiProperty ip(pcf::IndiProperty::Number);
    
    ip.setDevice(m_device);
-   ip.setName(m_yProperty);
+   ip.setName(m_axis2Property);
    ip.add(pcf::IndiElement("target"));
-   ip["target"] = m_yPos + m_scale*m_stepSize;
+   ip["target"] = m_axis2Pos + m_scale*m_stepSize;
 
    disableButtons();
 
-   sendNewProperty(ip);
+   sendNewProperty(ip);*/
 }
 
 void xyAlign::on_button_d_pressed()
 {
-   pcf::IndiProperty ip(pcf::IndiProperty::Number);
+    return move(0, -m_scale*m_stepSize);
+
+   /*pcf::IndiProperty ip(pcf::IndiProperty::Number);
    
    ip.setDevice(m_device);
-   ip.setName(m_yProperty);
+   ip.setName(m_axis2Property);
    ip.add(pcf::IndiElement("target"));
-   ip["target"] = m_yPos - m_scale*m_stepSize;
+   ip["target"] = m_axis2Pos - m_scale*m_stepSize;
 
    disableButtons();
 
-   sendNewProperty(ip);
+   sendNewProperty(ip);*/
 }
 
 void xyAlign::on_button_l_pressed()
 {
-   pcf::IndiProperty ip(pcf::IndiProperty::Number);
+    return move(-m_scale*m_stepSize, 0);
+
+   /*pcf::IndiProperty ip(pcf::IndiProperty::Number);
    
    ip.setDevice(m_device);
-   ip.setName(m_xProperty);
+   ip.setName(m_axis1Property);
    ip.add(pcf::IndiElement("target"));
-   ip["target"] = m_xPos - m_scale*m_stepSize;
+   ip["target"] = m_axis1Pos - m_scale*m_stepSize;
 
    disableButtons();
 
-   sendNewProperty(ip);
+   sendNewProperty(ip);*/
 }
 
 void xyAlign::on_button_r_pressed()
 {
-   pcf::IndiProperty ip(pcf::IndiProperty::Number);
+    return move(m_scale*m_stepSize, 0);
+
+    /*pcf::IndiProperty ip(pcf::IndiProperty::Number);
    
    ip.setDevice(m_device);
-   ip.setName(m_xProperty);
+   ip.setName(m_axis1Property);
    ip.add(pcf::IndiElement("target"));
-   ip["target"] = m_xPos + m_scale*m_stepSize;
+   ip["target"] = m_axis1Pos + m_scale*m_stepSize;
 
    disableButtons();
 
-   sendNewProperty(ip);
+   sendNewProperty(ip);*/
    
 }
 
