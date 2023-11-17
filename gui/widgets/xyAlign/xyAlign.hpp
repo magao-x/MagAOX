@@ -37,10 +37,10 @@ protected:
    double m_stepSize {1};   
    int m_scale {10};
 
-   double m_rot00 {1};
-   double m_rot01 {0};
-   double m_rot10 {0};
-   double m_rot11 {1};
+   double m_rot00 {0};
+   double m_rot01 {-1};
+   double m_rot10 {-1};
+   double m_rot11 {0};
    
 public:
    xyAlign( QWidget * Parent = 0, 
@@ -203,7 +203,7 @@ void xyAlign::handleSetProperty( const pcf::IndiProperty & ipRecv)
       {
          if(ipRecv.find("current"))
          {
-            m_axis1Pos = ipRecv["current"].get<double>();
+            m_axis2Pos = ipRecv["current"].get<double>();
             return;
          }
       }
@@ -237,7 +237,7 @@ void xyAlign::move( double dx,
     ip2.add(pcf::IndiElement("target"));
     ip2["target"] = m_axis2Pos + d2;
 
-    
+    sendNewProperty(ip1);
 
     sendNewProperty(ip2);
 
@@ -288,66 +288,21 @@ void xyAlign::disableButtons()
 void xyAlign::on_button_u_pressed()
 {
     return move(0, m_scale*m_stepSize);
-
-   /*pcf::IndiProperty ip(pcf::IndiProperty::Number);
-   
-   ip.setDevice(m_device);
-   ip.setName(m_axis2Property);
-   ip.add(pcf::IndiElement("target"));
-   ip["target"] = m_axis2Pos + m_scale*m_stepSize;
-
-   disableButtons();
-
-   sendNewProperty(ip);*/
 }
 
 void xyAlign::on_button_d_pressed()
 {
     return move(0, -m_scale*m_stepSize);
-
-   /*pcf::IndiProperty ip(pcf::IndiProperty::Number);
-   
-   ip.setDevice(m_device);
-   ip.setName(m_axis2Property);
-   ip.add(pcf::IndiElement("target"));
-   ip["target"] = m_axis2Pos - m_scale*m_stepSize;
-
-   disableButtons();
-
-   sendNewProperty(ip);*/
 }
 
 void xyAlign::on_button_l_pressed()
 {
     return move(-m_scale*m_stepSize, 0);
-
-   /*pcf::IndiProperty ip(pcf::IndiProperty::Number);
-   
-   ip.setDevice(m_device);
-   ip.setName(m_axis1Property);
-   ip.add(pcf::IndiElement("target"));
-   ip["target"] = m_axis1Pos - m_scale*m_stepSize;
-
-   disableButtons();
-
-   sendNewProperty(ip);*/
 }
 
 void xyAlign::on_button_r_pressed()
 {
     return move(m_scale*m_stepSize, 0);
-
-    /*pcf::IndiProperty ip(pcf::IndiProperty::Number);
-   
-   ip.setDevice(m_device);
-   ip.setName(m_axis1Property);
-   ip.add(pcf::IndiElement("target"));
-   ip["target"] = m_axis1Pos + m_scale*m_stepSize;
-
-   disableButtons();
-
-   sendNewProperty(ip);*/
-   
 }
 
 void xyAlign::on_button_scale_pressed()
@@ -375,7 +330,6 @@ void xyAlign::on_button_scale_pressed()
    
    char ss[5];
    snprintf(ss, 5, "%d", m_scale);
-   std::cerr << m_scale << " " << ss << "\n";
    ui.button_scale->setText(ss);
 
 
