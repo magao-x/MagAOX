@@ -52,6 +52,8 @@ protected:
 
    bool m_onDisconnected {false};
 
+    QTimer * m_updateTimer {nullptr};
+
 public:
    explicit roi( std::string & camName,
                  QWidget * Parent = 0, 
@@ -115,6 +117,11 @@ roi::roi( std::string & camName,
    ui.val_center_y->setProperty("isStatus", true);
    ui.val_width->setProperty("isStatus", true);
    ui.val_height->setProperty("isStatus", true);
+
+    m_updateTimer = new QTimer(this);
+
+    connect(m_updateTimer, SIGNAL(timeout()), this, SLOT(updateGUI()));
+    m_updateTimer->start(250);
 
    onDisconnect();
 }
@@ -359,7 +366,6 @@ void roi::handleSetProperty( const pcf::IndiProperty & ipRecv)
       m_onDisconnected = false;
    }
 
-   updateGUI();   
 }
 
 void roi::updateGUI()
