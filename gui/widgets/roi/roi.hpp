@@ -825,7 +825,7 @@ void roi::on_button_default_pressed()
    pcf::IndiProperty ipFreq(pcf::IndiProperty::Switch);
    
    ipFreq.setDevice(m_camName);
-   ipFreq.setName("roi_set_startup");
+   ipFreq.setName("roi_set_default");
    ipFreq.add(pcf::IndiElement("request"));
    ipFreq["request"].setSwitchState(pcf::IndiElement::On);
     
