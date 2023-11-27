@@ -118,6 +118,76 @@
 /** Offset for second chunk */
 #define OCAM2_BINNING4x4_OFFSET  (OCAM2_PIXELS_IMAGE_NORMAL - (OCAM2_PIXELS_IMAGE_BINNING4x4/2*OCAM2_NB_IDENTICAL_PIXELS_BINNING4x4))
 
+/** 16bit witdth*/
+#define OCAM2_IMAGE_WIDTH_2_TRACK   240
+/** 16bit witdth*/
+#define OCAM2_IMAGE_HEIGHT_2_TRACK  2
+/** 480 pixels(16bit witdth) per image area (240x2) */
+#define OCAM2_PIXELS_IMAGE_2_TRACK  (OCAM2_IMAGE_WIDTH_2_TRACK*OCAM2_IMAGE_HEIGHT_2_TRACK)
+/** 8bit witdth*/
+#define OCAM2_IMAGE_WIDTH_RAW_2_TRACK   1056
+/** 8bit witdth*/
+#define OCAM2_IMAGE_HEIGHT_RAW_2_TRACK  2
+/** 16896 pixels(16bit witdth) in raw image (including non-image pixels : 66x32x8) */
+#define OCAM2_PIXELS_RAW_2_TRACK  ((OCAM2_IMAGE_WIDTH_RAW_2_TRACK*OCAM2_IMAGE_HEIGHT_RAW_2_TRACK)/2)
+/** Number of identical pixel in raw image */
+#define OCAM2_NB_IDENTICAL_PIXELS_2_TRACK  1
+/** Offset for second chunk */
+#define OCAM2_2_TRACK_OFFSET  (OCAM2_PIXELS_IMAGE_NORMAL - (OCAM2_PIXELS_IMAGE_2_TRACK/2*OCAM2_NB_IDENTICAL_PIXELS_2_TRACK))
+
+/** 16bit witdth*/
+#define OCAM2_IMAGE_WIDTH_4_TRACK   240
+/** 16bit witdth*/
+#define OCAM2_IMAGE_HEIGHT_4_TRACK  4
+/** 480 pixels(16bit witdth) per image area (240x2) */
+#define OCAM2_PIXELS_IMAGE_4_TRACK  (OCAM2_IMAGE_WIDTH_4_TRACK*OCAM2_IMAGE_HEIGHT_4_TRACK)
+/** 8bit witdth*/
+#define OCAM2_IMAGE_WIDTH_RAW_4_TRACK   1056
+/** 8bit witdth*/
+#define OCAM2_IMAGE_HEIGHT_RAW_4_TRACK  3
+/** 16896 pixels(16bit witdth) in raw image (including non-image pixels : 66x32x8) */
+#define OCAM2_PIXELS_RAW_4_TRACK  ((OCAM2_IMAGE_WIDTH_RAW_4_TRACK*OCAM2_IMAGE_HEIGHT_RAW_4_TRACK)/2)
+/** Number of identical pixel in raw image */
+#define OCAM2_NB_IDENTICAL_PIXELS_4_TRACK  1
+/** Offset for second chunk */
+#define OCAM2_4_TRACK_OFFSET  (OCAM2_PIXELS_IMAGE_NORMAL - (OCAM2_PIXELS_IMAGE_4_TRACK/2*OCAM2_NB_IDENTICAL_PIXELS_4_TRACK))
+
+
+/** 16bit witdth*/
+#define OCAM2_IMAGE_WIDTH_BINNING1x3   240
+/** 16bit witdth*/
+#define OCAM2_IMAGE_HEIGHT_BINNING1x3  80
+/** 19200 pixels(16bit witdth) per image area (240x80) */
+#define OCAM2_PIXELS_IMAGE_BINNING1x3  (OCAM2_IMAGE_WIDTH_BINNING1x3*OCAM2_IMAGE_HEIGHT_BINNING1x3)
+/** 8bit witdth*/
+#define OCAM2_IMAGE_WIDTH_RAW_BINNING1x3   1056
+/** 8bit witdth*/
+#define OCAM2_IMAGE_HEIGHT_RAW_BINNING1x3  41
+/** 22176 pixels(16bit witdth) in raw image (including non-image pixels : 66x42x8)*/
+#define OCAM2_PIXELS_RAW_BINNING1x3  ((OCAM2_IMAGE_WIDTH_RAW_BINNING1x3*OCAM2_IMAGE_HEIGHT_RAW_BINNING1x3)/2)
+/** Number of identical pixel in raw image */
+#define OCAM2_NB_IDENTICAL_PIXELS_BINNING1x3  1
+/** Offset for second chunk */
+#define OCAM2_BINNING1x3_OFFSET  (OCAM2_PIXELS_IMAGE_NORMAL - (OCAM2_PIXELS_IMAGE_BINNING1x3/2*OCAM2_NB_IDENTICAL_PIXELS_BINNING1x3))
+
+/** 16bit witdth*/
+#define OCAM2_IMAGE_WIDTH_BINNING1x4   240
+/** 16bit witdth*/
+#define OCAM2_IMAGE_HEIGHT_BINNING1x4  60
+/** 3600 pixels(16bit witdth) per image area (60x60) */
+#define OCAM2_PIXELS_IMAGE_BINNING1x4  (OCAM2_IMAGE_WIDTH_BINNING1x4*OCAM2_IMAGE_HEIGHT_BINNING1x4)
+/** 8bit witdth*/
+#define OCAM2_IMAGE_WIDTH_RAW_BINNING1x4   1056
+/** 8bit witdth*/
+#define OCAM2_IMAGE_HEIGHT_RAW_BINNING1x4  31
+/** 16896 pixels(16bit witdth) in raw image (including non-image pixels : 66x32x8) */
+#define OCAM2_PIXELS_RAW_BINNING1x4  ((OCAM2_IMAGE_WIDTH_RAW_BINNING1x4*OCAM2_IMAGE_HEIGHT_RAW_BINNING1x4)/2)
+/** Number of identical pixel in raw image */
+#define OCAM2_NB_IDENTICAL_PIXELS_BINNING1x4  1
+/** Offset for second chunk */
+#define OCAM2_BINNING1x4_OFFSET  (OCAM2_PIXELS_IMAGE_NORMAL - (OCAM2_PIXELS_IMAGE_BINNING1x4/2*OCAM2_NB_IDENTICAL_PIXELS_BINNING1x4))
+
+
 /** Keep for compatibility */
 #define OCAM2_IMAGE_WIDTH_BINNING      OCAM2_IMAGE_WIDTH_BINNING2x2
 /** Keep for compatibility */
@@ -166,8 +236,16 @@ typedef enum workMode
     OCAM2_BINNING = OCAM2_BINNING2x2,
     /** Cropping 128 */
     OCAM2_CROPPING240x128 = 6,
+	/** Binning 2 lignes */
+	OCAM2_2_TRACK = 7,
+	/** Binning 4 lignes */
+	OCAM2_4_TRACK = 8,
+    /** Binning 1x3 */
+    OCAM2_BINNING1x3 = 9,
+    /** Binning 1x4 */
+    OCAM2_BINNING1x4 = 10,
     /** Number of mode */
-    OCAM2_NB_WORK_MODE = 5 /** Number of mode */
+    OCAM2_NB_WORK_MODE = 10 /** Number of mode */
 
 } ocam2_mode;
 
