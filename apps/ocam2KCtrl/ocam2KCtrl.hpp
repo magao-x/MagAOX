@@ -1142,7 +1142,6 @@ int ocam2KCtrl::configureAcquisition()
    log<text_log>("Send command to set mode: " + m_cameraModes[m_modeName].m_serialCommand);
    log<text_log>("Response was: " + response);
   
- 
    /* Initialize the OCAM2 SDK
        */
 
@@ -1153,16 +1152,31 @@ int ocam2KCtrl::configureAcquisition()
    ocam2_rc rc;
    ocam2_mode mode;
 
-   int OCAM_SZ;
+   int OCAM_SZw;
+   int OCAM_SZh;
    if(m_raw_height == 121)
    {
       mode = OCAM2_NORMAL;
-      OCAM_SZ = 240;
+      OCAM_SZw = 240;
+      OCAM_SZh = 240;
    }
    else if (m_raw_height == 62)
    {
       mode = OCAM2_BINNING;
-      OCAM_SZ = 120;
+      OCAM_SZw = 120;
+      OCAM_SZh = 120;
+   }
+   else if (m_raw_height == 41)
+   {
+      mode = OCAM2_BINNING1x3;
+      OCAM_SZw = 240;
+      OCAM_SZh = 80;
+   }
+   else if (m_raw_height == 31)
+   {
+      mode = OCAM2_BINNING1x4;
+      OCAM_SZw = 240;
+      OCAM_SZh = 60;
    }
    else
    {
@@ -1173,7 +1187,9 @@ int ocam2KCtrl::configureAcquisition()
    std::string ocamDescrambleFile = m_configDir + "/" + m_ocamDescrambleFile;
 
    std::cerr << "ocamDescrambleFile: " << ocamDescrambleFile << std::endl;
+   
    rc=ocam2_init(mode, ocamDescrambleFile.c_str(), &m_ocam2_id);
+   
    if (rc != OCAM2_OK)
    {
       if(powerState() != 1 || powerStateTarget() != 1) return -1;
@@ -1183,10 +1199,11 @@ int ocam2KCtrl::configureAcquisition()
    
 
    log<text_log>("OCAM2K initialized. id: " + std::to_string(m_ocam2_id));
+
    log<text_log>(std::string("OCAM2K mode is:") + ocam2_modeStr(ocam2_getMode(m_ocam2_id)));
    
-   m_width = OCAM_SZ;
-   m_height = OCAM_SZ;
+   m_width = OCAM_SZw;
+   m_height = OCAM_SZh;
    m_dataType = _DATATYPE_UINT16;
    
    if(m_framesSkipped == 1) m_framesSkipped = 2; //This means frame skip detected

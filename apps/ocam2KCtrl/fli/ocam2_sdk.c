@@ -83,8 +83,12 @@ const char *ocam2_modeStr(ocam2_mode mode)
      "Binning 2x2 Mode(120x120@3620Hz)",
      "Binning 3x3 Mode(80x80@4950Hz)",
      "Binning 4x4 Mode(60x60@5900Hz)",
-     "Cropping Mode(240x128@3500Hz)"};
-
+     "Cropping Mode(240x128@3500Hz)",
+     "Mode 7",
+     "Mode 8",
+     "Binning 1x3 Mode(240x80@XXXXHz)",
+     "Binning 1x4 Mode(240x50@XXXXHz)"};
+    
     switch(mode)
     {
         case OCAM2_UNKNOWN:
@@ -94,7 +98,9 @@ const char *ocam2_modeStr(ocam2_mode mode)
         case OCAM2_BINNING3x3:
         case OCAM2_BINNING4x4:
         case OCAM2_CROPPING240x128:
-
+        case OCAM2_BINNING1x3:
+        case OCAM2_BINNING1x4:
+        
         return ocam2_modeText[mode];
         default:
             return NULL;

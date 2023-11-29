@@ -159,7 +159,7 @@ void Matrix::scale(float scale_param){
 }
 
 void Matrix::subtract(Matrix* other, float value){
-	add(other, value);
+	add(other, value); // TODO: fix sign of value
 }
 
 
