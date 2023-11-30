@@ -16,6 +16,8 @@ else
 fi
 # Defines $ID and $VERSION_ID so we can detect which distribution we're on
 source /etc/os-release
+# Get just the XX beginning of a XX.YY version string
+MAJOR_VERSION=${VERSION_ID%.*}
 
 roleScript=/etc/profile.d/magaox_role.sh
 VM_KIND=$(systemd-detect-virt)
@@ -46,14 +48,14 @@ fi
 source $DIR/_common.sh
 
 # Install OS packages first
-osPackagesScript="$DIR/steps/install_${ID}_${VERSION_ID}_packages.sh"
+osPackagesScript="$DIR/steps/install_${ID}_${MAJOR_VERSION}_packages.sh"
 $_REAL_SUDO bash -l $osPackagesScript || exit_error "Failed to install packages from $osPackagesScript"
 
 if [[ $ID == centos ]]; then
     $_REAL_SUDO bash -l "$DIR/steps/install_cmake.sh" || exit 1
 fi
 
-distroSpecificScript="$DIR/steps/configure_${ID}_${VERSION_ID}.sh"
+distroSpecificScript="$DIR/steps/configure_${ID}_${MAJOR_VERSION}.sh"
 $_REAL_SUDO bash -l $distroSpecificScript || exit_error "Failed to configure ${ID} from $distroSpecificScript"
 
 if [[ $VM_KIND != "none" ]]; then
