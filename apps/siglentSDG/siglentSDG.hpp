@@ -36,8 +36,8 @@ class siglentSDG : public MagAOXApp<>, public dev::telemeter<siglentSDG>
    //constexpr static double cs_MaxFreq = 3622.0;//101;//3622.0;
 
 private:
-   std::vector<double> m_maxAmp = {  0.71,  0.83, 0.88, 1.05, 1.15}; //1.5,     1.2,     1.1     };
-   std::vector<double> m_maxFreq = {100.0,   150,  200 , 250, 300}; //2999.99, 3499.99, 3500.01};
+   std::vector<double> m_maxAmp = {  0.71,  0.83, 0.88, 1.05, 1.15, 3.45}; //1.5,     1.2,     1.1     };
+   std::vector<double> m_maxFreq = {100.0,   150,  200 , 250, 300, 1000}; //2999.99, 3499.99, 3500.01};
    //todo: do we need to add max and min pulse variables?
 protected:
 
