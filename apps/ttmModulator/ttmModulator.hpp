@@ -35,7 +35,7 @@ protected:
    double m_setDVolts {1.0}; ///< The setting ramp step size [volts].
 
    double m_modDFreq {500}; ///< The modulation ramp frequency step size [Hz].
-   double m_modDVolts {0.1}; ///< The modulation ramp voltage step size [Volts].
+   double m_modDVolts {0.5}; ///< The modulation ramp voltage step size [Volts].
 
    double m_rotAngle {0};
    double m_rotParity {1};
@@ -895,12 +895,12 @@ int ttmModulator::modTTM( double newRad,
          if( sendNewProperty(m_indiP_C2volts, "value", nextVolts2) < 0 ) return log<software_error,-1>({__FILE__,__LINE__});
 
          //Now check if values have changed.
-         if( waitValue(m_C1volts, nextVolts1, 1e-6) < 0 ) 
+         if( waitValue(m_C1volts, nextVolts1, 1e-3) < 0 ) 
          {
             return log<software_error,-1>({__FILE__,__LINE__, "fxngen timeout C1"});
          }
 
-         if( waitValue(m_C2volts, nextVolts2, 1e-6) < 0 ) 
+         if( waitValue(m_C2volts, nextVolts2, 1e-3) < 0 ) 
          {
             return log<software_error,-1>({__FILE__,__LINE__, "fxngen timeout C2"});
          }
