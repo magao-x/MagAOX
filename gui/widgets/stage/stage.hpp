@@ -87,6 +87,8 @@ public slots:
 signals:
    void setPointEditTimerStart(int);
 
+   void doUpdateGUI();
+
 protected:
    virtual void paintEvent(QPaintEvent * e);
 
@@ -99,27 +101,28 @@ stage::stage( std::string & stageName,
               QWidget * Parent, 
               Qt::WindowFlags f) : xWidget(Parent, f), m_stageName{stageName}
 {
-   ui.setupUi(this);
+    ui.setupUi(this);
 
-   m_winTitle = m_stageName;
+    m_winTitle = m_stageName;
    
-   ui.fsmState->device(m_stageName);
-   QFont qf = ui.stageName->font();
-   qf.setPixelSize(XW_FONT_SIZE+3);
-   ui.stageName->setFont(qf);
+    ui.fsmState->device(m_stageName);
+    QFont qf = ui.stageName->font();
+    qf.setPixelSize(XW_FONT_SIZE+3);
+    ui.stageName->setFont(qf);
 
-   ui.stageName->setText(m_stageName.c_str());
+    ui.stageName->setText(m_stageName.c_str());
 
-   ui.setPoint->setProperty("isStatus", true);
+    ui.setPoint->setProperty("isStatus", true);
 
-   ui.position->setAlignment(Qt::AlignCenter);
-   ui.stepSize->setAlignment(Qt::AlignCenter);
+    ui.position->setAlignment(Qt::AlignCenter);
+    ui.stepSize->setAlignment(Qt::AlignCenter);
 
-   m_setPointEditTimer = new QTimer(this);
-   connect(m_setPointEditTimer, SIGNAL(timeout()), this, SLOT(setPointEditTimerOut()));
-   connect(this, SIGNAL(setPointEditTimerStart(int)), m_setPointEditTimer, SLOT(start(int)));
+    m_setPointEditTimer = new QTimer(this);
+    connect(m_setPointEditTimer, SIGNAL(timeout()), this, SLOT(setPointEditTimerOut()));
+    connect(this, SIGNAL(setPointEditTimerStart(int)), m_setPointEditTimer, SLOT(start(int)));
+    connect(this, SIGNAL(doUpdateGUI()), this, SLOT(updateGUI()));
 
-   onDisconnect();
+    onDisconnect();
 }
    
 stage::~stage()
@@ -251,12 +254,14 @@ void stage::handleSetProperty( const pcf::IndiProperty & ipRecv)
       if(m_filterWheel) m_maxPos = n + 0.5;
    }
 
-   updateGUI();   
+   emit doUpdateGUI();
 }
 
 void stage::updateGUI()
 {
-   if( m_appState != "READY" && m_appState != "OPERATING" && m_appState != "CONFIGURING"  && m_appState != "NOTHOMED" && m_appState != "HOMING")
+   if( m_appState != "READY" && m_appState != "OPERATING" 
+             && m_appState != "CONFIGURING"  && m_appState != "NOTHOMED" 
+                     && m_appState != "HOMING")
    {
       ui.stageName->setEnabled(false);
       ui.fsmState->setEnabled(false);

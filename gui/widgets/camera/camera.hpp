@@ -164,7 +164,7 @@ camera::camera( std::string & camName,
 
    m_updateTimer = new QTimer(this);
 
-    connect(this, SIGNAL(doUpdateGUI()), this, SLOT(updateGUI()));
+   connect(this, SIGNAL(doUpdateGUI()), this, SLOT(updateGUI()));
 
    connect(m_updateTimer, SIGNAL(timeout()), this, SLOT(updateGUI()));
    connect(this, SIGNAL(updateTimerStop()), m_updateTimer, SLOT(stop()));
