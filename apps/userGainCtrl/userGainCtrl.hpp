@@ -626,14 +626,7 @@ int userGainCtrl::getAOCalib()
    }
    fin.close();
    
-   //Now get number of modes from the modesWFS file
-   //calsrc = m_aoCalDir + "/aol" + std::to_string(m_loopNumber) + "_modesWFS.fits";
-   
-   //m_ff.open(calsrc);
-
    int totalNModes = m_gainsCurrent.rows(); //m_ff.naxes(2);
-
-   m_ff.close();
 
    //Is this a change?
    if(totalNModes != m_totalNModes)
@@ -950,6 +943,11 @@ int userGainCtrl::processImage( void * curr_src,
 
    }
 
+   for(size_t n=0; n < m_indiP_blockGains.size(); ++n)
+   {
+      updateIfChanged(m_indiP_blockGains[n], "current", m_modeBlockGains[n]);
+   }
+
    lock.unlock();
 
    recordBlockGains();
@@ -1077,6 +1075,11 @@ int userGainCtrl::processImage( void * curr_src,
       m_modeBlockMCsConstant[n] = constant;
    }
 
+   for(size_t n=0; n < m_indiP_blockMCs.size(); ++n)
+   {
+      updateIfChanged(m_indiP_blockMCs[n], "current", m_modeBlockMCs[n]);
+   }
+
    lock.unlock();
 
    recordBlockGains();
@@ -1201,6 +1204,11 @@ int userGainCtrl::processImage( void * curr_src,
       }
 
       m_modeBlockLimsConstant[n] = constant;
+   }
+
+   for(size_t n=0; n < m_indiP_blockLimits.size(); ++n)
+   {
+      updateIfChanged(m_indiP_blockLimits[n], "current", m_modeBlockLims[n]);
    }
 
    lock.unlock();
@@ -1407,7 +1415,7 @@ int userGainCtrl::newCallBack_blockGains( const pcf::IndiProperty &ipRecv )
       return -1;
    }
 
-   if(ipRecv.getName().find("BLOCK") != 0)
+   if(ipRecv.getName().find("block") != 0)
    {
       #ifndef XWCTEST_INDI_CALLBACK_VALIDATION
       log<software_error>({__FILE__, __LINE__, "wrong INDI property"});

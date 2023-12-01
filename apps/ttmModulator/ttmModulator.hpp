@@ -875,7 +875,7 @@ int ttmModulator::modTTM( double newRad,
          ///\todo make sleep-time configurable
          sleep(1);
          currFreq = m_C1freq;
-         nextFreq = currFreq + 500.0;
+         nextFreq = currFreq + m_modDFreq;
          if(nextFreq > newFreq) nextFreq = newFreq;
       }
 
@@ -907,11 +907,11 @@ int ttmModulator::modTTM( double newRad,
 
          sleep(1);
          currVolts1 = m_C1volts;
-         nextVolts1 = currVolts1 + 0.1;
+         nextVolts1 = currVolts1 + m_modDVolts;
          if(nextVolts1 > voltageC1) nextVolts1 = voltageC1;
 
          currVolts2 = m_C2volts;
-         nextVolts2 = currVolts2 + 0.1;
+         nextVolts2 = currVolts2 + m_modDVolts;
          if(nextVolts2 > voltageC2) nextVolts2 = voltageC2;
 
       }
