@@ -317,8 +317,8 @@ INDI_NEWCALLBACK_DEFN(timeSeriesSimulator, gizmos)
 INDI_NEWCALLBACK_DEFN(timeSeriesSimulator, duty_cycle)
 (const pcf::IndiProperty &ipRecv)
 {
-  if (ipRecv.getName() == duty_cycle.getName())
-  {
+    INDI_VALIDATE_CALLBACK_PROPS(duty_cycle, ipRecv);
+
     if (ipRecv.find("period"))
     {
       duty_cycle["period"] = ipRecv["period"].get<double>();
@@ -340,8 +340,6 @@ INDI_NEWCALLBACK_DEFN(timeSeriesSimulator, duty_cycle)
     m_indiDriver->sendSetProperty(duty_cycle);
     updateVals();
     return 0;
-  }
-  return -1;
 }
 
 INDI_NEWCALLBACK_DEFN(timeSeriesSimulator, function)
@@ -363,8 +361,9 @@ INDI_NEWCALLBACK_DEFN(timeSeriesSimulator, function)
     currentFunctionName = "constant";
     break;
   }
-  if (ipRecv.getName() == function.getName())
-  {
+
+  INDI_VALIDATE_CALLBACK_PROPS(function, ipRecv);
+  
     auto updatedSwitches = ipRecv.getElements();
     for (auto fname : SimFunctionNames)
     {
@@ -419,8 +418,7 @@ INDI_NEWCALLBACK_DEFN(timeSeriesSimulator, function)
     updateVals();
 
     return 0;
-  }
-  return -1;
+ 
 }
 
 void timeSeriesSimulator::updateSimsensor()

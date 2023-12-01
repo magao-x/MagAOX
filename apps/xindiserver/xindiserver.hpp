@@ -130,7 +130,8 @@ protected:
    
    std::string m_driverFIFOPath; ///< The path to the local drivers' FIFOs directory
    std::vector<std::string> m_local; ///< List of local drivers passed in by config
-   std::vector<std::string> m_remote; ///< List of remote drivers passed in by config
+   std::vector<std::string> m_remote; ///< List of remote drivers, using tunnels, passed in by config
+   std::vector<std::string> m_driversAtHosts; ///< List of remote drivers, using driver@host[:port], passed in by config
    std::unordered_set<std::string> m_driverNames; ///< List of driver names processed for command line, used to prevent duplication.
    
    std::vector<std::string> m_remoteServers; ///< List of other INDI server config files to read remote drivers from.
@@ -252,6 +253,7 @@ void xindiserver::setupConfig()
    
    config.add("local.drivers","L", "local.drivers" , argType::Required, "local", "drivers", false,  "vector string", "List of local drivers to start.");
    config.add("remote.drivers","R", "remote.drivers" , argType::Required, "remote", "drivers", false,  "vector string", "List of remote drivers to start, in the form of name@tunnel, where tunnel is the name of a tunnel specified in sshTunnels.conf.");
+   config.add("remote.drivers@hosts","R", "remote.drivers@hosts" , argType::Required, "remote", "drivers@hosts", false,  "vector string", "List of remote drivers to start, in the form of name@host[:port], where host is the name of a host where another INDI server is running.");
 
    config.add("remote.servers","", "remote.servers" , argType::Required, "remote", "servers", false,  "vector string", "List of servers to load remote drivers for, in the form of name@tunnel.  Name is used to load the name.conf configuration file, and tunnel is the name of a tunnel specified in sshTunnels.conf.");
    
@@ -283,6 +285,7 @@ void xindiserver::loadConfig()
    
    config(m_local, "local.drivers");// May be empty if [indiserver_ctrl_fifo] is configured to match [indiserver.f]
    config(m_remote, "remote.drivers");
+   config(m_driversAtHosts, "remote.drivers@hosts");
    config(m_remoteServers, "remote.servers");
    
    loadSSHTunnelConfigs(m_tunnels, config);
@@ -389,6 +392,40 @@ int xindiserver::addLocalDrivers( std::vector<std::string> & driverArgs )
 inline
 int xindiserver::addRemoteDrivers( std::vector<std::string> & driverArgs )
 {
+   for(size_t i=0; i < m_driversAtHosts.size(); ++i)
+   {
+      std::string driver;
+      std::string host_port;
+
+      size_t p = m_driversAtHosts[i].find('@');
+
+      if(p == 0 || p == std::string::npos)
+      {
+         log<software_critical>({__FILE__, __LINE__, "Error parsing remote driver@host[:port] specification: " + m_driversAtHosts[i] + "\n"});         
+         return XINDISERVER_E_BADDRIVERSPEC;
+      }
+
+      driver = m_driversAtHosts[i].substr(0, p);
+      host_port = m_driversAtHosts[i].substr(p+1);
+
+      if( m_driverNames.count(driver) > 0)
+      {
+         log<software_critical>({__FILE__, __LINE__, "Duplicate driver name: " + driver});
+         return XINDISERVER_E_DUPLICATEDRIVER;
+      }
+
+      m_driverNames.insert(driver);
+
+      try
+      {
+         driverArgs.push_back(m_driversAtHosts[i]);
+      }
+      catch(...)
+      {
+         log<software_critical>({__FILE__, __LINE__, "Exception thrown by vector::push_back."});
+         return XINDISERVER_E_VECTOREXCEPT;
+      }
+   }
    for(size_t i=0; i < m_remote.size(); ++i)
    {
       std::string driver;

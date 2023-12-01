@@ -74,6 +74,7 @@ Usage(int rtn, const char* msg)
                  "    [MAGAOX_ROLE=role] resurrector_indi"
                  " [-r role] [--role=role]"
                  " [-nor|--no-output-redirect]"
+                 " [-l|--logging]"
                  " [-v|--verbose]"
                  " [-h|--help]\n"
                  "\n" << std::endl;
@@ -168,6 +169,18 @@ get_magaox_proclist_role(int argc, char** argv)
     pl_role += ".txt";
 
     return pl_role;
+}
+
+/** \brief Return whether a logging command-line option is present
+  *
+  * \returns true if -l or --logging is present, else false
+  * \arg \c argc - command line token count
+  * \arg \c argv - pointer to array of command line token pointers
+  */
+bool
+get_logging_arg(int argc, char** argv)
+{
+    return arg_is_present(argc, argv, "-l", "--logging");
 }
 
 /** \brief Return whether a verbose command-line option is present

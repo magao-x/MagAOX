@@ -4,6 +4,9 @@ source $DIR/../_common.sh
 set -euo pipefail
 
 log_info "Make Extra Packages for Enterprise Linux available in /etc/yum.repos.d/"
+if ! dnf config-manager -h >/dev/null; then
+    dnf install -y 'dnf-command(config-manager)'
+fi
 dnf config-manager --set-enabled crb
 dnf install -y epel-release
 
@@ -16,6 +19,7 @@ ldconfig -v
 
 # Install build tools and utilities
 yum install -y \
+    util-linux-user \
     kernel-devel \
     gcc-gfortran \
     which \
@@ -63,7 +67,9 @@ yum install -y \
     nethogs \
     shadow-utils \
     nfs-utils \
-    pybind11-devel \
+    rsync \
+    lapack-devel \
+    python \
 ;
 
 if [[ $MAGAOX_ROLE == vm ]]; then
@@ -72,13 +78,8 @@ fi
 
 # For some reason, pkg-config doesn't automatically look here?
 mkdir -p /etc/profile.d/
-echo "export PKG_CONFIG_PATH=\${PKG_CONFIG_PATH}:/usr/local/lib/pkgconfig" > /etc/profile.d/99-pkg-config.sh
+echo "export PKG_CONFIG_PATH=\${PKG_CONFIG_PATH-}:/usr/local/lib/pkgconfig" > /etc/profile.d/99-pkg-config.sh
 export PKG_CONFIG_PATH=/usr/local/lib/pkgconfig
-
-if [[ $(uname -p) == "aarch64" ]]; then
-    # since we won't install MKL:
-    yum install -y openblas-devel lapack-devel
-fi
 
 if [[ $MAGAOX_ROLE == TIC || $MAGAOX_ROLE == TOC || $MAGAOX_ROLE == ICC || $MAGAOX_ROLE == RTC || $MAGAOX_ROLE == AOC ]]; then
     dnf config-manager --add-repo https://pkgs.tailscale.com/stable/rhel/9/tailscale.repo

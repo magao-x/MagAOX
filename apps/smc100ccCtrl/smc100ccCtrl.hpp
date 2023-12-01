@@ -7,17 +7,6 @@
   * History:
   * - 2019-01-10 created by CJB
   *
-  * To compile:
-  * - make clean (recommended)
-  * - make CACAO=false
-  * - sudo make install
-  * - /opt/MagAOX/bin/smc100ccCtrl 
-  *
-  *
-  * To run with cursesIndi
-  * 1. /opt/MagAOX/bin/xindiserver -n xindiserverMaths
-  * 2. /opt/MagAOX/bin/smc100ccCtrl -n ssmc100ccCtrl
-  * 3. /opt/MagAOX/bin/cursesINDI 
   */
 #ifndef smc100ccCtrl_hpp
 #define smc100ccCtrl_hpp
@@ -937,42 +926,42 @@ int smc100ccCtrl::getLastError( std::string& errorString)
 
 INDI_NEWCALLBACK_DEFN(smc100ccCtrl, m_indiP_position)(const pcf::IndiProperty &ipRecv)
 {
+   INDI_VALIDATE_CALLBACK_PROPS(m_indiP_position, ipRecv);
+
    if(!( state() == stateCodes::READY || state() == stateCodes::OPERATING))
    {
       log<text_log>("can not command position in current state");
       return 0;
    }
    
-   if (ipRecv.getName() == m_indiP_position.getName())
+   
+   float current = -1e55, target = -1e55;
+
+   try
    {
-      float current = -1e55, target = -1e55;
-
-      try
-      {
-         current = ipRecv["current"].get<float>();
-      }
-      catch(...){}
-      
-      try
-      {
-         target = ipRecv["target"].get<float>();
-      }
-      catch(...){}
-      
-      if(target == -1e55) target = current;
-      
-      if(target == -1e55) return 0;
-      
-      //Lock the mutex, waiting if necessary
-      std::unique_lock<std::mutex> lock(m_indiMutex);
-
-      updateIfChanged(m_indiP_position, "target", target, INDI_BUSY);
-      m_target = target;
-
-      
-      return moveTo(target);
+      current = ipRecv["current"].get<float>();
    }
-   return -1;
+   catch(...){}
+   
+   try
+   {
+      target = ipRecv["target"].get<float>();
+   }
+   catch(...){}
+   
+   if(target == -1e55) target = current;
+   
+   if(target == -1e55) return 0;
+   
+   //Lock the mutex, waiting if necessary
+   std::unique_lock<std::mutex> lock(m_indiMutex);
+
+   updateIfChanged(m_indiP_position, "target", target, INDI_BUSY);
+   m_target = target;
+
+   
+   return moveTo(target);
+   
 }
 
 int smc100ccCtrl::stop()

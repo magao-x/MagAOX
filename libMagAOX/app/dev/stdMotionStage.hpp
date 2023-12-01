@@ -210,28 +210,28 @@ public:
      * \returns 0 on success.
      * \returns -1 on error.
      */
-   int newCallBack_preset( const pcf::IndiProperty &ipRecv /**< [in] the INDI property sent with the the new property request.*/);
+   int newCallBack_m_indiP_preset( const pcf::IndiProperty &ipRecv /**< [in] the INDI property sent with the the new property request.*/);
    
    /// Callback to process a NEW preset name request
    /**
      * \returns 0 on success.
      * \returns -1 on error.
      */
-   int newCallBack_presetName( const pcf::IndiProperty &ipRecv /**< [in] the INDI property sent with the the new property request.*/);
+   int newCallBack_m_indiP_presetName( const pcf::IndiProperty &ipRecv /**< [in] the INDI property sent with the the new property request.*/);
    
    /// Callback to process a NEW home request switch toggle
    /**
      * \returns 0 on success.
      * \returns -1 on error.
      */
-   int newCallBack_home( const pcf::IndiProperty &ipRecv /**< [in] the INDI property sent with the the new property request.*/);
+   int newCallBack_m_indiP_home( const pcf::IndiProperty &ipRecv /**< [in] the INDI property sent with the the new property request.*/);
    
    /// Callback to process a NEW stop request switch toggle
    /**
      * \returns 0 on success.
      * \returns -1 on error.
      */
-   int newCallBack_stop( const pcf::IndiProperty &ipRecv /**< [in] the INDI property sent with the the new property request.*/);
+   int newCallBack_m_indiP_stop( const pcf::IndiProperty &ipRecv /**< [in] the INDI property sent with the the new property request.*/);
    
    /// Update the INDI properties for this device controller
    /** You should call this once per main loop.
@@ -406,17 +406,19 @@ int stdMotionStage<derivedT>::st_newCallBack_stdMotionStage( void * app,
    std::string name = ipRecv.getName();
    derivedT * _app = static_cast<derivedT *>(app);
    
-   if(name == "stop") return _app->newCallBack_stop(ipRecv); //Check this first to make sure it 
-   if(name == "home") return _app->newCallBack_home(ipRecv);
-   if(name == _app->m_presetNotation) return _app->newCallBack_preset(ipRecv);
-   if(name == _app->m_presetNotation + "Name") return _app->newCallBack_presetName (ipRecv);
+   if(name == "stop") return _app->newCallBack_m_indiP_stop(ipRecv); //Check this first to make sure it 
+   if(name == "home") return _app->newCallBack_m_indiP_home(ipRecv);
+   if(name == _app->m_presetNotation) return _app->newCallBack_m_indiP_preset(ipRecv);
+   if(name == _app->m_presetNotation + "Name") return _app->newCallBack_m_indiP_presetName (ipRecv);
    
    return -1;
 }
 
 template<class derivedT>
-int stdMotionStage<derivedT>::newCallBack_preset ( const pcf::IndiProperty &ipRecv )
+int stdMotionStage<derivedT>::newCallBack_m_indiP_preset ( const pcf::IndiProperty &ipRecv )
 {
+    INDI_VALIDATE_CALLBACK_PROPS_DERIVED(m_indiP_preset, ipRecv); 
+
    double target;
    
    if( derived().indiTargetUpdate( m_indiP_preset, target, ipRecv, true) < 0)
@@ -434,13 +436,9 @@ int stdMotionStage<derivedT>::newCallBack_preset ( const pcf::IndiProperty &ipRe
 }
 
 template<class derivedT>
-int stdMotionStage<derivedT>::newCallBack_presetName( const pcf::IndiProperty &ipRecv )
+int stdMotionStage<derivedT>::newCallBack_m_indiP_presetName( const pcf::IndiProperty &ipRecv )
 {
-   if(ipRecv.getName() != m_indiP_presetName.getName())
-   {
-      derivedT::template log<software_error>({__FILE__, __LINE__, "invalid indi property received"});
-      return -1;
-   }
+    INDI_VALIDATE_CALLBACK_PROPS_DERIVED(m_indiP_presetName, ipRecv);
    
    std::string newName = "";
    int newn = -1;
@@ -479,13 +477,9 @@ int stdMotionStage<derivedT>::newCallBack_presetName( const pcf::IndiProperty &i
 }
 
 template<class derivedT>
-int stdMotionStage<derivedT>::newCallBack_home( const pcf::IndiProperty &ipRecv )
+int stdMotionStage<derivedT>::newCallBack_m_indiP_home( const pcf::IndiProperty &ipRecv )
 {
-   if(ipRecv.getName() != m_indiP_home.getName())
-   {
-      derivedT::template log<software_error>({__FILE__,__LINE__, "wrong INDI property received."});
-      return -1;
-   }
+    INDI_VALIDATE_CALLBACK_PROPS_DERIVED(m_indiP_home, ipRecv);
    
    if(!ipRecv.find("request")) return 0;
    
@@ -501,8 +495,10 @@ int stdMotionStage<derivedT>::newCallBack_home( const pcf::IndiProperty &ipRecv 
 }
 
 template<class derivedT>
-int stdMotionStage<derivedT>::newCallBack_stop( const pcf::IndiProperty &ipRecv )
+int stdMotionStage<derivedT>::newCallBack_m_indiP_stop( const pcf::IndiProperty &ipRecv )
 {
+    INDI_VALIDATE_CALLBACK_PROPS_DERIVED(m_indiP_stop, ipRecv);
+
    if(ipRecv.getName() != m_indiP_stop.getName())
    {
       derivedT::template log<software_error>({__FILE__,__LINE__, "wrong INDI property received."});
