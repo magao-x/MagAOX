@@ -7,8 +7,6 @@
 #ifndef cacaoInterface_hpp
 #define cacaoInterface_hpp
 
-
-
 #include "../../libMagAOX/libMagAOX.hpp" //Note this is included on command line to trigger pch
 #include "../../magaox_git_version.h"
 
@@ -240,7 +238,6 @@ public:
    
    pcf::IndiProperty m_indiP_loop;
    pcf::IndiProperty m_indiP_loopProcesses;
-   pcf::IndiProperty m_indiP_modes;
 
    pcf::IndiProperty m_indiP_loopState;
    pcf::IndiProperty m_indiP_loopZero;
@@ -313,11 +310,6 @@ int cacaoInterface::appStartup()
    m_indiP_loop["number"] = m_loopName;
    registerIndiPropertyReadOnly(m_indiP_loop);
    
-   createROIndiNumber( m_indiP_modes, "modes", "Loop Modes", "Loop Controls");
-   indi::addNumberElement(m_indiP_modes, "total", 0, 1, 25000, "Total Modes");
-   indi::addNumberElement(m_indiP_modes, "blocks", 0, 1, 99, "Mode Blocks");
-   registerIndiPropertyReadOnly(m_indiP_modes);
-
    createStandardIndiToggleSw( m_indiP_loopProcesses, "loop_processes", "Loop Processes", "Loop Controls");
    registerIndiPropertyReadOnly( m_indiP_loopProcesses);  
 
@@ -481,137 +473,141 @@ std::string cacaoInterface::getFPSValStr( const std::string & fps,
                                           const std::string & param 
                                         )
 {
-   std::string outfile = "/dev/shm/" + m_loopName + "_out_" + fps + "-" + m_loopNumber + "." + param;
+    std::string outfile = "/dev/shm/" + m_loopName + "_out_" + fps + "-" + m_loopNumber + "." + param;
 
-      std::string comout = "fwrval " + fps + "-" + m_loopNumber + "." + param + " "  + outfile + "\n";
+    std::string comout = "fwrval " + fps + "-" + m_loopNumber + "." + param + " "  + outfile + "\n";
 
-      int wfd = open( m_fpsFifo.c_str(), O_WRONLY);
-      if(wfd < 0)
-      {
-         log<software_error>({__FILE__, __LINE__, errno, "error opening " + m_fpsFifo});
-         return "";
-      }
+    int wfd = open( m_fpsFifo.c_str(), O_WRONLY);
+    if(wfd < 0)
+    {
+        log<software_error>({__FILE__, __LINE__, errno, "error opening " + m_fpsFifo});
+        return "";
+    }
 
-      int w = write(wfd, comout.c_str(), comout.size());
+    int w = write(wfd, comout.c_str(), comout.size());
       
-      if(w != (int) comout.size())
-      {
-         log<software_error>({__FILE__, __LINE__, errno, "error on write to " + m_fpsFifo});
-         return "";
-      }
+    if(w != (int) comout.size())
+    {
+        log<software_error>({__FILE__, __LINE__, errno, "error on write to " + m_fpsFifo});
+        return "";
+    }
       
-      close(wfd);
+    close(wfd);
       
-      char inbuff [4096];
+    char inbuff [4096];
 
-      int rfd = -1;
-      int nr =0;
-      while(rfd < 0 && nr < 20)
-      {
-         rfd = open(outfile.c_str(), O_RDONLY);
-         ++nr;
-         mx::sys::milliSleep(10);
-      }
+    int rfd = -1;
+    int nr =0;
+    while(rfd < 0 && nr < 20)
+    {
+        rfd = open(outfile.c_str(), O_RDONLY);
+        ++nr;
+        mx::sys::milliSleep(10);
+    }
 
-      int r = read(rfd, inbuff, sizeof(inbuff));
+    int r = read(rfd, inbuff, sizeof(inbuff));
 
-      if(r < 0)
-      {
-         log<software_error>({__FILE__, __LINE__, errno, "error on read from " + m_fpsFifo});
-         return "";
-      }
+    if(r < 0)
+    {
+        log<software_error>({__FILE__, __LINE__, errno, "error on read from " + m_fpsFifo});
+        return "";
+    }
 
-      close(rfd);
+    close(rfd);
 
-      remove(outfile.c_str());
-      
-      int n = strnlen(inbuff, sizeof(inbuff));
+    remove(outfile.c_str());
 
-      char * s = inbuff + n;
+    inbuff[r] = '\0';
 
-      while(s != inbuff && *s != ' ') 
-      {
-         if(*s == '\n' || *s == 'r') *s = '\0';
-         --s;
-      }
-      if(s == inbuff)
-      {
-         log<software_error>({__FILE__, __LINE__, errno, "error parsing result from " + m_fpsFifo});
-         return "";
-      }
+    std::string instr = inbuff;
 
-      ++s;
+    size_t ned = instr.find_last_not_of(" \t\r\n");
 
-      return s;
+    if(ned == std::string::npos || ned == 0)
+    {
+        log<software_error>({__FILE__, __LINE__, "got empty result from " + m_fpsFifo});
+        return "";
+    }
+
+    size_t nst = instr.rfind(' ', ned);
+
+    if(nst == 0 || nst == std::string::npos || ned <= nst)
+    {
+        log<software_error>({__FILE__, __LINE__, "bad format in result from " + m_fpsFifo});
+        return "";
+    }
+
+    return instr.substr(nst+1);
 }
 
 std::string cacaoInterface::getFPSValNum( const std::string & fps,
                                           const std::string & param 
                                         )
 {
-   std::string outfile = "/dev/shm/" + m_loopName + "_out_" + fps + "-" + m_loopNumber + "." + param;
+    std::string outfile = "/dev/shm/" + m_loopName + "_out_" + fps + "-" + m_loopNumber + "." + param;
 
-      std::string comout = "fwrval " + fps + "-" + m_loopNumber + "." + param + " "  + outfile + "\n";
+    std::string comout = "fwrval " + fps + "-" + m_loopNumber + "." + param + " "  + outfile + "\n";
 
-      int wfd = open( m_fpsFifo.c_str(), O_WRONLY);
-      if(wfd < 0)
-      {
-         log<software_error>({__FILE__, __LINE__, errno, "error opening " + m_fpsFifo});
-         return "";
-      }
+    int wfd = open( m_fpsFifo.c_str(), O_WRONLY);
+    if(wfd < 0)
+    {
+        log<software_error>({__FILE__, __LINE__, errno, "error opening " + m_fpsFifo});
+        return "";
+    }
 
-      int w = write(wfd, comout.c_str(), comout.size());
+    int w = write(wfd, comout.c_str(), comout.size());
+
+    if(w != (int) comout.size())
+    {
+        log<software_error>({__FILE__, __LINE__, errno, "error on write to " + m_fpsFifo});
+        return "";
+    }
+    close(wfd);
       
-      if(w != (int) comout.size())
-      {
-         log<software_error>({__FILE__, __LINE__, errno, "error on write to " + m_fpsFifo});
-         return "";
-      }
+    char inbuff [4096];
+
+    int rfd = -1;
+    int nr =0;
+    while(rfd < 0 && nr < 20)
+    {
+        rfd = open(outfile.c_str(), O_RDONLY);
+        ++nr;
+        mx::sys::milliSleep(10);
+    }
+
+    int r = read(rfd, inbuff, sizeof(inbuff));
+
+    close(rfd);
+
+    if(r < 0)
+    {
+        log<software_error>({__FILE__, __LINE__, errno, "error on read from " + m_fpsFifo});
+        return "";
+    }
+
+    remove(outfile.c_str());
       
-      close(wfd);
-      
-      char inbuff [4096];
+    inbuff[r] = '\0';
 
-      int rfd = -1;
-      int nr =0;
-      while(rfd < 0 && nr < 20)
-      {
-         rfd = open(outfile.c_str(), O_RDONLY);
-         ++nr;
-         mx::sys::milliSleep(10);
-      }
+    std::string instr = inbuff;
 
-      int r = read(rfd, inbuff, sizeof(inbuff));
+    size_t ned = instr.find_last_not_of(" \t\r\n");
 
-      close(rfd);
+    if(ned == std::string::npos || ned == 0)
+    {
+        log<software_error>({__FILE__, __LINE__, "got empty result from " + m_fpsFifo});
+        return "";
+    }
 
-      if(r < 0)
-      {
-         log<software_error>({__FILE__, __LINE__, errno, "error on read from " + m_fpsFifo});
-         return "";
-      }
+    size_t nst = instr.rfind(' ', ned);
 
-      remove(outfile.c_str());
-      
-      int n = strlen(inbuff);
+    if(nst == 0 || nst == std::string::npos || ned <= nst)
+    {
+        log<software_error>({__FILE__, __LINE__, "bad format in result from " + m_fpsFifo});
+        return "";
+    }
 
-      char * s = inbuff + n;
-
-      int ns = 0;
-      while(s != inbuff && ns < 4) 
-      {
-         if(*s == ' ') ++ns;
-         if(ns == 4) break;
-         if(*s == '\n' || *s == 'r' || *s == ' ') *s = '\0';
-         --s;
-      }
-      if(s == inbuff)
-      {
-         log<software_error>({__FILE__, __LINE__, errno, "error parsing result from " + m_fpsFifo});
-         return "";
-      }
-      ++s;
-      return s;
+    return instr.substr(nst);
 }
 
 inline
@@ -635,35 +631,19 @@ int cacaoInterface::getAOCalib()
    fin.open(calsrc);
    if(!fin)
    {
-      return log<software_error, -1>({__FILE__, __LINE__, errno, "userGainCtrl::getAOCalib failed to open: " + calsrc});
+      return log<software_error, -1>({__FILE__, __LINE__, errno, "cacaoInterface::getAOCalib failed to open: " + calsrc});
    }
    fin >> m_aoCalDir;
    fin.close();
 
-   std::string name = "";
-   size_t np = m_aoCalDir.rfind('/');
-   int nf = 1;
-   while(np != std::string::npos && np != 0 && nf < 4)
+   std::string nameFile = m_aoCalDir + "/LOOPNAME";
+   fin.open(nameFile);
+   if(!fin)
    {
-      np = m_aoCalDir.rfind('/',np-1);
-      ++nf;
+      return log<software_error, -1>({__FILE__, __LINE__, errno, "cacaoInterface::getAOCalib failed to open: " + nameFile});
    }
-
-   if(np == std::string::npos)
-   {
-      return log<software_error, -1>({__FILE__, __LINE__, errno, "userGainCtrl::getAOCalib failed to find loop name in: " + m_aoCalDir});
-   }
-
-   ++np;
-   size_t ne = m_aoCalDir.find('/', np+1);
-   
-   if(ne == std::string::npos)
-   {
-      return log<software_error, -1>({__FILE__, __LINE__, errno, "userGainCtrl::getAOCalib failed to find loop name in: " + m_aoCalDir});
-   }
-
-   
-   m_loopName = m_aoCalDir.substr(np, ne-np);
+   fin >> m_loopName;
+   fin.close();
 
    m_fpsFifo = "/milk/shm/" + m_loopName + "_fpsCTRL.fifo";
 
@@ -671,7 +651,7 @@ int cacaoInterface::getAOCalib()
    fin.open(calsrc);
    if(!fin)
    {
-      return log<software_error, -1>({__FILE__, __LINE__, errno, "userGainCtrl::getAOCalib failed to open: " + calsrc});
+      return log<software_error, -1>({__FILE__, __LINE__, errno, "cacaoInterface::getAOCalib failed to open: " + calsrc});
    }
    fin >> m_aoCalLoadTime;
    fin.close();
@@ -682,7 +662,7 @@ int cacaoInterface::getAOCalib()
    fin.open(calsrc);
    if(!fin)
    {
-      return log<software_error, -1>({__FILE__, __LINE__, errno, "userGainCtrl::getAOCalib failed to open: " + calsrc});
+      return log<software_error, -1>({__FILE__, __LINE__, errno, "cacaoInterface::getAOCalib failed to open: " + calsrc});
    }
 
    while(!fin.eof())
@@ -810,6 +790,7 @@ void cacaoInterface::fmThreadExec( )
       else m_loopState = 2; //closed
 
       ans = getFPSValNum("mfilt", "loopgain");
+
       try
       {
          m_gain = std::stof(ans);
@@ -839,18 +820,8 @@ void cacaoInterface::fmThreadExec( )
       }
 
       recordLoopGain();
-      /*
-      fin.open( m_loopDir +  "/status/stat_procON.txt");
-      
-      if(fin.is_open()) 
-      {
-         fin >> proc;
-      }
-      fin.close();
-      
-      */
 
-      mx::sys::milliSleep(1000);
+      mx::sys::milliSleep(250);
 
    }
    
