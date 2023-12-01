@@ -75,6 +75,8 @@ template< bool _useINDI = true >
 class MagAOXApp : public application
 {
 
+    friend class MagAOXApp_test;
+
 public:
 
    ///The log manager type.
@@ -530,7 +532,7 @@ private:
      */
 protected:
 
-   ///Flag controlling whether INDI is used.  If false, then no INDI code ipRecv.getName()executes.
+   ///Flag controlling whether INDI is used.  If false, then no INDI code executes.
    constexpr static bool m_useINDI = _useINDI;
 
 ///\todo instead of making this public, provide an accessor.
@@ -2442,13 +2444,13 @@ int MagAOXApp<_useINDI>::registerIndiPropertyReadOnly( pcf::IndiProperty & prop 
 {
    if(!m_useINDI) return 0;
 
-   callBackInsertResult result =  m_indiNewCallBacks.insert(callBackValueType( prop.getName(), {&prop, nullptr}));
+   callBackInsertResult result =  m_indiNewCallBacks.insert(callBackValueType( prop.createUniqueKey(), {&prop, nullptr}));
 
    try 
    {
       if(!result.second)
       {
-         return log<software_error,-1>({__FILE__, __LINE__, "failed to insert INDI property: " + prop.getName()});
+         return log<software_error,-1>({__FILE__, __LINE__, "failed to insert INDI property: " + prop.createUniqueKey()});
       }
    }
    catch( std::exception & e)
@@ -2486,7 +2488,7 @@ int MagAOXApp<_useINDI>::registerIndiPropertyReadOnly( pcf::IndiProperty & prop,
    {
       if(!result.second)
       {
-         return log<software_error,-1>({__FILE__, __LINE__, "failed to insert INDI property: " + prop.getName()});
+         return log<software_error,-1>({__FILE__, __LINE__, "failed to insert INDI property: " + prop.createUniqueKey()});
       }
    }
    catch( std::exception & e)
@@ -2509,11 +2511,11 @@ int MagAOXApp<_useINDI>::registerIndiPropertyNew( pcf::IndiProperty & prop,
 
    try
    {
-      callBackInsertResult result =  m_indiNewCallBacks.insert(callBackValueType( prop.getName(), {&prop, callBack}));
+      callBackInsertResult result =  m_indiNewCallBacks.insert(callBackValueType( prop.createUniqueKey(), {&prop, callBack}));
 
       if(!result.second)
       {
-         return log<software_error,-1>({__FILE__, __LINE__, "failed to insert INDI property: " + prop.getName()});
+         return log<software_error,-1>({__FILE__, __LINE__, "failed to insert INDI property: " + prop.createUniqueKey()});
       }
    }
    catch( std::exception & e)
@@ -2872,15 +2874,15 @@ void MagAOXApp<_useINDI>::handleGetProperties( const pcf::IndiProperty &ipRecv )
    }
 
    //Check if we actually have this.
-   if( m_indiNewCallBacks.count(ipRecv.getName()) == 0)
+   if( m_indiNewCallBacks.count(ipRecv.createUniqueKey()) == 0)
    {
       return;
    }
 
    //Otherwise send just the requested property, if property is not null
-   if(m_indiNewCallBacks[ ipRecv.getName() ].property)
+   if(m_indiNewCallBacks[ ipRecv.createUniqueKey() ].property)
    {
-      m_indiDriver->sendDefProperty( *(m_indiNewCallBacks[ ipRecv.getName() ].property) );
+      m_indiDriver->sendDefProperty( *(m_indiNewCallBacks[ ipRecv.createUniqueKey() ].property) );
    }
    return;
 }
@@ -2892,17 +2894,17 @@ void MagAOXApp<_useINDI>::handleNewProperty( const pcf::IndiProperty &ipRecv )
    if(m_indiDriver == nullptr) return;
 
    //Check if this is a valid name for us.
-   if( m_indiNewCallBacks.count(ipRecv.getName()) == 0 )
+   if( m_indiNewCallBacks.count(ipRecv.createUniqueKey()) == 0 )
    {
-      ///\todo log invalid NewProperty request, though it probably can't get this far.
+      log<software_debug>({__FILE__, __LINE__, "invalid NewProperty request for " + ipRecv.createUniqueKey()});
       return;
    }
 
-   int (*callBack)(void *, const pcf::IndiProperty &) = m_indiNewCallBacks[ ipRecv.getName() ].callBack;
+   int (*callBack)(void *, const pcf::IndiProperty &) = m_indiNewCallBacks[ ipRecv.createUniqueKey() ].callBack;
 
    if(callBack) callBack( this, ipRecv);
 
-   ///\todo log an error here because callBack should not be null
+   log<software_debug>({__FILE__, __LINE__, "NewProperty callback null for " + ipRecv.createUniqueKey()});
 
    return;
 }
@@ -2913,7 +2915,7 @@ void MagAOXApp<_useINDI>::handleSetProperty( const pcf::IndiProperty &ipRecv )
    if(!m_useINDI) return;
    if(m_indiDriver == nullptr) return;
 
-   std::string key = ipRecv.getDevice() + "." + ipRecv.getName();
+   std::string key = ipRecv.createUniqueKey();
 
    //Check if this is valid
    if( m_indiSetCallBacks.count(key) > 0 )
@@ -3016,7 +3018,7 @@ int MagAOXApp<_useINDI>::indiTargetUpdate( pcf::IndiProperty & localProperty,
                                            bool setBusy
                                          )
 {
-   if( remoteProperty.getName() != localProperty.getName())
+   if( remoteProperty.createUniqueKey() != localProperty.createUniqueKey())
    {
       return log<text_log,-1>("INDI property names do not match", logPrio::LOG_ERROR);
    }
@@ -3110,7 +3112,7 @@ int MagAOXApp<_useINDI>::sendNewProperty( const pcf::IndiProperty & ipSend,
    }
    catch(...)
    {
-      log<software_error>({__FILE__, __LINE__, "Exception caught setting " + ipSend.getDevice() + "." + ipSend.getName() + "." + el});
+      log<software_error>({__FILE__, __LINE__, "Exception caught setting " + ipSend.createUniqueKey() + "." + el});
       return -1;
    }
 
@@ -3157,7 +3159,7 @@ template<bool _useINDI>
 int MagAOXApp<_useINDI>::newCallBack_clearFSMAlert( const pcf::IndiProperty &ipRecv )
 {
 
-   if(ipRecv.getName() != m_indiP_clearFSMAlert.getName()) 
+   if(ipRecv.createUniqueKey() != m_indiP_clearFSMAlert.createUniqueKey()) 
    {
       return log<software_error, -1>({__FILE__, __LINE__, "wrong indi property received"});      
    }

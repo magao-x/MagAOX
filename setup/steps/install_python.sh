@@ -9,7 +9,8 @@ source $DIR/../_common.sh
 set -euo pipefail
 
 MAMBAFORGE_VERSION="$@"
-[ -z "$MAMBAFORGE_VERSION" ] && MAMBAFORGE_VERSION="4.14.0-1"
+###[ -z "$MAMBAFORGE_VERSION" ] && MAMBAFORGE_VERSION="4.14.0-1"
+[ -z "$MAMBAFORGE_VERSION" ] && MAMBAFORGE_VERSION="23.1.0-4"
 if [ "$MAMBAFORGE_VERSION" == "latest" ] ; then
     MAMBAFORGE_INSTALLER="Mambaforge-Linux-$(uname -p).sh"
     MAMBAFORGE_URL="https://github.com/conda-forge/miniforge/releases/latest/download/$MAMBAFORGE_INSTALLER"
@@ -44,5 +45,6 @@ channels:
   - defaults
 changeps1: false
 channel_priority: flexible
+disallowed_packages: [ qt ]
 EOF
 fi

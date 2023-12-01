@@ -5,6 +5,7 @@ set -euo pipefail
 apt-get update
 
 NEEDRESTART_SUSPEND=yes apt install -y \
+    sudo \
     ssh \
     build-essential \
     gfortran \
@@ -48,6 +49,9 @@ NEEDRESTART_SUSPEND=yes apt install -y \
     nfs-kernel-server \
     tree \
     linux-headers-generic \
+    libopenblas-openmp-dev \
+    liblapack-dev \
+    liblapacke-dev \
 ;
 
 if [[ $MAGAOX_ROLE == vm ]]; then

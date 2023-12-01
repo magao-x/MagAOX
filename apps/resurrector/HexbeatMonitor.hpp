@@ -727,7 +727,7 @@ private: // Internal attributes and interfaces
             istat = mkfifo(fifo_name.c_str(), S_IRUSR|S_IWUSR|S_IRGRP|S_IWGRP);
             prev_mode = umask(prev_mode);
             if (istat < 0) { return -1; }
-            fd = open(fifo_name.c_str(),O_RDWR|O_CLOEXEC);
+            fd = open(fifo_name.c_str(),O_RDWR|O_NONBLOCK|O_CLOEXEC);
         }
         if (fd < 0) { return -1; }
 

@@ -6,67 +6,74 @@
 
 #include <QObject>
 #include <QtPlugin>
-//#include <QGraphicsLineItem>
+// #include <QGraphicsLineItem>
 
 #include <iostream>
 
-class cameraStatus :
-                     public rtimvOverlayInterface
+class cameraStatus : public rtimvOverlayInterface
 {
-   Q_OBJECT
-   Q_PLUGIN_METADATA(IID "rtimv.overlayInterface/1.1")
-   Q_INTERFACES(rtimvOverlayInterface)
-    
-   protected:
-      rtimvOverlayAccess m_roa;
-      
-      bool m_enabled {false};
-      
-      bool m_enableable {false};
-      
-      std::string m_deviceName;
-      
-      std::string m_filterDeviceName;
-      
-      QGraphicsScene * m_qgs {nullptr};
-      
-      StretchBox * m_roiBox {nullptr};
-      StretchBox * m_roiFullBox {nullptr};
-      
-      char m_blob[512]; ///< Memory for copying rtimvDictionary blobs
+    Q_OBJECT
+    Q_PLUGIN_METADATA(IID "rtimv.overlayInterface/1.2")
+    Q_INTERFACES(rtimvOverlayInterface)
 
-      int m_width {0};
-      int m_height {0};
-      
-      float m_fullROI_x {0};
-      float m_fullROI_y {0};
-      int m_fullROI_w {0};
-      int m_fullROI_h {0};
-      
-   public:
-      cameraStatus() ;
-      
-      virtual ~cameraStatus();
+protected:
+    rtimvOverlayAccess m_roa;
 
-      virtual int attachOverlay( rtimvOverlayAccess &,
-                                 mx::app::appConfigurator & config
-                               ); 
-      
-      virtual int updateOverlay();
+    bool m_enabled{false};
 
-      virtual void keyPressEvent( QKeyEvent * ke);
-      
-      virtual bool overlayEnabled();
-      
-      virtual void enableOverlay();
+    bool m_enableable{false};
 
-      virtual void disableOverlay();
-      
-   signals:
-         
-      void newStretchBox(StretchBox *);
+    std::string m_deviceName;
 
-      void savingState(bool);
+    std::string m_filterDeviceName;
+    std::string m_filterDeviceName2;
+
+    QGraphicsScene *m_qgs{nullptr};
+
+    StretchBox *m_roiBox{nullptr};
+    StretchBox *m_roiFullBox{nullptr};
+
+    char m_blob[512]; ///< Memory for copying rtimvDictionary blobs
+
+    int m_width{0};
+    int m_height{0};
+
+public:
+    cameraStatus();
+
+    virtual ~cameraStatus();
+
+    virtual int attachOverlay(rtimvOverlayAccess &,
+                              mx::app::appConfigurator &config);
+
+    virtual int updateOverlay();
+
+    virtual void keyPressEvent(QKeyEvent *ke);
+
+    virtual bool overlayEnabled();
+
+    bool blobExists(const std::string propel);
+
+    bool getBlobStr(const std::string &deviceName,
+                    const std::string &propel);
+
+    bool getBlobStr(const std::string &propel);
+
+    template <typename realT>
+    realT getBlobVal(const std::string &propel, realT defVal);
+
+    virtual void enableOverlay();
+
+    virtual void disableOverlay();
+
+signals:
+
+    void newStretchBox(StretchBox *);
+
+    void savingState(bool);
+
+public:
+    virtual std::vector<std::string> info();
 };
 
-#endif //cameraStatus_hpp
+#endif // cameraStatus_hpp

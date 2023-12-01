@@ -12,7 +12,7 @@ resurrector_indi - manage processes in an INDI framework.
 # SYNOPSIS 
 ```
 [export MAGAOX_ROLE=magaox-role]
-[MAGAOX_ROLE=magaox-role] ./resurrector_indi [-r magaox-role] [--role=magaox-role] [-nor|--no-output-redirect] [-v|--verbose] [-h|--help]
+[MAGAOX_ROLE=magaox-role] ./resurrector_indi [-r magaox-role] [--role=magaox-role] [-nor|--no-output-redirect] [-l|--logging] [-v|--verbose] [-h|--help]
 
 ```
 - I.e. four ways to specify the role:  two using environment variable; two using command-line arguments.
@@ -164,7 +164,10 @@ The INDI driver FIFOs must be named "drivername.in" and "drivername.out" and are
     * To not redirect devices' outputs:
         * --no-output-redirect
         * -nor
-* Verbosity
+* Some logging
+    * -l
+    * --logging
+* Verbose logging
     * -v
     * --verbose
 * Help

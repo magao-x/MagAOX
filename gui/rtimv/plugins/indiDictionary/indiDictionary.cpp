@@ -1,96 +1,108 @@
+#include <set>
 
 #include "indiDictionary.hpp"
+
 
 class rtimvIndiClient: public pcf::IndiClient
 {
 protected:
-   bool m_shutdown {false};
-   bool m_connectionLost{false};
+    bool m_shutdown{false};
+    bool m_connectionLost{false};
 
-   dictionaryT * m_dict {nullptr};
-   
-   float m_northAngle {0};
-   
 public:
-   rtimvIndiClient( const std::string &szName,
+    std::set<std::string> m_subscribed;
+
+protected:
+    dictionaryT *m_dict{nullptr};
+
+    float m_northAngle{0};
+
+public:
+    rtimvIndiClient(const std::string &szName,
                     const std::string &szVersion,
                     const std::string &szProtocolVersion,
-                    const std::string & ipAddress,
+                    const std::string &ipAddress,
                     const int port,
-                    dictionaryT * dict
-                  ) : pcf::IndiClient(szName, szVersion, szProtocolVersion, ipAddress, port)  //"127.0.0.1", 7624)
-   {
-      m_dict = dict;
-   }
+                    dictionaryT *dict) : pcf::IndiClient(szName, szVersion, szProtocolVersion, ipAddress, port) //"127.0.0.1", 7624)
+    {
+        m_dict = dict;
+    }
 
-   ~rtimvIndiClient()
-   {
-      quitProcess();
-      deactivate();
-   }
-   
-   virtual void handleDefProperty( const pcf::IndiProperty &ipRecv )
-   {
-      if(m_dict == nullptr) return;
-      
-      std::string key = ipRecv.createUniqueKey();
-      
-      auto elIt = ipRecv.getElements().begin();
+    ~rtimvIndiClient()
+    {
+        quitProcess();
+        deactivate();
+    }
 
-      while(elIt != ipRecv.getElements().end())
-      {
-         std::string elKey = key + "." + elIt->second.getName();
+    virtual void handleDefProperty(const pcf::IndiProperty &ipRecv)
+    {
+        if (m_dict == nullptr)
+            return;
 
-         std::string val;
-         
-         if(ipRecv.getType() == pcf::IndiProperty::Switch)
-         {
-            if(ipRecv[elIt->second.getName()].getSwitchState() == pcf::IndiElement::On) val = "on";
-            else if (ipRecv[elIt->second.getName()].getSwitchState() == pcf::IndiElement::Off) val = "off";
-            else val = "unk";
-         }
-         else
-         {
-            val = ipRecv[elIt->second.getName()].get();
-         }
-         
-         (*m_dict)[elKey].setBlob(val.c_str(), val.size()+1);
-         
-         if(elKey == "tcsi.teldata.pa")
-         {
-            m_northAngle = ipRecv[elIt->second.getName()].get<float>();
-            (*m_dict)["rtimv.north.angle"].setBlob(&m_northAngle, sizeof(float));
-         }
-         
-         ++elIt;
-      }
-   }
+        std::string key = ipRecv.createUniqueKey();
 
-   virtual void handleDelProperty( const pcf::IndiProperty &ipRecv )
-   {
-      if(m_dict == nullptr) return;
-      
-      static_cast<void>(ipRecv);
-   }
+        if (m_subscribed.count(key) == 0)
+            return;
 
-   virtual void handleMessage( const pcf::IndiProperty &ipRecv )
-   {
-      static_cast<void>(ipRecv);
-   }
+        auto elIt = ipRecv.getElements().begin();
 
-   virtual void handleSetProperty( const pcf::IndiProperty &ipRecv )
-   {
-      handleDefProperty(ipRecv);
-   }
-   
-   virtual void execute()
-   {
-      processIndiRequests(false);
-   }
+        while(elIt != ipRecv.getElements().end())
+        {
+            std::string elKey = key + "." + elIt->second.getName();
 
+            std::string val;
+
+            if(ipRecv.getType() == pcf::IndiProperty::Switch)
+            {
+                if(ipRecv[elIt->second.getName()].getSwitchState() == pcf::IndiElement::On)
+                    val = "on";
+                else if(ipRecv[elIt->second.getName()].getSwitchState() == pcf::IndiElement::Off)
+                    val = "off";
+                else
+                    val = "unk";
+            }
+            else
+            {
+                val = ipRecv[elIt->second.getName()].get();
+            }
+
+            (*m_dict)[elKey].setBlob(val.c_str(), val.size() + 1);
+
+            if(elKey == "tcsi.teldata.pa")
+            {
+                m_northAngle = ipRecv[elIt->second.getName()].get<float>();
+                (*m_dict)["rtimv.north.angle"].setBlob(&m_northAngle, sizeof(float));
+            }
+
+            ++elIt;
+        }
+    }
+
+    virtual void handleDelProperty(const pcf::IndiProperty &ipRecv)
+    {
+        if(m_dict == nullptr)
+        {
+            return;
+        }
+
+        static_cast<void>(ipRecv);
+    }
+
+    virtual void handleMessage(const pcf::IndiProperty &ipRecv)
+    {
+        static_cast<void>(ipRecv);
+    }
+
+    virtual void handleSetProperty(const pcf::IndiProperty &ipRecv)
+    {
+        handleDefProperty(ipRecv);
+    }
+
+    virtual void execute()
+    {
+        processIndiRequests(false);
+    }
 };
-
-
 
 indiDictionary::indiDictionary() : rtimvDictionaryInterface()
 {
@@ -116,8 +128,8 @@ int indiDictionary::attachDictionary( dictionaryT * dict,
 
    if(m_ipAddress == "" || m_port <= 0)
    {
-      std::cerr << "INDI Dictionary: no connection specified. INDI disabled.\n";
       m_enabled = false;
+      return 1; 
    }
    else
    {
@@ -135,6 +147,8 @@ void indiDictionary::checkConnection()
 {
    if(!m_enabled) return;
 
+   std::lock_guard<std::mutex> lock(m_clientMutex);
+
    if(!m_client)
    {
       try
@@ -149,11 +163,6 @@ void indiDictionary::checkConnection()
       }
 
       m_client->activate();
-   
-      pcf::IndiProperty ipSend;
-      m_client->sendGetProperties( ipSend );
-      
-      return;
    }
    else if(m_client->getQuitProcess())
    {
@@ -163,6 +172,41 @@ void indiDictionary::checkConnection()
       m_client = nullptr;
       return;
    }
+
+   if(!m_client) return;
+
+   //Well if we're here we're connected, so now check if we're listening to our props
+   for(auto it=m_dict->begin(); it != m_dict->end(); ++it)
+   {
+      std::string elKey = it->first;
+
+      size_t np = elKey.find('.', 0);
+      std::string dev = elKey.substr(0, np);
+      
+      size_t ap = elKey.find('.', np+1);
+      std::string prop = elKey.substr(np+1, ap-(np+1));
+
+      std::string key = dev + "." + prop;
+      
+      auto res = m_client->m_subscribed.insert(key);
+      if(res.second == true) //If we have inserted it, we snoop it
+      {
+         pcf::IndiProperty ipSend;
+         ipSend.setDevice(dev);
+         ipSend.setName(prop);
+         m_client->sendGetProperties(ipSend);
+      }
+      
+   }
    
 }
 
+std::vector<std::string> indiDictionary::info()
+{
+    std::vector<std::string> vinfo;
+    vinfo.push_back("INDI dictionary: " + m_ipAddress + ":" + std::to_string(m_port));
+    if(m_client) vinfo[0] += " [connected]";
+    else vinfo[0] += " [not connected]";
+
+    return vinfo;
+}

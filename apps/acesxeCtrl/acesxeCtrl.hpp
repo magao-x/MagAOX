@@ -686,90 +686,78 @@ int acesxeCtrl::abort()
 
 INDI_NEWCALLBACK_DEFN(acesxeCtrl, m_indiP_windspeed)(const pcf::IndiProperty &ipRecv)
 {
-   if (ipRecv.getName() == m_indiP_windspeed.getName())
-   {
-      float ws = 0;
+    INDI_VALIDATE_CALLBACK_PROPS(m_indiP_windspeed, ipRecv);
 
-      if(ipRecv.find("current"))
-      {
-         ws = ipRecv["current"].get<double>();
-      }
+    float ws = 0;
 
-      if(ipRecv.find("target"))
-      {
-         ws = ipRecv["target"].get<double>();
-      }
+    if(ipRecv.find("current"))
+    {
+       ws = ipRecv["current"].get<double>();
+    }
 
-      if(ws == 0) return 0;
-      
-      std::lock_guard<std::mutex> guard(m_indiMutex);
+    if(ipRecv.find("target"))
+    {
+       ws = ipRecv["target"].get<double>();
+    }
 
-      updateIfChanged(m_indiP_windspeed, "target", ws, INDI_OK);
+    if(ws == 0) return 0;
+    
+    std::lock_guard<std::mutex> guard(m_indiMutex);
 
-      return windSpeed(ws);
-   }
+    updateIfChanged(m_indiP_windspeed, "target", ws, INDI_OK);
+
+    return windSpeed(ws);
+   
 
    return -1;
 }
 
 INDI_NEWCALLBACK_DEFN(acesxeCtrl, m_indiP_start )(const pcf::IndiProperty &ipRecv)
 {
-   if(ipRecv.getName() != m_indiP_start.getName())
-   {
-      log<software_error>({__FILE__,__LINE__, "wrong INDI property received."});
-      return -1;
-   }
-      
-   if(!ipRecv.find("request")) return 0;
-           
-   std::unique_lock<std::mutex> lock(m_indiMutex);
-      
-   if( ipRecv["request"].getSwitchState() == pcf::IndiElement::On)
-   {
-      return start();
-   }   
+    INDI_VALIDATE_CALLBACK_PROPS(m_indiP_start, ipRecv);
+
+    if(!ipRecv.find("request")) return 0;
+            
+    std::unique_lock<std::mutex> lock(m_indiMutex);
+       
+    if( ipRecv["request"].getSwitchState() == pcf::IndiElement::On)
+    {
+       return start();
+    }   
    
-   return 0;
+    return 0;
 }
 
 INDI_NEWCALLBACK_DEFN(acesxeCtrl, m_indiP_stop )(const pcf::IndiProperty &ipRecv)
 {
-   if(ipRecv.getName() != m_indiP_stop.getName())
-   {
-      log<software_error>({__FILE__,__LINE__, "wrong INDI property received."});
-      return -1;
-   }
-      
-   if(!ipRecv.find("request")) return 0;
-           
-   std::unique_lock<std::mutex> lock(m_indiMutex);
-      
-   if( ipRecv["request"].getSwitchState() == pcf::IndiElement::On)
-   {
-      return stop();
-   }   
-   
-   return 0;
+    INDI_VALIDATE_CALLBACK_PROPS(m_indiP_stop, ipRecv);
+
+    if(!ipRecv.find("request")) return 0;
+            
+    std::unique_lock<std::mutex> lock(m_indiMutex);
+       
+    if( ipRecv["request"].getSwitchState() == pcf::IndiElement::On)
+    {
+        return stop();
+    }   
+    
+    return 0;
 }
 
 INDI_NEWCALLBACK_DEFN(acesxeCtrl, m_indiP_abort )(const pcf::IndiProperty &ipRecv)
 {
-   if(ipRecv.getName() != m_indiP_abort.getName())
-   {
-      log<software_error>({__FILE__,__LINE__, "wrong INDI property received."});
-      return -1;
-   }
-      
-   if(!ipRecv.find("request")) return 0;
-           
-   std::unique_lock<std::mutex> lock(m_indiMutex);
-      
-   if( ipRecv["request"].getSwitchState() == pcf::IndiElement::On)
-   {
-      return abort();
-   }   
-   
-   return 0;
+    INDI_VALIDATE_CALLBACK_PROPS(m_indiP_abort, ipRecv);
+       
+    if(!ipRecv.find("request")) return 0;
+            
+    std::unique_lock<std::mutex> lock(m_indiMutex);
+       
+    if( ipRecv["request"].getSwitchState() == pcf::IndiElement::On)
+    {
+        return abort();
+    }   
+    
+    return 0;
 }
 
 } //namespace app
