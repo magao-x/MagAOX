@@ -16,16 +16,31 @@ int pwfsAlignment::attachOverlay( rtimvOverlayAccess & roa,
                                 )
 {
    
-   config.configUnused(m_deviceName, mx::app::iniFile::makeKey("pwfsAlignment", "name"));
+    config.configUnused(m_deviceName, mx::app::iniFile::makeKey("pwfsAlignment", "name"));
    
-   if(m_deviceName == "") return 1; //Tell rtimv we can't be used.
+    if(m_deviceName == "") return 1; //Tell rtimv we can't be used.
    
-   m_roa = roa;
+    m_roa = roa;
    
-   if(m_enabled) enableOverlay();
-   else disableOverlay();
    
-   return 0;
+   
+    if(m_roa.m_dictionary != nullptr)
+    {
+        //Register these
+        (*m_roa.m_dictionary)[m_deviceName + ".numPupils"].setBlob(nullptr, 0);
+        (*m_roa.m_dictionary)[m_deviceName + ".sm_frameSize"].setBlob(nullptr, 0);
+        (*m_roa.m_dictionary)[m_deviceName + ".quadrant1"].setBlob(nullptr, 0);
+        (*m_roa.m_dictionary)[m_deviceName + ".quadrant2"].setBlob(nullptr, 0);
+        (*m_roa.m_dictionary)[m_deviceName + ".quadrant3"].setBlob(nullptr, 0);
+        (*m_roa.m_dictionary)[m_deviceName + ".quadrant4"].setBlob(nullptr, 0);
+        //(*m_roa.m_dictionary)[m_deviceName + "."].setBlob(nullptr, 0);
+
+    }
+
+    if(m_enabled) enableOverlay();
+    else disableOverlay();
+
+    return 0;
 }
       
 int pwfsAlignment::updateOverlay()
