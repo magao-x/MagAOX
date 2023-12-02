@@ -21,6 +21,8 @@ If all replacement is done correctly, the application will build with only warni
 
 Next edit the code in the `.hpp` file to implement the application.  You can also edit the Makefile adding additional libraries, or perhaps another header.  You will typically not need to edit any code in the `.cpp` file other than replacing `template` as above.
 
+If you want to build a version with debug information and no optimization, type `make debug` on the command line.
+
 # 2. Build System Integration
 
 To cause the new app to be built, add it to the appropriate list of apps in the top level Makefile.  Pay attention to which machine you expect the app to run on.

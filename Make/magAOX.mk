@@ -49,7 +49,11 @@ TARGETNAME = $(PATHNAME)$(notdir $(BASENAME))
 
 all:  pch magaox_git_version.h $(TARGETNAME)
 	rm $(SELF_DIR)/../magaox_git_version.h
-	
+
+debug: CXXFLAGS += -g -O0
+debug: pch magaox_git_version.h $(TARGETNAME)
+	rm $(SELF_DIR)/../magaox_git_version.h
+
 pch:
 	cd $(SELF_DIR)/../libMagAOX; ${MAKE}
 

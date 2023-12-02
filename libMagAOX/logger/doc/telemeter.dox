@@ -1,0 +1,155 @@
+
+
+/**
+\addtogroup telemeter
+
+\section record_telem Logging telemetry
+
+libMagAO-X implements telemetry based on the logs system ( see \ref record_logs and \ref add_logs ).
+
+The telemetry system writes a log at a fixed frequency (every 10s by default), regardless of whether the telemetry data has changed.
+
+It is also possible to log telemetry when certain changes or events take place (outside of the fixed frequency interval).
+
+
+\section add_telem Steps to adding telemetry
+
+-# To add a new log type that is not an empty log (assume it is called "telem_type") follow steps 2-5 from \ref add_logs :
+   - Create a flatbuffer schema in logger/types/schemas  
+   - Create a new file \p "telem_type.hpp" in the logger/types directory (see template in \ref add_logs).
+   - Add the new \p "types/telem_type.hpp" file to the libMagAOX Makefile INCLUDEDEPS list.
+   - Add the log type to \p "logger/logCodes.dat" (see instructions and restrictions in \ref add_logs)
+
+-# Add an entry in telem.cpp to initialize the \p telem_fsm::lastRecord member
+
+-# Re-compile the logging system by typing `make` in the libMagAOX directory (above logger). This will generate a number of files based on the logCodes.dat entry you have made.  Correct any errors from the \p flatc compiler or the flatlogs code generator.
+
+-# Re-compile the logdump utility by running the following in the MagAOX/utils/logdump directory:
+\code
+make
+make install
+\endcode
+
+-# A class that derives from MagAOX::app::MagAOXApp (assume it is called `appCtrl`) needs to inherit the telemeter template and implement the interface described in telemeter.hpp, e.g.:
+\code
+class appCtrl : public MagAOXApp<true>, public dev::telemeter<appCtrl>
+{
+   ...
+
+   friend class dev::telemeter<appCtrl>;
+   typedef dev::telemeter<appCtrl> telemeterT;
+
+   ....
+
+   public:
+      ....
+
+      int checkRecordTimes();
+
+      int recordTelem( const telem_type * ); // ASSUME A LOG TYPE CALLED telem_type AND UPDATE AS NECESSARY
+
+      int recordApp( bool force = false ); // ASSUME A MEMBER recordApp THAT WRITES A TELEMETRY LOG OF TYPE telem_type
+}
+
+...
+
+int appCtrl::checkRecordTimes() // DO NOT CHANGE NAME
+{
+  return telemeterT::checkRecordTimes(telem_type());
+}
+
+int appCtrl::recordTelem(const telem_type *) // DO NOT CHANGE NAME
+{
+  return recordApp(true);
+}
+
+int appCtrl::recordApp( bool force ) // UPDATE NAME AS NEEDED
+{
+   static dataStruct lastTelem; ///< Structure holding previous telemetery data measurement.
+   
+   if(!(lastTelem == newTelem) || force)
+   {
+      telem<telem_type>({newTelem.data1, newTelem.data2, newTelem.data3, ...}); // OUTPUT TELEM LOG
+      lastTelem = newTelem;
+   }
+   
+   return 0;
+}
+\endcode
+
+-# Calls to the corresponding `dev::telemeter<appCtrl>` classes should be placed in the `setupConfig`, `loadConfig`, `appStartup`, `appLogic`, and `appShutdown` functions of `appCtrl`, e.g.:
+\code
+void appCtrl::setupConfig()
+{
+  config.add(...);
+  ...
+
+  telemeterT::setupConfig(config);
+}
+
+void appCtrl::loadConfig()
+{
+  if( loadConfigImpl(config) < 0)
+  {
+    log<text_log>("Error during config", logPrio::LOG_CRITICAL);
+    m_shutdown = true;
+  }
+
+  if(telemeterT::loadConfig(config) < 0)
+  {
+    log<text_log>("Error during telemeter config", logPrio::LOG_CRITICAL);
+    m_shutdown = true;
+  }
+}
+
+int appCtrl::appStartup()
+{
+   ... performing startup ...
+
+  if(telemeterT::appStartup() < 0)
+  {
+    return log<software_error,-1>({__FILE__,__LINE__});
+  }
+
+  return 0;
+}
+
+int appCtrl::appLogic()
+{
+  ... app doing its thing ...
+
+  if(telemeterT::appLogic() < 0)
+  {
+      log<software_error>({__FILE__, __LINE__});
+      return 0;
+  }
+
+  return 0;
+}
+
+int fsmCtrl::appShutdown()
+{
+  telemeterT::appShutdown();
+
+  return 0;
+}
+\endcode
+
+-# Include calls to `recordApp` at appropriate places throughout the `appCtrl` class, where things might have changed, to make sure that, in addition to the 0.1 Hz telemetry logging, changes are captured at the time they happen.
+
+-# Compile the app
+
+\section read_telem Reading telemetry files
+The telemetry logs are saved by default in \p /opt/MagAOX/telem . 
+
+To read them, use the logdump utility (see the <a href="https://magao-x.org/docs/handbook/operating/software/utils/logdump.html">handbook</a> for usage) with the command line args `--dir=/opt/MagAOX/telem --ext=.bintel`, e.g.:
+\code
+logdump --dir=/opt/MagAOX/telem --ext=.bintel appCtrl
+\endcode
+
+The alias `teldump` might also be available (depending on how MagAOX was installed):
+\code
+teldump appCtrl
+\endcode
+
+*/

@@ -38,6 +38,10 @@
 /** \defgroup flatlogs_files
   * \ingroup flatlogs
   */
+
+/** \defgroup telemeter Telemetry
+  * \ingroup logger
+  */
   
 /** \defgroup logger_types Log Entry Types
   * \ingroup logger
