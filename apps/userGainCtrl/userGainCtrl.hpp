@@ -1493,7 +1493,7 @@ int userGainCtrl::newCallBack_blockMCs( const pcf::IndiProperty &ipRecv )
       return -1;
    }
 
-   if(ipRecv.getName().find("BLOCK") != 0)
+   if(ipRecv.getName().find("block") != 0)
    {
       #ifndef XWCTEST_INDI_CALLBACK_VALIDATION
       log<software_error>({__FILE__, __LINE__, "wrong INDI property"});
@@ -1571,7 +1571,7 @@ int userGainCtrl::newCallBack_blockLimits( const pcf::IndiProperty &ipRecv )
       return -1;
    }
 
-   if(ipRecv.getName().find("BLOCK") != 0)
+   if(ipRecv.getName().find("block") != 0)
    {
       #ifndef XWCTEST_INDI_CALLBACK_VALIDATION
       log<software_error>({__FILE__, __LINE__, "wrong INDI property"});

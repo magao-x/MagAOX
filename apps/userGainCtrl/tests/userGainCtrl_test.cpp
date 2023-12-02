@@ -40,9 +40,9 @@ SCENARIO( "INDI Callbacks", "[userGainCtrl]" )
     XWCTEST_INDI_NEW_CALLBACK( userGainCtrl, singleModeNo);
     XWCTEST_INDI_NEW_CALLBACK( userGainCtrl, singleGain);
     XWCTEST_INDI_NEW_CALLBACK( userGainCtrl, singleMC);
-    XWCTEST_INDI_ARBNEW_CALLBACK( userGainCtrl, newCallBack_blockGains, BLOCK00_gain);
-    XWCTEST_INDI_ARBNEW_CALLBACK( userGainCtrl, newCallBack_blockMCs, BLOCK70_multcoeff);
-    XWCTEST_INDI_ARBNEW_CALLBACK( userGainCtrl, newCallBack_blockLimits, BLOCK32_limit);
+    XWCTEST_INDI_ARBNEW_CALLBACK( userGainCtrl, newCallBack_blockGains, block00_gain);
+    XWCTEST_INDI_ARBNEW_CALLBACK( userGainCtrl, newCallBack_blockMCs, block70_multcoeff);
+    XWCTEST_INDI_ARBNEW_CALLBACK( userGainCtrl, newCallBack_blockLimits, block32_limit);
 
 }
 
