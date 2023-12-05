@@ -261,10 +261,6 @@ protected:
 
    ///@}
  
-   //std::string m_aoCalDir;
-   //std::string m_aoCalArchiveTime;
-   //std::string m_aoCalLoadTime;
-
    mx::improc::eigenImage<realT> m_gainsCurrent; ///< The current gains.
    mx::improc::eigenImage<realT> m_gainsTarget; ///< The target gains.
    
@@ -494,6 +490,7 @@ void userGainCtrl::setupConfig()
 
    config.add("loop.number", "", "loop.number", argType::Required, "loop", "number", false, "int", "The loop number");
    config.add("blocks.splitTT", "", "blocks.splitTT", argType::Required, "blocks", "splitTT", false, "bool", "If true, the first block is split into two modes.");
+   config.add("blocks.nZern", "", "blocks.nZern", argType::Required, "blocks", "nZern", false, "int", "Number of Zernikes at beginning.  T/T and F are split, the rest in their own block.");
 
    telemeterT::setupConfig(config);
 }
@@ -503,6 +500,7 @@ int userGainCtrl::loadConfigImpl( mx::app::appConfigurator & _config )
 {
    _config(m_loopNumber, "loop.number");
    _config(m_splitTT, "blocks.splitTT");
+   _config(m_nZern, "blocks.nZern");
    
    shmimMonitorT::m_shmimName = "aol" + std::to_string(m_loopNumber) + "_mgainfact";   
    shmimMonitorT::loadConfig(config);
