@@ -103,6 +103,8 @@ protected:
 
    IMAGE m_imageStream; ///< The ImageStreamIO shared memory buffer.
 
+   ino_t m_inode {0};
+
 public:
 
    /// Setup the configuration system
@@ -515,6 +517,19 @@ void shmimMonitor<derivedT, specificT>::smThreadExec()
             else
             {
                opened = true;
+               char SM_fname[200];
+               ImageStreamIO_filename(SM_fname, sizeof(SM_fname), m_shmimName.c_str());
+
+               struct stat buffer;
+               int rv = stat(SM_fname, &buffer);
+
+               if(rv != 0)
+               {
+                  derivedT::template log<software_critical>({__FILE__,__LINE__, errno,"Could not get inode for " + m_shmimName + ". Source process will need to be restarted."});
+                  ImageStreamIO_closeIm(&m_imageStream);
+                  return;
+               }
+               m_inode = buffer.st_ino;
             }
          }
          else
@@ -523,6 +538,8 @@ void shmimMonitor<derivedT, specificT>::smThreadExec()
          }
       }
       
+      
+
       if(m_restart) continue; //this is kinda dumb.  we just go around on restart, so why test in the while loop at all?
 
       if(derived().state() != stateCodes::OPERATING) continue;
@@ -686,12 +703,36 @@ void shmimMonitor<derivedT, specificT>::smThreadExec()
             //Check for why we timed out
             if(errno == EINTR) break; //This indicates signal interrupted us, time to restart or shutdown, loop will exit normally if flags set.
             
-            //ETIMEDOUT just means we should wait more.
+            //ETIMEDOUT means we should check for deletion, and then wait more.
             //Otherwise, report an error.
             if(errno != ETIMEDOUT)
             {
                derivedT::template log<software_error>({__FILE__, __LINE__,errno, "sem_timedwait"});
                break;
+            }
+
+            //Check if the file has disappeared.
+            int SM_fd;
+            char SM_fname[200];
+            ImageStreamIO_filename(SM_fname, sizeof(SM_fname), m_shmimName.c_str());
+            SM_fd = open(SM_fname, O_RDWR);
+            if(SM_fd == -1)
+            {
+                m_restart = true;
+            }
+            close(SM_fd);
+
+            //Check if the inode changed
+            struct stat buffer;
+            int rv = stat(SM_fname, &buffer);
+            if(rv != 0)
+            {
+                m_restart = true;
+            }
+
+            if(buffer.st_ino != m_inode)
+            {
+                m_restart = true;
             }
 
          }
@@ -709,7 +750,7 @@ void shmimMonitor<derivedT, specificT>::smThreadExec()
       
    } //outer loop, will exit if m_shutdown==true
       
-   derivedT::template log<software_error>({__FILE__,__LINE__, std::to_string(m_smThreadID) + " " + std::to_string(derived().shutdown() == 0)});
+   //derivedT::template log<software_error>({__FILE__,__LINE__, std::to_string(m_smThreadID) + " " + std::to_string(derived().shutdown() == 0)});
    
    //*******
    // call derived().cleanup()

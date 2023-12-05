@@ -307,7 +307,8 @@ int cacaoInterface::appStartup()
    
    createROIndiText( m_indiP_loop, "loop", "name", "Loop Description", "Loop Controls", "Name");
    indi::addTextElement(m_indiP_loop, "number", "Number");
-   m_indiP_loop["number"] = m_loopName;
+   m_indiP_loop["number"] = m_loopNumber;
+   m_indiP_loop["name"] = m_loopName;
    registerIndiPropertyReadOnly(m_indiP_loop);
    
    createStandardIndiToggleSw( m_indiP_loopProcesses, "loop_processes", "Loop Processes", "Loop Controls");
@@ -627,7 +628,7 @@ int cacaoInterface::getAOCalib()
    fin.close();
 
    //Now read in the actual directory
-   calsrc += "/aol" +  m_loopNumber + "_calib_dir.txt";
+   calsrc += "/calib_dir.txt";
    fin.open(calsrc);
    if(!fin)
    {
@@ -657,7 +658,7 @@ int cacaoInterface::getAOCalib()
    fin.close();
    
 
-   calsrc = m_aoCalDir + "/aol" + m_loopNumber + "_calib_archived.txt";
+   calsrc = m_aoCalDir + "/calib_archived.txt";
    
    fin.open(calsrc);
    if(!fin)

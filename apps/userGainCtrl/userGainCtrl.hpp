@@ -21,6 +21,152 @@ namespace MagAOX
 namespace app
 {
 
+uint16_t modesAtBlock( uint16_t b )
+{
+    int16_t N = 2* (2*b+1 + 1);
+
+    return (N+1)*(N+1) - 1;
+}
+
+/// Calculate the number of modes in 1 block
+/** A block is 2 Fourier mode indices wide.  At index m, there are 2m linear degrees of freedom.
+  * This gives [(2m+1)(2m+1)-1] total Fourier modes.  By considering the difference for 2m and 2(m-1) we 
+  * find the number of modes in one index is 16m + 8.  Note that m here starts from 1.  
+  * 
+  * Block number b starts from 0, and is related to m by m = 2b + 1 
+  */
+uint16_t modesInBlock( uint16_t b /**< [in] the block number */)
+{
+    return 32*b + 24;
+}
+
+/// Calculate the number of blocks and the number of modes per block
+/** A block is 2 Fourier mode m-indices wide, going around to the m < 0 side.  At index m, there are 2m linear degrees of freedom.
+  * Block number b starts from 0, and is related to m by m = 2b + 1.  So for b+1 blocks, there are N = 2* (2*b+1 + 1) linear
+  * degrees of freedom, giving (N+1)*(N+1) - 1 total Fourier modes, with 32*b + 24 modes per block b.
+  * 
+  * Complicating this is the usual practice of putting pure Zernike modes into the beginning of the basis.  This accounts for 
+  * this if desired, always splitting Tip/Tilt and Focus into separate blocks.  Tip/Tilt can optionally be 2 separate blocks.
+  */
+int blockModes( std::vector<uint16_t> & blocks, ///< [out] the block structure.  The size is the number of blocks, and each entry contains the nubmer of modes in that block
+                uint16_t Nmodes,                ///< [in] the total number of modes
+                uint16_t Nzern,                 ///< [in] the number of Zernikes appended at the front
+                bool splitTT                    ///< [in] whether or not to split tip and tilt
+              )
+{
+    double Nblocksd = (sqrt(1.0+Nmodes) - 1)/4.;
+    int Nblocks = Nblocksd;
+
+    if(Nblocks < Nblocksd) 
+    {
+        ++Nblocks;
+    }
+
+    blocks.clear();
+
+    uint16_t tot = 0;
+    if(Nzern > 0)
+    {
+        if(Nzern < 2) //not enough modes for this
+        {
+            //This is dumb, whomever is doing this, you should know.
+            Nblocks += 1;
+            blocks.push_back(1);
+            tot = 1;
+        }
+        
+        if(splitTT)
+        {
+            Nblocks += 2;
+            blocks.push_back(1);
+            blocks.push_back(1);
+            tot = 2;
+        }
+        else
+        {
+            Nblocks += 1;
+            blocks.push_back(2);
+            tot = 2;
+        }
+
+        if(Nzern > 2)
+        {
+            //Focus
+            Nblocks += 1;
+            blocks.push_back(1);
+            ++tot;
+
+            if(Nzern > 3)
+            {
+                Nblocks += 1;
+                blocks.push_back(Nzern - 3);
+                tot += blocks.back();
+            }
+        }
+    }
+
+    if(tot >= Nmodes) //Here we handle the case of Nzern >= Nmodes.
+    {
+        uint16_t sum = 0;
+        for(size_t n=0; n < blocks.size(); ++n)
+        {
+            sum += blocks[n];
+        }
+
+        if(sum != Nmodes && sum != Nzern)
+        {
+            return -4;
+        }
+
+        return 0;
+    }
+
+    uint16_t currb = 0;
+
+    while(currb < Nblocks)
+    {
+        uint16_t NAtThis = modesAtBlock(currb);
+
+        if(NAtThis <= tot) //Still in the Zernikes at the beginning
+        {
+            //--Nblocks;
+            ++currb;
+            continue;
+        }
+
+        uint16_t Nthis = NAtThis - tot;
+
+        if(tot + Nthis > Nmodes)
+        {
+            Nthis = Nmodes - tot;
+        }
+
+        if(Nthis == 0)
+        {
+            ++currb;
+            break;
+        }
+
+        blocks.push_back(Nthis);
+        tot += Nthis;
+        ++currb;
+    }
+
+    uint16_t sum = 0;
+    for(size_t n=0; n < blocks.size(); ++n)
+    {
+        sum += blocks[n];
+    }
+
+    if(sum != Nmodes)
+    {
+        return -3;
+    }
+
+    return 0;
+
+}
+
 struct gainShmimT 
 {
    static std::string configSection()
@@ -61,7 +207,7 @@ struct limitShmimT
 };
 
 /** \defgroup userGainCtrl User Interface to Cacao Gains
-  * \brief Tracks the cacao gain factor vector and updates upon request, using blocks if desired.
+  * \brief Tracks the cacao gain factor vector and updates upon request, using blocks.
   *
   * <a href="../handbook/operating/software/apps/userGainCtrl.html">Application Documentation</a>
   *
@@ -110,13 +256,14 @@ protected:
      *@{
      */
    int m_loopNumber;
+   int m_nZern {0};
    bool m_splitTT {false};
 
    ///@}
  
-   std::string m_aoCalDir;
-   std::string m_aoCalArchiveTime;
-   std::string m_aoCalLoadTime;
+   //std::string m_aoCalDir;
+   //std::string m_aoCalArchiveTime;
+   //std::string m_aoCalLoadTime;
 
    mx::improc::eigenImage<realT> m_gainsCurrent; ///< The current gains.
    mx::improc::eigenImage<realT> m_gainsTarget; ///< The target gains.
@@ -133,8 +280,8 @@ protected:
 
    realT (*limit_pixget)(void *, size_t) {nullptr}; ///< Pointer to a function to extract the image data as our desired type realT.
 
-   std::vector<int> m_modeBlockStart;
-   std::vector<int> m_modeBlockN;
+   std::vector<uint16_t> m_modeBlockStart;
+   std::vector<uint16_t> m_modeBlockN;
    
    int m_totalNModes {0}; ///< The total number of WFS modes in the calib.
 
@@ -191,9 +338,9 @@ public:
 
 protected:
 
-   int checkAOCalib(); ///< Test if the AO calib is accessible.
+   //int checkAOCalib(); ///< Test if the AO calib is accessible.
 
-   int getAOCalib();
+   //int getAOCalib();
 
    int getModeBlocks();
 
@@ -334,6 +481,7 @@ userGainCtrl::userGainCtrl() : MagAOXApp(MAGAOX_CURRENT_SHA1, MAGAOX_REPO_MODIFI
    shmimMonitorT::m_getExistingFirst = true;
    mcShmimMonitorT::m_getExistingFirst = true;
    limitShmimMonitorT::m_getExistingFirst = true;
+
    return;
 }
 
@@ -431,7 +579,7 @@ int userGainCtrl::appStartup()
       return log<software_error,-1>({__FILE__,__LINE__});
    }
    
-   state(stateCodes::NODEVICE);
+   state(stateCodes::CONNECTED);
     
    return 0;
 }
@@ -454,7 +602,7 @@ int userGainCtrl::appLogic()
       return log<software_error,-1>({__FILE__,__LINE__});
    }
 
-   if(checkAOCalib() < 0)
+   /*if(checkAOCalib() < 0)
    {
       state(stateCodes::NODEVICE);
       if(!stateLogged()) log<text_log>("Could not find AO calib");
@@ -462,33 +610,14 @@ int userGainCtrl::appLogic()
    else 
    {
       if(!(state() == stateCodes::READY || state() == stateCodes::OPERATING)) state(stateCodes::NOTCONNECTED);
-   }
+   }*/
 
-   if( state() == stateCodes::READY || state() == stateCodes::OPERATING || state() == stateCodes::CONNECTED || state() == stateCodes::NOTCONNECTED  )
+   if( state() == stateCodes::READY || state() == stateCodes::OPERATING 
+              || state() == stateCodes::CONNECTED || state() == stateCodes::NOTCONNECTED  )
    {
-
-      //Now we go on:
-
-      //These could change if a new calibration is loaded
-      if(getAOCalib() < 0 )
-      {
-         state(stateCodes::NOTCONNECTED);
-         if(!stateLogged()) log<text_log>("Error getting AO calib", logPrio::LOG_ERROR);
-         return 0;
-      }
-
-      //These could change if a new calibration is loaded
-      if(getModeBlocks() < 0 )
-      {
-         state(stateCodes::NOTCONNECTED);
-         if(!stateLogged()) log<text_log>("Could not get mode blocks", logPrio::LOG_ERROR);
-         return 0;
-      }
-
       if(state() == stateCodes::NOTCONNECTED) state(stateCodes::CONNECTED);
       if(state() == stateCodes::CONNECTED) state(stateCodes::READY);
       if(state() == stateCodes::READY) state(stateCodes::OPERATING); //we just progress all the way through to operating so shmimMonitor will go.
-
    }
 
    if(state() == stateCodes::OPERATING)
@@ -549,341 +678,142 @@ int userGainCtrl::appShutdown()
    return 0;
 }
 
-inline
-int userGainCtrl::checkAOCalib()
-{
-   std::string calsrc = "/milk/shm/aol" + std::to_string(m_loopNumber) + "_calib_source.txt";
-
-   std::ifstream fin;
-   //First read in the milk/shm directory name, which could be to a symlinked directory
-   fin.open(calsrc);
-   if(!fin)
-   {
-      return -1;
-   }
-   fin >> calsrc;
-   fin.close();
-
-   //Now read in the actual directory
-   calsrc += "/aol" +  std::to_string(m_loopNumber) + "_calib_dir.txt";
-   fin.open(calsrc);
-   if(!fin)
-   {
-      return -1;
-   }
-   fin >> m_aoCalDir;
-   fin.close();
-
-   return 0;
-}
-
-inline
-int userGainCtrl::getAOCalib()
-{
-   std::string calsrc = "/milk/shm/aol" + std::to_string(m_loopNumber) + "_calib_source.txt";
-
-   std::ifstream fin;
-   //First read in the milk/shm directory name, which could be to a symlinked directory
-   fin.open(calsrc);
-   if(!fin)
-   {
-      return 0; //this can happen if cacao not started up, etc.
-   }
-   fin >> calsrc;
-   fin.close();
-
-   //Now read in the actual directory
-   calsrc += "/aol" +  std::to_string(m_loopNumber) + "_calib_dir.txt";
-   fin.open(calsrc);
-   if(!fin)
-   {
-      return log<software_error, -1>({__FILE__, __LINE__, errno, "userGainCtrl::getAOCalib failed to open: " + calsrc});
-   }
-   fin >> m_aoCalDir;
-   fin.close();
-
-   calsrc = "/milk/shm/aol" + std::to_string(m_loopNumber) + "_calib_loaded.txt";
-   fin.open(calsrc);
-   if(!fin)
-   {
-      return log<software_error, -1>({__FILE__, __LINE__, errno, "userGainCtrl::getAOCalib failed to open: " + calsrc});
-   }
-   fin >> m_aoCalLoadTime;
-   fin.close();
-   
-
-   calsrc = m_aoCalDir + "/aol" + std::to_string(m_loopNumber) + "_calib_archived.txt";
-   
-   fin.open(calsrc);
-   if(!fin)
-   {
-      return log<software_error, -1>({__FILE__, __LINE__, errno, "userGainCtrl::getAOCalib failed to open: " + calsrc});
-   }
-
-   while(!fin.eof())
-   {
-      fin >> m_aoCalArchiveTime;
-   }
-   fin.close();
-   
-   int totalNModes = m_gainsCurrent.rows(); //m_ff.naxes(2);
-
-   //Is this a change?
-   if(totalNModes != m_totalNModes)
-   {
-      log<text_log>("Found " + std::to_string(totalNModes) + " total modes in calib.");
-   }
-
-   m_totalNModes = totalNModes;
-
-   //Now we check if this matches the shared-memory.  If not, this would mean that the cal changed and the shmims did not
-   static bool mmlog = false; //log once per occurrence.  this could go on for a long time until mfilt is started.
-   ///\todo this can fail if it never compares as equal but shmimMonitors are connected.  shmimMonitor needs a "connected" flag.
-   if(m_totalNModes != (int) shmimMonitorT::m_width || m_totalNModes != (int) mcShmimMonitorT::m_width || m_totalNModes != (int) limitShmimMonitorT::m_width)
-   {
-      if(!mmlog) 
-      {
-         log<text_log>("Detected calib and gain shmim mismatch, reconnecting shmim.");
-      
-         shmimMonitorT::m_restart = true;
-         mcShmimMonitorT::m_restart = true;
-         limitShmimMonitorT::m_restart = true;
-      }
-      mmlog = true;
-   }   
-   else mmlog = false; //reset for next time
-
-   return 0;
-}
 
 inline
 int userGainCtrl::getModeBlocks()
-{
+{    
+    blockModes(m_modeBlockN, shmimMonitorT::m_width, m_nZern, m_splitTT);
 
-   std::vector<std::string> blocks = mx::ioutils::getFileNames(m_aoCalDir, "aol" + std::to_string(m_loopNumber) + "_block", "_NBmodes", ".txt");
+    uint16_t Nb = m_modeBlockN.size();
 
-   if(blocks.size() == 0)
-   {
-      log<text_log>("no mode blocks found", logPrio::LOG_WARNING);
-   }
+    m_modeBlockStart.resize(m_modeBlockN.size());
+    m_modeBlockStart[0] = 0;
+    for(size_t n = 1; n < m_modeBlockN.size(); ++n)
+    {
+        m_modeBlockStart[n] = m_modeBlockStart[n-1] + m_modeBlockN[n-1];
+    }
+    
+    //state(stateCodes::READY);
+    log<text_log>("loading new gain block structure");
 
-   std::ifstream fin;
+    //We're b/c the gain shmimMonitor restarted
+    //mcShmimMonitorT::m_restart = true;
+    //limitShmimMonitorT::m_restart = true;
 
-   fin.open(m_aoCalDir + "/aol" + std::to_string(m_loopNumber) + "_NBmodeblocks.txt");
-   if( !fin )
-   {
-      return log<software_error, -1>({__FILE__, __LINE__, errno, "userGainCtrl::getModeBlocks failed to open: NBmodeblocks.txt"});
-   }
-
-   size_t Nb;
-   fin >> Nb;
-
-   fin.close();
-
-   std::vector<int> modeBlockStart(Nb);
-   std::vector<int> modeBlockN(Nb);
-
-   
-   for(size_t n =0; n < Nb; ++n)
-   {
-      fin.open(blocks[n]);
-      if( !fin )
-      {
-         return log<software_error, -1>({__FILE__, __LINE__, errno, "userGainCtrl::getModeBlocks failed to open: " + blocks[n]});
-      }
-
-      int offs, num;
-
-      //fin >> offs;
-      fin >> num;
-
-      if(n == 0) offs = 0;
-      else offs = modeBlockStart[n-1] + modeBlockN[n-1];
-
-
-      modeBlockStart[n] = offs;
-      modeBlockN[n] = num;
-      fin.close();
-
-      if( !fin )
-      {
-         return log<software_error, -1>({__FILE__, __LINE__, errno, "userGainCtrl::getModeBlocks error closing: " + blocks[n]});
-      }
-   }
-
-   if(modeBlockStart.back() + modeBlockN.back() < m_totalNModes)
-   {
-      int st0 = modeBlockStart.back();
-      int N0 = modeBlockN.back();
-
-      modeBlockStart.push_back(st0 + N0);
-      modeBlockN.push_back(m_totalNModes - (st0+N0));
-      ++Nb;
-
-   }
-
-   //split tt here
-   if(m_splitTT)
-   {
-      if(modeBlockN[0] !=2 )
-      {
-         log<software_warning>({__FILE__, __LINE__, errno, "userGainCtrl::getModeBlocks splitTT is set but block00 does not have 2 modes"});
-      }
-      else if(modeBlockStart[0] != 0)
-      {
-         log<software_warning>({__FILE__, __LINE__, errno, "userGainCtrl::getModeBlocks splitTT is set but block00 does not start at mode 0"});
-      }
-      else
-      {
-         modeBlockStart.insert(modeBlockStart.begin(), 0);
-         modeBlockStart[1] = 1;
-
-         modeBlockN.insert(modeBlockN.begin(), 1);
-         modeBlockN[1] = 1;
-         ++Nb;
-      }
-   }
-
-   //now detect changes.
-   bool changed = false;
-   if(m_modeBlockStart.size() != Nb || m_modeBlockN.size() != Nb || m_modeBlockGains.size() != Nb || m_modeBlockMCs.size() != Nb || m_modeBlockLims.size() != Nb)
-   {
-      changed = true;
-   }
-   else //All are correct size, look for differences within:
-   {
-      for(size_t n=0; n < Nb; ++n)
-      {
-         if(m_modeBlockStart[n] != modeBlockStart[n] || m_modeBlockN[n] != modeBlockN[n])
-         {
-            changed = true;
-            break;
-         }
-      }
-   }
-
-   if(changed)
-   {
-      state(stateCodes::READY);
-      log<text_log>("loading new gain block structure");
-
-      shmimMonitorT::m_restart = true;
-      mcShmimMonitorT::m_restart = true;
-      limitShmimMonitorT::m_restart = true;
-
-      std::unique_lock<std::mutex> lock(m_modeBlockMutex);
-      m_modeBlockStart.resize(Nb);
-      m_modeBlockN.resize(Nb);
-      m_modeBlockGains.resize(Nb);
-      m_modeBlockGainsConstant.resize(Nb);
-      m_modeBlockMCs.resize(Nb);
-      m_modeBlockMCsConstant.resize(Nb);
-      m_modeBlockLims.resize(Nb);
-      m_modeBlockLimsConstant.resize(Nb);
-
-      for(size_t n=0; n < Nb; ++n)
-      {
-         m_modeBlockStart[n] = modeBlockStart[n];
-         m_modeBlockN[n] = modeBlockN[n];
-      }
-      lock.unlock();
-
-      //-- modify INDI vars --
-      std::unique_lock<std::mutex> indilock(m_indiMutex);
-      m_indiP_modes["total"] = m_modeBlockStart[m_modeBlockStart.size()-1] + m_modeBlockN[m_modeBlockN.size()-1];
-      m_indiP_modes["blocks"] = m_modeBlockStart.size();
-
-      //First just delete all existing blockXX elements
-      for(int n=0; n < 100; ++n)
-      {
-         char str[16];
-         snprintf(str, sizeof(str), "%02d", n);
-         std::string en = "block";
-         en += str;
-
-         if(m_indiP_modes.find(en)) m_indiP_modes.remove(en);
-      }
+    m_modeBlockGains.resize(Nb);
+    m_modeBlockGainsConstant.resize(Nb);
       
-      //Erase existing block gains
-      if(m_indiP_blockGains.size() > 0)
-      {
-         for(size_t n=0; n < m_indiP_blockGains.size(); ++n)
-         {
+    m_modeBlockMCs.resize(Nb);
+    m_modeBlockMCsConstant.resize(Nb);
+      
+    m_modeBlockLims.resize(Nb);
+    m_modeBlockLimsConstant.resize(Nb);
+
+    //-- modify INDI vars --
+    std::unique_lock<std::mutex> indilock(m_indiMutex);
+      
+    m_indiP_modes["total"] = m_modeBlockStart[m_modeBlockStart.size()-1] + m_modeBlockN[m_modeBlockN.size()-1];
+    m_indiP_modes["blocks"] = m_modeBlockStart.size();
+
+    //First just delete all existing blockXX elements
+    for(int n=0; n < 100; ++n)
+    {
+        char str[16];
+        snprintf(str, sizeof(str), "%02d", n);
+        std::string en = "block";
+        en += str;
+
+        if(m_indiP_modes.find(en)) m_indiP_modes.remove(en);
+    }
+      
+    //Erase existing block gains
+    if(m_indiP_blockGains.size() > 0)
+    {
+        for(size_t n=0; n < m_indiP_blockGains.size(); ++n)
+        {
             if(m_indiDriver) m_indiDriver->sendDelProperty(m_indiP_blockGains[n]);
-            m_indiNewCallBacks.erase(m_indiP_blockGains[n].getName());
-         }
-      }
-      m_indiP_blockGains.clear(); //I don't know what happens if you try to re-use an INDI property
+            if(!m_indiNewCallBacks.erase(m_indiP_blockGains[n].createUniqueKey()))
+            {
+                log<software_error>({__FILE__, __LINE__, "failed to erase " + m_indiP_blockGains[n].createUniqueKey()});
+            }
+       }
+    }
+    m_indiP_blockGains.clear(); //I don't know what happens if you try to re-use an INDI property
 
-      if(m_indiP_blockMCs.size() > 0)
-      {
-         for(size_t n=0; n < m_indiP_blockMCs.size(); ++n)
-         {
+    if(m_indiP_blockMCs.size() > 0)
+    {
+        for(size_t n=0; n < m_indiP_blockMCs.size(); ++n)
+        {
             if(m_indiDriver) m_indiDriver->sendDelProperty(m_indiP_blockMCs[n]);
-            m_indiNewCallBacks.erase(m_indiP_blockMCs[n].getName());
-         }
-      }
-      m_indiP_blockMCs.clear(); //I don't know what happens if you try to re-use an INDI property
+            if(!m_indiNewCallBacks.erase(m_indiP_blockMCs[n].createUniqueKey()))
+            {
+                log<software_error>({__FILE__, __LINE__, "failed to erase " + m_indiP_blockMCs[n].createUniqueKey()});
+            }
+       }
+    }
+    m_indiP_blockMCs.clear(); //I don't know what happens if you try to re-use an INDI property
 
-      if(m_indiP_blockLimits.size() > 0)
-      {
-         for(size_t n=0; n < m_indiP_blockLimits.size(); ++n)
-         {
+    if(m_indiP_blockLimits.size() > 0)
+    {
+        for(size_t n=0; n < m_indiP_blockLimits.size(); ++n)
+        {
             if(m_indiDriver) m_indiDriver->sendDelProperty(m_indiP_blockLimits[n]);
-            m_indiNewCallBacks.erase(m_indiP_blockLimits[n].getName());
-         }
-      }
-      m_indiP_blockLimits.clear(); //I don't know what happens if you try to re-use an INDI property
+            if(!m_indiNewCallBacks.erase(m_indiP_blockLimits[n].createUniqueKey()))
+            {
+                log<software_error>({__FILE__, __LINE__, "failed to erase " + m_indiP_blockLimits[n].createUniqueKey()});
+            }
+        }
+    }
+    m_indiP_blockLimits.clear(); //I don't know what happens if you try to re-use an INDI property
 
-      m_indiP_blockGains.resize(Nb);
-      m_indiP_blockMCs.resize(Nb);
-      m_indiP_blockLimits.resize(Nb);
+    m_indiP_blockGains.resize(Nb);
+    m_indiP_blockMCs.resize(Nb);
+    m_indiP_blockLimits.resize(Nb);
 
-      //Then add in what we want.
-      for(size_t n=0; n < Nb; ++n)
-      {
-         char str[16];
-         int nn = n;
-         snprintf(str, sizeof(str), "%02d", nn);
-         std::string en = "block";
-         en += str;
-         indi::addNumberElement(m_indiP_modes, en, 0, 1, 99, "Block " + std::to_string(nn));
-         m_indiP_modes[en] = m_modeBlockN[n];
+    //Then add in what we want.
+    for(size_t n=0; n < Nb; ++n)
+    {
+       char str[16];
+       int nn = n;
+       snprintf(str, sizeof(str), "%02d", nn);
+       std::string en = "block";
+       en += str;
+       indi::addNumberElement(m_indiP_modes, en, 0, 1, 99, "Block " + std::to_string(nn));
+       m_indiP_modes[en] = m_modeBlockN[n];
 
-         createStandardIndiNumber<float>( m_indiP_blockGains[n], en + "_gain", 0.0, 10.0, 0.01, "%0.3f", en + " Gain", "Loop Controls");
-         registerIndiPropertyNew( m_indiP_blockGains[n],  st_newCallBack_blockGains);  
-         if(m_indiDriver) m_indiDriver->sendSetProperty (m_indiP_blockGains[n]);
+       createStandardIndiNumber<float>( m_indiP_blockGains[n], en + "_gain", 0.0, 10.0, 0.01, "%0.3f", en + " Gain", "Loop Controls");
+       registerIndiPropertyNew( m_indiP_blockGains[n],  st_newCallBack_blockGains);  
+       if(m_indiDriver) m_indiDriver->sendSetProperty (m_indiP_blockGains[n]);
 
-         createStandardIndiNumber<float>( m_indiP_blockMCs[n], en + "_multcoeff", 0.0, 1.0, 0.01, "%0.3f", en + " Mult. Coeff", "Loop Controls");
-         registerIndiPropertyNew( m_indiP_blockMCs[n],  st_newCallBack_blockMCs);  
-         if(m_indiDriver) m_indiDriver->sendSetProperty (m_indiP_blockMCs[n]);
+       createStandardIndiNumber<float>( m_indiP_blockMCs[n], en + "_multcoeff", 0.0, 1.0, 0.01, "%0.3f", en + " Mult. Coeff", "Loop Controls");
+       registerIndiPropertyNew( m_indiP_blockMCs[n],  st_newCallBack_blockMCs);  
+       if(m_indiDriver) m_indiDriver->sendSetProperty (m_indiP_blockMCs[n]);
 
-         createStandardIndiNumber<float>( m_indiP_blockLimits[n], en + "_limit", 0.0, 100.0, 0.01, "%0.3f", en + " Limit", "Loop Controls");
-         registerIndiPropertyNew( m_indiP_blockLimits[n],  st_newCallBack_blockLimits);  
-         if(m_indiDriver) m_indiDriver->sendSetProperty (m_indiP_blockLimits[n]);
-      }
+       createStandardIndiNumber<float>( m_indiP_blockLimits[n], en + "_limit", 0.0, 100.0, 0.01, "%0.3f", en + " Limit", "Loop Controls");
+       registerIndiPropertyNew( m_indiP_blockLimits[n],  st_newCallBack_blockLimits);  
+       if(m_indiDriver) m_indiDriver->sendSetProperty (m_indiP_blockLimits[n]);
+    }
 
-      if(m_indiDriver) m_indiDriver->sendSetProperty (m_indiP_modes); //might not exist yet!
-      
-   }
-   
+    if(m_indiDriver) m_indiDriver->sendSetProperty (m_indiP_modes); //might not exist yet!   
 
-   return 0;
+    return 0;
 }
 
 inline
 int userGainCtrl::allocate(const gainShmimT & dummy)
 {
-   static_cast<void>(dummy); //be unused
+    static_cast<void>(dummy); //be unused
   
-   std::unique_lock<std::mutex> lock(m_indiMutex);
-     
-   m_gainsCurrent.resize(shmimMonitorT::m_width, shmimMonitorT::m_height);
-   m_gainsTarget.resize(shmimMonitorT::m_width, shmimMonitorT::m_height);
-   
-   pixget = getPixPointer<realT>(shmimMonitorT::m_dataType);
+    std::unique_lock<std::mutex> lock(m_modeBlockMutex);
 
-   return 0;
+    m_gainsCurrent.resize(shmimMonitorT::m_width, shmimMonitorT::m_height);
+    m_gainsTarget.resize(shmimMonitorT::m_width, shmimMonitorT::m_height);
+   
+    getModeBlocks();
+
+    pixget = getPixPointer<realT>(shmimMonitorT::m_dataType);
+
+    return 0;
 }
 
 inline
@@ -1006,16 +936,29 @@ int userGainCtrl::setBlockGain( int n,
 inline
 int userGainCtrl::allocate(const multcoeffShmimT & dummy)
 {
-   static_cast<void>(dummy); //be unused
-  
-   std::unique_lock<std::mutex> lock(m_indiMutex);
-     
-   m_mcsCurrent.resize(mcShmimMonitorT::m_width, mcShmimMonitorT::m_height);
-   m_mcsTarget.resize(mcShmimMonitorT::m_width, mcShmimMonitorT::m_height);
+    static_cast<void>(dummy); //be unused
    
-   mc_pixget = getPixPointer<realT>(mcShmimMonitorT::m_dataType);
+    int n = 0;
 
-   return 0;
+    while( mcShmimMonitorT::m_width != shmimMonitorT::m_width && n < 100 )
+    {
+        mx::sys::milliSleep(100);
+        ++n;
+    }
+
+    if( mcShmimMonitorT::m_width != shmimMonitorT::m_width )
+    {
+        return -1;
+    }
+
+    std::unique_lock<std::mutex> lock(m_indiMutex);
+
+    m_mcsCurrent.resize(mcShmimMonitorT::m_width, mcShmimMonitorT::m_height);
+    m_mcsTarget.resize(mcShmimMonitorT::m_width, mcShmimMonitorT::m_height);
+   
+    mc_pixget = getPixPointer<realT>(mcShmimMonitorT::m_dataType);
+
+    return 0;
 }
 
 inline
@@ -1138,16 +1081,29 @@ int userGainCtrl::setBlockMC( int n,
 inline
 int userGainCtrl::allocate(const limitShmimT & dummy)
 {
-   static_cast<void>(dummy); //be unused
+    static_cast<void>(dummy); //be unused
   
-   std::unique_lock<std::mutex> lock(m_indiMutex);
-     
-   m_limitsCurrent.resize(limitShmimMonitorT::m_width, limitShmimMonitorT::m_height);
-   m_limitsTarget.resize(limitShmimMonitorT::m_width, limitShmimMonitorT::m_height);
-   
-   limit_pixget = getPixPointer<realT>(limitShmimMonitorT::m_dataType);
+    int n = 0;
 
-   return 0;
+    while( limitShmimMonitorT::m_width != shmimMonitorT::m_width && n < 100 )
+    {
+        mx::sys::milliSleep(100);
+        ++n;
+    }
+
+    if( limitShmimMonitorT::m_width != shmimMonitorT::m_width )
+    {
+        return -1;
+    }
+
+    std::unique_lock<std::mutex> lock(m_indiMutex);
+     
+    m_limitsCurrent.resize(limitShmimMonitorT::m_width, limitShmimMonitorT::m_height);
+    m_limitsTarget.resize(limitShmimMonitorT::m_width, limitShmimMonitorT::m_height);
+   
+    limit_pixget = getPixPointer<realT>(limitShmimMonitorT::m_dataType);
+
+    return 0;
 }
 
 inline
@@ -1493,7 +1449,7 @@ int userGainCtrl::newCallBack_blockMCs( const pcf::IndiProperty &ipRecv )
       return -1;
    }
 
-   if(ipRecv.getName().find("BLOCK") != 0)
+   if(ipRecv.getName().find("block") != 0)
    {
       #ifndef XWCTEST_INDI_CALLBACK_VALIDATION
       log<software_error>({__FILE__, __LINE__, "wrong INDI property"});
@@ -1571,7 +1527,7 @@ int userGainCtrl::newCallBack_blockLimits( const pcf::IndiProperty &ipRecv )
       return -1;
    }
 
-   if(ipRecv.getName().find("BLOCK") != 0)
+   if(ipRecv.getName().find("block") != 0)
    {
       #ifndef XWCTEST_INDI_CALLBACK_VALIDATION
       log<software_error>({__FILE__, __LINE__, "wrong INDI property"});
