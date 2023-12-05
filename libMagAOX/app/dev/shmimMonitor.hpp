@@ -254,7 +254,6 @@ template<class derivedT, class specificT>
 shmimMonitor<derivedT, specificT> * shmimMonitor<derivedT, specificT>::m_selfMonitor = nullptr;
 
 
-
 template<class derivedT, class specificT>
 void shmimMonitor<derivedT, specificT>::setupConfig(mx::app::appConfigurator & config)
 {
@@ -264,6 +263,8 @@ void shmimMonitor<derivedT, specificT>::setupConfig(mx::app::appConfigurator & c
    
    config.add(specificT::configSection()+".shmimName", "", specificT::configSection()+".shmimName", argType::Required, specificT::configSection(), "shmimName", false, "string", "The name of the ImageStreamIO shared memory image. Will be used as /tmp/<shmimName>.im.shm.");
    
+   config.add(specificT::configSection()+".getExistingFirst", "", specificT::configSection()+".getExistingFirst", argType::Required, specificT::configSection(), "getExistingFirst", false, "bool", "If true an existing image is loaded.  If false we wait for a new image.");
+
    //Set this here to allow derived classes to set their own default before calling loadConfig
    m_shmimName = derived().configName();
          
@@ -275,7 +276,7 @@ void shmimMonitor<derivedT, specificT>::loadConfig(mx::app::appConfigurator & co
    config(m_smThreadPrio, specificT::configSection() + ".threadPrio");
    config(m_smCpuset, specificT::configSection() + ".cpuset");
    config(m_shmimName, specificT::configSection() + ".shmimName");
-  
+   config(m_getExistingFirst, specificT::configSection() + ".getExistingFirst");
 }
    
 template<class derivedT, class specificT>
@@ -763,10 +764,6 @@ void shmimMonitor<derivedT, specificT>::smThreadExec()
    }
    
 }
-
-
-
-
 
 template<class derivedT, class specificT>
 int shmimMonitor<derivedT, specificT>::updateINDI()

@@ -760,20 +760,18 @@ INDI_SETCALLBACK_DEFN( zaberCtrl, m_indiP_stageTemp )(const pcf::IndiProperty &i
 {
     INDI_VALIDATE_CALLBACK_PROPS(m_indiP_stageTemp, ipRecv);
 
-   if( ipRecv.find(m_stageName) != true ) //Just not our stage.
-   {
-      return 0;
-   }
+    if( ipRecv.find(m_stageName) != true ) //Just not our stage.
+    {
+        return 0;
+    }
    
-   std::lock_guard<std::mutex> guard(m_indiMutex);
+    std::lock_guard<std::mutex> guard(m_indiMutex);
    
-   m_stageTemp = ipRecv[m_stageName].get<double>();
+    m_stageTemp = ipRecv[m_stageName].get<double>();
    
-   updateIfChanged(m_indiP_temp, "current", m_stageTemp);   
-   
-   
+    updateIfChanged(m_indiP_temp, "current", m_stageTemp);   
 
-   return 0;
+    return 0;
 }
 
 int zaberCtrl::checkRecordTimes()

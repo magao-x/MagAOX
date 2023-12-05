@@ -41,6 +41,8 @@ protected:
    std::vector<gainCtrl *> m_blockCtrls {nullptr};
    std::mutex m_blockMutex;
 
+   QTimer * m_updateTimer {nullptr};
+
 public:
    loopCtrl( std::string & procName,
              QWidget * Parent = 0, 
@@ -80,6 +82,9 @@ public slots:
    void setupBlocks(int nB);
 
 signals:
+
+   void doUpdateGUI();
+
    void blocksChanged(int nB);
 
 private:
@@ -108,6 +113,12 @@ loopCtrl::loopCtrl( std::string & procName,
    setXwFont(ui.button_LoopZero);
    setXwFont(ui.button_zeroall);
    setXwFont(ui.label_block_gains);
+
+   m_updateTimer = new QTimer;
+
+   connect(m_updateTimer, SIGNAL(timeout()), this, SLOT(updateGUI()));
+
+   m_updateTimer->start(250);
 
    onDisconnect();
 }
@@ -283,7 +294,7 @@ void loopCtrl::handleSetProperty( const pcf::IndiProperty & ipRecv)
       }
    }
 
-   updateGUI();
+   emit doUpdateGUI();
 }
 
 void loopCtrl::handleDelProperty( const pcf::IndiProperty & ipRecv)

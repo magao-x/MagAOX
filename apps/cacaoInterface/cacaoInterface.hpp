@@ -831,156 +831,135 @@ void cacaoInterface::fmThreadExec( )
 
 INDI_NEWCALLBACK_DEFN(cacaoInterface, m_indiP_loopState )(const pcf::IndiProperty &ipRecv)
 {
-   if(ipRecv.getName() != m_indiP_loopState.getName())
-   {
-      log<software_error>({__FILE__,__LINE__, "wrong INDI property received."});
-      return -1;
-   }
+    INDI_VALIDATE_CALLBACK_PROPS(m_indiP_loopState, ipRecv);
       
-   if(!ipRecv.find("toggle")) return 0;
+    if(!ipRecv.find("toggle")) return 0;
            
-   std::unique_lock<std::mutex> lock(m_indiMutex);
+    std::unique_lock<std::mutex> lock(m_indiMutex);
       
-   if( ipRecv["toggle"].getSwitchState() == pcf::IndiElement::On)
-   {
-      return loopOn();
-   }   
-   else if( ipRecv["toggle"].getSwitchState() == pcf::IndiElement::Off)
-   {
-      return loopOff();
-   }
+    if( ipRecv["toggle"].getSwitchState() == pcf::IndiElement::On)
+    {
+        return loopOn();
+    }   
+    else if( ipRecv["toggle"].getSwitchState() == pcf::IndiElement::Off)
+    {
+        return loopOff();
+    }
       
-   log<software_error>({__FILE__,__LINE__, "switch state fall through."});
-   return -1;
+    log<software_error>({__FILE__,__LINE__, "switch state fall through."});
+    return -1;
 }
 
 INDI_NEWCALLBACK_DEFN(cacaoInterface, m_indiP_loopGain )(const pcf::IndiProperty &ipRecv)
 {
-   if(ipRecv.getName() != m_indiP_loopGain.getName())
-   {
-      log<software_error>({__FILE__,__LINE__, "wrong INDI property received."});
-      return -1;
-   }
+    INDI_VALIDATE_CALLBACK_PROPS(m_indiP_loopGain, ipRecv);
    
-   float current = -1;
-   float target = -1;
+    float current = -1;
+    float target = -1;
 
-   if(ipRecv.find("current"))
-   {
-      current = ipRecv["current"].get<double>();
-   }
+    if(ipRecv.find("current"))
+    {
+        current = ipRecv["current"].get<double>();
+    }
 
-   if(ipRecv.find("target"))
-   {
-      target = ipRecv["target"].get<double>();
-   }
+    if(ipRecv.find("target"))
+    {
+        target = ipRecv["target"].get<double>();
+    }
 
-   if(target == -1) target = current;
+    if(target == -1) target = current;
    
-   if(target == -1)
-   {
-      return 0;
-   }
+    if(target == -1)
+    {
+        return 0;
+    }
 
-   std::lock_guard<std::mutex> guard(m_indiMutex);
+    std::lock_guard<std::mutex> guard(m_indiMutex);
    
-   m_gain_target = target;
+    m_gain_target = target;
    
-   updateIfChanged(m_indiP_loopGain, "target", m_gain_target);
+    updateIfChanged(m_indiP_loopGain, "target", m_gain_target);
 
-   return setGain();
+    return setGain();
 }
 
 INDI_NEWCALLBACK_DEFN(cacaoInterface, m_indiP_loopZero )(const pcf::IndiProperty &ipRecv)
 {
-   if(ipRecv.getName() != m_indiP_loopZero.getName())
-   {
-      log<software_error>({__FILE__,__LINE__, "wrong INDI property received."});
-      return -1;
-   }
-      
-   if(!ipRecv.find("request")) return 0;
+    INDI_VALIDATE_CALLBACK_PROPS(m_indiP_loopZero, ipRecv);
+
+    if(!ipRecv.find("request")) return 0;
            
-   std::unique_lock<std::mutex> lock(m_indiMutex);
+    std::unique_lock<std::mutex> lock(m_indiMutex);
       
-   if( ipRecv["request"].getSwitchState() == pcf::IndiElement::On)
-   {
-      return loopZero();
-   }   
-   std::cerr << "off?\n";
-   
-   return 0;
+    if( ipRecv["request"].getSwitchState() == pcf::IndiElement::On)
+    {
+        return loopZero();
+    }   
+    
+    return 0;
 }
 
 INDI_NEWCALLBACK_DEFN(cacaoInterface, m_indiP_multCoeff )(const pcf::IndiProperty &ipRecv)
 {
-   if(ipRecv.getName() != m_indiP_multCoeff.getName())
-   {
-      log<software_error>({__FILE__,__LINE__, "wrong INDI property received."});
-      return -1;
-   }
+    INDI_VALIDATE_CALLBACK_PROPS(m_indiP_multCoeff, ipRecv);
    
-   float current = -1;
-   float target = -1;
+    float current = -1;
+    float target = -1;
 
-   if(ipRecv.find("current"))
-   {
-      current = ipRecv["current"].get<double>();
-   }
+    if(ipRecv.find("current"))
+    {
+        current = ipRecv["current"].get<double>();
+    }
 
-   if(ipRecv.find("target"))
-   {
-      target = ipRecv["target"].get<double>();
-   }
+    if(ipRecv.find("target"))
+    {
+        target = ipRecv["target"].get<double>();
+    }
 
-   if(target == -1) target = current;
+    if(target == -1) target = current;
    
-   if(target == -1)
-   {
-      return 0;
-   }
+    if(target == -1)
+    {
+        return 0;
+    }
 
-   std::lock_guard<std::mutex> guard(m_indiMutex);
+    std::lock_guard<std::mutex> guard(m_indiMutex);
 
-   m_multCoeff_target = target;
-   updateIfChanged(m_indiP_multCoeff, "target", target);
+    m_multCoeff_target = target;
+    updateIfChanged(m_indiP_multCoeff, "target", target);
       
-   return setMultCoeff();
+    return setMultCoeff();
 }
 
 INDI_NEWCALLBACK_DEFN(cacaoInterface, m_indiP_maxLim )(const pcf::IndiProperty &ipRecv)
 {
-   if(ipRecv.getName() != m_indiP_maxLim.getName())
-   {
-      log<software_error>({__FILE__,__LINE__, "wrong INDI property received."});
-      return -1;
-   }
+    INDI_VALIDATE_CALLBACK_PROPS(m_indiP_maxLim, ipRecv);
    
-   float current = -1;
-   float target = -1;
+    float current = -1;
+    float target = -1;
 
-   if(ipRecv.find("current"))
-   {
-      current = ipRecv["current"].get<double>();
-   }
+    if(ipRecv.find("current"))
+    {
+        current = ipRecv["current"].get<double>();
+    }
 
-   if(ipRecv.find("target"))
-   {
-      target = ipRecv["target"].get<double>();
-   }
+    if(ipRecv.find("target"))
+    {
+        target = ipRecv["target"].get<double>();
+    }
 
-   if(target == -1) target = current;
+    if(target == -1) target = current;
    
-   if(target == -1)
-   {
-      return 0;
-   }
+    if(target == -1)
+    {
+        return 0;
+    }
 
-   std::lock_guard<std::mutex> guard(m_indiMutex);
-   m_maxLim_target = target;
-   updateIfChanged(m_indiP_maxLim, "target", target);
+    std::lock_guard<std::mutex> guard(m_indiMutex);
+    m_maxLim_target = target;
+    updateIfChanged(m_indiP_maxLim, "target", target);
       
-   return setMaxLim();
+    return setMaxLim();
 }
 
 inline
