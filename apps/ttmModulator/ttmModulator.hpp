@@ -26,8 +26,8 @@ protected:
      * @{
      */
 
-   double m_maxFreq {1000.0}; ///< The maximum modulation frequency settable by this program
-   double m_maxVolt {3.45}; ///< The maximum modulation voltage settable by this program
+   double m_maxFreq {2000.0}; ///< The maximum modulation frequency settable by this program
+   double m_maxVolt {8}; ///< The maximum modulation voltage settable by this program
 
    double m_setVoltage_1 {5.0}; ///< the set position voltage of Ch. 1.
    double m_setVoltage_2 {5.0}; ///< the set position voltage of Ch. 2.
@@ -62,7 +62,7 @@ protected:
    double m_C2ofst {-1};  ///< DC offset of fxn gen channel 2.
    double m_C2phse {-1};  ///< Phase of fxn gen channel 2.
 
-   double m_calRadius {3.0};
+   double m_calRadius {1.0};
    
    /* Old Cal:
    std::vector<double> m_calFreqs = {100,400,500,600,700,800,900,1000,1100,1200,1300,1400,1500,1600,1700,1800,1900,2000};
@@ -76,11 +76,11 @@ protected:
    std::vector<double> m_calC2Amps = {0.64, 0.61, 0.56, 0.54,   0.55,  0.57,  0.65,  0.78,  0.95,  1.15,   1.15,   2.25,  2.15,  1.97};
    std::vector<double> m_calC2Phse = {  75, 75,    75,   75,    75,    75,    72,    67,    63,     35,    5,    18,    10,    -40} ; */
    
-   /* Cal on 2023-11-30:*/ 
-   std::vector<double> m_calFreqs = {  100,  150,  200,  250,   300,  500,  750, 1000};
-   std::vector<double> m_calC1Amps = {0.66, 0.70, 0.78, 0.83, 0.925,  1.3, 1.85,  2.5}; 
-   std::vector<double> m_calC2Amps = {0.67, 0.72, 0.81, 0.95,   1.1, 1.65,  2.5, 3.45}; 
-   std::vector<double> m_calC2Phse = {  75,   80,   80,   80,    80,   80,   80,   80}; 
+   /* Cal on 2023-12-03:*/ 
+   std::vector<double> m_calFreqs =  { 100,  250,  500,  750, 1000, 1250, 1500, 1750, 2000};
+   std::vector<double> m_calC1Amps = {0.22, 0.28, 0.43, 0.61, 0.82, 1.06, 1.35, 1.70, 2.045}; 
+   std::vector<double> m_calC2Amps = {0.23, 0.23, 0.56, 0.85, 1.16, 1.58, 1.96, 2.60, 3.63}; 
+   std::vector<double> m_calC2Phse = {  79,   82,   82,   82,   82,   82,   84,   88,   93}; 
 
 public:
 
@@ -723,6 +723,13 @@ int ttmModulator::setTTM()
    log<text_log>("PyWFS TTM is set.", logPrio::LOG_NOTICE);
 
    return 0;
+}
+
+double maxRadAtFrequency( const std::vector<double> freqs,
+                          const std::vector<double> amps,
+                          double modrad
+                        )
+{
 }
 
 inline
