@@ -35,6 +35,7 @@ HEADERS += ../../widgets/loopCtrl/loopCtrl.hpp \
            ../../widgets/xWidgets/gainCtrl.hpp \
            ../../widgets/xWidgets/statusLineEdit.hpp \
            ../../widgets/xWidgets/statusEntry.hpp \
+           ../../widgets/xWidgets/toggleSlider.hpp \
            ../../lib/multiIndiManager.hpp
            
 SOURCES += loopCtrlGUI_main.cpp 
@@ -43,7 +44,8 @@ SOURCES += loopCtrlGUI_main.cpp
            
 FORMS += ../../widgets/loopCtrl/loopCtrl.ui \
          ../../widgets/xWidgets/gainCtrl.ui \
-         ../../widgets/xWidgets/statusEntry.ui 
+         ../../widgets/xWidgets/statusEntry.ui \
+         ../../widgets/xWidgets/toggleSlider.ui
      
 LIBS += ../../../INDI/libcommon/libcommon.a \
         ../../../INDI/liblilxml/liblilxml.a

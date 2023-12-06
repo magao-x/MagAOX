@@ -29,7 +29,10 @@
      <item>
       <widget class="QSlider" name="slider">
        <property name="maximum">
-        <number>150</number>
+        <number>30</number>
+       </property>
+       <property name="singleStep">
+        <number>1</number>
        </property>
        <property name="orientation">
         <enum>Qt::Vertical</enum>

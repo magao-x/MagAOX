@@ -246,9 +246,9 @@ void gainCtrl::updateGUI()
 {
    if(isEnabled())
    {
-      int slv = m_current/m_maxVal * 150. + 0.5;
+      int slv = m_current/m_maxVal * (1.0*ui.slider->maximum()) + 0.5;
       if(slv < 0 ) slv = 0;
-      else if(slv > 150) slv = 150;
+      else if(slv > ui.slider->maximum()) slv = ui.slider->maximum();
 
       ui.slider->setValue(slv);
 
