@@ -229,245 +229,262 @@ class userGainCtrl : public MagAOXApp<true>, public dev::shmimMonitor<userGainCt
                      public dev::telemeter<userGainCtrl>
 {
 
-   //Give the test harness access.
-   friend class userGainCtrl_test;
-
-   friend class dev::shmimMonitor<userGainCtrl,gainShmimT>;
-   friend class dev::shmimMonitor<userGainCtrl,multcoeffShmimT>;
-   friend class dev::shmimMonitor<userGainCtrl,limitShmimT>;
-
-   typedef dev::telemeter<userGainCtrl> telemeterT;
-
-   friend class dev::telemeter<userGainCtrl>;
-
-public:
-
-   //The base shmimMonitor type
-   typedef dev::shmimMonitor<userGainCtrl,gainShmimT> shmimMonitorT;
-   typedef dev::shmimMonitor<userGainCtrl,multcoeffShmimT> mcShmimMonitorT;
-   typedef dev::shmimMonitor<userGainCtrl,limitShmimT> limitShmimMonitorT;
-
-   ///Floating point type in which to do all calculations.
-   typedef float realT;
-   
-protected:
-
-   /** \name Configurable Parameters
-     *@{
-     */
-   int m_loopNumber;
-   int m_nZern {0};
-   bool m_splitTT {false};
-
-   ///@}
+    //Give the test harness access.
+    friend class userGainCtrl_test;
  
-   mx::improc::eigenImage<realT> m_gainsCurrent; ///< The current gains.
-   mx::improc::eigenImage<realT> m_gainsTarget; ///< The target gains.
-   
-   realT (*pixget)(void *, size_t) {nullptr}; ///< Pointer to a function to extract the image data as our desired type realT.
-   
-   mx::improc::eigenImage<realT> m_mcsCurrent; ///< The current gains.
-   mx::improc::eigenImage<realT> m_mcsTarget; ///< The target gains.
+    friend class dev::shmimMonitor<userGainCtrl,gainShmimT>;
+    friend class dev::shmimMonitor<userGainCtrl,multcoeffShmimT>;
+    friend class dev::shmimMonitor<userGainCtrl,limitShmimT>;
+ 
+    typedef dev::telemeter<userGainCtrl> telemeterT;
+ 
+    friend class dev::telemeter<userGainCtrl>;
 
-   realT (*mc_pixget)(void *, size_t) {nullptr}; ///< Pointer to a function to extract the image data as our desired type realT.
-
-   mx::improc::eigenImage<realT> m_limitsCurrent; ///< The current gains.
-   mx::improc::eigenImage<realT> m_limitsTarget; ///< The target gains.
-
-   realT (*limit_pixget)(void *, size_t) {nullptr}; ///< Pointer to a function to extract the image data as our desired type realT.
-
-   std::vector<uint16_t> m_modeBlockStart;
-   std::vector<uint16_t> m_modeBlockN;
-   
-   int m_totalNModes {0}; ///< The total number of WFS modes in the calib.
-
-   std::vector<float> m_modeBlockGains;
-   std::vector<uint8_t> m_modeBlockGainsConstant;
-
-   std::vector<float> m_modeBlockMCs;
-   std::vector<uint8_t> m_modeBlockMCsConstant;
-
-   std::vector<float> m_modeBlockLims;
-   std::vector<uint8_t> m_modeBlockLimsConstant;
-
-   std::mutex m_modeBlockMutex;
-
-   mx::fits::fitsFile<float> m_ff;
-
-   int m_singleModeNo {0};
-   
 public:
-   /// Default c'tor.
-   userGainCtrl();
 
-   /// D'tor, declared and defined for noexcept.
-   ~userGainCtrl() noexcept
-   {}
+    //The base shmimMonitor type
+    typedef dev::shmimMonitor<userGainCtrl,gainShmimT> shmimMonitorT;
+    typedef dev::shmimMonitor<userGainCtrl,multcoeffShmimT> mcShmimMonitorT;
+    typedef dev::shmimMonitor<userGainCtrl,limitShmimT> limitShmimMonitorT;
+ 
+    ///Floating point type in which to do all calculations.
+    typedef float realT;
+   
+protected:
 
-   virtual void setupConfig();
+    /** \name Configurable Parameters
+      *@{
+      */
+    int m_loopNumber;
+    int m_nZern {0};
+    bool m_splitTT {false};
+ 
+    ///@}
+  
+    mx::improc::eigenImage<realT> m_gainsCurrent; ///< The current gains.
+    mx::improc::eigenImage<realT> m_gainsTarget; ///< The target gains.
+    
+    realT (*pixget)(void *, size_t) {nullptr}; ///< Pointer to a function to extract the image data as our desired type realT.
+    
+    mx::improc::eigenImage<realT> m_mcsCurrent; ///< The current gains.
+    mx::improc::eigenImage<realT> m_mcsTarget; ///< The target gains.
+ 
+    realT (*mc_pixget)(void *, size_t) {nullptr}; ///< Pointer to a function to extract the image data as our desired type realT.
+ 
+    mx::improc::eigenImage<realT> m_limitsCurrent; ///< The current gains.
+    mx::improc::eigenImage<realT> m_limitsTarget; ///< The target gains.
+ 
+    realT (*limit_pixget)(void *, size_t) {nullptr}; ///< Pointer to a function to extract the image data as our desired type realT.
+ 
+    std::vector<uint16_t> m_modeBlockStart;
+    std::vector<uint16_t> m_modeBlockN;
+    
+    int m_totalNModes {0}; ///< The total number of WFS modes in the calib.
+ 
+    std::vector<float> m_modeBlockGains;
+    std::vector<uint8_t> m_modeBlockGainsConstant;
+ 
+    std::vector<float> m_modeBlockMCs;
+    std::vector<uint8_t> m_modeBlockMCsConstant;
+ 
+    std::vector<float> m_modeBlockLims;
+    std::vector<uint8_t> m_modeBlockLimsConstant;
+ 
+    std::mutex m_modeBlockMutex;
+ 
+    mx::fits::fitsFile<float> m_ff;
+ 
+    int m_singleModeNo {0};
+    
+    float m_powerLawIndex {2};
+    float m_powerLawFloor {0.05};
 
-   /// Implementation of loadConfig logic, separated for testing.
-   /** This is called by loadConfig().
-     */
-   int loadConfigImpl( mx::app::appConfigurator & _config /**< [in] an application configuration from which to load values*/);
-
-   virtual void loadConfig();
-
-   /// Startup function
-   /**
-     *
-     */
-   virtual int appStartup();
-
-   /// Implementation of the FSM for userGainCtrl.
-   /** 
-     * \returns 0 on no critical error
-     * \returns -1 on an error requiring shutdown
-     */
-   virtual int appLogic();
-
-   /// Shutdown the app.
-   /** 
-     *
-     */
-   virtual int appShutdown();
+public:
+    /// Default c'tor.
+    userGainCtrl();
+ 
+    /// D'tor, declared and defined for noexcept.
+    ~userGainCtrl() noexcept
+    {}
+ 
+    virtual void setupConfig();
+ 
+    /// Implementation of loadConfig logic, separated for testing.
+    /** This is called by loadConfig().
+      */
+    int loadConfigImpl( mx::app::appConfigurator & _config /**< [in] an application configuration from which to load values*/);
+ 
+    virtual void loadConfig();
+ 
+    /// Startup function
+    /**
+      *
+      */
+    virtual int appStartup();
+ 
+    /// Implementation of the FSM for userGainCtrl.
+    /** 
+      * \returns 0 on no critical error
+      * \returns -1 on an error requiring shutdown
+      */
+    virtual int appLogic();
+ 
+    /// Shutdown the app.
+    /** 
+      *
+      */
+    virtual int appShutdown();
 
 protected:
 
-   //int checkAOCalib(); ///< Test if the AO calib is accessible.
-
-   //int getAOCalib();
-
-   int getModeBlocks();
-
-   int allocate( const gainShmimT & dummy /**< [in] tag to differentiate shmimMonitor parents.*/);
-   
-   int processImage( void * curr_src,          ///< [in] pointer to start of current frame.
-                     const gainShmimT & dummy ///< [in] tag to differentiate shmimMonitor parents.
-                   );
-   
-   int writeGains();
-
-   int setBlockGain( int n,
-                     float g
-                   );
-
-   int allocate( const multcoeffShmimT & dummy /**< [in] tag to differentiate shmimMonitor parents.*/);
-   
-   int processImage( void * curr_src,          ///< [in] pointer to start of current frame.
-                     const multcoeffShmimT & dummy ///< [in] tag to differentiate shmimMonitor parents.
-                   );
-
-   int writeMCs();
-
-   int setBlockMC( int n,
-                    float mc
-                 );
-
-   int allocate( const limitShmimT & dummy /**< [in] tag to differentiate shmimMonitor parents.*/);
-   
-   int processImage( void * curr_src,          ///< [in] pointer to start of current frame.
-                     const limitShmimT & dummy ///< [in] tag to differentiate shmimMonitor parents.
-                   );
-
-   int writeLimits();
-
-   int setBlockLimit( int n,
-                      float l
+    //int checkAOCalib(); ///< Test if the AO calib is accessible.
+ 
+    //int getAOCalib();
+ 
+    int getModeBlocks();
+ 
+    int allocate( const gainShmimT & dummy /**< [in] tag to differentiate shmimMonitor parents.*/);
+    
+    int processImage( void * curr_src,          ///< [in] pointer to start of current frame.
+                      const gainShmimT & dummy ///< [in] tag to differentiate shmimMonitor parents.
                     );
-
-   int setSingleModeNo (int m);
-   int setSingleGain( float g );
-
-   int setSingleMC( float mc );
-   
-   void updateSingles();
-
-   pcf::IndiProperty m_indiP_modes;
-
-   pcf::IndiProperty m_indiP_zeroAll;
-      
-   std::vector<pcf::IndiProperty> m_indiP_blockGains;
-   std::vector<pcf::IndiProperty> m_indiP_blockMCs;
-   std::vector<pcf::IndiProperty> m_indiP_blockLimits;
-
-   pcf::IndiProperty m_indiP_singleModeNo;
-   pcf::IndiProperty m_indiP_singleGain;
-   pcf::IndiProperty m_indiP_singleMC;
+    
+    int writeGains();
+ 
+    int setBlockGain( int n,
+                      float g
+                    );
+ 
+    int allocate( const multcoeffShmimT & dummy /**< [in] tag to differentiate shmimMonitor parents.*/);
+    
+    int processImage( void * curr_src,          ///< [in] pointer to start of current frame.
+                      const multcoeffShmimT & dummy ///< [in] tag to differentiate shmimMonitor parents.
+                    );
+ 
+    int writeMCs();
+ 
+    int setBlockMC( int n,
+                     float mc
+                  );
+ 
+    int allocate( const limitShmimT & dummy /**< [in] tag to differentiate shmimMonitor parents.*/);
+    
+    int processImage( void * curr_src,          ///< [in] pointer to start of current frame.
+                      const limitShmimT & dummy ///< [in] tag to differentiate shmimMonitor parents.
+                    );
+ 
+    int writeLimits();
+ 
+    int setBlockLimit( int n,
+                       float l
+                     );
+ 
+    int setSingleModeNo (int m);
+ 
+    int setSingleGain( float g );
+ 
+    int setSingleMC( float mc );
+    
+    void updateSingles();
+ 
+    void powerLawIndex( float pli );
+ 
+    void powerLawFloor( float plf );
+ 
+    void powerLawSet();
+ 
+    pcf::IndiProperty m_indiP_modes;
+ 
+    pcf::IndiProperty m_indiP_zeroAll;
+       
+    std::vector<pcf::IndiProperty> m_indiP_blockGains;
+    std::vector<pcf::IndiProperty> m_indiP_blockMCs;
+    std::vector<pcf::IndiProperty> m_indiP_blockLimits;
+ 
+    pcf::IndiProperty m_indiP_singleModeNo;
+    pcf::IndiProperty m_indiP_singleGain;
+    pcf::IndiProperty m_indiP_singleMC;
+ 
+    pcf::IndiProperty m_indiP_powerLawIndex;
+    pcf::IndiProperty m_indiP_powerLawFloor;
+    pcf::IndiProperty m_indiP_powerLawSet;
 
 public:
 
-   INDI_NEWCALLBACK_DECL(userGainCtrl, m_indiP_zeroAll);
-
-   INDI_NEWCALLBACK_DECL(userGainCtrl, m_indiP_singleModeNo);
-
-   INDI_NEWCALLBACK_DECL(userGainCtrl, m_indiP_singleGain);
-   
-   INDI_NEWCALLBACK_DECL(userGainCtrl, m_indiP_singleMC);
-
-   
-   /// The static callback function to be registered for block gains
-   /** Dispatches to the relevant handler
-     * 
-     * \returns 0 on success.
-     * \returns -1 on error.
-     */
-   static int st_newCallBack_blockGains( void * app, ///< [in] a pointer to this, will be static_cast-ed to derivedT.
-                                         const pcf::IndiProperty &ipRecv ///< [in] the INDI property sent with the the new property request.
-                                       );
-
-   /// Callback to process a NEW block gain request
-   /**
-     * \returns 0 on success.
-     * \returns -1 on error.
-     */
-   int newCallBack_blockGains( const pcf::IndiProperty &ipRecv /**< [in] the INDI property sent with the the new property request.*/);
-
-   /// The static callback function to be registered for block mult. coeff.s
-   /** Dispatches to the relevant handler
-     * 
-     * \returns 0 on success.
-     * \returns -1 on error.
-     */
-   static int st_newCallBack_blockMCs( void * app, ///< [in] a pointer to this, will be static_cast-ed to derivedT.
-                                       const pcf::IndiProperty &ipRecv ///< [in] the INDI property sent with the the new property request.
-                                     );
-
-   /// Callback to process a NEW block mult. coeff.s
-   /**
-     * \returns 0 on success.
-     * \returns -1 on error.
-     */
-   int newCallBack_blockMCs( const pcf::IndiProperty &ipRecv /**< [in] the INDI property sent with the the new property request.*/);
-
-   /// The static callback function to be registered for block limits
-   /** Dispatches to the relevant handler
-     * 
-     * \returns 0 on success.
-     * \returns -1 on error.
-     */
-   static int st_newCallBack_blockLimits( void * app, ///< [in] a pointer to this, will be static_cast-ed to derivedT.
+    INDI_NEWCALLBACK_DECL(userGainCtrl, m_indiP_zeroAll);
+ 
+    INDI_NEWCALLBACK_DECL(userGainCtrl, m_indiP_singleModeNo);
+ 
+    INDI_NEWCALLBACK_DECL(userGainCtrl, m_indiP_singleGain);
+    
+    INDI_NEWCALLBACK_DECL(userGainCtrl, m_indiP_singleMC);
+ 
+    INDI_NEWCALLBACK_DECL(userGainCtrl, m_indiP_powerLawIndex);
+    INDI_NEWCALLBACK_DECL(userGainCtrl, m_indiP_powerLawFloor);
+    INDI_NEWCALLBACK_DECL(userGainCtrl, m_indiP_powerLawSet);
+ 
+    /// The static callback function to be registered for block gains
+    /** Dispatches to the relevant handler
+      * 
+      * \returns 0 on success.
+      * \returns -1 on error.
+      */
+    static int st_newCallBack_blockGains( void * app, ///< [in] a pointer to this, will be static_cast-ed to derivedT.
+                                          const pcf::IndiProperty &ipRecv ///< [in] the INDI property sent with the the new property request.
+                                        );
+ 
+    /// Callback to process a NEW block gain request
+    /**
+      * \returns 0 on success.
+      * \returns -1 on error.
+      */
+    int newCallBack_blockGains( const pcf::IndiProperty &ipRecv /**< [in] the INDI property sent with the the new property request.*/);
+ 
+    /// The static callback function to be registered for block mult. coeff.s
+    /** Dispatches to the relevant handler
+      * 
+      * \returns 0 on success.
+      * \returns -1 on error.
+      */
+    static int st_newCallBack_blockMCs( void * app, ///< [in] a pointer to this, will be static_cast-ed to derivedT.
                                         const pcf::IndiProperty &ipRecv ///< [in] the INDI property sent with the the new property request.
                                       );
-
-   /// Callback to process a NEW block limits
-   /**
-     * \returns 0 on success.
-     * \returns -1 on error.
-     */
-   int newCallBack_blockLimits( const pcf::IndiProperty &ipRecv /**< [in] the INDI property sent with the the new property request.*/);
-
-   /** \name Telemeter Interface
-     * 
-     * @{
-     */ 
-   int checkRecordTimes();
-   
-   int recordTelem( const telem_blockgains * );
-
-   int recordBlockGains( bool force = false );
-   
-   ///@}
+ 
+    /// Callback to process a NEW block mult. coeff.s
+    /**
+      * \returns 0 on success.
+      * \returns -1 on error.
+      */
+    int newCallBack_blockMCs( const pcf::IndiProperty &ipRecv /**< [in] the INDI property sent with the the new property request.*/);
+ 
+    /// The static callback function to be registered for block limits
+    /** Dispatches to the relevant handler
+      * 
+      * \returns 0 on success.
+      * \returns -1 on error.
+      */
+    static int st_newCallBack_blockLimits( void * app, ///< [in] a pointer to this, will be static_cast-ed to derivedT.
+                                         const pcf::IndiProperty &ipRecv ///< [in] the INDI property sent with the the new property request.
+                                       );
+ 
+    /// Callback to process a NEW block limits
+    /**
+      * \returns 0 on success.
+      * \returns -1 on error.
+      */
+    int newCallBack_blockLimits( const pcf::IndiProperty &ipRecv /**< [in] the INDI property sent with the the new property request.*/);
+ 
+    /** \name Telemeter Interface
+      * 
+      * @{
+      */ 
+    int checkRecordTimes();
+    
+    int recordTelem( const telem_blockgains * );
+ 
+    int recordBlockGains( bool force = false );
+    
+    ///@}
 };
 
 inline
@@ -557,6 +574,23 @@ int userGainCtrl::appStartup()
    m_indiP_singleMC["target"].set(1);
    registerIndiPropertyNew(m_indiP_singleMC, INDI_NEWCALLBACK(m_indiP_singleMC));
 
+   createStandardIndiNumber<int>( m_indiP_powerLawIndex, "pwrlaw_index", 0, 10.0 ,0, "%0.2f", "");
+   m_indiP_powerLawIndex["current"].set(m_powerLawIndex);
+   m_indiP_powerLawIndex["target"].set(m_powerLawIndex);
+   registerIndiPropertyNew(m_indiP_powerLawIndex, INDI_NEWCALLBACK(m_indiP_powerLawIndex));
+
+   createStandardIndiNumber<int>( m_indiP_powerLawFloor, "pwrlaw_floor", 0, 1.0 ,0, "%0.2f", "");
+   m_indiP_powerLawFloor["current"].set(m_powerLawFloor);
+   m_indiP_powerLawFloor["target"].set(m_powerLawFloor);
+   registerIndiPropertyNew(m_indiP_powerLawFloor, INDI_NEWCALLBACK(m_indiP_powerLawFloor));
+
+   createStandardIndiRequestSw( m_indiP_powerLawSet, "pwrlaw_set");
+   if( registerIndiPropertyNew( m_indiP_powerLawSet, INDI_NEWCALLBACK(m_indiP_powerLawSet)) < 0)
+   {
+      log<software_error>({__FILE__,__LINE__});
+      return -1;
+   }
+
    if(shmimMonitorT::appStartup() < 0)
    {
       return log<software_error,-1>({__FILE__, __LINE__});
@@ -599,16 +633,6 @@ int userGainCtrl::appLogic()
    {
       return log<software_error,-1>({__FILE__,__LINE__});
    }
-
-   /*if(checkAOCalib() < 0)
-   {
-      state(stateCodes::NODEVICE);
-      if(!stateLogged()) log<text_log>("Could not find AO calib");
-   }
-   else 
-   {
-      if(!(state() == stateCodes::READY || state() == stateCodes::OPERATING)) state(stateCodes::NOTCONNECTED);
-   }*/
 
    if( state() == stateCodes::READY || state() == stateCodes::OPERATING 
               || state() == stateCodes::CONNECTED || state() == stateCodes::NOTCONNECTED  )
@@ -833,12 +857,12 @@ int userGainCtrl::processImage( void * curr_src,
    }
    
    //update blocks here.
-   std::cerr << "gains updated\n";
+   /*std::cerr << "gains updated\n";
 
    for(int cc =0; cc < m_gainsCurrent.cols(); ++cc)
       for(int rr=0; rr < m_gainsCurrent.rows(); ++rr)
          std::cout << m_gainsCurrent(rr,cc) << " ";
-   std::cout << "\n";
+   std::cout << "\n";*/
 
    for(size_t n =0; n < m_modeBlockStart.size(); ++n)
    {
@@ -978,12 +1002,12 @@ int userGainCtrl::processImage( void * curr_src,
    }
    
    //update blocks here.
-   std::cerr << "multcoeff updated\n";
+  /* std::cerr << "multcoeff updated\n";
 
    for(int cc =0; cc < m_mcsCurrent.cols(); ++cc)
       for(int rr=0; rr < m_mcsCurrent.rows(); ++rr)
          std::cout << m_mcsCurrent(rr,cc) << " ";
-   std::cout << "\n";
+   std::cout << "\n";*/
 
 
    for(size_t n =0; n < m_modeBlockStart.size(); ++n)
@@ -1123,12 +1147,10 @@ int userGainCtrl::processImage( void * curr_src,
    }
    
    //update blocks here.
-   std::cerr << "limits updated\n";
-
-   for(int cc =0; cc < m_limitsCurrent.cols(); ++cc)
+  /* for(int cc =0; cc < m_limitsCurrent.cols(); ++cc)
       for(int rr=0; rr < m_limitsCurrent.rows(); ++rr)
          std::cout << m_limitsCurrent(rr,cc) << " ";
-   std::cout << "\n";
+   std::cout << "\n";*/
 
 
    for(size_t n =0; n < m_modeBlockStart.size(); ++n)
@@ -1278,6 +1300,89 @@ void userGainCtrl::updateSingles()
 
 }
 
+void userGainCtrl::powerLawIndex( float pli )
+{
+    if(pli < 0)
+    {
+        pli = 0;
+    }
+
+    m_powerLawIndex = pli;
+    updateIfChanged(m_indiP_powerLawIndex, std::vector<std::string>({"current", "target"}), std::vector<float>({pli,pli}));
+}
+
+void userGainCtrl::powerLawFloor( float plf )
+{
+    m_powerLawFloor = plf;
+
+    updateIfChanged(m_indiP_powerLawFloor, std::vector<std::string>({"current", "target"}), std::vector<float>({plf,plf}));
+}
+
+void userGainCtrl::powerLawSet()
+{
+    uint16_t block0 = 0;
+
+    if(m_nZern > 0)
+    {
+        if(m_nZern > 1)
+        {
+            if(m_splitTT)
+            {
+                block0 = 2;
+            }
+            else
+            {
+                block0 = 1;
+            }
+        }
+
+        if(m_nZern > 2)
+        {
+            ++block0;
+        }
+
+        if(m_nZern > 3)
+        {
+            ++block0;
+        }
+        //Now have accounted for T/T and focus.
+
+        uint16_t currb = 1;
+        while(modesAtBlock(currb) < m_nZern)
+        {
+            ++currb;
+            ++block0;
+        }
+    }
+
+    if(block0 >= m_modeBlockStart.size())
+    {
+        return;
+    }
+
+    if(m_powerLawIndex < 0)
+    {
+        m_powerLawIndex = 0;
+    }
+
+    float mode0 = m_modeBlockStart[block0] + 0.5*m_modeBlockN[block0];
+    float gain0 = m_modeBlockGains[block0];
+    for(size_t n=block0+1; n < m_modeBlockStart.size(); ++n)
+    {
+        float mode = m_modeBlockStart[n] + 0.5*m_modeBlockN[n];
+
+        float imd1=(mode-mode0)/(m_totalNModes-mode0);
+        float imd2=pow(1.0-imd1, -m_powerLawIndex) * gain0;
+        float gain=(1-m_powerLawFloor)*imd2+m_powerLawFloor;
+
+        if(gain < 0) gain = 0;
+
+        setBlockGain(n, gain);
+    }
+
+
+}
+
 INDI_NEWCALLBACK_DEFN(userGainCtrl, m_indiP_zeroAll)(const pcf::IndiProperty &ipRecv)
 {
     INDI_VALIDATE_CALLBACK_PROPS(m_indiP_zeroAll, ipRecv);
@@ -1349,6 +1454,58 @@ INDI_NEWCALLBACK_DEFN(userGainCtrl, m_indiP_singleMC)(const pcf::IndiProperty &i
    return 0;
 }
 
+INDI_NEWCALLBACK_DEFN(userGainCtrl, m_indiP_powerLawIndex)(const pcf::IndiProperty &ipRecv)
+{
+   INDI_VALIDATE_CALLBACK_PROPS(m_indiP_powerLawIndex, ipRecv);
+
+   float target;
+   
+   if( indiTargetUpdate( m_indiP_powerLawIndex, target, ipRecv, true) < 0)
+   {
+      log<software_error>({__FILE__,__LINE__});
+      return -1;
+   }
+   
+   powerLawIndex(target);
+   
+   return 0;
+}
+
+INDI_NEWCALLBACK_DEFN(userGainCtrl, m_indiP_powerLawFloor)(const pcf::IndiProperty &ipRecv)
+{
+   INDI_VALIDATE_CALLBACK_PROPS(m_indiP_powerLawFloor, ipRecv);
+
+   float target;
+   
+   if( indiTargetUpdate( m_indiP_powerLawFloor, target, ipRecv, true) < 0)
+   {
+      log<software_error>({__FILE__,__LINE__});
+      return -1;
+   }
+   
+   powerLawFloor(target);
+   
+   return 0;
+}
+
+INDI_NEWCALLBACK_DEFN(userGainCtrl, m_indiP_powerLawSet)(const pcf::IndiProperty &ipRecv)
+{
+    INDI_VALIDATE_CALLBACK_PROPS(m_indiP_powerLawSet, ipRecv);
+
+    if(!ipRecv.find("request")) return 0;
+   
+    if( ipRecv["request"].getSwitchState() == pcf::IndiElement::On)
+    {
+        std::unique_lock<std::mutex> lock(m_indiMutex);
+
+        std::cerr << "Got Power Law\n";
+        powerLawSet();
+
+        updateSwitchIfChanged(m_indiP_powerLawSet, "request", pcf::IndiElement::Off, INDI_IDLE);
+    }
+   
+    return 0;
+}
 
 int userGainCtrl::st_newCallBack_blockGains( void * app,
                                                const pcf::IndiProperty &ipRecv
