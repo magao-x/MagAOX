@@ -361,14 +361,6 @@ int cacaoInterface::appLogic()
       return 0;
    }
 
-   /*if(checkLoopProcesses() < 0)
-   {
-      state(stateCodes::ERROR, true);
-      if(!stateLogged()) log<text_log>("Could not get loop name and/or number", logPrio::LOG_ERROR);
-      return 0;
-   }   
-   */
-
    if(m_loopProcesses == 0 || m_loopState == 0) state(stateCodes::READY);
    else state(stateCodes::OPERATING);
 
@@ -401,7 +393,7 @@ int cacaoInterface::appLogic()
    }
    else if(m_loopState == 2)
    {
-      updateSwitchIfChanged(m_indiP_loopState, "toggle", pcf::IndiElement::On, INDI_BUSY);
+      updateSwitchIfChanged(m_indiP_loopState, "toggle", pcf::IndiElement::On, INDI_OK);
    }
    
    updateIfChanged(m_indiP_loop, "name", m_loopName);
@@ -779,14 +771,6 @@ void cacaoInterface::fmThreadExec( )
       if(ans[1] == 'F')
       {
          m_loopState = 0;
-        /* if(m_gain == 0)
-         {
-            m_loopState = 0; //open
-         }
-         else 
-         {
-            m_loopState = 1; //paused -- gains set, but loop not updating so leak not in effect
-         }*/
       }
       else m_loopState = 2; //closed
 
