@@ -39,11 +39,25 @@ namespace dev
 /** Controls a set of outlets on a device, such as A/C power outlets or digital outputs.
   * The outlets are organized into channels, which could be made up of multiple outlets.
   *
-  * Requirements:
+  * derivedT must be a MagAOXApp, and additionally it must implement the functions
+  * \code
+    int turnOutletOn( int outletNum );
+
+    int turnOutletOff( int outletNum );
+
+    int updateOutletState( int outletNum );
+  * \endcode 
+  * and optionally
+  * \code
+    int updateOutletStates();
+    \endcode
+  *
+  * Other requirements:
   * - call `setNumberOfOutlets` in the derived class constructor
   * 
   * 
-  * \tparam derivedT specifies a MagAOXApp parent base class which is accessed with a `static_cast` (downcast)to perform various methods.
+  * \tparam derivedT specifies a MagAOXApp parent base class which is accessed with a `static_cast` (downcast)
+  *         to perform various methods.
   *
   * \ingroup appdev
   *

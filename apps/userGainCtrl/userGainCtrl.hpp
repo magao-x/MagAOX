@@ -949,7 +949,7 @@ int userGainCtrl::setBlockGain( int n,
       if(m_modeBlockStart[n] + m > m_gainsTarget.rows() -1) break;
       m_gainsTarget(m_modeBlockStart[n] + m,0) = m_gainsCurrent(m_modeBlockStart[n] + m,0) + (g - m_modeBlockGains[n]);
    }
-   lock.unlock();
+   //lock.unlock();
    recordBlockGains(true);
    writeGains();
    return 0;
@@ -1378,7 +1378,18 @@ void userGainCtrl::powerLawSet()
         if(gain < 0) gain = 0;
 
         setBlockGain(n, gain);
+
+        //Now wait on the update, otherwise the next command can overwrite from m_gainsCurrent
+        int nt = 0;
+        while(fabs(m_modeBlockGains[n] - gain) > 1e-5 && nt < 100)
+        {
+            mx::sys::milliSleep(5);
+            ++nt;
+        }
     }
+
+    log<text_log>("Set power law: " + std::to_string(m_powerLawIndex) + " " + std::to_string(m_powerLawFloor) + 
+                    " starting from block " + std::to_string(block0) + " " + std::to_string(gain0));
 
 
 }
