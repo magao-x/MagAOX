@@ -200,7 +200,9 @@ protected:
    float m_currAlert {16}; ///< The high-current alert threshold
    float m_currEmerg {20}; ///< The high-current emergency threshold
 
+   #ifndef XWC_SIM_MODE
    tty::telnetConn m_telnetConn; ///< The telnet connection manager
+   #endif
 
    std::string m_status; ///< The device status
    float m_frequency {0}; ///< The line frequency reported by the device.
@@ -504,7 +506,7 @@ int trippLitePDU::appLogic()
  
        if(rv < 0) return log<software_error,-1>({__FILE__, __LINE__});
  
-       
+       updateAlarmsAndWarnings();
  
        return 0;
     }
