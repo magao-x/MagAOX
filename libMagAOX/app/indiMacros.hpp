@@ -226,7 +226,12 @@
   *
   * \ingroup indi
   */
-#define REG_INDI_NEWPROP(prop, propName, type) registerIndiPropertyNew( prop, propName, type, pcf::IndiProperty::ReadWrite, pcf::IndiProperty::Idle, INDI_NEWCALLBACK(prop));
+#define REG_INDI_NEWPROP(prop, propName, type)                                                                                          \
+if( registerIndiPropertyNew( prop, propName, type, pcf::IndiProperty::ReadWrite, pcf::IndiProperty::Idle, INDI_NEWCALLBACK(prop)) < 0)  \
+{                                                                                                                                       \
+    return log<software_error,-1>({__FILE__,__LINE__, "failed to register new property"});                                              \
+}                                                                     
+
 
 /// Register a NEW INDI property with the class, with no callback.
 /** Is a wrapper for MagAOXApp::registerIndiPropertyNew with  NULL callback.
@@ -239,7 +244,14 @@
   *
   * \ingroup indi
   */
-#define REG_INDI_NEWPROP_NOCB(prop, propName, type) registerIndiPropertyNew( prop, propName, type, pcf::IndiProperty::ReadOnly, pcf::IndiProperty::Idle, 0);
+#define REG_INDI_NEWPROP_NOCB(prop, propName, type)                                                               \
+if( registerIndiPropertyNew( prop, propName, type, pcf::IndiProperty::ReadOnly, pcf::IndiProperty::Idle, 0) < 0)  \
+{                                                                                                                 \
+    return log<software_error,-1>({__FILE__,__LINE__, "failed to register read only property"});                  \
+}                                                                                           
+
+
+
 
 /// Register a SET INDI property with the class, using the standard callback name.
 /** Is a wrapper for MagAOXApp::registerIndiPropertySet.
@@ -252,6 +264,10 @@
   *
   * \ingroup indi
   */
-#define REG_INDI_SETPROP(prop, devName, propName) registerIndiPropertySet( prop,devName,  propName, INDI_SETCALLBACK(prop));
+#define REG_INDI_SETPROP(prop, devName, propName)                                          \
+if( registerIndiPropertySet( prop,devName,  propName, INDI_SETCALLBACK(prop)) < 0)         \
+{                                                                                          \
+    return log<software_error,-1>({__FILE__,__LINE__, "failed to register set property"}); \
+}                                                                                           
 
 #endif //app_indiMacros_hpp

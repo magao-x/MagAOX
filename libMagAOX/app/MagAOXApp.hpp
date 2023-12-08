@@ -1217,11 +1217,18 @@ void MagAOXApp<_useINDI>::setDefaults( int argc,
    m_configPathLocal = m_configDir + "/" + m_configName + ".conf";
 
    //Now we can setup common INDI properties
-   REG_INDI_NEWPROP_NOCB(m_indiP_state, "fsm", pcf::IndiProperty::Text);
+   if( registerIndiPropertyNew( m_indiP_state, "fsm", pcf::IndiProperty::Text, pcf::IndiProperty::ReadOnly, pcf::IndiProperty::Idle, 0) < 0) 
+   {                                                                                          
+      log<software_error>({__FILE__,__LINE__, "failed to register read only fsm_state property"});
+   }  
+
    m_indiP_state.add (pcf::IndiElement("state"));
 
    createStandardIndiRequestSw( m_indiP_clearFSMAlert, "fsm_clear_alert", "Clear FSM Alert", "FSM");                                                     
-   registerIndiPropertyNew(m_indiP_clearFSMAlert, st_newCallBack_clearFSMAlert);
+   if(registerIndiPropertyNew(m_indiP_clearFSMAlert, st_newCallBack_clearFSMAlert) < 0)
+   {
+      log<software_error>({__FILE__,__LINE__, "failed to register new fsm_alert property"});
+   }
    
    return;
 
@@ -1285,7 +1292,10 @@ void MagAOXApp<_useINDI>::loadBasicConfig() //virtual
       if(m_powerDevice != "" && m_powerChannel != "")
       {
          log<text_log>("enabling power management: " + m_powerDevice + "." + m_powerChannel + "." + m_powerElement + "/" + m_powerTargetElement);
-         REG_INDI_SETPROP(m_indiP_powerChannel, m_powerDevice, m_powerChannel);
+         if( registerIndiPropertySet( m_indiP_powerChannel,m_powerDevice, m_powerChannel, INDI_SETCALLBACK(m_indiP_powerChannel)) < 0)  
+         {                                                                                          
+            log<software_error>({__FILE__,__LINE__, "failed to register set property"}); 
+         }            
       }
       else
       {
