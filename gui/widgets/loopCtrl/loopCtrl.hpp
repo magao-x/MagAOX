@@ -109,8 +109,8 @@ loopCtrl::loopCtrl( std::string & procName,
    ui.slider_loop->setup(m_procName, "loop_state", "toggle", "");
    ui.slider_loop->setStretch(0,0,10, true, true);
 
-   ui.gainCtrl->setup(m_procName, "loop_gain", "Global Gain", -1, -1);
-   ui.mcCtrl->setup(m_procName, "loop_multcoeff", "Global Mult. Coef.", -1, -1);
+   ui.gainCtrl->setup(m_procName, "loop_gain", "Gain", -1, -1);
+   ui.mcCtrl->setup(m_procName, "loop_multcoeff", "Mult. Coef.", -1, -1);
    ui.mcCtrl->makeMultCoeffCtrl();
 
    if(m_procName == "loloop") m_gainCtrl = "logainctrl";
@@ -415,7 +415,7 @@ void loopCtrl::setupBlocks(int nB)
       char str[16];
       snprintf(str, sizeof(str), "%02d", n);
       modeTot += m_modes[n];
-      m_blockCtrls[n] = new gainCtrl(m_gainCtrl, std::string("block") + str + "_gain", std::string("Block") + str + " Gain", m_modes[n], modeTot);
+      m_blockCtrls[n] = new gainCtrl(m_gainCtrl, std::string("block") + str + "_gain", "", m_modes[n], modeTot);
       ui.horizontalLayout_2->addWidget(m_blockCtrls[n]);
       if(m_parent) m_parent->addSubscriber(m_blockCtrls[n]);
    }
