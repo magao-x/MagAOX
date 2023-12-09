@@ -48,10 +48,11 @@ uint16_t modesInBlock( uint16_t b /**< [in] the block number */)
   * Complicating this is the usual practice of putting pure Zernike modes into the beginning of the basis.  This accounts for 
   * this if desired, always splitting Tip/Tilt and Focus into separate blocks.  Tip/Tilt can optionally be 2 separate blocks.
   */
-int blockModes( std::vector<uint16_t> & blocks, ///< [out] the block structure.  The size is the number of blocks, and each entry contains the nubmer of modes in that block
-                uint16_t Nmodes,                ///< [in] the total number of modes
-                uint16_t Nzern,                 ///< [in] the number of Zernikes appended at the front
-                bool splitTT                    ///< [in] whether or not to split tip and tilt
+int blockModes( std::vector<uint16_t> & blocks,   ///< [out] the block structure.  The size is the number of blocks, and each entry contains the nubmer of modes in that block
+                std::vector<std::string> & names, ///< [out] the name of each block
+                uint16_t Nmodes,                  ///< [in] the total number of modes
+                uint16_t Nzern,                   ///< [in] the number of Zernikes appended at the front
+                bool splitTT                      ///< [in] whether or not to split tip and tilt
               )
 {
     double Nblocksd = (sqrt(1.0+Nmodes) - 1)/4.;
@@ -63,6 +64,7 @@ int blockModes( std::vector<uint16_t> & blocks, ///< [out] the block structure. 
     }
 
     blocks.clear();
+    names.clear();
 
     uint16_t tot = 0;
     if(Nzern > 0)
@@ -72,6 +74,7 @@ int blockModes( std::vector<uint16_t> & blocks, ///< [out] the block structure. 
             //This is dumb, whomever is doing this, you should know.
             Nblocks += 1;
             blocks.push_back(1);
+            names.push_back("Tip");
             tot = 1;
         }
         
@@ -79,13 +82,16 @@ int blockModes( std::vector<uint16_t> & blocks, ///< [out] the block structure. 
         {
             Nblocks += 2;
             blocks.push_back(1);
+            names.push_back("Tip");
             blocks.push_back(1);
+            names.push_back("Tilt");
             tot = 2;
         }
         else
         {
             Nblocks += 1;
             blocks.push_back(2);
+            names.push_back("Tip/Tilt");
             tot = 2;
         }
 
@@ -94,12 +100,14 @@ int blockModes( std::vector<uint16_t> & blocks, ///< [out] the block structure. 
             //Focus
             Nblocks += 1;
             blocks.push_back(1);
+            names.push_back("Focus");
             ++tot;
 
             if(Nzern > 3)
             {
                 Nblocks += 1;
                 blocks.push_back(Nzern - 3);
+                names.push_back("Z " + std::to_string(4)+"-" + std::to_string(Nzern));
                 tot += blocks.back();
             }
         }
@@ -148,6 +156,7 @@ int blockModes( std::vector<uint16_t> & blocks, ///< [out] the block structure. 
         }
 
         blocks.push_back(Nthis);
+        names.push_back("Block " + std::to_string(blocks.size()-1));
         tot += Nthis;
         ++currb;
     }
@@ -278,6 +287,7 @@ protected:
  
     std::vector<uint16_t> m_modeBlockStart;
     std::vector<uint16_t> m_modeBlockN;
+    std::vector<std::string> m_modeBlockNames;
     
     int m_totalNModes {0}; ///< The total number of WFS modes in the calib.
  
@@ -338,7 +348,7 @@ public:
 protected:
 
     //int checkAOCalib(); ///< Test if the AO calib is accessible.
- 
+
     //int getAOCalib();
  
     int getModeBlocks();
@@ -704,7 +714,7 @@ int userGainCtrl::appShutdown()
 inline
 int userGainCtrl::getModeBlocks()
 {    
-    blockModes(m_modeBlockN, shmimMonitorT::m_width, m_nZern, m_splitTT);
+    blockModes(m_modeBlockN, m_modeBlockNames, shmimMonitorT::m_width, m_nZern, m_splitTT);
 
     uint16_t Nb = m_modeBlockN.size();
 
@@ -715,12 +725,7 @@ int userGainCtrl::getModeBlocks()
         m_modeBlockStart[n] = m_modeBlockStart[n-1] + m_modeBlockN[n-1];
     }
     
-    //state(stateCodes::READY);
     log<text_log>("loading new gain block structure");
-
-    //We're b/c the gain shmimMonitor restarted
-    //mcShmimMonitorT::m_restart = true;
-    //limitShmimMonitorT::m_restart = true;
 
     m_modeBlockGains.resize(Nb);
     m_modeBlockGainsConstant.resize(Nb);
@@ -751,8 +756,8 @@ int userGainCtrl::getModeBlocks()
     //Erase existing block gains
     if(m_indiP_blockGains.size() > 0)
     {
-        for(size_t n=0; n < m_indiP_blockGains.size(); ++n)
-        {
+       for(size_t n=0; n < m_indiP_blockGains.size(); ++n)
+       {
             if(m_indiDriver) m_indiDriver->sendDelProperty(m_indiP_blockGains[n]);
             if(!m_indiNewCallBacks.erase(m_indiP_blockGains[n].createUniqueKey()))
             {
@@ -760,8 +765,9 @@ int userGainCtrl::getModeBlocks()
             }
        }
     }
-    m_indiP_blockGains.clear(); //I don't know what happens if you try to re-use an INDI property
+    m_indiP_blockGains.clear(); 
 
+    //Erase existing block mult. coeffs
     if(m_indiP_blockMCs.size() > 0)
     {
         for(size_t n=0; n < m_indiP_blockMCs.size(); ++n)
@@ -773,8 +779,9 @@ int userGainCtrl::getModeBlocks()
             }
        }
     }
-    m_indiP_blockMCs.clear(); //I don't know what happens if you try to re-use an INDI property
+    m_indiP_blockMCs.clear(); 
 
+    //Erase existing block limits
     if(m_indiP_blockLimits.size() > 0)
     {
         for(size_t n=0; n < m_indiP_blockLimits.size(); ++n)
@@ -786,7 +793,7 @@ int userGainCtrl::getModeBlocks()
             }
         }
     }
-    m_indiP_blockLimits.clear(); //I don't know what happens if you try to re-use an INDI property
+    m_indiP_blockLimits.clear(); 
 
     m_indiP_blockGains.resize(Nb);
     m_indiP_blockMCs.resize(Nb);
@@ -795,25 +802,25 @@ int userGainCtrl::getModeBlocks()
     //Then add in what we want.
     for(size_t n=0; n < Nb; ++n)
     {
-       char str[16];
-       int nn = n;
-       snprintf(str, sizeof(str), "%02d", nn);
-       std::string en = "block";
-       en += str;
-       indi::addNumberElement(m_indiP_modes, en, 0, 1, 99, "Block " + std::to_string(nn));
-       m_indiP_modes[en] = m_modeBlockN[n];
+        char str[16];
+        int nn = n;
+        snprintf(str, sizeof(str), "%02d", nn);
+        std::string en = "block";
+        en += str;
+        indi::addNumberElement(m_indiP_modes, en, 0, 1, 99, "Block " + std::to_string(nn));
+        m_indiP_modes[en] = m_modeBlockN[n];
 
-       createStandardIndiNumber<float>( m_indiP_blockGains[n], en + "_gain", 0.0, 10.0, 0.01, "%0.3f", en + " Gain", "Loop Controls");
-       registerIndiPropertyNew( m_indiP_blockGains[n],  st_newCallBack_blockGains);  
-       if(m_indiDriver) m_indiDriver->sendSetProperty (m_indiP_blockGains[n]);
+        createStandardIndiNumber<float>( m_indiP_blockGains[n], en + "_gain", 0.0, 10.0, 0.01, "%0.3f", m_modeBlockNames[n] + " Gain", "Loop Controls");
+        registerIndiPropertyNew( m_indiP_blockGains[n],  st_newCallBack_blockGains);  
+        if(m_indiDriver) m_indiDriver->sendSetProperty (m_indiP_blockGains[n]);
 
-       createStandardIndiNumber<float>( m_indiP_blockMCs[n], en + "_multcoeff", 0.0, 1.0, 0.01, "%0.3f", en + " Mult. Coeff", "Loop Controls");
-       registerIndiPropertyNew( m_indiP_blockMCs[n],  st_newCallBack_blockMCs);  
-       if(m_indiDriver) m_indiDriver->sendSetProperty (m_indiP_blockMCs[n]);
+        createStandardIndiNumber<float>( m_indiP_blockMCs[n], en + "_multcoeff", 0.0, 1.0, 0.01, "%0.3f", m_modeBlockNames[n] + " Mult. Coeff", "Loop Controls");
+        registerIndiPropertyNew( m_indiP_blockMCs[n],  st_newCallBack_blockMCs);  
+        if(m_indiDriver) m_indiDriver->sendSetProperty (m_indiP_blockMCs[n]);
 
-       createStandardIndiNumber<float>( m_indiP_blockLimits[n], en + "_limit", 0.0, 100.0, 0.01, "%0.3f", en + " Limit", "Loop Controls");
-       registerIndiPropertyNew( m_indiP_blockLimits[n],  st_newCallBack_blockLimits);  
-       if(m_indiDriver) m_indiDriver->sendSetProperty (m_indiP_blockLimits[n]);
+        createStandardIndiNumber<float>( m_indiP_blockLimits[n], en + "_limit", 0.0, 100.0, 0.01, "%0.3f", m_modeBlockNames[n] + " Limit", "Loop Controls");
+        registerIndiPropertyNew( m_indiP_blockLimits[n],  st_newCallBack_blockLimits);  
+        if(m_indiDriver) m_indiDriver->sendSetProperty (m_indiP_blockLimits[n]);
     }
 
     if(m_indiDriver) m_indiDriver->sendSetProperty (m_indiP_modes); //might not exist yet!   

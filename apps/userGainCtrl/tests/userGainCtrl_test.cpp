@@ -51,24 +51,24 @@ SCENARIO( "Calculating Blocks", "[userGainCtrl]" )
     {
         int rv;
         std::vector<uint16_t> blocks;
-
+        std::vector<std::string> names;
         //A full block means that all the modes in the last block are present
         WHEN("Full blocks")
         {
-            rv = blockModes(blocks, 24, 0, false);
+            rv = blockModes(blocks, names, 24, 0, false);
 
             REQUIRE(rv == 0);
             REQUIRE(blocks.size() == 1);
             REQUIRE(blocks[0] == 24);
 
-            rv = blockModes(blocks, 80, 0, false);
+            rv = blockModes(blocks, names, 80, 0, false);
 
             REQUIRE(rv == 0);
             REQUIRE(blocks.size() == 2);
             REQUIRE(blocks[0] == 24);
             REQUIRE(blocks[1] == 56);
 
-            rv = blockModes(blocks, 168, 0, false);
+            rv = blockModes(blocks, names, 168, 0, false);
 
             REQUIRE(rv == 0);
             REQUIRE(blocks.size() == 3);
@@ -80,14 +80,14 @@ SCENARIO( "Calculating Blocks", "[userGainCtrl]" )
         //A partial block means that not all modes in last block are present
         WHEN("Partial blocks")
         {
-            rv = blockModes(blocks, 25, 0, false);
+            rv = blockModes(blocks, names, 25, 0, false);
 
             REQUIRE(rv == 0);
             REQUIRE(blocks.size() == 2);
             REQUIRE(blocks[0] == 24);
             REQUIRE(blocks[1] == 1);
 
-            rv = blockModes(blocks, 85, 0, false);
+            rv = blockModes(blocks, names, 85, 0, false);
 
             REQUIRE(rv == 0);
             REQUIRE(blocks.size() == 3);
@@ -95,7 +95,7 @@ SCENARIO( "Calculating Blocks", "[userGainCtrl]" )
             REQUIRE(blocks[1] == 56);
             REQUIRE(blocks[2] == 5);
 
-            rv = blockModes(blocks, 287, 0, false);
+            rv = blockModes(blocks, names, 287, 0, false);
 
             REQUIRE(rv == 0);
             REQUIRE(blocks.size() == 4);
@@ -109,7 +109,7 @@ SCENARIO( "Calculating Blocks", "[userGainCtrl]" )
         //Test when Zernikes cover various numbers of blocks
         WHEN("Full blocks, Zernikes in 1 block, no split")
         {
-            rv = blockModes(blocks, 24, 10, false);
+            rv = blockModes(blocks, names, 24, 10, false);
             REQUIRE(rv == 0);
             REQUIRE(blocks.size() == 4);
             REQUIRE(blocks[0] == 2);
@@ -118,7 +118,7 @@ SCENARIO( "Calculating Blocks", "[userGainCtrl]" )
             REQUIRE(blocks[3] == 14);
 
             
-            rv = blockModes(blocks, 80, 5, false);
+            rv = blockModes(blocks, names, 80, 5, false);
 
             REQUIRE(rv == 0);
             REQUIRE(blocks.size() == 5);
@@ -128,7 +128,7 @@ SCENARIO( "Calculating Blocks", "[userGainCtrl]" )
             REQUIRE(blocks[3] == 19);
             REQUIRE(blocks[4] == 56);
 
-            rv = blockModes(blocks, 168, 23, false);
+            rv = blockModes(blocks, names, 168, 23, false);
 
             REQUIRE(rv == 0);
             REQUIRE(blocks.size() == 6);
@@ -143,7 +143,7 @@ SCENARIO( "Calculating Blocks", "[userGainCtrl]" )
 
         WHEN("Full blocks, Zernikes in 2 blocks, no split")
         {
-            rv = blockModes(blocks, 24, 25, false);
+            rv = blockModes(blocks, names, 24, 25, false);
 
             REQUIRE(rv == 0);
             REQUIRE(blocks.size() == 3);
@@ -151,7 +151,7 @@ SCENARIO( "Calculating Blocks", "[userGainCtrl]" )
             REQUIRE(blocks[1] == 1);
             REQUIRE(blocks[2] == 22);
 
-            rv = blockModes(blocks, 80, 25, false);
+            rv = blockModes(blocks, names, 80, 25, false);
 
             REQUIRE(rv == 0);
             REQUIRE(blocks.size() == 4);
@@ -160,7 +160,7 @@ SCENARIO( "Calculating Blocks", "[userGainCtrl]" )
             REQUIRE(blocks[2] == 22);
             REQUIRE(blocks[3] == 55);
 
-            rv = blockModes(blocks, 168, 79, false);
+            rv = blockModes(blocks, names, 168, 79, false);
             REQUIRE(rv == 0);
             REQUIRE(blocks.size() == 5);
             REQUIRE(blocks[0] == 2);
@@ -173,7 +173,7 @@ SCENARIO( "Calculating Blocks", "[userGainCtrl]" )
 
         WHEN("Partial blocks, Zernikes in 1 block, no split")
         {
-            rv = blockModes(blocks, 25, 10, false);
+            rv = blockModes(blocks, names, 25, 10, false);
 
             REQUIRE(rv == 0);
             REQUIRE(blocks.size() == 5);
@@ -183,7 +183,7 @@ SCENARIO( "Calculating Blocks", "[userGainCtrl]" )
             REQUIRE(blocks[3] == 14);
             REQUIRE(blocks[4] == 1);
 
-            rv = blockModes(blocks, 85, 5, false);
+            rv = blockModes(blocks, names, 85, 5, false);
 
             REQUIRE(rv == 0);
             REQUIRE(blocks.size() == 6);
@@ -194,7 +194,7 @@ SCENARIO( "Calculating Blocks", "[userGainCtrl]" )
             REQUIRE(blocks[4] == 56);
             REQUIRE(blocks[5] == 5);
 
-            rv = blockModes(blocks, 287, 23, false);
+            rv = blockModes(blocks, names, 287, 23, false);
 
             REQUIRE(rv == 0);
             REQUIRE(blocks.size() == 7);
@@ -210,7 +210,7 @@ SCENARIO( "Calculating Blocks", "[userGainCtrl]" )
 
         WHEN("Partial blocks, Zernikes in 2 blocks, no split")
         {
-            rv = blockModes(blocks, 26, 25, false);
+            rv = blockModes(blocks, names, 26, 25, false);
 
             REQUIRE(rv == 0);
             REQUIRE(blocks.size() == 4);
@@ -219,7 +219,7 @@ SCENARIO( "Calculating Blocks", "[userGainCtrl]" )
             REQUIRE(blocks[2] == 22);
             REQUIRE(blocks[3] == 1);
 
-            rv = blockModes(blocks, 85, 25, false);
+            rv = blockModes(blocks, names, 85, 25, false);
 
             REQUIRE(rv == 0);
             REQUIRE(blocks.size() == 5);
@@ -229,7 +229,7 @@ SCENARIO( "Calculating Blocks", "[userGainCtrl]" )
             REQUIRE(blocks[3] == 55);
             REQUIRE(blocks[4] == 5);
 
-            rv = blockModes(blocks, 287, 79, false);
+            rv = blockModes(blocks, names, 287, 79, false);
 
             REQUIRE(rv == 0);
             REQUIRE(blocks.size() == 6);
@@ -244,7 +244,7 @@ SCENARIO( "Calculating Blocks", "[userGainCtrl]" )
 
         WHEN("Full blocks, Zernikes in 1 block, with split")
         {
-            rv = blockModes(blocks, 24, 10, true);
+            rv = blockModes(blocks, names, 24, 10, true);
             REQUIRE(rv == 0);
             REQUIRE(blocks.size() == 5);
             REQUIRE(blocks[0] == 1);
@@ -254,7 +254,7 @@ SCENARIO( "Calculating Blocks", "[userGainCtrl]" )
             REQUIRE(blocks[4] == 14);
 
             
-            rv = blockModes(blocks, 80, 5, true);
+            rv = blockModes(blocks, names, 80, 5, true);
 
             REQUIRE(rv == 0);
             REQUIRE(blocks.size() == 6);
@@ -265,7 +265,7 @@ SCENARIO( "Calculating Blocks", "[userGainCtrl]" )
             REQUIRE(blocks[4] == 19);
             REQUIRE(blocks[5] == 56);
 
-            rv = blockModes(blocks, 168, 23, true);
+            rv = blockModes(blocks, names, 168, 23, true);
 
             REQUIRE(rv == 0);
             REQUIRE(blocks.size() == 7);
@@ -281,7 +281,7 @@ SCENARIO( "Calculating Blocks", "[userGainCtrl]" )
 
         WHEN("Full blocks, Zernikes in 2 blocks, with split")
         {
-            rv = blockModes(blocks, 24, 25, true);
+            rv = blockModes(blocks, names, 24, 25, true);
 
             REQUIRE(rv == 0);
             REQUIRE(blocks.size() == 4);
@@ -290,7 +290,7 @@ SCENARIO( "Calculating Blocks", "[userGainCtrl]" )
             REQUIRE(blocks[2] == 1);
             REQUIRE(blocks[3] == 22);
 
-            rv = blockModes(blocks, 80, 25, true);
+            rv = blockModes(blocks, names, 80, 25, true);
 
             REQUIRE(rv == 0);
             REQUIRE(blocks.size() == 5);
@@ -300,7 +300,7 @@ SCENARIO( "Calculating Blocks", "[userGainCtrl]" )
             REQUIRE(blocks[3] == 22);
             REQUIRE(blocks[4] == 55);
 
-            rv = blockModes(blocks, 168, 79, true);
+            rv = blockModes(blocks, names, 168, 79, true);
             REQUIRE(rv == 0);
             REQUIRE(blocks.size() == 6);
             REQUIRE(blocks[0] == 1);
@@ -314,7 +314,7 @@ SCENARIO( "Calculating Blocks", "[userGainCtrl]" )
 
         WHEN("Partial blocks, Zernikes in 1 block, with split")
         {
-            rv = blockModes(blocks, 25, 10, true);
+            rv = blockModes(blocks, names, 25, 10, true);
 
             REQUIRE(rv == 0);
             REQUIRE(blocks.size() == 6);
@@ -325,7 +325,7 @@ SCENARIO( "Calculating Blocks", "[userGainCtrl]" )
             REQUIRE(blocks[4] == 14);
             REQUIRE(blocks[5] == 1);
 
-            rv = blockModes(blocks, 85, 5, true);
+            rv = blockModes(blocks, names, 85, 5, true);
 
             REQUIRE(rv == 0);
             REQUIRE(blocks.size() == 7);
@@ -337,7 +337,7 @@ SCENARIO( "Calculating Blocks", "[userGainCtrl]" )
             REQUIRE(blocks[5] == 56);
             REQUIRE(blocks[6] == 5);
 
-            rv = blockModes(blocks, 287, 23, true);
+            rv = blockModes(blocks, names, 287, 23, true);
 
             REQUIRE(rv == 0);
             REQUIRE(blocks.size() == 8);
@@ -354,7 +354,7 @@ SCENARIO( "Calculating Blocks", "[userGainCtrl]" )
 
         WHEN("Partial blocks, Zernikes in 2 blocks, with split")
         {
-            rv = blockModes(blocks, 26, 25, true);
+            rv = blockModes(blocks, names, 26, 25, true);
 
             REQUIRE(rv == 0);
             REQUIRE(blocks.size() == 5);
@@ -364,7 +364,7 @@ SCENARIO( "Calculating Blocks", "[userGainCtrl]" )
             REQUIRE(blocks[3] == 22);
             REQUIRE(blocks[4] == 1);
 
-            rv = blockModes(blocks, 85, 25, true);
+            rv = blockModes(blocks, names, 85, 25, true);
 
             REQUIRE(rv == 0);
             REQUIRE(blocks.size() == 6);
@@ -375,7 +375,7 @@ SCENARIO( "Calculating Blocks", "[userGainCtrl]" )
             REQUIRE(blocks[4] == 55);
             REQUIRE(blocks[5] == 5);
 
-            rv = blockModes(blocks, 287, 79, true);
+            rv = blockModes(blocks, names, 287, 79, true);
 
             REQUIRE(rv == 0);
             REQUIRE(blocks.size() == 7);
@@ -392,7 +392,7 @@ SCENARIO( "Calculating Blocks", "[userGainCtrl]" )
         //Test if it all generalizes to even more zernikes
         WHEN("Partial blocks, Zernikes in 3 blocks, with split")
         {
-            rv = blockModes(blocks, 26, 81, true); //this should give 81 modes and quit
+            rv = blockModes(blocks, names, 26, 81, true); //this should give 81 modes and quit
 
             REQUIRE(rv == 0);
             REQUIRE(blocks.size() == 4);
@@ -401,7 +401,7 @@ SCENARIO( "Calculating Blocks", "[userGainCtrl]" )
             REQUIRE(blocks[2] == 1);
             REQUIRE(blocks[3] == 78);
  
-            rv = blockModes(blocks, 85, 81, true);
+            rv = blockModes(blocks, names, 85, 81, true);
 
             REQUIRE(rv == 0);
             REQUIRE(blocks.size() == 5);
@@ -411,7 +411,7 @@ SCENARIO( "Calculating Blocks", "[userGainCtrl]" )
             REQUIRE(blocks[3] == 78);
             REQUIRE(blocks[4] == 4);
 
-            rv = blockModes(blocks, 287, 100, true);
+            rv = blockModes(blocks, names, 287, 100, true);
 
             REQUIRE(rv == 0);
             REQUIRE(blocks.size() == 6);
@@ -426,7 +426,7 @@ SCENARIO( "Calculating Blocks", "[userGainCtrl]" )
 
         WHEN("The Full MagAO-X")
         {
-            rv = blockModes(blocks, 2400, 10, true); //this should give 81 modes and quite
+            rv = blockModes(blocks, names, 2400, 10, true); //this should give 81 modes and quite
 
             REQUIRE(rv == 0);
             REQUIRE(blocks.size() == 16);
