@@ -857,12 +857,6 @@ int userGainCtrl::processImage( void * curr_src,
    }
    
    //update blocks here.
-   /*std::cerr << "gains updated\n";
-
-   for(int cc =0; cc < m_gainsCurrent.cols(); ++cc)
-      for(int rr=0; rr < m_gainsCurrent.rows(); ++rr)
-         std::cout << m_gainsCurrent(rr,cc) << " ";
-   std::cout << "\n";*/
 
    for(size_t n =0; n < m_modeBlockStart.size(); ++n)
    {
@@ -1002,13 +996,6 @@ int userGainCtrl::processImage( void * curr_src,
    }
    
    //update blocks here.
-  /* std::cerr << "multcoeff updated\n";
-
-   for(int cc =0; cc < m_mcsCurrent.cols(); ++cc)
-      for(int rr=0; rr < m_mcsCurrent.rows(); ++rr)
-         std::cout << m_mcsCurrent(rr,cc) << " ";
-   std::cout << "\n";*/
-
 
    for(size_t n =0; n < m_modeBlockStart.size(); ++n)
    {
@@ -1147,12 +1134,7 @@ int userGainCtrl::processImage( void * curr_src,
    }
    
    //update blocks here.
-  /* for(int cc =0; cc < m_limitsCurrent.cols(); ++cc)
-      for(int rr=0; rr < m_limitsCurrent.rows(); ++rr)
-         std::cout << m_limitsCurrent(rr,cc) << " ";
-   std::cout << "\n";*/
-
-
+   
    for(size_t n =0; n < m_modeBlockStart.size(); ++n)
    {
       double mng = 0;
