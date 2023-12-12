@@ -83,6 +83,15 @@ const IndiConnection &IndiConnection::operator= ( const IndiConnection &idRhs )
 
 IndiConnection::~IndiConnection()
 {
+    try
+    {
+        deactivate();
+    }
+    catch(...)
+    {
+        //do nothing
+    }
+    
     if(m_fstreamOutput)
     {
         fclose(m_fstreamOutput);
