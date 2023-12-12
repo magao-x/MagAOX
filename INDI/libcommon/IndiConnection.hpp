@@ -155,8 +155,13 @@ class IndiConnection : public pcf::Thread
     mutable pcf::MutexLock m_mutOutput;
     /// The file descriptor to read from.
     int m_fdInput;
+    
     /// The file descriptor to write to.
     int m_fdOutput;
+
+    /// Stream for safer output
+    FILE * m_fstreamOutput {NULL};
+
     /// If the processing of INDI messages is put in a separate thread,
     /// this is the thread id of it.
     pthread_t m_idProcessThread;

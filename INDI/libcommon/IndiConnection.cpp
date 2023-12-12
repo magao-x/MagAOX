@@ -83,6 +83,11 @@ const IndiConnection &IndiConnection::operator= ( const IndiConnection &idRhs )
 
 IndiConnection::~IndiConnection()
 {
+    if(m_fstreamOutput)
+    {
+        fclose(m_fstreamOutput);
+    }
+
 }
 
 ////////////////////////////////////////////////////////////////////////////////
@@ -104,7 +109,7 @@ void IndiConnection::construct( const string &szName,
 
   // These are the two descriptors we will use to talk to the outside world.
   m_fdInput = STDIN_FILENO;
-  m_fdOutput = STDOUT_FILENO;
+  setOutputFd(STDOUT_FILENO);
 
   // setup the signal handler.
   //::signal( SIGHUP, IndiConnection::handleSignal );
@@ -363,18 +368,14 @@ void IndiConnection::sendXml( const string &szXml ) const
 {
   MutexLock::AutoLock autoOut( &m_mutOutput );
   
-  //Convert to stream b/c dprintf will kill silently on a bad file descriptor
-  FILE * fdout = fdopen(m_fdOutput, "w+");
-
-  if(!fdout)
+  if(!m_fstreamOutput)
   {
     return;
   }
 
-  ::fprintf( fdout, "%s", szXml.c_str() );
-  fflush(fdout);
+  ::fprintf( m_fstreamOutput, "%s", szXml.c_str() );
+  fflush(m_fstreamOutput);
 
-  //dprintf(m_fdOutput, "%s", szXml.c_str());
 }
 
 ////////////////////////////////////////////////////////////////////////////////
@@ -415,6 +416,11 @@ void IndiConnection::setInputFd( const int &iFd )
 void IndiConnection::setOutputFd( const int &iFd )
 {
   m_fdOutput = iFd;
+  if(m_fstreamOutput)
+  {
+    fclose(m_fstreamOutput);
+  }
+  m_fstreamOutput = fdopen(m_fdOutput, "w+");
 }
 
 ////////////////////////////////////////////////////////////////////////////////
