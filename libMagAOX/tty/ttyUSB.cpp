@@ -7,6 +7,7 @@
  */
 
 
+#include <iostream>
 
 #include <libudev.h>
 
@@ -48,41 +49,88 @@ int ttyUSBDevName( std::string & devName,       // [out] the /dev/ttyUSBX device
 
    for(size_t i=0; i< devNames.size(); ++i)
    {
+      struct udev_device *dev0;
+
+      dev0 = udev_device_new_from_syspath(udev, devNames[i].c_str());
+
+      if(!dev0) 
+      {
+         std::cerr << "udev_device_new_from_syspath failed: " << strerror(errno) << "\n";
+         perror("");
+         continue;
+      }
+
       struct udev_device *dev;
 
-      dev = udev_device_new_from_syspath(udev, devNames[i].c_str());
+      dev = udev_device_get_parent_with_subsystem_devtype( dev0, "usb", "usb_device");
 
-      if(!dev) continue;
-
-      dev = udev_device_get_parent_with_subsystem_devtype( dev, "usb", "usb_device");
-
-      if (!dev) continue;
+      if (!dev) 
+      {   
+         std::cerr << "udev_device_get_parent_with_subsystem_devtype failed: " << strerror(errno) << "\n";
+         perror("");
+         udev_device_unref(dev0);
+         continue;
+      }
 
       const char * idVendor = udev_device_get_sysattr_value( dev, "idVendor" );
+      
+      if(idVendor == nullptr) 
+      {
+         udev_device_unref(dev0);
+         continue;
+      }
 
-      if(idVendor == nullptr) continue;
-      if( strcmp( idVendor, vendor.c_str()) != 0) continue;
+      if( strcmp( idVendor, vendor.c_str()) != 0) 
+      {
+         udev_device_unref(dev0);
+         continue;
+      }
 
       const char * idProduct = udev_device_get_sysattr_value( dev, "idProduct" );
 
-      if(idProduct == nullptr) continue;
-      if( strcmp( idProduct, product.c_str()) != 0) continue;
+      if(idProduct == nullptr) 
+      {
+         udev_device_unref(dev0);
+         continue;
+      }
+
+      if( strcmp( idProduct, product.c_str()) != 0) 
+      {
+         udev_device_unref(dev0);
+         continue;
+      }
 
       const char * dserial = udev_device_get_sysattr_value( dev, "serial" );
 
       if(dserial == nullptr)
       {
-         if( serial != "") continue;
+         if( serial != "") 
+         {
+            udev_device_unref(dev0);
+            continue;
+         }
       }
-      else if( strcmp( dserial, serial.c_str()) != 0 ) continue;
-
+      else if( strcmp( dserial, serial.c_str()) != 0 ) 
+      {
+         udev_device_unref(dev0);
+         continue;
+      }
+    
       //If we make it through all comparisons we found it!
       boost::filesystem::path p(devNames[i]);
       devName = "/dev/" + p.filename().string();
+
+      udev_device_unref(dev0);
+
+      udev_unref(udev);
+
       return TTY_E_NOERROR;
    }
 
    devName = "";
+
+   udev_unref(udev);
+
    return TTY_E_DEVNOTFOUND;
 }
 
@@ -101,38 +149,66 @@ int ttyUSBDevNames( std::vector<std::string> & devNames, // [out] the /dev/ttyUS
 
    struct udev *udev;
 
-
    /* Create the udev object */
    udev = udev_new();
    if (!udev) return TTY_E_UDEVNEWFAILED;
 
    for(size_t i=0; i< pdevNames.size(); ++i)
    {
-      struct udev_device *dev;
+      struct udev_device *dev0;
 
-      dev = udev_device_new_from_syspath(udev, pdevNames[i].c_str());
+      dev0 = udev_device_new_from_syspath(udev, pdevNames[i].c_str());
 
-      if(!dev) continue;
+      if(!dev0) 
+      {
+         continue;
+      }
+      
+      struct udev_device * dev;
+      dev = udev_device_get_parent_with_subsystem_devtype( dev0, "usb", "usb_device");
 
-      dev = udev_device_get_parent_with_subsystem_devtype( dev, "usb", "usb_device");
-
-      if (!dev) continue;
+      if (!dev) 
+      {
+         udev_device_unref(dev0);
+         continue;
+      }
 
       const char * idVendor = udev_device_get_sysattr_value( dev, "idVendor" );
 
-      if(idVendor == nullptr) continue;
-      if( strcmp( idVendor, vendor.c_str()) != 0) continue;
+      if(idVendor == nullptr) 
+      {
+         udev_device_unref(dev0);
+         continue;
+      }
+
+      if( strcmp( idVendor, vendor.c_str()) != 0) 
+      {
+         udev_device_unref(dev0);
+         continue;
+      }
 
       const char * idProduct = udev_device_get_sysattr_value( dev, "idProduct" );
 
-      if(idProduct == nullptr) continue;
-      if( strcmp( idProduct, product.c_str()) != 0) continue;
+      if(idProduct == nullptr) 
+      {
+         udev_device_unref(dev0);
+         continue;
+      }
+
+      if( strcmp( idProduct, product.c_str()) != 0) 
+      {
+         udev_device_unref(dev0);
+         continue;
+      }
 
       //If we make it through all comparisons we found it!
       boost::filesystem::path p(pdevNames[i]);
       devNames.push_back( "/dev/" + p.filename().string());
+
+      udev_device_unref(dev0);
    }
 
+   udev_unref(udev);
 
    if( devNames.size() > 0) return TTY_E_NOERROR;   
    else return TTY_E_DEVNOTFOUND;

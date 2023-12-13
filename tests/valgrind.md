@@ -21,6 +21,7 @@ Once installed, you have to change the setuid bit for the executable you want to
 sudo chmod -s /opt/MagAOX/bin/magAOXMaths
 ```
 
+You will need to be root to run without setuid.  
 Then you can run that one executable with
 
 ```
