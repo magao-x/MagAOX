@@ -250,9 +250,6 @@ if( registerIndiPropertyNew( prop, propName, type, pcf::IndiProperty::ReadOnly, 
     return log<software_error,-1>({__FILE__,__LINE__, "failed to register read only property"});                  \
 }                                                                                           
 
-
-
-
 /// Register a SET INDI property with the class, using the standard callback name.
 /** Is a wrapper for MagAOXApp::registerIndiPropertySet.
   *
@@ -269,5 +266,65 @@ if( registerIndiPropertySet( prop,devName,  propName, INDI_SETCALLBACK(prop)) < 
 {                                                                                          \
     return log<software_error,-1>({__FILE__,__LINE__, "failed to register set property"}); \
 }                                                                                           
+
+/// Create and register a NEW INDI property as a standard toggle switch, using the standard callback name.
+/** This wraps createStandardIndiToggleSw and registerIndiPropertyNew, with error checking
+  *
+  * \param prop the property member name, with no quotes
+  * \param name he property name, in quotes
+  * 
+  * \ingroup indi
+  */
+#define CREATE_REG_INDI_NEW_TOGGLESWITCH( prop, name)                                 \
+    if( createStandardIndiToggleSw( prop, name) < 0)                                       \
+    {                                                                                      \
+        log<software_error>({__FILE__,__LINE__, "error from createStandardIndiToggleSw"}); \
+        return -1;                                                                         \
+    }                                                                                      \
+    if( registerIndiPropertyNew( prop, INDI_NEWCALLBACK(prop)) < 0)                        \
+    {                                                                                      \
+        log<software_error>({__FILE__,__LINE__, "error from registerIndiPropertyNew"});    \
+        return -1;                                                                         \
+    }
+
+/// Create and register a read-only INDI property as a standard toggle switch, with no callback.
+/** This wraps createStandardIndiToggleSw and registerIndiPropertyNew with null callback, with error checking
+  *
+  * \param prop the property member name, with no quotes
+  * \param name he property name, in quotes
+  * 
+  * \ingroup indi
+  */
+#define CREATE_REG_INDI_NEW_TOGGLESWITCH_NOCB( prop, name)                                 \
+    if( createStandardIndiToggleSw( prop, name) < 0)                                       \
+    {                                                                                      \
+        log<software_error>({__FILE__,__LINE__, "error from createStandardIndiToggleSw"}); \
+        return -1;                                                                         \
+    }                                                                                      \
+    if( registerIndiPropertyNew( prop, nullptr) < 0)                                       \
+    {                                                                                      \
+        log<software_error>({__FILE__,__LINE__, "error from registerIndiPropertyNew"});    \
+        return -1;                                                                         \
+    }
+
+/// Create and register a NEW INDI property as a standard request switch, using the standard callback name.
+/** This wraps createStandardIndiRequestSw and registerIndiPropertyNew, with error checking
+  *
+  * \param prop the property member name, with no quotes
+  * \param name he property name, in quotes
+  * 
+  * \ingroup indi
+  */
+#define CREATE_REG_INDI_NEW_REQUESTSWITCH( prop, name)                                      \
+    if( createStandardIndiRequestSw( prop, name) < 0)                                       \
+    {                                                                                       \
+        log<software_error>({__FILE__,__LINE__, "error from createStandardIndiRequestSw"}); \
+        return -1;                                                                          \
+    }                                                                                       \
+    if( registerIndiPropertyNew( prop, INDI_NEWCALLBACK(prop)) < 0)                         \
+    {                                                                                       \
+        log<software_error>({__FILE__,__LINE__, "error from registerIndiPropertyNew"});     \
+        return -1;                                                                          \
+    }
 
 #endif //app_indiMacros_hpp

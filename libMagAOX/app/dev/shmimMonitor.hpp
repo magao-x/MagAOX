@@ -526,7 +526,7 @@ void shmimMonitor<derivedT, specificT>::smThreadExec()
 
                if(rv != 0)
                {
-                  derivedT::template log<software_critical>({__FILE__,__LINE__, errno,"Could not get inode for " + m_shmimName + ". Source process will need to be restarted."});
+                  derivedT::template log<software_critical>({__FILE__,__LINE__, errno, "Could not get inode for " + m_shmimName + ". Source process will need to be restarted."});
                   ImageStreamIO_closeIm(&m_imageStream);
                   return;
                }
