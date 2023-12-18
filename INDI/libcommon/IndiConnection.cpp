@@ -92,7 +92,7 @@ IndiConnection::~IndiConnection()
         //do nothing
     }
     
-    if(m_fstreamOutput)
+    if(m_fstreamOutput && m_fstreamOutput != m_fstreamSTDOUT)
     {
         fclose(m_fstreamOutput);
     }
@@ -118,6 +118,9 @@ void IndiConnection::construct( const string &szName,
 
   // These are the two descriptors we will use to talk to the outside world.
   m_fdInput = STDIN_FILENO;
+
+  //We start with STDOUT.  
+  m_fstreamSTDOUT = fdopen(STDOUT_FILENO, "w+");  
   setOutputFd(STDOUT_FILENO);
 
   // setup the signal handler.
@@ -424,12 +427,22 @@ void IndiConnection::setInputFd( const int &iFd )
 
 void IndiConnection::setOutputFd( const int &iFd )
 {
-  m_fdOutput = iFd;
-  if(m_fstreamOutput)
-  {
-    fclose(m_fstreamOutput);
-  }
-  m_fstreamOutput = fdopen(m_fdOutput, "w+");
+    m_fdOutput = iFd;
+
+    //Close if it's open as long as it isn't STDOUT
+    if(m_fstreamOutput && m_fstreamOutput != m_fstreamSTDOUT)
+    {
+        fclose(m_fstreamOutput);
+    }
+
+    if(iFd == STDOUT_FILENO)
+    {
+        m_fstreamOutput = m_fstreamSTDOUT;
+    }
+    else
+    {
+        m_fstreamOutput = fdopen(m_fdOutput, "w+");
+    }
 }
 
 ////////////////////////////////////////////////////////////////////////////////
