@@ -2,8 +2,8 @@
   \file    ocam2_sdk.c
 
   \brief   Main library file
-
-  \author FIRSTLIGHT
+  
+  \author FIRSTLIGHT    
 */
 
 #include <stdlib.h>
@@ -83,8 +83,12 @@ const char *ocam2_modeStr(ocam2_mode mode)
      "Binning 2x2 Mode(120x120@3620Hz)",
      "Binning 3x3 Mode(80x80@4950Hz)",
      "Binning 4x4 Mode(60x60@5900Hz)",
-     "Cropping Mode(240x128@3500Hz)"};
-
+     "Cropping Mode(240x128@3500Hz)",
+     "Mode 7",
+     "Mode 8",
+     "Binning 1x3 Mode(240x80@XXXXHz)",
+     "Binning 1x4 Mode(240x50@XXXXHz)"};
+    
     switch(mode)
     {
         case OCAM2_UNKNOWN:
@@ -94,14 +98,15 @@ const char *ocam2_modeStr(ocam2_mode mode)
         case OCAM2_BINNING3x3:
         case OCAM2_BINNING4x4:
         case OCAM2_CROPPING240x128:
-
+        case OCAM2_BINNING1x3:
+        case OCAM2_BINNING1x4:
+        
         return ocam2_modeText[mode];
         default:
             return NULL;
     }
 }
 
-#if 0
 /* API function */
 const char * ocam2_sdkVersion()
 {
@@ -113,7 +118,6 @@ const char * ocam2_sdkBuild()
 {
     return OCAMSDK_BUILD;
 }
-#endif
 
 int ocam2_fsize(FILE *fp)
 {
@@ -175,6 +179,7 @@ static int ocam2_fillDescrblTab(const char *descrbFile)
 
                         if (NULL != g_descrblTab)
                         {
+                            char *arg;
                             char delim[] = ",\n\r";
                             char *saveptr;
 
@@ -183,7 +188,6 @@ static int ocam2_fillDescrblTab(const char *descrbFile)
 
                             while (i<nbElem)
                             {
-                                char *arg;
                                 arg = strtok_r(pfc, delim, &saveptr);
                                 if (NULL != arg)
                                     g_descrblTab[i] = atoi(arg);
@@ -361,6 +365,55 @@ static void ocam2_descramble_binning4x4(unsigned int *__restrict__ number, short
     *number = ((int *)imageRaw)[OCAM2_IMAGE_NB_OFFSET/4]; /* int offset */
 }
 
+static void ocam2_descramble_2_track(unsigned int *__restrict__ number, short *__restrict__ image, const short *__restrict__ imageRaw)
+{
+    const int chunk=OCAM2_PIXELS_IMAGE_2_TRACK/2;
+    int i;
+    for (i=0; i < chunk; i++)
+    {
+         image[i] = imageRaw[g_descrblTab[i*OCAM2_NB_IDENTICAL_PIXELS_2_TRACK]];
+         image[chunk+i] = imageRaw[g_descrblTab[i*OCAM2_NB_IDENTICAL_PIXELS_2_TRACK+OCAM2_2_TRACK_OFFSET]];
+    }
+    *number = ((int *)imageRaw)[OCAM2_IMAGE_NB_OFFSET/4]; /* int offset */
+}
+
+static void ocam2_descramble_4_track(unsigned int *__restrict__ number, short *__restrict__ image, const short *__restrict__ imageRaw)
+{
+    const int chunk=OCAM2_PIXELS_IMAGE_4_TRACK/2;
+    int i;
+    for (i=0; i < chunk; i++)
+    {
+         image[i] = imageRaw[g_descrblTab[i*OCAM2_NB_IDENTICAL_PIXELS_4_TRACK]];
+         image[chunk+i] = imageRaw[g_descrblTab[i*OCAM2_NB_IDENTICAL_PIXELS_4_TRACK+OCAM2_4_TRACK_OFFSET]];
+    }
+    *number = ((int *)imageRaw)[OCAM2_IMAGE_NB_OFFSET/4]; /* int offset */
+}
+
+
+static void ocam2_descramble_binning1x3(unsigned int* __restrict__ number, short* __restrict__ image, const short* __restrict__ imageRaw)
+{
+    const int chunk = OCAM2_PIXELS_IMAGE_BINNING1x3 / 2;
+    int i;
+    for (i = 0; i < chunk; i++)
+    {
+        image[i] = imageRaw[g_descrblTab[i * OCAM2_NB_IDENTICAL_PIXELS_BINNING1x3]];
+        image[chunk + i] = imageRaw[g_descrblTab[i * OCAM2_NB_IDENTICAL_PIXELS_BINNING1x3 + OCAM2_BINNING1x3_OFFSET]];
+    }
+    *number = ((int*)imageRaw)[OCAM2_IMAGE_NB_OFFSET / 4]; /* int offset */
+}
+
+static void ocam2_descramble_binning1x4(unsigned int* __restrict__ number, short* __restrict__ image, const short* __restrict__ imageRaw)
+{
+    const int chunk = OCAM2_PIXELS_IMAGE_BINNING1x4 / 2;
+    int i;
+    for (i = 0; i < chunk; i++)
+    {
+        image[i] = imageRaw[g_descrblTab[i * OCAM2_NB_IDENTICAL_PIXELS_BINNING1x4]];
+        image[chunk + i] = imageRaw[g_descrblTab[i * OCAM2_NB_IDENTICAL_PIXELS_BINNING1x4 + OCAM2_BINNING1x4_OFFSET]];
+    }
+    *number = ((int*)imageRaw)[OCAM2_IMAGE_NB_OFFSET / 4]; /* int offset */
+}
+
 /* API function */
 void ocam2_descramble(ocam2_id id, unsigned int *number, short *image, const short *imageRaw)
 {
@@ -382,7 +435,11 @@ ocam2_rc ocam2_init(ocam2_mode mode, const char *descrbFile, ocam2_id *id)
          (mode!=OCAM2_CROPPING240x128) &&
          (mode!=OCAM2_BINNING2x2) &&
          (mode!=OCAM2_BINNING3x3) &&
-         (mode!=OCAM2_BINNING4x4) )
+         (mode!=OCAM2_BINNING4x4) &&
+         (mode!=OCAM2_2_TRACK) &&
+         (mode!=OCAM2_4_TRACK) &&
+         (mode != OCAM2_BINNING1x3) &&
+         (mode != OCAM2_BINNING1x4) )
         return OCAM2_ERROR;
 
     if ( (NULL == descrbFile) && (0==g_nbCamera) )
@@ -415,6 +472,14 @@ ocam2_rc ocam2_init(ocam2_mode mode, const char *descrbFile, ocam2_id *id)
         g_camInfoTab[*id].pfuncDescrbl=ocam2_descramble_binning3x3;
     else if (OCAM2_BINNING4x4==mode)
         g_camInfoTab[*id].pfuncDescrbl=ocam2_descramble_binning4x4;
+	else if (OCAM2_2_TRACK==mode)
+        g_camInfoTab[*id].pfuncDescrbl=ocam2_descramble_2_track;
+	else if (OCAM2_4_TRACK==mode)
+        g_camInfoTab[*id].pfuncDescrbl=ocam2_descramble_4_track;
+    else if (OCAM2_BINNING1x3 == mode)
+        g_camInfoTab[*id].pfuncDescrbl = ocam2_descramble_binning1x3;
+    else if (OCAM2_BINNING1x4 == mode)
+        g_camInfoTab[*id].pfuncDescrbl = ocam2_descramble_binning1x4;
     else
         g_camInfoTab[*id].pfuncDescrbl=ocam2_descramble_normal;
 
@@ -438,3 +503,5 @@ ocam2_rc ocam2_exit(ocam2_id id)
     }
     return OCAM2_OK;
 }
+
+

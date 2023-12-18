@@ -1,0 +1,12 @@
+[Unit]
+Description=Renew certificates
+Requires=network.target
+After=network.target
+
+[Service]
+User=xsup
+WorkingDirectory=/home/xsup
+ExecStart=/usr/local/bin/lego --email lynx@magao-x.org --dns vultr --domains exao1.magao-x.org renew
+
+[Install]
+WantedBy=default.target

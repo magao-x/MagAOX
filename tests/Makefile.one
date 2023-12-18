@@ -32,7 +32,7 @@ TESTNAME = $(PATHNAME)$(notdir $(BASENAME))
 # setuid             #
 ######################
 #Special handling for tests requiring setuid
-ifeq ($(notdir $(BASENAME)),thSetuid_tests)
+ifeq ($(notdir $(BASENAME)),thSetuid_test)
    SETUID=sudo chown root:root $(TESTNAME) && sudo chmod u+s $(TESTNAME)
 endif
 

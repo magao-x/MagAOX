@@ -45,6 +45,7 @@ telem_telsee             20005    telem_telsee
 telem_stage              20050    telem_stage
 telem_zaber              20055    telem_zaber
 telem_pico               20060    telem_pico
+telem_position           20065    telem_position
 
 telem_observer           20070    telem_observer
 

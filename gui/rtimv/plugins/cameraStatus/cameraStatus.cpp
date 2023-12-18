@@ -31,8 +31,7 @@ int cameraStatus::attachOverlay( rtimvOverlayAccess & roa,
     m_enableable = true;
     m_enabled = true;
     
-    config.configUnused(m_filterDeviceName, mx::app::iniFile::makeKey("camera", "filterDevice"));
-    config.configUnused(m_filterDeviceName2, mx::app::iniFile::makeKey("camera", "filterDevice2"));
+    config.configUnused(m_filterDeviceNames, mx::app::iniFile::makeKey("camera", "filterDevices"));
 
     if(m_roa.m_dictionary != nullptr)
     {
@@ -58,17 +57,18 @@ int cameraStatus::attachOverlay( rtimvOverlayAccess & roa,
         (*m_roa.m_dictionary)[m_deviceName + ".shutter_status.status"].setBlob(nullptr, 0);
         (*m_roa.m_dictionary)[m_deviceName + ".shutter.toggle"].setBlob(nullptr, 0);
       
-        if(m_filterDeviceName != "")
+        m_presetNames.resize(m_filterDeviceNames.size());
+
+        for(size_t f = 0; f < m_filterDeviceNames.size(); ++f)
         {
-            (*m_roa.m_dictionary)[m_filterDeviceName + ".fsm.state"].setBlob(nullptr, 0);
-            (*m_roa.m_dictionary)[m_filterDeviceName + ".filterName"].setBlob(nullptr, 0);
+            if(m_filterDeviceNames[f].find("fw") == 0) m_presetNames[f] = ".filterName";
+            else if(m_filterDeviceNames[f].find("flip") == 0) m_presetNames[f] = ".position";
+            else m_presetNames[f] = ".presetName";
+
+            (*m_roa.m_dictionary)[m_filterDeviceNames[f] + ".fsm.state"].setBlob(nullptr, 0);
+            (*m_roa.m_dictionary)[m_filterDeviceNames[f] + m_presetNames[f]].setBlob(nullptr, 0);
         }
 
-        if(m_filterDeviceName2 != "")
-        {
-            (*m_roa.m_dictionary)[m_filterDeviceName2 + ".fsm.state"].setBlob(nullptr, 0);
-            (*m_roa.m_dictionary)[m_filterDeviceName2 + ".filterName"].setBlob(nullptr, 0);
-        }
 
         (*m_roa.m_dictionary)[m_deviceName + "-sw.writing.toggle"].setBlob(nullptr, 0);
 
@@ -310,16 +310,16 @@ int cameraStatus::updateOverlay()
     }
     if(n > m_roa.m_graphicsView->statusTextNo()-1) return 0;
    
-    if(m_filterDeviceName != "")
+    for(size_t f = 0; f < m_filterDeviceNames.size(); ++f)
     {
-        if(getBlobStr(m_filterDeviceName, "fsm.state"))
+        if(getBlobStr(m_filterDeviceNames[f], "fsm.state"))
         {
             std::string fwstate = std::string(m_blob);
         
             if(fwstate == "READY" || fwstate == "OPERATING")
             {
-                dictionaryIteratorT start = m_roa.m_dictionary->lower_bound(m_filterDeviceName + ".filterName");
-                dictionaryIteratorT end = m_roa.m_dictionary->upper_bound(m_filterDeviceName + ".filterNameZ");
+                dictionaryIteratorT start = m_roa.m_dictionary->lower_bound(m_filterDeviceNames[f] + m_presetNames[f]);
+                dictionaryIteratorT end = m_roa.m_dictionary->upper_bound(m_filterDeviceNames[f] + m_presetNames[f] + "Z");
                
                 std::string fkey;
                 while(start != end)
@@ -341,68 +341,18 @@ int cameraStatus::updateOverlay()
                 std::string filn;
                 if(pp != std::string::npos && pp < fkey.size()-1) //need to be able to add 1
                 {
-                    filn = m_filterDeviceName + ": " + fkey.substr(pp+1).c_str();
+                    filn = m_filterDeviceNames[f] + ": " + fkey.substr(pp+1).c_str();
                 }
                 else
                 {
-                    filn = m_filterDeviceName + ": unk";
+                    filn = m_filterDeviceNames[f] + ": unk";
                 }
                 m_roa.m_graphicsView->statusTextText(n, filn.c_str());
                 ++n;
             }
             else
             {
-                fwstate = m_filterDeviceName +  ": " + fwstate;
-                m_roa.m_graphicsView->statusTextText(n, fwstate.c_str());
-                ++n;
-            }
-        }
-        if(n > m_roa.m_graphicsView->statusTextNo()-1) return 0;   
-    }
-
-    if(m_filterDeviceName2 != "")
-    {
-        if(getBlobStr(m_filterDeviceName2, "fsm.state"))
-        {
-            std::string fwstate = std::string(m_blob);
-        
-            if(fwstate == "READY" || fwstate == "OPERATING")
-            {
-                dictionaryIteratorT start = m_roa.m_dictionary->lower_bound(m_filterDeviceName2 + ".filterName");
-                dictionaryIteratorT end = m_roa.m_dictionary->upper_bound(m_filterDeviceName2 + ".filterNameZ");
-               
-                std::string fkey;
-                while(start != end)
-                {
-                    if( (start->second.getBlobStr(m_blob, sizeof(m_blob))) == sizeof(m_blob) ) errPrint("bad string"); //Don't trust this as a string
-                  
-                    if(m_blob[0] != '\0')
-                    {
-                        if(std::string(m_blob) == "on")
-                        {
-                            fkey = start->first;
-                            break;
-                        }
-                    }
-                    ++start;
-                }
-               
-                size_t pp = fkey.rfind('.');
-                std::string filn;
-                if(pp != std::string::npos && pp < fkey.size()-1) //need to be able to add 1
-                {
-                    filn = m_filterDeviceName2 + ": " + fkey.substr(pp+1).c_str();
-                }
-                else
-                {
-                    filn = m_filterDeviceName2 + ": unk";
-                }
-                m_roa.m_graphicsView->statusTextText(n, filn.c_str());
-                ++n;
-            }
-            else
-            {
-                fwstate = m_filterDeviceName2 +  ": " + fwstate;
+                fwstate = m_filterDeviceNames[f] +  ": " + fwstate;
                 m_roa.m_graphicsView->statusTextText(n, fwstate.c_str());
                 ++n;
             }
@@ -419,8 +369,8 @@ int cameraStatus::updateOverlay()
             if(getBlobStr("shutter.toggle"))
             {
                 sstr = std::string(m_blob);
-                if(sstr == "on") sstr = "SHUT";
-                else sstr = "OPEN";
+                if(sstr == "on") sstr = "sh SHUT";
+                else sstr = "sh OPEN";
                 m_roa.m_graphicsView->statusTextText(n, sstr.c_str());
                 ++n;
             }

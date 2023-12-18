@@ -36,7 +36,7 @@ if [[ $MAGAOX_ROLE == RTC || $MAGAOX_ROLE == ICC || $MAGAOX_ROLE == AOC ]]; then
             mountPath=/srv/$host/data
             sudo mkdir -p $mountPath
             if ! grep -q $mountPath /etc/fstab; then
-                echo "$host:/data $mountPath	nfs	noauto,x-systemd.automount,nofail,x-systemd.device-timeout=10s	0 0" | sudo tee -a /etc/fstab
+                echo "$host:/data $mountPath	nfs	ro,noauto,x-systemd.automount,nofail,x-systemd.device-timeout=10s,soft,timeo=30	0 0" | sudo tee -a /etc/fstab
             fi
         fi
     done

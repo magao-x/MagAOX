@@ -184,11 +184,16 @@ void gainCtrl::makeMultCoeffCtrl()
 
 void gainCtrl::subscribe()
 {
-   if(!m_parent) return;
+    if(!m_parent) return;
    
-   if(m_property != "") m_parent->addSubscriberProperty(this, m_device, m_property);
+    if(m_property != "") 
+    {
+        m_parent->addSubscriberProperty(this, m_device, m_property);
 
-   m_parent->addSubscriber(ui.status);
+        //m_parent->addSubscriberProperty(this, m_device, m_property + "_name");
+    }
+
+    m_parent->addSubscriber(ui.status);
 
    return;
 }
@@ -234,9 +239,42 @@ void gainCtrl::handleSetProperty( const pcf::IndiProperty & ipRecv)
          {
             m_target = ipRecv["target"].get<float>();
          }
+
+         if(m_label == "")
+         {
+            m_label = ipRecv.getLabel();
+
+            size_t ssp = m_label.find(" Gain");
+            if(ssp == std::string::npos)
+            {
+                ssp = m_label.find(" Mult");
+            }
+            if(ssp == std::string::npos)
+            {
+                ssp = m_label.find(" Limit");
+            }
+
+            if(ssp == std::string::npos)
+            {
+                ui.label->setText(m_label.c_str());
+            }
+            else
+            {
+                ui.label->setText(m_label.substr(0,ssp).c_str());
+            }
+         }
       }
    }
 
+    /*if(ipRecv.getName() == m_property + "_name")
+    {
+        if(ipRecv.find("value"))
+        {
+            std::cerr << ipRecv["value"].get() << "\n";
+            ui.label->setText(ipRecv["value"].get().c_str());
+        }
+   }*/
+   
    updateGUI();
 
    ui.status->handleSetProperty(ipRecv);
@@ -246,9 +284,9 @@ void gainCtrl::updateGUI()
 {
    if(isEnabled())
    {
-      int slv = m_current/m_maxVal * 150. + 0.5;
+      int slv = m_current/m_maxVal * (1.0*ui.slider->maximum()) + 0.5;
       if(slv < 0 ) slv = 0;
-      else if(slv > 150) slv = 150;
+      else if(slv > ui.slider->maximum()) slv = ui.slider->maximum();
 
       ui.slider->setValue(slv);
 

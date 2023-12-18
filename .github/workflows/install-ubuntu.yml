@@ -24,11 +24,11 @@ jobs:
         with:
           path: /opt/MagAOX/
           key: ubuntu-22.04-dependencies-cache-v1-${{ hashFiles('setup/*', 'setup/**/*') }}
-      - run: 'bash -x setup/steps/install_ubuntu_22.04_packages.sh'
+      - run: 'bash -x setup/steps/install_ubuntu_22_packages.sh'
         name: Install OS dependencies
       - run: 'bash -lx setup/provision.sh'
         name: Auto-provision
       - run: 'bash -l setup/steps/install_MagAOX.sh'
         name: Install MagAO-X
-      # - run: 'make test'
-      #   name: Run tests
+      - run: 'make test'
+        name: Run tests

@@ -11,7 +11,7 @@ int main(int argc, char *argv[])
 {
    if(argc < 2)
    {
-      std::cerr << "Must specify DM INDI name.\n";
+      std::cerr << "Must specify stage INDI name.\n";
       return -1;
    }
    

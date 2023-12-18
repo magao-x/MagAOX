@@ -21,6 +21,8 @@ If all replacement is done correctly, the application will build with only warni
 
 Next edit the code in the `.hpp` file to implement the application.  You can also edit the Makefile adding additional libraries, or perhaps another header.  You will typically not need to edit any code in the `.cpp` file other than replacing `template` as above.
 
+If you want to build a version with debug information and no optimization, type `make debug` on the command line.
+
 # 2. Build System Integration
 
 To cause the new app to be built, add it to the appropriate list of apps in the top level Makefile.  Pay attention to which machine you expect the app to run on.
@@ -35,20 +37,7 @@ Add the `*_test.cpp` file to the top level `tests/testMagAOX.cpp` file, and to t
 
 Document your code with doxygen.  Be sure that `template` was changed to the application name in all documentation blocks in the source code, including the group definitions and `\ingroup` directives.
 
-# 5. Program Documentation
-
-Rename and edit the file `doc/template.md`, in the above example it should become `doc/hardwareCtrl.md`.  Change all instances of `template` to the application name, update the text appropriately, including the app specific options and INDI section.
-
-# 6. Documentation System Integration
-
-Next, follow all of these steps to integrate the documentation:
-- in the file `libMagAOX/doc/libMagAOX_doxygen.in` add the application folder to the INPUT directive 
-- in the same file, add the application/doc folder to the EXCLUDE directive
-- in the file 'apps/doc/magaox_apps_doxygen.in`  add the application `xxxx/doc/` folder to the `INPUT` directive
-
-Now running `make doc` in the top level should build all documentation with your new application integrated into it like all the others.
-
-# 7. Final Steps
+# 5. Final Steps
 
 Delete this `readme.md` from the new application folder.
 

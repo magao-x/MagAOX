@@ -21,7 +21,13 @@ all:
 	@for test in ${TESTOBJS}; do \
 	  $(MAKE) --no-print-directory -f Makefile.one t=$$test; \
 	done
-	
+
+.PHONY: test
+test: all
+	@for test in ${TESTOBJS}; do \
+	  ./$$test || exit 1; \
+	done
+
 .PHONY: clean
 clean:
 	@echo cleaning . . .

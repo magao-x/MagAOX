@@ -26,8 +26,8 @@ protected:
      * @{
      */
 
-   double m_maxFreq {0.0}; ///< The maximum modulation frequency settable by this program
-   double m_maxVolt {0.0}; ///< The maximum modulation voltage settable by this program
+   double m_maxFreq {2000.0}; ///< The maximum modulation frequency settable by this program
+   double m_maxVolt {8}; ///< The maximum modulation voltage settable by this program
 
    double m_setVoltage_1 {5.0}; ///< the set position voltage of Ch. 1.
    double m_setVoltage_2 {5.0}; ///< the set position voltage of Ch. 2.
@@ -35,7 +35,7 @@ protected:
    double m_setDVolts {1.0}; ///< The setting ramp step size [volts].
 
    double m_modDFreq {500}; ///< The modulation ramp frequency step size [Hz].
-   double m_modDVolts {0.1}; ///< The modulation ramp voltage step size [Volts].
+   double m_modDVolts {0.5}; ///< The modulation ramp voltage step size [Volts].
 
    double m_rotAngle {0};
    double m_rotParity {1};
@@ -62,7 +62,7 @@ protected:
    double m_C2ofst {-1};  ///< DC offset of fxn gen channel 2.
    double m_C2phse {-1};  ///< Phase of fxn gen channel 2.
 
-   double m_calRadius {3.0};
+   double m_calRadius {1.0};
    
    /* Old Cal:
    std::vector<double> m_calFreqs = {100,400,500,600,700,800,900,1000,1100,1200,1300,1400,1500,1600,1700,1800,1900,2000};
@@ -70,12 +70,18 @@ protected:
    std::vector<double> m_calC2Amps = {0.6,0.6,0.6,0.57,0.55,0.53,0.51,0.49,0.49,0.49,0.49,0.5,0.52,0.54,0.59,0.64,0.70,0.77};
    std::vector<double> m_calC2Phse = { 75, 75, 75,  75,  75,  75,  75,  75,  75,  75,  75,  75,  75,  72,  72,  70,  70,  70} ;*/
    
-   /* Cal on 2022-09-18:*/
+   /* Cal on 2022-09-18:
    std::vector<double> m_calFreqs = { 250,  500,   750,  1000,  1250,  1500,  1750,  2000,  2250,  2500,  2750,  3000,  3250,  3500};
    std::vector<double> m_calC1Amps = {0.66, 0.62, 0.58,  0.49,  0.44,  0.41,  0.43,  0.41,  0.35,  0.75,  1.0,   1.03,  1.08,  1.58 };
    std::vector<double> m_calC2Amps = {0.64, 0.61, 0.56, 0.54,   0.55,  0.57,  0.65,  0.78,  0.95,  1.15,   1.15,   2.25,  2.15,  1.97};
-   std::vector<double> m_calC2Phse = {  75, 75,    75,   75,    75,    75,    72,    67,    63,     35,    5,    18,    10,    -40} ;
+   std::vector<double> m_calC2Phse = {  75, 75,    75,   75,    75,    75,    72,    67,    63,     35,    5,    18,    10,    -40} ; */
    
+   /* Cal on 2023-12-03:*/ 
+   std::vector<double> m_calFreqs =  { 100,  250,  500,  750, 1000, 1250, 1500, 1750, 2000};
+   std::vector<double> m_calC1Amps = {0.22, 0.28, 0.43, 0.61, 0.82, 1.06, 1.35, 1.70, 2.045}; 
+   std::vector<double> m_calC2Amps = {0.23, 0.23, 0.56, 0.85, 1.16, 1.58, 1.96, 2.60, 3.63}; 
+   std::vector<double> m_calC2Phse = {  79,   82,   82,   82,   82,   82,   84,   88,   93}; 
+
 public:
 
    /// Default c'tor.
@@ -719,6 +725,13 @@ int ttmModulator::setTTM()
    return 0;
 }
 
+double maxRadAtFrequency( const std::vector<double> freqs,
+                          const std::vector<double> amps,
+                          double modrad
+                        )
+{
+}
+
 inline
 int ttmModulator::modTTM( double newRad,
                           double newFreq
@@ -869,7 +882,7 @@ int ttmModulator::modTTM( double newRad,
          ///\todo make sleep-time configurable
          sleep(1);
          currFreq = m_C1freq;
-         nextFreq = currFreq + 500.0;
+         nextFreq = currFreq + m_modDFreq;
          if(nextFreq > newFreq) nextFreq = newFreq;
       }
 
@@ -889,23 +902,23 @@ int ttmModulator::modTTM( double newRad,
          if( sendNewProperty(m_indiP_C2volts, "value", nextVolts2) < 0 ) return log<software_error,-1>({__FILE__,__LINE__});
 
          //Now check if values have changed.
-         if( waitValue(m_C1volts, nextVolts1, 1e-6) < 0 ) 
+         if( waitValue(m_C1volts, nextVolts1, 1e-3) < 0 ) 
          {
             return log<software_error,-1>({__FILE__,__LINE__, "fxngen timeout C1"});
          }
 
-         if( waitValue(m_C2volts, nextVolts2, 1e-6) < 0 ) 
+         if( waitValue(m_C2volts, nextVolts2, 1e-3) < 0 ) 
          {
             return log<software_error,-1>({__FILE__,__LINE__, "fxngen timeout C2"});
          }
 
          sleep(1);
          currVolts1 = m_C1volts;
-         nextVolts1 = currVolts1 + 0.1;
+         nextVolts1 = currVolts1 + m_modDVolts;
          if(nextVolts1 > voltageC1) nextVolts1 = voltageC1;
 
          currVolts2 = m_C2volts;
-         nextVolts2 = currVolts2 + 0.1;
+         nextVolts2 = currVolts2 + m_modDVolts;
          if(nextVolts2 > voltageC2) nextVolts2 = voltageC2;
 
       }

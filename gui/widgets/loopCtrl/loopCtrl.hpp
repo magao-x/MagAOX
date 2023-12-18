@@ -8,6 +8,7 @@
 
 #include "../xWidgets/xWidget.hpp"
 #include "../xWidgets/gainCtrl.hpp"
+#include "../xWidgets/statusEntry.hpp"
 
 namespace xqt 
 {
@@ -41,6 +42,8 @@ protected:
    std::vector<gainCtrl *> m_blockCtrls {nullptr};
    std::mutex m_blockMutex;
 
+   QTimer * m_updateTimer {nullptr};
+
 public:
    loopCtrl( std::string & procName,
              QWidget * Parent = 0, 
@@ -71,7 +74,7 @@ public:
 public slots:
    void updateGUI();
       
-   void on_slider_loop_sliderReleased();
+   //void on_slider_loop_sliderReleased();
    
    void on_button_LoopZero_pressed();
    
@@ -79,7 +82,12 @@ public slots:
 
    void setupBlocks(int nB);
 
+   void on_button_setplaw_pressed();
+
 signals:
+
+   void doUpdateGUI();
+
    void blocksChanged(int nB);
 
 private:
@@ -98,9 +106,19 @@ loopCtrl::loopCtrl( std::string & procName,
    setWindowTitle(QString(m_procName.c_str()));
    ui.label_loop_state->setProperty("isStatus", true);
 
-   ui.gainCtrl->setup(m_procName, "loop_gain", "Global Gain", -1, -1);
-   ui.mcCtrl->setup(m_procName, "loop_multcoeff", "Global Mult. Coef.", -1, -1);
+   ui.slider_loop->setup(m_procName, "loop_state", "toggle", "");
+   ui.slider_loop->setStretch(0,0,10, true, true);
+
+   ui.gainCtrl->setup(m_procName, "loop_gain", "Gain", -1, -1);
+   ui.mcCtrl->setup(m_procName, "loop_multcoeff", "Mult. Coef.", -1, -1);
    ui.mcCtrl->makeMultCoeffCtrl();
+
+   if(m_procName == "loloop") m_gainCtrl = "logainctrl";
+   else if(m_procName == "wloop") m_gainCtrl = "wgainctrl";
+   else m_gainCtrl = "hogainctrl";
+
+   ui.powerLawIndex->setup(m_gainCtrl, "pwrlaw_index", statusEntry::FLOAT, "Index", "");
+   ui.powerLawFloor->setup(m_gainCtrl, "pwrlaw_floor", statusEntry::FLOAT, "Floor", "");
 
    setXwFont(ui.label_LoopName);
    setXwFont(ui.label_loop);
@@ -108,6 +126,14 @@ loopCtrl::loopCtrl( std::string & procName,
    setXwFont(ui.button_LoopZero);
    setXwFont(ui.button_zeroall);
    setXwFont(ui.label_block_gains);
+
+   setXwFont(ui.label_powerLaw);
+
+   m_updateTimer = new QTimer;
+
+   connect(m_updateTimer, SIGNAL(timeout()), this, SLOT(updateGUI()));
+
+   m_updateTimer->start(250);
 
    onDisconnect();
 }
@@ -125,14 +151,16 @@ void loopCtrl::subscribe()
    m_parent->addSubscriberProperty(this, m_procName, "loop_gain");
    m_parent->addSubscriberProperty(this, m_procName, "loop_multcoeff");
    m_parent->addSubscriberProperty(this, m_procName, "loop_processes");
+   
+   m_parent->addSubscriber(ui.slider_loop);
    m_parent->addSubscriberProperty(this, m_procName, "loop_state");
 
-   if(m_procName == "loloop") m_gainCtrl = "logainctrl";
-   else if(m_procName == "wloop") m_gainCtrl = "wgainctrl";
-   else m_gainCtrl = "hogainctrl";
+   m_parent->addSubscriber(ui.powerLawIndex);
+   m_parent->addSubscriber(ui.powerLawFloor);
 
    m_parent->addSubscriberProperty(this, m_gainCtrl, "modes");
    
+
    m_parent->addSubscriber(ui.gainCtrl);
    m_parent->addSubscriber(ui.mcCtrl);
 
@@ -283,7 +311,7 @@ void loopCtrl::handleSetProperty( const pcf::IndiProperty & ipRecv)
       }
    }
 
-   updateGUI();
+   emit doUpdateGUI();
 }
 
 void loopCtrl::handleDelProperty( const pcf::IndiProperty & ipRecv)
@@ -315,7 +343,11 @@ void loopCtrl::setEnableDisable( bool tf,
 
    ui.gainCtrl->setEnabled(tf);
    ui.mcCtrl->setEnabled(tf);
-      
+
+   ui.powerLawIndex->setEnabled(tf);
+   ui.powerLawFloor->setEnabled(tf);
+   ui.button_setplaw->setEnabled(tf);
+
    std::lock_guard<std::mutex> lock(m_blockMutex);
    for(size_t n = 0; n < m_blockCtrls.size(); ++n)
    {
@@ -324,31 +356,7 @@ void loopCtrl::setEnableDisable( bool tf,
 }
 
 void loopCtrl::updateGUI()
-{   
-   if(!m_loopWaiting)
-   {
-      if(m_loopState)
-      {
-         ui.slider_loop->setSliderPosition(ui.slider_loop->maximum());
-      }
-      else
-      {
-         ui.slider_loop->setSliderPosition(ui.slider_loop->minimum());
-      }
-   }
-   
-   /*if( m_appState != "READY" && m_appState != "OPERATING" )
-   {
-      /// \todo Disable & zero all
-      
-   }
-   else if(!m_procState)
-   {
-      setEnableDisable(false);
-      ui.label_loop_state->setText("processes off");
-   }
-   else*/
-   {
+{      
       setEnableDisable(true, false);
 
       if(!m_loopWaiting) 
@@ -365,59 +373,9 @@ void loopCtrl::updateGUI()
       {
          ui.label_loop_state->setText("OPEN");
       }
-   }
+   
    
 } //updateGUI()
-
-
-void loopCtrl::on_slider_loop_sliderReleased()
-{
-   double relpos = ((double)(ui.slider_loop->sliderPosition() - ui.slider_loop->minimum()))/(ui.slider_loop->maximum() - ui.slider_loop->minimum());
-   
-   if(m_loopState)
-   {
-      if(relpos > 0.1)
-      {
-         ui.slider_loop->setSliderPosition(ui.slider_loop->maximum());
-         ui.label_loop_state->setEnabled(true);
-         ui.slider_loop->setEnabled(true);
-         return;
-      }
-   }
-   else 
-   {
-      if(relpos < 0.9)
-      {
-         ui.slider_loop->setSliderPosition(ui.slider_loop->minimum());
-         ui.label_loop_state->setEnabled(true);
-         ui.slider_loop->setEnabled(true);
-         return;
-      }
-   }
-   
-
-   ui.label_loop_state->setText("-----");
-   ui.label_loop_state->setEnabled(false);
-   ui.slider_loop->setEnabled(false);
-   m_loopWaiting = true;
-   
-   pcf::IndiProperty ipFreq(pcf::IndiProperty::Switch);
-   
-   ipFreq.setDevice(m_procName);
-   ipFreq.setName("loop_state");
-   ipFreq.add(pcf::IndiElement("toggle"));
-   
-   if(relpos >= 0.9)
-   {
-      ipFreq["toggle"] = pcf::IndiElement::On;
-   }
-   else
-   {
-      ipFreq["toggle"] = pcf::IndiElement::Off;
-   }
-   
-   sendNewProperty(ipFreq);
-}
 
 void loopCtrl::on_button_LoopZero_pressed()
 {
@@ -457,10 +415,23 @@ void loopCtrl::setupBlocks(int nB)
       char str[16];
       snprintf(str, sizeof(str), "%02d", n);
       modeTot += m_modes[n];
-      m_blockCtrls[n] = new gainCtrl(m_gainCtrl, std::string("block") + str + "_gain", std::string("Block") + str + " Gain", m_modes[n], modeTot);
+      m_blockCtrls[n] = new gainCtrl(m_gainCtrl, std::string("block") + str + "_gain", "", m_modes[n], modeTot);
       ui.horizontalLayout_2->addWidget(m_blockCtrls[n]);
       if(m_parent) m_parent->addSubscriber(m_blockCtrls[n]);
    }
+}
+
+void loopCtrl::on_button_setplaw_pressed()
+{
+    pcf::IndiProperty ipFreq(pcf::IndiProperty::Switch);
+   
+    ipFreq.setDevice(m_gainCtrl);
+    ipFreq.setName("pwrlaw_set");
+    ipFreq.add(pcf::IndiElement("request"));
+   
+    ipFreq["request"] = pcf::IndiElement::On;
+   
+    sendNewProperty(ipFreq);
 }
 
 } //namespace xqt

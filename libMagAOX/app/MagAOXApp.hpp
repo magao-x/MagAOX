@@ -942,10 +942,21 @@ protected:
    /** 
      *
      * \returns 0 on success.
-     * \returns -1 on an errory.
+     * \returns -1 on an error, which will be logged
      */
    int sendNewProperty( const pcf::IndiProperty & ipSend /**< [in] The property to send a "new" INDI command for */);
    
+   /// Send a new property commmand for a standard toggle switch
+   /**
+     * \returns 0 on success
+     * \returns -1 on an error, which will be logged.
+     */
+   int sendNewStandardIndiToggle( const std::string & device,   ///< [in] The device name
+                                  const std::string & property, ///< [in] The property name
+                                  bool onoff                    ///< [in] Switch state to send: true = on, false = off
+                                );
+
+
    ///indi Property to report the application state.
    pcf::IndiProperty m_indiP_state;
 
@@ -1244,11 +1255,18 @@ void MagAOXApp<_useINDI>::setDefaults( int argc,
    m_configPathLocal = m_configDir + "/" + m_configName + ".conf";
 
    //Now we can setup common INDI properties
-   REG_INDI_NEWPROP_NOCB(m_indiP_state, "fsm", pcf::IndiProperty::Text);
+   if( registerIndiPropertyNew( m_indiP_state, "fsm", pcf::IndiProperty::Text, pcf::IndiProperty::ReadOnly, pcf::IndiProperty::Idle, 0) < 0) 
+   {                                                                                          
+      log<software_error>({__FILE__,__LINE__, "failed to register read only fsm_state property"});
+   }  
+
    m_indiP_state.add (pcf::IndiElement("state"));
 
    createStandardIndiRequestSw( m_indiP_clearFSMAlert, "fsm_clear_alert", "Clear FSM Alert", "FSM");                                                     
-   registerIndiPropertyNew(m_indiP_clearFSMAlert, st_newCallBack_clearFSMAlert);
+   if(registerIndiPropertyNew(m_indiP_clearFSMAlert, st_newCallBack_clearFSMAlert) < 0)
+   {
+      log<software_error>({__FILE__,__LINE__, "failed to register new fsm_alert property"});
+   }
    
    return;
 
@@ -1322,7 +1340,10 @@ void MagAOXApp<_useINDI>::loadBasicConfig() //virtual
       if(m_powerDevice != "" && m_powerChannel != "")
       {
          log<text_log>("enabling power management: " + m_powerDevice + "." + m_powerChannel + "." + m_powerElement + "/" + m_powerTargetElement);
-         REG_INDI_SETPROP(m_indiP_powerChannel, m_powerDevice, m_powerChannel);
+         if( registerIndiPropertySet( m_indiP_powerChannel,m_powerDevice, m_powerChannel, INDI_SETCALLBACK(m_indiP_powerChannel)) < 0)  
+         {                                                                                          
+            log<software_error>({__FILE__,__LINE__, "failed to register set property"}); 
+         }            
       }
       else
       {
@@ -1388,6 +1409,7 @@ int MagAOXApp<_useINDI>::execute() //virtual
    //----------------------------------------//
    //        Check user
    //----------------------------------------//
+   #ifndef XWC_DISABLE_USER_CHECK
    struct stat logstat;
 
    if( stat(m_log.logPath().c_str(), &logstat) < 0)
@@ -1399,7 +1421,7 @@ int MagAOXApp<_useINDI>::execute() //virtual
    {
       return log<text_log,-1>({"You are running this app as the wrong user."}, logPrio::LOG_CRITICAL);
    }
-   
+   #endif
    
    //----------------------------------------//
    //        Get the PID Lock
@@ -2274,13 +2296,19 @@ int MagAOXApp<_useINDI>::createStandardIndiNumber( pcf::IndiProperty & prop,
    prop["current"].setMin(min);
    prop["current"].setMax(max);
    prop["current"].setStep(step);
-   prop["current"].setFormat(format);
-   
+   if(format != "") //don't override defaults
+   {
+      prop["current"].setFormat(format);
+   }
+
    prop.add(pcf::IndiElement("target"));
    prop["target"].setMin(min);
    prop["target"].setMax(max);
    prop["target"].setStep(step);
-   prop["target"].setFormat(format);
+   if(format != "") //don't override defaults
+   {
+      prop["target"].setFormat(format);
+   }
    
    //Don't set "" just in case libcommon does something with defaults
    if(label != "")
@@ -3133,19 +3161,54 @@ int MagAOXApp<_useINDI>::sendNewProperty( const pcf::IndiProperty & ipSend )
 
    if(!m_indiDriver)
    {
-      log<software_error>({__FILE__, __LINE__, "INDI communications not initialized."});
-      return -1;
+      return log<software_error, -1>({__FILE__, __LINE__, "INDI communications not initialized."});
    }
    
-   int rv = m_indiDriver->sendNewProperty(ipSend);
-   if(rv < 0)
+   if(m_indiDriver->sendNewProperty(ipSend) < 0)
    {
-      log<software_error>({__FILE__, __LINE__});
-      return -1;
+      return log<software_error, -1>({__FILE__, __LINE__});
    }
 
    return 0;
 }
+
+template<bool _useINDI>
+int MagAOXApp<_useINDI>::sendNewStandardIndiToggle( const std::string & device,
+                                                    const std::string & property,
+                                                    bool onoff
+                                                  )
+{             
+    if(!_useINDI) return 0;
+
+    pcf::IndiProperty ipSend(pcf::IndiProperty::Switch);  
+
+    try
+    {                                                     
+        ipSend.setDevice(device);                                                                              
+        ipSend.setName(property);                                                                              
+        ipSend.add(pcf::IndiElement("toggle"));    
+    }
+    catch(std::exception & e)
+    {
+        return log<software_error,-1>({__FILE__,__LINE__, std::string("exception: ") + e.what()});
+    }
+
+    if(onoff == false)                                                                                     
+    {                                                                                                      
+        ipSend["toggle"].setSwitchState(pcf::IndiElement::Off);                                            
+    }                                                                                                      
+    else                                                                                                   
+    {                                                                                                      
+        ipSend["toggle"].setSwitchState(pcf::IndiElement::On);                                             
+    }              
+
+    if(sendNewProperty(ipSend) < 0)                                                                        
+    {                                                                                                      
+        return log<software_error,-1>({__FILE__,__LINE__, "sendNewProperty failed for " + device + "." + property});                                                                        
+    }                                                                                                      
+
+    return 0;
+} 
 
 template<bool _useINDI>
 int MagAOXApp<_useINDI>::st_newCallBack_clearFSMAlert( void * app,

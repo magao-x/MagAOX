@@ -13,30 +13,32 @@ apps_common = \
 	shmimIntegrator \
 	timeSeriesSimulator
 
-apps_rtcicc = alpaoCtrl \
-              cacaoInterface \
-			  userGainCtrl \
-			  zaberCtrl \
-	          zaberLowLevel \
-			  picoMotorCtrl
+apps_rtcicc = \
+	bmcCtrl \
+	rhusbMon \
+	alpaoCtrl \
+	cacaoInterface \
+	userGainCtrl \
+	zaberCtrl \
+	zaberLowLevel \
+	picoMotorCtrl
 
 apps_rtc = \
+	alpaoCtrl \
 	ocam2KCtrl \
-    andorCtrl \
+	andorCtrl \
 	siglentSDG \
 	ttmModulator \
-	bmcCtrl \
-    rhusbMon \
 	pi335Ctrl \
 	pupilFit \
 	t2wOffloader \
 	dmSpeckle \
-    w2tcsOffloader \
+	w2tcsOffloader \
 	pwfsSlopeCalc
 
 
 apps_icc = \
-   acronameUsbHub \
+	acronameUsbHub \
 	flipperCtrl \
 	filterWheelCtrl \
 	hsfwCtrl \
@@ -65,8 +67,7 @@ apps_tic = \
 	acronameUsbHub \
 	baslerCtrl \
 	bmcCtrl \
-	trippLitePDU 
-
+	trippLitePDU
 
 libs_to_build = libtelnet
 
@@ -85,13 +86,13 @@ else ifeq ($(MAGAOX_ROLE),TIC)
 endif
 
 all_guis = \
-   dmCtrlGUI \
+	dmCtrlGUI \
 	dmModeGUI \
 	offloadCtrlGUI \
 	pupilGuideGUI \
 	pwr \
 	coronAlignGUI \
-   loopCtrlGUI \
+	loopCtrlGUI \
 	roiGUI \
 	cameraGUI \
 	stageGUI
@@ -126,11 +127,12 @@ else
   rtimv_plugins_to_build = $(all_rtimv_plugins)
 endif
 
-utils_to_build = logdump \
-				 logstream \
-                 cursesINDI \
-				 xrif2shmim \
-				 xrif2fits
+utils_to_build = \
+	logdump \
+	logstream \
+	cursesINDI \
+	xrif2shmim \
+	xrif2fits
 
 scripts_to_install = magaox \
 	query_seeing \
@@ -202,7 +204,6 @@ lib_clean:
 	cd libMagAOX; ${MAKE} clean
 
 apps_all: libs_install flatlogs_all
-
 	for app in ${apps_to_build}; do \
 		(cd apps/$$app; ${MAKE} )|| exit 1; \
 	done
@@ -282,8 +283,11 @@ utils_clean:
 			(cd utils/$$app; ${MAKE} clean) || exit 1; \
 		done
 
+test: tests_clean
+	cd tests; ${MAKE} test || exit 1;
+
 tests_clean:
-	cd tests; ${MAKE} clean || exit1;
+	cd tests; ${MAKE} clean || exit 1;
 	
 .PHONY: doc
 doc:

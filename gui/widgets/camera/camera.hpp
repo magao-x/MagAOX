@@ -164,7 +164,7 @@ camera::camera( std::string & camName,
 
    m_updateTimer = new QTimer(this);
 
-    connect(this, SIGNAL(doUpdateGUI()), this, SLOT(updateGUI()));
+   connect(this, SIGNAL(doUpdateGUI()), this, SLOT(updateGUI()));
 
    connect(m_updateTimer, SIGNAL(timeout()), this, SLOT(updateGUI()));
    connect(this, SIGNAL(updateTimerStop()), m_updateTimer, SLOT(stop()));
@@ -220,6 +220,7 @@ void camera::subscribe()
    m_parent->addSubscriberProperty((multiIndiSubscriber *) this, m_camName, "");
    m_parent->addSubscriberProperty((multiIndiSubscriber *) this, m_camName, "fsm");
    m_parent->addSubscriberProperty((multiIndiSubscriber *) this, m_darkName, "");
+   m_parent->addSubscriberProperty((multiIndiSubscriber *) this, m_darkName, "start");
 
    m_parent->addSubscriber(ui_fsmState);
 

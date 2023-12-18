@@ -69,7 +69,8 @@ namespace app
   * \ingroup pvcamCtrl
   */
 class pvcamCtrl : public MagAOXApp<true>, public dev::stdCamera<pvcamCtrl>, public dev::frameGrabber<pvcamCtrl>, 
-                                                       public dev::dssShutter<pvcamCtrl>, public dev::telemeter<pvcamCtrl>
+                                                 public dev::dssShutter<pvcamCtrl>, 
+                                                        public dev::telemeter<pvcamCtrl>
 {
 
     typedef dev::stdCamera<pvcamCtrl> stdCameraT;
@@ -91,9 +92,9 @@ public:
     /** \name app::dev Configurations
       *@{
       */
-    static constexpr bool c_stdCamera_tempControl = true; ///< app::dev config to tell stdCamera to expose temperature controls
+    static constexpr bool c_stdCamera_tempControl = false; ///< app::dev config to tell stdCamera to expose temperature controls
    
-    static constexpr bool c_stdCamera_temp = true; ///< app::dev config to tell stdCamera to expose temperature
+    static constexpr bool c_stdCamera_temp = false; ///< app::dev config to tell stdCamera to expose temperature
    
     static constexpr bool c_stdCamera_readoutSpeed = true; ///< app::dev config to tell stdCamera to expose readout speed controls
    
@@ -115,7 +116,7 @@ public:
 
     static constexpr bool c_stdCamera_cropMode = false; ///< app:dev config to tell stdCamera to expose Crop Mode controls
    
-    static constexpr bool c_stdCamera_hasShutter = false; ///< app:dev config to tell stdCamera to expose shutter controls
+    static constexpr bool c_stdCamera_hasShutter = true; ///< app:dev config to tell stdCamera to expose shutter controls
       
     static constexpr bool c_stdCamera_usesStateString = false; ///< app::dev confg to tell stdCamera to expose the state string property
    
@@ -329,7 +330,7 @@ void pvcamCtrl::setupConfig()
 
     stdCameraT::setupConfig(config);
     dev::frameGrabber<pvcamCtrl>::setupConfig(config);
-    dev::dssShutter<pvcamCtrl>::setupConfig(config);
+    shutterT::setupConfig(config);
     dev::telemeter<pvcamCtrl>::setupConfig(config);
 }
 
@@ -345,8 +346,23 @@ int pvcamCtrl::loadConfigImpl( mx::app::appConfigurator & _config )
     }
 
     stdCameraT::loadConfig(_config);
+
+    m_currentROI.x = m_default_x;
+    m_currentROI.y = m_default_y;
+    m_currentROI.w = m_default_w;
+    m_currentROI.h = m_default_h;
+    m_currentROI.bin_x = m_default_bin_x;
+    m_currentROI.bin_y = m_default_bin_y;
+
+    m_nextROI.x = m_currentROI.x;
+    m_nextROI.y = m_currentROI.y;
+    m_nextROI.w = m_currentROI.w;
+    m_nextROI.h = m_currentROI.h;
+    m_nextROI.bin_x = m_currentROI.bin_x;
+    m_nextROI.bin_y = m_currentROI.bin_y;
+    
     dev::frameGrabber<pvcamCtrl>::loadConfig(_config);
-    dev::dssShutter<pvcamCtrl>::loadConfig(_config);
+    shutterT::loadConfig(_config);
     dev::telemeter<pvcamCtrl>::loadConfig(_config);
    
 
@@ -379,6 +395,11 @@ int pvcamCtrl::appStartup()
         return log<software_critical, -1>({__FILE__, __LINE__});
     }
 
+    if(shutterT::appStartup() < 0)
+    {
+       return log<software_critical,-1>({__FILE__,__LINE__});
+    }
+
     return 0;
 }
 
@@ -404,6 +425,12 @@ int pvcamCtrl::appLogic()
 
     // run frammerGrabbers's appLogic
     if(frameGrabberT::appLogic() < 0)
+    {
+        return log<software_error, -1>({__FILE__, __LINE__});
+    }
+
+    //and run dssShutter's appLogic
+    if(shutterT::appLogic() < 0)
     {
         return log<software_error, -1>({__FILE__, __LINE__});
     }
@@ -484,7 +511,7 @@ int pvcamCtrl::appShutdown()
 
     ///\todo error check these base class fxns.
     frameGrabberT::appShutdown();
-    dev::dssShutter<pvcamCtrl>::appShutdown();
+    shutterT::appShutdown();
 
     return 0;
 }
@@ -500,18 +527,17 @@ int pvcamCtrl::powerOnDefaults()
     m_currentROI.h = m_default_h;
     m_currentROI.bin_x = m_default_bin_x;
     m_currentROI.bin_y = m_default_bin_y;
-
-    m_nextROI.x = m_currentROI.x;
-    m_nextROI.y = m_currentROI.y;
-    m_nextROI.w = m_currentROI.w;
-    m_nextROI.h = m_currentROI.h;
-    m_nextROI.bin_x = m_currentROI.bin_x;
-    m_nextROI.bin_y = m_currentROI.bin_y;
+   
+    m_nextROI.x = m_default_x;
+    m_nextROI.y = m_default_y;
+    m_nextROI.w = m_default_w;
+    m_nextROI.h = m_default_h;
+    m_nextROI.bin_x = m_default_bin_x;
+    m_nextROI.bin_y = m_default_bin_y;
 
     m_readoutSpeedName  = m_defaultReadoutSpeed;
     m_readoutSpeedNameSet = m_defaultReadoutSpeed;
 
-    std::cerr << "pod\n";
     return 0;
 }
 
@@ -641,8 +667,7 @@ int pvcamCtrl::setNextROI()
 
 int pvcamCtrl::setShutter(int sh)
 {
-    static_cast<void> (sh);
-    return 0;
+    return shutterT::setShutter(sh);
 }
 
 int pvcamCtrl::configureAcquisition()

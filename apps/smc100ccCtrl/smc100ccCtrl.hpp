@@ -39,7 +39,8 @@ namespace app
   Change to stateCodes::OPERATING and stateCodes::READY
 
   */
-class smc100ccCtrl : public MagAOXApp<>, public tty::usbDevice, public dev::ioDevice, public dev::stdMotionStage<smc100ccCtrl>, public dev::telemeter<smc100ccCtrl>
+class smc100ccCtrl : public MagAOXApp<>, public tty::usbDevice, public dev::ioDevice, 
+                             public dev::stdMotionStage<smc100ccCtrl>, public dev::telemeter<smc100ccCtrl>
 {
 
    friend class dev::stdMotionStage<smc100ccCtrl>;
@@ -98,8 +99,9 @@ public:
 
    virtual int onPowerOff()
    {
-      std::cerr << "On power off\n";
       m_powerOnHomed=false;
+      recordStage(true);
+      recordPosition(true);
       return 0;
    }
 
@@ -164,7 +166,13 @@ public:
    int checkRecordTimes();
    
    int recordTelem( const telem_stage * );
+
+   int recordTelem( const telem_position * );
+
+   int recordStage( bool force = false );
    
+   int recordPosition( bool force = false);
+
    ///@}
 };
 
@@ -185,7 +193,7 @@ void smc100ccCtrl::setupConfig()
    tty::usbDevice::setupConfig(config);
    dev::ioDevice::setupConfig(config);
    dev::stdMotionStage<smc100ccCtrl>::setupConfig(config);
-   
+   dev::telemeter<smc100ccCtrl>::setupConfig(config);
 }
 
 void smc100ccCtrl::loadConfig()
@@ -211,10 +219,17 @@ void smc100ccCtrl::loadConfig()
       m_shutdown = 1;
    }
    
-   dev::stdMotionStage<smc100ccCtrl>::loadConfig(config);
+   rv = dev::stdMotionStage<smc100ccCtrl>::loadConfig(config);
    if(rv != 0)
    {
-      log<software_error>({ __FILE__, __LINE__, "error loading io device configs"});
+      log<software_error>({ __FILE__, __LINE__, "error loading stdMotionStage configs"});
+      m_shutdown = 1;
+   }
+
+   rv = dev::telemeter<smc100ccCtrl>::loadConfig(config);
+   if(rv != 0)
+   {
+      log<software_error>({ __FILE__, __LINE__, "error loading telemeter configs"});
       m_shutdown = 1;
    }
 }
@@ -245,10 +260,17 @@ int smc100ccCtrl::appStartup()
    int rv = dev::stdMotionStage<smc100ccCtrl>::appStartup();
    if(rv != 0)
    {
-      log<software_error>({ __FILE__, __LINE__, "error loading io device configs"});
+      log<software_error>({ __FILE__, __LINE__, "error starting up stdMotionStage"});
       m_shutdown = 1;
    }
    
+   rv = dev::telemeter<smc100ccCtrl>::appStartup();
+   if(rv != 0)
+   {
+      log<software_error>({ __FILE__, __LINE__, "error starting up telemeter"});
+      m_shutdown = 1;
+   }
+
    return 0;
 }
 
@@ -257,6 +279,12 @@ int smc100ccCtrl::appLogic()
    if( state() == stateCodes::INITIALIZED )
    {
       log<text_log>( "In appLogic but in state INITIALIZED.", logPrio::LOG_CRITICAL );
+      return -1;
+   }
+
+   if(stdMotionStage<smc100ccCtrl>::appLogic() < 0)
+   {
+      log<software_error>({__FILE__, __LINE__});
       return -1;
    }
 
@@ -379,6 +407,15 @@ int smc100ccCtrl::appLogic()
    }
 
  
+   if(state() == stateCodes::HOMING || state() == stateCodes::READY || state() == stateCodes::OPERATING)
+   {
+      if(telemeter<smc100ccCtrl>::appLogic() < 0)
+      {
+         log<software_error>({__FILE__, __LINE__});
+         return -1;
+      }
+   }
+
    //If we're here, we can get state from controller...
    std::string axState;
    //mutex scope
@@ -390,6 +427,7 @@ int smc100ccCtrl::appLogic()
          return log<software_error, 0>({__FILE__,__LINE__});
       }
    }   
+
 
    if(axState[0] == '0') 
    {
@@ -540,6 +578,8 @@ int smc100ccCtrl::appLogic()
          log<software_error>({__FILE__, __LINE__,"There's been an error with getting current controller position."});
       }
 
+      recordPosition();
+
       updateIfChanged(m_indiP_position, "current", m_position);
       
       static int last_moving = -1;
@@ -579,7 +619,7 @@ int smc100ccCtrl::appLogic()
       }
 
       dev::stdMotionStage<smc100ccCtrl>::updateINDI();
-   
+      recordStage();
          
       return 0;
    }
@@ -966,7 +1006,11 @@ INDI_NEWCALLBACK_DEFN(smc100ccCtrl, m_indiP_position)(const pcf::IndiProperty &i
 
 int smc100ccCtrl::stop()
 {
-   std::unique_lock<std::mutex> lock(m_indiMutex);
+   recordStage(true);
+   recordPosition(true);
+   
+   //don't lock mutex -- this must go through
+
    std::string buffer{"1ST\r\n"};
    int rv = MagAOX::tty::ttyWrite(buffer, m_fileDescrip, m_writeTimeout); 
 
@@ -985,6 +1029,9 @@ int smc100ccCtrl::startHoming()
 {
    updateSwitchIfChanged(m_indiP_home, "request", pcf::IndiElement::Off, INDI_IDLE);
    
+   recordStage(true);
+   recordPosition(true);
+
    std::string buffer{"1OR\r\n"};
    int rv = MagAOX::tty::ttyWrite(buffer, m_fileDescrip, m_writeTimeout); 
 
@@ -1008,7 +1055,10 @@ double smc100ccCtrl::presetNumber()
 }
 
 int smc100ccCtrl::moveTo(double position)
-{      
+{  
+   recordStage(true);
+   recordPosition(true);
+
    std::string buffer{"1PA"};
    buffer = buffer + std::to_string(position) + "\r\n";
    
@@ -1037,12 +1087,37 @@ int smc100ccCtrl::moveTo(double position)
    
 int smc100ccCtrl::checkRecordTimes()
 {
-   return telemeter<smc100ccCtrl>::checkRecordTimes(telem_stage());
+   return telemeter<smc100ccCtrl>::checkRecordTimes(telem_stage(), telem_position());
 }
    
 int smc100ccCtrl::recordTelem( const telem_stage * )
 {
-   return stdMotionStage<smc100ccCtrl>::recordStage(true);
+   return recordStage(true);
+}
+
+int smc100ccCtrl::recordTelem( const telem_position * )
+{
+   return recordPosition(true);
+}
+
+int smc100ccCtrl::recordStage(bool force)
+{
+   return stdMotionStage<smc100ccCtrl>::recordStage(force);
+}
+
+int smc100ccCtrl::recordPosition(bool force)
+{
+   static float last_position = 1e30;
+
+   float fpos = m_position;
+
+   if( fpos != last_position || force )
+   {      
+      telem<telem_position>(fpos);
+      last_position = fpos;
+   }
+
+   return 0;
 }
 
 } //namespace app

@@ -1,0 +1,12 @@
+namespace MagAOX.logger;
+
+
+
+table Telem_position_fb
+{
+   /// position
+   pos:float;
+}
+
+root_type Telem_position_fb;
+
