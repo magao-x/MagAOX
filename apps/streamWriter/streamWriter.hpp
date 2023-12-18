@@ -81,7 +81,7 @@ protected:
 
    int m_semaphoreNumber {7}; ///< The image structure semaphore index.
    
-   unsigned m_semWait {500000000}; //The time in nsec to wait on the semaphore.  Max is 999999999. Default is 5e8 nsec.
+   unsigned m_semWait {500000000}; ///<The time in nsec to wait on the semaphore.  Max is 999999999. Default is 5e8 nsec.
    
    int m_lz4accel {1};
    
