@@ -70,31 +70,28 @@ class IndiElement
   public:
     /// Constructor.
     IndiElement();
+
     /// Constructor with a name. This will be used often.
     IndiElement( const std::string &szName );
-    /// Constructor with a name and a bool value.
-    //IndiElement( const std::string &szName, const bool &oValue );
-    /// Constructor with a name and a double value.
-    //IndiElement( const std::string &szName, const double &xValue );
-    /// Constructor with a name and a float value.
-    //IndiElement( const std::string &szName, const float &eValue );
-    /// Constructor with a name and an int value.
-    //IndiElement( const std::string &szName, const int &iValue );
+
     /// Constructor with a name and a string value.
     IndiElement( const std::string &szName, const std::string &szValue );
+
     /// Constructor with a name and a char pointer value.
     IndiElement( const std::string &szName, const char *pcValue );
-    /// Constructor with a name and a unsigned int value.
-    //IndiElement( const std::string &szName, const unsigned int &uiValue );
+
     /// Constructor with a name and a TT value.
     template <class TT> IndiElement( const std::string &szName, const TT &tValue );
 
     /// Constructor with a name and a LightStateType value.
     IndiElement( const std::string &szName, const LightStateType &tValue );
+
     /// Constructor with a name and a SwitchStateType value.
     IndiElement( const std::string &szName, const SwitchStateType &tValue );
+
     /// Copy constructor.
     IndiElement( const IndiElement &ieRhs );
+
     /// Destructor.
     virtual ~IndiElement();
 
