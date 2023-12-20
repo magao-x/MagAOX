@@ -21,152 +21,36 @@ using pcf::IndiElement;
 
 IndiElement::IndiElement()
 {
-  m_szMax = "0";
-  m_szMin = "0";
-  m_szSize = "0";
-  m_szStep = "0";
-  m_lsValue = UnknownLightState;
-  m_ssValue = UnknownSwitchState;
-  m_szFormat = "%g";
 }
 
 ////////////////////////////////////////////////////////////////////////////////
 /// Constructor with a name - this will be used often.
 
-IndiElement::IndiElement( const string &szName )
+IndiElement::IndiElement( const string &szName ) : m_szName(szName)
 {
-  m_szMax = "0";
-  m_szMin = "0";
-  m_szName = szName;
-  m_szSize = "0";
-  m_szStep = "0";
-  m_lsValue = UnknownLightState;
-  m_ssValue = UnknownSwitchState;
-  m_szFormat = "%g";
-}
-/*
-////////////////////////////////////////////////////////////////////////////////
-/// Constructor with a name and a bool value.
-
-IndiElement::IndiElement( const string &szName,
-                          const bool &oValue )
-{
-  m_szMax = "0";
-  m_szMin = "0";
-  m_szName = szName;
-  m_szSize = "0";
-  m_szStep = "0";
-  m_lsValue = UnknownLightState;
-  m_ssValue = UnknownSwitchState;
-  m_szFormat = "%g";
-
-  stringstream ssValue;
-  ssValue << boolalpha << oValue;
-  m_szValue = ssValue.str();
 }
 
-////////////////////////////////////////////////////////////////////////////////
-/// Constructor with a name and a double value.
-
-IndiElement::IndiElement( const string &szName,
-                          const double &xValue )
-{
-  m_szMax = "0";
-  m_szMin = "0";
-  m_szName = szName;
-  m_szSize = "0";
-  m_szStep = "0";
-  m_lsValue = UnknownLightState;
-  m_ssValue = UnknownSwitchState;
-  m_szFormat = "%g";
-
-  stringstream ssValue;
-  ssValue << xValue;
-  m_szValue = ssValue.str();
-}
-
-////////////////////////////////////////////////////////////////////////////////
-/// Constructor with a name and a float value.
-
-IndiElement::IndiElement( const string &szName,
-                          const float &eValue )
-{
-  m_szMax = "0";
-  m_szMin = "0";
-  m_szName = szName;
-  m_szSize = "0";
-  m_szStep = "0";
-  m_lsValue = UnknownLightState;
-  m_ssValue = UnknownSwitchState;
-  m_szFormat = "%g";
-
-  stringstream ssValue;
-  ssValue << eValue;
-  m_szValue = ssValue.str();
-}
-
-////////////////////////////////////////////////////////////////////////////////
-/// Constructor with a name and an int value.
-
-IndiElement::IndiElement( const string &szName,
-                          const int &iValue )
-{
-  m_szMax = "0";
-  m_szMin = "0";
-  m_szName = szName;
-  m_szSize = "0";
-  m_szStep = "0";
-  m_lsValue = UnknownLightState;
-  m_ssValue = UnknownSwitchState;
-  m_szFormat = "%g";
-
-  stringstream ssValue;
-  ssValue << iValue;
-  m_szValue = ssValue.str();
-}
-*/
 ////////////////////////////////////////////////////////////////////////////////
 /// Constructor with a name and a string value.
 
 IndiElement::IndiElement( const string &szName,
-                          const string &szValue )
+                          const string &szValue ) : m_szName(szName), m_szValue(szValue)
 {
-  m_szMax = "0";
-  m_szMin = "0";
-  m_szName = szName;
-  m_szSize = "0";
-  m_szStep = "0";
-  m_lsValue = UnknownLightState;
-  m_ssValue = UnknownSwitchState;
-  m_szFormat = "%g";
-
-  m_szValue = szValue;
 }
 
 ////////////////////////////////////////////////////////////////////////////////
 /// Constructor with a name and a char pointer value.
 
 IndiElement::IndiElement( const string &szName,
-                          const char *pcValue )
+                          const char *pcValue ) : m_szName(szName), m_szValue(pcValue)
 {
-  m_szMax = "0";
-  m_szMin = "0";
-  m_szName = szName;
-  m_szSize = "0";
-  m_szStep = "0";
-  m_lsValue = UnknownLightState;
-  m_ssValue = UnknownSwitchState;
-  m_szFormat = "%g";
-
-  m_szValue = string( pcValue );
 }
 
 ////////////////////////////////////////////////////////////////////////////////
 /// Constructor with a name and a LightStateType value.
 
 IndiElement::IndiElement( const string &szName,
-                          const LightStateType &tValue ) :  m_szFormat("%g"), m_szMax("0"), m_szMin("0"), m_szName(szName), m_szSize("0"),
-                                                             m_szStep("0"), m_lsValue(tValue), m_ssValue(UnknownSwitchState)
+                          const LightStateType &tValue ) : m_szName(szName), m_lsValue(tValue)
 {
 }
 
@@ -174,8 +58,7 @@ IndiElement::IndiElement( const string &szName,
 /// Constructor with a name and a SwitchStateType value.
 
 IndiElement::IndiElement( const string &szName,
-                          const SwitchStateType &tValue ) : m_szFormat("%g"), m_szMax("0"), m_szMin("0"), m_szName(szName), m_szSize("0"),
-                                                             m_szStep("0"), m_lsValue(UnknownLightState), m_ssValue(tValue)
+                          const SwitchStateType &tValue ) : m_szName(szName), m_ssValue(tValue)
 {
 }
 

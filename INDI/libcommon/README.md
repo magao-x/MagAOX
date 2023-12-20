@@ -6,26 +6,27 @@ The original author is Paul Grenz of the LBTI project.
 
 The following changes were made for use in MagAO-X:
 
-- IndiElement.cpp line 438 changed to:
- - ssValue >> iValue;
- - return ssValue.good();
-- IndiConnection.cpp: commented out ::signal on lines 118-120
-- MutexLock.hpp: added noexcept(true) to d'tor decl.
-- ReadWriteLock.hpp: added noexcept(true) to d'tor decl.
-- IndiDriver.hpp: added noexcept(true) to d'tor decl.
-- Removed logging of config elements, IndiConnection.ccp line 138
-- 2018-09-02: Fully removed logging and config from IndiConnection/Driver/Client, and removed those files from the repo.
-- 2019-08-24: made IndiConnection::m_oQuitProcess not static, prevents app-wide INDI shutdown due to a client disconnect.  Also some signal handling cruft we don't use.
-
+  - IndiElement.cpp line 438 changed to:
+  - ssValue >> iValue;
+  - return ssValue.good();
+  - IndiConnection.cpp: commented out ::signal on lines 118-120
+  - MutexLock.hpp: added noexcept(true) to d'tor decl.
+  - ReadWriteLock.hpp: added noexcept(true) to d'tor decl.
+  - IndiDriver.hpp: added noexcept(true) to d'tor decl.
+  - Removed logging of config elements, IndiConnection.ccp line 138
+  - 2018-09-02: Fully removed logging and config from IndiConnection/Driver/Client, and removed those files from the repo.
+  - 2019-08-24: made IndiConnection::m_oQuitProcess not static, prevents app-wide INDI shutdown due to a client disconnect.  Also some signal handling cruft we don't use.
+  - 2023-12-20: have altered the way file des are handled, now using streams for robustness.  Refactoring various things based on codacy.
+  
 TODO:
-- Should fully remove config system (comment it out), so we don't need to trick it with tmp files.
-- Analyze codacy issues with d'tors which throw (MutexLock and ReadWriteLock).
-
+  
+  - Should fully remove config system (comment it out), so we don't need to trick it with tmp files.
+  - Analyze codacy issues with d'tors which throw (MutexLock and ReadWriteLock).
 
 ## Version History
 
 2018-05-17: The first addition of this code to the MagAO-X repo was based on the LBTI_INDI svn rep:
-```
+```bash
 Working Copy Root Path: /home/jrmales/Source/LBTI_INDI
 URL: http://lbti.as.arizona.edu/svn/lbti/LBTI_INDI
 Relative URL: ^/LBTI_INDI
@@ -38,5 +39,3 @@ Last Changed Author: lbti
 Last Changed Rev: 9792
 Last Changed Date: 2018-05-17 14:55:08 -0700 (Thu, 17 May 2018)
 ```
-
-
