@@ -11,15 +11,12 @@ shift #removes the name from args
 
 case ${DMNAME} in
    woofer )
-      dmctrl=dmwoofer
       dmindex=00
       ;;
    tweeter )
-      dmctrl=dmtweeter
       dmindex=01
       ;;
    ncpc )
-      dmctrl=dmncpc
       dmindex=02
       ;;
    * )
