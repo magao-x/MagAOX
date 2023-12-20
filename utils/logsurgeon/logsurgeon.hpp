@@ -91,6 +91,9 @@ int logsurgeon::execute()
    if(nrd != fsz)
    {
       std::cerr << __FILE__ << " " << __LINE__ << " did not read complete file.\n";
+      delete[] buff;
+      delete[] gbuff;
+
       return -1;
    }
    fclose(fin);
