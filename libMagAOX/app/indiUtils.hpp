@@ -113,6 +113,7 @@ void updateIfChanged( pcf::IndiProperty & p,   ///< [in/out] The property contai
       if(p[el].getValue() != ssValue.str()|| oldState != newState)
       {
          p[el].set(newVal);
+         p.setTimeStamp(pcf::TimeStamp());
          p.setState (newState);
          indiDriver->sendSetProperty (p);
       }
@@ -148,6 +149,7 @@ void updateIfChanged( pcf::IndiProperty & p,   ///< [in/out] The property contai
    if( !indiDriver ) return;
    
    size_t n; //loop index outside so we can use it for error reporting.
+
    try
    {
       //First we look for any changes
@@ -174,6 +176,7 @@ void updateIfChanged( pcf::IndiProperty & p,   ///< [in/out] The property contai
          {
             p[els[n]].set(newVals[n]);
          }
+         p.setTimeStamp(pcf::TimeStamp());
          p.setState (newState);
          indiDriver->sendSetProperty (p);
       }
@@ -217,6 +220,7 @@ void updateSwitchIfChanged( pcf::IndiProperty & p,   ///< [in/out] The property 
       if(oldVal != newVal || oldState != newState)
       {
          p[el].setSwitchState(newVal);
+         p.setTimeStamp(pcf::TimeStamp());
          p.setState (newState);
          indiDriver->sendSetProperty (p);
       }
@@ -279,6 +283,7 @@ void updateSelectionSwitchIfChanged( pcf::IndiProperty & p,   ///< [in/out] The 
    if(changed || oldState != newState)
    {
       p.setState (newState);
+      p.setTimeStamp(pcf::TimeStamp());
       indiDriver->sendSetProperty (p);
    }
    

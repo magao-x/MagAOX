@@ -568,6 +568,7 @@ int stdMotionStage<derivedT>::updateINDI()
          m_indiP_presetName.setState(INDI_IDLE);
       }
             
+      m_indiP_presetName.setTimeStamp(pcf::TimeStamp());
       derived().m_indiDriver->sendSetProperty(m_indiP_presetName);
    }
       
