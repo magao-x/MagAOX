@@ -248,17 +248,8 @@ class IndiElement
 /// Constructor with a name and a TT value.
 
 template <class TT> pcf::IndiElement::IndiElement( const std::string &szName,
-                                                   const TT &ttValue )
+                                                   const TT &ttValue ) : m_szName(szName)
 {
-  m_szMax = "0";
-  m_szMin = "0";
-  m_szName = szName;
-  m_szSize = "0";
-  m_szStep = "0";
-  m_lsValue = UnknownLightState;
-  m_ssValue = UnknownSwitchState;
-  m_szFormat = "%g";
-
   std::stringstream ssValue;
   ssValue << std::boolalpha << ttValue;
   m_szValue = ssValue.str();
