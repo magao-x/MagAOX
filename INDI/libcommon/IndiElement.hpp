@@ -111,13 +111,6 @@ class IndiElement
     // We want the value as a different things.
     operator LightStateType() const;
     operator SwitchStateType() const;
-    //operator bool() const;
-    //operator double() const;
-    //operator float() const;
-    //operator int() const;
-    //operator std::string() const;
-    //operator unsigned int() const;
-    //template <class TT> operator TT() const;
 
     // Methods.
   public:
@@ -138,8 +131,6 @@ class IndiElement
     const std::string &getName() const;
     
     const std::string &getSize() const;
-    
-    template <class TT> typename std::remove_reference<TT>::type getSize() const;
     
     const std::string &getStep() const;
 
@@ -283,32 +274,7 @@ template <class TT> TT pcf::IndiElement::getValue() const
   return tValue;
 }
 
-////////////////////////////////////////////////////////////////////////////////
-/// Returns the TT value.
-/// This will NOT work trying to access the value as a string, see:
-/// https://stackoverflow.com/questions/7741531/conversion-operator-template-specialization
-/// Use 'getValue' instead.
-/*
-template <class TT> pcf::IndiElement::operator TT() const
-{
-  pcf::ReadWriteLock::AutoRLock rwAuto( &m_rwData );
 
-  TT ttValue;
-  std::stringstream ssValue( m_szValue );
-  ssValue.precision( 15 );
-
-  // Try to stream the data into the variable.
-  ssValue >> std::boolalpha >> ttValue;
-  if ( ssValue.fail() == true )
-  {
-    throw ( std::runtime_error( std::string( "IndiElement '" )
-                                + m_szName + "' value '"
-                                + m_szValue + "' cannot be streamed." ) );
-  }
-
-  return ttValue;
-}
-*/
 ////////////////////////////////////////////////////////////////////////////////
 ///  set an value of type TT in the element using the "=" operator.
 
@@ -388,6 +354,7 @@ template <class TT> void pcf::IndiElement::setSize( const TT &ttSize )
   m_szSize = ssValue.str();
 }
 
+/*
 ////////////////////////////////////////////////////////////////////////////////
 /// Get the size as an arbitrary type.
 template <class TT> typename std::remove_reference<TT>::type pcf::IndiElement::getSize() const
@@ -399,7 +366,7 @@ template <class TT> typename std::remove_reference<TT>::type pcf::IndiElement::g
   std::stringstream ssValue( m_szSize );
   ssValue >> std::boolalpha >> tValue;
   return tValue;
-}
+}*/
 
 
 ////////////////////////////////////////////////////////////////////////////////

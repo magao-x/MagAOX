@@ -33,9 +33,8 @@ IndiPropertyMap::~IndiPropertyMap()
 /// Copy constructor - just copy the properties.
 /// @param rhs Another version of the driver.
 
-IndiPropertyMap::IndiPropertyMap( const IndiPropertyMap &ipmRhs )
-{
-  m_mapProperties = ipmRhs.m_mapProperties;
+IndiPropertyMap::IndiPropertyMap( const IndiPropertyMap &ipmRhs ) : m_mapProperties(ipmRhs.m_mapProperties)
+{ 
 }
 
 ////////////////////////////////////////////////////////////////////////////////

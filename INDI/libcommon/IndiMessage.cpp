@@ -16,25 +16,20 @@ using pcf::IndiMessage;
 
 IndiMessage::IndiMessage()
 {
-  m_tType = Unknown;
 }
 
 ////////////////////////////////////////////////////////////////////////////////
 /// Constructor with type and property - this will be used often.
 
-IndiMessage::IndiMessage( const Type &tType, const IndiProperty &ipMsg )
+IndiMessage::IndiMessage( const Type &tType, const IndiProperty &ipMsg ) : m_ipMsg(ipMsg), m_tType(tType)
 {
-  m_tType = tType;
-  m_ipMsg = ipMsg;
 }
 
 ////////////////////////////////////////////////////////////////////////////////
 ///  Copy constructor.
 
-IndiMessage::IndiMessage( const IndiMessage &imRhs )
+IndiMessage::IndiMessage( const IndiMessage &imRhs ) : m_ipMsg(imRhs.m_ipMsg), m_tType(imRhs.m_tType)
 {
-  m_ipMsg = imRhs.m_ipMsg;
-  m_tType = imRhs.m_tType;
 }
 
 ////////////////////////////////////////////////////////////////////////////////
