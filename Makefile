@@ -60,7 +60,8 @@ apps_aoc = \
 	kTracker \
 	koolanceCtrl \
 	observerCtrl \
-	siglentSDG
+	siglentSDG \
+	audibleAlerts
 
 
 apps_tic = \
