@@ -394,12 +394,13 @@ template <class TT> typename std::remove_reference<TT>::type pcf::IndiElement::g
 {
   pcf::ReadWriteLock::AutoRLock rwAuto( &m_rwData );
 
-  TT tValue;
+  typename std::remove_reference<TT>::type tValue;
   //  stream the size into the variable.
   std::stringstream ssValue( m_szSize );
   ssValue >> std::boolalpha >> tValue;
   return tValue;
 }
+
 
 ////////////////////////////////////////////////////////////////////////////////
 ///  set a step of type TT in the element.
