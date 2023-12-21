@@ -7,24 +7,65 @@ import subprocess
 import psutil
 from purepyindi2 import Device, transports
 import toml
+import typing
 
 log = logging.getLogger(__name__)
+
+import xconf
+
+@xconf.config
+class BaseConfig:
+    sleep_interval_sec : float = xconf.field(default=1.0, help="Main loop logic will be run every `sleep_interval_sec` seconds")
+
+    @classmethod
+    def from_config(
+        cls,
+        default_config_path : typing.Optional[str] = None,
+        config_path_or_paths: typing.Union[str,list[str]] = None,
+        config_dict: typing.Optional[dict] = None,
+        settings_strs: typing.Optional[list[str]] = None,
+    ):
+        '''Initialize a class instance using config files from disk, and/or a dictionary
+        of options, and/or overrides from the cli
+        '''
+
+        config_paths = []
+        if isinstance(config_path_or_paths, str):
+            config_paths.append(config_path_or_paths)
+        elif isinstance(config_path_or_paths, list):
+            config_paths.extend(config_path_or_paths)
+        if settings_strs is None:
+            settings_strs = []
+        raw_config = xconf._get_config_data(default_config_path, config_paths, settings_strs)
+        if config_dict is not None:
+            for key, value in config_dict.items():
+                if key in raw_config:
+                    old_val = raw_config[key]
+                    log.info(f"Using provided value {value} for {key} which was set to {old_val} in the loaded config files")
+            raw_config.update(config_dict)
+        try:
+            instance = xconf.from_dict(cls, raw_config)
+        except (xconf.UnexpectedDataError, xconf.MissingValueError) as e:
+            raise xconf.ConfigMismatch(e, raw_config)
+        return instance
+
 
 class XDevice(Device):
     prefix_dir : str  = "/opt/MagAOX"
     logs_dir : str = "logs"
     config_dir : str = "config"
     log : logging.Logger
-    config : dict
+    config : BaseConfig
 
-    def _init_config(self):
-        config_file = self.prefix_dir + "/" + self.config_dir + "/" + self.name + ".conf"
-        try:
-            with open(config_file, 'r') as fh:
-                self.config = toml.loads(fh)
-        except Exception:
-            log.exception(f"Could not load the config file (tried {config_file})")
-            self.config = {}
+    @classmethod
+    @property
+    def default_config_path(cls):
+        return cls.prefix_dir + "/" + cls.config_dir + "/" + cls.__name__ + ".conf"
+
+    @classmethod
+    def load_config(cls, filenames, overrides):
+        config_class : BaseConfig = typing.get_type_hints(cls)['config']
+        return config_class.from_config(cls.default_config_path, filenames, settings_strs=overrides)
 
     def _init_logs(self, verbose, all_verbose):
         self.log = logging.getLogger(self.name)
@@ -54,7 +95,7 @@ class XDevice(Device):
     def __init__(self, name, *args, verbose=False, all_verbose=False, **kwargs):
         fifos_root = self.prefix_dir + "/drivers/fifos"
         super().__init__(name, *args, connection_class=partial(transports.IndiFifoConnection, name=name, fifos_root=fifos_root), **kwargs)
-        self._init_config()
+        self.config = self.load_config()
         self._init_logs(verbose, all_verbose)
 
     def lock_pid_file(self):
@@ -86,9 +127,17 @@ class XDevice(Device):
     @classmethod
     def console_app(cls):
         import argparse
-        parser = argparse.ArgumentParser()
+        parser = argparse.ArgumentParser(add_help=False)
+        xconf.add_subparser_arguments(parser)
         parser.add_argument('-n', '--name', help="Device name for INDI")
-        parser.add_argument('-v', '--verbose', action='store_true', help="Set device log level to DEBUG")
         parser.add_argument('-a', '--all-verbose', action='store_true', help="Set global log level to DEBUG")
         args = parser.parse_args()
+        config_class = typing.get_type_hints(cls)['config']
+        if args.help:
+            xconf.print_help(config_class, parser)
+            sys.exit(0)
+        if args.dump_config:
+            config = cls.load_config(args.config_file, args.vars)
+            print(xconf.config_to_toml(config))
+            sys.exit(0)
         cls(name=args.name, verbose=args.verbose, all_verbose=args.all_verbose).main()
