@@ -190,3 +190,7 @@ vm/calib/
 vm/config/
 vm/
 *.swp
+
+# Python caches, etc
+*.egg-info
+__pycache__

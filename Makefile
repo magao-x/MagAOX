@@ -289,6 +289,11 @@ test: tests_clean
 tests_clean:
 	cd tests; ${MAKE} clean || exit 1;
 	
+
+.PHONY: python_install
+python_install:
+	python -m pip install -e ./python/
+
 .PHONY: doc
 doc:
 	doxygen doc/config/Doxyfile.libMagAOX
