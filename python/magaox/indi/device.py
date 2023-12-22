@@ -62,6 +62,14 @@ class XDevice(Device):
     def default_config_path(cls):
         return cls.prefix_dir + "/" + cls.config_dir + "/" + cls.__name__ + ".conf"
 
+    @property
+    def sleep_interval_sec(self):
+        '''Sleep between executions of loop()
+
+        Note this overrides the superclass class attribute with a read-only property
+        referencing the config via `BaseConfig.sleep_interval_sec`'''
+        return self.config.sleep_interval_sec
+
     @classmethod
     def load_config(cls, filenames, overrides):
         config_class : BaseConfig = typing.get_type_hints(cls)['config']
