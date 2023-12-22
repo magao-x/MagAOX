@@ -7,6 +7,8 @@
 #ifndef pvcamCtrl_hpp
 #define pvcamCtrl_hpp
 
+#include <string.h>
+
 // PVCAM
 #include <master.h>
 #include <pvcam.h>
@@ -142,7 +144,7 @@ protected:
 
     int16 m_handle{ -1 }; ///< Camera handle, set when camera is opened
 
-    char m_camName[CAM_NAME_LEN] {'\0'}; ///< Camera name, filled in as part of opening the camera.
+    std::string m_camName; ///< Camera name, filled in as part of opening the camera.
 
     struct gain
     {
@@ -572,14 +574,14 @@ int pvcamCtrl::setExpTime()
 {
     ulong64 minExpTime, maxExpTime;
 
-    if(!pl_get_param(m_handle, PARAM_EXPOSURE_TIME, ATTR_MIN, (void *)&minExpTime))
+    if(!pl_get_param(m_handle, PARAM_EXPOSURE_TIME, ATTR_MIN, static_cast<void *>(&minExpTime)))
     {
         log_pvcam_software_error("pl_get_param", "PARAM_EXPOSURE_TIME ATTR_MIN");
         log<software_error>({__FILE__, __LINE__, "could not set exposure time"});
         return -1;
     }
 
-    if(!pl_get_param(m_handle, PARAM_EXPOSURE_TIME, ATTR_MAX, (void *)&maxExpTime))
+    if(!pl_get_param(m_handle, PARAM_EXPOSURE_TIME, ATTR_MAX, static_cast<void *>(&maxExpTime)))
     {
         log_pvcam_software_error("pl_get_param", "PARAM_EXPOSURE_TIME ATTR_MAX");
         log<software_error>({__FILE__, __LINE__, "could not set exposure time"});
@@ -715,7 +717,7 @@ int pvcamCtrl::configureAcquisition()
     }
     m_readoutSpeedName = m_readoutSpeedNameSet;
 
-    if(pl_set_param(m_handle, PARAM_READOUT_PORT, (void *)&value) == false)
+    if(pl_set_param(m_handle, PARAM_READOUT_PORT, static_cast<void *>(&value)) == false)
     {
         log_pvcam_software_error("pl_set_param", "PARAM_READOUT_PORT");
         return -1;
@@ -859,7 +861,7 @@ int pvcamCtrl::loadImageIntoStream(void *dest)
     
     // Obtain a pointer to the last acquired frame
     uns8 *frame;
-    if(pl_exp_get_latest_frame(m_handle, (void **)&frame) == false)
+    if(pl_exp_get_latest_frame(m_handle, reinterpret_cast<void **>(&frame)) == false)
     {
         log_pvcam_software_error("pl_exp_get_latest_frame", "");
     }
@@ -967,7 +969,7 @@ int pvcamCtrl::connect()
         // Read the version of the Device Driver
 
         rs_bool isAvailable;
-        if(!pl_get_param(handle, PARAM_HEAD_SER_NUM_ALPHA, ATTR_AVAIL, (void*)&isAvailable))
+        if(!pl_get_param(handle, PARAM_HEAD_SER_NUM_ALPHA, ATTR_AVAIL, static_cast<void*>(&isAvailable)))
         {
             log_pvcam_software_error("pl_get_param", "PARAM_HEAD_SER_NUM_ALPHA ATTR_AVAIL");
 
@@ -983,7 +985,7 @@ int pvcamCtrl::connect()
         {
             char camSerial[MAX_ALPHA_SER_NUM_LEN]{ '\0' };
 
-            if(!pl_get_param(handle, PARAM_HEAD_SER_NUM_ALPHA, ATTR_CURRENT, (void*)camSerial))
+            if(!pl_get_param(handle, PARAM_HEAD_SER_NUM_ALPHA, ATTR_CURRENT, static_cast<void*>(camSerial)))
             {
                 log_pvcam_software_error("pl_get_param", "PARAM_HEAD_SER_NUM_ALPHA ATTR_CURRENT");
 
@@ -998,7 +1000,7 @@ int pvcamCtrl::connect()
             if(camSerial == m_serialNumber) 
             {
                 state(stateCodes::NOTCONNECTED); //not strictly true, but logically true until m_handle is set
-                strncpy(m_camName, camName, sizeof(m_camName));
+                m_camName = camName; 
                 m_handle = handle;
                 break;
             }    
@@ -1063,7 +1065,7 @@ int pvcamCtrl::fillSpeedTable()
         
     uns32 nports;
 
-    if(pl_get_param(m_handle, PARAM_READOUT_PORT, ATTR_COUNT, (void *)&nports) == false)
+    if(pl_get_param(m_handle, PARAM_READOUT_PORT, ATTR_COUNT, static_cast<void *>(&nports)) == false)
     {
         log_pvcam_software_error("pl_get_param", "PARAM_READOUT_PORT");
         return -1;
@@ -1106,14 +1108,14 @@ int pvcamCtrl::fillSpeedTable()
 
         delete [] text;
 
-        if(pl_set_param(m_handle, PARAM_READOUT_PORT, (void *)&value) == false)
+        if(pl_set_param(m_handle, PARAM_READOUT_PORT, static_cast<void *>(&value)) == false)
         {
             log_pvcam_software_error("pl_set_param", "PARAM_READOUT_PORT");
             return -1;
         }
 
         uns32 nspeeds;
-        if(pl_get_param(m_handle, PARAM_SPDTAB_INDEX, ATTR_COUNT, (void *)&nspeeds) == false)
+        if(pl_get_param(m_handle, PARAM_SPDTAB_INDEX, ATTR_COUNT, static_cast<void *>(&nspeeds)) == false)
         {
             log_pvcam_software_error("pl_get_param", "PARAM_SPDTAB_INDEX");
             return -1;
@@ -1124,14 +1126,14 @@ int pvcamCtrl::fillSpeedTable()
 
         for(uns32 s = 0; s < nspeeds; ++s)
         {
-            if(pl_set_param(m_handle, PARAM_SPDTAB_INDEX, (void *)&s) == false)
+            if(pl_set_param(m_handle, PARAM_SPDTAB_INDEX, static_cast<void *>(&s)) == false)
             {
                 log_pvcam_software_error("pl_set_param", "PARAM_SPDTAB_INDEX");
                 return -1;
             }
 
             uns16 pixtime;
-            if(pl_get_param(m_handle, PARAM_PIX_TIME, ATTR_CURRENT, (void *)&pixtime) == false)
+            if(pl_get_param(m_handle, PARAM_PIX_TIME, ATTR_CURRENT, static_cast<void *>(&pixtime)) == false)
             {
                 log_pvcam_software_error("pl_get_param", "PARAM_PIX_TIME");
                 return -1;
@@ -1140,21 +1142,21 @@ int pvcamCtrl::fillSpeedTable()
             m_ports[p].speeds[s].pixTime = pixtime;
 
             uns32 ngains;
-            if(pl_get_param(m_handle, PARAM_GAIN_INDEX, ATTR_COUNT, (void *)&ngains) == false)
+            if(pl_get_param(m_handle, PARAM_GAIN_INDEX, ATTR_COUNT, static_cast<void *>(&ngains)) == false)
             {
                 log_pvcam_software_error("pl_get_param", "PARAM_GAIN_INDEX ATTR_COUNT");
                 return -1;
             }
 
             int16 ming;
-            if(pl_get_param(m_handle, PARAM_GAIN_INDEX, ATTR_MIN, (void *)&ming) == false)
+            if(pl_get_param(m_handle, PARAM_GAIN_INDEX, ATTR_MIN, static_cast<void *>(&ming)) == false)
             {
                 log_pvcam_software_error("pl_get_param", "PARAM_GAIN_INDEX ATTR_MIN");
                 return -1;
             }
 
             int16 maxg;
-            if(pl_get_param(m_handle, PARAM_GAIN_INDEX, ATTR_MIN, (void *)&maxg) == false)
+            if(pl_get_param(m_handle, PARAM_GAIN_INDEX, ATTR_MIN, static_cast<void *>(&maxg)) == false)
             {
                 log_pvcam_software_error("pl_get_param", "PARAM_GAIN_INDEX ATTR_MAX");
                 return -1;
@@ -1171,14 +1173,14 @@ int pvcamCtrl::fillSpeedTable()
             {
                 
                 int16 gg = ming + g;
-                if(pl_set_param(m_handle, PARAM_GAIN_INDEX, (void *)&gg) == false)
+                if(pl_set_param(m_handle, PARAM_GAIN_INDEX, static_cast<void *>(&gg)) == false)
                 {
                     log_pvcam_software_error("pl_set_param", "PARAM_GAIN_INDEX");
                     return -1;
                 }
 
                 int16 bitdepth;
-                if(pl_get_param(m_handle, PARAM_BIT_DEPTH, ATTR_CURRENT, (void *)&bitdepth) == false)
+                if(pl_get_param(m_handle, PARAM_BIT_DEPTH, ATTR_CURRENT, static_cast<void *>(&bitdepth)) == false)
                 {
                     log_pvcam_software_error("pl_get_param", "PARAM_BIT_DEPTH ATTR_CURRENT");
                     return -1;
@@ -1198,7 +1200,7 @@ void pvcamCtrl::dumpEnum(uns32 paramID, const std::string & paramMnem)
     {
         uns32 count;
 
-        if(PV_OK != pl_get_param(m_handle, paramID, ATTR_COUNT, (void *)&count))
+        if(PV_OK != pl_get_param(m_handle, paramID, ATTR_COUNT, static_cast<void *>(&count)))
         {
             log_pvcam_software_error("pl_get_param", paramMnem);
             // TODO: Handle error
@@ -1252,7 +1254,7 @@ int pvcamCtrl::getTemp()
     }
 
     rs_bool isAvailable;
-    if(!pl_get_param(m_handle, PARAM_TEMP_SETPOINT, ATTR_AVAIL, (void*)&isAvailable))
+    if(!pl_get_param(m_handle, PARAM_TEMP_SETPOINT, ATTR_AVAIL, static_cast<void*>(&isAvailable)))
     {
         if(powerState() != 1 || powerStateTarget() != 1) return 0;
         log_pvcam_software_error("pl_get_param", "PARAM_TEMP ATTR_AVAIL");
@@ -1262,7 +1264,7 @@ int pvcamCtrl::getTemp()
     int16 stemp;
     if(isAvailable) //Maybe this is a separate check.  Don't yet know what happens when acquiring
     {
-        if(!pl_get_param(m_handle, PARAM_TEMP_SETPOINT, ATTR_CURRENT, (void*)&stemp))
+        if(!pl_get_param(m_handle, PARAM_TEMP_SETPOINT, ATTR_CURRENT, static_cast<void*>(&stemp)))
         {
             if(powerState() != 1 || powerStateTarget() != 1) return 0;
             log_pvcam_software_error("pl_get_param", "PARAM_TEMP ATTR_AVAIL");
@@ -1272,7 +1274,7 @@ int pvcamCtrl::getTemp()
         m_ccdTempSetpt = stemp/100.0;
     }
 
-    if(!pl_get_param(m_handle, PARAM_TEMP, ATTR_AVAIL, (void*)&isAvailable))
+    if(!pl_get_param(m_handle, PARAM_TEMP, ATTR_AVAIL, static_cast<void*>(&isAvailable)))
     {
         if(powerState() != 1 || powerStateTarget() != 1) return 0;
         log_pvcam_software_error("pl_get_param", "PARAM_TEMP ATTR_AVAIL");
@@ -1282,7 +1284,7 @@ int pvcamCtrl::getTemp()
     int16 ctemp;
     if(isAvailable) //Maybe this is a separate check.  Don't yet know what happens when acquiring
     {
-        if(!pl_get_param(m_handle, PARAM_TEMP, ATTR_CURRENT, (void*)&ctemp))
+        if(!pl_get_param(m_handle, PARAM_TEMP, ATTR_CURRENT, static_cast<void*>(&ctemp)))
         {
             if(powerState() != 1 || powerStateTarget() != 1) return 0;
             log_pvcam_software_error("pl_get_param", "PARAM_TEMP ATTR_AVAIL");
