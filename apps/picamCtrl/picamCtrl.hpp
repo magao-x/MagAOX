@@ -333,6 +333,11 @@ protected:
    int checkNextROI();
 
    int setNextROI();
+
+   /// Sets the shutter state, via call to dssShutter::setShutterState(int) [stdCamera interface]
+   /**
+     * \returns 0 always
+     */
    int setShutter(int sh);
    
    //Framegrabber interface:
@@ -1299,7 +1304,7 @@ int picamCtrl::setNextROI()
 inline 
 int picamCtrl::setShutter( int sh )
 {
-   return dssShutter<picamCtrl>::setShutter(sh);
+   return dssShutter<picamCtrl>::setShutterState(sh);
 }
 
 inline

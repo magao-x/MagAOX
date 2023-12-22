@@ -225,7 +225,7 @@ public:
      */
    int setNextROI();
    
-   /// Sets the shutter state, via call to dssShutter::setShutter(int) [stdCamera interface]
+   /// Sets the shutter state, via call to dssShutter::setShutterState(int) [stdCamera interface]
    /**
      * \returns 0 always
      */
@@ -987,7 +987,7 @@ int ocam2KCtrl::setNextROI()
 inline 
 int ocam2KCtrl::setShutter(int sh)
 {
-   return dssShutter<ocam2KCtrl>::setShutter(sh);
+   return dssShutter<ocam2KCtrl>::setShutterState(sh);
 }
 
 inline

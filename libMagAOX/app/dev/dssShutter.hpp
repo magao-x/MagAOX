@@ -153,7 +153,7 @@ public:
      * \returns 0 on success
      * \returns -1 on error
      */ 
-   int setShutter( int sh /**< Desired shutter state. 0 for shut,1 for open*/);
+   int setShutterState( int sh /**< Desired shutter state. 0 for shut,1 for open*/);
    
    /// Open the shutter
    /** Do not lock the mutex before calling this.
@@ -483,7 +483,7 @@ int dssShutter<derivedT>::whilePowerOff()
 }
 
 template<class derivedT>
-int dssShutter<derivedT>::setShutter( int sh )
+int dssShutter<derivedT>::setShutterState( int sh )
 {
    if( sh == 1 )
    {

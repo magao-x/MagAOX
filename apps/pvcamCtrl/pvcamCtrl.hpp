@@ -249,6 +249,11 @@ public:
     int checkNextROI();
  
     int setNextROI();
+
+    /// Sets the shutter state, via call to dssShutter::setShutterState(int) [stdCamera interface]
+    /**
+      * \returns 0 always
+      */
     int setShutter(int sh);
     
     //Framegrabber interface:
@@ -669,7 +674,7 @@ int pvcamCtrl::setNextROI()
 
 int pvcamCtrl::setShutter(int sh)
 {
-    return shutterT::setShutter(sh);
+    return shutterT::setShutterState(sh);
 }
 
 int pvcamCtrl::configureAcquisition()
