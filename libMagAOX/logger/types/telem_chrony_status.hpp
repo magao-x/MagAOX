@@ -137,10 +137,10 @@ struct telem_chrony_status : public flatbuffer_log
      */ 
    static void * getAccessor( const std::string & member /**< [in] the name of the member */ )
    {
-      if(member == "sourceMAC") return (void *) &sourceMAC;
-      else if(member == "sourceIP") return (void *) &sourceIP;
-      else if(member == "synch") return (void *) &synch;
-      else if(member == "leap") return (void *) &leap;
+      if(member == "sourceMAC") return reinterpret_cast<void*>(&sourceMAC);
+      else if(member == "sourceIP") return reinterpret_cast<void*>(&sourceIP);
+      else if(member == "synch") return reinterpret_cast<void*>(&synch);
+      else if(member == "leap") return reinterpret_cast<void*>(&leap);
       else
       {
          std::cerr << "No string member " << member << " in telem_chrony_status\n";

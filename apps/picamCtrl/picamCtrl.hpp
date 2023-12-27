@@ -936,7 +936,7 @@ int picamCtrl::connect()
       m_cameraHandle = 0;
    }
 
-   Picam_GetAvailableCameraIDs((const PicamCameraID **) &id_array, &id_count);
+   Picam_GetAvailableCameraIDs(const_cast<const PicamCameraID **>(&id_array), &id_count);
 
    if(powerState() != 1 || powerStateTarget() != 1) return 0;
 
@@ -1933,11 +1933,11 @@ int picamCtrl::acquireAndCheckValid()
    pibyte *frame = NULL;
    pi64s metadataOffset;
 
-   frame = (pibyte*) m_available.initial_readout;
+   frame = static_cast<pibyte*>(m_available.initial_readout);
    metadataOffset = (pi64s)frame + m_frameSize;
 
-   pi64s *tmpPtr = NULL;
-   tmpPtr = (pi64s*)metadataOffset;
+   pi64s *tmpPtr = reinterpret_cast<pi64s*>(metadataOffset);
+
    double cam_ts = (double)*tmpPtr/(double)m_tsRes;
    double delta_ts = cam_ts - m_camera_timestamp;
 
@@ -2002,6 +2002,12 @@ int picamCtrl::reconfig()
       PicamAvailableData available;
 
       error = Picam_WaitForAcquisitionUpdate(m_cameraHandle, camTimeOut, &available, &status);
+      if(error != PicamError_None)
+      {
+         log<software_error>({__FILE__, __LINE__, 0, error, PicamEnum2String(PicamEnumeratedType_Error, error)});
+         state(stateCodes::ERROR);
+         return -1;
+      }
 
 //       if(! status.running )
 //       {

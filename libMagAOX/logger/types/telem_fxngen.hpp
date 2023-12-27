@@ -150,8 +150,8 @@ struct telem_fxngen : public flatbuffer_log
    /// Get the logMetaDetail for a member by name
    static logMetaDetail getAccessor( const std::string & member /**< [in] the name of the member */ )
    {
-      if(     member == "C1freq") return logMetaDetail({"C1 FREQ", logMeta::valTypes::Double, logMeta::metaTypes::Continuous, (void *) &C1freq});
-      else if(member == "C2freq") return logMetaDetail({"C2 FREQ", logMeta::valTypes::Double, logMeta::metaTypes::Continuous, (void *) &C2freq});
+      if(     member == "C1freq") return logMetaDetail({"C1 FREQ", logMeta::valTypes::Double, logMeta::metaTypes::Continuous, reinterpret_cast<void*>(&C1freq)});
+      else if(member == "C2freq") return logMetaDetail({"C2 FREQ", logMeta::valTypes::Double, logMeta::metaTypes::Continuous, reinterpret_cast<void*>(&C2freq)});
       else
       {
          std::cerr << "No string member " << member << " in telem_fxngen\n";

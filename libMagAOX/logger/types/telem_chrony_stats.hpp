@@ -176,15 +176,15 @@ struct telem_chrony_stats : public flatbuffer_log
      */ 
    static void * getAccessor( const std::string & member /**< [in] the name of the member */ )
    {
-      if(member == "systemTime") return (void *) &systemTime;
-      if(member == "lastOffset") return (void *) &lastOffset;
-      if(member == "rmsOffset") return (void *) &rmsOffset;
-      if(member == "freq") return (void *) &freq;
-      if(member == "residFreq") return (void *) &residFreq;
-      if(member == "skew") return (void *) &skew;
-      if(member == "rootDelay") return (void *) &rootDelay;
-      if(member == "rootDispersion") return (void *) &rootDispersion;
-      if(member == "updateInt") return (void *) &updateInt;
+      if(member == "systemTime") return reinterpret_cast<void*>(&systemTime);
+      if(member == "lastOffset") return reinterpret_cast<void*>(&lastOffset);
+      if(member == "rmsOffset") return reinterpret_cast<void*>(&rmsOffset);
+      if(member == "freq") return reinterpret_cast<void*>(&freq);
+      if(member == "residFreq") return reinterpret_cast<void*>(&residFreq);
+      if(member == "skew") return reinterpret_cast<void*>(&skew);
+      if(member == "rootDelay") return reinterpret_cast<void*>(&rootDelay);
+      if(member == "rootDispersion") return reinterpret_cast<void*>(&rootDispersion);
+      if(member == "updateInt") return reinterpret_cast<void*>(&updateInt);
       else
       {
          std::cerr << "No string member " << member << " in telem_chrony_stats\n";

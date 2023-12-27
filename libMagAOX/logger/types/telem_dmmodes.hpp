@@ -103,7 +103,7 @@ struct telem_dmmodes : public flatbuffer_log
      */ 
    static logMetaDetail getAccessor( const std::string & member /**< [in] the name of the member */ )
    {
-      if(member == "amps") return logMetaDetail({"AMPS", logMeta::valTypes::Vector_Float, logMeta::metaTypes::Continuous, (void *) &amps, false});
+      if(member == "amps") return logMetaDetail({"AMPS", logMeta::valTypes::Vector_Float, logMeta::metaTypes::Continuous, reinterpret_cast<void*>(&amps), false});
       else
       {
          std::cerr << "No string member " << member << " in telem_dmmodes\n";

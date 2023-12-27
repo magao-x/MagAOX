@@ -97,8 +97,8 @@ struct telem_rhusb : public flatbuffer_log
      */ 
    static void * getAccessor( const std::string & member /**< [in] the name of the member */ )
    {
-      if(member == "temp") return (void *) &temp;
-      else if(member == "rh") return (void *) &rh;
+      if(member == "temp") return reinterpret_cast<void*>(&temp);
+      else if(member == "rh") return reinterpret_cast<void*>(&rh);
       else
       {
          std::cerr << "No string member " << member << " in telem_rhusb\n";

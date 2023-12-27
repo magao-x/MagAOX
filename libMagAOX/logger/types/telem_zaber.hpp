@@ -106,9 +106,9 @@ struct telem_zaber : public flatbuffer_log
      */ 
    static logMetaDetail getAccessor( const std::string & member /**< [in] the name of the member */ )
    {
-      if(     member == "pos") return logMetaDetail({"POS", logMeta::valTypes::Float, logMeta::metaTypes::Continuous, (void *) &pos});
-      else if(member == "rawPos") return logMetaDetail({"COUNTS", logMeta::valTypes::Float, logMeta::metaTypes::Continuous, (void *) &rawPos}); 
-      else if(member == "temp") return logMetaDetail({"TEMP", logMeta::valTypes::Float, logMeta::metaTypes::Continuous, (void *) &temp}); 
+      if(     member == "pos") return logMetaDetail({"POS", logMeta::valTypes::Float, logMeta::metaTypes::Continuous, reinterpret_cast<void*>(&pos)});
+      else if(member == "rawPos") return logMetaDetail({"COUNTS", logMeta::valTypes::Float, logMeta::metaTypes::Continuous, reinterpret_cast<void*>(&rawPos)}); 
+      else if(member == "temp") return logMetaDetail({"TEMP", logMeta::valTypes::Float, logMeta::metaTypes::Continuous, reinterpret_cast<void*>(&temp)}); 
       else
       {
          std::cerr << "No string member " << member << " in telem_zaber\n";

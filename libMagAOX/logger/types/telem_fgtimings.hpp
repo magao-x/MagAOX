@@ -142,12 +142,12 @@ struct telem_fgtimings : public flatbuffer_log
      */ 
    static logMetaDetail getAccessor( const std::string & member /**< [in] the name of the member */ )
    {
-      if(member == "atime") return logMetaDetail({"ACQ TIME", logMeta::valTypes::Double, logMeta::metaTypes::Continuous, (void *) &atime});
-      else if(member == "atime_jitter") return logMetaDetail({"ACQ JITTER", logMeta::valTypes::Double, logMeta::metaTypes::Continuous, (void *) &atime_jitter});
-      else if(member == "wtime") return logMetaDetail({"WRT TIME", logMeta::valTypes::Double, logMeta::metaTypes::Continuous, (void *) &wtime});
-      else if(member == "wtime_jitter") return logMetaDetail({"WRT JITTER", logMeta::valTypes::Double, logMeta::metaTypes::Continuous, (void *) &wtime_jitter});
-      else if(member == "wmatime") return logMetaDetail({"WRT-ACQ TIME", logMeta::valTypes::Double, logMeta::metaTypes::Continuous, (void *) &wmatime});
-      else if(member == "wmatime_jitter") return logMetaDetail({"WRT-ACQ JITTER", logMeta::valTypes::Double, logMeta::metaTypes::Continuous, (void *) &wmatime_jitter});
+      if(member == "atime") return logMetaDetail({"ACQ TIME", logMeta::valTypes::Double, logMeta::metaTypes::Continuous, reinterpret_cast<void*>(&atime)});
+      else if(member == "atime_jitter") return logMetaDetail({"ACQ JITTER", logMeta::valTypes::Double, logMeta::metaTypes::Continuous, reinterpret_cast<void*>(&atime_jitter)});
+      else if(member == "wtime") return logMetaDetail({"WRT TIME", logMeta::valTypes::Double, logMeta::metaTypes::Continuous, reinterpret_cast<void*>(&wtime)});
+      else if(member == "wtime_jitter") return logMetaDetail({"WRT JITTER", logMeta::valTypes::Double, logMeta::metaTypes::Continuous, reinterpret_cast<void*>(&wtime_jitter)});
+      else if(member == "wmatime") return logMetaDetail({"WRT-ACQ TIME", logMeta::valTypes::Double, logMeta::metaTypes::Continuous, reinterpret_cast<void*>(&wmatime)});
+      else if(member == "wmatime_jitter") return logMetaDetail({"WRT-ACQ JITTER", logMeta::valTypes::Double, logMeta::metaTypes::Continuous, reinterpret_cast<void*>(&wmatime_jitter)});
 
       else
       {
