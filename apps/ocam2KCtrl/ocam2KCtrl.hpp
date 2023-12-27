@@ -1142,6 +1142,11 @@ int ocam2KCtrl::configureAcquisition()
    log<text_log>("Send command to set mode: " + m_cameraModes[m_modeName].m_serialCommand);
    log<text_log>("Response was: " + response);
   
+   if(setSynchro() < 0)
+   { 
+      log<software_error>({__FILE__, __LINE__, "Error setting synchro during configureAcquisition"});
+   }
+
    /* Initialize the OCAM2 SDK
        */
 

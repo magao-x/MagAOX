@@ -86,8 +86,8 @@ const char *ocam2_modeStr(ocam2_mode mode)
      "Cropping Mode(240x128@3500Hz)",
      "Mode 7",
      "Mode 8",
-     "Binning 1x3 Mode(240x80@XXXXHz)",
-     "Binning 1x4 Mode(240x50@XXXXHz)"};
+     "Binning 1x3 Mode(240x80@4944Hz)",
+     "Binning 1x4 Mode(240x60@5962Hz)"};
     
     switch(mode)
     {
