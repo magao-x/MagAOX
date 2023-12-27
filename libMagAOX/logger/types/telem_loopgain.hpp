@@ -116,10 +116,10 @@ struct telem_loopgain : public flatbuffer_log
      */ 
    static logMetaDetail getAccessor( const std::string & member /**< [in] the name of the member */ )
    {
-      if(      member == "state")    return logMetaDetail({"LOOP STATE", logMeta::valTypes::Int, logMeta::metaTypes::State, (void *) &state});
-      else if( member == "gain")     return logMetaDetail({"LOOP GAIN", logMeta::valTypes::Float, logMeta::metaTypes::State, (void *) &gain});
-      else if( member == "multcoef") return logMetaDetail({"LOOP MULTCOEF", logMeta::valTypes::Float, logMeta::metaTypes::State, (void *) &multcoef});
-      else if( member == "limit")    return logMetaDetail({"LOOP LIMIT", logMeta::valTypes::Float, logMeta::metaTypes::State, (void *) &limit});
+      if(      member == "state")    return logMetaDetail({"LOOP STATE", logMeta::valTypes::Int, logMeta::metaTypes::State, reinterpret_cast<void*>(&state)});
+      else if( member == "gain")     return logMetaDetail({"LOOP GAIN", logMeta::valTypes::Float, logMeta::metaTypes::State, reinterpret_cast<void*>(&gain)});
+      else if( member == "multcoef") return logMetaDetail({"LOOP MULTCOEF", logMeta::valTypes::Float, logMeta::metaTypes::State, reinterpret_cast<void*>(&multcoef)});
+      else if( member == "limit")    return logMetaDetail({"LOOP LIMIT", logMeta::valTypes::Float, logMeta::metaTypes::State, reinterpret_cast<void*>(&limit)});
       else
       {
          std::cerr << "No string member " << member << " in telem_loopgain\n";

@@ -1,0 +1,37 @@
+<personality name="lab">
+<default-voice name="larynx:southern_english_female-glow_tts" />
+  <react-to indi-id="observers.obs_on.toggle">
+    <transition value="On">
+      <speak>Saving data for {observers.current_observer.pfoa}.</speak>
+    </transition>
+    <transition value="Off">
+      <speak>Data saving stopped.</speak>
+    </transition>
+  </react-to>
+  <react-to indi-id="holoop.loop_state.toggle">
+    <transition op="eq" value="On">
+      <speak>High-order loop closed.</speak>
+    </transition>
+    <transition op="eq" value="Off">
+      <speak>High-order loop open.</speak>
+    </transition>
+  </react-to>
+  <react-to indi-id="stageadc1.fsm.state">
+    <transition value="NOTHOMED">
+      <speak>stage aiey dee cee one is not homed.</speak>
+    </transition>
+  </react-to>
+  <react-to indi-id="stageadc2.fsm.state">
+    <transition value="NOTHOMED">
+      <speak>stage aiey dee cee two is not homed.</speak>
+    </transition>
+  </react-to>
+  <react-to indi-id="loloop.loop_state.toggle">
+    <transition value="On">
+      <speak>Low-order loop closed.</speak>
+    </transition>
+    <transition value="Off">
+      <speak>Low-order loop open.</speak>
+    </transition>
+  </react-to>
+</personality>

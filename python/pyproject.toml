@@ -1,0 +1,15 @@
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[project]
+name = "magaox"
+version = "2023.12.21"
+
+authors = [
+  {name = "Joseph D. Long", email = "me@joseph-long.com"},
+]
+
+description = "Python utilities for MagAO-X interface"
+readme = "README.rst"
+license = {file = "LICENSE"}

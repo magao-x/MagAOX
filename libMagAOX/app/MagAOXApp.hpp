@@ -2923,7 +2923,7 @@ int MagAOXApp<_useINDI>::indiTargetUpdate( pcf::IndiProperty & localProperty,
    
    if( ! (remoteProperty.find("target") || remoteProperty.find("current") ) )
    {
-      return log<text_log,-1>("not target or current element in INDI property", logPrio::LOG_ERROR);
+      return log<text_log,-1>("no target or current element in INDI property", logPrio::LOG_ERROR);
    }
 
    bool set = false;

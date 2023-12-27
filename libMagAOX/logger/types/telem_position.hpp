@@ -84,7 +84,7 @@ struct telem_position : public flatbuffer_log
      */ 
    static logMetaDetail getAccessor( const std::string & member /**< [in] the name of the member */ )
    {
-      if(     member == "pos") return logMetaDetail({"POS", logMeta::valTypes::Float, logMeta::metaTypes::Continuous, (void *) &pos});
+      if(     member == "pos") return logMetaDetail({"POS", logMeta::valTypes::Float, logMeta::metaTypes::Continuous, reinterpret_cast<void*>(&pos)});
       else
       {
          std::cerr << "No string member " << member << " in telem_position\n";

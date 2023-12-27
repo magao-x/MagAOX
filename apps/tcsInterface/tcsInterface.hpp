@@ -1104,14 +1104,47 @@ int tcsInterface::parse_xms( double &x,
                              const std::string & xmsstr
                            )
 {
-   int st, en;
+   size_t st, en;
 
    int sgn = 1;
 
    st = 0;
    en = xmsstr.find(':', st);
    
-   x = strtod(xmsstr.substr(st, en-st).c_str(), 0);
+   //Check not found
+   if(en == std::string::npos)
+   {
+      log<software_error>({__FILE__, __LINE__, "error parsing x:m:s"});
+      return -1;
+   }
+
+   //Check 0 length or invalid
+   if(en - st < 2 || en < st)
+   {
+      log<software_error>({__FILE__, __LINE__, "error parsing x:m:s"});
+      return -1;
+   }
+
+   std::string xstr;
+   try
+   {
+      xstr = xmsstr.substr(st, en-st);
+   }
+   catch(const std::exception & e)
+   {
+      log<software_error>({__FILE__, __LINE__, e.what()});
+      return -1;
+   }
+
+   try
+   {
+      x = std::stod(xstr);
+   }
+   catch(const std::exception & e)
+   {
+      log<software_error>({__FILE__, __LINE__, e.what()});
+      return -1;
+   }
 
    //Check for negative
    if(std::signbit(x)) sgn = -1;
@@ -1121,12 +1154,70 @@ int tcsInterface::parse_xms( double &x,
    
    en = xmsstr.find(':', st);
    
-   m = sgn*strtod(xmsstr.substr(st, en-st).c_str(), 0);
-   
+   //Check not found
+   if(en == std::string::npos)
+   {
+      log<software_error>({__FILE__, __LINE__, "error parsing x:m:s"});
+      return -1;
+   }
+
+   //Check 0 length or invalid
+   if(en - st < 2 || en < st)
+   {
+      log<software_error>({__FILE__, __LINE__, "error parsing x:m:s"});
+      return -1;
+   }
+
+   std::string mstr;
+   try
+   {
+      mstr = xmsstr.substr(st, en-st);
+   }
+   catch(const std::exception & e)
+   {
+      log<software_error>({__FILE__, __LINE__, e.what()});
+      return -1;
+   }
+
+   try
+   {
+      m = sgn*std::stod(mstr);
+   }
+   catch(const std::exception & e)
+   {
+      log<software_error>({__FILE__, __LINE__, e.what()});
+      return -1;
+   }
+
    st = en+1;
+
+   if(st >= xmsstr.length() - 1)
+   {
+      log<software_error>({__FILE__, __LINE__, "error parsing x:m:s"});
+      return -1;
+   }
+
+   std::string sstr;
+   try
+   {
+      sstr = xmsstr.substr(st, xmsstr.length()-st);
+   }
+   catch(const std::exception & e)
+   {
+      log<software_error>({__FILE__, __LINE__, e.what()});
+      return -1;
+   }
    
-   s = sgn*strtod(xmsstr.substr(st, xmsstr.length()-st).c_str(), 0);
-   
+   try
+   {
+      s = sgn*std::stod(sstr);
+   }
+   catch(const std::exception & e)
+   {
+      log<software_error>({__FILE__, __LINE__, e.what()});
+      return -1;
+   }
+
    return 0;
 }
 

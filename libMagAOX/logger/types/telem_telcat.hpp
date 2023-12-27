@@ -161,12 +161,12 @@ struct telem_telcat : public flatbuffer_log
      */ 
    static logMetaDetail getAccessor( const std::string & member /**< [in] the name of the member */ )
    {
-      if(     member == "catObj") return logMetaDetail({"CATOBJ", logMeta::valTypes::String, logMeta::metaTypes::State, (void *) &catObj, false});
-      else if(member == "catRm")  return logMetaDetail({"CATRM", logMeta::valTypes::String, logMeta::metaTypes::State, (void *) &catRm, false});
-      else if(member == "catRA")  return logMetaDetail({"CATRA", logMeta::valTypes::Double, logMeta::metaTypes::State, (void *) &catRA, false});
-      else if(member == "catDec") return logMetaDetail({"CATDEC", logMeta::valTypes::Double, logMeta::metaTypes::State, (void *) &catDec, false});
-      else if(member == "catEp")  return logMetaDetail({"CATEP", logMeta::valTypes::Double, logMeta::metaTypes::State, (void *) &catEp, false});
-      else if(member == "catRo")  return logMetaDetail({"CATRO", logMeta::valTypes::Double, logMeta::metaTypes::State, (void *) &catRo, false});
+      if(     member == "catObj") return logMetaDetail({"CATOBJ", logMeta::valTypes::String, logMeta::metaTypes::State, reinterpret_cast<void*>(&catObj), false});
+      else if(member == "catRm")  return logMetaDetail({"CATRM", logMeta::valTypes::String, logMeta::metaTypes::State, reinterpret_cast<void*>(&catRm), false});
+      else if(member == "catRA")  return logMetaDetail({"CATRA", logMeta::valTypes::Double, logMeta::metaTypes::State, reinterpret_cast<void*>(&catRA), false});
+      else if(member == "catDec") return logMetaDetail({"CATDEC", logMeta::valTypes::Double, logMeta::metaTypes::State, reinterpret_cast<void*>(&catDec), false});
+      else if(member == "catEp")  return logMetaDetail({"CATEP", logMeta::valTypes::Double, logMeta::metaTypes::State, reinterpret_cast<void*>(&catEp), false});
+      else if(member == "catRo")  return logMetaDetail({"CATRO", logMeta::valTypes::Double, logMeta::metaTypes::State, reinterpret_cast<void*>(&catRo), false});
       else
       {
          std::cerr << "No string member " << member << " in telem_telcat\n";

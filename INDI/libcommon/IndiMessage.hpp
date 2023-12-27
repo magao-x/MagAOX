@@ -62,10 +62,12 @@ class IndiMessage
 
     // Members.
   private:
+    
     /// The property contained here.
     pcf::IndiProperty m_ipMsg;
+
     /// The type of this object. It cannot be changed.
-    Type m_tType;
+    Type m_tType {Unknown};
 
 }; // class IndiMessage
 } // namespace pcf
