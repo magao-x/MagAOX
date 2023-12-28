@@ -5,9 +5,9 @@
 #
 # Edit the IRQBALANCE_ARGS list of args to add a --banirq=x for each irq x you want to prevent being balanced
 # 
-# To Install:
+# To install:
 #
-# If first time after new installation: $ cp /etc/sysconfig/irqbalance /etc/sysconfig/irqbalance.bup
+# This should be installed by the configure_irqbalance.sh setup script.  You will need to delete the installed version.
 #
 # $ systemctl stop irqbalance
 #
@@ -31,20 +31,17 @@
 
 #
 # IRQBALANCE_BANNED_CPUS
-# 64 bit bitmask which allows you to indicate which cpu's should
+# bitmask which allows you to indicate which cpu's should
 # be skipped when reblancing irqs. Cpu numbers which have their
 # corresponding bits set to one in this mask will not have any
 # irq's assigned to them on rebalance
 #
-IRQBALANCE_BANNED_CPUS=00,fffc000f,ffffc000
+# For RTC this is 72 bits.  Currently bans 14-35 and 50-71 (which are the h/t pairs)
+IRQBALANCE_BANNED_CPUS=ff,fffc000f,ffffc000
 
 #
 # IRQBALANCE_ARGS
 # append any args here to the irqbalance daemon as documented in the man page
 #
-# Banning IDs from /proc/interrupts (first column is ID)
-#
-#   40 : enx503eaa0ceeff
-#   41 : enx503eaa0cf4cd
-#   64 : edt
+# Banning IDs by matching in the scripts
 IRQBALANCE_ARGS=--policyscript=/usr/local/bin/irqbalance_policyscript

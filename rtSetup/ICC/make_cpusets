@@ -89,7 +89,7 @@ echo 1 > system/cpuset.sched_load_balance
 ###############
 # Now setup cpusets for the ICC R/T processes
 # We have cores 8-31 (24 cores) to use.
-# Curently unused: 29-31 (y)  These are created as "spareN"
+# Curently unused: 22-31 (10)  These are created as "spareN"
 ###############
 
 ## NCPC DM
@@ -161,65 +161,71 @@ mkdir -p $cpusetMount/camtip-sw
 
 ## CACAO
 
-#aolrun 18-24
-mkdir -p $cpusetMount/aol2RT
-/bin/echo 18-24 > $cpusetMount/aol2RT/cpuset.cpus
-/bin/echo 1 > $cpusetMount/aol2RT/cpuset.cpu_exclusive
-/bin/echo 0-1 > $cpusetMount/aol2RT/cpuset.mems
-/bin/echo 0 > $cpusetMount/aol2RT/cpuset.sched_load_balance
+#acqu-mvm 18
+mkdir -p $cpusetMount/acqu-mvm
+/bin/echo 18 > $cpusetMount/acqu-mvm/cpuset.cpus
+/bin/echo 1 > $cpusetMount/acqu-mvm/cpuset.cpu_exclusive
+/bin/echo 0-1 > $cpusetMount/acqu-mvm/cpuset.mems
 
-mkdir -p $cpusetMount/aol2RT/aol2RT_0
-/bin/echo 18 > $cpusetMount/aol2RT/aol2RT_0/cpuset.cpus
-/bin/echo 1 > $cpusetMount/aol2RT/aol2RT_0/cpuset.cpu_exclusive
-/bin/echo 0-1 > $cpusetMount/aol2RT/aol2RT_0/cpuset.mems
+#mfilt 19
+mkdir -p $cpusetMount/mfilt
+/bin/echo 19 > $cpusetMount/mfilt/cpuset.cpus
+/bin/echo 1 > $cpusetMount/mfilt/cpuset.cpu_exclusive
+/bin/echo 0-1 > $cpusetMount/mfilt/cpuset.mems
 
-mkdir -p $cpusetMount/aol2RT/aol2RT_1
-/bin/echo 19 > $cpusetMount/aol2RT/aol2RT_1/cpuset.cpus
-/bin/echo 1 > $cpusetMount/aol2RT/aol2RT_1/cpuset.cpu_exclusive
-/bin/echo 0-1 > $cpusetMount/aol2RT/aol2RT_1/cpuset.mems
+#mlat 20
+mkdir -p $cpusetMount/mlat
+/bin/echo 20 > $cpusetMount/mlat/cpuset.cpus
+/bin/echo 1 > $cpusetMount/mlat/cpuset.cpu_exclusive
+/bin/echo 0-1 > $cpusetMount/mlat/cpuset.mems
 
-mkdir -p $cpusetMount/aol2RT/aol2RT_2
-/bin/echo 20 > $cpusetMount/aol2RT/aol2RT_2/cpuset.cpus
-/bin/echo 1 > $cpusetMount/aol2RT/aol2RT_2/cpuset.cpu_exclusive
-/bin/echo 0-1 > $cpusetMount/aol2RT/aol2RT_2/cpuset.mems
+#RTmon 21
+mkdir -p $cpusetMount/RTmon
+/bin/echo 21 > $cpusetMount/RTmon/cpuset.cpus
+/bin/echo 1 > $cpusetMount/RTmon/cpuset.cpu_exclusive
+/bin/echo 0-1 > $cpusetMount/RTmon/cpuset.mems
 
-mkdir -p $cpusetMount/aol2RT/aol2RT_3
-/bin/echo 21 > $cpusetMount/aol2RT/aol2RT_3/cpuset.cpus
-/bin/echo 1 > $cpusetMount/aol2RT/aol2RT_3/cpuset.cpu_exclusive
-/bin/echo 0-1 > $cpusetMount/aol2RT/aol2RT_3/cpuset.mems
+#spare22
+mkdir -p $cpusetMount/spare22
+/bin/echo 22 > $cpusetMount/spare22/cpuset.cpus
+/bin/echo 1 > $cpusetMount/spare22/cpuset.cpu_exclusive
+/bin/echo 0-1 > $cpusetMount/spare22/cpuset.mems
 
-mkdir -p $cpusetMount/aol2RT/aol2RT_4
-/bin/echo 22 > $cpusetMount/aol2RT/aol2RT_4/cpuset.cpus
-/bin/echo 1 > $cpusetMount/aol2RT/aol2RT_4/cpuset.cpu_exclusive
-/bin/echo 0-1 > $cpusetMount/aol2RT/aol2RT_4/cpuset.mems
+#spare23
+mkdir -p $cpusetMount/spare23
+/bin/echo 23 > $cpusetMount/spare23/cpuset.cpus
+/bin/echo 1 > $cpusetMount/spare23/cpuset.cpu_exclusive
+/bin/echo 0-1 > $cpusetMount/spare23/cpuset.mems
 
-mkdir -p $cpusetMount/aol2RT/aol2RT_5
-/bin/echo 23 > $cpusetMount/aol2RT/aol2RT_5/cpuset.cpus
-/bin/echo 1 > $cpusetMount/aol2RT/aol2RT_5/cpuset.cpu_exclusive
-/bin/echo 0-1 > $cpusetMount/aol2RT/aol2RT_5/cpuset.mems
+#spare24
+mkdir -p $cpusetMount/spare24
+/bin/echo 24 > $cpusetMount/spare24/cpuset.cpus
+/bin/echo 1 > $cpusetMount/spare24/cpuset.cpu_exclusive
+/bin/echo 0-1 > $cpusetMount/spare24/cpuset.mems
 
-mkdir -p $cpusetMount/aol2RT/aol2RT_6
-/bin/echo 24 > $cpusetMount/aol2RT/aol2RT_6/cpuset.cpus
-/bin/echo 1 > $cpusetMount/aol2RT/aol2RT_6/cpuset.cpu_exclusive
-/bin/echo 0-1 > $cpusetMount/aol2RT/aol2RT_6/cpuset.mems
+#spare25
+mkdir -p $cpusetMount/spare25
+/bin/echo 25 > $cpusetMount/spare25/cpuset.cpus
+/bin/echo 1 > $cpusetMount/spare25/cpuset.cpu_exclusive
+/bin/echo 0-1 > $cpusetMount/spare25/cpuset.mems
 
-#aol2RT1 -- mvm extrct
-mkdir -p $cpusetMount/aol2RT1
-/bin/echo 25 > $cpusetMount/aol2RT1/cpuset.cpus
-/bin/echo 1 > $cpusetMount/aol2RT1/cpuset.cpu_exclusive
-/bin/echo 0-1 > $cpusetMount/aol2RT1/cpuset.mems
+#spare26
+mkdir -p $cpusetMount/spare26
+/bin/echo 26 > $cpusetMount/spare26/cpuset.cpus
+/bin/echo 1 > $cpusetMount/spare26/cpuset.cpu_exclusive
+/bin/echo 0-1 > $cpusetMount/spare26/cpuset.mems
 
-#aol2RT2 -- gpumode2dm
-mkdir -p $cpusetMount/aol2RT2
-/bin/echo 26,27 > $cpusetMount/aol2RT2/cpuset.cpus
-/bin/echo 1 > $cpusetMount/aol2RT2/cpuset.cpu_exclusive
-/bin/echo 0-1 > $cpusetMount/aol2RT2/cpuset.mems
+#spare27
+mkdir -p $cpusetMount/spare27
+/bin/echo 27 > $cpusetMount/spare27/cpuset.cpus
+/bin/echo 1 > $cpusetMount/spare27/cpuset.cpu_exclusive
+/bin/echo 0-1 > $cpusetMount/spare27/cpuset.mems
 
-#aol2RT3 -- aol2-ProcessModeCo
-mkdir -p $cpusetMount/aol2RT3
-/bin/echo 28 > $cpusetMount/aol2RT3/cpuset.cpus
-/bin/echo 1 > $cpusetMount/aol2RT3/cpuset.cpu_exclusive
-/bin/echo 0-1 > $cpusetMount/aol2RT3/cpuset.mems
+#spare28
+mkdir -p $cpusetMount/spare28
+/bin/echo 28 > $cpusetMount/spare28/cpuset.cpus
+/bin/echo 1 > $cpusetMount/spare28/cpuset.cpu_exclusive
+/bin/echo 0-1 > $cpusetMount/spare28/cpuset.mems
 
 #spare29
 mkdir -p $cpusetMount/spare29

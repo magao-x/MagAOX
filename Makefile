@@ -257,7 +257,7 @@ scripts_install:
 	done
 
 rtscripts_install:
-	for scriptname in make_cpusets procs_to_cpusets; do \
+	for scriptname in make_cpusets move_irqs; do \
 		sudo install -d /opt/MagAOX/bin && \
 		if [ -e rtSetup/$(MAGAOX_ROLE)/$$scriptname ]; then \
 			sudo install rtSetup/$(MAGAOX_ROLE)/$$scriptname /opt/MagAOX/bin/$$scriptname && \
