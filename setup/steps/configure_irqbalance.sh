@@ -16,12 +16,12 @@ if [[ ! -e /etc/sysconfig/irqbalance.bup ]]; then
 fi
 
 # Install irqbalance config to use policyscript
-cp $DIR/../../rtSetup/$MAGAOX_ROLE/irqbalance /etc/sysconfig/irqbalance
+cp "$DIR/../../rtSetup/$MAGAOX_ROLE/irqbalance" /etc/sysconfig/irqbalance
 
 # Install policyscript
 if [[ ! -e /usr/local/bin/irqbalance_policyscript ]]; then
     install --owner root --mode 0555 \
-        $DIR/../../rtSetup/$MAGAOX_ROLE/irqbalance_policyscript \
+        "$DIR/../../rtSetup/$MAGAOX_ROLE/irqbalance_policyscript" \
         /usr/local/bin/irqbalance_policyscript
 fi
 
