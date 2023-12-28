@@ -10,7 +10,7 @@ irqs=$(awk '{print $1}' /proc/interrupts | grep '[0-9]:' | sed 's/.$//')
 
 for irq in $irqs; do
     if [ "$irq" != "0" ]; then
-        echo "0-13,36-49" > /proc/irq/$irq/smp_affinity_list || true
+        echo "0-7,32-39" > /proc/irq/$irq/smp_affinity_list || true
     fi
 done
 
