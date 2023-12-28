@@ -30,13 +30,9 @@
 
 #
 # IRQBALANCE_BANNED_CPUS
-# bitmask which allows you to indicate which cpu's should
-# be skipped when reblancing irqs. Cpu numbers which have their
-# corresponding bits set to one in this mask will not have any
-# irq's assigned to them on rebalance
 #
-# For ICC this is 64 bits.  Currently bans 8-31 and 40-63 (which are the h/t pairs)                        
-IRQBALANCE_BANNED_CPUS=ffffff00,ffffff00
+# For ICC currently bans 8-31 and 40-63 (which are the h/t pairs)                        
+IRQBALANCE_BANNED_CPULIST=8-31,40-63
 
 #
 # IRQBALANCE_ARGS

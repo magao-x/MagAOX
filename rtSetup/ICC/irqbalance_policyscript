@@ -12,7 +12,6 @@
 #enx503eaa0ceeff: ICC camsci1
 #enx503eaa0cf4cd: ICC camsci2
 #enx6cb31152a245: ICC icc-to-rtc
-#enx6cb31152a246: RTC rtc-to-ICC
 #cp2x73c: ?
 
 for driverPattern in edt nvidia enx503eaa0ceeff enx503eaa0cf4cd enx6cb31152a245 cp2x72c; do

@@ -16,10 +16,19 @@ done
 
 #Then move each special one
 
-edt=$(grep edt /proc/interrupts | awk '{print $1}' | sed 's/.$//')
-cpu=$(cat $CGROUPS1_CPUSET_MOUNTPOINT/camwfs/cpuset.cpus)
-echo "edt: " $edt " to " $cpu 
-echo $cpu > /proc/irq/$edt/smp_affinity_list
+enxs=$(grep enx503eaa0ceeff /proc/interrupts | awk '{print $1}' | sed 's/.$//')
+cpu=$(cat $CGROUPS1_CPUSET_MOUNTPOINT/camsci1/cpuset.cpus)
+for enx in $enxs; do
+    echo "camsci1 enx: " $enx " to " $cpu 
+    echo $cpu > /proc/irq/$enx/smp_affinity_list
+done
+
+enxs=$(grep enx503eaa0cf4cd /proc/interrupts | awk '{print $1}' | sed 's/.$//')
+cpu=$(cat $CGROUPS1_CPUSET_MOUNTPOINT/camsci2/cpuset.cpus)
+for enx in $enxs; do
+    echo "camsci2 enx: " $enx " to " $cpu 
+    echo $cpu > /proc/irq/$enx/smp_affinity_list
+done
 
 nvidias=$(grep nvidia /proc/interrupts | awk '{print $1}' | sed 's/.$//')
 cpu=$(cat $CGROUPS1_CPUSET_MOUNTPOINT/acqu-mvm/cpuset.cpus)
