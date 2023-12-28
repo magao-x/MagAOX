@@ -18,6 +18,8 @@ class pwfsAlignment : public rtimvOverlayInterface
 protected:
     rtimvOverlayAccess m_roa;
 
+    bool m_enabled{false};
+    
     char m_blob[512]; ///< Memory for copying rtimvDictionary blobs
 
     double m_1x{0};
