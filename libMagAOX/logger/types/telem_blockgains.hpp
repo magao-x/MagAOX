@@ -80,9 +80,9 @@ struct telem_blockgains : public flatbuffer_log
       // being very paranoid about existence and length here
       if( fbs->gains() && fbs->gains_constant() )
       {
-         if(fbs->gains()->Length() == fbs->gains_constant()->Length())
+         if(fbs->gains()->size() == fbs->gains_constant()->size())
          {
-            for(size_t i=0; i< fbs->gains()->Length(); ++i)
+            for(size_t i=0; i< fbs->gains()->size(); ++i)
             {
                msg += " ";
                msg += std::to_string(fbs->gains()->Get(i));
@@ -93,7 +93,7 @@ struct telem_blockgains : public flatbuffer_log
          }
          else
          {
-            for(size_t i=0; i< fbs->gains()->Length(); ++i)
+            for(size_t i=0; i< fbs->gains()->size(); ++i)
             {
                msg += " ";
                msg += std::to_string(fbs->gains()->Get(i));
@@ -103,7 +103,7 @@ struct telem_blockgains : public flatbuffer_log
       }
       else if (fbs->gains())
       {
-         for(size_t i=0; i< fbs->gains()->Length(); ++i)
+         for(size_t i=0; i< fbs->gains()->size(); ++i)
          {
             msg += " ";
             msg += std::to_string(fbs->gains()->Get(i));
@@ -114,9 +114,9 @@ struct telem_blockgains : public flatbuffer_log
       msg += " [mcs] ";
       if( fbs->mcs() && fbs->mcs_constant() )
       {
-         if(fbs->mcs()->Length() == fbs->mcs_constant()->Length())
+         if(fbs->mcs()->size() == fbs->mcs_constant()->size())
          {
-            for(size_t i=0; i< fbs->mcs()->Length(); ++i)
+            for(size_t i=0; i< fbs->mcs()->size(); ++i)
             {
                msg += " ";
                msg += std::to_string(fbs->mcs()->Get(i));
@@ -127,7 +127,7 @@ struct telem_blockgains : public flatbuffer_log
          }
          else
          {
-            for(size_t i=0; i< fbs->mcs()->Length(); ++i)
+            for(size_t i=0; i< fbs->mcs()->size(); ++i)
             {
                msg += " ";
                msg += std::to_string(fbs->mcs()->Get(i));
@@ -137,7 +137,7 @@ struct telem_blockgains : public flatbuffer_log
       }
       else if (fbs->mcs())
       {
-         for(size_t i=0; i< fbs->mcs()->Length(); ++i)
+         for(size_t i=0; i< fbs->mcs()->size(); ++i)
          {
             msg += " ";
             msg += std::to_string(fbs->mcs()->Get(i));
@@ -149,9 +149,9 @@ struct telem_blockgains : public flatbuffer_log
 
       if( fbs->lims() && fbs->lims_constant() )
       {
-         if(fbs->lims()->Length() == fbs->lims_constant()->Length())
+         if(fbs->lims()->size() == fbs->lims_constant()->size())
          {
-            for(size_t i=0; i< fbs->lims()->Length(); ++i)
+            for(size_t i=0; i< fbs->lims()->size(); ++i)
             {
                msg += " ";
                msg += std::to_string(fbs->lims()->Get(i));
@@ -162,7 +162,7 @@ struct telem_blockgains : public flatbuffer_log
          }
          else
          {
-            for(size_t i=0; i< fbs->lims()->Length(); ++i)
+            for(size_t i=0; i< fbs->lims()->size(); ++i)
             {
                msg += " ";
                msg += std::to_string(fbs->lims()->Get(i));
@@ -172,7 +172,7 @@ struct telem_blockgains : public flatbuffer_log
       }
       else if (fbs->lims())
       {
-         for(size_t i=0; i< fbs->lims()->Length(); ++i)
+         for(size_t i=0; i< fbs->lims()->size(); ++i)
          {
             msg += " ";
             msg += std::to_string(fbs->lims()->Get(i));
