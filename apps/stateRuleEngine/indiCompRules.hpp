@@ -380,7 +380,7 @@ public:
     onePropRule() = delete;
 
     /// Constructor.  You must provide the property type to construct a onePropRule
-    onePropRule( int type ) : m_type(type /**< The property type, from pcf::IndiProperty::Type*/)
+    explicit onePropRule( int type ) : m_type(type /**< The property type, from pcf::IndiProperty::Type*/)
     {}
 
     /// Set the property pointer
@@ -476,7 +476,7 @@ public:
     twoPropRule() = delete;
 
     /// Constructor.  You must provide the property type to construct a twoPropRule
-    twoPropRule( int type ) : m_type(type /**< The property type, from pcf::IndiProperty::Type*/)
+    explicit twoPropRule( int type ) : m_type(type /**< The property type, from pcf::IndiProperty::Type*/)
     {}
 
     /// Set the first property pointer
@@ -577,26 +577,32 @@ public:
     virtual boolorerr_t valid()
     {
         boolorerr_t rv;
+        
         if(m_property1 == nullptr)
         {
             rv = "property1 is null";
+            return rv;
         }
-        else if(!m_property1->find(m_element1))
+        
+        if(!m_property1->find(m_element1))
         {
             rv = "element1 is not found";
+            return rv;
         }
+
         if(m_property2 == nullptr)
         {
             rv = "property2 is null";
+            return rv;
         }
-        else if(!m_property2->find(m_element2))
+        
+        if(!m_property2->find(m_element2))
         {
             rv = "element2 is not found";
+            return rv;
         }
-        else
-        {
-            rv = true;
-        }
+
+        rv = true;
 
         return rv;
     }

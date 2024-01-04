@@ -52,7 +52,7 @@ public:
 
     virtual bool overlayEnabled();
 
-    bool blobExists(const std::string propel);
+    bool blobExists(const std::string & propel);
 
     bool getBlobStr(const std::string &deviceName,
                     const std::string &propel);
