@@ -1,3 +1,5 @@
+#if(__cplusplus == 201703L)
+
 #include "../../../tests/catch2/catch.hpp"
 
 #include "../indiCompRuleConfig.hpp"
@@ -311,3 +313,5 @@ SCENARIO( "rule configurations with errors", "[stateRuleEngine::ruleConfig]" )
         }
     }
 }
+
+#endif

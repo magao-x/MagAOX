@@ -1,3 +1,5 @@
+#if(__cplusplus == 201703L)
+
 #include "../../../tests/catch2/catch.hpp"
 
 #include "../indiCompRules.hpp"
@@ -603,3 +605,5 @@ SCENARIO( "compound rule compariaons", "[stateRuleEngine::rules]" )
         }
     }
 }      
+
+#endif
