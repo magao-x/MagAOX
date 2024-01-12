@@ -119,6 +119,7 @@ apps/siglentSDG/siglentSDG
 apps/siglentSDG/tests/siglentSDG_test
 apps/smc100ccCtrl/smc100ccCtrl
 apps/sshDigger/sshDigger
+apps/stateRuleEngine/stateRuleEngine
 apps/streamCircBuff/streamCircBuff
 apps/streamWriter/streamWriter
 

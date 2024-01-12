@@ -1,5 +1,5 @@
 import sys
-from typing import Optional
+from typing import Optional, Union
 from random import choice
 import time
 from functools import partial
@@ -9,8 +9,10 @@ import os
 import os.path
 import pprint
 import re
+import xconf
 from purepyindi2 import device, properties, constants, messages
 from purepyindi2.messages import DefNumber, DefSwitch, DefText
+from magaox.indi.device import Device, BaseConfig
 
 from .personality import Personality, Transition
 from .opentts_bridge import speak, ssml_to_wav
@@ -22,7 +24,30 @@ TAGS_RE = re.compile('<.*?>')
 def drop_xml_tags(raw_xml):
   return TAGS_RE.sub('', raw_xml)
 
-class AudibleAlerts(device.XDevice):
+@xconf.config
+class Condition:
+    messages : list = xconf.field(default_factory=list, help="Messages to choose from semi-randomly on condition triggering")
+
+@xconf.config
+class ValueCondition(Condition):
+    value : Union[float, int, str] = xconf.field(help="Value for exact equality test")
+
+@xconf.config
+class Reaction:
+    indi_id : str = xconf.field(help="INDI dotted-triple ID of an element")
+    conditions : list[Condition] = xconf.field(help="Conditions with associated messages")
+
+@xconf.config
+class PersonalityConfig:
+    random_utterances : list[str] = xconf.field(default_factory=list, help="Utterances uttered utterly randomly")
+    reactions : list[Reaction] = xconf.field(default_factory=list, help="Reactions to instrument state changes")
+
+@xconf.config
+class AudibleAlertsConfig(BaseConfig):
+    personalities : dict[str, PersonalityConfig] = xconf.field(default_factory=dict, help="")
+    
+
+class AudibleAlerts(Device):
     personality : Personality
     _cb_handles : set
     speech_requests : list[str]
@@ -168,7 +193,6 @@ class AudibleAlerts(device.XDevice):
         self.log.debug(f"Caching synthesis output to {self.cache_dir}")
         os.makedirs(self.cache_dir, exist_ok=True)
         self.load_personality(self.active_personality)
-        
 
         sv = properties.SwitchVector(
             name="mute",

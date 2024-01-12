@@ -39,20 +39,9 @@ using pcf::SystemSocket;
 ////////////////////////////////////////////////////////////////////////////////
 /// Basic constructor.
 
-SystemSocket::SystemSocket()
+SystemSocket::SystemSocket() : m_tType(UnknownType), m_nLastError(0), m_nSocket(-1), 
+                                m_nConnectTimeout(1000), m_nPort(-1), m_oIsNagleDisabled(false), m_oIsBound(false)
 {
-  m_tType = UnknownType;
-  m_nPort = -1;
-  m_szHost = string( "" );
-  m_nSocket = -1;
-  // default the connection timeout to 1 second.
-  m_nConnectTimeout = 1000;
-  // The Nagle algorithm is enabled by default.
-  m_oIsNagleDisabled = false;
-  // 'bind' has not been called.
-  m_oIsBound = false;
-  // No errors yet!
-  m_nLastError = 0;
 }
 
 ////////////////////////////////////////////////////////////////////////////////
@@ -60,22 +49,10 @@ SystemSocket::SystemSocket()
 
 SystemSocket::SystemSocket( const Type &tType,
                             const int &nPort,
-                            const string &szHost )
+                            const string &szHost ) : m_tType(tType), m_nLastError(0), m_nSocket(-1), 
+                                                      m_nConnectTimeout(1000), m_szHost(szHost), m_nPort(nPort), 
+                                                       m_oIsNagleDisabled(false), m_oIsBound(false)
 {
-  // Since we are initializing, we should remember these values.
-  m_tType = tType;
-  m_nPort = nPort;
-  m_szHost = szHost;
-  // The file descriptor is invalid until we make the 'socket' call.
-  m_nSocket = -1;
-  // default the connection timeout to 1 second.
-  m_nConnectTimeout = 1000;
-  // The Nagle algorithm is enabled by default.
-  m_oIsNagleDisabled = false;
-  // 'bind' has not been called.
-  m_oIsBound = false;
-  // No errors yet!
-  m_nLastError = 0;
 }
 
 ////////////////////////////////////////////////////////////////////////////////
@@ -338,7 +315,7 @@ sockaddr_in SystemSocket::convertStrToAddr( const string &szHost )
           break;
       }
 #else  //  assume linux
-      int nRet = inet_pton( AF_INET, szHost.c_str(), (void *)&(saAddr.sin_addr) );
+      int nRet = inet_pton( AF_INET, szHost.c_str(), static_cast<void *>(&(saAddr.sin_addr)) );
       int nErr = errno;
 
       //  Is the input not IPv4 dotted decimal string?
@@ -394,7 +371,7 @@ void SystemSocket::bind()
 
     sockaddr_in saAddr = createSockAddr( m_nPort, m_szHost );
 
-    if ( ::bind( m_nSocket, ( sockaddr * ) &saAddr, sizeof( saAddr ) ) == -1 )
+    if ( ::bind( m_nSocket, reinterpret_cast<sockaddr *>(&saAddr), sizeof( saAddr ) ) == -1 )
     {
       m_nLastError = errno;
       throw ( Error( string( ": " ) + strerror( m_nLastError ) ) );
@@ -461,8 +438,8 @@ void SystemSocket::accept( SystemSocket &socNew )
     memset( &saAddr, 0, sizeof ( saAddr ) );
     int nAddrLen = sizeof( saAddr );
 
-    if ( ( socNew.m_nSocket = ::accept( m_nSocket, ( sockaddr * ) &saAddr,
-                                        ( socklen_t * ) &nAddrLen ) ) == -1 )
+    if ( ( socNew.m_nSocket = ::accept( m_nSocket, reinterpret_cast<sockaddr *>(&saAddr),
+                                        reinterpret_cast<socklen_t *>(&nAddrLen) ) ) == -1 )
     {
       m_nLastError = errno;
       throw ( Error( string( ": " ) + strerror( m_nLastError ) ) );
@@ -547,7 +524,7 @@ void SystemSocket::sendChunkTo( char *pcData,
     //  the socket is connection-mode, dest_addr shall be ignored.
 
     int nRet = ::sendto( m_nSocket, pcData, nNumBytes, 0,
-                         ( const sockaddr * )( &saAddr ), sizeof( saAddr ) );
+                         reinterpret_cast<const sockaddr *>( &saAddr ), sizeof( saAddr ) );
     m_nLastError = errno;
 
     // Was there an error?
@@ -658,7 +635,7 @@ void SystemSocket::recvChunkFrom( char *pcData,
 
     socklen_t tSockLen = sizeof( saAddr );
     int nRet = ::recvfrom( m_nSocket, pcData, nNumBytes, MSG_WAITALL,
-                           ( sockaddr * )( &saAddr ), &tSockLen );
+                           reinterpret_cast<sockaddr *>( &saAddr ), &tSockLen );
     m_nLastError = errno;
 
     // Was there an error?
@@ -741,7 +718,7 @@ void SystemSocket::sendTo( const string &szData )
 
     //  nRet will now hold the number of bytes sent or an error code.
     int nRet = ::sendto( m_nSocket, szData.c_str(), szData.size(), 0,
-                         ( sockaddr * )( &saAddr ), sizeof( saAddr ) );
+                         reinterpret_cast<sockaddr *>( &saAddr ), sizeof( saAddr ) );
     m_nLastError = errno;
 
     // Was there an error?
@@ -898,7 +875,7 @@ void SystemSocket::connect()
     //  with the sa_family member of sockaddr set to AF_UNSPEC.
 
     // Will we connect immediately?
-    if ( ::connect( m_nSocket, ( sockaddr * ) &saAddr, sizeof( saAddr ) ) == -1 )
+    if ( ::connect( m_nSocket, reinterpret_cast<sockaddr *>(&saAddr), sizeof( saAddr ) ) == -1 )
     {
       m_nLastError = errno;
 
@@ -1014,7 +991,7 @@ void SystemSocket::getOption( const int &nLevel,
     }
 
     if ( ::getsockopt( m_nSocket, nLevel, nOption,
-                       (char *)( pvOptionValue ), &nOptionLength ) == -1 )
+                       static_cast<char *>( pvOptionValue ), &nOptionLength ) == -1 )
     {
       m_nLastError = errno;
       throw ( Error( string( ": " ) + strerror( m_nLastError ) ) );
@@ -1042,7 +1019,7 @@ void SystemSocket::setOption(const int &nLevel,
     }
 
     if ( ::setsockopt( m_nSocket, nLevel, nOption,
-                       (char *)( pvOptionValue ), nOptionLength ) == -1 )
+                       static_cast<char *>( pvOptionValue ), nOptionLength ) == -1 )
     {
       m_nLastError = errno;
       throw ( Error( string( ": " ) + strerror( m_nLastError ) ) );
@@ -1458,7 +1435,7 @@ int SystemSocket::getInterfaces( vector<SystemSocket::Interface> &vecInterfaces 
       // Try an increment of 10....
       uiAmt += 10;
       ifc.ifc_len = sizeof( struct ifreq ) * uiAmt;
-      ifc.ifc_buf = ( char * )( realloc( ifc.ifc_buf, ifc.ifc_len ) );
+      ifc.ifc_buf = static_cast<char *>( realloc( ifc.ifc_buf, ifc.ifc_len ) );
       // Make the call.
       nRetVal = ::ioctl( fdSock, SIOCGIFCONF, &ifc );
     }
@@ -1477,16 +1454,15 @@ int SystemSocket::getInterfaces( vector<SystemSocket::Interface> &vecInterfaces 
         string szName( ifr->ifr_name );
 
         // The IP address is set in the struct.
-        struct in_addr *psia1 = ( struct in_addr * )
-                                ( &( ifr->ifr_addr.sa_data[sizeof addrSock.sin_port] ) );
+        struct in_addr *psia1 = reinterpret_cast<struct in_addr *>( &( ifr->ifr_addr.sa_data[sizeof addrSock.sin_port] ) );
+
         string szIP( string( ::inet_ntoa( *psia1 ) ) );
 
         // Overwrite the same piece of memory with the broadcast address.
         nRetVal = ::ioctl( fdSock, SIOCGIFBRDADDR, ifr );
 
         // The broadcast address has replaced the IP address in the struct.
-        struct in_addr *psia2 = ( struct in_addr * )
-                                ( &( ifr->ifr_broadaddr.sa_data[sizeof addrSock.sin_port] ) );
+        struct in_addr *psia2 = reinterpret_cast<struct in_addr *>( &( ifr->ifr_broadaddr.sa_data[sizeof addrSock.sin_port] ) );
         string szBCast( string( ::inet_ntoa( *psia2 ) ) );
 
         // Add this info to our vector.

@@ -22,6 +22,7 @@ int pwfsAlignment::attachOverlay( rtimvOverlayAccess & roa,
    
     m_roa = roa;
    
+    m_enabled = true;
    
    
     if(m_roa.m_dictionary != nullptr)

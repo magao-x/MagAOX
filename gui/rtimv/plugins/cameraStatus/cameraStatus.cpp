@@ -87,7 +87,7 @@ int cameraStatus::attachOverlay( rtimvOverlayAccess & roa,
    return 0;
 }
 
-bool cameraStatus::blobExists( const std::string propel )
+bool cameraStatus::blobExists( const std::string & propel )
 {
     if(m_roa.m_dictionary->count(m_deviceName + "." + propel) == 0)
     {

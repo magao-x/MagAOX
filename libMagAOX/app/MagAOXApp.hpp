@@ -1565,8 +1565,15 @@ int MagAOXApp<_useINDI>::execute() //virtual
    {
       pcf::IndiProperty ipSend;
       ipSend.setDevice(m_configName);
-      m_indiDriver->sendDelProperty(ipSend);
-      
+      try 
+      {
+         m_indiDriver->sendDelProperty(ipSend);
+      }
+      catch(const std::exception & e)
+      {
+         log<software_error>({__FILE__, __LINE__, std::string("exception caught from sendDelProperty: ") + e.what()}); 
+      }
+
       m_indiDriver->quitProcess();
       m_indiDriver->deactivate();
       log<indidriver_stop>();
@@ -1628,7 +1635,14 @@ void MagAOXApp<_useINDI>::logMessage( bufferPtrT & b )
       
       msg.setTimeStamp(pcf::TimeStamp(tv));
       
-      m_indiDriver->sendMessage(msg);
+      try 
+      {
+         m_indiDriver->sendMessage(msg);
+      }
+      catch(const std::exception & e)
+      {
+         log<software_error>({__FILE__, __LINE__, std::string("exception caught from sendMessage: ") + e.what()}); 
+      }
    }
 }
 
@@ -2720,7 +2734,15 @@ void MagAOXApp<_useINDI>::sendGetPropertySetList(bool all)
       {
          if( it->second.property )
          {
-            m_indiDriver->sendGetProperties( *(it->second.property) );
+            try
+            {
+                m_indiDriver->sendGetProperties( *(it->second.property) );
+            }
+            catch(const std::exception & e)
+            {
+                log<software_error>({__FILE__, __LINE__, "exception caught from sendGetProperties for " + 
+                                                                   it->second.property->getName() + ": " + e.what()}); 
+            }
          }
 
          it->second.m_defReceived = false;
@@ -2742,33 +2764,41 @@ void MagAOXApp<_useINDI>::handleDefProperty( const pcf::IndiProperty &ipRecv )
 template<bool _useINDI>
 void MagAOXApp<_useINDI>::handleGetProperties( const pcf::IndiProperty &ipRecv )
 {
-   if(!m_useINDI) return;
-   if(m_indiDriver == nullptr) return;
+    if(!m_useINDI) return;
+    if(m_indiDriver == nullptr) return;
 
-   //Ignore if not our device
-   if (ipRecv.hasValidDevice() && ipRecv.getDevice() != m_indiDriver->getName())
-   {
-      return;
-   }
+    //Ignore if not our device
+    if (ipRecv.hasValidDevice() && ipRecv.getDevice() != m_indiDriver->getName())
+    {
+        return;
+    }
 
-   //Send all properties if requested.
-   if( !ipRecv.hasValidName() )
-   {
-      callBackIterator it = m_indiNewCallBacks.begin();
+    //Send all properties if requested.
+    if( !ipRecv.hasValidName() )
+    {
+        callBackIterator it = m_indiNewCallBacks.begin();
 
-      while(it != m_indiNewCallBacks.end() )
-      {
-         if( it->second.property )
-         {
-            m_indiDriver->sendDefProperty( *(it->second.property) );
-         }
-         ++it;
-      }
+        while(it != m_indiNewCallBacks.end() )
+        {
+            if( it->second.property )
+            {
+                try
+                {
+                    m_indiDriver->sendDefProperty( *(it->second.property) );
+                }
+                catch(const std::exception & e)
+                {
+                    log<software_error>({__FILE__, __LINE__, "exception caught from sendDefProperty for " + 
+                                                                   it->second.property->getName() + ": " + e.what()}); 
+                }
+            }
+            ++it;
+        }
 
-      //This is a possible INDI server restart, so we re-register for all notifications.
-      sendGetPropertySetList(true);
+        //This is a possible INDI server restart, so we re-register for all notifications.
+        sendGetPropertySetList(true);
 
-      return;
+        return;
    }
 
    //Check if we actually have this.
@@ -2780,7 +2810,15 @@ void MagAOXApp<_useINDI>::handleGetProperties( const pcf::IndiProperty &ipRecv )
    //Otherwise send just the requested property, if property is not null
    if(m_indiNewCallBacks[ ipRecv.createUniqueKey() ].property)
    {
-      m_indiDriver->sendDefProperty( *(m_indiNewCallBacks[ ipRecv.createUniqueKey() ].property) );
+      try
+      {
+         m_indiDriver->sendDefProperty( *(m_indiNewCallBacks[ ipRecv.createUniqueKey() ].property) );
+      }
+      catch(const std::exception & e)
+      {
+         log<software_error>({__FILE__, __LINE__, "exception caught from sendDefProperty for " + 
+                                                                   m_indiNewCallBacks[ ipRecv.createUniqueKey() ].property->getName() + ": " + e.what()}); 
+      }
    }
    return;
 }
@@ -3020,7 +3058,7 @@ int MagAOXApp<_useINDI>::sendNewProperty( const pcf::IndiProperty & ipSend,
       log<software_error>({__FILE__, __LINE__});
       return -1;
    }
-
+  
    return 0;
 }
 

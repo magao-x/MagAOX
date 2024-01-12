@@ -1,3 +1,4 @@
+../libMagAOX/app/tests/indiUtils_test
 ../libMagAOX/app/tests/MagAOXApp_test
 ../libMagAOX/app/dev/tests/outletController_test
 ../libMagAOX/sys/tests/thSetuid_test
@@ -10,6 +11,8 @@
 ../apps/siglentSDG/tests/siglentSDG_test
 ../apps/sshDigger/tests/sshDigger_test
 ../apps/smc100ccCtrl/tests/smc100ccCtrl_test
+../apps/stateRuleEngine/tests/indiCompRuleConfig_test
+../apps/stateRuleEngine/tests/indiCompRules_test
 ../apps/streamWriter/tests/streamWriter_test
 ../apps/tcsInterface/tests/tcsInterface_test 
 ../apps/userGainCtrl/tests/userGainCtrl_test

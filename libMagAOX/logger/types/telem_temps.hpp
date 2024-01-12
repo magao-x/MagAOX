@@ -69,7 +69,7 @@ struct telem_temps : public flatbuffer_log
       
       if( fbs->temps() )
       {
-         for(size_t i=0; i< fbs->temps()->Length(); ++i)
+         for(size_t i=0; i< fbs->temps()->size(); ++i)
          {
             msg += " ";
             msg += std::to_string(fbs->temps()->Get(i));
