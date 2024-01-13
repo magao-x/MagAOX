@@ -182,7 +182,7 @@ void IndiXmlParser::createDefTextVector( const IndiProperty &ip )
     if ( ip[ii].hasValidName() == false )
       throw runtime_error( szElementTag + " must have attribute 'name' defined." );
 
-    m_ssXml << " name=\"" << ip[ii].getName() << "\"";
+    m_ssXml << " name=\"" << ip[ii].name() << "\"";
 
     // "implied" means that if they are not defined, don't add them. Adding an
     // empty "implied" attribute to the generated XML is an error.
@@ -245,7 +245,7 @@ void IndiXmlParser::createSetTextVector( const IndiProperty &ip )
     if ( ip[ii].hasValidName() == false )
       throw runtime_error( szElementTag + " must have attribute 'name' defined." );
 
-    m_ssXml << " name=\"" << ip[ii].getName() << "\"";
+    m_ssXml << " name=\"" << ip[ii].name() << "\"";
 
     m_ssXml << ">\r\n";
 
@@ -297,7 +297,7 @@ void IndiXmlParser::createNewTextVector( const IndiProperty &ip )
     if ( ip[ii].hasValidName() == false )
       throw runtime_error( szElementTag + " must have attribute 'name' defined." );
 
-    m_ssXml << " name=\"" << ip[ii].getName() << "\"";
+    m_ssXml << " name=\"" << ip[ii].name() << "\"";
 
     m_ssXml << ">\r\n";
 
@@ -372,7 +372,7 @@ void IndiXmlParser::createDefNumberVector( const IndiProperty &ip )
     if ( ip[ii].hasValidStep() == false )
       throw runtime_error( szElementTag + " must have attribute 'step' defined." );
 
-    m_ssXml << " name=\"" << ip[ii].getName() << "\"";
+    m_ssXml << " name=\"" << ip[ii].name() << "\"";
     m_ssXml << " format=\"" << ip[ii].getFormat() << "\"";
     m_ssXml << " min=\"" << ip[ii].getMin() << "\"";
     m_ssXml << " max=\"" << ip[ii].getMax() << "\"";
@@ -439,7 +439,7 @@ void IndiXmlParser::createSetNumberVector( const IndiProperty &ip )
     if ( ip[ii].hasValidName() == false )
       throw runtime_error( szElementTag + " must have attribute 'name' defined." );
 
-    m_ssXml << " name=\"" << ip[ii].getName() << "\"";
+    m_ssXml << " name=\"" << ip[ii].name() << "\"";
 
     m_ssXml << ">\r\n";
 
@@ -491,7 +491,7 @@ void IndiXmlParser::createNewNumberVector( const IndiProperty &ip )
     if ( ip[ii].hasValidName() == false )
       throw runtime_error( szElementTag + " must have attribute 'name' defined." );
 
-    m_ssXml << " name=\"" << ip[ii].getName() << "\"";
+    m_ssXml << " name=\"" << ip[ii].name() << "\"";
 
     m_ssXml << ">\r\n";
 
@@ -561,7 +561,7 @@ void IndiXmlParser::createDefSwitchVector( const IndiProperty &ip )
     if ( ip[ii].hasValidName() == false )
       throw runtime_error( szElementTag + " must have attribute 'name' defined." );
 
-    m_ssXml << " name=\"" << ip[ii].getName() << "\"";
+    m_ssXml << " name=\"" << ip[ii].name() << "\"";
 
     // "implied" means that if they are not defined, don't add them. Adding an
     // empty "implied" attribute to the generated XML is an error.
@@ -624,7 +624,7 @@ void IndiXmlParser::createSetSwitchVector( const IndiProperty &ip )
     if ( ip[ii].hasValidName() == false )
       throw runtime_error( szElementTag + " must have attribute 'name' defined." );
 
-    m_ssXml << " name=\"" << ip[ii].getName() << "\"";
+    m_ssXml << " name=\"" << ip[ii].name() << "\"";
 
     m_ssXml << ">\r\n";
 
@@ -676,7 +676,7 @@ void IndiXmlParser::createNewSwitchVector( const IndiProperty &ip )
     if ( ip[ii].hasValidName() == false )
       throw runtime_error( szElementTag + " must have attribute 'name' defined." );
 
-    m_ssXml << " name=\"" << ip[ii].getName() << "\"";
+    m_ssXml << " name=\"" << ip[ii].name() << "\"";
 
     m_ssXml << ">\r\n";
 
@@ -738,7 +738,7 @@ void IndiXmlParser::createDefLightVector( const IndiProperty &ip )
     if ( ip[ii].hasValidName() == false )
       throw runtime_error( szElementTag + " must have attribute 'name' defined." );
 
-    m_ssXml << " name=\"" << ip[ii].getName() << "\"";
+    m_ssXml << " name=\"" << ip[ii].name() << "\"";
 
     // "implied" means that if they are not defined, don't add them. Adding an
     // empty "implied" attribute to the generated XML is an error.
@@ -799,7 +799,7 @@ void IndiXmlParser::createSetLightVector( const IndiProperty &ip )
     if ( ip[ii].hasValidName() == false )
       throw runtime_error( szElementTag + " must have attribute 'name' defined." );
 
-    m_ssXml << " name=\"" << ip[ii].getName() << "\"";
+    m_ssXml << " name=\"" << ip[ii].name() << "\"";
 
     m_ssXml << ">\r\n";
 
@@ -866,7 +866,7 @@ void IndiXmlParser::createDefBLOBVector( const IndiProperty &ip )
     if ( ip[ii].hasValidName() == false )
       throw runtime_error( szElementTag + " must have attribute 'name' defined." );
 
-    m_ssXml << " name=\"" << ip[ii].getName() << "\"";
+    m_ssXml << " name=\"" << ip[ii].name() << "\"";
 
     // "implied" means that if they are not defined, don't add them. Adding an
     // empty "implied" attribute to the generated XML is an error.
@@ -934,7 +934,7 @@ void IndiXmlParser::createSetBLOBVector( const IndiProperty &ip )
     if ( ip[ii].hasValidFormat() == false )
       throw runtime_error( szElementTag + " must have attribute 'format' defined." );
 
-    m_ssXml << " name=\"" << ip[ii].getName() << "\"";
+    m_ssXml << " name=\"" << ip[ii].name() << "\"";
     m_ssXml << " size=\"" << ip[ii].getSize() << "\"";
     m_ssXml << " format=\"" << ip[ii].getFormat() << "\"";
 
@@ -1002,7 +1002,7 @@ void IndiXmlParser::createNewBLOBVector( const IndiProperty &ip )
     if ( ip[ii].hasValidFormat() == false )
       throw runtime_error( szElementTag + " must have attribute 'format' defined." );
 
-    m_ssXml << " name=\"" << ip[ii].getName() << "\"";
+    m_ssXml << " name=\"" << ip[ii].name() << "\"";
     m_ssXml << " size=\"" << ip[ii].getSize() << "\"";
     m_ssXml << " format=\"" << ip[ii].getFormat() << "\"";
 
@@ -1479,7 +1479,7 @@ IndiMessage IndiXmlParser::createIndiMessage() const
           if ( ( szValue = string( ::findXMLAttValu( pxeChild, "min" ) ) ).size() > 0 )
             ieNew.setMin( szValue );
           if ( ( szValue = string( ::findXMLAttValu( pxeChild, "name" ) ) ).size() > 0 )
-            ieNew.setName( szValue );
+            ieNew.name( szValue );
           if ( ( szValue = string( ::findXMLAttValu( pxeChild, "size" ) ) ).size() > 0 )
             ieNew.setSize( szValue );
           if ( ( szValue = string( ::findXMLAttValu( pxeChild, "step" ) ) ).size() > 0 )

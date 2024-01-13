@@ -87,7 +87,7 @@ void pwrGUI::handleDefProperty( const pcf::IndiProperty & ipRecv /* [in] the pro
             elements->resize(nel);
             for(size_t i = 0; i < nel; ++i)
             {
-               (*elements)[i] = ipRecv[i].getName();
+               (*elements)[i] = ipRecv[i].name();
             }
          
             std::sort(elements->begin(), elements->end());

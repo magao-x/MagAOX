@@ -121,9 +121,9 @@ void selectionSw::handleSetProperty( const pcf::IndiProperty & ipRecv)
       std::string newName;
       for(auto it = ipRecv.getElements().begin(); it != ipRecv.getElements().end(); ++it)
       {
-         if(ui.comboBox->findText(QString(it->second.getName().c_str())) == -1)
+         if(ui.comboBox->findText(QString(it->second.name().c_str())) == -1)
          {
-            ui.comboBox->addItem(QString(it->second.getName().c_str()));
+            ui.comboBox->addItem(QString(it->second.name().c_str()));
          }
 
          if(it->second.getSwitchState() == pcf::IndiElement::On)
@@ -133,7 +133,7 @@ void selectionSw::handleSetProperty( const pcf::IndiProperty & ipRecv)
                std::cerr << "More than one switch selected in " << ipRecv.getDevice() << "." << ipRecv.getName() << "\n";
             }
          
-            newName = it->second.getName();
+            newName = it->second.name();
             if(newName != m_value) m_valChanged = true;
             m_value = newName; 
          }

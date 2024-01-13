@@ -69,7 +69,7 @@ void selectionSwStatus::handleSetProperty( const pcf::IndiProperty & ipRecv)
                std::cerr << "More than one switch selected in " << ipRecv.getDevice() << "." << ipRecv.getName() << "\n";
             }
          
-            newName = it->second.getName();
+            newName = it->second.name();
             if(newName != m_value) m_valChanged = true;
             m_value = newName; 
          }

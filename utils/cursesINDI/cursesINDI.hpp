@@ -248,7 +248,7 @@ void cursesINDI::handleDefProperty( const pcf::IndiProperty &ipRecv )
       es.propKey = ipRecv.createUniqueKey();
       es.device = ipRecv.getDevice();
       es.propertyName = ipRecv.getName();
-      es.name = elIt->second.getName();
+      es.name = elIt->second.name();
 
       std::string key = es.propKey + "." + es.name;
       auto elResult = knownElements.insert( elementMapValueT(key, es));

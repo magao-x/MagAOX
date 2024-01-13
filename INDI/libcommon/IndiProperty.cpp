@@ -926,7 +926,7 @@ void IndiProperty::update( const IndiElement &ieNew )
   pcf::ReadWriteLock::AutoWLock rwAuto( &m_rwData );
 
   // Actually add it to the map, or update it.
-  m_mapElements[ ieNew.getName() ] = ieNew;
+  m_mapElements[ ieNew.name() ] = ieNew;
 
   m_tsTimeStamp = TimeStamp::now();
 }
@@ -939,12 +939,12 @@ void IndiProperty::addIfNoExist( const IndiElement &ieNew )
   pcf::ReadWriteLock::AutoWLock rwAuto( &m_rwData );
 
   map<string, IndiElement>::const_iterator itr =
-    m_mapElements.find( ieNew.getName() );
+    m_mapElements.find( ieNew.name() );
 
   if ( itr == m_mapElements.end() )
   {
     // Actually add it to the map.
-    m_mapElements[ ieNew.getName() ] = ieNew;
+    m_mapElements[ ieNew.name() ] = ieNew;
     m_tsTimeStamp = TimeStamp::now();
   }
 }
@@ -958,13 +958,13 @@ void IndiProperty::add( const IndiElement &ieNew )
   pcf::ReadWriteLock::AutoWLock rwAuto( &m_rwData );
 
   map<string, IndiElement>::const_iterator itr =
-    m_mapElements.find( ieNew.getName() );
+    m_mapElements.find( ieNew.name() );
 
   if ( itr != m_mapElements.end() )
     throw Excep( ErrElementAlreadyExists );
 
   // Actually add it to the map.
-  m_mapElements[ ieNew.getName() ] = ieNew;
+  m_mapElements[ ieNew.name() ] = ieNew;
 
   m_tsTimeStamp = TimeStamp::now();
 }

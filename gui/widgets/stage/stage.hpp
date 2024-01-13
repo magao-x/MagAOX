@@ -231,9 +231,9 @@ void stage::handleSetProperty( const pcf::IndiProperty & ipRecv)
       for(auto it = ipRecv.getElements().begin(); it != ipRecv.getElements().end(); ++it)
       {
          ++n;
-         if(ui.setPoint->findText(QString(it->second.getName().c_str())) == -1)
+         if(ui.setPoint->findText(QString(it->second.name().c_str())) == -1)
          {
-            ui.setPoint->addItem(QString(it->second.getName().c_str()));
+            ui.setPoint->addItem(QString(it->second.name().c_str()));
          }
 
          if(it->second.getSwitchState() == pcf::IndiElement::On)
@@ -243,7 +243,7 @@ void stage::handleSetProperty( const pcf::IndiProperty & ipRecv)
                std::cerr << "More than one switch selected in " << ipRecv.getDevice() << "." << ipRecv.getName() << "\n";
             }
          
-            newName = it->second.getName();
+            newName = it->second.name();
             m_setPoint = newName;
             ui.setPoint->setCurrentText(m_setPoint.c_str());
             //if(newName != m_value) m_valChanged = true;

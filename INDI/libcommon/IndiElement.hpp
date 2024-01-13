@@ -1,16 +1,16 @@
-/// IndiElement.hpp
-///
-/// @author Paul Grenz
-///
-/// This class represents one element in an INDI property. In its most basic
-/// form it is a name-value pair with other attributes associated with it.
-/// All access is protected by a read-write lock.
-///
-////////////////////////////////////////////////////////////////////////////////
+/** \file IndiElement.hpp
+  *
+  * This class represents one element in an INDI property. In its most basic
+  * form it is a name-value pair with other attributes associated with it.
+  * All access is protected by a read-write lock.
+  *
+  * @author Paul Grenz (@Steward Observatory, original author)
+  * @author Jared Males (@Steward Observatory, refactored for MagAO-X)
+  */
 
-#ifndef INDI_ELEMENT_HPP
-#define INDI_ELEMENT_HPP
-#pragma once
+#ifndef libcommon_IndiElement_hpp
+#define libcommon_IndiElement_hpp
+
 
 #include <stdint.h>
 #include <string>
@@ -23,6 +23,7 @@ namespace pcf
 class IndiElement
 {
   public:
+
     // These are the possible types for streaming this element.
     enum Type
     {
@@ -66,34 +67,100 @@ class IndiElement
       On
     };
 
+    /** \name Member Data
+      * @{
+      */
+protected:
+    /// If this is a number or BLOB, this is the 'printf' format.
+    std::string m_szFormat {"%g"};
+
+    /// A label, usually used in a GUI.
+    std::string m_szLabel;
+    
+    /// If this is a number, this is its maximum value.
+    std::string m_szMax {"0"};
+    
+    /// If this is a number, this is its minimum value.
+    std::string m_szMin {"0"};
+    
+    /// The name of this element.
+    std::string m_name;
+    
+    /// If this is a BLOB, this is the number of bytes for it.
+    std::string m_szSize {"0"};
+    
+    /// If this is a number, this is increment for it.
+    std::string m_szStep {"0"};
+    
+    /// This is the value of the data.
+    std::string m_szValue;
+    
+    /// This can also be the value.
+    LightStateType m_lsValue {UnknownLightState};
+    
+    /// This can also be the value.
+    SwitchStateType m_ssValue {UnknownSwitchState};
+    
+    // A read write lock to protect the internal data.
+    mutable pcf::ReadWriteLock m_rwData;
+    ///@}
+
+    /** \name Construction and Destruction
+      *@{
+      */
+
     // Constructor/copy constructor/destructor.
   public:
     /// Constructor.
     IndiElement();
 
     /// Constructor with a name. This will be used often.
-    IndiElement( const std::string &szName );
+    IndiElement( const std::string &name );
 
     /// Constructor with a name and a string value.
-    IndiElement( const std::string &szName, const std::string &szValue );
+    IndiElement( const std::string &name, const std::string &szValue );
 
     /// Constructor with a name and a char pointer value.
-    IndiElement( const std::string &szName, const char *pcValue );
+    IndiElement( const std::string &name, const char *pcValue );
 
     /// Constructor with a name and a TT value.
-    template <class TT> IndiElement( const std::string &szName, const TT &tValue );
+    template <class TT> IndiElement( const std::string &name, const TT &tValue );
 
     /// Constructor with a name and a LightStateType value.
-    IndiElement( const std::string &szName, const LightStateType &tValue );
+    IndiElement( const std::string &name, const LightStateType &tValue );
 
     /// Constructor with a name and a SwitchStateType value.
-    IndiElement( const std::string &szName, const SwitchStateType &tValue );
+    IndiElement( const std::string &name, const SwitchStateType &tValue );
 
     /// Copy constructor.
     IndiElement( const IndiElement &ieRhs );
 
     /// Destructor.
     virtual ~IndiElement();
+
+    ///@}
+
+    /** \name Member Data Access 
+      * @{
+      */
+
+    /// Set the element name
+    void name( const std::string &name /**< [in] the new name*/);
+
+    /// Get the element name 
+    /** \returns the current value of m_name
+      */
+    const std::string &name() const;
+
+    /// Check if the element name is valid
+    /** The name is valid if m_name is non-zero size.
+      *
+      * \returns true if m_name is valid
+      * \returns false if m_name is not valid
+      */
+    bool hasValidName() const;
+
+    ///@}
 
     // Operators.
   public:
@@ -128,7 +195,7 @@ class IndiElement
     
     const std::string &getMin() const;
     
-    const std::string &getName() const;
+    
     
     const std::string &getSize() const;
     
@@ -153,7 +220,7 @@ class IndiElement
     bool hasValidLightState() const;
     bool hasValidMax() const;
     bool hasValidMin() const;
-    bool hasValidName() const;
+    
     bool hasValidSize() const;
     bool hasValidStep() const;
     bool hasValidSwitchState() const;
@@ -179,7 +246,7 @@ class IndiElement
     void setLabel( const std::string &szValue );
     void setMax( const std::string &szMax );
     void setMin( const std::string &szMin );
-    void setName( const std::string &szName );
+    
     void setSize( const std::string &szSize );
     void setStep( const std::string &szStep );
 
@@ -196,40 +263,8 @@ class IndiElement
     template <class TT> void setValue( const TT &ttValue );
     template <class TT> void set( const TT &ttValue );
 
-    // Members.
-  private:
-    /// If this is a number or BLOB, this is the 'printf' format.
-    std::string m_szFormat {"%g"};
-
-    /// A label, usually used in a GUI.
-    std::string m_szLabel;
     
-    /// If this is a number, this is its maximum value.
-    std::string m_szMax {"0"};
-    
-    /// If this is a number, this is its minimum value.
-    std::string m_szMin {"0"};
-    
-    /// The name of this element.
-    std::string m_szName;
-    
-    /// If this is a BLOB, this is the number of bytes for it.
-    std::string m_szSize {"0"};
-    
-    /// If this is a number, this is increment for it.
-    std::string m_szStep {"0"};
-    
-    /// This is the value of the data.
-    std::string m_szValue;
-    
-    /// This can also be the value.
-    LightStateType m_lsValue {UnknownLightState};
-    
-    /// This can also be the value.
-    SwitchStateType m_ssValue {UnknownSwitchState};
-    
-    // A read write lock to protect the internal data.
-    mutable pcf::ReadWriteLock m_rwData;
+  
 
 }; // class IndiElement
 } // namespace pcf
@@ -238,8 +273,8 @@ class IndiElement
 ////////////////////////////////////////////////////////////////////////////////
 /// Constructor with a name and a TT value.
 
-template <class TT> pcf::IndiElement::IndiElement( const std::string &szName,
-                                                   const TT &ttValue ) : m_szName(szName)
+template <class TT> pcf::IndiElement::IndiElement( const std::string &name,
+                                                   const TT &ttValue ) : m_name(name)
 {
   std::stringstream ssValue;
   ssValue << std::boolalpha << ttValue;
@@ -384,4 +419,4 @@ template <class TT> void pcf::IndiElement::setStep( const TT &ttStep )
 
 ////////////////////////////////////////////////////////////////////////////////
 
-#endif // INDI_ELEMENT_HPP
+#endif // libcommon_IndiElement_hpp

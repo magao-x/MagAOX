@@ -48,29 +48,29 @@ public:
 
         while(elIt != ipRecv.getElements().end())
         {
-            std::string elKey = key + "." + elIt->second.getName();
+            std::string elKey = key + "." + elIt->second.name();
 
             std::string val;
 
             if(ipRecv.getType() == pcf::IndiProperty::Switch)
             {
-                if(ipRecv[elIt->second.getName()].getSwitchState() == pcf::IndiElement::On)
+                if(ipRecv[elIt->second.name()].getSwitchState() == pcf::IndiElement::On)
                     val = "on";
-                else if(ipRecv[elIt->second.getName()].getSwitchState() == pcf::IndiElement::Off)
+                else if(ipRecv[elIt->second.name()].getSwitchState() == pcf::IndiElement::Off)
                     val = "off";
                 else
                     val = "unk";
             }
             else
             {
-                val = ipRecv[elIt->second.getName()].get();
+                val = ipRecv[elIt->second.name()].get();
             }
 
             (*m_dict)[elKey].setBlob(val.c_str(), val.size() + 1);
 
             if(elKey == "tcsi.teldata.pa")
             {
-                m_northAngle = ipRecv[elIt->second.getName()].get<float>();
+                m_northAngle = ipRecv[elIt->second.name()].get<float>();
                 (*m_dict)["rtimv.north.angle"].setBlob(&m_northAngle, sizeof(float));
             }
 

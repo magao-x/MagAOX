@@ -1,8 +1,9 @@
-/// IndiElement.cpp
-///
-/// @author Paul Grenz
-///
-////////////////////////////////////////////////////////////////////////////////
+/** \file IndiElement.cpp
+  *
+  *
+  * @author Paul Grenz (@Steward Observatory, original author)
+  * @author Jared Males (@Steward Observatory, refactored for MagAO-X)
+  */
 
 #include <string>
 #include <sstream>
@@ -16,68 +17,63 @@ using std::string;
 using std::stringstream;
 using pcf::IndiElement;
 
-////////////////////////////////////////////////////////////////////////////////
-/// Constructor.
-
 IndiElement::IndiElement()
 {
 }
 
-////////////////////////////////////////////////////////////////////////////////
-/// Constructor with a name - this will be used often.
-
-IndiElement::IndiElement( const string &szName ) : m_szName(szName)
+IndiElement::IndiElement( const string &name ) : m_name(name)
 {
 }
 
-////////////////////////////////////////////////////////////////////////////////
-/// Constructor with a name and a string value.
-
-IndiElement::IndiElement( const string &szName,
-                          const string &szValue ) : m_szName(szName), m_szValue(szValue)
+IndiElement::IndiElement( const string &name,
+                          const string &szValue ) : m_name(name), m_szValue(szValue)
 {
 }
 
-////////////////////////////////////////////////////////////////////////////////
-/// Constructor with a name and a char pointer value.
-
-IndiElement::IndiElement( const string &szName,
-                          const char *pcValue ) : m_szName(szName), m_szValue(pcValue)
+IndiElement::IndiElement( const string &name,
+                          const char *pcValue ) : m_name(name), m_szValue(pcValue)
 {
 }
 
-////////////////////////////////////////////////////////////////////////////////
-/// Constructor with a name and a LightStateType value.
-
-IndiElement::IndiElement( const string &szName,
-                          const LightStateType &tValue ) : m_szName(szName), m_lsValue(tValue)
+IndiElement::IndiElement( const string &name,
+                          const LightStateType &tValue ) : m_name(name), m_lsValue(tValue)
 {
 }
 
-////////////////////////////////////////////////////////////////////////////////
-/// Constructor with a name and a SwitchStateType value.
-
-IndiElement::IndiElement( const string &szName,
-                          const SwitchStateType &tValue ) : m_szName(szName), m_ssValue(tValue)
+IndiElement::IndiElement( const string &name,
+                          const SwitchStateType &tValue ) : m_name(name), m_ssValue(tValue)
 {
 }
-
-////////////////////////////////////////////////////////////////////////////////
-///  Copy constructor.
 
 IndiElement::IndiElement( const IndiElement &ieRhs ) : m_szFormat(ieRhs.m_szFormat), m_szLabel(ieRhs.m_szLabel),
-                                                         m_szMax(ieRhs.m_szMax), m_szMin(ieRhs.m_szMin), m_szName(ieRhs.m_szName),
+                                                         m_szMax(ieRhs.m_szMax), m_szMin(ieRhs.m_szMin), m_name(ieRhs.m_name),
                                                           m_szSize(ieRhs.m_szSize), m_szStep(ieRhs.m_szStep), m_szValue(ieRhs.m_szValue),
                                                            m_lsValue(ieRhs.m_lsValue), m_ssValue(ieRhs.m_ssValue)
 {
 }
 
-////////////////////////////////////////////////////////////////////////////////
-/// Destructor.
-
 IndiElement::~IndiElement()
 {
 }
+
+void IndiElement::name( const string &name )
+{
+  pcf::ReadWriteLock::AutoWLock rwAuto( &m_rwData );
+  m_name = name;
+}
+
+const string &IndiElement::name() const
+{
+  pcf::ReadWriteLock::AutoRLock rwAuto( &m_rwData );
+  return m_name;
+}
+
+bool IndiElement::hasValidName() const
+{
+  pcf::ReadWriteLock::AutoRLock rwAuto( &m_rwData );
+  return ( m_name.size() > 0 );
+}
+
 
 ////////////////////////////////////////////////////////////////////////////////
 /// Assigns the internal data of this object from an existing one.
@@ -92,7 +88,7 @@ const IndiElement &IndiElement::operator=( const IndiElement &ieRhs )
     m_szLabel = ieRhs.m_szLabel;
     m_szMax = ieRhs.m_szMax;
     m_szMin = ieRhs.m_szMin;
-    m_szName = ieRhs.m_szName;
+    m_name = ieRhs.m_name;
     m_szSize = ieRhs.m_szSize;
     m_szStep = ieRhs.m_szStep;
     m_szValue = ieRhs.m_szValue;
@@ -116,7 +112,7 @@ bool IndiElement::operator==( const IndiElement &ieRhs ) const
            m_szLabel == ieRhs.m_szLabel &&
            m_szMax == ieRhs.m_szMax &&
            m_szMin == ieRhs.m_szMin &&
-           m_szName == ieRhs.m_szName &&
+           m_name == ieRhs.m_name &&
            m_szSize == ieRhs.m_szSize &&
            m_szStep == ieRhs.m_szStep &&
            m_szValue == ieRhs.m_szValue &&
@@ -132,7 +128,7 @@ string IndiElement::createString() const
 
   stringstream ssOutput;
   ssOutput << "{ "
-           << "\"name\" : \"" << m_szName << "\" , "
+           << "\"name\" : \"" << m_name << "\" , "
            << "\"value\" : \"" << m_szValue << "\" , "
            << "\"lightstate\" : \"" << getLightStateString( m_lsValue ) << "\" , "
            << "\"switchstate\" : \"" << getSwitchStateString( m_ssValue ) << "\" , "
@@ -158,7 +154,7 @@ void IndiElement::clear()
   m_szLabel = "";
   m_szMax = "0";
   m_szMin = "0";
-  m_szName = "";
+  m_name = "";
   m_szSize = "0";
   m_szStep = "0";
   m_szValue = "";
@@ -223,11 +219,6 @@ const string &IndiElement::getMin() const
 ////////////////////////////////////////////////////////////////////////////////
 /// Returns the name attribute.
 
-const string &IndiElement::getName() const
-{
-  pcf::ReadWriteLock::AutoRLock rwAuto( &m_rwData );
-  return m_szName;
-}
 
 ////////////////////////////////////////////////////////////////////////////////
 /// Returns the step attribute.
@@ -296,7 +287,7 @@ IndiElement::operator bool() const
   ssValue >> oValue;
   if ( ssValue.fail() == true )
   {
-    throw ( runtime_error( string( "IndiElement '" ) + m_szName + "' value '" +
+    throw ( runtime_error( string( "IndiElement '" ) + m_name + "' value '" +
                            m_szValue + "' is not a bool.") );
   }
 
@@ -317,7 +308,7 @@ IndiElement::operator double() const
   ssValue >> xValue;
   if ( ssValue.fail() == true )
   {
-    throw ( runtime_error( string( "IndiElement '" ) + m_szName + "' value '" +
+    throw ( runtime_error( string( "IndiElement '" ) + m_name + "' value '" +
                            m_szValue + "' is not a double.") );
   }
 
@@ -338,7 +329,7 @@ IndiElement::operator float() const
   ssValue >> eValue;
   if ( ssValue.fail() == true )
   {
-    throw ( runtime_error( string( "IndiElement '" ) + m_szName + "' value '" +
+    throw ( runtime_error( string( "IndiElement '" ) + m_name + "' value '" +
                            m_szValue + "' is not a float.") );
   }
 
@@ -359,7 +350,7 @@ IndiElement::operator int() const
   ssValue >> iValue;
   if ( ssValue.fail() == true )
   {
-    throw ( runtime_error( string( "IndiElement '" ) + m_szName + "' value '" +
+    throw ( runtime_error( string( "IndiElement '" ) + m_name + "' value '" +
                            m_szValue + "' is not an int.") );
   }
 
@@ -389,7 +380,7 @@ IndiElement::operator unsigned int() const
   ssValue >> uiValue;
   if ( ssValue.fail() == true )
   {
-    throw ( runtime_error( string( "IndiElement '" ) + m_szName + "' value '" +
+    throw ( runtime_error( string( "IndiElement '" ) + m_name + "' value '" +
                            m_szValue + "' is not an unsigned int.") );
   }
 
@@ -463,11 +454,6 @@ void IndiElement::setMin( const string &szMin )
 
 ////////////////////////////////////////////////////////////////////////////////
 
-void IndiElement::setName( const string &szName )
-{
-  pcf::ReadWriteLock::AutoWLock rwAuto( &m_rwData );
-  m_szName = szName;
-}
 
 ////////////////////////////////////////////////////////////////////////////////
 
@@ -582,11 +568,6 @@ bool IndiElement::hasValidMin() const
 
 ////////////////////////////////////////////////////////////////////////////////
 
-bool IndiElement::hasValidName() const
-{
-  pcf::ReadWriteLock::AutoRLock rwAuto( &m_rwData );
-  return ( m_szName.size() > 0 );
-}
 
 ////////////////////////////////////////////////////////////////////////////////
 
