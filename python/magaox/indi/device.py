@@ -1,3 +1,4 @@
+import gzip
 import datetime
 import os.path
 import sys
@@ -49,6 +50,33 @@ class BaseConfig:
             raise xconf.ConfigMismatch(e, raw_config)
         return instance
 
+class MagAOXLogFormatter(logging.Formatter):
+    def formatTime(self, record, datefmt):
+        return datetime.datetime.fromtimestamp(record.created, datetime.timezone.utc).strftime('%Y-%m-%dT%H:%M:%S.%f000')
+
+class GZipFileHandler(logging.FileHandler):
+    def _open(self):
+        return gzip.open(self.baseFilename, self.mode + 't', encoding=self.encoding, errors=self.errors)
+
+def init_logging(logger : logging.Logger, destination, console_log_level=logging.INFO, file_log_level=logging.DEBUG, all_verbose=False):
+    log_format = '%(asctime)s %(levelname)s %(message)s (%(name)s:%(filename)s:%(lineno)d)'
+    logger.setLevel(logging.DEBUG)
+    if all_verbose:
+        logging.getLogger().setLevel(logging.DEBUG)
+        file_log_level = console_log_level = logging.DEBUG
+
+    compressed_file_handler = GZipFileHandler(destination)
+    logger.addHandler(compressed_file_handler)
+    compressed_file_handler.setLevel(file_log_level)
+
+    console = logging.StreamHandler()
+    console.setLevel(console_log_level)
+    logging.getLogger().addHandler(console)
+
+    formatter = MagAOXLogFormatter(log_format)
+    console.setFormatter(formatter)
+    compressed_file_handler.setFormatter(formatter)
+    logger.info(f"Logging to {destination}")
 
 class XDevice(Device):
     prefix_dir : str  = "/opt/MagAOX"
@@ -79,26 +107,9 @@ class XDevice(Device):
         self.log = logging.getLogger(self.name)
         log_dir = self.prefix_dir + "/" + self.logs_dir + "/" + self.name + "/"
         os.makedirs(log_dir, exist_ok=True)
-        self.log.debug(f"Made (or found) {log_dir=}")
         timestamp = datetime.datetime.now().strftime("%Y-%m-%dT%H%M%S")
-        log_file_path = log_dir + "/" + f"{self.name}_{timestamp}.log"
-        log_format = '%(filename)s:%(lineno)d: [%(levelname)s] %(message)s'
-        logging.basicConfig(
-            level='INFO',
-            filename=log_file_path,
-            format=log_format
-        )
-        if verbose:
-            self.log.setLevel(logging.DEBUG)
-        if all_verbose:
-            logging.getLogger().setLevel(logging.DEBUG)
-        # Specifying a filename results in no console output, so add it back
-        console = logging.StreamHandler()
-        console.setLevel(logging.DEBUG)
-        logging.getLogger('').addHandler(console)
-        formatter = logging.Formatter(log_format)
-        console.setFormatter(formatter)
-        self.log.info(f"Logging to {log_file_path}")
+        log_file_path = log_dir + "/" + f"{self.name}_{timestamp}.log.gz"
+        init_logging(self.log, log_file_path, console_log_level=logging.DEBUG if verbose else logging.INFO, all_verbose=all_verbose)
 
     def __init__(self, name, config, *args, verbose=False, all_verbose=False, **kwargs):
         fifos_root = self.prefix_dir + "/drivers/fifos"
@@ -146,7 +157,6 @@ class XDevice(Device):
             sys.exit(0)
         config = cls.load_config(args.config_file, args.vars)
         if args.dump_config:
-            config = cls.load_config(args.config_file, args.vars)
             print(xconf.config_to_toml(config))
             sys.exit(0)
         cls(name=args.name, config=config, verbose=args.verbose, all_verbose=args.all_verbose).main()
