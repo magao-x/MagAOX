@@ -3,7 +3,7 @@ import numpy as np
 
 from pyMilk.interfacing.isio_shmlib import SHM as shm
 import purepyindi2 as indi
-
+import time
 
 class XCam():
 	'''A python interface for existing MagAO-X cameras.
@@ -15,6 +15,8 @@ class XCam():
 		self._client = indi.client.IndiClient()
 		self._client.connect()
 		self._client.get_properties(shm_name)
+		time.sleep(0.25)
+
 		self._local_indi_prop = {}
 		
 		self._old_counter = 0

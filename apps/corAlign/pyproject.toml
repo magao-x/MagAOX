@@ -1,0 +1,15 @@
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[project]
+name = "corAlign"
+description = "Python INDI device to align the coronagraph focal plane masks."
+version = "2024.01.12"
+
+authors = [
+  {name = "Sebastiaan Y. Haffert", email = "shaffert@arizona.edu"},
+]
+
+[project.scripts]
+coralign = "corAlign:corAlign.console_app"
