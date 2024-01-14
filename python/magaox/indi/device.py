@@ -71,8 +71,8 @@ class XDevice(Device):
         return self.config.sleep_interval_sec
 
     @classmethod
-    def load_config(cls, filenames, overrides):
-        config_class : BaseConfig = typing.get_type_hints(cls)['config']
+    def load_config(cls, filenames=None, overrides=None):
+        config_class : type = typing.get_type_hints(cls)['config']
         return config_class.from_config(cls.default_config_path, filenames, settings_strs=overrides)
 
     def _init_logs(self, verbose, all_verbose):
@@ -100,10 +100,10 @@ class XDevice(Device):
         console.setFormatter(formatter)
         self.log.info(f"Logging to {log_file_path}")
 
-    def __init__(self, name, *args, verbose=False, all_verbose=False, **kwargs):
+    def __init__(self, name, config, *args, verbose=False, all_verbose=False, **kwargs):
         fifos_root = self.prefix_dir + "/drivers/fifos"
         super().__init__(name, *args, connection_class=partial(transports.IndiFifoConnection, name=name, fifos_root=fifos_root), **kwargs)
-        self.config = self.load_config()
+        self.config = config
         self._init_logs(verbose, all_verbose)
 
     def lock_pid_file(self):
@@ -144,8 +144,9 @@ class XDevice(Device):
         if args.help:
             xconf.print_help(config_class, parser)
             sys.exit(0)
+        config = cls.load_config(args.config_file, args.vars)
         if args.dump_config:
             config = cls.load_config(args.config_file, args.vars)
             print(xconf.config_to_toml(config))
             sys.exit(0)
-        cls(name=args.name, verbose=args.verbose, all_verbose=args.all_verbose).main()
+        cls(name=args.name, config=config, verbose=args.verbose, all_verbose=args.all_verbose).main()
