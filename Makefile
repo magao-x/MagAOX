@@ -140,7 +140,6 @@ scripts_to_install = magaox \
 	sync_cacao \
 	xctrl \
 	netconsole_logger \
-	creaimshm \
 	dmdispbridge \
 	shmimTCPreceive \
 	shmimTCPtransmit \
