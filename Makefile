@@ -39,6 +39,7 @@ apps_rtc = \
 
 apps_icc = \
 	acronameUsbHub \
+	dmPokeCenter \
 	flipperCtrl \
 	filterWheelCtrl \
 	hsfwCtrl \
