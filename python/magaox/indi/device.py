@@ -1,4 +1,5 @@
 import gzip
+import glob
 import datetime
 import os.path
 import sys
@@ -9,10 +10,10 @@ import psutil
 from purepyindi2 import Device, transports
 import toml
 import typing
-
-log = logging.getLogger(__name__)
-
 import xconf
+
+# n.b. replaced with logger scoped to device name during device init
+log = logging.getLogger()
 
 @xconf.config
 class BaseConfig:
@@ -54,28 +55,27 @@ class MagAOXLogFormatter(logging.Formatter):
     def formatTime(self, record, datefmt):
         return datetime.datetime.fromtimestamp(record.created, datetime.timezone.utc).strftime('%Y-%m-%dT%H:%M:%S.%f000')
 
-class GZipFileHandler(logging.FileHandler):
-    def _open(self):
-        return gzip.open(self.baseFilename, self.mode + 't', encoding=self.encoding, errors=self.errors)
-
-def init_logging(logger : logging.Logger, destination, console_log_level=logging.INFO, file_log_level=logging.DEBUG, all_verbose=False):
-    log_format = '%(asctime)s %(levelname)s %(message)s (%(name)s:%(filename)s:%(lineno)d)'
-    logger.setLevel(logging.DEBUG)
+def init_logging(logger : logging.Logger, destination, console_log_level, file_log_level, all_verbose):
+    root = logging.getLogger()
+    root.setLevel(logging.DEBUG)
     if all_verbose:
-        logging.getLogger().setLevel(logging.DEBUG)
         file_log_level = console_log_level = logging.DEBUG
+        logger = root
+    log_format = '%(asctime)s %(levelname)s %(message)s (%(name)s:%(funcName)s:%(lineno)d)'
+    # logger.setLevel(logging.DEBUG)
+    file_handler = logging.FileHandler(destination)
 
-    compressed_file_handler = GZipFileHandler(destination)
-    logger.addHandler(compressed_file_handler)
-    compressed_file_handler.setLevel(file_log_level)
+    logger.addHandler(file_handler)
+    file_handler.setLevel(file_log_level)
 
     console = logging.StreamHandler()
     console.setLevel(console_log_level)
-    logging.getLogger().addHandler(console)
+    logger.addHandler(console)
+    logger.setLevel(min(file_log_level, console_log_level))
 
     formatter = MagAOXLogFormatter(log_format)
     console.setFormatter(formatter)
-    compressed_file_handler.setFormatter(formatter)
+    file_handler.setFormatter(formatter)
     logger.info(f"Logging to {destination}")
 
 class XDevice(Device):
@@ -104,12 +104,31 @@ class XDevice(Device):
         return config_class.from_config(cls.default_config_path, filenames, settings_strs=overrides)
 
     def _init_logs(self, verbose, all_verbose):
-        self.log = logging.getLogger(self.name)
-        log_dir = self.prefix_dir + "/" + self.logs_dir + "/" + self.name + "/"
+        global log
+        log = self.log = logging.getLogger(self.name)
+        log_dir = self.prefix_dir + "/" + self.logs_dir + "/" + self.name
         os.makedirs(log_dir, exist_ok=True)
         timestamp = datetime.datetime.now().strftime("%Y-%m-%dT%H%M%S")
-        log_file_path = log_dir + "/" + f"{self.name}_{timestamp}.log.gz"
-        init_logging(self.log, log_file_path, console_log_level=logging.DEBUG if verbose else logging.INFO, all_verbose=all_verbose)
+        log_file_name = f"{self.name}_{timestamp}.log"
+        log_file_path = log_dir + "/" + log_file_name
+        init_logging(
+            log,
+            log_file_path,
+            console_log_level=logging.DEBUG if verbose else logging.INFO,
+            file_log_level=logging.DEBUG,
+            all_verbose=all_verbose)
+
+        # GZip compress any existing text logs (ending in .log not .log.gz)
+        for fn in glob.glob(log_dir + f"/{self.name}_*.log"):
+            if fn.endswith(log_file_name):
+                # don't gzip our empty log right after opening
+                continue
+            path_to_text_log = os.path.realpath(fn)
+            return_code = subprocess.call(["gzip", path_to_text_log])
+            if return_code != 0:
+                log.error(f"Unable to compress {path_to_text_log} with gzip")
+            else:
+                log.debug(f"Compressed existing log: {fn}")
 
     def __init__(self, name, config, *args, verbose=False, all_verbose=False, **kwargs):
         fifos_root = self.prefix_dir + "/drivers/fifos"
