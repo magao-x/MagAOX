@@ -3,7 +3,7 @@
 
 #define errPrint(expl) std::cerr << "warnings: " << __FILE__ << " " << __LINE__ << " " << expl << std::endl;
 
-warnings::warnings() : rtimvOverlayInterface()
+warnings::warnings() : rtimvOverlayInterface(), m_blob{'\0'}
 {
 }
 

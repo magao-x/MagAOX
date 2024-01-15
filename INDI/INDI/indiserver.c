@@ -1144,7 +1144,7 @@ driverStderrReaderThread (void *vp)
 	/* log everthing until error */
 	while (1) {
 	    /* read next whole line */
-        int rv = read(dp->efd, buf, sizeof(buf));
+        ssize_t rv = read(dp->efd, buf, sizeof(buf)-1);
         if(rv == 0)
         {
             logMessage ("from Driver %s: stderr EOF\n", dp->name);
@@ -1155,10 +1155,12 @@ driverStderrReaderThread (void *vp)
             logMessage ("from Driver %s: stderr %s\n", dp->name, strerror(errno));
             return NULL;
         }
+        buf[rv] = '\0';
 
 	    /* prefix each whole line to our stderr, save extra for next time */
 	    logMessage ("Driver %s: %s", dp->name, buf);	/* includes nl */
 	}
+    
 
 	/* for lint */
 	return (NULL);
@@ -1353,7 +1355,7 @@ restartDvr (DvrInfo *dp)
 			kill (dp->pid, SIGKILL));
 			(void) waitpid (dp->pid, &status, WNOHANG);
 	    }
-		int thispid = (int)gettid();
+		//int thispid = (int)gettid();
 		logMessage ("Driver %s: closing dp->efd", dp->name);
 	    close (dp->efd);
 		logMessage ("Driver %s: closing dp->wfd", dp->name);

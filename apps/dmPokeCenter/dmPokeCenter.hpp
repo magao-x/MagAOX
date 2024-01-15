@@ -1015,6 +1015,12 @@ int dmPokeCenter::fitPokes()
         m_gfit.setGuess(0, mx, 0.5*(m_pokeBlock.rows()-1.0), 0.5*(m_pokeBlock.cols()-1.0), mx::math::func::sigma2fwhm(m_pokeFWHMGuess));
         m_gfit.fit();
 
+        int rc = m_gfit.get_reason_code();
+        if(rc != 1 && rc != 2)
+        {
+            return log<software_error, -1>({__FILE__,__LINE__, "fit to poke " + std::to_string(nn) + " failed: " + m_gfit.get_reason_string()});
+        }
+
         m_pokePositions[nn*2 + 0] = x0 + m_gfit.x0();
         m_pokePositions[nn*2 + 1] = y0 + m_gfit.y0();
 
