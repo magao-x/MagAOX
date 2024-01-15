@@ -561,6 +561,15 @@ int dmPokeCenter::appShutdown()
     shmimMonitorT::appShutdown();
     telemeterT::appShutdown();
 
+    try
+    {
+        if(m_wfsThread.joinable())
+        {
+            m_wfsThread.join();
+        }
+    }
+    catch(...){}
+
     return 0;
 }
 
@@ -643,8 +652,6 @@ void dmPokeCenter::wfsThreadExec()
 
     while(m_shutdown == 0)
     {
-        std::cout << "wfs thread\n";
-
         timespec ts;
         XWC_SEM_WAIT_TS_RETVOID(ts, m_wfsSemWait_sec, m_wfsSemWait_nsec);
       
@@ -970,11 +977,6 @@ int dmPokeCenter::fitPupil()
         return log<software_error, -1>({__FILE__, __LINE__, "circle fit failed"});
     }
 
-    std::cerr << "\n";
-    std::cerr << x0 << " " << y0 << " " << avgr0 << "\n";
-    std::cerr << avgx << " " << avgy << " " << avgr << "\n";
-    std::cerr << "\n";
-
     x0 = cutx + x0/m_pupilMag;
     y0 = cuty + y0/m_pupilMag;
     avgr0 /= m_pupilMag;
@@ -982,9 +984,6 @@ int dmPokeCenter::fitPupil()
     avgx = cutx + avgx/m_pupilMag;
     avgy = cuty + avgy/m_pupilMag;
     avgr /= m_pupilMag;
-
-    std::cerr << x0 << " " << y0 << " " << avgr0 << "\n";
-    std::cerr << avgx << " " << avgy << " " << avgr << "\n";
 
     m_pupilX = avgx;
     m_pupilY = avgy;
@@ -1015,8 +1014,6 @@ int dmPokeCenter::fitPokes()
         m_gfit.setArray(m_pokeBlock .data(), m_pokeBlock.rows(), m_pokeBlock.cols());
         m_gfit.setGuess(0, mx, 0.5*(m_pokeBlock.rows()-1.0), 0.5*(m_pokeBlock.cols()-1.0), mx::math::func::sigma2fwhm(m_pokeFWHMGuess));
         m_gfit.fit();
-
-        std::cerr << x0 + m_gfit.x0() << " " << y0 + m_gfit.y0() << "\n";
 
         m_pokePositions[nn*2 + 0] = x0 + m_gfit.x0();
         m_pokePositions[nn*2 + 1] = y0 + m_gfit.y0();
