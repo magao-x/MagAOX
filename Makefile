@@ -62,7 +62,7 @@ apps_aoc = \
 	koolanceCtrl \
 	observerCtrl \
 	siglentSDG \
-	audibleAlerts
+	#audibleAlerts
 
 
 apps_tic = \
