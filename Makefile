@@ -115,7 +115,8 @@ all_rtimv_plugins = \
 	cameraStatus \
 	indiDictionary \
 	pwfsAlignment \
-	dmStatus
+	dmStatus \
+	warnings
 
 ifeq ($(MAGAOX_ROLE),RTC)
   rtimv_plugins_to_build =
