@@ -181,8 +181,10 @@ if [[ -e $VENDOR_SOFTWARE_BUNDLE ]]; then
     if [[ $ID == centos && ( $MAGAOX_ROLE == RTC || $MAGAOX_ROLE == TIC || $MAGAOX_ROLE == vm ) ]]; then
         sudo bash -l "$DIR/steps/install_bmc.sh"
     fi
-    if [[ $MAGAOX_ROLE == ICC ]]; then
+    if [[ $MAGAOX_ROLE == ICC || $MAGAOX_ROLE == RTC || $MAGAOX_ROLE == vm ]]; then
         sudo bash -l "$DIR/steps/install_libhsfw.sh"
+    fi
+    if [[ $MAGAOX_ROLE == ICC || $MAGAOX_ROLE == vm ]]; then
         sudo bash -l "$DIR/steps/install_picam.sh"
         sudo bash -l "$DIR/steps/install_kinetix.sh"
     fi
