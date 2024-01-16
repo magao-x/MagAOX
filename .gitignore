@@ -57,6 +57,7 @@ apps/cameraSim/cameraSim
 apps/dmMode/dmMode
 apps/dmModulator/dmModulator
 apps/dmPokeCenter/dmPokeCenter
+apps/dmSpeckle/dmSpeckle
 
 #f
 apps/filterWheelCtrl/filterWheelCtrl

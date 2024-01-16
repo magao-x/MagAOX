@@ -14,8 +14,12 @@ apps_common = \
 	timeSeriesSimulator
 
 apps_rtcicc = \
-	bmcCtrl \
-	rhusbMon \
+        acronameUsbHub \
+	baslerCtrl\
+        bmcCtrl \
+	flipperCtrl \
+        hsfwCtrl \
+        rhusbMon \
 	alpaoCtrl \
 	cacaoInterface \
 	userGainCtrl \
@@ -38,16 +42,11 @@ apps_rtc = \
 
 
 apps_icc = \
-	acronameUsbHub \
 	dmPokeCenter \
-	flipperCtrl \
 	filterWheelCtrl \
-	hsfwCtrl \
-	baslerCtrl \
 	picamCtrl \
 	pvcamCtrl \
 	smc100ccCtrl \
-	andorCtrl \
 	usbtempMon \
 	xt1121Ctrl \
 	xt1121DCDU \
