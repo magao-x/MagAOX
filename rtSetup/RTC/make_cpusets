@@ -191,17 +191,17 @@ mkdir -p $cpusetMount/RTmon
 /bin/echo 1 > $cpusetMount/RTmon/cpuset.cpu_exclusive
 /bin/echo 0-1 > $cpusetMount/RTmon/cpuset.mems
 
-#spare30
-mkdir -p $cpusetMount/spare30
-/bin/echo 30 > $cpusetMount/spare30/cpuset.cpus
-/bin/echo 1 > $cpusetMount/spare30/cpuset.cpu_exclusive
-/bin/echo 0-1 > $cpusetMount/spare30/cpuset.mems
+#camtip
+mkdir -p $cpusetMount/camtip
+/bin/echo 30 > $cpusetMount/camtip/cpuset.cpus
+/bin/echo 1 > $cpusetMount/camtip/cpuset.cpu_exclusive
+/bin/echo 0-1 > $cpusetMount/camtip/cpuset.mems
 
-#spare31
-mkdir -p $cpusetMount/spare31
-/bin/echo 31 > $cpusetMount/spare31/cpuset.cpus
-/bin/echo 1 > $cpusetMount/spare31/cpuset.cpu_exclusive
-/bin/echo 0-1 > $cpusetMount/spare31/cpuset.mems
+#camacq
+mkdir -p $cpusetMount/camacq
+/bin/echo 31 > $cpusetMount/camacq/cpuset.cpus
+/bin/echo 1 > $cpusetMount/camacq/cpuset.cpu_exclusive
+/bin/echo 0-1 > $cpusetMount/camacq/cpuset.mems
 
 #spare32
 mkdir -p $cpusetMount/spare32

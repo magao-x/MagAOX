@@ -14,15 +14,19 @@ apps_common = \
 	timeSeriesSimulator
 
 apps_rtcicc = \
+        alignLoop \
         acronameUsbHub \
-	baslerCtrl\
+	baslerCtrl \
         bmcCtrl \
 	flipperCtrl \
         hsfwCtrl \
         rhusbMon \
-	alpaoCtrl \
 	cacaoInterface \
+        kcubeCtrl \
+        modalPSDs \
 	userGainCtrl \
+        refRMS \
+        streamCircBuff \
 	zaberCtrl \
 	zaberLowLevel \
 	picoMotorCtrl
