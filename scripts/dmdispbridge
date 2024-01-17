@@ -315,62 +315,62 @@ then
        Ny=1
        ;;
     #gmt segment 3
-    "dm65disp00")
+    "dm63disp00")
        port=8640
        Nx=3
        Ny=1
        ;;
-    "dm65disp01")
+    "dm63disp01")
        port=8641
        Nx=3
        Ny=1
        ;;
-    "dm65disp02")
+    "dm63disp02")
        port=8642
        Nx=3
        Ny=1
        ;;
-    "dm65disp03")
+    "dm63disp03")
        port=8643
        Nx=3
        Ny=1
        ;;
-    "dm65disp04")
+    "dm63disp04")
        port=8644
        Nx=3
        Ny=1
        ;;
-    "dm65disp05")
+    "dm63disp05")
        port=8645
        Nx=3
        Ny=1
        ;;
-    "dm65disp06")
+    "dm63disp06")
        port=8646
        Nx=3
        Ny=1
        ;;
-    "dm65disp07")
+    "dm63disp07")
        port=8647
        Nx=3
        Ny=1
        ;;
-    "dm65disp08")
+    "dm63disp08")
        port=8648
        Nx=3
        Ny=1
        ;;
-    "dm65disp09")
+    "dm63disp09")
        port=8649
        Nx=3
        Ny=1
        ;;
-    "dm65disp10")
+    "dm63disp10")
        port=8650
        Nx=3
        Ny=1
        ;;
-    "dm65disp11")
+    "dm63disp11")
        port=8651
        Nx=3
        Ny=1

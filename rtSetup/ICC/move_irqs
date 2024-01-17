@@ -31,7 +31,7 @@ for enx in $enxs; do
 done
 
 nvidias=$(grep nvidia /proc/interrupts | awk '{print $1}' | sed 's/.$//')
-cpu=$(cat $CGROUPS1_CPUSET_MOUNTPOINT/acqu-mvm/cpuset.cpus)
+cpu=$(cat $CGROUPS1_CPUSET_MOUNTPOINT/acqu_mvm/cpuset.cpus)
 for nvidia in $nvidias; do
     echo "nvidia: " $nvidia " to " $cpu 
     echo $cpu > /proc/irq/$nvidia/smp_affinity_list
