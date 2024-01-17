@@ -54,11 +54,11 @@ cpusetMount=$CGROUPS1_CPUSET_MOUNTPOINT
 set -xeuo pipefail
 
 
-# we will use processors 0-7 and 32-39 as the hyperthread system cpus,
-# so we disable processors 40-63. This leaves us 8-31 as single thread processors.
+# we will use processors 0-13 and 32-45 as the hyperthread system cpus,
+# so we disable processors 46-63. This leaves us 10-31 as single thread processors.
 
-# Disable processors 50-71
-for cpu in {40..63}
+# Disable processors 46-63
+for cpu in {46..63}
 do
    /bin/echo 0 > /sys/devices/system/cpu/cpu$cpu/online 
 done
@@ -70,7 +70,7 @@ cd $cpusetMount
 #
 ############################
 mkdir -p $cpusetMount/system
-/bin/echo 0-7,32-39 > $cpusetMount/system/cpuset.cpus
+/bin/echo 0-13,32-45 > $cpusetMount/system/cpuset.cpus
 /bin/echo 0-1 > $cpusetMount/system/cpuset.mems
 
 # Now move all current tasks to system cpuset
@@ -88,21 +88,20 @@ echo 1 > system/cpuset.sched_load_balance
 
 ###############
 # Now setup cpusets for the ICC R/T processes
-# We have cores 8-31 (24 cores) to use.
-# Curently unused: 22-31 (10)  These are created as "spareN"
+# We have cores 14-31 (24 cores) to use.
 ###############
 
 ## NCPC DM
 
 #dm02comb
 mkdir -p $cpusetMount/dm02comb
-/bin/echo 8 > $cpusetMount/dm02comb/cpuset.cpus
+/bin/echo 14 > $cpusetMount/dm02comb/cpuset.cpus
 /bin/echo 1 > $cpusetMount/dm02comb/cpuset.cpu_exclusive
 /bin/echo 0-1 > $cpusetMount/dm02comb/cpuset.mems
 
 #ncpc
 mkdir -p $cpusetMount/ncpc
-/bin/echo 9 > $cpusetMount/ncpc/cpuset.cpus
+/bin/echo 15 > $cpusetMount/ncpc/cpuset.cpus
 /bin/echo 1 > $cpusetMount/ncpc/cpuset.cpu_exclusive
 /bin/echo 0-1 > $cpusetMount/ncpc/cpuset.mems
 
@@ -110,80 +109,41 @@ mkdir -p $cpusetMount/ncpc
 
 #camlowfs
 mkdir -p $cpusetMount/camlowfs
-/bin/echo 10 > $cpusetMount/camlowfs/cpuset.cpus
+/bin/echo 16 > $cpusetMount/camlowfs/cpuset.cpus
 /bin/echo 1 > $cpusetMount/camlowfs/cpuset.cpu_exclusive
 /bin/echo 0-1 > $cpusetMount/camlowfs/cpuset.mems
 
-#camlowfs-sw
-mkdir -p $cpusetMount/camlowfs-sw
-/bin/echo 11 > $cpusetMount/camlowfs-sw/cpuset.cpus
-/bin/echo 1 > $cpusetMount/camlowfs-sw/cpuset.cpu_exclusive
-/bin/echo 0-1 > $cpusetMount/camlowfs-sw/cpuset.mems
+#camlowfs_sw
+mkdir -p $cpusetMount/camlowfs_sw
+/bin/echo 17 > $cpusetMount/camlowfs_sw/cpuset.cpus
+/bin/echo 1 > $cpusetMount/camlowfs_sw/cpuset.cpu_exclusive
+/bin/echo 0-1 > $cpusetMount/camlowfs_sw/cpuset.mems
 
 ## camsci1
 #camsci1
 mkdir -p $cpusetMount/camsci1
-/bin/echo 12 > $cpusetMount/camsci1/cpuset.cpus
+/bin/echo 18 > $cpusetMount/camsci1/cpuset.cpus
 /bin/echo 1 > $cpusetMount/camsci1/cpuset.cpu_exclusive
 /bin/echo 0-1 > $cpusetMount/camsci1/cpuset.mems
 
-#camsci1-sw
-mkdir -p $cpusetMount/camsci1-sw
-/bin/echo 13 > $cpusetMount/camsci1-sw/cpuset.cpus
-/bin/echo 1 > $cpusetMount/camsci1-sw/cpuset.cpu_exclusive
-/bin/echo 0-1 > $cpusetMount/camsci1-sw/cpuset.mems
+#camsci1_sw
+mkdir -p $cpusetMount/camsci1_sw
+/bin/echo 19 > $cpusetMount/camsci1_sw/cpuset.cpus
+/bin/echo 1 > $cpusetMount/camsci1_sw/cpuset.cpu_exclusive
+/bin/echo 0-1 > $cpusetMount/camsci1_sw/cpuset.mems
 
 ## camsci2
 #camsci2
 mkdir -p $cpusetMount/camsci2
-/bin/echo 14 > $cpusetMount/camsci2/cpuset.cpus
+/bin/echo 20 > $cpusetMount/camsci2/cpuset.cpus
 /bin/echo 1 > $cpusetMount/camsci2/cpuset.cpu_exclusive
 /bin/echo 0-1 > $cpusetMount/camsci2/cpuset.mems
 
-#camsci2-sw
-mkdir -p $cpusetMount/camsci2-sw
-/bin/echo 15 > $cpusetMount/camsci2-sw/cpuset.cpus
-/bin/echo 1 > $cpusetMount/camsci2-sw/cpuset.cpu_exclusive
-/bin/echo 0-1 > $cpusetMount/camsci2-sw/cpuset.mems
-
-## camptip
-#camtip
-mkdir -p $cpusetMount/camtip
-/bin/echo 16 > $cpusetMount/camtip/cpuset.cpus
-/bin/echo 1 > $cpusetMount/camtip/cpuset.cpu_exclusive
-/bin/echo 0-1 > $cpusetMount/camtip/cpuset.mems
-
-#camtip-sw
-mkdir -p $cpusetMount/camtip-sw
-/bin/echo 17 > $cpusetMount/camtip-sw/cpuset.cpus
-/bin/echo 1 > $cpusetMount/camtip-sw/cpuset.cpu_exclusive
-/bin/echo 0-1 > $cpusetMount/camtip-sw/cpuset.mems
-
-## CACAO
-
-#acqu-mvm 18
-mkdir -p $cpusetMount/acqu-mvm
-/bin/echo 18 > $cpusetMount/acqu-mvm/cpuset.cpus
-/bin/echo 1 > $cpusetMount/acqu-mvm/cpuset.cpu_exclusive
-/bin/echo 0-1 > $cpusetMount/acqu-mvm/cpuset.mems
-
-#mfilt 19
-mkdir -p $cpusetMount/mfilt
-/bin/echo 19 > $cpusetMount/mfilt/cpuset.cpus
-/bin/echo 1 > $cpusetMount/mfilt/cpuset.cpu_exclusive
-/bin/echo 0-1 > $cpusetMount/mfilt/cpuset.mems
-
-#mlat 20
-mkdir -p $cpusetMount/mlat
-/bin/echo 20 > $cpusetMount/mlat/cpuset.cpus
-/bin/echo 1 > $cpusetMount/mlat/cpuset.cpu_exclusive
-/bin/echo 0-1 > $cpusetMount/mlat/cpuset.mems
-
-#RTmon 21
-mkdir -p $cpusetMount/RTmon
-/bin/echo 21 > $cpusetMount/RTmon/cpuset.cpus
-/bin/echo 1 > $cpusetMount/RTmon/cpuset.cpu_exclusive
-/bin/echo 0-1 > $cpusetMount/RTmon/cpuset.mems
+#camsci2_sw
+mkdir -p $cpusetMount/camsci2_sw
+/bin/echo 21 > $cpusetMount/camsci2_sw/cpuset.cpus
+/bin/echo 1 > $cpusetMount/camsci2_sw/cpuset.cpu_exclusive
+/bin/echo 0-1 > $cpusetMount/camsci2_sw/cpuset.mems
 
 #spare22
 mkdir -p $cpusetMount/spare22
@@ -197,29 +157,31 @@ mkdir -p $cpusetMount/spare23
 /bin/echo 1 > $cpusetMount/spare23/cpuset.cpu_exclusive
 /bin/echo 0-1 > $cpusetMount/spare23/cpuset.mems
 
-#spare24
-mkdir -p $cpusetMount/spare24
-/bin/echo 24 > $cpusetMount/spare24/cpuset.cpus
-/bin/echo 1 > $cpusetMount/spare24/cpuset.cpu_exclusive
-/bin/echo 0-1 > $cpusetMount/spare24/cpuset.mems
+## CACAO
 
-#spare25
-mkdir -p $cpusetMount/spare25
-/bin/echo 25 > $cpusetMount/spare25/cpuset.cpus
-/bin/echo 1 > $cpusetMount/spare25/cpuset.cpu_exclusive
-/bin/echo 0-1 > $cpusetMount/spare25/cpuset.mems
+#acqu_mvm
+mkdir -p $cpusetMount/acqu_mvm
+/bin/echo 24 > $cpusetMount/acqu_mvm/cpuset.cpus
+/bin/echo 1 > $cpusetMount/acqu_mvm/cpuset.cpu_exclusive
+/bin/echo 0-1 > $cpusetMount/acqu_mvm/cpuset.mems
 
-#spare26
-mkdir -p $cpusetMount/spare26
-/bin/echo 26 > $cpusetMount/spare26/cpuset.cpus
-/bin/echo 1 > $cpusetMount/spare26/cpuset.cpu_exclusive
-/bin/echo 0-1 > $cpusetMount/spare26/cpuset.mems
+#mfilt
+mkdir -p $cpusetMount/mfilt
+/bin/echo 25 > $cpusetMount/mfilt/cpuset.cpus
+/bin/echo 1 > $cpusetMount/mfilt/cpuset.cpu_exclusive
+/bin/echo 0-1 > $cpusetMount/mfilt/cpuset.mems
 
-#spare27
-mkdir -p $cpusetMount/spare27
-/bin/echo 27 > $cpusetMount/spare27/cpuset.cpus
-/bin/echo 1 > $cpusetMount/spare27/cpuset.cpu_exclusive
-/bin/echo 0-1 > $cpusetMount/spare27/cpuset.mems
+#mlat
+mkdir -p $cpusetMount/mlat
+/bin/echo 26 > $cpusetMount/mlat/cpuset.cpus
+/bin/echo 1 > $cpusetMount/mlat/cpuset.cpu_exclusive
+/bin/echo 0-1 > $cpusetMount/mlat/cpuset.mems
+
+#RTmon
+mkdir -p $cpusetMount/RTmon
+/bin/echo 27 > $cpusetMount/RTmon/cpuset.cpus
+/bin/echo 1 > $cpusetMount/RTmon/cpuset.cpu_exclusive
+/bin/echo 0-1 > $cpusetMount/RTmon/cpuset.mems
 
 #spare28
 mkdir -p $cpusetMount/spare28

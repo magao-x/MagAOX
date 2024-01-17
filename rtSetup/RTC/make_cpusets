@@ -92,7 +92,7 @@ echo 1 > system/cpuset.sched_load_balance
 ###############
 # Now setup cpusets for the RTC R/T processes
 # We have cores 14-35 (22 cores) to use.
-# Curently unused: 14-16 (3) and 28-35 (8)  These are created as "spareN"
+# Curently unused: 14-16 (3) and 34-35 (2)  These are created as "spareN"
 ###############
 
 #spare14
@@ -113,11 +113,11 @@ mkdir -p $cpusetMount/spare16
 /bin/echo 1 > $cpusetMount/spare16/cpuset.cpu_exclusive
 /bin/echo 0-1 > $cpusetMount/spare16/cpuset.mems
 
-#camwfs-sw - 17
-mkdir -p $cpusetMount/camwfs-sw
-/bin/echo 17 > $cpusetMount/camwfs-sw/cpuset.cpus
-/bin/echo 1 > $cpusetMount/camwfs-sw/cpuset.cpu_exclusive
-/bin/echo 0-1 > $cpusetMount/camwfs-sw/cpuset.mems
+#camwfs_sw - 17
+mkdir -p $cpusetMount/camwfs_sw
+/bin/echo 17 > $cpusetMount/camwfs_sw/cpuset.cpus
+/bin/echo 1 > $cpusetMount/camwfs_sw/cpuset.cpu_exclusive
+/bin/echo 0-1 > $cpusetMount/camwfs_sw/cpuset.mems
 
 #camwfs - 18
 mkdir -p $cpusetMount/camwfs
@@ -162,10 +162,10 @@ mkdir -p $cpusetMount/t2w
 /bin/echo 0-1 > $cpusetMount/t2w/cpuset.mems
 
 #acqu-mvm 25
-mkdir -p $cpusetMount/acqu-mvm
-/bin/echo 25 > $cpusetMount/acqu-mvm/cpuset.cpus
-/bin/echo 1 > $cpusetMount/acqu-mvm/cpuset.cpu_exclusive
-/bin/echo 0-1 > $cpusetMount/acqu-mvm/cpuset.mems
+mkdir -p $cpusetMount/acqu_mvm
+/bin/echo 25 > $cpusetMount/acqu_mvm/cpuset.cpus
+/bin/echo 1 > $cpusetMount/acqu_mvm/cpuset.cpu_exclusive
+/bin/echo 0-1 > $cpusetMount/acqu_mvm/cpuset.mems
 
 #mfilt 26
 mkdir -p $cpusetMount/mfilt
@@ -197,23 +197,23 @@ mkdir -p $cpusetMount/camtip
 /bin/echo 1 > $cpusetMount/camtip/cpuset.cpu_exclusive
 /bin/echo 0-1 > $cpusetMount/camtip/cpuset.mems
 
+#camtip_sw
+mkdir -p $cpusetMount/camtip_sw
+/bin/echo 31 > $cpusetMount/camtip_sw/cpuset.cpus
+/bin/echo 1 > $cpusetMount/camtip_sw/cpuset.cpu_exclusive
+/bin/echo 0-1 > $cpusetMount/camtip_sw/cpuset.mems
+
 #camacq
 mkdir -p $cpusetMount/camacq
-/bin/echo 31 > $cpusetMount/camacq/cpuset.cpus
+/bin/echo 32 > $cpusetMount/camacq/cpuset.cpus
 /bin/echo 1 > $cpusetMount/camacq/cpuset.cpu_exclusive
 /bin/echo 0-1 > $cpusetMount/camacq/cpuset.mems
 
-#spare32
-mkdir -p $cpusetMount/spare32
-/bin/echo 32 > $cpusetMount/spare32/cpuset.cpus
-/bin/echo 1 > $cpusetMount/spare32/cpuset.cpu_exclusive
-/bin/echo 0-1 > $cpusetMount/spare32/cpuset.mems
-
-#spare33
-mkdir -p $cpusetMount/spare33
-/bin/echo 33 > $cpusetMount/spare33/cpuset.cpus
-/bin/echo 1 > $cpusetMount/spare33/cpuset.cpu_exclusive
-/bin/echo 0-1 > $cpusetMount/spare33/cpuset.mems
+#camacq_sw
+mkdir -p $cpusetMount/camacq_sw
+/bin/echo 33 > $cpusetMount/camacq_sw/cpuset.cpus
+/bin/echo 1 > $cpusetMount/camacq_sw/cpuset.cpu_exclusive
+/bin/echo 0-1 > $cpusetMount/camacq_sw/cpuset.mems
 
 #spare34
 mkdir -p $cpusetMount/spare34
