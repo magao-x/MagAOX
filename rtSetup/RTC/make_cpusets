@@ -113,67 +113,67 @@ mkdir -p $cpusetMount/spare16
 /bin/echo 1 > $cpusetMount/spare16/cpuset.cpu_exclusive
 /bin/echo 0-1 > $cpusetMount/spare16/cpuset.mems
 
-#camwfs_sw - 17
+#camwfs_sw
 mkdir -p $cpusetMount/camwfs_sw
 /bin/echo 17 > $cpusetMount/camwfs_sw/cpuset.cpus
 /bin/echo 1 > $cpusetMount/camwfs_sw/cpuset.cpu_exclusive
 /bin/echo 0-1 > $cpusetMount/camwfs_sw/cpuset.mems
 
-#camwfs - 18
+#camwfs
 mkdir -p $cpusetMount/camwfs
 /bin/echo 18 > $cpusetMount/camwfs/cpuset.cpus
 /bin/echo 1 > $cpusetMount/camwfs/cpuset.cpu_exclusive
 /bin/echo 0-1 > $cpusetMount/camwfs/cpuset.mems
 
-#camwfs2 - 19
+#camwfs2
 mkdir -p $cpusetMount/camwfs2
 /bin/echo 19 > $cpusetMount/camwfs2/cpuset.cpus
 /bin/echo 1 > $cpusetMount/camwfs2/cpuset.cpu_exclusive
 /bin/echo 0-1 > $cpusetMount/camwfs2/cpuset.mems
 
-#dm00comb (woofer) - 20
+#dm00comb (woofer)
 mkdir -p $cpusetMount/dm00comb
 /bin/echo 20 > $cpusetMount/dm00comb/cpuset.cpus
 /bin/echo 1 > $cpusetMount/dm00comb/cpuset.cpu_exclusive
 /bin/echo 0-1 > $cpusetMount/dm00comb/cpuset.mems
 
-#woofer - 21
+#woofer
 mkdir -p $cpusetMount/woofer
 /bin/echo 21 > $cpusetMount/woofer/cpuset.cpus
 /bin/echo 1 > $cpusetMount/woofer/cpuset.cpu_exclusive
 /bin/echo 0-1 > $cpusetMount/woofer/cpuset.mems
 
-#dm01comb - 22
+#dm01comb
 mkdir -p $cpusetMount/dm01comb
 /bin/echo 22 > $cpusetMount/dm01comb/cpuset.cpus
 /bin/echo 1 > $cpusetMount/dm01comb/cpuset.cpu_exclusive
 /bin/echo 0-1 > $cpusetMount/dm01comb/cpuset.mems
 
-#tweeter - 23
+#tweeter
 mkdir -p $cpusetMount/tweeter
 /bin/echo 23 > $cpusetMount/tweeter/cpuset.cpus
 /bin/echo 1 > $cpusetMount/tweeter/cpuset.cpu_exclusive
 /bin/echo 0-1 > $cpusetMount/tweeter/cpuset.mems
 
-#t2w offload process - 24
+#t2w offload process 
 mkdir -p $cpusetMount/t2w
 /bin/echo 24 > $cpusetMount/t2w/cpuset.cpus
 /bin/echo 1 > $cpusetMount/t2w/cpuset.cpu_exclusive
 /bin/echo 0-1 > $cpusetMount/t2w/cpuset.mems
 
-#acqu-mvm 25
+#acqu_mvm
 mkdir -p $cpusetMount/acqu_mvm
 /bin/echo 25 > $cpusetMount/acqu_mvm/cpuset.cpus
 /bin/echo 1 > $cpusetMount/acqu_mvm/cpuset.cpu_exclusive
 /bin/echo 0-1 > $cpusetMount/acqu_mvm/cpuset.mems
 
-#mfilt 26
+#mfilt
 mkdir -p $cpusetMount/mfilt
 /bin/echo 26 > $cpusetMount/mfilt/cpuset.cpus
 /bin/echo 1 > $cpusetMount/mfilt/cpuset.cpu_exclusive
 /bin/echo 0-1 > $cpusetMount/mfilt/cpuset.mems
 
-#tweeterSpeck 27
+#tweeterSpeck
 mkdir -p $cpusetMount/tweeterSpeck
 /bin/echo 27 > $cpusetMount/tweeterSpeck/cpuset.cpus
 /bin/echo 1 > $cpusetMount/tweeterSpeck/cpuset.cpu_exclusive
