@@ -5,6 +5,7 @@
 ../libMagAOX/tty/tests/ttyIOUtils_test 
 ../apps/adcTracker/tests/adcTracker_test
 ../apps/cacaoInterface/tests/cacaoInterface_test
+../apps/closedLoopIndi/tests/closedLoopIndi_test
 ../apps/observerCtrl/tests/observerCtrl_test
 ../apps/ocam2KCtrl/tests/ocamUtils_test 
 ../apps/rhusbMon/tests/rhusbMonParsers_test
