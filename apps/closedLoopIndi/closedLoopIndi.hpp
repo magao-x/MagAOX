@@ -285,7 +285,7 @@ void closedLoopIndi::loadConfig()
 
 int closedLoopIndi::appStartup()
 {
-    REG_INDI_SETPROP(m_indiP_upstream, m_inputDevice, m_inputProperty);
+    REG_INDI_SETPROP(m_indiP_inputs, m_inputDevice, m_inputProperty);
  
     CREATE_REG_INDI_NEW_NUMBERF( m_indiP_reference0, "reference0", -1e15, 1e15, 1, "%g", "reference0", "references");
     m_indiP_reference0["current"] = m_references(0,0);
@@ -482,13 +482,19 @@ INDI_NEWCALLBACK_DEFN(closedLoopIndi, m_indiP_reference1)(const pcf::IndiPropert
 
 INDI_SETCALLBACK_DEFN(closedLoopIndi, m_indiP_inputs)(const pcf::IndiProperty &ipRecv)
 {
+    std::cerr << __LINE__ << "\n";
+
     INDI_VALIDATE_CALLBACK_PROPS(ipRecv, m_indiP_inputs)
+
+    std::cerr << __LINE__ << "\n";
 
     if(!ipRecv.find(m_inputElements[0])) return -1;
     if(!ipRecv.find(m_inputElements[1])) return -1;
     if(!ipRecv.find(m_inputCounterElement)) return -1;
 
     int counter = ipRecv[m_inputCounterElement].get<int>();
+
+    std::cerr << "got counter " << counter << "\n";
 
     if(counter > m_counter)
     {

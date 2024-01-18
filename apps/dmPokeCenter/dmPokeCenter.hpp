@@ -150,6 +150,7 @@ protected:
     float m_pokeX {0};
     float m_pokeY {0};
 
+    int32_t m_counter {0};
 public:
     /// Default c'tor.
     dmPokeCenter();
@@ -471,9 +472,10 @@ int dmPokeCenter::appStartup()
 
     m_pokePositions.resize(m_pokePosEls.size());
 
-    registerIndiPropertyReadOnly( m_indiP_deltaPos, "delta_position", pcf::IndiProperty::Number, pcf::IndiProperty::ReadOnly, pcf::IndiProperty::Idle);
-    m_indiP_deltaPos.add({"x", 0.0});
-    m_indiP_deltaPos.add({"y", 0.0});
+    registerIndiPropertyReadOnly( m_indiP_deltaPos, "measurement", pcf::IndiProperty::Number, pcf::IndiProperty::ReadOnly, pcf::IndiProperty::Idle);
+    m_indiP_deltaPos.add({"delta_x", 0.0});
+    m_indiP_deltaPos.add({"delta_y", 0.0});
+    m_indiP_deltaPos.add({"counter", 0});
 
     if(sem_init(&m_wfsSemaphore, 0,0) < 0) 
     {
@@ -875,7 +877,17 @@ int dmPokeCenter::analyzeSensor()
         return log<software_error,-1>({__FILE__, __LINE__, "error from fitPupil"});
     }
 
-    updateIfChanged(m_indiP_deltaPos, std::vector<std::string>({"x", "y"}), std::vector<float>({m_pupilX - m_pokeX, m_pupilY - m_pokeY}));
+    if(m_stopMeasurement) 
+    {
+        return 0;
+    }
+
+    ++m_counter;
+
+    m_indiP_deltaPos["delta_x"] = m_pupilX - m_pokeX;
+    m_indiP_deltaPos["delta_y"] = m_pupilY - m_pokeY;
+
+    updateIfChanged(m_indiP_deltaPos, "counter", m_counter);
 
     recordPokeCenter();
 
@@ -1011,6 +1023,7 @@ int dmPokeCenter::fitPokes()
 
         m_pokeBlock = m_pokeImages[nn]().block(x0, y0, m_pokeBlockW, m_pokeBlockW);
 
+        m_gfit.set_itmax(1000);
         m_gfit.setArray(m_pokeBlock .data(), m_pokeBlock.rows(), m_pokeBlock.cols());
         m_gfit.setGuess(0, mx, 0.5*(m_pokeBlock.rows()-1.0), 0.5*(m_pokeBlock.cols()-1.0), mx::math::func::sigma2fwhm(m_pokeFWHMGuess));
         m_gfit.fit();
