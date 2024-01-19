@@ -12,6 +12,7 @@
 #include <mx/improc/eigenImage.hpp>
 #include <mx/improc/milkImage.hpp>
 #include <mx/improc/circleOuterpix.hpp>
+#include <mx/improc/imageFilters.hpp>
 using namespace mx::improc;
 
 #include <mx/math/fit/fitGaussian.hpp>
@@ -824,7 +825,6 @@ int dmPokeCenter::runSensor(bool firstRun)
 
         m_pokeImages[nn].setWrite();
         m_pokeImages[nn]().setZero();
-        n = 0;
         
         m_dmImage( m_poke_x[nn], m_poke_y[nn]) = m_poke_amp;
         
@@ -835,6 +835,7 @@ int dmPokeCenter::runSensor(bool firstRun)
         //flush semaphore so we take the _next_ good image
         XWC_SEM_FLUSH(m_imageSemaphore);
 
+        n = 0;
         while(n < m_nPokeImages && !m_stopMeasurement && !m_shutdown)
         {    
             /* POSITIVE POKE */
@@ -848,14 +849,37 @@ int dmPokeCenter::runSensor(bool firstRun)
 
             ++n;
         }
+        if(m_stopMeasurement || m_shutdown) break;
 
-        m_pokeImages[nn]() = m_pokeImages[nn]()/m_nPokeImages - m_wfsDark() - m_pupilImage();
+        m_dmImage( m_poke_x[nn], m_poke_y[nn]) = -m_poke_amp;
+        
+        m_dmStream = m_dmImage;
+
+        mx::sys::microSleep(m_dmSleep);
+
+        //flush semaphore so we take the _next_ good image
+        XWC_SEM_FLUSH(m_imageSemaphore);
+
+        n = 0;
+        while(n < m_nPokeImages && !m_stopMeasurement && !m_shutdown)
+        {    
+            /* NEGATIVE POKE */
+
+            //** Now we record the poke image **//
+            XWC_SEM_WAIT_TS(ts, m_imageSemWait_sec, m_imageSemWait_nsec);
+            XWC_SEM_TIMEDWAIT_LOOP( m_imageSemaphore, ts )
+
+            //If here, we got an image.  m_rawImage will have been updated
+            m_pokeImages[nn]() -= m_rawImage();
+
+            ++n;
+        }
+        if(m_stopMeasurement || m_shutdown) break;
+
+        m_pokeImages[nn]() = m_pokeImages[nn]()/(2*m_nPokeImages);// - m_wfsDark() - m_pupilImage();
         m_pokeImages[nn].post();
 
-        if(nn == 0)
-        {
-            tmpFF.write("/tmp/poke0.fits", m_pokeImages[nn]());
-        }
+        tmpFF.write("/tmp/poke" + std::to_string(nn) + ".fits", m_pokeImages[nn]());
     }
 
     m_dmImage.setZero();
@@ -867,6 +891,11 @@ int dmPokeCenter::runSensor(bool firstRun)
 inline
 int dmPokeCenter::analyzeSensor()
 {
+    if(m_shutdown || m_stopMeasurement)
+    {
+        return 0;
+    }
+
     if(fitPupil() < 0)
     {
         return log<software_error,-1>({__FILE__, __LINE__, "error from fitPupil"});
@@ -883,6 +912,8 @@ int dmPokeCenter::analyzeSensor()
     }
 
     ++m_counter;
+
+    std::cerr << m_counter << " " << m_pupilX << " " << m_pupilY << " " << m_pokeX << " " << m_pokeY << " | " << m_pupilX - m_pokeX << " " << m_pupilY - m_pokeY << "\n";
 
     m_indiP_deltaPos["delta_x"] = m_pupilX - m_pokeX;
     m_indiP_deltaPos["delta_y"] = m_pupilY - m_pokeY;
@@ -1010,13 +1041,20 @@ inline
 int dmPokeCenter::fitPokes()
 {
 
+    eigenImage<float> sm;
+
     m_pokeX = 0;
     m_pokeY = 0;
     for(size_t nn = 0; nn < m_pokeImages.size(); ++nn)
     {
-        int xmx, ymx;
+        sm.resize(m_pokeImages[nn].rows(), m_pokeImages[nn].cols());
+        int xmx = 0;
+        int ymx = 0;
 
-        float mx = m_pokeImages[nn]().maxCoeff(&xmx, &ymx);
+        float mx = 0;// = m_pokeImages[nn]().maxCoeff(&xmx, &ymx);
+
+        medianSmooth(sm, xmx, ymx, mx, m_pokeImages[nn](), 5);
+
 
         int x0 = xmx - m_pokeBlockW/2;
         int y0 = ymx - m_pokeBlockW/2;
