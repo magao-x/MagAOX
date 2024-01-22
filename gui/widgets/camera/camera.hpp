@@ -1,6 +1,7 @@
 #ifndef camera_hpp
 #define camera_hpp
 
+#include <mx/app/appConfigurator.hpp>
 
 #include "ui_camera.h"
 
@@ -16,197 +17,219 @@
 #include "camera/roiStatus.hpp"
 #include "camera/shutterStatus.hpp"
 
+#include "stage/stage.hpp"
+#include "camera/stageStatus.hpp"
+
 #include <QThread>
 
 namespace xqt 
 {
    
+/// A GUI for an XWC Standard Camera
 class camera : public xWidget
 {
-   Q_OBJECT
+    Q_OBJECT
    
 protected:
    
-   std::string m_appState;
-   
-   std::string m_camName;
-   std::string m_darkName;
+    std::string m_appState;
+    
+    std::string m_camName;
+    std::string m_darkName;
+ 
+    fsmDisplay * ui_fsmState {nullptr};
+ 
+    statusEntry * ui_tempCCD {nullptr};
+ 
+    statusDisplay * ui_tempStatus {nullptr};
+ 
+    QPushButton * ui_reconfigure {nullptr};
+ 
+    std::vector<std::string> m_stageNames;
+    
+    std::vector<stageStatus *> ui_stage;
 
-   fsmDisplay * ui_fsmState {nullptr};
+    shutterStatus * ui_shutterStatus {nullptr};
 
-   statusEntry * ui_tempCCD {nullptr};
+    roiStatus * ui_roiStatus {nullptr};
 
-   statusDisplay * ui_tempStatus {nullptr};
+    selectionSwStatus * ui_modes {nullptr};
+ 
+    selectionSwStatus * ui_readoutSpd {nullptr};
 
-   QPushButton * ui_reconfigure {nullptr};
+    selectionSwStatus * ui_vshiftSpd {nullptr};
+ 
+    toggleSlider * ui_cropMode {nullptr};
+ 
+    statusEntry * ui_expTime {nullptr};
 
-   shutterStatus * ui_shutterStatus {nullptr};
-   //toggleSlider * ui_shutterStatus {nullptr};
-
-   roiStatus * ui_roiStatus {nullptr};
-   selectionSwStatus * ui_modes {nullptr};
-
-   selectionSwStatus * ui_readoutSpd {nullptr};
-   selectionSwStatus * ui_vshiftSpd {nullptr};
-
-   toggleSlider * ui_cropMode {nullptr};
-
-   statusEntry * ui_expTime {nullptr};
-   statusEntry * ui_fps {nullptr};
-   statusEntry * ui_emGain {nullptr};
-
-   toggleSlider * ui_synchro {nullptr};
-
-   QPushButton * ui_takeDarks {nullptr};
-
-
-   float m_temp {-99};
-
-   bool m_takingDark {false};
-
-   bool m_inUpdate {false};
-
-   QTimer * m_updateTimer {nullptr}; ///< Timer for periodic updates
-
-   bool m_connected {false};
+    statusEntry * ui_fps {nullptr};
+    statusEntry * ui_emGain {nullptr};
+ 
+    toggleSlider * ui_synchro {nullptr};
+ 
+    QPushButton * ui_takeDarks {nullptr};
+ 
+    float m_temp {-99};
+ 
+    bool m_takingDark {false};
+ 
+    bool m_inUpdate {false};
+ 
+    QTimer * m_updateTimer {nullptr}; ///< Timer for periodic updates
+ 
+    bool m_connected {false};
 
 public:
-   explicit camera( std::string & camName,
-                    QWidget * Parent = 0, 
-                    Qt::WindowFlags f = Qt::WindowFlags()
-                  );
-   
-   ~camera();
-   
-   void subscribe( );
-             
-   virtual void onConnect();
-   virtual void onDisconnect();
-   
-   void handleDefProperty( const pcf::IndiProperty & ipRecv /**< [in] the property which has changed*/);
-   
-   void handleSetProperty( const pcf::IndiProperty & ipRecv /**< [in] the property which has changed*/);
-   
-   void hideAll();
-   
-   void setEnableDisable(bool tf, bool all=true);
+    explicit camera( std::string & camName,
+                     QWidget * Parent = 0, 
+                     Qt::WindowFlags f = Qt::WindowFlags()
+                   );
+    
+    ~camera();
+    
+    void subscribe( );
+              
+    virtual void onConnect();
+    virtual void onDisconnect();
+    
+    void handleDefProperty( const pcf::IndiProperty & ipRecv /**< [in] the property which has changed*/);
+    
+    void handleSetProperty( const pcf::IndiProperty & ipRecv /**< [in] the property which has changed*/);
+    
+    void hideAll();
+    
+    void setEnableDisable(bool tf, bool all=true);
+ 
+    //static b/c it gets called before the device is instantiated.
+    static void setupConfig( mx::app::appConfigurator & config );
 
-   //void clearFocus();
+    void loadConfig( mx::app::appConfigurator & config );
 
 public slots:
-   void updateGUI();
-   
-   void setup_temp_ccd(bool ro);
-   void setup_tempStatus();
 
-   void setup_reconfigure();
-   void reconfigure();
-   void setup_shutter();
+    void updateGUI();
+    
+    void setup_temp_ccd(bool ro);
 
-   void setup_roiStatus();
-   void setup_modes();
+    void setup_tempStatus();
+ 
+    void setup_reconfigure();
 
-   void setup_readoutSpd();
-   void setup_vshiftSpd();
+    void reconfigure();
 
-   void setup_cropMode();
+    void setup_stage();
 
-   void setup_expTime(bool ro);
-   void setup_fps(bool ro);
-   void setup_emGain(bool ro);
+    void setup_shutter();
+ 
+    void setup_roiStatus();
 
-   void setup_synchro();
+    void setup_modes();
+ 
+    void setup_readoutSpd();
 
-   void setup_takeDarks();
+    void setup_vshiftSpd();
+ 
+    void setup_cropMode();
+ 
+    void setup_expTime(bool ro);
 
-   void takeDark();
+    void setup_fps(bool ro);
+
+    void setup_emGain(bool ro);
+ 
+    void setup_synchro();
+ 
+    void setup_takeDarks();
+ 
+    void takeDark();
 
 signals:
 
-   void doUpdateGUI();
+    void doUpdateGUI();
+ 
+    void updateTimerStop();
+    void updateTimerStart(int);
+ 
+    void add_temp_ccd(bool ro);
+    void add_tempStatus();
+ 
+    void add_reconfigure();
+ 
+    void add_shutter();
+ 
+    void add_roiStatus();
+    void add_modes();
+ 
+    void add_readoutSpd();
+    void add_vshiftSpd();
+ 
+    void add_cropMode();
+ 
+    void add_expTime(bool ro);   
+    void add_fps(bool ro);
+    void add_emGain(bool ro);
+ 
+    void add_synchro();
+ 
+    void add_takeDarks();
 
-   void updateTimerStop();
-   void updateTimerStart(int);
-
-   void add_temp_ccd(bool ro);
-   void add_tempStatus();
-
-   void add_reconfigure();
-
-   void add_shutter();
-
-   void add_roiStatus();
-   void add_modes();
-
-   void add_readoutSpd();
-   void add_vshiftSpd();
-
-   void add_cropMode();
-
-   void add_expTime(bool ro);   
-   void add_fps(bool ro);
-   void add_emGain(bool ro);
-
-   void add_synchro();
-
-   void add_takeDarks();
 private:
      
-   Ui::camera ui;
+    Ui::camera ui;
 };
    
 camera::camera( std::string & camName,
                 QWidget * Parent, 
                 Qt::WindowFlags f) : xWidget(Parent, f), m_camName{camName}
 {
-   m_darkName = m_camName + "-dark";
-   ui.setupUi(this);
-
-   m_updateTimer = new QTimer(this);
-
-   connect(this, SIGNAL(doUpdateGUI()), this, SLOT(updateGUI()));
-
-   connect(m_updateTimer, SIGNAL(timeout()), this, SLOT(updateGUI()));
-   connect(this, SIGNAL(updateTimerStop()), m_updateTimer, SLOT(stop()));
-   connect(this, SIGNAL(updateTimerStart(int)), m_updateTimer, SLOT(start(int)));
-
-   connect(this, SIGNAL(add_temp_ccd(bool)), this, SLOT(setup_temp_ccd(bool)));
-   connect(this, SIGNAL(add_tempStatus()), this, SLOT(setup_tempStatus()));
-
-   connect(this, SIGNAL(add_reconfigure()), this, SLOT(setup_reconfigure()));
-
-   connect(this, SIGNAL(add_shutter()), this, SLOT(setup_shutter()));
-
-   connect(this, SIGNAL(add_roiStatus()), this, SLOT(setup_roiStatus()));
-   connect(this, SIGNAL(add_modes()), this, SLOT(setup_modes()));
-
-   connect(this, SIGNAL(add_readoutSpd()), this, SLOT(setup_readoutSpd()));
-   connect(this, SIGNAL(add_vshiftSpd()), this, SLOT(setup_vshiftSpd()));
-   connect(this, SIGNAL(add_cropMode()), this, SLOT(setup_cropMode()));
-
-   connect(this, SIGNAL(add_expTime(bool)), this, SLOT(setup_expTime(bool)));
-   connect(this, SIGNAL(add_fps(bool)), this, SLOT(setup_fps(bool)));
-   connect(this, SIGNAL(add_emGain(bool)), this, SLOT(setup_emGain(bool)));
-   connect(this, SIGNAL(add_synchro()), this, SLOT(setup_synchro()));
-
-   connect(this, SIGNAL(add_takeDarks()), this, SLOT(setup_takeDarks()));
-
-   QSpacerItem *holder = new QSpacerItem(10,0, QSizePolicy::Expanding, QSizePolicy::Expanding);
-   ui.grid->addItem(holder, 2,1,1,1);
-
-   ui_fsmState = new xqt::fsmDisplay(this);
-   ui_fsmState->setObjectName(QString::fromUtf8("fsmState"));
-   ui.grid->addWidget(ui_fsmState, 1, 0, 1, 1);
-   ui_fsmState->device(m_camName);
-
-   QFont qf = ui.lab_camName->font();
-   qf.setPixelSize(XW_FONT_SIZE+3);
-   ui.lab_camName->setFont(qf);
-
-   ui.lab_camName->setText(m_camName.c_str());
-
-   
-   onDisconnect();
+    m_darkName = m_camName + "-dark";
+    ui.setupUi(this);
+ 
+    m_updateTimer = new QTimer(this);
+ 
+    connect(this, SIGNAL(doUpdateGUI()), this, SLOT(updateGUI()));
+ 
+    connect(m_updateTimer, SIGNAL(timeout()), this, SLOT(updateGUI()));
+    connect(this, SIGNAL(updateTimerStop()), m_updateTimer, SLOT(stop()));
+    connect(this, SIGNAL(updateTimerStart(int)), m_updateTimer, SLOT(start(int)));
+ 
+    connect(this, SIGNAL(add_temp_ccd(bool)), this, SLOT(setup_temp_ccd(bool)));
+    connect(this, SIGNAL(add_tempStatus()), this, SLOT(setup_tempStatus()));
+ 
+    connect(this, SIGNAL(add_reconfigure()), this, SLOT(setup_reconfigure()));
+ 
+    connect(this, SIGNAL(add_shutter()), this, SLOT(setup_shutter()));
+ 
+    connect(this, SIGNAL(add_roiStatus()), this, SLOT(setup_roiStatus()));
+    connect(this, SIGNAL(add_modes()), this, SLOT(setup_modes()));
+ 
+    connect(this, SIGNAL(add_readoutSpd()), this, SLOT(setup_readoutSpd()));
+    connect(this, SIGNAL(add_vshiftSpd()), this, SLOT(setup_vshiftSpd()));
+    connect(this, SIGNAL(add_cropMode()), this, SLOT(setup_cropMode()));
+ 
+    connect(this, SIGNAL(add_expTime(bool)), this, SLOT(setup_expTime(bool)));
+    connect(this, SIGNAL(add_fps(bool)), this, SLOT(setup_fps(bool)));
+    connect(this, SIGNAL(add_emGain(bool)), this, SLOT(setup_emGain(bool)));
+    connect(this, SIGNAL(add_synchro()), this, SLOT(setup_synchro()));
+ 
+    connect(this, SIGNAL(add_takeDarks()), this, SLOT(setup_takeDarks()));
+ 
+    QSpacerItem *holder = new QSpacerItem(10,0, QSizePolicy::Expanding, QSizePolicy::Expanding);
+    ui.grid->addItem(holder, 2,1,1,1);
+ 
+    ui_fsmState = new xqt::fsmDisplay(this);
+    ui_fsmState->setObjectName(QString::fromUtf8("fsmState"));
+    ui.grid->addWidget(ui_fsmState, 1, 0, 1, 1);
+    ui_fsmState->device(m_camName);
+ 
+    QFont qf = ui.lab_camName->font();
+    qf.setPixelSize(XW_FONT_SIZE+3);
+    ui.lab_camName->setFont(qf);
+ 
+    ui.lab_camName->setText(m_camName.c_str());
+ 
+    onDisconnect();
 }
    
 camera::~camera()
@@ -215,95 +238,122 @@ camera::~camera()
 
 void camera::subscribe()
 {
-   if(!m_parent) return;
+    if(!m_parent) return;
+ 
+    m_parent->addSubscriberProperty((multiIndiSubscriber *) this, m_camName, "");
+    m_parent->addSubscriberProperty((multiIndiSubscriber *) this, m_camName, "fsm");
+    m_parent->addSubscriberProperty((multiIndiSubscriber *) this, m_darkName, "");
+    m_parent->addSubscriberProperty((multiIndiSubscriber *) this, m_darkName, "start");
+ 
+    m_parent->addSubscriber(ui_fsmState);
+ 
+    if(ui_tempCCD) m_parent->addSubscriber(ui_tempCCD);
+    if(ui_tempStatus) m_parent->addSubscriber(ui_tempStatus);
 
-   m_parent->addSubscriberProperty((multiIndiSubscriber *) this, m_camName, "");
-   m_parent->addSubscriberProperty((multiIndiSubscriber *) this, m_camName, "fsm");
-   m_parent->addSubscriberProperty((multiIndiSubscriber *) this, m_darkName, "");
-   m_parent->addSubscriberProperty((multiIndiSubscriber *) this, m_darkName, "start");
+    if(ui_stage.size() > 0) 
+    {
+        for(size_t n = 0; n < ui_stage.size(); ++n)
+        {
+            m_parent->addSubscriber(ui_stage[n]);
+        }
+    }
 
-   m_parent->addSubscriber(ui_fsmState);
-
-   if(ui_tempCCD) m_parent->addSubscriber(ui_tempCCD);
-   if(ui_tempStatus) m_parent->addSubscriber(ui_tempStatus);
-   if(ui_shutterStatus) m_parent->addSubscriber(ui_shutterStatus);
-   if(ui_roiStatus) m_parent->addSubscriber(ui_roiStatus);
-   if(ui_modes) m_parent->addSubscriber(ui_modes);
-   if(ui_readoutSpd) m_parent->addSubscriber(ui_readoutSpd);
-   if(ui_vshiftSpd) m_parent->addSubscriber(ui_vshiftSpd);
-   if(ui_cropMode) m_parent->addSubscriber(ui_cropMode);
-   if(ui_expTime) m_parent->addSubscriber(ui_expTime);
-   if(ui_fps) m_parent->addSubscriber(ui_fps);
-   if(ui_emGain) m_parent->addSubscriber(ui_emGain);
-   if(ui_synchro) m_parent->addSubscriber(ui_synchro);
-
-   return;
+    if(ui_shutterStatus) m_parent->addSubscriber(ui_shutterStatus);
+    if(ui_roiStatus) m_parent->addSubscriber(ui_roiStatus);
+    if(ui_modes) m_parent->addSubscriber(ui_modes);
+    if(ui_readoutSpd) m_parent->addSubscriber(ui_readoutSpd);
+    if(ui_vshiftSpd) m_parent->addSubscriber(ui_vshiftSpd);
+    if(ui_cropMode) m_parent->addSubscriber(ui_cropMode);
+    if(ui_expTime) m_parent->addSubscriber(ui_expTime);
+    if(ui_fps) m_parent->addSubscriber(ui_fps);
+    if(ui_emGain) m_parent->addSubscriber(ui_emGain);
+    if(ui_synchro) m_parent->addSubscriber(ui_synchro);
+ 
+    return;
 }
   
 void camera::onConnect()
 {
-   ui.lab_camName->setEnabled(true);
-
-   setWindowTitle(QString((m_camName+"Ctrl").c_str()));
-
-   ui_fsmState->onConnect();
-
-   if(ui_tempCCD) ui_tempCCD->onConnect();
-   if(ui_tempStatus) ui_tempStatus->onConnect();
-   if(ui_shutterStatus) ui_shutterStatus->onConnect();
-
-   if(ui_roiStatus) ui_roiStatus->onConnect();
-   if(ui_modes) ui_modes->onConnect();
-   if(ui_readoutSpd) ui_readoutSpd->onConnect();
-   if(ui_vshiftSpd) ui_readoutSpd->onConnect();
-   if(ui_cropMode) ui_cropMode->onConnect();
-
-   if(ui_expTime) ui_expTime->onConnect();
-   if(ui_fps) ui_fps->onConnect();
-   if(ui_emGain) ui_emGain->onConnect();
-   
-   if(ui_synchro) ui_synchro->onConnect();
-
-   clearFocus();
-
-   m_connected = true;
-
-   emit doUpdateGUI();
+    ui.lab_camName->setEnabled(true);
+ 
+    setWindowTitle(QString((m_camName+"Ctrl").c_str()));
+ 
+    ui_fsmState->onConnect();
+ 
+    if(ui_tempCCD) ui_tempCCD->onConnect();
+    if(ui_tempStatus) ui_tempStatus->onConnect();
+ 
+    if(ui_stage.size() > 0)
+    {
+        for(size_t n = 0; n < ui_stage.size(); ++n)
+        {
+            ui_stage[n]->onConnect();
+        }
+    }
+ 
+    if(ui_shutterStatus) ui_shutterStatus->onConnect();
+ 
+    if(ui_roiStatus) ui_roiStatus->onConnect();
+    if(ui_modes) ui_modes->onConnect();
+    if(ui_readoutSpd) ui_readoutSpd->onConnect();
+    if(ui_vshiftSpd) ui_readoutSpd->onConnect();
+    if(ui_cropMode) ui_cropMode->onConnect();
+ 
+    if(ui_expTime) ui_expTime->onConnect();
+    if(ui_fps) ui_fps->onConnect();
+    if(ui_emGain) ui_emGain->onConnect();
+    
+    if(ui_synchro) ui_synchro->onConnect();
+ 
+    clearFocus();
+ 
+    m_connected = true;
+ 
+    emit doUpdateGUI();
 }
 
 void camera::onDisconnect()
 {
 
-   setWindowTitle(QString((m_camName+"Ctrl").c_str()) + QString(" (disconnected)"));
+    setWindowTitle(QString((m_camName+"Ctrl").c_str()) + QString(" (disconnected)"));
+ 
+    ui_fsmState->onDisconnect();
+ 
+    if(ui_tempCCD) ui_tempCCD->onDisconnect();
+    if(ui_tempStatus) ui_tempStatus->onDisconnect();
+    
+    if(ui_stage.size() > 0)
+    {
+        for(size_t n =0; n < ui_stage.size(); ++n)
+        {
+            ui_stage[n]->onDisconnect();
+        }
+    }
 
-   ui_fsmState->onDisconnect();
-
-   if(ui_tempCCD) ui_tempCCD->onDisconnect();
-   if(ui_tempStatus) ui_tempStatus->onDisconnect();
-   if(ui_shutterStatus) ui_shutterStatus->onDisconnect();
-
-   if(ui_roiStatus) ui_roiStatus->onDisconnect();
-   if(ui_modes) ui_modes->onDisconnect();
-   if(ui_readoutSpd) ui_readoutSpd->onDisconnect();
-   if(ui_vshiftSpd) ui_readoutSpd->onDisconnect();
-   if(ui_cropMode) ui_cropMode->onDisconnect();
-
-   if(ui_expTime) ui_expTime->onDisconnect();
-   if(ui_fps) ui_fps->onDisconnect();
-   if(ui_emGain) ui_emGain->onDisconnect();
-
-   if(ui_synchro) ui_synchro->onDisconnect();
-
-   clearFocus();   
-
-   m_connected = false;
-   while(m_inUpdate)
-   {
-      QThread::msleep(10); //Wait to get out of update
-   }
-   emit updateTimerStop();
-
-   setEnableDisable(false);
+    if(ui_shutterStatus) ui_shutterStatus->onDisconnect();
+ 
+    if(ui_roiStatus) ui_roiStatus->onDisconnect();
+    if(ui_modes) ui_modes->onDisconnect();
+    if(ui_readoutSpd) ui_readoutSpd->onDisconnect();
+    if(ui_vshiftSpd) ui_readoutSpd->onDisconnect();
+    if(ui_cropMode) ui_cropMode->onDisconnect();
+ 
+    if(ui_expTime) ui_expTime->onDisconnect();
+    if(ui_fps) ui_fps->onDisconnect();
+    if(ui_emGain) ui_emGain->onDisconnect();
+ 
+    if(ui_synchro) ui_synchro->onDisconnect();
+ 
+    clearFocus();   
+ 
+    m_connected = false;
+    while(m_inUpdate)
+    {
+       QThread::msleep(10); //Wait to get out of update
+    }
+    emit updateTimerStop();
+ 
+    setEnableDisable(false);
 }
 
 void camera::handleDefProperty( const pcf::IndiProperty & ipRecv)
@@ -462,58 +512,121 @@ void camera::handleSetProperty( const pcf::IndiProperty & ipRecv)
    emit doUpdateGUI();   
 }
 
+void camera::hideAll()
+{
+   if(ui_roiStatus) ui_roiStatus->hide();
+}
+
+void camera::setEnableDisable(bool tf, bool all)
+{
+    if(all)
+    {
+       ui.lab_camName->setEnabled(tf);
+       ui_fsmState->setEnabled(tf);
+    }
+ 
+    if(ui_reconfigure) ui_reconfigure->setEnabled(tf);
+    if(ui_tempCCD) ui_tempCCD->setEnabled(tf);
+    if(ui_tempStatus) ui_tempStatus->setEnabled(tf);
+ 
+    if(ui_roiStatus) ui_roiStatus->setEnabled(tf);
+    if(ui_modes) ui_modes->setEnabled(tf);
+    if(ui_readoutSpd) ui_readoutSpd->setEnabled(tf);
+    if(ui_vshiftSpd) ui_vshiftSpd->setEnabled(tf);
+    if(ui_expTime) ui_expTime->setEnabled(tf);
+    if(ui_fps) ui_fps->setEnabled(tf);
+    if(ui_emGain) ui_emGain->setEnabled(tf);
+    
+    if(ui_stage.size() > 0)
+    {
+        for(size_t n = 0; n < ui_stage.size(); ++n)
+        {
+            ui_stage[n]->setEnabled(tf);
+        }
+    } 
+    
+    if(ui_shutterStatus) ui_shutterStatus->setEnabled(tf);
+    
+    if(ui_takeDarks) ui_takeDarks->setEnabled(tf);
+   
+}
+
+void camera::setupConfig( mx::app::appConfigurator & config )
+{
+   config.add("camera.stages", "", "camera.stages", mx::app::argType::Required, "camera", "stages", false, "vector<string>", "List of stages associated with this camera");
+}
+
+void camera::loadConfig( mx::app::appConfigurator & config )
+{
+    config(m_stageNames, "camera.stages");
+    for(size_t n = 0; n < m_stageNames.size(); ++n)
+    {    
+        setup_stage();
+    }
+    onDisconnect();
+}
+
 void camera::updateGUI()
 {
-   if(m_inUpdate || !m_connected) return;
-   emit updateTimerStop();
-   m_inUpdate = true;
+    if(m_inUpdate || !m_connected) return;
+    emit updateTimerStop();
+    m_inUpdate = true;
+ 
+    if( m_appState == "NODEVICE" || m_appState == "NOTCONNECTED" || m_appState == "CONNECTED")
+    {
+       setEnableDisable(false, false);
+       ui.lab_camName->setEnabled(true);
+       ui_fsmState->setEnabled(true);
+    }
+    else if( m_appState != "READY" && m_appState != "OPERATING" && m_appState != "CONFIGURING")
+    {
+       setEnableDisable(false); 
+       m_inUpdate = false;
+ 
+       emit updateTimerStart(1000);
+       return;     
+    }
+    else //if( m_appState == "READY" || m_appState == "OPERATING" || m_appState == "CONFIGURING")
+    {
+       setEnableDisable(true);
+    }
+    
+    //Update the component GUIs to ensure they update for connection state, etc.
+    if(ui_tempCCD) ui_tempCCD->updateGUI();
+    if(ui_roiStatus) ui_roiStatus->updateGUI();
+ 
+    if(ui_stage.size() > 0)
+    {
+        for(size_t n = 0; n < ui_stage.size(); ++n)
+        {
+            ui_stage[n]->updateGUI();
+        }
+    }
 
-   if( m_appState == "NODEVICE" || m_appState == "NOTCONNECTED" || m_appState == "CONNECTED")
-   {
-      setEnableDisable(false, false);
-      ui.lab_camName->setEnabled(true);
-      ui_fsmState->setEnabled(true);
-   }
-   else if( m_appState != "READY" && m_appState != "OPERATING" && m_appState != "CONFIGURING")
-   {
-      setEnableDisable(false); 
-      m_inUpdate = false;
-
-      emit updateTimerStart(1000);
-      return;     
-   }
-   else //if( m_appState == "READY" || m_appState == "OPERATING" || m_appState == "CONFIGURING")
-   {
-      setEnableDisable(true);
-   }
-   
-   //Update the component GUIs to ensure they update for connection state, etc.
-   if(ui_tempCCD) ui_tempCCD->updateGUI();
-   if(ui_roiStatus) ui_roiStatus->updateGUI();
-   if(ui_shutterStatus) ui_shutterStatus->updateGUI();
-   if(ui_modes) ui_modes->updateGUI();
-   if(ui_readoutSpd) ui_readoutSpd->updateGUI();
-   if(ui_vshiftSpd) ui_vshiftSpd->updateGUI();
-   if(ui_cropMode) ui_cropMode->updateGUI();
-   if(ui_expTime) ui_expTime->updateGUI();
-   if(ui_fps) ui_fps->updateGUI();
-   if(ui_emGain) ui_emGain->updateGUI();
-   if(ui_synchro) ui_synchro->updateGUI();
-
-   if( (m_appState == "READY" || m_appState == "OPERATING") && ui_takeDarks )
-   {
-      if(m_takingDark)
-      {
-         ui_takeDarks->setEnabled(false);
-      }
-      else
-      {
-         ui_takeDarks->setEnabled(true);
-      }
-   }
-
-   emit updateTimerStart(1000);
-   m_inUpdate = false;
+    if(ui_shutterStatus) ui_shutterStatus->updateGUI();
+    if(ui_modes) ui_modes->updateGUI();
+    if(ui_readoutSpd) ui_readoutSpd->updateGUI();
+    if(ui_vshiftSpd) ui_vshiftSpd->updateGUI();
+    if(ui_cropMode) ui_cropMode->updateGUI();
+    if(ui_expTime) ui_expTime->updateGUI();
+    if(ui_fps) ui_fps->updateGUI();
+    if(ui_emGain) ui_emGain->updateGUI();
+    if(ui_synchro) ui_synchro->updateGUI();
+ 
+    if( (m_appState == "READY" || m_appState == "OPERATING") && ui_takeDarks )
+    {
+       if(m_takingDark)
+       {
+          ui_takeDarks->setEnabled(false);
+       }
+       else
+       {
+          ui_takeDarks->setEnabled(true);
+       }
+    }
+ 
+    emit updateTimerStart(1000);
+    m_inUpdate = false;
 
 } //updateGUI()
 
@@ -573,20 +686,41 @@ void camera::reconfigure()
    sendNewProperty(ipFreq);   
 }
 
+void camera::setup_stage()
+{
+    if(ui_stage.size() >= m_stageNames.size()) return;
+
+    size_t n = ui_stage.size();
+
+    ui_stage.push_back(new stageStatus(m_stageNames[n], this));
+
+    ui_stage[n]->setObjectName(QString::fromUtf8(m_stageNames[n].c_str()));
+   
+    ui.grid->addWidget(ui_stage[n], 4+n, 0, 1, 1);
+   
+    ui_stage[n]->onDisconnect();
+   
+}
+
 void camera::setup_shutter()
 {
-   if(ui_shutterStatus) return;
+    if(ui_shutterStatus) return;
    
-   ui_shutterStatus = new shutterStatus(m_camName, this);
+    ui_shutterStatus = new shutterStatus(m_camName, this);
 
-   //ui_shutterStatus = new toggleSlider(m_camName, "shutter", "toggle", "Shutter");
-   ui_shutterStatus->setObjectName(QString::fromUtf8("shutter"));
-   
-   ui.grid->addWidget(ui_shutterStatus, 7, 0, 2, 1);
-   
-   ui_shutterStatus->onDisconnect();
+    ui_shutterStatus->setObjectName(QString::fromUtf8("shutter"));
 
-   m_parent->addSubscriber(ui_shutterStatus);
+    int doff = 0;
+    if(ui_stage.size() > 4)
+    {
+        doff = ui_stage.size() - 4;
+    }
+
+    ui.grid->addWidget(ui_shutterStatus, 8 + doff, 0, 1, 1);
+   
+    ui_shutterStatus->onDisconnect();
+
+    m_parent->addSubscriber(ui_shutterStatus);
 }
 
 void camera::setup_roiStatus()
@@ -726,15 +860,22 @@ void camera::setup_synchro()
 
 void camera::setup_takeDarks()
 {
-   if(ui_takeDarks) return;
+    if(ui_takeDarks) return;
    
-   ui_takeDarks = new QPushButton(this);
-   ui_takeDarks->setObjectName(QString::fromUtf8("takeDarks"));
-   ui_takeDarks->setText("take darks");
-   ui_takeDarks->setMaximumWidth(200);
-   ui_takeDarks->setFocusPolicy(Qt::NoFocus);
-   connect(ui_takeDarks, SIGNAL(pressed()), this, SLOT(takeDark()));
-   ui.grid->addWidget(ui_takeDarks, 9, 0, 1, 1,Qt::AlignHCenter);   
+    ui_takeDarks = new QPushButton(this);
+    ui_takeDarks->setObjectName(QString::fromUtf8("takeDarks"));
+    ui_takeDarks->setText("take darks");
+    ui_takeDarks->setMaximumWidth(200);
+    ui_takeDarks->setFocusPolicy(Qt::NoFocus);
+    connect(ui_takeDarks, SIGNAL(pressed()), this, SLOT(takeDark()));
+
+    int doff = 0;
+    if(ui_stage.size() > 4)
+    {
+        doff = ui_stage.size() - 4;
+    }
+
+    ui.grid->addWidget(ui_takeDarks, 9 + doff, 0, 1, 1,Qt::AlignHCenter);   
 
 }
 
@@ -750,35 +891,6 @@ void camera::takeDark()
    sendNewProperty(ipFreq);   
 }
 
-void camera::hideAll()
-{
-   if(ui_roiStatus) ui_roiStatus->hide();
-}
-
-void camera::setEnableDisable(bool tf, bool all)
-{
-   if(all)
-   {
-      ui.lab_camName->setEnabled(tf);
-      ui_fsmState->setEnabled(tf);
-   }
-
-   if(ui_reconfigure) ui_reconfigure->setEnabled(tf);
-   if(ui_tempCCD) ui_tempCCD->setEnabled(tf);
-   if(ui_tempStatus) ui_tempStatus->setEnabled(tf);
-
-   if(ui_roiStatus) ui_roiStatus->setEnabled(tf);
-   if(ui_modes) ui_modes->setEnabled(tf);
-   if(ui_readoutSpd) ui_readoutSpd->setEnabled(tf);
-   if(ui_vshiftSpd) ui_vshiftSpd->setEnabled(tf);
-   if(ui_expTime) ui_expTime->setEnabled(tf);
-   if(ui_fps) ui_fps->setEnabled(tf);
-   if(ui_emGain) ui_emGain->setEnabled(tf);
-   if(ui_shutterStatus) ui_shutterStatus->setEnabled(tf);
-   
-   if(ui_takeDarks) ui_takeDarks->setEnabled(tf);
-   
-}
 
 } //namespace xqt
    
