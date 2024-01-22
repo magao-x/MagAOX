@@ -53,23 +53,17 @@ class corAlign(XDevice):
         sv.add_element(DefSwitch(name="psf", _value=constants.SwitchState.OFF))
         self.add_property(sv, callback=self.handle_state)
 
-        nv = properties.NumberVector(name='loop_counter')
-        nv.add_element(DefNumber(
-            name='current', label='Loop counter', format='%i',
+        nv = properties.NumberVector(name='measurement')
+		nv.add_element(DefNumber(
+            name='counter', label='Loop counter', format='%i',
             min=0, max=2**32-1, step=1, _value=0
         ))
-        self.add_property(nv)
-
-        nv = properties.NumberVector(name='shift_x')
         nv.add_element(DefNumber(
-            name='current', label='X shift', format='%3.3f',
+            name='x', label='X shift', format='%3.3f',
             min=-150.0, max=150.0, step=0.01, _value=0
         ))
-        self.add_property(nv)
-
-        nv = properties.NumberVector(name='shift_y')
-        nv.add_element(DefNumber(
-            name='current', label='Y shift', format='%3.3f',
+		nv.add_element(DefNumber(
+            name='y', label='Y shift', format='%3.3f',
             min=-150.0, max=150.0, step=0.01, _value=0
         ))
         self.add_property(nv)
@@ -190,15 +184,11 @@ class corAlign(XDevice):
         elif self.client['fwfpm.filterName'] == 'knifemask' or self.client['fwfpm.filterName'] == 'spare':
             return np.array([0.0, 0.0]) # Not implemented yet.
         else:
-            return measure_center_position(image)
+			# Do nothing if in an unspecified position.
+            return np.array([0.0, 0.0])
     
     def measure_psf_position(self, image):
         return np.array([0.0, 0.0])
-
-    def update_loop_counter(self):
-        self._loop_counter += 1
-        self.properties['loop_counter']['current'] = self._loop_counter
-        self.update_property(self.properties['loop_counter'])
 
     def transition_to_idle(self):
         self.properties['state']['psf'] = constants.SwitchState.OFF
@@ -211,13 +201,13 @@ class corAlign(XDevice):
         if self._state == States.CLOSED_LOOP:
             image = self.camera.grab_stack(self._n_avg)
             center_error = self.measure_fpm_mask_shift(image)
+			self._loop_counter += 1
 
             # Send new values to indi server.
-            self.properties['shift_x']['current'] = center_error[0]
-            self.update_property(self.properties['shift_x'])
-            self.properties['shift_y']['current'] = center_error[1]
-            self.update_property(self.properties['shift_y'])
-            self.update_loop_counter()
+            self.properties['measurement']['x'] = center_error[0]
+            self.properties['measurement']['y'] = center_error[1]
+			self.properties['measurement']['counter'] = self._loop_counter
+            self.update_property(self.properties['measurement'])
 
         elif self._state == States.PSF:
             image = self.camera.grab_stack(self._n_avg)
@@ -232,6 +222,5 @@ class corAlign(XDevice):
             self.properties['ref_y']['target'] = center_reference[1]
             self.update_property(self.properties['ref_y'])
 
-
-            self.transition_to_idle()            
+            self.transition_to_idle()
 
