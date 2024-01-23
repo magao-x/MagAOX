@@ -169,7 +169,7 @@ void flipperCtrl::loadConfig()
 
 int flipperCtrl::appStartup()
 {
-   createStandardIndiSelectionSw( m_indiP_position, "preset", {"in", "out"});
+   createStandardIndiSelectionSw( m_indiP_position, "presetName", {"in", "out"});
    
    if( registerIndiPropertyNew( m_indiP_position, INDI_NEWCALLBACK(m_indiP_position)) < 0)
    {
