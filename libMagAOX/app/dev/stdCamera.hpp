@@ -38,7 +38,10 @@ struct cameraConfig
    unsigned m_sizeY {0};
    unsigned m_binningX {0};
    unsigned m_binningY {0};
-   
+
+   unsigned m_digitalBinX {0};
+   unsigned m_digitalBinY {0};
+
    float m_maxFPS {0};
 };
 

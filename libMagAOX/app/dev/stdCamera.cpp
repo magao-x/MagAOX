@@ -58,16 +58,23 @@ int loadCameraConfig( cameraConfigMap & ccmap, //  [out] the map in which to pla
       unsigned sizeY = 0;
       config.configUnused(sizeY, mx::app::iniFile::makeKey(sections[i], "sizeY" ));
       
-      unsigned binningX = 0;
-      config.configUnused(binningX, mx::app::iniFile::makeKey(sections[i], "binning" ));
+      unsigned binningX = 1;
+      config.configUnused(binningX, mx::app::iniFile::makeKey(sections[i], "binningX" ));
       
-      unsigned binningY = 0;
-      config.configUnused(binningY, mx::app::iniFile::makeKey(sections[i], "binning" ));
+      unsigned binningY = 1;
+      config.configUnused(binningY, mx::app::iniFile::makeKey(sections[i], "binningY" ));
       
+      unsigned dbinningX = 1;
+      config.configUnused(dbinningX, mx::app::iniFile::makeKey(sections[i], "digital_binningX" ));
+      
+      unsigned dbinningY = 1;
+      config.configUnused(dbinningY, mx::app::iniFile::makeKey(sections[i], "digital_binningY" ));
+
       float maxFPS = 0;
       config.configUnused(maxFPS, mx::app::iniFile::makeKey(sections[i], "maxFPS" ));
       
-      ccmap[sections[i]] = cameraConfig({configFile, serialCommand, centerX, centerY, sizeX, sizeY, binningX, binningY, maxFPS});
+      ccmap[sections[i]] = cameraConfig({configFile, serialCommand, centerX, centerY, sizeX, sizeY, 
+                                                    binningX, binningY, dbinningX, dbinningY, maxFPS});
    }
    
    return 0;

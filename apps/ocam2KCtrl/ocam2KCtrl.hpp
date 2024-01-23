@@ -48,81 +48,89 @@ namespace app
 class ocam2KCtrl : public MagAOXApp<>, public dev::stdCamera<ocam2KCtrl>, public dev::edtCamera<ocam2KCtrl>, public dev::frameGrabber<ocam2KCtrl>,  
                                            public dev::dssShutter<ocam2KCtrl>, public dev::telemeter<ocam2KCtrl>
 {
-   friend class dev::stdCamera<ocam2KCtrl>;
-   friend class dev::edtCamera<ocam2KCtrl>;
-   friend class dev::frameGrabber<ocam2KCtrl>;
-   friend class dev::dssShutter<ocam2KCtrl>;
-   friend class dev::telemeter<ocam2KCtrl>;
-   
-   typedef MagAOXApp<> MagAOXAppT;
+    friend class dev::stdCamera<ocam2KCtrl>;
+    friend class dev::edtCamera<ocam2KCtrl>;
+    friend class dev::frameGrabber<ocam2KCtrl>;
+    friend class dev::dssShutter<ocam2KCtrl>;
+    friend class dev::telemeter<ocam2KCtrl>;
+    
+    typedef MagAOXApp<> MagAOXAppT;
    
 public:
-   /** \name app::dev Configurations
-     *@{
-     */
-   static constexpr bool c_stdCamera_tempControl = true; ///< app::dev config to tell stdCamera to expose temperature controls
-   
-   static constexpr bool c_stdCamera_temp = true; ///< app::dev config to tell stdCamera to expose temperature (ignored since tempControl==true)
-
-   static constexpr bool c_stdCamera_readoutSpeed = false; ///< app::dev config to tell stdCamera not to expose readout speed controls
-   
-   static constexpr bool c_stdCamera_vShiftSpeed = false; ///< app:dev config to tell stdCamera not to expose vertical shift speed control
-
-   static constexpr bool c_stdCamera_emGain = true; ///< app::dev config to tell stdCamera to expose EM gain controls 
-   
-   static constexpr bool c_stdCamera_exptimeCtrl = false; ///< app::dev config to tell stdCamera not to expose exposure time controls
-   
-   static constexpr bool c_stdCamera_fpsCtrl = true; ///< app::dev config to tell stdCamera to expose FPS controls
-
-   static constexpr bool c_stdCamera_fps = true; ///< app::dev config to tell stdCamera not to expose FPS status (ignored since fpsCtrl==true)
-   
-   static constexpr bool c_stdCamera_synchro = true; ///< app::dev config to tell stdCamera to expose synchro mode controls
-
-   static constexpr bool c_stdCamera_usesModes = true; ///< app:dev config to tell stdCamera not to expose mode controls
-   
-   static constexpr bool c_stdCamera_usesROI = false; ///< app:dev config to tell stdCamera to expose ROI controls
-
-   static constexpr bool c_stdCamera_cropMode = false; ///< app:dev config to tell stdCamera to expose Crop Mode controls
-   
-   static constexpr bool c_stdCamera_hasShutter = true; ///< app:dev config to tell stdCamera to expose shutter controls
-
-   static constexpr bool c_stdCamera_usesStateString = true; ///< app::dev confg to tell stdCamera to expose the state string property
-
-   static constexpr bool c_edtCamera_relativeConfigPath = true; ///< app::dev config to tell edtCamera to use relative path to camera config file
-   
-   static constexpr bool c_frameGrabber_flippable = false; ///< app:dev config to tell framegrabber these images can not be flipped
-   
-   ///@}
+    /** \name app::dev Configurations
+      *@{
+      */
+    static constexpr bool c_stdCamera_tempControl = true; ///< app::dev config to tell stdCamera to expose temperature controls
+    
+    static constexpr bool c_stdCamera_temp = true; ///< app::dev config to tell stdCamera to expose temperature (ignored since tempControl==true)
+ 
+    static constexpr bool c_stdCamera_readoutSpeed = false; ///< app::dev config to tell stdCamera not to expose readout speed controls
+    
+    static constexpr bool c_stdCamera_vShiftSpeed = false; ///< app:dev config to tell stdCamera not to expose vertical shift speed control
+ 
+    static constexpr bool c_stdCamera_emGain = true; ///< app::dev config to tell stdCamera to expose EM gain controls 
+    
+    static constexpr bool c_stdCamera_exptimeCtrl = false; ///< app::dev config to tell stdCamera not to expose exposure time controls
+    
+    static constexpr bool c_stdCamera_fpsCtrl = true; ///< app::dev config to tell stdCamera to expose FPS controls
+ 
+    static constexpr bool c_stdCamera_fps = true; ///< app::dev config to tell stdCamera not to expose FPS status (ignored since fpsCtrl==true)
+    
+    static constexpr bool c_stdCamera_synchro = true; ///< app::dev config to tell stdCamera to expose synchro mode controls
+ 
+    static constexpr bool c_stdCamera_usesModes = true; ///< app:dev config to tell stdCamera not to expose mode controls
+    
+    static constexpr bool c_stdCamera_usesROI = false; ///< app:dev config to tell stdCamera to expose ROI controls
+ 
+    static constexpr bool c_stdCamera_cropMode = false; ///< app:dev config to tell stdCamera to expose Crop Mode controls
+    
+    static constexpr bool c_stdCamera_hasShutter = true; ///< app:dev config to tell stdCamera to expose shutter controls
+ 
+    static constexpr bool c_stdCamera_usesStateString = true; ///< app::dev confg to tell stdCamera to expose the state string property
+ 
+    static constexpr bool c_edtCamera_relativeConfigPath = true; ///< app::dev config to tell edtCamera to use relative path to camera config file
+    
+    static constexpr bool c_frameGrabber_flippable = false; ///< app:dev config to tell framegrabber these images can not be flipped
+    
+    ///@}
 protected:
 
-   /** \name configurable parameters 
-     *@{
-     */ 
+    /** \name configurable parameters 
+      *@{
+      */ 
+ 
+    //Camera:
+ 
+    std::string m_ocamDescrambleFile; ///< Path the OCAM 2K pixel descrambling file, relative to MagAO-X config directory.
+ 
+    
+    
+    ///@}
+    
+    ocam2_id m_ocam2_id {0}; ///< OCAM SDK id.
+    
+    long m_currImageNumber {-1}; ///< The current image number, retrieved from the image itself.
+        
+    long m_lastImageNumber {-1};  ///< The last image number, saved from the last loop through.
+ 
+    bool m_protectionReset {false}; ///< Flag indicating that protection has been reset at least once.
+    
+    unsigned m_protectionResetConfirmed {0}; ///< Counter indicating the number of times that the protection reset has been requested within 10 seconds, for confirmation.
+ 
+    double m_protectionResetReqTime {0}; ///< The time at which protection reset was requested.  You have 10 seconds to confirm.
+ 
+    bool m_poweredOn {false};
+    
+    ocamTemps m_temps; ///< Structure holding the last temperature measurement.
+   
+    unsigned m_digitalBinX {1};
+    
+    unsigned m_digitalBinY {1};
 
-   //Camera:
+    bool m_digitalBin {false};
 
-   std::string m_ocamDescrambleFile; ///< Path the OCAM 2K pixel descrambling file, relative to MagAO-X config directory.
+    mx::improc::eigenImage<int16_t> m_digitalBinWork;
 
-   
-   
-   ///@}
-   
-   ocam2_id m_ocam2_id {0}; ///< OCAM SDK id.
-   
-   long m_currImageNumber {-1}; ///< The current image number, retrieved from the image itself.
-       
-   long m_lastImageNumber {-1};  ///< The last image number, saved from the last loop through.
-
-   bool m_protectionReset {false}; ///< Flag indicating that protection has been reset at least once.
-   
-   unsigned m_protectionResetConfirmed {0}; ///< Counter indicating the number of times that the protection reset has been requested within 10 seconds, for confirmation.
-
-   double m_protectionResetReqTime {0}; ///< The time at which protection reset was requested.  You have 10 seconds to confirm.
-
-   bool m_poweredOn {false};
-   
-   ocamTemps m_temps; ///< Structure holding the last temperature measurement.
-   
 public:
 
    ///Default c'tor
@@ -1103,109 +1111,137 @@ int ocam2KCtrl::setEMGain( )
 inline
 int ocam2KCtrl::configureAcquisition()
 {
-   //lock mutex
-   std::unique_lock<std::mutex> lock(m_indiMutex);
-   
-   //Send command to camera to place it in the correct mode
-   std::string response;
-   if( pdvSerialWriteRead( response, m_cameraModes[m_modeName].m_serialCommand) != 0) //m_pdv, m_cameraModes[m_modeName].m_serialCommand, m_readTimeout) != 0)
-   {
-      if(powerState() != 1 || powerStateTarget() != 1) return -1;
-
-      log<software_error>({__FILE__, __LINE__, "Error sending command to set mode"});
-      sleep(1);
-      return -1;
-   }
-   
-   m_currentROI.x = 119.5;
-   m_currentROI.y = 119.5;
-   m_currentROI.w = 240;
-   m_currentROI.h = 240;
-   m_currentROI.bin_x = m_cameraModes[m_modeName].m_binningX;
-   m_currentROI.bin_y = m_cameraModes[m_modeName].m_binningY;
-   
-   recordCamera();
-   
-    ///\todo check response of pdvSerialWriteRead
-   log<text_log>("camera configured with: " +m_cameraModes[m_modeName].m_serialCommand);
-   
-   if(m_fpsSet > 0) setFPS();
-   
-   log<text_log>("Send command to set mode: " + m_cameraModes[m_modeName].m_serialCommand);
-   log<text_log>("Response was: " + response);
+    //lock mutex
+    std::unique_lock<std::mutex> lock(m_indiMutex);
+    
+    //Send command to camera to place it in the correct mode
+    std::string response;
+    if( pdvSerialWriteRead( response, m_cameraModes[m_modeName].m_serialCommand) != 0) //m_pdv, m_cameraModes[m_modeName].m_serialCommand, m_readTimeout) != 0)
+    {
+        if(powerState() != 1 || powerStateTarget() != 1) return -1;
   
-   if(setSynchro() < 0)
-   { 
-      log<software_error>({__FILE__, __LINE__, "Error setting synchro during configureAcquisition"});
-   }
-
-   /* Initialize the OCAM2 SDK
-       */
-
-   if(m_ocam2_id > 0)
-   {
-      ocam2_exit(m_ocam2_id);
-   }
-   ocam2_rc rc;
-   ocam2_mode mode;
-
-   int OCAM_SZw;
-   int OCAM_SZh;
-   if(m_raw_height == 121)
-   {
-      mode = OCAM2_NORMAL;
-      OCAM_SZw = 240;
-      OCAM_SZh = 240;
-   }
-   else if (m_raw_height == 62)
-   {
-      mode = OCAM2_BINNING;
-      OCAM_SZw = 120;
-      OCAM_SZh = 120;
-   }
-   else if (m_raw_height == 41)
-   {
-      mode = OCAM2_BINNING1x3;
-      OCAM_SZw = 240;
-      OCAM_SZh = 80;
-   }
-   else if (m_raw_height == 31)
-   {
-      mode = OCAM2_BINNING1x4;
-      OCAM_SZw = 240;
-      OCAM_SZh = 60;
-   }
-   else
-   {
-      log<text_log>("Unrecognized OCAM2 mode.", logPrio::LOG_ERROR);
-      return -1;
-   }
-
-   std::string ocamDescrambleFile = m_configDir + "/" + m_ocamDescrambleFile;
-
-   std::cerr << "ocamDescrambleFile: " << ocamDescrambleFile << std::endl;
+        log<software_error>({__FILE__, __LINE__, "Error sending command to set mode"});
+        sleep(1);
+        return -1;
+    }
+    
+    m_currentROI.x = 119.5;
+    m_currentROI.y = 119.5;
+    m_currentROI.w = 240;
+    m_currentROI.h = 240;
+    m_currentROI.bin_x = m_cameraModes[m_modeName].m_binningX;
+    m_currentROI.bin_y = m_cameraModes[m_modeName].m_binningY;
+    
+    m_digitalBinX = m_cameraModes[m_modeName].m_digitalBinX;
+    m_digitalBinY = m_cameraModes[m_modeName].m_digitalBinY;
+    
+    if(m_digitalBinX > 1)
+    {
+        m_digitalBin = true;
+        std::cerr << "digital binning!\n";
+    }
+    else
+    {
+        m_digitalBin = false;
+    }
+ 
+    recordCamera();
+    
+     ///\todo check response of pdvSerialWriteRead
+    log<text_log>("camera configured with: " +m_cameraModes[m_modeName].m_serialCommand);
+    
+    if(m_fpsSet > 0) setFPS();
+    
+    log<text_log>("Send command to set mode: " + m_cameraModes[m_modeName].m_serialCommand);
+    log<text_log>("Response was: " + response);
    
-   rc=ocam2_init(mode, ocamDescrambleFile.c_str(), &m_ocam2_id);
-   
-   if (rc != OCAM2_OK)
-   {
-      if(powerState() != 1 || powerStateTarget() != 1) return -1;
-      log<text_log>("ocam2_init error. Failed to initialize OCAM SDK with descramble file: " + ocamDescrambleFile, logPrio::LOG_ERROR);
-      return -1;
-   }
-   
+    if(setSynchro() < 0)
+    { 
+        log<software_error>({__FILE__, __LINE__, "Error setting synchro during configureAcquisition"});
+    }
+ 
+    /* Initialize the OCAM2 SDK
+        */
+ 
+    if(m_ocam2_id > 0)
+    {
+        ocam2_exit(m_ocam2_id);
+    }
+    ocam2_rc rc;
+    ocam2_mode mode;
+ 
+    int OCAM_SZw;
+    int OCAM_SZh;
+    if(m_raw_height == 121)
+    {
+        mode = OCAM2_NORMAL;
+        OCAM_SZw = 240;
+        OCAM_SZh = 240;
+    }
+    else if (m_raw_height == 62)
+    {
+        mode = OCAM2_BINNING;
+        OCAM_SZw = 120;
+        OCAM_SZh = 120;
+    }
+    else if (m_raw_height == 41)
+    {
+        mode = OCAM2_BINNING1x3;
+        OCAM_SZw = 240;
+        OCAM_SZh = 80;
+    }
+    else if (m_raw_height == 31)
+    {
+        mode = OCAM2_BINNING1x4;
+        OCAM_SZw = 240;
+        OCAM_SZh = 60;
+    }
+    else
+    {
+        log<text_log>("Unrecognized OCAM2 mode.", logPrio::LOG_ERROR);
+        return -1;
+    }
+ 
+    std::string ocamDescrambleFile = m_configDir + "/" + m_ocamDescrambleFile;
+ 
+    std::cerr << "ocamDescrambleFile: " << ocamDescrambleFile << std::endl;
+    
+    rc=ocam2_init(mode, ocamDescrambleFile.c_str(), &m_ocam2_id);
+    
+    if (rc != OCAM2_OK)
+    {
+        if(powerState() != 1 || powerStateTarget() != 1) return -1;
+        log<text_log>("ocam2_init error. Failed to initialize OCAM SDK with descramble file: " + ocamDescrambleFile, logPrio::LOG_ERROR);
+        return -1;
+    }
+    
+ 
+    log<text_log>("OCAM2K initialized. id: " + std::to_string(m_ocam2_id));
+ 
+    log<text_log>(std::string("OCAM2K mode is:") + ocam2_modeStr(ocam2_getMode(m_ocam2_id)));
+    
+    
+    
+    
+    if(m_digitalBin)
+    {
+        std::cerr << "and digital binning!\n";
+        m_digitalBinWork.resize(OCAM_SZw, OCAM_SZh);
 
-   log<text_log>("OCAM2K initialized. id: " + std::to_string(m_ocam2_id));
+        m_width = OCAM_SZw / m_digitalBinX;
+        m_height = OCAM_SZh / m_digitalBinY;
+    }
+    else
+    {
+        m_width = OCAM_SZw;
+        m_height = OCAM_SZh;
+    }
 
-   log<text_log>(std::string("OCAM2K mode is:") + ocam2_modeStr(ocam2_getMode(m_ocam2_id)));
-   
-   m_width = OCAM_SZw;
-   m_height = OCAM_SZh;
-   m_dataType = _DATATYPE_UINT16;
-   
-   state(stateCodes::OPERATING);
-   
-   return 0;
+    m_dataType = _DATATYPE_UINT16;
+
+    state(stateCodes::OPERATING);
+    
+    return 0;
 }
  
 inline
@@ -1291,10 +1327,37 @@ int ocam2KCtrl::acquireAndCheckValid()
 inline
 int ocam2KCtrl::loadImageIntoStream(void * dest)
 {
-   unsigned currImageNumber = 0;
-   ocam2_descramble(m_ocam2_id, &currImageNumber, (short int *) dest, (short int *) m_image_p);
+    unsigned currImageNumber = 0;
+
+    if(!m_digitalBin)
+    {
+        ocam2_descramble(m_ocam2_id, &currImageNumber, reinterpret_cast<int16_t *>(dest), reinterpret_cast<int16_t *>(m_image_p));
+        //memcpy(dest, m_image_p, 120*120*2); //This is about 10 usec faster -- but we have to descramble.
+    }
+    else
+    {
+        ocam2_descramble(m_ocam2_id, &currImageNumber, m_digitalBinWork.data(), reinterpret_cast<int16_t *>(m_image_p));
+
+        mx::improc::eigenMap<int16_t> destMap( reinterpret_cast<int16_t*>(dest), m_width, m_height);
+
+        if(m_digitalBinX > 1)
+        {
+            for(int cc = 0; cc < destMap.cols(); ++cc)
+            {
+                for(int rr = 0; rr < destMap.rows(); ++rr)
+                {
+                    destMap(rr,cc)  = m_digitalBinWork(rr*m_digitalBinX + 0, cc);
+                    
+                    for(unsigned b = 1; b < m_digitalBinX; ++b)
+                    {
+                        destMap(rr,cc)  = m_digitalBinWork(rr*m_digitalBinX + b,cc);
+                    }
+                }
+            }
+        }
+    }
+
    
-   //memcpy(dest, m_image_p, 120*120*2); //This is about 10 usec faster -- but we have to descramble.
    return 0;
 }
    
