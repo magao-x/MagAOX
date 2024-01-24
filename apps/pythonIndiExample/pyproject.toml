@@ -12,4 +12,4 @@ authors = [
 ]
 
 [project.scripts]
-pythonIndiExample = "pythonIndiExample:PythonIndiExample.console_app"
+pythonIndiExample = "pythonIndiExample:pythonIndiExample.console_app"
