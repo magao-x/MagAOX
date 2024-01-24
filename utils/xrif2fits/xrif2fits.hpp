@@ -351,6 +351,11 @@ int xrif2fits::execute()
       
       logMetas.push_back(logMetaSpec({"fwsci2", telem_stage::eventCode, "presetName"}));
       logMetas.push_back(logMetaSpec({"fwsci2", telem_stage::eventCode, "preset"}));
+
+      logMetas.push_back( logMetaSpec("camwfs", telem_stdcam::eventCode, "fps"));
+      logMetas.push_back( logMetaSpec("camwfs", telem_stdcam::eventCode, "xbin"));
+      logMetas.push_back( logMetaSpec("camwfs", telem_stdcam::eventCode, "ybin"));
+      logMetas.push_back( logMetaSpec("camwfs", telem_stdcam::eventCode, "emGain"));
       
       logMetas.push_back( logMetaSpec(lfn.appName(), telem_stdcam::eventCode, "exptime"));
       logMetas.push_back( logMetaSpec(lfn.appName(), telem_stdcam::eventCode, "fps"));
