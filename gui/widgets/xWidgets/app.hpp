@@ -52,9 +52,9 @@ public:
         if(argc == 2)
         {
             m_deviceName = argv[1];
-            if(m_deviceName.find(".conf") != std::string::npos)
+            if(m_deviceName.find(".conf") != std::string::npos || m_deviceName.find('/') != std::string::npos)
             {
-                throw std::invalid_argument("Can only pass camera name, not config file, as non-option argument.  Use -c <config_file> instead.");
+                throw std::invalid_argument("Can only pass device name, not config file, as non-option argument.  Use -c <config_file> instead.");
             }
 
             std::string configDir = mx::sys::getEnv(m_configPathCLBase_env);

@@ -143,15 +143,19 @@ QString statusDisplay::formatValue()
 
 void statusDisplay::subscribe()
 {
-   if(!m_parent) return;
+    if(!m_parent) return;
    
-   m_parent->addSubscriberProperty(this, m_device, "fsm");
+    m_parent->addSubscriberProperty(this, m_device, "fsm");
 
-   if(m_property != "") m_parent->addSubscriberProperty(this, m_device, m_property);
+    if(m_property != "") m_parent->addSubscriberProperty(this, m_device, m_property);
 
-   if(m_ctrlWidget) m_parent->addSubscriber(m_ctrlWidget);
+    if(m_ctrlWidget) 
+    {
+        m_ctrlWidget->subscribe();
+        m_parent->addSubscriber(m_ctrlWidget);
+    }
 
-   return;
+    return;
 }
   
 void statusDisplay::onConnect()
