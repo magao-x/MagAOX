@@ -10,6 +10,11 @@ from magaox.indi.device import XDevice, BaseConfig
 from magaox.camera import XCam
 from magaox.constants import StateCodes
 
+from hcipy import util, make_circular_aperture, Field
+
+from skimage import feature
+
+
 from purepyindi2 import device, properties, constants
 from purepyindi2.messages import DefNumber, DefSwitch, DefLight, DefText
 
@@ -54,7 +59,7 @@ class corAlign(XDevice):
         self.add_property(sv, callback=self.handle_state)
 
         nv = properties.NumberVector(name='measurement')
-		nv.add_element(DefNumber(
+        nv.add_element(DefNumber(
             name='counter', label='Loop counter', format='%i',
             min=0, max=2**32-1, step=1, _value=0
         ))
@@ -62,7 +67,7 @@ class corAlign(XDevice):
             name='x', label='X shift', format='%3.3f',
             min=-150.0, max=150.0, step=0.01, _value=0
         ))
-		nv.add_element(DefNumber(
+        nv.add_element(DefNumber(
             name='y', label='Y shift', format='%3.3f',
             min=-150.0, max=150.0, step=0.01, _value=0
         ))
@@ -105,7 +110,7 @@ class corAlign(XDevice):
         #self.client.register_callback(func, device_name='fwfpm')
 
         self.log.info("Found camera: {:s}".format(self.config.camera.shmim))
-        self.camera = XCam(self.config.camera.shmim, use_hcipy=True)
+        self.camera = XCam(self.config.camera.shmim, pixel_size=6.0/21.0, use_hcipy=True)
         self._state = States.IDLE
 
         self._loop_counter = 0
@@ -179,12 +184,17 @@ class corAlign(XDevice):
         self.update_property(existing_property)
 
     def measure_fpm_mask_shift(self, image):
-        if self.client['fwfpm.filterName'] == 'lyotlg' or self.client['fwfpm.filterName'] == 'lyotsm':
+        if self.client['fwfpm.filterName.lyotsm'] == constants.SwitchState.ON:
             return measure_center_position(image)
-        elif self.client['fwfpm.filterName'] == 'knifemask' or self.client['fwfpm.filterName'] == 'spare':
+        elif self.client['fwfpm.filterName.lyotlg'] == constants.SwitchState.ON:
+            print("Is Lyot large mask")
+            return measure_center_position(image)
+        elif self.client['fwfpm.filterName.knifemask'] == constants.SwitchState.ON:
+            return np.array([0.0, 0.0]) # Not implemented yet.
+        elif self.client['fwfpm.filterName.spare'] == constants.SwitchState.ON:
             return np.array([0.0, 0.0]) # Not implemented yet.
         else:
-			# Do nothing if in an unspecified position.
+            # Do nothing if in an unspecified position.
             return np.array([0.0, 0.0])
     
     def measure_psf_position(self, image):
@@ -201,12 +211,13 @@ class corAlign(XDevice):
         if self._state == States.CLOSED_LOOP:
             image = self.camera.grab_stack(self._n_avg)
             center_error = self.measure_fpm_mask_shift(image)
-			self._loop_counter += 1
+            print(center_error)
+            self._loop_counter += 1
 
             # Send new values to indi server.
             self.properties['measurement']['x'] = center_error[0]
             self.properties['measurement']['y'] = center_error[1]
-			self.properties['measurement']['counter'] = self._loop_counter
+            self.properties['measurement']['counter'] = self._loop_counter
             self.update_property(self.properties['measurement'])
 
         elif self._state == States.PSF:
@@ -223,4 +234,3 @@ class corAlign(XDevice):
             self.update_property(self.properties['ref_y'])
 
             self.transition_to_idle()
-
