@@ -5,19 +5,19 @@
 
 int main(int argc, char *argv[])
 {
-   if(argc < 2)
-   {
-      std::cerr << "Must specify DM INDI name.\n";
-      return -1;
-   }
    
-   QApplication qapp(argc, argv);
+    QApplication qapp(argc, argv);
 
+    xqt::app<xqt::camera> app;
 
-   xqt::app<xqt::camera> app;
-
-   return app.main(argc, argv);
-   
-   
+    try
+    {
+        return app.main(argc, argv);
+    }
+    catch(const std::exception & e)
+    {
+        std::cerr << e.what() << "\n";
+        std::cerr << "try " << argv[0] << " -h for more information." << std::endl;
+    }
 }
    
