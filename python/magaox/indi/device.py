@@ -1,6 +1,8 @@
 import gzip
+import json
 import glob
 import datetime
+from datetime import timezone
 import os.path
 import sys
 from functools import partial
@@ -8,6 +10,8 @@ import logging
 import subprocess
 import psutil
 from purepyindi2 import Device, transports
+from purepyindi2.properties import IndiProperty
+import dataclasses
 import toml
 import typing
 import xconf
@@ -55,6 +59,22 @@ class MagAOXLogFormatter(logging.Formatter):
     def formatTime(self, record, datefmt):
         return datetime.datetime.fromtimestamp(record.created, datetime.timezone.utc).strftime('%Y-%m-%dT%H:%M:%S.%f000')
 
+def compress_files_glob(pattern, latest_filename=None):
+    '''GZip compress files matching a glob pattern,
+    omitting a "latest" file optionally'''
+    for fn in glob.glob(pattern):
+        if latest_filename is not None and fn.endswith(latest_filename):
+            # don't gzip our empty log right after opening (and we
+            # need to open it first in case we need to log problems
+            # with compression)
+            continue
+        path_to_text_log = os.path.realpath(fn)
+        return_code = subprocess.call(["gzip", path_to_text_log])
+        if return_code != 0:
+            log.error(f"Unable to compress {path_to_text_log} with gzip")
+        else:
+            log.debug(f"Compressed existing file: {fn}")
+
 def init_logging(logger : logging.Logger, destination, console_log_level, file_log_level, all_verbose):
     root = logging.getLogger()
     root.setLevel(logging.DEBUG)
@@ -78,10 +98,16 @@ def init_logging(logger : logging.Logger, destination, console_log_level, file_l
     file_handler.setFormatter(formatter)
     logger.info(f"Logging to {destination}")
 
+LINE_BUFFERED = 1
+
+
+LOG_FILENAME_TIMESTAMP_FORMAT = "%Y-%m-%dT%H%M%S"
+
 class XDevice(Device):
     prefix_dir : str  = "/opt/MagAOX"
     logs_dir : str = "logs"
     config_dir : str = "config"
+    telem_dir : str = "telem"
     log : logging.Logger
     config : BaseConfig
 
@@ -108,7 +134,7 @@ class XDevice(Device):
         log = self.log = logging.getLogger(self.name)
         log_dir = self.prefix_dir + "/" + self.logs_dir + "/" + self.name
         os.makedirs(log_dir, exist_ok=True)
-        timestamp = datetime.datetime.now().strftime("%Y-%m-%dT%H%M%S")
+        timestamp = self._startup_time.strftime(LOG_FILENAME_TIMESTAMP_FORMAT)
         log_file_name = f"{self.name}_{timestamp}.log"
         log_file_path = log_dir + "/" + log_file_name
         init_logging(
@@ -117,24 +143,44 @@ class XDevice(Device):
             console_log_level=logging.DEBUG if verbose else logging.INFO,
             file_log_level=logging.DEBUG,
             all_verbose=all_verbose)
+        compress_files_glob(log_dir + f"/{self.name}_*.log", latest_filename=log_file_name)
 
-        # GZip compress any existing text logs (ending in .log not .log.gz)
-        for fn in glob.glob(log_dir + f"/{self.name}_*.log"):
-            if fn.endswith(log_file_name):
-                # don't gzip our empty log right after opening
-                continue
-            path_to_text_log = os.path.realpath(fn)
-            return_code = subprocess.call(["gzip", path_to_text_log])
-            if return_code != 0:
-                log.error(f"Unable to compress {path_to_text_log} with gzip")
-            else:
-                log.debug(f"Compressed existing log: {fn}")
+    def _init_telem(self):
+        telem_dir = self.prefix_dir + "/" + self.telem_dir + "/" + self.name
+        timestamp = self._startup_time.strftime(LOG_FILENAME_TIMESTAMP_FORMAT)
+        telem_file_name = f"{self.name}_{timestamp}.ndjson"
+        os.makedirs(telem_dir, exist_ok=True)
+        telem_file_path = telem_dir + "/" + telem_file_name
+        self._telem_file = open(telem_file_path, 'wt', buffering=LINE_BUFFERED, encoding='utf8')
+        compress_files_glob(telem_dir + f"/{self.name}_*.ndjson", latest_filename=telem_file_name)
+        self.log.info(f"Telemetrying to {telem_file_path}")
+        self.telem('te')
+
+    def telem(self, event : str, message : typing.Union[str, dict[str, typing.Any]]):
+        current_ts_str = datetime.datetime.now().isoformat() + "000"  # zeros for consistency with MagAO-X timestamps with ns
+        payload = {
+            "ts": current_ts_str,
+            "prio": "TELM",
+            "ec": event,
+            "msg": message,
+        }
+        json.dump(payload, self._file)
+        self._file.write('\n')
+
+    def update_property(self, prop : IndiProperty):
+        super().update_property(prop)
+        self.telem('telem_indi_set', prop.to_serializable())
+
+    def __del__(self):
+        self._telem_file.close()
 
     def __init__(self, name, config, *args, verbose=False, all_verbose=False, **kwargs):
+        self._startup_time = datetime.datetime.now(timezone.utc)
         fifos_root = self.prefix_dir + "/drivers/fifos"
         super().__init__(name, *args, connection_class=partial(transports.IndiFifoConnection, name=name, fifos_root=fifos_root), **kwargs)
         self.config = config
         self._init_logs(verbose, all_verbose)
+        self._init_telem()
 
     def lock_pid_file(self):
         pid_dir = self.prefix_dir + f"/sys/{self.name}"
