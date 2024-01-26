@@ -9,7 +9,9 @@
 #include <mx/sys/environment.hpp>
 
 #include "../../../libMagAOX/common/environment.hpp"
-   
+#include "../../../libMagAOX/common/paths.hpp"
+
+
 #include "xWidget.hpp"
 #include "multiIndiManager.hpp"
 
@@ -29,8 +31,19 @@ public:
 
     app()
     {
-        //Set the config path relative to MagAOXPath
-        m_configPathCLBase_env = MAGAOX_env_config;
+        std::string basePath = mx::sys::getEnv(MAGAOX_env_path);
+        if(basePath == "")
+        {
+            basePath = MAGAOX_path;
+        }
+        
+        std::string configDir = mx::sys::getEnv(MAGAOX_env_config);
+        if(configDir == "")
+        {
+            configDir = MAGAOX_configRelPath;
+        }
+
+        m_configPathCLBase = basePath += "/" + configDir + "/";
 
         //Lack of config files is ignored
         m_requireConfigPathGlobal = false;
@@ -49,6 +62,7 @@ public:
                         char ** argv ///< [in] standard command line result containing the arguments.
                       )
     {
+        ///\todo We should config search path regardless of number of arguments.
         if(argc == 2)
         {
             m_deviceName = argv[1];
@@ -57,12 +71,8 @@ public:
                 throw std::invalid_argument("Can only pass device name, not config file, as non-option argument.  Use -c <config_file> instead.");
             }
 
-            std::string configDir = mx::sys::getEnv(m_configPathCLBase_env);
-            if(configDir != "")
-            {
-                m_configPathGlobal = configDir + "/guis.conf";
-                m_configPathUser = configDir + "/gui_" + m_deviceName + ".conf";
-            }
+            m_configPathGlobal = m_configPathCLBase + "/guis.conf";
+            m_configPathUser = m_configPathCLBase + "/gui_" + m_deviceName + ".conf";
         }
             
         application::setup(argc, argv);
@@ -71,11 +81,11 @@ public:
 
     virtual void setupConfig()
     {
-        config.add("gui", "", "gui.styleSheet", mx::app::argType::Required, "gui", "styleSheet", false, "string", "Path to a Qt style sheet to replace the default.");
+        config.add("gui.stylesheet", "", "gui.styleSheet", mx::app::argType::Required, "gui", "styleSheet", false, "string", "Path to a Qt style sheet to replace the default.");
         
-        config.add("indi", "d", "indi.device", mx::app::argType::Required, "indi", "device", false, "string", "INDI device name.");
-        config.add("indi", "a", "indi.ip", mx::app::argType::Required, "indi", "ip", false, "string", "INDI IP address or host name.  Default is 127.0.0.1.");
-        config.add("indi", "p", "indi.port", mx::app::argType::Required, "indi", "port", false, "int", "INDI IP port.  Default is 7624.");
+        config.add("indi.device", "d", "indi.device", mx::app::argType::Required, "indi", "device", false, "string", "INDI device name.");
+        config.add("indi.ip", "a", "indi.ip", mx::app::argType::Required, "indi", "ip", false, "string", "INDI IP address or host name.  Default is 127.0.0.1.");
+        config.add("indi.port", "p", "indi.port", mx::app::argType::Required, "indi", "port", false, "int", "INDI IP port.  Default is 7624.");
 
        widgetT::setupConfig(config);
     }
@@ -98,7 +108,6 @@ public:
 
         // set stylesheet
         QFile file(m_styleSheet.c_str());
-    
         file.open(QFile::ReadOnly | QFile::Text);
         QTextStream stream(&file);
         qApp->setStyleSheet(stream.readAll());
