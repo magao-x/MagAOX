@@ -190,7 +190,7 @@ class corAlign(XDevice):
             print("Is Lyot large mask")
             return measure_center_position(image)
         elif self.client['fwfpm.filterName.knifemask'] == constants.SwitchState.ON:
-            return np.array([0.0, 0.0]) # Not implemented yet.
+            return knife_edge_dist(image, theta=0, mask_diameter=200, threshold=0.5)
         elif self.client['fwfpm.filterName.spare'] == constants.SwitchState.ON:
             return np.array([0.0, 0.0]) # Not implemented yet.
         else:

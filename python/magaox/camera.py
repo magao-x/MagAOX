@@ -163,7 +163,7 @@ class XCam():
 		for i in range(num_images):
 			self._old_counter = self.counter
 
-			OUT[i] = self.process(self.shmim.get_data(check=True, timeout=5 * self.exposure_time))
+			OUT[i] = self.process(self.shmim.get_data(check=True, timeout=5 * self.exposure_time).astype(float))
 			
 			if self.counter == self._old_counter:
 				self._need_reconnect = True
@@ -182,7 +182,7 @@ class XCam():
 		for i in range(num_images):
 			self._old_counter = self.counter
 			
-			image = self.shmim.get_data(check=True, timeout=5 * self.exposure_time)
+			image = self.shmim.get_data(check=True, timeout=5 * self.exposure_time).astype(float)
 			
 			if self.counter == self._old_counter:
 				self._need_reconnect = True
