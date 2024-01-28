@@ -56,6 +56,8 @@ protected:
     
     mx::improc::eigenImage<float> m_references; ///< The reference values of the disturbances
 
+    std::unordered_map<std::string, std::string> m_fsmStates; ///< The FSM states of the control devices.
+
     std::vector<float> m_currents; ///< The current commands
 
     mx::improc::eigenImage<float> m_intMat; ///< The interaction matrix.  Default is [1 0][0 1].
@@ -134,15 +136,24 @@ public:
     INDI_SETCALLBACK_DECL(closedLoopIndi, m_indiP_inputs);
 
     pcf::IndiProperty m_indiP_ggain;
-    pcf::IndiProperty m_indiP_ctrlEnabled;
- 
     INDI_NEWCALLBACK_DECL(closedLoopIndi, m_indiP_ggain);
+    
+    pcf::IndiProperty m_indiP_ctrlEnabled;
     INDI_NEWCALLBACK_DECL(closedLoopIndi, m_indiP_ctrlEnabled);
  
-    pcf::IndiProperty m_indiP_ctrl0; ///< The INDI properties used for control of axis 0
+    pcf::IndiProperty m_indiP_counterReset;
+    INDI_NEWCALLBACK_DECL(closedLoopIndi, m_indiP_counterReset);
+
+    pcf::IndiProperty m_indiP_ctrl0_fsm; ///< The INDI property for fsm state of axis 0
+    INDI_SETCALLBACK_DECL(closedLoopIndi, m_indiP_ctrl0_fsm);
+
+    pcf::IndiProperty m_indiP_ctrl0; ///< The INDI property used for control of axis 0
     INDI_SETCALLBACK_DECL(closedLoopIndi, m_indiP_ctrl0);
 
-    pcf::IndiProperty m_indiP_ctrl1; ///< The INDI properties used for control of axis 1
+    pcf::IndiProperty m_indiP_ctrl1_fsm; ///< The INDI property for fsm state of axis 1
+    INDI_SETCALLBACK_DECL(closedLoopIndi, m_indiP_ctrl1_fsm);
+
+    pcf::IndiProperty m_indiP_ctrl1; ///< The INDI property used for control of axis 1
     INDI_SETCALLBACK_DECL(closedLoopIndi, m_indiP_ctrl1);
 
     pcf::IndiProperty m_indiP_upstream; ///< Property used to report the upstream loop state    
@@ -317,13 +328,22 @@ int closedLoopIndi::appStartup()
     
  
     CREATE_REG_INDI_NEW_TOGGLESWITCH( m_indiP_ctrlEnabled, "loop_state");
- 
+
+    CREATE_REG_INDI_NEW_REQUESTSWITCH( m_indiP_counterReset, "counter_reset");
+
     m_measurements.resize(2,1);
     m_measurements.setZero();
 
     m_currents.resize(m_ctrlDevices.size(), -1e15);
  
+    REG_INDI_SETPROP(m_indiP_ctrl0_fsm, m_ctrlDevices[0], "fsm");
+
     REG_INDI_SETPROP(m_indiP_ctrl0, m_ctrlDevices[0], m_ctrlProperties[0]);
+
+    if(m_ctrlDevices[1] != m_ctrlDevices[0])
+    {
+        REG_INDI_SETPROP(m_indiP_ctrl1_fsm, m_ctrlDevices[1], "fsm");
+    }
 
     REG_INDI_SETPROP(m_indiP_ctrl1, m_ctrlDevices[1], m_ctrlProperties[1]);
  
@@ -384,42 +404,54 @@ int closedLoopIndi::toggleLoop(bool onoff)
 inline
 int closedLoopIndi::updateLoop()
 {
-   std::cout << "measurements: ";
-   for(int cc = 0; cc < m_measurements.rows(); ++cc)
-   {
-      std::cout << m_measurements(cc,0) << " ";
-   }
-   std::cout << "\n";
+    bool ready = false;
 
-   m_commands.matrix() = m_intMat.matrix() * (m_measurements - m_references).matrix();
+    //This should only give ready == true if all devices exist and are ready
+    for(size_t n = 0; n < m_ctrlDevices.size(); ++n)
+    {
+        if(m_fsmStates.count(m_ctrlDevices[n]) > 0)
+        {
+            if(m_fsmStates[m_ctrlDevices[n]] == "READY")
+            {
+                ready = true;
+            }
+            else
+            {
+                ready = false;
+                break;
+            }
+        }
+        else
+        {
+            ready = false;
+            break;
+        }
+    }
 
-   std::cout << "delta commands:    ";
-   for(int cc = 0; cc < m_measurements.rows(); ++cc)
-   {
-      std::cout << -m_commands(cc,0) << " ";
-   }
-   std::cout << "\n";
+    if(ready != true)
+    {
+        return 0;
+    }
 
-   std::vector<float> commands;
-   commands.resize(m_measurements.rows());
+    m_commands.matrix() = m_intMat.matrix() * (m_measurements - m_references).matrix();
 
-   std::cout << "commands:    ";
-   for(int cc = 0; cc < m_measurements.rows(); ++cc)
-   {
-      commands[cc] = m_currents[cc] - m_ggain*m_gains[cc]*m_commands(cc,0);
-      std::cout << commands[cc] << " ";
-   }
-   std::cout << "\n";
+    std::vector<float> commands;
+    commands.resize(m_measurements.rows());
+
+    for(int cc = 0; cc < m_measurements.rows(); ++cc)
+    {
+        commands[cc] = m_currents[cc] - m_ggain*m_gains[cc]*m_commands(cc,0);
+    }
   
-   //And send commands.
-   if(m_loopClosed)
-   {
-      return sendCommands(commands);
-   }
-   else 
-   {
-      return 0;
-   }
+    //And send commands.
+    if(m_loopClosed)
+    {
+        return sendCommands(commands);
+    }
+    else 
+    {
+        return 0;
+    }
 }
 
 inline
@@ -482,11 +514,7 @@ INDI_NEWCALLBACK_DEFN(closedLoopIndi, m_indiP_reference1)(const pcf::IndiPropert
 
 INDI_SETCALLBACK_DEFN(closedLoopIndi, m_indiP_inputs)(const pcf::IndiProperty &ipRecv)
 {
-    std::cerr << __LINE__ << "\n";
-
     INDI_VALIDATE_CALLBACK_PROPS(ipRecv, m_indiP_inputs)
-
-    std::cerr << __LINE__ << "\n";
 
     if(!ipRecv.find(m_inputElements[0])) return -1;
     if(!ipRecv.find(m_inputElements[1])) return -1;
@@ -494,9 +522,7 @@ INDI_SETCALLBACK_DEFN(closedLoopIndi, m_indiP_inputs)(const pcf::IndiProperty &i
 
     int counter = ipRecv[m_inputCounterElement].get<int>();
 
-    std::cerr << "got counter " << counter << "\n";
-
-    if(counter > m_counter)
+    if(counter != m_counter)
     {
         m_counter = counter;
         m_measurements(0,0) = ipRecv[m_inputElements[0]].get<float>();
@@ -549,6 +575,32 @@ INDI_NEWCALLBACK_DEFN(closedLoopIndi, m_indiP_ctrlEnabled)(const pcf::IndiProper
     return 0;
 }
 
+INDI_NEWCALLBACK_DEFN(closedLoopIndi, m_indiP_counterReset)(const pcf::IndiProperty &ipRecv)
+{
+    INDI_VALIDATE_CALLBACK_PROPS(ipRecv, m_indiP_counterReset);
+
+    //switch is toggled to on
+    if( ipRecv["request"].getSwitchState() == pcf::IndiElement::On)
+    {
+       m_counter = -1;
+    }
+ 
+    
+    return 0;
+}
+
+INDI_SETCALLBACK_DEFN(closedLoopIndi, m_indiP_ctrl0_fsm)(const pcf::IndiProperty &ipRecv)
+{
+    INDI_VALIDATE_CALLBACK_PROPS(ipRecv, m_indiP_ctrl0_fsm);
+
+    if(ipRecv.find("state"))
+    {
+        m_fsmStates[ipRecv.getDevice()] = ipRecv["state"].get();
+    }
+
+   return 0;
+}
+
 INDI_SETCALLBACK_DEFN(closedLoopIndi, m_indiP_ctrl0)(const pcf::IndiProperty &ipRecv)
 {
     INDI_VALIDATE_CALLBACK_PROPS(ipRecv, m_indiP_ctrl0);
@@ -556,6 +608,18 @@ INDI_SETCALLBACK_DEFN(closedLoopIndi, m_indiP_ctrl0)(const pcf::IndiProperty &ip
     if(ipRecv.find(m_ctrlCurrents[0]))
     {
         m_currents[0] = ipRecv[m_ctrlCurrents[0]].get<float>();
+    }
+
+   return 0;
+}
+
+INDI_SETCALLBACK_DEFN(closedLoopIndi, m_indiP_ctrl1_fsm)(const pcf::IndiProperty &ipRecv)
+{
+    INDI_VALIDATE_CALLBACK_PROPS(ipRecv, m_indiP_ctrl1_fsm);
+
+    if(ipRecv.find("state"))
+    {
+        m_fsmStates[ipRecv.getDevice()] = ipRecv["state"].get();
     }
 
    return 0;

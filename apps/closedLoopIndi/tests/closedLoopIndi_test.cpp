@@ -25,9 +25,12 @@ public:
         XWCTEST_SETUP_INDI_NEW_PROP(reference1);
         XWCTEST_SETUP_INDI_NEW_PROP(ggain);
         XWCTEST_SETUP_INDI_NEW_PROP(ctrlEnabled);
+        XWCTEST_SETUP_INDI_NEW_PROP(counterReset);
 
         XWCTEST_SETUP_INDI_ARB_PROP(m_indiP_inputs, "inputdev", "measurement" )
+        XWCTEST_SETUP_INDI_ARB_PROP(m_indiP_ctrl0_fsm, "ctrl0dev", "fsm" )
         XWCTEST_SETUP_INDI_ARB_PROP(m_indiP_ctrl0, "ctrl0dev", "prop0" )
+        XWCTEST_SETUP_INDI_ARB_PROP(m_indiP_ctrl1_fsm, "ctrl1dev", "fsm" )
         XWCTEST_SETUP_INDI_ARB_PROP(m_indiP_ctrl1, "ctrl1dev", "prop1" )
         XWCTEST_SETUP_INDI_ARB_PROP(m_indiP_upstream, "updev", "loop_state" )
     }
@@ -41,8 +44,11 @@ SCENARIO( "INDI Callbacks", "[closedLoopIndi]" )
     XWCTEST_INDI_NEW_CALLBACK( closedLoopIndi, reference1);
     XWCTEST_INDI_NEW_CALLBACK( closedLoopIndi, ggain);
     XWCTEST_INDI_NEW_CALLBACK( closedLoopIndi, ctrlEnabled);
+    XWCTEST_INDI_NEW_CALLBACK( closedLoopIndi, counterReset);
     XWCTEST_INDI_SET_CALLBACK( closedLoopIndi, m_indiP_inputs, "inputdev", "measurement")
+    XWCTEST_INDI_SET_CALLBACK( closedLoopIndi, m_indiP_ctrl0_fsm, "ctrl0dev", "fsm")
     XWCTEST_INDI_SET_CALLBACK( closedLoopIndi, m_indiP_ctrl0, "ctrl0dev", "prop0")
+    XWCTEST_INDI_SET_CALLBACK( closedLoopIndi, m_indiP_ctrl1_fsm, "ctrl1dev", "fsm")
     XWCTEST_INDI_SET_CALLBACK( closedLoopIndi, m_indiP_ctrl1, "ctrl1dev", "prop1")
     XWCTEST_INDI_SET_CALLBACK( closedLoopIndi, m_indiP_upstream, "updev", "loop_state")
 }
