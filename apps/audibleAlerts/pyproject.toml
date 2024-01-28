@@ -1,0 +1,15 @@
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[project]
+name = "audibleAlerts"
+description =  "Audible alerting and text-to-speech for MagAO-X"
+version = "2023.12.21"
+
+authors = [
+  {name = "Joseph D. Long", email = "me@joseph-long.com"},
+]
+
+[project.scripts]
+audibleAlerts = "audibleAlerts:audibleAlerts.core.console_app"
