@@ -62,7 +62,7 @@ int cameraStatus::attachOverlay( rtimvOverlayAccess & roa,
         for(size_t f = 0; f < m_filterDeviceNames.size(); ++f)
         {
             if(m_filterDeviceNames[f].find("fw") == 0) m_presetNames[f] = ".filterName";
-            else if(m_filterDeviceNames[f].find("flip") == 0) m_presetNames[f] = ".position";
+            else if(m_filterDeviceNames[f].find("flip") == 0) m_presetNames[f] = ".presetName";
             else m_presetNames[f] = ".presetName";
 
             (*m_roa.m_dictionary)[m_filterDeviceNames[f] + ".fsm.state"].setBlob(nullptr, 0);
