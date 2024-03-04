@@ -311,7 +311,12 @@ if [[ $MAGAOX_ROLE != ci && $MAGAOX_ROLE != container && $MAGAOX_ROLE != vm ]]; 
 fi
 
 log_success "Provisioning complete"
-if [[ $MAGAOX_ROLE != ci && $MAGAOX_ROLE != container ]]; then
+
+if [[ $MAGAOX_ROLE == ci || $MAGAOX_ROLE == container ]]; then
+    exit 0
+elif [[ -z "$(groups | grep magaox)" ]]; then
+    log_info "You now need to log out and back in for group changes to take effect"
+else
     log_info "You'll probably want to run"
     log_info "    source /etc/profile.d/*.sh"
     log_info "to get all the new environment variables set."
