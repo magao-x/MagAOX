@@ -14,7 +14,7 @@ from purepyindi2 import device, properties, constants, messages
 from purepyindi2.messages import DefNumber, DefSwitch, DefText
 from magaox.indi.device import Device, BaseConfig
 
-from .personality import Personality, Transition
+from .personality import Personality, Transition, Operation
 from .opentts_bridge import speak, ssml_to_wav
 
 log = logging.getLogger(__name__)
@@ -24,34 +24,14 @@ TAGS_RE = re.compile('<.*?>')
 def drop_xml_tags(raw_xml):
   return TAGS_RE.sub('', raw_xml)
 
-@xconf.config
-class Condition:
-    messages : list = xconf.field(default_factory=list, help="Messages to choose from semi-randomly on condition triggering")
-
-@xconf.config
-class ValueCondition(Condition):
-    value : Union[float, int, str] = xconf.field(help="Value for exact equality test")
-
-@xconf.config
-class Reaction:
-    indi_id : str = xconf.field(help="INDI dotted-triple ID of an element")
-    conditions : list[Condition] = xconf.field(help="Conditions with associated messages")
-
-@xconf.config
-class PersonalityConfig:
-    random_utterances : list[str] = xconf.field(default_factory=list, help="Utterances uttered utterly randomly")
-    reactions : list[Reaction] = xconf.field(default_factory=list, help="Reactions to instrument state changes")
-
-@xconf.config
 class AudibleAlertsConfig(BaseConfig):
-    personalities : dict[str, PersonalityConfig] = xconf.field(default_factory=dict, help="")
-    
+    random_utterance_interval_sec : Union[float, int] = xconf.field(default=15 * 60, help="Seconds since last (real or random) utterance before a random utterance should play")
 
 class AudibleAlerts(Device):
     personality : Personality
     _cb_handles : set
     speech_requests : list[str]
-    default_voice : str = "coqui-tts:en_ljspeech"
+    default_voice : str = "coqui-tts:en_ljspeech"  # overridden by personality when loaded
     personalities : list[str] = ['default', 'lab',]
     active_personality : str = "default"
     api_url : str = "http://localhost:5500/"
@@ -76,10 +56,12 @@ class AudibleAlerts(Device):
             if current_text is not None and len(current_text.strip()) != 0:
                 self.speech_requests.append(current_text)
                 self.log.debug(f"Speech requested: {self.properties['speech_text']['current']}")
+                self.telem("speech_request", {"text": current_text})
         self.update_property(existing_property)  # ensure the request switch turns back off at the client
 
     def handle_reload_request(self, existing_property, new_message):
         if new_message['request'] is constants.SwitchState.ON:
+            self.telem("reload_personality", {"name": self.active_personality})
             self.load_personality(self.active_personality)
         self.update_property(existing_property)  # ensure the request switch turns back off at the client
 
@@ -91,6 +73,7 @@ class AudibleAlerts(Device):
         else:
             log.debug("Unmuted")
         self.update_property(existing_property)
+        self.telem("mute_toggle", {"mute": self.mute})
 
     def reaction_handler(self, new_message, element_name, transition, utterance_choices):
         if not isinstance(new_message, messages.IndiSetMessage):
@@ -159,7 +142,7 @@ class AudibleAlerts(Device):
             try:
                 self.client.unregister_callback(cb, device_name=device_name, property_name=property_name)
             except ValueError:
-                log.exception(f"Tried tp remove {cb=} {device_name=} {property_name=}")
+                log.exception(f"Tried to remove {cb=} {device_name=} {property_name=}")
         self.log.info(f"Loading personality from {personality_file}")
         self.personality = Personality.from_path(personality_file)
         self.default_voice = self.personality.default_voice
@@ -179,6 +162,7 @@ class AudibleAlerts(Device):
                     self.log.debug(f"{reaction.indi_id}: {t}: {utterance}")
                     result = ssml_to_wav(utterance, self.default_voice, self.api_url, self.cache_dir)
                     self.log.debug(f"Saved to {result}")
+        self.telem("load_personality", {'name': personality_name})
 
     def setup(self):
         self.latch_transitions = {}
@@ -249,7 +233,7 @@ class AudibleAlerts(Device):
                 speak(req_text, self.default_voice, self.api_url, self.cache_dir)
                 self.log.debug("Speech complete")
                 self.last_utterance_ts = time.time()  # update timestamp to prevent random utterances
-        if time.time() - self.last_utterance_ts > 15 * 60:
+        if time.time() - self.last_utterance_ts > self.config.random_utterance_interval_sec:
             next_utterance = choice(self.personality.random_utterances)
             while next_utterance == self.last_utterance_chosen:
                 next_utterance = choice(self.personality.random_utterances)
