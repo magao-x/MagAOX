@@ -818,6 +818,8 @@ void streamWriter::fgThreadExec()
    timespec missing_ts;
 
    IMAGE image;
+   ino_t inode =0; // The inode of the image stream file
+
    bool opened = false;
    
    while(m_shutdown == 0)
@@ -860,6 +862,20 @@ void streamWriter::fgThreadExec()
             else
             {
                opened = true;
+
+               char SM_fname[200];
+               ImageStreamIO_filename(SM_fname, sizeof(SM_fname), m_shmimName.c_str());
+
+               struct stat buffer;
+               int rv = stat(SM_fname, &buffer);
+
+               if(rv != 0)
+               {
+                  log<software_critical>({__FILE__,__LINE__, errno, "Could not get inode for " + m_shmimName + ". Source process will need to be restarted."});
+                  ImageStreamIO_closeIm(&image);
+                  return;
+               }
+               inode = buffer.st_ino;
             }
          }
          else
@@ -1106,6 +1122,30 @@ void streamWriter::fgThreadExec()
             {
                log<software_error>({__FILE__, __LINE__,errno, "sem_timedwait"});
                break;
+            }
+
+            //Check if the file has disappeared.
+            int SM_fd;
+            char SM_fname[200];
+            ImageStreamIO_filename(SM_fname, sizeof(SM_fname), m_shmimName.c_str());
+            SM_fd = open(SM_fname, O_RDWR);
+            if(SM_fd == -1)
+            {
+                m_restart = true;
+            }
+            close(SM_fd);
+
+            //Check if the inode changed
+            struct stat buffer;
+            int rv = stat(SM_fname, &buffer);
+            if(rv != 0)
+            {
+                m_restart = true;
+            }
+
+            if(buffer.st_ino != inode)
+            {
+                m_restart = true;
             }
          }
       }
