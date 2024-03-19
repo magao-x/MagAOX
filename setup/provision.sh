@@ -209,10 +209,6 @@ else
     bash -l "$DIR/steps/install_magao-x_calib.sh"
 fi
 
-if [[ $MAGAOX_ROLE == AOC || $MAGAOX_ROLE == TOC || $MAGAOX_ROLE == vm ]]; then
-    echo "export RTIMV_CONFIG_PATH=/opt/MagAOX/config" | sudo tee /etc/profile.d/rtimv_config_path.sh
-fi
-
 if [[ $MAGAOX_ROLE == ICC || $MAGAOX_ROLE == RTC || $MAGAOX_ROLE == AOC ]]; then
     echo "export CGROUPS1_CPUSET_MOUNTPOINT=/opt/MagAOX/cpuset" | sudo tee /etc/profile.d/cgroups1_cpuset_mountpoint.sh
 fi
@@ -277,6 +273,7 @@ fi
 if [[ $MAGAOX_ROLE == AOC || $MAGAOX_ROLE == TOC || $MAGAOX_ROLE == vm || $MAGAOX_ROLE == workstation || $MAGAOX_ROLE == ci ]]; then
     # realtime image viewer
     bash -l "$DIR/steps/install_rtimv.sh" || exit_error "Could not install rtimv"
+    echo "export RTIMV_CONFIG_PATH=/opt/MagAOX/config" | sudo tee /etc/profile.d/rtimv_config_path.sh
 fi
 
 if [[ $MAGAOX_ROLE == AOC || $MAGAOX_ROLE == TOC || $MAGAOX_ROLE == vm ||  $MAGAOX_ROLE == workstation ]]; then
