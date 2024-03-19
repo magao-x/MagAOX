@@ -51,6 +51,7 @@ apt-get install -y \
     linux-headers-generic \
     liblapack-dev \
     liblapacke-dev \
+    podman \
 ;
 
 if [[ $MAGAOX_ROLE == vm ]]; then
