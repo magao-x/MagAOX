@@ -266,21 +266,21 @@ int ttmModulator::appStartup()
    // set up the  INDI properties
    REG_INDI_NEWPROP(m_indiP_modState, "modState", pcf::IndiProperty::Number);
    m_indiP_modState.add (pcf::IndiElement("current"));
-   m_indiP_modState.add (pcf::IndiElement("requested"));
+   m_indiP_modState.add (pcf::IndiElement("target"));
    m_indiP_modState["current"].set(m_modState);
-   m_indiP_modState["requested"].set(m_modStateRequested);
+   m_indiP_modState["target"].set(m_modStateRequested);
 
    REG_INDI_NEWPROP(m_indiP_modFrequency, "modFrequency", pcf::IndiProperty::Number);
    m_indiP_modFrequency.add (pcf::IndiElement("current"));
-   m_indiP_modFrequency.add (pcf::IndiElement("requested"));
+   m_indiP_modFrequency.add (pcf::IndiElement("target"));
    m_indiP_modFrequency["current"].set(m_modFreq);
-   m_indiP_modFrequency["requested"].set(m_modFreqRequested);
+   m_indiP_modFrequency["target"].set(m_modFreqRequested);
 
    REG_INDI_NEWPROP(m_indiP_modRadius, "modRadius", pcf::IndiProperty::Number);
    m_indiP_modRadius.add (pcf::IndiElement("current"));
-   m_indiP_modRadius.add (pcf::IndiElement("requested"));
+   m_indiP_modRadius.add (pcf::IndiElement("target"));
    m_indiP_modRadius["current"].set(m_modRad);
-   m_indiP_modRadius["requested"].set(m_modRadRequested);
+   m_indiP_modRadius["target"].set(m_modRadRequested);
   
    REG_INDI_NEWPROP(m_indiP_offset12, "offset12", pcf::IndiProperty::Number);
    m_indiP_offset12.add (pcf::IndiElement("dC1"));
@@ -341,11 +341,11 @@ int ttmModulator::appLogic()
    { //mutex scope
       std::lock_guard<std::mutex> lock(m_indiMutex);
       updateIfChanged(m_indiP_modState, "current", m_modState);
-      updateIfChanged(m_indiP_modState, "requested", m_modStateRequested);
+      updateIfChanged(m_indiP_modState, "target", m_modStateRequested);
       updateIfChanged(m_indiP_modRadius, "current", m_modRad);
-      updateIfChanged(m_indiP_modRadius, "requested", m_modRadRequested);
+      updateIfChanged(m_indiP_modRadius, "target", m_modRadRequested);
       updateIfChanged(m_indiP_modFrequency, "current", m_modFreq);
-      updateIfChanged(m_indiP_modFrequency, "requested", m_modFreqRequested);
+      updateIfChanged(m_indiP_modFrequency, "target", m_modFreqRequested);
    }
    //This is set by an INDI newProperty
    if(m_modStateRequested > 0)
@@ -548,12 +548,12 @@ int ttmModulator::restTTM()
 {
    //Steps:
    //1) Set freqs to 0
-   if( sendNewProperty(m_indiP_C1freq, "value", 0.0) < 0 ) return log<software_error,-1>({__FILE__,__LINE__});
-   if( sendNewProperty(m_indiP_C2freq, "value", 0.0) < 0 ) return log<software_error,-1>({__FILE__,__LINE__});
+   if( sendNewProperty(m_indiP_C1freq, "target", 0.0) < 0 ) return log<software_error,-1>({__FILE__,__LINE__});
+   if( sendNewProperty(m_indiP_C2freq, "target", 0.0) < 0 ) return log<software_error,-1>({__FILE__,__LINE__});
 
    //2) Set amps to 0 (really 0.002)
-   if( sendNewProperty(m_indiP_C1volts, "value", 0.0) < 0 ) return log<software_error,-1>({__FILE__,__LINE__});
-   if( sendNewProperty(m_indiP_C2volts, "value", 0.0) < 0 ) return log<software_error,-1>({__FILE__,__LINE__});
+   if( sendNewProperty(m_indiP_C1volts, "target", 0.0) < 0 ) return log<software_error,-1>({__FILE__,__LINE__});
+   if( sendNewProperty(m_indiP_C2volts, "target", 0.0) < 0 ) return log<software_error,-1>({__FILE__,__LINE__});
 
    //3) Set phase to 0
    if( sendNewProperty(m_indiP_C1phse, "value", 0.0) < 0 ) return log<software_error,-1>({__FILE__,__LINE__});
@@ -598,14 +598,14 @@ int ttmModulator::setTTM()
 
       //Steps:
       //1) Set freqs to 0
-      if( sendNewProperty(m_indiP_C1freq, "value", 0.0) < 0 ) return log<software_error,-1>({__FILE__,__LINE__});
+      if( sendNewProperty(m_indiP_C1freq, "target", 0.0) < 0 ) return log<software_error,-1>({__FILE__,__LINE__});
 
-      if( sendNewProperty(m_indiP_C2freq, "value", 0.0) < 0 ) return log<software_error,-1>({__FILE__,__LINE__});
+      if( sendNewProperty(m_indiP_C2freq, "target", 0.0) < 0 ) return log<software_error,-1>({__FILE__,__LINE__});
 
       //2) Set amps to 0 (really 0.002)
-      if( sendNewProperty(m_indiP_C1volts, "value", 0.0) < 0 ) return log<software_error,-1>({__FILE__,__LINE__});
+      if( sendNewProperty(m_indiP_C1volts, "target", 0.0) < 0 ) return log<software_error,-1>({__FILE__,__LINE__});
 
-      if( sendNewProperty(m_indiP_C2volts, "value", 0.0) < 0 ) return log<software_error,-1>({__FILE__,__LINE__});
+      if( sendNewProperty(m_indiP_C2volts, "target", 0.0) < 0 ) return log<software_error,-1>({__FILE__,__LINE__});
 
       //3) Set phase to 0
       if( sendNewProperty(m_indiP_C1phse, "value", 0.0) < 0 ) return log<software_error,-1>({__FILE__,__LINE__});
@@ -725,12 +725,12 @@ int ttmModulator::setTTM()
    return 0;
 }
 
-double maxRadAtFrequency( const std::vector<double> freqs,
+/*double maxRadAtFrequency( const std::vector<double> freqs,
                           const std::vector<double> amps,
                           double modrad
                         )
 {
-}
+}*/
 
 inline
 int ttmModulator::modTTM( double newRad,
@@ -840,8 +840,8 @@ int ttmModulator::modTTM( double newRad,
       if(nextFreq > newFreq) nextFreq = newFreq;
 
       //send to device
-      if( sendNewProperty(m_indiP_C1freq, "value", nextFreq) < 0 ) log<software_error,-1>({__FILE__,__LINE__});
-      if( sendNewProperty(m_indiP_C2freq, "value", nextFreq) < 0 ) log<software_error,-1>({__FILE__,__LINE__});
+      if( sendNewProperty(m_indiP_C1freq, "target", nextFreq) < 0 ) log<software_error,-1>({__FILE__,__LINE__});
+      if( sendNewProperty(m_indiP_C2freq, "target", nextFreq) < 0 ) log<software_error,-1>({__FILE__,__LINE__});
 
       //Now check if values have changed.
       if( waitValue(m_C1freq, nextFreq, 1e-6) < 0 ) return log<software_error,-1>({__FILE__,__LINE__, "fxngen timeout"});
@@ -855,8 +855,8 @@ int ttmModulator::modTTM( double newRad,
       if(nextVolts2 > voltageC2) nextVolts2 = voltageC2;
 
       //send to device
-      if( sendNewProperty(m_indiP_C1volts, "value", nextVolts1) < 0 ) return log<software_error, -1>({__FILE__,__LINE__});
-      if( sendNewProperty(m_indiP_C2volts, "value", nextVolts2) < 0 ) return log<software_error, -1>({__FILE__,__LINE__});
+      if( sendNewProperty(m_indiP_C1volts, "target", nextVolts1) < 0 ) return log<software_error, -1>({__FILE__,__LINE__});
+      if( sendNewProperty(m_indiP_C2volts, "target", nextVolts2) < 0 ) return log<software_error, -1>({__FILE__,__LINE__});
 
 
       //Now check if values have changed.
@@ -872,8 +872,8 @@ int ttmModulator::modTTM( double newRad,
       ///\todo make frequency tolerance a configurable
       while( fabs(currFreq - newFreq) > 1e-4)
       {
-         if( sendNewProperty(m_indiP_C1freq, "value", nextFreq) < 0 ) return log<software_error,-1>({__FILE__,__LINE__});
-         if( sendNewProperty(m_indiP_C2freq, "value", nextFreq) < 0 ) return log<software_error,-1>({__FILE__,__LINE__});
+         if( sendNewProperty(m_indiP_C1freq, "target", nextFreq) < 0 ) return log<software_error,-1>({__FILE__,__LINE__});
+         if( sendNewProperty(m_indiP_C2freq, "target", nextFreq) < 0 ) return log<software_error,-1>({__FILE__,__LINE__});
 
          //Now check if values have changed.
          if( waitValue(m_C1freq, nextFreq, 1e-6) < 0 ) return log<software_error,-1>({__FILE__,__LINE__, "fxngen timeout"});
@@ -898,8 +898,8 @@ int ttmModulator::modTTM( double newRad,
       ///\todo make voltage tolerance a configurable.
       while( fabs(currVolts1 - voltageC1) > 1e-4 || fabs(currVolts2 - voltageC2) > 1e-4)
       {
-         if( sendNewProperty(m_indiP_C1volts, "value", nextVolts1) < 0 ) return log<software_error,-1>({__FILE__,__LINE__});
-         if( sendNewProperty(m_indiP_C2volts, "value", nextVolts2) < 0 ) return log<software_error,-1>({__FILE__,__LINE__});
+         if( sendNewProperty(m_indiP_C1volts, "target", nextVolts1) < 0 ) return log<software_error,-1>({__FILE__,__LINE__});
+         if( sendNewProperty(m_indiP_C2volts, "target", nextVolts2) < 0 ) return log<software_error,-1>({__FILE__,__LINE__});
 
          //Now check if values have changed.
          if( waitValue(m_C1volts, nextVolts1, 1e-3) < 0 ) 
@@ -970,7 +970,7 @@ INDI_NEWCALLBACK_DEFN(ttmModulator, m_indiP_modState)(const pcf::IndiProperty &i
     int state = 0;
     try
     {
-        state = ipRecv["requested"].get<int>();
+        state = ipRecv["target"].get<int>();
     }
     catch(...)
     {
@@ -991,7 +991,7 @@ INDI_NEWCALLBACK_DEFN(ttmModulator, m_indiP_modFrequency)(const pcf::IndiPropert
     try
     {
         double nf = -1;
-        nf = ipRecv["requested"].get<double>();
+        nf = ipRecv["target"].get<double>();
         if(nf > 0) m_modFreqRequested = nf;
     }
     catch(...)
@@ -1011,7 +1011,7 @@ INDI_NEWCALLBACK_DEFN(ttmModulator, m_indiP_modRadius)(const pcf::IndiProperty &
     try
     {
         double nr = -1;
-        nr = ipRecv["requested"].get<double>();
+        nr = ipRecv["target"].get<double>();
         if(nr > 0) m_modRadRequested = nr;
     }
     catch(...)
@@ -1114,7 +1114,7 @@ INDI_SETCALLBACK_DEFN(ttmModulator, m_indiP_C1freq)(const pcf::IndiProperty &ipR
     try
     {
        m_indiP_C1freq = ipRecv;
-       double nv = ipRecv["value"].get<double>();
+       double nv = ipRecv["current"].get<double>();
 
        m_C1freq = nv;
 
@@ -1136,7 +1136,7 @@ INDI_SETCALLBACK_DEFN(ttmModulator, m_indiP_C1volts)(const pcf::IndiProperty &ip
     try
     {
        m_indiP_C1volts = ipRecv;
-       double nv = ipRecv["value"].get<double>();
+       double nv = ipRecv["current"].get<double>();
 
        m_C1volts = nv;
        return 0;
@@ -1235,7 +1235,7 @@ INDI_SETCALLBACK_DEFN(ttmModulator, m_indiP_C2freq)(const pcf::IndiProperty &ipR
     try
     {
        m_indiP_C2freq = ipRecv;
-       double nv = ipRecv["value"].get<double>();
+       double nv = ipRecv["current"].get<double>();
 
        m_C2freq = nv;
 
@@ -1257,7 +1257,7 @@ INDI_SETCALLBACK_DEFN(ttmModulator, m_indiP_C2volts)(const pcf::IndiProperty &ip
     try
     {
        m_indiP_C2volts = ipRecv;
-       double nv = ipRecv["value"].get<double>();
+       double nv = ipRecv["current"].get<double>();
 
        m_C2volts = nv;
        return 0;
