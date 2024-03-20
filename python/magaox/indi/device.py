@@ -112,8 +112,7 @@ class XDevice(Device):
     config : BaseConfig
 
     @classmethod
-    @property
-    def default_config_path(cls):
+    def get_default_config_path(cls):
         return cls.prefix_dir + "/" + cls.config_dir + "/" + cls.__name__ + ".conf"
 
     @property
@@ -127,7 +126,7 @@ class XDevice(Device):
     @classmethod
     def load_config(cls, filenames=None, overrides=None):
         config_class : type = typing.get_type_hints(cls)['config']
-        return config_class.from_config(cls.default_config_path, filenames, settings_strs=overrides)
+        return config_class.from_config(cls.get_default_config_path(), filenames, settings_strs=overrides)
 
     def _init_logs(self, verbose, all_verbose):
         global log

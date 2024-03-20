@@ -843,7 +843,6 @@ int hoPredCtrl::processImage( void * curr_src, const dev::shmimT & dummy )
 				controller->create_exploration_buffer(m_exploration_rms, m_exploration_steps);  // Make a new buffer
 				controller->set_new_regularization(m_lambda); 									// set a new regularization
 				controller->reset_data_buffer();												// remove the history
-
 			}
 			
 

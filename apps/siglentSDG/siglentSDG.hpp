@@ -68,6 +68,7 @@ protected:
    uint8_t m_C1outp {0}; ///< The output status channel 1
    double m_C1frequency {0}; ///< The output frequency of channel 1
    double m_C1vpp {0}; ///< The peak-2-peak voltage of channel 1
+   double m_C1vppDefault {0}; ///< default value for vpp of channel 1
    double m_C1ofst {0}; ///< The offset voltage of channel 1
    double m_C1phse {0}; ///< The phase of channel 1 (SINE only)
    double m_C1wdth {0}; ///< The width of channel 1 (PULSE only)
@@ -76,6 +77,7 @@ protected:
    uint8_t m_C2outp {0}; ///<  The output status channel 2
    double m_C2frequency {0}; ///< The output frequency of channel 2
    double m_C2vpp {0}; ///< The peak-2-peak voltage of channel 2
+   double m_C2vppDefault {0}; ///< default value for vpp of channel 2
    double m_C2ofst {0}; ///< The offset voltage of channel 2
    double m_C2phse {0}; ///< The phase of channel 2 (SINE only)
    double m_C2wdth {0}; ///< The width of channel 2 (PULSE only)
@@ -456,6 +458,9 @@ void siglentSDG::setupConfig()
    
    config.add("fxngen.C1syncOn", "", "fxngen.C1syncOn", argType::Required, "fxngen", "C1syncOn", false, "bool", "Whether (true) or not (false) C1 synchro output is enabled at startup.  Default is false");
    config.add("fxngen.waveform", "w", "fxngen.waveform", argType::Required, "fxngen", "waveform", false, "string", "The waveform to populate function.");
+   
+   config.add("fxngen.C1ampDefault", "", "fxngen.C1ampDefault", argType::Required, "fxngen", "C1ampDefault", false, "float", "C1 Default P2V Amplitude of waveform . Default = 0.0");
+   config.add("fxngen.C2ampDefault", "", "fxngen.C2ampDefault", argType::Required, "fxngen", "C2ampDefault", false, "float", "C2 Default P2V Amplitude of waveform . Default = 0.0");
    /// config.add("fxngen.clock", "c", "fxngen.clock", argType::Required, "fxngen", "clock", false, "string", "Internal (INT) or external (EXT) clock.");
 
    dev::telemeter<siglentSDG>::setupConfig(config);
@@ -472,6 +477,9 @@ void siglentSDG::loadConfig()
    
    config(m_C1syncOn, "fxngen.C1syncOn");
    config(m_waveform, "fxngen.waveform"); // todo: check if this is a valid waveform?
+
+   config(m_C1vppDefault, "fxngen.C1ampDefault");
+   config(m_C2vppDefault, "fxngen.C2ampDefault");
    /// config(m_clock, "fxngen.clock");
 
    dev::telemeter<siglentSDG>::loadConfig(config);
@@ -1620,8 +1628,8 @@ int siglentSDG::normalizeSetup()
    changeFreq(1, 0);
    changeFreq(2, 0);
 
-   changeAmp(1, 0);
-   changeAmp(2, 0);
+   changeAmp(1, m_C1vppDefault);
+   changeAmp(2, m_C2vppDefault);
 
    if(m_waveform == "SINE"){
       changePhse(1, 0);

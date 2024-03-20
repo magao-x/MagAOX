@@ -2375,15 +2375,15 @@ void pupilGuide::on_button_camlens_r_pressed()
 
 void pupilGuide::on_button_camlens_scale_pressed()
 {
-   if(((int) (1000*m_camlensStepSize+0.5)) == 1)
-   {
-      m_camlensStepSize = 0.1;
-   }
-   else if(((int) (1000*m_camlensStepSize+0.5)) == 100)
+   if(((int) (1000*m_camlensStepSize+0.5)) == 5)
    {
       m_camlensStepSize = 0.05;
    }
    else if(((int) (1000*m_camlensStepSize+0.5)) == 50)
+   {
+      m_camlensStepSize = 0.025;
+   }
+   else if(((int) (1000*m_camlensStepSize+0.5)) == 25)
    {
       m_camlensStepSize = 0.01;
    }
@@ -2391,10 +2391,10 @@ void pupilGuide::on_button_camlens_scale_pressed()
    {
       m_camlensStepSize = 0.005;
    }
-   else if(((int) (1000*m_camlensStepSize+0.5)) == 5)
+/*   else if(((int) (1000*m_camlensStepSize+0.5)) == 5)
    {
       m_camlensStepSize = 0.001;
-   }
+   }*/
    
    char ss[5];
    snprintf(ss, 5, "%0.2f", m_camlensStepSize*10);

@@ -76,7 +76,7 @@
       <speak>Well, the seeing is shit. Smoke um if you got um</speak>
       <speak>Are you still operating in these conditions? Bless your little cotton socks.</speak>
     </transition>
-    <transition op="between" low="0.3" high="0.45">
+    <transition op="between" low="0.3" high="0.5">
       <speak>I'm chuffed to bits</speak>
     </transition>
     <transition op="between" low="0.0" high="0.3">
