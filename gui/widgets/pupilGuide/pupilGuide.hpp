@@ -175,8 +175,6 @@ public slots:
    
    //----------- modttm
 
-   void on_modFreq_target_returnPressed();
-   void on_modRad_target_returnPressed();
    void on_buttonMod_mod_pressed();
    void on_buttonMod_set_pressed();
    void on_buttonMod_rest_pressed();
@@ -209,13 +207,9 @@ public slots:
 
    void on_button_camera_pressed();
 
-   void on_button_pup_u_pressed();
    void on_button_pup_ul_pressed();
-   void on_button_pup_l_pressed();
    void on_button_pup_dl_pressed();
-   void on_button_pup_d_pressed();
    void on_button_pup_dr_pressed();
-   void on_button_pup_r_pressed();
    void on_button_pup_ur_pressed();
    void on_button_pup_scale_pressed();
    
@@ -260,6 +254,16 @@ pupilGuide::pupilGuide( QWidget * Parent, Qt::WindowFlags f) : xWidget(Parent, f
    connect(timer, SIGNAL(timeout()), this, SLOT(updateGUI()));
    timer->start(250);
       
+   ui.modFreq_current->setup("modwfs", "modFrequency", statusEntry::FLOAT, "", "");
+   ui.modFreq_current->setStretch(0,0,6);//removes spacer and maximizes text field
+   ui.modFreq_current->format("%0.1f");
+   ui.modFreq_current->onDisconnect();
+
+   ui.modRad_current->setup("modwfs", "modRadius", statusEntry::FLOAT, "", "");
+   ui.modRad_current->setStretch(0,0,6);//removes spacer and maximizes text field
+   ui.modRad_current->format("%0.1f");
+   ui.modRad_current->onDisconnect();
+
    ui.modCh1->setup("fxngenmodwfs", "C1ofst", statusEntry::FLOAT, "Ch1", "V");
    ui.modCh1->currEl("value");
    ui.modCh1->targEl("value");
@@ -287,26 +291,11 @@ pupilGuide::pupilGuide( QWidget * Parent, Qt::WindowFlags f) : xWidget(Parent, f
    snprintf(ss, 5, "%0.2f", m_camlensStepSize*10);
    ui.button_camlens_scale->setText(ss);
    
-   //QFont qf = ui.labelModAndCenter->font();
-   //qf.setPixelSize(XW_FONT_SIZE*1.2+0.5);
-   //ui.labelMode
    setXwFont(ui.labelModAndCenter);
    setXwFont(ui.modState);
-   setXwFont(ui.labelFreqCurrent);
-   setXwFont(ui.labelFreqTarget);
-   setXwFont(ui.labelFreq);
-   setXwFont(ui.labelRadius);
-   setXwFont(ui.modFreq_current);
-   setXwFont(ui.modFreq_target);
-   setXwFont(ui.modRad_current);
-   setXwFont(ui.modRad_target);
    setXwFont(ui.buttonMod_rest);
    setXwFont(ui.buttonMod_set);
    setXwFont(ui.buttonMod_mod);
-   //setXwFont(ui.labelCh1);
-   //setXwFont(ui.labelCh2);
-   //setXwFont(ui.modCh1);
-   //setXwFont(ui.modCh2);
    setXwFont(ui.labelMedianFluxes);
    setXwFont(ui.med1);
    setXwFont(ui.med2);
@@ -410,6 +399,8 @@ void pupilGuide::subscribe()
    m_parent->addSubscriberProperty(this, "modwfs", "modState");
    m_parent->addSubscriberProperty(this, "modwfs", "fsm");
 
+   m_parent->addSubscriber(ui.modFreq_current);
+   m_parent->addSubscriber(ui.modRad_current);
    m_parent->addSubscriber(ui.modCh1);
    m_parent->addSubscriber(ui.modCh2);
    
@@ -459,6 +450,8 @@ void pupilGuide::onConnect()
    ui.labelModAndCenter->setEnabled(true);
    ui.labelPupilFitting->setEnabled(true);
 
+   ui.modFreq_current->onConnect();
+   ui.modRad_current->onConnect();
    ui.modCh1->onConnect();
    ui.modCh2->onConnect();
 
@@ -483,6 +476,8 @@ void pupilGuide::onDisconnect()
    m_modFsmState = "";
    m_pupFsmState = "";
 
+   ui.modFreq_current->onDisconnect();
+   ui.modRad_current->onDisconnect();
    ui.modCh1->onDisconnect();
    ui.modCh2->onDisconnect();
 
@@ -544,9 +539,9 @@ void pupilGuide::handleSetProperty( const pcf::IndiProperty & ipRecv)
          {
             m_modFreq = ipRecv["current"].get<double>();
          }
-         if(ipRecv.find("requested"))
+         if(ipRecv.find("target"))
          {
-            m_modFreq_tgt = ipRecv["requested"].get<double>();
+            m_modFreq_tgt = ipRecv["target"].get<double>();
          }
       }
       else if(ipRecv.getName() == "modRadius")
@@ -555,9 +550,9 @@ void pupilGuide::handleSetProperty( const pcf::IndiProperty & ipRecv)
          {
             m_modRad = ipRecv["current"].get<double>();
          }
-         if(ipRecv.find("requested"))
+         if(ipRecv.find("target"))
          {
-            m_modRad_tgt = ipRecv["requested"].get<double>();
+            m_modRad_tgt = ipRecv["target"].get<double>();
          }
       }
       else if(ipRecv.getName() == "modState")
@@ -788,23 +783,6 @@ void pupilGuide::handleSetProperty( const pcf::IndiProperty & ipRecv)
       
       
    }
-   /*else if(dev == "fxngenmodwfs")
-   {
-      if(ipRecv.getName() == "C1ofst")
-      {
-         if(ipRecv.find("value"))
-         {
-            m_modCh1 = ipRecv["value"].get<double>();
-         }
-      }
-      else if(ipRecv.getName() == "C2ofst")
-      {
-         if(ipRecv.find("value"))
-         {
-            m_modCh2 = ipRecv["value"].get<double>();
-         }
-      }
-   }*/
    else if(dev == "ttmpupil")
    {
       if(ipRecv.getName() == "fsm")
@@ -914,20 +892,9 @@ void pupilGuide::modGUISetEnable( bool enableModGUI,
    if(enableModGUI)
    {
       ui.modState->setEnabled(true);
-      ui.labelFreqCurrent->setEnabled(true);
-      ui.labelFreqTarget->setEnabled(true);
-      ui.labelFreq->setEnabled(true);
-      ui.labelRadius->setEnabled(true);
       ui.modFreq_current->setEnabled(true);
       ui.modRad_current->setEnabled(true);
-      //ui.modFreq_target->setEnabled(true);
-      //ui.modRad_target->setEnabled(true);
-      //ui.buttonMod_rest->setEnabled(true);
-      //ui.buttonMod_set->setEnabled(true);
-      //ui.buttonMod_mod->setEnabled(true);
-      //ui.labelCh1->setEnabled(true);
       ui.modCh1->setEnabled(true);
-      //ui.labelCh2->setEnabled(true);
       ui.modCh2->setEnabled(true);
       
       if(enableModArrows)
@@ -974,20 +941,12 @@ void pupilGuide::modGUISetEnable( bool enableModGUI,
    }
    else
    {
-      ui.labelFreqCurrent->setEnabled(false);
-      ui.labelFreqTarget->setEnabled(false);
-      ui.labelFreq->setEnabled(false);
-      ui.labelRadius->setEnabled(false);
       ui.modFreq_current->setEnabled(false);
       ui.modRad_current->setEnabled(false);
-      ui.modFreq_target->setEnabled(false);
-      ui.modRad_target->setEnabled(false);
       ui.buttonMod_rest->setEnabled(false);
       ui.buttonMod_set->setEnabled(false);
       ui.buttonMod_mod->setEnabled(false);
-      //ui.labelCh1->setEnabled(false);
       ui.modCh1->setEnabled(false);
-      //ui.labelCh2->setEnabled(false);
       ui.modCh2->setEnabled(false);
       
       if(m_tipmovewhat == MOVE_TTM) 
@@ -1122,102 +1081,28 @@ void pupilGuide::updateGUI()
    }
    
    modGUISetEnable(enableModGUI, enableModArrows);
-   
+
+   ui.modRad_current->updateGUI();
+   ui.modFreq_current->updateGUI();
    ui.modCh1->updateGUI();
    ui.modCh2->updateGUI();
-   /*snprintf(str,sizeof(str), "%0.2f", m_modCh1);
-   ui.modCh1->setText(str);
-   snprintf(str,sizeof(str), "%0.2f", m_modCh2);
-   ui.modCh2->setText(str);*/
    
    if(m_modState == 3 && enableModGUI)
    {
-      ui.modFreq_current->setText("---");
-      ui.modRad_current->setText("---");
-      
-      if(!ui.modFreq_target->hasFocus())
-      {
-         if(m_modFreq_tgt == 0)
-         {
-            ui.modFreq_target->setText("");
-         }
-         else
-         {
-            snprintf(str, sizeof(str),"%0.3f", m_modFreq_tgt);
-            ui.modFreq_target->setText(str);
-         }
-      }
-      
-      if(!ui.modRad_target->hasFocus())
-      {
-         if(m_modRad_tgt == 0)
-         {
-            ui.modRad_target->setText("");
-         }
-         else
-         {
-            snprintf(str, sizeof(str),"%0.1f", m_modRad_tgt);
-            ui.modRad_target->setText(str);
-         }
-      }
-      
-      ui.modFreq_target->setEnabled(true);
-      ui.modRad_target->setEnabled(true);
       ui.buttonMod_rest->setEnabled(true);
       ui.buttonMod_set->setEnabled(false);
       ui.buttonMod_mod->setEnabled(true);
    }
    else if(m_modState == 4 && enableModGUI)
    {
-      snprintf(str, sizeof(str),"%0.3f", m_modFreq);
-      ui.modFreq_current->setText(str);
-      snprintf(str, sizeof(str),"%0.1f", m_modRad);
-      ui.modRad_current->setText(str);
-      
-      if(!ui.modFreq_target->hasFocus())
-      {
-         if(m_modFreq_tgt == 0)
-         {
-            ui.modFreq_target->setText("");
-         }
-         else
-         {
-            snprintf(str, sizeof(str),"%0.3f", m_modFreq_tgt);
-            ui.modFreq_target->setText(str);
-         }
-      }
-      
-      if(!ui.modRad_target->hasFocus())
-      {
-         if(m_modRad_tgt == 0)
-         {
-            ui.modRad_target->setText("");
-         }
-         else
-         {
-            snprintf(str, sizeof(str),"%0.1f", m_modRad_tgt);
-            ui.modRad_target->setText(str);
-         }
-      }
-      
-      ui.modFreq_target->setEnabled(true);
-      ui.modRad_target->setEnabled(true);
       ui.buttonMod_rest->setEnabled(true);
       ui.buttonMod_set->setEnabled(true);
       ui.buttonMod_mod->setEnabled(true);
    }
    else 
    {
-      ui.modFreq_current->setText("---");
-      ui.modRad_current->setText("---");
-      
-      ui.modFreq_target->setText("");
-      ui.modRad_target->setText("");
-      
       if(enableModGUI)
       {
-         ui.modFreq_target->setEnabled(false);
-         ui.modRad_target->setEnabled(false);
          ui.buttonMod_rest->setEnabled(true);
          ui.buttonMod_set->setEnabled(true);
          ui.buttonMod_mod->setEnabled(false);
@@ -1453,25 +1338,17 @@ void pupilGuide::updateGUI()
       if(enablePupFSMArrows)
       {
          ui.button_pup_ul->setEnabled(true); 
-         ui.button_pup_u->setEnabled(true);
          ui.button_pup_ur->setEnabled(true); 
-         ui.button_pup_l->setEnabled(true); 
          ui.button_pup_scale->setEnabled(true);
-         ui.button_pup_r->setEnabled(true);
          ui.button_pup_dl->setEnabled(true);
-         ui.button_pup_d->setEnabled(true);
          ui.button_pup_dr->setEnabled(true);
       }
       else
       {
          ui.button_pup_ul->setEnabled(false); 
-         ui.button_pup_u->setEnabled(false);
          ui.button_pup_ur->setEnabled(false); 
-         ui.button_pup_l->setEnabled(false); 
          ui.button_pup_scale->setEnabled(false);
-         ui.button_pup_r->setEnabled(false);
          ui.button_pup_dl->setEnabled(false);
-         ui.button_pup_d->setEnabled(false);
          ui.button_pup_dr->setEnabled(false);
       }
    }
@@ -1488,13 +1365,9 @@ void pupilGuide::updateGUI()
       ui.pupCh2->setText("");
       
       ui.button_pup_ul->setEnabled(false); 
-      ui.button_pup_u->setEnabled(false);
       ui.button_pup_ur->setEnabled(false); 
-      ui.button_pup_l->setEnabled(false); 
       ui.button_pup_scale->setEnabled(false);
-      ui.button_pup_r->setEnabled(false);
       ui.button_pup_dl->setEnabled(false);
-      ui.button_pup_d->setEnabled(false);
       ui.button_pup_dr->setEnabled(false);
    }
    
@@ -1562,31 +1435,6 @@ void pupilGuide::updateGUI()
 } //updateGUI()
 
 // ------------- modttm
-
-void pupilGuide::on_modFreq_target_returnPressed()
-{
-   pcf::IndiProperty ip(pcf::IndiProperty::Number);
-   
-   ip.setDevice("modwfs");
-   ip.setName("modFrequency");
-   ip.add(pcf::IndiElement("requested"));
-   ip["requested"] = ui.modFreq_target->text().toDouble();
-   
-   sendNewProperty(ip);
-   
-}
-   
-void pupilGuide::on_modRad_target_returnPressed()
-{
-   pcf::IndiProperty ip(pcf::IndiProperty::Number);
-   
-   ip.setDevice("modwfs");
-   ip.setName("modRadius");
-   ip.add(pcf::IndiElement("requested"));
-   ip["requested"] = ui.modRad_target->text().toDouble();
-   
-   sendNewProperty(ip);
-}
    
 void pupilGuide::on_buttonMod_mod_pressed()
 {
@@ -1594,8 +1442,8 @@ void pupilGuide::on_buttonMod_mod_pressed()
    
    ip.setDevice("modwfs");
    ip.setName("modState");
-   ip.add(pcf::IndiElement("requested"));
-   ip["requested"] = 4;
+   ip.add(pcf::IndiElement("target"));
+   ip["target"] = 4;
    
    sendNewProperty(ip);
 }
@@ -1606,8 +1454,8 @@ void pupilGuide::on_buttonMod_set_pressed()
    
    ip.setDevice("modwfs");
    ip.setName("modState");
-   ip.add(pcf::IndiElement("requested"));
-   ip["requested"] = 3;
+   ip.add(pcf::IndiElement("target"));
+   ip["target"] = 3;
    sendNewProperty(ip);
 }
    
@@ -1617,8 +1465,8 @@ void pupilGuide::on_buttonMod_rest_pressed()
    
    ip.setDevice("modwfs");
    ip.setName("modState");
-   ip.add(pcf::IndiElement("requested"));
-   ip["requested"] = 1;
+   ip.add(pcf::IndiElement("target"));
+   ip["target"] = 1;
    
    sendNewProperty(ip);
 }
@@ -1631,8 +1479,8 @@ void pupilGuide::on_button_scalemodcamwfs_pressed()
    
    ip.setDevice("modwfs");
    ip.setName("modFrequency");
-   ip.add(pcf::IndiElement("requested"));
-   ip["requested"] = scaletarg;
+   ip.add(pcf::IndiElement("target"));
+   ip["target"] = scaletarg;
    
    sendNewProperty(ip);
 }
@@ -2149,33 +1997,6 @@ void pupilGuide::on_button_camera_pressed()
    }
 }
 
-void pupilGuide::on_button_pup_u_pressed()
-{
-   pcf::IndiProperty ip(pcf::IndiProperty::Number);
-   
-   ip.setDevice("ttmpupil");
-   
-
-   if(m_pupCam == FLOWFS)
-   {
-      ip.setName("pos_2");
-      ip.add(pcf::IndiElement("target"));
-      ip["target"] = m_pupCh2 + m_pupStepSize;
-   }
-   else if(m_pupCam == LLOWFS)
-   {
-
-   }
-   else if(m_pupCam == CAMSCIS)
-   {
-      ip.setName("pos_1");
-      ip.add(pcf::IndiElement("target"));
-      ip["target"] = m_pupCh1 + m_pupStepSize;
-   }
-
-   sendNewProperty(ip);
-}
-
 void pupilGuide::on_button_pup_ul_pressed()
 {
   pcf::IndiProperty ip(pcf::IndiProperty::Number);
@@ -2220,32 +2041,6 @@ void pupilGuide::on_button_pup_ul_pressed()
    }
 
    sendNewProperty(ip2);
-}
-
-void pupilGuide::on_button_pup_l_pressed()
-{
-   pcf::IndiProperty ip(pcf::IndiProperty::Number);
-   
-   ip.setDevice("ttmpupil");
-   
-   if(m_pupCam == FLOWFS)
-   {
-      ip.setName("pos_1");
-      ip.add(pcf::IndiElement("target"));
-      ip["target"] = m_pupCh1 + m_pupStepSize;
-   }
-   else if(m_pupCam == LLOWFS)
-   {
-
-   }
-   else if(m_pupCam == CAMSCIS)
-   {
-      ip.setName("pos_2");
-      ip.add(pcf::IndiElement("target"));
-      ip["target"] = m_pupCh2 + m_pupStepSize;
-   }
-
-   sendNewProperty(ip);
 }
 
 void pupilGuide::on_button_pup_dl_pressed()
@@ -2293,33 +2088,6 @@ void pupilGuide::on_button_pup_dl_pressed()
    sendNewProperty(ip2);
 }
 
-void pupilGuide::on_button_pup_d_pressed()
-{
-   pcf::IndiProperty ip(pcf::IndiProperty::Number);
-   
-   ip.setDevice("ttmpupil");
-   
-   
-   if(m_pupCam == FLOWFS)
-   {
-      ip.setName("pos_2");
-      ip.add(pcf::IndiElement("target"));
-      ip["target"] = m_pupCh2 - m_pupStepSize;
-   }
-   else if(m_pupCam == LLOWFS)
-   {
-
-   }
-   else if(m_pupCam == CAMSCIS)
-   {
-      ip.setName("pos_1");
-      ip.add(pcf::IndiElement("target"));
-      ip["target"] = m_pupCh1 - m_pupStepSize;
-   }
-
-   sendNewProperty(ip);
-}
-
 void pupilGuide::on_button_pup_dr_pressed()
 {
    pcf::IndiProperty ip(pcf::IndiProperty::Number);
@@ -2363,32 +2131,6 @@ void pupilGuide::on_button_pup_dr_pressed()
    }
 
    sendNewProperty(ip2);
-}
-
-void pupilGuide::on_button_pup_r_pressed()
-{
-   pcf::IndiProperty ip(pcf::IndiProperty::Number);
-   
-   ip.setDevice("ttmpupil");
-   
-   if(m_pupCam == FLOWFS)
-   {
-      ip.setName("pos_1");
-      ip.add(pcf::IndiElement("target"));
-      ip["target"] = m_pupCh1 - m_pupStepSize;
-   }
-   else if(m_pupCam == LLOWFS)
-   {
-
-   }
-   else if(m_pupCam == CAMSCIS)
-   {
-      ip.setName("pos_2");
-      ip.add(pcf::IndiElement("target"));
-      ip["target"] = m_pupCh2 - m_pupStepSize;
-   }
-
-   sendNewProperty(ip);
 }
 
 void pupilGuide::on_button_pup_ur_pressed()
