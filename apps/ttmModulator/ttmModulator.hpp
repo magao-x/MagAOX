@@ -359,8 +359,8 @@ int ttmModulator::appLogic()
       double newFreq = m_modFreqRequested;
 
       m_modStateRequested = 0;
-      m_modFreqRequested = 0;
-      m_modRadRequested = 0;
+      //m_modFreqRequested = 0;
+      //m_modRadRequested = 0;
 
       lock.unlock();
 
@@ -612,8 +612,6 @@ int ttmModulator::setTTM()
 
       if( sendNewProperty(m_indiP_C2phse, "value", 0.0) < 0 ) return log<software_error,-1>({__FILE__,__LINE__});
 
-      /// \todo should we set the offset here just to be sure?
-
       //Now check if values have changed.
       if( waitValue(m_C1freq, 0.0) < 0) return log<software_error,-1>({__FILE__,__LINE__, "fxngen timeout"});
       if( waitValue(m_C2freq, 0.0) < 0) return log<software_error,-1>({__FILE__,__LINE__, "fxngen timeout"});
@@ -621,6 +619,11 @@ int ttmModulator::setTTM()
       if( waitValue(m_C2volts, 0.002,1e-6) < 0) return log<software_error,-1>({__FILE__,__LINE__, "fxngen timeout"});
       if( waitValue(m_C1phse, 0.0) < 0) return log<software_error,-1>({__FILE__,__LINE__, "fxngen timeout"});
       if( waitValue(m_C2phse, 0.0) < 0) return log<software_error,-1>({__FILE__,__LINE__, "fxngen timeout"});
+
+      m_modFreq = 0;
+      m_modFreqRequested = 0;
+      m_modRad = 0;
+      m_modRadRequested = 0;
 
       log<text_log>("PyWFS TTM is set.", logPrio::LOG_NOTICE);
       return 0;
@@ -967,6 +970,17 @@ INDI_NEWCALLBACK_DEFN(ttmModulator, m_indiP_modState)(const pcf::IndiProperty &i
 {
     INDI_VALIDATE_CALLBACK_PROPS(m_indiP_modState, ipRecv);
     
+    int target;
+    
+    if( indiTargetUpdate( m_indiP_modState, target, ipRecv, false) < 0)
+    {
+       return log<software_error, -1>({__FILE__,__LINE__});
+    }
+
+    m_modStateRequested = target;
+
+    /*m_references(0,0) = target;
+
     int state = 0;
     try
     {
@@ -978,7 +992,7 @@ INDI_NEWCALLBACK_DEFN(ttmModulator, m_indiP_modState)(const pcf::IndiProperty &i
         return -1;
     }
 
-    m_modStateRequested = state;
+    m_modStateRequested = state;*/
 
     return 0;
 }
@@ -987,6 +1001,17 @@ INDI_NEWCALLBACK_DEFN(ttmModulator, m_indiP_modFrequency)(const pcf::IndiPropert
 {
     INDI_VALIDATE_CALLBACK_PROPS(m_indiP_modFrequency, ipRecv);
 
+    double target;
+    if( indiTargetUpdate( m_indiP_modFrequency, target, ipRecv, false) < 0)
+    {
+       return log<software_error, -1>({__FILE__,__LINE__});
+    }
+    
+    if(target > 0)
+    {
+        m_modFreqRequested = target;
+    }
+    /*
     ///\todo use find to test
     try
     {
@@ -998,7 +1023,8 @@ INDI_NEWCALLBACK_DEFN(ttmModulator, m_indiP_modFrequency)(const pcf::IndiPropert
     {
         //do nothing, just means no requested in command.
     }
-    
+    */
+
     return 0;
    
 }
@@ -1007,6 +1033,18 @@ INDI_NEWCALLBACK_DEFN(ttmModulator, m_indiP_modRadius)(const pcf::IndiProperty &
 {
     INDI_VALIDATE_CALLBACK_PROPS(m_indiP_modRadius, ipRecv);
 
+    double target;
+    if( indiTargetUpdate( m_indiP_modRadius, target, ipRecv, false) < 0)
+    {
+       return log<software_error, -1>({__FILE__,__LINE__});
+    }
+    
+    if(target > 0)
+    {
+        m_modRadRequested = target;
+    }
+
+/*
     ///\todo use find to test
     try
     {
@@ -1018,14 +1056,14 @@ INDI_NEWCALLBACK_DEFN(ttmModulator, m_indiP_modRadius)(const pcf::IndiProperty &
     {
         //do nothing, just means no requested in command.
     }
-      
+      */
+
     return 0;
   
 }
 
 INDI_NEWCALLBACK_DEFN(ttmModulator, m_indiP_offset12)(const pcf::IndiProperty &ipRecv)
 {
-
     INDI_VALIDATE_CALLBACK_PROPS(m_indiP_offset12, ipRecv);
     
     double dx = 0;
