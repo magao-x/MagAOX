@@ -128,17 +128,30 @@ protected:
 
    // -- dmtweeter
    std::string m_dmtweeterState;
-   bool m_dmtweeterTestSet;
+   bool m_dmtweeterTestSet {false};
 
-   // -- ttmpupl
+   // -- dmncpc
+   std::string m_dmncpcState;
+   bool m_dmncpcTestSet {false};
+
+   // -- ttmpupil
    std::string m_pupFsmState;
    double m_pupCh1 {0};
    double m_pupCh2 {0};
    
    float m_pupStepSize {0.1};
 
-   int m_pupCam {FLOWFS};
+   int m_pupCam {CAMSCIS};
 
+   // -- ttmperi
+   std::string m_ttmPeriFsmState;
+   double m_ttmPeriCh1 {0};
+   double m_ttmPeriCh2 {0};
+
+   float m_ttmPeriStepSize {0.1};
+
+
+   // -- Camera Lens
    std::string m_camlensxFsmState;
    std::string m_camlensyFsmState;
    float m_camlensx_pos {0};
@@ -201,6 +214,9 @@ public slots:
    //----------- dmtweeter
    void on_buttonTweeterTest_set_pressed();
 
+   //----------- dmncpc
+   void on_buttonNCPCTest_set_pressed();
+
    //----------- ttmpupil
    void on_buttonPup_rest_pressed();
    void on_buttonPup_set_pressed();
@@ -213,7 +229,15 @@ public slots:
    void on_button_pup_ur_pressed();
    void on_button_pup_scale_pressed();
    
-   
+   //---------- TTM Peri
+   void on_button_ttmPeri_rest_pressed();
+   void on_button_ttmPeri_set_pressed();
+
+   void on_button_ttmPeri_l_pressed();
+   void on_button_ttmPeri_r_pressed();
+   void on_button_ttmPeri_u_pressed();
+   void on_button_ttmPeri_d_pressed();
+   void on_button_ttmPeri_scale_pressed();
    
    void toggleExpFit(bool visible);
    void on_buttonExpFit_pressed();
@@ -240,9 +264,7 @@ pupilGuide::pupilGuide( QWidget * Parent, Qt::WindowFlags f) : xWidget(Parent, f
    ui.setupUi(this);
 
    ui.modState->setProperty("isStatus", true);
-   ui.pupState->setProperty("isStatus", true);
 
-   ui.tweeterState->device("dmtweeter");
 
    ui.camlens_fsm->setProperty("isStatus", true);
    ui.button_camlens_scale->setProperty("isScaleButton", true);
@@ -293,6 +315,8 @@ pupilGuide::pupilGuide( QWidget * Parent, Qt::WindowFlags f) : xWidget(Parent, f
    
    setXwFont(ui.labelModAndCenter);
    setXwFont(ui.modState);
+   setXwFont(ui.labelFreq);
+   setXwFont(ui.labelRad);
    setXwFont(ui.buttonMod_rest);
    setXwFont(ui.buttonMod_set);
    setXwFont(ui.buttonMod_mod);
@@ -308,18 +332,45 @@ pupilGuide::pupilGuide( QWidget * Parent, Qt::WindowFlags f) : xWidget(Parent, f
 
    //tweeter controls
    setXwFont(ui.labelTweeter);
-   setXwFont(ui.tweeterState);
    setXwFont(ui.buttonTweeterTest_set);
 
-   //ttmpupil controls
+   //ncpc controls
+   setXwFont(ui.labelNCPC);
+   setXwFont(ui.buttonNCPCTest_set);
+
+   //-----------ttmpupil controls ------------
    setXwFont(ui.labelPupilSteering);
-   setXwFont(ui.pupState);
+   //setXwFont(ui.pupState);
    setXwFont(ui.buttonPup_rest);
    setXwFont(ui.buttonPup_set);
-   setXwFont(ui.labelPupCh1);
-   setXwFont(ui.labelPupCh2);
-   setXwFont(ui.pupCh1);
-   setXwFont(ui.pupCh2);
+   ui.pupState->device("ttmpupil");
+   ui.pupCh1->setup("ttmpupil", "pos_1", statusEntry::FLOAT, "Ch 1", "V");
+   ui.pupCh1->setStretch(1,2,4);
+   ui.pupCh1->highlightChanges(false);
+   ui.pupCh1->onDisconnect();
+   ui.pupCh2->setup("ttmpupil", "pos_2", statusEntry::FLOAT, "Ch 2", "V");
+   ui.pupCh2->setStretch(1,2,4);
+   ui.pupCh2->highlightChanges(false);
+   ui.pupCh2->onDisconnect();
+
+   //-----------ttmperi controls ------------
+   setXwFont(ui.labelTTMPeri);
+   //setXwFont(ui.ttmPeriState);
+   setXwFont(ui.buttonPup_rest);
+   setXwFont(ui.buttonPup_set);
+   ui.ttmPeriState->device("ttmperi");
+   ui.ttmPeriCh1->setup("ttmperi", "axis1_voltage", statusEntry::FLOAT, "Ch 1", "V");
+   ui.ttmPeriCh1->setStretch(1,2,4);
+   ui.ttmPeriCh1->highlightChanges(false);
+   ui.ttmPeriCh1->onDisconnect();
+   ui.ttmPeriCh2->setup("ttmperi", "axis2_voltage", statusEntry::FLOAT, "Ch 2", "V");
+   ui.ttmPeriCh2->highlightChanges(false);
+   ui.ttmPeriCh2->setStretch(1,2,4);
+   ui.ttmPeriCh2->onDisconnect();
+
+
+
+
 
    setXwFont(ui.labelPupilAlignment);
    m_camwfsAlignLoopWaitTimer = new QTimer;
@@ -419,14 +470,28 @@ void pupilGuide::subscribe()
    m_parent->addSubscriberProperty(this, "camwfs-avg", "nAverage");
 
    
+   m_parent->addSubscriber(ui.pupState);
+   m_parent->addSubscriber(ui.pupCh1);
+   m_parent->addSubscriber(ui.pupCh2);
    m_parent->addSubscriberProperty(this, "ttmpupil", "fsm");
    m_parent->addSubscriberProperty(this, "ttmpupil", "pos_1");
    m_parent->addSubscriberProperty(this, "ttmpupil", "pos_2");
 
-   m_parent->addSubscriber(ui.tweeterState);
+   m_parent->addSubscriber(ui.ttmPeriState);
+   m_parent->addSubscriber(ui.ttmPeriCh1);
+   m_parent->addSubscriber(ui.ttmPeriCh2);
+   m_parent->addSubscriberProperty(this, "ttmperi", "fsm");
+   m_parent->addSubscriberProperty(this, "ttmperi", "axis_1");
+   m_parent->addSubscriberProperty(this, "ttmperi", "axix_2");
+
    m_parent->addSubscriberProperty(this, "dmtweeter", "fsm");
    m_parent->addSubscriberProperty(this, "dmtweeter", "test_set");
    m_parent->addSubscriberProperty(this, "dmtweeter", "test");
+
+   m_parent->addSubscriberProperty(this, "dmncpc", "fsm");
+   m_parent->addSubscriberProperty(this, "dmncpc", "test_set");
+   m_parent->addSubscriberProperty(this, "dmncpc", "test");
+
 
    m_parent->addSubscriberProperty(this, "camwfs-align", "fsm");
    m_parent->addSubscriberProperty(this, "camwfs-align", "loop_state");
@@ -455,7 +520,14 @@ void pupilGuide::onConnect()
    ui.modCh1->onConnect();
    ui.modCh2->onConnect();
 
-   ui.tweeterState->onConnect();
+   ui.pupState->onConnect();
+   ui.pupCh1->onConnect();
+   ui.pupCh2->onConnect();
+
+
+   ui.ttmPeriState->onConnect();
+   ui.ttmPeriCh1->onConnect();
+   ui.ttmPeriCh2->onConnect();
 
    ui.labelPupilSteering->setEnabled(true);
    
@@ -481,7 +553,14 @@ void pupilGuide::onDisconnect()
    ui.modCh1->onDisconnect();
    ui.modCh2->onDisconnect();
 
-   ui.tweeterState->onDisconnect();
+   ui.pupState->onDisconnect();
+   ui.pupCh1->onDisconnect();
+   ui.pupCh2->onDisconnect();
+
+   ui.ttmPeriState->onDisconnect();
+   ui.ttmPeriCh1->onDisconnect();
+   ui.ttmPeriCh2->onDisconnect();
+   
 
    m_camlensxFsmState = "";
    m_camlensyFsmState = "";
@@ -519,7 +598,9 @@ void pupilGuide::handleDefProperty( const pcf::IndiProperty & ipRecv)
        dev == "camwfs-align" ||
        dev == "stagecamlensx" || 
        dev == "stagecamlensy" ||
-       dev == "dmtweeter") 
+       dev == "dmtweeter" ||
+       dev == "dmncpc" ||
+       dev == "ttmperi" ) 
    {
       return handleSetProperty(ipRecv);
    }
@@ -807,6 +888,30 @@ void pupilGuide::handleSetProperty( const pcf::IndiProperty & ipRecv)
          }
       }
    }
+   else if(dev == "ttmperi")
+   {
+      if(ipRecv.getName() == "fsm")
+      {
+         if(ipRecv.find("state"))
+         {
+            m_ttmPeriFsmState = ipRecv["state"].get<std::string>();
+         }
+      }
+      else if(ipRecv.getName() == "axis1_voltage")
+      {
+         if(ipRecv.find("current"))
+         {
+            m_ttmPeriCh1 = ipRecv["current"].get<double>();
+         }
+      }
+      else if(ipRecv.getName() == "axis2_voltage")
+      {
+         if(ipRecv.find("current"))
+         {
+            m_ttmPeriCh2 = ipRecv["current"].get<double>();
+         }
+      }
+   }
    else if(dev == "camwfs-align")
    {
       if(ipRecv.getName() == "loop_state")
@@ -877,6 +982,24 @@ void pupilGuide::handleSetProperty( const pcf::IndiProperty & ipRecv)
          {
             if(ipRecv["toggle"] == pcf::IndiElement::On) m_dmtweeterTestSet = true;
             else m_dmtweeterTestSet=false;
+         }
+      }
+   }
+   else if(dev == "dmncpc")
+   {
+      if(ipRecv.getName() == "fsm")
+      {
+         if(ipRecv.find("state"))
+         {
+            m_dmncpcState = ipRecv["state"].get<std::string>();
+         }
+      }
+      else if(ipRecv.getName() == "test_set")
+      {
+         if(ipRecv.find("toggle"))
+         {
+            if(ipRecv["toggle"] == pcf::IndiElement::On) m_dmncpcTestSet = true;
+            else m_dmncpcTestSet=false;
          }
       }
    }
@@ -1258,8 +1381,6 @@ void pupilGuide::updateGUI()
    
    if(m_dmtweeterState == "READY" || m_dmtweeterState == "OPERATING")
    {
-      ui.tweeterState->setEnabled(true);
-
       ui.buttonTweeterTest_set->setEnabled(true);
       if(m_dmtweeterTestSet)
       {
@@ -1272,11 +1393,28 @@ void pupilGuide::updateGUI()
    }
    else
    {
-      ui.tweeterState->setEnabled(false);
-
       ui.buttonTweeterTest_set->setEnabled(false);
       ui.buttonTweeterTest_set->setText("set test");
+   }
 
+   // ------ dmncpc
+   
+   if(m_dmncpcState == "READY" || m_dmncpcState == "OPERATING")
+   {
+      ui.buttonNCPCTest_set->setEnabled(true);
+      if(m_dmncpcTestSet)
+      {
+         ui.buttonNCPCTest_set->setText("zero test");
+      }
+      else
+      {
+         ui.buttonNCPCTest_set->setText("set test");
+      }
+   }
+   else
+   {
+      ui.buttonNCPCTest_set->setEnabled(false);
+      ui.buttonNCPCTest_set->setText("set test");
    }
 
    // ------ Pupil Steering
@@ -1285,23 +1423,26 @@ void pupilGuide::updateGUI()
    
    if(m_pupFsmState == "READY")
    {
-      ui.pupState->setText("SET");
       ui.pupState->setEnabled(true);
+      ui.pupCh1->setEnabled(true);
+      ui.pupCh2->setEnabled(true);
       ui.buttonPup_set->setEnabled(false);
       ui.buttonPup_rest->setEnabled(true);
    }
    else if(m_pupFsmState == "NOTHOMED")
    {
-      ui.pupState->setText("RIP");
       ui.pupState->setEnabled(true);
+      ui.pupCh1->setEnabled(false);
+      ui.pupCh2->setEnabled(false);
       ui.buttonPup_set->setEnabled(true);
       ui.buttonPup_rest->setEnabled(false);
       enablePupFSMArrows = false;
    }
    else if(m_pupFsmState == "HOMING")
    {
-      ui.pupState->setText("SETTING");
       ui.pupState->setEnabled(true);
+      ui.pupCh1->setEnabled(false);
+      ui.pupCh2->setEnabled(false);
       ui.buttonPup_set->setEnabled(false);
       ui.buttonPup_rest->setEnabled(true);
       enablePupFSMArrows = false;
@@ -1311,30 +1452,16 @@ void pupilGuide::updateGUI()
       enablePupFSM = false;
       if(m_pupFsmState == "")
       {
-         ui.pupState->setText("STATE UNKNOWN");
          ui.pupState->setEnabled(false);
       }
       else 
       {
          ui.pupState->setEnabled(true);
-         ui.pupState->setText(m_pupFsmState.c_str());
       }
    }
 
    if(enablePupFSM)
    {
-      ui.buttonPup_set->setEnabled(true);
-      ui.buttonPup_rest->setEnabled(true);
-      ui.labelPupCh1->setEnabled(true); 
-      ui.pupCh1->setEnabled(true);
-      ui.labelPupCh2->setEnabled(true);
-      ui.pupCh2->setEnabled(true);
-      
-      snprintf(str,sizeof(str), "%0.2f", m_pupCh1);
-      ui.pupCh1->setText(str);
-      snprintf(str,sizeof(str), "%0.2f", m_pupCh2);
-      ui.pupCh2->setText(str);
-      
       if(enablePupFSMArrows)
       {
          ui.button_pup_ul->setEnabled(true); 
@@ -1354,15 +1481,11 @@ void pupilGuide::updateGUI()
    }
    else
    {
+
       ui.buttonPup_set->setEnabled(false);
       ui.buttonPup_rest->setEnabled(false);
-      ui.labelPupCh1->setEnabled(false); 
       ui.pupCh1->setEnabled(false);
-      ui.labelPupCh2->setEnabled(false);
       ui.pupCh2->setEnabled(false);
-      
-      ui.pupCh1->setText("");
-      ui.pupCh2->setText("");
       
       ui.button_pup_ul->setEnabled(false); 
       ui.button_pup_ur->setEnabled(false); 
@@ -1371,7 +1494,75 @@ void pupilGuide::updateGUI()
       ui.button_pup_dr->setEnabled(false);
    }
    
+   // ------ TTM Peri
+   bool enableTTMPeriFSM = true;
+   bool enableTTMPeriFSMArrows = true;
    
+   if(m_ttmPeriFsmState == "READY")
+   {
+      ui.ttmPeriState->setEnabled(true);
+      ui.ttmPeriCh1->setEnabled(false);
+      ui.ttmPeriCh2->setEnabled(false);
+      ui.button_ttmPeri_set->setEnabled(false);
+      ui.button_ttmPeri_rest->setEnabled(true);
+
+      enableTTMPeriFSMArrows = false;
+   }
+   else if(m_ttmPeriFsmState == "OPERATING")
+   {
+      ui.ttmPeriState->setEnabled(true);
+      ui.ttmPeriCh1->setEnabled(true);
+      ui.ttmPeriCh2->setEnabled(true);
+      ui.button_ttmPeri_set->setEnabled(false);
+      ui.button_ttmPeri_rest->setEnabled(true);
+      enableTTMPeriFSMArrows = true;
+   }
+   else
+   {
+      enableTTMPeriFSM = false;
+      
+      if(m_ttmPeriFsmState == "")
+      {
+         ui.ttmPeriState->setEnabled(false);
+      }
+      else 
+      {
+         ui.ttmPeriState->setEnabled(true);
+      }
+
+      ui.ttmPeriCh1->setEnabled(false);
+      ui.ttmPeriCh2->setEnabled(false);
+      ui.button_ttmPeri_set->setEnabled(false);
+      ui.button_ttmPeri_rest->setEnabled(false);
+   }
+
+   if(enableTTMPeriFSM)
+   {
+      if(enableTTMPeriFSMArrows)
+      {
+         ui.button_ttmPeri_l->setEnabled(true); 
+         ui.button_ttmPeri_r->setEnabled(true); 
+         ui.button_ttmPeri_scale->setEnabled(true);
+         ui.button_ttmPeri_u->setEnabled(true);
+         ui.button_ttmPeri_d->setEnabled(true);
+      }
+      else
+      {
+         ui.button_ttmPeri_l->setEnabled(false); 
+         ui.button_ttmPeri_r->setEnabled(false); 
+         ui.button_ttmPeri_scale->setEnabled(false);
+         ui.button_ttmPeri_u->setEnabled(false);
+         ui.button_ttmPeri_d->setEnabled(false);
+      }
+   }
+   else
+   {  
+      ui.button_ttmPeri_l->setEnabled(false); 
+      ui.button_ttmPeri_r->setEnabled(false); 
+      ui.button_ttmPeri_scale->setEnabled(false);
+      ui.button_ttmPeri_u->setEnabled(false);
+      ui.button_ttmPeri_d->setEnabled(false);
+   }
    
    // --- camera lens
    
@@ -1956,6 +2147,28 @@ void pupilGuide::on_buttonTweeterTest_set_pressed()
    sendNewProperty(ip);
 }
 
+//----------- dmtweeter
+
+void pupilGuide::on_buttonNCPCTest_set_pressed()
+{
+   pcf::IndiProperty ip(pcf::IndiProperty::Switch);
+   
+   ip.setDevice("dmncpc");
+   ip.setName("test_set");
+   ip.add(pcf::IndiElement("toggle"));
+
+   if(m_dmncpcTestSet)
+   {
+      ip["toggle"].setSwitchState(pcf::IndiElement::Off);
+   }
+   else
+   {
+      ip["toggle"].setSwitchState(pcf::IndiElement::On);
+   }
+
+   sendNewProperty(ip);
+}
+
 //----------- ttmpupil
 
 void pupilGuide::on_buttonPup_rest_pressed()
@@ -1999,7 +2212,7 @@ void pupilGuide::on_button_camera_pressed()
 
 void pupilGuide::on_button_pup_ul_pressed()
 {
-  pcf::IndiProperty ip(pcf::IndiProperty::Number);
+   pcf::IndiProperty ip(pcf::IndiProperty::Number);
    
    ip.setDevice("ttmpupil");
    ip.setName("pos_1");
@@ -2205,6 +2418,155 @@ void pupilGuide::on_button_pup_scale_pressed()
    snprintf(ss, 5, "%0.2f", m_pupStepSize);
    ui.button_pup_scale->setText(ss);
 }
+
+void pupilGuide::on_button_ttmPeri_rest_pressed()
+{
+    pcf::IndiProperty ip(pcf::IndiProperty::Switch);
+   
+    ip.setDevice("ttmperi");
+    ip.setName("set");
+    ip.add(pcf::IndiElement("toggle"));
+    ip["toggle"].setSwitchState(pcf::IndiElement::Off);
+   
+    sendNewProperty(ip);
+}
+
+void pupilGuide::on_button_ttmPeri_set_pressed()
+{
+    pcf::IndiProperty ip(pcf::IndiProperty::Switch);
+   
+    ip.setDevice("ttmperi");
+    ip.setName("set");
+    ip.add(pcf::IndiElement("toggle"));
+    ip["toggle"].setSwitchState(pcf::IndiElement::On);
+   
+    sendNewProperty(ip);
+}
+
+void pupilGuide::on_button_ttmPeri_l_pressed()
+{
+    pcf::IndiProperty ip(pcf::IndiProperty::Number);
+   
+    ip.setDevice("ttmperi");
+    ip.setName("axis1_voltage");
+    ip.add(pcf::IndiElement("target"));
+
+    if(m_pupCam == FLOWFS)
+    {
+        ip["target"] = m_ttmPeriCh1 - m_ttmPeriStepSize;
+    }
+    else if(m_pupCam == LLOWFS)
+    {
+
+    }
+    else if(m_pupCam == CAMSCIS)
+    {
+        ip["target"] = m_ttmPeriCh1 - m_ttmPeriStepSize;
+    }
+
+   sendNewProperty(ip);
+
+}
+
+void pupilGuide::on_button_ttmPeri_r_pressed()
+{
+    pcf::IndiProperty ip(pcf::IndiProperty::Number);
+   
+    ip.setDevice("ttmperi");
+    ip.setName("axis1_voltage");
+    ip.add(pcf::IndiElement("target"));
+
+    if(m_pupCam == FLOWFS)
+    {
+        ip["target"] = m_ttmPeriCh1 + m_ttmPeriStepSize;
+    }
+    else if(m_pupCam == LLOWFS)
+    {
+
+    }
+    else if(m_pupCam == CAMSCIS)
+    {
+        ip["target"] = m_ttmPeriCh1 + m_ttmPeriStepSize;
+    }
+
+   sendNewProperty(ip);
+
+
+}
+
+void pupilGuide::on_button_ttmPeri_u_pressed()
+{
+    pcf::IndiProperty ip(pcf::IndiProperty::Number);
+   
+    ip.setDevice("ttmperi");
+    ip.setName("axis2_voltage");
+    ip.add(pcf::IndiElement("target"));
+
+    if(m_pupCam == FLOWFS)
+    {
+        ip["target"] = m_ttmPeriCh2 + m_ttmPeriStepSize;
+    }
+    else if(m_pupCam == LLOWFS)
+    {
+
+    }
+    else if(m_pupCam == CAMSCIS)
+    {
+        ip["target"] = m_ttmPeriCh2 + m_ttmPeriStepSize;
+    }
+
+    sendNewProperty(ip);
+
+}
+
+void pupilGuide::on_button_ttmPeri_d_pressed()
+{
+    pcf::IndiProperty ip(pcf::IndiProperty::Number);
+   
+    ip.setDevice("ttmperi");
+    ip.setName("axis2_voltage");
+    ip.add(pcf::IndiElement("target"));
+
+    if(m_pupCam == FLOWFS)
+    {
+        ip["target"] = m_ttmPeriCh2 - m_ttmPeriStepSize;
+    }
+    else if(m_pupCam == LLOWFS)
+    {
+
+    }
+    else if(m_pupCam == CAMSCIS)
+    {
+        ip["target"] = m_ttmPeriCh2 - m_ttmPeriStepSize;
+    }
+
+    sendNewProperty(ip);
+}
+
+void pupilGuide::on_button_ttmPeri_scale_pressed()
+{
+   if(((int) (m_ttmPeriStepSize)) == 50)
+   {
+      m_ttmPeriStepSize = 25;
+   }
+   else if(((int) (m_ttmPeriStepSize)) == 25)
+   {
+      m_ttmPeriStepSize = 10;
+   }
+   else if(((int) (m_ttmPeriStepSize)) == 10)
+   {
+      m_ttmPeriStepSize = 1;
+   }
+   else
+   {
+      m_ttmPeriStepSize = 50;
+   }
+   
+   char ss[5];
+   snprintf(ss, 5, "%0.2f", m_ttmPeriStepSize/100.);
+   ui.button_ttmPeri_scale->setText(ss);
+}
+
 
 void pupilGuide::on_pupilAlign_loopSlider_sliderReleased()
 {
