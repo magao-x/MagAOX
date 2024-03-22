@@ -2334,7 +2334,7 @@ int tcsInterface::recordTelSee(bool force)
    static int last_dimm_time = 0;
    static double last_dimm_el = 0;
    static double last_dimm_fwhm = 0;
-   static double last_dimm_fwhm_corr = 0;
+   //static double last_dimm_fwhm_corr = 0;
    
    static int last_mag1_time = 0;
    static double last_mag1_el = 0;
@@ -2349,7 +2349,7 @@ int tcsInterface::recordTelSee(bool force)
    if(force || m_dimm_time != last_dimm_time ||
                m_dimm_el != last_dimm_el ||
                m_dimm_fwhm != last_dimm_fwhm ||
-               m_dimm_fwhm_corr != last_dimm_fwhm_corr ||
+               /*m_dimm_fwhm_corr != last_dimm_fwhm_corr || //ignore corrected dimm*/
                m_mag1_time != last_mag1_time ||
                m_mag1_el != last_mag1_el ||
                m_mag1_fwhm != last_mag1_fwhm ||
@@ -2360,12 +2360,12 @@ int tcsInterface::recordTelSee(bool force)
                m_mag2_fwhm_corr != last_mag2_fwhm_corr)
 
    {
-      telem<telem_telsee>({m_dimm_time, m_dimm_el, m_dimm_fwhm, m_dimm_fwhm_corr, m_mag1_time, m_mag1_el, m_mag1_fwhm, m_mag1_fwhm_corr, m_mag2_time, m_mag2_el, m_mag2_fwhm, m_mag2_fwhm_corr});
+      telem<telem_telsee>({m_dimm_time, m_dimm_el, m_dimm_fwhm, -1, m_mag1_time, m_mag1_el, m_mag1_fwhm, m_mag1_fwhm_corr, m_mag2_time, m_mag2_el, m_mag2_fwhm, m_mag2_fwhm_corr});
 
       last_dimm_time = m_dimm_time;
       last_dimm_el = m_dimm_el;
       last_dimm_fwhm = m_dimm_fwhm;
-      last_dimm_fwhm_corr = m_dimm_fwhm_corr;
+      //last_dimm_fwhm_corr = m_dimm_fwhm_corr;
       
       last_mag1_time = m_mag1_time;
       last_mag1_el = m_mag1_el;
