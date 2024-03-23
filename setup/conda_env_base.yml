@@ -42,6 +42,8 @@ dependencies:
   - xxhash
   # for cacao
   - pybind11
+  # for xtelemdb
+  - psycopg2
 
   - pip:
       - hcipy
