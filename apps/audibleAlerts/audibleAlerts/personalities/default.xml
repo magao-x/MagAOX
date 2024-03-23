@@ -2,6 +2,7 @@
   <default-voice name="larynx:southern_english_female-glow_tts" />
   <random-utterances>
     <speak>pee eye is asleep. I'm the pee eye now.</speak>
+    <file name="toughest_battles.wav" />
     <!-- <speak>please forfeit all <s lang="es">empanadas</s> in a timely manner</speak> -->
     <speak>Oh, that little guy? I wouldn't worry about that little guy</speak>
     <speak>Chicken nugget</speak>
@@ -10,7 +11,25 @@
     <speak>Veggie nugget</speak>
     <speak>We, at toilet duck, recommend toilet duck.</speak>
     <speak>We, at Mag <say-as interpret-as="spell-out">AOX</say-as>, recommend Mag <say-as interpret-as="spell-out">AOX</say-as>.</speak>
+    <file name="not_jared.wav" />
   </random-utterances>
+  <soundboard>
+    <button name="NotJared">
+      <file name="not_jared.wav" />
+    </button>
+    <button name="Standards">
+      <file name="we_have_standards.wav" />
+    </button>
+    <button name="ChickenNugget">
+      <speak>Chicken nugget</speak>
+    </button>
+    <button name="Avalon">
+      <speak>beep boop bop</speak>
+    </button>
+    <button name="Proposals">
+      <file name="lkca15.wav" />
+    </button>
+  </soundboard>
   <react-to indi-id="observers.obs_on.toggle">
     <transition value="On">
       <speak>Saving data for {observers.current_observer.pfoa}.</speak>
@@ -74,12 +93,11 @@
       <speak>The seeing is never normally this bad. Maybe we should give up.</speak>
       <speak>You guys know this is hopeless, right?</speak>
       <speak>Well, the seeing is shit. Smoke um if you got um</speak>
-      <speak>Are you still operating in these conditions? Bless your little cotton socks.</speak>
-    </transition>
-    <transition op="between" low="0.3" high="0.5">
-      <speak>I'm chuffed to bits</speak>
+      <speak>Are you still operating in these conditions?</speak>
+      <file name="toughest_battles.wav" />
     </transition>
     <transition op="between" low="0.0" high="0.3">
+      <speak>I'm chuffed to bits</speak>
       <speak>Seeing is believing</speak>
       <speak>That might be the lowest number I've seen on the dim</speak>
     </transition>

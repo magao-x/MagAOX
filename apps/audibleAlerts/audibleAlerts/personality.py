@@ -1,10 +1,37 @@
-from enum import Enum
-from typing import Optional
-import purepyindi2
 from dataclasses import dataclass
+from enum import Enum
+import os.path
+import purepyindi2
+from typing import Optional
 import xml.etree.ElementTree as ET
 
 DEFAULT_DEBOUNCE_SEC = 3
+
+class SpeechRequest:
+    pass
+
+class SSML(SpeechRequest):
+    def __init__(self, markup):
+        self.markup = markup
+    def __repr__(self):
+        return f"{self.__class__.__name__}({repr(self.markup)})"
+    def __hash__(self):
+        return hash(repr(self))
+
+class Recording(SpeechRequest):
+    def __init__(self, path):
+        self.path = path
+    def __repr__(self):
+        return f"{self.__class__.__name__}({repr(self.path)})"
+    def __hash__(self):
+        return hash(repr(self))
+
+
+def xml_to_speechrequest(elem, file_path):
+    if elem.tag == 'file':
+        return Recording(os.path.join(os.path.dirname(file_path), elem.attrib['name']))
+    else:
+        return SSML(ET.tostring(elem, 'utf-8').decode('utf8').strip())
 
 class Operation(Enum):
     EQ = 'eq'
@@ -53,20 +80,22 @@ class Transition:
 @dataclass
 class Reaction:
     indi_id : str
-    transitions : dict[Transition, list[str]]
+    transitions : dict[Transition, list[SpeechRequest]]
 
 @dataclass
 class Personality:
     reactions : list[Reaction]
     default_voice : str
-    random_utterances : list[str]
-    
+    random_utterances : list[SpeechRequest]
+    soundboard : dict[str, SpeechRequest]
+
     @classmethod
     def from_path(cls, file_path):
         tree = ET.parse(file_path)
         root = tree.getroot()
         reactions = []
         random_utterances = []
+        soundboard = {}
         default_voice = None
 
         for el in root:
@@ -76,7 +105,12 @@ class Personality:
                 continue
             elif el.tag == 'random-utterances':
                 for utterance in el:
-                    random_utterances.append(ET.tostring(utterance, 'utf-8').decode('utf8').strip())
+                    random_utterances.append(xml_to_speechrequest(utterance, file_path))
+                continue
+            elif el.tag == 'soundboard':
+                for btn in el:
+                    assert len(btn) == 1
+                    soundboard[btn.attrib['name']] = xml_to_speechrequest(btn[0], file_path)
                 continue
             assert el.tag == 'react-to'
             indi_id = el.attrib['indi-id']
@@ -103,10 +137,15 @@ class Personality:
                     raise RuntimeError(f"Multiply defined for {indi_id} {operation=} {value=}")
                 transitions[trans] = []
                 for utterance in transition:
-                    assert utterance.tag == 'speak'
-                    transitions[trans].append(ET.tostring(utterance, 'utf-8').decode('utf8').strip())
+                    assert utterance.tag in ('speak', 'file')
+                    transitions[trans].append(xml_to_speechrequest(utterance, file_path))
             reactions.append(Reaction(indi_id=indi_id, transitions=transitions))
-        return cls(reactions=reactions, default_voice=default_voice, random_utterances=random_utterances)
+        return cls(
+            reactions=reactions,
+            default_voice=default_voice,
+            random_utterances=random_utterances,
+            soundboard=soundboard,
+        )
 
 if __name__ == "__main__":
     import pprint
