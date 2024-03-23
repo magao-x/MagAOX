@@ -271,6 +271,7 @@ pupilGuide::pupilGuide( QWidget * Parent, Qt::WindowFlags f) : xWidget(Parent, f
    ui.button_tip_scale->setProperty("isScaleButton", true);
    ui.button_focus_scale->setProperty("isScaleButton", true);
    ui.button_pup_scale->setProperty("isScaleButton", true);
+   ui.button_ttmPeri_scale->setProperty("isScaleButton", true);
    
    QTimer *timer = new QTimer(this);
    connect(timer, SIGNAL(timeout()), this, SLOT(updateGUI()));
