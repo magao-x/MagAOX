@@ -2454,7 +2454,7 @@ void pupilGuide::on_button_ttmPeri_l_pressed()
 
     if(m_pupCam == FLOWFS)
     {
-        ip["target"] = m_ttmPeriCh1 - m_ttmPeriStepSize;
+        ip["target"] = m_ttmPeriCh1 + m_ttmPeriStepSize;
     }
     else if(m_pupCam == LLOWFS)
     {
@@ -2462,7 +2462,7 @@ void pupilGuide::on_button_ttmPeri_l_pressed()
     }
     else if(m_pupCam == CAMSCIS)
     {
-        ip["target"] = m_ttmPeriCh1 - m_ttmPeriStepSize;
+        ip["target"] = m_ttmPeriCh1 + m_ttmPeriStepSize;
     }
 
    sendNewProperty(ip);
@@ -2479,7 +2479,7 @@ void pupilGuide::on_button_ttmPeri_r_pressed()
 
     if(m_pupCam == FLOWFS)
     {
-        ip["target"] = m_ttmPeriCh1 + m_ttmPeriStepSize;
+        ip["target"] = m_ttmPeriCh1 - m_ttmPeriStepSize;
     }
     else if(m_pupCam == LLOWFS)
     {
@@ -2487,7 +2487,7 @@ void pupilGuide::on_button_ttmPeri_r_pressed()
     }
     else if(m_pupCam == CAMSCIS)
     {
-        ip["target"] = m_ttmPeriCh1 + m_ttmPeriStepSize;
+        ip["target"] = m_ttmPeriCh1 - m_ttmPeriStepSize;
     }
 
    sendNewProperty(ip);
