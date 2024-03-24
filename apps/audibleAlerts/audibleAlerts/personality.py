@@ -15,16 +15,16 @@ class SSML(SpeechRequest):
         self.markup = markup
     def __repr__(self):
         return f"{self.__class__.__name__}({repr(self.markup)})"
-    def __hash__(self):
-        return hash(repr(self))
+    def __eq__(self, other):
+        return getattr(other, 'markup', None) == self.markup
 
 class Recording(SpeechRequest):
     def __init__(self, path):
         self.path = path
     def __repr__(self):
         return f"{self.__class__.__name__}({repr(self.path)})"
-    def __hash__(self):
-        return hash(repr(self))
+    def __eq__(self, other):
+        return getattr(other, 'path', None) == self.path
 
 
 def xml_to_speechrequest(elem, file_path):

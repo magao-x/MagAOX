@@ -36,7 +36,7 @@ class AudibleAlerts(XDevice):
     config : AudibleAlertsConfig
     personality : Personality
     _cb_handles : set
-    speech_requests : list[str]
+    _speech_requests : list[Union[SSML, Recording]]
     soundboard_sw_prop : properties.SwitchVector = None
     default_voice : str = "coqui-tts:en_ljspeech"  # overridden by personality when loaded
     personalities : list[str] = ['default', 'lab_mode',]
@@ -47,6 +47,12 @@ class AudibleAlerts(XDevice):
     per_transition_cooldown_ts : dict[Transition, float]
     last_utterance_ts : float = 0
     last_utterance_chosen : Optional[str] = None
+
+    def enqueue_speech_request(self, sr):
+        if any(sr == x for x in self._speech_requests):
+            log.warn(f"Duplicated speech request while already enqueued: {sr}")
+            return
+        self._speech_requests.append(sr)
 
     def handle_speech_text(self, existing_property, new_message):
         if 'target' in new_message and new_message['target'] != existing_property['current']:
@@ -61,13 +67,8 @@ class AudibleAlerts(XDevice):
             current_text = self.properties['speech_text']['current']
             if current_text is not None and len(current_text.strip()) != 0:
                 st = '<speak>' + current_text + '</speak>'
-                is_same = [st == getattr(x, 'markup', None) for x in self.speech_requests]
-                if any(is_same):
-                    self.log.warn(f"Discarding {repr(st)} because it's in the queue already")
-                else:
-                    self.speech_requests.append(SSML(st))
-                    self.log.debug(f"Speech requested: {self.properties['speech_text']['current']}")
-                    self.telem("speech_request", {"text": current_text})
+                self.enqueue_speech_request(SSML(st))
+                self.telem("speech_request", {"text": current_text})
         self.update_property(existing_property)  # ensure the request switch turns back off at the client
 
     def handle_reload_request(self, existing_property, new_message):
@@ -110,7 +111,7 @@ class AudibleAlerts(XDevice):
             if debounce_expired:
                 utterance = choice(utterance_choices)
                 self.log.debug(f"Submitting speech request: {utterance}")
-                self.speech_requests.append(utterance)
+                self.enqueue_speech_request(utterance)
             else:
                 self.log.debug(f"Would have talked, but it's only been {sec_since_trigger=}")
         elif transition.compare(last_value) and not transition.compare(value):
@@ -162,7 +163,7 @@ class AudibleAlerts(XDevice):
             if new_message[elem] is constants.SwitchState.ON:
                 srq = self.personality.soundboard[elem]
                 self.log.info(f"Soundboard requested {srq}")
-                self.speech_requests.append(srq)
+                self.enqueue_speech_request(srq)
         # set everything off again
         self.update_property(prop)
 
@@ -219,7 +220,7 @@ class AudibleAlerts(XDevice):
         self.latch_transitions = {}
         self.per_transition_cooldown_ts = {}
         self._cb_handles = set()
-        self.speech_requests = []
+        self._speech_requests = []
 
         while self.client.status is not constants.ConnectionStatus.CONNECTED:
             self.log.info("Waiting for connection...")
@@ -275,8 +276,8 @@ class AudibleAlerts(XDevice):
         self.log.info("Set up complete")
 
     def loop(self):
-        while len(self.speech_requests):
-            speech = self.preprocess(self.speech_requests.pop(0))
+        while len(self._speech_requests):
+            speech = self.preprocess(self._speech_requests.pop(0))
             if self.mute:
                 self.log.debug(f"Would have said: {repr(speech)}, but muted")
             else:

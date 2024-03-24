@@ -10,6 +10,7 @@
     <speak>do not over-click mouse, as this can cause computers to freeze.</speak>
     <speak>Veggie nugget</speak>
     <speak>We, at toilet duck, recommend toilet duck.</speak>
+    <speak><voice name="larynx:karen_savage-glow_tts">Entregue todas sus empanadas al jefe.</voice></speak>
     <speak>We, at Mag <say-as interpret-as="spell-out">AOX</say-as>, recommend Mag <say-as interpret-as="spell-out">AOX</say-as>.</speak>
     <file name="not_jared.wav" />
   </random-utterances>
@@ -84,6 +85,14 @@
   <react-to indi-id="stagek.fsm.state">
     <transition value="NOTHOMED">
       <speak>stage kay is not homed. the cat is grumpy.</speak>
+    </transition>
+  </react-to>
+  <react-to indi-id="tcsi.environment.wind">
+    <transition op="between" low="30" high="35">
+      <speak>The wind exceeded thirty miles per hour</speak>
+    </transition>
+    <transition op="gt" value="35.1">
+      <speak>We have exceeded the wind shutdown threshold</speak>
     </transition>
   </react-to>
   <react-to indi-id="tcsi.seeing.dimm_fwhm">
