@@ -131,6 +131,11 @@ protected:
 
     mx::improc::eigenImage<int16_t> m_digitalBinWork;
 
+    std::string m_syncDevice {"fxngensync"};
+    std::string m_syncFreqProp {"C1freq"};
+
+    float m_syncFreq {0};
+
 public:
 
    ///Default c'tor
@@ -317,8 +322,12 @@ protected:
    pcf::IndiProperty m_indiP_emProt;
    pcf::IndiProperty m_indiP_emProtReset;
 
+   pcf::IndiProperty m_indiP_syncFreq;
+
 public:
    INDI_NEWCALLBACK_DECL(ocam2KCtrl, m_indiP_emProtReset);
+
+   INDI_SETCALLBACK_DECL(ocam2KCtrl, m_indiP_syncFreq);
 
    /** \name Telemeter Interface
      * 
@@ -427,6 +436,8 @@ int ocam2KCtrl::appStartup()
    createStandardIndiRequestSw( m_indiP_emProtReset, "emProtectionReset", "Reset", "EM Protection"); 
    registerIndiPropertyNew( m_indiP_emProtReset, INDI_NEWCALLBACK(m_indiP_emProtReset));
    
+   REG_INDI_SETPROP(m_indiP_syncFreq, m_syncDevice, m_syncFreqProp);
+
    if(dev::stdCamera<ocam2KCtrl>::appStartup() < 0)
    {
       return log<software_critical,-1>({__FILE__,__LINE__});
@@ -888,88 +899,134 @@ int ocam2KCtrl::setTempSetPt()
 inline
 int ocam2KCtrl::getFPS()
 {
-   std::string response;
+    if(!m_synchro)
+    {
+        std::string response;
 
-   if( pdvSerialWriteRead( response, "fps") == 0) // m_pdv, "fps", m_readTimeout) == 0)
-   {
-      float fps;
-      if(parseFPS( fps, response ) < 0) 
-      {
-         if(powerState() != 1 || powerStateTarget() != 1) return -1;
-         return log<software_error, -1>({__FILE__, __LINE__, "fps parse error"});
-      }
-      m_fps = fps;
+        if( pdvSerialWriteRead( response, "fps") == 0) // m_pdv, "fps", m_readTimeout) == 0)
+        {
+            float fps;
+            if(parseFPS( fps, response ) < 0) 
+            {
+                if(powerState() != 1 || powerStateTarget() != 1) return -1;
+                return log<software_error, -1>({__FILE__, __LINE__, "fps parse error"});
+            }
+            m_fps = fps;
 
-      recordCamera();
+            recordCamera();
       
-      return 0;
+            return 0;
 
-   }
-   else return log<software_error,-1>({__FILE__, __LINE__});
+        }
+        else 
+        {
+            return log<software_error,-1>({__FILE__, __LINE__});
+        }
+    }
+    else 
+    {
+        m_fps = m_syncFreq;
+        recordCamera();
 
+        return 0;
+    }
 }
 
 inline
 int ocam2KCtrl::setFPS()
 {
-   std::string response;
+    std::string fpsStr= std::to_string(m_fpsSet);
 
-   ///\todo should we have fps range checks or let camera deal with it?
+    if(!m_synchro)
+    {
+        std::string response;
+    
+        if( pdvSerialWriteRead( response, "fps " + fpsStr ) == 0)
+        {
+            ///\todo check response
+            std::cerr << "fps " << fpsStr << " response: " << response << "\n";
+            log<text_log>({"set fps: " + fpsStr});
+      
+            //We always want to reset the latency circular buffers
+            ///\todo verify that this works!! 
+            m_nextMode = m_modeName;
+            m_reconfig = true;
+
+        }
+        else 
+        {
+            if(powerState() != 1 || powerStateTarget() != 1) return -1;
+            return log<software_error,-1>({__FILE__, __LINE__});
+        }
+    }
+    else 
+    {
+        std::cerr << "setting: " << fpsStr << "\n";
+
+        pcf::IndiProperty ipFreq(pcf::IndiProperty::Number);
    
-   std::string fpsStr= std::to_string(m_fpsSet);
-   if( pdvSerialWriteRead( response, "fps " + fpsStr ) == 0)
-   {
-      ///\todo check response
-      std::cerr << "fps " << fpsStr << " response: " << response << "\n";
-      log<text_log>({"set fps: " + fpsStr});
+        ipFreq.setDevice(m_syncDevice);
+        ipFreq.setName(m_syncFreqProp);
+        ipFreq.add(pcf::IndiElement("target"));
+   
+        ipFreq["target"] = fpsStr;
+   
+        sendNewProperty(ipFreq);
+    }
+
+    
       
-      //We always want to reset the latency circular buffers
-      ///\todo verify that this works!! 
-      m_nextMode = m_modeName;
-      m_reconfig = true;
-      
-      return 0;
-   }
-   else 
-   {
-      if(powerState() != 1 || powerStateTarget() != 1) return -1;
-      return log<software_error,-1>({__FILE__, __LINE__});
-   }
+    return 0;
 }
 
 inline
 int ocam2KCtrl::setSynchro()
 {
-   std::string response;
+    std::string response;
    
-   std::string sStr;
-   if(m_synchroSet) sStr = "on";
-   else sStr = "off";
+    //First set the actual FPS to 0 to get to max
+    std::string fpsStr= std::to_string(0);
+    if( pdvSerialWriteRead( response, "fps " + fpsStr ) == 0)
+    {
+        ///\todo check response
+        std::cerr << "fps " << fpsStr << " response: " << response << "\n";
+        log<text_log>({"set fps: " + fpsStr});      
+    }
+    else 
+    {
+        if(powerState() != 1 || powerStateTarget() != 1) return -1;
+        return log<software_error,-1>({__FILE__, __LINE__});
+    }
 
-   if( pdvSerialWriteRead( response, "synchro " + sStr ) == 0)
-   {
-      ///\todo check response
-      std::cerr << "synchro " << sStr << " resonse: " << response << "\n";
-      log<text_log>({"set synchro: " + sStr});
+    //Now actually turn synchro on
+    std::string sStr;
+    if(m_synchroSet) sStr = "on";
+    else sStr = "off";
+    if( pdvSerialWriteRead( response, "synchro " + sStr ) == 0)
+    {
+        ///\todo check response
+        std::cerr << "synchro " << sStr << " resonse: " << response << "\n";
+        log<text_log>({"set synchro: " + sStr});
       
-      m_synchro = m_synchroSet;
+        m_synchro = m_synchroSet;
 
-      if(m_synchro == false) 
-      {
-         updateSwitchIfChanged(m_indiP_synchro, "toggle", pcf::IndiElement::Off, INDI_IDLE);
-      }
-      else
-      {
-         updateSwitchIfChanged(m_indiP_synchro, "toggle", pcf::IndiElement::On, INDI_OK);
-      }
+        if(m_synchro == false) 
+        {
+            updateSwitchIfChanged(m_indiP_synchro, "toggle", pcf::IndiElement::Off, INDI_IDLE);
+        }
+        else
+        {
+            updateSwitchIfChanged(m_indiP_synchro, "toggle", pcf::IndiElement::On, INDI_OK);
+        }
+    }
+    else 
+    {
+        if(powerState() != 1 || powerStateTarget() != 1) return -1;
+        return log<software_error,-1>({__FILE__, __LINE__});
+    }
 
-      return 0;
-   }
-   else 
-   {
-      if(powerState() != 1 || powerStateTarget() != 1) return -1;
-      return log<software_error,-1>({__FILE__, __LINE__});
-   }
+    //Finally we set the FPS of the synchro device
+    return setFPS();
 }
 
 inline 
@@ -1411,6 +1468,30 @@ INDI_NEWCALLBACK_DEFN(ocam2KCtrl, m_indiP_emProtReset)(const pcf::IndiProperty &
 
    //If here, this is a confirmation.      
    return resetEMProtection();
+}
+
+INDI_SETCALLBACK_DEFN(ocam2KCtrl, m_indiP_syncFreq)(const pcf::IndiProperty &ipRecv)
+{
+    INDI_VALIDATE_CALLBACK_PROPS(ipRecv, m_indiP_syncFreq)
+
+    if(!ipRecv.find("current")) 
+    {   
+        return -1;
+    }
+
+    m_syncFreq = ipRecv["current"].get<double>();
+
+    if(m_synchro && m_syncFreq != m_fps)
+    {
+        recordCamera(true);
+        m_fps = m_syncFreq;
+        
+        //We always want to reset the latency circular buffers
+        m_nextMode = m_modeName;
+        m_reconfig = true;
+    }
+
+    return 0;
 }
 
 inline
