@@ -22,8 +22,6 @@ namespace MagAOX
 namespace app
 {
 
-
-   
 /** \defgroup t2wOffloader Tweeter to Woofer Offloading
   * \brief Monitors the averaged tweeter shape, and sends it to the woofer.
   *
@@ -260,7 +258,6 @@ void t2wOffloader::loadConfig()
 inline
 int t2wOffloader::appStartup()
 {
-   
 
    createStandardIndiNumber<float>( m_indiP_gain, "gain", 0, 1, 0, "%0.2f");
    m_indiP_gain["current"] = m_gain;
