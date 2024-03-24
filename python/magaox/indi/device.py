@@ -1,4 +1,3 @@
-import gzip
 import json
 import glob
 import datetime
@@ -9,10 +8,8 @@ from functools import partial
 import logging
 import subprocess
 import psutil
-from purepyindi2 import Device, transports
+from purepyindi2 import Device, transports, messages
 from purepyindi2.properties import IndiProperty
-import dataclasses
-import toml
 import typing
 import xconf
 
@@ -103,6 +100,25 @@ LINE_BUFFERED = 1
 
 LOG_FILENAME_TIMESTAMP_FORMAT = "%Y-%m-%dT%H%M%S"
 
+class IndiDeviceHandler(logging.Handler):
+    def __init__(self, device: Device, *args, **kwargs):
+        self.device = device
+        super().__init__(*args, **kwargs)
+    def emit(self, record: logging.LogRecord):
+        if logging.WARNING > record.levelno >= logging.INFO:
+            level_text = 'INFO '
+        elif logging.ERROR > record.levelno >= logging.WARNING:
+            level_text = 'WARN '
+        elif logging.CRITICAL > record.levelno >= logging.ERROR:
+            level_text = 'ERR  '
+        elif record.levelno >= logging.CRITICAL:
+            level_text = 'CRIT '
+        else:
+            return
+        msg = level_text + record.getMessage()
+        if self.device.connected:
+            self.device.connection.send(messages.Message(message=msg, device=self.device.name, timestamp=datetime.datetime.now(timezone.utc)))
+
 class XDevice(Device):
     prefix_dir : str  = "/opt/MagAOX"
     logs_dir : str = "logs"
@@ -143,6 +159,7 @@ class XDevice(Device):
             file_log_level=logging.DEBUG,
             all_verbose=all_verbose)
         compress_files_glob(log_dir + f"/{self.name}_*.log", latest_filename=log_file_name)
+        log.addHandler(IndiDeviceHandler(self, level=logging.INFO))
 
     def _init_telem(self):
         telem_dir = self.prefix_dir + "/" + self.telem_dir + "/" + self.name
@@ -153,7 +170,6 @@ class XDevice(Device):
         self._telem_file = open(telem_file_path, 'wt', buffering=LINE_BUFFERED, encoding='utf8')
         compress_files_glob(telem_dir + f"/{self.name}_*.ndjson", latest_filename=telem_file_name)
         self.log.info(f"Telemetrying to {telem_file_path}")
-        self.telem('te')
 
     def telem(self, event : str, message : typing.Union[str, dict[str, typing.Any]]):
         current_ts_str = datetime.datetime.now().isoformat() + "000"  # zeros for consistency with MagAO-X timestamps with ns
@@ -163,8 +179,8 @@ class XDevice(Device):
             "ec": event,
             "msg": message,
         }
-        json.dump(payload, self._file)
-        self._file.write('\n')
+        json.dump(payload, self._telem_file, default=str)
+        self._telem_file.write('\n')
 
     def update_property(self, prop : IndiProperty):
         super().update_property(prop)
