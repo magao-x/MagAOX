@@ -482,8 +482,8 @@ void pupilGuide::subscribe()
    m_parent->addSubscriber(ui.ttmPeriCh1);
    m_parent->addSubscriber(ui.ttmPeriCh2);
    m_parent->addSubscriberProperty(this, "ttmperi", "fsm");
-   m_parent->addSubscriberProperty(this, "ttmperi", "axis_1");
-   m_parent->addSubscriberProperty(this, "ttmperi", "axix_2");
+   m_parent->addSubscriberProperty(this, "ttmperi", "axis1_voltage");
+   m_parent->addSubscriberProperty(this, "ttmperi", "axix2_voltage");
 
    m_parent->addSubscriberProperty(this, "dmtweeter", "fsm");
    m_parent->addSubscriberProperty(this, "dmtweeter", "test_set");
@@ -1504,8 +1504,8 @@ void pupilGuide::updateGUI()
       ui.ttmPeriState->setEnabled(true);
       ui.ttmPeriCh1->setEnabled(false);
       ui.ttmPeriCh2->setEnabled(false);
-      ui.button_ttmPeri_set->setEnabled(false);
-      ui.button_ttmPeri_rest->setEnabled(true);
+      ui.button_ttmPeri_set->setEnabled(true);
+      ui.button_ttmPeri_rest->setEnabled(false);
 
       enableTTMPeriFSMArrows = false;
    }
