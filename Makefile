@@ -135,6 +135,7 @@ endif
 
 utils_to_build = \
 	logdump \
+	logsurgeon \
 	logstream \
 	cursesINDI \
 	xrif2shmim \
