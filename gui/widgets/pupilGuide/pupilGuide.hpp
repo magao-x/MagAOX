@@ -483,7 +483,7 @@ void pupilGuide::subscribe()
    m_parent->addSubscriber(ui.ttmPeriCh2);
    m_parent->addSubscriberProperty(this, "ttmperi", "fsm");
    m_parent->addSubscriberProperty(this, "ttmperi", "axis1_voltage");
-   m_parent->addSubscriberProperty(this, "ttmperi", "axix2_voltage");
+   m_parent->addSubscriberProperty(this, "ttmperi", "axis2_voltage");
 
    m_parent->addSubscriberProperty(this, "dmtweeter", "fsm");
    m_parent->addSubscriberProperty(this, "dmtweeter", "test_set");
