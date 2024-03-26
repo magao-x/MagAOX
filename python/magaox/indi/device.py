@@ -74,12 +74,11 @@ def compress_files_glob(pattern, latest_filename=None):
 
 def init_logging(logger : logging.Logger, destination, console_log_level, file_log_level, all_verbose):
     root = logging.getLogger()
-    root.setLevel(logging.DEBUG)
+    root.setLevel(logging.WARN)
     if all_verbose:
         file_log_level = console_log_level = logging.DEBUG
         logger = root
     log_format = '%(asctime)s %(levelname)s %(message)s (%(name)s:%(funcName)s:%(lineno)d)'
-    # logger.setLevel(logging.DEBUG)
     file_handler = logging.FileHandler(destination)
 
     logger.addHandler(file_handler)
@@ -128,8 +127,12 @@ class XDevice(Device):
     config : BaseConfig
 
     @classmethod
+    def get_default_config_prefix(cls):
+        return cls.prefix_dir + "/" + cls.config_dir + "/"
+
+    @classmethod
     def get_default_config_path(cls):
-        return cls.prefix_dir + "/" + cls.config_dir + "/" + cls.__name__ + ".conf"
+        return cls.get_default_config_prefix() + cls.__name__ + ".conf"
 
     @property
     def sleep_interval_sec(self):
@@ -156,7 +159,7 @@ class XDevice(Device):
             log,
             log_file_path,
             console_log_level=logging.DEBUG if verbose else logging.INFO,
-            file_log_level=logging.DEBUG,
+            file_log_level=logging.DEBUG if verbose else logging.INFO,
             all_verbose=all_verbose)
         compress_files_glob(log_dir + f"/{self.name}_*.log", latest_filename=log_file_name)
         log.addHandler(IndiDeviceHandler(self, level=logging.INFO))
@@ -235,7 +238,15 @@ class XDevice(Device):
         if args.help:
             xconf.print_help(config_class, parser)
             sys.exit(0)
-        config = cls.load_config(args.config_file, args.vars)
+
+        config_files = [args.config_file if args.name is None else cls.get_default_config_path]
+        if args.name is not None:
+            config_files = [os.path.join(cls.get_default_config_prefix(), args.name + '.conf')]
+        elif len(args.config_file):
+            config_files = args.config_file
+        else:
+            config_files = None
+        config = cls.load_config(config_files, args.vars)
         if args.dump_config:
             print(xconf.config_to_toml(config))
             sys.exit(0)
