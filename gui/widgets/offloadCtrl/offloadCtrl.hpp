@@ -70,15 +70,24 @@ offloadCtrl::offloadCtrl( QWidget * Parent,
 {
     ui.setupUi(this);
 
+    setXwFont(ui.label_Tweeter2Woofer);
     ui.label_offl_state->setProperty("isStatus", true);
     setXwFont(ui.label_offl_state);
+    setXwFont(ui.slider_loop);
 
     ui.slider_loop->setup("t2wOffloader", "offload", "toggle", "");
     ui.slider_loop->setStretch(0,0,10, true, true);
 
+    setXwFont(ui.button_zero);
+
+    setXwFont(ui.label_avgInt);
+    setXwFont(ui.avgInt);
     ui.avgInt->setup("dmtweeter-avg", "nAverage", statusEntry::INT , "", "");
     ui.avgInt->setStretch(0,0,1);
 
+   
+    setXwFont(ui.label_nModes);
+    setXwFont(ui.nModes);
     ui.nModes->setup("t2wOffloader", "numModes", statusEntry::INT , "", "");
     ui.nModes->setStretch(0,0,1);
 
@@ -86,6 +95,9 @@ offloadCtrl::offloadCtrl( QWidget * Parent,
     ui.mcCtrl->setup("t2wOffloader", "leak", "Leak", -1, -1);
     ui.mcCtrl->makeMultCoeffCtrl();
 
+    setXwFont(ui.label_Woofer2Telescope);
+    setXwFont(ui.labelTT);
+    setXwFont(ui.labelFocus);
     ui.sliderTelTTEnable->setup("tcsi", "offlTT_enable", "toggle", "");
     ui.sliderTelTTEnable->setStretch(0,0,10, true, true);
 
@@ -106,6 +118,9 @@ offloadCtrl::offloadCtrl( QWidget * Parent,
     ui.telFocusAvgInt->setup("tcsi", "offlF_avgInt", statusEntry::FLOAT, "Avg.", "sec");
     ui.telFocusAvgInt->setStretch(0,3,9);
     
+    setXwFont(ui.button_TelTTDump);
+    setXwFont(ui.button_TelFocusDump);
+
     m_updateTimer = new QTimer;
 
     connect(m_updateTimer, SIGNAL(timeout()), this, SLOT(updateGUI()));

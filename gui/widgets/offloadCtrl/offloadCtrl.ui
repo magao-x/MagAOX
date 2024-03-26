@@ -19,7 +19,7 @@
      <item>
       <layout class="QVBoxLayout" name="verticalLayout" stretch="3,2,0">
        <item>
-        <widget class="QLabel" name="label_LoopName">
+        <widget class="QLabel" name="label_Tweeter2Woofer">
          <property name="font">
           <font>
            <pointsize>14</pointsize>
@@ -310,7 +310,7 @@
      <item>
       <layout class="QVBoxLayout" name="verticalLayout_5">
        <item>
-        <widget class="QLabel" name="label_LoopName_2">
+        <widget class="QLabel" name="label_Woofer2Telescope">
          <property name="font">
           <font>
            <pointsize>14</pointsize>
@@ -342,7 +342,7 @@
          <item>
           <layout class="QVBoxLayout" name="verticalLayout_3">
            <item>
-            <widget class="QLabel" name="label">
+            <widget class="QLabel" name="labelTT">
              <property name="font">
               <font>
                <pointsize>12</pointsize>
@@ -453,7 +453,7 @@
          <item>
           <layout class="QVBoxLayout" name="verticalLayout_4">
            <item>
-            <widget class="QLabel" name="label_2">
+            <widget class="QLabel" name="labelFocus">
              <property name="font">
               <font>
                <pointsize>12</pointsize>
