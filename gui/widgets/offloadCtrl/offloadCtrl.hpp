@@ -127,7 +127,7 @@ void offloadCtrl::subscribe()
     if(!m_parent) return;
 
     m_parent->addSubscriberProperty(this, "t2wOffloader", "fsm");
-    m_parent->addSubscriberProperty(this, "t2wOffloader", "offlTT_enable");
+    m_parent->addSubscriberProperty(this, "t2wOffloader", "offload");
 
     m_parent->addSubscriberProperty(this, "dmtweeter-avg", "fsm");
     m_parent->addSubscriberProperty(this, "tcsi", "fsm");
@@ -184,7 +184,7 @@ void offloadCtrl::handleSetProperty( const pcf::IndiProperty & ipRecv)
                 m_t2wFsmState = ipRecv["state"].get<std::string>();
              }
         }
-        else if(ipRecv.getName() == "offlTT_enable")
+        else if(ipRecv.getName() == "offload")
         {
             if(ipRecv.find("toggle"))
             {
