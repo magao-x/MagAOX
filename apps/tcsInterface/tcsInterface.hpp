@@ -442,7 +442,8 @@ void tcsInterface::setupConfig()
    config.add("acqFromGuider.azoff", "", "acqFromGuider.azoff", argType::Required, "acqFromGuider", "azoff", false, "float", "static offset to az component of acquisition vector");
    config.add("acqFromGuider.el0", "", "acqFromGuider.el0", argType::Required, "acqFromGuider", "el0", false, "float", "el component of acquisition vector a 0 zd.");
    config.add("acqFromGuider.eloff", "", "acqFromGuider.eloff", argType::Required, "acqFromGuider", "eloff", false, "float", "static offset to el component of acquisition vector");
-   
+   config.add("acqFromGuider.focus", "", "acqFromGuider.focus", argType::Required, "acqFromGuider", "focus", false, "float", "static offset for focus acquisition");
+
    config.add("offload.TT_avgInt", "", "offload.TT_avgInt", argType::Required, "offload", "TT_avgInt", false, "float", "Woofer to Telescope T/T offload averaging interval [sec] ");
    config.add("offload.TT_gain", "", "offload.TT_gain", argType::Required, "offload", "TT_gain", false, "float", "Woofer to Telescope T/T offload gain");
    config.add("offload.TT_thresh", "", "offload.TT_thresh", argType::Required, "offload", "TT_thresh", false, "float", "Woofer to Telescope T/T offload threshold");
