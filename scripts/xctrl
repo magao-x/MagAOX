@@ -122,9 +122,13 @@ def _check_status(process_name):
     pid = None
     pid_exists = False
     if pid_file_exists:
-        with open(pid_filepath) as pid_file:
-            pid = int(pid_file.read().strip())
-        pid_exists = psutil.pid_exists(pid)
+        try:
+            with open(pid_filepath) as pid_file:
+                pid = int(pid_file.read().strip())
+            pid_exists = psutil.pid_exists(pid)
+        except Exception:
+            pid = -1
+            pid_exists = False
 
     return session_exists, pid_file_exists, pid, pid_exists
 
