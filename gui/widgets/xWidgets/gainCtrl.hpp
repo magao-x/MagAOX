@@ -190,7 +190,6 @@ void gainCtrl::subscribe()
     {
         m_parent->addSubscriberProperty(this, m_device, m_property);
 
-        //m_parent->addSubscriberProperty(this, m_device, m_property + "_name");
     }
 
     m_parent->addSubscriber(ui.status);
@@ -266,15 +265,6 @@ void gainCtrl::handleSetProperty( const pcf::IndiProperty & ipRecv)
       }
    }
 
-    /*if(ipRecv.getName() == m_property + "_name")
-    {
-        if(ipRecv.find("value"))
-        {
-            std::cerr << ipRecv["value"].get() << "\n";
-            ui.label->setText(ipRecv["value"].get().c_str());
-        }
-   }*/
-   
    updateGUI();
 
    ui.status->handleSetProperty(ipRecv);
@@ -289,7 +279,6 @@ void gainCtrl::updateGUI()
       else if(slv > ui.slider->maximum()) slv = ui.slider->maximum();
 
       ui.slider->setValue(slv);
-
    }
 
 } //updateGUI()
