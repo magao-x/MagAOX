@@ -12,6 +12,7 @@ dependencies = [
 ]
 authors = [
   {name = "Joseph D. Long", email = "me@joseph-long.com"},
+  {name = "Sebastiaan Y. Haffert", email = "shaffert@arizona.edu"},
 ]
 
 [project.scripts]
