@@ -33,7 +33,6 @@ CAMERA_CONNECT_RETRY_SEC = 5
 
 def find_active_filter(client, fwname):
     fwelems = client[f"{fwname}.filterName"]
-    fwelems = None
     if fwelems is None:
         return
     for elem in fwelems:
@@ -229,8 +228,6 @@ class VisX(XDevice):
         self.add_property(nv)
 
     def subscribe_to_other_devices(self):
-        self.client.get_properties('camsci1')
-        self.log.debug(f"Got exposure time: {self.client['camsci1.exptime.current']}")
         devices = set()
         for prop in EXTERNAL_RECORDED_PROPERTIES:
             device = prop.split('.')[0]
@@ -238,16 +235,15 @@ class VisX(XDevice):
             self.log.debug(f"subscribe to device: {device}")
         for fw in RECORDED_WHEELS:
             devices.add(fw)
-        self.client.get_properties(devices)
-        for prop in EXTERNAL_RECORDED_PROPERTIES:
-            device = prop.split('.')[0]
-            self.log.debug(f"Got properties: {prop} : {self.client[device]}")
-        self.log.info("Performed get_properties")
+        try:
+            self.client.get_properties_and_wait(devices)
+        except TimeoutError as e:
+            log.warning(f"Timed out waiting to get properties from external INDI devices: {e}")
 
     def setup(self):
         os.makedirs(self.data_directory, exist_ok=True)
         while self.client.status is not constants.ConnectionStatus.CONNECTED:
-            self.log.info(f"Connecting to INDI as a client to get {list(EXTERNAL_RECORDED_PROPERTIES.keys())}...")
+            self.log.info(f"Connecting to INDI as a client to get {list(EXTERNAL_RECORDED_PROPERTIES.keys())} and {RECORDED_WHEELS}...")
             time.sleep(1)
         self.log.info(f"INDI client connection: {self.client.status}")
         self.subscribe_to_other_devices()
