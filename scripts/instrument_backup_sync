@@ -27,7 +27,7 @@ $rsyncWithOptions /srv/rtc/data/telem/ $dest/rtc/telem/
 
 mkdir -p $dest/icc/{cacao,logs,rawimages,telem}
 # TODO rename it
-if [[ ! -e /srv/icc/data/cacao-icc ]]; then
+if [[ -e /srv/icc/data/cacao-icc ]]; then
     $rsyncWithOptions /srv/icc/data/cacao-icc/ $dest/icc/cacao/
 else
     $rsyncWithOptions /srv/icc/data/cacao/ $dest/icc/cacao/
