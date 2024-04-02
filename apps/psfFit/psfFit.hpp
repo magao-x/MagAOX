@@ -10,6 +10,9 @@
 #include "../../libMagAOX/libMagAOX.hpp" //Note this is included on command line to trigger pch
 #include "../../magaox_git_version.h"
 
+#include <mx/math/fit/fitGaussian.hpp>
+#include <mx/improc/imageFilters.hpp>
+
 /** \defgroup psfFit 
   * \brief The MagAO-X PSF fitter.
   *
@@ -92,11 +95,13 @@ protected:
     uint16_t m_fitCircBuffMaxLength {3600}; ///< Maximum length of the latency measurement circular buffers
     float m_fitCircBuffMaxTime {5}; ///< Maximum time of the latency meaurement circular buffers
 
+    float m_fwhmGuess {2};
    ///@}
 
-   mx::improc::eigenImage<float> m_image;
+    mx::improc::eigenImage<float> m_image;
+    mx::improc::eigenImage<float> m_sm;
 
-   mx::improc::eigenImage<float> m_dark;
+    mx::improc::eigenImage<float> m_dark;
    
     bool m_updated {false};
     float m_x {0};
@@ -117,6 +122,9 @@ protected:
     float m_rmsx {0};
     float m_mny  {0};
     float m_rmsy {0};
+
+    //Working memory for poke fitting
+    mx::math::fit::fitGaussian2Dsym<float> m_gfit;
 
 public:
    /// Default c'tor.
@@ -338,6 +346,15 @@ int psfFit::appStartup()
       REG_INDI_SETPROP(m_indiP_fpsSource, m_fpsSource, std::string("fps"));
    }
 
+   CREATE_REG_INDI_NEW_NUMBERF(m_indiP_dx, "dx", -100, 100, 1e-2, "%0.02f", "", "");
+   m_indiP_dx["current"].setValue(m_dx);
+   m_indiP_dx["target"].setValue(m_dx);
+
+   CREATE_REG_INDI_NEW_NUMBERF(m_indiP_dy, "dy", -100, 100, 1e-2, "%0.02f", "", "");
+   m_indiP_dy["current"].setValue(m_dy);
+   m_indiP_dy["target"].setValue(m_dy);
+
+
    state(stateCodes::OPERATING);
    
    return 0;
@@ -414,6 +431,9 @@ int psfFit::appLogic()
       log<software_error>({__FILE__, __LINE__});
    }
 
+   updateIfChanged(m_indiP_dx, "current", m_dx);
+   updateIfChanged(m_indiP_dy, "current", m_dy);
+
    return 0;
 }
 
@@ -436,7 +456,10 @@ int psfFit::allocate(const dev::shmimT & dummy)
     std::lock_guard<std::mutex> guard(m_imageMutex);
 
     m_image.resize(shmimMonitorT::m_width, shmimMonitorT::m_height);
-   
+    m_image.setZero();
+
+    m_sm.resize(m_image.rows(), m_image.cols());
+
     if(m_fitCircBuffMaxLength == 0 || m_fitCircBuffMaxTime == 0 || m_fps <= 0)
     {
         m_xcb.maxEntries(0);
@@ -458,35 +481,58 @@ int psfFit::allocate(const dev::shmimT & dummy)
    
 inline
 int psfFit::processImage( void* curr_src,
-                            const dev::shmimT & dummy
-                          )
+                          const dev::shmimT & dummy
+                        )
 {
     static_cast<void>(dummy);
    
     std::unique_lock<std::mutex> lock(m_imageMutex);
    
-    if(m_dark.rows() == m_image.rows() && m_dark.cols() == m_dark.cols())
+    if(m_dark.rows() == m_image.rows() && m_dark.cols() == m_image.cols())
     {
         for(unsigned nn=0; nn < shmimMonitorT::m_width*shmimMonitorT::m_height; ++nn)
         {
-            m_image.data()[nn] += ((float*)curr_src) [nn] - m_dark.data()[nn];
+            m_image.data()[nn] = ((uint16_t*)curr_src) [nn] - m_dark.data()[nn];
         }
     }
     else
     {
         for(unsigned nn=0; nn < shmimMonitorT::m_width*shmimMonitorT::m_height; ++nn)
         {
-            m_image.data()[nn] += ((float*)curr_src) [nn];
+            m_image.data()[nn] = ((uint16_t*)curr_src) [nn];
         }
     }
 
     lock.unlock();
 
     // fit
+    //std::cerr << m_image.sum() << "\n";
+    
+    //float max;
+    //int x=0;
+    //int y=0;
+
+    //max = m_image.maxCoeff(&x, &y);
+
+    //mx::improc::medianSmooth(m_sm, x, y, max, m_image, 3);
+
     mx::improc::imageCenterOfLight(m_x, m_y, m_image);
 
 
-    // update positiosn
+    /*if(fabs(m_x-x) > 2 || fabs(m_y-y) > 2)
+    {
+        std::cerr << "skip frame\n";
+        return 0;
+    }*/
+/*
+    m_gfit.set_itmax(1000);
+    m_gfit.setArray(m_image.data(), m_image.rows(), m_image.cols());
+    m_gfit.setGuess(0, max, x, y, mx::math::func::sigma2fwhm(m_fwhmGuess));
+    m_gfit.fit();
+
+    m_x = m_gfit.x0();
+    m_y = m_gfit.y0();
+*/
 
 
     m_updated = true;

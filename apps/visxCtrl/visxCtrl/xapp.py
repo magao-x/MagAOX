@@ -18,13 +18,13 @@ from .qhyccd import QHYCCDSDK, QHYCCDCamera
 log = logging.getLogger(__name__)
 
 EXTERNAL_RECORDED_PROPERTIES = {
-	'tcsi.catalog.object': 'OBJECT',
+    'tcsi.catalog.object': 'OBJECT',
     'tcsi.catdata.ra': None,
     'tcsi.catdata.dec': None,
     'tcsi.catdata.epoch': None,
     'observers.current_observer.full_name': 'OBSERVER',
     'tcsi.teldata.pa': 'PARANG',
-    'flipacq.position.in': None,
+    'flipacq.presetName.in': None,
 }
 
 RECORDED_WHEELS = ('fwfpm', 'fwlyot')
@@ -43,7 +43,7 @@ def find_active_filter(client, fwname):
 class VisXConfig(BaseConfig):
     full_sdk_path : str = xconf.field(default='/usr/local/lib/libqhyccd.so')
     temp_on_target_pct_diff : float = xconf.field(default=0.05, help="Absolute percent difference between temperature setpoint and currently reported value")
-
+    startup_temp : float = xconf.field(default=-15, help='Startup temperature of the camera.')
 class VisX(XDevice):
     config : VisXConfig
     # us
@@ -158,7 +158,7 @@ class VisX(XDevice):
         # Find camera
         self.camera = QHYCCDCamera(self.sdk, 0)
         self.exposure_time_sec = self.camera.exposure_time
-        self.temp_target_deg_c = self.camera.target_temperature
+        self.temp_target_deg_c = self.config.startup_temp
         self.camera_gain = self.camera.gain
         return True
 
@@ -208,11 +208,11 @@ class VisX(XDevice):
         nv = properties.NumberVector(name='temp_ccd', perm=constants.PropertyPerm.READ_WRITE)
         nv.add_element(DefNumber(
             name='current', label='Current temperature (deg C)', format='%3.3f',
-            min=-100, max=100, step=0.1, _value=self.temp_target_deg_c
+            min=-100, max=500, step=0.1, _value=self.temp_target_deg_c
         ))
         nv.add_element(DefNumber(
             name='target', label='Requested temperature (deg C)', format='%3.3f',
-            min=-100, max=100, step=0.1, _value=self.temp_target_deg_c
+            min=-100, max=500, step=0.1, _value=self.temp_target_deg_c
         ))
         self.add_property(nv, callback=self.handle_temp_ccd)
 

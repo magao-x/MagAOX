@@ -1002,6 +1002,12 @@ void streamWriter::fgThreadExec()
                if(cnt0flag > 10) m_restart = true; //if we get here 10 times then something else is wrong.
                continue;
             }
+
+            if(new_cnt0 - last_cnt0 > 1)
+            {
+                log<text_log>("cnt0 changed by more than 1. Frame skipped.", logPrio::LOG_WARNING);
+            }
+
             cnt0flag = 0;
 
             last_cnt0 = new_cnt0;
