@@ -10,30 +10,35 @@ fi
 bash create_oemdrv.sh
 bash download_rocky_iso.sh
 bash download_firmware.sh
+cp ./input/firmware/AAVMF_VARS.fd ./output/AAVMF_VARS.fd
 if [[ $(uname -p) == "arm" ]]; then
     cpuType="host"
+    accelFlag=",accel=hvf:kvm"
 else
     cpuType="cortex-a72"
+    accelFlag=""
 fi
 echo "Starting VM installation process..."
 qemu-system-aarch64 \
     -name xvm \
     -cdrom ./input/iso/Rocky-9.3-aarch64-minimal.iso \
     -netdev user,id=user.0 \
+    -device virtio-keyboard-pci -device virtio-mouse-pci \
     -smp 4 \
-    -machine type=virt \
+    -machine type=virt$accelFlag \
     -cpu $cpuType \
     -drive if=pflash,format=raw,id=ovmf_code,readonly=on,file=./input/firmware/AAVMF_CODE.fd \
-    -drive if=pflash,format=raw,id=ovmf_vars,file=./input/firmware/AAVMF_VARS.fd \
+    -drive if=pflash,format=raw,id=ovmf_vars,file=./output/AAVMF_VARS.fd \
     -drive file=output/xvm.qcow2,format=qcow2 \
     -drive file=input/oemdrv.qcow2,format=qcow2 \
     -device virtio-gpu-pci \
     -device virtio-net-pci,netdev=user.0 \
     -boot c \
     -m 4096M \
-    -display none \
+    -display cocoa \
+    -serial stdio \
 || exit 1
-    # -serial stdio \
+    # -display none \
 echo "Created VM and installed Rocky Linux 9.3 with KDE."
 echo "Starting up the VM for MagAO-X software installation..."
 qemu-system-aarch64 \
@@ -41,7 +46,7 @@ qemu-system-aarch64 \
     -netdev user,id=user.0,hostfwd=tcp:127.0.0.1:2201-:22 \
     -device virtio-keyboard-pci -device virtio-mouse-pci \
     -smp 4 \
-    -machine type=virt \
+    -machine type=virt$accelFlag \
     -cpu $cpuType \
     -drive if=pflash,format=raw,id=ovmf_code,readonly=on,file=./input/firmware/AAVMF_CODE.fd \
     -drive if=pflash,format=raw,id=ovmf_vars,file=./input/firmware/AAVMF_VARS.fd \
