@@ -30,7 +30,7 @@ jobs:
           bash download_rocky_iso.sh
       - name: Install QEMU
         run: |
-          apt-get install -y qemu-system
+          sudo apt-get install -y qemu-system
       - name: Generate OEMDRV image
         run: |
           cd $GITHUB_WORKSPACE/setup/xvm/
