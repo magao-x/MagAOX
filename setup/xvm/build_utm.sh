@@ -10,6 +10,11 @@ fi
 bash create_oemdrv.sh
 bash download_rocky_iso.sh
 bash download_firmware.sh
+if [[ $(uname -p) == "arm" ]]; then
+    cpuType="host"
+else
+    cpuType="cortex-a72"
+fi
 echo "Starting VM installation process..."
 qemu-system-aarch64 \
     -name xvm \
@@ -17,7 +22,7 @@ qemu-system-aarch64 \
     -netdev user,id=user.0 \
     -smp 4 \
     -machine type=virt \
-    -cpu host \
+    -cpu $cpuType \
     -drive if=pflash,format=raw,id=ovmf_code,readonly=on,file=./input/firmware/AAVMF_CODE.fd \
     -drive if=pflash,format=raw,id=ovmf_vars,file=./input/firmware/AAVMF_VARS.fd \
     -drive file=output/xvm.qcow2,format=qcow2 \
@@ -37,7 +42,7 @@ qemu-system-aarch64 \
     -device virtio-keyboard-pci -device virtio-mouse-pci \
     -smp 4 \
     -machine type=virt \
-    -cpu host \
+    -cpu $cpuType \
     -drive if=pflash,format=raw,id=ovmf_code,readonly=on,file=./input/firmware/AAVMF_CODE.fd \
     -drive if=pflash,format=raw,id=ovmf_vars,file=./input/firmware/AAVMF_VARS.fd \
     -drive file=output/xvm.qcow2,format=qcow2 \
