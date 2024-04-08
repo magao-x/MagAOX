@@ -16,7 +16,7 @@ if [[ $(uname -p) == "arm" ]]; then
     cpuType="host"
     accelFlag=",highmem=on,accel=hvf:kvm"
 else
-    cpuType="cortex-a72,highmem=on"
+    cpuType="max"
     accelFlag=""
 fi
 echo "Starting VM installation process..."
