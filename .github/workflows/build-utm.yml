@@ -28,16 +28,16 @@ jobs:
         run: |
           cd $GITHUB_WORKSPACE/setup/xvm/
           bash -x download_rocky_iso.sh
-      - name: Install QEMU
-        run: |
-          sudo apt-get update
-          sudo apt-get install -y qemu-system
-      - name: Create VM
-        run: |
-            cd $GITHUB_WORKSPACE/setup/xvm/
-            bash build_utm.sh
-      - name: Upload UTM image
-        uses: actions/upload-artifact@v2
-        with:
-          name: MagAO-X.utm.tar.xz
-          path: $GITHUB_WORKSPACE/setup/xvm/output/MagAO-X.utm.tar.xz
+      # - name: Install QEMU
+      #   run: |
+      #     sudo apt-get update
+      #     sudo apt-get install -y qemu-system
+      # - name: Create VM
+      #   run: |
+      #       cd $GITHUB_WORKSPACE/setup/xvm/
+      #       bash build_utm.sh
+      # - name: Upload UTM image
+      #   uses: actions/upload-artifact@v2
+      #   with:
+      #     name: MagAO-X.utm.tar.xz
+      #     path: $GITHUB_WORKSPACE/setup/xvm/output/MagAO-X.utm.tar.xz
