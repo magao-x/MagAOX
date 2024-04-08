@@ -27,7 +27,7 @@ jobs:
       - name: Download Rocky ISO
         run: |
           cd $GITHUB_WORKSPACE/setup/xvm/
-          bash -x download_rocky_iso.sh
+          bash download_rocky_iso.sh
       # - name: Install QEMU
       #   run: |
       #     sudo apt-get update
