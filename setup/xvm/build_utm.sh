@@ -2,20 +2,21 @@
 mkdir -p output
 # make disk drive image
 qemu-img create -f qcow2 output/xvm.qcow2 64G
+# make ssh key pair
 if [[ ! -e ./input/xvm_key ]]; then
-    ssh-keygen -q -t ed25519 -f ./input/xvm_key -N ''
+    ssh-keygen -q -t ed25519 -f ./output/xvm_key -N ''
 fi
+cp ./output/xvm_key.pub ./input/kickstart/authorized_keys
+# copy kickstart files
 cp -R ./kickstart ./input/
-cp ./input/xvm_key.pub ./input/kickstart/authorized_keys
-rm -f ./input/oemdrv.{dmg,qcow2}
-hdiutil create -srcfolder ./input/kickstart -format UDRO -volname "OEMDRV" -fs "MS-DOS FAT32" ./input/oemdrv.dmg
-qemu-img convert -f dmg -O qcow2 ./input/oemdrv.dmg ./input/oemdrv.qcow2
+# create oemdrv disk image for kickstart files and key
+bash create_oemdrv.sh
 bash download_rocky_iso.sh
 bash download_firmware.sh
 echo "Starting VM installation process..."
 qemu-system-aarch64 \
     -name xvm \
-    -cdrom Rocky-9.3-aarch64-minimal.iso \
+    -cdrom ./input/iso/Rocky-9.3-aarch64-minimal.iso \
     -netdev user,id=user.0 \
     -smp 4 \
     -machine type=virt \
@@ -58,4 +59,4 @@ wait
 cp -R ./utm ./output/MagAO-X.utm
 cd ./output
 mv ./xvm.qcow2 ./MagAO-X.utm/Data/xvm.qcow2
-tar -cJvf ./MagAO-X.utm.tar.xz ./MagAO-X.utm
+tar -cJvf ./MagAO-X.utm.tar.xz ./MagAO-X.utm xvm_key xvm_key.pub
