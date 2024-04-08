@@ -1,4 +1,5 @@
 #!/usr/bin/env bash
+set -x
 mkdir -p output input
 # make disk drive image
 qemu-img create -f qcow2 output/xvm.qcow2 64G
@@ -13,9 +14,9 @@ bash download_firmware.sh
 cp ./input/firmware/AAVMF_VARS.fd ./output/AAVMF_VARS.fd
 if [[ $(uname -p) == "arm" ]]; then
     cpuType="host"
-    accelFlag=",accel=hvf:kvm"
+    accelFlag=",highmem=on,accel=hvf:kvm"
 else
-    cpuType="cortex-a72"
+    cpuType="cortex-a72,highmem=on"
     accelFlag=""
 fi
 echo "Starting VM installation process..."
@@ -35,10 +36,11 @@ qemu-system-aarch64 \
     -device virtio-net-pci,netdev=user.0 \
     -boot c \
     -m 4096M \
-    -display cocoa \
+    -display none \
     -serial stdio \
 || exit 1
-    # -display none \
+    # -display cocoa \
+exit
 echo "Created VM and installed Rocky Linux 9.3 with KDE."
 echo "Starting up the VM for MagAO-X software installation..."
 qemu-system-aarch64 \
