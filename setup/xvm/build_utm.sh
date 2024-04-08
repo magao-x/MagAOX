@@ -31,8 +31,8 @@ qemu-system-aarch64 \
     -device virtio-net-pci,netdev=user.0 \
     -boot c \
     -m 4096M \
+    -display none \
 || exit 1
-    # -display cocoa \
     # -serial stdio \
 echo "Created VM and installed Rocky Linux 9.3 with KDE."
 echo "Starting up the VM for MagAO-X software installation..."
@@ -49,8 +49,8 @@ qemu-system-aarch64 \
     -device virtio-gpu-pci \
     -device virtio-net-pci,netdev=user.0 \
     -m 4096M \
+    -display none \
 &
-    # -display cocoa \
     # -serial stdio \
     # -device virtio-serial \
     # -chardev socket,path=/tmp/qga.sock,server=on,wait=off,id=qga0 \
