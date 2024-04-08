@@ -21,9 +21,9 @@ jobs:
         uses: actions/cache@v2
         with:
           path: setup/xvm/input/iso
-          key: rocky-iso-${{ runner.os }}-${{ hashFiles('setup/xvm/download_rocky_iso.sh') }}
+          key: rocky-iso-${{ hashFiles('setup/xvm/download_rocky_iso.sh') }}
           restore-keys: |
-            rocky-iso-${{ runner.os }}-${{ hashFiles('setup/xvm/download_rocky_iso.sh') }}
+            rocky-iso-${{ hashFiles('setup/xvm/download_rocky_iso.sh') }}
       - name: Download Rocky ISO
         run: |
           cd $GITHUB_WORKSPACE/setup/xvm/
@@ -32,6 +32,12 @@ jobs:
       #   run: |
       #     sudo apt-get update
       #     sudo apt-get install -y qemu-system rpm2cpio cpio
+      - name: Install Homebrew
+        run: |
+          /bin/bash -c "$(curl -fsSL https://raw.githubusercontent.com/Homebrew/install/HEAD/install.sh)"
+      - name: Install QEMU
+        run: |
+          brew install qemu
       - name: Create VM
         run: |
             cd $GITHUB_WORKSPACE/setup/xvm/
