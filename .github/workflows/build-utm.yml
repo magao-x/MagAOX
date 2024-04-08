@@ -9,8 +9,7 @@ on:
 
 jobs:
   build-utm-arm64:
-    runs-on: macos-14
-    # if: ${{ github.event.workflow_run.conclusion == 'success' }}
+    runs-on: ubuntu-latest
     # Sets the permissions granted to the `GITHUB_TOKEN` for the actions in this job.
     permissions:
       contents: read
@@ -18,21 +17,26 @@ jobs:
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
-      - name: Install Homebrew
-        run: |
-          /bin/bash -c "$(curl -fsSL https://raw.githubusercontent.com/Homebrew/install/HEAD/install.sh)"
-      - name: Install QEMU
-        run: |
-          brew install qemu
-    #   - name: Install UTM
-    #     run: |
-    #       brew install utm
-      - name: Create VM
+      - name: Cache Rocky ISO
+        uses: actions/cache@v2
+        with:
+          path: $GITHUB_WORKSPACE/setup/xvm/output
+          key: rocky-iso-${{ runner.os }}-${{ hashFiles('setup/xvm/download_rocky_iso.sh') }}
+          restore-keys: |
+            rocky-iso-${{ runner.os }}-${{ hashFiles('setup/xvm/download_rocky_iso.sh') }}
+      - name: Download Rocky ISO
         run: |
             cd $GITHUB_WORKSPACE/setup/xvm/
-            bash build_utm.sh
-      - name: Upload Homebrew installation script
-        uses: actions/upload-artifact@v2
-        with:
-          name: MagAO-X.utm.tar.xz
-          path: $GITHUB_WORKSPACE/setup/xvm/output/MagAO-X.utm.tar.xz
+            bash download_rocky_iso.sh
+
+    #   - name: Set up QEMU
+    #     uses: docker/setup-qemu-action@v3
+    #   - name: Create VM
+    #     run: |
+    #         cd $GITHUB_WORKSPACE/setup/xvm/
+    #         bash build_utm.sh
+    #   - name: Upload Homebrew installation script
+    #     uses: actions/upload-artifact@v2
+    #     with:
+    #       name: MagAO-X.utm.tar.xz
+    #       path: $GITHUB_WORKSPACE/setup/xvm/output/MagAO-X.utm.tar.xz

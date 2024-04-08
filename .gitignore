@@ -193,6 +193,7 @@ flatlogs/src/logCodes.dat
 .vscode
 .ipynb_checkpoints
 setup/bundle.zip
+setup/xvm/output/
 vm/cache/
 vm/calib/
 vm/config/
