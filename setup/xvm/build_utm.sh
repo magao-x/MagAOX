@@ -12,7 +12,7 @@ bash create_oemdrv.sh
 bash download_rocky_iso.sh
 bash download_firmware.sh
 cp ./input/firmware/AAVMF_VARS.fd ./output/AAVMF_VARS.fd
-if [[ $(uname -p) == "arm" ]]; then
+if [[ $(uname -p) == "arm" && $CI != "true" ]]; then
     cpuType="host"
     accelFlag=",highmem=on,accel=hvf:kvm"
 else
