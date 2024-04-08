@@ -28,12 +28,12 @@ jobs:
         run: |
           cd $GITHUB_WORKSPACE/setup/xvm/
           bash download_rocky_iso.sh
-      - name: Set up QEMU
-        uses: docker/setup-qemu-action@v3
-      - name: Generate OEMDRV image
-        run: |
-            cd $GITHUB_WORKSPACE/setup/xvm/
-            bash create_oemdrv.sh
+      # - name: Set up QEMU
+      #   uses: docker/setup-qemu-action@v3
+      # - name: Generate OEMDRV image
+      #   run: |
+      #       cd $GITHUB_WORKSPACE/setup/xvm/
+      #       bash create_oemdrv.sh
 
     #   - name: Create VM
     #     run: |
