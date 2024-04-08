@@ -20,7 +20,7 @@ jobs:
       - name: Cache Rocky ISO
         uses: actions/cache@v2
         with:
-          path: $GITHUB_WORKSPACE/setup/xvm/output
+          path: $GITHUB_WORKSPACE/setup/xvm/input/iso/
           key: rocky-iso-${{ runner.os }}-${{ hashFiles('setup/xvm/download_rocky_iso.sh') }}
           restore-keys: |
             rocky-iso-${{ runner.os }}-${{ hashFiles('setup/xvm/download_rocky_iso.sh') }}
