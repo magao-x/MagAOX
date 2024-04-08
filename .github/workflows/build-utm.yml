@@ -27,7 +27,7 @@ jobs:
       - name: Download Rocky ISO
         run: |
           cd $GITHUB_WORKSPACE/setup/xvm/
-          bash download_rocky_iso.sh
+          bash -x download_rocky_iso.sh
       - name: Install QEMU
         run: |
           sudo apt-get update
@@ -35,7 +35,7 @@ jobs:
       - name: Generate OEMDRV image
         run: |
           cd $GITHUB_WORKSPACE/setup/xvm/
-          bash create_oemdrv.sh
+          bash -x create_oemdrv.sh
 
     #   - name: Create VM
     #     run: |
