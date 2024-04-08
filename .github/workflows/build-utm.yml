@@ -20,7 +20,7 @@ jobs:
       - name: Cache Rocky ISO
         uses: actions/cache@v2
         with:
-          path: $GITHUB_WORKSPACE/setup/xvm/input/iso/
+          path: $GITHUB_WORKSPACE/setup/xvm/input/iso
           key: rocky-iso-${{ runner.os }}-${{ hashFiles('setup/xvm/download_rocky_iso.sh') }}
           restore-keys: |
             rocky-iso-${{ runner.os }}-${{ hashFiles('setup/xvm/download_rocky_iso.sh') }}
@@ -32,17 +32,12 @@ jobs:
         run: |
           sudo apt-get update
           sudo apt-get install -y qemu-system
-      - name: Generate OEMDRV image
+      - name: Create VM
         run: |
-          cd $GITHUB_WORKSPACE/setup/xvm/
-          bash -x create_oemdrv.sh
-
-    #   - name: Create VM
-    #     run: |
-    #         cd $GITHUB_WORKSPACE/setup/xvm/
-    #         bash build_utm.sh
-    #   - name: Upload Homebrew installation script
-    #     uses: actions/upload-artifact@v2
-    #     with:
-    #       name: MagAO-X.utm.tar.xz
-    #       path: $GITHUB_WORKSPACE/setup/xvm/output/MagAO-X.utm.tar.xz
+            cd $GITHUB_WORKSPACE/setup/xvm/
+            bash build_utm.sh
+      - name: Upload UTM image
+        uses: actions/upload-artifact@v2
+        with:
+          name: MagAO-X.utm.tar.xz
+          path: $GITHUB_WORKSPACE/setup/xvm/output/MagAO-X.utm.tar.xz

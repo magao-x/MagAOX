@@ -2,6 +2,10 @@
 mkdir -p output input
 # make disk drive image
 qemu-img create -f qcow2 output/xvm.qcow2 64G
+# make ssh key pair
+if [[ ! -e ./output/xvm_key ]]; then
+    ssh-keygen -q -t ed25519 -f ./output/xvm_key -N ''
+fi
 # create oemdrv disk image for kickstart files and key
 bash create_oemdrv.sh
 bash download_rocky_iso.sh
