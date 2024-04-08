@@ -1,9 +1,11 @@
 name: Build UTM ARM virtual machine
 on:
-  workflow_run:
-    workflows: ["Rocky build"]
-    types: [completed]
-    branches: [dev]
+  push:
+    branches: [xvm-dev]
+#   workflow_run:
+#     workflows: ["Rocky build"]
+#     types: [completed]
+#     branches: [xvm-dev]
 
 jobs:
   build-utm-arm64:
@@ -34,4 +36,3 @@ jobs:
         with:
           name: MagAO-X.utm.tar.xz
           path: $GITHUB_WORKSPACE/setup/xvm/output/MagAO-X.utm.tar.xz
-
