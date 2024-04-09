@@ -22,7 +22,7 @@ qemu-system-aarch64 \
     -drive file=output/xvm.qcow2,format=qcow2 \
     -device virtio-gpu-pci \
     -device virtio-net-pci,netdev=user.0 \
-    -m 4096M \
+    -m 8192M \
     -display none \
 &
     # -serial stdio \
