@@ -39,7 +39,7 @@ qemu-system-aarch64 \
     -device virtio-gpu-pci \
     -device virtio-net-pci,netdev=user.0 \
     -boot c \
-    -m 4096M \
+    -m 8192M \
     -display none \
 || exit 1
 cp -v ./output/xvm.qcow2 ./output/xvm_stage1.qcow2
