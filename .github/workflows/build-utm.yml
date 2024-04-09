@@ -45,15 +45,16 @@ jobs:
           /bin/bash -c "$(curl -fsSL https://raw.githubusercontent.com/Homebrew/install/HEAD/install.sh)"
       - name: Install QEMU
         run: |
+          sysctl machdep.cpu
           brew install qemu
       - name: Create VM and install Rocky 9
         run: |
             cd $GITHUB_WORKSPACE/setup/xvm/
             bash build_vm_stage1.sh
-      # - name: Install MagAO-X software
-      #   run: |
-      #       cd $GITHUB_WORKSPACE/setup/xvm/
-      #       bash build_vm_stage2.sh
+      - name: Install MagAO-X software
+        run: |
+            cd $GITHUB_WORKSPACE/setup/xvm/
+            bash build_vm_stage2.sh
       - name: Create UTM bundle
         run: |
             cd $GITHUB_WORKSPACE/setup/xvm/
@@ -63,4 +64,6 @@ jobs:
         with:
           name: MagAO-X_VM
           path: |
-            setup/xvm/output/MagAO-X.utm
+            setup/xvm/output/MagAO-X_VM_bundle.tar.xz
+            setup/xvm/output/xvm_key
+            setup/xvm/output/xvm_key.pub
