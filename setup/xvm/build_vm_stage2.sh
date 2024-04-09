@@ -30,6 +30,6 @@ qemu-system-aarch64 \
     # -chardev socket,path=/tmp/qga.sock,server=on,wait=off,id=qga0 \
     # -device virtserialport,chardev=qga0,name=org.qemu.guest_agent.0 \
 sleep 30
-ssh -p 2201 -o "UserKnownHostsFile /dev/null" -o "StrictHostKeyChecking=no" -i ./input/xvm_key xdev@localhost 'bash -s' < ./bootstrap_magao-x.sh
+ssh -p 2201 -o "UserKnownHostsFile /dev/null" -o "StrictHostKeyChecking=no" -i ./input/xvm_key xdev@localhost 'bash -s' < ./bootstrap_magao-x.sh || exit 1
 wait
 echo "Finished installing MagAO-X software."

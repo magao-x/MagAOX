@@ -31,6 +31,8 @@ jobs:
             setup/xvm/output/xvm_stage1.qcow2
             setup/xvm/output/xvm_key.pub
             setup/xvm/output/xvm_key
+            setup/xvm/output/AAVMF_VARS.fd
+            setup/xvm/input/firmware/AAVMF_CODE.fd
           key: rocky-iso-${{ runner.os }}-${{ hashFiles('setup/xvm/download_rocky_iso.sh,setup/xvm/build_vm_stage1.sh,setup/xvm/download_firmware.sh,setup/xvm/create_oemdrv.sh,setup/xvm/kickstart/ks.cfg') }}
           restore-keys: |
             rocky-iso-${{ runner.os }}-${{ hashFiles('setup/xvm/download_rocky_iso.sh,setup/xvm/build_vm_stage1.sh,setup/xvm/download_firmware.sh,setup/xvm/create_oemdrv.sh,setup/xvm/kickstart/ks.cfg') }}
