@@ -52,10 +52,6 @@ jobs:
         run: |
             cd $GITHUB_WORKSPACE/setup/xvm/
             bash build_vm_stage1.sh
-            cp -R ./utm ./output/MagAO-X.utm
-            cd ./output
-            mv ./xvm.qcow2 ./MagAO-X.utm/Data/xvm.qcow2
-            tar -cJvf ./MagAO-X.utm.tar.xz ./MagAO-X.utm xvm_key xvm_key.pub
       - name: Install MagAO-X software
         run: |
             cd $GITHUB_WORKSPACE/setup/xvm/
@@ -67,5 +63,6 @@ jobs:
       - name: Upload UTM image
         uses: actions/upload-artifact@v2
         with:
-          name: MagAO-X.utm.tar.xz
-          path: setup/xvm/output/MagAO-X.utm.tar.xz
+          name: MagAO-X_VM
+          path: |
+            setup/xvm/output/MagAO-X.utm
