@@ -56,10 +56,10 @@ jobs:
             cd ./output
             mv ./xvm.qcow2 ./MagAO-X.utm/Data/xvm.qcow2
             tar -cJvf ./MagAO-X.utm.tar.xz ./MagAO-X.utm xvm_key xvm_key.pub
-      # - name: Install MagAO-X software
-      #   run: |
-      #       cd $GITHUB_WORKSPACE/setup/xvm/
-      #       bash build_vm_stage2.sh
+      - name: Install MagAO-X software
+        run: |
+            cd $GITHUB_WORKSPACE/setup/xvm/
+            bash build_vm_stage2.sh
       - name: Create UTM bundle
         run: |
             cd $GITHUB_WORKSPACE/setup/xvm/
