@@ -18,14 +18,14 @@ jobs:
       - name: Checkout repository
         uses: actions/checkout@v4
       - name: Cache Rocky ISO
-        uses: actions/cache@v2
+        uses: actions/cache@v4
         with:
           path: setup/xvm/input/iso
           key: rocky-iso-${{ hashFiles('setup/xvm/download_rocky_iso.sh') }}
           restore-keys: |
             rocky-iso-${{ hashFiles('setup/xvm/download_rocky_iso.sh') }}
       - name: Cache first stage VM
-        uses: actions/cache@v2
+        uses: actions/cache@v4
         with:
           path: |
             setup/xvm/output/xvm_stage1.qcow2
