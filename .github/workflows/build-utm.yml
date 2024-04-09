@@ -24,6 +24,16 @@ jobs:
           key: rocky-iso-${{ hashFiles('setup/xvm/download_rocky_iso.sh') }}
           restore-keys: |
             rocky-iso-${{ hashFiles('setup/xvm/download_rocky_iso.sh') }}
+      - name: Cache first stage VM
+        uses: actions/cache@v2
+        with:
+          path: |
+            setup/xvm/output/xvm_stage1.qcow2
+            setup/xvm/output/xvm_key.pub
+            setup/xvm/output/xvm_key
+          key: rocky-iso-${{ runner.os }}-${{ hashFiles('setup/xvm/download_rocky_iso.sh,setup/xvm/build_vm_stage1.sh,setup/xvm/download_firmware.sh,setup/xvm/create_oemdrv.sh,setup/xvm/kickstart/ks.cfg') }}
+          restore-keys: |
+            rocky-iso-${{ runner.os }}-${{ hashFiles('setup/xvm/download_rocky_iso.sh,setup/xvm/build_vm_stage1.sh,setup/xvm/download_firmware.sh,setup/xvm/create_oemdrv.sh,setup/xvm/kickstart/ks.cfg') }}
       - name: Download Rocky ISO
         run: |
           cd $GITHUB_WORKSPACE/setup/xvm/
@@ -41,7 +51,7 @@ jobs:
       - name: Create VM and install Rocky 9
         run: |
             cd $GITHUB_WORKSPACE/setup/xvm/
-            bash build_utm_stage1.sh
+            bash build_vm_stage1.sh
             cp -R ./utm ./output/MagAO-X.utm
             cd ./output
             mv ./xvm.qcow2 ./MagAO-X.utm/Data/xvm.qcow2
@@ -49,7 +59,11 @@ jobs:
       # - name: Install MagAO-X software
       #   run: |
       #       cd $GITHUB_WORKSPACE/setup/xvm/
-      #       bash build_utm_stage2.sh
+      #       bash build_vm_stage2.sh
+      - name: Create UTM bundle
+        run: |
+            cd $GITHUB_WORKSPACE/setup/xvm/
+            bash bundle_utm.sh
       - name: Upload UTM image
         uses: actions/upload-artifact@v2
         with:

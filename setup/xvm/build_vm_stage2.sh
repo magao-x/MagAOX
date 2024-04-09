@@ -1,5 +1,15 @@
 #!/usr/bin/env bash
 echo "Starting up the VM for MagAO-X software installation..."
+if [[ -e ./output/xvm_stage1.qcow2 ]]; then
+    cp ./output/xvm_stage1.qcow2 ./output/xvm.qcow2
+fi
+if [[ $(uname -p) == "arm" && $CI != "true" ]]; then
+    cpuType="host"
+    accelFlag=",highmem=on,accel=hvf:kvm"
+else
+    cpuType="max"
+    accelFlag=""
+fi
 qemu-system-aarch64 \
     -name xvm \
     -netdev user,id=user.0,hostfwd=tcp:127.0.0.1:2201-:22 \
@@ -22,7 +32,4 @@ qemu-system-aarch64 \
 sleep 30
 ssh -p 2201 -o "UserKnownHostsFile /dev/null" -o "StrictHostKeyChecking=no" -i ./input/xvm_key xdev@localhost 'bash -s' < ./bootstrap_magao-x.sh
 wait
-cp -R ./utm ./output/MagAO-X.utm
-cd ./output
-mv ./xvm.qcow2 ./MagAO-X.utm/Data/xvm.qcow2
-tar -cJvf ./MagAO-X.utm.tar.xz ./MagAO-X.utm xvm_key xvm_key.pub
+echo "Finished installing MagAO-X software."

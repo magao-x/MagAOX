@@ -1,5 +1,9 @@
 #!/usr/bin/env bash
 set -x
+if [[ -e ./output/xvm_stage1.qcow2 ]]; then
+    echo "Stage one image populated from cache. Skipping stage one."
+    exit 0
+fi
 mkdir -p output input
 # make disk drive image
 qemu-img create -f qcow2 output/xvm.qcow2 64G
@@ -38,4 +42,5 @@ qemu-system-aarch64 \
     -m 4096M \
     -display none \
 || exit 1
+cp -v ./output/xvm.qcow2 ./output/xvm_stage1.qcow2
 echo "Created VM and installed Rocky Linux 9.3 with KDE."
