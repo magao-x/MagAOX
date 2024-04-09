@@ -18,7 +18,7 @@ qemu-system-aarch64 \
     -machine type=virt$accelFlag \
     -cpu $cpuType \
     -drive if=pflash,format=raw,id=ovmf_code,readonly=on,file=./input/firmware/AAVMF_CODE.fd \
-    -drive if=pflash,format=raw,id=ovmf_vars,file=./input/firmware/AAVMF_VARS.fd \
+    -drive if=pflash,format=raw,id=ovmf_vars,file=./output/AAVMF_VARS.fd \
     -drive file=output/xvm.qcow2,format=qcow2 \
     -device virtio-gpu-pci \
     -device virtio-net-pci,netdev=user.0 \
