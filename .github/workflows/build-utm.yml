@@ -50,10 +50,10 @@ jobs:
         run: |
             cd $GITHUB_WORKSPACE/setup/xvm/
             bash build_vm_stage1.sh
-      # - name: Install MagAO-X software
-      #   run: |
-      #       cd $GITHUB_WORKSPACE/setup/xvm/
-      #       bash build_vm_stage2.sh
+      - name: Install MagAO-X software
+        run: |
+            cd $GITHUB_WORKSPACE/setup/xvm/
+            bash build_vm_stage2.sh
       - name: Create UTM bundle
         run: |
             cd $GITHUB_WORKSPACE/setup/xvm/
