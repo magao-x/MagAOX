@@ -1,17 +1,20 @@
+import json
+import glob
 import datetime
+from datetime import timezone
 import os.path
 import sys
 from functools import partial
 import logging
 import subprocess
 import psutil
-from purepyindi2 import Device, transports
-import toml
+from purepyindi2 import Device, transports, messages
+from purepyindi2.properties import IndiProperty
 import typing
-
-log = logging.getLogger(__name__)
-
 import xconf
+
+# n.b. replaced with logger scoped to device name during device init
+log = logging.getLogger()
 
 @xconf.config
 class BaseConfig:
@@ -49,18 +52,87 @@ class BaseConfig:
             raise xconf.ConfigMismatch(e, raw_config)
         return instance
 
+class MagAOXLogFormatter(logging.Formatter):
+    def formatTime(self, record, datefmt):
+        return datetime.datetime.fromtimestamp(record.created, datetime.timezone.utc).strftime('%Y-%m-%dT%H:%M:%S.%f000')
+
+def compress_files_glob(pattern, latest_filename=None):
+    '''GZip compress files matching a glob pattern,
+    omitting a "latest" file optionally'''
+    for fn in glob.glob(pattern):
+        if latest_filename is not None and fn.endswith(latest_filename):
+            # don't gzip our empty log right after opening (and we
+            # need to open it first in case we need to log problems
+            # with compression)
+            continue
+        path_to_text_log = os.path.realpath(fn)
+        return_code = subprocess.call(["gzip", path_to_text_log])
+        if return_code != 0:
+            log.error(f"Unable to compress {path_to_text_log} with gzip")
+        else:
+            log.debug(f"Compressed existing file: {fn}")
+
+def init_logging(logger : logging.Logger, destination, console_log_level, file_log_level, all_verbose):
+    root = logging.getLogger()
+    root.setLevel(logging.WARN)
+    if all_verbose:
+        file_log_level = console_log_level = logging.DEBUG
+        logger = root
+    log_format = '%(asctime)s %(levelname)s %(message)s (%(name)s:%(funcName)s:%(lineno)d)'
+    file_handler = logging.FileHandler(destination)
+
+    logger.addHandler(file_handler)
+    file_handler.setLevel(file_log_level)
+
+    console = logging.StreamHandler()
+    console.setLevel(console_log_level)
+    logger.addHandler(console)
+    logger.setLevel(min(file_log_level, console_log_level))
+
+    formatter = MagAOXLogFormatter(log_format)
+    console.setFormatter(formatter)
+    file_handler.setFormatter(formatter)
+    logger.info(f"Logging to {destination}")
+
+LINE_BUFFERED = 1
+
+
+LOG_FILENAME_TIMESTAMP_FORMAT = "%Y-%m-%dT%H%M%S"
+
+class IndiDeviceHandler(logging.Handler):
+    def __init__(self, device: Device, *args, **kwargs):
+        self.device = device
+        super().__init__(*args, **kwargs)
+    def emit(self, record: logging.LogRecord):
+        if logging.WARNING > record.levelno >= logging.INFO:
+            level_text = 'INFO '
+        elif logging.ERROR > record.levelno >= logging.WARNING:
+            level_text = 'WARN '
+        elif logging.CRITICAL > record.levelno >= logging.ERROR:
+            level_text = 'ERR  '
+        elif record.levelno >= logging.CRITICAL:
+            level_text = 'CRIT '
+        else:
+            return
+        msg = level_text + record.getMessage()
+        if self.device.connected:
+            self.device.connection.send(messages.Message(message=msg, device=self.device.name, timestamp=datetime.datetime.now(timezone.utc)))
 
 class XDevice(Device):
     prefix_dir : str  = "/opt/MagAOX"
     logs_dir : str = "logs"
     config_dir : str = "config"
+    telem_dir : str = "telem"
     log : logging.Logger
     config : BaseConfig
 
     @classmethod
-    @property
-    def default_config_path(cls):
-        return cls.prefix_dir + "/" + cls.config_dir + "/" + cls.__name__ + ".conf"
+    def get_default_config_prefix(cls):
+        return cls.prefix_dir + "/" + cls.config_dir + "/"
+
+    @classmethod
+    def get_default_config_path(cls):
+        return cls.get_default_config_prefix() + cls.__name__ + ".conf"
 
     @property
     def sleep_interval_sec(self):
@@ -71,40 +143,62 @@ class XDevice(Device):
         return self.config.sleep_interval_sec
 
     @classmethod
-    def load_config(cls, filenames, overrides):
-        config_class : BaseConfig = typing.get_type_hints(cls)['config']
-        return config_class.from_config(cls.default_config_path, filenames, settings_strs=overrides)
+    def load_config(cls, filenames=None, overrides=None):
+        config_class : type = typing.get_type_hints(cls)['config']
+        return config_class.from_config(cls.get_default_config_path(), filenames, settings_strs=overrides)
 
     def _init_logs(self, verbose, all_verbose):
-        self.log = logging.getLogger(self.name)
-        log_dir = self.prefix_dir + "/" + self.logs_dir + "/" + self.name + "/"
+        global log
+        log = self.log = logging.getLogger(self.name)
+        log_dir = self.prefix_dir + "/" + self.logs_dir + "/" + self.name
         os.makedirs(log_dir, exist_ok=True)
-        self.log.debug(f"Made (or found) {log_dir=}")
-        timestamp = datetime.datetime.now().strftime("%Y-%m-%dT%H%M%S")
-        log_file_path = log_dir + "/" + f"{self.name}_{timestamp}.log"
-        log_format = '%(filename)s:%(lineno)d: [%(levelname)s] %(message)s'
-        logging.basicConfig(
-            level='INFO',
-            filename=log_file_path,
-            format=log_format
-        )
-        if verbose:
-            self.log.setLevel(logging.DEBUG)
-        if all_verbose:
-            logging.getLogger().setLevel(logging.DEBUG)
-        # Specifying a filename results in no console output, so add it back
-        console = logging.StreamHandler()
-        console.setLevel(logging.DEBUG)
-        logging.getLogger('').addHandler(console)
-        formatter = logging.Formatter(log_format)
-        console.setFormatter(formatter)
-        self.log.info(f"Logging to {log_file_path}")
+        timestamp = self._startup_time.strftime(LOG_FILENAME_TIMESTAMP_FORMAT)
+        log_file_name = f"{self.name}_{timestamp}.log"
+        log_file_path = log_dir + "/" + log_file_name
+        init_logging(
+            log,
+            log_file_path,
+            console_log_level=logging.DEBUG if verbose else logging.INFO,
+            file_log_level=logging.DEBUG if verbose else logging.INFO,
+            all_verbose=all_verbose)
+        compress_files_glob(log_dir + f"/{self.name}_*.log", latest_filename=log_file_name)
+        log.addHandler(IndiDeviceHandler(self, level=logging.INFO))
 
-    def __init__(self, name, *args, verbose=False, all_verbose=False, **kwargs):
+    def _init_telem(self):
+        telem_dir = self.prefix_dir + "/" + self.telem_dir + "/" + self.name
+        timestamp = self._startup_time.strftime(LOG_FILENAME_TIMESTAMP_FORMAT)
+        telem_file_name = f"{self.name}_{timestamp}.ndjson"
+        os.makedirs(telem_dir, exist_ok=True)
+        telem_file_path = telem_dir + "/" + telem_file_name
+        self._telem_file = open(telem_file_path, 'wt', buffering=LINE_BUFFERED, encoding='utf8')
+        compress_files_glob(telem_dir + f"/{self.name}_*.ndjson", latest_filename=telem_file_name)
+        self.log.info(f"Telemetrying to {telem_file_path}")
+
+    def telem(self, event : str, message : typing.Union[str, dict[str, typing.Any]]):
+        current_ts_str = datetime.datetime.now().isoformat() + "000"  # zeros for consistency with MagAO-X timestamps with ns
+        payload = {
+            "ts": current_ts_str,
+            "prio": "TELM",
+            "ec": event,
+            "msg": message,
+        }
+        json.dump(payload, self._telem_file, default=str)
+        self._telem_file.write('\n')
+
+    def update_property(self, prop : IndiProperty):
+        super().update_property(prop)
+        self.telem('telem_indi_set', prop.to_serializable())
+
+    def __del__(self):
+        self._telem_file.close()
+
+    def __init__(self, name, config, *args, verbose=False, all_verbose=False, **kwargs):
+        self._startup_time = datetime.datetime.now(timezone.utc)
         fifos_root = self.prefix_dir + "/drivers/fifos"
         super().__init__(name, *args, connection_class=partial(transports.IndiFifoConnection, name=name, fifos_root=fifos_root), **kwargs)
-        self.config = self.load_config()
+        self.config = config
         self._init_logs(verbose, all_verbose)
+        self._init_telem()
 
     def lock_pid_file(self):
         pid_dir = self.prefix_dir + f"/sys/{self.name}"
@@ -144,8 +238,16 @@ class XDevice(Device):
         if args.help:
             xconf.print_help(config_class, parser)
             sys.exit(0)
+
+        config_files = [args.config_file if args.name is None else cls.get_default_config_path]
+        if args.name is not None:
+            config_files = [os.path.join(cls.get_default_config_prefix(), args.name + '.conf')]
+        elif len(args.config_file):
+            config_files = args.config_file
+        else:
+            config_files = None
+        config = cls.load_config(config_files, args.vars)
         if args.dump_config:
-            config = cls.load_config(args.config_file, args.vars)
             print(xconf.config_to_toml(config))
             sys.exit(0)
-        cls(name=args.name, verbose=args.verbose, all_verbose=args.all_verbose).main()
+        cls(name=args.name, config=config, verbose=args.verbose, all_verbose=args.all_verbose).main()

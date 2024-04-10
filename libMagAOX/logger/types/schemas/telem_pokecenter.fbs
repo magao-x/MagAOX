@@ -1,0 +1,15 @@
+namespace MagAOX.logger;
+
+
+
+table Telem_pokecenter_fb
+{
+   measuring:uint8;
+   pupil_x:float;
+   pupil_y:float;
+   poke_x:[float];
+   poke_y:[float];
+}
+
+root_type Telem_pokecenter_fb;
+

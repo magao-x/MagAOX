@@ -13,7 +13,7 @@ cd /opt/MagAOX/vendor/teledyne/pvcam
 
 chmod +x ./$PVCAM_RUNFILE
 if [[ ! -e /opt/pvcam/etc/profile.d/pvcam.sh ]]; then
-    echo 'y\nn\n' | bash ./$PVCAM_RUNFILE || exit_error "Couldn't install Teledyne Photometrics PVCam for Kinetix"
+    echo 'y\nn\n' | bash ./$PVCAM_RUNFILE || error_exit "Couldn't install Teledyne Photometrics PVCam for Kinetix"
     log_success "Ran Teledyne Photometrics PVCam installer for Kinetix"
 else
     log_info "Existing PVCam install found, use the originall installer or /opt/pvcam/pvcam.uninstall.sh to remove"

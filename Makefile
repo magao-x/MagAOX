@@ -14,11 +14,19 @@ apps_common = \
 	timeSeriesSimulator
 
 apps_rtcicc = \
-	bmcCtrl \
-	rhusbMon \
-	alpaoCtrl \
+        alignLoop \
+        acronameUsbHub \
+	baslerCtrl \
+        bmcCtrl \
+	flipperCtrl \
+        hsfwCtrl \
+        rhusbMon \
 	cacaoInterface \
+        kcubeCtrl \
+        modalPSDs \
 	userGainCtrl \
+        refRMS \
+        streamCircBuff \
 	zaberCtrl \
 	zaberLowLevel \
 	picoMotorCtrl
@@ -38,20 +46,16 @@ apps_rtc = \
 
 
 apps_icc = \
-	acronameUsbHub \
-	flipperCtrl \
+	dmPokeCenter \
 	filterWheelCtrl \
-	hsfwCtrl \
-	baslerCtrl \
 	picamCtrl \
 	pvcamCtrl \
 	smc100ccCtrl \
-	andorCtrl \
 	usbtempMon \
 	xt1121Ctrl \
 	xt1121DCDU \
 	koolanceCtrl \
-	tcsInterface
+	coralign 
 
 apps_aoc = \
 	trippLitePDU \
@@ -61,7 +65,7 @@ apps_aoc = \
 	koolanceCtrl \
 	observerCtrl \
 	siglentSDG \
-	audibleAlerts
+	#audibleAlerts
 
 
 apps_tic = \
@@ -114,7 +118,8 @@ all_rtimv_plugins = \
 	cameraStatus \
 	indiDictionary \
 	pwfsAlignment \
-	dmStatus
+	dmStatus \
+	warnings
 
 ifeq ($(MAGAOX_ROLE),RTC)
   rtimv_plugins_to_build =
@@ -130,6 +135,7 @@ endif
 
 utils_to_build = \
 	logdump \
+	logsurgeon \
 	logstream \
 	cursesINDI \
 	xrif2shmim \
@@ -140,7 +146,6 @@ scripts_to_install = magaox \
 	sync_cacao \
 	xctrl \
 	netconsole_logger \
-	creaimshm \
 	dmdispbridge \
 	shmimTCPreceive \
 	shmimTCPtransmit \
@@ -293,7 +298,7 @@ tests_clean:
 
 .PHONY: python_install
 python_install:
-	python -m pip install -e ./python/
+	sudo python -m pip install -e ./python/
 
 .PHONY: doc
 doc:

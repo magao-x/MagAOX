@@ -52,11 +52,13 @@ apps/bmcCtrl/bmcCtrl
 #c
 apps/cacaoInterface/cacaoInterface
 apps/cameraSim/cameraSim
+apps/closedLoopIndi/closedLoopIndi
 
 #d
 apps/dmMode/dmMode
 apps/dmModulator/dmModulator
-apps/dmSpeckle/
+apps/dmPokeCenter/dmPokeCenter
+apps/dmSpeckle/dmSpeckle
 
 #f
 apps/filterWheelCtrl/filterWheelCtrl

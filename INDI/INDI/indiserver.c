@@ -51,6 +51,8 @@
  *
  */
 
+#define _GNU_SOURCE
+
 #include <stdio.h>
 #include <stdlib.h>
 #include <stdarg.h>
@@ -156,7 +158,7 @@ typedef struct {
     int err;				/* set on fatal error */
     int rfd;				/* driver's stdout read pipe fd if local, else socket */
     int wfd;				/* driver's stdin write pipe fd if local, else socket  */
-    FILE *efp;				/* driver's stderr read FILE pointer, iff local */
+    int efd;				/* driver's stderr read pipe fd, if local */
     pthread_t stderr_thr;		/* stderr reader thread */
     time_t start;			/* time this driver was started */
     int restarts;			/* n times this process has been restarted */
@@ -503,7 +505,7 @@ startLocalDvr (DvrInfo *dp)
 	dp->pid = pid;
 	dp->rfd = rp[0];
 	dp->wfd = wp[1];
-	dp->efp = fdopen (ep[0], "r");
+    dp->efd = ep[0];
 	dp->err = 0;
 	dp->lp = newLilXML();
 	dp->mp = newMsg();
@@ -1142,17 +1144,23 @@ driverStderrReaderThread (void *vp)
 	/* log everthing until error */
 	while (1) {
 	    /* read next whole line */
-	    if (!fgets (buf, sizeof(buf), dp->efp)) {
-		if (feof (dp->efp))
-		    logMessage ("from Driver %s: stderr EOF\n", dp->name);
-		if (ferror(dp->efp))
-		    logMessage ("from Driver %s: stderr %s\n", dp->name, strerror(errno));
-		return (NULL);	/* thread exit */
-	    }
+        ssize_t rv = read(dp->efd, buf, sizeof(buf)-1);
+        if(rv == 0)
+        {
+            logMessage ("from Driver %s: stderr EOF\n", dp->name);
+            return NULL;
+        }
+        else if(rv < 0)
+        {
+            logMessage ("from Driver %s: stderr %s\n", dp->name, strerror(errno));
+            return NULL;
+        }
+        buf[rv] = '\0';
 
 	    /* prefix each whole line to our stderr, save extra for next time */
 	    logMessage ("Driver %s: %s", dp->name, buf);	/* includes nl */
 	}
+    
 
 	/* for lint */
 	return (NULL);
@@ -1236,10 +1244,13 @@ driverWriterThread (void *vp)
 static void
 onDriverError (DvrInfo *dp)
 {
+	logMessage ("Driver %s: reader thread indicates it's time to restart\n", dp->name);
 	pthread_mutex_lock (&dp->q_lock);
+	logMessage ("Driver %s: locked mutex to set error condition\n", dp->name);
 	dp->err = 1;
 	pthread_cond_signal (&dp->go_cond);
 	pthread_mutex_unlock (&dp->q_lock);
+	logMessage ("Driver %s: reader thread signaled go_cond and unlocked q_lock\n", dp->name);
 }
 
 /* called by clientReaderThread to inform clientWriterThread it has
@@ -1340,16 +1351,21 @@ restartDvr (DvrInfo *dp)
 		else
 		    logMessage ("Driver %s: Unknown exit condition\n", dp->name);
 	    } else {
-		logMessage ("Driver %s: Killed: %d\n", dp->name,
+			logMessage ("Driver %s: Killed: %d\n", dp->name,
 			kill (dp->pid, SIGKILL));
-		(void) waitpid (dp->pid, &status, WNOHANG);
+			(void) waitpid (dp->pid, &status, WNOHANG);
 	    }
+		//int thispid = (int)gettid();
+		logMessage ("Driver %s: closing dp->efd", dp->name);
+	    close (dp->efd);
+		logMessage ("Driver %s: closing dp->wfd", dp->name);
 	    close (dp->wfd);
+		logMessage ("Driver %s: closing dp->rfd", dp->name);
 	    close (dp->rfd);
-	    fclose (dp->efp);
 	}
 
 	/* free memory and locks */
+	logMessage ("Driver %s: freeing memory and locks\n", dp->name);
 	for (i = 0; i < dp->nsprops; i++)
 	    free (dp->sprops[i]);
 	free (dp->sprops);
@@ -1358,7 +1374,7 @@ restartDvr (DvrInfo *dp)
 	pthread_mutex_destroy (&dp->q_lock);
 	pthread_cond_destroy (&dp->go_cond);
 	pthread_rwlock_destroy (&dp->sprops_rwlock);
-	if (verbose > 1)
+	// if (verbose > 1)
 	    logMessage ("Driver %s: draining with %d on queue\n", dp->name, nFQ(dp->msgq));
 	drainMsgs (dp->msgq);
 	delFQ (dp->msgq);

@@ -281,6 +281,18 @@ public:
 
     void endOfFrameCallback( FRAME_INFO * finfo );
 
+   /** \name Telemeter Interface
+     * 
+     * @{
+     */ 
+   int checkRecordTimes();
+   
+   int recordTelem( const telem_stdcam * );
+   
+   int recordTelem( const telem_fgtimings * );
+   
+   ///@}
+
 };
 
 pvcamCtrl::pvcamCtrl() : MagAOXApp(MAGAOX_CURRENT_SHA1, MAGAOX_REPO_MODIFIED)
@@ -338,7 +350,7 @@ void pvcamCtrl::setupConfig()
     stdCameraT::setupConfig(config);
     dev::frameGrabber<pvcamCtrl>::setupConfig(config);
     shutterT::setupConfig(config);
-    dev::telemeter<pvcamCtrl>::setupConfig(config);
+    telemeterT::setupConfig(config);
 }
 
 int pvcamCtrl::loadConfigImpl( mx::app::appConfigurator & _config )
@@ -370,7 +382,7 @@ int pvcamCtrl::loadConfigImpl( mx::app::appConfigurator & _config )
     
     dev::frameGrabber<pvcamCtrl>::loadConfig(_config);
     shutterT::loadConfig(_config);
-    dev::telemeter<pvcamCtrl>::loadConfig(_config);
+    telemeterT::loadConfig(_config);
    
 
    return 0;
@@ -403,6 +415,11 @@ int pvcamCtrl::appStartup()
     }
 
     if(shutterT::appStartup() < 0)
+    {
+       return log<software_critical,-1>({__FILE__,__LINE__});
+    }
+
+    if(telemeterT::appStartup() < 0)
     {
        return log<software_critical,-1>({__FILE__,__LINE__});
     }
@@ -487,10 +504,12 @@ int pvcamCtrl::appLogic()
             return log<software_error,0>({__FILE__,__LINE__});
         }
 
-        /*if(telemeterT::appLogic() < 0)
+        if(telemeterT::appLogic() < 0)
         {
             log<software_error>({__FILE__, __LINE__});
-        }*/
+        }
+
+        recordCamera();
     }
 
 
@@ -517,8 +536,20 @@ int pvcamCtrl::appShutdown()
     }
 
     ///\todo error check these base class fxns.
-    frameGrabberT::appShutdown();
-    shutterT::appShutdown();
+    if(frameGrabberT::appShutdown() < 0)
+    {
+        log<software_error>({__FILE__, __LINE__, "error from frameGrabberT::appShutdown()"});
+    }
+
+    if(shutterT::appShutdown() < 0)
+    {
+        log<software_error>({__FILE__, __LINE__, "error from shutterT::appShutdown()"});
+    }
+
+    if(telemeterT::appShutdown() < 0)
+    {
+        log<software_error>({__FILE__, __LINE__, "error from telemeterT::appShutdown()"});
+    }
 
     return 0;
 }
@@ -598,13 +629,13 @@ int pvcamCtrl::setExpTime()
     if(m_expTimeSet*1e6 < minExpTime)
     {
         m_expTimeSet = (int) (minExpTime/1e6+0.5);
-        std::cerr << "increased m_expTimeSet to: " << m_expTimeSet << "\n";
+        log<text_log>("increased m_expTimeSet to: " + std::to_string(m_expTimeSet), logPrio::LOG_INFO);
     }
 
     if(m_expTimeSet * 1e6 > maxExpTime)
     {
         m_expTimeSet = (int) (maxExpTime / 1e6 - 0.5);
-        std::cerr << "decreased m_expTimeSet to: " << m_expTimeSet << "\n";
+        log<text_log>("decreased m_expTimeSet to: " + std::to_string(m_expTimeSet), logPrio::LOG_INFO); 
     }
 
     frameGrabberT::m_reconfig = true;
@@ -674,11 +705,14 @@ int pvcamCtrl::setNextROI()
 
 int pvcamCtrl::setShutter(int sh)
 {
+    recordCamera(true);
     return shutterT::setShutterState(sh);
 }
 
 int pvcamCtrl::configureAcquisition()
 {
+
+    recordCamera(true);
     //-- 0: register the callback
     if(pl_cam_deregister_callback(m_handle, PL_CALLBACK_EOF) == false) // Because we registered it last time we configured acq:
     {
@@ -802,6 +836,8 @@ int pvcamCtrl::configureAcquisition()
         state(stateCodes::FAILURE);
         return -1;
     }
+
+    recordCamera(true);
 
     return 0;
 }
@@ -1332,12 +1368,23 @@ void pvcamCtrl::endOfFrameCallback(FRAME_INFO *finfo)
         log<software_critical>({__FILE__, __LINE__, errno, 0, "Error posting to frame ready semaphore"});
         return;
     }
-
-
-
-    
 }
 
+int pvcamCtrl::checkRecordTimes()
+{
+   return telemeterT::checkRecordTimes(telem_stdcam());
+}
+   
+int pvcamCtrl::recordTelem(const telem_stdcam *)
+{
+   return recordCamera(true);
+}
+
+inline
+int pvcamCtrl::recordTelem( const telem_fgtimings * )
+{
+   return recordFGTimings(true);
+}
 
 } // namespace app
 } //namespace MagAOX

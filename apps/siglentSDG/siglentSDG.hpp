@@ -68,6 +68,7 @@ protected:
    uint8_t m_C1outp {0}; ///< The output status channel 1
    double m_C1frequency {0}; ///< The output frequency of channel 1
    double m_C1vpp {0}; ///< The peak-2-peak voltage of channel 1
+   double m_C1vppDefault {0}; ///< default value for vpp of channel 1
    double m_C1ofst {0}; ///< The offset voltage of channel 1
    double m_C1phse {0}; ///< The phase of channel 1 (SINE only)
    double m_C1wdth {0}; ///< The width of channel 1 (PULSE only)
@@ -76,6 +77,7 @@ protected:
    uint8_t m_C2outp {0}; ///<  The output status channel 2
    double m_C2frequency {0}; ///< The output frequency of channel 2
    double m_C2vpp {0}; ///< The peak-2-peak voltage of channel 2
+   double m_C2vppDefault {0}; ///< default value for vpp of channel 2
    double m_C2ofst {0}; ///< The offset voltage of channel 2
    double m_C2phse {0}; ///< The phase of channel 2 (SINE only)
    double m_C2wdth {0}; ///< The width of channel 2 (PULSE only)
@@ -456,6 +458,9 @@ void siglentSDG::setupConfig()
    
    config.add("fxngen.C1syncOn", "", "fxngen.C1syncOn", argType::Required, "fxngen", "C1syncOn", false, "bool", "Whether (true) or not (false) C1 synchro output is enabled at startup.  Default is false");
    config.add("fxngen.waveform", "w", "fxngen.waveform", argType::Required, "fxngen", "waveform", false, "string", "The waveform to populate function.");
+   
+   config.add("fxngen.C1ampDefault", "", "fxngen.C1ampDefault", argType::Required, "fxngen", "C1ampDefault", false, "float", "C1 Default P2V Amplitude of waveform . Default = 0.0");
+   config.add("fxngen.C2ampDefault", "", "fxngen.C2ampDefault", argType::Required, "fxngen", "C2ampDefault", false, "float", "C2 Default P2V Amplitude of waveform . Default = 0.0");
    /// config.add("fxngen.clock", "c", "fxngen.clock", argType::Required, "fxngen", "clock", false, "string", "Internal (INT) or external (EXT) clock.");
 
    dev::telemeter<siglentSDG>::setupConfig(config);
@@ -472,6 +477,9 @@ void siglentSDG::loadConfig()
    
    config(m_C1syncOn, "fxngen.C1syncOn");
    config(m_waveform, "fxngen.waveform"); // todo: check if this is a valid waveform?
+
+   config(m_C1vppDefault, "fxngen.C1ampDefault");
+   config(m_C2vppDefault, "fxngen.C2ampDefault");
    /// config(m_clock, "fxngen.clock");
 
    dev::telemeter<siglentSDG>::loadConfig(config);
@@ -480,22 +488,26 @@ void siglentSDG::loadConfig()
 inline
 int siglentSDG::appStartup()
 {
-   // set up the  INDI properties
-   REG_INDI_NEWPROP_NOCB(m_indiP_status, "status", pcf::IndiProperty::Text);
-   m_indiP_status.add (pcf::IndiElement("value"));
-   m_indiP_status["value"].set(0);
+    // set up the  INDI properties
+    REG_INDI_NEWPROP_NOCB(m_indiP_status, "status", pcf::IndiProperty::Text);
+    m_indiP_status.add (pcf::IndiElement("value"));
+    m_indiP_status["value"].set(0);
 
-   REG_INDI_NEWPROP(m_indiP_C1outp, "C1outp", pcf::IndiProperty::Text);
-   m_indiP_C1outp.add (pcf::IndiElement("value"));
-   m_indiP_C1outp["value"].set("");
+    REG_INDI_NEWPROP(m_indiP_C1outp, "C1outp", pcf::IndiProperty::Text);
+    m_indiP_C1outp.add (pcf::IndiElement("value"));
+    m_indiP_C1outp["value"].set("");
 
-   REG_INDI_NEWPROP(m_indiP_C1freq, "C1freq", pcf::IndiProperty::Number);
-   m_indiP_C1freq.add (pcf::IndiElement("value"));
-   m_indiP_C1freq["value"].set(0);
+    //REG_INDI_NEWPROP(m_indiP_C1freq, "C1freq", pcf::IndiProperty::Number);
+    CREATE_REG_INDI_NEW_NUMBERF( m_indiP_C1freq, "C1freq", -1e15, 1e15, 1, "%g", "C1freq", "C1freq");
+    //m_indiP_C1freq.add (pcf::IndiElement("value"));
+    m_indiP_C1freq["current"].set(0);
+    m_indiP_C1freq["target"].set(0);
 
-   REG_INDI_NEWPROP(m_indiP_C1amp, "C1amp", pcf::IndiProperty::Number);
-   m_indiP_C1amp.add (pcf::IndiElement("value"));
-   m_indiP_C1amp["value"].set(0);
+    //REG_INDI_NEWPROP(m_indiP_C1amp, "C1amp", pcf::IndiProperty::Number);
+    CREATE_REG_INDI_NEW_NUMBERF( m_indiP_C1amp, "C1amp", -1e15, 1e15, 1, "%g", "C1amp", "C1amp");
+    //m_indiP_C1amp.add (pcf::IndiElement("value"));
+    m_indiP_C1amp["current"].set(0);
+    m_indiP_C1amp["target"].set(0);
 
    REG_INDI_NEWPROP(m_indiP_C1ofst, "C1ofst", pcf::IndiProperty::Number);
    m_indiP_C1ofst.add (pcf::IndiElement("value"));
@@ -544,25 +556,34 @@ int siglentSDG::appStartup()
    m_indiP_C2outp.add (pcf::IndiElement("value"));
    m_indiP_C2outp["value"].set("");
 
-   REG_INDI_NEWPROP(m_indiP_C2freq, "C2freq", pcf::IndiProperty::Number);
-   m_indiP_C2freq.add (pcf::IndiElement("value"));
-   m_indiP_C2freq["value"].set(0);
+   //REG_INDI_NEWPROP(m_indiP_C2freq, "C2freq", pcf::IndiProperty::Number);
+   CREATE_REG_INDI_NEW_NUMBERF( m_indiP_C2freq, "C2freq", -1e15, 1e15, 1, "%g", "C2freq", "C2freq");
+   //m_indiP_C2freq.add (pcf::IndiElement("value"));
+   m_indiP_C2freq["current"].set(0);
+   m_indiP_C2freq["target"].set(0);
 
-   REG_INDI_NEWPROP(m_indiP_C2amp, "C2amp", pcf::IndiProperty::Number);
-   m_indiP_C2amp.add (pcf::IndiElement("value"));
-   m_indiP_C2amp["value"].set(0);
+   //REG_INDI_NEWPROP(m_indiP_C2amp, "C2amp", pcf::IndiProperty::Number);
+   CREATE_REG_INDI_NEW_NUMBERF( m_indiP_C2amp, "C2amp", -1e15, 1e15, 1, "%g", "C2amp", "C2amp");
+   //m_indiP_C2amp.add (pcf::IndiElement("value"));
+   m_indiP_C2amp["current"].set(0);
+   m_indiP_C2amp["target"].set(0);
+
+   //m_indiP_C2amp.add (pcf::IndiElement("value"));
+   //m_indiP_C2amp["value"].set(0);
 
    REG_INDI_NEWPROP(m_indiP_C2ofst, "C2ofst", pcf::IndiProperty::Number);
    m_indiP_C2ofst.add (pcf::IndiElement("value"));
    m_indiP_C2ofst["value"].set(0);
 
-   if(m_waveform == "SINE"){
+   if(m_waveform == "SINE")
+   {
       REG_INDI_NEWPROP(m_indiP_C2phse, "C2phse", pcf::IndiProperty::Number);
       m_indiP_C2phse.add (pcf::IndiElement("value"));
       m_indiP_C2phse["value"].set(0);
    }
 
-   if(m_waveform == "PULSE"){
+   if(m_waveform == "PULSE")
+   {
       REG_INDI_NEWPROP(m_indiP_C2wdth, "C2wdth", pcf::IndiProperty::Number);
       m_indiP_C2wdth.add (pcf::IndiElement("value"));
       m_indiP_C2wdth["value"].set(0);
@@ -694,7 +715,6 @@ int siglentSDG::appLogic()
       std::unique_lock<std::mutex> lock(m_indiMutex, std::try_to_lock);
       if(lock.owns_lock())
       {
-
          if(m_poweredOn)
          {
             //This means we need to do the power-on setup.
@@ -706,7 +726,6 @@ int siglentSDG::appLogic()
 
             m_poweredOn = false;
          }
-
 
          int cs = checkSetup();
 
@@ -924,9 +943,15 @@ int siglentSDG::onPowerOff()
    m_C1vpp_tgt = -1;
    
    updateIfChanged(m_indiP_C1wvtp, "value", m_C1wvtp);
-   updateIfChanged(m_indiP_C1freq, "value", 0.0);
+
+   updateIfChanged(m_indiP_C1freq, "current", 0.0);
+   updateIfChanged(m_indiP_C1freq, "target", 0.0);
+
    updateIfChanged(m_indiP_C1peri, "value", 0.0);
-   updateIfChanged(m_indiP_C1amp, "value", 0.0);
+   
+   updateIfChanged(m_indiP_C1amp, "current", 0.0);
+   updateIfChanged(m_indiP_C1amp, "target", 0.0);
+
    updateIfChanged(m_indiP_C1ampvrms, "value", 0.0);
    updateIfChanged(m_indiP_C1ofst, "value", 0.0);
    updateIfChanged(m_indiP_C1hlev, "value", 0.0);
@@ -947,9 +972,15 @@ int siglentSDG::onPowerOff()
    m_C2vpp_tgt = -1;
    
    updateIfChanged(m_indiP_C2wvtp, "value", m_C2wvtp);
-   updateIfChanged(m_indiP_C2freq, "value", 0.0);
+   
+   updateIfChanged(m_indiP_C2freq, "current", 0.0);
+   updateIfChanged(m_indiP_C2freq, "target", 0.0);
+
    updateIfChanged(m_indiP_C2peri, "value", 0.0);
-   updateIfChanged(m_indiP_C2amp, "value", 0.0);
+ 
+   updateIfChanged(m_indiP_C2amp, "current", 0.0);
+   updateIfChanged(m_indiP_C2amp, "target", 0.0);
+
    updateIfChanged(m_indiP_C2ampvrms, "value", 0.0);
    updateIfChanged(m_indiP_C2ofst, "value", 0.0);
    updateIfChanged(m_indiP_C2hlev, "value", 0.0);
@@ -1283,9 +1314,11 @@ int siglentSDG::queryBSWV( int channel)
          recordParams();
          
          updateIfChanged(m_indiP_C1wvtp, "value", resp_wvtp);
-         updateIfChanged(m_indiP_C1freq, "value", resp_freq);
+         updateIfChanged(m_indiP_C1freq, "current", resp_freq);
          updateIfChanged(m_indiP_C1peri, "value", resp_peri);
-         updateIfChanged(m_indiP_C1amp, "value", resp_amp);
+         
+         updateIfChanged(m_indiP_C1amp, "current", resp_amp);
+
          updateIfChanged(m_indiP_C1ampvrms, "value", resp_ampvrms);
          updateIfChanged(m_indiP_C1ofst, "value", resp_ofst);
          updateIfChanged(m_indiP_C1hlev, "value", resp_hlev);
@@ -1308,9 +1341,9 @@ int siglentSDG::queryBSWV( int channel)
          recordParams();
          
          updateIfChanged(m_indiP_C2wvtp, "value", resp_wvtp);
-         updateIfChanged(m_indiP_C2freq, "value", resp_freq);
+         updateIfChanged(m_indiP_C2freq, "current", resp_freq);
          updateIfChanged(m_indiP_C2peri, "value", resp_peri);
-         updateIfChanged(m_indiP_C2amp, "value", resp_amp);
+         updateIfChanged(m_indiP_C2amp, "current", resp_amp);
          updateIfChanged(m_indiP_C2ampvrms, "value", resp_ampvrms);
          updateIfChanged(m_indiP_C2ofst, "value", resp_ofst);
          updateIfChanged(m_indiP_C2hlev, "value", resp_hlev);
@@ -1620,8 +1653,8 @@ int siglentSDG::normalizeSetup()
    changeFreq(1, 0);
    changeFreq(2, 0);
 
-   changeAmp(1, 0);
-   changeAmp(2, 0);
+   changeAmp(1, m_C1vppDefault);
+   changeAmp(2, m_C2vppDefault);
 
    if(m_waveform == "SINE"){
       changePhse(1, 0);
@@ -1830,7 +1863,7 @@ int siglentSDG::changeFreq( int channel,
    double newFreq;
    try
    {
-      newFreq = ipRecv["value"].get<double>();
+      newFreq = ipRecv["target"].get<double>();
    }
    catch(...)
    {
@@ -1946,7 +1979,7 @@ int siglentSDG::changeAmp( int channel,
    double newAmp;
    try
    {
-      newAmp = ipRecv["value"].get<double>();
+      newAmp = ipRecv["target"].get<double>();
    }
    catch(...)
    {

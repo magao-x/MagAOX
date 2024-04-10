@@ -181,8 +181,10 @@ if [[ -e $VENDOR_SOFTWARE_BUNDLE ]]; then
     if [[ $ID == centos && ( $MAGAOX_ROLE == RTC || $MAGAOX_ROLE == TIC || $MAGAOX_ROLE == vm ) ]]; then
         sudo bash -l "$DIR/steps/install_bmc.sh"
     fi
-    if [[ $MAGAOX_ROLE == ICC ]]; then
+    if [[ $MAGAOX_ROLE == ICC || $MAGAOX_ROLE == RTC || $MAGAOX_ROLE == vm ]]; then
         sudo bash -l "$DIR/steps/install_libhsfw.sh"
+    fi
+    if [[ $MAGAOX_ROLE == ICC || $MAGAOX_ROLE == vm ]]; then
         sudo bash -l "$DIR/steps/install_picam.sh"
         sudo bash -l "$DIR/steps/install_kinetix.sh"
     fi
@@ -205,10 +207,6 @@ else
     # Initialize the config and calib repos as normal user
     bash -l "$DIR/steps/install_magao-x_config.sh"
     bash -l "$DIR/steps/install_magao-x_calib.sh"
-fi
-
-if [[ $MAGAOX_ROLE == AOC || $MAGAOX_ROLE == TOC || $MAGAOX_ROLE == vm ]]; then
-    echo "export RTIMV_CONFIG_PATH=/opt/MagAOX/config" | sudo tee /etc/profile.d/rtimv_config_path.sh
 fi
 
 if [[ $MAGAOX_ROLE == ICC || $MAGAOX_ROLE == RTC || $MAGAOX_ROLE == AOC ]]; then
@@ -275,6 +273,7 @@ fi
 if [[ $MAGAOX_ROLE == AOC || $MAGAOX_ROLE == TOC || $MAGAOX_ROLE == vm || $MAGAOX_ROLE == workstation || $MAGAOX_ROLE == ci ]]; then
     # realtime image viewer
     bash -l "$DIR/steps/install_rtimv.sh" || exit_error "Could not install rtimv"
+    echo "export RTIMV_CONFIG_PATH=/opt/MagAOX/config" | sudo tee /etc/profile.d/rtimv_config_path.sh
 fi
 
 if [[ $MAGAOX_ROLE == AOC || $MAGAOX_ROLE == TOC || $MAGAOX_ROLE == vm ||  $MAGAOX_ROLE == workstation ]]; then
@@ -309,7 +308,12 @@ if [[ $MAGAOX_ROLE != ci && $MAGAOX_ROLE != container && $MAGAOX_ROLE != vm ]]; 
 fi
 
 log_success "Provisioning complete"
-if [[ $MAGAOX_ROLE != ci && $MAGAOX_ROLE != container ]]; then
+
+if [[ $MAGAOX_ROLE == ci || $MAGAOX_ROLE == container ]]; then
+    exit 0
+elif [[ -z "$(groups | grep magaox)" ]]; then
+    log_info "You now need to log out and back in for group changes to take effect"
+else
     log_info "You'll probably want to run"
     log_info "    source /etc/profile.d/*.sh"
     log_info "to get all the new environment variables set."

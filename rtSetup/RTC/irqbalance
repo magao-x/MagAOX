@@ -36,8 +36,8 @@
 # corresponding bits set to one in this mask will not have any
 # irq's assigned to them on rebalance
 #
-# For RTC this is 72 bits.  Currently bans 14-35 and 50-71 (which are the h/t pairs)
-IRQBALANCE_BANNED_CPUS=ff,fffc000f,ffffc000
+# For RTC this is 128 bits.  Currently bans 32-63 and 96-127 (which are the h/t pairs)
+IRQBALANCE_BANNED_CPULIST=32-63,96-127
 
 #
 # IRQBALANCE_ARGS

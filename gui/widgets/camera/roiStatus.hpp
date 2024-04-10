@@ -5,7 +5,6 @@
 
 #include "ui_statusDisplay.h"
 
-
 #include "../xWidgets/statusDisplay.hpp"
 
 namespace xqt 

@@ -62,7 +62,7 @@ int cameraStatus::attachOverlay( rtimvOverlayAccess & roa,
         for(size_t f = 0; f < m_filterDeviceNames.size(); ++f)
         {
             if(m_filterDeviceNames[f].find("fw") == 0) m_presetNames[f] = ".filterName";
-            else if(m_filterDeviceNames[f].find("flip") == 0) m_presetNames[f] = ".position";
+            else if(m_filterDeviceNames[f].find("flip") == 0) m_presetNames[f] = ".presetName";
             else m_presetNames[f] = ".presetName";
 
             (*m_roa.m_dictionary)[m_filterDeviceNames[f] + ".fsm.state"].setBlob(nullptr, 0);
@@ -73,8 +73,6 @@ int cameraStatus::attachOverlay( rtimvOverlayAccess & roa,
         (*m_roa.m_dictionary)[m_deviceName + "-sw.writing.toggle"].setBlob(nullptr, 0);
 
       //(*m_roa.m_dictionary)[m_deviceName + ""].setBlob(nullptr, 0);
-
- 
 
    }
 
@@ -191,7 +189,6 @@ int cameraStatus::updateOverlay()
     if(blobExists("roi_region_w.current") && blobExists("roi_region_h.current") && blobExists("roi_region_x.current") 
                           && blobExists("roi_region_y.current") && blobExists("roi_region_bin_x.current") && blobExists("roi_region_bin_y.current"))
     {
-        
         int w = getBlobVal<int>("roi_region_w.current", -1);
         int h = getBlobVal<int>("roi_region_h.current", -1);
         int ibx = getBlobVal<int>("roi_region_bin_x.current", -1);
@@ -215,6 +212,8 @@ int cameraStatus::updateOverlay()
                           && blobExists("roi_region_y.target") && blobExists("roi_region_bin_x.target") && blobExists("roi_region_bin_y.target"))
             {
 
+                std::lock_guard<std::mutex> guard(m_roiBoxMutex);
+
                 int wt = getBlobVal<int>("roi_region_w.target", -1);
                 int ht = getBlobVal<int>("roi_region_h.target", -1);
                 float bxt = getBlobVal<float>("roi_region_bin_x.target", -1);
@@ -232,6 +231,8 @@ int cameraStatus::updateOverlay()
                         m_roiBox->setVisible(true);
                         m_roiBox->setStretchable(false);
                         m_roiBox->setRemovable(false);
+                        std::cerr << "Connecting\n";
+                        connect(m_roiBox, SIGNAL(remove(StretchBox*)), this, SLOT(stretchBoxRemove(StretchBox*)));
                         emit newStretchBox(m_roiBox);
                     }
                     //note: can only be here if bx > 0
@@ -250,6 +251,7 @@ int cameraStatus::updateOverlay()
                 {
                     if(m_roiBox) m_roiBox->setVisible(false);
                 }
+
             }//if(blobExists("roi_region_w.target")
       
         }//if(w > 0 && h > 0 && x > 0 && y > 0 && ibx > 0 && iby > 0)
@@ -430,6 +432,27 @@ void cameraStatus::disableOverlay()
    }
    
    m_enabled = false;
+}
+
+void cameraStatus::stretchBoxRemove(StretchBox * sb)
+{
+    std::cerr << "cameraStatus::stretchBoxRemove 1\n";
+    std::lock_guard<std::mutex> guard(m_roiBoxMutex);
+    if(!m_roiBox)
+    {
+        return;
+    }
+
+    std::cerr << "cameraStatus::stretchBoxRemove 2\n";
+
+    if(sb != m_roiBox)
+    {
+        return;
+    }
+
+    std::cerr << "cameraStatus::stretchBoxRemove 3\n";
+
+    m_roiBox = nullptr;
 }
 
 std::vector<std::string> cameraStatus::info()

@@ -415,6 +415,7 @@ int hoPredCtrl::loadConfigImpl( mx::app::appConfigurator & _config )
 
 	_config(m_dmChannel, "parameters.channel");
 	std::cout << "Open DM tweeter channel at " << m_dmChannel << std::endl;
+	std::cout << "Done reading config Impl." << std::endl;
 
    return 0;
 }
@@ -588,7 +589,7 @@ inline
 int hoPredCtrl::allocate(const dev::shmimT & dummy)
 {
 	static_cast<void>(dummy); //be unused
-
+	
 	// Or get from config
 	use_full_image_reconstructor = true;
 
@@ -745,7 +746,7 @@ int hoPredCtrl::processImage( void * curr_src, const dev::shmimT & dummy )
 		
 	static_cast<void>(dummy); //be unused
 	auto start = std::chrono::steady_clock::now();
-
+	
 	Eigen::Map<eigenImage<unsigned short>> pwfsIm( static_cast<unsigned short *>(curr_src), m_pwfsHeight, m_pwfsWidth);
 	// Calculate the norm
 	realT pwfs_norm = 0;
@@ -843,7 +844,6 @@ int hoPredCtrl::processImage( void * curr_src, const dev::shmimT & dummy )
 				controller->create_exploration_buffer(m_exploration_rms, m_exploration_steps);  // Make a new buffer
 				controller->set_new_regularization(m_lambda); 									// set a new regularization
 				controller->reset_data_buffer();												// remove the history
-
 			}
 			
 

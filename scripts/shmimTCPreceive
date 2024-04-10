@@ -99,6 +99,15 @@ fi
 
 
 OMP_NUM_THREADS=1 cacao -n $pname << EOF
+csetpmove ${SHMIMTCP_CPUSET}
 imnetwreceive $1 1 ${RTprio}
 exit
 EOF
+
+if [ -z "${SHMIMTCP_CPUSET}" ] && [ "$CPUSETFLAG" = "1" ]; then
+    tmux send-keys -t ${tmuxname} "csetpmove ${CPUset}" C-m
+
+elif [ -n "${SHMIMTCP_CPUSET}" ]; then
+    tmux send-keys -t ${tmuxname} "csetpmove ${SHMIMTCP_CPUSET}" C-m
+
+fi

@@ -138,6 +138,11 @@ int indiDictionary::attachDictionary( dictionaryT * dict,
       checkConnection();
       connect(&m_connTimer, SIGNAL(timeout()), this, SLOT(checkConnection()));
       m_connTimer.start(m_checkTimeout);
+
+      if(m_dict)
+      {
+        (*m_dict)["tcsi.teldata.pa"].setBlob(nullptr, 0);
+      }
    }
 
    return 0;

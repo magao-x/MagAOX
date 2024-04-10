@@ -8,9 +8,10 @@ TARGET=
 
 #Dependencies to trigger recompile
 INCLUDEDEPS= app/MagAOXApp.hpp \
-	     app/indiDriver.hpp \
-	     app/indiMacros.hpp \
-	     app/indiUtils.hpp \
+	         app/indiDriver.hpp \
+	         app/indiMacros.hpp \
+	         app/indiUtils.hpp \
+			 app/semUtils.hpp \
              app/stateCodes.hpp \
              app/dev/outletController.hpp \
              app/dev/ioDevice.hpp \
@@ -49,42 +50,43 @@ INCLUDEDEPS= app/MagAOXApp.hpp \
              logger/types/state_change.hpp \
              logger/types/string_log.hpp \
              logger/types/user_log.hpp \
-	     logger/types/config_log.hpp \
-	     logger/types/saving_state_change.hpp \
-	     logger/types/saving_start.hpp \
-	     logger/types/saving_stop.hpp \
-	     logger/types/telem_saving.hpp \
-            logger/types/telem_saving_state.hpp \
-            logger/types/telem_dmmodes.hpp \
-	     logger/types/telem_dmspeck.hpp \
-		  logger/types/telem_blockgains.hpp \
-	     logger/types/telem_chrony_status.hpp \
-	     logger/types/telem_chrony_stats.hpp \
-	     logger/types/telem_cooler.hpp \
-	     logger/types/telem_coreloads.hpp \
-	     logger/types/telem_coretemps.hpp \
-	     logger/types/telem_drivetemps.hpp \
-            logger/types/telem_fgtimings.hpp \
-	     logger/types/telem_fxngen.hpp \
-	     logger/types/telem_observer.hpp \
-		  logger/types/telem_loopgain.hpp \
-	     logger/types/telem_pico.hpp \
-		 logger/types/telem_position.hpp \
-            logger/types/telem_rhusb.hpp \
-	     logger/types/telem_stage.hpp \
-	     logger/types/telem_stdcam.hpp \
-	     logger/types/telem_telcat.hpp \
-	     logger/types/telem_teldata.hpp \
-	     logger/types/telem_telenv.hpp \
-	     logger/types/telem_telpos.hpp \
-	     logger/types/telem_telsee.hpp \
-	     logger/types/telem_telvane.hpp \
-	     logger/types/telem_temps.hpp \
-	     logger/types/telem_usage.hpp \
-	     logger/types/telem_zaber.hpp \
-	     logger/types/text_log.hpp \
-	     sys/thSetuid.hpp \
-	     sys/runCommand.hpp \
+             logger/types/config_log.hpp \
+             logger/types/saving_state_change.hpp \
+             logger/types/saving_start.hpp \
+             logger/types/saving_stop.hpp \
+             logger/types/telem_saving.hpp \
+             logger/types/telem_saving_state.hpp \
+             logger/types/telem_dmmodes.hpp \
+             logger/types/telem_dmspeck.hpp \
+             logger/types/telem_blockgains.hpp \
+             logger/types/telem_chrony_status.hpp \
+             logger/types/telem_chrony_stats.hpp \
+             logger/types/telem_cooler.hpp \
+             logger/types/telem_coreloads.hpp \
+             logger/types/telem_coretemps.hpp \
+             logger/types/telem_drivetemps.hpp \
+             logger/types/telem_fgtimings.hpp \
+             logger/types/telem_fxngen.hpp \
+             logger/types/telem_observer.hpp \
+             logger/types/telem_loopgain.hpp \
+             logger/types/telem_pico.hpp \
+             logger/types/telem_position.hpp \
+             logger/types/telem_pokecenter.hpp \
+             logger/types/telem_rhusb.hpp \
+             logger/types/telem_stage.hpp \
+             logger/types/telem_stdcam.hpp \
+             logger/types/telem_telcat.hpp \
+             logger/types/telem_teldata.hpp \
+             logger/types/telem_telenv.hpp \
+             logger/types/telem_telpos.hpp \
+             logger/types/telem_telsee.hpp \
+             logger/types/telem_telvane.hpp \
+             logger/types/telem_temps.hpp \
+             logger/types/telem_usage.hpp \
+             logger/types/telem_zaber.hpp \
+             logger/types/text_log.hpp \
+             sys/thSetuid.hpp \
+             sys/runCommand.hpp \
              tty/ttyErrors.hpp \
              tty/ttyIOUtils.hpp \
              tty/ttyUSB.hpp \

@@ -12,7 +12,7 @@ prep-container:
 install: prep-container
 	sudo python -c 'import purepyindi2' || (echo "Need purepyindi2 installed to $(shell which python)" && exit 1)
 	sudo python -m pip install -e .
-	sudo ln -sfv $(shell which audibleAlerts) /opt/MagAOX/bin/audibleAlerts
+	sudo ln -sfv /opt/conda/bin/audibleAlerts /opt/MagAOX/bin/audibleAlerts
 
 clean:
 

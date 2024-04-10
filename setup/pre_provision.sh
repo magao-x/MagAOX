@@ -57,6 +57,8 @@ source /etc/os-release
 # and *bring down the whole system* (by rebooting when you try to run
 # https://github.com/magao-x/ALPAO-interface/blob/master/initalpaoPCIe )
 ALPAO_CMDLINE_FIX="hardened_usercopy=off"
+# Try to work around iommu issue with RTC2
+IOMMU_FIX="iommu=pt"
 # make the PCIe expansion card work
 PCIEXPANSION_CMDLINE_FIX="pci=noaer"
 # disable the slow Spectre mitigations
@@ -65,7 +67,7 @@ SPECTRE_CMDLINE_FIX="noibrs noibpb nopti nospectre_v2 nospectre_v1 l1tf=off nosp
 NVIDIA_DRIVER_FIX="rd.driver.blacklist=nouveau nouveau.modeset=0"
 
 # Put it all together
-DESIRED_CMDLINE="nosplash $NVIDIA_DRIVER_FIX $ALPAO_CMDLINE_FIX $PCIEXPANSION_CMDLINE_FIX $SPECTRE_CMDLINE_FIX"
+DESIRED_CMDLINE="nosplash $NVIDIA_DRIVER_FIX $ALPAO_CMDLINE_FIX $PCIEXPANSION_CMDLINE_FIX $SPECTRE_CMDLINE_FIX $IOMMU_FIX"
 
 if ! grep "$DESIRED_CMDLINE" /etc/default/grub; then
     echo GRUB_CMDLINE_LINUX_DEFAULT=\""$DESIRED_CMDLINE"\" | sudo tee -a /etc/default/grub

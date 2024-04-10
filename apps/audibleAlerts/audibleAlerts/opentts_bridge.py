@@ -6,14 +6,19 @@ import logging
 import requests
 from urllib.parse import urljoin
 
+from .personality import Recording
+
 log = logging.getLogger(__name__)
 
 def check_opentts_service_status(api_url):
     return requests.head(api_url).status_code == 200
 
-def speak(ssml_text, default_voice, api_url, cache_dir):
-    log.debug("Generating speech (or using cache)...")
-    wav_path = ssml_to_wav(ssml_text, default_voice, api_url, cache_dir)
+def speak(speech, default_voice, api_url, cache_dir):
+    if isinstance(speech, Recording):
+        wav_path = speech.path
+    else:
+        log.debug("Generating speech (or using cache)...")
+        wav_path = ssml_to_wav(speech.markup, default_voice, api_url, cache_dir)
     log.debug("Playing audio...")
     play_wav(wav_path)
     log.debug("Speech spoken.")

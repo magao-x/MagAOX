@@ -322,6 +322,7 @@ void loopCtrl::handleDelProperty( const pcf::IndiProperty & ipRecv)
    {
       for(size_t n =0; n < m_blockCtrls.size(); ++n)
       {
+         m_parent->unsubscribe(m_blockCtrls[n]);
          ui.horizontalLayout_2->removeWidget(m_blockCtrls[n]);
          m_blockCtrls[n]->deleteLater();
       }

@@ -3,7 +3,7 @@ import numpy as np
 
 from pyMilk.interfacing.isio_shmlib import SHM as shm
 import purepyindi2 as indi
-
+import time
 
 class XCam():
 	'''A python interface for existing MagAO-X cameras.
@@ -15,6 +15,8 @@ class XCam():
 		self._client = indi.client.IndiClient()
 		self._client.connect()
 		self._client.get_properties(shm_name)
+		time.sleep(0.25)
+
 		self._local_indi_prop = {}
 		
 		self._old_counter = 0
@@ -28,7 +30,13 @@ class XCam():
 		self.shmim = shm(self.shm_name)
 		
 		# A dark frame might not exists. Check for existence!
-		self.dark_shmim = shm(self.shm_name + '_dark')
+		self._dark_exists = False
+		try:
+			self.dark_shmim = shm(self.shm_name + '_dark')
+			self._dark_exists = True
+		except FileNotFoundError:
+			print("Dark shmim '{:s}' does not exist.".format(self.shm_name + '_dark'))
+
 		self._need_reconnect = False
 
 		if self._use_hcipy:
@@ -127,6 +135,12 @@ class XCam():
 	def shutter(self, shutter_state):
 		self._client[self.shm_name + '.shutter.toggle'] = indi.SwitchState.ON if shutter_state else indi.SwitchState.OFF
 
+	def process(self, data):
+		if self._dark_exists:
+			if np.all(self.dark_shmim.IMAGE.md.size==self.shmim.IMAGE.md.size):
+				return data - self.dark_shmim.get_data(check=False).astype(float)
+		return data
+
 	def grab(self):
 		self._old_counter = self.counter
 		data = self.shmim.get_data(check=True, timeout=5 * self.exposure_time).astype(float)
@@ -136,8 +150,7 @@ class XCam():
 		else:
 			self._old_counter = self.counter
 		
-		if np.all(self.dark_shmim.IMAGE.md.size==self.shmim.IMAGE.md.size):
-			data -= self.dark_shmim.get_data(check=False).astype(float)
+		data = self.process(data)
 
 		if self._use_hcipy:
 			data = Field(data.ravel(), self.grid)
@@ -147,13 +160,10 @@ class XCam():
 	def grab_many(self, num_images):
 		OUT = np.zeros((num_images, *self.shmim.shape), dtype=self.shmim.nptype)
 
-		if np.all(self.dark_shmim.IMAGE.md.size==self.shmim.IMAGE.md.size):
-			background = self.dark_shmim.get_data(check=False)
-
 		for i in range(num_images):
 			self._old_counter = self.counter
 
-			OUT[i] = self.shmim.get_data(check=True, timeout=5 * self.exposure_time) - background
+			OUT[i] = self.process(self.shmim.get_data(check=True, timeout=5 * self.exposure_time).astype(float))
 			
 			if self.counter == self._old_counter:
 				self._need_reconnect = True
@@ -172,7 +182,7 @@ class XCam():
 		for i in range(num_images):
 			self._old_counter = self.counter
 			
-			image = self.shmim.get_data(check=True, timeout=5 * self.exposure_time)
+			image = self.shmim.get_data(check=True, timeout=5 * self.exposure_time).astype(float)
 			
 			if self.counter == self._old_counter:
 				self._need_reconnect = True
@@ -186,8 +196,7 @@ class XCam():
 		if k != 0:
 			stacked_image = stacked_image / k
 
-		if np.all(self.dark_shmim.IMAGE.md.size==self.shmim.IMAGE.md.size):
-			stacked_image -= self.dark_shmim.get_data(check=False)
+		stacked_image = self.process(stacked_image)
 		
 		if self._use_hcipy:
 			stacked_image = Field(stacked_image.ravel(), self.grid)
