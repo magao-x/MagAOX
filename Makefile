@@ -11,7 +11,8 @@ apps_common = \
 	streamWriter \
 	dmMode \
 	shmimIntegrator \
-	timeSeriesSimulator
+	timeSeriesSimulator \
+	dbIngest
 
 apps_rtcicc = \
         alignLoop \
@@ -65,7 +66,7 @@ apps_aoc = \
 	koolanceCtrl \
 	observerCtrl \
 	siglentSDG \
-	#audibleAlerts
+	audibleAlerts
 
 
 apps_tic = \
@@ -165,7 +166,7 @@ scripts_to_install = magaox \
 
 all: indi_all libs_all flatlogs apps_all guis_all utils_all
 
-install: indi_install libs_install flatlogs_all apps_install guis_install utils_install scripts_install rtscripts_install
+install: indi_install libs_install flatlogs_all apps_install guis_install utils_install scripts_install rtscripts_install python_install
 
 #We clean just libMagAOX, and the apps, guis, and utils for normal devel work.
 clean: lib_clean apps_clean guis_clean utils_clean tests_clean

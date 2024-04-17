@@ -13,3 +13,12 @@ authors = [
 description = "Python utilities for MagAO-X interface"
 readme = "README.rst"
 license = {file = "LICENSE"}
+
+dependencies = [
+  "watchdog>=3.0.0,<4",
+  "xconf>=0.0.1",
+  "psycopg2"
+]
+
+[project.scripts]
+xtelemdb = "magaox.db.cli:DISPATCHER.main"

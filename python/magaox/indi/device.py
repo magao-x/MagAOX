@@ -125,6 +125,7 @@ class XDevice(Device):
     telem_dir : str = "telem"
     log : logging.Logger
     config : BaseConfig
+    log_file_name : str
 
     @classmethod
     def get_default_config_prefix(cls):
@@ -153,15 +154,15 @@ class XDevice(Device):
         log_dir = self.prefix_dir + "/" + self.logs_dir + "/" + self.name
         os.makedirs(log_dir, exist_ok=True)
         timestamp = self._startup_time.strftime(LOG_FILENAME_TIMESTAMP_FORMAT)
-        log_file_name = f"{self.name}_{timestamp}.log"
-        log_file_path = log_dir + "/" + log_file_name
+        self.log_file_name = f"{self.name}_{timestamp}.log"
+        log_file_path = log_dir + "/" + self.log_file_name
         init_logging(
             log,
             log_file_path,
             console_log_level=logging.DEBUG if verbose else logging.INFO,
             file_log_level=logging.DEBUG if verbose else logging.INFO,
             all_verbose=all_verbose)
-        compress_files_glob(log_dir + f"/{self.name}_*.log", latest_filename=log_file_name)
+        compress_files_glob(log_dir + f"/{self.name}_*.log", latest_filename=self.log_file_name)
         log.addHandler(IndiDeviceHandler(self, level=logging.INFO))
 
     def _init_telem(self):

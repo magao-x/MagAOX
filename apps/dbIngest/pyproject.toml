@@ -1,0 +1,15 @@
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[project]
+name = "dbIngest"
+description = "Per-instrument-computer database ingest virtual device"
+version = "2023.12.21"
+
+authors = [
+  {name = "Joseph D. Long", email = "me@joseph-long.com"},
+]
+
+[project.scripts]
+dbIngest = "dbIngest:dbIngest.console_app"
