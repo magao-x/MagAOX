@@ -38,8 +38,8 @@ struct telem_telsee : public flatbuffer_log
       ///Construct from components
       messageT( const int & dimm_time,         ///< [in] 
                 const double & dimm_el,        ///< [in] 
-                const double & dimm_fwhm,      ///< [in] 
                 const double & dimm_fwhm_corr, ///< [in]
+                const double & dimm_fwhm_bad,  ///< [in]
                 const int & mag1_time,         ///< [in] 
                 const double & mag1_el,        ///< [in] 
                 const double & mag1_fwhm,      ///< [in] 
@@ -50,7 +50,7 @@ struct telem_telsee : public flatbuffer_log
                 const double & mag2_fwhm_corr  ///< [in]
               )
       {
-         auto fp = CreateTelem_telsee_fb(builder, dimm_time, dimm_el, dimm_fwhm, dimm_fwhm_corr, mag1_time, mag1_el, mag1_fwhm, mag1_fwhm_corr, mag2_time, mag2_el, mag2_fwhm, mag2_fwhm_corr);
+         auto fp = CreateTelem_telsee_fb(builder, dimm_time, dimm_el, dimm_fwhm_corr, dimm_fwhm_bad, mag1_time, mag1_el, mag1_fwhm, mag1_fwhm_corr, mag2_time, mag2_el, mag2_fwhm, mag2_fwhm_corr);
          builder.Finish(fp);
       }
 
@@ -82,10 +82,7 @@ struct telem_telsee : public flatbuffer_log
       
       msg += "el: ";
       msg += std::to_string(fbs->dimm_el()) + " ";
-      
-      msg += "fw: ";
-      msg += std::to_string(fbs->dimm_fwhm()) + " ";
-      
+
       msg += "fw-cor: ";
       msg += std::to_string(fbs->dimm_fwhm_corr()) + "] ";
       
