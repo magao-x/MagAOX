@@ -1,12 +1,15 @@
 [build-system]
-requires = ["hatchling"]
-build-backend = "hatchling.build"
+requires = ["setuptools"]
+build-backend = "setuptools.build_meta"
 
 [project]
 name = "dbIngest"
 description = "Per-instrument-computer database ingest virtual device"
 version = "2023.12.21"
-
+dependencies = [
+  "xconf",
+  "purepyindi2",
+]
 authors = [
   {name = "Joseph D. Long", email = "me@joseph-long.com"},
 ]
