@@ -13,6 +13,8 @@ from purepyindi2.properties import IndiProperty
 import typing
 import xconf
 
+from ..utils import PUREPYINDI_DEVICE_FILENAME_TIME_FORMAT
+
 # n.b. replaced with logger scoped to device name during device init
 log = logging.getLogger()
 
@@ -96,9 +98,6 @@ def init_logging(logger : logging.Logger, destination, console_log_level, file_l
 
 LINE_BUFFERED = 1
 
-
-LOG_FILENAME_TIMESTAMP_FORMAT = "%Y-%m-%dT%H%M%S"
-
 class IndiDeviceHandler(logging.Handler):
     def __init__(self, device: Device, *args, **kwargs):
         self.device = device
@@ -153,7 +152,7 @@ class XDevice(Device):
         log = self.log = logging.getLogger(self.name)
         log_dir = self.prefix_dir + "/" + self.logs_dir + "/" + self.name
         os.makedirs(log_dir, exist_ok=True)
-        timestamp = self._startup_time.strftime(LOG_FILENAME_TIMESTAMP_FORMAT)
+        timestamp = self._startup_time.strftime(PUREPYINDI_DEVICE_FILENAME_TIME_FORMAT)
         self.log_file_name = f"{self.name}_{timestamp}.log"
         log_file_path = log_dir + "/" + self.log_file_name
         init_logging(
@@ -167,7 +166,7 @@ class XDevice(Device):
 
     def _init_telem(self):
         telem_dir = self.prefix_dir + "/" + self.telem_dir + "/" + self.name
-        timestamp = self._startup_time.strftime(LOG_FILENAME_TIMESTAMP_FORMAT)
+        timestamp = self._startup_time.strftime(PUREPYINDI_DEVICE_FILENAME_TIME_FORMAT)
         telem_file_name = f"{self.name}_{timestamp}.ndjson"
         os.makedirs(telem_dir, exist_ok=True)
         telem_file_path = telem_dir + "/" + telem_file_name

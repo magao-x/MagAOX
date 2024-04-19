@@ -8,6 +8,7 @@ from psycopg2 import sql
 from psycopg2.extras import execute_values, execute_batch
 
 from . import Telem, FileOrigin, FileReplica
+from ..utils import xfilename_to_utc_timestamp
 
 log = logging.getLogger(__name__)
 
@@ -23,11 +24,11 @@ ON CONFLICT (device, ts, msg) DO NOTHING;
 def batch_file_origins(cur: psycopg2.extensions.cursor, records: list[FileOrigin]):
     cur.execute("BEGIN")
     execute_batch(cur, f'''
-INSERT INTO file_origins (origin_host, origin_path, modification_time, size_bytes)
-VALUES (%s, %s, %s, %s)
+INSERT INTO file_origins (origin_host, origin_path, creation_time, modification_time, size_bytes)
+VALUES (%s, %s, %s, %s, %s)
 ON CONFLICT (origin_host, origin_path)
 DO UPDATE SET modification_time = EXCLUDED.modification_time, size_bytes = EXCLUDED.size_bytes
-''', [(rec.origin_host, rec.origin_path, rec.mtime, rec.size_bytes) for rec in records])
+''', [(rec.origin_host, rec.origin_path, rec.creation_time, rec.modification_time, rec.size_bytes) for rec in records])
     cur.execute("COMMIT")
 
 def identify_new_files(cur: psycopg2.extensions.cursor, this_host: str, paths: list[str]):
@@ -100,10 +101,16 @@ def update_file_inventory(cur: psycopg2.extensions.cursor, host: str, data_dirs:
             records = []
             for fn in new_files:
                 stat_result = os.stat(fn)
+                try:
+                    ctime = xfilename_to_utc_timestamp(fn)
+                except ValueError as e:
+                    log.debug(f"Falling back to filesystem ctime for creation_time on {fn}")
+                    ctime = datetime.datetime.fromtimestamp(stat_result.st_ctime)
                 records.append(FileOrigin(
                     origin_host=host,
                     origin_path=fn,
-                    mtime=datetime.datetime.fromtimestamp(stat_result.st_mtime),
+                    creation_time=ctime,
+                    modification_time=datetime.datetime.fromtimestamp(stat_result.st_mtime),
                     size_bytes=stat_result.st_size,
                 ))
             batch_file_origins(cur, records)

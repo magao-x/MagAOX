@@ -7,14 +7,15 @@ from typing import Union
 class FileOrigin:
     origin_host : str
     origin_path : Union[pathlib.Path, str]
-    mtime : datetime.datetime
+    creation_time : datetime.datetime
+    modification_time : datetime.datetime
     size_bytes : int
 
 @dataclass
 class FileReplica:
     origin_host : str
     origin_path : Union[pathlib.Path, str]
-    origin_mtime : datetime.datetime
+    origin_modification_time : datetime.datetime
     size_bytes : int
     hostname : str
     replica_path : Union[pathlib.Path, str]

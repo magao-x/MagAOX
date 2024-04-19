@@ -24,6 +24,7 @@ CREATE TABLE IF NOT EXISTS file_origins (
     origin_host VARCHAR(50),
     origin_path VARCHAR(1024),
     modification_time TIMESTAMP,
+    creation_time TIMESTAMP,
     size_bytes BIGINT,
     PRIMARY KEY (origin_host, origin_path)
 );
