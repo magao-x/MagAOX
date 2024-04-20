@@ -5,7 +5,7 @@ import datetime
 import logging
 import os
 import os.path
-import psycopg2
+import psycopg
 import socket
 import typing
 from tqdm import tqdm

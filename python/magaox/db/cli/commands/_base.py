@@ -1,6 +1,6 @@
 import socket
 
-import psycopg2
+import psycopg
 import xconf
 
 import magaox.db.config as config

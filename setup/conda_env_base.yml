@@ -43,7 +43,7 @@ dependencies:
   # for cacao
   - pybind11
   # for xtelemdb
-  - psycopg2
+  - psycopg
 
   - pip:
       - hcipy

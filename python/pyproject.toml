@@ -17,7 +17,9 @@ license = {file = "LICENSE"}
 dependencies = [
   "watchdog>=3.0.0,<4",
   "xconf>=0.0.1",
-  "psycopg2"
+  "psycopg[binary]>=3.1.18",
+  "coloredlogs>=15.0.1",
+  "psutil>=5.9.8",
 ]
 
 [project.scripts]

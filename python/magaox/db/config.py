@@ -3,7 +3,7 @@ import typing
 import xconf
 import logging
 import pathlib
-import psycopg2
+import psycopg
 import socket
 
 from magaox.indi.device import BaseConfig as IndiDeviceBaseConfig
@@ -26,11 +26,11 @@ class DbConfig:
     port : int = xconf.field(default=5432, help='TCP port to connect to PostgreSQL on')
     database : int = xconf.field(default='xtelem', help='Name of PostgreSQL database')
 
-    def connect(self) -> psycopg2.extensions.connection:
+    def connect(self) -> psycopg.Connection:
         password = os.environ.get('XTELEMDB_PASSWORD', None)
         try:
-            conn = psycopg2.connect(
-                database=self.database,
+            conn = psycopg.connect(
+                dbname=self.database,
                 host=self.host,
                 user=self.user,
                 password=password,
@@ -49,7 +49,7 @@ Ensure:
             raise
         return conn
 
-    def cursor(self) -> psycopg2.extensions.cursor:
+    def cursor(self) -> psycopg.Cursor:
         return self.connect().cursor()
 
 @xconf.config

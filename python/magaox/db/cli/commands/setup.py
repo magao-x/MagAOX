@@ -1,7 +1,7 @@
 import pathlib
 import logging
 
-import psycopg2
+import psycopg
 
 import xconf
 from ._base import BaseDbCommand
@@ -17,7 +17,7 @@ class Setup(BaseDbCommand):
     '''Create tables and indices that are not already present in the configured database
     '''
 
-    def initialize(self, conn : psycopg2.extensions.connection):
+    def initialize(self, conn : psycopg.Connection):
         c = conn.cursor()
         for fn in SETUP_SQL_FILES:
             sql_fpath = SETUP_SQL_PATH / fn

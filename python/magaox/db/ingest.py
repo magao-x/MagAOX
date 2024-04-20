@@ -3,27 +3,27 @@ import logging
 import os
 import json
 
-import psycopg2
-from psycopg2 import sql
-from psycopg2.extras import execute_values, execute_batch
+import psycopg
+from psycopg import sql
+# from psycopg.extras import execute_values, execute_batch
 
 from . import Telem, FileOrigin, FileReplica
 from ..utils import xfilename_to_utc_timestamp
 
 log = logging.getLogger(__name__)
 
-def batch_telem(cur: psycopg2.extensions.cursor, records: list[Telem]):
+def batch_telem(cur: psycopg.Cursor, records: list[Telem]):
     cur.execute("BEGIN")
-    execute_batch(cur, f'''
+    cur.executemany(f'''
 INSERT INTO telem (ts, device, msg, ec)
 VALUES (%s, %s, %s::JSONB, %s)
 ON CONFLICT (device, ts, msg) DO NOTHING;
 ''', [(rec.ts, rec.device, json.dumps(rec.msg), rec.ec) for rec in records])
     cur.execute("COMMIT")
 
-def batch_file_origins(cur: psycopg2.extensions.cursor, records: list[FileOrigin]):
+def batch_file_origins(cur: psycopg.Cursor, records: list[FileOrigin]):
     cur.execute("BEGIN")
-    execute_batch(cur, f'''
+    cur.executemany(f'''
 INSERT INTO file_origins (origin_host, origin_path, creation_time, modification_time, size_bytes)
 VALUES (%s, %s, %s, %s, %s)
 ON CONFLICT (origin_host, origin_path)
@@ -31,7 +31,7 @@ DO UPDATE SET modification_time = EXCLUDED.modification_time, size_bytes = EXCLU
 ''', [(rec.origin_host, rec.origin_path, rec.creation_time, rec.modification_time, rec.size_bytes) for rec in records])
     cur.execute("COMMIT")
 
-def identify_new_files(cur: psycopg2.extensions.cursor, this_host: str, paths: list[str]):
+def identify_new_files(cur: psycopg.Cursor, this_host: str, paths: list[str]):
     '''Returns the paths from ``paths`` that are not already part of the ``file_origins`` table'''
     if len(paths) == 0:
         return []
@@ -69,7 +69,7 @@ def identify_new_files(cur: psycopg2.extensions.cursor, this_host: str, paths: l
     return new_files
 
 
-def identify_non_ingested_telem(cur: psycopg2.extensions.cursor, host: str):
+def identify_non_ingested_telem(cur: psycopg.Cursor, host: str):
     '''Use ``file_origins`` table to find ``.bintel`` file paths on the host
     ``host`` which need to be ingested'''
     # select file origins matching given hostname without ingest records
@@ -91,7 +91,7 @@ WHERE fit.origin_host IS NULL AND
         fns.append(row[0])
     return fns
 
-def update_file_inventory(cur: psycopg2.extensions.cursor, host: str, data_dirs: list[str]):
+def update_file_inventory(cur: psycopg.Cursor, host: str, data_dirs: list[str]):
     """Update the file inventory with any untracked local files (if any)"""
     cur.execute("BEGIN")
     for prefix in data_dirs:
@@ -116,5 +116,5 @@ def update_file_inventory(cur: psycopg2.extensions.cursor, host: str, data_dirs:
             batch_file_origins(cur, records)
     cur.execute("COMMIT")
 
-def backfill_telemetry(cur: psycopg2.extensions.cursor, host: str, data_dirs: list[str]):
+def backfill_telemetry(cur: psycopg.Cursor, host: str, data_dirs: list[str]):
     pass
