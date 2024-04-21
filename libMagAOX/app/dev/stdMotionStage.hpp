@@ -29,9 +29,9 @@ namespace dev
     
     int startHoming(); //INDI mutex will be locked on this call.
     
-    double presetNumber();
+    float presetNumber();
     
-    int moveTo(double); //INDI mutex will be locked on this call.
+    int moveTo(float); //INDI mutex will be locked on this call.
     \endcode 
   *
   * In addition the derived class is responsible for setting m_moving and m_preset. m_preset_target should also be set if the wheel
@@ -64,7 +64,7 @@ protected:
    
    std::vector<std::string> m_presetNames; ///< The names of each position on the stage.
    
-   std::vector<double> m_presetPositions; ///< The positions, in arbitrary units, of each preset.  If 0, then the integer position number (starting from 1) is used to calculate.
+   std::vector<float> m_presetPositions; ///< The positions, in arbitrary units, of each preset.  If 0, then the integer position number (starting from 1) is used to calculate.
    
    ///@}
    
@@ -77,8 +77,8 @@ protected:
    int8_t m_moving {0}; ///< Whether or not the stage is moving.  -2 means powered off, -1 means not homed, 0 means not moving, 1 means moving, 2 means homing.  
    int8_t m_movingState {0}; ///< Used to track the type of command.  If > 1 this is a command to move to a preset.  If 0 then it is a move to an arbitrary position.
    
-   double m_preset {0}; ///< The current numerical preset position [1.0 is index 0 in the preset name vector]
-   double m_preset_target {0}; ///< The target numerical preset position [1.0 is index 0 in the preset name vector]
+   float m_preset {0}; ///< The current numerical preset position [1.0 is index 0 in the preset name vector]
+   float m_preset_target {0}; ///< The target numerical preset position [1.0 is index 0 in the preset name vector]
    
 public:
 
@@ -277,7 +277,7 @@ int stdMotionStage<derivedT>::setupConfig(mx::app::appConfigurator & config)
    config.add("stage.homePreset", "", "stage.homePreset", argType::Required, "stage", "homePreset", false, "int", "If >=0, this preset number is moved to after homing.");
    
    config.add(m_presetNotation + "s.names", "", m_presetNotation + "s.names",  argType::Required, m_presetNotation+"s", "names", false, "vector<string>", "The names of the " + m_presetNotation+ "s.");
-   config.add(m_presetNotation + "s.positions", "", m_presetNotation + "s.positions",  argType::Required, m_presetNotation+"s", "positions", false, "vector<double>", "The positions of the " + m_presetNotation + "s.  If omitted or 0 then order is used.");
+   config.add(m_presetNotation + "s.positions", "", m_presetNotation + "s.positions",  argType::Required, m_presetNotation+"s", "positions", false, "vector<float>", "The positions of the " + m_presetNotation + "s.  If omitted or 0 then order is used.");
    
    return 0;
 }
@@ -419,19 +419,19 @@ int stdMotionStage<derivedT>::newCallBack_m_indiP_preset ( const pcf::IndiProper
 {
     INDI_VALIDATE_CALLBACK_PROPS_DERIVED(m_indiP_preset, ipRecv); 
 
-   double target;
+    float target;
    
-   if( derived().indiTargetUpdate( m_indiP_preset, target, ipRecv, true) < 0)
-   {
-      derivedT::template log<software_error>({__FILE__,__LINE__});
-      return -1;
-   }
+    if( derived().indiTargetUpdate( m_indiP_preset, target, ipRecv, true) < 0)
+    {
+        derivedT::template log<software_error>({__FILE__,__LINE__});
+        return -1;
+    }
    
-   m_preset_target = target;
+    m_preset_target = target;
    
-   std::lock_guard<std::mutex> guard(derived().m_indiMutex);
-   m_movingState = 0; //this is not a preset move
-   return derived().moveTo(target);
+    std::lock_guard<std::mutex> guard(derived().m_indiMutex);
+    m_movingState = 0; //this is not a preset move
+    return derived().moveTo(target);
    
 }
 
@@ -468,7 +468,7 @@ int stdMotionStage<derivedT>::newCallBack_m_indiP_presetName( const pcf::IndiPro
    
    std::lock_guard<std::mutex> guard(derived().m_indiMutex);
 
-   m_preset_target = m_presetPositions[newn]; //(double) newn + 1.0;
+   m_preset_target = m_presetPositions[newn]; 
    derived().updateIfChanged(m_indiP_preset, "target",  m_preset_target, INDI_BUSY);
    
    m_movingState = 1; //This is a preset move
@@ -592,7 +592,7 @@ template<class derivedT>
 int stdMotionStage<derivedT>::recordStage(bool force)
 {
    static int8_t last_moving = m_moving + 100; //guarantee first run
-   static double last_preset;
+   static float last_preset;
    static std::string last_presetName;
    
    size_t n = derived().presetNumber();
