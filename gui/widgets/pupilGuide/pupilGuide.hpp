@@ -619,36 +619,36 @@ void pupilGuide::handleSetProperty( const pcf::IndiProperty & ipRecv)
       {
          if(ipRecv.find("current"))
          {
-            m_modFreq = ipRecv["current"].get<double>();
+            m_modFreq = ipRecv["current"].value<double>();
          }
          if(ipRecv.find("target"))
          {
-            m_modFreq_tgt = ipRecv["target"].get<double>();
+            m_modFreq_tgt = ipRecv["target"].value<double>();
          }
       }
       else if(ipRecv.getName() == "modRadius")
       {
          if(ipRecv.find("current"))
          {
-            m_modRad = ipRecv["current"].get<double>();
+            m_modRad = ipRecv["current"].value<double>();
          }
          if(ipRecv.find("target"))
          {
-            m_modRad_tgt = ipRecv["target"].get<double>();
+            m_modRad_tgt = ipRecv["target"].value<double>();
          }
       }
       else if(ipRecv.getName() == "modState")
       {
          if(ipRecv.find("current"))
          {
-            m_modState = ipRecv["current"].get<int>();
+            m_modState = ipRecv["current"].value<int>();
          }
       }
       else if(ipRecv.getName() == "fsm")
       {
          if(ipRecv.find("state"))
          {
-            m_modFsmState = ipRecv["state"].get<std::string>();
+            m_modFsmState = ipRecv["state"].value();
          }
       }
    }
@@ -658,7 +658,7 @@ void pupilGuide::handleSetProperty( const pcf::IndiProperty & ipRecv)
       {
          if(ipRecv.find("current"))
          {
-            m_camwfsFreq = ipRecv["current"].get<double>();
+            m_camwfsFreq = ipRecv["current"].value<double>();
          }
       }
    }
@@ -668,15 +668,15 @@ void pupilGuide::handleSetProperty( const pcf::IndiProperty & ipRecv)
       {
          if(ipRecv.find("0000"))
          {
-            m_tip = ipRecv["0000"].get<double>();
+            m_tip = ipRecv["0000"].value<double>();
          }
          if(ipRecv.find("0001"))
          {
-            m_tilt = ipRecv["0001"].get<double>();
+            m_tilt = ipRecv["0001"].value<double>();
          }
          if(ipRecv.find("0002"))
          {
-            m_focus = ipRecv["0002"].get<double>();
+            m_focus = ipRecv["0002"].value<double>();
          }
       }
    }
@@ -686,14 +686,14 @@ void pupilGuide::handleSetProperty( const pcf::IndiProperty & ipRecv)
       {
          if(ipRecv.find("current"))
          {
-            m_nAverage_current = ipRecv["current"].get<unsigned>();
+            m_nAverage_current = ipRecv["current"].value<unsigned>();
          }
       }
       else if(ipRecv.getName() == "fsm")
       {
          if(ipRecv.find("state"))
          {
-            m_camwfsavgState = ipRecv["state"].get<std::string>();
+            m_camwfsavgState = ipRecv["state"].value();
          }
       }
    }
@@ -704,162 +704,162 @@ void pupilGuide::handleSetProperty( const pcf::IndiProperty & ipRecv)
       {
          if(ipRecv.find("med"))
          {
-            m_med1 = ipRecv["med"].get<double>();
+            m_med1 = ipRecv["med"].value<double>();
          }
          
          if(ipRecv.find("x"))
          {
-            m_x1 = ipRecv["x"].get<double>();
+            m_x1 = ipRecv["x"].value<double>();
          }
       
          if(ipRecv.find("y"))
          {
-            m_y1 = ipRecv["y"].get<double>();
+            m_y1 = ipRecv["y"].value<double>();
          }
          
          if(ipRecv.find("D"))
          {
-            m_D1 = ipRecv["D"].get<double>();
+            m_D1 = ipRecv["D"].value<double>();
          }
          
          if(ipRecv.find("set-x"))
          {
-            m_setx1 = ipRecv["set-x"].get<double>();
+            m_setx1 = ipRecv["set-x"].value<double>();
          }
       
          if(ipRecv.find("set-y"))
          {
-            m_sety1 = ipRecv["set-y"].get<double>();
+            m_sety1 = ipRecv["set-y"].value<double>();
          }
          
          if(ipRecv.find("set-D"))
          {
-            m_setD1 = ipRecv["set-D"].get<double>();
+            m_setD1 = ipRecv["set-D"].value<double>();
          }
       }
       else if(ipRecv.getName() == "quadrant2")
       {
          if(ipRecv.find("med"))
          {
-            m_med2 = ipRecv["med"].get<double>();
+            m_med2 = ipRecv["med"].value<double>();
          }
          
          if(ipRecv.find("x"))
          {
-            m_x2 = ipRecv["x"].get<double>();
+            m_x2 = ipRecv["x"].value<double>();
          }
       
          if(ipRecv.find("y"))
          {
-            m_y2 = ipRecv["y"].get<double>();
+            m_y2 = ipRecv["y"].value<double>();
          }
          
          if(ipRecv.find("D"))
          {
-            m_D2 = ipRecv["D"].get<double>();
+            m_D2 = ipRecv["D"].value<double>();
          }
          
          if(ipRecv.find("set-x"))
          {
-            m_setx2 = ipRecv["set-x"].get<double>();
+            m_setx2 = ipRecv["set-x"].value<double>();
          }
       
          if(ipRecv.find("set-y"))
          {
-            m_sety2 = ipRecv["set-y"].get<double>();
+            m_sety2 = ipRecv["set-y"].value<double>();
          }
          
          if(ipRecv.find("set-D"))
          {
-            m_setD2 = ipRecv["set-D"].get<double>();
+            m_setD2 = ipRecv["set-D"].value<double>();
          }
       }
       else if(ipRecv.getName() == "quadrant3")
       {
          if(ipRecv.find("med"))
          {
-            m_med3 = ipRecv["med"].get<double>();
+            m_med3 = ipRecv["med"].value<double>();
          }
          
          if(ipRecv.find("x"))
          {
-            m_x3 = ipRecv["x"].get<double>();
+            m_x3 = ipRecv["x"].value<double>();
          }
       
          if(ipRecv.find("y"))
          {
-            m_y3 = ipRecv["y"].get<double>();
+            m_y3 = ipRecv["y"].value<double>();
          }
          
          if(ipRecv.find("D"))
          {
-            m_D3 = ipRecv["D"].get<double>();
+            m_D3 = ipRecv["D"].value<double>();
          }
          
          if(ipRecv.find("set-x"))
          {
-            m_setx3 = ipRecv["set-x"].get<double>();
+            m_setx3 = ipRecv["set-x"].value<double>();
          }
       
          if(ipRecv.find("set-y"))
          {
-            m_sety3 = ipRecv["set-y"].get<double>();
+            m_sety3 = ipRecv["set-y"].value<double>();
          }
          
          if(ipRecv.find("set-D"))
          {
-            m_setD3 = ipRecv["set-D"].get<double>();
+            m_setD3 = ipRecv["set-D"].value<double>();
          }
       }
       else if(ipRecv.getName() == "quadrant4")
       {
          if(ipRecv.find("med"))
          {
-            m_med4 = ipRecv["med"].get<double>();
+            m_med4 = ipRecv["med"].value<double>();
          }
          
          if(ipRecv.find("x"))
          {
-            m_x4 = ipRecv["x"].get<double>();
+            m_x4 = ipRecv["x"].value<double>();
          }
       
          if(ipRecv.find("y"))
          {
-            m_y4 = ipRecv["y"].get<double>();
+            m_y4 = ipRecv["y"].value<double>();
          }
          
          if(ipRecv.find("D"))
          {
-            m_D4 = ipRecv["D"].get<double>();
+            m_D4 = ipRecv["D"].value<double>();
          }
          
          if(ipRecv.find("set-x"))
          {
-            m_setx4 = ipRecv["set-x"].get<double>();
+            m_setx4 = ipRecv["set-x"].value<double>();
          }
       
          if(ipRecv.find("set-y"))
          {
-            m_sety4 = ipRecv["set-y"].get<double>();
+            m_sety4 = ipRecv["set-y"].value<double>();
          }
          
          if(ipRecv.find("set-D"))
          {
-            m_setD4 = ipRecv["set-D"].get<double>();
+            m_setD4 = ipRecv["set-D"].value<double>();
          }
       }   
       else if(ipRecv.getName() == "threshold")
       {
          if(ipRecv.find("current"))
          {
-            m_threshold_current = ipRecv["current"].get<double>();
+            m_threshold_current = ipRecv["current"].value<double>();
          }
       }
       else if(ipRecv.getName() == "fsm")
       {
          if(ipRecv.find("state"))
          {
-            m_camwfsfitState = ipRecv["state"].get<std::string>();
+            m_camwfsfitState = ipRecv["state"].value();
          }
       }
       
@@ -871,21 +871,21 @@ void pupilGuide::handleSetProperty( const pcf::IndiProperty & ipRecv)
       {
          if(ipRecv.find("state"))
          {
-            m_pupFsmState = ipRecv["state"].get<std::string>();
+            m_pupFsmState = ipRecv["state"].value();
          }
       }
       else if(ipRecv.getName() == "pos_1")
       {
          if(ipRecv.find("current"))
          {
-            m_pupCh1 = ipRecv["current"].get<double>();
+            m_pupCh1 = ipRecv["current"].value<double>();
          }
       }
       else if(ipRecv.getName() == "pos_2")
       {
          if(ipRecv.find("current"))
          {
-            m_pupCh2 = ipRecv["current"].get<double>();
+            m_pupCh2 = ipRecv["current"].value<double>();
          }
       }
    }
@@ -895,21 +895,21 @@ void pupilGuide::handleSetProperty( const pcf::IndiProperty & ipRecv)
       {
          if(ipRecv.find("state"))
          {
-            m_ttmPeriFsmState = ipRecv["state"].get<std::string>();
+            m_ttmPeriFsmState = ipRecv["state"].value();
          }
       }
       else if(ipRecv.getName() == "axis1_voltage")
       {
          if(ipRecv.find("current"))
          {
-            m_ttmPeriCh1 = ipRecv["current"].get<double>();
+            m_ttmPeriCh1 = ipRecv["current"].value<double>();
          }
       }
       else if(ipRecv.getName() == "axis2_voltage")
       {
          if(ipRecv.find("current"))
          {
-            m_ttmPeriCh2 = ipRecv["current"].get<double>();
+            m_ttmPeriCh2 = ipRecv["current"].value<double>();
          }
       }
    }
@@ -919,7 +919,7 @@ void pupilGuide::handleSetProperty( const pcf::IndiProperty & ipRecv)
       {
          if(ipRecv.find("toggle"))
          {
-            if(ipRecv["toggle"].getSwitchState() == pcf::IndiElement::On)
+            if(ipRecv["toggle"].switchState() == pcf::IndiElement::SwitchState::On)
             {
                if(m_camwfsAlignLoopState == false) m_camwfsAlignLoopWaiting = false;
                m_camwfsAlignLoopState = true;
@@ -940,14 +940,14 @@ void pupilGuide::handleSetProperty( const pcf::IndiProperty & ipRecv)
       {
          if(ipRecv.find("state"))
          {
-            m_camlensxFsmState = ipRecv["state"].get<std::string>();
+            m_camlensxFsmState = ipRecv["state"].value();
          }
       }
       else if(ipRecv.getName() == "position")
       {
          if(ipRecv.find("current"))
          {
-            m_camlensx_pos = ipRecv["current"].get<float>();
+            m_camlensx_pos = ipRecv["current"].value<float>();
          }
       }
    }
@@ -957,14 +957,14 @@ void pupilGuide::handleSetProperty( const pcf::IndiProperty & ipRecv)
       {
          if(ipRecv.find("state"))
          {
-            m_camlensyFsmState = ipRecv["state"].get<std::string>();
+            m_camlensyFsmState = ipRecv["state"].value();
          }
       }
       else if(ipRecv.getName() == "position")
       {
          if(ipRecv.find("current"))
          {
-            m_camlensy_pos = ipRecv["current"].get<float>();
+            m_camlensy_pos = ipRecv["current"].value<float>();
          }
       }
    }
@@ -974,14 +974,14 @@ void pupilGuide::handleSetProperty( const pcf::IndiProperty & ipRecv)
       {
          if(ipRecv.find("state"))
          {
-            m_dmtweeterState = ipRecv["state"].get<std::string>();
+            m_dmtweeterState = ipRecv["state"].value();
          }
       }
       else if(ipRecv.getName() == "test_set")
       {
          if(ipRecv.find("toggle"))
          {
-            if(ipRecv["toggle"] == pcf::IndiElement::On) m_dmtweeterTestSet = true;
+            if(ipRecv["toggle"] == pcf::IndiElement::SwitchState::On) m_dmtweeterTestSet = true;
             else m_dmtweeterTestSet=false;
          }
       }
@@ -992,14 +992,14 @@ void pupilGuide::handleSetProperty( const pcf::IndiProperty & ipRecv)
       {
          if(ipRecv.find("state"))
          {
-            m_dmncpcState = ipRecv["state"].get<std::string>();
+            m_dmncpcState = ipRecv["state"].value();
          }
       }
       else if(ipRecv.getName() == "test_set")
       {
          if(ipRecv.find("toggle"))
          {
-            if(ipRecv["toggle"] == pcf::IndiElement::On) m_dmncpcTestSet = true;
+            if(ipRecv["toggle"] == pcf::IndiElement::SwitchState::On) m_dmncpcTestSet = true;
             else m_dmncpcTestSet=false;
          }
       }
@@ -2138,11 +2138,11 @@ void pupilGuide::on_buttonTweeterTest_set_pressed()
 
    if(m_dmtweeterTestSet)
    {
-      ip["toggle"].setSwitchState(pcf::IndiElement::Off);
+      ip["toggle"].switchState(pcf::IndiElement::SwitchState::Off);
    }
    else
    {
-      ip["toggle"].setSwitchState(pcf::IndiElement::On);
+      ip["toggle"].switchState(pcf::IndiElement::SwitchState::On);
    }
 
    sendNewProperty(ip);
@@ -2160,11 +2160,11 @@ void pupilGuide::on_buttonNCPCTest_set_pressed()
 
    if(m_dmncpcTestSet)
    {
-      ip["toggle"].setSwitchState(pcf::IndiElement::Off);
+      ip["toggle"].switchState(pcf::IndiElement::SwitchState::Off);
    }
    else
    {
-      ip["toggle"].setSwitchState(pcf::IndiElement::On);
+      ip["toggle"].switchState(pcf::IndiElement::SwitchState::On);
    }
 
    sendNewProperty(ip);
@@ -2179,7 +2179,7 @@ void pupilGuide::on_buttonPup_rest_pressed()
    ip.setDevice("ttmpupil");
    ip.setName("releaseDM");
    ip.add(pcf::IndiElement("request"));
-   ip["request"].setSwitchState(pcf::IndiElement::On);
+   ip["request"].switchState(pcf::IndiElement::SwitchState::On);
    
    sendNewProperty(ip);
    
@@ -2192,7 +2192,7 @@ void pupilGuide::on_buttonPup_set_pressed()
    ip.setDevice("ttmpupil");
    ip.setName("initDM");
    ip.add(pcf::IndiElement("request"));
-   ip["request"].setSwitchState(pcf::IndiElement::On);
+   ip["request"].switchState(pcf::IndiElement::SwitchState::On);
    
    sendNewProperty(ip);
 }
@@ -2427,7 +2427,7 @@ void pupilGuide::on_button_ttmPeri_rest_pressed()
     ip.setDevice("ttmperi");
     ip.setName("set");
     ip.add(pcf::IndiElement("toggle"));
-    ip["toggle"].setSwitchState(pcf::IndiElement::Off);
+    ip["toggle"].switchState(pcf::IndiElement::SwitchState::Off);
    
     sendNewProperty(ip);
 }
@@ -2439,7 +2439,7 @@ void pupilGuide::on_button_ttmPeri_set_pressed()
     ip.setDevice("ttmperi");
     ip.setName("set");
     ip.add(pcf::IndiElement("toggle"));
-    ip["toggle"].setSwitchState(pcf::IndiElement::On);
+    ip["toggle"].switchState(pcf::IndiElement::SwitchState::On);
    
     sendNewProperty(ip);
 }
@@ -2606,11 +2606,11 @@ void pupilGuide::on_pupilAlign_loopSlider_sliderReleased()
    
    if(relpos >= 0.9)
    {
-      ipFreq["toggle"] = pcf::IndiElement::On;
+      ipFreq["toggle"] = pcf::IndiElement::SwitchState::On;
    }
    else
    {
-      ipFreq["toggle"] = pcf::IndiElement::Off;
+      ipFreq["toggle"] = pcf::IndiElement::SwitchState::Off;
    }
    
    sendNewProperty(ipFreq);

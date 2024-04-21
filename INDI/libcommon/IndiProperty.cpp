@@ -269,7 +269,7 @@ bool IndiProperty::compareValue( const IndiProperty &ipComp,
     return false;
 
   // If we found it, and the values don't match, these are different.
-  if ( itr->second.getValue() != itrComp->second.getValue() )
+  if ( itr->second.value() != itrComp->second.value() )
     return false;
 
   // If we got here, we are identical.
@@ -312,7 +312,7 @@ bool IndiProperty::compareValues( const IndiProperty &ipComp ) const
       return false;
 
     // If we found it, and the values don't match, these are different.
-    if ( itrComp->second.getValue() != itr->second.getValue() )
+    if ( itrComp->second.value() != itr->second.value() )
       return false;
   }
 
@@ -357,8 +357,8 @@ bool IndiProperty::hasNewValue( const IndiProperty &ipComp,
 
   // If we found it, and the values don't match and the 'comp' is not
   // empty, the 'comp' is an update.
-  if ( itr->second.getValue() != itrComp->second.getValue() &&
-      itrComp->second.getValue().length() > 0 )
+  if ( itr->second.value() != itrComp->second.value() &&
+      itrComp->second.value().length() > 0 )
     return true;
 
   // If we got here, we are identical or the 'comp' is empty.

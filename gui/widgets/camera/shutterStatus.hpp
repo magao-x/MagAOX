@@ -97,7 +97,7 @@ void shutterStatus::handleSetProperty( const pcf::IndiProperty & ipRecv)
    {
       if(ipRecv.find("toggle"))
       {
-         if(ipRecv["toggle"] == pcf::IndiElement::On) m_state = 1;
+         if(ipRecv["toggle"] == pcf::IndiElement::SwitchState::On) m_state = 1;
          else m_state = 0;
 
          if(m_tgt_state == -1) m_tgt_state = m_state;
@@ -108,7 +108,7 @@ void shutterStatus::handleSetProperty( const pcf::IndiProperty & ipRecv)
    {
       if(ipRecv.find("status"))
       {
-         m_status = ipRecv["status"].get();
+         m_status = ipRecv["status"].value();
       }
    }
 

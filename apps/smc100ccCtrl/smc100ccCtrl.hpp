@@ -23,6 +23,64 @@
 #include <iterator>
 #include <bitset>
 
+template<typename realT>
+struct stdMotionStage_simulator 
+{
+    realT m_minPos {0};
+    realT m_maxPos {0};
+    realT m_tgtPos {0};
+    realT m_curPos {0};
+
+    bool m_posWraps {false};
+
+    realT m_timeToHome {0};
+    bool m_rehome {false};
+    realT m_postHomePosition {0};
+    realT m_timeHomingStarted {0};
+    bool m_homing {false};
+
+    realT m_accel {0};
+    realT m_timeMovingStarted {0};
+    realT m_startPos {0};
+    bool m_moving {false};
+
+    int appLogic()
+    {
+        if(m_homing)
+        {
+            if( get_curr_time() - m_timeHomingStarted >= m_timeToHome)
+            {
+                m_homing = false;
+                m_curPos = m_postHomePosition;
+            }
+        }
+        else if(m_moving)
+        {
+            double dt = (m_tgtPos - m_startPos)/m_accel;
+
+            double t = get_curr_time();
+            if( t - m_timeMovingStarted > fabs(dt))
+            {
+                m_moving = false;
+                m_curPos = m_tgtPos;
+            }
+            else
+            {
+                m_curPos = m_startPos + (t - m_timeMovingStarted)/dt*(m_tgtPos - m_startPos);
+            }
+        }
+
+        if(m_curPos < m_minPos)
+        {
+        }
+        else if (m_curPos > m_maxPos)
+        {
+        }
+
+    }
+
+
+};
 
 namespace MagAOX
 {

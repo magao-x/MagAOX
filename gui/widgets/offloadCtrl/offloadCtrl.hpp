@@ -196,14 +196,14 @@ void offloadCtrl::handleSetProperty( const pcf::IndiProperty & ipRecv)
         {
             if(ipRecv.find("state"))
             {
-                m_t2wFsmState = ipRecv["state"].get<std::string>();
+                m_t2wFsmState = ipRecv["state"].value();
              }
         }
         else if(ipRecv.getName() == "offload")
         {
             if(ipRecv.find("toggle"))
             {
-                if(ipRecv["toggle"].getSwitchState() == pcf::IndiElement::On)
+                if(ipRecv["toggle"].switchState() == pcf::IndiElement::SwitchState::On)
                 {
                     m_offlState = true;
                 }
@@ -221,7 +221,7 @@ void offloadCtrl::handleSetProperty( const pcf::IndiProperty & ipRecv)
         {
             if(ipRecv.find("state"))
             {
-                m_tweeterAvgFsmState = ipRecv["state"].get<std::string>();
+                m_tweeterAvgFsmState = ipRecv["state"].value();
              }
         }
     }
@@ -231,7 +231,7 @@ void offloadCtrl::handleSetProperty( const pcf::IndiProperty & ipRecv)
         {
             if(ipRecv.find("state"))
             {
-                m_tcsiFsmState = ipRecv["state"].get<std::string>();
+                m_tcsiFsmState = ipRecv["state"].value();
              }
         }
     }
@@ -324,7 +324,7 @@ void offloadCtrl::on_button_zero_pressed()
     ipFreq.setName("zero");
     ipFreq.add(pcf::IndiElement("request"));
    
-    ipFreq["request"] = pcf::IndiElement::On;
+    ipFreq["request"] = pcf::IndiElement::SwitchState::On;
    
     sendNewProperty(ipFreq);
 }
@@ -337,7 +337,7 @@ void offloadCtrl::on_button_TelTTDump_pressed()
     ipFreq.setName("offlTT_dump");
     ipFreq.add(pcf::IndiElement("request"));
    
-    ipFreq["request"] = pcf::IndiElement::On;
+    ipFreq["request"] = pcf::IndiElement::SwitchState::On;
    
     sendNewProperty(ipFreq);
 }
@@ -350,7 +350,7 @@ void offloadCtrl::on_button_TelFocusDump_pressed()
     ipFreq.setName("offlF_dump");
     ipFreq.add(pcf::IndiElement("request"));
    
-    ipFreq["request"] = pcf::IndiElement::On;
+    ipFreq["request"] = pcf::IndiElement::SwitchState::On;
    
     sendNewProperty(ipFreq);
 }

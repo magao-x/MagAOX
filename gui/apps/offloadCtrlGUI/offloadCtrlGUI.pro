@@ -16,7 +16,7 @@ CONFIG(release, debug|release) {
     CONFIG += optimize_full
 }
 
-CONFIG += c++14
+CONFIG += c++17
 CONFIG += qwt
 exists( $$(CONDA_PREFIX)/include ) {
     INCLUDEPATH += $$(CONDA_PREFIX)/include

@@ -363,7 +363,7 @@ void statusEntry::handleSetProperty( const pcf::IndiProperty & ipRecv)
    {
       if(ipRecv.find(m_currEl))
       {
-         std::string current = ipRecv[m_currEl].get();
+         std::string current = ipRecv[m_currEl].value();
          if(current != m_current)  
          {
             m_valChanged = true;
@@ -373,7 +373,7 @@ void statusEntry::handleSetProperty( const pcf::IndiProperty & ipRecv)
 
       if(ipRecv.find(m_targEl))
       {
-         m_target = ipRecv[m_targEl].get();
+         m_target = ipRecv[m_targEl].value();
       }
    }
 

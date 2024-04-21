@@ -245,21 +245,21 @@ void roi::handleSetProperty( const pcf::IndiProperty & ipRecv)
    {
       if(ipRecv.find("state"))
       {
-         m_appState = ipRecv["state"].get<std::string>();
+         m_appState = ipRecv["state"].value<std::string>();
       }
    }
    else if(ipRecv.getName() == "roi_region_bin_x")
    {
       if(ipRecv.find("current"))
       {
-         int val = ipRecv["current"].get<int>();
+         int val = ipRecv["current"].value<int>();
          if(val != m_bin_x_curr) m_bin_x_curr_changed = true;
          m_bin_x_curr = val;
       }
 
       if(ipRecv.find("target"))
       {
-         int val = ipRecv["target"].get<int>();
+         int val = ipRecv["target"].value<int>();
          if(val != m_bin_x_tgt) m_bin_x_tgt_changed = true;
          m_bin_x_tgt = val;
       }
@@ -268,14 +268,14 @@ void roi::handleSetProperty( const pcf::IndiProperty & ipRecv)
    {
       if(ipRecv.find("current"))
       {
-         int val = ipRecv["current"].get<int>();
+         int val = ipRecv["current"].value<int>();
          if(val != m_bin_y_curr) m_bin_y_curr_changed = true;
          m_bin_y_curr = val;
       }
 
       if(ipRecv.find("target"))
       {
-         int val = ipRecv["target"].get<int>();
+         int val = ipRecv["target"].value<int>();
          if(val != m_bin_y_tgt) m_bin_y_tgt_changed = true;
          m_bin_y_tgt = val;
       }
@@ -284,14 +284,14 @@ void roi::handleSetProperty( const pcf::IndiProperty & ipRecv)
    {
       if(ipRecv.find("current"))
       {
-         float val = ipRecv["current"].get<float>();;
+         float val = ipRecv["current"].value<float>();;
          if(val != m_cen_x_curr) m_cen_x_curr_changed = true;
          m_cen_x_curr = val;
       }
 
       if(ipRecv.find("target"))
       {
-         float val = ipRecv["target"].get<float>();;
+         float val = ipRecv["target"].value<float>();;
          if(val != m_cen_x_tgt) m_cen_x_tgt_changed = true;
          m_cen_x_tgt = val;
       }
@@ -300,14 +300,14 @@ void roi::handleSetProperty( const pcf::IndiProperty & ipRecv)
    {
       if(ipRecv.find("current"))
       {
-         float val = ipRecv["current"].get<float>();;
+         float val = ipRecv["current"].value<float>();;
          if(val != m_cen_y_curr) m_cen_y_curr_changed = true;
          m_cen_y_curr = val;
       }
 
       if(ipRecv.find("target"))
       {
-         float val = ipRecv["target"].get<float>();;
+         float val = ipRecv["target"].value<float>();;
          if(val != m_cen_y_tgt) m_cen_y_tgt_changed = true;
          m_cen_y_tgt = val;
       }
@@ -316,14 +316,14 @@ void roi::handleSetProperty( const pcf::IndiProperty & ipRecv)
    {
       if(ipRecv.find("current"))
       {
-         int val = ipRecv["current"].get<int>();
+         int val = ipRecv["current"].value<int>();
          if(val != m_wid_curr) m_wid_curr_changed = true;
          m_wid_curr = val;
       }
 
       if(ipRecv.find("target"))
       {
-         int val = ipRecv["target"].get<int>();
+         int val = ipRecv["target"].value<int>();
          if(val != m_wid_tgt) m_wid_tgt_changed = true;
          m_wid_tgt = val;
       }
@@ -332,14 +332,14 @@ void roi::handleSetProperty( const pcf::IndiProperty & ipRecv)
    {
       if(ipRecv.find("current"))
       {
-         int val = ipRecv["current"].get<int>();
+         int val = ipRecv["current"].value<int>();
          if(val != m_hgt_curr) m_hgt_curr_changed = true;
          m_hgt_curr = val;
       }
 
       if(ipRecv.find("target"))
       {
-         int val = ipRecv["target"].get<int>();
+         int val = ipRecv["target"].value<int>();
          if(val != m_hgt_tgt) m_hgt_tgt_changed = true;
          m_hgt_tgt = val;
       }
@@ -713,7 +713,7 @@ void roi::on_button_loadlast_pressed()
    ipFreq.setDevice(m_camName);
    ipFreq.setName("roi_load_last");
    ipFreq.add(pcf::IndiElement("request"));
-   ipFreq["request"].setSwitchState(pcf::IndiElement::On);
+   ipFreq["request"].switchState(pcf::IndiElement::SwitchState::On);
     
    sendNewProperty(ipFreq);  
 }
@@ -762,7 +762,7 @@ void roi::on_button_check_pressed()
    ipFreq.setDevice(m_camName);
    ipFreq.setName("roi_region_check");
    ipFreq.add(pcf::IndiElement("request"));
-   ipFreq["request"].setSwitchState(pcf::IndiElement::On);
+   ipFreq["request"].switchState(pcf::IndiElement::SwitchState::On);
     
    sendNewProperty(ipFreq);  
 }
@@ -776,7 +776,7 @@ void roi::on_button_set_pressed()
    ipFreq.setDevice(m_camName);
    ipFreq.setName("roi_set");
    ipFreq.add(pcf::IndiElement("request"));
-   ipFreq["request"].setSwitchState(pcf::IndiElement::On);
+   ipFreq["request"].switchState(pcf::IndiElement::SwitchState::On);
     
    sendNewProperty(ipFreq); 
 }
@@ -790,7 +790,7 @@ void roi::on_button_last_pressed()
    ipFreq.setDevice(m_camName);
    ipFreq.setName("roi_set_last");
    ipFreq.add(pcf::IndiElement("request"));
-   ipFreq["request"].setSwitchState(pcf::IndiElement::On);
+   ipFreq["request"].switchState(pcf::IndiElement::SwitchState::On);
     
    sendNewProperty(ipFreq); 
 }
@@ -804,7 +804,7 @@ void roi::on_button_fullbin_pressed()
    ipFreq.setDevice(m_camName);
    ipFreq.setName("roi_set_full_bin");
    ipFreq.add(pcf::IndiElement("request"));
-   ipFreq["request"].setSwitchState(pcf::IndiElement::On);
+   ipFreq["request"].switchState(pcf::IndiElement::SwitchState::On);
     
    sendNewProperty(ipFreq); 
 }
@@ -819,7 +819,7 @@ void roi::on_button_full_pressed()
    ipFreq.setDevice(m_camName);
    ipFreq.setName("roi_set_full");
    ipFreq.add(pcf::IndiElement("request"));
-   ipFreq["request"].setSwitchState(pcf::IndiElement::On);
+   ipFreq["request"].switchState(pcf::IndiElement::SwitchState::On);
     
    sendNewProperty(ipFreq); 
 }
@@ -833,7 +833,7 @@ void roi::on_button_default_pressed()
    ipFreq.setDevice(m_camName);
    ipFreq.setName("roi_set_default");
    ipFreq.add(pcf::IndiElement("request"));
-   ipFreq["request"].setSwitchState(pcf::IndiElement::On);
+   ipFreq["request"].switchState(pcf::IndiElement::SwitchState::On);
     
    sendNewProperty(ipFreq); 
 }

@@ -124,7 +124,7 @@ void fsmDisplay::handleSetProperty( const pcf::IndiProperty & ipRecv)
    {
       if(ipRecv.find(m_element))
       {
-         std::string value = ipRecv[m_element].get();
+         std::string value = ipRecv[m_element].value();
          if(value != m_value) m_valChanged = true;
          m_value = value;
       }

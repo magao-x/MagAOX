@@ -85,84 +85,84 @@ void roiStatus::handleSetProperty( const pcf::IndiProperty & ipRecv)
    {
       if(ipRecv.find("current"))
       {
-         int curr = ipRecv["current"].get<int>();
+         int curr = ipRecv["current"].value<int>();
          if(curr != m_bin_x_curr) m_valChanged = true;
          m_bin_x_curr = curr;
       }
 
       if(ipRecv.find("target"))
       {
-         m_bin_x_tgt = ipRecv["target"].get<int>();
+         m_bin_x_tgt = ipRecv["target"].value<int>();
       }
    }
    else if(ipRecv.getName() == "roi_region_bin_y")
    {
       if(ipRecv.find("current"))
       {
-         int curr = ipRecv["current"].get<int>();
+         int curr = ipRecv["current"].value<int>();
          if(curr != m_bin_y_curr) m_valChanged = true;
          m_bin_y_curr = curr;
       }
 
       if(ipRecv.find("target"))
       {
-         m_bin_y_tgt = ipRecv["target"].get<int>();
+         m_bin_y_tgt = ipRecv["target"].value<int>();
       }
    }
    else if(ipRecv.getName() == "roi_region_x")
    {
       if(ipRecv.find("current"))
       {
-         float curr = ipRecv["current"].get<float>();
+         float curr = ipRecv["current"].value<float>();
          if(curr != m_cen_x_curr) m_valChanged = true;
          m_cen_x_curr = curr;
       }
 
       if(ipRecv.find("target"))
       {
-         m_cen_x_tgt = ipRecv["target"].get<float>();
+         m_cen_x_tgt = ipRecv["target"].value<float>();
       }
    }
    else if(ipRecv.getName() == "roi_region_y")
    {
       if(ipRecv.find("current"))
       {
-         float curr = ipRecv["current"].get<float>();
+         float curr = ipRecv["current"].value<float>();
          if(curr != m_cen_y_curr) m_valChanged = true;
          m_cen_y_curr = curr;
       }
 
       if(ipRecv.find("target"))
       {
-         m_cen_y_tgt = ipRecv["target"].get<float>();
+         m_cen_y_tgt = ipRecv["target"].value<float>();
       }
    }
    else if(ipRecv.getName() == "roi_region_w")
    {
       if(ipRecv.find("current"))
       {
-         int curr = ipRecv["current"].get<int>();
+         int curr = ipRecv["current"].value<int>();
          if(curr != m_wid_curr) m_valChanged = true;
          m_wid_curr = curr;
       }
 
       if(ipRecv.find("target"))
       {
-         m_wid_tgt = ipRecv["target"].get<int>();
+         m_wid_tgt = ipRecv["target"].value<int>();
       }
    }
    else if(ipRecv.getName() == "roi_region_h")
    {
       if(ipRecv.find("current"))
       {
-         int curr = ipRecv["current"].get<int>();
+         int curr = ipRecv["current"].value<int>();
          if(curr != m_hgt_curr) m_valChanged = true;
          m_hgt_curr = curr;
       }
 
       if(ipRecv.find("target"))
       {
-         m_hgt_tgt = ipRecv["target"].get<int>();
+         m_hgt_tgt = ipRecv["target"].value<int>();
       }
    }
 

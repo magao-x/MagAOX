@@ -9,46 +9,47 @@
 #include <sstream>
 #include <iostream>           // for std::cerr
 #include <stdexcept>          // for std::runtime_error
+#include <cstring>
 #include "IndiElement.hpp"
 
-using std::boolalpha;
-using std::runtime_error;
-using std::string;
-using std::stringstream;
-using pcf::IndiElement;
+namespace pcf
+{
 
 IndiElement::IndiElement()
 {
 }
 
-IndiElement::IndiElement( const string &name ) : m_name(name)
+IndiElement::IndiElement( const std::string &name ) : m_name(name)
 {
 }
 
-IndiElement::IndiElement( const string &name,
-                          const string &szValue ) : m_name(name), m_szValue(szValue)
+IndiElement::IndiElement( const std::string &name,
+                          const std::string &value ) : m_name(name), m_value(value)
 {
 }
 
-IndiElement::IndiElement( const string &name,
-                          const char *pcValue ) : m_name(name), m_szValue(pcValue)
+IndiElement::IndiElement( const std::string &name,
+                          const double & value ) : m_name(name)
+{
+    std::stringstream ssValue;
+    ssValue << std::boolalpha << value;
+    m_value = ssValue.str();
+}
+
+IndiElement::IndiElement( const std::string &name,
+                          const LightState &value ) : m_name(name), m_lightState(value)
 {
 }
 
-IndiElement::IndiElement( const string &name,
-                          const LightStateType &tValue ) : m_name(name), m_lsValue(tValue)
+IndiElement::IndiElement( const std::string &name,
+                          const SwitchState &value ) : m_name(name), m_switchState(value)
 {
 }
 
-IndiElement::IndiElement( const string &name,
-                          const SwitchStateType &tValue ) : m_name(name), m_ssValue(tValue)
-{
-}
-
-IndiElement::IndiElement( const IndiElement &ieRhs ) : m_szFormat(ieRhs.m_szFormat), m_szLabel(ieRhs.m_szLabel),
-                                                         m_szMax(ieRhs.m_szMax), m_szMin(ieRhs.m_szMin), m_name(ieRhs.m_name),
-                                                          m_szSize(ieRhs.m_szSize), m_szStep(ieRhs.m_szStep), m_szValue(ieRhs.m_szValue),
-                                                           m_lsValue(ieRhs.m_lsValue), m_ssValue(ieRhs.m_ssValue)
+IndiElement::IndiElement( const IndiElement &ieRhs ) : m_format(ieRhs.m_format), m_label(ieRhs.m_label),
+                                                         m_max(ieRhs.m_max), m_min(ieRhs.m_min), m_name(ieRhs.m_name),
+                                                          m_size(ieRhs.m_size), m_step(ieRhs.m_step), m_value(ieRhs.m_value),
+                                                           m_lightState(ieRhs.m_lightState), m_switchState(ieRhs.m_switchState)
 {
 }
 
@@ -56,592 +57,392 @@ IndiElement::~IndiElement()
 {
 }
 
-void IndiElement::name( const string &name )
+void IndiElement::format( const std::string & format )
 {
-  pcf::ReadWriteLock::AutoWLock rwAuto( &m_rwData );
-  m_name = name;
+    std::unique_lock wLock(m_rwData);
+    m_format = format;
 }
 
-const string &IndiElement::name() const
+const std::string & IndiElement::format() const
 {
-  pcf::ReadWriteLock::AutoRLock rwAuto( &m_rwData );
-  return m_name;
+    std::shared_lock rLock(m_rwData);
+    return m_format;
+}
+
+bool IndiElement::hasValidFormat() const
+{
+    std::shared_lock rLock(m_rwData);
+    return ( m_format.size() > 0 );
+}
+
+void IndiElement::label( const std::string & label )
+{
+    std::unique_lock wLock(m_rwData);
+    m_label = label;
+}
+
+const std::string & IndiElement::label() const
+{
+    std::shared_lock rLock(m_rwData);  
+    return m_label;
+}
+
+bool IndiElement::hasValidLabel() const
+{
+    std::shared_lock rLock(m_rwData);
+    return ( m_label.size() > 0 );
+}
+
+void IndiElement::min( const std::string & min )
+{
+    std::unique_lock wLock(m_rwData);
+    m_min = min;
+}
+
+void IndiElement::min( const double & min )
+{
+    std::unique_lock wLock(m_rwData);
+
+    std::stringstream ssValue;
+    ssValue.precision( 15 );
+    ssValue << min;
+    m_min = ssValue.str();
+}
+
+const std::string &IndiElement::min() const
+{
+    std::shared_lock rLock(m_rwData);
+    return m_min;
+}
+
+bool IndiElement::hasValidMin() const
+{
+    std::shared_lock rLock(m_rwData);    
+    return ( m_min.size() > 0 );
+}
+
+void IndiElement::max( const std::string & max )
+{
+    std::unique_lock wLock(m_rwData);
+    m_max = max;
+}
+
+void IndiElement::max( const double & max )
+{
+    std::unique_lock rLock(m_rwData);
+
+    std::stringstream ssValue;
+    ssValue.precision( 15 );
+    ssValue << max;
+    m_max = ssValue.str();
+}
+
+const std::string &IndiElement::max() const
+{
+    std::shared_lock rLock(m_rwData);
+    return m_max;
+}
+
+bool IndiElement::hasValidMax() const
+{
+    std::shared_lock rLock(m_rwData);
+    return ( m_max.size() > 0 );
+}
+
+void IndiElement::name( const std::string &name )
+{
+    std::unique_lock wLock(m_rwData);
+    m_name = name;
+}
+
+const std::string &IndiElement::name() const
+{
+    std::shared_lock rLock(m_rwData);
+    return m_name;
 }
 
 bool IndiElement::hasValidName() const
 {
-  pcf::ReadWriteLock::AutoRLock rwAuto( &m_rwData );
-  return ( m_name.size() > 0 );
+    std::shared_lock rLock(m_rwData);
+    return ( m_name.size() > 0 );
 }
 
-
-////////////////////////////////////////////////////////////////////////////////
-/// Assigns the internal data of this object from an existing one.
-
-const IndiElement &IndiElement::operator=( const IndiElement &ieRhs )
+void IndiElement::size( const std::string & size )
 {
-  if ( &ieRhs != this )
-  {
-    pcf::ReadWriteLock::AutoWLock rwAuto( &m_rwData );
-
-    m_szFormat = ieRhs.m_szFormat;
-    m_szLabel = ieRhs.m_szLabel;
-    m_szMax = ieRhs.m_szMax;
-    m_szMin = ieRhs.m_szMin;
-    m_name = ieRhs.m_name;
-    m_szSize = ieRhs.m_szSize;
-    m_szStep = ieRhs.m_szStep;
-    m_szValue = ieRhs.m_szValue;
-    m_lsValue = ieRhs.m_lsValue;
-    m_ssValue = ieRhs.m_ssValue;
-  }
-  return *this;
+    std::unique_lock wLock(m_rwData);
+    m_size = size;
 }
 
-////////////////////////////////////////////////////////////////////////////////
-/// Returns true if we have an exact match (value as well).
-
-bool IndiElement::operator==( const IndiElement &ieRhs ) const
+void IndiElement::size( const double & size )
 {
-  if ( &ieRhs == this )
-    return true;
+    std::unique_lock wLock(m_rwData);
 
-  pcf::ReadWriteLock::AutoRLock rwAuto( &m_rwData );
-
-  return ( m_szFormat == ieRhs.m_szFormat &&
-           m_szLabel == ieRhs.m_szLabel &&
-           m_szMax == ieRhs.m_szMax &&
-           m_szMin == ieRhs.m_szMin &&
-           m_name == ieRhs.m_name &&
-           m_szSize == ieRhs.m_szSize &&
-           m_szStep == ieRhs.m_szStep &&
-           m_szValue == ieRhs.m_szValue &&
-           m_lsValue == ieRhs.m_lsValue &&
-           m_ssValue == ieRhs.m_ssValue );
+    std::stringstream value;
+    value.precision( 15 );
+    value << size;
+    m_size = value.str();
 }
 
-////////////////////////////////////////////////////////////////////////////////
-
-string IndiElement::createString() const
+const std::string & IndiElement::size() const
 {
-  pcf::ReadWriteLock::AutoRLock rwAuto( &m_rwData );
-
-  stringstream ssOutput;
-  ssOutput << "{ "
-           << "\"name\" : \"" << m_name << "\" , "
-           << "\"value\" : \"" << m_szValue << "\" , "
-           << "\"lightstate\" : \"" << getLightStateString( m_lsValue ) << "\" , "
-           << "\"switchstate\" : \"" << getSwitchStateString( m_ssValue ) << "\" , "
-           << "\"label\" : \"" << m_szLabel << "\" , "
-           << "\"format\" : \"" << m_szFormat << "\" , "
-           << "\"max\" : \"" << m_szMax << "\" , "
-           << "\"min\" : \"" << m_szMin << "\" , "
-           << "\"size\" : \"" << m_szSize << "\" , "
-           << "\"step\" : \"" << m_szStep << "\" "
-           << "} ";
-  return ssOutput.str();
+    std::shared_lock rLock(m_rwData);  
+    return m_size;
 }
 
-
-////////////////////////////////////////////////////////////////////////////////
-/// Remove all attributes and reset this object.
-
-void IndiElement::clear()
-{
-  pcf::ReadWriteLock::AutoWLock rwAuto( &m_rwData );
-
-  m_szFormat = "%g";
-  m_szLabel = "";
-  m_szMax = "0";
-  m_szMin = "0";
-  m_name = "";
-  m_szSize = "0";
-  m_szStep = "0";
-  m_szValue = "";
-  m_lsValue = UnknownLightState;
-  m_ssValue = UnknownSwitchState;
-}
-
-////////////////////////////////////////////////////////////////////////////////
-/// Returns the format attribute.
-
-const string &IndiElement::getFormat() const
-{
-  pcf::ReadWriteLock::AutoRLock rwAuto( &m_rwData );
-  return m_szFormat;
-}
-
-////////////////////////////////////////////////////////////////////////////////
-/// Returns the label attribute.
-
-const string &IndiElement::getLabel() const
-{
-  pcf::ReadWriteLock::AutoRLock rwAuto( &m_rwData );
-  return m_szLabel;
-}
-
-////////////////////////////////////////////////////////////////////////////////
-/// Returns the state of a light.
-
-IndiElement::operator IndiElement::LightStateType() const
-{
-  pcf::ReadWriteLock::AutoRLock rwAuto( &m_rwData );
-  return m_lsValue;
-}
-
-////////////////////////////////////////////////////////////////////////////////
-/// Returns the state of a light.
-
-IndiElement::LightStateType IndiElement::getLightState() const
-{
-  pcf::ReadWriteLock::AutoRLock rwAuto( &m_rwData );
-  return m_lsValue;
-}
-
-////////////////////////////////////////////////////////////////////////////////
-/// Returns the max attribute.
-
-const string &IndiElement::getMax() const
-{
-  pcf::ReadWriteLock::AutoRLock rwAuto( &m_rwData );
-  return m_szMax;
-}
-
-////////////////////////////////////////////////////////////////////////////////
-/// Returns the min attribute.
-
-const string &IndiElement::getMin() const
-{
-  pcf::ReadWriteLock::AutoRLock rwAuto( &m_rwData );
-  return m_szMin;
-}
-
-////////////////////////////////////////////////////////////////////////////////
-/// Returns the name attribute.
-
-
-////////////////////////////////////////////////////////////////////////////////
-/// Returns the step attribute.
-
-const string &IndiElement::getStep() const
-{
-  pcf::ReadWriteLock::AutoRLock rwAuto( &m_rwData );
-  return m_szStep;
-}
-
-////////////////////////////////////////////////////////////////////////////////
-/// Returns the size attribute.
-
-const std::string & IndiElement::getSize() const
-{
-  pcf::ReadWriteLock::AutoRLock rwAuto( &m_rwData );
-  return m_szSize;
-}
-
-////////////////////////////////////////////////////////////////////////////////
-/// Returns the state of a switch.
-
-IndiElement::operator IndiElement::SwitchStateType() const
-{
-  pcf::ReadWriteLock::AutoRLock rwAuto( &m_rwData );
-  return m_ssValue;
-}
-
-////////////////////////////////////////////////////////////////////////////////
-/// Returns the state of a switch.
-
-IndiElement::SwitchStateType IndiElement::getSwitchState() const
-{
-  pcf::ReadWriteLock::AutoRLock rwAuto( &m_rwData );
-  return m_ssValue;
-}
-
-////////////////////////////////////////////////////////////////////////////////
-/// Is the value (not LightState or SwitchState) a numeric?
-
-bool IndiElement::isNumeric() const
-{
-  pcf::ReadWriteLock::AutoRLock rwAuto( &m_rwData );
-
-  int iValue;
-  std::stringstream ssValue( m_szValue );
-
-  // Try to stream the data into the int variable.
-  // If we fail, this value is not numeric.
-  ssValue >> iValue;
-  return ssValue.good();
-//  return ( ssValue >> iValue );
-}
-
-////////////////////////////////////////////////////////////////////////////////
-/// Returns the bool value. If the value is 0, "false", or any other non-value.
-/*
-IndiElement::operator bool() const
-{
-  pcf::ReadWriteLock::AutoRLock rwAuto( &m_rwData );
-
-  bool oValue;
-  std::stringstream ssValue( m_szValue );
-
-  // Try to stream the data into the variable.
-  ssValue >> oValue;
-  if ( ssValue.fail() == true )
-  {
-    throw ( runtime_error( string( "IndiElement '" ) + m_name + "' value '" +
-                           m_szValue + "' is not a bool.") );
-  }
-
-  return oValue;
-}
-
-////////////////////////////////////////////////////////////////////////////////
-/// Returns the double value.
-
-IndiElement::operator double() const
-{
-  pcf::ReadWriteLock::AutoRLock rwAuto( &m_rwData );
-
-  double xValue;
-  std::stringstream ssValue( m_szValue );
-
-  // Try to stream the data into the variable.
-  ssValue >> xValue;
-  if ( ssValue.fail() == true )
-  {
-    throw ( runtime_error( string( "IndiElement '" ) + m_name + "' value '" +
-                           m_szValue + "' is not a double.") );
-  }
-
-  return xValue;
-}
-
-////////////////////////////////////////////////////////////////////////////////
-/// Returns the float value.
-
-IndiElement::operator float() const
-{
-  pcf::ReadWriteLock::AutoRLock rwAuto( &m_rwData );
-
-  float eValue;
-  std::stringstream ssValue( m_szValue );
-
-  // Try to stream the data into the variable.
-  ssValue >> eValue;
-  if ( ssValue.fail() == true )
-  {
-    throw ( runtime_error( string( "IndiElement '" ) + m_name + "' value '" +
-                           m_szValue + "' is not a float.") );
-  }
-
-  return eValue;
-}
-
-////////////////////////////////////////////////////////////////////////////////
-/// Returns the int value.
-
-IndiElement::operator int() const
-{
-  pcf::ReadWriteLock::AutoRLock rwAuto( &m_rwData );
-
-  int iValue;
-  std::stringstream ssValue( m_szValue );
-
-  // Try to stream the data into the variable.
-  ssValue >> iValue;
-  if ( ssValue.fail() == true )
-  {
-    throw ( runtime_error( string( "IndiElement '" ) + m_name + "' value '" +
-                           m_szValue + "' is not an int.") );
-  }
-
-  return iValue;
-}
-
-////////////////////////////////////////////////////////////////////////////////
-/// Returns the string value.
-
-IndiElement::operator string() const
-{
-  pcf::ReadWriteLock::AutoRLock rwAuto( &m_rwData );
-  return m_szValue;
-}
-
-////////////////////////////////////////////////////////////////////////////////
-/// Returns the unsigned int value.
-
-IndiElement::operator unsigned int() const
-{
-  pcf::ReadWriteLock::AutoRLock rwAuto( &m_rwData );
-
-  unsigned int uiValue;
-  std::stringstream ssValue( m_szValue );
-
-  // Try to stream the data into the variable.
-  ssValue >> uiValue;
-  if ( ssValue.fail() == true )
-  {
-    throw ( runtime_error( string( "IndiElement '" ) + m_name + "' value '" +
-                           m_szValue + "' is not an unsigned int.") );
-  }
-
-  return uiValue;
-}
-*/
-////////////////////////////////////////////////////////////////////////////////
-/// Returns the value as type string.
-
-string IndiElement::get() const
-{
-  pcf::ReadWriteLock::AutoRLock rwAuto( &m_rwData );
-  return m_szValue;
-}
-
-////////////////////////////////////////////////////////////////////////////////
-/// Returns the value as type string.
-
-string IndiElement::getValue() const
-{
-  pcf::ReadWriteLock::AutoRLock rwAuto( &m_rwData );
-  return m_szValue;
-}
-
-////////////////////////////////////////////////////////////////////////////////
-/// Returns the string value as an array of char. The size argument should
-/// contain the number of bytes in the buffer 'pcValue', it will be returned
-/// with the number of bytes actually copied.
-
-void IndiElement::getValue( char *pcValue, unsigned int &uiSize ) const
-{
-  pcf::ReadWriteLock::AutoRLock rwAuto( &m_rwData );
-
-  // Modify the number of bytes to copy. It will be the lesser of the two sizes.
-  uiSize = ( uiSize > m_szValue.size() ) ? ( m_szValue.size() ) : ( uiSize );
-
-  ::memcpy( pcValue, m_szValue.c_str(), uiSize );
-}
-
-////////////////////////////////////////////////////////////////////////////////
-
-void IndiElement::setFormat( const string &szFormat )
-{
-  pcf::ReadWriteLock::AutoWLock rwAuto( &m_rwData );
-  m_szFormat = szFormat;
-}
-
-////////////////////////////////////////////////////////////////////////////////
-
-void IndiElement::setLabel( const string &szLabel )
-{
-  pcf::ReadWriteLock::AutoWLock rwAuto( &m_rwData );
-  m_szLabel = szLabel;
-}
-
-////////////////////////////////////////////////////////////////////////////////
-
-void IndiElement::setMax( const string &szMax )
-{
-  pcf::ReadWriteLock::AutoWLock rwAuto( &m_rwData );
-  m_szMax = szMax;
-}
-
-////////////////////////////////////////////////////////////////////////////////
-
-void IndiElement::setMin( const string &szMin )
-{
-  pcf::ReadWriteLock::AutoWLock rwAuto( &m_rwData );
-  m_szMin = szMin;
-}
-
-////////////////////////////////////////////////////////////////////////////////
-
-
-////////////////////////////////////////////////////////////////////////////////
-
-void IndiElement::setStep( const string &szStep )
-{
-  pcf::ReadWriteLock::AutoWLock rwAuto( &m_rwData );
-  m_szStep = szStep;
-}
-
-////////////////////////////////////////////////////////////////////////////////
-
-void IndiElement::setSize( const string &szSize )
-{
-  pcf::ReadWriteLock::AutoWLock rwAuto( &m_rwData );
-  m_szSize = szSize;
-}
-
-////////////////////////////////////////////////////////////////////////////////
-/// This is an alternate way of calling 'setLightState'.
-
-const IndiElement::LightStateType &IndiElement::operator=( const LightStateType &tValue )
-{
-  pcf::ReadWriteLock::AutoWLock rwAuto( &m_rwData );
-  m_lsValue = tValue;
-  return tValue;
-}
-
-////////////////////////////////////////////////////////////////////////////////
-
-void IndiElement::setLightState( const LightStateType &tValue )
-{
-  pcf::ReadWriteLock::AutoWLock rwAuto( &m_rwData );
-  m_lsValue = tValue;
-}
-
-////////////////////////////////////////////////////////////////////////////////
-/// This is an alternate way of calling 'setSwitchState'.
-
-const IndiElement::SwitchStateType &IndiElement::operator=( const SwitchStateType &tValue )
-{
-  pcf::ReadWriteLock::AutoWLock rwAuto( &m_rwData );
-  m_ssValue = tValue;
-  return tValue;
-}
-
-////////////////////////////////////////////////////////////////////////////////
-
-void IndiElement::setSwitchState( const SwitchStateType &tValue )
-{
-  pcf::ReadWriteLock::AutoWLock rwAuto( &m_rwData );
-  m_ssValue = tValue;
-}
-
-////////////////////////////////////////////////////////////////////////////////
-/// Sets the data contained in the value as a string.
-
-void IndiElement::setValue( const string &szValue )
-{
-  pcf::ReadWriteLock::AutoWLock rwAuto( &m_rwData );
-  m_szValue = szValue;
-}
-
-////////////////////////////////////////////////////////////////////////////////
-/// Sets the data contained in the value as a string.
-
-void IndiElement::setValue( const char *pcValue,
-                            const unsigned int &uiSize )
-{
-  pcf::ReadWriteLock::AutoWLock rwAuto( &m_rwData );
-  m_szValue.assign( const_cast<char *>( pcValue ), uiSize );
-}
-
-////////////////////////////////////////////////////////////////////////////////
-
-bool IndiElement::hasValidFormat() const
-{
-  pcf::ReadWriteLock::AutoRLock rwAuto( &m_rwData );
-  return ( m_szFormat.size() > 0 );
-}
-
-////////////////////////////////////////////////////////////////////////////////
-
-bool IndiElement::hasValidLabel() const
-{
-  pcf::ReadWriteLock::AutoRLock rwAuto( &m_rwData );
-  return ( m_szLabel.size() > 0 );
-}
-
-////////////////////////////////////////////////////////////////////////////////
-
-bool IndiElement::hasValidLightState() const
-{
-  pcf::ReadWriteLock::AutoRLock rwAuto( &m_rwData );
-  return ( m_lsValue != UnknownLightState );
-}
-
-////////////////////////////////////////////////////////////////////////////////
-
-bool IndiElement::hasValidMax() const
-{
-  pcf::ReadWriteLock::AutoRLock rwAuto( &m_rwData );
-  return ( m_szMax.size() > 0 );
-}
-
-////////////////////////////////////////////////////////////////////////////////
-
-bool IndiElement::hasValidMin() const
-{
-  pcf::ReadWriteLock::AutoRLock rwAuto( &m_rwData );
-  return ( m_szMin.size() > 0 );
-}
-
-////////////////////////////////////////////////////////////////////////////////
-
-
-////////////////////////////////////////////////////////////////////////////////
 
 bool IndiElement::hasValidSize() const
 {
-  pcf::ReadWriteLock::AutoRLock rwAuto( &m_rwData );
-  return ( m_szSize.size() > 0 );
+    std::shared_lock rLock(m_rwData);
+    return ( m_size.size() > 0 );
 }
 
-////////////////////////////////////////////////////////////////////////////////
+void IndiElement::step( const std::string & step )
+{
+    std::unique_lock wLock(m_rwData);
+    m_step = step;
+}
+
+void IndiElement::step( const double & step )
+{
+    std::unique_lock wLock(m_rwData);
+
+    std::stringstream value;
+    value.precision( 15 );
+    value << step;
+    m_step = value.str();
+}
+
+const std::string &IndiElement::step() const
+{
+    std::shared_lock rLock(m_rwData);
+    return m_step;
+}
 
 bool IndiElement::hasValidStep() const
 {
-  pcf::ReadWriteLock::AutoRLock rwAuto( &m_rwData );
-  return ( m_szStep.size() > 0 );
+    std::shared_lock rLock(m_rwData);
+    return ( m_step.size() > 0 );
 }
 
-////////////////////////////////////////////////////////////////////////////////
-
-bool IndiElement::hasValidSwitchState() const
+void IndiElement::value( const std::string & val )
 {
-  pcf::ReadWriteLock::AutoRLock rwAuto( &m_rwData );
-  return ( m_ssValue != UnknownSwitchState );
+    std::unique_lock wLock(m_rwData);    
+    m_value = val;
 }
 
-////////////////////////////////////////////////////////////////////////////////
+void IndiElement::value( const double & val )
+{
+    std::unique_lock wLock(m_rwData);   
+    
+    std::stringstream value;
+    value.precision( 15 );
+    value << std::boolalpha << val;
+    m_value = value.str();
+}
+
+std::string IndiElement::value() const
+{
+    std::shared_lock rLock(m_rwData);
+    return m_value;
+}
 
 bool IndiElement::hasValidValue() const
 {
-  pcf::ReadWriteLock::AutoRLock rwAuto( &m_rwData );
-  return ( m_szValue.size() > 0 );
+    //pcf::ReadWriteLock::AutoRLock rwAuto( &m_rwData );
+    std::shared_lock rLock(m_rwData);
+
+    return ( m_value.size() > 0 );
 }
 
-////////////////////////////////////////////////////////////////////////////////
-/// Returns the enumerated type given the string type.
-
-IndiElement::LightStateType IndiElement::getLightStateType( const string &szType )
+void IndiElement::lightState( const LightState & state )
 {
-  LightStateType tType = UnknownLightState;
-
-  if ( szType == "Idle" )
-    tType = Idle;
-  else if ( szType == "Ok" )
-    tType = Ok;
-  else if ( szType == "Busy" )
-    tType = Busy;
-  else if ( szType == "Alert" )
-    tType = Alert;
-
-  return tType;
+    std::unique_lock wLock(m_rwData);
+    m_lightState = state;
 }
 
-////////////////////////////////////////////////////////////////////////////////
-/// Returns the string type given the enumerated type.
-
-string IndiElement::getLightStateString( const LightStateType &tType )
+const IndiElement::LightState & IndiElement::operator=( const LightState & state )
 {
-  string szType = "";
+    std::unique_lock wLock(m_rwData);
+    m_lightState = state;
+    return m_lightState;
+}
+
+IndiElement::LightState IndiElement::lightState() const
+{
+    std::shared_lock rLock(m_rwData);
+    return m_lightState;
+}
+
+bool IndiElement::hasValidLightState() const
+{
+    std::shared_lock rLock(m_rwData);
+    return ( m_lightState != LightState::Unknown );
+}
+
+void IndiElement::switchState( const SwitchState & state )
+{
+    std::unique_lock wLock(m_rwData);  
+    m_switchState = state;
+}
+
+const IndiElement::SwitchState & IndiElement::operator=( const SwitchState & state )
+{
+    std::unique_lock wLock(m_rwData);  
+    m_switchState = state;
+    return m_switchState;
+}
+
+IndiElement::SwitchState IndiElement::switchState() const
+{
+    std::shared_lock rLock(m_rwData);
+    return m_switchState;
+}
+
+bool IndiElement::hasValidSwitchState() const
+{
+    std::shared_lock rLock(m_rwData);
+    return ( m_switchState != SwitchState::Unknown );
+}
+
+
+
+
+
+
+
+
+
+
+
+
+const IndiElement &IndiElement::operator=( const IndiElement &ieRhs )
+{
+    if ( &ieRhs != this )
+    {
+        //pcf::ReadWriteLock::AutoWLock rwAuto( &m_rwData );
+        std::unique_lock wLock(m_rwData);
+
+        m_format = ieRhs.m_format;
+        m_label = ieRhs.m_label;
+        m_max = ieRhs.m_max;
+        m_min = ieRhs.m_min;
+        m_name = ieRhs.m_name;
+        m_size = ieRhs.m_size;
+        m_step = ieRhs.m_step;
+        m_value = ieRhs.m_value;
+        m_lightState = ieRhs.m_lightState;
+        m_switchState = ieRhs.m_switchState;
+    }
+    
+    return *this;
+}
+
+
+bool IndiElement::operator==( const IndiElement &ieRhs ) const
+{
+    if ( &ieRhs == this )
+    {
+        return true;
+    }
+
+    //pcf::ReadWriteLock::AutoRLock rwAuto( &m_rwData );
+    std::shared_lock rLock(m_rwData);
+
+    return ( m_format == ieRhs.m_format &&
+             m_label == ieRhs.m_label &&
+             m_max == ieRhs.m_max &&
+             m_min == ieRhs.m_min &&
+             m_name == ieRhs.m_name &&
+             m_size == ieRhs.m_size &&
+             m_step == ieRhs.m_step &&
+             m_value == ieRhs.m_value &&
+             m_lightState == ieRhs.m_lightState &&
+             m_switchState == ieRhs.m_switchState );
+}
+
+std::string IndiElement::createString() const
+{
+    //pcf::ReadWriteLock::AutoRLock rwAuto( &m_rwData );
+    std::shared_lock rLock(m_rwData);
+
+    std::stringstream ssOutput;
+    ssOutput << "{ "
+             << "\"name\" : \"" << m_name << "\" , "
+             << "\"value\" : \"" << m_value << "\" , "
+             << "\"lightstate\" : \"" << getLightStateString( m_lightState ) << "\" , "
+             << "\"switchstate\" : \"" << getSwitchStateString( m_switchState ) << "\" , "
+             << "\"label\" : \"" << m_label << "\" , "
+             << "\"format\" : \"" << m_format << "\" , "
+             << "\"max\" : \"" << m_max << "\" , "
+             << "\"min\" : \"" << m_min << "\" , "
+             << "\"size\" : \"" << m_size << "\" , "
+             << "\"step\" : \"" << m_step << "\" "
+             << "} ";
+    return ssOutput.str();
+}
+
+
+
+void IndiElement::clear()
+{
+    //pcf::ReadWriteLock::AutoWLock rwAuto( &m_rwData );
+    std::unique_lock wLock(m_rwData);
+    m_format = "%g";
+    m_label = "";
+    m_max = "0";
+    m_min = "0";
+    m_name = "";
+    m_size = "0";
+    m_step = "0";
+    m_value = "";
+    m_lightState = LightState::Unknown;
+    m_switchState = SwitchState::Unknown;
+}
+
+
+
+
+
+
+
+
+IndiElement::LightState IndiElement::getLightState( const std::string &szType )
+{
+
+    LightState tType = LightState::Unknown;
+
+    if ( szType == "Idle" )
+        tType = LightState::Idle;
+    else if ( szType == "Ok" )
+        tType = LightState::Ok;
+    else if ( szType == "Busy" )
+        tType = LightState::Busy;
+    else if ( szType == "Alert" )
+        tType = LightState::Alert;
+
+    return tType;
+}
+
+std::string IndiElement::getLightStateString( const LightState &tType )
+{
+
+  std::string szType = "";
 
   switch ( tType )
   {
-    case UnknownLightState:
+    case LightState::Unknown:
       szType = "";
       break;
-    case Idle:
+    case LightState::Idle:
       szType = "Idle";
       break;
-    case Ok:
+    case LightState::Ok:
       szType = "Ok";
       break;
-    case Busy:
+    case LightState::Busy:
       szType = "Busy";
       break;
-    case Alert:
+    case LightState::Alert:
       szType = "Alert";
       break;
   }
@@ -649,37 +450,33 @@ string IndiElement::getLightStateString( const LightStateType &tType )
   return szType;
 }
 
-////////////////////////////////////////////////////////////////////////////////
-/// Returns the enumerated type given the string type.
-
-IndiElement::SwitchStateType IndiElement::getSwitchStateType( const string &szType )
+IndiElement::SwitchState IndiElement::getSwitchState( const std::string &szType )
 {
-  SwitchStateType tType = UnknownSwitchState;
+
+  SwitchState tType = SwitchState::Unknown;
 
   if ( szType == "Off" )
-    tType = Off;
+    tType = SwitchState::Off;
   else if ( szType == "On" )
-    tType = On;
+    tType = SwitchState::On;
 
   return tType;
 }
 
-////////////////////////////////////////////////////////////////////////////////
-/// Returns the string type given the enumerated type.
-
-string IndiElement::getSwitchStateString( const SwitchStateType &tType )
+std::string IndiElement::getSwitchStateString( const SwitchState &tType )
 {
-  string szType = "";
+
+  std::string szType = "";
 
   switch ( tType )
   {
-    case UnknownSwitchState:
+    case SwitchState::Unknown:
       szType = "";
       break;
-    case Off:
+    case SwitchState::Off:
       szType = "Off";
       break;
-    case On:
+    case SwitchState::On:
       szType = "On";
       break;
   }
@@ -687,89 +484,103 @@ string IndiElement::getSwitchStateString( const SwitchStateType &tType )
   return szType;
 }
 
-////////////////////////////////////////////////////////////////////////////////
-/// Returns the string type given the enumerated type.
-
-string IndiElement::convertTypeToString( const Type &tType )
+std::string IndiElement::convertTypeToString( const Type &tType )
 {
-  string szType = "UnknownType";
+    
+    std::string szType = "UnknownType";
 
-  switch ( tType )
-  {
-    case UnknownType:
-      szType = "";
-      break;
+    switch ( tType )
+    {
+        case Type::Unknown:
+            szType = "";
+            break;
 
-    // Define properties.
-    case DefBLOB:
-      szType = "defBLOB";
-      break;
-    case DefLight:
-      szType = "defLight";
-      break;
-    case DefNumber:
-      szType = "defNumber";
-      break;
-    case DefSwitch:
-      szType = "defSwitch";
-      break;
-    case DefText:
-      szType = "defText";
-      break;
+        // Define properties.
+        case Type::DefBLOB:
+            szType = "defBLOB";
+            break;
+        case Type::DefLight:
+            szType = "defLight";
+            break;
+        case Type::DefNumber:
+            szType = "defNumber";
+            break;
+        case Type::DefSwitch:
+            szType = "defSwitch";
+            break;
+        case Type::DefText:
+            szType = "defText";
+            break;
 
-    // Update or set properties.
-    case OneBLOB:
-      szType = "oneBLOB";
-      break;
-    case OneLight:
-      szType = "oneLight";
-      break;
-    case OneNumber:
-      szType = "oneNumber";
-      break;
-    case OneSwitch:
-      szType = "oneSwitch";
-      break;
-    case OneText:
-      szType = "oneText";
-      break;
+        // Update or set properties.
+        case Type::OneBLOB:
+            szType = "oneBLOB";
+            break;
+        case Type::OneLight:
+            szType = "oneLight";
+            break;
+        case Type::OneNumber:
+            szType = "oneNumber";
+            break;
+        case Type::OneSwitch:
+            szType = "oneSwitch";
+            break;
+        case Type::OneText:
+            szType = "oneText";
+            break;
   }
 
   return szType;
 }
 
-////////////////////////////////////////////////////////////////////////////////
-/// Returns the enumerated type given the tag.
-
-IndiElement::Type IndiElement::convertStringToType( const string &szTag )
+IndiElement::Type IndiElement::convertStringToType( const std::string &szTag )
 {
-  Type tType = UnknownType;
+    Type tType = Type::Unknown;
 
-  // Define properties.
-  if ( szTag == "defBLOB" )
-    tType = DefBLOB;
-  else if ( szTag == "defLight" )
-    tType = DefLight;
-  else if ( szTag == "defNumber" )
-    tType = DefNumber;
-  else if ( szTag == "defSwitch" )
-    tType = DefSwitch;
-  else if ( szTag == "defText" )
-    tType = DefText;
+    // Define properties.
+    if ( szTag == "defBLOB" )
+    {
+        tType = Type::DefBLOB;
+    }
+    else if ( szTag == "defLight" )
+    {
+        tType = Type::DefLight;
+    }
+    else if ( szTag == "defNumber" )
+    {
+        tType = Type::DefNumber;
+    }
+    else if ( szTag == "defSwitch" )
+    {
+        tType = Type::DefSwitch;
+    }
+    else if ( szTag == "defText" )
+    {
+        tType = Type::DefText;
+    }
+    else if ( szTag == "oneBLOB" )
+    {
+        tType = Type::OneBLOB;
+    }
+    else if ( szTag == "oneLight" )
+    {
+        tType = Type::OneLight;
+    }
+    else if ( szTag == "oneNumber" )
+    {    
+        tType = Type::OneNumber;
+    }
+    else if ( szTag == "oneSwitch" )
+    {
+        tType = Type::OneSwitch;
+    }
+    else if ( szTag == "oneText" )
+    {    
+        tType = Type::OneText;
+    }
 
-  // Update or set properties.
-  else if ( szTag == "oneBLOB" )
-    tType = OneBLOB;
-  else if ( szTag == "oneLight" )
-    tType = OneLight;
-  else if ( szTag == "oneNumber" )
-    tType = OneNumber;
-  else if ( szTag == "oneSwitch" )
-    tType = OneSwitch;
-  else if ( szTag == "oneText" )
-    tType = OneText;
-
-  return tType;
+    return tType;
 }
 
-////////////////////////////////////////////////////////////////////////////////
+}//namespace pcf
+

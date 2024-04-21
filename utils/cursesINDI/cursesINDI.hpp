@@ -46,13 +46,13 @@ std::string displayValue( pcf::IndiProperty & ip, ///< [in] the INDI property
    
    if(ip.getType() == pcf::IndiProperty::Switch)
    {
-      if( ip[el].getSwitchState() == pcf::IndiElement::Off ) return "|O|";
-      if( ip[el].getSwitchState() == pcf::IndiElement::On ) return "|X|";
-      return pcf::IndiElement::getSwitchStateString(ip[el].getSwitchState());
+      if( ip[el].switchState() == pcf::IndiElement::SwitchState::Off ) return "|O|";
+      if( ip[el].switchState() == pcf::IndiElement::SwitchState::On ) return "|X|";
+      return pcf::IndiElement::getSwitchStateString(ip[el].switchState());
    }
    else
    {
-      return ip[el].getValue();
+      return ip[el].value();
    }
 }
 
@@ -614,9 +614,9 @@ void cursesINDI::updateTable()
          }
       }
       
-      if(m_cellContents[it->second.tableRow][4] != displayValue(knownProps[it->second.propKey], it->second.name)) //.getValue())
+      if(m_cellContents[it->second.tableRow][4] != displayValue(knownProps[it->second.propKey], it->second.name)) //.value())
       {
-         m_cellContents[it->second.tableRow][4] = displayValue(knownProps[it->second.propKey], it->second.name); //knownProps[it->second.propKey][it->second.name].getValue();
+         m_cellContents[it->second.tableRow][4] = displayValue(knownProps[it->second.propKey], it->second.name); //knownProps[it->second.propKey][it->second.name].value();
          
          if(it->second.tableRow - m_startRow < (size_t) tabHeight()) //It's currently displayed
          {
@@ -630,7 +630,7 @@ void cursesINDI::updateTable()
          }
          
       };
-      //updateContents( it->second.tableRow, 4,  knownProps[it->second.propKey][it->second.name].getValue());
+      //updateContents( it->second.tableRow, 4,  knownProps[it->second.propKey][it->second.name].value());
    }
 
    wattron(m_gridWin[m_currY][m_currX], A_REVERSE);
@@ -959,7 +959,7 @@ void cursesINDI::keyPressed( int ch )
             ipSend.add(pcf::IndiElement(it->second.name));
             //if(fpout) *fpout << "newStr: " << newStr << std::endl; 
    
-            ipSend[it->second.name].setValue(newStr);
+            ipSend[it->second.name].value(newStr);
             sendNewProperty(ipSend);
          }
 
@@ -989,16 +989,16 @@ void cursesINDI::keyPressed( int ch )
          if( knownProps[it->second.propKey].getType() != pcf::IndiProperty::Switch) break;
          
          std::string toggleString;
-         pcf::IndiElement::SwitchStateType toggleState;
-         if( knownProps[it->second.propKey][it->second.name].getSwitchState() == pcf::IndiElement::Off  )
+         pcf::IndiElement::SwitchState toggleState;
+         if( knownProps[it->second.propKey][it->second.name].switchState() == pcf::IndiElement::SwitchState::Off  )
          {
             toggleString = "On";
-            toggleState = pcf::IndiElement::On;
+            toggleState = pcf::IndiElement::SwitchState::On;
          }
-         else if(knownProps[it->second.propKey][it->second.name].getSwitchState() == pcf::IndiElement::On)
+         else if(knownProps[it->second.propKey][it->second.name].switchState() == pcf::IndiElement::SwitchState::On)
          {
             toggleString = "Off";
-            toggleState = pcf::IndiElement::Off;
+            toggleState = pcf::IndiElement::SwitchState::Off;
          }
          else break; //would happen fo state unknown
          
@@ -1024,7 +1024,7 @@ void cursesINDI::keyPressed( int ch )
             ipSend.setDevice(knownProps[it->second.propKey].getDevice());
             ipSend.setName(knownProps[it->second.propKey].getName());
             ipSend.add(pcf::IndiElement(it->second.name));
-            ipSend[it->second.name].setSwitchState(toggleState);
+            ipSend[it->second.name].switchState(toggleState);
             sendNewProperty(ipSend);
          }
 
@@ -1080,11 +1080,11 @@ void cursesINDI::keyPressed( int ch )
                ipSend.add(elit->second);
                if( knownProps[it->second.propKey].getRule() != pcf::IndiProperty::AnyOfMany)
                {
-                  ipSend[elit->first].setSwitchState(pcf::IndiElement::Off);
+                  ipSend[elit->first].switchState(pcf::IndiElement::SwitchState::Off);
                }
             }
             
-            ipSend[it->second.name].setSwitchState(pcf::IndiElement::On);
+            ipSend[it->second.name].switchState(pcf::IndiElement::SwitchState::On);
             sendNewProperty(ipSend);
          }
 

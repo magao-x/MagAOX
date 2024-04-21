@@ -285,7 +285,7 @@ void toggleSlider::handleSetProperty( const pcf::IndiProperty & ipRecv)
       {
          int currStatus = m_status;
          if(ipRecv.getState() == pcf::IndiProperty::Busy) m_status = 1;
-         else if(ipRecv["toggle"] == pcf::IndiElement::On) m_status = 2;
+         else if(ipRecv["toggle"] == pcf::IndiElement::SwitchState::On) m_status = 2;
          else m_status = 0;
 
          if(currStatus != m_status) 
@@ -370,11 +370,11 @@ void toggleSlider::doToggle(bool onoff)
 
    if(onoff == false)
    {
-      ipFreq["toggle"].setSwitchState(pcf::IndiElement::Off);
+      ipFreq["toggle"].switchState(pcf::IndiElement::SwitchState::Off);
    }
    else
    {
-      ipFreq["toggle"].setSwitchState(pcf::IndiElement::On);
+      ipFreq["toggle"].switchState(pcf::IndiElement::SwitchState::On);
    }
 
    sendNewProperty(ipFreq); 

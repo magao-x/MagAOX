@@ -47,7 +47,7 @@ int addTextElement( pcf::IndiProperty & prop, ///< [out] the property to which t
    //Don't set "" just in case libcommon does something with defaults
    if(label != "")
    {
-      prop[name].setLabel(label);
+      prop[name].label(label);
    }
    
    return 0;
@@ -70,15 +70,15 @@ int addNumberElement( pcf::IndiProperty & prop, ///< [out] the property to which
                     )                                                
 {
    prop.add(pcf::IndiElement(name, 0));
-   prop[name].setMin(min);
-   prop[name].setMax(max);
-   prop[name].setStep(step);
-   prop[name].setFormat(format);
+   prop[name].min(min);
+   prop[name].max(max);
+   prop[name].step(step);
+   prop[name].format(format);
       
    //Don't set "" just in case libcommon does something with defaults
    if(label != "")
    {
-      prop[name].setLabel(label);
+      prop[name].label(label);
    }
    
    return 0;
@@ -111,9 +111,9 @@ void updateIfChanged( pcf::IndiProperty & p,   ///< [in/out] The property contai
       pcf::IndiProperty::PropertyStateType oldState = p.getState();
    
       //Do comparison in string space, not raw value
-      if(p[el].getValue() != ssValue.str()|| oldState != newState)
+      if(p[el].value() != ssValue.str()|| oldState != newState)
       {
-         p[el].set(newVal);
+         p[el].value(newVal);
          p.setTimeStamp(pcf::TimeStamp());
          p.setState (newState);
          indiDriver->sendSetProperty (p);
@@ -167,7 +167,7 @@ void updateIfChanged( pcf::IndiProperty & p,   ///< [in/out] The property contai
          ssValue << std::boolalpha << newVals[n];
 
          //compare in string space
-         if(p[els[n]].getValue() != ssValue.str()) changed = true;
+         if(p[els[n]].value() != ssValue.str()) changed = true;
       }
       
       //and if there are changes, we send an update
@@ -175,7 +175,7 @@ void updateIfChanged( pcf::IndiProperty & p,   ///< [in/out] The property contai
       {
          for(n=0; n< els.size(); ++n)
          {
-            p[els[n]].set(newVals[n]);
+            p[els[n]].value(newVals[n]);
          }
          p.setTimeStamp(pcf::TimeStamp());
          p.setState (newState);
@@ -205,7 +205,7 @@ void updateIfChanged( pcf::IndiProperty & p,   ///< [in/out] The property contai
 template<class indiDriverT>
 void updateSwitchIfChanged( pcf::IndiProperty & p,   ///< [in/out] The property containing the element to possibly update
                             const std::string & el,  ///< [in] The element name
-                            const pcf::IndiElement::SwitchStateType & newVal,        ///< [in] the new value
+                            const pcf::IndiElement::SwitchState & newVal,        ///< [in] the new value
                             indiDriverT * indiDriver, ///< [in] the MagAOX INDI driver to use
                             pcf::IndiProperty::PropertyStateType newState = pcf::IndiProperty::Ok
                           )
@@ -214,13 +214,13 @@ void updateSwitchIfChanged( pcf::IndiProperty & p,   ///< [in/out] The property 
 
    try
    {
-      pcf::IndiElement::SwitchStateType oldVal = p[el].getSwitchState();
+      pcf::IndiElement::SwitchState oldVal = p[el].switchState();
 
       pcf::IndiProperty::PropertyStateType oldState = p.getState();
    
       if(oldVal != newVal || oldState != newState)
       {
-         p[el].setSwitchState(newVal);
+         p[el].switchState(newVal);
          p.setTimeStamp(pcf::TimeStamp());
          p.setState (newState);
          indiDriver->sendSetProperty (p);
@@ -263,17 +263,17 @@ void updateSelectionSwitchIfChanged( pcf::IndiProperty & p,   ///< [in/out] The 
    {
       if( elit->first == el )
       {
-         if(elit->second.getSwitchState() != pcf::IndiElement::On)
+         if(elit->second.switchState() != pcf::IndiElement::SwitchState::On)
          {
-            p[elit->first].setSwitchState(pcf::IndiElement::On);
+            p[elit->first].switchState(pcf::IndiElement::SwitchState::On);
             changed = true;
          }
       }
       else
       {
-         if(elit->second.getSwitchState() != pcf::IndiElement::Off)
+         if(elit->second.switchState() != pcf::IndiElement::SwitchState::Off)
          {
-            p[elit->first].setSwitchState(pcf::IndiElement::Off);
+            p[elit->first].switchState(pcf::IndiElement::SwitchState::Off);
             changed = true;
          }
       }   

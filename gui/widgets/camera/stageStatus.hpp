@@ -86,7 +86,7 @@ void stageStatus::handleSetProperty( const pcf::IndiProperty & ipRecv)
 
         for(auto it = map.begin(); it != map.end(); ++it)
         {
-            if(it->second.getSwitchState() == pcf::IndiElement::On)
+            if(it->second.switchState() == pcf::IndiElement::SwitchState::On)
             {
                 if(m_presetName != it->first)
                 {
@@ -102,7 +102,7 @@ void stageStatus::handleSetProperty( const pcf::IndiProperty & ipRecv)
     {
         if(ipRecv.find("current"))
         {
-            float pos = ipRecv["current"].get<float>();
+            float pos = ipRecv["current"].value<float>();
             if(pos != m_position && (m_presetName == "none" || m_presetName == ""))
             {
                 m_valChanged = true;

@@ -131,19 +131,19 @@ void selectionSw::handleSetProperty( const pcf::IndiProperty & ipRecv)
         std::string newName;
         for(auto it = ipRecv.getElements().begin(); it != ipRecv.getElements().end(); ++it)
         {
-           if(ui.comboBox->findText(QString(it->second.getName().c_str())) == -1)
+           if(ui.comboBox->findText(QString(it->second.name().c_str())) == -1)
            {
-              ui.comboBox->addItem(QString(it->second.getName().c_str()));
+              ui.comboBox->addItem(QString(it->second.name().c_str()));
            }
   
-           if(it->second.getSwitchState() == pcf::IndiElement::On)
+           if(it->second.switchState() == pcf::IndiElement::SwitchState::On)
            {
                if(newName != "")
                {
                    std::cerr << "More than one switch selected in " << ipRecv.getDevice() << "." << ipRecv.getName() << "\n";
                }
             
-               newName = it->second.getName();
+               newName = it->second.name();
                if(newName != m_value) m_valChanged = true;
                m_value = newName; 
            }
@@ -205,11 +205,11 @@ void selectionSw::on_button_set_pressed()
      
            if(elName == selection)
            {
-               ipSend.add(pcf::IndiElement(elName, pcf::IndiElement::On));
+               ipSend.add(pcf::IndiElement(elName, pcf::IndiElement::SwitchState::On));
            }
            else
            {
-               ipSend.add(pcf::IndiElement(elName, pcf::IndiElement::Off));
+               ipSend.add(pcf::IndiElement(elName, pcf::IndiElement::SwitchState::Off));
            }
         }
      

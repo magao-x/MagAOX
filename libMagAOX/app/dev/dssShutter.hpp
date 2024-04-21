@@ -722,7 +722,7 @@ int dssShutter<derivedT>::setCallBack_powerChannel( const pcf::IndiProperty &ipR
    
    if(!ipRecv.find("state")) return 0;
    
-   ps = ipRecv["state"].get<std::string>();
+   ps = ipRecv["state"].value();
    
    if(ps == "On")
    {
@@ -758,7 +758,7 @@ int dssShutter<derivedT>::setCallBack_sensorChannel( const pcf::IndiProperty &ip
    
    if(!ipRecv.find("current")) return 0;
    
-   int ss = ipRecv["current"].get<int>(); 
+   int ss = ipRecv["current"].value<int>(); 
 
    if(ss == 1)
    {
@@ -794,7 +794,7 @@ int dssShutter<derivedT>::setCallBack_triggerChannel( const pcf::IndiProperty &i
    
    if(!ipRecv.find("current")) return 0;
    
-   int ts = ipRecv["current"].get<int>(); 
+   int ts = ipRecv["current"].value<int>(); 
 
    if(ts == 1)
    {

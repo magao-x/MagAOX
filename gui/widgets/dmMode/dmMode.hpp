@@ -352,7 +352,7 @@ void dmMode::handleSetProperty( const pcf::IndiProperty & ipRecv /**< [in] the p
       
          if(ipRecv.find(elName))
          {
-            float amp = ipRecv[elName].get<float>();
+            float amp = ipRecv[elName].value<float>();
             updateGUI(n, amp);
          }
       }
@@ -376,14 +376,14 @@ void dmMode::handleSetProperty( const pcf::IndiProperty & ipRecv /**< [in] the p
    {
       if(ipRecv.find("name"))
       {
-         QString name = ipRecv["name"].get<std::string>().c_str();
+         QString name = ipRecv["name"].value().c_str();
          name += " DM modes";
          ui.title->setText(name);
          setWindowTitle(name);
       }
       if(ipRecv.find("channel"))
       {
-         QString channel = ipRecv["channel"].get<std::string>().c_str();
+         QString channel = ipRecv["channel"].value().c_str();
          ui.channel->setText(channel);
       }
    }

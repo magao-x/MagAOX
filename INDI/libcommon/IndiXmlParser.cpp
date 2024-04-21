@@ -187,12 +187,12 @@ void IndiXmlParser::createDefTextVector( const IndiProperty &ip )
     // "implied" means that if they are not defined, don't add them. Adding an
     // empty "implied" attribute to the generated XML is an error.
     if ( ip[ii].hasValidLabel() == true )
-      m_ssXml << " label=\"" << ip[ii].getLabel() << "\"";
+      m_ssXml << " label=\"" << ip[ii].label() << "\"";
 
     m_ssXml << ">\r\n";
 
     // Now add the data for the element...
-    m_ssXml << createSafeXmlString( ip[ii].getValue() ) << "\r\n";
+    m_ssXml << createSafeXmlString( ip[ii].value() ) << "\r\n";
     m_ssXml << "\t</" << szElementTag << ">\r\n";
   }
   m_ssXml << "</" << szTag << ">\r\n";
@@ -250,7 +250,7 @@ void IndiXmlParser::createSetTextVector( const IndiProperty &ip )
     m_ssXml << ">\r\n";
 
     // Now add the data for the element...
-    m_ssXml << createSafeXmlString( ip[ii].getValue() ) << "\r\n";
+    m_ssXml << createSafeXmlString( ip[ii].value() ) << "\r\n";
     m_ssXml << "\t</" << szElementTag << ">\r\n";
   }
   m_ssXml << "</" << szTag << ">\r\n";
@@ -302,7 +302,7 @@ void IndiXmlParser::createNewTextVector( const IndiProperty &ip )
     m_ssXml << ">\r\n";
 
     // Now add the data for the element...
-    m_ssXml << createSafeXmlString( ip[ii].getValue() ) << "\r\n";
+    m_ssXml << createSafeXmlString( ip[ii].value() ) << "\r\n";
     m_ssXml << "\t</" << szElementTag << ">\r\n";
   }
   m_ssXml << "</" << szTag << ">\r\n";
@@ -373,20 +373,20 @@ void IndiXmlParser::createDefNumberVector( const IndiProperty &ip )
       throw runtime_error( szElementTag + " must have attribute 'step' defined." );
 
     m_ssXml << " name=\"" << ip[ii].name() << "\"";
-    m_ssXml << " format=\"" << ip[ii].getFormat() << "\"";
-    m_ssXml << " min=\"" << ip[ii].getMin() << "\"";
-    m_ssXml << " max=\"" << ip[ii].getMax() << "\"";
-    m_ssXml << " step=\"" << ip[ii].getStep() << "\"";
+    m_ssXml << " format=\"" << ip[ii].format() << "\"";
+    m_ssXml << " min=\"" << ip[ii].min() << "\"";
+    m_ssXml << " max=\"" << ip[ii].max() << "\"";
+    m_ssXml << " step=\"" << ip[ii].step() << "\"";
 
     // "implied" means that if they are not defined, don't add them. Adding an
     // empty "implied" attribute to the generated XML is an error.
     if ( ip[ii].hasValidLabel() == true )
-      m_ssXml << " label=\"" << ip[ii].getLabel() << "\"";
+      m_ssXml << " label=\"" << ip[ii].label() << "\"";
 
     m_ssXml << ">\r\n";
 
     // Now add the data for the element...
-    m_ssXml << createSafeXmlString( ip[ii].getValue() ) << "\r\n";
+    m_ssXml << createSafeXmlString( ip[ii].value() ) << "\r\n";
     m_ssXml << "\t</" << szElementTag << ">\r\n";
   }
   m_ssXml << "</" << szTag << ">\r\n";
@@ -444,7 +444,7 @@ void IndiXmlParser::createSetNumberVector( const IndiProperty &ip )
     m_ssXml << ">\r\n";
 
     // Now add the data for the element...
-    m_ssXml << createSafeXmlString( ip[ii].getValue() ) << "\r\n";
+    m_ssXml << createSafeXmlString( ip[ii].value() ) << "\r\n";
     m_ssXml << "\t</" << szElementTag << ">\r\n";
   }
   m_ssXml << "</" << szTag << ">\r\n";
@@ -496,7 +496,7 @@ void IndiXmlParser::createNewNumberVector( const IndiProperty &ip )
     m_ssXml << ">\r\n";
 
     // Now add the data for the element...
-    m_ssXml << createSafeXmlString( ip[ii].getValue() ) << "\r\n";
+    m_ssXml << createSafeXmlString( ip[ii].value() ) << "\r\n";
     m_ssXml << "\t</" << szElementTag << ">\r\n";
   }
   m_ssXml << "</" << szTag << ">\r\n";
@@ -566,12 +566,12 @@ void IndiXmlParser::createDefSwitchVector( const IndiProperty &ip )
     // "implied" means that if they are not defined, don't add them. Adding an
     // empty "implied" attribute to the generated XML is an error.
     if ( ip[ii].hasValidLabel() == true )
-      m_ssXml << " label=\"" << ip[ii].getLabel() << "\"";
+      m_ssXml << " label=\"" << ip[ii].label() << "\"";
 
     m_ssXml << ">\r\n";
 
     // Now add the data for the element...
-    m_ssXml << IndiElement::getSwitchStateString( ip[ii].getSwitchState() ) << "\r\n";
+    m_ssXml << IndiElement::getSwitchStateString( ip[ii].switchState() ) << "\r\n";
     m_ssXml << "\t</" << szElementTag << ">\r\n";
   }
   m_ssXml << "</" << szTag << ">\r\n";
@@ -629,7 +629,7 @@ void IndiXmlParser::createSetSwitchVector( const IndiProperty &ip )
     m_ssXml << ">\r\n";
 
     // Now add the data for the element...
-    m_ssXml << IndiElement::getSwitchStateString( ip[ii].getSwitchState() ) << "\r\n";
+    m_ssXml << IndiElement::getSwitchStateString( ip[ii].switchState() ) << "\r\n";
     m_ssXml << "\t</" << szElementTag << ">\r\n";
   }
   m_ssXml << "</" << szTag << ">\r\n";
@@ -681,7 +681,7 @@ void IndiXmlParser::createNewSwitchVector( const IndiProperty &ip )
     m_ssXml << ">\r\n";
 
     // Now add the data for the element...
-    m_ssXml << IndiElement::getSwitchStateString( ip[ii].getSwitchState() ) << "\r\n";
+    m_ssXml << IndiElement::getSwitchStateString( ip[ii].switchState() ) << "\r\n";
     m_ssXml << "\t</" << szElementTag << ">\r\n";
   }
   m_ssXml << "</" << szTag << ">\r\n";
@@ -743,12 +743,12 @@ void IndiXmlParser::createDefLightVector( const IndiProperty &ip )
     // "implied" means that if they are not defined, don't add them. Adding an
     // empty "implied" attribute to the generated XML is an error.
     if ( ip[ii].hasValidLabel() == true )
-      m_ssXml << " label=\"" << ip[ii].getLabel() << "\"";
+      m_ssXml << " label=\"" << ip[ii].label() << "\"";
 
     m_ssXml << ">\r\n";
 
     // Now add the data for the element...
-    m_ssXml << IndiElement::getLightStateString( ip[ii].getLightState() ) << "\r\n";
+    m_ssXml << IndiElement::getLightStateString( ip[ii].lightState() ) << "\r\n";
     m_ssXml << "\t</" << szElementTag << ">\r\n";
   }
   m_ssXml << "</" << szTag << ">\r\n";
@@ -804,7 +804,7 @@ void IndiXmlParser::createSetLightVector( const IndiProperty &ip )
     m_ssXml << ">\r\n";
 
     // Now add the data for the element...
-    m_ssXml << IndiElement::getLightStateString( ip[ii].getLightState() ) << "\r\n";
+    m_ssXml << IndiElement::getLightStateString( ip[ii].lightState() ) << "\r\n";
     m_ssXml << "\t</" << szElementTag << ">\r\n";
   }
   m_ssXml << "</" << szTag << ">\r\n";
@@ -871,7 +871,7 @@ void IndiXmlParser::createDefBLOBVector( const IndiProperty &ip )
     // "implied" means that if they are not defined, don't add them. Adding an
     // empty "implied" attribute to the generated XML is an error.
     if ( ip[ii].hasValidLabel() == true )
-      m_ssXml << " label=\"" << ip[ii].getLabel() << "\"";
+      m_ssXml << " label=\"" << ip[ii].label() << "\"";
 
     m_ssXml << ">\r\n";
 
@@ -935,18 +935,18 @@ void IndiXmlParser::createSetBLOBVector( const IndiProperty &ip )
       throw runtime_error( szElementTag + " must have attribute 'format' defined." );
 
     m_ssXml << " name=\"" << ip[ii].name() << "\"";
-    m_ssXml << " size=\"" << ip[ii].getSize() << "\"";
-    m_ssXml << " format=\"" << ip[ii].getFormat() << "\"";
+    m_ssXml << " size=\"" << ip[ii].size() << "\"";
+    m_ssXml << " format=\"" << ip[ii].format() << "\"";
 
     m_ssXml << ">\r\n";
 
     // Allocate a big buffer to hold the base64 encoded data.
-    vector<unsigned char> vecBase64Buf( 4 * ip[ii].getValue().size() / 3 + 4 );
+    vector<unsigned char> vecBase64Buf( 4 * ip[ii].value().size() / 3 + 4 );
 
     // Now base64 encode the data.
     unsigned char *pcBase64Buf = &vecBase64Buf[0];
-    unsigned char *pcValueBuf = (unsigned char *)( ip[ii].getValue().c_str() );
-    unsigned int  uiValueBufLen = ip[ii].getValue().size();
+    unsigned char *pcValueBuf = (unsigned char *)( ip[ii].value().c_str() );
+    unsigned int  uiValueBufLen = ip[ii].value().size();
     // unsigned int uiBase64BufLen =
     ::to64frombits( pcBase64Buf, pcValueBuf, uiValueBufLen );
 
@@ -1003,18 +1003,18 @@ void IndiXmlParser::createNewBLOBVector( const IndiProperty &ip )
       throw runtime_error( szElementTag + " must have attribute 'format' defined." );
 
     m_ssXml << " name=\"" << ip[ii].name() << "\"";
-    m_ssXml << " size=\"" << ip[ii].getSize() << "\"";
-    m_ssXml << " format=\"" << ip[ii].getFormat() << "\"";
+    m_ssXml << " size=\"" << ip[ii].size() << "\"";
+    m_ssXml << " format=\"" << ip[ii].format() << "\"";
 
     m_ssXml << ">\r\n";
 
     // Allocate a big buffer to hold the base64 encoded data.
-    vector<unsigned char> vecBase64Buf( 4 * ip[ii].getValue().size() / 3 + 4 );
+    vector<unsigned char> vecBase64Buf( 4 * ip[ii].value().size() / 3 + 4 );
 
     // Now base64 encode the data.
     unsigned char *pcBase64Buf = &vecBase64Buf[0];
-    unsigned char *pcValueBuf = (unsigned char *)( ip[ii].getValue().c_str() );
-    unsigned int  uiValueBufLen = ip[ii].getValue().size();
+    unsigned char *pcValueBuf = (unsigned char *)( ip[ii].value().c_str() );
+    unsigned int  uiValueBufLen = ip[ii].value().size();
     //unsigned int uiBase64BufLen =
     ::to64frombits( pcBase64Buf, pcValueBuf, uiValueBufLen );
 
@@ -1471,19 +1471,19 @@ IndiMessage IndiXmlParser::createIndiMessage() const
           IndiElement ieNew;
 
           if ( ( szValue = string( ::findXMLAttValu( pxeChild, "format" ) ) ).size() > 0 )
-            ieNew.setFormat( szValue );
+            ieNew.format( szValue );
           if ( ( szValue = string( ::findXMLAttValu( pxeChild, "label" ) ) ).size() > 0 )
-            ieNew.setLabel( szValue );
+            ieNew.label( szValue );
           if ( ( szValue = string( ::findXMLAttValu( pxeChild, "max" ) ) ).size() > 0 )
-            ieNew.setMax( szValue );
+            ieNew.max( szValue );
           if ( ( szValue = string( ::findXMLAttValu( pxeChild, "min" ) ) ).size() > 0 )
-            ieNew.setMin( szValue );
+            ieNew.min( szValue );
           if ( ( szValue = string( ::findXMLAttValu( pxeChild, "name" ) ) ).size() > 0 )
             ieNew.name( szValue );
           if ( ( szValue = string( ::findXMLAttValu( pxeChild, "size" ) ) ).size() > 0 )
-            ieNew.setSize( szValue );
+            ieNew.size( szValue );
           if ( ( szValue = string( ::findXMLAttValu( pxeChild, "step" ) ) ).size() > 0 )
-            ieNew.setStep( szValue );
+            ieNew.step( szValue );
 
           szValue = string( ::pcdataXMLEle( pxeChild ) );
 
@@ -1492,15 +1492,15 @@ IndiMessage IndiXmlParser::createIndiMessage() const
           {
             case DefLightVector:
             case SetLightVector:
-              ieNew.setLightState( IndiElement::getLightStateType( szValue ) );
+              ieNew.lightState( IndiElement::getLightState( szValue ) );
               break;
             case DefSwitchVector:
             case NewSwitchVector:
             case SetSwitchVector:
-              ieNew.setSwitchState( IndiElement::getSwitchStateType( szValue ) );
+              ieNew.switchState( IndiElement::getSwitchState( szValue ) );
               break;
             default:
-              ieNew.setValue( szValue );
+              ieNew.value( szValue );
           }
 
           // Now add this element to the message.

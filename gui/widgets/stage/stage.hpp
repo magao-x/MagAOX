@@ -190,7 +190,7 @@ void stage::handleSetProperty( const pcf::IndiProperty & ipRecv)
    {
       if(ipRecv.find("state"))
       {
-         m_appState = ipRecv["state"].get<std::string>();
+         m_appState = ipRecv["state"].value();
       }
    }
 
@@ -198,7 +198,7 @@ void stage::handleSetProperty( const pcf::IndiProperty & ipRecv)
    {
       if(ipRecv.find("value"))
       {
-         m_maxPos = ipRecv["value"].get<double>();
+         m_maxPos = ipRecv["value"].value<double>();
       }
    }
 
@@ -206,7 +206,7 @@ void stage::handleSetProperty( const pcf::IndiProperty & ipRecv)
    {
       if(ipRecv.find("current"))
       {
-         double val = ipRecv["current"].get<double>();
+         double val = ipRecv["current"].value<double>();
          if(val != m_position) m_position_changed = true;
          m_position = val;
       }
@@ -216,7 +216,7 @@ void stage::handleSetProperty( const pcf::IndiProperty & ipRecv)
       m_filterWheel = true;
       if(ipRecv.find("current"))
       {
-         double val = ipRecv["current"].get<double>();
+         double val = ipRecv["current"].value<double>();
          if(val != m_position) m_position_changed = true;
          m_position = val;
       }
@@ -236,7 +236,7 @@ void stage::handleSetProperty( const pcf::IndiProperty & ipRecv)
             ui.setPoint->addItem(QString(it->second.name().c_str()));
          }
 
-         if(it->second.getSwitchState() == pcf::IndiElement::On)
+         if(it->second.switchState() == pcf::IndiElement::SwitchState::On)
          {
             if(newName != "")
             {
@@ -389,11 +389,11 @@ void stage::on_setPointGo_pressed()
    
          if(elName == selection)
          {
-            ipSend.add(pcf::IndiElement(elName, pcf::IndiElement::On));
+            ipSend.add(pcf::IndiElement(elName, pcf::IndiElement::SwitchState::On));
          }
          else
          {
-            ipSend.add(pcf::IndiElement(elName, pcf::IndiElement::Off));
+            ipSend.add(pcf::IndiElement(elName, pcf::IndiElement::SwitchState::Off));
          }
       }
    
@@ -544,7 +544,7 @@ void stage::on_home_pressed()
    ipFreq.setDevice(m_stageName);
    ipFreq.setName("home");
    ipFreq.add(pcf::IndiElement("request"));
-   ipFreq["request"].setSwitchState(pcf::IndiElement::On);
+   ipFreq["request"].switchState(pcf::IndiElement::SwitchState::On);
     
    sendNewProperty(ipFreq);   
 }
@@ -556,7 +556,7 @@ void stage::on_stop_pressed()
    ipFreq.setDevice(m_stageName);
    ipFreq.setName("stop");
    ipFreq.add(pcf::IndiElement("request"));
-   ipFreq["request"].setSwitchState(pcf::IndiElement::On);
+   ipFreq["request"].switchState(pcf::IndiElement::SwitchState::On);
     
    sendNewProperty(ipFreq);   
 }

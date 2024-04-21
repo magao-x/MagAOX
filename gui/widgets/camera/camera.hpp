@@ -371,7 +371,7 @@ void camera::handleSetProperty( const pcf::IndiProperty & ipRecv)
       {
          if(ipRecv.find("state"))
          {
-            m_appState = ipRecv["state"].get<std::string>();
+            m_appState = ipRecv["state"].value();
          }
       }
       
@@ -498,7 +498,7 @@ void camera::handleSetProperty( const pcf::IndiProperty & ipRecv)
 
       if(ipRecv.getName() == "start" && ipRecv.find("toggle"))
       {
-         if(ipRecv["toggle"].getSwitchState() == pcf::IndiElement::On)
+         if(ipRecv["toggle"].switchState() == pcf::IndiElement::SwitchState::On)
          {
             m_takingDark = true;
          }
@@ -681,7 +681,7 @@ void camera::reconfigure()
    ipFreq.setDevice(m_camName);
    ipFreq.setName("reconfigure");
    ipFreq.add(pcf::IndiElement("request"));
-   ipFreq["request"].setSwitchState(pcf::IndiElement::On);
+   ipFreq["request"].switchState(pcf::IndiElement::SwitchState::On);
     
    sendNewProperty(ipFreq);   
 }
@@ -886,7 +886,7 @@ void camera::takeDark()
    ipFreq.setDevice(m_darkName);
    ipFreq.setName("start");
    ipFreq.add(pcf::IndiElement("toggle"));
-   ipFreq["toggle"].setSwitchState(pcf::IndiElement::On);
+   ipFreq["toggle"].switchState(pcf::IndiElement::SwitchState::On);
     
    sendNewProperty(ipFreq);   
 }

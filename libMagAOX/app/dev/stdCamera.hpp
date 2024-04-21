@@ -1075,7 +1075,7 @@ int stdCamera<derivedT>::createReadoutSpeed(const mx::meta::trueFalseT<true> & t
    //Set the labes if provided
    if(m_readoutSpeedNameLabels.size() == m_readoutSpeedNames.size())
    {
-      for(size_t n=0; n< m_readoutSpeedNames.size(); ++n) m_indiP_readoutSpeed[m_readoutSpeedNames[n]].setLabel(m_readoutSpeedNameLabels[n]);
+      for(size_t n=0; n< m_readoutSpeedNames.size(); ++n) m_indiP_readoutSpeed[m_readoutSpeedNames[n]].label(m_readoutSpeedNameLabels[n]);
    }
    
    derived().registerIndiPropertyNew(m_indiP_readoutSpeed, st_newCallBack_stdCamera);
@@ -1100,7 +1100,7 @@ int stdCamera<derivedT>::createVShiftSpeed(const mx::meta::trueFalseT<true> & t)
    
    if(m_vShiftSpeedNameLabels.size() == m_vShiftSpeedNames.size())
    {
-      for(size_t n=0; n< m_vShiftSpeedNames.size(); ++n) m_indiP_vShiftSpeed[m_vShiftSpeedNames[n]].setLabel(m_vShiftSpeedNameLabels[n]);
+      for(size_t n=0; n< m_vShiftSpeedNames.size(); ++n) m_indiP_vShiftSpeed[m_vShiftSpeedNames[n]].label(m_vShiftSpeedNameLabels[n]);
    }
    
    derived().registerIndiPropertyNew(m_indiP_vShiftSpeed, st_newCallBack_stdCamera);
@@ -1124,8 +1124,8 @@ int stdCamera<derivedT>::appStartup()
    {
       //The min/max/step values should be set in derivedT before this is called.
       derived().createStandardIndiNumber( m_indiP_temp, "temp_ccd", m_minTemp, m_maxTemp, m_stepTemp, "%0.1f","CCD Temperature", "CCD Temperature");
-      m_indiP_temp["current"].set(m_ccdTemp);
-      m_indiP_temp["target"].set(m_ccdTempSetpt);
+      m_indiP_temp["current"].value(m_ccdTemp);
+      m_indiP_temp["target"].value(m_ccdTempSetpt);
       if( derived().registerIndiPropertyNew( m_indiP_temp, st_newCallBack_stdCamera) < 0)
       {
          #ifndef STDCAMERA_TEST_NOLOG
@@ -1135,7 +1135,7 @@ int stdCamera<derivedT>::appStartup()
       }
       
       derived().createStandardIndiToggleSw( m_indiP_tempcont, "temp_controller", "CCD Temperature", "Control On/Off");
-      m_indiP_tempcont["toggle"].set(pcf::IndiElement::Off);
+      m_indiP_tempcont["toggle"].switchState(pcf::IndiElement::SwitchState::Off);
       if( derived().registerIndiPropertyNew( m_indiP_tempcont, st_newCallBack_stdCamera) < 0)
       {
          #ifndef STDCAMERA_TEST_NOLOG
@@ -1157,7 +1157,7 @@ int stdCamera<derivedT>::appStartup()
    {
       derived().createROIndiNumber( m_indiP_temp, "temp_ccd", "CCD Temperature", "CCD Temperature");
       m_indiP_temp.add(pcf::IndiElement("current"));
-      m_indiP_temp["current"].set(m_ccdTemp);
+      m_indiP_temp["current"].value(m_ccdTemp);
       if( derived().registerIndiPropertyReadOnly( m_indiP_temp) < 0)
       {
          #ifndef STDCAMERA_TEST_NOLOG
@@ -1232,10 +1232,10 @@ int stdCamera<derivedT>::appStartup()
    {
       derived().createROIndiNumber( m_indiP_fps, "fps");
       m_indiP_fps.add(pcf::IndiElement("current"));
-      m_indiP_fps["current"].setMin(m_minFPS);
-      m_indiP_fps["current"].setMax(m_maxFPS);
-      m_indiP_fps["current"].setStep(m_stepFPS);
-      m_indiP_fps["current"].setFormat("%0.2f");
+      m_indiP_fps["current"].min(m_minFPS);
+      m_indiP_fps["current"].max(m_maxFPS);
+      m_indiP_fps["current"].step(m_stepFPS);
+      m_indiP_fps["current"].format("%0.2f");
 
       if( derived().registerIndiPropertyReadOnly( m_indiP_fps ) < 0)
       {
@@ -1545,11 +1545,11 @@ int stdCamera<derivedT>::appLogic()
             
             if(m_shutterState == 1)
             {
-               derived().updateSwitchIfChanged(m_indiP_shutter, "toggle", pcf::IndiElement::On, INDI_OK);
+               derived().updateSwitchIfChanged(m_indiP_shutter, "toggle", pcf::IndiElement::SwitchState::On, INDI_OK);
             }
             else
             {
-               derived().updateSwitchIfChanged(m_indiP_shutter, "toggle", pcf::IndiElement::Off, INDI_IDLE);
+               derived().updateSwitchIfChanged(m_indiP_shutter, "toggle", pcf::IndiElement::SwitchState::Off, INDI_IDLE);
             }
          }
             
@@ -1597,7 +1597,7 @@ int stdCamera<derivedT>::onPowerOff()
    {
       for(auto it = m_cameraModes.begin();it!=m_cameraModes.end();++it)
       {
-         derived().updateSwitchIfChanged(m_indiP_mode, it->first, pcf::IndiElement::Off, INDI_IDLE);
+         derived().updateSwitchIfChanged(m_indiP_mode, it->first, pcf::IndiElement::SwitchState::Off, INDI_IDLE);
       }
    }
    
@@ -1640,11 +1640,11 @@ int stdCamera<derivedT>::onPowerOff()
           
       if(m_shutterState == 0)
       {
-         derived().updateSwitchIfChanged(m_indiP_shutter, "toggle", pcf::IndiElement::On, INDI_OK);
+         derived().updateSwitchIfChanged(m_indiP_shutter, "toggle", pcf::IndiElement::SwitchState::On, INDI_OK);
       }
       else
       {
-         derived().updateSwitchIfChanged(m_indiP_shutter, "toggle", pcf::IndiElement::Off, INDI_IDLE);
+         derived().updateSwitchIfChanged(m_indiP_shutter, "toggle", pcf::IndiElement::SwitchState::Off, INDI_IDLE);
       }
    }
    
@@ -1672,11 +1672,11 @@ int stdCamera<derivedT>::whilePowerOff()
       
       if(m_shutterState == 0)
       {
-         derived().updateSwitchIfChanged(m_indiP_shutter, "toggle", pcf::IndiElement::On, INDI_OK);
+         derived().updateSwitchIfChanged(m_indiP_shutter, "toggle", pcf::IndiElement::SwitchState::On, INDI_OK);
       }
       else
       {
-         derived().updateSwitchIfChanged(m_indiP_shutter, "toggle", pcf::IndiElement::Off, INDI_IDLE);
+         derived().updateSwitchIfChanged(m_indiP_shutter, "toggle", pcf::IndiElement::SwitchState::Off, INDI_IDLE);
       }
    }
    
@@ -1821,15 +1821,15 @@ int stdCamera<derivedT>::newCallBack_temp_controller( const pcf::IndiProperty &i
       
       std::unique_lock<std::mutex> lock(derived().m_indiMutex);
       
-      if( ipRecv["toggle"].getSwitchState() == pcf::IndiElement::On)
+      if( ipRecv["toggle"].switchState() == pcf::IndiElement::SwitchState::On)
       {
          m_tempControlStatusSet = true;
-         derived().updateSwitchIfChanged(m_indiP_tempcont, "toggle", pcf::IndiElement::On, INDI_BUSY);
+         derived().updateSwitchIfChanged(m_indiP_tempcont, "toggle", pcf::IndiElement::SwitchState::On, INDI_BUSY);
       }   
-      else if( ipRecv["toggle"].getSwitchState() == pcf::IndiElement::Off)
+      else if( ipRecv["toggle"].switchState() == pcf::IndiElement::SwitchState::Off)
       {
          m_tempControlStatusSet = false;
-         derived().updateSwitchIfChanged(m_indiP_tempcont, "toggle", pcf::IndiElement::Off, INDI_BUSY);
+         derived().updateSwitchIfChanged(m_indiP_tempcont, "toggle", pcf::IndiElement::SwitchState::Off, INDI_BUSY);
       }
       
       mx::meta::trueFalseT<derivedT::c_stdCamera_emGain> tf;
@@ -1872,7 +1872,7 @@ int stdCamera<derivedT>::newCallBack_readoutSpeed( const pcf::IndiProperty &ipRe
       {
          if(!ipRecv.find(m_readoutSpeedNames[i])) continue;
          
-         if(ipRecv[m_readoutSpeedNames[i]].getSwitchState() == pcf::IndiElement::On)
+         if(ipRecv[m_readoutSpeedNames[i]].switchState() == pcf::IndiElement::SwitchState::On)
          {
             if(newspeed != "")
             {
@@ -1932,7 +1932,7 @@ int stdCamera<derivedT>::newCallBack_vShiftSpeed( const pcf::IndiProperty &ipRec
       {
          if(!ipRecv.find(m_vShiftSpeedNames[i])) continue;
          
-         if(ipRecv[m_vShiftSpeedNames[i]].getSwitchState() == pcf::IndiElement::On)
+         if(ipRecv[m_vShiftSpeedNames[i]].switchState() == pcf::IndiElement::SwitchState::On)
          {
             if(newspeed != "")
             {
@@ -2112,12 +2112,12 @@ int stdCamera<derivedT>::newCallBack_synchro( const pcf::IndiProperty &ipRecv)
    
       if(!ipRecv.find("toggle")) return 0;
    
-      if( ipRecv["toggle"].getSwitchState() == pcf::IndiElement::Off )
+      if( ipRecv["toggle"].switchState() == pcf::IndiElement::SwitchState::Off )
       {
          m_synchroSet = false;
       }
    
-      if( ipRecv["toggle"].getSwitchState() == pcf::IndiElement::On )
+      if( ipRecv["toggle"].switchState() == pcf::IndiElement::SwitchState::On )
       {
          m_synchroSet = true;
       }
@@ -2154,7 +2154,7 @@ int stdCamera<derivedT>::newCallBack_mode( const pcf::IndiProperty &ipRecv )
       {
          if(!ipRecv.find(it->first)) continue;
          
-         if(ipRecv[it->first].getSwitchState() == pcf::IndiElement::On)
+         if(ipRecv[it->first].switchState() == pcf::IndiElement::SwitchState::On)
          {
             if(newName != "")
             {
@@ -2192,11 +2192,11 @@ int stdCamera<derivedT>::newCallBack_reconfigure( const pcf::IndiProperty &ipRec
    
    if(!ipRecv.find("request")) return 0;
    
-   if( ipRecv["request"].getSwitchState() == pcf::IndiElement::On)
+   if( ipRecv["request"].switchState() == pcf::IndiElement::SwitchState::On)
    {
       std::unique_lock<std::mutex> lock(derived().m_indiMutex);
       
-      indi::updateSwitchIfChanged(m_indiP_reconfig, "request", pcf::IndiElement::Off, derived().m_indiDriver, INDI_IDLE);
+      indi::updateSwitchIfChanged(m_indiP_reconfig, "request", pcf::IndiElement::SwitchState::Off, derived().m_indiDriver, INDI_IDLE);
       
       m_nextMode = m_modeName;
       derived().m_reconfig = true;
@@ -2231,12 +2231,12 @@ int stdCamera<derivedT>::newCallBack_cropMode( const pcf::IndiProperty &ipRecv)
 
       if(!ipRecv.find("toggle")) return 0;
    
-      if( ipRecv["toggle"].getSwitchState() == pcf::IndiElement::Off )
+      if( ipRecv["toggle"].switchState() == pcf::IndiElement::SwitchState::Off )
       {
          m_cropModeSet = false;
       }
    
-      if( ipRecv["toggle"].getSwitchState() == pcf::IndiElement::On )
+      if( ipRecv["toggle"].switchState() == pcf::IndiElement::SwitchState::On )
       {
          m_cropModeSet = true;
       }
@@ -2414,11 +2414,11 @@ int stdCamera<derivedT>::newCallBack_roi_check( const pcf::IndiProperty &ipRecv 
       
       if(!ipRecv.find("request")) return 0;
       
-      if( ipRecv["request"].getSwitchState() == pcf::IndiElement::On)
+      if( ipRecv["request"].switchState() == pcf::IndiElement::SwitchState::On)
       {
          std::unique_lock<std::mutex> lock(derived().m_indiMutex);
          
-         indi::updateSwitchIfChanged(m_indiP_roi_check, "request", pcf::IndiElement::Off, derived().m_indiDriver, INDI_IDLE);
+         indi::updateSwitchIfChanged(m_indiP_roi_check, "request", pcf::IndiElement::SwitchState::Off, derived().m_indiDriver, INDI_IDLE);
          
          mx::meta::trueFalseT<derivedT::c_stdCamera_usesROI> tf;
          return checkNextROI(tf);
@@ -2455,11 +2455,11 @@ int stdCamera<derivedT>::newCallBack_roi_set( const pcf::IndiProperty &ipRecv )
 
       if(!ipRecv.find("request")) return 0;
       
-      if( ipRecv["request"].getSwitchState() == pcf::IndiElement::On)
+      if( ipRecv["request"].switchState() == pcf::IndiElement::SwitchState::On)
       {
          std::unique_lock<std::mutex> lock(derived().m_indiMutex);
          
-         indi::updateSwitchIfChanged(m_indiP_roi_set, "request", pcf::IndiElement::Off, derived().m_indiDriver, INDI_IDLE);
+         indi::updateSwitchIfChanged(m_indiP_roi_set, "request", pcf::IndiElement::SwitchState::Off, derived().m_indiDriver, INDI_IDLE);
          
          m_lastROI = m_currentROI;
          
@@ -2484,11 +2484,11 @@ int stdCamera<derivedT>::newCallBack_roi_full( const pcf::IndiProperty &ipRecv )
 
       if(!ipRecv.find("request")) return 0;
       
-      if( ipRecv["request"].getSwitchState() == pcf::IndiElement::On)
+      if( ipRecv["request"].switchState() == pcf::IndiElement::SwitchState::On)
       {
          std::unique_lock<std::mutex> lock(derived().m_indiMutex);
          
-         indi::updateSwitchIfChanged(m_indiP_roi_full, "request", pcf::IndiElement::Off, derived().m_indiDriver, INDI_IDLE);
+         indi::updateSwitchIfChanged(m_indiP_roi_full, "request", pcf::IndiElement::SwitchState::Off, derived().m_indiDriver, INDI_IDLE);
       
          m_nextROI.x = m_full_x;
          m_nextROI.y = m_full_y;
@@ -2518,11 +2518,11 @@ int stdCamera<derivedT>::newCallBack_roi_fullbin( const pcf::IndiProperty &ipRec
 
       if(!ipRecv.find("request")) return 0;
       
-      if( ipRecv["request"].getSwitchState() == pcf::IndiElement::On)
+      if( ipRecv["request"].switchState() == pcf::IndiElement::SwitchState::On)
       {
          std::unique_lock<std::mutex> lock(derived().m_indiMutex);
          
-         indi::updateSwitchIfChanged(m_indiP_roi_fullbin, "request", pcf::IndiElement::Off, derived().m_indiDriver, INDI_IDLE);
+         indi::updateSwitchIfChanged(m_indiP_roi_fullbin, "request", pcf::IndiElement::SwitchState::Off, derived().m_indiDriver, INDI_IDLE);
       
          bool reset = false;
 
@@ -2582,11 +2582,11 @@ int stdCamera<derivedT>::newCallBack_roi_loadlast( const pcf::IndiProperty &ipRe
 
       if(!ipRecv.find("request")) return 0;      
 
-      if( ipRecv["request"].getSwitchState() == pcf::IndiElement::On)
+      if( ipRecv["request"].switchState() == pcf::IndiElement::SwitchState::On)
       {
          std::unique_lock<std::mutex> lock(derived().m_indiMutex);
          
-         indi::updateSwitchIfChanged(m_indiP_roi_loadlast, "request", pcf::IndiElement::Off, derived().m_indiDriver, INDI_IDLE);
+         indi::updateSwitchIfChanged(m_indiP_roi_loadlast, "request", pcf::IndiElement::SwitchState::Off, derived().m_indiDriver, INDI_IDLE);
          
          m_nextROI = m_lastROI;
          return 0;
@@ -2608,11 +2608,11 @@ int stdCamera<derivedT>::newCallBack_roi_last( const pcf::IndiProperty &ipRecv )
       #endif
       if(!ipRecv.find("request")) return 0;      
 
-      if( ipRecv["request"].getSwitchState() == pcf::IndiElement::On)
+      if( ipRecv["request"].switchState() == pcf::IndiElement::SwitchState::On)
       {
          std::unique_lock<std::mutex> lock(derived().m_indiMutex);
          
-         indi::updateSwitchIfChanged(m_indiP_roi_last, "request", pcf::IndiElement::Off, derived().m_indiDriver, INDI_IDLE);
+         indi::updateSwitchIfChanged(m_indiP_roi_last, "request", pcf::IndiElement::SwitchState::Off, derived().m_indiDriver, INDI_IDLE);
          
          m_nextROI = m_lastROI;
          m_lastROI = m_currentROI;
@@ -2637,11 +2637,11 @@ int stdCamera<derivedT>::newCallBack_roi_default( const pcf::IndiProperty &ipRec
 
       if(!ipRecv.find("request")) return 0;
       
-      if( ipRecv["request"].getSwitchState() == pcf::IndiElement::On)
+      if( ipRecv["request"].switchState() == pcf::IndiElement::SwitchState::On)
       {
          std::unique_lock<std::mutex> lock(derived().m_indiMutex);
          
-         indi::updateSwitchIfChanged(m_indiP_roi_default, "request", pcf::IndiElement::Off, derived().m_indiDriver, INDI_IDLE);
+         indi::updateSwitchIfChanged(m_indiP_roi_default, "request", pcf::IndiElement::SwitchState::Off, derived().m_indiDriver, INDI_IDLE);
          
          m_nextROI.x = m_default_x;
          m_nextROI.y = m_default_y;
@@ -2692,12 +2692,12 @@ int stdCamera<derivedT>::newCallBack_shutter( const pcf::IndiProperty &ipRecv )
       
        mx::meta::trueFalseT<derivedT::c_stdCamera_hasShutter> tf;
             
-      if( ipRecv["toggle"].getSwitchState() == pcf::IndiElement::Off )
+      if( ipRecv["toggle"].switchState() == pcf::IndiElement::SwitchState::Off )
       {
          setShutter(1, tf);
       }
       
-      if( ipRecv["toggle"].getSwitchState() == pcf::IndiElement::On )
+      if( ipRecv["toggle"].switchState() == pcf::IndiElement::SwitchState::On )
       {
          setShutter(0, tf);
       }
@@ -2776,11 +2776,11 @@ int stdCamera<derivedT>::updateINDI()
    {
       if(m_synchro == false) 
       {
-         derived().updateSwitchIfChanged(m_indiP_synchro, "toggle", pcf::IndiElement::Off, INDI_IDLE);
+         derived().updateSwitchIfChanged(m_indiP_synchro, "toggle", pcf::IndiElement::SwitchState::Off, INDI_IDLE);
       }
       else
       {
-         derived().updateSwitchIfChanged(m_indiP_synchro, "toggle", pcf::IndiElement::On, INDI_OK);
+         derived().updateSwitchIfChanged(m_indiP_synchro, "toggle", pcf::IndiElement::SwitchState::On, INDI_OK);
       }
    }
 
@@ -2791,8 +2791,8 @@ int stdCamera<derivedT>::updateINDI()
       
       for(auto it = m_cameraModes.begin();it!=m_cameraModes.end();++it)
       {
-         if(it->first == m_modeName) derived().updateSwitchIfChanged(m_indiP_mode, it->first, pcf::IndiElement::On, st);
-         else derived().updateSwitchIfChanged(m_indiP_mode, it->first, pcf::IndiElement::Off, st);
+         if(it->first == m_modeName) derived().updateSwitchIfChanged(m_indiP_mode, it->first, pcf::IndiElement::SwitchState::On, st);
+         else derived().updateSwitchIfChanged(m_indiP_mode, it->first, pcf::IndiElement::SwitchState::Off, st);
       }
             
    }
@@ -2801,11 +2801,11 @@ int stdCamera<derivedT>::updateINDI()
    {
       if(m_cropMode == false) 
       {
-         derived().updateSwitchIfChanged(m_indiP_cropMode, "toggle", pcf::IndiElement::Off, INDI_IDLE);
+         derived().updateSwitchIfChanged(m_indiP_cropMode, "toggle", pcf::IndiElement::SwitchState::Off, INDI_IDLE);
       }
       else
       {
-         derived().updateSwitchIfChanged(m_indiP_cropMode, "toggle", pcf::IndiElement::On, INDI_OK);
+         derived().updateSwitchIfChanged(m_indiP_cropMode, "toggle", pcf::IndiElement::SwitchState::On, INDI_OK);
       }
    }
    
@@ -2823,7 +2823,7 @@ int stdCamera<derivedT>::updateINDI()
    {
       if(m_tempControlStatus == false)
       {
-         derived().updateSwitchIfChanged( m_indiP_tempcont, "toggle", pcf::IndiElement::Off, INDI_IDLE);
+         derived().updateSwitchIfChanged( m_indiP_tempcont, "toggle", pcf::IndiElement::SwitchState::Off, INDI_IDLE);
          derived().updateIfChanged(m_indiP_temp, "current", m_ccdTemp, INDI_IDLE);
          derived().updateIfChanged(m_indiP_temp, "target", m_ccdTempSetpt, INDI_IDLE);
          derived().updateIfChanged( m_indiP_tempstat, "status", m_tempControlStatusStr, INDI_IDLE);
@@ -2832,14 +2832,14 @@ int stdCamera<derivedT>::updateINDI()
       {
          if(m_tempControlOnTarget)
          {
-            derived().updateSwitchIfChanged( m_indiP_tempcont, "toggle", pcf::IndiElement::On, INDI_OK);
+            derived().updateSwitchIfChanged( m_indiP_tempcont, "toggle", pcf::IndiElement::SwitchState::On, INDI_OK);
             derived().updateIfChanged(m_indiP_temp, "current", m_ccdTemp, INDI_OK);
             derived().updateIfChanged(m_indiP_temp, "target", m_ccdTempSetpt, INDI_OK);
             derived().updateIfChanged( m_indiP_tempstat, "status", m_tempControlStatusStr, INDI_OK);
          }
          else
          {
-            derived().updateSwitchIfChanged( m_indiP_tempcont, "toggle", pcf::IndiElement::On, INDI_BUSY);
+            derived().updateSwitchIfChanged( m_indiP_tempcont, "toggle", pcf::IndiElement::SwitchState::On, INDI_BUSY);
             derived().updateIfChanged(m_indiP_temp, "current", m_ccdTemp, INDI_BUSY);
             derived().updateIfChanged(m_indiP_temp, "target", m_ccdTempSetpt, INDI_BUSY);
             derived().updateIfChanged( m_indiP_tempstat, "status", m_tempControlStatusStr, INDI_BUSY);
@@ -2870,11 +2870,11 @@ int stdCamera<derivedT>::updateINDI()
           
       if(m_shutterState == 0) //0 shut, 1 open
       {
-         derived().updateSwitchIfChanged(m_indiP_shutter, "toggle", pcf::IndiElement::On, INDI_OK);
+         derived().updateSwitchIfChanged(m_indiP_shutter, "toggle", pcf::IndiElement::SwitchState::On, INDI_OK);
       }
       else
       {
-         derived().updateSwitchIfChanged(m_indiP_shutter, "toggle", pcf::IndiElement::Off, INDI_IDLE);
+         derived().updateSwitchIfChanged(m_indiP_shutter, "toggle", pcf::IndiElement::SwitchState::Off, INDI_IDLE);
       }
    }
    

@@ -17,7 +17,6 @@ namespace app
 namespace dev 
 {
 
-
 /// MagAO-X standard motion stage interface
 /** Implements the standard interface to a MagAO-X motion stage.
   * This includes the mcbl filter wheels, the zaber stages. 
@@ -320,8 +319,8 @@ int stdMotionStage<derivedT>::appStartup()
    }
  
    derived().createStandardIndiNumber( m_indiP_preset, m_presetNotation, 1.0, (double) m_presetNames.size(), step, format);
-   m_indiP_preset["current"].set(0);
-   m_indiP_preset["target"].set(0);
+   m_indiP_preset["current"].value(0);
+   m_indiP_preset["target"].value(0);
    if( derived().registerIndiPropertyNew( m_indiP_preset, st_newCallBack_stdMotionStage) < 0)
    {
       #ifndef STDFILTERWHEEL_TEST_NOLOG
@@ -448,7 +447,7 @@ int stdMotionStage<derivedT>::newCallBack_m_indiP_presetName( const pcf::IndiPro
    {
       if(!ipRecv.find(m_presetNames[i])) continue;
       
-      if(ipRecv[m_presetNames[i]].getSwitchState() == pcf::IndiElement::On)
+      if(ipRecv[m_presetNames[i]].switchState() == pcf::IndiElement::SwitchState::On)
       {
          if(newName != "")
          {
@@ -483,9 +482,9 @@ int stdMotionStage<derivedT>::newCallBack_m_indiP_home( const pcf::IndiProperty 
    
    if(!ipRecv.find("request")) return 0;
    
-   if( ipRecv["request"].getSwitchState() == pcf::IndiElement::On)
+   if( ipRecv["request"].switchState() == pcf::IndiElement::SwitchState::On)
    {
-      indi::updateSwitchIfChanged(m_indiP_home, "request", pcf::IndiElement::On, derived().m_indiDriver, INDI_BUSY);
+      indi::updateSwitchIfChanged(m_indiP_home, "request", pcf::IndiElement::SwitchState::On, derived().m_indiDriver, INDI_BUSY);
       
       std::lock_guard<std::mutex> guard(derived().m_indiMutex);
       m_movingState = 0;
@@ -507,9 +506,9 @@ int stdMotionStage<derivedT>::newCallBack_m_indiP_stop( const pcf::IndiProperty 
    
    if(!ipRecv.find("request")) return 0;
    
-   if( ipRecv["request"].getSwitchState() == pcf::IndiElement::On)
+   if( ipRecv["request"].switchState() == pcf::IndiElement::SwitchState::On)
    {
-      indi::updateSwitchIfChanged(m_indiP_stop, "request", pcf::IndiElement::On, derived().m_indiDriver, INDI_BUSY);
+      indi::updateSwitchIfChanged(m_indiP_stop, "request", pcf::IndiElement::SwitchState::On, derived().m_indiDriver, INDI_BUSY);
     
       //-->do not lock mutex!
       m_movingState = 0;
@@ -542,18 +541,18 @@ int stdMotionStage<derivedT>::updateINDI()
    {
       if( i == nn )
       {
-         if(m_indiP_presetName[m_presetNames[i]] != pcf::IndiElement::On) 
+         if(m_indiP_presetName[m_presetNames[i]].switchState() != pcf::IndiElement::SwitchState::On) 
          {
             changed = true;
-            m_indiP_presetName[m_presetNames[i]] = pcf::IndiElement::On;
+            m_indiP_presetName[m_presetNames[i]].switchState() = pcf::IndiElement::SwitchState::On;
          }
       }
       else
       {
-         if(m_indiP_presetName[m_presetNames[i]] != pcf::IndiElement::Off) 
+         if(m_indiP_presetName[m_presetNames[i]].switchState() != pcf::IndiElement::SwitchState::Off) 
          {
             changed = true;
-            m_indiP_presetName[m_presetNames[i]] = pcf::IndiElement::Off;
+            m_indiP_presetName[m_presetNames[i]].switchState() = pcf::IndiElement::SwitchState::Off;
          }
       }
    }

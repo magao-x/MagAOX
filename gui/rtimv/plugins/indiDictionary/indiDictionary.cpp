@@ -54,23 +54,23 @@ public:
 
             if(ipRecv.getType() == pcf::IndiProperty::Switch)
             {
-                if(ipRecv[elIt->second.name()].getSwitchState() == pcf::IndiElement::On)
+                if(ipRecv[elIt->second.name()].switchState() == pcf::IndiElement::SwitchState::On)
                     val = "on";
-                else if(ipRecv[elIt->second.name()].getSwitchState() == pcf::IndiElement::Off)
+                else if(ipRecv[elIt->second.name()].switchState() == pcf::IndiElement::SwitchState::Off)
                     val = "off";
                 else
                     val = "unk";
             }
             else
             {
-                val = ipRecv[elIt->second.name()].get();
+                val = ipRecv[elIt->second.name()].value();
             }
 
             (*m_dict)[elKey].setBlob(val.c_str(), val.size() + 1);
 
             if(elKey == "tcsi.teldata.pa")
             {
-                m_northAngle = ipRecv[elIt->second.name()].get<float>();
+                m_northAngle = ipRecv[elIt->second.name()].value<float>();
                 (*m_dict)["rtimv.north.angle"].setBlob(&m_northAngle, sizeof(float));
             }
 

@@ -268,7 +268,7 @@ void coronAlign::handleSetProperty( const pcf::IndiProperty & ipRecv)
       {
          if(ipRecv.find("current"))
          {
-            m_fwPupilPos = ipRecv["current"].get<double>();
+            m_fwPupilPos = ipRecv["current"].value<double>();
             return;
          }
       }
@@ -276,7 +276,7 @@ void coronAlign::handleSetProperty( const pcf::IndiProperty & ipRecv)
       {
          if(ipRecv.find("state"))
          {
-            m_fwPupilState = ipRecv["state"].get();
+            m_fwPupilState = ipRecv["state"].value();
             return;
          }
       }
@@ -287,7 +287,7 @@ void coronAlign::handleSetProperty( const pcf::IndiProperty & ipRecv)
       {
          if(ipRecv.find("current"))
          {
-            m_fwFocalPos = ipRecv["current"].get<double>();
+            m_fwFocalPos = ipRecv["current"].value<double>();
             return;
          }
       }
@@ -295,7 +295,7 @@ void coronAlign::handleSetProperty( const pcf::IndiProperty & ipRecv)
       {
          if(ipRecv.find("state"))
          {
-            m_fwFocalState = ipRecv["state"].get();
+            m_fwFocalState = ipRecv["state"].value();
             return;
          }
       }
@@ -306,7 +306,7 @@ void coronAlign::handleSetProperty( const pcf::IndiProperty & ipRecv)
       {
          if(ipRecv.find("current"))
          {
-            m_fwLyotPos = ipRecv["current"].get<double>();
+            m_fwLyotPos = ipRecv["current"].value<double>();
             return;
          }
       }
@@ -314,7 +314,7 @@ void coronAlign::handleSetProperty( const pcf::IndiProperty & ipRecv)
       {
          if(ipRecv.find("state"))
          {
-            m_fwLyotState = ipRecv["state"].get();
+            m_fwLyotState = ipRecv["state"].value();
             return;
          }
       }
@@ -325,7 +325,7 @@ void coronAlign::handleSetProperty( const pcf::IndiProperty & ipRecv)
       {
          if(ipRecv.find("current"))
          {
-            m_picoPupilPos = ipRecv["current"].get<long>();
+            m_picoPupilPos = ipRecv["current"].value<long>();
             return;
          }
       }
@@ -333,7 +333,7 @@ void coronAlign::handleSetProperty( const pcf::IndiProperty & ipRecv)
       {
          if(ipRecv.find("current"))
          {
-            m_picoFocalPos = ipRecv["current"].get<long>();
+            m_picoFocalPos = ipRecv["current"].value<long>();
             return;
          }
       }
@@ -341,7 +341,7 @@ void coronAlign::handleSetProperty( const pcf::IndiProperty & ipRecv)
       {
          if(ipRecv.find("current"))
          {
-            m_picoLyotPos = ipRecv["current"].get<long>();
+            m_picoLyotPos = ipRecv["current"].value<long>();
             return;
          }
       }
@@ -349,7 +349,7 @@ void coronAlign::handleSetProperty( const pcf::IndiProperty & ipRecv)
       {
          if(ipRecv.find("state"))
          {
-            m_picoState = ipRecv["state"].get();
+            m_picoState = ipRecv["state"].value();
             return;
          }
       }

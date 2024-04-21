@@ -32,13 +32,6 @@ SRCS = \
 	 Thread.cpp \
 	 TimeStamp.cpp
 
-#   TCPConnection.cpp \
-#	 TCPListener.cpp \
-#	 LogFile.cpp \
-#	 Logger.cpp \
-#   Fits.cpp \
-#	 Config.cpp \
-#	 ConfigFile.cpp \
 
 OBJS = $(SRCS:.cpp=.o)
 
@@ -46,6 +39,7 @@ libcommon.a: $(OBJS)
 	ar -r $@ $(OBJS)
 	ar -s $@
 
+IndiElement.o: IndiElement.hpp IndiElement.cpp 
 
 clean:
 	rm -f *.o *.a *.so

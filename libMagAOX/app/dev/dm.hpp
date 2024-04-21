@@ -365,7 +365,7 @@ protected:
                ipFreq.setDevice(m_satTriggerDevice[n]);
                ipFreq.setName(m_satTriggerProperty[n]);
                ipFreq.add(pcf::IndiElement("toggle"));
-               ipFreq["toggle"] = pcf::IndiElement::Off;
+               ipFreq["toggle"] = pcf::IndiElement::SwitchState::Off;
                derived().sendNewProperty(ipFreq);
 
                derivedT::template log<text_log>("DM saturation threshold exceeded.  Loop opened.", logPrio::LOG_WARNING);
@@ -1084,12 +1084,12 @@ int dm<derivedT,realT>::checkFlats()
       {
          if(it->first == m_flatCurrent || m_flatCurrent == "")
          {
-            m_indiP_flats.add(pcf::IndiElement(it->first, pcf::IndiElement::On));
+            m_indiP_flats.add(pcf::IndiElement(it->first, pcf::IndiElement::SwitchState::On));
             m_flatCurrent = it->first; //handles the case m_flatCurrent == "" b/c it was not set in config
          }
          else
          {
-            m_indiP_flats.add(pcf::IndiElement(it->first, pcf::IndiElement::Off));
+            m_indiP_flats.add(pcf::IndiElement(it->first, pcf::IndiElement::SwitchState::Off));
          }
       }
       
@@ -1097,11 +1097,11 @@ int dm<derivedT,realT>::checkFlats()
       {
          if(m_flatCurrent == "default")
          {
-            m_indiP_flats.add(pcf::IndiElement("default", pcf::IndiElement::On));
+            m_indiP_flats.add(pcf::IndiElement("default", pcf::IndiElement::SwitchState::On));
          }
          else
          {
-            m_indiP_flats.add(pcf::IndiElement("default", pcf::IndiElement::Off));
+            m_indiP_flats.add(pcf::IndiElement("default", pcf::IndiElement::SwitchState::Off));
          }
       }
    
@@ -1166,11 +1166,11 @@ int dm<derivedT, realT>::loadFlat(const std::string &intarget)
     {
         if(m_flatCurrent == "default")
         {
-            m_indiP_flats["default"] = pcf::IndiElement::On;
+            m_indiP_flats["default"] = pcf::IndiElement::SwitchState::On;
         }
         else
         {
-            m_indiP_flats["default"] = pcf::IndiElement::Off;
+            m_indiP_flats["default"] = pcf::IndiElement::SwitchState::Off;
         }
     }
 
@@ -1183,11 +1183,11 @@ int dm<derivedT, realT>::loadFlat(const std::string &intarget)
 
         if(i->first == m_flatCurrent)
         {
-            m_indiP_flats[i->first] = pcf::IndiElement::On;
+            m_indiP_flats[i->first] = pcf::IndiElement::SwitchState::On;
         }
         else
         {
-            m_indiP_flats[i->first] = pcf::IndiElement::Off;
+            m_indiP_flats[i->first] = pcf::IndiElement::SwitchState::Off;
         }
     }
 
@@ -1285,7 +1285,7 @@ int dm<derivedT,realT>::setFlat(bool update)
    
    if(!update)
    {
-      derived().updateSwitchIfChanged(m_indiP_setFlat, "toggle", pcf::IndiElement::On, pcf::IndiProperty::Busy);
+      derived().updateSwitchIfChanged(m_indiP_setFlat, "toggle", pcf::IndiElement::SwitchState::On, pcf::IndiProperty::Busy);
    
       derivedT::template log<text_log>("flat set");
    }
@@ -1339,7 +1339,7 @@ int dm<derivedT,realT>::zeroFlat()
    //Post the semaphore
    ImageStreamIO_closeIm(&m_flatImageStream);
    
-   derived().updateSwitchIfChanged(m_indiP_setFlat, "toggle", pcf::IndiElement::Off, pcf::IndiProperty::Idle);
+   derived().updateSwitchIfChanged(m_indiP_setFlat, "toggle", pcf::IndiElement::SwitchState::Off, pcf::IndiProperty::Idle);
    
    derivedT::template log<text_log>("flat zeroed");
    
@@ -1397,12 +1397,12 @@ int dm<derivedT,realT>::checkTests()
       {
          if(it->first == m_testCurrent || m_testCurrent == "")
          {
-            m_indiP_tests.add(pcf::IndiElement(it->first, pcf::IndiElement::On));
+            m_indiP_tests.add(pcf::IndiElement(it->first, pcf::IndiElement::SwitchState::On));
             m_testCurrent = it->first; //Handles the case when m_testCurrent=="" b/c it was not set in config
          }
          else
          {
-            m_indiP_tests.add(pcf::IndiElement(it->first, pcf::IndiElement::Off));
+            m_indiP_tests.add(pcf::IndiElement(it->first, pcf::IndiElement::SwitchState::Off));
          }
       }
       
@@ -1410,11 +1410,11 @@ int dm<derivedT,realT>::checkTests()
       {
          if(m_testCurrent == "default")
          {
-            m_indiP_tests.add(pcf::IndiElement("default", pcf::IndiElement::On));
+            m_indiP_tests.add(pcf::IndiElement("default", pcf::IndiElement::SwitchState::On));
          }
          else
          {
-            m_indiP_tests.add(pcf::IndiElement("default", pcf::IndiElement::Off));
+            m_indiP_tests.add(pcf::IndiElement("default", pcf::IndiElement::SwitchState::Off));
          }
       }
    
@@ -1476,11 +1476,11 @@ int dm<derivedT, realT>::loadTest(const std::string &intarget)
     {
         if(m_testCurrent == "default")
         {
-            m_indiP_tests["default"] = pcf::IndiElement::On;
+            m_indiP_tests["default"] = pcf::IndiElement::SwitchState::On;
         }
         else
         {
-            m_indiP_tests["default"] = pcf::IndiElement::Off;
+            m_indiP_tests["default"] = pcf::IndiElement::SwitchState::Off;
         }
     }
 
@@ -1493,11 +1493,11 @@ int dm<derivedT, realT>::loadTest(const std::string &intarget)
 
        if(i->first == m_testCurrent)
        {
-           m_indiP_tests[i->first] = pcf::IndiElement::On;
+           m_indiP_tests[i->first] = pcf::IndiElement::SwitchState::On;
        }
        else
        {
-           m_indiP_tests[i->first] = pcf::IndiElement::Off;
+           m_indiP_tests[i->first] = pcf::IndiElement::SwitchState::Off;
        }
    }
 
@@ -1588,7 +1588,7 @@ int dm<derivedT,realT>::setTest()
    //Post the semaphore
    ImageStreamIO_closeIm(&m_testImageStream);
    
-   derived().updateSwitchIfChanged(m_indiP_setTest, "toggle", pcf::IndiElement::On, pcf::IndiProperty::Busy);
+   derived().updateSwitchIfChanged(m_indiP_setTest, "toggle", pcf::IndiElement::SwitchState::On, pcf::IndiProperty::Busy);
    
    derivedT::template log<text_log>("test set");
    
@@ -1642,7 +1642,7 @@ int dm<derivedT,realT>::zeroTest()
      
    ImageStreamIO_closeIm(&m_testImageStream);
    
-   derived().updateSwitchIfChanged(m_indiP_setTest, "toggle", pcf::IndiElement::Off, pcf::IndiProperty::Idle);
+   derived().updateSwitchIfChanged(m_indiP_setTest, "toggle", pcf::IndiElement::SwitchState::Off, pcf::IndiProperty::Idle);
    
    derivedT::template log<text_log>("test zeroed");
    
@@ -1672,7 +1672,7 @@ int dm<derivedT,realT>::zeroAll(bool nosem)
       {
          ImageStreamIO_closeIm(&imageStream);
          derivedT::template log<text_log>("width mismatch between " + shmimN + " and configured DM", logPrio::LOG_ERROR);
-         derived().updateSwitchIfChanged(m_indiP_zeroAll, "request", pcf::IndiElement::Off, INDI_IDLE);
+         derived().updateSwitchIfChanged(m_indiP_zeroAll, "request", pcf::IndiElement::SwitchState::Off, INDI_IDLE);
          return -1;
       }
    
@@ -1680,7 +1680,7 @@ int dm<derivedT,realT>::zeroAll(bool nosem)
       {
          ImageStreamIO_closeIm(&imageStream);
          derivedT::template log<text_log>("height mismatch between " + shmimN + " and configured DM", logPrio::LOG_ERROR);
-         derived().updateSwitchIfChanged(m_indiP_zeroAll, "request", pcf::IndiElement::Off, INDI_IDLE);
+         derived().updateSwitchIfChanged(m_indiP_zeroAll, "request", pcf::IndiElement::SwitchState::Off, INDI_IDLE);
          return -1;
       }
       
@@ -1703,15 +1703,15 @@ int dm<derivedT,realT>::zeroAll(bool nosem)
    
    derivedT::template log<text_log>("all channels zeroed", logPrio::LOG_NOTICE);
 
-   derived().updateSwitchIfChanged(m_indiP_zeroAll, "request", pcf::IndiElement::Off, INDI_IDLE);
+   derived().updateSwitchIfChanged(m_indiP_zeroAll, "request", pcf::IndiElement::SwitchState::Off, INDI_IDLE);
 
    //Also cleanup flat and test
    m_flatSet = false;   
-   derived().updateSwitchIfChanged(m_indiP_setFlat, "toggle", pcf::IndiElement::Off, pcf::IndiProperty::Idle);
+   derived().updateSwitchIfChanged(m_indiP_setFlat, "toggle", pcf::IndiElement::SwitchState::Off, pcf::IndiProperty::Idle);
    
    //Also cleanup flat and test
    m_testSet = false;   
-   derived().updateSwitchIfChanged(m_indiP_setTest, "toggle", pcf::IndiElement::Off, pcf::IndiProperty::Idle);
+   derived().updateSwitchIfChanged(m_indiP_setTest, "toggle", pcf::IndiElement::SwitchState::Off, pcf::IndiProperty::Idle);
 
    int rv;
    if( (rv = clearSat()) < 0)
@@ -1746,7 +1746,7 @@ int dm<derivedT,realT>::clearSat()
       {
          ImageStreamIO_closeIm(&imageStream);
          derivedT::template log<text_log>("width mismatch between " + shmimN + " and configured DM", logPrio::LOG_ERROR);
-         derived().updateSwitchIfChanged(m_indiP_zeroAll, "request", pcf::IndiElement::Off, INDI_IDLE);
+         derived().updateSwitchIfChanged(m_indiP_zeroAll, "request", pcf::IndiElement::SwitchState::Off, INDI_IDLE);
          return -1;
       }
    
@@ -1754,7 +1754,7 @@ int dm<derivedT,realT>::clearSat()
       {
          ImageStreamIO_closeIm(&imageStream);
          derivedT::template log<text_log>("height mismatch between " + shmimN + " and configured DM", logPrio::LOG_ERROR);
-         derived().updateSwitchIfChanged(m_indiP_zeroAll, "request", pcf::IndiElement::Off, INDI_IDLE);
+         derived().updateSwitchIfChanged(m_indiP_zeroAll, "request", pcf::IndiElement::SwitchState::Off, INDI_IDLE);
          return -1;
       }
       
@@ -1968,7 +1968,7 @@ int dm<derivedT,realT>::newCallBack_init( const pcf::IndiProperty &ipRecv )
       
    if(!ipRecv.find("request")) return 0;
    
-   if( ipRecv["request"].getSwitchState() == pcf::IndiElement::On)
+   if( ipRecv["request"].switchState() == pcf::IndiElement::SwitchState::On)
    {
       return derived().initDM();
    }
@@ -1993,7 +1993,7 @@ int dm<derivedT,realT>::newCallBack_zero( const pcf::IndiProperty &ipRecv )
       
    if(!ipRecv.find("request")) return 0;
    
-   if( ipRecv["request"].getSwitchState() == pcf::IndiElement::On)
+   if( ipRecv["request"].switchState() == pcf::IndiElement::SwitchState::On)
    {
       return derived().zeroDM();
    }
@@ -2018,7 +2018,7 @@ int dm<derivedT,realT>::newCallBack_release( const pcf::IndiProperty &ipRecv )
       
    if(!ipRecv.find("request")) return 0;
    
-   if( ipRecv["request"].getSwitchState() == pcf::IndiElement::On)
+   if( ipRecv["request"].switchState() == pcf::IndiElement::SwitchState::On)
    {
       return releaseDM();
    }
@@ -2046,7 +2046,7 @@ int dm<derivedT,realT>::newCallBack_flats( const pcf::IndiProperty &ipRecv )
    
    if(ipRecv.find("default"))
    {
-      if(ipRecv["default"].getSwitchState() == pcf::IndiElement::On)
+      if(ipRecv["default"].switchState() == pcf::IndiElement::SwitchState::On)
       {
          newFlat = "default";
       }
@@ -2057,7 +2057,7 @@ int dm<derivedT,realT>::newCallBack_flats( const pcf::IndiProperty &ipRecv )
    {
       if(!ipRecv.find(i->first)) continue;
       
-      if(ipRecv[i->first].getSwitchState() == pcf::IndiElement::On)
+      if(ipRecv[i->first].switchState() == pcf::IndiElement::SwitchState::On)
       {
          if(newFlat != "")
          {
@@ -2092,7 +2092,7 @@ int dm<derivedT,realT>::newCallBack_setFlat( const pcf::IndiProperty &ipRecv )
    
    if(!ipRecv.find("toggle")) return 0;
    
-   if(ipRecv["toggle"] == pcf::IndiElement::On)
+   if(ipRecv["toggle"] == pcf::IndiElement::SwitchState::On)
    {
       return setFlat();
    }
@@ -2123,7 +2123,7 @@ int dm<derivedT,realT>::newCallBack_tests( const pcf::IndiProperty &ipRecv )
    
    if(ipRecv.find("default"))
    {
-      if(ipRecv["default"].getSwitchState() == pcf::IndiElement::On)
+      if(ipRecv["default"].switchState() == pcf::IndiElement::SwitchState::On)
       {
          newTest = "default";
       }
@@ -2134,7 +2134,7 @@ int dm<derivedT,realT>::newCallBack_tests( const pcf::IndiProperty &ipRecv )
    {
       if(!ipRecv.find(i->first)) continue;
       
-      if(ipRecv[i->first].getSwitchState() == pcf::IndiElement::On)
+      if(ipRecv[i->first].switchState() == pcf::IndiElement::SwitchState::On)
       {
          if(newTest != "")
          {
@@ -2169,7 +2169,7 @@ int dm<derivedT,realT>::newCallBack_setTest( const pcf::IndiProperty &ipRecv )
    
    if(!ipRecv.find("toggle")) return 0;
    
-   if(ipRecv["toggle"] == pcf::IndiElement::On)
+   if(ipRecv["toggle"] == pcf::IndiElement::SwitchState::On)
    {
       return setTest();
    }
@@ -2198,9 +2198,9 @@ int dm<derivedT,realT>::newCallBack_zeroAll( const pcf::IndiProperty &ipRecv )
       
    if(!ipRecv.find("request")) return 0;
    
-   if( ipRecv["request"].getSwitchState() == pcf::IndiElement::On)
+   if( ipRecv["request"].switchState() == pcf::IndiElement::SwitchState::On)
    {
-      indi::updateSwitchIfChanged(m_indiP_zeroAll, "request", pcf::IndiElement::On, derived().m_indiDriver, INDI_BUSY);
+      indi::updateSwitchIfChanged(m_indiP_zeroAll, "request", pcf::IndiElement::SwitchState::On, derived().m_indiDriver, INDI_BUSY);
       
       std::lock_guard<std::mutex> guard(derived().m_indiMutex);
       return zeroAll();

@@ -134,7 +134,7 @@ IndiPropertyMap::Iterator IndiPropertyMap::find( const string& szElementName,
   for ( ; itr != m_mapProperties.end(); ++itr )
   {
     if ( itr->second.find( szElementName ) == true &&
-         itr->second[szElementName].get() == szElementValue )
+         itr->second[szElementName].value() == szElementValue )
     {
       return itr;
     }
@@ -155,7 +155,7 @@ IndiPropertyMap::ConstIterator IndiPropertyMap::find( const string& szElementNam
   for ( ; itr != m_mapProperties.end(); ++itr )
   {
     if ( itr->second.find( szElementName ) == true &&
-         itr->second[szElementName].get() == szElementValue )
+         itr->second[szElementName].value() == szElementValue )
     {
       return itr;
     }

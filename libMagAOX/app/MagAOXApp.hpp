@@ -860,7 +860,7 @@ protected:
      */
    void updateSwitchIfChanged( pcf::IndiProperty & p, ///< [in/out] The property containing the element to possibly update
                                const std::string & el, ///< [in] The element name
-                               const pcf::IndiElement::SwitchStateType & newVal, ///< [in] the new value
+                               const pcf::IndiElement::SwitchState & newVal, ///< [in] the new value
                                pcf::IndiProperty::PropertyStateType ipState = pcf::IndiProperty::Ok
                              );
    
@@ -2235,7 +2235,7 @@ int MagAOXApp<_useINDI>::createROIndiText( pcf::IndiProperty & prop,
    
    if(elLabel != "")
    {
-      prop[elName].setLabel(elLabel);
+      prop[elName].label(elLabel);
    }
    
    return 0;
@@ -2259,21 +2259,21 @@ int MagAOXApp<_useINDI>::createStandardIndiNumber( pcf::IndiProperty & prop,
    prop.setPerm(pcf::IndiProperty::ReadWrite); 
    prop.setState(pcf::IndiProperty::Idle);
    prop.add(pcf::IndiElement("current"));
-   prop["current"].setMin(min);
-   prop["current"].setMax(max);
-   prop["current"].setStep(step);
+   prop["current"].min(min);
+   prop["current"].max(max);
+   prop["current"].step(step);
    if(format != "") //don't override defaults
    {
-      prop["current"].setFormat(format);
+      prop["current"].format(format);
    }
 
    prop.add(pcf::IndiElement("target"));
-   prop["target"].setMin(min);
-   prop["target"].setMax(max);
-   prop["target"].setStep(step);
+   prop["target"].min(min);
+   prop["target"].max(max);
+   prop["target"].step(step);
    if(format != "") //don't override defaults
    {
-      prop["target"].setFormat(format);
+      prop["target"].format(format);
    }
    
    //Don't set "" just in case libcommon does something with defaults
@@ -2332,7 +2332,7 @@ int MagAOXApp<_useINDI>::createStandardIndiToggleSw( pcf::IndiProperty & prop,
    prop.setRule(pcf::IndiProperty::AtMostOne);
    
    //Add the toggle element initialized to Off
-   prop.add(pcf::IndiElement("toggle", pcf::IndiElement::Off));
+   prop.add(pcf::IndiElement("toggle", pcf::IndiElement::SwitchState::Off));
    
    //Don't set "" just in case libcommon does something with defaults
    if(label != "")
@@ -2363,7 +2363,7 @@ int MagAOXApp<_useINDI>::createStandardIndiRequestSw( pcf::IndiProperty & prop,
    prop.setRule(pcf::IndiProperty::AtMostOne);
    
    //Add the toggle element initialized to Off
-   prop.add(pcf::IndiElement("request", pcf::IndiElement::Off));
+   prop.add(pcf::IndiElement("request", pcf::IndiElement::SwitchState::Off));
    
    //Don't set "" just in case libcommon does something with defaults
    if(label != "")
@@ -2403,8 +2403,8 @@ int MagAOXApp<_useINDI>::createStandardIndiSelectionSw( pcf::IndiProperty & prop
    //Add the toggle element initialized to Off
    for(size_t n=0; n < elements.size(); ++n)
    {
-      pcf::IndiElement elem = pcf::IndiElement(elements[n], pcf::IndiElement::Off);
-      elem.setLabel(elementLabels[n]);
+      pcf::IndiElement elem = pcf::IndiElement(elements[n], pcf::IndiElement::SwitchState::Off);
+      elem.label(elementLabels[n]);
       prop.add(elem);
    }
    
@@ -2900,7 +2900,7 @@ void MagAOXApp<_useINDI>::updateIfChanged( pcf::IndiProperty & p,
 template<bool _useINDI>
 void MagAOXApp<_useINDI>::updateSwitchIfChanged( pcf::IndiProperty & p,
                                                  const std::string & el,
-                                                 const pcf::IndiElement::SwitchStateType & newVal, 
+                                                 const pcf::IndiElement::SwitchState & newVal, 
                                                  pcf::IndiProperty::PropertyStateType ipState
                                                )
 {
@@ -2968,7 +2968,7 @@ int MagAOXApp<_useINDI>::indiTargetUpdate( pcf::IndiProperty & localProperty,
    
    if( remoteProperty.find("target") )
    {
-      localTarget = remoteProperty["target"].get<T>();
+      localTarget = remoteProperty["target"].value<T>();
       set = true;
    }
    
@@ -2976,7 +2976,7 @@ int MagAOXApp<_useINDI>::indiTargetUpdate( pcf::IndiProperty & localProperty,
    {
       if( remoteProperty.find("current") )
       {
-         localTarget = remoteProperty["current"].get<T>();
+         localTarget = remoteProperty["current"].value<T>();
          set = true;
       }
    }
@@ -3044,7 +3044,7 @@ int MagAOXApp<_useINDI>::sendNewProperty( const pcf::IndiProperty & ipSend,
 
    try
    {
-      ipToSend[el].setValue(newVal);
+      ipToSend[el].value(newVal);
    }
    catch(...)
    {
@@ -3103,11 +3103,11 @@ int MagAOXApp<_useINDI>::sendNewStandardIndiToggle( const std::string & device,
 
     if(onoff == false)                                                                                     
     {                                                                                                      
-        ipSend["toggle"].setSwitchState(pcf::IndiElement::Off);                                            
+        ipSend["toggle"].switchState(pcf::IndiElement::SwitchState::Off);                                            
     }                                                                                                      
     else                                                                                                   
     {                                                                                                      
-        ipSend["toggle"].setSwitchState(pcf::IndiElement::On);                                             
+        ipSend["toggle"].switchState(pcf::IndiElement::SwitchState::On);                                             
     }              
 
     if(sendNewProperty(ipSend) < 0)                                                                        
@@ -3137,10 +3137,10 @@ int MagAOXApp<_useINDI>::newCallBack_clearFSMAlert( const pcf::IndiProperty &ipR
    
    if(!ipRecv.find("request")) return 0;
    
-   if(ipRecv["request"].getSwitchState() == pcf::IndiElement::On )
+   if(ipRecv["request"].switchState() == pcf::IndiElement::SwitchState::On )
    {
       clearFSMAlert();
-      updateSwitchIfChanged(m_indiP_clearFSMAlert, "request", pcf::IndiElement::Off, INDI_IDLE); 
+      updateSwitchIfChanged(m_indiP_clearFSMAlert, "request", pcf::IndiElement::SwitchState::Off, INDI_IDLE); 
    }
 
    
@@ -3198,7 +3198,7 @@ INDI_SETCALLBACK_DEFN( MagAOXApp<_useINDI>, m_indiP_powerChannel)(const pcf::Ind
 
    if( ipRecv.find(m_powerElement))
    {
-      ps = ipRecv[m_powerElement].get<std::string>();
+      ps = ipRecv[m_powerElement].value();
 
       if(ps == "On")
       {
@@ -3216,7 +3216,7 @@ INDI_SETCALLBACK_DEFN( MagAOXApp<_useINDI>, m_indiP_powerChannel)(const pcf::Ind
    
    if( ipRecv.find(m_powerTargetElement))
    {
-      ps = ipRecv[m_powerTargetElement].get<std::string>();
+      ps = ipRecv[m_powerTargetElement].value();
 
       if(ps == "On")
       {

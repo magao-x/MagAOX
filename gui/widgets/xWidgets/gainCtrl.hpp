@@ -226,7 +226,7 @@ void gainCtrl::handleSetProperty( const pcf::IndiProperty & ipRecv)
       {
          if(ipRecv.find("current"))
          {
-            float current = ipRecv["current"].get<float>();
+            float current = ipRecv["current"].value<float>();
             if(current != m_current)
             {
                m_valChanged = true;
@@ -236,7 +236,7 @@ void gainCtrl::handleSetProperty( const pcf::IndiProperty & ipRecv)
    
          if(ipRecv.find("target"))
          {
-            m_target = ipRecv["target"].get<float>();
+            m_target = ipRecv["target"].value<float>();
          }
 
          if(m_label == "")

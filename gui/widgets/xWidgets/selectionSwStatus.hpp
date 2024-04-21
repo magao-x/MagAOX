@@ -62,7 +62,7 @@ void selectionSwStatus::handleSetProperty( const pcf::IndiProperty & ipRecv)
       std::string newName;
       for(auto it = ipRecv.getElements().begin(); it != ipRecv.getElements().end(); ++it)
       {
-         if(it->second.getSwitchState() == pcf::IndiElement::On)
+         if(it->second.switchState() == pcf::IndiElement::SwitchState::On)
          {
             if(newName != "")
             {

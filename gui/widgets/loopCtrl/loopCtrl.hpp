@@ -221,19 +221,19 @@ void loopCtrl::handleSetProperty( const pcf::IndiProperty & ipRecv)
    {
       if(ipRecv.find("state"))
       {
-         m_appState = ipRecv["state"].get<std::string>();
+         m_appState = ipRecv["state"].value<std::string>();
       }
    }
    else if(ipRecv.getName() == "loop")
    {
       if(ipRecv.find("name"))
       {
-         m_loopName = ipRecv["name"].get<std::string>();
+         m_loopName = ipRecv["name"].value<std::string>();
       }
       
       if(ipRecv.find("number"))
       {
-         m_loopNumber = ipRecv["number"].get<std::string>();
+         m_loopNumber = ipRecv["number"].value<std::string>();
       }
       
       std::string label = m_loopName + " (aol" + m_loopNumber + ")";
@@ -243,21 +243,21 @@ void loopCtrl::handleSetProperty( const pcf::IndiProperty & ipRecv)
    {
       if(ipRecv.find("current"))
       {
-         m_gain = ipRecv["current"].get<float>();
+         m_gain = ipRecv["current"].value<float>();
       }
    }
    else if(ipRecv.getName() == "loop_multcoeff")
    {
       if(ipRecv.find("current"))
       {
-         m_multcoeff = ipRecv["current"].get<float>();
+         m_multcoeff = ipRecv["current"].value<float>();
       }
    }
    else if(ipRecv.getName() == "loop_state")
    {
       if(ipRecv.find("toggle"))
       {
-         if(ipRecv["toggle"].getSwitchState() == pcf::IndiElement::On)
+         if(ipRecv["toggle"].switchState() == pcf::IndiElement::SwitchState::On)
          {
             m_loopState = true;
          }
@@ -273,7 +273,7 @@ void loopCtrl::handleSetProperty( const pcf::IndiProperty & ipRecv)
    {
       if(ipRecv.find("toggle"))
       {
-         if(ipRecv["toggle"].getSwitchState() == pcf::IndiElement::On)
+         if(ipRecv["toggle"].switchState() == pcf::IndiElement::SwitchState::On)
          {
             m_procState = true;
          }
@@ -290,7 +290,7 @@ void loopCtrl::handleSetProperty( const pcf::IndiProperty & ipRecv)
       {
          if(ipRecv.find("blocks"))
          {
-            size_t nB = ipRecv["blocks"].get<int>();
+            size_t nB = ipRecv["blocks"].value<int>();
 
             m_modes.resize(nB,0);
             
@@ -299,7 +299,7 @@ void loopCtrl::handleSetProperty( const pcf::IndiProperty & ipRecv)
                char mstr[24];
                snprintf(mstr, sizeof(mstr), "%02zu", n);
                std::string blockstr = std::string("block")+mstr;
-               int nM = ipRecv[std::string("block")+mstr].get<int>();
+               int nM = ipRecv[std::string("block")+mstr].value<int>();
                m_modes[n] = nM;
 
             }
@@ -386,7 +386,7 @@ void loopCtrl::on_button_LoopZero_pressed()
    ipFreq.setName("loop_zero");
    ipFreq.add(pcf::IndiElement("request"));
    
-   ipFreq["request"] = pcf::IndiElement::On;
+   ipFreq["request"] = pcf::IndiElement::SwitchState::On;
    
    sendNewProperty(ipFreq);
 }
@@ -399,7 +399,7 @@ void loopCtrl::on_button_zeroall_pressed()
    ipFreq.setName("zero_all");
    ipFreq.add(pcf::IndiElement("request"));
    
-   ipFreq["request"] = pcf::IndiElement::On;
+   ipFreq["request"] = pcf::IndiElement::SwitchState::On;
    
    sendNewProperty(ipFreq);
 }
@@ -430,7 +430,7 @@ void loopCtrl::on_button_setplaw_pressed()
     ipFreq.setName("pwrlaw_set");
     ipFreq.add(pcf::IndiElement("request"));
    
-    ipFreq["request"] = pcf::IndiElement::On;
+    ipFreq["request"] = pcf::IndiElement::SwitchState::On;
    
     sendNewProperty(ipFreq);
 }

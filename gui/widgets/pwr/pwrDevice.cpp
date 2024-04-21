@@ -109,7 +109,7 @@ void pwrDevice::handleSetProperty( const pcf::IndiProperty & ipRecv )
          if( ipRecv.find(m_channels[n]->channelName()))
          {
              
-            std::string outletStr =  ipRecv[m_channels[n]->channelName()].get();
+            std::string outletStr =  ipRecv[m_channels[n]->channelName()].value();
             
             std::vector<int> outlets;
             mx::ioutils::parseStringVector(outlets, outletStr);
@@ -130,7 +130,7 @@ void pwrDevice::handleSetProperty( const pcf::IndiProperty & ipRecv )
       {
          if( ipRecv.find(m_channels[n]->channelName()))
          {
-            double onDelay =  ipRecv[m_channels[n]->channelName()].get<double>();
+            double onDelay =  ipRecv[m_channels[n]->channelName()].value<double>();
             m_channels[n]->onDelay(onDelay);
          }
       }
@@ -144,7 +144,7 @@ void pwrDevice::handleSetProperty( const pcf::IndiProperty & ipRecv )
       {
          if( ipRecv.find(m_channels[n]->channelName()))
          {
-            double offDelay =  ipRecv[m_channels[n]->channelName()].get<double>();
+            double offDelay =  ipRecv[m_channels[n]->channelName()].value<double>();
             m_channels[n]->offDelay(offDelay);
          }
       }
@@ -159,7 +159,7 @@ void pwrDevice::handleSetProperty( const pcf::IndiProperty & ipRecv )
       {
          if( ipRecv.find("target") )
          {
-            std::string tmp = ipRecv["target"].get();
+            std::string tmp = ipRecv["target"].value();
             
             if(tmp == "On") m_channels[i]->switchTarget(2);
             if(tmp == "Int") m_channels[i]->switchTarget(1);
@@ -168,7 +168,7 @@ void pwrDevice::handleSetProperty( const pcf::IndiProperty & ipRecv )
          
          if( ipRecv.find("state") )
          {
-            std::string tmp = ipRecv["state"].get();
+            std::string tmp = ipRecv["state"].value();
             
             if(tmp == "On") m_channels[i]->switchState(2);
             if(tmp == "Int") m_channels[i]->switchState(1);
@@ -184,18 +184,18 @@ void pwrDevice::handleSetProperty( const pcf::IndiProperty & ipRecv )
       
       if(ipRecv.find("current"))
       {
-         m_current.add( ipRecv["current"].get<double>(), ts);
+         m_current.add( ipRecv["current"].value<double>(), ts);
       }
       
       if(ipRecv.find("voltage"))
       {
-         m_voltage.add( ipRecv["voltage"].get<double>(), ts);
-         //std::cerr << m_deviceName << " " << ipRecv["voltage"].get<double>() << "\n";
+         m_voltage.add( ipRecv["voltage"].value<double>(), ts);
+         //std::cerr << m_deviceName << " " << ipRecv["voltage"].value<double>() << "\n";
       }
       
       if(ipRecv.find("frequency"))
       {
-         m_frequency.add( ipRecv["frequency"].get<double>(), ts);
+         m_frequency.add( ipRecv["frequency"].value<double>(), ts);
       }
       
       emit loadChanged();

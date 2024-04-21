@@ -659,12 +659,12 @@ int outletController<derivedT>::newCallBack_channels( const pcf::IndiProperty &i
 
    if(ipRecv.find("state"))
    {
-      state = ipRecv["state"].get<std::string>();
+      state = ipRecv["state"].value();
    }
 
    if(ipRecv.find("target"))
    {
-      target = ipRecv["target"].get<std::string>();
+      target = ipRecv["target"].value();
    }
 
    if( target == "" ) target = state;

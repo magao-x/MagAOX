@@ -199,14 +199,14 @@ void dmCtrl::handleSetProperty( const pcf::IndiProperty & ipRecv)
    {
       if(ipRecv.find("state"))
       {
-         m_appState = ipRecv["state"].get<std::string>();
+         m_appState = ipRecv["state"].value();
       }
    }
    else if(ipRecv.getName() == "sm_shmimName")
    {
       if(ipRecv.find("name"))
       {
-         m_shmimName = ipRecv["name"].get<std::string>();
+         m_shmimName = ipRecv["name"].value();
       }
    }
    else if(ipRecv.getName() == "flat")
@@ -220,21 +220,24 @@ void dmCtrl::handleSetProperty( const pcf::IndiProperty & ipRecv)
             ui.comboSelectFlat->addItem(it->first.c_str());
          }
          
-         if(ipRecv[it->first] == pcf::IndiElement::On) ui.comboSelectFlat->setCurrentText(it->first.c_str()); 
+         if(ipRecv[it->first] == pcf::IndiElement::SwitchState::On) 
+         {
+            ui.comboSelectFlat->setCurrentText(it->first.c_str()); 
+         }
       }
    }
    else if(ipRecv.getName() == "flat_shmim")
    {
       if(ipRecv.find("channel"))
       {
-         m_flatShmim = ipRecv["channel"].get<std::string>();
+         m_flatShmim = ipRecv["channel"].value();
       }
    }
    else if(ipRecv.getName() == "flat_set")
    {
       if(ipRecv.find("toggle"))
       {
-         if(ipRecv["toggle"] == pcf::IndiElement::On) m_flatSet = true;
+         if(ipRecv["toggle"] == pcf::IndiElement::SwitchState::On) m_flatSet = true;
          else m_flatSet = false;
       }
    }
@@ -249,7 +252,7 @@ void dmCtrl::handleSetProperty( const pcf::IndiProperty & ipRecv)
             ui.comboSelectTest->addItem(it->first.c_str());
          }
          
-         if(ipRecv[it->first] == pcf::IndiElement::On) ui.comboSelectTest->setCurrentText(it->first.c_str());
+         if(ipRecv[it->first] == pcf::IndiElement::SwitchState::On) ui.comboSelectTest->setCurrentText(it->first.c_str());
          
       }
    }
@@ -257,14 +260,14 @@ void dmCtrl::handleSetProperty( const pcf::IndiProperty & ipRecv)
    {
       if(ipRecv.find("channel"))
       {
-         m_testShmim = ipRecv["channel"].get<std::string>();
+         m_testShmim = ipRecv["channel"].value();
       }
    }
    else if(ipRecv.getName() == "test_set")
    {
       if(ipRecv.find("toggle"))
       {
-         if(ipRecv["toggle"] == pcf::IndiElement::On) m_testSet = true;
+         if(ipRecv["toggle"] == pcf::IndiElement::SwitchState::On) m_testSet = true;
          else m_testSet = false;
       }
    }
@@ -354,7 +357,7 @@ void dmCtrl::on_buttonInit_pressed()
    ipFreq.setDevice(m_dmName);
    ipFreq.setName("initDM");
    ipFreq.add(pcf::IndiElement("request"));
-   ipFreq["request"].setSwitchState(pcf::IndiElement::On);
+   ipFreq["request"].switchState(pcf::IndiElement::SwitchState::On);
     
    sendNewProperty(ipFreq);   
 }
@@ -368,7 +371,7 @@ void dmCtrl::on_buttonZeroAll_pressed()
    ip.setName("zeroAll");
    ip.add(pcf::IndiElement("request"));
    
-   ip["request"].setSwitchState(pcf::IndiElement::On);
+   ip["request"].switchState(pcf::IndiElement::SwitchState::On);
    
    sendNewProperty(ip);   
 }
@@ -380,7 +383,7 @@ void dmCtrl::on_buttonZero_pressed()
    ipFreq.setDevice(m_dmName);
    ipFreq.setName("zeroDM");
    ipFreq.add(pcf::IndiElement("request"));
-   ipFreq["request"].setSwitchState(pcf::IndiElement::On);
+   ipFreq["request"].switchState(pcf::IndiElement::SwitchState::On);
     
    sendNewProperty(ipFreq);
 }
@@ -392,7 +395,7 @@ void dmCtrl::on_buttonRelease_pressed()
    ipFreq.setDevice(m_dmName);
    ipFreq.setName("releaseDM");
    ipFreq.add(pcf::IndiElement("request"));
-   ipFreq["request"].setSwitchState(pcf::IndiElement::On);
+   ipFreq["request"].switchState(pcf::IndiElement::SwitchState::On);
     
    sendNewProperty(ipFreq);
 }
@@ -411,8 +414,8 @@ void dmCtrl::on_comboSelectFlat_activated(int index)
       std::string eln = ui.comboSelectFlat->itemText(i).toStdString();
       std::cerr << eln << "\n";
       ipFreq.add(pcf::IndiElement(eln));
-      if(eln == choice) ipFreq[eln] = pcf::IndiElement::On;
-      else ipFreq[eln] = pcf::IndiElement::Off;
+      if(eln == choice) ipFreq[eln] = pcf::IndiElement::SwitchState::On;
+      else ipFreq[eln] = pcf::IndiElement::SwitchState::Off;
    }
    sendNewProperty(ipFreq);
 }
@@ -424,7 +427,7 @@ void dmCtrl::on_buttonSetFlat_pressed()
    ipFreq.setDevice(m_dmName);
    ipFreq.setName("flat_set");
    ipFreq.add(pcf::IndiElement("toggle"));
-   ipFreq["toggle"] = pcf::IndiElement::On;
+   ipFreq["toggle"] = pcf::IndiElement::SwitchState::On;
     
    sendNewProperty(ipFreq);
 }
@@ -436,7 +439,7 @@ void dmCtrl::on_buttonZeroFlat_pressed()
    ipFreq.setDevice(m_dmName);
    ipFreq.setName("flat_set");
    ipFreq.add(pcf::IndiElement("toggle"));
-   ipFreq["toggle"] = pcf::IndiElement::Off;
+   ipFreq["toggle"] = pcf::IndiElement::SwitchState::Off;
     
    sendNewProperty(ipFreq);
 }
@@ -454,8 +457,8 @@ void dmCtrl::on_comboSelectTest_activated(int index)
    {
       std::string eln = ui.comboSelectTest->itemText(i).toStdString();
       ipFreq.add(pcf::IndiElement(eln));
-      if(eln == choice) ipFreq[eln] = pcf::IndiElement::On;
-      else ipFreq[eln] = pcf::IndiElement::Off;
+      if(eln == choice) ipFreq[eln] = pcf::IndiElement::SwitchState::On;
+      else ipFreq[eln] = pcf::IndiElement::SwitchState::Off;
    }
    sendNewProperty(ipFreq);
 }
@@ -467,7 +470,7 @@ void dmCtrl::on_buttonSetTest_pressed()
    ipFreq.setDevice(m_dmName);
    ipFreq.setName("test_set");
    ipFreq.add(pcf::IndiElement("toggle"));
-   ipFreq["toggle"] = pcf::IndiElement::On;
+   ipFreq["toggle"] = pcf::IndiElement::SwitchState::On;
     
    sendNewProperty(ipFreq);
 }
@@ -479,7 +482,7 @@ void dmCtrl::on_buttonZeroTest_pressed()
    ipFreq.setDevice(m_dmName);
    ipFreq.setName("test_set");
    ipFreq.add(pcf::IndiElement("toggle"));
-   ipFreq["toggle"] = pcf::IndiElement::Off;
+   ipFreq["toggle"] = pcf::IndiElement::SwitchState::Off;
     
    sendNewProperty(ipFreq);
 }

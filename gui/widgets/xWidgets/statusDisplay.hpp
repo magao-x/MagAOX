@@ -183,7 +183,7 @@ void statusDisplay::handleSetProperty( const pcf::IndiProperty & ipRecv)
     {
         if(ipRecv.find("state"))
         {
-            std::string fsmState = ipRecv["state"].get();
+            std::string fsmState = ipRecv["state"].value();
             
             if(fsmState == "READY" || fsmState == "OPERATING")
             {
@@ -222,7 +222,7 @@ void statusDisplay::handleSetProperty( const pcf::IndiProperty & ipRecv)
     {
         if(ipRecv.find(m_element))
         {
-            std::string value = ipRecv[m_element].get();
+            std::string value = ipRecv[m_element].value();
             if(value != m_value) m_valChanged = true;
             m_value = value;
         }
