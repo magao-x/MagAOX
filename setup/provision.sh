@@ -73,6 +73,13 @@ if [[ $MAGAOX_ROLE == AOC || $MAGAOX_ROLE == ICC || $MAGAOX_ROLE == RTC ]]; then
     sudo bash -l "$DIR/steps/configure_nfs.sh"
 fi
 
+
+if [[ $MAGAOX_ROLE == AOC ]]; then
+    # Configure a tablespace to store postgres data on the /data array
+    # and user accounts for the system to use
+    bash -l "$DIR/steps/configure_postgresql.sh"
+fi
+
 if [[ $MAGAOX_ROLE == AOC || $MAGAOX_ROLE == ICC || $MAGAOX_ROLE == RTC || $MAGAOX_ROLE == TOC || $MAGAOX_ROLE == TIC ]]; then
     # Configure time syncing
     sudo bash -l "$DIR/steps/configure_chrony.sh"
@@ -269,6 +276,7 @@ fi
 #     # sup web interface
 #     bash -l "$DIR/steps/install_sup.sh"
 # fi
+
 
 if [[ $MAGAOX_ROLE == AOC || $MAGAOX_ROLE == TOC || $MAGAOX_ROLE == vm || $MAGAOX_ROLE == workstation || $MAGAOX_ROLE == ci ]]; then
     # realtime image viewer

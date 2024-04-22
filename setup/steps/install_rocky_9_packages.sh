@@ -87,3 +87,8 @@ if [[ $MAGAOX_ROLE == TIC || $MAGAOX_ROLE == TOC || $MAGAOX_ROLE == ICC || $MAGA
     systemctl enable --now tailscaled
     tailscale up
 fi
+
+if [[ $MAGAOX_ROLE == AOC ]]; then
+    dnf module install postgresql:15/server
+    postgresql-setup --initdb
+fi
