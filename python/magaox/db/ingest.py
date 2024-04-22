@@ -5,7 +5,7 @@ import json
 
 import psycopg
 from psycopg import sql
-# from psycopg.extras import execute_values, execute_batch
+from tqdm import tqdm
 
 from . import Telem, FileOrigin, FileReplica
 from ..utils import creation_time_from_filename
@@ -99,8 +99,12 @@ def update_file_inventory(cur: psycopg.Cursor, host: str, data_dirs: list[str]):
             new_files = identify_new_files(cur, host, [os.path.join(dirpath, fn) for fn in filenames])
             log.info(f"Found {len(new_files)} new files in {dirpath}")
             records = []
-            for fn in new_files:
-                stat_result = os.stat(fn)
+            for fn in tqdm(new_files, desc=dirpath):
+                try:
+                    stat_result = os.stat(fn)
+                except FileNotFoundError:
+                    log.info(f"Skipped {fn} (broken link?)")
+                    continue
                 records.append(FileOrigin(
                     origin_host=host,
                     origin_path=fn,
