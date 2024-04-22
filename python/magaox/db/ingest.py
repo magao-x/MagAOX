@@ -97,7 +97,11 @@ def update_file_inventory(cur: psycopg.Cursor, host: str, data_dirs: list[str]):
     for prefix in data_dirs:
         for dirpath, dirnames, filenames in os.walk(prefix):
             new_files = identify_new_files(cur, host, [os.path.join(dirpath, fn) for fn in filenames])
-            log.info(f"Found {len(new_files)} new files in {dirpath}")
+            if len(new_files) == 0:
+                log.info(f"No new files in {dirpath}")
+                continue
+            else:
+                log.info(f"Found {len(new_files)} new files in {dirpath}")
             records = []
             for fn in tqdm(new_files, desc=dirpath):
                 try:
@@ -105,6 +109,8 @@ def update_file_inventory(cur: psycopg.Cursor, host: str, data_dirs: list[str]):
                 except FileNotFoundError:
                     log.info(f"Skipped {fn} (broken link?)")
                     continue
+                except OSError as e:
+                    log.info(f"Skipping {fn} because of error ({e})")
                 records.append(FileOrigin(
                     origin_host=host,
                     origin_path=fn,
