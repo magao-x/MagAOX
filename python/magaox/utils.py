@@ -26,3 +26,12 @@ def xfilename_to_utc_timestamp(filename):
     except ValueError:
         ts =  datetime.datetime.strptime(chopped_ts_str, PUREPYINDI_DEVICE_FILENAME_TIME_FORMAT).replace(tzinfo=timezone.utc)
     return ts
+
+def creation_time_from_filename(filepath, stat_result=None):
+    try:
+        ts = xfilename_to_utc_timestamp(filepath)
+    except ValueError:
+        if stat_result is None:
+            stat_result = os.stat(filepath)
+        ts = datetime.datetime.fromtimestamp(stat_result.st_ctime)
+    return ts

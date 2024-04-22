@@ -8,7 +8,7 @@ from magaox.indi.device import XDevice
 from magaox.db.config import BaseDeviceConfig
 from magaox.db import Telem, FileOrigin
 from magaox.db import ingest
-from magaox.utils import parse_iso_datetime_as_utc
+from magaox.utils import parse_iso_datetime_as_utc, creation_time_from_filename
 
 import json
 import xconf
@@ -37,7 +37,8 @@ class NewXFilesHandler(FileSystemEventHandler):
         return FileOrigin(
             origin_host=self.host,
             origin_path=event.src_path,
-            mtime=datetime.datetime.fromtimestamp(stat_result.st_mtime),
+            creation_time=creation_time_from_filename(event.src_path, stat_result=stat_result),
+            modification_time=datetime.datetime.fromtimestamp(stat_result.st_mtime),
             size_bytes=stat_result.st_size,
         )
 

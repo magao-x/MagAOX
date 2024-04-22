@@ -8,7 +8,7 @@ from psycopg import sql
 # from psycopg.extras import execute_values, execute_batch
 
 from . import Telem, FileOrigin, FileReplica
-from ..utils import xfilename_to_utc_timestamp
+from ..utils import creation_time_from_filename
 
 log = logging.getLogger(__name__)
 
@@ -41,9 +41,9 @@ def identify_new_files(cur: psycopg.Cursor, this_host: str, paths: list[str]):
         cur.execute("CREATE TEMPORARY TABLE on_disk_files ( path VARCHAR(1024) )")
         query = f'''
     INSERT INTO on_disk_files (path)
-    (VALUES {', '.join(('%s',) * len(paths))})
+    VALUES (%s)
     '''
-        cur.execute(query, [(x,) for x in paths])
+        cur.executemany(query, [(x,) for x in paths])
         # execute_values(cur, query, )
         log.debug(f"Loaded {len(paths)} paths into temporary table for new file identification")
 
@@ -101,15 +101,10 @@ def update_file_inventory(cur: psycopg.Cursor, host: str, data_dirs: list[str]):
             records = []
             for fn in new_files:
                 stat_result = os.stat(fn)
-                try:
-                    ctime = xfilename_to_utc_timestamp(fn)
-                except ValueError as e:
-                    log.debug(f"Falling back to filesystem ctime for creation_time on {fn}")
-                    ctime = datetime.datetime.fromtimestamp(stat_result.st_ctime)
                 records.append(FileOrigin(
                     origin_host=host,
                     origin_path=fn,
-                    creation_time=ctime,
+                    creation_time=creation_time_from_filename(fn, stat_result=stat_result),
                     modification_time=datetime.datetime.fromtimestamp(stat_result.st_mtime),
                     size_bytes=stat_result.st_size,
                 ))
