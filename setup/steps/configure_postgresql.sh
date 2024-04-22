@@ -31,9 +31,3 @@ else
     sudo -u postgres psql -c "CREATE DATABASE xtelem" || true
 fi
 sudo -u postgres psql < $DIR/../sql/setup_users.sql || exit_error "Could not create database users"
-sudo rm -f /opt/MagAOX/secrets/xtelemdb_password
-sudo touch /opt/MagAOX/secrets/xtelemdb_password
-sudo chown xsup:magaox /opt/MagAOX/secrets/xtelemdb_password
-sudo chmod u=r,g=,o= /opt/MagAOX/secrets/xtelemdb_password
-echo 'extremeAO!' | sudo tee -a /opt/MagAOX/secrets/xtelemdb_password
-log_info "Default xtelem database password written to /opt/MagAOX/secrets. Update and synchronize with other MagAO-X instrument computers."

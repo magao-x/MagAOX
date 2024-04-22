@@ -110,6 +110,8 @@ if [[ $MAGAOX_ROLE == AOC ]]; then
     # and user accounts for the system to use
     bash -l "$DIR/steps/configure_postgresql.sh"
 fi
+# All MagAO-X computers may use the password to connect to the main db
+bash -l "$DIR/steps/configure_postgresql_pass.sh"
 
 if [[ $MAGAOX_ROLE == vm ]]; then
     if [[ $VM_KIND != "wsl" ]]; then
