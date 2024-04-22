@@ -96,14 +96,14 @@ def update_file_inventory(cur: psycopg.Cursor, host: str, data_dirs: list[str]):
     cur.execute("BEGIN")
     for prefix in data_dirs:
         for dirpath, dirnames, filenames in os.walk(prefix):
+            log.info(f"Checking for new files in {dirpath}")
             new_files = identify_new_files(cur, host, [os.path.join(dirpath, fn) for fn in filenames])
             if len(new_files) == 0:
-                log.info(f"No new files in {dirpath}")
                 continue
             else:
                 log.info(f"Found {len(new_files)} new files in {dirpath}")
             records = []
-            for fn in tqdm(new_files, desc=dirpath):
+            for fn in tqdm(new_files):
                 try:
                     stat_result = os.stat(fn)
                 except FileNotFoundError:
