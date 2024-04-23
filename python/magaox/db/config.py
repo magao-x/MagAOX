@@ -4,11 +4,19 @@ import xconf
 import logging
 import pathlib
 import psycopg
+import psycopg.rows
 import socket
 
 from magaox.indi.device import BaseConfig as IndiDeviceBaseConfig
 
 log = logging.getLogger(__name__)
+
+__all__ = [
+    'DEFAULT_DATA_DIRS',
+    'DbConfig',
+    'BaseConfig',
+    'BaseDeviceConfig',
+]
 
 DEFAULT_DATA_DIRS = [
     '/opt/MagAOX/logs',
@@ -46,6 +54,7 @@ class DbConfig:
                 host=self.host,
                 user=self.user,
                 password=password,
+                row_factory=psycopg.rows.dict_row,
             )
         except Exception as e:
             log.error("Unable to connect to database.")

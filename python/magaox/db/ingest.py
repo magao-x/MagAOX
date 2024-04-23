@@ -7,7 +7,7 @@ import psycopg
 from psycopg import sql
 from tqdm import tqdm
 
-from . import Telem, FileOrigin, FileReplica
+from .records import Telem, FileOrigin, FileReplica
 from ..utils import creation_time_from_filename
 
 log = logging.getLogger(__name__)
@@ -63,7 +63,7 @@ def identify_new_files(cur: psycopg.Cursor, this_host: str, paths: list[str]):
         log.debug(f"Found {cur.rowcount} new path{'s' if cur.rowcount != 1 else ''}")
         new_files = []
         for row in cur:
-            new_files.append(row[0])
+            new_files.append(row['odf.path'])
     finally:
         cur.execute("ROLLBACK")  # ensure temp table is deleted
     return new_files
@@ -88,7 +88,7 @@ WHERE fit.origin_host IS NULL AND
 ;
 ''', (host,))
     for row in cur:
-        fns.append(row[0])
+        fns.append(row['fi.origin_path'])
     return fns
 
 def update_file_inventory(cur: psycopg.Cursor, host: str, data_dirs: list[str]):
