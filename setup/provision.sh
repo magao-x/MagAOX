@@ -238,6 +238,7 @@ bash -l "$DIR/steps/install_milk_and_cacao.sh" || exit_error "milk/cacao install
 bash -l "$DIR/steps/install_xrif.sh" || exit_error "Failed to build and install xrif"
 bash -l "$DIR/steps/install_milkzmq.sh" || exit_error "milkzmq install failed"
 bash -l "$DIR/steps/install_purepyindi.sh" || exit_error "purepyindi install failed"
+bash -l "$DIR/steps/install_purepyindi2.sh" || exit_error "purepyindi2 install failed"
 bash -l "$DIR/steps/install_magpyx.sh" || exit_error "magpyx install failed"
 bash -l "$DIR/steps/install_mxlib.sh" || exit_error "Failed to build and install mxlib"
 source /etc/profile.d/mxmakefile.sh
