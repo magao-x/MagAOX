@@ -30,6 +30,7 @@ dependencies:
   - pybind11
   # for xtelemdb
   - psycopg
+  - python-duckdb
 
   - pip:
       - hcipy

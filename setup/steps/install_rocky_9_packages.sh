@@ -88,7 +88,12 @@ if [[ $MAGAOX_ROLE == TIC || $MAGAOX_ROLE == TOC || $MAGAOX_ROLE == ICC || $MAGA
     tailscale up
 fi
 
-if [[ $MAGAOX_ROLE == AOC ]]; then
-    dnf module install postgresql:15/server
+
+# install postgresql 15 client for RHEL 9
+dnf module install -y postgresql:15/client
+
+# set up the postgresql server
+if [[ $MAGAOX_ROLE == AOC && ! -e /var/lib/pgsql ]]; then
+    dnf module install -y postgresql:15/server
     postgresql-setup --initdb
 fi
