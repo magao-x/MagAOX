@@ -76,7 +76,7 @@ if ! grep "$DESIRED_CMDLINE" /etc/default/grub; then
     elif [[ -d /boot/grub ]]; then
         sudo update-grub
     else
-        exit_error "Where's grub gotten to?"
+        exit_with_error "Where's grub gotten to?"
     fi
     log_success "Applied kernel command line tweaks"
 fi

@@ -11,7 +11,7 @@ if [[ $arch == "x86_64" ]]; then
 elif [[ $arch == "aarch64" ]]; then
     PACKAGE_DIR="$PACKAGE_DIR-arm64"
 else
-    exit_error "Unknown arch: $arch"
+    exit_with_error "Unknown arch: $arch"
 fi
 PACKAGE_ARCHIVE=$PACKAGE_DIR.zip
 if [[ ! -d $PACKAGE_DIR ]]; then

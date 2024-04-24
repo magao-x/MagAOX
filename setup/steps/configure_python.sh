@@ -11,7 +11,7 @@ set -euo pipefail
 #
 # Install the standard MagAOX user python environment
 #
-mamba env update -f $DIR/../conda_env_pinned_$(uname -i).yml || exit_error "Failed to install or update packages using pinned versions. Update the env manually with the base specification and update the pinned versions if possible."
+mamba env update -f $DIR/../conda_env_pinned_$(uname -i).yml || exit_with_error "Failed to install or update packages using pinned versions. Update the env manually with the base specification and update the pinned versions if possible."
 source /etc/os-release
 if [[ ( $MAGAOX_ROLE == AOC || $MAGAOX_ROLE == ci ) && ( $ID == "centos" ) ]]; then
 	mamba install -y qt=5 qwt
@@ -62,7 +62,7 @@ if [[ $MAGAOX_ROLE != ci ]]; then
 	echo "WorkingDirectory=$workingDir" >> $overrideFile
 	if [[ -e $overrideFileDest ]]; then
 		if ! diff $overrideFile $overrideFileDest; then
-			exit_error "Existing $overrideFile does not match $overrideFileDest"
+			exit_with_error "Existing $overrideFile does not match $overrideFileDest"
 		fi
 	else
 		sudo mv $overrideFile $overrideFileDest

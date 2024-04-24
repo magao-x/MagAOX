@@ -17,5 +17,5 @@ fi
 
 sudo mv /opt/EDTpdv/version /opt/EDTpdv/version.txt 2>/dev/null || true
 echo "/opt/EDTpdv" | sudo tee /etc/ld.so.conf.d/EDTpdv-x86_64.conf
-sudo ldconfig || exit_error "Could not run ldconfig"
+sudo ldconfig || exit_with_error "Could not run ldconfig"
 log_success "Finished EDTpdv setup"

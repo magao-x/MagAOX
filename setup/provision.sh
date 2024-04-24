@@ -49,21 +49,21 @@ source $DIR/_common.sh
 
 # Install OS packages first
 osPackagesScript="$DIR/steps/install_${ID}_${MAJOR_VERSION}_packages.sh"
-$_REAL_SUDO bash -l $osPackagesScript || exit_error "Failed to install packages from $osPackagesScript"
+$_REAL_SUDO bash -l $osPackagesScript || exit_with_error "Failed to install packages from $osPackagesScript"
 
 if [[ $ID == centos ]]; then
     $_REAL_SUDO bash -l "$DIR/steps/install_cmake.sh" || exit 1
 fi
 
 distroSpecificScript="$DIR/steps/configure_${ID}_${MAJOR_VERSION}.sh"
-$_REAL_SUDO bash -l $distroSpecificScript || exit_error "Failed to configure ${ID} from $distroSpecificScript"
+$_REAL_SUDO bash -l $distroSpecificScript || exit_with_error "Failed to configure ${ID} from $distroSpecificScript"
 
 if [[ $VM_KIND != "none" ]]; then
     git config --global --replace-all safe.directory '*'
     sudo git config --global --replace-all safe.directory '*'
 fi
 
-bash -l "$DIR/steps/configure_trusted_sudoers.sh" || exit_error "Could not configure trusted groups for sudoers"
+bash -l "$DIR/steps/configure_trusted_sudoers.sh" || exit_with_error "Could not configure trusted groups for sudoers"
 sudo bash -l "$DIR/steps/configure_xsup_aliases.sh"
 
 if [[ $MAGAOX_ROLE == AOC || $MAGAOX_ROLE == ICC || $MAGAOX_ROLE == RTC ]]; then
@@ -120,7 +120,7 @@ if [[ $MAGAOX_ROLE == vm ]]; then
     fi
     # Install a config in ~/.ssh/config for the vm user
     # to make it easier to make tunnels work
-    bash -l "$DIR/steps/configure_vm_ssh.sh" || exit_error "Failed to set up VM SSH"
+    bash -l "$DIR/steps/configure_vm_ssh.sh" || exit_with_error "Failed to set up VM SSH"
 fi
 
 # Install dependencies for the GUIs
@@ -141,7 +141,7 @@ cd /opt/MagAOX/vendor
 sudo bash -l "$DIR/steps/install_rclone.sh" || exit 1
 bash -l "$DIR/steps/install_openblas.sh" || exit 1
 if [[ $MAGAOX_ROLE == RTC || $MAGAOX_ROLE == ICC || $MAGAOX_ROLE == AOC || $MAGAOX_ROLE == TIC ]]; then
-    bash -l "$DIR/steps/install_cuda.sh" || exit_error "CUDA install failed"
+    bash -l "$DIR/steps/install_cuda.sh" || exit_with_error "CUDA install failed"
 fi
 sudo bash -l "$DIR/steps/install_fftw.sh" || exit 1
 sudo bash -l "$DIR/steps/install_cfitsio.sh" || exit 1
@@ -161,7 +161,7 @@ fi
 
 # SuSE packages need either Python 3.6 or 3.10, but Rocky 9.2 has Python 3.9 as /bin/python, so we build our own RPM:
 if [[ $ID == rocky && $MAGAOX_ROLE != container ]]; then
-  sudo bash -l "$DIR/steps/install_cpuset.sh" || exit_error "Couldn't install cpuset from source"
+  sudo bash -l "$DIR/steps/install_cpuset.sh" || exit_with_error "Couldn't install cpuset from source"
 fi
 
 
@@ -234,14 +234,14 @@ if [[ $ID == centos && ( $MAGAOX_ROLE == AOC || $MAGAOX_ROLE == TOC || $MAGAOX_R
 fi
 
 # Install first-party deps
-bash -l "$DIR/steps/install_milk_and_cacao.sh" || exit_error "milk/cacao install failed" # depends on /opt/conda/bin/python existing for plugin build
-bash -l "$DIR/steps/install_xrif.sh" || exit_error "Failed to build and install xrif"
-bash -l "$DIR/steps/install_milkzmq.sh" || exit_error "milkzmq install failed"
-bash -l "$DIR/steps/install_purepyindi.sh" || exit_error "purepyindi install failed"
-bash -l "$DIR/steps/install_purepyindi2.sh" || exit_error "purepyindi2 install failed"
-bash -l "$DIR/steps/install_xconf.sh" || exit_error "xconf install failed"
-bash -l "$DIR/steps/install_magpyx.sh" || exit_error "magpyx install failed"
-bash -l "$DIR/steps/install_mxlib.sh" || exit_error "Failed to build and install mxlib"
+bash -l "$DIR/steps/install_milk_and_cacao.sh" || exit_with_error "milk/cacao install failed" # depends on /opt/conda/bin/python existing for plugin build
+bash -l "$DIR/steps/install_xrif.sh" || exit_with_error "Failed to build and install xrif"
+bash -l "$DIR/steps/install_milkzmq.sh" || exit_with_error "milkzmq install failed"
+bash -l "$DIR/steps/install_purepyindi.sh" || exit_with_error "purepyindi install failed"
+bash -l "$DIR/steps/install_purepyindi2.sh" || exit_with_error "purepyindi2 install failed"
+bash -l "$DIR/steps/install_xconf.sh" || exit_with_error "xconf install failed"
+bash -l "$DIR/steps/install_magpyx.sh" || exit_with_error "magpyx install failed"
+bash -l "$DIR/steps/install_mxlib.sh" || exit_with_error "Failed to build and install mxlib"
 source /etc/profile.d/mxmakefile.sh
 
 ## Clone sources to /opt/MagAOX/source/MagAOX
@@ -283,7 +283,7 @@ fi
 
 if [[ $MAGAOX_ROLE == AOC || $MAGAOX_ROLE == TOC || $MAGAOX_ROLE == vm || $MAGAOX_ROLE == workstation || $MAGAOX_ROLE == ci ]]; then
     # realtime image viewer
-    bash -l "$DIR/steps/install_rtimv.sh" || exit_error "Could not install rtimv"
+    bash -l "$DIR/steps/install_rtimv.sh" || exit_with_error "Could not install rtimv"
     echo "export RTIMV_CONFIG_PATH=/opt/MagAOX/config" | sudo tee /etc/profile.d/rtimv_config_path.sh
 fi
 
@@ -307,8 +307,8 @@ if [[ $MAGAOX_ROLE != ci && $MAGAOX_ROLE != container && $MAGAOX_ROLE != vm ]]; 
     sudo bash -l "$DIR/steps/configure_startup_services.sh"
 
     log_info "Generating subuid and subgid files, may need to run podman system migrate"
-    sudo python "$DIR/generate_subuid_subgid.py" || exit_error "Generating subuid/subgid files for podman failed"
-    sudo podman system migrate || exit_error "Could not run podman system migrate"
+    sudo python "$DIR/generate_subuid_subgid.py" || exit_with_error "Generating subuid/subgid files for podman failed"
+    sudo podman system migrate || exit_with_error "Could not run podman system migrate"
 
     # To try and debug hardware issues, ICC and RTC replicate their
     # kernel console log over UDP to AOC over the instrument LAN.
