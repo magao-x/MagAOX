@@ -73,7 +73,9 @@ protected:
 
     int m_semaphoreNumber{7}; ///< The image structure semaphore index.
 
-    unsigned m_semWait{500000000}; ///< The time in nsec to wait on the semaphore.  Max is 999999999. Default is 5e8 nsec.
+    unsigned m_semWaitSec{0}; ///< The time in whole sec to wait on the semaphore, to which m_semWaitNSec is added.  Default is 0 nsec.
+
+    unsigned m_semWaitNSec{500000000}; ///< The time in nsec to wait on the semaphore, added to m_semWaitSec.  Max is 999999999. Default is 5e8 nsec.
 
     int m_lz4accel{1};
 
@@ -99,7 +101,6 @@ protected:
     uint64_t m_currSaveStart{0}; ///< The circular buffer position at which to start saving.
     uint64_t m_currSaveStop{0};  ///< The circular buffer position at which to stop saving.
 
-    bool m_logSaveStart{0};             ///< Flag indicating that the start saving log should entry should be made.
     uint64_t m_currSaveStartFrameNo{0}; ///< The frame number of the image at which saving started (for logging)
     uint64_t m_currSaveStopFrameNo{0};  ///< The frame number of the image at which saving stopped (for logging)
 
@@ -357,7 +358,7 @@ inline void streamWriter::loadConfig()
     config(m_outName, "writer.outName");
 
     config(m_semaphoreNumber, "framegrabber.semaphoreNumber");
-    config(m_semWait, "framegrabber.semWait");
+    config(m_semWaitNSec, "framegrabber.semWait");
 
     config(m_fgThreadPrio, "framegrabber.threadPrio");
     config(m_fgCpuset, "framegrabber.cpuset");
@@ -550,6 +551,7 @@ inline int streamWriter::appShutdown()
 
     return 0;
 }
+
 inline int streamWriter::initialize_xrif()
 {
     xrif_error_t rv = xrif_new(&m_xrif);
@@ -914,18 +916,19 @@ inline void streamWriter::fgThreadExec()
         while (!m_shutdown && !m_restart)
         {
             timespec ts;
+            XWC_SEM_WAIT_TS_RETVOID( ts, m_semWaitSec, m_semWaitNSec );
 
-            if (clock_gettime(CLOCK_REALTIME, &ts) < 0)
+            /*if (clock_gettime(CLOCK_REALTIME, &ts) < 0)
             {
                 log<software_critical>({__FILE__, __LINE__, errno, 0, "clock_gettime"});
                 return;
             }
 
-            mx::sys::timespecAddNsec(ts, m_semWait);
+            mx::sys::timespecAddNsec(ts, m_semWait);*/
 
             if (sem_timedwait(sem, &ts) == 0)
             {
-                if (image.md[0].naxis > 2) ///\todo change to naxis?
+                if (image.md[0].naxis > 2)
                 {
                     curr_image = image.md[0].cnt1;
                 }
@@ -948,7 +951,7 @@ inline void streamWriter::fgThreadExec()
 
                 if (atype != m_dataType || snx != m_width || sny != m_height || snz != length)
                 {
-                    //**** close out here
+                    //**** close out here as if STOP_WRITING
 
                     break; // exit the nearest while loop and get the new image setup.
                 }
@@ -968,16 +971,20 @@ inline void streamWriter::fgThreadExec()
                     new_cnt0 = image.md[0].cnt0;
                 }
 
-                if (new_cnt0 == last_cnt0)
+
+                ///\todo cleanup skip frame handling.  
+                if (new_cnt0 == last_cnt0) //<- this probably isn't useful really
                 {
                     log<text_log>("semaphore raised but cnt0 has not changed -- we're probably getting behind", logPrio::LOG_WARNING);
                     ++cnt0flag;
                     if (cnt0flag > 10)
+                    {
                         m_restart = true; // if we get here 10 times then something else is wrong.
+                    }
                     continue;
                 }
 
-                if (new_cnt0 - last_cnt0 > 1)
+                if (new_cnt0 - last_cnt0 > 1) //<- this is what we want to check.
                 {
                     log<text_log>("cnt0 changed by more than 1. Frame skipped.", logPrio::LOG_WARNING);
                 }
@@ -1032,7 +1039,10 @@ inline void streamWriter::fgThreadExec()
                 }
 
                 if (m_shutdown && m_writing == WRITING)
+                {
                     m_writing = STOP_WRITING;
+                }
+
                 switch (m_writing)
                 {
                     case START_WRITING:
@@ -1040,7 +1050,9 @@ inline void streamWriter::fgThreadExec()
                         m_nextChunkStart = (m_currImage / m_writeChunkLength) * m_writeChunkLength;
                         m_writing = WRITING;
                         m_currSaveStartFrameNo = new_cnt0;
-                        m_logSaveStart = true;
+
+                        log<saving_start>({1, m_currSaveStartFrameNo});
+
                         // fall through
                     case WRITING:
                         if (m_currImage - m_nextChunkStart == m_writeChunkLength - 1)
@@ -1059,8 +1071,10 @@ inline void streamWriter::fgThreadExec()
     
                             m_nextChunkStart = ((m_currImage + 1) / m_writeChunkLength) * m_writeChunkLength;
                             if (m_nextChunkStart >= m_circBuffLength)
+                            {
                                 m_nextChunkStart = 0;
-    
+                            }
+
                             m_currChunkStart = m_nextChunkStart;
                         }
                         break;
@@ -1094,6 +1108,7 @@ inline void streamWriter::fgThreadExec()
                 {
                     case WRITING:
                         //Here we should check for time > max_archive_time or whatever we end up with
+                        // That is check if there is data to write, and if time is greater than, then write
                         //for now placeholder
                         break;
                     case STOP_WRITING:
@@ -1171,7 +1186,10 @@ inline void streamWriter::fgThreadExec()
         if (opened)
         {
             if (m_semaphoreNumber >= 0)
+            {
+                ///\todo is this release necessary with closeIM?
                 image.semReadPID[m_semaphoreNumber] = 0; // release semaphore
+            }
             ImageStreamIO_closeIm(&image);
             opened = false;
         }
@@ -1195,7 +1213,11 @@ inline void streamWriter::fgThreadExec()
     if (opened)
     {
         if (m_semaphoreNumber >= 0)
-            image.semReadPID[m_semaphoreNumber] = 0; // release semaphore
+        {
+            ///\todo is this release necessary with closeIM?
+            image.semReadPID[m_semaphoreNumber] = 0; // release semaphore.  
+        }
+
         ImageStreamIO_closeIm(&image);
     }
 }
@@ -1228,7 +1250,9 @@ inline void streamWriter::swThreadExec()
         }
 
         if (shutdown())
+        {
             break;
+        }
 
         // This will happen after a reconnection, and could update m_shmimName, etc.
         if (m_fname == nullptr)
@@ -1255,19 +1279,24 @@ inline void streamWriter::swThreadExec()
             return; // will trigger a shutdown
         }
 
-        mx::sys::timespecAddNsec(ts, m_semWait);
+        mx::sys::timespecAddNsec(ts, m_semWaitNSec);
 
         if (sem_timedwait(&m_swSemaphore, &ts) == 0)
         {
             if (doEncode() < 0)
+            {
+                log<software_critical>({__FILE__, __LINE__, "error encoding data"});
                 return;
+            }
             // Otherwise, success, and we just go on.
         }
         else
         {
             // Check for why we timed out
             if (errno == EINTR)
+            {
                 continue; // This will probably indicate time to shutdown, loop will exit normally if flags set.
+            }
 
             // ETIMEDOUT just means we should wait more.
             // Otherwise, report an error.
@@ -1289,12 +1318,8 @@ inline void streamWriter::swThreadExec()
 inline int streamWriter::doEncode()
 {
     if (m_writing == NOT_WRITING)
-        return 0;
-
-    if (m_logSaveStart)
     {
-        log<saving_start>({1, m_currSaveStartFrameNo});
-        m_logSaveStart = false;
+        return 0;
     }
 
     recordSavingState(true);
@@ -1303,8 +1328,12 @@ inline int streamWriter::doEncode()
 
     clock_gettime(CLOCK_REALTIME, &tw0);
 
+    size_t nFrames = m_currSaveStop - m_currSaveStart;
+    size_t nBytes = m_width * m_height * m_typeSize;
+
+
     // Configure xrif and copy image data -- this does no allocations
-    int rv = xrif_set_size(m_xrif, m_width, m_height, 1, (m_currSaveStop - m_currSaveStart), m_dataType);
+    int rv = xrif_set_size(m_xrif, m_width, m_height, 1, nFrames, m_dataType);
     if (rv != XRIF_NOERROR)
     {
         // This is a big problem.  Report it as "ALERT" and go on.
@@ -1318,10 +1347,11 @@ inline int streamWriter::doEncode()
         log<software_error>({__FILE__, __LINE__, 0, rv, "xrif set LZ4 acceleration error."});
     }
 
-    memcpy(m_xrif->raw_buffer, m_rawImageCircBuff + m_currSaveStart * m_width * m_height * m_typeSize, (m_currSaveStop - m_currSaveStart) * m_width * m_height * m_typeSize);
+
+    memcpy(m_xrif->raw_buffer, m_rawImageCircBuff + m_currSaveStart * nBytes, nFrames * nBytes);
 
     // Configure xrif and copy timing data -- no allocations
-    rv = xrif_set_size(m_xrif_timing, 5, 1, 1, (m_currSaveStop - m_currSaveStart), XRIF_TYPECODE_UINT64);
+    rv = xrif_set_size(m_xrif_timing, 5, 1, 1, nFrames, XRIF_TYPECODE_UINT64);
     if (rv != XRIF_NOERROR)
     {
         // This is a big problem.  Report it as "ALERT" and go on.
@@ -1335,7 +1365,7 @@ inline int streamWriter::doEncode()
         log<software_error>({__FILE__, __LINE__, 0, rv, "xrif set LZ4 acceleration error."});
     }
 
-    memcpy(m_xrif_timing->raw_buffer, m_timingCircBuff + m_currSaveStart * 5, (m_currSaveStop - m_currSaveStart) * 5 * sizeof(uint64_t));
+    memcpy(m_xrif_timing->raw_buffer, m_timingCircBuff + m_currSaveStart * 5, nFrames * 5 * sizeof(uint64_t));
 
     rv = xrif_encode(m_xrif);
     if (rv != XRIF_NOERROR)
