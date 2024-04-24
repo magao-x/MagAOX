@@ -240,6 +240,7 @@ bash -l "$DIR/steps/install_milkzmq.sh" || exit_with_error "milkzmq install fail
 bash -l "$DIR/steps/install_purepyindi.sh" || exit_with_error "purepyindi install failed"
 bash -l "$DIR/steps/install_purepyindi2.sh" || exit_with_error "purepyindi2 install failed"
 bash -l "$DIR/steps/install_xconf.sh" || exit_with_error "xconf install failed"
+bash -l "$DIR/steps/install_lookyloo.sh" || exit_with_error "lookyloo install failed"
 bash -l "$DIR/steps/install_magpyx.sh" || exit_with_error "magpyx install failed"
 bash -l "$DIR/steps/install_mxlib.sh" || exit_with_error "Failed to build and install mxlib"
 source /etc/profile.d/mxmakefile.sh
