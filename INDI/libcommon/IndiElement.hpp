@@ -32,13 +32,61 @@
 */
 namespace pcf
 {
+
+namespace internal
+{
+
+template<typename TT>
+std::string value2string(const TT & value)
+{
+    std::stringstream ss;
+    ss.precision(std::numeric_limits<TT>::digits10 + 1);
+    ss << value;
+    return ss.str();
+}
+
+template<>
+inline std::string value2string<std::string>( const std::string & val )
+{
+    std::string s = val;
+    return s;
+}
+
+template<>
+inline std::string value2string<bool>( const bool & val )
+{
+    std::stringstream ss;
+    ss << std::boolalpha << val;
+    return ss.str();
+}
+
+template<typename T>
+T string2value( const std::string & str)
+{
+    std::stringstream ss(str);
+    T val;
+    ss >> std::boolalpha >> val;
+
+    return val;
+}
+
+template<>
+inline std::string string2value<std::string>( const std::string & str )
+{
+    std::string val = str;
+    return val;
+}
+
+}
+
+
 class IndiElement
 {
 
 public:
 
     // These are the possible types for streaming this element.
-    enum class Type
+  /*  enum class Type
     {
         Unknown = 0,
         // Define properties.
@@ -53,7 +101,7 @@ public:
         OneNumber,
         OneSwitch,
         OneText,
-    };
+    };*/
 
     enum class LightState
     {
@@ -75,26 +123,27 @@ public:
       * @{
       */
 protected:
+
+    /// The name of this element.
+    std::string m_name;
+
     /// If this is a number or BLOB, this is the 'printf' format.
     std::string m_format {"%g"};
 
     /// A label, usually used in a GUI.
     std::string m_label;
     
-    /// If this is a number, this is its maximum value.
-    std::string m_max {"0"};
-    
     /// If this is a number, this is its minimum value.
     std::string m_min {"0"};
     
-    /// The name of this element.
-    std::string m_name;
-    
-    /// If this is a BLOB, this is the number of bytes for it.
-    std::string m_size {"0"};
+    /// If this is a number, this is its maximum value.
+    std::string m_max {"0"};
     
     /// If this is a number, this is increment for it.
     std::string m_step {"0"};
+        
+    /// If this is a BLOB, this is the number of bytes for it.
+    std::string m_size {"0"};
     
     /// This is the value of the data.
     std::string m_value;
@@ -104,7 +153,7 @@ protected:
     
     /// This can also be the value.
     SwitchState m_switchState {SwitchState::Unknown};
-    
+
     // A read write lock to protect the internal data.
     //mutable pcf::ReadWriteLock m_rwData;
     mutable std::shared_mutex m_rwData;
@@ -155,6 +204,22 @@ protected:
       * @{
       */
 
+    /// Set the element name
+    void name( const std::string &name /**< [in] the new name*/);
+
+    /// Get the element name 
+    /** \returns the current value of m_name
+      */
+    const std::string & name() const;
+
+    /// Check if the element name is valid
+    /** The name is valid if m_name is non-zero size.
+      *
+      * \returns true if m_name is valid
+      * \returns false if m_name is not valid
+      */
+    bool hasValidName() const;
+
     /// Set the element format
     void format( const std::string & format /**< [in] the new format*/);
 
@@ -185,34 +250,20 @@ protected:
       */
     bool hasValidLabel() const;
 
-    /// Set the element max
-    void max( const std::string & max /**< [in] the new max*/);
-
-    /// Set the element max
-    void max( const double & max /**< [in] the new max*/);
-
-    /// Get the element max
-    /** \returns the current value of m_max
-      */
-    const std::string & max() const;
-
-    /// Check if the max entry is valid
-    /**
-      * \returns true if m_max has non-zero size
-      * \returns false otherwise
-      */
-    bool hasValidMax() const;
-
-    /// Set the element min
-    void min( const std::string & min /**< [in] the new min*/);
+    /// Set the element's min
+    template<typename TT>
+    void min( const TT & max /**< [in] the new min*/);
     
-    /// Set the element min
-    void min( const double & min /**< [in] the new min*/);
-    
-    /// Get the element min
+    /// Get the element's min
     /** \returns the current value of m_min
       */
     const std::string & min() const;
+
+    /// Get the element's min as type
+    /** \returns the current value of m_min as type TT
+      */
+    template<typename TT>
+    const TT & min() const;
 
     /// Check if the min entry is valid
     /**
@@ -221,27 +272,55 @@ protected:
       */
     bool hasValidMin() const;
 
-    /// Set the element name
-    void name( const std::string &name /**< [in] the new name*/);
+    /// Set the element max
+    template<typename TT>
+    void max( const TT & max /**< [in] the new max*/);
 
-    /// Get the element name 
-    /** \returns the current value of m_name
+    /// Get the element max
+    /** \returns the current value of m_max
       */
-    const std::string & name() const;
+    const std::string & max() const;
 
-    /// Check if the element name is valid
-    /** The name is valid if m_name is non-zero size.
-      *
-      * \returns true if m_name is valid
-      * \returns false if m_name is not valid
+    /// Get the element's max as type
+    /** \returns the current value of m_max as type TT
       */
-    bool hasValidName() const;
+    template<typename TT>
+    const TT & max() const;
+
+    /// Check if the max entry is valid
+    /**
+      * \returns true if m_max has non-zero size
+      * \returns false otherwise
+      */
+    bool hasValidMax() const;
+
+    /// Set the element's step
+    template<typename TT>
+    void step( const TT & stp /**< [in] the new step*/);
+
+    /// Get the element's step
+    /** \returns the current value of m_step
+      */
+    const std::string & step() const;
+
+    /// Get the element's step as type
+    /** \returns the current value of m_step as type TT
+      */
+    template<typename TT>
+    const TT & step() const;
+
+    /// Check if the step entry is valid
+    /**
+      * \returns true if m_step as non-zero size
+      * \returns false otherwise
+      */
+    bool hasValidStep() const;
 
     /// Set the element size
     void size( const std::string & size /**< [in] the new size*/);
 
     /// Set the element size
-    void size( const double & size /**< [in] the new size*/);
+    void size( const size_t & size /**< [in] the new size*/);
 
     const std::string & size() const;
 
@@ -252,29 +331,9 @@ protected:
       */
     bool hasValidSize() const;
 
-    /// Set the element step
-    void step( const std::string & step /**< [in] the new step*/ );
-    
-    /// Set the element step
-    void step( const double & step /**< [in] the new step*/);
-
-    /// Get the element step
-    /** \returns the current value of m_step
-      */
-    const std::string & step() const;
-
-    /// Check if the step entry is valid
-    /**
-      * \returns true if m_step as non-zero size
-      * \returns false otherwise
-      */
-    bool hasValidStep() const;
-
     /// Set the element's value
-    void value( const std::string & val );
-
-    /// Set the element's value
-    void value( const double  & val );
+    template<typename TT>
+    void value( const TT  & val );
 
     /// Set the element's value
     template <class TT> const TT &operator= ( const TT & val );
@@ -363,34 +422,6 @@ protected:
 
     /// Returns a string with each attribute & value enumerated.
     std::string createString() const;
-
-    static std::string value2String( const std::string & val )
-    {
-        std::string s = val;
-        return s;
-    }
-    
-    static std::string value2String( const char * val )
-    {
-        std::string s(val);
-        return s;
-    }
-
-    template<typename T>
-    static std::string value2String( const T & val )
-    {
-        std::stringstream ss;
-        ss.precision(std::numeric_limits<T>::digits10 + 1);
-        ss << std::boolalpha << val;
-        return ss.str();
-    }
-
-    
-    /// Returns the string type given the enumerated type.
-    static std::string convertTypeToString( const Type &tType );
-
-    /// Returns the enumerated type given the tag.
-    static Type convertStringToType( const std::string &szTag );
     
     /// Returns the string type given the enumerated type.
     static std::string getLightStateString( const LightState &tType );
@@ -408,56 +439,100 @@ protected:
 
 }; // class IndiElement
 
+template<typename TT>
+void IndiElement::min( const TT  & min )
+{
+    std::unique_lock wLock(m_rwData);
+    m_min = internal::value2string<TT>(min);
+}
+
+inline //kept this here instead of cpp for clarity
+const std::string & IndiElement::min() const
+{
+    std::shared_lock rLock(m_rwData);
+    return m_min;
+}
+
+template<typename TT>
+const TT & IndiElement::min() const 
+{
+    std::shared_lock rLock(m_rwData);
+    return internal::string2value<TT>(m_min);
+}
+
+template<typename TT>
+void IndiElement::max( const TT  & max )
+{
+    std::unique_lock wLock(m_rwData);
+    m_max = internal::value2string<TT>(max);
+}
+
+template<typename TT>
+const TT & IndiElement::max() const 
+{
+    std::shared_lock rLock(m_rwData);
+    return internal::string2value<TT>(m_max);
+}
 
 
+template<typename TT>
+void IndiElement::step( const TT  & stp )
+{
+    std::unique_lock wLock(m_rwData);
+    m_step = internal::value2string<TT>(stp);
+}
+
+inline //kept this here instead of cpp for clarity
+const std::string &IndiElement::step() const
+{
+    std::shared_lock rLock(m_rwData);
+    return m_step;
+}
+
+template <class TT> 
+const TT & IndiElement::step() const
+{
+    std::shared_lock rLock(m_rwData);
+    return internal::string2value<TT>(m_step);
+}
+
+template<typename TT>
+void IndiElement::value( const TT  & val )
+{
+    std::unique_lock wLock(m_rwData);
+    m_value = internal::value2string<TT>(val);
+}
+
+inline //kept this here instead of cpp for clarity
+std::string IndiElement::value() const
+{
+    std::shared_lock rLock(m_rwData);
+    return m_value;
+}
 
 template <class TT> 
 TT IndiElement::value() const
 {
     std::shared_lock rLock(m_rwData);
-
-    TT tValue;
-    //  stream the data into the variable.
-    std::stringstream value( m_value );
-    value >> std::boolalpha >> tValue;
-    return tValue;
+    return internal::string2value<TT>(m_value);
 }
 
 
 template <class TT> 
 const TT & IndiElement::operator= ( const TT &val )
 {
-    value(val);
-    return val;
-
-    //pcf::ReadWriteLock::AutoWLock rwAuto( &m_rwData );
-/*    std::unique_lock wLock(m_rwData);
-
-    std::stringstream ssValue;
-    ssValue.precision( 15 );
-    ssValue << std::boolalpha << ttValue;
-    m_value = ssValue.str();
-    return ttValue;*/
-}
-
-
-template<typename T>
-T string2Value( const std::string & str)
-{
-    std::stringstream ss(str);
-    T val;
-    ss >> std::boolalpha >> val;
-
+    std::unique_lock wLock(m_rwData);
+    m_value = internal::value2string<TT>(val);
     return val;
 }
 
 
-template<>
-inline std::string string2Value<std::string>( const std::string & str )
-{
-    std::string val = str;
-    return val;
-}
+
+
+
+    
+
+
 
 
 } // namespace pcf
