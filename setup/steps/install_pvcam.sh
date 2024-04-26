@@ -13,7 +13,7 @@ cd /opt/MagAOX/vendor/teledyne/pvcam
 
 chmod +x ./$PVCAM_RUNFILE
 if [[ ! -e /opt/pvcam/etc/profile.d/pvcam.sh ]]; then
-    echo 'y\nn\n' | bash ./$PVCAM_RUNFILE || exit_error "Couldn't install Teledyne Photometrics PVCam for Kinetix"
+    echo 'y\nn\n' | bash ./$PVCAM_RUNFILE || exit_with_error "Couldn't install Teledyne Photometrics PVCam for Kinetix"
     log_success "Ran Teledyne Photometrics PVCam installer for Kinetix"
 else
     log_info "Existing PVCam install found, use the originall installer or /opt/pvcam/pvcam.uninstall.sh to remove"
@@ -26,7 +26,7 @@ cd /opt/MagAOX/vendor/teledyne/pvcam-sdk
 
 chmod +x ./$PVCAMSDK_RUNFILE
 if [[ ! -e /opt/pvcam/etc/profile.d/pvcam.sh ]]; then
-    echo 'y\nn\n' | bash ./$PVCAMSDK_RUNFILE || exit_error "Couldn't install Teledyne Photometrics PVCam for Kinetix"
+    echo 'y\nn\n' | bash ./$PVCAMSDK_RUNFILE || exit_with_error "Couldn't install Teledyne Photometrics PVCam for Kinetix"
     log_success "Ran Teledyne Photometrics PVCam installer for Kinetix"
 else
     log_info "Existing PVCam install found, use the originall installer or /opt/pvcam/pvcam.uninstall.sh to remove"
@@ -41,7 +41,7 @@ fi
 #     log_success "Ran Picam SDK installer"
 # fi
 # if [[ ! -e /opt/PrincetonInstruments/picam ]]; then
-#     exit_error "Installer failed to create /opt/PrincetonInstruments/picam, aborting"
+#     exit_with_error "Installer failed to create /opt/PrincetonInstruments/picam, aborting"
 # fi
 # chmod a+rX -R /opt/pleora
 # chmod a+rX -R /opt/PrincetonInstruments

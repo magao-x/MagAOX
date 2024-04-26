@@ -135,7 +135,7 @@ public:
             /// Append next (or first) sub-directory token
             fullpath += (fullpath.empty() ? "" : "/") + *it;
 
-            struct stat stbuf{0};
+            struct stat stbuf {};
 
             /// Get directory status; true if stat(...) fails
             if (stat(fullpath.c_str(),&stbuf))
@@ -282,16 +282,48 @@ TEST_forked_child()
     if (use_cerr)
     {
         std::cerr << "(std::cerr)" << s;
-        write(STDERR_FILENO,"(STDERR_FILENO)",15);
-        write(STDERR_FILENO,s.c_str(), s.length());
+        ssize_t wc = write(STDERR_FILENO,"(STDERR_FILENO)",15);
+        if(wc != 15) 
+        {
+            //try again
+            fprintf(stderr, "problems writing to stderr\n");
+            return;
+        }
+
+        wc = write(STDERR_FILENO,s.c_str(), s.length());
+        if(wc != (ssize_t) s.length()) 
+        {
+            //try again
+            fprintf(stderr, "problems writing to stderr\n");
+            return;
+        }
         fprintf(stderr, "(stderr)%s",s.c_str());
+        
     }
     else
     {
         std::cout << "std::cout[" << s << "]" << std::endl;
-        write(STDOUT_FILENO,"STDOUT_FILENO[",14);
-        write(STDOUT_FILENO,s.c_str(),s.length());
-        write(STDOUT_FILENO,"]\n",2);
+        ssize_t wc = write(STDOUT_FILENO,"STDOUT_FILENO[",14);
+        if(wc != 14) 
+        {
+            //try again
+            fprintf(stderr, "problems writing to stderr\n");
+            return;
+        }
+        wc = write(STDOUT_FILENO,s.c_str(),s.length());
+        if(wc != (ssize_t) s.length()) 
+        {
+            //try again
+            fprintf(stderr, "problems writing to stderr\n");
+            return;
+        }
+        wc = write(STDOUT_FILENO,"]\n",2);
+        if(wc != 2) 
+        {
+            //try again
+            fprintf(stderr, "problems writing to stderr\n");
+            return;
+        }
         fprintf(stdout, "stdout[%s]\n",s.c_str());
     }
     use_cerr ^= true;  // Alternate writing to STDOUT and to STDERR

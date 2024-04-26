@@ -12,7 +12,6 @@
 
 #include "generated/telem_stage_generated.h"
 #include "flatbuffer_log.hpp"
-#include "../logMeta.hpp"
 
 namespace MagAOX
 {
@@ -38,7 +37,7 @@ struct telem_stage : public flatbuffer_log
    {
       ///Construct from components
       messageT( const int8_t & moving,         ///<[in] whether or not stage is in motion
-                const double & preset,         ///<[in] current position of stage in preset units
+                const float & preset,         ///<[in] current position of stage in preset units
                 const std::string & presetName ///<[in] current preset name
               )
       {
@@ -54,7 +53,7 @@ struct telem_stage : public flatbuffer_log
                        flatlogs::msgLenT len            ///< [in] length of msgBuffer.
                      )
    {
-      auto verifier = flatbuffers::Verifier( (uint8_t*) flatlogs::logHeader::messageBuffer(logBuff), static_cast<size_t>(len));
+      auto verifier = flatbuffers::Verifier( static_cast<uint8_t*>(flatlogs::logHeader::messageBuffer(logBuff)), static_cast<size_t>(len));
       return VerifyTelem_stage_fbBuffer(verifier);
    }
 
@@ -95,7 +94,7 @@ struct telem_stage : public flatbuffer_log
       return fbs->moving();
    }
    
-   static double preset( void * msgBuffer )
+   static float preset( void * msgBuffer )
    {
       auto fbs = GetTelem_stage_fb(msgBuffer);
       return fbs->preset();
@@ -118,9 +117,9 @@ struct telem_stage : public flatbuffer_log
      */ 
    static logMetaDetail getAccessor( const std::string & member /**< [in] the name of the member */ )
    {
-      if(     member == "moving") return logMetaDetail({"MOVING", logMeta::valTypes::Int, logMeta::metaTypes::State, (void *) &moving}); 
-      else if(member == "preset") return logMetaDetail({"PRESET POSITION", logMeta::valTypes::Double, logMeta::metaTypes::State, (void *) &preset}); 
-      else if(member == "presetName") return logMetaDetail({"PRESET NAME", logMeta::valTypes::String, logMeta::metaTypes::State, (void *) &presetName}); 
+      if(     member == "moving") return logMetaDetail({"MOVING", logMeta::valTypes::Int, logMeta::metaTypes::State, reinterpret_cast<void*>(&moving)}); 
+      else if(member == "preset") return logMetaDetail({"PRESET POSITION", logMeta::valTypes::Float, logMeta::metaTypes::State, reinterpret_cast<void*>(&preset)}); 
+      else if(member == "presetName") return logMetaDetail({"PRESET NAME", logMeta::valTypes::String, logMeta::metaTypes::State, reinterpret_cast<void*>(&presetName)}); 
       else
       {
          std::cerr << "No string member " << member << " in telem_stage\n";

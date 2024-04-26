@@ -12,6 +12,8 @@
 #include "app/MagAOXApp.hpp"
 #include "app/indiDriver.hpp"
 #include "app/indiMacros.hpp"
+#include "app/indiUtils.hpp"
+#include "app/semUtils.hpp"
 #include "app/stateCodes.hpp"
 #include "app/dev/outletController.hpp"
 #include "app/dev/ioDevice.hpp"

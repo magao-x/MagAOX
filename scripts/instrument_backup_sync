@@ -1,34 +1,37 @@
 #!/usr/bin/env bash
 set -ex
-if (( $# < 1 )); then
-  prefixes=( "/mnt/backup" "/mnt/backup2" )
+if [[ -z "$1" ]]; then
+    dest=/mnt/backup
 else
-  prefixes="$@"
+    dest="$1"
 fi
-rsyncWithOptions="rsync --exclude='**/*_2022*' -a --info=progress2"
-for mountpoint in "${prefixes[@]}"; do
-    if mount | grep -q "on $mountpoint"; then
-        for remote in icc rtc; do
-            if ! mount | grep -q "$remote:/data on /srv/$remote/data"; then
-                echo "NFS mount appears not to be active for $remote"
-                exit 1
-            fi
-            
-            mkdir -p $mountpoint/$remote
-            for dir in rawimages logs telem; do
-                $rsyncWithOptions /srv/$remote/data/$dir/ $mountpoint/$remote/$dir/
-            done
-            if [[ -e /srv/$remote/data/cacao/ ]]; then
-                # special case to back up cacao data
-                $rsyncWithOptions /srv/$remote/data/cacao/ $mountpoint/$remote/cacao/
-            fi
-        done
-        mkdir -p $mountpoint/aoc
-        for dir in rawimages logs telem; do
-            $rsyncWithOptions /data/$dir/ $mountpoint/aoc/$dir/
-        done
-    else
-        echo "No backup drive mounted on $mountpoint"
+
+if ! mount | grep -q "on $dest"; then
+    echo "External drive mount appears not to be active for $dest"
+    exit 1
+fi
+for remote in icc rtc; do
+    if ! mount | grep -q "$remote:/data on /srv/$remote/data"; then
+        echo "NFS mount appears not to be active for $remote"
+        exit 1
     fi
 done
 
+rsyncWithOptions="rsync --exclude='**/*_2022*' --exclude='**/*_2023*' -a --info=progress2"
+
+mkdir -p $dest/rtc/{cacao,logs,rawimages,telem}
+$rsyncWithOptions /srv/rtc/data/cacao/ $dest/rtc/cacao/
+$rsyncWithOptions /srv/rtc/data/logs/ $dest/rtc/logs/
+$rsyncWithOptions /srv/rtc/data/rawimages/ $dest/rtc/rawimages/
+$rsyncWithOptions /srv/rtc/data/telem/ $dest/rtc/telem/
+
+mkdir -p $dest/icc/{cacao,logs,rawimages,telem}
+# TODO rename it
+if [[ -e /srv/icc/data/cacao-icc ]]; then
+    $rsyncWithOptions /srv/icc/data/cacao-icc/ $dest/icc/cacao/
+else
+    $rsyncWithOptions /srv/icc/data/cacao/ $dest/icc/cacao/
+fi
+$rsyncWithOptions /srv/icc/data/logs/ $dest/icc/logs/
+$rsyncWithOptions /srv/icc/data/rawimages/ $dest/icc/rawimages/
+$rsyncWithOptions /srv/icc/data/telem/ $dest/icc/telem/

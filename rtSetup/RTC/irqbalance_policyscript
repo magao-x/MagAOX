@@ -1,0 +1,23 @@
+#!/bin/bash
+#
+# Prevent rebalancing IRQs for latency-sensitive hardware interrupts
+#
+# Install to /usr/local/bin ensuring *only* root can write to the file
+# (because it is invoked with root privileges).
+#
+# Driver names are actually patterns, i.e. enx matches enx2cfda1c6db1a.
+
+#edt: any EDT gramegrabber
+#nvidia: any NVIDIA GPU
+#enx503eaa0ceeff: ICC camsci1
+#enx503eaa0cf4cd: ICC camsci2
+#enx6cb31152a245: ICC icc-to-rtc
+#enx6cb31152a246: RTC rtc-to-ICC
+#cp2x73c: ?
+
+for driverPattern in edt nvidia enx6cb31152a246 cp2x72c; do
+    if [[ $(grep -e "^\s*$2" /proc/interrupts) == *"$driverPattern"* ]]; then
+        echo "ban=true"
+        exit 0
+    fi
+done

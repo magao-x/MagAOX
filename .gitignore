@@ -50,6 +50,8 @@ apps/CGraphFSMHardwareInterface/CGFSM
 
 nothing added to commit but untracked files present (use "git add" to track)
 
+apps/*/build/
+
 #a
 apps/adcTracker/adcTracker
 apps/alpaoCtrl/alpaoCtrl
@@ -66,11 +68,13 @@ apps/bmcCtrl/bmcCtrl
 #c
 apps/cacaoInterface/cacaoInterface
 apps/cameraSim/cameraSim
+apps/closedLoopIndi/closedLoopIndi
 
 #d
 apps/dmMode/dmMode
 apps/dmModulator/dmModulator
-apps/dmSpeckle/
+apps/dmPokeCenter/dmPokeCenter
+apps/dmSpeckle/dmSpeckle
 
 #f
 apps/filterWheelCtrl/filterWheelCtrl
@@ -135,6 +139,7 @@ apps/siglentSDG/siglentSDG
 apps/siglentSDG/tests/siglentSDG_test
 apps/smc100ccCtrl/smc100ccCtrl
 apps/sshDigger/sshDigger
+apps/stateRuleEngine/stateRuleEngine
 apps/streamCircBuff/streamCircBuff
 apps/streamWriter/streamWriter
 
@@ -206,5 +211,7 @@ vm/calib/
 vm/config/
 vm/
 *.swp
-setup/qhyccd_container/sdk_linux64_22.02.17.tgz
-CGraphFSMHardwareInterface.cpp.lst
+
+# Python caches, etc
+*.egg-info
+__pycache__

@@ -31,7 +31,8 @@ protected:
     QGraphicsScene *m_qgs{nullptr};
 
     StretchBox *m_roiBox{nullptr};
-    StretchBox *m_roiFullBox{nullptr};
+
+    std::mutex m_roiBoxMutex;
 
     char m_blob[512]; ///< Memory for copying rtimvDictionary blobs
 
@@ -52,7 +53,7 @@ public:
 
     virtual bool overlayEnabled();
 
-    bool blobExists(const std::string propel);
+    bool blobExists(const std::string & propel);
 
     bool getBlobStr(const std::string &deviceName,
                     const std::string &propel);
@@ -71,6 +72,10 @@ signals:
     void newStretchBox(StretchBox *);
 
     void savingState(bool);
+
+public slots:
+
+    void stretchBoxRemove(StretchBox * );
 
 public:
     virtual std::vector<std::string> info();

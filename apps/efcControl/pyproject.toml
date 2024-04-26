@@ -1,0 +1,15 @@
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[project]
+name = "efcControl"
+description = "Python INDI device that uses EFC for focal plane wavefront control."
+version = "2024.01.17"
+
+authors = [
+  {name = "Sebastiaan Y. Haffert", email = "shaffert@arizona.edu"},
+]
+
+[project.scripts]
+efcCtrl = "efcControl:efcControl.console_app"

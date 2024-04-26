@@ -11,6 +11,7 @@
 #ifndef app_indiUtils_hpp
 #define app_indiUtils_hpp
 
+#include <iostream>
 #include <limits>
 
 #include "../../INDI/libcommon/IndiProperty.hpp"
@@ -113,6 +114,7 @@ void updateIfChanged( pcf::IndiProperty & p,   ///< [in/out] The property contai
       if(p[el].getValue() != ssValue.str()|| oldState != newState)
       {
          p[el].set(newVal);
+         p.setTimeStamp(pcf::TimeStamp());
          p.setState (newState);
          indiDriver->sendSetProperty (p);
       }
@@ -148,6 +150,7 @@ void updateIfChanged( pcf::IndiProperty & p,   ///< [in/out] The property contai
    if( !indiDriver ) return;
    
    size_t n; //loop index outside so we can use it for error reporting.
+
    try
    {
       //First we look for any changes
@@ -174,6 +177,7 @@ void updateIfChanged( pcf::IndiProperty & p,   ///< [in/out] The property contai
          {
             p[els[n]].set(newVals[n]);
          }
+         p.setTimeStamp(pcf::TimeStamp());
          p.setState (newState);
          indiDriver->sendSetProperty (p);
       }
@@ -217,6 +221,7 @@ void updateSwitchIfChanged( pcf::IndiProperty & p,   ///< [in/out] The property 
       if(oldVal != newVal || oldState != newState)
       {
          p[el].setSwitchState(newVal);
+         p.setTimeStamp(pcf::TimeStamp());
          p.setState (newState);
          indiDriver->sendSetProperty (p);
       }
@@ -279,6 +284,7 @@ void updateSelectionSwitchIfChanged( pcf::IndiProperty & p,   ///< [in/out] The 
    if(changed || oldState != newState)
    {
       p.setState (newState);
+      p.setTimeStamp(pcf::TimeStamp());
       indiDriver->sendSetProperty (p);
    }
    
@@ -290,6 +296,56 @@ void updateSelectionSwitchIfChanged( pcf::IndiProperty & p,   ///< [in/out] The 
    }
 }
 
+/// Parse an INDI key into the device and property names
+/** We often represent an INDI property as a unique key in the form
+  * `deviceName.propName`.  This function parses such a key into its
+  * parts.
+  *
+  * \returns 0  on success
+  * \returns -1 if the provided key is not at least 3 characters long
+  * \returns -2 if no '.' is found
+  * \returns -3 if '.' is the first character
+  * \returns -4 if '.' is the last character
+  */
+inline
+int parseIndiKey( std::string & devName,  ///< [out] the device name
+                  std::string & propName, ///< [out] the property name
+                  const std::string & key ///< [in] the key to parse
+                )
+{
+    if(key.size() < 3)
+    {
+        return -1;
+    }
+
+    size_t p = key.find('.');
+
+    if(p == std::string::npos)
+    {
+        devName = "";
+        propName = "";
+        return -2;
+    }
+
+    if(p == 0)
+    {
+        devName = "";
+        propName = "";
+        return -3;
+    }
+
+    if(p == key.size()-1)
+    {
+        devName = "";
+        propName = "";
+        return -4;
+    }
+
+    devName = key.substr(0, p);
+    propName = key.substr(p+1);
+
+    return 0;
+}
 
 } //namespace indi
 } //namespace app

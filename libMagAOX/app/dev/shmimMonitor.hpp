@@ -103,7 +103,7 @@ protected:
 
    IMAGE m_imageStream; ///< The ImageStreamIO shared memory buffer.
 
-   ino_t m_inode {0};
+   ino_t m_inode {0}; ///< The inode of the image stream file
 
 public:
 

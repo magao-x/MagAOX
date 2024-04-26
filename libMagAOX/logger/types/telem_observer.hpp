@@ -57,12 +57,12 @@ struct telem_observer : public flatbuffer_log
                        flatlogs::msgLenT len            ///< [in] length of msgBuffer.
                      )
    {
-      auto verifier = flatbuffers::Verifier( (uint8_t*) flatlogs::logHeader::messageBuffer(logBuff), static_cast<size_t>(len));
+      auto verifier = flatbuffers::Verifier( static_cast<uint8_t*>(flatlogs::logHeader::messageBuffer(logBuff)), static_cast<size_t>(len));
 
       bool ok = VerifyTelem_observer_fbBuffer(verifier); 
       if(!ok) return ok;
 
-      auto fbs = GetTelem_observer_fb((uint8_t*) flatlogs::logHeader::messageBuffer(logBuff));
+      auto fbs = GetTelem_observer_fb(static_cast<uint8_t*>(flatlogs::logHeader::messageBuffer(logBuff)));
 
       if(fbs->email())
       {
@@ -155,9 +155,9 @@ struct telem_observer : public flatbuffer_log
      */ 
    static logMetaDetail getAccessor( const std::string & member /**< [in] the name of the member */ )
    {
-      if(     member == "email")     return logMetaDetail({"OBSERVER", logMeta::valTypes::String, logMeta::metaTypes::State, (void *) &email, false});
-      else if(member == "obsName")   return logMetaDetail({"OBS-NAME", logMeta::valTypes::String, logMeta::metaTypes::State, (void *) &obsName, false});
-      else if(member == "observing") return logMetaDetail({"OBSERVING", logMeta::valTypes::Bool, logMeta::metaTypes::State, (void *) &observing}); 
+      if(     member == "email")     return logMetaDetail({"OBSERVER", logMeta::valTypes::String, logMeta::metaTypes::State, reinterpret_cast<void*>(&email), false});
+      else if(member == "obsName")   return logMetaDetail({"OBS-NAME", logMeta::valTypes::String, logMeta::metaTypes::State, reinterpret_cast<void*>(&obsName), false});
+      else if(member == "observing") return logMetaDetail({"OBSERVING", logMeta::valTypes::Bool, logMeta::metaTypes::State, reinterpret_cast<void*>(&observing)}); 
       else
       {
          std::cerr << "No string member " << member << " in telem_observer\n";

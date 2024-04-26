@@ -14,14 +14,17 @@ fi
 if [[ ! -e /etc/sysconfig/irqbalance.bup ]]; then
     cp /etc/sysconfig/irqbalance /etc/sysconfig/irqbalance.bup
 fi
+
 # Install irqbalance config to use policyscript
-cp $DIR/../../rtSetup/irqbalance /etc/sysconfig/irqbalance
+cp "$DIR/../../rtSetup/$MAGAOX_ROLE/irqbalance" /etc/sysconfig/irqbalance
+
 # Install policyscript
 if [[ ! -e /usr/local/bin/irqbalance_policyscript ]]; then
     install --owner root --mode 0555 \
-        $DIR/../../rtSetup/irqbalance_policyscript \
+        "$DIR/../../rtSetup/$MAGAOX_ROLE/irqbalance_policyscript" \
         /usr/local/bin/irqbalance_policyscript
 fi
+
 # Note that SELinux audit events are still logged, but permissive is required
 # to get the policyscript to run from the irqbalance service's context.
 semanage permissive -a irqbalance_t

@@ -1,0 +1,27 @@
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[project]
+name = "magaox"
+version = "2023.12.21"
+
+authors = [
+  {name = "Joseph D. Long", email = "me@joseph-long.com"},
+]
+
+description = "Python utilities for MagAO-X interface"
+readme = "README.rst"
+license = {file = "LICENSE"}
+
+dependencies = [
+  "watchdog>=3.0.0,<4",
+  "xconf>=0.0.1",
+  "psycopg[binary]>=3.1.18",
+  "coloredlogs>=15.0.1",
+  "psutil>=5.9.8",
+  "tqdm",
+]
+
+[project.scripts]
+xtelemdb = "magaox.db.cli:DISPATCHER.main"

@@ -23,27 +23,19 @@ using pcf::IndiProperty;
 
 IndiProperty::IndiProperty()
 {
-  m_tType = Unknown;
-  m_tPerm = UnknownPropertyPerm;
-  m_oRequested = false;
-  m_tRule = UnknownSwitchRule;
-  m_tState = UnknownPropertyState;
-  m_xTimeout = 0.0f;
-  m_beValue = UnknownBLOBEnable;
+  //m_tPerm = UnknownPropertyPerm;
+  //m_oRequested = false;
+  //m_tRule = UnknownSwitchRule;
+  //m_tState = UnknownPropertyState;
+  //m_xTimeout = 0.0f;
+  //m_beValue = UnknownBLOBEnable;
 }
 
 ////////////////////////////////////////////////////////////////////////////////
 /// Constructor with type - this will be used often.
 
-IndiProperty::IndiProperty( const Type &tType )
+IndiProperty::IndiProperty( const Type &tType ) : m_tType(tType)
 {
-  m_tType = tType;
-  m_tPerm = UnknownPropertyPerm;
-  m_oRequested = false;
-  m_tRule = UnknownSwitchRule;
-  m_tState = UnknownPropertyState;
-  m_xTimeout = 0.0f;
-  m_beValue = UnknownBLOBEnable;
 }
 
 ////////////////////////////////////////////////////////////////////////////////
@@ -51,17 +43,8 @@ IndiProperty::IndiProperty( const Type &tType )
 
 IndiProperty::IndiProperty( const Type &tType,
                             const string &szDevice,
-                            const string &szName )
+                            const string &szName ) :  m_szDevice(szDevice), m_szName(szName), m_tType(tType)
 {
-  m_tType = tType;
-  m_szDevice = szDevice;
-  m_szName = szName;
-  m_tPerm = UnknownPropertyPerm;
-  m_oRequested = false;
-  m_tRule = UnknownSwitchRule;
-  m_tState = UnknownPropertyState;
-  m_xTimeout = 0.0f;
-  m_beValue = UnknownBLOBEnable;
 }
 
 ////////////////////////////////////////////////////////////////////////////////
@@ -72,40 +55,21 @@ IndiProperty::IndiProperty( const Type &tType,
                             const string &szName,
                             const PropertyStateType &tState,
                             const PropertyPermType &tPerm,
-                            const SwitchRuleType &tRule )
+                            const SwitchRuleType &tRule ) : m_szDevice(szDevice), m_szName(szName), m_tPerm(tPerm),
+                                                               m_tRule(tRule), m_tState(tState), m_tType(tType)
 {
-  m_tType = tType;
-  m_szDevice = szDevice;
-  m_szName = szName;
-  m_tPerm = tPerm;
-  m_oRequested = false;
-  m_tRule = tRule;
-  m_tState = tState;
-  m_xTimeout = 0.0f;
-  m_beValue = UnknownBLOBEnable;
 }
 
 ////////////////////////////////////////////////////////////////////////////////
 ///  Copy constructor.
 
-IndiProperty::IndiProperty(const IndiProperty &ipRhs )
+IndiProperty::IndiProperty(const IndiProperty &ipRhs ) : m_szDevice(ipRhs.m_szDevice), m_szGroup(ipRhs.m_szGroup), m_szLabel(ipRhs.m_szLabel),
+                                                           m_szMessage(ipRhs.m_szMessage), m_szName(ipRhs.m_szName), m_tPerm(ipRhs.m_tPerm),
+                                                            m_tRule(ipRhs.m_tRule), m_tState(ipRhs.m_tState), m_xTimeout(ipRhs.m_xTimeout),
+                                                              m_oRequested(ipRhs.m_oRequested),  m_tsTimeStamp(ipRhs.m_tsTimeStamp),
+                                                                m_szVersion(ipRhs.m_szVersion), m_beValue(ipRhs.m_beValue), 
+                                                                 m_mapElements(ipRhs.m_mapElements), m_tType(ipRhs.m_tType)
 {
-  m_szDevice = ipRhs.m_szDevice;
-  m_szGroup = ipRhs.m_szGroup;
-  m_szLabel = ipRhs.m_szLabel;
-  m_szMessage = ipRhs.m_szMessage;
-  m_szName = ipRhs.m_szName;
-  m_tPerm = ipRhs.m_tPerm;
-  m_oRequested = ipRhs.m_oRequested;
-  m_tRule = ipRhs.m_tRule;
-  m_tState = ipRhs.m_tState;
-  m_xTimeout = ipRhs.m_xTimeout;
-  m_tsTimeStamp = ipRhs.m_tsTimeStamp;
-  m_szVersion = ipRhs.m_szVersion;
-  m_beValue = ipRhs.m_beValue;
-
-  m_mapElements = ipRhs.m_mapElements;
-  m_tType = ipRhs.m_tType;
 }
 
 ////////////////////////////////////////////////////////////////////////////////

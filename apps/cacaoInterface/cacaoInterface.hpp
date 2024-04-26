@@ -626,8 +626,18 @@ int cacaoInterface::getAOCalib()
    {
       return log<software_error, -1>({__FILE__, __LINE__, errno, "cacaoInterface::getAOCalib failed to open: " + calsrc});
    }
-   fin >> m_aoCalDir;
+   std::string aoCalDir;
+
+   fin >> aoCalDir;
+
    fin.close();
+  
+   bool newcal = false;
+   if(aoCalDir != m_aoCalDir)
+   {
+      m_aoCalDir = aoCalDir;
+      newcal = true;
+   }
 
    std::string nameFile = m_aoCalDir + "/LOOPNAME";
    fin.open(nameFile);
@@ -646,10 +656,22 @@ int cacaoInterface::getAOCalib()
    {
       return log<software_error, -1>({__FILE__, __LINE__, errno, "cacaoInterface::getAOCalib failed to open: " + calsrc});
    }
-   fin >> m_aoCalLoadTime;
+   std::string aoCalLoadTime;
+   fin >> aoCalLoadTime;
+
+   if(aoCalLoadTime != m_aoCalLoadTime)
+   {
+      newcal = true;
+      m_aoCalLoadTime = aoCalLoadTime;
+   }
+
+   if(newcal)
+   {
+      log<text_log>("new calibration " + m_aoCalDir + " loaded at: " + m_aoCalLoadTime, logPrio::LOG_INFO);
+   }
+
    fin.close();
    
-
    calsrc = m_aoCalDir + "/calib_archived.txt";
    
    fin.open(calsrc);

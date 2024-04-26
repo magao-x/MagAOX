@@ -59,7 +59,7 @@ struct telem_teldata : public flatbuffer_log
                        flatlogs::msgLenT len            ///< [in] length of msgBuffer.
                      )
    {
-      auto verifier = flatbuffers::Verifier( (uint8_t*) flatlogs::logHeader::messageBuffer(logBuff), static_cast<size_t>(len));
+      auto verifier = flatbuffers::Verifier( static_cast<uint8_t*>(flatlogs::logHeader::messageBuffer(logBuff)), static_cast<size_t>(len));
       return VerifyTelem_teldata_fbBuffer(verifier);
    }
  
@@ -175,16 +175,16 @@ struct telem_teldata : public flatbuffer_log
      */ 
    static logMetaDetail getAccessor( const std::string & member /**< [in] the name of the member */ )
    {
-      if(     member == "roi") return logMetaDetail({"ROI", logMeta::valTypes::Int, logMeta::metaTypes::State, (void *) &roi});
-      else if(member == "tracking") return logMetaDetail({"TRACKING", logMeta::valTypes::Int, logMeta::metaTypes::State, (void *) &tracking}); 
-      else if(member == "guiding") return logMetaDetail({"GUIDING", logMeta::valTypes::Int, logMeta::metaTypes::State, (void *) &guiding}); 
-      else if(member == "slewing") return logMetaDetail({"SLEWING", logMeta::valTypes::Int, logMeta::metaTypes::State, (void *) &slewing}); 
-      else if(member == "guiderMoving") return logMetaDetail({"GUIDER MOVING", logMeta::valTypes::Int, logMeta::metaTypes::State, (void *) &guiderMoving}); 
-      else if(member == "az") return logMetaDetail({"AZ", logMeta::valTypes::Double, logMeta::metaTypes::Continuous, (void *) &az, false});
-      else if(member == "zd") return logMetaDetail({"ZD", logMeta::valTypes::Double, logMeta::metaTypes::Continuous, (void *) &zd, false});
-      else if(member == "pa") return logMetaDetail({"PARANG", logMeta::valTypes::Double, logMeta::metaTypes::Continuous, (void *) &pa, false});
-      else if(member == "domeAz") return logMetaDetail({"DOME AZ", logMeta::valTypes::Double, logMeta::metaTypes::Continuous, (void *) &domeAz}); 
-      else if(member == "domeStat") return logMetaDetail({"DOME STATUS", logMeta::valTypes::Int, logMeta::metaTypes::State, (void *) &domeStat});
+      if(     member == "roi") return logMetaDetail({"ROI", logMeta::valTypes::Int, logMeta::metaTypes::State, reinterpret_cast<void*>(&roi)});
+      else if(member == "tracking") return logMetaDetail({"TRACKING", logMeta::valTypes::Int, logMeta::metaTypes::State, reinterpret_cast<void*>(&tracking)}); 
+      else if(member == "guiding") return logMetaDetail({"GUIDING", logMeta::valTypes::Int, logMeta::metaTypes::State, reinterpret_cast<void*>(&guiding)}); 
+      else if(member == "slewing") return logMetaDetail({"SLEWING", logMeta::valTypes::Int, logMeta::metaTypes::State, reinterpret_cast<void*>(&slewing)}); 
+      else if(member == "guiderMoving") return logMetaDetail({"GUIDER MOVING", logMeta::valTypes::Int, logMeta::metaTypes::State, reinterpret_cast<void*>(&guiderMoving)}); 
+      else if(member == "az") return logMetaDetail({"AZ", logMeta::valTypes::Double, logMeta::metaTypes::Continuous, reinterpret_cast<void*>(&az), false});
+      else if(member == "zd") return logMetaDetail({"ZD", logMeta::valTypes::Double, logMeta::metaTypes::Continuous, reinterpret_cast<void*>(&zd), false});
+      else if(member == "pa") return logMetaDetail({"PARANG", logMeta::valTypes::Double, logMeta::metaTypes::Continuous, reinterpret_cast<void*>(&pa), false});
+      else if(member == "domeAz") return logMetaDetail({"DOME AZ", logMeta::valTypes::Double, logMeta::metaTypes::Continuous, reinterpret_cast<void*>(&domeAz)}); 
+      else if(member == "domeStat") return logMetaDetail({"DOME STATUS", logMeta::valTypes::Int, logMeta::metaTypes::State, reinterpret_cast<void*>(&domeStat)});
       else
       {
          std::cerr << "No string member " << member << " in telem_teldata\n";

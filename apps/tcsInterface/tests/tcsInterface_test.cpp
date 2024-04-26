@@ -61,5 +61,269 @@ SCENARIO( "INDI Callbacks", "[tcsInterface]" )
 
 }
 
+SCENARIO( "Parsing times in x:m:s format", "[tcsInterface]" )
+{
+    GIVEN("A valid x:m:s string")
+    {
+        int rv;
+
+        WHEN("Positive, double digit integers")
+        { 
+            tcsInterface_test tit("tcsi");
+
+            std::string tstr = "12:20:50";
+         
+            double x;
+            double m;
+            double s;
+
+            rv = tit.parse_xms(x, m, s, tstr);        
+         
+            REQUIRE(rv == 0);
+            REQUIRE_THAT(x, Catch::Matchers::WithinAbs(12, 1e-10)); 
+            REQUIRE_THAT(m, Catch::Matchers::WithinAbs(20, 1e-10)); 
+            REQUIRE_THAT(s, Catch::Matchers::WithinAbs(50, 1e-10)); 
+        }
+
+        WHEN("Negative, double digit integers")
+        {
+            tcsInterface_test tit("tcsi");
+
+            std::string tstr = "-22:30:48";
+         
+            double x;
+            double m;
+            double s;
+
+            rv = tit.parse_xms(x, m, s, tstr);        
+         
+            REQUIRE(rv == 0);
+            REQUIRE_THAT(x, Catch::Matchers::WithinAbs(-22, 1e-10)); 
+            REQUIRE_THAT(m, Catch::Matchers::WithinAbs(-30, 1e-10)); 
+            REQUIRE_THAT(s, Catch::Matchers::WithinAbs(-48, 1e-10)); 
+        }
+
+        WHEN("Positive, double digit, decimal seconds")
+        { 
+            tcsInterface_test tit("tcsi");
+
+            std::string tstr = "12:20:50.267849";
+         
+            double x;
+            double m;
+            double s;
+
+            rv = tit.parse_xms(x, m, s, tstr);        
+         
+            REQUIRE(rv == 0);
+            REQUIRE_THAT(x, Catch::Matchers::WithinAbs(12, 1e-10)); 
+            REQUIRE_THAT(m, Catch::Matchers::WithinAbs(20, 1e-10)); 
+            REQUIRE_THAT(s, Catch::Matchers::WithinAbs(50.267849, 1e-10)); 
+        }
+
+        WHEN("Negative, double digit integers")
+        {
+            tcsInterface_test tit("tcsi");
+
+            std::string tstr = "-22:30:48.8771819";
+         
+            double x;
+            double m;
+            double s;
+
+            rv = tit.parse_xms(x, m, s, tstr);        
+         
+            REQUIRE(rv == 0);
+            REQUIRE_THAT(x, Catch::Matchers::WithinAbs(-22, 1e-10)); 
+            REQUIRE_THAT(m, Catch::Matchers::WithinAbs(-30, 1e-10)); 
+            REQUIRE_THAT(s, Catch::Matchers::WithinAbs(-48.8771819, 1e-10)); 
+     }
+   }
+
+    GIVEN("Invalid x:m:s strings")
+    {
+        int rv;
+
+        WHEN("empty")
+        { 
+            tcsInterface_test tit("tcsi");
+
+            std::string tstr = "";
+         
+            double x;
+            double m;
+            double s;
+
+            rv = tit.parse_xms(x, m, s, tstr);        
+         
+            REQUIRE(rv == -1);
+        }
+
+        WHEN("no :")
+        { 
+            tcsInterface_test tit("tcsi");
+
+            std::string tstr = "12-20-50";
+         
+            double x;
+            double m;
+            double s;
+
+            rv = tit.parse_xms(x, m, s, tstr);        
+         
+            REQUIRE(rv == -1);
+        }
+
+        WHEN("only one :")
+        { 
+            tcsInterface_test tit("tcsi");
+
+            std::string tstr = "12:20-50";
+         
+            double x;
+            double m;
+            double s;
+
+            rv = tit.parse_xms(x, m, s, tstr);        
+         
+            REQUIRE(rv == -1);
+        }
+
+        WHEN("two :, but one at beginning")
+        { 
+            tcsInterface_test tit("tcsi");
+
+            std::string tstr = ":12:20";
+         
+            double x;
+            double m;
+            double s;
+
+            rv = tit.parse_xms(x, m, s, tstr);        
+         
+            REQUIRE(rv == -1);
+        }
+
+        WHEN("two :, but no m")
+        { 
+            tcsInterface_test tit("tcsi");
+
+            std::string tstr = "12::20";
+         
+            double x;
+            double m;
+            double s;
+
+            rv = tit.parse_xms(x, m, s, tstr);        
+         
+            REQUIRE(rv == -1);
+        }
+
+        WHEN("two :, but one at end")
+        { 
+            tcsInterface_test tit("tcsi");
+
+            std::string tstr = "12:20:";
+         
+            double x;
+            double m;
+            double s;
+
+            rv = tit.parse_xms(x, m, s, tstr);        
+         
+            REQUIRE(rv == -1);
+        }
+
+        WHEN("invalid x")
+        { 
+            tcsInterface_test tit("tcsi");
+
+            std::string tstr = "x:20:80";
+         
+            double x;
+            double m;
+            double s;
+
+            rv = tit.parse_xms(x, m, s, tstr);        
+         
+            REQUIRE(rv == -1);
+        }
+
+        WHEN("invalid -x")
+        { 
+            tcsInterface_test tit("tcsi");
+
+            std::string tstr = "-x:20:80";
+         
+            double x;
+            double m;
+            double s;
+
+            rv = tit.parse_xms(x, m, s, tstr);        
+         
+            REQUIRE(rv == -1);
+        }
+
+        WHEN("invalid m")
+        { 
+            tcsInterface_test tit("tcsi");
+
+            std::string tstr = "20:m:80";
+         
+            double x;
+            double m;
+            double s;
+
+            rv = tit.parse_xms(x, m, s, tstr);        
+         
+            REQUIRE(rv == -1);
+        }
+
+        WHEN("invalid -m")
+        { 
+            tcsInterface_test tit("tcsi");
+
+            std::string tstr = "-12:m:80";
+         
+            double x;
+            double m;
+            double s;
+
+            rv = tit.parse_xms(x, m, s, tstr);        
+         
+            REQUIRE(rv == -1);
+        }
+
+        WHEN("invalid s")
+        { 
+            tcsInterface_test tit("tcsi");
+
+            std::string tstr = "20:23:s.ssy";
+         
+            double x;
+            double m;
+            double s;
+
+            rv = tit.parse_xms(x, m, s, tstr);        
+         
+            REQUIRE(rv == -1);
+        }
+
+        WHEN("invalid -s")
+        { 
+            tcsInterface_test tit("tcsi");
+
+            std::string tstr = "-12:23:s.sye";
+         
+            double x;
+            double m;
+            double s;
+
+            rv = tit.parse_xms(x, m, s, tstr);        
+         
+            REQUIRE(rv == -1);
+        }
+    }
+}
 
 } //namespace tcsInterface_test 

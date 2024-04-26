@@ -32,17 +32,9 @@ int pcf::Thread::sm_nStopSignal = SIGQUIT;
 ////////////////////////////////////////////////////////////////////////////////
 /// Standard constructor.
 
-Thread::Thread()
-{
-  m_oIsRunning = false; //  no thread yet.
-  m_uiInterval = 1000;  //  default to 1 second.
-  m_oIsPaused = false;  //  we are not paused.
-  m_oStop = true;       //  we are, in fact, stopped.
-  m_oOneShot = false;   //  we are not one shot by default.
-  m_idThis = 0;         //  no id for this yet.
-  m_psocTrigger = NULL; //  no trigger to use, yet.
-  m_tState = Idle;      //  Default state is Idle, since the thread is not running.
-
+Thread::Thread() : m_idThis(0), m_uiInterval(1000), m_tState(Idle), m_oStop(true), 
+                    m_oOneShot(false), m_oIsRunning(false), m_oIsPaused(false), m_psocTrigger(NULL)
+{ 
   // We are not running in 'execute' yet.
   m_mutReady.lock();
 
@@ -98,17 +90,9 @@ const Thread &Thread::operator=( const Thread &copy )
 /// parameters will be copied, but if the original is running, this one will not
 /// be.
 
-Thread::Thread( const Thread &copy )
+Thread::Thread( const Thread &copy ) : m_idThis(0), m_uiInterval(copy.m_uiInterval), m_tState(Idle), m_oStop(true), 
+                                      m_oOneShot(copy.m_oOneShot), m_oIsRunning(false), m_oIsPaused(false), m_psocTrigger(NULL)
 {
-  m_uiInterval = copy.m_uiInterval;
-  m_oOneShot = copy.m_oOneShot;
-  m_idThis = 0;
-  m_oStop = true;
-  m_oIsRunning = false;
-  m_oIsPaused = false;
-  m_psocTrigger = NULL;
-  m_tState = Idle;
-
   // We are not running in 'execute' yet.
   m_mutReady.lock();
 

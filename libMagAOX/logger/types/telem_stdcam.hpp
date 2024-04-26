@@ -12,7 +12,6 @@
 
 #include "generated/telem_stdcam_generated.h"
 #include "flatbuffer_log.hpp"
-#include "../logMeta.hpp"
 
 namespace MagAOX
 {
@@ -114,7 +113,7 @@ struct telem_stdcam : public flatbuffer_log
                        flatlogs::msgLenT len            ///< [in] length of msgBuffer.
                      )
    {
-      auto verifier = flatbuffers::Verifier( (uint8_t*) flatlogs::logHeader::messageBuffer(logBuff), static_cast<size_t>(len));
+      auto verifier = flatbuffers::Verifier( static_cast<uint8_t*>(flatlogs::logHeader::messageBuffer(logBuff)), static_cast<size_t>(len));
       return VerifyTelem_stdcam_fbBuffer(verifier);
    }
 
@@ -386,27 +385,27 @@ struct telem_stdcam : public flatbuffer_log
      */ 
    static logMetaDetail getAccessor( const std::string & member /**< [in] the name of the member */ )
    {
-      if(member == "mode") return logMetaDetail({"MODE", logMeta::valTypes::String, logMeta::metaTypes::State, (void *) &mode});
-      else if(member == "xcen") return logMetaDetail({"ROI XCEN", logMeta::valTypes::Float, logMeta::metaTypes::State, (void *) &xcen});
-      else if(member == "ycen") return logMetaDetail({"ROI YCEN", logMeta::valTypes::Float, logMeta::metaTypes::State, (void *) &ycen});
-      else if(member == "width") return logMetaDetail({"ROI WIDTH", logMeta::valTypes::Int, logMeta::metaTypes::State, (void *) &width});
-      else if(member == "height") return logMetaDetail({"ROI HEIGHT", logMeta::valTypes::Int, logMeta::metaTypes::State, (void *) &height});
-      else if(member == "xbin") return logMetaDetail({"ROI XBIN", logMeta::valTypes::Int, logMeta::metaTypes::State, (void *) &xbin});
-      else if(member == "ybin") return logMetaDetail({"ROI YBIN", logMeta::valTypes::Int, logMeta::metaTypes::State, (void *) &ybin});
-      else if(member == "exptime") return logMetaDetail({"EXPTIME", logMeta::valTypes::Float, logMeta::metaTypes::State, (void *) &exptime});
-      else if(member == "fps") return logMetaDetail({"FPS", logMeta::valTypes::Float, logMeta::metaTypes::State, (void *) &fps});
-      else if(member == "emGain") return logMetaDetail({"EMGAIN", logMeta::valTypes::Float, logMeta::metaTypes::State, (void *) &emGain});
-      else if(member == "adcSpeed") return logMetaDetail({"ADC SPEED", logMeta::valTypes::Float, logMeta::metaTypes::State, (void *) &adcSpeed});
-      else if(member == "temp") return logMetaDetail({"TEMP", logMeta::valTypes::Float, logMeta::metaTypes::Continuous, (void *) &temp});
-      else if(member == "tempSetpt") return logMetaDetail({"TEMP SETPT", logMeta::valTypes::Float, logMeta::metaTypes::State, (void *) &tempSetpt});
-      else if(member == "tempStatus") return logMetaDetail({"TEMP STATUS", logMeta::valTypes::Int, logMeta::metaTypes::Continuous, (void *) &tempStatus});
-      else if(member == "tempOnTarget") return logMetaDetail({"TEMP ONTGT", logMeta::valTypes::Int, logMeta::metaTypes::Continuous, (void *) &tempOnTarget});
-      else if(member == "tempStatusStr") return logMetaDetail({"TEMP STATUSSTR", logMeta::valTypes::String, logMeta::metaTypes::State, (void *) &tempStatusStr});
-      else if(member == "shutterStatusStr") return logMetaDetail({"SHUTTER STATUS", logMeta::valTypes::String, logMeta::metaTypes::State, (void *) &shutterStatusStr});
-      else if(member == "shutterState") return logMetaDetail({"SHUTTER", logMeta::valTypes::String, logMeta::metaTypes::State, (void *) &shutterState});
-      else if(member == "synchro") return logMetaDetail({"SYNCHRO", logMeta::valTypes::Bool, logMeta::metaTypes::State, (void *) &synchro});
-      else if(member == "vshift") return logMetaDetail({"VSHIFTSPD", logMeta::valTypes::Float, logMeta::metaTypes::State, (void *) &vshift});
-      else if(member == "cropMode") return logMetaDetail({"CROPMODE", logMeta::valTypes::Bool, logMeta::metaTypes::State, (void *) &cropMode});
+      if(member == "mode") return logMetaDetail({"MODE", logMeta::valTypes::String, logMeta::metaTypes::State, reinterpret_cast<void*>(&mode)});
+      else if(member == "xcen") return logMetaDetail({"ROI XCEN", logMeta::valTypes::Float, logMeta::metaTypes::State, reinterpret_cast<void*>(&xcen)});
+      else if(member == "ycen") return logMetaDetail({"ROI YCEN", logMeta::valTypes::Float, logMeta::metaTypes::State, reinterpret_cast<void*>(&ycen)});
+      else if(member == "width") return logMetaDetail({"ROI WIDTH", logMeta::valTypes::Int, logMeta::metaTypes::State, reinterpret_cast<void*>(&width)});
+      else if(member == "height") return logMetaDetail({"ROI HEIGHT", logMeta::valTypes::Int, logMeta::metaTypes::State, reinterpret_cast<void*>(&height)});
+      else if(member == "xbin") return logMetaDetail({"ROI XBIN", logMeta::valTypes::Int, logMeta::metaTypes::State, reinterpret_cast<void*>(&xbin)});
+      else if(member == "ybin") return logMetaDetail({"ROI YBIN", logMeta::valTypes::Int, logMeta::metaTypes::State, reinterpret_cast<void*>(&ybin)});
+      else if(member == "exptime") return logMetaDetail({"EXPTIME", logMeta::valTypes::Float, logMeta::metaTypes::State, reinterpret_cast<void*>(&exptime)});
+      else if(member == "fps") return logMetaDetail({"FPS", logMeta::valTypes::Float, logMeta::metaTypes::State, reinterpret_cast<void*>(&fps)});
+      else if(member == "emGain") return logMetaDetail({"EMGAIN", logMeta::valTypes::Float, logMeta::metaTypes::State, reinterpret_cast<void*>(&emGain)});
+      else if(member == "adcSpeed") return logMetaDetail({"ADC SPEED", logMeta::valTypes::Float, logMeta::metaTypes::State, reinterpret_cast<void*>(&adcSpeed)});
+      else if(member == "temp") return logMetaDetail({"TEMP", logMeta::valTypes::Float, logMeta::metaTypes::Continuous, reinterpret_cast<void*>(&temp)});
+      else if(member == "tempSetpt") return logMetaDetail({"TEMP SETPT", logMeta::valTypes::Float, logMeta::metaTypes::State, reinterpret_cast<void*>(&tempSetpt)});
+      else if(member == "tempStatus") return logMetaDetail({"TEMP STATUS", logMeta::valTypes::Int, logMeta::metaTypes::Continuous, reinterpret_cast<void*>(&tempStatus)});
+      else if(member == "tempOnTarget") return logMetaDetail({"TEMP ONTGT", logMeta::valTypes::Int, logMeta::metaTypes::Continuous, reinterpret_cast<void*>(&tempOnTarget)});
+      else if(member == "tempStatusStr") return logMetaDetail({"TEMP STATUSSTR", logMeta::valTypes::String, logMeta::metaTypes::State, reinterpret_cast<void*>(&tempStatusStr)});
+      else if(member == "shutterStatusStr") return logMetaDetail({"SHUTTER STATUS", logMeta::valTypes::String, logMeta::metaTypes::State, reinterpret_cast<void*>(&shutterStatusStr)});
+      else if(member == "shutterState") return logMetaDetail({"SHUTTER", logMeta::valTypes::String, logMeta::metaTypes::State, reinterpret_cast<void*>(&shutterState)});
+      else if(member == "synchro") return logMetaDetail({"SYNCHRO", logMeta::valTypes::Bool, logMeta::metaTypes::State, reinterpret_cast<void*>(&synchro)});
+      else if(member == "vshift") return logMetaDetail({"VSHIFTSPD", logMeta::valTypes::Float, logMeta::metaTypes::State, reinterpret_cast<void*>(&vshift)});
+      else if(member == "cropMode") return logMetaDetail({"CROPMODE", logMeta::valTypes::Bool, logMeta::metaTypes::State, reinterpret_cast<void*>(&cropMode)});
       else
       {
          std::cerr << "No string member " << member << " in telem_stdcam\n";

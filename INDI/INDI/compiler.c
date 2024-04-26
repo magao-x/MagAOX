@@ -323,7 +323,7 @@ next_token ()
 	    /* looks like a constant.
 	     * leading +- already handled
 	     */
-	    if (nconsts > MAX_OPX) {
+	    if (nconsts >= MAX_OPX) {
 		(void) sprintf (err_msg, toomc, MAX_OPX);
 		return (ERR);
 	    }
@@ -339,7 +339,7 @@ next_token ()
 	    }
 	} else if (c == '"') {
 	    /* a variable */
-	    if (nvars > MAX_OPX) {
+	    if (nvars >= MAX_OPX) {
 		(void) sprintf (err_msg, toomv, MAX_OPX);
 		return (ERR);
 	    }

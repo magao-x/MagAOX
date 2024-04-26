@@ -49,7 +49,7 @@ struct telem_dmmodes : public flatbuffer_log
                        flatlogs::msgLenT len            ///< [in] length of msgBuffer.
                      )
    {
-      auto verifier = flatbuffers::Verifier( (uint8_t*) flatlogs::logHeader::messageBuffer(logBuff), static_cast<size_t>(len));
+      auto verifier = flatbuffers::Verifier( static_cast<uint8_t*>(flatlogs::logHeader::messageBuffer(logBuff)), static_cast<size_t>(len));
       return VerifyTelem_dmmodes_fbBuffer(verifier);
    }
 
@@ -103,7 +103,7 @@ struct telem_dmmodes : public flatbuffer_log
      */ 
    static logMetaDetail getAccessor( const std::string & member /**< [in] the name of the member */ )
    {
-      if(member == "amps") return logMetaDetail({"AMPS", logMeta::valTypes::Vector_Float, logMeta::metaTypes::Continuous, (void *) &amps, false});
+      if(member == "amps") return logMetaDetail({"AMPS", logMeta::valTypes::Vector_Float, logMeta::metaTypes::Continuous, reinterpret_cast<void*>(&amps), false});
       else
       {
          std::cerr << "No string member " << member << " in telem_dmmodes\n";

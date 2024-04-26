@@ -258,8 +258,6 @@ int refRMS::appLogic()
    {
       if(m_rms.size() >= m_rms.maxEntries())
       {
-         cbIndexT refEntry = m_rms.nextEntry();
-
          m_rms_1sec = 0;
          if(m_rms.size() > 1.0*m_fps)
          {

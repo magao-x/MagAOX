@@ -202,8 +202,13 @@ rm $1_size.txt
 
 tmux send-keys -t ${tmuxname} "echo \"SYNCMODE = ${SYNCMODE}\"" C-m
 tmux send-keys -t ${tmuxname} "cacao -n shmimTCPtransmit-$1" C-m
-if [ "$CPUSETFLAG" = "1" ]; then
-tmux send-keys -t ${tmuxname} "csetpmove ${CPUset}" C-m
+
+if [ -z "${SHMIMTCP_CPUSET}" ] && [ "$CPUSETFLAG" = "1" ]; then
+    tmux send-keys -t ${tmuxname} "csetpmove ${CPUset}" C-m
+
+elif [ -n "${SHMIMTCP_CPUSET}" ]; then
+    tmux send-keys -t ${tmuxname} "csetpmove ${SHMIMTCP_CPUSET}" C-m
+
 fi
 tmux send-keys -t ${tmuxname} "readshmim $1" C-m
 tmux send-keys -t ${tmuxname} "imnetwtransmit $1 $2 $3 ${SYNCMODE} ${RTprio}" C-m

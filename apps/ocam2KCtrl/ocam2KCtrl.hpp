@@ -48,83 +48,94 @@ namespace app
 class ocam2KCtrl : public MagAOXApp<>, public dev::stdCamera<ocam2KCtrl>, public dev::edtCamera<ocam2KCtrl>, public dev::frameGrabber<ocam2KCtrl>,  
                                            public dev::dssShutter<ocam2KCtrl>, public dev::telemeter<ocam2KCtrl>
 {
-   friend class dev::stdCamera<ocam2KCtrl>;
-   friend class dev::edtCamera<ocam2KCtrl>;
-   friend class dev::frameGrabber<ocam2KCtrl>;
-   friend class dev::dssShutter<ocam2KCtrl>;
-   friend class dev::telemeter<ocam2KCtrl>;
-   
-   typedef MagAOXApp<> MagAOXAppT;
+    friend class dev::stdCamera<ocam2KCtrl>;
+    friend class dev::edtCamera<ocam2KCtrl>;
+    friend class dev::frameGrabber<ocam2KCtrl>;
+    friend class dev::dssShutter<ocam2KCtrl>;
+    friend class dev::telemeter<ocam2KCtrl>;
+    
+    typedef MagAOXApp<> MagAOXAppT;
    
 public:
-   /** \name app::dev Configurations
-     *@{
-     */
-   static constexpr bool c_stdCamera_tempControl = true; ///< app::dev config to tell stdCamera to expose temperature controls
-   
-   static constexpr bool c_stdCamera_temp = true; ///< app::dev config to tell stdCamera to expose temperature (ignored since tempControl==true)
-
-   static constexpr bool c_stdCamera_readoutSpeed = false; ///< app::dev config to tell stdCamera not to expose readout speed controls
-   
-   static constexpr bool c_stdCamera_vShiftSpeed = false; ///< app:dev config to tell stdCamera not to expose vertical shift speed control
-
-   static constexpr bool c_stdCamera_emGain = true; ///< app::dev config to tell stdCamera to expose EM gain controls 
-   
-   static constexpr bool c_stdCamera_exptimeCtrl = false; ///< app::dev config to tell stdCamera not to expose exposure time controls
-   
-   static constexpr bool c_stdCamera_fpsCtrl = true; ///< app::dev config to tell stdCamera to expose FPS controls
-
-   static constexpr bool c_stdCamera_fps = true; ///< app::dev config to tell stdCamera not to expose FPS status (ignored since fpsCtrl==true)
-   
-   static constexpr bool c_stdCamera_synchro = true; ///< app::dev config to tell stdCamera to expose synchro mode controls
-
-   static constexpr bool c_stdCamera_usesModes = true; ///< app:dev config to tell stdCamera not to expose mode controls
-   
-   static constexpr bool c_stdCamera_usesROI = false; ///< app:dev config to tell stdCamera to expose ROI controls
-
-   static constexpr bool c_stdCamera_cropMode = false; ///< app:dev config to tell stdCamera to expose Crop Mode controls
-   
-   static constexpr bool c_stdCamera_hasShutter = true; ///< app:dev config to tell stdCamera to expose shutter controls
-
-   static constexpr bool c_stdCamera_usesStateString = true; ///< app::dev confg to tell stdCamera to expose the state string property
-
-   static constexpr bool c_edtCamera_relativeConfigPath = true; ///< app::dev config to tell edtCamera to use relative path to camera config file
-   
-   static constexpr bool c_frameGrabber_flippable = false; ///< app:dev config to tell framegrabber these images can not be flipped
-   
-   ///@}
+    /** \name app::dev Configurations
+      *@{
+      */
+    static constexpr bool c_stdCamera_tempControl = true; ///< app::dev config to tell stdCamera to expose temperature controls
+    
+    static constexpr bool c_stdCamera_temp = true; ///< app::dev config to tell stdCamera to expose temperature (ignored since tempControl==true)
+ 
+    static constexpr bool c_stdCamera_readoutSpeed = false; ///< app::dev config to tell stdCamera not to expose readout speed controls
+    
+    static constexpr bool c_stdCamera_vShiftSpeed = false; ///< app:dev config to tell stdCamera not to expose vertical shift speed control
+ 
+    static constexpr bool c_stdCamera_emGain = true; ///< app::dev config to tell stdCamera to expose EM gain controls 
+    
+    static constexpr bool c_stdCamera_exptimeCtrl = false; ///< app::dev config to tell stdCamera not to expose exposure time controls
+    
+    static constexpr bool c_stdCamera_fpsCtrl = true; ///< app::dev config to tell stdCamera to expose FPS controls
+ 
+    static constexpr bool c_stdCamera_fps = true; ///< app::dev config to tell stdCamera not to expose FPS status (ignored since fpsCtrl==true)
+    
+    static constexpr bool c_stdCamera_synchro = true; ///< app::dev config to tell stdCamera to expose synchro mode controls
+ 
+    static constexpr bool c_stdCamera_usesModes = true; ///< app:dev config to tell stdCamera not to expose mode controls
+    
+    static constexpr bool c_stdCamera_usesROI = false; ///< app:dev config to tell stdCamera to expose ROI controls
+ 
+    static constexpr bool c_stdCamera_cropMode = false; ///< app:dev config to tell stdCamera to expose Crop Mode controls
+    
+    static constexpr bool c_stdCamera_hasShutter = true; ///< app:dev config to tell stdCamera to expose shutter controls
+ 
+    static constexpr bool c_stdCamera_usesStateString = true; ///< app::dev confg to tell stdCamera to expose the state string property
+ 
+    static constexpr bool c_edtCamera_relativeConfigPath = true; ///< app::dev config to tell edtCamera to use relative path to camera config file
+    
+    static constexpr bool c_frameGrabber_flippable = false; ///< app:dev config to tell framegrabber these images can not be flipped
+    
+    ///@}
 protected:
 
-   /** \name configurable parameters 
-     *@{
-     */ 
-
-   //Camera:
-
-   std::string m_ocamDescrambleFile; ///< Path the OCAM 2K pixel descrambling file, relative to MagAO-X config directory.
-
+    /** \name configurable parameters 
+      *@{
+      */ 
+ 
+    //Camera:
+ 
+    std::string m_ocamDescrambleFile; ///< Path the OCAM 2K pixel descrambling file, relative to MagAO-X config directory.
+ 
+    
+    
+    ///@}
+    
+    ocam2_id m_ocam2_id {0}; ///< OCAM SDK id.
+    
+    long m_currImageNumber {-1}; ///< The current image number, retrieved from the image itself.
+        
+    long m_lastImageNumber {-1};  ///< The last image number, saved from the last loop through.
+ 
+    bool m_protectionReset {false}; ///< Flag indicating that protection has been reset at least once.
+    
+    unsigned m_protectionResetConfirmed {0}; ///< Counter indicating the number of times that the protection reset has been requested within 10 seconds, for confirmation.
+ 
+    double m_protectionResetReqTime {0}; ///< The time at which protection reset was requested.  You have 10 seconds to confirm.
+ 
+    bool m_poweredOn {false};
+    
+    ocamTemps m_temps; ///< Structure holding the last temperature measurement.
    
-   
-   ///@}
-   
-   ocam2_id m_ocam2_id {0}; ///< OCAM SDK id.
-   
-   long m_currImageNumber {-1}; ///< The current image number, retrieved from the image itself.
-       
-   long m_lastImageNumber {-1};  ///< The last image number, saved from the last loop through.
+    unsigned m_digitalBinX {1};
+    
+    unsigned m_digitalBinY {1};
 
-   int m_framesSkipped {0};
+    bool m_digitalBin {false};
 
-   bool m_protectionReset {false}; ///< Flag indicating that protection has been reset at least once.
-   
-   unsigned m_protectionResetConfirmed {0}; ///< Counter indicating the number of times that the protection reset has been requested within 10 seconds, for confirmation.
+    mx::improc::eigenImage<int16_t> m_digitalBinWork;
 
-   double m_protectionResetReqTime {0}; ///< The time at which protection reset was requested.  You have 10 seconds to confirm.
+    std::string m_syncDevice {"fxngensync"};
+    std::string m_syncFreqProp {"C1freq"};
 
-   bool m_poweredOn {false};
-   
-   ocamTemps m_temps; ///< Structure holding the last temperature measurement.
-   
+    float m_syncFreq {0};
+
 public:
 
    ///Default c'tor
@@ -225,7 +236,7 @@ public:
      */
    int setNextROI();
    
-   /// Sets the shutter state, via call to dssShutter::setShutter(int) [stdCamera interface]
+   /// Sets the shutter state, via call to dssShutter::setShutterState(int) [stdCamera interface]
    /**
      * \returns 0 always
      */
@@ -311,8 +322,12 @@ protected:
    pcf::IndiProperty m_indiP_emProt;
    pcf::IndiProperty m_indiP_emProtReset;
 
+   pcf::IndiProperty m_indiP_syncFreq;
+
 public:
    INDI_NEWCALLBACK_DECL(ocam2KCtrl, m_indiP_emProtReset);
+
+   INDI_SETCALLBACK_DECL(ocam2KCtrl, m_indiP_syncFreq);
 
    /** \name Telemeter Interface
      * 
@@ -421,6 +436,8 @@ int ocam2KCtrl::appStartup()
    createStandardIndiRequestSw( m_indiP_emProtReset, "emProtectionReset", "Reset", "EM Protection"); 
    registerIndiPropertyNew( m_indiP_emProtReset, INDI_NEWCALLBACK(m_indiP_emProtReset));
    
+   REG_INDI_SETPROP(m_indiP_syncFreq, m_syncDevice, m_syncFreqProp);
+
    if(dev::stdCamera<ocam2KCtrl>::appStartup() < 0)
    {
       return log<software_critical,-1>({__FILE__,__LINE__});
@@ -541,12 +558,6 @@ int ocam2KCtrl::appLogic()
 
    if( state() == stateCodes::READY || state() == stateCodes::OPERATING )
    {
-
-      if(m_framesSkipped)
-      {
-         log<text_log>("FRAMES SKIPPED -- RECONFIGURE", logPrio::LOG_ERROR);
-      }
-
       //Get a lock if we can
       std::unique_lock<std::mutex> lock(m_indiMutex, std::try_to_lock);
 
@@ -888,88 +899,134 @@ int ocam2KCtrl::setTempSetPt()
 inline
 int ocam2KCtrl::getFPS()
 {
-   std::string response;
+    if(!m_synchro)
+    {
+        std::string response;
 
-   if( pdvSerialWriteRead( response, "fps") == 0) // m_pdv, "fps", m_readTimeout) == 0)
-   {
-      float fps;
-      if(parseFPS( fps, response ) < 0) 
-      {
-         if(powerState() != 1 || powerStateTarget() != 1) return -1;
-         return log<software_error, -1>({__FILE__, __LINE__, "fps parse error"});
-      }
-      m_fps = fps;
+        if( pdvSerialWriteRead( response, "fps") == 0) // m_pdv, "fps", m_readTimeout) == 0)
+        {
+            float fps;
+            if(parseFPS( fps, response ) < 0) 
+            {
+                if(powerState() != 1 || powerStateTarget() != 1) return -1;
+                return log<software_error, -1>({__FILE__, __LINE__, "fps parse error"});
+            }
+            m_fps = fps;
 
-      recordCamera();
+            recordCamera();
       
-      return 0;
+            return 0;
 
-   }
-   else return log<software_error,-1>({__FILE__, __LINE__});
+        }
+        else 
+        {
+            return log<software_error,-1>({__FILE__, __LINE__});
+        }
+    }
+    else 
+    {
+        m_fps = m_syncFreq;
+        recordCamera();
 
+        return 0;
+    }
 }
 
 inline
 int ocam2KCtrl::setFPS()
 {
-   std::string response;
+    std::string fpsStr= std::to_string(m_fpsSet);
 
-   ///\todo should we have fps range checks or let camera deal with it?
+    if(!m_synchro)
+    {
+        std::string response;
+    
+        if( pdvSerialWriteRead( response, "fps " + fpsStr ) == 0)
+        {
+            ///\todo check response
+            std::cerr << "fps " << fpsStr << " response: " << response << "\n";
+            log<text_log>({"set fps: " + fpsStr});
+      
+            //We always want to reset the latency circular buffers
+            ///\todo verify that this works!! 
+            m_nextMode = m_modeName;
+            m_reconfig = true;
+
+        }
+        else 
+        {
+            if(powerState() != 1 || powerStateTarget() != 1) return -1;
+            return log<software_error,-1>({__FILE__, __LINE__});
+        }
+    }
+    else 
+    {
+        std::cerr << "setting: " << fpsStr << "\n";
+
+        pcf::IndiProperty ipFreq(pcf::IndiProperty::Number);
    
-   std::string fpsStr= std::to_string(m_fpsSet);
-   if( pdvSerialWriteRead( response, "fps " + fpsStr ) == 0)
-   {
-      ///\todo check response
-      std::cerr << "fps " << fpsStr << " response: " << response << "\n";
-      log<text_log>({"set fps: " + fpsStr});
+        ipFreq.setDevice(m_syncDevice);
+        ipFreq.setName(m_syncFreqProp);
+        ipFreq.add(pcf::IndiElement("target"));
+   
+        ipFreq["target"] = fpsStr;
+   
+        sendNewProperty(ipFreq);
+    }
+
+    
       
-      //We always want to reset the latency circular buffers
-      ///\todo verify that this works!! 
-      m_nextMode = m_modeName;
-      m_reconfig = true;
-      
-      return 0;
-   }
-   else 
-   {
-      if(powerState() != 1 || powerStateTarget() != 1) return -1;
-      return log<software_error,-1>({__FILE__, __LINE__});
-   }
+    return 0;
 }
 
 inline
 int ocam2KCtrl::setSynchro()
 {
-   std::string response;
+    std::string response;
    
-   std::string sStr;
-   if(m_synchroSet) sStr = "on";
-   else sStr = "off";
+    //First set the actual FPS to 0 to get to max
+    std::string fpsStr= std::to_string(0);
+    if( pdvSerialWriteRead( response, "fps " + fpsStr ) == 0)
+    {
+        ///\todo check response
+        std::cerr << "fps " << fpsStr << " response: " << response << "\n";
+        log<text_log>({"set fps: " + fpsStr});      
+    }
+    else 
+    {
+        if(powerState() != 1 || powerStateTarget() != 1) return -1;
+        return log<software_error,-1>({__FILE__, __LINE__});
+    }
 
-   if( pdvSerialWriteRead( response, "synchro " + sStr ) == 0)
-   {
-      ///\todo check response
-      std::cerr << "synchro " << sStr << " resonse: " << response << "\n";
-      log<text_log>({"set synchro: " + sStr});
+    //Now actually turn synchro on
+    std::string sStr;
+    if(m_synchroSet) sStr = "on";
+    else sStr = "off";
+    if( pdvSerialWriteRead( response, "synchro " + sStr ) == 0)
+    {
+        ///\todo check response
+        std::cerr << "synchro " << sStr << " resonse: " << response << "\n";
+        log<text_log>({"set synchro: " + sStr});
       
-      m_synchro = m_synchroSet;
+        m_synchro = m_synchroSet;
 
-      if(m_synchro == false) 
-      {
-         updateSwitchIfChanged(m_indiP_synchro, "toggle", pcf::IndiElement::Off, INDI_IDLE);
-      }
-      else
-      {
-         updateSwitchIfChanged(m_indiP_synchro, "toggle", pcf::IndiElement::On, INDI_OK);
-      }
+        if(m_synchro == false) 
+        {
+            updateSwitchIfChanged(m_indiP_synchro, "toggle", pcf::IndiElement::Off, INDI_IDLE);
+        }
+        else
+        {
+            updateSwitchIfChanged(m_indiP_synchro, "toggle", pcf::IndiElement::On, INDI_OK);
+        }
+    }
+    else 
+    {
+        if(powerState() != 1 || powerStateTarget() != 1) return -1;
+        return log<software_error,-1>({__FILE__, __LINE__});
+    }
 
-      return 0;
-   }
-   else 
-   {
-      if(powerState() != 1 || powerStateTarget() != 1) return -1;
-      return log<software_error,-1>({__FILE__, __LINE__});
-   }
+    //Finally we set the FPS of the synchro device
+    return setFPS();
 }
 
 inline 
@@ -987,7 +1044,7 @@ int ocam2KCtrl::setNextROI()
 inline 
 int ocam2KCtrl::setShutter(int sh)
 {
-   return dssShutter<ocam2KCtrl>::setShutter(sh);
+   return dssShutter<ocam2KCtrl>::setShutterState(sh);
 }
 
 inline
@@ -1111,107 +1168,137 @@ int ocam2KCtrl::setEMGain( )
 inline
 int ocam2KCtrl::configureAcquisition()
 {
-   //lock mutex
-   std::unique_lock<std::mutex> lock(m_indiMutex);
-   
-   //Send command to camera to place it in the correct mode
-   std::string response;
-   if( pdvSerialWriteRead( response, m_cameraModes[m_modeName].m_serialCommand) != 0) //m_pdv, m_cameraModes[m_modeName].m_serialCommand, m_readTimeout) != 0)
-   {
-      if(powerState() != 1 || powerStateTarget() != 1) return -1;
-
-      log<software_error>({__FILE__, __LINE__, "Error sending command to set mode"});
-      sleep(1);
-      return -1;
-   }
-   
-   m_currentROI.x = 119.5;
-   m_currentROI.y = 119.5;
-   m_currentROI.w = 240;
-   m_currentROI.h = 240;
-   m_currentROI.bin_x = m_cameraModes[m_modeName].m_binningX;
-   m_currentROI.bin_y = m_cameraModes[m_modeName].m_binningY;
-   
-   recordCamera();
-   
-    ///\todo check response of pdvSerialWriteRead
-   log<text_log>("camera configured with: " +m_cameraModes[m_modeName].m_serialCommand);
-   
-   if(m_fpsSet > 0) setFPS();
-   
-   log<text_log>("Send command to set mode: " + m_cameraModes[m_modeName].m_serialCommand);
-   log<text_log>("Response was: " + response);
+    //lock mutex
+    std::unique_lock<std::mutex> lock(m_indiMutex);
+    
+    //Send command to camera to place it in the correct mode
+    std::string response;
+    if( pdvSerialWriteRead( response, m_cameraModes[m_modeName].m_serialCommand) != 0) //m_pdv, m_cameraModes[m_modeName].m_serialCommand, m_readTimeout) != 0)
+    {
+        if(powerState() != 1 || powerStateTarget() != 1) return -1;
   
-   /* Initialize the OCAM2 SDK
-       */
-
-   if(m_ocam2_id > 0)
-   {
-      ocam2_exit(m_ocam2_id);
-   }
-   ocam2_rc rc;
-   ocam2_mode mode;
-
-   int OCAM_SZw;
-   int OCAM_SZh;
-   if(m_raw_height == 121)
-   {
-      mode = OCAM2_NORMAL;
-      OCAM_SZw = 240;
-      OCAM_SZh = 240;
-   }
-   else if (m_raw_height == 62)
-   {
-      mode = OCAM2_BINNING;
-      OCAM_SZw = 120;
-      OCAM_SZh = 120;
-   }
-   else if (m_raw_height == 41)
-   {
-      mode = OCAM2_BINNING1x3;
-      OCAM_SZw = 240;
-      OCAM_SZh = 80;
-   }
-   else if (m_raw_height == 31)
-   {
-      mode = OCAM2_BINNING1x4;
-      OCAM_SZw = 240;
-      OCAM_SZh = 60;
-   }
-   else
-   {
-      log<text_log>("Unrecognized OCAM2 mode.", logPrio::LOG_ERROR);
-      return -1;
-   }
-
-   std::string ocamDescrambleFile = m_configDir + "/" + m_ocamDescrambleFile;
-
-   std::cerr << "ocamDescrambleFile: " << ocamDescrambleFile << std::endl;
+        log<software_error>({__FILE__, __LINE__, "Error sending command to set mode"});
+        sleep(1);
+        return -1;
+    }
+    
+    m_currentROI.x = 119.5;
+    m_currentROI.y = 119.5;
+    m_currentROI.w = 240;
+    m_currentROI.h = 240;
+    m_currentROI.bin_x = m_cameraModes[m_modeName].m_binningX;
+    m_currentROI.bin_y = m_cameraModes[m_modeName].m_binningY;
+    
+    m_digitalBinX = m_cameraModes[m_modeName].m_digitalBinX;
+    m_digitalBinY = m_cameraModes[m_modeName].m_digitalBinY;
+    
+    if(m_digitalBinX > 1)
+    {
+        m_digitalBin = true;
+        std::cerr << "digital binning!\n";
+    }
+    else
+    {
+        m_digitalBin = false;
+    }
+ 
+    recordCamera();
+    
+     ///\todo check response of pdvSerialWriteRead
+    log<text_log>("camera configured with: " +m_cameraModes[m_modeName].m_serialCommand);
+    
+    if(m_fpsSet > 0) setFPS();
+    
+    log<text_log>("Send command to set mode: " + m_cameraModes[m_modeName].m_serialCommand);
+    log<text_log>("Response was: " + response);
    
-   rc=ocam2_init(mode, ocamDescrambleFile.c_str(), &m_ocam2_id);
-   
-   if (rc != OCAM2_OK)
-   {
-      if(powerState() != 1 || powerStateTarget() != 1) return -1;
-      log<text_log>("ocam2_init error. Failed to initialize OCAM SDK with descramble file: " + ocamDescrambleFile, logPrio::LOG_ERROR);
-      return -1;
-   }
-   
+    if(setSynchro() < 0)
+    { 
+        log<software_error>({__FILE__, __LINE__, "Error setting synchro during configureAcquisition"});
+    }
+ 
+    /* Initialize the OCAM2 SDK
+        */
+ 
+    if(m_ocam2_id > 0)
+    {
+        ocam2_exit(m_ocam2_id);
+    }
+    ocam2_rc rc;
+    ocam2_mode mode;
+ 
+    int OCAM_SZw;
+    int OCAM_SZh;
+    if(m_raw_height == 121)
+    {
+        mode = OCAM2_NORMAL;
+        OCAM_SZw = 240;
+        OCAM_SZh = 240;
+    }
+    else if (m_raw_height == 62)
+    {
+        mode = OCAM2_BINNING;
+        OCAM_SZw = 120;
+        OCAM_SZh = 120;
+    }
+    else if (m_raw_height == 41)
+    {
+        mode = OCAM2_BINNING1x3;
+        OCAM_SZw = 240;
+        OCAM_SZh = 80;
+    }
+    else if (m_raw_height == 31)
+    {
+        mode = OCAM2_BINNING1x4;
+        OCAM_SZw = 240;
+        OCAM_SZh = 60;
+    }
+    else
+    {
+        log<text_log>("Unrecognized OCAM2 mode.", logPrio::LOG_ERROR);
+        return -1;
+    }
+ 
+    std::string ocamDescrambleFile = m_configDir + "/" + m_ocamDescrambleFile;
+ 
+    std::cerr << "ocamDescrambleFile: " << ocamDescrambleFile << std::endl;
+    
+    rc=ocam2_init(mode, ocamDescrambleFile.c_str(), &m_ocam2_id);
+    
+    if (rc != OCAM2_OK)
+    {
+        if(powerState() != 1 || powerStateTarget() != 1) return -1;
+        log<text_log>("ocam2_init error. Failed to initialize OCAM SDK with descramble file: " + ocamDescrambleFile, logPrio::LOG_ERROR);
+        return -1;
+    }
+    
+ 
+    log<text_log>("OCAM2K initialized. id: " + std::to_string(m_ocam2_id));
+ 
+    log<text_log>(std::string("OCAM2K mode is:") + ocam2_modeStr(ocam2_getMode(m_ocam2_id)));
+    
+    
+    
+    
+    if(m_digitalBin)
+    {
+        std::cerr << "and digital binning!\n";
+        m_digitalBinWork.resize(OCAM_SZw, OCAM_SZh);
 
-   log<text_log>("OCAM2K initialized. id: " + std::to_string(m_ocam2_id));
+        m_width = OCAM_SZw / m_digitalBinX;
+        m_height = OCAM_SZh / m_digitalBinY;
+    }
+    else
+    {
+        m_width = OCAM_SZw;
+        m_height = OCAM_SZh;
+    }
 
-   log<text_log>(std::string("OCAM2K mode is:") + ocam2_modeStr(ocam2_getMode(m_ocam2_id)));
-   
-   m_width = OCAM_SZw;
-   m_height = OCAM_SZh;
-   m_dataType = _DATATYPE_UINT16;
-   
-   if(m_framesSkipped == 1) m_framesSkipped = 2; //This means frame skip detected
-   else if(m_framesSkipped == 2) m_framesSkipped = 0; //This means user requested reconfig after frame skip detected.
+    m_dataType = _DATATYPE_UINT16;
 
-   state(stateCodes::OPERATING);
-   
-   return 0;
+    state(stateCodes::OPERATING);
+    
+    return 0;
 }
  
 inline
@@ -1267,11 +1354,9 @@ int ocam2KCtrl::acquireAndCheckValid()
             
             log<text_log>("frames skipped: " + std::to_string(framesSkipped), logPrio::LOG_ERROR);
             
-	    // and go on and try to use it.
-	    //
+            m_lastImageNumber = -1;
             m_nextMode = m_modeName;
             m_reconfig = 1;
-            m_framesSkipped = 1;
             return 1;
             
          }
@@ -1287,7 +1372,6 @@ int ocam2KCtrl::acquireAndCheckValid()
       
             //Reset the counters.
             m_lastImageNumber = -1;
-            m_framesSkipped = 1;
             return 1;
          
          }
@@ -1300,10 +1384,37 @@ int ocam2KCtrl::acquireAndCheckValid()
 inline
 int ocam2KCtrl::loadImageIntoStream(void * dest)
 {
-   unsigned currImageNumber = 0;
-   ocam2_descramble(m_ocam2_id, &currImageNumber, (short int *) dest, (short int *) m_image_p);
+    unsigned currImageNumber = 0;
+
+    if(!m_digitalBin)
+    {
+        ocam2_descramble(m_ocam2_id, &currImageNumber, reinterpret_cast<int16_t *>(dest), reinterpret_cast<int16_t *>(m_image_p));
+        //memcpy(dest, m_image_p, 120*120*2); //This is about 10 usec faster -- but we have to descramble.
+    }
+    else
+    {
+        ocam2_descramble(m_ocam2_id, &currImageNumber, m_digitalBinWork.data(), reinterpret_cast<int16_t *>(m_image_p));
+
+        mx::improc::eigenMap<int16_t> destMap( reinterpret_cast<int16_t*>(dest), m_width, m_height);
+
+        if(m_digitalBinX > 1)
+        {
+            for(int cc = 0; cc < destMap.cols(); ++cc)
+            {
+                for(int rr = 0; rr < destMap.rows(); ++rr)
+                {
+                    destMap(rr,cc)  = m_digitalBinWork(rr*m_digitalBinX + 0, cc);
+                    
+                    for(unsigned b = 1; b < m_digitalBinX; ++b)
+                    {
+                        destMap(rr,cc)  = m_digitalBinWork(rr*m_digitalBinX + b,cc);
+                    }
+                }
+            }
+        }
+    }
+
    
-   //memcpy(dest, m_image_p, 120*120*2); //This is about 10 usec faster -- but we have to descramble.
    return 0;
 }
    
@@ -1357,6 +1468,30 @@ INDI_NEWCALLBACK_DEFN(ocam2KCtrl, m_indiP_emProtReset)(const pcf::IndiProperty &
 
    //If here, this is a confirmation.      
    return resetEMProtection();
+}
+
+INDI_SETCALLBACK_DEFN(ocam2KCtrl, m_indiP_syncFreq)(const pcf::IndiProperty &ipRecv)
+{
+    INDI_VALIDATE_CALLBACK_PROPS(ipRecv, m_indiP_syncFreq)
+
+    if(!ipRecv.find("current")) 
+    {   
+        return -1;
+    }
+
+    m_syncFreq = ipRecv["current"].get<double>();
+
+    if(m_synchro && m_syncFreq != m_fps)
+    {
+        recordCamera(true);
+        m_fps = m_syncFreq;
+        
+        //We always want to reset the latency circular buffers
+        m_nextMode = m_modeName;
+        m_reconfig = true;
+    }
+
+    return 0;
 }
 
 inline

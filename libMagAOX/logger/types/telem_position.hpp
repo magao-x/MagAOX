@@ -10,7 +10,6 @@
 
 #include "generated/telem_position_generated.h"
 #include "flatbuffer_log.hpp"
-#include "../logMeta.hpp"
 
 namespace MagAOX
 {
@@ -48,7 +47,7 @@ struct telem_position : public flatbuffer_log
                        flatlogs::msgLenT len            ///< [in] length of msgBuffer.
                      )
    {
-      auto verifier = flatbuffers::Verifier( (uint8_t*) flatlogs::logHeader::messageBuffer(logBuff), static_cast<size_t>(len));
+      auto verifier = flatbuffers::Verifier( static_cast<uint8_t*>(flatlogs::logHeader::messageBuffer(logBuff)), static_cast<size_t>(len));
       return VerifyTelem_position_fbBuffer(verifier);
    }
 
@@ -84,7 +83,7 @@ struct telem_position : public flatbuffer_log
      */ 
    static logMetaDetail getAccessor( const std::string & member /**< [in] the name of the member */ )
    {
-      if(     member == "pos") return logMetaDetail({"POS", logMeta::valTypes::Float, logMeta::metaTypes::Continuous, (void *) &pos});
+      if(     member == "pos") return logMetaDetail({"POS", logMeta::valTypes::Float, logMeta::metaTypes::Continuous, reinterpret_cast<void*>(&pos)});
       else
       {
          std::cerr << "No string member " << member << " in telem_position\n";

@@ -1,5 +1,6 @@
 SELF_DIR := $(abspath $(dir $(lastword $(MAKEFILE_LIST))))
--include $(SELF_DIR)/../local/common.mk
+-include $(SELF_DIR)/local/common.mk
+-include $(SELF_DIR)/Make/python.mk
 
 apps_common = \
 	sshDigger \
@@ -11,14 +12,23 @@ apps_common = \
 	streamWriter \
 	dmMode \
 	shmimIntegrator \
-	timeSeriesSimulator
+	timeSeriesSimulator \
+	#dbIngest
 
 apps_rtcicc = \
-	bmcCtrl \
-	rhusbMon \
-	alpaoCtrl \
+        alignLoop \
+        acronameUsbHub \
+	baslerCtrl \
+        bmcCtrl \
+	flipperCtrl \
+        hsfwCtrl \
+        rhusbMon \
 	cacaoInterface \
+        kcubeCtrl \
+        modalPSDs \
 	userGainCtrl \
+        refRMS \
+        streamCircBuff \
 	zaberCtrl \
 	zaberLowLevel \
 	picoMotorCtrl
@@ -38,20 +48,16 @@ apps_rtc = \
 
 
 apps_icc = \
-	acronameUsbHub \
-	flipperCtrl \
+	dmPokeCenter \
 	filterWheelCtrl \
-	hsfwCtrl \
-	baslerCtrl \
 	picamCtrl \
 	pvcamCtrl \
 	smc100ccCtrl \
-	andorCtrl \
 	usbtempMon \
 	xt1121Ctrl \
 	xt1121DCDU \
 	koolanceCtrl \
-	tcsInterface
+	coralign 
 
 apps_aoc = \
 	trippLitePDU \
@@ -60,7 +66,8 @@ apps_aoc = \
 	kTracker \
 	koolanceCtrl \
 	observerCtrl \
-	siglentSDG
+	siglentSDG \
+	audibleAlerts
 
 
 apps_tic = \
@@ -113,7 +120,8 @@ all_rtimv_plugins = \
 	cameraStatus \
 	indiDictionary \
 	pwfsAlignment \
-	dmStatus
+	dmStatus \
+	warnings
 
 ifeq ($(MAGAOX_ROLE),RTC)
   rtimv_plugins_to_build =
@@ -129,6 +137,7 @@ endif
 
 utils_to_build = \
 	logdump \
+	logsurgeon \
 	logstream \
 	cursesINDI \
 	xrif2shmim \
@@ -139,7 +148,6 @@ scripts_to_install = magaox \
 	sync_cacao \
 	xctrl \
 	netconsole_logger \
-	creaimshm \
 	dmdispbridge \
 	shmimTCPreceive \
 	shmimTCPtransmit \
@@ -159,7 +167,7 @@ scripts_to_install = magaox \
 
 all: indi_all libs_all flatlogs apps_all guis_all utils_all
 
-install: indi_install libs_install flatlogs_all apps_install guis_install utils_install scripts_install rtscripts_install
+install: indi_install libs_install flatlogs_all apps_install guis_install utils_install scripts_install rtscripts_install python_install
 
 #We clean just libMagAOX, and the apps, guis, and utils for normal devel work.
 clean: lib_clean apps_clean guis_clean utils_clean tests_clean
@@ -256,7 +264,7 @@ scripts_install:
 	done
 
 rtscripts_install:
-	for scriptname in make_cpusets procs_to_cpusets; do \
+	for scriptname in make_cpusets move_irqs; do \
 		sudo install -d /opt/MagAOX/bin && \
 		if [ -e rtSetup/$(MAGAOX_ROLE)/$$scriptname ]; then \
 			sudo install rtSetup/$(MAGAOX_ROLE)/$$scriptname /opt/MagAOX/bin/$$scriptname && \
@@ -289,6 +297,11 @@ test: tests_clean
 tests_clean:
 	cd tests; ${MAKE} clean || exit 1;
 	
+
+.PHONY: python_install
+python_install:
+	sudo $(PYTHON) -m pip install ./python/
+
 .PHONY: doc
 doc:
 	doxygen doc/config/Doxyfile.libMagAOX

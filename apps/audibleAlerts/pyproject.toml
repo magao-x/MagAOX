@@ -1,0 +1,18 @@
+[build-system]
+requires = ["setuptools"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "audibleAlerts"
+description =  "Audible alerting and text-to-speech for MagAO-X"
+version = "2023.12.21"
+dependencies = [
+  "xconf",
+  "purepyindi2",
+]
+authors = [
+  {name = "Joseph D. Long", email = "me@joseph-long.com"},
+]
+
+[project.scripts]
+audibleAlerts = "audibleAlerts:core.AudibleAlerts.console_app"

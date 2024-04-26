@@ -24,7 +24,7 @@ fi
 function log_error() {
     echo -e "$(tput setaf 1 2>/dev/null)$1$(tput sgr0 2>/dev/null)"
 }
-function exit_error() {
+function exit_with_error() {
   log_error "$1"
   exit 1
 }

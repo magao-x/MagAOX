@@ -37,15 +37,15 @@ struct software_log : public flatbuffer_log
       /// C'tor with full specification.
       messageT( const char * file, ///< [in] The file of the error, should always be \c \_\_FILE\_\_
                 const uint32_t line, ///< [in] The line number of the error, should always be \c \_\_LINE\_\_ 
-                const int32_t  code_errno, ///< [in] The errno code at the time of the log entry. Only errno should be passed here, so strerror can be used later.
-                const int32_t  code_other, ///< [in] Some other error code, such as a return value or library code.
-                const char * expl  ///< [in] explanatory text about the software event
+                const int32_t  errnoCode, ///< [in] The errno code at the time of the log entry. Only errno should be passed here, so strerror can be used later.
+                const int32_t  otherCode, ///< [in] Some other error code, such as a return value or library code.
+                const char * explanation  ///< [in] explanatory text about the software event
               )
       {
          auto _file = builder.CreateString(file);
-         auto _expl = builder.CreateString(expl);
+         auto _expl = builder.CreateString(explanation);
                                     
-         auto gs = CreateSoftware_log_fb(builder, _file, line, code_errno, code_other, _expl);
+         auto gs = CreateSoftware_log_fb(builder, _file, line, errnoCode, otherCode, _expl);
          builder.Finish(gs);
       }
       
@@ -54,66 +54,66 @@ struct software_log : public flatbuffer_log
         */
       messageT( const char * file, ///< [in] The file of the error, should always be \c \_\_FILE\_\_
                 const uint32_t line, ///< [in] The line number of the error, should always be \c \_\_LINE\_\_
-                const int32_t  code_errno, ///< [in] The errno code at the time of the log entry. Only errno should be passed here, so strerror can be used later.
-                const int32_t  code_other, ///< [in] Some other error code, such as a return value or library code.
-                const std::string & expl ///< [in] explanatory text about the software event
+                const int32_t  errnoCode, ///< [in] The errno code at the time of the log entry. Only errno should be passed here, so strerror can be used later.
+                const int32_t  otherCode, ///< [in] Some other error code, such as a return value or library code.
+                const std::string & explanation ///< [in] explanatory text about the software event
               )
       {
          auto _file = builder.CreateString(file);
-         auto _expl = builder.CreateString(expl);
+         auto _expl = builder.CreateString(explanation);
                                     
-         auto gs = CreateSoftware_log_fb(builder, _file, line, code_errno, code_other, _expl);
+         auto gs = CreateSoftware_log_fb(builder, _file, line, errnoCode, otherCode, _expl);
          builder.Finish(gs);
       }
       
       /// C'tor for errno only -- code explanation can be looked up later.
       messageT( const char * file, ///< [in] The file of the error, should always be \c \_\_FILE\_\_
                 const uint32_t line, ///< [in] The line number of the error, should always be \c \_\_LINE\_\_
-                const int32_t  code_errno ///< [in] The errno code at the time of the log entry. Only errno should be passed here, so strerror can be used later.
+                const int32_t  errnoCode ///< [in] The errno code at the time of the log entry. Only errno should be passed here, so strerror can be used later.
               )
       {
          auto _file = builder.CreateString(file);
                                     
-         auto gs = CreateSoftware_log_fb(builder, _file, line, code_errno, 0, 0);
+         auto gs = CreateSoftware_log_fb(builder, _file, line, errnoCode, 0, 0);
          builder.Finish(gs);
       }
       
       /// C'tor for errno with additional explanation.
       messageT( const char * file, ///< [in] The file of the error, should always be \c \_\_FILE\_\_
                 const uint32_t line, ///< [in] The line number of the error, should always be \c \_\_LINE\_\_
-                const int32_t  code_errno, ///< [in] The errno code at the time of the log entry. Only errno should be passed here, so strerror can be used later.
-                const char * expl ///< [in] explanatory text about the software event
+                const int32_t  errnoCode, ///< [in] The errno code at the time of the log entry. Only errno should be passed here, so strerror can be used later.
+                const char * explanation ///< [in] explanatory text about the software event
               )
       {
          auto _file = builder.CreateString(file);
-         auto _expl = builder.CreateString(expl);                           
+         auto _expl = builder.CreateString(explanation);                           
          
-         auto gs = CreateSoftware_log_fb(builder, _file, line, code_errno, 0, _expl);
+         auto gs = CreateSoftware_log_fb(builder, _file, line, errnoCode, 0, _expl);
          builder.Finish(gs);
       }
       
       /// C'tor for errno with additional explanation, std::string overload.
       messageT( const char * file, ///< [in] The file of the error, should always be \c \_\_FILE\_\_
                 const uint32_t line, ///< [in] The line number of the error, should always be \c \_\_LINE\_\_
-                const int32_t  code_errno, ///< [in] The errno code at the time of the log entry. Only errno should be passed here, so strerror can be used later.
-                const std::string & expl ///< [in] explanatory text about the software event
+                const int32_t  errnoCode, ///< [in] The errno code at the time of the log entry. Only errno should be passed here, so strerror can be used later.
+                const std::string & explanation ///< [in] explanatory text about the software event
               )
       {
          auto _file = builder.CreateString(file);
-         auto _expl = builder.CreateString(expl);                           
+         auto _expl = builder.CreateString(explanation);                           
          
-         auto gs = CreateSoftware_log_fb(builder, _file, line, code_errno, 0, _expl);
+         auto gs = CreateSoftware_log_fb(builder, _file, line, errnoCode, 0, _expl);
          builder.Finish(gs);
       }
       
       /// C'tor with no codes, just the explanation.
       messageT( const char * file, ///< [in] The file of the error, should always be \c \_\_FILE\_\_
                 const uint32_t line, ///< [in] The line number of the error, should always be \c \_\_LINE\_\_
-                const std::string & expl ///< [in] explanatory text about the software event
+                const std::string & explanation ///< [in] explanatory text about the software event
               )
       {
          auto _file = builder.CreateString(file);
-         auto _expl = builder.CreateString(expl);
+         auto _expl = builder.CreateString(explanation);
          
          auto gs = CreateSoftware_log_fb(builder, _file, line, 0,0,_expl);
          builder.Finish(gs);        
@@ -137,7 +137,7 @@ struct software_log : public flatbuffer_log
                        flatlogs::msgLenT len            ///< [in] length of msgBuffer.
                      )
    {
-      auto verifier = flatbuffers::Verifier( (uint8_t*) flatlogs::logHeader::messageBuffer(logBuff), static_cast<size_t>(len));
+      auto verifier = flatbuffers::Verifier( static_cast<uint8_t*>(flatlogs::logHeader::messageBuffer(logBuff)), static_cast<size_t>(len));
       return VerifySoftware_log_fbBuffer(verifier);
    }
 

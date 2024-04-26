@@ -85,12 +85,14 @@ int logsurgeon::execute()
 
 
    char * buff = new char[fsz];
-   char * gbuff = new char[fsz];
 
    ssize_t nrd = fread(buff, 1, fsz, fin); 
    if(nrd != fsz)
    {
       std::cerr << __FILE__ << " " << __LINE__ << " did not read complete file.\n";
+      fclose(fin);
+      delete[] buff;
+
       return -1;
    }
    fclose(fin);
@@ -104,6 +106,8 @@ int logsurgeon::execute()
    ssize_t badSt = 0;
    ssize_t kpt = sizeof(logPrioT);
    
+   char * gbuff = new char[fsz];
+
    //Now check each byte to see if it is a potential start of a valid log
    while(kpt < fsz)
    {
@@ -184,6 +188,8 @@ int logsurgeon::execute()
    else if (m_checkOnly)
    {
       std::cerr << "Check-only mode set, exiting with error status to indicate failed verification\n";
+      delete[] buff;
+      delete[] gbuff;
       return EXIT_FAILURE;
    }
    else
@@ -197,6 +203,8 @@ int logsurgeon::execute()
       {
          std::cerr << "Error opening corrupted file for writing (" __FILE__ << " " << __LINE__ << ")\n";
          std::cerr << "No further action taken\n";
+         delete[] buff;
+         delete[] gbuff;
          return EXIT_FAILURE;
       }
 
@@ -208,6 +216,8 @@ int logsurgeon::execute()
       {
          std::cerr << "Error writing backup corrupted file (" __FILE__ << " " << __LINE__ << ")\n";
          std::cerr << "No further action taken\n";
+         delete[] buff;
+         delete[] gbuff;
          return EXIT_FAILURE;
       }
 
@@ -215,6 +225,8 @@ int logsurgeon::execute()
       {
          std::cerr << "Error closing backup corrupted file (" __FILE__ << " " << __LINE__ << ")\n";
          std::cerr << "No further action taken\n";
+         delete[] buff;
+         delete[] gbuff;
          return EXIT_FAILURE;
       }
 
@@ -226,6 +238,9 @@ int logsurgeon::execute()
       {
          std::cerr << "Error opening existing file for writing (" __FILE__ << " " << __LINE__ << ")\n";
          std::cerr << "No further action taken\n";
+
+         delete[] buff;
+         delete[] gbuff;
          return EXIT_FAILURE;
       }
 
@@ -236,12 +251,16 @@ int logsurgeon::execute()
       if(fwr != gcurr)
       {
          std::cerr << "Error writing corrected file (" __FILE__ << " " << __LINE__ << ")\n";
+         delete[] buff;
+         delete[] gbuff;
          return EXIT_FAILURE;
       }
    
       if(fcst != 0)
       {
          std::cerr << "Error closing corrected file (" __FILE__ << " " << __LINE__ << ")\n";
+         delete[] buff;
+         delete[] gbuff;
          return EXIT_FAILURE;
       }
 

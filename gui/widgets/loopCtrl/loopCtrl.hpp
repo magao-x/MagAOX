@@ -39,7 +39,7 @@ protected:
    bool m_procState {false};
    
    std::vector<int> m_modes;
-   std::vector<gainCtrl *> m_blockCtrls {nullptr};
+   std::vector<gainCtrl *> m_blockCtrls;
    std::mutex m_blockMutex;
 
    QTimer * m_updateTimer {nullptr};
@@ -73,9 +73,7 @@ public:
 
 public slots:
    void updateGUI();
-      
-   //void on_slider_loop_sliderReleased();
-   
+         
    void on_button_LoopZero_pressed();
    
    void on_button_zeroall_pressed();
@@ -97,45 +95,49 @@ private:
    
 loopCtrl::loopCtrl( std::string & procName,
                     QWidget * Parent, 
-                    Qt::WindowFlags f) : xWidget(Parent, f), m_procName{procName}
+                    Qt::WindowFlags f) : xWidget(Parent, f)
 {
-   ui.setupUi(this);
+    ui.setupUi(this);
    
-   connect(this, SIGNAL(blocksChanged(int)), this, SLOT(setupBlocks(int)));
+    connect(this, SIGNAL(blocksChanged(int)), this, SLOT(setupBlocks(int)));
 
-   setWindowTitle(QString(m_procName.c_str()));
-   ui.label_loop_state->setProperty("isStatus", true);
+    m_procName = procName + "loop";
 
-   ui.slider_loop->setup(m_procName, "loop_state", "toggle", "");
-   ui.slider_loop->setStretch(0,0,10, true, true);
 
-   ui.gainCtrl->setup(m_procName, "loop_gain", "Gain", -1, -1);
-   ui.mcCtrl->setup(m_procName, "loop_multcoeff", "Mult. Coef.", -1, -1);
-   ui.mcCtrl->makeMultCoeffCtrl();
+    setWindowTitle(QString(m_procName.c_str()));
+    ui.label_loop_state->setProperty("isStatus", true);
 
-   if(m_procName == "loloop") m_gainCtrl = "logainctrl";
-   else if(m_procName == "wloop") m_gainCtrl = "wgainctrl";
-   else m_gainCtrl = "hogainctrl";
+    ui.slider_loop->setup(m_procName, "loop_state", "toggle", "");
+    ui.slider_loop->setStretch(0,0,10, true, true);
 
-   ui.powerLawIndex->setup(m_gainCtrl, "pwrlaw_index", statusEntry::FLOAT, "Index", "");
-   ui.powerLawFloor->setup(m_gainCtrl, "pwrlaw_floor", statusEntry::FLOAT, "Floor", "");
+    ui.gainCtrl->setup(m_procName, "loop_gain", "Gain", -1, -1);
+   
+    ui.mcCtrl->setup(m_procName, "loop_multcoeff", "Mult. Coef.", -1, -1);
+    ui.mcCtrl->makeMultCoeffCtrl();
 
-   setXwFont(ui.label_LoopName);
-   setXwFont(ui.label_loop);
-   setXwFont(ui.label_loop_state);
-   setXwFont(ui.button_LoopZero);
-   setXwFont(ui.button_zeroall);
-   setXwFont(ui.label_block_gains);
+    m_gainCtrl = procName + "gainctrl";
 
-   setXwFont(ui.label_powerLaw);
+    ui.powerLawIndex->setup(m_gainCtrl, "pwrlaw_index", statusEntry::FLOAT, "Index", "");
+    ui.powerLawFloor->setup(m_gainCtrl, "pwrlaw_floor", statusEntry::FLOAT, "Floor", "");
 
-   m_updateTimer = new QTimer;
+    setXwFont(ui.label_LoopName);
+    setXwFont(ui.label_loop);
+    setXwFont(ui.label_loop_state);
+    setXwFont(ui.button_LoopZero);
+    setXwFont(ui.button_zeroall);
+    setXwFont(ui.label_block_gains);
 
-   connect(m_updateTimer, SIGNAL(timeout()), this, SLOT(updateGUI()));
+    setXwFont(ui.label_powerLaw);
 
-   m_updateTimer->start(250);
+    m_updateTimer = new QTimer;
 
-   onDisconnect();
+    connect(m_updateTimer, SIGNAL(timeout()), this, SLOT(updateGUI()));
+
+    m_updateTimer->start(250);
+
+    connect(this, SIGNAL(doUpdateGUI()), this, SLOT(updateGUI()));
+
+    onDisconnect();
 }
    
 loopCtrl::~loopCtrl()
@@ -146,12 +148,13 @@ void loopCtrl::subscribe()
 {
    if(!m_parent) return;
 
+
    m_parent->addSubscriberProperty(this, m_procName, "fsm");
    m_parent->addSubscriberProperty(this, m_procName, "loop");
    m_parent->addSubscriberProperty(this, m_procName, "loop_gain");
    m_parent->addSubscriberProperty(this, m_procName, "loop_multcoeff");
    m_parent->addSubscriberProperty(this, m_procName, "loop_processes");
-   
+ 
    m_parent->addSubscriber(ui.slider_loop);
    m_parent->addSubscriberProperty(this, m_procName, "loop_state");
 
@@ -159,10 +162,11 @@ void loopCtrl::subscribe()
    m_parent->addSubscriber(ui.powerLawFloor);
 
    m_parent->addSubscriberProperty(this, m_gainCtrl, "modes");
-   
+
 
    m_parent->addSubscriber(ui.gainCtrl);
    m_parent->addSubscriber(ui.mcCtrl);
+
 
    std::lock_guard<std::mutex> lock(m_blockMutex);
    for(size_t n = 0; n < m_blockCtrls.size(); ++n)
@@ -175,35 +179,47 @@ void loopCtrl::subscribe()
    
 void loopCtrl::onConnect()
 {
-   setWindowTitle(QString(m_procName.c_str()));
+    setWindowTitle(QString(m_procName.c_str()));
 
-   xWidget::onConnect();
+    ui.slider_loop->onConnect();
+    ui.powerLawFloor->onConnect();
+    ui.powerLawIndex->onConnect();
+
+   //xWidget::onConnect();
    ui.gainCtrl->onConnect();
    ui.mcCtrl->onConnect();
+
    
    std::lock_guard<std::mutex> lock(m_blockMutex);
    for(size_t n = 0; n < m_blockCtrls.size(); ++n)
    {
       if(m_blockCtrls[n]) m_blockCtrls[n]->onConnect();
    }
+
 }
 
 void loopCtrl::onDisconnect()
 {
-   std::string tit = m_procName + " (disconnected)";
-   setWindowTitle(QString(tit.c_str()));
+    std::string tit = m_procName + " (disconnected)";
+    setWindowTitle(QString(tit.c_str()));
+
+    ui.slider_loop->onDisconnect();
+    ui.powerLawFloor->onDisconnect();
+    ui.powerLawIndex->onDisconnect();
 
    setEnableDisable(false);
 
-   xWidget::onDisconnect();
+   //xWidget::onDisconnect();
    ui.gainCtrl->onDisconnect();
    ui.mcCtrl->onDisconnect();
+
 
    std::lock_guard<std::mutex> lock(m_blockMutex);
    for(size_t n = 0; n < m_blockCtrls.size(); ++n)
    {
       if(m_blockCtrls[n]) m_blockCtrls[n]->onDisconnect();
    }
+
 }
 
 void loopCtrl::handleDefProperty( const pcf::IndiProperty & ipRecv)
@@ -269,20 +285,6 @@ void loopCtrl::handleSetProperty( const pcf::IndiProperty & ipRecv)
          m_loopWaiting = false;
       }
    }
-   else if(ipRecv.getName() == "loop_processes")
-   {
-      if(ipRecv.find("toggle"))
-      {
-         if(ipRecv["toggle"].getSwitchState() == pcf::IndiElement::On)
-         {
-            m_procState = true;
-         }
-         else
-         {
-            m_procState = false;
-         }
-      }
-   }
    }
    if(ipRecv.getDevice() == m_gainCtrl)
    {
@@ -310,6 +312,7 @@ void loopCtrl::handleSetProperty( const pcf::IndiProperty & ipRecv)
          }
       }
    }
+   
 
    emit doUpdateGUI();
 }
@@ -318,10 +321,12 @@ void loopCtrl::handleDelProperty( const pcf::IndiProperty & ipRecv)
 {  
    std::lock_guard<std::mutex> lock(m_blockMutex);
    
+   
    if(ipRecv.getDevice() == m_gainCtrl)
    {
       for(size_t n =0; n < m_blockCtrls.size(); ++n)
       {
+         m_parent->unsubscribe(m_blockCtrls[n]);
          ui.horizontalLayout_2->removeWidget(m_blockCtrls[n]);
          m_blockCtrls[n]->deleteLater();
       }
@@ -348,11 +353,13 @@ void loopCtrl::setEnableDisable( bool tf,
    ui.powerLawFloor->setEnabled(tf);
    ui.button_setplaw->setEnabled(tf);
 
+
    std::lock_guard<std::mutex> lock(m_blockMutex);
    for(size_t n = 0; n < m_blockCtrls.size(); ++n)
    {
       if(m_blockCtrls[n]) m_blockCtrls[n]->setEnabled(tf);
    }
+   
 }
 
 void loopCtrl::updateGUI()
@@ -405,20 +412,32 @@ void loopCtrl::on_button_zeroall_pressed()
 
 void loopCtrl::setupBlocks(int nB)
 {
-   std::lock_guard<std::mutex> lock(m_blockMutex);
+    std::lock_guard<std::mutex> lock(m_blockMutex);
 
-   m_blockCtrls.resize(nB, nullptr); //I think this will call the destructor
+    for(size_t n =0; n < m_blockCtrls.size(); ++n)
+    {
+        if(m_blockCtrls[n] == nullptr) continue;
 
-   int modeTot = 0;
-   for(int n = 0; n < nB; ++n)
-   {
-      char str[16];
-      snprintf(str, sizeof(str), "%02d", n);
-      modeTot += m_modes[n];
-      m_blockCtrls[n] = new gainCtrl(m_gainCtrl, std::string("block") + str + "_gain", "", m_modes[n], modeTot);
-      ui.horizontalLayout_2->addWidget(m_blockCtrls[n]);
-      if(m_parent) m_parent->addSubscriber(m_blockCtrls[n]);
-   }
+        m_parent->unsubscribe(m_blockCtrls[n]);
+        ui.horizontalLayout_2->removeWidget(m_blockCtrls[n]);
+        m_blockCtrls[n]->deleteLater();
+    }
+         
+    m_blockCtrls.clear();
+
+
+    m_blockCtrls.resize(nB, nullptr); //I think this will call the destructor
+
+    int modeTot = 0;
+    for(int n = 0; n < nB; ++n)
+    {
+        char str[16];
+        snprintf(str, sizeof(str), "%02d", n);
+        modeTot += m_modes[n];
+        m_blockCtrls[n] = new gainCtrl(m_gainCtrl, std::string("block") + str + "_gain", "", m_modes[n], modeTot);
+        ui.horizontalLayout_2->addWidget(m_blockCtrls[n]);
+        if(m_parent) m_parent->addSubscriber(m_blockCtrls[n]);
+    }
 }
 
 void loopCtrl::on_button_setplaw_pressed()

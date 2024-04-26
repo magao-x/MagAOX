@@ -77,8 +77,7 @@ int blockModes( std::vector<uint16_t> & blocks,   ///< [out] the block structure
             names.push_back("Tip");
             tot = 1;
         }
-        
-        if(splitTT)
+        else if(splitTT)
         {
             Nblocks += 2;
             blocks.push_back(1);
@@ -151,7 +150,6 @@ int blockModes( std::vector<uint16_t> & blocks,   ///< [out] the block structure
 
         if(Nthis == 0)
         {
-            ++currb;
             break;
         }
 
@@ -264,7 +262,7 @@ protected:
     /** \name Configurable Parameters
       *@{
       */
-    int m_loopNumber;
+    int m_loopNumber {-1};
     int m_nZern {0};
     bool m_splitTT {false};
  
@@ -912,7 +910,7 @@ inline
 int userGainCtrl::writeGains()
 {
    shmimMonitorT::m_imageStream.md->write=1;
-   char * dest = (char *) shmimMonitorT::m_imageStream.array.raw;// + next_cnt1*m_width*m_height*m_typeSize;
+   char * dest = static_cast<char *>(shmimMonitorT::m_imageStream.array.raw);
 
    memcpy(dest, m_gainsTarget.data(), shmimMonitorT::m_width*shmimMonitorT::m_height*shmimMonitorT::m_typeSize  ); 
 
@@ -921,10 +919,7 @@ int userGainCtrl::writeGains()
 
    //Set the image acquisition timestamp
    shmimMonitorT::m_imageStream.md->atime = shmimMonitorT::m_imageStream.md->writetime;
-         
-   //Update cnt1
-   //m_imageStream.md->cnt1 = next_cnt1;
-          
+                   
    //Update cnt0
    shmimMonitorT::m_imageStream.md->cnt0++;
          
@@ -1050,7 +1045,7 @@ inline
 int userGainCtrl::writeMCs()
 {
    mcShmimMonitorT::m_imageStream.md->write=1;
-   char * dest = (char *) mcShmimMonitorT::m_imageStream.array.raw;// + next_cnt1*m_width*m_height*m_typeSize;
+   char * dest = static_cast<char *>(mcShmimMonitorT::m_imageStream.array.raw);
 
    memcpy(dest, m_mcsTarget.data(), mcShmimMonitorT::m_width*mcShmimMonitorT::m_height*mcShmimMonitorT::m_typeSize  ); 
 
@@ -1059,10 +1054,7 @@ int userGainCtrl::writeMCs()
 
    //Set the image acquisition timestamp
    mcShmimMonitorT::m_imageStream.md->atime = mcShmimMonitorT::m_imageStream.md->writetime;
-         
-   //Update cnt1
-   //mcShmimMonitorT::m_imageStream.md->cnt1 = next_cnt1;
-          
+                   
    //Update cnt0
    mcShmimMonitorT::m_imageStream.md->cnt0++;
          
@@ -1187,7 +1179,7 @@ inline
 int userGainCtrl::writeLimits()
 {
    limitShmimMonitorT::m_imageStream.md->write=1;
-   char * dest = (char *) limitShmimMonitorT::m_imageStream.array.raw;// + next_cnt1*m_width*m_height*m_typeSize;
+   char * dest = static_cast<char *>(limitShmimMonitorT::m_imageStream.array.raw);// + next_cnt1*m_width*m_height*m_typeSize;
 
    memcpy(dest, m_limitsTarget.data(), limitShmimMonitorT::m_width*limitShmimMonitorT::m_height*limitShmimMonitorT::m_typeSize  ); 
 
@@ -1196,10 +1188,7 @@ int userGainCtrl::writeLimits()
 
    //Set the image acquisition timestamp
    limitShmimMonitorT::m_imageStream.md->atime = limitShmimMonitorT::m_imageStream.md->writetime;
-         
-   //Update cnt1
-   //mcShmimMonitorT::m_imageStream.md->cnt1 = next_cnt1;
-          
+                   
    //Update cnt0
    limitShmimMonitorT::m_imageStream.md->cnt0++;
          
