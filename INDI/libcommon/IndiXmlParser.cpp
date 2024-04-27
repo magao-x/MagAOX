@@ -571,7 +571,7 @@ void IndiXmlParser::createDefSwitchVector( const IndiProperty &ip )
     m_ssXml << ">\r\n";
 
     // Now add the data for the element...
-    m_ssXml << IndiElement::getSwitchStateString( ip[ii].switchState() ) << "\r\n";
+    m_ssXml << IndiElement::switchState2String( ip[ii].switchState() ) << "\r\n";
     m_ssXml << "\t</" << szElementTag << ">\r\n";
   }
   m_ssXml << "</" << szTag << ">\r\n";
@@ -629,7 +629,7 @@ void IndiXmlParser::createSetSwitchVector( const IndiProperty &ip )
     m_ssXml << ">\r\n";
 
     // Now add the data for the element...
-    m_ssXml << IndiElement::getSwitchStateString( ip[ii].switchState() ) << "\r\n";
+    m_ssXml << IndiElement::switchState2String( ip[ii].switchState() ) << "\r\n";
     m_ssXml << "\t</" << szElementTag << ">\r\n";
   }
   m_ssXml << "</" << szTag << ">\r\n";
@@ -681,7 +681,7 @@ void IndiXmlParser::createNewSwitchVector( const IndiProperty &ip )
     m_ssXml << ">\r\n";
 
     // Now add the data for the element...
-    m_ssXml << IndiElement::getSwitchStateString( ip[ii].switchState() ) << "\r\n";
+    m_ssXml << IndiElement::switchState2String( ip[ii].switchState() ) << "\r\n";
     m_ssXml << "\t</" << szElementTag << ">\r\n";
   }
   m_ssXml << "</" << szTag << ">\r\n";
@@ -748,7 +748,7 @@ void IndiXmlParser::createDefLightVector( const IndiProperty &ip )
     m_ssXml << ">\r\n";
 
     // Now add the data for the element...
-    m_ssXml << IndiElement::getLightStateString( ip[ii].lightState() ) << "\r\n";
+    m_ssXml << IndiElement::lightState2String( ip[ii].lightState() ) << "\r\n";
     m_ssXml << "\t</" << szElementTag << ">\r\n";
   }
   m_ssXml << "</" << szTag << ">\r\n";
@@ -804,7 +804,7 @@ void IndiXmlParser::createSetLightVector( const IndiProperty &ip )
     m_ssXml << ">\r\n";
 
     // Now add the data for the element...
-    m_ssXml << IndiElement::getLightStateString( ip[ii].lightState() ) << "\r\n";
+    m_ssXml << IndiElement::lightState2String( ip[ii].lightState() ) << "\r\n";
     m_ssXml << "\t</" << szElementTag << ">\r\n";
   }
   m_ssXml << "</" << szTag << ">\r\n";
@@ -1492,12 +1492,12 @@ IndiMessage IndiXmlParser::createIndiMessage() const
           {
             case DefLightVector:
             case SetLightVector:
-              ieNew.lightState( IndiElement::getLightState( szValue ) );
+              ieNew.lightState( IndiElement::string2LightState( szValue ) );
               break;
             case DefSwitchVector:
             case NewSwitchVector:
             case SetSwitchVector:
-              ieNew.switchState( IndiElement::getSwitchState( szValue ) );
+              ieNew.switchState( IndiElement::string2SwitchState( szValue ) );
               break;
             default:
               ieNew.value( szValue );

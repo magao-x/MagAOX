@@ -1,15 +1,15 @@
 /** \file IndiElement.cpp
   *
-  *
+  * Definitions for the IndiElement class.
+  * 
   * @author Paul Grenz (@Steward Observatory, original author)
   * @author Jared Males (@Steward Observatory, refactored for MagAO-X)
   */
 
-#include <string>
-#include <sstream>
 #include <iostream>           // for std::cerr
 #include <stdexcept>          // for std::runtime_error
 #include <cstring>
+
 #include "IndiElement.hpp"
 
 namespace pcf
@@ -26,14 +26,6 @@ IndiElement::IndiElement( const std::string &name ) : m_name(name)
 IndiElement::IndiElement( const std::string &name,
                           const std::string &value ) : m_name(name), m_value(value)
 {
-}
-
-IndiElement::IndiElement( const std::string &name,
-                          const double & value ) : m_name(name)
-{
-    std::stringstream ssValue;
-    ssValue << std::boolalpha << value;
-    m_value = ssValue.str();
 }
 
 IndiElement::IndiElement( const std::string &name,
@@ -55,6 +47,24 @@ IndiElement::IndiElement( const IndiElement &ieRhs ) : m_name(ieRhs.m_name), m_f
 
 IndiElement::~IndiElement()
 {
+}
+
+void IndiElement::name( const std::string &name )
+{
+    std::unique_lock wLock(m_rwData);
+    m_name = name;
+}
+
+const std::string &IndiElement::name() const
+{
+    std::shared_lock rLock(m_rwData);
+    return m_name;
+}
+
+bool IndiElement::hasValidName() const
+{
+    std::shared_lock rLock(m_rwData);
+    return ( m_name.size() > 0 );
 }
 
 void IndiElement::format( const std::string & format )
@@ -93,50 +103,10 @@ bool IndiElement::hasValidLabel() const
     return ( m_label.size() > 0 );
 }
 
-/*void IndiElement::min( const std::string & min )
-{
-    std::unique_lock wLock(m_rwData);
-    m_min = min;
-}
-
-void IndiElement::min( const double & min )
-{
-    std::unique_lock wLock(m_rwData);
-
-    std::stringstream ssValue;
-    ssValue.precision( 15 );
-    ssValue << min;
-    m_min = ssValue.str();
-}*/
-
-
-
 bool IndiElement::hasValidMin() const
 {
     std::shared_lock rLock(m_rwData);    
     return ( m_min.size() > 0 );
-}
-
-/*void IndiElement::max( const std::string & max )
-{
-    std::unique_lock wLock(m_rwData);
-    m_max = max;
-}
-
-void IndiElement::max( const double & max )
-{
-    std::unique_lock rLock(m_rwData);
-
-    std::stringstream ssValue;
-    ssValue.precision( 15 );
-    ssValue << max;
-    m_max = ssValue.str();
-}*/
-
-const std::string &IndiElement::max() const
-{
-    std::shared_lock rLock(m_rwData);
-    return m_max;
 }
 
 bool IndiElement::hasValidMax() const
@@ -145,22 +115,10 @@ bool IndiElement::hasValidMax() const
     return ( m_max.size() > 0 );
 }
 
-void IndiElement::name( const std::string &name )
-{
-    std::unique_lock wLock(m_rwData);
-    m_name = name;
-}
-
-const std::string &IndiElement::name() const
+bool IndiElement::hasValidStep() const
 {
     std::shared_lock rLock(m_rwData);
-    return m_name;
-}
-
-bool IndiElement::hasValidName() const
-{
-    std::shared_lock rLock(m_rwData);
-    return ( m_name.size() > 0 );
+    return ( m_step.size() > 0 );
 }
 
 void IndiElement::size( const std::string & size )
@@ -190,12 +148,6 @@ bool IndiElement::hasValidSize() const
     return ( m_size.size() > 0 );
 }
 
-bool IndiElement::hasValidStep() const
-{
-    std::shared_lock rLock(m_rwData);
-    return ( m_step.size() > 0 );
-}
-
 bool IndiElement::hasValidValue() const
 {
     std::shared_lock rLock(m_rwData);
@@ -220,6 +172,11 @@ IndiElement::LightState IndiElement::lightState() const
 {
     std::shared_lock rLock(m_rwData);
     return m_lightState;
+}
+
+bool IndiElement::operator==(const LightState & ls) const
+{
+    return (m_lightState == ls);
 }
 
 bool IndiElement::hasValidLightState() const
@@ -247,22 +204,16 @@ IndiElement::SwitchState IndiElement::switchState() const
     return m_switchState;
 }
 
+bool IndiElement::operator==(const SwitchState & ss) const
+{
+    return (m_switchState == ss);
+}
+
 bool IndiElement::hasValidSwitchState() const
 {
     std::shared_lock rLock(m_rwData);
     return ( m_switchState != SwitchState::Unknown );
 }
-
-
-
-
-
-
-
-
-
-
-
 
 const IndiElement &IndiElement::operator=( const IndiElement &ieRhs )
 {
@@ -307,28 +258,6 @@ bool IndiElement::operator==( const IndiElement &ieRhs ) const
              m_switchState == ieRhs.m_switchState );
 }
 
-std::string IndiElement::createString() const
-{
-    std::shared_lock rLock(m_rwData);
-
-    std::stringstream ssOutput;
-    ssOutput << "{ "
-             << "\"name\" : \"" << m_name << "\" , "
-             << "\"value\" : \"" << m_value << "\" , "
-             << "\"lightstate\" : \"" << getLightStateString( m_lightState ) << "\" , "
-             << "\"switchstate\" : \"" << getSwitchStateString( m_switchState ) << "\" , "
-             << "\"label\" : \"" << m_label << "\" , "
-             << "\"format\" : \"" << m_format << "\" , "
-             << "\"max\" : \"" << m_max << "\" , "
-             << "\"min\" : \"" << m_min << "\" , "
-             << "\"size\" : \"" << m_size << "\" , "
-             << "\"step\" : \"" << m_step << "\" "
-             << "} ";
-    return ssOutput.str();
-}
-
-
-
 void IndiElement::clear()
 {
     std::unique_lock wLock(m_rwData);
@@ -344,8 +273,27 @@ void IndiElement::clear()
     m_switchState = SwitchState::Unknown;
 }
 
+std::string IndiElement::createString() const
+{
+    std::shared_lock rLock(m_rwData);
 
-IndiElement::LightState IndiElement::getLightState( const std::string &szType )
+    std::stringstream ssOutput;
+    ssOutput << "{ "
+             << "\"name\" : \"" << m_name << "\" , "
+             << "\"value\" : \"" << m_value << "\" , "
+             << "\"lightstate\" : \"" << lightState2String( m_lightState ) << "\" , "
+             << "\"switchstate\" : \"" << switchState2String( m_switchState ) << "\" , "
+             << "\"label\" : \"" << m_label << "\" , "
+             << "\"format\" : \"" << m_format << "\" , "
+             << "\"max\" : \"" << m_max << "\" , "
+             << "\"min\" : \"" << m_min << "\" , "
+             << "\"size\" : \"" << m_size << "\" , "
+             << "\"step\" : \"" << m_step << "\" "
+             << "} ";
+    return ssOutput.str();
+}
+
+IndiElement::LightState IndiElement::string2LightState( const std::string &szType )
 {
 
     LightState tType = LightState::Unknown;
@@ -362,7 +310,7 @@ IndiElement::LightState IndiElement::getLightState( const std::string &szType )
     return tType;
 }
 
-std::string IndiElement::getLightStateString( const LightState &tType )
+std::string IndiElement::lightState2String( const LightState &tType )
 {
 
   std::string szType = "";
@@ -389,7 +337,7 @@ std::string IndiElement::getLightStateString( const LightState &tType )
   return szType;
 }
 
-IndiElement::SwitchState IndiElement::getSwitchState( const std::string &szType )
+IndiElement::SwitchState IndiElement::string2SwitchState( const std::string &szType )
 {
 
   SwitchState tType = SwitchState::Unknown;
@@ -402,7 +350,7 @@ IndiElement::SwitchState IndiElement::getSwitchState( const std::string &szType 
   return tType;
 }
 
-std::string IndiElement::getSwitchStateString( const SwitchState &tType )
+std::string IndiElement::switchState2String( const SwitchState &tType )
 {
 
   std::string szType = "";

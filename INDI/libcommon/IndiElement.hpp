@@ -1,8 +1,6 @@
 /** \file IndiElement.hpp
-  *
-  * This class represents one element in an INDI property. In its most basic
-  * form it is a name-value pair with other attributes associated with it.
-  * All access is protected by a read-write lock.
+  * 
+  * Declarations for the IndiElement class.
   *
   * @author Paul Grenz (@Steward Observatory, original author)
   * @author Jared Males (@Steward Observatory, refactored for MagAO-X)
@@ -19,15 +17,12 @@
 #include <mutex>
 #include <shared_mutex>
 
-/* 2024-04-21 Refactor progress
+/* 2024-04-26 Refactor progress
 -- main API rewrite done
 -- todo:
-   -- switch to format from streams, have single common place for all conversions
    -- tests of conversions
-   -- restore template methods for value and light and switch states
    -- implement exclusivity between value and light and switch states based on Type
    -- tests of setting and getting values/states
-   -- full comparison operators for value and lightstate and switchstate
 
 */
 namespace pcf
@@ -79,29 +74,17 @@ inline std::string string2value<std::string>( const std::string & str )
 
 }
 
-
+/** One element in an INDI property
+  *
+  * This class represents one element in an INDI property. In its most basic
+  * form it is a name-value pair with other attributes associated with it.
+  * All access is protected by a read-write lock.
+  *
+  */
 class IndiElement
 {
 
 public:
-
-    // These are the possible types for streaming this element.
-  /*  enum class Type
-    {
-        Unknown = 0,
-        // Define properties.
-        DefBLOB,
-        DefLight,
-        DefNumber,
-        DefSwitch,
-        DefText,
-        // Used to set or update.
-        OneBLOB,
-        OneLight,
-        OneNumber,
-        OneSwitch,
-        OneText,
-    };*/
 
     enum class LightState
     {
@@ -178,8 +161,9 @@ protected:
                );
 
     /// Constructor with a name and a numeric value
+    template<typename TT>
     IndiElement( const std::string &name, 
-                 const double & value 
+                 const TT & value 
                );
 
     /// Constructor with a name and a LightState value.
@@ -351,6 +335,13 @@ protected:
       */
     bool hasValidValue() const;
 
+    /// Compare the string representation of the value
+    bool operator==(const std::string & val) const;
+
+    /// Compare the value numerically
+    template<typename T>
+    bool operator==( const T & val ) const;
+    
     /// Set the element's light state
     void lightState( const LightState & state /**< [in] the new light state*/);
 
@@ -361,6 +352,9 @@ protected:
     /** \returns the current value of m_lightState
       */
     LightState lightState() const;
+
+    /// Compare the current light state
+    bool operator==(const LightState & ls) const;
 
     /// Check if the light state entry is valid
     /**
@@ -380,6 +374,9 @@ protected:
       */
     SwitchState switchState() const;
 
+    // Compare the switch state
+    bool operator==(const SwitchState & ss) const;
+
     /// Check if the switch state entry is valid
     /**
       * \returns true if m_switchState is not UnknownSwitchState
@@ -389,34 +386,16 @@ protected:
 
     ///@}
 
-    // Operators.
-  public:
+    /** \name General Methods.
+      * @{
+      */ 
+
     /// Assigns the internal data of this object from an existing one.
-    const IndiElement &operator= ( const IndiElement &ieRhs );
+    const IndiElement & operator= ( const IndiElement &ieRhs );
 
     /// Returns true if we have an exact match (value as well).
     bool operator==( const IndiElement &ieRhs ) const;
-
-    bool operator==(const std::string & val) const
-    {
-        return (m_value == val);
-    }
-
-    bool operator==(const SwitchState & ss) const
-    {
-        return (m_switchState == ss);
-    }
-
-    bool operator==(const LightState & ls) const
-    {
-        return (m_lightState == ls);
-    }
-
-    template<typename T>
-    bool operator==( const T & val ) const;
-
-    // Methods.
-  public:
+    
     /// Reset this object.
     virtual void clear();
 
@@ -424,20 +403,26 @@ protected:
     std::string createString() const;
     
     /// Returns the string type given the enumerated type.
-    static std::string getLightStateString( const LightState &tType );
+    static std::string lightState2String( const LightState &tType );
     
     /// Returns the enumerated type given the string type.
-    static LightState getLightState( const std::string &szType );
+    static LightState string2LightState( const std::string &szType );
     
     /// Returns the string type given the enumerated type.
-    static std::string getSwitchStateString( const SwitchState &tType );
+    static std::string switchState2String( const SwitchState &tType );
     
     /// Returns the enumerated type given the string type.
-    static SwitchState getSwitchState( const std::string &szType );
-
-
+    static SwitchState string2SwitchState( const std::string &szType );
 
 }; // class IndiElement
+
+template<typename TT>
+IndiElement::IndiElement( const std::string &name, 
+                          const TT & value 
+                        ) : m_name(name)
+{
+    m_value = internal::value2string<TT>(value);
+}
 
 template<typename TT>
 void IndiElement::min( const TT  & min )
@@ -467,13 +452,19 @@ void IndiElement::max( const TT  & max )
     m_max = internal::value2string<TT>(max);
 }
 
+inline //kept this here instead of cpp for clarity
+const std::string &IndiElement::max() const
+{
+    std::shared_lock rLock(m_rwData);
+    return m_max;
+}
+
 template<typename TT>
 const TT & IndiElement::max() const 
 {
     std::shared_lock rLock(m_rwData);
     return internal::string2value<TT>(m_max);
 }
-
 
 template<typename TT>
 void IndiElement::step( const TT  & stp )
@@ -517,6 +508,11 @@ TT IndiElement::value() const
     return internal::string2value<TT>(m_value);
 }
 
+inline
+bool IndiElement::operator==(const std::string & val) const
+{
+    return (m_value == val);
+}
 
 template <class TT> 
 const TT & IndiElement::operator= ( const TT &val )
@@ -525,15 +521,6 @@ const TT & IndiElement::operator= ( const TT &val )
     m_value = internal::value2string<TT>(val);
     return val;
 }
-
-
-
-
-
-    
-
-
-
 
 } // namespace pcf
 
