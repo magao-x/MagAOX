@@ -1,11 +1,8 @@
 import logging
 import xconf
 import coloredlogs
-from .commands import (
-    setup,
-    inventory,
-    backfill,
-)
+from magaox.db.commands import XTELEMDB_COMMANDS
+from magaox.quicklook.commands import XQUICKLOOK_COMMANDS
 
 # Split out for use in worker startup if needed
 def _configure_logging(level, first_party_loggers):
@@ -21,13 +18,9 @@ def _configure_logging(level, first_party_loggers):
         coloredlogs.install(level=level, logger=pkglog)
 
 class Dispatcher(xconf.Dispatcher):
-    first_party_loggers = ['magaox.db', 'xconf']
+    first_party_loggers = ['magaox', 'xconf']
     def configure_logging(self, level):
         _configure_logging(level, self.first_party_loggers)
 
-DISPATCHER = Dispatcher([
-    setup.Setup,
-    inventory.Inventory,
-    backfill.Backfill,
-])
-
+XTELEMDB = Dispatcher(XTELEMDB_COMMANDS)
+XQUICKLOOK = Dispatcher(XQUICKLOOK_COMMANDS)

@@ -25,5 +25,7 @@ class Inventory(BaseDbCommand):
     data_dirs : list[str] = xconf.field(default_factory=lambda: DEFAULT_DATA_DIRS)
 
     def main(self):
-        with self.database.cursor() as cur:
+        conn = self.database.connect()
+        with conn.transaction():
+            cur = conn.cursor()
             ingest.update_file_inventory(cur, self.hostname, self.data_dirs)

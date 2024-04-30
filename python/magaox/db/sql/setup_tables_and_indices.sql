@@ -4,7 +4,7 @@ CREATE TABLE IF NOT EXISTS telem (
     msg JSONB,
     prio VARCHAR(8),
     ec VARCHAR(20),
-    PRIMARY KEY (ts, device, msg)
+    PRIMARY KEY (ts, device)
 );
 
 CREATE INDEX IF NOT EXISTS telem_device_ts ON telem (device, ts);

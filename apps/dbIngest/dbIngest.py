@@ -68,16 +68,9 @@ def _run_logdump_thread(logger_name, logdump_dir, logdump_args, name, message_qu
         try:
             args = logdump_args + ('--dir='+logdump_dir, '-J', '-f', name)
             log.debug(f"Running logdump command {repr(' '.join(args))} for {name} in follow mode")
-            p = subprocess.Popen(args, stdout=subprocess.PIPE, stdin=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+            p = subprocess.Popen(args, stdout=subprocess.PIPE, stdin=subprocess.DEVNULL, stderr=subprocess.DEVNULL, text=True)
             for line in p.stdout:
-                assert line[0] == ord('{'), f'malformed line {line[0]=}'
-                payload = json.loads(line)
-                message = Telem(
-                    name,
-                    parse_iso_datetime_as_utc(payload['ts']),
-                    payload['ec'],
-                    payload['msg']
-                )
+                message = Telem.from_json(name, line)
                 message_queue.put(message)
             if p.returncode != 0:
                 raise RuntimeError(f"{name} logdump exited with {p.returncode} ({repr(' '.join(args))})")
@@ -206,7 +199,8 @@ class dbIngest(XDevice):
         except queue.Empty:
             pass
 
-        with self.conn.cursor() as cur:
+        with self.conn.transaction():
+            cur = self.conn.cursor()
             ingest.batch_telem(cur, telems)
             ingest.batch_file_origins(cur, fs_events)
 
