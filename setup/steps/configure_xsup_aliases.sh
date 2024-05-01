@@ -17,7 +17,7 @@ Defaults>xsup !secure_path
 %magaox ALL = (xsup) NOPASSWD: ALL
 %magaox ALL = (root) NOPASSWD: /opt/MagAOX/bin/write_magaox_pidfile
 HERE
-visudo -cf /tmp/sudoers_xsup || exit_error "visudo syntax check failed on /tmp/sudoers_xsup"
+visudo -cf /tmp/sudoers_xsup || exit_with_error "visudo syntax check failed on /tmp/sudoers_xsup"
 sudo mv /tmp/sudoers_xsup /etc/sudoers.d/xsup
 
 cat <<'HERE' | sudo tee /etc/profile.d/xsupify.sh || exit 1

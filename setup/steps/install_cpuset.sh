@@ -46,4 +46,4 @@ fi
 cat <<"HERE" | sudo tee /etc/cset.conf || exit 1
 mountpoint = $CGROUPS1_CPUSET_MOUNTPOINT
 HERE
-cset --help || exit_error "Could not run cset"
+cset --help || exit_with_error "Could not run cset"

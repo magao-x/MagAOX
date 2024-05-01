@@ -36,6 +36,8 @@ doc/www/
 ##########################################
 #Executables and app specifics to ignore:
 
+apps/*/build/
+
 #a
 apps/adcTracker/adcTracker
 apps/alpaoCtrl/alpaoCtrl

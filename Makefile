@@ -1,5 +1,6 @@
 SELF_DIR := $(abspath $(dir $(lastword $(MAKEFILE_LIST))))
--include $(SELF_DIR)/../local/common.mk
+-include $(SELF_DIR)/local/common.mk
+-include $(SELF_DIR)/Make/python.mk
 
 apps_common = \
 	sshDigger \
@@ -299,7 +300,7 @@ tests_clean:
 
 .PHONY: python_install
 python_install:
-	sudo python -m pip install ./python/
+	sudo $(PYTHON) -m pip install ./python/
 
 .PHONY: doc
 doc:
