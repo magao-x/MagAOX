@@ -39,13 +39,7 @@ class Bundle(BaseQuicklookCommand):
         if not self.output_path.is_dir():
             self.output_path.mkdir(parents=True, exist_ok=True)
         timestamp_str = format_timestamp_for_filename(utcnow())
-        log_file_path = f"./lookyloo_bundle_{timestamp_str}.log" if args.verbose or args.dry_run else None
-        log_format = '%(filename)s:%(lineno)d: [%(levelname)s] %(message)s'
-        logging.basicConfig(
-            level='DEBUG' if args.verbose or args.dry_run else 'INFO',
-            filename=log_file_path,
-            format=log_format
-        )
+
         # Specifying a filename results in no console output, so add it back
         if args.verbose or args.dry_run:
             console = logging.StreamHandler()
