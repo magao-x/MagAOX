@@ -67,6 +67,8 @@ protected:
 
     size_t m_writeChunkLength{512}; ///< The number of frames to write at a time
 
+    double m_maxChunkTime {60}; ///< The maximum time before writing regardless of number of frames.
+
     std::string m_shmimName; ///< The name of the shared memory buffer.
 
     std::string m_outName; ///< The name to use for outputting files,  Default is m_shmimName.
@@ -80,6 +82,7 @@ protected:
     int m_lz4accel{1};
 
     bool m_compress{true};
+
     ///@}
 
     size_t m_width{0};     ///< The width of the image
@@ -92,6 +95,10 @@ protected:
 
     size_t m_currImage{0};
 
+    double m_currImageTime {0}; ///< The write-time of the current image
+
+    double m_currChunkStartTime {0}; ///< The write-time of the first image in the chunk
+    
     // Writer book-keeping:
     int m_writing{NOT_WRITING}; ///< Controls whether or not images are being written, and sequences start and stop of writing.
 
@@ -315,6 +322,8 @@ inline void streamWriter::setupConfig()
 
     config.add("writer.writeChunkLength", "", "writer.writeChunkLength", argType::Required, "writer", "writeChunkLength", false, "size_t", "The length in frames of the chunks to write to disk. Should be smaller than circBuffLength.");
 
+    config.add("writer.maxChunkTime", "", "writer.maxChunkTime", argType::Required, "writer", "maxChunkTime", false, "float", "The max length in seconds of the chunks to write to disk. Default is 60 sec.");
+
     config.add("writer.threadPrio", "", "writer.threadPrio", argType::Required, "writer", "threadPrio", false, "int", "The real-time priority of the stream writer thread.");
 
     config.add("writer.cpuset", "", "writer.cpuset", argType::Required, "writer", "cpuset", false, "int", "The cpuset for the writer thread.");
@@ -343,6 +352,7 @@ inline void streamWriter::loadConfig()
 
     config(m_circBuffLength, "writer.circBuffLength");
     config(m_writeChunkLength, "writer.writeChunkLength");
+    config(m_maxChunkTime, "writer.maxChunkTime");
     config(m_swThreadPrio, "writer.threadPrio");
     config(m_swCpuset, "writer.cpuset");
     config(m_compress, "writer.compress");
@@ -908,23 +918,37 @@ inline void streamWriter::fgThreadExec()
         m_currChunkStart = 0;
         m_nextChunkStart = 0;
 
-        uint64_t last_cnt0 = ((uint64_t)-1);
+        //Initialized curr_image ...
+        if (image.md[0].naxis > 2)
+        {
+            curr_image = image.md[0].cnt1;
+        }
+        else
+        {
+            curr_image = 0;
+        }
+
+        uint64_t last_cnt0;// = ((uint64_t)-1);
+
+        //so we can initialize last_cnt0 to avoid frame skip on startup
+        if (image.cntarray)
+        {
+            last_cnt0 = image.cntarray[curr_image];
+        }
+        else
+        {
+            last_cnt0 = image.md[0].cnt0;
+        }
 
         int cnt0flag = 0;
+
+        bool restartWriting = false; //flag to prevent logging on a logging restart
 
         // This is the main image grabbing loop.
         while (!m_shutdown && !m_restart)
         {
             timespec ts;
             XWC_SEM_WAIT_TS_RETVOID( ts, m_semWaitSec, m_semWaitNSec );
-
-            /*if (clock_gettime(CLOCK_REALTIME, &ts) < 0)
-            {
-                log<software_critical>({__FILE__, __LINE__, errno, 0, "clock_gettime"});
-                return;
-            }
-
-            mx::sys::timespecAddNsec(ts, m_semWait);*/
 
             if (sem_timedwait(sem, &ts) == 0)
             {
@@ -1038,6 +1062,8 @@ inline void streamWriter::fgThreadExec()
                     curr_timing[4] = curr_timing[2];
                 }
 
+                m_currImageTime = 1.0*curr_timing[3] + (1.0*curr_timing[4])/1e9;
+
                 if (m_shutdown && m_writing == WRITING)
                 {
                     m_writing = STOP_WRITING;
@@ -1051,17 +1077,23 @@ inline void streamWriter::fgThreadExec()
                         m_writing = WRITING;
                         m_currSaveStartFrameNo = new_cnt0;
 
-                        log<saving_start>({1, m_currSaveStartFrameNo});
+                        m_currChunkStartTime = m_currImageTime;
+
+                        if(!restartWriting)
+                        {
+                            log<saving_start>({1, m_currSaveStartFrameNo});
+                        }
+                        restartWriting = false;
 
                         // fall through
                     case WRITING:
-                        if (m_currImage - m_nextChunkStart == m_writeChunkLength - 1)
+                        if((m_currImage - m_nextChunkStart == m_writeChunkLength - 1) || (m_currImageTime - m_currChunkStartTime > m_maxChunkTime))
                         {
                             m_currSaveStart = m_currChunkStart;
                             m_currSaveStop = m_nextChunkStart + m_writeChunkLength;
                             m_currSaveStopFrameNo = new_cnt0;
     
-                            std::cerr << __FILE__ << " " << __LINE__ << " WRITING\n";
+                            std::cerr << __FILE__ << " " << __LINE__ << " WRITING " << new_cnt0 << "\n";
                             // Now tell the writer to get going
                             if (sem_post(&m_swSemaphore) < 0)
                             {
@@ -1076,6 +1108,7 @@ inline void streamWriter::fgThreadExec()
                             }
 
                             m_currChunkStart = m_nextChunkStart;
+                            m_currChunkStartTime = m_currImageTime;
                         }
                         break;
     
@@ -1091,6 +1124,7 @@ inline void streamWriter::fgThreadExec()
                             log<software_critical>({__FILE__, __LINE__, errno, 0, "Error posting to semaphore"});
                             return;
                         }
+                        restartWriting = false;
                         break;
     
                     default:
@@ -1103,13 +1137,29 @@ inline void streamWriter::fgThreadExec()
             }
             else
             {
-                //*****  IF here, should check if "STOP_WRITING" set, and trigger the cleanup and close out of the current writing
+                //If semaphore times-out or errors, we first cleanup any writing that needs to be done
                 switch (m_writing)
                 {
                     case WRITING:
-                        //Here we should check for time > max_archive_time or whatever we end up with
-                        // That is check if there is data to write, and if time is greater than, then write
-                        //for now placeholder
+                        //Here, if there is at least 1 image, we check for delta-time > m_maxChunkTime 
+                        // then write
+                        if((m_currImage - m_nextChunkStart > 0) && (mx::sys::get_curr_time() - m_currChunkStartTime > m_maxChunkTime))
+                        {
+                            m_currSaveStart = m_currChunkStart;
+                            m_currSaveStop = m_currImage + 1;
+                            m_currSaveStopFrameNo = last_cnt0;
+    
+                            std::cerr << __FILE__ << " " << __LINE__ << " TIMEOUT WRITING " << last_cnt0 << "\n";
+                            // Now tell the writer to get going
+                            if (sem_post(&m_swSemaphore) < 0)
+                            {
+                                log<software_critical>({__FILE__, __LINE__, errno, 0, "Error posting to semaphore"});
+                                return;
+                            }
+    
+                            m_writing = START_WRITING;
+                            restartWriting = true;
+                        }
                         break;
                     case STOP_WRITING:
                         //If we timed-out while STOP_WRITING is set, we trigger a write.
@@ -1124,17 +1174,22 @@ inline void streamWriter::fgThreadExec()
                             log<software_critical>({__FILE__, __LINE__, errno, 0, "Error posting to semaphore"});
                             return;
                         }
+                        restartWriting = false;
                         break;
                     default:
                         break;
                 }
 
                 if (image.md[0].sem <= 0)
+                {
                     break; // Indicates that the server has cleaned up.
+                }
 
                 // Check for why we timed out
                 if (errno == EINTR)
+                {
                     break; // This will indicate time to shutdown, loop will exit normally flags set.
+                }
 
                 // ETIMEDOUT just means we should wait more.
                 // Otherwise, report an error.
@@ -1365,7 +1420,13 @@ inline int streamWriter::doEncode()
         log<software_error>({__FILE__, __LINE__, 0, rv, "xrif set LZ4 acceleration error."});
     }
 
+    for(size_t nF = 0; nF < nFrames; ++nF)
+    {
+        std::cerr << "      " << (m_timingCircBuff + m_currSaveStart * 5 + nF * 5)[0] << "\n";
+    }
+
     memcpy(m_xrif_timing->raw_buffer, m_timingCircBuff + m_currSaveStart * 5, nFrames * 5 * sizeof(uint64_t));
+
 
     rv = xrif_encode(m_xrif);
     if (rv != XRIF_NOERROR)
@@ -1552,7 +1613,7 @@ inline int streamWriter::recordSavingState(bool force)
     static uint64_t currSaveStart = -1;
 
     int16_t state;
-    if (m_writing == WRITING)
+    if (m_writing == WRITING || m_writing == START_WRITING || m_writing == STOP_WRITING) //Changed from just writing 5/2024
         state = 1;
     else
         state = 0;
