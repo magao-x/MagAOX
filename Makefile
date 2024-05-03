@@ -277,12 +277,12 @@ rtscripts_install:
 		fi \
 	; done
 
-utils_all: flatlogs_all
+utils_all: flatlogs_all indi_all
 		for app in ${utils_to_build}; do \
 			(cd utils/$$app; ${MAKE}) || exit 1; \
 		done
 
-utils_install: flatlogs_all
+utils_install: flatlogs_all utils_all
 		for app in ${utils_to_build}; do \
 			(cd utils/$$app; ${MAKE} install) || exit 1; \
 		done
@@ -301,7 +301,7 @@ tests_clean:
 
 .PHONY: python_install
 python_install:
-	sudo $(PYTHON) -m pip install ./python/
+	sudo $(PYTHON) -m pip install -e ./python/
 
 .PHONY: doc
 doc:

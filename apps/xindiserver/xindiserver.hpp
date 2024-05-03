@@ -758,6 +758,7 @@ int xindiserver::appStartup()
       log<software_critical>({__FILE__, __LINE__});
       return -1;
    }
+
    //--------------------
    //Make symlinks
    //--------------------
@@ -824,16 +825,23 @@ int xindiserver::appLogic()
 inline
 int xindiserver::appShutdown()
 {
-   kill(m_isPID, SIGTERM);
-   
-   char w = '\0';
-   ssize_t nwr = write(m_isSTDERR_input, &w, 1);
-   if(nwr != 1)
+    
+   if(m_isPID > 0)
    {
-      log<software_error>({__FILE__, __LINE__, errno });
-      log<software_error>({__FILE__, __LINE__, "Error on write to i.s. log thread. Sending SIGTERM."});
-      pthread_kill(m_isLogThread.native_handle(), SIGTERM);
+      kill(m_isPID, SIGTERM);
+   }
+
+   if(m_isSTDERR_input >= 0)
+   {
+      char w = '\0';
+      ssize_t nwr = write(m_isSTDERR_input, &w, 1);
+      if(nwr != 1)
+      {
+         log<software_error>({__FILE__, __LINE__, errno });
+         log<software_error>({__FILE__, __LINE__, "Error on write to i.s. log thread. Sending SIGTERM."});
+         pthread_kill(m_isLogThread.native_handle(), SIGTERM);
       
+      }
    }
       
    if(m_isLogThread.joinable()) m_isLogThread.join();

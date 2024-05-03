@@ -3,9 +3,9 @@ import socket
 import psycopg
 import xconf
 
-import magaox.db.config as config
+import magaox.db.config as dbconfig
 
 @xconf.config
-class BaseDbCommand(config.BaseConfig, xconf.Command):
+class BaseDbCommand(dbconfig.BaseConfig, xconf.Command):
     def main(self):
         raise NotImplementedError("Command subclasses must implement main()")

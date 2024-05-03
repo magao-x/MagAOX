@@ -57,7 +57,7 @@ class DbConfig:
                 row_factory=psycopg.rows.dict_row,
             )
         except Exception as e:
-            log.error("Unable to connect to database.")
+            log.exception("Unable to connect to database.")
             log.error(f"""
 Ensure:
 1. PostgreSQL is running on {self.host}:{self.port} (`systemctl status postgresql` on {self.host})
