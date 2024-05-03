@@ -125,6 +125,7 @@ protected:
    
    pcf::IndiProperty m_indiP_sws;
    
+   pcf::IndiProperty m_indiP_userlog;
 
 public:
    INDI_NEWCALLBACK_DECL(observerCtrl, m_indiP_observers);
@@ -133,6 +134,8 @@ public:
    INDI_NEWCALLBACK_DECL(observerCtrl, m_indiP_observing);
    
    INDI_NEWCALLBACK_DECL(observerCtrl, m_indiP_sws);
+
+   INDI_NEWCALLBACK_DECL(observerCtrl, m_indiP_userlog);
 
    ///@}
    
@@ -197,11 +200,16 @@ int observerCtrl::loadConfigImpl( mx::app::appConfigurator & _config )
       std::string sanitizedEmail = "";
       for(size_t n = 0; n < email.size(); ++n)
       {
-         if(email[n] == '@') {
+         if(email[n] == '@') 
+         {
             sanitizedEmail = sanitizedEmail + "-at-";
-         } else if(email[n] == '.') {
+         } 
+         else if(email[n] == '.') 
+         {
             sanitizedEmail = sanitizedEmail + "-dot-";
-         } else {
+         } 
+         else 
+         {
             sanitizedEmail.push_back(email[n]);
          }
       }
@@ -243,6 +251,21 @@ int observerCtrl::appStartup()
    {
       log<software_critical>({__FILE__, __LINE__});
       return -1;
+   }
+
+   //Set to default user of jared
+   ///\todo do something else. maybe a defautl user is specified in the config?
+   for(auto & it : m_observers)
+   {
+      if(it.first.find("jrmales") != std::string::npos)
+      {
+         m_indiP_observers[it.second.m_sanitizedEmail].setSwitchState(pcf::IndiElement::On);
+         m_currentObserver = it.second;
+      }
+      else
+      {
+         m_indiP_observers[it.second.m_sanitizedEmail].setSwitchState(pcf::IndiElement::Off);
+      }
    }
     
    if(registerIndiPropertyNew( m_indiP_observers, INDI_NEWCALLBACK(m_indiP_observers)) < 0)
@@ -288,6 +311,21 @@ int observerCtrl::appStartup()
       log<software_critical>({__FILE__, __LINE__});
       return -1;
    }
+
+   m_indiP_userlog = pcf::IndiProperty(pcf::IndiProperty::Text);
+   m_indiP_userlog.setDevice(configName());
+   m_indiP_userlog.setName("user_log");
+   m_indiP_userlog.setPerm(pcf::IndiProperty::ReadWrite); 
+   m_indiP_userlog.setState(pcf::IndiProperty::Idle);
+   m_indiP_userlog.add(pcf::IndiElement("email"));
+   m_indiP_userlog.add(pcf::IndiElement("message"));
+   m_indiP_userlog.add(pcf::IndiElement("time_s"));
+   m_indiP_userlog.add(pcf::IndiElement("time_ns"));
+   if(registerIndiPropertyNew( m_indiP_userlog, INDI_NEWCALLBACK(m_indiP_userlog)) < 0)
+   {
+      log<software_critical>({__FILE__, __LINE__});
+      return -1;
+   }   
 
    if(dev::telemeter<observerCtrl>::appStartup() < 0)
    {
@@ -485,6 +523,57 @@ INDI_NEWCALLBACK_DEFN(observerCtrl, m_indiP_sws)(const pcf::IndiProperty &ipRecv
    }
       
    return 0;
+}
+
+INDI_NEWCALLBACK_DEFN(observerCtrl, m_indiP_userlog)(const pcf::IndiProperty &ipRecv)
+{
+    INDI_VALIDATE_CALLBACK_PROPS(m_indiP_userlog, ipRecv);
+      
+    std::string email;
+    std::string message;
+
+    timespecX ts {};
+
+    if(ipRecv.find("email"))
+    {
+        email = ipRecv["email"].get();
+    }
+
+    if(ipRecv.find("message"))
+    {
+        message = ipRecv["message"].get();
+    }
+
+    if(message == "")
+    {
+        return 0;
+    }
+
+    if(email == "")
+    {
+        email = m_currentObserver.m_email;
+    }
+
+    if(ipRecv.find("time_s"))
+    {
+        ts.time_s = ipRecv["time_s"].get<flatlogs::secT>();
+    }
+    
+    if(ipRecv.find("time_ns"))
+    {
+        ts.time_ns = ipRecv["time_ns"].get<flatlogs::nanosecT>();
+    }
+
+    if(ts.time_s != 0)
+    {
+        m_log.template log<user_log>(ts, {email, message}, logPrio::LOG_INFO);
+    }
+    else
+    {
+        log<user_log>({email, message});
+    }
+
+    return 0;
 }
 
 inline
