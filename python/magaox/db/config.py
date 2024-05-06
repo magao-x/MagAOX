@@ -42,7 +42,6 @@ class DbConfig:
                 password = open(self.password_file, 'r').read().strip()
             except Exception:
                 log.error(f"Tried to get password from {self.password_file}")
-                raise
 
         if password is None:
             raise RuntimeError(f"Need password to connect to host={self.host} database={self.database} user={self.user}, "
