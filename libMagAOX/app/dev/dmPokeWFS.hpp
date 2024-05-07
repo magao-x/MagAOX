@@ -41,20 +41,25 @@ namespace dev
 
 /// A base class to coordinate poking a deformable mirror's actuators and synchronized reads of a camera image.
 /** CRTP class `derivedT` has the following requirements:
-  * - Must be a MagAOXApp
+  * - Must be a MagAOXApp<true>
+  * 
   * - Must be derived from `dev::shmimMonitor<DERIVEDNAME, dev::dmPokeWFS<DERIVEDNAME>::wfsShmimT>` (replace DERIVEDNAME with derivedT class name)
+  * 
   * - Must be derived from  `dev::shmimMonitor<DERIVEDNAME, dev::dmPokeWFS<DERIVEDNAME>::darkShmimT>` (replace DERIVEDNAME with derivedT class name)
+  * 
   * - Must contain the following friend declarations (replace DERIVEDNAME with derivedT class name):
   *   \code
   *      friend class dev::shmimMonitor<DERIVEDNAME, dev::dmPokeWFS<DERIVEDNAME>::wfsShmimT>;
   *      friend class dev::shmimMonitor<DERIVEDNAME, dev::dmPokeWFS<DERIVEDNAME>::darkShmimT>;
   *      friend class dev::dmPokeWFS<DERIVEDNAME>
   *   \endcode
+  * 
   * - Must contain the following typedefs (replace DERIVEDNAME with derivedT class name):
   *   \code
   *       typedef dev::shmimMonitor<DERIVEDNAME, dev::dmPokeWFS<DERIVEDNAME>::wfsShmimT> shmimMonitorT;
   *       typedef dev::shmimMonitor<DERIVEDNAME, dev::dmPokeWFS<DERIVEDNAME>::darkShmimT> darkShmimMonitorT;
   *       typedef dev::dmPokeWFS<DERIVEDNAME> dmPokeWFST;
+  * 
   *   \endcode
   * - Must provide the following interfaces:
   *   \code 
@@ -94,15 +99,29 @@ namespace dev
   *   The function \ref updateMeasurement() can be used for this.  However, the updating of the loop counter and the subsequent INDI 
   *   property update is handled automatically after that.
   * 
+  * - Must be a telemeter with the following interface:
+  * 
+  *     - Must be derived from `dev::telemeter<DERIVEDNAME>` (replace DERIVEDNAME with derivedT class name) and meet the requirements
+  *       of `dev::telemeter`
+  * 
+  *     - In the function `derivedT::checkRecordTimes()` required by `dev::telemeter`,  the `telem_pokeloop` type must be checked.
+  *       The minimum `derivedT::checkRecordTimes()` is:
+  *       \code
+  *         int checkRecordTimes()
+  *         {
+  *             return telemeterT::checkRecordTimes(telem_pokeloop());
+  *         }
+  *       \endcode
+  *
   * - Must call this base class's setupConfig(), loadConfig(), appStartup(), appStartup(), and appShutdown() in the 
-  *   appropriate functions.  For convenience the following macros are defined to provide error checking:
-  *   \code  
+  *    appropriate functions.  For convenience the following macros are defined to provide error checking:
+  *    \code  
   *       DMPOKEWFS_SETUP_CONFIG( cfig )
   *       DMPOKEWFS_LOAD_CONFIG( cfig )
   *       DMPOKEWFS_APP_STARTUP
   *       DMPOKEWFS_APP_LOGIC
   *       DMPOKEWFS_APP_SHUTDOWN
-  *   \endcode
+  *    \endcode
   * 
   * \ingroup appdev
   */
@@ -165,23 +184,23 @@ protected:
 
     std::mutex m_wfsImageMutex;
 
-    eigenImage<float> m_wfsDark;
+    mx::improc::eigenImage<float> m_wfsDark;
 
-    milkImage<float> m_rawImage;
+    mx::improc::milkImage<float> m_rawImage;
     
-    milkImage<float> m_pokeImage;
+    mx::improc::milkImage<float> m_pokeImage;
 
     float (*wfsPixget)(void *, size_t) {nullptr}; ///< Pointer to a function to extract the image data as float
 
     float m_wfsFps {-1}; ///< The WFS camera FPS
 
-    eigenImage<float> m_darkImage; ///< The dark image
+    mx::improc::eigenImage<float> m_darkImage; ///< The dark image
 
     float (*darkPixget)(void *, size_t) {nullptr}; ///< Pointer to a function to extract the dark image data as float
 
-    milkImage<float> m_dmStream;
+    mx::improc::milkImage<float> m_dmStream;
 
-    eigenImage<float> m_dmImage;
+    mx::improc::eigenImage<float> m_dmImage;
 
     float m_deltaX {0};
     float m_deltaY {0};
@@ -377,6 +396,16 @@ protected:
 
     pcf::IndiProperty m_indiP_measurement; ///< Property to report the delta measurement, including the loop counter.
 
+
+    ///@}
+
+    /** \name Telemeter Interface 
+      * @{ 
+      */
+
+    int recordTelem(const telem_pokeloop *);
+
+    int recordPokeLoop(bool force = false);
 
     ///@}
 
@@ -1050,6 +1079,34 @@ INDI_NEWCALLBACK_DEFN( dmPokeWFS<derivedT>, m_indiP_stop )(const pcf::IndiProper
         {
             m_stopMeasurement = true;
         }
+    }
+
+    return 0;
+}
+
+template<class derivedT>
+int dmPokeWFS<derivedT>::recordTelem(const telem_pokeloop *)
+{
+    return recordPokeLoop(true);
+}
+
+template<class derivedT>
+int dmPokeWFS<derivedT>::recordPokeLoop(bool force)
+{
+    static int measuring = -1;
+    static float deltaX = std::numeric_limits<float>::max();
+    static float deltaY = std::numeric_limits<float>::max();
+    static uint64_t counter = std::numeric_limits<uint64_t>::max();
+
+    if(force || (m_counter != counter) || (m_deltaX != deltaX) || (m_deltaY != deltaY) || (m_measuring != measuring))
+    {
+        uint8_t meas = m_measuring;
+        derived().template telem<telem_pokeloop>({meas, m_deltaX, m_deltaY, m_counter});
+
+        measuring = m_measuring;
+        deltaX = m_deltaX;
+        deltaY = m_deltaY;
+        counter = m_counter;
     }
 
     return 0;

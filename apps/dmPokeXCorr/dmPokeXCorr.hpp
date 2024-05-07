@@ -162,9 +162,7 @@ protected:
      */
     int checkRecordTimes();
 
-    int recordTelem(const telem_pokeloop *);
-
-    int recordPokeLoop(bool force = false);
+    
 
     ///@}
 };
@@ -261,22 +259,6 @@ int dmPokeXCorr::appLogic()
 
     TELEMETER_APP_LOGIC;
 
-    // Do a join check to see if other threads have exited.
-    // these will throw if the threads are really gone
-    try
-    {
-        if (pthread_tryjoin_np(m_wfsThread.native_handle(), 0) == 0)
-        {
-            log<software_error>({__FILE__, __LINE__, "WFS thread has exited"});
-            return -1;
-        }
-    }
-    catch (...)
-    {
-        log<software_error>({__FILE__, __LINE__, "WFS thread has exited"});
-        return -1;
-    }
-
     return 0;
 }
 
@@ -322,35 +304,9 @@ int dmPokeXCorr::analyzeSensor()
     return 0;
 }
 
-inline int dmPokeXCorr::checkRecordTimes()
+int dmPokeXCorr::checkRecordTimes()
 {
     return telemeterT::checkRecordTimes(telem_pokeloop());
-}
-
-inline int dmPokeXCorr::recordTelem(const telem_pokeloop *)
-{
-    return recordPokeLoop(true);
-}
-
-inline int dmPokeXCorr::recordPokeLoop(bool force)
-{
-    static int measuring = -1;
-    static float deltaX = std::numeric_limits<float>::max();
-    static float deltaY = std::numeric_limits<float>::max();
-    static uint64_t counter = std::numeric_limits<uint64_t>::max();
-
-    if(force || (m_counter != counter) || (m_deltaX != deltaX) || (m_deltaY != deltaY) || (m_measuring != measuring))
-    {
-        uint8_t meas = m_measuring;
-        telem<telem_pokeloop>({meas, m_deltaX, m_deltaY, m_counter});
-
-        measuring = m_measuring;
-        deltaX = m_deltaX;
-        deltaY = m_deltaY;
-        counter = m_counter;
-    }
-
-    return 0;
 }
 
 } // namespace app
