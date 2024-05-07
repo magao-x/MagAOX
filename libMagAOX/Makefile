@@ -13,6 +13,7 @@ INCLUDEDEPS= app/MagAOXApp.hpp \
 	         app/indiUtils.hpp \
 			 app/semUtils.hpp \
              app/stateCodes.hpp \
+			 app/dev/semUtilsDerived.hpp \
              app/dev/outletController.hpp \
              app/dev/ioDevice.hpp \
              app/dev/stdMotionStage.hpp \
@@ -23,6 +24,7 @@ INCLUDEDEPS= app/MagAOXApp.hpp \
              app/dev/shmimMonitor.hpp \
              app/dev/dm.hpp \
              app/dev/telemeter.hpp \
+			 app/dev/dmPokeWFS.hpp \
              common/config.hpp \
              common/defaults.hpp \
              common/environment.hpp \
@@ -72,6 +74,7 @@ INCLUDEDEPS= app/MagAOXApp.hpp \
              logger/types/telem_pico.hpp \
              logger/types/telem_position.hpp \
              logger/types/telem_pokecenter.hpp \
+			 logger/types/telem_pokeloop.hpp \
              logger/types/telem_rhusb.hpp \
              logger/types/telem_stage.hpp \
              logger/types/telem_stdcam.hpp \

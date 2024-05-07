@@ -267,6 +267,12 @@ if( registerIndiPropertySet( prop,devName,  propName, INDI_SETCALLBACK(prop)) < 
     return log<software_error,-1>({__FILE__,__LINE__, "failed to register set property"}); \
 }                                                                                           
 
+#define REG_INDI_SETPROP_DERIVED(prop, devName, propName)                                                     \
+if( derived().template registerIndiPropertySet( prop,devName,  propName, INDI_SETCALLBACK(prop)) < 0)         \
+{                                                                                                             \
+    return derivedT::template log<software_error,-1>({__FILE__,__LINE__, "failed to register set property"}); \
+}                                                                                           
+
 /// Create and register a NEW INDI property as a standard number as float, using the standard callback name.
 /** This wraps createStandardIndiNumber and registerIndiPropertyNew, with error checking.
   * \p prop will have elements "current" and "target".
@@ -408,4 +414,98 @@ if( registerIndiPropertySet( prop,devName,  propName, INDI_SETCALLBACK(prop)) < 
         return -1;                                                                          \
     }
 
+/// Create and register a NEW INDI property as a standard number as float, using the standard callback name, using the derived class.
+/** This wraps createStandardIndiNumber and registerIndiPropertyNew, with error checking.
+  * \p prop will have elements "current" and "target".
+  *
+  * \param prop     [out] the property to create and setup
+  * \param name     [in] the name of the property
+  * \param min      [in] the minimum value for the elements, applied to both target and current
+  * \param max      [in] the minimum value for the elements, applied to both target and current
+  * \param step     [in] the step size for the elements, applied to both target and current
+  * \param format   [in] the _ value for the elements, applied to both target and current.  Set to "" to use the MagAO-X standard for type.
+  * \param label    [in] the GUI label suggestion for this property
+  * \param group    [in] the group for this property
+  * 
+  * \ingroup indi
+  */
+#define CREATE_REG_INDI_NEW_NUMBERF_DERIVED( prop, name, min, max, step, format, label, group)              \
+    if( derived().template createStandardIndiNumber<float>( prop, name, min, max, step, format, label, group) < 0)   \
+    {                                                                                                       \
+        derivedT::template log<software_error>({__FILE__,__LINE__, "error from createStandardIndiNumber"}); \
+        return -1;                                                                                          \
+    }                                                                                                       \
+    if( derived().template registerIndiPropertyNew( prop, INDI_NEWCALLBACK(prop)) < 0)                               \
+    {                                                                                                       \
+        derivedT::template log<software_error>({__FILE__,__LINE__, "error from registerIndiPropertyNew"});  \
+        return -1;                                                                                          \
+    }
+
+
+/// Create and register a NEW INDI property as a standard number as int, using the standard callback name, using the derived class
+/** This wraps createStandardIndiNumber and registerIndiPropertyNew, with error checking
+  * \p prop will have elements "current" and "target".
+  *
+  * \param prop     [out] the property to create and setup
+  * \param name     [in] the name of the property
+  * \param min      [in] the minimum value for the elements, applied to both target and current
+  * \param max      [in] the minimum value for the elements, applied to both target and current
+  * \param step     [in] the step size for the elements, applied to both target and current
+  * \param format   [in] the _ value for the elements, applied to both target and current.  Set to "" to use the MagAO-X standard for type.
+  * \param label    [in] the GUI label suggestion for this property
+  * \param group    [in] the group for this property
+  * 
+  * \ingroup indi
+  */
+#define CREATE_REG_INDI_NEW_NUMBERI_DERIVED( prop, name, min, max, step, format, label, group)              \
+    if( derived().template createStandardIndiNumber<int>( prop, name, min, max, step, format, label, group) < 0)     \
+    {                                                                                                       \
+        derivedT::template log<software_error>({__FILE__,__LINE__, "error from createStandardIndiNumber"}); \
+        return -1;                                                                                          \
+    }                                                                                                       \
+    if( derived().template registerIndiPropertyNew( prop, INDI_NEWCALLBACK(prop)) < 0)                               \
+    {                                                                                                       \
+        derivedT::template log<software_error>({__FILE__,__LINE__, "error from registerIndiPropertyNew"});  \
+        return -1;                                                                                          \
+    }
+
+/// Create and register a NEW INDI property as a standard toggle switch, using the standard callback name, using the derived class
+/** This wraps createStandardIndiToggleSw and registerIndiPropertyNew, with error checking
+  *
+  * \param prop the property member name, with no quotes
+  * \param name he property name, in quotes
+  * 
+  * \ingroup indi
+  */
+#define CREATE_REG_INDI_NEW_TOGGLESWITCH_DERIVED( prop, name )                                                \
+    if( derived().template createStandardIndiToggleSw( prop, name) < 0)                                                \
+    {                                                                                                         \
+        derivedT::template log<software_error>({__FILE__,__LINE__, "error from createStandardIndiToggleSw"}); \
+        return -1;                                                                                            \
+    }                                                                                                         \
+    if( derived().template registerIndiPropertyNew( prop, INDI_NEWCALLBACK(prop)) < 0)                                 \
+    {                                                                                                         \
+        derivedT::template log<software_error>({__FILE__,__LINE__, "error from registerIndiPropertyNew"});    \
+        return -1;                                                                                            \
+    }
+
+/// Create and register a NEW INDI property as a standard request switch, using the standard callback name, using the derived class
+/** This wraps createStandardIndiRequestSw and registerIndiPropertyNew, with error checking
+  *
+  * \param prop the property member name, with no quotes
+  * \param name he property name, in quotes
+  * 
+  * \ingroup indi
+  */
+#define CREATE_REG_INDI_NEW_REQUESTSWITCH_DERIVED( prop, name)                                                 \
+    if( derived().template createStandardIndiRequestSw( prop, name) < 0)                                                \
+    {                                                                                                          \
+        derivedT::template log<software_error>({__FILE__,__LINE__, "error from createStandardIndiRequestSw"}); \
+        return -1;                                                                                             \
+    }                                                                                                          \
+    if( derived().template registerIndiPropertyNew( prop, INDI_NEWCALLBACK(prop)) < 0)                                  \
+    {                                                                                                          \
+        derivedT::template log<software_error>({__FILE__,__LINE__, "error from registerIndiPropertyNew"});     \
+        return -1;                                                                                             \
+    }
 #endif //app_indiMacros_hpp
