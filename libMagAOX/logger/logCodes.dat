@@ -52,6 +52,7 @@ telem_zaber              20055    telem_zaber
 telem_pico               20060    telem_pico
 telem_position           20065    telem_position
 telem_pokecenter         20067    telem_pokecenter
+telem_pokeloop           20068    telem_pokeloop
 telem_observer           20070    telem_observer
 
 telem_rhusb              20100    telem_rhusb

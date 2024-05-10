@@ -15,6 +15,7 @@
 #include "app/indiUtils.hpp"
 #include "app/semUtils.hpp"
 #include "app/stateCodes.hpp"
+#include "app/dev/semUtilsDerived.hpp"
 #include "app/dev/outletController.hpp"
 #include "app/dev/ioDevice.hpp"
 #include "app/dev/stdMotionStage.hpp"
@@ -25,7 +26,7 @@
 #include "app/dev/shmimMonitor.hpp"
 #include "app/dev/dm.hpp"
 #include "app/dev/telemeter.hpp"
-
+#include "app/dev/dmPokeWFS.hpp"
 #include "sys/runCommand.hpp"
 
 #include "common/config.hpp"
