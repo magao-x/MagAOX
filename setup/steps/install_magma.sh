@@ -1,7 +1,7 @@
 #!/bin/bash
 # If not started as root, sudo yourself
 if [[ "$EUID" != 0 ]]; then
-    sudo bash -l $0 "$@"
+    sudo -H bash -l $0 "$@"
     exit $?
 fi
 DIR="$( cd "$( dirname "${BASH_SOURCE[0]}" )" && pwd )"
@@ -33,7 +33,7 @@ elif [[ $MAGAOX_ROLE == AOC || $MAGAOX_ROLE == TIC || $MAGAOX_ROLE == ci ]]; the
 fi
 make -j 32
 make install
-echo "/usr/local/magma/lib" | sudo tee /etc/ld.so.conf.d/magma.conf
+echo "/usr/local/magma/lib" | sudo -H tee /etc/ld.so.conf.d/magma.conf
 ldconfig
 echo "# Configure MAGMA library environment variables (do not edit, see /opt/MagAOX/source/MagAOX/setup/install_magma.sh)" > /etc/profile.d/magma.sh
 echo "export PKG_CONFIG_PATH=\$PKG_CONFIG_PATH:/usr/local/magma/lib/pkgconfig" >> /etc/profile.d/magma.sh
