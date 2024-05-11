@@ -184,6 +184,7 @@ void closedLoopIndi::setupConfig()
     config.add("loop.intMat10", "", "loop.intMat10", argType::Required, "loop", "intMat10", false, "float", "element (1,0) of the interaction matrix. Default is 0.");
     config.add("loop.intMat11", "", "loop.intMat11", argType::Required, "loop", "intMat11", false, "float", "element (1,1) of the interaction matrix. Default is 1.");
 
+    config.add("loop.gain", "", "loop.gain", argType::Required, "loop", "gain", false, "float", "default global loop gain.");
     config.add("loop.gains", "", "loop.gains", argType::Required, "loop", "gains", false, "vector<float>", "default loop gains.  If single number, it is applied to all axes.");
     config.add("loop.upstream", "", "loop.upstream", argType::Required, "loop", "upstream", false, "string", "Upstream loop device name.  This loop will open, and optionally close, with the upstream loop.  Default none.");
     config.add("loop.upstreamProperty", "", "loop.upstreamProperty", argType::Required, "loop", "upstreamProperty", false, "string", "Property of upstream loop device to follow.  Must be a toggle.  Default is loop_state.");
@@ -281,6 +282,8 @@ int closedLoopIndi::loadConfigImpl( mx::app::appConfigurator & _config )
     m_intMat(0,1) = im01;
     m_intMat(1,0) = im10;
     m_intMat(1,1) = im11;
+    
+    _config(m_ggain, "loop.gain");
     
     _config(m_defaultGains, "loop.gains");
     _config(m_upstreamDevice, "loop.upstream");
