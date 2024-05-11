@@ -60,7 +60,7 @@ struct telem_dmspeck : public flatbuffer_log
                        flatlogs::msgLenT len            ///< [in] length of msgBuffer.
                      )
    {
-      auto verifier = flatbuffers::Verifier( (uint8_t*) flatlogs::logHeader::messageBuffer(logBuff), static_cast<size_t>(len));
+      auto verifier = flatbuffers::Verifier( static_cast<uint8_t*>(flatlogs::logHeader::messageBuffer(logBuff)), static_cast<size_t>(len));
       return VerifyTelem_dmspeck_fbBuffer(verifier);
    }
 
@@ -203,13 +203,13 @@ struct telem_dmspeck : public flatbuffer_log
      */ 
    static logMetaDetail getAccessor( const std::string & member /**< [in] the name of the member */ )
    {
-      if(member == "modulating") return logMetaDetail({"MODULATING", logMeta::valTypes::Bool, logMeta::metaTypes::State, (void *) &modulating});
-      else if(member == "trigger") return logMetaDetail({"TRIGGERED", logMeta::valTypes::Bool, logMeta::metaTypes::State, (void *) &trigger});
-      else if(member == "frequency") return logMetaDetail({"FREQUENCY", logMeta::valTypes::Float, logMeta::metaTypes::State, (void *) &frequency});
-      else if(member == "separations") return logMetaDetail({"SEPARATIONS", logMeta::valTypes::Vector_Float, logMeta::metaTypes::State, (void *) &separations});
-      else if(member == "angles") return logMetaDetail({"ANGLES", logMeta::valTypes::Vector_Float, logMeta::metaTypes::State, (void *) &angles});
-      else if(member == "amplitudes") return logMetaDetail({"AMPLITUDES", logMeta::valTypes::Vector_Float, logMeta::metaTypes::State, (void *) &amplitudes});
-      else if(member == "crosses") return logMetaDetail({"CROSSES", logMeta::valTypes::Vector_Bool, logMeta::metaTypes::State, (void *) &crosses});
+      if(member == "modulating") return logMetaDetail({"MODULATING", logMeta::valTypes::Bool, logMeta::metaTypes::State, reinterpret_cast<void*>(&modulating)});
+      else if(member == "trigger") return logMetaDetail({"TRIGGERED", logMeta::valTypes::Bool, logMeta::metaTypes::State, reinterpret_cast<void*>(&trigger)});
+      else if(member == "frequency") return logMetaDetail({"FREQUENCY", logMeta::valTypes::Float, logMeta::metaTypes::State, reinterpret_cast<void*>(&frequency)});
+      else if(member == "separations") return logMetaDetail({"SEPARATIONS", logMeta::valTypes::Vector_Float, logMeta::metaTypes::State, reinterpret_cast<void*>(&separations)});
+      else if(member == "angles") return logMetaDetail({"ANGLES", logMeta::valTypes::Vector_Float, logMeta::metaTypes::State, reinterpret_cast<void*>(&angles)});
+      else if(member == "amplitudes") return logMetaDetail({"AMPLITUDES", logMeta::valTypes::Vector_Float, logMeta::metaTypes::State, reinterpret_cast<void*>(&amplitudes)});
+      else if(member == "crosses") return logMetaDetail({"CROSSES", logMeta::valTypes::Vector_Bool, logMeta::metaTypes::State, reinterpret_cast<void*>(&crosses)});
       else
       {
          std::cerr << "No string member " << member << " in telem_dmspeck\n";

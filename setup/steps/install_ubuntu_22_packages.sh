@@ -52,6 +52,7 @@ NEEDRESTART_SUSPEND=yes apt install -y \
     libopenblas-openmp-dev \
     liblapack-dev \
     liblapacke-dev \
+    podman \
 ;
 
 if [[ $MAGAOX_ROLE == vm ]]; then

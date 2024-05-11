@@ -169,17 +169,7 @@ void flipperCtrl::loadConfig()
 
 int flipperCtrl::appStartup()
 {
-/*
-   if(m_deviceName == "") state(stateCodes::NODEVICE);
-   else
-   {
-      state(stateCodes::NOTCONNECTED);
-      std::stringstream logs;
-      logs << "USB Device " << m_idVendor << ":" << m_idProduct << ":" << m_serial << " found in udev as " << m_deviceName;
-      log<text_log>(logs.str());
-   }*/
-
-   createStandardIndiSelectionSw( m_indiP_position, "position", {"in", "out"});
+   createStandardIndiSelectionSw( m_indiP_position, "presetName", {"in", "out"});
    
    if( registerIndiPropertyNew( m_indiP_position, INDI_NEWCALLBACK(m_indiP_position)) < 0)
    {

@@ -1,7 +1,7 @@
 #!/bin/bash
 if [[ "$EUID" != 0 ]]; then
     echo "Becoming root..."
-    sudo bash -l $0 "$@"
+    sudo -H bash -l $0 "$@"
     exit $?
 fi
 DIR="$( cd "$( dirname "${BASH_SOURCE[0]}" )" && pwd )"
@@ -20,7 +20,7 @@ if [[ ! -e /opt/PrincetonInstruments/picam ]]; then
     log_success "Ran Picam SDK installer"
 fi
 if [[ ! -e /opt/PrincetonInstruments/picam ]]; then
-    exit_error "Installer failed to create /opt/PrincetonInstruments/picam, aborting"
+    exit_with_error "Installer failed to create /opt/PrincetonInstruments/picam, aborting"
 fi
 chmod a+rX -R /opt/pleora
 chmod a+rX -R /opt/PrincetonInstruments

@@ -12,7 +12,10 @@
 
 #include "generated/telem_fxngen_generated.h"
 #include "flatbuffer_log.hpp"
-#include "../logMeta.hpp"
+
+#define TELEM_FXNGEN_WVTP_DC (0)
+#define TELEM_FXNGEN_WVTP_SINE (1)
+#define TELEM_FXNGEN_WVTP_PULSE (2)
 
 namespace MagAOX
 {
@@ -25,51 +28,42 @@ namespace logger
   */
 struct telem_fxngen : public flatbuffer_log
 {
-   ///The event code
-   static const flatlogs::eventCodeT eventCode = eventCodes::TELEM_FXNGEN;
+    ///The event code
+    static const flatlogs::eventCodeT eventCode = eventCodes::TELEM_FXNGEN;
 
-   ///The default level
-   static const flatlogs::logPrioT defaultLevel = flatlogs::logPrio::LOG_TELEM;
+    ///The default level
+    static const flatlogs::logPrioT defaultLevel = flatlogs::logPrio::LOG_TELEM;
 
-   static timespec lastRecord; ///< The timestamp of the last time this log was recorded.  Used by the telemetry system.
+    static timespec lastRecord; ///< The timestamp of the last time this log was recorded.  Used by the telemetry system.
    
+    
+
+
    ///The type of the input message
    struct messageT : public fbMessage
    {
       ///Construct from components
-      messageT( const uint8_t & C1outp,     ///< [in] Channel 1 output status
-                const double & C1freq,      ///< [in] Channel 1 frequency [Hz]
-                const double & C1vpp,       ///< [in] Channel 1 P2P voltage [V]
-                const double & C1ofst,      ///< [in] Channel 1 offset [V]
-                const double & C1phse,      ///< [in] Channel 1 phase [deg]
-                const double & C1wdth,      ///< [in] Channel 1 width [s]
-                const std::string & C1wvtp, ///< [in] Channel 1 wavetype (SINE or DC)
-                const uint8_t & C2outp,     ///< [in] Channel 2 output status
-                const double & C2freq,      ///< [in] Channel 2 frequency [Hz]
-                const double & C2vpp,       ///< [in] Channel 2 P2P voltage [V]
-                const double & C2ofst,      ///< [in] Channel 2 offset [V]
-                const double & C2phse,      ///< [in] Channel 2 phase [deg]
-                const double & C2wdth,      ///< [in] Channel 2 width [s]
-                const std::string & C2wvtp, ///< [in] Channel 2 wavetype  (SINE or DC) 
-                const uint8_t & C1sync,     ///< [in] Channel 1 sync status
-                const uint8_t & C2sync      ///< [in] Channel 2 sync status
+      messageT( const uint8_t & C1outp, ///< [in] Channel 1 output status
+                const double & C1freq,  ///< [in] Channel 1 frequency [Hz]
+                const double & C1vpp,   ///< [in] Channel 1 P2P voltage [V]
+                const double & C1ofst,  ///< [in] Channel 1 offset [V]
+                const double & C1phse,  ///< [in] Channel 1 phase [deg]
+                const uint8_t & C1wvtp, ///< [in] Channel 1 wavetype (SINE or DC)
+                const uint8_t & C2outp, ///< [in] Channel 2 output status
+                const double & C2freq,  ///< [in] Channel 2 frequency [Hz]
+                const double & C2vpp,   ///< [in] Channel 2 P2P voltage [V]
+                const double & C2ofst,  ///< [in] Channel 2 offset [V]
+                const double & C2phse,  ///< [in] Channel 2 phase [deg]
+                const uint8_t & C2wvtp, ///< [in] Channel 2 wavetype  (SINE or DC) 
+                const uint8_t & C1sync, ///< [in] Channel 1 sync status
+                const uint8_t & C2sync, ///< [in] Channel 2 sync status
+                const double & C1wdth,  ///< [in] Channel 1 width [s]
+                const double & C2wdth   ///< [in] Channel 2 width [s]
               )
       {
-         uint8_t  _C1wvtp = 3,  _C2wvtp = 3;
-         
-         
-         if(C1wvtp == "DC") _C1wvtp = 0;
-         else if(C1wvtp == "SINE") _C1wvtp = 1;
-         else if(C1wvtp == "PULSE") _C1wvtp = 2;
-         
-         if(C2wvtp == "DC") _C2wvtp = 0;
-         else if(C2wvtp == "SINE") _C2wvtp = 1;
-         else if(C2wvtp == "PULSE") _C2wvtp = 2;
-         
-         
-         auto fp = CreateTelem_fxngen_fb(builder, C1outp, C1freq, C1vpp, C1ofst, C1phse, _C1wvtp, C2outp, C2freq, C2vpp, C2ofst, C2phse,  _C2wvtp, C1sync, C2sync, C1wdth, C2wdth);
+         auto fp = CreateTelem_fxngen_fb(builder, C1outp, C1freq, C1vpp, C1ofst, C1phse, C1wvtp, 
+                                               C2outp, C2freq, C2vpp, C2ofst, C2phse, C2wvtp, C1sync, C2sync, C1wdth, C2wdth);
          builder.Finish(fp);
-
       }
 
    };
@@ -78,7 +72,7 @@ struct telem_fxngen : public flatbuffer_log
                        flatlogs::msgLenT len            ///< [in] length of msgBuffer.
                      )
    {
-      auto verifier = flatbuffers::Verifier( (uint8_t*) flatlogs::logHeader::messageBuffer(logBuff), static_cast<size_t>(len));
+      auto verifier = flatbuffers::Verifier( static_cast<uint8_t*>(flatlogs::logHeader::messageBuffer(logBuff)), static_cast<size_t>(len));
       return VerifyTelem_fxngen_fbBuffer(verifier);
    }
 
@@ -93,9 +87,9 @@ struct telem_fxngen : public flatbuffer_log
 
       std::string msg = "Ch 1: ";
       
-      if(fbs->C1wvtp() == 0) msg += "DC ";
-      else if(fbs->C1wvtp() == 1) msg += "SINE ";
-      else if(fbs->C1wvtp() == 2) msg += "PULSE ";
+      if(fbs->C1wvtp() == TELEM_FXNGEN_WVTP_DC) msg += "DC ";
+      else if(fbs->C1wvtp() == TELEM_FXNGEN_WVTP_SINE) msg += "SINE ";
+      else if(fbs->C1wvtp() == TELEM_FXNGEN_WVTP_PULSE) msg += "PULSE ";
       else msg += "UNK ";
       
       if(fbs->C1outp() == 0) msg += "OFF ";
@@ -113,9 +107,9 @@ struct telem_fxngen : public flatbuffer_log
 
       msg += " | Ch 2: ";
 
-      if(fbs->C2wvtp() == 0) msg += "DC ";
-      else if(fbs->C2wvtp() == 1) msg += "SINE ";
-      else if(fbs->C2wvtp() == 2) msg += "PULSE ";
+      if(fbs->C2wvtp() == TELEM_FXNGEN_WVTP_DC) msg += "DC ";
+      else if(fbs->C2wvtp() == TELEM_FXNGEN_WVTP_SINE) msg += "SINE ";
+      else if(fbs->C2wvtp() == TELEM_FXNGEN_WVTP_PULSE) msg += "PULSE ";
       else msg += "UNK ";
       
       if(fbs->C2outp() == 0) msg += "OFF ";
@@ -150,8 +144,8 @@ struct telem_fxngen : public flatbuffer_log
    /// Get the logMetaDetail for a member by name
    static logMetaDetail getAccessor( const std::string & member /**< [in] the name of the member */ )
    {
-      if(     member == "C1freq") return logMetaDetail({"C1 FREQ", logMeta::valTypes::Double, logMeta::metaTypes::Continuous, (void *) &C1freq});
-      else if(member == "C2freq") return logMetaDetail({"C2 FREQ", logMeta::valTypes::Double, logMeta::metaTypes::Continuous, (void *) &C2freq});
+      if(     member == "C1freq") return logMetaDetail({"C1 FREQ", logMeta::valTypes::Double, logMeta::metaTypes::Continuous, reinterpret_cast<void*>(&C1freq)});
+      else if(member == "C2freq") return logMetaDetail({"C2 FREQ", logMeta::valTypes::Double, logMeta::metaTypes::Continuous, reinterpret_cast<void*>(&C2freq)});
       else
       {
          std::cerr << "No string member " << member << " in telem_fxngen\n";

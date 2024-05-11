@@ -30,9 +30,10 @@ exists( $$(CONDA_PREFIX)/lib ) {
 MAKEFILE = makefile.cameraGUI
 
 # Input
-INCLUDEPATH += ../../lib ../../widgets 
+INCLUDEPATH += ../../lib ../../widgets ../../widgets/xWidgets
 
 HEADERS += ../../widgets/camera/camera.hpp \
+           ../../widgets/xWidgets/app.hpp \
            ../../widgets/xWidgets/xWidget.hpp \
            ../../widgets/xWidgets/fsmDisplay.hpp \
            ../../widgets/xWidgets/selectionSwStatus.hpp \
@@ -43,7 +44,9 @@ HEADERS += ../../widgets/camera/camera.hpp \
            ../../widgets/xWidgets/selectionSw.hpp \
            ../../widgets/xWidgets/toggleSlider.hpp \
            ../../widgets/camera/roiStatus.hpp \
+           ../../widgets/camera/stageStatus.hpp \
            ../../widgets/roi/roi.hpp \
+           ../../widgets/stage/stage.hpp \
            ../../widgets/camera/shutterStatus.hpp \
            ../../lib/multiIndiManager.hpp
            
@@ -55,11 +58,13 @@ FORMS += ../../widgets/camera/camera.ui \
          ../../widgets/xWidgets/statusDisplay.ui \
          ../../widgets/xWidgets/toggleSlider.ui \
          ../../widgets/roi/roi.ui \
+         ../../widgets/stage/stage.ui \
          ../../widgets/camera/shutterStatus.ui \
          ../../widgets/xWidgets/selectionSw.ui
      
 LIBS += ../../../INDI/libcommon/libcommon.a \
-        ../../../INDI/liblilxml/liblilxml.a
+        ../../../INDI/liblilxml/liblilxml.a \
+        -lmxlib
 
 RESOURCES += ../../resources/MagAOXStyleSheets/MagAOXStyle.qrc 
 

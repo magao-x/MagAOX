@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 if [[ "$EUID" != 0 ]]; then
     echo "Becoming root..."
-    sudo bash -l $0 "$@"
+    sudo -H bash -l $0 "$@"
     exit $?
 fi
 DIR="$( cd "$( dirname "${BASH_SOURCE[0]}" )" && pwd )"
@@ -33,7 +33,7 @@ cd /opt/MagAOX/vendor
 _cached_fetch https://github.com/lpechacek/cpuset/archive/refs/tags/v1.6.zip cpuset-v1.6.zip
 unzip -o cpuset-v1.6.zip
 cd cpuset-1.6/
-sudo yum install -y python-devel xmlto
+sudo -H yum install -y python-devel xmlto
 
 $osPython setup.py bdist_rpm
 rpmFile=/opt/MagAOX/vendor/cpuset-1.6/dist/cpuset-1.6-1.noarch.rpm
@@ -43,7 +43,7 @@ if [[ -e /etc/profile.d/cgroups1_cpuset_mountpoint.sh ]]; then
 else
     CGROUPS1_CPUSET_MOUNTPOINT=/opt/MagAOX/cpuset
 fi
-cat <<"HERE" | sudo tee /etc/cset.conf || exit 1
+cat <<"HERE" | sudo -H tee /etc/cset.conf || exit 1
 mountpoint = $CGROUPS1_CPUSET_MOUNTPOINT
 HERE
-cset --help || exit_error "Could not run cset"
+cset --help || exit_with_error "Could not run cset"

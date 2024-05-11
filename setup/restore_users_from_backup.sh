@@ -2,9 +2,9 @@
 DIR="$( cd "$( dirname "${BASH_SOURCE[0]}" )" && pwd )"
 source $DIR/_common.sh
 set -euo pipefail
-[ "$#" -eq 1 ] || exit_error "Usage: ${BASH_SOURCE[0]} /path/to/folder/of/homes/"
+[ "$#" -eq 1 ] || exit_with_error "Usage: ${BASH_SOURCE[0]} /path/to/folder/of/homes/"
 if [[ ! -d $1 ]]; then
-    exit_error "Specify the path to a folder of backed-up home directories"
+    exit_with_error "Specify the path to a folder of backed-up home directories"
 fi
 allUserFolders=($1/*)
 log_warn "Matched these user folders: ${allUserFolders[*]}"
@@ -20,6 +20,6 @@ for userFolder in "${allUserFolders[@]}"; do
     fi
     uid=$(id -u $userName)
     gid=$(id -g $userName)
-    sudo rsync -av $userFolder/ /home/$userName/ || exit_error "Failed to sync files from $userFolder to /home/$userName/"
-    sudo chown -vR $uid:$gid /home/$userName/ || exit_error "Failed to normalize ownership to $userName ($(id $userName))"
+    sudo rsync -av $userFolder/ /home/$userName/ || exit_with_error "Failed to sync files from $userFolder to /home/$userName/"
+    sudo chown -vR $uid:$gid /home/$userName/ || exit_with_error "Failed to normalize ownership to $userName ($(id $userName))"
 done

@@ -1,0 +1,145 @@
+<personality>
+  <default-voice name="larynx:southern_english_female-glow_tts" />
+  <random-utterances>
+    <speak>pee eye is asleep. I'm the pee eye now.</speak>
+    <file name="toughest_battles.wav" />
+    <!-- <speak>please forfeit all <s lang="es">empanadas</s> in a timely manner</speak> -->
+    <speak>Oh, that little guy? I wouldn't worry about that little guy</speak>
+    <speak>Chicken nugget</speak>
+    <speak>having more things just means that more things can go right</speak>
+    <speak>do not over-click mouse, as this can cause computers to freeze.</speak>
+    <speak>Veggie nugget</speak>
+    <speak>We, at toilet duck, recommend toilet duck.</speak>
+    <speak><voice name="larynx:karen_savage-glow_tts">Entregue todas sus empanadas al jefe.</voice></speak>
+    <speak>We, at Mag <say-as interpret-as="spell-out">AOX</say-as>, recommend Mag <say-as interpret-as="spell-out">AOX</say-as>.</speak>
+    <file name="not_jared.wav" />
+  </random-utterances>
+  <soundboard>
+    <button name="NotJared">
+      <file name="not_jared.wav" />
+    </button>
+    <button name="Standards">
+      <file name="we_have_standards.wav" />
+    </button>
+    <button name="ChickenNugget">
+      <speak>Chicken nugget</speak>
+    </button>
+    <button name="Avalon">
+      <speak>beep boop bop</speak>
+    </button>
+    <button name="Proposals">
+      <file name="lkca15.wav" />
+    </button>
+  </soundboard>
+  <react-to indi-id="observers.obs_on.toggle">
+    <transition value="On">
+      <speak>Saving data for {observers.current_observer.pfoa}.</speak>
+    </transition>
+    <transition value="Off">
+      <speak>Data saving stopped.</speak>
+    </transition>
+  </react-to>
+  <react-to indi-id="holoop.loop_state.toggle">
+    <transition op="eq" value="On">
+      <speak>High-order loop is closed.</speak>
+      <speak>Closing high-order loop.</speak>
+      <speak>Mag <say-as interpret-as="spell-out">AOX</say-as> System: Engage high-order loop.</speak>
+      <speak>High-order loop engaged</speak>
+      <speak>Adaptive optics turned up to <say-as interpret-as="cardinal">11</say-as>.</speak>
+      <speak>Science in progress. Please stand by.</speak>
+      <speak>Energize.</speak>
+      <speak>Engage.</speak>
+      <speak>Let's go.</speak>
+      <speak>Ready to kick some ass.</speak>
+    </transition>
+    <transition op="eq" value="Off">
+      <speak>No more adaptive optics for you</speak>
+      <speak>Loop is open</speak>
+      <speak>The fun is over</speak>
+    </transition>
+  </react-to>
+  <react-to indi-id="tcsi.catalog.object">
+    <transition>
+      <speak>Target updated.</speak>
+      <speak>New target selected.</speak>
+    </transition>
+  </react-to>
+  <react-to indi-id="tcsi.environment.humidity">
+    <transition op="between" low="80" high="100">
+      <speak>Humidity warning: <say-as interpret-as="number">{tcsi.environment.humidity}</say-as> percent</speak>
+    </transition>
+    <transition op="between" low="70" high="80">
+      <speak>Humidity at <say-as interpret-as="number">{tcsi.environment.humidity}</say-as> percent</speak>
+    </transition>
+  </react-to>
+  <react-to indi-id="stageadc1.fsm.state">
+    <transition value="NOTHOMED">
+      <speak>stage aiey dee cee one is not homed. the cat is grumpy.</speak>
+    </transition>
+  </react-to>
+  <react-to indi-id="stageadc2.fsm.state">
+    <transition value="NOTHOMED">
+      <speak>stage aiey dee cee two is not homed. the cat is grumpy.</speak>
+    </transition>
+  </react-to>
+  <react-to indi-id="stagek.fsm.state">
+    <transition value="NOTHOMED">
+      <speak>stage kay is not homed. the cat is grumpy.</speak>
+    </transition>
+  </react-to>
+  <react-to indi-id="tcsi.environment.wind">
+    <transition op="between" low="30" high="35">
+      <speak>The wind exceeded thirty miles per hour</speak>
+    </transition>
+    <transition op="gt" value="35.1">
+      <speak>We have exceeded the wind shutdown threshold</speak>
+    </transition>
+  </react-to>
+  <react-to indi-id="tcsi.seeing.dimm_fwhm">
+    <transition op="gt" value="1.5">
+      <speak>You know, this is the worst seeing I can remember!</speak>
+      <speak>We have standards</speak>
+      <speak>The seeing is never normally this bad. Maybe we should give up.</speak>
+      <speak>You guys know this is hopeless, right?</speak>
+      <speak>Well, the seeing is shit. Smoke um if you got um</speak>
+      <speak>Are you still operating in these conditions?</speak>
+      <file name="toughest_battles.wav" />
+    </transition>
+    <transition op="between" low="0.0" high="0.3">
+      <speak>I'm chuffed to bits</speak>
+      <speak>Seeing is believing</speak>
+      <speak>That might be the lowest number I've seen on the dim</speak>
+    </transition>
+  </react-to>
+  <react-to indi-id="loloop.loop_state.toggle">
+    <transition value="On">
+      <speak>Beep boop bop.</speak>
+      <speak>Low fiss on</speak>
+      <speak>Hocus pocus low fiss</speak>
+    </transition>
+    <transition value="Off">
+      <speak>I am so done with this.</speak>
+      <speak>Low fiss off</speak>
+    </transition>
+  </react-to>
+  <react-to indi-id="camvisx.current_exposure.remaining_pct">
+    <transition value="90" op="gt">
+      <speak><voice name="larynx:nathalie-glow_tts">Gaan met die banaan.</voice></speak>
+      <speak><voice name="larynx:nathalie-glow_tts">De dood of de gladiolen.</voice></speak>
+      <speak><voice name="larynx:nathalie-glow_tts">De kogel is door de kerk.</voice></speak>
+      <speak><voice name="larynx:nathalie-glow_tts">Als de kat van huis is, dansen de muizen op tafel.</voice></speak>
+    </transition>
+  </react-to>
+  <react-to indi-id="camvisx.current_exposure.remaining_pct">
+    <transition value="0" op="le">
+      <speak>Exposuring complete</speak>
+      <speak>Done visex ing</speak>
+      <speak>Sixty megapixels for you</speak>
+    </transition>
+  </react-to>
+  <react-to indi-id="tweeterSpeck.modulating.toggle">
+    <transition value="On">
+      <speak>sparkles mick yew in to the control room, paging sparkles mick yew in</speak>
+    </transition>
+  </react-to>
+</personality>

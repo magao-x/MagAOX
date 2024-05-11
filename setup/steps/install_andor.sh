@@ -4,6 +4,6 @@ export BUILDING_KERNEL_STUFF=1  # disable loading devtoolset-7 for agreement w/ 
 source $DIR/../_common.sh
 set -euo pipefail
 cd /opt/MagAOX/vendor/andor
-sudo patch -Np1 < unattended_install.patch || true
-sudo bash install_andor
+sudo -H patch -Np1 < unattended_install.patch || true
+sudo -H bash install_andor
 log_info "install_andor complete"

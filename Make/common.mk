@@ -146,12 +146,11 @@ endif
 
 EXTRA_LDLIBS+= $(CUDA_LIBS)
 
-#2021-01-07: added xpa to levmar
-
 CACAO ?= true
 ifneq ($(CACAO),false)
   EXTRA_LDLIBS +=  -L/usr/local/milk/lib -lImageStreamIO
   INCLUDES += -I/usr/local/milk/include
+  CXXFLAGS += -DMXLIB_MILK
 endif
 
 ### OpenBLAS compiler/linker flags
@@ -190,9 +189,11 @@ LDLIBS += -Wl,-rpath,$(LDLIBRPATH)
 ########################################
 ## Compilation and linking
 #######################################
+CSTD ?= -std=c99
+CXXSTD ?= -std=c++17
 
-CFLAGS += -std=c99 -fPIC $(INCLUDES) $(OPTIMIZE)
-CXXFLAGS += -std=c++14 -Wall -Wextra -fPIC $(INCLUDES) $(OPTIMIZE)
+CFLAGS += $(CSTD) -fPIC $(INCLUDES) $(OPTIMIZE)
+CXXFLAGS += $(CXXSTD) -Wall -Wextra -fPIC $(INCLUDES) $(OPTIMIZE)
 
 #This is needed to force use of g++ for linking
 LINK.o = $(LINK.cc)

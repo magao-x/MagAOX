@@ -38,7 +38,10 @@ struct cameraConfig
    unsigned m_sizeY {0};
    unsigned m_binningX {0};
    unsigned m_binningY {0};
-   
+
+   unsigned m_digitalBinX {0};
+   unsigned m_digitalBinY {0};
+
    float m_maxFPS {0};
 };
 
@@ -50,177 +53,232 @@ int loadCameraConfig( cameraConfigMap & ccmap, ///< [out] the map in which to pl
                     );
 
 /// MagAO-X standard camera interface
-/** Implements the standard interface to a MagAO-X camera
+/** Implements the standard interface to a MagAO-X camera.  The derived class `derivedT` must
+  * meet the following requirements:
+  * 
+  * - The derived class `derivedT` must be a `MagAOXApp\<true\>`
+  *  
+  * - Must declare this class a friend like so: 
+  *   \code
+  *       friend class dev::stdCamera<DERIVEDNAME>;  //replace DERIVEDNAME with derivedT class name
+  *   \endcode
+  * 
+  * - Must declare the following typedef:
+  *   \code
+  *       typedef dev::stdCamera<DERIVEDNAME> stdCameraT; //replace DERIVEDNAME with derivedT class name
+  *   \endcode
+  * 
+  * - Must declare a series of `static constexpr` flags to manage static compile-time configuration.  Each of these
+  *   flags must be defined in derivedT to be either true or false.
+  * 
+  *     - Temperature Control and Status:
+  *     
+  *         - A static configuration variable must be defined in derivedT as
+  *           \code
+  *               static constexpr bool c_stdCamera_tempControl = true; //or: false
+  *           \endcode
+  *           which determines whether or not temperature controls are exposed. 
+  *     
+  *         - If `(c_stdCamera_tempControl == true)` then the derived class must implement the following interfaces
+  *           \code
+  *               int setTempControl(); // set temp control status according to m_tempControlStatusSet
+  *               int setTempSetPt(); // set the temperature set point accordin to m_ccdTempSetpt
+  *           \endcode
+  *     
+  *         - A static configuration variable must be defined in derivedT as
+  *           \code
+  *               static constexpr bool c_stdCamera_temp = true; //or: false
+  *           \endcode
+  *           which determines whether or not temperature reporting is exposed.  Note that if 
+  *           `(c_stdCamera_tempControl == true)`, then the behavior is as if `c_stdCamera_temp == true`, 
+  *           but thus constexpr must still be defined.  
+  *     
+  *         - If either `(c_stdCamera_tempControl == true)` or `c_stdCamera_temp == true` then the INDI property "temp_ccd" 
+  *           will be updated from the value of \ref m_ccdTemp.
+  *    
+  *     - Readout Speed:
+  * 
+  *       - A static configuration variable must be defined in derivedT as
+  *         \code
+  *             static constexpr bool c_stdCamera_readoutSpeed = true; //or: false
+  *         \endcode
+  *         which determines whether or not readout speed controls are exposed.  If true, then the implementation should populate
+  *         \ref m_readoutSpeedNames and \ref m_readoutSpeedNameLabels (vectors of strings) on construction to the allowed values.  This 
+  *         facility is normally used to control both amplifier and readout/adc speed with names like "ccd_1MHz" and "emccd_17MHz".  
+  * 
+  *       - If used (and true) then the following interface must be implemented:
+  *         \code
+  *             int setReadoutSpeed(); // configures camera using m_readoutSpeedNameSet
+  *         \endcode
+  *         This configures the camera according to \ref m_readoutSpeedNameSet.
+  *         The implementation must also manage \ref m_readoutSpeedName, keeping it up to date with the current setting.  
+  * 
+  *       - If true, the configuration setting "camera.defaultReadoutSpeed"
+  *         is also exposed, and \ref m_defaultReadoutSpeed will be set according to it.  The implementation can
+  *         set a sensible default on construction.
+  *     
+  *     - Vertical Shift Speed:
+  * 
+  *        - A static configuration variable must be defined in derivedT as
+  *          \code
+  *              static constexpr bool c_stdCamera_vShiftSpeed = true; //or: false
+  *          \endcode
+  *          which determines whether or not vertical shift speed controls are exposed. 
+  * 
+  *        - If true, then the implementation should populate \ref m_vShiftSpeedNames and \ref m_vShiftSpeedLabels 
+  *          (vectors of strings) on construction to the allowed values.  This 
+  *          facility is normally used with names like "0_3us" and "1_3us".  
+  * 
+  *        - If true then the following interface must be defined: 
+  *          \code 
+  *              int setVShiftSpeed(); // configures camera according to m_vShiftSpeedNameSet
+  *          \endcode
+  *          function must be defined which sets the camera according to \ref m_vShiftSpeedNameSet.
+  *          The implementation must also manage m_vShiftSpeedName, keeping it up to date.  
+  * 
+  *        - The configuration setting "camera.defaultVShiftSpeed"
+  *          is also exposed, and \ref m_defaultVShiftSpeed will be set accordingly.  derivedT can set a sensible default
+  *          on constuction.
+  *     
+  *     - Exposure Time:
+  *        - A static configuration variable must be defined in derivedT as
+  *          \code
+  *              static constexpr bool c_stdCamera_exptimeCtrl = true; //or: false
+  *          \endcode
+  *        - If true, the following interface must be implemented:
+  *          \code
+  *              int setExpTime(); // set camera exposure time according to m_expTimeSet.
+  *          \endcode
+  *          to configure the camera according to \ref m_expTimeSet.  derivedT must also keep \ref m_expTime up to date.
+  * 
+  *     - Frames per Second (FPS) Control and Status:
+  *         - A static configuration variable must be defined in derivedT as
+  *           \code
+  *               static constexpr bool c_stdCamera_fpsCtrl = true; //or: false
+  *           \endcode
+  *   
+  *         - If that is set to true the derivedT must implement
+  *           \code
+  *               int setFPS(); // set camera FS according to m_fps
+  *           \endcode
+  *           to configure the camera according to \ref m_fpsSet.  
+  *   
+  *         - A static configuration variable must be defined in derivedT as
+  *           \code
+  *              static constexpr bool c_stdCamera_fps = true; //or: false
+  *           \endcode
+  *           Note that the value of c_stdCamera_fps does not matter if c_stdCamera_fpsCtrl == true.
+  *   
+  *         - If either `c_stdCamera_fpsCtrl == true` or `c_stdCamera_fps == true` then derivedT must also 
+  *           keep \ref m_fps up to date.
+  *     
+  *     - Synchro Control:
+  *       
+  *       - A static configuration variable must be defined in derivedT as
+  *         \code
+  *             static constexpr bool c_stdCamera_synchro = true; //or: false
+  *         \endcode
+  *       - If that is set to true the derivedT must implement
+  *         \code
+  *             int setSynchro(); // configure the camera based m_synchroSet.
+  *         \endcode
+  *         to configure the camera based on \ref m_synchroSet.  The implementation should also keep
+  *         \ref m_synchro up to date.
+  * 
+  *     - EM Gain:
+  *        - A static configuration variable must be defined in derivedT as
+  *          \code
+  *              static constexpr bool c_stdCamera_emGain = true; //or: false
+  *          \endcode
+  *          which determines whether or not EM gain controls are exposed.  
+  *  
+  *        - If the camera uses EM Gain, then a function 
+  *          \code
+  *              int setEMGain(); // set EM gain based on m_emGainSet.
+  *          \endcode
+  *          must be defined which sets the camera EM Gain to \ref m_emGainSet.  
+  * 
+  *        - If true the implementation must keep \ref m_emGain up to date.  
+  *  
+  *        - If true the value of \ref m_maxEMGain should be set by the implementation and managed
+  *          as needed. Additionally the configuration setting "camera.maxEMGain" is exposed.
+  *     
+  *     - Camera Modes:
+  * 
+  *       - A static configuration variable must be defined in derivedT as
+  *         \code
+  *             static constexpr bool c_stdCamera_usesModes= true; //or: false
+  *         \endcode
+  * 
+  *       - If true, then modes are read from the configuration file.  See \ref loadCameraConfig()
+  *     
+  *       - If true, then the configuration setting "camera.startupMode" is exposed, which sets the mode at startup by its name.
+  * 
+  *     - Regions of Interest 
+  *       
+  *       - A static configuration variable must be defined in derivedT as
+  *         \code
+  *             static constexpr bool c_stdCamera_usesROI = true; //or: false
+  *         \endcode
+  *       
+  *       - The default values of m_currentROI should be set before calling stdCamera::appStartup().
+  *       
+  *       - The derived class must implement:
+  *         \code
+  *             int checkNextROI(); // verifies m_nextROI values and modifies to closest valid values if needed
+  *             int setNextROI(); // sets the ROI to the new target values.
+  *         \endcode
+  *     
+  *     - Crop Mode ROIs:
+  *       
+  *        - A static configuration variable must be defined in derivedT as
+  *          \code
+  *              static constexpr bool c_stdCamera_cropMode = true; //or: false
+  *          \endcode
+  * 
+  *        - If true the derived class must implement 
+  *          \code
+  *              int setCropMode(); // set crop mode according to m_cropModeSet
+  *          \endcode
+  *          which changes the crop mode according to \ref m_cropModeSet. 
+  *  
+  *        - `derivedT` must also maintain the value of \ref m_cropMode.
+  *     
+  *     - Shutters:
+  * 
+  *       - A static configuration variable must be defined in derivedT as
+  *         \code
+  *             static constexpr bool c_stdCamera_hasShutter = true; //or: false
+  *         \endcode
+  *       
+  *       - If true the following interface must be implemented:
+  *         \code
+  *             int setShutter(int); // shut the shutter if 0, open the shutter otherwise.
+  *         \endcode
+  *         which shuts the shutter if the argument is 0, opens it otherwise.
+  *     
+  *     - State:
+  *       
+  *       - A static configuration variable must be defined in derivedT as
+  *         \code
+  *             static constexpr bool c_stdCamera_usesStateString = true; //or: false
+  *         \endcode
+  *         which determines whether the class provides a state string for dark management.
+  *       
+  *       - If true, the following functions must be defined in derivedT:
+  *         \code
+  *             std::string stateString(); //String capturing the current state.  Must not include "__T".
+  *             bool stateStringValid(); //Whether or not the current state string is valid, i.e. not changing.
+  *         \endcode
   * 
   * 
-  * The derived class `derivedT` must be a MagAOXApp\<true\>, and should declare this class a friend like so: 
-  * \code
-  *  friend class dev::stdCamera<derivedT>;
-  * \endcode
-  *
-  * int powerOnDefaults()
+  * - The derived class must implement:
+  *   \code
+  *   int powerOnDefaults(); // called on power-on after powerOnWaitElapsed has occurred.
+  *   \endcode
   * 
-  * Temperature:
-  * 
-  * A static configuration variable must be defined in derivedT as
-  * \code
-  * static constexpr bool c_stdCamera_tempControl = true; //or: false
-  * \endcode
-  * which determines whether or not temperature controls are exposed. If this is true then the derived class must implement
-  * \code
-  * int setTempControl(); // set temp control status according to m_tempControlStatusSet
-  * int setTempSetPt(); // set the temperature set point accordin gto m_ccdTempSetpt
-  * \endcode
-  * 
-  * A static configuration variable must be defined in derivedT as
-  * \code
-  * static constexpr bool c_stdCamera_temp = true; //or: false
-  * \endcode
-  * which determines whether or not temperature reporting is exposed.  Note that if c_stdCamera_tempControl == true, this setting does not matter, 
-  * but the constexpr must still be defined.  If true the INDI property temp_ccd will be updated from the value of m_ccdTemp.
-  *
-  * Readout Speed:
-  * A static configuration variable must be defined in derivedT as
-  * \code
-  * static constexpr bool c_stdCamera_readoutSpeed = true; //or: false
-  * \endcode
-  * which determines whether or not readout speed controls are exposed.  If true, then the implementation should populate
-  * m_readoutSpeedNames and m_readoutSpeedNameLabels (vectors of strings) on construction to the allowed values.  This 
-  * facility is normally used to control both amplifier and readout/adc speed with names like "ccd_1MHz" and "emccd_17MHz".  
-  * If used (and true) the 
-  * \code
-  * int setReadoutSpeed();
-  * \endcode
-  * function must be define which sets the camera according to m_readoutSpeedNameSet.
-  * The implementation must also manage m_readoutSpeedName, keeping it up to date.  The configuration setting camera.defaultReadoutSpeed
-  * is also exposed, and the implementation can set this default with m_defaultReadoutSpeed. 
-  * 
-  * Vertical Shift Speed:
-  * A static configuration variable must be defined in derivedT as
-  * \code
-  * static constexpr bool c_stdCamera_vShiftSpeed = true; //or: false
-  * \endcode
-  * which determines whether or not vertical shift speed controls are exposed. If true, then the implementation should populate
-  * m_vShiftSpeedNames and m_vShiftSpeedLabels (vectors of strings) on construction to the allowed values.  This 
-  * facility is normally used names like "0_3us" and "1_3us".  
-  * If used (and true) the 
-  * \code 
-  * int setVShiftSpeed();
-  * \endcode
-  * function must be defined which sets the camera according to m_vShiftSpeedNameSet.
-  * The implementation must also manage m_vShiftSpeedName, keeping it up to date.  The configuration setting camera.defaultVShiftSpeed
-  * is also exposed, and the implementation can set this default with m_defaultVShiftSpeed. 
-  * 
-  * Exposure Time:
-  * A static configuration variable must be defined in derivedT as
-  * \code
-  * static constexpr bool c_stdCamera_exptimeCtrl = true; //or: false
-  * \endcode
-  * \code
-  * int setExpTime();
-  * \endcode
-  * 
-  * FPS Control:
-  * A static configuration variable must be defined in derivedT as
-  * \code
-  * static constexpr bool c_stdCamera_fpsCtrl = true; //or: false
-  * \endcode
-  * If that is set to true the derivedT must implement
-  * \code
-  * int setFPS();
-  * \endcode
-  * 
-  * FPS Status:
-  * A static configuration variable must be defined in derivedT as
-  * \code
-  * static constexpr bool c_stdCamera_fps = true; //or: false
-  * \endcode
-  * Note that the value of c_stdCamera_fps does not matter if c_stdCamera_fpsCtrl == true.
-  * 
-  * Synchro Control:
-  * A static configuration variable must be defined in derivedT as
-  * \code
-  * static constexpr bool c_stdCamera_synchro = true; //or: false
-  * \endcode
-  * If that is set to true the derivedT must implement
-  * \code
-  * int setSynchro();
-  * \endcode
-  * 
-  * EM Gain:
-  * A static configuration variable must be defined in derivedT as
-  * \code
-  * static constexpr bool c_stdCamera_emGain = true; //or: false
-  * \endcode
-  * which determines whether or not EM gain controls are exposed.  If the camera uses EM Gain, then 
-  * a function 
-  * \code
-  * int setEMGain();
-  * \endcode
-  * must be defined which sets the camera EM Gain to \ref m_emGainSet.  The implementation
-  * must also keep m_emGain up to date.  The value of \ref m_maxEMGain should be set by the implementation and managed
-  * as needed.
-  * 
-  * Camera Modes:
-  * A static configuration variable must be defined in derivedT as
-  * \code
-  * static constexpr bool c_stdCamera_usesModes= true; //or: false
-  * \endcode
-  * 
-  * Regions of Interest 
-  * A static configuration variable must be defined in derivedT as
-  * \code
-  * static constexpr bool c_stdCamera_usesROI = true; //or: false
-  * \endcode
-  * The default values of m_currentROI should be set before calling stdCamera::appStartup().
-  * The derived class must implement:
-  * \code
-  * int checkNextROI(); // verifies m_nextROI values and modifies to closest valid values if needed
-  * int setNextROI(); // sets the ROI to the new target values.
-  * \endcode
-  * 
-  * Crop Mode ROIs:
-  * A static configuration variable must be defined in derivedT as
-  * \code
-  * static constexpr bool c_stdCamera_cropMode = true; //or: false
-  * \endcode
-  * and the derived class must implement 
-  * \code
-  * int setCropMode();
-  * \endcode
-  * which changes the crop mode according to \ref m_cropModeSet.
-  * 
-  * Shutters:
-  * A static configuration variable must be defined in derivedT as
-  * \code
-  * static constexpr bool c_stdCamera_hasShutter = true; //or: false
-  * \endcode
-  * and a funciton must defined
-  * \code
-  * int setShutter(int); 
-  * \endcode
-  * which shuts the shutter if the argument is 0, opens it otherwise.
-  * 
-  * State:
-  * A static configuration variable must be defined in derivedT as
-  * \code
-  * static constexpr bool c_stdCamera_usesStateString = true; //or: false
-  * \endcode
-  * which determines whether the class provides a state string for dark management.
-  * If true, the following functions must be defined in derivedT:
-  * \code
-  * std::string stateString(); //String capturing the current state.  Must not include "__T".
-  * bool stateStringValid(); //Whether or not the current state string is valid, i.e. not changing.
-  * \endcode
-  * 
-  * 
-  * The derived class must implement:
-  * \code
-  * int powerOnDefaults(); // called on power-on after powerOnWaitElapsed has occurred.
-  * \endcode
-  * 
-  * Calls to this class's `setupConfig`, `loadConfig`, `appStartup`, `appLogic`, `appShutdown`
-  * `onPowerOff`, and `whilePowerOff`,  must be placed in the derived class's functions of the same name.
+  * - Calls to this class's setupConfig(), loadConfig(), appStartup(), appLogic(), appShutdown()
+  *   onPowerOff(), and whilePowerOff(),  must be placed in the derived class's functions of the same name.
   *
   * \ingroup appdev
   */
@@ -460,7 +518,7 @@ protected:
 
 public:
 
-   ///Destructor, destroys the PdvDev structure
+   ///Destructor.
    ~stdCamera() noexcept;
    
    /// Setup the configuration system

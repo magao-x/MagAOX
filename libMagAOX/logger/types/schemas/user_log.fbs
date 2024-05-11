@@ -1,0 +1,10 @@
+namespace MagAOX.logger;
+
+table User_log_fb
+{
+    email:string;
+    message:string;
+}
+
+root_type User_log_fb;
+

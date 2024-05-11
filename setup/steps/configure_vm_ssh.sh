@@ -3,7 +3,7 @@ DIR="$( cd "$( dirname "${BASH_SOURCE[0]}" )" && pwd )"
 source $DIR/../_common.sh
 set -euo pipefail
 if [[ "$EUID" == 0 ]]; then
-  exit_error "Configure VM ssh as a normal user, not root"
+  exit_with_error "Configure VM ssh as a normal user, not root"
 fi
 #
 # Pre-populate known hosts and hostname aliases for SSH tunneling from the VM

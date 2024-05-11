@@ -70,31 +70,28 @@ class IndiElement
   public:
     /// Constructor.
     IndiElement();
+
     /// Constructor with a name. This will be used often.
     IndiElement( const std::string &szName );
-    /// Constructor with a name and a bool value.
-    //IndiElement( const std::string &szName, const bool &oValue );
-    /// Constructor with a name and a double value.
-    //IndiElement( const std::string &szName, const double &xValue );
-    /// Constructor with a name and a float value.
-    //IndiElement( const std::string &szName, const float &eValue );
-    /// Constructor with a name and an int value.
-    //IndiElement( const std::string &szName, const int &iValue );
+
     /// Constructor with a name and a string value.
     IndiElement( const std::string &szName, const std::string &szValue );
+
     /// Constructor with a name and a char pointer value.
     IndiElement( const std::string &szName, const char *pcValue );
-    /// Constructor with a name and a unsigned int value.
-    //IndiElement( const std::string &szName, const unsigned int &uiValue );
+
     /// Constructor with a name and a TT value.
     template <class TT> IndiElement( const std::string &szName, const TT &tValue );
 
     /// Constructor with a name and a LightStateType value.
     IndiElement( const std::string &szName, const LightStateType &tValue );
+
     /// Constructor with a name and a SwitchStateType value.
     IndiElement( const std::string &szName, const SwitchStateType &tValue );
+
     /// Copy constructor.
     IndiElement( const IndiElement &ieRhs );
+
     /// Destructor.
     virtual ~IndiElement();
 
@@ -114,13 +111,6 @@ class IndiElement
     // We want the value as a different things.
     operator LightStateType() const;
     operator SwitchStateType() const;
-    //operator bool() const;
-    //operator double() const;
-    //operator float() const;
-    //operator int() const;
-    //operator std::string() const;
-    //operator unsigned int() const;
-    //template <class TT> operator TT() const;
 
     // Methods.
   public:
@@ -131,12 +121,17 @@ class IndiElement
 
     // All the different data this can store.
     const std::string &getFormat() const;
+    
     const std::string &getLabel() const;
+    
     const std::string &getMax() const;
+    
     const std::string &getMin() const;
+    
     const std::string &getName() const;
+    
     const std::string &getSize() const;
-    template <class TT> TT getSize() const;
+    
     const std::string &getStep() const;
 
     /// Different ways of getting the data in this element.
@@ -204,25 +199,35 @@ class IndiElement
     // Members.
   private:
     /// If this is a number or BLOB, this is the 'printf' format.
-    std::string m_szFormat;
+    std::string m_szFormat {"%g"};
+
     /// A label, usually used in a GUI.
     std::string m_szLabel;
+    
     /// If this is a number, this is its maximum value.
-    std::string m_szMax;
+    std::string m_szMax {"0"};
+    
     /// If this is a number, this is its minimum value.
-    std::string m_szMin;
+    std::string m_szMin {"0"};
+    
     /// The name of this element.
     std::string m_szName;
+    
     /// If this is a BLOB, this is the number of bytes for it.
-    std::string m_szSize;
+    std::string m_szSize {"0"};
+    
     /// If this is a number, this is increment for it.
-    std::string m_szStep;
+    std::string m_szStep {"0"};
+    
     /// This is the value of the data.
     std::string m_szValue;
+    
     /// This can also be the value.
-    LightStateType m_lsValue;
+    LightStateType m_lsValue {UnknownLightState};
+    
     /// This can also be the value.
-    SwitchStateType m_ssValue;
+    SwitchStateType m_ssValue {UnknownSwitchState};
+    
     // A read write lock to protect the internal data.
     mutable pcf::ReadWriteLock m_rwData;
 
@@ -234,17 +239,8 @@ class IndiElement
 /// Constructor with a name and a TT value.
 
 template <class TT> pcf::IndiElement::IndiElement( const std::string &szName,
-                                                   const TT &ttValue )
+                                                   const TT &ttValue ) : m_szName(szName)
 {
-  m_szMax = "0";
-  m_szMin = "0";
-  m_szName = szName;
-  m_szSize = "0";
-  m_szStep = "0";
-  m_lsValue = UnknownLightState;
-  m_ssValue = UnknownSwitchState;
-  m_szFormat = "%g";
-
   std::stringstream ssValue;
   ssValue << std::boolalpha << ttValue;
   m_szValue = ssValue.str();
@@ -278,32 +274,7 @@ template <class TT> TT pcf::IndiElement::getValue() const
   return tValue;
 }
 
-////////////////////////////////////////////////////////////////////////////////
-/// Returns the TT value.
-/// This will NOT work trying to access the value as a string, see:
-/// https://stackoverflow.com/questions/7741531/conversion-operator-template-specialization
-/// Use 'getValue' instead.
-/*
-template <class TT> pcf::IndiElement::operator TT() const
-{
-  pcf::ReadWriteLock::AutoRLock rwAuto( &m_rwData );
 
-  TT ttValue;
-  std::stringstream ssValue( m_szValue );
-  ssValue.precision( 15 );
-
-  // Try to stream the data into the variable.
-  ssValue >> std::boolalpha >> ttValue;
-  if ( ssValue.fail() == true )
-  {
-    throw ( std::runtime_error( std::string( "IndiElement '" )
-                                + m_szName + "' value '"
-                                + m_szValue + "' cannot be streamed." ) );
-  }
-
-  return ttValue;
-}
-*/
 ////////////////////////////////////////////////////////////////////////////////
 ///  set an value of type TT in the element using the "=" operator.
 
@@ -383,19 +354,20 @@ template <class TT> void pcf::IndiElement::setSize( const TT &ttSize )
   m_szSize = ssValue.str();
 }
 
+/*
 ////////////////////////////////////////////////////////////////////////////////
 /// Get the size as an arbitrary type.
-
-template <class TT> TT pcf::IndiElement::getSize() const
+template <class TT> typename std::remove_reference<TT>::type pcf::IndiElement::getSize() const
 {
   pcf::ReadWriteLock::AutoRLock rwAuto( &m_rwData );
 
-  TT tValue;
+  typename std::remove_reference<TT>::type tValue;
   //  stream the size into the variable.
   std::stringstream ssValue( m_szSize );
   ssValue >> std::boolalpha >> tValue;
   return tValue;
-}
+}*/
+
 
 ////////////////////////////////////////////////////////////////////////////////
 ///  set a step of type TT in the element.

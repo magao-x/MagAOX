@@ -737,9 +737,9 @@ int xindiserver::processISLog( std::string logs )
    
    if(ed == std::string::npos)
    {
-      log<software_error>({__FILE__, __LINE__, "Did not find timestamp : in log entry"});
-      log<text_log>("--> " + logs, logPrio::LOG_ERROR);
-      return -1;
+      //log<software_error>({__FILE__, __LINE__, "Did not find timestamp : in log entry"});
+      log<text_log>(logs, logPrio::LOG_INFO);
+      return 0;
    }
    
    std::string ts = logs.substr(st, ed-st);
@@ -892,16 +892,23 @@ int xindiserver::appLogic()
 inline
 int xindiserver::appShutdown()
 {
-   kill(m_isPID, SIGTERM);
-   
-   char w = '\0';
-   ssize_t nwr = write(m_isSTDERR_input, &w, 1);
-   if(nwr != 1)
+    
+   if(m_isPID > 0)
    {
-      log<software_error>({__FILE__, __LINE__, errno });
-      log<software_error>({__FILE__, __LINE__, "Error on write to i.s. log thread. Sending SIGTERM."});
-      pthread_kill(m_isLogThread.native_handle(), SIGTERM);
+      kill(m_isPID, SIGTERM);
+   }
+
+   if(m_isSTDERR_input >= 0)
+   {
+      char w = '\0';
+      ssize_t nwr = write(m_isSTDERR_input, &w, 1);
+      if(nwr != 1)
+      {
+         log<software_error>({__FILE__, __LINE__, errno });
+         log<software_error>({__FILE__, __LINE__, "Error on write to i.s. log thread. Sending SIGTERM."});
+         pthread_kill(m_isLogThread.native_handle(), SIGTERM);
       
+      }
    }
       
    if(m_isLogThread.joinable()) m_isLogThread.join();

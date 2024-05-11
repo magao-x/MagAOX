@@ -2,7 +2,7 @@
 set -eo pipefail
 
 #######################################################
-# dmdispbridge: create a TCP bridge for a dmdisp
+# dmdispTCP: create a shmimTCP connection for a dmdisp
 #
 #
 #######################################################
@@ -12,23 +12,21 @@ pname=`echo "$0" | sed "s/\.\///g"`
 
 function printHELP {
 echo "------------------------------------------------------------------------"
-echo "$(tput bold) $pname : create dmdisp bridge $(tput sgr0)"
+echo "$(tput bold) $pname : create a shmimTCP connection for a dmdisp channel $(tput sgr0)"
 echo "------------------------------------------------------------------------"
-echo "  Create a dmdisp bridge"
+echo "  Create a shmimTCP dmdisp bridge"
 echo "   "
 echo " $(tput bold)USAGE:$(tput sgr0)"
-echo "     $0 [-h] <dmnum> <ip>"
+echo "     $0 [-h] <dmchan>"
 echo ""
 echo ""
 echo " $(tput bold)INPUT:$(tput sgr0)"
-echo "  <dmnum>      : the dm number, XX in dmXXdispYY"
-echo "  <name>       : ip address of the machine controlling the dm"
-echo "  <start-port> : the starting port number, for dmXXdisp00"
+echo "  <dmchan>     : the dm channel shmim name, dm01disp05"
 echo ""
 echo " This should be run on the machine that will send the commands"
 echo ""
 echo " $(tput bold)EXAMPLE:$(tput sgr0)"
-echo "     $0 01 192.168.2.2 8800 #will create bridge for dm01disp "
+echo "     $0 dm01disp05 #will create for dm01disp05 "
 echo ""
 echo "------------------------------------------------------------------------"
 }
@@ -58,37 +56,639 @@ while getopts :hckp: FLAG; do
 done
 
 
-ip=$2
+dmdisp=$1
 me=$(hostname)
+role=$MAGAOX_ROLE
 
-for i in {0..11}
-do
-   if (($i < 10 ))
-   then
-      chnum="0$i"
-   else
-      chnum="$i"
-   fi
+ip="0"
+port=0
+Nx=0
+Ny=0
+if [ "$role" = "ICC" ]
+then
+  
+  ip="192.168.2.2"
 
-   let "port=($3 + $i)"
+  case $dmdisp in
+    #dmwoofer
+    "dm00disp00")
+       port=8780
+       Nx=11
+       Ny=11
+       ;;
+    "dm00disp01")
+       port=8781
+       Nx=11
+       Ny=11
+       ;;
+    "dm00disp02")
+       port=8782
+       Nx=11
+       Ny=11
+       ;;
+    "dm00disp03")
+       port=8783
+       Nx=11
+       Ny=11
+       ;;
+    "dm00disp04")
+       port=8784
+       Nx=11
+       Ny=11
+       ;;
+    "dm00disp05")
+       port=8785
+       Nx=11
+       Ny=11
+       ;;
+    "dm00disp06")
+       port=8786
+       Nx=11
+       Ny=11
+       ;;
+    "dm00disp07")
+       port=8787
+       Nx=11
+       Ny=11
+       ;;
+    "dm00disp08")
+       port=8788
+       Nx=11
+       Ny=11
+       ;;
+    "dm00disp09")
+       port=8789
+       Nx=11
+       Ny=11
+       ;;
+    "dm00disp10")
+       port=8790
+       Nx=11
+       Ny=11
+       ;;
+    "dm00disp11")
+       port=8791
+       Nx=11
+       Ny=11
+       ;;
+    #dmtweeter
+    "dm01disp00")
+       port=8800
+       Nx=50
+       Ny=50
+       ;;
+    "dm01disp01")
+       port=8801
+       Nx=50
+       Ny=50
+       ;;
+    "dm01disp02")
+       port=8802
+       Nx=50
+       Ny=50
+       ;;
+    "dm01disp03")
+       port=8803
+       Nx=50
+       Ny=50
+       ;;
+    "dm01disp04")
+       port=8804
+       Nx=50
+       Ny=50
+       ;;
+    "dm01disp05")
+       port=8805
+       Nx=50
+       Ny=50
+       ;;
+    "dm01disp06")
+       port=8806
+       Nx=50
+       Ny=50
+       ;;
+    "dm01disp07")
+       port=8807
+       Nx=50
+       Ny=50
+       ;;
+    "dm01disp08")
+       port=8808
+       Nx=50
+       Ny=50
+       ;;
+    "dm01disp09")
+       port=8809
+       Nx=50
+       Ny=50
+       ;;
+    "dm01disp10")
+       port=8810
+       Nx=50
+       Ny=50
+       ;;
+    "dm01disp11")
+       port=8811
+       Nx=50
+       Ny=50
+       ;;
+    #gmt segment 1
+    "dm61disp00")
+       port=8600
+       Nx=3
+       Ny=1
+       ;;
+    "dm61disp01")
+       port=8601
+       Nx=3
+       Ny=1
+       ;;
+    "dm61disp02")
+       port=8602
+       Nx=3
+       Ny=1
+       ;;
+    "dm61disp03")
+       port=8603
+       Nx=3
+       Ny=1
+       ;;
+    "dm61disp04")
+       port=8604
+       Nx=3
+       Ny=1
+       ;;
+    "dm61disp05")
+       port=8605
+       Nx=3
+       Ny=1
+       ;;
+    "dm61disp06")
+       port=8606
+       Nx=3
+       Ny=1
+       ;;
+    "dm61disp07")
+       port=8607
+       Nx=3
+       Ny=1
+       ;;
+    "dm61disp08")
+       port=8608
+       Nx=3
+       Ny=1
+       ;;
+    "dm61disp09")
+       port=8609
+       Nx=3
+       Ny=1
+       ;;
+    "dm61disp10")
+       port=8610
+       Nx=3
+       Ny=1
+       ;;
+    "dm61disp11")
+       port=8611
+       Nx=3
+       Ny=1
+       ;;
+    #gmt segment 2
+    "dm62disp00")
+       port=8620
+       Nx=3
+       Ny=1
+       ;;
+    "dm62disp01")
+       port=8621
+       Nx=3
+       Ny=1
+       ;;
+    "dm62disp02")
+       port=8622
+       Nx=3
+       Ny=1
+       ;;
+    "dm62disp03")
+       port=8623
+       Nx=3
+       Ny=1
+       ;;
+    "dm62disp04")
+       port=8624
+       Nx=3
+       Ny=1
+       ;;
+    "dm62disp05")
+       port=8625
+       Nx=3
+       Ny=1
+       ;;
+    "dm62disp06")
+       port=8626
+       Nx=3
+       Ny=1
+       ;;
+    "dm62disp07")
+       port=8627
+       Nx=3
+       Ny=1
+       ;;
+    "dm62disp08")
+       port=8628
+       Nx=3
+       Ny=1
+       ;;
+    "dm62disp09")
+       port=8629
+       Nx=3
+       Ny=1
+       ;;
+    "dm62disp10")
+       port=8630
+       Nx=3
+       Ny=1
+       ;;
+    "dm62disp11")
+       port=8631
+       Nx=3
+       Ny=1
+       ;;
+    #gmt segment 3
+    "dm63disp00")
+       port=8640
+       Nx=3
+       Ny=1
+       ;;
+    "dm63disp01")
+       port=8641
+       Nx=3
+       Ny=1
+       ;;
+    "dm63disp02")
+       port=8642
+       Nx=3
+       Ny=1
+       ;;
+    "dm63disp03")
+       port=8643
+       Nx=3
+       Ny=1
+       ;;
+    "dm63disp04")
+       port=8644
+       Nx=3
+       Ny=1
+       ;;
+    "dm63disp05")
+       port=8645
+       Nx=3
+       Ny=1
+       ;;
+    "dm63disp06")
+       port=8646
+       Nx=3
+       Ny=1
+       ;;
+    "dm63disp07")
+       port=8647
+       Nx=3
+       Ny=1
+       ;;
+    "dm63disp08")
+       port=8648
+       Nx=3
+       Ny=1
+       ;;
+    "dm63disp09")
+       port=8649
+       Nx=3
+       Ny=1
+       ;;
+    "dm63disp10")
+       port=8650
+       Nx=3
+       Ny=1
+       ;;
+    "dm63disp11")
+       port=8651
+       Nx=3
+       Ny=1
+       ;;
+    #gmt segment 4
+    "dm64disp00")
+       port=8660
+       Nx=3
+       Ny=1
+       ;;
+    "dm64disp01")
+       port=8661
+       Nx=3
+       Ny=1
+       ;;
+    "dm64disp02")
+       port=8662
+       Nx=3
+       Ny=1
+       ;;
+    "dm64disp03")
+       port=8663
+       Nx=3
+       Ny=1
+       ;;
+    "dm64disp04")
+       port=8664
+       Nx=3
+       Ny=1
+       ;;
+    "dm64disp05")
+       port=8665
+       Nx=3
+       Ny=1
+       ;;
+    "dm64disp06")
+       port=8666
+       Nx=3
+       Ny=1
+       ;;
+    "dm64disp07")
+       port=8667
+       Nx=3
+       Ny=1
+       ;;
+    "dm64disp08")
+       port=8668
+       Nx=3
+       Ny=1
+       ;;
+    "dm64disp09")
+       port=8669
+       Nx=3
+       Ny=1
+       ;;
+    "dm64disp10")
+       port=8670
+       Nx=3
+       Ny=1
+       ;;
+    "dm64disp11")
+       port=8671
+       Nx=3
+       Ny=1
+       ;;
+    #gmt segment 5
+    "dm65disp00")
+       port=8680
+       Nx=3
+       Ny=1
+       ;;
+    "dm65disp01")
+       port=8681
+       Nx=3
+       Ny=1
+       ;;
+    "dm65disp02")
+       port=8682
+       Nx=3
+       Ny=1
+       ;;
+    "dm65disp03")
+       port=8683
+       Nx=3
+       Ny=1
+       ;;
+    "dm65disp04")
+       port=8684
+       Nx=3
+       Ny=1
+       ;;
+    "dm65disp05")
+       port=8685
+       Nx=3
+       Ny=1
+       ;;
+    "dm65disp06")
+       port=8686
+       Nx=3
+       Ny=1
+       ;;
+    "dm65disp07")
+       port=8687
+       Nx=3
+       Ny=1
+       ;;
+    "dm65disp08")
+       port=8688
+       Nx=3
+       Ny=1
+       ;;
+    "dm65disp09")
+       port=8689
+       Nx=3
+       Ny=1
+       ;;
+    "dm65disp10")
+       port=8690
+       Nx=3
+       Ny=1
+       ;;
+    "dm65disp11")
+       port=8691
+       Nx=3
+       Ny=1
+       ;;
+    #gmt segment 6
+    "dm66disp00")
+       port=8700
+       Nx=3
+       Ny=1
+       ;;
+    "dm66disp01")
+       port=8701
+       Nx=3
+       Ny=1
+       ;;
+    "dm66disp02")
+       port=8702
+       Nx=3
+       Ny=1
+       ;;
+    "dm66disp03")
+       port=8703
+       Nx=3
+       Ny=1
+       ;;
+    "dm66disp04")
+       port=8704
+       Nx=3
+       Ny=1
+       ;;
+    "dm66disp05")
+       port=8705
+       Nx=3
+       Ny=1
+       ;;
+    "dm66disp06")
+       port=8706
+       Nx=3
+       Ny=1
+       ;;
+    "dm66disp07")
+       port=8707
+       Nx=3
+       Ny=1
+       ;;
+    "dm66disp08")
+       port=8708
+       Nx=3
+       Ny=1
+       ;;
+    "dm66disp09")
+       port=8709
+       Nx=3
+       Ny=1
+       ;;
+    "dm66disp10")
+       port=8710
+       Nx=3
+       Ny=1
+       ;;
+    "dm66disp11")
+       port=8711
+       Nx=3
+       Ny=1
+       ;;
+  esac
+elif [ "$role" = "RTC" ]
+then
+  
+  ip="192.168.2.3"
 
-   echo $port
+  case $dmdisp in
+    #dmncpc
+    "dm01disp00")
+       port=8820
+       Nx=34
+       Ny=34
+       ;;
+    "dm01disp01")
+       port=8821
+       Nx=34
+       Ny=34
+       ;;
+    "dm01disp02")
+       port=8822
+       Nx=34
+       Ny=34
+       ;;
+    "dm01disp03")
+       port=8823
+       Nx=34
+       Ny=34
+       ;;
+    "dm01disp04")
+       port=8824
+       Nx=34
+       Ny=34
+       ;;
+    "dm01disp05")
+       port=8825
+       Nx=34
+       Ny=34
+       ;;
+    "dm01disp06")
+       port=8826
+       Nx=34
+       Ny=34
+       ;;
+    "dm01disp07")
+       port=8827
+       Nx=34
+       Ny=34
+       ;;
+    "dm01disp08")
+       port=8828
+       Nx=34
+       Ny=34
+       ;;
+    "dm01disp09")
+       port=8829
+       Nx=34
+       Ny=34
+       ;;
+    "dm01disp10")
+       port=8830
+       Nx=34
+       Ny=34
+       ;;
+    "dm01disp11")
+       port=8831
+       Nx=34
+       Ny=34
+       ;;
+  esac
+else
+  echo ""
+  echo "This can only be run on ICC or RTC."
+  echo ""
+  printHELP
+  exit
+fi
 
-   com="cd shmimTCP && tmux new-session -d -s sTCPrc-"$me"-dm"$1"disp"$chnum" && tmux send-keys -t sTCPrc-"$me"-dm"$1"disp"$chnum" \"bash ./shmimTCPreceive.bash "$port"\" C-m"
+if [ $ip = "0" ]
+then
+  echo ""
+  echo "Did not find an ip. This can only be run on ICC or RTC."
+  echo "" 
+  printHELP
+  exit
+fi
 
-   echo $com
+if [ $port = 0 ]
+then
+  echo ""
+  echo "Did not find a port. Is dm channel valid?" 
+  echo ""
+  printHELP
+  exit
+fi 
 
-   #Create tmux and start listening on RTC
-   ssh -t rtc $com
+if [ $Nx = 0 or $Ny = 0 ]
+then
+  echo ""
+  echo "Did not find a DM size. Is dm channel valid?"
+  echo "" 
+  printHELP
+  exit
+fi 
 
-   #create shmim locally
-   creaimshm "dm"$1"disp"$chnum 50 50
+#It seems to take two separate ssh sessions to do this successfully, but maybe not
+com1="tmux new -d -s sTCPrc-"$me"-"$dmdisp
 
-   #start transmitting
-   #echo "starting detached session"
-   #tmux new -d -s "sTCPtx-"$me"-dm"$1"disp"$chnum
-   echo "starting shmimTCPtransmit: " "dm"$1"disp"$chnum $ip $port
+com2="tmux send -t sTCPrc-"$me"-"$dmdisp" C-c C-m \"shmimTCPreceive "$port"\" C-m"
 
-   shmimTCPtransmit "dm"$1"disp"$chnum $ip $port
-done
+#Create tmux on RTC
+echo $com1
+ssh -t rtc $com1 || true #this lets us ignore a duplicate session
+
+#Start listening on RTC
+echo $com2
+ssh -t rtc $com2
+
+
+#create shmim locally
+   
+dmnamearg="s>tf32>"$dmdisp
+
+cacao << EOF
+mk2Dim "$dmnamearg" $Nx $Ny
+quit
+EOF
+  
+#start transmitting
+echo "starting shmimTCPtransmit: " $dmdisp $ip $port
+
+shmimTCPtransmit $dmdisp $ip $port
+
+
 

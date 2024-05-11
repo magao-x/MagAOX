@@ -1,0 +1,19 @@
+[build-system]
+requires = ["setuptools"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "visxCtrl"
+description =  "Control for Vis-X: Visible Integral field Spectrograph - Extreme for MagAO-X"
+version = "0.0.1.dev"
+dependencies = [
+  "xconf",
+  "purepyindi2",
+]
+authors = [
+  {name = "Joseph D. Long", email = "me@joseph-long.com"},
+  {name = "Sebastiaan Y. Haffert", email = "shaffert@arizona.edu"},
+]
+
+[project.scripts]
+visxCtrl = "visxCtrl.xapp:VisX.console_app"

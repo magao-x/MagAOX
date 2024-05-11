@@ -313,6 +313,8 @@ int usbtempMon::checkConnections()
       elevatedPrivileges ep(this);
       
       int fd = DS18B20_open(devNames[i].c_str());
+      ep.restore();
+      
       if (!is_fd_valid(fd)) 
       {
          log<software_error>({__FILE__,__LINE__, std::string(DS18B20_errmsg())});
@@ -320,7 +322,7 @@ int usbtempMon::checkConnections()
          continue;
       }
 
-      ep.restore();
+      
       
       unsigned char rom[DS18X20_ROM_SIZE];
       char romstr[2*DS18X20_ROM_SIZE+1];

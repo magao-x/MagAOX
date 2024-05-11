@@ -1,0 +1,13 @@
+[Unit]
+Description=Move MagAO-X IRQs
+Requires=make_cpusets.service
+After=make_cpusets.service
+Before=multi-user.target
+
+[Service]
+Type=oneshot
+RemainAfterExit=yes
+ExecStart=/opt/MagAOX/bin/move_irqs
+
+[Install]
+WantedBy=default.target

@@ -1,0 +1,47 @@
+#!/bin/bash
+set -euo pipefail
+
+source /etc/profile.d/cgroups1_cpuset_mountpoint.sh
+
+systemctl stop irqbalance
+
+#First move all IRQs
+irqs=$(awk '{print $1}' /proc/interrupts | grep '[0-9]:' | sed 's/.$//')
+
+for irq in $irqs; do
+    if [ "$irq" != "0" ]; then
+        echo "0-7,32-39" > /proc/irq/$irq/smp_affinity_list || true
+    fi
+done
+
+#Then move each special one
+
+enxs=$(grep enx503eaa0ceeff /proc/interrupts | awk '{print $1}' | sed 's/.$//')
+cpu=$(cat $CGROUPS1_CPUSET_MOUNTPOINT/camsci1/cpuset.cpus)
+for enx in $enxs; do
+    echo "camsci1 enx: " $enx " to " $cpu 
+    echo $cpu > /proc/irq/$enx/smp_affinity_list
+done
+
+enxs=$(grep enx503eaa0cf4cd /proc/interrupts | awk '{print $1}' | sed 's/.$//')
+cpu=$(cat $CGROUPS1_CPUSET_MOUNTPOINT/camsci2/cpuset.cpus)
+for enx in $enxs; do
+    echo "camsci2 enx: " $enx " to " $cpu 
+    echo $cpu > /proc/irq/$enx/smp_affinity_list
+done
+
+nvidias=$(grep nvidia /proc/interrupts | awk '{print $1}' | sed 's/.$//')
+cpu=$(cat $CGROUPS1_CPUSET_MOUNTPOINT/acqu_mvm/cpuset.cpus)
+for nvidia in $nvidias; do
+    echo "nvidia: " $nvidia " to " $cpu 
+    echo $cpu > /proc/irq/$nvidia/smp_affinity_list
+done
+
+echo "done moving IRQs"
+
+systemctl start irqbalance
+systemctl status irqbalance
+
+
+echo ""
+echo "check for irqbalance errors after at least 10 seconds with: journalctl -b | grep irqbalance"

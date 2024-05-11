@@ -442,7 +442,8 @@ void tcsInterface::setupConfig()
    config.add("acqFromGuider.azoff", "", "acqFromGuider.azoff", argType::Required, "acqFromGuider", "azoff", false, "float", "static offset to az component of acquisition vector");
    config.add("acqFromGuider.el0", "", "acqFromGuider.el0", argType::Required, "acqFromGuider", "el0", false, "float", "el component of acquisition vector a 0 zd.");
    config.add("acqFromGuider.eloff", "", "acqFromGuider.eloff", argType::Required, "acqFromGuider", "eloff", false, "float", "static offset to el component of acquisition vector");
-   
+   config.add("acqFromGuider.focus", "", "acqFromGuider.focus", argType::Required, "acqFromGuider", "focus", false, "float", "static offset for focus acquisition");
+
    config.add("offload.TT_avgInt", "", "offload.TT_avgInt", argType::Required, "offload", "TT_avgInt", false, "float", "Woofer to Telescope T/T offload averaging interval [sec] ");
    config.add("offload.TT_gain", "", "offload.TT_gain", argType::Required, "offload", "TT_gain", false, "float", "Woofer to Telescope T/T offload gain");
    config.add("offload.TT_thresh", "", "offload.TT_thresh", argType::Required, "offload", "TT_thresh", false, "float", "Woofer to Telescope T/T offload threshold");
@@ -1104,14 +1105,47 @@ int tcsInterface::parse_xms( double &x,
                              const std::string & xmsstr
                            )
 {
-   int st, en;
+   size_t st, en;
 
    int sgn = 1;
 
    st = 0;
    en = xmsstr.find(':', st);
    
-   x = strtod(xmsstr.substr(st, en-st).c_str(), 0);
+   //Check not found
+   if(en == std::string::npos)
+   {
+      log<software_error>({__FILE__, __LINE__, "error parsing x:m:s"});
+      return -1;
+   }
+
+   //Check 0 length or invalid
+   if(en - st < 2 || en < st)
+   {
+      log<software_error>({__FILE__, __LINE__, "error parsing x:m:s"});
+      return -1;
+   }
+
+   std::string xstr;
+   try
+   {
+      xstr = xmsstr.substr(st, en-st);
+   }
+   catch(const std::exception & e)
+   {
+      log<software_error>({__FILE__, __LINE__, e.what()});
+      return -1;
+   }
+
+   try
+   {
+      x = std::stod(xstr);
+   }
+   catch(const std::exception & e)
+   {
+      log<software_error>({__FILE__, __LINE__, e.what()});
+      return -1;
+   }
 
    //Check for negative
    if(std::signbit(x)) sgn = -1;
@@ -1121,12 +1155,70 @@ int tcsInterface::parse_xms( double &x,
    
    en = xmsstr.find(':', st);
    
-   m = sgn*strtod(xmsstr.substr(st, en-st).c_str(), 0);
-   
+   //Check not found
+   if(en == std::string::npos)
+   {
+      log<software_error>({__FILE__, __LINE__, "error parsing x:m:s"});
+      return -1;
+   }
+
+   //Check 0 length or invalid
+   if(en - st < 2 || en < st)
+   {
+      log<software_error>({__FILE__, __LINE__, "error parsing x:m:s"});
+      return -1;
+   }
+
+   std::string mstr;
+   try
+   {
+      mstr = xmsstr.substr(st, en-st);
+   }
+   catch(const std::exception & e)
+   {
+      log<software_error>({__FILE__, __LINE__, e.what()});
+      return -1;
+   }
+
+   try
+   {
+      m = sgn*std::stod(mstr);
+   }
+   catch(const std::exception & e)
+   {
+      log<software_error>({__FILE__, __LINE__, e.what()});
+      return -1;
+   }
+
    st = en+1;
+
+   if(st >= xmsstr.length() - 1)
+   {
+      log<software_error>({__FILE__, __LINE__, "error parsing x:m:s"});
+      return -1;
+   }
+
+   std::string sstr;
+   try
+   {
+      sstr = xmsstr.substr(st, xmsstr.length()-st);
+   }
+   catch(const std::exception & e)
+   {
+      log<software_error>({__FILE__, __LINE__, e.what()});
+      return -1;
+   }
    
-   s = sgn*strtod(xmsstr.substr(st, xmsstr.length()-st).c_str(), 0);
-   
+   try
+   {
+      s = sgn*std::stod(sstr);
+   }
+   catch(const std::exception & e)
+   {
+      log<software_error>({__FILE__, __LINE__, e.what()});
+      return -1;
+   }
+
    return 0;
 }
 
@@ -2243,7 +2335,7 @@ int tcsInterface::recordTelSee(bool force)
    static int last_dimm_time = 0;
    static double last_dimm_el = 0;
    static double last_dimm_fwhm = 0;
-   static double last_dimm_fwhm_corr = 0;
+   //static double last_dimm_fwhm_corr = 0;
    
    static int last_mag1_time = 0;
    static double last_mag1_el = 0;
@@ -2258,7 +2350,7 @@ int tcsInterface::recordTelSee(bool force)
    if(force || m_dimm_time != last_dimm_time ||
                m_dimm_el != last_dimm_el ||
                m_dimm_fwhm != last_dimm_fwhm ||
-               m_dimm_fwhm_corr != last_dimm_fwhm_corr ||
+               /*m_dimm_fwhm_corr != last_dimm_fwhm_corr || //ignore corrected dimm*/
                m_mag1_time != last_mag1_time ||
                m_mag1_el != last_mag1_el ||
                m_mag1_fwhm != last_mag1_fwhm ||
@@ -2269,12 +2361,12 @@ int tcsInterface::recordTelSee(bool force)
                m_mag2_fwhm_corr != last_mag2_fwhm_corr)
 
    {
-      telem<telem_telsee>({m_dimm_time, m_dimm_el, m_dimm_fwhm, m_dimm_fwhm_corr, m_mag1_time, m_mag1_el, m_mag1_fwhm, m_mag1_fwhm_corr, m_mag2_time, m_mag2_el, m_mag2_fwhm, m_mag2_fwhm_corr});
+      telem<telem_telsee>({m_dimm_time, m_dimm_el, m_dimm_fwhm, -1, m_mag1_time, m_mag1_el, m_mag1_fwhm, m_mag1_fwhm_corr, m_mag2_time, m_mag2_el, m_mag2_fwhm, m_mag2_fwhm_corr});
 
       last_dimm_time = m_dimm_time;
       last_dimm_el = m_dimm_el;
       last_dimm_fwhm = m_dimm_fwhm;
-      last_dimm_fwhm_corr = m_dimm_fwhm_corr;
+      //last_dimm_fwhm_corr = m_dimm_fwhm_corr;
       
       last_mag1_time = m_mag1_time;
       last_mag1_el = m_mag1_el;

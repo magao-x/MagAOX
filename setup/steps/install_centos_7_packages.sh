@@ -14,7 +14,7 @@ yum install -y http://dl.fedoraproject.org/pub/epel/epel-release-latest-7.noarch
 yum install -y http://galaxy4.net/repo/galaxy4-release-7-current.noarch.rpm || true
 
 # changes the set of available packages, making devtoolset-7 available
-yum -y install centos-release-scl  || exit_error "Failed to enable devtoolsets"
+yum -y install centos-release-scl  || exit_with_error "Failed to enable devtoolsets"
 # install and enable devtoolset-7 for all users
 # Note: this only works on interactive shells! There is a bug in SCL
 # that breaks sudo argument parsing when SCL is enabled

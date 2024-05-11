@@ -51,7 +51,7 @@ struct telem_temps : public flatbuffer_log
                        flatlogs::msgLenT len            ///< [in] length of msgBuffer.
                      )
    {
-      auto verifier = flatbuffers::Verifier( (uint8_t*) flatlogs::logHeader::messageBuffer(logBuff), static_cast<size_t>(len));
+      auto verifier = flatbuffers::Verifier( static_cast<uint8_t*>(flatlogs::logHeader::messageBuffer(logBuff)), static_cast<size_t>(len));
       return VerifyTelem_temps_fbBuffer(verifier);
    }
  
@@ -69,7 +69,7 @@ struct telem_temps : public flatbuffer_log
       
       if( fbs->temps() )
       {
-         for(size_t i=0; i< fbs->temps()->Length(); ++i)
+         for(size_t i=0; i< fbs->temps()->size(); ++i)
          {
             msg += " ";
             msg += std::to_string(fbs->temps()->Get(i));

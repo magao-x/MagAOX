@@ -514,10 +514,10 @@ int logManager<parentT, logFileT>::createLog( bufferPtrT & logBuffer,
 template<class parentT, class logFileT>
 template<typename logT>
 int logManager<parentT, logFileT>::createLog( bufferPtrT & logBuffer,
-                                     const timespecX & ts,
-                                     const typename logT::messageT & msg,
-                                     const logPrioT & level
-                                   )
+                                              const timespecX & ts,
+                                              const typename logT::messageT & msg,
+                                              const logPrioT & level
+                                            )
 {
    return logHeader::createLog<logT>(logBuffer, ts, msg, level);
 }
@@ -525,8 +525,8 @@ int logManager<parentT, logFileT>::createLog( bufferPtrT & logBuffer,
 template<class parentT, class logFileT>
 template<typename logT>
 void logManager<parentT, logFileT>::log( const typename logT::messageT & msg,
-                                logPrioT level
-                              )
+                                         logPrioT level
+                                       )
 {
    //Step 0 check level.
    if(level == logPrio::LOG_DEFAULT) level = logT::defaultLevel;
@@ -547,9 +547,9 @@ void logManager<parentT, logFileT>::log( const typename logT::messageT & msg,
 template<class parentT, class logFileT>
 template<typename logT>
 void logManager<parentT, logFileT>::log( timespecX & ts,
-                                const typename logT::messageT & msg,
-                                logPrioT level
-                              )
+                                         const typename logT::messageT & msg,
+                                         logPrioT level
+                                       )
 {
    //Step 0 check level.
    if(level == logPrio::LOG_DEFAULT) level = logT::defaultLevel;

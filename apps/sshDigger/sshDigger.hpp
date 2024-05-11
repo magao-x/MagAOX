@@ -69,7 +69,7 @@ protected:
    bool m_compress {false}; ///< Control compression on this tunnel.  True is on, false is off.
    ///@}
 
-   int m_tunnelPID; ///< The PID of the autossh process
+   int m_tunnelPID {0}; ///< The PID of the autossh process
 
    /** \name ssh log capture
      * @{
@@ -140,7 +140,7 @@ public:
    void sshLogThreadExec();
 
    /// Process a log entry from indiserver, putting it into MagAO-X standard form
-   int processSSHLog( std::string logs );
+   int processSSHLog( const std::string & logs );
 
    ///Thread starter, called by sshLogThreadStart on thread construction.  Calls sshLogThreadExec.
    static void _autosshLogThreadStart( sshDigger * s /**< [in] a pointer to an sshDigger instance (normally this) */);
@@ -440,7 +440,7 @@ void sshDigger::sshLogThreadExec()
    std::string logs;
    while(m_shutdown == 0 && m_sshSTDERR > 0)
    {
-      ssize_t count = read(m_sshSTDERR, buffer, sizeof(buffer));
+      ssize_t count = read(m_sshSTDERR, buffer, sizeof(buffer)-1);
       if (count <= 0)
       {
          continue;
@@ -471,7 +471,7 @@ void sshDigger::sshLogThreadExec()
 }
 
 inline
-int sshDigger::processSSHLog( std::string logs )
+int sshDigger::processSSHLog( const std::string & logs )
 {
    logPrioT lp = logPrio::LOG_INFO;
 
@@ -574,7 +574,7 @@ void sshDigger::autosshLogThreadExec()
    std::string logs;
    while(m_shutdown == 0)
    {
-      ssize_t count = read(m_autosshLogFD, buffer, sizeof(buffer));
+      ssize_t count = read(m_autosshLogFD, buffer, sizeof(buffer)-1);
       if (count <= 0)
       {
          continue;
@@ -616,8 +616,6 @@ int sshDigger::processAutoSSHLog( const std::string & logs )
 
 int sshDigger::appStartup()
 {
-   m_tunnelPID = 0;
-
    m_autosshLogFile = "/dev/shm/sshDigger_autossh_" + m_configName + "_" + std::to_string(m_pid);
 
    if( mkfifo( m_autosshLogFile.c_str(), S_IRUSR | S_IWUSR) < 0)

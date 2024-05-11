@@ -24,7 +24,7 @@ fi
 function log_error() {
     echo -e "$(tput setaf 1 2>/dev/null)$1$(tput sgr0 2>/dev/null)"
 }
-function exit_error() {
+function exit_with_error() {
   log_error "$1"
   exit 1
 }
@@ -191,7 +191,7 @@ function createuser() {
     log_info "User account $username exists"
   else
     sudo useradd -U $username || exit 1
-    echo -e "$DEFAULT_PASSWORD\n$DEFAULT_PASSWORD" | sudo passwd $username || exit 1
+    echo -e "$DEFAULT_PASSWORD\n$DEFAULT_PASSWORD" | sudo -H passwd $username || exit 1
     log_success "Created user account $username with default password $DEFAULT_PASSWORD"
   fi
   sudo usermod -a -G $instrument_group $username || exit 1
@@ -201,18 +201,18 @@ function createuser() {
   sudo chmod -R u=rwx,g=,o= /home/$username/.ssh || exit 1
   sudo chmod u=rw,g=,o= /home/$username/.ssh/authorized_keys || exit 1
   sudo chown -R $username:$instrument_group /home/$username || exit 1
-  sudo chsh $username -s $(which bash) || exit 1
+  sudo -H chsh $username -s $(which bash) || exit 1
   log_info "Append an ecdsa or ed25519 key to /home/$username/.ssh/authorized_keys to enable SSH login"
 
   data_path="/data/users/$username/"
-  sudo mkdir -p "$data_path" || exit 1
-  sudo chown "$username:$instrument_group" "$data_path" || exit 1
-  sudo chmod g+rxs "$data_path" || exit 1
+  sudo -H mkdir -p "$data_path" || exit 1
+  sudo -H chown "$username:$instrument_group" "$data_path" || exit 1
+  sudo -H chmod g+rxs "$data_path" || exit 1
   log_success "Created $data_path"
 
   link_name="/home/$username/data"
   if sudo test ! -L "$link_name"; then
-    sudo ln -sv "$data_path" "$link_name" || exit 1
+    sudo -H ln -sv "$data_path" "$link_name" || exit 1
     log_success "Linked $link_name -> $data_path"
   fi
 }

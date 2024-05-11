@@ -1,5 +1,6 @@
 SELF_DIR := $(abspath $(dir $(lastword $(MAKEFILE_LIST))))
--include $(SELF_DIR)/../local/common.mk
+-include $(SELF_DIR)/local/common.mk
+-include $(SELF_DIR)/Make/python.mk
 
 apps_common = \
 	sshDigger \
@@ -11,14 +12,23 @@ apps_common = \
 	streamWriter \
 	dmMode \
 	shmimIntegrator \
-	timeSeriesSimulator
+	timeSeriesSimulator \
+	dbIngest
 
 apps_rtcicc = \
-	bmcCtrl \
-	rhusbMon \
-	alpaoCtrl \
+        alignLoop \
+        acronameUsbHub \
+	baslerCtrl \
+        bmcCtrl \
+	flipperCtrl \
+        hsfwCtrl \
+        rhusbMon \
 	cacaoInterface \
+        kcubeCtrl \
+        modalPSDs \
 	userGainCtrl \
+        refRMS \
+        streamCircBuff \
 	zaberCtrl \
 	zaberLowLevel \
 	picoMotorCtrl
@@ -38,20 +48,16 @@ apps_rtc = \
 
 
 apps_icc = \
-	acronameUsbHub \
-	flipperCtrl \
+	dmPokeCenter \
 	filterWheelCtrl \
-	hsfwCtrl \
-	baslerCtrl \
 	picamCtrl \
 	pvcamCtrl \
 	smc100ccCtrl \
-	andorCtrl \
 	usbtempMon \
 	xt1121Ctrl \
 	xt1121DCDU \
 	koolanceCtrl \
-	tcsInterface
+	coralign 
 
 apps_aoc = \
 	trippLitePDU \
@@ -60,7 +66,8 @@ apps_aoc = \
 	kTracker \
 	koolanceCtrl \
 	observerCtrl \
-	siglentSDG
+	siglentSDG \
+	audibleAlerts
 
 
 apps_tic = \
@@ -113,7 +120,8 @@ all_rtimv_plugins = \
 	cameraStatus \
 	indiDictionary \
 	pwfsAlignment \
-	dmStatus
+	dmStatus \
+	warnings
 
 ifeq ($(MAGAOX_ROLE),RTC)
   rtimv_plugins_to_build =
@@ -129,6 +137,7 @@ endif
 
 utils_to_build = \
 	logdump \
+	logsurgeon \
 	logstream \
 	cursesINDI \
 	xrif2shmim \
@@ -139,7 +148,6 @@ scripts_to_install = magaox \
 	sync_cacao \
 	xctrl \
 	netconsole_logger \
-	creaimshm \
 	dmdispbridge \
 	shmimTCPreceive \
 	shmimTCPtransmit \
@@ -155,11 +163,12 @@ scripts_to_install = magaox \
 	lowfs_switch_apply \
 	write_magaox_pidfile \
 	mount_cgroups1_cpuset \
-	killIndiZombies
+	killIndiZombies \
+	xlog
 
 all: indi_all libs_all flatlogs apps_all guis_all utils_all
 
-install: indi_install libs_install flatlogs_all apps_install guis_install utils_install scripts_install rtscripts_install
+install: indi_install libs_install flatlogs_all apps_install guis_install utils_install scripts_install rtscripts_install python_install
 
 #We clean just libMagAOX, and the apps, guis, and utils for normal devel work.
 clean: lib_clean apps_clean guis_clean utils_clean tests_clean
@@ -192,8 +201,8 @@ libs_install:
 	for lib in ${libs_to_build}; do \
 		(cd libs/$$lib; ${MAKE}  install) || exit 1; \
 	done
-	sudo bash -c "echo $(LIB_PATH) > /etc/ld.so.conf.d/magaox.conf"
-	sudo ldconfig
+	sudo -H bash -c "echo $(LIB_PATH) > /etc/ld.so.conf.d/magaox.conf"
+	sudo -H ldconfig
 
 libs_clean:
 	for lib in ${libs_to_build}; do \
@@ -250,30 +259,30 @@ rtimv_plugins_clean:
 
 scripts_install:
 	for script in ${scripts_to_install}; do \
-		sudo install -d /opt/MagAOX/bin && \
-		sudo install scripts/$$script /opt/MagAOX/bin  && \
-		sudo ln -fs /opt/MagAOX/bin/$$script /usr/local/bin/$$script; \
+		sudo -H install -d /opt/MagAOX/bin && \
+		sudo -H install scripts/$$script /opt/MagAOX/bin  && \
+		sudo -H ln -fs /opt/MagAOX/bin/$$script /usr/local/bin/$$script; \
 	done
 
 rtscripts_install:
-	for scriptname in make_cpusets procs_to_cpusets; do \
-		sudo install -d /opt/MagAOX/bin && \
+	for scriptname in make_cpusets move_irqs; do \
+		sudo -H install -d /opt/MagAOX/bin && \
 		if [ -e rtSetup/$(MAGAOX_ROLE)/$$scriptname ]; then \
-			sudo install rtSetup/$(MAGAOX_ROLE)/$$scriptname /opt/MagAOX/bin/$$scriptname && \
-			sudo ln -fs /opt/MagAOX/bin/$$scriptname /usr/local/bin/$$scriptname; \
+			sudo -H install rtSetup/$(MAGAOX_ROLE)/$$scriptname /opt/MagAOX/bin/$$scriptname && \
+			sudo -H ln -fs /opt/MagAOX/bin/$$scriptname /usr/local/bin/$$scriptname; \
 		else \
-			echo "echo 'No $$scriptname for $$MAGAOX_ROLE'\nexit 0" | sudo tee /opt/MagAOX/bin/$$scriptname && \
-			sudo chmod +x /opt/MagAOX/bin/$$scriptname && \
-			sudo ln -fs /opt/MagAOX/bin/$$scriptname /usr/local/bin/$$scriptname; \
+			echo "echo 'No $$scriptname for $$MAGAOX_ROLE'\nexit 0" | sudo -H tee /opt/MagAOX/bin/$$scriptname && \
+			sudo -H chmod +x /opt/MagAOX/bin/$$scriptname && \
+			sudo -H ln -fs /opt/MagAOX/bin/$$scriptname /usr/local/bin/$$scriptname; \
 		fi \
 	; done
 
-utils_all: flatlogs_all
+utils_all: flatlogs_all indi_all
 		for app in ${utils_to_build}; do \
 			(cd utils/$$app; ${MAKE}) || exit 1; \
 		done
 
-utils_install: flatlogs_all
+utils_install: flatlogs_all utils_all
 		for app in ${utils_to_build}; do \
 			(cd utils/$$app; ${MAKE} install) || exit 1; \
 		done
@@ -289,6 +298,11 @@ test: tests_clean
 tests_clean:
 	cd tests; ${MAKE} clean || exit 1;
 	
+
+.PHONY: python_install
+python_install:
+	sudo -H $(PYTHON) -m pip install -e ./python/
+
 .PHONY: doc
 doc:
 	doxygen doc/config/Doxyfile.libMagAOX

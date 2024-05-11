@@ -1,0 +1,21 @@
+namespace MagAOX.logger;
+
+
+
+table Telem_pokeloop_fb
+{
+   /// Flag indicating if the WFS is measuring
+   measuring:uint8;
+
+   /// The delta-X position
+   deltaX:float;
+
+   /// The delta-Y position
+   deltaY:float;
+
+   /// Current loop counter
+   counter:uint64;
+}
+
+root_type Telem_pokeloop_fb;
+
