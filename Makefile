@@ -57,7 +57,7 @@ apps_icc = \
 	xt1121Ctrl \
 	xt1121DCDU \
 	koolanceCtrl \
-	coralign 
+	#coralign 
 
 apps_aoc = \
 	trippLitePDU \
