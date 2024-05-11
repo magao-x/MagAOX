@@ -191,8 +191,6 @@ public slots:
    void on_buttonMod_mod_pressed();
    void on_buttonMod_set_pressed();
    void on_buttonMod_rest_pressed();
-
-   void on_button_scalemodcamwfs_pressed();
          
    void on_button_ttmtel_pressed();
 
@@ -1659,20 +1657,6 @@ void pupilGuide::on_buttonMod_rest_pressed()
    ip.setName("modState");
    ip.add(pcf::IndiElement("target"));
    ip["target"] = 1;
-   
-   sendNewProperty(ip);
-}
-   
-void pupilGuide::on_button_scalemodcamwfs_pressed()
-{
-   double scaletarg = 0.99990082103502819777 * m_camwfsFreq;
-
-   pcf::IndiProperty ip(pcf::IndiProperty::Number);
-   
-   ip.setDevice("modwfs");
-   ip.setName("modFrequency");
-   ip.add(pcf::IndiElement("target"));
-   ip["target"] = scaletarg;
    
    sendNewProperty(ip);
 }
