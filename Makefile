@@ -13,6 +13,7 @@ apps_common = \
 	dmMode \
 	shmimIntegrator \
 	timeSeriesSimulator \
+	closedLoopIndi \
 	dbIngest
 
 apps_rtcicc = \
