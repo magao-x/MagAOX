@@ -49,38 +49,38 @@ source $DIR/_common.sh
 
 # Install OS packages first
 osPackagesScript="$DIR/steps/install_${ID}_${MAJOR_VERSION}_packages.sh"
-$_REAL_SUDO bash -l $osPackagesScript || exit_with_error "Failed to install packages from $osPackagesScript"
+$_REAL_SUDO -H bash -l $osPackagesScript || exit_with_error "Failed to install packages from $osPackagesScript"
 
 if [[ $ID == centos ]]; then
-    $_REAL_SUDO bash -l "$DIR/steps/install_cmake.sh" || exit 1
+    $_REAL_SUDO -H bash -l "$DIR/steps/install_cmake.sh" || exit 1
 fi
 
 distroSpecificScript="$DIR/steps/configure_${ID}_${MAJOR_VERSION}.sh"
-$_REAL_SUDO bash -l $distroSpecificScript || exit_with_error "Failed to configure ${ID} from $distroSpecificScript"
+$_REAL_SUDO -H bash -l $distroSpecificScript || exit_with_error "Failed to configure ${ID} from $distroSpecificScript"
 
 if [[ $VM_KIND != "none" ]]; then
     git config --global --replace-all safe.directory '*'
-    sudo git config --global --replace-all safe.directory '*'
+    sudo -H git config --global --replace-all safe.directory '*'
 fi
 
 bash -l "$DIR/steps/configure_trusted_sudoers.sh" || exit_with_error "Could not configure trusted groups for sudoers"
-sudo bash -l "$DIR/steps/configure_xsup_aliases.sh"
+sudo -H bash -l "$DIR/steps/configure_xsup_aliases.sh"
 
 if [[ $MAGAOX_ROLE == AOC || $MAGAOX_ROLE == ICC || $MAGAOX_ROLE == RTC ]]; then
     # Configure hostname aliases for instrument LAN
-    sudo bash -l "$DIR/steps/configure_etc_hosts.sh"
+    sudo -H bash -l "$DIR/steps/configure_etc_hosts.sh"
     # Configure NFS exports from RTC -> AOC and ICC -> AOC
-    sudo bash -l "$DIR/steps/configure_nfs.sh"
+    sudo -H bash -l "$DIR/steps/configure_nfs.sh"
 fi
 
 if [[ $MAGAOX_ROLE == AOC || $MAGAOX_ROLE == ICC || $MAGAOX_ROLE == RTC || $MAGAOX_ROLE == TOC || $MAGAOX_ROLE == TIC ]]; then
     # Configure time syncing
-    sudo bash -l "$DIR/steps/configure_chrony.sh"
+    sudo -H bash -l "$DIR/steps/configure_chrony.sh"
 fi
 
 if [[ $MAGAOX_ROLE != ci ]]; then
     # Increase inotify watches
-    sudo bash -l "$DIR/steps/increase_fs_watcher_limits.sh"
+    sudo -H bash -l "$DIR/steps/increase_fs_watcher_limits.sh"
 fi
 
 # The VM and CI provisioning doesn't run setup_users_and_groups.sh
@@ -103,7 +103,7 @@ if [[ ! -e $VENDOR_SOFTWARE_BUNDLE ]]; then
 fi
 
 ## Set up file structure and permissions
-sudo bash -l "$DIR/steps/ensure_dirs_and_perms.sh" $MAGAOX_ROLE
+sudo -H bash -l "$DIR/steps/ensure_dirs_and_perms.sh" $MAGAOX_ROLE
 
 if [[ $MAGAOX_ROLE == AOC ]]; then
     # Configure a tablespace to store postgres data on the /data array
@@ -116,7 +116,7 @@ bash -l "$DIR/steps/configure_postgresql_pass.sh"
 if [[ $MAGAOX_ROLE == vm ]]; then
     if [[ $VM_KIND != "wsl" ]]; then
         # Enable forwarding MagAO-X GUIs to the host for VMs
-        sudo bash -l "$DIR/steps/enable_vm_x11_forwarding.sh"
+        sudo -H bash -l "$DIR/steps/enable_vm_x11_forwarding.sh"
     fi
     # Install a config in ~/.ssh/config for the vm user
     # to make it easier to make tunnels work
@@ -125,7 +125,7 @@ fi
 
 # Install dependencies for the GUIs
 if [[ $MAGAOX_ROLE == AOC || $MAGAOX_ROLE == TOC || $MAGAOX_ROLE == ci || $MAGAOX_ROLE == vm || $MAGAOX_ROLE == workstation ]]; then
-    sudo bash -l "$DIR/steps/install_gui_dependencies.sh"
+    sudo -H bash -l "$DIR/steps/install_gui_dependencies.sh"
 fi
 
 # Install Linux headers (instrument computers use the RT kernel / headers)
@@ -138,30 +138,30 @@ if [[ $MAGAOX_ROLE == ci || $MAGAOX_ROLE == vm || $MAGAOX_ROLE == workstation ||
 fi
 ## Build third-party dependencies under /opt/MagAOX/vendor
 cd /opt/MagAOX/vendor
-sudo bash -l "$DIR/steps/install_rclone.sh" || exit 1
+sudo -H bash -l "$DIR/steps/install_rclone.sh" || exit 1
 bash -l "$DIR/steps/install_openblas.sh" || exit 1
 if [[ $MAGAOX_ROLE == RTC || $MAGAOX_ROLE == ICC || $MAGAOX_ROLE == AOC || $MAGAOX_ROLE == TIC ]]; then
     bash -l "$DIR/steps/install_cuda.sh" || exit_with_error "CUDA install failed"
 fi
-sudo bash -l "$DIR/steps/install_fftw.sh" || exit 1
-sudo bash -l "$DIR/steps/install_cfitsio.sh" || exit 1
-sudo bash -l "$DIR/steps/install_eigen.sh" || exit 1
-sudo bash -l "$DIR/steps/install_zeromq.sh" || exit 1
-sudo bash -l "$DIR/steps/install_cppzmq.sh" || exit 1
-sudo bash -l "$DIR/steps/install_flatbuffers.sh" || exit 1
+sudo -H bash -l "$DIR/steps/install_fftw.sh" || exit 1
+sudo -H bash -l "$DIR/steps/install_cfitsio.sh" || exit 1
+sudo -H bash -l "$DIR/steps/install_eigen.sh" || exit 1
+sudo -H bash -l "$DIR/steps/install_zeromq.sh" || exit 1
+sudo -H bash -l "$DIR/steps/install_cppzmq.sh" || exit 1
+sudo -H bash -l "$DIR/steps/install_flatbuffers.sh" || exit 1
 if [[ $MAGAOX_ROLE == AOC ]]; then
-    sudo bash -l "$DIR/steps/install_lego.sh"
+    sudo -H bash -l "$DIR/steps/install_lego.sh"
 fi
 if [[ $MAGAOX_ROLE == RTC || $MAGAOX_ROLE == ICC || $MAGAOX_ROLE == TIC || $MAGAOX_ROLE == ci || ( $MAGAOX_ROLE == vm && $VM_KIND == vagrant ) ]]; then
-    sudo bash -l "$DIR/steps/install_basler_pylon.sh"
+    sudo -H bash -l "$DIR/steps/install_basler_pylon.sh"
 fi
 if [[ $MAGAOX_ROLE == RTC || $MAGAOX_ROLE == ICC || $MAGAOX_ROLE == ci || ( $MAGAOX_ROLE == vm && $VM_KIND == vagrant ) ]]; then
-    sudo bash -l "$DIR/steps/install_edt.sh"
+    sudo -H bash -l "$DIR/steps/install_edt.sh"
 fi
 
 # SuSE packages need either Python 3.6 or 3.10, but Rocky 9.2 has Python 3.9 as /bin/python, so we build our own RPM:
 if [[ $ID == rocky && $MAGAOX_ROLE != container ]]; then
-  sudo bash -l "$DIR/steps/install_cpuset.sh" || exit_with_error "Couldn't install cpuset from source"
+  sudo -H bash -l "$DIR/steps/install_cpuset.sh" || exit_with_error "Couldn't install cpuset from source"
 fi
 
 
@@ -182,19 +182,19 @@ if [[ -e $VENDOR_SOFTWARE_BUNDLE ]]; then
     # Note that 'vm' is in the list for ease of testing the install_* scripts
     if [[ $MAGAOX_ROLE == RTC || $MAGAOX_ROLE == ICC || $MAGAOX_ROLE == vm ]]; then
         if [[ $ID == centos ]]; then
-            sudo bash -l "$DIR/steps/install_alpao.sh"
+            sudo -H bash -l "$DIR/steps/install_alpao.sh"
         fi
-        sudo bash -l "$DIR/steps/install_andor.sh"
+        sudo -H bash -l "$DIR/steps/install_andor.sh"
     fi
     if [[ $ID == centos && ( $MAGAOX_ROLE == RTC || $MAGAOX_ROLE == TIC || $MAGAOX_ROLE == vm ) ]]; then
-        sudo bash -l "$DIR/steps/install_bmc.sh"
+        sudo -H bash -l "$DIR/steps/install_bmc.sh"
     fi
     if [[ $MAGAOX_ROLE == ICC || $MAGAOX_ROLE == RTC || $MAGAOX_ROLE == vm ]]; then
-        sudo bash -l "$DIR/steps/install_libhsfw.sh"
+        sudo -H bash -l "$DIR/steps/install_libhsfw.sh"
     fi
     if [[ $MAGAOX_ROLE == ICC || $MAGAOX_ROLE == vm ]]; then
-        sudo bash -l "$DIR/steps/install_picam.sh"
-        sudo bash -l "$DIR/steps/install_kinetix.sh"
+        sudo -H bash -l "$DIR/steps/install_picam.sh"
+        sudo -H bash -l "$DIR/steps/install_kinetix.sh"
     fi
     sudo rm -rf $BUNDLE_TMPDIR
 fi
@@ -224,12 +224,12 @@ fi
 # Create Python env and install Python libs that need special treatment
 # Note that subsequent steps will use libs from conda since the base
 # env activates by default.
-sudo bash -l "$DIR/steps/install_python.sh"
-sudo bash -l "$DIR/steps/configure_python.sh"
+sudo -H bash -l "$DIR/steps/install_python.sh"
+sudo -H bash -l "$DIR/steps/configure_python.sh"
 source /opt/conda/bin/activate
 
 if [[ $ID == centos && ( $MAGAOX_ROLE == AOC || $MAGAOX_ROLE == TOC || $MAGAOX_ROLE == vm ) ]]; then
-    sudo mamba install -y qwt qt=5.9.7 || exit 1
+    sudo -H mamba install -y qwt qt=5.9.7 || exit 1
     log_info "Installed qwt from conda for widgeting purposes on old CentOS"
 fi
 
@@ -285,16 +285,16 @@ fi
 if [[ $MAGAOX_ROLE == AOC || $MAGAOX_ROLE == TOC || $MAGAOX_ROLE == vm || $MAGAOX_ROLE == workstation || $MAGAOX_ROLE == ci ]]; then
     # realtime image viewer
     bash -l "$DIR/steps/install_rtimv.sh" || exit_with_error "Could not install rtimv"
-    echo "export RTIMV_CONFIG_PATH=/opt/MagAOX/config" | sudo tee /etc/profile.d/rtimv_config_path.sh
+    echo "export RTIMV_CONFIG_PATH=/opt/MagAOX/config" | sudo -H tee /etc/profile.d/rtimv_config_path.sh
 fi
 
 if [[ $MAGAOX_ROLE == AOC || $MAGAOX_ROLE == TOC || $MAGAOX_ROLE == vm ||  $MAGAOX_ROLE == workstation ]]; then
     # regular old ds9 image viewer
-    sudo bash -l "$DIR/steps/install_ds9.sh"
+    sudo -H bash -l "$DIR/steps/install_ds9.sh"
 fi
 
 # aliases to improve ergonomics of MagAO-X ops
-sudo bash -l "$DIR/steps/install_aliases.sh"
+sudo -H bash -l "$DIR/steps/install_aliases.sh"
 
 # CI invokes install_MagAOX.sh as the next step (see .circleci/config.yml)
 # By separating the real build into another step, we can cache the slow provisioning steps
@@ -305,18 +305,18 @@ if [[ $MAGAOX_ROLE != ci ]]; then
 fi
 
 if [[ $MAGAOX_ROLE != ci && $MAGAOX_ROLE != container && $MAGAOX_ROLE != vm ]]; then
-    sudo bash -l "$DIR/steps/configure_startup_services.sh"
+    sudo -H bash -l "$DIR/steps/configure_startup_services.sh"
 
     log_info "Generating subuid and subgid files, may need to run podman system migrate"
-    sudo python "$DIR/generate_subuid_subgid.py" || exit_with_error "Generating subuid/subgid files for podman failed"
-    sudo podman system migrate || exit_with_error "Could not run podman system migrate"
+    sudo -H python "$DIR/generate_subuid_subgid.py" || exit_with_error "Generating subuid/subgid files for podman failed"
+    sudo -H podman system migrate || exit_with_error "Could not run podman system migrate"
 
     # To try and debug hardware issues, ICC and RTC replicate their
     # kernel console log over UDP to AOC over the instrument LAN.
     # The script that collects these messages is in ../scripts/netconsole_logger
     # so we have to install its service unit after 'make scripts_install'
     # runs.
-    sudo bash -l "$DIR/steps/configure_kernel_netconsole.sh"
+    sudo -H bash -l "$DIR/steps/configure_kernel_netconsole.sh"
 fi
 
 log_success "Provisioning complete"
