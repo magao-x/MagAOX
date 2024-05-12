@@ -296,6 +296,8 @@ int dmPokeXCorr::analyzeSensor()
 
     m_xcorr(xs, ys, m_pokeImage());
 
+    std::cerr << "dmPokeXCorr::analyzeSensor: " << xs << " " << ys << "\n";
+    
     if(updateMeasurement(xs, ys) < 0)
     {
         return log<software_error,-1>({__FILE__, __LINE__, "error from dmPokeWFS::updateMeasurement"});
