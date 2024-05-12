@@ -36,8 +36,8 @@ class siglentSDG : public MagAOXApp<>, public dev::telemeter<siglentSDG>
    //constexpr static double cs_MaxFreq = 3622.0;//101;//3622.0;
 
 private:
-   std::vector<double> m_maxAmp = {8.0,   8};//0.71,  0.83, 0.88, 1.05, 1.15, 3.45}; //1.5,     1.2,     1.1     };
-   std::vector<double> m_maxFreq = {0.0, 2000};//100.0,   150,  200,  250,  300, 1000}; //2999.99, 3499.99, 3500.01};
+   std::vector<double> m_maxAmp = {1.2801,   1.2801,  1.0201};//0.71,  0.83, 0.88, 1.05, 1.15, 3.45}; //1.5,     1.2,     1.1     };
+   std::vector<double> m_maxFreq = {0.0,   2000,      3000};//100.0,   150,  200,  250,  300, 1000}; //2999.99, 3499.99, 3500.01};
    //todo: do we need to add max and min pulse variables?
 protected:
 
@@ -1895,7 +1895,8 @@ int siglentSDG::changeAmp( int channel,
    if(channel == 2) offst = m_C2ofst;
    
    // Do not limit freq if a PULSE wave
-   if(m_waveform != "PULSE"){
+   if(m_waveform != "PULSE")
+   {
 
       //Ensure we won't excede the 0-10V range for SINE
       if(offst + 0.5*newAmp > 10) 
