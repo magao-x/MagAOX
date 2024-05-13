@@ -32,7 +32,8 @@ apps_rtcicc = \
         streamCircBuff \
 	zaberCtrl \
 	zaberLowLevel \
-	picoMotorCtrl
+	picoMotorCtrl \
+	psfFit
 
 apps_rtc = \
 	alpaoCtrl \
