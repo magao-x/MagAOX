@@ -1,12 +1,11 @@
 name: Build UTM ARM virtual machine
 on:
-  push:
-    branches: [xvm-dev]
-#   workflow_run:
-#     workflows: ["Rocky build"]
-#     types: [completed]
-#     branches: [xvm-dev]
-
+  workflow_run:
+    workflows: ["Rocky build"]
+    types: [completed]
+    # branches: [xvm-dev]
+  # push:
+  #   branches: [xvm-dev]
 jobs:
   build-utm-arm64:
     runs-on: macos-14
