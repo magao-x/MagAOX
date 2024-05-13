@@ -1,4 +1,5 @@
 #!/usr/bin/env bash
+set -ex
 mkdir -p ./input/firmware
 cd ./input/firmware
 platform=$(uname)
