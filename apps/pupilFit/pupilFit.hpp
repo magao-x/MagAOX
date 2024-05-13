@@ -920,7 +920,7 @@ int pupilFit::processImage( void* curr_src,
    
    for(unsigned nn=0; nn < shmimMonitorT::m_width*shmimMonitorT::m_height; ++nn)
    {
-      m_fitIm.data()[nn] += ((float*)curr_src) [nn];
+      m_fitIm.data()[nn] = ((float*)curr_src) [nn];
    }
    
    m_fitter.m_thresh = m_threshold;
@@ -1282,12 +1282,16 @@ int pupilFit::processImage( void* curr_src,
 {
    static_cast<void>(dummy);
    
+   int npix = 0;
    for(unsigned nn=0; nn < refShmimMonitorT::m_width*refShmimMonitorT::m_height; ++nn)
    {
-      m_refIm.data()[nn] += ((float*)curr_src) [nn];
+      m_refIm.data()[nn] = ((float*)curr_src) [nn];
+      ++npix;
    }
 
    log<text_log>("reference updated", logPrio::LOG_NOTICE);
+ 
+   std::cerr << m_refIm.sum() << " " << npix << "\n";
 
    shmimMonitorT::m_restart = true;
 
