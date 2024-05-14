@@ -86,7 +86,6 @@ if [[ $MAGAOX_ROLE == TIC || $MAGAOX_ROLE == TOC || $MAGAOX_ROLE == ICC || $MAGA
     dnf config-manager --add-repo https://pkgs.tailscale.com/stable/rhel/9/tailscale.repo
     dnf install tailscale
     systemctl enable --now tailscaled
-    tailscale up
 fi
 
 
