@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 DIR="$( cd "$( dirname "${BASH_SOURCE[0]}" )" && pwd )"
 source $DIR/../_common.sh
-confFile=/etc/postgresql/14/main/pg_hba.conf
+confFile=/var/lib/pgsql/data/pg_hba.conf
 dropInDir=${confFile}.d
 sudo mkdir -p $dropInDir || exit_with_error "Could not make $dropInDir"
 sudo chown -R postgres:postgres $dropInDir || exit_with_error "Could not set ownership of $dropInDir"
@@ -24,6 +24,8 @@ if [[ $MAGAOX_ROLE == AOC ]]; then
     dataArrayPath=/data/postgres
     sudo mkdir -p $dataArrayPath || exit_with_error "Could not make $dataArrayPath"
     sudo chown -R postgres:postgres $dataArrayPath || exit_with_error "Could not set ownership of $dataArrayPath"
+    sudo semanage fcontext -a -t postgresql_db_t "${dataArrayPath}(/.*)?" || exit_with_error "Could not adjust SELinux context for ${dataArrayPath}"
+    sudo restorecon -R ${dataArrayPath} || exit_with_error "Could not restorecon the SELinux context on ${dataArrayPath}"
 
     sudo -u postgres psql -c "CREATE TABLESPACE data_array LOCATION '$dataArrayPath'" || true
     sudo -u postgres psql -c "CREATE DATABASE xtelem TABLESPACE = data_array" || true
