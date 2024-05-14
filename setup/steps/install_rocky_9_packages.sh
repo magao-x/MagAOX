@@ -21,6 +21,7 @@ ldconfig -v
 yum install -y \
     util-linux-user \
     kernel-devel \
+    kernel-modules-extra \
     gcc-gfortran \
     which \
     openssh \
