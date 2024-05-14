@@ -14,6 +14,21 @@ else
     _REAL_SUDO=$(which sudo)
   fi
 fi
+
+# Function to refresh sudo timer
+refresh_sudo_timer() {
+    while true; do
+        $_REAL_SUDO -v
+        sleep 60
+    done
+}
+
+# Start refreshing sudo timer in the background
+if [[ $EUID != 0 ]]; then
+    $_REAL_SUDO -v
+    refresh_sudo_timer &
+fi
+
 # Defines $ID and $VERSION_ID so we can detect which distribution we're on
 source /etc/os-release
 # Get just the XX beginning of a XX.YY version string
