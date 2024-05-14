@@ -385,6 +385,20 @@ void IndiConnection::sendXml( const string &szXml ) const
     return;
   }
 
+  size_t sofar{0};
+  size_t target{szXml.length()+1};
+  while (sofar < target)
+  {
+    int writ;
+    writ = ::write(m_fdOutput, szXml.c_str()+sofar, target-sofar);
+    if (writ < 1)
+    {
+      break;
+    }
+    sofar += writ;
+  }
+  return;
+
   ::fprintf( m_fstreamOutput, "%s", szXml.c_str() );
   fflush(m_fstreamOutput);
 
