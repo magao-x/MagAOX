@@ -16,3 +16,6 @@ authors = [
 
 [project.scripts]
 audibleAlerts = "audibleAlerts:core.AudibleAlerts.console_app"
+
+[tool.setuptools.package-data]
+audibleAlerts = ["**/*"]
