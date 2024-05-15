@@ -260,6 +260,11 @@ bash -l "$DIR/steps/install_magpyx.sh" || exit_with_error "magpyx install failed
 bash -l "$DIR/steps/install_mxlib.sh" || exit_with_error "Failed to build and install mxlib"
 source /etc/profile.d/mxmakefile.sh
 
+if [[ $MAGAOX_ROLE == AOC || $MAGAOX_ROLE == vm ||  $MAGAOX_ROLE == workstation ]]; then
+    # sup web interface
+    bash -l "$DIR/steps/install_sup.sh"
+fi
+
 ## Clone sources to /opt/MagAOX/source/MagAOX
 if [[ $MAGAOX_ROLE == ci ]]; then
     ln -sfv ~/project/ /opt/MagAOX/source/MagAOX
@@ -289,12 +294,6 @@ else
         log_info "Running from clone located at $(dirname $DIR), nothing to do for cloning step"
     fi
 fi
-
-# TODO:jlong: uncomment when it's back in working order
-# if [[ $MAGAOX_ROLE == AOC || $MAGAOX_ROLE == vm ||  $MAGAOX_ROLE == workstation ]]; then
-#     # sup web interface
-#     bash -l "$DIR/steps/install_sup.sh"
-# fi
 
 
 if [[ $MAGAOX_ROLE == AOC || $MAGAOX_ROLE == TOC || $MAGAOX_ROLE == vm || $MAGAOX_ROLE == workstation || $MAGAOX_ROLE == ci ]]; then
