@@ -1,7 +1,7 @@
 #!/bin/bash
 # If not started as root, sudo yourself
 if [[ "$EUID" != 0 ]]; then
-    sudo bash -l $0 "$@"
+    sudo -H bash -l $0 "$@"
     exit $?
 fi
 DIR="$( cd "$( dirname "${BASH_SOURCE[0]}" )" && pwd )"
@@ -38,12 +38,12 @@ UNIT_PATH=/etc/systemd/system/
 
 # clean up old files if they exist
 if [[ -e $UNIT_PATH/jupyterlab.service ]]; then
-    sudo systemctl stop jupyterlab || true
-	sudo rm $UNIT_PATH/jupyterlab.service
+    sudo -H systemctl stop jupyterlab || true
+	sudo -H rm $UNIT_PATH/jupyterlab.service
 fi
 
 if [[ $MAGAOX_ROLE != ci ]]; then
-	sudo cp $DIR/../systemd_units/jupyternotebook.service $UNIT_PATH/jupyternotebook.service
+	sudo -H cp $DIR/../systemd_units/jupyternotebook.service $UNIT_PATH/jupyternotebook.service
 	log_success "Installed jupyternotebook.service to $UNIT_PATH"
 
 	# Due to SystemD nonsense, WorkingDirectory must be a directory and not a symbolic link
@@ -68,10 +68,10 @@ if [[ $MAGAOX_ROLE != ci ]]; then
 		sudo mv $overrideFile $overrideFileDest
 	fi
 
-	sudo systemctl daemon-reload
+	sudo -H systemctl daemon-reload
 	
-	sudo systemctl enable jupyternotebook
+	sudo -H systemctl enable jupyternotebook
 	log_success "Enabled jupyternotebook service"
-	sudo systemctl start jupyternotebook
+	sudo -H systemctl start jupyternotebook
 	log_success "Started jupyternotebook service"
 fi

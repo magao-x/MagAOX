@@ -10,5 +10,5 @@ parentdir=/opt/MagAOX/source
 clone_or_update_and_cd $orgname $reponame $parentdir
 git checkout $MAGPYX_COMMIT_ISH
 
-sudo /opt/conda/bin/pip install -e .
+sudo -H /opt/conda/bin/pip install -e .
 python -c 'import magpyx'

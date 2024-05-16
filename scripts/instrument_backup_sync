@@ -2,7 +2,7 @@
 set -ex
 # If not started as root, sudo yourself
 if [[ "$EUID" != 0 ]]; then
-    sudo bash -l $0 "$@"
+    sudo -H bash -l $0 "$@"
     exit $?
 fi
 if [[ $(hostname) != "exao1" ]]; then

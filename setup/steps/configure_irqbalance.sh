@@ -1,6 +1,6 @@
 #!/bin/bash
 if [[ "$EUID" != 0 ]]; then
-    sudo bash $0 "$@"
+    sudo -H bash $0 "$@"
     exit $?
 fi
 set -euo pipefail
