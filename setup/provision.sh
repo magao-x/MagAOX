@@ -124,6 +124,8 @@ if [[ $MAGAOX_ROLE == AOC ]]; then
     # Configure a tablespace to store postgres data on the /data array
     # and user accounts for the system to use
     bash -l "$DIR/steps/configure_postgresql.sh"
+    # Install and enable the service for grafana
+    bash -l "$DIR/steps/install_grafana.sh"
 fi
 # All MagAO-X computers may use the password to connect to the main db
 bash -l "$DIR/steps/configure_postgresql_pass.sh"
