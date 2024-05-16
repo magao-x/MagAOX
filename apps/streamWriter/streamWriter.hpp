@@ -1298,6 +1298,9 @@ int streamWriter::doEncode()
       log<saving_start>({1,m_currSaveStartFrameNo});
       m_logSaveStart = false;
    }
+   uint64_t saveStart = m_currSaveStart;
+   uint64_t saveCount = m_currSaveStop - saveStart;
+   uint64_t saveStopFrameNo = m_currSaveStopFrameNo;
    
    recordSavingState(true);
 
@@ -1306,7 +1309,7 @@ int streamWriter::doEncode()
    clock_gettime(CLOCK_REALTIME, &tw0);
    
    //Configure xrif and copy image data -- this does no allocations
-   int rv = xrif_set_size(m_xrif, m_width, m_height, 1, (m_currSaveStop-m_currSaveStart), m_dataType);
+   int rv = xrif_set_size(m_xrif, m_width, m_height, 1, saveCount, m_dataType);
    if(rv != XRIF_NOERROR)
    {
       //This is a big problem.  Report it as "ALERT" and go on.
@@ -1320,10 +1323,10 @@ int streamWriter::doEncode()
       log<software_error>({__FILE__,__LINE__, 0, rv, "xrif set LZ4 acceleration error."});
    }
    
-   memcpy(m_xrif->raw_buffer,  m_rawImageCircBuff + m_currSaveStart*m_width*m_height*m_typeSize, (m_currSaveStop-m_currSaveStart)*m_width*m_height*m_typeSize);
+   memcpy(m_xrif->raw_buffer,  m_rawImageCircBuff + saveStart*m_width*m_height*m_typeSize, saveCount*m_width*m_height*m_typeSize);
    
    //Configure xrif and copy timing data -- no allocations
-   rv = xrif_set_size(m_xrif_timing, 5, 1, 1, (m_currSaveStop-m_currSaveStart), XRIF_TYPECODE_UINT64);
+   rv = xrif_set_size(m_xrif_timing, 5, 1, 1, saveCount, XRIF_TYPECODE_UINT64);
    if(rv != XRIF_NOERROR)
    {
       //This is a big problem.  Report it as "ALERT" and go on.
@@ -1337,7 +1340,7 @@ int streamWriter::doEncode()
       log<software_error>({__FILE__,__LINE__, 0, rv, "xrif set LZ4 acceleration error."});
    }
    
-   memcpy(m_xrif_timing->raw_buffer, m_timingCircBuff + m_currSaveStart*5, (m_currSaveStop-m_currSaveStart)*5*sizeof(uint64_t));
+   memcpy(m_xrif_timing->raw_buffer, m_timingCircBuff + saveStart*5, saveCount*5*sizeof(uint64_t));
    
    
    rv = xrif_encode(m_xrif);
@@ -1370,7 +1373,7 @@ int streamWriter::doEncode()
    
    //Now break down the acq time of the first image in the buffer for use in file name
    tm uttime;//The broken down time.   
-   timespec * fts = (timespec *) (m_timingCircBuff + m_currSaveStart*5 +1);
+   timespec * fts = (timespec *) (m_timingCircBuff + saveStart * 5 + 1);
             
    if(gmtime_r(&fts->tv_sec, &uttime) == 0)
    {
@@ -1447,7 +1450,7 @@ int streamWriter::doEncode()
    if(m_writing == STOP_WRITING) 
    {
       m_writing = NOT_WRITING;
-      log<saving_stop>({0,m_currSaveStopFrameNo});
+      log<saving_stop>({0, saveStopFrameNo});
    }
    
    recordSavingState(true);
