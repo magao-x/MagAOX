@@ -23,8 +23,11 @@ refresh_sudo_timer() {
     done
 }
 
+# Clear cached credentials for sudo, if they exist
+sudo -K
+
 # Start refreshing sudo timer in the background
-if [[ $EUID != 0 ]]; then
+if [[ "$(sudo -H -n true 2>&1)" ]]; then
     $_REAL_SUDO -v
     refresh_sudo_timer &
 fi
