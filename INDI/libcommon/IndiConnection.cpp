@@ -91,10 +91,10 @@ IndiConnection::~IndiConnection()
     {
         //do nothing
     }
-    
-    if(m_fstreamOutput && m_fstreamOutput != m_fstreamSTDOUT)
+
+    if(m_fdOutput > 0 && m_fdOutput != STDOUT_FILENO)
     {
-        fclose(m_fstreamOutput);
+        ::close(m_fdOutput);
     }
 
 }
@@ -120,7 +120,6 @@ void IndiConnection::construct( const string &szName,
   m_fdInput = STDIN_FILENO;
 
   //We start with STDOUT.  
-  m_fstreamSTDOUT = fdopen(STDOUT_FILENO, "w+");  
   setOutputFd(STDOUT_FILENO);
 
   // setup the signal handler.
@@ -380,7 +379,7 @@ void IndiConnection::sendXml( const string &szXml ) const
 {
   MutexLock::AutoLock autoOut( &m_mutOutput );
   
-  if(!m_fstreamOutput)
+  if(m_fdOutput < 0)
   {
     return;
   }
@@ -398,10 +397,6 @@ void IndiConnection::sendXml( const string &szXml ) const
     sofar += writ;
   }
   return;
-
-  ::fprintf( m_fstreamOutput, "%s", szXml.c_str() );
-  fflush(m_fstreamOutput);
-
 }
 
 ////////////////////////////////////////////////////////////////////////////////
@@ -442,21 +437,6 @@ void IndiConnection::setInputFd( const int &iFd )
 void IndiConnection::setOutputFd( const int &iFd )
 {
     m_fdOutput = iFd;
-
-    //Close if it's open as long as it isn't STDOUT
-    if(m_fstreamOutput && m_fstreamOutput != m_fstreamSTDOUT)
-    {
-        fclose(m_fstreamOutput);
-    }
-
-    if(iFd == STDOUT_FILENO)
-    {
-        m_fstreamOutput = m_fstreamSTDOUT;
-    }
-    else
-    {
-        m_fstreamOutput = fdopen(m_fdOutput, "w+");
-    }
 }
 
 ////////////////////////////////////////////////////////////////////////////////
