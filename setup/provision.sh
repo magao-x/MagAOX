@@ -158,7 +158,7 @@ cd /opt/MagAOX/vendor
 sudo bash -l "$DIR/steps/install_rclone.sh" || exit 1
 bash -l "$DIR/steps/install_openblas.sh" || exit 1
 if [[ $MAGAOX_ROLE == RTC || $MAGAOX_ROLE == ICC || $MAGAOX_ROLE == AOC || $MAGAOX_ROLE == TIC ]]; then
-    bash -l "$DIR/steps/install_cuda.sh" || exit_with_error "CUDA install failed"
+    bash -l "$DIR/steps/install_cuda_rocky_9.sh" || exit_with_error "CUDA install failed"
 fi
 sudo bash -l "$DIR/steps/install_fftw.sh" || exit 1
 sudo bash -l "$DIR/steps/install_cfitsio.sh" || exit 1
