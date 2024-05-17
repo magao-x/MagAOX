@@ -548,6 +548,9 @@ inline void dmSpeckle::modThreadExec()
             if (m_dwell == 0)
                 m_dwell = 1;
 
+            float m_streamDelay = 0;//0.000375- 0.5/2000.;
+            std::cerr << m_streamDelay << "\n";
+
             while (m_modulating && !m_shutdown)
             {
                 if (m_trigger)
@@ -562,8 +565,18 @@ inline void dmSpeckle::modThreadExec()
 
                     ts.tv_sec += 1;
 
+                    
                     if (sem_timedwait(sem, &ts) == 0)
                     {
+                        double t0 = mx::sys::get_curr_time();
+                        double t1 = t0;
+                        while(t1 - t0 < m_streamDelay)
+                        {
+                            double dt = (1e8)*(m_streamDelay - (t1-t0)); //This is 0.1 times remaining time, but in nanosecs
+                            mx::sys::nanoSleep(dt);
+                            t1 = mx::sys::get_curr_time();
+                        }
+
                         triggered = true;
                     }
                     else
