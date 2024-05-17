@@ -73,6 +73,14 @@ namespace dev
   *           return *static_cast<darkShmimMonitorT *>(this);
   *       }
   *   \endcode
+  *
+  * - If derivedT has additional shmimMonitor parents, you will need to include these lines in the class 
+  *   declaration:
+  *   \code
+  *       using dmPokeWFST::allocate;
+  *       using dmPokeWFST::processImage;
+  *   \endcode
+  *
   * - Must provide the following interface:
   *   \code
   *       // Run the sensor steps 
@@ -666,7 +674,7 @@ int dmPokeWFS<derivedT>::allocate( const wfsShmimT & dummy)
     {
         m_dmStream.open(m_dmChan);    
     }
-    catch(const std::exception& e) //this can check for invalid_argument and distinguish not existing
+    catch(const std::exception& e) 
     {
         return derivedT::template log<software_error,-1>({__FILE__, __LINE__, std::string("exception opening DM: ") + e.what()});
     }
@@ -676,8 +684,6 @@ int dmPokeWFS<derivedT>::allocate( const wfsShmimT & dummy)
     if(derived().darkShmimMonitor().width() == derived().shmimMonitor().width() && 
          derived().darkShmimMonitor().height() == derived().shmimMonitor().height() )
     {
-        std::cerr << "dark is valid " << derived().darkShmimMonitor().width() << " " << derived().shmimMonitor().width() << " ";
-        std::cerr << derived().darkShmimMonitor().height() << " " << derived().shmimMonitor().height() << "\n";
         m_darkValid = true;
     }
     else
