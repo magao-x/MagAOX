@@ -248,7 +248,24 @@ if( registerIndiPropertyNew( prop, propName, type, pcf::IndiProperty::ReadWrite,
 if( registerIndiPropertyNew( prop, propName, type, pcf::IndiProperty::ReadOnly, pcf::IndiProperty::Idle, 0) < 0)  \
 {                                                                                                                 \
     return log<software_error,-1>({__FILE__,__LINE__, "failed to register read only property"});                  \
-}                                                                                           
+}                                    
+
+/// Register a NEW INDI property with the class, with no callback, using the derived class
+/** Is a wrapper for MagAOXApp::registerIndiPropertyNew with  NULL callback.
+  *
+  * \param prop the property member name, with no quotes
+  * \param propName the property name, in quotes
+  * \param type the property type, pcf::IndiProperty::Type
+  * \param perm the property permissions, pcf::IndiProperty::PropertyPermType
+  * \param state the property state, pcf::IndiProperty::PropertyStateType
+  *
+  * \ingroup indi
+  */
+#define REG_INDI_NEWPROP_NOCB_DERIVED(prop, propName, type)                                                                 \
+if( derived().registerIndiPropertyNew( prop, propName, type, pcf::IndiProperty::ReadOnly, pcf::IndiProperty::Idle, 0) < 0)  \
+{                                                                                                                           \
+    return derivedT::template log<software_error,-1>({__FILE__,__LINE__, "failed to register read only property"});         \
+}                                     
 
 /// Register a SET INDI property with the class, using the standard callback name.
 /** Is a wrapper for MagAOXApp::registerIndiPropertySet.
