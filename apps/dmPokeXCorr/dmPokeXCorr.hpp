@@ -34,6 +34,18 @@ namespace MagAOX
 namespace app
 {
 
+struct zrespShmimT
+{
+    static std::string configSection()
+    {
+        return "zrespM";
+    };
+    static std::string indiPrefix()
+    {
+        return "zrespM";
+    };
+};
+
 /// The MagAO-X DM to PWFS alignment Application
 /**
  * \ingroup dmPokeXCorr
@@ -42,24 +54,27 @@ class dmPokeXCorr : public MagAOXApp<true>,
                     public dev::dmPokeWFS<dmPokeXCorr>,
                     public dev::shmimMonitor<dmPokeXCorr, dev::dmPokeWFS<dmPokeXCorr>::wfsShmimT>,
                     public dev::shmimMonitor<dmPokeXCorr, dev::dmPokeWFS<dmPokeXCorr>::darkShmimT>,
+                    public dev::shmimMonitor<dmPokeXCorr, zrespShmimT>,
                     public dev::telemeter<dmPokeXCorr>
 {
     // Give the test harness access.
     friend class dmPokeXCorr_test;
 
-    friend class dev::shmimMonitor<dmPokeXCorr, dev::dmPokeWFS<dmPokeXCorr>::wfsShmimT>;
+    friend class dev::dmPokeWFS<dmPokeXCorr>;
+    
+    typedef dev::dmPokeWFS<dmPokeXCorr> dmPokeWFST;
 
-    friend class dev::shmimMonitor<dmPokeXCorr, dev::dmPokeWFS<dmPokeXCorr>::darkShmimT>;
+    friend class dev::shmimMonitor<dmPokeXCorr, dev::dmPokeWFS<dmPokeXCorr>::wfsShmimT>;
 
     typedef dev::shmimMonitor<dmPokeXCorr, dev::dmPokeWFS<dmPokeXCorr>::wfsShmimT> shmimMonitorT;
 
+    friend class dev::shmimMonitor<dmPokeXCorr, dev::dmPokeWFS<dmPokeXCorr>::darkShmimT>;
+
     typedef dev::shmimMonitor<dmPokeXCorr, dev::dmPokeWFS<dmPokeXCorr>::darkShmimT> darkShmimMonitorT;
 
-    friend class dev::dmPokeWFS<dmPokeXCorr>;
+    friend class dev::shmimMonitor<dmPokeXCorr, zrespShmimT>;
 
-    
-
-    typedef dev::dmPokeWFS<dmPokeXCorr> dmPokeWFST;
+    typedef dev::shmimMonitor<dmPokeXCorr, zrespShmimT> zrespShmimMonitorT;
 
     friend class dev::telemeter<dmPokeXCorr>;
 
@@ -132,6 +147,26 @@ public:
         return *static_cast<darkShmimMonitorT *>(this);
     }
 
+    /** \name zrespShmimMonitorT inteface
+      * @{
+      */
+
+    int allocate(const zrespShmimT & dummy );
+
+    int processImage( void * curr_src,    
+                      const zrespShmimT &  dummy
+                    );
+
+    using dmPokeWFST::allocate;
+
+    using dmPokeWFST::processImage;
+
+    ///@}
+
+    /** \name dmPokeWFS Interface
+      * @{
+      */
+
     /// Run the sensor steps
     /** Coordinates the actions of poking and collecting images.
      * Upon completion this calls runSensor.  If \p firstRun == true, one time
@@ -149,6 +184,8 @@ public:
      * \returns \< 0 on an error
      */
     int analyzeSensor();
+
+    ///@} 
 
     /** \name INDI Interface
      * @{
@@ -176,7 +213,7 @@ void dmPokeXCorr::setupConfig()
 {
     DMPOKEWFS_SETUP_CONFIG(config);
 
-    config.add("wfscam.zRespMFile", "", "wfscam.zRespMFile", argType::Required, "wfscam", "zRespMFile", false, "string", "Path to the zonal response matrix.");
+    SHMIMMONITORT_SETUP_CONFIG( zrespShmimMonitorT, config ); 
 
     TELEMETER_SETUP_CONFIG(config);
 }
@@ -185,18 +222,11 @@ int dmPokeXCorr::loadConfigImpl(mx::app::appConfigurator &_config)
 {
     DMPOKEWFS_LOAD_CONFIG(_config);
 
-    _config(m_zRespMFile, "wfscam.zRespMFile");
-
-    int rv = 0;
-
-    if(m_zRespMFile == "")
-    {
-        return log<text_log, -1>("must supply path to zonal response file as wfscam.zRespMFile", logPrio::LOG_ERROR); 
-    }
+    SHMIMMONITORT_LOAD_CONFIG( zrespShmimMonitorT, _config);
 
     TELEMETER_LOAD_CONFIG(_config);
 
-    return rv;
+    return 0;
 }
 
 void dmPokeXCorr::loadConfig()
@@ -211,6 +241,8 @@ int dmPokeXCorr::appStartup()
 {
     DMPOKEWFS_APP_STARTUP;
 
+    SHMIMMONITORT_APP_STARTUP(zrespShmimMonitorT);
+
     TELEMETER_APP_STARTUP;
 
     //Gotta connect to the DM stream to find out its size
@@ -224,13 +256,65 @@ int dmPokeXCorr::appStartup()
         return log<software_error,-1>({__FILE__, __LINE__, std::string("exception opening DM: ") + e.what()});
     }
 
-    mx::fits::fitsFile<float> ff;
+    
+    state(stateCodes::READY);
 
-    mx::improc::eigenCube<float> zRespM;
-    if(ff.read(zRespM, m_zRespMFile) < 0)
+    return 0;
+}
+
+int dmPokeXCorr::appLogic()
+{
+    DMPOKEWFS_APP_LOGIC;
+
+    SHMIMMONITORT_APP_LOGIC( zrespShmimMonitorT );
+    SHMIMMONITORT_UPDATE_INDI( zrespShmimMonitorT );
+    SHMIMMONITORT_UPDATE_INDI( shmimMonitorT );
+    SHMIMMONITORT_UPDATE_INDI( darkShmimMonitorT );
+
+    TELEMETER_APP_LOGIC;
+
+    return 0;
+}
+
+int dmPokeXCorr::appShutdown()
+{
+    DMPOKEWFS_APP_SHUTDOWN;
+
+    SHMIMMONITORT_APP_SHUTDOWN( zrespShmimMonitorT );
+
+    TELEMETER_APP_SHUTDOWN;
+
+    return 0;
+}
+
+int dmPokeXCorr::allocate(const zrespShmimT & dummy )
+{
+    static_cast<void>(dummy);
+
+    m_refIm.create( m_configName + "_refIm", zrespShmimMonitorT::m_width, zrespShmimMonitorT::m_height);
+
+    return 0;
+}
+
+int dmPokeXCorr::processImage( void * curr_src,    
+                               const zrespShmimT &  dummy
+                             )
+{
+    static_cast<void>(dummy);
+
+    //Gotta connect to the DM stream to find out its size
+    //can't assume that we have connected anywhere else.
+    mx::improc::milkImage<float> mdm;
+    try
     {
-        return log<software_error, -1>({__FILE__, __LINE__, "error reading zRespMFile: " + m_zRespMFile});
+        mdm.open(m_dmChan);    
     }
+    catch(const std::exception& e) 
+    {
+        return log<software_error,-1>({__FILE__, __LINE__, std::string("exception opening DM: ") + e.what()});
+    }
+
+    mx::improc::eigenCube<float> zRespM ((float *) curr_src, zrespShmimMonitorT::m_width, zrespShmimMonitorT::m_height, zrespShmimMonitorT::m_depth);
 
     mx::improc::eigenImage<float> refIm;
     refIm.resize(zRespM.rows(), zRespM.cols());
@@ -243,30 +327,9 @@ int dmPokeXCorr::appStartup()
         refIm += zRespM.image(actno);
     }
 
-    m_refIm.create( m_configName + "_refIm", zRespM.rows(), zRespM.cols());
     m_refIm = refIm;
     
     m_xcorr.refIm(m_refIm());
-
-    state(stateCodes::READY);
-
-    return 0;
-}
-
-int dmPokeXCorr::appLogic()
-{
-    DMPOKEWFS_APP_LOGIC;
-
-    TELEMETER_APP_LOGIC;
-
-    return 0;
-}
-
-int dmPokeXCorr::appShutdown()
-{
-    DMPOKEWFS_APP_SHUTDOWN;
-
-    TELEMETER_APP_SHUTDOWN;
 
     return 0;
 }
@@ -292,10 +355,17 @@ int dmPokeXCorr::runSensor(bool firstRun)
 
 int dmPokeXCorr::analyzeSensor()
 {
+    if(m_xcorr.refIm().rows() != m_pokeImage().rows() || m_xcorr.refIm().rows() != m_pokeImage().cols() )
+    {
+        return 0;
+    }
+
     float xs, ys;
 
     m_xcorr(xs, ys, m_pokeImage());
 
+    std::cerr << "dmPokeXCorr::analyzeSensor: " << xs << " " << ys << "\n";
+    
     if(updateMeasurement(xs, ys) < 0)
     {
         return log<software_error,-1>({__FILE__, __LINE__, "error from dmPokeWFS::updateMeasurement"});
@@ -308,6 +378,8 @@ int dmPokeXCorr::checkRecordTimes()
 {
     return telemeterT::checkRecordTimes(telem_pokeloop());
 }
+
+
 
 } // namespace app
 } // namespace MagAOX

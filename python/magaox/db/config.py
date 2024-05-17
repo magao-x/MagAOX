@@ -43,9 +43,6 @@ class DbConfig:
             except Exception:
                 log.error(f"Tried to get password from {self.password_file}")
 
-        if password is None:
-            raise RuntimeError(f"Need password to connect to host={self.host} database={self.database} user={self.user}, "
-                               f"set $XTELEMDB_PASSWORD in the environment or write in {self.password_file}")
 
         try:
             conn = psycopg.connect(
@@ -57,8 +54,10 @@ class DbConfig:
             )
         except Exception as e:
             log.exception("Unable to connect to database.")
+            log.error(f"May need password to connect to host={self.host} database={self.database} user={self.user}, "
+                      f"set $XTELEMDB_PASSWORD in the environment or write in {self.password_file}")
             log.error(f"""
-Ensure:
+Also, ensure:
 1. PostgreSQL is running on {self.host}:{self.port} (`systemctl status postgresql` on {self.host})
 2. The database {repr(self.database)} exists
 3. The appropriate user accounts have been created

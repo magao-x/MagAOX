@@ -23,6 +23,8 @@ dependencies = [
   "tqdm",
   "universal_pathlib>=0.2.2,<0.3",
   "orjson>=3.9.15,<4",
+  "purepyindi2",
+  "astropy>=5.3.1",
 ]
 
 [project.scripts]

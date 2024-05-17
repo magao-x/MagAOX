@@ -14,6 +14,21 @@ else
     _REAL_SUDO=$(which sudo)
   fi
 fi
+
+# Function to refresh sudo timer
+refresh_sudo_timer() {
+    while true; do
+        $_REAL_SUDO -v
+        sleep 60
+    done
+}
+
+# Start refreshing sudo timer in the background
+if [[ $EUID != 0 ]]; then
+    $_REAL_SUDO -v
+    refresh_sudo_timer &
+fi
+
 # Defines $ID and $VERSION_ID so we can detect which distribution we're on
 source /etc/os-release
 # Get just the XX beginning of a XX.YY version string
@@ -109,6 +124,8 @@ if [[ $MAGAOX_ROLE == AOC ]]; then
     # Configure a tablespace to store postgres data on the /data array
     # and user accounts for the system to use
     bash -l "$DIR/steps/configure_postgresql.sh"
+    # Install and enable the service for grafana
+    bash -l "$DIR/steps/install_grafana.sh"
 fi
 # All MagAO-X computers may use the password to connect to the main db
 bash -l "$DIR/steps/configure_postgresql_pass.sh"
@@ -141,7 +158,7 @@ cd /opt/MagAOX/vendor
 sudo bash -l "$DIR/steps/install_rclone.sh" || exit 1
 bash -l "$DIR/steps/install_openblas.sh" || exit 1
 if [[ $MAGAOX_ROLE == RTC || $MAGAOX_ROLE == ICC || $MAGAOX_ROLE == AOC || $MAGAOX_ROLE == TIC ]]; then
-    bash -l "$DIR/steps/install_cuda.sh" || exit_with_error "CUDA install failed"
+    bash -l "$DIR/steps/install_cuda_rocky_9.sh" || exit_with_error "CUDA install failed"
 fi
 sudo bash -l "$DIR/steps/install_fftw.sh" || exit 1
 sudo bash -l "$DIR/steps/install_cfitsio.sh" || exit 1
@@ -245,6 +262,11 @@ bash -l "$DIR/steps/install_magpyx.sh" || exit_with_error "magpyx install failed
 bash -l "$DIR/steps/install_mxlib.sh" || exit_with_error "Failed to build and install mxlib"
 source /etc/profile.d/mxmakefile.sh
 
+if [[ $MAGAOX_ROLE == AOC || $MAGAOX_ROLE == vm ||  $MAGAOX_ROLE == workstation ]]; then
+    # sup web interface
+    bash -l "$DIR/steps/install_sup.sh"
+fi
+
 ## Clone sources to /opt/MagAOX/source/MagAOX
 if [[ $MAGAOX_ROLE == ci ]]; then
     ln -sfv ~/project/ /opt/MagAOX/source/MagAOX
@@ -274,12 +296,6 @@ else
         log_info "Running from clone located at $(dirname $DIR), nothing to do for cloning step"
     fi
 fi
-
-# TODO:jlong: uncomment when it's back in working order
-# if [[ $MAGAOX_ROLE == AOC || $MAGAOX_ROLE == vm ||  $MAGAOX_ROLE == workstation ]]; then
-#     # sup web interface
-#     bash -l "$DIR/steps/install_sup.sh"
-# fi
 
 
 if [[ $MAGAOX_ROLE == AOC || $MAGAOX_ROLE == TOC || $MAGAOX_ROLE == vm || $MAGAOX_ROLE == workstation || $MAGAOX_ROLE == ci ]]; then

@@ -26,10 +26,19 @@ if [[ $MAGAOX_ROLE == RTC || $MAGAOX_ROLE == ICC || $MAGAOX_ROLE == AOC ]]; then
             exportHosts="$host(ro,sync,all_squash) $exportHosts"
         fi
     done
-    if ! grep -q "$exportHosts" /etc/exports; then
-        echo "/data      $exportHosts" | sudo tee -a /etc/exports
+    exportDataLine="/data      $exportHosts"
+    if ! grep -q $exportDataLine /etc/exports; then
+        echo $exportDataLine | sudo tee -a /etc/exports
         sudo exportfs -a
         sudo systemctl reload $nfsServiceUnit
+    fi
+    if [[ $MAGAOX_ROLE == AOC ]]; then
+        exportBackupsLine="/mnt/backup      $exportHosts"
+        if ! grep -q $exportBackupsLine /etc/exports; then
+            echo $exportBackupsLine | sudo tee -a /etc/exports
+            sudo exportfs -a
+            sudo systemctl reload $nfsServiceUnit
+        fi
     fi
 
     for host in aoc rtc icc; do
@@ -39,6 +48,14 @@ if [[ $MAGAOX_ROLE == RTC || $MAGAOX_ROLE == ICC || $MAGAOX_ROLE == AOC ]]; then
             if ! grep -q $mountPath /etc/fstab; then
                 echo "$host:/data $mountPath	nfs	ro,noauto,x-systemd.automount,nofail,x-systemd.device-timeout=10s,soft,timeo=30	0 0" | sudo tee -a /etc/fstab
             fi
+
         fi
     done
+    if [[ $MAGAOX_ROLE != AOC ]]; then
+        mountPath=/srv/$host/backups
+        sudo mkdir -p $mountPath
+        if ! grep -q $mountPath /etc/fstab; then
+            echo "$host:/mnt/backups $mountPath	nfs	ro,noauto,x-systemd.automount,nofail,x-systemd.device-timeout=10s,soft,timeo=30	0 0" | sudo tee -a /etc/fstab
+        fi
+    fi
 fi

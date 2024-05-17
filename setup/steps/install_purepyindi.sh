@@ -11,5 +11,5 @@ clone_or_update_and_cd $orgname $reponame $parentdir
 git checkout $PUREPYINDI_COMMIT_ISH
 
 cd $parentdir/$reponame
-pip install -e .[all]
+sudo /opt/conda/bin/pip install -e .[all]
 python -c 'import purepyindi'

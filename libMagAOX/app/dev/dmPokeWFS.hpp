@@ -46,7 +46,7 @@ namespace dev
   * 
   * - Must be derived from  `dev::shmimMonitor<DERIVEDNAME, dev::dmPokeWFS<DERIVEDNAME>::darkShmimT>` (replace DERIVEDNAME with derivedT class name)
   * 
-  * - Must contain the following friend declarations (replace DERIVEDNAME with derivedT class name):
+  * - Must contain the following friend declalibMagAOX/app/indiMacros.hpprations (replace DERIVEDNAME with derivedT class name):
   *   \code
   *      friend class dev::shmimMonitor<DERIVEDNAME, dev::dmPokeWFS<DERIVEDNAME>::wfsShmimT>;
   *      friend class dev::shmimMonitor<DERIVEDNAME, dev::dmPokeWFS<DERIVEDNAME>::darkShmimT>;
@@ -73,6 +73,13 @@ namespace dev
   *       }
   *   \endcode
   * 
+  * - If derivedT has additional shmimMonitor parents, you will need to include these lines in the class 
+  *   declaration:
+  *   \code
+  *       using dmPokeWFST::allocate;
+  *       using dmPokeWFST::processImage;
+  *   \endcode
+  *
   * - Must provide the following interface:
   *   \code
   *       // Run the sensor steps 
@@ -171,6 +178,8 @@ protected:
 
     unsigned m_nPokeImages {5}; ///< The number of images to average for the poke images.  Default is 5.
 
+    unsigned m_nPokeAverage {10}; ///< The number of poke sequences to average.  Default is 10.
+
     std::string m_dmChan;
 
     std::vector<int> m_poke_x;
@@ -184,17 +193,18 @@ protected:
 
     std::mutex m_wfsImageMutex;
 
-    mx::improc::eigenImage<float> m_wfsDark;
-
     mx::improc::milkImage<float> m_rawImage;
     
     mx::improc::milkImage<float> m_pokeImage;
+    mx::improc::eigenImage<float> m_pokeLocal;
 
     float (*wfsPixget)(void *, size_t) {nullptr}; ///< Pointer to a function to extract the image data as float
 
     float m_wfsFps {-1}; ///< The WFS camera FPS
 
     mx::improc::eigenImage<float> m_darkImage; ///< The dark image
+
+    bool m_darkValid {false}; ///< Flag indicating if dark is valid based on its size.
 
     float (*darkPixget)(void *, size_t) {nullptr}; ///< Pointer to a function to extract the dark image data as float
 
@@ -344,9 +354,9 @@ protected:
 
 
     /// Apply a single DM poke pattern and record the results
-    /** This accumulates m_nPokeImages in m_pokeImage, so m_pokeImage
-      * should be zeroed set to writing before the first call to this (e.g. for a +1 poke), 
-      * but not zeroed before the second cal (e.g. for the -1 poke). You also need
+    /** This accumulates m_nPokeImages*m_nPokeAverage images in m_pokeLocal, so m_pokeLocal
+      * should be zeroed before the first call to this (e.g. for a +1 poke), 
+      * but not zeroed before the second call (e.g. for the -1 poke). You also need
       * to 0 the DM after finishing a poke pair.
       * See basicRunSensor() for how to use.
       * 
@@ -381,6 +391,9 @@ protected:
 
     pcf::IndiProperty m_indiP_nPokeImages;
     INDI_NEWCALLBACK_DECL(derivedT, m_indiP_nPokeImages);
+
+    pcf::IndiProperty m_indiP_nPokeAverage;
+    INDI_NEWCALLBACK_DECL(derivedT, m_indiP_nPokeAverage);
 
     pcf::IndiProperty m_indiP_wfsFps; ///< Property to get the FPS from the WFS camera
     INDI_SETCALLBACK_DECL(derivedT, m_indiP_wfsFps);
@@ -442,6 +455,8 @@ int dmPokeWFS<derivedT>::setupConfig(mx::app::appConfigurator & config)
     config.add("pokecen.pokeAmp", "", "pokecen.pokeAmp", argType::Required, "pokecen", "pokeAmp", false, "float", "The poke amplitude, in DM command units. Default is 0.");
     config.add("pokecen.dmSleep", "", "pokecen.dmSleep", argType::Required, "pokecen", "dmSleep", false, "float", "The time to sleep for the DM command to be applied, in microseconds. Default is 10000.");
     config.add("pokecen.nPokeImages", "", "pokecen.nPokeImages", argType::Required, "pokecen", "nPokeImages", false, "int", "The number of poke images to average.  Default 5.");
+    config.add("pokecen.nPokeAverage", "", "pokecen.nPokeAverage", argType::Required, "pokecen", "nPokeAverage", false, "int", "The number of poke sequences to average.  Default 10.");
+
 
     return 0;    
 }
@@ -491,6 +506,8 @@ int dmPokeWFS<derivedT>::loadConfig( mx::app::appConfigurator & config)
 
     config(m_nPokeImages, "pokecen.nPokeImages");
 
+    config(m_nPokeAverage, "pokecen.nPokeAverage");
+
     return 0;
 }
 
@@ -514,6 +531,10 @@ int dmPokeWFS<derivedT>::appStartup()
     CREATE_REG_INDI_NEW_NUMBERI_DERIVED(m_indiP_nPokeImages, "nPokeImages", 1, 1000, 1, "%d", "", "");
     m_indiP_nPokeImages["current"].setValue(m_nPokeImages);
     m_indiP_nPokeImages["target"].setValue(m_nPokeImages);
+
+    CREATE_REG_INDI_NEW_NUMBERI_DERIVED(m_indiP_nPokeAverage, "nPokeAverage", 1, 1000, 1, "%d", "", "");
+    m_indiP_nPokeAverage["current"].setValue(m_nPokeAverage);
+    m_indiP_nPokeAverage["target"].setValue(m_nPokeAverage);
 
     REG_INDI_SETPROP_DERIVED(m_indiP_wfsFps, m_wfsCamDevName, std::string("fps"));
     
@@ -603,6 +624,7 @@ int dmPokeWFS<derivedT>::appLogic()
     }
 
     derived().template updateIfChanged( m_indiP_nPokeImages, "current", m_nPokeImages);
+    derived().template updateIfChanged( m_indiP_nPokeAverage, "current", m_nPokeAverage);
     derived().template updateIfChanged( m_indiP_poke_amp, "current", m_poke_amp);
 
     return 0;
@@ -641,7 +663,6 @@ int dmPokeWFS<derivedT>::allocate( const wfsShmimT & dummy)
 {
     static_cast<void>(dummy); //be unused
   
-    //This is a call to the pokeSensor::allocate, unless we can have dev::pokeSensor : public shmimMonitor<pokeSensor>
     std::unique_lock<std::mutex> lock(m_wfsImageMutex);
 
     m_rawImage.create( derived().m_configName + "_raw", derived().shmimMonitor().width(), derived().shmimMonitor().height());
@@ -652,17 +673,26 @@ int dmPokeWFS<derivedT>::allocate( const wfsShmimT & dummy)
     {
         m_dmStream.open(m_dmChan);    
     }
-    catch(const std::exception& e) //this can check for invalid_argument and distinguish not existing
+    catch(const std::exception& e) 
     {
         return derivedT::template log<software_error,-1>({__FILE__, __LINE__, std::string("exception opening DM: ") + e.what()});
     }
     
     m_dmImage.resize(m_dmStream.rows(), m_dmStream.cols());
 
-    //end of call to pokeSensor::allocate
+    if(derived().darkShmimMonitor().width() == derived().shmimMonitor().width() && 
+         derived().darkShmimMonitor().height() == derived().shmimMonitor().height() )
+    {
+        m_darkValid = true;
+    }
+    else
+    {
+        m_darkValid = false;
+    }
 
     m_pokeImage.create(derived().m_configName + "_poke", derived().shmimMonitor().width(), derived().shmimMonitor().height());
-    
+    m_pokeLocal.resize(derived().shmimMonitor().width(), derived().shmimMonitor().height());
+
     return 0;
 }
 
@@ -673,13 +703,27 @@ int dmPokeWFS<derivedT>::processImage( void * curr_src,
 {
     static_cast<void>(dummy); //be unused
 
+    std::unique_lock<std::mutex> lock(m_wfsImageMutex);
+
     float * data = m_rawImage().data();
+    float * darkData = m_darkImage.data();
 
     //Copy the data out as float no matter what type it is
     uint64_t Npix = derived().shmimMonitor().width()*derived().shmimMonitor().height();
-    for(unsigned nn=0; nn < Npix; ++nn)
+
+    if(m_darkValid)
     {
-        data[nn] = wfsPixget(curr_src, nn);
+        for(unsigned nn=0; nn < Npix; ++nn)
+        {
+            data[nn] = wfsPixget(curr_src, nn) - darkData[nn];
+        }
+    }
+    else
+    {
+        for(unsigned nn=0; nn < Npix; ++nn)
+        {
+            data[nn] = wfsPixget(curr_src, nn);
+        }
     }
 
     if(sem_post(&m_imageSemaphore) < 0)
@@ -697,14 +741,23 @@ int dmPokeWFS<derivedT>::allocate( const darkShmimT & dummy)
 {
     static_cast<void>(dummy); //be unused
   
-    //This is a call to the pokeSensor::allocate, unless we can have dev::pokeSensor : public shmimMonitor<pokeSensor>
     std::unique_lock<std::mutex> lock(m_wfsImageMutex);
 
-    m_wfsDark.resize(derived().darkShmimMonitor().width(), derived().darkShmimMonitor().height());
+    m_darkImage.resize(derived().darkShmimMonitor().width(), derived().darkShmimMonitor().height());
 
     darkPixget = getPixPointer<float>(derived().darkShmimMonitor().dataType());
 
-    //end of call to pokeSensor::allocate
+    if(derived().darkShmimMonitor().width() == derived().shmimMonitor().width() && 
+         derived().darkShmimMonitor().height() == derived().shmimMonitor().height() )
+    {
+        std::cerr << "dark is valid " << derived().darkShmimMonitor().width() << " " << derived().shmimMonitor().width() << " ";
+        std::cerr << derived().darkShmimMonitor().height() << " " << derived().shmimMonitor().height() << "\n";
+        m_darkValid = true;
+    }
+    else
+    {
+        m_darkValid = false;
+    }
     
     return 0;
 }
@@ -715,6 +768,8 @@ int dmPokeWFS<derivedT>::processImage( void * curr_src,
                                      )
 {
     static_cast<void>(dummy); //be unused
+
+    std::unique_lock<std::mutex> lock(m_wfsImageMutex);
 
     float * darkData = m_darkImage.data();
 
@@ -861,14 +916,12 @@ int dmPokeWFS<derivedT>::basicTimedPoke(float pokeSign)
     uint32_t n = 0;
     while(n < m_nPokeImages && !(m_stopMeasurement || derived().m_shutdown))
     {    
-        /* POSITIVE POKE */
-
         //** Now we record the poke image **//
         XWC_SEM_WAIT_TS_DERIVED(ts, m_imageSemWait_sec, m_imageSemWait_nsec);
         XWC_SEM_TIMEDWAIT_LOOP_DERIVED( m_imageSemaphore, ts )
 
         //If here, we got an image.  m_rawImage will have been updated
-        m_pokeImage() +=  sign*m_rawImage();
+        m_pokeLocal +=  sign*m_rawImage();
 
         ++n;
     }
@@ -893,48 +946,60 @@ int dmPokeWFS<derivedT>::basicRunSensor()
         return derivedT::template log<software_error,-1>({__FILE__, __LINE__, "poke image is not allocated"});
     }
 
-    //We accumulate directly to the  poke image stream   
+    m_pokeLocal.setZero();
+
+    for(unsigned nseq = 0; nseq < m_nPokeAverage; ++nseq)
+    {
+
+        //************** positive POKE **********************/
+
+        rv = basicTimedPoke(+1);
+
+        if(rv < 0)
+        {
+            derivedT::template log<software_error>({__FILE__, __LINE__});
+            return rv;
+        }
+        else if (rv > 0) // shutdown
+        {
+            return rv;
+        }
+
+        if(m_stopMeasurement || derived().m_shutdown) 
+        {
+            break;
+        }
+
+        //************** NEGATIVE POKE **********************/
+
+        rv = basicTimedPoke(-1);
+
+        if(rv < 0)
+        {
+            derivedT::template log<software_error>({__FILE__, __LINE__});
+            return rv;
+        }
+        else if (rv > 0) // shutdown
+        {
+            return rv;
+        }
+    
+        if(m_stopMeasurement || derived().m_shutdown) 
+        {
+            break;
+        }
+    }
+
     try
     {
-        m_pokeImage.setWrite();
-        m_pokeImage().setZero();
+        m_pokeImage = m_pokeLocal/(2.0*m_nPokeImages*m_nPokeAverage);
     }
     catch(const std::exception& e)
     {
         return derivedT::template log<software_error,-1>({__FILE__, __LINE__, e.what()});
     }
 
-    //************** positive POKE **********************/
-
-    rv = basicTimedPoke(+1);
-
-    if(rv < 0)
-    {
-        derivedT::template log<software_error>({__FILE__, __LINE__});
-        return rv;
-    }
-    else if (rv > 0) // shutdown
-    {
-        return rv;
-    }
-
-    //************** NEGATIVE POKE **********************/
-
-    rv = basicTimedPoke(-1);
-
-    if(rv < 0)
-    {
-        derivedT::template log<software_error>({__FILE__, __LINE__});
-        return rv;
-    }
-    else if (rv > 0) // shutdown
-    {
-        return rv;
-    }
-    
-
-    m_pokeImage() = m_pokeImage()/(2.0*m_nPokeImages);
-    m_pokeImage.post();
+   
 
     m_dmImage.setZero();
     m_dmStream = m_dmImage;
@@ -968,6 +1033,23 @@ INDI_NEWCALLBACK_DEFN( dmPokeWFS<derivedT>, m_indiP_nPokeImages )(const pcf::Ind
     }
 
     m_nPokeImages = target;
+
+    return 0;
+}
+
+template<class derivedT>
+INDI_NEWCALLBACK_DEFN( dmPokeWFS<derivedT>, m_indiP_nPokeAverage )(const pcf::IndiProperty &ipRecv)
+{
+    INDI_VALIDATE_CALLBACK_PROPS_DERIVED(m_indiP_nPokeAverage, ipRecv)
+   
+    float target;
+
+    if( derived().template indiTargetUpdate(m_indiP_nPokeAverage, target, ipRecv, false) < 0)
+    {
+        return derivedT::template log<software_error,-1>({__FILE__, __LINE__});
+    }
+
+    m_nPokeAverage = target;
 
     return 0;
 }

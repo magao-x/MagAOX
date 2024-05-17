@@ -13,6 +13,7 @@ apps_common = \
 	dmMode \
 	shmimIntegrator \
 	timeSeriesSimulator \
+	closedLoopIndi \
 	dbIngest
 
 apps_rtcicc = \
@@ -31,7 +32,8 @@ apps_rtcicc = \
         streamCircBuff \
 	zaberCtrl \
 	zaberLowLevel \
-	picoMotorCtrl
+	picoMotorCtrl \
+	psfFit
 
 apps_rtc = \
 	alpaoCtrl \
@@ -57,7 +59,7 @@ apps_icc = \
 	xt1121Ctrl \
 	xt1121DCDU \
 	koolanceCtrl \
-	#coralign 
+	corAlign 
 
 apps_aoc = \
 	trippLitePDU \
@@ -177,84 +179,84 @@ clean: lib_clean apps_clean guis_clean utils_clean tests_clean
 all_clean: indi_clean libs_clean flatlogs_clean lib_clean apps_clean guis_clean utils_clean doc_clean tests_clean
 
 flatlogs_all:
-	cd flatlogs/src/; ${MAKE} install
+	cd flatlogs/src/ && ${MAKE} install
 
 flatlogs_clean:
-	cd flatlogs/src/; ${MAKE} clean
+	cd flatlogs/src/ && ${MAKE} clean
 	rm -rf flatlogs/bin
 
 indi_all:
-	cd INDI; ${MAKE} all
+	cd INDI && ${MAKE} all
 
 indi_install:
-	cd INDI; ${MAKE} install
+	cd INDI && ${MAKE} install
 
 indi_clean:
-	cd INDI; ${MAKE} clean
+	cd INDI && ${MAKE} clean
 
 libs_all:
 	for lib in ${libs_to_build}; do \
-		(cd libs/$$lib; ${MAKE} )|| exit 1; \
+		(cd libs/$$lib && ${MAKE} )|| exit 1; \
 	done
 
 libs_install:
 	for lib in ${libs_to_build}; do \
-		(cd libs/$$lib; ${MAKE}  install) || exit 1; \
+		(cd libs/$$lib && ${MAKE}  install) || exit 1; \
 	done
 	sudo bash -c "echo $(LIB_PATH) > /etc/ld.so.conf.d/magaox.conf"
 	sudo ldconfig
 
 libs_clean:
 	for lib in ${libs_to_build}; do \
-		(cd libs/$$lib; ${MAKE}  clean) || exit 1; \
+		(cd libs/$$lib && ${MAKE}  clean) || exit 1; \
 	done
 
 lib_clean:
-	cd libMagAOX; ${MAKE} clean
+	cd libMagAOX && ${MAKE} clean
 
 apps_all: libs_install flatlogs_all
 	for app in ${apps_to_build}; do \
-		(cd apps/$$app; ${MAKE} )|| exit 1; \
+		(cd apps/$$app && ${MAKE} )|| exit 1; \
 	done
 
 apps_install: flatlogs_all
 	for app in ${apps_to_build}; do \
-		(cd apps/$$app; ${MAKE}  install) || exit 1; \
+		(cd apps/$$app && ${MAKE}  install) || exit 1; \
 	done
 
 apps_clean:
 	for app in ${apps_to_build}; do \
-		(cd apps/$$app; ${MAKE}  clean) || exit 1; \
+		(cd apps/$$app && ${MAKE}  clean) || exit 1; \
 	done
 
 guis_all: libs_install rtimv_plugins_all
 	for gui in ${guis_to_build}; do \
-		(cd gui/apps/$$gui; ${MAKE} )|| exit 1; \
+		(cd gui/apps/$$gui && ${MAKE} )|| exit 1; \
 	done
 
 guis_install: rtimv_plugins_install
 	for gui in ${guis_to_build}; do \
-		(cd gui/apps/$$gui; ${MAKE} install) || exit 1; \
+		(cd gui/apps/$$gui && ${MAKE} install) || exit 1; \
 	done
 
 guis_clean: rtimv_plugins_clean 
 	for gui in ${all_guis}; do \
-		(cd gui/apps/$$gui; ${MAKE} clean) || exit 1; \
+		(cd gui/apps/$$gui && ${MAKE} clean) || exit 1; \
 	done
 
 rtimv_plugins_all: libs_install
 	for plg in ${rtimv_plugins_to_build}; do \
-		(cd gui/rtimv/plugins/$$plg; ${MAKE} )|| exit 1; \
+		(cd gui/rtimv/plugins/$$plg && ${MAKE} )|| exit 1; \
 	done
 
 rtimv_plugins_install:
 	for plg in ${rtimv_plugins_to_build}; do \
-		(cd gui/rtimv/plugins/$$plg; ${MAKE} install) || exit 1; \
+		(cd gui/rtimv/plugins/$$plg && ${MAKE} install) || exit 1; \
 	done
 
 rtimv_plugins_clean:
 	for plg in ${rtimv_plugins_to_build}; do \
-		(cd gui/rtimv/plugins/$$plg; ${MAKE} clean) || exit 1; \
+		(cd gui/rtimv/plugins/$$plg && ${MAKE} clean) || exit 1; \
 	done
 
 scripts_install:
@@ -279,24 +281,24 @@ rtscripts_install:
 
 utils_all: flatlogs_all indi_all
 		for app in ${utils_to_build}; do \
-			(cd utils/$$app; ${MAKE}) || exit 1; \
+			(cd utils/$$app && ${MAKE}) || exit 1; \
 		done
 
 utils_install: flatlogs_all utils_all
 		for app in ${utils_to_build}; do \
-			(cd utils/$$app; ${MAKE} install) || exit 1; \
+			(cd utils/$$app && ${MAKE} install) || exit 1; \
 		done
 
 utils_clean:
 		for app in ${utils_to_build}; do \
-			(cd utils/$$app; ${MAKE} clean) || exit 1; \
+			(cd utils/$$app && ${MAKE} clean) || exit 1; \
 		done
 
 test: tests_clean
-	cd tests; ${MAKE} test || exit 1;
+	cd tests && ${MAKE} test || exit 1;
 
 tests_clean:
-	cd tests; ${MAKE} clean || exit 1;
+	cd tests && ${MAKE} clean || exit 1;
 	
 
 .PHONY: python_install

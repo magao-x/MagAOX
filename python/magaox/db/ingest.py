@@ -2,13 +2,14 @@ import datetime
 import logging
 import os
 import json
+import orjson
 
 import psycopg
 from psycopg import sql
 from tqdm import tqdm
 
 from .records import Telem, FileOrigin, FileReplica, FileIngestTime
-from ..utils import creation_time_from_filename
+from ..utils import creation_time_from_filename, parse_iso_datetime_as_utc
 
 log = logging.getLogger(__name__)
 
@@ -18,7 +19,7 @@ def batch_telem(cur: psycopg.Cursor, records: list[Telem]):
 INSERT INTO telem (ts, device, msg, ec)
 VALUES (%s, %s, %s::JSONB, %s)
 ON CONFLICT (device, ts) DO NOTHING;
-''', [(rec.ts, rec.device, json.dumps(rec.msg), rec.ec) for rec in records])
+''', [(rec.ts, rec.device, orjson.dumps(rec.msg).decode('utf8'), rec.ec) for rec in records])
     cur.execute("COMMIT")
 
 def batch_file_origins(cur: psycopg.Cursor, records: list[FileOrigin]):
@@ -128,3 +129,13 @@ def record_file_ingest_time(cur: psycopg.Cursor, rec : FileIngestTime):
         (rec.ts, rec.device, rec.ingested_at, rec.origin_host, rec.origin_path)
     )
     cur.execute("COMMIT")
+
+def line_to_record(name, line):
+    assert line[0] == ord("{"), f"malformed line {line[0]=}"
+    payload = orjson.loads(line)
+    return Telem(
+        name,
+        parse_iso_datetime_as_utc(payload["ts"]),
+        payload["ec"],
+        payload["msg"],
+    )
