@@ -20,12 +20,12 @@ local   all             all                                     peer
 local   replication     all                                     peer
 host    replication     all             127.0.0.1/32            scram-sha-256
 host    replication     all             ::1/128                 scram-sha-256
-host    all             all             192.168.0.0/16            scram-sha-256
-
-host    all             all             ::1/128            scram-sha-256
+host    all             all             192.168.0.0/16          scram-sha-256
+host    all             all             ::1/128                 scram-sha-256
 host    all             all             127.0.0.1/32            scram-sha-256
 EOF
 fi
+sed -i "s/^#*listen_addresses.*/listen_addresses = '*'/" /var/lib/pgsql/data/postgresql.conf
 
 sudo systemctl enable postgresql.service || exit_with_error "Could not create enable postgresql service"
 sudo systemctl restart postgresql.service || exit_with_error "Could not start postgresql service"
@@ -69,7 +69,7 @@ EOF
     sudo restorecon -R ${dataArrayPath} || exit_with_error "Could not restorecon the SELinux context on ${dataArrayPath}"
 
     sudo -u postgres psql -c "CREATE TABLESPACE data_array LOCATION '$dataArrayPath'" || true
-    sudo -u postgres psql -c "CREATE DATABASE xtelem TABLESPACE = data_array" || true
+    sudo -u postgres psql -c "CREATE DATABASE xtelem WITH OWNER = xtelem TABLESPACE = data_array" || true
 else
     sudo -u postgres psql -c "CREATE DATABASE xtelem" || true
 fi
