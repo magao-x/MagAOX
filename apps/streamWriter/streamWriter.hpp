@@ -974,8 +974,6 @@ void streamWriter::fgThreadExec()
 
                 if (atype != m_dataType || snx != m_width || sny != m_height || snz != length)
                 {
-                    //**** close out here as if STOP_WRITING
-
                     break; // exit the nearest while loop and get the new image setup.
                 }
 
@@ -994,6 +992,8 @@ void streamWriter::fgThreadExec()
                     new_cnt0 = image.md[0].cnt0;
                 }
 
+                std::cerr << "new_cnt0: " << new_cnt0 << "\n";
+                
                 ///\todo cleanup skip frame handling.
                 if (new_cnt0 == last_cnt0) //<- this probably isn't useful really
                 {
@@ -1087,7 +1087,7 @@ void streamWriter::fgThreadExec()
                             {
                                 m_nextChunkStart += m_writeChunkLength;
                             }
-                            
+
                             m_currChunkStartTime = m_currImageTime;
 
                             restartWriting = false;
