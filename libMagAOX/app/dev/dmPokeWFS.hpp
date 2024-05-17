@@ -4,8 +4,6 @@
   * \ingroup dmPokeWFS_files
   */
 
-
-
 #ifndef dmPokeWFS_hpp
 #define dmPokeWFS_hpp
 
@@ -17,7 +15,7 @@ using namespace mx::improc;
 #include "../../ImageStreamIO/pixaccess.hpp"
 
 /** \defgroup dmPokeWFS
-  * \brief The MagAO-X application to register DM actuators to pupil pixels
+  * \brief The MagAO-X device to coordinate poking a deformable mirror's actuators and synchronize reads of a camera image.
   *
   * <a href="../handbook/operating/software/apps/dmPokeWFS.html">Application Documentation</a>
   *
@@ -39,9 +37,10 @@ namespace dev
 
 
 
-/// A base class to coordinate poking a deformable mirror's actuators and synchronized reads of a camera image.
+/// A base class to coordinate poking a deformable mirror's actuators and synchronizedreads of a camera image.
 /** CRTP class `derivedT` has the following requirements:
-  * - Must be a MagAOXApp<true>
+  * 
+  * - Must be derived from MagAOXApp<true>
   * 
   * - Must be derived from `dev::shmimMonitor<DERIVEDNAME, dev::dmPokeWFS<DERIVEDNAME>::wfsShmimT>` (replace DERIVEDNAME with derivedT class name)
   * 
@@ -73,6 +72,7 @@ namespace dev
   *           return *static_cast<darkShmimMonitorT *>(this);
   *       }
   *   \endcode
+  * 
   * - Must provide the following interface:
   *   \code
   *       // Run the sensor steps 
