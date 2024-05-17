@@ -67,7 +67,7 @@ protected:
 
     size_t m_writeChunkLength{512}; ///< The number of frames to write at a time
 
-    double m_maxChunkTime{60}; ///< The maximum time before writing regardless of number of frames.
+    double m_maxChunkTime{10}; ///< The maximum time before writing regardless of number of frames.
 
     std::string m_shmimName; ///< The name of the shared memory buffer.
 
@@ -108,7 +108,6 @@ protected:
     uint64_t m_currSaveStart{0}; ///< The circular buffer position at which to start saving.
     uint64_t m_currSaveStop{0};  ///< The circular buffer position at which to stop saving.
 
-    uint64_t m_currSaveStartFrameNo{0}; ///< The frame number of the image at which saving started (for logging)
     uint64_t m_currSaveStopFrameNo{0};  ///< The frame number of the image at which saving stopped (for logging)
 
     /// The xrif compression handle for image data
@@ -950,7 +949,7 @@ void streamWriter::fgThreadExec()
             timespec ts;
             XWC_SEM_WAIT_TS_RETVOID(ts, m_semWaitSec, m_semWaitNSec);
 
-            if (sem_timedwait(sem, &ts) == 0)
+            if(sem_timedwait(sem, &ts) == 0)
             {
                 if (image.md[0].naxis > 2)
                 {
@@ -1070,113 +1069,174 @@ void streamWriter::fgThreadExec()
 
                 switch (m_writing)
                 {
-                case START_WRITING:
-                    m_currChunkStart = m_currImage;
-                    m_nextChunkStart = (m_currImage / m_writeChunkLength) * m_writeChunkLength;
-                    m_writing = WRITING;
-                    m_currSaveStartFrameNo = new_cnt0;
+                    case START_WRITING:
+                        if(!restartWriting)
+                        {
+                            m_currChunkStart = m_currImage;
+                            m_nextChunkStart = (m_currImage / m_writeChunkLength) * m_writeChunkLength;
+                            m_currChunkStartTime = m_currImageTime;
+        
+                            log<saving_start>({1, new_cnt0});
+                        }
+                        else
+                        {
+                            m_currChunkStart = m_currImage;
+                            m_nextChunkStart = (m_currImage / m_writeChunkLength) * m_writeChunkLength;
 
-                    m_currChunkStartTime = m_currImageTime;
+                            if(m_currImage - m_nextChunkStart == m_writeChunkLength - 1)
+                            {
+                                m_nextChunkStart += m_writeChunkLength;
+                            }
+                            
+                            m_currChunkStartTime = m_currImageTime;
 
-                    if (!restartWriting)
-                    {
-                        log<saving_start>({1, m_currSaveStartFrameNo});
-                    }
-                    restartWriting = false;
+                            restartWriting = false;
+                        }
 
-                    // fall through
-                case WRITING:
-                    if ((m_currImage - m_nextChunkStart == m_writeChunkLength - 1) || (m_currImageTime - m_currChunkStartTime > m_maxChunkTime))
-                    {
+                        m_writing = WRITING;
+
+                        // fall through
+                    case WRITING:
+                        if(m_currImage - m_nextChunkStart == m_writeChunkLength - 1)
+                        {
+                            m_currSaveStart = m_currChunkStart;
+                            m_currSaveStop = m_nextChunkStart + m_writeChunkLength;
+                            m_currSaveStopFrameNo = new_cnt0;
+    
+                            std::cerr << __FILE__ << " " << __LINE__ << " WRITING " << m_currImage << " " 
+                                                   << m_nextChunkStart << " " 
+                                                    << (m_currImage - m_nextChunkStart == m_writeChunkLength - 1) << " "
+                                                     << (m_currImageTime - m_currChunkStartTime > m_maxChunkTime) << " "
+                                                      << new_cnt0 << "\n";
+
+                            
+                            // Now tell the writer to get going
+                            if (sem_post(&m_swSemaphore) < 0)
+                            {
+                                log<software_critical>({__FILE__, __LINE__, errno, 0, "Error posting to semaphore"});
+                                return;
+                            }
+    
+                            m_nextChunkStart = ((m_currImage + 1) / m_writeChunkLength) * m_writeChunkLength;
+                            if (m_nextChunkStart >= m_circBuffLength)
+                            {
+                                m_nextChunkStart = 0;
+                            }
+    
+                            m_currChunkStart = m_nextChunkStart;
+                            m_currChunkStartTime = m_currImageTime;
+                        }
+                        else if(m_currImageTime - m_currChunkStartTime > m_maxChunkTime)
+                        {
+                            m_currSaveStart = m_currChunkStart;
+                            m_currSaveStop = m_currImage + 1;
+                            m_currSaveStopFrameNo = new_cnt0;
+    
+                            std::cerr << __FILE__ << " " << __LINE__ << " IMAGE TIME WRITING " << m_currImage << " " 
+                                                   << m_nextChunkStart << " " 
+                                                    << (m_currImage - m_nextChunkStart == m_writeChunkLength - 1) << " "
+                                                     << (m_currImageTime - m_currChunkStartTime > m_maxChunkTime) << " "
+                                                      << new_cnt0 << "\n";
+
+                            // Now tell the writer to get going
+                            if (sem_post(&m_swSemaphore) < 0)
+                            {
+                                log<software_critical>({__FILE__, __LINE__, errno, 0, "Error posting to semaphore"});
+                                return;
+                            }
+    
+                            m_nextChunkStart = ((m_currImage + 1) / m_writeChunkLength) * m_writeChunkLength;
+                            if (m_nextChunkStart >= m_circBuffLength)
+                            {
+                                m_nextChunkStart = 0;
+                            }
+    
+                            m_currChunkStart = m_nextChunkStart;
+                            m_currChunkStartTime = m_currImageTime;
+                        }
+                        break;
+    
+                    case STOP_WRITING:
                         m_currSaveStart = m_currChunkStart;
-                        m_currSaveStop = m_nextChunkStart + m_writeChunkLength;
+                        m_currSaveStop = m_currImage+1;
                         m_currSaveStopFrameNo = new_cnt0;
-
-                        std::cerr << __FILE__ << " " << __LINE__ << " WRITING " << new_cnt0 << "\n";
+    
+                        std::cerr << __FILE__ << " " << __LINE__ << " STOP_WRITING\n";
                         // Now tell the writer to get going
                         if (sem_post(&m_swSemaphore) < 0)
                         {
                             log<software_critical>({__FILE__, __LINE__, errno, 0, "Error posting to semaphore"});
                             return;
                         }
-
-                        m_nextChunkStart = ((m_currImage + 1) / m_writeChunkLength) * m_writeChunkLength;
-                        if (m_nextChunkStart >= m_circBuffLength)
-                        {
-                            m_nextChunkStart = 0;
-                        }
-
-                        m_currChunkStart = m_nextChunkStart;
-                        m_currChunkStartTime = m_currImageTime;
-                    }
-                    break;
-
-                case STOP_WRITING:
-                    m_currSaveStart = m_currChunkStart;
-                    m_currSaveStop = m_currImage + 1;
-                    m_currSaveStopFrameNo = new_cnt0;
-
-                    std::cerr << __FILE__ << " " << __LINE__ << " STOP_WRITING\n";
-                    // Now tell the writer to get going
-                    if (sem_post(&m_swSemaphore) < 0)
-                    {
-                        log<software_critical>({__FILE__, __LINE__, errno, 0, "Error posting to semaphore"});
-                        return;
-                    }
-                    restartWriting = false;
-                    break;
-
-                default:
-                    break;
+                        restartWriting = false;
+                        break;
+    
+                    default:
+                        break;
                 }
 
                 ++m_currImage;
                 if (m_currImage >= m_circBuffLength)
+                {
                     m_currImage = 0;
+                }
             }
             else
             {
                 // If semaphore times-out or errors, we first cleanup any writing that needs to be done
+                //we can also get here if a signal interrupts the sem wait which is triggered by INDI callbacks
                 switch (m_writing)
                 {
-                case WRITING:
-                    // Here, if there is at least 1 image, we check for delta-time > m_maxChunkTime
-                    //  then write
-                    if ((m_currImage - m_nextChunkStart > 0) && (mx::sys::get_curr_time() - m_currChunkStartTime > m_maxChunkTime))
-                    {
-                        m_currSaveStart = m_currChunkStart;
-                        m_currSaveStop = m_currImage + 1;
-                        m_currSaveStopFrameNo = last_cnt0;
+                    case WRITING:
+                        // Here, if there is at least 1 image, we check for delta-time > m_maxChunkTime
+                        //  then write
+                        if ((m_currImage - m_nextChunkStart > 0) && (mx::sys::get_curr_time() - m_currChunkStartTime > m_maxChunkTime))
+                        {
+                            m_currSaveStart = m_currChunkStart;
+                            m_currSaveStop = m_currImage;
+                            m_currSaveStopFrameNo = last_cnt0;
+    
+                            std::cerr << __FILE__ << " " << __LINE__ << " TIMEOUT WRITING " << " " 
+                                << m_currImage << " " << m_nextChunkStart << " " <<(m_currImage - m_nextChunkStart)  << " "
+                                 << last_cnt0 << "\n";
+                            // Now tell the writer to get going
+                            if (sem_post(&m_swSemaphore) < 0)
+                            {
+                                log<software_critical>({__FILE__, __LINE__, errno, 0, "Error posting to semaphore"});
+                                return;
+                            }
+    
+                            m_writing = START_WRITING;
+                            restartWriting = true;
 
-                        std::cerr << __FILE__ << " " << __LINE__ << " TIMEOUT WRITING " << last_cnt0 << "\n";
+                            
+
+                            /*m_currChunkStart = m_currImage;
+                            m_nextChunkStart = ((m_currImage + 1) / m_writeChunkLength) * m_writeChunkLength;
+                            if (m_nextChunkStart >= m_circBuffLength)
+                            {
+                                m_nextChunkStart = 0;
+                            }
+                            m_currChunkStartTime = m_currImageTime;*/
+                        }
+                        break;
+                    case STOP_WRITING:
+                        // If we timed-out while STOP_WRITING is set, we trigger a write.
+                        m_currSaveStart = m_currChunkStart;
+                        m_currSaveStop = m_currImage;
+                        m_currSaveStopFrameNo = last_cnt0;
+    
+                        std::cerr << __FILE__ << " " << __LINE__ << " TIMEOUT STOP_WRITING\n";
                         // Now tell the writer to get going
                         if (sem_post(&m_swSemaphore) < 0)
                         {
                             log<software_critical>({__FILE__, __LINE__, errno, 0, "Error posting to semaphore"});
                             return;
                         }
-
-                        m_writing = START_WRITING;
-                        restartWriting = true;
-                    }
-                    break;
-                case STOP_WRITING:
-                    // If we timed-out while STOP_WRITING is set, we trigger a write.
-                    m_currSaveStart = m_currChunkStart;
-                    m_currSaveStop = m_currImage + 1;
-                    m_currSaveStopFrameNo = last_cnt0;
-
-                    std::cerr << __FILE__ << " " << __LINE__ << " TIMEOUT STOP_WRITING\n";
-                    // Now tell the writer to get going
-                    if (sem_post(&m_swSemaphore) < 0)
-                    {
-                        log<software_critical>({__FILE__, __LINE__, errno, 0, "Error posting to semaphore"});
-                        return;
-                    }
-                    restartWriting = false;
-                    break;
-                default:
-                    break;
+                        restartWriting = false;
+                        break;
+                    default:
+                        break;
                 }
 
                 if (image.md[0].sem <= 0)
@@ -1219,12 +1279,46 @@ void streamWriter::fgThreadExec()
 
                 if (buffer.st_ino != inode)
                 {
+                    std::cerr << "Restarting due to inode . . . \n";
                     m_restart = true;
                 }
             }
         }
 
         ///\todo might still be writing here, so must check
+        // If semaphore times-out or errors, we first cleanup any writing that needs to be done
+        if(m_writing == WRITING || m_writing == STOP_WRITING)
+        {
+            // Here, if there is at least 1 image, then write
+            if ((m_currImage - m_nextChunkStart > 0))
+            {
+                m_currSaveStart = m_currChunkStart;
+                m_currSaveStop = m_currImage;
+                m_currSaveStopFrameNo = last_cnt0;
+    
+                m_writing = STOP_WRITING;
+
+                std::cerr << __FILE__ << " " << __LINE__ << " WRITING ON RESTART " << last_cnt0 << "\n";
+                // Now tell the writer to get going
+                if (sem_post(&m_swSemaphore) < 0)
+                {
+                    log<software_critical>({__FILE__, __LINE__, errno, 0, "Error posting to semaphore"});
+                    return;
+                }
+             }
+             else
+             {
+                m_writing = NOT_WRITING;
+             }
+
+             
+             while(m_writing != NOT_WRITING)
+             {
+                std::cerr << __FILE__ << " " << __LINE__ << " WAITING TO FINISH WRITING " << last_cnt0 << "\n";
+                sleep(1);
+             }
+        }
+
         if (m_rawImageCircBuff)
         {
             free(m_rawImageCircBuff);
@@ -1380,15 +1474,15 @@ int streamWriter::doEncode()
 
     timespec tw0, tw1, tw2;
 
-    // Record these to prevent a change in other thread
-    uint64_t saveStart = m_currSaveStart;
-    uint64_t saveCount = m_currSaveStop - saveStart;
-    uint64_t saveStopFrameNo = m_currSaveStopFrameNo;
-
     clock_gettime(CLOCK_REALTIME, &tw0);
 
-    size_t nFrames = saveCount;
+    // Record these to prevent a change in other thread
+    uint64_t saveStart = m_currSaveStart;
+    uint64_t saveStopFrameNo = m_currSaveStopFrameNo;
+    size_t nFrames = m_currSaveStop - saveStart;
     size_t nBytes = m_width * m_height * m_typeSize;
+
+    std::cerr << "nFrames: " << nFrames << "\n";
 
     // Configure xrif and copy image data -- this does no allocations
     int rv = xrif_set_size(m_xrif, m_width, m_height, 1, nFrames, m_dataType);
@@ -1551,7 +1645,9 @@ INDI_NEWCALLBACK_DEFN(streamWriter, m_indiP_writing)
     INDI_VALIDATE_CALLBACK_PROPS(m_indiP_writing, ipRecv);
 
     if (!ipRecv.find("toggle"))
+    {
         return 0;
+    }
 
     if (ipRecv["toggle"].getSwitchState() == pcf::IndiElement::Off && (m_writing == WRITING || m_writing == START_WRITING))
     {
@@ -1562,6 +1658,7 @@ INDI_NEWCALLBACK_DEFN(streamWriter, m_indiP_writing)
     {
         m_writing = START_WRITING;
     }
+
     return 0;
 }
 
