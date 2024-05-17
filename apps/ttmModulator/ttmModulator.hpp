@@ -26,8 +26,8 @@ protected:
      * @{
      */
 
-   double m_maxFreq {2000.0}; ///< The maximum modulation frequency settable by this program
-   double m_maxVolt {8}; ///< The maximum modulation voltage settable by this program
+   double m_maxFreq {3000.0}; ///< The maximum modulation frequency settable by this program
+   double m_maxVolt {1.2801}; ///< The maximum modulation voltage settable by this program
 
    double m_setVoltage_1 {5.0}; ///< the set position voltage of Ch. 1.
    double m_setVoltage_2 {5.0}; ///< the set position voltage of Ch. 2.
@@ -76,11 +76,17 @@ protected:
    std::vector<double> m_calC2Amps = {0.64, 0.61, 0.56, 0.54,   0.55,  0.57,  0.65,  0.78,  0.95,  1.15,   1.15,   2.25,  2.15,  1.97};
    std::vector<double> m_calC2Phse = {  75, 75,    75,   75,    75,    75,    72,    67,    63,     35,    5,    18,    10,    -40} ; */
    
-   /* Cal on 2023-12-03:*/ 
-   std::vector<double> m_calFreqs =  { 100,  250,  500,  750, 1000, 1250, 1500, 1750, 2000};
+   /* Cal on 2023-12-03 (w. strain gauges ON):*/ 
+   /*std::vector<double> m_calFreqs =  { 100,  250,  500,  750, 1000, 1250, 1500, 1750, 2000};
    std::vector<double> m_calC1Amps = {0.22, 0.28, 0.43, 0.61, 0.82, 1.06, 1.35, 1.70, 2.045}; 
    std::vector<double> m_calC2Amps = {0.23, 0.23, 0.56, 0.85, 1.16, 1.58, 1.96, 2.60, 3.63}; 
-   std::vector<double> m_calC2Phse = {  79,   82,   82,   82,   82,   82,   84,   88,   93}; 
+   std::vector<double> m_calC2Phse = {  79,   82,   82,   82,   82,   82,   84,   88,   93}; */
+
+    /* Cal on 2023-12-03 (w. strain gauges OFF):*/ 
+    std::vector<double> m_calFreqs =  { 100,   250,   500,   750,  1000,  1250,  1500,  1750,  2000,     2250, 2500,  2750, 3000};
+    std::vector<double> m_calC1Amps = {0.310, 0.317, 0.327, 0.327, 0.333, 0.333, 0.343, 0.350, 0.373,    0.39, 0.405, 0.425, 0.435};
+    std::vector<double> m_calC2Amps = {0.313, 0.317, 0.327, 0.340, 0.357, 0.363, 0.380, 0.407, 0.426667, 0.45, 0.475, 0.490, 0.510}; //have to go to this many sig-figs for max voltage reasons
+    std::vector<double> m_calC2Phse = {  74,   74,    74,    74,    74,    71,   71,     68,    68,      68,   68,     68,   68};
 
 public:
 

@@ -1,7 +1,12 @@
 #these are the log codes
 git_state                0        git_state
 text_log                 10       string_log
-user_log                 11       string_log
+
+#after probably never being used, user_log was re-implemented
+#log code incremented just to be safe 
+#user_log                 11       string_log
+user_log                 12       user_log
+
 state_change             20       state_change
 software_log             50       software_log
 config_log               60       config_log
@@ -47,6 +52,7 @@ telem_zaber              20055    telem_zaber
 telem_pico               20060    telem_pico
 telem_position           20065    telem_position
 telem_pokecenter         20067    telem_pokecenter
+telem_pokeloop           20068    telem_pokeloop
 telem_observer           20070    telem_observer
 
 telem_rhusb              20100    telem_rhusb

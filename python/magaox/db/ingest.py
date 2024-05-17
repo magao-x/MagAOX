@@ -2,13 +2,14 @@ import datetime
 import logging
 import os
 import json
+import orjson
 
 import psycopg
 from psycopg import sql
 from tqdm import tqdm
 
-from .records import Telem, FileOrigin, FileReplica
-from ..utils import creation_time_from_filename
+from .records import Telem, FileOrigin, FileReplica, FileIngestTime
+from ..utils import creation_time_from_filename, parse_iso_datetime_as_utc
 
 log = logging.getLogger(__name__)
 
@@ -17,8 +18,8 @@ def batch_telem(cur: psycopg.Cursor, records: list[Telem]):
     cur.executemany(f'''
 INSERT INTO telem (ts, device, msg, ec)
 VALUES (%s, %s, %s::JSONB, %s)
-ON CONFLICT (device, ts, msg) DO NOTHING;
-''', [(rec.ts, rec.device, json.dumps(rec.msg), rec.ec) for rec in records])
+ON CONFLICT (device, ts) DO NOTHING;
+''', [(rec.ts, rec.device, orjson.dumps(rec.msg).decode('utf8'), rec.ec) for rec in records])
     cur.execute("COMMIT")
 
 def batch_file_origins(cur: psycopg.Cursor, records: list[FileOrigin]):
@@ -53,7 +54,7 @@ def identify_new_files(cur: psycopg.Cursor, this_host: str, paths: list[str]):
         already_known_files AS (
             SELECT origin_path, origin_host FROM file_origins WHERE origin_host = %s
         )
-    SELECT odf.path, akf.origin_path 
+    SELECT odf.path as path, akf.origin_path as origin_path
     FROM on_disk_files odf
     LEFT JOIN already_known_files akf ON
         odf.path = akf.origin_path
@@ -63,20 +64,20 @@ def identify_new_files(cur: psycopg.Cursor, this_host: str, paths: list[str]):
         log.debug(f"Found {cur.rowcount} new path{'s' if cur.rowcount != 1 else ''}")
         new_files = []
         for row in cur:
-            new_files.append(row['odf.path'])
+            new_files.append(row['path'])
     finally:
         cur.execute("ROLLBACK")  # ensure temp table is deleted
     return new_files
 
 
-def identify_non_ingested_telem(cur: psycopg.Cursor, host: str):
+def identify_non_ingested_telem(cur: psycopg.Cursor, host: str) -> list[str]:
     '''Use ``file_origins`` table to find ``.bintel`` file paths on the host
     ``host`` which need to be ingested'''
     # select file origins matching given hostname without ingest records
     # with extensions like '%.bintel'
     fns = []
     cur.execute('''
-SELECT fi.origin_path
+SELECT fi.origin_path as origin_path
 FROM file_origins fi
 LEFT JOIN file_ingest_times fit ON
     fi.origin_host = fit.origin_host AND
@@ -88,7 +89,7 @@ WHERE fit.origin_host IS NULL AND
 ;
 ''', (host,))
     for row in cur:
-        fns.append(row['fi.origin_path'])
+        fns.append(row['origin_path'])
     return fns
 
 def update_file_inventory(cur: psycopg.Cursor, host: str, data_dirs: list[str]):
@@ -102,7 +103,7 @@ def update_file_inventory(cur: psycopg.Cursor, host: str, data_dirs: list[str]):
                 continue
             else:
                 log.info(f"Found {len(new_files)} new files in {dirpath}")
-            records = []
+            origin_records = []
             for fn in tqdm(new_files):
                 try:
                     stat_result = os.stat(fn)
@@ -111,15 +112,30 @@ def update_file_inventory(cur: psycopg.Cursor, host: str, data_dirs: list[str]):
                     continue
                 except OSError as e:
                     log.info(f"Skipping {fn} because of error ({e})")
-                records.append(FileOrigin(
+                origin_records.append(FileOrigin(
                     origin_host=host,
                     origin_path=fn,
                     creation_time=creation_time_from_filename(fn, stat_result=stat_result),
                     modification_time=datetime.datetime.fromtimestamp(stat_result.st_mtime),
                     size_bytes=stat_result.st_size,
                 ))
-            batch_file_origins(cur, records)
+            batch_file_origins(cur, origin_records)
     cur.execute("COMMIT")
 
-def backfill_telemetry(cur: psycopg.Cursor, host: str, data_dirs: list[str]):
-    pass
+def record_file_ingest_time(cur: psycopg.Cursor, rec : FileIngestTime):
+    cur.execute("BEGIN")
+    cur.execute(
+        "INSERT INTO file_ingest_times (ts, device, ingested_at, origin_host, origin_path) VALUES (%s, %s, %s, %s, %s)",
+        (rec.ts, rec.device, rec.ingested_at, rec.origin_host, rec.origin_path)
+    )
+    cur.execute("COMMIT")
+
+def line_to_record(name, line):
+    assert line[0] == ord("{"), f"malformed line {line[0]=}"
+    payload = orjson.loads(line)
+    return Telem(
+        name,
+        parse_iso_datetime_as_utc(payload["ts"]),
+        payload["ec"],
+        payload["msg"],
+    )

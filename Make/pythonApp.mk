@@ -3,7 +3,8 @@ include $(SELF_DIR)/python.mk
 
 TARGET ?= $(t)
 
-all : install
+all:
+	@echo "*** $(TARGET) is a Python app, skipping 'build' step. Use 'make install' to install. ***"
 
 install:
 	sudo $(PYTHON) -c 'import purepyindi2' || (echo "Need purepyindi2 installed to $(shell which python)" && exit 1)

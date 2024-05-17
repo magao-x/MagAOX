@@ -18,5 +18,6 @@ dependencies:
   - pip:
       # web ui
       - aiortc
+      - aiofile
       - starlette
       - uvicorn

@@ -1,11 +1,15 @@
+import orjson
 import datetime
 from dataclasses import dataclass
 import pathlib
 from typing import Union
 
+from ..utils import parse_iso_datetime_as_utc
+
 __all__ = [
     'FileOrigin',
     'FileReplica',
+    'FileIngestTime',
     'Telem',
 ]
 
@@ -25,6 +29,14 @@ class FileReplica:
     size_bytes : int
     hostname : str
     replica_path : Union[pathlib.Path, str]
+
+@dataclass
+class FileIngestTime:
+    ts : datetime.datetime
+    device : str
+    ingested_at : datetime.datetime
+    origin_host : str
+    origin_path : str
 
 @dataclass
 class Telem:
@@ -53,3 +65,22 @@ class Telem:
     ec : str
     msg : dict
 
+    @classmethod
+    def from_json_bytes(cls, device, json_bytes):
+        payload = orjson.loads(json_bytes)
+        return cls(
+            device=device,
+            ts=parse_iso_datetime_as_utc(payload['ts']),
+            ec=payload['ec'],
+            msg=payload['msg'],
+        )
+
+    @classmethod
+    def from_json(cls, device, json_str):
+        return cls.from_json_bytes(device, json_str.encode('utf8'))
+
+    def get_msg_json_bytes(self) -> bytes:
+        return orjson.dumps(self.msg)
+
+    def get_msg_json(self) -> str:
+        return self.get_msg_json_bytes().decode('utf8')
