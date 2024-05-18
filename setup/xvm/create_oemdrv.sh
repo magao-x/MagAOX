@@ -1,7 +1,8 @@
 #!/usr/bin/env bash
-mkdir -p input output
-# copy kickstart files
-cp -R ./kickstart ./input/
+source ./_common.sh
+mkdir -p input/kickstart output
+# generate kickstart template
+cat ./kickstart/ks.cfg.template | envsubst > ./input/kickstart/ks.cfg
 cp ./output/xvm_key.pub ./input/kickstart/authorized_keys
 rm -f ./input/oemdrv.{dmg,qcow2}
 if [[ $(uname) == "Darwin" ]]; then
