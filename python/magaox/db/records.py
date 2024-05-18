@@ -82,6 +82,7 @@ class Telem:
             device=device,
             ts=parse_iso_datetime_as_utc(payload['ts']),
             ec=payload['ec'],
+            msg=payload,
         )
 
     def get_msg_json_bytes(self) -> bytes:
