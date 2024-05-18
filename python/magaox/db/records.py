@@ -40,6 +40,14 @@ class FileIngestTime:
     origin_host : str
     origin_path : str
 
+def _parse_msg_json(msg_json: str):
+    msg_bytes = msg_json.encode('utf8')
+    try:
+        payload = orjson.loads(msg_bytes)
+    except orjson.JSONDecodeError:
+        payload = FALLBACK_JSON.decode(msg_json)
+    return payload
+
 @dataclass
 class Telem:
     # pretty-printed log/teldump row
@@ -68,21 +76,13 @@ class Telem:
     msg : dict
 
     @classmethod
-    def _from_json_bytes(cls, device, json_bytes):
-        payload = orjson.loads(json_bytes)
+    def from_json(cls, device, json_str):
+        payload = _parse_msg_json(json_str)
         return cls(
             device=device,
             ts=parse_iso_datetime_as_utc(payload['ts']),
             ec=payload['ec'],
-            msg=payload['msg'],
         )
-
-    @classmethod
-    def from_json(cls, device, json_str):
-        try:
-            return cls._from_json_bytes(device, json_str.encode('utf8'))
-        except orjson.JSONDecodeError:
-            return FALLBACK_JSON.decode(json_str)
 
     def get_msg_json_bytes(self) -> bytes:
         return orjson.dumps(self.msg)
