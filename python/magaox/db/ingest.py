@@ -82,8 +82,16 @@ FROM file_origins fi
 LEFT JOIN file_ingest_times fit ON
     fi.origin_host = fit.origin_host AND
     fi.origin_path = fit.origin_path
-WHERE fit.origin_host IS NULL AND
-    fit.origin_path IS NULL AND
+WHERE
+    (
+        (
+            fit.origin_host IS NULL AND
+            fit.origin_path IS NULL
+        ) OR (
+            fit.ingested_at < fi.modification_time
+        )
+    )
+    AND
     fi.origin_host = %s AND
     fi.origin_path LIKE '%%.bintel'
 ;
