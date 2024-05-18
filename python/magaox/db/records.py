@@ -4,7 +4,7 @@ from dataclasses import dataclass
 import pathlib
 from typing import Union
 
-from ..utils import parse_iso_datetime_as_utc
+from ..utils import parse_iso_datetime_as_utc, FunkyJSONDecoder
 
 __all__ = [
     'FileOrigin',
@@ -12,6 +12,8 @@ __all__ = [
     'FileIngestTime',
     'Telem',
 ]
+
+FALLBACK_JSON = FunkyJSONDecoder()
 
 @dataclass
 class FileOrigin:
@@ -66,7 +68,7 @@ class Telem:
     msg : dict
 
     @classmethod
-    def from_json_bytes(cls, device, json_bytes):
+    def _from_json_bytes(cls, device, json_bytes):
         payload = orjson.loads(json_bytes)
         return cls(
             device=device,
@@ -77,7 +79,10 @@ class Telem:
 
     @classmethod
     def from_json(cls, device, json_str):
-        return cls.from_json_bytes(device, json_str.encode('utf8'))
+        try:
+            return cls._from_json_bytes(device, json_str.encode('utf8'))
+        except orjson.JSONDecodeError:
+            return FALLBACK_JSON.decode(json_str)
 
     def get_msg_json_bytes(self) -> bytes:
         return orjson.dumps(self.msg)

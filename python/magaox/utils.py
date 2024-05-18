@@ -2,6 +2,20 @@ import os.path
 import datetime
 from datetime import timezone
 
+__all__ = [
+    'XFILENAME_TIME_FORMAT',
+    'PUREPYINDI_DEVICE_FILENAME_TIME_FORMAT',
+    'parse_iso_datetime_as_utc',
+    'xfilename_to_utc_timestamp',
+    'creation_time_from_filename',
+    'parse_iso_datetime',
+    'utcnow',
+    'format_timestamp_for_filename',
+    'get_current_semester',
+    'get_search_start_end_timestamps',
+    'FunkyJSONDecoder',
+]
+
 # note: we must truncate to microsecond precision due to limitations in
 # `datetime`, so this pattern works only after chopping off the last
 # three characters
@@ -99,3 +113,87 @@ def get_search_start_end_timestamps(
     if end_dt < start_dt:
         raise ValueError("End time is before start time")
     return start_dt, end_dt
+
+
+import json
+
+from json.scanner import NUMBER_RE
+
+def py_make_scanner(context):
+    '''Derived from the Python standard library json.scanner module
+    used under the terms of the Python software license
+
+    https://docs.python.org/3/license.html#psf-license-agreement-for-python-release
+
+    The function has been modified to handle literal ``nan``, ``-nan``, ``inf``, ``-inf``
+    as emitted by Flatbuffers "JSON" support
+    '''
+    parse_object = context.parse_object
+    parse_array = context.parse_array
+    parse_string = context.parse_string
+    match_number = NUMBER_RE.match
+    strict = context.strict
+    parse_float = context.parse_float
+    parse_int = context.parse_int
+    parse_constant = context.parse_constant
+    object_hook = context.object_hook
+    object_pairs_hook = context.object_pairs_hook
+    memo = context.memo
+
+    def _scan_once(string, idx):
+        try:
+            nextchar = string[idx]
+        except IndexError:
+            raise StopIteration(idx) from None
+
+        if nextchar == '"':
+            return parse_string(string, idx + 1, strict)
+        elif nextchar == '{':
+            return parse_object((string, idx + 1), strict,
+                _scan_once, object_hook, object_pairs_hook, memo)
+        elif nextchar == '[':
+            return parse_array((string, idx + 1), _scan_once)
+        elif nextchar == 'n' and string[idx:idx + 4] == 'null':
+            return None, idx + 4
+        elif nextchar == 't' and string[idx:idx + 4] == 'true':
+            return True, idx + 4
+        elif nextchar == 'f' and string[idx:idx + 5] == 'false':
+            return False, idx + 5
+
+        m = match_number(string, idx)
+        if m is not None:
+            integer, frac, exp = m.groups()
+            if frac or exp:
+                res = parse_float(integer + (frac or '') + (exp or ''))
+            else:
+                res = parse_int(integer)
+            return res, m.end()
+        elif nextchar == 'N' and string[idx:idx + 3] == 'NaN':
+            return parse_constant('NaN'), idx + 3
+        elif nextchar == 'I' and string[idx:idx + 8] == 'Infinity':
+            return parse_constant('Infinity'), idx + 8
+        elif nextchar == '-' and string[idx:idx + 9] == '-Infinity':
+            return parse_constant('-Infinity'), idx + 9
+        elif nextchar == 'n' and string[idx:idx + 3] == 'nan':
+            return parse_constant('NaN'), idx + 3
+        elif nextchar == '-' and string[idx:idx + 4] == '-nan':
+            return parse_constant('NaN'), idx + 4
+        elif nextchar == 'i' and string[idx:idx + 3] == 'inf':
+            return parse_constant('Infinity'), idx + 8
+        elif nextchar == '-' and string[idx:idx + 4] == '-inf':
+            return parse_constant('-Infinity'), idx + 9
+        else:
+            raise StopIteration(idx)
+
+    def scan_once(string, idx):
+        try:
+            return _scan_once(string, idx)
+        finally:
+            memo.clear()
+
+    return scan_once
+
+class FunkyJSONDecoder(json.JSONDecoder):
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+        self.scan_once = py_make_scanner(self)
