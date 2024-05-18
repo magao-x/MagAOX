@@ -992,8 +992,10 @@ void streamWriter::fgThreadExec()
                     new_cnt0 = image.md[0].cnt0;
                 }
 
+                #ifdef SW_DEBUG
                 std::cerr << "new_cnt0: " << new_cnt0 << "\n";
-                
+                #endif
+
                 ///\todo cleanup skip frame handling.
                 if (new_cnt0 == last_cnt0) //<- this probably isn't useful really
                 {
@@ -1070,26 +1072,17 @@ void streamWriter::fgThreadExec()
                 switch (m_writing)
                 {
                     case START_WRITING:
-                        if(!restartWriting)
-                        {
-                            m_currChunkStart = m_currImage;
-                            m_nextChunkStart = (m_currImage / m_writeChunkLength) * m_writeChunkLength;
-                            m_currChunkStartTime = m_currImageTime;
+                        
+                        m_currChunkStart = m_currImage;
+                        m_nextChunkStart = (m_currImage / m_writeChunkLength) * m_writeChunkLength;
+                        m_currChunkStartTime = m_currImageTime;
         
+                        if(!restartWriting) //We only log if this is really a start
+                        {
                             log<saving_start>({1, new_cnt0});
                         }
-                        else
+                        else //on a restart after a timeout we don't log
                         {
-                            m_currChunkStart = m_currImage;
-                            m_nextChunkStart = (m_currImage / m_writeChunkLength) * m_writeChunkLength;
-
-                            if(m_currImage - m_nextChunkStart == m_writeChunkLength - 1)
-                            {
-                                m_nextChunkStart += m_writeChunkLength;
-                            }
-
-                            m_currChunkStartTime = m_currImageTime;
-
                             restartWriting = false;
                         }
 
@@ -1103,12 +1096,13 @@ void streamWriter::fgThreadExec()
                             m_currSaveStop = m_nextChunkStart + m_writeChunkLength;
                             m_currSaveStopFrameNo = new_cnt0;
     
+                            #ifdef SW_DEBUG
                             std::cerr << __FILE__ << " " << __LINE__ << " WRITING " << m_currImage << " " 
                                                    << m_nextChunkStart << " " 
                                                     << (m_currImage - m_nextChunkStart == m_writeChunkLength - 1) << " "
                                                      << (m_currImageTime - m_currChunkStartTime > m_maxChunkTime) << " "
                                                       << new_cnt0 << "\n";
-
+                            #endif
                             
                             // Now tell the writer to get going
                             if (sem_post(&m_swSemaphore) < 0)
@@ -1132,11 +1126,13 @@ void streamWriter::fgThreadExec()
                             m_currSaveStop = m_currImage + 1;
                             m_currSaveStopFrameNo = new_cnt0;
     
+                            #ifdef SW_DEBUG
                             std::cerr << __FILE__ << " " << __LINE__ << " IMAGE TIME WRITING " << m_currImage << " " 
                                                    << m_nextChunkStart << " " 
                                                     << (m_currImage - m_nextChunkStart == m_writeChunkLength - 1) << " "
                                                      << (m_currImageTime - m_currChunkStartTime > m_maxChunkTime) << " "
                                                       << new_cnt0 << "\n";
+                            #endif
 
                             // Now tell the writer to get going
                             if (sem_post(&m_swSemaphore) < 0)
@@ -1145,14 +1141,9 @@ void streamWriter::fgThreadExec()
                                 return;
                             }
     
-                            m_nextChunkStart = ((m_currImage + 1) / m_writeChunkLength) * m_writeChunkLength;
-                            if (m_nextChunkStart >= m_circBuffLength)
-                            {
-                                m_nextChunkStart = 0;
-                            }
-    
-                            m_currChunkStart = m_nextChunkStart;
-                            m_currChunkStartTime = m_currImageTime;
+                            m_writing = START_WRITING;
+                            restartWriting = true;
+
                         }
                         break;
     
@@ -1161,7 +1152,10 @@ void streamWriter::fgThreadExec()
                         m_currSaveStop = m_currImage+1;
                         m_currSaveStopFrameNo = new_cnt0;
     
+                        #ifdef SW_DEBUG
                         std::cerr << __FILE__ << " " << __LINE__ << " STOP_WRITING\n";
+                        #endif
+
                         // Now tell the writer to get going
                         if (sem_post(&m_swSemaphore) < 0)
                         {
@@ -1196,9 +1190,12 @@ void streamWriter::fgThreadExec()
                             m_currSaveStop = m_currImage;
                             m_currSaveStopFrameNo = last_cnt0;
     
+                            #ifdef SW_DEBUG
                             std::cerr << __FILE__ << " " << __LINE__ << " TIMEOUT WRITING " << " " 
                                 << m_currImage << " " << m_nextChunkStart << " " <<(m_currImage - m_nextChunkStart)  << " "
                                  << last_cnt0 << "\n";
+                            #endif
+
                             // Now tell the writer to get going
                             if (sem_post(&m_swSemaphore) < 0)
                             {
@@ -1209,15 +1206,6 @@ void streamWriter::fgThreadExec()
                             m_writing = START_WRITING;
                             restartWriting = true;
 
-                            
-
-                            /*m_currChunkStart = m_currImage;
-                            m_nextChunkStart = ((m_currImage + 1) / m_writeChunkLength) * m_writeChunkLength;
-                            if (m_nextChunkStart >= m_circBuffLength)
-                            {
-                                m_nextChunkStart = 0;
-                            }
-                            m_currChunkStartTime = m_currImageTime;*/
                         }
                         break;
                     case STOP_WRITING:
@@ -1226,7 +1214,10 @@ void streamWriter::fgThreadExec()
                         m_currSaveStop = m_currImage;
                         m_currSaveStopFrameNo = last_cnt0;
     
+                        #ifdef SW_DEBUG
                         std::cerr << __FILE__ << " " << __LINE__ << " TIMEOUT STOP_WRITING\n";
+                        #endif
+
                         // Now tell the writer to get going
                         if (sem_post(&m_swSemaphore) < 0)
                         {
@@ -1279,7 +1270,9 @@ void streamWriter::fgThreadExec()
 
                 if (buffer.st_ino != inode)
                 {
+                    #ifdef SW_DEBUG
                     std::cerr << "Restarting due to inode . . . \n";
+                    #endif
                     m_restart = true;
                 }
             }
@@ -1344,7 +1337,6 @@ void streamWriter::fgThreadExec()
 
     } // outer loop, will exit if m_shutdown==true
 
-    ///\todo might still be writing here, so must check
     // One more check
     if (m_rawImageCircBuff)
     {
@@ -1472,17 +1464,15 @@ int streamWriter::doEncode()
 
     recordSavingState(true);
 
-    timespec tw0, tw1, tw2;
-
-    clock_gettime(CLOCK_REALTIME, &tw0);
-
     // Record these to prevent a change in other thread
     uint64_t saveStart = m_currSaveStart;
     uint64_t saveStopFrameNo = m_currSaveStopFrameNo;
     size_t nFrames = m_currSaveStop - saveStart;
     size_t nBytes = m_width * m_height * m_typeSize;
 
+    #ifdef SW_DEBUG
     std::cerr << "nFrames: " << nFrames << "\n";
+    #endif
 
     // Configure xrif and copy image data -- this does no allocations
     int rv = xrif_set_size(m_xrif, m_width, m_height, 1, nFrames, m_dataType);
@@ -1516,10 +1506,12 @@ int streamWriter::doEncode()
         log<software_error>({__FILE__, __LINE__, 0, rv, "xrif set LZ4 acceleration error."});
     }
 
+    #ifdef SW_DEBUG
     for (size_t nF = 0; nF < nFrames; ++nF)
     {
         std::cerr << "      " << (m_timingCircBuff + saveStart * 5 + nF * 5)[0] << "\n";
     }
+    #endif
 
     memcpy(m_xrif_timing->raw_buffer, m_timingCircBuff + saveStart * 5, nFrames * 5 * sizeof(uint64_t));
 
@@ -1574,8 +1566,6 @@ int streamWriter::doEncode()
     // Cover up the \0 inserted by snprintf
     (m_fname + m_fnameBase.size())[23] = '.';
 
-    clock_gettime(CLOCK_REALTIME, &tw1);
-
     FILE *fp_xrif = fopen(m_fname, "wb");
     if (fp_xrif == NULL)
     {
@@ -1618,12 +1608,6 @@ int streamWriter::doEncode()
     }
 
     fclose(fp_xrif);
-
-    clock_gettime(CLOCK_REALTIME, &tw2);
-
-    double wt = ((double)tw2.tv_sec + ((double)tw2.tv_nsec) / 1e9) - ((double)tw1.tv_sec + ((double)tw1.tv_nsec) / 1e9);
-
-    std::cerr << wt << "\n";
 
     recordSavingStats(true);
 
