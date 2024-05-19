@@ -109,19 +109,20 @@ class Backfill(BaseDbCommand):
             self.database.cursor(), self.hostname
         )
         with concurrent.futures.ThreadPoolExecutor(max_workers=self.parallel_jobs) as pool:
-            futures = []
+            paths_to_futures = {}
             log.info(f"Starting backfill tasks for {len(paths)} path{'s' if len(paths) != 1 else ''}")
+
             for fp in tqdm(paths[:self.limit]):
                 if os.path.exists(fp):
-                    futures.append(pool.submit(self.backfill_from_path, fp))
+                    paths_to_futures[fp] = pool.submit(self.backfill_from_path, fp)
                 else:
                     log.debug(f"Skipping {fp} because the file does not exist")
             log.info("Ingesting files")
             pbar = tqdm(total=len(paths))
-            for ft in concurrent.futures.as_completed(futures):
+            for ft in concurrent.futures.as_completed(paths_to_futures.values()):
                 try:
                     log.debug(f"Finished {ft.result()}")
                 except Exception as e:
-                    log.exception("Failed to process telem file")
+                    log.exception(f"Failed to process telem file {paths_to_futures[ft]}")
                 pbar.update()
             pbar.close()
