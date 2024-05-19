@@ -54,11 +54,12 @@ class Backfill(BaseDbCommand):
             stdout=subprocess.PIPE,
             stdin=subprocess.DEVNULL,
             stderr=subprocess.DEVNULL,
+            text=True,
         )
         log.debug("Converting logdump output to records")
         records = []
         for line in p.stdout:
-            message = ingest.line_to_record(name, line)
+            message = Telem.from_json(name, line)
             records.append(message)
         p.wait()
         if p.returncode != 0:
@@ -72,7 +73,7 @@ class Backfill(BaseDbCommand):
         records = []
         with gzip.open(path, 'rt') as f:
             for line in f:
-                message = ingest.line_to_record(name, line)
+                message = Telem.from_json(name, line)
                 records.append(message)
         return records
 
