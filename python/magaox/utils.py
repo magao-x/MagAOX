@@ -179,9 +179,9 @@ def py_make_scanner(context):
         elif nextchar == '-' and string[idx:idx + 4] == '-nan':
             return parse_constant('NaN'), idx + 4
         elif nextchar == 'i' and string[idx:idx + 3] == 'inf':
-            return parse_constant('Infinity'), idx + 8
+            return parse_constant('Infinity'), idx + 3
         elif nextchar == '-' and string[idx:idx + 4] == '-inf':
-            return parse_constant('-Infinity'), idx + 9
+            return parse_constant('-Infinity'), idx + 4
         else:
             raise StopIteration(idx)
 
