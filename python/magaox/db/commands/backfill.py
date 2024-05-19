@@ -53,7 +53,7 @@ class Backfill(BaseDbCommand):
             args,
             stdout=subprocess.PIPE,
             stdin=subprocess.DEVNULL,
-            # stderr=subprocess.DEVNULL,
+            stderr=subprocess.DEVNULL,
         )
         log.debug("Converting logdump output to records")
         records = []
