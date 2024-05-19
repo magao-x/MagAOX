@@ -59,6 +59,9 @@ class Backfill(BaseDbCommand):
         log.debug("Converting logdump output to records")
         records = []
         for line in p.stdout:
+            line = line.strip()
+            if len(line) == 0:
+                continue
             message = Telem.from_json(name, line)
             records.append(message)
         p.wait()
