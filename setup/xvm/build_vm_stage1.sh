@@ -47,7 +47,8 @@ qemu-system-${qemuArch} \
     -device virtio-net-pci,netdev=user.0 \
     -boot c \
     -m 8192M \
+    -display none \
+    -serial stdio \
 || exit 1
-    # -display none \
 cp -v ./output/xvm.qcow2 ./output/xvm_stage1.qcow2
 echo "Created VM and installed Rocky Linux"
