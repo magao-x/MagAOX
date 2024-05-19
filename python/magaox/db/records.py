@@ -1,3 +1,4 @@
+import logging
 import orjson
 import datetime
 from dataclasses import dataclass
@@ -5,6 +6,8 @@ import pathlib
 from typing import Union
 
 from ..utils import parse_iso_datetime_as_utc, FunkyJSONDecoder
+
+log = logging.getLogger(__name__)
 
 __all__ = [
     'FileOrigin',
@@ -45,6 +48,7 @@ def _parse_msg_json(msg_json: str):
     try:
         payload = orjson.loads(msg_bytes)
     except orjson.JSONDecodeError:
+        log.debug(f"Falling back to FunkyJSONDecoder for line {repr(msg_json)}")
         payload = FALLBACK_JSON.decode(msg_json)
     return payload
 
