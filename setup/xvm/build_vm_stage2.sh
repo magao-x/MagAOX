@@ -18,7 +18,7 @@ qemu-system-${qemuArch} \
     -smp 4 \
     -machine type=virt$accelFlag \
     -cpu $cpuType \
-    -drive if=pflash,format=raw,id=ovmf_code,readonly=on,file=./input/firmware/firmware_code.fd \
+    -drive if=pflash,format=raw,id=ovmf_code,readonly=on,file=./output/firmware_code.fd \
     -drive if=pflash,format=raw,id=ovmf_vars,file=./output/firmware_vars.fd \
     -drive file=output/xvm.qcow2,format=qcow2 \
     -device virtio-gpu-pci \
