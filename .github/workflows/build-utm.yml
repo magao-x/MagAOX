@@ -49,19 +49,19 @@ jobs:
         run: |
             cd $GITHUB_WORKSPACE/setup/xvm/
             bash build_vm_stage1.sh
-      # - name: Install MagAO-X software
-      #   run: |
-      #       cd $GITHUB_WORKSPACE/setup/xvm/
-      #       bash build_vm_stage2.sh
-      # - name: Create UTM bundle
-      #   run: |
-      #       cd $GITHUB_WORKSPACE/setup/xvm/
-      #       bash bundle_utm.sh
-      # - name: Upload UTM image
-      #   uses: actions/upload-artifact@v2
-      #   with:
-      #     name: MagAO-X_VM
-      #     path: |
-      #       setup/xvm/output/MagAO-X_VM_bundle.tar.xz
-      #       setup/xvm/output/xvm_key
-      #       setup/xvm/output/xvm_key.pub
+      - name: Install MagAO-X software
+        run: |
+            cd $GITHUB_WORKSPACE/setup/xvm/
+            bash build_vm_stage2.sh
+      - name: Create UTM bundle
+        run: |
+            cd $GITHUB_WORKSPACE/setup/xvm/
+            bash bundle_utm.sh
+      - name: Upload UTM image
+        uses: actions/upload-artifact@v2
+        with:
+          name: MagAO-X_VM
+          path: |
+            setup/xvm/output/MagAO-X_VM_bundle.tar.xz
+            setup/xvm/output/xvm_key
+            setup/xvm/output/xvm_key.pub
