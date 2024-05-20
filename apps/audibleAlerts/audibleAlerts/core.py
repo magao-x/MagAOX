@@ -113,7 +113,7 @@ class AudibleAlerts(XDevice):
                 self.log.debug(f"Submitting speech request: {utterance}")
                 self.enqueue_speech_request(utterance)
             else:
-                self.log.debug(f"Would have talked, but it's only been {sec_since_trigger=}")
+                self.log.debug(f"Would have spoken, but it's only been {sec_since_trigger=}")
         elif transition.compare(last_value) and not transition.compare(value):
             # un-latch, so next time we change to a value that compares True we trigger again:
             del self.latch_transitions[transition]
@@ -214,6 +214,7 @@ class AudibleAlerts(XDevice):
                             self.log.debug(f"Cannot pre-cache because there are substitutions to be made")
         self.active_personality = personality_name
         self.telem("load_personality", {'name': personality_name})
+        self.send_all_properties()
 
     def setup(self):
         self.last_utterance_ts = time.time()

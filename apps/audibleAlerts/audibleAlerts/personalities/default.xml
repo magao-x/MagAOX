@@ -30,6 +30,9 @@
     <button name="Proposals">
       <file name="lkca15.wav" />
     </button>
+    <button name="ThemeSong">
+      <file name="clown.wav" />
+    </button>
   </soundboard>
   <react-to indi-id="observers.obs_on.toggle">
     <transition value="On">
