@@ -69,6 +69,8 @@ static int mypid = -1;                   // PID of this process
 void
 sigusr2_handler(int sig, siginfo_t *si, void *unused)
 {
+    static_cast<void>(si);
+    static_cast<void>(unused);
     std::cerr
     << "Driver[" << myname << "]:  "
     << "PID=" << mypid
@@ -85,7 +87,7 @@ sigusr2_handler(int sig, siginfo_t *si, void *unused)
 void handle_SIGs()
 {
     int istat = -1;
-    struct sigaction sa = { 0 };
+    struct sigaction sa = { 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0 };
 
     // Ignore SIGPIPE on bad write so we can handle it inline
     // Ignore SIGINT so ^C will stop parent process (resurrector) only

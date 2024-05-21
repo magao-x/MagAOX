@@ -38,6 +38,8 @@ static bool verbose{false};
 void
 sigusr12_handler(int sig, siginfo_t *si, void *unused)
 {
+    static_cast<void>(si);
+    static_cast<void>(unused);
     if (logging)
     {
         std::cerr << "Received signal[" 
@@ -64,7 +66,7 @@ void setup_SIGUSR12_handler(int iSIGUSRn)
     }
 
     int istat = -1;
-    struct sigaction sa = { 0 };
+    struct sigaction sa = { 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0 };
 
     // Catch SIGUSR1 or SIGUSR2 in sigusr12_handler(...) above
     sigemptyset(&sa.sa_mask);

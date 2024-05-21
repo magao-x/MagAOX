@@ -148,6 +148,7 @@ scripts_to_install = magaox \
 	query_seeing \
 	sync_cacao \
 	xctrl \
+	resuctrl \
 	netconsole_logger \
 	dmdispbridge \
 	shmimTCPreceive \

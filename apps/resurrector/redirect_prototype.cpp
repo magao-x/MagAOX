@@ -135,7 +135,7 @@ public:
             /// Append next (or first) sub-directory token
             fullpath += (fullpath.empty() ? "" : "/") + *it;
 
-            struct stat stbuf{0};
+            struct stat stbuf{0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,{0,0},0};
 
             /// Get directory status; true if stat(...) fails
             if (stat(fullpath.c_str(),&stbuf))
@@ -274,6 +274,8 @@ TEST_forked_child()
   bool use_cerr{false};  // Alternate writing to STDOUT and to STDERR
   while (1)
   {
+    ssize_t unused{0};
+    static_cast<void>(unused);
     std::string s;
     getline(std::cin,s);            // Read line into string
     if (std::cin.eof()) { break; }  // Exit loop on EOF (Control-D?)
@@ -282,16 +284,16 @@ TEST_forked_child()
     if (use_cerr)
     {
         std::cerr << "(std::cerr)" << s;
-        write(STDERR_FILENO,"(STDERR_FILENO)",15);
-        write(STDERR_FILENO,s.c_str(), s.length());
+        unused = ::write(STDERR_FILENO,"(STDERR_FILENO)",15);
+        unused = ::write(STDERR_FILENO,s.c_str(), s.length());
         fprintf(stderr, "(stderr)%s",s.c_str());
     }
     else
     {
         std::cout << "std::cout[" << s << "]" << std::endl;
-        write(STDOUT_FILENO,"STDOUT_FILENO[",14);
-        write(STDOUT_FILENO,s.c_str(),s.length());
-        write(STDOUT_FILENO,"]\n",2);
+        unused = ::write(STDOUT_FILENO,"STDOUT_FILENO[",14);
+        unused = ::write(STDOUT_FILENO,s.c_str(),s.length());
+        unused = ::write(STDOUT_FILENO,"]\n",2);
         fprintf(stdout, "stdout[%s]\n",s.c_str());
     }
     use_cerr ^= true;  // Alternate writing to STDOUT and to STDERR

@@ -153,15 +153,15 @@ public: // interfaces
 
     // Public read-only access to private class members
     int FD() { return m_fd; }
-    const std::string hbname() const { return m_hbname; }
-    const std::string fifo_name() const { return m_fifo_name; }
+    std::string hbname() const { return m_hbname; }
+    std::string fifo_name() const { return m_fifo_name; }
     const std::string& last_hb() const { return m_last_hb; }
 
     // Public read/write access to private class members (properties)
-    const int max_restarts_get() const { return m_restart_max; }
+    int max_restarts_get() const { return m_restart_max; }
     void max_restarts_set(int val) { m_restart_max = val; }
 
-    const bool pending_close_get() const { return m_pending_close; }
+    bool pending_close_get() const { return m_pending_close; }
     void pending_close_set(bool tf)
     {
         m_pending_close = tf && (m_fd > -1);
@@ -172,7 +172,7 @@ public: // interfaces
         m_output_redirect = output_redirect;
     }
 
-    const int init_dly() const { return m_init_delay; }
+    int init_dly() const { return m_init_delay; }
 
     // /////////////////////////////////////////////////////////////////
     // /////////////////////////////////////////////////////////////////
@@ -625,6 +625,7 @@ private: // Internal attributes and interfaces
     static void
     hbm_sigchld_handler(int sig)
     {
+        static_cast<void>(sig);
         int saved_errno = errno;
         while (waitpid((pid_t)(-1), 0, WNOHANG) > 0) {}
         errno = saved_errno;
@@ -767,6 +768,7 @@ private: // Internal attributes and interfaces
     int
     fork_hexbeater(int delay, bool check_existing)
     {
+        static_cast<void>(delay);
         // If directed to check for a hexbeater via m_argv0 and m_hbname
         // and such a hexbeater is found, then return its PID ...
         int pid{check_existing ? find_hexbeater_pid() : 0};
@@ -951,6 +953,7 @@ private: // Internal attributes and interfaces
                 if ('.'==*rit or isdigit(*rit)) { break; }
                 // Char is not a decimal digit or a '.' - drop through
                 checkseq = 1;
+                /* falls through */
 
             case 1:
                 // If first position in match was reached but there are
