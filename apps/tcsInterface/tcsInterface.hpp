@@ -47,10 +47,21 @@ class tcsInterface : public MagAOXApp<true>, public dev::ioDevice, public dev::t
 
    friend class dev::telemeter<tcsInterface>;
    
-   
 protected:
 
-   /** \name Configurable Parameters
+   /** \name lab mode 
+     * @{
+     */
+
+   bool m_labMode {true};
+
+   pcf::IndiProperty m_indiP_labMode;
+   INDI_NEWCALLBACK_DECL(tcsInterface, m_indiP_labMode);
+
+   ///@}
+
+
+   /** \name TCS Networking
      *@{
      */
    
@@ -58,21 +69,18 @@ protected:
    int m_devicePort {5811}; ///< The IP port for TCS communications. Should be the command port.  Default is 5811
    int m_seeingInterval {2};
    
-   bool m_labMode {true};
    
-   ///@}
-
+   ///Mutex for locking TCS communications.
+   std::mutex m_tcsMutex;
 
    tty::netSerial m_sock; 
-   
-   ///Mutex for locking INDI communications.
-   std::mutex m_tcsMutex;
-   
+
+   ///@}
+
    //Telescope time:
    double m_telST {0};
 
    pcf::IndiProperty m_indiP_teltime;
-
 
    //Telescope position:
    double m_telEpoch {0};
@@ -403,10 +411,6 @@ public:
    pcf::IndiProperty m_indiP_offlFthresh;
    INDI_NEWCALLBACK_DECL(tcsInterface, m_indiP_offlFthresh);
    
-   
-   
-   
-   
    float m_offlCComa_00 {1};
    float m_offlCComa_01 {0};
    float m_offlCComa_10 {1};
@@ -482,7 +486,6 @@ int tcsInterface::loadConfigImpl( mx::app::appConfigurator & _config )
 {
    
    _config(m_labMode, "labMode");
-   std::cerr << "\n\n labMode= " << m_labMode << "\n\n";
    
    _config(m_pyrNudge_C_00, "pyrNudger.C_00");
    _config(m_pyrNudge_C_01, "pyrNudger.C_01");
@@ -544,6 +547,22 @@ void tcsInterface::loadConfig()
 inline
 int tcsInterface::appStartup()
 {
+   CREATE_REG_INDI_NEW_TOGGLESWITCH( m_indiP_labMode, "labMode");
+   if(m_labMode)
+   {
+      m_indiP_labMode["toggle"].setSwitchState(pcf::IndiElement::On);
+      log<text_log>("lab mode ON", logPrio::LOG_NOTICE);
+   }
+   else
+   {
+      m_indiP_labMode["toggle"].setSwitchState(pcf::IndiElement::Off); 
+      log<text_log>("lab mode OFF", logPrio::LOG_NOTICE);
+   }
+
+   updateSwitchIfChanged(m_indiP_offlTTenable, "toggle", pcf::IndiElement::On, INDI_OK);
+
+
+
    createROIndiNumber( m_indiP_teltime, "teltime", "Telscope Time", "TCS");
    indi::addNumberElement<double>( m_indiP_teltime, "sidereal_time", 0, std::numeric_limits<double>::max(), 0, "%0.6f");
    m_indiP_teltime["sidereal_time"] = m_telST;
@@ -815,9 +834,7 @@ int tcsInterface::appStartup()
    //Register to receive the coeff updates from Kyle
    REG_INDI_SETPROP(m_indiP_offloadCoeffs, "w2tcsOffloader", "zCoeffs");
    
-   
    state(stateCodes::NOTCONNECTED);
-   
    
    return 0;
 }
@@ -2623,11 +2640,12 @@ int tcsInterface::doTToffload( float tt_0,
          log<text_log>("[OFFL] TT offloading: " + std::to_string(tt_0) + " " + std::to_string(tt_1));
          sendTToffload(tt_0, tt_1);
       }
-      else
+      else if(!m_labMode)
       {
          log<text_log>("TT offload above threshold but TT offloading disabled", logPrio::LOG_WARNING);
       }
    }
+
    return 0;
    
 }
@@ -2637,7 +2655,7 @@ int tcsInterface::sendTToffload( float tt_0,
                                )
 {
 
-   if(m_labMode)
+   if(m_labMode) //If labMode we send offloads to the modulator
    {
       pcf::IndiProperty ip(pcf::IndiProperty::Number);
       ip.setDevice("modwfs");
@@ -2687,8 +2705,9 @@ int tcsInterface::doFoffload( float F_0 )
          log<text_log>("[OFFL] Focus sending: " + std::to_string(F_0));
          sendFoffload(F_0);
       }
-      else
+      else if(!m_labMode)
       {
+         
          log<text_log>("Focus offload above threshold but Focus offloading disabled", logPrio::LOG_WARNING);
       }
    }
@@ -2706,6 +2725,47 @@ int tcsInterface::sendFoffload( float F_0 )
    log<text_log>(std::string("[OFFL] sending: ") + fstr);
    
    return sendMagTelCommand(fstr, m_readTimeout);
+}
+
+INDI_NEWCALLBACK_DEFN(tcsInterface, m_indiP_labMode)(const pcf::IndiProperty &ipRecv)
+{
+   INDI_VALIDATE_CALLBACK_PROPS(m_indiP_labMode, ipRecv);
+
+   if(!ipRecv.find("toggle"))
+   {
+      return log<software_error,-1>({__FILE__,__LINE__, "no toggle element"});
+   }
+   
+   bool labMode;
+
+   if(ipRecv["toggle"].getSwitchState() == pcf::IndiElement::On)
+   {
+      labMode = true;
+   }
+   else
+   {
+      labMode = false;
+   }
+
+   if(m_labMode == labMode)
+   {
+      return 0;
+   }
+
+   m_labMode = labMode;
+
+   if(m_labMode)
+   {
+      log<text_log>("lab mode ON", logPrio::LOG_NOTICE);
+      updateSwitchIfChanged(m_indiP_labMode, "toggle", pcf::IndiElement::On, INDI_OK);
+   }
+   else
+   {
+      log<text_log>("lab mode OFF", logPrio::LOG_NOTICE);
+      updateSwitchIfChanged(m_indiP_labMode, "toggle", pcf::IndiElement::Off, INDI_OK);
+   }
+
+   return 0;
 }
 
 INDI_NEWCALLBACK_DEFN(tcsInterface, m_indiP_pyrNudge)(const pcf::IndiProperty &ipRecv)
@@ -2733,8 +2793,6 @@ INDI_NEWCALLBACK_DEFN(tcsInterface, m_indiP_pyrNudge)(const pcf::IndiProperty &i
    
    return sendPyrNudge(x, y, z);
 }
-
-
 
 INDI_NEWCALLBACK_DEFN(tcsInterface, m_indiP_acqFromGuider)(const pcf::IndiProperty &ipRecv)
 {
