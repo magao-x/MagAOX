@@ -291,7 +291,10 @@ int dmPokeXCorr::allocate(const zrespShmimT & dummy )
 {
     static_cast<void>(dummy);
 
-    m_refIm.create( m_configName + "_refIm", zrespShmimMonitorT::m_width, zrespShmimMonitorT::m_height);
+    if(m_refIm.rows() != zrespShmimMonitorT::m_width || m_refIm.cols() != zrespShmimMonitorT::m_height)
+    {
+        m_refIm.create( m_configName + "_refIm", zrespShmimMonitorT::m_width, zrespShmimMonitorT::m_height);
+    }
 
     return 0;
 }

@@ -690,7 +690,11 @@ int dmPokeWFS<derivedT>::allocate( const wfsShmimT & dummy)
         m_darkValid = false;
     }
 
-    m_pokeImage.create(derived().m_configName + "_poke", derived().shmimMonitor().width(), derived().shmimMonitor().height());
+    if(m_pokeImage.rows() != derived().shmimMonitor().width() || m_pokeImage.cols() != derived().shmimMonitor().height())
+    {
+        m_pokeImage.create(derived().m_configName + "_poke", derived().shmimMonitor().width(), derived().shmimMonitor().height());
+    }
+
     m_pokeLocal.resize(derived().shmimMonitor().width(), derived().shmimMonitor().height());
 
     return 0;
