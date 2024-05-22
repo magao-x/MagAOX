@@ -32,8 +32,7 @@ class NewXFilesHandler(FileSystemEventHandler):
         self.events_queue = events_queue
         self.log = logging.getLogger(log_name)
 
-    def construct_message(self, event, is_new_file=False):
-        stat_result = os.stat(event.src_path)
+    def construct_message(self, stat_result, event, is_new_file=False):
         return FileOrigin(
             origin_host=self.host,
             origin_path=event.src_path,
@@ -45,12 +44,20 @@ class NewXFilesHandler(FileSystemEventHandler):
     def on_created(self, event):
         if event.is_directory:
             return
-        self.events_queue.put(self.construct_message(event, is_new_file=True))
+        try:
+            stat_result = os.stat(event.src_path)
+        except FileNotFoundError:
+            return
+        self.events_queue.put(self.construct_message(stat_result, event, is_new_file=True))
 
     def on_modified(self, event):
         if event.is_directory:
             return
-        self.events_queue.put(self.construct_message(event, is_new_file=False))
+        try:
+            stat_result = os.stat(event.src_path)
+        except FileNotFoundError:
+            return
+        self.events_queue.put(self.construct_message(stat_result, event, is_new_file=False))
 
 RETRY_WAIT_SEC = 2
 CREATE_CONNECTION_TIMEOUT_SEC = 2
