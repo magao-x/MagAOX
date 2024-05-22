@@ -17,7 +17,7 @@ else
   git checkout $COMMIT_ISH
   bash -x ./fetch_cacao_dev.sh
 fi
-sudo rm -rf _build src/config.h src/milk_config.h
+sudo -H rm -rf _build src/config.h src/milk_config.h
 mkdir -p _build
 cd _build
 
@@ -34,7 +34,7 @@ numCpus=$(nproc)
 make -j $((numCpus / 2))
 sudo make install
 
-sudo $pythonExe -m pip install ../src/ImageStreamIO/
+sudo -H $pythonExe -m pip install ../src/ImageStreamIO/
 $pythonExe -c 'import ImageStreamIOWrap' || exit 1
 
 milkSuffix=bin/milk
@@ -45,8 +45,8 @@ if command -v milk; then
     log_warn "Found existing milk binary at $(command -v milk)"
 fi
 link_if_necessary $milkPath /usr/local/milk
-echo "/usr/local/milk/lib" | sudo tee /etc/ld.so.conf.d/milk.conf
-sudo ldconfig
+echo "/usr/local/milk/lib" | sudo -H tee /etc/ld.so.conf.d/milk.conf
+sudo -H ldconfig
 echo "export PATH=\"\$PATH:/usr/local/milk/bin\"" | sudo tee /etc/profile.d/milk.sh
 echo "export PKG_CONFIG_PATH=\$PKG_CONFIG_PATH:/usr/local/milk/lib/pkgconfig" | sudo tee -a /etc/profile.d/milk.sh
 echo "export MILK_SHM_DIR=/milk/shm" | sudo tee -a /etc/profile.d/milk.sh
@@ -68,7 +68,7 @@ if [[ $MAGAOX_ROLE == ICC || $MAGAOX_ROLE == RTC ]]; then
   clone_or_update_and_cd magao-x "cacao-${MAGAOX_ROLE,,}" /data
   link_if_necessary "/data/cacao-${MAGAOX_ROLE,,}" /opt/MagAOX/cacao
   sudo install $DIR/../systemd_units/cacao_startup_if_present.service /etc/systemd/system/
-  sudo systemctl daemon-reload || true
+  sudo -H systemctl daemon-reload || true
   sudo systemctl enable cacao_startup_if_present.service || true
 else
   make_on_data_array "cacao-${MAGAOX_ROLE,,}" /opt/MagAOX

@@ -1,7 +1,7 @@
 #!/bin/bash
 if [[ "$EUID" != 0 ]]; then
     echo "Becoming root..."
-    sudo bash -l $0 "$@"
+    sudo -H bash -l $0 "$@"
     exit $?
 fi
 DIR="$( cd "$( dirname "${BASH_SOURCE[0]}" )" && pwd )"

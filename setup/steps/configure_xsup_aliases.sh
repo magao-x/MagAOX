@@ -1,6 +1,6 @@
 #!/bin/bash
 if [[ "$EUID" != 0 ]]; then
-    sudo bash $0 "$@"
+    sudo -H bash $0 "$@"
     exit $?
 fi
 DIR="$( cd "$( dirname "${BASH_SOURCE[0]}" )" && pwd )"

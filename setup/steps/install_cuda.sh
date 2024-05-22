@@ -9,7 +9,7 @@ fi
 
 if [[ "$EUID" != 0 ]]; then
     echo "Becoming root..."
-    $REAL_SUDO --preserve-env=BUILDING_KERNEL_STUFF bash -l $0 "$@"
+    $REAL_SUDO -H --preserve-env=BUILDING_KERNEL_STUFF bash -l $0 "$@"
     exit $?
 fi
 DIR="$( cd "$( dirname "${BASH_SOURCE[0]}" )" && pwd )"
@@ -51,7 +51,7 @@ if [[ ! -e /usr/local/cuda-$CUDA_VERSION ]]; then
     bash $CUDA_RUNFILE $CUDA_FLAGS || exit 1
 else
     log_info "Existing CUDA install found in /usr/local/cuda-$CUDA_VERSION"
-    log_info "sudo /usr/local/cuda-$CUDA_VERSION/bin/cuda-uninstaller to uninstall"
+    log_info "sudo -H /usr/local/cuda-$CUDA_VERSION/bin/cuda-uninstaller to uninstall"
 fi
 echo "export CUDADIR=/usr/local/cuda" > /etc/profile.d/cuda.sh
 echo "export CUDA_ROOT=/usr/local/cuda" >> /etc/profile.d/cuda.sh
@@ -67,7 +67,7 @@ if [[ $MAGAOX_ROLE != vm && $MAGAOX_ROLE != ci && ! -e /usr/lib/systemd/system/n
   cd nvidia-persistenced-init
   # NVIDIA's install script adds the user, adds a systemd unit
   # enables it, and starts it.
-  sudo bash install.sh systemd
+  sudo -H bash install.sh systemd
   rm -r $workdir
 fi
 
