@@ -6,6 +6,6 @@ setINDI "stagepickoff.presetName.lab=Off;none=Off;tel=On"
 setINDI "adctrack.tracking.toggle=On"
 setINDI "ktrack.tracking.toggle=On"
 setINDI "tcsi.labMode.toggle=Off"
-setINDI "maggio_x.personality.default=On;lab_mode=Off"
+setINDI "maggieo_x.personality.default=On;lab_mode=Off"
 
 xlog "ran xskymode"

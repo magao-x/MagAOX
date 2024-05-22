@@ -13,6 +13,6 @@ setINDI "fliptip.presetName.in=On;out=Off"
 setINDI "tcsi.offlTT_enable.toggle=Off"
 setINDI "tcsi.offlF_enable.toggle=Off"
 setINDI "tcsi.labMode.toggle=On"
-setINDI "maggio_x.personality.default=Off;lab_mode=On"
+setINDI "maggieo_x.personality.default=Off;lab_mode=On"
 
 xlog "ran xlabmode"
