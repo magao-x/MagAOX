@@ -143,7 +143,7 @@ public:
        \endcode
      * with appropriate error checking.
      */
-   void setupConfig(mx::app::appConfigurator & config /**< [out] the derived classes configurator*/);
+   int setupConfig(mx::app::appConfigurator & config /**< [out] the derived classes configurator*/);
 
    /// load the configuration system results
    /**
@@ -153,7 +153,7 @@ public:
        \endcode
      * with appropriate error checking.
      */
-   void loadConfig(mx::app::appConfigurator & config /**< [in] the derived classes configurator*/);
+   int loadConfig(mx::app::appConfigurator & config /**< [in] the derived classes configurator*/);
 
    /// Startup function
    /** 
@@ -566,7 +566,7 @@ private:
 };
 
 template<class derivedT, typename realT>
-void dm<derivedT,realT>::setupConfig(mx::app::appConfigurator & config)
+int dm<derivedT,realT>::setupConfig(mx::app::appConfigurator & config)
 {
    config.add("dm.calibPath", "", "dm.calibPath", argType::Required, "dm", "calibPath", false, "string", "The path to calibration files, relative to the MagAO-X calibration path.");
    
@@ -604,10 +604,11 @@ void dm<derivedT,realT>::setupConfig(mx::app::appConfigurator & config)
    config.add("dm.satTriggerDevice", "", "dm.satTriggerDevice", argType::Required, "dm", "satTriggerDevice", false, "vector<string>", "Device(s) with a toggle switch to toggle on saturation trigger.");
    config.add("dm.satTriggerProperty", "", "dm.satTriggerProperty", argType::Required, "dm", "satTriggerProperty", false, "vector<string>", "Property with a toggle switch to toggle on saturation trigger, one per entry in satTriggerDevice.");
 
+   return 0;
 }
 
 template<class derivedT, typename realT>
-void dm<derivedT,realT>::loadConfig(mx::app::appConfigurator & config)
+int dm<derivedT,realT>::loadConfig(mx::app::appConfigurator & config)
 {
    
    m_calibPath = derived().m_calibDir + "/" + m_calibRelDir;
@@ -676,6 +677,8 @@ void dm<derivedT,realT>::loadConfig(mx::app::appConfigurator & config)
    config(m_intervalSatCountThreshold, "dm.intervalSatCountThreshold"); 
    config(m_satTriggerDevice, "dm.satTriggerDevice");
    config(m_satTriggerProperty, "dm.satTriggerProperty");
+
+   return 0;
 }
    
 
@@ -1945,8 +1948,6 @@ int dm<derivedT,realT>::updateINDI()
 {
    if( !derived().m_indiDriver ) return 0;
    
-   
-   
    return 0;
 }
 
@@ -2207,6 +2208,56 @@ int dm<derivedT,realT>::newCallBack_zeroAll( const pcf::IndiProperty &ipRecv )
    }
    return 0;  
 }
+
+/// Call dmT::setupConfig with error checking for dm
+/**
+  * \param cfig the application configurator 
+  */
+#define DM_SETUP_CONFIG( cfig )                                                   \
+    if(dmT::setupConfig(cfig) < 0)                                                \
+    {                                                                             \
+        log<software_error>({__FILE__, __LINE__, "Error from dmT::setupConfig"}); \
+        m_shutdown = true;                                                        \
+        return;                                                                   \
+    }
+
+/// Call dmT::loadConfig with error checking for dm
+/** This must be inside a function that returns int, e.g. the standard loadConfigImpl.
+  * \param cfig the application configurator 
+  */
+#define DM_LOAD_CONFIG( cfig )                                                             \
+    if(dmT::loadConfig(cfig) < 0)                                                          \
+    {                                                                                      \
+        return log<software_error,-1>({__FILE__, __LINE__, "Error from dmT::loadConfig"}); \
+    }
+
+/// Call shmimMonitorT::appStartup with error checking for dm
+#define DM_APP_STARTUP                                                                     \
+    if(dmT::appStartup() < 0)                                                              \
+    {                                                                                      \
+        return log<software_error,-1>({__FILE__, __LINE__, "Error from dmT::appStartup"}); \
+    }
+
+/// Call dmT::appLogic with error checking for dm
+#define DM_APP_LOGIC                                                                     \
+    if(dmT::appLogic() < 0)                                                              \
+    {                                                                                    \
+        return log<software_error,-1>({__FILE__, __LINE__, "Error from dmT::appLogic"}); \
+    }
+
+/// Call dmT::updateINDI with error checking for dm
+#define DM_UPDATE_INDI                                                                     \
+    if(dmT::updateINDI() < 0)                                                              \
+    {                                                                                      \
+        return log<software_error,-1>({__FILE__, __LINE__, "Error from dmT::updateINDI"}); \
+    }
+
+/// Call dmT::appShutdown with error checking for dm
+#define DM_APP_SHUTDOWN                                                                     \
+    if(dmT::appShutdown() < 0)                                                              \
+    {                                                                                       \
+        return log<software_error,-1>({__FILE__, __LINE__, "Error from dmT::appShutdown"}); \
+    }
 
 } //namespace dev
 } //namespace app

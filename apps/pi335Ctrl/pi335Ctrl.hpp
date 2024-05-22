@@ -11,7 +11,7 @@
 #include "../../magaox_git_version.h"
 
 /** \defgroup pi335Ctrl
- * \brief The XXXXXXX application to do YYYYYYY
+ * \brief The MagAO-X application to interface with a PI-335 Controller
  *
  * <a href="..//apps_html/page_module_pi335Ctrl.html">Application Documentation</a>
  *
@@ -28,7 +28,7 @@ namespace MagAOX
 namespace app
 {
 
-/// The MagAO-X PI 335 Controller
+/// The MagAO-X PI 335 Controller Interface
 /**
  * \ingroup pi335Ctrl
  */
@@ -40,7 +40,11 @@ class pi335Ctrl : public MagAOXApp<true>, public tty::usbDevice, public dev::ioD
 
     friend class dev::dm<pi335Ctrl, float>;
 
+    typedef dev::dm<pi335Ctrl, float> dmT;
+
     friend class dev::shmimMonitor<pi335Ctrl>;
+
+    typedef dev::shmimMonitor<pi335Ctrl> shmimMonitorT;
 
     friend class dev::telemeter<pi335Ctrl>;
 
@@ -288,10 +292,11 @@ void pi335Ctrl::setupConfig()
 {
     dev::ioDevice::setupConfig(config);
     tty::usbDevice::setupConfig(config);
-    dev::dm<pi335Ctrl, float>::setupConfig(config);
+
+    DM_SETUP_CONFIG(config);
 
     TELEMETER_SETUP_CONFIG(config);
-
+      
     config.add("stage.naxes", "", "stage.naxes", argType::Required, "stage", "naxes", false, "int", "Number of axes.  Default is 2.  Max is 3.");
 
     config.add("stage.homePos1", "", "stage.homePos1", argType::Required, "stage", "homePos1", false, "float", "Home position of axis 1.  Default is 17.5.");
@@ -318,7 +323,7 @@ int pi335Ctrl::loadConfigImpl(mx::app::appConfigurator &_config)
     m_calibRelDir = "ttmpupil";
     config(m_calibRelDir, "dm.calibRelDir");
 
-    dev::dm<pi335Ctrl, float>::loadConfig(_config);
+    DM_LOAD_CONFIG(_config);
 
     config(m_naxes, "stage.naxes");
     config(m_homePos1, "stage.homePos1");
@@ -350,9 +355,8 @@ int pi335Ctrl::appStartup()
         log<text_log>(std::string("USB Device ") + m_idVendor + ":" + m_idProduct + ":" + m_serial + " found in udev as " + m_deviceName);
     }
 
-    ///\todo error checks here
-    dev::dm<pi335Ctrl, float>::appStartup();
-    shmimMonitor<pi335Ctrl>::appStartup();
+    DM_APP_STARTUP;
+    SHMIMMONITOR_APP_STARTUP;
 
     // set up the  INDI properties
     REG_INDI_NEWPROP(m_indiP_pos1, "pos_1", pcf::IndiProperty::Number);
@@ -376,8 +380,8 @@ int pi335Ctrl::appStartup()
 
 int pi335Ctrl::appLogic()
 {
-    dev::dm<pi335Ctrl, float>::appLogic();
-    shmimMonitor<pi335Ctrl>::appLogic();
+    DM_APP_LOGIC;
+    SHMIMMONITOR_APP_LOGIC;
 
     TELEMETER_APP_LOGIC;
 
@@ -660,13 +664,17 @@ int pi335Ctrl::appLogic()
             updateIfChanged<float>(m_indiP_pos3, std::vector<std::string>({"current", "target"}), {m_pos3, m_pos3Set}, INDI_BUSY);
         }
     }
+
+    SHMIMMONITOR_UPDATE_INDI;
+    DM_UPDATE_INDI;
+    
     return 0;
 }
 
 int pi335Ctrl::appShutdown()
 {
-    dev::dm<pi335Ctrl, float>::appShutdown();
-    shmimMonitor<pi335Ctrl>::appShutdown();
+    DM_APP_SHUTDOWN;
+    SHMIMMONITOR_APP_SHUTDOWN;
     TELEMETER_APP_SHUTDOWN;
 
     return 0;
