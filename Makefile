@@ -6,6 +6,7 @@ apps_common = \
 	sshDigger \
 	sysMonitor \
 	xindiserver \
+	resurrector \
 	mzmqClient \
 	magAOXMaths \
 	mzmqServer \
