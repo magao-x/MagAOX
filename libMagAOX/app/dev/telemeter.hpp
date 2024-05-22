@@ -41,7 +41,7 @@ namespace dev
   *
   * - Must provide one overload of the following function for each telemetry type:
   *   \code
-  *       int recordTelem( telem_type1 * )
+  *       int recordTelem( const telem_type1 * )
   *       {
   *          //DO NOT USE telem_type1
   *          return m_tel<telem_type1>( { message entered here } );

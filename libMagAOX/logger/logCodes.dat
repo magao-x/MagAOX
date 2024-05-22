@@ -80,3 +80,5 @@ telem_dmmodes            20910    telem_dmmodes
 telem_loopgain           20915    telem_loopgain
 telem_blockgains         20920    telem_blockgains 
 
+telem_pi335              20930    telem_pi335
+

@@ -33,7 +33,9 @@ namespace app
 /** 
   * \ingroup pi335Ctrl
   */
-class pi335Ctrl : public MagAOXApp<true> , public tty::usbDevice, public dev::ioDevice, public dev::dm<pi335Ctrl,float>,  public dev::shmimMonitor<pi335Ctrl>
+class pi335Ctrl : public MagAOXApp<true> , public tty::usbDevice, public dev::ioDevice, 
+                      public dev::dm<pi335Ctrl,float>,  public dev::shmimMonitor<pi335Ctrl>,
+                          public dev::telemeter<pi335Ctrl>
 {
 
    //Give the test harness access.
@@ -43,14 +45,18 @@ class pi335Ctrl : public MagAOXApp<true> , public tty::usbDevice, public dev::io
    
    friend class dev::shmimMonitor<pi335Ctrl>;
    
+   friend class dev::telemeter<pi335Ctrl>;
+
+   typedef dev::telemeter<pi335Ctrl> telemeterT;
+
 protected:
 
    /** \name Configurable Parameters
      *@{
      */  
-   
-   
-   
+
+   float m_posTol {0.05}; ///< The tolerance for reporting a raw position rather than the setpoint.
+
    float m_homePos1 {17.5}; ///< Home position of axis 1.  Default is 17.5
    float m_homePos2 {17.5}; ///< Home position of axis 2.  Default is 17.5
    float m_homePos3 {0.0}; ///< Home position of axis 2.  Default is 17.5
@@ -81,13 +87,19 @@ protected:
    
    int m_servoState {0};
 
+   float m_pos1Set {0};
    float m_pos1 {0};
+
+   float m_pos2Set {0};
    float m_pos2 {0};
+
+   float m_pos3Set {0};
    float m_pos3 {0};
-   
+
    float m_sva1 {0};
    float m_sva2 {0};
    float m_sva3 {0};
+
 public:
    /// Default c'tor.
    pi335Ctrl();
@@ -259,6 +271,18 @@ public:
    INDI_NEWCALLBACK_DECL(pi335Ctrl, m_indiP_pos1);
    INDI_NEWCALLBACK_DECL(pi335Ctrl, m_indiP_pos2);
    INDI_NEWCALLBACK_DECL(pi335Ctrl, m_indiP_pos3);
+
+   /** \name Telemeter Interface
+     * @{ 
+     */
+
+   int checkRecordTimes();
+
+   int recordTelem( const telem_pi335 * );
+
+   int recordPI335( bool force = false );
+
+   ///@}
 };
 
 pi335Ctrl::pi335Ctrl() : MagAOXApp(MAGAOX_CURRENT_SHA1, MAGAOX_REPO_MODIFIED)
@@ -274,6 +298,8 @@ void pi335Ctrl::setupConfig()
    tty::usbDevice::setupConfig(config);
    dev::dm<pi335Ctrl,float>::setupConfig(config);
    
+   TELEMETER_SETUP_CONFIG( config );
+
    config.add("stage.naxes", "", "stage.naxes", argType::Required, "stage", "naxes", false, "int", "Number of axes.  Default is 2.  Max is 3.");
    
    config.add("stage.homePos1", "", "stage.homePos1", argType::Required, "stage", "homePos1", false, "float", "Home position of axis 1.  Default is 17.5.");
@@ -307,6 +333,8 @@ int pi335Ctrl::loadConfigImpl( mx::app::appConfigurator & _config )
    config(m_homePos2, "stage.homePos2");
    config(m_homePos3, "stage.homePos3");
    
+   TELEMETER_LOAD_CONFIG( _config );
+
    return 0;
 }
 
@@ -349,6 +377,8 @@ int pi335Ctrl::appStartup()
    
    //Note: 3rd axis added in testConnection if it's found
    
+   TELEMETER_APP_STARTUP;
+
    return 0;
 }
 
@@ -357,6 +387,8 @@ int pi335Ctrl::appLogic()
    dev::dm<pi335Ctrl,float>::appLogic();
    shmimMonitor<pi335Ctrl>::appLogic();
    
+   TELEMETER_APP_LOGIC;
+
    if(state() == stateCodes::POWERON)
    {
       if(!powerOnWaitElapsed()) 
@@ -467,7 +499,6 @@ int pi335Ctrl::appLogic()
    
    if(state() == stateCodes::HOMING)
    {
-      //std::cerr << "Homing state: " << m_homingState << " " << mx::sys::get_curr_time() - m_homingStart << "\n";
       int ax = m_homingState + 1;
       
       int atz = homeState(ax);
@@ -478,7 +509,7 @@ int pi335Ctrl::appLogic()
          log<software_error,-1>({__FILE__, __LINE__, "error getting ATZ? home state."});
       }
       
-      if(atz == 1) //mx::sys::get_curr_time() - m_homingStart > 20)
+      if(atz == 1)
       {
          ++m_homingState;
          
@@ -529,13 +560,14 @@ int pi335Ctrl::appLogic()
       lock.unlock();
       mx::sys::milliSleep(1); //Put this thread to sleep to make sure other thread gets a lock
       
-      if(fabs(m_pos1-pos1) > 0.1)
+      m_pos1 = pos1;
+      if(fabs(m_pos1Set-m_pos1) > m_posTol)
       {
          updateIfChanged(m_indiP_pos1, "current", m_pos1, INDI_BUSY);
       }
       else
       {
-         updateIfChanged(m_indiP_pos1, "current", m_pos1, INDI_IDLE);
+         updateIfChanged(m_indiP_pos1, "current", m_pos1Set, INDI_IDLE);
       }
 
       lock.lock();
@@ -560,13 +592,14 @@ int pi335Ctrl::appLogic()
       lock.unlock();
       mx::sys::milliSleep(1); //Put this thread to sleep to make sure other thread gets a lock
             
-      if(fabs(m_pos2 - pos2) > 0.1) //sva2 != m_sva2)
+      m_pos2 = pos2;
+      if(fabs(m_pos2Set - m_pos2) > m_posTol) //sva2 != m_sva2)
       {
          updateIfChanged(m_indiP_pos2, "current", m_pos2, INDI_BUSY);
       }
       else
       {
-         updateIfChanged(m_indiP_pos2, "current", m_pos2, INDI_IDLE);
+         updateIfChanged(m_indiP_pos2, "current", m_pos2Set, INDI_IDLE);
       }
       
       lock.lock();
@@ -593,13 +626,14 @@ int pi335Ctrl::appLogic()
          lock.unlock();
          mx::sys::milliSleep(1); //Put this thread to sleep to make sure other thread gets a lock
                
-         if(fabs(m_pos3 - pos3) > 0.1) //sva2 != m_sva2)
+         m_pos3 = pos3;
+         if(fabs(m_pos3Set - m_pos3) > m_posTol)
          {
             updateIfChanged(m_indiP_pos3, "current", m_pos3, INDI_BUSY);
          }
          else
          {
-            updateIfChanged(m_indiP_pos3, "current", m_pos3, INDI_IDLE);
+            updateIfChanged(m_indiP_pos3, "current", m_pos3Set, INDI_IDLE);
          }
          
          lock.lock();
@@ -615,21 +649,20 @@ int pi335Ctrl::appLogic()
          m_sva3 = sva3;
       }
       
+      recordPI335();
       
-      //std::cerr << m_pos1 << " " << pos1 << " " << m_sva1 << " " << m_pos2 << " " << pos2 << " " << m_sva2;
-      //if(m_naxes == 3) std::cerr << " " << m_pos3 << " " << pos3 << " " << m_sva3;
-      //std::cerr << "\n";
+      /*std::cerr << m_pos1Set << " " << pos1 << " " << m_sva1 << " " << m_pos2Set << " " << pos2 << " " << m_sva2;
+      if(m_naxes == 3) std::cerr << " " << m_pos3Set << " " << pos3 << " " << m_sva3;
+      std::cerr << "\n";*/
    }
    else if(state() == stateCodes::OPERATING)
    {
-      updateIfChanged(m_indiP_pos1, "current", m_pos1, INDI_BUSY);
-      updateIfChanged(m_indiP_pos1, "target", m_pos1, INDI_BUSY);
-      updateIfChanged(m_indiP_pos2, "current", m_pos2, INDI_BUSY);
-      updateIfChanged(m_indiP_pos2, "target", m_pos2, INDI_BUSY);
+      updateIfChanged<float>(m_indiP_pos1, std::vector<std::string>({"current", "target"}), {m_pos1, m_pos1Set}, INDI_BUSY);
+      updateIfChanged<float>(m_indiP_pos2, std::vector<std::string>({"current","target"}), {m_pos2, m_pos2Set}, INDI_BUSY);
+
       if(m_naxes == 3) 
       {
-        updateIfChanged(m_indiP_pos3, "current", m_pos3, INDI_BUSY);
-        updateIfChanged(m_indiP_pos3, "target", m_pos3, INDI_BUSY);
+        updateIfChanged<float>(m_indiP_pos3, std::vector<std::string>({"current", "target"}), {m_pos3, m_pos3Set}, INDI_BUSY);
       }
    }
    return 0;
@@ -639,7 +672,8 @@ int pi335Ctrl::appShutdown()
 {
    dev::dm<pi335Ctrl,float>::appShutdown();
    shmimMonitor<pi335Ctrl>::appShutdown();
-   
+   TELEMETER_APP_SHUTDOWN;
+
    return 0;
 }
 
@@ -652,9 +686,7 @@ int pi335Ctrl::testConnection()
    {
       return log<software_critical, -1>( {__FILE__, __LINE__, rv, tty::ttyErrorString(rv)});
    }
-  
-   std::cerr << "idn response: " << resp << "\n";
-   
+     
    size_t st;
    if( (st = resp.find("E-727.3SDA")) == std::string::npos) 
    {
@@ -671,24 +703,18 @@ int pi335Ctrl::testConnection()
    }
    resp1 = mx::ioutils::removeWhiteSpace(resp1);
    
-   std::cerr << "CST? 1 response: " << resp1 << "\n";
-
    if( (rv = tty::ttyWriteRead( resp2, "CST? 2\n", "\n", false, m_fileDescrip, m_writeTimeout, m_readTimeout)) < 0)
    {
       return log<software_critical,-1>( {__FILE__, __LINE__, rv, tty::ttyErrorString(rv)});
    }
    resp2 = mx::ioutils::removeWhiteSpace(resp2);
    
-   std::cerr << "CST? 2 response: " << resp2 << "\n";
-
    if( (rv = tty::ttyWriteRead( resp3, "CST? 3\n", "\n", false, m_fileDescrip, m_writeTimeout, m_readTimeout)) < 0)
    {
       return log<software_critical,-1>( {__FILE__, __LINE__, rv, tty::ttyErrorString(rv)});
    }
    resp3 = mx::ioutils::removeWhiteSpace(resp3);
-   
-   std::cerr << "CST? 3 response: " << resp3 << "\n";
-   
+      
    updateIfChanged(m_indiP_pos1, "current", 0.0);
    updateIfChanged(m_indiP_pos1, "target", 0.0);
          
@@ -810,11 +836,7 @@ int pi335Ctrl::testConnection()
       m_max3 = mx::ioutils::convertFromString<float>(resp.substr(st+1));
       log<text_log>("axis 3 max: " + std::to_string(m_max3));
    }
-   
-   std::cerr << "Limits axis-1: " << m_min1 << " " << m_max1 << "\n";
-   std::cerr << "Limits axis-2: " << m_min2 << " " << m_max2 << "\n";
-   if(m_naxes == 3) std::cerr << "Limits axis-3: " << m_min3 << " " << m_max3 << "\n";
-   
+      
    m_flatCommand.resize(3,1);
    if(m_naxes == 2)
    {
@@ -829,18 +851,6 @@ int pi335Ctrl::testConnection()
       m_flatCommand(2,0) = m_homePos3;
    }
    m_flatLoaded = true;
-
-   /*if( (rv = tty::ttyWriteRead( resp, "PUN?\n", "\n", false, m_fileDescrip, m_writeTimeout, m_readTimeout)) < 0)
-   {
-      return log<software_critical, -1>( {__FILE__, __LINE__, rv, tty::ttyErrorString(rv)});
-   }
-         
-   if((st = resp.find('=')) == std::string::npos)
-   {
-      return log<software_critical, -1>( {__FILE__, __LINE__, "invalid response"});
-   }
-   
-   std::cerr << resp << "\n";*/
    
    return 0;
    
@@ -851,42 +861,34 @@ int pi335Ctrl::initDM()
    int rv;
    std::string resp;
    
-   
    //get open-loop position of axis 1 (should be zero)
-   //std::cerr << "Sending: SVA? 1\n";
    rv = tty::ttyWriteRead( resp, "SVA? 1\n", "\n", false, m_fileDescrip, m_writeTimeout, m_readTimeout);
 
    if(rv < 0)
    {
       log<software_error>( {__FILE__, __LINE__, rv, tty::ttyErrorString(rv)});
    }
-   //std::cerr << "response: " << resp << "\n";
    
    //get open-loop position of axis 2 (should be zero)
-   // std::cerr << "Sending: SVA? 2\n";
    rv = tty::ttyWriteRead( resp, "SVA? 2\n", "\n", false, m_fileDescrip, m_writeTimeout, m_readTimeout);
 
    if(rv < 0)
    {
       log<software_error>( {__FILE__, __LINE__, rv, tty::ttyErrorString(rv)});
    }
-   //std::cerr << "response: " << resp << "\n";
    
    if(m_naxes == 3)
    {
       //get open-loop position of axis 2 (should be zero)
-      // std::cerr << "Sending: SVA? 2\n";
       rv = tty::ttyWriteRead( resp, "SVA? 3\n", "\n", false, m_fileDescrip, m_writeTimeout, m_readTimeout);
 
       if(rv < 0)
       {
          log<software_error>( {__FILE__, __LINE__, rv, tty::ttyErrorString(rv)});
       }
-      //std::cerr << "response: " << resp << "\n";
    }
  
    //make sure axis 1 has servo off
-   //std::cerr << "Sending: SVO 1 0\n";
    rv = tty::ttyWrite("SVO 1 0\n",  m_fileDescrip, m_writeTimeout);
 
    if(rv < 0)
@@ -895,7 +897,6 @@ int pi335Ctrl::initDM()
    }
    
    //make sure axis 2 has servo off
-   //std::cerr << "Sending: SVO 2 0\n";
    rv = tty::ttyWrite("SVA 2 0\n",  m_fileDescrip, m_writeTimeout);
 
    if(rv < 0)
@@ -906,7 +907,6 @@ int pi335Ctrl::initDM()
    if(m_naxes == 0)
    {
       //make sure axis 3 has servo off
-      //std::cerr << "Sending: SVO 2 0\n";
       rv = tty::ttyWrite("SVA 3 0\n",  m_fileDescrip, m_writeTimeout);
 
       if(rv < 0)
@@ -936,7 +936,6 @@ int pi335Ctrl::home()
    m_homingState = 0;
 
    state(stateCodes::HOMING);   
-   
    
    return home_1();
    
@@ -988,7 +987,6 @@ int pi335Ctrl::home_1()
    if(m_actuallyATZ)
    {
       //zero range found in axis 1 (NOTE this moves mirror full range) TAKES 1min 
-      //std::cerr << "Sending: ATZ 1 NaN\n";
       rv = tty::ttyWrite("ATZ 1 NaN\n",  m_fileDescrip, m_writeTimeout);
 
       if(rv < 0)
@@ -1023,7 +1021,6 @@ int pi335Ctrl::home_2()
    if(m_actuallyATZ)
    {
       //zero range found in axis 2 (NOTE this moves mirror full range) TAKES 1min 
-      //std::cerr << "Sending: ATZ 2 NaN\n";
       rv = tty::ttyWrite("ATZ 2 NaN\n", m_fileDescrip, m_writeTimeout);
 
       if(rv < 0)
@@ -1057,7 +1054,6 @@ int pi335Ctrl::home_3()
    if(m_actuallyATZ)
    {
       //zero range found in axis 3 (NOTE this moves mirror full range) TAKES 1min 
-      //std::cerr << "Sending: ATZ 3 NaN\n";
       rv = tty::ttyWrite("ATZ 3 NaN\n", m_fileDescrip, m_writeTimeout);
 
       if(rv < 0)
@@ -1134,7 +1130,6 @@ int pi335Ctrl::finishInit()
    {
       log<software_error>( {__FILE__, __LINE__, rv, tty::ttyErrorString(rv)});
    }
-   //std::cerr << "response: " << resp << "\n";
    
    //Get the real position of axis 2 (should be 0mrad st start) 
    rv = tty::ttyWriteRead( resp, "SVA? 2\n", "\n", false, m_fileDescrip, m_writeTimeout, m_readTimeout);
@@ -1169,7 +1164,7 @@ int pi335Ctrl::finishInit()
 
    mx::sys::milliSleep(250);
    
-   //turn on servo to axis 3 (green servo LED goes on 727) 
+   //turn on servo to axis 2 (green servo LED goes on 727) 
    rv = tty::ttyWrite("SVO 2 1\n", m_fileDescrip, m_writeTimeout);
 
    if(rv < 0)
@@ -1209,7 +1204,7 @@ int pi335Ctrl::finishInit()
       log<software_error>( {__FILE__, __LINE__, rv, tty::ttyErrorString(rv)});
    }
 
-   m_pos1 = m_homePos1;
+   m_pos1Set = m_homePos1;
    updateIfChanged(m_indiP_pos1, "target", m_homePos1);   
    
    //center axis 2 (to configured home position)
@@ -1221,7 +1216,7 @@ int pi335Ctrl::finishInit()
       log<software_error>( {__FILE__, __LINE__, rv, tty::ttyErrorString(rv) } );
    }
    
-   m_pos2 = m_homePos2;
+   m_pos2Set = m_homePos2;
    updateIfChanged(m_indiP_pos2, "target", m_homePos2);
    
    if(m_naxes == 3)
@@ -1235,53 +1230,13 @@ int pi335Ctrl::finishInit()
          log<software_error>( {__FILE__, __LINE__, rv, tty::ttyErrorString(rv) } );
       }
  
-      m_pos3 = m_homePos3;
+      m_pos3Set = m_homePos3;
       updateIfChanged(m_indiP_pos3, "target", m_homePos3);
       
    }
    
-   /*
-   sleep(3);
-   
-   
-   //Now we turn servos off
-   if( tty::ttyWrite("SVO 1 0\n", m_fileDescrip, m_writeTimeout) < 0)
-   {
-      log<software_error>( {__FILE__, __LINE__, rv, tty::ttyErrorString(rv)});
-   }
-   
-   if( tty::ttyWrite("SVO 2 0\n",  m_fileDescrip, m_writeTimeout) < 0)
-   {
-      log<software_error>( {__FILE__, __LINE__, rv, tty::ttyErrorString(rv) } );
-   }
-
-   m_servoState = 0;
-
-   log<text_log>("servos off", logPrio::LOG_NOTICE);
-
-
-   float sva1;
-   if(getSva(sva1, 1) < 0)
-   {
-      log<software_error>({__FILE__,__LINE__});
-      state(stateCodes::ERROR);
-      return 0;
-   }   
-
-   m_sva1 = sva1;
-   
-   float sva2;
-   if(getSva(sva2, 2) < 0)
-   {
-      log<software_error>({__FILE__,__LINE__});
-      state(stateCodes::ERROR);
-      return 0;
-   }
-   
-   m_sva2 = sva2;
-   */
    state(stateCodes::READY);
-   //state(stateCodes::OPERATING);
+ 
    return 0;
 }
 
@@ -1376,7 +1331,6 @@ int pi335Ctrl::getCom( std::string & resp,
    
    sendcom += "\n";
 
-   //std::cerr << "sending: " << sendcom;
    int rv = tty::ttyWriteRead( resp, sendcom, "\n", false, m_fileDescrip, m_writeTimeout, m_readTimeout);
    if(rv < 0)
    {
@@ -1384,8 +1338,6 @@ int pi335Ctrl::getCom( std::string & resp,
       return -1;
    }
 
-   //std::cerr << "response: " << resp << "\n";
-   
    return 0;
 }
 
@@ -1465,11 +1417,10 @@ int pi335Ctrl::move_1( float absPos )
       return -1;
    }
    
-   m_pos1 = absPos;
+   m_pos1Set = absPos;
    
    std::string com = "MOV 1 " + std::to_string(absPos) + "\n";
    
-   //std::cerr << "Sending: " << com;
    rv = tty::ttyWrite(com, m_fileDescrip, m_writeTimeout);
 
    if(rv < 0)
@@ -1490,10 +1441,9 @@ int pi335Ctrl::move_2( float absPos )
       return -1;
    }
    
-   m_pos2 = absPos;
+   m_pos2Set = absPos;
    std::string com = "MOV 2 " + std::to_string(absPos) + "\n";
    
-   //std::cerr << "Sending: " << com;
    rv = tty::ttyWrite(com, m_fileDescrip, m_writeTimeout);
 
    if(rv < 0)
@@ -1519,10 +1469,9 @@ int pi335Ctrl::move_3( float absPos )
       return -1;
    }
    
-   m_pos3 = absPos;
+   m_pos3Set = absPos;
    std::string com = "MOV 3 " + std::to_string(absPos) + "\n";
    
-   //std::cerr << "Sending: " << com;
    rv = tty::ttyWrite(com, m_fileDescrip, m_writeTimeout);
 
    if(rv < 0)
@@ -1534,9 +1483,7 @@ int pi335Ctrl::move_3( float absPos )
 }
 
 INDI_NEWCALLBACK_DEFN(pi335Ctrl, m_indiP_pos1)(const pcf::IndiProperty &ipRecv)
-{
-   //if(MagAOXAppT::m_powerState == 0) return 0;
-   
+{   
    if (ipRecv.createUniqueKey() == m_indiP_pos1.createUniqueKey())
    {
       float current = -999999, target = -999999;
@@ -1562,13 +1509,13 @@ INDI_NEWCALLBACK_DEFN(pi335Ctrl, m_indiP_pos1)(const pcf::IndiProperty &ipRecv)
 
          updateIfChanged(m_indiP_pos1, "target", target);
       
-         updateFlat(target, m_pos2, m_pos3); //This just changes the values, but doesn't move
+         updateFlat(target, m_pos2Set, m_pos3Set); //This just changes the values, but doesn't move
 
          return move_1(target);
       }
       else if(state() == stateCodes::OPERATING)
       {
-         return updateFlat(target, m_pos2, m_pos3);
+         return updateFlat(target, m_pos2Set, m_pos3Set);
       }
       
    }
@@ -1576,9 +1523,7 @@ INDI_NEWCALLBACK_DEFN(pi335Ctrl, m_indiP_pos1)(const pcf::IndiProperty &ipRecv)
 }
 
 INDI_NEWCALLBACK_DEFN(pi335Ctrl, m_indiP_pos2)(const pcf::IndiProperty &ipRecv)
-{
-   //if(MagAOXAppT::m_powerState == 0) return 0;
-   
+{   
    if (ipRecv.createUniqueKey() == m_indiP_pos2.createUniqueKey())
    {
       float current = -999999, target = -999999;
@@ -1593,8 +1538,6 @@ INDI_NEWCALLBACK_DEFN(pi335Ctrl, m_indiP_pos2)(const pcf::IndiProperty &ipRecv)
          target = ipRecv["target"].get<float>();
       }
       
-      std::cerr << current << " " << target << "\n";
-      
       if(target == -999999) target = current;
       
       if(target == -999999) return 0;
@@ -1605,12 +1548,12 @@ INDI_NEWCALLBACK_DEFN(pi335Ctrl, m_indiP_pos2)(const pcf::IndiProperty &ipRecv)
          std::unique_lock<std::mutex> lock(m_indiMutex);
 
          updateIfChanged(m_indiP_pos2, "target", target);
-         updateFlat(m_pos1, target, m_pos3); //This just changes the values, but doesn't move
+         updateFlat(m_pos1Set, target, m_pos3Set); //This just changes the values, but doesn't move
          return move_2(target);
       }
       else if(state() == stateCodes::OPERATING)
       {
-         return updateFlat(m_pos1, target, m_pos3);
+         return updateFlat(m_pos1Set, target, m_pos3Set);
       }
       
    }
@@ -1619,7 +1562,6 @@ INDI_NEWCALLBACK_DEFN(pi335Ctrl, m_indiP_pos2)(const pcf::IndiProperty &ipRecv)
 
 INDI_NEWCALLBACK_DEFN(pi335Ctrl, m_indiP_pos3)(const pcf::IndiProperty &ipRecv)
 {
-   //if(MagAOXAppT::m_powerState == 0) return 0;
    
    if (ipRecv.getName() == m_indiP_pos3.getName())
    {
@@ -1646,16 +1588,58 @@ INDI_NEWCALLBACK_DEFN(pi335Ctrl, m_indiP_pos3)(const pcf::IndiProperty &ipRecv)
 
          updateIfChanged(m_indiP_pos3, "target", target);
       
-         updateFlat(m_pos1, m_pos2, target); //This just changes the values, but doesn't move
+         updateFlat(m_pos1Set, m_pos2Set, target); //This just changes the values, but doesn't move
          return move_3(target);
       }
       else if(state() == stateCodes::OPERATING)
       {
-         return updateFlat(m_pos1, m_pos2, target);
+         return updateFlat(m_pos1Set, m_pos2Set, target);
       }
 
    }
    return -1;
+}
+
+int pi335Ctrl::checkRecordTimes()
+{
+    return telemeterT::checkRecordTimes( telem_pi335());
+}
+
+int pi335Ctrl::recordTelem( const telem_pi335 * )
+{
+    return recordPI335(true);
+}
+
+int pi335Ctrl::recordPI335( bool force )
+{
+   static float pos1Set = std::numeric_limits<float>::max(); 
+   static float pos1 = std::numeric_limits<float>::max();
+   static float sva1 = std::numeric_limits<float>::max();
+   static float pos2Set = std::numeric_limits<float>::max();
+   static float pos2 = std::numeric_limits<float>::max();
+   static float sva2 = std::numeric_limits<float>::max();
+   static float pos3Set = std::numeric_limits<float>::max();
+   static float pos3 = std::numeric_limits<float>::max();
+   static float sva3 = std::numeric_limits<float>::max();
+
+   if( force || m_pos1Set != pos1Set || m_pos1 != pos1 || m_sva1 != sva1 ||
+                  m_pos2Set != pos2Set || m_pos2 != pos2 ||  m_sva2 != sva2 ||
+                    m_pos3Set != pos3Set || m_pos3 != pos3 || m_sva3 != sva3 )
+   {
+      telem<telem_pi335>({m_pos1Set, m_pos1, m_sva1, m_pos2Set, m_pos2, m_sva2, m_pos3Set, m_pos3, m_sva3});
+
+      pos1Set = m_pos1Set;
+      pos1 = m_pos1;
+      sva1 = m_sva1;
+      pos2Set = m_pos2Set;
+      pos2 = m_pos2;
+      sva2 = m_sva2;
+      pos3Set = m_pos3Set;
+      pos3 = m_pos3;
+      sva3 = m_sva3;
+   }
+
+   return 0;
 }
 
 } //namespace app

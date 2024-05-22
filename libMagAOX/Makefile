@@ -71,6 +71,7 @@ INCLUDEDEPS= app/MagAOXApp.hpp \
              logger/types/telem_fxngen.hpp \
              logger/types/telem_observer.hpp \
              logger/types/telem_loopgain.hpp \
+			 logger/types/telem_pi335.hpp \
              logger/types/telem_pico.hpp \
              logger/types/telem_position.hpp \
              logger/types/telem_pokecenter.hpp \
