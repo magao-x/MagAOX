@@ -62,6 +62,8 @@ protected:
 
     std::string m_dmTriggerChannel; ///< The DM channel to monitor as a trigger
 
+    float m_triggerDelay {0};//0.000375- 0.5/2000.;
+
     int m_triggerSemaphore{9}; ///< The semaphore to use (default 9)
 
     bool m_trigger{true}; ///< Run in trigger mode if true (default)
@@ -80,6 +82,7 @@ protected:
 
     unsigned m_dwell{1}; ///< The dwell time for each speckle, or for how many frames it is held.
 
+    int m_single {-1}; ///< if >= 0 a single frame is non-zero.
     ///@}
 
     mx::improc::eigenCube<realT> m_shapes;
@@ -90,6 +93,7 @@ protected:
 
     IMAGE m_triggerStream;
 
+    
     uint8_t m_dataType{0}; ///< The ImageStreamIO type code.
     size_t m_typeSize{0};  ///< The size of the type, in bytes.
 
@@ -98,6 +102,7 @@ protected:
 
     bool m_modulating{false};
 
+    bool m_restartSp {false};
 public:
     /// Default c'tor.
     dmSpeckle();
@@ -168,23 +173,27 @@ protected:
     // declare our properties
     pcf::IndiProperty m_indiP_dm;
     pcf::IndiProperty m_indiP_trigger;
+    pcf::IndiProperty m_indiP_delay;
     pcf::IndiProperty m_indiP_separation;
     pcf::IndiProperty m_indiP_angle;
     pcf::IndiProperty m_indiP_amp;
     pcf::IndiProperty m_indiP_cross;
     pcf::IndiProperty m_indiP_frequency;
     pcf::IndiProperty m_indiP_dwell;
+    pcf::IndiProperty m_indiP_single;
     pcf::IndiProperty m_indiP_modulating;
     pcf::IndiProperty m_indiP_zero;
 
 public:
     INDI_NEWCALLBACK_DECL(dmSpeckle, m_indiP_trigger);
+    INDI_NEWCALLBACK_DECL(dmSpeckle, m_indiP_delay);
     INDI_NEWCALLBACK_DECL(dmSpeckle, m_indiP_separation);
     INDI_NEWCALLBACK_DECL(dmSpeckle, m_indiP_angle);
     INDI_NEWCALLBACK_DECL(dmSpeckle, m_indiP_cross);
     INDI_NEWCALLBACK_DECL(dmSpeckle, m_indiP_amp);
     INDI_NEWCALLBACK_DECL(dmSpeckle, m_indiP_frequency);
     INDI_NEWCALLBACK_DECL(dmSpeckle, m_indiP_dwell);
+    INDI_NEWCALLBACK_DECL(dmSpeckle, m_indiP_single);
     INDI_NEWCALLBACK_DECL(dmSpeckle, m_indiP_modulating);
     INDI_NEWCALLBACK_DECL(dmSpeckle, m_indiP_zero);
 
@@ -208,11 +217,12 @@ dmSpeckle::dmSpeckle() : MagAOXApp(MAGAOX_CURRENT_SHA1, MAGAOX_REPO_MODIFIED)
 
 void dmSpeckle::setupConfig()
 {
-    config.add("dm.name", "", "dm.name", argType::Required, "dm", "name", false, "string", "The descriptive name of this dm. Default is the channel name.");
     config.add("dm.channelName", "", "dm.channelName", argType::Required, "dm", "channelName", false, "string", "The name of the DM channel to write to.");
     config.add("dm.triggerChannel", "", "dm.triggerChannel", argType::Required, "dm", "triggerChannel", false, "string", "The name of the DM channel to trigger on.");
     config.add("dm.triggerSemaphore", "", "dm.triggerSemaphore", argType::Required, "dm", "triggerSemaphore", false, "int", "The semaphore to use (default 9).");
     config.add("dm.trigger", "", "dm.trigger", argType::True, "dm", "trigger", false, "bool", "Run in trigger mode if true (default).");
+    config.add("dm.triggerDelay", "", "dm.triggerDelay", argType::Required, "dm", "triggerDelay", false, "float", "Delay to apply to the trigger.");
+    
     config.add("dm.separation", "", "dm.separation", argType::Required, "dm", "separation", false, "float", "The radial separation of the speckles (default 15.0).");
     config.add("dm.angle", "", "dm.angle", argType::Required, "dm", "angle", false, "float", "The angle of the speckle pattern c.c.w. from up on camsci1/2 (default 0.0).");
     config.add("dm.angleOffset", "", "dm.angleOffset", argType::Required, "dm", "angleOffset", false, "float", "The calibration offset of angle so that up on camsci1/2 is 0.");
@@ -237,14 +247,24 @@ int dmSpeckle::loadConfigImpl(mx::app::appConfigurator &_config)
 
     _config(m_dmTriggerChannel, "dm.triggerChannel");
     _config(m_triggerSemaphore, "dm.triggerSemaphore");
+    
     if (_config.isSet("dm.trigger"))
+    {
         _config(m_trigger, "dm.trigger");
+    }
+
+    _config(m_triggerDelay, "dm.triggerDelay");
+
     _config(m_separation, "dm.separation");
     _config(m_angle, "dm.angle");
     _config(m_angleOffset, "dm.angleOffset");
     _config(m_amp, "dm.amp");
+    
     if (_config.isSet("dm.cross"))
+    {
         _config(m_cross, "dm.cross");
+    }
+
     _config(m_frequency, "dm.frequency");
     _config(m_dwell, "dm.dwell");
     _config(m_modThreadPrio, "modulator.threadPrio");
@@ -267,6 +287,11 @@ int dmSpeckle::appStartup()
     m_indiP_dm["name"] = m_dmName;
     m_indiP_dm.add(pcf::IndiElement("channel"));
     m_indiP_dm["channel"] = m_dmChannelName;
+
+    createStandardIndiNumber<float>(m_indiP_delay, "delay", 0, 0, 1, "%f");
+    m_indiP_delay["current"] = m_triggerDelay;
+    m_indiP_delay["target"] = m_triggerDelay;
+    registerIndiPropertyNew(m_indiP_delay, INDI_NEWCALLBACK(m_indiP_delay));
 
     createStandardIndiNumber<float>(m_indiP_separation, "separation", 0, 0, 100, "%f");
     m_indiP_separation["current"] = m_separation;
@@ -318,10 +343,15 @@ int dmSpeckle::appStartup()
         m_indiP_trigger["toggle"] = pcf::IndiElement::Off;
     }
 
-    createStandardIndiNumber<float>(m_indiP_dwell, "dwell", 1, 100, 1, "%d");
+    createStandardIndiNumber<int>(m_indiP_dwell, "dwell", 1, 100, 1, "%d");
     m_indiP_dwell["current"] = m_dwell;
     m_indiP_dwell["target"] = m_dwell;
     registerIndiPropertyNew(m_indiP_dwell, INDI_NEWCALLBACK(m_indiP_dwell));
+
+    createStandardIndiNumber<int>(m_indiP_single, "single", -1, 3, 1, "%d");
+    m_indiP_single["current"] = m_single;
+    m_indiP_single["target"] = m_single;
+    registerIndiPropertyNew(m_indiP_single, INDI_NEWCALLBACK(m_indiP_single));
 
     createStandardIndiToggleSw(m_indiP_modulating, "modulating");
     if (registerIndiPropertyNew(m_indiP_modulating, INDI_NEWCALLBACK(m_indiP_modulating)) < 0)
@@ -461,6 +491,9 @@ int dmSpeckle::generateSpeckles()
     m_shapes.image(0) *= m_amp;
     m_shapes.image(1) = -1 * m_shapes.image(0);
 
+   /* m_shapes.image(0) += -0.75;
+    m_shapes.image(1) += -0.75;
+*/
     mx::sigproc::makeFourierMode(m_shapes.image(2), m, n, -1);
 
     if (m_cross)
@@ -476,11 +509,25 @@ int dmSpeckle::generateSpeckles()
     mx::fits::fitsFile<realT> ff;
     ff.write("/tmp/specks.fits", m_shapes);
 
+    if(m_single >= 0)
+    {
+        for(int pp = 0; pp < m_shapes.planes(); ++pp)
+        {
+            if(pp != m_single)
+            {
+                m_shapes.image(pp) *= 0;
+            }
+        }
+    }
+
+
+    updateIfChanged(m_indiP_delay, "current", m_triggerDelay);
     updateIfChanged(m_indiP_separation, "current", m_separation);
     updateIfChanged(m_indiP_angle, "current", m_angle);
     updateIfChanged(m_indiP_amp, "current", m_amp);
     updateIfChanged(m_indiP_frequency, "current", m_frequency);
     updateIfChanged(m_indiP_dwell, "current", m_dwell);
+    updateIfChanged(m_indiP_single, "current", m_single);
 
     return 0;
 }
@@ -507,8 +554,9 @@ inline void dmSpeckle::modThreadExec()
             mx::sys::milliSleep(500);
         }
 
-        if (m_modulating && !m_shutdown)
+        if (m_modulating  && !m_shutdown)
         {
+            m_restartSp = false;
             generateSpeckles();
 
             int64_t freqNsec = (1.0 / m_frequency) * 1e9;
@@ -548,10 +596,12 @@ inline void dmSpeckle::modThreadExec()
             if (m_dwell == 0)
                 m_dwell = 1;
 
-            float m_streamDelay = 0;//0.000375- 0.5/2000.;
-            std::cerr << m_streamDelay << "\n";
+            
+            float triggerDelay = m_triggerDelay/1e6;
 
-            while (m_modulating && !m_shutdown)
+            double t0, t1;
+
+            while (m_modulating && !m_restartSp && !m_shutdown)
             {
                 if (m_trigger)
                 {
@@ -568,11 +618,13 @@ inline void dmSpeckle::modThreadExec()
                     
                     if (sem_timedwait(sem, &ts) == 0)
                     {
-                        double t0 = mx::sys::get_curr_time();
-                        double t1 = t0;
-                        while(t1 - t0 < m_streamDelay)
+                        t0 = mx::sys::get_curr_time();
+                        t1 = t0;
+                        
+                        while(t1 - t0 < triggerDelay)
                         {
-                            double dt = (1e8)*(m_streamDelay - (t1-t0)); //This is 0.1 times remaining time, but in nanosecs
+                            double dt = (1e8)*( triggerDelay - (t1-t0)); //This is 0.1 times remaining time, but in nanosecs
+                            if(dt <= 0) break;
                             mx::sys::nanoSleep(dt);
                             t1 = mx::sys::get_curr_time();
                         }
@@ -621,8 +673,10 @@ inline void dmSpeckle::modThreadExec()
                     m_imageStream.md->atime = currtime;
                     m_imageStream.md->writetime = currtime;
 
-                    if (!m_trigger)
+                    if(!m_trigger || triggerDelay > 0)
+                    {
                         m_imageStream.md->cnt0++;
+                    }
 
                     m_imageStream.md->write = 0;
                     ImageStreamIO_sempost(&m_imageStream, -1);
@@ -643,6 +697,8 @@ inline void dmSpeckle::modThreadExec()
                     }
                 }
             }
+            if(m_restartSp) continue;
+
             recordDmSpeck(true);
             log<text_log>("stopped modulating", logPrio::LOG_NOTICE);
             // Always zero when done
@@ -690,11 +746,46 @@ INDI_NEWCALLBACK_DEFN(dmSpeckle, m_indiP_trigger)
         indi::updateSwitchIfChanged(m_indiP_trigger, "toggle", pcf::IndiElement::On, m_indiDriver, INDI_OK);
     }
 
+    m_restartSp = true;
+
     return 0;
 }
 
-INDI_NEWCALLBACK_DEFN(dmSpeckle, m_indiP_separation)
-(const pcf::IndiProperty &ipRecv)
+INDI_NEWCALLBACK_DEFN(dmSpeckle, m_indiP_delay)(const pcf::IndiProperty &ipRecv)
+{
+    if (ipRecv.getName() != m_indiP_delay.getName())
+    {
+        log<software_error>({__FILE__, __LINE__, "wrong INDI property received."});
+        return -1;
+    }
+
+    float del = -1000000000;
+
+    if (ipRecv.find("current"))
+    {
+        del = ipRecv["current"].get<float>();
+    }
+
+    if (ipRecv.find("target"))
+    {
+        del = ipRecv["target"].get<float>();
+    }
+
+    if (del == -1000000000)
+    {
+        log<software_error>({__FILE__, __LINE__, "No requested delay"});
+        return 0;
+    }
+
+    std::unique_lock<std::mutex> lock(m_indiMutex);
+    m_triggerDelay = del;
+    updateIfChanged(m_indiP_delay, "target", m_triggerDelay);
+
+    m_restartSp = true;
+    return 0;
+}
+
+INDI_NEWCALLBACK_DEFN(dmSpeckle, m_indiP_separation)(const pcf::IndiProperty &ipRecv)
 {
     if (ipRecv.getName() != m_indiP_separation.getName())
     {
@@ -723,6 +814,9 @@ INDI_NEWCALLBACK_DEFN(dmSpeckle, m_indiP_separation)
     std::unique_lock<std::mutex> lock(m_indiMutex);
     m_separation = sep;
     updateIfChanged(m_indiP_separation, "target", m_separation);
+
+    m_restartSp = true;
+
     return 0;
 }
 
@@ -756,6 +850,8 @@ INDI_NEWCALLBACK_DEFN(dmSpeckle, m_indiP_angle)
     std::unique_lock<std::mutex> lock(m_indiMutex);
     m_angle = ang;
     updateIfChanged(m_indiP_angle, "target", m_angle);
+
+    m_restartSp = true;
     return 0;
 }
 
@@ -789,6 +885,8 @@ INDI_NEWCALLBACK_DEFN(dmSpeckle, m_indiP_amp)
     std::unique_lock<std::mutex> lock(m_indiMutex);
     m_amp = amp;
     updateIfChanged(m_indiP_amp, "target", m_amp);
+
+    m_restartSp = true;
     return 0;
 }
 
@@ -817,6 +915,8 @@ INDI_NEWCALLBACK_DEFN(dmSpeckle, m_indiP_cross)
         m_cross = true;
         indi::updateSwitchIfChanged(m_indiP_cross, "toggle", pcf::IndiElement::On, m_indiDriver, INDI_OK);
     }
+
+    m_restartSp = true;
 
     return 0;
 }
@@ -851,6 +951,9 @@ INDI_NEWCALLBACK_DEFN(dmSpeckle, m_indiP_frequency)
     std::unique_lock<std::mutex> lock(m_indiMutex);
     m_frequency = freq;
     updateIfChanged(m_indiP_frequency, "target", m_frequency);
+
+    m_restartSp = true;
+
     return 0;
 }
 
@@ -884,6 +987,38 @@ INDI_NEWCALLBACK_DEFN(dmSpeckle, m_indiP_dwell)
     std::unique_lock<std::mutex> lock(m_indiMutex);
     m_dwell = dwell;
     updateIfChanged(m_indiP_dwell, "target", m_dwell);
+
+    m_restartSp = true;
+
+    return 0;
+}
+
+INDI_NEWCALLBACK_DEFN(dmSpeckle, m_indiP_single)
+(const pcf::IndiProperty &ipRecv)
+{
+    INDI_VALIDATE_CALLBACK_PROPS(m_indiP_single, ipRecv);
+
+    int single = 0;
+
+    if (ipRecv.find("current"))
+    {
+        single = ipRecv["current"].get<int>();
+    }
+
+    if (ipRecv.find("target"))
+    {
+        single = ipRecv["target"].get<int>();
+    }
+
+    if (single < -1 || single > 3 )
+    {
+        log<software_error>({__FILE__, __LINE__, "Invalid requested dwell: " + std::to_string(single)});
+        return 0;
+    }
+
+    std::unique_lock<std::mutex> lock(m_indiMutex);
+    m_single = single;
+    updateIfChanged(m_indiP_single, "target", m_single);
     return 0;
 }
 
@@ -913,6 +1048,7 @@ INDI_NEWCALLBACK_DEFN(dmSpeckle, m_indiP_modulating)
         indi::updateSwitchIfChanged(m_indiP_modulating, "toggle", pcf::IndiElement::On, m_indiDriver, INDI_OK);
     }
 
+    
     return 0;
 }
 
