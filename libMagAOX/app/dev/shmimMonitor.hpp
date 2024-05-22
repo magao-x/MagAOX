@@ -563,8 +563,10 @@ void shmimMonitor<derivedT, specificT>::smThreadExec()
                 curr_image = m_imageStream.md[0].cnt1;
             }
             else
+            {
                 curr_image = 0;
-
+            }
+            
             atype = m_imageStream.md[0].datatype;
             snx = m_imageStream.md[0].size[0];
 
