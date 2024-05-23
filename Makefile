@@ -6,7 +6,6 @@ apps_common = \
 	sshDigger \
 	sysMonitor \
 	xindiserver \
-	resurrector \
 	mzmqClient \
 	magAOXMaths \
 	mzmqServer \
@@ -138,6 +137,7 @@ else
 endif
 
 utils_to_build = \
+	resurrector_indi \
 	logdump \
 	logsurgeon \
 	logstream \
