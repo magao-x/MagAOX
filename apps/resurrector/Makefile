@@ -5,7 +5,7 @@ INCLUDES +=  -I../../libMagAOX/common -Wall $(EXTRACPPFLAGS)
 OTHER_HEADERS=resurrector.hpp HexbeatMonitor.hpp resurrector_indi.hpp
 OTHER_OBJS=redirect_prototype.o
 TARGET=resurrector_indi
-include ../../Make/magAOXApp.mk
+include ../../Make/magAOXUtil.mk
 
 ########################################################################
 ########################################################################

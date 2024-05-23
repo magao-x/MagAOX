@@ -34,7 +34,9 @@ function verb_startup {
   || resu_failure "Readable process list file not found; exiting ..." \
   || return 1
 
-  command="./resurrector_indi -r $ROLE"
+  command="$(find_resurrector_indi_path) -r $ROLE" \
+  || ( echo Program resurrector_indi not found && false ) \
+  || return 1
   resu_success "$command &"
   $command &
 }
@@ -184,6 +186,20 @@ function verb_status {
 }
 
 ########################################################################
+### Verb to show, or not, the resurrector_indi file found
+function verb_ripath {
+
+  hide ripath
+
+  ripath=$(find_resurrector_indi_path)
+
+  [ "$ripath" ] \
+  && echo "Found $ripath" \
+  || ( echo "resurrector_indi not found" && false )
+
+}
+
+########################################################################
 ### Parse command line; store the results in the various shell variables
 function parse_commands {
 
@@ -192,6 +208,7 @@ function parse_commands {
   unset procnames
   unset Helped
   unset All
+  unset RootCheck
 
   ### Loop over command-line arguments
   for arg in $* ; do
@@ -205,7 +222,7 @@ function parse_commands {
     case "$arg" in
 
     ### Verbs
-    startup|shutdown|restart|start|stop|defib|peek|status)
+    startup|shutdown|restart|start|stop|defib|peek|status|ripath)
 
       ### If a second verb is found, add it as procname to procnames var
       [ "$verb" ] \
@@ -222,6 +239,11 @@ function parse_commands {
       || Usage "ERROR:  Duplicate role; exiting..." \
       || return 1
       ROLEisnext=$arg
+      ;;
+
+    ### --root-check
+    --root-check)
+      RootCheck=yes
       ;;
 
     ### -all
@@ -377,11 +399,13 @@ function resurrector_indi_pid {
 
   for P in "$(dirname "$0")/resurrector_indi" \
            "${opt_magaox}/bin/" "${opt_magaox}/source/" \
-           "/usr/local/bin/" "/" \
+           "/usr/local/bin/" \
+           "/" \
   ; do
+     [ "$P" != "/" ] || [ "$RootCheck" ] || continue
      [ "$P" == "/" ] && slow_warning
      [ "$P" ] && [ -d "$P" ] && D="+D" || D=""
-     lsof -lnw $D "$P" | \grep 'txt.*/resurrector_indi$' && break
+     ( lsof -lnw $D "$P" 2>/dev/null ) | \grep 'txt.*/resurrector_indi$' && break
   done \
   | while read ri pid user txt reg device size_off node exe cruft ; do
       [ "$txt" == "txt" ] \
@@ -390,6 +414,32 @@ function resurrector_indi_pid {
       && echo $pid | grep '^[1-9][0-9]*$' \
       && break
     done | \grep .              ### Returns failure if nothing was found
+}
+
+########################################################################
+### Write the first resurrector_indi found to stdout
+function find_resurrector_indi_path {
+
+  ### Search for resurrector_indi executable via find command under
+  ### several places, taking the first place that yields a match:
+  ### 1) look first in same directory as this script w/o recursion,
+  ### 2) then under MagAOX binaries' directory w/o recursion
+  ### 3) then under MagAOX sources' directory with recursion
+  ### 4) then under /usr/local/bin/ without recursion
+
+  for P in "$(dirname "$0")/" \
+           "${opt_magaox}/bin/" "${opt_magaox}/source" \
+           "/usr/local/bin/" \
+  ; do
+     ### If directory ends in "/" then don't recurse below that dir
+     [ "$P%/" == "$P" ] && unset maxdepthopt || maxdepthopt="-maxdepth 1"
+
+     find "$P" $depthopt -name resurrector_indi 2>/dev/null \
+     | head -1 | grep . && return 0 || continue
+
+  done
+
+  return 1
 }
 
 ########################################################################
@@ -498,8 +548,9 @@ function find_hexbeat_pipe {
 
 ########################################################################
 function Usage {
-cat << EoF
-usage: [MAGAOX_ROLE=ROLE] resuctrl [-h|--help] [-r ROLE|--role ROLE] \\
+less '-sPsEnter/k=>Down/Up; spacebar/b=>next/previous; q=>quit' << EoF
+usage:  [MAGAOX_ROLE=ROLE] resuctrl [-h|--help] [-r ROLE|--role ROLE] \\
+             [--root-check] \\
              startup|shutdown|restart|start|stop|defib|peek|status \\
              [PROCNAME[ PROCNAME[ ...]]]
 
@@ -540,8 +591,11 @@ Usage:
         - declare to resurrector that PROCNAME processes have expired,
           so they will be restarted by resurrector_indi
 
+    resuctrl ripath
+        - show path to resurrector_indi, if one is found
+
 positional arguments:
-  {startup,shutdown,restart,start,stop,defib,peek,status}
+  {startup,shutdown,restart,start,stop,defib,peek,status,ripath}
                         verb for action to take
 
 proclist is contents of file::
@@ -550,9 +604,14 @@ proclist is contents of file::
 optional arguments:
   -h, --help            show this help message and exit
   -r ROLE, --role ROLE  Specify role to read proclist for (default:gauss)
+  --root-check          Check entire filesystem for resurrector_indi
+                          proecess if none found in expected directories
+EoF
+
+cat << EoFmsg
 
 $RED_SEQ$*$RESET_SEQ
-EoF
+EoFmsg
 
 return 1
 
