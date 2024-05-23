@@ -605,7 +605,7 @@ optional arguments:
   -h, --help            show this help message and exit
   -r ROLE, --role ROLE  Specify role to read proclist for (default:gauss)
   --root-check          Check entire filesystem for resurrector_indi
-                          proecess if none found in expected directories
+                          process if none found in expected directories
 EoF
 
 cat << EoFmsg
