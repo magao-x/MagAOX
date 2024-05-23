@@ -18,7 +18,6 @@ dependencies:
   - pip:
       # web ui
       - aiortc
-      - python-engineio
-      - python-socketio
+      - aiofile
       - starlette
       - uvicorn

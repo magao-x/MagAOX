@@ -21,6 +21,7 @@ ldconfig -v
 yum install -y \
     util-linux-user \
     kernel-devel \
+    kernel-modules-extra \
     gcc-gfortran \
     which \
     openssh \
@@ -85,5 +86,14 @@ if [[ $MAGAOX_ROLE == TIC || $MAGAOX_ROLE == TOC || $MAGAOX_ROLE == ICC || $MAGA
     dnf config-manager --add-repo https://pkgs.tailscale.com/stable/rhel/9/tailscale.repo
     dnf install tailscale
     systemctl enable --now tailscaled
-    tailscale up
+fi
+
+
+# install postgresql 15 client for RHEL 9
+dnf module install -y postgresql:15/client
+
+# set up the postgresql server
+if [[ $MAGAOX_ROLE == AOC && ! -e /var/lib/pgsql ]]; then
+    dnf module install -y postgresql:15/server
+    postgresql-setup --initdb
 fi

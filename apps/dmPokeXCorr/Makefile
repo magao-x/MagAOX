@@ -2,6 +2,6 @@
 allall: all 
 
 OTHER_HEADERS=
-TARGET=dmModulator
+TARGET=dmPokeXCorr
 include ../../Make/magAOXApp.mk
 

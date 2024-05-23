@@ -10,7 +10,6 @@
 
 #include "generated/telem_position_generated.h"
 #include "flatbuffer_log.hpp"
-#include "../logMeta.hpp"
 
 namespace MagAOX
 {

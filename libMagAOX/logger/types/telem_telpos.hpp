@@ -12,7 +12,6 @@
 
 #include "generated/telem_telpos_generated.h"
 #include "flatbuffer_log.hpp"
-#include "../logMeta.hpp"
 
 #include <cmath>
 

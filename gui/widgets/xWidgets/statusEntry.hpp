@@ -42,7 +42,7 @@ protected:
    std::string m_current;
    std::string m_target;
    
-
+   QTimer * m_updateTimer {nullptr};
    
 public:
    statusEntry( QWidget * Parent = 0, 
@@ -142,6 +142,10 @@ public slots:
 
    void stopEditing();
 
+signals:
+
+   void doUpdateGUI();
+
 private:
      
    Ui::statusEntry ui;
@@ -163,8 +167,6 @@ statusEntry::statusEntry( const std::string & device,
 {
    construct();
    setup(device, property, type, label, units);
-
-   
 }
 
 statusEntry::~statusEntry() noexcept
@@ -173,16 +175,24 @@ statusEntry::~statusEntry() noexcept
 
 void statusEntry::construct()
 {
-   ui.setupUi(this);
-   ui.value->setProperty("isStatus", true);
+    ui.setupUi(this);
+    ui.value->setProperty("isStatus", true);
 
-   QFont qf = ui.label->font();
-   qf.setPixelSize(XW_FONT_SIZE);
-   ui.label->setFont(qf);
+    QFont qf = ui.label->font();
+    qf.setPixelSize(XW_FONT_SIZE);
+    ui.label->setFont(qf);
 
-   qf = ui.value->font();
-   qf.setPixelSize(XW_FONT_SIZE);
-   ui.value->setFont(qf);
+    qf = ui.value->font();
+    qf.setPixelSize(XW_FONT_SIZE);
+    ui.value->setFont(qf);
+
+    m_updateTimer = new QTimer;
+
+    connect(m_updateTimer, SIGNAL(timeout()), this, SLOT(updateGUI()));
+
+    m_updateTimer->start(250);
+
+    connect(this, SIGNAL(doUpdateGUI()), this, SLOT(updateGUI()));
 }
 
 void statusEntry::setup( const std::string & device,
@@ -333,21 +343,21 @@ bool statusEntry::highlightChanges()
 
 void statusEntry::subscribe()
 {
-   if(!m_parent) return ;
+    if(!m_parent) return ;
    
-   if(m_property != "") m_parent->addSubscriberProperty(this, m_device, m_property);
+    if(m_property != "") m_parent->addSubscriberProperty(this, m_device, m_property);
 
-   return;
+    return;
 }
   
 void statusEntry::onConnect()
 {
-   m_valChanged = true;
+    m_valChanged = true;
 }
 
 void statusEntry::onDisconnect()
 {
-   ui.value->setText("---");
+    ui.value->setText("---");
 }
 
 void statusEntry::handleDefProperty( const pcf::IndiProperty & ipRecv)
@@ -377,7 +387,7 @@ void statusEntry::handleSetProperty( const pcf::IndiProperty & ipRecv)
       }
    }
 
-   updateGUI();
+   emit doUpdateGUI();
 }
 
 void statusEntry::setStretch( int s0, 
@@ -428,14 +438,14 @@ void statusEntry::on_value_returnPressed()
 
 void statusEntry::updateGUI()
 {
-   if(isEnabled())
-   {
-      if(m_valChanged)
-      {
-          ui.value->setTextChanged(formattedValue());
-          m_valChanged = false;
-      }
-   }
+    if(isEnabled())
+    {
+        if(m_valChanged)
+        {
+            ui.value->setTextChanged(formattedValue());
+            m_valChanged = false;
+        }
+    }
 
 } //updateGUI()
 

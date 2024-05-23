@@ -13,3 +13,20 @@ authors = [
 description = "Python utilities for MagAO-X interface"
 readme = "README.rst"
 license = {file = "LICENSE"}
+
+dependencies = [
+  "watchdog>=3.0.0,<4",
+  "xconf>=0.0.1",
+  "psycopg[binary]>=3.1.18",
+  "coloredlogs>=15.0.1",
+  "psutil>=5.9.8",
+  "tqdm",
+  "universal_pathlib>=0.2.2,<0.3",
+  "orjson>=3.9.15,<4",
+  "purepyindi2",
+  "astropy>=5.3.1",
+]
+
+[project.scripts]
+xtelemdb = "magaox.cli:XTELEMDB.main"
+xquicklook = "magaox.cli:XQUICKLOOK.main"

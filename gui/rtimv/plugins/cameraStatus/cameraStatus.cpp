@@ -71,13 +71,14 @@ int cameraStatus::attachOverlay( rtimvOverlayAccess & roa,
 
 
         (*m_roa.m_dictionary)[m_deviceName + "-sw.writing.toggle"].setBlob(nullptr, 0);
+        (*m_roa.m_dictionary)[m_deviceName + "-sw.fsm.state"].setBlob(nullptr, 0);
 
       //(*m_roa.m_dictionary)[m_deviceName + ""].setBlob(nullptr, 0);
 
    }
 
    connect(this, SIGNAL(newStretchBox(StretchBox *)), m_roa.m_mainWindowObject, SLOT(addStretchBox(StretchBox *)));
-   connect(this, SIGNAL(savingState(bool)), m_roa.m_mainWindowObject, SLOT(savingState(bool)));
+   connect(this, SIGNAL(savingState(rtimv::savingState)), m_roa.m_mainWindowObject, SLOT(savingState(rtimv::savingState)));
 
    if(m_enabled) enableOverlay();
    else disableOverlay();
@@ -387,11 +388,32 @@ int cameraStatus::updateOverlay()
     }    
     if(n > m_roa.m_graphicsView->statusTextNo()-1) return 0;  
 
-    if(getBlobStr(m_deviceName + "-sw", "writing.toggle"))
+    if(getBlobStr(m_deviceName + "-sw", "fsm.state"))
     {
-        sstr = std::string(m_blob);
-        if(sstr == "on") emit savingState(true);
-        else emit savingState(false);
+        std::string fsmstr = std::string(m_blob);
+
+        std::string swtstr = "off";
+        
+        if(getBlobStr(m_deviceName + "-sw", "writing.toggle"))
+        {
+            swtstr = std::string(m_blob);
+        }
+        
+        if(fsmstr == "OPERATING")
+        {
+            if(swtstr == "on")
+            {
+                emit savingState(rtimv::savingState::on);
+            }
+            else
+            {
+                emit savingState(rtimv::savingState::waiting);
+            }
+        }
+        else 
+        {
+            emit savingState(rtimv::savingState::off);
+        }
     }
 
     return 0;

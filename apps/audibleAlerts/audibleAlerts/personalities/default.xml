@@ -30,6 +30,9 @@
     <button name="Proposals">
       <file name="lkca15.wav" />
     </button>
+    <button name="ThemeSong">
+      <file name="clown.wav" />
+    </button>
   </soundboard>
   <react-to indi-id="observers.obs_on.toggle">
     <transition value="On">
@@ -88,11 +91,8 @@
     </transition>
   </react-to>
   <react-to indi-id="tcsi.environment.wind">
-    <transition op="between" low="30" high="35">
-      <speak>The wind exceeded thirty miles per hour</speak>
-    </transition>
     <transition op="gt" value="35.1">
-      <speak>We have exceeded the wind shutdown threshold</speak>
+      <speak>The last wind measurement exceeded the shutdown threshold</speak>
     </transition>
   </react-to>
   <react-to indi-id="tcsi.seeing.dimm_fwhm">

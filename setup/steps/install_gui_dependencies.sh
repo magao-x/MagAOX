@@ -27,6 +27,7 @@ elif [[ $ID == rocky && $VERSION_ID == "9."* ]]; then
     sudo dnf install -y \
         qt5-devel \
         qwt-qt5-devel \
+        wmctrl \
     ;
 fi
 

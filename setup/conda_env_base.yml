@@ -21,20 +21,6 @@ dependencies:
   - cupy
   - line_profiler
   - pyserial
-  # video streaming
-  - cffi
-  - cryptography
-  - av
-  - pyee
-  - ffmpeg
-  - libopus
-  - libvpx
-  # web ui
-  - nodejs
-  - yarn
-  - websockets
-  - ujson
-  - uvloop
   # hcipy deps available in conda
   - asdf
   - pyyaml
@@ -43,14 +29,9 @@ dependencies:
   # for cacao
   - pybind11
   # for xtelemdb
-  - psycopg2
+  - psycopg
+  - python-duckdb
 
   - pip:
       - hcipy
       - poppy
-      # web ui
-      - aiortc
-      - python-engineio
-      - python-socketio
-      - starlette
-      - uvicorn

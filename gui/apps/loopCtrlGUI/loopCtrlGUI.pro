@@ -12,6 +12,7 @@ OBJECTS_DIR = obj/
 RCC_DIR = res/
 UI_DIR = ../../widgets/loopCtrl
 
+CONFIG+=debug
 CONFIG(release, debug|release) {
     CONFIG += optimize_full
 }

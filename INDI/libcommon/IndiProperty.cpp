@@ -18,69 +18,42 @@ using pcf::TimeStamp;
 using pcf::IndiElement;
 using pcf::IndiProperty;
 
-////////////////////////////////////////////////////////////////////////////////
-/// Constructor.
-
 IndiProperty::IndiProperty()
 {
-  //m_tPerm = UnknownPropertyPerm;
-  //m_oRequested = false;
-  //m_tRule = UnknownSwitchRule;
-  //m_tState = UnknownPropertyState;
-  //m_xTimeout = 0.0f;
-  //m_beValue = UnknownBLOBEnable;
 }
 
-////////////////////////////////////////////////////////////////////////////////
-/// Constructor with type - this will be used often.
-
-IndiProperty::IndiProperty( const Type &tType ) : m_tType(tType)
+IndiProperty::IndiProperty( const Type &tType ) : m_type(tType)
 {
 }
-
-////////////////////////////////////////////////////////////////////////////////
-/// Constructor with type, device and name - this will be used often.
 
 IndiProperty::IndiProperty( const Type &tType,
                             const string &szDevice,
-                            const string &szName ) :  m_szDevice(szDevice), m_szName(szName), m_tType(tType)
+                            const string &szName ) :  m_device(szDevice), m_name(szName), m_type(tType)
 {
 }
-
-////////////////////////////////////////////////////////////////////////////////
-/// Constructor with type, device, name, state, and perm.
 
 IndiProperty::IndiProperty( const Type &tType,
                             const string &szDevice,
                             const string &szName,
-                            const PropertyStateType &tState,
+                            const PropertyState &tState,
                             const PropertyPermType &tPerm,
-                            const SwitchRuleType &tRule ) : m_szDevice(szDevice), m_szName(szName), m_tPerm(tPerm),
-                                                               m_tRule(tRule), m_tState(tState), m_tType(tType)
+                            const SwitchRuleType &tRule ) : m_device(szDevice), m_name(szName), m_perm(tPerm),
+                                                               m_rule(tRule), m_state(tState), m_type(tType)
 {
 }
 
-////////////////////////////////////////////////////////////////////////////////
-///  Copy constructor.
-
-IndiProperty::IndiProperty(const IndiProperty &ipRhs ) : m_szDevice(ipRhs.m_szDevice), m_szGroup(ipRhs.m_szGroup), m_szLabel(ipRhs.m_szLabel),
-                                                           m_szMessage(ipRhs.m_szMessage), m_szName(ipRhs.m_szName), m_tPerm(ipRhs.m_tPerm),
-                                                            m_tRule(ipRhs.m_tRule), m_tState(ipRhs.m_tState), m_xTimeout(ipRhs.m_xTimeout),
-                                                              m_oRequested(ipRhs.m_oRequested),  m_tsTimeStamp(ipRhs.m_tsTimeStamp),
-                                                                m_szVersion(ipRhs.m_szVersion), m_beValue(ipRhs.m_beValue), 
-                                                                 m_mapElements(ipRhs.m_mapElements), m_tType(ipRhs.m_tType)
+IndiProperty::IndiProperty(const IndiProperty &ipRhs ) : m_device(ipRhs.m_device), m_group(ipRhs.m_group), m_label(ipRhs.m_label),
+                                                           m_message(ipRhs.m_message), m_name(ipRhs.m_name), m_perm(ipRhs.m_perm),
+                                                            m_rule(ipRhs.m_rule), m_state(ipRhs.m_state), m_timeout(ipRhs.m_timeout),
+                                                              m_requested(ipRhs.m_requested),  m_timeStamp(ipRhs.m_timeStamp),
+                                                                m_version(ipRhs.m_version), m_beValue(ipRhs.m_beValue), 
+                                                                 m_mapElements(ipRhs.m_mapElements), m_type(ipRhs.m_type)
 {
 }
-
-////////////////////////////////////////////////////////////////////////////////
-/// Destructor.
 
 IndiProperty::~IndiProperty()
 {
 }
-
-////////////////////////////////////////////////////////////////////////////////
-/// Assigns the internal data of this object from an existing one.
 
 const IndiProperty &IndiProperty::operator=( const IndiProperty &ipRhs )
 {
@@ -88,22 +61,22 @@ const IndiProperty &IndiProperty::operator=( const IndiProperty &ipRhs )
   {
     pcf::ReadWriteLock::AutoWLock rwAuto( &m_rwData );
 
-    m_szDevice = ipRhs.m_szDevice;
-    m_szGroup = ipRhs.m_szGroup;
-    m_szLabel = ipRhs.m_szLabel;
-    m_szMessage = ipRhs.m_szMessage;
-    m_szName = ipRhs.m_szName;
-    m_tPerm = ipRhs.m_tPerm;
-    m_oRequested = ipRhs.m_oRequested;
-    m_tRule = ipRhs.m_tRule;
-    m_tState = ipRhs.m_tState;
-    m_xTimeout = ipRhs.m_xTimeout;
-    m_tsTimeStamp = ipRhs.m_tsTimeStamp;
-    m_szVersion = ipRhs.m_szVersion;
+    m_device = ipRhs.m_device;
+    m_group = ipRhs.m_group;
+    m_label = ipRhs.m_label;
+    m_message = ipRhs.m_message;
+    m_name = ipRhs.m_name;
+    m_perm = ipRhs.m_perm;
+    m_requested = ipRhs.m_requested;
+    m_rule = ipRhs.m_rule;
+    m_state = ipRhs.m_state;
+    m_timeout = ipRhs.m_timeout;
+    m_timeStamp = ipRhs.m_timeStamp;
+    m_version = ipRhs.m_version;
     m_beValue = ipRhs.m_beValue;
 
     m_mapElements = ipRhs.m_mapElements;
-    m_tType = ipRhs.m_tType;
+    m_type = ipRhs.m_type;
   }
   return *this;
 }
@@ -152,20 +125,20 @@ bool IndiProperty::operator==( const IndiProperty &ipRhs ) const
 
   // Otherwise the maps are identical and it comes down to the
   // attributes here matching.
-  return ( m_szDevice == ipRhs.m_szDevice &&
-    m_szGroup == ipRhs.m_szGroup &&
-    m_szLabel == ipRhs.m_szLabel &&
-    m_szMessage == ipRhs.m_szMessage &&
-    m_szName == ipRhs.m_szName &&
-    m_tPerm == ipRhs.m_tPerm &&
-    //m_oRequested == ipRhs.m_oRequested &&
-    m_tRule == ipRhs.m_tRule &&
-    m_tState == ipRhs.m_tState &&
-    //m_xTimeout == ipRhs.m_xTimeout &&
-    //m_tsTimeStamp ==ipRhs.m_tsTimeStamp &&  // Don't compare!
-    m_szVersion == ipRhs.m_szVersion &&
+  return ( m_device == ipRhs.m_device &&
+    m_group == ipRhs.m_group &&
+    m_label == ipRhs.m_label &&
+    m_message == ipRhs.m_message &&
+    m_name == ipRhs.m_name &&
+    m_perm == ipRhs.m_perm &&
+    //m_requested == ipRhs.m_requested &&
+    m_rule == ipRhs.m_rule &&
+    m_state == ipRhs.m_state &&
+    //m_timeout == ipRhs.m_timeout &&
+    //m_timeStamp ==ipRhs.m_timeStamp &&  // Don't compare!
+    m_version == ipRhs.m_version &&
     m_beValue == ipRhs.m_beValue &&
-    m_tType == ipRhs.m_tType );
+    m_type == ipRhs.m_type );
 }
 
 ////////////////////////////////////////////////////////////////////////////////
@@ -209,10 +182,10 @@ bool IndiProperty::compareProperty( const IndiProperty &ipComp ) const
   if ( &ipComp == this )
     return true;
 
-  if ( ipComp.getType() != m_tType )
+  if ( ipComp.getType() != m_type )
     return false;
 
-  if ( ipComp.getDevice() != m_szDevice || ipComp.getName() != m_szName )
+  if ( ipComp.getDevice() != m_device || ipComp.getName() != m_name )
     return false;
 
   // If they are different sizes, they are different.
@@ -250,10 +223,10 @@ bool IndiProperty::compareValue( const IndiProperty &ipComp,
   if ( &ipComp == this )
     return true;
 
-  if ( ipComp.getType() != m_tType )
+  if ( ipComp.getType() != m_type )
     return false;
 
-  if ( ipComp.getDevice() != m_szDevice || ipComp.getName() != m_szName )
+  if ( ipComp.getDevice() != m_device || ipComp.getName() != m_name )
     return false;
 
   // Can we find this element in this map? If not, we fail.
@@ -289,10 +262,10 @@ bool IndiProperty::compareValues( const IndiProperty &ipComp ) const
   if ( &ipComp == this )
     return true;
 
-  if ( ipComp.getType() != m_tType )
+  if ( ipComp.getType() != m_type )
     return false;
 
-  if ( ipComp.getDevice() != m_szDevice || ipComp.getName() != m_szName )
+  if ( ipComp.getDevice() != m_device || ipComp.getName() != m_name )
     return false;
 
   // If they are different sizes, they are different.
@@ -337,10 +310,10 @@ bool IndiProperty::hasNewValue( const IndiProperty &ipComp,
     return false;
 
   // The types don't match, so we can't be compared.
-  if ( ipComp.getType() != m_tType )
+  if ( ipComp.getType() != m_type )
     return false;
 
-  if ( ipComp.getDevice() != m_szDevice || ipComp.getName() != m_szName )
+  if ( ipComp.getDevice() != m_device || ipComp.getName() != m_name )
     return false;
 
   // Can we find this element in this map? If not, we fail.
@@ -374,19 +347,19 @@ string IndiProperty::createString() const
 
   stringstream ssOutput;
   ssOutput << "{ "
-           << "\"device\" : \"" << m_szDevice << "\" , "
-           << "\"name\" : \"" << m_szName << "\" , "
-           << "\"type\" : \"" << convertTypeToString( m_tType ) << "\" , "
-           << "\"group\" : \"" << m_szGroup << "\" , "
-           << "\"label\" : \"" << m_szLabel << "\" , "
-           << "\"timeout\" : \"" << m_xTimeout << "\" , "
-           << "\"version\" : \"" << m_szVersion << "\" , "
-           << "\"timestamp\" : \"" << m_tsTimeStamp.getFormattedIso8601Str() << "\" , "
-           << "\"perm\" : \"" << getPropertyPermString( m_tPerm ) << "\" , "
-           << "\"rule\" : \"" << getSwitchRuleString( m_tRule ) << "\" , "
-           << "\"state\" : \"" << getPropertyStateString( m_tState ) << "\" , "
+           << "\"device\" : \"" << m_device << "\" , "
+           << "\"name\" : \"" << m_name << "\" , "
+           << "\"type\" : \"" << convertTypeToString( m_type ) << "\" , "
+           << "\"group\" : \"" << m_group << "\" , "
+           << "\"label\" : \"" << m_label << "\" , "
+           << "\"timeout\" : \"" << m_timeout << "\" , "
+           << "\"version\" : \"" << m_version << "\" , "
+           << "\"timestamp\" : \"" << m_timeStamp.getFormattedIso8601Str() << "\" , "
+           << "\"perm\" : \"" << getPropertyPermString( m_perm ) << "\" , "
+           << "\"rule\" : \"" << getSwitchRuleString( m_rule ) << "\" , "
+           << "\"state\" : \"" << getPropertyStateString( m_state ) << "\" , "
            << "\"BLOBenable\" : \"" << getBLOBEnableString( m_beValue ) << "\" , "
-           << "\"message\" : \"" << m_szMessage << "\" "
+           << "\"message\" : \"" << m_message << "\" "
            << "\"elements\" : [ \n";
 
   map<string, IndiElement>::const_iterator itr = m_mapElements.begin();
@@ -412,7 +385,7 @@ string IndiProperty::createString() const
 string IndiProperty::createUniqueKey() const
 {
   pcf::ReadWriteLock::AutoRLock rwAuto( &m_rwData );
-  return m_szDevice + "." + m_szName;
+  return m_device + "." + m_name;
 }
 
 ////////////////////////////////////////////////////////////////////////////////
@@ -429,7 +402,7 @@ bool IndiProperty::hasValidBLOBEnable() const
 bool IndiProperty::hasValidDevice() const
 {
   pcf::ReadWriteLock::AutoRLock rwAuto( &m_rwData );
-  return ( m_szDevice.size() != 0 );
+  return ( m_device.size() != 0 );
 }
 
 ////////////////////////////////////////////////////////////////////////////////
@@ -438,7 +411,7 @@ bool IndiProperty::hasValidDevice() const
 bool IndiProperty::hasValidGroup() const
 {
   pcf::ReadWriteLock::AutoRLock rwAuto( &m_rwData );
-  return ( m_szGroup.size() != 0 );
+  return ( m_group.size() != 0 );
 }
 
 ////////////////////////////////////////////////////////////////////////////////
@@ -447,7 +420,7 @@ bool IndiProperty::hasValidGroup() const
 bool IndiProperty::hasValidLabel() const
 {
   pcf::ReadWriteLock::AutoRLock rwAuto( &m_rwData );
-  return ( m_szLabel.size() != 0 );
+  return ( m_label.size() != 0 );
 }
 
 ////////////////////////////////////////////////////////////////////////////////
@@ -456,7 +429,7 @@ bool IndiProperty::hasValidLabel() const
 bool IndiProperty::hasValidMessage() const
 {
   pcf::ReadWriteLock::AutoRLock rwAuto( &m_rwData );
-  return ( m_szMessage.size() != 0 );
+  return ( m_message.size() != 0 );
 }
 
 ////////////////////////////////////////////////////////////////////////////////
@@ -465,7 +438,7 @@ bool IndiProperty::hasValidMessage() const
 bool IndiProperty::hasValidName() const
 {
   pcf::ReadWriteLock::AutoRLock rwAuto( &m_rwData );
-  return ( m_szName.size() != 0 );
+  return ( m_name.size() != 0 );
 }
 
 ////////////////////////////////////////////////////////////////////////////////
@@ -474,7 +447,7 @@ bool IndiProperty::hasValidName() const
 bool IndiProperty::hasValidPerm() const
 {
   pcf::ReadWriteLock::AutoRLock rwAuto( &m_rwData );
-  return ( m_tPerm != UnknownPropertyPerm );
+  return ( m_perm != UnknownPropertyPerm );
 }
 
 ////////////////////////////////////////////////////////////////////////////////
@@ -483,7 +456,7 @@ bool IndiProperty::hasValidPerm() const
 bool IndiProperty::hasValidRule() const
 {
   pcf::ReadWriteLock::AutoRLock rwAuto( &m_rwData );
-  return ( m_tRule != UnknownSwitchRule );
+  return ( m_rule != UnknownSwitchRule );
 }
 
 ////////////////////////////////////////////////////////////////////////////////
@@ -492,7 +465,7 @@ bool IndiProperty::hasValidRule() const
 bool IndiProperty::hasValidState() const
 {
   pcf::ReadWriteLock::AutoRLock rwAuto( &m_rwData );
-  return ( m_tState != UnknownPropertyState );
+  return ( m_state != PropertyState::Unknown );
 }
 
 ////////////////////////////////////////////////////////////////////////////////
@@ -501,7 +474,7 @@ bool IndiProperty::hasValidState() const
 bool IndiProperty::hasValidTimeout() const
 {
   pcf::ReadWriteLock::AutoRLock rwAuto( &m_rwData );
-  return ( m_xTimeout != 0.0f );
+  return ( m_timeout != 0.0f );
 }
 
 ////////////////////////////////////////////////////////////////////////////////
@@ -520,7 +493,7 @@ bool IndiProperty::hasValidTimeStamp() const
 bool IndiProperty::hasValidVersion() const
 {
   pcf::ReadWriteLock::AutoRLock rwAuto( &m_rwData );
-  return ( m_szVersion.size() != 0 );
+  return ( m_version.size() != 0 );
 }
 
 ////////////////////////////////////////////////////////////////////////////////
@@ -529,7 +502,7 @@ bool IndiProperty::hasValidVersion() const
 const string &IndiProperty::getDevice() const
 {
   pcf::ReadWriteLock::AutoRLock rwAuto( &m_rwData );
-  return m_szDevice;
+  return m_device;
 }
 
 ////////////////////////////////////////////////////////////////////////////////
@@ -547,7 +520,7 @@ const IndiProperty::BLOBEnableType &IndiProperty::getBLOBEnable() const
 const string &IndiProperty::getGroup() const
 {
   pcf::ReadWriteLock::AutoRLock rwAuto( &m_rwData );
-  return m_szGroup;
+  return m_group;
 }
 
 ////////////////////////////////////////////////////////////////////////////////
@@ -556,7 +529,7 @@ const string &IndiProperty::getGroup() const
 const string &IndiProperty::getLabel() const
 {
   pcf::ReadWriteLock::AutoRLock rwAuto( &m_rwData );
-  return m_szLabel;
+  return m_label;
 }
 
 ////////////////////////////////////////////////////////////////////////////////
@@ -565,7 +538,7 @@ const string &IndiProperty::getLabel() const
 const string &IndiProperty::getMessage() const
 {
   pcf::ReadWriteLock::AutoRLock rwAuto( &m_rwData );
-  return m_szMessage;
+  return m_message;
 }
 
 ////////////////////////////////////////////////////////////////////////////////
@@ -574,7 +547,7 @@ const string &IndiProperty::getMessage() const
 const string &IndiProperty::getName() const
 {
   pcf::ReadWriteLock::AutoRLock rwAuto( &m_rwData );
-  return m_szName;
+  return m_name;
 }
 
 ////////////////////////////////////////////////////////////////////////////////
@@ -583,7 +556,7 @@ const string &IndiProperty::getName() const
 const IndiProperty::PropertyPermType &IndiProperty::getPerm() const
 {
   pcf::ReadWriteLock::AutoRLock rwAuto( &m_rwData );
-  return m_tPerm;
+  return m_perm;
 }
 
 ////////////////////////////////////////////////////////////////////////////////
@@ -592,16 +565,16 @@ const IndiProperty::PropertyPermType &IndiProperty::getPerm() const
 const IndiProperty::SwitchRuleType &IndiProperty::getRule() const
 {
   pcf::ReadWriteLock::AutoRLock rwAuto( &m_rwData );
-  return m_tRule;
+  return m_rule;
 }
 
 ////////////////////////////////////////////////////////////////////////////////
 /// Returns the state of the device.
 
-const IndiProperty::PropertyStateType &IndiProperty::getState() const
+const IndiProperty::PropertyState &IndiProperty::getState() const
 {
   pcf::ReadWriteLock::AutoRLock rwAuto( &m_rwData );
-  return m_tState;
+  return m_state;
 }
 
 ////////////////////////////////////////////////////////////////////////////////
@@ -610,7 +583,7 @@ const IndiProperty::PropertyStateType &IndiProperty::getState() const
 const double &IndiProperty::getTimeout() const
 {
   pcf::ReadWriteLock::AutoRLock rwAuto( &m_rwData );
-  return m_xTimeout;
+  return m_timeout;
 }
 
 ////////////////////////////////////////////////////////////////////////////////
@@ -619,7 +592,7 @@ const double &IndiProperty::getTimeout() const
 const TimeStamp &IndiProperty::getTimeStamp() const
 {
   pcf::ReadWriteLock::AutoRLock rwAuto( &m_rwData );
-  return m_tsTimeStamp;
+  return m_timeStamp;
 }
 
 ////////////////////////////////////////////////////////////////////////////////
@@ -628,7 +601,7 @@ const TimeStamp &IndiProperty::getTimeStamp() const
 const IndiProperty::Type &IndiProperty::getType() const
 {
   pcf::ReadWriteLock::AutoRLock rwAuto( &m_rwData );
-  return m_tType;
+  return m_type;
 }
 
 ////////////////////////////////////////////////////////////////////////////////
@@ -637,7 +610,7 @@ const IndiProperty::Type &IndiProperty::getType() const
 const string &IndiProperty::getVersion() const
 {
   pcf::ReadWriteLock::AutoRLock rwAuto( &m_rwData );
-  return m_szVersion;
+  return m_version;
 }
 
 ////////////////////////////////////////////////////////////////////////////////
@@ -647,7 +620,7 @@ const string &IndiProperty::getVersion() const
 const bool &IndiProperty::isRequested() const
 {
   pcf::ReadWriteLock::AutoRLock rwAuto( &m_rwData );
-  return m_oRequested;
+  return m_requested;
 }
 
 ////////////////////////////////////////////////////////////////////////////////
@@ -672,7 +645,7 @@ void IndiProperty::setBLOBEnable( const BLOBEnableType &tValue )
 void IndiProperty::setDevice( const string &szValue )
 {
   pcf::ReadWriteLock::AutoWLock rwAuto( &m_rwData );
-  m_szDevice = szValue;
+  m_device = szValue;
 }
 
 ////////////////////////////////////////////////////////////////////////////////
@@ -680,7 +653,7 @@ void IndiProperty::setDevice( const string &szValue )
 void IndiProperty::setGroup( const string &szValue )
 {
   pcf::ReadWriteLock::AutoWLock rwAuto( &m_rwData );
-  m_szGroup = szValue;
+  m_group = szValue;
 }
 
 ////////////////////////////////////////////////////////////////////////////////
@@ -688,7 +661,7 @@ void IndiProperty::setGroup( const string &szValue )
 void IndiProperty::setLabel( const string &szValue )
 {
   pcf::ReadWriteLock::AutoWLock rwAuto( &m_rwData );
-  m_szLabel = szValue;
+  m_label = szValue;
 }
 
 ////////////////////////////////////////////////////////////////////////////////
@@ -696,7 +669,7 @@ void IndiProperty::setLabel( const string &szValue )
 void IndiProperty::setMessage( const string &szValue )
 {
   pcf::ReadWriteLock::AutoWLock rwAuto( &m_rwData );
-  m_szMessage = szValue;
+  m_message = szValue;
 }
 
 ////////////////////////////////////////////////////////////////////////////////
@@ -704,7 +677,7 @@ void IndiProperty::setMessage( const string &szValue )
 void IndiProperty::setName( const string &szValue )
 {
   pcf::ReadWriteLock::AutoWLock rwAuto( &m_rwData );
-  m_szName = szValue;
+  m_name = szValue;
 }
 
 ////////////////////////////////////////////////////////////////////////////////
@@ -712,7 +685,7 @@ void IndiProperty::setName( const string &szValue )
 void IndiProperty::setPerm( const IndiProperty::PropertyPermType &tValue )
 {
   pcf::ReadWriteLock::AutoWLock rwAuto( &m_rwData );
-  m_tPerm = tValue;
+  m_perm = tValue;
 }
 
 ////////////////////////////////////////////////////////////////////////////////
@@ -720,7 +693,7 @@ void IndiProperty::setPerm( const IndiProperty::PropertyPermType &tValue )
 void IndiProperty::setRequested( const bool &oRequested )
 {
   pcf::ReadWriteLock::AutoWLock rwAuto( &m_rwData );
-  m_oRequested = oRequested;
+  m_requested = oRequested;
 }
 
 ////////////////////////////////////////////////////////////////////////////////
@@ -728,15 +701,15 @@ void IndiProperty::setRequested( const bool &oRequested )
 void IndiProperty::setRule( const IndiProperty::SwitchRuleType &tValue )
 {
   pcf::ReadWriteLock::AutoWLock rwAuto( &m_rwData );
-  m_tRule = tValue;
+  m_rule = tValue;
 }
 
 ////////////////////////////////////////////////////////////////////////////////
 
-void IndiProperty::setState( const IndiProperty::PropertyStateType &tValue )
+void IndiProperty::setState( const IndiProperty::PropertyState &tValue )
 {
   pcf::ReadWriteLock::AutoWLock rwAuto( &m_rwData );
-  m_tState = tValue;
+  m_state = tValue;
 }
 
 ////////////////////////////////////////////////////////////////////////////////
@@ -744,7 +717,7 @@ void IndiProperty::setState( const IndiProperty::PropertyStateType &tValue )
 void IndiProperty::setTimeout( const double &xValue )
 {
   pcf::ReadWriteLock::AutoWLock rwAuto( &m_rwData );
-  m_xTimeout = xValue;
+  m_timeout = xValue;
 }
 
 ////////////////////////////////////////////////////////////////////////////////
@@ -752,7 +725,7 @@ void IndiProperty::setTimeout( const double &xValue )
 void IndiProperty::setTimeStamp( const TimeStamp &tsValue )
 {
   pcf::ReadWriteLock::AutoWLock rwAuto( &m_rwData );
-  m_tsTimeStamp = tsValue;
+  m_timeStamp = tsValue;
 }
 
 ////////////////////////////////////////////////////////////////////////////////
@@ -760,7 +733,7 @@ void IndiProperty::setTimeStamp( const TimeStamp &tsValue )
 void IndiProperty::setVersion( const string &szValue )
 {
   pcf::ReadWriteLock::AutoWLock rwAuto( &m_rwData );
-  m_szVersion = szValue;
+  m_version = szValue;
 }
 
 ////////////////////////////////////////////////////////////////////////////////
@@ -928,7 +901,7 @@ void IndiProperty::update( const IndiElement &ieNew )
   // Actually add it to the map, or update it.
   m_mapElements[ ieNew.name() ] = ieNew;
 
-  m_tsTimeStamp = TimeStamp::now();
+  m_timeStamp = TimeStamp::now();
 }
 
 ////////////////////////////////////////////////////////////////////////////////
@@ -945,7 +918,7 @@ void IndiProperty::addIfNoExist( const IndiElement &ieNew )
   {
     // Actually add it to the map.
     m_mapElements[ ieNew.name() ] = ieNew;
-    m_tsTimeStamp = TimeStamp::now();
+    m_timeStamp = TimeStamp::now();
   }
 }
 
@@ -966,7 +939,7 @@ void IndiProperty::add( const IndiElement &ieNew )
   // Actually add it to the map.
   m_mapElements[ ieNew.name() ] = ieNew;
 
-  m_tsTimeStamp = TimeStamp::now();
+  m_timeStamp = TimeStamp::now();
 }
 
 ////////////////////////////////////////////////////////////////////////////////
@@ -1004,7 +977,7 @@ void IndiProperty::update( const string &szElementName,
 
   itr->second = ieUpdate;
 
-  m_tsTimeStamp = TimeStamp::now();
+  m_timeStamp = TimeStamp::now();
 }
 
 ////////////////////////////////////////////////////////////////////////////////
@@ -1095,18 +1068,26 @@ string IndiProperty::getBLOBEnableString( const BLOBEnableType &tType )
 ////////////////////////////////////////////////////////////////////////////////
 /// Returns the enumerated type given the string type.
 
-IndiProperty::PropertyStateType IndiProperty::getPropertyStateType( const string &szType )
+IndiProperty::PropertyState IndiProperty::getPropertyStateType( const string &szType )
 {
-  PropertyStateType tType = UnknownPropertyState;
+  PropertyState tType = PropertyState::Unknown;
 
   if ( szType == "Idle" )
-    tType = Idle;
+  {
+    tType = PropertyState::Idle;
+  }
   else if ( szType == "Ok" )
-    tType = Ok;
+  {
+    tType = PropertyState::Ok;
+  }
   else if ( szType == "Busy" )
-    tType = Busy;
+  {
+    tType = PropertyState::Busy;
+  }
   else if ( szType == "Alert" )
-    tType = Alert;
+  {
+    tType = PropertyState::Alert;
+  }
 
   return tType;
 }
@@ -1114,25 +1095,25 @@ IndiProperty::PropertyStateType IndiProperty::getPropertyStateType( const string
 ////////////////////////////////////////////////////////////////////////////////
 /// Returns the string type given the enumerated type.
 
-string IndiProperty::getPropertyStateString( const PropertyStateType &tType )
+string IndiProperty::getPropertyStateString( const PropertyState &tType )
 {
   string szType = "";
 
   switch ( tType )
   {
-    case UnknownPropertyState:
+    case PropertyState::Unknown:
       szType = "";
       break;
-    case Idle:
+    case PropertyState::Idle:
       szType = "Idle";
       break;
-    case Ok:
+    case PropertyState::Ok:
       szType = "Ok";
       break;
-    case Busy:
+    case PropertyState::Busy:
       szType = "Busy";
       break;
-    case Alert:
+    case PropertyState::Alert:
       szType = "Alert";
       break;
   }

@@ -1,5 +1,14 @@
 #!/usr/bin/env bash
 set -ex
+# If not started as root, sudo yourself
+if [[ "$EUID" != 0 ]]; then
+    sudo -H bash -l $0 "$@"
+    exit $?
+fi
+if [[ $(hostname) != "exao1" ]]; then
+    echo "Must run on exao1"
+    exit 1
+fi
 if [[ -z "$1" ]]; then
     dest=/mnt/backup
 else
@@ -19,11 +28,9 @@ done
 
 rsyncWithOptions="rsync --exclude='**/*_2022*' --exclude='**/*_2023*' -a --info=progress2"
 
-mkdir -p $dest/rtc/{cacao,logs,rawimages,telem}
-$rsyncWithOptions /srv/rtc/data/cacao/ $dest/rtc/cacao/
-$rsyncWithOptions /srv/rtc/data/logs/ $dest/rtc/logs/
-$rsyncWithOptions /srv/rtc/data/rawimages/ $dest/rtc/rawimages/
-$rsyncWithOptions /srv/rtc/data/telem/ $dest/rtc/telem/
+mkdir -p $dest/aoc/{logs,telem}
+$rsyncWithOptions /data/logs/ $dest/aoc/logs/
+$rsyncWithOptions /data/telem/ $dest/aoc/telem/
 
 mkdir -p $dest/icc/{cacao,logs,rawimages,telem}
 # TODO rename it
@@ -35,3 +42,9 @@ fi
 $rsyncWithOptions /srv/icc/data/logs/ $dest/icc/logs/
 $rsyncWithOptions /srv/icc/data/rawimages/ $dest/icc/rawimages/
 $rsyncWithOptions /srv/icc/data/telem/ $dest/icc/telem/
+
+mkdir -p $dest/rtc/{cacao,logs,rawimages,telem}
+$rsyncWithOptions /srv/rtc/data/cacao/ $dest/rtc/cacao/
+$rsyncWithOptions /srv/rtc/data/logs/ $dest/rtc/logs/
+$rsyncWithOptions /srv/rtc/data/rawimages/ $dest/rtc/rawimages/
+$rsyncWithOptions /srv/rtc/data/telem/ $dest/rtc/telem/

@@ -1,7 +1,7 @@
 #!/bin/bash
 # If not started as root, sudo yourself
 if [[ "$EUID" != 0 ]]; then
-    sudo bash -l $0 "$@"
+    sudo -H bash -l $0 "$@"
     exit $?
 fi
 DIR="$( cd "$( dirname "${BASH_SOURCE[0]}" )" && pwd )"
@@ -10,9 +10,9 @@ source $DIR/../_common.sh
 set -euo pipefail
 cd /opt/MagAOX/vendor/alpao
 log_info "Began Alpao install with $(which gcc)"
-sudo patch -Np2 < alpao_build_fix.patch || true
+sudo -H patch -Np2 < alpao_build_fix.patch || true
 # option 2 - "Install ASDK and Interface Corp. PEX-292144 support"
-echo 2 | sudo bash Linux/InstallASDK.sh || exit 1
+echo 2 | sudo -H bash Linux/InstallASDK.sh || exit 1
 # The Alpao installer (and PEX sub-installer) doesn't explicitly set permissions on its libs
 for libFilename in libgpg2x72c.so.2.2.5 libgpgconf.so.1.5.6 libait_pex292144.so libasdk.so; do
     sudo chmod -v u=rwx,g=rx,o=rx /usr/lib/$libFilename || true

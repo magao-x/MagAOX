@@ -13,6 +13,8 @@
 #include "flatbuffers/flatbuffers.h"
 #include "flatbuffers/idl.h"
 
+#include "../logMeta.hpp"
+
 namespace MagAOX
 {
 namespace logger
@@ -38,9 +40,7 @@ struct fbMessage
   */
 struct flatbuffer_log 
 {
-   
-   
-   
+
    ///Get the length of the message.
    static flatlogs::msgLenT length( const fbMessage & msg /**< [in] the fbMessage type holding a FlatBufferBuilder */)
    {

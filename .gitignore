@@ -19,6 +19,7 @@ ui*.h
 **/moc/
 **/moc_*
 makefile.*GUI
+gui/**/makefile.*
 
 #Ignore any old folders
 **/old/
@@ -35,6 +36,8 @@ doc/www/
 
 ##########################################
 #Executables and app specifics to ignore:
+
+apps/*/build/
 
 #a
 apps/adcTracker/adcTracker
@@ -58,6 +61,7 @@ apps/closedLoopIndi/closedLoopIndi
 apps/dmMode/dmMode
 apps/dmModulator/dmModulator
 apps/dmPokeCenter/dmPokeCenter
+apps/dmPokeXCorr/dmPokeXCorr
 apps/dmSpeckle/dmSpeckle
 
 #f
@@ -105,6 +109,7 @@ apps/openLoopPSDs/openLoopPSDs
 apps/pi335Ctrl/pi335Ctrl
 apps/picamCtrl/picamCtrl
 apps/picoMotorCtrl/picoMotorCtrl
+apps/psfFit/psfFit
 apps/pupilAlign/pupilAlign
 apps/pupilFit/pupilFit
 apps/pvcamCtrl/pvcamCtrl
@@ -188,6 +193,8 @@ flatlogs/src/logCodes.dat
 .vscode
 .ipynb_checkpoints
 setup/bundle.zip
+setup/xvm/input/
+setup/xvm/output/
 vm/cache/
 vm/calib/
 vm/config/

@@ -1,0 +1,18 @@
+#!/bin/bash
+
+set -eo pipefail
+
+#######################################################
+# xlog: make a log entry in the observers log 
+#
+#
+#######################################################
+
+NANO_TIMESTAMP=$(date +%s%N)
+SECS=$(printf "%1d\n" ${NANO_TIMESTAMP: 0 : -9})
+NANOS=${NANO_TIMESTAMP: -9 : 9 }
+
+MSG="$*"
+
+setINDI "observers.user_log.email=$USER@$HOSTNAME;message=$MSG;time_s=$SECS;time_ns=$NANOS"
+

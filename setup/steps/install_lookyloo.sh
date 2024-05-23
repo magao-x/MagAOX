@@ -11,16 +11,16 @@ clone_or_update_and_cd $orgname $reponame $parentdir
 git checkout $commit_ish
 
 cd $parentdir/$reponame
-pip install -e . || exit_error "Could not pip install $reponame"
-lookyloo -h 2>&1 > /dev/null || exit_error "'lookyloo -h' command exited with an error, or was not found"
-
+sudo -H /opt/conda/bin/pip install -e . || exit_with_error "Could not pip install $reponame"
+lookyloo -h 2>&1 > /dev/null || exit_with_error "'lookyloo -h' command exited with an error, or was not found"
+UNIT_PATH=/etc/systemd/system/
 if [[ $MAGAOX_ROLE == AOC ]]; then
-    cp $DIR/../systemd_units/lookyloo.service $UNIT_PATH/lookyloo.service
+    sudo cp $DIR/../systemd_units/lookyloo.service $UNIT_PATH/lookyloo.service
     log_success "Installed lookyloo.service to $UNIT_PATH"
 
-    systemctl daemon-reload
-    systemctl enable lookyloo
+    sudo -H systemctl daemon-reload
+    sudo systemctl enable lookyloo
     log_success "Enabled lookyloo service"
-    systemctl start lookyloo
+    sudo systemctl start lookyloo
     log_success "Started lookyloo service"
 fi

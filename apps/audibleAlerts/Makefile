@@ -1,6 +1,8 @@
-all : install prep-container
+TARGET=audibleAlerts
 
-.PHONY: all install prep-container
+allall : prep-container all
+
+.PHONY: allall prep-container
 
 prep-container:
 	sudo install ./container-opentts.service /etc/systemd/system/
@@ -9,10 +11,4 @@ prep-container:
 	sudo systemctl enable container-opentts
 	sudo systemctl start container-opentts
 
-install: prep-container
-	sudo python -c 'import purepyindi2' || (echo "Need purepyindi2 installed to $(shell which python)" && exit 1)
-	sudo python -m pip install -e .
-	sudo ln -sfv /opt/conda/bin/audibleAlerts /opt/MagAOX/bin/audibleAlerts
-
-clean:
-
+include ../../Make/pythonApp.mk

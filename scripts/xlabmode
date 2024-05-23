@@ -1,0 +1,18 @@
+#!/bin/bash
+
+echo "setting lab mode"
+
+setINDI "stagepickoff.presetName.lab=On;none=Off;tel=Off"
+setINDI "adctrack.tracking.toggle=Off"
+setINDI "ktrack.tracking.toggle=Off"
+sleep 2
+setINDI "stagek.presetName.gmt=Off;lab=On;none=Off"
+setINDI "stageadc1.presetName.lab=On;none=Off"
+setINDI "stageadc2.presetName.lab=On;none=Off"
+setINDI "fliptip.presetName.in=On;out=Off"
+setINDI "tcsi.offlTT_enable.toggle=Off"
+setINDI "tcsi.offlF_enable.toggle=Off"
+setINDI "tcsi.labMode.toggle=On"
+setINDI "maggieo_x.personality.default=Off;lab_mode=On"
+
+xlog "ran xlabmode"
