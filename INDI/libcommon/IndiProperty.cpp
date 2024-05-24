@@ -36,7 +36,7 @@ IndiProperty::IndiProperty( const Type &tType,
                             const string &szDevice,
                             const string &szName,
                             const PropertyState &tState,
-                            const PropertyPermType &tPerm,
+                            const PropertyPerm &tPerm,
                             const SwitchRule &tRule ) : m_device(szDevice), m_name(szName), m_perm(tPerm),
                                                                m_rule(tRule), m_state(tState), m_type(tType)
 {
@@ -84,7 +84,7 @@ const IndiProperty &IndiProperty::operator=( const IndiProperty &ipRhs )
 ////////////////////////////////////////////////////////////////////////////////
 /// This is an alternate way of calling 'setBLOBEnable'.
 
-const IndiProperty::BLOBEnableType &IndiProperty::operator=( const BLOBEnableType &tValue )
+const IndiProperty::BLOBEnable &IndiProperty::operator=( const BLOBEnable &tValue )
 {
   pcf::ReadWriteLock::AutoWLock rwAuto( &m_rwData );
   m_beValue = tValue;
@@ -393,7 +393,7 @@ string IndiProperty::createUniqueKey() const
 bool IndiProperty::hasValidBLOBEnable() const
 {
   pcf::ReadWriteLock::AutoRLock rwAuto( &m_rwData );
-  return ( m_beValue != UnknownBLOBEnable );
+  return ( m_beValue != BLOBEnable::Unknown );
 }
 
 ////////////////////////////////////////////////////////////////////////////////
@@ -447,7 +447,7 @@ bool IndiProperty::hasValidName() const
 bool IndiProperty::hasValidPerm() const
 {
   pcf::ReadWriteLock::AutoRLock rwAuto( &m_rwData );
-  return ( m_perm != UnknownPropertyPerm );
+  return ( m_perm != PropertyPerm::Unknown );
 }
 
 ////////////////////////////////////////////////////////////////////////////////
@@ -508,7 +508,7 @@ const string &IndiProperty::getDevice() const
 ////////////////////////////////////////////////////////////////////////////////
 /// Returns the BLOB enabled state.
 
-const IndiProperty::BLOBEnableType &IndiProperty::getBLOBEnable() const
+const IndiProperty::BLOBEnable &IndiProperty::getBLOBEnable() const
 {
   pcf::ReadWriteLock::AutoRLock rwAuto( &m_rwData );
   return m_beValue;
@@ -553,7 +553,7 @@ const string &IndiProperty::getName() const
 ////////////////////////////////////////////////////////////////////////////////
 /// Returns the value of the perm attribute.
 
-const IndiProperty::PropertyPermType &IndiProperty::getPerm() const
+const IndiProperty::PropertyPerm &IndiProperty::getPerm() const
 {
   pcf::ReadWriteLock::AutoRLock rwAuto( &m_rwData );
   return m_perm;
@@ -634,7 +634,7 @@ void IndiProperty::clear()
 
 ////////////////////////////////////////////////////////////////////////////////
 
-void IndiProperty::setBLOBEnable( const BLOBEnableType &tValue )
+void IndiProperty::setBLOBEnable( const BLOBEnable &tValue )
 {
   pcf::ReadWriteLock::AutoWLock rwAuto( &m_rwData );
   m_beValue = tValue;
@@ -682,7 +682,7 @@ void IndiProperty::setName( const string &szValue )
 
 ////////////////////////////////////////////////////////////////////////////////
 
-void IndiProperty::setPerm( const IndiProperty::PropertyPermType &tValue )
+void IndiProperty::setPerm( const IndiProperty::PropertyPerm &tValue )
 {
   pcf::ReadWriteLock::AutoWLock rwAuto( &m_rwData );
   m_perm = tValue;
@@ -784,7 +784,7 @@ const IndiElement& IndiProperty::at( const unsigned int& uiIndex ) const
   pcf::ReadWriteLock::AutoRLock rwAuto( &m_rwData );
 
   if ( uiIndex > m_mapElements.size() - 1 )
-    throw Excep( ErrIndexOutOfBounds );
+    throw Excep( Error::IndexOutOfBounds );
 
   map<string, IndiElement>::const_iterator itr = m_mapElements.begin();
   std::advance( itr, uiIndex );
@@ -801,7 +801,7 @@ IndiElement& IndiProperty::at( const unsigned int& uiIndex )
   pcf::ReadWriteLock::AutoWLock rwAuto( &m_rwData );
 
   if ( uiIndex > m_mapElements.size() - 1 )
-    throw Excep( ErrIndexOutOfBounds );
+    throw Excep( Error::IndexOutOfBounds );
 
   map<string, IndiElement>::iterator itr = m_mapElements.begin();
   std::advance( itr, uiIndex );
@@ -848,7 +848,7 @@ const IndiElement& IndiProperty::operator[]( const unsigned int& uiIndex ) const
   pcf::ReadWriteLock::AutoRLock rwAuto( &m_rwData );
 
   if ( uiIndex > m_mapElements.size() - 1 )
-    throw Excep( ErrIndexOutOfBounds );
+    throw Excep( Error::IndexOutOfBounds );
 
   map<string, IndiElement>::const_iterator itr = m_mapElements.begin();
   std::advance( itr, uiIndex );
@@ -865,7 +865,7 @@ IndiElement& IndiProperty::operator[]( const unsigned int& uiIndex )
   pcf::ReadWriteLock::AutoWLock rwAuto( &m_rwData );
 
   if ( uiIndex > m_mapElements.size() - 1 )
-    throw Excep( ErrIndexOutOfBounds );
+    throw Excep( Error::IndexOutOfBounds );
 
   map<string, IndiElement>::iterator itr = m_mapElements.begin();
   std::advance( itr, uiIndex );
@@ -934,7 +934,7 @@ void IndiProperty::add( const IndiElement &ieNew )
     m_mapElements.find( ieNew.name() );
 
   if ( itr != m_mapElements.end() )
-    throw Excep( ErrElementAlreadyExists );
+    throw Excep( Error::ElementAlreadyExists );
 
   // Actually add it to the map.
   m_mapElements[ ieNew.name() ] = ieNew;
@@ -954,7 +954,7 @@ void IndiProperty::remove( const string &szElementName )
     m_mapElements.find( szElementName );
 
   if ( itr == m_mapElements.end() )
-    throw Excep( ErrCouldntFindElement );
+    throw Excep( Error::CouldntFindElement );
 
   // Actually delete the element.
   m_mapElements.erase( itr );
@@ -973,7 +973,7 @@ void IndiProperty::update( const string &szElementName,
     m_mapElements.find( szElementName );
 
   if ( itr == m_mapElements.end() )
-    throw Excep( ErrCouldntFindElement );
+    throw Excep( Error::CouldntFindElement );
 
   itr->second = ieUpdate;
 
@@ -997,22 +997,22 @@ bool IndiProperty::find( const string &szElementName ) const
 ///  return the message concerning the error.
 /// @param nErr The error to look up the message for.
 
-string IndiProperty::getErrorMsg( const int &nErr )
+string IndiProperty::getErrorMsg( const Error &nErr )
 {
   string szMsg;
   switch ( nErr )
   {
     //  errors defined in this class.
-    case ErrNone:
+    case Error::None:
       szMsg = "No Error";
       break;
-    case ErrCouldntFindElement:
+    case Error::CouldntFindElement:
       szMsg = "Could not find element";
       break;
-    case ErrElementAlreadyExists:
+    case Error::ElementAlreadyExists:
       szMsg = "Element already exists";
       break;
-    case ErrIndexOutOfBounds:
+    case Error::IndexOutOfBounds:
       szMsg = "Index out of bounds";
       break;
     default:
@@ -1025,16 +1025,22 @@ string IndiProperty::getErrorMsg( const int &nErr )
 ////////////////////////////////////////////////////////////////////////////////
 /// Returns the enumerated type given the string type.
 
-IndiProperty::BLOBEnableType IndiProperty::getBLOBEnableType( const string &szType )
+IndiProperty::BLOBEnable IndiProperty::getBLOBEnable( const string &szType )
 {
-  BLOBEnableType tType = UnknownBLOBEnable;
+  BLOBEnable tType = BLOBEnable::Unknown;
 
   if ( szType == "Never" )
-    tType = Never;
+  {
+    tType = BLOBEnable::Never;
+  }
   else if ( szType == "Also" )
-    tType = Also;
+  {
+    tType = BLOBEnable::Also;
+  }
   else if ( szType == "Only" )
-    tType = Only;
+  {
+    tType = BLOBEnable::Only;
+  }
 
   return tType;
 }
@@ -1042,22 +1048,22 @@ IndiProperty::BLOBEnableType IndiProperty::getBLOBEnableType( const string &szTy
 ////////////////////////////////////////////////////////////////////////////////
 /// Returns the string type given the enumerated type.
 
-string IndiProperty::getBLOBEnableString( const BLOBEnableType &tType )
+string IndiProperty::getBLOBEnableString( const BLOBEnable &tType )
 {
   string szType = "";
 
   switch ( tType )
   {
-    case UnknownBLOBEnable:
+    case BLOBEnable::Unknown:
       szType = "";
       break;
-    case Never:
+    case BLOBEnable::Never:
       szType = "Never";
       break;
-    case Also:
+    case BLOBEnable::Also:
       szType = "Also";
       break;
-    case Only:
+    case BLOBEnable::Only:
       szType = "Only";
       break;
   }
@@ -1173,16 +1179,22 @@ string IndiProperty::getSwitchRuleString( const SwitchRule &tType )
 ////////////////////////////////////////////////////////////////////////////////
 /// Returns the enumerated type given the string type.
 
-IndiProperty::PropertyPermType IndiProperty::getPropertyPermType( const string &szType )
+IndiProperty::PropertyPerm IndiProperty::getPropertyPerm( const string &szType )
 {
-  PropertyPermType tType = UnknownPropertyPerm;
+  PropertyPerm tType = PropertyPerm::Unknown;
 
   if ( szType == "ro" )
-    tType = ReadOnly;
+  {
+    tType = PropertyPerm::ReadOnly;
+  }
   else if ( szType == "wo" )
-    tType = WriteOnly;
+  {
+    tType = PropertyPerm::WriteOnly;
+  }
   else if ( szType == "rw" )
-    tType = ReadWrite;
+  {
+    tType = PropertyPerm::ReadWrite;
+  }
 
   return tType;
 }
@@ -1190,22 +1202,22 @@ IndiProperty::PropertyPermType IndiProperty::getPropertyPermType( const string &
 ////////////////////////////////////////////////////////////////////////////////
 /// Returns the string type given the enumerated type.
 
-string IndiProperty::getPropertyPermString( const PropertyPermType &tType )
+string IndiProperty::getPropertyPermString( const PropertyPerm &tType )
 {
   string szType = "";
 
   switch ( tType )
   {
-    case UnknownPropertyPerm:
+    case PropertyPerm::Unknown:
       szType = "";
       break;
-    case ReadOnly:
+    case PropertyPerm::ReadOnly:
       szType = "ro";
       break;
-    case WriteOnly:
+    case PropertyPerm::WriteOnly:
       szType = "wo";
       break;
-    case ReadWrite:
+    case PropertyPerm::ReadWrite:
       szType = "rw";
       break;
   }
@@ -1222,22 +1234,22 @@ string IndiProperty::convertTypeToString( const Type &tType )
 
   switch ( tType )
   {
-    case IndiProperty::Unknown:
+    case Type::Unknown:
       szType = "";
       break;
-    case IndiProperty::BLOB:
+    case Type::BLOB:
       szType = "BLOB";
       break;
-    case IndiProperty::Light:
+    case Type::Light:
       szType = "Light";
       break;
-    case IndiProperty::Number:
+    case Type::Number:
       szType = "Number";
       break;
-    case IndiProperty::Switch:
+    case Type::Switch:
       szType = "Switch";
       break;
-    case IndiProperty::Text:
+    case Type::Text:
       szType = "Text";
       break;
   }
@@ -1250,19 +1262,19 @@ string IndiProperty::convertTypeToString( const Type &tType )
 
 IndiProperty::Type IndiProperty::convertStringToType( const string &szTag )
 {
-  Type tType = IndiProperty::Unknown;
+  Type tType = Type::Unknown;
 
   // Define properties.
   if ( szTag == "BLOB" )
-    tType = IndiProperty::BLOB;
+    tType = Type::BLOB;
   else if ( szTag == "Light" )
-    tType = IndiProperty::Light;
+    tType = Type::Light;
   else if ( szTag == "Number" )
-    tType = IndiProperty::Number;
+    tType = Type::Number;
   else if ( szTag == "Switch" )
-    tType = IndiProperty::Switch;
+    tType = Type::Switch;
   else if ( szTag == "Text" )
-    tType = IndiProperty::Text;
+    tType = Type::Text;
 
   return tType;
 }

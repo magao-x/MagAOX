@@ -16,9 +16,8 @@
 #include "TimeStamp.hpp"
 #include "IndiElement.hpp"
 
-/* 2024-05-23 refactor in progress 
+/* 2024-05-24 refactor in progress 
  * ToDo:
- * - finish converting to enum classes
  * - make sure member data in best order
  * - organize get/set functions
  * - convert from rwLock to shared mutex
@@ -29,19 +28,19 @@ namespace pcf
 class IndiProperty
 {
 public:
-    enum Error
+    enum class Error
     {
-        ErrNone = 0,
-        ErrCouldntFindElement = -3,
-        ErrElementAlreadyExists = -5,
-        ErrIndexOutOfBounds = -6,
-        ErrWrongElementType = -7,
-        ErrUndefined = -9999
+        None = 0,
+        CouldntFindElement = -3,
+        ElementAlreadyExists = -5,
+        IndexOutOfBounds = -6,
+        WrongElementType = -7,
+        Undefined = -9999
     };
 
-    enum BLOBEnableType
+    enum class BLOBEnable
     {
-        UnknownBLOBEnable = 0,
+        Unknown = 0,
         Also = 1,
         Only,
         Never
@@ -64,9 +63,9 @@ public:
         OneOfMany
     };
 
-    enum PropertyPermType
+    enum class PropertyPerm
     {
-        UnknownPropertyPerm = 0,
+        Unknown = 0,
         ReadOnly = 1,
         ReadWrite,
         WriteOnly
@@ -76,7 +75,7 @@ public:
     // The order and enumeration of this list is important.
     // Do not add or change enumerations here without adjusting
     // the indexing of the 'allowed attributes' list.
-    enum Type
+    enum class Type
     {
         Unknown = 0,
         BLOB,
@@ -124,7 +123,7 @@ protected:
 
     std::string m_name;
 
-    PropertyPermType m_perm{UnknownPropertyPerm};
+    PropertyPerm m_perm{PropertyPerm::Unknown};
 
     SwitchRule m_rule{SwitchRule::Unknown};
 
@@ -141,13 +140,13 @@ protected:
     std::string m_version;
 
     /// This can also be the value.
-    BLOBEnableType m_beValue{UnknownBLOBEnable};
+    BLOBEnable m_beValue{BLOBEnable::Unknown};
 
     /// A dictionary of elements, indexable by name.
     std::map<std::string, pcf::IndiElement> m_mapElements;
 
     /// The type of this object. It cannot be changed.
-    pcf::IndiProperty::Type m_type{Unknown};
+    Type m_type{Type::Unknown};
 
     // A read write lock to protect the internal data.
     mutable pcf::ReadWriteLock m_rwData;
@@ -175,7 +174,7 @@ public:
                   const std::string &szDevice,
                   const std::string &szName,
                   const PropertyState &tState,
-                  const PropertyPermType &tPerm,
+                  const PropertyPerm &tPerm,
                   const SwitchRule &tRule = SwitchRule::Unknown
                 );
 
@@ -192,7 +191,7 @@ public:
     /// Assigns the internal data of this object from an existing one.
     const IndiProperty &operator=(const IndiProperty &ipRhs);
     /// This is an alternate way of calling 'setBLOBEnable'.
-    const BLOBEnableType &operator=(const BLOBEnableType &tValue);
+    const BLOBEnable &operator=(const BLOBEnable &tValue);
     /// Returns true if we have an exact match (value as well).
     bool operator==(const IndiProperty &ipRhs) const;
     // Return a reference to an element so it can be modified.
@@ -227,7 +226,7 @@ public:
     std::string createUniqueKey() const;
 
     // A getter for blob enable.
-    const BLOBEnableType &getBLOBEnable() const;
+    const BLOBEnable &getBLOBEnable() const;
 
     // A getter for each attribute.
     const std::string &getDevice() const;
@@ -235,7 +234,7 @@ public:
     const std::string &getLabel() const;
     const std::string &getMessage() const;
     const std::string &getName() const;
-    const PropertyPermType &getPerm() const;
+    const PropertyPerm &getPerm() const;
     const SwitchRule &getRule() const;
 
     const PropertyState &getState() const;
@@ -259,13 +258,13 @@ public:
     /// Returns the enumerated type given the tag.
     static Type convertStringToType(const std::string &szTag);
     /// Returns the string type given the enumerated type.
-    static std::string getBLOBEnableString(const BLOBEnableType &tType);
+    static std::string getBLOBEnableString(const BLOBEnable &tType);
     /// Returns the enumerated type given the string type.
-    static BLOBEnableType getBLOBEnableType(const std::string &szType);
+    static BLOBEnable getBLOBEnable(const std::string &szType);
     /// Returns the string type given the enumerated type.
-    static std::string getPropertyPermString(const PropertyPermType &tType);
+    static std::string getPropertyPermString(const PropertyPerm &tType);
     /// Returns the enumerated type given the string type.
-    static PropertyPermType getPropertyPermType(const std::string &szType);
+    static PropertyPerm getPropertyPerm(const std::string &szType);
     /// Returns the string type given the enumerated type.
     static std::string getPropertyStateString(const PropertyState &tType);
     /// Returns the enumerated type given the string type.
@@ -275,7 +274,7 @@ public:
     /// Returns the enumerated type given the string type.
     static SwitchRule getSwitchRule(const std::string &szType);
     /// Returns the message concerning the error.
-    static std::string getErrorMsg(const int &nErr);
+    static std::string getErrorMsg(const Error &nErr);
     /// Ensures that a name conforms to the INDI standard and can be used as
     /// an identifier. This means:
     ///     1) No ' ' - these will be converted to '_'
@@ -312,13 +311,13 @@ public:
     bool hasValidVersion() const;
 
     /// All the attribute setters.
-    void setBLOBEnable(const BLOBEnableType &tValue);
+    void setBLOBEnable(const BLOBEnable &tValue);
     void setDevice(const std::string &szValue);
     void setGroup(const std::string &szValue);
     void setLabel(const std::string &szValue);
     void setMessage(const std::string &szValue);
     void setName(const std::string &szValue);
-    void setPerm(const PropertyPermType &tValue);
+    void setPerm(const PropertyPerm &tValue);
     void setRequested(const bool &oRequested);
     void setRule(const SwitchRule &tValue);
     void setState(const PropertyState &tValue);

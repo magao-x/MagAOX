@@ -53,13 +53,13 @@ IndiXmlParser::IndiXmlParser( const IndiMessage &imSend,
     case IndiMessage::Define:
       switch ( ipSend.getType() )
       {
-        case IndiProperty::BLOB: createDefBLOBVector( ipSend ); break;
-        case IndiProperty::Light: createDefLightVector( ipSend ); break;
-        case IndiProperty::Number: createDefNumberVector( ipSend ); break;
-        case IndiProperty::Switch: createDefSwitchVector( ipSend ); break;
-        case IndiProperty::Text: createDefTextVector( ipSend ); break;
+        case IndiProperty::Type::BLOB: createDefBLOBVector( ipSend ); break;
+        case IndiProperty::Type::Light: createDefLightVector( ipSend ); break;
+        case IndiProperty::Type::Number: createDefNumberVector( ipSend ); break;
+        case IndiProperty::Type::Switch: createDefSwitchVector( ipSend ); break;
+        case IndiProperty::Type::Text: createDefTextVector( ipSend ); break;
         default:
-        case IndiProperty::Unknown:
+        case IndiProperty::Type::Unknown:
           throw runtime_error( "Unknown INDI property DEF type is not allowed." );
           break;
       }
@@ -84,12 +84,12 @@ IndiXmlParser::IndiXmlParser( const IndiMessage &imSend,
     case IndiMessage::NewProperty:
       switch ( ipSend.getType() )
       {
-        case IndiProperty::BLOB: createNewBLOBVector( ipSend ); break;
-        case IndiProperty::Number: createNewNumberVector( ipSend ); break;
-        case IndiProperty::Switch: createNewSwitchVector( ipSend ); break;
-        case IndiProperty::Text: createNewTextVector( ipSend ); break;
+        case IndiProperty::Type::BLOB: createNewBLOBVector( ipSend ); break;
+        case IndiProperty::Type::Number: createNewNumberVector( ipSend ); break;
+        case IndiProperty::Type::Switch: createNewSwitchVector( ipSend ); break;
+        case IndiProperty::Type::Text: createNewTextVector( ipSend ); break;
         default:
-        case IndiProperty::Unknown:
+        case IndiProperty::Type::Unknown:
           throw runtime_error( "Unknown INDI property NEW type is not allowed." );
           break;
       }
@@ -98,13 +98,13 @@ IndiXmlParser::IndiXmlParser( const IndiMessage &imSend,
     case IndiMessage::SetProperty:
       switch ( ipSend.getType() )
       {
-        case IndiProperty::BLOB: createSetBLOBVector( ipSend ); break;
-        case IndiProperty::Light: createSetLightVector( ipSend ); break;
-        case IndiProperty::Number: createSetNumberVector( ipSend ); break;
-        case IndiProperty::Switch: createSetSwitchVector( ipSend ); break;
-        case IndiProperty::Text: createSetTextVector( ipSend ); break;
+        case IndiProperty::Type::BLOB: createSetBLOBVector( ipSend ); break;
+        case IndiProperty::Type::Light: createSetLightVector( ipSend ); break;
+        case IndiProperty::Type::Number: createSetNumberVector( ipSend ); break;
+        case IndiProperty::Type::Switch: createSetSwitchVector( ipSend ); break;
+        case IndiProperty::Type::Text: createSetTextVector( ipSend ); break;
         default:
-        case IndiProperty::Unknown:
+        case IndiProperty::Type::Unknown:
           throw runtime_error( "Unknown INDI property SET type is not allowed." );
           break;
       }
@@ -1332,81 +1332,81 @@ IndiMessage IndiXmlParser::createIndiMessage() const
         break;
       // Define properties.
       case DefBLOBVector:
-        ipNew = IndiProperty( IndiProperty::BLOB );
+        ipNew = IndiProperty( IndiProperty::Type::BLOB );
         tMsgType = IndiMessage::Define;
         break;
       case DefLightVector:
-        ipNew = IndiProperty( IndiProperty::Light );
+        ipNew = IndiProperty( IndiProperty::Type::Light );
         tMsgType = IndiMessage::Define;
         break;
       case DefNumberVector:
-        ipNew = IndiProperty( IndiProperty::Number );
+        ipNew = IndiProperty( IndiProperty::Type::Number );
         tMsgType = IndiMessage::Define;
         break;
       case DefSwitchVector:
-        ipNew = IndiProperty( IndiProperty::Switch );
+        ipNew = IndiProperty( IndiProperty::Type::Switch );
         tMsgType = IndiMessage::Define;
         break;
       case DefTextVector:
-        ipNew = IndiProperty( IndiProperty::Text );
+        ipNew = IndiProperty( IndiProperty::Type::Text );
         tMsgType = IndiMessage::Define;
         break;
       // Delete properties.
       case DelProperty:
-        ipNew = IndiProperty( IndiProperty::Unknown );
+        ipNew = IndiProperty( IndiProperty::Type::Unknown );
         tMsgType = IndiMessage::Delete;
         break;
       // Enable blobs for a client.
       case EnableBLOB:
-        ipNew = IndiProperty( IndiProperty::Unknown );
+        ipNew = IndiProperty( IndiProperty::Type::Unknown );
         tMsgType = IndiMessage::EnableBLOB;
         break;
       // Command to enable snooping messages from other devices.
       case GetProperties:
-        ipNew = IndiProperty( IndiProperty::Unknown );
+        ipNew = IndiProperty( IndiProperty::Type::Unknown );
         tMsgType = IndiMessage::GetProperties;
         break;
       // A message.
       case Message:
-        ipNew = IndiProperty( IndiProperty::Unknown );
+        ipNew = IndiProperty( IndiProperty::Type::Unknown );
         tMsgType = IndiMessage::Message;
         break;
       // Update properties.
       case NewBLOBVector:
-        ipNew = IndiProperty( IndiProperty::BLOB );
+        ipNew = IndiProperty( IndiProperty::Type::BLOB );
         tMsgType = IndiMessage::NewProperty;
         break;
       case NewNumberVector:
-        ipNew = IndiProperty( IndiProperty::Number );
+        ipNew = IndiProperty( IndiProperty::Type::Number );
         tMsgType = IndiMessage::NewProperty;
         break;
       case NewSwitchVector:
-        ipNew = IndiProperty( IndiProperty::Switch );
+        ipNew = IndiProperty( IndiProperty::Type::Switch );
         tMsgType = IndiMessage::NewProperty;
         break;
       case NewTextVector:
-        ipNew = IndiProperty( IndiProperty::Text );
+        ipNew = IndiProperty( IndiProperty::Type::Text );
         tMsgType = IndiMessage::NewProperty;
         break;
       // Set properties.
       case SetBLOBVector:
-        ipNew = IndiProperty( IndiProperty::BLOB );
+        ipNew = IndiProperty( IndiProperty::Type::BLOB );
         tMsgType = IndiMessage::SetProperty;
         break;
       case SetLightVector:
-        ipNew = IndiProperty( IndiProperty::Light );
+        ipNew = IndiProperty( IndiProperty::Type::Light );
         tMsgType = IndiMessage::SetProperty;
         break;
       case SetNumberVector:
-        ipNew = IndiProperty( IndiProperty::Number );
+        ipNew = IndiProperty( IndiProperty::Type::Number );
         tMsgType = IndiMessage::SetProperty;
         break;
       case SetSwitchVector:
-        ipNew = IndiProperty( IndiProperty::Switch );
+        ipNew = IndiProperty( IndiProperty::Type::Switch );
         tMsgType = IndiMessage::SetProperty;
         break;
       case SetTextVector:
-        ipNew = IndiProperty( IndiProperty::Text );
+        ipNew = IndiProperty( IndiProperty::Type::Text );
         tMsgType = IndiMessage::SetProperty;
         break;
     };
@@ -1423,7 +1423,7 @@ IndiMessage IndiXmlParser::createIndiMessage() const
     if ( ( szValue = getAttributeValue( "name", m_pxeRoot ) ).size() > 0 )
       ipNew.setName( szValue );
     if ( ( szValue = getAttributeValue( "perm", m_pxeRoot ) ).size() > 0 )
-      ipNew.setPerm( IndiProperty::getPropertyPermType( szValue ) );
+      ipNew.setPerm( IndiProperty::getPropertyPerm( szValue ) );
     if ( ( szValue = getAttributeValue( "rule", m_pxeRoot ) ).size() > 0 )
       ipNew.setRule( IndiProperty::getSwitchRule( szValue ) );
     if ( ( szValue = getAttributeValue( "state", m_pxeRoot ) ).size() > 0 )
@@ -1449,7 +1449,7 @@ IndiMessage IndiXmlParser::createIndiMessage() const
     // but has data in it.
     if ( tType == EnableBLOB )
     {
-      ipNew = IndiProperty::getBLOBEnableType( ::pcdataXMLEle( m_pxeRoot ) );
+      ipNew = IndiProperty::getBLOBEnable( ::pcdataXMLEle( m_pxeRoot ) );
     }
     else
     {
