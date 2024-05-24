@@ -156,8 +156,8 @@ void IndiXmlParser::createDefTextVector( const IndiProperty &ip )
 
   m_ssXml << " device=\"" << ip.getDevice() << "\"";
   m_ssXml << " name=\"" << ip.getName() << "\"";
-  m_ssXml << " state=\"" << ip.getPropertyStateString( ip.getState() ) << "\"";
-  m_ssXml << " perm=\"" << ip.getPropertyPermString( ip.getPerm() ) << "\"";
+  m_ssXml << " state=\"" << ip.getStateString( ip.getState() ) << "\"";
+  m_ssXml << " perm=\"" << ip.getPermString( ip.getPerm() ) << "\"";
 
   // "implied" means that if they are not defined, don't add them. Adding an
   // empty "implied" attribute to the generated XML is an error.
@@ -227,7 +227,7 @@ void IndiXmlParser::createSetTextVector( const IndiProperty &ip )
   // "implied" means that if they are not defined, don't add them. Adding an
   // empty "implied" attribute to the generated XML is an error.
   if ( ip.hasValidState() == true )
-    m_ssXml << " state=\"" << ip.getPropertyStateString( ip.getState() ) << "\"";
+    m_ssXml << " state=\"" << ip.getStateString( ip.getState() ) << "\"";
   if ( ip.hasValidTimeout() == true )
     m_ssXml << " timeout=\"" << ip.getTimeout() << "\"";
   m_ssXml << " timestamp=\"" << ip.getTimeStamp().getFormattedIso8601Str() << "\"";
@@ -338,8 +338,8 @@ void IndiXmlParser::createDefNumberVector( const IndiProperty &ip )
 
   m_ssXml << " device=\"" << ip.getDevice() << "\"";
   m_ssXml << " name=\"" << ip.getName() << "\"";
-  m_ssXml << " state=\"" << ip.getPropertyStateString( ip.getState() ) << "\"";
-  m_ssXml << " perm=\"" << ip.getPropertyPermString( ip.getPerm() ) << "\"";
+  m_ssXml << " state=\"" << ip.getStateString( ip.getState() ) << "\"";
+  m_ssXml << " perm=\"" << ip.getPermString( ip.getPerm() ) << "\"";
 
   // "implied" means that if they are not defined, don't add them. Adding an
   // empty "implied" attribute to the generated XML is an error.
@@ -421,7 +421,7 @@ void IndiXmlParser::createSetNumberVector( const IndiProperty &ip )
   // "implied" means that if they are not defined, don't add them. Adding an
   // empty "implied" attribute to the generated XML is an error.
   if ( ip.hasValidState() == true )
-    m_ssXml << " state=\"" << ip.getPropertyStateString( ip.getState() ) << "\"";
+    m_ssXml << " state=\"" << ip.getStateString( ip.getState() ) << "\"";
   if ( ip.hasValidTimeout() == true )
     m_ssXml << " timeout=\"" << ip.getTimeout() << "\"";
   m_ssXml << " timestamp=\"" << ip.getTimeStamp().getFormattedIso8601Str() << "\"";
@@ -534,8 +534,8 @@ void IndiXmlParser::createDefSwitchVector( const IndiProperty &ip )
 
   m_ssXml << " device=\"" << ip.getDevice() << "\"";
   m_ssXml << " name=\"" << ip.getName() << "\"";
-  m_ssXml << " state=\"" << ip.getPropertyStateString( ip.getState() ) << "\"";
-  m_ssXml << " perm=\"" << ip.getPropertyPermString( ip.getPerm() ) << "\"";
+  m_ssXml << " state=\"" << ip.getStateString( ip.getState() ) << "\"";
+  m_ssXml << " perm=\"" << ip.getPermString( ip.getPerm() ) << "\"";
   m_ssXml << " rule=\"" << ip.getSwitchRuleString( ip.getRule() ) << "\"";
 
   // "implied" means that if they are not defined, don't add them. Adding an
@@ -606,7 +606,7 @@ void IndiXmlParser::createSetSwitchVector( const IndiProperty &ip )
   // "implied" means that if they are not defined, don't add them. Adding an
   // empty "implied" attribute to the generated XML is an error.
   if ( ip.hasValidState() == true )
-    m_ssXml << " state=\"" << IndiProperty::getPropertyStateString( ip.getState() ) << "\"";
+    m_ssXml << " state=\"" << IndiProperty::getStateString( ip.getState() ) << "\"";
   if ( ip.hasValidTimeout() == true )
     m_ssXml << " timeout=\"" << ip.getTimeout() << "\"";
   m_ssXml << " timestamp=\"" << ip.getTimeStamp().getFormattedIso8601Str() << "\"";
@@ -715,7 +715,7 @@ void IndiXmlParser::createDefLightVector( const IndiProperty &ip )
 
   m_ssXml << " device=\"" << ip.getDevice() << "\"";
   m_ssXml << " name=\"" << ip.getName() << "\"";
-  m_ssXml << " state=\"" << ip.getPropertyStateString( ip.getState() ) << "\"";
+  m_ssXml << " state=\"" << ip.getStateString( ip.getState() ) << "\"";
 
   // "implied" means that if they are not defined, don't add them. Adding an
   // empty "implied" attribute to the generated XML is an error.
@@ -783,7 +783,7 @@ void IndiXmlParser::createSetLightVector( const IndiProperty &ip )
   // "implied" means that if they are not defined, don't add them. Adding an
   // empty "implied" attribute to the generated XML is an error.
   if ( ip.hasValidState() == true )
-    m_ssXml << " state=\"" << ip.getPropertyStateString( ip.getState() ) << "\"";
+    m_ssXml << " state=\"" << ip.getStateString( ip.getState() ) << "\"";
   m_ssXml << " timestamp=\"" << ip.getTimeStamp().getFormattedIso8601Str() << "\"";
   if ( ip.hasValidMessage() == true )
     m_ssXml << " message=\"" << ip.getMessage() << "\"";
@@ -840,8 +840,8 @@ void IndiXmlParser::createDefBLOBVector( const IndiProperty &ip )
 
   m_ssXml << " device=\"" << ip.getDevice() << "\"";
   m_ssXml << " name=\"" << ip.getName() << "\"";
-  m_ssXml << " state=\"" << ip.getPropertyStateString( ip.getState() ) << "\"";
-  m_ssXml << " perm=\"" << ip.getPropertyPermString( ip.getPerm() ) << "\"";
+  m_ssXml << " state=\"" << ip.getStateString( ip.getState() ) << "\"";
+  m_ssXml << " perm=\"" << ip.getPermString( ip.getPerm() ) << "\"";
 
   // "implied" means that if they are not defined, don't add them. Adding an
   // empty "implied" attribute to the generated XML is an error.
@@ -912,7 +912,7 @@ void IndiXmlParser::createSetBLOBVector( const IndiProperty &ip )
   // "implied" means that if they are not defined, don't add them. Adding an
   // empty "implied" attribute to the generated XML is an error.
   if ( ip.hasValidState() == true )
-    m_ssXml << " state=\"" << ip.getPropertyStateString( ip.getState() ) << "\"";
+    m_ssXml << " state=\"" << ip.getStateString( ip.getState() ) << "\"";
   if ( ip.hasValidTimeout() == true )
     m_ssXml << " timeout=\"" << ip.getTimeout() << "\"";
   m_ssXml << " timestamp=\"" << ip.getTimeStamp().getFormattedIso8601Str() << "\"";
@@ -1423,11 +1423,11 @@ IndiMessage IndiXmlParser::createIndiMessage() const
     if ( ( szValue = getAttributeValue( "name", m_pxeRoot ) ).size() > 0 )
       ipNew.setName( szValue );
     if ( ( szValue = getAttributeValue( "perm", m_pxeRoot ) ).size() > 0 )
-      ipNew.setPerm( IndiProperty::getPropertyPerm( szValue ) );
+      ipNew.setPerm( IndiProperty::getPerm( szValue ) );
     if ( ( szValue = getAttributeValue( "rule", m_pxeRoot ) ).size() > 0 )
       ipNew.setRule( IndiProperty::getSwitchRule( szValue ) );
     if ( ( szValue = getAttributeValue( "state", m_pxeRoot ) ).size() > 0 )
-      ipNew.setState( IndiProperty::getPropertyState( szValue ) );
+      ipNew.setState( IndiProperty::getState( szValue ) );
     if ( ( szValue = getAttributeValue( "timeout", m_pxeRoot ) ).size() > 0 )
     {
       stringstream ssTimeout;

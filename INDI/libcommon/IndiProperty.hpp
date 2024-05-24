@@ -22,6 +22,7 @@
  * - organize get/set functions
  * - convert from rwLock to shared mutex
  */
+
 namespace pcf
 {
 
@@ -46,7 +47,7 @@ public:
         Never
     };
 
-    enum class PropertyState
+    enum class State
     {
         Unknown = 0,
         Alert = 1,
@@ -63,7 +64,7 @@ public:
         OneOfMany
     };
 
-    enum class PropertyPerm
+    enum class Perm
     {
         Unknown = 0,
         ReadOnly = 1,
@@ -123,11 +124,11 @@ protected:
 
     std::string m_name;
 
-    PropertyPerm m_perm{PropertyPerm::Unknown};
+    Perm m_perm{Perm::Unknown};
 
     SwitchRule m_rule{SwitchRule::Unknown};
 
-    PropertyState m_state{PropertyState::Unknown};
+    State m_state{State::Unknown};
 
     double m_timeout{0.0f};
 
@@ -173,8 +174,8 @@ public:
     IndiProperty( const Type &tType,
                   const std::string &szDevice,
                   const std::string &szName,
-                  const PropertyState &tState,
-                  const PropertyPerm &tPerm,
+                  const State &tState,
+                  const Perm &tPerm,
                   const SwitchRule &tRule = SwitchRule::Unknown
                 );
 
@@ -234,10 +235,10 @@ public:
     const std::string &getLabel() const;
     const std::string &getMessage() const;
     const std::string &getName() const;
-    const PropertyPerm &getPerm() const;
+    const Perm &getPerm() const;
     const SwitchRule &getRule() const;
 
-    const PropertyState &getState() const;
+    const State &getState() const;
     
     const double &getTimeout() const;
     const pcf::TimeStamp &getTimeStamp() const;
@@ -262,13 +263,13 @@ public:
     /// Returns the enumerated type given the string type.
     static BLOBEnable getBLOBEnable(const std::string &szType);
     /// Returns the string type given the enumerated type.
-    static std::string getPropertyPermString(const PropertyPerm &tType);
+    static std::string getPermString(const Perm &tType);
     /// Returns the enumerated type given the string type.
-    static PropertyPerm getPropertyPerm(const std::string &szType);
+    static Perm getPerm(const std::string &szType);
     /// Returns the string type given the enumerated type.
-    static std::string getPropertyStateString(const PropertyState &tType);
+    static std::string getStateString(const State &tType);
     /// Returns the enumerated type given the string type.
-    static PropertyState getPropertyState(const std::string &szType);
+    static State getState(const std::string &szType);
     /// Returns the string type given the enumerated type.
     static std::string getSwitchRuleString(const SwitchRule &tType);
     /// Returns the enumerated type given the string type.
@@ -317,10 +318,10 @@ public:
     void setLabel(const std::string &szValue);
     void setMessage(const std::string &szValue);
     void setName(const std::string &szValue);
-    void setPerm(const PropertyPerm &tValue);
+    void setPerm(const Perm &tValue);
     void setRequested(const bool &oRequested);
     void setRule(const SwitchRule &tValue);
-    void setState(const PropertyState &tValue);
+    void setState(const State &tValue);
     void setTimeout(const double &xValue);
     void setTimeStamp(const pcf::TimeStamp &tsValue);
     void setVersion(const std::string &szValue);
