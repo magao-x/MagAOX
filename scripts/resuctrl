@@ -34,7 +34,7 @@ function verb_startup {
   || resu_failure "Readable process list file not found; exiting ..." \
   || return 1
 
-  command="$(find_resurrector_indi_path) -r $ROLE" \
+  command="$(find_resurrector_indi_path) -r $ROLE $CACHESUFFIXargs" \
   || ( echo Program resurrector_indi not found && false ) \
   || return 1
   resu_success "$command &"
@@ -200,6 +200,26 @@ function verb_ripath {
 }
 
 ########################################################################
+### Verb to reset (or create) the cached proclist
+function verb_reset {
+
+  hide reset
+
+  ripath="$(find_resurrector_indi_path)" \
+  && proclist_base="$($ripath -r $ROLE -cs - -pn)" \
+  && proclist_cached="$($ripath -r $ROLE $CACHESUFFIXargs -pn)" \
+  || ( echo "Failed to determine proclist path(s) [$proclist_base] [$proclist_cached]" && false ) \
+  || return 1
+
+  [ "$proclist_base" == "$proclist_cached" ] \
+  && ( echo "Cached proclist path cannot be the same as the base proclist path" || true ) \
+  && return 1
+
+  cp -v "$proclist_base" "$proclist_cached"
+
+}
+
+########################################################################
 ### Parse command line; store the results in the various shell variables
 function parse_commands {
 
@@ -209,20 +229,27 @@ function parse_commands {
   unset Helped
   unset All
   unset RootCheck
+  unset CACHESUFFIXargs
+  unset CACHESUFFIXisnext
 
   ### Loop over command-line arguments
   for arg in $* ; do
 
+
     ### Ignore empty arguments
+    ### - Caveat:  empty arguments reset "is next" flags
     ### -r or --role was previous argument; use current argument as ROLE
+    ### -cs or --cache-suffix was previous argument; use current arg
+    [ ! "$arg" ] && unset ROLEisnext && unset CACHESUFFIXisnext
     [ "$arg" ] || continue
-    [ "$ROLEisnext" ] && ROLE="$arg" && unset ROLEisnext && continue
+    [ "$ROLEisnext" ] && unset ROLEisnext && ROLE="$arg" && continue
+    [ "$CACHESUFFIXisnext" ] && unset CACHESUFFIXisnext && CACHESUFFIXargs="-cs $arg" && continue
 
     ### Parse arguments using case-esac statments
     case "$arg" in
 
     ### Verbs
-    startup|shutdown|restart|start|stop|defib|peek|status|ripath)
+    startup|shutdown|restart|start|stop|defib|peek|status|ripath|reset)
 
       ### If a second verb is found, add it as procname to procnames var
       [ "$verb" ] \
@@ -244,6 +271,11 @@ function parse_commands {
     ### --root-check
     --root-check)
       RootCheck=yes
+      ;;
+
+    ### -cs .cache-suffix or --cache-suffix .cache-suffix
+    -cs|--cache-suffix)
+      CACHESUFFIXisnext=yes
       ;;
 
     ### -all
@@ -372,9 +404,13 @@ function wrap_procname {
 ### Build the path to existing process list file with configuration data
 function proclist_path {
 
-  the_proclist="${opt_magaox}/config/proclist_${ROLE}.txt"
+  command="$(find_resurrector_indi_path) -r $ROLE $CACHESUFFIXargs -pn" \
+  || ( echo Program resurrector_indi not found && false ) \
+  || return 1
 
-  [ -r "$the_proclist" ] \
+  the_proclist="$($command)" \
+  && [ "$the_proclist" ] \
+  && [ -r "$the_proclist" ] \
   && [ "$1" == "readonly" -o -w "$the_proclist" ] \
   && ls -d "$the_proclist"
 }
@@ -548,6 +584,7 @@ function find_hexbeat_pipe {
 
 ########################################################################
 function Usage {
+
 less '-sPsEnter/k=>Down/Up; spacebar/b=>next/previous; q=>quit' << EoF
 usage:  [MAGAOX_ROLE=ROLE] resuctrl [-h|--help] [-r ROLE|--role ROLE] \\
              [--root-check] \\
@@ -606,6 +643,11 @@ optional arguments:
   -r ROLE, --role ROLE  Specify role to read proclist for (default:gauss)
   --root-check          Check entire filesystem for resurrector_indi
                           process if none found in expected directories
+  -cs .sfx,             Suffix to append to version-controlled path of
+  --cache-suffix .sfx     /opt/MagAOX/config/proclist.txt to control
+                          which apps to run.  Leading "." is optional.
+                          To see default, try "resurrector_indi -pn"
+                          For no suffix, use -cs -
 EoF
 
 cat << EoFmsg
@@ -629,6 +671,7 @@ In verb_{$1}:
 verb{$verb}:
 - ROLE{$ROLE}
 - procnames{$procnames}
+- Proclist cache suffix arguments{$CACHESUFFIXargs}
 - All{$All}
 EoFhide
 }

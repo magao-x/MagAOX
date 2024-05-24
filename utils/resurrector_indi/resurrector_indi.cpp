@@ -89,6 +89,16 @@ void setup_SIGUSR12_handler(int iSIGUSRn)
 int
 main(int argc, char** argv)
 {
+
+    // Get MagAOX role and build process list file pathname e.g.
+    // export MAGAOX_ROLE=vm; path=/opt/MagAOX/config/proclist_vm.txt
+    std::string proclist_role = get_magaox_proclist_role(argc, argv);
+    if (arg_is_present(argc,argv,"-pn","--proclist-name"))
+    {
+        std::cout << proclist_role << std::endl;
+        return 0;
+    }
+
     extern void stdout_stderr_redirect(std::string);
     bool nor{get_no_output_redirect_arg(argc,argv)};
     logging = get_logging_arg(argc, argv);
@@ -100,10 +110,6 @@ main(int argc, char** argv)
 
     if (verbose) { resurr.set_resurr_verbose_logging(); }
     else         { resurr.clr_resurr_verbose_logging(); }
-
-    // Get MagAOX role and build process list file pathname e.g.
-    // export MAGAOX_ROLE=vm; path=/opt/MagAOX/config/proclist_vm.txt
-    std::string proclist_role = get_magaox_proclist_role(argc, argv);
 
     setup_SIGUSR12_handler(SIGUSR1);
     setup_SIGUSR12_handler(SIGUSR2);

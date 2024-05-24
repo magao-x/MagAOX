@@ -74,6 +74,8 @@ Usage(int rtn, const char* msg)
                  "    [MAGAOX_ROLE=role] resurrector_indi"
                  " [-r role] [--role=role]"
                  " [-nor|--no-output-redirect]"
+                 " [-pn|--proclist-name]"
+                 " [-cs .cache-suffix] [--cache-suffix=.cache-suffix]"
                  " [-l|--logging]"
                  " [-v|--verbose]"
                  " [-h|--help]\n"
@@ -163,10 +165,15 @@ get_magaox_proclist_role(int argc, char** argv)
     if (!role) { role = getenv("MAGAOX_ROLE"); }
     if (!role) { Usage(1, "\nERROR:  no role specified; try --help"); }
 
+    const char default_cache_suffix[] = { ".copy" };
+    char* cache_suffix{arg_value(argc, argv, "-cs", "--cache-suffix=")};
+    if (!cache_suffix) { cache_suffix = (char*) default_cache_suffix; }
+
     std::string pl_role{IRMAGAOX_config};  // /opt/MagAOX/config
     pl_role += "/proclist_";
     pl_role += role;
     pl_role += ".txt";
+    if (strcmp(cache_suffix,"-")) { pl_role += cache_suffix; }
 
     return pl_role;
 }
