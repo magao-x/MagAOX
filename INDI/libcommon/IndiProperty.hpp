@@ -56,9 +56,9 @@ public:
         Idle
     };
 
-    enum SwitchRuleType
+    enum class SwitchRule
     {
-        UnknownSwitchRule = 0,
+        Unknown = 0,
         AnyOfMany = 1,
         AtMostOne,
         OneOfMany
@@ -126,7 +126,7 @@ protected:
 
     PropertyPermType m_perm{UnknownPropertyPerm};
 
-    SwitchRuleType m_rule{UnknownSwitchRule};
+    SwitchRule m_rule{SwitchRule::Unknown};
 
     PropertyState m_state{PropertyState::Unknown};
 
@@ -176,7 +176,7 @@ public:
                   const std::string &szName,
                   const PropertyState &tState,
                   const PropertyPermType &tPerm,
-                  const SwitchRuleType &tRule = UnknownSwitchRule
+                  const SwitchRule &tRule = SwitchRule::Unknown
                 );
 
     /// Copy constructor.
@@ -236,7 +236,7 @@ public:
     const std::string &getMessage() const;
     const std::string &getName() const;
     const PropertyPermType &getPerm() const;
-    const SwitchRuleType &getRule() const;
+    const SwitchRule &getRule() const;
 
     const PropertyState &getState() const;
     
@@ -269,11 +269,11 @@ public:
     /// Returns the string type given the enumerated type.
     static std::string getPropertyStateString(const PropertyState &tType);
     /// Returns the enumerated type given the string type.
-    static PropertyState getPropertyStateType(const std::string &szType);
+    static PropertyState getPropertyState(const std::string &szType);
     /// Returns the string type given the enumerated type.
-    static std::string getSwitchRuleString(const SwitchRuleType &tType);
+    static std::string getSwitchRuleString(const SwitchRule &tType);
     /// Returns the enumerated type given the string type.
-    static SwitchRuleType getSwitchRuleType(const std::string &szType);
+    static SwitchRule getSwitchRule(const std::string &szType);
     /// Returns the message concerning the error.
     static std::string getErrorMsg(const int &nErr);
     /// Ensures that a name conforms to the INDI standard and can be used as
@@ -320,7 +320,7 @@ public:
     void setName(const std::string &szValue);
     void setPerm(const PropertyPermType &tValue);
     void setRequested(const bool &oRequested);
-    void setRule(const SwitchRuleType &tValue);
+    void setRule(const SwitchRule &tValue);
     void setState(const PropertyState &tValue);
     void setTimeout(const double &xValue);
     void setTimeStamp(const pcf::TimeStamp &tsValue);

@@ -1425,9 +1425,9 @@ IndiMessage IndiXmlParser::createIndiMessage() const
     if ( ( szValue = getAttributeValue( "perm", m_pxeRoot ) ).size() > 0 )
       ipNew.setPerm( IndiProperty::getPropertyPermType( szValue ) );
     if ( ( szValue = getAttributeValue( "rule", m_pxeRoot ) ).size() > 0 )
-      ipNew.setRule( IndiProperty::getSwitchRuleType( szValue ) );
+      ipNew.setRule( IndiProperty::getSwitchRule( szValue ) );
     if ( ( szValue = getAttributeValue( "state", m_pxeRoot ) ).size() > 0 )
-      ipNew.setState( IndiProperty::getPropertyStateType( szValue ) );
+      ipNew.setState( IndiProperty::getPropertyState( szValue ) );
     if ( ( szValue = getAttributeValue( "timeout", m_pxeRoot ) ).size() > 0 )
     {
       stringstream ssTimeout;

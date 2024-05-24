@@ -121,7 +121,7 @@ class IndiPropertyMap
     /// will receive many instances of it. This is useful in handling lists
     /// of things, such as sensors or motors, etc.
     void updateState( const pcf::IndiDriver &idParent,
-                      const pcf::IndiProperty::PropertyStateType &pstNew,
+                      const pcf::IndiProperty::PropertyState &pstNew,
                       const std::string &szPropertyName = "",
                       const std::string &szNewName = "" );
 

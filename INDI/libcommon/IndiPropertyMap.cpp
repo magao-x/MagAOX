@@ -419,7 +419,7 @@ void IndiPropertyMap::sendDef( const IndiDriver &idParent,
 /// of things, such as sensors or motors, etc.
 
 void IndiPropertyMap::updateState( const IndiDriver &idParent,
-                                   const IndiProperty::PropertyStateType &pstNew,
+                                   const IndiProperty::PropertyState &pstNew,
                                    const string &szPropertyName,
                                    const string &szNewName )
 {

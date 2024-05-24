@@ -37,7 +37,7 @@ IndiProperty::IndiProperty( const Type &tType,
                             const string &szName,
                             const PropertyState &tState,
                             const PropertyPermType &tPerm,
-                            const SwitchRuleType &tRule ) : m_device(szDevice), m_name(szName), m_perm(tPerm),
+                            const SwitchRule &tRule ) : m_device(szDevice), m_name(szName), m_perm(tPerm),
                                                                m_rule(tRule), m_state(tState), m_type(tType)
 {
 }
@@ -456,7 +456,7 @@ bool IndiProperty::hasValidPerm() const
 bool IndiProperty::hasValidRule() const
 {
   pcf::ReadWriteLock::AutoRLock rwAuto( &m_rwData );
-  return ( m_rule != UnknownSwitchRule );
+  return ( m_rule != SwitchRule::Unknown );
 }
 
 ////////////////////////////////////////////////////////////////////////////////
@@ -562,7 +562,7 @@ const IndiProperty::PropertyPermType &IndiProperty::getPerm() const
 ////////////////////////////////////////////////////////////////////////////////
 /// Returns the rule stored in the message.
 
-const IndiProperty::SwitchRuleType &IndiProperty::getRule() const
+const IndiProperty::SwitchRule &IndiProperty::getRule() const
 {
   pcf::ReadWriteLock::AutoRLock rwAuto( &m_rwData );
   return m_rule;
@@ -698,7 +698,7 @@ void IndiProperty::setRequested( const bool &oRequested )
 
 ////////////////////////////////////////////////////////////////////////////////
 
-void IndiProperty::setRule( const IndiProperty::SwitchRuleType &tValue )
+void IndiProperty::setRule( const IndiProperty::SwitchRule &tValue )
 {
   pcf::ReadWriteLock::AutoWLock rwAuto( &m_rwData );
   m_rule = tValue;
@@ -1068,7 +1068,7 @@ string IndiProperty::getBLOBEnableString( const BLOBEnableType &tType )
 ////////////////////////////////////////////////////////////////////////////////
 /// Returns the enumerated type given the string type.
 
-IndiProperty::PropertyState IndiProperty::getPropertyStateType( const string &szType )
+IndiProperty::PropertyState IndiProperty::getPropertyState( const string &szType )
 {
   PropertyState tType = PropertyState::Unknown;
 
@@ -1124,16 +1124,22 @@ string IndiProperty::getPropertyStateString( const PropertyState &tType )
 ////////////////////////////////////////////////////////////////////////////////
 /// Returns the enumerated type given the string type.
 
-IndiProperty::SwitchRuleType IndiProperty::getSwitchRuleType( const string &szType )
+IndiProperty::SwitchRule IndiProperty::getSwitchRule( const string &szType )
 {
-  SwitchRuleType tType = UnknownSwitchRule;
+  SwitchRule tType = SwitchRule::Unknown;
 
   if ( szType == "OneOfMany" )
-    tType = OneOfMany;
+  {
+    tType = SwitchRule::OneOfMany;
+  }
   else if ( szType == "AtMostOne" )
-    tType = AtMostOne;
+  {
+    tType = SwitchRule::AtMostOne;
+  }
   else if ( szType == "AnyOfMany" )
-    tType = AnyOfMany;
+  {
+    tType = SwitchRule::AnyOfMany;
+  }
 
   return tType;
 }
@@ -1141,22 +1147,22 @@ IndiProperty::SwitchRuleType IndiProperty::getSwitchRuleType( const string &szTy
 ////////////////////////////////////////////////////////////////////////////////
 /// Returns the string type given the enumerated type.
 
-string IndiProperty::getSwitchRuleString( const SwitchRuleType &tType )
+string IndiProperty::getSwitchRuleString( const SwitchRule &tType )
 {
   string szType = "";
 
   switch ( tType )
   {
-    case OneOfMany:
+    case SwitchRule::OneOfMany:
       szType = "OneOfMany";
       break;
-    case AtMostOne:
+    case SwitchRule::AtMostOne:
       szType = "AtMostOne";
       break;
-    case AnyOfMany:
+    case SwitchRule::AnyOfMany:
       szType = "AnyOfMany";
       break;
-    case UnknownSwitchRule:
+    case SwitchRule::Unknown:
       szType = "";
       break;
   }
