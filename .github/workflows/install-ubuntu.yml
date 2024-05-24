@@ -23,8 +23,8 @@ jobs:
         uses: actions/cache@v3.0.6
         with:
           path: /opt/MagAOX/
-          key: ubuntu-22.04-dependencies-cache-v1-${{ hashFiles('setup/*', 'setup/**/*') }}
-      - run: 'bash -x setup/steps/install_ubuntu_22_packages.sh'
+          key: ubuntu-24.04-dependencies-cache-v1-${{ hashFiles('setup/*', 'setup/**/*') }}
+      - run: 'bash -x setup/steps/install_ubuntu_24_packages.sh'
         name: Install OS dependencies
       - run: 'bash -lx setup/provision.sh'
         name: Auto-provision
