@@ -3,8 +3,9 @@ DIR="$( cd "$( dirname "${BASH_SOURCE[0]}" )" && pwd )"
 source $DIR/../_common.sh
 set -euo pipefail
 
+source /etc/os-release
 if [[ $ID == ubuntu ]]; then
-    sudo NEEDRESTART_SUSPEND=yes apt install -y \
+    sudo -i apt install -y \
         x11-apps \
         libgl-dev \
         qtbase5-dev \
@@ -13,8 +14,12 @@ if [[ $ID == ubuntu ]]; then
         qtbase5-dev-tools \
         libqt5svg5-dev \
         wmctrl \
-        libqwt-qt5-dev \
-    ;
+	;
+    if [[ $VERSION_ID = "24.04" ]]; then
+        sudo -i apt install -y libqwtmathml-qt5-dev ;
+    else
+        sudo -i apt install -y libqwt-qt5-dev/jammy ;
+    fi
 elif [[ $ID == centos && $VERSION_ID == 7 ]]; then
     sudo yum install -y \
         xorg-x11-apps \
@@ -26,6 +31,7 @@ elif [[ $ID == rocky && $VERSION_ID == "9."* ]]; then
     sudo dnf install -y \
         qt5-devel \
         qwt-qt5-devel \
+        wmctrl \
     ;
 fi
 

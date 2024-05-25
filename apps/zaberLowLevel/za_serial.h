@@ -93,7 +93,7 @@ int za_disconnect(z_port port);
  * \return the number of bytes written, Z_ERROR_NULL_PARAMETER if \a command is
  * NULL, or Z_ERROR_SYSTEM_ERROR in case of system error.
  */
-int za_send(z_port port, const char *command);
+int za_send(z_port port, const char *command, size_t sMaxSz);
 
 /** Reads a message from the serial port.
  *
@@ -139,7 +139,7 @@ int za_receive(z_port port, char *destination, int length);
  * \return Z_SUCCESS on success, Z_ERROR_NULL_PARAMETER if \a destination or
  * \a reply is NULL, or Z_ERROR_COULD_NOT_DECODE if the reply is malformed.
  */
-int za_decode(struct za_reply *destination, const char *reply);
+int za_decode(struct za_reply *destination, const char *reply, size_t sMaxSz);
 
 /** Changes the baud rate of both input and output.
  *

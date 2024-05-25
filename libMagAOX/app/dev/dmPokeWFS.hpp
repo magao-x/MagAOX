@@ -4,8 +4,6 @@
   * \ingroup dmPokeWFS_files
   */
 
-
-
 #ifndef dmPokeWFS_hpp
 #define dmPokeWFS_hpp
 
@@ -17,7 +15,7 @@ using namespace mx::improc;
 #include "../../ImageStreamIO/pixaccess.hpp"
 
 /** \defgroup dmPokeWFS
-  * \brief The MagAO-X application to register DM actuators to pupil pixels
+  * \brief The MagAO-X device to coordinate poking a deformable mirror's actuators and synchronize reads of a camera image.
   *
   * <a href="../handbook/operating/software/apps/dmPokeWFS.html">Application Documentation</a>
   *
@@ -39,15 +37,16 @@ namespace dev
 
 
 
-/// A base class to coordinate poking a deformable mirror's actuators and synchronized reads of a camera image.
+/// A base class to coordinate poking a deformable mirror's actuators and synchronizedreads of a camera image.
 /** CRTP class `derivedT` has the following requirements:
-  * - Must be a MagAOXApp<true>
+  * 
+  * - Must be derived from MagAOXApp<true>
   * 
   * - Must be derived from `dev::shmimMonitor<DERIVEDNAME, dev::dmPokeWFS<DERIVEDNAME>::wfsShmimT>` (replace DERIVEDNAME with derivedT class name)
   * 
   * - Must be derived from  `dev::shmimMonitor<DERIVEDNAME, dev::dmPokeWFS<DERIVEDNAME>::darkShmimT>` (replace DERIVEDNAME with derivedT class name)
   * 
-  * - Must contain the following friend declarations (replace DERIVEDNAME with derivedT class name):
+  * - Must contain the following friend declalibMagAOX/app/indiMacros.hpprations (replace DERIVEDNAME with derivedT class name):
   *   \code
   *      friend class dev::shmimMonitor<DERIVEDNAME, dev::dmPokeWFS<DERIVEDNAME>::wfsShmimT>;
   *      friend class dev::shmimMonitor<DERIVEDNAME, dev::dmPokeWFS<DERIVEDNAME>::darkShmimT>;
@@ -73,6 +72,14 @@ namespace dev
   *           return *static_cast<darkShmimMonitorT *>(this);
   *       }
   *   \endcode
+  * 
+  * - If derivedT has additional shmimMonitor parents, you will need to include these lines in the class 
+  *   declaration:
+  *   \code
+  *       using dmPokeWFST::allocate;
+  *       using dmPokeWFST::processImage;
+  *   \endcode
+  *
   * - Must provide the following interface:
   *   \code
   *       // Run the sensor steps 
@@ -666,7 +673,7 @@ int dmPokeWFS<derivedT>::allocate( const wfsShmimT & dummy)
     {
         m_dmStream.open(m_dmChan);    
     }
-    catch(const std::exception& e) //this can check for invalid_argument and distinguish not existing
+    catch(const std::exception& e) 
     {
         return derivedT::template log<software_error,-1>({__FILE__, __LINE__, std::string("exception opening DM: ") + e.what()});
     }
@@ -676,8 +683,6 @@ int dmPokeWFS<derivedT>::allocate( const wfsShmimT & dummy)
     if(derived().darkShmimMonitor().width() == derived().shmimMonitor().width() && 
          derived().darkShmimMonitor().height() == derived().shmimMonitor().height() )
     {
-        std::cerr << "dark is valid " << derived().darkShmimMonitor().width() << " " << derived().shmimMonitor().width() << " ";
-        std::cerr << derived().darkShmimMonitor().height() << " " << derived().shmimMonitor().height() << "\n";
         m_darkValid = true;
     }
     else
@@ -685,7 +690,11 @@ int dmPokeWFS<derivedT>::allocate( const wfsShmimT & dummy)
         m_darkValid = false;
     }
 
-    m_pokeImage.create(derived().m_configName + "_poke", derived().shmimMonitor().width(), derived().shmimMonitor().height());
+    if(m_pokeImage.rows() != derived().shmimMonitor().width() || m_pokeImage.cols() != derived().shmimMonitor().height())
+    {
+        m_pokeImage.create(derived().m_configName + "_poke", derived().shmimMonitor().width(), derived().shmimMonitor().height());
+    }
+
     m_pokeLocal.resize(derived().shmimMonitor().width(), derived().shmimMonitor().height());
 
     return 0;

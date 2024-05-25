@@ -36,7 +36,7 @@ public:
 
     std::set<std::string> m_keys;
 
-    void key( const std::string nkey )
+    void key( const std::string & nkey )
     {
         m_keys.insert(nkey);
     }
@@ -65,7 +65,7 @@ public:
 
     void toggleOn()
     {
-        std::cerr << "toggle on\n";
+        std::cerr << m_name << " toggle on\n";
         for(auto && iput : m_inputs)
         {
             iput.second->state(ingr::putState::on);
@@ -80,7 +80,7 @@ public:
 
     void toggleOff()
     {
-        std::cerr << "toggle off\n";
+        std::cerr << m_name << " toggle off\n";
 
         for(auto && iput : m_inputs)
         {
@@ -99,7 +99,7 @@ public:
 /** 
   * \ingroup instGraph
   */
-class instGraph : public MagAOXApp<true>
+class instGraph : public MagAOXApp<true>, public ingr::instGraph
 {
 
    //Give the test harness access.
@@ -115,9 +115,7 @@ protected:
    
    ///@}
 
-    ingr::instGraph m_igr;
-
-    ingr::instBeam * m_beam_source2fwtelsim {nullptr};
+    ingr::instBeam * m_beam_fwcamsim2camsim {nullptr};
 
     std::map<std::string, xigNode *> m_nodes;
     std::multimap<std::string, xigNode *> m_nodeHandleSets;
@@ -214,13 +212,13 @@ std::string nameFromKey(const std::string & key)
 int instGraph::appStartup()
 {
     pwrOnOffNode * nn = new pwrOnOffNode;
-    nn->name("source");
-    nn->key("pdu0.source");
+    nn->name("fwcamsim");
+    nn->key("pdu0.fwcamsim");
     m_nodes.insert({nn->name(), nn});
 
     nn = new pwrOnOffNode;
-    nn->name("fwtelsim");
-    nn->key("usbdu0.fwtelsim");
+    nn->name("camsim");
+    nn->key("pdu0.camsim");
     m_nodes.insert({nn->name(), nn});
 
     for(auto it=m_nodes.begin(); it != m_nodes.end(); ++it)
@@ -236,6 +234,17 @@ int instGraph::appStartup()
             registerIndiPropertySet( *ip, devname, propname, st_setCallBack_nodeProperties);
         }
     }
+
+    m_beam_fwcamsim2camsim = new ingr::instBeam;
+    m_beam_fwcamsim2camsim->name("fwcamsim2camsim");
+    m_beams.insert({m_beam_fwcamsim2camsim->name(), m_beam_fwcamsim2camsim});
+
+    ingr::instIOPut * newput = new ingr::instIOPut({m_nodes["fwcamsim"],ingr::ioDir::output,"out",ingr::putType::light,m_beam_fwcamsim2camsim});
+    m_nodes["fwcamsim"]->addIOPut(newput);
+
+    newput = new ingr::instIOPut({m_nodes["camsim"],ingr::ioDir::input,"in",ingr::putType::light,m_beam_fwcamsim2camsim});
+    m_nodes["camsim"]->addIOPut(newput);
+
 
 /*    m_node_fwtelsim = new pwrOnOffNode;
     m_node_fwtelsim->name("fwtelsim");
@@ -267,6 +276,9 @@ int instGraph::appStartup()
 int instGraph::appLogic()
 {
     //std::cout << ingr::beamState2String(m_beam_source2fwtelsim->state()) << "\n";
+
+    std::cout << "fwcamsim2camsim state   = " << ingr::beamState2String(beam("fwcamsim2camsim")->state()) << "\n  ";
+
     return 0;
 }
 

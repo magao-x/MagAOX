@@ -68,7 +68,6 @@ struct shmimT
   \endcode
   * which returns the string to prefix to INDI properties.  The default `shmimT` uses "sm".
   *
-  * \todo move requirement for sigsegv handling to derived class -- it should set m_restart on all shmimMonitors it inherited.
   *
   * \ingroup appdev
   */
@@ -184,22 +183,6 @@ protected:
     bool m_restart{false}; ///< Flag indicating tha the shared memory should be reinitialized.
 
     static shmimMonitor *m_selfMonitor; ///< Static pointer to this (set in constructor).  Used for getting out of the static SIGSEGV handler.
-
-    /// Sets the handler for SIGSEGV and SIGBUS
-    /** These are caused by ImageStreamIO server resets.
-     */
-    int setSigSegvHandler();
-
-    /// The handler called when SIGSEGV or SIGBUS is received, which will be due to ImageStreamIO server resets.  Just a wrapper for handlerSigSegv.
-    static void _handlerSigSegv(int signum,
-                                siginfo_t *siginf,
-                                void *ucont);
-
-    /// Handles SIGSEGV and SIGBUS.  Sets m_restart to true.
-    void handlerSigSegv(int signum,
-                        siginfo_t *siginf,
-                        void *ucont);
-    ///@}
 
     /** \name shmimmonitor Thread
      * This thread actually monitors the shared memory buffer
@@ -334,9 +317,9 @@ int shmimMonitor<derivedT, specificT>::appStartup()
 
     if (derived().registerIndiPropertyNew(m_indiP_shmimName, nullptr) < 0)
     {
-#ifndef SHMIMMONITOR_TEST_NOLOG
+        #ifndef SHMIMMONITOR_TEST_NOLOG
         derivedT::template log<software_error>({__FILE__, __LINE__});
-#endif
+        #endif
         return -1;
     }
 
@@ -351,19 +334,11 @@ int shmimMonitor<derivedT, specificT>::appStartup()
     m_indiP_frameSize.add(pcf::IndiElement("height"));
     m_indiP_frameSize["height"] = 0;
 
-    if (setSigSegvHandler() < 0)
-    {
-#ifndef SHMIMMONITOR_TEST_NOLOG
-        derivedT::template log<software_error>({__FILE__, __LINE__});
-#endif
-        return -1;
-    }
-
     if (derived().registerIndiPropertyNew(m_indiP_frameSize, nullptr) < 0)
     {
-#ifndef SHMIMMONITOR_TEST_NOLOG
+        #ifndef SHMIMMONITOR_TEST_NOLOG
         derivedT::template log<software_error>({__FILE__, __LINE__});
-#endif
+        #endif
         return -1;
     }
 
@@ -426,66 +401,6 @@ int shmimMonitor<derivedT, specificT>::appShutdown()
     }
 
     return 0;
-}
-
-template <class derivedT, class specificT>
-int shmimMonitor<derivedT, specificT>::setSigSegvHandler()
-{
-    struct sigaction act;
-    sigset_t set;
-
-    act.sa_sigaction = &shmimMonitor<derivedT, specificT>::_handlerSigSegv;
-    act.sa_flags = SA_SIGINFO;
-    sigemptyset(&set);
-    act.sa_mask = set;
-
-    errno = 0;
-    if (sigaction(SIGSEGV, &act, 0) < 0)
-    {
-        std::string logss = "Setting handler for SIGSEGV failed. Errno says: ";
-        logss += strerror(errno);
-
-        derivedT::template log<software_error>({__FILE__, __LINE__, errno, 0, logss});
-
-        return -1;
-    }
-
-    errno = 0;
-    if (sigaction(SIGBUS, &act, 0) < 0)
-    {
-        std::string logss = "Setting handler for SIGBUS failed. Errno says: ";
-        logss += strerror(errno);
-
-        derivedT::template log<software_error>({__FILE__, __LINE__, errno, 0, logss});
-
-        return -1;
-    }
-
-    derivedT::template log<text_log>("Installed SIGSEGV/SIGBUS signal handler.", logPrio::LOG_DEBUG);
-
-    return 0;
-}
-
-template <class derivedT, class specificT>
-void shmimMonitor<derivedT, specificT>::_handlerSigSegv(int signum,
-                                                        siginfo_t *siginf,
-                                                        void *ucont)
-{
-    m_selfMonitor->handlerSigSegv(signum, siginf, ucont);
-}
-
-template <class derivedT, class specificT>
-void shmimMonitor<derivedT, specificT>::handlerSigSegv(int signum,
-                                                       siginfo_t *siginf,
-                                                       void *ucont)
-{
-    static_cast<void>(signum);
-    static_cast<void>(siginf);
-    static_cast<void>(ucont);
-
-    m_restart = true;
-
-    return;
 }
 
 template <class derivedT, class specificT>
@@ -648,8 +563,10 @@ void shmimMonitor<derivedT, specificT>::smThreadExec()
                 curr_image = m_imageStream.md[0].cnt1;
             }
             else
+            {
                 curr_image = 0;
-
+            }
+            
             atype = m_imageStream.md[0].datatype;
             snx = m_imageStream.md[0].size[0];
 
@@ -819,6 +736,120 @@ int shmimMonitor<derivedT, specificT>::updateINDI()
 
     return 0;
 }
+
+/// Call shmimMonitorT::setupConfig with error checking for shmimMonitor
+/**
+  * \param cfig the application configurator 
+  */
+#define SHMIMMONITOR_SETUP_CONFIG( cfig )                                                   \
+    if(shmimMonitorT::setupConfig(cfig) < 0)                                                \
+    {                                                                                       \
+        log<software_error>({__FILE__, __LINE__, "Error from shmimMonitorT::setupConfig"}); \
+        m_shutdown = true;                                                                  \
+        return;                                                                             \
+    }
+
+/// Call shmimMonitorT::setupConfig with error checking for a typedef-ed shmimMonitor
+/**
+  * \param SHMIMMONITORT is the typedef-ed name of the shmimMonitor class, e.g. darkShmimMonitorT.
+  * \param cfig the application configurator 
+  */
+#define SHMIMMONITORT_SETUP_CONFIG( SHMIMMONITORT, cfig )                                        \
+    if(SHMIMMONITORT::setupConfig(cfig) < 0)                                                     \
+    {                                                                                            \
+        log<software_error>({__FILE__, __LINE__, "Error from " #SHMIMMONITORT "::setupConfig"}); \
+        m_shutdown = true;                                                                       \
+        return;                                                                                  \
+    }
+
+/// Call shmimMonitorT::loadConfig with error checking for shmimMonitor
+/** This must be inside a function that returns int, e.g. the standard loadConfigImpl.
+  * \param cfig the application configurator 
+  */
+#define SHMIMMONITOR_LOAD_CONFIG( cfig )                                                             \
+    if(shmimMonitorT::loadConfig(cfig) < 0)                                                          \
+    {                                                                                                \
+        return log<software_error,-1>({__FILE__, __LINE__, "Error from shmimMonitorT::loadConfig"}); \
+    }
+
+/// Call shmimMonitorT::loadConfig with error checking for a typedef-ed shmimMonitor
+/** This must be inside a function that returns int, e.g. the standard loadConfigImpl.
+  * \param SHMIMMONITORT is the typedef-ed name of the shmimMonitor class, e.g. darkShmimMonitorT.
+  * \param cfig the application configurator 
+  */
+#define SHMIMMONITORT_LOAD_CONFIG( SHMIMMONITORT, cfig )                                                  \
+    if(SHMIMMONITORT::loadConfig(cfig) < 0)                                                               \
+    {                                                                                                     \
+        return log<software_error,-1>({__FILE__, __LINE__, "Error from " #SHMIMMONITORT "::loadConfig"}); \
+    }
+
+/// Call shmimMonitorT::appStartup with error checking for shmimMonitor
+#define SHMIMMONITOR_APP_STARTUP                                                                     \
+    if(shmimMonitorT::appStartup() < 0)                                                              \
+    {                                                                                                \
+        return log<software_error,-1>({__FILE__, __LINE__, "Error from shmimMonitorT::appStartup"}); \
+    }
+
+/// Call shmimMonitorT::appStartup with error checking for a typedef-ed shmimMonitor
+/** 
+  * \param SHMIMMONITORT is the typedef-ed name of the shmimMonitor class, e.g. darkShmimMonitorT.
+  */
+#define SHMIMMONITORT_APP_STARTUP( SHMIMMONITORT )                                                        \
+    if(SHMIMMONITORT::appStartup() < 0)                                                                   \
+    {                                                                                                     \
+        return log<software_error,-1>({__FILE__, __LINE__, "Error from " #SHMIMMONITORT "::appStartup"}); \
+    }
+
+/// Call shmimMonitorT::appLogic with error checking for shmimMonitor
+#define SHMIMMONITOR_APP_LOGIC                                                                     \
+    if(shmimMonitorT::appLogic() < 0)                                                              \
+    {                                                                                              \
+        return log<software_error,-1>({__FILE__, __LINE__, "Error from shmimMonitorT::appLogic"}); \
+    }
+
+/// Call shmimMonitorT::appLogic with error checking for a typedef-ed shmimMonitor
+/** 
+  * \param SHMIMMONITORT is the typedef-ed name of the shmimMonitor class, e.g. darkShmimMonitorT.
+  */
+#define SHMIMMONITORT_APP_LOGIC( SHMIMMONITORT )                                                        \
+    if(SHMIMMONITORT::appLogic() < 0)                                                                   \
+    {                                                                                                   \
+        return log<software_error,-1>({__FILE__, __LINE__, "Error from " #SHMIMMONITORT "::appLogic"}); \
+    }
+
+/// Call shmimMonitorT::updateINDI with error checking for shmimMonitor
+#define SHMIMMONITOR_UPDATE_INDI                                                                     \
+    if(shmimMonitorT::updateINDI() < 0)                                                              \
+    {                                                                                                \
+        return log<software_error,-1>({__FILE__, __LINE__, "Error from shmimMonitorT::updateINDI"}); \
+    }
+
+/// Call shmimMonitorT::updateINDI with error checking for a typedef-ed shmimMonitor
+/** 
+  * \param SHMIMMONITORT is the typedef-ed name of the shmimMonitor class, e.g. darkShmimMonitorT.
+  */
+#define SHMIMMONITORT_UPDATE_INDI( SHMIMMONITORT )                                                        \
+    if(SHMIMMONITORT::updateINDI() < 0)                                                                   \
+    {                                                                                                     \
+        return log<software_error,-1>({__FILE__, __LINE__, "Error from " #SHMIMMONITORT "::updateINDI"}); \
+    }
+
+/// Call shmimMonitorT::appShutdown with error checking for shmimMonitor
+#define SHMIMMONITOR_APP_SHUTDOWN                                                                     \
+    if(shmimMonitorT::appShutdown() < 0)                                                              \
+    {                                                                                                 \
+        return log<software_error,-1>({__FILE__, __LINE__, "Error from shmimMonitorT::appShutdown"}); \
+    }
+
+/// Call shmimMonitorT::appShutodwn with error checking for a typedef-ed shmimMonitor
+/** 
+  * \param SHMIMMONITORT is the typedef-ed name of the shmimMonitor class, e.g. darkShmimMonitorT.
+  */
+#define SHMIMMONITORT_APP_SHUTDOWN( SHMIMMONITORT )                                                        \
+    if(SHMIMMONITORT::appShutdown() < 0)                                                                   \
+    {                                                                                                      \
+        return log<software_error,-1>({__FILE__, __LINE__, "Error from " #SHMIMMONITORT "::appShutdown"}); \
+    }
 
 } // namespace dev
 } // namespace app

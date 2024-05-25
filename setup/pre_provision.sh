@@ -18,7 +18,7 @@ if [[ -z $MAGAOX_ROLE ]]; then
     echo "    workstation - Any other MagAO-X workstation"
     echo
     while [[ -z $MAGAOX_ROLE ]]; do
-        read -p "Role:" roleinput
+        read -p "Role: " roleinput
         case $roleinput in
             AOC)
                 MAGAOX_ROLE=AOC
@@ -66,10 +66,16 @@ SPECTRE_CMDLINE_FIX="noibrs noibpb nopti nospectre_v2 nospectre_v1 l1tf=off nosp
 NVIDIA_DRIVER_FIX="rd.driver.blacklist=nouveau nouveau.modeset=0"
 
 # Put it all together
-DESIRED_CMDLINE="nosplash $NVIDIA_DRIVER_FIX $ALPAO_CMDLINE_FIX $PCIEXPANSION_CMDLINE_FIX $SPECTRE_CMDLINE_FIX $IOMMU_FIX"
+if [[ $MAGAOX_ROLE == "workstation" ]]; then
+    DESIRED_CMDLINE="nosplash $NVIDIA_DRIVER_FIX"
+else
+    DESIRED_CMDLINE="nosplash $NVIDIA_DRIVER_FIX $ALPAO_CMDLINE_FIX $PCIEXPANSION_CMDLINE_FIX $SPECTRE_CMDLINE_FIX $IOMMU_FIX"
+fi
 
-if ! grep "$DESIRED_CMDLINE" /etc/default/grub; then
-    echo GRUB_CMDLINE_LINUX_DEFAULT=\""$DESIRED_CMDLINE"\" | sudo tee -a /etc/default/grub
+if ! sudo grep -r "$DESIRED_CMDLINE" /boot/loader/entries; then
+    sudo cp /etc/default/grub /etc/default/grub.bak
+    sudo grubby --update-kernel=ALL --args="$DESIRED_CMDLINE"
+
     if [[ -d /boot/grub2 ]]; then
         sudo grub2-mkconfig -o /boot/grub2/grub.cfg
     elif [[ -d /boot/grub ]]; then
@@ -106,5 +112,5 @@ fi
 
 $DIR/setup_users_and_groups.sh
 log_success "Created users and configured groups"
-
+log_info "You will need to use grub2-install with the right devices to get RAID1 reliability for boot"
 log_success "Reboot before proceeding"

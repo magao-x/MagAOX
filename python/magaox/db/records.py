@@ -1,10 +1,13 @@
+import logging
 import orjson
 import datetime
 from dataclasses import dataclass
 import pathlib
 from typing import Union
 
-from ..utils import parse_iso_datetime_as_utc
+from ..utils import parse_iso_datetime_as_utc, FunkyJSONDecoder
+
+log = logging.getLogger(__name__)
 
 __all__ = [
     'FileOrigin',
@@ -12,6 +15,8 @@ __all__ = [
     'FileIngestTime',
     'Telem',
 ]
+
+FALLBACK_JSON = FunkyJSONDecoder()
 
 @dataclass
 class FileOrigin:
@@ -37,6 +42,15 @@ class FileIngestTime:
     ingested_at : datetime.datetime
     origin_host : str
     origin_path : str
+
+def _parse_msg_json(msg_json: str):
+    msg_bytes = msg_json.encode('utf8')
+    try:
+        payload = orjson.loads(msg_bytes)
+    except orjson.JSONDecodeError:
+        log.debug(f"Falling back to FunkyJSONDecoder for line {repr(msg_json)}")
+        payload = FALLBACK_JSON.decode(msg_json)
+    return payload
 
 @dataclass
 class Telem:
@@ -66,18 +80,14 @@ class Telem:
     msg : dict
 
     @classmethod
-    def from_json_bytes(cls, device, json_bytes):
-        payload = orjson.loads(json_bytes)
+    def from_json(cls, device, json_str):
+        payload = _parse_msg_json(json_str)
         return cls(
             device=device,
             ts=parse_iso_datetime_as_utc(payload['ts']),
             ec=payload['ec'],
             msg=payload['msg'],
         )
-
-    @classmethod
-    def from_json(cls, device, json_str):
-        return cls.from_json_bytes(device, json_str.encode('utf8'))
 
     def get_msg_json_bytes(self) -> bytes:
         return orjson.dumps(self.msg)

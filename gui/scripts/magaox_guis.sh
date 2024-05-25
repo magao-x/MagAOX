@@ -14,11 +14,17 @@ cameraGUI camacq &
 cameraGUI camsci1 &
 cameraGUI camsci2 &
 
-loopCtrlGUI holoop &
+loopCtrlGUI ho &
 offloadCtrlGUI &
+loopCtrlGUI lo &
+
 
 pupilGuideGUI &
 
+dmModeGUI wooferModes &
+dmModeGUI ncpcModes &
+
+coronAlignGUI &
 sleep 6
 
 dmnorm.sh woofer

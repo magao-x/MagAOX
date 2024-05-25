@@ -906,13 +906,13 @@ protected:
      * This comparison is done in the true
      * type of the value.
      * 
-     * 
      * \overload
      */
    template<typename T>
-   void updateIfChanged( pcf::IndiProperty & p, ///< [in/out] The property containing the element to possibly update
-                         const std::vector<std::string> & els, ///< [in] String vector of element names
-                         const std::vector<T> & newVals ///< [in] the new values
+   void updateIfChanged( pcf::IndiProperty & p,                                                ///< [in/out] The property containing the element to possibly update
+                         const std::vector<std::string> & els,                                 ///< [in] String vector of element names
+                         const std::vector<T> & newVals,                                       ///< [in] the new values
+                         pcf::IndiProperty::PropertyStateType newState = pcf::IndiProperty::Ok ///< [in] [optional] The state of the property
                       );
 
    /// Get the target element value from an new property 
@@ -3065,14 +3065,15 @@ template<bool _useINDI>
 template<typename T>
 void MagAOXApp<_useINDI>::updateIfChanged( pcf::IndiProperty & p,
                                            const std::vector<std::string> & els,
-                                           const std::vector<T> & newVals
+                                           const std::vector<T> & newVals,
+                                           pcf::IndiProperty::PropertyStateType newState
                                          )
 {
    if(!_useINDI) return;
 
    if(!m_indiDriver) return;
 
-   indi::updateIfChanged(p, els, newVals, m_indiDriver);
+   indi::updateIfChanged(p, els, newVals, m_indiDriver, newState);
 }
 
 

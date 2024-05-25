@@ -1,14 +1,16 @@
 import datetime
 import logging
 import os
-import json
+
+from psycopg.types.json import Jsonb
+import orjson
 
 import psycopg
 from psycopg import sql
 from tqdm import tqdm
 
 from .records import Telem, FileOrigin, FileReplica, FileIngestTime
-from ..utils import creation_time_from_filename
+from ..utils import creation_time_from_filename, parse_iso_datetime_as_utc
 
 log = logging.getLogger(__name__)
 
@@ -18,7 +20,7 @@ def batch_telem(cur: psycopg.Cursor, records: list[Telem]):
 INSERT INTO telem (ts, device, msg, ec)
 VALUES (%s, %s, %s::JSONB, %s)
 ON CONFLICT (device, ts) DO NOTHING;
-''', [(rec.ts, rec.device, json.dumps(rec.msg), rec.ec) for rec in records])
+''', [(rec.ts, rec.device, Jsonb(rec.msg, dumps=orjson.dumps), rec.ec) for rec in records])
     cur.execute("COMMIT")
 
 def batch_file_origins(cur: psycopg.Cursor, records: list[FileOrigin]):
@@ -81,8 +83,16 @@ FROM file_origins fi
 LEFT JOIN file_ingest_times fit ON
     fi.origin_host = fit.origin_host AND
     fi.origin_path = fit.origin_path
-WHERE fit.origin_host IS NULL AND
-    fit.origin_path IS NULL AND
+WHERE
+    (
+        (
+            fit.origin_host IS NULL AND
+            fit.origin_path IS NULL
+        ) OR (
+            fit.ingested_at < fi.modification_time
+        )
+    )
+    AND
     fi.origin_host = %s AND
     fi.origin_path LIKE '%%.bintel'
 ;
@@ -124,7 +134,12 @@ def update_file_inventory(cur: psycopg.Cursor, host: str, data_dirs: list[str]):
 def record_file_ingest_time(cur: psycopg.Cursor, rec : FileIngestTime):
     cur.execute("BEGIN")
     cur.execute(
-        "INSERT INTO file_ingest_times (ts, device, ingested_at, origin_host, origin_path) VALUES (%s, %s, %s, %s, %s)",
+"""
+INSERT INTO file_ingest_times (ts, device, ingested_at, origin_host, origin_path)
+VALUES (%s, %s, %s, %s, %s)
+ON CONFLICT (ts, device)
+DO UPDATE SET ingested_at = EXCLUDED.ingested_at
+""",
         (rec.ts, rec.device, rec.ingested_at, rec.origin_host, rec.origin_path)
     )
     cur.execute("COMMIT")

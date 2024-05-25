@@ -251,7 +251,8 @@ int zaberLowLevel::connect()
    
    //===== First renumber so they are unique.   
    log<text_log>("Sending: / renumber", logPrio::LOG_DEBUG);
-   int nwr = za_send(m_port, "/ renumber");
+   std::string renum = "/ renumber";
+   int nwr = za_send(m_port, renum.c_str(), renum.size());
    
    if(nwr == Z_ERROR_SYSTEM_ERROR)
    {
@@ -274,7 +275,8 @@ int zaberLowLevel::connect()
    
    //======= Now find the stages
    log<text_log>("Sending: / get system.serial", logPrio::LOG_DEBUG);
-   nwr = za_send(m_port, "/ get system.serial");
+   std::string gss = "/ get system.serial";
+   nwr = za_send(m_port, gss.c_str(), gss.size() );
 
    if(nwr == Z_ERROR_SYSTEM_ERROR)
    {

@@ -2,7 +2,7 @@
 set -ex
 # If not started as root, sudo yourself
 if [[ "$EUID" != 0 ]]; then
-    sudo bash -l $0 "$@"
+    sudo -H bash -l $0 "$@"
     exit $?
 fi
 if [[ $(hostname) != "exao1" ]]; then
@@ -28,23 +28,11 @@ done
 
 rsyncWithOptions="rsync --exclude='**/*_2022*' --exclude='**/*_2023*' -a --info=progress2"
 
-mkdir -p $dest/aoc/{logs,telem}
-$rsyncWithOptions /data/logs/ $dest/aoc/logs/
-$rsyncWithOptions /data/telem/ $dest/aoc/telem/
+mkdir -p $dest/aoc/
+$rsyncWithOptions /data/ $dest/aoc/
 
-mkdir -p $dest/icc/{cacao,logs,rawimages,telem}
-# TODO rename it
-if [[ -e /srv/icc/data/cacao-icc ]]; then
-    $rsyncWithOptions /srv/icc/data/cacao-icc/ $dest/icc/cacao/
-else
-    $rsyncWithOptions /srv/icc/data/cacao/ $dest/icc/cacao/
-fi
-$rsyncWithOptions /srv/icc/data/logs/ $dest/icc/logs/
-$rsyncWithOptions /srv/icc/data/rawimages/ $dest/icc/rawimages/
-$rsyncWithOptions /srv/icc/data/telem/ $dest/icc/telem/
+mkdir -p $dest/icc/
+$rsyncWithOptions /srv/icc/data/ $dest/icc/
 
-mkdir -p $dest/rtc/{cacao,logs,rawimages,telem}
-$rsyncWithOptions /srv/rtc/data/cacao/ $dest/rtc/cacao/
-$rsyncWithOptions /srv/rtc/data/logs/ $dest/rtc/logs/
-$rsyncWithOptions /srv/rtc/data/rawimages/ $dest/rtc/rawimages/
-$rsyncWithOptions /srv/rtc/data/telem/ $dest/rtc/telem/
+mkdir -p $dest/rtc/
+$rsyncWithOptions /srv/rtc/data/ $dest/rtc/

@@ -71,7 +71,7 @@ signals:
 
     void newStretchBox(StretchBox *);
 
-    void savingState(bool);
+    void savingState(rtimv::savingState);
 
 public slots:
 

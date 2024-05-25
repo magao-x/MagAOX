@@ -109,7 +109,10 @@ int za_disconnect(z_port port)
  * forgotten the leading '/' and trailing '\n'. Mention of this is probably
  * best left out of the official docs since it's a hacky way to use za_send().
  */
-int za_send(z_port port, const char *command)
+int za_send( z_port port, 
+             const char *command,
+             size_t sMaxSz
+           )
 {
 	int nlast,
 		length,
@@ -126,7 +129,7 @@ int za_send(z_port port, const char *command)
 		SYSCALL(nlast = write(port, "/", 1));
 		written += nlast;
 	}
-	length = strlen(command);
+	length = strnlen(command, sMaxSz);
 	SYSCALL(nlast = write(port, command, length));
 	written += nlast;
 	if (nlast != length)
@@ -273,14 +276,17 @@ static size_t copy_until_delim(char *destination, const char *source,
 	return i + 1;
 }
 
-static int decode_reply(struct za_reply *destination, const char *reply)
+static int decode_reply( struct za_reply *destination, 
+                         const char *reply,
+                         size_t sMaxSz
+                       )
 {
 	char buffer[8]; /* needs to be at least 5B: set to 8 because
 					   it will be padded to 8 from 5 anyway. */
 	size_t offset,
 		   length;
 
-	if (strlen(reply) < 18)
+	if (strnlen(reply, sMaxSz) < 18)
 	{
 		PRINTF_ERROR("[ERROR] Reply could not be decoded: shorter than expected. "
 				"It is likely that only a partial reply was read.\n"
@@ -363,7 +369,7 @@ static int decode_reply(struct za_reply *destination, const char *reply)
 	 *
 	 * Replies and info have data. This can be anything, including spaces,
 	 * numbers, and human-readable text. */
-	length = strlen(reply); /* get length of remaining data */
+	length = strnlen(reply, sMaxSz); /* get length of remaining data */
 	if (length > sizeof(destination->response_data))
 	{
 		PRINTF_ERROR("[ERROR] Reply could not be decoded: response data too "
@@ -377,13 +383,16 @@ static int decode_reply(struct za_reply *destination, const char *reply)
 
 }
 
-static int decode_alert(struct za_reply *destination, const char *reply)
+static int decode_alert( struct za_reply *destination, 
+                         const char *reply,
+                         size_t sMaxSz
+                       )
 {
 	size_t offset;
 	char buffer[8]; /* needs to be at least 5B: set to 8 because
 					   it will be padded to 8 from 5 anyway. */
 
-	if (strlen(reply) < 13)
+	if (strnlen(reply, sMaxSz) < 13)
 	{
 		PRINTF_ERROR("[ERROR] Reply could not be decoded: shorter than expected. "
 				"It is likely that only a partial reply was read.\n"
@@ -453,14 +462,17 @@ static int decode_alert(struct za_reply *destination, const char *reply)
 	return Z_SUCCESS;
 }
 
-static int decode_info(struct za_reply *destination, const char *reply)
+static int decode_info( struct za_reply *destination, 
+                        const char *reply,
+                        size_t sMaxSz
+                      )
 {
 	size_t length,
 		   offset;
 	char buffer[8]; /* needs to be at least 5B: set to 8 because
 					   it will be padded to 8 from 5 anyway. */
 
-	if (strlen(reply) < 7)
+	if (strnlen(reply, sMaxSz) < 7)
 	{
 		PRINTF_ERROR("[ERROR] Reply could not be decoded: shorter than expected. "
 				"It is likely that only a partial reply was read.\n"
@@ -499,7 +511,7 @@ static int decode_info(struct za_reply *destination, const char *reply)
 	 *
 	 * Replies and info have data. This can be anything, including spaces,
 	 * numbers, and human-readable text. */
-	length = strlen(reply); /* get length of remaining data */
+	length = strnlen(reply,sMaxSz); /* get length of remaining data */
 	if (length > sizeof(destination->response_data))
 	{
 		PRINTF_ERROR("[ERROR] Reply could not be decoded: response data too "
@@ -524,7 +536,10 @@ static int decode_info(struct za_reply *destination, const char *reply)
  * See http://www.zaber.com/wiki/Manuals/ASCII_Protocol_Manual#Replies for
  * more info on replies.
  */
-int za_decode(struct za_reply *destination, const char *reply)
+int za_decode( struct za_reply *destination, 
+               const char *reply,
+               size_t sMaxSz
+             )
 {
 	char message_type;
 
@@ -535,7 +550,7 @@ int za_decode(struct za_reply *destination, const char *reply)
 		return Z_ERROR_NULL_PARAMETER;
 	}
 
-	if (strlen(reply) == 0)
+	if (strnlen(reply, sMaxSz) == 0)
 	{
 		PRINT_ERROR("[ERROR] Reply could not be decoded: no data.");
 		return Z_ERROR_COULD_NOT_DECODE;
@@ -546,11 +561,11 @@ int za_decode(struct za_reply *destination, const char *reply)
 	switch(message_type)
 	{
 		case '@':
-			return decode_reply(destination, reply);
+			return decode_reply(destination, reply, sMaxSz);
 		case '!':
-			return decode_alert(destination, reply);
+			return decode_alert(destination, reply, sMaxSz);
 		case '#':
-			return decode_info(destination, reply);
+			return decode_info(destination, reply, sMaxSz);
 		default:
 			PRINTF_ERROR("[ERROR] Reply could not be decoded: unexpected "
 					"message type. Valid types are '@' (reply), '!' (alert), "
