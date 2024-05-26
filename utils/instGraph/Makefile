@@ -6,6 +6,5 @@ TARGET=instGraph
 
 LDLIBS += -linstGraph
 
-
-include ../../Make/magAOXApp.mk
+include ../../Make/magAOXUtil.mk
 

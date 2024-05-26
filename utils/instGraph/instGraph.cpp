@@ -9,7 +9,7 @@
 
 int main(int argc, char **argv)
 {
-   MagAOX::app::instGraph xapp;
+   instGraph xapp;
 
    return xapp.main(argc, argv);
 
