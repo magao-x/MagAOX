@@ -25,7 +25,6 @@ SRCS = \
 	 IndiElement.cpp \
 	 IndiMessage.cpp \
 	 IndiProperty.cpp \
-	 IndiPropertyMap.cpp \
 	 IndiXmlParser.cpp \
 	 System.cpp \
 	 SystemSocket.cpp \
@@ -40,6 +39,7 @@ libcommon.a: $(OBJS)
 	ar -s $@
 
 IndiElement.o: IndiElement.hpp IndiElement.cpp 
+IndiProperty.o: IndiProperty.hpp IndiProperty.cpp TimeStamp.o IndiElement.o 
 
 clean:
 	rm -f *.o *.a *.so

@@ -138,7 +138,6 @@ protected:
     SwitchState m_switchState {SwitchState::Unknown};
 
     // A read write lock to protect the internal data.
-    //mutable pcf::ReadWriteLock m_rwData;
     mutable std::shared_mutex m_rwData;
 
     ///@}

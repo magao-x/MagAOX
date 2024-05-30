@@ -51,7 +51,7 @@ IndiXmlParser::IndiXmlParser( const IndiMessage &imSend,
   switch ( imSend.getType() )
   {
     case IndiMessage::Define:
-      switch ( ipSend.getType() )
+      switch ( ipSend.type() )
       {
         case IndiProperty::Type::BLOB: createDefBLOBVector( ipSend ); break;
         case IndiProperty::Type::Light: createDefLightVector( ipSend ); break;
@@ -82,7 +82,7 @@ IndiXmlParser::IndiXmlParser( const IndiMessage &imSend,
       break;
 
     case IndiMessage::NewProperty:
-      switch ( ipSend.getType() )
+      switch ( ipSend.type() )
       {
         case IndiProperty::Type::BLOB: createNewBLOBVector( ipSend ); break;
         case IndiProperty::Type::Number: createNewNumberVector( ipSend ); break;
@@ -96,7 +96,7 @@ IndiXmlParser::IndiXmlParser( const IndiMessage &imSend,
       break;
 
     case IndiMessage::SetProperty:
-      switch ( ipSend.getType() )
+      switch ( ipSend.type() )
       {
         case IndiProperty::Type::BLOB: createSetBLOBVector( ipSend ); break;
         case IndiProperty::Type::Light: createSetLightVector( ipSend ); break;
@@ -137,7 +137,7 @@ void IndiXmlParser::createDefTextVector( const IndiProperty &ip )
   // What kind of message is this?
   string szTag = "defTextVector";
   string szElementTag = "defText";
-  string szDescrip = szTag + " '" + ip.getName() + "'";
+  string szDescrip = szTag + " '" + ip.name() + "'";
 
   // Clear out the xml stream.
   m_ssXml.str("");
@@ -154,26 +154,26 @@ void IndiXmlParser::createDefTextVector( const IndiProperty &ip )
   if ( ip.hasValidPerm() == false )
     throw runtime_error( szDescrip + " must have attribute 'perm' defined." );
 
-  m_ssXml << " device=\"" << ip.getDevice() << "\"";
-  m_ssXml << " name=\"" << ip.getName() << "\"";
-  m_ssXml << " state=\"" << ip.getStateString( ip.getState() ) << "\"";
-  m_ssXml << " perm=\"" << ip.getPermString( ip.getPerm() ) << "\"";
+  m_ssXml << " device=\"" << ip.device() << "\"";
+  m_ssXml << " name=\"" << ip.name() << "\"";
+  m_ssXml << " state=\"" << ip.state2String( ip.state() ) << "\"";
+  m_ssXml << " perm=\"" << ip.permission2String( ip.perm() ) << "\"";
 
   // "implied" means that if they are not defined, don't add them. Adding an
   // empty "implied" attribute to the generated XML is an error.
   if ( ip.hasValidLabel() == true )
-    m_ssXml << " label=\"" << ip.getLabel() << "\"";
+    m_ssXml << " label=\"" << ip.label() << "\"";
   if ( ip.hasValidGroup() == true )
-    m_ssXml << " group=\"" << ip.getGroup() << "\"";
+    m_ssXml << " group=\"" << ip.group() << "\"";
   if ( ip.hasValidTimeout() == true )
-    m_ssXml << " timeout=\"" << ip.getTimeout() << "\"";
-  m_ssXml << " timestamp=\"" << ip.getTimeStamp().getFormattedIso8601Str() << "\"";
+    m_ssXml << " timeout=\"" << ip.timeout() << "\"";
+  m_ssXml << " timestamp=\"" << ip.timeStamp().getFormattedIso8601Str() << "\"";
   if ( ip.hasValidMessage() == true )
-    m_ssXml << " message=\"" << ip.getMessage() << "\"";
+    m_ssXml << " message=\"" << ip.message() << "\"";
 
   m_ssXml << ">\r\n";
 
-  for ( unsigned int ii = 0; ii < ip.getNumElements(); ii++ )
+  for ( unsigned int ii = 0; ii < ip.numElements(); ii++ )
   {
     m_ssXml << "\t<" << szElementTag;
 
@@ -208,7 +208,7 @@ void IndiXmlParser::createSetTextVector( const IndiProperty &ip )
   // What kind of message is this?
   string szTag = "setTextVector";
   string szElementTag = "oneText";
-  string szDescrip = szTag + " '" + ip.getName() + "'";
+  string szDescrip = szTag + " '" + ip.name() + "'";
 
   // Clear out the xml stream.
   m_ssXml.str("");
@@ -221,22 +221,22 @@ void IndiXmlParser::createSetTextVector( const IndiProperty &ip )
   if ( ip.hasValidName() == false )
     throw runtime_error( szDescrip + " must have attribute 'name' defined." );
 
-  m_ssXml << " device=\"" << ip.getDevice() << "\"";
-  m_ssXml << " name=\"" << ip.getName() << "\"";
+  m_ssXml << " device=\"" << ip.device() << "\"";
+  m_ssXml << " name=\"" << ip.name() << "\"";
 
   // "implied" means that if they are not defined, don't add them. Adding an
   // empty "implied" attribute to the generated XML is an error.
   if ( ip.hasValidState() == true )
-    m_ssXml << " state=\"" << ip.getStateString( ip.getState() ) << "\"";
+    m_ssXml << " state=\"" << ip.state2String( ip.state() ) << "\"";
   if ( ip.hasValidTimeout() == true )
-    m_ssXml << " timeout=\"" << ip.getTimeout() << "\"";
-  m_ssXml << " timestamp=\"" << ip.getTimeStamp().getFormattedIso8601Str() << "\"";
+    m_ssXml << " timeout=\"" << ip.timeout() << "\"";
+  m_ssXml << " timestamp=\"" << ip.timeStamp().getFormattedIso8601Str() << "\"";
   if ( ip.hasValidMessage() == true )
-    m_ssXml << " message=\"" << ip.getMessage() << "\"";
+    m_ssXml << " message=\"" << ip.message() << "\"";
 
   m_ssXml << ">\r\n";
 
-  for ( unsigned int ii = 0; ii < ip.getNumElements(); ii++ )
+  for ( unsigned int ii = 0; ii < ip.numElements(); ii++ )
   {
     m_ssXml << "\t<" << szElementTag;
 
@@ -266,7 +266,7 @@ void IndiXmlParser::createNewTextVector( const IndiProperty &ip )
   // What kind of message is this?
   string szTag = "newTextVector";
   string szElementTag = "oneText";
-  string szDescrip = szTag + " '" + ip.getName() + "'";
+  string szDescrip = szTag + " '" + ip.name() + "'";
 
   // Clear out the xml stream.
   m_ssXml.str("");
@@ -279,16 +279,16 @@ void IndiXmlParser::createNewTextVector( const IndiProperty &ip )
   if ( ip.hasValidName() == false )
     throw runtime_error( szDescrip + " must have attribute 'name' defined." );
 
-  m_ssXml << " device=\"" << ip.getDevice() << "\"";
-  m_ssXml << " name=\"" << ip.getName() << "\"";
+  m_ssXml << " device=\"" << ip.device() << "\"";
+  m_ssXml << " name=\"" << ip.name() << "\"";
 
   // "implied" means that if they are not defined, don't add them. Adding an
   // empty "implied" attribute to the generated XML is an error.
-  m_ssXml << " timestamp=\"" << ip.getTimeStamp().getFormattedIso8601Str() << "\"";
+  m_ssXml << " timestamp=\"" << ip.timeStamp().getFormattedIso8601Str() << "\"";
 
   m_ssXml << ">\r\n";
 
-  for ( unsigned int ii = 0; ii < ip.getNumElements(); ii++ )
+  for ( unsigned int ii = 0; ii < ip.numElements(); ii++ )
   {
     m_ssXml << "\t<" << szElementTag;
 
@@ -319,7 +319,7 @@ void IndiXmlParser::createDefNumberVector( const IndiProperty &ip )
   // What kind of message is this?
   string szTag = "defNumberVector";
   string szElementTag = "defNumber";
-  string szDescrip = szTag + " '" + ip.getName() + "'";
+  string szDescrip = szTag + " '" + ip.name() + "'";
 
   // Clear out the xml stream.
   m_ssXml.str("");
@@ -336,26 +336,26 @@ void IndiXmlParser::createDefNumberVector( const IndiProperty &ip )
   if ( ip.hasValidPerm() == false )
     throw runtime_error( szDescrip + " must have attribute 'perm' defined." );
 
-  m_ssXml << " device=\"" << ip.getDevice() << "\"";
-  m_ssXml << " name=\"" << ip.getName() << "\"";
-  m_ssXml << " state=\"" << ip.getStateString( ip.getState() ) << "\"";
-  m_ssXml << " perm=\"" << ip.getPermString( ip.getPerm() ) << "\"";
+  m_ssXml << " device=\"" << ip.device() << "\"";
+  m_ssXml << " name=\"" << ip.name() << "\"";
+  m_ssXml << " state=\"" << ip.state2String( ip.state() ) << "\"";
+  m_ssXml << " perm=\"" << ip.permission2String( ip.perm() ) << "\"";
 
   // "implied" means that if they are not defined, don't add them. Adding an
   // empty "implied" attribute to the generated XML is an error.
   if ( ip.hasValidLabel() == true )
-    m_ssXml << " label=\"" << ip.getLabel() << "\"";
+    m_ssXml << " label=\"" << ip.label() << "\"";
   if ( ip.hasValidGroup() == true )
-    m_ssXml << " group=\"" << ip.getGroup() << "\"";
+    m_ssXml << " group=\"" << ip.group() << "\"";
   if ( ip.hasValidTimeout() == true )
-    m_ssXml << " timeout=\"" << ip.getTimeout() << "\"";
-  m_ssXml << " timestamp=\"" << ip.getTimeStamp().getFormattedIso8601Str() << "\"";
+    m_ssXml << " timeout=\"" << ip.timeout() << "\"";
+  m_ssXml << " timestamp=\"" << ip.timeStamp().getFormattedIso8601Str() << "\"";
   if ( ip.hasValidMessage() == true )
-    m_ssXml << " message=\"" << ip.getMessage() << "\"";
+    m_ssXml << " message=\"" << ip.message() << "\"";
 
   m_ssXml << ">\r\n";
 
-  for ( unsigned int ii = 0; ii < ip.getNumElements(); ii++ )
+  for ( unsigned int ii = 0; ii < ip.numElements(); ii++ )
   {
     m_ssXml << "\t<" << szElementTag;
 
@@ -402,7 +402,7 @@ void IndiXmlParser::createSetNumberVector( const IndiProperty &ip )
   // What kind of message is this?
   string szTag = "setNumberVector";
   string szElementTag = "oneNumber";
-  string szDescrip = szTag + " '" + ip.getName() + "'";
+  string szDescrip = szTag + " '" + ip.name() + "'";
 
   // Clear out the xml stream.
   m_ssXml.str("");
@@ -415,22 +415,22 @@ void IndiXmlParser::createSetNumberVector( const IndiProperty &ip )
   if ( ip.hasValidName() == false )
     throw runtime_error( szDescrip + " must have attribute 'name' defined." );
 
-  m_ssXml << " device=\"" << ip.getDevice() << "\"";
-  m_ssXml << " name=\"" << ip.getName() << "\"";
+  m_ssXml << " device=\"" << ip.device() << "\"";
+  m_ssXml << " name=\"" << ip.name() << "\"";
 
   // "implied" means that if they are not defined, don't add them. Adding an
   // empty "implied" attribute to the generated XML is an error.
   if ( ip.hasValidState() == true )
-    m_ssXml << " state=\"" << ip.getStateString( ip.getState() ) << "\"";
+    m_ssXml << " state=\"" << ip.state2String( ip.state() ) << "\"";
   if ( ip.hasValidTimeout() == true )
-    m_ssXml << " timeout=\"" << ip.getTimeout() << "\"";
-  m_ssXml << " timestamp=\"" << ip.getTimeStamp().getFormattedIso8601Str() << "\"";
+    m_ssXml << " timeout=\"" << ip.timeout() << "\"";
+  m_ssXml << " timestamp=\"" << ip.timeStamp().getFormattedIso8601Str() << "\"";
   if ( ip.hasValidMessage() == true )
-    m_ssXml << " message=\"" << ip.getMessage() << "\"";
+    m_ssXml << " message=\"" << ip.message() << "\"";
 
   m_ssXml << ">\r\n";
 
-  for ( unsigned int ii = 0; ii < ip.getNumElements(); ii++ )
+  for ( unsigned int ii = 0; ii < ip.numElements(); ii++ )
   {
     m_ssXml << "\t<" << szElementTag;
 
@@ -460,7 +460,7 @@ void IndiXmlParser::createNewNumberVector( const IndiProperty &ip )
   // What kind of message is this?
   string szTag = "newNumberVector";
   string szElementTag = "oneNumber";
-  string szDescrip = szTag + " '" + ip.getName() + "'";
+  string szDescrip = szTag + " '" + ip.name() + "'";
 
   // Clear out the xml stream.
   m_ssXml.str("");
@@ -473,16 +473,16 @@ void IndiXmlParser::createNewNumberVector( const IndiProperty &ip )
   if ( ip.hasValidName() == false )
     throw runtime_error( szDescrip + " must have attribute 'name' defined." );
 
-  m_ssXml << " device=\"" << ip.getDevice() << "\"";
-  m_ssXml << " name=\"" << ip.getName() << "\"";
+  m_ssXml << " device=\"" << ip.device() << "\"";
+  m_ssXml << " name=\"" << ip.name() << "\"";
 
   // "implied" means that if they are not defined, don't add them. Adding an
   // empty "implied" attribute to the generated XML is an error.
-  m_ssXml << " timestamp=\"" << ip.getTimeStamp().getFormattedIso8601Str() << "\"";
+  m_ssXml << " timestamp=\"" << ip.timeStamp().getFormattedIso8601Str() << "\"";
 
   m_ssXml << ">\r\n";
 
-  for ( unsigned int ii = 0; ii < ip.getNumElements(); ii++ )
+  for ( unsigned int ii = 0; ii < ip.numElements(); ii++ )
   {
     m_ssXml << "\t<" << szElementTag;
 
@@ -513,7 +513,7 @@ void IndiXmlParser::createDefSwitchVector( const IndiProperty &ip )
   // What kind of message is this?
   string szTag = "defSwitchVector";
   string szElementTag = "defSwitch";
-  string szDescrip = szTag + " '" + ip.getName() + "'";
+  string szDescrip = szTag + " '" + ip.name() + "'";
 
   // Clear out the xml stream.
   m_ssXml.str("");
@@ -532,27 +532,27 @@ void IndiXmlParser::createDefSwitchVector( const IndiProperty &ip )
   if ( ip.hasValidRule() == false )
     throw runtime_error( szDescrip + " must have attribute 'rule' defined." );
 
-  m_ssXml << " device=\"" << ip.getDevice() << "\"";
-  m_ssXml << " name=\"" << ip.getName() << "\"";
-  m_ssXml << " state=\"" << ip.getStateString( ip.getState() ) << "\"";
-  m_ssXml << " perm=\"" << ip.getPermString( ip.getPerm() ) << "\"";
-  m_ssXml << " rule=\"" << ip.getSwitchRuleString( ip.getRule() ) << "\"";
+  m_ssXml << " device=\"" << ip.device() << "\"";
+  m_ssXml << " name=\"" << ip.name() << "\"";
+  m_ssXml << " state=\"" << ip.state2String( ip.state() ) << "\"";
+  m_ssXml << " perm=\"" << ip.permission2String( ip.perm() ) << "\"";
+  m_ssXml << " rule=\"" << ip.switchRule2String( ip.rule() ) << "\"";
 
   // "implied" means that if they are not defined, don't add them. Adding an
   // empty "implied" attribute to the generated XML is an error.
   if ( ip.hasValidLabel() == true )
-    m_ssXml << " label=\"" << ip.getLabel() << "\"";
+    m_ssXml << " label=\"" << ip.label() << "\"";
   if ( ip.hasValidGroup() == true )
-    m_ssXml << " group=\"" << ip.getGroup() << "\"";
+    m_ssXml << " group=\"" << ip.group() << "\"";
   if ( ip.hasValidTimeout() == true )
-    m_ssXml << " timeout=\"" << ip.getTimeout() << "\"";
-  m_ssXml << " timestamp=\"" << ip.getTimeStamp().getFormattedIso8601Str() << "\"";
+    m_ssXml << " timeout=\"" << ip.timeout() << "\"";
+  m_ssXml << " timestamp=\"" << ip.timeStamp().getFormattedIso8601Str() << "\"";
   if ( ip.hasValidMessage() == true )
-    m_ssXml << " message=\"" << ip.getMessage() << "\"";
+    m_ssXml << " message=\"" << ip.message() << "\"";
 
   m_ssXml << ">\r\n";
 
-  for ( unsigned int ii = 0; ii < ip.getNumElements(); ii++ )
+  for ( unsigned int ii = 0; ii < ip.numElements(); ii++ )
   {
     m_ssXml << "\t<" << szElementTag;
 
@@ -587,7 +587,7 @@ void IndiXmlParser::createSetSwitchVector( const IndiProperty &ip )
   // What kind of message is this?
   string szTag = "setSwitchVector";
   string szElementTag = "oneSwitch";
-  string szDescrip = szTag + " '" + ip.getName() + "'";
+  string szDescrip = szTag + " '" + ip.name() + "'";
 
   // Clear out the xml stream.
   m_ssXml.str("");
@@ -600,22 +600,22 @@ void IndiXmlParser::createSetSwitchVector( const IndiProperty &ip )
   if ( ip.hasValidName() == false )
     throw runtime_error( szDescrip + " must have attribute 'name' defined." );
 
-  m_ssXml << " device=\"" << ip.getDevice() << "\"";
-  m_ssXml << " name=\"" << ip.getName() << "\"";
+  m_ssXml << " device=\"" << ip.device() << "\"";
+  m_ssXml << " name=\"" << ip.name() << "\"";
 
   // "implied" means that if they are not defined, don't add them. Adding an
   // empty "implied" attribute to the generated XML is an error.
   if ( ip.hasValidState() == true )
-    m_ssXml << " state=\"" << IndiProperty::getStateString( ip.getState() ) << "\"";
+    m_ssXml << " state=\"" << IndiProperty::state2String( ip.state() ) << "\"";
   if ( ip.hasValidTimeout() == true )
-    m_ssXml << " timeout=\"" << ip.getTimeout() << "\"";
-  m_ssXml << " timestamp=\"" << ip.getTimeStamp().getFormattedIso8601Str() << "\"";
+    m_ssXml << " timeout=\"" << ip.timeout() << "\"";
+  m_ssXml << " timestamp=\"" << ip.timeStamp().getFormattedIso8601Str() << "\"";
   if ( ip.hasValidMessage() == true )
-    m_ssXml << " message=\"" << ip.getMessage() << "\"";
+    m_ssXml << " message=\"" << ip.message() << "\"";
 
   m_ssXml << ">\r\n";
 
-  for ( unsigned int ii = 0; ii < ip.getNumElements(); ii++ )
+  for ( unsigned int ii = 0; ii < ip.numElements(); ii++ )
   {
     m_ssXml << "\t<" << szElementTag;
 
@@ -645,7 +645,7 @@ void IndiXmlParser::createNewSwitchVector( const IndiProperty &ip )
   // What kind of message is this?
   string szTag = "newSwitchVector";
   string szElementTag = "oneSwitch";
-  string szDescrip = szTag + " '" + ip.getName() + "'";
+  string szDescrip = szTag + " '" + ip.name() + "'";
 
   // Clear out the xml stream.
   m_ssXml.str("");
@@ -658,16 +658,16 @@ void IndiXmlParser::createNewSwitchVector( const IndiProperty &ip )
   if ( ip.hasValidName() == false )
     throw runtime_error( szDescrip + " must have attribute 'name' defined." );
 
-  m_ssXml << " device=\"" << ip.getDevice() << "\"";
-  m_ssXml << " name=\"" << ip.getName() << "\"";
+  m_ssXml << " device=\"" << ip.device() << "\"";
+  m_ssXml << " name=\"" << ip.name() << "\"";
 
   // "implied" means that if they are not defined, don't add them. Adding an
   // empty "implied" attribute to the generated XML is an error.
-  m_ssXml << " timestamp=\"" << ip.getTimeStamp().getFormattedIso8601Str() << "\"";
+  m_ssXml << " timestamp=\"" << ip.timeStamp().getFormattedIso8601Str() << "\"";
 
   m_ssXml << ">\r\n";
 
-  for ( unsigned int ii = 0; ii < ip.getNumElements(); ii++ )
+  for ( unsigned int ii = 0; ii < ip.numElements(); ii++ )
   {
     m_ssXml << "\t<" << szElementTag;
 
@@ -698,7 +698,7 @@ void IndiXmlParser::createDefLightVector( const IndiProperty &ip )
   // What kind of message is this?
   string szTag = "defLightVector";
   string szElementTag = "defLight";
-  string szDescrip = szTag + " '" + ip.getName() + "'";
+  string szDescrip = szTag + " '" + ip.name() + "'";
 
   // Clear out the xml stream.
   m_ssXml.str("");
@@ -713,23 +713,23 @@ void IndiXmlParser::createDefLightVector( const IndiProperty &ip )
   if ( ip.hasValidState() == false )
     throw runtime_error( szDescrip + " must have attribute 'state' defined." );
 
-  m_ssXml << " device=\"" << ip.getDevice() << "\"";
-  m_ssXml << " name=\"" << ip.getName() << "\"";
-  m_ssXml << " state=\"" << ip.getStateString( ip.getState() ) << "\"";
+  m_ssXml << " device=\"" << ip.device() << "\"";
+  m_ssXml << " name=\"" << ip.name() << "\"";
+  m_ssXml << " state=\"" << ip.state2String( ip.state() ) << "\"";
 
   // "implied" means that if they are not defined, don't add them. Adding an
   // empty "implied" attribute to the generated XML is an error.
   if ( ip.hasValidLabel() == true )
-    m_ssXml << " label=\"" << ip.getLabel() << "\"";
+    m_ssXml << " label=\"" << ip.label() << "\"";
   if ( ip.hasValidGroup() == true )
-    m_ssXml << " group=\"" << ip.getGroup() << "\"";
-  m_ssXml << " timestamp=\"" << ip.getTimeStamp().getFormattedIso8601Str() << "\"";
+    m_ssXml << " group=\"" << ip.group() << "\"";
+  m_ssXml << " timestamp=\"" << ip.timeStamp().getFormattedIso8601Str() << "\"";
   if ( ip.hasValidMessage() == true )
-    m_ssXml << " message=\"" << ip.getMessage() << "\"";
+    m_ssXml << " message=\"" << ip.message() << "\"";
 
   m_ssXml << ">\r\n";
 
-  for ( unsigned int ii = 0; ii < ip.getNumElements(); ii++ )
+  for ( unsigned int ii = 0; ii < ip.numElements(); ii++ )
   {
     m_ssXml << "\t<" << szElementTag;
 
@@ -764,7 +764,7 @@ void IndiXmlParser::createSetLightVector( const IndiProperty &ip )
   // What kind of message is this?
   string szTag = "setLightVector";
   string szElementTag = "oneLight";
-  string szDescrip = szTag + " '" + ip.getName() + "'";
+  string szDescrip = szTag + " '" + ip.name() + "'";
 
   // Clear out the xml stream.
   m_ssXml.str("");
@@ -777,20 +777,20 @@ void IndiXmlParser::createSetLightVector( const IndiProperty &ip )
   if ( ip.hasValidName() == false )
     throw runtime_error( szDescrip + " must have attribute 'name' defined." );
 
-  m_ssXml << " device=\"" << ip.getDevice() << "\"";
-  m_ssXml << " name=\"" << ip.getName() << "\"";
+  m_ssXml << " device=\"" << ip.device() << "\"";
+  m_ssXml << " name=\"" << ip.name() << "\"";
 
   // "implied" means that if they are not defined, don't add them. Adding an
   // empty "implied" attribute to the generated XML is an error.
   if ( ip.hasValidState() == true )
-    m_ssXml << " state=\"" << ip.getStateString( ip.getState() ) << "\"";
-  m_ssXml << " timestamp=\"" << ip.getTimeStamp().getFormattedIso8601Str() << "\"";
+    m_ssXml << " state=\"" << ip.state2String( ip.state() ) << "\"";
+  m_ssXml << " timestamp=\"" << ip.timeStamp().getFormattedIso8601Str() << "\"";
   if ( ip.hasValidMessage() == true )
-    m_ssXml << " message=\"" << ip.getMessage() << "\"";
+    m_ssXml << " message=\"" << ip.message() << "\"";
 
   m_ssXml << ">\r\n";
 
-  for ( unsigned int ii = 0; ii < ip.getNumElements(); ii++ )
+  for ( unsigned int ii = 0; ii < ip.numElements(); ii++ )
   {
     m_ssXml << "\t<" << szElementTag;
 
@@ -821,7 +821,7 @@ void IndiXmlParser::createDefBLOBVector( const IndiProperty &ip )
   // What kind of message is this?
   string szTag = "defBLOBVector";
   string szElementTag = "defBLOB";
-  string szDescrip = szTag + " '" + ip.getName() + "'";
+  string szDescrip = szTag + " '" + ip.name() + "'";
 
   // Clear out the xml stream.
   m_ssXml.str("");
@@ -838,26 +838,26 @@ void IndiXmlParser::createDefBLOBVector( const IndiProperty &ip )
   if ( ip.hasValidPerm() == false )
     throw runtime_error( szDescrip + " must have attribute 'perm' defined." );
 
-  m_ssXml << " device=\"" << ip.getDevice() << "\"";
-  m_ssXml << " name=\"" << ip.getName() << "\"";
-  m_ssXml << " state=\"" << ip.getStateString( ip.getState() ) << "\"";
-  m_ssXml << " perm=\"" << ip.getPermString( ip.getPerm() ) << "\"";
+  m_ssXml << " device=\"" << ip.device() << "\"";
+  m_ssXml << " name=\"" << ip.name() << "\"";
+  m_ssXml << " state=\"" << ip.state2String( ip.state() ) << "\"";
+  m_ssXml << " perm=\"" << ip.permission2String( ip.perm() ) << "\"";
 
   // "implied" means that if they are not defined, don't add them. Adding an
   // empty "implied" attribute to the generated XML is an error.
   if ( ip.hasValidLabel() == true )
-    m_ssXml << " label=\"" << ip.getLabel() << "\"";
+    m_ssXml << " label=\"" << ip.label() << "\"";
   if ( ip.hasValidGroup() == true )
-    m_ssXml << " group=\"" << ip.getGroup() << "\"";
+    m_ssXml << " group=\"" << ip.group() << "\"";
   if ( ip.hasValidTimeout() == true )
-    m_ssXml << " timeout=\"" << ip.getTimeout() << "\"";
-  m_ssXml << " timestamp=\"" << ip.getTimeStamp().getFormattedIso8601Str() << "\"";
+    m_ssXml << " timeout=\"" << ip.timeout() << "\"";
+  m_ssXml << " timestamp=\"" << ip.timeStamp().getFormattedIso8601Str() << "\"";
   if ( ip.hasValidMessage() == true )
-    m_ssXml << " message=\"" << ip.getMessage() << "\"";
+    m_ssXml << " message=\"" << ip.message() << "\"";
 
   m_ssXml << ">\r\n";
 
-  for ( unsigned int ii = 0; ii < ip.getNumElements(); ii++ )
+  for ( unsigned int ii = 0; ii < ip.numElements(); ii++ )
   {
     m_ssXml << "\t<" << szElementTag;
 
@@ -893,7 +893,7 @@ void IndiXmlParser::createSetBLOBVector( const IndiProperty &ip )
   // What kind of message is this?
   string szTag = "setBLOBVector";
   string szElementTag = "oneBLOB";
-  string szDescrip = szTag + " '" + ip.getName() + "'";
+  string szDescrip = szTag + " '" + ip.name() + "'";
 
   // Clear out the xml stream.
   m_ssXml.str("");
@@ -906,22 +906,22 @@ void IndiXmlParser::createSetBLOBVector( const IndiProperty &ip )
   if ( ip.hasValidName() == false )
     throw runtime_error( szDescrip + " must have attribute 'name' defined." );
 
-  m_ssXml << " device=\"" << ip.getDevice() << "\"";
-  m_ssXml << " name=\"" << ip.getName() << "\"";
+  m_ssXml << " device=\"" << ip.device() << "\"";
+  m_ssXml << " name=\"" << ip.name() << "\"";
 
   // "implied" means that if they are not defined, don't add them. Adding an
   // empty "implied" attribute to the generated XML is an error.
   if ( ip.hasValidState() == true )
-    m_ssXml << " state=\"" << ip.getStateString( ip.getState() ) << "\"";
+    m_ssXml << " state=\"" << ip.state2String( ip.state() ) << "\"";
   if ( ip.hasValidTimeout() == true )
-    m_ssXml << " timeout=\"" << ip.getTimeout() << "\"";
-  m_ssXml << " timestamp=\"" << ip.getTimeStamp().getFormattedIso8601Str() << "\"";
+    m_ssXml << " timeout=\"" << ip.timeout() << "\"";
+  m_ssXml << " timestamp=\"" << ip.timeStamp().getFormattedIso8601Str() << "\"";
   if ( ip.hasValidMessage() == true )
-    m_ssXml << " message=\"" << ip.getMessage() << "\"";
+    m_ssXml << " message=\"" << ip.message() << "\"";
 
   m_ssXml << ">\r\n";
 
-  for ( unsigned int ii = 0; ii < ip.getNumElements(); ii++ )
+  for ( unsigned int ii = 0; ii < ip.numElements(); ii++ )
   {
     m_ssXml << "\t<" << szElementTag;
 
@@ -967,7 +967,7 @@ void IndiXmlParser::createNewBLOBVector( const IndiProperty &ip )
   // What kind of message is this?
   string szTag = "newBLOBVector";
   string szElementTag = "oneBLOB";
-  string szDescrip = szTag + " '" + ip.getName() + "'";
+  string szDescrip = szTag + " '" + ip.name() + "'";
 
   // Clear out the xml stream.
   m_ssXml.str("");
@@ -980,16 +980,16 @@ void IndiXmlParser::createNewBLOBVector( const IndiProperty &ip )
   if ( ip.hasValidName() == false )
     throw runtime_error( szDescrip + " must have attribute 'name' defined." );
 
-  m_ssXml << " device=\"" << ip.getDevice() << "\"";
-  m_ssXml << " name=\"" << ip.getName() << "\"";
+  m_ssXml << " device=\"" << ip.device() << "\"";
+  m_ssXml << " name=\"" << ip.name() << "\"";
 
   // "implied" means that if they are not defined, don't add them. Adding an
   // empty "implied" attribute to the generated XML is an error.
-  m_ssXml << " timestamp=\"" << ip.getTimeStamp().getFormattedIso8601Str() << "\"";
+  m_ssXml << " timestamp=\"" << ip.timeStamp().getFormattedIso8601Str() << "\"";
 
   m_ssXml << ">\r\n";
 
-  for ( unsigned int ii = 0; ii < ip.getNumElements(); ii++ )
+  for ( unsigned int ii = 0; ii < ip.numElements(); ii++ )
   {
     m_ssXml << "\t<" << szElementTag;
 
@@ -1041,10 +1041,10 @@ void IndiXmlParser::createMessage( const IndiProperty &ip )
   // "implied" means that if they are not defined, don't add them. Adding an
   // empty "implied" attribute to the generated XML is an error.
   if ( ip.hasValidDevice() == true )
-    m_ssXml << " device=\"" << ip.getDevice() << "\"";
-  m_ssXml << " timestamp=\"" << ip.getTimeStamp().getFormattedIso8601Str() << "\"";
+    m_ssXml << " device=\"" << ip.device() << "\"";
+  m_ssXml << " timestamp=\"" << ip.timeStamp().getFormattedIso8601Str() << "\"";
   if ( ip.hasValidMessage() == true )
-    m_ssXml << " message=\"" << ip.getMessage() << "\"";
+    m_ssXml << " message=\"" << ip.message() << "\"";
 
   m_ssXml << ">\r\n";
   m_ssXml << "</" << szTag << ">\r\n";
@@ -1058,7 +1058,7 @@ void IndiXmlParser::createDelProperty( const IndiProperty &ip )
 {
   // What kind of message is this?
   string szTag = "delProperty";
-  string szDescrip = szTag + " '" + ip.getName() + "'";
+  string szDescrip = szTag + " '" + ip.name() + "'";
 
   // Clear out the xml stream.
   m_ssXml.str("");
@@ -1069,15 +1069,15 @@ void IndiXmlParser::createDelProperty( const IndiProperty &ip )
   if ( ip.hasValidDevice() == false )
     throw runtime_error( szDescrip + " must have attribute 'device' defined." );
 
-  m_ssXml << " device=\"" << ip.getDevice() << "\"";
+  m_ssXml << " device=\"" << ip.device() << "\"";
 
   // "implied" means that if they are not defined, don't add them. Adding an
   // empty "implied" attribute to the generated XML is an error.
   if ( ip.hasValidName() == true )
-    m_ssXml << " name=\"" << ip.getName() << "\"";
-  m_ssXml << " timestamp=\"" << ip.getTimeStamp().getFormattedIso8601Str() << "\"";
+    m_ssXml << " name=\"" << ip.name() << "\"";
+  m_ssXml << " timestamp=\"" << ip.timeStamp().getFormattedIso8601Str() << "\"";
   if ( ip.hasValidMessage() == true )
-    m_ssXml << " message=\"" << ip.getMessage() << "\"";
+    m_ssXml << " message=\"" << ip.message() << "\"";
 
   m_ssXml << ">\r\n";
   m_ssXml << "</" << szTag << ">\r\n";
@@ -1099,9 +1099,9 @@ void IndiXmlParser::createGetProperties( const IndiProperty &ip )
   // "implied" means that if they are not defined, don't add them. Adding an
   // empty "implied" attribute to the generated XML is an error.
   if ( ip.hasValidDevice() == true )
-    m_ssXml << " device=\"" << ip.getDevice() << "\"";
+    m_ssXml << " device=\"" << ip.device() << "\"";
   if ( ip.hasValidName() == true )
-    m_ssXml << " name=\"" << ip.getName() << "\"";
+    m_ssXml << " name=\"" << ip.name() << "\"";
 
   m_ssXml << " version=\"" << m_szProtocolVersion << "\"";
 
@@ -1117,7 +1117,7 @@ void IndiXmlParser::createEnableBLOB( const IndiProperty &ip )
 {
   // What kind of message is this?
   string szTag = "enableBLOB";
-  string szDescrip = szTag + " '" + ip.getName() + "'";
+  string szDescrip = szTag + " '" + ip.name() + "'";
 
   // Clear out the xml stream.
   m_ssXml.str("");
@@ -1128,15 +1128,15 @@ void IndiXmlParser::createEnableBLOB( const IndiProperty &ip )
   if ( ip.hasValidDevice() == false )
     throw runtime_error( szDescrip + " must have attribute 'device' defined." );
 
-  m_ssXml << " device=\"" << ip.getDevice() << "\"";
+  m_ssXml << " device=\"" << ip.device() << "\"";
 
   // "implied" means that if they are not defined, don't add them. Adding an
   // empty "implied" attribute to the generated XML is an error.
   if ( ip.hasValidName() == true )
-    m_ssXml << " name=\"" << ip.getName() << "\"";
+    m_ssXml << " name=\"" << ip.name() << "\"";
 
   m_ssXml << ">\r\n";
-  m_ssXml << IndiProperty::getBLOBEnableString( ip.getBLOBEnable() ) << "\r\n";
+  m_ssXml << IndiProperty::BLOBEnable2String( ip.beValue() ) << "\r\n";
   m_ssXml << "</" << szTag << ">\r\n";
 }
 
@@ -1413,43 +1413,43 @@ IndiMessage IndiXmlParser::createIndiMessage() const
 
     // Set the attributes.
     if ( ( szValue = getAttributeValue( "device", m_pxeRoot ) ).size() > 0 )
-      ipNew.setDevice( szValue );
+      ipNew.device( szValue );
     if ( ( szValue = getAttributeValue( "group", m_pxeRoot ) ).size() > 0 )
-      ipNew.setGroup( szValue );
+      ipNew.group( szValue );
     if ( ( szValue = getAttributeValue( "label", m_pxeRoot ) ).size() > 0 )
-      ipNew.setLabel( szValue );
+      ipNew.label( szValue );
     if ( ( szValue = getAttributeValue( "message", m_pxeRoot ) ).size() > 0 )
-      ipNew.setMessage( szValue );
+      ipNew.message( szValue );
     if ( ( szValue = getAttributeValue( "name", m_pxeRoot ) ).size() > 0 )
-      ipNew.setName( szValue );
+      ipNew.name( szValue );
     if ( ( szValue = getAttributeValue( "perm", m_pxeRoot ) ).size() > 0 )
-      ipNew.setPerm( IndiProperty::getPerm( szValue ) );
+      ipNew.perm( IndiProperty::string2Permission( szValue ) );
     if ( ( szValue = getAttributeValue( "rule", m_pxeRoot ) ).size() > 0 )
-      ipNew.setRule( IndiProperty::getSwitchRule( szValue ) );
+      ipNew.rule( IndiProperty::string2SwitchRule( szValue ) );
     if ( ( szValue = getAttributeValue( "state", m_pxeRoot ) ).size() > 0 )
-      ipNew.setState( IndiProperty::getState( szValue ) );
+      ipNew.state( IndiProperty::string2State(szValue) );
     if ( ( szValue = getAttributeValue( "timeout", m_pxeRoot ) ).size() > 0 )
     {
       stringstream ssTimeout;
       ssTimeout << szValue;
       double xTimeout;
       ssTimeout >> xTimeout;
-      ipNew.setTimeout( xTimeout );
+      ipNew.timeout( xTimeout );
     }
     if ( ( szValue = getAttributeValue( "timestamp", m_pxeRoot ) ).size() > 0 )
     {
       TimeStamp tsMod;
       tsMod.fromFormattedIso8601Str( szValue );
-      ipNew.setTimeStamp( tsMod );
+      ipNew.timeStamp( tsMod );
     }
     if ( ( szValue = getAttributeValue( "version", m_pxeRoot ) ).size() > 0 )
-      ipNew.setVersion( szValue );
+      ipNew.version( szValue );
 
     // A special case is a BLOB enable message - it has no elements,
     // but has data in it.
     if ( tType == EnableBLOB )
     {
-      ipNew = IndiProperty::getBLOBEnable( ::pcdataXMLEle( m_pxeRoot ) );
+      ipNew = IndiProperty::string2BLOBEnable( ::pcdataXMLEle( m_pxeRoot ) );
     }
     else
     {

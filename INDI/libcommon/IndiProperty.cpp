@@ -17,32 +17,32 @@ IndiProperty::IndiProperty()
 {
 }
 
-IndiProperty::IndiProperty(const Type &tType) : m_type(tType)
+IndiProperty::IndiProperty(const Type & type) : m_type(type)
 {
 }
 
-IndiProperty::IndiProperty(const Type &tType,
-                           const std::string &szDevice,
-                           const std::string &szName) : m_device(szDevice), m_name(szName), m_type(tType)
+IndiProperty::IndiProperty(const Type & type,
+                           const std::string & device,
+                           const std::string & name) : m_type(type), m_device(device), m_name(name)
 {
 }
 
-IndiProperty::IndiProperty(const Type &tType,
-                           const std::string &szDevice,
-                           const std::string &szName,
-                           const State &tState,
-                           const Perm &tPerm,
-                           const SwitchRule &tRule) : m_device(szDevice), m_name(szName), m_perm(tPerm),
-                                                      m_rule(tRule), m_state(tState), m_type(tType)
+IndiProperty::IndiProperty(const Type & type,
+                           const std::string & device,
+                           const std::string & name,
+                           const State & state,
+                           const Perm & perm,
+                           const SwitchRule & rule) : m_type(type), m_device(device), m_name(name), 
+                                                       m_state(state), m_perm(perm), m_rule(rule)
 {
 }
 
-IndiProperty::IndiProperty(const IndiProperty &ipRhs) : m_device(ipRhs.m_device), m_group(ipRhs.m_group), m_label(ipRhs.m_label),
-                                                        m_message(ipRhs.m_message), m_name(ipRhs.m_name), m_perm(ipRhs.m_perm),
-                                                        m_rule(ipRhs.m_rule), m_state(ipRhs.m_state), m_timeout(ipRhs.m_timeout),
-                                                        m_requested(ipRhs.m_requested), m_timeStamp(ipRhs.m_timeStamp),
-                                                        m_version(ipRhs.m_version), m_beValue(ipRhs.m_beValue),
-                                                        m_mapElements(ipRhs.m_mapElements), m_type(ipRhs.m_type)
+IndiProperty::IndiProperty(const IndiProperty &ipRhs) : m_type(ipRhs.m_type), m_device(ipRhs.m_device), m_name(ipRhs.m_name),
+                                                        m_state(ipRhs.m_state), m_message(ipRhs.m_message), m_perm(ipRhs.m_perm),
+                                                        m_rule(ipRhs.m_rule), m_group(ipRhs.m_group), m_label(ipRhs.m_label),                                      
+                                                        m_timeout(ipRhs.m_timeout),
+                                                        /*m_requested(ipRhs.m_requested),*/ m_timeStamp(ipRhs.m_timeStamp),
+                                                        m_version(ipRhs.m_version), m_elements(ipRhs.m_elements), m_beValue(ipRhs.m_beValue)
 {
 }
 
@@ -50,11 +50,372 @@ IndiProperty::~IndiProperty()
 {
 }
 
+const IndiProperty::Type &IndiProperty::type() const
+{
+    std::shared_lock rLock(m_rwData);
+    return m_type;
+}
+
+void IndiProperty::device(const std::string & dev)
+{
+    std::unique_lock wLock(m_rwData);
+    m_device = dev;
+}
+
+const std::string &IndiProperty::device() const
+{
+    std::shared_lock rLock(m_rwData);
+    return m_device;
+}
+
+bool IndiProperty::hasValidDevice() const
+{
+    std::shared_lock rLock(m_rwData);
+    return (m_device.size() != 0);
+}
+
+void IndiProperty::name(const std::string & nm)
+{
+    std::unique_lock wLock(m_rwData);
+    m_name = nm;
+}
+
+const std::string &IndiProperty::name() const
+{
+    std::shared_lock rLock(m_rwData);
+    return m_name;
+}
+
+bool IndiProperty::hasValidName() const
+{
+    std::shared_lock rLock(m_rwData);
+    return (m_name.size() != 0);
+}
+
+std::string IndiProperty::createUniqueKey() const
+{
+    std::shared_lock rLock(m_rwData);
+    return m_device + "." + m_name;
+}
+
+void IndiProperty::state(const IndiProperty::State & st)
+{
+    std::unique_lock wLock(m_rwData);
+    m_state = st;
+}
+
+const IndiProperty::State &IndiProperty::state() const
+{
+    std::shared_lock rLock(m_rwData);
+    return m_state;
+}
+
+bool IndiProperty::hasValidState() const
+{
+    std::shared_lock rLock(m_rwData);
+    return (m_state != State::Unknown);
+}
+
+void IndiProperty::message(const std::string & msg)
+{
+    std::unique_lock wLock(m_rwData);
+    m_message = msg;
+}
+
+const std::string &IndiProperty::message() const
+{
+    std::shared_lock rLock(m_rwData);
+    return m_message;
+}
+
+bool IndiProperty::hasValidMessage() const
+{
+    std::shared_lock rLock(m_rwData);
+    return (m_message.size() != 0);
+}
+
+void IndiProperty::perm(const IndiProperty::Perm & prm)
+{
+    std::unique_lock wLock(m_rwData);
+    m_perm = prm;
+}
+
+const IndiProperty::Perm & IndiProperty::perm() const
+{
+    std::shared_lock rLock(m_rwData);
+    return m_perm;
+}
+
+bool IndiProperty::hasValidPerm() const
+{
+    std::shared_lock rLock(m_rwData);
+    return (m_perm != Perm::Unknown);
+}
+
+void IndiProperty::rule(const IndiProperty::SwitchRule & rl)
+{
+    std::unique_lock wLock(m_rwData);
+    m_rule = rl;
+}
+
+const IndiProperty::SwitchRule &IndiProperty::rule() const
+{
+    std::shared_lock rLock(m_rwData);
+    return m_rule;
+}
+
+bool IndiProperty::hasValidRule() const
+{
+    std::shared_lock rLock(m_rwData);
+    return (m_rule != SwitchRule::Unknown);
+}
+
+void IndiProperty::group(const std::string & grp)
+{
+    std::unique_lock wLock(m_rwData);
+    m_group = grp;
+}
+
+const std::string &IndiProperty::group() const
+{
+    std::shared_lock rLock(m_rwData);
+    return m_group;
+}
+
+bool IndiProperty::hasValidGroup() const
+{
+    std::shared_lock rLock(m_rwData);
+    return (m_group.size() != 0);
+}
+
+void IndiProperty::label(const std::string & lbl)
+{
+    std::unique_lock wLock(m_rwData);
+    m_label = lbl;
+}
+
+const std::string &IndiProperty::label() const
+{
+    std::shared_lock rLock(m_rwData);
+    return m_label;
+}
+
+bool IndiProperty::hasValidLabel() const
+{
+    std::shared_lock rLock(m_rwData);
+    return (m_label.size() != 0);
+}
+
+void IndiProperty::timeout(const double & tmo)
+{
+    std::unique_lock wLock(m_rwData);
+    m_timeout = tmo;
+}
+
+const double &IndiProperty::timeout() const
+{
+    std::shared_lock rLock(m_rwData);
+    return m_timeout;
+}
+
+bool IndiProperty::hasValidTimeout() const
+{
+    std::shared_lock rLock(m_rwData);
+    return (m_timeout != 0.0f);
+}
+
+void IndiProperty::timeStamp(const TimeStamp & ts)
+{
+    std::unique_lock wLock(m_rwData);
+    m_timeStamp = ts;
+}
+
+const TimeStamp &IndiProperty::timeStamp() const
+{
+    std::shared_lock rLock(m_rwData);
+    return m_timeStamp;
+}
+
+bool IndiProperty::hasValidTimeStamp() const
+{
+    // todo: Timestamp is always valid.... this is a weak point.
+    std::shared_lock rLock(m_rwData);
+    return true;
+}
+
+
+void IndiProperty::version(const std::string & vers)
+{
+    std::unique_lock wLock(m_rwData);
+    m_version = vers;
+}
+
+const std::string &IndiProperty::version() const
+{
+    std::shared_lock rLock(m_rwData);
+    return m_version;
+}
+
+bool IndiProperty::hasValidVersion() const
+{
+    std::shared_lock rLock(m_rwData);
+    return (m_version.size() != 0);
+}
+
+void IndiProperty::elements(const std::map<std::string, IndiElement> & els)
+{
+    std::unique_lock wLock(m_rwData);
+    m_elements = els;
+}
+
+const std::map<std::string, IndiElement> &IndiProperty::elements() const
+{
+    std::unique_lock wLock(m_rwData);
+    return m_elements;
+}
+
+unsigned int IndiProperty::numElements() const
+{
+    std::shared_lock rLock(m_rwData);
+    return (m_elements.size());
+}
+
+void IndiProperty::add(const IndiElement & el)
+{
+    std::unique_lock wLock(m_rwData);
+
+    std::map<std::string, IndiElement>::const_iterator itr = m_elements.find(el.name());
+
+    if (itr != m_elements.end())
+    {
+        throw Excep(Error::ElementAlreadyExists);
+    }
+
+    // Actually add it to the map.
+    m_elements[el.name()] = el;
+
+    m_timeStamp = TimeStamp::now();
+}
+
+void IndiProperty::addIfNoExist(const IndiElement & el)
+{
+    std::unique_lock wLock(m_rwData);
+
+    std::map<std::string, IndiElement>::const_iterator itr = m_elements.find(el.name());
+
+    if (itr == m_elements.end())
+    {
+        // Actually add it to the map.
+        m_elements[el.name()] = el;
+        m_timeStamp = TimeStamp::now();
+    }
+}
+
+void IndiProperty::remove(const std::string & elName)
+{
+    std::unique_lock wLock(m_rwData);
+
+    std::map<std::string, IndiElement>::iterator itr = m_elements.find(elName);
+
+    if (itr == m_elements.end())
+    {
+        throw Excep(Error::CouldntFindElement);
+    }
+
+    // Actually delete the element.
+    m_elements.erase(itr);
+}
+
+bool IndiProperty::find(const std::string & elName) const
+{
+    std::shared_lock rLock(m_rwData);
+
+    std::map<std::string, IndiElement>::const_iterator itr = m_elements.find(elName);
+
+    return (itr != m_elements.end());
+}
+
+void IndiProperty::update(const IndiElement & elName)
+{
+    std::unique_lock wLock(m_rwData);
+
+    // Actually add it to the map, or update it.
+    m_elements[elName.name()] = elName;
+
+    m_timeStamp = TimeStamp::now();
+}
+
+void IndiProperty::update(const std::string & elName,
+                          const IndiElement & el)
+{
+    std::unique_lock wLock(m_rwData);
+
+    std::map<std::string, IndiElement>::iterator itr = m_elements.find(elName);
+
+    if (itr == m_elements.end())
+    {
+        throw Excep(Error::CouldntFindElement);
+    }
+
+    itr->second = el;
+
+    m_timeStamp = TimeStamp::now();
+}
+
+const IndiElement &IndiProperty::at(const std::string & elName) const
+{
+    std::shared_lock rLock(m_rwData);
+
+    std::map<std::string, IndiElement>::const_iterator itr = m_elements.find(elName);
+
+    if (itr == m_elements.end())
+    {
+        throw std::runtime_error(std::string("Element name '") + elName + "' not found.");
+    }
+
+    return itr->second;
+}
+
+IndiElement &IndiProperty::at(const std::string & elName)
+{
+    std::unique_lock wLock(m_rwData);
+
+    std::map<std::string, IndiElement>::iterator itr = m_elements.find(elName);
+
+    if (itr == m_elements.end())
+    {
+        throw std::runtime_error(std::string("Element name '") + elName + "' not found.");
+    }
+
+    return itr->second;
+}
+
+void IndiProperty::beValue(const BLOBEnable & blobe)
+{
+    std::unique_lock wLock(m_rwData);
+    m_beValue = blobe;
+}
+
+const IndiProperty::BLOBEnable &IndiProperty::beValue() const
+{
+    std::shared_lock rLock(m_rwData);
+    return m_beValue;
+}
+
+bool IndiProperty::hasValidBeValue() const
+{
+    std::shared_lock rLock(m_rwData);
+    return (m_beValue != BLOBEnable::Unknown);
+}
+
+
+
+
 const IndiProperty &IndiProperty::operator=(const IndiProperty &ipRhs)
 {
     if (&ipRhs != this)
     {
-        pcf::ReadWriteLock::AutoWLock rwAuto(&m_rwData);
+        std::unique_lock wLock(m_rwData);
 
         m_device = ipRhs.m_device;
         m_group = ipRhs.m_group;
@@ -62,7 +423,7 @@ const IndiProperty &IndiProperty::operator=(const IndiProperty &ipRhs)
         m_message = ipRhs.m_message;
         m_name = ipRhs.m_name;
         m_perm = ipRhs.m_perm;
-        m_requested = ipRhs.m_requested;
+        //m_requested = ipRhs.m_requested;
         m_rule = ipRhs.m_rule;
         m_state = ipRhs.m_state;
         m_timeout = ipRhs.m_timeout;
@@ -70,7 +431,7 @@ const IndiProperty &IndiProperty::operator=(const IndiProperty &ipRhs)
         m_version = ipRhs.m_version;
         m_beValue = ipRhs.m_beValue;
 
-        m_mapElements = ipRhs.m_mapElements;
+        m_elements = ipRhs.m_elements;
         m_type = ipRhs.m_type;
     }
     return *this;
@@ -81,7 +442,7 @@ const IndiProperty &IndiProperty::operator=(const IndiProperty &ipRhs)
 
 const IndiProperty::BLOBEnable &IndiProperty::operator=(const BLOBEnable &tValue)
 {
-    pcf::ReadWriteLock::AutoWLock rwAuto(&m_rwData);
+    std::unique_lock wLock(m_rwData);
     m_beValue = tValue;
     return tValue;
 }
@@ -91,26 +452,26 @@ const IndiProperty::BLOBEnable &IndiProperty::operator=(const BLOBEnable &tValue
 
 bool IndiProperty::operator==(const IndiProperty &ipRhs) const
 {
-    pcf::ReadWriteLock::AutoRLock rwAuto(&m_rwData);
+    std::shared_lock rLock(m_rwData);
 
     // If we are comparing ourself to ourself - easy!
     if (&ipRhs == this)
         return true;
 
     // If they are different sizes, they are different.
-    if (ipRhs.m_mapElements.size() != m_mapElements.size())
+    if (ipRhs.m_elements.size() != m_elements.size())
         return false;
 
     // We need some iterators for each of the maps.
-    std::map<std::string, IndiElement>::const_iterator itrRhs = ipRhs.m_mapElements.end();
-    std::map<std::string, IndiElement>::const_iterator itr = m_mapElements.begin();
-    for (; itr != m_mapElements.end(); ++itr)
+    std::map<std::string, IndiElement>::const_iterator itrRhs = ipRhs.m_elements.end();
+    std::map<std::string, IndiElement>::const_iterator itr = m_elements.begin();
+    for (; itr != m_elements.end(); ++itr)
     {
         // Can we find an element of the same name in the other map?
-        itrRhs = ipRhs.m_mapElements.find(itr->first);
+        itrRhs = ipRhs.m_elements.find(itr->first);
 
         // If we can't find the name, these are different.
-        if (itrRhs == ipRhs.m_mapElements.end())
+        if (itrRhs == ipRhs.m_elements.end())
             return false;
 
         // If we found it, and they don't match, these are different.
@@ -169,71 +530,71 @@ std::string IndiProperty::scrubName(const std::string &szName)
 /// but the type must match, as must the device and name. The names of all the
 /// elements must match as well.
 
-bool IndiProperty::compareProperty(const IndiProperty &ipComp) const
+/*bool IndiProperty::compareProperty(const IndiProperty &ipComp) const
 {
-    pcf::ReadWriteLock::AutoRLock rwAuto(&m_rwData);
+    std::shared_lock rLock(m_rwData);
 
     // If we are comparing ourself to ourself - easy!
     if (&ipComp == this)
         return true;
 
-    if (ipComp.getType() != m_type)
+    if (ipComp.type() != m_type)
         return false;
 
-    if (ipComp.getDevice() != m_device || ipComp.getName() != m_name)
+    if (ipComp.device() != m_device || ipComp.name() != m_name)
         return false;
 
     // If they are different sizes, they are different.
-    if (ipComp.m_mapElements.size() != m_mapElements.size())
+    if (ipComp.m_elements.size() != m_elements.size())
         return false;
 
     // We need some iterators for each of the maps.
-    std::map<std::string, IndiElement>::const_iterator itrComp = ipComp.m_mapElements.end();
-    std::map<std::string, IndiElement>::const_iterator itr = m_mapElements.begin();
-    for (; itr != m_mapElements.end(); ++itr)
+    std::map<std::string, IndiElement>::const_iterator itrComp = ipComp.m_elements.end();
+    std::map<std::string, IndiElement>::const_iterator itr = m_elements.begin();
+    for (; itr != m_elements.end(); ++itr)
     {
         // Can we find an element of the same name in the other map?
-        itrComp = ipComp.m_mapElements.find(itr->first);
+        itrComp = ipComp.m_elements.find(itr->first);
 
         // If we can't find the name, these are different.
-        if (itrComp == ipComp.m_mapElements.end())
+        if (itrComp == ipComp.m_elements.end())
             return false;
     }
 
     // If we got here, we are identical.
     return true;
-}
+}*/
 
 ////////////////////////////////////////////////////////////////////////////////
 /// Compares one element value contained in this class with another
 /// instance. The type must match, as must the device and name.
 /// The name of this element must match as well.
 
-bool IndiProperty::compareValue(const IndiProperty &ipComp,
+/*bool IndiProperty::compareValue(const IndiProperty &ipComp,
                                 const std::string &szElementName) const
 {
-    pcf::ReadWriteLock::AutoRLock rwAuto(&m_rwData);
+    std::shared_lock rLock(m_rwData);
 
     // If we are comparing ourself to ourself - easy!
     if (&ipComp == this)
         return true;
 
-    if (ipComp.getType() != m_type)
+    if (ipComp.type() != m_type)
         return false;
 
-    if (ipComp.getDevice() != m_device || ipComp.getName() != m_name)
+    if (ipComp.device() != m_device || ipComp.name() != m_name)
         return false;
 
     // Can we find this element in this map? If not, we fail.
     std::map<std::string, IndiElement>::const_iterator itr =
-        m_mapElements.find(szElementName);
-    if (itr == m_mapElements.end())
+        m_elements.find(szElementName);
+    if (itr == m_elements.end())
         return false;
 
     // Can we find this element in the other map? If not, we fail.
     std::map<std::string, IndiElement>::const_iterator itrComp =
-        ipComp.m_mapElements.find(szElementName);
-    if (itrComp == ipComp.m_mapElements.end())
+        ipComp.m_elements.find(szElementName);
+    if (itrComp == ipComp.m_elements.end())
         return false;
 
     // If we found it, and the values don't match, these are different.
@@ -242,41 +603,41 @@ bool IndiProperty::compareValue(const IndiProperty &ipComp,
 
     // If we got here, we are identical.
     return true;
-}
+}*/
 
 ////////////////////////////////////////////////////////////////////////////////
 /// Compares all the element values contained in this class with another
 /// instance. The type must match, as must the device and name. The number
 /// and names of all the elements must match as well.
 
-bool IndiProperty::compareValues(const IndiProperty &ipComp) const
+/*bool IndiProperty::compareValues(const IndiProperty &ipComp) const
 {
-    pcf::ReadWriteLock::AutoRLock rwAuto(&m_rwData);
+    std::shared_lock rLock(m_rwData);
 
     // If we are comparing ourself to ourself - easy!
     if (&ipComp == this)
         return true;
 
-    if (ipComp.getType() != m_type)
+    if (ipComp.type() != m_type)
         return false;
 
-    if (ipComp.getDevice() != m_device || ipComp.getName() != m_name)
+    if (ipComp.device() != m_device || ipComp.name() != m_name)
         return false;
 
     // If they are different sizes, they are different.
-    if (ipComp.m_mapElements.size() != m_mapElements.size())
+    if (ipComp.m_elements.size() != m_elements.size())
         return false;
 
     // We need some iterators for each of the maps.
-    std::map<std::string, IndiElement>::const_iterator itrComp = ipComp.m_mapElements.end();
-    std::map<std::string, IndiElement>::const_iterator itr = m_mapElements.begin();
-    for (; itr != m_mapElements.end(); ++itr)
+    std::map<std::string, IndiElement>::const_iterator itrComp = ipComp.m_elements.end();
+    std::map<std::string, IndiElement>::const_iterator itr = m_elements.begin();
+    for (; itr != m_elements.end(); ++itr)
     {
         // Can we find an element of the same name in the other map?
-        itrComp = ipComp.m_mapElements.find(itr->first);
+        itrComp = ipComp.m_elements.find(itr->first);
 
         // If we can't find the name, these are different.
-        if (itrComp == ipComp.m_mapElements.end())
+        if (itrComp == ipComp.m_elements.end())
             return false;
 
         // If we found it, and the values don't match, these are different.
@@ -286,59 +647,15 @@ bool IndiProperty::compareValues(const IndiProperty &ipComp) const
 
     // If we got here, we are identical.
     return true;
-}
+}*/
 
-////////////////////////////////////////////////////////////////////////////////
-/// Compares one element value contained in this class with another
-/// instance. The type must match, as must the device and name.
-/// The name of this element must match as well, and the value must be a new,
-/// non-blank value.
-
-bool IndiProperty::hasNewValue(const IndiProperty &ipComp,
-                               const std::string &szElementName) const
-{
-    pcf::ReadWriteLock::AutoRLock rwAuto(&m_rwData);
-
-    // If we are comparing ourself to ourself - easy - there is no new value,
-    // so we must return false.
-    if (&ipComp == this)
-        return false;
-
-    // The types don't match, so we can't be compared.
-    if (ipComp.getType() != m_type)
-        return false;
-
-    if (ipComp.getDevice() != m_device || ipComp.getName() != m_name)
-        return false;
-
-    // Can we find this element in this map? If not, we fail.
-    std::map<std::string, IndiElement>::const_iterator itr =
-        m_mapElements.find(szElementName);
-    if (itr == m_mapElements.end())
-        return false;
-
-    // Can we find this element in the other map? If not, we fail.
-    std::map<std::string, IndiElement>::const_iterator itrComp =
-        ipComp.m_mapElements.find(szElementName);
-    if (itrComp == ipComp.m_mapElements.end())
-        return false;
-
-    // If we found it, and the values don't match and the 'comp' is not
-    // empty, the 'comp' is an update.
-    if (itr->second.value() != itrComp->second.value() &&
-        itrComp->second.value().length() > 0)
-        return true;
-
-    // If we got here, we are identical or the 'comp' is empty.
-    return false;
-}
 
 ////////////////////////////////////////////////////////////////////////////////
 /// Returns a std::string with each attribute enumerated.
 
-std::string IndiProperty::createString() const
+/*std::string IndiProperty::createString() const
 {
-    pcf::ReadWriteLock::AutoRLock rwAuto(&m_rwData);
+    std::shared_lock rLock(m_rwData);
 
     std::stringstream ssOutput;
     ssOutput << "{ "
@@ -357,11 +674,11 @@ std::string IndiProperty::createString() const
              << "\"message\" : \"" << m_message << "\" "
              << "\"elements\" : [ \n";
 
-    std::map<std::string, IndiElement>::const_iterator itr = m_mapElements.begin();
-    for (; itr != m_mapElements.end(); ++itr)
+    std::map<std::string, IndiElement>::const_iterator itr = m_elements.begin();
+    for (; itr != m_elements.end(); ++itr)
     {
         ssOutput << "    ";
-        if (itr != m_mapElements.begin())
+        if (itr != m_elements.begin())
             ssOutput << " , ";
         ssOutput << itr->second.createString();
     }
@@ -370,450 +687,33 @@ std::string IndiProperty::createString() const
              << " } ";
 
     return ssOutput.str();
-}
+}*/
 
 ////////////////////////////////////////////////////////////////////////////////
 /// Create a name for this property based on the device name and the
 /// property name. A '.' is used as the chracter to join them together.
 /// This key should be unique for all indi devices.
 
-std::string IndiProperty::createUniqueKey() const
-{
-    pcf::ReadWriteLock::AutoRLock rwAuto(&m_rwData);
-    return m_device + "." + m_name;
-}
 
-////////////////////////////////////////////////////////////////////////////////
 
-bool IndiProperty::hasValidBLOBEnable() const
-{
-    pcf::ReadWriteLock::AutoRLock rwAuto(&m_rwData);
-    return (m_beValue != BLOBEnable::Unknown);
-}
 
-////////////////////////////////////////////////////////////////////////////////
-/// Returns true if this contains a non-empty'device' attribute.
 
-bool IndiProperty::hasValidDevice() const
-{
-    pcf::ReadWriteLock::AutoRLock rwAuto(&m_rwData);
-    return (m_device.size() != 0);
-}
 
-////////////////////////////////////////////////////////////////////////////////
-/// Returns true if this contains a non-empty 'group' attribute.
-
-bool IndiProperty::hasValidGroup() const
-{
-    pcf::ReadWriteLock::AutoRLock rwAuto(&m_rwData);
-    return (m_group.size() != 0);
-}
-
-////////////////////////////////////////////////////////////////////////////////
-/// Returns true if this contains a non-empty 'label' attribute.
-
-bool IndiProperty::hasValidLabel() const
-{
-    pcf::ReadWriteLock::AutoRLock rwAuto(&m_rwData);
-    return (m_label.size() != 0);
-}
-
-////////////////////////////////////////////////////////////////////////////////
-/// Returns true if this contains a non-empty 'message' attribute.
-
-bool IndiProperty::hasValidMessage() const
-{
-    pcf::ReadWriteLock::AutoRLock rwAuto(&m_rwData);
-    return (m_message.size() != 0);
-}
-
-////////////////////////////////////////////////////////////////////////////////
-/// Returns true if this contains a non-empty 'name' attribute.
-
-bool IndiProperty::hasValidName() const
-{
-    pcf::ReadWriteLock::AutoRLock rwAuto(&m_rwData);
-    return (m_name.size() != 0);
-}
-
-////////////////////////////////////////////////////////////////////////////////
-/// Returns true if this contains a non-empty 'perm' attribute.
-
-bool IndiProperty::hasValidPerm() const
-{
-    pcf::ReadWriteLock::AutoRLock rwAuto(&m_rwData);
-    return (m_perm != Perm::Unknown);
-}
-
-////////////////////////////////////////////////////////////////////////////////
-/// Returns true if this contains a non-empty 'rule' attribute.
-
-bool IndiProperty::hasValidRule() const
-{
-    pcf::ReadWriteLock::AutoRLock rwAuto(&m_rwData);
-    return (m_rule != SwitchRule::Unknown);
-}
-
-////////////////////////////////////////////////////////////////////////////////
-/// Returns true if this contains a non-empty 'state' attribute.
-
-bool IndiProperty::hasValidState() const
-{
-    pcf::ReadWriteLock::AutoRLock rwAuto(&m_rwData);
-    return (m_state != State::Unknown);
-}
-
-////////////////////////////////////////////////////////////////////////////////
-/// Returns true if this contains a non-empty 'timeout' attribute.
-
-bool IndiProperty::hasValidTimeout() const
-{
-    pcf::ReadWriteLock::AutoRLock rwAuto(&m_rwData);
-    return (m_timeout != 0.0f);
-}
-
-////////////////////////////////////////////////////////////////////////////////
-/// Returns true if this contains a non-empty 'timestamp' attribute.
-
-bool IndiProperty::hasValidTimeStamp() const
-{
-    // todo: Timestamp is always valid.... this is a weak point.
-    pcf::ReadWriteLock::AutoRLock rwAuto(&m_rwData);
-    return true;
-}
-
-////////////////////////////////////////////////////////////////////////////////
-/// Returns true if this contains a non-empty 'version' attribute.
-
-bool IndiProperty::hasValidVersion() const
-{
-    pcf::ReadWriteLock::AutoRLock rwAuto(&m_rwData);
-    return (m_version.size() != 0);
-}
-
-////////////////////////////////////////////////////////////////////////////////
-/// Returns the name of the device.
-
-const std::string &IndiProperty::getDevice() const
-{
-    pcf::ReadWriteLock::AutoRLock rwAuto(&m_rwData);
-    return m_device;
-}
-
-////////////////////////////////////////////////////////////////////////////////
-/// Returns the BLOB enabled state.
-
-const IndiProperty::BLOBEnable &IndiProperty::getBLOBEnable() const
-{
-    pcf::ReadWriteLock::AutoRLock rwAuto(&m_rwData);
-    return m_beValue;
-}
-
-////////////////////////////////////////////////////////////////////////////////
-/// Returns the value of the group attribute.
-
-const std::string &IndiProperty::getGroup() const
-{
-    pcf::ReadWriteLock::AutoRLock rwAuto(&m_rwData);
-    return m_group;
-}
-
-////////////////////////////////////////////////////////////////////////////////
-/// Returns the value of the label attribute.
-
-const std::string &IndiProperty::getLabel() const
-{
-    pcf::ReadWriteLock::AutoRLock rwAuto(&m_rwData);
-    return m_label;
-}
-
-////////////////////////////////////////////////////////////////////////////////
-/// Returns the value of the message attribute.
-
-const std::string &IndiProperty::getMessage() const
-{
-    pcf::ReadWriteLock::AutoRLock rwAuto(&m_rwData);
-    return m_message;
-}
-
-////////////////////////////////////////////////////////////////////////////////
-/// Returns the value of the name attribute.
-
-const std::string &IndiProperty::getName() const
-{
-    pcf::ReadWriteLock::AutoRLock rwAuto(&m_rwData);
-    return m_name;
-}
-
-////////////////////////////////////////////////////////////////////////////////
-/// Returns the value of the perm attribute.
-
-const IndiProperty::Perm &IndiProperty::getPerm() const
-{
-    pcf::ReadWriteLock::AutoRLock rwAuto(&m_rwData);
-    return m_perm;
-}
-
-////////////////////////////////////////////////////////////////////////////////
-/// Returns the rule stored in the message.
-
-const IndiProperty::SwitchRule &IndiProperty::getRule() const
-{
-    pcf::ReadWriteLock::AutoRLock rwAuto(&m_rwData);
-    return m_rule;
-}
-
-////////////////////////////////////////////////////////////////////////////////
-/// Returns the state of the device.
-
-const IndiProperty::State &IndiProperty::getState() const
-{
-    pcf::ReadWriteLock::AutoRLock rwAuto(&m_rwData);
-    return m_state;
-}
-
-////////////////////////////////////////////////////////////////////////////////
-/// Returns the timeout of the device.
-
-const double &IndiProperty::getTimeout() const
-{
-    pcf::ReadWriteLock::AutoRLock rwAuto(&m_rwData);
-    return m_timeout;
-}
-
-////////////////////////////////////////////////////////////////////////////////
-/// Returns the timestamp stored in the message.
-
-const TimeStamp &IndiProperty::getTimeStamp() const
-{
-    pcf::ReadWriteLock::AutoRLock rwAuto(&m_rwData);
-    return m_timeStamp;
-}
-
-////////////////////////////////////////////////////////////////////////////////
-/// Returns the message type.
-
-const IndiProperty::Type &IndiProperty::getType() const
-{
-    pcf::ReadWriteLock::AutoRLock rwAuto(&m_rwData);
-    return m_type;
-}
-
-////////////////////////////////////////////////////////////////////////////////
-/// Returns the version stored in the message.
-
-const std::string &IndiProperty::getVersion() const
-{
-    pcf::ReadWriteLock::AutoRLock rwAuto(&m_rwData);
-    return m_version;
-}
-
-////////////////////////////////////////////////////////////////////////////////
-/// Returns whether or not this property has been requested by a client.
-/// This is not managed automatically.
-
-const bool &IndiProperty::isRequested() const
-{
-    pcf::ReadWriteLock::AutoRLock rwAuto(&m_rwData);
-    return m_requested;
-}
-
-////////////////////////////////////////////////////////////////////////////////
-/// Remove all elements from this object.
 
 void IndiProperty::clear()
 {
-    pcf::ReadWriteLock::AutoWLock rwAuto(&m_rwData);
-    m_mapElements.clear();
+    std::unique_lock wLock(m_rwData);
+    m_elements.clear();
 }
 
 ////////////////////////////////////////////////////////////////////////////////
-
-void IndiProperty::setBLOBEnable(const BLOBEnable &tValue)
-{
-    pcf::ReadWriteLock::AutoWLock rwAuto(&m_rwData);
-    m_beValue = tValue;
-}
-
-////////////////////////////////////////////////////////////////////////////////
-
-void IndiProperty::setDevice(const std::string &szValue)
-{
-    pcf::ReadWriteLock::AutoWLock rwAuto(&m_rwData);
-    m_device = szValue;
-}
-
-////////////////////////////////////////////////////////////////////////////////
-
-void IndiProperty::setGroup(const std::string &szValue)
-{
-    pcf::ReadWriteLock::AutoWLock rwAuto(&m_rwData);
-    m_group = szValue;
-}
-
-////////////////////////////////////////////////////////////////////////////////
-
-void IndiProperty::setLabel(const std::string &szValue)
-{
-    pcf::ReadWriteLock::AutoWLock rwAuto(&m_rwData);
-    m_label = szValue;
-}
-
-////////////////////////////////////////////////////////////////////////////////
-
-void IndiProperty::setMessage(const std::string &szValue)
-{
-    pcf::ReadWriteLock::AutoWLock rwAuto(&m_rwData);
-    m_message = szValue;
-}
-
-////////////////////////////////////////////////////////////////////////////////
-
-void IndiProperty::setName(const std::string &szValue)
-{
-    pcf::ReadWriteLock::AutoWLock rwAuto(&m_rwData);
-    m_name = szValue;
-}
-
-////////////////////////////////////////////////////////////////////////////////
-
-void IndiProperty::setPerm(const IndiProperty::Perm &tValue)
-{
-    pcf::ReadWriteLock::AutoWLock rwAuto(&m_rwData);
-    m_perm = tValue;
-}
-
-////////////////////////////////////////////////////////////////////////////////
-
-void IndiProperty::setRequested(const bool &oRequested)
-{
-    pcf::ReadWriteLock::AutoWLock rwAuto(&m_rwData);
-    m_requested = oRequested;
-}
-
-////////////////////////////////////////////////////////////////////////////////
-
-void IndiProperty::setRule(const IndiProperty::SwitchRule &tValue)
-{
-    pcf::ReadWriteLock::AutoWLock rwAuto(&m_rwData);
-    m_rule = tValue;
-}
-
-////////////////////////////////////////////////////////////////////////////////
-
-void IndiProperty::setState(const IndiProperty::State &tValue)
-{
-    pcf::ReadWriteLock::AutoWLock rwAuto(&m_rwData);
-    m_state = tValue;
-}
-
-////////////////////////////////////////////////////////////////////////////////
-
-void IndiProperty::setTimeout(const double &xValue)
-{
-    pcf::ReadWriteLock::AutoWLock rwAuto(&m_rwData);
-    m_timeout = xValue;
-}
-
-////////////////////////////////////////////////////////////////////////////////
-
-void IndiProperty::setTimeStamp(const TimeStamp &tsValue)
-{
-    pcf::ReadWriteLock::AutoWLock rwAuto(&m_rwData);
-    m_timeStamp = tsValue;
-}
-
-////////////////////////////////////////////////////////////////////////////////
-
-void IndiProperty::setVersion(const std::string &szValue)
-{
-    pcf::ReadWriteLock::AutoWLock rwAuto(&m_rwData);
-    m_version = szValue;
-}
-
-////////////////////////////////////////////////////////////////////////////////
-/// Returns the number of elements.
-
-unsigned int IndiProperty::getNumElements() const
-{
-    pcf::ReadWriteLock::AutoRLock rwAuto(&m_rwData);
-    return (m_mapElements.size());
-}
-
-////////////////////////////////////////////////////////////////////////////////
-/// Returns the element named szName.
-/// Throws exception if name is not found.
-
-const IndiElement &IndiProperty::at(const std::string &szName) const
-{
-    pcf::ReadWriteLock::AutoRLock rwAuto(&m_rwData);
-    std::map<std::string, IndiElement>::const_iterator itr = m_mapElements.find(szName);
-
-    if (itr == m_mapElements.end())
-        throw std::runtime_error(std::string("Element name '") + szName + "' not found.");
-
-    return itr->second;
-}
-
-////////////////////////////////////////////////////////////////////////////////
-/// Returns the element named szName.
-/// Throws exception if name is not found.
-
-IndiElement &IndiProperty::at(const std::string &szName)
-{
-    pcf::ReadWriteLock::AutoWLock rwAuto(&m_rwData);
-    std::map<std::string, IndiElement>::iterator itr = m_mapElements.find(szName);
-
-    if (itr == m_mapElements.end())
-        throw std::runtime_error(std::string("Element name '") + szName + "' not found.");
-
-    return itr->second;
-}
-
-////////////////////////////////////////////////////////////////////////////////
-/// Returns the element at index uiIndex.
-/// Throws exception if index is out of bounds.
-
-const IndiElement &IndiProperty::at(const unsigned int &uiIndex) const
-{
-    pcf::ReadWriteLock::AutoRLock rwAuto(&m_rwData);
-
-    if (uiIndex > m_mapElements.size() - 1)
-        throw Excep(Error::IndexOutOfBounds);
-
-    std::map<std::string, IndiElement>::const_iterator itr = m_mapElements.begin();
-    std::advance(itr, uiIndex);
-
-    return itr->second;
-}
-
-////////////////////////////////////////////////////////////////////////////////
-/// Returns the element at index uiIndex.
-/// Throws exception if index is out of bounds.
-
-IndiElement &IndiProperty::at(const unsigned int &uiIndex)
-{
-    pcf::ReadWriteLock::AutoWLock rwAuto(&m_rwData);
-
-    if (uiIndex > m_mapElements.size() - 1)
-        throw Excep(Error::IndexOutOfBounds);
-
-    std::map<std::string, IndiElement>::iterator itr = m_mapElements.begin();
-    std::advance(itr, uiIndex);
-
-    return itr->second;
-}
-
-////////////////////////////////////////////////////////////////////////////////
-/// Returns the element named szName.
-/// Throws exception if name is not found.
 
 const IndiElement &IndiProperty::operator[](const std::string &szName) const
 {
-    pcf::ReadWriteLock::AutoRLock rwAuto(&m_rwData);
-    std::map<std::string, IndiElement>::const_iterator itr = m_mapElements.find(szName);
+    std::shared_lock rLock(m_rwData);
+    std::map<std::string, IndiElement>::const_iterator itr = m_elements.find(szName);
 
-    if (itr == m_mapElements.end())
+    if (itr == m_elements.end())
         throw std::runtime_error(std::string("Element name '") + szName + "' not found.");
 
     return itr->second;
@@ -825,14 +725,15 @@ const IndiElement &IndiProperty::operator[](const std::string &szName) const
 
 IndiElement &IndiProperty::operator[](const std::string &szName)
 {
-    pcf::ReadWriteLock::AutoWLock rwAuto(&m_rwData);
-    std::map<std::string, IndiElement>::iterator itr = m_mapElements.find(szName);
+    std::unique_lock wLock(m_rwData);
+    std::map<std::string, IndiElement>::iterator itr = m_elements.find(szName);
 
-    if (itr == m_mapElements.end())
+    if (itr == m_elements.end())
         throw std::runtime_error(std::string("Element name '") + szName + "' not found.");
 
     return itr->second;
 }
+
 
 ////////////////////////////////////////////////////////////////////////////////
 /// Returns the element at an index (zero-based).
@@ -840,12 +741,12 @@ IndiElement &IndiProperty::operator[](const std::string &szName)
 
 const IndiElement &IndiProperty::operator[](const unsigned int &uiIndex) const
 {
-    pcf::ReadWriteLock::AutoRLock rwAuto(&m_rwData);
+    std::shared_lock rLock(m_rwData);
 
-    if (uiIndex > m_mapElements.size() - 1)
+    if (uiIndex > m_elements.size() - 1)
         throw Excep(Error::IndexOutOfBounds);
 
-    std::map<std::string, IndiElement>::const_iterator itr = m_mapElements.begin();
+    std::map<std::string, IndiElement>::const_iterator itr = m_elements.begin();
     std::advance(itr, uiIndex);
 
     return itr->second;
@@ -857,142 +758,19 @@ const IndiElement &IndiProperty::operator[](const unsigned int &uiIndex) const
 
 IndiElement &IndiProperty::operator[](const unsigned int &uiIndex)
 {
-    pcf::ReadWriteLock::AutoWLock rwAuto(&m_rwData);
+    std::unique_lock wLock(m_rwData);
 
-    if (uiIndex > m_mapElements.size() - 1)
+    if (uiIndex > m_elements.size() - 1)
         throw Excep(Error::IndexOutOfBounds);
 
-    std::map<std::string, IndiElement>::iterator itr = m_mapElements.begin();
+    std::map<std::string, IndiElement>::iterator itr = m_elements.begin();
     std::advance(itr, uiIndex);
 
     return itr->second;
 }
 
-////////////////////////////////////////////////////////////////////////////////
-/// Returns the entire map of elements.
 
-const std::map<std::string, IndiElement> &IndiProperty::getElements() const
-{
-    pcf::ReadWriteLock::AutoWLock rwAuto(&m_rwData);
-    return m_mapElements;
-}
-
-////////////////////////////////////////////////////////////////////////////////
-/// Sets the entire map of elements.
-
-void IndiProperty::setElements(const std::map<std::string, IndiElement> &mapElements)
-{
-    pcf::ReadWriteLock::AutoWLock rwAuto(&m_rwData);
-    m_mapElements = mapElements;
-}
-
-////////////////////////////////////////////////////////////////////////////////
-/// Updates the value of an element, adds it if it doesn't exist.
-
-void IndiProperty::update(const IndiElement &ieNew)
-{
-    pcf::ReadWriteLock::AutoWLock rwAuto(&m_rwData);
-
-    // Actually add it to the map, or update it.
-    m_mapElements[ieNew.name()] = ieNew;
-
-    m_timeStamp = TimeStamp::now();
-}
-
-////////////////////////////////////////////////////////////////////////////////
-/// Adds an element if it doesn't exist. If it does exist, this is a no-op.
-
-void IndiProperty::addIfNoExist(const IndiElement &ieNew)
-{
-    pcf::ReadWriteLock::AutoWLock rwAuto(&m_rwData);
-
-    std::map<std::string, IndiElement>::const_iterator itr =
-        m_mapElements.find(ieNew.name());
-
-    if (itr == m_mapElements.end())
-    {
-        // Actually add it to the map.
-        m_mapElements[ieNew.name()] = ieNew;
-        m_timeStamp = TimeStamp::now();
-    }
-}
-
-////////////////////////////////////////////////////////////////////////////////
-/// Adds a new IndiElement.
-/// Throws if the element already exists.
-
-void IndiProperty::add(const IndiElement &ieNew)
-{
-    pcf::ReadWriteLock::AutoWLock rwAuto(&m_rwData);
-
-    std::map<std::string, IndiElement>::const_iterator itr =
-        m_mapElements.find(ieNew.name());
-
-    if (itr != m_mapElements.end())
-        throw Excep(Error::ElementAlreadyExists);
-
-    // Actually add it to the map.
-    m_mapElements[ieNew.name()] = ieNew;
-
-    m_timeStamp = TimeStamp::now();
-}
-
-////////////////////////////////////////////////////////////////////////////////
-/// Removes an element named 'szElementName'.
-/// Throws if the element doesn't exist.
-
-void IndiProperty::remove(const std::string &szElementName)
-{
-    pcf::ReadWriteLock::AutoWLock rwAuto(&m_rwData);
-
-    std::map<std::string, IndiElement>::iterator itr =
-        m_mapElements.find(szElementName);
-
-    if (itr == m_mapElements.end())
-        throw Excep(Error::CouldntFindElement);
-
-    // Actually delete the element.
-    m_mapElements.erase(itr);
-}
-
-////////////////////////////////////////////////////////////////////////////////
-/// Updates the value of an element named 'szElementName'.
-/// Throws if the element doesn't exist.
-
-void IndiProperty::update(const std::string &szElementName,
-                          const IndiElement &ieUpdate)
-{
-    pcf::ReadWriteLock::AutoWLock rwAuto(&m_rwData);
-
-    std::map<std::string, IndiElement>::iterator itr =
-        m_mapElements.find(szElementName);
-
-    if (itr == m_mapElements.end())
-        throw Excep(Error::CouldntFindElement);
-
-    itr->second = ieUpdate;
-
-    m_timeStamp = TimeStamp::now();
-}
-
-////////////////////////////////////////////////////////////////////////////////
-///  Returns true if the element 'szElementName' exists, false otherwise.
-
-bool IndiProperty::find(const std::string &szElementName) const
-{
-    pcf::ReadWriteLock::AutoRLock rwAuto(&m_rwData);
-
-    std::map<std::string, IndiElement>::const_iterator itr =
-        m_mapElements.find(szElementName);
-
-    return (itr != m_mapElements.end());
-}
-
-////////////////////////////////////////////////////////////////////////////////
-///  return the message concerning the error.
-/// @param nErr The error to look up the message for.
-
-std::string IndiProperty::getErrorMsg(const Error &nErr)
+std::string IndiProperty::errorMsg(const Error &nErr)
 {
     std::string szMsg;
     switch (nErr)
@@ -1017,271 +795,214 @@ std::string IndiProperty::getErrorMsg(const Error &nErr)
     return szMsg;
 }
 
-////////////////////////////////////////////////////////////////////////////////
-/// Returns the enumerated type given the std::string type.
-
-IndiProperty::BLOBEnable IndiProperty::getBLOBEnable(const std::string &szType)
+IndiProperty::BLOBEnable IndiProperty::string2BLOBEnable( const std::string & str )
 {
-    BLOBEnable tType = BLOBEnable::Unknown;
+    BLOBEnable type = BLOBEnable::Unknown;
 
-    if (szType == "Never")
+    if (str == "Never")
     {
-        tType = BLOBEnable::Never;
+        type = BLOBEnable::Never;
     }
-    else if (szType == "Also")
+    else if (str == "Also")
     {
-        tType = BLOBEnable::Also;
+        type = BLOBEnable::Also;
     }
-    else if (szType == "Only")
+    else if (str == "Only")
     {
-        tType = BLOBEnable::Only;
+        type = BLOBEnable::Only;
     }
 
-    return tType;
+    return type;
 }
 
-////////////////////////////////////////////////////////////////////////////////
-/// Returns the std::string type given the enumerated type.
-
-std::string IndiProperty::getBLOBEnableString(const BLOBEnable &tType)
+std::string IndiProperty::BLOBEnable2String( const BLOBEnable & type )
 {
-    std::string szType = "";
-
-    switch (tType)
+    switch (type)
     {
-    case BLOBEnable::Unknown:
-        szType = "";
-        break;
-    case BLOBEnable::Never:
-        szType = "Never";
-        break;
-    case BLOBEnable::Also:
-        szType = "Also";
-        break;
-    case BLOBEnable::Only:
-        szType = "Only";
-        break;
+        case BLOBEnable::Unknown:
+            return std::string("");
+        case BLOBEnable::Never:
+            return std::string("Never");
+        case BLOBEnable::Also:
+            return std::string("Also");
+        case BLOBEnable::Only:
+            return std::string("Only");
+        default:
+            return std::string("");
     }
 
-    return szType;
 }
 
-////////////////////////////////////////////////////////////////////////////////
-/// Returns the enumerated type given the std::string type.
-
-IndiProperty::State IndiProperty::getState(const std::string &szType)
+IndiProperty::State IndiProperty::string2State(const std::string &str)
 {
-    State tType = State::Unknown;
-
-    if (szType == "Idle")
+    if(str == "Idle")
     {
-        tType = State::Idle;
+        return State::Idle;
     }
-    else if (szType == "Ok")
+    else if(str == "Ok")
     {
-        tType = State::Ok;
+        return State::Ok;
     }
-    else if (szType == "Busy")
+    else if(str == "Busy")
     {
-        tType = State::Busy;
+        return State::Busy;
     }
-    else if (szType == "Alert")
+    else if(str == "Alert")
     {
-        tType = State::Alert;
+        return State::Alert;
     }
-
-    return tType;
+    else 
+    {
+        return State::Unknown;
+    }
 }
 
-////////////////////////////////////////////////////////////////////////////////
-/// Returns the std::string type given the enumerated type.
-
-std::string IndiProperty::getStateString(const State &tType)
+std::string IndiProperty::state2String(const State & state)
 {
-    std::string szType = "";
-
-    switch (tType)
+    switch (state)
     {
-    case State::Unknown:
-        szType = "";
-        break;
-    case State::Idle:
-        szType = "Idle";
-        break;
-    case State::Ok:
-        szType = "Ok";
-        break;
-    case State::Busy:
-        szType = "Busy";
-        break;
-    case State::Alert:
-        szType = "Alert";
-        break;
+        case State::Unknown:
+            return std::string("");
+        case State::Idle:
+            return std::string("Idle");
+        case State::Ok:
+            return std::string("Ok");
+        case State::Busy:
+           return std::string("Busy");
+        case State::Alert:
+            return std::string("Alert");
+        default:
+            return std::string("");
     }
-
-    return szType;
 }
 
-////////////////////////////////////////////////////////////////////////////////
-/// Returns the enumerated type given the std::string type.
-
-IndiProperty::SwitchRule IndiProperty::getSwitchRule(const std::string &szType)
+IndiProperty::SwitchRule IndiProperty::string2SwitchRule(const std::string &str)
 {
-    SwitchRule tType = SwitchRule::Unknown;
 
-    if (szType == "OneOfMany")
+    if (str == "OneOfMany")
     {
-        tType = SwitchRule::OneOfMany;
+        return SwitchRule::OneOfMany;
     }
-    else if (szType == "AtMostOne")
+    else if (str == "AtMostOne")
     {
-        tType = SwitchRule::AtMostOne;
+        return SwitchRule::AtMostOne;
     }
-    else if (szType == "AnyOfMany")
+    else if (str == "AnyOfMany")
     {
-        tType = SwitchRule::AnyOfMany;
+        return SwitchRule::AnyOfMany;
+    }
+    else 
+    {
+        return SwitchRule::Unknown;
     }
 
-    return tType;
 }
 
-////////////////////////////////////////////////////////////////////////////////
-/// Returns the std::string type given the enumerated type.
-
-std::string IndiProperty::getSwitchRuleString(const SwitchRule &tType)
+std::string IndiProperty::switchRule2String(const SwitchRule & rule)
 {
-    std::string szType = "";
-
-    switch (tType)
+    switch (rule)
     {
-    case SwitchRule::OneOfMany:
-        szType = "OneOfMany";
-        break;
-    case SwitchRule::AtMostOne:
-        szType = "AtMostOne";
-        break;
-    case SwitchRule::AnyOfMany:
-        szType = "AnyOfMany";
-        break;
-    case SwitchRule::Unknown:
-        szType = "";
-        break;
+        case SwitchRule::OneOfMany:
+            return std::string("OneOfMany");
+            break;
+        case SwitchRule::AtMostOne:
+            return std::string("AtMostOne");
+            break;
+        case SwitchRule::AnyOfMany:
+            return std::string("AnyOfMany");
+            break;
+        case SwitchRule::Unknown:
+            return std::string("");
+        default:
+            return std::string("");
     }
-
-    return szType;
 }
 
-////////////////////////////////////////////////////////////////////////////////
-/// Returns the enumerated type given the std::string type.
-
-IndiProperty::Perm IndiProperty::getPerm(const std::string &szType)
+IndiProperty::Perm IndiProperty::string2Permission(const std::string &str)
 {
-    Perm tType = Perm::Unknown;
+    if (str == "ro")
+    {
+        return Perm::ReadOnly;
+    }
+    else if (str == "wo")
+    {
+        return Perm::WriteOnly;
+    }
+    else if (str == "rw")
+    {
+        return Perm::ReadWrite;
+    }
+    else 
+    {
+        return Perm::Unknown;
+    }
 
-    if (szType == "ro")
-    {
-        tType = Perm::ReadOnly;
-    }
-    else if (szType == "wo")
-    {
-        tType = Perm::WriteOnly;
-    }
-    else if (szType == "rw")
-    {
-        tType = Perm::ReadWrite;
-    }
-
-    return tType;
 }
 
-////////////////////////////////////////////////////////////////////////////////
-/// Returns the std::string type given the enumerated type.
-
-std::string IndiProperty::getPermString(const Perm &tType)
+std::string IndiProperty::permission2String(const Perm & perm)
 {
-    std::string szType = "";
-
-    switch (tType)
+    switch (perm)
     {
-    case Perm::Unknown:
-        szType = "";
-        break;
-    case Perm::ReadOnly:
-        szType = "ro";
-        break;
-    case Perm::WriteOnly:
-        szType = "wo";
-        break;
-    case Perm::ReadWrite:
-        szType = "rw";
-        break;
+        case Perm::Unknown:
+            return std::string("");
+        case Perm::ReadOnly:
+            return std::string("ro");
+        case Perm::WriteOnly:
+            return std::string("wo");
+        case Perm::ReadWrite:
+            return std::string("rw");
+        default:
+            return std::string("");
     }
-
-    return szType;
 }
 
-////////////////////////////////////////////////////////////////////////////////
-/// Returns the std::string type given the enumerated type.
-
-std::string IndiProperty::convertTypeToString(const Type &tType)
+std::string IndiProperty::type2String(const Type &type)
 {
-    std::string szType = "";
-
-    switch (tType)
+    switch (type)
     {
-    case Type::Unknown:
-        szType = "";
-        break;
-    case Type::BLOB:
-        szType = "BLOB";
-        break;
-    case Type::Light:
-        szType = "Light";
-        break;
-    case Type::Number:
-        szType = "Number";
-        break;
-    case Type::Switch:
-        szType = "Switch";
-        break;
-    case Type::Text:
-        szType = "Text";
-        break;
+        case Type::Unknown:
+            return std::string("");
+        case Type::BLOB:
+            return std::string("BLOB");
+        case Type::Light:
+            return std::string ("Light");
+        case Type::Number:
+            return std::string ("Number");
+        case Type::Switch:
+            return std::string("Switch");
+        case Type::Text:
+            return std::string("Text");
+        default:
+            return std::string("");
     }
-
-    return szType;
 }
 
-////////////////////////////////////////////////////////////////////////////////
-/// Returns the enumerated type given the tag.
-
-IndiProperty::Type IndiProperty::convertStringToType(const std::string &szTag)
+IndiProperty::Type IndiProperty::string2Type( const std::string & str )
 {
-    Type tType = Type::Unknown;
-
-    // Define properties.
-    if (szTag == "BLOB")
+    if(str == "BLOB")
     {
-        tType = Type::BLOB;
+        return Type::BLOB;
     }
-    else if (szTag == "Light")
+    else if(str == "Light")
     {
-        tType = Type::Light;
+        return Type::Light;
     }
-    else if (szTag == "Number")
+    else if(str == "Number")
     {
-        tType = Type::Number;
+        return Type::Number;
     }
-    else if (szTag == "Switch")
+    else if(str == "Switch")
     {
-        tType = Type::Switch;
+        return Type::Switch;
     }
-    else if (szTag == "Text")
+    else if(str == "Text")
     {
-        tType = Type::Text;
+        return Type::Text;
     }
-
-    return tType;
+    else 
+    {
+        return Type::Unknown;
+    }
 }
 
 } //namespace pcf

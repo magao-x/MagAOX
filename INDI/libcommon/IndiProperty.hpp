@@ -12,10 +12,11 @@
 #include <string>
 #include <map>
 #include <exception>
-#include "ReadWriteLock.hpp"
 #include "TimeStamp.hpp"
 #include "IndiElement.hpp"
 
+#include <mutex>
+#include <shared_mutex>
 /* 2024-05-24 refactor in progress 
  * ToDo:
  * - make sure member data in best order
@@ -102,7 +103,7 @@ public:
         }
         virtual const char *what() const throw()
         {
-            return IndiProperty::getErrorMsg(m_tCode).c_str();
+            return IndiProperty::errorMsg(m_tCode).c_str();
         }
 
     private:
@@ -114,44 +115,50 @@ public:
       */
 protected:
 
+    /// The type of this object. Set on construction, it cannot be changed except by assignment.
+    Type m_type{Type::Unknown};
+
+    /// The INDI device name
     std::string m_device;
 
-    std::string m_group;
-
-    std::string m_label;
-
-    std::string m_message;
-
+    /// The name of this property
     std::string m_name;
 
-    Perm m_perm{Perm::Unknown};
-
-    SwitchRule m_rule{SwitchRule::Unknown};
-
+    /// The current state of this property
     State m_state{State::Unknown};
 
+    /// The current message associated with this property
+    std::string m_message;
+
+    /// The permission setting of this property
+    Perm m_perm{Perm::Unknown};
+
+    /// If a switch, the switch-rule associate with this property
+    SwitchRule m_rule{SwitchRule::Unknown};
+
+    /// The UI group
+    std::string m_group;
+
+    /// The UI label
+    std::string m_label;
+
+    /// The time it takes to change this property 
     double m_timeout{0.0f};
 
-    // This is a flag which can be used to show that this property
-    // has been requested by a client. This is not managed automatically.
-    bool m_requested{false};
-
+    /// The moment when these data were valid
     pcf::TimeStamp m_timeStamp;
 
+    /// The protocol version
     std::string m_version;
+
+    /// A dictionary of elements, indexable by name.
+    std::map<std::string, pcf::IndiElement> m_elements;
 
     /// This can also be the value.
     BLOBEnable m_beValue{BLOBEnable::Unknown};
-
-    /// A dictionary of elements, indexable by name.
-    std::map<std::string, pcf::IndiElement> m_mapElements;
-
-    /// The type of this object. It cannot be changed.
-    Type m_type{Type::Unknown};
-
+    
     // A read write lock to protect the internal data.
-    mutable pcf::ReadWriteLock m_rwData;
-
+    mutable std::shared_mutex m_rwData;
 
     ///@}
 
@@ -163,20 +170,21 @@ public:
     IndiProperty();
 
     /// Constructor with a type. This will be used often.
-    explicit IndiProperty(const Type &tType);
+    explicit IndiProperty(const Type & type);
 
     /// Constructor with a type, device and name. This will be used often.
-    IndiProperty( const Type &tType,
-                  const std::string &szDevice,
-                  const std::string &szName);
+    IndiProperty( const Type & type,
+                  const std::string & device,
+                  const std::string & name
+                );
 
     /// Constructor with a type, device, name, state, and perm.
-    IndiProperty( const Type &tType,
-                  const std::string &szDevice,
-                  const std::string &szName,
-                  const State &tState,
-                  const Perm &tPerm,
-                  const SwitchRule &tRule = SwitchRule::Unknown
+    IndiProperty( const Type & type,
+                  const std::string & device,
+                  const std::string & name,
+                  const State & state,
+                  const Perm & perm,
+                  const SwitchRule & rule = SwitchRule::Unknown
                 );
 
     /// Copy constructor.
@@ -186,175 +194,256 @@ public:
     virtual ~IndiProperty();
 
     ///@}
+    
+    /** \name Member Data Access 
+      * @{
+      */
+
+    /// There is only a 'getter' for the type, since it can't be changed.
+    const Type &type() const;
+    
+    void device(const std::string & dev);
+
+    const std::string & device() const;
+
+    /// Returns true if this contains a non-empty 'device' attribute.
+    bool hasValidDevice() const;
+
+    void name(const std::string & na);
+
+    const std::string & name() const;
+
+    /// Returns true if this contains a non-empty 'name' attribute.
+    bool hasValidName() const;
+
+    /// Create the unique key for this property based on the device name and the property name. 
+    /** A '.' is used as the character to join them together.
+      * This key must be unique for all indi devices.
+      *
+      * \returns the key as "device.name"
+      */
+    std::string createUniqueKey() const;
+
+    void state(const State & st);
+
+    const State & state() const;
+
+    /// Returns true if this contains a non-empty 'state' attribute.
+    bool hasValidState() const;
+
+    void message(const std::string & msg);
+
+    const std::string & message() const;
+
+    /// Returns true if this contains a non-empty 'message' attribute.
+    bool hasValidMessage() const;
+
+    void perm(const Perm & prm);
+
+    const Perm & perm() const;
+
+    /// Returns true if this contains a non-empty 'perm' attribute.
+    bool hasValidPerm() const;
+
+    void rule(const SwitchRule & rl);
+
+    const SwitchRule & rule() const;
+
+    /// Returns true if this contains a non-empty 'rule' attribute.
+    bool hasValidRule() const;
+
+    void group(const std::string & grp);
+
+    const std::string & group() const;
+    
+    /// Returns true if this contains a non-empty 'group' attribute.
+    bool hasValidGroup() const;
+
+    void label(const std::string & lbl);
+
+    const std::string &label() const;
+    
+    /// Returns true if this contains a non-empty 'label' attribute.
+    bool hasValidLabel() const;
+
+    void timeout(const double & tmo);
+
+    const double & timeout() const;
+    
+    /// Returns true if this contains a non-empty 'timeout' attribute.
+    bool hasValidTimeout() const;
+
+    void timeStamp(const pcf::TimeStamp &ts);
+
+    const pcf::TimeStamp & timeStamp() const;
+    
+    /// Returns true if this contains a non-empty 'timestamp' attribute.
+    bool hasValidTimeStamp() const;
+
+    void version(const std::string &vers);
+
+    const std::string & version() const;
+
+    /// Returns true if this contains a non-empty 'version' attribute.
+    bool hasValidVersion() const;
+
+    /// Set the entire map of elements.
+    void elements(const std::map<std::string, pcf::IndiElement> & els);
+
+    /// Get the entire map of elements.
+    const std::map<std::string, pcf::IndiElement> & elements() const;
+
+    unsigned int numElements() const;
+
+    /// Adds a new element.
+    /// Throws if the element already exists.
+    void add(const pcf::IndiElement & el);
+
+    /// Adds an element if it doesn't exist. If it does exist, this is a no-op.
+    void addIfNoExist(const pcf::IndiElement & el);
+
+    /// Removes an element named 'szElementName'.
+    /// Throws if the element doesn't exist.
+    void remove(const std::string & elName);
+
+    ///  Returns true if the element 'szElementName' exists, false otherwise.
+    bool find(const std::string & elName) const;
+
+    /// Updates the value of an element named 'szElementName'.
+    /// Throws if the element doesn't exist.
+    void update(const std::string & elName,
+                const pcf::IndiElement & el);
+
+    /// Updates the value of an element, adds it if it doesn't exist.
+    void update(const pcf::IndiElement & el);
+
+    const IndiElement & at(const std::string & elName) const;
+
+    IndiElement & at(const std::string & elName);
+
+    /// All the attribute setters.
+    void beValue(const BLOBEnable & blobe);
+    
+    const BLOBEnable & beValue() const;
+
+    /// Returns true if this contains a valid BLOB-enable value.
+    bool hasValidBeValue() const;
+    
+    ///@}
+
+
+
 
     // Operators.
 public:
+    
     /// Assigns the internal data of this object from an existing one.
     const IndiProperty &operator=(const IndiProperty &ipRhs);
+
     /// This is an alternate way of calling 'setBLOBEnable'.
     const BLOBEnable &operator=(const BLOBEnable &tValue);
+    
     /// Returns true if we have an exact match (value as well).
     bool operator==(const IndiProperty &ipRhs) const;
+    
     // Return a reference to an element so it can be modified.
     const IndiElement &operator[](const std::string &szName) const;
+    
     IndiElement &operator[](const std::string &szName);
+ 
     // Return a reference to an element so it can be modified.
     const IndiElement &operator[](const unsigned int &uiIndex) const;
+    
     IndiElement &operator[](const unsigned int &uiIndex);
 
-    // Methods.
+    /** \name General Methods.
+      * @{
+      */ 
+
 public:
     /// Reset this object.
     void clear();
-    /// Compares one property with another instance. The values may not match,
-    /// but the type must match, as must the device and name. The names of all
-    /// the elements must match as well.
-    bool compareProperty(const IndiProperty &ipComp) const;
-    /// Compares one element value contained in this class with another
-    /// instance. The type must match, as must the device and name.
-    /// The name of this element must match as well.
-    bool compareValue(const IndiProperty &ipComp,
-                      const std::string &szElementName) const;
-    /// Compares all the element values contained in this class with another
-    /// instance. The type must match, as must the device and name. The number
-    /// and names of all the elements must match as well.
-    bool compareValues(const IndiProperty &ipComp) const;
-    /// Returns a string with each attribute enumerated.
-    std::string createString() const;
-    /// Create a name for this property based on the device name and the
-    /// property name. A '.' is used as the character to join them together.
-    /// This key should be unique for all indi devices.
-    std::string createUniqueKey() const;
-
-    // A getter for blob enable.
-    const BLOBEnable &getBLOBEnable() const;
-
-    // A getter for each attribute.
-    const std::string &getDevice() const;
-    const std::string &getGroup() const;
-    const std::string &getLabel() const;
-    const std::string &getMessage() const;
-    const std::string &getName() const;
-    const Perm &getPerm() const;
-    const SwitchRule &getRule() const;
-
-    const State &getState() const;
     
-    const double &getTimeout() const;
-    const pcf::TimeStamp &getTimeStamp() const;
-    /// There is only a 'getter' for the type, since it can't be changed.
-    const Type &getType() const;
-    const std::string &getVersion() const;
-    /// Compares one element value contained in this class with another
-    /// instance. The type must match, as must the device and name.
-    /// The name of this element must match as well, and the value must be a
-    /// new, non-blank value.
-    bool hasNewValue(const IndiProperty &ipComp,
-                     const std::string &szElementName) const;
-    const bool &isRequested() const;
+    /// Get the string name of a property \ref Type
+    /** 
+      * \returns 
+      */
+    static std::string type2String( const Type & type /**< [in] the \ref Type to convert*/ );
 
-    /// Returns the string type given the enumerated type.
-    /// Throws exception if string is not found.
-    static std::string convertTypeToString(const Type &tType);
-    /// Returns the enumerated type given the tag.
-    static Type convertStringToType(const std::string &szTag);
-    /// Returns the string type given the enumerated type.
-    static std::string getBLOBEnableString(const BLOBEnable &tType);
-    /// Returns the enumerated type given the string type.
-    static BLOBEnable getBLOBEnable(const std::string &szType);
-    /// Returns the string type given the enumerated type.
-    static std::string getPermString(const Perm &tType);
-    /// Returns the enumerated type given the string type.
-    static Perm getPerm(const std::string &szType);
-    /// Returns the string type given the enumerated type.
-    static std::string getStateString(const State &tType);
-    /// Returns the enumerated type given the string type.
-    static State getState(const std::string &szType);
-    /// Returns the string type given the enumerated type.
-    static std::string getSwitchRuleString(const SwitchRule &tType);
-    /// Returns the enumerated type given the string type.
-    static SwitchRule getSwitchRule(const std::string &szType);
-    /// Returns the message concerning the error.
-    static std::string getErrorMsg(const Error &nErr);
+    /// Get the property \ref Type given its string name
+    /** 
+      * \returns 
+      */
+    static Type string2Type( const std::string & str /**< [in] the string to convert */ );
+    
+    /// Get the string name of the given \ref BLOBEnable
+    /** 
+      * \returns 
+      */
+    static std::string BLOBEnable2String( const BLOBEnable & type /**<[in] the \ref BLOBEnable to convert */ );
+
+    /// Get the \ref BLOBEnable given its string name.
+    /** 
+      * \returns 
+      */
+    static BLOBEnable string2BLOBEnable( const std::string & str /**< [in] the string to convert */ );
+
+    /// Get the string name of the given \ref Perm.
+    /** 
+      * \returns 
+      */
+    static std::string permission2String( const Perm & perm /**< [in] the \ref Perm to convert*/ );
+    
+    /// Get the \ref Perm given the string name.
+    /** 
+      * \returns 
+      */
+    static Perm string2Permission( const std::string & str  /**< [in] the string to convert */ );
+
+    /// Get the string name of the state.
+    /** 
+      * \returns 
+      */
+    static std::string state2String( const State &state /**< [in] the \ref State to convert*/ );
+    
+    /// Get the state string name of the \ref State.
+    /** 
+      * \returns 
+      */
+    static State string2State( const std::string & str  /**< [in] the string to convert */ );
+
+    /// Get the string name of a \ref SwitchRule.
+    /** 
+      * \returns 
+      */
+    static std::string switchRule2String( const SwitchRule & rule /**< [in] the \ref SwitchRule to convert*/ );
+
+    /// Get the \ref SwitchRule given the string name.
+    /** 
+      * \returns 
+      */
+    static SwitchRule string2SwitchRule( const std::string & str /**< [in] the string to convert */ );
+
+    /// Get the message concerning the error.
+    /** 
+      * \returns 
+      */
+    static std::string errorMsg( const Error & err /**< [in] the \ref Error to convert*/ );
+
     /// Ensures that a name conforms to the INDI standard and can be used as
     /// an identifier. This means:
     ///     1) No ' ' - these will be converted to '_'
     ///     2) No '.' - these will be converted to '___'
     ///     3) No Unprintable chars - these will be converted to '_'
-    static std::string scrubName(const std::string &szName);
+    static std::string scrubName( const std::string &szName);
 
-    /// Returns the number of elements.
-    unsigned int getNumElements() const;
+    ///@}
 
-    /// Returns true if this contains a valid BLOB-enable value.
-    bool hasValidBLOBEnable() const;
-    /// Returns true if this contains a non-empty 'device' attribute.
-    bool hasValidDevice() const;
-    /// Returns true if this contains a non-empty 'group' attribute.
-    bool hasValidGroup() const;
-    /// Returns true if this contains a non-empty 'label' attribute.
-    bool hasValidLabel() const;
-    /// Returns true if this contains a non-empty 'message' attribute.
-    bool hasValidMessage() const;
-    /// Returns true if this contains a non-empty 'name' attribute.
-    bool hasValidName() const;
-    /// Returns true if this contains a non-empty 'perm' attribute.
-    bool hasValidPerm() const;
-    /// Returns true if this contains a non-empty 'rule' attribute.
-    bool hasValidRule() const;
-    /// Returns true if this contains a non-empty 'state' attribute.
-    bool hasValidState() const;
-    /// Returns true if this contains a non-empty 'timeout' attribute.
-    bool hasValidTimeout() const;
-    /// Returns true if this contains a non-empty 'timestamp' attribute.
-    bool hasValidTimeStamp() const;
-    /// Returns true if this contains a non-empty 'version' attribute.
-    bool hasValidVersion() const;
-
-    /// All the attribute setters.
-    void setBLOBEnable(const BLOBEnable &tValue);
-    void setDevice(const std::string &szValue);
-    void setGroup(const std::string &szValue);
-    void setLabel(const std::string &szValue);
-    void setMessage(const std::string &szValue);
-    void setName(const std::string &szValue);
-    void setPerm(const Perm &tValue);
-    void setRequested(const bool &oRequested);
-    void setRule(const SwitchRule &tValue);
-    void setState(const State &tValue);
-    void setTimeout(const double &xValue);
-    void setTimeStamp(const pcf::TimeStamp &tsValue);
-    void setVersion(const std::string &szValue);
-
+    
+    
     // Element functions.
 public:
-    // Return a reference to an element so it can be modified.
-    const IndiElement &at(const std::string &szName) const;
-    IndiElement &at(const std::string &szName);
-    // Return a reference to an element so it can be modified.
-    const IndiElement &at(const unsigned int &uiIndex) const;
-    IndiElement &at(const unsigned int &uiIndex);
-    /// Adds a new element.
-    /// Throws if the element already exists.
-    void add(const pcf::IndiElement &ieNew);
-    /// Adds an element if it doesn't exist. If it does exist, this is a no-op.
-    void addIfNoExist(const pcf::IndiElement &ieNew);
-    ///  Returns true if the element 'szElementName' exists, false otherwise.
-    bool find(const std::string &szElementName) const;
-    /// Get the entire map of elements.
-    const std::map<std::string, pcf::IndiElement> &getElements() const;
-    /// Removes an element named 'szElementName'.
-    /// Throws if the element doesn't exist.
-    void remove(const std::string &szElementName);
-    /// Set the entire map of elements.
-    void setElements(const std::map<std::string, pcf::IndiElement> &mapElements);
-    /// Updates the value of an element named 'szElementName'.
-    /// Throws if the element doesn't exist.
-    void update(const std::string &szElementName,
-                const pcf::IndiElement &ieUpdate);
-    /// Updates the value of an element, adds it if it doesn't exist.
-    void update(const pcf::IndiElement &ieNew);
-
+    
 
 }; // class IndiProperty
 

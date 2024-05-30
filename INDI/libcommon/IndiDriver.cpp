@@ -22,8 +22,7 @@ using pcf::IndiProperty;
 ////////////////////////////////////////////////////////////////////////////////
 /// Standard constructor.
 
-IndiDriver::IndiDriver()
-  : IndiConnection()
+IndiDriver::IndiDriver() : IndiConnection()
 {
   setup();
 }
@@ -32,8 +31,7 @@ IndiDriver::IndiDriver()
 
 IndiDriver::IndiDriver( const string &szName,
                         const string &szVersion,
-                        const string &szProtocolVersion )
-  : IndiConnection( szName, szVersion, szProtocolVersion )
+                        const string &szProtocolVersion ) : IndiConnection( szName, szVersion, szProtocolVersion )
 {
   setup();
 }
@@ -115,9 +113,9 @@ void IndiDriver::setup()
 
   // Create and initialize the uptime message.
   m_ipUpTime = IndiProperty( IndiProperty::Type::Number, getName(), "Version" );
-  m_ipUpTime.setPerm( IndiProperty::Perm::ReadOnly );
-  m_ipUpTime.setState( IndiProperty::State::Ok );
-  m_ipUpTime.setTimeStamp( TimeStamp::now() );
+  m_ipUpTime.perm( IndiProperty::Perm::ReadOnly );
+  m_ipUpTime.state( IndiProperty::State::Ok );
+  m_ipUpTime.timeStamp( TimeStamp::now() );
 
   // Device version number.
   m_ipUpTime.add( IndiElement( "Driver", getVersion() ) );
@@ -436,7 +434,7 @@ void IndiDriver::sendSetProperty( const IndiProperty &ipSend ) const
 {
    IndiProperty _ipSend = ipSend;
    
-   _ipSend.setTimeStamp(TimeStamp::now());
+   _ipSend.timeStamp(TimeStamp::now());
    
   if ( isResponseModeEnabled() == true )
   {
