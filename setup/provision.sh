@@ -363,6 +363,7 @@ fi
 
 if [[ $MAGAOX_ROLE != ci && $MAGAOX_ROLE != container && $MAGAOX_ROLE != vm ]]; then
     sudo -H bash -l "$DIR/steps/configure_startup_services.sh"
+fi
 
 if which podman ; then
     log_info "Generating subuid and subgid files, may need to run podman system migrate"
