@@ -363,12 +363,12 @@ fi
 
 if [[ $MAGAOX_ROLE != ci && $MAGAOX_ROLE != container && $MAGAOX_ROLE != vm ]]; then
     sudo -H bash -l "$DIR/steps/configure_startup_services.sh"
-fi
 
-if which podman ; then
-    log_info "Generating subuid and subgid files, may need to run podman system migrate"
-    sudo -H python "$DIR/generate_subuid_subgid.py" || exit_with_error "Generating subuid/subgid files for podman failed"
-    sudo -H podman system migrate || exit_with_error "Could not run podman system migrate"
+    if which podman ; then
+        log_info "Generating subuid and subgid files, may need to run podman system migrate"
+        sudo -H python "$DIR/generate_subuid_subgid.py" || exit_with_error "Generating subuid/subgid files for podman failed"
+        sudo -H podman system migrate || exit_with_error "Could not run podman system migrate"
+    fi
 
     # To try and debug hardware issues, ICC and RTC replicate their
     # kernel console log over UDP to AOC over the instrument LAN.
