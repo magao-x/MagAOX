@@ -385,7 +385,9 @@ void IndiConnection::sendXml( const string &szXml ) const
   }
 
   size_t sofar{0};
-  size_t target{szXml.length()+1};
+  size_t target{szXml.length()};   // last character is usually \0
+  if (target == 0) { return; }     // do nothing if string length is 0
+  if (!szXml[target-1]) { --target; } // send final char if non-\0
   while (sofar < target)
   {
     int writ;

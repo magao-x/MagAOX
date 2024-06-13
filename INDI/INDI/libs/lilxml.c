@@ -391,11 +391,8 @@ XMLEle *readXMLEle(LilXML *lp, int newc, char ynot[])
     /* EOF? */
     if (newc == 0)
     {
-        if (lp->cs != LOOK4START)
-	{
-            sprintf(ynot, "Line %d: early[readXMLEle] XML EOF", lp->ln);
-            initParser(lp);
-	}
+        sprintf(ynot, "Line %d: early[readXMLEle] XML EOF", lp->ln);
+        initParser(lp);
         return (NULL);
     }
 
