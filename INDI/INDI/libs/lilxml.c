@@ -297,7 +297,7 @@ XMLEle **parseXMLChunk(LilXML *lp, char *buf, int size, char ynot[])
         /* EOF? */
         if (newc == 0)
         {
-            sprintf(ynot, "Line %d: early XML EOF", lp->ln);
+            sprintf(ynot, "Line %d: early[parseXMLChunk] XML EOF", lp->ln);
             initParser(lp);
             curr++;
             continue;
@@ -391,8 +391,11 @@ XMLEle *readXMLEle(LilXML *lp, int newc, char ynot[])
     /* EOF? */
     if (newc == 0)
     {
-        sprintf(ynot, "Line %d: early XML EOF", lp->ln);
-        initParser(lp);
+        if (lp->cs != LOOK4START)
+	{
+            sprintf(ynot, "Line %d: early[readXMLEle] XML EOF", lp->ln);
+            initParser(lp);
+	}
         return (NULL);
     }
 
