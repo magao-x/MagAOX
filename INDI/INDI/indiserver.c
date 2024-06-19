@@ -53,6 +53,7 @@
 #include "indidevapi.h"
 #include "lilxml.h"
 
+#include <zlib.h>
 #include <errno.h>
 #include <fcntl.h>
 #include <libgen.h>
@@ -129,10 +130,13 @@ typedef struct
     int nprops;         /* n entries in props[] */
     int allprops;       /* saw getProperties w/o device */
     BLOBHandling blob;  /* when to send setBLOBs */
-    int s;              /* socket for this client */
+    int s;              /* socket file descriptor (FD) of this client */
     LilXML *lp;         /* XML parsing context */
     FQ *msgq;           /* Msg queue */
     unsigned int nsent; /* bytes of current Msg sent so far */
+    gzFile gzfird;      /* zlib gzread proxy for FD */
+    gzFile gzfiwr;      /* zlib gzwrite proxy for FD) */
+    int gzwchk;         /* Allow for one compression check */
 } ClInfo;
 static ClInfo *clinfo; /*  malloced pool of clients */
 static int nclinfo;    /* n total (not active) */
@@ -161,6 +165,8 @@ typedef struct strDvrInfo
     unsigned int nsent; /* bytes of current Msg sent so far */
     struct strDvrInfo* pNextToRestart; /* next to restart, or NULL */
     int restartDelayus; /* Microseconds before next restart attempt */
+    gzFile gzfird;      /* zlib gzread proxy for FD; remote dvr only */
+    gzFile gzfiwr;      /* zlib gzwrite proxy for FD; remote dvr only */
 } DvrInfo, *pDvr, **ppDvr;
 static DvrInfo *dvrinfo; /* malloced array of drivers */
 static int ndvrinfo;     /* n total */
@@ -353,7 +359,31 @@ static int openINDIServer(char host[], int indi_port)
     if (connect(sockfd, (struct sockaddr *)&serv_addr, sizeof(serv_addr)) < 0)
     {
         fprintf(stderr, "connect(%s,%d): %s\n", host, indi_port, strerror(errno));
-        /* Drop thru with valid but unconnected fd, instead of Bye(); */
+        /* Drop thru with valid but unconnected fd, instead of Bye();
+         * errno will be non-zero, which will cause trigger calling code
+         * to shut down this driver
+         */
+    }
+    else
+    {
+        /* Make connected socket non-blocking */
+        int retGET;
+        int retSET;
+        retGET = fcntl(sockfd, F_GETFL);
+        retSET = fcntl(sockfd, F_SETFL, retGET | O_RDWR | O_NONBLOCK);
+        if (retGET < 0 | retSET < 0)
+        {
+            fprintf(stderr, "%s: %d=connect(...)"
+                            "; %d=fcntl(%d, F_GETFL)"
+                            "; %d=fcntl(%d, F_SETFL, %d | O_RDWR | O_NONBLOCK)"
+                            "; %d=errno[%s]\n"
+                          , indi_tstamp(NULL), sockfd
+                          , retGET, sockfd
+                          , retSET, sockfd, retGET
+                          , errno, strerror(errno)
+                   );
+            /* Same drop thru logic as above (non-zero errno) */
+        }
     }
 
     /* ok */
@@ -375,6 +405,78 @@ static void freeMsg(Msg *mp)
     free(mp);
 }
 
+/* Shut down read and write ends of an INDI connection
+   - If it is a socket, then it is bidirectional and
+     the read and write file descriptors will be the same
+   - There nay be a gzFile pointers for either or both;
+     these will be closed
+ */
+static void closeINDIconnection(ClInfo* cp, DvrInfo* dp)
+{
+    int wfd = cp ? cp->s : (dp ? dp->wfd : -1);
+    int rfd = cp ? cp->s : (dp ? dp->rfd : -1);
+    int wfdvalid = wfd > -1;
+    int rfdvalid = rfd > -1;
+    int isbidir = rfd == wfd;
+    gzFile* pGzfird = cp ? &cp->gzfird : (dp ? &dp->gzfird : NULL);
+    gzFile* pGzfiwr = cp ? &cp->gzfiwr : (dp ? &dp->gzfiwr : NULL);
+
+    if (wfdvalid)
+    {
+        /* Flush any compressed output, if compression is active */
+        if (pGzfiwr && *pGzfiwr) { gzflush(*pGzfiwr, Z_FINISH); }
+
+        /* If read and write FDs (file descriptors) are valid and the
+         * same, then assume it's a bidirectional socket and shut it
+         * down
+         */
+        if (isbidir) { shutdown(wfd, SHUT_RDWR); }
+        /* N.B. that does not close the socket FD; that is done next */
+    }
+
+    /* Close write side of INDI connection */
+    errno = 0;
+    if (wfdvalid)
+    {
+        if (pGzfiwr && *pGzfiwr)
+        {
+            gzclose(*pGzfiwr);  // N.B. this will close wfd
+            *pGzfiwr = NULL;
+        }
+        else
+        {
+            close(wfd);
+        }
+    }
+
+    errno = 0;
+    if (!pGzfird || !*pGzfird) // No read gzFile pointer:  close read FD
+    {
+        if (isbidir) { return; } // Bidirectional read FD already closed
+        if (!rfdvalid) { return; } // No need to close invalid read FD
+
+        close(rfd);  // close valid, non-bidirectional read FD
+
+        return; // the read gzFile pointer is NULL:  nothing more to do
+    }
+
+    /* To here the read non-NULL gzFile pointer needs to be closed.
+     * If the read FD was already closed by the write logic above, then
+     * create an open FD to stand in for it so the gzclose call on the
+     * read side will have something to close
+     */
+    if (isbidir)
+    {
+        int pair[2];
+        int pipertn = pipe(pair);
+        dup2(pair[0], rfd);
+        close(pair[1]);
+    }
+
+    gzclose(*pGzfird);                 /* Close the read gzFile pointer */
+    *pGzfird = NULL;
+} // static void closeINDIconnection(ClInfo* cp, DvrInfo* dp)
+
 /* close down the given client */
 static void shutdownClient(ClInfo *cp)
 {
@@ -382,7 +484,7 @@ static void shutdownClient(ClInfo *cp)
 
     /* close socket connection */
     shutdown(cp->s, SHUT_RDWR);
-    close(cp->s);
+    closeINDIconnection(cp, NULL);
 
     /* free memory */
     delLilXML(cp->lp);
@@ -417,7 +519,9 @@ static void shutdownClient(ClInfo *cp)
  */
 static int sendClientMsg(ClInfo *cp)
 {
-    ssize_t nsend, nw;
+    ssize_t nsend;
+    ssize_t nw;
+    ssize_t gzwrote;
     Msg *mp;
 
     /* get current message */
@@ -427,15 +531,40 @@ static int sendClientMsg(ClInfo *cp)
     nsend = mp->cl - cp->nsent;
     if (nsend > MAXWSIZ)
         nsend = MAXWSIZ;
-    nw = write(cp->s, &mp->cp[cp->nsent], nsend);
+
+    /*******************************************/
+    /* Here is the beef:  data are written ... */
+    errno = 0;
+    if (cp->gzfiwr)
+    {
+        /* ... compressed, ... */
+        gzclearerr(cp->gzfiwr);
+        gzwrote = nw = gzwrite(cp->gzfiwr, &mp->cp[cp->nsent], nsend);
+        gzflush(cp->gzfiwr, Z_SYNC_FLUSH);
+    }
+    else
+    {
+        /* ... or compressed */
+        gzwrote = 0;
+        nw = write(cp->s, &mp->cp[cp->nsent], nsend);
+    }
+    /*******************************************/
 
     /* shut down if trouble */
     if (nw <= 0)
     {
+#       if 0
         if (nw == 0)
             fprintf(stderr, "%s: Client %d: write returned 0\n", indi_tstamp(NULL), cp->s);
         else
-            fprintf(stderr, "%s: Client %d: write: %s\n", indi_tstamp(NULL), cp->s, strerror(errno));
+#       endif
+            fprintf(stderr, "%s: Client %d: %swrite returned %ld: errno[%s]; gzerror[%s]\n"
+                          , indi_tstamp(NULL), cp->s
+                          , cp->gzfiwr ? "gz" : ""
+                          , cp->gzfiwr ? gzwrote : nw
+                          , strerror(errno)
+                          , cp->gzfiwr ? gzerror(cp->gzfiwr,NULL) : "N/A"
+                   );
         shutdownClient(cp);
         return (-1);
     }
@@ -462,7 +591,12 @@ static int sendClientMsg(ClInfo *cp)
             for (ptrnl=ptr; ptrnl<ptrend && '\n'!=*ptrnl; ++ptrnl) ;
             if (ptr < ptrnl)
             {
-              fprintf(stderr, "%s: Client %d: %.*s\n", ts, cp->s, (int)(ptrnl-ptr), ptr);
+              fprintf(stderr, "%s: Client %d: %swrote[%ld] %.*s\n"
+                            , ts, cp->s
+                            , cp->gzfiwr ? "gz" : ""
+                            , cp->gzfiwr ? gzwrote : nw
+                            , (int)(ptrnl-ptr), ptr
+                     );
             }
             ptr = ptrnl + 1;
         }
@@ -768,6 +902,10 @@ static void startRemoteDvr(DvrInfo *dp)
     dp->port    = indi_port;
     dp->rfd     = sockfd;
     dp->wfd     = sockfd;
+    dp->gzfird  = NULL;
+    dp->gzfiwr  = NULL;
+    dp->gzfird = gzdopen(dp->rfd, "r");
+    dp->gzfiwr = gzdopen(dp->wfd, "w9");  // Assume server can decompress
     dp->lp      = newLilXML();
     dp->msgq    = newFQ(1);
     dp->sprops  = (Property *)malloc(1); /* seed for realloc */
@@ -791,12 +929,25 @@ static void startRemoteDvr(DvrInfo *dp)
     mp = newMsg();
     pushFQ(dp->msgq, mp);
     if (dev[0])
-        sprintf(buf, "<getProperties device='%s' version='%g'/>\n", dp->dev[0], INDIV);
-    else
-        // This informs downstream server that it is connecting to an upstream server
-        // and not a regular client. The difference is in how it treats snooping properties
-        // among properties.
-        sprintf(buf, "<getProperties device='*' version='%g'/>\n", INDIV);
+        sprintf(buf, "<getProperties"
+                     " device='%s'"  // device='<dp->dev[0]>' or device='*'
+                     "%s"  // message='~~gzready~~' or nothing
+                     " version='%g'/>\n"
+
+                   // " device='*'" informs downstream server that it is
+                   // connecting to (accepting) an upstream server and
+                   // not a regular client. The difference is in how it
+                   // treats snooping properties among properties.
+                   , dev[0] ? dp->dev[0] : "*"
+
+                   // " message='~~gzready~~'" informs downstream server
+                   // that the upstream connection is reading data using
+                   // gzread(), so the downstream server is free to use,
+                   // or not use, gzwrite() when sending data upstream
+                   , dp->gzfird ? " message='~~gzready~~'" : ""
+
+                   , INDIV // version e.g. 1.7 or similar
+               );
     setMsgStr(mp, buf);
     mp->count++;
 
@@ -847,6 +998,8 @@ static void startLocalDvr(DvrInfo *dp)
     dp->port    = -1;
     dp->wfd     = fdstdin;
     dp->rfd     = fdstdout;
+    dp->gzfird  = NULL;
+    dp->gzfiwr  = NULL;
 #   if 0
     dp->efd     = fdctrl;
 #   endif/*0*/
@@ -891,7 +1044,7 @@ static void shutdownDvr(DvrInfo *dp, int restart)
     Msg *mp;
     int i = 0;
 
-    // Tell client driver is dead.
+    // Tell any snooping clients that driver is dead.
     for (i = 0; i < dp->ndev; i++)
     {
         /* Inform clients that this driver is dead */
@@ -912,21 +1065,7 @@ static void shutdownDvr(DvrInfo *dp, int restart)
     }
 
     /* reclaim resources (connections) */
-    if (dp->pid == REMOTEDVR)
-    {
-        /* close socket connection */
-        shutdown(dp->wfd, SHUT_RDWR);
-        close(dp->wfd); /* same as rfd */
-    }
-    else
-    {
-        /* close local named FIFOs */
-        close(dp->wfd);
-        close(dp->rfd);
-#       if 0
-        close(dp->efd);
-#       endif/*0*/
-    }
+    closeINDIconnection(NULL, dp);
 
 #ifdef OSX_EMBEDED_MODE
     fprintf(stderr, "STOPPED \"%s\"\n", dp->name);
@@ -979,7 +1118,9 @@ static void shutdownDvr(DvrInfo *dp, int restart)
  */
 static int sendDriverMsg(DvrInfo *dp)
 {
-    ssize_t nsend, nw;
+    ssize_t nsend;
+    ssize_t nw;
+    ssize_t gzwrote;
     Msg *mp;
 
     /* get current message */
@@ -989,15 +1130,41 @@ static int sendDriverMsg(DvrInfo *dp)
     nsend = mp->cl - dp->nsent;
     if (nsend > MAXWSIZ)
         nsend = MAXWSIZ;
-    nw = write(dp->wfd, &mp->cp[dp->nsent], nsend);
+
+    /*******************************************/
+    /* Here is the beef:  data are written ... */
+    errno = 0;
+    if (dp->gzfiwr)
+    {
+        /* ... compressed, ... */
+        gzclearerr(dp->gzfiwr);
+        gzwrote = nw = gzwrite(dp->gzfiwr, &mp->cp[dp->nsent], nsend);
+        gzflush(dp->gzfiwr, Z_SYNC_FLUSH);
+    }
+    else
+    {
+        /* ... or compressed */
+        gzwrote = 0;
+        nw = write(dp->wfd, &mp->cp[dp->nsent], nsend);
+    }
+    /*******************************************/
 
     /* restart if trouble */
     if (nw <= 0)
     {
+#       if 0
         if (nw == 0)
             fprintf(stderr, "%s: Driver %s[wfd=%d]: write returned 0\n", indi_tstamp(NULL), dp->name, dp->wfd);
         else
             fprintf(stderr, "%s: Driver %s[wfd=%d]: write: %s\n", indi_tstamp(NULL), dp->name, dp->wfd, strerror(errno));
+#       endif
+        fprintf(stderr, "%s: Client %d: %swrite returned %ld: errno[%s]; gzerror[%s]\n"
+                       , indi_tstamp(NULL), dp->wfd
+                       , dp->gzfiwr ? "gz" : ""
+                       , dp->gzfiwr ? gzwrote : nw
+                       , strerror(errno)
+                       , dp->gzfiwr ? gzerror(dp->gzfiwr,NULL) : "N/A"
+                   );
         shutdownDvr(dp, 1);
         return (-1);
     }
@@ -1296,14 +1463,17 @@ static void newFIFO(void)
             else
                 startRemoteDvr(dp);
         }
-        else
+        else  // stop <tDriver>[ -<options>]
         {
             for (dp = dvrinfo; dp < &dvrinfo[ndvrinfo]; dp++)
             {
                 fprintf(stderr, "%s: dp->name: %s - tDriver: %s\n", ts, dp->name, tDriver);
                 if (!strcmp(dp->name, tDriver) && dp->active == 1)
                 {
-                    fprintf(stderr, "%s: name: %s - dp->dev[0]: %s\n", ts, tName, dp->dev[0]);
+                    fprintf(stderr, "%s: name: %s - dp->dev[0]: %s\n"
+                                  , ts, tName
+                                  , dp->ndev ? dp->dev[0] : "<no device name yet>"
+                           );
 
                     /* If device name is given, check against it before shutting down */
                     //if (tName[0] && strcmp(dp->dev[0], tName))
@@ -1348,13 +1518,26 @@ static int newClSocket()
     struct sockaddr_in cli_socket;
     socklen_t cli_len;
     int cli_fd;
+    int retGET = 0;
+    int retSET = 0;
 
-    /* get a private connection to new client */
+    /* get a private non-blocking connection to new client */
     cli_len = sizeof(cli_socket);
+    errno = 0;
     cli_fd  = accept(lsocket, (struct sockaddr *)&cli_socket, &cli_len);
-    if (cli_fd < 0)
+    retGET = fcntl(cli_fd, F_GETFL);
+    retSET = fcntl(cli_fd, F_SETFL, retGET | O_RDWR | O_NONBLOCK);
+    if (cli_fd < 0 || retGET < 0 | retSET < 0)
     {
-        fprintf(stderr, "accept: %s\n", strerror(errno));
+        fprintf(stderr, "%s: %d=accept(...)"
+                        "; %d=fcntl(%d, F_GETFL)"
+                        "; %d=fcntl(%d, F_SETFL, %d | O_RDWR | O_NONBLOCK)"
+                        "; %d=errno[%s]\n"
+                      , indi_tstamp(NULL), cli_fd
+                      , retGET, cli_fd
+                      , retSET, cli_fd, retGET
+                      , errno, strerror(errno)
+               );
         Bye();
     }
 
@@ -1396,6 +1579,10 @@ static void newClient()
     memset(cp, 0, sizeof(*cp));
     cp->active = 1;
     cp->s      = s;
+    cp->gzfird = NULL;
+    cp->gzfiwr = NULL;
+    cp->gzwchk = 1; // Check once if client can receive compressed data
+    cp->gzfird = gzdopen(cp->s, "r");// gzbuffer(cp->gzfird, 16);
     cp->lp     = newLilXML();
     cp->msgq   = newFQ(1);
     cp->props  = malloc(1);
@@ -1406,8 +1593,12 @@ static void newClient()
         struct sockaddr_in addr;
         socklen_t len = sizeof(addr);
         getpeername(s, (struct sockaddr *)&addr, &len);
-        fprintf(stderr, "%s: Client %d: new arrival from %s:%d - welcome!\n", indi_tstamp(NULL), cp->s,
-                inet_ntoa(addr.sin_addr), ntohs(addr.sin_port));
+        fprintf(stderr, "%s: Client %d: new arrival from %s:%d"
+                        "(zlib decompression is%s available on this end)"
+                        " - welcome!\n", indi_tstamp(NULL), cp->s,
+                inet_ntoa(addr.sin_addr), ntohs(addr.sin_port)
+                , cp->gzfird ? "" : " not"
+               );
     }
 #ifdef OSX_EMBEDED_MODE
     int active = 0;
@@ -1647,13 +1838,28 @@ static int readFromClient(ClInfo *cp)
     ssize_t i, nr;
 
     /* read client */
-    nr = read(cp->s, buf, sizeof(buf));
+    errno = 0;
+    if (cp->gzfird)
+    {
+        gzclearerr(cp->gzfird);
+        nr = gzread(cp->gzfird, buf, sizeof(buf));
+    }
+    else
+    {
+        nr = read(cp->s, buf, sizeof(buf));
+    }
     if (nr <= 0)
     {
         if (nr < 0)
-            fprintf(stderr, "%s: Client %d: read: %s\n", indi_tstamp(NULL), cp->s, strerror(errno));
+            fprintf(stderr, "%s: Client %d: read: %s\n"
+                          , indi_tstamp(NULL), cp->s, strerror(errno)
+                   );
         else if (verbose > 0)
-            fprintf(stderr, "%s: Client %d: read EOF\n", indi_tstamp(NULL), cp->s);
+        {
+            fprintf(stderr, "%s: Client %d: read EOF[%s]\n"
+                          , indi_tstamp(NULL), cp->s, strerror(errno)
+                   );
+        }
         shutdownClient(cp);
         return (-1);
     }
@@ -1668,8 +1874,25 @@ static int readFromClient(ClInfo *cp)
             char *roottag    = tagXMLEle(root);
             const char *dev  = findXMLAttValu(root, "device");
             const char *name = findXMLAttValu(root, "name");
+            const char *xmsg = findXMLAttValu(root, "message");
             int isblob       = !strcmp(tagXMLEle(root), "setBLOBVector");
             Msg *mp;
+
+            if (cp->gzwchk > 0 && !cp->gzfiwr)
+            {
+                --cp->gzwchk;
+                if (strstr(xmsg,"~~gzready~~"))
+                {
+                    cp->gzfiwr = gzdopen(cp->s, "w9");
+                    fprintf(stderr, "%s: Client %d: does zlib decompression"
+                                    "; %s in gzdopen()-ing gzFile for writing"
+                                    "; %d attempts remaining\n"
+                                  , indi_tstamp(NULL), cp->s
+                                  , cp->gzfiwr ? "succeeded" : " failed"
+                                  , cp->gzwchk
+                           );
+                }
+            }
 
             if (verbose > 2)
             {
@@ -1679,8 +1902,13 @@ static int readFromClient(ClInfo *cp)
             }
             else if (verbose > 1)
             {
-                fprintf(stderr, "%s: Client %d: read <%s device='%s' name='%s'>\n", indi_tstamp(NULL), cp->s,
-                        tagXMLEle(root), findXMLAttValu(root, "device"), findXMLAttValu(root, "name"));
+                fprintf(stderr, "%s: Client %d: read <%s device='%s'"
+                                " name='%s'>...\n"
+                              , indi_tstamp(NULL), cp->s
+                              , tagXMLEle(root)
+                              , findXMLAttValu(root, "device")
+                              , findXMLAttValu(root, "name")
+                       );
             }
 
             /* snag interested properties.
@@ -1830,6 +2058,8 @@ static int q2Servers(DvrInfo *me, Msg *mp, XMLEle *root)
         if (!cp->active)
             continue;
 
+	devFound = 0;
+
         // Only send the message to the upstream server that is connected specfically to the device in driver dp
         switch (cp->allprops)
         {
@@ -1934,7 +2164,16 @@ static int readFromDriver(DvrInfo *dp)
     int inode = 0;
 
     /* read driver */
-    nr = read(dp->rfd, buf, sizeof(buf));
+    errno = 0;
+    if (dp->gzfird)
+    {
+        gzclearerr(dp->gzfird);
+        nr = gzread(dp->gzfird, buf, sizeof(buf));
+    }
+    else
+    {
+        nr = read(dp->rfd, buf, sizeof(buf));
+    }
     if (nr <= 0)
     {
         if (nr < 0)

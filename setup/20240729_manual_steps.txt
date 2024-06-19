@@ -1,0 +1,56 @@
+########################################################################
+### On primary Ubuntu 22.04 (see MULTIPASS below)
+########################################################################
+
+####################################
+### Some SUDO actions:  update; man dirs; /opt/MagAOX; MAGAOX_ROLE
+
+  sudo su -
+    apt-get update                                        ### Short wait
+    mkdir -p /usr/local/share/man/man{1,2,3,4,5,6,7,8,9}
+    mkdir -p /opt/MagAOX
+    chown :ubuntu /opt/MagAOX
+    chmod u+sX,g+wsX /opt/MagAOX
+    echo export MAGAOX_ROLE=vm | tee    /etc/profile.d/magaox_role.sh
+    exit
+
+### End SUDO actions
+####################################
+
+  source /etc/profile.d/magaox_role.sh
+
+  mkdir ~/githubalt
+  cd ~/githubalt
+  git clone -b resurrector-zlibINDI https://github.com/drbitboy/MagAOX.git
+  git clone https://github.com/drbitboy/magao-x-config.git config
+
+  cd ~/githubalt/MagAOX/setup/
+
+  ######################################################################
+  bash -lx provision.sh                               ### Very long wait
+  ######################################################################
+
+  mkfifo /opt/MagAOX/drivers/fifos/indiserver.ctrl
+
+  bash -l    ### Re-read BASH environment e.g. MKLROOT
+
+  cd /opt/MagAOX/source/MagAOX/utils/resurrector_indi/
+  make clean all install
+  resuctrl startup
+
+########################################################################
+### MULTIPASS:  On Windows or WSL; for Linux, drop the .exe
+########################################################################
+
+### Stop, delete and purge existing primary multipass.exe VM
+   multipass.exe stop primary
+   multipass.exe delete primary
+   multipass.exe purge
+
+### Create new primary multipass.exe VM
+   multipass.exe launch -n primary 22.04                 ### Medium wait
+   multipass.exe stop primary
+   multipass.exe set local.primary.disk=20GiB
+   multipass.exe set local.primary.cpus=4
+   multipass.exe start primary                             ### Long wait
+
