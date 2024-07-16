@@ -652,7 +652,7 @@ int xrif2fits::execute()
          
          std::string dateobs = mx::sys::ISO8601DateTimeStr(atime, 1);
          
-         fh.append("DATE-OBS", dateobs, "Date of obs. YYYY-mm-ddTHH:MM:SS");
+         fh.append("DATE-OBS", dateobs, "Date of observation (UTC)");
          fh.append("INSTRUME", "MagAO-X");
          fh.append("CAMERA", lfn.appName());
          fh.append("TELESCOP", "Magellan Clay, Las Campanas Obs.");
