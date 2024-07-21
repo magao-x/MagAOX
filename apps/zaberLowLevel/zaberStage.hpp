@@ -530,7 +530,7 @@ int zaberStage<parentT>::getResponse( std::string & response,
                            )
 {
    za_reply rep;
-   int rv = za_decode(&rep, repBuff.c_str());
+   int rv = za_decode(&rep, repBuff.c_str(), repBuff.size());
    if(rv != Z_SUCCESS)
    {
       if(m_parent)
@@ -586,7 +586,7 @@ int zaberStage<parentT>::sendCommand( std::string & response,
 {
    MagAOXAppT::log<text_log>(std::string("Sending: ") + command, logPrio::LOG_DEBUG2);
    
-   za_send(port, command.c_str());
+   za_send(port, command.c_str(), command.size());
 
    char buff[256];
 
@@ -618,7 +618,7 @@ int zaberStage<parentT>::sendCommand( std::string & response,
       
       MagAOXAppT::log<text_log>(std::string("Received: ") + buff, logPrio::LOG_DEBUG2);
 
-      rv = za_decode(&rep, buff);
+      rv = za_decode(&rep, buff, sizeof(buff));
       if(rv != Z_SUCCESS)
       {
          if(m_parent)

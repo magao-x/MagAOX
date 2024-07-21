@@ -14,8 +14,12 @@ if [[ $ID == ubuntu ]]; then
         qtbase5-dev-tools \
         libqt5svg5-dev \
         wmctrl \
-        libqwt-qt5-dev/jammy \
-    ;
+	;
+    if [[ $VERSION_ID = "24.04" ]]; then
+        sudo -i apt install -y libqwtmathml-qt5-dev ;
+    else
+        sudo -i apt install -y libqwt-qt5-dev/jammy ;
+    fi
 elif [[ $ID == centos && $VERSION_ID == 7 ]]; then
     sudo yum install -y \
         xorg-x11-apps \
