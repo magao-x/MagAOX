@@ -57,7 +57,7 @@ const IndiProperty::Type &IndiProperty::type() const
 }
 
 void IndiProperty::device(const std::string & dev)
-{
+{*9793.
     std::unique_lock wLock(m_rwData);
     m_device = dev;
 }

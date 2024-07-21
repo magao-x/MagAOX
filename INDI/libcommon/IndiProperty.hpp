@@ -29,15 +29,50 @@ namespace pcf
 
 class IndiProperty
 {
+
 public:
-    enum class Error
+
+    /// The possible types of INDI properties 
+    /** The order and enumeration of this list is important.
+      * Do not add or change enumerations here without adjusting
+      * the indexing of the 'allowed attributes' list.
+      */ 
+    enum class Type
     {
-        None = 0,
-        CouldntFindElement = -3,
-        ElementAlreadyExists = -5,
-        IndexOutOfBounds = -6,
-        WrongElementType = -7,
-        Undefined = -9999
+        Unknown = 0, ///< Type is not known, generally indicates an error
+        BLOB,        ///< The binary large object (BLOB) type
+        Light,       ///< The INDI Light type
+        Number,      ///< The INDI Number type
+        Switch,      ///< The INDI Switch type
+        Text,        ///< The INDI Text type
+    };
+
+    /// The possible states of an INDI Property
+    enum class State
+    {
+        Unknown = 0, ///< State is not known, generally indicates an error
+        Alert = 1,   ///< State Alert
+        Busy,        ///< State Busy
+        Ok,          ///< State Ok
+        Idle         ///< State Idle
+    };
+
+    /// The possible INDI property permission states
+    enum class Perm
+    {
+        Unknown = 0,  ///< Unknwon permission type, generally indicates an error
+        ReadOnly = 1, ///< Property is read only
+        ReadWrite,    ///< Property is read and write
+        WriteOnly     ///< Property is write only
+    };
+
+    /// The INDI switch property switch-rules
+    enum class SwitchRule
+    {
+        Unknown = 0,   ///< Unknwon switch rule, generally indicates an error
+        AnyOfMany = 1, ///< Any of many rule
+        AtMostOne,     ///< At most one rule
+        OneOfMany      ///< One of many rule
     };
 
     enum class BLOBEnable
@@ -48,48 +83,29 @@ public:
         Never
     };
 
-    enum class State
+    enum class Error
     {
-        Unknown = 0,
-        Alert = 1,
-        Busy,
-        Ok,
-        Idle
+        None = 0,
+        CouldntFindElement = -3,
+        ElementAlreadyExists = -5,
+        IndexOutOfBounds = -6,
+        WrongElementType = -7,
+        Undefined = -9999
     };
 
-    enum class SwitchRule
-    {
-        Unknown = 0,
-        AnyOfMany = 1,
-        AtMostOne,
-        OneOfMany
-    };
+    
 
-    enum class Perm
-    {
-        Unknown = 0,
-        ReadOnly = 1,
-        ReadWrite,
-        WriteOnly
-    };
+    
 
-    // These are the types that a property can be.
-    // The order and enumeration of this list is important.
-    // Do not add or change enumerations here without adjusting
-    // the indexing of the 'allowed attributes' list.
-    enum class Type
-    {
-        Unknown = 0,
-        BLOB,
-        Light,
-        Number,
-        Switch,
-        Text,
-    };
+    
 
+    
+
+    
 public:
     class Excep : public std::exception
     {
+
     private:
         Excep() {}
 
@@ -101,6 +117,7 @@ public:
         {
             return m_tCode;
         }
+
         virtual const char *what() const throw()
         {
             return IndiProperty::errorMsg(m_tCode).c_str();
@@ -170,25 +187,25 @@ public:
     IndiProperty();
 
     /// Constructor with a type. This will be used often.
-    explicit IndiProperty(const Type & type);
+    explicit IndiProperty(const Type & type /**< [in] the INDI property \ref Type*/);
 
     /// Constructor with a type, device and name. This will be used often.
-    IndiProperty( const Type & type,
-                  const std::string & device,
-                  const std::string & name
+    IndiProperty( const Type & type,          ///< [in] the INDI property \ref Type
+                  const std::string & device, ///< [in] the name of the INDI device which owns this property
+                  const std::string & name    ///< [in] the name of this INDI property
                 );
 
     /// Constructor with a type, device, name, state, and perm.
-    IndiProperty( const Type & type,
-                  const std::string & device,
-                  const std::string & name,
-                  const State & state,
-                  const Perm & perm,
-                  const SwitchRule & rule = SwitchRule::Unknown
+    IndiProperty( const Type & type,                            ///< [in] the INDI property \ref Type
+                  const std::string & device,                   ///< [in] the name of the INDI device which owns this property
+                  const std::string & name,                     ///< [in] the name of this INDI property
+                  const State & state,                          ///< [in] the INDI property \ref State
+                  const Perm & perm,                            ///< [in] the INDI property \ref Perm
+                  const SwitchRule & rule = SwitchRule::Unknown ///< [in] [optional] the INDI property \ref SwitchRule
                 );
 
     /// Copy constructor.
-    IndiProperty( const IndiProperty &ipRhs );
+    IndiProperty( const IndiProperty &ipRhs /**< [in] the IndiProperty to copy */);
 
     /// Destructor.
     virtual ~IndiProperty();
@@ -199,21 +216,44 @@ public:
       * @{
       */
 
-    /// There is only a 'getter' for the type, since it can't be changed.
+    /// Get the property type
+    /** 
+      * \note m_type has only a get function, no set, since it can't be changed
+      * 
+      * \returns the current value of m_type
+      */
     const Type &type() const;
     
-    void device(const std::string & dev);
+    /// Set the device name
+    void device(const std::string & dev /**< [in] the new device name */);
 
+    /// Get the device name
+    /** \returns the current value of m_device
+      */
     const std::string & device() const;
 
-    /// Returns true if this contains a non-empty 'device' attribute.
+    /// Check if the device name is valid
+    /** The device is valid if m_device is non-zero size.
+      *
+      * \returns true if m_device is valid
+      * \returns false if m_device is not valid
+      */
     bool hasValidDevice() const;
 
-    void name(const std::string & na);
+    /// Set the property name
+    void name(const std::string & na /**< [in] the new property name */);
 
+    /// Get the property name 
+    /** \returns the current value of m_name
+      */
     const std::string & name() const;
 
-    /// Returns true if this contains a non-empty 'name' attribute.
+    /// Check if the name is valid
+    /** The name is valid if m_name is non-zero size.
+      *
+      * \returns true if m_name is valid
+      * \returns false if m_name is not valid
+      */
     bool hasValidName() const;
 
     /// Create the unique key for this property based on the device name and the property name. 
@@ -224,69 +264,151 @@ public:
       */
     std::string createUniqueKey() const;
 
-    void state(const State & st);
+    /// Set the
+    void state(const State & st /**< [in]  */);
 
+    /// Get the 
+    /** \returns the current value of 
+      */
     const State & state() const;
 
-    /// Returns true if this contains a non-empty 'state' attribute.
+    /// Check if the  is valid
+    /** The  is valid if m_ is non-zero size.
+      *
+      * \returns true if m_ is valid
+      * \returns false if m_ is not valid
+      */
     bool hasValidState() const;
 
-    void message(const std::string & msg);
+    /// Set the
+    void message(const std::string & msg /**< [in]  */);
 
+    /// Get the  
+    /** \returns the current value of
+      */
     const std::string & message() const;
 
-    /// Returns true if this contains a non-empty 'message' attribute.
+    /// Check if the  is valid
+    /** The  is valid if m_ is non-zero size.
+      *
+      * \returns true if m_ is valid
+      * \returns false if m_ is not valid
+      */
     bool hasValidMessage() const;
 
+    /// Set the
     void perm(const Perm & prm);
 
+    /// Get the  
+    /** \returns the current value of
+      */
     const Perm & perm() const;
 
-    /// Returns true if this contains a non-empty 'perm' attribute.
+    /// Check if the  is valid
+    /** The  is valid if m_ is non-zero size.
+      *
+      * \returns true if m_ is valid
+      * \returns false if m_ is not valid
+      */
     bool hasValidPerm() const;
 
-    void rule(const SwitchRule & rl);
+    /// Set the
+    void rule(const SwitchRule & rl /**< [in]  */);
 
+    /// Get the  
+    /** \returns the current value of
+      */
     const SwitchRule & rule() const;
 
-    /// Returns true if this contains a non-empty 'rule' attribute.
+    /// Check if the  is valid
+    /** The  is valid if m_ is non-zero size.
+      *
+      * \returns true if m_ is valid
+      * \returns false if m_ is not valid
+      */
     bool hasValidRule() const;
 
-    void group(const std::string & grp);
+    /// Set the
+    void group(const std::string & grp /**< [in]  */);
 
+    /// Get the  
+    /** \returns the current value of
+      */
     const std::string & group() const;
     
-    /// Returns true if this contains a non-empty 'group' attribute.
+    /// Check if the  is valid
+    /** The  is valid if m_ is non-zero size.
+      *
+      * \returns true if m_ is valid
+      * \returns false if m_ is not valid
+      */
     bool hasValidGroup() const;
 
-    void label(const std::string & lbl);
+    /// Set the
+    void label(const std::string & lbl /**< [in]  */);
 
+    /// Get the  
+    /** \returns the current value of
+      */
     const std::string &label() const;
     
-    /// Returns true if this contains a non-empty 'label' attribute.
+    /// Check if the  is valid
+    /** The  is valid if m_ is non-zero size.
+      *
+      * \returns true if m_ is valid
+      * \returns false if m_ is not valid
+      */
     bool hasValidLabel() const;
 
-    void timeout(const double & tmo);
+    /// Set the
+    void timeout(const double & tmo /**< [in]  */);
 
+    /// Get the  
+    /** \returns the current value of
+      */
     const double & timeout() const;
     
-    /// Returns true if this contains a non-empty 'timeout' attribute.
+    /// Check if the  is valid
+    /** The  is valid if m_ is non-zero size.
+      *
+      * \returns true if m_ is valid
+      * \returns false if m_ is not valid
+      */
     bool hasValidTimeout() const;
 
-    void timeStamp(const pcf::TimeStamp &ts);
+    /// Set the
+    void timeStamp(const pcf::TimeStamp &ts /**< [in]  */);
 
+    /// Get the  
+    /** \returns the current value of
+      */
     const pcf::TimeStamp & timeStamp() const;
     
-    /// Returns true if this contains a non-empty 'timestamp' attribute.
+    /// Check if the  is valid
+    /** The  is valid if m_ is non-zero size.
+      *
+      * \returns true if m_ is valid
+      * \returns false if m_ is not valid
+      */
     bool hasValidTimeStamp() const;
 
-    void version(const std::string &vers);
+    /// Set the
+    void version(const std::string &vers /**< [in]  */);
 
+    /// Get the  
+    /** \returns the current value of
+      */
     const std::string & version() const;
 
-    /// Returns true if this contains a non-empty 'version' attribute.
+    /// Check if the  is valid
+    /** The  is valid if m_ is non-zero size.
+      *
+      * \returns true if m_ is valid
+      * \returns false if m_ is not valid
+      */
     bool hasValidVersion() const;
 
+//-------------------------------------
     /// Set the entire map of elements.
     void elements(const std::map<std::string, pcf::IndiElement> & els);
 
@@ -321,7 +443,7 @@ public:
 
     IndiElement & at(const std::string & elName);
 
-    /// All the attribute setters.
+    /// Set the
     void beValue(const BLOBEnable & blobe);
     
     const BLOBEnable & beValue() const;
