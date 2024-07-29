@@ -36,6 +36,7 @@ protected:
     
     std::string m_camName;
     std::string m_darkName;
+    std::string m_avgName;
  
     fsmDisplay * ui_fsmState {nullptr};
  
@@ -64,8 +65,11 @@ protected:
     statusEntry * ui_expTime {nullptr};
 
     statusEntry * ui_fps {nullptr};
+
     statusEntry * ui_emGain {nullptr};
  
+    statusEntry * ui_avgTime {nullptr};
+
     toggleSlider * ui_synchro {nullptr};
  
     QPushButton * ui_takeDarks {nullptr};
@@ -138,6 +142,8 @@ public slots:
 
     void setup_emGain(bool ro);
  
+   void setup_avgTime(bool ro);
+
     void setup_synchro();
  
     void setup_takeDarks();
@@ -169,6 +175,8 @@ signals:
     void add_expTime(bool ro);   
     void add_fps(bool ro);
     void add_emGain(bool ro);
+
+    void add_avgTime(bool ro);
  
     void add_synchro();
  
@@ -184,6 +192,8 @@ camera::camera( std::string & camName,
                 Qt::WindowFlags f) : xWidget(Parent, f), m_camName{camName}
 {
     m_darkName = m_camName + "-dark";
+    m_avgName = m_camName + "-avg";
+
     ui.setupUi(this);
  
     m_updateTimer = new QTimer(this);
@@ -211,6 +221,7 @@ camera::camera( std::string & camName,
     connect(this, SIGNAL(add_expTime(bool)), this, SLOT(setup_expTime(bool)));
     connect(this, SIGNAL(add_fps(bool)), this, SLOT(setup_fps(bool)));
     connect(this, SIGNAL(add_emGain(bool)), this, SLOT(setup_emGain(bool)));
+    connect(this, SIGNAL(add_avgTime(bool)), this, SLOT(setup_avgTime(bool)));
     connect(this, SIGNAL(add_synchro()), this, SLOT(setup_synchro()));
  
     connect(this, SIGNAL(add_takeDarks()), this, SLOT(setup_takeDarks()));
@@ -244,7 +255,9 @@ void camera::subscribe()
     m_parent->addSubscriberProperty((multiIndiSubscriber *) this, m_camName, "fsm");
     m_parent->addSubscriberProperty((multiIndiSubscriber *) this, m_darkName, "");
     m_parent->addSubscriberProperty((multiIndiSubscriber *) this, m_darkName, "start");
- 
+    m_parent->addSubscriberProperty((multiIndiSubscriber *) this, m_avgName, "");
+    m_parent->addSubscriberProperty((multiIndiSubscriber *) this, m_avgName, "avgTime");
+
     m_parent->addSubscriber(ui_fsmState);
  
     if(ui_tempCCD) m_parent->addSubscriber(ui_tempCCD);
@@ -267,6 +280,7 @@ void camera::subscribe()
     if(ui_expTime) m_parent->addSubscriber(ui_expTime);
     if(ui_fps) m_parent->addSubscriber(ui_fps);
     if(ui_emGain) m_parent->addSubscriber(ui_emGain);
+    if(ui_avgTime) m_parent->addSubscriber(ui_avgTime);
     if(ui_synchro) m_parent->addSubscriber(ui_synchro);
  
     return;
@@ -302,6 +316,7 @@ void camera::onConnect()
     if(ui_expTime) ui_expTime->onConnect();
     if(ui_fps) ui_fps->onConnect();
     if(ui_emGain) ui_emGain->onConnect();
+    if(ui_avgTime) ui_avgTime->onConnect();
     
     if(ui_synchro) ui_synchro->onConnect();
  
@@ -341,7 +356,8 @@ void camera::onDisconnect()
     if(ui_expTime) ui_expTime->onDisconnect();
     if(ui_fps) ui_fps->onDisconnect();
     if(ui_emGain) ui_emGain->onDisconnect();
- 
+    if(ui_avgTime) ui_avgTime->onDisconnect();
+
     if(ui_synchro) ui_synchro->onDisconnect();
  
     clearFocus();   
@@ -363,7 +379,7 @@ void camera::handleDefProperty( const pcf::IndiProperty & ipRecv)
 
 void camera::handleSetProperty( const pcf::IndiProperty & ipRecv)
 {  
-   if(ipRecv.getDevice() != m_camName && ipRecv.getDevice() != m_darkName) return;
+   if(ipRecv.getDevice() != m_camName && ipRecv.getDevice() != m_darkName && ipRecv.getDevice() != m_avgName) return;
    
    if(ipRecv.getDevice() == m_camName)
    {
@@ -508,6 +524,13 @@ void camera::handleSetProperty( const pcf::IndiProperty & ipRecv)
          }
       }
    }
+   else if(ipRecv.getDevice() == m_avgName)
+   {
+      if(!ui_avgTime) 
+      {
+         emit add_avgTime(false);
+      }
+   }
 
    emit doUpdateGUI();   
 }
@@ -536,7 +559,8 @@ void camera::setEnableDisable(bool tf, bool all)
     if(ui_expTime) ui_expTime->setEnabled(tf);
     if(ui_fps) ui_fps->setEnabled(tf);
     if(ui_emGain) ui_emGain->setEnabled(tf);
-    
+    if(ui_avgTime) ui_avgTime->setEnabled(tf);
+
     if(ui_stage.size() > 0)
     {
         for(size_t n = 0; n < ui_stage.size(); ++n)
@@ -611,6 +635,7 @@ void camera::updateGUI()
     if(ui_expTime) ui_expTime->updateGUI();
     if(ui_fps) ui_fps->updateGUI();
     if(ui_emGain) ui_emGain->updateGUI();
+    if(ui_avgTime) ui_avgTime->updateGUI();
     if(ui_synchro) ui_synchro->updateGUI();
  
     if( (m_appState == "READY" || m_appState == "OPERATING") && ui_takeDarks )
@@ -842,6 +867,23 @@ void camera::setup_emGain(bool ro)
    ui_emGain->onDisconnect();
 
    m_parent->addSubscriber(ui_emGain);
+}
+
+void camera::setup_avgTime(bool ro)
+{
+   if(ui_avgTime) return;
+   
+   ui_avgTime = new statusEntry(this);
+   ui_avgTime->setObjectName(QString::fromUtf8("avgTime"));
+   ui_avgTime->setup(m_avgName, "avgTime", statusEntry::FLOAT, "Avg. Time", "");
+   ui_avgTime->highlightChanges(true);
+   ui_avgTime->readOnly(ro);
+
+   ui.grid->addWidget(ui_avgTime, 11, 1, 1, 1);
+   
+   ui_avgTime->onDisconnect();
+
+   m_parent->addSubscriber(ui_avgTime);
 }
 
 void camera::setup_synchro()
