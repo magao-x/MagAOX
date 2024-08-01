@@ -178,6 +178,7 @@ static pDvr pRestarts;  /* linked list of drivers to restart */
 
 static int port = INDIPORT;                            /* public INDI port */
 static int verbose;                                    /* chattiness */
+static int use_is_zlib = 0;                            /* inter-INDI server zlib compression */
 static int lsocket;                                    /* listen socket */
 static char *ldir;                                     /* where to log driver messages */
 static int maxqsiz       = (DEFMAXQSIZ * 1024 * 1024); /* kill if these bytes behind */
@@ -237,6 +238,7 @@ static void usage(void)
     fprintf(stderr, " -p p     : alternate IP port, default %d\n", INDIPORT);
     fprintf(stderr, " -r r     : maximum driver restarts on error, default %d\n", DEFMAXRESTART);
     fprintf(stderr, " -f path  : Path to fifo for dynamic startup and shutdown of drivers.\n");
+    fprintf(stderr, " -z       : use zlib compression between INDI servers, default no compression\n");
     fprintf(stderr, " -v       : show key events, no traffic\n");
     fprintf(stderr, " -vv      : -v + key message content\n");
     fprintf(stderr, " -vvv     : -vv + complete xml\n");
@@ -903,9 +905,9 @@ static void startRemoteDvr(DvrInfo *dp)
     dp->rfd     = sockfd;
     dp->wfd     = sockfd;
     dp->gzfird  = NULL;
-    dp->gzfiwr  = NULL;
-    dp->gzfird = gzdopen(dp->rfd, "r");
-    dp->gzfiwr = gzdopen(dp->wfd, "w9");  // Assume server can decompress
+    dp->gzfird  = gzdopen(dp->rfd, "r");
+    // If cmd-line had -z, then assume server can do zlib decompression
+    dp->gzfiwr  = use_is_zlib ? gzdopen(dp->wfd,"w9") : NULL;
     dp->lp      = newLilXML();
     dp->msgq    = newFQ(1);
     dp->sprops  = (Property *)malloc(1); /* seed for realloc */
@@ -1581,8 +1583,9 @@ static void newClient()
     cp->s      = s;
     cp->gzfird = NULL;
     cp->gzfiwr = NULL;
-    cp->gzwchk = 1; // Check once if client can receive compressed data
-    cp->gzfird = gzdopen(cp->s, "r");// gzbuffer(cp->gzfird, 16);
+    // If cmd-line had -z, then trigger check whether client can do zlib
+    cp->gzwchk = use_is_zlib;        // Default is 0 => no check
+    cp->gzfird = gzdopen(cp->s, "r");
     cp->lp     = newLilXML();
     cp->msgq   = newFQ(1);
     cp->props  = malloc(1);
@@ -1878,6 +1881,15 @@ static int readFromClient(ClInfo *cp)
             int isblob       = !strcmp(tagXMLEle(root), "setBLOBVector");
             Msg *mp;
 
+            /* Check whether message with ~~gzready~~ was received;
+             * if yes, then try to open write compression gzFile pointer
+             * N.B. if gzdopen fails, or gzwchk was not greater than
+             *      zero because -z was not on command line, then
+             *      data written to this client will not be compressed,
+             *      but gzread will be able to process them anyway
+             *      because the ZLIB/GZ prefix will never be sent, so
+             *      the stream will be interpreted as uncompressed data
+             */
             if (cp->gzwchk > 0 && !cp->gzfiwr)
             {
                 --cp->gzwchk;
@@ -2531,6 +2543,9 @@ int main(int ac, char *av[])
                     break;
                 case 'v':
                     verbose++;
+                    break;
+                case 'z':
+                    use_is_zlib = 1;
                     break;
                 default:
                     usage();

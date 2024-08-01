@@ -127,6 +127,7 @@ protected:
    int indiserver_p {-1}; ///< The indiserver port (passed to indiserver)
    int indiserver_v {-1}; ///< The indiserver verbosity (passed to indiserver)
    bool indiserver_x {false}; ///< The indiserver terminate after last exit flag (passed to indiserver)
+   bool indiserver_z {false}; ///< The inter-indiserver zlib compression flag
    
    std::string m_driverFIFOPath; ///< The path to the local drivers' FIFOs directory
    std::vector<std::string> m_local; ///< List of local drivers passed in by config
@@ -250,6 +251,7 @@ void xindiserver::setupConfig()
    config.add("indiserver.p", "p", "", argType::Required, "indiserver", "p", false,  "int", "indiserver: alternate IP port, default 7624");
    config.add("indiserver.v", "v", "", argType::True, "indiserver", "v", false,  "int", "indiserver: log verbosity, -v, -vv or -vvv");
    config.add("indiserver.x", "x", "", argType::True, "indiserver", "x", false,  "bool", "exit after last client disconnects -- FOR PROFILING ONLY");
+   config.add("indiserver.z", "z", "", argType::Required, "indiserver", "z", false,  "bool", "Whether to use zlib compression between INDI servers");
    
    config.add("local.drivers","L", "local.drivers" , argType::Required, "local", "drivers", false,  "vector string", "List of local drivers to start.");
    config.add("remote.drivers","R", "remote.drivers" , argType::Required, "remote", "drivers", false,  "vector string", "List of remote drivers to start, in the form of name@tunnel, where tunnel is the name of a tunnel specified in sshTunnels.conf.");
@@ -282,6 +284,7 @@ void xindiserver::loadConfig()
    }
    
    config(indiserver_x, "indiserver.x");
+   config(indiserver_z, "indiserver.z");
    
    config(m_local, "local.drivers");// May be empty if [indiserver_ctrl_fifo] is configured to match [indiserver.f]
    config(m_remote, "remote.drivers");
@@ -331,6 +334,8 @@ int xindiserver::constructIndiserverCommand( std::vector<std::string> & indiserv
       
       // The indiserver terminate after last exit flag
       if(indiserver_x == true) indiserverCommand.push_back("-x");
+
+      if(indiserver_z == true) indiserverCommand.push_back("-z");
    }
    catch(...)
    {
