@@ -4,10 +4,11 @@
   * \ingroup instGraph_files
   */
 
-#ifndef instGraph_hpp
-#define instGraph_hpp
+#ifndef xInstGraph_hpp
+#define xInstGraph_hpp
 
-#include <instGraph/instGraph.hpp>
+#include "/usr/local/include/instGraph/instGraphXML.hpp"
+using namespace ingr;
 
 #include "../../libMagAOX/libMagAOX.hpp" //Note this is included on command line to trigger pch
 
@@ -25,16 +26,22 @@
   */
 
 
-class xigNode : public ingr::instNode 
+class xigNode
 {
 public:
 
+    std::string m_name;
+
     std::set<std::string> m_keys;
+
+    instGraphXML * m_parentGraph {nullptr};
 
     void key( const std::string & nkey )
     {
         m_keys.insert(nkey);
     }
+
+    ingr::instNode * m_node {nullptr};
 
     virtual void handleSetProperty( const pcf::IndiProperty & ipRecv ) = 0;
 };
@@ -45,73 +52,232 @@ class pwrOnOffNode : public xigNode
 public:
 
     std::string m_pwrKey;
-    
+    int m_pwrState {-1};
+
     virtual void handleSetProperty( const pcf::IndiProperty & ipRecv )
     {
-        if(m_keys.size() != 1) return;
-
-        if(m_keys.count(ipRecv.createUniqueKey()) == 0) return;
+        if( ipRecv.createUniqueKey() != m_pwrKey ) return;
 
         if(!ipRecv.find("state")) return;
 
+        std::cerr << "got: " << ipRecv.createUniqueKey() << "\n";
         if(ipRecv["state"].get<std::string>() == "On") return toggleOn();
         else return toggleOff();
     }
 
-    void toggleOn()
+    virtual void toggleOn()
     {
-        std::cerr << m_name << " toggle on\n";
-        for(auto && iput : m_inputs)
+        m_pwrState = 1;
+
+        togglePutsOn();
+        
+    }
+
+    virtual void togglePutsOn()
+    {
+        if(m_node == nullptr) return;
+
+        for(auto && iput : m_node->inputs())
         {
             iput.second->state(ingr::putState::on);
         } 
 
-        for(auto && oput : m_outputs)
+        for(auto && oput : m_node->outputs())
         {
             oput.second->state(ingr::putState::on);
         } 
-
     }
 
-    void toggleOff()
+    virtual void toggleOff()
     {
-        std::cerr << m_name << " toggle off\n";
+        m_pwrState = 1;
 
-        for(auto && iput : m_inputs)
+        togglePutsOff();
+    }
+
+    virtual void togglePutsOff()
+    {
+        if(m_node == nullptr) return;
+
+        for(auto && iput : m_node->inputs())
         {
             iput.second->state(ingr::putState::off);
         } 
 
-        for(auto && oput : m_outputs)
+        for(auto && oput : m_node->outputs())
         {
             oput.second->state(ingr::putState::off);
-        } 
-
+        }
     }
 };
 
-class instGraph;
+class stdMotionNode : public pwrOnOffNode
+{
 
-class instGraphIndiClient : public pcf::IndiClient
+public:
+
+    std::string m_device;
+    std::string m_presetPrefix {"preset"};
+    
+    std::string m_curVal;
+
+    std::vector<std::string> m_presetPutName {"out"}; 
+
+    ingr::ioDir m_presetDir {ingr::ioDir::output};
+
+    virtual void handleSetProperty( const pcf::IndiProperty & ipRecv )
+    {
+        pwrOnOffNode::handleSetProperty(ipRecv);
+
+        if(ipRecv.createUniqueKey() ==  (m_device + "." + m_presetPrefix + "Name") )
+        {
+            std::cerr << "got " << ipRecv.createUniqueKey() << "\n";
+
+            if(m_node != nullptr)
+            {
+                for(auto && it : ipRecv.getElements() )
+                {
+                    if(it.second.getSwitchState() == pcf::IndiElement::On)
+                    {
+                        bool changed;
+                        if(m_curVal != it.second.getName())
+                        {
+                            changed = true;
+                        }
+
+                        m_curVal = it.second.getName();
+                        
+                        if(changed) 
+                        {
+                            if(m_curVal == "none")
+                            {
+                                togglePutsOff();
+                            }
+                            else 
+                            {   
+                                togglePutsOn();
+                            }
+                        }
+                    }
+                }
+            
+                /*else 
+                {
+                    if(m_node->auxDataValid())
+                    {
+                        if(m_presetPutName.size() == 1)
+                        {
+                            m_parentGraph->valuePut(m_name, m_presetPutName[0], m_presetDir, "off");
+                        }
+                        else 
+                        {
+                        }
+                    }
+                }*/
+                
+            }
+        }
+    }
+
+    virtual void togglePutsOn()
+    {
+        std::cerr << "toggle on\n";
+        if(m_pwrState == 1)
+        {
+            if(m_presetPutName.size() == 1)
+            {
+                if(m_node->auxDataValid())
+                {
+                    if(m_parentGraph)
+                    {
+                        m_parentGraph->valuePut(m_name, m_presetPutName[0], m_presetDir, m_curVal);
+                    }
+                }
+                pwrOnOffNode::togglePutsOn();
+            }
+            else 
+            {
+                for(auto s : m_presetPutName)
+                {
+                    ingr::instIOPut * pptr;
+                    
+                    try 
+                    {
+                        if(m_presetDir == ingr::ioDir::input )
+                        {
+                            pptr = m_node->input(s);
+                        }
+                        else 
+                        {
+                            pptr = m_node->output(s);
+                        }
+                    } 
+                    catch(...)
+                    {
+                        return;
+                    }
+
+                    if(s == m_curVal)
+                    {
+                        pptr->state(ingr::putState::on);
+                    }
+                    else 
+                    {
+                        pptr->state(ingr::putState::off);
+                    }
+                }
+                std::cerr << "changing state\n";
+                m_parentGraph->stateChange();
+            } Indent: Namespace Contents
+        }
+
+        return; //we don't automatically toggle puts on upon power on.
+    }
+
+    virtual void togglePutsOff()
+    {
+        std::cerr << "toggle off\n";
+        if(m_node != nullptr)
+        {
+            if(m_node->auxDataValid())
+            {
+                if(m_presetPutName.size() == 1)
+                {
+                    m_parentGraph->valuePut(m_name, m_presetPutName[0], m_presetDir, "off");
+                }
+                else 
+                {
+                }
+            }
+        }
+            
+        pwrOnOffNode::togglePutsOff();
+    }
+
+};
+
+
+class xInstGraph;
+
+class xInstGraphIndiClient : public pcf::IndiClient
 {
 public: 
 
-    instGraph * m_parent {nullptr};
+    xInstGraph * m_parent {nullptr};
 
-    instGraphIndiClient( const std::string & name,
-                         const std::string & version,
-                         const std::string & something,
-                         const std::string & ipAddr,
-                         int port,
-                         instGraph * parent 
-                      ) : IndiClient(name, version, something, ipAddr, port), m_parent(parent)
+    xInstGraphIndiClient( const std::string & name,
+                          const std::string & version,
+                          const std::string & something,
+                          const std::string & ipAddr,
+                          int port,
+                          xInstGraph * parent 
+                        ) : IndiClient(name, version, something, ipAddr, port), m_parent(parent)
     {
 
     }
 
     void execute()
     {
-        std::cerr << __LINE__ << "\n";
         processIndiRequests(false);
     }
 
@@ -126,7 +292,7 @@ public:
 /** 
   * \ingroup instGraph
   */
-class instGraph : public mx::app::application,  public ingr::instGraph
+class xInstGraph : public mx::app::application
 {
 
    //Give the test harness access.
@@ -142,19 +308,19 @@ protected:
    
    ///@}
 
-    ingr::instBeam * m_beam_fwcamsim2camsim {nullptr};
+    ingr::instGraphXML m_graph;
 
     std::map<std::string, xigNode *> m_nodes;
     std::multimap<std::string, xigNode *> m_nodeHandleSets;
 
-    instGraphIndiClient * m_client {nullptr};
+    xInstGraphIndiClient * m_client {nullptr};
 
 public:
    /// Default c'tor.
-   instGraph();
+   xInstGraph();
 
    /// D'tor, declared and defined for noexcept.
-   ~instGraph() noexcept
+   ~xInstGraph() noexcept
    {}
 
    virtual void setupConfig();
@@ -189,28 +355,26 @@ public:
 
 };
 
-instGraph::instGraph() 
+xInstGraph::xInstGraph() 
 {
    
    return;
 }
 
-void instGraph::setupConfig()
+void xInstGraph::setupConfig()
 {
-    std::cerr << __LINE__ << "\n";
 }
 
-int instGraph::loadConfigImpl( mx::app::appConfigurator & _config )
+int xInstGraph::loadConfigImpl( mx::app::appConfigurator & _config )
 {
    static_cast<void>(_config);
    
    return 0;
 }
 
-void instGraph::loadConfig()
+void xInstGraph::loadConfig()
 {
    loadConfigImpl(config);
-   std::cerr << __LINE__ << "\n";
 }
 
 std::string deviceFromKey(const std::string & key)
@@ -229,79 +393,54 @@ std::string nameFromKey(const std::string & key)
     return key.substr(dot+1);
 }
 
-int instGraph::appStartup()
+int xInstGraph::appStartup()
 {
-    std::cerr << __LINE__ << "\n";
+    std::string emsg;
+    if( m_graph.loadXMLFile(emsg, "magaox.drawio") < 0 )
+    {
+        std::cerr << emsg << "\n";
+        return -1;
+    }
 
     pwrOnOffNode * nn = new pwrOnOffNode;
-    nn->name("fwcamsim");
-    nn->key("pdu0.fwcamsim");
-    m_nodes.insert({nn->name(), nn});
+    nn->m_name = "source";
+    nn->m_pwrKey = "pdu0.source";
+    nn->key(nn->m_pwrKey);
+    nn->m_node = m_graph.node(nn->m_name);
+    m_nodes.insert({nn->m_node->name(), nn});
 
-    nn = new pwrOnOffNode;
-    nn->name("camsim");
-    nn->key("pdu0.camsim");
-    m_nodes.insert({nn->name(), nn});
+    stdMotionNode * n2 = new stdMotionNode;
+    n2->m_parentGraph = &m_graph;
+    n2->m_name = "fwtelsim";
+    n2->m_pwrKey = "dcdu1.fwtelsim";
+    n2->key(n2->m_pwrKey);
+    n2->m_device = "fwtelsim";
+    n2->m_presetPrefix = "filter";
+    n2->key(n2->m_device + "." + n2->m_presetPrefix + "Name");
+    n2->m_node = m_graph.node("fwtelsim");
+    m_nodes.insert({n2->m_node->name(), n2});
 
-    /*for(auto it=m_nodes.begin(); it != m_nodes.end(); ++it)
-    {
-        for(auto kit=it->second->m_keys.begin(); kit != it->second->m_keys.end(); ++kit)
-        {
-            m_nodeHandleSets.insert({*kit, it->second});
-            pcf::IndiProperty * ip = new pcf::IndiProperty;
-            std::string devname = deviceFromKey(*kit);
-            std::string propname = nameFromKey(*kit);
-            ip->setDevice(devname);
-            ip->setName(propname);
-            registerIndiPropertySet( *ip, devname, propname, st_setCallBack_nodeProperties);
-        }
-    }*/
+    stdMotionNode * n3 = new stdMotionNode;
+    n3->m_parentGraph = &m_graph;
+    n3->m_name = "pickoff";
+    n3->m_pwrKey = "pdu2.stagepickoff";
+    n3->key(n3->m_pwrKey);
+    n3->m_device = "stagepickoff";
+    n3->m_presetPrefix = "preset";
+    n3->key(n3->m_device + "." + n3->m_presetPrefix + "Name");
+    n3->m_node = m_graph.node("pickoff");
+    n3->m_presetDir = ingr::ioDir::input;
+    n3->m_presetPutName = {"lab", "tel"};
+    m_nodes.insert({n3->m_node->name(), n3});
 
-    m_beam_fwcamsim2camsim = new ingr::instBeam;
-    m_beam_fwcamsim2camsim->name("fwcamsim2camsim");
-    m_beams.insert({m_beam_fwcamsim2camsim->name(), m_beam_fwcamsim2camsim});
-
-    ingr::instIOPut * newput = new ingr::instIOPut({m_nodes["fwcamsim"],ingr::ioDir::output,"out",ingr::putType::light,m_beam_fwcamsim2camsim});
-    m_nodes["fwcamsim"]->addIOPut(newput);
-
-    newput = new ingr::instIOPut({m_nodes["camsim"],ingr::ioDir::input,"in",ingr::putType::light,m_beam_fwcamsim2camsim});
-    m_nodes["camsim"]->addIOPut(newput);
-
-
-/*    m_node_fwtelsim = new pwrOnOffNode;
-    m_node_fwtelsim->name("fwtelsim");
-
-    m_node_source->m_device = "pdu0";
-    m_node_source->m_property = "source";
-
-    REG_INDI_SETPROP(m_indiP_sourcePower, "pdu0", "source");
-
-    m_node_fwtelsim->m_device = "usbdu0";
-    m_node_fwtelsim->m_property = "fwtelsim";
-
-    REG_INDI_SETPROP(m_indiP_fwtelsimPower, "usbdu0", "fwtelsim");
-
-    m_beam_source2fwtelsim = new ingr::instBeam;
-    m_beam_source2fwtelsim->name("source2fwtelsim");
-
-    ingr::instIOPut * newput = new ingr::instIOPut({m_node_source,ingr::ioDir::output,"out",ingr::putType::light,m_beam_source2fwtelsim});
-    m_node_source->addIOPut(newput);
-
-    newput = new ingr::instIOPut({m_node_fwtelsim,ingr::ioDir::input,"in",ingr::putType::light,m_beam_source2fwtelsim});
-    m_node_fwtelsim->addIOPut(newput);
-*/
-
-    
     return 0;
 }
 
-int instGraph::execute()
+int xInstGraph::execute()
 {
     appStartup();
 
     //std::cout << ingr::beamState2String(m_beam_source2fwtelsim->state()) << "\n";
-
-    std::cerr << __LINE__ << "\n";
 
     bool m_shutdown = false;
     bool m_connected = false;
@@ -312,7 +451,7 @@ int instGraph::execute()
         {
             try 
             {
-                m_client = new instGraphIndiClient("instGraph", "1.7", "1,7", "127.0.0.1", 7624, this);
+                m_client = new xInstGraphIndiClient("instGraph", "1.7", "1,7", "127.0.0.1", 7624, this);
             }
             catch(...) 
             {
@@ -374,9 +513,7 @@ int instGraph::execute()
 
         while(m_connected && !m_shutdown)
         {
-            std::cout << "fwcamsim2camsim state   = " << ingr::beamState2String(beam("fwcamsim2camsim")->state()) << "\n  ";
-
-            mx::sys::milliSleep(1000);
+           mx::sys::milliSleep(1000);
 
             if(m_client->getQuitProcess())
             {
@@ -393,12 +530,12 @@ int instGraph::execute()
     return 0;
 }
 
-int instGraph::appShutdown()
+int xInstGraph::appShutdown()
 {
    return 0;
 }
 
-void instGraph::handleSetProperty( const pcf::IndiProperty &ipRecv )
+void xInstGraph::handleSetProperty( const pcf::IndiProperty &ipRecv )
 {
     auto range = m_nodeHandleSets.equal_range(ipRecv.createUniqueKey());
 
@@ -409,18 +546,17 @@ void instGraph::handleSetProperty( const pcf::IndiProperty &ipRecv )
 }
 
 
-void instGraphIndiClient::handleSetProperty(const pcf::IndiProperty & ipRecv)
+void xInstGraphIndiClient::handleSetProperty(const pcf::IndiProperty & ipRecv)
 {
-    std::cerr << __LINE__ << "\n";
     if(m_parent)
     {
         m_parent->handleSetProperty(ipRecv);
     }
 }
 
-void instGraphIndiClient::handleDefProperty(const pcf::IndiProperty & ipRecv)
+void xInstGraphIndiClient::handleDefProperty(const pcf::IndiProperty & ipRecv)
 {
     handleSetProperty(ipRecv);
 }
 
-#endif //instGraph_hpp
+#endif //xInstGraph_hpp

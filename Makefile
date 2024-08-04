@@ -2,34 +2,39 @@ SELF_DIR := $(abspath $(dir $(lastword $(MAKEFILE_LIST))))
 -include $(SELF_DIR)/local/common.mk
 -include $(SELF_DIR)/Make/python.mk
 
-apps_common = \
+#Apps to build for any basic system
+apps_basic = \
 	sshDigger \
-	sysMonitor \
 	xindiserver \
-	mzmqClient \
 	magAOXMaths \
+	timeSeriesSimulator \
+	mzmqClient 
+
+#Apps commmon to all MagAO-X control machines
+apps_common = \
+    sysMonitor \
 	mzmqServer \
 	streamWriter \
 	dmMode \
 	shmimIntegrator \
-	timeSeriesSimulator \
 	closedLoopIndi \
 	dbIngest
 
+#Apps common to RTC and ICC on MagAO-X
 apps_rtcicc = \
-        alignLoop \
-        acronameUsbHub \
+    alignLoop \
+    acronameUsbHub \
 	baslerCtrl \
-        bmcCtrl \
+    bmcCtrl \
 	flipperCtrl \
-        hsfwCtrl \
-        rhusbMon \
+    hsfwCtrl \
+    rhusbMon \
 	cacaoInterface \
-        kcubeCtrl \
-        modalPSDs \
+    kcubeCtrl \
+    modalPSDs \
 	userGainCtrl \
-        refRMS \
-        streamCircBuff \
+    refRMS \
+    streamCircBuff \
 	zaberCtrl \
 	zaberLowLevel \
 	picoMotorCtrl \
@@ -80,17 +85,21 @@ apps_tic = \
 
 libs_to_build = libtelnet
 
-apps_to_build = $(apps_common)
+apps_to_build = $(apps_basic)
 
 ifeq ($(MAGAOX_ROLE),AOC)
+  apps_to_build += $(apps_common)
   apps_to_build += $(apps_aoc)
 else ifeq ($(MAGAOX_ROLE),ICC)
+  apps_to_build += $(apps_common)
   apps_to_build += $(apps_rtcicc)
   apps_to_build += $(apps_icc)
 else ifeq ($(MAGAOX_ROLE),RTC)
+  apps_to_build += $(apps_common)
   apps_to_build += $(apps_rtcicc)
   apps_to_build += $(apps_rtc)
 else ifeq ($(MAGAOX_ROLE),TIC)
+  apps_to_build += $(apps_common)
   apps_to_build += $(apps_tic)
 endif
 
