@@ -43,7 +43,16 @@ class sysMonitor : public MagAOXApp<>, public dev::telemeter<sysMonitor>
 
    friend class dev::telemeter<sysMonitor>;
    
+   enum class sysType
+   {
+      Intel,
+      AMD
+   };
+
 protected:
+
+   sysType m_sysType {sysType::Intel};
+
    int m_warningCoreTemp = 0;   ///< User defined warning temperature for CPU cores
    int m_criticalCoreTemp = 0;   ///< User defined critical temperature for CPU cores
    int m_warningDiskTemp = 0;   ///< User defined warning temperature for drives
@@ -111,14 +120,35 @@ public:
 
 
    /// Parses string from system call to find CPU temperatures
+   /** When a valid string is read in, the value from that string is stored.
+     * This calls the appropriate function based on m_sysType.
+     * 
+     * \returns -1 on invalid string being read in
+     * \returns 0 on completion and storing of value
+     */
+   int parseCPUTemperatures( float & temp,            /// [out] the return value from the string
+                             const std::string & line /// [in] the string to be parsed
+                           );
+
+   /// Parses string from system call to find CPU temperatures on an Intel system
    /** When a valid string is read in, the value from that string is stored
      * 
      * \returns -1 on invalid string being read in
      * \returns 0 on completion and storing of value
      */
-   int parseCPUTemperatures( std::string,  /**< [in] the string to be parsed*/
-                             float&   /**< [out] the return value from the string*/
-                           );
+   int parseCPUTemperaturesIntel( float & temp,            /// [out] the return value from the string
+                                  const std::string & line /// [in] the string to be parsed
+                                );
+
+   /// Parses string from system call to find CPU temperatures on an AMD system
+   /** When a valid string is read in, the value from that string is stored
+     * 
+     * \returns -1 on invalid string being read in
+     * \returns 0 on completion and storing of value
+     */
+   int parseCPUTemperaturesAMD( float & temp,            /// [out] the return value from the string
+                                const std::string & line /// [in] the string to be parsed
+                              );
 
 
    /// Checks if any core temperatures are warning or critical levels
@@ -338,6 +368,7 @@ inline sysMonitor::sysMonitor() : MagAOXApp(MAGAOX_CURRENT_SHA1, MAGAOX_REPO_MOD
 
 void sysMonitor::setupConfig()
 {
+   config.add("sysType", "", "sysType", argType::Required, "", "sysType", false, "string", "The system type, Intel (default) or AMD");
    config.add("diskNames", "", "diskNames", argType::Required, "", "diskNames", false, "vector<string>", "The names (/dev/sdX) of the drives to monitor");
    config.add("warningCoreTemp", "", "warningCoreTemp", argType::Required, "", "warningCoreTemp", false, "int", "The warning temperature for CPU cores.");
    config.add("criticalCoreTemp", "", "criticalCoreTemp", argType::Required, "", "criticalCoreTemp", false, "int", "The critical temperature for CPU cores.");
@@ -349,6 +380,31 @@ void sysMonitor::setupConfig()
 
 void sysMonitor::loadConfig()
 {
+   std::string st;
+   //Configure for default, such that logs are correct after config
+   if(m_sysType == sysType::Intel)
+   {
+      st = "Intel";
+   }
+   else if(m_sysType == sysType::AMD)
+   {
+      st = "AMD";
+   }
+   config(st, "sysType");
+   if(st == "Intel")
+   {
+      m_sysType = sysType::Intel;
+   }
+   else if(st == "AMD")
+   {
+      m_sysType = sysType::AMD;
+   }
+   else 
+   {
+      log<software_critical>({__FILE__, __LINE__, "Invalid system type specified."});
+      m_shutdown = 1;
+   }
+
    config(m_diskNameList, "diskNames");
    config(m_warningCoreTemp, "warningCoreTemp");
    config(m_criticalCoreTemp, "criticalCoreTemp");
@@ -360,10 +416,6 @@ void sysMonitor::loadConfig()
 
 int sysMonitor::appStartup()
 {
-   
-   //REG_INDI_NEWPROP_NOCB(m_indiP_core_temps, "core_temps", pcf::IndiProperty::Number);
-   
-   
    
    REG_INDI_NEWPROP_NOCB(m_indiP_core_temps, "core_temps", pcf::IndiProperty::Number);
    m_indiP_core_temps.add(pcf::IndiElement("max"));
@@ -483,10 +535,8 @@ int sysMonitor::appLogic()
       {
          log<telem_drivetemps>({m_diskNames, m_diskTemps}, logPrio::LOG_ALERT);
       } 
-      else 
-      {
-         recordDriveTemps();
-      }
+      
+      recordDriveTemps();
    }
    else 
    {
@@ -566,7 +616,7 @@ int sysMonitor::findCPUTemperatures(std::vector<float>& temps)
    for(size_t n=0; n < commandOutput.size(); ++n)
    {  
       float tempVal;
-      if (parseCPUTemperatures(commandOutput[n], tempVal) == 0)
+      if (parseCPUTemperatures(tempVal, commandOutput[n]) == 0)
       {
          temps.push_back(tempVal);
          rv = 0;
@@ -575,11 +625,34 @@ int sysMonitor::findCPUTemperatures(std::vector<float>& temps)
    return rv;
 }
 
-int sysMonitor::parseCPUTemperatures(std::string line, float& temps) 
+int sysMonitor::parseCPUTemperatures( float& temp,
+                                      const std::string & line
+                                    ) 
+{
+   if(m_sysType == sysType::Intel)
+   {
+      return parseCPUTemperaturesAMD(temp, line);
+   }
+   else if(m_sysType == sysType::AMD)
+   {
+      return parseCPUTemperaturesAMD(temp, line);
+   }
+   else
+   {
+      log<software_error>({__FILE__, __LINE__, "invalid system type"});
+      return -1;
+   }
+
+}
+
+
+int sysMonitor::parseCPUTemperaturesIntel( float& temp,
+                                           const std::string & line
+                                         ) 
 {
    if (line.length() <= 1)
    {
-      temps = -999;
+      temp = -999;
       return -1;
    }
 
@@ -590,7 +663,7 @@ int sysMonitor::parseCPUTemperatures(std::string line, float& temps)
       if(st == std::string::npos)
       {
          log<software_error>({__FILE__, __LINE__,"Invalid read occured when parsing CPU temperatures."});
-         temps = -999;
+         temp = -999;
          return -1;
       }
       
@@ -600,29 +673,24 @@ int sysMonitor::parseCPUTemperatures(std::string line, float& temps)
       if(ed == std::string::npos)
       {
          log<software_error>({__FILE__, __LINE__,"Invalid read occured when parsing CPU temperatures."});
-         temps = -999;
+         temp = -999;
          return -1;
       }
       
       --ed;
       
       std::string temp_str = line.substr(st, ed-st);
-      //std::cerr << str << " " << temp_str << "\n";
-      
-      
-      float temp;
+
       try
       {
-         temp = std::stof (temp_str);
+         temp = std::stof(temp_str);
       }
       catch (const std::invalid_argument& e) 
       {
          log<software_error>({__FILE__, __LINE__,"Invalid read occured when parsing CPU temperatures."});
-         temps = -999;
+         temp = -999;
          return -1;
       }
-
-      temps = temp;
 
       if (m_warningCoreTemp == 0)
       {
@@ -659,7 +727,7 @@ int sysMonitor::parseCPUTemperatures(std::string line, float& temps)
          catch (const std::invalid_argument& e) 
          {
             log<software_error>({__FILE__, __LINE__,"Invalid read occured when parsing critical CPU temperatures."});
-            temps = -999;
+            temp = -999;
             return -1;
          }
       }                           
@@ -667,10 +735,53 @@ int sysMonitor::parseCPUTemperatures(std::string line, float& temps)
    }
    else 
    {
-      temps = -999;
+      temp = -999;
       return -1;
    }
 
+}
+
+int sysMonitor::parseCPUTemperaturesAMD( float& temp,
+                                         const std::string & line
+                                       ) 
+{
+   if (line.length() <= 1)
+   {
+      temp = -999;
+      return -1;
+   }
+
+   std::string str = line.substr(0, 6);
+   if (str.compare("Tctl: ") == 0) 
+   {
+      size_t ed = line.find('C',0);
+      if(ed == std::string::npos)
+      {
+         log<software_error>({__FILE__, __LINE__,"Invalid read occured when parsing CPU temperatures."});
+         temp = -999;
+         return -1;
+      }
+
+      str = line.substr(7, ((ed - 1) - 7)); //ed-1 to eat degree.
+      std::cout << str << " " << std::stof(str) << "\n";
+
+      try 
+      {
+         temp = std::stof(str);
+      }
+      catch(...)
+      {
+         log<software_error>({__FILE__, __LINE__,"Invalid read occured when parsing CPU temperatures."});
+         temp = -999;
+         return -1;
+      }
+      return 0;
+   }
+   else 
+   {
+      temp = -999;
+      return -1;
+   }
 }
 
 int sysMonitor::criticalCoreTemperature(std::vector<float>& v)
@@ -739,7 +850,7 @@ int sysMonitor::parseCPULoads(std::string line, float& loadVal)
 {
    if (line.length() <= 1)
    {
-      log<software_error>({__FILE__, __LINE__,"zero lenght line in parseCPULoads."});
+      log<software_error>({__FILE__, __LINE__,"zero length line in parseCPULoads."});
       return -1;
    }
    std::istringstream iss(line);
@@ -769,7 +880,7 @@ int sysMonitor::findDiskTemperature( std::vector<std::string> & hdd_names,
                                      std::vector<float>& hdd_temps
                                    ) 
 {
-   /*std::vector<std::string> commandList{"hddtemp"};//, "/dev/sda",  "/dev/sdb", "/dev/sdc", "/dev/sdd", "/dev/sde", "/dev/sdf"};
+   std::vector<std::string> commandList{"hddtemp"};
    for(size_t n=0;n<m_diskNameList.size();++n)
    {
       commandList.push_back(m_diskNameList[n]);
@@ -803,9 +914,9 @@ int sysMonitor::findDiskTemperature( std::vector<std::string> & hdd_names,
          rv = 0;
       }
    }
-   return rv;*/
+   return rv;
 
-   return 0;
+   //return 0;
 }
 
 int sysMonitor::parseDiskTemperature( std::string & driveName,
@@ -1172,7 +1283,7 @@ int sysMonitor::updateVals()
    
    if(m_setLatency)
    {
-      updateSwitchIfChanged( m_indiP_setlat, "toggle", pcf::IndiElement::On, INDI_BUSY);
+      updateSwitchIfChanged( m_indiP_setlat, "toggle", pcf::IndiElement::On, INDI_OK);
    }
    else
    {
@@ -1299,7 +1410,7 @@ int sysMonitor::recordTelem( const telem_coreloads * )
 {
    return recordCoreLoads(true);
 }
-   
+
 int sysMonitor::recordTelem( const telem_coretemps * )
 {
    return recordCoreTemps(true);
