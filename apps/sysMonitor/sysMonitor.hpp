@@ -631,7 +631,7 @@ int sysMonitor::parseCPUTemperatures( float& temp,
 {
    if (m_sysType == sysType::Intel)
    {
-      return parseCPUTemperaturesAMD(temp, line);
+      return parseCPUTemperaturesIntel(temp, line);
    }
    else if (m_sysType == sysType::AMD)
    {
