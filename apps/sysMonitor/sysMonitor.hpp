@@ -175,8 +175,8 @@ public:
      * \returns -1 on invalid string being read in
      * \returns 0 on completion and storing of value
      */
-   int parseCPULoads( std::string,   /**< [in] the string to be parsed*/
-                      float&   /**< [out] the return value from the string*/
+   int parseCPULoads( float &,            ///< [out] the return value from the string
+                      const std::string & ///< [in] the string to be parsed
                     );
 
 
@@ -836,7 +836,7 @@ int sysMonitor::findCPULoads(std::vector<float>& loads)
    for (auto line = commandOutput.begin() + 4; line != commandOutput.end(); line++)
    {
       float loadVal;
-      if (parseCPULoads(*line, loadVal) == 0)
+      if (parseCPULoads(loadVal, *line) == 0)
       {
          loads.push_back(loadVal);
          rv = 0;
@@ -845,7 +845,9 @@ int sysMonitor::findCPULoads(std::vector<float>& loads)
    return rv;
 }
 
-int sysMonitor::parseCPULoads(std::string line, float& loadVal)
+int sysMonitor::parseCPULoads( float & loadVal,
+                               const std::string & line
+                             )
 {
    if (line.length() <= 1)
    {
@@ -853,8 +855,10 @@ int sysMonitor::parseCPULoads(std::string line, float& loadVal)
       return -1;
    }
    std::istringstream iss(line);
-   std::vector<std::string> tokens{ std::istream_iterator<std::string>{iss},std::istream_iterator<std::string>{} };
+   
+   std::vector<std::string> tokens(std::istream_iterator<std::string>{iss}, std::istream_iterator<std::string>{});
    if (tokens.size() < 8) return 1;
+
    float cpu_load;
    try
    {
@@ -1379,6 +1383,8 @@ void sysMonitor::setlatThreadExec()
 
 INDI_NEWCALLBACK_DEFN(sysMonitor, m_indiP_setlat)(const pcf::IndiProperty& ipRecv)
 {
+   INDI_VALIDATE_CALLBACK_PROPS(m_indiP_setlat, ipRecv);
+
    if (ipRecv.getName() != m_indiP_setlat.getName())
    {
       log<software_error>({ __FILE__,__LINE__, "wrong INDI property received." });
@@ -1402,7 +1408,13 @@ INDI_NEWCALLBACK_DEFN(sysMonitor, m_indiP_setlat)(const pcf::IndiProperty& ipRec
 inline
 int sysMonitor::checkRecordTimes()
 {
-   return telemeter<sysMonitor>::checkRecordTimes(telem_coreloads(), telem_coretemps(), telem_drivetemps(), telem_usage(), telem_chrony_status(), telem_chrony_stats());
+   return telemeter<sysMonitor>::checkRecordTimes( telem_coreloads(), 
+                                                   telem_coretemps(), 
+                                                   telem_drivetemps(), 
+                                                   telem_usage(), 
+                                                   telem_chrony_status(), 
+                                                   telem_chrony_stats()
+                                                 );
 }
 
 int sysMonitor::recordTelem(const telem_coreloads*)
@@ -1566,17 +1578,17 @@ int sysMonitor::recordChronyStatus(bool force)
 
 int sysMonitor::recordChronyStats(bool force)
 {
-   double old_chronySystemTime = 1e50; //to force an update the first time no matter what
-   double old_chronyLastOffset = 0;
-   double old_chronyRMSOffset = 0;
-   double old_chronyFreq = 0;
-   double old_chronyResidFreq = 0;
-   double old_chronySkew = 0;
-   double old_chronyRootDelay = 0;
-   double old_chronyRootDispersion = 0;
-   double old_chronyUpdateInt = 0;
+   static double old_chronySystemTime = 1e50; //to force an update the first time no matter what
+   static double old_chronyLastOffset = 0;
+   static double old_chronyRMSOffset = 0;
+   static double old_chronyFreq = 0;
+   static double old_chronyResidFreq = 0;
+   static double old_chronySkew = 0;
+   static double old_chronyRootDelay = 0;
+   static double old_chronyRootDispersion = 0;
+   static double old_chronyUpdateInt = 0;
 
-   if (old_chronySystemTime == m_chronySystemTime || old_chronyLastOffset == m_chronyLastOffset ||
+   if(old_chronySystemTime == m_chronySystemTime || old_chronyLastOffset == m_chronyLastOffset ||
       old_chronyRMSOffset == m_chronyRMSOffset || old_chronyFreq == m_chronyFreq ||
       old_chronyResidFreq == m_chronyResidFreq || old_chronySkew == m_chronySkew ||
       old_chronyRootDelay == m_chronyRootDelay || old_chronyRootDispersion == m_chronyRootDispersion ||
@@ -1597,6 +1609,7 @@ int sysMonitor::recordChronyStats(bool force)
       old_chronyUpdateInt = m_chronyUpdateInt;
 
    }
+
    return 0;
 }
 
