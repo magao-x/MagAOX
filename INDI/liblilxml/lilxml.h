@@ -44,6 +44,7 @@ extern void delLilXML (LilXML *lp);
 extern void delXMLEle (XMLEle *e);
 
 /* process XML */
+extern XMLEle **parseXMLChunk (LilXML *lp, char *buf, int size, char errmsg[]);
 extern XMLEle *readXMLEle (LilXML *lp, int c, char ynot[]);
 extern XMLEle *parseXML (char buf[], char ynot[]);
 extern XMLEle *readXMLFile (FILE *fp, LilXML *lp, char ynot[]);

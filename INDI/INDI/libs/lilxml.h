@@ -70,9 +70,9 @@ extern "C" {
 #endif
 
 /* opaque handle types */
-typedef struct xml_att_ XMLAtt;
-typedef struct xml_ele_ XMLEle;
-typedef struct LilXML_ LilXML;
+typedef struct _xml_att XMLAtt;
+typedef struct _xml_ele XMLEle;
+typedef struct _LilXML LilXML;
 
 /**
  * \defgroup lilxmlFunctions XML Functions: Functions to parse, process, and search XML.
@@ -202,32 +202,32 @@ extern int nXMLAtt(XMLEle *ep);
 /** \brief add an element with the given tag to the given element. parent can be NULL to make a new root.
     \return if parent is NULL, a new root is returned, otherwise, parent is returned.
 */
-extern XMLEle *addXMLEle(XMLEle *parent, const char *tag);
+extern XMLEle *addXMLEle(XMLEle *parent, char *tag);
 
 /** \brief set the pcdata of the given element
     \param ep pointer to an XML element.
     \param pcdata pcdata to set.
 */
-extern void editXMLEle(XMLEle *ep, const char *pcdata);
+extern void editXMLEle(XMLEle *ep, char *pcdata);
 
 /** \brief Add an XML attribute to an existing XML element.
     \param ep pointer to an XML element
     \param name the name of the XML attribute to add.
     \param value the value of the XML attribute to add.
 */
-extern XMLAtt *addXMLAtt(XMLEle *ep, const char *name, const char *value);
+extern XMLAtt *addXMLAtt(XMLEle *ep, char *name, char *value);
 
 /** \brief Remove an XML attribute from an XML element.
     \param ep pointer to an XML element.
     \param name the name of the XML attribute to remove
 */
-extern void rmXMLAtt(XMLEle *ep, const char *name);
+extern void rmXMLAtt(XMLEle *ep, char *name);
 
 /** \brief change the value of an attribute to str.
 *   \param ap pointer to XML attribute
 *   \param str new attribute value
 */
-extern void editXMLAtt(XMLAtt *ap, const char *str);
+extern void editXMLAtt(XMLAtt *ap, char *str);
 
 /** \brief return a string with all xml-sensitive characters within the passed string replaced with their entity sequence equivalents.
 *   N.B. caller must use the returned string before calling us again.
@@ -240,7 +240,7 @@ extern char *entityXML(char *str);
     \param name the name of the XML attribute to retrieve its value.
     \return the value string of an XML element on success. NULL on failure.
 */
-extern const char *findXMLAttValu(XMLEle *ep, const char *name);
+extern char *findXMLAttValu(XMLEle *ep, const char *name);
 
 /** \brief Handy wrapper to read one xml file.
     \param fp pointer to FILE to read.
@@ -268,6 +268,10 @@ extern int sprXMLEle(char *s, XMLEle *ep, int level);
 *   N.B. set level = 0 on first call.
 */
 extern int sprlXMLEle(XMLEle *ep, int level);
+
+/** \brief TBD
+*/
+extern XMLEle *cloneXMLEle (XMLEle *ep);
 
 /* install alternatives to malloc/realloc/free */
 extern void indi_xmlMalloc(void *(*newmalloc)(size_t size), void *(*newrealloc)(void *ptr, size_t size),
