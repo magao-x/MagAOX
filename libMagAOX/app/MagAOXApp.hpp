@@ -1762,6 +1762,13 @@ void MagAOXApp<_useINDI>::_handlerSigTerm( int signum,
    m_self->handlerSigTerm(signum, siginf, ucont);
 }
 
+static std::string
+sigabbrev(int sig)
+{
+    char* p = (char*) sigabbrev_np(sig);
+    return std::string("SIG") + (p ? p : "<unknown>");
+}
+
 template<bool _useINDI>
 void MagAOXApp<_useINDI>::handlerSigTerm( int signum,
                                           siginfo_t *siginf __attribute__((unused)),
@@ -1770,6 +1777,7 @@ void MagAOXApp<_useINDI>::handlerSigTerm( int signum,
 {
    m_shutdown = 1;
 
+#  if 0
    std::string signame;
    switch(signum)
    {
@@ -1783,11 +1791,12 @@ void MagAOXApp<_useINDI>::handlerSigTerm( int signum,
          signame = "SIGQUIT";
          break;
       default:
-         signame = "OTHER";
+         signame = std::string("SIG") + "OTHER";
    }
+#  endif//0
 
    std::string logss = "Caught signal ";
-   logss += signame;
+   logss += sigabbrev(signum); // signame;
    logss += ". Shutting down.";
 
    std::cerr << "\n" << logss << std::endl;
