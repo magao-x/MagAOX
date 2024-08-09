@@ -1328,7 +1328,12 @@ void sysMonitor::setlatThreadExec()
                cpuFile += std::to_string(cpu);
                cpuFile += "/cpufreq/scaling_governor";
                int wfd = open(cpuFile.c_str(), O_WRONLY);
-               write(wfd, "performance", sizeof("performance"));
+               ssize_t perfsz = sizeof("performance");
+               ssize_t wrtsz = write(wfd, "performance", perfsz);
+               if(wrtsz != perfsz)
+               {
+                  log<software_error>({ __FILE__,__LINE__,"error setting performance governor for CPU " + std::to_string(cpu) });
+               }
                close(wfd);
             }
             log<text_log>("set governor to performance", logPrio::LOG_NOTICE);
@@ -1367,7 +1372,13 @@ void sysMonitor::setlatThreadExec()
                cpuFile += std::to_string(cpu);
                cpuFile += "/cpufreq/scaling_governor";
                int wfd = open(cpuFile.c_str(), O_WRONLY);
-               write(wfd, "powersave", sizeof("powersave"));
+               ssize_t pwrsz = sizeof("powersave");
+               ssize_t wrtsz = write(wfd, "powersave", pwrsz);
+               if(wrtsz != pwrsz)
+               {
+                  log<software_error>({ __FILE__,__LINE__,"error setting powersave governor for CPU " + std::to_string(cpu) });
+               }
+
                close(wfd);
             }
             log<text_log>("set governor to powersave", logPrio::LOG_NOTICE);

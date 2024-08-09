@@ -1,5 +1,6 @@
 ../libMagAOX/app/tests/indiUtils_test
 ../libMagAOX/app/tests/MagAOXApp_test
+../libMagAOX/app/tests/stateCodes_test
 ../libMagAOX/app/dev/tests/outletController_test
 ../libMagAOX/sys/tests/thSetuid_test
 ../libMagAOX/tty/tests/ttyIOUtils_test 
@@ -15,6 +16,7 @@
 ../apps/stateRuleEngine/tests/indiCompRuleConfig_test
 ../apps/stateRuleEngine/tests/indiCompRules_test
 ../apps/streamWriter/tests/streamWriter_test
+../apps/sysMonitor/tests/sysMonitor_test
 ../apps/tcsInterface/tests/tcsInterface_test 
 ../apps/userGainCtrl/tests/userGainCtrl_test
 ../apps/xindiserver/tests/xindiserver_test
