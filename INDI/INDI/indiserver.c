@@ -44,7 +44,9 @@
  * Clients that get more than maxqsiz bytes behind are shut down.
  */
 
+#ifndef _GNU_SOURCE
 #define _GNU_SOURCE // needed for siginfo_t and sigaction
+#endif
 
 #include "config.h"
 
@@ -769,7 +771,7 @@ static void setMsgXMLEle(Msg *mp, XMLEle *root)
     if (mp->cl < sizeof(mp->buf))
         mp->cp = mp->buf;
     else
-        mp->cp = malloc(mp->cl + 1);
+        mp->cp = (char*) malloc(mp->cl + 1);
     sprXMLEle(mp->cp, root, 0);
 }
 
@@ -782,7 +784,7 @@ static void setMsgStr(Msg *mp, char *str)
     if (mp->cl < sizeof(mp->buf))
         mp->cp = mp->buf;
     else
-        mp->cp = malloc(mp->cl + 1);
+        mp->cp = (char*) malloc(mp->cl + 1);
     strcpy(mp->cp, str);
 }
 
@@ -1050,8 +1052,8 @@ static void shutdownDvr(DvrInfo *dp, int restart)
     for (i = 0; i < dp->ndev; i++)
     {
         /* Inform clients that this driver is dead */
-        XMLEle *root = addXMLEle(NULL, "delProperty");
-        addXMLAtt(root, "device", dp->dev[i]);
+        XMLEle *root = addXMLEle(NULL, (char*)"delProperty");
+        addXMLAtt(root, (char*)"device", dp->dev[i]);
 
         /* Ensure timestamp is prefixed to line sent to STDERR */
         fprintf(stderr, "%s: Driver shutdown: ", indi_tstamp(NULL));
@@ -1588,7 +1590,7 @@ static void newClient()
     cp->gzfird = gzdopen(cp->s, "r");
     cp->lp     = newLilXML();
     cp->msgq   = newFQ(1);
-    cp->props  = malloc(1);
+    cp->props  = (Property*) malloc(1);
     cp->nsent  = 0;
 
     if (verbose > 0)
@@ -2315,8 +2317,13 @@ static int readFromDriver(DvrInfo *dp)
     return (shutany ? -1 : 0);
 }
 
+#ifndef __INDISERVER_MAIN__
+#define __INDISERVER_MAIN__ main
+#define __CALL_INDIRUN_IN_MAIN__
+static
+#endif//__INDISERVER_MAIN__
 /* service traffic from clients and drivers */
-static void indiRun(void)
+void indiRun(void)
 {
     fd_set rs, ws;
     int maxfd = 0;
@@ -2457,7 +2464,7 @@ static void indiRun(void)
     handle_restart_list(&tv, startDvr);
 }
 
-int main(int ac, char *av[])
+int __INDISERVER_MAIN__(int ac, char *av[])
 {
     /* log startup */
     logStartup(ac, av);
@@ -2586,11 +2593,13 @@ int main(int ac, char *av[])
     /* Load up FIFO, if available */
     indiFIFO();
 
+#ifdef __CALL_INDIRUN_IN_MAIN__
     /* handle new clients and all io */
     while (1)
         indiRun();
 
     /* whoa! */
     fprintf(stderr, "unexpected return from main\n");
+#endif//__CALL_INDIRUN_IN_MAIN__
     return (1);
 }

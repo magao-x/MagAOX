@@ -72,7 +72,7 @@ FQ *newFQ(int grow)
 {
     FQ *q = (FQ *)(*fqmalloc)(sizeof(FQ));
     memset(q, 0, sizeof(FQ));
-    q->q    = (*fqmalloc)(1); /* seed for realloc */
+    q->q    = (void**)(*fqmalloc)(1); /* seed for realloc */
     q->grow = grow > 0 ? grow : 1;
     return (q);
 }
@@ -147,7 +147,7 @@ static void chkFQ(FQ *q)
 
     /* realloc to minimum number of grow-sized chunks required */
     q->nmem = q->grow * (q->head / q->grow + 1);
-    q->q    = (*fqrealloc)(q->q, q->nmem * sizeof(void *));
+    q->q    = (void**)(*fqrealloc)(q->q, q->nmem * sizeof(void *));
 }
 
 #if defined(TEST_FQ)
