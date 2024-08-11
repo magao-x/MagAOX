@@ -141,8 +141,6 @@ protected:
 
    std::vector<std::string> m_indiserverCommand; ///< The command line arguments to indiserver
 
-   pid_t m_isPID {0}; ///< The PID of the indiserver process
-
    int m_isSTDERR {-1}; ///< The output of stderr of the indiserver process
    int m_isSTDERR_input {-1}; ///< The input end of stderr, used to wake up the log thread on shutdown.
 
@@ -204,7 +202,7 @@ public:
      * \returns 0 on success
      * \returns -1 on error (fatal)
      */
-   int forkIndiserver();
+   int initINDIServer();
 
    ///Thread starter, called by isLogThreadStart on thread construction.  Calls isLogThreadExec.
    static void _isLogThreadStart( xindiserver * l /**< [in] a pointer to a xindiserver instance (normally this) */);
@@ -238,6 +236,7 @@ xindiserver::xindiserver() : MagAOXApp(MAGAOX_CURRENT_SHA1, MAGAOX_REPO_MODIFIED
 {
    //Use the sshTunnels.conf config file
    m_configBase = "sshTunnels";
+   m_loopPause = 100000000;//Default 0.1s; indiRun has 1s select timeout
 
    return;
 }
@@ -569,13 +568,15 @@ int xindiserver::addRemoteServers( std::vector<std::string> & driverArgs )
    return 0;
 }
 
+extern "C" { int callable_indiserver(int,char**); }
+
 inline
-int xindiserver::forkIndiserver()
+int xindiserver::initINDIServer()
 {
 
    if(m_log.logLevel() >= logPrio::LOG_INFO)
    {
-      std::string coml = "Starting indiserver with command:";
+      std::string coml = "Initializing indiserver with command:";
       for(size_t i=0;i<m_indiserverCommand.size();++i)
       {
          coml += " ";
@@ -593,47 +594,31 @@ int xindiserver::forkIndiserver()
       return -1;
    }
 
+   // Route (int)STDERR_FILENO, and also (FILE*)stderr, to pipe input.
+   // I.e. data written to filedes[1] can be read from filedes[0]
+   while ((dup2(filedes[1], STDERR_FILENO) == -1) && (errno == EINTR)) {}
 
-   m_isPID = fork();
-
-   if(m_isPID < 0)
+   // Populate argument count and vector for callable_indiserver
+   int is_argc = m_indiserverCommand.size();
+   char** is_argv = new char*[m_indiserverCommand.size()];
+   for(size_t i=0; i< m_indiserverCommand.size(); ++i)
    {
-      log<software_error>({__FILE__, __LINE__, errno, "fork failed"});
-      return -1;
+      is_argv[i] = (m_indiserverCommand[i].data());
    }
 
+   // Here's the beef:  initialize the INDI server
+   int rtn = callable_indiserver(is_argc, is_argv);
 
-   if(m_isPID == 0)
-   {
-      //Route STDERR of child to pipe input.
-      while ((dup2(filedes[1], STDERR_FILENO) == -1) && (errno == EINTR)) {}
-      close(filedes[1]);
-      close(filedes[0]);
+   // Clean up the INDI server argument vector
+   delete[] is_argv;
 
-      const char ** drivers = new const char*[m_indiserverCommand.size()+1];
-
-      for(size_t i=0; i< m_indiserverCommand.size(); ++i)
-      {
-         drivers[i] = (m_indiserverCommand[i].data());
-      }
-      drivers[m_indiserverCommand.size()] = NULL;
-
-
-      execvp("indiserver", (char * const*) drivers);
-
-      log<software_error>({__FILE__, __LINE__, errno, "execvp returned"});
-
-      delete[] drivers;
-
-      return -1;
-   }
-
+   // Save pipe for logging thread; see isLogThreadExec()
    m_isSTDERR = filedes[0];
    m_isSTDERR_input = filedes[1];
 
    if(m_log.logLevel() <= logPrio::LOG_INFO)
    {
-      std::string coml = "indiserver started with PID " + mx::ioutils::convertToString(m_isPID);
+      std::string coml = "indiserver initialized with return " + mx::ioutils::convertToString(rtn);
       log<text_log>(coml);
    }
 
@@ -829,26 +814,6 @@ int xindiserver::appStartup()
       log<software_critical>({__FILE__, __LINE__});
       return -1;
    }
-#  if 0
-   //--------------------
-   //Make symlinks
-   //--------------------
-   std::string path1 = "/opt/MagAOX/bin/xindidriver";
-   for(size_t i=0; i<m_local.size(); ++i)
-   {
-      elevatedPrivileges elPriv(this);
-
-      std::cerr << "creating symlink " << path1 << " " << m_driverPath + m_local[i] << "\n";
-
-      int rv = symlink(path1.c_str(), (m_driverPath + m_local[i]).c_str());
-
-      if(rv < 0 && errno != EEXIST)
-      {
-         log<software_error>({__FILE__, __LINE__, errno});
-         log<software_error>({__FILE__, __LINE__, "Failed to create symlink for driver: " + m_local[i] + ". Continuing."});
-      }
-   }
-#  endif//0
 
    m_local.clear();
    m_remote.clear();
@@ -857,7 +822,7 @@ int xindiserver::appStartup()
    //--------------------
    //Now start indiserver
    //--------------------
-   if(forkIndiserver() < 0)
+   if(initINDIServer() < 0)
    {
       log<software_critical>({__FILE__, __LINE__});
       return -1;
@@ -872,25 +837,13 @@ int xindiserver::appStartup()
    return 0;
 }
 
+extern "C" { void indiRun(void); }
+
 inline
 int xindiserver::appLogic()
 {
-   int status;
-   pid_t result = waitpid(m_isPID, &status, WNOHANG);
-   if (result == 0)
-   {
-      state(stateCodes::CONNECTED);
-   }
-   else
-   {
-      //We don't care why.  If indiserver is not alive while in this function then it's a fatal error.
-      log<text_log>("indiserver has exited", logPrio::LOG_CRITICAL);
-      state(stateCodes::FAILURE);
-      return -1;
-   }
-
-
-
+   state(stateCodes::CONNECTED);
+   indiRun();
    return 0;
 }
 
@@ -898,11 +851,7 @@ inline
 int xindiserver::appShutdown()
 {
 
-   if(m_isPID > 0)
-   {
-      kill(m_isPID, SIGTERM);
-   }
-
+   // Wake up logging thread by sending it data
    if(m_isSTDERR_input >= 0)
    {
       char w = '\0';
@@ -916,7 +865,8 @@ int xindiserver::appShutdown()
       }
    }
 
-   if(m_isLogThread.joinable()) m_isLogThread.join();
+   if(m_isLogThread.joinable()) { m_isLogThread.join(); }
+   else { log<text_log>("indiserver is not joinable"); }
    return 0;
 }
 
