@@ -132,17 +132,18 @@
 /** \param prop1 [in] the first property to compare
   * \param prop2 [in] the second property to compare
   */
-#define INDI_VALIDATE_CALLBACK_PROPS_IMPL(prop1, prop2)                                                                           \
-        if(prop1.createUniqueKey() != prop2.createUniqueKey())                                                                    \
-        {                                                                                                                         \
-            INDI_VALIDATE_LOG_ERROR(prop1, prop2)                                                                                 \
-            return -1;                                                                                                            \
+#define INDI_VALIDATE_CALLBACK_PROPS_IMPL(prop1, prop2)                \
+        if(prop1.createUniqueKey() != prop2.createUniqueKey())         \
+        {                                                              \
+            INDI_VALIDATE_LOG_ERROR(prop1, prop2)                      \
+            return -1;                                                 \
         }
 
 #ifdef XWCTEST_INDI_CALLBACK_VALIDATION
 
 // When testing validation of callback checks, we add a return 0 to avoid executing the rest of the callback.
-#define INDI_VALIDATE_CALLBACK_PROPS(prop1, prop2)  INDI_VALIDATE_CALLBACK_PROPS_IMPL(prop1, prop2) else {return 0;}
+#define INDI_VALIDATE_CALLBACK_PROPS(prop1, prop2)  INDI_VALIDATE_CALLBACK_PROPS_IMPL(prop1, prop2)  \
+                                                    else {return 0;}
 
 #else
 
@@ -369,6 +370,28 @@ if( derived().template registerIndiPropertySet( prop,devName,  propName, INDI_SE
     {                                                                                                \
         log<software_error>({__FILE__,__LINE__, "error from registerIndiPropertyNew"});              \
         return -1;                                                                                   \
+    }
+
+/// Create and register a RO INDI property as a number, using the standard callback name.
+/** This wraps createROIndiNumber and registerIndiPropertyReadOnly, with error checking.
+  *
+  * \param prop   [out] the property to create and setup
+  * \param name   [in] the name of the property
+  * \param label  [in] [optional] the GUI label suggestion for this property
+  * \param group  [in] [optional] the group for this property
+  * 
+  * \ingroup indi
+  */
+#define CREATE_REG_INDI_RO_NUMBER( prop, name, label, group )                                \
+    if( createROIndiNumber( prop, name, label, group ) < 0)                                  \
+    {                                                                                        \
+        log<software_error>({__FILE__,__LINE__, "error from createROIndiNumber"});           \
+        return -1;                                                                           \
+    }                                                                                        \
+    if( registerIndiPropertyReadOnly( prop ) < 0)                                            \
+    {                                                                                        \
+        log<software_error>({__FILE__,__LINE__, "error from registerIndiPropertyReadOnly"}); \
+        return -1;                                                                           \
     }
 
 /// Create and register a NEW INDI property as a standard toggle switch, using the standard callback name.
