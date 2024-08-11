@@ -256,11 +256,7 @@ int modalPSDs::appStartup()
 
    SHMIMMONITOR_APP_STARTUP;
 
-   if (threadStart(m_psdThread, m_psdThreadInit, m_psdThreadID, m_psdThreadProp, m_psdThreadPrio, m_psdThreadCpuset, "psdcalc", this, psdThreadStart) < 0)
-   {
-      log<software_error>({ __FILE__, __LINE__ });
-      return -1;
-   }
+   XWCAPP_THREAD_START(m_psdThread, m_psdThreadInit, m_psdThreadID, m_psdThreadProp, m_psdThreadPrio, m_psdThreadCpuset, "psdcalc", psdThreadStart);
 
    state(stateCodes::OPERATING);
 
@@ -270,6 +266,8 @@ int modalPSDs::appStartup()
 int modalPSDs::appLogic()
 {
    SHMIMMONITOR_APP_LOGIC;
+
+   XWCAPP_THREAD_CHECK(m_psdThread, "psdcalc");
 
    std::unique_lock<std::mutex> lock(m_indiMutex);
 
@@ -282,17 +280,7 @@ int modalPSDs::appShutdown()
 {
    SHMIMMONITOR_APP_SHUTDOWN;
 
-   if (m_psdThread.joinable())
-   {
-      pthread_kill(m_psdThread.native_handle(), SIGUSR1);
-      try
-      {
-         m_psdThread.join(); //this will throw if it was already joined
-      }
-      catch (...)
-      {
-      }
-   }
+   XWCAPP_THREAD_STOP( m_psdThread );
 
    if (m_rawpsdStream)
    {
