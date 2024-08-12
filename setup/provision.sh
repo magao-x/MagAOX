@@ -244,8 +244,8 @@ fi
 # Create Python env and install Python libs that need special treatment
 # Note that subsequent steps will use libs from conda since the base
 # env activates by default.
-sudo -H bash -l "$DIR/steps/install_python.sh"
-sudo -H bash -l "$DIR/steps/configure_python.sh"
+sudo -H bash -l "$DIR/steps/install_python.sh" || exit_with_error "Couldn't install Python"
+sudo -H bash -l "$DIR/steps/configure_python.sh" || exit_with_error "Couldn't configure Python environments"
 source /opt/conda/bin/activate
 
 if [[ $ID == centos && ( $MAGAOX_ROLE == AOC || $MAGAOX_ROLE == TOC || $MAGAOX_ROLE == vm ) ]]; then
