@@ -10,7 +10,7 @@
 #define XWCTEST_INDI_CALLBACK_VALIDATION
 
 /// Make an indi property variable name
-/** This takes m_indiP_ and voltage and creates m_indiP_voltage, which is the standard way
+/** This takes m_indiP_ and voltage (as the propname) and creates m_indiP_voltage, which is the standard way
   * to name an INDI property which takes new requests.
   * 
   * \param stub [in] the first part of the variable name, e.g. m_indiP_ 

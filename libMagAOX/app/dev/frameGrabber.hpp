@@ -34,7 +34,21 @@ namespace dev
 /** MagAO-X generic frame grabber
   *
   * 
-  * The derived class `derivedT` must expose the following interface
+  * The derived class `derivedT` has the following requirements:
+  * 
+  * - Must be derived from MagAOXApp<true>
+  * 
+  * - Must contain the following friend declaration:
+  *   \code
+  *       friend class dev::frameGrabber<derivedT>; //replace derivedT
+  *   \endcode
+  * 
+  * - Must declare the following typedef:
+  *   \code
+  *       typedef dev::frameGrabber<derivedT> frameGrabberT; //replace derivedT
+  *   \endcode
+  * 
+  * - must expose the following interface
   * \code 
     //Configures the camera for acquistion, must also set m_width, m_height, and m_dataType
     //so that the shared memory can be allocated
@@ -69,8 +83,17 @@ namespace dev
   * \endcode
   * which determines whether or not the images can be flipped programatically.
   *
-  * Calls to this class's `setupConfig`, `loadConfig`, `appStartup`, `appLogic` and `appShutdown`
-  * functions must be placed in the derived class's functions of the same name.
+  * Calls to this class's `setupConfig`, `loadConfig`, `appStartup`, `appLogic`, `updateINDI`, and `appShutdown`
+  * functions must be placed in the derived class's functions of the same name. For convenience the 
+  *   following macros are defined to provide error checking:
+  *   \code  
+  *       FRAMEGRABBER_SETUP_CONFIG( cfig )
+  *       FRAMEGRABBER_LOAD_CONFIG( cfig )
+  *       FRAMEGRABBER_APP_STARTUP
+  *       FRAMEGRABBER_APP_LOGIC
+  *       FRAMEGRABBER_UPDATE_INDI
+  *       FRAMEGRABBER_APP_SHUTDOWN
+  *   \endcode
   *
   * \ingroup appdev
   */
@@ -152,7 +175,7 @@ public:
        \endcode
      * with appropriate error checking.
      */
-   void setupConfig(mx::app::appConfigurator & config /**< [out] the derived classes configurator*/);
+   int setupConfig(mx::app::appConfigurator & config /**< [out] the derived classes configurator*/);
 
    /// load the configuration system results
    /**
@@ -162,7 +185,7 @@ public:
        \endcode
      * with appropriate error checking.
      */
-   void loadConfig(mx::app::appConfigurator & config /**< [in] the derived classes configurator*/);
+   int loadConfig(mx::app::appConfigurator & config /**< [in] the derived classes configurator*/);
 
    /// Startup function
    /** Starts the framegrabber thread
@@ -287,7 +310,7 @@ private:
 };
 
 template<class derivedT>
-void frameGrabber<derivedT>::setupConfig(mx::app::appConfigurator & config)
+int frameGrabber<derivedT>::setupConfig(mx::app::appConfigurator & config)
 {
    config.add("framegrabber.threadPrio", "", "framegrabber.threadPrio", argType::Required, "framegrabber", "threadPrio", false, "int", "The real-time priority of the framegrabber thread.");
 
@@ -306,10 +329,12 @@ void frameGrabber<derivedT>::setupConfig(mx::app::appConfigurator & config)
    {
       config.add("framegrabber.defaultFlip", "", "framegrabber.defaultFlip", argType::Required, "framegrabber", "defaultFlip", false, "string", "The default flip of the image.  Options are flipNone, flipUD, flipLR, flipUDLR.  The default is flipNone.");
    }
+
+   return 0;
 }
 
 template<class derivedT>
-void frameGrabber<derivedT>::loadConfig(mx::app::appConfigurator & config)
+int frameGrabber<derivedT>::loadConfig(mx::app::appConfigurator & config)
 {
    config(m_fgThreadPrio, "framegrabber.threadPrio");
    config(m_fgCpuset, "framegrabber.cpuset");
@@ -360,6 +385,8 @@ void frameGrabber<derivedT>::loadConfig(mx::app::appConfigurator & config)
          m_defaultFlip = fgFlipNone;
       }
    }
+
+   return 0;
 }
    
 
@@ -811,6 +838,56 @@ int frameGrabber<derivedT>::recordFGTimings( bool force )
    return 0;
 
 }
+
+/// Call frameGrabberT::setupConfig with error checking for frameGrabber
+/**
+  * \param cfig the application configurator 
+  */
+#define FRAMEGRABBER_SETUP_CONFIG( cfig )                                                   \
+    if(frameGrabberT::setupConfig(cfig) < 0)                                                \
+    {                                                                                       \
+        log<software_error>({__FILE__, __LINE__, "Error from frameGrabberT::setupConfig"}); \
+        m_shutdown = true;                                                                  \
+        return;                                                                             \
+    }
+
+/// Call frameGrabberT::loadConfig with error checking for frameGrabber
+/** This must be inside a function that returns int, e.g. the standard loadConfigImpl.
+  * \param cfig the application configurator 
+  */
+#define FRAMEGRABBER_LOAD_CONFIG( cfig )                                                             \
+    if(frameGrabberT::loadConfig(cfig) < 0)                                                          \
+    {                                                                                                \
+        return log<software_error,-1>({__FILE__, __LINE__, "Error from frameGrabberT::loadConfig"}); \
+    }
+
+/// Call frameGrabberT::appStartup with error checking for frameGrabber
+#define FRAMEGRABBER_APP_STARTUP                                                                     \
+    if(frameGrabberT::appStartup() < 0)                                                              \
+    {                                                                                                \
+        return log<software_error,-1>({__FILE__, __LINE__, "Error from frameGrabberT::appStartup"}); \
+    }
+
+/// Call frameGrabberT::appLogic with error checking for frameGrabber
+#define FRAMEGRABBER_APP_LOGIC                                                                     \
+    if(frameGrabberT::appLogic() < 0)                                                              \
+    {                                                                                              \
+        return log<software_error,-1>({__FILE__, __LINE__, "Error from frameGrabberT::appLogic"}); \
+    }
+
+/// Call frameGrabberT::updateINDI with error checking for frameGrabber
+#define FRAMEGRABBER_UPDATE_INDI                                                                     \
+    if(frameGrabberT::updateINDI() < 0)                                                              \
+    {                                                                                                \
+        return log<software_error,-1>({__FILE__, __LINE__, "Error from frameGrabberT::updateINDI"}); \
+    }
+
+/// Call frameGrabberT::appShutdown with error checking for frameGrabber
+#define FRAMEGRABBER_APP_SHUTDOWN                                                                     \
+    if(frameGrabberT::appShutdown() < 0)                                                              \
+    {                                                                                                 \
+        return log<software_error,-1>({__FILE__, __LINE__, "Error from frameGrabberT::appShutdown"}); \
+    }
 
 } //namespace dev
 } //namespace app

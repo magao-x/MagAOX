@@ -3419,4 +3419,65 @@ extern template class MagAOXApp<false>;
 } //namespace app
 } //namespace MagAOX
 
+/// Error handling wrapper for the threadStart function of the XWCApp
+/** This should be placed in appLogic for each thread managed by an MagAOXApp.  
+  * On error, this will cause the app to shutdown.
+  * \see MagAOXApp::threadStart
+  * 
+  * \param thrdSt     [out] (std::thread) The thread object to start executing
+  * \param thrdInit   [in/out] (bool) The thread initilization synchronizer. 
+  * \param thrdId     [in/out] (pid_t) The thread pid to be filled in by thrdStart immediately upon call
+  * \param thrdProp   [in/out](pcf::IndiProperty) The INDI property to publish the thread details
+  * \param thrdPrio   [in] (int) The r/t priority to set for this thread
+  * \param thrdCpuset [in] (const std::string &) the cpuset to place this thread on.  Ignored if "".
+  * \param thrdName   [in] (const std::string &) The name of the thread (just for logging)
+  * \param thrdStart  [in] (function) The thread starting function, a static function taking a `this` pointer as argument.
+  */
+#define XWCAPP_THREAD_START( thrdSt, thrdInit, thrdId, thrdProp, thrdPrio, thrdCpuset, thrdName, thrdStart)   \
+   if (threadStart(thrdSt, thrdInit, thrdId, thrdProp, thrdPrio, thrdCpuset, thrdName, this, thrdStart) < 0)  \
+   {                                                                                                          \
+      log<software_error>({ __FILE__, __LINE__, "error from threadStart for " #thrdName });                   \
+      return -1;                                                                                              \
+   }
+
+/// Error handling wrapper for checking on thread status with tryjoin
+/** This should be placed in appLogic for each thread managed by an MagAOXApp.  If the
+  * thread has exited or otherwise causes an error the app will exit.
+  * 
+  * \param thrdSt   [in] (std::thread) The thread object to start executing
+  * \param thrdName [in] (const std::string &) The name of the thread (just for logging)
+  */
+#define XWCAPP_THREAD_CHECK( thrdSt, thrdName )                                          \
+    try                                                                                  \
+    {                                                                                    \
+        if(pthread_tryjoin_np(thrdSt.native_handle(), 0) == 0)                           \
+        {                                                                                \
+            log<software_error>({__FILE__, __LINE__, #thrdName " thread has exited"});   \
+            return -1;                                                                   \
+        }                                                                                \
+    }                                                                                    \
+    catch (...)                                                                          \
+    {                                                                                    \
+        log<software_error>({__FILE__, __LINE__, #thrdName " thread has exited"});       \
+        return -1;                                                                       \
+    }                                                                                    
+
+/// Error handlng wrapper for stopping a thread
+/** This should be placed in appShutdown for each thread managed by an MagAOXApp.
+  * 
+  * \param thrdSt [in] (std::thread) The thread object to start executing
+  */
+#define XWCAPP_THREAD_STOP( thrdSt )                      \
+   if(thrdSt.joinable())                                  \
+   {                                                      \
+      pthread_kill(thrdSt.native_handle(), SIGUSR1);      \
+      try                                                 \
+      {                                                   \
+         thrdSt.join();                                   \
+      }                                                   \
+      catch (...)                                         \
+      {                                                   \
+      }                                                   \
+   }
+
 #endif //app_MagAOXApp_hpp

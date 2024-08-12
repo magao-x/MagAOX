@@ -64,6 +64,7 @@ def frames_to_movie(
     preview,
     constant_rate_factor,
     accumulate,
+    crop,
 ):
     frames_paths = frames_paths[::every_nth_frame]
     vmin, vmax = sample_frames_to_limits(frames_paths, sample_n_files, pct_min, pct_max, bin)
@@ -79,6 +80,8 @@ def frames_to_movie(
     for idx, fn in enumerate(tqdm.tqdm(frames_paths)):
         with open(fn, 'rb') as fh:
             img = fits.getdata(fh)
+            if crop > 0:
+                img = img[crop:-crop,crop:-crop]
             if accumulate:
                 if accumulator is None:
                     accumulator = np.zeros(img.shape)
@@ -89,9 +92,10 @@ def frames_to_movie(
             if rough_bg_subtract:
                 img = img - np.median(img, axis=1)[:, np.newaxis]
             if log_scale:
-                img = np.log10(img)
-                scale_kwargs['vmin'] = max(np.log10(vmin), 0.1)
-                scale_kwargs['vmax'] = max(np.log10(vmax), 0.1)
+                min_offset = np.min(img)
+                img = np.log10(img - min_offset + 1)
+                scale_kwargs['vmin'] = max(np.log10(vmin - min_offset + 1), 0.1)
+                scale_kwargs['vmax'] = max(np.log10(vmax - min_offset + 1), 0.1)
             if preview:
                 plt.imsave(f"{output_dir}/{movie_name}_preview.png", img, cmap=cmap, **scale_kwargs)
                 return
@@ -145,12 +149,13 @@ def main(args):
             args.preview,
             args.crf,
             args.accumulate,
+            args.crop,
         )
     else:
         obs_name = args.OBS_NAME_OR_DIR
         cameras = args.cameras if args.cameras is not None else SCIENCE_CAMERAS
         for cam in cameras:
-            frames = list(sorted(glob.glob(f"{args.quicklook_root}/*/{obs_name}/{cam}/*.fits")))
+            frames = list(sorted(glob.glob(f"{args.quicklook_root}/*/*/*_{obs_name}/{cam}/*.fits")))
             log.info(f"Found {len(frames)} for {obs_name}")
             frames_to_movie(
                 frames,
@@ -168,6 +173,7 @@ def main(args):
                 args.preview,
                 args.crf,
                 args.accumulate,
+                args.crop,
             )
 
 if __name__ == "__main__":
@@ -180,10 +186,11 @@ if __name__ == "__main__":
     parser.add_argument('--sample-n-files', type=int, default=100, help="How many files to sample to determine percentile-based min/max")
     parser.add_argument('--every-nth-frame', type=int, default=1, help="How much to downsample the time-series of images")
     parser.add_argument('--bin', type=int, default=1, help="How much to spatially downsample the images as an integer binning factor")
-    parser.add_argument('--percentile-min', type=float, default=5, help="Percentile setting minimum of color bar scale")
-    parser.add_argument('--percentile-max', type=float, default=99, help="Percentile setting maximum of color bar scale")
+    parser.add_argument('--percentile-min', type=float, default=5, help="Percentile setting minimum of color bar scale (default: 5)")
+    parser.add_argument('--percentile-max', type=float, default=99.5, help="Percentile setting maximum of color bar scale (default: 99.5)")
     parser.add_argument('--log-scale', action='store_true', help="Whether to logarithmically scale the images")
     parser.add_argument('--rough-bg-subtract', action='store_true', help="Whether to subtract the median column from each frame")
+    parser.add_argument('--crop', type=int, default=0, help="Number of pixels to crop from all sides")
     parser.add_argument('--preview', action='store_true', help="Write preview frame with colormap and scaling and exit")
     parser.add_argument('--accumulate', action='store_true', help="")
     parser.add_argument('--crf', type=int, default=24, help="H.264 constant rate factor for compression (higher is smaller with worse quality)")

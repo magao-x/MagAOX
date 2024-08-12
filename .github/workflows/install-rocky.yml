@@ -1,8 +1,11 @@
 name: "Rocky build"
 on:
   push:
+    branches:
+      - '*'
+      - '!libcommon-refactor'
   schedule:
-      - cron: '43 5 * * *'
+    - cron: '43 5 * * *'
 jobs:
   install-rocky:
     runs-on: ubuntu-latest

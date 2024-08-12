@@ -160,7 +160,7 @@ struct telem_telcat : public flatbuffer_log
      */ 
    static logMetaDetail getAccessor( const std::string & member /**< [in] the name of the member */ )
    {
-      if(     member == "catObj") return logMetaDetail({"CATOBJ", logMeta::valTypes::String, logMeta::metaTypes::State, reinterpret_cast<void*>(&catObj), false});
+      if(     member == "catObj") return logMetaDetail({"OBJECT", logMeta::valTypes::String, logMeta::metaTypes::State, reinterpret_cast<void*>(&catObj), false});
       else if(member == "catRm")  return logMetaDetail({"CATRM", logMeta::valTypes::String, logMeta::metaTypes::State, reinterpret_cast<void*>(&catRm), false});
       else if(member == "catRA")  return logMetaDetail({"CATRA", logMeta::valTypes::Double, logMeta::metaTypes::State, reinterpret_cast<void*>(&catRA), false});
       else if(member == "catDec") return logMetaDetail({"CATDEC", logMeta::valTypes::Double, logMeta::metaTypes::State, reinterpret_cast<void*>(&catDec), false});

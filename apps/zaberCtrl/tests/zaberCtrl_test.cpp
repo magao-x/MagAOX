@@ -21,7 +21,7 @@ class zaberCtrl_test : public zaberCtrl
 {
 
 public:
-    zaberCtrl_test(const std::string device)
+    zaberCtrl_test(const std::string & device)
     {
         m_configName = device;
 
