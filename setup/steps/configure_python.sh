@@ -68,6 +68,8 @@ if [[ $MAGAOX_ROLE != ci ]]; then
 		sudo mv $overrideFile $overrideFileDest
 	fi
 
+	sudo /sbin/restorecon -v /etc/systemd/system/jupyternotebook.service.d/override.conf
+	sudo /sbin/restorecon -v /etc/systemd/system/jupyternotebook.service
 	sudo -H systemctl daemon-reload
 	
 	sudo -H systemctl enable jupyternotebook
