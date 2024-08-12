@@ -164,6 +164,7 @@ void alignLoop::setupConfig()
    config.add("ctrl.currents", "", "ctrl.currents", argType::Required, "ctrl", "currents", false, "vector<string>", "current elements of the properties on which base the commands.");
    config.add("ctrl.targets", "", "ctrl.targets", argType::Required, "ctrl", "targets", false, "vector<string>", "target elements of the properties to which to send the commands.");
 
+   config.add("loop.gain", "", "loop.gain", argType::Required, "loop", "gain", false, "float", "default global loop gain.");
    config.add("loop.intMat", "", "loop.intMat", argType::Required, "loop", "intMat", false, "string", "file name of the interaction matrix.");
    config.add("loop.gains", "", "loop.gains", argType::Required, "loop", "gains", false, "vector<float>", "default loop gains.  If single number, it is applied to all axes.");
    config.add("loop.upstream", "", "loop.upstream", argType::Required, "loop", "upstream", false, "string", "Upstream loop device name.  This loop will open, and optionally close, with the upstream loop.  Default none.");
@@ -179,6 +180,7 @@ int alignLoop::loadConfigImpl( mx::app::appConfigurator & _config )
    _config(m_ctrlProperties, "ctrl.properties");
    _config(m_ctrlCurrents, "ctrl.currents");
    _config(m_ctrlTargets, "ctrl.targets");
+   _config(m_ggain, "loop.gain");
    _config(m_intMatFile, "loop.intMat");
    _config(m_defaultGains, "loop.gains");
    _config(m_upstreamDevice, "loop.upstream");
@@ -254,8 +256,7 @@ int alignLoop::appStartup()
    {
       registerIndiPropertySet( m_indiP_ctrl[n], m_ctrlDevices[n], m_ctrlProperties[n], &st_setCallBack_ctrl);
    }
-   std::string intMatPath = m_calibDir + "/" + m_intMatFile; 
-
+   
    m_commands.resize(m_ctrlTargets.size(), m_ctrlTargets.size()) ;
    m_commands.setZero();
 
@@ -267,6 +268,8 @@ int alignLoop::appStartup()
    m_intMat(0,1) = 0.926;
 
 /*
+   std::string intMatPath = m_calibDir + "/" + m_intMatFile; 
+ 
    mx::fits::fitsFile<float> ff;
    try
    {
@@ -360,7 +363,7 @@ int alignLoop::processImage( void* curr_src,
    
    for(unsigned nn=0; nn < shmimMonitorT::m_width*shmimMonitorT::m_height; ++nn)
    {
-      m_measurements.data()[nn] = ((float*)curr_src) [nn];
+      m_measurements.data()[nn] = (static_cast<float*>(curr_src)) [nn];
    }
 
 
