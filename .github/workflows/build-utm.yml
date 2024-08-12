@@ -1,7 +1,7 @@
 name: Build UTM ARM virtual machine
 on:
-  push:
-    branches: []
+  schedule:
+    - cron: '12 6 * * *'
 # on:
 #   # workflow_run:
 #   #   workflows: ["Rocky build"]
