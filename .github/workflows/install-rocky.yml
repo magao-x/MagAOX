@@ -2,8 +2,9 @@ name: "Rocky build"
 on:
   push:
     branches:
-      - '*'
-      - '!libcommon-refactor'
+      - xvm
+      # - '*'
+      # - '!libcommon-refactor'
   schedule:
     - cron: '43 5 * * *'
 jobs:
