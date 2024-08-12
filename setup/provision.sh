@@ -53,15 +53,6 @@ if [[ ! -e $roleScript ]]; then
 fi
 source $roleScript
 
-if [[ $MAGAOX_ROLE == ci ]]; then
-    export NEEDRESTART_SUSPEND=yes
-    export DEBIAN_FRONTEND=noninteractive
-    cat <<'HERE' | sudo tee /etc/profile.d/ci.sh || exit 1
-export NEEDRESTART_SUSPEND=yes
-export DEBIAN_FRONTEND=noninteractive
-HERE
-fi
-
 # Get logging functions
 source $DIR/_common.sh
 
