@@ -479,7 +479,7 @@ int streamWriter::appLogic()
     }
     catch (...)
     {
-        log<software_error>({__FILE__, __LINE__, "streamwriter thread has exited"});
+        log<software_error>({__FILE__, __LINE__, "framegrabber thread has exited"});
         return -1;
     }
 

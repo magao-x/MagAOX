@@ -56,7 +56,8 @@ protected:
    double m_C1setVoltage {5.0}; ///< the set position voltage of Ch. 1.
    double m_C2setVoltage {5.0}; ///< the set position voltage of Ch. 2.
 
-   bool m_C1syncOn {false};
+   bool m_C1outpOn {false}; /**< Flag controlling if C1 output is on after normalization.
+                                 This will only have an effect if m_C1wvtp is "pulse" */
 
    ///@}
 
@@ -456,12 +457,11 @@ void siglentSDG::setupConfig()
    config.add("timeouts.write", "", "timeouts.write", argType::Required, "timeouts", "write", false, "int", "The timeout for writing to the device [msec]. Default = 1000");
    config.add("timeouts.read", "", "timeouts.read", argType::Required, "timeouts", "read", false, "int", "The timeout for reading the device [msec]. Default = 2000");
    
-   config.add("fxngen.C1syncOn", "", "fxngen.C1syncOn", argType::Required, "fxngen", "C1syncOn", false, "bool", "Whether (true) or not (false) C1 synchro output is enabled at startup.  Default is false");
+   config.add("fxngen.C1outpOn", "", "fxngen.C1outpOn", argType::Required, "fxngen", "C1outpOn", false, "bool", "Whether (true) or not (false) C1 output is enabled at startup. Only effective wavefrom is pulse. Default is false.");
    config.add("fxngen.waveform", "w", "fxngen.waveform", argType::Required, "fxngen", "waveform", false, "string", "The waveform to populate function.");
    
    config.add("fxngen.C1ampDefault", "", "fxngen.C1ampDefault", argType::Required, "fxngen", "C1ampDefault", false, "float", "C1 Default P2V Amplitude of waveform . Default = 0.0");
    config.add("fxngen.C2ampDefault", "", "fxngen.C2ampDefault", argType::Required, "fxngen", "C2ampDefault", false, "float", "C2 Default P2V Amplitude of waveform . Default = 0.0");
-   /// config.add("fxngen.clock", "c", "fxngen.clock", argType::Required, "fxngen", "clock", false, "string", "Internal (INT) or external (EXT) clock.");
 
    dev::telemeter<siglentSDG>::setupConfig(config);
 }
@@ -475,7 +475,7 @@ void siglentSDG::loadConfig()
    config(m_writeTimeOut, "timeouts.write");
    config(m_readTimeOut, "timeouts.read");
    
-   config(m_C1syncOn, "fxngen.C1syncOn");
+   config(m_C1outpOn, "fxngen.C1outpOn");
    config(m_waveform, "fxngen.waveform"); // todo: check if this is a valid waveform?
 
    config(m_C1vppDefault, "fxngen.C1ampDefault");
@@ -556,20 +556,13 @@ int siglentSDG::appStartup()
    m_indiP_C2outp.add (pcf::IndiElement("value"));
    m_indiP_C2outp["value"].set("");
 
-   //REG_INDI_NEWPROP(m_indiP_C2freq, "C2freq", pcf::IndiProperty::Number);
    CREATE_REG_INDI_NEW_NUMBERF( m_indiP_C2freq, "C2freq", -1e15, 1e15, 1, "%g", "C2freq", "C2freq");
-   //m_indiP_C2freq.add (pcf::IndiElement("value"));
    m_indiP_C2freq["current"].set(0);
    m_indiP_C2freq["target"].set(0);
 
-   //REG_INDI_NEWPROP(m_indiP_C2amp, "C2amp", pcf::IndiProperty::Number);
    CREATE_REG_INDI_NEW_NUMBERF( m_indiP_C2amp, "C2amp", -1e15, 1e15, 1, "%g", "C2amp", "C2amp");
-   //m_indiP_C2amp.add (pcf::IndiElement("value"));
    m_indiP_C2amp["current"].set(0);
    m_indiP_C2amp["target"].set(0);
-
-   //m_indiP_C2amp.add (pcf::IndiElement("value"));
-   //m_indiP_C2amp["value"].set(0);
 
    REG_INDI_NEWPROP(m_indiP_C2ofst, "C2ofst", pcf::IndiProperty::Number);
    m_indiP_C2ofst.add (pcf::IndiElement("value"));
@@ -1656,12 +1649,13 @@ int siglentSDG::normalizeSetup()
    changeAmp(1, m_C1vppDefault);
    changeAmp(2, m_C2vppDefault);
 
-   if(m_waveform == "SINE"){
+   if(m_waveform == "SINE")
+   {
       changePhse(1, 0);
       changePhse(2, 0);
    }
-
-   if(m_waveform == "PULSE"){
+   else if(m_waveform == "PULSE")
+   {
       changeWdth(1, 0);
       changeWdth(2, 0);
    }
@@ -1675,7 +1669,15 @@ int siglentSDG::normalizeSetup()
    changeOfst(1, 0.0);
    changeOfst(2, 0.0);
 
-   changeOutp(1, "OFF");
+   if(m_C1outpOn && m_waveform == "PULSE")
+   {
+      changeOutp(1, "ON");
+   }
+   else 
+   {
+      changeOutp(1, "OFF");
+   }
+
    changeOutp(2, "OFF");
 
    changeWvtp(1, m_waveform);

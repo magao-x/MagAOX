@@ -48,7 +48,7 @@ protected:
    bool m_jsonMode {false};
 
    unsigned long m_pauseTime {250}; ///When following, pause time to check for new data. msec. Default is 250 msec.
-   int m_fileCheckInterval {4}; ///When following, number of loops to wait before checking for a new file.  Default is 4.
+   int m_fileCheckInterval {20}; ///When following, number of loops to wait before checking for a new file.  Default is 4.
 
    std::vector<std::string> m_prefixes;
 
@@ -331,9 +331,12 @@ int logdump::execute()
             return -1;
          }
 
-         if (m_jsonMode) {
+         if (m_jsonMode) 
+         {
             printLogJson(len, logBuff);
-         } else {
+         } 
+         else 
+         {
             printLogBuff(lvl, ec, len, logBuff);
          }
 
