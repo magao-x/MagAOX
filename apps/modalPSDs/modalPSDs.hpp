@@ -378,7 +378,6 @@ int modalPSDs::allocate(const dev::shmimT& dummy)
       m_df = 1.0 / (m_tsSize);
    }
 
-
    //Create the shared memory images
    uint32_t imsize[3];
 
@@ -413,7 +412,6 @@ int modalPSDs::allocate(const dev::shmimT& dummy)
 
    m_freqStream->md->write = 0;
    ImageStreamIO_sempost(m_freqStream, -1);
-
 
    allocatePSDStreams();
 

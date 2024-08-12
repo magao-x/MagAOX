@@ -69,6 +69,7 @@ struct shmimT
   *       SHMIMMONITOR_LOAD_CONFIG( cfig )
   *       SHMIMMONITOR_APP_STARTUP
   *       SHMIMMONITOR_APP_LOGIC
+  *       SHMIMMONITOR_UPDATE_INDI
   *       SHMIMMONITOR_APP_SHUTDOWN
   *   \endcode
   *   See below for the macros to use if `specificT` is used to specialize.

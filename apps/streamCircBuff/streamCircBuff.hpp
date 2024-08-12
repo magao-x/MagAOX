@@ -33,7 +33,10 @@ namespace app
 /** 
   * \ingroup streamCircBuff
   */
-class streamCircBuff : public MagAOXApp<true>, public dev::shmimMonitor<streamCircBuff>, public dev::frameGrabber<streamCircBuff>, public dev::telemeter<streamCircBuff>
+class streamCircBuff : public MagAOXApp<true>, 
+                       public dev::shmimMonitor<streamCircBuff>, 
+                       public dev::frameGrabber<streamCircBuff>, 
+                       public dev::telemeter<streamCircBuff>
 {
    friend class dev::shmimMonitor<streamCircBuff>;
    friend class dev::frameGrabber<streamCircBuff>;
@@ -66,12 +69,9 @@ protected:
    /** \name Configurable Parameters
      *@{
      */
-   
-   
-   
    ///@}
 
-   char * m_currSrc;
+   char * m_currSrc {nullptr};
 
    sem_t m_smSemaphore {0}; ///< Semaphore used to synchronize the fg thread and the sm thread.
 
@@ -192,18 +192,22 @@ streamCircBuff::streamCircBuff() : MagAOXApp(MAGAOX_CURRENT_SHA1, MAGAOX_REPO_MO
 
 void streamCircBuff::setupConfig()
 {
-   shmimMonitorT::setupConfig(config);
-   frameGrabberT::setupConfig(config);
-   telemeterT::setupConfig(config);
+   SHMIMMONITOR_SETUP_CONFIG(config);
+   
+   FRAMEGRABBER_SETUP_CONFIG(config);
+
+   TELEMETER_SETUP_CONFIG(config);
    
 }
 
 int streamCircBuff::loadConfigImpl( mx::app::appConfigurator & _config )
 {
-   shmimMonitorT::loadConfig(_config);
-   frameGrabberT::loadConfig(_config);
-   telemeterT::loadConfig(config);   
+   SHMIMMONITOR_LOAD_CONFIG(_config);
+   
+   FRAMEGRABBER_LOAD_CONFIG(_config);
 
+   TELEMETER_LOAD_CONFIG(config);
+   
    return 0;
 }
 
@@ -220,20 +224,11 @@ int streamCircBuff::appStartup()
       return -1;
    }
 
-   if(shmimMonitorT::appStartup() < 0)
-   {
-      return log<software_error,-1>({__FILE__, __LINE__});
-   }
+   SHMIMMONITOR_APP_STARTUP;
 
-   if(frameGrabberT::appStartup() < 0)
-   {
-      return log<software_error,-1>({__FILE__, __LINE__});
-   }
+   FRAMEGRABBER_APP_STARTUP;
 
-   if(telemeterT::appStartup() < 0)
-   {
-      return log<software_error,-1>({__FILE__, __LINE__});
-   }
+   TELEMETER_APP_STARTUP;
 
    state(stateCodes::OPERATING);
 
@@ -242,41 +237,26 @@ int streamCircBuff::appStartup()
 
 int streamCircBuff::appLogic()
 {
-   if( shmimMonitorT::appLogic() < 0)
-   {
-      return log<software_error,-1>({__FILE__,__LINE__});
-   }
+   SHMIMMONITOR_APP_LOGIC;
 
-   if( frameGrabberT::appLogic() < 0)
-   {
-      return log<software_error,-1>({__FILE__,__LINE__});
-   }
+   FRAMEGRABBER_APP_LOGIC;
 
-   if( telemeterT::appLogic() < 0)
-   {
-      return log<software_error,-1>({__FILE__,__LINE__});
-   }
+   TELEMETER_APP_LOGIC;
 
    std::unique_lock<std::mutex> lock(m_indiMutex);
 
-   if(shmimMonitorT::updateINDI() < 0)
-   {
-      log<software_error>({__FILE__, __LINE__});
-   }
+   SHMIMMONITOR_UPDATE_INDI;
 
-   if(frameGrabberT::updateINDI() < 0)
-   {
-      log<software_error>({__FILE__, __LINE__});
-   }
+   FRAMEGRABBER_UPDATE_INDI;
 
    return 0;
 }
 
 int streamCircBuff::appShutdown()
 {
-   shmimMonitorT::appShutdown();
-   frameGrabberT::appShutdown();
-   telemeterT::appShutdown();
+   SHMIMMONITOR_APP_SHUTDOWN;
+   FRAMEGRABBER_APP_SHUTDOWN;
+   TELEMETER_APP_SHUTDOWN;
 
    return 0;
 }
@@ -286,6 +266,9 @@ int streamCircBuff::allocate( const dev::shmimT & dummy)
    static_cast<void>(dummy);
 
    //we don't actually do anything here -- just a pass through to f.g.
+
+   m_reconfig = true;
+
    return 0;
 }
    
@@ -307,7 +290,6 @@ int streamCircBuff::processImage( void * curr_src,
    return 0;
 }
 
-inline
 int streamCircBuff::configureAcquisition()
 {
    std::unique_lock<std::mutex> lock(m_indiMutex);
@@ -354,10 +336,20 @@ int streamCircBuff::acquireAndCheckValid()
    {
       return 1;
    }
+
+   if(m_currSrc == nullptr)
+   {
+      return 1;
+   }
 }
 
 int streamCircBuff::loadImageIntoStream(void * dest)
 {
+   if(m_currSrc == nullptr)
+   {
+      return -1;
+   }
+
    memcpy(dest, m_currSrc, shmimMonitorT::m_width*shmimMonitorT::m_height*frameGrabberT::m_typeSize  );
    return 0;
 }
@@ -372,7 +364,6 @@ int streamCircBuff::checkRecordTimes()
    return telemeterT::checkRecordTimes(telem_fgtimings());
 }
    
-inline
 int streamCircBuff::recordTelem( const telem_fgtimings * )
 {
    return recordFGTimings(true);
