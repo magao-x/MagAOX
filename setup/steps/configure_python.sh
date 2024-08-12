@@ -7,6 +7,7 @@ fi
 DIR="$( cd "$( dirname "${BASH_SOURCE[0]}" )" && pwd )"
 source $DIR/../_common.sh
 set -euo pipefail
+set -x
 
 #
 # Install the standard MagAOX user python environment
