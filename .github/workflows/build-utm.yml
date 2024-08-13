@@ -87,7 +87,7 @@ jobs:
         uses: actions/download-artifact@v4
         with:
             name: stage1_vm
-            path: $GITHUB_WORKSPACE/setup/xvm/output/
+            path: setup/xvm/output/
       - name: Install MagAO-X software
         run: |
             cd $GITHUB_WORKSPACE/setup/xvm/
