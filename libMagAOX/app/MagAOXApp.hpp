@@ -1392,7 +1392,10 @@ int MagAOXApp<_useINDI>::execute() //virtual
    if( lockPID() < 0 )
    {
       state(stateCodes::FAILURE);
-      log<text_log>({"Failed to lock PID."}, logPrio::LOG_CRITICAL);
+
+      //We don't log this, because it won't be logged anyway.
+      std::cerr << "\nCRITICAL: Failed to lock PID.  Exiting.\n\n";
+
       //Return immediately, not safe to go on.
       return -1;
    }
@@ -1413,8 +1416,12 @@ int MagAOXApp<_useINDI>::execute() //virtual
    
    if(m_log.logThreadRunning() == false)
    {
+      state(stateCodes::FAILURE);
+
       //We don't log this, because it won't be logged anyway.
       std::cerr << "\nCRITICAL: log thread not running.  Exiting.\n\n";
+
+      //Fall all the way through so PID gets unlocked
       m_shutdown = 1;
    }
 
@@ -1438,7 +1445,10 @@ int MagAOXApp<_useINDI>::execute() //virtual
    {
       if(startINDI() < 0)
       {
+         log<software_critical>({__FILE__, __LINE__, "INDI failed to start."});
          state(stateCodes::FAILURE);
+
+         //Fall all the way through so PID gets unlocked
          m_shutdown = 1;
       }
    }
