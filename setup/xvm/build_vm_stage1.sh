@@ -1,4 +1,5 @@
 #!/usr/bin/env bash
+source ./_common.sh
 set -x
 if [[ -e ./output/xvm_stage1.qcow2 ]]; then
     echo "Stage one image populated from cache. Skipping stage one."
@@ -15,7 +16,13 @@ fi
 bash create_oemdrv.sh
 bash download_rocky_iso.sh
 bash download_firmware.sh
-cp ./input/firmware/AAVMF_VARS.fd ./output/AAVMF_VARS.fd
+if [[ $qemuArch == aarch64 ]]; then
+    cp ./input/firmware/AAVMF_VARS.fd ./output/firmware_vars.fd
+    cp ./input/firmware/AAVMF_CODE.fd ./output/firmware_code.fd
+else
+    cp ./input/firmware/OVMF_VARS.fd ./output/firmware_vars.fd
+    cp ./input/firmware/OVMF_CODE.fd ./output/firmware_code.fd
+fi
 if [[ $(uname -p) == "arm" && $CI != "true" ]]; then
     cpuType="host"
     accelFlag=",highmem=on,accel=hvf:kvm"
@@ -24,16 +31,16 @@ else
     accelFlag=""
 fi
 echo "Starting VM installation process..."
-qemu-system-aarch64 \
+qemu-system-${qemuArch} \
     -name xvm \
-    -cdrom ./input/iso/Rocky-9.3-aarch64-minimal.iso \
+    -cdrom ./input/iso/Rocky-${rockyVersion}-${rockyArch}-minimal.iso \
     -netdev user,id=user.0 \
     -device virtio-keyboard-pci -device virtio-mouse-pci \
     -smp 4 \
     -machine type=virt$accelFlag \
     -cpu $cpuType \
-    -drive if=pflash,format=raw,id=ovmf_code,readonly=on,file=./input/firmware/AAVMF_CODE.fd \
-    -drive if=pflash,format=raw,id=ovmf_vars,file=./output/AAVMF_VARS.fd \
+    -drive if=pflash,format=raw,id=ovmf_code,readonly=on,file=./output/firmware_code.fd \
+    -drive if=pflash,format=raw,id=ovmf_vars,file=./output/firmware_vars.fd \
     -drive file=output/xvm.qcow2,format=qcow2 \
     -drive file=input/oemdrv.qcow2,format=qcow2 \
     -device virtio-gpu-pci \
@@ -41,6 +48,7 @@ qemu-system-aarch64 \
     -boot c \
     -m 8192M \
     -display none \
+    -serial stdio \
 || exit 1
 cp -v ./output/xvm.qcow2 ./output/xvm_stage1.qcow2
-echo "Created VM and installed Rocky Linux 9.3 with KDE."
+echo "Created VM and installed Rocky Linux"

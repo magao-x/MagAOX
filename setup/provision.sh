@@ -53,15 +53,6 @@ if [[ ! -e $roleScript ]]; then
 fi
 source $roleScript
 
-if [[ $MAGAOX_ROLE == ci ]]; then
-    export NEEDRESTART_SUSPEND=yes
-    export DEBIAN_FRONTEND=noninteractive
-    cat <<'HERE' | sudo tee /etc/profile.d/ci.sh || exit 1
-export NEEDRESTART_SUSPEND=yes
-export DEBIAN_FRONTEND=noninteractive
-HERE
-fi
-
 # Get logging functions
 # Also defines $ID and $VERSION_ID, from /etc/os-release, so we can detect which distribution we're on
 source $DIR/_common.sh
@@ -285,8 +276,8 @@ fi
 # Create Python env and install Python libs that need special treatment
 # Note that subsequent steps will use libs from conda since the base
 # env activates by default.
-sudo -H bash -l "$DIR/steps/install_python.sh"
-sudo -H bash -l "$DIR/steps/configure_python.sh"
+sudo -H bash -l "$DIR/steps/install_python.sh" || exit_with_error "Couldn't install Python"
+sudo -H bash -l "$DIR/steps/configure_python.sh" || exit_with_error "Couldn't configure Python environments"
 source /opt/conda/bin/activate
 
 if [[ $ID == centos && ( $MAGAOX_ROLE == AOC || $MAGAOX_ROLE == TOC || $MAGAOX_ROLE == vm ) ]]; then
