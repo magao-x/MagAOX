@@ -20,49 +20,50 @@ jobs:
         uses: actions/checkout@v4
       - name: Cache Rocky ISO
         uses: actions/cache@v4
+        id: cache-iso
         with:
           path: setup/xvm/input/iso
           key: rocky-iso-${{ hashFiles('setup/xvm/_common.sh','setup/xvm/download_rocky_iso.sh') }}
-      - name: Cache first stage VM
-        uses: actions/cache@v4
-        id: cache
-        with:
-          path: |
-            setup/xvm/output/xvm_stage1.qcow2
-            setup/xvm/output/xvm_key.pub
-            setup/xvm/output/xvm_key
-            setup/xvm/output/firmware_vars.fd
-            setup/xvm/output/firmware_code.fd
-          key: xvm-stage1-${{ runner.os }}-${{ hashFiles('setup/xvm/_common.sh','setup/xvm/download_rocky_iso.sh','setup/xvm/build_vm_stage1.sh','setup/xvm/download_firmware.sh','setup/xvm/create_oemdrv.sh','setup/xvm/kickstart/ks.cfg.template') }}
+      # - name: Cache first stage VM
+      #   uses: actions/cache@v4
+      #   id: cache-vm-stage1
+      #   with:
+      #     path: |
+      #       setup/xvm/output/xvm_stage1.qcow2
+      #       setup/xvm/output/xvm_key.pub
+      #       setup/xvm/output/xvm_key
+      #       setup/xvm/output/firmware_vars.fd
+      #       setup/xvm/output/firmware_code.fd
+      #     key: xvm-stage1-${{ runner.os }}-${{ hashFiles('setup/xvm/_common.sh','setup/xvm/download_rocky_iso.sh','setup/xvm/build_vm_stage1.sh','setup/xvm/download_firmware.sh','setup/xvm/create_oemdrv.sh','setup/xvm/kickstart/ks.cfg.template') }}
       - name: Download Rocky ISO
-        if: steps.cache.outputs.cache-hit != 'true'
+        if: steps.cache-iso.outputs.cache-hit != 'true'
         run: |
           cd $GITHUB_WORKSPACE/setup/xvm/
           bash download_rocky_iso.sh
-      - name: Install Homebrew
-        if: steps.cache.outputs.cache-hit != 'true'
-        run: |
-          /bin/bash -c "$(curl -fsSL https://raw.githubusercontent.com/Homebrew/install/HEAD/install.sh)"
-      - name: Install QEMU
-        if: steps.cache.outputs.cache-hit != 'true'
-        run: |
-          sysctl machdep.cpu
-          brew install qemu
-      - name: Create VM and install Rocky 9
-        if: steps.cache.outputs.cache-hit != 'true'
-        run: |
-            cd $GITHUB_WORKSPACE/setup/xvm/
-            bash build_vm_stage1.sh
-      - name: Upload stage 1 outputs
-        uses: actions/upload-artifact@v4
-        with:
-          name: stage1_vm
-          path: |
-            setup/xvm/output/xvm_stage1.qcow2
-            setup/xvm/output/xvm_key.pub
-            setup/xvm/output/xvm_key
-            setup/xvm/output/firmware_vars.fd
-            setup/xvm/output/firmware_code.fd
+      # - name: Install Homebrew
+      #   if: steps.cache-vm-stage1.outputs.cache-hit != 'true'
+      #   run: |
+      #     /bin/bash -c "$(curl -fsSL https://raw.githubusercontent.com/Homebrew/install/HEAD/install.sh)"
+      # - name: Install QEMU
+      #   if: steps.cache-vm-stage1.outputs.cache-hit != 'true'
+      #   run: |
+      #     sysctl machdep.cpu
+      #     brew install qemu
+      # - name: Create VM and install Rocky 9
+      #   if: steps.cache-vm-stage1.outputs.cache-hit != 'true'
+      #   run: |
+      #       cd $GITHUB_WORKSPACE/setup/xvm/
+      #       bash build_vm_stage1.sh
+      # - name: Upload stage 1 outputs
+      #   uses: actions/upload-artifact@v4
+      #   with:
+      #     name: stage1_vm
+      #     path: |
+      #       setup/xvm/output/xvm_stage1.qcow2
+      #       setup/xvm/output/xvm_key.pub
+      #       setup/xvm/output/xvm_key
+      #       setup/xvm/output/firmware_vars.fd
+      #       setup/xvm/output/firmware_code.fd
   # build-utm-arm64-stage2:
   #   runs-on: macos-14
   #   needs: build-utm-arm64-stage1
