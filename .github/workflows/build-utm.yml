@@ -58,6 +58,7 @@ jobs:
       - name: Upload stage 1 outputs
         uses: actions/upload-artifact@v4
         with:
+          retention-days: 1
           name: stage1_vm
           path: |
             setup/xvm/output/xvm_stage1.qcow2
@@ -86,6 +87,7 @@ jobs:
         uses: actions/download-artifact@v4
         with:
             name: stage1_vm
+            path: $GITHUB_WORKSPACE/setup/xvm/output/
       - name: Install MagAO-X software
         run: |
             cd $GITHUB_WORKSPACE/setup/xvm/
