@@ -1,13 +1,13 @@
 name: Build UTM ARM virtual machine
 on:
-  schedule:
-    - cron: '12 6 * * *'
+  # schedule:
+  #   - cron: '12 6 * * *'
 # on:
 #   # workflow_run:
 #   #   workflows: ["Rocky build"]
 #   #   types: [completed]
-#   push:
-#     branches: [xvm]
+  push:
+    branches: [xvm]
 jobs:
   build-utm-arm64:
     runs-on: macos-14
