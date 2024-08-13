@@ -2,10 +2,9 @@ name: Build UTM ARM virtual machine
 on:
   # schedule:
   #   - cron: '12 6 * * *'
-# on:
-#   # workflow_run:
-#   #   workflows: ["Rocky build"]
-#   #   types: [completed]
+  # workflow_run:
+  #   workflows: ["Rocky build"]
+  #   types: [completed]
   push:
     branches: [xvm]
 jobs:
@@ -24,7 +23,6 @@ jobs:
         with:
           path: setup/xvm/input/iso
           key: rocky-iso-${{ hashFiles('setup/xvm/_common.sh','setup/xvm/download_rocky_iso.sh') }}
-
       - name: Cache first stage VM
         uses: actions/cache@v4
         id: cache-vm-stage1
@@ -55,17 +53,17 @@ jobs:
         run: |
             cd $GITHUB_WORKSPACE/setup/xvm/
             bash build_vm_stage1.sh
+      - name: Bundle outputs as tar file
+        run: |
+            cd $GITHUB_WORKSPACE/setup/xvm/
+            tar -cvf stage1_outputs.tar ./output/
       - name: Upload stage 1 outputs
         uses: actions/upload-artifact@v4
         with:
           retention-days: 1
           name: stage1_vm
-          path: |
-            setup/xvm/output/xvm_stage1.qcow2
-            setup/xvm/output/xvm_key.pub
-            setup/xvm/output/xvm_key
-            setup/xvm/output/firmware_vars.fd
-            setup/xvm/output/firmware_code.fd
+          path: setup/xvm/stage1_outputs.tar
+
   build-utm-arm64-stage2:
     runs-on: macos-14
     needs: build-utm-arm64-stage1
@@ -87,7 +85,11 @@ jobs:
         uses: actions/download-artifact@v4
         with:
             name: stage1_vm
-            path: setup/xvm/output/
+            path: setup/xvm/
+      - name: Extract previous job outputs
+        run: |
+            cd $GITHUB_WORKSPACE/setup/xvm/
+            tar -xvf stage1_outputs.tar
       - name: Install MagAO-X software
         run: |
             cd $GITHUB_WORKSPACE/setup/xvm/
