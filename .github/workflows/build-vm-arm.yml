@@ -40,13 +40,15 @@ jobs:
         run: |
           cd $GITHUB_WORKSPACE/setup/xvm/
           bash download_rocky_iso.sh
-      - name: Install Homebrew
-        if: steps.cache-vm-stage1.outputs.cache-hit != 'true'
-        run: |
-          /bin/bash -c "$(curl -fsSL https://raw.githubusercontent.com/Homebrew/install/HEAD/install.sh)"
+      # - name: Install Homebrew
+      #   if: steps.cache-vm-stage1.outputs.cache-hit != 'true'
+      #   run: |
+      #     /bin/bash -c "$(curl -fsSL https://raw.githubusercontent.com/Homebrew/install/HEAD/install.sh)"
       - name: Install QEMU
         if: steps.cache-vm-stage1.outputs.cache-hit != 'true'
-        run: sudo apt-get install -y qemu-system-arm
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y qemu-system-arm
       # - name: Install QEMU
       #   if: steps.cache-vm-stage1.outputs.cache-hit != 'true'
       #   run: |
