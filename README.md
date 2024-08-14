@@ -38,6 +38,9 @@ These are defined in `libMagAOX/common/environment.hpp`.  They do not need to be
 
 - `MAGAOX_env_config`, the name of the environment variable holding the relative path to the config files.  Default = "MagAOX_CONFIG".
 
+- `INDIS_NAMED_FIFO_DIR`, the name of the environment variable holding the absolute path to indiSERVER<->XindiDRIVER named FIFOs.  Optional, no default
+  - As of 2022-05-23, this is only implemented in the **feature/named-pipes-consolidate-indiserver** branch
+
 #### 2.2 Default Values
 
 These are values which might be changed for different components. These are defined in `libMagAOX/common/defaults.hpp`.  They do not normally need to be changed, but these macros can be used to override relevant defaults.
@@ -151,3 +154,12 @@ To-do items are listed in the above sections.  Also see the Todo page in the dox
 - [] split base INDI off into separate repo, which will be the minimum someone needs to have INDI utils for interacting with MagAO-X without installing the whole tree.
 - [] create indiserver startup script which takes a list of drivers from a config file, creates symlinks to xindidriver as needed, and then starts indiserver itself.
 - [] start issue tracking
+- [] Brian T. Carcich, Ascending Node Technologies, starting ca. March, 2022:
+  - [] make it possible to start and stop drivers and associated INDI protocol communications on-the-fly
+    - eliminate xindidriver intermediate pass-through processes
+  - See sub-directory 2022_ANT/ for more detail
+
+## 7 Develop in a VM with [Vagrant](https://vagrantup.com)
+
+To develop in the most "flight-like" configuration, a Vagrantfile is provided to set up a development VM. A quick-start guide is available [in the handbook](https://magao-x.org/docs/handbook/appendices/development_vm.html).
+=======

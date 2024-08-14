@@ -2,7 +2,6 @@
 DIR="$( cd "$( dirname "${BASH_SOURCE[0]}" )" && pwd )"
 source $DIR/../_common.sh
 set -euo pipefail
-source /etc/os-release
 if [[ -e /etc/chrony/chrony.conf ]]; then
     CHRONYCONF_PATH=/etc/chrony/chrony.conf
 elif [[ -e /etc/chrony.conf ]]; then

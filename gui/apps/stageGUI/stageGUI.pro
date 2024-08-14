@@ -47,7 +47,8 @@ FORMS += ../../widgets/stage/stage.ui \
          ../../widgets/xWidgets/fsmDisplay.ui
      
 LIBS += ../../../INDI/libcommon/libcommon.a \
-        ../../../INDI/liblilxml/liblilxml.a
+        ../../../INDI/liblilxml/liblilxml.a \
+        -lqwt-qt5
 
 RESOURCES += ../../resources/MagAOXStyleSheets/MagAOXStyle.qrc 
 

@@ -84,6 +84,7 @@ struct _LilXML {
     int delim;				/* attribute value delimiter */
     int lastc;				/* last char (just used wiht skipping)*/
     int skipping;			/* in comment or declaration */
+    int inblob;				/* in oneBLOB element */
 };
 
 /* internal representation of a (possibly nested) XML element */
@@ -214,6 +215,158 @@ delXMLEle (XMLEle *ep)
   (*myfree) (ep);
 }
 
+//#define WITH_MEMCHR
+XMLEle **
+parseXMLChunk(LilXML *lp, char *buf, int size, char ynot[])
+{
+    unsigned int nnodes     = 1;
+    XMLEle **nodes = (XMLEle **)malloc(nnodes * sizeof(XMLEle*));
+    *nodes         = NULL;
+    char *curr     = buf;
+    int s;
+    ynot[0] = '\0';
+
+    if (lp->inblob) {
+#ifdef WITH_ENCLEN
+        if (size < lp->ce->pcdata.sm - lp->ce->pcdata.sl) {
+            memcpy((void *)(lp->ce->pcdata.s + lp->ce->pcdata.sl), (const void *)buf, size);
+            lp->ce->pcdata.sl += size;
+            return nodes;
+        } else
+            lp->inblob = 0;
+#endif
+#ifdef WITH_MEMCHR
+        char *ltpos = memchr(buf, '<', size);
+        if (!ltpos) {
+            lp->ce->pcdata.s = (char *)moremem(lp->ce->pcdata.s, lp->ce->pcdata.sm + size);
+            lp->ce->pcdata.sm += size;
+            memcpy((void *)(lp->ce->pcdata.s + lp->ce->pcdata.sl), (const void *)buf, size);
+            lp->ce->pcdata.sl += size;
+            return nodes;
+        } else
+            lp->inblob = 0;
+#endif
+    } else {
+        if (lp->ce) {
+            char *ctag = tagXMLEle(lp->ce);
+            if (ctag && !(strcmp(ctag, "oneBLOB")) && (lp->cs == INCON)) {
+#ifdef WITH_ENCLEN
+                XMLAtt *blenatt = findXMLAtt(lp->ce, "enclen");
+                if (blenatt) {
+                    int blen;
+                    sscanf(valuXMLAtt(blenatt), "%d", &blen);
+
+                    // Add room for those '\n' on every 72 character line + extra half-full line.
+                    blen += (blen / 72) + 1;
+
+                    lp->ce->pcdata.s  = (char *)moremem(lp->ce->pcdata.s, blen);
+                    lp->ce->pcdata.sm = blen; // always set sm
+
+                    if (size <= blen - lp->ce->pcdata.sl) {
+                        memcpy((void *)(lp->ce->pcdata.s + lp->ce->pcdata.sl), (const void *)buf, size);
+                        lp->ce->pcdata.sl += size;
+                        lp->inblob = 1;
+                        return nodes;
+                    }
+                }
+#endif
+#ifdef WITH_MEMCHR
+                char *ltpos = memchr(buf, '<', size);
+                if (!ltpos) {
+                    lp->ce->pcdata.s = (char *)moremem(lp->ce->pcdata.s, lp->ce->pcdata.sm + size);
+                    lp->ce->pcdata.sm += size;
+                    memcpy((void *)(lp->ce->pcdata.s + lp->ce->pcdata.sl), (const void *)buf, size);
+                    lp->ce->pcdata.sl += size;
+                    lp->inblob = 1;
+                    return nodes;
+                } else
+                    lp->inblob = 0;
+#endif
+            }
+        }
+    }
+    while (curr - buf < size) {
+        char newc = *curr;
+        /* EOF? */
+        if (newc == 0) {
+            sprintf(ynot, "Line %d: early[parseXMLChunk] XML EOF", lp->ln);
+            initParser(lp);
+            curr++;
+            continue;
+        }
+
+        /* new line? */
+        if (newc == '\n')
+            lp->ln++;
+
+        /* skip comments and declarations. requires 1 char history */
+        if (!lp->skipping && lp->lastc == '<' && (newc == '?' || newc == '!')) {
+            lp->skipping = 1;
+            lp->lastc    = newc;
+            curr++;
+            continue;
+        }
+        if (lp->skipping) {
+            if (newc == '>')
+                lp->skipping = 0;
+            lp->lastc = newc;
+            curr++;
+            continue;
+        }
+        if (newc == '<') {
+            lp->lastc = '<';
+            curr++;
+            continue;
+        }
+
+        /* do a pending '<' first then newc */
+        if (lp->lastc == '<') {
+            if (oneXMLchar(lp, '<', ynot) < 0) {
+                initParser(lp);
+                curr++;
+                continue;
+            }
+            /* N.B. we assume '<' will never result in closure */
+        }
+
+        /* process newc (at last!) */
+        s = oneXMLchar(lp, newc, ynot);
+        if (s == 0) {
+            lp->lastc = newc;
+            curr++;
+            continue;
+        }
+        if (s < 0) {
+            initParser(lp);
+            curr++;
+            continue;
+        }
+
+        /* Ok! store ce in nodes and we start over.
+         * N.B. up to caller to call delXMLEle with what we return.
+         */
+        nodes[nnodes - 1] = lp->ce;
+        nodes             = (XMLEle **)realloc(nodes, (nnodes + 1) * sizeof(XMLEle*));
+        nodes[nnodes]     = NULL;
+        nnodes += 1;
+        lp->ce = NULL;
+        initParser(lp);
+        curr++;
+    }
+    /*
+     * N.B. up to caller to free nodes.
+     */
+    return nodes;
+}
+
+/* reset endtag */
+static void
+resetEndTag(LilXML *lp)
+{
+  freeString (&lp->endtag);
+  newString (&lp->endtag);
+}
+
 /* process one more character of an XML file.
  * when find closure with outter element return root of complete tree.
  * when find error return NULL with reason in ynot[].
@@ -231,7 +384,7 @@ readXMLEle (LilXML *lp, int newc, char ynot[])
 
   /* EOF? */
   if (newc == 0) {
-    sprintf (ynot, "Line %d: early XML EOF", lp->ln);
+    sprintf (ynot, "Line %d: early[readXMLEle] XML EOF", lp->ln);
     initParser(lp);
     return (NULL);
   }
@@ -453,7 +606,6 @@ nXMLAtt (XMLEle *ep)
   return (ep->nat);
 }
 
-
 /* search ep for an attribute with the given name and return its value.
  * return "" if not found.
  */
@@ -667,8 +819,8 @@ entityXML (char *s)
 {
   static char *malbuf;
   int nmalbuf = 0;
-  char *sret;
-  char *ep;
+  char *sret = NULL;
+  char *ep = NULL;
 
   /* scan for each entity, if any */
   for (sret = s; (ep = strpbrk (s, entities)) != NULL; s = ep+1) {
@@ -739,7 +891,7 @@ decodeEntity (char *ent, int *cp)
   };
   unsigned int i;
 
-  for (i = 0; i < sizeof(enttable)/sizeof(enttable[0]); i++) {
+  for (i = 0; i < (sizeof(enttable)/sizeof(enttable[0])); i++) {
     if (strcmp (ent, enttable[i].ent) == 0) {
       *cp = enttable[i].c;
       return (1);
@@ -1035,14 +1187,6 @@ freeAtt (XMLAtt *a)
   (*myfree)(a);
 }
 
-/* reset endtag */
-static void
-resetEndTag(LilXML *lp)
-{
-  freeString (&lp->endtag);
-  newString (&lp->endtag);
-}
-
 /* 1 if c is a valid token character, else 0.
  * it can be alpha or '_' or numeric unless start.
  */
@@ -1061,8 +1205,9 @@ growString (String *sp, int c)
   if (l > sp->sm) {
     if (!sp->s)
       newString (sp);
-    else
+    else {
       sp->s = (char *) moremem (sp->s, sp->sm *= 2);
+    }
   }
   sp->s[--l] = '\0';
   sp->s[--l] = (char)c;
@@ -1073,23 +1218,31 @@ growString (String *sp, int c)
 static void
 appendString (String *sp, char *str)
 {
+  if (!sp || !str)
+    return;
   int strl = strlen (str);
   int l = sp->sl + strl + 1;	/* need room for '\0' */
 
   if (l > sp->sm) {
     if (!sp->s)
       newString (sp);
-    if (l > sp->sm)
-      sp->s = (char *) moremem (sp->s, (sp->sm = l));
+    if (l > sp->sm) {
+      sp->s = (char *) moremem(sp->s, (sp->sm = l));
+    }
   }
-  strcpy (&sp->s[sp->sl], str);
-  sp->sl += strl;
+  if (sp->s) {
+    strcpy(&sp->s[sp->sl], str);
+    sp->sl += strl;
+  }
 }
 
 /* init a String with a malloced string containing just \0 */
 static void
 newString(String *sp)
 {
+  if (!sp)
+    return;
+
   sp->s = (char *)moremem(NULL, MINMEM);
   sp->sm = MINMEM;
   *sp->s = '\0';

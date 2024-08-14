@@ -54,6 +54,7 @@ fi
 source $roleScript
 
 # Get logging functions
+# Also defines $ID and $VERSION_ID, from /etc/os-release, so we can detect which distribution we're on
 source $DIR/_common.sh
 
 # Install OS packages first
@@ -142,7 +143,7 @@ fi
 # Install Linux headers (instrument computers use the RT kernel / headers)
 if [[ $MAGAOX_ROLE == ci || $MAGAOX_ROLE == vm || $MAGAOX_ROLE == workstation || $MAGAOX_ROLE == AOC || $MAGAOX_ROLE == TOC ]]; then
     if [[ $ID == ubuntu ]]; then
-        sudo -i apt install -y linux-headers-generic
+        sudo NEEDRESTART_SUSPEND=yes apt install -y linux-headers-generic
     elif [[ $ID == centos ]]; then
         sudo yum install -y kernel-devel-$(uname -r) || sudo yum install -y kernel-devel
     fi
@@ -150,7 +151,9 @@ fi
 ## Build third-party dependencies under /opt/MagAOX/vendor
 cd /opt/MagAOX/vendor
 sudo -H bash -l "$DIR/steps/install_rclone.sh" || exit 1
-bash -l "$DIR/steps/install_openblas.sh" || exit 1
+[ -r "$DIR/steps/install_openblas.inhibit" ] \
+|| ( bash -l "$DIR/steps/install_openblas.sh" && touch "$DIR/steps/install_openblas.inhibit" ) \
+|| exit 1
 if [[ $MAGAOX_ROLE == RTC || $MAGAOX_ROLE == ICC || $MAGAOX_ROLE == AOC || $MAGAOX_ROLE == TIC ]]; then
     bash -l "$DIR/steps/install_cuda_rocky_9.sh" || exit_with_error "CUDA install failed"
 fi
@@ -160,6 +163,7 @@ sudo -H bash -l "$DIR/steps/install_eigen.sh" || exit 1
 sudo -H bash -l "$DIR/steps/install_zeromq.sh" || exit 1
 sudo -H bash -l "$DIR/steps/install_cppzmq.sh" || exit 1
 sudo -H bash -l "$DIR/steps/install_flatbuffers.sh" || exit 1
+sudo -H bash -l "$DIR/steps/install_zlib-drbitboy.sh" || exit 1
 if [[ $MAGAOX_ROLE == AOC ]]; then
     sudo -H bash -l "$DIR/steps/install_lego.sh"
 fi
@@ -210,8 +214,45 @@ if [[ -e $VENDOR_SOFTWARE_BUNDLE ]]; then
     sudo rm -rf $BUNDLE_TMPDIR
 fi
 
+## Build first-party dependencies
+cd /opt/MagAOX/source
+bash -l "$DIR/steps/install_xrif.sh" || exit_error "Failed to build and install xrif"
+bash -l "$DIR/steps/install_mxlib.sh" || exit_error "Failed to build and install mxlib"
+source /etc/profile.d/mxmakefile.sh
+
+## Build MagAO-X and install sources to /opt/MagAOX/source/MagAOX
+if [[ $MAGAOX_ROLE == ci ]]; then
+    ln -sfv ~/project/ /opt/MagAOX/source/MagAOX
+else
+    log_info "Running as $USER"
+    if [[ $DIR != /opt/MagAOX/source/MagAOX/setup ]]; then
+        if [[ ! -e /opt/MagAOX/source/MagAOX ]]; then
+            echo "Cloning new copy of MagAOX codebase"
+            orgname=magao-x
+            reponame=MagAOX
+            parentdir=/opt/MagAOX/source
+            clone_or_update_and_cd $orgname $reponame $parentdir
+            if git --git-dir="$parentdir/$reponame/.git" remote -v 2>/dev/null | grep -q "^origin  *https://.*/$orgname/$reponame" ; then
+                # ensure upstream is set somewhere that isn't on the fs to avoid possibly pushing
+                # things and not having them go where we expect
+                stat /opt/MagAOX/source/MagAOX/.git
+                git remote remove origin
+                git remote add origin https://github.com/magao-x/MagAOX.git
+                git fetch origin
+                git branch -u origin/dev dev
+            fi
+            log_success "In the future, you can re-run this script from /opt/MagAOX/source/MagAOX/setup"
+            log_info "(In fact, maybe delete $(dirname $DIR)?)"
+        else
+            cd /opt/MagAOX/source/MagAOX
+            git fetch
+        fi
+    else
+        log_info "Running from clone located at $(dirname $DIR), nothing to do for cloning step"
+    fi
+fi
 # These steps should work as whatever user is installing, provided
-# they are a member of magaox-dev and they have sudo access to install to
+# they are a member of $instrument_dev_group and they have sudo access to install to
 # /usr/local. Building as root would leave intermediate build products
 # owned by root, which we probably don't want.
 #
@@ -246,15 +287,15 @@ fi
 
 # Install first-party deps
 bash -l "$DIR/steps/install_milk_and_cacao.sh" || exit_with_error "milk/cacao install failed" # depends on /opt/conda/bin/python existing for plugin build
-bash -l "$DIR/steps/install_xrif.sh" || exit_with_error "Failed to build and install xrif"
+#bash -l "$DIR/steps/install_xrif.sh" || exit_with_error "Failed to build and install xrif"
 bash -l "$DIR/steps/install_milkzmq.sh" || exit_with_error "milkzmq install failed"
 bash -l "$DIR/steps/install_purepyindi.sh" || exit_with_error "purepyindi install failed"
 bash -l "$DIR/steps/install_purepyindi2.sh" || exit_with_error "purepyindi2 install failed"
 bash -l "$DIR/steps/install_xconf.sh" || exit_with_error "xconf install failed"
 bash -l "$DIR/steps/install_lookyloo.sh" || exit_with_error "lookyloo install failed"
 bash -l "$DIR/steps/install_magpyx.sh" || exit_with_error "magpyx install failed"
-bash -l "$DIR/steps/install_mxlib.sh" || exit_with_error "Failed to build and install mxlib"
-source /etc/profile.d/mxmakefile.sh
+#bash -l "$DIR/steps/install_mxlib.sh" || exit_with_error "Failed to build and install mxlib"
+#source /etc/profile.d/mxmakefile.sh
 
 if [[ $MAGAOX_ROLE == AOC || $MAGAOX_ROLE == vm ||  $MAGAOX_ROLE == workstation ]]; then
     # sup web interface
@@ -317,9 +358,11 @@ fi
 if [[ $MAGAOX_ROLE != ci && $MAGAOX_ROLE != container && $MAGAOX_ROLE != vm ]]; then
     sudo -H bash -l "$DIR/steps/configure_startup_services.sh"
 
-    log_info "Generating subuid and subgid files, may need to run podman system migrate"
-    sudo -H python "$DIR/generate_subuid_subgid.py" || exit_with_error "Generating subuid/subgid files for podman failed"
-    sudo -H podman system migrate || exit_with_error "Could not run podman system migrate"
+    if which podman ; then
+        log_info "Generating subuid and subgid files, may need to run podman system migrate"
+        sudo -H python "$DIR/generate_subuid_subgid.py" || exit_with_error "Generating subuid/subgid files for podman failed"
+        sudo -H podman system migrate || exit_with_error "Could not run podman system migrate"
+    fi
 
     # To try and debug hardware issues, ICC and RTC replicate their
     # kernel console log over UDP to AOC over the instrument LAN.

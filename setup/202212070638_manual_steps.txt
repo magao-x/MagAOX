@@ -1,0 +1,85 @@
+########################################################################
+### On Windows or WSL
+########################################################################
+
+### Stop, delete and purge existing primary multipass.exe VM
+   multipass.exe stop primary
+   multipass.exe delete primary
+   multipass.exe purge
+
+### Create new primary multipass.exe VM
+   multipass.exe launch -n primary 22.04                 ### Medium wait
+   multipass.exe stop primary
+   multipass.exe set local.primary.disk=20GiB
+   multipass.exe set local.primary.cpus=4
+   multipass.exe start primary                             ### Long wait
+
+####################################
+### START some Carcich-specific actions, along with others
+
+### Copy github_id_rsa (SSH key) and MagAOX config files to primary,
+### Then Shell to primary VM
+
+   cd ~
+   multipass.exe transfer confs.tar primary:                 ### Carcich
+   multipass.exe exec primary -- tar xvf confs.tar           ### Carcich
+   multipass.exe exec primary -- touch .hushlogin
+   multipass.exe shell primary
+
+########################################################################
+### On primary Ubuntu 22.04
+########################################################################
+
+####################################
+### Some SUDO actions:  update; man dirs; /opt/MagAOX; MAGAOX_ROLE
+
+  sudo su -
+    apt-get update                                        ### Short wait
+    mkdir -p /usr/local/share/man/man{1,2,3,4,5,6,7,8,9}
+    mkdir -p /opt/MagAOX
+    chown :ubuntu /opt/MagAOX
+    chmod u+sX,g+wsX /opt/MagAOX
+    echo export MAGAOX_ROLE=vm | tee    /etc/profile.d/magaox_role.sh
+    exit
+
+### End SUDO actions
+####################################
+
+  source /etc/profile.d/magaox_role.sh
+
+  eval $(ssh-agent)
+  ssh-add /home/ubuntu/.ssh/github_id_rsa
+  ### < Enter password when requested
+  ### > Identity added: /home/...
+
+  mkdir -p /opt/MagAOX/source/
+  cd /opt/MagAOX/source/
+  git clone git@github.com:magao-x/scfsw.git MagAOX
+  ### > Are you sure you want to continue connecting (yes/no/[fingerprint])?
+  ### < yes
+  ### > Cloning into 'MagAOX'...
+
+  mkdir -p /opt/MagAOX/source/MagAOX/vm/milkzmq
+
+  cd /opt/MagAOX/source/MagAOX/setup/
+  git checkout cleanup/20221206-provisioning-scripts
+
+  ######################################################################
+  bash -lx provision.sh                               ### Very long wait
+  ######################################################################
+
+  cd ~/tmp/confs/
+
+  for i in * ; do mv /opt/MagAOX/config/$i /opt/MagAOX/config/$i.disabled ; mv $i /opt/MagAOX/config/ ; done
+
+  mkfifo /opt/MagAOX/drivers/fifos/indiserver.ctrl
+
+  bash -l    ### Re-read BASH environment e.g. MKLROOT
+
+  cd /opt/MagAOX/source/MagAOX/apps/CGFSMHIfpga/
+  make clean all install
+  cd /opt/MagAOX/source/MagAOX/apps/CGFSMUIfpga/
+  make clean all install
+  cd /opt/MagAOX/source/MagAOX/apps/resurrector/
+  make clean all
+  ./resurrector_indi 
