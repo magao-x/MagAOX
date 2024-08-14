@@ -1,10 +1,6 @@
 #!/usr/bin/env bash
-rockyVersion=${rockyVersion:-9.4}
-if [[ $(uname -p) == arm ]]; then
-    rockyArch=${rockyArch:-aarch64}
-    qemuArch=aarch64
-else
-    rockyArch=${rockyArch:-x86_64}
-    qemuArch=x86_64
+if [[ -z $vmArch ]]; then
+    echo "Set vmArch environment variable to aarch64 or x86_64"
+    exit 1
 fi
-export rockyVersion rockyArch qemuArch
+rockyVersion=${rockyVersion:-9.4}

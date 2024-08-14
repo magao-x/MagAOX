@@ -11,7 +11,7 @@ else
     cpuType="max"
     accelFlag=""
 fi
-qemu-system-${qemuArch} \
+qemu-system-${vmArch} \
     -name xvm \
     -netdev user,id=user.0,hostfwd=tcp:127.0.0.1:2201-:22 \
     -device virtio-keyboard-pci -device virtio-mouse-pci \

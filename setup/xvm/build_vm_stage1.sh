@@ -16,7 +16,7 @@ fi
 bash create_oemdrv.sh
 bash download_rocky_iso.sh
 bash download_firmware.sh
-if [[ $qemuArch == aarch64 ]]; then
+if [[ $vmArch == aarch64 ]]; then
     cp ./input/firmware/AAVMF_VARS.fd ./output/firmware_vars.fd
     cp ./input/firmware/AAVMF_CODE.fd ./output/firmware_code.fd
 else
@@ -31,9 +31,9 @@ else
     accelFlag=""
 fi
 echo "Starting VM installation process..."
-qemu-system-${qemuArch} \
+qemu-system-${vmArch} \
     -name xvm \
-    -cdrom ./input/iso/Rocky-${rockyVersion}-${rockyArch}-minimal.iso \
+    -cdrom ./input/iso/Rocky-${rockyVersion}-${vmArch}-minimal.iso \
     -netdev user,id=user.0 \
     -device virtio-keyboard-pci -device virtio-mouse-pci \
     -smp 4 \
