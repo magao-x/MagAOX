@@ -3,7 +3,7 @@ set -ex
 mkdir -p ./input/firmware
 cd ./input/firmware
 platform=$(uname)
-if [[ $(uname -m) == "arm64" ]]; then
+if [[ $vmArch == aarch64 ]]; then
     archInfix=aarch64
     archPrefix=AAVMF
 else
