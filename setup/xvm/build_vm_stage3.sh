@@ -3,7 +3,7 @@ echo "Starting up the VM for MagAO-X software installation..."
 source ./_common.sh
 if [[ -e ./output/xvm_stage2.qcow2 ]]; then
     cp ./output/xvm_stage2.qcow2 ./output/xvm.qcow2
-else if [[ ! -e ./output/xvm.qcow2 ]]; then
+elif [[ ! -e ./output/xvm.qcow2 ]]; then
     echo "No xvm.qcow2 found for stage 2"
     exit 1
 fi

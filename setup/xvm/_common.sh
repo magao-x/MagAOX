@@ -13,7 +13,7 @@ else
 fi
 export cpuType accelFlag
 
-qemuDisplay=${qemuDisplay:-0}
+qemuDisplay=${qemuDisplay:-}
 if [[ $qemuDisplay == serial ]]; then
     ioFlag="-serial stdio"
 elif [[ ! -z $qemuDisplay ]]; then
