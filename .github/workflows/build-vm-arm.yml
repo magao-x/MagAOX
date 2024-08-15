@@ -11,7 +11,7 @@ env:
   vmArch: aarch64
 jobs:
   build-arm-stage1:
-    runs-on: macos-14
+    runs-on: ubuntu-latest
     permissions:
       contents: read
       packages: write
@@ -69,7 +69,7 @@ jobs:
           name: arm_stage1_vm
           path: setup/xvm/stage1_outputs.tar
   build-arm-stage2:
-    runs-on: macos-14
+    runs-on: ubuntu-latest
     needs: build-arm-stage1
     permissions:
       contents: read
@@ -125,7 +125,7 @@ jobs:
           name: arm_stage2_vm
           path: setup/xvm/stage2_outputs.tar
   build-arm-stage3:
-    runs-on: macos-14
+    runs-on: ubuntu-latest
     needs: build-arm-stage2
     permissions:
       contents: read

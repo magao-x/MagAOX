@@ -14,12 +14,10 @@ fi
 export cpuType accelFlag
 
 qemuDisplay=${qemuDisplay:-}
-if [[ $qemuDisplay == serial ]]; then
-    ioFlag="-serial stdio"
-elif [[ ! -z $qemuDisplay ]]; then
+if [[ ! -z $qemuDisplay ]]; then
     ioFlag="-display $qemuDisplay"
 else
-    ioFlag=''
+    ioFlag='-serial stdio'
 fi
 export ioFlag
 
