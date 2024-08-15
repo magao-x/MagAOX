@@ -4,3 +4,4 @@ if [[ -z $vmArch ]]; then
     exit 1
 fi
 rockyVersion=${rockyVersion:-9.4}
+export rockyVersion

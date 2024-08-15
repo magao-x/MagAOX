@@ -31,6 +31,12 @@ else
     accelFlag=""
 fi
 echo "Starting VM installation process..."
+qemuDisplay=${qemuDisplay:-0}
+if [[ $qemuDisplay == 0 ]]; then
+    ioFlag="-serial stdio"
+else
+    ioFlag="-display $qemuDisplay"
+fi
 qemu-system-${vmArch} \
     -name xvm \
     -cdrom ./input/iso/Rocky-${rockyVersion}-${vmArch}-minimal.iso \
@@ -47,7 +53,7 @@ qemu-system-${vmArch} \
     -device virtio-net-pci,netdev=user.0 \
     -boot c \
     -m 8192M \
-    -display none \
+    $ioFlag \
     -serial stdio \
 || exit 1
 mv -v ./output/xvm.qcow2 ./output/xvm_stage1.qcow2
