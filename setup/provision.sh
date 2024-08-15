@@ -306,9 +306,9 @@ fi
 # aliases to improve ergonomics of MagAO-X ops
 sudo -H bash -l "$DIR/steps/install_aliases.sh"
 
-# CI invokes install_MagAOX.sh as the next step (see .circleci/config.yml)
-# By separating the real build into another step, we can cache the slow provisioning steps
-# and reuse them on subsequent runs.
+# CI invokes install_MagAOX.sh as the next step. By separating the
+# real build into another step, we can cache the slow provisioning
+# steps and reuse them on subsequent runs.
 if [[ -z $CI ]]; then
     cd /opt/MagAOX/source/MagAOX
     bash -l "$DIR/steps/install_MagAOX.sh" || exit 1
