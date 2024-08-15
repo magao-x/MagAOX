@@ -11,7 +11,7 @@ env:
   vmArch: aarch64
 jobs:
   build-arm-stage1:
-    runs-on: ubuntu-latest
+    runs-on: macos-14
     permissions:
       contents: read
       packages: write
@@ -34,26 +34,25 @@ jobs:
             setup/xvm/output/xvm_key
             setup/xvm/output/firmware_vars.fd
             setup/xvm/output/firmware_code.fd
-          key: xvm-stage1-${{ runner.os }}-${{ hashFiles('setup/xvm/_common.sh','setup/xvm/download_rocky_iso.sh','setup/xvm/build_vm_stage1.sh','setup/xvm/download_firmware.sh','setup/xvm/create_oemdrv.sh','setup/xvm/kickstart/ks.cfg.template') }}
+          key: xvm-stage1-${{ runner.os }}-${{ hashFiles('setup/xvm/*','setup/xvm/kickstart/*','setup/xvm/utm/**') }}
       - name: Download Rocky ISO
         if: steps.cache-iso.outputs.cache-hit != 'true'
         run: |
           cd $GITHUB_WORKSPACE/setup/xvm/
           bash download_rocky_iso.sh
-      # - name: Install Homebrew
+      - name: Install Homebrew
+        if: steps.cache-vm-stage1.outputs.cache-hit != 'true'
+        run: /bin/bash -c "$(curl -fsSL https://raw.githubusercontent.com/Homebrew/install/HEAD/install.sh)"
+      # - name: Install QEMU for Ubuntu
       #   if: steps.cache-vm-stage1.outputs.cache-hit != 'true'
       #   run: |
-      #     /bin/bash -c "$(curl -fsSL https://raw.githubusercontent.com/Homebrew/install/HEAD/install.sh)"
-      - name: Install QEMU
+      #     sudo apt-get update
+      #     sudo apt-get install -y qemu-system-arm rpm2cpio
+      - name: Install QEMU for macOS
         if: steps.cache-vm-stage1.outputs.cache-hit != 'true'
         run: |
-          sudo apt-get update
-          sudo apt-get install -y qemu-system-arm rpm2cpio
-      # - name: Install QEMU
-      #   if: steps.cache-vm-stage1.outputs.cache-hit != 'true'
-      #   run: |
-      #     sysctl machdep.cpu
-      #     brew install qemu
+          sysctl machdep.cpu
+          brew install qemu
       - name: Create VM and install Rocky 9
         if: steps.cache-vm-stage1.outputs.cache-hit != 'true'
         run: |
@@ -70,7 +69,7 @@ jobs:
           name: arm_stage1_vm
           path: setup/xvm/stage1_outputs.tar
   build-arm-stage2:
-    runs-on: ubuntu-latest
+    runs-on: macos-14
     needs: build-arm-stage1
     permissions:
       contents: read
@@ -78,26 +77,42 @@ jobs:
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
-      - name: Install QEMU
-        run: sudo apt-get install -y qemu-system-arm
+      - name: Cache second stage VM
+        uses: actions/cache@v4
+        id: cache-vm-stage2
+        with:
+          path: |
+            setup/xvm/output/xvm_stage2.qcow2
+            setup/xvm/output/xvm_key.pub
+            setup/xvm/output/xvm_key
+            setup/xvm/output/firmware_vars.fd
+            setup/xvm/output/firmware_code.fd
+          key: xvm-stage2-${{ env.vmArch }}-${{ hashFiles('setup/**','!setup/xvm/**') }}
+      - name: Install QEMU for macOS
+        if: steps.cache-vm-stage2.outputs.cache-hit != 'true'
+        run: brew install qemu
       - name: Download initial Rocky VM
+        if: steps.cache-vm-stage2.outputs.cache-hit != 'true'
         uses: actions/download-artifact@v4
         with:
             name: arm_stage1_vm
             path: setup/xvm/
       - name: Extract previous job outputs
+        if: steps.cache-vm-stage2.outputs.cache-hit != 'true'
         run: |
             cd $GITHUB_WORKSPACE/setup/xvm/
             tar -xvf stage1_outputs.tar
+            mv -v output/xvm_stage1.qcow2 output/xvm.qcow2
       - name: Install MagAO-X software
+        if: steps.cache-vm-stage2.outputs.cache-hit != 'true'
         run: |
             cd $GITHUB_WORKSPACE/setup/xvm/
             bash build_vm_stage2.sh
       - name: Bundle outputs as tar file
         run: |
             cd $GITHUB_WORKSPACE/setup/xvm/
-            tar -cvf stage2_outputs.tar ./output/xvm.qcow2 ./output/xvm_key ./output/xvm_key.pub
-      - name: Upload UTM image
+            tar -cvf stage2_outputs.tar ./output/xvm_stage2.qcow2 ./output/xvm_key ./output/xvm_key.pub ./output/firmware_vars.fd ./output/firmware_code.fd
+      - name: Upload stage 2 outputs
         uses: actions/upload-artifact@v4
         with:
           name: arm_stage2_vm

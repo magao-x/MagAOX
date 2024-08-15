@@ -15,7 +15,7 @@ qemu-system-${vmArch} \
     -name xvm \
     -netdev user,id=user.0,hostfwd=tcp:127.0.0.1:2201-:22 \
     -device virtio-keyboard-pci -device virtio-mouse-pci \
-    -smp 4 \
+    -smp 3 \
     -machine type=virt$accelFlag \
     -cpu $cpuType \
     -drive if=pflash,format=raw,id=ovmf_code,readonly=on,file=./output/firmware_code.fd \
@@ -33,4 +33,5 @@ qemu-system-${vmArch} \
 sleep 30
 ssh -p 2201 -o "UserKnownHostsFile /dev/null" -o "StrictHostKeyChecking=no" -i ./output/xvm_key xdev@localhost 'bash -s' < ./bootstrap_magao-x.sh || exit 1
 wait
-echo "Finished installing MagAO-X software."
+mv -v ./output/xvm.qcow2 ./output/xvm_stage2.qcow2
+echo "Finished installing MagAO-X dependencies."

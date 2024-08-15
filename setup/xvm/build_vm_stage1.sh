@@ -36,7 +36,7 @@ qemu-system-${vmArch} \
     -cdrom ./input/iso/Rocky-${rockyVersion}-${vmArch}-minimal.iso \
     -netdev user,id=user.0 \
     -device virtio-keyboard-pci -device virtio-mouse-pci \
-    -smp 4 \
+    -smp 3 \
     -machine type=virt$accelFlag \
     -cpu $cpuType \
     -drive if=pflash,format=raw,id=ovmf_code,readonly=on,file=./output/firmware_code.fd \
@@ -50,5 +50,5 @@ qemu-system-${vmArch} \
     -display none \
     -serial stdio \
 || exit 1
-cp -v ./output/xvm.qcow2 ./output/xvm_stage1.qcow2
+mv -v ./output/xvm.qcow2 ./output/xvm_stage1.qcow2
 echo "Created VM and installed Rocky Linux"
