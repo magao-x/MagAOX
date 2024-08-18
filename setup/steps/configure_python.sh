@@ -70,10 +70,14 @@ if [[ $MAGAOX_ROLE != ci ]]; then
 		sudo mv $overrideFile $overrideFileDest
 	fi
 
-	sudo /sbin/restorecon -v /etc/systemd/system/jupyternotebook.service.d/override.conf
-	sudo /sbin/restorecon -v /etc/systemd/system/jupyternotebook.service
+	if [[ $ID == rocky ]]; then
+		log_info "Fixing SELinux contexts for SystemD override files"
+		sudo /sbin/restorecon -v $OVERRIDE_PATH
+		sudo /sbin/restorecon -v $overrideFileDest
+		log_success "Applied correct SELinux contexts to $overrideFileDest and $OVERRIDE_PATH"
+	fi
 	sudo -H systemctl daemon-reload
-	
+
 	sudo -H systemctl enable jupyternotebook
 	log_success "Enabled jupyternotebook service"
 	sudo -H systemctl start jupyternotebook
