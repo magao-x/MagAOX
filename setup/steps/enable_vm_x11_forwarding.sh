@@ -17,6 +17,6 @@ sudo systemctl restart sshd
 source /etc/os-release # Defines $ID and $VERSION_ID so we can detect which distribution we're on
 if [[ $ID == ubuntu ]]; then
     sudo -i apt install -y xauth
-elif [[ $ID == centos ]]; then
+elif [[ $ID == centos || $ID == rocky ]]; then
     sudo yum install -y xorg-x11-xauth
 fi

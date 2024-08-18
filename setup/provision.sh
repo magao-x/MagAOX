@@ -143,7 +143,7 @@ fi
 if [[ $MAGAOX_ROLE == ci || $MAGAOX_ROLE == vm || $MAGAOX_ROLE == workstation || $MAGAOX_ROLE == AOC || $MAGAOX_ROLE == TOC ]]; then
     if [[ $ID == ubuntu ]]; then
         sudo -i apt install -y linux-headers-generic
-    elif [[ $ID == centos ]]; then
+    elif [[ $ID == centos || $ID == rocky ]]; then
         sudo yum install -y kernel-devel-$(uname -r) || sudo yum install -y kernel-devel
     fi
 fi
@@ -191,13 +191,13 @@ if [[ -e $VENDOR_SOFTWARE_BUNDLE ]]; then
         fi
     done
     # Note that 'vm' is in the list for ease of testing the install_* scripts
-    if [[ $MAGAOX_ROLE == RTC || $MAGAOX_ROLE == ICC || $MAGAOX_ROLE == vm ]]; then
-        if [[ $ID == centos ]]; then
-            sudo -H bash -l "$DIR/steps/install_alpao.sh"
-        fi
+    if [[ $MAGAOX_ROLE == RTC || $MAGAOX_ROLE == vm ]]; then
+        sudo -H bash -l "$DIR/steps/install_alpao.sh"
+    fi
+    if [[ $MAGAOX_ROLE == ICC || $MAGAOX_ROLE == vm ]]; then
         sudo -H bash -l "$DIR/steps/install_andor.sh"
     fi
-    if [[ $ID == centos && ( $MAGAOX_ROLE == RTC || $MAGAOX_ROLE == TIC || $MAGAOX_ROLE == vm ) ]]; then
+    if [[ $MAGAOX_ROLE == RTC || $MAGAOX_ROLE == TIC || $MAGAOX_ROLE == vm ]]; then
         sudo -H bash -l "$DIR/steps/install_bmc.sh"
     fi
     if [[ $MAGAOX_ROLE == ICC || $MAGAOX_ROLE == RTC || $MAGAOX_ROLE == vm ]]; then
