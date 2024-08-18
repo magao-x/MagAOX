@@ -42,7 +42,7 @@ if [[ $MAGAOX_ROLE == AOC || $MAGAOX_ROLE == ICC || $MAGAOX_ROLE == RTC || $MAGA
     sudo ufw deny https || true
     sudo ufw allow in from 192.168.0.0/24 || true
 
-    log_info "Use CentOS mountpoint for cpusets"
+    log_info "Use old (RHEL 7) mountpoint for cpusets"
     sudo mkdir -p /sys/fs/cgroup/cpuset
     cat <<'HERE' | sudo -H tee /etc/cset.conf || true
 mountpoint = /sys/fs/cgroup/cpuset

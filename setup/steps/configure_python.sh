@@ -16,13 +16,11 @@ set -x
 # mamba env export
 mamba env update -f $DIR/../conda_env_pinned_$(uname -i).yml || exit_with_error "Failed to install or update packages using pinned versions. Update the env manually with the base specification and update the pinned versions if possible."
 source /etc/os-release
-if [[ ( $MAGAOX_ROLE == AOC || $MAGAOX_ROLE == ci ) && ( $ID == "centos" ) ]]; then
-	mamba install -y qt=5 qwt
-fi
+
 #
 # Set up auto-starting xsup Jupyter Notebook instance
 #
-if [[ $MAGAOX_ROLE == vm ]]; then
+if [[ $MAGAOX_ROLE == workstation && $VM_KIND != "none" ]]; then
 	NOTEBOOK_OPTIONS='--ip="0.0.0.0"'
 else
 	NOTEBOOK_OPTIONS=''

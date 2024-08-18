@@ -5,17 +5,7 @@ SETUPDIR="$( cd "$( dirname "${BASH_SOURCE[0]}" )" && pwd )"
 instrument_user=xsup
 instrument_group=magaox
 instrument_dev_group=magaox-dev
-if [[ $MAGAOX_ROLE == vm ]]; then
-  # Heuristic detection of which automatically created user account to use
-  # based on home directory existing.
-  if [[ -d /home/vagrant ]]; then
-    instrument_user=vagrant
-  elif [[ -d /home/ubuntu ]]; then
-    instrument_user=ubuntu
-    instrument_group=ubuntu
-    instrument_dev_group=ubuntu
-  fi
-elif [[ $MAGAOX_ROLE == ci || $MAGAOX_ROLE == container ]]; then
+if [[ $MAGAOX_ROLE == ci || $MAGAOX_ROLE == container ]]; then
   instrument_user=root
   instrument_group=root
   instrument_dev_group=root

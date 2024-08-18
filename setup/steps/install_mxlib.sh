@@ -49,9 +49,6 @@ if [[ $MAGAOX_ROLE == RTC || $MAGAOX_ROLE == ICC || $MAGAOX_ROLE == AOC || $MAGA
 fi
 
 source /etc/os-release
-if [[ $ID == centos ]]; then
-  echo "CXXVERSION = -std=c++14" >> $mxlibCommonOverrides
-fi
 
 if [[ $ID == rocky && $(uname -p) == "aarch64" ]]; then
   echo "CXXFLAGS += -I/usr/include/lapacke" >> $mxlibCommonOverrides

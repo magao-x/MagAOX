@@ -54,6 +54,6 @@ apt-get install -y \
     podman \
 ;
 
-if [[ $MAGAOX_ROLE == vm ]]; then
+if [[ $VM_KIND != "none" ]]; then
     apt install -y xauth
 fi

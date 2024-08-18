@@ -53,10 +53,12 @@ sudo mkdir -p $OVERRIDE_PATH
 echo "[Service]" | sudo -H tee $OVERRIDE_PATH/override.conf
 echo "Environment=\"MAGAOX_ROLE=$MAGAOX_ROLE\"" | sudo -H tee -a $OVERRIDE_PATH/override.conf
 
-if [[ $MAGAOX_ROLE == vm ]]; then
+if [[ $VM_KIND != "none" ]]; then
     echo "Environment=\"UVICORN_HOST=0.0.0.0\"" | sudo -H tee -a $OVERRIDE_PATH/override.conf
-    echo "User=vagrant" | sudo -H tee -a $OVERRIDE_PATH/override.conf
-    echo "WorkingDirectory=/home/vagrant" | sudo -H tee -a $OVERRIDE_PATH/override.conf
+fi
+if [[ $instrument_user != xsup ]]; then
+    echo "User=$instrument_user" | sudo -H tee -a $OVERRIDE_PATH/override.conf
+    echo "WorkingDirectory=/home/$instrument_user" | sudo -H tee -a $OVERRIDE_PATH/override.conf
 fi
 sudo systemctl enable sup-local.service || true
 sudo systemctl restart sup-local.service || true
