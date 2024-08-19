@@ -1,8 +1,6 @@
 #/usr/bin/env bash
-# Install MagAO-X software on a fresh Rocky Linux installation.
-git clone https://github.com/magao-x/MagAOX.git
-cd MagAOX/setup/
+sudo mkdir -p /etc/profile.d
 echo 'export MAGAOX_ROLE=workstation' | sudo tee /etc/profile.d/magaox.sh
 export CI=1
-bash -lx provision.sh
+bash -lx /opt/MagAOX/source/MagAOX/provision.sh
 sudo shutdown -P now

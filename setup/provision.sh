@@ -50,6 +50,8 @@ if [[ ! -e $roleScript ]]; then
     exit 1
 fi
 source $roleScript
+echo "Got MAGAOX_ROLE=$MAGAOX_ROLE"
+export MAGAOX_ROLE
 
 # Get logging functions
 source $DIR/_common.sh

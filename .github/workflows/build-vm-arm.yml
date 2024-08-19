@@ -28,12 +28,7 @@ jobs:
         uses: actions/cache@v4
         id: cache-vm-stage1
         with:
-          path: |
-            setup/xvm/output/xvm_stage1.qcow2
-            setup/xvm/output/xvm_key.pub
-            setup/xvm/output/xvm_key
-            setup/xvm/output/firmware_vars.fd
-            setup/xvm/output/firmware_code.fd
+          path: setup/xvm/stage1_outputs.tar
           key: xvm-stage1-${{ runner.os }}-${{ hashFiles('setup/xvm/*','setup/xvm/kickstart/*','setup/xvm/utm/**') }}
       - name: Download Rocky ISO
         if: steps.cache-iso.outputs.cache-hit != 'true'
@@ -59,6 +54,7 @@ jobs:
             cd $GITHUB_WORKSPACE/setup/xvm/
             bash build_vm_stage1.sh
       - name: Bundle outputs as tar file
+        if: steps.cache-vm-stage1.outputs.cache-hit != 'true'
         run: |
             cd $GITHUB_WORKSPACE/setup/xvm/
             tar -cvf stage1_outputs.tar ./output/
@@ -82,12 +78,7 @@ jobs:
         uses: actions/cache@v4
         id: cache-vm-stage2
         with:
-          path: |
-            setup/xvm/output/xvm_stage2.qcow2
-            setup/xvm/output/xvm_key.pub
-            setup/xvm/output/xvm_key
-            setup/xvm/output/firmware_vars.fd
-            setup/xvm/output/firmware_code.fd
+          path: setup/xvm/output/stage2_outputs.tar
           key: xvm-stage2-${{ env.vmArch }}-${{ hashFiles('setup/**','!setup/xvm/**') }}
       - name: Install QEMU for Ubuntu
         if: runner.os == 'Linux' && steps.cache-vm-stage2.outputs.cache-hit != 'true'
@@ -117,6 +108,7 @@ jobs:
             cd $GITHUB_WORKSPACE/setup/xvm/
             bash build_vm_stage2.sh
       - name: Bundle outputs as tar file
+        if: steps.cache-vm-stage2.outputs.cache-hit != 'true'
         run: |
             cd $GITHUB_WORKSPACE/setup/xvm/
             tar -cvf stage2_outputs.tar ./output/xvm_stage2.qcow2 ./output/xvm_key ./output/xvm_key.pub ./output/firmware_vars.fd ./output/firmware_code.fd
@@ -125,73 +117,73 @@ jobs:
         with:
           name: arm_stage2_vm
           path: setup/xvm/stage2_outputs.tar
-  build-arm-stage3:
-    runs-on: macos-14
-    needs: build-arm-stage2
-    permissions:
-      contents: read
-      packages: write
-    steps:
-      - name: Checkout repository
-        uses: actions/checkout@v4
-      - name: Install QEMU for Ubuntu
-        if: runner.os == 'Linux'
-        run: |
-          sudo apt-get update
-          sudo apt-get install -y qemu-system-arm rpm2cpio
-      - name: Install QEMU for macOS
-        if: runner.os == 'macOS'
-        run: |
-          sysctl machdep.cpu
-          brew install qemu
-      - name: Download Rocky VM with dependencies
-        uses: actions/download-artifact@v4
-        with:
-            name: arm_stage2_vm
-            path: setup/xvm/
-      - name: Extract previous job outputs
-        run: |
-            cd $GITHUB_WORKSPACE/setup/xvm/
-            tar -xvf stage2_outputs.tar
-            mv -v output/xvm_stage2.qcow2 output/xvm.qcow2
-      - name: Install MagAO-X software
-        run: |
-            cd $GITHUB_WORKSPACE/setup/xvm/
-            bash build_vm_stage3.sh
-      - name: Bundle outputs as tar file
-        run: |
-            cd $GITHUB_WORKSPACE/setup/xvm/
-            tar -cvf stage3_outputs.tar ./output/xvm_stage3.qcow2 ./output/xvm_key ./output/xvm_key.pub ./output/firmware_vars.fd ./output/firmware_code.fd
-      - name: Upload stage 3 outputs
-        uses: actions/upload-artifact@v4
-        with:
-          name: arm_stage3_vm
-          path: setup/xvm/stage3_outputs.tar
-  build-arm-stage4-utm:
-    runs-on: macos-14
-    needs: build-arm-stage3
-    permissions:
-      contents: read
-      packages: write
-    steps:
-      - name: Get built VM artifact
-        uses: actions/download-artifact@v4
-        with:
-            name: arm_stage3_vm
-            path: setup/xvm/output/
-      - name: Extract previous job outputs
-        run: |
-            cd $GITHUB_WORKSPACE/setup/xvm/
-            tar -xvf stage3_outputs.tar
-      - name: Create UTM bundle
-        run: |
-            cd $GITHUB_WORKSPACE/setup/xvm/
-            bash bundle_utm.sh
-      - name: Upload UTM image
-        uses: actions/upload-artifact@v4
-        with:
-          name: MagAO-X_VM
-          path: |
-            setup/xvm/output/MagAO-X_VM_bundle.tar.xz
-            setup/xvm/output/xvm_key
-            setup/xvm/output/xvm_key.pub
+  # build-arm-stage3:
+  #   runs-on: macos-14
+  #   needs: build-arm-stage2
+  #   permissions:
+  #     contents: read
+  #     packages: write
+  #   steps:
+  #     - name: Checkout repository
+  #       uses: actions/checkout@v4
+  #     - name: Install QEMU for Ubuntu
+  #       if: runner.os == 'Linux'
+  #       run: |
+  #         sudo apt-get update
+  #         sudo apt-get install -y qemu-system-arm rpm2cpio
+  #     - name: Install QEMU for macOS
+  #       if: runner.os == 'macOS'
+  #       run: |
+  #         sysctl machdep.cpu
+  #         brew install qemu
+  #     - name: Download Rocky VM with dependencies
+  #       uses: actions/download-artifact@v4
+  #       with:
+  #           name: arm_stage2_vm
+  #           path: setup/xvm/
+  #     - name: Extract previous job outputs
+  #       run: |
+  #           cd $GITHUB_WORKSPACE/setup/xvm/
+  #           tar -xvf stage2_outputs.tar
+  #           mv -v output/xvm_stage2.qcow2 output/xvm.qcow2
+  #     - name: Install MagAO-X software
+  #       run: |
+  #           cd $GITHUB_WORKSPACE/setup/xvm/
+  #           bash build_vm_stage3.sh
+  #     - name: Bundle outputs as tar file
+  #       run: |
+  #           cd $GITHUB_WORKSPACE/setup/xvm/
+  #           tar -cvf stage3_outputs.tar ./output/xvm_stage3.qcow2 ./output/xvm_key ./output/xvm_key.pub ./output/firmware_vars.fd ./output/firmware_code.fd
+  #     - name: Upload stage 3 outputs
+  #       uses: actions/upload-artifact@v4
+  #       with:
+  #         name: arm_stage3_vm
+  #         path: setup/xvm/stage3_outputs.tar
+  # build-arm-stage4-utm:
+  #   runs-on: macos-14
+  #   needs: build-arm-stage3
+  #   permissions:
+  #     contents: read
+  #     packages: write
+  #   steps:
+  #     - name: Get built VM artifact
+  #       uses: actions/download-artifact@v4
+  #       with:
+  #           name: arm_stage3_vm
+  #           path: setup/xvm/output/
+  #     - name: Extract previous job outputs
+  #       run: |
+  #           cd $GITHUB_WORKSPACE/setup/xvm/
+  #           tar -xvf stage3_outputs.tar
+  #     - name: Create UTM bundle
+  #       run: |
+  #           cd $GITHUB_WORKSPACE/setup/xvm/
+  #           bash bundle_utm.sh
+  #     - name: Upload UTM image
+  #       uses: actions/upload-artifact@v4
+  #       with:
+  #         name: MagAO-X_VM
+  #         path: |
+  #           setup/xvm/output/MagAO-X_VM_bundle.tar.xz
+  #           setup/xvm/output/xvm_key
+  #           setup/xvm/output/xvm_key.pub
