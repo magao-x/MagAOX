@@ -43,7 +43,7 @@ if [[ $VM_KIND != "none" ]]; then
     echo "Detected virtualization: $VM_KIND"
 fi
 if [[ ! -e $roleScript && ! -z $MAGAOX_ROLE ]]; then
-    echo "export MAGAOX_ROLE=$role" | $_REAL_SUDO tee $roleScript
+    echo "export MAGAOX_ROLE=$MAGAOX_ROLE" | $_REAL_SUDO tee $roleScript
 fi
 if [[ ! -e $roleScript ]]; then
     echo "Export \$MAGAOX_ROLE in $roleScript first"
