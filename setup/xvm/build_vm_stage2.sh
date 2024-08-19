@@ -25,7 +25,7 @@ qemu-system-${vmArch} \
 &
 sleep 60
 ssh -p 2201 -o "UserKnownHostsFile /dev/null" -o "StrictHostKeyChecking=no" -i ./output/xvm_key xdev@localhost mkdir -p MagAOX
-rsync -rv -e 'ssh -p 2201 -o "UserKnownHostsFile /dev/null" -o "StrictHostKeyChecking=no" -i ./output/xvm_key' ../../ xdev@localhost:MagAOX/
+rsync -rv --exclude xvm -e 'ssh -p 2201 -o "UserKnownHostsFile /dev/null" -o "StrictHostKeyChecking=no" -i ./output/xvm_key' ../../ xdev@localhost:MagAOX/
 ssh -p 2201 -o "UserKnownHostsFile /dev/null" -o "StrictHostKeyChecking=no" -i ./output/xvm_key xdev@localhost 'bash -s' < ./bootstrap_magao-x.sh || exit 1
 # wait for the backgrounded qemu process to exit:
 wait
