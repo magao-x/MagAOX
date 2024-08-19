@@ -1,0 +1,99 @@
+<mxfile host="65bd71144e">
+    <diagram id="GYhyZ-raUVNj0wQR4c2P" name="Page-1">
+        <mxGraphModel dx="1206" dy="575" grid="0" gridSize="10" guides="1" tooltips="1" connect="1" arrows="1" fold="1" page="1" pageScale="1" pageWidth="1180" pageHeight="350" background="none" math="0" shadow="0">
+            <root>
+                <mxCell id="0"/>
+                <mxCell id="1" parent="0"/>
+                <mxCell id="group:telescope" value="" style="group;fontSize=14;labelBackgroundColor=none;fontColor=none;noLabel=1;" parent="1" vertex="1" connectable="0">
+                    <mxGeometry x="980" y="20" width="180" height="120" as="geometry"/>
+                </mxCell>
+                <mxCell id="node:telescope" value="telescope" style="rounded=0;whiteSpace=wrap;html=1;fontSize=17;" parent="group:telescope" vertex="1">
+                    <mxGeometry width="180" height="120" as="geometry"/>
+                </mxCell>
+                <mxCell id="output:telescope:out" value="out" style="rounded=0;whiteSpace=wrap;html=1;strokeColor=#FF0000;" parent="group:telescope" vertex="1">
+                    <mxGeometry y="80" width="80" height="40" as="geometry"/>
+                </mxCell>
+                <mxCell id="group:source" value="" style="group" parent="1" vertex="1" connectable="0">
+                    <mxGeometry x="980" y="200" width="180" height="120" as="geometry"/>
+                </mxCell>
+                <mxCell id="node:source" value="&lt;font style=&quot;font-size: 18px;&quot;&gt;source&lt;/font&gt;" style="rounded=0;whiteSpace=wrap;html=1;" parent="group:source" vertex="1">
+                    <mxGeometry width="180" height="120" as="geometry"/>
+                </mxCell>
+                <mxCell id="output:source:out" value="out" style="rounded=0;whiteSpace=wrap;html=1;strokeColor=#FF0000;" parent="group:source" vertex="1">
+                    <mxGeometry y="80" width="80" height="40" as="geometry"/>
+                </mxCell>
+                <mxCell id="group:fwtelsim" value="" style="group" parent="1" vertex="1" connectable="0">
+                    <mxGeometry x="650" y="200" width="180" height="120" as="geometry"/>
+                </mxCell>
+                <mxCell id="node:fwtelsim" value="fwtelsim" style="rounded=0;whiteSpace=wrap;html=1;fontSize=18;" parent="group:fwtelsim" vertex="1">
+                    <mxGeometry width="180" height="120" as="geometry"/>
+                </mxCell>
+                <mxCell id="input:fwtelsim:in" value="in" style="rounded=0;whiteSpace=wrap;html=1;strokeColor=#FF0000;" parent="group:fwtelsim" vertex="1">
+                    <mxGeometry x="110" y="80" width="70" height="40" as="geometry"/>
+                </mxCell>
+                <mxCell id="output:fwtelsim:out" value="out" style="rounded=0;whiteSpace=wrap;html=1;strokeColor=#FF0000;" parent="group:fwtelsim" vertex="1">
+                    <mxGeometry y="80" width="70" height="40" as="geometry"/>
+                </mxCell>
+                <mxCell id="link:fwtelsim:in2out" value="" style="endArrow=classic;html=1;exitX=0;exitY=0.5;exitDx=0;exitDy=0;entryX=1;entryY=0.5;entryDx=0;entryDy=0;strokeColor=#00FF00;dashed=1;" parent="group:fwtelsim" source="input:fwtelsim:in" target="output:fwtelsim:out" edge="1">
+                    <mxGeometry width="50" height="50" relative="1" as="geometry"/>
+                </mxCell>
+                <mxCell id="group:pickoff" value="" style="group" parent="1" vertex="1" connectable="0">
+                    <mxGeometry x="330" y="200" width="180" height="120" as="geometry"/>
+                </mxCell>
+                <mxCell id="node:pickoff" value="&lt;font style=&quot;font-size: 18px;&quot;&gt;pickoff&lt;/font&gt;" style="rounded=0;whiteSpace=wrap;html=1;" parent="group:pickoff" vertex="1">
+                    <mxGeometry width="180" height="120" as="geometry"/>
+                </mxCell>
+                <mxCell id="input:pickoff:tel" value="tel" style="rounded=0;inwhiteSpace=wrap;html=1;strokeColor=#FF0000;" parent="group:pickoff" vertex="1">
+                    <mxGeometry x="110" width="70" height="40" as="geometry"/>
+                </mxCell>
+                <mxCell id="input:pickoff:lab" value="lab" style="rounded=0;whiteSpace=wrap;html=1;strokeColor=#FF0000;" parent="group:pickoff" vertex="1">
+                    <mxGeometry x="110" y="80" width="70" height="40" as="geometry"/>
+                </mxCell>
+                <mxCell id="output:pickoff:out" value="out" style="rounded=0;whiteSpace=wrap;html=1;strokeColor=#FF0000;" parent="group:pickoff" vertex="1">
+                    <mxGeometry y="80" width="70" height="40" as="geometry"/>
+                </mxCell>
+                <mxCell id="link:pickoff:lab2out" value="" style="endArrow=classic;html=1;exitX=0;exitY=0.5;exitDx=0;exitDy=0;entryX=1;entryY=0.5;entryDx=0;entryDy=0;strokeColor=#00FF00;dashed=1;" parent="group:pickoff" source="input:pickoff:lab" target="output:pickoff:out" edge="1">
+                    <mxGeometry width="50" height="50" relative="1" as="geometry"/>
+                </mxCell>
+                <mxCell id="link:pickoff:tel2out" value="" style="endArrow=classic;html=1;dashed=1;strokeColor=#00FF00;exitX=0;exitY=0.5;exitDx=0;exitDy=0;entryX=0.5;entryY=0;entryDx=0;entryDy=0;" parent="group:pickoff" source="input:pickoff:tel" target="output:pickoff:out" edge="1">
+                    <mxGeometry width="50" height="50" relative="1" as="geometry">
+                        <Array as="points">
+                            <mxPoint x="35" y="20"/>
+                        </Array>
+                    </mxGeometry>
+                </mxCell>
+                <mxCell id="group:stagek" value="" style="group" parent="1" connectable="0" vertex="1">
+                    <mxGeometry x="10" y="200" width="180" height="120" as="geometry"/>
+                </mxCell>
+                <mxCell id="node:stagek" value="stagek" style="rounded=0;whiteSpace=wrap;html=1;fontSize=18;" parent="group:stagek" vertex="1">
+                    <mxGeometry width="180" height="120" as="geometry"/>
+                </mxCell>
+                <mxCell id="input:stagek:in" value="in" style="rounded=0;whiteSpace=wrap;html=1;strokeColor=#FF0000;" parent="group:stagek" vertex="1">
+                    <mxGeometry x="110" y="80" width="70" height="40" as="geometry"/>
+                </mxCell>
+                <mxCell id="output:stagek:out" value="out" style="rounded=0;whiteSpace=wrap;html=1;strokeColor=#FF0000;" parent="group:stagek" vertex="1">
+                    <mxGeometry y="80" width="70" height="40" as="geometry"/>
+                </mxCell>
+                <mxCell id="link:stagek:in2out" value="" style="endArrow=classic;html=1;dashed=1;strokeColor=#00FF00;exitX=0;exitY=0.5;exitDx=0;exitDy=0;entryX=1;entryY=0.5;entryDx=0;entryDy=0;" parent="group:stagek" source="input:stagek:in" target="output:stagek:out" edge="1">
+                    <mxGeometry width="50" height="50" relative="1" as="geometry"/>
+                </mxCell>
+                <mxCell id="beam:telescope2pickoff" value="telescope2pickoff" style="edgeStyle=elbowEdgeStyle;elbow=horizontal;endArrow=classic;html=1;curved=0;rounded=0;endSize=8;startSize=8;entryX=1;entryY=0.5;entryDx=0;entryDy=0;exitX=0;exitY=0.5;exitDx=0;exitDy=0;strokeColor=#FF0000;strokeWidth=2;fontColor=#FF0000;fontSize=14;" parent="1" source="output:telescope:out" target="input:pickoff:tel" edge="1">
+                    <mxGeometry relative="1" as="geometry">
+                        <Array as="points">
+                            <mxPoint x="570" y="200"/>
+                        </Array>
+                    </mxGeometry>
+                </mxCell>
+                <mxCell id="beam:source2fwtelsim" value="source2fwtelsim" style="endArrow=classic;html=1;exitX=0;exitY=0.5;exitDx=0;exitDy=0;entryX=1;entryY=0.5;entryDx=0;entryDy=0;strokeColor=#FF0000;strokeWidth=2;fontColor=#FF0000;fontSize=14;" parent="1" source="output:source:out" target="input:fwtelsim:in" edge="1">
+                    <mxGeometry relative="1" as="geometry"/>
+                </mxCell>
+                <mxCell id="beam:fwtelsim2pickoff" value="fwtelsim2pickoff" style="endArrow=classic;html=1;exitX=0;exitY=0.5;exitDx=0;exitDy=0;entryX=1;entryY=0.5;entryDx=0;entryDy=0;strokeColor=#FF0000;strokeWidth=2;fontColor=#FF0000;fontSize=14;" parent="1" source="output:fwtelsim:out" target="input:pickoff:lab" edge="1">
+                    <mxGeometry relative="1" as="geometry"/>
+                </mxCell>
+                <mxCell id="beam:pickoff2stagek" value="pickoff2stagek" style="endArrow=classic;html=1;exitX=0;exitY=0.5;exitDx=0;exitDy=0;entryX=1;entryY=0.5;entryDx=0;entryDy=0;strokeColor=#FF0000;strokeWidth=2;fontColor=#FF0000;fontSize=14;" parent="1" source="output:pickoff:out" target="input:stagek:in" edge="1">
+                    <mxGeometry relative="1" as="geometry"/>
+                </mxCell>
+            </root>
+        </mxGraphModel>
+    </diagram>
+</mxfile>
