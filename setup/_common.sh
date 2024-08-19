@@ -1,6 +1,6 @@
 #!/bin/bash
 SETUPDIR="$( cd "$( dirname "${BASH_SOURCE[0]}" )" && pwd )"
-
+VM_KIND=$(systemd-detect-virt)
 
 instrument_user=xsup
 instrument_group=magaox
