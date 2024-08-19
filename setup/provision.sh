@@ -41,9 +41,9 @@ roleScript=/etc/profile.d/magaox_role.sh
 VM_KIND=$(systemd-detect-virt)
 if [[ $VM_KIND != "none" ]]; then
     echo "Detected virtualization: $VM_KIND"
-    if [[ ! -e $roleScript ]]; then
-        echo "export MAGAOX_ROLE=vm" | $_REAL_SUDO tee $roleScript
-    fi
+fi
+if [[ ! -e $roleScript && ! -z $MAGAOX_ROLE ]]; then
+    echo "export MAGAOX_ROLE=$role" | $_REAL_SUDO tee $roleScript
 fi
 if [[ ! -e $roleScript ]]; then
     echo "Export \$MAGAOX_ROLE in $roleScript first"

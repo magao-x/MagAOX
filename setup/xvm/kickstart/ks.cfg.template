@@ -103,6 +103,7 @@ nano
 git
 qemu-guest-agent
 spice-vdagent
+rsync
 %end
 
 # Do not start the Inital Setup app
