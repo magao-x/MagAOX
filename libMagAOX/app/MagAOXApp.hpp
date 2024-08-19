@@ -4,7 +4,7 @@
   *
   * History:
   * - 2017-12-24 created by JRM
-  * 
+  *
   * \ingroup app_files
   */
 
@@ -88,11 +88,11 @@ protected:
    std::string m_configName; ///< The name of the configuration file (minus .conf).
 
    std::string m_configDir; ///< The path to configuration files for MagAOX.
-      
+
    std::string m_configBase; ///< The name of a base config class for this app (minus .conf).
 
    std::string m_calibDir; ///< The path to calibration files for MagAOX.
-   
+
    std::string sysPath;  ///< The path to the system directory, for PID file, etc.
 
    std::string secretsPath; ///< Path to the secrets directory, where passwords, etc, are stored.
@@ -131,10 +131,10 @@ public:
 
    /// Get the value of the shutdown flag.
    /**
-     * \returns the current value of m_shutdown 
-     */ 
+     * \returns the current value of m_shutdown
+     */
    int shutdown();
-   
+
    /// Set the paths for config files
    /** Replaces the mx::application defaults with the MagAO-X config system.
      *
@@ -170,9 +170,9 @@ public:
    /// Check for unused and unrecognized config options and settings.
    /** Logs the unused targets as warnings.  Unrecognized and unused options are logged as critical, and m_shutdown is set.
      * Any command line argument (not an option) will also be critical and cause shutdown.
-     */  
+     */
    virtual void checkConfig();
-   
+
    /// The execute method implementing the standard main loop.  Should not normally be overridden.
    /** Performs final startup steps.  That is:
      * - Verifies correct effective user-id by comparison to logs directory.
@@ -265,11 +265,11 @@ public:
 
    /// Handle a log message from the logging system
    /** This is a callback from the logManager, and is called when the log thread is processing log entries.
-     * 
+     *
      * Decides whether to display to stderr and whether to send via INDI.
      */
    void logMessage( bufferPtrT & b );
-   
+
 private:
    /// Callback for config system logging.
    /** Called by appConfigurator each time a value is set using the config() operator.
@@ -314,48 +314,48 @@ private:
    uid_t m_euidReal;     ///< The real user id of the proces (i.e. the lower privileged id of the user)
    uid_t m_euidCalled;   ///< The user id of the process as called (i.e. the higher privileged id of the owner, root if setuid).
    uid_t m_suid;         ///< The save-set user id of the process
-   
+
 protected:
 
    /// Internal class to manage setuid privilege escalation with RAII
    /** Upon construction this elevates to the called user id, root in a setuid process.
      * Restores privileges to real user id upon destruction (i.e. when it goes out of scope).
-     */ 
+     */
    class elevatedPrivileges
    {
       private:
          MagAOXApp * m_app;
          bool m_elevated {false};
-         
+
       public:
          explicit elevatedPrivileges(MagAOXApp * app)
          {
             m_app = app;
             elevate();
          }
-      
+
          void elevate()
          {
             if(m_elevated) return;
-          
+
             m_app->setEuidCalled();
             m_elevated = true;
          }
-         
+
          void restore()
          {
             if(!m_elevated) return;
-            
+
             m_app->setEuidReal();
             m_elevated = false;
          }
-         
+
          ~elevatedPrivileges()
          {
             restore();
          }
    };
-   
+
 private:
    /// Set the effective user ID to the called value, i.e. the highest possible.
    /** If setuid is set on the file, this will be super-user privileges.
@@ -417,22 +417,22 @@ protected:
      * the environment variable is not set, the default defined by MAGAOX_cpusetPath in paths.hpp is used.
      * This is normally "/opt/MagAOX/cpuset/"
      */
-   
+
    std::string m_cpusetPath {MAGAOX_cpusetPath};
 
-   /** \name Threads 
+   /** \name Threads
      *
      * @{
      */
 public:
-   
+
    /// Start a thread, using this class's privileges to set priority, etc.
-   /** 
+   /**
      * The thread initialization synchronizer `bool` is set to true at the beginning
      * of this function, then is set to false once all initialization is complete.  The
      * thread exec function should wait until this is false before doing _anything_ except
      * setting the pid.  This is to avoid privilege escalation bugs.
-     * 
+     *
      * The interface of the thread start function is:
      \code
      static void impl::myThreadStart( impl * o )
@@ -445,10 +445,10 @@ public:
      *
      * \returns 0 on success
      * \returns -1 on error
-     */ 
+     */
    template<class thisPtr, class Function>
    int threadStart( std::thread & thrd,           ///< [out] The thread object to start executing
-                    bool & thrdInit,              ///< [in/out] The thread initilization synchronizer.  
+                    bool & thrdInit,              ///< [in/out] The thread initilization synchronizer.
                     pid_t & tpid,                 ///< [in/out] The thread pid to be filled in by thrdStart immediately upon call
                     pcf::IndiProperty & thProp,   ///< [in/out] The INDI property to publish the thread details
                     int thrdPrio,                 ///< [in] The r/t priority to set for this thread
@@ -457,9 +457,9 @@ public:
                     thisPtr * thrdThis,           ///< [in] The `this` pointer to pass to the thread starter function
                     Function&& thrdStart          ///< [in] The thread starting function, a static function taking a `this` pointer as argument.
                   );
-   
+
    ///@} -- Threads
-   
+
    /** \name Application State
      *
      * @{
@@ -468,9 +468,9 @@ private:
    stateCodes::stateCodeT m_state {stateCodes::UNINITIALIZED}; ///< The application's state.  Never ever set this directly, use state(const stateCodeT & s).
 
    bool m_stateAlert {false}; //Flag to control whether the FSM is in an alert state.  Once set, only user acknowledgement can change this.
-   
+
    bool m_gitAlert {false}; //Flag set if there is a git modified warning to alert on.
-   
+
    int m_stateLogged {0} ;///< Counter and flag for use to log errors just once.  Never ever access directly, use stateLogged().
 
 public:
@@ -482,10 +482,10 @@ public:
    /// Set the current state code
     /*
      * If it is a change, the state change is logged.  Also resets m_stateLogged to 0.
-     * 
+     *
      * Will also update INDI if there is a change.
      */
-   void state( const stateCodes::stateCodeT & s, ///< [in] The new application state 
+   void state( const stateCodes::stateCodeT & s, ///< [in] The new application state
                bool stateAlert = false ///< [in] [optional] flag to set the alert state of the FSM property.
              );
 
@@ -511,13 +511,13 @@ public:
    ///@} --Application State
 
 private:
-   
+
    /// Clear the FSM alert state.
    /** This can only be done from within this class, and this
      * should only be possible via user action via INDI.
-     */ 
+     */
    int clearFSMAlert();
-   
+
    /** \name INDI Interface
      *
      * For reference: "Get" and "New" refer to properties we own. "Set" refers to properties owned by others.
@@ -538,7 +538,7 @@ public:
 
    ///Mutex for locking INDI communications.
    std::mutex m_indiMutex;
-   
+
 protected:
    ///Structure to hold the call-back details for handling INDI communications.
    struct indiCallBack
@@ -590,20 +590,20 @@ public:
 
    /// Create a standard R/W INDI Text property with target and current elements.
    /**
-     * \returns 0 on success 
+     * \returns 0 on success
      * \returns -1 on error
-     */ 
+     */
    int createStandardIndiText( pcf::IndiProperty & prop,       ///< [out] the property to create and setup
                                const std::string & propName,   ///< [in] the name of the property
                                const std::string & label = "", ///< [in] [optional] the GUI label suggestion for this property
                                const std::string & group = ""  ///< [in] [optional] the group for this property
                              );
-   
+
    /// Create a standard ReadOnly INDI Text property, with at least one element.
    /**
-     * \returns 0 on success 
+     * \returns 0 on success
      * \returns -1 on error
-     */ 
+     */
    int createROIndiText( pcf::IndiProperty & prop,           ///< [out] the property to create and setup
                          const std::string & propName,       ///< [in] the name of the property
                          const std::string & elName,         ///< [in] the name of the element
@@ -611,12 +611,12 @@ public:
                          const std::string & propGroup = "", ///< [in] [optional] the group for this property
                          const std::string & elLabel = ""    ///< [in] [optional] the GUI label suggestion for the element
                        );
-   
+
    /// Create a standard R/W INDI Number property with target and current elements.
    /**
-     * \returns 0 on success 
+     * \returns 0 on success
      * \returns -1 on error
-     */ 
+     */
    template<typename T>
    int createStandardIndiNumber( pcf::IndiProperty & prop,       ///< [out] the property to create and setup
                                  const std::string & name,       ///< [in] the name of the property
@@ -627,42 +627,42 @@ public:
                                  const std::string & label = "", ///< [in] [optional] the GUI label suggestion for this property
                                  const std::string & group = ""  ///< [in] [optional] the group for this property
                                );
-   
+
    /// Create a ReadOnly INDI Number property
    /**
-     * \returns 0 on success 
+     * \returns 0 on success
      * \returns -1 on error
-     */ 
+     */
    int createROIndiNumber( pcf::IndiProperty & prop,           ///< [out] the property to create and setup
                            const std::string & propName,       ///< [in] the name of the property
                            const std::string & propLabel = "", ///< [in] [optional] the GUI label suggestion for this property
                            const std::string & propGroup = ""  ///< [in] [optional] the group for this property
                          );
-   
+
    /// Create a standard R/W INDI switch with a single toggle element.
    /** This switch is intended to function like an on/off toggle switch.
-     * 
-     * \returns 0 on success 
+     *
+     * \returns 0 on success
      * \returns -1 on error
-     */ 
+     */
    int createStandardIndiToggleSw( pcf::IndiProperty & prop,       ///< [out] the property to create and setup
                                    const std::string & name,       ///< [in] the name of the property
                                    const std::string & label = "", ///< [in] [optional] the GUI label suggestion for this property
                                    const std::string & group = ""  ///< [in] [optional] the group for this property
-                                 );   
-   
+                                 );
+
    /// Create a standard R/W INDI switch with a single request element.
    /** This switch is intended to function like a momentary switch.
      *
      * \returns 0 on success
      * \returns -1 on error
-     */ 
+     */
    int createStandardIndiRequestSw( pcf::IndiProperty & prop,       ///< [out] the property to create and setup
                                     const std::string & name,       ///< [in] the name of the property
                                     const std::string & label = "", ///< [in] [optional] the GUI label suggestion for this property
                                     const std::string & group = ""  ///< [in] [optional] the group for this property
                                   );
-   
+
    /// Create a standard R/W INDI selection (one of many) switch with vector of elements and element labels
    /** This switch is intended to function like drop down menu.
      *
@@ -679,10 +679,10 @@ public:
 
 /// Create a standard R/W INDI selection (one of many) switch with vector of elements using the element strings as their own labels
    /** This switch is intended to function like drop down menu.
-     * 
-     * \returns 0 on success 
+     *
+     * \returns 0 on success
      * \returns -1 on error
-     */ 
+     */
    int createStandardIndiSelectionSw( pcf::IndiProperty & prop,                  ///< [out] the property to create and setup
                                       const std::string & name,                  ///< [in] the name of the property,
                                       const std::vector<std::string> & elements, ///< [in] the element names to give to the switches
@@ -712,7 +712,7 @@ public:
                                      const pcf::IndiProperty::PropertyPermType & propPerm,  ///< [in] the permissions of the property
                                      const pcf::IndiProperty::PropertyStateType & propState ///< [in] the state of the property
                                    );
-   
+
    /// Register an INDI property which is exposed for others to request a New Property for.
    /** In this version the supplied IndiProperty must be fully set up before passing in.
      *
@@ -723,7 +723,7 @@ public:
    int registerIndiPropertyNew( pcf::IndiProperty & prop,                   ///< [in] the property to register, must be fully set up
                                 int (*)( void *, const pcf::IndiProperty &) ///< [in] the callback for changing the property
                               );
-   
+
    /// Register an INDI property which is exposed for others to request a New Property for.
    /** This verison sets up the INDI property according to the arguments.
      *
@@ -738,7 +738,7 @@ public:
                                 const pcf::IndiProperty::PropertyStateType & propState, ///< [in] the state of the property
                                 int (*)( void *, const pcf::IndiProperty &)             ///< [in] the callback for changing the property
                               );
-   
+
    /// Register an INDI property which is exposed for others to request a New Property for, with a switch rule
    /** This verison sets up the INDI property according to the arguments.
      *
@@ -754,7 +754,7 @@ public:
                                 const pcf::IndiProperty::SwitchRuleType & propRule,     ///< [in] the switch rule type
                                 int (*)( void *, const pcf::IndiProperty &)             ///< [in] the callback for changing the property
                               );
-   
+
    /// Register an INDI property which is monitored for updates from others.
    /**
      *
@@ -781,7 +781,7 @@ protected:
      * \returns -1 on error.  This is fatal.
      */
    int startINDI();
-   
+
 public:
 
    void sendGetPropertySetList(bool all=false);
@@ -821,11 +821,11 @@ protected:
 
    /// Update an INDI property element value if it has changed.
    /** Will only peform a SetProperty if the new element value has changed
-     * compared to the stored value, or if the property state has changed.  
-     * 
+     * compared to the stored value, or if the property state has changed.
+     *
      * This comparison is done in the true
      * type of the value.
-     * 
+     *
      * For a property with multiple elements, you should use the vector version to minimize network traffic.
      */
    template<typename T>
@@ -837,13 +837,13 @@ protected:
 
    /// Update an INDI property element value if it has changed.
    /** Will only peform a SetProperty if the new element value has changed
-     * compared to the stored value, or if the property state has changed.  
-     * 
+     * compared to the stored value, or if the property state has changed.
+     *
      * This comparison is done in the true
      * type of the value.
-     * 
+     *
      * This is a specialization for `const char *` to `std::string`.
-     * 
+     *
      * For a property with multiple elements, you should use the vector version to minimize network traffic.
      * \overload
      */
@@ -852,28 +852,28 @@ protected:
                          const char * newVal, ///< [in] the new value
                          pcf::IndiProperty::PropertyStateType ipState = pcf::IndiProperty::Ok
                       );
-   
+
    /// Update an INDI switch element value if it has changed.
    /** Will only peform a SetProperty if the new element switch state has changed, or the propery state
      * has changed.
-     * 
+     *
      */
    void updateSwitchIfChanged( pcf::IndiProperty & p, ///< [in/out] The property containing the element to possibly update
                                const std::string & el, ///< [in] The element name
                                const pcf::IndiElement::SwitchStateType & newVal, ///< [in] the new value
                                pcf::IndiProperty::PropertyStateType ipState = pcf::IndiProperty::Ok
                              );
-   
+
    /// Update an INDI property if values have changed.
    /** Will only peform a SetProperty if at least one value has changed
-     * compared to the stored value, or if the property state has changed.  
-     * 
+     * compared to the stored value, or if the property state has changed.
+     *
      * Constructs the element names for each value as elX where X is the index of the vector.
-     * 
+     *
      * This comparison is done in the true
      * type of the value.
-     * 
-     * 
+     *
+     *
      * \overload
      */
    template<typename T>
@@ -885,11 +885,11 @@ protected:
 
   /// Update an INDI property if values have changed.
    /** Will only peform a SetProperty if at least one value has changed
-     * compared to the stored value, or if the property state has changed.  
-     * 
+     * compared to the stored value, or if the property state has changed.
+     *
      * This comparison is done in the true
      * type of the value.
-     * 
+     *
      * \overload
      */
    template<typename T>
@@ -899,15 +899,15 @@ protected:
                          pcf::IndiProperty::PropertyStateType newState = pcf::IndiProperty::Ok ///< [in] [optional] The state of the property
                       );
 
-   /// Get the target element value from an new property 
+   /// Get the target element value from an new property
    /**
      * \returns 0 on success
      * \returns -1 on error
      */
    template<typename T>
-   int indiTargetUpdate( pcf::IndiProperty & localProperty, ///< [out] The local property to update 
+   int indiTargetUpdate( pcf::IndiProperty & localProperty, ///< [out] The local property to update
                          T & localTarget, ///< [out] The local value to update
-                         const pcf::IndiProperty & remoteProperty, ///< [in] the new property received 
+                         const pcf::IndiProperty & remoteProperty, ///< [in] the new property received
                          bool setBusy = true ///< [in] [optional] set property to busy if true
                        );
 
@@ -923,13 +923,13 @@ protected:
                         const T & newVal ///< [in] The value to request for the element.
                       );
    /// Send a newProperty command to another device (using the INDI Client interface)
-   /** 
+   /**
      *
      * \returns 0 on success.
      * \returns -1 on an error, which will be logged
      */
    int sendNewProperty( const pcf::IndiProperty & ipSend /**< [in] The property to send a "new" INDI command for */);
-   
+
    /// Send a new property commmand for a standard toggle switch
    /**
      * \returns 0 on success
@@ -946,7 +946,7 @@ protected:
 
    ///indi Property to clear an FSM alert.
    pcf::IndiProperty m_indiP_clearFSMAlert;
-   
+
    /// The static callback function to be registered for requesting to clear the FSM alert
    /**
      * \returns 0 on success.
@@ -962,7 +962,7 @@ protected:
      * \returns -1 on error.
      */
    int newCallBack_clearFSMAlert( const pcf::IndiProperty &ipRecv /**< [in] the INDI property sent with the the new property request.*/);
-   
+
    ///@} --INDI Interface
 
    /** \name Power Management
@@ -987,14 +987,14 @@ protected:
    std::string m_powerTargetElement {"target"}; ///< The INDI element name to monitor for this device's power state.
 
    unsigned long m_powerOnWait {0}; ///< Time in sec to wait for device to boot after power on.
-   
+
    /* Power on waiting counter . . . */
    int m_powerOnCounter {-1}; ///< Counts numer of loops after power on, implements delay for device bootup.  If -1, then device was NOT powered off on app startup.
-   
+
    /* Power state . . . */
    int m_powerState {-1}; ///< Current power state, 1=On, 0=Off, -1=Unk.
    int m_powerTargetState {-1}; ///< Current target power state, 1=On, 0=Off, -1=Unk.
-   
+
    pcf::IndiProperty m_indiP_powerChannel; ///< INDI property used to communicate power state.
 
    /// This method is called when the change to poweroff is detected.
@@ -1010,11 +1010,11 @@ protected:
      * \returns -1 on any error which means the app should exit.
      */
    virtual int whilePowerOff();
-   
+
    /// This method tests whether the power on wait time has elapsed.
-   /** You would call this once per appLogic loop while in state POWERON.  While false, you would return 0.  
+   /** You would call this once per appLogic loop while in state POWERON.  While false, you would return 0.
      * Once it becomes true, take post-power-on actions and go on with life.
-     * 
+     *
      * \returns true if the time since POWERON is greater than the power-on wait, or if power management is not enabled
      * \returns false otherwise
      */
@@ -1026,20 +1026,20 @@ public:
    /** If power management is not enabled, this always returns 1=On.
      *
      * \returns -1 if power state is unknown
-     * \returns 0 if power is off 
+     * \returns 0 if power is off
      * \returns 1 if power is on or m_powerMgtEnabled==false
-     */ 
+     */
    int powerState();
-   
+
    /// Returns the target power state.
    /** If power management is not enabled, this always returns 1=On.
      *
      * \returns -1 if target power state is unknown
-     * \returns 0 if target power state is off 
+     * \returns 0 if target power state is off
      * \returns 1 if target power is on or m_powerMgtEnabled==false
-     */ 
+     */
    int powerStateTarget();
-   
+
    INDI_SETCALLBACK_DECL(MagAOXApp, m_indiP_powerChannel);
 
    ///@} Power Management
@@ -1062,7 +1062,7 @@ public:
      * \returns the current value of m_configDir
      */
    std::string configDir();
-   
+
    ///Get the INDI input FIFO file name
    /**
      * \returns the current value of m_driverInName
@@ -1100,7 +1100,7 @@ MagAOXApp<_useINDI>::MagAOXApp( const std::string & git_sha1,
       std::cerr << "Attempt to instantiate 2nd MagAOXApp.  Exiting immediately.\n";
       exit(-1);
    }
-   
+
    m_self = this;
 
    //Get the uids of this process.
@@ -1108,14 +1108,14 @@ MagAOXApp<_useINDI>::MagAOXApp( const std::string & git_sha1,
    setEuidReal(); //immediately step down to unpriveleged uid.
 
    m_log.parent(this);
-   
+
    //Set up config logging
    config.m_sources = true;
    config.configLog = configLog;
 
    //We log the current GIT status.
    logPrioT gl = logPrio::LOG_INFO;
-   if(git_modified) 
+   if(git_modified)
    {
       gl = logPrio::LOG_WARNING;
       m_gitAlert = true;
@@ -1123,12 +1123,12 @@ MagAOXApp<_useINDI>::MagAOXApp( const std::string & git_sha1,
    log<git_state>(git_state::messageT("MagAOX", git_sha1, git_modified), gl);
 
    gl = logPrio::LOG_INFO;
-   if(MXLIB_UNCOMP_REPO_MODIFIED) 
+   if(MXLIB_UNCOMP_REPO_MODIFIED)
    {
       gl = logPrio::LOG_WARNING;
       m_gitAlert = true;
    }
-   
+
    log<git_state>(git_state::messageT("mxlib", MXLIB_UNCOMP_CURRENT_SHA1, MXLIB_UNCOMP_REPO_MODIFIED), gl);
 
 }
@@ -1181,9 +1181,9 @@ void MagAOXApp<_useINDI>::setDefaults( int argc,
       tmpstr = MAGAOX_calibRelPath;
    }
    m_calibDir = MagAOXPath + "/" + tmpstr;
-   
-   
-   
+
+
+
    //Setup default log path
    tmpstr = MagAOXPath + "/" + MAGAOX_logRelPath;
 
@@ -1228,19 +1228,19 @@ void MagAOXApp<_useINDI>::setDefaults( int argc,
    m_configPathLocal = m_configDir + "/" + m_configName + ".conf";
 
    //Now we can setup common INDI properties
-   if( registerIndiPropertyNew( m_indiP_state, "fsm", pcf::IndiProperty::Text, pcf::IndiProperty::ReadOnly, pcf::IndiProperty::Idle, 0) < 0) 
-   {                                                                                          
+   if( registerIndiPropertyNew( m_indiP_state, "fsm", pcf::IndiProperty::Text, pcf::IndiProperty::ReadOnly, pcf::IndiProperty::Idle, 0) < 0)
+   {
       log<software_error>({__FILE__,__LINE__, "failed to register read only fsm_state property"});
-   }  
+   }
 
    m_indiP_state.add (pcf::IndiElement("state"));
 
-   createStandardIndiRequestSw( m_indiP_clearFSMAlert, "fsm_clear_alert", "Clear FSM Alert", "FSM");                                                     
+   createStandardIndiRequestSw( m_indiP_clearFSMAlert, "fsm_clear_alert", "Clear FSM Alert", "FSM");
    if(registerIndiPropertyNew(m_indiP_clearFSMAlert, st_newCallBack_clearFSMAlert) < 0)
    {
       log<software_error>({__FILE__,__LINE__, "failed to register new fsm_alert property"});
    }
-   
+
    return;
 
 }
@@ -1252,7 +1252,7 @@ void MagAOXApp<_useINDI>::setupBasicConfig() //virtual
    config.add("loopPause", "p", "loopPause", argType::Required, "", "loopPause", false, "unsigned long", "The main loop pause time in ns");
 
    config.add("ignore_git", "", "ignore-git", argType::True, "", "", false, "bool", "set to true to ignore git status");
-   
+
    //Logger Stuff
    m_log.setupConfig(config);
 
@@ -1264,7 +1264,7 @@ void MagAOXApp<_useINDI>::setupBasicConfig() //virtual
          log<software_critical>({__FILE__,__LINE__, "power management is enabled but we are not using INDI"});
          m_shutdown = true;
       }
-      
+
       //Power Management
       config.add("power.device", "", "power.device", argType::Required, "power", "device", false, "string", "Device controlling power for this app's device (INDI name).");
       config.add("power.channel", "", "power.channel", argType::Required, "power", "channel", false, "string", "Channel on device for this app's device (INDI name).");
@@ -1279,12 +1279,12 @@ void MagAOXApp<_useINDI>::loadBasicConfig() //virtual
 {
    bool ig {false};
    config(ig, "ignore_git");
-   
+
    if(!ig && m_gitAlert)
    {
       m_stateAlert = true;
    }
-   
+
    //---------- Setup the logger ----------//
    m_log.logName(m_configName);
    m_log.loadConfig(config);
@@ -1299,21 +1299,21 @@ void MagAOXApp<_useINDI>::loadBasicConfig() //virtual
       config(m_powerChannel, "power.channel");
       config(m_powerElement, "power.element");
       config(m_powerTargetElement, "power.targetElement");
-      
+
       if(m_powerDevice != "" && m_powerChannel != "")
       {
          log<text_log>("enabling power management: " + m_powerDevice + "." + m_powerChannel + "." + m_powerElement + "/" + m_powerTargetElement);
-         if( registerIndiPropertySet( m_indiP_powerChannel,m_powerDevice, m_powerChannel, INDI_SETCALLBACK(m_indiP_powerChannel)) < 0)  
-         {                                                                                          
-            log<software_error>({__FILE__,__LINE__, "failed to register set property"}); 
-         }            
+         if( registerIndiPropertySet( m_indiP_powerChannel,m_powerDevice, m_powerChannel, INDI_SETCALLBACK(m_indiP_powerChannel)) < 0)
+         {
+            log<software_error>({__FILE__,__LINE__, "failed to register set property"});
+         }
       }
       else
       {
          log<text_log>("power management not configured!", logPrio::LOG_CRITICAL);
          m_shutdown = true;
       }
-      
+
       config(m_powerOnWait, "power.powerOnWait");
       if(m_powerOnWait > 3600)
       {
@@ -1337,20 +1337,20 @@ void MagAOXApp<_useINDI>::checkConfig() //virtual
          log<text_log>("Unused config target: " + msg, logPrio::LOG_WARNING);
       }
    }
-         
+
    if(config.m_unusedConfigs.size() > 0)
    {
       for( auto it = config.m_unusedConfigs.begin(); it != config.m_unusedConfigs.end(); ++it )
       {
          if(it->second.used == true) continue;
-                     
+
          std::string msg = it->second.name;
          if(config.m_sources && it->second.sources.size() > 0 ) msg += " [" + it->second.sources[0]  + "]";
-                       
+
          log<text_log>("Unrecognized config setting: " + msg, logPrio::LOG_CRITICAL);
          m_shutdown = true;
       }
-      
+
    }
 
    if(config.nonOptions.size() > 0)
@@ -1361,11 +1361,11 @@ void MagAOXApp<_useINDI>::checkConfig() //virtual
       }
       m_shutdown = true;
    }
-   
+
 }
-   
-   
-   
+
+
+
 template<bool _useINDI>
 int MagAOXApp<_useINDI>::execute() //virtual
 {
@@ -1377,15 +1377,19 @@ int MagAOXApp<_useINDI>::execute() //virtual
 
    if( stat(m_log.logPath().c_str(), &logstat) < 0)
    {
-      return log<text_log,-1>({"Can not stat the log path."}, logPrio::LOG_CRITICAL);
+      state(stateCodes::FAILURE);
+      std::cerr << "\nCRITICAL: Can not stat the log path.\n\n";
+      return -1;
    }
-   
+
    if( logstat.st_uid != geteuid() )
    {
-      return log<text_log,-1>({"You are running this app as the wrong user."}, logPrio::LOG_CRITICAL);
+      state(stateCodes::FAILURE);
+      std::cerr << "\nCRITICAL: You are running this app as the wrong user.\n\n";
+      return -1;
    }
    #endif
-   
+
    //----------------------------------------//
    //        Get the PID Lock
    //----------------------------------------//
@@ -1400,10 +1404,10 @@ int MagAOXApp<_useINDI>::execute() //virtual
       return -1;
    }
 
-   //----------------------------------------//
-   //        Begin the logger
-   //----------------------------------------//
-   m_log.logThreadStart();
+   /* ***************************** */
+   /*        start logging          */
+   /* ***************************** */
+   m_log.logThreadStart(); //no return type
 
    //Give up to 2 secs to make sure log thread has time to get started and try to open a file.
    int w = 0;
@@ -1413,7 +1417,7 @@ int MagAOXApp<_useINDI>::execute() //virtual
       std::this_thread::sleep_for( std::chrono::duration<unsigned long, std::nano>(100000000));
       ++w;
    }
-   
+
    if(m_log.logThreadRunning() == false)
    {
       state(stateCodes::FAILURE);
@@ -1421,23 +1425,54 @@ int MagAOXApp<_useINDI>::execute() //virtual
       //We don't log this, because it won't be logged anyway.
       std::cerr << "\nCRITICAL: log thread not running.  Exiting.\n\n";
 
-      //Fall all the way through so PID gets unlocked
-      m_shutdown = 1;
+      if(unlockPID() < 0)
+      {
+         log<software_error>({__FILE__, __LINE__, "error from unlockPID()"});
+      }
+
+      return -1;
    }
 
-   //----------------------------------------//
-
-   //Install signal handling
+   /* ***************************** */
+   /*       signal handling         */
+   /* ***************************** */
    if(m_shutdown == 0)
    {
-      setSigTermHandler();
+      if(setSigTermHandler()< 0)
+      {
+         state(stateCodes::FAILURE);
+
+         log<software_critical>({__FILE__, __LINE__, "error from setSigTermHandler()"});
+
+         if(unlockPID() < 0)
+         {
+             log<software_error>({__FILE__, __LINE__, "error from unlockPID()"});
+         }
+
+         return -1;
+      }
    }
-   
-   //We are not initialized, begin application startup.
+
+   /* ***************************** */
+   /*         appStartup()          */
+   /* ***************************** */
    if( m_shutdown == 0 )
    {
       state(stateCodes::INITIALIZED);
-      if(appStartup() < 0) m_shutdown = 1;
+
+      if(appStartup() < 0)
+      {
+        state(stateCodes::FAILURE);
+
+        log<software_critical>({__FILE__, __LINE__, "error from appStartup()"});
+
+        if(unlockPID() < 0)
+        {
+            log<software_error>({__FILE__, __LINE__, "error from unlockPID()"});
+        }
+
+        return -1;
+      }
    }
 
    //====Begin INDI Communications
@@ -1445,11 +1480,22 @@ int MagAOXApp<_useINDI>::execute() //virtual
    {
       if(startINDI() < 0)
       {
-         log<software_critical>({__FILE__, __LINE__, "INDI failed to start."});
          state(stateCodes::FAILURE);
 
-         //Fall all the way through so PID gets unlocked
-         m_shutdown = 1;
+         log<software_critical>({__FILE__, __LINE__, "INDI failed to start."});
+
+         //Have to call appShutdown since appStartup was called
+         if(appShutdown() < 0)
+         {
+            log<software_error>({__FILE__, __LINE__, "error from appShutdown()"});
+         }
+
+         if(unlockPID() < 0)
+         {
+            log<software_error>({__FILE__, __LINE__, "error from unlockPID()"});
+         }
+
+         return -1;
       }
    }
 
@@ -1464,7 +1510,7 @@ int MagAOXApp<_useINDI>::execute() //virtual
          {
             if(!stateLogged()) log<text_log>("waiting for power state");
          }
-         
+
          ++nwaits;
          if(nwaits == 30)
          {
@@ -1472,17 +1518,18 @@ int MagAOXApp<_useINDI>::execute() //virtual
             state(stateCodes::ERROR);
          }
       }
-      
-      if(m_powerState > 0) 
+
+      if(m_powerState > 0)
       {
          state(stateCodes::POWERON);
       }
-      else 
+      else
       {
          m_powerOnCounter = 0;
          state(stateCodes::POWEROFF);
          if(onPowerOff() < 0)
          {
+            log<software_error>({__FILE__, __LINE__, "error from onPowerOff()"});
             m_shutdown = 1;
          }
       }
@@ -1517,6 +1564,7 @@ int MagAOXApp<_useINDI>::execute() //virtual
                state(stateCodes::POWEROFF);
                if(onPowerOff() < 0)
                {
+                  log<software_error>({__FILE__, __LINE__, "error from onPowerOff()"});
                   m_shutdown = 1;
                   continue;
                }
@@ -1530,6 +1578,7 @@ int MagAOXApp<_useINDI>::execute() //virtual
       {
          if( appLogic() < 0)
          {
+            log<software_error>({__FILE__, __LINE__, "error from appLogic()"});
             m_shutdown = 1;
             continue;
          }
@@ -1538,6 +1587,7 @@ int MagAOXApp<_useINDI>::execute() //virtual
       {
          if( whilePowerOff() < 0)
          {
+            log<software_error>({__FILE__, __LINE__, "error from whilePowerOff()"});
             m_shutdown = 1;
             continue;
          }
@@ -1566,7 +1616,10 @@ int MagAOXApp<_useINDI>::execute() //virtual
       }
    }
 
-   appShutdown();
+   if(appShutdown() < 0)
+   {
+      log<software_error>({__FILE__, __LINE__, "error from appShutdown()"});
+   }
 
    state(stateCodes::SHUTDOWN);
 
@@ -1575,13 +1628,13 @@ int MagAOXApp<_useINDI>::execute() //virtual
    {
       pcf::IndiProperty ipSend;
       ipSend.setDevice(m_configName);
-      try 
+      try
       {
          m_indiDriver->sendDelProperty(ipSend);
       }
       catch(const std::exception & e)
       {
-         log<software_error>({__FILE__, __LINE__, std::string("exception caught from sendDelProperty: ") + e.what()}); 
+         log<software_error>({__FILE__, __LINE__, std::string("exception caught from sendDelProperty: ") + e.what()});
       }
 
       m_indiDriver->quitProcess();
@@ -1589,7 +1642,10 @@ int MagAOXApp<_useINDI>::execute() //virtual
       log<indidriver_stop>();
    }
 
-   unlockPID();
+   if(unlockPID() < 0)
+   {
+      log<software_error>({__FILE__, __LINE__, "error from unlockPID()"});
+   }
 
    sleep(1);
    return 0;
@@ -1621,37 +1677,37 @@ void MagAOXApp<_useINDI>::logMessage( bufferPtrT & b )
       logStdFormat(std::cerr, b);
       std::cerr << "\n";
    }
-   
+
    if( logHeader::logLevel( b ) < logPrio::LOG_ERROR )
    {
       state(m_state, true); //For anything worse than error, we set the FSM state to alert
    }
-   
+
    if(_useINDI && m_indiDriver)
    {
       pcf::IndiProperty msg;
       msg.setDevice(m_configName);
-      
+
       std::stringstream logstdf;
       logMinStdFormat(logstdf, b);
-      
+
       msg.setMessage(logstdf.str());
-      
+
       //Set the INDI prop timespec to match the log entry
       timespecX ts = logHeader::timespec(b);
       timeval tv;
       tv.tv_sec = ts.time_s;
       tv.tv_usec = (long int) ( ((double) ts.time_ns)/1e3 );
-      
+
       msg.setTimeStamp(pcf::TimeStamp(tv));
-      
-      try 
+
+      try
       {
          m_indiDriver->sendMessage(msg);
       }
       catch(const std::exception & e)
       {
-         log<software_error>({__FILE__, __LINE__, std::string("exception caught from sendMessage: ") + e.what()}); 
+         log<software_error>({__FILE__, __LINE__, std::string("exception caught from sendMessage: ") + e.what()});
       }
    }
 }
@@ -1756,10 +1812,10 @@ void MagAOXApp<_useINDI>::handlerSigTerm( int signum,
    log<text_log>(logss);
 }
 
-///Empty signal handler.  SIGUSR1 is used to interrupt sleep in various threads.   
+///Empty signal handler.  SIGUSR1 is used to interrupt sleep in various threads.
 void sigUsr1Handler( int signum,
                      siginfo_t * siginf,
-                     void *ucont 
+                     void *ucont
                    );
 
 
@@ -1940,14 +1996,14 @@ int MagAOXApp<_useINDI>::unlockPID()
 
       //Get the maximum privileges available
       elevatedPrivileges elPriv(this);
-   
+
       if( ::remove(pidFileName.c_str()) < 0)
       {
          log<software_error>({__FILE__, __LINE__, errno, 0, std::string("Failed to remove PID file: ") + strerror(errno)});
          return -1;
       }
    }
-   
+
    std::stringstream logss;
    logss << "PID (" << m_pid << ") unlocked.";
    log<text_log>(logss.str());
@@ -1969,9 +2025,9 @@ int MagAOXApp<_useINDI>::threadStart( std::thread & thrd,
                                     )
 {
    thrdInit = true;
-   
+
    tpid = 0;
-   
+
    try
    {
       thrd  = std::thread( thrdStart, thrdThis);
@@ -1994,7 +2050,7 @@ int MagAOXApp<_useINDI>::threadStart( std::thread & thrd,
    }
 
    //Now set the RT priority.
-   
+
    if(thrdPrio < 0) thrdPrio = 0;
    if(thrdPrio > 99) thrdPrio = 99;
 
@@ -2006,14 +2062,14 @@ int MagAOXApp<_useINDI>::threadStart( std::thread & thrd,
    {//scope for elPriv
       //Get the maximum privileges available
       elevatedPrivileges elPriv(this);
-   
+
       //We set return value based on result from sched_setscheduler
       //But we make sure to restore privileges no matter what happens.
       errno = 0;
       if(thrdPrio > 0) rv = pthread_setschedparam(thrd.native_handle(), MAGAOX_RT_SCHED_POLICY, &sp);
       else rv = pthread_setschedparam(thrd.native_handle(), SCHED_OTHER, &sp);
    }
-   
+
    if(rv < 0)
    {
       log<software_error>({__FILE__, __LINE__, errno, "Setting " + thrdName + " thread scheduler priority to " + std::to_string(thrdPrio) + " failed."});
@@ -2022,9 +2078,9 @@ int MagAOXApp<_useINDI>::threadStart( std::thread & thrd,
    {
       log<text_log>(thrdName + " thread scheduler priority set to " + std::to_string(thrdPrio));
    }
-      
+
    // Wait for tpid to be filled in, but only for one total second.
-   if(tpid == 0) 
+   if(tpid == 0)
    {
       for(int i=0;i<10;++i)
       {
@@ -2032,7 +2088,7 @@ int MagAOXApp<_useINDI>::threadStart( std::thread & thrd,
          if(tpid!=0) break;
       }
    }
-   
+
    if(tpid == 0)
    {
       return log<software_error,-1>({__FILE__, __LINE__, errno, "tpid for " + thrdName + " not set."});
@@ -2040,13 +2096,13 @@ int MagAOXApp<_useINDI>::threadStart( std::thread & thrd,
    else
    {
       log<text_log>(thrdName + " thread pid is " + std::to_string(tpid));
-      
+
       if(_useINDI)
       {
          thProp = pcf::IndiProperty(pcf::IndiProperty::Number);
          thProp.setDevice(configName());
          thProp.setName(std::string("th-") + thrdName);
-         thProp.setPerm(pcf::IndiProperty::ReadOnly); 
+         thProp.setPerm(pcf::IndiProperty::ReadOnly);
          thProp.setState(pcf::IndiProperty::Idle);
          thProp.add(pcf::IndiElement("pid"));
          thProp["pid"] = tpid;
@@ -2076,16 +2132,16 @@ int MagAOXApp<_useINDI>::threadStart( std::thread & thrd,
             return log<software_error,-1>({__FILE__, __LINE__, errno, "error on write"});
          }
 
-         close(wfd);  
-      
+         close(wfd);
+
          log<text_log>("moved " + thrdName + " to cpuset " + cpuset, logPrio::LOG_NOTICE);
       }
    }
-   
+
    thrdInit = false;
 
-   return 0; 
-   
+   return 0;
+
 }
 
 template<bool _useINDI>
@@ -2116,20 +2172,20 @@ void MagAOXApp<_useINDI>::state( const stateCodes::stateCodeT & s,
    {
       m_stateAlert = stateAlert;
       log<text_log>("FSM alert set", logPrio::LOG_WARNING );
-      
+
    }
-   
+
    //Check to make sure INDI is up to date
    std::unique_lock<std::mutex> lock(m_indiMutex, std::try_to_lock);  //Lock the mutex before conducting INDI communications.
 
    //Note this is called every execute loop to make sure we update eventually
    if(lock.owns_lock())
-   {  
+   {
       ///\todo move this to a function in stateCodes
       pcf::IndiProperty::PropertyStateType stst = INDI_IDLE;
-      
+
       //If it's already in the "ALERT" state, then this can't take it out of it.
-      if(m_stateAlert == true) 
+      if(m_stateAlert == true)
       {
          stst = INDI_ALERT;
       }
@@ -2141,7 +2197,7 @@ void MagAOXApp<_useINDI>::state( const stateCodes::stateCodeT & s,
          else if (m_state <= stateCodes::LOGGEDIN ) stst = INDI_IDLE;
          else if (m_state == stateCodes::NOTHOMED || m_state == stateCodes::SHUTDOWN) stst = INDI_IDLE;
       }
-      
+
       updateIfChanged(m_indiP_state, "state", stateCodes::codeText(m_state), stst);
    }
 }
@@ -2167,19 +2223,19 @@ int MagAOXApp<_useINDI>::clearFSMAlert()
    if(m_stateAlert == false) return 0;
    m_stateAlert = false;
    log<text_log>("FSM alert cleared", logPrio::LOG_WARNING );
-   
+
    pcf::IndiProperty::PropertyStateType stst = INDI_IDLE;
-   
+
    if(m_state == stateCodes::READY) stst = INDI_OK;
    else if(m_state == stateCodes::OPERATING || m_state == stateCodes::HOMING || m_state == stateCodes::CONFIGURING) stst = INDI_BUSY;
    else if( m_state < stateCodes::NODEVICE ) stst = INDI_ALERT;
    else if (m_state <= stateCodes::LOGGEDIN ) stst = INDI_IDLE;
    else if (m_state == stateCodes::NOTHOMED || m_state == stateCodes::SHUTDOWN) stst = INDI_IDLE;
-         
+
    updateIfChanged(m_indiP_state, "state", stateCodes::codeText(m_state), stst);
-   
+
    return 0;
-      
+
 }
 
 /*-------------------------------------------------------------------------------------*/
@@ -2187,86 +2243,86 @@ int MagAOXApp<_useINDI>::clearFSMAlert()
 /*-------------------------------------------------------------------------------------*/
 
 template<bool _useINDI>
-int MagAOXApp<_useINDI>::createStandardIndiText( pcf::IndiProperty & prop,       
-                                                 const std::string & propName,   
-                                                 const std::string & label, 
-                                                 const std::string & group  
+int MagAOXApp<_useINDI>::createStandardIndiText( pcf::IndiProperty & prop,
+                                                 const std::string & propName,
+                                                 const std::string & label,
+                                                 const std::string & group
                                                )
 {
    prop = pcf::IndiProperty(pcf::IndiProperty::Text);
    prop.setDevice(configName());
    prop.setName(propName);
-   prop.setPerm(pcf::IndiProperty::ReadWrite); 
+   prop.setPerm(pcf::IndiProperty::ReadWrite);
    prop.setState(pcf::IndiProperty::Idle);
    prop.add(pcf::IndiElement("current"));
    prop.add(pcf::IndiElement("target"));
-   
+
    //Don't set "" just in case libcommon does something with defaults
    if(label != "")
    {
       prop.setLabel(label);
    }
-   
+
    if(group != "")
    {
       prop.setGroup(group);
    }
-   
+
    return 0;
 }
 
 template<bool _useINDI>
-int MagAOXApp<_useINDI>::createROIndiText( pcf::IndiProperty & prop,           
-                                           const std::string & propName,       
-                                           const std::string & elName,         
-                                           const std::string & propLabel, 
-                                           const std::string & propGroup,  
-                                           const std::string & elLabel  
+int MagAOXApp<_useINDI>::createROIndiText( pcf::IndiProperty & prop,
+                                           const std::string & propName,
+                                           const std::string & elName,
+                                           const std::string & propLabel,
+                                           const std::string & propGroup,
+                                           const std::string & elLabel
                                          )
 {
    prop = pcf::IndiProperty(pcf::IndiProperty::Text);
    prop.setDevice(configName());
    prop.setName(propName);
-   prop.setPerm(pcf::IndiProperty::ReadOnly); 
+   prop.setPerm(pcf::IndiProperty::ReadOnly);
    prop.setState(pcf::IndiProperty::Idle);
-   
+
    //Don't set "" just in case libcommon does something with defaults
    if(propLabel != "")
    {
       prop.setLabel(propLabel);
    }
-   
+
    if(propGroup != "")
    {
       prop.setGroup(propGroup);
    }
-   
+
    prop.add(pcf::IndiElement(elName));
-   
+
    if(elLabel != "")
    {
       prop[elName].setLabel(elLabel);
    }
-   
+
    return 0;
 }
 
 template<bool _useINDI>
 template<typename T>
-int MagAOXApp<_useINDI>::createStandardIndiNumber( pcf::IndiProperty & prop,       
-                                                   const std::string & name,       
-                                                   const T & min,                  
-                                                   const T & max,                  
-                                                   const T & step,                 
-                                                   const std::string & format,     
-                                                   const std::string & label, 
-                                                   const std::string & group  
+int MagAOXApp<_useINDI>::createStandardIndiNumber( pcf::IndiProperty & prop,
+                                                   const std::string & name,
+                                                   const T & min,
+                                                   const T & max,
+                                                   const T & step,
+                                                   const std::string & format,
+                                                   const std::string & label,
+                                                   const std::string & group
                                                  )
 {
    prop = pcf::IndiProperty(pcf::IndiProperty::Number);
    prop.setDevice(configName());
    prop.setName(name);
-   prop.setPerm(pcf::IndiProperty::ReadWrite); 
+   prop.setPerm(pcf::IndiProperty::ReadWrite);
    prop.setState(pcf::IndiProperty::Idle);
    prop.add(pcf::IndiElement("current"));
    prop["current"].setMin(min);
@@ -2285,131 +2341,131 @@ int MagAOXApp<_useINDI>::createStandardIndiNumber( pcf::IndiProperty & prop,
    {
       prop["target"].setFormat(format);
    }
-   
+
    //Don't set "" just in case libcommon does something with defaults
    if(label != "")
    {
       prop.setLabel(label);
    }
-   
+
    if(group != "")
    {
       prop.setGroup(group);
    }
-   
+
    return 0;
 }
 
 template<bool _useINDI>
-int MagAOXApp<_useINDI>::createROIndiNumber( pcf::IndiProperty & prop,           
-                                             const std::string & propName,       
-                                             const std::string & propLabel, 
-                                             const std::string & propGroup 
+int MagAOXApp<_useINDI>::createROIndiNumber( pcf::IndiProperty & prop,
+                                             const std::string & propName,
+                                             const std::string & propLabel,
+                                             const std::string & propGroup
                                            )
 {
    prop = pcf::IndiProperty(pcf::IndiProperty::Number);
    prop.setDevice(configName());
    prop.setName(propName);
-   prop.setPerm(pcf::IndiProperty::ReadOnly); 
+   prop.setPerm(pcf::IndiProperty::ReadOnly);
    prop.setState(pcf::IndiProperty::Idle);
-   
+
    //Don't set "" just in case libcommon does something with defaults
    if(propLabel != "")
    {
       prop.setLabel(propLabel);
    }
-   
+
    if(propGroup != "")
    {
       prop.setGroup(propGroup);
    }
-   
+
    return 0;
 }
 
 template<bool _useINDI>
-int MagAOXApp<_useINDI>::createStandardIndiToggleSw( pcf::IndiProperty & prop,       
-                                                     const std::string & name,       
-                                                     const std::string & label, 
-                                                     const std::string & group  
+int MagAOXApp<_useINDI>::createStandardIndiToggleSw( pcf::IndiProperty & prop,
+                                                     const std::string & name,
+                                                     const std::string & label,
+                                                     const std::string & group
                                                    )
 {
    prop = pcf::IndiProperty(pcf::IndiProperty::Switch);
    prop.setDevice(configName());
    prop.setName(name);
-   prop.setPerm(pcf::IndiProperty::ReadWrite); 
+   prop.setPerm(pcf::IndiProperty::ReadWrite);
    prop.setState(pcf::IndiProperty::Idle);
    prop.setRule(pcf::IndiProperty::AtMostOne);
-   
+
    //Add the toggle element initialized to Off
    prop.add(pcf::IndiElement("toggle", pcf::IndiElement::Off));
-   
+
    //Don't set "" just in case libcommon does something with defaults
    if(label != "")
    {
       prop.setLabel(label);
    }
-   
+
    if(group != "")
    {
       prop.setGroup(group);
    }
-   
+
    return 0;
 }
 
 template<bool _useINDI>
-int MagAOXApp<_useINDI>::createStandardIndiRequestSw( pcf::IndiProperty & prop,   
-                                                      const std::string & name,   
-                                                      const std::string & label,  
-                                                      const std::string & group   
+int MagAOXApp<_useINDI>::createStandardIndiRequestSw( pcf::IndiProperty & prop,
+                                                      const std::string & name,
+                                                      const std::string & label,
+                                                      const std::string & group
                                                     )
 {
    prop = pcf::IndiProperty(pcf::IndiProperty::Switch);
    prop.setDevice(configName());
    prop.setName(name);
-   prop.setPerm(pcf::IndiProperty::ReadWrite); 
+   prop.setPerm(pcf::IndiProperty::ReadWrite);
    prop.setState(pcf::IndiProperty::Idle);
    prop.setRule(pcf::IndiProperty::AtMostOne);
-   
+
    //Add the toggle element initialized to Off
    prop.add(pcf::IndiElement("request", pcf::IndiElement::Off));
-   
+
    //Don't set "" just in case libcommon does something with defaults
    if(label != "")
    {
       prop.setLabel(label);
    }
-   
+
    if(group != "")
    {
       prop.setGroup(group);
    }
-   
+
    return 0;
 }
 
 template<bool _useINDI>
-int MagAOXApp<_useINDI>::createStandardIndiSelectionSw( pcf::IndiProperty & prop,                  
-                                                        const std::string & name,                  
+int MagAOXApp<_useINDI>::createStandardIndiSelectionSw( pcf::IndiProperty & prop,
+                                                        const std::string & name,
                                                         const std::vector<std::string> & elements,
                                                         const std::vector<std::string> & elementLabels,
-                                                        const std::string & label,            
-                                                        const std::string & group             
+                                                        const std::string & label,
+                                                        const std::string & group
                                                       )
 {
    if(elements.size() == 0)
    {
       return log<software_error,-1>({__FILE__,__LINE__, "elements vector has zero size"});
    }
-   
+
    prop = pcf::IndiProperty(pcf::IndiProperty::Switch);
    prop.setDevice(configName());
    prop.setName(name);
-   prop.setPerm(pcf::IndiProperty::ReadWrite); 
+   prop.setPerm(pcf::IndiProperty::ReadWrite);
    prop.setState(pcf::IndiProperty::Idle);
    prop.setRule(pcf::IndiProperty::OneOfMany);
-   
+
    //Add the toggle element initialized to Off
    for(size_t n=0; n < elements.size(); ++n)
    {
@@ -2417,18 +2473,18 @@ int MagAOXApp<_useINDI>::createStandardIndiSelectionSw( pcf::IndiProperty & prop
       elem.setLabel(elementLabels[n]);
       prop.add(elem);
    }
-   
+
    //Don't set "" just in case libcommon does something with defaults
    if(label != "")
    {
       prop.setLabel(label);
    }
-   
+
    if(group != "")
    {
       prop.setGroup(group);
    }
-   
+
    return 0;
 }
 
@@ -2450,7 +2506,7 @@ int MagAOXApp<_useINDI>::registerIndiPropertyReadOnly( pcf::IndiProperty & prop 
 
    callBackInsertResult result =  m_indiNewCallBacks.insert(callBackValueType( prop.createUniqueKey(), {&prop, nullptr}));
 
-   try 
+   try
    {
       if(!result.second)
       {
@@ -2465,7 +2521,7 @@ int MagAOXApp<_useINDI>::registerIndiPropertyReadOnly( pcf::IndiProperty & prop 
    {
       return log<software_error, -1>({__FILE__, __LINE__, "Unknown exception caught."});
    }
-   
+
    return 0;
 }
 
@@ -2488,7 +2544,7 @@ int MagAOXApp<_useINDI>::registerIndiPropertyReadOnly( pcf::IndiProperty & prop,
 
    callBackInsertResult result =  m_indiNewCallBacks.insert(callBackValueType( propName, {&prop, nullptr}));
 
-   try 
+   try
    {
       if(!result.second)
       {
@@ -2530,7 +2586,7 @@ int MagAOXApp<_useINDI>::registerIndiPropertyNew( pcf::IndiProperty & prop,
    {
       return log<software_error, -1>({__FILE__, __LINE__, "Unknown exception caught."});
    }
-   
+
    return 0;
 }
 
@@ -2590,7 +2646,7 @@ int MagAOXApp<_useINDI>::registerIndiPropertySet( pcf::IndiProperty & prop,
 
    callBackInsertResult result =  m_indiSetCallBacks.insert(callBackValueType( prop.createUniqueKey(), {&prop, callBack}));
 
-   try 
+   try
    {
       if(!result.second)
       {
@@ -2605,7 +2661,7 @@ int MagAOXApp<_useINDI>::registerIndiPropertySet( pcf::IndiProperty & prop,
    {
       return log<software_error, -1>({__FILE__, __LINE__, "Unknown exception caught."});
    }
-   
+
    return 0;
 }
 
@@ -2687,7 +2743,7 @@ int MagAOXApp<_useINDI>::startINDI()
    //======= Instantiate the indiDriver
    try
    {
-      if(m_indiDriver != nullptr) 
+      if(m_indiDriver != nullptr)
       {
          m_indiDriver->quitProcess();
          m_indiDriver->deactivate();
@@ -2750,8 +2806,8 @@ void MagAOXApp<_useINDI>::sendGetPropertySetList(bool all)
             }
             catch(const std::exception & e)
             {
-                log<software_error>({__FILE__, __LINE__, "exception caught from sendGetProperties for " + 
-                                                                   it->second.property->getName() + ": " + e.what()}); 
+                log<software_error>({__FILE__, __LINE__, "exception caught from sendGetProperties for " +
+                                                                   it->second.property->getName() + ": " + e.what()});
             }
          }
 
@@ -2798,8 +2854,8 @@ void MagAOXApp<_useINDI>::handleGetProperties( const pcf::IndiProperty &ipRecv )
                 }
                 catch(const std::exception & e)
                 {
-                    log<software_error>({__FILE__, __LINE__, "exception caught from sendDefProperty for " + 
-                                                                   it->second.property->getName() + ": " + e.what()}); 
+                    log<software_error>({__FILE__, __LINE__, "exception caught from sendDefProperty for " +
+                                                                   it->second.property->getName() + ": " + e.what()});
                 }
             }
             ++it;
@@ -2826,8 +2882,8 @@ void MagAOXApp<_useINDI>::handleGetProperties( const pcf::IndiProperty &ipRecv )
       }
       catch(const std::exception & e)
       {
-         log<software_error>({__FILE__, __LINE__, "exception caught from sendDefProperty for " + 
-                                                                   m_indiNewCallBacks[ ipRecv.createUniqueKey() ].property->getName() + ": " + e.what()}); 
+         log<software_error>({__FILE__, __LINE__, "exception caught from sendDefProperty for " +
+                                                                   m_indiNewCallBacks[ ipRecv.createUniqueKey() ].property->getName() + ": " + e.what()});
       }
    }
    return;
@@ -2886,7 +2942,7 @@ template<bool _useINDI>
 template<typename T>
 void MagAOXApp<_useINDI>::updateIfChanged( pcf::IndiProperty & p,
                                            const std::string & el,
-                                           const T & newVal, 
+                                           const T & newVal,
                                            pcf::IndiProperty::PropertyStateType ipState
                                          )
 {
@@ -2900,7 +2956,7 @@ void MagAOXApp<_useINDI>::updateIfChanged( pcf::IndiProperty & p,
 template<bool _useINDI>
 void MagAOXApp<_useINDI>::updateIfChanged( pcf::IndiProperty & p,
                                            const std::string & el,
-                                           const char * newVal, 
+                                           const char * newVal,
                                            pcf::IndiProperty::PropertyStateType ipState
                                          )
 {
@@ -2910,7 +2966,7 @@ void MagAOXApp<_useINDI>::updateIfChanged( pcf::IndiProperty & p,
 template<bool _useINDI>
 void MagAOXApp<_useINDI>::updateSwitchIfChanged( pcf::IndiProperty & p,
                                                  const std::string & el,
-                                                 const pcf::IndiElement::SwitchStateType & newVal, 
+                                                 const pcf::IndiElement::SwitchStateType & newVal,
                                                  pcf::IndiProperty::PropertyStateType ipState
                                                )
 {
@@ -2934,7 +2990,7 @@ void MagAOXApp<_useINDI>::updateIfChanged( pcf::IndiProperty & p,
    if(!m_indiDriver) return;
 
    std::vector<std::string> descriptors(newVals.size(), el);
-   for (size_t index = 0; index < newVals.size(); ++index) 
+   for (size_t index = 0; index < newVals.size(); ++index)
    {
       descriptors[index] += std::to_string(index);
    }
@@ -2969,20 +3025,20 @@ int MagAOXApp<_useINDI>::indiTargetUpdate( pcf::IndiProperty & localProperty,
    {
       return log<text_log,-1>("INDI property names do not match", logPrio::LOG_ERROR);
    }
-   
+
    if( ! (remoteProperty.find("target") || remoteProperty.find("current") ) )
    {
       return log<text_log,-1>("no target or current element in INDI property", logPrio::LOG_ERROR);
    }
 
    bool set = false;
-   
+
    if( remoteProperty.find("target") )
    {
       localTarget = remoteProperty["target"].get<T>();
       set = true;
    }
-   
+
    if( !set )
    {
       if( remoteProperty.find("current") )
@@ -2991,12 +3047,12 @@ int MagAOXApp<_useINDI>::indiTargetUpdate( pcf::IndiProperty & localProperty,
          set = true;
       }
    }
-   
+
    if( !set )
    {
       return log<text_log,-1>("no non-empty value found in INDI property", logPrio::LOG_ERROR);
    }
-   
+
    if(setBusy)
    {
       updateIfChanged(localProperty, "target", localTarget, INDI_BUSY);
@@ -3005,7 +3061,7 @@ int MagAOXApp<_useINDI>::indiTargetUpdate( pcf::IndiProperty & localProperty,
    {
       updateIfChanged(localProperty, "target", localTarget);
    }
-   
+
    return 0;
 }
 
@@ -3069,7 +3125,7 @@ int MagAOXApp<_useINDI>::sendNewProperty( const pcf::IndiProperty & ipSend,
       log<software_error>({__FILE__, __LINE__});
       return -1;
    }
-  
+
    return 0;
 }
 
@@ -3082,7 +3138,7 @@ int MagAOXApp<_useINDI>::sendNewProperty( const pcf::IndiProperty & ipSend )
    {
       return log<software_error, -1>({__FILE__, __LINE__, "INDI communications not initialized."});
    }
-   
+
    if(m_indiDriver->sendNewProperty(ipSend) < 0)
    {
       return log<software_error, -1>({__FILE__, __LINE__});
@@ -3096,38 +3152,38 @@ int MagAOXApp<_useINDI>::sendNewStandardIndiToggle( const std::string & device,
                                                     const std::string & property,
                                                     bool onoff
                                                   )
-{             
+{
     if(!_useINDI) return 0;
 
-    pcf::IndiProperty ipSend(pcf::IndiProperty::Switch);  
+    pcf::IndiProperty ipSend(pcf::IndiProperty::Switch);
 
     try
-    {                                                     
-        ipSend.setDevice(device);                                                                              
-        ipSend.setName(property);                                                                              
-        ipSend.add(pcf::IndiElement("toggle"));    
+    {
+        ipSend.setDevice(device);
+        ipSend.setName(property);
+        ipSend.add(pcf::IndiElement("toggle"));
     }
     catch(std::exception & e)
     {
         return log<software_error,-1>({__FILE__,__LINE__, std::string("exception: ") + e.what()});
     }
 
-    if(onoff == false)                                                                                     
-    {                                                                                                      
-        ipSend["toggle"].setSwitchState(pcf::IndiElement::Off);                                            
-    }                                                                                                      
-    else                                                                                                   
-    {                                                                                                      
-        ipSend["toggle"].setSwitchState(pcf::IndiElement::On);                                             
-    }              
+    if(onoff == false)
+    {
+        ipSend["toggle"].setSwitchState(pcf::IndiElement::Off);
+    }
+    else
+    {
+        ipSend["toggle"].setSwitchState(pcf::IndiElement::On);
+    }
 
-    if(sendNewProperty(ipSend) < 0)                                                                        
-    {                                                                                                      
-        return log<software_error,-1>({__FILE__,__LINE__, "sendNewProperty failed for " + device + "." + property});                                                                        
-    }                                                                                                      
+    if(sendNewProperty(ipSend) < 0)
+    {
+        return log<software_error,-1>({__FILE__,__LINE__, "sendNewProperty failed for " + device + "." + property});
+    }
 
     return 0;
-} 
+}
 
 template<bool _useINDI>
 int MagAOXApp<_useINDI>::st_newCallBack_clearFSMAlert( void * app,
@@ -3141,31 +3197,31 @@ template<bool _useINDI>
 int MagAOXApp<_useINDI>::newCallBack_clearFSMAlert( const pcf::IndiProperty &ipRecv )
 {
 
-   if(ipRecv.createUniqueKey() != m_indiP_clearFSMAlert.createUniqueKey()) 
+   if(ipRecv.createUniqueKey() != m_indiP_clearFSMAlert.createUniqueKey())
    {
-      return log<software_error, -1>({__FILE__, __LINE__, "wrong indi property received"});      
+      return log<software_error, -1>({__FILE__, __LINE__, "wrong indi property received"});
    }
-   
+
    if(!ipRecv.find("request")) return 0;
-   
+
    if(ipRecv["request"].getSwitchState() == pcf::IndiElement::On )
    {
       clearFSMAlert();
-      updateSwitchIfChanged(m_indiP_clearFSMAlert, "request", pcf::IndiElement::Off, INDI_IDLE); 
+      updateSwitchIfChanged(m_indiP_clearFSMAlert, "request", pcf::IndiElement::Off, INDI_IDLE);
    }
 
-   
+
    return 0;
 }
 
 template<bool _useINDI>
-int MagAOXApp<_useINDI>::onPowerOff() 
+int MagAOXApp<_useINDI>::onPowerOff()
 {
    return 0;
 }
 
 template<bool _useINDI>
-int MagAOXApp<_useINDI>::whilePowerOff() 
+int MagAOXApp<_useINDI>::whilePowerOff()
 {
    return 0;
 }
@@ -3174,7 +3230,7 @@ template<bool _useINDI>
 bool MagAOXApp<_useINDI>::powerOnWaitElapsed()
 {
    if(!m_powerMgtEnabled || m_powerOnWait == 0 || m_powerOnCounter < 0) return true;
-   
+
    if(m_powerOnCounter*m_loopPause > ((double) m_powerOnWait)*1e9)
    {
       return true;
@@ -3190,7 +3246,7 @@ template<bool _useINDI>
 int MagAOXApp<_useINDI>::powerState()
 {
    if(!m_powerMgtEnabled) return 1;
-   
+
    return m_powerState;
 }
 
@@ -3198,7 +3254,7 @@ template<bool _useINDI>
 int MagAOXApp<_useINDI>::powerStateTarget()
 {
    if(!m_powerMgtEnabled) return 1;
-   
+
    return m_powerTargetState;
 }
 
@@ -3224,7 +3280,7 @@ INDI_SETCALLBACK_DEFN( MagAOXApp<_useINDI>, m_indiP_powerChannel)(const pcf::Ind
          m_powerState = -1;
       }
    }
-   
+
    if( ipRecv.find(m_powerTargetElement))
    {
       ps = ipRecv[m_powerTargetElement].get<std::string>();
@@ -3242,12 +3298,12 @@ INDI_SETCALLBACK_DEFN( MagAOXApp<_useINDI>, m_indiP_powerChannel)(const pcf::Ind
          m_powerTargetState = -1;
       }
    }
-   
+
    return 0;
 }
 
 
-   
+
 template<bool _useINDI>
 std::string MagAOXApp<_useINDI>::configName()
 {
@@ -3285,12 +3341,12 @@ extern template class MagAOXApp<false>;
 } //namespace MagAOX
 
 /// Error handling wrapper for the threadStart function of the XWCApp
-/** This should be placed in appLogic for each thread managed by an MagAOXApp.  
+/** This should be placed in appLogic for each thread managed by an MagAOXApp.
   * On error, this will cause the app to shutdown.
   * \see MagAOXApp::threadStart
-  * 
+  *
   * \param thrdSt     [out] (std::thread) The thread object to start executing
-  * \param thrdInit   [in/out] (bool) The thread initilization synchronizer. 
+  * \param thrdInit   [in/out] (bool) The thread initilization synchronizer.
   * \param thrdId     [in/out] (pid_t) The thread pid to be filled in by thrdStart immediately upon call
   * \param thrdProp   [in/out](pcf::IndiProperty) The INDI property to publish the thread details
   * \param thrdPrio   [in] (int) The r/t priority to set for this thread
@@ -3308,7 +3364,7 @@ extern template class MagAOXApp<false>;
 /// Error handling wrapper for checking on thread status with tryjoin
 /** This should be placed in appLogic for each thread managed by an MagAOXApp.  If the
   * thread has exited or otherwise causes an error the app will exit.
-  * 
+  *
   * \param thrdSt   [in] (std::thread) The thread object to start executing
   * \param thrdName [in] (const std::string &) The name of the thread (just for logging)
   */
@@ -3325,11 +3381,11 @@ extern template class MagAOXApp<false>;
     {                                                                                    \
         log<software_error>({__FILE__, __LINE__, #thrdName " thread has exited"});       \
         return -1;                                                                       \
-    }                                                                                    
+    }
 
 /// Error handlng wrapper for stopping a thread
 /** This should be placed in appShutdown for each thread managed by an MagAOXApp.
-  * 
+  *
   * \param thrdSt [in] (std::thread) The thread object to start executing
   */
 #define XWCAPP_THREAD_STOP( thrdSt )                      \
