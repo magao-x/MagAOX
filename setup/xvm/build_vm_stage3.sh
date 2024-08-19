@@ -13,8 +13,7 @@ qemu-system-${vmArch} \
     -netdev user,id=user.0,hostfwd=tcp:127.0.0.1:2201-:22 \
     -device virtio-keyboard-pci -device virtio-mouse-pci \
     -smp 3 \
-    -machine type=virt$accelFlag \
-    -cpu $cpuType \
+    $qemuMachineFlags \
     -drive if=pflash,format=raw,id=ovmf_code,readonly=on,file=./output/firmware_code.fd \
     -drive if=pflash,format=raw,id=ovmf_vars,file=./output/firmware_vars.fd \
     -drive file=output/xvm.qcow2,format=qcow2 \
