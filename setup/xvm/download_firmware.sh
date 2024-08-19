@@ -13,7 +13,7 @@ fi
 
 indexPage=https://dl.rockylinux.org/pub/rocky/9/AppStream/${archInfix}/os/Packages/e/
 if [[ ! -e ${archPrefix}_CODE.fd ]]; then
-    rpmName=$(curl -q $indexPage | grep edk2 | sed -n 's/.*href="\(edk2-'$archInfix'-[^"]*\)".*/\1/p')
+    rpmName=$(curl -q $indexPage | grep edk2 | sed -n 's/.*href="\(edk2-[^"]*\)".*/\1/p')
     curl -OL ${indexPage}/${rpmName}
     if [[ $(uname -o) == Darwin ]]; then
         tar xvf $rpmName

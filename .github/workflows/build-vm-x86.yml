@@ -42,7 +42,7 @@ jobs:
         if: runner.os == 'Linux' && steps.cache-vm-stage1.outputs.cache-hit != 'true'
         run: |
           sudo apt-get update
-          sudo apt-get install -y qemu-system-arm rpm2cpio
+          sudo apt-get install -y qemu-system-x86_64 rpm2cpio
       - name: Install QEMU for macOS
         if: runner.os == 'macOS' && steps.cache-vm-stage1.outputs.cache-hit != 'true'
         run: |
