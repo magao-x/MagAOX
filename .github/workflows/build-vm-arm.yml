@@ -78,7 +78,7 @@ jobs:
         uses: actions/cache@v4
         id: cache-vm-stage2
         with:
-          path: setup/xvm/output/stage2_outputs.tar
+          path: setup/xvm/stage2_outputs.tar
           key: xvm-stage2-${{ env.vmArch }}-${{ hashFiles('setup/**','!setup/xvm/**') }}
       - name: Install QEMU for Ubuntu
         if: runner.os == 'Linux' && steps.cache-vm-stage2.outputs.cache-hit != 'true'
