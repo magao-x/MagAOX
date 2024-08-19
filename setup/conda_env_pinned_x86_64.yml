@@ -48,6 +48,9 @@ dependencies:
   - cuda-version=12.6=h7480c83_3
   - cupy=13.2.0=py310h7421b7d_1
   - cupy-core=13.2.0=py310hfb24ac1_1
+  - pybind11=2.13.1=py310h25c7140_0
+  - pybind11-abi=4=hd8ed1ab_3
+  - pybind11-global=2.13.1=py310h25c7140_0
   - tornado=6.4.1=py310hc51659f_0
   - tqdm=4.66.2=pyhd8ed1ab_0
   - traitlets=5.14.3=pyhd8ed1ab_0

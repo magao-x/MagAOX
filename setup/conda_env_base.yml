@@ -16,6 +16,7 @@ dependencies:
   - pip
   - nb_conda_kernels
   - pytest
+  - pybind11
   - psutil
   - cupy
   - line_profiler

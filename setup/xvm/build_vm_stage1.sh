@@ -16,7 +16,7 @@ fi
 bash create_oemdrv.sh
 bash download_rocky_iso.sh
 bash download_firmware.sh
-if [[ $qemuArch == aarch64 ]]; then
+if [[ $vmArch == aarch64 ]]; then
     cp ./input/firmware/AAVMF_VARS.fd ./output/firmware_vars.fd
     cp ./input/firmware/AAVMF_CODE.fd ./output/firmware_code.fd
 else
@@ -31,12 +31,12 @@ else
     accelFlag=""
 fi
 echo "Starting VM installation process..."
-qemu-system-${qemuArch} \
+qemu-system-${vmArch} \
     -name xvm \
-    -cdrom ./input/iso/Rocky-${rockyVersion}-${rockyArch}-minimal.iso \
+    -cdrom ./input/iso/Rocky-${rockyVersion}-${vmArch}-minimal.iso \
     -netdev user,id=user.0 \
     -device virtio-keyboard-pci -device virtio-mouse-pci \
-    -smp 4 \
+    -smp 3 \
     -machine type=virt$accelFlag \
     -cpu $cpuType \
     -drive if=pflash,format=raw,id=ovmf_code,readonly=on,file=./output/firmware_code.fd \
@@ -47,8 +47,7 @@ qemu-system-${qemuArch} \
     -device virtio-net-pci,netdev=user.0 \
     -boot c \
     -m 8192M \
-    -display none \
-    -serial stdio \
+    $ioFlag \
 || exit 1
-cp -v ./output/xvm.qcow2 ./output/xvm_stage1.qcow2
+mv -v ./output/xvm.qcow2 ./output/xvm_stage1.qcow2
 echo "Created VM and installed Rocky Linux"
