@@ -16,12 +16,13 @@ fi
 bash create_oemdrv.sh
 bash download_rocky_iso.sh
 bash download_firmware.sh
+
 if [[ $vmArch == aarch64 ]]; then
-    cp ./input/firmware/AAVMF_VARS.fd ./output/firmware_vars.fd
-    cp ./input/firmware/AAVMF_CODE.fd ./output/firmware_code.fd
+    cp ./input/firmware/usr/share/AAVMF/AAVMF_VARS.fd ./output/firmware_vars.fd
+    cp ./input/firmware/usr/share/AAVMF/AAVMF_CODE.fd ./output/firmware_code.fd
 else
-    cp ./input/firmware/OVMF_VARS.fd ./output/firmware_vars.fd
-    cp ./input/firmware/OVMF_CODE.fd ./output/firmware_code.fd
+    cp ./input/firmware/usr/share/edk2/ovmf/OVMF_VARS.fd ./output/firmware_vars.fd
+    cp ./input/firmware/usr/share/edk2/ovmf/OVMF_CODE.fd ./output/firmware_code.fd
 fi
 
 echo "Starting VM installation process..."
