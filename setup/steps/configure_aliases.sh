@@ -1,4 +1,4 @@
-#!/bin/bash
+#!/usr/bin/env bash
 if [[ "$EUID" != 0 ]]; then
     sudo -H bash $0 "$@"
     exit $?
@@ -6,6 +6,8 @@ fi
 DIR="$( cd "$( dirname "${BASH_SOURCE[0]}" )" && pwd )"
 source $DIR/../_common.sh
 set -o pipefail
+
+echo "alias teldump='logdump --dir=/opt/MagAOX/telem --ext=.bintel'" | sudo tee /etc/profile.d/teldump.sh
 
 cat <<'HERE' > /tmp/sudoers_xsup
 # keep MAGAOX_ROLE set for any sudo'd command

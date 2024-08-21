@@ -53,15 +53,10 @@ source $roleScript
 echo "Got MAGAOX_ROLE=$MAGAOX_ROLE"
 export MAGAOX_ROLE
 
-# Get logging functions
-source $DIR/_common.sh
+sudo -H bash -l "$DIR/install_third_party_deps.sh" || exit_with_error "Failed to install third-party dependencies"
 
-# Install OS packages first
-osPackagesScript="$DIR/steps/install_${ID}_${MAJOR_VERSION}_packages.sh"
-$_REAL_SUDO -H bash -l $osPackagesScript || exit_with_error "Failed to install packages from $osPackagesScript"
-
-distroSpecificScript="$DIR/steps/configure_${ID}_${MAJOR_VERSION}.sh"
-$_REAL_SUDO -H bash -l $distroSpecificScript || exit_with_error "Failed to configure ${ID} from $distroSpecificScript"
+# Apply configuration tweaks
+log_info "Applying configuration tweaks for OS and services"
 
 if [[ $VM_KIND != "none" ]]; then
     git config --global --replace-all safe.directory '*'
@@ -72,19 +67,19 @@ bash -l "$DIR/steps/configure_trusted_sudoers.sh" || exit_with_error "Could not 
 sudo -H bash -l "$DIR/steps/configure_xsup_aliases.sh"
 
 if [[ $MAGAOX_ROLE == AOC || $MAGAOX_ROLE == ICC || $MAGAOX_ROLE == RTC ]]; then
-    # Configure hostname aliases for instrument LAN
+    log_info "Configure hostname aliases for instrument LAN"
     sudo -H bash -l "$DIR/steps/configure_etc_hosts.sh"
-    # Configure NFS exports from RTC -> AOC and ICC -> AOC
+    log_info "Configure NFS exports from RTC -> AOC and ICC -> AOC"
     sudo -H bash -l "$DIR/steps/configure_nfs.sh"
 fi
 
 if [[ $MAGAOX_ROLE == AOC || $MAGAOX_ROLE == ICC || $MAGAOX_ROLE == RTC || $MAGAOX_ROLE == TOC || $MAGAOX_ROLE == TIC ]]; then
-    # Configure time syncing
+    log_info "Configure time syncing"
     sudo -H bash -l "$DIR/steps/configure_chrony.sh"
 fi
 
 if [[ $MAGAOX_ROLE != ci ]]; then
-    # Increase inotify watches
+    log_info "Increase inotify watches (e.g. for VSCode remote users)"
     sudo -H bash -l "$DIR/steps/increase_fs_watcher_limits.sh"
 fi
 
@@ -130,48 +125,6 @@ if [[ $MAGAOX_ROLE == workstation ]]; then
     bash -l "$DIR/steps/configure_ssh_for_workstations.sh" || exit_with_error "Failed to pre-populate SSH config"
 fi
 
-# Install dependencies for the GUIs
-if [[ $MAGAOX_ROLE == AOC || $MAGAOX_ROLE == TOC || $MAGAOX_ROLE == ci || $MAGAOX_ROLE == workstation ]]; then
-    sudo -H bash -l "$DIR/steps/install_gui_dependencies.sh"
-fi
-
-# Install Linux headers (instrument computers use the RT kernel / headers)
-if [[ $MAGAOX_ROLE == ci || $MAGAOX_ROLE == workstation || $MAGAOX_ROLE == AOC || $MAGAOX_ROLE == TOC ]]; then
-    if [[ $ID == ubuntu ]]; then
-        sudo -i apt install -y linux-headers-generic
-    elif [[ $ID == rocky ]]; then
-        sudo yum install -y kernel-devel-$(uname -r) || sudo yum install -y kernel-devel
-    fi
-fi
-## Build third-party dependencies under /opt/MagAOX/vendor
-cd /opt/MagAOX/vendor
-sudo -H bash -l "$DIR/steps/install_rclone.sh" || exit 1
-bash -l "$DIR/steps/install_openblas.sh" || exit 1
-if [[ $MAGAOX_ROLE == RTC || $MAGAOX_ROLE == ICC || $MAGAOX_ROLE == AOC || $MAGAOX_ROLE == TIC ]]; then
-    bash -l "$DIR/steps/install_cuda_rocky_9.sh" || exit_with_error "CUDA install failed"
-fi
-sudo -H bash -l "$DIR/steps/install_fftw.sh" || exit 1
-sudo -H bash -l "$DIR/steps/install_cfitsio.sh" || exit 1
-sudo -H bash -l "$DIR/steps/install_eigen.sh" || exit 1
-sudo -H bash -l "$DIR/steps/install_zeromq.sh" || exit 1
-sudo -H bash -l "$DIR/steps/install_cppzmq.sh" || exit 1
-sudo -H bash -l "$DIR/steps/install_flatbuffers.sh" || exit 1
-if [[ $MAGAOX_ROLE == AOC ]]; then
-    sudo -H bash -l "$DIR/steps/install_lego.sh"
-fi
-if [[ $MAGAOX_ROLE == RTC || $MAGAOX_ROLE == ICC || $MAGAOX_ROLE == TIC || $MAGAOX_ROLE == ci ]]; then
-    sudo -H bash -l "$DIR/steps/install_basler_pylon.sh"
-fi
-if [[ $MAGAOX_ROLE == RTC || $MAGAOX_ROLE == ICC || $MAGAOX_ROLE == ci ]]; then
-    sudo -H bash -l "$DIR/steps/install_edt.sh"
-fi
-
-# SuSE packages need either Python 3.6 or 3.10, but Rocky 9.2 has Python 3.9 as /bin/python, so we build our own RPM:
-if [[ $ID == rocky && $MAGAOX_ROLE != container ]]; then
-  sudo -H bash -l "$DIR/steps/install_cpuset.sh" || exit_with_error "Couldn't install cpuset from source"
-fi
-
-
 ## Install proprietary / non-public software
 if [[ -e $VENDOR_SOFTWARE_BUNDLE ]]; then
     # Extract bundle
@@ -207,9 +160,6 @@ fi
 # they are a member of magaox-dev and they have sudo access to install to
 # /usr/local. Building as root would leave intermediate build products
 # owned by root, which we probably don't want.
-#
-# On a Vagrant VM, we need to "sudo" to become vagrant since the provisioning
-# runs as root.
 cd /opt/MagAOX/source
 if [[ $MAGAOX_ROLE == TIC || $MAGAOX_ROLE == TOC ]]; then
     # Initialize the config and calib repos as normal user
@@ -284,11 +234,6 @@ if [[ $MAGAOX_ROLE == AOC || $MAGAOX_ROLE == TOC || $MAGAOX_ROLE == workstation 
     # realtime image viewer
     bash -l "$DIR/steps/install_rtimv.sh" || exit_with_error "Could not install rtimv"
     echo "export RTIMV_CONFIG_PATH=/opt/MagAOX/config" | sudo -H tee /etc/profile.d/rtimv_config_path.sh
-fi
-
-if [[ $MAGAOX_ROLE == AOC || $MAGAOX_ROLE == TOC ||  $MAGAOX_ROLE == workstation ]]; then
-    # regular old ds9 image viewer
-    sudo -H bash -l "$DIR/steps/install_ds9.sh"
 fi
 
 # aliases to improve ergonomics of MagAO-X ops
